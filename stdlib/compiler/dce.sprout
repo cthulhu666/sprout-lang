@@ -3,13 +3,20 @@ import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.types as types
 import stdlib.compiler.ast as ast
 
-# Dead Let Elimination (DLE) pass.
-# Removes TDoLetStep name expr from TDo blocks where:
+# Two eliminations, both applied after typeclass lowering and before IR emission.
+#
+# Dead Let Elimination (DLE) — `elim_program`. Removes TDoLetStep name expr from
+# TDo blocks where:
 #   (1) name does not appear free in any subsequent do-step, and
 #   (2) expr is pure (has no observable side effects)
-#
-# Applied after typeclass lowering, before IR emission.
 # Recurses into all expression positions so nested TDo blocks are optimised too.
+#
+# Declaration reachability — `elim_unreachable`. Drops whole declarations that
+# the entry point cannot reach. See the section at the bottom of this file.
+#
+# The two are independent and DLE runs first: shrinking bodies can only remove
+# references, so it can only ever make reachability drop MORE. Running them the
+# other way round would still be correct, merely weaker.
 
 # ---------------------------------------------------------------------------
 # Purity check
@@ -271,3 +278,245 @@ fn elim_decls(ds: List typed_ast.TypedDecl) -> List typed_ast.TypedDecl =
 export fn elim_program(prog: typed_ast.TypedProgram) -> typed_ast.TypedProgram =
   match prog with
   | typed_ast.TypedProgram (decls) -> typed_ast.TypedProgram(elim_decls(decls))
+
+# ---------------------------------------------------------------------------
+# Declaration reachability elimination
+# ---------------------------------------------------------------------------
+#
+# Everything above rewrites declaration BODIES. This section drops whole
+# declarations nothing reaches, which is what stops every program from carrying
+# the entire prelude: before it, a six-line `module main` emitted 276 functions
+# of which 3 were reachable.
+#
+# Running after `lowering.lower_program` is what makes plain name reachability
+# sufficient. Lowering has already expanded TDict evidence into concrete
+# instance-function references and flattened each instance into
+# `__tc_{Class}_{mangled}_{method}` TFnDecls, so by this point every live edge —
+# including every typeclass dispatch — is an ordinary TVar.
+#
+# The pass is deliberately IMPRECISE, in one direction only. It collects TVar
+# names without tracking binders, so a lambda parameter or match binding that
+# shares a top-level function's name adds an edge that keeps a dead function
+# alive. That is the safe error: dropping a live declaration is a link failure
+# or a silently missing instance, while keeping a dead one costs lines.
+# `tests/stdlib/compiler/test_dce_reachable.spr` asserts the over-approximation
+# directly, so making the pass precise means deleting a test on purpose.
+
+# Names an expression references. Mirrors `is_free`'s traversal, but collecting
+# instead of testing — and with no binder handling, per the note above.
+fn refs_expr(e: typed_ast.TypedExpr, acc: Set) -> Set =
+  match e with
+  | typed_ast.TVar n _ _ -> set_insert(n, acc)
+  | typed_ast.TInt _ _ _ -> acc
+  | typed_ast.TFloat _ _ _ -> acc
+  | typed_ast.TBool _ _ _ -> acc
+  | typed_ast.TString _ _ _ -> acc
+  | typed_ast.TChar _ _ _ -> acc
+  | typed_ast.TUnit _ _ -> acc
+  | typed_ast.TTuple items _ _ -> refs_list(items, acc)
+  | typed_ast.TIf cond thn els _ _ -> refs_expr(els, refs_expr(thn, refs_expr(cond, acc)))
+  | typed_ast.TMatch scrut arms _ _ -> refs_arms(arms, refs_expr(scrut, acc))
+  | typed_ast.TCall callee args _ _ -> refs_list(args, refs_expr(callee, acc))
+  # Neither can survive lowering — ast_to_ir rejects a TDict outright. Panicking
+  # rather than returning `acc` keeps a future regression loud: silently
+  # reporting "no references" here would delete the instance functions a
+  # surviving dictionary points at.
+  | typed_ast.TDict _ _ _ _ -> panic("dce.refs_expr: TDict survived lowering (internal error)")
+  | typed_ast.TMethodRef _ _ _ _ _ -> panic("dce.refs_expr: TMethodRef survived lowering (internal error)")
+  | typed_ast.TLambda _ body _ _ -> refs_expr(body, acc)
+  # `++` on lists lowers to a call to the prelude's `list_append` whose name is a
+  # STRING LITERAL in codegen (ast_to_ir.sprout:5400), so no TVar names it. Rooted
+  # for every `++` rather than only for list operands: reproducing codegen's
+  # `is_list_type` test here would be a second copy of a rule that must agree, and
+  # the cost of being wrong is a deleted callee. String `++` lowers to the
+  # `str_concat` extern, which is kept anyway.
+  | typed_ast.TBinary op l r _ _ ->
+      if op == "++" then set_insert("list_append", refs_expr(r, refs_expr(l, acc)))
+      else refs_expr(r, refs_expr(l, acc))
+  | typed_ast.TUnary _ operand _ _ -> refs_expr(operand, acc)
+  # Likewise `a..b`, which lowers to a literal-named `range_up` call
+  # (ast_to_ir.sprout:1104) rather than to an inline IntRange construction.
+  | typed_ast.TRange l r _ _ -> set_insert("range_up", refs_expr(r, refs_expr(l, acc)))
+  | typed_ast.TDo steps _ _ -> refs_steps(steps, acc)
+  | typed_ast.TRecord _ fields _ _ -> refs_fields(fields, acc)
+  | typed_ast.TGetField obj _ _ _ -> refs_expr(obj, acc)
+  | typed_ast.TRecordUpdate base fields _ _ -> refs_fields(fields, refs_expr(base, acc))
+
+fn refs_list(es: List typed_ast.TypedExpr, acc: Set) -> Set =
+  match es with
+  | Nil -> acc
+  | Cons e rest -> refs_list(rest, refs_expr(e, acc))
+
+# Pattern positions are not traversed: a constructor lowers to an inline
+# allocation, never to a callable symbol, so a pattern references nothing that
+# could be pruned.
+fn refs_arms(arms: List typed_ast.TypedMatchBranch, acc: Set) -> Set =
+  match arms with
+  | Nil -> acc
+  | Cons arm rest ->
+      match arm with
+      | typed_ast.TypedMatchBranch _ body -> refs_arms(rest, refs_expr(body, acc))
+
+fn refs_fields(fields: List typed_ast.TypedRecordField, acc: Set) -> Set =
+  match fields with
+  | Nil -> acc
+  | Cons f rest ->
+      match f with
+      | typed_ast.TypedRecordField _ v -> refs_fields(rest, refs_expr(v, acc))
+
+fn refs_steps(steps: List typed_ast.TypedDoStep, acc: Set) -> Set =
+  match steps with
+  | Nil -> acc
+  | Cons step rest ->
+      match step with
+      | typed_ast.TDoBindStep _ e -> refs_steps(rest, refs_expr(e, acc))
+      | typed_ast.TDoLetStep _ e -> refs_steps(rest, refs_expr(e, acc))
+      | typed_ast.TDoExprStep e -> refs_steps(rest, refs_expr(e, acc))
+
+fn refs_instance_methods(ms: List typed_ast.TypedInstanceMethod, acc: Set) -> Set =
+  match ms with
+  | Nil -> acc
+  | Cons m rest ->
+      match m with
+      | typed_ast.TypedInstanceMethod _ _ _ _ body ->
+          refs_instance_methods(rest, refs_expr(body, acc))
+
+# A pass-through carries a declaration the typed pipeline had no typed form for.
+# Today that is only type-level: a type, record, class, alias or wrap, none of
+# which reference a value. A VALUE declaration arriving here would carry a body
+# this walker cannot see, and pruning around it could delete a live callee — so
+# it is a hard error rather than an assumption.
+fn refs_passthrough(d: ast.Decl, acc: Set) -> Set =
+  match d with
+  | ast.TypeDecl _ _ _ _ _ _ -> acc
+  | ast.RecordDecl _ _ _ _ _ _ -> acc
+  | ast.ClassDecl _ _ _ _ _ -> acc
+  | ast.AliasDecl _ _ _ _ -> acc
+  | ast.WrapDecl _ _ _ -> acc
+  | ast.ExternFnDecl _ _ _ _ _ -> acc
+  | ast.FnDecl name _ _ _ _ _ _ ->
+      panic("dce.refs_passthrough: untyped FnDecl `" ++ name ++ "` reached codegen (internal error)")
+  | ast.LetDecl name _ _ _ ->
+      panic("dce.refs_passthrough: untyped LetDecl `" ++ name ++ "` reached codegen (internal error)")
+  | ast.InstanceDecl _ _ _ _ ->
+      panic("dce.refs_passthrough: untyped InstanceDecl reached codegen (internal error)")
+
+fn refs_decl(d: typed_ast.TypedDecl, acc: Set) -> Set =
+  match d with
+  | typed_ast.TFnDecl _ _ _ _ _ body -> refs_expr(body, acc)
+  | typed_ast.TExternFnDecl _ _ _ _ -> acc
+  | typed_ast.TLetDecl _ e -> refs_expr(e, acc)
+  # Lowering replaces every instance with generated TFnDecls, so this arm is
+  # defensive. Traversing rather than ignoring keeps it safe if that changes.
+  | typed_ast.TInstanceDecl _ _ methods -> refs_instance_methods(methods, acc)
+  | typed_ast.TPassThrough decl -> refs_passthrough(decl, acc)
+
+# The program entry: bare `main`, or the bundler-qualified `<module>.main` a file
+# with a `module` header emits. Deliberately the same rule as codegen's
+# `ast_to_ir.is_entry_fn_name`, so what this pass keeps and what codegen calls
+# cannot disagree.
+fn is_entry_name(name: String) -> Bool =
+  name == "main" || (n >= 5 && str_slice(name, n - 5, 5) == ".main")
+  where n = str_len(name)
+
+# A declaration kept regardless of who references it — so also a starting point
+# for reachability, since whatever its body calls is live too.
+#
+# Externs lower to `declare` lines whose absence is a link error, and pass-through
+# type declarations are reached from patterns and field access rather than by
+# name, so neither is a candidate for pruning.
+fn is_rooted_decl(d: typed_ast.TypedDecl) -> Bool =
+  match d with
+  | typed_ast.TFnDecl name _ _ _ _ _ -> is_entry_name(name)
+  | typed_ast.TExternFnDecl _ _ _ _ -> true
+  # Order-sensitive and effectively free to keep: the prelude declares none.
+  | typed_ast.TLetDecl _ _ -> true
+  | typed_ast.TInstanceDecl _ _ _ -> true
+  | typed_ast.TPassThrough _ -> true
+
+fn decl_name_of(d: typed_ast.TypedDecl) -> Maybe String =
+  match d with
+  | typed_ast.TFnDecl name _ _ _ _ _ -> Just(name)
+  | typed_ast.TExternFnDecl name _ _ _ -> Just(name)
+  | typed_ast.TLetDecl name _ -> Just(name)
+  | typed_ast.TInstanceDecl _ _ _ -> Nothing
+  | typed_ast.TPassThrough _ -> Nothing
+
+# name -> declaration, so the worklist resolves an edge in O(log n).
+fn decl_index(decls: List typed_ast.TypedDecl, acc: Dict typed_ast.TypedDecl) -> Dict typed_ast.TypedDecl =
+  match decls with
+  | Nil -> acc
+  | Cons d rest ->
+      match decl_name_of(d) with
+      | Nothing -> decl_index(rest, acc)
+      | Just name -> decl_index(rest, dict_set(name, d, acc))
+
+# Names reachable from the always-kept declarations, plus those names themselves.
+#
+# The worklist marks a name live on POP rather than on push, so one already live
+# is skipped before its body is walked again — which is what lets a self- or
+# mutually-recursive DEAD cluster terminate without rooting itself. A pass built
+# on "is this name referenced anywhere?" keeps both of those clusters forever.
+fn close_over(queue: List String, index: Dict typed_ast.TypedDecl, live: Set) -> Set =
+  match queue with
+  | Nil -> live
+  | Cons name rest ->
+      if set_member(name, live) then close_over(rest, index, live)
+      else
+        match dict_get(name, index) with
+        | Nothing -> close_over(rest, index, set_insert(name, live))
+        | Just d ->
+            close_over(list_append(set_to_list(refs_decl(d, set_empty())), rest),
+                       index, set_insert(name, live))
+
+fn seed_queue(decls: List typed_ast.TypedDecl, acc: List String) -> List String =
+  match decls with
+  | Nil -> acc
+  | Cons d rest ->
+      if ! is_rooted_decl (d) then seed_queue(rest, acc)
+      else
+        match decl_name_of(d) with
+        | Nothing -> seed_queue(rest, list_append(set_to_list(refs_decl(d, set_empty())), acc))
+        | Just name -> seed_queue(rest, Cons(name, acc))
+
+fn keep_live(decls: List typed_ast.TypedDecl, live: Set) -> List typed_ast.TypedDecl =
+  match decls with
+  | Nil -> Nil
+  | Cons d rest ->
+      if is_rooted_decl(d) then Cons(d, keep_live(rest, live))
+      else
+        match decl_name_of(d) with
+        | Nothing -> Cons(d, keep_live(rest, live))
+        | Just name ->
+            if set_member(name, live) then Cons(d, keep_live(rest, live))
+            else keep_live(rest, live)
+
+fn has_entry(decls: List typed_ast.TypedDecl) -> Bool =
+  match decls with
+  | Nil -> false
+  | Cons d rest ->
+      match d with
+      | typed_ast.TFnDecl name _ _ _ _ _ -> if is_entry_name(name) then true else has_entry(rest)
+      | _ -> has_entry(rest)
+
+# Drop every declaration the entry point cannot reach.
+#
+# WITH NO ENTRY POINT THIS IS A NO-OP, and that is a correctness requirement, not
+# a nicety. `compile_program_streaming` also translates FRAGMENTS: the differential
+# IR-shape tests (`test_ir_call_result_rooting`, `test_ir_tuple_result_rooting`)
+# hand it a few functions with no `main` and count root pushes in the result.
+# Rooting from nothing would prune everything, and those tests would compare zero
+# against zero and pass for the wrong reason on the way to failing. A program
+# without an entry is not a program whose every declaration is unreachable — it is
+# one where reachability is not defined, so nothing is claimed and nothing is cut.
+#
+# O(total expression nodes × log n): each reachable declaration's body is walked
+# once, and every set operation is an AVL insert or lookup.
+export fn elim_unreachable(prog: typed_ast.TypedProgram) -> typed_ast.TypedProgram =
+  match prog with
+  | typed_ast.TypedProgram decls ->
+      if ! has_entry (decls) then prog
+      else
+        typed_ast.TypedProgram(
+          keep_live(decls,
+                    close_over(seed_queue(decls, Nil), decl_index(decls, dict_empty()), set_empty())))

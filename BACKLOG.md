@@ -2064,7 +2064,22 @@ Legend:
   by construction; consider making that the documented workflow, raising the cap, or at minimum
   printing "(truncated, N more lines)" so the reader knows they are seeing a prefix.
 
-- [ ] `P3` **No cross-module DCE for unused exported module functions.** A program importing a
+- [x] `P3` **No cross-module DCE for unused exported module functions. FIXED 2026-08-27** by
+  `dce.elim_unreachable` (see the closed entry in §Compiler/codegen for the pass and its
+  corrections). Reachability is computed over the whole bundle, so a module's unused exports are
+  dropped exactly like the prelude's: `examples/tcp_echo_once.sprout`, the file measured below,
+  went **15,585 → 1,180** emitted lines.
+
+  **The design consequence is the part that matters, and it is a repeal, not just a saving.** The
+  placement rule at the end of this entry — *an extern may move only to a leaf module, or to one
+  its consumers would import anyway* — existed solely because import cost was unbounded. It was
+  correctly labelled below as "a workaround for missing DCE masquerading as a design principle".
+  That workaround is now unnecessary: placement can be decided on meaning. Whoever next touches
+  [spec-v0.md §3 *Externs are outside the module system*](docs/spec-v0.md) should retire the rule
+  there rather than preserve it by inertia. The `stdlib/json.sprout` payer named below — ~2,700
+  lines of unused `stdlib.string` + `stdlib.bytes` bodies for four externs — is likewise gone.
+
+  Original entry, kept because its measurements are what justified the work. A program importing a
   module for one function emits every exported function in it. Measured 2026-08-15:
   `examples/tcp_echo_once.sprout` imports `stdlib.terminal` and calls 3 of its wrappers, but its IR
   carries all **17** `define`s plus a `__sprout_init_globals` it did not previously need (from
@@ -2367,14 +2382,56 @@ Found while correcting stale claims across the user-facing docs; none is a doc f
   diagnostics keep `demo.f` / `demo.Fruit` — so a future merge of the message-level strip
   (`source.strip_entry_names`) with the name-level one (`source.display_ctor_name`) fails there
   rather than in a user's error output.
-- [ ] `P3` **DCE is absent from the `--emit-ir` path.** `dce.elim_program` is applied in
-  `compile_phase_lower*` (`compiler.sprout:442`, `:513`) but not in `compile_full` (`:311`),
-  which is what `--emit-ir` uses — so every emitted module carries the whole prelude whether
-  or not it is reachable (a 7-line `module main` that calls one local function still emits
-  ~12.7k lines, including an unused `@map`). Wiring DCE into `compile_full` would shrink the
-  entire 811k-line golden corpus and make an unconditional prelude nearly free in golden
-  churn. Gated separately: it rewrites every golden at once, so it wants its own PR with the
-  diff read per AGENTS.md DoD #12.
+- [x] `P3` **Every emitted module carried the whole prelude. FIXED 2026-08-27** by
+  `dce.elim_unreachable`, a declaration-level reachability pass applied at the top of
+  `ir_pipeline.compile_program_streaming`. Measured over the 58 corpus files that build and run
+  clean: **918,358 → 143,537 emitted lines, 84.4%**. A six-line `module main` went 12,992 → 170
+  lines and 276 → 3 `define`s. Verified behaviourally, not just by size: every corpus file was
+  compiled *and run* under both compilers with stdout and exit status compared — 60/60 identical,
+  the only two textual diffs being wall-clock timings printed by `astar` and `nqueens` benchmarks
+  (solution counts identical).
+
+  **This entry previously said something false in both halves, and the corrections are the
+  reusable part.** It claimed (a) DCE "is absent from the `--emit-ir` path" and (b) wiring
+  `dce.elim_program` into `compile_full` would fix it. Neither held:
+
+  - `dce.elim_program` is **Dead *Let* Elimination**, not declaration DCE. Its `elim_decls` is
+    `Cons(elim_decl(d), …)` — a map that never drops a declaration. Wiring it anywhere would have
+    shrunk nothing. The file's own header said so; the entry did not.
+  - It was **already on the `--emit-ir` path**. `compile_phase_recheck_with_roots` is a straight
+    alias for `compile_phase_lower_with_roots`, which calls it. The 12,992 lines were measured
+    *with* it running.
+
+  **Three bugs the examples corpus could not catch, all found by `just test`.** The differential
+  harness compiled *and ran* every file in `examples/` + `tests/smoke_shapes/` under both
+  compilers and reported 60/60 identical — and still missed all three:
+
+  1. **`use of undefined value '@range_up'`.** `a..b` lowers to a call whose callee name is a
+     *string literal* in codegen (`ast_to_ir.sprout:1104`), so no `TVar` names it and the pass
+     deleted the target. No example uses a top-level range literal. Same class:
+     `list_append` for `++` on lists (`:5400`). Both are now rooted at their nodes, and the
+     sweep that enumerates the class — intersect stdlib function names with codegen string
+     literals — returns exactly those two plus `main` and a non-call `append` predicate.
+  2–3. **The two differential rooting tests** hand `compile_program_streaming` a fragment with
+     no `main` and count root pushes. Rooting from nothing pruned everything and collapsed both
+     sides of the comparison to zero. Fixed in the *pass* — with no entry point it is a no-op —
+     rather than by giving the tests a `main`, which would have bent a differential IR test to
+     suit an implementation. Invariants in [docs/compiler-internals.md](docs/compiler-internals.md)
+     §*A function is live only if some `TVar` names it*.
+
+  Note the detection asymmetry that makes (1) dangerous: a pruned prelude callee is an IR
+  **parse** error at `clang` time, not a link error, because a prelude function gets no
+  `declare` unlike an extern. So nothing fails until some test happens to exercise the syntax.
+
+  So the pass had to be written, not wired. Two further findings worth keeping: `--emit-ir` does
+  **not** go through `compiler.compile_full_ir` at all — `compile_driver.run_file_use_ir_codegen`
+  calls `ir_pipeline.compile_program_streaming` directly, so a pass added at `compile_full_ir`
+  (the analysis service's entry) silently does nothing for the CLI. `ir_pipeline` is the seam both
+  share, which is why the pass lives there. And plain name reachability is only sufficient
+  *after* `lowering.lower_program`: it expands `TDict` evidence to concrete instance-function
+  references and flattens each instance to `__tc_{Class}_{mangled}_{method}` `TFnDecl`s, so every
+  typeclass edge is an ordinary `TVar` by then. One phase earlier a class-method call is still
+  polymorphic and reachability would have to keep every instance of every mentioned class.
 
 - [ ] `P3` **A `no_prelude` file whose top-level name matches a C runtime symbol dies with
   `duplicate symbol` at link, having type-checked clean.** `no_prelude` + `fn str_len(s: String)
