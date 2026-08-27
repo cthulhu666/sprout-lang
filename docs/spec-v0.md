@@ -2365,6 +2365,53 @@ lawful `List` instance duplicates `Semigroup (List a)`'s `++`, so with `List`
 excluded the class would have a single `Maybe` instance — ceremony with no
 dispatch payoff.  The `Maybe` fallback is therefore a free function.
 
+### `Foldable`-derived extreme selection (Experimental)
+
+```
+min_by(f: a -> k, xs: c a) -> Maybe a   where Foldable c, Ord k
+max_by(f: a -> k, xs: c a) -> Maybe a   where Foldable c, Ord k
+minimum(xs: c a)           -> Maybe a   where Foldable c, Ord a
+maximum(xs: c a)           -> Maybe a   where Foldable c, Ord a
+```
+
+`min_by`/`max_by` select the element whose **derived key** is least/greatest —
+argmin and argmax.  They return the *element*, never the key.  `minimum` and
+`maximum` are the identity-key cases, standing to `min_by`/`max_by` as
+`vec_sort` stands to `vec_sort_by`.
+
+`_by` takes a **key function**, not a comparator, matching `vec_sort_by` and
+`vec_sum_by`.  Sprout ships no comparator-taking form of any of the four.
+
+All four are **total**: an empty structure yields `Nothing`, never a panic
+(§8.2).  This is a deliberate divergence from Haskell's partial
+`minimum`/`maximum` and follows PureScript, Rust and Elm.
+
+**Tie-breaking is specified, not incidental.**  `min_by` keeps the **first**
+element attaining the least key; `max_by` keeps the **last** attaining the
+greatest.  Because `vec_sort_by` is a stable sort, this makes the two exactly
+the ends of the sorted order — for non-empty `xs`:
+
+```
+min_by(f, xs) == vec_get(0, vec_sort_by(f, foldable_to_vec(xs)))
+max_by(f, xs) == vec_get(n - 1, vec_sort_by(f, foldable_to_vec(xs)))
+```
+
+Both identities are checked in `tests/stdlib/test_min_max.spr`.  The rule
+matches Haskell's documented leftmost/rightmost choice and Rust's
+`min`/`max_by_key`.
+
+The key function is applied exactly once per element; the fold carries the
+incumbent's key alongside it.  It is necessarily **pure** — `Foldable`'s
+`fold_values` has no effect row, so an effectful key is a type error.
+
+> **`Ord` and the comparison operators are different orderings, and these
+> functions use `Ord`.**  `<` `<=` `>` `>=` accept `Int`, `Char` and `Double`
+> only; the `Ord` class covers `Int`, `Bool`, `String`, 2–5-tuples, `Maybe`,
+> `List`, `Result` and `Vec`.  `Int` is the only type in both.  Consequently
+> `minimum` over a `List Double` does **not** type-check — there is no
+> `Ord Double`, deliberately, because IEEE NaN is unordered (see `BACKLOG.md`).
+> A `Double`-keyed argmin must still be hand-folded until that is resolved.
+
 ### `Maybe`/`Result` combinator free functions
 
 Beyond the generic `map` (`Functor`) and `and_then` (`Monad`), the prelude
