@@ -2205,24 +2205,38 @@ from Sprout — a candidate for removal, deliberately not bundled into this chan
   **Deliberately deferred:** Rust's `#[expect(lint)]` — which warns via `unfulfilled_lint_expectations` when the named lint does *not* fire — is a strictly better fit for the two deliberate files, since it turns the suppression into a second assertion that the flagged construct is still present rather than a hole that silently outlives its reason. Held back only to avoid shipping two mechanisms at once; revisit once `allow` has real usage.
 - [x] `P3` Refactor trace fork in `stdlib/compiler/compiler.sprout`'s `compile_full_ir_lines`. Resolved via approach (a): new `compile_phase_recheck_timed` is the single-source pipeline body (bundle→prelude→check→lower) writing per-phase timestamps into a `Ref PhaseTimes`; `compile_full_ir_lines_fast` and `compile_full_ir_lines_traced` eliminated; `compile_full_ir_lines` calls `compile_phase_recheck_timed` unconditionally, then reads the Ref and emits the `[phase]` line only when `SPROUT_TIME_PHASES` is set. Phase-isolation GC guarantee preserved. See PR refactor/trace-fork-unify. (Superseded 2026-07-12: `compile_full_ir_lines` and this whole timing path were deleted with the direct backend; re-adding per-phase timing on the typed path is tracked under "Compiler / Stdlib Misc".)
 - [ ] `P3` Investigate native formatter inconsistency on nested constructor spacing: `Just(Just(x))` sometimes gets formatted with an inner space (`Just (Just(x))`) and sometimes not, even within the same file. Reproduced 2026-06-10 on `tests/stdlib/test_serialize_primitives.spr` (before that file was deleted as part of the Serialize/Deserialize revert) — running `just fmt-file` deterministically produced a diff that inserted spaces in some occurrences but not others. Suggests an inconsistency in the formatter's nested-call handling, possibly column-budget driven. Add regression coverage with a focused fixture that contains multiple `Just(Just(x))` patterns at different indentation depths.
-- [ ] `P1` Fix native formatter newline preservation bug: `fmt_bin fmt` can collapse
-  `.sprout`/`.spr` files to a single line. Reproduced on
-  `stdlib/compiler/lowering.sprout`, `tests/stdlib/compiler/test_lowering.spr`,
-  and `tests/stdlib/test_constrained_container_dispatch.spr`; this also makes the
-  pre-commit `fmt-check` hook unusable for affected files. Add regression coverage
-  for multiline modules before re-enabling formatter-enforced commits for these paths.
-  **Status unverified, likely stale (2026-08-24 re-scan).** `just fmt-check` (`justfile:80`)
-  runs `fmt --check` over EVERY `.sprout`/`.spr` file via `rg --files`, and `fmt-check` is the
-  first entry in the `gate` aggregate (`justfile:2922`) — so a `fmt_bin fmt` that still
-  collapsed `stdlib/compiler/lowering.sprout` would leave that gate red on every run. Either
-  the collapse was fixed in passing (`cb0fa3b8` "fmt: protect multi-line backtick templates
-  from line-based mangling" is the likeliest candidate — same line-based-pass root cause) or
-  the reproducer has narrowed. Deliberately NOT closed, because confirming needs
-  `just fmt-check-file stdlib/compiler/lowering.sprout` against a built `fmt_bin`. Next person:
-  run that probe on all three named files, then either close this or replace it with the
-  narrower repro. Two formatter defects that ARE live and separately tracked: `f()(X)` gains a
-  space (§7 `P3`, 2026-08-21) and `!flag()` → `! flag ()` (Compiler/Stdlib Misc `P3`,
-  2026-08-14).
+- [x] `P1` **Native formatter newline preservation bug — CLOSED 2026-08-27, does not reproduce.**
+  As filed, `fmt_bin fmt` could collapse a `.sprout`/`.spr` file to a single line, reproduced on
+  `stdlib/compiler/lowering.sprout`, `tests/stdlib/compiler/test_lowering.spr` and
+  `tests/stdlib/test_constrained_container_dispatch.spr`. The 2026-08-24 re-scan left it open
+  pending the probe it asked for; that probe has now been run on all three files and the collapse
+  is gone. Most likely fixed in passing by `cb0fa3b8` ("fmt: protect multi-line backtick templates
+  from line-based mangling") as that scan guessed — not confirmed by bisect, because the value of
+  a bisect here is low once the behaviour is gone and gated.
+
+  **Evidence.** Two halves, because either alone is weak:
+  1. `just fmt-check` — exit 0 over EVERY `.sprout`/`.spr` in the repo (`justfile:80`, `rg --files`).
+     `fmt --check` asserts the formatted output equals the file on disk, and every corpus file is
+     multi-line, so no corpus file collapses. This half is the standing regression coverage the
+     entry asked for; it needs no new fixture, and it is the first entry in the `gate` aggregate.
+  2. A file the formatter genuinely REWRITES still keeps its lines. Perturbing `= ` → `=    ` in a
+     copy of `lowering.sprout` makes `fmt` report `formatted` (not `ok:`) and it comes back at
+     **1836 lines**, byte-identical to the original except for one line where the perturbation
+     landed inside a `#` comment — which a formatter correctly does not touch. Same result on
+     `test_constrained_container_dispatch.spr`: rewritten, then byte-identical.
+
+  **Trap for the next person, which cost real time here.** `fmt_bin fmt <path>` **writes in place**
+  and prints a one-line status to stdout — `ok: <path>` when the file was already canonical,
+  `formatted <path>` when it rewrote. So `fmt_bin fmt f | wc -l` prints `1` for *every* file and
+  looks exactly like a collapse; it is measuring the status line. Check the file, not the stdout.
+  Also note the check flag comes AFTER the subcommand (`fmt_bin fmt --check <path>`);
+  `fmt_bin --check <path>` is `unknown subcommand: --check`. And `fmt` does **not** normalize
+  indentation — a re-indented copy comes back `ok:` with the perturbation intact — so perturbing
+  whitespace-at-line-start is not a valid probe of whether the formatter does work. Perturb spacing
+  *within* a line instead.
+
+  Two formatter defects that ARE live and separately tracked: `f()(X)` gains a space (§7 `P3`,
+  2026-08-21) and `!flag()` → `! flag ()` (Compiler/Stdlib Misc `P3`, 2026-08-14).
 - [ ] `P3` **Formatter inserts a space into chained application when the argument starts with an uppercase identifier** (found 2026-08-21 while adding `tests/stdlib/test_constrained_fn_return_position.spr`). `fmt` rewrites `pick_color()(Red)` to `pick_color() (Red)` while leaving `pick_int()(4)` and `labeller_for(1)(2)` untouched. Discriminated by probe rather than inferred: with `fn mkc() -> Color -> Int`, `mkc()(c)` for a lowercase-bound `c` stays tight and `mkc()(Red)` gains the space, so the trigger is the leading identifier's CASE, not the argument's type or whether it is a literal. Cosmetic only — the reformatted file parses and its suite still passes — but it is inconsistent output from the tool `fmt-check` gates on, and it makes a `just fmt` run touch lines the author did not write. Likely an arm that treats an uppercase head as a constructor application and emits a leading separator. Acceptance: `f()(X)` and `f()(x)` format identically, with a fixture covering both.
 - [ ] `P2` Move `lower_typeclasses` into `run_program` so callers never need to apply it manually: every production call site (cli.py, repl.py, analysis_execution_backend.py) already lowers before calling `run_program`, but tests that call `run_program` directly on an unlowered program silently break whenever new code uses a Foldable/typeclass-constrained function. Verify no caller double-lowers (lowering should be idempotent, but confirm first), then absorb the step inside `run_program` and remove the redundant `lower_typeclasses` calls at each call site.
 - [x] `P1` Add `opt --passes=verify` IR validation to `bootstrap-from-seed`, `_test-stdlib`, and `_compile-examples` justfile recipes (2026-05-28). `_build-stage` already had the check. All three emit LLVM IR and then hand off to clang; the verify step runs between IR emission and clang so malformed IR (phi type mismatches, wrong insertvalue types, etc.) is caught with a precise LLVM error rather than a cryptic clang message. `opt` is a hard requirement — the build fails loudly if it is not on PATH. Install via `brew install llvm` (macOS) or `apt-get install llvm-16` (Linux). CI already satisfies this via `llvm-16` in PATH. Pre-commit hook emit-IR smoke tests (section 1) also wired to run `opt --passes=verify` per shape when available. This would have caught the CPR tuple param regression (LLVM phi type mismatch) and the missing-ptrtoint global closure bug.
