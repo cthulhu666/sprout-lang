@@ -734,6 +734,60 @@ export fn fold_indexed(f: b -> Int -> a -> b, init: b, xs: f a) -> b where Folda
   match fold(\ (s, x) -> match s with | (i, acc) -> (i + 1, f(acc, i, x)), (0, init), xs) with
   | (_, result) -> result
 
+# One step of the argmin fold. The accumulator carries the incumbent's KEY next
+# to it, so `f` runs exactly once per element instead of again at every
+# comparison. The strict `ord_lt` is what keeps the FIRST of several equal keys.
+fn min_by_step(f: a -> k, best: Maybe (k, a), x: a) -> Maybe(k, a) where Ord k =
+  let key = f(x)
+  in
+    match best with
+    | Nothing -> Just((key, x))
+    | Just entry ->
+        match entry with
+        | (best_key, _) -> if ord_lt(key, best_key) then Just((key, x)) else best
+
+# The argmax twin. `ord_gte`, not `ord_gt`: an equal key displaces the
+# incumbent, so the LAST of several equal keys is kept. See `max_by`.
+fn max_by_step(f: a -> k, best: Maybe (k, a), x: a) -> Maybe(k, a) where Ord k =
+  let key = f(x)
+  in
+    match best with
+    | Nothing -> Just((key, x))
+    | Just entry ->
+        match entry with
+        | (best_key, _) -> if ord_gte(key, best_key) then Just((key, x)) else best
+
+# Drop the carried key once the fold is done — callers want the element.
+fn keyed_value(best: Maybe (k, a)) -> Maybe a =
+  match best with
+  | Nothing -> Nothing
+  | Just entry -> match entry with | (_, value) -> Just(value)
+
+# O(n), applying `f` exactly once per element: the element whose key is least,
+# or `Nothing` when empty. Returns the ELEMENT, not the key. A tie keeps the
+# FIRST such element; `max_by` keeps the last, which makes the two exactly the
+# ends of `vec_sort_by`'s stable order.
+export fn min_by(f: a -> k, xs: c a) -> Maybe a where Foldable c, Ord k =
+  keyed_value(fold(\ (best, x) -> min_by_step(f, best, x), Nothing, xs))
+
+# O(n), applying `f` exactly once per element. A tie keeps the LAST such
+# element — see `min_by` for why the two rules differ.
+export fn max_by(f: a -> k, xs: c a) -> Maybe a where Foldable c, Ord k =
+  keyed_value(fold(\ (best, x) -> max_by_step(f, best, x), Nothing, xs))
+
+# O(n): the least element, or `Nothing` when empty — the identity-key case of
+# `min_by`, mirroring how `vec_sort` sits on `vec_sort_by`. `Ord` covers Int,
+# Bool, String, tuples, Maybe, List, Result and Vec but NOT Double: the
+# comparison operators and the `Ord` class are separate orderings in Sprout, and
+# `Int` is the only type in both (docs/min-max-combinators-v0.md §8).
+export fn minimum(xs: c a) -> Maybe a where Foldable c, Ord a =
+  min_by(\value -> value, xs)
+
+# O(n): the greatest element, or `Nothing` when empty. Same `Ord`-vs-operator
+# caveat as `minimum`.
+export fn maximum(xs: c a) -> Maybe a where Foldable c, Ord a =
+  max_by(\value -> value, xs)
+
 # O(n²) when 'a = String': each '++' copies the growing accumulator (O(total chars so far)).
 # Use string_concat_many directly for String; a String-specific fast path would need Monoid dispatch.
 export fn mconcat(xs: f a) -> a where Foldable f, Monoid a =

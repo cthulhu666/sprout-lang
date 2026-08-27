@@ -1,0 +1,106 @@
+import stdlib.test (check_eq, run_suite)
+
+# Tests for the Foldable-generic extreme-selection combinators — `minimum`,
+# `maximum`, `min_by`, `max_by` (docs/min-max-combinators-v0.md).
+#
+# Three properties carry most of the weight, because they are the ones a naive
+# implementation gets wrong:
+#
+#   - `min_by`/`max_by` return the ELEMENT, not the key (argmin, not min);
+#   - ties: `min_by` keeps the FIRST minimum, `max_by` keeps the LAST maximum;
+#   - which is exactly what makes the pair the two ends of `vec_sort_by`'s
+#     stable order — pinned below as a law, not just as two examples.
+#
+# Both `Foldable` instances are covered: a `where Foldable c` signature that
+# only ever saw `List` would not prove the genericity is real.
+
+type Person = (name: String, age: Int) deriving (Eq, ToString)
+
+# Type anchors. An empty collection leaves the element type free on both sides
+# of the comparison, so each empty case needs a typed nullary fn.
+fn nil_int() -> List Int = Nil
+fn no_int() -> Maybe Int = Nothing
+fn nil_person() -> List Person = Nil
+fn no_person() -> Maybe Person = Nothing
+fn empty_vec_int() -> Vec Int = vec_empty()
+
+fn age_of(p: Person) -> Int = p.age
+fn name_of(p: Person) -> String = p.name
+
+# Dictionary forwarding. `minimum` carries `where Ord a` and so does this
+# caller, so the dictionary is genuinely PASSED here rather than devirtualized
+# away as it is at a concrete call site (design doc §6). Without a caller of
+# this shape the forwarding path is untested.
+fn pick_smallest(xs: c a) -> Maybe a where Foldable c, Ord a =
+  minimum(xs)
+
+fn pick_largest(xs: c a) -> Maybe a where Foldable c, Ord a =
+  maximum(xs)
+
+fn main() -> Unit !{IO} =
+  let ints = Cons(3, Cons(1, Cons(4, Cons(1, Cons(5, Nil)))))
+      strs = Cons("pear", Cons("apple", Cons("fig", Nil)))
+      ints_vec = vec_from_list(ints)
+
+      # Ages 5, 1, 1, 9, 9 — the minimum is tied across `min-first`/`min-late`
+      # and the maximum across `max-early`/`max-last`, so first-vs-last is
+      # observable through the `name` field.
+      people = Cons(Person(name = "start", age = 5),
+               Cons(Person(name = "min-first", age = 1),
+               Cons(Person(name = "min-late", age = 1),
+               Cons(Person(name = "max-early", age = 9),
+               Cons(Person(name = "max-last", age = 9), Nil)))))
+      sorted_by_age = vec_sort_by(age_of, vec_from_list(people))
+  in run_suite("min_max", [
+    # --- Empty: total, never a panic -----------------------------------------
+    check_eq("minimum of empty list", minimum(nil_int()), no_int()),
+    check_eq("maximum of empty list", maximum(nil_int()), no_int()),
+    check_eq("minimum of empty vec", minimum(empty_vec_int()), no_int()),
+    check_eq("min_by of empty list", min_by(age_of, nil_person()), no_person()),
+    check_eq("max_by of empty list", max_by(age_of, nil_person()), no_person()),
+
+    # --- Singleton: the element is both extremes -----------------------------
+    check_eq("minimum of singleton", minimum(Cons(42, Nil)), Just(42)),
+    check_eq("maximum of singleton", maximum(Cons(42, Nil)), Just(42)),
+
+    # --- List Int ------------------------------------------------------------
+    check_eq("minimum over List Int", minimum(ints), Just(1)),
+    check_eq("maximum over List Int", maximum(ints), Just(5)),
+
+    # --- Ord String, to show this is not Int-only ----------------------------
+    check_eq("minimum over List String", minimum(strs), Just("apple")),
+    check_eq("maximum over List String", maximum(strs), Just("pear")),
+
+    # --- Vec: the other Foldable instance ------------------------------------
+    check_eq("minimum over Vec Int", minimum(ints_vec), Just(1)),
+    check_eq("maximum over Vec Int", maximum(ints_vec), Just(5)),
+
+    # --- argmin/argmax return the ELEMENT, not the key -----------------------
+    check_eq("min_by returns the element",
+      min_by(age_of, people), Just (Person(name = "min-first", age = 1))),
+    check_eq("max_by returns the element",
+      max_by(age_of, people), Just (Person(name = "max-last", age = 9))),
+
+    # A String key, to show `k` is not pinned to Int either.
+    check_eq("min_by on a String key",
+      min_by(name_of, people), Just (Person(name = "max-early", age = 9))),
+
+    # --- Ties: min keeps the FIRST, max keeps the LAST -----------------------
+    check_eq("min_by tie keeps the first",
+      map(name_of, min_by(age_of, people)), Just("min-first")),
+    check_eq("max_by tie keeps the last",
+      map(name_of, max_by(age_of, people)), Just("max-last")),
+
+    # --- The law the tie rule exists for: the ends of the stable sort --------
+    check_eq("min_by is element 0 of the stable sort",
+      min_by(age_of, people), vec_get(0, sorted_by_age)),
+    check_eq("max_by is the last element of the stable sort",
+      max_by(age_of, people), vec_get(vec_length(sorted_by_age) - 1, sorted_by_age)),
+
+    # --- Dictionary forwarding through a constrained caller ------------------
+    check_eq("forwarded minimum at Int", pick_smallest(ints), Just(1)),
+    check_eq("forwarded maximum at Int", pick_largest(ints), Just(5)),
+    check_eq("forwarded minimum at String", pick_smallest(strs), Just("apple")),
+    check_eq("forwarded minimum over Vec", pick_smallest(ints_vec), Just(1)),
+    check_eq("forwarded minimum of empty", pick_smallest(nil_int()), no_int())
+  ])
