@@ -2425,8 +2425,12 @@ incumbent's key alongside it.  It is necessarily **pure** — `Foldable`'s
 ```
 class Filterable f
   fn filter_values(pred: a -> Bool, xs: f a) -> f a
+  fn filter_map_values(f: a -> Maybe b, xs: f a) -> f b
+  fn partition_values(pred: a -> Bool, xs: f a) -> (f a, f a)
 
-filter(pred: a -> Bool, xs: c a) -> c a where Filterable c   # = filter_values(pred, xs)
+filter(pred: a -> Bool, xs: c a)     -> c a         where Filterable c
+filter_map(f: a -> Maybe b, xs: c a) -> c b         where Filterable c
+partition(pred: a -> Bool, xs: c a)  -> (c a, c a)  where Filterable c
 ```
 
 `filter` keeps the elements satisfying `pred`, in their original order, and
@@ -2453,9 +2457,63 @@ unused slot to every dictionary without making a method derivable.
 effectful predicate is a type error, the same restriction `Foldable` imposes on
 `fold`'s step.
 
-`filter_map` (filter and transform in one pass) and `partition` are **not**
-generic: `vec_filter_map` exists for `Vec` only, and there is no `partition`
-(tracked in `BACKLOG.md`).
+`filter_map` drops and transforms in one pass — `Nothing` discards the element,
+`Just` keeps the mapped value — and `filter` is its special case where the
+function returns the element unchanged or nothing.  `partition` returns the
+elements satisfying `pred` and those not, each in original order, as a **pair**
+of the same container kind (Haskell, Rust, Elm and Scala all return a pair;
+PureScript's `{no, yes}` record is the outlier).
+
+Both are class **methods** rather than derivations, for reasons specific to a
+strict language: deriving `filter` from `filter_map` — the PureScript and
+witherable design — allocates a `Maybe` per surviving element, and deriving
+`partition` from two `filter` passes applies the caller's predicate twice per
+element, breaking the once-per-element guarantee `min_by`/`max_by` document.
+`partition_values` therefore builds both halves in one pass.
+
+The concrete per-container forms are `list_filter_map`/`vec_filter_map` and
+`list_partition`/`vec_partition`.
+
+### `Foldable`-derived search and test combinators (Experimental)
+
+```
+any(pred: a -> Bool, xs: c a)      -> Bool     where Foldable c
+all(pred: a -> Bool, xs: c a)      -> Bool     where Foldable c
+find(pred: a -> Bool, xs: c a)     -> Maybe a  where Foldable c
+find_map(f: a -> Maybe b, xs: c a) -> Maybe b  where Foldable c
+count(pred: a -> Bool, xs: c a)    -> Int      where Foldable c
+member(x: a, xs: c a)              -> Bool     where Foldable c, Eq a
+```
+
+These are the **consumers**: they return a scalar or a `Maybe`, never a
+container, so they are keyed on the source alone and need only `Foldable`.
+They are plain free functions — no class method backs them.
+
+`find` returns the **first** element satisfying `pred`, `find_map` the first
+`Just` that `f` produces.  Both are **total**: an empty structure yields
+`Nothing`, never a panic (§8.2).
+
+The empty cases for the pair are asymmetric and deliberate: `any` of an empty
+structure is `false` and `all` of one is **`true`** — the vacuous case, since
+they are the folds of `||` and `&&` over their respective identities.  This
+matches every language that ships the pair.
+
+`member` compares by the `Eq` instance, and is the `Foldable`-generic form of
+`list_member`.
+
+> **These do not short-circuit the traversal.**  `Foldable.fold_values` has no
+> early exit, so `any`, `all`, `find`, `find_map` and `member` visit every
+> element even once the answer is settled.  The predicate is not applied again
+> after that point, so the cost is O(n) traversal with at most k predicate
+> calls.  `vec_any` and `vec_all` short-circuit both and remain the faster
+> spelling for a `Vec`.  PureScript has the same limitation for the same
+> reason; Rust and Scala escape it only via an iterator protocol, which Sprout
+> does not have.
+
+`length` and `is_empty` are deliberately **not** provided in this family: a
+fold-derived version would be O(n) even on `Vec`, where `vec_length` is O(1).
+Providing them at the right complexity requires `Foldable` class methods with
+per-instance overrides, as Haskell does (see `BACKLOG.md`).
 
 ### `Maybe`/`Result` combinator free functions
 

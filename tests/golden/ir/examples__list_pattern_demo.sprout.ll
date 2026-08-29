@@ -141,7 +141,7 @@ declare i64 @ref_write(i64, i64)
 @.cname.18 = private unnamed_addr constant [35 x i8] c"examples.list_pattern_demo.Unknown\00"
 @.cfkinds.18 = private unnamed_addr constant [2 x i8] c"p\00"
 
-define i64 @filter(i64 %pred, i64 %xs, i64 %__tc_Filterable_0_filter_values) {
+define i64 @filter(i64 %pred, i64 %xs, i64 %__tc_Filterable_0_filter_values, i64 %__tc_Filterable_0_filter_map_values, i64 %__tc_Filterable_0_partition_values) {
 entry:
   %t$1 = alloca i64
   store i64 %xs, ptr %t$1
@@ -150,10 +150,16 @@ entry:
   store i64 %pred, ptr %t$3
   %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
   %t$5 = alloca i64
-  store i64 %__tc_Filterable_0_filter_values, ptr %t$5
+  store i64 %__tc_Filterable_0_partition_values, ptr %t$5
   %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
-  %t$0 = call i64 @__cm_Filterable_filter_values(i64 %pred, i64 %xs, i64 %__tc_Filterable_0_filter_values)
-  %t$7 = call i64 @sprout_gc_pop_roots(i64 3)
+  %t$7 = alloca i64
+  store i64 %__tc_Filterable_0_filter_values, ptr %t$7
+  %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
+  %t$9 = alloca i64
+  store i64 %__tc_Filterable_0_filter_map_values, ptr %t$9
+  %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
+  %t$0 = call i64 @__cm_Filterable_filter_values(i64 %pred, i64 %xs, i64 %__tc_Filterable_0_filter_values, i64 %__tc_Filterable_0_filter_map_values, i64 %__tc_Filterable_0_partition_values)
+  %t$11 = call i64 @sprout_gc_pop_roots(i64 5)
   ret i64 %t$0
 }
 
@@ -908,7 +914,7 @@ entry:
   ret i64 %t$67
 }
 
-define i64 @__cm_Filterable_filter_values(i64 %pred, i64 %xs, i64 %__tc_Filterable_0_filter_values) {
+define i64 @__cm_Filterable_filter_values(i64 %pred, i64 %xs, i64 %__tc_Filterable_0_filter_values, i64 %__tc_Filterable_0_filter_map_values, i64 %__tc_Filterable_0_partition_values) {
 entry:
   call void @sprout_closure_arity_check(i64 %__tc_Filterable_0_filter_values, i64 2)
   %t$0$env_ptr = inttoptr i64 %__tc_Filterable_0_filter_values to ptr

@@ -1,0 +1,66 @@
+import stdlib.test (check_eq, run_suite)
+
+# A module defining its own top-level `find`, `any` or `count` must keep
+# working after the prelude gained generic ones — the user's definition wins
+# and the rest of the prelude still resolves.
+#
+# This is not hypothetical. `grimward/combat.sprout` in the one downstream
+# consumer defines `fn find(cs: List Combatant, id: Int) -> Maybe Combatant`,
+# a two-argument lookup with nothing in common with the prelude's predicate
+# form beyond the name. The shape below mirrors it deliberately: same name,
+# different arity and different argument types, called alongside prelude
+# combinators in the same file.
+#
+# Shadowing a prelude name has misdirected errors before (a top-level `append`
+# collides with `Semigroup.append` and reports as a missing `++` witness), so
+# each of these is a real risk, not a formality — but note the mechanism
+# differs: these are plain constrained free functions, not class methods.
+
+type Item = (id: Int, label: String) deriving (Eq, ToString)
+
+fn no_item() -> Maybe Item = Nothing
+
+# Same name as the prelude's, different arity AND different argument types.
+fn find(items: List Item, wanted: Int) -> Maybe Item =
+  match items with
+  | Nil -> Nothing
+  | Cons x rest -> if x.id == wanted then Just(x) else find(rest, wanted)
+
+# `any` shadowed by a zero-predicate form, to cover the name that is also
+# contextual syntax in type position (`any C` is an existential).
+fn any(items: List Item) -> Bool =
+  match items with
+  | [] -> false
+  | [_ | _] -> true
+
+# `count` shadowed by a plain length, the shape `game/keymap.sprout` uses.
+fn count(items: List Item) -> Int =
+  match items with
+  | Nil -> 0
+  | Cons _ rest -> 1 + count(rest)
+
+fn is_odd_id(x: Item) -> Bool = x.id - (x.id / 2) * 2 == 1
+
+fn main() -> Unit !{IO} =
+  let items = Cons(Item(id = 1, label = "one"),
+              Cons(Item(id = 2, label = "two"),
+              Cons(Item(id = 3, label = "three"), Nil)))
+  in run_suite("prelude_name_shadowing", [
+    # The local definitions win at their own call sites.
+    check_eq("a local `find` shadows the prelude's",
+      find(items, 2), Just (Item(id = 2, label = "two"))),
+    check_eq("the local `find` still reports a miss",
+      find(items, 9), no_item()),
+    check_eq("a local `any` shadows the prelude's", any(items), true),
+    check_eq("a local `count` shadows the prelude's", count(items), 3),
+
+    # The unshadowed prelude combinators are unaffected in the same module.
+    check_eq("prelude `filter` still resolves here",
+      filter(is_odd_id, items),
+      Cons(Item(id = 1, label = "one"), Cons (Item(id = 3, label = "three"), Nil))),
+    check_eq("prelude `all` still resolves here", all(\x -> x.id > 0, items), true),
+    check_eq("prelude `partition` still resolves here",
+      partition(is_odd_id, items),
+      (Cons (Item(id = 1, label = "one"), Cons (Item(id = 3, label = "three"), Nil)),
+       Cons(Item(id = 2, label = "two"), Nil)))
+  ])
