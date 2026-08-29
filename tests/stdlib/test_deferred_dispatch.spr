@@ -1,0 +1,91 @@
+import stdlib.test (check_eq, run_suite)
+
+# Calling a local lambda whose body uses a typeclass method
+# (docs/deferred-dispatch-v0.md).
+#
+# The receiver's type here is pinned only by the APPLICATION, never by the
+# lambda body. Dictionary selection for an input-position class method used to
+# bail out whenever the resolved head was concrete, on the assumption that a
+# concrete head with no dictionary could only mean a missing instance. For a
+# lambda parameter that assumption is false: eager inference cannot resolve the
+# head yet, and the post-pass refused to, so the call reached `verify_dispatch`
+# dictionary-less and was rejected as `No instance of ToString for Int` — with
+# `instance ToString Int` sitting in the prelude the whole time.
+#
+# What decides these cases is WHEN the receiver's type becomes known, not
+# nesting, arity, `let`, or annotation. `annotated` is the sharpest of them: the
+# author wrote `Int` explicitly and was still told there was no instance for
+# `Int`. The last two are the shapes that already worked, kept here so a fix to
+# the deferred path cannot quietly disturb the eager one.
+
+# A user-defined class, so these tests cannot pass by some property special to
+# `ToString`/`Eq` — the two the bug was first seen through.
+class Tag a
+  fn tag(x: a) -> String
+
+instance Tag Int
+  fn tag(x: Int) -> String = "i" ++ int_to_string(x)
+
+instance Tag Bool
+  fn tag(x: Bool) -> String = if x then "bT" else "bF"
+
+# The minimal repro: three lines, one class method, one application.
+fn minimal() -> String =
+  let g = \x -> to_string(x)
+  in g(1)
+
+# Binder types written out in full. Annotation does NOT rescue this shape, which
+# is what makes the old diagnostic indefensible rather than merely unhelpful.
+fn annotated() -> String =
+  let g = \ (x: Int, y: Int) -> to_string(x) ++ to_string(y)
+  in g(1, 2)
+
+# Curried lambda, resolved only by the second application.
+fn curried() -> Bool =
+  let g = \x -> \y -> x == y
+  in g(1)(2)
+
+# No `let` at all — an immediately applied lambda literal reaches the same path.
+fn immediate() -> Bool =
+  (\x -> \y -> x == y)(3)(3)
+
+# The same shape through a user class rather than a prelude one.
+fn user_class() -> String =
+  let g = \x -> tag(x)
+  in g(7)
+
+# A second instance of that class, so the dictionary actually has to be chosen
+# rather than defaulted to the only one available.
+fn user_class_bool() -> String =
+  let g = \x -> tag(x)
+  in g(true)
+
+# --- Shapes that already worked: regression cover for the eager path ---------
+
+# The body pins `x` (via `x + n`) before dispatch runs, so this resolved eagerly
+# and must keep doing so.
+fn body_pinned() -> String =
+  let n = 1
+  in
+    let g = \x -> to_string(x + n)
+    in g(2)
+
+# A lambda passed to a higher-order function, where the callee's signature fixes
+# the element type during the call.
+fn via_hof() -> String =
+  string_concat_many(list_map(\v -> to_string(v), Cons(1, Cons(2, Nil))))
+
+fn main() -> Unit !{IO} =
+  run_suite("deferred_dispatch", [
+    # --- Resolved only by the application: the bug ---------------------------
+    check_eq("minimal repro", minimal(), "1"),
+    check_eq("annotated binders", annotated(), "12"),
+    check_eq("curried, unequal", curried(), false),
+    check_eq("immediately applied lambda", immediate(), true),
+    check_eq("user class, Int instance", user_class(), "i7"),
+    check_eq("user class, Bool instance", user_class_bool(), "bT"),
+
+    # --- Resolved inside the body: must not regress --------------------------
+    check_eq("body pins the receiver", body_pinned(), "3"),
+    check_eq("lambda passed to a HOF", via_hof(), "12")
+  ])

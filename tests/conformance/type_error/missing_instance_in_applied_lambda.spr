@@ -1,0 +1,16 @@
+# The negative twin of tests/stdlib/test_deferred_dispatch.spr.
+#
+# Same shape — a local lambda whose receiver type is pinned only by the
+# application — but the instance genuinely does not exist: the prelude has
+# `Eq Int`/`Eq String` and no `Eq Double` (BACKLOG.md, `Ord Double`).
+#
+# Deferred input-position dispatch fills a dictionary slot that eager inference
+# left open. It must fill it only when an instance actually exists; injecting
+# unconditionally would turn this compile error into a LINKER error with no
+# Sprout source position, which is the failure mode verify_dispatch.sprout
+# already warns about. So this file must stay rejected, and stay located.
+module main
+
+fn main() -> Unit !{IO} =
+  let g = \x -> \y -> x == y
+  in print(g(1.0)(2.0))
