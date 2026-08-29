@@ -33,11 +33,19 @@ combinator falls in by default. And `deriving (Eq, Ord)` is impossible for **any
 record or ADT with a `Double` field, which is every user type carrying a
 coordinate, a mass, or a score.
 
-Downstream, `uncharted-suns` hand-folds this five times, all keyed on `Double`:
-`game/render_vista.sprout:1285`, `game/stations.sprout:70-80`,
-`game/economy.sprout:715`, `loam/hydrology.sprout:437`, and a hand-written
-`min_by` at `grimward/combat.sprout:200` whose own comment names the prelude gap
-as its reason to exist.
+Downstream, `uncharted-suns` carries a hand-written
+`fn min_by(score: a -> Double, xs: List a)` in `grimward/combat.sprout` whose own
+comment names the prelude gap as its reason to exist, and `grimward/mods.sprout`
+declines to derive on two types for the same reason, in a module where every
+sibling ADT derives `Eq`.
+
+> **Corrected 2026-08-29, after the change landed and the downstream cleanup was
+> done.** This paragraph originally claimed **five** hand-folds — adding
+> `render_vista`, `stations`, `economy` and `hydrology`. That count came from
+> grep hits rather than from reading the code, and only the `combat` one is a
+> `min_by`. See §8 for what the other four actually are and why none of them is a
+> prelude swap. The `deriving` half of §1 was always the larger consequence, and
+> it stands unchanged; the fold count was the weaker argument and was overstated.
 
 ## 2. Goals
 
@@ -264,8 +272,22 @@ than accidental.
   **discard** a NaN operand, while a `compare`-based `max` under §7 would
   **propagate** it (NaN being greatest), and OCaml's `Float.max` propagates too.
   Two defensible definitions; whichever is written must say which and why.
-- The five hand-folds in `uncharted-suns` (`render_vista`, `stations`, `economy`,
-  `hydrology`, and `grimward/combat`'s own `min_by`), all keyed on `Double`.
+- `grimward/combat`'s own `min_by` in `uncharted-suns` — a true duplicate of the
+  prelude's, tie rule and all. Deleted downstream; behaviour-neutral including at
+  NaN, since a NaN key loses under both a strict `<` and a total order that sorts
+  NaN greatest.
+
+  > **Correction.** §1 and the `BACKLOG` entry that motivated this work claimed
+  > **five** downstream hand-folds would be retired. That count came from grep
+  > hits and is wrong; reading the code, it is **one**. `game.economy.argmax5`
+  > keeps the FIRST of equal keys while the prelude's `max_by` keeps the LAST
+  > (`ord_gte`), so it is not behaviour-neutral. `game.stations.habitable_go` is a
+  > *filtered* argmin returning an index with a sentinel, a shape `min_by` does
+  > not have. `loam.hydrology`'s are effectful `MutMatrix` neighbourhood scans,
+  > and `Foldable.fold_values` has no effect row, so they could not be `min_by`
+  > at any point. `render_vista`'s pick fold is `!{IO}` for the same reason.
+  > None of this weakens the case for the change — the `deriving` consequence was
+  > always the larger half — but a motivating count should be counted.
 - `deriving` on downstream types that carry a `Double` — e.g.
   `grimward/mods.sprout:29`, whose comment names this gap as the reason it does
   not derive.
