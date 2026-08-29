@@ -1,16 +1,23 @@
 # The negative twin of tests/stdlib/test_deferred_dispatch.spr.
 #
 # Same shape — a local lambda whose receiver type is pinned only by the
-# application — but the instance genuinely does not exist: the prelude has
-# `Eq Int`/`Eq String` and no `Eq Double` (BACKLOG.md, `Ord Double`).
+# application — but the instance genuinely does not exist.
 #
 # Deferred input-position dispatch fills a dictionary slot that eager inference
 # left open. It must fill it only when an instance actually exists; injecting
 # unconditionally would turn this compile error into a LINKER error with no
 # Sprout source position, which is the failure mode verify_dispatch.sprout
 # already warns about. So this file must stay rejected, and stay located.
+#
+# Anchored on a local type declared WITHOUT `deriving`, not on a prelude gap.
+# The first version of this fixture used `Double`, which had no `Eq` instance at
+# the time; adding one (docs/eq-ord-double-v0.md) made the file compile and the
+# fixture silently stop testing anything. A user type with no instance cannot be
+# closed from the prelude.
 module main
+
+type Opaque = Opaque Int
 
 fn main() -> Unit !{IO} =
   let g = \x -> \y -> x == y
-  in print(g(1.0)(2.0))
+  in if g(Opaque(1)) (Opaque(2)) then print("equal") else print("differs")

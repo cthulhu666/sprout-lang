@@ -1,0 +1,120 @@
+import stdlib.test (check_eq, check_true, check_false, run_suite)
+import stdlib.math (is_nan)
+
+# `Eq Double` / `Ord Double` (docs/eq-ord-double-v0.md).
+#
+# The two orderings in Sprout are separate paths and stay separate. The `==` and
+# `<` OPERATORS are lowered straight to IEEE `fcmp` by the typechecker
+# (`infer.check_eq` short-circuits on `is_primitive_eq_type`, `check_compare`
+# unifies against Int/Char/Double) and never consult a class. The `Eq`/`Ord`
+# CLASSES are what `deriving`, `member`, `minimum` and sorting reach.
+#
+# So the operators keep IEEE semantics — NaN unordered, `nan == nan` false — and
+# the class gets a TOTAL order, because a class whose order is partial cannot
+# implement `compare : Int` honestly. That is Java's split (`==` vs
+# `Double.compareTo`) and Julia's (`<` vs `isless`), not Haskell's, where one
+# `Ord Double` serves both and is non-lawful at NaN.
+
+fn nan() -> Double = 0.0 / 0.0
+
+fn inf() -> Double = 1.0 / 0.0
+
+type Reading = (label: String, value: Double) deriving (Eq, Ord, ToString)
+
+# --- The operators must NOT change: IEEE semantics, verified today -----------
+
+fn op_nan_eq() -> Bool = nan() == nan()
+
+fn op_nan_lt() -> Bool = nan() < 1.0
+
+fn op_nan_gt() -> Bool = nan() > 1.0
+
+# --- The class is total ------------------------------------------------------
+
+fn cls_nan_eq() -> Bool = eq(nan(), nan())
+
+fn cls_nan_vs_number() -> Int = compare(nan(), 1.0)
+
+fn cls_number_vs_nan() -> Int = compare(1.0, nan())
+
+fn cls_nan_vs_nan() -> Int = compare(nan(), nan())
+
+fn cls_nan_vs_inf() -> Int = compare(nan(), inf())
+
+# Signed zeros compare equal, so `eq` and `compare` agree on them. `Ord a` has
+# `Eq a` as a superclass; the pair being inconsistent would be a live trap.
+# `0.0 - 0.0` is +0.0, not -0.0 — the multiply is what actually sets the sign bit.
+fn neg_zero() -> Double = -1.0 * 0.0
+
+fn cls_signed_zero_eq() -> Bool = eq(0.0, neg_zero())
+
+fn cls_signed_zero_compare() -> Int = compare(0.0, neg_zero())
+
+# --- Consumers that inherited the hole ---------------------------------------
+
+fn via_member() -> Bool = member(2.0, [1.0, 2.0, 3.0])
+
+fn via_minimum() -> Maybe Double = minimum([3.0, 1.0, 2.0])
+
+fn via_maximum() -> Maybe Double = maximum([3.0, 1.0, 2.0])
+
+fn via_min_by() -> Maybe (String, Double) =
+  min_by(\p -> match p with | (_, v) -> v, [("a", 3.0), ("b", 1.0), ("c", 2.0)])
+
+fn min_by_label() -> String =
+  match via_min_by() with
+  | Just p -> match p with | (label, _) -> label
+  | Nothing -> "none"
+
+# A user record with a `Double` field — the viral case. Before an `Eq Double`
+# existed this failed at the DERIVED instance, not at the use site:
+# "No instance of Eq for Double in instance method eq".
+fn derived_eq_same() -> Bool =
+  eq(Reading(label = "a", value = 1.0), Reading(label = "a", value = 1.0))
+
+fn derived_eq_differs() -> Bool =
+  eq(Reading(label = "a", value = 1.0), Reading(label = "a", value = 2.0))
+
+fn derived_compare() -> Int =
+  compare(Reading(label = "a", value = 1.0), Reading(label = "a", value = 2.0))
+
+# --- Sorting terminates and places NaN last ----------------------------------
+
+fn sorted_labels() -> String =
+  string_concat_many(list_map(\v -> if is_nan(v) then "N" else double_to_string(v),
+    vec_to_list(vec_sort(vec_from_list([2.0, nan(), 1.0])))))
+
+fn main() -> Unit !{IO} =
+  run_suite("double_ord", [
+    # Operators keep IEEE semantics
+    check_false("operator: nan == nan", op_nan_eq()),
+    check_false("operator: nan < 1.0", op_nan_lt()),
+    check_false("operator: nan > 1.0", op_nan_gt()),
+
+    # check_eq itself now works on Double, retiring the check_approx workaround
+    # for exact-value assertions
+    check_eq("check_eq on Double", 1.5, 1.5),
+
+    # The class is total
+    check_true("class: eq(nan, nan)", cls_nan_eq()),
+    check_eq("class: compare(nan, 1.0)", cls_nan_vs_number(), 1),
+    check_eq("class: compare(1.0, nan)", cls_number_vs_nan(), -1),
+    check_eq("class: compare(nan, nan)", cls_nan_vs_nan(), 0),
+    check_eq("class: nan sorts above inf", cls_nan_vs_inf(), 1),
+    check_true("class: eq(0.0, -0.0)", cls_signed_zero_eq()),
+    check_eq("class: compare(0.0, -0.0)", cls_signed_zero_compare(), 0),
+
+    # Consumers
+    check_true("member on Double", via_member()),
+    check_eq("minimum", via_minimum(), Just(1.0)),
+    check_eq("maximum", via_maximum(), Just(3.0)),
+    check_eq("min_by on a Double key", min_by_label(), "b"),
+
+    # deriving over a Double field
+    check_true("derived eq, equal", derived_eq_same()),
+    check_false("derived eq, differing Double field", derived_eq_differs()),
+    check_eq("derived compare orders by the Double field", derived_compare(), -1),
+
+    # Sorting
+    check_eq("vec_sort places nan last", sorted_labels(), "1.02.0N")
+  ])

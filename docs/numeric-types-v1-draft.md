@@ -26,13 +26,15 @@ goals and surface design decisions before writing any code.
 > signature quibble — `Real.pow` returning `a` and `Integer.pow` returning `Maybe a`
 > cannot both be one class method without associated types, which Sprout lacks.
 >
-> **Conflict 2 — §7.1 is now overdue, not pending.** §7.1 says the NaN/`Ord` decision is
-> "needed before `Double` ships". `Double` shipped without it, so `Double` today has
-> exactly one instance in the whole stdlib (`ToString`, `prelude.sprout:814`) — no `Eq`,
-> no `Ord`. Two live consequences: `check_eq` does not type-check on `Double`
-> (`stdlib/test.sprout` carries `check_approx` to work around it), and `stdlib.math`
-> deliberately ships **no** `Double` `min`/`max`/`sign`, because they would force the
-> decision. Tracked in `BACKLOG.md`.
+> **Conflict 2 — §7.1 is RESOLVED, 2026-08-29: `docs/eq-ord-double-v0.md`.** `Double`
+> now has `Eq` and `Ord` instances that are **total**, while the `==`/`<` operators keep
+> IEEE semantics — a fourth option §7.1 does not list, and the one that fits Sprout,
+> because here the operators and the `Ord` class are already separate code paths and
+> neither can reach the other. §7.1's stated preference (a `PartialOrd` split) was
+> **rejected**: it formalises the exclusion rather than closing it, leaving
+> `minimum`/`maximum`/`min_by`/`max_by` still unable to take a `Double` key unless they
+> are re-signed, at which point the NaN question has to be answered anyway. Read §7.1
+> below as the pre-decision record.
 
 ---
 
@@ -384,6 +386,15 @@ contract that `Numeric` requires via `Eq` and `Ord`. Options:
 Decision needed before `Double` ships. Preference: `PartialOrd` split, so
 `Numeric` stays total-order and `Double` sits in a `PartialNumeric` variant,
 or NaN is simply excluded from valid `Double` values by convention.
+
+> **DECIDED 2026-08-29 — none of the three; see `docs/eq-ord-double-v0.md`.** The
+> option list above is missing the one that was taken, because it assumes the
+> `Ord` class and the `<` operator are the same ordering. In Sprout they are not:
+> `<` is monomorphic and built into the typechecker, and `Eq`/`Ord` are reached
+> only through class dispatch. So `Double` got **total** `Eq`/`Ord` instances
+> while the operators kept IEEE semantics, which is Java's and Julia's split. The
+> `PartialOrd` preference stated here was rejected on the grounds that it does
+> not deliver comparison-based APIs on `Double` — it formalises their absence.
 
 ### 7.2 Division Safety for `Integer`
 

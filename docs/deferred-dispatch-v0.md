@@ -92,7 +92,8 @@ a `TDict` carrying the concrete constraint head and `EvUnresolved`.
 - No new syntax, no signature changes, no new builtin.
 
 **Non-goals**
-- `Eq Double` / `Ord Double` and the min/max-on-`Double` question (`BACKLOG.md:603`).
+- `Eq Double` / `Ord Double` and the min/max-on-`Double` question — settled
+  separately on 2026-08-29, `docs/eq-ord-double-v0.md`.
 - The `<`/`Ord` operator split and `check_compare`'s silent `Int` defaulting — a
   separate, larger item.
 - Generalizing local bindings (let-polymorphism). This change makes monomorphic local
@@ -191,11 +192,17 @@ Positive (must compile and run):
 4. A non-prelude user class, to show the fix is not `ToString`/`Eq`-specific.
 
 Negative (must STILL be rejected, with a located, accurate message):
-5. `member(1.0, [1.0, 2.0])` — no `Eq Double`. Guards against the fix degrading into
-   "inject a dict and hope", which would turn a compile error into a link error. The
-   surrounding code comments (`verify_dispatch.sprout:322-326`) call out that failure
-   mode explicitly.
-6. `type R = (v: Double) deriving (Eq)` — the same check through the deriving path.
+5. A local type declared without `deriving`, used under `==` in an applied lambda.
+   Guards against the fix degrading into "inject a dict and hope", which would turn a
+   compile error into a link error. The surrounding code comments
+   (`verify_dispatch.sprout:322-326`) call out that failure mode explicitly.
+
+   > **Corrected 2026-08-29.** This fixture originally used `Double`, on the grounds
+   > that the prelude had no `Eq Double`. `Eq Double` landed two days later
+   > (`docs/eq-ord-double-v0.md`) and the file started compiling — a negative test
+   > anchored on a *gap* stops testing anything the moment the gap closes, silently.
+   > It is now anchored on a user type with no instance, which no prelude change can
+   > close.
 
 Regression:
 7. The working rows of the §1 table, so the eager path is not disturbed.

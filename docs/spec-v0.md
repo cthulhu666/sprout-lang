@@ -2395,6 +2395,40 @@ lawful `List` instance duplicates `Semigroup (List a)`'s `++`, so with `List`
 excluded the class would have a single `Maybe` instance — ceremony with no
 dispatch payoff.  The `Maybe` fallback is therefore a free function.
 
+### `Eq` and `Ord` on `Double`
+
+`Double` has `Eq` and `Ord` instances, and **they do not agree with the
+comparison operators at NaN**.  This is deliberate and normative.
+
+The two orderings are reached by different syntax and never by each other:
+
+- The **operators** `==` `!=` `<` `<=` `>` `>=` on `Double` are the IEEE 754
+  ordered comparisons.  NaN is unordered: `nan == nan`, `nan < x`, `nan > x` and
+  `nan != nan` are all `false`.  They are lowered directly by the typechecker and
+  do **not** dispatch through `Eq` or `Ord`.
+- The **class methods** `eq` and `compare` define a **total** order, which is
+  what `deriving`, `member`, `minimum`, `maximum`, `min_by`, `max_by`,
+  `vec_sort` and `Dict` keys use.
+
+The class agrees with the operator on every pair the operator orders, and fills
+in only the case IEEE leaves open:
+
+| pair | `==` / `<` | `eq` / `compare` |
+|---|---|---|
+| `1.0`, `2.0` | `1.0 < 2.0` is `true` | `compare` is `-1` |
+| `-0.0`, `0.0` | `==` is `true` | `eq` is `true`, `compare` is `0` |
+| `nan`, `nan` | `==` is `false` | `eq` is `true`, `compare` is `0` |
+| `nan`, any number or `inf` | all comparisons `false` | `compare` is `1` |
+
+So NaN equals itself and sorts **above** every number, `inf` included; `vec_sort`
+places NaN last, and `minimum` over a list containing NaN returns a real number
+while `maximum` returns NaN.
+
+A total `compare` is required rather than chosen: `compare` returns `Int`, so
+there is no value denoting "unordered".  The same split exists in Java
+(`==` vs `Double.compareTo`) and Julia (`<` vs `isless`).  Rationale and the
+prior-art survey: `docs/eq-ord-double-v0.md`.
+
 ### `Foldable`-derived extreme selection (Experimental)
 
 ```
@@ -2436,11 +2470,10 @@ incumbent's key alongside it.  It is necessarily **pure** — `Foldable`'s
 
 > **`Ord` and the comparison operators are different orderings, and these
 > functions use `Ord`.**  `<` `<=` `>` `>=` accept `Int`, `Char` and `Double`
-> only; the `Ord` class covers `Int`, `Bool`, `String`, 2–5-tuples, `Maybe`,
-> `List`, `Result` and `Vec`.  `Int` is the only type in both.  Consequently
-> `minimum` over a `List Double` does **not** type-check — there is no
-> `Ord Double`, deliberately, because IEEE NaN is unordered (see `BACKLOG.md`).
-> A `Double`-keyed argmin must still be hand-folded until that is resolved.
+> only; the `Ord` class covers `Int`, `Bool`, `String`, `Double`, 2–5-tuples,
+> `Maybe`, `List`, `Result` and `Vec`.  `Int` and `Double` are the types in both,
+> and **on `Double` the two orderings differ at NaN** — see *`Eq` and `Ord` on
+> `Double`* above.
 
 ### `Filterable` class and generic `filter` (Experimental)
 
@@ -2603,7 +2636,7 @@ non-empty.  Whitespace and line breaks inside the parentheses are allowed.
 
 | Class | Scope | Synthesized method |
 |---|---|---|
-| `Eq` | all ADT shapes | `eq(left, right)` — `match (left, right) with` per-ctor pairs comparing fields with recursive `eq`; cross-ctor pairs return false.  The `==` and `!=` infix operators desugar to `Eq.eq` dispatch for all non-primitive types; `==` on `Int`, `Bool`, `Char`, and `String` uses the built-in comparison path. |
+| `Eq` | all ADT shapes | `eq(left, right)` — `match (left, right) with` per-ctor pairs comparing fields with recursive `eq`; cross-ctor pairs return false.  The `==` and `!=` infix operators desugar to `Eq.eq` dispatch for all non-primitive types; `==` on `Int`, `Bool`, `Char`, `String` and `Double` uses the built-in comparison path.  For `Double` that path is IEEE and the `Eq` instance is total, so a derived `eq` over a `Double` field does **not** mean the same thing as `==` on that field at NaN — see *`Eq` and `Ord` on `Double`*. |
 | `Ord` | all ADT shapes | `compare(left, right)` — nested match; constructors compared by declaration index (first-declared is least); same-ctor pairs compare fields lexicographically via `match compare(l0, r0) with \| 0 -> ... \| c -> c` chains |
 | `ToString` | all ADT shapes | `to_string(value)` — renders as `"CtorName"` for nullary, `"CtorName(to_string(f0), ..., to_string(fN-1))"` for N-field. `CtorName` is the **source-form** name: `deriving` expands after the bundler has qualified declarations, so the name it sees is `main.Apple`, and it emits `Apple` (§8.5) |
 | `Enum` | **nullary-only ADTs** | `ordinal(v)` — `match v with` mapping each constructor to its 0-based declaration index; `from_ordinal(n)` — `if n == 0 then Just(Ctor0) else ... else Nothing`, the total-with-`Nothing` inverse |

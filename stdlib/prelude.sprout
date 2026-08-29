@@ -998,6 +998,34 @@ instance Eq Char
   # O(1). A Char is an immediate i64 codepoint; == is an integer compare.
   fn eq(left: Char, right: Char) -> Bool = left == right
 
+# NaN test. `==` on Double lowers to an ORDERED compare (`fcmp oeq`), which is
+# false when either side is NaN, so `!(x == x)` holds exactly for NaN. Duplicated
+# from `stdlib.math.is_nan` rather than imported: the prelude is bundled into
+# every program and cannot import a module that imports it.
+fn double_is_nan(x: Double) -> Bool = ! (x == x)
+
+# The only primitive Eq instance that is not `left == right`, and the difference
+# is the whole design (docs/eq-ord-double-v0.md).
+#
+# Sprout has two orderings on Double and they are separate code paths. The `==`
+# and `<` OPERATORS are lowered straight to IEEE `fcmp` by the typechecker
+# (`infer.check_eq` short-circuits on `is_primitive_eq_type`, which lists Double;
+# `check_compare` has no class fallback) and never reach this instance. What
+# reaches it is the CLASS: `deriving`, `member`, `minimum`, `vec_sort`, Dict keys.
+#
+# So the operators keep IEEE semantics and the class gets a TOTAL order, because
+# `compare : Int` has no third answer to return for an unordered pair. That is
+# Java's split (`==` vs `Double.compareTo`) and Julia's (`<` vs `isless`), not
+# Haskell's, whose single `Ord Double` is non-lawful at NaN.
+#
+# The rule that decides every case: the class agrees with the operator wherever
+# the operator gives an answer, and fills in only the hole IEEE leaves. Hence
+# `-0.0` and `+0.0` are equal here (`==` says so), and only NaN is special.
+instance Eq Double
+  fn eq(left: Double, right: Double) -> Bool =
+    if left == right then true
+    else double_is_nan(left) && double_is_nan(right)
+
 instance Eq (Maybe a) where Eq a
   fn eq(left: Maybe a, right: Maybe a) -> Bool =
     match left with
@@ -1119,6 +1147,23 @@ instance Ord Bool
 instance Ord String
   fn compare(left: String, right: String) -> Int =
     str_compare(left, right)
+
+# Total, per the `Eq Double` note above. NaN equals itself and sorts ABOVE every
+# number, `inf` included — Java's `Double.compareTo` and Julia's `isless` both
+# place it there, against OCaml's `Float.compare`, which places it below. The
+# practical reason to follow Java: `minimum` is the more common query, and this
+# keeps it returning a real number when one NaN contaminates the input rather
+# than returning the contamination. It also means `vec_sort` puts NaN last.
+#
+# The final `else` is reached only when neither `<`, `>`, nor `==` held, which
+# for Double means at least one side is NaN.
+instance Ord Double
+  fn compare(left: Double, right: Double) -> Int =
+    if left < right then -1
+    else if left > right then 1
+    else if left == right then 0
+    else if double_is_nan(left) then (if double_is_nan(right) then 0 else 1)
+    else -1
 
 # Ord for tuples (arities 2-5): lexicographic, short-circuiting on the first
 # unequal component (mirrors the chain `deriving (Ord)` emits).

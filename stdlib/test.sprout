@@ -100,12 +100,15 @@ export fn summary(state: TestState) -> Unit !{IO} =
 #       check_approx("sqrt(2)", sqrt(2.0), 1.41421, 0.0001),
 #     ])
 #
-# `check_eq` does not type-check on `Double`: it needs an `Eq Double` instance (its `eq`
-# call goes through the `Eq` typeclass, unlike the `==` operator, which on `Double` is a
-# built-in primitive comparison), and no `Eq Double` instance exists — a `check_eq` on
-# Double fails with "No instance of Eq for Double". Use `check_approx` / `check_approx2`
-# for floating-point and 2D `(x, z)` checks: they compare with `-`/`<` directly, carry a
-# tolerance (exact float equality is wrong for computed values anyway), and diagnose.
+# `check_eq` works on `Double` (an `Eq Double` instance landed with
+# docs/eq-ord-double-v0.md), but it asserts EXACT equality, so it is right only for values
+# you expect bit-for-bit — a literal, a table lookup, an endpoint. Use `check_approx` /
+# `check_approx2` for anything computed: they carry an explicit tolerance, which is what a
+# float assertion needs regardless of whether an `Eq` instance exists.
+#
+# One difference to know: `check_eq` goes through the `Eq` class, whose `Double` instance is
+# TOTAL, while the `==` operator is IEEE. So `check_eq("", nan, nan)` PASSES where
+# `nan == nan` is false. That is the intended split, not a leak.
 #
 # Use the effectful TestState API above only when producing the actual value
 # needs IO (e.g. a Ref-backed capture sink, channels) — those cases can't be a
@@ -128,13 +131,13 @@ export fn check_true(label: String, condition: Bool) -> TestCase =
 export fn check_false(label: String, condition: Bool) -> TestCase =
   TestCase(label, condition == false, "expected false, got true")
 
-# Float sibling of check_eq: passes when |actual - expected| < eps. check_eq can't be used
-# on Double — its `eq` goes through the `Eq` typeclass, which has no `Double` instance (the
-# `==` operator on Double is a built-in primitive, not that typeclass), so it fails to
-# compile with "No instance of Eq for Double"; and exact float equality would be wrong for
-# computed values anyway. check_approx compares with the `-`/`<` operators directly and
-# renders the message via the monomorphic ToString Double instance. eps is explicit at the
-# call site — the visible tolerance is part of the test.
+# Float sibling of check_eq: passes when |actual - expected| < eps. check_eq does compile on
+# Double now, but it asserts exact equality, which is the wrong assertion for a computed
+# value — reach for this instead whenever the expected value came out of arithmetic.
+# check_approx compares with the `-`/`<` operators directly, so it is IEEE throughout: a NaN
+# actual FAILS here (every comparison against NaN is false), where check_eq's total `Eq`
+# instance would pass it against an expected NaN. eps is explicit at the call site — the
+# visible tolerance is part of the test.
 export fn check_approx(label: String, actual: Double, expected: Double, eps: Double) -> TestCase =
   if abs(actual - expected) < eps then TestCase(label, true, "")
   else TestCase(label, false,

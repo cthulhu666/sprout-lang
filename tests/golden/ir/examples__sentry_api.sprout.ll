@@ -7597,6 +7597,16 @@ entry:
   ret i64 %t$5
 }
 
+define i64 @double_is_nan(i64 %x) {
+entry:
+  %t$0$fa = bitcast i64 %x to double
+  %t$0$fb = bitcast i64 %x to double
+  %t$0 = fcmp oeq double %t$0$fa, %t$0$fb
+  %t$1 = zext i1 %t$0 to i64
+  %t$2 = xor i64 %t$1, 1
+  ret i64 %t$2
+}
+
 define i64 @list_eq(i64 %left$in, i64 %right$in, i64 %__tc_Eq_0_eq$in) {
 entry:
   %t$34 = alloca i64
@@ -20485,6 +20495,35 @@ entry:
   ret i64 %t$1
 }
 
+define i64 @__tc_Eq_Double_eq(i64 %left, i64 %right) {
+entry:
+  %t$0$fa = bitcast i64 %left to double
+  %t$0$fb = bitcast i64 %right to double
+  %t$0 = fcmp oeq double %t$0$fa, %t$0$fb
+  %t$1 = zext i1 %t$0 to i64
+  %t$11 = trunc i64 %t$1 to i1
+  br i1 %t$11, label %then_2, label %else_2
+then_2:
+  %t$4 = add i64 0, 1
+  br label %join_2
+else_2:
+  %t$5 = call i64 @double_is_nan(i64 %left)
+  %t$10 = trunc i64 %t$5 to i1
+  br i1 %t$10, label %then_6, label %else_6
+then_6:
+  %t$8 = call i64 @double_is_nan(i64 %right)
+  br label %join_6
+else_6:
+  %t$9 = add i64 0, 0
+  br label %join_6
+join_6:
+  %t$7 = phi i64 [%t$8, %then_6], [%t$9, %else_6]
+  br label %join_2
+join_2:
+  %t$3 = phi i64 [%t$4, %then_2], [%t$7, %join_6]
+  ret i64 %t$3
+}
+
 define i64 @__tc_Eq_Maybe_a_eq(i64 %left, i64 %right, i64 %__tc_Eq_0_eq) {
 entry:
   %t$0 = call i64 @sprout_tag(i64 %left)
@@ -21499,6 +21538,73 @@ entry:
   %t$0 = call i64 @str_compare(i64 %left, i64 %right)
   %t$5 = call i64 @sprout_gc_pop_roots(i64 2)
   ret i64 %t$0
+}
+
+define i64 @__tc_Ord_Double_compare(i64 %left, i64 %right) {
+entry:
+  %t$0$fa = bitcast i64 %left to double
+  %t$0$fb = bitcast i64 %right to double
+  %t$0 = fcmp olt double %t$0$fa, %t$0$fb
+  %t$1 = zext i1 %t$0 to i64
+  %t$30 = trunc i64 %t$1 to i1
+  br i1 %t$30, label %then_2, label %else_2
+then_2:
+  %t$4 = add i64 0, 1
+  %t$5 = sub i64 0, %t$4
+  br label %join_2
+else_2:
+  %t$6$fa = bitcast i64 %left to double
+  %t$6$fb = bitcast i64 %right to double
+  %t$6 = fcmp ogt double %t$6$fa, %t$6$fb
+  %t$7 = zext i1 %t$6 to i64
+  %t$29 = trunc i64 %t$7 to i1
+  br i1 %t$29, label %then_8, label %else_8
+then_8:
+  %t$10 = add i64 0, 1
+  br label %join_8
+else_8:
+  %t$11$fa = bitcast i64 %left to double
+  %t$11$fb = bitcast i64 %right to double
+  %t$11 = fcmp oeq double %t$11$fa, %t$11$fb
+  %t$12 = zext i1 %t$11 to i64
+  %t$28 = trunc i64 %t$12 to i1
+  br i1 %t$28, label %then_13, label %else_13
+then_13:
+  %t$15 = add i64 0, 0
+  br label %join_13
+else_13:
+  %t$16 = call i64 @double_is_nan(i64 %left)
+  %t$27 = trunc i64 %t$16 to i1
+  br i1 %t$27, label %then_17, label %else_17
+then_17:
+  %t$19 = call i64 @double_is_nan(i64 %right)
+  %t$24 = trunc i64 %t$19 to i1
+  br i1 %t$24, label %then_20, label %else_20
+then_20:
+  %t$22 = add i64 0, 0
+  br label %join_20
+else_20:
+  %t$23 = add i64 0, 1
+  br label %join_20
+join_20:
+  %t$21 = phi i64 [%t$22, %then_20], [%t$23, %else_20]
+  br label %join_17
+else_17:
+  %t$25 = add i64 0, 1
+  %t$26 = sub i64 0, %t$25
+  br label %join_17
+join_17:
+  %t$18 = phi i64 [%t$21, %join_20], [%t$26, %else_17]
+  br label %join_13
+join_13:
+  %t$14 = phi i64 [%t$15, %then_13], [%t$18, %join_17]
+  br label %join_8
+join_8:
+  %t$9 = phi i64 [%t$10, %then_8], [%t$14, %join_13]
+  br label %join_2
+join_2:
+  %t$3 = phi i64 [%t$5, %then_2], [%t$9, %join_8]
+  ret i64 %t$3
 }
 
 define i64 @__tc_Ord_Tuple_a_b_compare(i64 %left, i64 %right, i64 %__tc_Ord_0_compare, i64 %__tc_Eq_0_eq, i64 %__tc_Ord_1_compare, i64 %__tc_Eq_1_eq) {
