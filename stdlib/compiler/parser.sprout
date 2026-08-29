@@ -1,5 +1,4 @@
 module stdlib.compiler.parser
-import stdlib.collections (Vec, vec_get, vec_length, vec_slice)
 import stdlib.string as string
 import stdlib.compiler.token as token
 import stdlib.compiler.source as source

@@ -1,5 +1,4 @@
 module examples.foldable_demo
-import stdlib.collections (Foldable, List, Vec, vec_length, foldable_to_vec)
 
 fn list_sample() -> List Int =
   [1, 2, 3]

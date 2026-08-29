@@ -5,7 +5,6 @@ import stdlib.compiler.parser as parser
 import stdlib.compiler.lexer as lexer
 import stdlib.compiler.bundler as bundler
 import stdlib.compiler.token as token
-import stdlib.collections (Vec)
 
 # ONE AUTHORITY FOR "WHAT DOES THIS MODULE PUBLISH".
 #

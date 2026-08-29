@@ -1,5 +1,5 @@
 module stdlib.http_client
-import stdlib.http (Result, HttpError, HttpResponse)
+import stdlib.http (HttpError, HttpResponse)
 
 extern fn http_request(method: String, url: String, headers: String, body: String, timeout_ms: Int) -> Result HttpError HttpResponse !{IO}
 

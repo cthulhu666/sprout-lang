@@ -12516,20 +12516,6 @@ entry:
   ret i64 %t$1
 }
 
-define i64 @stdlib.collections.vec_singleton(i64 %value) {
-entry:
-  %t$2 = alloca i64
-  store i64 %value, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$0 = call i64 @vec_empty()
-  %t$4 = alloca i64
-  store i64 %t$0, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$1 = call i64 @vec_append(i64 %value, i64 %t$0)
-  %t$6 = call i64 @sprout_gc_pop_roots(i64 2)
-  ret i64 %t$1
-}
-
 define i64 @stdlib.string.words(i64 %raw) {
 entry:
   %t$1 = alloca i64

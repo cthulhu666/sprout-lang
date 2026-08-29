@@ -1,5 +1,4 @@
 import stdlib.test (check_eq, run_suite)
-import stdlib.collections (Foldable, List, Vec, vec_length, foldable_to_vec)
 
 # Mixed-constraint dispatch guard for the §13.3(B) S3 flip: an externally-called
 # constrained fn whose `where` clause mixes a TYVAR constraint (Label a, a

@@ -1,0 +1,7 @@
+module other.dup_one
+
+# Fixture for tests/stdlib/compiler/test_import_diagnostics.spr: shares its LAST
+# module-name segment with demo.dup_one, so importing both whole binds the module
+# prefix `dup_one` twice.
+export fn other_value() -> Int =
+  3

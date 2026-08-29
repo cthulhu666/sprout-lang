@@ -4,7 +4,6 @@ import stdlib.test (TestState, new_state, assert_true, summary)
 import stdlib.repl as repl
 import stdlib.fs as fs
 import stdlib.env as env
-import stdlib.collections (Vec, vec_length)
 import stdlib.process as process
 import stdlib.string as string
 

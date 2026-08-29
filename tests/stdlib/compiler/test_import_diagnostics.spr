@@ -1,0 +1,179 @@
+module main
+
+import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
+import stdlib.compiler.bundler as bundler
+import stdlib.compiler.source as source
+import stdlib.string as string
+import stdlib.env as env
+
+# Two ways an import used to fail in silence, both in `apply_selective_name`:
+#
+#   1. A name the module does not export bound nothing and said nothing, so a
+#      stale import line survived every rename of the thing it named.
+#   2. Two imports binding one unqualified name kept the LAST one, so which
+#      symbol a bare name meant depended on import order, and the only symptom
+#      was a type error somewhere else naming neither import.
+#
+# Asserted on the bundle rather than on emitted IR: both checks run in
+# `make_bundle_or_err`, and a bundle is the smallest thing that has the module
+# symbol tables they read.
+
+fn package_root() -> String =
+  "tests/conformance/package_resolution/roots"
+
+# The bundle error message for `src` as the entry file, or "" when it bundled
+# cleanly. Every case asserts on the message, so "bundled fine" and "rejected
+# for the wrong reason" stay distinguishable.
+fn bundle_msg(src: String, root: String) -> String !{IO} =
+  do
+    load_env <- bundler.new_load_env()
+    result <- bundler.bundle_source_with_roots(src, "/tmp/sprout_import_diag.spr",
+      source.StdlibRoot(root), [package_root()], load_env)
+    match result with
+    | bundler.BundleErr _ msg -> msg
+    | bundler.BundleOk _ -> ""
+
+fn valid_import() -> String =
+  `module entry
+import demo.dup_one (OneBox, JustOne, one_value)
+
+fn use_it() -> Int = one_value()
+`
+
+fn unexported_name() -> String =
+  `module entry
+import demo.dup_one (nope)
+
+fn use_it() -> Int = 1
+`
+
+fn declared_but_not_exported() -> String =
+  `module entry
+import demo.dup_one (hidden_helper)
+
+fn use_it() -> Int = 1
+`
+
+fn same_ctor_from_two_modules() -> String =
+  `module entry
+import demo.dup_one (Dup)
+import demo.dup_two (Dup)
+
+fn use_it() -> Int = 1
+`
+
+fn ctor_collision_via_type_imports() -> String =
+  `module entry
+import demo.dup_one (OneBox)
+import demo.dup_two (TwoBox)
+
+fn use_it() -> Int = 1
+`
+
+fn same_name_from_one_module_twice() -> String =
+  `module entry
+import demo.dup_one (Dup)
+import demo.dup_one (Dup, JustOne)
+
+fn use_it() -> Int = 1
+`
+
+fn colliding_module_prefix() -> String =
+  `module entry
+import demo.dup_one
+import other.dup_one
+
+fn use_it() -> Int = 1
+`
+
+fn aliased_module_prefix() -> String =
+  `module entry
+import demo.dup_one
+import other.dup_one as other_one
+
+fn use_it() -> Int = 1
+`
+
+# The adjacent-legitimate case for the collision rule, and the one spelling no
+# file in the tree uses — so the corpus says nothing about it. `vec_singleton` is
+# exported by stdlib.collections AND declared in the prelude, which is exactly
+# the shape a rule computed against prelude names instead of against the other
+# imports would reject.
+fn name_the_prelude_also_declares() -> String =
+  `module entry
+import stdlib.collections (vec_singleton)
+
+fn use_it() -> Int = vec_length(vec_singleton(7))
+`
+
+# An extern is never in a module's exported set at all (spec-v0 §"Externs are
+# outside the module system"), and `str_byte_len` is not even written `export`.
+# Listing it is still how its module gets bundled, so it has to be accepted —
+# rejecting it would advise adding `export`, which the parser discards.
+fn extern_imported_by_name() -> String =
+  `module entry
+import stdlib.string (str_byte_len)
+
+fn use_it() -> Int = str_byte_len("hi")
+`
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    # A missing root FAILS rather than skips: without it every bundle below errors
+    # for a reason no assertion expects, and a skip would show a green suite that
+    # checked nothing.
+    match env.get("SPROUT_STDLIB_ROOT") with
+    | Nothing ->
+        assert_true(state, "SPROUT_STDLIB_ROOT is set (the suite cannot bundle without it)", false)
+    | Just root ->
+        do
+          # ── Control: the same fixtures, imported legally ──────────────────
+          ok <- bundle_msg(valid_import(), root)
+          assert_eq(state, "a valid selective import still bundles", ok, "")
+
+          # ── 1. A name the module does not export ──────────────────────────
+          missing <- bundle_msg(unexported_name(), root)
+          assert_true(state, "an unexported name is rejected, not ignored",
+            string.contains(missing, "nope"))
+          assert_true(state, "the rejection names the module it was imported from",
+            string.contains(missing, "demo.dup_one"))
+
+          hidden <- bundle_msg(declared_but_not_exported(), root)
+          assert_true(state, "a declared-but-unexported name says so",
+            string.contains(hidden, "not exported"))
+
+          # ── 2. One unqualified name bound twice ───────────────────────────
+          dup_ctor <- bundle_msg(same_ctor_from_two_modules(), root)
+          assert_true(state, "the same ctor name from two modules is rejected",
+            string.contains(dup_ctor, "Dup"))
+          assert_true(state, "the collision names both symbols",
+            string.contains(dup_ctor, "demo.dup_two.Dup"))
+
+          # The ctors arrive through `(..)` on the TYPE import, so neither import
+          # line mentions the name that collides.
+          dup_type <- bundle_msg(ctor_collision_via_type_imports(), root)
+          assert_true(state, "ctors brought in by two (..) type imports collide too",
+            string.contains(dup_type, "Dup"))
+
+          # Same symbol by two routes is not a collision — nothing is ambiguous.
+          twice <- bundle_msg(same_name_from_one_module_twice(), root)
+          assert_eq(state, "importing one name twice from one module is fine", twice, "")
+
+          # ── 3. Two modules sharing a prefix ───────────────────────────────
+          prefix <- bundle_msg(colliding_module_prefix(), root)
+          assert_true(state, "two modules binding one prefix are rejected",
+            string.contains(prefix, "dup_one"))
+
+          aliased <- bundle_msg(aliased_module_prefix(), root)
+          assert_eq(state, "an explicit alias resolves the prefix collision", aliased, "")
+
+          # The prelude is not an import, and its names are not import bindings,
+          # so it can never be the other half of a collision.
+          shadowing <- bundle_msg(name_the_prelude_also_declares(), root)
+          assert_eq(state, "importing a name the prelude also declares is fine", shadowing, "")
+
+          ext <- bundle_msg(extern_imported_by_name(), root)
+          assert_eq(state, "importing an extern by name is accepted", ext, "")
+
+    summary(state)

@@ -93,6 +93,28 @@ comment does not extend the list. Import lists get long — a real module carrie
 over a hundred imports, several past 200 columns — and requiring one line made
 them unformattable.
 
+An aliased import binds the module name's **last segment** as its prefix, so
+`import demo.a.b` is reached as `b.<name>`; `as` overrides that.
+
+**Every listed name must be exported by the module it is listed under.** A name
+that module does not export — including one it declares without `export` — is
+rejected, naming both. The two cases are worded differently because the fix
+differs: a declared-but-unexported name says so, and points at the declaration.
+
+**One unqualified name is bound at most once per file.** Two imports that bind
+the same name to two different symbols are rejected; binding the *same* symbol
+twice is not an error, so listing a name twice, or reaching it by two routes,
+stays legal. The rule covers names that appear in no import list: a `(..)` type
+import brings the type's constructors with it, so importing two types whose
+constructors share a name collides. Two whole-module imports sharing a prefix
+collide the same way — `import demo.a` beside `import other.a` — and `as`
+resolves it.
+
+Both rules exist because the failure was silent. An unexported name bound
+nothing, so an import line outlived the declaration it named; and a name bound
+twice kept the last binding, so which symbol a bare name meant depended on import
+order, with the only symptom a type error elsewhere naming neither import.
+
 ### 3.1 Prelude scope
 
 **The prelude is available in every file, unconditionally.** Its declarations are

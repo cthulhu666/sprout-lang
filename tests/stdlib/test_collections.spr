@@ -1,5 +1,4 @@
 import stdlib.test (check_eq, check_true, check_false, run_suite)
-import stdlib.collections (Vec, Dict, foldable_to_vec, vec_get_or, vec_reverse, vec_slice, vec_sum_by, dict_keys, dict_values, dict_remove, dict_get, dict_set, dict_from_list)
 
 fn main() -> Unit !{IO} =
   let v = foldable_to_vec([10, 20, 30, 40])

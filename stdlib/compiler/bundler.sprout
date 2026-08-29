@@ -79,12 +79,33 @@ type ParsedModule =
 # Per-module name tables.
 #   ModuleSymbols value_locals type_locals class_locals
 #                 exported_vals exported_types exported_cls
-#                 method_names ctor_exports
+#                 method_names ctor_exports extern_names
+#
+# `extern_names` is for DIAGNOSTICS only, and is the one entry that is not a
+# resolution binding: an extern is ScopeGlobal, so it resolves by bare name
+# wherever its module is bundled and never lands in a name map. Listing one in an
+# import is still meaningful — it is what bundles the module — so the import
+# checks have to know the name exists.
 type ModuleSymbols =
   | ModuleSymbols
       (Dict String) (Dict String) (Dict String)
       (Dict String) (Dict String) (Dict String)
-      (List String) (Dict (Dict String))
+      (List String) (Dict (Dict String)) (List String)
+
+# What one import binds, in one namespace.
+#
+#   ImportBinding ns name target
+#
+# The namespace is what keeps a type and a value of the same name from reading as
+# a conflict: `wrap Foo` legitimately binds both.
+type ImportNs =
+  | NsValue  # unqual_values — exported values, and the ctors an `(..)` type brings
+  | NsType  # unqual_types
+  | NsClass  # unqual_classes
+  | NsPrefix  # a whole-module import's prefix; `target` is the module name
+
+type ImportBinding =
+  | ImportBinding ImportNs String String
 
 # Name-resolution context for qualifying one module's declarations.
 #   ResolveCtx value_locals type_locals class_locals
@@ -103,28 +124,31 @@ type ResolveCtx =
 # ---------------------------------------------------------------------------
 
 fn sym_value_locals(s: ModuleSymbols) -> Dict String =
-  match s with | ModuleSymbols v _ _ _ _ _ _ _ -> v
+  match s with | ModuleSymbols v _ _ _ _ _ _ _ _ -> v
 
 fn sym_type_locals(s: ModuleSymbols) -> Dict String =
-  match s with | ModuleSymbols _ t _ _ _ _ _ _ -> t
+  match s with | ModuleSymbols _ t _ _ _ _ _ _ _ -> t
 
 fn sym_class_locals(s: ModuleSymbols) -> Dict String =
-  match s with | ModuleSymbols _ _ c _ _ _ _ _ -> c
+  match s with | ModuleSymbols _ _ c _ _ _ _ _ _ -> c
 
 fn sym_exported_vals(s: ModuleSymbols) -> Dict String =
-  match s with | ModuleSymbols _ _ _ ev _ _ _ _ -> ev
+  match s with | ModuleSymbols _ _ _ ev _ _ _ _ _ -> ev
 
 fn sym_exported_types(s: ModuleSymbols) -> Dict String =
-  match s with | ModuleSymbols _ _ _ _ et _ _ _ -> et
+  match s with | ModuleSymbols _ _ _ _ et _ _ _ _ -> et
 
 fn sym_exported_cls(s: ModuleSymbols) -> Dict String =
-  match s with | ModuleSymbols _ _ _ _ _ ec _ _ -> ec
+  match s with | ModuleSymbols _ _ _ _ _ ec _ _ _ -> ec
 
 fn sym_method_names(s: ModuleSymbols) -> List String =
-  match s with | ModuleSymbols _ _ _ _ _ _ mn _ -> mn
+  match s with | ModuleSymbols _ _ _ _ _ _ mn _ _ -> mn
 
 fn sym_ctor_exports(s: ModuleSymbols) -> Dict (Dict String) =
-  match s with | ModuleSymbols _ _ _ _ _ _ _ ce -> ce
+  match s with | ModuleSymbols _ _ _ _ _ _ _ ce _ -> ce
+
+fn sym_extern_names(s: ModuleSymbols) -> List String =
+  match s with | ModuleSymbols _ _ _ _ _ _ _ _ xs -> xs
 
 # ---------------------------------------------------------------------------
 # ResolveCtx accessors
@@ -787,7 +811,7 @@ fn build_module_symbols(mod_name: String, exported: List String, ctor_types: Lis
   build_symbols_from_decls(mod_name, exported, ctor_types, decls,
     ModuleSymbols(dict_empty(), dict_empty(), dict_empty(),
                   dict_empty(), dict_empty(), dict_empty(),
-                  Nil, dict_empty()))
+                  Nil, dict_empty(), Nil))
 
 fn build_symbols_from_decls(mod_name: String, exported: List String, ctor_types: List String, decls: List ast.Decl, acc: ModuleSymbols) -> ModuleSymbols =
   match decls with
@@ -822,8 +846,17 @@ fn add_decl_to_symbols(mod_name: String, exported: List String, ctor_types: List
   # scope_names_module returns nothing to record. The env path excludes it from
   # program_module_value_names by the same call, which is what keeps the two front
   # ends from spelling an extern two different ways.
-  | ast.ExternFnDecl _ _ _ _ _ ->
-      add_scoped_values(mod_name, exported, decl, acc)
+  #
+  # The NAME is still recorded, in extern_names — listing an extern in an import
+  # is how its module gets bundled, so the import checks must not read it as a
+  # name the module does not have.
+  | ast.ExternFnDecl name _ _ _ _ ->
+      add_extern_name(name, add_scoped_values(mod_name, exported, decl, acc))
+
+fn add_extern_name(name: String, acc: ModuleSymbols) -> ModuleSymbols =
+  match acc with
+  | ModuleSymbols vl tl cl ev et ec mn ce xs ->
+      ModuleSymbols(vl, tl, cl, ev, et, ec, mn, ce, Cons(name, xs))
 
 # Register every module-scoped value name a declaration introduces.
 fn add_scoped_values(mod_name: String, exported: List String, decl: ast.Decl, acc: ModuleSymbols) -> ModuleSymbols =
@@ -838,26 +871,26 @@ fn add_value_names(mod_name: String, exported: List String, names: List String, 
 
 fn add_value_to_symbols(mod_name: String, name: String, is_exported: Bool, acc: ModuleSymbols) -> ModuleSymbols =
   match acc with
-  | ModuleSymbols vl tl cl ev et ec mn ce ->
+  | ModuleSymbols vl tl cl ev et ec mn ce xs ->
       ModuleSymbols(dict_set(name, canonical, vl), tl, cl,
                     if is_exported then dict_set(name, canonical, ev) else ev,
-                    et, ec, mn, ce)
+                    et, ec, mn, ce, xs)
   where canonical = source.qualified_name_str(qualified_name(source.ModuleName(mod_name), source.RawName(name)))
 
 fn add_record_to_symbols(mod_name: String, name: String, is_exported: Bool, acc: ModuleSymbols) -> ModuleSymbols =
   match acc with
-  | ModuleSymbols vl tl cl ev et ec mn ce ->
+  | ModuleSymbols vl tl cl ev et ec mn ce xs ->
       ModuleSymbols(vl, dict_set(name, canonical, tl), cl, ev,
                     if is_exported then dict_set(name, canonical, et) else et,
-                    ec, mn, ce)
+                    ec, mn, ce, xs)
   where canonical = source.qualified_name_str(qualified_name(source.ModuleName(mod_name), source.RawName(name)))
 
 fn add_class_to_symbols(mod_name: String, name: String, methods: List ast.ClassMethodSig, is_exported: Bool, acc: ModuleSymbols) -> ModuleSymbols =
   match acc with
-  | ModuleSymbols vl tl cl ev et ec mn ce ->
+  | ModuleSymbols vl tl cl ev et ec mn ce xs ->
       ModuleSymbols(vl, tl, dict_set(name, canonical, cl), ev, et,
                     if is_exported then dict_set(name, canonical, ec) else ec,
-                    list_append(mn, extract_method_names(methods)), ce)
+                    list_append(mn, extract_method_names(methods)), ce, xs)
   where canonical = source.qualified_name_str(qualified_name(source.ModuleName(mod_name), source.RawName(name)))
 
 fn extract_method_names(methods: List ast.ClassMethodSig) -> List String =
@@ -869,7 +902,7 @@ fn extract_method_names(methods: List ast.ClassMethodSig) -> List String =
 
 fn add_type_to_symbols(mod_name: String, type_name: String, ctors: List ast.TypeConstructor, exported: List String, ctor_types: List String, acc: ModuleSymbols) -> ModuleSymbols =
   match acc with
-  | ModuleSymbols vl tl cl ev et ec mn ce ->
+  | ModuleSymbols vl tl cl ev et ec mn ce xs ->
       match add_ctors(mod_name, ctors, export_ctors, vl, ev, dict_empty()) with
       | (new_vl, new_ev, ctor_map) ->
           ModuleSymbols(new_vl,
@@ -878,7 +911,8 @@ fn add_type_to_symbols(mod_name: String, type_name: String, ctors: List ast.Type
                         new_ev,
                         if is_type_exported then dict_set(type_name, canonical, et) else et,
                         ec, mn,
-                        if export_ctors then dict_set(type_name, ctor_map, ce) else ce)
+                        if export_ctors then dict_set(type_name, ctor_map, ce) else ce,
+                        xs)
   where canonical = source.qualified_name_str(qualified_name(source.ModuleName(mod_name), source.RawName(type_name)))
         is_type_exported = str_list_member(type_name, exported)
         export_ctors = str_list_member(type_name, ctor_types)
@@ -953,42 +987,234 @@ fn apply_selective_names(names: List String, symbols: ModuleSymbols, ctx: Resolv
 
 fn apply_selective_name(name: String, symbols: ModuleSymbols, ctx: ResolveCtx) -> ResolveCtx =
   try_add_method(name, symbols,
-    try_add_class(name, symbols,
-      try_add_type_with_ctors(name, symbols,
-        try_add_value(name, symbols, ctx))))
+    apply_import_bindings(selective_name_bindings(name, symbols), ctx))
 
-fn try_add_value(name: String, symbols: ModuleSymbols, ctx: ResolveCtx) -> ResolveCtx =
+# Every binding one selective import name contributes. Single source of truth:
+# resolution applies exactly this list and the import diagnostics below check it,
+# so the two cannot drift about what a name means.
+fn selective_name_bindings(name: String, symbols: ModuleSymbols) -> List ImportBinding =
+  list_append(value_binding(name, symbols),
+    list_append(type_bindings(name, symbols), class_binding(name, symbols)))
+
+fn value_binding(name: String, symbols: ModuleSymbols) -> List ImportBinding =
   match dict_get(name, sym_exported_vals(symbols)) with
-  | Nothing -> ctx
-  | Just canonical -> ctx_with_unqual_value(ctx, name, canonical)
+  | Nothing -> Nil
+  | Just canonical -> [ImportBinding (NsValue, name, canonical)]
 
-fn try_add_type_with_ctors(name: String, symbols: ModuleSymbols, ctx: ResolveCtx) -> ResolveCtx =
+# A type import carries its constructors when the type was exported `(..)`, which
+# is why a name that appears in no import list can still collide.
+fn type_bindings(name: String, symbols: ModuleSymbols) -> List ImportBinding =
   match dict_get(name, sym_exported_types(symbols)) with
-  | Nothing -> ctx
+  | Nothing -> Nil
   | Just canonical ->
-      match dict_get(name, sym_ctor_exports(symbols)) with
-      | Nothing -> ctx_with_unqual_type(ctx, name, canonical)
-      | Just ctor_map ->
-          add_ctor_map_to_ctx(ctor_map, dict_keys_list(ctor_map),
-            ctx_with_unqual_type(ctx, name, canonical))
+      Cons(ImportBinding (NsType, name, canonical),
+        match dict_get(name, sym_ctor_exports(symbols)) with
+        | Nothing -> Nil
+        | Just ctor_map -> ctor_bindings(ctor_map, dict_keys_list(ctor_map)))
 
-fn add_ctor_map_to_ctx(ctor_map: Dict String, ctor_names: List String, ctx: ResolveCtx) -> ResolveCtx =
+fn ctor_bindings(ctor_map: Dict String, ctor_names: List String) -> List ImportBinding =
   match ctor_names with
-  | Nil -> ctx
+  | Nil -> Nil
   | Cons ctor_name rest ->
       match dict_get(ctor_name, ctor_map) with
-      | Nothing -> add_ctor_map_to_ctx(ctor_map, rest, ctx)
-      | Just canonical -> add_ctor_map_to_ctx(ctor_map, rest, ctx_with_unqual_value(ctx, ctor_name, canonical))
+      | Nothing -> ctor_bindings(ctor_map, rest)
+      | Just canonical ->
+          Cons(ImportBinding (NsValue, ctor_name, canonical), ctor_bindings(ctor_map, rest))
 
-fn try_add_class(name: String, symbols: ModuleSymbols, ctx: ResolveCtx) -> ResolveCtx =
+fn class_binding(name: String, symbols: ModuleSymbols) -> List ImportBinding =
   match dict_get(name, sym_exported_cls(symbols)) with
-  | Nothing -> ctx
-  | Just canonical -> ctx_with_unqual_class(ctx, name, canonical)
+  | Nothing -> Nil
+  | Just canonical -> [ImportBinding (NsClass, name, canonical)]
+
+fn apply_import_bindings(bindings: List ImportBinding, ctx: ResolveCtx) -> ResolveCtx =
+  match bindings with
+  | Nil -> ctx
+  | Cons b rest -> apply_import_bindings(rest, apply_import_binding(b, ctx))
+
+# NsPrefix never reaches here: a whole-module import binds an alias map rather
+# than a name, and apply_one_import applies that itself.
+fn apply_import_binding(b: ImportBinding, ctx: ResolveCtx) -> ResolveCtx =
+  match b with
+  | ImportBinding NsValue name target -> ctx_with_unqual_value(ctx, name, target)
+  | ImportBinding NsType name target -> ctx_with_unqual_type(ctx, name, target)
+  | ImportBinding NsClass name target -> ctx_with_unqual_class(ctx, name, target)
+  | ImportBinding NsPrefix _ _ -> ctx
 
 fn try_add_method(name: String, symbols: ModuleSymbols, ctx: ResolveCtx) -> ResolveCtx =
   if str_list_member(name, sym_method_names(symbols)) then
     ctx_with_methods(ctx, Cons(name, Nil))
   else ctx
+
+# ---------------------------------------------------------------------------
+# Import diagnostics
+# ---------------------------------------------------------------------------
+#
+# Applying an import is a fold that can only return a context, so neither of the
+# two ways an import goes wrong could be reported from inside it, and both were
+# silent:
+#
+#   1. A name the module does not export bound nothing. The import line survived
+#      every rename of the thing it named, and the file kept compiling because
+#      some other import happened to supply the name.
+#   2. Two imports binding one unqualified name kept the last. Which symbol a
+#      bare name meant depended on import ORDER, and the only symptom was a type
+#      error elsewhere naming neither import.
+#
+# Both are checked here instead, over the bindings resolution actually makes, so
+# a name that arrives through `(..)` on a type import is covered like any other.
+
+fn spec_symbols(spec: module_loader.ImportSpec, all_symbols: Dict ModuleSymbols,
+                stdlib_root: String, extra_roots: List String) -> Maybe ModuleSymbols =
+  match spec_to_path(spec, stdlib_root, extra_roots) with
+  | Nothing -> Nothing
+  | Just mod_path -> dict_get(mod_path, all_symbols)
+
+fn spec_bindings(spec: module_loader.ImportSpec, all_symbols: Dict ModuleSymbols,
+                 stdlib_root: String, extra_roots: List String) -> List ImportBinding =
+  # An unresolvable module contributes nothing: collect_modules has already
+  # reported it, and a second message about the same line would only distract.
+  match spec_symbols(spec, all_symbols, stdlib_root, extra_roots) with
+  | Nothing -> Nil
+  | Just symbols ->
+      match spec with
+      | module_loader.ImportAlias mod_name alias -> [ImportBinding (NsPrefix, alias, mod_name)]
+      | module_loader.ImportSelective _ names -> selective_names_bindings(names, symbols)
+
+fn selective_names_bindings(names: List String, symbols: ModuleSymbols) -> List ImportBinding =
+  match names with
+  | Nil -> Nil
+  | Cons name rest ->
+      list_append(selective_name_bindings(name, symbols), selective_names_bindings(rest, symbols))
+
+fn all_import_bindings(specs: List module_loader.ImportSpec, all_symbols: Dict ModuleSymbols,
+                       stdlib_root: String, extra_roots: List String) -> List ImportBinding =
+  match specs with
+  | Nil -> Nil
+  | Cons spec rest ->
+      list_append(spec_bindings(spec, all_symbols, stdlib_root, extra_roots),
+        all_import_bindings(rest, all_symbols, stdlib_root, extra_roots))
+
+# The first (namespace, name) bound to two DIFFERENT symbols, with the symbol it
+# was already bound to. The same symbol twice is legal — importing one name by
+# two routes leaves nothing ambiguous.
+fn first_import_conflict(bindings: List ImportBinding, seen: Dict String) -> Maybe (ImportBinding, String) =
+  match bindings with
+  | Nil -> Nothing
+  | Cons b rest ->
+      match dict_get(binding_key(b), seen) with
+      | Just previous ->
+          if previous == binding_target(b) then first_import_conflict(rest, seen)
+          else Just((b, previous))
+      | Nothing ->
+          first_import_conflict(rest, dict_set(binding_key(b), binding_target(b), seen))
+
+fn binding_key(b: ImportBinding) -> String =
+  match b with | ImportBinding ns name _ -> ns_tag(ns) ++ " " ++ name
+
+fn binding_target(b: ImportBinding) -> String =
+  match b with | ImportBinding _ _ target -> target
+
+fn ns_tag(ns: ImportNs) -> String =
+  match ns with
+  | NsValue -> "value"
+  | NsType -> "type"
+  | NsClass -> "class"
+  | NsPrefix -> "prefix"
+
+# Two kinds of name bind nothing yet are legitimate to import, and both would
+# otherwise read as unknown: a class METHOD, which joins the method list, and an
+# EXTERN, which is global once its module is bundled — listing it is what bundles
+# the module.
+#
+# For an extern the exemption is FORCED, not a leniency. An extern "never enters a
+# module's exported set" (spec-v0 §"Externs are outside the module system"), and
+# `export` on one is a parsed-and-discarded no-op (parser.sprout:2227), so
+# "declared but not exported" is not a state an extern can be in. Rejecting one
+# would reach a message telling the reader to add `export`, which the parser then
+# discards — advice that cannot clear the diagnostic.
+#
+# extern_names holds this module's OWN extern declarations only, unlike
+# module_loader.sprout:305-308, where globals are marker-selected and a module
+# passes on the externs that reached it transitively. A name from an imported
+# module's imports is still unknown here.
+fn import_name_binds(name: String, symbols: ModuleSymbols) -> Bool =
+  match selective_name_bindings(name, symbols) with
+  | Nil ->
+      str_list_member(name, sym_method_names(symbols))
+        || str_list_member(name, sym_extern_names(symbols))
+  | [_ | _] -> true
+
+fn module_declares_name(name: String, symbols: ModuleSymbols) -> Bool =
+  has_key(name, sym_value_locals(symbols))
+    || has_key(name, sym_type_locals(symbols))
+    || has_key(name, sym_class_locals(symbols))
+
+fn has_key(name: String, d: Dict String) -> Bool =
+  match dict_get(name, d) with
+  | Nothing -> false
+  | Just _ -> true
+
+fn first_unbound_name(names: List String, symbols: ModuleSymbols) -> Maybe String =
+  match names with
+  | Nil -> Nothing
+  | Cons name rest ->
+      if import_name_binds(name, symbols) then first_unbound_name(rest, symbols)
+      else Just(name)
+
+# Declared-but-unexported is worth its own wording: the fix is in the OTHER file,
+# and "exports no such name" would send the reader looking for a typo instead.
+fn unknown_import_message(path: String, mod_name: String, name: String, symbols: ModuleSymbols) -> String =
+  if module_declares_name(name, symbols) then
+    `${path}: import ${mod_name} (${name}): \`${name}\` is declared in module \`${mod_name}\` but not exported — add \`export\` to its declaration, or \`(..)\` to its type's export if it is a constructor.`
+  else
+    `${path}: import ${mod_name} (${name}): module \`${mod_name}\` exports no \`${name}\`.`
+
+fn conflict_message(path: String, b: ImportBinding, previous: String) -> String =
+  match b with
+  | ImportBinding NsPrefix alias mod_name ->
+      `${path}: import ${mod_name}: the module prefix \`${alias}\` is already bound to \`${previous}\` in this file — import one of them under another name (\`import ${mod_name} as <alias>\`).`
+  | ImportBinding _ name target ->
+      `${path}: \`${name}\` is imported twice in this file, from two different symbols (\`${previous}\` and \`${target}\`) — a bare \`${name}\` would silently mean the last one. Import at most one, or import the modules whole and qualify.`
+
+# Nothing for a whole-module import (it lists no names) and for a module that did
+# not resolve, so the three guards read as one "or this spec has nothing to say".
+fn unknown_name_in_spec(spec: module_loader.ImportSpec, all_symbols: Dict ModuleSymbols,
+                        stdlib_root: String, extra_roots: List String, path: String) -> Maybe String =
+  let module_loader.ImportSelective mod_name names = spec else Nothing
+      Just symbols = spec_symbols(spec, all_symbols, stdlib_root, extra_roots) else Nothing
+      Just name = first_unbound_name(names, symbols) else Nothing
+  in Just(unknown_import_message(path, mod_name, name, symbols))
+
+fn first_unknown_import(specs: List module_loader.ImportSpec, all_symbols: Dict ModuleSymbols,
+                        stdlib_root: String, extra_roots: List String, path: String) -> Maybe String =
+  match specs with
+  | Nil -> Nothing
+  | Cons spec rest ->
+      match unknown_name_in_spec(spec, all_symbols, stdlib_root, extra_roots, path) with
+      | Just msg -> Just(msg)
+      | Nothing -> first_unknown_import(rest, all_symbols, stdlib_root, extra_roots, path)
+
+fn module_import_error(mod: ParsedModule, all_symbols: Dict ModuleSymbols,
+                       stdlib_root: String, extra_roots: List String) -> Maybe String =
+  match mod with
+  | ParsedModule _ path specs _ _ _ ->
+      match first_unknown_import(specs, all_symbols, stdlib_root, extra_roots, path) with
+      | Just msg -> Just(msg)
+      | Nothing ->
+          match first_import_conflict(
+                  all_import_bindings(specs, all_symbols, stdlib_root, extra_roots),
+                  dict_empty()) with
+          | Nothing -> Nothing
+          | Just (b, previous) -> Just(conflict_message(path, b, previous))
+
+fn validate_imports(modules: List ParsedModule, all_symbols: Dict ModuleSymbols,
+                    stdlib_root: String, extra_roots: List String) -> Maybe String =
+  match modules with
+  | Nil -> Nothing
+  | Cons mod rest ->
+      match module_import_error(mod, all_symbols, stdlib_root, extra_roots) with
+      | Just msg -> Just(msg)
+      | Nothing -> validate_imports(rest, all_symbols, stdlib_root, extra_roots)
 
 # ---------------------------------------------------------------------------
 # AST qualification
@@ -1836,17 +2062,24 @@ fn validate_qualified_decls(decls: List ast.Decl) -> Maybe(source.SourcePos, Str
       | Just msg -> Just((ast.decl_pos(d), msg))
       | Nothing -> validate_qualified_decls(rest)
 
+# Imports are validated FIRST. A bad import makes the names it should have bound
+# resolve to something else or to nothing, so every later check reports a symptom
+# of it — under its own name, somewhere the import is not mentioned.
 fn make_bundle_or_err(modules: List ParsedModule, stdlib_root: String, extra_roots: List String) -> BundleResult =
-  match validate_qualified_decls(qualified) with
-  | Just (pos, err_msg) -> BundleErr(pos, "[assert] qualify_decl: " ++ err_msg)
+  match validate_imports(modules, all_symbols, stdlib_root, extra_roots) with
+  | Just err_msg -> BundleErr(no_pos(), err_msg)
   | Nothing ->
-      match validate_type_names(qualified) with
-      | Just (pos, err_msg) -> BundleErr(pos, err_msg)
+      match validate_qualified_decls(qualified) with
+      | Just (pos, err_msg) -> BundleErr(pos, "[assert] qualify_decl: " ++ err_msg)
       | Nothing ->
-        match deriving.validate_deriving_decls(qualified) with
-        | Just (pos, err_msg) -> BundleErr(pos, "deriving: " ++ err_msg)
-        | Nothing -> BundleOk(ast.Program(deriving.expand_deriving_decls(qualified), no_pos()))
-  where qualified = qualify_all_modules(modules, build_all_symbols(modules), stdlib_root, extra_roots)
+          match validate_type_names(qualified) with
+          | Just (pos, err_msg) -> BundleErr(pos, err_msg)
+          | Nothing ->
+            match deriving.validate_deriving_decls(qualified) with
+            | Just (pos, err_msg) -> BundleErr(pos, "deriving: " ++ err_msg)
+            | Nothing -> BundleOk(ast.Program(deriving.expand_deriving_decls(qualified), no_pos()))
+  where all_symbols = build_all_symbols(modules)
+        qualified = qualify_all_modules(modules, all_symbols, stdlib_root, extra_roots)
 
 export fn bundle_file(path: source.FilePath, stdlib_root: source.StdlibRoot) -> BundleResult !{IO} =
   bundle_file_with_roots(path, stdlib_root, Nil)

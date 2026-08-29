@@ -1,7 +1,6 @@
 import stdlib.test (check_eq, check_true, check_false, run_suite)
 import stdlib.compiler.lexer as lexer
 import stdlib.compiler.token as token
-import stdlib.collections (Vec, vec_get)
 
 fn kind_str(t: token.Token) -> String =
   match token.token_kind(t) with

@@ -193,6 +193,12 @@ Resolution:
 - importing `export type Name` exposes the type name only
 - importing `export type Name(..)` also exposes the type's constructors for pattern matches and calls
 - top-level declarations are internally namespaced by module, so imported modules no longer flatten into one global scope
+- a listed name the module does not export is an error, and so is binding one
+  unqualified name twice from two modules — including via constructors two `(..)`
+  type imports both carry, and including two whole-module imports that share a
+  prefix (spec-v0 §3). An `extern fn` is the exception to the first rule: it is
+  global once its module is bundled, so listing one is legal and is what bundles
+  the module.
 
 Export behavior:
 

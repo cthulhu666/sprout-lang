@@ -1,5 +1,4 @@
 module examples.aoc_2025_day_4
-import stdlib.collections (Vec, vec_append, vec_empty, vec_filter, vec_get_or, vec_length)
 import stdlib.string (char_at_or, concat, length, string_from_char, string_lines)
 import stdlib.fs as fs
 

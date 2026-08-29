@@ -1,5 +1,4 @@
 module stdlib.string
-import stdlib.collections (List, Vec, vec_empty, vec_append)
 import stdlib.bytes as bytes
 
 # String primitives owned by this module rather than by the prelude.

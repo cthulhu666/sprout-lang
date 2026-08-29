@@ -4,7 +4,6 @@
 # cannot be regression-tested in this framework.
 import stdlib.test (check_eq, run_suite)
 import stdlib.repl (insert_at, delete_before, history_prev, history_next, is_declaration)
-import stdlib.collections (Vec, foldable_to_vec)
 
 fn main() -> Unit !{IO} =
   let h = foldable_to_vec(["old", "mid", "new"])
