@@ -215,13 +215,16 @@ both the prefix and the split unnecessary. It is blocked on four counts:
 1. It is unimplemented — `Status: draft. No implementation yet` — and its milestone N1
    (class infrastructure, operators desugaring through dispatch, `/` removed from `Int`)
    is a compiler and spec change, not a stdlib one.
-2. `Double` has exactly one instance in the whole stdlib: `ToString`
-   (`prelude.sprout:814`). There is no `Eq Double` and no `Ord Double`, so even
-   `min`/`max` cannot be written generically today.
-3. That absence is a *flagged open question*, not an oversight. The draft's §7.1 states
-   IEEE NaN "breaks the `Ord` contract that `Numeric` requires" and concludes "Decision
-   needed before `Double` ships". `Double` shipped without it. Prior art diverges: Rust
-   gives `f64` only `PartialOrd`; Haskell defines `Ord Double` and it is a known footgun.
+2. `Double` had exactly one instance in the whole stdlib: `ToString`. **Resolved
+   2026-08-29** — `Eq Double` and `Ord Double` landed (`docs/eq-ord-double-v0.md`),
+   so a generic `min`/`max` is now writable. Points 1 and 4 are unaffected.
+3. That absence was a *flagged open question*, not an oversight. The draft's §7.1 stated
+   IEEE NaN "breaks the `Ord` contract that `Numeric` requires" and concluded "Decision
+   needed before `Double` ships"; `Double` shipped without it, and the decision was
+   finally taken on 2026-08-29. Prior art diverges: Rust gives `f64` only `PartialOrd`;
+   Haskell defines `Ord Double` and it is a known footgun. Sprout took a third route,
+   available because its comparison **operators** and its `Ord` **class** are separate
+   code paths — the operators stay IEEE, the class is total.
 4. **Even a finished hierarchy would not unify `pow`.** `Int` `pow` returns `Maybe Int`
    (Rule 1) and `Double` `pow` returns `Double` (Rule 2). One class method has one
    signature modulo the class variable, so expressing both needs associated types, which

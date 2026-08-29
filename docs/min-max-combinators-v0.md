@@ -5,6 +5,16 @@ sequencing question was answered **(1) — land the four on `where Ord k` now,
 `Ord Double` follows**, with the coverage gap recorded in the spec text and in
 `BACKLOG.md` rather than left to be rediscovered.
 
+> **`Ord Double` landed 2026-08-29 (`docs/eq-ord-double-v0.md`), closing the §8
+> limitation.** All four combinators now accept `Double` keys with no change to
+> their signatures, which is what option (1) was chosen for. Two claims in §8
+> below are superseded and left visible: "there is no `Ord Double`" (there is
+> now), and the framing that a total `Ord Double` "is a lie". The second was
+> wrong about Sprout specifically — the `<` operator and the `Ord` class are
+> separate code paths here and neither can reach the other, so the class can be
+> total while the operator stays IEEE. `Ord Char` is still absent, so the row
+> below is otherwise unchanged.
+
 ## 1. Problem statement
 
 Selecting the smallest or largest element of a collection — and, more often, the

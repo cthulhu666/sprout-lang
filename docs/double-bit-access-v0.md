@@ -40,8 +40,11 @@ reinterpreted a Double's bits.
   values. The blocker there is exact **wide-integer** arithmetic (128-bit or
   bignum, as Ryū/Grisu/Dragon4 require), which bit access does nothing for. See
   `runtime/APPROVED_BUILTINS` on `double_to_string`.
-- **`Eq`/`Ord Double`.** Gated on the NaN-ordering *decision*
-  (`docs/numeric-types-v1-draft.md` §7.1), not on any missing capability.
+- **`Eq`/`Ord Double`.** Gated on the NaN-ordering *decision*, not on any missing
+  capability — **decided 2026-08-29**, `docs/eq-ord-double-v0.md`. The prediction
+  held: the instances needed no bit access at all. They are written over `==`,
+  `<` and `! (x == x)`, which is also why they could live in the prelude, where
+  `double_to_bits` deliberately does not.
 - **NaN classification.** `is_nan` via `! (x == x)` is the canonical portable
   idiom, not a workaround; it needs nothing added.
 - General-purpose integer bitwise operators (`&`, `|`, `<<`, `>>`). Sprout has

@@ -12,6 +12,12 @@ import stdlib.test (check_true, check_false, run_suite)
 #
 # Uses only values that are exactly representable in IEEE-754 double, so the
 # equality checks are deterministic (no rounding surprises).
+#
+# An `Eq Double` instance has since landed (docs/eq-ord-double-v0.md), so the
+# "has no Double instance" above is history, not current state. This file still
+# covers only the OPERATOR path, which the instance does not touch — the
+# short-circuit above means `==` never reaches the class. The class is covered by
+# test_double_ord.spr, which asserts the two disagree at NaN.
 
 fn main() -> Unit !{IO} =
   run_suite("double_eq", [
