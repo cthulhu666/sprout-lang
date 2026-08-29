@@ -9,7 +9,6 @@
 # char_to_string resolves.  An importless file is self-contained and does NOT
 # get the prelude, so a char_to_string call there is a hard "unresolved call"
 # error (codegen.emit_named_call) rather than a silent zero_val.
-import stdlib.string (str_len)
 
 # 0. Use the import so it is not dead, and keep prelude bundling deterministic.
 fn len_of(s: String) -> Int = str_len(s)

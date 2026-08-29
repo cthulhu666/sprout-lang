@@ -1,5 +1,4 @@
 import stdlib.test (check_eq, run_suite)
-import stdlib.collections (Foldable, List, Vec, vec_length, foldable_to_vec)
 
 # Stage-3 (positional scheme identity) regression guard for the @constrained_N:fn
 # marker resolution path — the mechanism canonicalize_constrained_markers repairs

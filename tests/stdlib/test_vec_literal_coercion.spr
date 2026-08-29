@@ -1,5 +1,4 @@
 import stdlib.test (TestState, new_state, assert_eq, summary)
-import stdlib.collections (Vec, foldable_to_vec, vec_get_or, vec_sum_by)
 
 # A Vec-typed parameter, exercised below with a bare list literal at the call
 # site — the coercion inserts vec_from_list around the [..] literal.

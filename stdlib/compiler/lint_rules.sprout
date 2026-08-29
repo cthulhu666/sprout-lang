@@ -1,6 +1,5 @@
 module stdlib.compiler.lint_rules
 
-import stdlib.collections (Vec, vec_get, vec_length)
 import stdlib.compiler.ast as ast
 import stdlib.compiler.parser as parser
 import stdlib.compiler.lexer as lexer

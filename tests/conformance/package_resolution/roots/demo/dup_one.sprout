@@ -1,0 +1,17 @@
+module demo.dup_one
+
+# Fixture for tests/stdlib/compiler/test_import_diagnostics.spr.
+#
+# Exports a constructor name (`Dup`) that demo.dup_two also exports, so an entry
+# file importing both binds one unqualified name to two different symbols. Also
+# carries one declaration that is deliberately NOT exported, which is the other
+# half of the import diagnostics: a name a module declares but does not offer.
+export type OneBox (..) =
+  | Dup Int
+  | JustOne
+
+fn hidden_helper() -> Int =
+  1
+
+export fn one_value() -> Int =
+  hidden_helper()

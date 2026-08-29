@@ -1,5 +1,4 @@
 import stdlib.test (check_true, run_suite)
-import stdlib.collections (Vec, vec_from_list)
 
 # Ord instances for tuples (2-5) and containers (Maybe, List, Result, Vec).
 # Assertions use ord_lt/ord_gt (Bool) and compare(...) == 0 for equality, so

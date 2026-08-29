@@ -1,4 +1,3 @@
-import stdlib.collections (Vec, vec_sum_by)
 
 fn take_ints(v: Vec Int) -> Int =
   vec_sum_by(\x -> x, v)

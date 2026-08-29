@@ -1,5 +1,4 @@
 module examples.collections_demo
-import stdlib.collections (Dict, Vec, dict_keys, dict_remove, dict_values, foldable_to_vec, vec_get_or, vec_reverse, vec_slice, vec_sum_by)
 import stdlib.string as string
 
 # Demonstrates current stdlib collection helpers and literals.

@@ -1,5 +1,4 @@
 module stdlib.math.int
-import stdlib.collections (Maybe)
 
 # The Int arithmetic layer, split out of `stdlib.math` so the Double layer there can
 # carry the plain names (`abs`, `clamp`, `pow`). Sprout has no overloading, so one name

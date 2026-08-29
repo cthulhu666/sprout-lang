@@ -1,5 +1,4 @@
 import stdlib.test (check_eq, run_suite)
-import stdlib.collections (Foldable, List, Vec, vec_length, foldable_to_vec)
 
 # §13.3(B) S4 guard: constrained dispatch through the PROVISIONAL-scheme paths
 # that S3 left on the @constrained markers — the recursion self-binding

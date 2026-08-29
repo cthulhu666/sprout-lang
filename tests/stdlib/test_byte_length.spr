@@ -1,7 +1,6 @@
 import stdlib.test (check_eq, run_suite)
 import stdlib.string (byte_length, length, concat, slice)
 import stdlib.bytes as bytes
-import stdlib.collections (dict_from_list, dict_keys, vec_get_or)
 
 # Pins byte_length across the string-representation change (headered literals).
 # byte_length must equal the UTF-8 byte count for BOTH string literals (static,

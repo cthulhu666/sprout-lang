@@ -5,7 +5,6 @@ import stdlib.repl as repl
 import stdlib.env as env
 import stdlib.process as process
 import stdlib.string as string
-import stdlib.collections (Vec)
 
 # THE REPL'S MODULE-NAME COMPLETION LIST MUST NOT ROT.
 #

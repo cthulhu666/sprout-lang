@@ -1,0 +1,10 @@
+module demo.dup_two
+
+# Fixture for tests/stdlib/compiler/test_import_diagnostics.spr — the second
+# module exporting a `Dup` constructor (see demo.dup_one).
+export type TwoBox (..) =
+  | Dup String
+  | JustTwo
+
+export fn two_value() -> Int =
+  2

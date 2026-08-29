@@ -1,5 +1,4 @@
 module stdlib.compiler.lexer
-import stdlib.collections (Vec, vec_append, vec_empty)
 import stdlib.string as string
 import stdlib.compiler.source as source
 import stdlib.compiler.token as token
