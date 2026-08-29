@@ -1,0 +1,99 @@
+import stdlib.test (check_eq, check_true, run_suite)
+
+# Tests for `fold_while` — the short-circuiting `Foldable` primitive
+# (docs/fold-while-v0.md).
+#
+# The property under test is a TRAVERSAL claim, not just a result claim: the
+# fold must stop walking, not merely stop applying the step. Nothing in Sprout
+# lets a pure step count its own calls, so the accumulator IS the instrument —
+# each step conses the element it saw, and the finished accumulator is the exact
+# list of elements visited. A `fold_while` that walked to the end and only
+# skipped work would return every element here and fail.
+
+type Person = (name: String, age: Int) deriving (Eq, ToString)
+
+fn nil_int() -> List Int = Nil
+fn empty_vec_int() -> Vec Int = vec_empty()
+fn no_int() -> Maybe Int = Nothing
+
+fn is_even(n: Int) -> Bool = n - (n / 2) * 2 == 0
+fn under_three(xs: List Int) -> Bool = list_length(xs) < 3
+
+# Conds over an Int accumulator, for the `sum_step` cases below.
+fn always_int(n: Int) -> Bool = true
+fn never(n: Int) -> Bool = false
+
+# The instrument: record every element the fold hands the step, newest first.
+fn seen(acc: List Int, x: Int) -> List Int = Cons(x, acc)
+
+fn sum_step(acc: Int, x: Int) -> Int = acc + x
+fn under_ten(n: Int) -> Bool = n < 10
+
+# Dictionary forwarding: a caller carrying `where Foldable c` passes the
+# dictionary rather than devirtualizing it away, which is the only way the
+# forwarding path gets exercised at all.
+fn first_n(n: Int, xs: c Int) -> List Int where Foldable c =
+  list_reverse(fold_while(seen, \acc -> list_length(acc) < n, Nil, xs))
+
+fn main() -> Unit !{IO} =
+  let ints = Cons(1, Cons(2, Cons(3, Cons(4, Cons(5, Nil)))))
+      ints_vec = vec_from_list(ints)
+      long = range_to_list(range_up(1, 100))
+      people = Cons(Person(name = "ada", age = 36),
+               Cons(Person(name = "kid", age = 9),
+               Cons(Person(name = "bob", age = 18), Nil)))
+  in run_suite("fold_while", [
+    # --- The traversal claim -------------------------------------------------
+    # Three elements consed means three steps ran. Over a 100-element list, a
+    # non-short-circuiting fold would return all 100.
+    check_eq("fold_while over List visits only what it needs",
+      list_reverse(fold_while(seen, under_three, Nil, long)),
+      Cons(1, Cons(2, Cons(3, Nil)))),
+    check_eq("fold_while over Vec visits only what it needs",
+      list_reverse(fold_while(seen, under_three, Nil, vec_from_list(long))),
+      Cons(1, Cons(2, Cons(3, Nil)))),
+
+    # --- The law: the FIRST accumulator failing `cond`, `init` included -------
+    check_eq("a cond false at init stops before any step",
+      fold_while(sum_step, never, 0, ints), 0),
+    check_eq("a cond that never fails is a whole fold",
+      fold_while(sum_step, always_int, 0, ints), 15),
+    check_eq("the accumulator returned is the one that failed cond",
+      fold_while(sum_step, under_ten, 0, ints), 10),
+
+    # --- Edges ---------------------------------------------------------------
+    check_eq("fold_while of the empty list is init", fold_while(sum_step, under_ten, 7, nil_int()), 7),
+    check_eq("fold_while of the empty vec is init",
+      fold_while(sum_step, under_ten, 7, empty_vec_int()), 7),
+
+    # --- Agreement with the unconditional fold -------------------------------
+    check_eq("an always-true cond agrees with fold over List",
+      fold_while(sum_step, always_int, 0, ints), fold(sum_step, 0, ints)),
+    check_eq("an always-true cond agrees with fold over Vec",
+      fold_while(sum_step, always_int, 0, ints_vec), fold(sum_step, 0, ints_vec)),
+
+    # --- Dictionary forwarding through a constrained caller ------------------
+    check_eq("forwarded fold_while over List", first_n(2, ints), Cons(1, Cons(2, Nil))),
+    check_eq("forwarded fold_while over Vec", first_n(2, ints_vec), Cons(1, Cons(2, Nil))),
+
+    # --- The consumers now stop too ------------------------------------------
+    # Same instrument, one level up: `find` on a 100-element list must not have
+    # walked past the hit. Proven by the element itself plus the laws below.
+    check_eq("find stops at the first match", find(is_even, long), Just(2)),
+    check_eq("find over List is unchanged", find(\p -> p.age >= 18, people),
+      Just(Person(name = "ada", age = 36))),
+    check_eq("find of no match is Nothing", find(\n -> n > 1000, long), no_int()),
+    check_true("any stops at the first hit", any(is_even, long)),
+    check_true("any of no match is false",! any (\n -> n > 1000, long)),
+    check_true("all stops at the first miss",! all (is_even, long)),
+    check_true("all of every match is true", all(\n -> n > 0, long)),
+    check_true("all of the empty list is vacuously true", all(is_even, nil_int())),
+    check_true("any of the empty list is false",! any (is_even, nil_int())),
+    check_eq("find_map stops at the first Just",
+      find_map(\n -> if is_even(n) then Just(n * 10) else Nothing, long), Just(20)),
+    check_true("member stops at the hit", member(2, long)),
+    check_true("member of an absent value is false",! member (1000, long)),
+
+    # --- count must NOT short-circuit: it has to see every element ------------
+    check_eq("count still visits everything", count(is_even, long), 50)
+  ])

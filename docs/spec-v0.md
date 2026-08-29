@@ -2501,19 +2501,45 @@ matches every language that ships the pair.
 `member` compares by the `Eq` instance, and is the `Foldable`-generic form of
 `list_member`.
 
-> **These do not short-circuit the traversal.**  `Foldable.fold_values` has no
-> early exit, so `any`, `all`, `find`, `find_map` and `member` visit every
-> element even once the answer is settled.  The predicate is not applied again
-> after that point, so the cost is O(n) traversal with at most k predicate
-> calls.  `vec_any` and `vec_all` short-circuit both and remain the faster
-> spelling for a `Vec`.  PureScript has the same limitation for the same
-> reason; Rust and Scala escape it only via an iterator protocol, which Sprout
-> does not have.
+> **These short-circuit the traversal**, except `count`.  `any`, `all`, `find`,
+> `find_map` and `member` are built on `fold_while` (below) and stop walking at
+> the deciding element — O(k) in the elements visited, not O(n).  `count` must
+> see every element by definition and is built on `fold`.  `vec_any` and
+> `vec_all` are `any`/`all` specialised to `Vec`, not faster alternatives to
+> them.
 
 `length` and `is_empty` are deliberately **not** provided in this family: a
 fold-derived version would be O(n) even on `Vec`, where `vec_length` is O(1).
 Providing them at the right complexity requires `Foldable` class methods with
 per-instance overrides, as Haskell does (see `BACKLOG.md`).
+
+### `fold_while` — the short-circuiting fold (Experimental)
+
+```
+fold_while(step: b -> a -> b, cond: b -> Bool, init: b, xs: f a) -> b  where Foldable f
+```
+
+`Foldable` carries **two** methods.  `fold_values` is a left fold and therefore
+cannot exit early; `fold_while_values` can, and is what the combinators above
+are built on.  Both are mandatory for every instance — Sprout classes have no
+default method bodies.
+
+`cond` is a **continue** condition, reading as `take_while`'s predicate does:
+the fold proceeds while `cond` holds of the accumulator.
+
+> **The law.**  `fold_while` returns the first accumulator — `init` included —
+> for which `cond` answers `false`.  If no accumulator fails `cond`, it is
+> exactly `fold`.
+
+`cond` is queried on `init` before any step runs, so `fold_while(step, cond,
+init, xs)` is `init` whenever `cond(init)` is false, whatever `xs` holds.  An
+instance over a non-linear structure re-checks `cond` between substructures, so
+`cond` must be pure and must tolerate being asked more than once about equal
+values.  An effectful `cond` is a type error, the same restriction `Foldable`
+imposes on `step`.
+
+Rationale, prior art, and the rejected `Continue`/`Done` sentinel form:
+`docs/fold-while-v0.md`.
 
 ### `Maybe`/`Result` combinator free functions
 
