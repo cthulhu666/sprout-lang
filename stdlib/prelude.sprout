@@ -843,17 +843,27 @@ export fn filter_map(f: a -> Maybe b, xs: c a) -> c b where Filterable c =
 export fn partition(pred: a -> Bool, xs: c a) -> (c a, c a) where Filterable c =
   partition_values(pred, xs)
 
+# EVERY STEP BELOW LATCHES — it returns the settled accumulator untouched
+# rather than recomputing from the current element. `fold_while` delegates the
+# stop decision to the instance's `cond` check, so a step that DISCARDED the
+# accumulator would be only as correct as the instance is diligent: one extra
+# step after the answer is settled would overwrite it, and an instance that
+# checks `cond` once per recursive call instead of once per step is an easy
+# thing to write (docs/fold-while-v0.md §8). Latching costs nothing — the walk
+# still stops for a well-behaved instance — and makes these answers independent
+# of the instance. Pinned by tests/stdlib/test_fold_while_instance_robustness.spr.
+#
 # O(k) up to the deciding element: true when some element satisfies `pred`. The
 # traversal STOPS at the first hit — `fold_while` is what buys that, and it is
 # why these five are built on it rather than on `fold`. `vec_any` is this same
 # function specialised to `Vec`, not a faster one.
 export fn any(pred: a -> Bool, xs: c a) -> Bool where Foldable c =
-  fold_while(\ (acc, x) -> pred(x), \acc -> ! acc, false, xs)
+  fold_while(\ (acc, x) -> if acc then acc else pred(x), \acc -> ! acc, false, xs)
 
 # O(k) up to the first element failing `pred`. True for an empty structure — the
 # vacuous case, matching every language that ships this pair.
 export fn all(pred: a -> Bool, xs: c a) -> Bool where Foldable c =
-  fold_while(\ (acc, x) -> pred(x), \acc -> acc, true, xs)
+  fold_while(\ (acc, x) -> if acc then pred(x) else acc, \acc -> acc, true, xs)
 
 # O(k) up to the match: the FIRST element satisfying `pred`, or `Nothing`. Total
 # — an empty structure yields `Nothing`, never a panic.
@@ -865,7 +875,7 @@ export fn find(pred: a -> Bool, xs: c a) -> Maybe a where Foldable c =
 # O(k) up to the match: the first `Just` that `f` produces — search and
 # transform in one step, for when the test and the result share work.
 export fn find_map(f: a -> Maybe b, xs: c a) -> Maybe b where Foldable c =
-  fold_while(\ (acc, x) -> f(x),
+  fold_while(\ (acc, x) -> match acc with | Just _ -> acc | Nothing -> f(x),
              \acc -> match acc with | Just _ -> false | Nothing -> true,
              Nothing, xs)
 
@@ -873,8 +883,9 @@ export fn find_map(f: a -> Maybe b, xs: c a) -> Maybe b where Foldable c =
 export fn count(pred: a -> Bool, xs: c a) -> Int where Foldable c =
   fold(\ (acc, x) -> if pred(x) then acc + 1 else acc, 0, xs)
 
-# O(n) traversal: whether `x` occurs, by the `Eq` instance rather than by
-# pointer identity. The Foldable-generic form of `list_member`.
+# O(k) up to the hit: whether `x` occurs, by the `Eq` instance rather than by
+# pointer identity. The Foldable-generic form of `list_member`, and it inherits
+# `any`'s short-circuit and `any`'s latch along with it.
 export fn member(x: a, xs: c a) -> Bool where Foldable c, Eq a =
   any(\y -> eq(y, x), xs)
 

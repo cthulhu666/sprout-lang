@@ -6123,11 +6123,19 @@ entry:
   %t$0$env_ptr = inttoptr i64 %env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
   %t$0 = load i64, ptr %t$0$slot_ptr
+  %t$4 = trunc i64 %acc to i1
+  br i1 %t$4, label %then_1, label %else_1
+then_1:
+  br label %join_1
+else_1:
   call void @sprout_closure_arity_check(i64 %t$0, i64 1)
-  %t$1$env_ptr = inttoptr i64 %t$0 to ptr
-  %t$1$code = load ptr, ptr %t$1$env_ptr
-  %t$1 = call i64 (i64, i64) %t$1$code(i64 %t$0, i64 %x)
-  ret i64 %t$1
+  %t$3$env_ptr = inttoptr i64 %t$0 to ptr
+  %t$3$code = load ptr, ptr %t$3$env_ptr
+  %t$3 = call i64 (i64, i64) %t$3$code(i64 %t$0, i64 %x)
+  br label %join_1
+join_1:
+  %t$2 = phi i64 [%acc, %then_1], [%t$3, %else_1]
+  ret i64 %t$2
 }
 
 define i64 @__sprout_ir_lambda_12(i64 %env$, i64 %acc) {
@@ -6175,11 +6183,19 @@ entry:
   %t$0$env_ptr = inttoptr i64 %env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
   %t$0 = load i64, ptr %t$0$slot_ptr
+  %t$4 = trunc i64 %acc to i1
+  br i1 %t$4, label %then_1, label %else_1
+then_1:
   call void @sprout_closure_arity_check(i64 %t$0, i64 1)
-  %t$1$env_ptr = inttoptr i64 %t$0 to ptr
-  %t$1$code = load ptr, ptr %t$1$env_ptr
-  %t$1 = call i64 (i64, i64) %t$1$code(i64 %t$0, i64 %x)
-  ret i64 %t$1
+  %t$3$env_ptr = inttoptr i64 %t$0 to ptr
+  %t$3$code = load ptr, ptr %t$3$env_ptr
+  %t$3 = call i64 (i64, i64) %t$3$code(i64 %t$0, i64 %x)
+  br label %join_1
+else_1:
+  br label %join_1
+join_1:
+  %t$2 = phi i64 [%t$3, %then_1], [%acc, %else_1]
+  ret i64 %t$2
 }
 
 define i64 @__sprout_ir_lambda_14(i64 %env$, i64 %acc) {
@@ -6324,11 +6340,30 @@ entry:
   %t$0$env_ptr = inttoptr i64 %env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
   %t$0 = load i64, ptr %t$0$slot_ptr
+  %t$1 = call i64 @sprout_tag(i64 %acc)
+  br label %arm_0_2
+arm_0_2:
+  %t$4 = add i64 0, 1
+  %t$5 = icmp eq i64 %t$1, %t$4
+  br i1 %t$5, label %body_0_2, label %arm_1_2
+body_0_2:
+  br label %join_2
+arm_1_2:
+  %t$6 = add i64 0, 0
+  %t$7 = icmp eq i64 %t$1, %t$6
+  br i1 %t$7, label %body_1_2, label %arm_2_2
+body_1_2:
   call void @sprout_closure_arity_check(i64 %t$0, i64 1)
-  %t$1$env_ptr = inttoptr i64 %t$0 to ptr
-  %t$1$code = load ptr, ptr %t$1$env_ptr
-  %t$1 = call i64 (i64, i64) %t$1$code(i64 %t$0, i64 %x)
-  ret i64 %t$1
+  %t$8$env_ptr = inttoptr i64 %t$0 to ptr
+  %t$8$code = load ptr, ptr %t$8$env_ptr
+  %t$8 = call i64 (i64, i64) %t$8$code(i64 %t$0, i64 %x)
+  br label %join_2
+arm_2_2:
+  call void @sprout_abort_match()
+  unreachable
+join_2:
+  %t$3 = phi i64 [%acc, %body_0_2], [%t$8, %body_1_2]
+  ret i64 %t$3
 }
 
 define i64 @__sprout_ir_lambda_18(i64 %env$, i64 %acc) {

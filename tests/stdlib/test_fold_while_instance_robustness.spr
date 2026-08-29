@@ -1,0 +1,71 @@
+import stdlib.test (check_eq, check_true, run_suite)
+
+# The `Foldable` consumers must answer correctly over ANY instance, including
+# one that consults `cond` less often than it should (docs/fold-while-v0.md §8).
+#
+# `fold_while` puts the stop decision in `cond`, which is the instance's job to
+# honour. A consumer whose step DISCARDS the accumulator — `\ (acc, x) -> pred(x)`
+# — is therefore only as correct as the instance is diligent: one extra step
+# after the answer is settled overwrites it. A consumer whose step LATCHES
+# cannot be corrupted that way, and latching costs nothing, because `fold_while`
+# still stops the walk for a well-behaved instance.
+#
+# `Two` below is the counter-example, deliberately under-checking: it asks
+# `cond` once on entry and then runs both steps. Over it, a non-latching `any`
+# answers `false` for a container whose first element matches. Every assertion
+# here fails on a consumer that does not latch.
+
+type Two a = Two a a
+
+instance Foldable Two
+  fn fold_values(step: b -> a -> b, init: b, xs: Two a) -> b =
+    match xs with
+    | Two p q -> step(step(init, p), q)
+  # The mistake §8 describes: `cond` is honoured on entry and never again.
+  fn fold_while_values(step: b -> a -> b, cond: b -> Bool, init: b, xs: Two a) -> b =
+    if ! cond (init) then init
+    else
+      match xs with
+      | Two p q -> step(step(init, p), q)
+
+fn is_even(n: Int) -> Bool = n - (n / 2) * 2 == 0
+fn is_odd(n: Int) -> Bool = n - (n / 2) * 2 == 1
+fn no_int() -> Maybe Int = Nothing
+
+fn half_if_even(n: Int) -> Maybe Int = if is_even(n) then Just(n / 2) else Nothing
+
+fn main() -> Unit !{IO} =
+  # The settled answer is at the FIRST element in each case, so a second step
+  # would overwrite it.
+  let hit_first = Two(2, 1)
+      miss_first = Two(1, 3)
+  in run_suite("fold_while_instance_robustness", [
+    # `any`: the match is first; an over-stepping instance must not lose it.
+    check_true("any survives an instance that over-steps", any(is_even, hit_first)),
+    check_true("any is still false when nothing matches",! any (is_even, miss_first)),
+
+    # `all`: the failure is first; an over-stepping instance must not erase it.
+    check_true("all survives an instance that over-steps",! all (is_odd, hit_first)),
+    check_true("all is still true when everything matches", all(is_odd, miss_first)),
+
+    # `find` already latched before this fix — pinned so it stays that way.
+    check_eq("find survives an instance that over-steps", find(is_even, hit_first), Just(2)),
+    check_eq("find is still Nothing when nothing matches", find(is_even, miss_first), no_int()),
+
+    # `find_map`: the first `Just` must not be replaced by a later `Nothing`.
+    check_eq("find_map survives an instance that over-steps",
+      find_map(half_if_even, hit_first), Just(1)),
+    check_eq("find_map is still Nothing when nothing matches",
+      find_map(half_if_even, miss_first), no_int()),
+
+    # `member` derives from `any`, so it inherits the same exposure.
+    check_true("member survives an instance that over-steps", member(2, hit_first)),
+    check_true("member is still false when absent",! member (2, miss_first)),
+
+    # `count` reads every element by design and is unaffected either way.
+    check_eq("count is unaffected", count(is_even, hit_first), 1),
+
+    # The plain fold is untouched by any of this.
+    check_eq("fold over the same instance is unchanged",
+      fold(\ (acc, x) -> acc + x, 0, hit_first), 3)
+  ])
