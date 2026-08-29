@@ -89,6 +89,9 @@ instance Filterable Vec
   fn filter_values(pred: a -> Bool, xs: Vec a) -> Vec a = vec_filter(pred, xs)
 ```
 
+(The class has since grown `filter_map_values` and `partition_values` —
+`docs/collection-combinators-v0.md`.)
+
 The old `List` body became `export fn list_filter`, which also removes a naming
 irregularity: `filter` had been the one `List` helper with no `list_` twin
 (`list_map`, `list_fold`, `list_each`, `list_append`, `list_flat_map` all have
@@ -113,10 +116,13 @@ effectful predicate stays a hand-written fold. This matches `Foldable`, whose
 
 ## 7. Deferred
 
-- `filter_map` over `Filterable` (or a `Compactable`-style split). `Vec` has
-  `vec_filter_map`; `List` has no equivalent at all.
-- `partition` — no prelude form for either container.
+- ~~`filter_map` over `Filterable`~~ and ~~`partition`~~ — **both landed**, as
+  a second and third class method. See `docs/collection-combinators-v0.md` §6
+  for why each is a method rather than a derivation (a derived `filter` would
+  allocate a `Maybe` per surviving element; a two-pass `partition` would apply
+  the caller's predicate twice per element).
 - `Dict`/`Set` instances, gated on those types getting `Functor`/`Foldable`.
+- An effectful predicate (§6).
 
 Recorded in `BACKLOG.md`.
 

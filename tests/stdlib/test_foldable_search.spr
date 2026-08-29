@@ -1,0 +1,124 @@
+import stdlib.test (check_eq, run_suite)
+
+# Tests for the Foldable-generic search and test combinators — `any`, `all`,
+# `find`, `find_map`, `count`, `member` (docs/collection-combinators-v0.md).
+#
+# These are the CONSUMERS: they return a scalar or a `Maybe`, never a
+# container, so they are keyed on the source alone and need only `Foldable`.
+# Both instances are covered — a `where Foldable c` signature that only ever
+# saw `List` would not prove the genericity is real.
+#
+# Two properties a naive implementation gets wrong, pinned below:
+#   - `find` returns the FIRST match, not an arbitrary one;
+#   - `any` of an empty structure is false and `all` of one is TRUE (the
+#     vacuous case), which is what makes them the fold of `||` and `&&` over
+#     their respective identities.
+
+type Person = (name: String, age: Int) deriving (Eq, ToString)
+
+# Type anchors. An empty container leaves the element type free on both sides
+# of the comparison, so each empty case needs a typed nullary fn.
+fn nil_int() -> List Int = Nil
+fn no_int() -> Maybe Int = Nothing
+fn no_string() -> Maybe String = Nothing
+fn no_person() -> Maybe Person = Nothing
+fn empty_vec_int() -> Vec Int = vec_empty()
+
+fn is_even(n: Int) -> Bool = n - (n / 2) * 2 == 0
+fn is_positive(n: Int) -> Bool = n > 0
+fn is_negative(n: Int) -> Bool = n < 0
+fn is_adult(p: Person) -> Bool = p.age >= 18
+
+# For find_map: transform and test in one step. Returns the name of an adult.
+fn adult_name(p: Person) -> Maybe String =
+  if p.age >= 18 then Just(p.name) else Nothing
+
+# Dictionary forwarding. These carry `where Foldable c` and so do the callers
+# below, so the dictionary is genuinely PASSED rather than devirtualized away
+# as it is at a concrete call site. Without callers of this shape the dispatch
+# path is never exercised.
+fn has_any(pred: a -> Bool, xs: c a) -> Bool where Foldable c = any(pred, xs)
+fn first_match(pred: a -> Bool, xs: c a) -> Maybe a where Foldable c = find(pred, xs)
+fn tally(pred: a -> Bool, xs: c a) -> Int where Foldable c = count(pred, xs)
+fn contains(x: a, xs: c a) -> Bool where Foldable c, Eq a = member(x, xs)
+
+fn main() -> Unit !{IO} =
+  let ints = Cons(1, Cons(2, Cons(3, Cons(4, Cons(5, Nil)))))
+      ints_vec = vec_from_list(ints)
+      strs = Cons("pear", Cons("apple", Cons("fig", Nil)))
+      people = Cons(Person(name = "kid", age = 9),
+               Cons(Person(name = "ada", age = 36),
+               Cons(Person(name = "bob", age = 18), Nil)))
+  in run_suite("foldable_search", [
+    # --- any / all over both instances ---------------------------------------
+    check_eq("any over List: a match exists", any(is_even, ints), true),
+    check_eq("any over List: no match", any(is_negative, ints), false),
+    check_eq("any over Vec: a match exists", any(is_even, ints_vec), true),
+    check_eq("any over Vec: no match", any(is_negative, ints_vec), false),
+    check_eq("all over List: holds for every element", all(is_positive, ints), true),
+    check_eq("all over List: one counterexample is enough", all(is_even, ints), false),
+    check_eq("all over Vec: holds for every element", all(is_positive, ints_vec), true),
+    check_eq("all over Vec: one counterexample is enough", all(is_even, ints_vec), false),
+
+    # --- The vacuous cases: any of empty is false, all of empty is TRUE ------
+    check_eq("any of the empty list is false", any(is_positive, nil_int()), false),
+    check_eq("all of the empty list is true", all(is_negative, nil_int()), true),
+    check_eq("any of the empty vec is false", any(is_positive, empty_vec_int()), false),
+    check_eq("all of the empty vec is true", all(is_negative, empty_vec_int()), true),
+
+    # --- find returns the FIRST match ----------------------------------------
+    check_eq("find over List returns the first match", find(is_even, ints), Just(2)),
+    check_eq("find over Vec returns the first match", find(is_even, ints_vec), Just(2)),
+    check_eq("find with no match is Nothing", find(is_negative, ints), no_int()),
+    check_eq("find of the empty list is Nothing", find(is_positive, nil_int()), no_int()),
+    check_eq("find of the empty vec is Nothing", find(is_positive, empty_vec_int()), no_int()),
+    check_eq("find on a record element",
+      find(is_adult, people), Just (Person(name = "ada", age = 36))),
+
+    # --- find_map: transform and search in one step --------------------------
+    check_eq("find_map returns the first mapped hit",
+      find_map(adult_name, people), Just("ada")),
+    check_eq("find_map with no hit is Nothing",
+      find_map(adult_name, Cons (Person(name = "kid", age = 9), Nil)), no_string()),
+    check_eq("find_map of the empty list is Nothing",
+      find_map(adult_name, Nil), no_string()),
+
+    # --- count ---------------------------------------------------------------
+    check_eq("count over List", count(is_even, ints), 2),
+    check_eq("count over Vec", count(is_even, ints_vec), 2),
+    check_eq("count with no matches is 0", count(is_negative, ints), 0),
+    check_eq("count of the empty list is 0", count(is_positive, nil_int()), 0),
+    check_eq("count matching everything is the length", count(is_positive, ints), 5),
+
+    # --- member --------------------------------------------------------------
+    check_eq("member over List: present", member(3, ints), true),
+    check_eq("member over List: absent", member(9, ints), false),
+    check_eq("member over Vec: present", member(3, ints_vec), true),
+    check_eq("member over Vec: absent", member(9, ints_vec), false),
+    check_eq("member at String, to show `a` is not pinned to Int",
+      member("fig", strs), true),
+    check_eq("member of the empty list is false", member(1, nil_int()), false),
+    check_eq("member agrees with list_member", member(3, ints), list_member(3, ints)),
+
+    # --- Laws relating the family --------------------------------------------
+    # all p == !any (not . p), the De Morgan pair the two share.
+    check_eq("all is the De Morgan dual of any",
+      all(is_positive, ints),! any (\n -> ! is_positive (n), ints)),
+    # any p == (find p != Nothing), i.e. find refines any rather than differing.
+    check_eq("any agrees with find",
+      any(is_even, ints), find(is_even, ints) != no_int()),
+    # count p == 0 exactly when nothing matches.
+    check_eq("count is zero exactly when any is false",
+      count(is_negative, ints) == 0,! any (is_negative, ints)),
+
+    # --- Dictionary forwarding through constrained callers -------------------
+    check_eq("forwarded any over List", has_any(is_even, ints), true),
+    check_eq("forwarded any over Vec", has_any(is_even, ints_vec), true),
+    check_eq("forwarded find over List", first_match(is_even, ints), Just(2)),
+    check_eq("forwarded find over Vec", first_match(is_even, ints_vec), Just(2)),
+    check_eq("forwarded find over records",
+      first_match(is_adult, people), Just (Person(name = "ada", age = 36))),
+    check_eq("forwarded count over Vec", tally(is_even, ints_vec), 2),
+    check_eq("forwarded member over List", contains(3, ints), true),
+    check_eq("forwarded member over Vec", contains(9, ints_vec), false)
+  ])

@@ -222,6 +222,27 @@ export fn list_filter(pred: a -> Bool, xs: List a) -> List a =
       if pred(x) then Cons(x, list_filter(pred, rest))
       else list_filter(pred, rest)
 
+# O(n): drop and transform in one pass — `Nothing` discards the element, `Just`
+# keeps the mapped value. The concrete List form behind `Filterable List`.
+export fn list_filter_map(f: a -> Maybe b, xs: List a) -> List b =
+  match xs with
+  | Nil -> Nil
+  | Cons x rest ->
+      match f(x) with
+      | Nothing -> list_filter_map(f, rest)
+      | Just mapped -> Cons(mapped, list_filter_map(f, rest))
+
+# O(n), one pass, `pred` applied exactly once per element: the elements
+# satisfying `pred` and those not, each in original order.
+export fn list_partition(pred: a -> Bool, xs: List a) -> (List a, List a) =
+  match xs with
+  | Nil -> (Nil, Nil)
+  | Cons x rest ->
+      match list_partition(pred, rest) with
+      | (yes, no) ->
+          if pred(x) then (Cons(x, yes), no)
+          else (yes, Cons(x, no))
+
 export fn list_map(f: a -> b, xs: List a) -> List b =
   list_map_go(f, xs)
 
@@ -343,6 +364,23 @@ fn vec_filter_map_indexed(f: a -> Maybe b, vec: Vec a, index: Int, total: Int, a
 # O(n): one pass; result built via vec_from_list in a single allocation.
 export fn vec_filter_map(f: a -> Maybe b, vec: Vec a) -> Vec b =
   vec_filter_map_indexed(f, vec, 0, vec_length(vec), Nil)
+
+fn vec_partition_indexed(pred: a -> Bool, vec: Vec a, index: Int, total: Int,
+                         yes: List a, no: List a) -> (Vec a, Vec a) =
+  if index >= total then
+    (vec_from_list(list_reverse_go(yes, Nil)), vec_from_list(list_reverse_go(no, Nil)))
+  else
+    match vec_get(index, vec) with
+    | Nothing ->
+        (vec_from_list(list_reverse_go(yes, Nil)), vec_from_list(list_reverse_go(no, Nil)))
+    | Just value ->
+        if pred(value) then vec_partition_indexed(pred, vec, index + 1, total, Cons(value, yes), no)
+        else vec_partition_indexed(pred, vec, index + 1, total, yes, Cons(value, no))
+
+# O(n), one pass, `pred` applied exactly once per element: both halves are built
+# side by side rather than by filtering twice.
+export fn vec_partition(pred: a -> Bool, vec: Vec a) -> (Vec a, Vec a) =
+  vec_partition_indexed(pred, vec, 0, vec_length(vec), Nil, Nil)
 
 fn vec_any_indexed(pred: a -> Bool, vec: Vec a, index: Int, total: Int) -> Bool =
   if index >= total then false
@@ -713,8 +751,16 @@ export class Foldable f
 # slot to every dictionary. The method name stays out of the global namespace;
 # `filter` below is the exported combinator (the `fmap`/`map`,
 # `fold_values`/`fold` idiom).
+# `filter_map_values` is a second primitive rather than the single one `filter`
+# derives from (PureScript and witherable both make filterMap the primitive):
+# in a strict language the derived `filter` would allocate a `Maybe` per
+# surviving element, which laziness pays for elsewhere and Sprout cannot.
+# `partition_values` is likewise a method, not two `filter` passes, so the
+# predicate runs exactly once per element.
 export class Filterable f
   fn filter_values(pred: a -> Bool, xs: f a) -> f a
+  fn filter_map_values(f: a -> Maybe b, xs: f a) -> f b
+  fn partition_values(pred: a -> Bool, xs: f a) -> (f a, f a)
 
 # Applicative (Package C-b shape): the primitive is `map2` (apply an n-ary function
 # to values in a context), NOT `ap`/`<*>` — the latter feeds one wrapped argument at
@@ -748,6 +794,51 @@ export fn fold(step: b -> a -> b, init: b, xs: f a) -> b where Foldable f =
 # need an effect row on the class method, which the dispatcher does not carry.
 export fn filter(pred: a -> Bool, xs: c a) -> c a where Filterable c =
   filter_values(pred, xs)
+
+# O(n) per instance: drop and transform in one pass. `filter` is the special
+# case where `f` returns the element unchanged or nothing.
+export fn filter_map(f: a -> Maybe b, xs: c a) -> c b where Filterable c =
+  filter_map_values(f, xs)
+
+# O(n) per instance: the elements satisfying `pred` and those not, in original
+# order, as a pair of the same container kind. `pred` runs once per element.
+export fn partition(pred: a -> Bool, xs: c a) -> (c a, c a) where Filterable c =
+  partition_values(pred, xs)
+
+# O(n) TRAVERSAL: true when some element satisfies `pred`. `Foldable` has no
+# early exit, so every element is visited even after the answer is settled;
+# `pred` itself is not applied again once it is. `vec_any` short-circuits both
+# and stays the faster spelling for a Vec.
+export fn any(pred: a -> Bool, xs: c a) -> Bool where Foldable c =
+  fold(\ (acc, x) -> if acc then acc else pred(x), false, xs)
+
+# O(n) traversal, same early-exit caveat as `any`. True for an empty structure
+# — the vacuous case, matching every language that ships this pair.
+export fn all(pred: a -> Bool, xs: c a) -> Bool where Foldable c =
+  fold(\ (acc, x) -> if acc then pred(x) else acc, true, xs)
+
+# O(n) traversal: the FIRST element satisfying `pred`, or `Nothing`. Total —
+# an empty structure yields `Nothing`, never a panic.
+export fn find(pred: a -> Bool, xs: c a) -> Maybe a where Foldable c =
+  fold(\ (acc, x) ->
+         match acc with
+         | Just _ -> acc
+         | Nothing -> if pred(x) then Just(x) else Nothing,
+       Nothing, xs)
+
+# O(n) traversal: the first `Just` that `f` produces — search and transform in
+# one step, for when the test and the result share work.
+export fn find_map(f: a -> Maybe b, xs: c a) -> Maybe b where Foldable c =
+  fold(\ (acc, x) -> match acc with | Just _ -> acc | Nothing -> f(x), Nothing, xs)
+
+# O(n), applying `pred` to every element: how many satisfy it.
+export fn count(pred: a -> Bool, xs: c a) -> Int where Foldable c =
+  fold(\ (acc, x) -> if pred(x) then acc + 1 else acc, 0, xs)
+
+# O(n) traversal: whether `x` occurs, by the `Eq` instance rather than by
+# pointer identity. The Foldable-generic form of `list_member`.
+export fn member(x: a, xs: c a) -> Bool where Foldable c, Eq a =
+  any(\y -> eq(y, x), xs)
 
 # O(n): fold exposing the 0-based element index to the step function.
 export fn fold_indexed(f: b -> Int -> a -> b, init: b, xs: f a) -> b where Foldable f =
@@ -1101,6 +1192,10 @@ instance Foldable List
 instance Filterable List
   fn filter_values(pred: a -> Bool, xs: List a) -> List a =
     list_filter(pred, xs)
+  fn filter_map_values(f: a -> Maybe b, xs: List a) -> List b =
+    list_filter_map(f, xs)
+  fn partition_values(pred: a -> Bool, xs: List a) -> (List a, List a) =
+    list_partition(pred, xs)
 
 # O(n·m): the cartesian ("list monad") product — for each x in xs, combine it with
 # every y in ys. This is the instance consistent with a List monad; the pairwise
@@ -1166,6 +1261,10 @@ instance Foldable Vec
 instance Filterable Vec
   fn filter_values(pred: a -> Bool, xs: Vec a) -> Vec a =
     vec_filter(pred, xs)
+  fn filter_map_values(f: a -> Maybe b, xs: Vec a) -> Vec b =
+    vec_filter_map(f, xs)
+  fn partition_values(pred: a -> Bool, xs: Vec a) -> (Vec a, Vec a) =
+    vec_partition(pred, xs)
 
 fn vec_append_flip(acc: Vec a, item: a) -> Vec a =
   vec_append(item, acc)

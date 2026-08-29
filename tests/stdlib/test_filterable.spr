@@ -27,6 +27,14 @@ fn never(n: Int) -> Bool = false
 fn is_adult(p: Person) -> Bool = p.age >= 18
 fn name_of(p: Person) -> String = p.name
 
+# For filter_map: drop and transform in one pass. Halves the even numbers and
+# discards the odd ones, so neither half of the operation is a no-op.
+fn half_if_even(n: Int) -> Maybe Int =
+  if n - (n / 2) * 2 == 0 then Just(n / 2) else Nothing
+
+fn nothing_int(n: Int) -> Maybe Int = Nothing
+fn just_self(n: Int) -> Maybe Int = Just(n)
+
 # Dictionary forwarding. `filter` carries `where Filterable c` and so does this
 # caller, so the dictionary is genuinely PASSED here rather than devirtualized
 # away as it is at a concrete call site. Without a caller of this shape the
@@ -39,6 +47,11 @@ fn keep(pred: a -> Bool, xs: c a) -> c a where Filterable c =
 # side, which is where a mis-slotted dictionary shows up.
 fn evens_doubled(xs: c Int) -> c Int where Filterable c, Functor c =
   map(\n -> n * 2, filter(is_even, xs))
+
+fn halve_evens(xs: c Int) -> c Int where Filterable c = filter_map(half_if_even, xs)
+
+fn split(pred: a -> Bool, xs: c a) -> (c a, c a) where Filterable c =
+  partition(pred, xs)
 
 fn main() -> Unit !{IO} =
   let ints = Cons(1, Cons(2, Cons(3, Cons(4, Cons(5, Nil)))))
@@ -87,5 +100,56 @@ fn main() -> Unit !{IO} =
     check_eq("Filterable and Functor forwarded together over List",
       evens_doubled(ints), Cons(4, Cons(8, Nil))),
     check_eq("Filterable and Functor forwarded together over Vec",
-      evens_doubled(ints_vec), vec_from_list(Cons(4, Cons(8, Nil))))
+      evens_doubled(ints_vec), vec_from_list(Cons(4, Cons(8, Nil)))),
+
+    # --- filter_map: drop and transform in one pass --------------------------
+    check_eq("filter_map over List", filter_map(half_if_even, ints), Cons(1, Cons(2, Nil))),
+    check_eq("filter_map over Vec preserves the container",
+      filter_map(half_if_even, ints_vec), vec_from_list(Cons(1, Cons(2, Nil)))),
+    check_eq("filter_map over Vec agrees with vec_filter_map",
+      filter_map(half_if_even, ints_vec), vec_filter_map(half_if_even, ints_vec)),
+    check_eq("filter_map keeping nothing empties the list",
+      filter_map(nothing_int, ints), nil_int()),
+    check_eq("filter_map keeping nothing empties the vec",
+      filter_map(nothing_int, ints_vec), empty_vec_int()),
+    check_eq("filter_map of the empty list", filter_map(half_if_even, nil_int()), nil_int()),
+    check_eq("filter_map of the empty vec",
+      filter_map(half_if_even, empty_vec_int()), empty_vec_int()),
+    # An always-Just function makes filter_map exactly map, which is the law
+    # tying it to the Functor instance rather than leaving it a separate idea.
+    check_eq("filter_map with an always-Just f is map",
+      filter_map(just_self, ints), map(\n -> n, ints)),
+    # filter p == filter_map (\x -> if p x then Just x else Nothing): the
+    # derivation PureScript and witherable make their class primitive.
+    check_eq("filter is the Just/Nothing case of filter_map",
+      filter(is_even, ints),
+      filter_map(\n -> if is_even(n) then Just(n) else Nothing, ints)),
+
+    # --- partition -----------------------------------------------------------
+    check_eq("partition over List splits yes/no in order",
+      partition(is_even, ints), (Cons(2, Cons(4, Nil)), Cons(1, Cons(3, Cons(5, Nil))))),
+    check_eq("partition over Vec preserves the container",
+      partition(is_even, ints_vec),
+      (vec_from_list(Cons(2, Cons(4, Nil))), vec_from_list(Cons(1, Cons(3, Cons(5, Nil)))))),
+    check_eq("partition of the empty list", partition(is_even, nil_int()), (nil_int(), nil_int())),
+    check_eq("partition of the empty vec",
+      partition(is_even, empty_vec_int()), (empty_vec_int(), empty_vec_int())),
+    check_eq("a predicate that always holds puts everything left",
+      partition(always, ints), (ints, nil_int())),
+    check_eq("a predicate that never holds puts everything right",
+      partition(never, ints), (nil_int(), ints)),
+    # The law that makes partition worth having as a primitive: its two halves
+    # are exactly the two filters, so a caller never needs both spellings.
+    check_eq("partition's left half is filter p",
+      partition(is_even, ints), (filter(is_even, ints), filter(\n -> ! is_even (n), ints))),
+
+    # --- Dictionary forwarding for the new methods ---------------------------
+    check_eq("forwarded filter_map over List", halve_evens(ints), Cons(1, Cons(2, Nil))),
+    check_eq("forwarded filter_map over Vec",
+      halve_evens(ints_vec), vec_from_list(Cons(1, Cons(2, Nil)))),
+    check_eq("forwarded partition over List",
+      split(is_even, ints), (Cons(2, Cons(4, Nil)), Cons(1, Cons(3, Cons(5, Nil))))),
+    check_eq("forwarded partition over Vec",
+      split(is_even, ints_vec),
+      (vec_from_list(Cons(2, Cons(4, Nil))), vec_from_list(Cons(1, Cons(3, Cons(5, Nil))))))
   ])

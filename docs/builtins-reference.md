@@ -263,7 +263,13 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
 - `map(fn, list) -> List`
 - `fold(fn, init, list) -> value`
 - `filter(predicate, xs) -> c a` (`where Filterable c` — `List` or `Vec`, container preserved)
-- `list_filter(predicate, list) -> List`
+- `filter_map(f, xs) -> c b` (`where Filterable c` — drop and transform in one pass)
+- `partition(predicate, xs) -> (c a, c a)` (`where Filterable c` — matches, then non-matches)
+- `any(predicate, xs) -> Bool` / `all(predicate, xs) -> Bool` (`where Foldable c`)
+- `find(predicate, xs) -> Maybe a` / `find_map(f, xs) -> Maybe b` (`where Foldable c`)
+- `count(predicate, xs) -> Int` (`where Foldable c`)
+- `member(x, xs) -> Bool` (`where Foldable c, Eq a`)
+- `list_filter(predicate, list) -> List`, `list_filter_map`, `list_partition`
 - `split_ints(s: String) -> List Int`
 - `Vec a` plus foundational helpers:
   - `vec_empty()`
