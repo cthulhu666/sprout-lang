@@ -40,9 +40,11 @@ Non-goals:
 ```sprout
 class Foldable f
   fn fold_values(step: b -> a -> b, init: b, xs: f a) -> b
+  fn fold_while_values(step: b -> a -> b, cond: b -> Bool, init: b, xs: f a) -> b
 ```
 
-Nothing in it builds an `f`. A fold-derived `filter` must therefore name one
+Nothing in it builds an `f` — `fold_while_values` (added later, `docs/fold-while-v0.md`) no more
+than `fold_values`, since it too only tears a container down. A fold-derived `filter` must therefore name one
 concrete result type — in practice `List` — so `filter` over a `Vec` would
 return a `List`, silently changing the type mid-`|>`-chain and forcing a
 `vec_from_list` at every use. Rebuilding the input container requires the class

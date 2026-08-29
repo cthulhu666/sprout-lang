@@ -146,10 +146,24 @@ allocation per element — i.e. the sentinel's price, paid only by the caller wh
 ## 8. Known hazard for instance authors
 
 Forgetting the `cond` re-check after a recursive descent — the tree case, where the walk must
-re-check between the left subtree and the node — **type-checks and returns correct answers**, and
-silently loses only the short-circuit. The sentinel form cannot be ignored that way, because `Done`
-has to be unwrapped. This is the real cost of the choice, and it is closed by testing the traversal
-rather than the result (§9).
+re-check between the left subtree and the node — type-checks, and silently loses the short-circuit.
+The sentinel form cannot be ignored that way, because `Done` has to be unwrapped. This is the real
+cost of the choice.
+
+**It costs only the short-circuit, and that is a property of the consumers, not a given.** Because
+`fold_while` delegates the stop decision to the instance, a consumer whose step *discarded* the
+accumulator — `\ (acc, x) -> pred(x)` — would be only as correct as the instance is diligent: one
+extra step after the answer is settled overwrites it, and `any` over such an instance returns
+`false` for a container whose first element matches. So every consumer in §4 **latches**: its step
+returns the settled accumulator untouched rather than recomputing from the current element.
+Latching costs nothing, since the walk still stops for a well-behaved instance, and it is what
+makes the hazard above benign rather than wrong-answer-producing.
+
+`tests/stdlib/test_fold_while_instance_robustness.spr` pins this with a deliberately
+under-checking instance that consults `cond` once on entry and then runs both its steps: every
+consumer must still answer correctly over it. The suite fails on non-latching steps — which is how
+this was caught, in review, after the first version of this file claimed the hazard was benign
+without the latch that makes it so.
 
 ## 9. Tests
 
@@ -160,6 +174,9 @@ and merely skipped work returns all 100 elements of the fixture and fails. Cover
 law at `init`, agreement with `fold` under an always-true `cond`, empty structures, dictionary
 forwarding through a `where Foldable c` caller, all five rebuilt consumers, and `count` continuing
 *not* to short-circuit.
+
+`tests/stdlib/test_fold_while_instance_robustness.spr` (12 assertions) covers §8: a user `Foldable`
+instance that under-checks `cond`, against which every consumer must still answer correctly.
 
 ## 10. Deferred
 

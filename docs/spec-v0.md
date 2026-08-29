@@ -2538,6 +2538,13 @@ instance over a non-linear structure re-checks `cond` between substructures, so
 values.  An effectful `cond` is a type error, the same restriction `Foldable`
 imposes on `step`.
 
+An instance that consults `cond` **less** often than every step is a conforming
+`fold` but a non-conforming `fold_while`: it loses the short-circuit.  It must
+not change any answer, and does not, because the combinators above latch — each
+step returns a settled accumulator untouched rather than recomputing it.  A
+step that discarded the accumulator would depend on the instance for its
+correctness rather than only for its speed.
+
 Rationale, prior art, and the rejected `Continue`/`Done` sentinel form:
 `docs/fold-while-v0.md`.
 
