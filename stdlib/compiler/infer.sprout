@@ -6915,7 +6915,7 @@ fn typecheck_decl(
                       # Without this the slot stayed open and the call reached codegen an argument
                       # short of the arity its dictionary parameters imply.
                       finish_let_decl(name, expr,
-                        resolve_dispatch_typed_expr(global_env_dict(env), s1, typed_expr),
+                        resolve_dispatch_typed_expr(global_env_dict(env), s1, set_empty(), typed_expr),
                         s1, let_pos, env, env_ftv, es1a)
   | ast.AliasDecl _ _ _ _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl), env, env_ftv, subst)
@@ -7248,6 +7248,27 @@ fn find_inst_in_return_type_list(class_name: String, items: List types.Type, env
       | Just d -> Just(d)
       | Nothing -> find_inst_in_return_type_list(class_name, rest, env, pos)
 
+# Prepend the instance dict for a dispatch head the final substitution has made
+# concrete. Shared by the return- and input-position paths: once the head is
+# concrete both want the same node, and having one spelling of it keeps them from
+# drifting. Evidence stays `EvUnresolved` — resolve.sprout owns the instance
+# table and reports a missing instance against this position.
+fn concrete_dispatch_call(
+  env: Dict types.Scheme,
+  fn_: typed_ast.TypedExpr,
+  args: List typed_ast.TypedExpr,
+  t: types.Type,
+  pos: source.SourcePos,
+  class_name: String,
+  resolved_t: types.Type
+) -> typed_ast.TypedExpr =
+  typed_ast.TCall(fn_,
+    Cons(typed_ast.TDict(
+      ast.TypeConstraint(class_name, Cons(type_to_typeexpr_with_prog_vars(resolved_t, class_name, env), Nil)),
+      types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved),
+      strip_leading_tdicts(args)),
+    t, pos)
+
 fn try_rewrite_for_return_dispatch(
   env: Dict types.Scheme,
   subst: Dict types.Type,
@@ -7273,28 +7294,34 @@ fn try_rewrite_for_return_dispatch(
       # position rather than letting it reach the linker.
       match concrete_type_str(resolved_t) with
       | Nothing -> keep_or_forward_dispatch(env, subst, fn_, args, t, pos, class_name, resolved_t)
-      | Just _ ->
-          typed_ast.TCall(fn_,
-            Cons(typed_ast.TDict(
-              ast.TypeConstraint(class_name, Cons(type_to_typeexpr_with_prog_vars(resolved_t, class_name, env), Nil)),
-              types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved),
-              strip_leading_tdicts(args)),
-            t, pos)
+      | Just _ -> concrete_dispatch_call(env, fn_, args, t, pos, class_name, resolved_t)
 
 # Input-position dispatch resolves eagerly during inference, so a call that
 # already carries a dict is left exactly as it is — re-deriving it here could only
 # disagree with a decision made on better information.
 #
-# What arrives here dict-less is a FORWARD whose variable was not yet identified
-# with its constraint's variable when check_instance_fwd ran. `find_fwd_tdict_in_args`
-# reads each argument's RAW node type, so a lambda parameter — whose type is a
-# fresh variable until the lambda unifies with the higher-order function's
-# parameter — misses its own marker. That is the `acc ++ x` inside a fold. The
-# declaration's final substitution has since identified the two, so repair it
-# exactly as the return-position path does.
+# What arrives here dict-less resolves one of two ways, and BOTH are repaired
+# here rather than only the first.
 #
-# This is what makes gating the `++` site safe: without the repair, gating turns
-# every such fold into a dictionary-less call.
+# A FORWARD is a variable that was not yet identified with its constraint's
+# variable when check_instance_fwd ran. `find_fwd_tdict_in_args` reads each
+# argument's RAW node type, so a lambda parameter — whose type is a fresh
+# variable until the lambda unifies with the higher-order function's parameter —
+# misses its own marker. That is the `acc ++ x` inside a fold. This is what makes
+# gating the `++` site safe: without the repair, gating turns every such fold
+# into a dictionary-less call.
+#
+# A CONCRETE head reaches here when eager inference could not resolve it and only
+# the final substitution can — a lambda parameter pinned by a later application,
+# as in `let g = \x -> to_string(x) in g(1)`. This path used to bail out on a
+# concrete head, reasoning that inference resolves input positions eagerly so a
+# concrete head with no dict could only mean a missing instance. That holds only
+# when the type WAS known during inference; when the application is what pins it,
+# bailing out left the call dictionary-less and verify_dispatch reported
+# `No instance of ToString for Int` with the instance sitting in the prelude.
+# Injecting here does not assume the instance exists: the dict carries
+# `EvUnresolved`, and resolve.sprout still rejects a genuinely missing one
+# (docs/deferred-dispatch-v0.md).
 fn maybe_forward_input_dispatch(
   env: Dict types.Scheme,
   subst: Dict types.Type,
@@ -7309,11 +7336,10 @@ fn maybe_forward_input_dispatch(
   let Nil = collect_all_tdicts(args) else typed_ast.TCall(fn_, args, t, pos)
       Just resolved_t = dispatch_type_for_vars(method_type, args, t, subst, class_vars)
         else typed_ast.TCall(fn_, args, t, pos)
-      # A concrete head is inference's business, not this pass's: if it resolved
-      # concretely and still has no dict, that is a missing instance, which
-      # verify_dispatch reports against the call's position.
-      Nothing = concrete_type_str(resolved_t) else typed_ast.TCall(fn_, args, t, pos)
-  in keep_or_forward_dispatch(env, subst, fn_, args, t, pos, class_name, resolved_t)
+  in
+    match concrete_type_str(resolved_t) with
+    | Nothing -> keep_or_forward_dispatch(env, subst, fn_, args, t, pos, class_name, resolved_t)
+    | Just _ -> concrete_dispatch_call(env, fn_, args, t, pos, class_name, resolved_t)
 
 # Inject a forwarded dict when the still-polymorphic dispatch variable is one the
 # enclosing declaration declared a constraint for; otherwise leave the call alone.
@@ -7386,13 +7412,26 @@ fn fwd_key_tyvar_matches(key: String, class_name: String, v: types.TyVarId, subs
 fn maybe_rewrite_class_method_call(
   env: Dict types.Scheme,
   subst: Dict types.Type,
+  bound: Set,
   fn_: typed_ast.TypedExpr,
   args: List typed_ast.TypedExpr,
   t: types.Type,
   pos: source.SourcePos
 ) -> typed_ast.TypedExpr =
   match fn_ with
+  # A LOCAL binding may share a class method's or a constrained fn's name — a
+  # parameter, lambda parameter, `let`, do-bind or match binding. `@class:<name>`
+  # and the env entry are GLOBAL registrations and cannot see the shadow, so the
+  # name must be checked against the local scope first: a shadow is not the
+  # method, and rewriting it injects a dict for a class the code never mentioned
+  # (`fn via_param(append: Int -> Int -> Int, x: Int) = append(x, x)` →
+  # `No instance of Semigroup for Int`). verify_dispatch has always skipped these
+  # via its own `locals`; the rewriter reached the same calls but was blind to
+  # scope, and only never mis-rewrote them because it used to decline every
+  # concrete head. tests/stdlib/test_local_shadows_class_method.spr covers this.
   | typed_ast.TVar method_name _ _ ->
+      if set_member(method_name, bound) then typed_ast.TCall(fn_, args, t, pos)
+      else
       match dict_get("@class:" ++ method_name, env) with
       | Nothing -> maybe_rewrite_constrained_fn_call(env, subst, fn_, method_name, args, t, pos)
       | Just class_marker ->
@@ -7414,7 +7453,13 @@ fn maybe_rewrite_class_method_call(
               | _ -> typed_ast.TCall(fn_, args, t, pos)
   | _ -> typed_ast.TCall(fn_, args, t, pos)
 
-fn resolve_dispatch_typed_expr(env: Dict types.Scheme, subst: Dict types.Type, e: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
+# `bound` carries the names bound LOCALLY at each point, and grows at every
+# binding form exactly as verify_dispatch's `locals` does. A callee that names a
+# local shadow is not the class method, so it must not be rewritten — see
+# maybe_rewrite_class_method_call. The rewriter needs this for the same reason
+# the verifier did: `@class:<name>` is a global registration and says nothing
+# about what the name means at this point in the body.
+fn resolve_dispatch_typed_expr(env: Dict types.Scheme, subst: Dict types.Type, bound: Set, e: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
   match e with
   | typed_ast.TVar _ _ _ -> e
   | typed_ast.TInt _ _ _ -> e
@@ -7424,72 +7469,80 @@ fn resolve_dispatch_typed_expr(env: Dict types.Scheme, subst: Dict types.Type, e
   | typed_ast.TChar _ _ _ -> e
   | typed_ast.TUnit _ _ -> e
   | typed_ast.TTuple items t pos ->
-      typed_ast.TTuple(resolve_dispatch_typed_list(env, subst, items), t, pos)
+      typed_ast.TTuple(resolve_dispatch_typed_list(env, subst, bound, items), t, pos)
   | typed_ast.TIf cond then_ else_ t pos ->
-      typed_ast.TIf(resolve_dispatch_typed_expr(env, subst, cond),
-                    resolve_dispatch_typed_expr(env, subst, then_),
-                    resolve_dispatch_typed_expr(env, subst, else_),
+      typed_ast.TIf(resolve_dispatch_typed_expr(env, subst, bound, cond),
+                    resolve_dispatch_typed_expr(env, subst, bound, then_),
+                    resolve_dispatch_typed_expr(env, subst, bound, else_),
                     t, pos)
   | typed_ast.TMatch scrutinee branches t pos ->
-      typed_ast.TMatch(resolve_dispatch_typed_expr(env, subst, scrutinee),
-                       resolve_dispatch_typed_branches(env, subst, branches),
+      typed_ast.TMatch(resolve_dispatch_typed_expr(env, subst, bound, scrutinee),
+                       resolve_dispatch_typed_branches(env, subst, bound, branches),
                        t, pos)
   | typed_ast.TCall fn_ args t pos ->
-      maybe_rewrite_class_method_call(env, subst,
-        resolve_dispatch_typed_expr(env, subst, fn_),
-        resolve_dispatch_typed_list(env, subst, args),
+      maybe_rewrite_class_method_call(env, subst, bound,
+        resolve_dispatch_typed_expr(env, subst, bound, fn_),
+        resolve_dispatch_typed_list(env, subst, bound, args),
         t, pos)
   | typed_ast.TDict _ _ _ _ -> e
   | typed_ast.TMethodRef _ _ _ _ _ -> e
   | typed_ast.TLambda params body t pos ->
-      typed_ast.TLambda(params, resolve_dispatch_typed_expr(env, subst, body), t, pos)
+      typed_ast.TLambda(params, resolve_dispatch_typed_expr(env, subst, bind_params(params, bound), body), t, pos)
   | typed_ast.TBinary op left right t pos ->
-      typed_ast.TBinary(op, resolve_dispatch_typed_expr(env, subst, left), resolve_dispatch_typed_expr(env, subst, right), t, pos)
+      typed_ast.TBinary(op, resolve_dispatch_typed_expr(env, subst, bound, left), resolve_dispatch_typed_expr(env, subst, bound, right), t, pos)
   | typed_ast.TUnary op operand t pos ->
-      typed_ast.TUnary(op, resolve_dispatch_typed_expr(env, subst, operand), t, pos)
+      typed_ast.TUnary(op, resolve_dispatch_typed_expr(env, subst, bound, operand), t, pos)
   | typed_ast.TRange from_ to_ t pos ->
-      typed_ast.TRange(resolve_dispatch_typed_expr(env, subst, from_), resolve_dispatch_typed_expr(env, subst, to_), t, pos)
+      typed_ast.TRange(resolve_dispatch_typed_expr(env, subst, bound, from_), resolve_dispatch_typed_expr(env, subst, bound, to_), t, pos)
   | typed_ast.TDo steps t pos ->
-      typed_ast.TDo(resolve_dispatch_typed_do_steps_local(env, subst, steps), t, pos)
+      typed_ast.TDo(resolve_dispatch_typed_do_steps_local(env, subst, bound, steps), t, pos)
   | typed_ast.TRecord name fields t pos ->
-      typed_ast.TRecord(name, resolve_dispatch_typed_record_fields_local(env, subst, fields), t, pos)
+      typed_ast.TRecord(name, resolve_dispatch_typed_record_fields_local(env, subst, bound, fields), t, pos)
   | typed_ast.TGetField expr field t pos ->
-      typed_ast.TGetField(resolve_dispatch_typed_expr(env, subst, expr), field, t, pos)
+      typed_ast.TGetField(resolve_dispatch_typed_expr(env, subst, bound, expr), field, t, pos)
   | typed_ast.TRecordUpdate base fields t pos ->
-      typed_ast.TRecordUpdate(resolve_dispatch_typed_expr(env, subst, base), resolve_dispatch_typed_record_fields_local(env, subst, fields), t, pos)
+      typed_ast.TRecordUpdate(resolve_dispatch_typed_expr(env, subst, bound, base), resolve_dispatch_typed_record_fields_local(env, subst, bound, fields), t, pos)
 
-fn resolve_dispatch_typed_list(env: Dict types.Scheme, subst: Dict types.Type, xs: List typed_ast.TypedExpr) -> List typed_ast.TypedExpr =
+fn resolve_dispatch_typed_list(env: Dict types.Scheme, subst: Dict types.Type, bound: Set, xs: List typed_ast.TypedExpr) -> List typed_ast.TypedExpr =
   match xs with
   | Nil -> Nil
-  | Cons h t -> Cons(resolve_dispatch_typed_expr(env, subst, h), resolve_dispatch_typed_list(env, subst, t))
+  | Cons h t -> Cons(resolve_dispatch_typed_expr(env, subst, bound, h), resolve_dispatch_typed_list(env, subst, bound, t))
 
-fn resolve_dispatch_typed_branches(env: Dict types.Scheme, subst: Dict types.Type, branches: List typed_ast.TypedMatchBranch) -> List typed_ast.TypedMatchBranch =
+# A branch's pattern binds only within that branch, so each arm extends `bound`
+# from the incoming set rather than from its predecessor.
+fn resolve_dispatch_typed_branches(env: Dict types.Scheme, subst: Dict types.Type, bound: Set, branches: List typed_ast.TypedMatchBranch) -> List typed_ast.TypedMatchBranch =
   match branches with
   | Nil -> Nil
   | Cons h t ->
       match h with
       | typed_ast.TypedMatchBranch pat body ->
-          Cons(typed_ast.TypedMatchBranch(pat, resolve_dispatch_typed_expr(env, subst, body)), resolve_dispatch_typed_branches(env, subst, t))
+          Cons(typed_ast.TypedMatchBranch(pat, resolve_dispatch_typed_expr(env, subst, bind_pattern(pat, bound), body)),
+               resolve_dispatch_typed_branches(env, subst, bound, t))
 
-fn resolve_dispatch_typed_do_steps_local(env: Dict types.Scheme, subst: Dict types.Type, steps: List typed_ast.TypedDoStep) -> List typed_ast.TypedDoStep =
+# Do steps bind SEQUENTIALLY: a name is in scope for the steps below it, but not
+# for its own right-hand side.
+fn resolve_dispatch_typed_do_steps_local(env: Dict types.Scheme, subst: Dict types.Type, bound: Set, steps: List typed_ast.TypedDoStep) -> List typed_ast.TypedDoStep =
   match steps with
   | Nil -> Nil
   | Cons h t ->
       match h with
       | typed_ast.TDoBindStep pat expr ->
-          Cons(typed_ast.TDoBindStep(pat, resolve_dispatch_typed_expr(env, subst, expr)), resolve_dispatch_typed_do_steps_local(env, subst, t))
+          Cons(typed_ast.TDoBindStep(pat, resolve_dispatch_typed_expr(env, subst, bound, expr)),
+               resolve_dispatch_typed_do_steps_local(env, subst, bind_pattern(pat, bound), t))
       | typed_ast.TDoLetStep name expr ->
-          Cons(typed_ast.TDoLetStep(name, resolve_dispatch_typed_expr(env, subst, expr)), resolve_dispatch_typed_do_steps_local(env, subst, t))
+          Cons(typed_ast.TDoLetStep(name, resolve_dispatch_typed_expr(env, subst, bound, expr)),
+               resolve_dispatch_typed_do_steps_local(env, subst, set_insert(name, bound), t))
       | typed_ast.TDoExprStep expr ->
-          Cons(typed_ast.TDoExprStep(resolve_dispatch_typed_expr(env, subst, expr)), resolve_dispatch_typed_do_steps_local(env, subst, t))
+          Cons(typed_ast.TDoExprStep(resolve_dispatch_typed_expr(env, subst, bound, expr)),
+               resolve_dispatch_typed_do_steps_local(env, subst, bound, t))
 
-fn resolve_dispatch_typed_record_fields_local(env: Dict types.Scheme, subst: Dict types.Type, fields: List typed_ast.TypedRecordField) -> List typed_ast.TypedRecordField =
+fn resolve_dispatch_typed_record_fields_local(env: Dict types.Scheme, subst: Dict types.Type, bound: Set, fields: List typed_ast.TypedRecordField) -> List typed_ast.TypedRecordField =
   match fields with
   | Nil -> Nil
   | Cons h t ->
       match h with
       | typed_ast.TypedRecordField name expr ->
-          Cons(typed_ast.TypedRecordField(name, resolve_dispatch_typed_expr(env, subst, expr)), resolve_dispatch_typed_record_fields_local(env, subst, t))
+          Cons(typed_ast.TypedRecordField(name, resolve_dispatch_typed_expr(env, subst, bound, expr)), resolve_dispatch_typed_record_fields_local(env, subst, bound, t))
 
 # ---------------------------------------------------------------------------
 # Soundness validator — detect unresolved TVars in typed AST
@@ -8334,7 +8387,7 @@ fn check_fn_body(
             match fn_linear_gate(params, s2, inst_type, typed_body, fn_pos, env) with
             | linear_check.LinFail lp lm -> (typed_ast.BodyErr(lp, lm), dict_empty(), Nil, subst)
             | linear_check.LinPass ->
-                (typed_ast.BodyOk(resolve_dispatch_typed_expr(fwd_env, s2, typed_body), unifier.apply_subst(s2, inst_type)),
+                (typed_ast.BodyOk(resolve_dispatch_typed_expr(fwd_env, s2, bind_params(params, set_empty()), typed_body), unifier.apply_subst(s2, inst_type)),
                  fwd_markers, canonicalize_constrained_constraints(constraints, prog_to_fresh, s2, inst_type, env_ftv),
                  s2)
   | _ -> (typed_ast.BodyOk(dummy_unit(), types.TConst(types.type_id("Unit"))), dict_empty(), Nil, subst)
@@ -8813,4 +8866,4 @@ fn finish_instance_method_checked(name: String, params: List ast.Param, ret_mayb
   | linear_check.LinFail lp lm -> InstanceMethodErr(lp, lm)
   | linear_check.LinPass ->
       InstanceMethodOk(
-        typed_ast.TypedInstanceMethod(name, params, ret_maybe, eff_maybe, resolve_dispatch_typed_expr(body_env, s2, typed_body)))
+        typed_ast.TypedInstanceMethod(name, params, ret_maybe, eff_maybe, resolve_dispatch_typed_expr(body_env, s2, bind_params(params, set_empty()), typed_body)))
