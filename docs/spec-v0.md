@@ -2420,6 +2420,43 @@ incumbent's key alongside it.  It is necessarily **pure** — `Foldable`'s
 > `Ord Double`, deliberately, because IEEE NaN is unordered (see `BACKLOG.md`).
 > A `Double`-keyed argmin must still be hand-folded until that is resolved.
 
+### `Filterable` class and generic `filter` (Experimental)
+
+```
+class Filterable f
+  fn filter_values(pred: a -> Bool, xs: f a) -> f a
+
+filter(pred: a -> Bool, xs: c a) -> c a where Filterable c   # = filter_values(pred, xs)
+```
+
+`filter` keeps the elements satisfying `pred`, in their original order, and
+returns **the same container kind it was given** — filtering a `Vec` yields a
+`Vec`, not a `List`.  Instances: `List` and `Vec`, the same pair as `Foldable`.
+
+That return position is why this is its own class rather than a `Foldable`
+derivation.  `Foldable.fold_values` only tears a container down; a fold-derived
+`filter` could rebuild just one fixed container type, so `Vec`-in would give
+`List`-out and break a `|>` chain mid-pipeline.  Preserving the container needs
+a class whose variable appears in the result.
+
+The exported combinator is the free function **`filter`**, delegating to
+`filter_values`, mirroring `Functor.fmap`/`map` and `Foldable.fold_values`/`fold`.
+The concrete per-type forms remain available and are what the instances call:
+`list_filter` for `List`, `vec_filter` for `Vec`.
+
+`Filterable` has **no superclass**.  PureScript's `Data.Filterable` requires
+`Compactable` + `Functor` and Haskell's `witherable` requires `Functor`; both
+Sprout instances are `Functor`s anyway, and the constraint would add an
+unused slot to every dictionary without making a method derivable.
+
+`pred` is necessarily **pure** — the class method carries no effect row, so an
+effectful predicate is a type error, the same restriction `Foldable` imposes on
+`fold`'s step.
+
+`filter_map` (filter and transform in one pass) and `partition` are **not**
+generic: `vec_filter_map` exists for `Vec` only, and there is no `partition`
+(tracked in `BACKLOG.md`).
+
 ### `Maybe`/`Result` combinator free functions
 
 Beyond the generic `map` (`Functor`) and `and_then` (`Monad`), the prelude

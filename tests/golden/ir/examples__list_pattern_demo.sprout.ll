@@ -141,86 +141,20 @@ declare i64 @ref_write(i64, i64)
 @.cname.18 = private unnamed_addr constant [35 x i8] c"examples.list_pattern_demo.Unknown\00"
 @.cfkinds.18 = private unnamed_addr constant [2 x i8] c"p\00"
 
-define i64 @filter(i64 %pred$in, i64 %xs$in) {
+define i64 @filter(i64 %pred, i64 %xs, i64 %__tc_Filterable_0_filter_values) {
 entry:
-  %t$17 = alloca i64
-  store i64 %pred$in, ptr %t$17
-  %t$18 = alloca i64
-  store i64 %xs$in, ptr %t$18
-  %t$19 = call ptr @llvm.stacksave()
-  br label %tco_loop
-tco_loop:
-  %pred = load i64, ptr %t$17
-  %xs = load i64, ptr %t$18
-  %t$0 = call i64 @sprout_tag(i64 %xs)
-  br label %arm_0_1
-arm_0_1:
-  %t$3 = add i64 0, 5
-  %t$4 = icmp eq i64 %t$0, %t$3
-  br i1 %t$4, label %body_0_1, label %arm_1_1
-body_0_1:
-  %t$5 = call i64 @sprout_alloc_obj(i64 5, i64 0)
-  br label %join_1
-arm_1_1:
-  %t$6 = add i64 0, 6
-  %t$7 = icmp eq i64 %t$0, %t$6
-  br i1 %t$7, label %body_1_1, label %arm_2_1
-body_1_1:
-  %t$8 = call i64 @sprout_field(i64 %xs, i64 0)
-  %t$9 = call i64 @sprout_field(i64 %xs, i64 1)
-  %t$20 = alloca i64
-  store i64 %pred, ptr %t$20
-  %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
-  %t$22 = alloca i64
-  store i64 %t$8, ptr %t$22
-  %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
-  %t$24 = alloca i64
-  store i64 %t$9, ptr %t$24
-  %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
-  call void @sprout_closure_arity_check(i64 %pred, i64 1)
-  %t$10$env_ptr = inttoptr i64 %pred to ptr
-  %t$10$code = load ptr, ptr %t$10$env_ptr
-  %t$10 = call i64 (i64, i64) %t$10$code(i64 %pred, i64 %t$8)
-  %t$16 = trunc i64 %t$10 to i1
-  %t$26 = call i64 @sprout_gc_pop_roots(i64 3)
-  br i1 %t$16, label %then_11, label %else_11
-then_11:
-  %t$27 = alloca i64
-  store i64 %t$9, ptr %t$27
-  %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
-  %t$29 = alloca i64
-  store i64 %t$8, ptr %t$29
-  %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
-  %t$31 = alloca i64
-  store i64 %pred, ptr %t$31
-  %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
-  %t$13 = call i64 @filter(i64 %pred, i64 %t$9)
-  %t$33 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$34 = alloca i64
-  store i64 %t$13, ptr %t$34
-  %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
-  %t$14 = call i64 @sprout_alloc_obj(i64 6, i64 2)
-  %t$14$ptr = inttoptr i64 %t$14 to ptr
-  %t$14$f0 = getelementptr i64, ptr %t$14$ptr, i64 0
-  store i64 %t$8, ptr %t$14$f0
-  %t$14$f1 = getelementptr i64, ptr %t$14$ptr, i64 1
-  store i64 %t$13, ptr %t$14$f1
-  %t$36 = call i64 @sprout_gc_pop_roots(i64 3)
-  br label %join_11
-else_11:
-  store i64 %pred, ptr %t$17
-  store i64 %t$9, ptr %t$18
-  call void @llvm.stackrestore(ptr %t$19)
-  br label %tco_loop
-join_11:
-  %t$12 = phi i64 [%t$14, %then_11]
-  br label %join_1
-arm_2_1:
-  call void @sprout_abort_match()
-  unreachable
-join_1:
-  %t$2 = phi i64 [%t$5, %body_0_1], [%t$12, %join_11]
-  ret i64 %t$2
+  %t$1 = alloca i64
+  store i64 %xs, ptr %t$1
+  %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
+  %t$3 = alloca i64
+  store i64 %pred, ptr %t$3
+  %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
+  %t$5 = alloca i64
+  store i64 %__tc_Filterable_0_filter_values, ptr %t$5
+  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
+  %t$0 = call i64 @__cm_Filterable_filter_values(i64 %pred, i64 %xs, i64 %__tc_Filterable_0_filter_values)
+  %t$7 = call i64 @sprout_gc_pop_roots(i64 3)
+  ret i64 %t$0
 }
 
 define i64 @examples.list_pattern_demo.parse_args(i64 %args) {
@@ -972,6 +906,15 @@ entry:
   %t$67$ptr = inttoptr i64 %t$66 to ptr
   %t$67 = call i64 @print_str(ptr %t$67$ptr)
   ret i64 %t$67
+}
+
+define i64 @__cm_Filterable_filter_values(i64 %pred, i64 %xs, i64 %__tc_Filterable_0_filter_values) {
+entry:
+  call void @sprout_closure_arity_check(i64 %__tc_Filterable_0_filter_values, i64 2)
+  %t$0$env_ptr = inttoptr i64 %__tc_Filterable_0_filter_values to ptr
+  %t$0$code = load ptr, ptr %t$0$env_ptr
+  %t$0 = call i64 (i64, i64, i64) %t$0$code(i64 %__tc_Filterable_0_filter_values, i64 %pred, i64 %xs)
+  ret i64 %t$0
 }
 
 define i64 @__tc_Semigroup_String_append(i64 %left, i64 %right) {

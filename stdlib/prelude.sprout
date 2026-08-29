@@ -213,12 +213,14 @@ fn list_each_go(f: a -> Unit !{e}, xs: List a) -> Unit !{e} =
         _ <- f(x)
         list_each_go(f, rest)
 
-export fn filter(pred: a -> Bool, xs: List a) -> List a =
+# O(n): keep the elements satisfying `pred`, in order. The concrete List form
+# behind `Filterable List`; generic code wants `filter`.
+export fn list_filter(pred: a -> Bool, xs: List a) -> List a =
   match xs with
   | Nil -> Nil
   | Cons x rest ->
-      if pred(x) then Cons(x, filter(pred, rest))
-      else filter(pred, rest)
+      if pred(x) then Cons(x, list_filter(pred, rest))
+      else list_filter(pred, rest)
 
 export fn list_map(f: a -> b, xs: List a) -> List b =
   list_map_go(f, xs)
@@ -702,6 +704,18 @@ export class Functor f
 export class Foldable f
   fn fold_values(step: b -> a -> b, init: b, xs: f a) -> b
 
+# Filterable is Foldable's structure-preserving counterpart: `f` appears in the
+# RESULT as well as the argument, so filtering a Vec yields a Vec. That return
+# position is the whole reason this is its own class — `Foldable` only tears a
+# container down, so a fold-derived filter could only ever rebuild one fixed
+# container type. No `Functor` superclass (unlike PureScript/witherable): both
+# instances are Functors anyway, and the constraint would only add an unused
+# slot to every dictionary. The method name stays out of the global namespace;
+# `filter` below is the exported combinator (the `fmap`/`map`,
+# `fold_values`/`fold` idiom).
+export class Filterable f
+  fn filter_values(pred: a -> Bool, xs: f a) -> f a
+
 # Applicative (Package C-b shape): the primitive is `map2` (apply an n-ary function
 # to values in a context), NOT `ap`/`<*>` — the latter feeds one wrapped argument at
 # a time, which needs curried partial application that Sprout does not have. `pure`
@@ -728,6 +742,12 @@ export fn map(f: a -> b, xs: c a) -> c b where Functor c =
 
 export fn fold(step: b -> a -> b, init: b, xs: f a) -> b where Foldable f =
   fold_values(step, init, xs)
+
+# O(n) per instance: keep the elements satisfying `pred`, in order, in the same
+# container kind that came in. `pred` is pure — an effectful predicate would
+# need an effect row on the class method, which the dispatcher does not carry.
+export fn filter(pred: a -> Bool, xs: c a) -> c a where Filterable c =
+  filter_values(pred, xs)
 
 # O(n): fold exposing the 0-based element index to the step function.
 export fn fold_indexed(f: b -> Int -> a -> b, init: b, xs: f a) -> b where Foldable f =
@@ -1075,6 +1095,13 @@ instance Foldable List
   fn fold_values(step: b -> a -> b, init: b, xs: List a) -> b =
     list_fold(step, init, xs)
 
+# Delegates to the standalone `list_filter` rather than recursing here: a class
+# method that calls itself from its own instance body fails dictionary
+# resolution today, the same reason `fold_values` above delegates.
+instance Filterable List
+  fn filter_values(pred: a -> Bool, xs: List a) -> List a =
+    list_filter(pred, xs)
+
 # O(n·m): the cartesian ("list monad") product — for each x in xs, combine it with
 # every y in ys. This is the instance consistent with a List monad; the pairwise
 # ("zip") behaviour is a separate ZipList newtype, deferred.
@@ -1135,6 +1162,10 @@ instance Functor Vec
 instance Foldable Vec
   fn fold_values(step: b -> a -> b, init: b, xs: Vec a) -> b =
     vec_fold(step, init, xs)
+
+instance Filterable Vec
+  fn filter_values(pred: a -> Bool, xs: Vec a) -> Vec a =
+    vec_filter(pred, xs)
 
 fn vec_append_flip(acc: Vec a, item: a) -> Vec a =
   vec_append(item, acc)
