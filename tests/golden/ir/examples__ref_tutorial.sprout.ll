@@ -208,7 +208,7 @@ entry:
   ret i64 %t$3
 }
 
-define i64 @fold(i64 %step, i64 %init, i64 %xs, i64 %__tc_Foldable_0_fold_values) {
+define i64 @fold(i64 %step, i64 %init, i64 %xs, i64 %__tc_Foldable_0_fold_values, i64 %__tc_Foldable_0_fold_while_values) {
 entry:
   %t$1 = alloca i64
   store i64 %xs, ptr %t$1
@@ -220,10 +220,13 @@ entry:
   store i64 %init, ptr %t$5
   %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
   %t$7 = alloca i64
-  store i64 %__tc_Foldable_0_fold_values, ptr %t$7
+  store i64 %__tc_Foldable_0_fold_while_values, ptr %t$7
   %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
-  %t$0 = call i64 @__cm_Foldable_fold_values(i64 %step, i64 %init, i64 %xs, i64 %__tc_Foldable_0_fold_values)
-  %t$9 = call i64 @sprout_gc_pop_roots(i64 4)
+  %t$9 = alloca i64
+  store i64 %__tc_Foldable_0_fold_values, ptr %t$9
+  %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
+  %t$0 = call i64 @__cm_Foldable_fold_values(i64 %step, i64 %init, i64 %xs, i64 %__tc_Foldable_0_fold_values, i64 %__tc_Foldable_0_fold_while_values)
+  %t$11 = call i64 @sprout_gc_pop_roots(i64 5)
   ret i64 %t$0
 }
 
@@ -435,7 +438,7 @@ entry:
   ret i64 %t$3
 }
 
-define i64 @max_by(i64 %f, i64 %xs, i64 %__tc_Foldable_0_fold_values, i64 %__tc_Ord_1_compare, i64 %__tc_Eq_1_eq) {
+define i64 @max_by(i64 %f, i64 %xs, i64 %__tc_Foldable_0_fold_values, i64 %__tc_Foldable_0_fold_while_values, i64 %__tc_Ord_1_compare, i64 %__tc_Eq_1_eq) {
 entry:
   %t$4 = alloca i64
   store i64 %xs, ptr %t$4
@@ -447,11 +450,14 @@ entry:
   store i64 %__tc_Ord_1_compare, ptr %t$8
   %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
   %t$10 = alloca i64
-  store i64 %__tc_Foldable_0_fold_values, ptr %t$10
+  store i64 %__tc_Foldable_0_fold_while_values, ptr %t$10
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
   %t$12 = alloca i64
-  store i64 %__tc_Eq_1_eq, ptr %t$12
+  store i64 %__tc_Foldable_0_fold_values, ptr %t$12
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
+  %t$14 = alloca i64
+  store i64 %__tc_Eq_1_eq, ptr %t$14
+  %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
   %t$0 = call i64 @sprout_alloc_closure(i64 32, i64 2)
   %t$0$raw = inttoptr i64 %t$0 to ptr
   store ptr @__sprout_ir_lambda_0, ptr %t$0$raw
@@ -461,21 +467,21 @@ entry:
   store i64 %__tc_Ord_1_compare, ptr %t$0$raw$slot$2
   %t$0$raw$slot$3 = getelementptr i64, ptr %t$0$raw, i64 3
   store i64 %f, ptr %t$0$raw$slot$3
-  %t$14 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$15 = alloca i64
-  store i64 %t$0, ptr %t$15
-  %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
-  %t$1 = call i64 @sprout_alloc_obj(i64 0, i64 0)
+  %t$16 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$17 = alloca i64
-  store i64 %t$1, ptr %t$17
+  store i64 %t$0, ptr %t$17
   %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
-  %t$2 = call i64 @fold(i64 %t$0, i64 %t$1, i64 %xs, i64 %__tc_Foldable_0_fold_values)
-  %t$19 = call i64 @sprout_gc_pop_roots(i64 6)
-  %t$20 = alloca i64
-  store i64 %t$2, ptr %t$20
-  %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
+  %t$1 = call i64 @sprout_alloc_obj(i64 0, i64 0)
+  %t$19 = alloca i64
+  store i64 %t$1, ptr %t$19
+  %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
+  %t$2 = call i64 @fold(i64 %t$0, i64 %t$1, i64 %xs, i64 %__tc_Foldable_0_fold_values, i64 %__tc_Foldable_0_fold_while_values)
+  %t$21 = call i64 @sprout_gc_pop_roots(i64 7)
+  %t$22 = alloca i64
+  store i64 %t$2, ptr %t$22
+  %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
   %t$3 = call i64 @keyed_value(i64 %t$2)
-  %t$22 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$24 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$3
 }
 
@@ -484,7 +490,7 @@ entry:
   ret i64 %value
 }
 
-define i64 @maximum(i64 %xs, i64 %__tc_Foldable_0_fold_values, i64 %__tc_Ord_1_compare, i64 %__tc_Eq_1_eq) {
+define i64 @maximum(i64 %xs, i64 %__tc_Foldable_0_fold_values, i64 %__tc_Foldable_0_fold_while_values, i64 %__tc_Ord_1_compare, i64 %__tc_Eq_1_eq) {
 entry:
   %t$2 = alloca i64
   store i64 %xs, ptr %t$2
@@ -493,19 +499,22 @@ entry:
   store i64 %__tc_Ord_1_compare, ptr %t$4
   %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
   %t$6 = alloca i64
-  store i64 %__tc_Foldable_0_fold_values, ptr %t$6
+  store i64 %__tc_Foldable_0_fold_while_values, ptr %t$6
   %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
   %t$8 = alloca i64
-  store i64 %__tc_Eq_1_eq, ptr %t$8
+  store i64 %__tc_Foldable_0_fold_values, ptr %t$8
   %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
+  %t$10 = alloca i64
+  store i64 %__tc_Eq_1_eq, ptr %t$10
+  %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
   %t$0 = call i64 @sprout_alloc_closure(i64 8, i64 1)
   %t$0$raw = inttoptr i64 %t$0 to ptr
   store ptr @__sprout_ir_lambda_1, ptr %t$0$raw
-  %t$10 = alloca i64
-  store i64 %t$0, ptr %t$10
-  %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
-  %t$1 = call i64 @max_by(i64 %t$0, i64 %xs, i64 %__tc_Foldable_0_fold_values, i64 %__tc_Ord_1_compare, i64 %__tc_Eq_1_eq)
-  %t$12 = call i64 @sprout_gc_pop_roots(i64 5)
+  %t$12 = alloca i64
+  store i64 %t$0, ptr %t$12
+  %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
+  %t$1 = call i64 @max_by(i64 %t$0, i64 %xs, i64 %__tc_Foldable_0_fold_values, i64 %__tc_Foldable_0_fold_while_values, i64 %__tc_Ord_1_compare, i64 %__tc_Eq_1_eq)
+  %t$14 = call i64 @sprout_gc_pop_roots(i64 6)
   ret i64 %t$1
 }
 
@@ -1164,7 +1173,7 @@ entry:
   ret i64 %t$0
 }
 
-define i64 @__cm_Foldable_fold_values(i64 %step, i64 %init, i64 %xs, i64 %__tc_Foldable_0_fold_values) {
+define i64 @__cm_Foldable_fold_values(i64 %step, i64 %init, i64 %xs, i64 %__tc_Foldable_0_fold_values, i64 %__tc_Foldable_0_fold_while_values) {
 entry:
   call void @sprout_closure_arity_check(i64 %__tc_Foldable_0_fold_values, i64 3)
   %t$0$env_ptr = inttoptr i64 %__tc_Foldable_0_fold_values to ptr

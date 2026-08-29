@@ -251,6 +251,18 @@ export fn list_map(f: a -> b, xs: List a) -> List b =
 export fn list_fold(step: b -> a -> b !{e}, init: b, xs: List a) -> b !{e} =
   list_fold_go(step, init, xs)
 
+# O(k) in the elements visited, not O(n): the walk itself stops, so the tail of
+# the list is never reached. `cond` is a CONTINUE condition, like `take_while`'s
+# — folding proceeds while it holds of the accumulator. Pure, unlike
+# `list_fold`: the accumulator is queried between steps and an effectful `cond`
+# would fire an effect per element for a question about a value.
+export fn list_fold_while(step: b -> a -> b, cond: b -> Bool, init: b, xs: List a) -> b =
+  if ! cond (init) then init
+  else
+    match xs with
+    | Nil -> init
+    | Cons x rest -> list_fold_while(step, cond, step(init, x), rest)
+
 # O(n): imperative traversal; `f` runs for its effect on each element.
 export fn list_each(f: a -> Unit !{e}, xs: List a) -> Unit !{e} =
   list_each_go(f, xs)
@@ -338,6 +350,21 @@ fn vec_fold_indexed(f: b -> a -> b, acc: b, vec: Vec a, index: Int, total: Int) 
 export fn vec_fold(f: b -> a -> b, init: b, vec: Vec a) -> b =
   vec_fold_indexed(f, init, vec, 0, vec_length(vec))
 
+fn vec_fold_while_indexed(step: b -> a -> b, cond: b -> Bool, acc: b, vec: Vec a,
+                          index: Int, total: Int) -> b =
+  if ! cond (acc) then acc
+  else if index >= total then acc
+  else
+    match vec_get(index, vec) with
+    | Nothing -> acc
+    | Just value -> vec_fold_while_indexed(step, cond, step(acc, value), vec, index + 1, total)
+
+# O(k) in the elements visited: the index walk stops, so the tail of the vector
+# is never read. See `list_fold_while` for why `cond` is pure and why it reads
+# as a continue condition.
+export fn vec_fold_while(step: b -> a -> b, cond: b -> Bool, init: b, vec: Vec a) -> b =
+  vec_fold_while_indexed(step, cond, init, vec, 0, vec_length(vec))
+
 fn vec_filter_indexed(pred: a -> Bool, vec: Vec a, index: Int, total: Int, acc: List a) -> Vec a =
   if index >= total then vec_from_list(list_reverse_go(acc, Nil))
   else
@@ -382,25 +409,14 @@ fn vec_partition_indexed(pred: a -> Bool, vec: Vec a, index: Int, total: Int,
 export fn vec_partition(pred: a -> Bool, vec: Vec a) -> (Vec a, Vec a) =
   vec_partition_indexed(pred, vec, 0, vec_length(vec), Nil, Nil)
 
-fn vec_any_indexed(pred: a -> Bool, vec: Vec a, index: Int, total: Int) -> Bool =
-  if index >= total then false
-  else
-    match vec_get(index, vec) with
-    | Nothing -> false
-    | Just value -> if pred(value) then true else vec_any_indexed(pred, vec, index + 1, total)
-
+# Both stop at the deciding element, and both are now the generic `any`/`all`
+# specialised to `Vec` rather than a second hand-written index loop — the two
+# spellings cannot drift apart in behaviour or in complexity.
 export fn vec_any(pred: a -> Bool, vec: Vec a) -> Bool =
-  vec_any_indexed(pred, vec, 0, vec_length(vec))
-
-fn vec_all_indexed(pred: a -> Bool, vec: Vec a, index: Int, total: Int) -> Bool =
-  if index >= total then true
-  else
-    match vec_get(index, vec) with
-    | Nothing -> true
-    | Just value -> if pred(value) then vec_all_indexed(pred, vec, index + 1, total) else false
+  vec_fold_while(\ (acc, x) -> pred(x), \acc -> ! acc, false, vec)
 
 export fn vec_all(pred: a -> Bool, vec: Vec a) -> Bool =
-  vec_all_indexed(pred, vec, 0, vec_length(vec))
+  vec_fold_while(\ (acc, x) -> pred(x), \acc -> acc, true, vec)
 
 fn vec_count_indexed(pred: a -> Bool, vec: Vec a, index: Int, total: Int, acc: Int) -> Int =
   if index >= total then acc
@@ -739,8 +755,19 @@ export class Monoid t where Semigroup t
 export class Functor f
   fn fmap(f: a -> b, xs: f a) -> f b
 
+# Two methods, not one. `fold_values` is a LEFT fold and so cannot stop early —
+# the same reason Haskell's `foldl` cannot and its `foldr` can (laziness in the
+# second argument, which a strict language has no equivalent of). Sprout has
+# neither laziness nor an iterator protocol, so an early exit has to be a
+# primitive: nothing derived from `fold_values` can stop the walk, only stop
+# doing work. `fold_while_values` is that primitive. Both are mandatory —
+# classes carry no default bodies — but an instance may derive the plain one
+# from its own `fold_while` helper with a constant `cond` if it prefers to write
+# one loop, which is why this is a second method rather than a replacement:
+# deriving the other direction would tax every fold in the language.
 export class Foldable f
   fn fold_values(step: b -> a -> b, init: b, xs: f a) -> b
+  fn fold_while_values(step: b -> a -> b, cond: b -> Bool, init: b, xs: f a) -> b
 
 # Filterable is Foldable's structure-preserving counterpart: `f` appears in the
 # RESULT as well as the argument, so filtering a Vec yields a Vec. That return
@@ -789,6 +816,17 @@ export fn map(f: a -> b, xs: c a) -> c b where Functor c =
 export fn fold(step: b -> a -> b, init: b, xs: f a) -> b where Foldable f =
   fold_values(step, init, xs)
 
+# O(k) in the elements visited: folds while `cond` holds of the accumulator and
+# STOPS WALKING as soon as it does not. `cond` is a continue condition, reading
+# as `take_while`'s does.
+#
+# THE LAW: `fold_while` returns the first accumulator — `init` included — for
+# which `cond` answers false; with no such accumulator it is exactly `fold`.
+# `cond` is pure and may be asked more than once about equal values, because a
+# non-linear instance re-checks it between substructures.
+export fn fold_while(step: b -> a -> b, cond: b -> Bool, init: b, xs: f a) -> b where Foldable f =
+  fold_while_values(step, cond, init, xs)
+
 # O(n) per instance: keep the elements satisfying `pred`, in order, in the same
 # container kind that came in. `pred` is pure — an effectful predicate would
 # need an effect row on the class method, which the dispatcher does not carry.
@@ -805,31 +843,31 @@ export fn filter_map(f: a -> Maybe b, xs: c a) -> c b where Filterable c =
 export fn partition(pred: a -> Bool, xs: c a) -> (c a, c a) where Filterable c =
   partition_values(pred, xs)
 
-# O(n) TRAVERSAL: true when some element satisfies `pred`. `Foldable` has no
-# early exit, so every element is visited even after the answer is settled;
-# `pred` itself is not applied again once it is. `vec_any` short-circuits both
-# and stays the faster spelling for a Vec.
+# O(k) up to the deciding element: true when some element satisfies `pred`. The
+# traversal STOPS at the first hit — `fold_while` is what buys that, and it is
+# why these five are built on it rather than on `fold`. `vec_any` is this same
+# function specialised to `Vec`, not a faster one.
 export fn any(pred: a -> Bool, xs: c a) -> Bool where Foldable c =
-  fold(\ (acc, x) -> if acc then acc else pred(x), false, xs)
+  fold_while(\ (acc, x) -> pred(x), \acc -> ! acc, false, xs)
 
-# O(n) traversal, same early-exit caveat as `any`. True for an empty structure
-# — the vacuous case, matching every language that ships this pair.
+# O(k) up to the first element failing `pred`. True for an empty structure — the
+# vacuous case, matching every language that ships this pair.
 export fn all(pred: a -> Bool, xs: c a) -> Bool where Foldable c =
-  fold(\ (acc, x) -> if acc then pred(x) else acc, true, xs)
+  fold_while(\ (acc, x) -> pred(x), \acc -> acc, true, xs)
 
-# O(n) traversal: the FIRST element satisfying `pred`, or `Nothing`. Total —
-# an empty structure yields `Nothing`, never a panic.
+# O(k) up to the match: the FIRST element satisfying `pred`, or `Nothing`. Total
+# — an empty structure yields `Nothing`, never a panic.
 export fn find(pred: a -> Bool, xs: c a) -> Maybe a where Foldable c =
-  fold(\ (acc, x) ->
-         match acc with
-         | Just _ -> acc
-         | Nothing -> if pred(x) then Just(x) else Nothing,
-       Nothing, xs)
+  fold_while(\ (acc, x) -> if pred(x) then Just(x) else acc,
+             \acc -> match acc with | Just _ -> false | Nothing -> true,
+             Nothing, xs)
 
-# O(n) traversal: the first `Just` that `f` produces — search and transform in
-# one step, for when the test and the result share work.
+# O(k) up to the match: the first `Just` that `f` produces — search and
+# transform in one step, for when the test and the result share work.
 export fn find_map(f: a -> Maybe b, xs: c a) -> Maybe b where Foldable c =
-  fold(\ (acc, x) -> match acc with | Just _ -> acc | Nothing -> f(x), Nothing, xs)
+  fold_while(\ (acc, x) -> f(x),
+             \acc -> match acc with | Just _ -> false | Nothing -> true,
+             Nothing, xs)
 
 # O(n), applying `pred` to every element: how many satisfy it.
 export fn count(pred: a -> Bool, xs: c a) -> Int where Foldable c =
@@ -1185,6 +1223,8 @@ instance Functor (Result e)
 instance Foldable List
   fn fold_values(step: b -> a -> b, init: b, xs: List a) -> b =
     list_fold(step, init, xs)
+  fn fold_while_values(step: b -> a -> b, cond: b -> Bool, init: b, xs: List a) -> b =
+    list_fold_while(step, cond, init, xs)
 
 # Delegates to the standalone `list_filter` rather than recursing here: a class
 # method that calls itself from its own instance body fails dictionary
@@ -1257,6 +1297,8 @@ instance Functor Vec
 instance Foldable Vec
   fn fold_values(step: b -> a -> b, init: b, xs: Vec a) -> b =
     vec_fold(step, init, xs)
+  fn fold_while_values(step: b -> a -> b, cond: b -> Bool, init: b, xs: Vec a) -> b =
+    vec_fold_while(step, cond, init, xs)
 
 instance Filterable Vec
   fn filter_values(pred: a -> Bool, xs: Vec a) -> Vec a =

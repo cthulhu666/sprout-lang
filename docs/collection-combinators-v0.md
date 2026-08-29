@@ -124,16 +124,20 @@ partitions in one pass, and `min_by`/`max_by` already made "applied exactly
 once per element" a documented guarantee; breaking it here would be
 inconsistent within one prelude.
 
-**The `Foldable` consumers cannot short-circuit the traversal.**
-`fold_values` has no early exit, so `any`/`all`/`find`/`find_map`/`member`
-visit every element even after the answer is settled. The predicate itself is
-not re-applied once it is, so the cost is *O(n) traversal with at most k
-predicate calls*. `vec_any`/`vec_all` short-circuit both and remain the faster
-spelling for a `Vec`. PureScript has the identical limitation for the identical
-reason — it is strict and derives these from `foldMap`; Rust and Scala escape
-it only by having an iterator protocol, which Sprout does not. Fixing this
-needs a short-circuiting primitive on `Foldable` (e.g. `fold_while`), which
-would change no signature here.
+**The `Foldable` consumers could not short-circuit the traversal — RESOLVED
+2026-08-29 by `fold_while` (`docs/fold-while-v0.md`).** As shipped here,
+`fold_values` had no early exit, so `any`/`all`/`find`/`find_map`/`member`
+visited every element even after the answer was settled: *O(n) traversal with
+at most k predicate calls*, the identical limitation PureScript has for the
+identical reason (strict, derives these from a fold), where Rust and Scala
+escape only via an iterator protocol Sprout does not have. `Foldable` now
+carries a second method, `fold_while_values`, and all five are rebuilt on it,
+so each stops at the deciding element. No signature here changed, exactly as
+predicted. Two consequences for the text above: `vec_any`/`vec_all` are no
+longer "the faster spelling for a `Vec`" — they are these same functions
+specialised to `Vec`, and their hand-written index loops are deleted — and
+`count` is now the only consumer that still visits everything, which is
+inherent rather than a limitation.
 
 ## 7. Deferred
 
