@@ -262,7 +262,8 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
 - `Maybe a` (`Just`, `Nothing`)
 - `map(fn, list) -> List`
 - `fold(fn, init, list) -> value`
-- `filter(predicate, list) -> List`
+- `filter(predicate, xs) -> c a` (`where Filterable c` — `List` or `Vec`, container preserved)
+- `list_filter(predicate, list) -> List`
 - `split_ints(s: String) -> List Int`
 - `Vec a` plus foundational helpers:
   - `vec_empty()`

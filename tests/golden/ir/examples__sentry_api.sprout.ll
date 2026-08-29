@@ -1276,7 +1276,7 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @filter(i64 %pred$in, i64 %xs$in) {
+define i64 @list_filter(i64 %pred$in, i64 %xs$in) {
 entry:
   %t$17 = alloca i64
   store i64 %pred$in, ptr %t$17
@@ -1329,7 +1329,7 @@ then_11:
   %t$31 = alloca i64
   store i64 %pred, ptr %t$31
   %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
-  %t$13 = call i64 @filter(i64 %pred, i64 %t$9)
+  %t$13 = call i64 @list_filter(i64 %pred, i64 %t$9)
   %t$33 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$34 = alloca i64
   store i64 %t$13, ptr %t$34
@@ -5424,6 +5424,22 @@ entry:
   %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
   %t$0 = call i64 @__cm_Foldable_fold_values(i64 %step, i64 %init, i64 %xs, i64 %__tc_Foldable_0_fold_values)
   %t$9 = call i64 @sprout_gc_pop_roots(i64 4)
+  ret i64 %t$0
+}
+
+define i64 @filter(i64 %pred, i64 %xs, i64 %__tc_Filterable_0_filter_values) {
+entry:
+  %t$1 = alloca i64
+  store i64 %xs, ptr %t$1
+  %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
+  %t$3 = alloca i64
+  store i64 %pred, ptr %t$3
+  %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
+  %t$5 = alloca i64
+  store i64 %__tc_Filterable_0_filter_values, ptr %t$5
+  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
+  %t$0 = call i64 @__cm_Filterable_filter_values(i64 %pred, i64 %xs, i64 %__tc_Filterable_0_filter_values)
+  %t$7 = call i64 @sprout_gc_pop_roots(i64 3)
   ret i64 %t$0
 }
 
@@ -19253,6 +19269,15 @@ entry:
   ret i64 %t$0
 }
 
+define i64 @__cm_Filterable_filter_values(i64 %pred, i64 %xs, i64 %__tc_Filterable_0_filter_values) {
+entry:
+  call void @sprout_closure_arity_check(i64 %__tc_Filterable_0_filter_values, i64 2)
+  %t$0$env_ptr = inttoptr i64 %__tc_Filterable_0_filter_values to ptr
+  %t$0$code = load ptr, ptr %t$0$env_ptr
+  %t$0 = call i64 (i64, i64, i64) %t$0$code(i64 %__tc_Filterable_0_filter_values, i64 %pred, i64 %xs)
+  ret i64 %t$0
+}
+
 define i64 @__cm_Applicative_pure(i64 %x, i64 %__tc_Applicative_0_pure, i64 %__tc_Applicative_0_map2, i64 %__tc_Functor_0_fmap) {
 entry:
   call void @sprout_closure_arity_check(i64 %__tc_Applicative_0_pure, i64 1)
@@ -21452,6 +21477,19 @@ entry:
   ret i64 %t$0
 }
 
+define i64 @__tc_Filterable_List_filter_values(i64 %pred, i64 %xs) {
+entry:
+  %t$1 = alloca i64
+  store i64 %xs, ptr %t$1
+  %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
+  %t$3 = alloca i64
+  store i64 %pred, ptr %t$3
+  %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
+  %t$0 = call i64 @list_filter(i64 %pred, i64 %xs)
+  %t$5 = call i64 @sprout_gc_pop_roots(i64 2)
+  ret i64 %t$0
+}
+
 define i64 @__tc_Applicative_List_pure(i64 %x) {
 entry:
   %t$2 = alloca i64
@@ -21700,6 +21738,19 @@ entry:
   %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
   %t$0 = call i64 @vec_fold(i64 %step, i64 %init, i64 %xs)
   %t$7 = call i64 @sprout_gc_pop_roots(i64 3)
+  ret i64 %t$0
+}
+
+define i64 @__tc_Filterable_Vec_filter_values(i64 %pred, i64 %xs) {
+entry:
+  %t$1 = alloca i64
+  store i64 %xs, ptr %t$1
+  %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
+  %t$3 = alloca i64
+  store i64 %pred, ptr %t$3
+  %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
+  %t$0 = call i64 @vec_filter(i64 %pred, i64 %xs)
+  %t$5 = call i64 @sprout_gc_pop_roots(i64 2)
   ret i64 %t$0
 }
 
