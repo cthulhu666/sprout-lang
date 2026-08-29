@@ -2827,6 +2827,44 @@ what the LSP actually does: `docs/language-server-roadmap.md`.
   (highlighting works everywhere). LSP4IJ (Red Hat, EPL-2.0, 2024.2+) would close that gap at the
   cost of a third-party runtime dependency.
 
+### 7.7) Codebase-memory-mcp indexing for Sprout
+
+Full plan of record: `docs/tree-sitter-sprout-support.md` (rewritten 2026-08-29 — the previous
+version's status block was wrong about what exists).
+
+- [ ] `P2` **`codebase-memory-mcp` cannot index Sprout, and the half-built fix has been sitting
+  unmerged since April.** CBM's project for this repo holds **1 node, 0 edges** — the bare
+  `Project` node — so `search_graph`, `get_architecture` and `trace_call_path` are useless on
+  Sprout, including on `uncharted-suns`. The C-side wiring already exists on two unmerged
+  branches of the fork `cthulhu666/codebase-memory-mcp` (`codex/sprout-support` `434926e`,
+  `codex/sprout-index-persistence-fix` `70f55b0`): vendored grammar, `CBM_LANG_SPROUT`, a full
+  `lang_specs.c` row, extractor cases, `THIRD_PARTY.md` row, tests. **It did not stall on
+  Sprout** — it stalled on a CBM *core* defect, recorded in `94d30b0`: *"The direct page writer
+  currently produces inconsistent on-disk graphs for mixed real-world projects, including Sprout
+  indexing."* `cbm_write_db` is still the live path on CBM `main`, and the fork has never fetched
+  `upstream/main` (four months behind), so the first question is whether DeusData already fixed
+  it. Scope decided 2026-08-29: **full expression coverage in one pass**, not declarations-only —
+  without `CALLS` edges the index offers little over grep.
+- [ ] `P2` **`tree-sitter-sprout/` is ungated and has drifted from the language.** No `justfile`
+  recipe runs `tree-sitter` at all, so nothing has ever checked the grammar against real source.
+  It is a self-declared conservative scaffold with 14 verified divergences — records are `( f: T )`
+  but the grammar says `{ }`; field access is postfix `e.f` but the grammar has `get e f`; and
+  `extern` (141 uses), `deriving` (206 uses), `wrap`, `linear`, `(..)`, `|>`, effect rows `!{IO}`,
+  `let..in` / `let..else`, `with (…)` and the operators `++ >> << .. %` are absent outright. The
+  fix has a prerequisite: **build the measuring instrument first** — `scripts/ts_parse_coverage.sh`
+  over all 801 files plus a `just tree-sitter-test` recipe — because tree-sitter degrades to
+  `ERROR` nodes silently, so without a corpus-wide rate you cannot tell 95% coverage from 40%.
+  `sproutd --analysis-service` is a ready-made differential oracle: diff its
+  `symbol_locations_in_source` against the `queries/tags.scm` captures per file.
+- [ ] `P3` **`.spr` was never registered with CBM.** The April branch added only `.sprout` to
+  `EXT_TABLE`, which misses **654 of 801** Sprout files — the entire test corpus. No collision:
+  CBM has no `.spr*` entry today. Also needs a `cbm_is_test_file()` case, since `.spr` files are
+  non-importable entrypoint scripts rather than library modules.
+- [ ] `P3` **CBM's `TEST(sprout_basics)` asserts on syntax Sprout does not have.** It uses
+  `type Person = { name: String }`, matching the grammar's wrong record rule rather than the
+  language. A test written against a buggy grammar passes and locks the bug in; rewrite it to
+  `( name: String )` alongside the grammar fix.
+
 ### 8) Runtime and FFI Foundations for Database Clients
 
 - [x] `P0` Define a safer representation for external resource handles (currently `stdlib.net` wrapper ADTs; true opacity still depends on hidden constructors).
