@@ -1,0 +1,53 @@
+import stdlib.task (TimeoutResult, Completed, Expired, with_timeout)
+import stdlib.terminal as terminal
+
+# A with_timeout that expires while a task is parked on stdin must NOT close fd 0.
+#
+# This is the regression test for the park-variant mix-up. `unowned` in
+# scheduler_park_on_unowned_fd_timeout does not mean "an fd we may not close" -- it
+# means "no handle table owns this fd, so the parked frame is its only reference
+# and a force-drop must close it or leak it". It sets park_close_fd, and
+# force_drop_task then close()s it. Correct for an in-flight connect(); catastrophic
+# for stdin, which the process owns outright and which must outlive any one read.
+#
+# RED (the park routed through the unowned entry point): the expiry force-drops the
+# parked task and closes fd 0, so the SECOND read below hits a closed descriptor and
+# answers `stdin-broken-after-cancel`. Worse in a real program than the message
+# suggests -- fd 0 is then free, so the next open/socket/accept is handed it and a
+# later read_avail silently reads an unrelated descriptor.
+# GREEN: `stdin-survived-cancel`.
+#
+# Ordinary gates cannot catch this. Every other stdin fixture completes its read, so
+# no force-drop ever happens; the defect needs a cancel or timeout ACROSS a park,
+# which is precisely the case none of them exercise.
+fn describe(input: terminal.TermInput) -> String =
+  match input with
+  | terminal.TermBytes _ -> "bytes"
+  | terminal.TermIdle -> "idle"
+  | terminal.TermResized -> "resized"
+  | terminal.TermEof -> "eof"
+  | terminal.TermFailed msg -> "failed " ++ msg
+
+# stdin still WORKS if it answers with any ordinary outcome. `TermFailed` is the
+# one verdict that means the descriptor itself is gone (EBADF), so it -- not the
+# absence of bytes -- is what distinguishes a closed fd from a quiet one.
+fn still_usable(input: terminal.TermInput) -> Bool =
+  match input with
+  | terminal.TermFailed _ -> false
+  | _ -> true
+
+fn main() -> Unit !{IO} =
+  do
+    # Park on stdin under a deadline that fires first: 150ms budget against a
+    # 5000ms read, with nothing on stdin yet.
+    outcome <- with_timeout(150, \_ -> terminal.read_avail(64, 5000))
+    _ <- match outcome with
+         | Expired -> terminal.write("read force-dropped as expected\n")
+         | Completed input -> terminal.write("read returned early: " ++ describe(input) ++ "\n")
+
+    # The load-bearing half: stdin must still be a live descriptor afterwards.
+    after <- terminal.read_avail(64, 1000)
+    if still_usable(after) then
+      terminal.write("stdin-survived-cancel (" ++ describe(after) ++ ")\n")
+    else
+      terminal.write("stdin-broken-after-cancel (" ++ describe(after) ++ ")\n")

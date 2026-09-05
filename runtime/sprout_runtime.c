@@ -3608,14 +3608,30 @@ long long term_raw_enter(void) {
 }
 
 long long term_raw_exit(void) {
+  int was_held = g_term_raw_held;
   term_restore_on_exit();
+  if (was_held) {
+    /* Put SIGWINCH back the way we found it and drop any resize recorded while we
+     * held the terminal. Leaving the handler armed would let a later resize set the
+     * flag with nobody to act on it, and the next read_avail — possibly in a
+     * non-TUI phase of the same program, reading piped stdin — would answer
+     * TermResized for a window nothing is drawing to. */
+    signal(SIGWINCH, SIG_DFL);
+    __atomic_store_n(&g_term_winch, 0, __ATOMIC_RELAXED);
+  }
   return 0;
 }
 
 long long term_size(void) {
   long long rows = 24, cols = 80;
   struct winsize ws;
-  if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_row > 0 && ws.ws_col > 0) {
+  /* stdout, then stderr, then stdin. Asking only stdout gets the fallback wrong for
+   * `prog > log.txt` run from a terminal: fd 1 is a file, but fds 2 and 0 are still
+   * the tty and know the real size. Any of the three answering is better evidence
+   * than the 24x80 default. */
+  if ((ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_row > 0 && ws.ws_col > 0) ||
+      (ioctl(STDERR_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_row > 0 && ws.ws_col > 0) ||
+      (ioctl(STDIN_FILENO,  TIOCGWINSZ, &ws) == 0 && ws.ws_row > 0 && ws.ws_col > 0)) {
     rows = (long long)ws.ws_row;
     cols = (long long)ws.ws_col;
   } else {
@@ -3646,7 +3662,8 @@ static long long term_input_failed(const char* detail) {
   return out;
 }
 
-/* Can fd 0 be registered with the poller for readability?
+/* What kind of thing is fd 0? Two decisions depend on it: whether it can be
+ * registered with the poller at all, and what a zero-byte read means.
  *
  * An ALLOWLIST, deliberately, because both plausible denylists are wrong and fail
  * loudly rather than gracefully — sprout_poll_add aborts the process when the
@@ -3657,12 +3674,18 @@ static long long term_input_failed(const char* detail) {
  * Pipes, sockets and terminals are what the kqueue/epoll backends handle; for
  * everything else there is no readiness to wait for and read() returns at once,
  * so skipping the wait costs nothing but the caller's `ms` is then ignored. */
-static int term_stdin_pollable(void) {
+typedef enum {
+  TERM_STDIN_TTY,     /* a terminal: pollable, and read() == 0 means "nothing yet" */
+  TERM_STDIN_STREAM,  /* pipe or socket: pollable, and read() == 0 is a real EOF   */
+  TERM_STDIN_OTHER    /* regular file, /dev/null, closed: not pollable             */
+} TermStdinKind;
+
+static TermStdinKind term_stdin_kind(void) {
   struct stat st;
-  if (fstat(STDIN_FILENO, &st) != 0) return 0;
-  if (S_ISFIFO(st.st_mode) || S_ISSOCK(st.st_mode)) return 1;
-  if (S_ISCHR(st.st_mode)) return isatty(STDIN_FILENO) ? 1 : 0;
-  return 0;
+  if (fstat(STDIN_FILENO, &st) != 0) return TERM_STDIN_OTHER;
+  if (S_ISCHR(st.st_mode)) return isatty(STDIN_FILENO) ? TERM_STDIN_TTY : TERM_STDIN_OTHER;
+  if (S_ISFIFO(st.st_mode) || S_ISSOCK(st.st_mode)) return TERM_STDIN_STREAM;
+  return TERM_STDIN_OTHER;
 }
 
 /* Exactly one task may be parked on stdin at a time.
@@ -3698,14 +3721,27 @@ static void term_clear_reader_parked(void* unused) {
  * bug. Waiting for readability first means the read that follows cannot block. */
 long long term_read_avail(long long max_val, long long ms_val) {
   unsigned char buf[4096];
-  if (g_term_winch) {
-    g_term_winch = 0;
+  /* Test-and-clear in ONE operation. A plain `if (flag) flag = 0;` is a load then
+   * a store, and a SIGWINCH delivered between them is overwritten by the store and
+   * lost — the UI would then draw at the stale size until the user resized AGAIN.
+   * __atomic_exchange_n stays async-signal-safe. */
+  if (__atomic_exchange_n(&g_term_winch, 0, __ATOMIC_RELAXED))
     return term_input0("stdlib.terminal.TermResized");
-  }
   if (max_val <= 0) return term_input0("stdlib.terminal.TermIdle");
   long long want = max_val > (long long)sizeof(buf) ? (long long)sizeof(buf) : max_val;
 
-  if (term_stdin_pollable()) {
+  TermStdinKind kind = term_stdin_kind();
+
+  /* The one-reader rule is checked for EVERY caller, not just the ones that park.
+   * A zero-timeout call does not park, but it does READ, so letting it through
+   * while another task is parked reinstates exactly the theft this guard exists to
+   * stop: the poller wakes the parked reader, the zero-timeout caller has already
+   * taken the bytes, and the parked reader's read() then blocks the OS thread. */
+  if (g_term_reader_parked)
+    tcp_fail("term_read_avail: stdin already has a parked reader "
+             "(a TUI must drive input from exactly one task)");
+
+  if (kind != TERM_STDIN_OTHER) {
     if (ms_val <= 0) {
       /* "Don't wait at all" cannot go through the park: scheduler_park_on_fd_timeout
        * requires ms > 0. Nothing is being waited on, so blocking the thread for a
@@ -3715,39 +3751,56 @@ long long term_read_avail(long long max_val, long long ms_val) {
       pfd.events = POLLIN;
       pfd.revents = 0;
       int r = poll(&pfd, 1, 0);
-      if (r == 0) return term_input0("stdlib.terminal.TermIdle");
       if (r < 0) {
         if (errno == EINTR) return term_input0("stdlib.terminal.TermIdle");
         return term_input_failed(strerror(errno));
       }
-    /* The UNOWNED-fd park, not the owned one: scheduler_park_on_fd_timeout CLOSES
-     * the fd when a with_timeout expiry or scope_cancel force-drops the parked
-     * task (sprout_scheduler.h), and closing stdin out from under the process is
-     * not a recoverable state. Nothing is held in malloc'd memory across the park,
-     * so no scheduler_set_park_cleanup hook is needed. */
+      /* Inspect revents rather than trusting a positive return: POLLERR/POLLNVAL
+       * also count towards `r`, and falling through to read() on one of those
+       * would report a live terminal as EOF. */
+      if (r == 0 || !(pfd.revents & POLLIN)) {
+        if (pfd.revents & POLLNVAL) return term_input_failed("stdin is not open");
+        if (pfd.revents & POLLHUP) return term_input0("stdlib.terminal.TermEof");
+        return term_input0("stdlib.terminal.TermIdle");
+      }
+    /* scheduler_park_on_fd_timeout — the PLAIN entry point, NOT the "unowned" one.
+     * Read the two the right way round: `unowned` does not mean "an fd we may not
+     * close", it means "no handle table owns this fd, so the parked frame is its
+     * only reference and a force-drop must close it or leak it". That variant sets
+     * park_close_fd (sprout_scheduler.c:1046) and force_drop_task then does
+     * close(park_close_fd) (:709-711) — so using it here would make one
+     * with_timeout or scope_cancel over an input read close STDIN, permanently and
+     * silently: fd 0 is then free, and the next open/socket/accept is handed it, so
+     * a later read_avail reads an unrelated descriptor. The plain variant never
+     * touches park_close_fd, which is what stdin needs — the process owns it
+     * outright and it must outlive any single parked read. */
     } else {
-      if (g_term_reader_parked)
-        tcp_fail("term_read_avail: stdin already has a parked reader "
-                 "(a TUI must drive input from exactly one task)");
       g_term_reader_parked = 1;
       scheduler_set_park_cleanup(term_clear_reader_parked, NULL);
-      int ready = scheduler_park_on_unowned_fd_timeout(STDIN_FILENO, SPROUT_POLL_READ, ms_val);
+      int ready = scheduler_park_on_fd_timeout(STDIN_FILENO, SPROUT_POLL_READ, ms_val);
       scheduler_set_park_cleanup(NULL, NULL);
       g_term_reader_parked = 0;
       if (!ready) {
         /* The deadline won. Re-check the resize flag first: a SIGWINCH that
          * arrived during the park is the more informative answer of the two. */
-        if (g_term_winch) {
-          g_term_winch = 0;
+        if (__atomic_exchange_n(&g_term_winch, 0, __ATOMIC_RELAXED))
           return term_input0("stdlib.terminal.TermResized");
-        }
         return term_input0("stdlib.terminal.TermIdle");
       }
     }
   }
 
   ssize_t n = read(STDIN_FILENO, buf, (size_t)want);
-  if (n == 0) return term_input0("stdlib.terminal.TermEof");
+  if (n == 0) {
+    /* Zero bytes does NOT mean EOF on a terminal we put in raw mode: term_raw_enter
+     * sets VMIN=0/VTIME=0, so a tty read returns 0 whenever the queue is empty.
+     * Reporting that as TermEof would shut a TUI down on a perfectly live
+     * terminal. On a pipe or socket — and on a tty still in canonical mode, where
+     * we did not set VMIN — zero really is end of input. */
+    if (kind == TERM_STDIN_TTY && g_term_raw_held)
+      return term_input0("stdlib.terminal.TermIdle");
+    return term_input0("stdlib.terminal.TermEof");
+  }
   if (n < 0) {
     if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
       return term_input0("stdlib.terminal.TermIdle");
