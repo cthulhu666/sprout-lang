@@ -16,31 +16,36 @@ fn hygiene_binder_acc(xs: List Int) -> List Int =
   [acc + 1 for acc in xs]
 
 fn hygiene_shadow_acc(xs: List Int) -> List Int =
-  let acc = 10 in [acc + x for x in xs]
+  let acc = 10
+  in [acc + x for x in xs]
 
 fn hygiene_binder_acc2(xs: List Int) -> List Int =
   [acc2 + 1 for acc2 in xs]
 
 fn hygiene_shadow_acc2(xs: List Int) -> List Int =
-  let acc2 = 20 in [acc2 + x for x in xs]
+  let acc2 = 20
+  in [acc2 + x for x in xs]
 
 fn hygiene_binder_step(xs: List Int) -> List Int =
   [step + 1 for step in xs]
 
 fn hygiene_shadow_step(xs: List Int) -> List Int =
-  let step = 30 in [step + x for x in xs]
+  let step = 30
+  in [step + x for x in xs]
 
 fn hygiene_binder_go(xs: List Int) -> List Int =
   [go + 1 for go in xs]
 
 fn hygiene_shadow_go(xs: List Int) -> List Int =
-  let go = 40 in [go + x for x in xs]
+  let go = 40
+  in [go + x for x in xs]
 
 fn hygiene_binder_tmp(xs: List Int) -> List Int =
   [tmp + 1 for tmp in xs]
 
 fn hygiene_shadow_tmp(xs: List Int) -> List Int =
-  let tmp = 50 in [tmp + x for x in xs]
+  let tmp = 50
+  in [tmp + x for x in xs]
 
 # --- 2. Evaluation multiplicity (D4, normative): the FIRST generator's source
 # is evaluated exactly once; every subsequent generator's source is evaluated

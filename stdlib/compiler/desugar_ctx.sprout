@@ -197,7 +197,18 @@ fn desugar_expr_no_ctx_i(expr: ast.Expr, fn_idx: Dict (List (Maybe String))) -> 
       ast.RecordUpdateExpr(desugar_expr_no_ctx_i(base, fn_idx), desugar_record_fields_i(fields, fn_idx), pos)
   | ast.IntRangeExpr lo hi pos ->
       ast.IntRangeExpr(desugar_expr_no_ctx_i(lo, fn_idx), desugar_expr_no_ctx_i(hi, fn_idx), pos)
+  | ast.ComprehensionExpr elem gens pos ->
+      ast.ComprehensionExpr(desugar_expr_no_ctx_i(elem, fn_idx), desugar_comprehension_gens_i(gens, fn_idx), pos)
   | _ -> expr
+
+fn desugar_comprehension_gens_i(gens: List ast.ComprehensionGen, fn_idx: Dict (List (Maybe String))) -> List ast.ComprehensionGen =
+  match gens with
+  | Nil -> Nil
+  | Cons g rest ->
+      match g with
+      | ast.ComprehensionGen pat src guards ->
+          Cons(ast.ComprehensionGen(pat, desugar_expr_no_ctx_i(src, fn_idx), desugar_exprs_no_ctx_i(guards, fn_idx)),
+               desugar_comprehension_gens_i(rest, fn_idx))
 
 fn desugar_call_expr_i(callee: ast.Expr, args: List ast.Expr, pos: source.SourcePos, fn_idx: Dict (List (Maybe String))) -> ast.Expr =
   ast.CallExpr(
@@ -525,7 +536,20 @@ fn find_redundant_no_ctx(expr: ast.Expr, fn_idx: Dict (List (Maybe String))) -> 
       list_append(find_redundant_no_ctx(base, fn_idx), find_redundant_record_fields(fields, fn_idx))
   | ast.IntRangeExpr lo hi _ ->
       list_append(find_redundant_no_ctx(lo, fn_idx), find_redundant_no_ctx(hi, fn_idx))
+  | ast.ComprehensionExpr elem gens _ ->
+      list_append(find_redundant_no_ctx(elem, fn_idx), find_redundant_comprehension_gens(gens, fn_idx))
   | _ -> Nil
+
+fn find_redundant_comprehension_gens(gens: List ast.ComprehensionGen, fn_idx: Dict (List (Maybe String))) -> List source.SourcePos =
+  match gens with
+  | Nil -> Nil
+  | Cons g rest ->
+      match g with
+      | ast.ComprehensionGen _ src guards ->
+          list_append(
+            list_append(find_redundant_no_ctx(src, fn_idx), find_redundant_exprs_no_ctx(guards, fn_idx)),
+            find_redundant_comprehension_gens(rest, fn_idx)
+          )
 
 fn find_redundant_args_with_callee(callee: ast.Expr, args: List ast.Expr, fn_idx: Dict (List (Maybe String))) -> List source.SourcePos =
   match callee_var_name(callee) with
