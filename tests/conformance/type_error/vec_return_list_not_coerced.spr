@@ -1,0 +1,13 @@
+module main
+
+# Spec 5.5.1: the `Vec`-context lowering covers the shapes provably a `List`
+# before inference — a list literal and a comprehension. A `List`-typed
+# VARIABLE carries no such proof, so it is not coerced here either.
+#
+# This is the RETURN position on purpose. The argument position reports the pair
+# as `Vec vs List` and this one as `List vs Vec` — opposite orders — so the
+# remedy must not assume which side is the expected type.
+
+fn as_vec(xs: List Int) -> Vec Int = xs
+
+fn main() -> Unit !{IO} = print(int_to_string(vec_length(as_vec(Nil))))

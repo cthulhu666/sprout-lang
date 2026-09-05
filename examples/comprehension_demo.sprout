@@ -1,0 +1,52 @@
+module examples.comprehension_demo
+
+# Demonstrates list comprehensions: `[expr for pattern in source if guard]`.
+#
+# A comprehension reads in the order the data flows — source, filter, result —
+# and elaborates to a fold that accumulates in reverse and reverses once at the
+# end, so it costs the same as the fold you would have written and runs in
+# constant stack space whatever the source size.
+#
+# Spec 5.10; design and decisions in docs/list-comprehensions-v0.md.
+
+# --- 1. A range is a source. No conversion, no hand-threaded accumulator. ---
+fn squares(n: Int) -> List Int = [i * i for i in 1..n]
+
+# --- 2. Guards filter. Several may attach to one generator; each is evaluated
+# only when the ones to its left have passed. ---
+fn mid_range(n: Int) -> List Int = [i for i in 1..n if i > 2 if i < 8]
+
+# --- 3. The generator pattern destructures, so the body needs no accessors.
+# It must be irrefutable: `Just x` is REJECTED rather than silently skipping
+# non-matches. To drop elements, say so with `list_filter_map`. ---
+fn adults(people: List (String, Int)) -> List String =
+  [name for (name, age) in people if age >= 18]
+
+# --- 4. Generators are comma-separated and nest left-to-right, the leftmost
+# outermost. A later generator's source may read an earlier binder, which is
+# what keeps this from enumerating every permutation. ---
+fn pythagorean_triples(n: Int) -> List (Int, Int, Int) =
+  [(a, b, c) for a in 1..n, b in a..n, c in b..n if a * a + b * b == c * c]
+
+# --- 5. Comprehensions nest: one may appear in the element position of
+# another, building rows. ---
+fn times_table(n: Int) -> List (List Int) =
+  [[r * c for c in 1..n] for r in 1..n]
+
+# --- 6. In a `Vec`-expected position a comprehension lowers to
+# `vec_from_list(...)`, the same context-directed rule a list literal gets
+# (spec 5.5.1) — so a `Vec` needs no explicit conversion at the call site. ---
+fn square_vec(n: Int) -> Vec Int = [i * i for i in 1..n]
+
+fn row_text(row: List Int) -> String = to_string(row)
+
+fn main() -> Unit !{IO} =
+  let people = [("ada", 36), ("bo", 12), ("cy", 19)]
+  in do
+    print(`squares 5           ${to_string(squares(5))}`)
+    print(`guarded 10          ${to_string(mid_range(10))}`)
+    print(`adults              ${to_string(adults(people))}`)
+    print(`triples up to 20    ${to_string(pythagorean_triples(20))}`)
+    print(`times table 4`)
+    list_each(\row -> print(`  ${row_text(row)}`), times_table(4))
+    print(`as a Vec            ${to_string(vec_length(square_vec(5)))} elements`)

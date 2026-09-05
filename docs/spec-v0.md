@@ -1158,22 +1158,46 @@ template literal; there is no raw pass-through. A backslash followed by any othe
 character (e.g. `\r`, `\0`, `\z`) is a lexical error, mirroring how string and
 char literals reject unsupported escapes.
 
-### 5.5.1 List-literal lowering in a `Vec`-expected context
+### 5.5.1 `List` lowering in a `Vec`-expected context
 
-A list literal `[e1, …, en]` normally denotes a `List a`. When a list literal
-appears in a position whose expected type is `Vec a` — a function argument for a
-`Vec`-typed parameter, or a function/method body whose return type is `Vec a` —
-the elaborator lowers it to `vec_from_list([e1, …, en])`, so it denotes a `Vec a`
-without an explicit `vec_from_list` call. This is a **literal-only** lowering,
-directed by the expected type name: only syntactic list literals are affected. A
-`List`-typed variable or other `List`-valued expression in a `Vec`-expected
-position is *not* coerced and remains a type error (a pre-existing `List` vs
-`Vec` mismatch), because a syntactic literal is the only expression form
-statically known to be a `List` prior to type inference. Empty `[]` in a
+A list literal `[e1, …, en]` and a list comprehension `[e for x in src]` each
+normally denote a `List a`. When either appears in a position whose expected type
+is `Vec a` — a function argument for a `Vec`-typed parameter, or a function/method
+body whose return type is `Vec a` — the elaborator wraps it in `vec_from_list(…)`,
+so it denotes a `Vec a` without an explicit conversion:
+
+```sprout
+fn takes_vec(v: Vec Int) -> Int = vec_length(v)
+
+takes_vec([1, 2, 3])                # ≡ takes_vec(vec_from_list([1, 2, 3]))
+takes_vec([x * x for x in 1..3])    # ≡ takes_vec(vec_from_list([x * x for x in 1..3]))
+
+fn squares(n: Int) -> Vec Int = [i * i for i in 1..n]   # return position, likewise
+```
+
+The lowering is **syntax-directed**, and applies to exactly the expression forms
+that are provably a `List` *before* type inference runs — today, a list literal
+and a comprehension (§5.10, whose value is always a `List` whatever the generator
+ranges over). A `List`-typed **variable**, or any other `List`-valued expression,
+is *not* coerced and remains a type error (a pre-existing `List` vs `Vec`
+mismatch): the pass has no inferred types, so it cannot tell a `List`-typed name
+from a `Vec`-typed one, and wrapping unconditionally would turn the ordinary
+`f(vec_empty())` into `vec_from_list(vec)`. That boundary is a soundness
+requirement, not a conservatism.
+
+The expected type propagates through `if` and `match` to the branches, so
+`takes_vec(if c then [1, 2] else [])` lowers in both arms. Empty `[]` in a
 `Vec`-expected context denotes an empty `Vec`. Plain `List`-expected and
 inference-driven contexts are unaffected. This parallels the `StringTemplate`
-lowering above (both are context-directed literal lowerings). Rationale and
-prior art: `docs/coercions-and-literals-v1-draft.md` (Case A).
+lowering above (both are context-directed lowerings).
+
+The wrap costs exactly what writing `vec_from_list(…)` by hand costs — the `List`
+is built, then walked once — so the sugar adds no runtime cost over the explicit
+form. It also does not *save* the intermediate: a comprehension targeting a `Vec`
+still builds cons cells first. A zero-intermediate lowering is deferred.
+
+Rationale and prior art: `docs/coercions-and-literals-v1-draft.md` (Case A);
+the comprehension extension is D8 of `docs/list-comprehensions-v0.md`.
 
 ### 5.8 Linear types (Experimental)
 
@@ -1488,7 +1512,9 @@ keyword (§2), so a comprehension is distinguished from a list literal by a sing
 token of lookahead and `[a, b | rest]` still parses as a tail pattern.
 
 The value of a comprehension is always a `List`, whatever the generator ranges
-over.
+over. In a `Vec`-expected position it is wrapped in `vec_from_list(…)`, the same
+context-directed lowering a list literal gets — being always a `List` is exactly
+what puts it inside that rule's soundness boundary (§5.5.1).
 
 **Generator sources.** The source expression must have type `List a` or
 `IntRange`. This set is **closed**: there is no `Generator` class and no way to

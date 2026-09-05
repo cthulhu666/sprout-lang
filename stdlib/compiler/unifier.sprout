@@ -471,6 +471,33 @@ fn type_mismatch_error(l: types.Type, r: types.Type) -> String =
   if types.type_mentions_skolem(l) || types.type_mentions_skolem(r)
   then "existential type escapes its scope: a hidden `exists`-bound type cannot be used at a concrete or a different hidden type"
   else "Type mismatch: " ++ types.type_to_string(l) ++ " vs " ++ types.type_to_string(r)
+         ++ list_vec_hint(l, r)
+
+# `List` and `Vec` are the pair users most often expect to be interchangeable,
+# and the bare mismatch names no way across. The remedy is deliberately
+# DIRECTION-AGNOSTIC: the two sides arrive in opposite orders depending on
+# position — an argument reports `Vec vs List`, a return `List vs Vec` — so
+# naming a single conversion would be wrong half the time. The second sentence
+# is the one that answers the question actually being asked, which is why a list
+# literal in the same slot was accepted and this value is not.
+# Fixtures: tests/conformance/type_error/vec_{nonliteral,return}_list_not_coerced.
+fn list_vec_hint(l: types.Type, r: types.Type) -> String =
+  if is_list_vec_pair(l, r)
+  then " — `List` and `Vec` are distinct types; convert with vec_from_list or vec_to_list (a list literal or comprehension in a `Vec` position converts automatically, spec 5.5.1, but a `List`-typed value carries no such proof before inference)"
+  else ""
+
+fn is_list_vec_pair(l: types.Type, r: types.Type) -> Bool =
+  let a = type_head_name(l)
+      b = type_head_name(r)
+  in ((a == "List") && (b == "Vec")) || ((a == "Vec") && (b == "List"))
+
+# The head constructor of an applied type: `Vec Int` -> "Vec". Empty for any
+# shape without one (a variable, an arrow, a tuple).
+fn type_head_name(t: types.Type) -> String =
+  match t with
+  | types.TConst id -> types.type_id_name(id)
+  | types.TApp base _ -> type_head_name(base)
+  | _ -> ""
 
 fn unify_applied(
   subst: Dict types.Type,

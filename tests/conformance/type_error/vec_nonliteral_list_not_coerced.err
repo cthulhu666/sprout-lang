@@ -1,1 +1,1 @@
-Call type mismatch: Type mismatch: Vec vs List
+Call type mismatch: Type mismatch: Vec vs List — `List` and `Vec` are distinct types; convert with vec_from_list or vec_to_list
