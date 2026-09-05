@@ -198,9 +198,13 @@ term_clear
 term_hide_cursor
 term_is_interactive  # Pre-existing builtin, not new. Absent until 2026-08-08 only because it was DEFINED `_Bool` while declared `i64`; the gate greps `long long <name>(`, so the ABI mismatch also hid it from this allowlist. Cannot be Sprout: isatty(2) on stdin/stdout.
 term_move
+term_raw_enter  # tcgetattr/tcsetattr(3) — Sprout cannot address the tty driver. Holds raw mode for a SESSION, which term_read_key's per-keypress toggle cannot: that toggle is why it decodes only `ESC [ A/B/C/D` and leaks a longer sequence's tail as fake keypresses. Also installs the SIGWINCH handler and the atexit restore, neither expressible in Sprout.
+term_raw_exit  # The termios restore half of the pair above. Same reason.
+term_read_avail  # read(2) on fd 0 combined with a scheduler park — parking is runtime-internal and has no Sprout expression. Correctness, not speed: term_read_key blocks the OS thread, so a key read starves every other green task, and there is no other way to wait on stdin without also mutating the open file description the parent shell shares (O_NONBLOCK).
 term_read_key
 term_read_line
 term_show_cursor
+term_size  # ioctl(TIOCGWINSZ) — Sprout cannot issue an ioctl. Nothing else can answer it: the DSR escape (`ESC[6n`) writes a reply into stdin that term_read_key discards, and $COLUMNS/$LINES are shell-local and normally unexported.
 term_write
 time_now_micros  # syscall wrapper — gettimeofday cannot be called from Sprout stdlib; needed for wall-clock benchmarking
 wall_time_micros  # syscall wrapper — gettimeofday (CLOCK_REALTIME) cannot be called from Sprout; needed for wall-clock log timestamps. Correctness (not perf): the value is unobtainable in Sprout, and time_now_micros is monotonic (elapsed-only), so it cannot substitute. Calendar formatting stays pure Sprout (stdlib.log.format_iso8601)

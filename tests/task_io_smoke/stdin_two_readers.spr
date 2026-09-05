@@ -1,0 +1,31 @@
+import stdlib.task (Scope, with_scope, task_spawn)
+import stdlib.terminal as terminal
+
+# Two tasks parked on stdin at once must FAIL LOUDLY, not wedge.
+#
+# Both would wake when the pipe becomes readable, the first would consume the
+# bytes, and the second's read would then block the OS thread -- silently undoing
+# the property `stdin_park.spr` pins. Silent, because nothing crashes: the program
+# simply stops making progress, which is the hardest kind of failure to attribute.
+#
+# Note a tty is IMMUNE to this (raw mode sets VMIN=0, so its read returns at once),
+# so a hand-run terminal check would not find it. The pipe this fixture uses is
+# what exposes it -- which is also what the real smoke fixtures use.
+#
+# RED for this fixture is a HANG (caught by the recipe's alarm) or a clean exit;
+# GREEN is the runtime's loud failure naming the second reader.
+fn park_on_stdin(label: String) -> Unit !{IO} =
+  match terminal.read_avail(64, 3000) with
+  | terminal.TermBytes _ -> terminal.write(label ++ " got bytes\n")
+  | terminal.TermIdle -> terminal.write(label ++ " idle\n")
+  | terminal.TermResized -> terminal.write(label ++ " resized\n")
+  | terminal.TermEof -> terminal.write(label ++ " eof\n")
+  | terminal.TermFailed msg -> terminal.write(label ++ " failed " ++ msg ++ "\n")
+
+fn run(s: Scope) -> Unit !{IO} =
+  do
+    task_spawn(s, \_ -> park_on_stdin("first"))
+    task_spawn(s, \_ -> park_on_stdin("second"))
+
+fn main() -> Unit !{IO} =
+  with_scope(\s -> run(s))

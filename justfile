@@ -1632,6 +1632,43 @@ task-io-smoke: bootstrap-from-seed
       cat "$TMPD/run.out" >&2; exit 1
     fi
   }
+  run_stdin() {  # $1 = label, $2 = required substring, $3 = stdin spec
+    # run_once inherits whatever stdin the caller had, which is exactly what a stdin
+    # fixture cannot do. The spec selects the source:
+    #   delay:<secs>:<payload>  a PIPE, silent for <secs>, then <payload>
+    #   devnull                 /dev/null — a character device, so the register path
+    #                           kqueue refuses; immediate EOF
+    local label="$1" want="$2" spec="$3"
+    set +e
+    case "$spec" in
+      devnull)
+        perl -e 'alarm 15; exec @ARGV' "$TMPD/bin" < /dev/null > "$TMPD/run.out" 2>"$TMPD/run.err"
+        ;;
+      delay:*)
+        local rest="${spec#delay:}"
+        local delay="${rest%%:*}"
+        local payload="${rest#*:}"
+        # The trailing sleep keeps the write end open past the payload, so a reader
+        # that is still parked sees data rather than EOF.
+        ( sleep "$delay"; printf '%s' "$payload"; sleep 0.2 ) \
+          | perl -e 'alarm 15; exec @ARGV' "$TMPD/bin" > "$TMPD/run.out" 2>"$TMPD/run.err"
+        ;;
+      *)
+        echo "task-io-smoke [$label]: bad stdin spec '$spec'" >&2; exit 1
+        ;;
+    esac
+    local ec=$?
+    set -e
+    if [ "$ec" -ne 0 ]; then
+      echo "task-io-smoke [$label]: did not complete (exit $ec) — likely a HANG (stdin parking broken)" >&2
+      echo "--- stdout ---" >&2; cat "$TMPD/run.out" >&2; echo "--- stderr ---" >&2; cat "$TMPD/run.err" >&2
+      exit 1
+    fi
+    if ! grep -q "$want" "$TMPD/run.out"; then
+      echo "task-io-smoke [$label]: missing expected output '$want'" >&2
+      cat "$TMPD/run.out" >&2; exit 1
+    fi
+  }
   # (1) minimal read-park: reader parks, sibling write wakes it (assert interleaved order).
   build tests/task_io_smoke/concurrent_read.spr
   run_once "read-park" "reader got ping"
@@ -1957,7 +1994,53 @@ task-io-smoke: bootstrap-from-seed
   # lifetime half — it requires completing all 60 force-drops with no hang/crash, floor >= 40 Expired.
   build tests/task_io_smoke/dns_resolve_cancel_drop.spr
   SPROUT_DNS_RESOLVE_DELAY_MS=40 run_once "dns-cancel-drop" "dns-cancel-drop-ok"
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop, connect-park, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, read-deadline-loses-to-data, http-utf8-body, http-binary-body, tcp-accept-bad-handle, http-accept-exhaustion, tcp-nul-payload, http-request-parks, http-request-total-deadline, http-cancel-drop, http-header-lower-parks, dns-resolve-parks, dns-cancel-drop; interleaved; stress-clean)"
+  # (34) STDIN parks the calling task, not the OS thread — the stdin twin of (1). `reader` waits on
+  # terminal.read_avail before any byte exists, `sibling` only prints, and stdin is a pipe that stays
+  # silent for 300ms. Parked: the reader suspends, sibling runs, the delayed byte wakes the reader.
+  # Blocking: the reader owns the thread for the full 300ms and sibling cannot run until it is done.
+  # So ORDER is the signal — and both orders TERMINATE, so a regression reports as a wrong order
+  # rather than as this recipe's 15s alarm, which is a strictly better failure mode than a hang.
+  #
+  # Verified RED before the park landed, on the same fixture and the same binary: a poll(2)-based
+  # term_read_avail printed [reader got ping, sibling ran]; substituting
+  # scheduler_park_on_unowned_fd_timeout, with no other change, flipped it to
+  # [sibling ran, reader got ping].
+  #
+  # The /dev/null case is not a formality. It is a CHARACTER device, exactly like a tty, but kqueue's
+  # EVFILT_READ refuses to register it and sprout_poll_add ABORTS rather than returning an error —
+  # so "not a regular file" as the pollability test crashes here, and "not a character device"
+  # excludes the tty this whole surface exists for. That is why term_stdin_pollable is an allowlist
+  # (fifo/socket/tty), and this case is what holds it to that.
+  build tests/task_io_smoke/stdin_park.spr
+  run_stdin "stdin-park" "reader got ping" "delay:0.3:ping"
+  if ! awk '/sibling ran/{s=NR} /reader got ping/{if(s && NR>s) ok=1} END{exit !ok}' "$TMPD/run.out"; then
+    echo "task-io-smoke [stdin-park]: wrong order (sibling should precede the woken reader)" >&2
+    cat "$TMPD/run.out" >&2; exit 1
+  fi
+  SPROUT_GC_STRESS=1 run_stdin "stdin-park/stress" "reader got ping" "delay:0.3:ping"
+  run_stdin "stdin-park/devnull" "reader: eof" "devnull"
+  # (34b) Two tasks parked on stdin at once must FAIL LOUDLY rather than wedge. Both wake on
+  # readability, the first consumes the bytes, and the second's read then blocks the OS thread —
+  # silently undoing what (34) pins, since nothing crashes and the program just stops progressing.
+  # A TTY is immune (raw mode sets VMIN=0, so its read returns at once), so this is reachable only
+  # over a pipe or socket and a hand-run terminal check would miss it entirely.
+  # RED here is a hang (the alarm) or a clean exit; GREEN is the named runtime error.
+  build tests/task_io_smoke/stdin_two_readers.spr
+  set +e
+  ( sleep 0.3; printf 'ping'; sleep 0.2 ) \
+    | perl -e 'alarm 15; exec @ARGV' "$TMPD/bin" > "$TMPD/run.out" 2>"$TMPD/run.err"
+  two_reader_ec=$?
+  set -e
+  if [ "$two_reader_ec" -eq 0 ]; then
+    echo "task-io-smoke [stdin-two-readers]: expected a loud failure, got a clean exit" >&2
+    cat "$TMPD/run.out" >&2; exit 1
+  fi
+  if ! grep -q "stdin already has a parked reader" "$TMPD/run.err"; then
+    echo "task-io-smoke [stdin-two-readers]: exited $two_reader_ec without the guard's message" >&2
+    echo "--- stdout ---" >&2; cat "$TMPD/run.out" >&2; echo "--- stderr ---" >&2; cat "$TMPD/run.err" >&2
+    exit 1
+  fi
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop, connect-park, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, read-deadline-loses-to-data, http-utf8-body, http-binary-body, tcp-accept-bad-handle, http-accept-exhaustion, tcp-nul-payload, http-request-parks, http-request-total-deadline, http-cancel-drop, http-header-lower-parks, dns-resolve-parks, dns-cancel-drop, stdin-park, stdin-two-readers; interleaved; stress-clean)"
 
 # ── Linux gate (local, container-backed) ──────────────────────────────────────
 #

@@ -1,0 +1,40 @@
+import stdlib.task (Scope, with_scope, task_spawn)
+import stdlib.terminal as terminal
+import stdlib.bytes as bytes
+
+# M0 stdin-parking smoke, the stdin twin of concurrent_read.spr.
+#
+# Two green tasks. `reader` asks for terminal input before any exists; `sibling`
+# only prints. The fixture is driven with stdin on a PIPE that stays silent for
+# ~200ms, so with parking the reader suspends, the scheduler runs sibling, and
+# the delayed byte wakes the reader:
+#   sibling ran
+#   reader got ping
+# With a BLOCKING read the reader holds the OS thread for the whole 200ms, so
+# sibling cannot run until the reader is done and the order INVERTS:
+#   reader got ping
+#   sibling ran
+# Order is therefore the RED/GREEN signal, exactly as in concurrent_read.spr --
+# and unlike a hang, both orders terminate, so a regression reports as a wrong
+# order rather than as the recipe's timeout.
+fn reader() -> Unit !{IO} =
+  match terminal.read_avail(64, 5000) with
+  | terminal.TermBytes data ->
+      match bytes.to_string(data) with
+      | Ok text -> terminal.write("reader got " ++ text ++ "\n")
+      | Err _ -> terminal.write("reader: payload was not text\n")
+  | terminal.TermIdle -> terminal.write("reader: idle\n")
+  | terminal.TermResized -> terminal.write("reader: resized\n")
+  | terminal.TermEof -> terminal.write("reader: eof\n")
+  | terminal.TermFailed msg -> terminal.write("reader: failed " ++ msg ++ "\n")
+
+fn sibling() -> Unit !{IO} =
+  terminal.write("sibling ran\n")
+
+fn run(s: Scope) -> Unit !{IO} =
+  do
+    task_spawn(s, \_ -> reader())
+    task_spawn(s, \_ -> sibling())
+
+fn main() -> Unit !{IO} =
+  with_scope(\s -> run(s))

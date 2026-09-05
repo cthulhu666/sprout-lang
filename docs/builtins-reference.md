@@ -113,13 +113,17 @@ through the module's wrapper API:
 - `term_move(row: Int, col: Int) -> Unit !{IO}`
 - `term_hide_cursor() -> Unit !{IO}`
 - `term_show_cursor() -> Unit !{IO}`
-- `term_read_key() -> String !{IO}` (reads one key from stdin; in TTY mode it reads immediately without waiting for newline)
+- `term_read_key() -> String !{IO}` (reads one key from stdin; in TTY mode it reads immediately without waiting for newline). **Enters and leaves raw mode around each keypress**, which bounds what it can decode: it recognises `ESC [ A/B/C/D` and returns the tail bytes of anything longer — a modifier chord, an SGR mouse report, a bracketed paste — as separate fake keypresses. It also **blocks the OS thread**, so a key read starves every other green task. Use the session surface below for anything beyond a prompt; this one is kept for `stdlib.repl` and is unchanged.
 - `term_read_line() -> Maybe String !{IO}` (reads one stdin line, trims trailing `\n`/`\r\n`, returns `Nothing` at EOF)
 - `term_write(text: String) -> Unit !{IO}`
+- `term_raw_enter() -> Unit !{IO}` / `term_raw_exit() -> Unit !{IO}` — hold raw mode for a **session** rather than a keypress: no echo, no line buffering, and ctrl-C, ctrl-S and ctrl-Q delivered as ordinary bytes (`ISIG`/`IXON` off) so a UI can bind them. `OPOST` is off too, so `\n` no longer implies `\r` and `print` is unusable while raw mode is held — send diagnostics to stderr. `term_raw_enter` also installs a `SIGWINCH` handler and an `atexit` restore; the restore is mandatory rather than tidy, because a crash would otherwise strand the user's shell with echo off and no working ctrl-C. A no-op when stdin is not a terminal.
+- `term_size() -> stdlib.terminal.TermSize !{IO}` — rows and columns from `TIOCGWINSZ`, falling back to `$LINES`/`$COLUMNS` and then 24x80, so a layout always has finite numbers. Nothing else can answer this: the DSR escape (`ESC[6n`) writes its reply into stdin, where `term_read_key` discards it.
+- `term_read_avail(max: Int, ms: Int) -> stdlib.terminal.TermInput !{IO}` — up to `max` raw bytes, waiting at most `ms`. **Parks the calling task rather than the OS thread**, so timers, animation and network I/O keep running while a UI waits on the keyboard; `ms <= 0` polls once and returns `TermIdle`. Returns `Bytes`, not `String`, because a read can land mid-UTF-8-sequence — decoding (CSI parsing, modifiers, mouse, paste, UTF-8 reassembly) belongs in Sprout, where it is testable. Two constraints worth knowing: **exactly one task may be parked on stdin at a time** (a second one fails loudly, because both would wake on readability and the loser's read would block the thread), and a resize is reported as `TermResized` on the *next* call rather than cutting a park short.
 
 Application code should prefer the package surface in `stdlib.terminal`
-(`write`, `hide_cursor`, `show_cursor`, `term_read_key_once`, and related
-helpers) instead of the raw `term_*` hooks.
+(`write`, `hide_cursor`, `show_cursor`, `raw_enter`, `raw_exit`, `size`,
+`read_avail`, `term_read_key_once`, and related helpers) instead of the raw
+`term_*` hooks.
 
 Experimental snapshot analysis hooks:
 
@@ -718,6 +722,18 @@ Terminal convenience module (in `stdlib/terminal.sprout`):
 - `term_render_line(row, text) -> Unit !{IO}`
 - `term_read_key_once() -> String !{IO}`
 - `term_read_line_once() -> Maybe String !{IO}`
+
+Session surface, for a UI rather than a prompt:
+
+- `raw_enter() -> Unit !{IO}` / `raw_exit() -> Unit !{IO}`
+- `size() -> TermSize !{IO}`, with `size_rows(s) -> Int` / `size_cols(s) -> Int`
+- `read_avail(max, timeout_ms) -> TermInput !{IO}`
+
+`TermInput` is total by construction — `TermBytes Bytes`, `TermIdle`,
+`TermResized`, `TermEof`, `TermFailed String` — so every outcome the descriptor
+can produce has a constructor and a caller cannot forget one. `TermIdle` is not
+an error: it is how a UI gets its frame tick. See the `term_*` entries above for
+the constraints (one parked reader; resize reported on the next call).
 
 These helpers follow the current sequencing style rule: use `do` for
 multi-step `IO` and mixed `IO` plus `Maybe`/`Result` flows, and keep
