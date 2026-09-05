@@ -149,8 +149,12 @@ export fn size_cols(s: TermSize) -> Int =
 # Wait up to `timeout_ms` for input, returning at most `max` bytes.
 #
 # Parks the calling task, so timers, animation and network I/O keep running while
-# a UI waits on the keyboard. A non-positive `timeout_ms` polls once and returns
-# `TermIdle` rather than waiting.
+# a UI waits on the keyboard.
+#
+# A non-positive `timeout_ms` polls once instead of waiting: it still answers
+# `TermBytes` when input is already queued, and `TermIdle` only when there is
+# none. `max` is capped at 4096 per call, so a large paste arrives over several
+# calls rather than one.
 #
 # EXACTLY ONE task may be waiting here at a time; a second one fails loudly. Two
 # waiters would both wake when stdin becomes readable, the first would take the

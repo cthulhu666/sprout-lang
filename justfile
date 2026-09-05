@@ -1636,6 +1636,7 @@ task-io-smoke: bootstrap-from-seed
     # run_once inherits whatever stdin the caller had, which is exactly what a stdin
     # fixture cannot do. The spec selects the source:
     #   delay:<secs>:<payload>  a PIPE, silent for <secs>, then <payload>
+    #   silent:<secs>           a PIPE held open for <secs> that never writes
     #   devnull                 /dev/null — a character device, so the register path
     #                           kqueue refuses; immediate EOF
     local label="$1" want="$2" spec="$3"
@@ -1643,6 +1644,14 @@ task-io-smoke: bootstrap-from-seed
     case "$spec" in
       devnull)
         perl -e 'alarm 15; exec @ARGV' "$TMPD/bin" < /dev/null > "$TMPD/run.out" 2>"$TMPD/run.err"
+        ;;
+      silent:*)
+        # Writes NOTHING. A fixture that outlives its own reads (anything asserting
+        # what happens AFTER a cancel) finishes before the writer would, and a write
+        # into the closed pipe would take SIGPIPE — which `pipefail` then reports as
+        # the pipeline's status, failing the gate on a run whose output was correct.
+        ( sleep "${spec#silent:}" ) \
+          | perl -e 'alarm 15; exec @ARGV' "$TMPD/bin" > "$TMPD/run.out" 2>"$TMPD/run.err"
         ;;
       delay:*)
         local rest="${spec#delay:}"
@@ -2040,7 +2049,20 @@ task-io-smoke: bootstrap-from-seed
     echo "--- stdout ---" >&2; cat "$TMPD/run.out" >&2; echo "--- stderr ---" >&2; cat "$TMPD/run.err" >&2
     exit 1
   fi
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop, connect-park, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, read-deadline-loses-to-data, http-utf8-body, http-binary-body, tcp-accept-bad-handle, http-accept-exhaustion, tcp-nul-payload, http-request-parks, http-request-total-deadline, http-cancel-drop, http-header-lower-parks, dns-resolve-parks, dns-cancel-drop, stdin-park, stdin-two-readers; interleaved; stress-clean)"
+  # (34c) A with_timeout expiring across a stdin park must NOT close fd 0. `unowned` in
+  # scheduler_park_on_unowned_fd_timeout does not mean "an fd we may not close" — it means "no
+  # handle table owns this fd, so the parked frame is its only reference and a force-drop must
+  # close it or leak it". It sets park_close_fd and force_drop_task close()s it: right for an
+  # in-flight connect(), catastrophic for stdin. Measured on the unowned variant, this fixture
+  # prints `stdin-broken-after-cancel (failed Bad file descriptor)`; on the plain one it prints
+  # `stdin-survived-cancel`. In a real program the damage is worse than the message — fd 0 is
+  # then free, so the next open/socket/accept is handed it and a later read reads a stranger.
+  #
+  # None of (34)/(34b) can catch this: they all COMPLETE their read, so no force-drop ever
+  # happens. It needs a cancel or timeout ACROSS a park, which is what this adds.
+  build tests/task_io_smoke/stdin_cancel_keeps_fd.spr
+  run_stdin "stdin-cancel-keeps-fd" "stdin-survived-cancel" "silent:3"
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop, connect-park, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, read-deadline-loses-to-data, http-utf8-body, http-binary-body, tcp-accept-bad-handle, http-accept-exhaustion, tcp-nul-payload, http-request-parks, http-request-total-deadline, http-cancel-drop, http-header-lower-parks, dns-resolve-parks, dns-cancel-drop, stdin-park, stdin-two-readers, stdin-cancel-keeps-fd; interleaved; stress-clean)"
 
 # ── Linux gate (local, container-backed) ──────────────────────────────────────
 #
