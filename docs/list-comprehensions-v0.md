@@ -1,7 +1,8 @@
 # List comprehensions — design (v0)
 
-Status: **proposed** (2026-09-05). Decisions D1–D6 below are settled with the
-user; §4's implementation overview is awaiting approval before any code lands.
+Status: **in implementation** (2026-09-05). Decisions D1–D7 below are settled
+with the user. The keyword, AST node, parser and walker arms have landed; the
+check-and-elaborate step in `infer` is in progress.
 
 Supersedes the scope written at `BACKLOG.md:3274` ("single generator, optional
 guard, list-only, no pattern generators, no nested or multi-generator") — see
@@ -215,14 +216,25 @@ unambiguous because Sprout's `if` is always `if … then … else` and never inf
 so it cannot continue the preceding source expression. Guards terminate at `,`
 or `]`, neither of which is an operator.
 
-### D2 — Typed natively in `infer`; elaborated **after** inference
+### D2 — Checked, then elaborated, both inside inference
 
-The comprehension survives parsing as a real AST node. `infer` types it
-**natively** — no rewriting — producing a typed node that records each source's
-type. A separate pass over the typed tree, running after inference and before
-`ast_to_ir`, rewrites it into the fold form of §5.
+> **Revised again after a second adversarial review.** The previous version had
+> `infer` build a typed `TComprehension` node which a *post-inference pass* then
+> rewrote. That is unsound — see "Why the elaboration must not be a later pass"
+> below — and has been replaced. There is now no typed comprehension node at
+> all.
 
-| Source type (post-solve) | Pattern binds | Fold used |
+The comprehension survives parsing as a real AST node. `infer_comprehension`
+then does two things, in order:
+
+1. **Check.** Walk the generators left to right to resolve each source against
+   the closed set — which is what *selects the fold* — and to raise §7's
+   diagnostics while the user's own expressions are still in hand.
+2. **Elaborate.** Build the §5 fold form as ordinary **untyped** `ast.Expr` and
+   infer that. The synthesized code goes through the same typechecker as
+   hand-written code.
+
+| Source type | Pattern binds | Fold used |
 |---|---|---|
 | `List a` | `a` | `list_fold` |
 | `IntRange` | `Int` | `range_fold` |
@@ -245,26 +257,100 @@ obvious reading of `[i * i for i in 5..1]` — "iterate down" — is wrong in Sp
 and the *reason* it is safe to leave alone is that an existing check already
 covers it.
 
-**This split is the whole of the first draft's revision, and it fixes three
-things at once.** The draft elaborated mid-inference into surface syntax:
+#### Why the elaboration must not be a later pass
 
-- **Capture.** Fixed binder names collided with user names —
-  `[acc + 1 for acc in xs]` produced `list_fold(\ (acc, acc) -> …)`, and
-  `let acc = 10 in [acc + x for x in xs]` shadowed the user's `acc` with the
-  accumulator. Post-inference the binders are compiler-generated and fresh.
-- **Under-determined sources.** Parameter annotations are optional in v0
-  (spec §7), so in `fn f(xs) = [x for x in xs]` the source is still a
-  metavariable mid-inference — too early to choose a fold. Post-solve the type
-  is known, or it is genuinely ambiguous and the error in §7 is accurate rather
-  than premature. Note there is no legitimate container-polymorphic
-  comprehension to support: D2's set is closed, so an unsolved source is always
-  an under-determined program.
-- **Patterns in parameter position.** The draft's desugar put the generator
-  pattern where a lambda parameter goes, and lambda parameters are identifiers
-  only (`parse_param`, `parser.sprout:1414-1417`; `expected_ident("lambda
-  parameter")`, `:1295`). That made `[a + b for (a, b) in ps]` — which D3
-  explicitly permits — inexpressible. A post-inference rewrite emits the
-  destructuring directly and never passes through that restriction.
+`fn_linear_gate` (`infer.sprout:8069-8075`) is called from `typecheck_decl`
+(`:8697`, `:9175`), so **`linear_check` runs on each declaration's typed body
+*during* inference**, not after it. A pass scheduled "after inference, before
+`ast_to_ir`" therefore runs strictly *later* than every linear check.
+
+Under the previous design that was not a gap to fill later — it was a live
+soundness hole. `linear_check` would meet a `TComprehension` it had no rule for,
+and the natural stub, `LinOk(Nil, Nil)`, claims "binds nothing, consumes
+nothing". So:
+
+```sprout
+[release(r) for i in 1..3]   # consumes r — reported as consuming nothing
+release(r)                   # …so this reads as the first consume: accepted
+```
+
+A double-consume compiles. The inverse also holds: a comprehension that is a
+linear value's only consumer yields a false "never consumed".
+
+Writing a real arm instead is not a small job, and it is the wrong job. The
+rules it would need — reject a linear binder, reject a linear capture, shadow
+the generator binders — are `lin_lambda`'s rules (`linear_check.sprout:1092-1112`),
+because a comprehension *is* a nest of lambdas. Hand-copying them onto a node
+that will be rewritten into the very construct they were written for, and then
+keeping the copy in sync forever, is the signal that the node should not exist
+at that point in the pipeline.
+
+Elaborating inside inference means the synthesized fold lambdas are present when
+the gate runs, so the existing rules apply unchanged. See D7 for what that
+implies for users.
+
+#### What this buys, beyond soundness
+
+- **Mistakes are type errors, not miscompiles.** Hand-building typed nodes means
+  hand-building `types.TFunc` chains (`types.sprout:112` — curried, one arrow per
+  parameter, each carrying an effect row and an ownership). Nothing downstream
+  re-verifies them: `verify_dispatch` checks only dictionary resolution, and
+  `opt --passes=verify` passed on every "compiles clean, then SIGSEGVs" episode
+  in `BACKLOG.md`, item 9 included. A new golden IR file is snapshotted
+  presumed-correct, so it catches later drift, not initial wrongness.
+- **Errors still point at user code.** The synthesized tree splices in the user's
+  own element, guard and source expressions unchanged, carrying their original
+  positions.
+- **Precedent.** `deriving.sprout` synthesizes untyped AST for inference to type,
+  and `desugar_ctx` wraps every template interpolation in a synthesized bare
+  `to_string(…)` call on the bundled program. Post-bundle synthesis referencing
+  bare prelude names is an existing, load-bearing pattern — it works because the
+  prelude bundles under module name `""` (`bundler.sprout:734-738`), so
+  `list_fold`, `range_fold`, `list_reverse`, `Cons` and `Nil` are uniquely the
+  bare names in the bundled environment.
+
+#### The cost, stated plainly
+
+Each generator's source is inferred **twice** — once by the check phase, whose
+typed output is discarded, and once as part of the synthesized tree. This is
+compile time only. The synthesized tree embeds each source expression exactly
+once, so runtime evaluation multiplicity is D4's, and the counters in
+`tests/stdlib/test_comprehension_hygiene.spr` would catch any violation.
+
+#### Superseded: the three defects that killed mid-inference elaboration once
+
+An earlier review rejected elaborating inside inference on three grounds. Each
+is addressed, and recorded here so the decision is not re-litigated from memory:
+
+- **Capture** — fixed binder names collided with user names, so
+  `[acc + 1 for acc in xs]` produced `list_fold(\ (acc, acc) -> …)`.
+  **Fixed:** binders are position-derived and prefixed, `comp_tmp_name`
+  producing `__cmp_acc{line}_{col}_{depth}` — the scheme `parser.do_tmp_name`
+  (`parser.sprout:525-526`) already uses, plus a depth index so two generators
+  of one comprehension cannot collide.
+- **Patterns in parameter position** — a lambda parameter must be an identifier
+  (`parse_param`, `parser.sprout:1414-1417`), so a generator pattern could not
+  be one. **Fixed:** any pattern that is not a plain variable is destructured by
+  a one-arm `match`, exactly as `parser.build_do_total` (`:548-555`) does for a
+  no-`else` do-bind. A plain variable pattern still becomes the fold parameter
+  directly, so the common case emits no match at all.
+- **Under-determined sources** — parameter annotations are optional in v0
+  (spec §291), so in `fn f(xs) = [x for x in xs]` the source may still be a
+  metavariable. **Fixed, but honestly:** this was never solved by *waiting*. The
+  source kind is resolved the moment the check phase reaches that generator,
+  left to right — which is also what the shipped implementation does. If it is
+  unresolved then, it is an error (§7), not a default. There is no legitimate
+  container-polymorphic comprehension to support, since D2's set is closed, so
+  "unsolved here" and "unsolved forever" coincide. An earlier draft claimed this
+  worked because elaboration was "post-solve"; that framing was never accurate.
+
+A **fourth** hazard, found by the second review and not present in the list
+above: a local can shadow a bare prelude name the elaboration emits, as in
+`let list_fold = 5 in [x * x for x in xs]`. Locals are not module-qualified, so
+the synthesized call resolves to the local. Under the rejected typed-node design
+this was a *silent miscompile*; here it is a type error, in the same
+already-known wart class as shadowing `append` misdirecting a `Semigroup` error.
+Pinned by `tests/conformance/type_error/comprehension_shadowed_prelude.spr`.
 
 Three alternatives for the *dispatch* (as opposed to its timing) were rejected:
 
@@ -289,22 +375,13 @@ ad hoc: spec §5.9 enumerates `Maybe`/`Result` as the only short-circuiting
 families and states outright that the behaviour is not user-extensible. Widening
 the set later (`Vec`) is compatible; narrowing it would not be.
 
-**Precedent for the pass itself.** `resolve.sprout` already runs over
-`typed_ast` after inference and synthesizes typed nodes (dictionary arguments).
-That is the shape this pass takes. The first draft instead cited
-`infer_var_or_field` (`infer.sprout:1142`) as precedent for *mid-inference*
-rewriting; that citation was wrong in kind — it rewrites on **scope** (a
-`dict_get` against the environment), not on an inferred type, and it infers
-once rather than infer-then-re-infer. Nothing in this compiler rewrites on a
-solved type today; this pass would be the first, which is a cost this design
-now states rather than hides.
+Nothing the elaboration synthesizes needs dictionaries — `list_fold`,
+`range_fold`, `list_reverse` are plain functions and `Cons`/`Nil` are
+constructors. Class-method calls inside the element expression or guards are
+ordinary user code and are resolved exactly as they would be outside a
+comprehension.
 
-Nothing the pass synthesizes needs dictionaries — `list_fold`, `range_fold`,
-`list_reverse` are plain functions and `Cons`/`Nil` are constructors — so it may
-run before `resolve`. Class-method calls inside the element expression or guards
-are already in the tree and are resolved wherever they land.
-
-#### D2.1 — Where the pass runs decides how many files change
+#### D2.1 — Which files change, measured
 
 Sprout carries two parallel node families: untyped `ast.*Expr` and typed
 `typed_ast.T*`. A new expression needs an arm in every walker over each family it
@@ -316,23 +393,21 @@ reaches. Measured by grepping the most recently threaded node, `RecordUpdateExpr
 | untyped `ast.RecordUpdateExpr` | `ast`, `parser`, `bundler`, `desugar_ctx`, `driver`, `iface_codec`, `lint_rules`, `infer` |
 | typed `typed_ast.TRecordUpdate` | `typed_ast`, `infer`, `dce`, `ast_to_ir`, `resolve`, `lowering`, `verify_dispatch`, `linear_check` |
 
-The untyped eight are unavoidable — the node is parsed, bundled, linted and
-interface-encoded before inference ever sees it.
+**Comprehensions pay the untyped row and none of the typed row.** The untyped
+eight are unavoidable — the node is parsed, bundled, linted and interface-encoded
+before inference ever sees it. The typed row is zero because the comprehension is
+gone before a typed tree containing one can exist.
 
-The typed side is where the pass's position pays. `compiler.sprout:487-517` runs
-`infer` → `resolve` → `verify_dispatch`, with `lowering` → `dce` on the other
-arm. **Inserting the elaboration immediately after `infer`, before everything
-else, means `TComprehension` never reaches `resolve`, `verify_dispatch`,
-`lowering`, `dce`, `ast_to_ir` or `linear_check`** — so the typed side costs
-`typed_ast` + `infer` + the new pass, not eight files.
-
-Run it any later and those five gain arms, and `linear_check` in particular
-would need real thought about a linear value bound by a generator. Running first
-is therefore not just cheaper, it defers a question this design has not answered.
-
-This corrects the first draft, which claimed `ast_to_ir` and lowering "never see
-the node" as though that were automatic. It is a consequence of scheduling the
-pass first, and it holds only while that stays true.
+That asymmetry is not a scheduling nicety, and an earlier version of this section
+got it wrong in an instructive way. It claimed a post-inference pass would cost
+only three typed-side files because later passes "never see" the node. Measured,
+that was false: **Sprout's exhaustiveness check is type-driven, not
+reachability-driven**, so adding a constructor to `TypedExpr` makes every
+non-catch-all `match` over `TypedExpr` a static error however unreachable the
+case is. Introducing one broke the build in `lowering`, `dce` (four sites),
+`ast_to_ir` (three sites), `linear_check`, and `typed_ast.typed_expr_pos` — eight
+files of stubs, one of which (`linear_check`) could not be a stub at all without
+being unsound.
 
 ### D3 — A refutable generator pattern is rejected, not filtered
 
@@ -409,6 +484,29 @@ worth recording beyond the fix: comprehension guards make the missing remainder
 function considerably more visible, since "every second element" is the archetypal
 guard. A prelude `rem` is out of scope here and belongs in `BACKLOG.md`.
 
+### D7 — A comprehension rejects linear values
+
+Because the elaboration produces real lambdas before `fn_linear_gate` runs (D2),
+a comprehension is judged by the rules already in `lin_lambda`
+(`linear_check.sprout:1092-1112`): a lambda may not take a linear parameter, and
+may not capture a linear value. So a comprehension that binds a linear value
+from its source, or consumes one from the enclosing scope in its element or
+guard, is **rejected**.
+
+That is the right default and it is not a workaround. An element expression runs
+once per element — zero to n times, statically unknown — and linear discipline
+requires exactly once, so consuming a linear value there could never be correct.
+It is the same reasoning `lin_lambda_captures` already encodes for any lambda.
+
+The rejection is conservative in one known way. A fold's step lambda takes the
+accumulator as a parameter, so threading a linear value *through the accumulator*
+would be a legitimate exactly-once pattern — the one shape where "n times" can
+still be linear. Sprout has no answer for linear folds anywhere today, and this
+design deliberately does not invent one: comprehensions inherit whatever the
+language decides for lambdas later. The diagnostic a user sees names a lambda at
+the comprehension's position, which is honest but terse; improving that wording
+is a follow-up, not a blocker.
+
 ## 5. Semantics — the elaboration
 
 Written below in surface syntax for readability. The real pass operates on the
@@ -478,8 +576,13 @@ No new types, no new classes, no unification changes.
   of the closed set (D2). An unsolved source is an error, not a default — there
   is no container-polymorphic comprehension to preserve.
 
-Because typing is native (D2), there is no infer-then-re-infer step and no
-double-inference cost; the first draft had both.
+Each generator's source is inferred twice — once by the check phase, once inside
+the synthesized tree (D2). That is a deliberate, compile-time-only cost, and it
+is what buys the elaboration passing through the ordinary typechecker. It has no
+semantic consequences: fresh type variables from the discarded pass are orphans
+that never reach the surviving tree, effect reports are recorded per declaration
+rather than per expression (`infer.sprout:8673`, `:9111`), and the source
+expression is embedded once, so runtime evaluation multiplicity is D4's.
 
 ## 7. Error-message impact
 
@@ -609,6 +712,32 @@ impact-scan rule.
   missing prelude `rem`/`mod` from D6.
 
 ## 11. Review history
+
+### Second review (2026-09-05) — the elaboration site
+
+Reviewed after inference landed, to decide between a post-inference pass over a
+typed `TComprehension` node and elaborating inside inference. Findings:
+
+- **`linear_check` runs inside inference**, at the declaration boundary
+  (`fn_linear_gate`, `infer.sprout:8069-8075`, called from `:8697`/`:9175`) — not
+  after it. A post-inference pass is therefore invisible to it, and the stub arm
+  it forces (`LinOk(Nil, Nil)`) lets a double-consume compile. This was the
+  deciding finding; it turned the choice from a risk-appetite question into a
+  soundness one. See D2's "Why the elaboration must not be a later pass".
+- **Nothing downstream would catch bad hand-built types.** `verify_dispatch`
+  checks dictionary resolution only; `opt --passes=verify` passed on every
+  compiles-clean-then-SIGSEGVs episode in `BACKLOG.md`; a new golden is
+  snapshotted presumed-correct.
+- **A fourth hygiene hazard** neither the first review nor this design had: a
+  local shadowing a bare prelude name the elaboration emits
+  (`let list_fold = 5 in […]`). A type error here, a silent miscompile under the
+  rejected design. Now pinned by a conformance fixture.
+- **The "post-solve" framing was never accurate.** Source kinds are resolved as
+  the walk reaches each generator, left to right, in both designs.
+- **Double inference is compile-time only** — confirmed against the effect and
+  field-obligation machinery; D4's runtime multiplicity is unaffected.
+
+### First review (2026-09-05) — the design draft
 
 First draft reviewed adversarially 2026-09-05. Beyond the D2 revision described
 at the head of this document, the review corrected:
