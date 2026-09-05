@@ -3299,9 +3299,20 @@ dot-guard `infer.is_lowercase_name` has (a dotted name is never a type variable)
 
 ### V1 Roadmap Candidates
 
-1. Add list comprehensions for `List` values in v1.
-   Initial scope: `[expr for x in xs]` and `[expr for x in xs if pred]`.
-   First milestone constraints: single generator, optional guard, list-only, no pattern generators, and no nested or multi-generator comprehensions.
+1. **List comprehensions — LANDED 2026-09-05.** Design, decisions and prior-art survey:
+   [docs/list-comprehensions-v0.md](./docs/list-comprehensions-v0.md); normative surface: spec §5.10 (Experimental).
+   Shipped *past* the first-milestone constraints this entry originally set (single generator, no pattern
+   generators, no nesting, list-only): comma-separated multi-generators, several guards per generator,
+   irrefutable pattern generators, nesting in both element and source position, and `IntRange` sources
+   alongside `List`. Elaborates to `list_fold`/`range_fold` accumulating in reverse with one final
+   `list_reverse`, so it runs in constant stack space.
+   Deliberately deferred — each has a rationale in the design doc, none is an oversight:
+   - a `let` qualifier inside the generator list;
+   - `Vec` sources — the generator set is **closed** (no `Generator` class is possible: the two-parameter
+     class cannot dispatch, and `IntRange` cannot be `Foldable` on kind grounds). Convert with `vec_to_list`;
+   - parallel / zip generators;
+   - linear values, which are rejected rather than tracked (D7) — comprehensions will inherit whatever
+     the language later decides for lambdas, since higher-order linearity is deferred language-wide.
 2. Continue the experimental integer-ranges slice toward a final v1 contract.
    Current implemented scope: a dedicated `IntRange` type, `a..b` inclusive syntax, ascending and descending unit-step semantics, and helper surface including `range`, `range_start`, `range_end`, `range_contains`, `range_count`, `range_to_list`, `range_to_vec`, and `range_fold`.
    Remaining follow-up: finalize the normative v1 contract, keep diagnostics sharp, and decide whether later range extensions such as patterns or half-open forms should exist at all.

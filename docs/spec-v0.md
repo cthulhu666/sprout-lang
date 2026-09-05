@@ -39,7 +39,11 @@ Out of scope for v0:
   `lo..hi` is three tokens (`lo`, `..`, `hi`), never one. Ranges therefore lex
   uniformly whatever their endpoints are — `0..n`, `lo..hi`, `p.x..p.y`,
   `first(xs)..last(xs)` — and `a..b` is the canonical spelling the formatter emits.
-- Keywords: `fn`, `let`, `where`, `type`, `wrap`, `match`, `with`, `if`, `then`, `else`, `true`, `false`
+- Keywords: `export`, `fn`, `let`, `type`, `class`, `instance`, `where`, `match`,
+  `with`, `do`, `if`, `then`, `else`, `in`, `true`, `false`, `extern`,
+  `deriving`, `wrap`, `for`. All are **hard** keywords — reserved everywhere,
+  never usable as an identifier. The implementation list is `is_keyword`
+  (`lexer.sprout:56`) and this list must match it exactly.
 - Literals: integer, boolean, string, unit (`()`)
 - Integer literals are decimal (`255`), hexadecimal (`0xFF`), or binary (`0b1010`).
   The `0x`/`0b` prefix and hex digits are case-insensitive, so `0XFF`, `0xff` and
@@ -1470,6 +1474,67 @@ is a type error, not an implicit `Ok`.
 Effects are orthogonal. `!{IO}` describes *what a step may do*, not whether the block
 can exit early, so an `!{IO}` block containing a fallible bind still short-circuits
 and its later steps are still conditional (see §5.8's consume rule).
+
+### 5.10 List comprehensions (Experimental)
+
+```
+comprehension ::= '[' expr 'for' generator { ',' generator } ']'
+generator     ::= pattern 'in' expr { 'if' expr }
+```
+
+Generators are separated by commas; a guard attaches to the generator on its
+left with **no** comma, and a generator may carry several guards. `for` is a hard
+keyword (§2), so a comprehension is distinguished from a list literal by a single
+token of lookahead and `[a, b | rest]` still parses as a tail pattern.
+
+The value of a comprehension is always a `List`, whatever the generator ranges
+over.
+
+**Generator sources.** The source expression must have type `List a` or
+`IntRange`. This set is **closed**: there is no `Generator` class and no way to
+add a source type. A `Vec` must be converted (`vec_to_list`). The source type
+must be *known* at the generator — an unsolved type is an error, not a deferred
+constraint, so `fn f(xs) = [x for x in xs]` is rejected until `xs` is annotated.
+
+**Generator patterns must be irrefutable.** A pattern that can fail to match is
+rejected; it is *not* a filter that silently drops non-matching elements. This is
+the same judgement `match` exhaustiveness uses (§5.5), so a single-constructor
+pattern — tuple, `wrap`, record, one-variant ADT — is accepted and `Just x` is
+not. To drop elements, say so with `list_filter_map`.
+
+**Guards** must have type `Bool`. A guard is evaluated only when every guard to
+its left, on the same generator, has passed.
+
+**Evaluation order and multiplicity.** Generators nest left-to-right, the
+leftmost being outermost, and results are produced depth-first: for two
+generators the second varies fastest. The first generator's source expression is
+evaluated **once**; every later generator's source is evaluated **once per
+iteration of the generators enclosing it**, so an effectful inner source runs
+repeatedly. A failing guard skips the generators to its right entirely. The
+element expression is evaluated once per surviving combination, in result order.
+
+Effects in the element, the guards and the sources are those of the comprehension
+as a whole, and occur in the order above.
+
+**Linear types.** A comprehension may not bind a linear value in a generator, nor
+consume one from the enclosing scope in its element or guards (§5.8). Both are
+rejected; higher-order linearity is deferred, and the number of iterations is not
+known statically.
+
+Equivalent to a fold that accumulates in reverse and reverses once at the end, so
+a comprehension over any source runs in constant stack space:
+
+```sprout
+[e for x in src if p]
+# ≡  list_reverse(list_fold(\acc x -> if p then Cons(e, acc) else acc, Nil, src))
+```
+
+The accumulator is a compiler-generated binder that cannot capture, or be
+captured by, any user name.
+
+*Experimental:* settled as above. A `let` qualifier, `Vec` sources and parallel
+(zip) generators are deliberately absent; see
+`docs/list-comprehensions-v0.md` for the rationale and open questions.
 
 ## 6. Evaluation Semantics (Strict)
 

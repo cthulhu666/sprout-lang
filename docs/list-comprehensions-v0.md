@@ -1,20 +1,25 @@
 # List comprehensions — design (v0)
 
-Status: **in implementation** (2026-09-05). Decisions D1–D7 below are settled
-with the user. The keyword, AST node, parser and walker arms have landed; the
-check-and-elaborate step in `infer` is in progress.
+Status: **landed** (2026-09-05), experimental. Decisions D1–D7 below are settled
+with the user and implemented. Normative surface: spec §5.10.
 
-Supersedes the scope written at `BACKLOG.md:3274` ("single generator, optional
-guard, list-only, no pattern generators, no nested or multi-generator") — see
-§2 for why that slice was rejected.
+Supersedes the scope V1 Roadmap Candidate 1 in `BACKLOG.md` originally set
+("single generator, optional guard, list-only, no pattern generators, no nested
+or multi-generator") — see §2 for why that slice was rejected. That entry now
+points here.
 
-> **Revised 2026-09-05 after an adversarial review of the first draft.** The
-> substantive change is D2: elaboration moved from *mid-inference, into surface
-> syntax* to *post-inference, over the typed tree*. Three separate defects in
-> the first draft — accumulator binders capturing user names, no rule for a
-> source whose type is not yet solved, and generator patterns being illegal in
-> the lambda-parameter position the desugar put them in — were one defect, and
-> D2 is its single fix. §11 records what else the review corrected.
+> **Revised twice on 2026-09-05, both times over D2 — where the elaboration
+> runs.** The first review moved it from *mid-inference, into surface syntax* to
+> *post-inference, over the typed tree*, fixing three defects that were really
+> one: accumulator binders capturing user names, no rule for a source whose type
+> is not yet solved, and generator patterns being illegal in the lambda-parameter
+> position the desugar put them in. The second review then moved it **back inside
+> inference**, because post-inference is *unsound* rather than merely riskier —
+> `fn_linear_gate` runs `linear_check` during inference, so a later pass is
+> invisible to it. The current design keeps the first review's three fixes (fresh
+> position-derived binders, an explicit unsolved-source error, a one-arm `match`
+> for non-variable patterns) while checking and elaborating in one place. §11
+> records both reviews.
 
 ## 1. Problem statement
 
@@ -53,6 +58,33 @@ it: against `filter |> map` the elaboration is a wash on both traversal count
 (2 either way) and allocation (2k cells either way, since the fold's
 accumulator is reversed into a fresh list). The wins are the O(1) stack, and
 the absence of per-outer-element concatenation in the multi-generator case.
+
+### Downstream survey (2026-09-05)
+
+`uncharted-suns` is Sprout's only real user, so it is the one place to check
+whether this feature retrofits onto existing code. It largely **does not**, and
+that is worth stating plainly rather than leaving implied.
+
+It contains **171** `list_fold` call sites and **zero** uses of `list_filter` or
+`list_filter_map`. Its list-building folds fall into three groups, none of which
+a comprehension can take over:
+
+1. **`filter_map` shape** — `list_fold` with `match … | Just x -> Cons(x, acc) | Nothing -> acc`
+   (`combat.sprout:1294`, `:1391`, `:1545`, `:1809`). D3 excludes exactly this on
+   purpose: dropping elements must be said out loud. These sites are the argument
+   *for* D3, not against it.
+2. **Index-dependent** — `fold_indexed`, usually `if i < cap` (`run.sprout:77`,
+   `debug_verbs.sprout:77`, `kit.sprout:201`, `:204`, `combat.sprout:1562`). A
+   comprehension exposes no index.
+3. **Accumulator-reading element** — `names.sprout:81` passes `acc` into the
+   element expression itself. Structurally impossible in a comprehension, since
+   the accumulator is not in scope.
+
+Two conclusions follow. The value of comprehensions here is **prospective** —
+new code, especially the `1..n` source of §1.1 — not a cleanup of what exists;
+this proposal should not be sold as the latter. And the zero-versus-four split in
+group 1 says `list_filter_map` is being hand-rolled because it is not known,
+which makes D3's diagnostic naming it (§7) do real work beyond the rejection.
 
 ## 2. Goals and non-goals
 
@@ -471,18 +503,34 @@ The elaboration emits prelude names (`list_fold`, `range_fold`, `list_reverse`,
 no prelude. This is **not a new rule**: `[…]` list literals already desugar to
 `Cons`/`Nil` (`parser.sprout:1309-1313`) and already have this property.
 
-### D6 — The examples need a remainder function, and there isn't one
+### D6 — The archetypal guard needs a remainder, and `%` is not it
 
-Sprout has **no `%` operator** — the lexer's operator table
-(`lexer.sprout:343`) does not list it and the character is rejected — and
-neither `prelude.sprout` nor `math.sprout` exports `rem`/`mod`.
-`examples/fizzbuzz.sprout:1` defines its own `fn rem(n: Int, m: Int) -> Int`.
+Sprout has **no `%` operator** — the lexer's operator table (`lexer.sprout:343`)
+does not list it and the character is rejected. The first draft's flagship
+example, `[i * i for i in 1..n if i % 2 == 0]`, therefore did not compile, and
+every example here uses comparisons or a named call instead.
 
-The first draft's flagship example was `[i * i for i in 1..n if i % 2 == 0]`,
-which does not compile. Every example here now uses comparisons instead. This is
-worth recording beyond the fix: comprehension guards make the missing remainder
-function considerably more visible, since "every second element" is the archetypal
-guard. A prelude `rem` is out of scope here and belongs in `BACKLOG.md`.
+*Corrected 2026-09-05.* This decision previously also claimed no `rem`/`mod`
+exists, and filed a prelude `rem` to `BACKLOG.md` as a gap. That was wrong, and
+wrong in an avoidable way: it checked `prelude.sprout` and `math.sprout` but not
+`stdlib/math/int.sprout`, a *different module*, which exports
+`mod(value, modulus) -> Maybe Int` (Euclidean, `Nothing` for a non-positive
+modulus). The archetypal guard is writable today — verified:
+
+```sprout
+import stdlib.math.int as mint
+
+fn evens(n: Int) -> List Int = [i for i in 1..n if mint.mod(i, 2) == Just(0)]
+#  evens(10) == [2, 4, 6, 8, 10]
+```
+
+What survives the correction is narrower and still worth recording: the guard
+costs an import and a `== Just(0)` unwrap where other languages write
+`i % 2 == 0`, because `mod` is total over a modulus that may be zero.
+`examples/fizzbuzz.sprout:1` defines its own `rem` rather than importing this,
+which suggests the discoverability problem is real even though the function is
+not missing. No backlog item is filed for a prelude `rem`; if one is ever wanted
+the argument is ergonomics, not absence.
 
 ### D7 — A comprehension rejects linear values
 
@@ -736,9 +784,10 @@ the O(1) stack claim in §5.
 8. `just seed-fp-ack` as its own isolated step if the fixed point holds, then
    commit (#13).
 
-**Downstream** — `uncharted-suns` was surveyed for the `for` keyword (D1, clean).
-It has **not** been surveyed for the §1 shapes; do that before landing, per the
-impact-scan rule.
+**Downstream** — `uncharted-suns` was surveyed for the `for` keyword (D1, clean)
+and, on 2026-09-05, for the §1 shapes. The result is in §1 "Downstream survey":
+essentially no existing code is a comprehension candidate, so the feature's value
+there is prospective rather than a retrofit.
 
 ## 10. Spec and docs
 
@@ -750,10 +799,16 @@ impact-scan rule.
 - `docs/idiomatic-sprout.md` — when to reach for a comprehension versus `|>`
   with combinators, and `list_each` for effects rather than a discarded
   comprehension (D4).
-- `README.md` — syntax summary; `for` added to the reserved-word list.
+- `README.md` — comprehension syntax under "Iteration Combinators", and a line in
+  the experimental-slices list. There is no reserved-word list in `README.md`;
+  the keyword list lives in **spec §2**, which this change also corrects — it
+  listed 12 keywords against `is_keyword`'s 20, so `for` was added along with the
+  8 that were already missing (`export`, `class`, `instance`, `do`, `in`,
+  `extern`, `deriving`, and `for` itself).
 - `BACKLOG.md` — replace V1 Roadmap Candidate 1 with a pointer here; record the
-  deferred `let` qualifier, `Vec` sources, and zip generators from §2; add the
-  missing prelude `rem`/`mod` from D6.
+  deferred `let` qualifier, `Vec` sources, and zip generators from §2. **No**
+  prelude `rem`/`mod` item: see the correction in D6 — `stdlib.math.int.mod`
+  already exists.
 
 ## 11. Review history
 
@@ -786,8 +841,9 @@ typed `TComprehension` node and elaborating inside inference. Findings:
 First draft reviewed adversarially 2026-09-05. Beyond the D2 revision described
 at the head of this document, the review corrected:
 
-- `%` is not a Sprout operator and no `rem`/`mod` exists — the flagship example
-  did not compile (now D6).
+- `%` is not a Sprout operator — the flagship example did not compile (now D6).
+  This review also asserted that no `rem`/`mod` exists anywhere; that half was
+  **itself wrong** and is corrected in D6. `stdlib/math/int.sprout` exports `mod`.
 - The refutability rule is spec **§5.2.1**, not §5.2.2 (miscited throughout).
 - "Allocates only the result's cons cells" was false by 2×, and "strictly better
   on stack and passes" was half right — passes are a wash (now §1, §5).

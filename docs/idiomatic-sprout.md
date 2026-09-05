@@ -140,6 +140,48 @@ do
   list_each(\body -> mut.mutvec_push(log, body), bodies)   # grows as needed
 ```
 
+## Build a list with a comprehension
+
+A comprehension is for *building a list*. It reads in the order the data flows —
+source, filter, shape — and it elaborates to the same fold you would have written
+by hand, so there is nothing to trade off on speed or stack depth.
+
+With one source and one transform, either form is fine; pick whichever the
+surrounding code already reads like. The comprehension pulls ahead as soon as
+there is more than one thing going on:
+
+```sprout
+# Filter and transform: said once, in one place.
+[n * 2 for n in ns if n > 0]
+list_map(\n -> n * 2, list_filter(\n -> n > 0, ns))     # same thing, read inside-out
+
+# Destructuring: the binder names the parts, so the body has no accessors.
+[name for (name, age) in people if age > 18]
+
+# Two sources: the clear win — no nested map, no concat.
+[(x, y) for x in xs, y in ys]
+
+# A range source needs no conversion.
+[i * i for i in 1..n]
+```
+
+Three places to *not* reach for one:
+
+- **You are chaining.** A comprehension is not a pipe stage, so it breaks a `|>`
+  chain in half. If the value is already flowing through `|>`, keep using
+  combinators.
+- **You want effects, not a list.** A comprehension builds a value; running an
+  action per element is `list_each`. Building a list you then throw away is the
+  tell.
+- **The pattern can fail.** A generator pattern must be irrefutable, and this is
+  deliberate: skipping non-matching elements is a *decision*, so Sprout makes you
+  write it. Use `list_filter_map` and say which elements survive.
+
+```sprout
+[x for Just x in maybes]                              # rejected: `Just x` can fail
+list_filter_map(\m -> m, maybes)                      # the idiom — drops Nothing
+```
+
 ## Chain transforms with `|>`
 
 The prelude is data-last — the collection is always the final argument — so a
