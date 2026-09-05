@@ -1,0 +1,106 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.mutable (MutVec, mutvec_empty, mutvec_push, mutvec_len)
+
+# List comprehensions do not exist yet (docs/list-comprehensions-v0.md, proposed
+# 2026-09-05). This file is the TDD RED for three normative properties the
+# design pins down; it must fail to PARSE (the first `for` token) until the
+# feature lands. See §4 D2 (hygiene), D4 (evaluation order/multiplicity), and
+# §5 (the O(1)-stack elaboration) for what each group below is pinning.
+
+# --- 1. Hygiene (D2): the elaboration's compiler-generated accumulator must
+# never capture, or be captured by, a user name. Each pair below tries one
+# plausible generated-binder name both as the generator's OWN pattern name and
+# as a name already bound in the surrounding scope.
+
+fn hygiene_binder_acc(xs: List Int) -> List Int =
+  [acc + 1 for acc in xs]
+
+fn hygiene_shadow_acc(xs: List Int) -> List Int =
+  let acc = 10 in [acc + x for x in xs]
+
+fn hygiene_binder_acc2(xs: List Int) -> List Int =
+  [acc2 + 1 for acc2 in xs]
+
+fn hygiene_shadow_acc2(xs: List Int) -> List Int =
+  let acc2 = 20 in [acc2 + x for x in xs]
+
+fn hygiene_binder_step(xs: List Int) -> List Int =
+  [step + 1 for step in xs]
+
+fn hygiene_shadow_step(xs: List Int) -> List Int =
+  let step = 30 in [step + x for x in xs]
+
+fn hygiene_binder_go(xs: List Int) -> List Int =
+  [go + 1 for go in xs]
+
+fn hygiene_shadow_go(xs: List Int) -> List Int =
+  let go = 40 in [go + x for x in xs]
+
+fn hygiene_binder_tmp(xs: List Int) -> List Int =
+  [tmp + 1 for tmp in xs]
+
+fn hygiene_shadow_tmp(xs: List Int) -> List Int =
+  let tmp = 50 in [tmp + x for x in xs]
+
+# --- 2. Evaluation multiplicity (D4, normative): the FIRST generator's source
+# is evaluated exactly once; every subsequent generator's source is evaluated
+# once per iteration of the generators to its left. `record_call` pushes one
+# entry to a MutVec each time its source-producing wrapper runs, so the final
+# length of the MutVec IS the evaluation count.
+
+fn record_call(counter: MutVec Int, xs: List Int) -> List Int !{IO} =
+  do
+    _ <- mutvec_push(counter, 1)
+    xs
+
+# The recorded source is the OUTER (first) generator: multiplicity says its
+# wrapper runs once, no matter how many outer elements there are.
+fn outer_multiplicity(counter: MutVec Int, xs: List Int, ys: List Int) -> List (Int, Int) !{IO} =
+  [(x, y) for x in record_call(counter, xs), y in ys]
+
+# The recorded source is the INNER (second) generator: multiplicity says its
+# wrapper runs once per element of the outer generator's source.
+fn inner_multiplicity(counter: MutVec Int, xs: List Int, ys: List Int) -> List (Int, Int) !{IO} =
+  [(x, y) for x in xs, y in record_call(counter, ys)]
+
+# --- 3. Stack safety (§5): the elaboration is a fold, tail-recursive
+# throughout (`list_fold_go`/`range_fold_go`/`list_reverse_go` in
+# `stdlib/prelude.sprout`), so it must run in O(1) stack. 100_000 is the size
+# `tests/stdlib/test_vec_sort_stacksafe.spr` uses for the same reason: the
+# runtime's GC root pool is a fixed 131072 slots, and a non-tail-recursive
+# O(n)-deep implementation (the shape `list_filter`/`list_map_go` have today,
+# per docs/list-comprehensions-v0.md §1 item 3) exhausts it well before 100k,
+# aborting with `sprout_gc_push_root: GC root pool exhausted` before any
+# assertion runs. A tail-recursive fold completes regardless of size.
+fn large_range_comprehension() -> List Int =
+  [i for i in 1..100000]
+
+fn main() -> Unit !{IO} =
+  do
+    outer_counter <- mutvec_empty()
+    outer_pairs <- outer_multiplicity(outer_counter, [1, 2, 3], [10, 20])
+    outer_calls <- mutvec_len(outer_counter)
+
+    inner_counter <- mutvec_empty()
+    inner_pairs <- inner_multiplicity(inner_counter, [1, 2, 3], [10, 20])
+    inner_calls <- mutvec_len(inner_counter)
+
+    run_suite("comprehension_hygiene", [
+      check_eq("generator binder named acc: value, not capture", hygiene_binder_acc(Cons(1, Cons(2, Nil))), Cons(2, Cons(3, Nil))),
+      check_eq("user acc in scope survives a comprehension over other names", hygiene_shadow_acc(Cons(1, Cons(2, Nil))), Cons(11, Cons(12, Nil))),
+      check_eq("generator binder named acc2: value, not capture", hygiene_binder_acc2(Cons(1, Cons(2, Nil))), Cons(2, Cons(3, Nil))),
+      check_eq("user acc2 in scope survives a comprehension over other names", hygiene_shadow_acc2(Cons(1, Cons(2, Nil))), Cons(21, Cons(22, Nil))),
+      check_eq("generator binder named step: value, not capture", hygiene_binder_step(Cons(1, Cons(2, Nil))), Cons(2, Cons(3, Nil))),
+      check_eq("user step in scope survives a comprehension over other names", hygiene_shadow_step(Cons(1, Cons(2, Nil))), Cons(31, Cons(32, Nil))),
+      check_eq("generator binder named go: value, not capture", hygiene_binder_go(Cons(1, Cons(2, Nil))), Cons(2, Cons(3, Nil))),
+      check_eq("user go in scope survives a comprehension over other names", hygiene_shadow_go(Cons(1, Cons(2, Nil))), Cons(41, Cons(42, Nil))),
+      check_eq("generator binder named tmp: value, not capture", hygiene_binder_tmp(Cons(1, Cons(2, Nil))), Cons(2, Cons(3, Nil))),
+      check_eq("user tmp in scope survives a comprehension over other names", hygiene_shadow_tmp(Cons(1, Cons(2, Nil))), Cons(51, Cons(52, Nil))),
+
+      check_eq("outer generator source evaluated exactly once", outer_calls, 1),
+      check_eq("outer comprehension result unaffected by the wrapper", outer_pairs, Cons((1, 10), Cons((1, 20), Cons((2, 10), Cons((2, 20), Cons((3, 10), Cons((3, 20), Nil))))))),
+      check_eq("inner generator source evaluated once per outer element", inner_calls, 3),
+      check_eq("inner comprehension result unaffected by the wrapper", inner_pairs, Cons((1, 10), Cons((1, 20), Cons((2, 10), Cons((2, 20), Cons((3, 10), Cons((3, 20), Nil))))))),
+
+      check_eq("100k-element range comprehension completes in O(1) stack", list_length(large_range_comprehension()), 100000)
+    ])

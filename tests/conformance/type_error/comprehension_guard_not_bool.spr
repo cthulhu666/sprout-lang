@@ -1,0 +1,9 @@
+module main
+
+# List comprehensions do not exist yet (docs/list-comprehensions-v0.md).
+# Design §6/§7 item 5: a guard must be `Bool`; a non-`Bool` guard is the
+# standard unification error, positioned at the guard.
+fn main() -> Unit !{IO} =
+  let xs = [1, 2, 3]
+      ys = [x for x in xs if 1]
+  in list_each(\y -> print(int_to_string(y)), ys)

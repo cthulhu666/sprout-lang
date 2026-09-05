@@ -1,0 +1,10 @@
+module main
+
+# List comprehensions do not exist yet (docs/list-comprehensions-v0.md).
+# Parameter annotations are optional (docs/spec-v0.md:291), so `xs` here is
+# still a metavariable when the comprehension is typed; design §7 item 2
+# rejects an unsolved source rather than defaulting.
+fn f(xs) = [x for x in xs]
+
+fn main() -> Unit !{IO} =
+  list_each(\y -> print(int_to_string(y)), f([1, 2, 3]))

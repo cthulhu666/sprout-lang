@@ -1,0 +1,88 @@
+import stdlib.test (check_eq, run_suite)
+
+# List-comprehension syntax (docs/list-comprehensions-v0.md):
+#   comprehension ::= '[' expr 'for' generator { ',' generator } ']'
+#   generator     ::= pattern 'in' expr { 'if' expr }
+#
+# `for` is not yet a reserved word and the comprehension AST node does not
+# exist, so this file currently fails to compile with a parse error at the
+# first `for` token. That is the intended TDD RED state.
+
+# Non-literal bounds, so a crossed pair is a genuinely EMPTY range at
+# runtime rather than the compiler's static "range is empty" rejection
+# (infer.sprout's `static_empty_range`, which fires only on literal Int
+# bounds passed directly to `range_up`/`range_down`, e.g. a bare `5..1`).
+fn mk_range(lo: Int, hi: Int) -> IntRange = range_up(lo, hi)
+
+fn int_nil() -> List Int = Nil
+
+wrap Cents = Int
+
+fn main() -> Unit !{IO} =
+  let pairs = [(1, 2), (3, 4)]
+      prices = [Cents(100), Cents(250)]
+  in run_suite("comprehension", [
+
+    # 1. Single generator over a List: identity and a transforming element expr.
+    check_eq("single List generator, identity",
+      [x for x in [1, 2, 3]], [1, 2, 3]),
+    check_eq("single List generator, transform",
+      [x * 2 for x in [1, 2, 3]], [2, 4, 6]),
+
+    # 2. Single generator over an IntRange.
+    check_eq("single IntRange generator",
+      [i * i for i in 1..5], [1, 4, 9, 16, 25]),
+
+    # 3. A guard on a single generator, over each source kind.
+    check_eq("guard over a List source",
+      [x for x in [1, 2, 3, 4, 5] if x > 2], [3, 4, 5]),
+    check_eq("guard over an IntRange source",
+      [i for i in 1..5 if i > 2], [3, 4, 5]),
+
+    # 4. Two generators (cartesian product). The point of this case is ORDER:
+    # leftmost generator outermost, depth-first, left to right.
+    check_eq("two generators: cartesian order",
+      [(x, y) for x in [1, 2], y in [10, 20]],
+      [(1, 10), (1, 20), (2, 10), (2, 20)]),
+
+    # 5. Dependent inner source: the second generator's source expression reads
+    # the first generator's binder.
+    check_eq("dependent inner source",
+      [a * b for a in 1..3, b in 1..a], [1, 2, 4, 3, 6, 9]),
+
+    # 6. A guard on the OUTER generator skips the entire inner loop: x = 2
+    # contributes zero pairs, not a partially-filtered set of them.
+    check_eq("outer guard skips the whole inner loop",
+      [(x, y) for x in [1, 2, 3] if x != 2, y in [10, 20]],
+      [(1, 10), (1, 20), (3, 10), (3, 20)]),
+
+    # 7. Guards on both generators.
+    check_eq("guards on both generators",
+      [(x, y) for x in [1, 2, 3] if x > 1, y in [10, 20, 30] if y > 10],
+      [(2, 20), (2, 30), (3, 20), (3, 30)]),
+
+    # 8. Empty sources: an empty List, and an empty IntRange (`range_is_empty`
+    # holds when the end lies past the start in the direction of travel).
+    check_eq("empty List source", [x for x in int_nil()], int_nil()),
+    check_eq("empty IntRange source", [i for i in mk_range(5, 1)], int_nil()),
+
+    # 9. A descending range source. `a..b` always lowers to `range_up(a, b)`
+    # (prelude.sprout:1787-1788), so it is NEVER descending regardless of
+    # which of a, b is larger — a literal `5..1` is in fact a compile-time
+    # error (crossed literal bounds, infer.sprout `static_empty_range`), not
+    # a silently-empty or descending range. Descending is `range_down(hi, lo)`.
+    check_eq("descending range via range_down",
+      [i for i in range_down(5, 1)], [5, 4, 3, 2, 1]),
+
+    # 10. Irrefutable non-variable generator patterns: a tuple pattern, and a
+    # `wrap` pattern.
+    check_eq("tuple pattern generator",
+      [a + b for (a, b) in pairs], [3, 7]),
+    check_eq("wrap pattern generator",
+      [n + 1 for Cents n in prices], [101, 251]),
+
+    # 11. Three generators, to prove nesting generalises past two.
+    check_eq("three generators",
+      [x + y + z for x in [1, 2], y in [10, 20], z in [100, 200]],
+      [111, 211, 121, 221, 112, 212, 122, 222])
+  ])

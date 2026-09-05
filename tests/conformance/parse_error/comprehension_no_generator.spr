@@ -1,0 +1,8 @@
+module main
+
+# List comprehensions do not exist yet (docs/list-comprehensions-v0.md).
+# D1 grammar: a comprehension needs at least one generator after `for`;
+# `[x for]` has none.
+fn main() -> Unit !{IO} =
+  let ys = [x for]
+  in list_each(\y -> print(int_to_string(y)), ys)
