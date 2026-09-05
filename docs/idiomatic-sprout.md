@@ -163,6 +163,9 @@ list_map(\n -> n * 2, list_filter(\n -> n > 0, ns))     # same thing, read insid
 
 # A range source needs no conversion.
 [i * i for i in 1..n]
+
+# Nor does a Vec result — the comprehension is wrapped for you.
+fn squares(n: Int) -> Vec Int = [i * i for i in 1..n]
 ```
 
 Three places to *not* reach for one:

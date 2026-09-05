@@ -3309,7 +3309,9 @@ dot-guard `infer.is_lowercase_name` has (a dotted name is never a type variable)
    Deliberately deferred — each has a rationale in the design doc, none is an oversight:
    - a `let` qualifier inside the generator list;
    - `Vec` sources — the generator set is **closed** (no `Generator` class is possible: the two-parameter
-     class cannot dispatch, and `IntRange` cannot be `Foldable` on kind grounds). Convert with `vec_to_list`;
+     class cannot dispatch, and `IntRange` cannot be `Foldable` on kind grounds). Convert with `vec_to_list`.
+     Note this is about `Vec` as an *input*: a `Vec` **result** needs no conversion, since a comprehension in a
+     `Vec`-expected position is wrapped in `vec_from_list` like a list literal (spec §5.5.1, D8);
    - parallel / zip generators;
    - linear values, which are rejected rather than tracked (D7) — comprehensions will inherit whatever
      the language later decides for lambdas, since higher-order linearity is deferred language-wide.

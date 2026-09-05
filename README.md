@@ -232,7 +232,17 @@ written, accumulating in reverse and reversing once at the end:
 Generators are comma-separated; a guard attaches to the generator on its left with
 no comma, and there may be several. The pattern must be irrefutable — `Just x` is
 rejected rather than silently skipping non-matches, so use `list_filter_map` when
-dropping elements is what you mean. See [spec §5.10](docs/spec-v0.md) and
+dropping elements is what you mean.
+
+In a `Vec`-expected position a comprehension needs no conversion — it lowers to
+`vec_from_list(…)`, the same rule a list literal gets ([spec §5.5.1](docs/spec-v0.md)):
+
+```sprout
+fn squares(n: Int) -> Vec Int = [i * i for i in 1..n]
+```
+
+Runnable tour: [`examples/comprehension_demo.sprout`](examples/comprehension_demo.sprout).
+See also [spec §5.10](docs/spec-v0.md) and
 [docs/list-comprehensions-v0.md](docs/list-comprehensions-v0.md).
 
 `IntRange` is inclusive of both ends, so a half-open `[0, n)` loop is

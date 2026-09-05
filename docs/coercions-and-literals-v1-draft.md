@@ -151,8 +151,18 @@ compromise):** the pass cannot distinguish a `List`-typed variable from a
 only well-typed on a `List`. Wrapping *unconditionally* in a `Vec` slot would
 turn the common case — passing a real `Vec` to a `Vec` parameter
 (`f(vec_empty())`) — into `vec_from_list(vec)`, a hard type error. A syntactic
-`Cons`/`Nil` head is the **one shape provably a `List`** without type info, so it
-is the *sound boundary*, not a limitation. This also matches the prior art
+`Cons`/`Nil` head is **provably a `List`** without type info, so it
+is the *sound boundary*, not a limitation.
+
+> **Amended 2026-09-05.** This paragraph originally called a `Cons`/`Nil` head
+> "the **one shape** provably a `List`". That was true when written and is not
+> now: list comprehensions (spec §5.10) are also always `List`s regardless of
+> what they range over, so they satisfy the same test and are wrapped too — see
+> D8 of `docs/list-comprehensions-v0.md`. The *boundary* is unchanged and still
+> excludes `List`-typed variables for exactly the reason above; only the census
+> of shapes that meet it grew. Worth noting for any future form: the question to
+> ask is "is this provably a `List` with no inferred types?", not "is this a
+> literal?". This also matches the prior art
 exactly: Haskell `OverloadedLists` and Swift `ExpressibleByArrayLiteral` affect
 *literal syntax only*, never arbitrary values (§3.A). The pre-implementation
 draft's claim that it "fires on any `List`-typed expression / that generality is
@@ -267,9 +277,10 @@ error modes diverge in a useful way:
   the checker reports `Call type mismatch: Type mismatch: Int vs String` — the
   element mismatch, not a bare `List`/`Vec` one. (Fixture:
   `tests/conformance/type_error/vec_literal_element_mismatch`.)
-- A **non-literal** `List` value in `Vec` position is *not* coerced and reports
+- A `List`-typed **variable** in `Vec` position is *not* coerced and reports
   `Call type mismatch: Type mismatch: Vec vs List` — the pre-existing
-  constructor mismatch (correct: it genuinely is not coercible here). (Fixture:
+  constructor mismatch (correct: it genuinely is not coercible here; a name
+  carries no pre-inference proof that it is a `List`). (Fixture:
   `tests/conformance/type_error/vec_nonliteral_list_not_coerced`.)
 
 **B.** `wrap Age = Int deriving (Num)` where `Num Int` is not in scope ⇒
@@ -328,8 +339,9 @@ executable, all passing on stage-2.)
 - **A. Implemented + spec updated.** `spec-v0.md` §5.5 (string interpolation)
   gains a short clause documenting the parallel `List`-literal → `Vec` lowering:
   a syntactic list literal in a `Vec`-expected position is lowered to
-  `vec_from_list([…])`, literal-only (non-literal `List` values are not
-  coerced). The `IsList`-generalization (§5.A) is noted as future work.
+  `vec_from_list([…])`, for the shapes provably a `List` before inference
+  (`List`-typed variables are not coerced). The `IsList`-generalization (§5.A)
+  is noted as future work.
 - **B. Experimental (not built).** On acceptance, revise `spec-v0.md` §5.6.1 to
   permit `deriving` on `wrap` for instance lifting, spell out that lifting
   preserves distinctness, and cross-reference `docs/deriving-v1-draft.md`.

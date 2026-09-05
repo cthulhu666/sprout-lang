@@ -1,0 +1,26 @@
+import stdlib.test (check_eq, run_suite)
+
+# A comprehension in a `Vec`-expected position, the same context-directed
+# lowering spec 5.5.1 already applies to a list literal. A comprehension is
+# provably a `List` before inference (spec 5.10: its value is always a List),
+# which is the soundness boundary that rule is drawn on.
+
+fn takes_vec(v: Vec Int) -> Int = vec_length(v)
+
+fn squares(n: Int) -> Vec Int = [i * i for i in 1..n]
+
+fn main() -> Unit !{IO} =
+  run_suite("comprehension in Vec context", [
+
+    check_eq("comprehension as a Vec argument",
+      takes_vec([x for x in [1, 2, 3]]), 3),
+
+    check_eq("comprehension as a Vec return type",
+      vec_to_list(squares(3)), [1, 4, 9]),
+
+    check_eq("context reaches through an if",
+      takes_vec(if true then [x for x in [1, 2]] else []), 2),
+
+    check_eq("a plain list literal still works in the same slot",
+      takes_vec([1, 2, 3, 4]), 4)
+  ])

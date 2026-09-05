@@ -585,6 +585,65 @@ defect, and a message is the one place a broken claim can survive indefinitely
 because nothing executes it. The rejections themselves are fixtures —
 `tests/conformance/type_error/comprehension_linear_{binder,capture,ctor_binder}`.
 
+### D8 — A comprehension coerces to `Vec`, like a list literal
+
+Spec §5.5.1 wraps a list literal in `vec_from_list(…)` when the expected type is
+`Vec`. A comprehension now does the same:
+
+```sprout
+fn takes_vec(v: Vec Int) -> Int = vec_length(v)
+
+takes_vec([1, 2, 3])                # already worked
+takes_vec([x * x for x in 1..3])    # D8: now works too
+
+fn squares(n: Int) -> Vec Int = [i * i for i in 1..n]
+```
+
+Before D8 these two `[…]`-shaped expressions behaved differently in the same
+argument slot, and the second failed with a bare `Type mismatch: Vec vs List`
+naming no remedy — while the comprehension's *source* side already emitted
+`— convert with vec_to_list(…)` for the mirror-image case.
+
+**Why this is inside the existing rule, not a widening of it.** The
+literal-only boundary exists for a stated soundness reason
+(`coercions-and-literals-v1-draft.md:148`): `desugar_ctx` runs before inference,
+so it cannot tell a `List`-typed name from a `Vec`-typed one, and an
+unconditional wrap would turn `f(vec_empty())` into `vec_from_list(vec)`. A
+syntactic `Cons`/`Nil` head was described there as "the **one shape** provably a
+`List`" — true when written, stale now: a comprehension is provably a `List` too
+(§5, its value is always a `List`). D8 applies the existing rule to a form that
+did not exist when the rule was drawn. It is one arm in
+`desugar_ctx.desugar_ctx_leaf_i`.
+
+**Costed before deciding, because the first estimate was backwards.** The
+initial read was that a hint would be cheap and the coercion a commitment. It is
+the other way round:
+
+| | cost |
+|---|---|
+| Coercion | **1 line** of code, in the function that already implements the rule |
+| Runtime | **Zero** over the explicit form — emits `vec_from_list(list_reverse(range_fold(…)))`, exactly the hand-written lowering |
+| Risk | **Nil.** Fires only when the expected type name is `Vec` *and* the leaf is a comprehension — a combination that was always a hard error, so no compiling program can change meaning |
+| Golden corpus | **Untouched** — `desugar_ctx` is not in the bundled smoke shape |
+| A comprehension-specific *hint* instead | Invasive: `infer_call_resolve` receives `arg_types`, not expressions, and unifies the whole call as one arrow, so it cannot say which argument mismatched |
+
+**Prior art, verified against the GHC user's guide.** Haskell's `OverloadedLists`
+overloads seven notations — `[]`, `[x]`, `[x,y,z]` and the four arithmetic-sequence
+forms — plus list patterns; comprehensions are **not** among them. Python makes
+the container syntactic (`{x for …}` vs `[x for …]`) rather than converting. So
+prior art does not support this extension, and it is taken on the local argument
+instead: Sprout's mechanism is a fixed `List → Vec` conversion directed by an
+expected type, not literal polymorphism over a class, and its own soundness
+boundary already covers comprehensions.
+
+**What it does not buy.** The intermediate list is still built — a comprehension
+targeting a `Vec` allocates cons cells and then walks them. A direct-to-`Vec`
+lowering remains deferred (`coercions-and-literals-v1-draft.md` §5.A). D8 is
+sugar, not an optimisation.
+
+Pinned by `tests/stdlib/test_comprehension_vec_ctx.spr` (argument position,
+return position, through an `if`, and a plain literal in the same slot).
+
 ## 5. Semantics — the elaboration
 
 Written below in surface syntax for readability. The real pass operates on the
@@ -806,6 +865,16 @@ there is prospective rather than a retrofit.
   irrefutable-pattern rule (D3), and evaluation order and multiplicity (D4).
   Normative. Cross-reference §5.2.1, whose refutability judgement D3 reuses, and
   §5.9, whose closed-family precedent D2 follows.
+- `docs/spec-v0.md` §5.5.1 — retitled and rewritten for D8: the `Vec`-context
+  lowering now covers comprehensions as well as list literals, and states the
+  boundary as "provably a `List` before inference" rather than "literal-only".
+- `docs/coercions-and-literals-v1-draft.md` — amended where it called a
+  `Cons`/`Nil` head "the one shape provably a `List`" (D8), and two acceptance
+  lines that said "non-literal" where they meant "a `List`-typed variable".
+- `examples/comprehension_demo.sprout` — the runnable tour: range source,
+  guards, destructuring, dependent multi-generators (Pythagorean triples),
+  nesting, and the `Vec` coercion. Adding it is itself a golden-corpus change
+  (`scripts/ir_golden_diff.sh` walks `examples/`).
 - `docs/idiomatic-sprout.md` — when to reach for a comprehension versus `|>`
   with combinators, and `list_each` for effects rather than a discarded
   comprehension (D4).

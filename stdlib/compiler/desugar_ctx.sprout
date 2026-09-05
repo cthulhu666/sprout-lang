@@ -18,9 +18,10 @@ import stdlib.string as string
 # Each interp part is wrapped in to_string(expr).
 # Empty literal segments are skipped from the parts list.
 #
-# Purely syntactic — never sees inferred types — so context only fires on the
-# one AST shape provably correct without type info (a syntactic list/template
-# literal); a real Vec/StringTemplate value falls through unwrapped. This is
+# Purely syntactic — never sees inferred types — so context fires only on AST
+# shapes provably correct without type info (a syntactic list/template literal,
+# or a comprehension, which is always a List); a real Vec/StringTemplate value
+# falls through unwrapped. This is
 # checker.sprout's own pre-typecheck desugar pass, extracted to a leaf module
 # (ast/source/string only) so lint_rules.sprout can reuse the same Vec-context
 # computation without depending on the typechecker.
@@ -109,9 +110,10 @@ fn desugar_instance_method_i(m: ast.InstanceMethodImpl, fn_idx: Dict (List (Mayb
 # and lower literals by AST shape: "StringTemplate" (template ADT vs String) and
 # "Vec" (bare list literal -> vec_from_list).  Both thread the context through
 # if/match arms so a literal in either arm is lowered.  The pass is purely
-# syntactic — it never sees inferred types — so "Vec" only fires on a syntactic
-# list literal (the one shape provably a List without type info); a real Vec
-# argument falls through unwrapped.
+# syntactic — it never sees inferred types — so "Vec" fires only on shapes
+# provably a List without type info: a syntactic list literal, and a
+# comprehension (spec 5.10, its value is always a List). A real Vec argument
+# falls through unwrapped, which is what the boundary is for.
 fn desugar_expr_i(expr: ast.Expr, expected: Maybe String, fn_idx: Dict (List (Maybe String))) -> ast.Expr =
   match expected with
   | Nothing -> desugar_expr_no_ctx_i(expr, fn_idx)
@@ -148,6 +150,12 @@ fn desugar_ctx_leaf_i(expr: ast.Expr, exp_name: String, fn_idx: Dict (List (Mayb
             if cname == "Cons" then wrap_vec_from_list(desugar_expr_no_ctx_i(expr, fn_idx), pos)
             else desugar_expr_no_ctx_i(expr, fn_idx)
         | Nothing -> desugar_expr_no_ctx_i(expr, fn_idx)
+    # A comprehension is the second shape provably a `List` without type info
+    # (spec 5.10: its value is always a List, whatever the generator ranges
+    # over), so it sits inside this pass's soundness boundary rather than
+    # widening it. The boundary is what stops an unconditional wrap turning
+    # `f(vec_empty())` into `vec_from_list(vec)`.
+    | ast.ComprehensionExpr _ _ pos -> wrap_vec_from_list(desugar_expr_no_ctx_i(expr, fn_idx), pos)
     | _ -> desugar_expr_no_ctx_i(expr, fn_idx)
   else
     match expr with
