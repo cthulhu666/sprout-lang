@@ -1,0 +1,10 @@
+module main
+
+# List comprehensions do not exist yet (docs/list-comprehensions-v0.md).
+# D3: a refutable generator pattern is rejected, not filtered. For a source
+# that is not `Maybe`, there is no one-call escape hatch, so the diagnostic
+# wording differs from the `Maybe` case (design §7 item 4).
+fn main() -> Unit !{IO} =
+  let xss = [[1, 2], [3, 4]]
+      ys = [x for Cons x _ in xss]
+  in list_each(\y -> print(int_to_string(y)), ys)

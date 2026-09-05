@@ -1,0 +1,9 @@
+module main
+
+# List comprehensions do not exist yet (docs/list-comprehensions-v0.md).
+# D1 grammar: a guard cannot appear before any generator; `[x for if p]`
+# has a guard with no preceding generator.
+fn main() -> Unit !{IO} =
+  let p = true
+      ys = [x for if p]
+  in list_each(\y -> print(int_to_string(y)), ys)

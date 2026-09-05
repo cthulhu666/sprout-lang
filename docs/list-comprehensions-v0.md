@@ -1,0 +1,644 @@
+# List comprehensions — design (v0)
+
+Status: **proposed** (2026-09-05). Decisions D1–D6 below are settled with the
+user; §4's implementation overview is awaiting approval before any code lands.
+
+Supersedes the scope written at `BACKLOG.md:3274` ("single generator, optional
+guard, list-only, no pattern generators, no nested or multi-generator") — see
+§2 for why that slice was rejected.
+
+> **Revised 2026-09-05 after an adversarial review of the first draft.** The
+> substantive change is D2: elaboration moved from *mid-inference, into surface
+> syntax* to *post-inference, over the typed tree*. Three separate defects in
+> the first draft — accumulator binders capturing user names, no rule for a
+> source whose type is not yet solved, and generator patterns being illegal in
+> the lambda-parameter position the desugar put them in — were one defect, and
+> D2 is its single fix. §11 records what else the review corrected.
+
+## 1. Problem statement
+
+Sprout has no comprehension syntax. Element-wise construction is written with
+data-last combinators and `|>`:
+
+```sprout
+xs |> list_filter(\n -> n > 2) |> list_map(\n -> n * n)
+```
+
+For the **single-generator** case this is already flat and idiomatic, and a
+comprehension buys only the removal of two lambdas. Three things are genuinely
+missing, and none are addressed by a single-generator form:
+
+1. **A range cannot be a source.** The most natural comprehension there is —
+   `[i * i for i in 1..n]` — has no short spelling, because `IntRange` is a
+   distinct type from `List`. Today it is `range_fold` with a hand-threaded
+   accumulator. (`range_to_list` exists but is used almost nowhere: every call
+   site is in the range tests themselves, except `tests/stdlib/test_fold_while.spr:41`,
+   which uses it to build a fixture.)
+2. **The cartesian shape is nested and allocates per outer element.**
+   `[(r, c) for r in rows, c in cols]` is
+   `list_flat_map(\r -> list_map(\c -> (r, c), cols), rows)`, which builds and
+   then concatenates one intermediate list *per element of `rows`*.
+   `list_flat_map` currently has **zero call sites outside the prelude**, which
+   is honest evidence in both directions: either the shape is not needed here,
+   or it is painful enough that callers restructure around it. This proposal
+   does not claim a measured pain point in this repository.
+3. **The combinator chain is O(n) stack, twice.** `list_filter`
+   (`prelude.sprout:218`) and `list_map_go` (`:195`) are both non-tail-recursive
+   — each builds `Cons(…, recurse(…))`. The elaboration in §5 is tail-recursive
+   throughout.
+
+**What §5 does *not* buy**, stated plainly because the first draft overclaimed
+it: against `filter |> map` the elaboration is a wash on both traversal count
+(2 either way) and allocation (2k cells either way, since the fold's
+accumulator is reversed into a fresh list). The wins are the O(1) stack, and
+the absence of per-outer-element concatenation in the multi-generator case.
+
+## 2. Goals and non-goals
+
+**Goals**
+
+- A comprehension form over `List` and `IntRange` sources.
+- Multiple generators, with later generators able to depend on earlier binders.
+- Boolean guards, attached to the generator whose scope they filter.
+- An elaboration that runs in O(1) stack and allocates nothing per outer
+  element.
+- Diagnostics that name the fix, not just the rejection.
+
+**Non-goals**
+
+- No `Vec` sources in v0 (`vec_to_list` at the call site; the closed set in D2
+  is designed to be widened later).
+- No pattern generators — see D3. Refutable patterns are **rejected**, not
+  filtered.
+- No `Dict`/`Set`/generic-container sources; no user-extensible generator
+  protocol (D2 explains why a class cannot express one today).
+- No comprehension over `Maybe`/`Result`, no monad-generic comprehension.
+- No `let` qualifier (Haskell's third qualifier form). Deferred; additive.
+- No parallel/zip generators (Erlang's `&&`).
+
+## 3. Prior-art survey
+
+Verified against primary sources. Every row was read; nothing here is recalled.
+
+| Language | Multiple generators | Guard | Refutable pattern in generator | Range as source |
+|---|---|---|---|---|
+| Haskell 2010 §3.11 | ✓ "nested, depth-first evaluation" | ✓ + `let` decls | ✓ **skips** | `[1..10]` is already a list |
+| Python | ✓ multiple `for` *and* `if` | ✓ | ✗ no refutable binding form at all | `range(n)` is an iterable |
+| Erlang | ✓ (+ `&&` zip generators) | ✓ | ✓ `<-` skips; `<:-` raises `badmatch` | — |
+| Scala 2.13 §6.19 | ✓ | ✓ | ✓ **skips**, via `withFilter` | — |
+| F# | ✓ (nested `for`) | ✓ | — | ✓ `[ for i in 1..10 -> i * i ]` |
+
+Multiple generators and a guard are **universal — five for five**. No language
+in the set shipped the single-generator-only slice `BACKLOG.md:3274` described,
+which is why §2 takes multi-generator as the entry bar.
+
+On the pattern question the wording matters:
+
+- **Haskell**: *"Binding of variables occurs according to the normal pattern
+  matching rules, and if a match fails then that element of the list is simply
+  skipped over."*
+- **Scala**: *"every generator `p <- e`, where `p` is not irrefutable for the
+  type of `e` is replaced by `p <- e.withFilter { case p => true; case _ =>
+  false }`"*
+- **Erlang**: *"A relaxed generator ignores that term and continues on. A strict
+  generator fails with an exception."*
+
+**Python is not a vote.** Its `for` target is an irrefutable destructuring
+target; a mismatch is a runtime error, not a skip. Having no refutable binding
+form, it abstains. The honest tally is **4/4 among languages that have
+refutable generator patterns**.
+
+### 3.1 Why those four agree
+
+The rationale is in the Haskell report as a translation equation rather than as
+a policy statement:
+
+```
+[ e | p <- l,  Q ]  =  let ok p  = [ e | Q ]
+                           ok _  = []
+                       in concatMap ok l
+```
+
+`ok _ = []` is not a decision about pattern generators. It is forced: `ok` must
+be total, its result type is `[b]`, and the only value the language can supply
+without consulting the programmer is the monoid identity. **The container
+supplies the failure value, so nothing needs to be asked.** Scala's `withFilter`
+is the same move made explicit; Erlang's list generator is the same move again.
+
+This also shows that skipping and Sprout's `let..else` are *not* opposite
+disciplines, which an earlier framing of this design got wrong:
+
+- `let Just x = m else fb` — the result type is an arbitrary `a`. There is **no
+  zero**, so the language cannot invent a failure value and must ask. `else` is
+  the answer.
+- `[e for Just x in ms]` — the element contributes a `List b`, which **has** a
+  zero meaning "contributes nothing".
+
+One rule — *never invent a failure value* — with a canonical one available in
+the second case and not the first.
+
+### 3.2 Why the consensus is nevertheless not adopted
+
+The zero answers *"what value?"*. It does not answer *"did you intend to?"*
+
+Erlang re-opened exactly this after roughly 25 years.
+[EEP 70](https://www.erlang.org/eeps/eep-0070) (Final, implemented in OTP 28)
+adds strict generators because *"relaxed generators can hide the presence of
+unexpected elements in the input data of a comprehension"*; the motivating case
+is `[{User, Email} || #{user := User, email := Email} <- all_users()]` silently
+dropping users with no email, which *"masks potentially corrupted data"*. The
+semantics were never wrong. What is missing is that a reader cannot distinguish
+*"I mean to drop these"* from *"I forgot these existed."*
+
+Sources: [Haskell 2010 Report §3.11](https://www.haskell.org/onlinereport/haskell2010/haskellch3.html)
+· [Python language reference](https://docs.python.org/3/reference/expressions.html)
+· [Erlang list comprehensions](https://www.erlang.org/doc/system/list_comprehensions.html)
+· [EEP 70](https://www.erlang.org/eeps/eep-0070)
+· [Scala 2.13 spec §6](https://scala-lang.org/files/archive/spec/2.13/06-expressions.html)
+· [F# lists](https://learn.microsoft.com/en-us/dotnet/fsharp/language-reference/lists)
+
+Elm was considered as the closest comparator (beginner-oriented, combinator-first
+ML) and **left out**: the 2013 request `elm/compiler#147` is closed with no
+reachable maintainer comment, so its position could not be verified from a
+primary source. An unverified row is worse than an absent one.
+
+## 4. Decisions, and the implementation overview
+
+### D1 — Surface syntax: `for` / `in` / `if`
+
+```
+comprehension ::= '[' expr 'for' generator { ',' generator } ']'
+generator     ::= pattern 'in' expr { 'if' expr }
+```
+
+Guards attach to the generator they follow, with no separating comma; generators
+are comma-separated. This makes a guard's scope syntactically obvious and lets an
+outer guard skip the whole inner loop.
+
+```sprout
+[i * i for i in 1..n]
+[i * i for i in 1..n if i > 2]
+[(r, c) for r in rows, c in cols]
+[(r, c) for r in rows if r > 0, c in cols if c != r]
+[a * b for a in 1..3, b in 1..a]          # inner source depends on outer binder
+```
+
+**Why not Haskell's `[e | x <- xs]`.** Not because `|` is taken — in *expression*
+position it is free (`parse_list_pattern` at `parser.sprout:411-432` has the
+tail-pattern branch; `parse_list_literal` at `:1298-1307` has no `|` branch at
+all, so `[e | …]` is currently just a parse error). The first draft's claim that
+the spelling was "forced" was wrong. The actual reasons are weaker but still
+sufficient: expression and pattern brackets should not read as the same shape
+with different meanings, and a `match` in the head position would collide with
+arm-`|` greediness (`[match m with | A -> 1 | x <- xs]` has no good reading).
+The Python-style spelling avoids both and is what the `BACKLOG` scope already
+assumed.
+
+`for` becomes a reserved word. Verified free **in both repositories**:
+
+- In-repo — across `stdlib/`, `examples/`, `tests/` and `testsupport/`, every
+  occurrence of `for` is inside a comment or a string literal
+  (`stdlib/template.sprout` uses `"for"` as *template-language* syntax in a
+  string, which is unaffected).
+- Downstream — `uncharted-suns`, the sole dogfooding consumer, was scanned with
+  comments and both single- and multi-line backtick templates stripped. The only
+  hits are GLSL `for` loops inside shader templates (`loam/planet.sprout:54`,
+  `loam/nebula.sprout:53`), both within the backtick block spanning lines 31–88.
+  String content, not identifiers.
+
+Migration cost today is therefore zero, and grows with every month this is
+deferred.
+
+Parsing is single-token lookahead: after `[`, parse one expression, then `for`
+means comprehension while `,` or `]` means list literal. A trailing `if` is
+unambiguous because Sprout's `if` is always `if … then … else` and never infix,
+so it cannot continue the preceding source expression. Guards terminate at `,`
+or `]`, neither of which is an operator.
+
+### D2 — Typed natively in `infer`; elaborated **after** inference
+
+The comprehension survives parsing as a real AST node. `infer` types it
+**natively** — no rewriting — producing a typed node that records each source's
+type. A separate pass over the typed tree, running after inference and before
+`ast_to_ir`, rewrites it into the fold form of §5.
+
+| Source type (post-solve) | Pattern binds | Fold used |
+|---|---|---|
+| `List a` | `a` | `list_fold` |
+| `IntRange` | `Int` | `range_fold` |
+| still unsolved | — | positioned error, §7 |
+| anything else | — | positioned error, §7 |
+
+**`a..b` is always ascending, and a crossed literal range is already a compile
+error.** `..` lowers to `range_up(a, b)` unconditionally (`prelude.sprout:1788`),
+so `5..1` does not mean "count down" and does not mean "empty" — it is rejected
+by `static_empty_range` / `reversed_literal_range` (`infer.sprout:5165-5186`),
+which fire when **both** bounds are static int literals and point the author at
+`range_down(5, 1)`. Computed bounds (`n - 1`) are not flagged and may be empty at
+runtime.
+
+Comprehensions inherit this for free: the check runs on the `..` call itself,
+regardless of the context it appears in, so `[e for i in 5..1]` is rejected with
+the existing diagnostic and needs no comprehension-specific rule. Descending
+iteration is written `range_down(hi, lo)`. This is worth stating because the
+obvious reading of `[i * i for i in 5..1]` — "iterate down" — is wrong in Sprout,
+and the *reason* it is safe to leave alone is that an existing check already
+covers it.
+
+**This split is the whole of the first draft's revision, and it fixes three
+things at once.** The draft elaborated mid-inference into surface syntax:
+
+- **Capture.** Fixed binder names collided with user names —
+  `[acc + 1 for acc in xs]` produced `list_fold(\ (acc, acc) -> …)`, and
+  `let acc = 10 in [acc + x for x in xs]` shadowed the user's `acc` with the
+  accumulator. Post-inference the binders are compiler-generated and fresh.
+- **Under-determined sources.** Parameter annotations are optional in v0
+  (spec §7), so in `fn f(xs) = [x for x in xs]` the source is still a
+  metavariable mid-inference — too early to choose a fold. Post-solve the type
+  is known, or it is genuinely ambiguous and the error in §7 is accurate rather
+  than premature. Note there is no legitimate container-polymorphic
+  comprehension to support: D2's set is closed, so an unsolved source is always
+  an under-determined program.
+- **Patterns in parameter position.** The draft's desugar put the generator
+  pattern where a lambda parameter goes, and lambda parameters are identifiers
+  only (`parse_param`, `parser.sprout:1414-1417`; `expected_ident("lambda
+  parameter")`, `:1295`). That made `[a + b for (a, b) in ps]` — which D3
+  explicitly permits — inexpressible. A post-inference rewrite emits the
+  destructuring directly and never passes through that restriction.
+
+Three alternatives for the *dispatch* (as opposed to its timing) were rejected:
+
+- **A generator class.** Not possible without a type-system change. `Foldable f`
+  is kind `* -> *` while `IntRange` is `IntRange Int Int Int`
+  (`prelude.sprout:79`) — monomorphic in `Int`, so it can never have an
+  instance. A two-parameter `class Generator src elem` cannot dispatch either:
+  instance keying is single-parameter throughout, of which
+  `add_class_param` (`resolve.sprout:343-346`, keeping only the head parameter
+  via `| [p | _] -> dict_set(class_name, p, acc)`) is one visible symptom rather
+  than the whole proof.
+- **A syntactic special-case** on the `IntRangeExpr` node (`ast.sprout:118`).
+  Cheap, but it works only in the literal shape: `let r = 1..n in [i * i for i
+  in r]` and `[i * i for i in bounds()]` would both fail with an error
+  mentioning `List`.
+- **Always materialise** via `range_to_list`. Inherits the syntactic limit above
+  *and* adds a defect: `range_to_list_go` (`prelude.sprout:159-162`) is
+  non-tail-recursive, so a large range would exhaust the stack.
+
+A closed, enumerated set is consistent with existing Sprout precedent rather than
+ad hoc: spec §5.9 enumerates `Maybe`/`Result` as the only short-circuiting
+families and states outright that the behaviour is not user-extensible. Widening
+the set later (`Vec`) is compatible; narrowing it would not be.
+
+**Precedent for the pass itself.** `resolve.sprout` already runs over
+`typed_ast` after inference and synthesizes typed nodes (dictionary arguments).
+That is the shape this pass takes. The first draft instead cited
+`infer_var_or_field` (`infer.sprout:1142`) as precedent for *mid-inference*
+rewriting; that citation was wrong in kind — it rewrites on **scope** (a
+`dict_get` against the environment), not on an inferred type, and it infers
+once rather than infer-then-re-infer. Nothing in this compiler rewrites on a
+solved type today; this pass would be the first, which is a cost this design
+now states rather than hides.
+
+Nothing the pass synthesizes needs dictionaries — `list_fold`, `range_fold`,
+`list_reverse` are plain functions and `Cons`/`Nil` are constructors — so it may
+run before `resolve`. Class-method calls inside the element expression or guards
+are already in the tree and are resolved wherever they land.
+
+#### D2.1 — Where the pass runs decides how many files change
+
+Sprout carries two parallel node families: untyped `ast.*Expr` and typed
+`typed_ast.T*`. A new expression needs an arm in every walker over each family it
+reaches. Measured by grepping the most recently threaded node, `RecordUpdateExpr`
+/ `TRecordUpdate`:
+
+| Family | Files that match on it |
+|---|---|
+| untyped `ast.RecordUpdateExpr` | `ast`, `parser`, `bundler`, `desugar_ctx`, `driver`, `iface_codec`, `lint_rules`, `infer` |
+| typed `typed_ast.TRecordUpdate` | `typed_ast`, `infer`, `dce`, `ast_to_ir`, `resolve`, `lowering`, `verify_dispatch`, `linear_check` |
+
+The untyped eight are unavoidable — the node is parsed, bundled, linted and
+interface-encoded before inference ever sees it.
+
+The typed side is where the pass's position pays. `compiler.sprout:487-517` runs
+`infer` → `resolve` → `verify_dispatch`, with `lowering` → `dce` on the other
+arm. **Inserting the elaboration immediately after `infer`, before everything
+else, means `TComprehension` never reaches `resolve`, `verify_dispatch`,
+`lowering`, `dce`, `ast_to_ir` or `linear_check`** — so the typed side costs
+`typed_ast` + `infer` + the new pass, not eight files.
+
+Run it any later and those five gain arms, and `linear_check` in particular
+would need real thought about a linear value bound by a generator. Running first
+is therefore not just cheaper, it defers a question this design has not answered.
+
+This corrects the first draft, which claimed `ast_to_ir` and lowering "never see
+the node" as though that were automatic. It is a consequence of scheduling the
+pass first, and it holds only while that stays true.
+
+### D3 — A refutable generator pattern is rejected, not filtered
+
+Against the 4/4 consensus in §3, and for the reason in §3.2. Refutability is
+judged by the rule spec **§5.2.1** already defines for `let..else` — *against the
+pattern's type, not its shape* (§5.2.2:578 refers back to it) — so a `wrap`, a
+tuple, or a single-constructor record pattern is irrefutable and allowed. The
+check happens in `infer`, which has both the pattern and the element type.
+
+```sprout
+[x for Just x in ms]
+# rejected — see §7 for the diagnostic
+
+list_filter_map(\m -> m, ms)      # the explicit form, already in the prelude
+```
+
+**Honest limitation.** The escape hatch is only *direct* for `Maybe`.
+`list_filter_map` (`prelude.sprout:227`) has type `f: a -> Maybe b`, so for any
+other refutable pattern the user must hand-write the projection:
+
+```sprout
+[x for Cons x _ in xss]                                    # rejected
+list_filter_map(\l -> match l with
+                      | Cons x _ -> Just(x)
+                      | _        -> Nothing, xss)          # what they write instead
+```
+
+That is more than "call the existing function", and §7 gives it its own
+diagnostic wording rather than pretending the two cases are alike. It is still
+the *explicit* form — the drop is written down — which is the point of D3.
+
+Erlang needed new syntax (`<:-`) to recover explicitness because its
+comprehension had held the filtering role for 25 years; Sprout has not shipped
+one and can decline the role. This errs in the recoverable direction: rejecting
+now leaves room to add skipping, or a marked form, later; shipping silent
+skipping can never be narrowed.
+
+### D4 — Effects flow; order and multiplicity are specified
+
+`list_fold` and `range_fold` are effect-polymorphic (`step: b -> a -> b !{e}`),
+so an effectful element expression or guard typechecks and the comprehension
+carries the effect. Forbidding it would mean a purity restriction nothing else
+in the language has; but `list_each` remains the idiom for running an action per
+element, and the style guide should say so.
+
+Sprout is strict, so the following are observable and therefore normative:
+
+- **Order** — depth-first, leftmost generator outermost, left to right, matching
+  Haskell's "nested, depth-first evaluation of the generators" and Python's
+  "nesting from left to right".
+- **Multiplicity** — the first generator's source expression is evaluated
+  **once**; every subsequent generator's source is evaluated **once per
+  iteration of the generators to its left**, because it may depend on their
+  binders. So in `[e for x in xs, y in f(x)]`, `f` runs once per element of
+  `xs`. A caller who wants a constant inner source must hoist it into a `let`.
+
+### D5 — Prelude dependency
+
+The elaboration emits prelude names (`list_fold`, `range_fold`, `list_reverse`,
+`Cons`, `Nil`), so a comprehension does not work in an importless file that gets
+no prelude. This is **not a new rule**: `[…]` list literals already desugar to
+`Cons`/`Nil` (`parser.sprout:1309-1313`) and already have this property.
+
+### D6 — The examples need a remainder function, and there isn't one
+
+Sprout has **no `%` operator** — the lexer's operator table
+(`lexer.sprout:343`) does not list it and the character is rejected — and
+neither `prelude.sprout` nor `math.sprout` exports `rem`/`mod`.
+`examples/fizzbuzz.sprout:1` defines its own `fn rem(n: Int, m: Int) -> Int`.
+
+The first draft's flagship example was `[i * i for i in 1..n if i % 2 == 0]`,
+which does not compile. Every example here now uses comparisons instead. This is
+worth recording beyond the fix: comprehension guards make the missing remainder
+function considerably more visible, since "every second element" is the archetypal
+guard. A prelude `rem` is out of scope here and belongs in `BACKLOG.md`.
+
+## 5. Semantics — the elaboration
+
+Written below in surface syntax for readability. The real pass operates on the
+typed tree with **compiler-generated binders** (D2), so the accumulator names
+shown as `acc`/`acc2` are fresh and cannot capture or be captured by user names.
+
+Single generator with a guard:
+
+```sprout
+[e for x in src if p]
+
+# elaborates to (FOLD = list_fold | range_fold, per D2):
+list_reverse(FOLD(\ (acc, x) -> if p then Cons(e, acc) else acc, Nil, src))
+```
+
+Multiple generators nest, threading one accumulator so that exactly one reverse
+runs at the end:
+
+```sprout
+[e for x in xs if p, y in ys if q]
+
+list_reverse(
+  list_fold(\ (acc, x) ->
+    if p then
+      list_fold(\ (acc2, y) -> if q then Cons(e, acc2) else acc2, acc, ys)
+    else acc,
+  Nil, xs))
+```
+
+A non-variable irrefutable pattern (tuple, `wrap`, single-constructor record)
+becomes a fresh binder plus a destructuring bind inside the step, since a
+pattern cannot occupy a parameter position (D2).
+
+**Costs, stated precisely.** For a k-element result from an n-element source:
+
+| | traversals | cons cells |
+|---|---|---|
+| `filter \|> map` | 2 | 2k (intermediate + result) |
+| this elaboration | 2 (source, then reverse) | 2k (accumulator + reversed result) |
+| `flat_map`-nested, m generators | — | 2k **plus** one intermediate list per outer element |
+
+So against the single-generator chain it is a wash on both counts; the wins are
+the **O(1) stack** (`list_fold_go` `:200`, `range_fold_go` `:167`,
+`list_reverse_go` `:528` are all tail-recursive, against `list_filter` `:218`
+and `list_map_go` `:195` which are not) and the **absence of per-outer-element
+concatenation** in the multi-generator case.
+
+A guard on an outer generator skips the entire inner loop, which is both the
+correct reading of "nesting from left to right" and the efficient one.
+
+Hand-evaluated for `xs = [1, 2]`, `ys = [a, b]`, no guards:
+`[(x, y) for x in xs, y in ys]` → `[(1,a), (1,b), (2,a), (2,b)]`.
+
+## 6. Type-system impact
+
+No new types, no new classes, no unification changes.
+
+- Generator sources are inferred left to right; source *k* is inferred in an
+  environment extended with the binders of generators *1…k-1*, which is what
+  makes `[a * b for a in 1..3, b in 1..a]` well-typed.
+- Each guard must be `Bool`.
+- The comprehension's type is `List b`, where `b` is the element expression's
+  type.
+- Its effect row is the join of the sources', guards', and element expression's
+  rows (D4).
+- Each source's type must be **solved** by the end of inference and must be one
+  of the closed set (D2). An unsolved source is an error, not a default — there
+  is no container-polymorphic comprehension to preserve.
+
+Because typing is native (D2), there is no infer-then-re-infer step and no
+double-inference cost; the first draft had both.
+
+## 7. Error-message impact
+
+Five new diagnostics, all positioned:
+
+1. **Unsupported source** — the closed set, naming the conversion:
+   ```
+   3:20: ERROR: check: a comprehension generator ranges over a `List` or an
+   `IntRange`; `items` is a `Vec Int` — convert with `vec_to_list(items)`
+   ```
+2. **Under-determined source** — the type never got solved:
+   ```
+   3:20: ERROR: check: cannot tell what `xs` ranges over; a comprehension
+   generator needs a known `List` or `IntRange` type — annotate the parameter
+   ```
+3. **Refutable pattern, `Maybe` source** — the rejection plus the direct form:
+   ```
+   3:14: ERROR: check: a generator pattern must be irrefutable; `Just x` can
+   fail to match. To drop non-matching elements, say so: list_filter_map(\m -> m, ms)
+   ```
+4. **Refutable pattern, any other type** — the rejection plus the shape of the
+   projection, since no one-call form exists (D3):
+   ```
+   3:14: ERROR: check: a generator pattern must be irrefutable; `Cons x _` can
+   fail to match. To drop non-matching elements, say so with list_filter_map and
+   a match returning `Just`/`Nothing`.
+   ```
+5. **Non-`Bool` guard** — the standard unification error, positioned at the
+   guard rather than at the whole comprehension.
+
+Plus parse errors for a missing `in`, a comprehension with no generator, and a
+guard before any generator:
+```
+1:12: ERROR: parse: a comprehension needs at least one generator
+(`<pat> in <expr>`) before any `if` guard
+```
+
+Two of these wordings are **inherited, not invented**, and the implementation
+must keep them that way so the fixtures stay stable:
+
+- The missing-`in` error comes from the parser's existing
+  `expected_keyword` helper (`parser.sprout:157-164`), which emits
+  `"Expected keyword " ++ kw ++ " at " ++ pos`. So the generator's `in` must be
+  consumed with `expected_keyword(tokens, i, "in")` rather than a bespoke
+  message.
+- The non-`Bool` guard error is the unifier's standard `Type mismatch: Int vs
+  Bool`, identical to the existing `if_branch_mismatch` fixture. A guard is an
+  ordinary `Bool`-unified position and needs no special-casing.
+
+## 8. Compatibility and migration
+
+- **Reserving `for` is the only breaking change**, and it breaks nothing in
+  either repository today (D1).
+- Everything else is additive. No existing program changes meaning.
+- **The keyword change reaches the formatter and linter.**
+  `stdlib/compiler/formatter.sprout` is token-based, so `for` moving from
+  `TokenIdentKind` to `TokenKeywordKind` changes its spacing decisions; a
+  multi-line comprehension also needs a defined layout. `just fmt-check` runs in
+  CI, so this is a gate, not a polish item.
+- Editing `stdlib/compiler/` makes this seed-gated: `just refresh-seed` runs
+  **before** `just test` and before `just ir-golden-diff`, or those gates
+  silently run the pre-edit binary.
+- The lexer change means a two-step bootstrap may be required if the committed
+  seed predates it (`docs/debugging.md` §2-Step Bootstrap Protocol).
+
+## 9. Tests and gates
+
+**Parser** — single generator; multiple generators; guard; several guards;
+comprehension-vs-list-literal disambiguation; comprehension-vs-tail-pattern
+(`[a, b | rest]` must still parse as a pattern); nested comprehension in both
+element and source position; a lambda in the element expression; `let … in` as a
+source; the three parse errors in §7.
+
+**Types** — `List` source; `IntRange` source; `Vec` source rejected; unsolved
+source rejected (`fn f(xs) = [x for x in xs]`); refutable pattern rejected, both
+diagnostic variants; non-`Bool` guard rejected; dependent inner source
+(`b in 1..a`); irrefutable non-variable patterns accepted (tuple, `wrap`,
+single-constructor record).
+
+**Hygiene** — `[acc + 1 for acc in xs]` and `let acc = 10 in [acc + x for x in xs]`
+must both compile and give the right answer. These are the first draft's bugs;
+they are regression tests, not nice-to-haves.
+
+**Runtime** — result order for two generators (depth-first, leftmost outermost);
+outer guard skipping an inner loop; inner-source evaluation multiplicity (D4),
+observed with an effectful source; an empty `List` source; an empty range built
+from *computed* bounds (a literal `5..1` is a compile error, not an empty range —
+see D2); a descending source via `range_down`; and a range large enough to prove
+the O(1) stack claim in §5.
+
+**Gates** (Definition of Done, in order):
+
+1. `just fmt` over new `.spr`/`.sprout` files, staged (#4) — and `fmt-check`
+   passes given the new keyword (§8).
+2. `just refresh-seed`, staging `bootstrap/compile_driver.ll` (#9) — **before**
+   the two gates below.
+3. `mise exec -- just test`, full, no filter (#5).
+4. `just compile-examples-stage1` (#6).
+5. Smoke shapes via `--emit-ir` (#7) and bundle smoke via `--phase bundle` (#8),
+   both triggered by editing `stdlib/compiler/`.
+6. `just run-example-canary` (#11), triggered because `refresh-seed` rewrites
+   `bootstrap/compile_driver.ll`. Covered by `just ci-fast-gates`.
+7. `just ir-golden-diff`, then `ir-golden-snapshot` + stage `tests/golden/ir/`
+   (#12). A new `examples/` file is itself a golden-corpus change
+   (`scripts/ir_golden_diff.sh:103` walks the directory); for a purely additive
+   example the snapshot must write **only** the new file.
+8. `just seed-fp-ack` as its own isolated step if the fixed point holds, then
+   commit (#13).
+
+**Downstream** — `uncharted-suns` was surveyed for the `for` keyword (D1, clean).
+It has **not** been surveyed for the §1 shapes; do that before landing, per the
+impact-scan rule.
+
+## 10. Spec and docs
+
+- `docs/spec-v0.md` — a new subsection under §5 covering the grammar (D1), the
+  closed generator set and the solved-type requirement (D2), the
+  irrefutable-pattern rule (D3), and evaluation order and multiplicity (D4).
+  Normative. Cross-reference §5.2.1, whose refutability judgement D3 reuses, and
+  §5.9, whose closed-family precedent D2 follows.
+- `docs/idiomatic-sprout.md` — when to reach for a comprehension versus `|>`
+  with combinators, and `list_each` for effects rather than a discarded
+  comprehension (D4).
+- `README.md` — syntax summary; `for` added to the reserved-word list.
+- `BACKLOG.md` — replace V1 Roadmap Candidate 1 with a pointer here; record the
+  deferred `let` qualifier, `Vec` sources, and zip generators from §2; add the
+  missing prelude `rem`/`mod` from D6.
+
+## 11. Review history
+
+First draft reviewed adversarially 2026-09-05. Beyond the D2 revision described
+at the head of this document, the review corrected:
+
+- `%` is not a Sprout operator and no `rem`/`mod` exists — the flagship example
+  did not compile (now D6).
+- The refutability rule is spec **§5.2.1**, not §5.2.2 (miscited throughout).
+- "Allocates only the result's cons cells" was false by 2×, and "strictly better
+  on stack and passes" was half right — passes are a wash (now §1, §5).
+- "`|` is unavailable, forced not chosen" was wrong: `|` is free in expression
+  position. The conclusion survives on weaker grounds (now D1).
+- Inner-source evaluation multiplicity was unspecified and is observable (now
+  D4).
+- `range_to_list` does have one non-range-test call site (now §1).
+- The DoD gate list omitted smoke shapes, bundle smoke, seed staging, the
+  example canary, `fmt`, and the full test run; the formatter/linter consequence
+  of a new keyword was missed entirely (now §8, §9).
+- D3's escape hatch was presented as uniformly available; it is direct only for
+  `Maybe` (now D3, and §7 diagnostic 4).
+- Reserving `for` was verified in-repo but not downstream. Now verified in both
+  (D1) — `uncharted-suns` is clean.
+
+Checked and found sound: all cited `prelude.sprout` line numbers and their
+tail/non-tail characterisations; the `Foldable` kind argument; the `lexer.sprout`
+keyword list; `ir_golden_diff.sh:103`; `list_flat_map` having no call sites
+outside the prelude; spec §5.9's closed-family precedent; the §5 desugar's
+semantics proper (element order, guard scoping, accumulator threading, single
+reverse); D5's pre-existing importless caveat; and the grammar under
+single-token lookahead against nested comprehensions, tuple elements, `..` as a
+source, a lambda in the element, `let … in` as a source, and guard termination.
+
+This document is non-normative until implemented; `docs/spec-v0.md` is the
+normative source once it lands.

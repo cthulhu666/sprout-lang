@@ -1,0 +1,9 @@
+module main
+
+# List comprehensions do not exist yet (docs/list-comprehensions-v0.md).
+# Once they do, a generator source outside the closed set {List, IntRange}
+# must be rejected and told to convert with `vec_to_list` (design §7 item 1).
+fn main() -> Unit !{IO} =
+  let items = vec_singleton(1)
+      doubled = [x * 2 for x in items]
+  in list_each(\d -> print(int_to_string(d)), doubled)

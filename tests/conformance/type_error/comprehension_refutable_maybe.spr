@@ -1,0 +1,10 @@
+module main
+
+# List comprehensions do not exist yet (docs/list-comprehensions-v0.md).
+# D3: a refutable generator pattern is rejected, not filtered. Against a
+# `Maybe` source the diagnostic must point at the direct escape hatch,
+# `list_filter_map` (design §7 item 3).
+fn main() -> Unit !{IO} =
+  let ms = [Just(1), Nothing, Just(3)]
+      ys = [x for Just x in ms]
+  in list_each(\y -> print(int_to_string(y)), ys)

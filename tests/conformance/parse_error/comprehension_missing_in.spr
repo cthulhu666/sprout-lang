@@ -1,0 +1,10 @@
+module main
+
+# List comprehensions do not exist yet (docs/list-comprehensions-v0.md).
+# D1 grammar: `generator ::= pattern 'in' expr { 'if' expr }`. A generator
+# with a pattern but no `in` before its source expression must be rejected
+# at parse time.
+fn main() -> Unit !{IO} =
+  let xs = [1, 2, 3]
+      ys = [x for x xs]
+  in list_each(\y -> print(int_to_string(y)), ys)
