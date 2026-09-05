@@ -67,6 +67,7 @@ Running with `USER="  Ada  "` prints `Hello, Ada`. More in [`examples/`](./examp
 **Experimental slices** (implemented, not yet normative v0): the module system,
 typeclasses, records (`type User = (name: String)` — parametric, with `p.x` access
 and `p with (name = …)` update), integer ranges (`a..b`),
+list comprehensions (`[e for x in xs if p]`, over `List` and `IntRange`),
 `Char`/Unicode text, `stdlib.regex`, `do` notation for `Maybe`/`Result`/`IO`,
 existential constructors (`| exists a. Cell a where ToString a`, and its `(any C)`
 sugar — trait objects / heterogeneous collections), linear types with
@@ -216,6 +217,23 @@ range_fold(step: b -> Int -> b !{e}, init: b, r: IntRange) -> b !{e}
 list_each (f: a -> Unit !{e}, xs: List a)  -> Unit !{e}            # traverse for effect
 list_fold (step: b -> a -> b !{e}, init: b, xs: List a) -> b !{e}
 ```
+
+To *build* a list rather than loop for effect, prefer a comprehension. It reads in
+the order the data flows, works over either source type, and runs in constant
+stack space — it elaborates to exactly the `list_fold`/`range_fold` you would have
+written, accumulating in reverse and reversing once at the end:
+
+```sprout
+[i * i for i in 1..n]                            # over an IntRange
+[name for (name, age) in people if age > 18]     # destructure, then filter
+[(x, y) for x in xs, y in ys]                    # nested: leftmost is outermost
+```
+
+Generators are comma-separated; a guard attaches to the generator on its left with
+no comma, and there may be several. The pattern must be irrefutable — `Just x` is
+rejected rather than silently skipping non-matches, so use `list_filter_map` when
+dropping elements is what you mean. See [spec §5.10](docs/spec-v0.md) and
+[docs/list-comprehensions-v0.md](docs/list-comprehensions-v0.md).
 
 `IntRange` is inclusive of both ends, so a half-open `[0, n)` loop is
 `range_up(0, n - 1)` — including at `n == 0`, which needs **no guard**. A range is
