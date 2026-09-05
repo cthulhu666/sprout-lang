@@ -1,0 +1,148 @@
+module stdlib.fs.path
+
+import stdlib.string as string
+
+# Pure path manipulation. NOTHING here touches the filesystem — every function is
+# a total function of its argument, which is what makes the whole module unit
+# testable with no temp directory and no ordering between cases. Path questions
+# that require the disk (does it exist, what does this symlink resolve to)
+# deliberately live in `stdlib.fs` instead, so the two never get confused.
+#
+# POSIX separators only. Drive letters, UNC paths and `\` are out of scope; see
+# docs/stdlib-fs-v0.md §2 N3, which records that as a decision rather than an
+# oversight.
+#
+# The edge cases are not invented. `basename`/`dirname` follow POSIX
+# basename(3)/dirname(3), `extension`/`stem` follow Rust's `Path`, and
+# `normalize` is Go's `Clean`; docs/stdlib-fs-v0.md §3.1 has the survey and the
+# one place the surveyed languages actually disagree.
+
+export fn is_absolute(p: String) -> Bool =
+  string.starts_with(p, "/")
+
+# Strip EVERY trailing separator, so "/" and "//" both reduce to "". Callers
+# below rely on that empty result to detect an all-separators path, which is the
+# case POSIX gives its own answer to.
+fn drop_trailing_seps(p: String) -> String =
+  if string.ends_with(p, "/") then
+    drop_trailing_seps(string.take(p, string.length(p) - 1))
+  else p
+
+# POSIX basename(3). Its EXAMPLES table is the authority for the three odd
+# cases: "" is ".", "/" is "/", and a trailing separator is stripped before the
+# last component is taken, so basename("/usr/") is "usr" and not "".
+export fn basename(p: String) -> String =
+  if string.is_empty(p) then "."
+  else basename_trimmed(drop_trailing_seps(p))
+
+fn basename_trimmed(trimmed: String) -> String =
+  if string.is_empty(trimmed) then "/"
+  else
+    match string.rsplit_once(trimmed, "/") with
+    | Nothing -> trimmed
+    | Just (_, last) -> last
+
+# POSIX dirname(3). "" is ".", a path with no separator is ".", and the result
+# never keeps a trailing separator unless it IS the root.
+export fn dirname(p: String) -> String =
+  if string.is_empty(p) then "."
+  else dirname_trimmed(drop_trailing_seps(p))
+
+fn dirname_trimmed(trimmed: String) -> String =
+  if string.is_empty(trimmed) then "/"
+  else
+    match string.rsplit_once(trimmed, "/") with
+    | Nothing -> "."
+    | Just (before, _) -> dirname_head(trimmed, drop_trailing_seps(before))
+
+# An empty head means the last separator was the leading one, so the parent is
+# the root on an absolute path and the current directory on a relative one.
+fn dirname_head(trimmed: String, head: String) -> String =
+  if string.is_empty(head) then
+    if is_absolute(trimmed) then "/" else "."
+  else head
+
+# The extension of the final component, WITHOUT its dot, or Nothing.
+#
+# Two rules carry the survey's findings. A name beginning with "." and having no
+# other dot has no extension — ".bashrc" is a name, not an extension — which is
+# Rust's and Node's answer and the one place Go diverges (it would answer
+# ".bashrc"). And absence is `Nothing` rather than "", which is why the dot is
+# dropped: Go and Node keep the dot only because they need it to tell "" apart
+# from a real empty extension, and `Maybe` already carries that.
+export fn extension(p: String) -> Maybe String =
+  match string.rsplit_once(basename(p), ".") with
+  | Nothing -> Nothing
+  | Just (before, after) -> if string.is_empty(before) then Nothing else Just(after)
+
+# The final component with its extension removed. A dotfile keeps its whole
+# name, which follows from `extension` rather than being a second rule.
+export fn stem(p: String) -> String =
+  stem_of(basename(p), extension(p))
+
+fn stem_of(name: String, ext: Maybe String) -> String =
+  match ext with
+  | Nothing -> name
+  | Just e -> string.take(name, string.length(name) - string.length(e) - 1)
+
+# An absolute right-hand side DISCARDS the left, matching Rust's `Path::join`:
+# joining an absolute path onto a base is almost always a caller mistake, and
+# silently producing "base//abs" would hide it behind a path that cannot exist.
+export fn join(left: String, right: String) -> String =
+  if string.is_empty(right) then left
+  else if is_absolute(right) then right
+  else if string.is_empty(left) then right
+  else if string.ends_with(left, "/") then left ++ right
+  else left ++ "/" ++ right
+
+# The non-empty components, dropping the empties that a leading, trailing or
+# doubled separator produces. Rootedness is NOT recoverable from the result —
+# `split("/a")` and `split("a")` are both `["a"]` — so ask `is_absolute`
+# separately rather than looking for a leading empty component.
+export fn split(p: String) -> List String =
+  list_filter(\c -> ! string.is_empty (c), string.split(p, "/"))
+
+fn clean_step(rooted: Bool, acc: List String, c: String) -> List String =
+  if c == "." then acc
+  else if c == ".." then
+    match acc with
+    # Go's rule 4: a ".." that would escape the root is dropped, because the
+    # root has no parent. On a RELATIVE path it must be kept — "../a" names a
+    # real sibling directory and normalizing it to "a" would be wrong.
+    | Nil -> if rooted then Nil else Cons("..", acc)
+    | Cons head rest -> if head == ".." then Cons("..", acc) else rest
+  else Cons(c, acc)
+
+fn normalize_body(rooted: Bool, body: String) -> String =
+  if rooted then "/" ++ body
+  else if string.is_empty(body) then "."
+  else body
+
+# Lexical normalization — Go's `Clean`. Never touches the filesystem, so it
+# cannot and does not resolve symlinks: "a/link/.." normalizes to "a" even when
+# `link` points elsewhere. That is the documented behaviour of every lexical
+# cleaner; a resolving version is a different function that needs the disk.
+#
+# The accumulator is built reversed, so `clean_step` can pop the previous
+# component in O(1) when it meets a "..".
+export fn normalize(p: String) -> String =
+  let rooted = is_absolute(p)
+      cleaned = fold(\ (acc, c) -> clean_step(rooted, acc, c), Nil, split(p))
+  in normalize_body(rooted, string.join("/", list_reverse(cleaned)))
+
+# Both sides are normalized first, and the prefix is matched with its separator
+# attached, so "/ab" is not treated as living under "/a" — a plain
+# `starts_with` would say it does.
+fn relative_under(nb: String, np: String) -> Maybe String =
+  if nb == np then Just(".")
+  else if string.ends_with(nb, "/") then string.strip_prefix(np, nb)
+  else string.strip_prefix(np, nb ++ "/")
+
+# `p` expressed relative to `base`, or Nothing when `p` is not under it.
+#
+# This is Rust's `strip_prefix`, not a general relativizer: it never synthesises
+# "../.." to reach a sibling. Doing that correctly requires knowing whether
+# `base` names a directory, which a function that cannot look at the disk has no
+# way to answer.
+export fn relative_to(base: String, p: String) -> Maybe String =
+  relative_under(normalize(base), normalize(p))

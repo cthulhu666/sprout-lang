@@ -1,0 +1,104 @@
+import stdlib.test (TestCase, check_eq, check_true, check_false, run_suite)
+import stdlib.fs.path as path
+import stdlib.string as string
+
+# Pure path manipulation: no filesystem access, so every case here is a total
+# function of its input and can be pinned exactly. The edge cases are not
+# invented — each row marked (survey) is quoted from a primary source in
+# docs/stdlib-fs-v0.md §3.1, which is what makes them assertable rather than
+# a matter of taste.
+
+# `extension` returns `Maybe String`; rendering absence as "-" keeps the
+# assertions comparable as plain Strings and makes a failure readable without
+# depending on a ToString instance for Maybe.
+fn ext(p: String) -> String =
+  match path.extension(p) with
+  | Nothing -> "-"
+  | Just e -> e
+
+fn rel(base: String, p: String) -> String =
+  match path.relative_to(base, p) with
+  | Nothing -> "-"
+  | Just r -> r
+
+fn parts(p: String) -> String =
+  string.join(",", path.split(p))
+
+fn main() -> Unit !{IO} =
+  run_suite("fs.path", [
+    # --- basename: POSIX basename(3), whose EXAMPLES table is the authority ---
+    check_eq("basename empty is dot (survey: POSIX, Go)", path.basename(""), "."),
+    check_eq("basename root is root (survey: POSIX, Go)", path.basename("/"), "/"),
+    check_eq("basename all-separators is one separator", path.basename("//"), "/"),
+    check_eq("basename strips a trailing separator (survey: POSIX)", path.basename("/usr/"), "usr"),
+    check_eq("basename of a file (survey: POSIX)", path.basename("/usr/lib"), "lib"),
+    check_eq("basename of a bare name", path.basename("usr"), "usr"),
+    check_eq("basename of a relative path", path.basename("a/b/c.txt"), "c.txt"),
+
+    # --- dirname: POSIX dirname(3) ---
+    check_eq("dirname empty is dot (survey: POSIX, Go)", path.dirname(""), "."),
+    check_eq("dirname root is root (survey: POSIX, Go)", path.dirname("/"), "/"),
+    check_eq("dirname of a trailing-separator path", path.dirname("/usr/"), "/"),
+    check_eq("dirname of a file", path.dirname("/usr/lib"), "/usr"),
+    check_eq("dirname of a bare name is dot", path.dirname("usr"), "."),
+    check_eq("dirname of a relative path", path.dirname("a/b/c.txt"), "a/b"),
+
+    # --- extension: Rust/Node shape — Maybe, and no leading dot -------------
+    check_eq("extension of a simple name (survey: Rust)", ext("foo.txt"), "txt"),
+    check_eq("extension is absent with no dot (survey: Rust)", ext("foo"), "-"),
+    # The one place the surveyed languages actually disagree: Go returns the
+    # whole name here, Rust and Node return nothing. Sprout follows the 3-to-1
+    # majority, because Go's answer makes a dotfile all extension and no stem.
+    check_eq("a leading dot does not start an extension (survey: Rust, Node)", ext(".bashrc"), "-"),
+    check_eq("extension is the last one (survey: Rust)", ext("foo.tar.gz"), "gz"),
+    check_eq("a dot in a directory component is not an extension", ext("a.b/c"), "-"),
+    # Derived from the rule (split at the final dot of the final component),
+    # not quoted from a source: a trailing dot yields an empty extension, which
+    # is distinguishable from absence precisely because the result is a Maybe.
+    check_eq("a trailing dot is an empty extension", ext("foo."), ""),
+
+    # --- stem ---------------------------------------------------------------
+    check_eq("stem drops the extension (survey: Rust)", path.stem("foo.txt"), "foo"),
+    check_eq("stem of a dotfile is the whole name (survey: Rust)", path.stem(".bashrc"), ".bashrc"),
+    check_eq("stem keeps inner dots (survey: Rust)", path.stem("foo.tar.gz"), "foo.tar"),
+    check_eq("stem operates on the final component", path.stem("/a/b/c.txt"), "c"),
+
+    # --- join ---------------------------------------------------------------
+    check_eq("join inserts one separator", path.join("a", "b"), "a/b"),
+    check_eq("join does not double a separator", path.join("a/", "b"), "a/b"),
+    check_eq("join onto an empty left is the right", path.join("", "b"), "b"),
+    check_eq("an absolute right discards the left", path.join("a", "/b"), "/b"),
+    check_eq("join onto root", path.join("/", "b"), "/b"),
+    check_eq("join with an empty right is the left", path.join("a", ""), "a"),
+
+    # --- is_absolute --------------------------------------------------------
+    check_true("a rooted path is absolute", path.is_absolute("/a")),
+    check_false("a bare name is not absolute", path.is_absolute("a")),
+    check_false("empty is not absolute", path.is_absolute("")),
+
+    # --- normalize: Go's Clean, whose four rules are quoted in the design doc -
+    check_eq("normalize resolves an inner ..", path.normalize("a/b/../c"), "a/c"),
+    check_eq("normalize collapses a double separator", path.normalize("a//b"), "a/b"),
+    check_eq("normalize drops a dot component", path.normalize("a/./b"), "a/b"),
+    check_eq("normalize drops .. at the root (survey: Go rule 4)", path.normalize("/../a"), "/a"),
+    check_eq("normalize keeps a leading .. when relative", path.normalize("../a"), "../a"),
+    check_eq("normalize of empty is dot (survey: Go)", path.normalize(""), "."),
+    check_eq("normalize of root is root (survey: Go)", path.normalize("/"), "/"),
+    check_eq("normalize resolves a trailing ..", path.normalize("a/b/.."), "a"),
+    check_eq("normalize back to the current directory", path.normalize("a/.."), "."),
+    check_eq("normalize drops a trailing separator (survey: Go)", path.normalize("a/b/"), "a/b"),
+
+    # --- relative_to: Rust's strip_prefix, not a ../.. walk ------------------
+    check_eq("relative_to strips a directory prefix", rel("/a", "/a/b/c"), "b/c"),
+    check_eq("relative_to itself is dot", rel("/a", "/a"), "."),
+    check_eq("relative_to an unrelated base is absent", rel("/a", "/b"), "-"),
+    # The prefix has to land on a component boundary; "/ab" merely starts with
+    # the characters of "/a". This is the case a naive starts_with would miss.
+    check_eq("relative_to matches components, not characters", rel("/a", "/ab"), "-"),
+
+    # --- split --------------------------------------------------------------
+    check_eq("split yields components", parts("a/b/c"), "a,b,c"),
+    check_eq("split drops the leading empty of a rooted path", parts("/a/b"), "a,b"),
+    check_eq("split of empty yields nothing", parts(""), ""),
+    check_eq("split of root yields nothing", parts("/"), "")
+  ])

@@ -281,6 +281,38 @@ export fn split_once(raw: String, sep: String) -> Maybe (String, String) =
     | Nothing -> Nothing
     | Just pos -> Just((take(raw, pos), drop(raw, pos + length(sep))))
 
+# Every occurrence of `sep`, in order, including the empty segments a leading,
+# trailing or doubled separator produces — `split("/a//b/", "/")` is
+# `["", "a", "", "b", ""]`. Callers wanting them dropped filter; a splitter that
+# dropped them could not be used to parse a record with empty fields.
+#
+# Argument order follows `split_once(raw, sep)` beside it, NOT `join(sep, xs)`.
+# The tree has both conventions, and matching the function this one shares a
+# name-prefix with is what stops the pair from being a trap.
+#
+# An empty separator yields the whole string, matching `split_once`'s decision to
+# report Nothing rather than fabricate a split at every position.
+#
+# O(bytes × |sep|): one left-to-right byte scan with O(1) byte-indexed slicing.
+# Deliberately NOT the obvious `split_once`-on-the-remainder recursion, which is
+# quadratic — `slice` is codepoint-indexed and walks the whole remainder per
+# step. Scanning bytes is safe for any valid UTF-8 separator because UTF-8 is
+# self-synchronising: no encoded character occurs as a subsequence of another, so
+# a match can only ever begin on a character boundary.
+export fn split(raw: String, sep: String) -> List String =
+  if str_byte_len(sep) == 0 then Cons(raw, Nil)
+  else list_reverse(split_go(raw, sep, str_byte_len(sep), str_byte_len(raw), 0, 0, Nil))
+
+fn split_go(raw: String, sep: String, sep_bytes: Int, total: Int,
+            pos: Int, start: Int, acc: List String) -> List String =
+  if pos > total - sep_bytes then
+    Cons(str_slice_bytes(raw, start, total - start), acc)
+  else if str_starts_with_at_byte(raw, pos, sep) then
+    split_go(raw, sep, sep_bytes, total, pos + sep_bytes, pos + sep_bytes,
+      Cons(str_slice_bytes(raw, start, pos - start), acc))
+  else
+    split_go(raw, sep, sep_bytes, total, pos + 1, start, acc)
+
 fn join_step(sep: String, acc: List String, s: String) -> List String =
   match acc with
   | Nil -> Cons(s, Nil)

@@ -1,5 +1,87 @@
-import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
+import stdlib.test (TestState, new_state, assert_true, assert_false, assert_eq, summary)
 import stdlib.fs as fs
+import stdlib.bytes as bytes
+import stdlib.process as process
+
+# Every assertion below reduces a `Result FsError a` to a short classification
+# string. That is deliberate: the point of FsError is that a caller can tell
+# "missing" from "denied" from "not empty", so a test that only checked Ok/Err
+# would pass just as well against the old unmatchable-String error this module
+# replaces. Naming the constructor is what pins the classification.
+fn err_name(e: fs.FsError) -> String =
+  match e with
+  | fs.FsNotFound _ -> "not_found"
+  | fs.FsPermissionDenied _ -> "permission_denied"
+  | fs.FsAlreadyExists _ -> "already_exists"
+  | fs.FsNotADirectory _ -> "not_a_directory"
+  | fs.FsIsADirectory _ -> "is_a_directory"
+  | fs.FsDirectoryNotEmpty _ -> "directory_not_empty"
+  | fs.FsInvalidPath _ -> "invalid_path"
+  | fs.FsIoError _ -> "io_error"
+
+fn outcome(r: Result fs.FsError a) -> String =
+  match r with
+  | Ok _ -> "ok"
+  | Err e -> err_name(e)
+
+fn kind_name(k: fs.EntryKind) -> String =
+  match k with
+  | fs.FileEntry -> "file"
+  | fs.DirEntry -> "dir"
+  | fs.SymlinkEntry -> "symlink"
+  | fs.OtherEntry -> "other"
+
+fn kind_of(r: Result fs.FsError fs.Entry) -> String =
+  match r with
+  | Err e -> err_name(e)
+  | Ok entry -> kind_name(fs.entry_kind(entry))
+
+fn size_of(r: Result fs.FsError fs.Entry) -> Int =
+  match r with
+  | Err _ -> -1
+  | Ok entry -> fs.entry_size(entry)
+
+# read_text/write_text keep their old unmatchable-String error, so they need
+# their own reducer. That the two cannot share one is the clearest statement of
+# what this change adds.
+fn text_outcome(r: Result String a) -> String =
+  match r with
+  | Ok _ -> "ok"
+  | Err msg -> "err: " ++ msg
+
+fn names_of(r: Result fs.FsError (List String)) -> List String =
+  match r with
+  | Err _ -> []
+  | Ok names -> names
+
+fn byte_at(r: Result fs.FsError Bytes, i: Int) -> Int =
+  match r with
+  | Err _ -> -1
+  | Ok b ->
+      match bytes.get(b, i) with
+      | Nothing -> -1
+      | Just v -> v
+
+# `\ (a, b) -> …` is a TWO-PARAMETER lambda in Sprout, not tuple destructuring,
+# and the prelude has no fst/snd — so reading one side of a pair needs a named
+# function with a tuple pattern.
+#
+# The parameter is `item`, not the obvious `entry`: a PARAMETER named `entry`
+# currently emits `%entry` into a function whose first basic block is also
+# `entry`, and LLVM shares one namespace between values and labels, so the file
+# fails to assemble. See BACKLOG §Compiler Correctness. A match or let binding of
+# the same name is fine — those become `%t$N` temporaries — which is why
+# `remove_dir_all` in stdlib/fs.sprout can still say `Ok entry`.
+fn pair_kind(item: (String, fs.Entry)) -> String =
+  match item with | (_, e) -> kind_name(fs.entry_kind(e))
+
+fn pair_name(item: (String, fs.Entry)) -> String =
+  match item with | (n, _) -> n
+
+fn byte_count(r: Result fs.FsError Bytes) -> Int =
+  match r with
+  | Err _ -> -1
+  | Ok b -> bytes.length(b)
 
 # `read_file` / `write_file` had NO direct test coverage: both were exercised only
 # incidentally, as setup helpers inside compiler tests that assert something else
@@ -38,5 +120,157 @@ fn main() -> Unit !{IO} =
     match fs.read_text("/tmp/sprout_test_fs_definitely_absent_xyzzy/nope.txt") with
     | Err _ -> assert_true(state, "read_text of a missing path is Err", true)
     | Ok _ -> assert_true(state, "read_text of a missing path is Err", false)
+
+    # --- M1: listing, metadata, binary I/O, mutation ------------------------
+
+    let root = "/tmp/sprout_test_fs_m1"
+    let txt = root ++ "/a.txt"
+    let dat = root ++ "/bin.dat"
+    let sub = root ++ "/sub"
+
+    # A previous run that failed midway would leave the tree behind, so the
+    # suite must be idempotent. Either outcome is fine here — what is NOT fine
+    # is any other error, which would mean the cleanup path itself is broken and
+    # every assertion below is running against unknown state.
+    assert_true(state, "pre-clean removes any stale tree",
+      member(outcome(fs.remove_dir_all(root)), ["ok", "not_found"]))
+
+    # make_dir_all is pure Sprout over the single-level builtin, so this is the
+    # first real exercise of the fold: two levels neither of which exists yet.
+    assert_eq(state, "make_dir_all creates a nested tree",
+      outcome(fs.make_dir_all(sub ++ "/deep")), "ok")
+    assert_eq(state, "make_dir_all over an existing tree succeeds",
+      outcome(fs.make_dir_all(sub ++ "/deep")), "ok")
+
+    assert_eq(state, "write_text into the new tree",
+      text_outcome(fs.write_text(txt, "hello\n")), "ok")
+
+    # 0xFF is not a legal UTF-8 lead byte and 0x00 is a NUL: a String can hold
+    # neither (spec-v0.md §64), so this file is exactly the case read_text
+    # cannot express and read_bytes exists for. It is also why write_bytes had
+    # to land alongside read_bytes — without it nothing in the language can
+    # create this file, and the binary reader would be untestable on the input
+    # that motivates it.
+    let payload = bytes.append(bytes.append(bytes.singleton(255), bytes.singleton(0)),
+                               bytes.singleton(65))
+    assert_eq(state, "write_bytes writes a non-UTF-8 payload",
+      outcome(fs.write_bytes(dat, payload)), "ok")
+
+    assert_eq(state, "read_bytes round-trips the byte count", byte_count(fs.read_bytes(dat)), 3)
+    assert_eq(state, "read_bytes preserves a 0xFF byte", byte_at(fs.read_bytes(dat), 0), 255)
+    assert_eq(state, "read_bytes preserves an interior NUL", byte_at(fs.read_bytes(dat), 1), 0)
+
+    # The pair that proves read_bytes is not just read_text with a cast: the
+    # same file is unreadable as text and readable as bytes.
+    match fs.read_text(dat) with
+    | Err _ -> assert_true(state, "read_text rejects a non-UTF-8 file", true)
+    | Ok _ -> assert_true(state, "read_text rejects a non-UTF-8 file", false)
+
+    # --- listing ------------------------------------------------------------
+
+    let listed = names_of(fs.list_dir(root))
+    assert_eq(state, "list_dir sees exactly the three entries", count(\_ -> true, listed), 3)
+    assert_true(state, "list_dir reports a file", member("a.txt", listed))
+    assert_true(state, "list_dir reports the binary file", member("bin.dat", listed))
+    assert_true(state, "list_dir reports a subdirectory", member("sub", listed))
+    # "." and ".." are the entries readdir yields that nobody ever wants; a
+    # listing that leaked them would make every recursive walk loop forever.
+    assert_false(state, "list_dir omits the self entry", member(".", listed))
+    assert_false(state, "list_dir omits the parent entry", member("..", listed))
+
+    # --- stat ---------------------------------------------------------------
+
+    assert_eq(state, "stat classifies a regular file", kind_of(fs.stat(txt)), "file")
+    assert_eq(state, "stat classifies a directory", kind_of(fs.stat(sub)), "dir")
+    assert_eq(state, "stat reports the byte size", size_of(fs.stat(txt)), 6)
+
+    # An Entry deliberately carries no name, so `read_dir` returns pairs. That
+    # keeps exactly one implementation of "the last component of a path" —
+    # path.basename — instead of a second copy inside the runtime.
+    let entries = match fs.read_dir(root) with
+                  | Err _ -> []
+                  | Ok es -> es
+    assert_eq(state, "read_dir pairs every name with its metadata",
+      count(\_ -> true, entries), 3)
+    assert_eq(state, "read_dir finds exactly one subdirectory",
+      count(\p -> pair_kind(p) == "dir", entries), 1)
+    assert_eq(state, "read_dir finds two regular files",
+      count(\p -> pair_kind(p) == "file", entries), 2)
+    assert_true(state, "read_dir carries the names through",
+      any(\p -> pair_name(p) == "bin.dat", entries))
+
+    # --- symlinks: stat follows, symlink_stat and read_dir do not -----------
+    #
+    # This distinction is not pedantry — it is what broke first. `/tmp` is a
+    # symlink on macOS, so an lstat-only `is_dir` answered false for it and every
+    # make_dir_all under /tmp failed.
+    #
+    # There is no symlink builtin, so the fixture is built with ln(1). That is
+    # setup, not the subject; asserting it worked means a missing `ln` fails
+    # loudly instead of silently skipping the four assertions below.
+    let link = root ++ "/link_to_sub"
+    assert_true(state, "ln -s builds the symlink fixture",
+      process.proc_ok(process.proc_run(["ln", "-s", sub, link])))
+
+    assert_eq(state, "symlink_stat reports the link itself",
+      kind_of(fs.symlink_stat(link)), "symlink")
+    assert_eq(state, "stat follows the link to its target",
+      kind_of(fs.stat(link)), "dir")
+    assert_true(state, "is_dir follows a link to a directory", fs.is_dir(link))
+
+    # read_dir uses symlink_stat, matching Rust's DirEntry::file_type and Go's
+    # ReadDir. A following read_dir would report this entry as a directory and a
+    # tree walk would descend into it — which is how a link to an ancestor turns
+    # into an infinite walk.
+    let linked = match fs.read_dir(root) with
+                 | Err _ -> []
+                 | Ok es -> es
+    assert_eq(state, "read_dir reports a link as a link, not as its target",
+      count(\p -> pair_kind(p) == "symlink", linked), 1)
+
+    # Convenience predicates over stat, checked against a path of each kind and
+    # against one that does not exist — the case where they must answer false
+    # rather than propagate.
+    assert_true(state, "exists sees a file", fs.exists(txt))
+    assert_true(state, "is_dir sees a directory", fs.is_dir(sub))
+    assert_true(state, "is_file sees a file", fs.is_file(txt))
+    assert_false(state, "is_file rejects a directory", fs.is_file(sub))
+    assert_false(state, "is_dir rejects a file", fs.is_dir(txt))
+    assert_false(state, "exists is false for a missing path", fs.exists(root ++ "/nope"))
+
+    # make_dir_all must not report success when a REGULAR FILE blocks the path:
+    # the mkdir fails with EEXIST, which on its own reads as "already there".
+    # Distinguishing the two is the one non-obvious branch in the Sprout fold.
+    assert_eq(state, "make_dir_all refuses to treat a file as a parent directory",
+      outcome(fs.make_dir_all(txt ++ "/under")), "not_a_directory")
+
+    # --- error classification, one constructor at a time --------------------
+
+    assert_eq(state, "stat of a missing path is not_found",
+      outcome(fs.stat(root ++ "/nope")), "not_found")
+    assert_eq(state, "make_dir over an existing directory is already_exists",
+      outcome(fs.make_dir(sub)), "already_exists")
+    assert_eq(state, "list_dir of a regular file is not_a_directory",
+      outcome(fs.list_dir(txt)), "not_a_directory")
+    assert_eq(state, "remove of a non-empty directory is directory_not_empty",
+      outcome(fs.remove(sub)), "directory_not_empty")
+    assert_eq(state, "read_bytes of a directory fails rather than returning empty",
+      outcome(fs.read_bytes(sub)), "is_a_directory")
+
+    # --- rename and remove --------------------------------------------------
+
+    let moved = root ++ "/b.txt"
+    assert_eq(state, "rename succeeds", outcome(fs.rename(txt, moved)), "ok")
+    assert_eq(state, "the old name is gone after rename", outcome(fs.stat(txt)), "not_found")
+    assert_eq(state, "the new name is present after rename", outcome(fs.stat(moved)), "ok")
+
+    assert_eq(state, "remove deletes a file", outcome(fs.remove(moved)), "ok")
+    assert_eq(state, "the file is gone after remove", outcome(fs.stat(moved)), "not_found")
+
+    # remove_dir_all is pure Sprout over read_dir + remove, so this exercises
+    # the recursion against a tree that is two levels deep and still populated.
+    assert_eq(state, "remove_dir_all clears a populated tree",
+      outcome(fs.remove_dir_all(root)), "ok")
+    assert_eq(state, "the tree is gone afterwards", outcome(fs.stat(root)), "not_found")
 
     summary(state)
