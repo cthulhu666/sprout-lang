@@ -97,6 +97,14 @@ export type DoStep (..) =
 export type RecordField (..) =
   | RecordField String Expr
 
+# One generator of a list comprehension: `<pat> in <source>` plus the guards
+# that trail it. A guard belongs to the generator it follows, so a guard on an
+# outer generator skips the inner loops entirely
+# (docs/list-comprehensions-v0.md §5). The pattern must be irrefutable; that is
+# checked in inference, not here.
+export type ComprehensionGen (..) =
+  | ComprehensionGen Pattern Expr (List Expr)
+
 # --- Expressions ---
 
 export type Expr (..) =
@@ -121,6 +129,11 @@ export type Expr (..) =
   | GetFieldExpr Expr String source.SourcePos
   # Functional record update `base with (field = value, ...)` (docs/records-v0.md §4.4).
   | RecordUpdateExpr Expr (List RecordField) source.SourcePos
+  # List comprehension `[elem for p in src if g, q in src2]`
+  # (docs/list-comprehensions-v0.md). Element expression, then one or more
+  # generators, leftmost outermost. Typed natively in `infer` and rewritten to
+  # folds by a post-inference pass, so this node never reaches lowering.
+  | ComprehensionExpr Expr (List ComprehensionGen) source.SourcePos
 
 # --- Template literal parts (Experimental — Phase 1 AST stub) ---
 # Parser wiring happens in Phase 3; this variant is unreachable until then.

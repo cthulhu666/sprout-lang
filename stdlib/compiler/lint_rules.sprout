@@ -124,7 +124,16 @@ fn expr_uses_any(names: List String, e: ast.Expr) -> Bool =
   | ast.RecordUpdateExpr base fields _ -> expr_uses_any(names, base) || record_fields_use_any(names, fields)
   | ast.IntRangeExpr lo hi _ -> expr_uses_any(names, lo) || expr_uses_any(names, hi)
   | ast.StringTemplateExpr parts _ -> template_parts_use_any(names, parts)
+  | ast.ComprehensionExpr elem gens _ -> expr_uses_any(names, elem) || comprehension_gens_use_any(names, gens)
   | _ -> false  # leaves: Int/Float/Bool/String/Char/Unit — no sub-expressions
+
+fn comprehension_gens_use_any(names: List String, gens: List ast.ComprehensionGen) -> Bool =
+  match gens with
+  | Nil -> false
+  | Cons g rest ->
+      (match g with
+       | ast.ComprehensionGen _ src guards -> expr_uses_any(names, src) || exprs_use_any(names, guards))
+      || comprehension_gens_use_any(names, rest)
 
 fn exprs_use_any(names: List String, exprs: List ast.Expr) -> Bool =
   match exprs with
@@ -191,7 +200,17 @@ fn walk_expr(e: ast.Expr) -> List LintFinding =
   | ast.IntRangeExpr lo hi _ ->
       list_append(walk_expr(lo), walk_expr(hi))
   | ast.StringTemplateExpr parts _ -> walk_template_parts(parts)
+  | ast.ComprehensionExpr elem gens _ -> list_append(walk_expr(elem), walk_comprehension_gens(gens))
   | _ -> Nil  # leaves: Var/Int/Float/Bool/String/Char/Unit — no sub-expressions
+
+fn walk_comprehension_gens(gens: List ast.ComprehensionGen) -> List LintFinding =
+  match gens with
+  | Nil -> Nil
+  | Cons g rest -> list_append(walk_comprehension_gen(g), walk_comprehension_gens(rest))
+
+fn walk_comprehension_gen(g: ast.ComprehensionGen) -> List LintFinding =
+  match g with
+  | ast.ComprehensionGen _ src guards -> list_append(walk_expr(src), walk_exprs(guards))
 
 fn walk_exprs(exprs: List ast.Expr) -> List LintFinding =
   match exprs with
@@ -432,7 +451,13 @@ fn find_list_shape_in_expr(e: ast.Expr) -> List source.SourcePos =
   | ast.IntRangeExpr lo hi _ ->
       find_list_shape_in_expr(lo) ++ find_list_shape_in_expr(hi)
   | ast.StringTemplateExpr parts _ -> find_list_shape_in_template_parts(parts)
+  | ast.ComprehensionExpr elem gens _ -> find_list_shape_in_expr(elem) ++ find_list_shape_in_comprehension_gens(gens)
   | _ -> Nil
+
+fn find_list_shape_in_comprehension_gens(gens: List ast.ComprehensionGen) -> List source.SourcePos =
+  concat_map(\g -> match g with
+    | ast.ComprehensionGen pat src guards ->
+        find_list_shape_in_pattern(pat) ++ find_list_shape_in_expr(src) ++ find_list_shape_in_exprs(guards), gens)
 
 fn find_list_shape_in_exprs(exprs: List ast.Expr) -> List source.SourcePos =
   concat_map(find_list_shape_in_expr, exprs)
@@ -552,7 +577,13 @@ fn find_prefix_pattern_in_expr(e: ast.Expr) -> List source.SourcePos =
   | ast.IntRangeExpr lo hi _ ->
       find_prefix_pattern_in_expr(lo) ++ find_prefix_pattern_in_expr(hi)
   | ast.StringTemplateExpr parts _ -> find_prefix_pattern_in_template_parts(parts)
+  | ast.ComprehensionExpr elem gens _ -> find_prefix_pattern_in_expr(elem) ++ find_prefix_pattern_in_comprehension_gens(gens)
   | _ -> Nil
+
+fn find_prefix_pattern_in_comprehension_gens(gens: List ast.ComprehensionGen) -> List source.SourcePos =
+  concat_map(\g -> match g with
+    | ast.ComprehensionGen pat src guards ->
+        find_prefix_pattern_in_pattern(pat) ++ find_prefix_pattern_in_expr(src) ++ find_prefix_pattern_in_exprs(guards), gens)
 
 fn find_prefix_pattern_in_exprs(exprs: List ast.Expr) -> List source.SourcePos =
   concat_map(find_prefix_pattern_in_expr, exprs)

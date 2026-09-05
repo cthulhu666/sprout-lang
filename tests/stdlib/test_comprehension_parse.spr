@@ -1,0 +1,92 @@
+import stdlib.test (check_eq, run_suite)
+
+# Parser disambiguation for list comprehensions (docs/list-comprehensions-v0.md
+# D1). The behaviour suites (test_comprehension.spr, _hygiene.spr) pin what a
+# comprehension COMPUTES; this file pins what the parser must still be able to
+# tell apart once `[` can begin either a list literal or a comprehension.
+#
+# Every case here is a grammar hazard named in D1 or found while reviewing it.
+# RED until the feature parses.
+
+# --- 1. The forms `[` already had must keep working, unchanged. ---
+
+fn plain_literal() -> List Int = [1, 2, 3]
+
+fn empty_literal() -> List Int = []
+
+# The list TAIL PATTERN is why Haskell's `[e | x <- xs]` spelling was unavailable
+# (D1). `|` in pattern position must be untouched by the new expression form.
+fn tail_pattern(xs: List Int) -> Int =
+  match xs with
+  | [] -> 0
+  | [a] -> a
+  | [a, b | _] -> a + b
+
+# --- 2. A comprehension nested in each position a comprehension can occur. ---
+
+# In ELEMENT position: the inner `[` opens while the outer one is still open.
+fn nested_in_element() -> List (List Int) =
+  [[y * 10 for y in 1..x] for x in 1..3]
+
+# In SOURCE position: the source expression is itself a comprehension.
+fn nested_in_source() -> List Int =
+  [y + 1 for y in [x * 2 for x in 1..3]]
+
+# --- 3. Element expressions whose own syntax could swallow the `for`. ---
+
+# A lambda body extends as far right as it can; it must stop at `for`.
+fn lambda_in_element() -> List Int =
+  [(\n -> n + 1)(x) for x in 1..3]
+
+# A `match` in element position has arm-`|` greediness, the other half of D1's
+# argument against the `|` spelling.
+fn match_in_element(ms: List (Maybe Int)) -> List Int =
+  [match m with | Just v -> v | Nothing -> 0 for m in ms]
+
+# A tuple element must not be read as two comma-separated list items.
+fn tuple_element() -> List (Int, Int) =
+  [(x, x * 2) for x in 1..3]
+
+# --- 4. Source expressions whose own syntax could swallow the `if` guard. ---
+
+# `let … in` as a source: the generator's `in` must not capture the `let`'s.
+# Sprout requires a let block's `in` to start its own line (a one-line
+# `let x = 1 in x` is a parse error, independent of comprehensions), so the
+# block is parenthesised to keep it inside the source position.
+fn let_in_source() -> List Int =
+  [x for x in (let ys = [4, 5]
+               in ys)]
+
+# An `if … then … else` source is a prefix form, so it is consumed whole; the
+# trailing `if` that follows is the GUARD, not a continuation of the source.
+fn if_source_then_guard(flag: Bool) -> List Int =
+  [x for x in (if flag then [1, 2, 3] else []) if x > 1]
+
+# A range source binds tighter than the guard that follows it.
+fn range_source_then_guard(n: Int) -> List Int =
+  [x for x in 1..n if x > 2]
+
+fn main() -> Unit !{IO} =
+  run_suite("comprehension_parse", [
+    check_eq("plain list literal still parses", plain_literal(), [1, 2, 3]),
+    check_eq("empty list literal still parses", empty_literal(), []),
+    check_eq("tail pattern still parses (two or more)", tail_pattern([7, 8, 9]), 15),
+    check_eq("tail pattern still parses (exactly one)", tail_pattern([7]), 7),
+    check_eq("tail pattern still parses (empty)", tail_pattern([]), 0),
+
+    check_eq("comprehension nested in element position", nested_in_element(),
+      [[10], [10, 20], [10, 20, 30]]),
+    check_eq("comprehension nested in source position", nested_in_source(),
+      [3, 5, 7]),
+
+    check_eq("lambda in element position stops at for", lambda_in_element(), [2, 3, 4]),
+    check_eq("match in element position stops at for",
+      match_in_element([Just(1), Nothing, Just(3)]), [1, 0, 3]),
+    check_eq("tuple element is one element, not two", tuple_element(),
+      [(1, 2), (2, 4), (3, 6)]),
+
+    check_eq("let..in as a source keeps its own in", let_in_source(), [4, 5]),
+    check_eq("if-source followed by a guard, taken", if_source_then_guard(true), [2, 3]),
+    check_eq("if-source followed by a guard, empty branch", if_source_then_guard(false), []),
+    check_eq("range source then guard", range_source_then_guard(5), [3, 4, 5])
+  ])

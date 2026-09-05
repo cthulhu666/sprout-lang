@@ -872,6 +872,8 @@ fn infer_expr(
   | ast.IntRangeExpr lo hi pos -> infer_range(state, env, subst, eff_subst, lo, hi, pos)
   | ast.StringTemplateExpr _ pos ->
       InferErr(pos, "Internal error: StringTemplateExpr reached inference; desugar pass should have eliminated it")
+  | ast.ComprehensionExpr _ _ pos ->
+      InferErr(pos, "list comprehensions are not yet implemented")
 
 # Declaration-boundary wrapper: applies s1 to the result so fresh TVars
 # never escape into lowering.  Declaration-level callers should use this;
@@ -6168,6 +6170,20 @@ fn referenced_names(e: ast.Expr, bound: Set, index: Set, acc: Set) -> Set =
   | ast.GetFieldExpr record _ _ -> referenced_names(record, bound, index, acc)
   | ast.RecordUpdateExpr base fields _ ->
       referenced_names_fields(fields, bound, index, referenced_names(base, bound, index, acc))
+  | ast.ComprehensionExpr elem gens _ ->
+      referenced_names_comprehension(elem, gens, bound, index, acc)
+
+# A generator's pattern binders scope over its own guards, every later
+# generator's source and guards, and (once the walk reaches Nil) the element.
+fn referenced_names_comprehension(elem: ast.Expr, gens: List ast.ComprehensionGen, bound: Set, index: Set, acc: Set) -> Set =
+  match gens with
+  | Nil -> referenced_names(elem, bound, index, acc)
+  | Cons g rest ->
+      match g with
+      | ast.ComprehensionGen pat src guards ->
+          referenced_names_comprehension(elem, rest, bind_pattern(pat, bound), index,
+            referenced_names_list(guards, bind_pattern(pat, bound), index,
+              referenced_names(src, bound, index, acc)))
 
 fn referenced_names_list(es: List ast.Expr, bound: Set, index: Set, acc: Set) -> Set =
   match es with

@@ -172,6 +172,16 @@ fn dump_expr(e: ast.Expr) -> String =
       sexp("get-field", [dump_expr(record), q(field_name)])
   | ast.RecordUpdateExpr base fields _ ->
       sexp("record-update", Cons(dump_expr(base), dump_record_fields(fields)))
+  | ast.ComprehensionExpr elem gens _ ->
+      sexp("comprehension", Cons(dump_expr(elem), dump_comprehension_gens(gens)))
+
+fn dump_comprehension_gens(items: List ast.ComprehensionGen) -> List String =
+  match items with
+  | Nil -> Nil
+  | Cons g rest ->
+      match g with
+      | ast.ComprehensionGen pat src guards ->
+          Cons(sexp("gen", Cons(dump_pat(pat), Cons(dump_expr(src), dump_exprs(guards)))), dump_comprehension_gens(rest))
 
 fn dump_exprs(items: List ast.Expr) -> List String =
   match items with

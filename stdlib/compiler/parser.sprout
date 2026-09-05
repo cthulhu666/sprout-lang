@@ -1302,9 +1302,74 @@ fn parse_list_literal(tokens: Vec token.Token, i: Int) -> Result ParseError (ast
     | Just (_, i3) -> Ok((ast.VarExpr(ast.list_ctor_nil, cur_pos(tokens, i)), i3))
     | Nothing ->
         do
-          (items, i3) <- collect_expr_list(tokens, i2, Nil)
-          (_, i4) <- expected_symbol("]", tokens, i3)
-          Ok((desugar_list_literal(list_reverse(items), cur_pos(tokens, i)), i4))
+          (head_expr, i3) <- parse_expr(tokens, i2)
+          if tok_is_keyword(tok_at(tokens, i3), "for") then
+            parse_comprehension_tail(tokens, i3 + 1, head_expr, cur_pos(tokens, i))
+          else
+            do
+              (items, i4) <- collect_list_items_after_head(tokens, i3, head_expr)
+              (_, i5) <- expected_symbol("]", tokens, i4)
+              Ok((desugar_list_literal(items, cur_pos(tokens, i)), i5))
+
+# `[` and its first expression are already consumed; gather any remaining
+# `, <expr>` items. Splitting the head off is what makes the literal-vs-
+# comprehension choice single-token lookahead with no backtracking: whichever
+# way it goes, the head expression is already in hand. Returns source order.
+fn collect_list_items_after_head(tokens: Vec token.Token, i: Int, head_expr: ast.Expr) -> Result ParseError (List ast.Expr, Int) =
+  match match_symbol(tokens, i, ",") with
+  | Nothing -> Ok((Cons(head_expr, Nil), i))
+  | Just (_, i2) ->
+      do
+        (rest, i3) <- collect_expr_list(tokens, i2, Nil)
+        Ok((Cons(head_expr, list_reverse(rest)), i3))
+
+# `[ <elem> for <gen> {, <gen>} ]`, entered just past `for` with <elem> parsed.
+# `pos` is the opening `[`.  docs/list-comprehensions-v0.md D1.
+fn parse_comprehension_tail(tokens: Vec token.Token, i: Int, elem: ast.Expr, pos: source.SourcePos) -> Result ParseError (ast.Expr, Int) =
+  if comprehension_missing_generator(tokens, i) then
+    Err(ParseError(
+      "a comprehension needs at least one generator (`<pat> in <expr>`) before any `if` guard at "
+        ++ pos_str(cur_pos(tokens, i)),
+      cur_pos(tokens, i)))
+  else
+    do
+      (gens, i2) <- collect_comprehension_gens(tokens, i, Nil)
+      (_, i3) <- expected_symbol("]", tokens, i2)
+      Ok((ast.ComprehensionExpr(elem, gens, pos), i3))
+
+# `[x for]` and `[x for if p]` are the same mistake: only a generator may follow
+# `for`.  Caught here so both get the diagnostic that names the missing form,
+# rather than a bare "Expected keyword in" from the pattern parser.
+fn comprehension_missing_generator(tokens: Vec token.Token, i: Int) -> Bool =
+  tok_is_keyword(tok_at(tokens, i), "if") || tok_is_symbol(tok_at(tokens, i), "]")
+
+fn collect_comprehension_gens(tokens: Vec token.Token, i: Int, acc: List ast.ComprehensionGen) -> Result ParseError (List ast.ComprehensionGen, Int) =
+  do
+    (g, i2) <- parse_comprehension_gen(tokens, i)
+    match match_symbol(tokens, i2, ",") with
+    | Nothing -> Ok((list_reverse(Cons(g, acc)), i2))
+    | Just (_, i3) -> collect_comprehension_gens(tokens, i3, Cons(g, acc))
+
+# `<pat> in <source> {if <guard>}`.  The `in` goes through expected_keyword so
+# the missing-`in` diagnostic is the parser's standard wording, which
+# tests/conformance/parse_error/comprehension_missing_in.err pins.
+fn parse_comprehension_gen(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.ComprehensionGen, Int) =
+  do
+    (pat, i2) <- parse_pattern(tokens, i)
+    (_, i3) <- expected_keyword("in", tokens, i2)
+    (src, i4) <- parse_expr(tokens, i3)
+    (guards, i5) <- collect_comprehension_guards(tokens, i4, Nil)
+    Ok((ast.ComprehensionGen(pat, src, guards), i5))
+
+# Guards trail a COMPLETE source expression.  This is unambiguous because `if`
+# is only ever a prefix form in Sprout — it can never continue the expression to
+# its left — so a source expression always ends before one.
+fn collect_comprehension_guards(tokens: Vec token.Token, i: Int, acc: List ast.Expr) -> Result ParseError (List ast.Expr, Int) =
+  if tok_is_keyword(tok_at(tokens, i), "if") then
+    do
+      (g, i2) <- parse_expr(tokens, i + 1)
+      collect_comprehension_guards(tokens, i2, Cons(g, acc))
+  else Ok((list_reverse(acc), i))
 
 fn desugar_list_literal(items: List ast.Expr, pos: source.SourcePos) -> ast.Expr =
   match items with

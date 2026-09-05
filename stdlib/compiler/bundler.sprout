@@ -1468,6 +1468,24 @@ fn qualify_expr(ctx: ResolveCtx, scope: List String, expr: ast.Expr) -> ast.Expr
       ast.RecordUpdateExpr(qualify_expr(ctx, scope, base), qualify_record_fields(ctx, scope, fields), pos)
   | ast.StringTemplateExpr parts pos ->
       ast.StringTemplateExpr(qualify_template_parts(ctx, scope, parts), pos)
+  | ast.ComprehensionExpr elem gens pos ->
+      let (qgens, final_scope) = qualify_comprehension_gens(ctx, scope, gens)
+      in ast.ComprehensionExpr(qualify_expr(ctx, final_scope, elem), qgens, pos)
+
+# Each generator's pattern scopes over its own guards, every later generator's
+# source and guards, and (via the returned final scope) the element expr.
+fn qualify_comprehension_gens(ctx: ResolveCtx, scope: List String, gens: List ast.ComprehensionGen) -> (List ast.ComprehensionGen, List String) =
+  match gens with
+  | Nil -> (Nil, scope)
+  | Cons g rest ->
+      match g with
+      | ast.ComprehensionGen pat src guards ->
+          let qsrc = qualify_expr(ctx, scope, src)
+          in let qpat = qualify_pattern(ctx, pat)
+          in let inner_scope = list_append(scope, pattern_bindings(pat))
+          in let qguards = qualify_expr_list(ctx, inner_scope, guards)
+          in let (qrest, final_scope) = qualify_comprehension_gens(ctx, inner_scope, rest)
+          in (Cons(ast.ComprehensionGen(qpat, qsrc, qguards), qrest), final_scope)
 
 fn qualify_template_parts(ctx: ResolveCtx, scope: List String, parts: List ast.TemplateExprPart) -> List ast.TemplateExprPart =
   match parts with
@@ -1831,7 +1849,24 @@ fn unresolved_in_expr(e: ast.Expr, declared: Dict String) -> Maybe String =
       | Just n -> Just(n)
       | Nothing -> unresolved_in_record_exprs(fields, declared)
   | ast.StringTemplateExpr parts _ -> unresolved_in_template_parts(parts, declared)
+  | ast.ComprehensionExpr elem gens _ ->
+      match unresolved_in_expr(elem, declared) with
+      | Just n -> Just(n)
+      | Nothing -> unresolved_in_comprehension_gens(gens, declared)
   | _ -> Nothing
+
+fn unresolved_in_comprehension_gens(gens: List ast.ComprehensionGen, declared: Dict String) -> Maybe String =
+  match gens with
+  | Nil -> Nothing
+  | Cons g rest ->
+      match g with
+      | ast.ComprehensionGen _ src guards ->
+          match unresolved_in_expr(src, declared) with
+          | Just n -> Just(n)
+          | Nothing ->
+              match unresolved_in_exprs(guards, declared) with
+              | Just n -> Just(n)
+              | Nothing -> unresolved_in_comprehension_gens(rest, declared)
 
 fn unresolved_in_exprs(es: List ast.Expr, declared: Dict String) -> Maybe String =
   match es with

@@ -1189,6 +1189,22 @@ export fn encode_ast_expr(e: ast.Expr) -> String =
       string_concat_many(["(GetFieldExpr ", encode_ast_expr(obj), " ", encode_quoted_str(field), " ", encode_ast_pos(p), ")"])
   | ast.RecordUpdateExpr base fields p ->
       string_concat_many(["(RecordUpdateExpr ", encode_ast_expr(base), " ", encode_record_field_list(fields), " ", encode_ast_pos(p), ")"])
+  | ast.ComprehensionExpr elem gens p ->
+      string_concat_many(["(ComprehensionExpr ", encode_ast_expr(elem), " ", encode_comprehension_gen_list(gens), " ", encode_ast_pos(p), ")"])
+
+fn encode_comprehension_gen(g: ast.ComprehensionGen) -> String =
+  match g with
+  | ast.ComprehensionGen pat src guards ->
+      string_concat_many(["(ComprehensionGen ", encode_ast_pattern(pat), " ", encode_ast_expr(src), " ", encode_ast_expr_list(guards), ")"])
+
+fn encode_comprehension_gen_list(xs: List ast.ComprehensionGen) -> String =
+  string_concat_many(["(", join_comprehension_gens(xs), ")"])
+
+fn join_comprehension_gens(xs: List ast.ComprehensionGen) -> String =
+  match xs with
+  | [] -> ""
+  | [g] -> encode_comprehension_gen(g)
+  | [g | rest] -> string_concat_many([encode_comprehension_gen(g), " ", join_comprehension_gens(rest)])
 
 fn encode_ast_expr_list(xs: List ast.Expr) -> String =
   string_concat_many(["(", join_ast_exprs(xs), ")"])
@@ -1736,6 +1752,7 @@ fn decode_ast_expr_by_tag(s: String, bytes: Bytes, i: Int, total: Int, tag: Stri
   else if tag == "RecordExpr" then decode_record_expr_at(s, bytes, i, total)
   else if tag == "GetFieldExpr" then decode_get_field_expr_at(s, bytes, i, total)
   else if tag == "RecordUpdateExpr" then decode_record_update_expr_at(s, bytes, i, total)
+  else if tag == "ComprehensionExpr" then decode_comprehension_expr_at(s, bytes, i, total)
   else Nothing
 
 fn decode_var_expr_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
@@ -1870,6 +1887,40 @@ fn decode_record_update_expr_at(s: String, bytes: Bytes, i: Int, total: Int) -> 
       Just(p, m) = decode_pos_at(s, bytes, skip_ws(s, bytes, k, total), total) else Nothing
       Just end = expect_char(s, bytes, skip_ws(s, bytes, m, total), total, ')') else Nothing
   in Just((ast.RecordUpdateExpr(base, fields, p), end))
+
+fn decode_comprehension_expr_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
+  let Just(elem, j) = decode_ast_expr_at(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing
+      Just(gens, k) = decode_comprehension_gen_list_at(s, bytes, skip_ws(s, bytes, j, total), total) else Nothing
+      Just(p, m) = decode_pos_at(s, bytes, skip_ws(s, bytes, k, total), total) else Nothing
+      Just end = expect_char(s, bytes, skip_ws(s, bytes, m, total), total, ')') else Nothing
+  in Just((ast.ComprehensionExpr(elem, gens, p), end))
+
+fn decode_comprehension_gen_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.ComprehensionGen, Int) =
+  let Just j = expect_char(s, bytes, i, total, '(') else Nothing
+      Just(tag, k) = read_atom(s, bytes, skip_ws(s, bytes, j, total), total) else Nothing
+  in
+    if tag == "ComprehensionGen" then decode_comprehension_gen_body(s, bytes, k, total)
+    else Nothing
+
+fn decode_comprehension_gen_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.ComprehensionGen, Int) =
+  let Just(pat, j) = decode_ast_pattern_at(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing
+      Just(src, k) = decode_ast_expr_at(s, bytes, skip_ws(s, bytes, j, total), total) else Nothing
+      Just(guards, m) = decode_ast_expr_list_at(s, bytes, skip_ws(s, bytes, k, total), total) else Nothing
+      Just end = expect_char(s, bytes, skip_ws(s, bytes, m, total), total, ')') else Nothing
+  in Just((ast.ComprehensionGen(pat, src, guards), end))
+
+fn decode_comprehension_gen_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List ast.ComprehensionGen, Int) =
+  match expect_char(s, bytes, i, total, '(') with
+  | Nothing -> Nothing
+  | Just j -> collect_comprehension_gens(s, bytes, skip_ws(s, bytes, j, total), total, Nil)
+
+fn collect_comprehension_gens(s: String, bytes: Bytes, i: Int, total: Int, acc: List ast.ComprehensionGen) -> Maybe (List ast.ComprehensionGen, Int) =
+  match expect_char(s, bytes, i, total, ')') with
+  | Just end -> Just((list_reverse(acc), end))
+  | Nothing ->
+      match decode_comprehension_gen_at(s, bytes, i, total) with
+      | Nothing -> Nothing
+      | Just (g, j) -> collect_comprehension_gens(s, bytes, skip_ws(s, bytes, j, total), total, Cons(g, acc))
 
 fn decode_ast_expr_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List ast.Expr, Int) =
   match expect_char(s, bytes, i, total, '(') with
