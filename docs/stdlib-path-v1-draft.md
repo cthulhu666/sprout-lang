@@ -1,6 +1,41 @@
 # stdlib.path — v1 draft
 
-**Status:** experimental design draft, not normative.
+**Status:** experimental design draft, not normative. **Partly superseded 2026-09-05** — see the
+box below before implementing anything here.
+
+> ### Superseded in part by `stdlib.fs.path`
+>
+> A path module landed as **`stdlib/fs/path.sprout`** (module `stdlib.fs.path`) with the
+> filesystem work in `docs/stdlib-fs-v0.md`. It answers open question 1 — the module name is
+> `stdlib.fs.path`, not `stdlib.path`, because it ships as the pure half of `stdlib.fs` rather than
+> as a standalone facility.
+>
+> **What this draft got right and what landed unchanged.** The pure semantics agree completely, and
+> that agreement is worth noting because the two were derived independently — this draft from a
+> design conversation, the landed module from a primary-source survey (`stdlib-fs-v0.md` §3.1).
+> Both give `extension("foo.tar.gz") = Just "gz"`, `extension(".hidden") = Nothing`, and no leading
+> dot; both make `normalize` explicit, lexical and non-resolving rather than eager; and both take
+> the same non-goals (POSIX-only separators, no absolute-vs-relative *type* distinction, no symlink
+> resolution in the pure layer).
+>
+> **What did NOT land, and remains this document's to argue for.**
+>
+> 1. **The `File` / `Dir` type distinction and its smart constructors.** The landed module operates
+>    on plain `String`. `stdlib-fs-v0.md` §6 records why even the weaker `wrap Path = String` was
+>    declined: `read_text`/`write_text` already take `String`, so a newtype for half the module is
+>    worse than none, and the only two-path signature (`rename(from, to)`) would have both sides the
+>    same type — so the swap-protection a newtype buys has nothing to protect. Neither argument
+>    touches the *`File`-vs-`Dir`* distinction this draft proposes, which is a stronger claim and
+>    still open.
+> 2. **Changing `read_file`'s signature to take a `File`.** That breaking change did not happen and
+>    is not planned.
+> 3. **Goal 2 — retiring the naive `str_concat` join sites** in `module_loader.module_name_to_path`
+>    and `bundler.prelude_path`, with their trailing-slash and empty-root bugs. Untouched. Those are
+>    compiler sources, so the migration carries the full seed protocol and is its own change; the
+>    landed `path.join` is now available to do it with.
+>
+> Anyone reviving this draft is arguing for the typed surface specifically, against a working
+> `String`-based one — so the case has to be made on the bug class it prevents, with evidence.
 **Author:** TBD; design conversation pre-dates implementation.
 **Origin:** the `wrap FilePath`/`wrap StdlibRoot` pair landed in PR #40 closed
 the swap-bug class for compiler-internal paths, but left two questions open:

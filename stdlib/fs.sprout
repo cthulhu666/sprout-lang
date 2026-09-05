@@ -1,5 +1,7 @@
 module stdlib.fs
 
+import stdlib.fs.path as path
+
 # Filesystem primitives. Declared here rather than in the prelude: nothing in the prelude calls
 # them, and under the rule "an extern lives in the module that owns its surface" this is that
 # module. Touching the filesystem becomes an explicit dependency — the same reasoning the prelude
@@ -10,11 +12,11 @@ module stdlib.fs
 # from anywhere this module is bundled. The wrapper API below is what makes that reach intentional
 # and greppable, not a visibility rule.
 #
-# NO TYPE DECLARATIONS IN THIS MODULE, deliberately. The REPL's module loader validates type-decl
-# field names against a fixed vocabulary and swallows the error when one is missing, which is why
-# eleven stdlib modules currently fail to load there (docs/repl-env-type-vocabulary-v0.md §1.2).
-# Function signatures are not scanned, so a module of externs and wrappers loads cleanly. Adding a
-# `type` here would silently drop stdlib.fs out of the REPL.
+# This module once carried a "NO TYPE DECLARATIONS, deliberately" rule: the REPL's module loader
+# validated type-decl field names against a fixed vocabulary and silently swallowed the failure, so
+# a `type` here would have dropped stdlib.fs out of the REPL. That constraint is GONE — Fix A of
+# docs/repl-env-type-vocabulary-v0.md (`@type:` env markers) landed and retired it. Re-measured with
+# that document's own Appendix A probe: stdlib.fs loads clean with the declarations below.
 extern fn read_file(path: String) -> Result String String !{IO}
 extern fn write_file(path: String, content: String) -> Result String Unit !{IO}
 
@@ -33,3 +35,241 @@ export fn read_text(path: String) -> Result String String !{IO} =
 
 export fn write_text(path: String, content: String) -> Result String Unit !{IO} =
   write_file(path, content)
+
+# ---------------------------------------------------------------------------
+# Listing, metadata, binary I/O, mutation
+#
+# `read_text`/`write_text` above are the TEXT surface: they validate UTF-8 and
+# report an unmatchable String. Everything below is the classified surface, and
+# the two coexist rather than one replacing the other.
+# ---------------------------------------------------------------------------
+
+export type EntryKind (..) =
+  | FileEntry
+  | DirEntry
+  # Only ever reported by `symlink_stat` and `read_dir`, which do not follow a
+  # link. `stat` follows, so it answers with whatever the link points at — a
+  # link to a directory is a `DirEntry` there.
+  | SymlinkEntry
+  # A device, socket, or fifo. One constructor rather than four: nothing an IDE
+  # or a build tool does needs to tell them apart, and a case no caller matches
+  # is a case nobody keeps correct.
+  | OtherEntry
+
+# Metadata for one path: kind, size in bytes, modification time in seconds.
+#
+# Deliberately carries NO name. The name of a path is `path.basename`, and
+# having the runtime fill a second copy of that rule would put two
+# implementations of POSIX basename(3) in the tree to drift apart. `read_dir`
+# pairs a name with its Entry instead.
+export type Entry (..) =
+  | Entry EntryKind Int Int
+
+export fn entry_kind(e: Entry) -> EntryKind =
+  match e with | Entry kind _ _ -> kind
+
+export fn entry_size(e: Entry) -> Int =
+  match e with | Entry _ size _ -> size
+
+export fn entry_mtime(e: Entry) -> Int =
+  match e with | Entry _ _ mtime -> mtime
+
+export fn entry_is_dir(e: Entry) -> Bool =
+  match entry_kind(e) with
+  | DirEntry -> true
+  | _ -> false
+
+export fn entry_is_file(e: Entry) -> Bool =
+  match entry_kind(e) with
+  | FileEntry -> true
+  | _ -> false
+
+# A classified error, unlike `read_text`'s String. The constructor is what a
+# caller matches; the payload is "<path>: <reason>" for a human and should not
+# be parsed.
+#
+# The set is CLOSED, diverging from Rust's `#[non_exhaustive]` ErrorKind and
+# Go's open sentinel set, so that a `match` here is total and the compiler
+# checks it. `FsIoError` is what buys back the room those languages get from
+# being open: a newly classified errno moves out of it into its own
+# constructor.
+export type FsError (..) =
+  | FsNotFound String
+  | FsPermissionDenied String
+  | FsAlreadyExists String
+  | FsNotADirectory String
+  | FsIsADirectory String
+  | FsDirectoryNotEmpty String
+  | FsInvalidPath String
+  | FsIoError String
+
+export fn fs_error_message(e: FsError) -> String =
+  match e with
+  | FsNotFound msg -> msg
+  | FsPermissionDenied msg -> msg
+  | FsAlreadyExists msg -> msg
+  | FsNotADirectory msg -> msg
+  | FsIsADirectory msg -> msg
+  | FsDirectoryNotEmpty msg -> msg
+  | FsInvalidPath msg -> msg
+  | FsIoError msg -> msg
+
+extern fn fs_list_dir(path: String) -> Result FsError (List String) !{IO}
+extern fn fs_stat_path(path: String, follow: Int) -> Result FsError Entry !{IO}
+extern fn fs_read_bytes(path: String) -> Result FsError Bytes !{IO}
+extern fn fs_write_bytes(path: String, payload: Bytes) -> Result FsError Unit !{IO}
+extern fn fs_make_dir(path: String) -> Result FsError Unit !{IO}
+extern fn fs_remove(path: String) -> Result FsError Unit !{IO}
+extern fn fs_rename(from: String, to: String) -> Result FsError Unit !{IO}
+
+# The directory's entry names, excluding "." and "..".
+#
+# ORDER IS UNSPECIFIED — it is the filesystem's order, not sorted. Sort at the
+# point of display; depending on the incidental order is a bug that reproduces
+# on one machine and not another.
+export fn list_dir(dir: String) -> Result FsError (List String) !{IO} =
+  fs_list_dir(dir)
+
+# Metadata for one path, FOLLOWING a final symlink — so a link to a directory
+# answers `DirEntry`, and a broken link answers `FsNotFound`.
+#
+# Following is the default because that is the question callers usually mean
+# ("can I use this as a directory?") and because it matches Rust's `fs::metadata`
+# and Go's `os.Stat`. It matters concretely: `/tmp` is a symlink on macOS, so a
+# non-following `is_dir("/tmp")` answers false.
+export fn stat(p: String) -> Result FsError Entry !{IO} =
+  fs_stat_path(p, 1)
+
+# Metadata for the path ITSELF, never its target — Rust's `fs::symlink_metadata`,
+# Go's `os.Lstat`. This is what a tree walk wants: it reports `SymlinkEntry`, so
+# a link is deleted or skipped instead of being descended through, which is also
+# what stops a link pointing at an ancestor from looping forever.
+export fn symlink_stat(p: String) -> Result FsError Entry !{IO} =
+  fs_stat_path(p, 0)
+
+# The whole file as bytes, with no UTF-8 validation — the reader for a file that
+# is not text, and the one `read_text` cannot stand in for.
+export fn read_bytes(p: String) -> Result FsError Bytes !{IO} =
+  fs_read_bytes(p)
+
+export fn write_bytes(p: String, payload: Bytes) -> Result FsError Unit !{IO} =
+  fs_write_bytes(p, payload)
+
+# Create one directory. The parent must exist; use `make_dir_all` otherwise.
+export fn make_dir(p: String) -> Result FsError Unit !{IO} =
+  fs_make_dir(p)
+
+# Delete one file, or one EMPTY directory. A non-empty directory reports
+# `FsDirectoryNotEmpty`; use `remove_dir_all` when that is what you meant.
+export fn remove(p: String) -> Result FsError Unit !{IO} =
+  fs_remove(p)
+
+export fn rename(from: String, to: String) -> Result FsError Unit !{IO} =
+  fs_rename(from, to)
+
+# Does the path exist? Loses the reason it does not, which is why it is a
+# convenience over `stat` rather than the primitive: a false here can mean
+# "absent" or "a parent directory is unreadable", and only `stat` tells you
+# which.
+export fn exists(p: String) -> Bool !{IO} =
+  match stat(p) with
+  | Ok _ -> true
+  | Err _ -> false
+
+export fn is_dir(p: String) -> Bool !{IO} =
+  match stat(p) with
+  | Ok e -> entry_is_dir(e)
+  | Err _ -> false
+
+export fn is_file(p: String) -> Bool !{IO} =
+  match stat(p) with
+  | Ok e -> entry_is_file(e)
+  | Err _ -> false
+
+# Each entry name paired with its metadata. Order is `list_dir`'s, i.e.
+# unspecified.
+#
+# An entry that DISAPPEARS between the listing and its stat is skipped, not
+# reported: a directory is a mutable thing and its listing is a snapshot, so an
+# entry that no longer exists is not in it. Failing the whole call for one
+# vanished temp file would make this unusable on a busy directory. Every other
+# error still propagates — an unreadable entry is a real problem and stays one.
+#
+# Uses `symlink_stat`, so an entry that is a symlink reports as `SymlinkEntry`
+# rather than as its target. That matches Rust's `DirEntry::file_type` and Go's
+# `ReadDir`, and it is what makes a `read_dir`-driven tree walk terminate: a link
+# pointing at an ancestor is a leaf here, not a cycle.
+#
+# O(n) syscalls for n entries, one lstat each.
+export fn read_dir(dir: String) -> Result FsError (List (String, Entry)) !{IO} =
+  match fs_list_dir(dir) with
+  | Err e -> Err(e)
+  | Ok names -> read_dir_go(dir, names, Nil)
+
+fn read_dir_go(dir: String, names: List String, acc: List (String, Entry))
+    -> Result FsError (List (String, Entry)) !{IO} =
+  match names with
+  | Nil -> Ok(list_reverse(acc))
+  | Cons name rest ->
+      match symlink_stat(path.join(dir, name)) with
+      | Ok e -> read_dir_go(dir, rest, Cons((name, e), acc))
+      | Err err ->
+          match err with
+          | FsNotFound _ -> read_dir_go(dir, rest, acc)
+          | _ -> Err(err)
+
+# Create a directory and every missing parent. Succeeds when the tree already
+# exists, which is the behaviour that makes it usable as a setup step.
+#
+# Written in Sprout over the single-level builtin rather than as a recursive
+# mkdir in C: the interesting part is the "already there is fine" rule, and
+# here it is one readable branch that the test suite can reach.
+export fn make_dir_all(p: String) -> Result FsError Unit !{IO} =
+  make_dir_all_go(if path.is_absolute(p) then "/" else "", path.split(p))
+
+fn make_dir_all_go(prefix: String, comps: List String) -> Result FsError Unit !{IO} =
+  match comps with
+  | Nil -> Ok(())
+  | Cons c rest ->
+      match make_dir_step(path.join(prefix, c)) with
+      | Err e -> Err(e)
+      | Ok _ -> make_dir_all_go(path.join(prefix, c), rest)
+
+# `FsAlreadyExists` is success here, but only for a directory: a REGULAR FILE
+# sitting where a parent directory should go is a real failure, and reporting it
+# as `FsNotADirectory` says so instead of letting the next level fail with a
+# confusing error about a path the caller never named.
+fn make_dir_step(p: String) -> Result FsError Unit !{IO} =
+  match fs_make_dir(p) with
+  | Ok _ -> Ok(())
+  | Err e ->
+      match e with
+      | FsAlreadyExists msg -> if is_dir(p) then Ok(()) else Err(FsNotADirectory(msg))
+      | _ -> Err(e)
+
+# Delete a tree: its contents first, then the directory itself.
+#
+# A SYMLINK inside the tree is removed, never followed — `stat` is lstat, so a
+# link to a directory reports `SymlinkEntry` and takes the `remove` branch. A
+# version built on a following stat would delete the link's target instead, and
+# would loop forever on a link pointing at an ancestor.
+export fn remove_dir_all(p: String) -> Result FsError Unit !{IO} =
+  match symlink_stat(p) with
+  | Err e -> Err(e)
+  | Ok entry ->
+      if entry_is_dir(entry) then
+        match fs_list_dir(p) with
+        | Err e -> Err(e)
+        | Ok names ->
+            match remove_children(p, names) with
+            | Err e -> Err(e)
+            | Ok _ -> fs_remove(p)
+      else fs_remove(p)
+
+fn remove_children(dir: String, names: List String) -> Result FsError Unit !{IO} =
+  match names with
+  | Nil -> Ok(())
+  | Cons name rest ->
+      match remove_dir_all(path.join(dir, name)) with
+      | Err e -> Err(e)
+      | Ok _ -> remove_children(dir, rest)

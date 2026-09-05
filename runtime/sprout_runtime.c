@@ -26,6 +26,7 @@
 #include <sys/ioctl.h>  /* terminal size: TIOCGWINSZ */
 #include <sys/stat.h>   /* term_read_avail: fstat, to tell a pollable fd from a regular file */
 #include <sys/mman.h>   /* GC arena: reserve address space (PROT_NONE), commit per chunk */
+#include <dirent.h>     /* stdlib.fs: opendir/readdir/closedir */
 #include "sprout_scheduler.h"
 #ifdef __APPLE__
 #pragma clang diagnostic push
@@ -3042,6 +3043,284 @@ long long write_file(long long path_i, long long content_i) {
   fclose(f);
   return sprout_make1(find_ctor_tag_by_name("Ok"), 0LL);
 }
+/* ---------------------------------------------------------------------------
+ * stdlib.fs — directory listing, metadata, binary file I/O, and mutation.
+ *
+ * These are the operations Sprout cannot express: each is a syscall. Everything
+ * that composes out of them — make_dir_all, remove_dir_all, read_dir's pairing
+ * of names with metadata — is written in Sprout in stdlib/fs.sprout, where it is
+ * testable. See docs/stdlib-fs-v0.md §4.1.
+ *
+ * `read_file` / `write_file` above stay as they are: they are the TEXT surface,
+ * they validate UTF-8, and their error is an unmatchable String. The pair below
+ * is the byte surface with a classified error, and the two coexist.
+ * ------------------------------------------------------------------------- */
+
+/* errno -> the stdlib.fs.FsError constructor that classifies it.
+ *
+ * Written as an if-chain rather than a switch on purpose: POSIX permits
+ * ENOTEMPTY == EEXIST (and EAGAIN == EWOULDBLOCK is the familiar precedent), and
+ * duplicate case labels are a compile error rather than a fallthrough. macOS and
+ * Linux happen to differ today; this does not depend on their continuing to. */
+static const char* fs_error_ctor(int err) {
+  if (err == ENOENT)                       return "stdlib.fs.FsNotFound";
+  if (err == EACCES || err == EPERM)       return "stdlib.fs.FsPermissionDenied";
+  if (err == ENOTEMPTY)                    return "stdlib.fs.FsDirectoryNotEmpty";
+  if (err == EEXIST)                       return "stdlib.fs.FsAlreadyExists";
+  if (err == ENOTDIR)                      return "stdlib.fs.FsNotADirectory";
+  if (err == EISDIR)                       return "stdlib.fs.FsIsADirectory";
+  if (err == ENAMETOOLONG || err == ELOOP) return "stdlib.fs.FsInvalidPath";
+  return "stdlib.fs.FsIoError";
+}
+
+/* Err(<ctor> "<detail>"). Rooting mirrors tcp_net_err1: each intermediate is a
+ * GC local before the next allocation can run a collection. */
+static long long fs_err_ctor_msg(const char* ctor_name, const char* detail) {
+  long long msg = (long long)(uintptr_t)dup_managed_cstr(detail, "stdlib.fs: out of memory");
+  SPROUT_GC_PUSH_I64_LOCAL(msg);
+  long long err = sprout_make1(find_ctor_tag_by_name(ctor_name), msg);
+  SPROUT_GC_PUSH_I64_LOCAL(err);
+  long long out = sprout_make1(find_ctor_tag_by_name("Err"), err);
+  SPROUT_GC_POP_LOCALS(2);
+  return out;
+}
+
+/* The payload carries the path as well as strerror: by the time an error
+ * reaches a log line the caller's own path variable is usually long gone, and
+ * "No such file or directory" on its own names nothing. */
+static long long fs_err(int err, const char* path) {
+  char detail[1024];
+  snprintf(detail, sizeof(detail), "%s: %s", path ? path : "(null path)", strerror(err));
+  return fs_err_ctor_msg(fs_error_ctor(err), detail);
+}
+
+static long long fs_ok(long long payload) {
+  long long rooted = payload;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted);
+  long long out = sprout_make1(find_ctor_tag_by_name("Ok"), payload);
+  SPROUT_GC_POP_LOCALS(1);
+  return out;
+}
+
+/* Ok(()) — Unit is not a heap value, so there is nothing to root. */
+static long long fs_ok_unit(void) {
+  return sprout_make1(find_ctor_tag_by_name("Ok"), 0LL);
+}
+
+/* An empty path is rejected here rather than passed to the syscall, which would
+ * report ENOENT and so classify as "not found" — true of nothing in particular
+ * and misleading about the caller's actual mistake. */
+static int fs_path_rejected(const char* path, long long* out) {
+  if (path == NULL) {
+    *out = fs_err_ctor_msg("stdlib.fs.FsInvalidPath", "null path");
+    return 1;
+  }
+  if (path[0] == '\0') {
+    *out = fs_err_ctor_msg("stdlib.fs.FsInvalidPath", "empty path");
+    return 1;
+  }
+  return 0;
+}
+
+/* Result FsError (List String): the directory's entries, excluding "." and "..".
+ *
+ * ORDER IS UNSPECIFIED — this is readdir's order, which is the filesystem's, not
+ * sorted. A caller that shows the list to a human sorts it.
+ *
+ * Names only. Pairing each with its metadata is read_dir's job in Sprout: it
+ * costs one lstat per entry that dirent's d_type could sometimes save, and
+ * d_type is DT_UNKNOWN on several filesystems, so the saving is conditional
+ * while the C would not be. */
+long long fs_list_dir(long long path_i) {
+  const char* path = (const char*)(uintptr_t)path_i;
+  long long rejected;
+  if (fs_path_rejected(path, &rejected)) return rejected;
+
+  DIR* dir = opendir(path);
+  if (dir == NULL) return fs_err(errno, path);
+
+  long long cons_tag = find_ctor_tag_by_name("Cons");
+  SPROUT_HANDLE(h_list, sprout_make0(find_ctor_tag_by_name("Nil")));
+
+  /* readdir returns NULL for both end-of-directory and error, distinguished
+   * only by errno — hence the clear before every call. */
+  int read_err = 0;
+  while (1) {
+    errno = 0;
+    struct dirent* de = readdir(dir);
+    if (de == NULL) { read_err = errno; break; }
+    if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0) continue;
+    char* name = dup_managed_cstr(de->d_name, "fs_list_dir: out of memory");
+    {
+      SPROUT_HANDLE(h_name, (long long)(uintptr_t)name);
+      SPROUT_HANDLE_SET(h_list,
+        sprout_make2(cons_tag, sprout_handle_get(h_name), sprout_handle_get(h_list)));
+    }
+  }
+  closedir(dir);
+  if (read_err != 0) return fs_err(read_err, path);
+  return fs_ok(sprout_handle_get(h_list));
+}
+
+/* Result FsError Entry, where Entry is `Entry EntryKind Int Int` — kind, size in
+ * bytes, mtime in seconds.
+ *
+ * `follow` selects stat(2) vs lstat(2), exposed in Sprout as the two named
+ * functions `stat` and `symlink_stat` rather than as a flag. One builtin rather
+ * than two because it is one syscall family and the branch is a single line; an
+ * Int rather than a Bool because the extern boundary passes i64 and an Int flag
+ * makes that explicit at the declaration.
+ *
+ * The distinction is load-bearing, not pedantry: on macOS `/tmp` is a symlink to
+ * `/private/tmp`, so an lstat-only `is_dir("/tmp")` answers false and any
+ * make_dir_all under /tmp fails. Following is the default because that is what
+ * Rust's fs::metadata and Go's os.Stat do; the non-following variant is what a
+ * tree walk needs, so that a link is deleted rather than descended through.
+ *
+ * The entry carries no NAME. It could — the path is right here — but then C and
+ * stdlib.fs.path would hold two implementations of one basename rule, and they
+ * would eventually disagree. read_dir pairs a name with its Entry in Sprout
+ * instead, leaving exactly one definition of what a path's last component is. */
+long long fs_stat_path(long long path_i, long long follow) {
+  const char* path = (const char*)(uintptr_t)path_i;
+  long long rejected;
+  if (fs_path_rejected(path, &rejected)) return rejected;
+
+  struct stat st;
+  int rc = (follow != 0) ? stat(path, &st) : lstat(path, &st);
+  if (rc != 0) return fs_err(errno, path);
+
+  const char* kind_ctor = "stdlib.fs.OtherEntry";
+  if (S_ISREG(st.st_mode))       kind_ctor = "stdlib.fs.FileEntry";
+  else if (S_ISDIR(st.st_mode))  kind_ctor = "stdlib.fs.DirEntry";
+  else if (S_ISLNK(st.st_mode))  kind_ctor = "stdlib.fs.SymlinkEntry";
+
+  long long kind = sprout_make0(find_ctor_tag_by_name(kind_ctor));
+  SPROUT_GC_PUSH_I64_LOCAL(kind);
+  long long entry = sprout_make3(find_ctor_tag_by_name("stdlib.fs.Entry"),
+                                 kind, (long long)st.st_size, (long long)st.st_mtime);
+  SPROUT_GC_POP_LOCALS(1);
+  return fs_ok(entry);
+}
+
+/* Result FsError Bytes: the whole file, with NO UTF-8 validation.
+ *
+ * The directory case is checked explicitly rather than left to read(2), because
+ * the platforms disagree about it — reading a directory fd fails with EISDIR on
+ * Linux and can succeed on some systems — and a caller matching on
+ * FsIsADirectory deserves the same answer everywhere. */
+long long fs_read_bytes(long long path_i) {
+  const char* path = (const char*)(uintptr_t)path_i;
+  long long rejected;
+  if (fs_path_rejected(path, &rejected)) return rejected;
+
+  int fd = open(path, O_RDONLY);
+  if (fd < 0) return fs_err(errno, path);
+
+  struct stat st;
+  if (fstat(fd, &st) != 0) { int e = errno; close(fd); return fs_err(e, path); }
+  if (S_ISDIR(st.st_mode)) { close(fd); return fs_err(EISDIR, path); }
+
+  size_t cap = (S_ISREG(st.st_mode) && st.st_size > 0) ? (size_t)st.st_size + 1 : 4096;
+  size_t len = 0;
+  unsigned char* buf = (unsigned char*)malloc(cap);
+  if (buf == NULL) { close(fd); return fs_err_ctor_msg("stdlib.fs.FsIoError", "out of memory"); }
+
+  while (1) {
+    if (len == cap) {
+      size_t grown_cap = cap * 2;
+      unsigned char* grown = (unsigned char*)realloc(buf, grown_cap);
+      if (grown == NULL) {
+        free(buf); close(fd);
+        return fs_err_ctor_msg("stdlib.fs.FsIoError", "out of memory");
+      }
+      buf = grown;
+      cap = grown_cap;
+    }
+    ssize_t n = read(fd, buf + len, cap - len);
+    if (n == 0) break;                       /* EOF */
+    if (n < 0) {
+      if (errno == EINTR) continue;
+      { int e = errno; free(buf); close(fd); return fs_err(e, path); }
+    }
+    len += (size_t)n;
+  }
+  close(fd);
+
+  long long payload =
+    (long long)(uintptr_t)bytes_from_chunk_bytes(buf, len, "fs_read_bytes: out of memory");
+  free(buf);
+  return fs_ok(payload);
+}
+
+/* Result FsError Unit. The counterpart read_bytes cannot ship without: a String
+ * is always valid UTF-8 with no NUL (spec-v0.md §64), so write_file cannot
+ * express an arbitrary byte sequence and nothing else in the language can put
+ * one in a file. */
+long long fs_write_bytes(long long path_i, long long bytes_h) {
+  const char* path = (const char*)(uintptr_t)path_i;
+  long long rejected;
+  if (fs_path_rejected(path, &rejected)) return rejected;
+
+  BytesVal* payload = (BytesVal*)(uintptr_t)bytes_h;
+  if (payload == NULL) tcp_fail("fs_write_bytes: null payload");
+
+  int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+  if (fd < 0) return fs_err(errno, path);
+
+  /* write(2) may transfer fewer bytes than asked for on any descriptor, so the
+   * loop is required, not defensive. */
+  size_t off = 0;
+  while (off < payload->len) {
+    ssize_t n = write(fd, payload->data + off, payload->len - off);
+    if (n < 0) {
+      if (errno == EINTR) continue;
+      { int e = errno; close(fd); return fs_err(e, path); }
+    }
+    off += (size_t)n;
+  }
+  /* close can report a deferred write error; ignoring it would call a failed
+   * write a success. */
+  if (close(fd) != 0) return fs_err(errno, path);
+  return fs_ok_unit();
+}
+
+/* One level only, 0777 before umask. Recursive creation is make_dir_all in
+ * Sprout, which is also what makes an existing-tree call a success rather than
+ * an EEXIST. */
+long long fs_make_dir(long long path_i) {
+  const char* path = (const char*)(uintptr_t)path_i;
+  long long rejected;
+  if (fs_path_rejected(path, &rejected)) return rejected;
+  if (mkdir(path, 0777) != 0) return fs_err(errno, path);
+  return fs_ok_unit();
+}
+
+/* remove(3): unlink for a file, rmdir for a directory. A non-empty directory
+ * fails with ENOTEMPTY, which classifies as FsDirectoryNotEmpty — recursive
+ * deletion is remove_dir_all in Sprout, deliberately, so that walking a tree
+ * and deleting it are separately testable. */
+long long fs_remove(long long path_i) {
+  const char* path = (const char*)(uintptr_t)path_i;
+  long long rejected;
+  if (fs_path_rejected(path, &rejected)) return rejected;
+  if (remove(path) != 0) return fs_err(errno, path);
+  return fs_ok_unit();
+}
+
+/* rename(2). Atomic within a filesystem; EXDEV across one, which classifies as
+ * FsIoError — a cross-device move is copy-then-delete and belongs to a caller
+ * that can decide about partial state, not to a primitive. */
+long long fs_rename(long long from_i, long long to_i) {
+  const char* from = (const char*)(uintptr_t)from_i;
+  const char* to   = (const char*)(uintptr_t)to_i;
+  long long rejected;
+  if (fs_path_rejected(from, &rejected)) return rejected;
+  if (fs_path_rejected(to, &rejected)) return rejected;
+  if (rename(from, to) != 0) return fs_err(errno, from);
+  return fs_ok_unit();
+}
+
 long long panic(long long msg_i) {
   const char* msg = (const char*)(uintptr_t)msg_i;
   tcp_fail(msg ? msg : "panic");

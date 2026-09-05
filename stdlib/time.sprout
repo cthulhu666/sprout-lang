@@ -8,8 +8,11 @@ module stdlib.time
 # from anywhere this module is bundled. The wrapper API below is what makes that reach intentional
 # and greppable, not a visibility rule.
 #
-# NO TYPE DECLARATIONS IN THIS MODULE, deliberately — see the same note in stdlib/fs.sprout. A
-# `type` here would silently drop stdlib.time out of the REPL.
+# This module once carried a "NO TYPE DECLARATIONS, deliberately" rule, cross-referencing the same
+# note in stdlib/fs.sprout: a `type` would have dropped the module out of the REPL, whose loader
+# validated type-decl field names against a fixed vocabulary and swallowed the failure. That
+# constraint is GONE — Fix A of docs/repl-env-type-vocabulary-v0.md (`@type:` env markers) retired
+# it, and stdlib.fs now declares types and still loads. Declare a type here if one is warranted.
 extern fn time_now_micros() -> Int !{IO}
 extern fn wall_time_micros() -> Int !{IO}
 

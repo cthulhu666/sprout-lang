@@ -78,6 +78,7 @@ through the module's wrapper API:
 |---|---|---|
 | `read_file(path) -> Result String String` | `stdlib.fs` | `fs.read_text(path)` |
 | `write_file(path, content) -> Result String Unit` | `stdlib.fs` | `fs.write_text(path, content)` |
+| `fs_*` (7: list_dir, stat_path, read_bytes, write_bytes, make_dir, remove, rename) | `stdlib.fs` | `fs.list_dir(…)`, `fs.stat(…)`, … |
 | `env_get(name) -> Maybe String` | `stdlib.env` | `env.get(name)` |
 | `time_now_micros() -> Int` | `stdlib.time` | `time.now_micros()` — monotonic, for elapsed time |
 | `wall_time_micros() -> Int` | `stdlib.time` | `time.wall_micros()` — realtime, for timestamps |
@@ -749,6 +750,58 @@ Named `*_text` rather than `*_file` because that is the actual contract:
 binary file as `Err`, so this pair cannot read one. `Err` carries a
 human-readable message — `strerror(errno)`, a UTF-8 decode reason, or
 `"null path"` / `"out of memory"` — and must not be pattern-matched on.
+
+The rest of the module is the **classified** surface, whose error is a matchable
+`FsError` rather than a String. Both halves coexist; the pair above is not
+deprecated.
+
+- `list_dir(dir) -> Result FsError (List String) !{IO}` — entry names, excluding
+  `.` and `..`. **Order is unspecified** (the filesystem's, not sorted).
+- `stat(p) -> Result FsError Entry !{IO}` — **follows** a final symlink, like
+  Rust's `fs::metadata` and Go's `os.Stat`.
+- `symlink_stat(p) -> Result FsError Entry !{IO}` — does **not** follow, like
+  `fs::symlink_metadata` / `os.Lstat`. Only this and `read_dir` ever report
+  `SymlinkEntry`.
+- `read_bytes(p) -> Result FsError Bytes !{IO}` / `write_bytes(p, bytes)` — no
+  UTF-8 validation in either direction. The reader for a file that is not text,
+  and the only way to put an arbitrary byte sequence into one.
+- `make_dir(p)` / `make_dir_all(p)` / `remove(p)` / `remove_dir_all(p)` /
+  `rename(from, to)` — all `-> Result FsError Unit !{IO}`. `make_dir_all`
+  succeeds when the tree already exists; `remove` on a non-empty directory is
+  `FsDirectoryNotEmpty`, and `remove_dir_all` is what recurses.
+- `read_dir(dir) -> Result FsError (List (String, Entry)) !{IO}` — names paired
+  with metadata, using `symlink_stat`. An entry that disappears between the
+  listing and its stat is skipped; every other error propagates.
+- `exists(p)` / `is_dir(p)` / `is_file(p)` `-> Bool !{IO}` — convenience over
+  `stat`, so they follow symlinks and lose the *reason* for a `false`.
+
+`Entry` is `Entry EntryKind Int Int` — kind, size in bytes, mtime in seconds —
+read through `entry_kind` / `entry_size` / `entry_mtime` / `entry_is_dir` /
+`entry_is_file`. It carries **no name**: the name of a path is
+`stdlib.fs.path.basename`, and a second copy of that rule in the runtime would
+drift from it.
+
+`FsError` is a closed ADT — `FsNotFound`, `FsPermissionDenied`,
+`FsAlreadyExists`, `FsNotADirectory`, `FsIsADirectory`, `FsDirectoryNotEmpty`,
+`FsInvalidPath`, `FsIoError` — so a `match` on it is total, unlike Rust's
+`#[non_exhaustive]` `ErrorKind`. Each carries a `"<path>: <reason>"` string for
+display; match the **constructor**, not the text. `fs_error_message` extracts it.
+
+Path module (in `stdlib/fs/path.sprout`) — **pure**, no builtins, no filesystem
+access:
+
+- `is_absolute(p) -> Bool`, `join(left, right) -> String`,
+  `split(p) -> List String` (non-empty components)
+- `basename(p) -> String`, `dirname(p) -> String` — POSIX `basename(3)` /
+  `dirname(3)`, including `basename("") == "."` and `basename("/") == "/"`
+- `extension(p) -> Maybe String` — **without** the dot, and `Nothing` for a
+  dotfile like `.bashrc`; `stem(p) -> String` is the complement
+- `normalize(p) -> String` — Go's `Clean`, applied lexically, so it does not
+  resolve symlinks
+- `relative_to(base, p) -> Maybe String` — Rust's `strip_prefix`; it never
+  synthesises `../..`
+
+Survey and rationale for every edge case: `docs/stdlib-fs-v0.md`.
 
 Environment module (in `stdlib/env.sprout`):
 
