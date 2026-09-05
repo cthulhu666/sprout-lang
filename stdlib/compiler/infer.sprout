@@ -5487,10 +5487,11 @@ fn comp_kinds_tail(kinds: List CompKind) -> List CompKind =
   | Cons _ t -> t
 
 # Position-derived, like parser.do_tmp_name, and additionally indexed by nesting
-# depth so two generators of the same comprehension cannot collide. The `__cmp_`
-# prefix keeps these out of the user's namespace.
+# depth so two generators of the same comprehension cannot collide. The prefix
+# keeps these out of the user's namespace, and linear_check matches on it to
+# recognize a synthesized fold.
 fn comp_tmp_name(tag: String, depth: Int, pos: source.SourcePos) -> String =
-  "__cmp_" ++ tag ++ int_to_string(pos.line) ++ "_" ++ int_to_string(pos.column)
+  ast.comp_binder_prefix ++ tag ++ int_to_string(pos.line) ++ "_" ++ int_to_string(pos.column)
     ++ "_" ++ int_to_string(depth)
 
 # A guard must be Bool. The synthesized `if` would enforce this anyway, but

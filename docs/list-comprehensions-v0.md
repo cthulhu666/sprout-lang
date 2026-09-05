@@ -488,7 +488,7 @@ guard. A prelude `rem` is out of scope here and belongs in `BACKLOG.md`.
 
 Because the elaboration produces real lambdas before `fn_linear_gate` runs (D2),
 a comprehension is judged by the rules already in `lin_lambda`
-(`linear_check.sprout:1092-1112`): a lambda may not take a linear parameter, and
+(`linear_check.sprout:1106-1147`): a lambda may not take a linear parameter, and
 may not capture a linear value. So a comprehension that binds a linear value
 from its source, or consumes one from the enclosing scope in its element or
 guard, is **rejected**.
@@ -503,9 +503,39 @@ accumulator as a parameter, so threading a linear value *through the accumulator
 would be a legitimate exactly-once pattern — the one shape where "n times" can
 still be linear. Sprout has no answer for linear folds anywhere today, and this
 design deliberately does not invent one: comprehensions inherit whatever the
-language decides for lambdas later. The diagnostic a user sees names a lambda at
-the comprehension's position, which is honest but terse; improving that wording
-is a follow-up, not a blocker.
+language decides for lambdas later.
+
+The *rejection* is inherited, but the *wording* is not. `lin_lambda`'s own
+messages describe a lambda, and against a comprehension all three of their parts
+were wrong: they named a construct absent from the source, they advised declaring
+a callee parameter `once` when the callee is the elaboration's own `list_fold`
+and so cannot be annotated at all, and for a non-variable generator pattern they
+printed a generated binder — a real leak, `linear lambda parameter
+'__cmp_val5_39_0'`. `linear_check` therefore recognizes a synthesized fold (any
+parameter carrying `ast.comp_binder_prefix`) and words both rejections in terms
+of the generator:
+
+```
+comprehension generator 'f' binds a linear value, which is not yet supported
+  (a comprehension elaborates to a fold, and higher-order linearity is deferred:
+  the step function runs once per element, so a linear binder cannot yet be
+  tracked across iterations); consume the elements in an explicit recursive
+  function instead
+
+linear value 'f' cannot be used inside a comprehension (…so the compiler cannot
+  yet prove 'f' is consumed exactly once); consume it before the comprehension
+  and use the result inside
+```
+
+When the fold parameter is generated rather than the user's own binder, the
+subject degrades to `this comprehension generator` instead of naming it.
+
+Both suggested rewrites are *pinned by a running test*
+(`tests/stdlib/test_comprehension_linear_advice.spr`), not merely believed to
+work. That is deliberate: advice being impossible to follow was the original
+defect, and a message is the one place a broken claim can survive indefinitely
+because nothing executes it. The rejections themselves are fixtures —
+`tests/conformance/type_error/comprehension_linear_{binder,capture,ctor_binder}`.
 
 ## 5. Semantics — the elaboration
 
@@ -586,7 +616,7 @@ expression is embedded once, so runtime evaluation multiplicity is D4's.
 
 ## 7. Error-message impact
 
-Five new diagnostics, all positioned:
+Six new diagnostics, all positioned:
 
 1. **Unsupported source** — the closed set, naming the conversion:
    ```
@@ -612,6 +642,11 @@ Five new diagnostics, all positioned:
    ```
 5. **Non-`Bool` guard** — the standard unification error, positioned at the
    guard rather than at the whole comprehension.
+6. **Linear value** — two shapes, a generator that binds one and an enclosing
+   binder consumed inside. `linear_check` produces these instead of its
+   lambda-worded pair once it recognizes a synthesized fold; see D7 for the full
+   text and for why inheriting the wording (unlike inheriting the rejection) was
+   not acceptable.
 
 Plus parse errors for a missing `in`, a comprehension with no generator, and a
 guard before any generator:
@@ -661,6 +696,15 @@ source rejected (`fn f(xs) = [x for x in xs]`); refutable pattern rejected, both
 diagnostic variants; non-`Bool` guard rejected; dependent inner source
 (`b in 1..a`); irrefutable non-variable patterns accepted (tuple, `wrap`,
 single-constructor record).
+
+**Linearity** (D7) — a generator binding a linear value; a linear value from the
+enclosing scope consumed in the element; a non-variable generator pattern over a
+linear element, which is the case that used to print a generated binder name. The
+paired regression is that a genuine hand-written lambda still gets the *lambda*
+wording (`linear_lambda_param`, `lambda_capture_still_rejected`), since the new
+messages are selected by a name prefix and a mis-selection would be silent. A
+positive suite runs both rewrites the messages suggest, so the advice is gated
+rather than asserted.
 
 **Hygiene** — `[acc + 1 for acc in xs]` and `let acc = 10 in [acc + x for x in xs]`
 must both compile and give the right answer. These are the first draft's bugs;

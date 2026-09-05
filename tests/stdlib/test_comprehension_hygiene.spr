@@ -1,11 +1,11 @@
 import stdlib.test (check_eq, run_suite)
 import stdlib.mutable (MutVec, mutvec_empty, mutvec_push, mutvec_len)
 
-# List comprehensions do not exist yet (docs/list-comprehensions-v0.md, proposed
-# 2026-09-05). This file is the TDD RED for three normative properties the
-# design pins down; it must fail to PARSE (the first `for` token) until the
-# feature lands. See §4 D2 (hygiene), D4 (evaluation order/multiplicity), and
-# §5 (the O(1)-stack elaboration) for what each group below is pinning.
+# Three normative properties of list comprehensions
+# (docs/list-comprehensions-v0.md): §4 D2 (hygiene), D4 (evaluation order and
+# multiplicity), and §5 (the O(1)-stack elaboration). Written as the TDD RED for
+# the feature — it failed to parse at the first `for` — and green since the
+# elaboration landed.
 
 # --- 1. Hygiene (D2): the elaboration's compiler-generated accumulator must
 # never capture, or be captured by, a user name. Each pair below tries one

@@ -4,9 +4,10 @@ import stdlib.test (check_eq, run_suite)
 #   comprehension ::= '[' expr 'for' generator { ',' generator } ']'
 #   generator     ::= pattern 'in' expr { 'if' expr }
 #
-# `for` is not yet a reserved word and the comprehension AST node does not
-# exist, so this file currently fails to compile with a parse error at the
-# first `for` token. That is the intended TDD RED state.
+# This file was written before the feature, when `for` was not a reserved word
+# and the AST node did not exist, so it failed to parse at the first `for`. It
+# has been green since the elaboration landed; the coverage it pins is listed
+# under §9 "Types"/"Runtime" of the design doc.
 
 # Non-literal bounds, so a crossed pair is a genuinely EMPTY range at
 # runtime rather than the compiler's static "range is empty" rejection
