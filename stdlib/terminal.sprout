@@ -75,3 +75,87 @@ export fn term_read_line_once() -> Maybe String !{IO} =
 
 export fn term_is_interactive_once() -> Bool !{IO} =
   term_is_interactive()
+
+# ---------------------------------------------------------------------------
+# Session raw mode, terminal size, and parked input
+#
+# `term_read_key` above is a per-keypress surface: it enters raw mode, reads, and
+# restores the old termios before returning. That bound is why it decodes only
+# `ESC [ A/B/C/D` — a longer sequence (a modifier chord, an SGR mouse report, a
+# bracketed paste) outlives the window, and its tail bytes come back to the caller
+# as separate fake keypresses. It also blocks the OS thread, so a key read starves
+# every other green task.
+#
+# The surface below is the one a TUI uses instead. Raw mode is held across the
+# session, `read_avail` hands back raw bytes and PARKS the calling task rather
+# than the thread, and all decoding happens in Sprout — where it is an ordinary
+# tested function rather than untestable C. `term_read_key` is unchanged and still
+# used by stdlib/repl.sprout.
+# ---------------------------------------------------------------------------
+
+# Rows and columns. A positional ADT rather than a tuple because an extern
+# returning a tuple has no precedent in the runtime, while a two-Int constructor
+# does (stdlib.regex.Match).
+export type TermSize (..) =
+  | TermSize Int Int
+
+# The result of one `read_avail`. Total by construction: every outcome the
+# descriptor can produce has a constructor, so a caller cannot forget one.
+#
+# `Bytes`, not `String`: a read can land mid-UTF-8-sequence, and a Sprout String
+# is always valid UTF-8 with no NUL. Reassembly belongs to the decoder.
+export type TermInput (..) =
+  | TermBytes Bytes
+  # The deadline elapsed with nothing readable. Not an error — it is how a UI
+  # gets its frame tick.
+  | TermIdle
+  # SIGWINCH arrived since the last call. Observed here rather than delivered as
+  # a signal, so a resize is an ordinary event in the same stream as a keypress.
+  | TermResized
+  | TermEof
+  | TermFailed String
+
+extern fn term_raw_enter() -> Unit !{IO}
+extern fn term_raw_exit() -> Unit !{IO}
+extern fn term_size() -> TermSize !{IO}
+extern fn term_read_avail(max: Int, ms: Int) -> TermInput !{IO}
+
+# Hold raw mode for the session: no echo, no line buffering, and ctrl-C, ctrl-S
+# and ctrl-Q delivered as ordinary bytes instead of signals. A no-op when stdin is
+# not a terminal, so a piped run needs no branch at the call site.
+#
+# The runtime registers an atexit restore, so an abnormal exit cannot strand the
+# user's shell with echo off — which would otherwise be unrecoverable, ctrl-C
+# being exactly what this turns off.
+export fn raw_enter() -> Unit !{IO} =
+  term_raw_enter()
+
+export fn raw_exit() -> Unit !{IO} =
+  term_raw_exit()
+
+# Current terminal size, falling back to $LINES/$COLUMNS and then 24x80, so a
+# layout always has finite numbers even with no terminal attached.
+export fn size() -> TermSize !{IO} =
+  term_size()
+
+export fn size_rows(s: TermSize) -> Int =
+  match s with
+  | TermSize rows _ -> rows
+
+export fn size_cols(s: TermSize) -> Int =
+  match s with
+  | TermSize _ cols -> cols
+
+# Wait up to `timeout_ms` for input, returning at most `max` bytes.
+#
+# Parks the calling task, so timers, animation and network I/O keep running while
+# a UI waits on the keyboard. A non-positive `timeout_ms` polls once and returns
+# `TermIdle` rather than waiting.
+#
+# EXACTLY ONE task may be waiting here at a time; a second one fails loudly. Two
+# waiters would both wake when stdin becomes readable, the first would take the
+# bytes, and the second's read would then block the whole scheduler — so the
+# guard turns an unattributable wedge into a named error. Drive input from one
+# task and hand events on through a channel.
+export fn read_avail(max: Int, timeout_ms: Int) -> TermInput !{IO} =
+  term_read_avail(max, timeout_ms)

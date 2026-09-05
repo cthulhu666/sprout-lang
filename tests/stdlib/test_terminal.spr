@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
 import stdlib.terminal as terminal
 
 # stdlib.terminal had NO test coverage anywhere in tests/. This closes that gap
@@ -40,6 +40,47 @@ fn main() -> Unit !{IO} =
     interactive <- terminal.term_is_interactive_once()
     assert_true(state, "term_is_interactive_once returns a usable Bool",
       interactive || ! interactive)
+
+    # --- session raw mode, size, parked input (M0) ---------------------------
+    #
+    # `size()` is asserted only for POSITIVITY, not for a value: it answers from
+    # TIOCGWINSZ on a terminal and from the 24x80 fallback under the piped
+    # harness, and pinning either would make the suite environment-dependent (the
+    # same reasoning as term_is_interactive_once above). Positivity is the real
+    # contract a layout engine depends on — that it never has to divide by zero
+    # or lay out into a negative region.
+    dims <- terminal.size()
+    assert_true(state, "size() reports a positive row count", terminal.size_rows(dims) > 0)
+    assert_true(state, "size() reports a positive column count", terminal.size_cols(dims) > 0)
+
+    # The accessors themselves ARE deterministic, so they get a real assertion
+    # rather than a liveness one. This is what catches the two fields being
+    # swapped, which the environment-dependent check above cannot see.
+    assert_eq(state, "size_rows reads the first field", terminal.size_rows(terminal.TermSize(24, 80)), 24)
+    assert_eq(state, "size_cols reads the second field", terminal.size_cols(terminal.TermSize(24, 80)), 80)
+
+    # A zero timeout polls once and returns rather than waiting, so this cannot
+    # hang the suite whatever stdin happens to be. WHICH constructor comes back is
+    # environment-dependent (TermIdle under the piped harness, TermEof on
+    # </dev/null, TermBytes if a hand-run terminal has buffered input), so what is
+    # pinned is that the result is one of them and that the call returns at all —
+    # a match with no catch-all would stop compiling if a constructor were added.
+    probe <- terminal.read_avail(64, 0)
+    assert_true(state, "read_avail(_, 0) returns without blocking",
+      match probe with
+      | terminal.TermBytes _ -> true
+      | terminal.TermIdle -> true
+      | terminal.TermResized -> true
+      | terminal.TermEof -> true
+      | terminal.TermFailed _ -> true)
+
+    # Paired with no write in between: when the suite is run by hand on a real
+    # terminal these two DO briefly reconfigure it, and with OPOST off a write in
+    # the window would stair-step the harness's own output. Under the piped
+    # harness raw_enter is a no-op, since stdin is not a tty.
+    _ <- terminal.raw_enter()
+    _ <- terminal.raw_exit()
+    assert_true(state, "raw_enter/raw_exit resolve, link and execute", true)
 
     # Reaching this line at all is the substance of the test: every wrapper above
     # resolved to a live symbol and returned.

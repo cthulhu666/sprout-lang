@@ -23,6 +23,8 @@
 #include <pthread.h>
 #include <stdatomic.h>   /* async DNS: refcount + thread-inflight cap across the resolver thread */
 #include <sys/resource.h>
+#include <sys/ioctl.h>  /* terminal size: TIOCGWINSZ */
+#include <sys/stat.h>   /* term_read_avail: fstat, to tell a pollable fd from a regular file */
 #include <sys/mman.h>   /* GC arena: reserve address space (PROT_NONE), commit per chunk */
 #include "sprout_scheduler.h"
 #ifdef __APPLE__
@@ -3518,6 +3520,245 @@ long long term_write(long long text_val) {
   fputs(text, stdout);
   fflush(stdout);
   return 0;
+}
+/* ── Persistent raw mode, terminal size, parked stdin ────────────────────────
+ *
+ * The replacement input surface for `term_read_key` above, which is left in place
+ * for stdlib/repl.sprout. Three things differ, and the first is what forces the
+ * other two:
+ *
+ *   - Raw mode is held for a SESSION, not re-entered per keypress. term_read_key
+ *     restores the old termios before it returns, which bounds how much of an
+ *     escape sequence it can ever see: it decodes `ESC [ A/B/C/D` and leaks the
+ *     tail bytes of anything longer (a modifier chord, an SGR mouse report, a
+ *     bracketed paste) back to the caller as separate fake keypresses.
+ *   - Nothing is decoded here. A caller gets raw bytes and decodes them in
+ *     Sprout, where the decoder is an ordinary pure function with tests.
+ *   - The read PARKS the calling green task rather than blocking the OS thread,
+ *     so a TUI can run timers, animation and network I/O alongside input.
+ */
+
+static struct termios g_term_saved_attr;
+static int g_term_raw_held = 0;      /* 1 while our termios is installed */
+static int g_term_atexit_armed = 0;  /* the restore handler is registered once */
+static volatile sig_atomic_t g_term_winch = 0;
+
+/* Async-signal-safe by construction: one store to a sig_atomic_t, read and
+ * cleared by term_read_avail. A resize is observed on the NEXT read_avail call
+ * rather than waking a park immediately — sprout_poll_wait already treats EINTR
+ * as "zero ready, re-poll" (sprout_poll.c), so the signal does not cancel the
+ * park, and a TUI polls on a bounded deadline anyway. */
+static void term_winch_handler(int sig) {
+  (void)sig;
+  g_term_winch = 1;
+}
+
+/* Restores the terminal on every exit path that runs atexit handlers, including
+ * a loud-fail abort. Without it a crash inside a TUI leaves the user's shell with
+ * ECHO and ISIG off — unusable, and NOT recoverable with ctrl-C, because ISIG is
+ * precisely what raw mode turned off. */
+static void term_restore_on_exit(void) {
+  if (g_term_raw_held) {
+    tcsetattr(STDIN_FILENO, TCSANOW, &g_term_saved_attr);
+    g_term_raw_held = 0;
+  }
+}
+
+long long term_raw_enter(void) {
+  if (g_term_raw_held) return 0;
+  if (!isatty(STDIN_FILENO)) return 0;  /* piped stdin has no termios to configure */
+  if (tcgetattr(STDIN_FILENO, &g_term_saved_attr) != 0) return 0;
+  struct termios raw = g_term_saved_attr;
+  /* ISIG off makes ctrl-C an ordinary key event instead of a signal — an editor
+   * has to be able to bind it. That is what makes the atexit restore mandatory
+   * rather than merely tidy. */
+  raw.c_lflag &= (tcflag_t)~(ICANON | ECHO | ISIG | IEXTEN);
+  /* IXON off frees ctrl-S/ctrl-Q from flow control; ICRNL off keeps Enter
+   * distinguishable from ctrl-J. */
+  raw.c_iflag &= (tcflag_t)~(IXON | ICRNL | BRKINT | INPCK | ISTRIP);
+  /* OPOST off stops \n from implying \r. Correct for a TUI, which positions the
+   * cursor absolutely — but it does mean `print` is unusable while raw mode is
+   * held. Route diagnostics to stderr; stdlib/log.sprout already does. */
+  raw.c_oflag &= (tcflag_t)~(OPOST);
+  raw.c_cc[VMIN] = 0;
+  raw.c_cc[VTIME] = 0;
+  if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) != 0) return 0;
+  g_term_raw_held = 1;
+  if (!g_term_atexit_armed) {
+    atexit(term_restore_on_exit);
+    g_term_atexit_armed = 1;
+  }
+  struct sigaction sa;
+  memset(&sa, 0, sizeof(sa));
+  sa.sa_handler = term_winch_handler;
+  sigemptyset(&sa.sa_mask);
+  /* SA_RESTART, deliberately. Once this handler is installed a resize can
+   * interrupt ANY blocking syscall in the process, not just the input park —
+   * a TUI doing network I/O would see spurious EINTR out of tcp_read_some, which
+   * has no reason to expect one. sprout_poll_wait does tolerate EINTR, so the
+   * poller does not need the flag; the rest of the runtime is what does.
+   *
+   * The cost is that a resize does not cut a park short: it is reported by the
+   * NEXT read_avail, so a UI learns about it within its own poll interval rather
+   * than instantly. That is the right trade for a surface whose callers are
+   * already required to pass a bounded deadline. */
+  sa.sa_flags = SA_RESTART;
+  sigaction(SIGWINCH, &sa, NULL);
+  return 0;
+}
+
+long long term_raw_exit(void) {
+  term_restore_on_exit();
+  return 0;
+}
+
+long long term_size(void) {
+  long long rows = 24, cols = 80;
+  struct winsize ws;
+  if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_row > 0 && ws.ws_col > 0) {
+    rows = (long long)ws.ws_row;
+    cols = (long long)ws.ws_col;
+  } else {
+    /* Not a tty (piped output, CI). $LINES/$COLUMNS are usually shell-local and
+     * unexported, so this is a courtesy path rather than a reliable one; the
+     * 24x80 default is what guarantees a layout engine always has finite numbers. */
+    const char* env_rows = getenv("LINES");
+    const char* env_cols = getenv("COLUMNS");
+    if (env_rows != NULL) { long long v = atoll(env_rows); if (v > 0) rows = v; }
+    if (env_cols != NULL) { long long v = atoll(env_cols); if (v > 0) cols = v; }
+  }
+  /* Two unboxed Int fields, so no rooting is needed — the same shape and the same
+   * reasoning as stdlib.regex.Match. */
+  return sprout_make2(find_ctor_tag_by_name("stdlib.terminal.TermSize"), rows, cols);
+}
+
+static long long term_input0(const char* ctor_name) {
+  return sprout_make0(find_ctor_tag_by_name(ctor_name));
+}
+
+static long long term_input_failed(const char* detail) {
+  /* intern_string COPIES into a permanent, non-arena, header-prefixed buffer, so
+   * it is safe for strerror's static storage and triggers no collection. */
+  long long msg = (long long)(uintptr_t)intern_string(detail);
+  SPROUT_GC_PUSH_I64_LOCAL(msg);
+  long long out = sprout_make1(find_ctor_tag_by_name("stdlib.terminal.TermFailed"), msg);
+  SPROUT_GC_POP_LOCALS(1);
+  return out;
+}
+
+/* Can fd 0 be registered with the poller for readability?
+ *
+ * An ALLOWLIST, deliberately, because both plausible denylists are wrong and fail
+ * loudly rather than gracefully — sprout_poll_add aborts the process when the
+ * backend refuses a descriptor, so guessing costs a crash, not a slow path:
+ *   - "not a regular file" admits /dev/null, which kqueue's EVFILT_READ refuses
+ *     to register ("kevent register failed"). Measured, not theorised.
+ *   - "not a character device" excludes a TTY, which is the whole point.
+ * Pipes, sockets and terminals are what the kqueue/epoll backends handle; for
+ * everything else there is no readiness to wait for and read() returns at once,
+ * so skipping the wait costs nothing but the caller's `ms` is then ignored. */
+static int term_stdin_pollable(void) {
+  struct stat st;
+  if (fstat(STDIN_FILENO, &st) != 0) return 0;
+  if (S_ISFIFO(st.st_mode) || S_ISSOCK(st.st_mode)) return 1;
+  if (S_ISCHR(st.st_mode)) return isatty(STDIN_FILENO) ? 1 : 0;
+  return 0;
+}
+
+/* Exactly one task may be parked on stdin at a time.
+ *
+ * Two parked readers both wake when the descriptor becomes readable; the first
+ * consumes the bytes, and the second's read() then BLOCKS the OS thread — which
+ * silently undoes the one property this surface exists to provide. A tty in raw
+ * mode happens to be immune (VMIN=0 makes its read return at once), so this is
+ * NOT a tty concern that a terminal-only test would find; it bites on a pipe or
+ * socket, which is what the smoke fixtures use.
+ *
+ * Loud rather than recovered: a TUI has one input task by construction, so
+ * tripping this is a caller bug, and a wedged scheduler is about the hardest
+ * failure there is to attribute after the fact.
+ *
+ * The flag is cleared through the park-cleanup hook as well as on the normal
+ * path. with_timeout expiry and scope_cancel free a parked task's frame WITHOUT
+ * unwinding it, so without the hook a single cancelled read would leave stdin
+ * permanently unreadable for the rest of the process. */
+static int g_term_reader_parked = 0;
+
+static void term_clear_reader_parked(void* unused) {
+  (void)unused;
+  g_term_reader_parked = 0;
+}
+
+/* Read whatever is available on stdin, waiting at most `ms`.
+ *
+ * The wait happens BEFORE the read, which is what lets one path serve a tty, a
+ * pipe and a file alike: VMIN/VTIME make only a TTY read non-blocking, and
+ * setting O_NONBLOCK on fd 0 would mutate the open file description that the
+ * parent shell shares — the classic "shell misbehaves after the program exits"
+ * bug. Waiting for readability first means the read that follows cannot block. */
+long long term_read_avail(long long max_val, long long ms_val) {
+  unsigned char buf[4096];
+  if (g_term_winch) {
+    g_term_winch = 0;
+    return term_input0("stdlib.terminal.TermResized");
+  }
+  if (max_val <= 0) return term_input0("stdlib.terminal.TermIdle");
+  long long want = max_val > (long long)sizeof(buf) ? (long long)sizeof(buf) : max_val;
+
+  if (term_stdin_pollable()) {
+    if (ms_val <= 0) {
+      /* "Don't wait at all" cannot go through the park: scheduler_park_on_fd_timeout
+       * requires ms > 0. Nothing is being waited on, so blocking the thread for a
+       * zero-timeout poll costs no concurrency. */
+      struct pollfd pfd;
+      pfd.fd = STDIN_FILENO;
+      pfd.events = POLLIN;
+      pfd.revents = 0;
+      int r = poll(&pfd, 1, 0);
+      if (r == 0) return term_input0("stdlib.terminal.TermIdle");
+      if (r < 0) {
+        if (errno == EINTR) return term_input0("stdlib.terminal.TermIdle");
+        return term_input_failed(strerror(errno));
+      }
+    /* The UNOWNED-fd park, not the owned one: scheduler_park_on_fd_timeout CLOSES
+     * the fd when a with_timeout expiry or scope_cancel force-drops the parked
+     * task (sprout_scheduler.h), and closing stdin out from under the process is
+     * not a recoverable state. Nothing is held in malloc'd memory across the park,
+     * so no scheduler_set_park_cleanup hook is needed. */
+    } else {
+      if (g_term_reader_parked)
+        tcp_fail("term_read_avail: stdin already has a parked reader "
+                 "(a TUI must drive input from exactly one task)");
+      g_term_reader_parked = 1;
+      scheduler_set_park_cleanup(term_clear_reader_parked, NULL);
+      int ready = scheduler_park_on_unowned_fd_timeout(STDIN_FILENO, SPROUT_POLL_READ, ms_val);
+      scheduler_set_park_cleanup(NULL, NULL);
+      g_term_reader_parked = 0;
+      if (!ready) {
+        /* The deadline won. Re-check the resize flag first: a SIGWINCH that
+         * arrived during the park is the more informative answer of the two. */
+        if (g_term_winch) {
+          g_term_winch = 0;
+          return term_input0("stdlib.terminal.TermResized");
+        }
+        return term_input0("stdlib.terminal.TermIdle");
+      }
+    }
+  }
+
+  ssize_t n = read(STDIN_FILENO, buf, (size_t)want);
+  if (n == 0) return term_input0("stdlib.terminal.TermEof");
+  if (n < 0) {
+    if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
+      return term_input0("stdlib.terminal.TermIdle");
+    return term_input_failed(strerror(errno));
+  }
+  long long payload =
+    (long long)(uintptr_t)bytes_from_chunk_bytes(buf, (size_t)n, "term_read_avail: out of memory");
+  SPROUT_GC_PUSH_I64_LOCAL(payload);
+  long long out = sprout_make1(find_ctor_tag_by_name("stdlib.terminal.TermBytes"), payload);
+  SPROUT_GC_POP_LOCALS(1);
+  return out;
 }
 static char* sprout_json_escape(const char* text) {
   if (text == NULL) tcp_fail("analysis service: null json text");

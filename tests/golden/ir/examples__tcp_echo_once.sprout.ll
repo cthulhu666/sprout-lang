@@ -112,6 +112,10 @@ declare i64 @term_is_interactive()
 declare i64 @term_read_key()
 declare i64 @term_read_line()
 declare i64 @term_write(i64)
+declare i64 @term_raw_enter()
+declare i64 @term_raw_exit()
+declare i64 @term_size()
+declare i64 @term_read_avail(i64, i64)
 @.str.0 = private unnamed_addr constant { i64, [15 x i8] } { i64 229386, [15 x i8] c"invalid handle\00" }
 @.str.1 = private unnamed_addr constant { i64, [14 x i8] } { i64 213002, [14 x i8] c"end of stream\00" }
 @.str.2 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"timed out\00" }
@@ -177,6 +181,18 @@ declare i64 @term_write(i64)
 @.cfkinds.24 = private unnamed_addr constant [2 x i8] c"i\00"
 @.cname.25 = private unnamed_addr constant [23 x i8] c"stdlib.net.TcpListener\00"
 @.cfkinds.25 = private unnamed_addr constant [2 x i8] c"i\00"
+@.cname.26 = private unnamed_addr constant [25 x i8] c"stdlib.terminal.TermSize\00"
+@.cfkinds.26 = private unnamed_addr constant [3 x i8] c"ii\00"
+@.cname.27 = private unnamed_addr constant [26 x i8] c"stdlib.terminal.TermBytes\00"
+@.cfkinds.27 = private unnamed_addr constant [2 x i8] c"p\00"
+@.cname.28 = private unnamed_addr constant [25 x i8] c"stdlib.terminal.TermIdle\00"
+@.cfkinds.28 = private unnamed_addr constant [1 x i8] c"\00"
+@.cname.29 = private unnamed_addr constant [28 x i8] c"stdlib.terminal.TermResized\00"
+@.cfkinds.29 = private unnamed_addr constant [1 x i8] c"\00"
+@.cname.30 = private unnamed_addr constant [24 x i8] c"stdlib.terminal.TermEof\00"
+@.cfkinds.30 = private unnamed_addr constant [1 x i8] c"\00"
+@.cname.31 = private unnamed_addr constant [27 x i8] c"stdlib.terminal.TermFailed\00"
+@.cfkinds.31 = private unnamed_addr constant [2 x i8] c"s\00"
 @stdlib.net.poll_write = private constant i64 2
 @stdlib.net.poll_read = private constant i64 1
 @stdlib.net.read_chunk = private constant i64 65536
@@ -1173,6 +1189,24 @@ entry:
   %cname_ptr_25 = getelementptr inbounds [23 x i8], ptr @.cname.25, i64 0, i64 0
   %cfkinds_ptr_25 = getelementptr inbounds [2 x i8], ptr @.cfkinds.25, i64 0, i64 0
   %creg_25 = call i64 @sprout_register_ctor(i64 25, ptr %cname_ptr_25, i64 1, ptr %cfkinds_ptr_25)
+  %cname_ptr_26 = getelementptr inbounds [25 x i8], ptr @.cname.26, i64 0, i64 0
+  %cfkinds_ptr_26 = getelementptr inbounds [3 x i8], ptr @.cfkinds.26, i64 0, i64 0
+  %creg_26 = call i64 @sprout_register_ctor(i64 26, ptr %cname_ptr_26, i64 2, ptr %cfkinds_ptr_26)
+  %cname_ptr_27 = getelementptr inbounds [26 x i8], ptr @.cname.27, i64 0, i64 0
+  %cfkinds_ptr_27 = getelementptr inbounds [2 x i8], ptr @.cfkinds.27, i64 0, i64 0
+  %creg_27 = call i64 @sprout_register_ctor(i64 27, ptr %cname_ptr_27, i64 1, ptr %cfkinds_ptr_27)
+  %cname_ptr_28 = getelementptr inbounds [25 x i8], ptr @.cname.28, i64 0, i64 0
+  %cfkinds_ptr_28 = getelementptr inbounds [1 x i8], ptr @.cfkinds.28, i64 0, i64 0
+  %creg_28 = call i64 @sprout_register_ctor(i64 28, ptr %cname_ptr_28, i64 0, ptr %cfkinds_ptr_28)
+  %cname_ptr_29 = getelementptr inbounds [28 x i8], ptr @.cname.29, i64 0, i64 0
+  %cfkinds_ptr_29 = getelementptr inbounds [1 x i8], ptr @.cfkinds.29, i64 0, i64 0
+  %creg_29 = call i64 @sprout_register_ctor(i64 29, ptr %cname_ptr_29, i64 0, ptr %cfkinds_ptr_29)
+  %cname_ptr_30 = getelementptr inbounds [24 x i8], ptr @.cname.30, i64 0, i64 0
+  %cfkinds_ptr_30 = getelementptr inbounds [1 x i8], ptr @.cfkinds.30, i64 0, i64 0
+  %creg_30 = call i64 @sprout_register_ctor(i64 30, ptr %cname_ptr_30, i64 0, ptr %cfkinds_ptr_30)
+  %cname_ptr_31 = getelementptr inbounds [27 x i8], ptr @.cname.31, i64 0, i64 0
+  %cfkinds_ptr_31 = getelementptr inbounds [2 x i8], ptr @.cfkinds.31, i64 0, i64 0
+  %creg_31 = call i64 @sprout_register_ctor(i64 31, ptr %cname_ptr_31, i64 1, ptr %cfkinds_ptr_31)
   call void @__sprout_init_globals()
   call i64 @__sprout_user_main()
   ret i32 0
