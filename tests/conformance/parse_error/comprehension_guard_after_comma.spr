@@ -1,0 +1,11 @@
+module main
+
+# List comprehensions: docs/list-comprehensions-v0.md, spec 5.10.
+# D1 grammar, second generator position. `comprehension_missing_generator` used
+# to run only once, before the FIRST generator, so a guard where a later
+# generator belongs escaped the dedicated diagnostic and fell through to a bare
+# "Expected pattern". The rule is positional, not first-only.
+fn main() -> Unit !{IO} =
+  let ys = [1, 2, 3]
+      zs = [y for y in ys, if y > 1]
+  in list_each(\z -> print(int_to_string(z)), zs)

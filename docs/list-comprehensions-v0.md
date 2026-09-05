@@ -659,12 +659,12 @@ the synthesized tree (D2). That is a deliberate, compile-time-only cost, and it
 is what buys the elaboration passing through the ordinary typechecker. It has no
 semantic consequences: fresh type variables from the discarded pass are orphans
 that never reach the surviving tree, effect reports are recorded per declaration
-rather than per expression (`infer.sprout:8673`, `:9111`), and the source
+rather than per expression (`infer.sprout:8694`, `:9132`), and the source
 expression is embedded once, so runtime evaluation multiplicity is D4's.
 
 ## 7. Error-message impact
 
-Six new diagnostics, all positioned:
+Five new diagnostics, all positioned:
 
 1. **Unsupported source** — the closed set, naming the conversion:
    ```
@@ -676,21 +676,26 @@ Six new diagnostics, all positioned:
    3:20: ERROR: check: cannot tell what `xs` ranges over; a comprehension
    generator needs a known `List` or `IntRange` type — annotate the parameter
    ```
-3. **Refutable pattern, `Maybe` source** — the rejection plus the direct form:
+3. **Refutable pattern** — the rejection, the counterexample that proves it, and
+   the way to drop elements deliberately (D3):
    ```
-   3:14: ERROR: check: a generator pattern must be irrefutable; `Just x` can
-   fail to match. To drop non-matching elements, say so: list_filter_map(\m -> m, ms)
+   9:19: ERROR: check: a generator pattern must be irrefutable, and this one does
+   not match `Nothing`. To drop non-matching elements, say so with
+   list_filter_map before the comprehension
    ```
-4. **Refutable pattern, any other type** — the rejection plus the shape of the
-   projection, since no one-call form exists (D3):
-   ```
-   3:14: ERROR: check: a generator pattern must be irrefutable; `Cons x _` can
-   fail to match. To drop non-matching elements, say so with list_filter_map and
-   a match returning `Just`/`Nothing`.
-   ```
-5. **Non-`Bool` guard** — the standard unification error, positioned at the
+   *Revised 2026-09-05, after review.* Two things were wrong here. The draft
+   specified **two** wordings, split on whether the element type is `Maybe`
+   (which has a one-call `list_filter_map(\m -> m, ms)`) — one wording ships, and
+   the split is not worth a type-dispatch branch inside a diagnostic. More
+   seriously, the shipped message spliced in `exhaustiveness_check`'s **whole
+   sentence**, so it read `Non-exhaustive match on Maybe Int — no branch matches
+   Nothing`: it reported a `match` against source that contains none. The witness
+   is now taken from `coverage_gap` directly, which returns the bare
+   counterexample. The `.err` fixtures pin the full sentence rather than a
+   five-word prefix, so this drift cannot recur unnoticed.
+4. **Non-`Bool` guard** — the standard unification error, positioned at the
    guard rather than at the whole comprehension.
-6. **Linear value** — two shapes, a generator that binds one and an enclosing
+5. **Linear value** — two shapes, a generator that binds one and an enclosing
    binder consumed inside. `linear_check` produces these instead of its
    lambda-worded pair once it recognizes a synthesized fold; see D7 for the full
    text and for why inheriting the wording (unlike inheriting the rejection) was
@@ -702,6 +707,11 @@ guard before any generator:
 1:12: ERROR: parse: a comprehension needs at least one generator
 (`<pat> in <expr>`) before any `if` guard
 ```
+
+The guard check is **positional, not first-only**: it runs at every generator
+position, so `[x for y in ys, if p]` gets this message too rather than falling
+through to a bare `Expected pattern`. Fixture:
+`tests/conformance/parse_error/comprehension_guard_after_comma`.
 
 Two of these wordings are **inherited, not invented**, and the implementation
 must keep them that way so the fixtures stay stable:

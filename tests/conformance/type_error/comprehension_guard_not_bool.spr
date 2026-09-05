@@ -1,6 +1,6 @@
 module main
 
-# List comprehensions do not exist yet (docs/list-comprehensions-v0.md).
+# List comprehensions: docs/list-comprehensions-v0.md, spec 5.10.
 # Design §6/§7 item 5: a guard must be `Bool`; a non-`Bool` guard is the
 # standard unification error, positioned at the guard.
 fn main() -> Unit !{IO} =

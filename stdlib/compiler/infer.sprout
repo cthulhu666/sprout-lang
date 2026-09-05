@@ -5278,7 +5278,7 @@ fn infer_range(
 #      miscompile, and no comprehension node ever exists downstream.
 #
 # Phase 2 must stay inside inference, not a later pass: `fn_linear_gate`
-# (:8069, called from typecheck_decl) runs linear_check on each declaration's
+# (`fn_linear_gate`, called from typecheck_decl) runs linear_check on each declaration's
 # typed body DURING inference. Elaborating here means the synthesized fold
 # lambdas are present when that gate runs, so a linear value bound or consumed
 # by a comprehension is judged by the existing lambda rules (lin_lambda) rather
@@ -5361,8 +5361,13 @@ fn check_comprehension_gen_body(
         # no-`else` do-bind. Match this Maybe-!{IO} check DIRECTLY: a `<-` bind
         # would strip the Maybe layer (see infer_branches's identical caveat
         # above, around :3960).
-        match exhaustiveness_check(state, env, subst, ctor_map, elem_type,
-                                    Cons(typed_ast.TypedMatchBranch(pat, typed_ast.TUnit(elem_type, no_pos())), Nil)) with
+        #
+        # `coverage_gap`, not `exhaustiveness_check`: the latter wraps this same
+        # witness in "Non-exhaustive match on T — …", and the user wrote a
+        # generator, not a `match`. Splicing that sentence in described a
+        # construct absent from their source.
+        match coverage_gap(state, env, subst, ctor_map,
+                            unifier.apply_subst(subst, elem_type), Cons(pat, Nil)) with
         | Just w -> CompErr(pat_pos(pat), refutable_generator_message(w))
         | Nothing ->
             do
@@ -5422,7 +5427,7 @@ fn build_comprehension(elem: ast.Expr, gens: List ast.ComprehensionGen, kinds: L
 fn build_comp_level(elem: ast.Expr, gens: List ast.ComprehensionGen, kinds: List CompKind,
                     init: ast.Expr, depth: Int, pos: source.SourcePos) -> ast.Expr =
   match gens with
-  | Nil -> init
+  | Nil -> panic("infer.build_comp_level: comprehension with no generators (internal error)")
   | Cons g rest ->
       match g with
       | ast.ComprehensionGen pat src guards ->
@@ -5460,7 +5465,7 @@ fn build_comp_guards(guards: List ast.Expr, inner: ast.Expr, acc_name: String, p
   | Cons g rest ->
       ast.IfExpr(g, build_comp_guards(rest, inner, acc_name, pos), ast.VarExpr(acc_name, pos), pos)
 
-# A lambda parameter must be an identifier (parser.sprout:1414), so any pattern
+# A lambda parameter must be an identifier (parser.parse_lambda_params), so any pattern
 # that is not a plain variable is destructured by a one-arm `match` — the same
 # shape parser.build_do_total uses. The pattern is already known irrefutable
 # (checked above), so this match cannot fail at runtime and W5 accepts it.
@@ -5478,6 +5483,7 @@ fn comp_param_name(pat: ast.Pattern, val_name: String) -> String =
 
 fn comp_fold_name(kinds: List CompKind) -> String =
   match kinds with
+  | Nil -> panic("infer.comp_fold_name: no generator kind for this level (internal error)")
   | [KindIntRange | _] -> "range_fold"
   | _ -> "list_fold"
 
@@ -5517,12 +5523,14 @@ fn check_comprehension_guards(
             | unifier.UnifyOk s2 es2 ->
                 check_comprehension_guards(state, env, s2, es2, rest)
 
-# §7 diagnostic 3/4: the rejection plus the actionable half (W5's witness),
-# plus the escape hatch. Both diagnostic variants in the design share this
-# wording; only the witness `w` differs by source shape.
+# §7 diagnostic 3: the rejection, the counterexample that proves it, and the way
+# to drop elements on purpose. `w` is the bare witness from coverage_gap (e.g.
+# `Nothing`, `Nil`), so this names a value the pattern misses instead of
+# describing a `match` the user never wrote. No trailing period — the caller
+# appends " in function <name>".
 fn refutable_generator_message(w: String) -> String =
-  "generator pattern must be irrefutable; " ++ w ++
-  ". To drop non-matching elements, use list_filter_map to filter before the comprehension."
+  "a generator pattern must be irrefutable, and this one does not match `" ++ w ++
+  "`. To drop non-matching elements, say so with list_filter_map before the comprehension"
 
 # The closed generator set (docs/list-comprehensions-v0.md D2): List and
 # IntRange only. Anything else — including a still-unresolved type
