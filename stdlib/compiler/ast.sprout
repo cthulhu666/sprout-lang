@@ -312,6 +312,12 @@ export type Program (..) =
 export let list_ctor_nil = "Nil"
 export let list_ctor_cons = "Cons"
 
+# Prefix of every binder the comprehension elaboration invents (infer.comp_tmp_name).
+# Shared because linear_check reads it back: a lambda carrying such a binder is
+# code the user never wrote, so its diagnostics must name the generator rather
+# than the synthesized lambda, and must never print the binder itself.
+export let comp_binder_prefix = "__cmp_"
+
 # Source-level names of the TemplatePart constructors, used by checker.sprout
 # when lowering a StringTemplateExpr into the StringTemplate ADT.
 export let template_ctor_lit = "TemplateLit"

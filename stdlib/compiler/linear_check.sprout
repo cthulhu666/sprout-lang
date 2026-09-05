@@ -336,6 +336,27 @@ fn linear_lambda_param_msg(name: String) -> String =
 fn lambda_capture_msg(name: String) -> String =
   "linear value '" ++ name ++ "' captured by a lambda is not yet supported (higher-order linearity is deferred; if the callee invokes this closure at most once, declare that parameter `once`)"
 
+# A comprehension elaborates to a fold over lambdas the user never wrote
+# (infer.build_comp_fold), so the two messages above misdescribe it three ways:
+# they name a lambda absent from the source, they advise declaring a callee
+# parameter `once` when the callee is the elaboration's own `list_fold`, and for
+# a non-variable generator pattern they print a generated binder name. These
+# name the generator instead. The rewrite each one suggests is pinned by
+# tests/stdlib/test_comprehension_linear_advice.spr, so advice that stops
+# working fails a gate instead of rotting inside a message nobody re-checks.
+fn comprehension_binder_msg(name: String) -> String =
+  comprehension_binder_subject(name) ++ " binds a linear value, which is not yet supported (a comprehension elaborates to a fold, and higher-order linearity is deferred: the step function runs once per element, so a linear binder cannot yet be tracked across iterations); consume the elements in an explicit recursive function instead"
+
+# The fold parameter is the user's own binder for a plain variable generator
+# pattern, and a generated name for any other pattern; never show the latter.
+fn comprehension_binder_subject(name: String) -> String =
+  if str_starts_with(name, ast.comp_binder_prefix)
+  then "this comprehension generator"
+  else "comprehension generator '" ++ name ++ "'"
+
+fn comprehension_capture_msg(name: String) -> String =
+  "linear value '" ++ name ++ "' cannot be used inside a comprehension (a comprehension elaborates to a fold, and higher-order linearity is deferred: the step function runs once per element, so the compiler cannot yet prove '" ++ name ++ "' is consumed exactly once); consume it before the comprehension and use the result inside"
+
 fn app_uses(a: List LinUse, b: List LinUse) -> List LinUse =
   match a with
   | Nil -> b
@@ -1085,9 +1106,29 @@ fn extend_scope(is_lin: Bool, name: String, sc: LinScope) -> LinScope =
 # Regression: tests/conformance/type_error/lambda_capture_still_rejected.
 fn lin_lambda(params: List ast.Param, body: typed_ast.TypedExpr, lam_type: types.Type,
               p: source.SourcePos, sc: LinScope, env: Dict types.Scheme) -> LinRes =
-  match first_linear_param(params, lam_type, env) with
-  | Just pname -> LinErr(p, linear_lambda_param_msg(pname))
-  | Nothing -> lin_lambda_body(body, p, scope_shadow(lambda_param_names(params), sc), env)
+  let from_comp = is_comprehension_fold(params)
+  in match first_linear_param(params, lam_type, env) with
+     | Just pname -> LinErr(p, linear_param_msg(from_comp, pname))
+     | Nothing ->
+         lin_lambda_body(body, p, scope_shadow(lambda_param_names(params), sc), env, from_comp)
+
+# The rejection is identical either way; only the wording differs, so provenance
+# is carried as a flag rather than duplicating the analysis.
+fn linear_param_msg(from_comp: Bool, name: String) -> String =
+  if from_comp then comprehension_binder_msg(name) else linear_lambda_param_msg(name)
+
+fn lambda_capture_msg_for(from_comp: Bool, name: String) -> String =
+  if from_comp then comprehension_capture_msg(name) else lambda_capture_msg(name)
+
+# Every fold the comprehension elaboration builds takes the accumulator as its
+# first parameter, under a generated name; a lambda holding any such binder is
+# therefore synthesized rather than written.
+fn is_comprehension_fold(params: List ast.Param) -> Bool =
+  match params with
+  | Nil -> false
+  | Cons prm rest ->
+      if str_starts_with(param_name(prm), ast.comp_binder_prefix) then true
+      else is_comprehension_fold(rest)
 
 fn lambda_param_names(params: List ast.Param) -> List String =
   match params with
@@ -1095,15 +1136,15 @@ fn lambda_param_names(params: List ast.Param) -> List String =
   | Cons prm rest -> Cons(param_name(prm), lambda_param_names(rest))
 
 fn lin_lambda_body(body: typed_ast.TypedExpr, p: source.SourcePos,
-                   sc: LinScope, env: Dict types.Scheme) -> LinRes =
+                   sc: LinScope, env: Dict types.Scheme, from_comp: Bool) -> LinRes =
   match lin_consumed(body, sc, env) with
   | LinErr ep m -> LinErr(ep, m)
-  | LinOk bc bb -> lin_lambda_captures(app_uses(bc, bb), p)
+  | LinOk bc bb -> lin_lambda_captures(app_uses(bc, bb), p, from_comp)
 
-fn lin_lambda_captures(uses: List LinUse, p: source.SourcePos) -> LinRes =
+fn lin_lambda_captures(uses: List LinUse, p: source.SourcePos, from_comp: Bool) -> LinRes =
   match uses with
   | Nil -> LinOk(Nil, Nil)
-  | [u | _] -> LinErr(p, lambda_capture_msg(luse_name(u)))
+  | [u | _] -> LinErr(p, lambda_capture_msg_for(from_comp, luse_name(u)))
 
 # --- parameter modes ---
 

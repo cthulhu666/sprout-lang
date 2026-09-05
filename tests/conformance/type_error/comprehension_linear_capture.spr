@@ -1,0 +1,13 @@
+module main
+
+# D7, capture case: the linear value comes from the ENCLOSING scope, not from a
+# generator. The old wording told the user to declare a callee parameter `once`
+# — impossible advice here, since the callee is the elaboration's own fold.
+
+type linear File = File Int
+
+fn use_file(f: File) -> Int = match f with | File n -> n
+
+fn scaled(f: File) -> List Int = [i * use_file(f) for i in 1..3]
+
+fn main() -> Unit !{IO} = print(to_string(list_length(scaled(File(2)))))

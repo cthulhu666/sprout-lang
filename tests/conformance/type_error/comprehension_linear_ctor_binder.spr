@@ -1,0 +1,11 @@
+module main
+
+# D7, non-variable generator pattern: the fold parameter is a compiler-generated
+# binder, so the old wording printed an internal name (`__cmp_val5_39_0`) the
+# user never wrote and cannot search for. The diagnostic must not name it.
+
+type linear File = File Int
+
+fn sizes(fs: List File) -> List Int = [n for File n in fs]
+
+fn main() -> Unit !{IO} = print(to_string(list_length(sizes(Nil))))

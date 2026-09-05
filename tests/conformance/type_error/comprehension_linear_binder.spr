@@ -1,0 +1,13 @@
+module main
+
+# D7: a comprehension rejects linear values, because it elaborates to a fold and
+# higher-order linearity is deferred. The diagnostic must name the CONSTRUCT THE
+# USER WROTE — a generator — not the lambda the elaboration synthesized.
+
+type linear File = File Int
+
+fn use_file(f: File) -> Int = match f with | File n -> n
+
+fn sizes(fs: List File) -> List Int = [use_file(f) for f in fs]
+
+fn main() -> Unit !{IO} = print(to_string(list_length(sizes(Nil))))
