@@ -1,6 +1,6 @@
 module main
 
-# List comprehensions do not exist yet (docs/list-comprehensions-v0.md).
+# List comprehensions: docs/list-comprehensions-v0.md, spec 5.10.
 # D3: a refutable generator pattern is rejected, not filtered. Against a
 # `Maybe` source the diagnostic must point at the direct escape hatch,
 # `list_filter_map` (design §7 item 3).

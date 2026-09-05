@@ -1,6 +1,6 @@
 module main
 
-# List comprehensions do not exist yet (docs/list-comprehensions-v0.md).
+# List comprehensions: docs/list-comprehensions-v0.md, spec 5.10.
 # D1 grammar: `generator ::= pattern 'in' expr { 'if' expr }`. A generator
 # with a pattern but no `in` before its source expression must be rejected
 # at parse time.

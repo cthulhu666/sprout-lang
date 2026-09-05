@@ -1,10 +1,12 @@
 module main
 
-# List comprehensions do not exist yet (docs/list-comprehensions-v0.md).
-# D3: a refutable generator pattern is rejected, not filtered. For a source
-# that is not `Maybe`, there is no one-call escape hatch, so the diagnostic
-# wording differs from the `Maybe` case (design §7 item 4).
+# List comprehensions: docs/list-comprehensions-v0.md, spec 5.10.
+# D3: a refutable generator pattern is rejected, not filtered. One wording
+# serves every source shape; only the witness differs (`Nil` here, `Nothing` for
+# the Maybe fixture). The witness comes from `coverage_gap`, NOT from
+# `exhaustiveness_check` — the latter wraps it in "Non-exhaustive match on T",
+# which would report a `match` this source does not contain.
 fn main() -> Unit !{IO} =
   let xss = [[1, 2], [3, 4]]
-      ys = [x for Cons x _ in xss]
+      ys = [x for [x | _] in xss]
   in list_each(\y -> print(int_to_string(y)), ys)

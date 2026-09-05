@@ -1,1 +1,1 @@
-generator pattern must be irrefutable
+a generator pattern must be irrefutable, and this one does not match `Nothing`. To drop non-matching elements, say so with list_filter_map before the comprehension

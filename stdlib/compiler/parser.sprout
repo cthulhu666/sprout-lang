@@ -1326,16 +1326,16 @@ fn collect_list_items_after_head(tokens: Vec token.Token, i: Int, head_expr: ast
 # `[ <elem> for <gen> {, <gen>} ]`, entered just past `for` with <elem> parsed.
 # `pos` is the opening `[`.  docs/list-comprehensions-v0.md D1.
 fn parse_comprehension_tail(tokens: Vec token.Token, i: Int, elem: ast.Expr, pos: source.SourcePos) -> Result ParseError (ast.Expr, Int) =
-  if comprehension_missing_generator(tokens, i) then
-    Err(ParseError(
-      "a comprehension needs at least one generator (`<pat> in <expr>`) before any `if` guard at "
-        ++ pos_str(cur_pos(tokens, i)),
-      cur_pos(tokens, i)))
-  else
-    do
-      (gens, i2) <- collect_comprehension_gens(tokens, i, Nil)
-      (_, i3) <- expected_symbol("]", tokens, i2)
-      Ok((ast.ComprehensionExpr(elem, gens, pos), i3))
+  do
+    (gens, i2) <- collect_comprehension_gens(tokens, i, Nil)
+    (_, i3) <- expected_symbol("]", tokens, i2)
+    Ok((ast.ComprehensionExpr(elem, gens, pos), i3))
+
+fn comprehension_no_generator_err(tokens: Vec token.Token, i: Int) -> ParseError =
+  ParseError(
+    "a comprehension needs at least one generator (`<pat> in <expr>`) before any `if` guard at "
+      ++ pos_str(cur_pos(tokens, i)),
+    cur_pos(tokens, i))
 
 # `[x for]` and `[x for if p]` are the same mistake: only a generator may follow
 # `for`.  Caught here so both get the diagnostic that names the missing form,
@@ -1343,12 +1343,19 @@ fn parse_comprehension_tail(tokens: Vec token.Token, i: Int, elem: ast.Expr, pos
 fn comprehension_missing_generator(tokens: Vec token.Token, i: Int) -> Bool =
   tok_is_keyword(tok_at(tokens, i), "if") || tok_is_symbol(tok_at(tokens, i), "]")
 
+# The missing-generator check runs at EVERY generator position, not just the
+# first: `[x for y in ys, if p]` is the same mistake as `[x for if p]` and gets
+# the same diagnostic. Checking only before the first one let the later case
+# fall through to a bare "Expected pattern".
 fn collect_comprehension_gens(tokens: Vec token.Token, i: Int, acc: List ast.ComprehensionGen) -> Result ParseError (List ast.ComprehensionGen, Int) =
-  do
-    (g, i2) <- parse_comprehension_gen(tokens, i)
-    match match_symbol(tokens, i2, ",") with
-    | Nothing -> Ok((list_reverse(Cons(g, acc)), i2))
-    | Just (_, i3) -> collect_comprehension_gens(tokens, i3, Cons(g, acc))
+  if comprehension_missing_generator(tokens, i) then
+    Err(comprehension_no_generator_err(tokens, i))
+  else
+    do
+      (g, i2) <- parse_comprehension_gen(tokens, i)
+      match match_symbol(tokens, i2, ",") with
+      | Nothing -> Ok((list_reverse(Cons(g, acc)), i2))
+      | Just (_, i3) -> collect_comprehension_gens(tokens, i3, Cons(g, acc))
 
 # `<pat> in <source> {if <guard>}`.  The `in` goes through expected_keyword so
 # the missing-`in` diagnostic is the parser's standard wording, which

@@ -1,6 +1,6 @@
 module main
 
-# List comprehensions do not exist yet (docs/list-comprehensions-v0.md).
+# List comprehensions: docs/list-comprehensions-v0.md, spec 5.10.
 # Parameter annotations are optional (docs/spec-v0.md:291), so `xs` here is
 # still a metavariable when the comprehension is typed; design §7 item 2
 # rejects an unsolved source rather than defaulting.
