@@ -872,8 +872,8 @@ fn infer_expr(
   | ast.IntRangeExpr lo hi pos -> infer_range(state, env, subst, eff_subst, lo, hi, pos)
   | ast.StringTemplateExpr _ pos ->
       InferErr(pos, "Internal error: StringTemplateExpr reached inference; desugar pass should have eliminated it")
-  | ast.ComprehensionExpr _ _ pos ->
-      InferErr(pos, "list comprehensions are not yet implemented")
+  | ast.ComprehensionExpr elem gens pos ->
+      infer_comprehension(state, env, subst, eff_subst, elem, gens, pos)
 
 # Declaration-boundary wrapper: applies s1 to the result so fresh TVars
 # never escape into lowering.  Declaration-level callers should use this;
@@ -5255,6 +5255,320 @@ fn infer_range(
           typed_ast.TRange(typed_lo, typed_hi,
             types.TConst(types.type_id("IntRange")), pos),
           s4, es4, merge_effects(lo_eff, hi_eff))
+
+# ---------------------------------------------------------------------------
+# List comprehensions (docs/list-comprehensions-v0.md D2-D4, §6)
+# ---------------------------------------------------------------------------
+#
+# Elaborated here: inference rewrites a comprehension into the fold form of
+# design §5 as ordinary untyped ast.Expr and infers that, so no typed
+# comprehension node ever exists at any point.
+
+# --- List comprehensions (docs/list-comprehensions-v0.md) --------------------
+#
+# Two phases, both here, because BOTH need types that only inference has:
+#
+#   1. CHECK — walk the generators left to right to (a) resolve each source
+#      against the closed set, which is what selects the fold, and (b) raise the
+#      design's diagnostics (§7) while the user's own expressions are still in
+#      hand, so errors point at what they wrote.
+#   2. ELABORATE — build the §5 fold form as ordinary UNTYPED ast.Expr and infer
+#      THAT. The synthesized code goes through the same typechecker as
+#      hand-written code, so a mistake here is a type error rather than a
+#      miscompile, and no comprehension node ever exists downstream.
+#
+# Phase 2 must stay inside inference, not a later pass: `fn_linear_gate`
+# (:8069, called from typecheck_decl) runs linear_check on each declaration's
+# typed body DURING inference. Elaborating here means the synthesized fold
+# lambdas are present when that gate runs, so a linear value bound or consumed
+# by a comprehension is judged by the existing lambda rules (lin_lambda) rather
+# than slipping past an unreachable stub.
+#
+# The check phase's typed output is discarded; only the source kinds and the
+# substitution carry forward. Sources are therefore inferred twice, which costs
+# compile time only — the synthesized tree embeds each source expression ONCE,
+# so runtime evaluation multiplicity is D4's.
+fn infer_comprehension(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  elem: ast.Expr,
+  gens: List ast.ComprehensionGen,
+  pos: source.SourcePos
+) -> InferResult !{IO} =
+  do
+    cr <- check_comprehension_gens(state, env, subst, eff_subst, gens, Nil)
+    match cr with
+    | CompErr cpos m -> InferErr(cpos, m)
+    | CompOk kinds s1 es1 ->
+        infer_expr(state, env, s1, es1, build_comprehension(elem, gens, kinds, pos))
+
+# Result of the check phase: the per-generator source kinds, in source order,
+# plus the substitution the checks solved.
+type CompCheck =
+  | CompOk (List CompKind) (Dict types.Type) (Dict types.Effect)
+  | CompErr source.SourcePos String
+
+type CompKind =
+  | KindList
+  | KindIntRange
+
+# A generator's binder does not scope over its own source
+# (docs/list-comprehensions-v0.md D2, §6) — `src` is checked in the CURRENT
+# `env`, before this generator's pattern is bound into it.
+fn check_comprehension_gens(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  gens: List ast.ComprehensionGen,
+  acc_kinds: List CompKind
+) -> CompCheck !{IO} =
+  match gens with
+  | Nil -> CompOk(comp_kind_list_reverse(acc_kinds), subst, eff_subst)
+  | Cons g rest ->
+      match g with
+      | ast.ComprehensionGen pat src guards ->
+          do
+            sr <- infer_expr(state, env, subst, eff_subst, src)
+            match sr with
+            | InferErr spos e -> CompErr(spos, e)
+            | InferOk typed_src s1 es1 _ ->
+                match resolve_comprehension_source(unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_src)), src) with
+                | Err msg -> CompErr(typed_ast.typed_expr_pos(typed_src), msg)
+                | Ok elem_and_kind ->
+                    check_comprehension_gen_body(state, env, s1, es1, pat, elem_and_kind, guards, rest, acc_kinds)
+
+fn check_comprehension_gen_body(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  pat: ast.Pattern,
+  elem_and_kind: (types.Type, CompKind),
+  guards: List ast.Expr,
+  rest: List ast.ComprehensionGen,
+  acc_kinds: List CompKind
+) -> CompCheck !{IO} =
+  match elem_and_kind with
+  | (elem_type, kind) ->
+      do
+        ctor_map <- unifier.get_ctor_map(state)
+        # D3: a refutable generator pattern is rejected, not filtered. Reuses
+        # W5's exhaustiveness judgement rather than a bespoke refutability
+        # predicate — the same routing parser.build_do_total uses for a
+        # no-`else` do-bind. Match this Maybe-!{IO} check DIRECTLY: a `<-` bind
+        # would strip the Maybe layer (see infer_branches's identical caveat
+        # above, around :3960).
+        match exhaustiveness_check(state, env, subst, ctor_map, elem_type,
+                                    Cons(typed_ast.TypedMatchBranch(pat, typed_ast.TUnit(elem_type, no_pos())), Nil)) with
+        | Just w -> CompErr(pat_pos(pat), refutable_generator_message(w))
+        | Nothing ->
+            do
+              pr <- infer_pattern(state, env, subst, eff_subst, elem_type, pat)
+              match pr with
+              | InferErr ppos e -> CompErr(ppos, e)
+              | InferOk _ s2 es2 _ ->
+                  do
+                    let env2 = extend_env_with_existential_givens(pat, s2, extend_env_from_pattern(pat, s2, env))
+                    gr <- check_comprehension_guards(state, env2, s2, es2, guards)
+                    match gr with
+                    | CompErr gpos e -> CompErr(gpos, e)
+                    | CompOk _ s3 es3 ->
+                        check_comprehension_gens(state, env2, s3, es3, rest, Cons(kind, acc_kinds))
+
+fn comp_kind_list_reverse(xs: List CompKind) -> List CompKind =
+  comp_kind_list_reverse_go(xs, Nil)
+
+fn comp_kind_list_reverse_go(xs: List CompKind, acc: List CompKind) -> List CompKind =
+  match xs with
+  | Nil -> acc
+  | Cons h t -> comp_kind_list_reverse_go(t, Cons(h, acc))
+
+# --- Elaboration (docs/list-comprehensions-v0.md §5) -------------------------
+#
+#   [e for p1 in s1 if g1, p2 in s2 if g2]
+#
+# becomes
+#
+#   list_reverse(
+#     FOLD1(\ (a1, v1) -> match v1 with | p1 ->
+#             if g1 then
+#               FOLD2(\ (a2, v2) -> match v2 with | p2 ->
+#                       if g2 then Cons(e, a2) else a2,
+#                     a1, s2)
+#             else a1,
+#           Nil, s1))
+#
+# ONE accumulator is threaded through every level, so exactly one list_reverse
+# runs however many generators there are. A guard yields the accumulator
+# unchanged, which is what makes an outer guard skip the entire inner fold.
+#
+# The user's own sub-expressions (element, guards, sources) are spliced in
+# unchanged, carrying their original positions — so a type error inside them
+# still points at what the user wrote. Each source appears exactly ONCE, giving
+# D4's evaluation multiplicity: the first is an argument of the outermost fold
+# (evaluated once); a later one sits inside the enclosing step lambda
+# (evaluated once per outer element).
+fn build_comprehension(elem: ast.Expr, gens: List ast.ComprehensionGen, kinds: List CompKind, pos: source.SourcePos) -> ast.Expr =
+  ast.CallExpr(
+    ast.VarExpr("list_reverse", pos),
+    Cons(build_comp_level(elem, gens, kinds, ast.VarExpr(ast.list_ctor_nil, pos), 0, pos), Nil),
+    pos)
+
+# `init` is the accumulator this level's fold starts from: `Nil` outermost, the
+# enclosing level's accumulator variable further in.
+fn build_comp_level(elem: ast.Expr, gens: List ast.ComprehensionGen, kinds: List CompKind,
+                    init: ast.Expr, depth: Int, pos: source.SourcePos) -> ast.Expr =
+  match gens with
+  | Nil -> init
+  | Cons g rest ->
+      match g with
+      | ast.ComprehensionGen pat src guards ->
+          build_comp_fold(elem, pat, src, guards, rest, kinds, init, depth, pos)
+
+fn build_comp_fold(elem: ast.Expr, pat: ast.Pattern, src: ast.Expr, guards: List ast.Expr,
+                   rest: List ast.ComprehensionGen, kinds: List CompKind, init: ast.Expr,
+                   depth: Int, pos: source.SourcePos) -> ast.Expr =
+  let acc_name = comp_tmp_name("acc", depth, pos)
+      val_name = comp_tmp_name("val", depth, pos)
+      inner = build_comp_inner(elem, rest, comp_kinds_tail(kinds), acc_name, depth, pos)
+      guarded = build_comp_guards(guards, inner, acc_name, pos)
+      body = build_comp_destructure(pat, val_name, guarded, pos)
+      step = ast.LambdaExpr(
+        Cons(ast.Param(acc_name, Nothing, ast.ModeDefault),
+          Cons(ast.Param(comp_param_name(pat, val_name), Nothing, ast.ModeDefault), Nil)),
+        body, pos)
+  in ast.CallExpr(ast.VarExpr(comp_fold_name(kinds), pos),
+       Cons(step, Cons(init, Cons(src, Nil))), pos)
+
+# The innermost level contributes an element; every other level opens the next
+# fold, starting it from THIS level's accumulator.
+fn build_comp_inner(elem: ast.Expr, rest: List ast.ComprehensionGen, kinds_tail: List CompKind,
+                    acc_name: String, depth: Int, pos: source.SourcePos) -> ast.Expr =
+  match rest with
+  | Nil ->
+      ast.CallExpr(ast.VarExpr(ast.list_ctor_cons, pos),
+        Cons(elem, Cons(ast.VarExpr(acc_name, pos), Nil)), pos)
+  | _ -> build_comp_level(elem, rest, kinds_tail, ast.VarExpr(acc_name, pos), depth + 1, pos)
+
+# Guards nest outside-in; a failing guard yields the accumulator untouched.
+fn build_comp_guards(guards: List ast.Expr, inner: ast.Expr, acc_name: String, pos: source.SourcePos) -> ast.Expr =
+  match guards with
+  | Nil -> inner
+  | Cons g rest ->
+      ast.IfExpr(g, build_comp_guards(rest, inner, acc_name, pos), ast.VarExpr(acc_name, pos), pos)
+
+# A lambda parameter must be an identifier (parser.sprout:1414), so any pattern
+# that is not a plain variable is destructured by a one-arm `match` — the same
+# shape parser.build_do_total uses. The pattern is already known irrefutable
+# (checked above), so this match cannot fail at runtime and W5 accepts it.
+fn build_comp_destructure(pat: ast.Pattern, val_name: String, inner: ast.Expr, pos: source.SourcePos) -> ast.Expr =
+  match pat with
+  | ast.VarPattern _ _ -> inner
+  | _ -> ast.MatchExpr(ast.VarExpr(val_name, pos), Cons(ast.MatchBranch(pat, inner), Nil), pos)
+
+# A plain variable pattern becomes the fold parameter directly, so the common
+# case emits no match at all.
+fn comp_param_name(pat: ast.Pattern, val_name: String) -> String =
+  match pat with
+  | ast.VarPattern n _ -> n
+  | _ -> val_name
+
+fn comp_fold_name(kinds: List CompKind) -> String =
+  match kinds with
+  | [KindIntRange | _] -> "range_fold"
+  | _ -> "list_fold"
+
+fn comp_kinds_tail(kinds: List CompKind) -> List CompKind =
+  match kinds with
+  | Nil -> Nil
+  | Cons _ t -> t
+
+# Position-derived, like parser.do_tmp_name, and additionally indexed by nesting
+# depth so two generators of the same comprehension cannot collide. The `__cmp_`
+# prefix keeps these out of the user's namespace.
+fn comp_tmp_name(tag: String, depth: Int, pos: source.SourcePos) -> String =
+  "__cmp_" ++ tag ++ int_to_string(pos.line) ++ "_" ++ int_to_string(pos.column)
+    ++ "_" ++ int_to_string(depth)
+
+# A guard must be Bool. The synthesized `if` would enforce this anyway, but
+# checking here reports it at the guard's own position instead of inside code
+# the user never wrote.
+fn check_comprehension_guards(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  guards: List ast.Expr
+) -> CompCheck !{IO} =
+  match guards with
+  | Nil -> CompOk(Nil, subst, eff_subst)
+  | Cons g rest ->
+      do
+        gr <- infer_expr(state, env, subst, eff_subst, g)
+        match gr with
+        | InferErr pos e -> CompErr(pos, e)
+        | InferOk typed_g s1 es1 _ ->
+            match unifier.unify_types(s1, es1, typed_ast.typed_expr_type(typed_g), types.type_bool()) with
+            | unifier.UnifyErr e -> CompErr(typed_ast.typed_expr_pos(typed_g), e)
+            | unifier.UnifyOk s2 es2 ->
+                check_comprehension_guards(state, env, s2, es2, rest)
+
+# §7 diagnostic 3/4: the rejection plus the actionable half (W5's witness),
+# plus the escape hatch. Both diagnostic variants in the design share this
+# wording; only the witness `w` differs by source shape.
+fn refutable_generator_message(w: String) -> String =
+  "generator pattern must be irrefutable; " ++ w ++
+  ". To drop non-matching elements, use list_filter_map to filter before the comprehension."
+
+# The closed generator set (docs/list-comprehensions-v0.md D2): List and
+# IntRange only. Anything else — including a still-unresolved type
+# variable — is an error, never a default.
+fn resolve_comprehension_source(src_ty: types.Type, src_expr: ast.Expr) -> Result String (types.Type, CompKind) =
+  match src_ty with
+  | types.TApp base arg ->
+      match base with
+      | types.TConst id ->
+          if types.type_id_name(id) == "List" then Ok((arg, KindList))
+          else Err(unsupported_source_message(src_ty, src_expr))
+      | _ -> Err(unsupported_source_message(src_ty, src_expr))
+  | types.TConst id ->
+      if types.type_id_name(id) == "IntRange" then Ok((types.type_int(), KindIntRange))
+      else Err(unsupported_source_message(src_ty, src_expr))
+  | types.TVar _ -> Err(undetermined_source_message(src_expr))
+  | _ -> Err(unsupported_source_message(src_ty, src_expr))
+
+fn comprehension_source_display(src_expr: ast.Expr) -> String =
+  match src_expr with
+  | ast.VarExpr name _ -> "`" ++ name ++ "`"
+  | _ -> "the source"
+
+fn comprehension_source_arg_text(src_expr: ast.Expr) -> String =
+  match src_expr with
+  | ast.VarExpr name _ -> name
+  | _ -> "…"
+
+fn vec_conversion_hint(src_ty: types.Type, src_expr: ast.Expr) -> String =
+  match src_ty with
+  | types.TApp base _ ->
+      match base with
+      | types.TConst id ->
+          if types.type_id_name(id) == "Vec"
+          then " — convert with `vec_to_list(" ++ comprehension_source_arg_text(src_expr) ++ ")`"
+          else ""
+      | _ -> ""
+  | _ -> ""
+
+fn unsupported_source_message(src_ty: types.Type, src_expr: ast.Expr) -> String =
+  "a comprehension generator ranges over a `List` or an `IntRange`; " ++
+  comprehension_source_display(src_expr) ++ " is a `" ++ types.type_to_string(src_ty) ++ "`" ++
+  vec_conversion_hint(src_ty, src_expr)
+
+fn undetermined_source_message(src_expr: ast.Expr) -> String =
+  "cannot tell what " ++ comprehension_source_display(src_expr) ++
+  " ranges over; a comprehension generator needs a known `List` or `IntRange` type — annotate the parameter"
 
 # ---------------------------------------------------------------------------
 # Program-level typechecking

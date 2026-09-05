@@ -1,0 +1,16 @@
+module main
+
+# A comprehension elaborates into calls to bare prelude names (`list_fold`,
+# `list_reverse`, `Cons`). Locals are not module-qualified, so a local binding
+# CAN shadow one of them. The property this pins is that such a program is
+# REJECTED, not silently miscompiled: the elaborated call would otherwise
+# resolve to the Int local.
+#
+# Sprout already has this wart for other prelude names (shadowing `append`
+# misdirects a Semigroup error); comprehensions inherit it rather than adding
+# a new class of problem.
+fn shadowed(xs: List Int) -> List Int =
+  let list_fold = 5
+  in [x * x for x in xs]
+
+fn main() -> Unit !{IO} = print(to_string(shadowed([1, 2, 3])))
