@@ -400,10 +400,16 @@ Legend:
       bare class name while instances/class-markers were qualified — construction and unpacked-value
       dispatch then missed (`@inst`/`@fwd`). Now qualified via `qualify_constraints`; inert for
       non-existential programs (byte-identical) and for the seed (the compiler sources use no `any C`).
-      - [ ] `P4` **Imported-class existential (`any some_import.Renderable`) untested.** Every case
-        exercised defines the boxed class in the SAME module. A boxed imported class routes through the
-        same `qualify_constraints`/alias tables as an imported `where` constraint, so it likely works,
-        but add a cross-module test to confirm.
+      - [x] `P4` **Imported-class existential (`any some_import.Renderable`) — CONFIRMED WORKING
+        2026-09-06.** Every case exercised had defined the boxed class in the SAME module. The
+        prediction held: `tests/stdlib/test_existential_cross_module.spr` boxes a class declared in
+        `testsupport/exwidget.sprout` and dispatches at two instances, and it passed on the first
+        run. The same test also covers the *unconstrained* cross-module shape the TUI M3 widget
+        model needs — an `exists`-prefixed box DECLARED in an imported module, constructed and
+        unpacked in the importer at two different hidden state types, in one heterogeneous list.
+        That is the untested case `docs/gadts-v0.md` flagged as the widget/scene-graph enabler.
+        One real gap fell out of writing it: a class METHOD is not reachable through a module
+        alias (filed under *Compiler / Stdlib Misc*), so the test imports `draw` by name.
       - [x] `P4` **Unify resolve's traversal copy. LANDED 2026-07-31.** `resolve.sprout` kept its own
         byte-identical `class_with_transitive_supers` (the PACK authority for evidence order) while
         `types` owned the count+unpack copy — a silent-drift surface whose failure mode is a
@@ -4413,6 +4419,40 @@ op-classification already in place.
   default has never been measured against real handler depth — measure what depth handlers use.
 
 ### Compiler / Stdlib Misc
+
+- [x] `P1` **A record with TWO OR MORE type parameters typed its fields in the wrong order. FIXED
+  2026-09-06.** `type Pair a b = (x: a, y: b)` typed `p.x` as `b`, so `fn get(p: Pair Int String)
+  -> Int = p.x` was rejected with `Type mismatch: Int vs String`. Two independent double-reversals,
+  each an **identity on a one-element list**, which is why nothing caught it — before the fix the
+  whole tree contained no record with two type parameters, only 0- and 1-parameter ones:
+  - `parser.parse_record_type_decl` applied `list_reverse(params)` to a list `collect_ident_list`
+    had already reversed into declaration order. `parse_type_decl` (ADTs) does not, which is why a
+    two-parameter **ADT** always worked — that asymmetry is what localised the bug.
+  - `infer.extract_tapp_args` applied `list_reverse` to a spine `collect_tapp_args` already walks
+    outermost-inward, so it too came back in order. All three consumers (field access, field-
+    obligation discharge, record update) zip it against the record's quantified vars.
+
+  Both fixes are required: with only one applied the two reversals stop cancelling in a different
+  place rather than agreeing. The failure mode is **quiet** — `Pair Int Int` compiled and ran
+  correctly, so a same-type record would never have shown it. `parse_class_decl` and
+  `parse_alias_decl` carried the same copy-pasted double reversal and were fixed with it; both are
+  latent today (multi-parameter classes are unsupported, and no multi-parameter alias exists).
+  Surfaced while designing the TUI M3 widget model, whose `View s m` is the tree's first
+  two-parameter record. Tests: `tests/stdlib/test_multi_param_records.spr` (7 assertions:
+  both parameter positions, three parameters, the same record at swapped arguments, `with` update
+  on each param, and the unannotated inference path). Design note: `docs/records-v0.md` §6.
+
+- [ ] `P3` **A class method is not reachable through a module alias.** `import m as m` then
+  `m.method(x)` fails with ``Unknown variable: m.method``; only the selective form
+  `import m (method)` works. `bundler.add_class_to_symbols` files method names in the
+  `ModuleSymbols` `method_names` field and never in `exported_vals`, and
+  `ctx_with_alias_val` is populated from `sym_exported_vals` alone — so the alias table has no
+  entry to find. Latent until now because no module outside `stdlib/json.sprout` ever called an
+  imported class's method: `JsonEncode` is used only via a `where JsonEncode a` constraint inside
+  its own module. Surfaced by `tests/stdlib/test_existential_cross_module.spr`, which works around
+  it with a selective import. Fix is to also register method names in the alias value table;
+  the question to settle first is whether a method SHOULD be alias-qualifiable given that
+  dispatch is by instance rather than by module.
 
 - [x] `P2` **Passing `print` as a VALUE emits a call to a symbol that does not exist. FIXED
   2026-09-06, same day it was filed.** The entry below scoped it to `print`; measuring first

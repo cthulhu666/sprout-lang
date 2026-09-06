@@ -1965,7 +1965,10 @@ fn parse_record_type_decl(tokens: Vec token.Token, i: Int) -> Result ParseError 
     # `deriving (...)` is trailing on records (the `= (fields)` RHS is a
     # self-contained parenthesised list), unlike ADTs where it precedes `=`.
     (deriving_classes, i9) <- parse_deriving_clause(tokens, i8)
-    Ok((ast.RecordDecl(token.token_text(name_tok), list_reverse(params), fields, deriving_classes, mult, cur_pos(tokens, i)), i9))
+    # `collect_ident_list` already returns declaration order; reversing again put
+    # a record's type params backwards, which is invisible at one param and
+    # swaps the field types at two. `parse_type_decl` is the correct precedent.
+    Ok((ast.RecordDecl(token.token_text(name_tok), params, fields, deriving_classes, mult, cur_pos(tokens, i)), i9))
 
 fn parse_class_method_sig(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.ClassMethodSig, Int) =
   do
@@ -2057,7 +2060,7 @@ fn parse_class_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.D
     (params, i4) <- collect_ident_list(tokens, i3, Nil)
     (superclasses, i5) <- parse_optional_instance_constraints(tokens, i4)
     (methods, i6) <- parse_class_body(tokens, i5, decl_start_col(tokens, i))
-    Ok((ast.ClassDecl(token.token_text(name_tok), list_reverse(params), methods, superclasses, cur_pos(tokens, i)), i6))
+    Ok((ast.ClassDecl(token.token_text(name_tok), params, methods, superclasses, cur_pos(tokens, i)), i6))
 
 fn parse_instance_method(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.InstanceMethodImpl, Int) =
   do
@@ -2225,7 +2228,7 @@ fn parse_alias_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.D
     (params, i5) <- collect_ident_list(tokens, i4, Nil)
     (_, i6) <- expected_symbol("=", tokens, i5)
     (body, i7) <- parse_type_expr(tokens, i6)
-    Ok((ast.AliasDecl(token.token_text(name_tok), list_reverse(params), body, cur_pos(tokens, i)), i7))
+    Ok((ast.AliasDecl(token.token_text(name_tok), params, body, cur_pos(tokens, i)), i7))
 
 # A record declaration is `type Name <params> = ( label : Type, ... )`.  It is
 # distinguished from an ADT (`= Ctor | ...`), a wrap (`= wrap Inner`), and a

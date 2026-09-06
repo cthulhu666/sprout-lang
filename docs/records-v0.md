@@ -254,6 +254,18 @@ operator (`1..5`) and the constructor-export-all marker (`type Foo (..)`).
 - Field-name references validate against declared type names exactly as
   `docs/spec-v0.md` §5.6 already specifies for `RecordDecl` field types.
 
+**Type arguments are positional, and both directions must agree.** A record's
+type parameters are matched to its type arguments by position — the record's
+quantified vars in declaration order against the spine of the applied type. Two
+places produce those lists and both were reversed until 2026-09-06:
+`parser.parse_record_type_decl` reversed a parameter list `collect_ident_list`
+had already put in declaration order, and `infer.extract_tapp_args` reversed a
+spine `collect_tapp_args` had already put in order. Each reversal is an identity
+on a one-element list, and no record in the tree had two type parameters, so
+`Pair a b` typed `x` as `b`. `parse_type_decl` (ADTs) never reversed, which is
+why a two-parameter ADT always worked. Guarded by
+`tests/stdlib/test_multi_param_records.spr`.
+
 ## 7. Records vs `Dict` (why they stay distinct)
 
 Sprout's `Dict v` (`stdlib/prelude.sprout`) is `Dict (Map v)`: **String-keyed**,
