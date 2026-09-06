@@ -186,4 +186,11 @@ fn main() -> Unit !{IO} =
           assert_true(state, "back-edge branches to the loop", string.contains(ir, "br label %tco_loop"))
           assert_true(state, "the self-call is gone",
             string.contains(ir, "call i64 @main.loop") == false)
+          # The rewritten arm branches back to tco_loop instead of falling into
+          # join_3, so join_3's phi must lose that incoming — otherwise it names
+          # a predecessor that no longer reaches it and the module fails verify.
+          assert_true(state, "phi drops the rewritten predecessor",
+            string.contains(ir, "[%t$9, %else_3]") == false)
+          assert_true(state, "phi keeps the base arm as its only incoming",
+            string.contains(ir, "%t$4 = phi i64 [%t$5, %then_3]"))
           summary(state)
