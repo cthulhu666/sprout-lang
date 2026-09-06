@@ -9449,7 +9449,7 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_lambda_6(i64 %env$, i64 %err) {
+define i64 @stdlib.http_server.as_server_error(i64 %err) {
 entry:
   %t$0 = call i64 @sprout_tag(i64 %err)
   br label %arm_0_1
@@ -9472,6 +9472,16 @@ join_1:
   ret i64 %t$2
 }
 
+define i64 @__sprout_ir_eta_stdlib.http_server.as_server_error_6(i64 %env$, i64 %a0) {
+entry:
+  %t$0 = alloca i64
+  store i64 %a0, ptr %t$0
+  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
+  %ret = call i64 @stdlib.http_server.as_server_error(i64 %a0)
+  %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %ret
+}
+
 define i64 @stdlib.http_server.render(i64 %resp) {
 entry:
   %t$0 = call i64 @sprout_tag(i64 %resp)
@@ -9492,7 +9502,7 @@ body_0_1:
   %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
   %t$8 = call i64 @sprout_alloc_closure(i64 8, i64 1)
   %t$8$raw = inttoptr i64 %t$8 to ptr
-  store ptr @__sprout_ir_lambda_6, ptr %t$8$raw
+  store ptr @__sprout_ir_eta_stdlib.http_server.as_server_error_6, ptr %t$8$raw
   %t$24 = alloca i64
   store i64 %t$8, ptr %t$24
   %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
@@ -19619,27 +19629,14 @@ wrepack_next_7:
   unreachable
 }
 
-define i64 @__sprout_ir_lambda_26(i64 %env$, i64 %err) {
+define i64 @__sprout_ir_eta_stdlib.http_server.as_server_error_26(i64 %env$, i64 %a0) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %err)
-  br label %arm_0_1
-arm_0_1:
-  %t$3 = add i64 0, 20
-  %t$4 = icmp eq i64 %t$0, %t$3
-  br i1 %t$4, label %body_0_1, label %arm_1_1
-body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %err, i64 0)
-  %t$6 = call i64 @sprout_alloc_obj(i64 50, i64 1)
-  %t$6$ptr = inttoptr i64 %t$6 to ptr
-  %t$6$f0 = getelementptr i64, ptr %t$6$ptr, i64 0
-  store i64 %t$5, ptr %t$6$f0
-  br label %join_1
-arm_1_1:
-  call void @sprout_abort_match()
-  unreachable
-join_1:
-  %t$2 = phi i64 [%t$6, %body_0_1]
-  ret i64 %t$2
+  %t$0 = alloca i64
+  store i64 %a0, ptr %t$0
+  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
+  %ret = call i64 @stdlib.http_server.as_server_error(i64 %a0)
+  %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %ret
 }
 
 define { i64, i64 } @stdlib.http_server.render_worker(i64 %resp) {
@@ -19658,7 +19655,7 @@ entry:
   %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
   %t$3 = call i64 @sprout_alloc_closure(i64 8, i64 1)
   %t$3$raw = inttoptr i64 %t$3 to ptr
-  store ptr @__sprout_ir_lambda_26, ptr %t$3$raw
+  store ptr @__sprout_ir_eta_stdlib.http_server.as_server_error_26, ptr %t$3$raw
   %t$30 = alloca i64
   store i64 %t$3, ptr %t$30
   %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)

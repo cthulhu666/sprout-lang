@@ -187,7 +187,8 @@ fn walk_expr(e: ast.Expr) -> List LintFinding =
   | ast.IfExpr cond then_ else_ _ ->
       list_append(walk_expr(cond), list_append(walk_expr(then_), walk_expr(else_)))
   | ast.CallExpr callee args _ ->
-      list_append(walk_expr(callee), walk_exprs(args))
+      list_append(multi_line_lambda_findings(args),
+                  list_append(walk_expr(callee), walk_exprs(args)))
   | ast.TupleExpr elems _ -> walk_exprs(elems)
   | ast.BinaryExpr _ left right _ ->
       list_append(walk_expr(left), walk_expr(right))
@@ -455,16 +456,22 @@ fn find_list_shape_in_expr(e: ast.Expr) -> List source.SourcePos =
   | _ -> Nil
 
 fn find_list_shape_in_comprehension_gens(gens: List ast.ComprehensionGen) -> List source.SourcePos =
-  concat_map(\g -> match g with
-    | ast.ComprehensionGen pat src guards ->
-        find_list_shape_in_pattern(pat) ++ find_list_shape_in_expr(src) ++ find_list_shape_in_exprs(guards), gens)
+  concat_map(find_list_shape_in_comprehension_gen, gens)
+
+fn find_list_shape_in_comprehension_gen(g: ast.ComprehensionGen) -> List source.SourcePos =
+  match g with
+  | ast.ComprehensionGen pat src guards ->
+      find_list_shape_in_pattern(pat) ++ find_list_shape_in_expr(src) ++ find_list_shape_in_exprs(guards)
 
 fn find_list_shape_in_exprs(exprs: List ast.Expr) -> List source.SourcePos =
   concat_map(find_list_shape_in_expr, exprs)
 
 fn find_list_shape_in_branches(branches: List ast.MatchBranch) -> List source.SourcePos =
-  concat_map(\b -> match b with
-    | ast.MatchBranch pat body -> find_list_shape_in_pattern(pat) ++ find_list_shape_in_expr(body), branches)
+  concat_map(find_list_shape_in_branch, branches)
+
+fn find_list_shape_in_branch(b: ast.MatchBranch) -> List source.SourcePos =
+  match b with
+  | ast.MatchBranch pat body -> find_list_shape_in_pattern(pat) ++ find_list_shape_in_expr(body)
 
 fn find_list_shape_in_do_steps(steps: List ast.DoStep) -> List source.SourcePos =
   concat_map(find_list_shape_in_do_step, steps)
@@ -479,9 +486,12 @@ fn find_list_shape_in_record_fields(fields: List ast.RecordField) -> List source
   concat_map(\f -> match f with | ast.RecordField _ value -> find_list_shape_in_expr(value), fields)
 
 fn find_list_shape_in_template_parts(parts: List ast.TemplateExprPart) -> List source.SourcePos =
-  concat_map(\p -> match p with
-    | ast.LitPart _ -> Nil
-    | ast.InterpPart e -> find_list_shape_in_expr(e), parts)
+  concat_map(find_list_shape_in_template_part, parts)
+
+fn find_list_shape_in_template_part(p: ast.TemplateExprPart) -> List source.SourcePos =
+  match p with
+  | ast.LitPart _ -> Nil
+  | ast.InterpPart e -> find_list_shape_in_expr(e)
 
 # ---------------------------------------------------------------------------
 # Rule: list-prefix-pattern
@@ -581,16 +591,22 @@ fn find_prefix_pattern_in_expr(e: ast.Expr) -> List source.SourcePos =
   | _ -> Nil
 
 fn find_prefix_pattern_in_comprehension_gens(gens: List ast.ComprehensionGen) -> List source.SourcePos =
-  concat_map(\g -> match g with
-    | ast.ComprehensionGen pat src guards ->
-        find_prefix_pattern_in_pattern(pat) ++ find_prefix_pattern_in_expr(src) ++ find_prefix_pattern_in_exprs(guards), gens)
+  concat_map(find_prefix_pattern_in_comprehension_gen, gens)
+
+fn find_prefix_pattern_in_comprehension_gen(g: ast.ComprehensionGen) -> List source.SourcePos =
+  match g with
+  | ast.ComprehensionGen pat src guards ->
+      find_prefix_pattern_in_pattern(pat) ++ find_prefix_pattern_in_expr(src) ++ find_prefix_pattern_in_exprs(guards)
 
 fn find_prefix_pattern_in_exprs(exprs: List ast.Expr) -> List source.SourcePos =
   concat_map(find_prefix_pattern_in_expr, exprs)
 
 fn find_prefix_pattern_in_branches(branches: List ast.MatchBranch) -> List source.SourcePos =
-  concat_map(\b -> match b with
-    | ast.MatchBranch pat body -> find_prefix_pattern_in_pattern(pat) ++ find_prefix_pattern_in_expr(body), branches)
+  concat_map(find_prefix_pattern_in_branch, branches)
+
+fn find_prefix_pattern_in_branch(b: ast.MatchBranch) -> List source.SourcePos =
+  match b with
+  | ast.MatchBranch pat body -> find_prefix_pattern_in_pattern(pat) ++ find_prefix_pattern_in_expr(body)
 
 fn find_prefix_pattern_in_do_steps(steps: List ast.DoStep) -> List source.SourcePos =
   concat_map(find_prefix_pattern_in_do_step, steps)
@@ -605,9 +621,144 @@ fn find_prefix_pattern_in_record_fields(fields: List ast.RecordField) -> List so
   concat_map(\f -> match f with | ast.RecordField _ value -> find_prefix_pattern_in_expr(value), fields)
 
 fn find_prefix_pattern_in_template_parts(parts: List ast.TemplateExprPart) -> List source.SourcePos =
-  concat_map(\p -> match p with
-    | ast.LitPart _ -> Nil
-    | ast.InterpPart e -> find_prefix_pattern_in_expr(e), parts)
+  concat_map(find_prefix_pattern_in_template_part, parts)
+
+fn find_prefix_pattern_in_template_part(p: ast.TemplateExprPart) -> List source.SourcePos =
+  match p with
+  | ast.LitPart _ -> Nil
+  | ast.InterpPart e -> find_prefix_pattern_in_expr(e)
+
+# ---------------------------------------------------------------------------
+# Rule: multi-line-lambda-arg
+#
+# Flags a lambda passed as a call argument whose body is control flow — a
+# `match`, an `if`, a `do`, or a `let .. in` (the same MatchExpr node, §5.1) —
+# and runs past the line the lambda opens on. The call's own shape is then
+# something the reader has to reassemble around a body that is not the call's
+# subject; a named function with a signature says it once and reads at the
+# call site as a name.
+#
+# Scoped to ARGUMENT position on purpose. A lambda bound in a `where` or a
+# `let` already has the name this rule asks for.
+#
+# A body that merely wraps for width — a wide record literal or call — is not
+# reported. That is a line-length question, and giving it a name buys nothing.
+#
+# `_` placeholders desugar to lambdas at parse time (§5.3), so they arrive here
+# as LambdaExpr. They cannot trip the rule: a hole binds to its innermost
+# enclosing CALL, so a synthesized lambda's body is that call, never control
+# flow.
+
+fn multi_line_lambda_message() -> String =
+  "multi-line lambda argument — lift the body into a named fn and pass the name, closing over locals with a `_` placeholder (docs/idiomatic-sprout.md)"
+
+# Control flow, as opposed to one expression wrapped for width.
+fn is_block_body(e: ast.Expr) -> Bool =
+  match e with
+  | ast.MatchExpr _ _ _ -> true
+  | ast.IfExpr _ _ _ _ -> true
+  | ast.DoExpr _ _ -> true
+  | _ -> false
+
+fn larger(a: Int, b: Int) -> Int = if a > b then a else b
+
+# The last line any node in the subtree starts on. Every Expr carries its own
+# SourcePos, so this answers "does this body run past its opening line" without
+# re-reading the source. Exhaustive by intent: a new Expr variant should fail
+# the build here rather than silently under-report its extent.
+fn max_line(e: ast.Expr) -> Int =
+  match e with
+  | ast.MatchExpr scrut branches pos ->
+      larger(pos.line, larger(max_line(scrut), max_line_branches(branches)))
+  | ast.IfExpr cond then_ else_ pos ->
+      larger(pos.line, larger(max_line(cond), larger(max_line(then_), max_line(else_))))
+  | ast.CallExpr callee args pos ->
+      larger(pos.line, larger(max_line(callee), max_line_exprs(args)))
+  | ast.TupleExpr elems pos -> larger(pos.line, max_line_exprs(elems))
+  | ast.BinaryExpr _ left right pos ->
+      larger(pos.line, larger(max_line(left), max_line(right)))
+  | ast.UnaryExpr _ operand pos -> larger(pos.line, max_line(operand))
+  | ast.LambdaExpr _ body pos -> larger(pos.line, max_line(body))
+  | ast.DoExpr steps pos -> larger(pos.line, max_line_do_steps(steps))
+  | ast.RecordExpr _ fields pos -> larger(pos.line, max_line_record_fields(fields))
+  | ast.GetFieldExpr rec_expr _ pos -> larger(pos.line, max_line(rec_expr))
+  | ast.RecordUpdateExpr base fields pos ->
+      larger(pos.line, larger(max_line(base), max_line_record_fields(fields)))
+  | ast.IntRangeExpr lo hi pos -> larger(pos.line, larger(max_line(lo), max_line(hi)))
+  | ast.StringTemplateExpr parts pos -> larger(pos.line, max_line_template_parts(parts))
+  | ast.ComprehensionExpr elem gens pos ->
+      larger(pos.line, larger(max_line(elem), max_line_comprehension_gens(gens)))
+  | ast.VarExpr _ pos -> pos.line
+  | ast.IntExpr _ pos -> pos.line
+  | ast.FloatExpr _ pos -> pos.line
+  | ast.BoolExpr _ pos -> pos.line
+  | ast.StringExpr _ pos -> pos.line
+  | ast.CharExpr _ pos -> pos.line
+  | ast.UnitExpr pos -> pos.line
+
+fn max_line_exprs(exprs: List ast.Expr) -> Int =
+  match exprs with
+  | Nil -> 0
+  | Cons e rest -> larger(max_line(e), max_line_exprs(rest))
+
+fn max_line_branches(branches: List ast.MatchBranch) -> Int =
+  match branches with
+  | Nil -> 0
+  | Cons b rest ->
+      match b with
+      | ast.MatchBranch _ body -> larger(max_line(body), max_line_branches(rest))
+
+fn max_line_do_steps(steps: List ast.DoStep) -> Int =
+  match steps with
+  | Nil -> 0
+  | Cons s rest -> larger(max_line_do_step(s), max_line_do_steps(rest))
+
+fn max_line_do_step(s: ast.DoStep) -> Int =
+  match s with
+  | ast.DoBindStep _ value -> max_line(value)
+  | ast.DoLetStep _ value -> max_line(value)
+  | ast.DoExprStep value -> max_line(value)
+
+fn max_line_record_fields(fields: List ast.RecordField) -> Int =
+  match fields with
+  | Nil -> 0
+  | Cons f rest ->
+      match f with
+      | ast.RecordField _ value -> larger(max_line(value), max_line_record_fields(rest))
+
+fn max_line_template_parts(parts: List ast.TemplateExprPart) -> Int =
+  match parts with
+  | Nil -> 0
+  | Cons p rest -> larger(max_line_template_part(p), max_line_template_parts(rest))
+
+fn max_line_template_part(p: ast.TemplateExprPart) -> Int =
+  match p with
+  | ast.LitPart _ -> 0
+  | ast.InterpPart e -> max_line(e)
+
+fn max_line_comprehension_gens(gens: List ast.ComprehensionGen) -> Int =
+  match gens with
+  | Nil -> 0
+  | Cons g rest -> larger(max_line_comprehension_gen(g), max_line_comprehension_gens(rest))
+
+fn max_line_comprehension_gen(g: ast.ComprehensionGen) -> Int =
+  match g with
+  | ast.ComprehensionGen _ src guards -> larger(max_line(src), max_line_exprs(guards))
+
+# One finding per offending argument, so a call passing two multi-line lambdas
+# reports both — each is a separate lift.
+fn multi_line_lambda_findings(args: List ast.Expr) -> List LintFinding =
+  match args with
+  | Nil -> Nil
+  | Cons a rest -> multi_line_lambda_finding(a) ++ multi_line_lambda_findings(rest)
+
+fn multi_line_lambda_finding(arg: ast.Expr) -> List LintFinding =
+  match arg with
+  | ast.LambdaExpr _ body pos ->
+      if is_block_body(body) && max_line(body) > pos.line
+      then Cons(mk_finding(pos, "multi-line-lambda-arg", multi_line_lambda_message()), Nil)
+      else Nil
+  | _ -> Nil
 
 # ---------------------------------------------------------------------------
 # Program-level entry points
