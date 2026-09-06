@@ -38,8 +38,6 @@ fn times_table(n: Int) -> List (List Int) =
 # (spec 5.5.1) — so a `Vec` needs no explicit conversion at the call site. ---
 fn square_vec(n: Int) -> Vec Int = [i * i for i in 1..n]
 
-fn row_text(row: List Int) -> String = to_string(row)
-
 fn main() -> Unit !{IO} =
   let people = [("ada", 36), ("bo", 12), ("cy", 19)]
   in do
@@ -48,5 +46,5 @@ fn main() -> Unit !{IO} =
     print(`adults              ${to_string(adults(people))}`)
     print(`triples up to 20    ${to_string(pythagorean_triples(20))}`)
     print(`times table 4`)
-    list_each(\row -> print(`  ${row_text(row)}`), times_table(4))
+    list_each(\row -> print(`  ${to_string(row)}`), times_table(4))
     print(`as a Vec            ${to_string(vec_length(square_vec(5)))} elements`)
