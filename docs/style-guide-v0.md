@@ -176,6 +176,8 @@ Use these body rules:
 - Keep deeply nested expressions rare; introduce helpers or local bindings when
   structure becomes hard to scan.
 - Keep binary operators surrounded by spaces — except `..`, which is tight (§2).
+- A lambda passed as a call argument gets one line; a body that needs `match`,
+  `if`, `let` or `do` becomes a named function (§10).
 
 ## 7. `where` Blocks
 
@@ -283,6 +285,15 @@ Rules:
   pipeline-friendly, since `|>` feeds the left value into the final position:
   `xs |> map(f)` desugars to `map(f, xs)`. Reserve data-first only for accessors
   where the receiver reads as a subject (`range_start(r)`, `vec_length(v)`).
+- **No multi-line lambda arguments.** A lambda in argument position stays on one
+  line. When the body needs `match`, `if`, `let` or `do`, lift it into a named
+  function and pass the name, supplying captured locals with a `_` placeholder:
+  `list_map(gap_to(c, _), xs)`. A lambda's parameter types come from the callee's
+  slot and are never written, so a block body is unsignatured logic sitting
+  mid-call. `just lint` reports these as `multi-line-lambda-arg`; see
+  [idiomatic-sprout.md § Name the lambda that doesn't fit its
+  line](./idiomatic-sprout.md#name-the-lambda-that-doesnt-fit-its-line) for the
+  worked shapes and the placeholder re-evaluation trap.
 
 Good:
 
@@ -417,7 +428,9 @@ When creating or editing Sprout source, agents should:
    examples.
 4. Keep effect annotations explicit and visible.
 5. Extract helpers rather than introducing dense nested expressions.
-6. Update nearby examples and docs when a style recommendation changes.
+6. Never write a multi-line lambda in argument position; lift it to a named
+   function and pass the name (§10).
+7. Update nearby examples and docs when a style recommendation changes.
 
 If an existing file conflicts with this guide, prefer small local consistency
 over unrelated large rewrites. Apply the guide to the changed region first.
