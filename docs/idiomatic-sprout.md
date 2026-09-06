@@ -116,7 +116,8 @@ print(name)` and `print` are the same function, and the shorter one has nothing
 to misread.
 
 When the per-element action needs more than one expression, name a helper and pass
-it the same way:
+it the same way — see [Name the lambda that doesn't fit its
+line](#name-the-lambda-that-doesnt-fit-its-line) below:
 
 ```sprout
 fn greet(name: String) -> Unit !{IO} = do
@@ -144,6 +145,62 @@ do
   log <- mut.mutvec_empty()
   list_each(\body -> mut.mutvec_push(log, body), bodies)   # grows as needed
 ```
+
+## Name the lambda that doesn't fit its line
+
+A lambda passed as a call argument stays on **one line**. When its body needs
+`match`, `if`, `let` or `do`, lift the body into a named function and pass the
+name. `just lint` enforces this as `multi-line-lambda-arg`.
+
+The reason is not width. A lambda's parameter types come from the slot it is
+passed into, so they are never written at the call site — a block body is the one
+place in the language where several lines of logic carry no signature at all, and
+reading it means recovering the types from the callee first. Naming the function
+puts the signature back:
+
+```sprout
+# Avoid — the reader meets `o` with no idea what it is:
+fn front_gap(b: Battle, c: Combatant) -> Maybe Double =
+  minimum(filter_map(\o -> let d = space.along(c.pos, o.pos, marching(c))
+                           in if d > 0.0 then Just(d) else Nothing,
+                     opposing(b, c)))
+
+# Idiomatic — the step is a function with a type, and the two jobs separate:
+fn gap_to(c: Combatant, o: Combatant) -> Double =
+  space.along(c.pos, o.pos, marching(c))
+
+fn front_gap(b: Battle, c: Combatant) -> Maybe Double =
+  minimum(filter(\d -> d > 0.0, list_map(gap_to(c, _), opposing(b, c))))
+```
+
+The lifted function usually needs the locals the lambda closed over. Take them as
+leading parameters and fill them at the call site with a `_` placeholder (spec
+§5.3) — `gap_to(c, _)` is `\o -> gap_to(c, o)`. Two holes give a two-parameter
+step, which is the shape a fold wants:
+
+```sprout
+list_fold(merge_into(sep, _, _), Nil, rows)   # ≡ \ (acc, r) -> merge_into(sep, acc, r)
+```
+
+**One trap.** Non-hole arguments in a placeholder are captured *by expression* and
+re-evaluated on every call, so a computed value belongs in a `where` binding, not
+inline:
+
+```sprout
+# `girth_of(c)` is re-run for every element:
+fn settle(all: List Body, c: Body) -> Point =
+  list_fold(shoved_from(c, girth_of(c), _, _), c.pos, all)
+
+# Once, before the fold starts:
+fn settle(all: List Body, c: Body) -> Point =
+  list_fold(shoved_from(c, r, _, _), c.pos, all)
+where
+  r = girth_of(c)
+```
+
+Lifting is not always the answer — often the multi-line body is a `map` and a
+`filter` fused by hand, as `front_gap` was above, and splitting them is both
+shorter and the better fix. Look for that first.
 
 ## Build a list with a comprehension
 

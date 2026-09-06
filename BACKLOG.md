@@ -2178,6 +2178,16 @@ Legend:
   deleting it. No such import remains in the repo, so this is currently latent — worth a lint that
   rejects `import stdlib.prelude` outright, since there is no case where it is correct.
 
+- [ ] `P2` **`lint` reports `ok` on a file that does not parse.** Found 2026-09-06 while checking
+  the doc snippets for `multi-line-lambda-arg`. A file whose lambda body is
+  `let d = f(o) in` with the `in` trailing its binding line is a parse error —
+  `--phase check` says `Unexpected token after the end of a let binding … a let block takes one
+  binding per line` — but `fmt_bin lint` on the same file prints `ok` and **exits 0**. So a
+  syntactically broken file is indistinguishable from a clean one at the lint gate, and every rule
+  is silently skipped rather than reported as unchecked. `just lint` over the repo therefore cannot
+  be read as "every file was linted". Lint should surface the parse error and exit non-zero, the
+  way `fmt` does. (`fmt` on the same file also reports `ok`, so it is likely the same swallow.)
+
 ### Prelude extern relocation — status and open questions
 
 **Done 2026-08-15.** `stdlib/prelude.sprout` declared **85 `extern fn`s**, every one of them
