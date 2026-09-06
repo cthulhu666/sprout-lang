@@ -101,6 +101,13 @@ type ArgSlotsResult =
   | SlotsOk (List ArgSlot) (Dict types.Type) (Dict types.Effect)
   | SlotsErr source.SourcePos String
 
+# Outcome of checking one lambda's parameter annotations. Shaped like
+# unifier.Unified because it carries the same thing: the substitutions a
+# successful unification produced, or the message a failed one did.
+type AnnoCheck =
+  | AnnoOk (Dict types.Type) (Dict types.Effect)
+  | AnnoErr source.SourcePos String
+
 type CallResult =
   | CallOk types.Type (Dict types.Type) (Dict types.Effect) types.Effect
   | CallErr source.SourcePos String
@@ -4685,6 +4692,37 @@ fn infer_lambda_expected(
   do
     fresh_params <- make_fresh_param_types(state, params)
     let param_types = seed_param_types(fresh_params, expected)
+    infer_lambda_checked(state, env, params, param_types, body, pos,
+      check_param_annotations(params, param_types, subst, eff_subst,
+        aliases_for_annotations(env), pos))
+
+# The annotations agreed, or there were none: infer the body against the
+# substitution they produced.
+fn infer_lambda_checked(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  params: List ast.Param,
+  param_types: List types.Type,
+  body: ast.Expr,
+  pos: source.SourcePos,
+  checked: AnnoCheck
+) -> InferResult !{IO} =
+  match checked with
+  | AnnoErr epos msg -> InferErr(epos, msg)
+  | AnnoOk subst eff_subst ->
+      infer_lambda_body(state, env, subst, eff_subst, params, param_types, body, pos)
+
+fn infer_lambda_body(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  params: List ast.Param,
+  param_types: List types.Type,
+  body: ast.Expr,
+  pos: source.SourcePos
+) -> InferResult !{IO} =
+  do
     let env2 = extend_env_with_params(params, param_types, env)
     br <- infer_expr(state, env2, subst, eff_subst, body)
     match br with
@@ -4753,6 +4791,115 @@ fn extend_env_with_params(params: List ast.Param, param_types: List types.Type, 
   | (Cons p rest_p, Cons t rest_t) ->
       match p with
       | ast.Param name _ _ -> extend_env_with_params(rest_p, rest_t, bind_local_scheme(name, types.mono(t), env))
+
+# ---------------------------------------------------------------------------
+# Lambda parameter annotations
+#
+# An annotated lambda parameter's annotation is UNIFIED with the type the
+# parameter already has -- the callee's slot in argument position, a fresh
+# variable anywhere else. The slot is a fact and the annotation is a claim, so a
+# disagreement is reported rather than silently resolved, and elsewhere
+# unification simply installs what was written. See
+# docs/lambda-parameter-annotations-v0.md.
+#
+# This runs BEFORE the body is inferred, which is load-bearing rather than
+# incidental: a dictionary is chosen DURING body inference, so a check applied
+# afterwards arrives too late to be evidence -- the same trap recorded on the
+# `let x: T = e` path at typecheck_let_rhs.
+# ---------------------------------------------------------------------------
+
+# v0 rejects a type variable here. Sprout has no lexically scoped type variables,
+# so the `a` in `\(x: a)` cannot mean the enclosing signature's `a`; it would be a
+# separate variable that merely happens to unify, which reads as meaningful while
+# meaning something else. Rejecting leaves the spelling free for scoped type
+# variables to later give it the meaning readers already assume.
+fn annotation_tyvar(te: ast.TypeExpr) -> Maybe String =
+  match collect_te_vars(te, Nil) with
+  | [] -> Nothing
+  | [v | _] -> Just(v)
+
+# The type vocabulary an annotation resolves against: module aliases lifted from
+# the `@qualalias:` markers, plus `type alias` declarations mirrored under
+# `@aliasty:` by mirror_alias_env.
+#
+# Both come from `env` because that is all inference holds this deep. The
+# declaration walk's own `alias_env` never reaches infer_expr, and a lambda
+# parameter annotation is the first annotation position resolved inside a body.
+# Without the `@aliasty:` half, `\ (n: Name) -> …` against `type alias Name =
+# String` resolves `Name` to an opaque TConst of that name and fails later as
+# `No instance of ToString for Name`.
+fn aliases_for_annotations(env: Dict types.Scheme) -> Dict types.Type =
+  alias_decls_from_env(vec_to_list(dict_entries(env)), import_aliases_from_env(env))
+
+fn alias_decls_from_env(
+  entries: List (String, types.Scheme), acc: Dict types.Type
+) -> Dict types.Type =
+  match entries with
+  | [] -> acc
+  | [(key, scheme) | rest] ->
+      if str_starts_with(key, alias_marker_prefix()) then
+        match scheme with
+        | types.Scheme _ _ ty _ _ ->
+            alias_decls_from_env(rest,
+              dict_set(str_slice(key, str_len(alias_marker_prefix()), str_len(key)), ty, acc))
+      else alias_decls_from_env(rest, acc)
+
+# `pos` is the LAMBDA's position, threaded in so the error is constructed with a
+# location rather than given one by a caller (guidelines.md §5). It is the
+# nearest true position available: neither ast.Param nor ast.TypeExpr carries a
+# SourcePos, so a parameter has none of its own. The message names the parameter
+# to make up the difference.
+fn check_param_annotations(
+  params: List ast.Param,
+  param_types: List types.Type,
+  s: Dict types.Type,
+  es: Dict types.Effect,
+  alias_env: Dict types.Type,
+  pos: source.SourcePos
+) -> AnnoCheck =
+  match (params, param_types) with
+  | (Nil, _) -> AnnoOk(s, es)
+  | (_, Nil) -> AnnoOk(s, es)
+  | (Cons p rest_p, Cons t rest_t) ->
+      match p with
+      | ast.Param name maybe_te _ ->
+          check_one_param_annotation(name, maybe_te, t, rest_p, rest_t, s, es, alias_env, pos)
+
+fn check_one_param_annotation(
+  name: String,
+  maybe_te: Maybe ast.TypeExpr,
+  t: types.Type,
+  rest_p: List ast.Param,
+  rest_t: List types.Type,
+  s: Dict types.Type,
+  es: Dict types.Effect,
+  alias_env: Dict types.Type,
+  pos: source.SourcePos
+) -> AnnoCheck =
+  match maybe_te with
+  | Nothing -> check_param_annotations(rest_p, rest_t, s, es, alias_env, pos)
+  | Just te ->
+      match annotation_tyvar(te) with
+      | Just v ->
+          AnnoErr(pos, "type variable `" ++ v ++
+                  "` is not allowed in a lambda parameter annotation: v0 requires a concrete type")
+      | Nothing ->
+          unify_param_annotation(name, te, t, rest_p, rest_t, s, es, alias_env, pos)
+
+fn unify_param_annotation(
+  name: String,
+  te: ast.TypeExpr,
+  t: types.Type,
+  rest_p: List ast.Param,
+  rest_t: List types.Type,
+  s: Dict types.Type,
+  es: Dict types.Effect,
+  alias_env: Dict types.Type,
+  pos: source.SourcePos
+) -> AnnoCheck =
+  match unifier.unify_types(s, es, unifier.apply_subst(s, t), type_from_ast(te, alias_env)) with
+  | unifier.UnifyOk s2 es2 -> check_param_annotations(rest_p, rest_t, s2, es2, alias_env, pos)
+  | unifier.UnifyErr e -> AnnoErr(pos, "type annotation mismatch for `" ++ name ++ "`: " ++ e)
 
 # ---------------------------------------------------------------------------
 # Record inference
@@ -6944,6 +7091,39 @@ fn typecheck_group(
           | [_ | _] ->
               GroupErr(no_pos(), "internal: a multi-member binding group must contain only FnDecls")
 
+# Key prefix for a `type alias` mirrored into the value environment. Named rather
+# than spelled twice so the write and the read cannot drift.
+fn alias_marker_prefix() -> String = "@aliasty:"
+
+# Commit an AliasDecl: the alias goes into `alias_env` as before AND is mirrored
+# into `env`, which is the only environment that reaches expression inference.
+# Mirrored at the declaration rather than snapshot once per module because
+# AliasDecl entries appear as the walk passes them — an AliasDecl is a group
+# barrier precisely so that everything after it sees the updated environments.
+fn alias_group_ok(
+  i: Int,
+  decl: ast.Decl,
+  out: Dict typed_ast.TypedDecl,
+  env: GlobalEnv,
+  subst: Dict types.Type,
+  env_ftv: List String,
+  alias_env: Dict types.Type
+) -> GroupResult =
+  GroupOk(dict_set(int_to_string(i), typed_ast.TPassThrough(decl), out),
+          mirror_alias_env(alias_env, env), subst, alias_env, env_ftv)
+
+fn mirror_alias_env(alias_env: Dict types.Type, env: GlobalEnv) -> GlobalEnv =
+  GlobalEnv(mirror_alias_entries(vec_to_list(dict_entries(alias_env)), global_env_dict(env)))
+
+fn mirror_alias_entries(
+  entries: List (String, types.Type), acc: Dict types.Scheme
+) -> Dict types.Scheme =
+  match entries with
+  | [] -> acc
+  | [(name, ty) | rest] ->
+      mirror_alias_entries(rest,
+        dict_set(alias_marker_prefix() ++ name, types.mono(ty), acc))
+
 fn all_fn_decls(members: List (Int, ast.Decl)) -> Bool =
   match members with
   | Nil -> true
@@ -6968,11 +7148,11 @@ fn typecheck_singleton(
 ) -> GroupResult !{IO} =
   match decl with
   | ast.AliasDecl name [] rhs_te _ ->
-      GroupOk(dict_set(int_to_string(i), typed_ast.TPassThrough(decl), out), env, subst,
-              dict_set(name, type_from_ast(rhs_te, dict_empty()), alias_env), env_ftv)
+      alias_group_ok(i, decl, out, env, subst, env_ftv,
+        dict_set(name, type_from_ast(rhs_te, dict_empty()), alias_env))
   | ast.AliasDecl name [param] rhs_te _ ->
-      GroupOk(dict_set(int_to_string(i), typed_ast.TPassThrough(decl), out), env, subst,
-              register_single_param_alias(name, param, rhs_te, alias_env), env_ftv)
+      alias_group_ok(i, decl, out, env, subst, env_ftv,
+        register_single_param_alias(name, param, rhs_te, alias_env))
   | _ ->
       do
         r <- typecheck_decl(state, decl, env, subst, eff_subst, alias_env, env_ftv)

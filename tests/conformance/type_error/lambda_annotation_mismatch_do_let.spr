@@ -1,0 +1,12 @@
+# The do-block `let` step position. A lambda bound here is neither in argument
+# position nor a top-level `let`, and it was the third place a contradictory
+# annotation was silently accepted — the parameter is solved by `tag(3)` and the
+# written `String` never consulted.
+#
+# Like the `where` case, the annotation is now believed and the CALL is reported.
+module main
+
+fn main() -> Unit !{IO} =
+  do
+    let tag = \ (s: String) -> `<${s}>`
+    print(tag(3))

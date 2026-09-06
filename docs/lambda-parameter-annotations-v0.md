@@ -1,8 +1,8 @@
 # Lambda parameter annotations — design v0
 
-**Status:** proposal, awaiting approval. Revision 2 — revised after an independent
+**Status:** approved and implemented. Revision 2 — revised after an independent
 review found four defects in revision 1, each reproduced here (§11 records what
-changed and why). Supersedes the follow-up in
+changed and why); §11.3 records what implementation then corrected in revision 2. Supersedes the follow-up in
 [`lambda-argument-inference-v0.md`](./lambda-argument-inference-v0.md) §7, whose
 motivating example and error text are both stale (§1.3).
 
@@ -249,12 +249,13 @@ byte-identical — `just ir-golden-diff` is the gate that checks it.
 `TypeEffect` on a non-arrow annotation (`:177`) — both are pre-existing limits
 shared with declaration annotations, unchanged here and out of scope.
 
-**Open, recommendation attached.** Spec §5.3 advertises an unparenthesized
-`\s: String -> …` shorthand. It is a parse error today (`Expected -> at 6:15`).
-**Recommend correcting the spec rather than the parser**: the annotation's type may
-itself contain `->`, so `\s: Int -> String -> …` has no readable parse without
-parentheses. OCaml and Haskell require them for the same reason; Rust escapes it
-only because `|…|` self-delimits.
+**Resolved — the spec was corrected, not the parser.** §5.3 advertised an
+unparenthesized `\s: String -> …` shorthand that is a parse error
+(`Expected -> at 6:15`). The annotation's type may itself contain `->`, so
+`\s: Int -> String -> …` has no readable parse without parentheses; OCaml and
+Haskell require them for the same reason, and Rust escapes it only because `|…|`
+self-delimits. The shorthand line now says an annotation requires the
+parenthesized form.
 
 ## 6. Type-system impact
 
@@ -378,3 +379,26 @@ it.
 | 5 | "No program changes meaning" | A third class exists: schemes of already-compiling bindings narrow (§6) |
 | 6 | Error located at the parameter | Neither `Param` nor `TypeExpr` carries a `SourcePos`; locate at the lambda (§7) |
 | 7 | Census pattern | Missed multi-parameter and multi-line forms; re-run, result still 0 (§8) |
+
+### 11.3 What implementing it then corrected
+
+Two things the design got wrong and the fixtures caught.
+
+**The diagnostic differs by position, and the design did not say so.** Outside
+argument position there is no slot, so the lambda is inferred first, the
+annotation installs the type, and the *call* is checked against it —
+`Call type mismatch`, pointing at the use. Only in argument position, where the
+slot is known before the body is inferred, is the mismatch reported at the
+annotation. §7 predicted the annotation-side message everywhere. The behaviour is
+better than the prediction: an explicit annotation is believed, and the error
+lands where the author deviated from what they declared. Pinned by
+`lambda_annotation_mismatch_where` and `_do_let` against `_arg`.
+
+**`import_aliases_from_env` was not sufficient plumbing.** §4 said resolution
+could ride on the `@qualalias:` markers already in `env`. Those cover *module*
+aliases only; a `type alias` declaration lives in the walk's separate `alias_env`
+and never reaches inference, so `\ (n: Name) -> …` resolved `Name` to an opaque
+`TConst` and failed as `No instance of ToString for Name`. Fixed by mirroring
+`alias_env` into `env` under an `@aliasty:` prefix at the `AliasDecl` commit
+point — at the declaration, not as a per-module snapshot, for exactly the reason
+§4 rejected the `InferState` field. Guarded by `run/lambda_annotation_alias`.

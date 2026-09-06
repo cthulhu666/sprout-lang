@@ -3,6 +3,13 @@
 # Before lambda parameter annotations were honoured this compiled clean: the
 # parameter's type was solved from `wrap_it(n)` and the written `String` was
 # never consulted, so the annotation was decoration permitted to lie.
+#
+# The error lands on the CALL, not on the annotation, and that is the point. A
+# `where` binding has no callee slot, so the lambda is inferred first and the
+# annotation simply installs `String`; `wrap_it(n)` is then checked against the
+# signature the author wrote. An explicit annotation is believed and the use is
+# the mistake. Argument position reports the other way round — the slot is known
+# before the lambda is inferred — see lambda_annotation_mismatch_arg.
 module main
 
 fn shout(n: Int) -> String =
