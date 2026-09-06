@@ -1,0 +1,73 @@
+module stdlib.tui.style
+
+# Colours and text attributes, and their SGR encoding.
+# Design: docs/tui-core-v0.md §3.4.
+
+# `stdlib/terminal.sprout` emits 24-bit truecolor only, which cannot express
+# "the user's terminal theme blue". An app that wants to sit inside the user's
+# colour scheme needs the indexed palette; a theme that hardcodes RGB fights
+# it. `Ansi` covers both the 16- and 256-colour ranges.
+export type Color (..) deriving (Eq, ToString) =
+  | DefaultColor
+  | Ansi Int
+  | Rgb Int Int Int
+
+# fg, bg, bold, underline, reverse. Positional rather than a record because
+# every field is read by the screen diff on the hot path, and the diff compares
+# whole styles with `Eq` rather than field by field.
+export type Style (..) deriving (Eq, ToString) =
+  | Style Color Color Bool Bool Bool
+
+export fn style_default() -> Style =
+  Style(DefaultColor, DefaultColor, false, false, false)
+
+export fn style_fg(s: Style) -> Color = match s with | Style fg _ _ _ _ -> fg
+
+export fn style_bg(s: Style) -> Color = match s with | Style _ bg _ _ _ -> bg
+
+export fn style_bold(s: Style) -> Bool = match s with | Style _ _ b _ _ -> b
+
+export fn style_underline(s: Style) -> Bool = match s with | Style _ _ _ u _ -> u
+
+export fn style_reverse(s: Style) -> Bool = match s with | Style _ _ _ _ r -> r
+
+export fn with_fg(s: Style, c: Color) -> Style =
+  Style(c, style_bg(s), style_bold(s), style_underline(s), style_reverse(s))
+
+export fn with_bg(s: Style, c: Color) -> Style =
+  Style(style_fg(s), c, style_bold(s), style_underline(s), style_reverse(s))
+
+export fn with_bold(s: Style, on: Bool) -> Style =
+  Style(style_fg(s), style_bg(s), on, style_underline(s), style_reverse(s))
+
+export fn with_underline(s: Style, on: Bool) -> Style =
+  Style(style_fg(s), style_bg(s), style_bold(s), on, style_reverse(s))
+
+export fn with_reverse(s: Style, on: Bool) -> Style =
+  Style(style_fg(s), style_bg(s), style_bold(s), style_underline(s), on)
+
+fn esc() -> String = char_to_str(27)
+
+# `38`/`48` select the extended forms; `5;n` is the palette index and `2;r;g;b`
+# is truecolor. The 30-37 shorthand for the first eight colours is deliberately
+# NOT used: one form for every index means no branch on the value, and any
+# terminal that understands 256 colours understands `38;5;n`.
+fn color_params(base: Int, c: Color) -> String =
+  match c with
+  # Nothing: the leading `0` reset already selected the default.
+  | DefaultColor -> ""
+  | Ansi n -> `;${int_to_string(base)};5;${int_to_string(n)}`
+  | Rgb r g b ->
+      `;${int_to_string(base)};2;${int_to_string(r)};${int_to_string(g)};${int_to_string(b)}`
+
+fn attr_params(s: Style) -> String =
+  (if style_bold(s) then ";1" else "")
+    ++ (if style_underline(s) then ";4" else "")
+    ++ (if style_reverse(s) then ";7" else "")
+
+# An ABSOLUTE sequence, always starting with the `0` reset, so a run carries no
+# assumption about what the previous run left set. That is what lets
+# `diff_to_ansi` emit changed runs in any order and skip unchanged ones.
+export fn style_to_ansi(s: Style) -> String =
+  string_concat_many([esc(), "[0", attr_params(s),
+                      color_params(38, style_fg(s)), color_params(48, style_bg(s)), "m"])

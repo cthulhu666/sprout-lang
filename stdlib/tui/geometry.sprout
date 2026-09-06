@@ -1,0 +1,99 @@
+module stdlib.tui.geometry
+
+# Rectangle arithmetic for the TUI core. Pure, total, no allocation beyond the
+# values returned. Design: docs/tui-core-v0.md §4.
+#
+# Convention: x first. A `Region` is (col, row, cols, rows) and an `Offset` is
+# (col, row), matching every TUI library's (x, y, w, h) and the SGR mouse
+# report, which is also column-first. `stdlib.terminal.TermSize` is the one
+# thing in the tree that is ROW-first; converting is the caller's job and is
+# deliberately not done here, so this module stays free of the terminal's
+# externs and testable without one.
+#
+# Edges are half-open: `region_right` is one past the last column, like a
+# `Vec` length. That is what makes `split_left` lossless — the halves share an
+# edge without sharing a cell.
+
+export type Size (..) deriving (Eq, ToString) =
+  | Size Int Int
+
+export type Offset (..) deriving (Eq, ToString) =
+  | Offset Int Int
+
+export type Region (..) deriving (Eq, ToString) =
+  | Region Int Int Int Int
+
+export fn size_cols(s: Size) -> Int = match s with | Size cols _ -> cols
+
+export fn size_rows(s: Size) -> Int = match s with | Size _ rows -> rows
+
+export fn offset_col(o: Offset) -> Int = match o with | Offset col _ -> col
+
+export fn offset_row(o: Offset) -> Int = match o with | Offset _ row -> row
+
+export fn region_col(r: Region) -> Int = match r with | Region col _ _ _ -> col
+
+export fn region_row(r: Region) -> Int = match r with | Region _ row _ _ -> row
+
+export fn region_cols(r: Region) -> Int = match r with | Region _ _ cols _ -> cols
+
+export fn region_rows(r: Region) -> Int = match r with | Region _ _ _ rows -> rows
+
+export fn region_right(r: Region) -> Int = region_col(r) + region_cols(r)
+
+export fn region_bottom(r: Region) -> Int = region_row(r) + region_rows(r)
+
+export fn region_size(r: Region) -> Size = Size(region_cols(r), region_rows(r))
+
+export fn region_at_origin(s: Size) -> Region =
+  Region(0, 0, size_cols(s), size_rows(s))
+
+# Zero OR negative, so an intersection that misses and a split past the edge
+# both land in one predicate rather than each needing its own check.
+export fn is_empty(r: Region) -> Bool =
+  region_cols(r) <= 0 || region_rows(r) <= 0
+
+export fn contains(r: Region, o: Offset) -> Bool =
+  if is_empty(r) then false
+  else
+    offset_col(o) >= region_col(r) && offset_col(o) < region_right(r)
+      && offset_row(o) >= region_row(r) && offset_row(o) < region_bottom(r)
+
+fn imax(a: Int, b: Int) -> Int = if a > b then a else b
+
+fn imin(a: Int, b: Int) -> Int = if a < b then a else b
+
+# Disjoint inputs give an empty region at the greater origin, never a negative
+# extent: `is_empty` is then the whole test, and no caller has to reason about
+# a width below zero.
+export fn intersect(a: Region, b: Region) -> Region =
+  let col = imax(region_col(a), region_col(b))
+      row = imax(region_row(a), region_row(b))
+      right = imin(region_right(a), region_right(b))
+      bottom = imin(region_bottom(a), region_bottom(b))
+  in
+  Region(col, row, imax(0, right - col), imax(0, bottom - row))
+
+# The nearest cell inside `r`. An empty region has no cell to land on, so its
+# origin stands — the alternative, an offset one past the edge, would be a
+# position no `contains` accepts.
+export fn clamp_offset(r: Region, o: Offset) -> Offset =
+  if is_empty(r) then Offset(region_col(r), region_row(r))
+  else
+    Offset(imin(imax(offset_col(o), region_col(r)), region_right(r) - 1),
+           imin(imax(offset_row(o), region_row(r)), region_bottom(r) - 1))
+
+# Named for what they TAKE. "split_h" is ambiguous about whether it cuts along
+# a horizontal line or produces a horizontal arrangement, and every library
+# that uses the name means one of the two.
+export fn split_left(r: Region, cols: Int) -> (Region, Region) =
+  let n = imin(imax(cols, 0), region_cols(r))
+  in
+  (Region(region_col(r), region_row(r), n, region_rows(r)),
+   Region(region_col(r) + n, region_row(r), region_cols(r) - n, region_rows(r)))
+
+export fn split_top(r: Region, rows: Int) -> (Region, Region) =
+  let n = imin(imax(rows, 0), region_rows(r))
+  in
+  (Region(region_col(r), region_row(r), region_cols(r), n),
+   Region(region_col(r), region_row(r) + n, region_cols(r), region_rows(r) - n))

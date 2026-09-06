@@ -1,0 +1,107 @@
+import stdlib.test (TestCase, check_eq, check_true, check_false, run_suite)
+import stdlib.tui.geometry as g
+
+# Rectangle arithmetic for the TUI core. Pure and total, so every case is
+# pinned exactly. Design: docs/tui-core-v0.md §4.
+#
+# The convention under test is x-first — a Region is (col, row, cols, rows) —
+# and the edges are half-open: `region_right` is one past the last column, the
+# same as a `Vec` length. Half-open is what makes `split_left` lossless, since
+# the two halves share an edge without sharing a cell.
+
+fn r(col: Int, row: Int, cols: Int, rows: Int) -> g.Region = g.Region(col, row, cols, rows)
+
+fn empty_at(col: Int, row: Int) -> g.Region = g.Region(col, row, 0, 0)
+
+# An empty region keeps the extent it did not lose. A zero-column half of a
+# 5-row region is still 5 rows tall, and collapsing that to 0 would discard the
+# row span a later grow would need. `is_empty` reads the failing axis, so one
+# zero is enough to be empty.
+fn no_cols_at(col: Int, row: Int, rows: Int) -> g.Region = g.Region(col, row, 0, rows)
+
+fn no_rows_at(col: Int, row: Int, cols: Int) -> g.Region = g.Region(col, row, cols, 0)
+
+# The prelude has no fst/snd, so a split's halves are named here.
+fn taken(p: (g.Region, g.Region)) -> g.Region = match p with | (a, _) -> a
+
+fn rest(p: (g.Region, g.Region)) -> g.Region = match p with | (_, b) -> b
+
+fn main() -> Unit !{IO} =
+  run_suite("tui.geometry", [
+    # --- accessors and derived edges ---
+    check_eq("region_col", g.region_col(r(3, 4, 10, 5)), 3),
+    check_eq("region_row", g.region_row(r(3, 4, 10, 5)), 4),
+    check_eq("region_cols", g.region_cols(r(3, 4, 10, 5)), 10),
+    check_eq("region_rows", g.region_rows(r(3, 4, 10, 5)), 5),
+    check_eq("region_right is one past the last column", g.region_right(r(3, 4, 10, 5)), 13),
+    check_eq("region_bottom is one past the last row", g.region_bottom(r(3, 4, 10, 5)), 9),
+    check_eq("region_size", g.region_size(r(3, 4, 10, 5)), g.Size(10, 5)),
+    check_eq("region_at_origin", g.region_at_origin(g.Size(10, 5)), r(0, 0, 10, 5)),
+
+    # --- emptiness: a zero OR negative extent is empty ---
+    check_false("a positive region is not empty", g.is_empty(r(0, 0, 1, 1))),
+    check_true("zero columns is empty", g.is_empty(r(0, 0, 0, 5))),
+    check_true("zero rows is empty", g.is_empty(r(0, 0, 5, 0))),
+    check_true("negative columns is empty", g.is_empty(r(0, 0, -1, 5))),
+
+    # --- contains, on the half-open edges ---
+    check_true("contains its origin", g.contains(r(3, 4, 10, 5), g.Offset(3, 4))),
+    check_true("contains its last cell", g.contains(r(3, 4, 10, 5), g.Offset(12, 8))),
+    check_false("excludes the column past its right edge",
+                g.contains(r(3, 4, 10, 5), g.Offset(13, 8))),
+    check_false("excludes the row past its bottom edge",
+                g.contains(r(3, 4, 10, 5), g.Offset(12, 9))),
+    check_false("excludes a point above and left", g.contains(r(3, 4, 10, 5), g.Offset(2, 3))),
+    check_false("an empty region contains nothing, not even its origin",
+                g.contains(r(3, 4, 0, 0), g.Offset(3, 4))),
+
+    # --- intersect ---
+    check_eq("overlapping regions", g.intersect(r(0, 0, 10, 10), r(5, 5, 10, 10)), r(5, 5, 5, 5)),
+    check_eq("one region inside another", g.intersect(r(0, 0, 10, 10), r(2, 2, 3, 3)), r(2, 2, 3, 3)),
+    check_eq("a region with itself", g.intersect(r(3, 4, 10, 5), r(3, 4, 10, 5)), r(3, 4, 10, 5)),
+
+    # Disjoint yields an empty region at the greater origin rather than a
+    # negative-extent one, so `is_empty` is enough to test the result and no
+    # caller has to reason about a negative width. Note the surviving axis is
+    # kept: two side-by-side 5-row regions DO overlap in rows, and reporting
+    # that is strictly more information than a zeroed rectangle.
+    check_eq("side by side, touching but not overlapping",
+             g.intersect(r(0, 0, 5, 5), r(5, 0, 5, 5)), no_cols_at(5, 0, 5)),
+    check_eq("fully disjoint", g.intersect(r(0, 0, 2, 2), r(10, 10, 2, 2)), empty_at(10, 10)),
+    check_true("an intersection that misses is empty",
+               g.is_empty(g.intersect(r(0, 0, 2, 2), r(10, 10, 2, 2)))),
+    check_true("intersecting with an empty region is empty",
+               g.is_empty(g.intersect(r(0, 0, 10, 10), r(2, 2, 0, 0)))),
+
+    # --- clamp_offset moves a point to the nearest cell inside ---
+    check_eq("a point already inside is unchanged",
+             g.clamp_offset(r(3, 4, 10, 5), g.Offset(5, 6)), g.Offset(5, 6)),
+    check_eq("clamps left and up", g.clamp_offset(r(3, 4, 10, 5), g.Offset(0, 0)), g.Offset(3, 4)),
+    check_eq("clamps to the LAST cell, not past the edge",
+             g.clamp_offset(r(3, 4, 10, 5), g.Offset(99, 99)), g.Offset(12, 8)),
+    check_eq("an empty region has no cell to clamp into, so the origin stands",
+             g.clamp_offset(r(3, 4, 0, 0), g.Offset(99, 99)), g.Offset(3, 4)),
+
+    # --- split_left / split_top: named for what they take, since "horizontal
+    # split" is ambiguous about whether it cuts along or across ---
+    check_eq("split_left takes columns off the left",
+             g.split_left(r(0, 0, 10, 5), 3), (r(0, 0, 3, 5), r(3, 0, 7, 5))),
+    check_eq("split_left at zero leaves everything on the right",
+             g.split_left(r(2, 1, 10, 5), 0), (no_cols_at(2, 1, 5), r(2, 1, 10, 5))),
+    check_eq("split_left past the edge leaves nothing on the right",
+             g.split_left(r(2, 1, 10, 5), 99), (r(2, 1, 10, 5), no_cols_at(12, 1, 5))),
+    check_eq("split_left with a negative count clamps to zero",
+             g.split_left(r(2, 1, 10, 5), -4), (no_cols_at(2, 1, 5), r(2, 1, 10, 5))),
+    check_eq("split_top takes rows off the top",
+             g.split_top(r(0, 0, 10, 5), 2), (r(0, 0, 10, 2), r(0, 2, 10, 3))),
+    check_eq("split_top past the edge leaves nothing below",
+             g.split_top(r(2, 1, 10, 5), 99), (r(2, 1, 10, 5), no_rows_at(2, 6, 10))),
+
+    # A split is lossless: the halves share an edge but no cell, so their
+    # widths sum to the original and neither contains the other's cells.
+    check_eq("the two halves' columns sum to the original",
+             g.region_cols(taken(g.split_left(r(0, 0, 10, 5), 3)))
+               + g.region_cols(rest(g.split_left(r(0, 0, 10, 5), 3))), 10),
+    check_false("the right half does not contain the left half's last cell",
+                g.contains(rest(g.split_left(r(0, 0, 10, 5), 3)), g.Offset(2, 0)))
+  ])

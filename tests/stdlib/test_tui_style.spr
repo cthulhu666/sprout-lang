@@ -1,0 +1,68 @@
+import stdlib.test (TestCase, check_eq, run_suite)
+import stdlib.tui.style as st
+
+# Byte-exact SGR output. Design: docs/tui-core-v0.md §3.4.
+#
+# The escape is built here the same way stdlib/terminal.sprout builds it —
+# `char_to_str(27)` — rather than written as a literal, because a literal ESC
+# in a source file is invisible in a diff and easy to corrupt on a copy.
+
+fn esc() -> String = char_to_str(27)
+
+fn sgr(body: String) -> String = esc() ++ "[" ++ body ++ "m"
+
+fn plain() -> st.Style = st.style_default()
+
+fn main() -> Unit !{IO} =
+  run_suite("tui.style", [
+    # --- the default style is a bare reset ---
+    # Every run starts with `0`, so a run is self-contained: the renderer never
+    # has to know what the previous run left set, which is what lets
+    # `diff_to_ansi` emit runs in any order.
+    check_eq("default style is a reset", st.style_to_ansi(plain()), sgr("0")),
+
+    # --- attributes, in SGR's own numeric order ---
+    check_eq("bold", st.style_to_ansi(st.with_bold(plain(), true)), sgr("0;1")),
+    check_eq("underline", st.style_to_ansi(st.with_underline(plain(), true)), sgr("0;4")),
+    check_eq("reverse", st.style_to_ansi(st.with_reverse(plain(), true)), sgr("0;7")),
+    check_eq("all three attributes",
+             st.style_to_ansi(st.with_reverse(st.with_underline(st.with_bold(plain(), true), true), true)),
+             sgr("0;1;4;7")),
+    check_eq("an attribute set back to false disappears",
+             st.style_to_ansi(st.with_bold(st.with_bold(plain(), true), false)), sgr("0")),
+
+    # --- DefaultColor emits nothing: the leading reset already selected it ---
+    check_eq("default foreground adds nothing",
+             st.style_to_ansi(st.with_fg(plain(), st.DefaultColor)), sgr("0")),
+    check_eq("default background adds nothing",
+             st.style_to_ansi(st.with_bg(plain(), st.DefaultColor)), sgr("0")),
+
+    # --- indexed palette: 38;5;n / 48;5;n, uniform across the 16- and
+    # 256-colour ranges rather than branching to the 30-37 shorthand ---
+    check_eq("indexed foreground", st.style_to_ansi(st.with_fg(plain(), st.Ansi(4))), sgr("0;38;5;4")),
+    check_eq("indexed background", st.style_to_ansi(st.with_bg(plain(), st.Ansi(4))), sgr("0;48;5;4")),
+    check_eq("a 256-colour index", st.style_to_ansi(st.with_fg(plain(), st.Ansi(213))), sgr("0;38;5;213")),
+
+    # --- truecolor ---
+    check_eq("rgb foreground",
+             st.style_to_ansi(st.with_fg(plain(), st.Rgb(255, 128, 0))), sgr("0;38;2;255;128;0")),
+    check_eq("rgb background",
+             st.style_to_ansi(st.with_bg(plain(), st.Rgb(0, 0, 0))), sgr("0;48;2;0;0;0")),
+
+    # --- ordering: attributes, then foreground, then background ---
+    check_eq("everything at once",
+             st.style_to_ansi(st.with_bg(st.with_fg(st.with_bold(plain(), true), st.Ansi(4)),
+                                         st.Rgb(10, 20, 30))),
+             sgr("0;1;38;5;4;48;2;10;20;30")),
+
+    # --- accessors round-trip ---
+    check_eq("with_fg is readable back", st.style_fg(st.with_fg(plain(), st.Ansi(9))), st.Ansi(9)),
+    check_eq("with_bg is readable back", st.style_bg(st.with_bg(plain(), st.Ansi(9))), st.Ansi(9)),
+    check_eq("the default style has default colours", st.style_fg(plain()), st.DefaultColor),
+    check_eq("setting a colour leaves the other alone", st.style_bg(st.with_fg(plain(), st.Ansi(9))),
+             st.DefaultColor),
+
+    # --- Eq on Style is what the screen diff will compare cells with ---
+    check_eq("styles built the same way are equal",
+             st.with_bold(plain(), true), st.with_bold(st.style_default(), true))
+  ])
