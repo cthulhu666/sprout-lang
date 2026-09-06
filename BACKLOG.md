@@ -4377,6 +4377,46 @@ op-classification already in place.
 
 ### Compiler / Stdlib Misc
 
+- [ ] `P2` **Passing `print` as a VALUE emits a call to a symbol that does not exist.** Surfaced
+  2026-09-06 while rewriting `examples/fizzbuzz.sprout`; worked around there with
+  `list_each(\line -> print(line), …)`, which is what all five other examples that iterate with
+  `print` already write. `list_each(print, xs)` typechecks, emits `ERROR:`-free IR, and then fails
+  to link:
+
+  ```
+  error: use of undefined value '@print'
+    %ret = call i64 @print(i64 %a0)
+  ```
+
+  **Root cause.** `print` is not an ordinary extern. It dispatches *by argument type at the call
+  site* — `String`/`Char` to `@print_str(ptr)`, `Int`/`Bool` to `@print_value(i64)`
+  (`ast_to_ir.sprout:4724-4771`) — so there is deliberately no `@print` symbol at all, and
+  `is_hardcoded_intrinsic` (`ir_lowering.sprout:604`) suppresses the `declare` that
+  `lower_extern_decls` would otherwise emit. The comment at `ir_lowering.sprout:536-539` says so
+  outright. Eta-expansion never learned that: `synthesize_eta_wrapper`
+  (`ast_to_ir.sprout:941-942`) forwards to the source-level `name` unconditionally, producing
+  `define @__sprout_ir_eta_print_0(i64 %env$, i64 %a0) { … call i64 @print(i64 %a0) … }`.
+
+  **Measured scope.** Builtins whose lowering is call-site-directed, not eta-expansion generally.
+  A *class method* eta-expands fine — `list_map(to_string, xs)` resolves through
+  `@__tc_ToString_Int_to_string` and links — because the instance is picked at the same point the
+  wrapper is built. The same hole is available to `eprint` and to any other name
+  `is_hardcoded_intrinsic` suppresses.
+
+  **Fix direction.** Have `synthesize_eta_wrapper` route through the same argument-type dispatch
+  the direct call site uses, rather than emitting a bare `IRCall name` — the wrapper is minted per
+  use-site with the type already resolved, so the information is in hand. A blanket
+  `declare i64 @print(i64)` is *not* a fix: the runtime has no such function, and the wrapper's
+  `i64` parameter cannot choose between `print_str` and `print_value` after the fact.
+
+  Worth noting for whoever takes it: `infer.sprout:1645` cites `list_each(print, xs)` by name as
+  the motivating example for effect unification, so the typechecker was taught to accept precisely
+  the expression codegen cannot emit. Note also which gate could have caught it: only
+  `run-example-canary` links and runs (`justfile:1486-1497`, five examples, `fizzbuzz` among
+  them). `compile-examples-stage1` stops at IR, and `smoke-shapes` (`justfile:987-1005`) only
+  greps the emitted text — neither resolves a symbol. Undefined-symbol regressions are therefore
+  visible on five files out of 61.
+
 - [ ] `P2` **A function PARAMETER named `entry` emits invalid IR.** Surfaced 2026-09-05 while
   writing `tests/stdlib/test_fs.spr`; worked around there by renaming the parameter to `item`.
   `fn f(entry: Int) -> Int = entry + 1` compiles and typechecks, then fails to assemble:
