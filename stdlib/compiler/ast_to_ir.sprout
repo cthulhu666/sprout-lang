@@ -6187,13 +6187,13 @@ fn tco_drop_incoming(inc: List (String, String), removed_val: String, pred: Stri
       if v == removed_val && p == pred then tco_drop_incoming(rest, removed_val, pred)
       else Cons((v, p), tco_drop_incoming(rest, removed_val, pred))
 
-fn tco_fix_phi_in_block(phi_block: String, removed_val: String, pred: String, b: sprout_ir.IRBlock) -> sprout_ir.IRBlock =
-  if tco_block_label(b) == phi_block
-  then sprout_ir.IRBlock(phi_block, tco_fix_phi_in_ops(tco_block_ops(b), removed_val, pred))
-  else b
-
 fn tco_fix_phi_block(blocks: List sprout_ir.IRBlock, phi_block: String, removed_val: String, pred: String) -> List sprout_ir.IRBlock =
-  list_map(tco_fix_phi_in_block(phi_block, removed_val, pred, _), blocks)
+  list_map(fix_block, blocks)
+where
+  fix_block = \ (b: sprout_ir.IRBlock) ->
+    if tco_block_label(b) == phi_block
+    then sprout_ir.IRBlock(phi_block, tco_fix_phi_in_ops(tco_block_ops(b), removed_val, pred))
+    else b
 
 fn tco_fix_all_phis(blocks: List sprout_ir.IRBlock, hits: List (String, List String, String, String)) -> List sprout_ir.IRBlock =
   match hits with
@@ -6204,13 +6204,13 @@ fn tco_fix_all_phis(blocks: List sprout_ir.IRBlock, hits: List (String, List Str
       else tco_fix_all_phis(tco_fix_phi_block(blocks, phi_block, call_result, pred), rest)
 
 # Rename the old "entry" block to "tco_loop" and prepend the per-param reloads.
-fn tco_rename_entry_block(slots: List (String, String, String, sprout_ir.IRType), b: sprout_ir.IRBlock) -> sprout_ir.IRBlock =
-  if tco_block_label(b) == "entry"
-  then sprout_ir.IRBlock("tco_loop", list_append(tco_load_ops(slots), tco_block_ops(b)))
-  else b
-
 fn tco_make_loop_blocks(blocks: List sprout_ir.IRBlock, slots: List (String, String, String, sprout_ir.IRType)) -> List sprout_ir.IRBlock =
-  list_map(tco_rename_entry_block(slots, _), blocks)
+  list_map(rename_entry, blocks)
+where
+  rename_entry = \ (b: sprout_ir.IRBlock) ->
+    if tco_block_label(b) == "entry"
+    then sprout_ir.IRBlock("tco_loop", list_append(tco_load_ops(slots), tco_block_ops(b)))
+    else b
 
 # Drop blocks left unreachable when a join's phi loses all incomings (every
 # predecessor was a tail call rewritten to IRTcoBack). A phi with no incomings
