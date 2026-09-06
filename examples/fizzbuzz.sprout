@@ -1,11 +1,16 @@
-fn rem(n: Int, m: Int) -> Int =
-  n - (n / m) * m
+import stdlib.math.int as imath
+
+# `mod` is total: it answers `Nothing` for a modulus of zero or less, so a
+# divisibility test compares against `Just(0)` instead of trusting a bare
+# remainder that a zero divisor would have made up.
+fn divisible(n: Int, d: Int) -> Bool =
+  imath.mod(n, d) == Just(0)
 
 fn fizzbuzz(n: Int) -> String =
-  if rem(n, 15) == 0 then "FizzBuzz"
-  else if rem(n, 3) == 0 then "Fizz"
-  else if rem(n, 5) == 0 then "Buzz"
-  else "Number"
+  if divisible(n, 15) then "FizzBuzz"
+  else if divisible(n, 3) then "Fizz"
+  else if divisible(n, 5) then "Buzz"
+  else to_string(n)
 
 fn main() -> Unit !{IO} =
-  print(fizzbuzz(15))
+  list_each(\line -> print(line), [fizzbuzz(i) for i in 1..15])
