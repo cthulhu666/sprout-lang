@@ -1,0 +1,25 @@
+module testsupport.exwidget
+
+# Fixture for the cross-module existential: the box, its record and a class are
+# declared HERE, and constructed/unpacked from an importing module.
+
+export type View s = (state: s, step: s -> s, render: s -> String)
+
+export type Widget (..) =
+  | exists s. Widget (View s)
+
+export fn run(w: Widget, n: Int) -> String =
+  match w with
+  | Widget v -> v.render(step_n(v.step, v.state, n))
+
+fn step_n(step: s -> s, st: s, n: Int) -> s =
+  if n <= 0 then st else step_n(step, step(st), n - 1)
+
+export class Renderable a
+  fn draw(v: a) -> String
+
+instance Renderable Int
+  fn draw(v: Int) -> String = `i${int_to_string(v)}`
+
+instance Renderable String
+  fn draw(v: String) -> String = `s${v}`

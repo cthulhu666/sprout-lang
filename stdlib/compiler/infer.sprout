@@ -4951,8 +4951,12 @@ fn extract_tconst_name(t: types.Type) -> String =
   | types.TApp base _ -> extract_tconst_name(base)
   | _ -> "Unknown"
 
+# `TApp (TApp Pair a1) a2` -> `[a1, a2]`, declaration order. `collect_tapp_args`
+# already prepends as it walks outermost-inward, so the spine comes back in
+# order and must NOT be reversed — every consumer zips this against the record's
+# quantified vars, which are in declaration order.
 fn extract_tapp_args(t: types.Type) -> List types.Type =
-  list_reverse(collect_tapp_args(t, Nil))
+  collect_tapp_args(t, Nil)
 
 fn collect_tapp_args(t: types.Type, acc: List types.Type) -> List types.Type =
   match t with

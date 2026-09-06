@@ -1,0 +1,51 @@
+module tests.multi_param_records
+
+# Regression: a record with MORE THAN ONE type parameter had its parameters
+# stored backwards, so `Pair Int String` typed `x` as String and `y` as Int.
+#
+# Two independent reversals had to line up for this:
+#   - `parser.parse_record_type_decl` reversed the parameter list a second time
+#     (`collect_ident_list` already returns declaration order), so the record's
+#     params were registered as [b, a];
+#   - `infer.extract_tapp_args` reversed the type-application spine, which
+#     `collect_tapp_args` also already returns in order.
+#
+# Both are identities on a ONE-parameter list, which is why nothing caught them:
+# before this test the whole tree contained no record with two type parameters.
+
+import stdlib.test (check_eq, run_suite)
+
+type Pair a b = (x: a, y: b)
+
+type Trip a b c = (u: a, v: b, w: c)
+
+fn mk() -> Pair Int String = Pair(x = 1, y = "!")
+
+fn get_x(p: Pair Int String) -> Int = p.x
+
+fn get_y(p: Pair Int String) -> String = p.y
+
+# The same record at the OTHER instantiation: nothing may key off argument
+# order beyond the declaration.
+fn swap(p: Pair Int String) -> Pair String Int = Pair(x = p.y, y = p.x)
+
+fn show_swapped(p: Pair String Int) -> String = p.x ++ int_to_string(p.y)
+
+fn show_trip(t: Trip String Int Bool) -> String =
+  t.u ++ int_to_string(t.v) ++ to_string(t.w)
+
+# Inference alone, with no annotation to unify against.
+fn unannotated() -> String =
+  int_to_string(p.x) ++ p.y
+  where p = Pair(x = 2, y = "?")
+
+fn main() -> Unit !{IO} =
+  run_suite("multi-parameter records", [
+    check_eq("first param", get_x(mk()), 1),
+    check_eq("second param", get_y(mk()), "!"),
+    check_eq("three parameters", show_trip(Trip(u = "a", v = 2, w = true)), "a2true"),
+    check_eq("the same record, arguments swapped", show_swapped(swap(mk())), "!1"),
+    check_eq("functional update keeps each param", get_y(mk() with (y = "?")), "?"),
+    check_eq("update on the first param", get_x(mk() with (x = 9)), 9),
+    check_eq("inferred, no annotation", unannotated(), "2?")
+  ])

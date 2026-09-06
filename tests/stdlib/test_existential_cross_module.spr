@@ -1,0 +1,47 @@
+module tests.existential_cross_module
+
+# Existentials across a module boundary. Every other existential test declares
+# the box and its class in the SAME module; both shapes here cross one:
+#   1. an `exists`-prefixed box DECLARED in an imported module, constructed and
+#      unpacked here at two different hidden state types;
+#   2. `any exwidget.Renderable` — a box over an IMPORTED class, declared here.
+
+import stdlib.test (check_eq, run_suite)
+import stdlib.string as string
+import testsupport.exwidget as exwidget
+# `draw` comes in by NAME, not through the `exwidget.` alias: a class method is
+# not reachable through a module alias.
+import testsupport.exwidget (draw)
+
+fn count_up(n: Int) -> Int = n + 1
+
+fn show_count(n: Int) -> String = `count=${int_to_string(n)}`
+
+fn add_dot(buf: String) -> String = buf ++ "."
+
+fn show_buf(buf: String) -> String = `buf=${buf}`
+
+fn counter() -> exwidget.Widget =
+  exwidget.Widget(exwidget.View(state = 0, step = count_up, render = show_count))
+
+fn buffer() -> exwidget.Widget =
+  exwidget.Widget(exwidget.View(state = "", step = add_dot, render = show_buf))
+
+# The heterogeneous list is the point: two different hidden `s` in one list.
+fn rendered() -> String =
+  string.join("|", list_map(\w -> exwidget.run(w, 2), [counter(), buffer()]))
+
+type RBox = | RBox (any exwidget.Renderable)
+
+fn rbox_draw(b: RBox) -> String =
+  match b with
+  | RBox v -> draw(v)
+
+fn main() -> Unit !{IO} =
+  run_suite("existential cross-module", [
+    check_eq("imported box, Int state", exwidget.run(counter(), 3), "count=3"),
+    check_eq("imported box, String state", exwidget.run(buffer(), 3), "buf=..."),
+    check_eq("heterogeneous list of imported boxes", rendered(), "count=2|buf=.."),
+    check_eq("imported class box, Int", rbox_draw(RBox(7)), "i7"),
+    check_eq("imported class box, String", rbox_draw(RBox("x")), "sx")
+  ])
