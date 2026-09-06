@@ -601,13 +601,28 @@ and is rejected as a non-exhaustive match, naming the constructors it missed.
 Lambda expressions are anonymous functions.
 
 - Syntax: `\(` parameter-list `)` `->` expression
-- Single-parameter shorthand: `\x -> expression` and `\x: T -> expression`
+- Single-parameter shorthand: `\x -> expression`. An annotation requires the
+  parenthesized form, `\(x: T) -> expression`, because the annotation's own type
+  may contain `->` and `\x: A -> B -> e` has no readable parse without them.
 - The parenthesized parameter list must contain at least one parameter.
-- Parameter annotations are optional and follow the same rules as named functions.
-  *(Not yet enforced: inference currently ignores a lambda parameter's annotation.
-  In argument position the parameter type comes from the callee's parameter slot,
-  so the annotation is redundant there; elsewhere the parameter stays unconstrained
-  — see `BACKLOG.md`.)*
+- **A parameter annotation is unified with the type the parameter already has** —
+  the callee's parameter slot in argument position, an unconstrained variable
+  anywhere else. A disagreement is a **compile error** (`type annotation mismatch
+  for 'x'`). Outside argument position, where nothing else determines the
+  parameter, the annotation is what fixes it, so a `let`- or `where`-bound lambda
+  can be given a type its body alone would leave ambiguous.
+
+  Because the annotation is believed, a conflicting *use* is what gets reported
+  outside argument position: the lambda is inferred first and the call is then
+  checked against the signature written. In argument position the slot is known
+  before the body is inferred, so the mismatch is reported at the annotation.
+- **A type variable in a lambda parameter annotation is rejected in v0**
+  (`type variable 'a' is not allowed in a lambda parameter annotation`). Sprout has
+  no lexically scoped type variables, so the `a` in `\(x: a) -> …` could not mean
+  the enclosing signature's `a`; it would be a separate variable that merely
+  happens to unify. Rejecting keeps the spelling free for scoped type variables to
+  later give it the meaning readers already assume. See
+  `docs/lambda-parameter-annotations-v0.md`.
 - Lambdas capture surrounding lexical bindings by value.
 - A lambda with parameters `x, y` has function type `tx -> ty -> tr`.
 - **In argument position a lambda's parameter types come from the callee.** The

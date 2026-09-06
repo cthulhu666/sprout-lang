@@ -198,6 +198,21 @@ where
   r = girth_of(c)
 ```
 
+The lift does not have to go all the way to the top level. A `where` binding takes
+a lambda too, and an annotated parameter now carries a *checked* signature — write
+one and a wrong type is a compile error, not decoration:
+
+```sprout
+fn front_gap(b: Battle, c: Combatant) -> Maybe Double =
+  minimum(filter(\d -> d > 0.0, list_map(gap_to, opposing(b, c))))
+where
+  gap_to = \ (o: Combatant) -> space.along(c.pos, o.pos, marching(c))
+```
+
+That reads best when the helper is used once and belongs to this function. Prefer a
+top-level `fn` when it is reused, when the enclosing function is already long, or
+when it needs to recurse — `where` bindings cannot self-reference (spec §5.1).
+
 Lifting is not always the answer — often the multi-line body is a `map` and a
 `filter` fused by hand, as `front_gap` was above, and splitting them is both
 shorter and the better fix. Look for that first.
