@@ -883,12 +883,20 @@ fn brace_body_findings(tokens: Vec token.Token) -> List LintFinding =
 # no findings (formatter.lint_source's text-based checks already cover files
 # that don't even parse; this rule set only has something to say once the
 # file is syntactically valid).
+# A file that does not lex or parse cannot have a single AST rule run against
+# it. Reporting it as clean would make an unchecked file indistinguishable from
+# a checked one, so the failure is itself a finding: it prints through the same
+# path and the driver exits non-zero. `strip_headers` pads each header line it
+# removes with a newline, so the position here is the position in the file.
+fn unparsed_finding(pos: source.SourcePos, reason: String) -> LintFinding =
+  mk_finding(pos, "unparsed", reason ++ " — no lint rule could be checked")
+
 export fn lint_ast(src: String) -> List LintFinding =
   match lexer.tokenize(source.strip_headers(src)) with
-  | Err _ -> Nil
+  | Err (token.TokenizeError msg pos) -> [unparsed_finding(pos, msg)]
   | Ok toks ->
       match parser.parse_program(toks) with
-      | Err _ -> Nil
+      | Err (parser.ParseError msg pos) -> [unparsed_finding(pos, msg)]
       | Ok prog ->
           list_append(drop_desugared_matches(src, lint_program(prog)),
             list_append(list_shape_findings(src, prog),

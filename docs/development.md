@@ -44,6 +44,16 @@ Common tasks:
 - REPL: `mise exec -- just build-sproutd` once, then `mise exec -- just repl`
 - Language server (LSP): `build/sproutd --lsp <stdlib-root>`; see [language-server-roadmap.md](./language-server-roadmap.md) and `editors/intellij` for the JetBrains plugin
 
+**What a green `lint` means.** Most rules need an AST, so a file that does not lex
+or parse is reported as `[unparsed]` and exits non-zero rather than passing. A
+clean `lint` therefore means "this parsed *and* no rule fired" — without that, an
+unchecked file is indistinguishable from a checked one and `just lint` over a tree
+cannot be read as "every file was linted".
+
+`fmt` is deliberately different: it is line-based, never parses, and falls back to
+per-line formatting when the lexer fails, so it can legitimately report `ok` on a
+file that does not parse.
+
 ### Platforms
 
 Supported hosts today are **macOS** and **Linux**. The two workflows cover different

@@ -36,6 +36,9 @@ fn first_message(findings: List lint_rules.LintFinding) -> String =
 fn mentions_let_else(msg: String) -> Bool =
   str_find(msg, "let..else") != -1
 
+fn mentions_one_binding(msg: String) -> Bool =
+  str_find(msg, "one binding per line") != -1
+
 # Rule-scoped count — keeps an assertion about ONE rule from breaking when a
 # fixture also happens to trip a different rule (e.g. a Cons/Nil-recursion
 # fixture used for staircase-of-doom now also legitimately trips
@@ -457,9 +460,30 @@ let two_multiline_lambdas =
   "                           else Nothing,\n" ++
   "                     ys))\n"
 
+# A file that does not PARSE cannot have any AST rule run against it, and the
+# honest answer is to say so. Reporting it as clean makes an unchecked file
+# indistinguishable from a checked one at the lint gate — and `just lint` over a
+# tree could no longer be read as "every file was linted".
+let unparseable =
+  "fn gap(n: Int) -> Int =\n" ++
+  "  let d = n + 1 in\n" ++
+  "  d * 2\n"
+
+# The earlier of the two failure points: this one never reaches the parser.
+let unlexable =
+  "fn f() -> String = \"abc\n"
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
+
+    assert_eq(state, "unparseable file: reported, not silently clean", count_list(lint_rules.lint_ast(unparseable)), 1)
+    assert_eq(state, "unparseable file: rule id", first_rule(lint_rules.lint_ast(unparseable)), "unparsed")
+    assert_eq(state, "unparseable file: anchored at the offending line", first_line(lint_rules.lint_ast(unparseable)), 2)
+    assert_eq(state, "unparseable file: message carries the parser's reason", mentions_one_binding(first_message(lint_rules.lint_ast(unparseable))), true)
+    assert_eq(state, "unlexable file: reported, not silently clean", count_list(lint_rules.lint_ast(unlexable)), 1)
+    assert_eq(state, "unlexable file: rule id", first_rule(lint_rules.lint_ast(unlexable)), "unparsed")
+    assert_eq(state, "unlexable file: anchored at the offending line", first_line(lint_rules.lint_ast(unlexable)), 1)
 
     assert_eq(state, "docs example (depth 2): below min_staircase_depth=3, no finding", count_list(lint_rules.lint_ast(docs_example)), 0)
 
