@@ -68,6 +68,8 @@ Use commit messages that explain intent:
 - `parser: add infix precedence for comparison operators`
 - `types: improve error for mismatched function arguments`
 
+**Review gate** — `scripts/review_gate.py`, wired as a Stop hook in `.claude/settings.json`. Once per distinct working-tree state it refuses the turn and prints a path-aware checklist: idiomatic Sprout for `.sprout`/`.spr`, `docs/guidelines.md` for `stdlib/`, GC/rooting for `stdlib/compiler/` and `runtime/`, docs+spec sync always. Stop is the only unconditional exit from a turn, so it is the only event that can gate "the change is finished" — `PostToolUse` fires mid-edit and cannot block. It cannot loop: the session's first Stop records the dirty tree as a baseline, a state already shown is never shown twice, and `MAX_BLOCKS` caps the session. Generated artifacts (`bootstrap/compile_driver.ll`, `tests/golden/ir/`, `build/`, `.claude/`) are invisible to it, so a reseed or a golden snapshot never trips it. Test with `just test-review-gate`.
+
 **Seed gate** — `scripts/seed_gate.sh`, wired as a PreToolUse Bash hook. Intercepts `git commit` and blocks if `stdlib/compiler/*.sprout` or `stdlib/*.sprout` is staged without a refreshed `bootstrap/compile_driver.ll`. Bypass (when IR is genuinely unchanged): run `just verify-bootstrap-fixed-point` then `just seed-fp-ack`.
 
 > **Caveat — `just seed-stale` and CI answer different questions, and a comment-only edit splits them.** Three checks are easy to run together and are not the same thing:
