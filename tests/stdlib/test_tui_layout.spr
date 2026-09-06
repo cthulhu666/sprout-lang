@@ -1,0 +1,138 @@
+module tests.tui_layout
+
+# Turning one Region into many. Design: docs/tui-widgets-v0.md §3.2-3.4.
+#
+# The invariant every case here defends is that an allocation sums to EXACTLY
+# the extent it was given. A layout that loses a cell to rounding leaves a
+# column nothing ever paints, and `diff_to_ansi` will then keep it stale for the
+# life of the program.
+
+import stdlib.test (check_eq, run_suite)
+import stdlib.string as string
+import stdlib.tui.geometry as geometry
+import stdlib.tui.layout as layout
+
+fn ints(xs: List Int) -> String =
+  string.join(",", list_map(\n -> int_to_string(n), xs))
+
+fn solved(total: Int, ds: List layout.Dimension) -> String =
+  ints(layout.solve(total, ds))
+
+fn total_of(xs: List Int) -> Int = list_fold(\ (acc, n) -> acc + n, 0, xs)
+
+fn sums_to(total: Int, ds: List layout.Dimension) -> Int =
+  total_of(layout.solve(total, ds))
+
+# A region rendered as "col,row,cols,rows", so a whole split reads in one line.
+fn reg(r: geometry.Region) -> String =
+  ints([geometry.region_col(r), geometry.region_row(r),
+        geometry.region_cols(r), geometry.region_rows(r)])
+
+fn regs(rs: List geometry.Region) -> String =
+  string.join(" ", list_map(reg, rs))
+
+fn full() -> geometry.Region = geometry.Region(0, 0, 12, 6)
+
+fn main() -> Unit !{IO} =
+  run_suite("tui layout", [
+    # ── solve: exact cells ──────────────────────────────────────────────────
+    check_eq("nothing to place", solved(10, Nil), ""),
+    check_eq("a single fixed item", solved(10, [layout.Cells(4)]), "4"),
+    check_eq("fixed items keep their size", solved(10, [layout.Cells(3), layout.Cells(2)]), "3,2"),
+    check_eq("a negative ask clamps to zero", solved(10, [layout.Cells(-5)]), "0"),
+
+    # ── solve: fractions take what is left ──────────────────────────────────
+    check_eq("one fraction takes the remainder",
+      solved(10, [layout.Cells(4), layout.Fraction(1)]), "4,6"),
+    check_eq("equal fractions split evenly",
+      solved(10, [layout.Fraction(1), layout.Fraction(1)]), "5,5"),
+    check_eq("weights are proportional",
+      solved(12, [layout.Fraction(1), layout.Fraction(2)]), "4,8"),
+    # 10/3 each. Largest-remainder hands the odd unit to the earliest item, so
+    # the parts still sum to 10 rather than 9.
+    check_eq("largest remainder distributes the leftover",
+      solved(10, [layout.Fraction(1), layout.Fraction(1), layout.Fraction(1)]), "4,3,3"),
+    check_eq("largest remainder, two units to hand out",
+      solved(11, [layout.Fraction(1), layout.Fraction(1), layout.Fraction(1)]), "4,4,3"),
+    check_eq("a zero weight gets nothing",
+      solved(10, [layout.Fraction(0), layout.Fraction(1)]), "0,10"),
+
+    # ── solve: Auto sits between the two ────────────────────────────────────
+    check_eq("auto takes its natural size",
+      solved(10, [layout.Auto(3), layout.Fraction(1)]), "3,7"),
+    check_eq("auto and cells both precede fractions",
+      solved(10, [layout.Cells(2), layout.Auto(3), layout.Fraction(1)]), "2,3,5"),
+
+    # ── solve: the shrink priority, Fraction then Auto then Cells ───────────
+    check_eq("fractions yield first",
+      solved(5, [layout.Cells(5), layout.Fraction(1)]), "5,0"),
+    check_eq("auto yields before cells",
+      solved(5, [layout.Cells(5), layout.Auto(3)]), "5,0"),
+    check_eq("auto is truncated, not dropped, when it partly fits",
+      solved(6, [layout.Cells(5), layout.Auto(3)]), "5,1"),
+    check_eq("cells starve in declaration order",
+      solved(4, [layout.Cells(3), layout.Cells(3)]), "3,1"),
+    check_eq("a starved item gets zero, never a negative",
+      solved(2, [layout.Cells(3), layout.Cells(3)]), "2,0"),
+    check_eq("nothing to give",
+      solved(0, [layout.Cells(3), layout.Fraction(1)]), "0,0"),
+
+    # ── solve: the sum invariant ────────────────────────────────────────────
+    check_eq("sums exactly, three fractions in 10", sums_to(10, [layout.Fraction(1), layout.Fraction(1), layout.Fraction(1)]), 10),
+    check_eq("sums exactly, seven fractions in 10",
+      sums_to(10, [layout.Fraction(1), layout.Fraction(1), layout.Fraction(1),
+                   layout.Fraction(1), layout.Fraction(1), layout.Fraction(1),
+                   layout.Fraction(1)]), 10),
+    check_eq("sums exactly, mixed kinds in 13",
+      sums_to(13, [layout.Cells(2), layout.Auto(3), layout.Fraction(2), layout.Fraction(1)]), 13),
+    check_eq("sums exactly when over-subscribed",
+      sums_to(4, [layout.Cells(3), layout.Auto(3), layout.Fraction(1)]), 4),
+
+    # ── row and column ──────────────────────────────────────────────────────
+    check_eq("a row splits columns and keeps rows",
+      regs(layout.row(full(), [layout.Cells(4), layout.Fraction(1)])),
+      "0,0,4,6 4,0,8,6"),
+    check_eq("a column splits rows and keeps columns",
+      regs(layout.column(full(), [layout.Cells(1), layout.Fraction(1)])),
+      "0,0,12,1 0,1,12,5"),
+    check_eq("an empty region yields empty parts",
+      regs(layout.row(geometry.Region(3, 3, 0, 0), [layout.Fraction(1)])), "3,3,0,0"),
+
+    # ── dock ────────────────────────────────────────────────────────────────
+    check_eq("dock top takes rows off the top",
+      reg(match layout.dock(full(), layout.Top, 1) with | (d, _) -> d), "0,0,12,1"),
+    check_eq("dock top leaves the rest below",
+      reg(match layout.dock(full(), layout.Top, 1) with | (_, r) -> r), "0,1,12,5"),
+    check_eq("dock bottom takes from the bottom",
+      reg(match layout.dock(full(), layout.Bottom, 2) with | (d, _) -> d), "0,4,12,2"),
+    check_eq("dock bottom leaves the rest above",
+      reg(match layout.dock(full(), layout.Bottom, 2) with | (_, r) -> r), "0,0,12,4"),
+    check_eq("dock left",
+      reg(match layout.dock(full(), layout.Left, 3) with | (d, _) -> d), "0,0,3,6"),
+    check_eq("dock right",
+      reg(match layout.dock(full(), layout.Right, 3) with | (d, _) -> d), "9,0,3,6"),
+    check_eq("dock right leaves the rest",
+      reg(match layout.dock(full(), layout.Right, 3) with | (_, r) -> r), "0,0,9,6"),
+    check_eq("docking more than there is takes all of it",
+      reg(match layout.dock(full(), layout.Top, 99) with | (d, _) -> d), "0,0,12,6"),
+    check_eq("and leaves nothing",
+      reg(match layout.dock(full(), layout.Top, 99) with | (_, r) -> r), "0,6,12,0"),
+
+    # A header, a footer and a sidebar, with the body falling out as the
+    # remainder — the shape a real app wires up.
+    check_eq("dock_all peels edges in order",
+      regs(match layout.dock_all(full(), [(layout.Top, 1), (layout.Bottom, 1), (layout.Left, 4)]) with
+           | (ds, _) -> ds),
+      "0,0,12,1 0,5,12,1 0,1,4,4"),
+    check_eq("dock_all leaves the body",
+      reg(match layout.dock_all(full(), [(layout.Top, 1), (layout.Bottom, 1), (layout.Left, 4)]) with
+          | (_, body) -> body),
+      "4,1,8,4"),
+
+    # ── grid ────────────────────────────────────────────────────────────────
+    check_eq("a grid is rows of regions",
+      string.join(" / ", list_map(regs,
+        layout.grid(full(), [layout.Fraction(1), layout.Fraction(1)],
+                             [layout.Cells(2), layout.Fraction(1)]))),
+      "0,0,6,2 6,0,6,2 / 0,2,6,4 6,2,6,4")
+  ])

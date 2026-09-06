@@ -1,0 +1,228 @@
+module stdlib.tui.layout
+
+# Turning one Region into many. Design: docs/tui-widgets-v0.md §3.2-3.4.
+#
+# Everything here is a total function over integers: no solver, no floating
+# point, no failure case. `solve` is the whole engine and `row`/`column`/`grid`/
+# `dock` are the ways to spend its answer on a Region.
+
+import stdlib.tui.geometry as geometry
+
+fn imax(a: Int, b: Int) -> Int = if a > b then a else b
+
+fn imin(a: Int, b: Int) -> Int = if a < b then a else b
+
+# How much of an axis an item asks for.
+#
+#   Cells    exactly n, an author's demand
+#   Fraction weight n over whatever survives the fixed asks
+#   Auto     n, the item's own measured natural size
+#
+# `Auto` carries its measurement rather than being resolved later, so `solve`
+# stays a pure function of its arguments and needs no callback into a widget.
+export type Dimension (..) deriving (Eq, ToString) =
+  | Cells Int
+  | Fraction Int
+  | Auto Int
+
+export type Edge (..) deriving (Eq, ToString) =
+  | Top
+  | Bottom
+  | Left
+  | Right
+
+# Split `total` among `items`, in declaration order, summing to EXACTLY
+# `imax(0, total)`.
+#
+# Fixed asks (`Cells`, then `Auto`) are paid first and fractions divide what is
+# left. When the fixed asks alone exceed the total, they are met in declaration
+# order and later items are starved to zero — the priority is Fraction yields,
+# then Auto, then Cells, because `Cells 1` is a demand for a one-row status bar
+# and `Auto` is only a request derived from content. ratatui publishes an
+# equivalent order; CSS Grid instead squeezes proportionally, which needs a
+# solver and a rounding rule at every step.
+export fn solve(total: Int, items: List Dimension) -> List Int =
+  let room = imax(0, total)
+      cells_ask = sum_of(items, is_cells)
+      auto_ask = sum_of(items, is_auto)
+  in
+  # Budgets per tier, each the share left after the higher-priority tiers.
+  let cells_budget = imin(cells_ask, room)
+      auto_budget = imin(auto_ask, room - cells_budget)
+      frac_budget = room - cells_budget - auto_budget
+  in
+  place(items, take_state(cells_budget, auto_budget),
+        fraction_shares(items, frac_budget))
+
+fn is_cells(d: Dimension) -> Bool =
+  match d with
+  | Cells _ -> true
+  | Fraction _ -> false
+  | Auto _ -> false
+
+fn is_auto(d: Dimension) -> Bool =
+  match d with
+  | Cells _ -> false
+  | Fraction _ -> false
+  | Auto _ -> true
+
+fn ask_of(d: Dimension) -> Int =
+  match d with
+  | Cells n -> imax(0, n)
+  | Auto n -> imax(0, n)
+  | Fraction _ -> 0
+
+fn sum_of(items: List Dimension, pick: Dimension -> Bool) -> Int =
+  list_fold(\ (acc, d) -> if pick(d) then acc + ask_of(d) else acc, 0, items)
+
+# Remaining budget for each fixed tier, spent in declaration order.
+type Budgets = (cells: Int, auto: Int)
+
+fn take_state(cells: Int, auto: Int) -> Budgets = Budgets(cells = cells, auto = auto)
+
+# Walk the items once, drawing each fixed ask from its tier's remaining budget
+# and each fraction from the pre-computed share list.
+fn place(items: List Dimension, budgets: Budgets, shares: List Int) -> List Int =
+  match items with
+  | Nil -> Nil
+  | Cons d rest ->
+      match d with
+      | Cells n ->
+          let got = imin(imax(0, n), budgets.cells)
+          in
+          Cons(got, place(rest, budgets with (cells = budgets.cells - got), shares))
+      | Auto n ->
+          let got = imin(imax(0, n), budgets.auto)
+          in
+          Cons(got, place(rest, budgets with (auto = budgets.auto - got), shares))
+      | Fraction _ ->
+          match shares with
+          | Nil -> Cons(0, place(rest, budgets, Nil))
+          | Cons s more -> Cons(s, place(rest, budgets, more))
+
+# ── Fractions, by largest remainder ─────────────────────────────────────────
+
+# Each fraction's floor share, then the leftover units handed one each to the
+# largest remainders, ties going to the earliest item. This is Hamilton's
+# apportionment method, and it is what makes the parts sum to the whole: three
+# equal fractions in 10 columns are 4,3,3 and never 3,3,3 with a column lost.
+fn fraction_shares(items: List Dimension, budget: Int) -> List Int =
+  let weights = fraction_weights(items)
+      total_w = list_fold(\ (acc, w) -> acc + w, 0, weights)
+  in
+  if total_w <= 0 || budget <= 0 then list_map(\_ -> 0, weights)
+  else
+    let floors = list_map(\w -> (w * budget) / total_w, weights)
+        assigned = list_fold(\ (acc, n) -> acc + n, 0, floors)
+    in
+    hand_out(floors, remainders(weights, budget, total_w), budget - assigned)
+
+fn fraction_weights(items: List Dimension) -> List Int =
+  list_flat_map(weight_of, items)
+
+# A singleton for a fraction and nothing for the others, so `list_flat_map`
+# yields the weights in order with the non-fractions dropped.
+fn weight_of(d: Dimension) -> List Int =
+  match d with
+  | Fraction w -> [imax(0, w)]
+  | Cells _ -> Nil
+  | Auto _ -> Nil
+
+# `(w * budget) mod total_w` — how much of a unit each item was short-changed.
+fn remainders(weights: List Int, budget: Int, total_w: Int) -> List Int =
+  list_map(\w -> (w * budget) - ((w * budget) / total_w) * total_w, weights)
+
+# Give one extra unit to each of the `spare` largest remainders. `spare` is
+# always smaller than the number of fractions, so this terminates.
+fn hand_out(floors: List Int, rems: List Int, spare: Int) -> List Int =
+  if spare <= 0 then floors
+  else
+    let winner = argmax(rems)
+    in
+    hand_out(bump_at(floors, winner), clear_at(rems, winner), spare - 1)
+
+# Earliest index of the greatest value; -1 for an empty list, which `bump_at`
+# and `clear_at` then leave untouched.
+fn argmax(xs: List Int) -> Int =
+  match xs with
+  | Nil -> -1
+  | Cons h rest -> argmax_go(rest, 1, 0, h)
+
+fn argmax_go(xs: List Int, i: Int, best_i: Int, best: Int) -> Int =
+  match xs with
+  | Nil -> best_i
+  | Cons h rest ->
+      if h > best then argmax_go(rest, i + 1, i, h)
+      else argmax_go(rest, i + 1, best_i, best)
+
+fn bump_at(xs: List Int, i: Int) -> List Int = map_at(xs, i, \n -> n + 1)
+
+# A claimed remainder drops below every real one, so the next argmax picks a
+# different item. -1 rather than 0 because a genuine remainder can be 0.
+fn clear_at(xs: List Int, i: Int) -> List Int = map_at(xs, i, \_ -> -1)
+
+fn map_at(xs: List Int, i: Int, f: Int -> Int) -> List Int =
+  match xs with
+  | Nil -> Nil
+  | Cons h rest ->
+      if i == 0 then Cons(f(h), rest) else Cons(h, map_at(rest, i - 1, f))
+
+# ── Spending an allocation on a Region ──────────────────────────────────────
+
+# Children side by side: splits columns, every child keeps the full height.
+export fn row(r: geometry.Region, items: List Dimension) -> List geometry.Region =
+  cut_cols(geometry.region_col(r), r, solve(geometry.region_cols(r), items))
+
+fn cut_cols(col: Int, r: geometry.Region, widths: List Int) -> List geometry.Region =
+  match widths with
+  | Nil -> Nil
+  | Cons w rest ->
+      Cons(geometry.Region(col, geometry.region_row(r), w, geometry.region_rows(r)),
+           cut_cols(col + w, r, rest))
+
+# Children stacked: splits rows, every child keeps the full width.
+export fn column(r: geometry.Region, items: List Dimension) -> List geometry.Region =
+  cut_rows(geometry.region_row(r), r, solve(geometry.region_rows(r), items))
+
+fn cut_rows(row_at: Int, r: geometry.Region, heights: List Int) -> List geometry.Region =
+  match heights with
+  | Nil -> Nil
+  | Cons h rest ->
+      Cons(geometry.Region(geometry.region_col(r), row_at, geometry.region_cols(r), h),
+           cut_rows(row_at + h, r, rest))
+
+# Rows of cells. Columns are solved once against the full width and reused for
+# every row, so cells line up vertically — solving per row would let rounding
+# land differently on different rows and ragged the grid.
+export fn grid(r: geometry.Region, cols: List Dimension,
+               rows: List Dimension) -> List (List geometry.Region) =
+  list_map(\band -> row(band, cols), column(r, rows))
+
+# ── Docking ─────────────────────────────────────────────────────────────────
+
+# Take `extent` off one edge, returning (docked, remaining). Textual's `dock`
+# removes a widget from the document flow; there is no flow here, so the same
+# idea is just this shape — the caller keeps the remainder and docks again.
+export fn dock(r: geometry.Region, edge: Edge,
+               extent: Int) -> (geometry.Region, geometry.Region) =
+  match edge with
+  | Top -> geometry.split_top(r, extent)
+  | Bottom -> geometry.split_bottom(r, extent)
+  | Left -> geometry.split_left(r, extent)
+  | Right -> geometry.split_right(r, extent)
+
+# Fold `dock` over several edges. Returns the docked regions in the order asked
+# for, plus the body left over — a header, footer and sidebar in one call.
+export fn dock_all(r: geometry.Region,
+                   edges: List (Edge, Int)) -> (List geometry.Region, geometry.Region) =
+  dock_go(r, edges, Nil)
+
+fn dock_go(r: geometry.Region, edges: List (Edge, Int),
+           acc: List geometry.Region) -> (List geometry.Region, geometry.Region) =
+  match edges with
+  | Nil -> (list_reverse(acc), r)
+  | Cons e rest ->
+      match e with
+      | (edge, extent) ->
+          match dock(r, edge, extent) with
+          | (taken, left) -> dock_go(left, rest, Cons(taken, acc))

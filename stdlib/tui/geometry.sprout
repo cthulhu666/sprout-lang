@@ -97,3 +97,18 @@ export fn split_top(r: Region, rows: Int) -> (Region, Region) =
   in
   (Region(region_col(r), region_row(r), region_cols(r), n),
    Region(region_col(r), region_row(r) + n, region_cols(r), region_rows(r) - n))
+
+# The far-edge twins. Both return (taken, remainder) in that order, like their
+# near-edge counterparts — so the taken part is always first no matter which
+# edge it came off, and `dock` can fold over all four without a special case.
+export fn split_right(r: Region, cols: Int) -> (Region, Region) =
+  let n = imin(imax(cols, 0), region_cols(r))
+  in
+  (Region(region_right(r) - n, region_row(r), n, region_rows(r)),
+   Region(region_col(r), region_row(r), region_cols(r) - n, region_rows(r)))
+
+export fn split_bottom(r: Region, rows: Int) -> (Region, Region) =
+  let n = imin(imax(rows, 0), region_rows(r))
+  in
+  (Region(region_col(r), region_bottom(r) - n, region_cols(r), n),
+   Region(region_col(r), region_row(r), region_cols(r), region_rows(r) - n))

@@ -1,0 +1,239 @@
+module stdlib.tui.text
+
+# Grapheme-cluster segmentation and column measurement, and the wrapping built
+# on them. Design: docs/tui-widgets-v0.md §3.5.
+#
+# A line's length here is its COLUMN width, never its codepoint count: a CJK
+# ideograph occupies two columns and a combining mark occupies none. That is
+# the whole reason this is a TUI module rather than part of `stdlib.string`,
+# which has no business knowing how wide a terminal renders a character.
+#
+# `screen.sprout` places clusters and this module measures them, so the
+# segmentation lives here and is shared. Two copies would be free to disagree,
+# and the failure mode — a wrapper that breaks a line the placer then draws at
+# a different width — is a drifting cursor rather than an error.
+
+import stdlib.unicode.grapheme as grapheme
+import stdlib.unicode.utf8 as utf8
+import stdlib.unicode.width as uwidth
+
+fn imax(a: Int, b: Int) -> Int = if a > b then a else b
+
+fn space() -> Int = 32
+
+fn newline() -> Int = 10
+
+# ── Segmentation ────────────────────────────────────────────────────────────
+
+# The text as grapheme clusters, each a non-empty list of codepoints whose head
+# is the primary. O(n) in codepoints.
+export fn clusters(text: String) -> List (List Int) =
+  let cps = utf8.codepoints(text)
+  in
+  split_clusters(cps, grapheme.cluster_sizes(cps), Nil)
+
+fn split_clusters(cps: List Int, sizes: List Int,
+                  acc: List (List Int)) -> List (List Int) =
+  match sizes with
+  | Nil -> list_reverse(acc)
+  | Cons n rest ->
+      split_clusters(drop_n(cps, n), rest, Cons(take_n(cps, n, Nil), acc))
+
+export fn take_n(xs: List Int, n: Int, acc: List Int) -> List Int =
+  if n <= 0 then list_reverse(acc)
+  else
+    match xs with
+    | Nil -> list_reverse(acc)
+    | Cons h rest -> take_n(rest, n - 1, Cons(h, acc))
+
+export fn drop_n(xs: List Int, n: Int) -> List Int =
+  if n <= 0 then xs
+  else
+    match xs with
+    | Nil -> Nil
+    | Cons _ rest -> drop_n(rest, n - 1)
+
+# The width of the PRIMARY codepoint, not the sum over the cluster. Summing
+# would make an emoji ZWJ sequence four columns wide; tcell measures the same
+# way, taking the width from its `mainc` and ignoring `combc`. Combining marks
+# are zero-width anyway, so the two agree everywhere except the ZWJ case, where
+# only this answer is usable.
+export fn cluster_width(cluster: List Int) -> Int =
+  match cluster with
+  | Nil -> 1
+  | [primary | _] -> imax(1, uwidth.codepoint_width(primary))
+
+fn cluster_is(cluster: List Int, cp: Int) -> Bool =
+  match cluster with
+  | Nil -> false
+  | [primary | _] -> primary == cp
+
+fn render(cs: List (List Int)) -> String =
+  utf8.from_codepoints(flatten(cs))
+
+fn flatten(xs: List (List Int)) -> List Int =
+  list_reverse(list_fold(\ (acc, x) -> prepend_all(x, acc), Nil, xs))
+
+fn prepend_all(xs: List Int, acc: List Int) -> List Int =
+  list_fold(\ (a, x) -> Cons(x, a), acc, xs)
+
+# ── Measurement ─────────────────────────────────────────────────────────────
+
+# Columns the text occupies. O(n) in codepoints.
+export fn width(text: String) -> Int = clusters_width(clusters(text))
+
+fn clusters_width(cs: List (List Int)) -> Int =
+  list_fold(\ (acc, c) -> acc + cluster_width(c), 0, cs)
+
+# ── Truncation ──────────────────────────────────────────────────────────────
+
+# The longest prefix fitting in `cols` columns. A wide cluster that would
+# straddle the edge is dropped whole rather than halved — half a character is
+# not a character, and a terminal asked to draw one would desynchronise the
+# column arithmetic for the rest of the line.
+export fn truncate(text: String, cols: Int) -> String =
+  if cols <= 0 then ""
+  else render(take_cols(clusters(text), cols, Nil))
+
+fn take_cols(cs: List (List Int), left: Int,
+             acc: List (List Int)) -> List (List Int) =
+  match cs with
+  | Nil -> list_reverse(acc)
+  | Cons c rest ->
+      if cluster_width(c) > left then list_reverse(acc)
+      else take_cols(rest, left - cluster_width(c), Cons(c, acc))
+
+# ── Wrapping ────────────────────────────────────────────────────────────────
+
+# Break `text` into lines of at most `cols` columns.
+#
+# Greedy: fill a line with whole words while they fit, and cut mid-word only
+# when a single word cannot fit a line at all — a word with no break
+# opportunity still has to be placed, and overflowing the caller's region is
+# not an option. An existing newline is a hard break. Space runs at a break are
+# consumed, so no wrapped line begins with the space that ended the last one.
+#
+# A non-positive width has no line to fill; returning the input whole
+# terminates, where a search for room that never appears would not.
+#
+# Named `wrap_to` rather than `wrap` because `wrap` is the newtype keyword
+# (`wrap Meters = Int`) and cannot be a function name.
+export fn wrap_to(text: String, cols: Int) -> List String =
+  if cols <= 0 then [text]
+  else list_flat_map(\line -> wrap_line(line, cols), hard_lines(clusters(text)))
+
+# Split on newline clusters. The newline itself is dropped: it is a break, not
+# content, and keeping it would make every line one column wider than measured.
+fn hard_lines(cs: List (List Int)) -> List (List (List Int)) =
+  list_reverse(finish_line(split_lines(cs, Nil, Nil)))
+
+fn split_lines(cs: List (List Int), cur: List (List Int),
+               acc: List (List (List Int))) -> (List (List Int), List (List (List Int))) =
+  match cs with
+  | Nil -> (cur, acc)
+  | Cons c rest ->
+      if cluster_is(c, newline())
+      then split_lines(rest, Nil, Cons(list_reverse(cur), acc))
+      else split_lines(rest, Cons(c, cur), acc)
+
+fn finish_line(state: (List (List Int), List (List (List Int)))) -> List (List (List Int)) =
+  match state with
+  | (cur, acc) -> Cons(list_reverse(cur), acc)
+
+# One hard line, greedily filled. Words are the runs between space runs; the
+# spaces are dropped, which is what collapses a run of them at a break.
+fn wrap_line(line: List (List Int), cols: Int) -> List String =
+  list_map(render, fill(words(line), Nil, 0, Nil, cols))
+
+fn words(cs: List (List Int)) -> List (List (List Int)) =
+  list_reverse(finish_word(split_words(cs, Nil, Nil)))
+
+fn split_words(cs: List (List Int), cur: List (List Int),
+               acc: List (List (List Int))) -> (List (List Int), List (List (List Int))) =
+  match cs with
+  | Nil -> (cur, acc)
+  | Cons c rest ->
+      if cluster_is(c, space())
+      then split_words(rest, Nil, push_word(cur, acc))
+      else split_words(rest, Cons(c, cur), acc)
+
+fn finish_word(state: (List (List Int), List (List (List Int)))) -> List (List (List Int)) =
+  match state with
+  | (cur, acc) -> push_word(cur, acc)
+
+# An empty run is what separates two adjacent spaces; dropping it is what makes
+# `"aa   bb"` wrap the same as `"aa bb"`.
+fn push_word(cur: List (List Int),
+             acc: List (List (List Int))) -> List (List (List Int)) =
+  match cur with
+  | Nil -> acc
+  | [_ | _] -> Cons(list_reverse(cur), acc)
+
+# `cur`/`cur_w` are the line being built, reversed; `acc` the finished lines,
+# reversed.
+fn fill(ws: List (List (List Int)), cur: List (List Int), cur_w: Int,
+        acc: List (List (List Int)), cols: Int) -> List (List (List Int)) =
+  match ws with
+  | Nil -> list_reverse(flush(cur, acc))
+  | Cons w rest -> place(w, rest, cur, cur_w, acc, cols)
+
+fn flush(cur: List (List Int),
+         acc: List (List (List Int))) -> List (List (List Int)) =
+  match cur with
+  | Nil -> acc
+  | [_ | _] -> Cons(list_reverse(cur), acc)
+
+fn place(w: List (List Int), rest: List (List (List Int)), cur: List (List Int),
+         cur_w: Int, acc: List (List (List Int)), cols: Int) -> List (List (List Int)) =
+  match cur with
+  # Nothing on the line yet, so there is no separating space to pay for.
+  | Nil -> start(w, rest, acc, cols)
+  | [_ | _] ->
+      if cur_w + 1 + clusters_width(w) <= cols
+      then fill(rest, prepend_all_clusters(w, Cons([space()], cur)),
+                cur_w + 1 + clusters_width(w), acc, cols)
+      # Does not fit beside what is there: close the line and retry on a fresh
+      # one, where `start` decides whether it needs cutting.
+      else start(w, rest, Cons(list_reverse(cur), acc), cols)
+
+# A word on an empty line: it either fits, or it is longer than any line can be
+# and is cut into full-width chunks with the tail carried forward.
+fn start(w: List (List Int), rest: List (List (List Int)),
+         acc: List (List (List Int)), cols: Int) -> List (List (List Int)) =
+  if clusters_width(w) <= cols
+  then fill(rest, list_reverse(w), clusters_width(w), acc, cols)
+  else chunk(w, rest, acc, cols)
+
+fn chunk(w: List (List Int), rest: List (List (List Int)),
+         acc: List (List (List Int)), cols: Int) -> List (List (List Int)) =
+  let head = take_cols(w, cols, Nil)
+  in
+  # `take_cols` returning nothing would mean a single cluster wider than the
+  # whole line. Emitting it alone overflows by one column, which is visible;
+  # emitting nothing would never terminate, which is not.
+  match head with
+  | Nil -> chunk_rest(drop_count(w, 1), rest, Cons(take_n_clusters(w, 1), acc), cols)
+  | [_ | _] -> chunk_rest(drop_count(w, list_length(head)), rest, Cons(head, acc), cols)
+
+fn chunk_rest(tail: List (List Int), rest: List (List (List Int)),
+              acc: List (List (List Int)), cols: Int) -> List (List (List Int)) =
+  match tail with
+  | Nil -> fill(rest, Nil, 0, acc, cols)
+  | [_ | _] -> start(tail, rest, acc, cols)
+
+fn take_n_clusters(xs: List (List Int), n: Int) -> List (List Int) =
+  if n <= 0 then Nil
+  else
+    match xs with
+    | Nil -> Nil
+    | Cons h rest -> Cons(h, take_n_clusters(rest, n - 1))
+
+fn drop_count(xs: List (List Int), n: Int) -> List (List Int) =
+  if n <= 0 then xs
+  else
+    match xs with
+    | Nil -> Nil
+    | Cons _ rest -> drop_count(rest, n - 1)
+
+fn prepend_all_clusters(xs: List (List Int), acc: List (List Int)) -> List (List Int) =
+  list_fold(\ (a, x) -> Cons(x, a), acc, xs)
