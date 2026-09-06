@@ -1,0 +1,84 @@
+module stdlib.unicode.lookup
+
+# Shared encoding and search for the generated tables in
+# stdlib/unicode/tables.sprout.  Design: docs/stdlib-unicode-v0.md §3.4.
+#
+# The generator imports THIS module for `b62_4`, so the encoder that writes a
+# table and the decoder that searches it are the same code by construction.
+# A drifting pair would produce a table that looks fine and answers wrongly.
+
+import stdlib.string as string
+
+# ── base-62, order-preserving ───────────────────────────────────────────────
+# Digits, then uppercase, then lowercase — increasing values map to increasing
+# ASCII, so a lexicographic compare of two encodings IS a numeric compare.
+# That is what lets a table be binary-searched without being decoded, which in
+# turn is what keeps char_width pure: a decode-once cache would need MutVec,
+# and MutVec is !{IO}.
+
+# Sprout has no `%` operator (see stdlib/math.sprout:211).
+export fn imod(n: Int, d: Int) -> Int = n - (n / d) * d
+
+# One alphabet serves both directions — encoding is an index into it and
+# decoding is a search of it, so the pair cannot drift. Sprout has no
+# `Char -> Int`, only `char_from_codepoint` the other way, so this is also the
+# only way to get a numeric value out of a character; `string.hex_digit_value`
+# uses the same trick.
+export fn b62_alphabet() -> String =
+  "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+
+export fn b62_digit(v: Int) -> String = string.slice(b62_alphabet(), v, 1)
+
+export fn b62_digit_value(ch: Char) -> Int =
+  match string.find(b62_alphabet(), string.string_from_char(ch)) with
+  | Just v -> v
+  | Nothing -> 0
+
+# 62^4 = 14,776,336 > 0x10FFFF, so four digits cover every codepoint.
+export fn b62_4(n: Int) -> String =
+  b62_digit(imod(n / 238328, 62)) ++ b62_digit(imod(n / 3844, 62))
+    ++ b62_digit(imod(n / 62, 62)) ++ b62_digit(imod(n, 62))
+
+export fn b62_decode(raw: String) -> Int =
+  b62_decode_go(raw, 0, string.length(raw), 0)
+
+fn b62_decode_go(raw: String, i: Int, n: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else b62_decode_go(raw, i + 1, n,
+                     acc * 62 + b62_digit_value(string.char_at_or(raw, i, '0')))
+
+# ── Table access ────────────────────────────────────────────────────────────
+# One entry is lo(4) + hi(4) + tag(1); the generator writes 400 entries
+# (3600 characters) per chunk.
+
+export fn entry_width() -> Int = 9
+export fn entries_per_chunk() -> Int = 400
+
+export fn entry_at(chunk: Int -> String, i: Int) -> String =
+  let c = i / 400
+  in
+  string.slice(chunk(c), (i - c * 400) * 9, 9)
+
+# Binary search for the range containing `cp`, returning its one-character tag.
+# Ranges within one table never overlap (they come from a single UCD property
+# file), so the containing range is unique when it exists.
+export fn find_tag(count: Int, chunk: Int -> String, cp: Int) -> Maybe String =
+  find_go(chunk, b62_4(cp), 0, count - 1)
+
+fn find_go(chunk: Int -> String, key: String, lo: Int, hi: Int) -> Maybe String =
+  if lo > hi then Nothing
+  else
+    let mid = (lo + hi) / 2
+    in
+    probe(chunk, key, lo, hi, mid, entry_at(chunk, mid))
+
+fn probe(chunk: Int -> String, key: String, lo: Int, hi: Int,
+         mid: Int, e: String) -> Maybe String =
+  if compare(key, string.slice(e, 0, 4)) < 0 then find_go(chunk, key, lo, mid - 1)
+  else if compare(key, string.slice(e, 4, 4)) > 0 then find_go(chunk, key, mid + 1, hi)
+  else Just(string.slice(e, 8, 1))
+
+export fn has_tag(count: Int, chunk: Int -> String, cp: Int) -> Bool =
+  match find_tag(count, chunk, cp) with
+  | Nothing -> false
+  | Just _ -> true
