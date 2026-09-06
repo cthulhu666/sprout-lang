@@ -13,6 +13,9 @@ module main
 # golden does not depend on the window the test happens to run in. That is also
 # why `app.run` is not exercised here — it reads the terminal size and blocks on
 # stdin, neither of which a golden can pin.
+#
+# Commands are likewise absent: a command's whole effect is IO performed by the
+# loop, which stdout cannot pin at a fixed size. `test_tui_cmd.spr` covers them.
 
 import stdlib.string as string
 import stdlib.terminal as term
@@ -35,11 +38,11 @@ fn to_outer(m: Msg) -> Outer = Inner(m)
 
 # ── a counter: hidden state is Int ──────────────────────────────────────────
 
-fn counter_on_event(n: Int, ev: event.Event) -> (Int, List Msg) =
+fn counter_on_event(n: Int, ev: event.Event) -> (Int, List Msg, List(widget.Cmd Msg)) =
   match ev with
-  | event.TickEvent -> (n + 1, Nil)
-  | event.KeyPress _ _ -> (n, [Hit(n)])
-  | _ -> (n, Nil)
+  | event.TickEvent -> (n + 1, Nil, Nil)
+  | event.KeyPress _ _ -> (n, [Hit(n)], Nil)
+  | _ -> (n, Nil, Nil)
 
 fn counter_measure(n: Int, avail: g.Size) -> g.Size = g.Size(n, 1)
 
@@ -54,7 +57,9 @@ fn counter(n: Int) -> widget.Widget Msg =
 
 # ── a label: hidden state is String ─────────────────────────────────────────
 
-fn label_on_event(t: String, ev: event.Event) -> (String, List Msg) = (t, [Loud(t)])
+fn label_on_event(t: String,
+                  ev: event.Event) -> (String, List Msg, List(widget.Cmd Msg)) =
+  (t, [Loud(t)], Nil)
 
 fn label_measure(t: String, avail: g.Size) -> g.Size = g.Size(string.length(t), 1)
 
@@ -71,7 +76,8 @@ fn label(t: String) -> widget.Widget Msg =
 
 type Box = (dims: List layout.Dimension, kids: List (widget.Widget Msg))
 
-fn box_on_event(b: Box, ev: event.Event) -> (Box, List Msg) = (b, Nil)
+fn box_on_event(b: Box, ev: event.Event) -> (Box, List Msg, List(widget.Cmd Msg)) =
+  (b, Nil, Nil)
 
 fn box_measure(b: Box, avail: g.Size) -> g.Size = avail
 
@@ -103,23 +109,24 @@ fn box(dims: List layout.Dimension, kids: List (widget.Widget Msg)) -> widget.Wi
 
 # ── the pure pump ───────────────────────────────────────────────────────────
 
-fn update(m: Msg, w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow) =
+fn update(m: Msg, w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow, List(widget.Cmd Msg)) =
   match m with
   | Hit n -> quit_at(n, w)
-  | Loud _ -> (w, app.Continue)
+  | Loud _ -> app.done(w, app.Continue)
 
-fn quit_at(n: Int, w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow) =
-  if n >= 2 then (w, app.Quit) else (counter(n + 1), app.Continue)
+fn quit_at(n: Int,
+           w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow, List(widget.Cmd Msg)) =
+  if n >= 2 then app.done(w, app.Quit) else app.done(counter(n + 1), app.Continue)
 
 fn key() -> event.Event = event.KeyPress(event.KEnter, event.mods_none())
 
 fn said(w: widget.Widget Msg, evs: List event.Event) -> String =
   match widget.feed(w, evs) with
-  | (_, ms) -> to_string(ms)
+  | (_, ms, _) -> to_string(ms)
 
 fn flow_after(w: widget.Widget Msg, ev: event.Event) -> String =
   match app.step(update, w, ev) with
-  | (w2, f) -> `${to_string(f)} width=${to_string(g.size_cols(widget.measure(w2, g.Size(9, 9))))}`
+  | (w2, f, _) -> `${to_string(f)} width=${to_string(g.size_cols(widget.measure(w2, g.Size(9, 9))))}`
 
 fn main() -> Unit !{IO} = do
   # --- the box, pure ---
@@ -152,4 +159,4 @@ fn measured(w: widget.Widget Msg) -> Int =
 
 fn said_outer(w: widget.Widget Outer, ev: event.Event) -> String =
   match widget.on_event(w, ev) with
-  | (_, ms) -> to_string(ms)
+  | (_, ms, _) -> to_string(ms)

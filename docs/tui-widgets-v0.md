@@ -40,7 +40,7 @@ constraint solver.
 ```sprout
 type View s m = (
   state:    s,
-  on_event: s -> Event -> (s, List m),
+  on_event: s -> Event -> (s, List m, List (Cmd m)),
   render:   s -> Region -> Screen -> Unit !{IO},
   measure:  s -> Size -> Size
 )
@@ -229,6 +229,53 @@ unconditional join would wait forever on a loop that never ends.
 underneath. Deciding it up front rather than retrofitting; polymorphic-keyed `Dict` is
 tracked separately and is far too large to bundle here.
 
+### 3.8 A widget asks for IO with a command, and never performs it
+
+`on_event` is pure, so a widget that needs to read a directory cannot simply do it. It
+returns a **command** — a description of work — and the app loop runs it:
+
+```sprout
+type Cmd m = | Cmd (Unit -> m !{IO})
+```
+
+`run` spawns each command in its own task and delivers its result back as an ordinary
+`SigMsg`, so the pump needs no separate notion of a command completing. Both halves may
+ask: the widget in `on_event`, the application in `update`. `step` runs the widget first,
+so **widget commands lead** — a reusable widget's request must not be reordered behind
+the embedding application's.
+
+Commands asked for by a **quitting** message are kept in `apply`'s result but dropped by
+`advance`, because `run_in` cancels the scope on the next line and a task spawned there
+could not finish. A farewell *frame* is painted; farewell *work* is not performed.
+
+**Why a newtype over a concrete `!{IO}` arrow, and not an effect-polymorphic field.**
+The obvious alternative is `on_event: s -> Event -> (s, List m) !{e}`, letting a widget
+be pure or effectful as it likes. It is smaller, and it type-checks. It is also **unsound
+in Sprout v0**:
+
+```sprout
+type Box = (f: Int -> Int !{e})
+fn pure_user(b: Box, n: Int) -> Int = b.f(n)   # declared PURE — accepted
+```
+
+Hand `pure_user` a box holding an `!{IO}` function and it compiles clean and performs IO
+inside a function the checker believes is pure (verified by running it). `e` is not a
+parameter of `Box`, so the constructor scheme quantifies and then *discards* it; field
+access re-instantiates a fresh unconstrained variable, and rule 8's documented let-through
+— a body whose effect resolves to a variable is accepted — waves the pure signature past.
+Expressing that design honestly needs effect parameters on type constructors, which
+spec §7 excludes from v0. A concrete `!{IO}` arrow has no such hole: unwrapping a `Cmd`
+and calling it inside a pure function *is* correctly rejected.
+
+The command architecture is not merely the available option, it is the better one. Bubbletea
+— Go, goroutines, IO permitted anywhere, no effect system to route around — chose the same
+shape: `Update(Msg) (Model, Cmd)` with `type Cmd func() Msg`, executed asynchronously. The
+reason is independent of effects: `on_event` runs on the event loop, so IO performed inline
+would block every other widget's next frame, while a command runs in its own task.
+
+`app.done(w, flow)` builds the no-command result, so an application that never issues one
+does not write an empty list in every arm.
+
 ## 4. Modules
 
 | Module | Contents | Lands in |
@@ -236,20 +283,24 @@ tracked separately and is far too large to bundle here.
 | `stdlib/tui/text.sprout` | cluster segmentation, `width`, `wrap_to`, `truncate` | pure half |
 | `stdlib/tui/layout.sprout` | `Dimension`, `Edge`, `solve`, `row`, `column`, `grid`, `dock` | pure half |
 | `stdlib/tui/geometry.sprout` | `split_right`, `split_bottom` added | pure half |
-| `stdlib/tui/widget.sprout` | `View`, `Widget`, `WidgetId`, `on_event`, `feed`, `measure`, `render`, `map_msgs` | app-loop half |
-| `stdlib/tui/app.sprout` | `Flow`, `Signal`, `App`, `apply`, `step`, `run` | app-loop half |
+| `stdlib/tui/widget.sprout` | `View`, `Widget`, `WidgetId`, `Cmd`, `on_event`, `feed`, `measure`, `render`, `map_msgs`, `cmd_run`, `cmd_map` | app-loop half |
+| `stdlib/tui/app.sprout` | `Flow`, `Signal`, `App`, `apply`, `step`, `run`, `done` | app-loop half |
 
 The split is at the pure/IO seam: everything in the first three is a total function over
 values, unit-testable with `run_suite`/`check_eq` and no terminal.
 
-`widget` keeps that seam too — only `render` is `!{IO}`. `on_event` is pure and reports
-messages instead of acting, which is what makes a widget testable and what gives the message
-type a reason to exist: a widget that could perform IO in `on_event` would have nothing to
-report. `app` splits the same way, into a pure `step`/`apply` core and the `run` shell.
+`widget` keeps that seam too — only `render` is `!{IO}`. `on_event` is pure: it reports
+messages and *asks* for IO with a `Cmd` rather than performing any, which is what makes a
+widget testable and what keeps the event loop responsive (§3.8). `app` splits the same way,
+into a pure `step`/`apply` core and the `run` shell that performs what they asked for.
 
 **Composition beyond a single widget is M4.** A container is expressible today — it is a
 widget whose hidden state is a `List (Widget m)`, which `examples/tui_dashboard.sprout`
-demonstrates in about thirty lines — but stdlib ships no `row`/`column` container yet.
+demonstrates in about thirty lines — but stdlib ships no `row`/`column` container yet, and
+each application therefore re-writes the broadcast of events *and commands* to its children.
+M4 also has to answer how a command's **result** gets back to the widget that asked: `update`
+receives it holding an opaque `Widget m` it cannot address into, so only application-global
+commands are useful until a container can route one down. Both are filed in `BACKLOG.md`.
 
 ## 5. Syntax, type-system and error-message impact
 
@@ -288,7 +339,14 @@ All pure, `run_suite`/`check_eq`, no terminal and no fixture process.
   reaching a real `Screen` at the region's origin. Hidden state is observed only through
   `measure`, because reaching into it directly would test what the type exists to forbid.
 - `tests/stdlib/test_tui_app.spr` — the pure pump: `apply` threading messages through
-  `update`, stopping at the first `Quit`, and `step` routing an event end to end.
+  `update`, stopping at the first `Quit`, `step` routing an event end to end, and command
+  collection — from `update`, accumulated across messages, kept across a `Quit`, and merged
+  with the widget's own in `step`.
+- `tests/stdlib/test_tui_cmd.spr` — commands: that building one performs nothing, that
+  `feed` batches them across events, that `map_msgs` retargets a command's *result* and not
+  just its messages, and that a widget's command leads the application's in `step`. Uses the
+  `TestState` form rather than `run_suite`, because asserting on a command's result means
+  running it.
 - `tests/conformance/run/tui_widgets.spr` — golden stdout for the composed path at a FIXED
   screen size, so the golden does not depend on the window the test runs in.
 
@@ -297,6 +355,14 @@ stdin, so no gate exercises it — the conformance runner inherits stdin and wou
 vary. It was verified by hand against `examples/tui_dashboard.sprout`: EOF closes the
 channel and tears down cleanly (exit 0); typed keys decode, update the tree and repaint
 incrementally; a widget-emitted `Quit` ends the loop; and `TermIdle` produces ticks at the
-configured cadence (four in 1.2s at `tick_ms = 250`). **Resize and the `boot`/`SigMsg`
-worker path are implemented but unverified** — neither is reachable from a piped stdin.
+configured cadence (four in 1.2s at `tick_ms = 250`).
+
+The **`SigMsg` path is now verified** — landing commands gave it a driver. A scratch program
+whose widget asks for IO on a keypress, whose command writes a marker file, and whose
+`update` quits on the command's result was run with stdin held open for 8s: the marker
+appeared and the loop had already returned at t=3s, so the result travelled task → channel →
+`on_sig` → `apply`, and EOF was demonstrably not what ended it. (The first attempt timed the
+whole shell pipeline, whose elapsed time is bounded by the `sleep` holding stdin open rather
+than by the app — it read 8s either way and proved nothing. The app has to timestamp its own
+exit.) **The resize path remains unverified**: `TermResized` needs a real SIGWINCH, so a pty.
 Tracked in `BACKLOG.md`.

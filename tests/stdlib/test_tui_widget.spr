@@ -30,11 +30,12 @@ fn wrap_msg(m: Msg) -> Outer = Wrapped(m)
 
 # ── a counter: hidden state is Int ──────────────────────────────────────────
 
-fn counter_on_event(n: Int, ev: event.Event) -> (Int, List Msg) =
+fn counter_on_event(n: Int,
+                    ev: event.Event) -> (Int, List Msg, List(widget.Cmd Msg)) =
   match ev with
-  | event.TickEvent -> (n + 1, Nil)
-  | event.KeyPress _ _ -> (n, [Bumped(n)])
-  | _ -> (n, Nil)
+  | event.TickEvent -> (n + 1, Nil, Nil)
+  | event.KeyPress _ _ -> (n, [Bumped(n)], Nil)
+  | _ -> (n, Nil, Nil)
 
 # The window onto the hidden state: reported width IS the count.
 fn counter_measure(n: Int, avail: g.Size) -> g.Size = g.Size(n, 1)
@@ -50,7 +51,9 @@ fn counter(n: Int) -> widget.Widget Msg =
 
 # ── a label: hidden state is String ─────────────────────────────────────────
 
-fn label_on_event(s: String, ev: event.Event) -> (String, List Msg) = (s, [Said(s)])
+fn label_on_event(s: String,
+                  ev: event.Event) -> (String, List Msg, List(widget.Cmd Msg)) =
+  (s, [Said(s)], Nil)
 
 fn label_measure(s: String, avail: g.Size) -> g.Size = g.Size(string.length(s), 1)
 
@@ -72,23 +75,23 @@ fn width_of(w: widget.Widget a) -> Int =
 
 fn stepped(w: widget.Widget a, ev: event.Event) -> widget.Widget a =
   match widget.on_event(w, ev) with
-  | (w2, _) -> w2
+  | (w2, _, _) -> w2
 
 fn fed(w: widget.Widget a, evs: List event.Event) -> widget.Widget a =
   match widget.feed(w, evs) with
-  | (w2, _) -> w2
+  | (w2, _, _) -> w2
 
 fn said(w: widget.Widget Msg, ev: event.Event) -> String =
   match widget.on_event(w, ev) with
-  | (_, ms) -> to_string(ms)
+  | (_, ms, _) -> to_string(ms)
 
 fn said_all(w: widget.Widget Msg, evs: List event.Event) -> String =
   match widget.feed(w, evs) with
-  | (_, ms) -> to_string(ms)
+  | (_, ms, _) -> to_string(ms)
 
 fn said_outer(w: widget.Widget Outer, ev: event.Event) -> String =
   match widget.on_event(w, ev) with
-  | (_, ms) -> to_string(ms)
+  | (_, ms, _) -> to_string(ms)
 
 fn key() -> event.Event = event.KeyPress(event.KEnter, event.mods_none())
 

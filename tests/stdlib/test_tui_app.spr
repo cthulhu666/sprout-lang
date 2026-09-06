@@ -3,9 +3,11 @@ module tests.tui_app
 # The pump's pure core. Design: docs/tui-widgets-v0.md §3.6.
 #
 # `run` needs a terminal, but the decision it makes on every signal does not:
-# `step` takes a widget and an event and returns the next widget plus whether
-# the loop keeps going. Everything interesting about the loop is in there, so
-# that is what this suite pins — no terminal, no channel, no scheduler.
+# `step` takes a widget and an event and returns the next widget, whether the
+# loop keeps going, and the IO both halves asked for. Everything interesting
+# about the loop is in there, so that is what this suite pins — no terminal, no
+# channel, no scheduler. Commands are collected here but never run; running one
+# needs IO, so `test_tui_cmd.spr` covers that half.
 
 import stdlib.test (check_eq, run_suite)
 import stdlib.tui.app as app
@@ -21,11 +23,12 @@ type Msg (..) deriving (Eq, ToString) =
 
 # A counter whose reported width is its count, so an update is observable
 # without reaching into the hidden state.
-fn counter_on_event(n: Int, ev: event.Event) -> (Int, List Msg) =
+fn counter_on_event(n: Int,
+                    ev: event.Event) -> (Int, List Msg, List(widget.Cmd Msg)) =
   match ev with
-  | event.TickEvent -> (n, [Bumped(n)])
-  | event.KeyPress _ _ -> (n, [Hushed])
-  | _ -> (n, Nil)
+  | event.TickEvent -> (n, [Bumped(n)], Nil)
+  | event.KeyPress _ _ -> (n, [Hushed], Nil)
+  | _ -> (n, Nil, Nil)
 
 fn counter_measure(n: Int, avail: g.Size) -> g.Size = g.Size(n, 1)
 
@@ -41,35 +44,84 @@ fn counter(n: Int) -> widget.Widget Msg =
 # `Bumped n` grows the widget by one and quits once it has reached 3. Growing
 # is done by replacing the box, which is what a real `update` does when a
 # message rebuilds part of the tree.
-fn update(m: Msg, w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow) =
+fn update(m: Msg, w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow,
+                                            List(widget.Cmd Msg)) =
   match m with
   | Bumped n -> bump(n, w)
-  | Hushed -> (w, app.Continue)
+  | Hushed -> app.done(w, app.Continue)
 
-fn bump(n: Int, w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow) =
-  if n >= 3 then (counter(n), app.Quit)
-  else (counter(n + 1), app.Continue)
+fn bump(n: Int, w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow,
+                                          List(widget.Cmd Msg)) =
+  if n >= 3 then app.done(counter(n), app.Quit)
+  else app.done(counter(n + 1), app.Continue)
 
 fn width_of(w: widget.Widget Msg) -> Int =
   g.size_cols(widget.measure(w, g.Size(80, 24)))
 
 fn applied_width(msgs: List Msg, w: widget.Widget Msg) -> Int =
   match app.apply(update, msgs, w) with
-  | (w2, _) -> width_of(w2)
+  | (w2, _, _) -> width_of(w2)
 
 fn applied_flow(msgs: List Msg, w: widget.Widget Msg) -> app.Flow =
   match app.apply(update, msgs, w) with
-  | (_, f) -> f
+  | (_, f, _) -> f
 
 fn stepped_width(w: widget.Widget Msg, ev: event.Event) -> Int =
   match app.step(update, w, ev) with
-  | (w2, _) -> width_of(w2)
+  | (w2, _, _) -> width_of(w2)
 
 fn stepped_flow(w: widget.Widget Msg, ev: event.Event) -> app.Flow =
   match app.step(update, w, ev) with
-  | (_, f) -> f
+  | (_, f, _) -> f
 
 fn key() -> event.Event = event.KeyPress(event.KEnter, event.mods_none())
+
+# ── commands: what pure code asks the loop to do ────────────────────────────
+#
+# Both halves can ask — the widget in `on_event`, the application in `update` —
+# and `apply`/`step` are what collect the requests without performing any.
+
+# Declared `!{IO}` because `Cmd` requires it, not because it performs any — a
+# command's whole point is that the work is deferred, so a test double has
+# nothing to do. Style guide §9 forbids over-declaring; this is the type's demand.
+fn noop(tag: String, u: Unit) -> Msg !{IO} = Hushed
+
+# A widget that reports AND asks, so a step can produce commands from both.
+fn asking_on_event(n: Int, ev: event.Event) -> (Int, List Msg, List(widget.Cmd Msg)) =
+  match ev with
+  | event.TickEvent -> (n, [Bumped(n)], [widget.Cmd(noop("widget", _))])
+  | _ -> (n, Nil, Nil)
+
+fn asking(n: Int) -> widget.Widget Msg =
+  widget.Widget(widget.View(state = n, on_event = asking_on_event,
+                            render = counter_render, measure = counter_measure))
+
+fn asking_update(m: Msg, w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow,
+                                                   List(widget.Cmd Msg)) =
+  match m with
+  | Bumped n -> (counter(n + 1), app.Continue, [widget.Cmd(noop("update", _))])
+  | Hushed -> app.done(w, app.Continue)
+
+# Quits, and asks for one last thing on the way out.
+fn quit_update(m: Msg, w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow,
+                                                 List(widget.Cmd Msg)) =
+  (w, app.Quit, [widget.Cmd(noop("farewell", _))])
+
+fn asked(msgs: List Msg, w: widget.Widget Msg) -> Int =
+  match app.apply(asking_update, msgs, w) with
+  | (_, _, cs) -> list_length(cs)
+
+fn quit_asked(msgs: List Msg, w: widget.Widget Msg) -> Int =
+  match app.apply(quit_update, msgs, w) with
+  | (_, _, cs) -> list_length(cs)
+
+fn plain_asked(msgs: List Msg, w: widget.Widget Msg) -> Int =
+  match app.apply(update, msgs, w) with
+  | (_, _, cs) -> list_length(cs)
+
+fn stepped_cmds(w: widget.Widget Msg, ev: event.Event) -> Int =
+  match app.step(asking_update, w, ev) with
+  | (_, _, cs) -> list_length(cs)
 
 fn main() -> Unit !{IO} =
   run_suite("tui app", [
@@ -77,6 +129,23 @@ fn main() -> Unit !{IO} =
     check_eq("Continue prints", to_string(app.Continue), "Continue"),
     check_eq("Quit prints", to_string(app.Quit), "Quit"),
     check_eq("Continue is not Quit", app.Continue == app.Quit, false),
+
+    # ── commands are collected, never run ───────────────────────────────────
+    check_eq("an update that asks contributes a command",
+             asked([Bumped(0)], counter(0)), 1),
+    check_eq("commands accumulate across messages",
+             asked([Bumped(0), Bumped(1)], counter(0)), 2),
+    check_eq("no messages asks for nothing", asked(Nil, counter(0)), 0),
+    check_eq("app.done asks for nothing",
+             plain_asked([Bumped(0), Hushed], counter(0)), 0),
+    # A farewell command survives the Quit that ends the loop.
+    check_eq("a quitting update's command is kept",
+             quit_asked([Hushed], counter(0)), 1),
+    # The widget asked, then update asked again for the message it emitted.
+    check_eq("step collects from the widget and the application",
+             stepped_cmds(asking(0), event.TickEvent), 2),
+    check_eq("a silent event asks for nothing",
+             stepped_cmds(asking(0), key()), 0),
 
     # ── apply: folding messages through update ──────────────────────────────
     check_eq("no messages leaves the widget alone", applied_width(Nil, counter(0)), 0),
