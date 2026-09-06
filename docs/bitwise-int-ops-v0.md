@@ -352,14 +352,20 @@ is an integer literal in `0..63` pays nothing — the guard is folded away at tr
 time (§9), and that covers every GC-header field extraction and every mask in this
 document's examples.
 
-### 5.4 Not first-class values
+### 5.4 First-class values, where the types are known
+
+> **Amended 2026-09-06.** This section originally said these could not be passed as values
+> at all. They can now: `list_fold(bit_xor, 0, xs)` works. The paragraph below records what
+> changed and what is still refused.
 
 Like `print`, `to_double` and `double_to_bits`, these are compiler intrinsics with no
-runtime symbol, so they **cannot be passed as values**: `list_fold(bit_xor, 0, xs)`
-references an undefined symbol and fails to link. That is loud rather than silent, and is
-the pre-existing behaviour of this whole class of declaration. The workaround is a
-one-line wrapper — `fn bxor(a: Int, b: Int) -> Int = bit_xor(a, b)` — which is an
-ordinary function and passes fine.
+runtime symbol, so a first-class reference cannot be a wrapper that *calls* one. The
+wrapper instead lowers the operation itself, using the same call-site dispatch a direct
+call gets, and is minted per use-site with the argument types already resolved. What that
+still cannot do is lower a reference whose argument type is a type variable — a reference
+inside a function generic in the operand type has nothing to dispatch on — so that case is
+rejected with a located error naming the one-line-wrapper workaround
+(`fn bxor(a: Int, b: Int) -> Int = bit_xor(a, b)`, an ordinary function that passes fine).
 
 ### 5.5 Companion gap: there are no hex literals
 

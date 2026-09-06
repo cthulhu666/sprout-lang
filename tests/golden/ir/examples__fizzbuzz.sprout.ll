@@ -564,20 +564,20 @@ join_2:
   ret i64 %t$3
 }
 
-define i64 @__sprout_ir_lambda_1(i64 %env$, i64 %line) {
+define i64 @__sprout_ir_eta_print_1(i64 %env$, i64 %a0) {
 entry:
-  %t$0$ptr = inttoptr i64 %line to ptr
+  %t$0$ptr = inttoptr i64 %a0 to ptr
   %t$0 = call i64 @print_str(ptr %t$0$ptr)
   ret i64 %t$0
 }
 
-define i64 @__sprout_ir_lambda_2(i64 %env$, i64 %__cmp_acc16_35_0, i64 %i) {
+define i64 @__sprout_ir_lambda_2(i64 %env$, i64 %__cmp_acc16_20_0, i64 %i) {
 entry:
   %t$2 = alloca i64
   store i64 %i, ptr %t$2
   %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
   %t$4 = alloca i64
-  store i64 %__cmp_acc16_35_0, ptr %t$4
+  store i64 %__cmp_acc16_20_0, ptr %t$4
   %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
   %t$0 = call i64 @$entry.fizzbuzz(i64 %i)
   %t$6 = alloca i64
@@ -588,7 +588,7 @@ entry:
   %t$1$f0 = getelementptr i64, ptr %t$1$ptr, i64 0
   store i64 %t$0, ptr %t$1$f0
   %t$1$f1 = getelementptr i64, ptr %t$1$ptr, i64 1
-  store i64 %__cmp_acc16_35_0, ptr %t$1$f1
+  store i64 %__cmp_acc16_20_0, ptr %t$1$f1
   %t$8 = call i64 @sprout_gc_pop_roots(i64 3)
   ret i64 %t$1
 }
@@ -597,7 +597,7 @@ define i64 @__sprout_user_main() {
 entry:
   %t$0 = call i64 @sprout_alloc_closure(i64 8, i64 1)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_1, ptr %t$0$raw
+  store ptr @__sprout_ir_eta_print_1, ptr %t$0$raw
   %t$9 = alloca i64
   store i64 %t$0, ptr %t$9
   %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)

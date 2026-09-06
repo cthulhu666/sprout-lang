@@ -10180,9 +10180,9 @@ entry:
   ret i64 %t$1
 }
 
-define i64 @__sprout_ir_lambda_9(i64 %env$, i64 %line) {
+define i64 @__sprout_ir_eta_eprint_9(i64 %env$, i64 %a0) {
 entry:
-  %t$0$ptr = inttoptr i64 %line to ptr
+  %t$0$ptr = inttoptr i64 %a0 to ptr
   %t$0 = call i64 @eprint_str(ptr %t$0$ptr)
   ret i64 %t$0
 }
@@ -10194,7 +10194,7 @@ entry:
   %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
   %t$0 = call i64 @sprout_alloc_closure(i64 8, i64 1)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_9, ptr %t$0$raw
+  store ptr @__sprout_ir_eta_eprint_9, ptr %t$0$raw
   %t$4 = alloca i64
   store i64 %t$0, ptr %t$4
   %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)

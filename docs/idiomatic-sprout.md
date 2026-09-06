@@ -106,19 +106,24 @@ let big    = vec_filter(\n -> n > 2, nums)
 let total  = vec_fold(\ (acc, n) -> acc + n, 0, nums)
 
 # Effectful traversal (bridge a Vec through vec_to_list):
-list_each(\name -> print(name), names)
-list_each(\name -> print(name), vec_to_list(items))
+list_each(print, names)
+list_each(print, vec_to_list(items))
 ```
 
+Write a lambda when the step *does* something to the element. When it only hands
+the element straight to one function, pass that function's name — `\name ->
+print(name)` and `print` are the same function, and the shorter one has nothing
+to misread.
+
 When the per-element action needs more than one expression, name a helper and pass
-a one-expression lambda:
+it the same way:
 
 ```sprout
 fn greet(name: String) -> Unit !{IO} = do
   print("welcome,")
   print(name)
 
-list_each(\n -> greet(n), names)
+list_each(greet, names)
 ```
 
 Reach for `range_each` only when you genuinely need the index — a numeric loop, or

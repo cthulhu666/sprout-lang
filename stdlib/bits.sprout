@@ -22,10 +22,11 @@ module stdlib.bits
 #   - An extern is never module-qualified (spec §"Externs are outside the module system"),
 #     so these are called by BARE name. `import stdlib.bits` puts them in the build;
 #     `bits.bit_and(w, 255)` does NOT resolve and fails with `Unknown variable`.
-#   - They cannot be used as first-class values. `list_fold(bit_xor, 0, xs)` references an
-#     undefined symbol and fails to LINK — loud rather than silent. Wrap it in a one-line
-#     ordinary function (`fn bxor(a: Int, b: Int) -> Int = bit_xor(a, b)`) if you need to
-#     pass one around.
+#   - They CAN be used as first-class values — `list_fold(bit_xor, 0, xs)` works — but only
+#     where the argument types are known at the reference. Eta-expansion lowers the wrapper
+#     body through the same call-site dispatch rather than calling a symbol, so a reference
+#     under a type variable (inside a function generic in the operand type) has nothing to
+#     dispatch on and is rejected with a located error.
 #
 # WIDTH. Five of the seven are definable without reference to any width, and survive `Int`
 # eventually becoming arbitrary-precision (spec §8.4) unchanged: `bit_and`, `bit_or`,

@@ -41,7 +41,7 @@ export fn logger_with_sink(min: Level, sink: String -> Unit !{IO}) -> Logger =
 # The default sink is stderr (via eprint), which keeps stdout clean for a
 # program's actual output — the Unix convention for diagnostics.
 export fn stderr_logger(min: Level) -> Logger =
-  logger_with_sink(min, \line -> eprint(line))
+  logger_with_sink(min, eprint)
 
 export fn min_level(lg: Logger) -> Level =
   match lg with

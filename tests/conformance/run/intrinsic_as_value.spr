@@ -1,0 +1,65 @@
+module main
+
+# Every builtin whose lowering is directed by the CALL SITE has no symbol of its own to forward
+# to: `print`/`eprint` choose @print_str or @print_value from the argument's type, `to_double`
+# and the bits family lower to a single LLVM instruction. Passing one as a first-class value
+# used to emit a wrapper calling a name that does not exist, and the two halves of the family
+# failed at different stages — @print has its `declare` suppressed so `opt` rejected it, while
+# @to_double and the bits family were declared and failed only at LINK.
+#
+# This fixture lives in conformance/run rather than tests/stdlib because this is the only corpus
+# that links and executes; an IR-only or grep-only gate cannot see either failure.
+
+import stdlib.bits
+import stdlib.math
+
+# --- print dispatches on the argument type, so each type is a separate wrapper body ---
+fn print_strings() -> Unit !{IO} = list_each(print, ["alpha", "beta"])
+
+fn print_ints() -> Unit !{IO} = list_each(print, [1, 2])
+
+fn print_chars() -> Unit !{IO} = list_each(print, ['x', 'y'])
+
+fn print_bools() -> Unit !{IO} = list_each(print, [true, false])
+
+# stderr, so it is absent from the golden — it is here because it must LINK.
+fn eprint_strings() -> Unit !{IO} = list_each(eprint, ["diagnostic"])
+
+# --- the bits family, each in value position ---
+fn xor_all(xs: List Int) -> Int = list_fold(bit_xor, 0, xs)
+
+fn and_all(xs: List Int) -> Int = list_fold(bit_and, 255, xs)
+
+fn or_all(xs: List Int) -> Int = list_fold(bit_or, 0, xs)
+
+fn shl_all(xs: List Int) -> Int = list_fold(bit_shl, 1, xs)
+
+fn shr_all(xs: List Int) -> Int = list_fold(bit_shr, 1024, xs)
+
+fn shr_zf_all(xs: List Int) -> Int = list_fold(bit_shr_zf, -1, xs)
+
+fn complement(xs: List Int) -> List Int = list_map(bit_not, xs)
+
+# --- to_double and the Double bit intrinsics ---
+fn widen(xs: List Int) -> List Double = list_map(to_double, xs)
+
+fn bit_patterns(xs: List Double) -> List Int = list_map(double_to_bits, xs)
+
+fn from_patterns(xs: List Int) -> List Double = list_map(double_from_bits, xs)
+
+fn main() -> Unit !{IO} = do
+  print_strings()
+  print_ints()
+  print_chars()
+  print_bools()
+  eprint_strings()
+  print(`xor       ${to_string(xor_all([1, 2, 4]))}`)
+  print(`and       ${to_string(and_all([204, 170]))}`)
+  print(`or        ${to_string(or_all([1, 2, 4]))}`)
+  print(`shl       ${to_string(shl_all([3, 2]))}`)
+  print(`shr       ${to_string(shr_all([3, 2]))}`)
+  print(`shr_zf    ${to_string(shr_zf_all([60]))}`)
+  print(`not       ${to_string(complement([0, 1, 5]))}`)
+  print(`widen     ${to_string(widen([1, 2]))}`)
+  print(`bits      ${to_string(bit_patterns([1.0]))}`)
+  print(`unbits    ${to_string(from_patterns([4607182418800017408]))}`)

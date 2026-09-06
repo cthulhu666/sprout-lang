@@ -1,0 +1,83 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.ast_to_ir as ast_to_ir
+import stdlib.compiler.ir_lowering as ir_lowering
+import stdlib.compiler.sprout_ir as sprout_ir
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.types as types
+import stdlib.compiler.ast as ast
+import stdlib.compiler.source as source
+import stdlib.string as string
+
+# A call-site-directed intrinsic referenced as a VALUE. `print` has no @print symbol —
+# each call site picks @print_str or @print_value from the argument type — so the generic
+# eta wrapper (`call @<name>`) named nothing and the program failed at `opt` or at LINK.
+# synthesize_intrinsic_eta_closure lowers the wrapper BODY through the same dispatch
+# instead, which means the wrapper is only well-defined where the argument type is known.
+#
+# Asserted here rather than only in tests/conformance/run/intrinsic_as_value.spr because
+# that fixture can show the program works, not WHICH branch each wrapper took, and it
+# cannot reach the rejection at all (a rejected program emits no stdout to compare).
+
+fn no_pos() -> source.SourcePos = source.SourcePos(index = 0, line = 0, column = 0)
+
+fn string_t() -> types.Type = types.TConst(types.type_id("String"))
+fn int_t() -> types.Type = types.TConst(types.type_id("Int"))
+fn unit_t() -> types.Type = types.TConst(types.type_id("Unit"))
+fn free_t() -> types.Type = types.TVar(types.tyvar_id("a"))
+
+fn io_arrow(param: types.Type) -> types.Type =
+  types.TFunc(param, unit_t(), types.EffectIO, types.OwnConsume)
+
+# `fn f() -> (t -> Unit !{IO}) = print` — `print` in value position, at argument type `t`.
+fn print_as_value(t: types.Type) -> typed_ast.TypedDecl =
+  typed_ast.TFnDecl("f", Nil, Nothing, Nothing, Nil,
+    typed_ast.TVar("print", io_arrow(t), no_pos()))
+
+fn print_arities() -> Dict ast_to_ir.FnInfo =
+  dict_set("print", ast_to_ir.fn_info(1, false), dict_empty())
+
+# Lower the decl and hand back the whole emitted text — the wrapper is a LIFTED
+# function, so the decl's own body is only the IRMkClosure that references it.
+fn lower_all(d: typed_ast.TypedDecl) -> Result String String !{IO} =
+  do
+    ctr <- ref_new(0)
+    lidx <- ref_new(dict_empty())
+    match ast_to_ir.translate_decl_with_idx(d, dict_empty(), set_empty(), set_empty(),
+                                            print_arities(), ctr, lidx) with
+    | Err msg -> Err(msg)
+    | Ok maybe ->
+        match maybe with
+        | Nothing -> Err("expected a translated fn")
+        | Just triple ->
+            match triple with
+            | (f, _idx, lifted) ->
+                Ok(list_fold(\ (acc, g) -> acc ++ ir_lowering.lower_fn_with_table(g, dict_empty()),
+                             ir_lowering.lower_fn_with_table(f, dict_empty()), lifted))
+
+fn check_dispatch(state: TestState, label: String, t: types.Type, expect: String) -> Unit !{IO} =
+  match lower_all(print_as_value(t)) with
+  | Err msg -> assert_true(state, label ++ ": lowered (got Err: " ++ msg ++ ")", false)
+  | Ok text ->
+      do
+        assert_true(state, label ++ ": wrapper calls " ++ expect, string.contains(text, expect))
+        # The bug this replaces: a wrapper body forwarding to the absent @print.
+        assert_true(state, label ++ ": no call to the absent @print",
+          string.contains(text, "call i64 @print(") == false)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    check_dispatch(state, "String argument", string_t(), "@print_str")
+    check_dispatch(state, "Int argument", int_t(), "@print_value")
+    # An argument type that is still a type variable carries no dispatch, and must be
+    # REJECTED rather than silently taking the Int arm and printing a pointer.
+    match lower_all(print_as_value(free_t())) with
+    | Ok _ -> assert_true(state, "free tyvar argument: rejected", false)
+    | Err msg ->
+        do
+          assert_true(state, "free tyvar argument: rejected, naming the intrinsic",
+            string.contains(msg, "'print' cannot be used as a first-class value"))
+          assert_true(state, "free tyvar argument: rejection says what to do instead",
+            string.contains(msg, "Wrap it in an ordinary function"))
+    summary(state)

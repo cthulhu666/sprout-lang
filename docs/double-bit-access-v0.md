@@ -170,10 +170,14 @@ directions for every bit pattern, including every NaN payload (nothing is
 canonicalised) and both zeros. Neither is a numeric conversion — `double_to_bits(1.0)`
 is `4607182418800017408`, not `1`. `to_double` remains the numeric bridge.
 
-Like `print` and `to_double`, both are compiler intrinsics and **cannot be used as
-first-class values**: `map(double_to_bits, xs)` references an undefined symbol and
-fails to link. That is loud rather than silent, and is the pre-existing behaviour of
-this whole class of declaration.
+Like `print` and `to_double`, both are compiler intrinsics with no runtime symbol.
+
+> **Amended 2026-09-06.** This paragraph originally said they could not be used as
+> first-class values, `map(double_to_bits, xs)` failing at link. They can now: the
+> wrapper the compiler synthesises for a first-class reference lowers the operation
+> rather than calling a symbol. Only a reference whose argument type is still a type
+> variable is refused, and that is now a located compile error rather than a link
+> failure. See `docs/bitwise-int-ops-v0.md` §5.4.
 
 ### Why no bitwise operators
 

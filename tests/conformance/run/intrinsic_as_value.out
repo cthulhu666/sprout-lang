@@ -1,0 +1,18 @@
+alpha
+beta
+1
+2
+x
+y
+1
+0
+xor       7
+and       136
+or        7
+shl       32
+shr       32
+shr_zf    15
+not       [-1, -2, -6]
+widen     [1.0, 2.0]
+bits      [4607182418800017408]
+unbits    [1.0]
