@@ -1,0 +1,168 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.tui.app as app
+import stdlib.tui.event as event
+import stdlib.tui.geometry as g
+import stdlib.tui.screen as scr
+import stdlib.tui.style as sty
+import stdlib.tui.widget as widget
+
+# Commands: how pure code asks for IO. Design: docs/tui-widgets-v0.md §3.8.
+#
+# The property under test is that building a command performs NOTHING. A widget
+# that wanted to read a file used to have no way to say so; now it returns a
+# `Cmd`, and only the app loop's task runs it. So the interesting assertions are
+# about a command *not* having run yet, and about commands surviving the two
+# transformations a widget tree applies to them — batching across events, and
+# `map_msgs` retargeting a widget into another vocabulary.
+
+type Msg (..) deriving (Eq, ToString) =
+  | Ticked Int
+  | Loaded String
+
+type Outer (..) deriving (Eq, ToString) =
+  | Wrapped Msg
+
+fn wrap_msg(m: Msg) -> Outer = Wrapped(m)
+
+# The command body. Declared `!{IO}` because a real one reads a file; this one
+# stays deterministic so the suite asserts on its result.
+fn load(name: String, u: Unit) -> Msg !{IO} = Loaded(name)
+
+# ── a widget that asks for IO ───────────────────────────────────────────────
+
+fn loader_on_event(n: Int, ev: event.Event) -> (Int, List Msg, List(widget.Cmd Msg)) =
+  match ev with
+  # A key asks for work rather than doing it.
+  | event.KeyPress _ _ -> (n + 1, [Ticked(n)], [widget.Cmd(load("keyed", _))])
+  # A tick reports, and asks for nothing.
+  | event.TickEvent -> (n + 1, [Ticked(n)], Nil)
+  | _ -> (n, Nil, Nil)
+
+fn loader_measure(n: Int, avail: g.Size) -> g.Size = g.Size(n, 1)
+
+fn loader_render(n: Int, r: g.Region, s: scr.Screen) -> Unit !{IO} = do
+  stop <- scr.screen_write(s, g.region_col(r), g.region_row(r), to_string(n),
+                           sty.style_default())
+  ()
+
+fn loader(n: Int) -> widget.Widget Msg =
+  widget.Widget(widget.View(state = n, on_event = loader_on_event,
+                            render = loader_render, measure = loader_measure))
+
+fn key() -> event.Event = event.KeyPress(event.KEnter, event.mods_none())
+
+# ── reading results without unpacking the box ───────────────────────────────
+
+fn cmds_of(w: widget.Widget a, ev: event.Event) -> Int =
+  match widget.on_event(w, ev) with
+  | (_, _, cs) -> list_length(cs)
+
+fn fed_cmds(w: widget.Widget a, evs: List event.Event) -> Int =
+  match widget.feed(w, evs) with
+  | (_, _, cs) -> list_length(cs)
+
+fn width_of(w: widget.Widget a) -> Int =
+  g.size_cols(widget.measure(w, g.Size(80, 24)))
+
+fn stepped(w: widget.Widget a, ev: event.Event) -> widget.Widget a =
+  match widget.on_event(w, ev) with
+  | (w2, _, _) -> w2
+
+fn first_cmd(w: widget.Widget a, ev: event.Event) -> Maybe(widget.Cmd a) =
+  match widget.on_event(w, ev) with
+  | (_, _, cs) -> head_of(cs)
+
+fn head_of(cs: List x) -> Maybe x =
+  match cs with
+  | Nil -> Nothing
+  | [c | _] -> Just(c)
+
+fn main() -> Unit !{IO} = do
+  state <- new_state()
+  purity_cases(state)
+  batching_cases(state)
+  map_cases(state)
+  order_cases(state)
+  summary(state)
+
+# ── the widget asked first, so its command leads ────────────────────────────
+#
+# Order is not cosmetic: a reusable widget's request must not be reordered
+# behind the embedding application's, or a widget that asked to read a file
+# before the app asked to overwrite it would get the two the wrong way round.
+
+fn ord_update(m: Msg, w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow,
+                                                List(widget.Cmd Msg)) =
+  (w, app.Continue, [widget.Cmd(load("from-update", _))])
+
+fn order_cases(state: TestState) -> Unit !{IO} =
+  match app.step(ord_update, loader(0), key()) with
+  | (_, _, cs) -> order_run(state, cs)
+
+fn order_run(state: TestState, cs: List (widget.Cmd Msg)) -> Unit !{IO} = do
+  assert_eq(state, "a step collects both halves' commands", list_length(cs), 2)
+  msgs <- run_all(cs, Nil)
+  assert_eq(state, "the widget's command leads the application's",
+            to_string(msgs), "[Loaded(keyed), Loaded(from-update)]")
+
+fn run_all(cs: List (widget.Cmd Msg), acc: List Msg) -> List Msg !{IO} =
+  match cs with
+  | Nil -> list_reverse(acc)
+  | [c | rest] -> run_next(c, rest, acc)
+
+fn run_next(c: widget.Cmd Msg, rest: List (widget.Cmd Msg),
+            acc: List Msg) -> List Msg !{IO} = do
+  m <- widget.cmd_run(c)
+  run_all(rest, Cons(m, acc))
+
+# ── building a command runs nothing ─────────────────────────────────────────
+
+fn purity_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "a key produces one command", cmds_of(loader(0), key()), 1)
+  assert_eq(state, "a tick produces none", cmds_of(loader(0), event.TickEvent), 0)
+  # State still advances on the event that asked for work.
+  assert_eq(state, "the asking event still updates state",
+            width_of(stepped(loader(4), key())), 5)
+  run_cases(state, first_cmd(loader(0), key()))
+
+# Running is the app loop's job, and it is the ONLY place the IO happens.
+fn run_cases(state: TestState, c: Maybe (widget.Cmd Msg)) -> Unit !{IO} =
+  match c with
+  | Nothing -> assert_eq(state, "a command was produced", "missing", "present")
+  | Just cmd -> ran_case(state, cmd)
+
+fn ran_case(state: TestState, c: widget.Cmd Msg) -> Unit !{IO} = do
+  m <- widget.cmd_run(c)
+  assert_eq(state, "running a command yields its message", m, Loaded("keyed"))
+
+# ── batching across a feed ──────────────────────────────────────────────────
+
+fn batching_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "feed collects a command per asking event",
+            fed_cmds(loader(0), [key(), key()]), 2)
+  assert_eq(state, "feed collects none when nothing asks",
+            fed_cmds(loader(0), [event.TickEvent, event.TickEvent]), 0)
+  assert_eq(state, "feed mixes asking and non-asking events",
+            fed_cmds(loader(0), [key(), event.TickEvent, key()]), 2)
+  assert_eq(state, "feeding nothing asks for nothing", fed_cmds(loader(0), Nil), 0)
+
+# ── map_msgs retargets commands too ─────────────────────────────────────────
+#
+# This is the case that would silently rot: a widget embedded in another
+# application still asks for its own work, and the command's RESULT has to be
+# translated on the way back or the outer app receives a message it cannot read.
+
+fn map_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "a mapped widget still asks",
+            cmds_of(widget.map_msgs(wrap_msg, loader(0)), key()), 1)
+  mapped_run(state, first_cmd(widget.map_msgs(wrap_msg, loader(0)), key()))
+
+fn mapped_run(state: TestState, c: Maybe (widget.Cmd Outer)) -> Unit !{IO} =
+  match c with
+  | Nothing -> assert_eq(state, "a mapped command was produced", "missing", "present")
+  | Just cmd -> mapped_ran(state, cmd)
+
+fn mapped_ran(state: TestState, c: widget.Cmd Outer) -> Unit !{IO} = do
+  m <- widget.cmd_run(c)
+  assert_eq(state, "a mapped command's result is retargeted too",
+            m, Wrapped (Loaded("keyed")))

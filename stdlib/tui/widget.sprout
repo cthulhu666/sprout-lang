@@ -20,15 +20,40 @@ export fn id_text(i: WidgetId) -> String =
   match i with
   | WidgetId s -> s
 
+# A unit of IO that a widget or application WANTS performed, but does not
+# perform. Pure code builds one; only the app loop runs it, in a task of its
+# own, so a slow read cannot stall the frame.
+#
+# A newtype over a concrete `!{IO}` arrow rather than an effect-polymorphic
+# field: an `!{e}` field is erased when the record is constructed, which lets
+# IO run inside a function the checker still believes is pure.
+export type Cmd m (..) =
+  | Cmd (Unit -> m !{IO})
+
+# Perform the work. The app loop calls this and nothing else does.
+export fn cmd_run(c: Cmd m) -> m !{IO} =
+  match c with
+  | Cmd f -> f(())
+
+# Retarget a command's result, so an embedded widget's work reports in the
+# embedding application's vocabulary. Pure: it composes thunks, runs neither.
+export fn cmd_map(f: m -> n, c: Cmd m) -> Cmd n =
+  match c with
+  | Cmd g -> Cmd(cmd_mapped(f, g, _))
+
+fn cmd_mapped(f: m -> n, g: Unit -> m !{IO}, u: Unit) -> n !{IO} = do
+  x <- g(())
+  f(x)
+
 # The four things a widget can do, over its own state type.
 #
-# `on_event` is pure and returns the messages the widget wants its application
-# to see; it cannot act on the world itself. That is what keeps a widget
-# testable and what makes the message type meaningful — a widget that could
-# perform IO in `on_event` would have no reason to report anything.
+# `on_event` is pure: it reports messages, and it asks for IO with a `Cmd`
+# rather than performing any. That is what keeps a widget testable, and it is
+# also what keeps the loop responsive — a command runs in its own task, while
+# IO performed inline would block every other widget's next frame.
 export type View s m = (
   state: s,
-  on_event: s -> event.Event -> (s, List m),
+  on_event: s -> event.Event -> (s, List m, List (Cmd m)),
   render: s -> geometry.Region -> screen.Screen -> Unit !{IO},
   measure: s -> geometry.Size -> geometry.Size
 )
@@ -42,38 +67,43 @@ export type Widget m (..) =
   | exists s. Widget (View s m)
 
 # Hand one event to a widget: the box comes back rebuilt around its new state,
-# still hiding the same type, plus whatever it wants to say.
-export fn on_event(w: Widget m, ev: event.Event) -> (Widget m, List m) =
+# still hiding the same type, plus what it wants to say and what it wants done.
+export fn on_event(w: Widget m, ev: event.Event) -> (Widget m, List m, List (Cmd m)) =
   match w with
   | Widget v -> repack(v, v.on_event(v.state, ev))
 
 # Repacking is a separate function because the skolem `s` is only in scope
 # under the `Widget v` pattern; naming it here keeps `on_event` one line and
 # the existential's scope obvious.
-fn repack(v: View s m, r: (s, List m)) -> (Widget m, List m) =
+fn repack(v: View s m,
+          r: (s, List m, List (Cmd m))) -> (Widget m, List m, List (Cmd m)) =
   match r with
-  | (s2, msgs) -> (Widget(v with (state = s2)), msgs)
+  | (s2, msgs, cmds) -> (Widget(v with (state = s2)), msgs, cmds)
 
-# Fold a batch of events in order, concatenating what each one said. One read
+# Fold a batch of events in order, concatenating what each one said and asked
+# for. One read
 # of the terminal yields several events, and they must be applied in arrival
 # order — a widget's reply depends on the state the previous event left.
-export fn feed(w: Widget m, evs: List event.Event) -> (Widget m, List m) =
-  feed_go(w, evs, Nil)
+export fn feed(w: Widget m,
+               evs: List event.Event) -> (Widget m, List m, List (Cmd m)) =
+  feed_go(w, evs, Nil, Nil)
 
-fn feed_go(w: Widget m, evs: List event.Event, acc: List m) -> (Widget m, List m) =
+fn feed_go(w: Widget m, evs: List event.Event, msgs: List m,
+           cmds: List (Cmd m)) -> (Widget m, List m, List (Cmd m)) =
   match evs with
-  | Nil -> (w, list_reverse(acc))
-  | [e | rest] -> feed_step(on_event(w, e), rest, acc)
+  | Nil -> (w, list_reverse(msgs), list_reverse(cmds))
+  | [e | rest] -> feed_step(on_event(w, e), rest, msgs, cmds)
 
-fn feed_step(r: (Widget m, List m), rest: List event.Event,
-             acc: List m) -> (Widget m, List m) =
+fn feed_step(r: (Widget m, List m, List (Cmd m)), rest: List event.Event,
+             msgs: List m,
+             cmds: List (Cmd m)) -> (Widget m, List m, List (Cmd m)) =
   match r with
-  | (w2, msgs) -> feed_go(w2, rest, push_all(msgs, acc))
+  | (w2, ms, cs) -> feed_go(w2, rest, push_all(ms, msgs), push_all(cs, cmds))
 
 # Accumulate reversed and reverse once at the end, so a long batch is linear
 # rather than quadratic in `++`.
-fn push_all(msgs: List m, acc: List m) -> List m =
-  list_fold(\ (a, m) -> Cons(m, a), acc, msgs)
+fn push_all(xs: List a, acc: List a) -> List a =
+  list_fold(\ (seen, x) -> Cons(x, seen), acc, xs)
 
 # The widget's natural size within `avail` — what `layout.Auto` carries.
 export fn measure(w: Widget m, avail: geometry.Size) -> geometry.Size =
@@ -86,8 +116,9 @@ export fn render(w: Widget m, r: geometry.Region, s: screen.Screen) -> Unit !{IO
   match w with
   | Widget v -> v.render(v.state, r, s)
 
-# Retarget a widget's messages, so one written against its own vocabulary can
-# be embedded in an application with a different one. This is what makes `m`
+# Retarget a widget's messages AND the results of its commands, so one written
+# against its own vocabulary can be embedded in an application with a different
+# one. This is what makes `m`
 # universal rather than merely fixed: without it, a reusable widget would have
 # to be written against the vocabulary of every application that used it.
 export fn map_msgs(f: m -> n, w: Widget m) -> Widget n =
@@ -98,10 +129,14 @@ export fn map_msgs(f: m -> n, w: Widget m) -> Widget n =
                             measure = v.measure))
 
 # Applied above with `_` holes for the last two arguments, leaving
-# `s -> Event -> (s, List n)` — the field's type. Sprout is n-ary, so the holes
+# `s -> Event -> (s, List n, List (Cmd n))` — the field's type. Sprout is
+# n-ary, so the holes
 # are how a partial application is spelled; a lambda would say the same thing
 # but would be one in argument position, which the style guide rejects.
-fn mapped_on_event(f: m -> n, inner: s -> event.Event -> (s, List m),
-                   st: s, ev: event.Event) -> (s, List n) =
+fn mapped_on_event(f: m -> n,
+                   inner: s -> event.Event -> (s, List m, List (Cmd m)),
+                   st: s, ev: event.Event) -> (s, List n, List (Cmd n)) =
   match inner(st, ev) with
-  | (s2, msgs) -> (s2, list_map(f, msgs))
+  # The commands are retargeted too: an embedded widget's work must report in
+  # the embedding vocabulary, or the outer app receives a message it cannot read.
+  | (s2, msgs, cmds) -> (s2, list_map(f, msgs), list_map(cmd_map(f, _), cmds))

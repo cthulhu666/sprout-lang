@@ -3,10 +3,11 @@ module stdlib.tui.app
 # The message pump and render loop. Design: docs/tui-widgets-v0.md §3.6.
 #
 # The loop's decision on every signal is a PURE function — `step` takes a
-# widget and an event and returns the next widget plus whether to keep going —
-# and `run` is the shell that supplies signals and paints the result. That split
-# is why the interesting half of this module is unit-testable with no terminal,
-# no channel and no scheduler.
+# widget and an event and returns the next widget, whether to keep going, and
+# the IO that was asked for — and `run` is the shell that supplies signals,
+# paints the result and performs that IO. That split is why the interesting
+# half of this module is unit-testable with no terminal, no channel and no
+# scheduler: deciding to read a file is a value, and only running it is not.
 
 import stdlib.bytes as bytes
 import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_send, chan_recv, chan_close)
@@ -28,20 +29,21 @@ export type Flow (..) deriving (Eq, ToString) =
 # What the pump multiplexes onto its one channel. `chan_select` is recv-only,
 # same-typed and has no `default` arm, so differently-typed sources cannot be
 # selected across; one sum-typed channel is the shape that works today. A
-# worker task posts `SigMsg`, the input task posts `SigEvent`, and the loop
-# cannot tell — nor need to — which task a signal came from.
+# worker task or a finished command posts `SigMsg`, the input task posts
+# `SigEvent`, and the loop cannot tell — nor need to — which task a signal
+# came from.
 export type Signal m (..) =
   | SigEvent event.Event
   | SigMsg m
 
 # `update` is the application's half: it receives what widgets said and decides
-# both the next tree and whether to stop. Widget-local state lives inside the
-# widget, so this is for cross-widget concerns only — there is deliberately no
-# separate `Ref AppState`, because the loop threads the tree as a parameter and
-# nothing is shared between tasks.
+# the next tree, whether to stop, and what IO to ask for. Widget-local state
+# lives inside the widget, so this is for cross-widget concerns only — there is
+# deliberately no separate `Ref AppState`, because the loop threads the tree as
+# a parameter and nothing is shared between tasks.
 export type App m = (
   root: widget.Widget m,
-  update: m -> widget.Widget m -> (widget.Widget m, Flow),
+  update: m -> widget.Widget m -> (widget.Widget m, Flow, List(widget.Cmd m)),
   tick_ms: Int,
   boot: Scope -> Chan(Signal m) -> Unit !{IO}
 )
@@ -49,31 +51,55 @@ export type App m = (
 # The default `boot` for an application with no worker tasks.
 export fn no_boot(scope: Scope, ch: Chan (Signal m)) -> Unit !{IO} = ()
 
+# The common `update` result: a new tree and a verdict, asking for no IO.
+# Spelled once here so an application that never issues a command does not
+# write an empty list in every arm.
+export fn done(w: widget.Widget m,
+               flow: Flow) -> (widget.Widget m, Flow, List(widget.Cmd m)) =
+  (w, flow, Nil)
+
 # ── The pure core ───────────────────────────────────────────────────────────
 
 # Fold messages through `update`, threading the tree, and STOP at the first
 # `Quit`. The quitting message's own update still lands — it is how an app
 # paints a farewell frame — but the ones behind it do not, because the tree
 # they would act on is already being torn down.
-export fn apply(update: m -> widget.Widget m -> (widget.Widget m, Flow),
-                msgs: List m, w: widget.Widget m) -> (widget.Widget m, Flow) =
-  match msgs with
-  | Nil -> (w, Continue)
-  | [msg | rest] -> apply_step(update, update(msg, w), rest)
+export fn apply(update: m -> widget.Widget m -> (widget.Widget m, Flow, List(widget.Cmd m)),
+                msgs: List m,
+                w: widget.Widget m) -> (widget.Widget m, Flow, List(widget.Cmd m)) =
+  apply_go(update, msgs, w, Nil)
 
-fn apply_step(update: m -> widget.Widget m -> (widget.Widget m, Flow),
-              r: (widget.Widget m, Flow),
-              rest: List m) -> (widget.Widget m, Flow) =
+fn apply_go(update: m -> widget.Widget m -> (widget.Widget m, Flow, List(widget.Cmd m)), msgs: List m, w: widget.Widget m,
+            acc: List (widget.Cmd m)) -> (widget.Widget m, Flow, List(widget.Cmd m)) =
+  match msgs with
+  | Nil -> (w, Continue, list_reverse(acc))
+  | [msg | rest] -> apply_step(update, update(msg, w), rest, acc)
+
+fn apply_step(update: m -> widget.Widget m -> (widget.Widget m, Flow, List(widget.Cmd m)),
+              r: (widget.Widget m, Flow, List(widget.Cmd m)), rest: List m,
+              acc: List (widget.Cmd m)) -> (widget.Widget m, Flow, List(widget.Cmd m)) =
   match r with
-  | (w2, Quit) -> (w2, Quit)
-  | (w2, Continue) -> apply(update, rest, w2)
+  # Commands asked for by the quitting message still come back, so a farewell
+  # write is not silently dropped along with the messages behind it.
+  | (w2, Quit, cs) -> (w2, Quit, list_reverse(push_all(cs, acc)))
+  | (w2, Continue, cs) -> apply_go(update, rest, w2, push_all(cs, acc))
+
+fn push_all(xs: List a, acc: List a) -> List a =
+  list_fold(\ (seen, x) -> Cons(x, seen), acc, xs)
 
 # One event, end to end: the widget tree sees it, whatever it says goes through
-# `update`, and the result is the next tree plus the loop's verdict.
-export fn step(update: m -> widget.Widget m -> (widget.Widget m, Flow),
-               w: widget.Widget m, ev: event.Event) -> (widget.Widget m, Flow) =
+# `update`, and the result is the next tree, the loop's verdict, and every
+# command both halves asked for.
+export fn step(update: m -> widget.Widget m -> (widget.Widget m, Flow, List(widget.Cmd m)), w: widget.Widget m,
+               ev: event.Event) -> (widget.Widget m, Flow, List(widget.Cmd m)) =
   match widget.on_event(w, ev) with
-  | (w2, msgs) -> apply(update, msgs, w2)
+  | (w2, msgs, cmds) -> step_apply(cmds, apply(update, msgs, w2))
+
+# The widget asked first, so its commands lead; `update` may have added more.
+fn step_apply(wcmds: List (widget.Cmd m),
+              r: (widget.Widget m, Flow, List(widget.Cmd m))) -> (widget.Widget m, Flow, List(widget.Cmd m)) =
+  match r with
+  | (w2, flow, ucmds) -> (w2, flow, list_append(wcmds, ucmds))
 
 # ── The shell ───────────────────────────────────────────────────────────────
 
@@ -92,7 +118,7 @@ fn run_in(scope: Scope, spec: App m) -> Unit !{IO} = do
   size <- current_size()
   s <- screen.screen_new(size)
   paint(s, spec.root, size)
-  pump(ch, s, spec.root, spec.update, size)
+  pump(scope, ch, s, spec.root, spec.update, size)
   # The input task is parked in `read_avail` or on a send; cancelling the scope
   # drops it, which is what lets `with_scope`'s join return. Without this the
   # join would wait on a loop that never ends.
@@ -113,60 +139,78 @@ fn paint(s: screen.Screen, w: widget.Widget m, size: geometry.Size) -> Unit !{IO
   frame <- screen.diff_to_ansi(s)
   terminal.write(frame)
 
-fn pump(ch: Chan (Signal m), s: screen.Screen, w: widget.Widget m,
-        update: m -> widget.Widget m -> (widget.Widget m, Flow),
+fn pump(scope: Scope, ch: Chan (Signal m), s: screen.Screen, w: widget.Widget m,
+        update: m -> widget.Widget m -> (widget.Widget m, Flow, List(widget.Cmd m)),
         size: geometry.Size) -> Unit !{IO} = do
   r <- chan_recv(ch)
-  on_signal(ch, s, w, update, size, r)
+  on_signal(scope, ch, s, w, update, size, r)
 
 # A closed channel means the input task saw EOF or a read error: there is
 # nothing left to drive the loop, so it ends the same way a `Quit` does.
-fn on_signal(ch: Chan (Signal m), s: screen.Screen, w: widget.Widget m,
-             update: m -> widget.Widget m -> (widget.Widget m, Flow),
+fn on_signal(scope: Scope, ch: Chan (Signal m), s: screen.Screen, w: widget.Widget m,
+             update: m -> widget.Widget m -> (widget.Widget m, Flow, List(widget.Cmd m)),
              size: geometry.Size, r: Recv (Signal m)) -> Unit !{IO} =
   match r with
   | Closed -> ()
-  | Got sig -> on_sig(ch, s, w, update, size, sig)
+  | Got sig -> on_sig(scope, ch, s, w, update, size, sig)
 
-fn on_sig(ch: Chan (Signal m), s: screen.Screen, w: widget.Widget m,
-          update: m -> widget.Widget m -> (widget.Widget m, Flow),
+fn on_sig(scope: Scope, ch: Chan (Signal m), s: screen.Screen, w: widget.Widget m,
+          update: m -> widget.Widget m -> (widget.Widget m, Flow, List(widget.Cmd m)),
           size: geometry.Size, sig: Signal m) -> Unit !{IO} =
   match sig with
-  | SigEvent ev -> on_event_sig(ch, s, w, update, size, ev)
-  # A message from a worker task takes the same path as one a widget said.
-  | SigMsg msg -> advance(ch, s, update, size, apply(update, [msg], w))
+  | SigEvent ev -> on_event_sig(scope, ch, s, w, update, size, ev)
+  # A completed command's result takes the same path as one a widget said.
+  | SigMsg msg -> advance(scope, ch, s, update, size, apply(update, [msg], w))
 
 # A resize is handled here rather than by a widget: the screen itself has to be
 # replaced, and no widget can do that.
-fn on_event_sig(ch: Chan (Signal m), s: screen.Screen, w: widget.Widget m,
-                update: m -> widget.Widget m -> (widget.Widget m, Flow),
+fn on_event_sig(scope: Scope, ch: Chan (Signal m), s: screen.Screen, w: widget.Widget m,
+                update: m -> widget.Widget m -> (widget.Widget m, Flow, List(widget.Cmd m)),
                 size: geometry.Size, ev: event.Event) -> Unit !{IO} =
   match ev with
-  | event.ResizeEvent ns -> resized(ch, s, w, update, ns)
-  | _ -> advance(ch, s, update, size, step(update, w, ev))
+  | event.ResizeEvent ns -> resized(scope, ch, s, w, update, ns)
+  | _ -> advance(scope, ch, s, update, size, step(update, w, ev))
 
 # A resized screen is blank in both buffers, so the next paint is a full
 # repaint — the terminal's contents after a resize are not knowable.
-fn resized(ch: Chan (Signal m), s: screen.Screen, w: widget.Widget m,
-           update: m -> widget.Widget m -> (widget.Widget m, Flow),
+fn resized(scope: Scope, ch: Chan (Signal m), s: screen.Screen, w: widget.Widget m,
+           update: m -> widget.Widget m -> (widget.Widget m, Flow, List(widget.Cmd m)),
            ns: geometry.Size) -> Unit !{IO} = do
   s2 <- screen.screen_resize(s, ns)
   paint(s2, w, ns)
-  pump(ch, s2, w, update, ns)
+  pump(scope, ch, s2, w, update, ns)
 
-fn advance(ch: Chan (Signal m), s: screen.Screen,
-           update: m -> widget.Widget m -> (widget.Widget m, Flow),
-           size: geometry.Size, r: (widget.Widget m, Flow)) -> Unit !{IO} =
+fn advance(scope: Scope, ch: Chan (Signal m), s: screen.Screen,
+           update: m -> widget.Widget m -> (widget.Widget m, Flow, List(widget.Cmd m)), size: geometry.Size,
+           r: (widget.Widget m, Flow, List(widget.Cmd m))) -> Unit !{IO} =
   match r with
   # The final frame is painted before returning, so a farewell message is seen.
-  | (w2, Quit) -> paint(s, w2, size)
-  | (w2, Continue) -> repaint(ch, s, w2, update, size)
+  # Outstanding commands are dropped: the scope is cancelled on the next line
+  # of `run_in`, so a task spawned here could not finish anyway.
+  | (w2, Quit, _) -> paint(s, w2, size)
+  | (w2, Continue, cs) -> dispatched(scope, ch, s, w2, update, size, cs)
 
-fn repaint(ch: Chan (Signal m), s: screen.Screen, w: widget.Widget m,
-           update: m -> widget.Widget m -> (widget.Widget m, Flow),
+# Each command runs in its OWN task, so a slow one — a file read, a compile —
+# cannot stall the loop. Its result returns as an ordinary `SigMsg`, which is
+# why the pump needs no separate notion of a command having finished.
+fn dispatched(scope: Scope, ch: Chan (Signal m), s: screen.Screen, w: widget.Widget m,
+              update: m -> widget.Widget m -> (widget.Widget m, Flow, List(widget.Cmd m)), size: geometry.Size,
+              cs: List (widget.Cmd m)) -> Unit !{IO} = do
+  list_each(spawn_cmd(scope, ch, _), cs)
+  repaint(scope, ch, s, w, update, size)
+
+fn spawn_cmd(scope: Scope, ch: Chan (Signal m), c: widget.Cmd m) -> Unit !{IO} =
+  task_spawn(scope, run_cmd(ch, c, _))
+
+fn run_cmd(ch: Chan (Signal m), c: widget.Cmd m, u: Unit) -> Unit !{IO} = do
+  msg <- widget.cmd_run(c)
+  chan_send(ch, SigMsg(msg))
+
+fn repaint(scope: Scope, ch: Chan (Signal m), s: screen.Screen, w: widget.Widget m,
+           update: m -> widget.Widget m -> (widget.Widget m, Flow, List(widget.Cmd m)),
            size: geometry.Size) -> Unit !{IO} = do
   paint(s, w, size)
-  pump(ch, s, w, update, size)
+  pump(scope, ch, s, w, update, size)
 
 # ── The input task ──────────────────────────────────────────────────────────
 

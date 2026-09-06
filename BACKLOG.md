@@ -2038,8 +2038,16 @@ Legend:
   tree, and the loop threads it as a parameter. A `Ref` would have bought shared mutable
   state for nothing.
 
-- [ ] `P2` **TUI `app.run`: resize and the worker-message path are implemented but
-  unverified.** No automated gate exercises `run` at all — it takes over the terminal and
+- [ ] `P2` **TUI `app.run`: the resize path is implemented but unverified.**
+  *(Amended 2026-09-06: the `SigMsg` half of this is now VERIFIED. Landing commands gave
+  it a driver — a scratch program whose widget asks for IO on a keypress, whose command
+  writes a marker file, and whose `update` quits on the command's result. Run with stdin
+  held open for 8s: the marker appeared and the loop had already returned at t=3s, so the
+  result travelled task → channel → `on_sig` → `apply` and EOF was demonstrably not what
+  ended it. Note the first attempt at this measured the whole pipeline's elapsed time,
+  which is bounded by the `sleep` holding stdin open, not by the app — it read 8s whether
+  the app exited early or not, and proved nothing. The app has to timestamp its own exit.)*
+  The `TermResized` arm remains unverified and still needs a pty. No automated gate exercises `run` at all — it takes over the terminal and
   blocks on stdin, and the `tests/conformance/run` harness inherits stdin, so a fixture
   there would hang or vary by environment. What WAS verified by hand against
   `examples/tui_dashboard.sprout`: EOF closes the channel and tears down cleanly (exit 0);
@@ -2049,15 +2057,87 @@ Legend:
   and the `boot`/`SigMsg` arm by which a worker task posts a message (needs a spawned task
   inside a running app). Both are single `match` arms over paths whose pieces are covered —
   `apply` is unit-tested and `screen_resize` has its own suite — but the wiring is not.
-  Closing this wants a pty-driven fixture; `stdlib.process` can spawn one, which is the
-  likely shape.
+  Closing the remaining half wants a pty-driven fixture; `stdlib.process` can spawn one,
+  which is the likely shape.
+
+- [ ] `P2` **A command's result reaches `update`, which cannot route it to the widget that
+  asked.** `App.update` receives `m` and an opaque `Widget m`; it can replace the tree but
+  cannot address *into* it, so when a file-tree widget asks to read a directory the answer
+  arrives somewhere that cannot give it back. Elm and Bubbletea solve this in the
+  application — the model holds sub-models and `update` dispatches explicitly — which works
+  because their models are records, not existentials. Sprout's `Widget m` deliberately hides
+  its state, so the same move is unavailable. Surfaced 2026-09-06 while trying to give
+  `examples/tui_dashboard.sprout` a command to demonstrate: every honest version needed a
+  route back to one specific widget. **This is M4 container work**: a container already
+  broadcasts events to its children, so it is the thing that can carry an addressed message
+  down. Until it exists, only application-global commands (quit, reload everything) are
+  useful, which is why the demo still issues none. Options to weigh: a `WidgetId` on the
+  message, a routing wrapper around a child, or `update` returning a targeted event.
+
+- [ ] `P2` **Record-field effect variables are erased at construction, so a pure signature
+  can launder IO.** `type Box = (f: Int -> Int !{e})` plus `fn pure_user(b: Box, n: Int) ->
+  Int = b.f(n)` compiles and RUNS IO inside a function declared pure — verified by running
+  it, twice, independently. `e` is not a parameter of `Box`, so the constructor scheme
+  quantifies and discards it (`types.scheme_quantified` / `scheme_effect_vars_of`); field
+  access re-instantiates a fresh unconstrained variable, and rule 8's let-through (spec §7
+  enforcement note — a body whose effect resolves to a variable is accepted) passes it.
+  Nothing in-tree hits this: all 9 `!{e}` occurrences outside `stdlib/compiler/` are prelude
+  iteration combinators whose variable is pinned param→result, and no type declaration
+  anywhere carries an effect variable. **The naive fix does not work** — flipping the
+  `(Pure, EffectVar _)` arm at `unifier.sprout:88` also rejects `fn maybe_do(n) -> Unit !{e}`
+  called from a pure caller, which is a legitimate program (verified accepted today); the
+  two are indistinguishable at that knob because the information separating them was
+  discarded at the construction site. The tractable fix is to **reject effect variables in
+  stored positions** (type-decl fields) with a diagnostic, which closes the hole and breaks
+  nothing in-tree. Making the *design* expressible instead needs effect parameters on type
+  constructors, which `docs/effect-system-v1-draft.md` §3 and §12 explicitly exclude — so
+  that is a Design Change Process question, not a bug fix. Also amend the comment at
+  `unifier.sprout:86` calling accept-when-unknown "the only safe direction for a
+  conservatism knob": it is safe against false rejections and unsafe against this.
+
+- [ ] `P3` **A parameterized type alias whose body is a FUNCTION TYPE is never expanded.**
+  `type alias Cmd m = Unit -> m !{IO}` parses, but using it fails with
+  `Type mismatch: main.Cmd Int vs Unit -> $t…`. It is the *combination* that breaks, which
+  is worth stating precisely because two nearby shapes are fine and in use:
+
+  | shape | works? |
+  |---|---|
+  | `type alias Boxed a = Result String a` — parameterized, non-arrow | **yes** — this is `net.TcpResult`, `http_server.ServerResult`, `scram.ScramResult`; 14 uses in stdlib |
+  | `type alias H = Int -> Int !{IO}` — unparameterized, arrow | **yes**, effect included |
+  | `type alias Fn a = Int -> a` — parameterized, arrow | **no**, even with no effect anywhere |
+
+  So it is neither an effects bug nor a general alias bug. Found 2026-09-06 while sizing the
+  TUI command type; worked around with a newtype ADT, which is the better spelling there
+  anyway. *(An earlier draft of this entry said "parameterized type aliases are never
+  expanded", which is wrong — it would send a reader to audit 14 working call sites.)*
+
+  **A second, independent alias gap found the same day: an alias used as a RECORD FIELD type
+  is not expanded either** — unparameterized and non-arrow though it may be.
+
+  ```sprout
+  type alias Names = List String
+  fn shout(ns: Names) -> (Names, Int) = (ns, list_length(ns))   # fine
+  type Bag = (items: Names, tag: String)
+  fn read_bag(b: Bag) -> Int = list_length(b.items)
+  # ERROR: Type mismatch: List $t2555 vs main.Names in function main.read_bag
+  ```
+
+  The field keeps the alias name instead of its expansion, so reading it yields a type
+  nothing else unifies with. Consistent with the working stdlib aliases, which all appear in
+  function signatures rather than record fields. Surfaced when `examples/tui_dashboard.sprout`
+  tried to name its child-list type: aliases for the message and command lists (signature
+  positions) work and are now used there; the one for the container's `kids` field had to be
+  reverted to the spelled-out type.
 
 - [ ] `P3` **stdlib ships no container widget.** A container is expressible today — it is a
   widget whose hidden state is a `List (Widget m)`, which `examples/tui_dashboard.sprout`
   demonstrates in about thirty lines, broadcasting events to children and spending
   `layout.row`/`layout.column` on their regions. But every application currently has to write
   that itself. `row`/`column`/`grid` container widgets belong to the M4 widget library, noted
-  here so the gap is attributed rather than rediscovered.
+  here so the gap is attributed rather than rediscovered. As of the command landing the demo's
+  container also has to forward its children's *commands*, which is more boilerplate per
+  application and strengthens the case; see the message-routing entry above, which the same
+  container work is the natural place to solve.
 
 - [x] `P1` **Unicode width and grapheme clusters — LANDED 2026-09-06 as `stdlib/unicode`.** Split
   out of TUI M2 because it is a stdlib capability in its own right. `codepoint_width` implements

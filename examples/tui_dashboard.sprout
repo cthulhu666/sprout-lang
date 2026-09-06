@@ -37,12 +37,17 @@ fn line(s: scr.Screen, r: g.Region, row: Int, txt: String,
                            text.truncate(txt, g.region_cols(r)), st)
   ()
 
+# What a widget hands back besides its new state: what it said, and what it
+# wants done. Named once, because every widget below repeats the pair.
+type alias Says = List Msg
+type alias Asks = List(widget.Cmd Msg)
+
 # ── a ticking counter: hidden state is Int ──────────────────────────────────
 
-fn ticks_on_event(n: Int, ev: event.Event) -> (Int, List Msg) =
+fn ticks_on_event(n: Int, ev: event.Event) -> (Int, Says, Asks) =
   match ev with
-  | event.TickEvent -> (n + 1, Nil)
-  | _ -> (n, Nil)
+  | event.TickEvent -> (n + 1, Nil, Nil)
+  | _ -> (n, Nil, Nil)
 
 fn ticks_measure(n: Int, avail: g.Size) -> g.Size = g.Size(g.size_cols(avail), 2)
 
@@ -58,19 +63,19 @@ fn ticks() -> widget.Widget Msg =
 
 # `q` is this widget's business, so it is this widget that says `Quit`. The
 # application never inspects a keystroke.
-fn keys_on_event(log: List String, ev: event.Event) -> (List String, List Msg) =
+fn keys_on_event(log: List String, ev: event.Event) -> (List String, Says, Asks) =
   match ev with
   | event.KeyPress k mods -> on_key(log, k)
-  | _ -> (log, Nil)
+  | _ -> (log, Nil, Nil)
 
-fn on_key(log: List String, k: event.Key) -> (List String, List Msg) =
+fn on_key(log: List String, k: event.Key) -> (List String, Says, Asks) =
   match k with
   | event.KChar c -> on_char(log, c)
-  | _ -> (Cons(to_string(k), log), [Typed(to_string(k))])
+  | _ -> (Cons(to_string(k), log), [Typed(to_string(k))], Nil)
 
-fn on_char(log: List String, c: Char) -> (List String, List Msg) =
-  if c == 'q' then (log, [Quit])
-  else (Cons(char_to_string(c), log), [Typed(char_to_string(c))])
+fn on_char(log: List String, c: Char) -> (List String, Says, Asks) =
+  if c == 'q' then (log, [Quit], Nil)
+  else (Cons(char_to_string(c), log), [Typed(char_to_string(c))], Nil)
 
 fn keys_measure(log: List String, avail: g.Size) -> g.Size = avail
 
@@ -102,7 +107,8 @@ fn keys() -> widget.Widget Msg =
 
 # ── a static label: hidden state is String ──────────────────────────────────
 
-fn label_on_event(txt: String, ev: event.Event) -> (String, List Msg) = (txt, Nil)
+fn label_on_event(txt: String, ev: event.Event) -> (String, Says, Asks) =
+  (txt, Nil, Nil)
 
 fn label_measure(txt: String, avail: g.Size) -> g.Size =
   g.Size(text.width(txt), 1)
@@ -122,26 +128,30 @@ fn label(txt: String) -> widget.Widget Msg =
 type Box = (vertical: Bool, dims: List layout.Dimension,
             kids: List (widget.Widget Msg))
 
-fn box_on_event(b: Box, ev: event.Event) -> (Box, List Msg) =
-  match broadcast(b.kids, ev, Nil, Nil) with
-  | (kids, msgs) -> (b with (kids = kids), msgs)
+fn box_on_event(b: Box, ev: event.Event) -> (Box, Says, Asks) =
+  match broadcast(b.kids, ev, Nil, Nil, Nil) with
+  | (kids, msgs, cmds) -> (b with (kids = kids), msgs, cmds)
 
-# Every child sees every event, in order, and their messages are concatenated.
+# Every child sees every event, in order; their messages AND their commands are
+# concatenated. A container forwards what its children ask for without knowing
+# what any of it means — which is the whole point of the message vocabulary.
 fn broadcast(kids: List (widget.Widget Msg), ev: event.Event,
-             wacc: List (widget.Widget Msg),
-             macc: List Msg) -> (List(widget.Widget Msg), List Msg) =
+             wacc: List (widget.Widget Msg), macc: Says,
+             cacc: Asks) -> (List(widget.Widget Msg), Says, Asks) =
   match kids with
-  | Nil -> (list_reverse(wacc), list_reverse(macc))
-  | [k | rest] -> broadcast_step(widget.on_event(k, ev), rest, ev, wacc, macc)
+  | Nil -> (list_reverse(wacc), list_reverse(macc), list_reverse(cacc))
+  | [k | rest] -> broadcast_step(widget.on_event(k, ev), rest, ev, wacc, macc, cacc)
 
-fn broadcast_step(r: (widget.Widget Msg, List Msg), rest: List (widget.Widget Msg),
-                  ev: event.Event, wacc: List (widget.Widget Msg),
-                  macc: List Msg) -> (List(widget.Widget Msg), List Msg) =
+fn broadcast_step(r: (widget.Widget Msg, Says, Asks),
+                  rest: List (widget.Widget Msg), ev: event.Event,
+                  wacc: List (widget.Widget Msg), macc: Says,
+                  cacc: Asks) -> (List(widget.Widget Msg), Says, Asks) =
   match r with
-  | (k2, msgs) -> broadcast(rest, ev, Cons(k2, wacc), push_all(msgs, macc))
+  | (k2, msgs, cmds) ->
+      broadcast(rest, ev, Cons(k2, wacc), push_all(msgs, macc), push_all(cmds, cacc))
 
-fn push_all(msgs: List Msg, acc: List Msg) -> List Msg =
-  list_fold(\ (a, m) -> Cons(m, a), acc, msgs)
+fn push_all(xs: List a, acc: List a) -> List a =
+  list_fold(\ (seen, x) -> Cons(x, seen), acc, xs)
 
 fn box_measure(b: Box, avail: g.Size) -> g.Size = avail
 
@@ -187,10 +197,10 @@ fn body() -> widget.Widget Msg =
   box(false, [layout.Fraction(1), layout.Fraction(2)], [ticks(), keys()])
 
 # Widgets already did the work; the application only decides when to stop.
-fn update(m: Msg, w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow) =
+fn update(m: Msg, w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow, Asks) =
   match m with
-  | Quit -> (w, app.Quit)
-  | Typed _ -> (w, app.Continue)
+  | Quit -> app.done(w, app.Quit)
+  | Typed _ -> app.done(w, app.Continue)
 
 fn main() -> Unit !{IO} =
   app.run(app.App(root = root(), update = update, tick_ms = 250,
