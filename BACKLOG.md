@@ -4377,11 +4377,55 @@ op-classification already in place.
 
 ### Compiler / Stdlib Misc
 
-- [ ] `P2` **Passing `print` as a VALUE emits a call to a symbol that does not exist.** Surfaced
-  2026-09-06 while rewriting `examples/fizzbuzz.sprout`; worked around there with
-  `list_each(\line -> print(line), …)`, which is what all five other examples that iterate with
-  `print` already write. `list_each(print, xs)` typechecks, emits `ERROR:`-free IR, and then fails
-  to link:
+- [x] `P2` **Passing `print` as a VALUE emits a call to a symbol that does not exist. FIXED
+  2026-09-06, same day it was filed.** The entry below scoped it to `print`; measuring first
+  found **twelve** intrinsics with the identical hole, and two distinct failure stages.
+  `is_call_site_intrinsic` (`ast_to_ir.sprout`) is now the one definition of the set —
+  `print`, `eprint`, `to_double`, `double_to_bits`, `double_from_bits` and the seven
+  `stdlib.bits` operations — consulted by both the direct call site and eta-expansion.
+
+  **What was actually wrong.** `synthesize_eta_wrapper` emits `call @<name>`, and none of the
+  twelve has a `<name>` to call. The two halves fail differently, which is why only one was
+  visible: `print`/`eprint` are on `is_hardcoded_intrinsic`'s list so their `declare` is
+  suppressed, and `opt --passes=verify` rejects the dangling reference. The other ten keep
+  their `declare`, so `opt` is satisfied by the promise and only the **linker** discovers
+  there is nothing behind it — `Undefined symbols: _to_double, referenced from
+  ___sprout_ir_eta_to_double_0`. Suppressing a `declare` turned out to be an accidental
+  safety feature: it moves the error into a tool the build actually runs.
+
+  **Fix.** `synthesize_intrinsic_eta_closure` builds the wrapper body with the same
+  translator the direct call site uses, over synthetic parameters `a0..a(N-1)`:
+  `translate_expr` resolves each `TVar "ai"` through the param path to `%ai`, so the
+  intrinsic sees argument expressions carrying the types *this* reference was instantiated
+  at. One wrapper per use-site, so `list_each(print, strs)` and `list_each(print, ints)` in
+  one program get different bodies (verified: four `print` wrappers in the fixture, taking
+  `@print_str` and `@print_value` as the types demand). Block assembly mirrors the
+  lambda-lifting site, including the `lifted_idx_ref` write the old wrapper did not need and
+  the rooting pass does — and a body is not always one block, since a shift by a non-literal
+  count emits a guard CFG.
+
+  **The case still refused, now diagnosed instead of linked.** An argument type that is still
+  a type variable carries no dispatch. Letting it through would be worse than the link error:
+  `translate_print_call` would fall to its `else` arm and print a String's pointer as an Int.
+  It is now `ast_to_ir: 'print' cannot be used as a first-class value here (line L, column C)`
+  naming the one-line-wrapper workaround.
+
+  **Evidence the change is additive.** All 61 golden-corpus files emit **byte-identical** IR
+  under the old and new compilers — nothing in the corpus referenced an intrinsic as a value,
+  so the new path is reached only by programs that were previously broken.
+
+  Coverage: `tests/conformance/run/intrinsic_as_value.spr` (all twelve, in the only corpus
+  that links *and* runs) and `tests/stdlib/compiler/test_intrinsic_eta.spr` (which branch each
+  wrapper took, plus the rejection — a rejected program emits no stdout for the conformance
+  runner to compare, so that assertion has nowhere else to live). Docs corrected in three
+  places that stated the limitation as permanent: `spec-v0.md` §8.1.1,
+  `bitwise-int-ops-v0.md` §5.4, `double-bit-access-v0.md`. Original report follows.
+
+  <details><summary>Original report</summary>
+
+  Surfaced 2026-09-06 while rewriting `examples/fizzbuzz.sprout`; worked around there with
+  `list_each(\line -> print(line), …)`. `list_each(print, xs)` typechecks, emits `ERROR:`-free
+  IR, and then fails to link:
 
   ```
   error: use of undefined value '@print'
@@ -4416,6 +4460,26 @@ op-classification already in place.
   them). `compile-examples-stage1` stops at IR, and `smoke-shapes` (`justfile:987-1005`) only
   greps the emitted text — neither resolves a symbol. Undefined-symbol regressions are therefore
   visible on five files out of 61.
+
+  </details>
+
+- [ ] `P3` **Ten intrinsics get a `declare` for a symbol the runtime does not define.** Found
+  2026-09-06 while fixing the entry above. `lower_extern_decls` emits `declare i64 @to_double(i64)`,
+  `@double_to_bits`, `@double_from_bits` and all seven `@bit_*` for any program importing them —
+  verified on `tests/conformance/run/intrinsic_as_value.spr`, ten declares, zero definitions in
+  `runtime/`. Nothing calls them any more, and LLVM does not require an unreferenced declare to
+  resolve, so this is inert *today*.
+
+  It is worth closing because it is the mechanism that made the eta bug expensive to find.
+  `print`/`eprint` are on `is_hardcoded_intrinsic`'s list, so their declare is suppressed and a
+  dangling `@print` is caught by `opt --passes=verify` — which every IR gate runs. The other ten
+  keep the declare, LLVM believes the promise, and the lie survives to the **linker**, which only
+  `run-example-canary` (5 files) and `test-conformance-run` reach. Adding the ten to
+  `is_hardcoded_intrinsic` (`ir_lowering.sprout:604`) moves any future regression in this family
+  one stage earlier, into a tool that runs everywhere.
+
+  Cheap and mechanical, but it is a compiler-source change, so it costs a reseed and a golden
+  cycle — hence P3 rather than folding it into the fix above.
 
 - [ ] `P2` **A function PARAMETER named `entry` emits invalid IR.** Surfaced 2026-09-05 while
   writing `tests/stdlib/test_fs.spr`; worked around there by renaming the parameter to `item`.

@@ -895,7 +895,7 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
       Ok((Nil, cur_label,
            list_append(cur_ops, Cons(sprout_ir.IRFloatConst(fresh_name(name_prefix, idx), text), Nil)),
            fresh_name(name_prefix, idx), idx + 1))
-  | typed_ast.TVar name _ _ ->
+  | typed_ast.TVar name var_ty var_pos ->
       # A TVar may reference: (a) a function parameter, (b) a 0-arity
       # constructor (e.g. Nil, Nothing) used without parens, (c) a captured
       # free variable in a lifted lambda body (present in `captures`).
@@ -934,6 +934,14 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
                   # then emit IRMkClosure to package the wrapper as a value.
                   match dict_get(name, fn_arities) with
                   | Just info ->
+                      # A call-site-directed intrinsic has no symbol to forward
+                      # to, so its wrapper body must be lowered, not called.
+                      if is_call_site_intrinsic(name)
+                      then synthesize_intrinsic_eta_closure(name, info.arity, var_ty, var_pos,
+                                                            ctors, idx, cur_label, cur_ops, lifted_ref,
+                                                            top_level, let_names, fn_arities,
+                                                            lambda_ctr_ref, lifted_idx_ref, name_prefix)
+                      else
                       do
                         let arity = info.arity
                         ctr <- ref_read(lambda_ctr_ref)
@@ -4698,6 +4706,44 @@ fn finish_match(match_ty: types.Type, s_blocks: List sprout_ir.IRBlock,
           Cons(sprout_ir.IRPhi(phi_name, llvm_ret_type(match_ty), phi_incoming), Nil),
           phi_name, idx))
 
+# The builtins whose lowering is chosen at the CALL SITE rather than by a symbol.
+# `print`/`eprint` pick @print_str or @print_value from the argument's type;
+# `to_double` and the Double bit accessors are single LLVM instructions; each
+# bits operation is one integer instruction.  None has a symbol in the runtime,
+# so a plain `call @<name>` would not resolve — which is why a reference in
+# VALUE position routes through here too (synthesize_intrinsic_eta_closure).
+export fn is_call_site_intrinsic(fname: String) -> Bool =
+  fname == "print" || fname == "eprint" || fname == "to_double"
+    || fname == "double_to_bits" || fname == "double_from_bits"
+    || is_bits_intrinsic(fname)
+
+# Lower one saturated call to a call-site-directed intrinsic.  The order mirrors
+# is_call_site_intrinsic; the final arm is the bits family.
+fn translate_call_site_intrinsic(fname: String, args: List typed_ast.TypedExpr,
+                                 params: List String, ctors: Dict sprout_ir.CtorInfo, idx: Int,
+                                 cur_label: String, cur_ops: List sprout_ir.IROp,
+                                 captures: Dict String,
+                                 lifted_ref: Ref (List sprout_ir.IRFunction),
+                                 top_level: Set, let_names: Set, fn_arities: Dict FnInfo,
+                                 lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
+                                 name_prefix: String) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
+  if fname == "print" || fname == "eprint"
+  then translate_print_call(fname, args, params, ctors, idx,
+                            cur_label, cur_ops, captures, lifted_ref, top_level, let_names, fn_arities,
+                            lambda_ctr_ref, lifted_idx_ref, name_prefix)
+  else if fname == "to_double"
+  then translate_to_double_call(args, params, ctors, idx,
+                                cur_label, cur_ops, captures, lifted_ref, top_level, let_names, fn_arities,
+                                lambda_ctr_ref, lifted_idx_ref, name_prefix)
+  else if fname == "double_to_bits" || fname == "double_from_bits"
+  then translate_double_bits_call(fname, args, params, ctors, idx,
+                                  cur_label, cur_ops, captures, lifted_ref, top_level, let_names, fn_arities,
+                                  lambda_ctr_ref, lifted_idx_ref, name_prefix)
+  else translate_bits_call(fname, args, params, ctors, idx,
+                           cur_label, cur_ops, captures, lifted_ref, top_level, let_names, fn_arities,
+                           lambda_ctr_ref, lifted_idx_ref, name_prefix)
+
 # Translate a TCall node.
 #
 # Dispatch on the callee shape:
@@ -5045,26 +5091,13 @@ fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
                                  captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
                                  name_prefix)
       | Nothing ->
-          # print / eprint are builtins that dispatch by argument type, mirroring
-          # direct codegen's emit_print_call (codegen.sprout ~2474): String/Char ->
-          # @print_str(ptr), Int/Bool -> @print_value(i64), eprint -> @eprint_str(ptr).
-          # There is no @print symbol in the runtime, so a generic call would not link.
-          if fname == "print" || fname == "eprint"
-          then translate_print_call(fname, args, params, ctors, idx,
-                                    cur_label, cur_ops, captures, lifted_ref, top_level, let_names, fn_arities,
-                                    lambda_ctr_ref, lifted_idx_ref, name_prefix)
-          else if fname == "to_double"
-          then translate_to_double_call(args, params, ctors, idx,
-                                        cur_label, cur_ops, captures, lifted_ref, top_level, let_names, fn_arities,
-                                        lambda_ctr_ref, lifted_idx_ref, name_prefix)
-          else if fname == "double_to_bits" || fname == "double_from_bits"
-          then translate_double_bits_call(fname, args, params, ctors, idx,
-                                          cur_label, cur_ops, captures, lifted_ref, top_level, let_names, fn_arities,
-                                          lambda_ctr_ref, lifted_idx_ref, name_prefix)
-          else if is_bits_intrinsic(fname)
-          then translate_bits_call(fname, args, params, ctors, idx,
-                                   cur_label, cur_ops, captures, lifted_ref, top_level, let_names, fn_arities,
-                                   lambda_ctr_ref, lifted_idx_ref, name_prefix)
+          # A builtin whose lowering the call site chooses — see
+          # is_call_site_intrinsic.  Routed through one dispatcher so the
+          # eta-expansion path can reuse it for a reference in VALUE position.
+          if is_call_site_intrinsic(fname)
+          then translate_call_site_intrinsic(fname, args, params, ctors, idx,
+                                             cur_label, cur_ops, captures, lifted_ref, top_level, let_names,
+                                             fn_arities, lambda_ctr_ref, lifted_idx_ref, name_prefix)
           else if param_known(fname, params)
           then
             # Trust the typechecker: any param reached here was accepted as
@@ -7157,6 +7190,108 @@ export fn collect_extern_decls(decls: List typed_ast.TypedDecl) -> List (String,
       | typed_ast.TExternFnDecl name params _ _ ->
           Cons((name, list_length(params)), collect_extern_decls(rest))
       | _ -> collect_extern_decls(rest)
+
+# A call-site-directed intrinsic referenced as a VALUE.  There is no symbol to
+# forward to (see is_call_site_intrinsic), so the wrapper body cannot be the
+# generic `call @<name>` synthesize_eta_wrapper emits — that name resolves
+# nowhere, and the two halves of the family fail at different stages: @print has
+# its `declare` suppressed and is rejected by `opt`, while @to_double and the
+# bits family are declared and fail only at LINK.
+#
+# Instead the body is lowered by the SAME translator the direct call site uses,
+# over synthetic parameters a0..a(N-1): translate_expr resolves each
+# `TVar "ai"` through the param path to `%ai`, so the intrinsic sees argument
+# expressions carrying the types this particular reference was instantiated at.
+# One wrapper is minted per use-site, so `list_each(print, strs)` and
+# `list_each(print, ints)` in the same program get different bodies.
+#
+# Block assembly mirrors the lambda-lifting site: a body is not always one
+# block, since a shift by a non-literal count emits a guard CFG.
+fn synthesize_intrinsic_eta_closure(name: String, arity: Int, var_ty: types.Type,
+                                    var_pos: source.SourcePos,
+                                    ctors: Dict sprout_ir.CtorInfo, idx: Int,
+                                    cur_label: String, cur_ops: List sprout_ir.IROp,
+                                    lifted_ref: Ref (List sprout_ir.IRFunction),
+                                    top_level: Set, let_names: Set, fn_arities: Dict FnInfo,
+                                    lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
+                                    name_prefix: String) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
+  match intrinsic_arg_types(var_ty, arity, Nil) with
+  | Nothing -> Err(intrinsic_not_a_value_msg(name, var_pos))
+  | Just arg_tys ->
+      do
+        ctr <- ref_read(lambda_ctr_ref)
+        ref_write(lambda_ctr_ref, ctr + 1)
+        let wrapper_name = "__sprout_ir_eta_" ++ name ++ "_" ++ int_to_string(ctr)
+        let synth_names = build_wrapper_param_names(0, arity)
+        match translate_call_site_intrinsic(name,
+                build_synth_arg_exprs(synth_names, arg_tys, var_pos),
+                synth_names, ctors, 0, "entry", Nil, dict_empty(), lifted_ref,
+                top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref, "%t$") with
+        | Err msg -> Err(msg)
+        | Ok body ->
+            match body with
+            | (body_blocks, body_lbl, body_ops, body_result, body_next_idx) ->
+                do
+                  let ret_block = sprout_ir.IRBlock(body_lbl,
+                                    list_append(body_ops, Cons(sprout_ir.IRRet(body_result), Nil)))
+                  let wrapper_fn = sprout_ir.IRFunction(wrapper_name,
+                                     Cons(("env$", sprout_ir.IRTHeap),
+                                          build_intrinsic_eta_params(synth_names, arg_tys)),
+                                     "i64",
+                                     list_append(body_blocks, Cons(ret_block, Nil)))
+                  existing_lifted <- ref_read(lifted_ref)
+                  ref_write(lifted_ref, Cons(wrapper_fn, existing_lifted))
+                  # The rooting pass mints fresh names from here, so it must not
+                  # reuse the %t$N the body already spent.
+                  cur_lifted_idx <- ref_read(lifted_idx_ref)
+                  ref_write(lifted_idx_ref, dict_set(wrapper_name, body_next_idx, cur_lifted_idx))
+                  Ok((Nil, cur_label,
+                       list_append(cur_ops,
+                         Cons(sprout_ir.IRMkClosure(fresh_name(name_prefix, idx), wrapper_name, arity, Nil), Nil)),
+                       fresh_name(name_prefix, idx), idx + 1))
+
+# Peel `remaining` argument types off a function type.  Answers Nothing if the
+# type is not that many arrows deep, or if any argument type is still a type
+# variable — the unresolved case must NOT reach a wrapper body, because the
+# intrinsics choose their lowering from it and would choose silently: `print`
+# would fall through to its Int arm and print a String's pointer as a number.
+fn intrinsic_arg_types(t: types.Type, remaining: Int, acc: List types.Type) -> Maybe (List types.Type) =
+  if remaining <= 0 then Just(list_reverse(acc))
+  else
+    match t with
+    | types.TFunc param ret _ _ ->
+        match param with
+        | types.TVar _ -> Nothing
+        | _ -> intrinsic_arg_types(ret, remaining - 1, Cons(param, acc))
+    | _ -> Nothing
+
+fn intrinsic_not_a_value_msg(name: String, pos: source.SourcePos) -> String =
+  `ast_to_ir: '${name}' cannot be used as a first-class value here (line ${int_to_string(pos.line)}, column ${int_to_string(pos.column)}). It is a compiler intrinsic with no symbol of its own — each call site picks its lowering from the argument types, and at this reference they are not known. Wrap it in an ordinary function and pass that instead.`
+
+fn build_wrapper_param_names(idx: Int, arity: Int) -> List String =
+  if idx >= arity then Nil
+  else Cons("a" ++ int_to_string(idx), build_wrapper_param_names(idx + 1, arity))
+
+fn build_synth_arg_exprs(names: List String, tys: List types.Type,
+                         pos: source.SourcePos) -> List typed_ast.TypedExpr =
+  match (names, tys) with
+  | (Cons n rest_n, Cons t rest_t) ->
+      Cons(typed_ast.TVar(n, t, pos), build_synth_arg_exprs(rest_n, rest_t, pos))
+  | _ -> Nil
+
+# Unlike build_wrapper_arg_params, which calls every eta parameter heap, these
+# carry the argument types the reference resolved to — so an Int parameter is
+# IRTScalar and the rooting pass leaves it alone.
+fn build_intrinsic_eta_params(names: List String,
+                              tys: List types.Type) -> List (String, sprout_ir.IRType) =
+  match (names, tys) with
+  | (Cons n rest_n, Cons t rest_t) ->
+      Cons((n, if type_kind.type_is_non_heap_scalar(t)
+               then sprout_ir.IRTScalar
+               else sprout_ir.IRTHeap),
+           build_intrinsic_eta_params(rest_n, rest_t))
+  | _ -> Nil
 
 # M3 PR 6: synthesize the wrapper IRFunction for an eta-expanded named-fn
 # reference.  Mirrors codegen.sprout:1434-1444's emit_named_fn_wrapper_lines.

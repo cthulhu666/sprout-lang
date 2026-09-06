@@ -1883,8 +1883,12 @@ since IEEE compares them equal — and every NaN payload, which is never
 canonicalised.
 
 Like `print` and `to_double`, both are compiler intrinsics rather than runtime
-functions and therefore **cannot be used as first-class values**; passing one to a
-higher-order function (`map(double_to_bits, xs)`) fails at link time.
+functions. They may be passed to a higher-order function (`map(double_to_bits, xs)`),
+but only where the argument types are known at the reference: an intrinsic has no
+symbol of its own, so the wrapper the compiler synthesises for a first-class
+reference lowers the operation itself rather than calling one. A reference whose
+argument type is still a type variable — inside a function generic in that type — is
+therefore rejected at compile time.
 
 Status: experimental. Rationale, the prior-art survey, and the rejected
 alternatives are in `docs/double-bit-access-v0.md`.

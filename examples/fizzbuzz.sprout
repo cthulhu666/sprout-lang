@@ -13,4 +13,4 @@ fn fizzbuzz(n: Int) -> String =
   else to_string(n)
 
 fn main() -> Unit !{IO} =
-  list_each(\line -> print(line), [fizzbuzz(i) for i in 1..15])
+  list_each(print, [fizzbuzz(i) for i in 1..15])
