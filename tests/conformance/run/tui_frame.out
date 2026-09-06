@@ -1,0 +1,7 @@
+[KeyPress(KRight, Mods(true, false, false))] +0 held
+[KeyPress(KChar(a), Mods(false, false, false))] +1 held
+[MousePress(MouseLeft, Offset(11, 4))] +0 held
+[Paste([A)] +0 held
+columns after each write: 2 7 9
+[1;1H[0mab[1;4H[0;1m日本[1;9H[0mé[0m
+second diff is 0 bytes
