@@ -14,9 +14,8 @@ import stdlib.mutable (MutMatrix, mutmatrix_new, mutmatrix_at, mutmatrix_set,
 import stdlib.string as string
 import stdlib.tui.geometry as geometry
 import stdlib.tui.style as style
-import stdlib.unicode.grapheme as grapheme
+import stdlib.tui.text as text
 import stdlib.unicode.utf8 as utf8
-import stdlib.unicode.width as uwidth
 
 # A cell holds a grapheme CLUSTER — a primary codepoint plus any combining
 # marks — not a single codepoint, so `e` + U+0301 is one cell. The primary is
@@ -81,17 +80,10 @@ export fn is_continuation_at(s: Screen, col: Int, row: Int) -> Bool !{IO} =
 
 # ── Placing clusters ────────────────────────────────────────────────────────
 
-# The width of the PRIMARY codepoint, not the sum over the cluster. Summing
-# would make an emoji ZWJ sequence four columns wide; tcell measures the same
-# way, taking the width from its `mainc` and ignoring `combc`. Combining marks
-# are zero-width anyway, so the two agree everywhere except the ZWJ case, where
-# only this answer is usable.
-fn cluster_width(cluster: List Int) -> Int =
-  match cluster with
-  | Nil -> 1
-  | [primary | _] -> imax(1, uwidth.codepoint_width(primary))
-
-fn imax(a: Int, b: Int) -> Int = if a > b then a else b
+# Segmentation and measurement live in `stdlib.tui.text`, which the wrapper
+# also uses. One definition, because a placer and a wrapper that disagreed
+# about how wide a cluster is would drift the cursor rather than fail.
+fn cluster_width(cluster: List Int) -> Int = text.cluster_width(cluster)
 
 # Break the pair that `col` lands in, if it lands in one. Two directions,
 # because a write can land on either half:
@@ -113,7 +105,9 @@ fn repair_right(s: Screen, col: Int, row: Int, here: Cell) -> Unit !{IO} =
 fn cell_columns(c: Cell) -> Int =
   match c with
   | Continuation -> 1
-  | Cell primary _ _ -> imax(1, uwidth.codepoint_width(primary))
+  # Measured through the same function that placed it: a cell's width is its
+  # primary's width, and the combining marks it carries are not consulted.
+  | Cell primary _ _ -> text.cluster_width([primary])
 
 fn set_raw(s: Screen, col: Int, row: Int, c: Cell) -> Unit !{IO} =
   if in_bounds(s, col, row) then mutmatrix_set(back_of(s), row, col, c) else ()
@@ -157,31 +151,7 @@ export fn screen_write(s: Screen, col: Int, row: Int, text: String,
                        st: style.Style) -> Int !{IO} =
   write_go(s, col, row, cluster_list(text), st)
 
-fn cluster_list(text: String) -> List (List Int) =
-  let cps = utf8.codepoints(text)
-  in
-  split_clusters(cps, grapheme.cluster_sizes(cps), Nil)
-
-fn split_clusters(cps: List Int, sizes: List Int,
-                  acc: List (List Int)) -> List (List Int) =
-  match sizes with
-  | Nil -> list_reverse(acc)
-  | Cons n rest ->
-      split_clusters(drop_n(cps, n), rest, Cons(take_n(cps, n, Nil), acc))
-
-fn take_n(xs: List Int, n: Int, acc: List Int) -> List Int =
-  if n <= 0 then list_reverse(acc)
-  else
-    match xs with
-    | Nil -> list_reverse(acc)
-    | Cons h rest -> take_n(rest, n - 1, Cons(h, acc))
-
-fn drop_n(xs: List Int, n: Int) -> List Int =
-  if n <= 0 then xs
-  else
-    match xs with
-    | Nil -> Nil
-    | Cons _ rest -> drop_n(rest, n - 1)
+fn cluster_list(s: String) -> List (List Int) = text.clusters(s)
 
 fn write_go(s: Screen, col: Int, row: Int, clusters: List (List Int),
             st: style.Style) -> Int !{IO} =

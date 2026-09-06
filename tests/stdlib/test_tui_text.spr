@@ -1,0 +1,73 @@
+module tests.tui_text
+
+# Column measurement and wrapping. Both count COLUMNS, not codepoints: a CJK
+# ideograph is two columns and a combining mark is zero, so a wrapper that
+# counted characters would overflow a pane on one and waste space on the other.
+# Design: docs/tui-widgets-v0.md §3.5.
+
+import stdlib.test (check_eq, run_suite)
+import stdlib.string as string
+import stdlib.tui.text as text
+import stdlib.unicode.utf8 as utf8
+
+fn joined(xs: List String) -> String = string.join("|", xs)
+
+fn wrapped(s: String, cols: Int) -> String = joined(text.wrap_to(s, cols))
+
+# Sprout has no `\u{...}` escape, so non-ASCII fixtures are built from
+# codepoints, as `test_tui_screen.spr` already does. 769 is U+0301 COMBINING
+# ACUTE ACCENT; 19990/30028 are 世/界, both East Asian Wide.
+fn e_acute() -> String = utf8.from_codepoints([101, 769])
+
+fn a_e_acute_b() -> String = utf8.from_codepoints([97, 101, 769, 98])
+
+fn shi() -> String = utf8.from_codepoints([19990])
+
+fn shi_jie() -> String = utf8.from_codepoints([19990, 30028])
+
+fn a_shi_jie() -> String = utf8.from_codepoints([97, 19990, 30028])
+
+fn a_shi_b() -> String = utf8.from_codepoints([97, 19990, 98])
+
+fn shi_jie_shi() -> String = utf8.from_codepoints([19990, 30028, 19990])
+
+fn main() -> Unit !{IO} =
+  run_suite("tui text", [
+    # ── width ───────────────────────────────────────────────────────────────
+    check_eq("empty is zero", text.width(""), 0),
+    check_eq("ascii is one per char", text.width("hello"), 5),
+    check_eq("a CJK ideograph is two columns", text.width(shi_jie()), 4),
+    check_eq("mixed ascii and wide", text.width(a_shi_b()), 4),
+    # `e` + U+0301 COMBINING ACUTE is one cluster, one column.
+    check_eq("a combining mark adds nothing", text.width(e_acute()), 1),
+    check_eq("a combining mark does not split", text.width(a_e_acute_b()), 3),
+
+    # ── truncate ────────────────────────────────────────────────────────────
+    check_eq("truncate shorter than the limit is identity", text.truncate("ab", 5), "ab"),
+    check_eq("truncate at the limit is identity", text.truncate("abc", 3), "abc"),
+    check_eq("truncate cuts to the column count", text.truncate("abcdef", 3), "abc"),
+    # A wide cluster that would straddle the edge is dropped whole: half a
+    # character is not a character.
+    check_eq("truncate never splits a wide cluster", text.truncate(a_shi_jie(), 2), "a"),
+    check_eq("truncate to zero is empty", text.truncate("abc", 0), ""),
+
+    # ── wrap ────────────────────────────────────────────────────────────────
+    check_eq("empty wraps to nothing", joined(text.wrap_to("", 5)), ""),
+    check_eq("a short line is one line", wrapped("hi", 5), "hi"),
+    check_eq("wraps at a space", wrapped("aa bb", 2), "aa|bb"),
+    check_eq("the break consumes the space", wrapped("aaa bbb", 3), "aaa|bbb"),
+    check_eq("packs as many words as fit", wrapped("a b c d", 3), "a b|c d"),
+    # A word with nowhere to break has to be cut mid-word, or it would either
+    # overflow the region or loop forever.
+    check_eq("hard-breaks an over-long word", wrapped("abcdefg", 3), "abc|def|g"),
+    check_eq("hard-break after a fitting word", wrapped("ab cdefgh", 4), "ab|cdef|gh"),
+    check_eq("an existing newline is a hard break", wrapped("ab\ncd", 10), "ab|cd"),
+    check_eq("a newline breaks even mid-fit", wrapped("a\nb", 10), "a|b"),
+    check_eq("wide clusters count as two",
+      wrapped(shi_jie_shi(), 4), shi_jie() ++ "|" ++ shi()),
+    check_eq("runs of spaces collapse at a break", wrapped("aa   bb", 2), "aa|bb"),
+    # Degenerate widths must terminate rather than loop: a zero or negative
+    # width has no line to fill, so the whole text is one line.
+    check_eq("zero width yields the input", wrapped("abc", 0), "abc"),
+    check_eq("negative width yields the input", wrapped("abc", -3), "abc")
+  ])
