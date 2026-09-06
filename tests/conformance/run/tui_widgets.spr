@@ -1,0 +1,155 @@
+module main
+
+# Golden-stdout coverage for M3: a widget tree, the layout engine and the pure
+# pump core, end to end.
+#
+# Sibling of tui_frame.spr, which pins the M2 decoder and screen. The unit
+# suites assert the same behaviour, but against expressions built from the same
+# helpers the implementation uses; this fixture pins the ACTUAL stdout of a real
+# binary, so a change in how a tree is composed shows up even if both sides of a
+# unit assertion moved together.
+#
+# The screen size is FIXED here rather than read from the terminal, so the
+# golden does not depend on the window the test happens to run in. That is also
+# why `app.run` is not exercised here — it reads the terminal size and blocks on
+# stdin, neither of which a golden can pin.
+
+import stdlib.string as string
+import stdlib.terminal as term
+import stdlib.tui.app as app
+import stdlib.tui.event as event
+import stdlib.tui.geometry as g
+import stdlib.tui.layout as layout
+import stdlib.tui.screen as scr
+import stdlib.tui.style as sty
+import stdlib.tui.widget as widget
+
+type Msg (..) deriving (Eq, ToString) =
+  | Hit Int
+  | Loud String
+
+type Outer (..) deriving (Eq, ToString) =
+  | Inner Msg
+
+fn to_outer(m: Msg) -> Outer = Inner(m)
+
+# ── a counter: hidden state is Int ──────────────────────────────────────────
+
+fn counter_on_event(n: Int, ev: event.Event) -> (Int, List Msg) =
+  match ev with
+  | event.TickEvent -> (n + 1, Nil)
+  | event.KeyPress _ _ -> (n, [Hit(n)])
+  | _ -> (n, Nil)
+
+fn counter_measure(n: Int, avail: g.Size) -> g.Size = g.Size(n, 1)
+
+fn counter_render(n: Int, r: g.Region, s: scr.Screen) -> Unit !{IO} = do
+  stop <- scr.screen_write(s, g.region_col(r), g.region_row(r), to_string(n),
+                           sty.style_default())
+  ()
+
+fn counter(n: Int) -> widget.Widget Msg =
+  widget.Widget(widget.View(state = n, on_event = counter_on_event,
+                            render = counter_render, measure = counter_measure))
+
+# ── a label: hidden state is String ─────────────────────────────────────────
+
+fn label_on_event(t: String, ev: event.Event) -> (String, List Msg) = (t, [Loud(t)])
+
+fn label_measure(t: String, avail: g.Size) -> g.Size = g.Size(string.length(t), 1)
+
+fn label_render(t: String, r: g.Region, s: scr.Screen) -> Unit !{IO} = do
+  stop <- scr.screen_write(s, g.region_col(r), g.region_row(r), t,
+                           sty.style_default())
+  ()
+
+fn label(t: String) -> widget.Widget Msg =
+  widget.Widget(widget.View(state = t, on_event = label_on_event,
+                            render = label_render, measure = label_measure))
+
+# ── a container: hidden state is a list of other widgets ────────────────────
+
+type Box = (dims: List layout.Dimension, kids: List (widget.Widget Msg))
+
+fn box_on_event(b: Box, ev: event.Event) -> (Box, List Msg) = (b, Nil)
+
+fn box_measure(b: Box, avail: g.Size) -> g.Size = avail
+
+fn box_render(b: Box, r: g.Region, s: scr.Screen) -> Unit !{IO} =
+  paint_kids(b.kids, layout.row(r, b.dims), s)
+
+fn paint_kids(kids: List (widget.Widget Msg), regions: List g.Region,
+              s: scr.Screen) -> Unit !{IO} =
+  match kids with
+  | Nil -> ()
+  | [k | rest] -> paint_kid(k, rest, regions, s)
+
+fn paint_kid(k: widget.Widget Msg, rest: List (widget.Widget Msg),
+             regions: List g.Region, s: scr.Screen) -> Unit !{IO} =
+  match regions with
+  | Nil -> ()
+  | [r | rrest] -> paint_then(k, r, s, rest, rrest)
+
+fn paint_then(k: widget.Widget Msg, r: g.Region, s: scr.Screen,
+              rest: List (widget.Widget Msg),
+              rrest: List g.Region) -> Unit !{IO} = do
+  widget.render(k, r, s)
+  paint_kids(rest, rrest, s)
+
+fn box(dims: List layout.Dimension, kids: List (widget.Widget Msg)) -> widget.Widget Msg =
+  widget.Widget(widget.View(state = Box(dims = dims, kids = kids),
+                            on_event = box_on_event, render = box_render,
+                            measure = box_measure))
+
+# ── the pure pump ───────────────────────────────────────────────────────────
+
+fn update(m: Msg, w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow) =
+  match m with
+  | Hit n -> quit_at(n, w)
+  | Loud _ -> (w, app.Continue)
+
+fn quit_at(n: Int, w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow) =
+  if n >= 2 then (w, app.Quit) else (counter(n + 1), app.Continue)
+
+fn key() -> event.Event = event.KeyPress(event.KEnter, event.mods_none())
+
+fn said(w: widget.Widget Msg, evs: List event.Event) -> String =
+  match widget.feed(w, evs) with
+  | (_, ms) -> to_string(ms)
+
+fn flow_after(w: widget.Widget Msg, ev: event.Event) -> String =
+  match app.step(update, w, ev) with
+  | (w2, f) -> `${to_string(f)} width=${to_string(g.size_cols(widget.measure(w2, g.Size(9, 9))))}`
+
+fn main() -> Unit !{IO} = do
+  # --- the box, pure ---
+  # Three ticks then a key: the reported count is the state at the time, which
+  # is what proves `feed` folds in order rather than broadcasting the original.
+  print(said(counter(0), [event.TickEvent, event.TickEvent, event.TickEvent, key()]))
+  # Two widgets with DIFFERENT hidden state types, measured through one list.
+  print(to_string(list_map(measured, [counter(3), label("hello")])))
+  # A retargeted vocabulary.
+  print(said_outer(widget.map_msgs(to_outer, counter(4)), key()))
+
+  # --- the pump, pure ---
+  print(flow_after(counter(0), key()))
+  print(flow_after(counter(2), key()))
+  print(flow_after(counter(2), event.Paste("x")))
+
+  # --- the tree, rendered ---
+  # `Cells 3` then two fractions over 17 remaining columns: 3, 9, 8 by largest
+  # remainder. A lost column here would leave a cell nothing ever paints.
+  s <- scr.screen_new(g.Size(20, 1))
+  widget.render(box([layout.Cells(3), layout.Fraction(1), layout.Fraction(1)],
+                    [label("ab"), label("cd"), label("ef")]),
+                g.Region(0, 0, 20, 1), s)
+  frame <- scr.diff_to_ansi(s)
+  term.write(frame)
+  term.write("\n")
+
+fn measured(w: widget.Widget Msg) -> Int =
+  g.size_cols(widget.measure(w, g.Size(80, 24)))
+
+fn said_outer(w: widget.Widget Outer, ev: event.Event) -> String =
+  match widget.on_event(w, ev) with
+  | (_, ms) -> to_string(ms)

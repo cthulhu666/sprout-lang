@@ -1,0 +1,107 @@
+module stdlib.tui.widget
+
+# The widget box: private state, shared message vocabulary. Design:
+# docs/tui-widgets-v0.md §3.1.
+#
+# Everything here except `render` is a total function over values, so a widget
+# is testable without a terminal — which is the reason `on_event` and `measure`
+# are pure and only painting is `!{IO}`.
+
+import stdlib.tui.event as event
+import stdlib.tui.geometry as geometry
+import stdlib.tui.screen as screen
+
+# Every widget ID, keybinding and plugin key is a String underneath, because
+# `Dict` and `Set` are String-keyed only. Decided up front rather than
+# retrofitted; docs/tui-widgets-v0.md §3.7.
+export wrap WidgetId = String
+
+export fn id_text(i: WidgetId) -> String =
+  match i with
+  | WidgetId s -> s
+
+# The four things a widget can do, over its own state type.
+#
+# `on_event` is pure and returns the messages the widget wants its application
+# to see; it cannot act on the world itself. That is what keeps a widget
+# testable and what makes the message type meaningful — a widget that could
+# perform IO in `on_event` would have no reason to report anything.
+export type View s m = (
+  state: s,
+  on_event: s -> event.Event -> (s, List m),
+  render: s -> geometry.Region -> screen.Screen -> Unit !{IO},
+  measure: s -> geometry.Size -> geometry.Size
+)
+
+# `s` is EXISTENTIAL and `m` is UNIVERSAL, which is the whole design: a text
+# input and a tree sit in one `List (Widget AppMsg)` with neither able to see
+# the other's state, while both speak the one vocabulary the application
+# declared. `exists` rather than `any C` because the hidden variable spans four
+# fields and `any C` is single-field sugar.
+export type Widget m (..) =
+  | exists s. Widget (View s m)
+
+# Hand one event to a widget: the box comes back rebuilt around its new state,
+# still hiding the same type, plus whatever it wants to say.
+export fn on_event(w: Widget m, ev: event.Event) -> (Widget m, List m) =
+  match w with
+  | Widget v -> repack(v, v.on_event(v.state, ev))
+
+# Repacking is a separate function because the skolem `s` is only in scope
+# under the `Widget v` pattern; naming it here keeps `on_event` one line and
+# the existential's scope obvious.
+fn repack(v: View s m, r: (s, List m)) -> (Widget m, List m) =
+  match r with
+  | (s2, msgs) -> (Widget(v with (state = s2)), msgs)
+
+# Fold a batch of events in order, concatenating what each one said. One read
+# of the terminal yields several events, and they must be applied in arrival
+# order — a widget's reply depends on the state the previous event left.
+export fn feed(w: Widget m, evs: List event.Event) -> (Widget m, List m) =
+  feed_go(w, evs, Nil)
+
+fn feed_go(w: Widget m, evs: List event.Event, acc: List m) -> (Widget m, List m) =
+  match evs with
+  | Nil -> (w, list_reverse(acc))
+  | [e | rest] -> feed_step(on_event(w, e), rest, acc)
+
+fn feed_step(r: (Widget m, List m), rest: List event.Event,
+             acc: List m) -> (Widget m, List m) =
+  match r with
+  | (w2, msgs) -> feed_go(w2, rest, push_all(msgs, acc))
+
+# Accumulate reversed and reverse once at the end, so a long batch is linear
+# rather than quadratic in `++`.
+fn push_all(msgs: List m, acc: List m) -> List m =
+  list_fold(\ (a, m) -> Cons(m, a), acc, msgs)
+
+# The widget's natural size within `avail` — what `layout.Auto` carries.
+export fn measure(w: Widget m, avail: geometry.Size) -> geometry.Size =
+  match w with
+  | Widget v -> v.measure(v.state, avail)
+
+# Paint into `r`. A widget is handed a region, never the whole screen, so
+# composition is the caller's arithmetic and not the widget's concern.
+export fn render(w: Widget m, r: geometry.Region, s: screen.Screen) -> Unit !{IO} =
+  match w with
+  | Widget v -> v.render(v.state, r, s)
+
+# Retarget a widget's messages, so one written against its own vocabulary can
+# be embedded in an application with a different one. This is what makes `m`
+# universal rather than merely fixed: without it, a reusable widget would have
+# to be written against the vocabulary of every application that used it.
+export fn map_msgs(f: m -> n, w: Widget m) -> Widget n =
+  match w with
+  | Widget v -> Widget (View(state = v.state,
+                            on_event = mapped_on_event(f, v.on_event, _, _),
+                            render = v.render,
+                            measure = v.measure))
+
+# Applied above with `_` holes for the last two arguments, leaving
+# `s -> Event -> (s, List n)` — the field's type. Sprout is n-ary, so the holes
+# are how a partial application is spelled; a lambda would say the same thing
+# but would be one in argument position, which the style guide rejects.
+fn mapped_on_event(f: m -> n, inner: s -> event.Event -> (s, List m),
+                   st: s, ev: event.Event) -> (s, List n) =
+  match inner(st, ev) with
+  | (s2, msgs) -> (s2, list_map(f, msgs))

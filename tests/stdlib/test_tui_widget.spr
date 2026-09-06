@@ -1,0 +1,190 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.string as string
+import stdlib.tui.event as event
+import stdlib.tui.geometry as g
+import stdlib.tui.screen as scr
+import stdlib.tui.style as sty
+import stdlib.tui.widget as widget
+
+# The widget box. Design: docs/tui-widgets-v0.md §3.1.
+#
+# The property under test is that `s` is genuinely HIDDEN and `m` genuinely
+# SHARED: two widgets with different state types sit in one list, each keeps its
+# own state across events, and neither can observe the other's. `render` is
+# `!{IO}`, so this suite uses the TestState form.
+#
+# State is observed through `measure`, which is the only pure window onto `s` a
+# caller has. That is deliberate — a test that reached into the state directly
+# would be testing something the type exists to forbid.
+
+type Msg (..) deriving (Eq, ToString) =
+  | Bumped Int
+  | Said String
+
+# A second, unrelated vocabulary, for `map_msgs`.
+type Outer (..) deriving (Eq, ToString) =
+  | Wrapped Msg
+  | Ignored
+
+fn wrap_msg(m: Msg) -> Outer = Wrapped(m)
+
+# ── a counter: hidden state is Int ──────────────────────────────────────────
+
+fn counter_on_event(n: Int, ev: event.Event) -> (Int, List Msg) =
+  match ev with
+  | event.TickEvent -> (n + 1, Nil)
+  | event.KeyPress _ _ -> (n, [Bumped(n)])
+  | _ -> (n, Nil)
+
+# The window onto the hidden state: reported width IS the count.
+fn counter_measure(n: Int, avail: g.Size) -> g.Size = g.Size(n, 1)
+
+fn counter_render(n: Int, r: g.Region, s: scr.Screen) -> Unit !{IO} = do
+  stop <- scr.screen_write(s, g.region_col(r), g.region_row(r), to_string(n),
+                           sty.style_default())
+  ()
+
+fn counter(n: Int) -> widget.Widget Msg =
+  widget.Widget(widget.View(state = n, on_event = counter_on_event,
+                            render = counter_render, measure = counter_measure))
+
+# ── a label: hidden state is String ─────────────────────────────────────────
+
+fn label_on_event(s: String, ev: event.Event) -> (String, List Msg) = (s, [Said(s)])
+
+fn label_measure(s: String, avail: g.Size) -> g.Size = g.Size(string.length(s), 1)
+
+fn label_render(s: String, r: g.Region, sc: scr.Screen) -> Unit !{IO} = do
+  stop <- scr.screen_write(sc, g.region_col(r), g.region_row(r), s,
+                           sty.style_default())
+  ()
+
+fn label(s: String) -> widget.Widget Msg =
+  widget.Widget(widget.View(state = s, on_event = label_on_event,
+                            render = label_render, measure = label_measure))
+
+# ── reading a box without unpacking it ──────────────────────────────────────
+
+# Width of a widget, i.e. its hidden state made observable. Generic in the
+# message type so the `map_msgs` cases can use it too.
+fn width_of(w: widget.Widget a) -> Int =
+  g.size_cols(widget.measure(w, g.Size(80, 24)))
+
+fn stepped(w: widget.Widget a, ev: event.Event) -> widget.Widget a =
+  match widget.on_event(w, ev) with
+  | (w2, _) -> w2
+
+fn fed(w: widget.Widget a, evs: List event.Event) -> widget.Widget a =
+  match widget.feed(w, evs) with
+  | (w2, _) -> w2
+
+fn said(w: widget.Widget Msg, ev: event.Event) -> String =
+  match widget.on_event(w, ev) with
+  | (_, ms) -> to_string(ms)
+
+fn said_all(w: widget.Widget Msg, evs: List event.Event) -> String =
+  match widget.feed(w, evs) with
+  | (_, ms) -> to_string(ms)
+
+fn said_outer(w: widget.Widget Outer, ev: event.Event) -> String =
+  match widget.on_event(w, ev) with
+  | (_, ms) -> to_string(ms)
+
+fn key() -> event.Event = event.KeyPress(event.KEnter, event.mods_none())
+
+fn main() -> Unit !{IO} = do
+  state <- new_state()
+  id_cases(state)
+  event_cases(state)
+  hidden_state_cases(state)
+  map_cases(state)
+  render_cases(state)
+  summary(state)
+
+fn id_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "a WidgetId carries its String",
+            widget.id_text(widget.WidgetId("tree")), "tree")
+
+# ── events thread state and collect messages ────────────────────────────────
+
+fn event_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "a tick advances the hidden state",
+            width_of(stepped(counter(0), event.TickEvent)), 1)
+  assert_eq(state, "a tick emits no message", said(counter(0), event.TickEvent), "[]")
+
+  assert_eq(state, "a keypress leaves the state alone",
+            width_of(stepped(counter(7), key())), 7)
+  assert_eq(state, "a keypress emits the current count",
+            said(counter(7), key()), "[Bumped(7)]")
+
+  # `feed` folds a list in order: three ticks, then a key reporting 3. A fold in
+  # the wrong order would report 0.
+  assert_eq(state, "feed folds every event in order",
+            width_of(fed(counter(0), [event.TickEvent, event.TickEvent, event.TickEvent])), 3)
+  assert_eq(state, "feed reports messages from the state at the time",
+            said_all(counter(0), [event.TickEvent, event.TickEvent, event.TickEvent, key()]),
+            "[Bumped(3)]")
+  assert_eq(state, "feed concatenates across events",
+            said_all(counter(0), [key(), event.TickEvent, key()]),
+            "[Bumped(0), Bumped(1)]")
+
+  assert_eq(state, "feeding nothing changes nothing", width_of(fed(counter(4), Nil)), 4)
+  assert_eq(state, "feeding nothing says nothing", said_all(counter(4), Nil), "[]")
+
+  # Repacking has to survive repeated use: the box is rebuilt on every event,
+  # and a rebuild that lost the state would show up as a stuck count.
+  assert_eq(state, "a repacked box keeps accumulating",
+            width_of(fed(fed(counter(0), [event.TickEvent, event.TickEvent]),
+                         [event.TickEvent, event.TickEvent])), 4)
+
+# ── two hidden types in one list ────────────────────────────────────────────
+
+fn hidden_state_cases(state: TestState) -> Unit !{IO} = do
+  # `Int` state and `String` state in ONE list — the point of the existential.
+  let ws = [counter(3), label("hello")]
+  assert_eq(state, "a heterogeneous list measures each widget",
+            to_string(list_map(width_of, ws)), "[3, 5]")
+
+  assert_eq(state, "the counter speaks for itself", said(counter(9), key()), "[Bumped(9)]")
+  assert_eq(state, "the label speaks for itself", said(label("hi"), key()), "[Said(hi)]")
+
+  # Advancing every widget in the list touches only each one's own state: the
+  # label ignores a tick, the counter does not.
+  assert_eq(state, "advancing a list touches only each widget's own state",
+            to_string(list_map(width_of, list_map(tick_once, ws))), "[4, 5]")
+
+fn tick_once(w: widget.Widget Msg) -> widget.Widget Msg =
+  stepped(w, event.TickEvent)
+
+# ── retargeting the message type ────────────────────────────────────────────
+
+fn map_cases(state: TestState) -> Unit !{IO} = do
+  let outer = widget.map_msgs(wrap_msg, counter(5))
+  assert_eq(state, "map_msgs retargets the emitted messages",
+            said_outer(outer, key()), "[Wrapped(Bumped(5))]")
+  assert_eq(state, "map_msgs leaves the hidden state alone", width_of(outer), 5)
+
+  # The mapped box is still a working widget: it must keep stepping.
+  assert_eq(state, "a mapped widget still advances",
+            width_of(stepped(outer, event.TickEvent)), 6)
+  assert_eq(state, "a mapped widget still advances twice",
+            width_of(fed(outer, [event.TickEvent, event.TickEvent])), 7)
+
+# ── render reaches the screen, at the region's origin ───────────────────────
+
+fn render_cases(state: TestState) -> Unit !{IO} = do
+  s <- scr.screen_new(g.Size(12, 2))
+  widget.render(label("hi"), g.Region(2, 0, 8, 1), s)
+  at2 <- scr.text_at(s, 2, 0)
+  at3 <- scr.text_at(s, 3, 0)
+  at0 <- scr.text_at(s, 0, 0)
+  assert_eq(state, "render writes at the region's column", at2, "h")
+  assert_eq(state, "render writes the rest of the text", at3, "i")
+  assert_eq(state, "render does not write left of the region", at0, " ")
+
+  # A second widget into a second region: the two do not collide.
+  widget.render(counter(7), g.Region(0, 1, 4, 1), s)
+  row1 <- scr.text_at(s, 0, 1)
+  still <- scr.text_at(s, 2, 0)
+  assert_eq(state, "a second widget renders into its own region", row1, "7")
+  assert_eq(state, "and leaves the first widget's cells alone", still, "h")

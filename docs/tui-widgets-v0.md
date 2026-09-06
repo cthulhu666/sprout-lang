@@ -1,9 +1,9 @@
 # TUI M3 — widget model, layout, app loop
 
-**Status:** PARTIAL. The pure half (`stdlib/tui/text.sprout`, `stdlib/tui/layout.sprout`,
-the `geometry` additions) is implemented; the widget model and the app loop follow in a
-second change. Builds on `docs/tui-core-v0.md` (M2), which owns `geometry`, `style`,
-`event`, `keys` and `screen`.
+**Status:** implemented. The pure half (`stdlib/tui/text.sprout`, `stdlib/tui/layout.sprout`,
+the `geometry` additions) landed first; `stdlib/tui/widget.sprout` and
+`stdlib/tui/app.sprout` followed. Builds on `docs/tui-core-v0.md` (M2), which owns
+`geometry`, `style`, `event`, `keys` and `screen`.
 
 ## 1. Problem
 
@@ -74,6 +74,24 @@ update, plus `any imported.Class`. All work — `tests/stdlib/test_existential_c
 Designing this is also what surfaced the bug fixed in "a record's type parameters are
 positional, in declaration order": `View s m` is the tree's first two-parameter record, and
 they were being registered backwards.
+
+`View` is also the tree's first record with **function-typed fields**, which nothing in
+`stdlib/` had used before. Two consequences worth recording, both verified rather than
+assumed:
+
+- A field declared `s -> Event -> (s, List m)` is CALLED n-ary: `v.on_event(v.state, ev)`.
+  Sprout does not auto-curry at call sites.
+- Building a field by partially applying a named function needs explicit `_` holes —
+  `mapped_on_event(f, v.on_event, _, _)`. Without them the compiler reports
+  ``expects 4 arguments, got 2 (Sprout is n-ary; use `_` for partial application)``. A
+  lambda would express the same thing but would be a lambda in argument position, which
+  `docs/style-guide-v0.md` rejects.
+
+**`map_msgs` retargets a widget's vocabulary** — `map_msgs(f: m -> n, w: Widget m) -> Widget n`
+— by repacking at the *same* hidden state type with the emitted messages mapped. It is what
+makes `m` universal rather than merely fixed: without it a reusable widget would have to be
+written against the message type of every application that embedded it, which is the exact
+coupling the existential removes for state. `WidgetId` reads back through `id_text`.
 
 ### 3.2 Three dimension kinds, and an explicit shrink priority
 
@@ -156,13 +174,53 @@ is this text" for the placer and the wrapper to share.
 
 `chan_select` is recv-only, same-typed, and has no `default` arm (`stdlib/chan.sprout`), so
 several differently-typed sources cannot be selected across. The shape that works today is
-one `Chan Event` fed by an input task, a timer task and any worker tasks, with the main loop
-recving from it. `Ref AppState` holds application state — read-modify-write is atomic
-without a lock because the green scheduler only preempts at I/O, channel and sleep parks,
-the same reasoning `docs/http-stateful-server-v0.md` records.
+one channel carrying a sum, with the main loop recving from it:
 
-This is a **workaround for a `chan_select` limitation**, not a preference, and is recorded
-as such in `BACKLOG.md` §4 so the pump's shape is attributed to its cause.
+```sprout
+type Signal m = | SigEvent Event | SigMsg m
+```
+
+`SigEvent` is what the input task posts; `SigMsg` is what a worker task posts, and the loop
+cannot tell — nor need to — which task a signal came from. This is a **workaround for a
+`chan_select` limitation**, not a preference, and is recorded as such in `BACKLOG.md` §4 so
+the pump's shape is attributed to its cause.
+
+Two things the original sketch called for turned out to be unnecessary once
+`stdlib/terminal.sprout` was read closely, and leaving them in would have been cargo:
+
+- **No timer task.** `read_avail(max, timeout_ms)` already reports a `TermIdle` when its
+  deadline elapses with nothing readable — its own doc calls that "how a UI gets its frame
+  tick". The input task turns `TermIdle` into `TickEvent`, so the tick costs no task, no
+  channel and no clock arithmetic. `TermResized` arrives on the same call, which is why a
+  resize is an ordinary event in the same stream rather than a signal handler.
+- **No `Ref AppState`.** The loop is a recursive `!{IO}` function and threads the widget
+  tree, the screen and the size as parameters. A `Ref` would be shared mutable state bought
+  for nothing — the sketch reached for it by analogy with `docs/http-stateful-server-v0.md`,
+  where state is genuinely shared across concurrent connection tasks. Here exactly one task
+  touches the tree.
+
+The application supplies an `update` rather than a message handler, so a message can rebuild
+part of the tree:
+
+```sprout
+type App m = (
+  root:    Widget m,
+  update:  m -> Widget m -> (Widget m, Flow),   # Flow = Continue | Quit
+  tick_ms: Int,
+  boot:    Scope -> Chan (Signal m) -> Unit !{IO}
+)
+```
+
+`boot` is the hook for spawning worker tasks with access to the channel; `no_boot` is the
+default for an application without any. The fold over a batch of messages **stops at the
+first `Quit`** — the quitting message's own update still lands, so an app can paint a
+farewell frame, but the messages behind it do not, because the tree they would act on is
+already being torn down.
+
+`read_avail` permits exactly one waiter and loud-fails on a second, so exactly one task owns
+the terminal and everything else reaches the loop through the channel. On quit the scope is
+cancelled, which drops that task where it is parked; without the cancel, `with_scope`'s
+unconditional join would wait forever on a loop that never ends.
 
 ### 3.7 IDs are strings
 
@@ -178,11 +236,20 @@ tracked separately and is far too large to bundle here.
 | `stdlib/tui/text.sprout` | cluster segmentation, `width`, `wrap_to`, `truncate` | pure half |
 | `stdlib/tui/layout.sprout` | `Dimension`, `Edge`, `solve`, `row`, `column`, `grid`, `dock` | pure half |
 | `stdlib/tui/geometry.sprout` | `split_right`, `split_bottom` added | pure half |
-| `stdlib/tui/widget.sprout` | `View`, `Widget`, `WidgetId` | app-loop half |
-| `stdlib/tui/app.sprout` | the message pump and render loop | app-loop half |
+| `stdlib/tui/widget.sprout` | `View`, `Widget`, `WidgetId`, `on_event`, `feed`, `measure`, `render`, `map_msgs` | app-loop half |
+| `stdlib/tui/app.sprout` | `Flow`, `Signal`, `App`, `apply`, `step`, `run` | app-loop half |
 
 The split is at the pure/IO seam: everything in the first three is a total function over
 values, unit-testable with `run_suite`/`check_eq` and no terminal.
+
+`widget` keeps that seam too — only `render` is `!{IO}`. `on_event` is pure and reports
+messages instead of acting, which is what makes a widget testable and what gives the message
+type a reason to exist: a widget that could perform IO in `on_event` would have nothing to
+report. `app` splits the same way, into a pure `step`/`apply` core and the `run` shell.
+
+**Composition beyond a single widget is M4.** A container is expressible today — it is a
+widget whose hidden state is a `List (Widget m)`, which `examples/tui_dashboard.sprout`
+demonstrates in about thirty lines — but stdlib ships no `row`/`column` container yet.
 
 ## 5. Syntax, type-system and error-message impact
 
@@ -216,3 +283,20 @@ All pure, `run_suite`/`check_eq`, no terminal and no fixture process.
   combining marks, a word longer than the line, existing newlines, degenerate widths.
 - `tests/stdlib/test_tui_layout.spr` — the sum invariant at many extents, each shrink tier,
   largest-remainder distribution and its tie-break, `dock` folds, `grid`.
+- `tests/stdlib/test_tui_widget.spr` — the box: two hidden state types in one list, state
+  threaded across a `feed`, repacking that survives repeated use, `map_msgs`, and `render`
+  reaching a real `Screen` at the region's origin. Hidden state is observed only through
+  `measure`, because reaching into it directly would test what the type exists to forbid.
+- `tests/stdlib/test_tui_app.spr` — the pure pump: `apply` threading messages through
+  `update`, stopping at the first `Quit`, and `step` routing an event end to end.
+- `tests/conformance/run/tui_widgets.spr` — golden stdout for the composed path at a FIXED
+  screen size, so the golden does not depend on the window the test runs in.
+
+**What is NOT covered by an automated test.** `run` takes over the terminal and blocks on
+stdin, so no gate exercises it — the conformance runner inherits stdin and would hang or
+vary. It was verified by hand against `examples/tui_dashboard.sprout`: EOF closes the
+channel and tears down cleanly (exit 0); typed keys decode, update the tree and repaint
+incrementally; a widget-emitted `Quit` ends the loop; and `TermIdle` produces ticks at the
+configured cadence (four in 1.2s at `tick_ms = 250`). **Resize and the `boot`/`SigMsg`
+worker path are implemented but unverified** — neither is reachable from a piped stdin.
+Tracked in `BACKLOG.md`.
