@@ -2016,7 +2016,48 @@ Legend:
 - [ ] `P3` **Mouse reporting mode is decoded but never enabled.** M2 decodes SGR (1006) mouse reports; nothing writes the escape that asks the terminal to send them. That belongs with the app loop that would turn it on, since enabling it without a consumer just corrupts the input stream. Two smaller gaps in the same area: the modifier bits in the button value (xterm: "4=Shift, 8=Meta, 16=Control") are **masked off**, because `Event` carries no modifiers on a mouse report; and only SGR is decoded, not normal-mode tracking, which is why `MouseRelease` can carry a button at all.
 
 - [ ] `P3` **A terminal may disagree with UAX #11 about a character's width.** `screen.sprout` computes width from the Unicode tables, which is the best a program can do unilaterally. A terminal that disagrees — most often on emoji ZWJ sequences, and on Ambiguous-width characters under a CJK locale — renders a line at a width the diff engine did not predict, and every cursor move after it drifts. Any real fix is a negotiation with the terminal rather than a change to the tables. Recovery today is a full repaint, which `screen_resize` provides by returning a screen blank in both buffers.
-- [ ] `P1` Add basic event loop utility for TUI apps. **Scheduled as TUI M3.** Unblocked by the parked-stdin work above — an event loop that could not run a timer alongside input was the thing this entry could not have delivered before. Note one shape constraint found while scoping it: `chan_select` is recv-only, same-typed, and has no `default` arm, so the pump multiplexes input/timers/workers over ONE sum-typed channel rather than selecting across several. That is a workaround for the `chan_select` limitation already tracked in the concurrency arc, recorded here so the pump's shape is attributed to it rather than read as a design preference.
+- [x] `P1` Add basic event loop utility for TUI apps. **LANDED 2026-09-06 as TUI M3**
+  (`stdlib/tui/app.sprout`, design in `docs/tui-widgets-v0.md` §3.6). Unblocked by the
+  parked-stdin work above — an event loop that could not run a timer alongside input was the
+  thing this entry could not have delivered before. The shape constraint found while scoping
+  it held: `chan_select` is recv-only, same-typed, and has no `default` arm, so the pump
+  multiplexes over ONE channel carrying `Signal m = SigEvent Event | SigMsg m` rather than
+  selecting across several. That remains a workaround for the `chan_select` limitation
+  tracked in the concurrency arc, recorded here so the pump's shape is attributed to it
+  rather than read as a design preference.
+
+  Two things the scoping sketch called for turned out to be **unnecessary**, and are noted
+  because both would have been cargo carried on an analogy rather than a reading of the code.
+  (a) *No timer task.* `terminal.read_avail(max, ms)` already reports `TermIdle` when its
+  deadline elapses with nothing readable — its own doc calls that "how a UI gets its frame
+  tick" — so the input task turns `TermIdle` into `TickEvent` and the tick costs no task and
+  no clock arithmetic. `TermResized` arrives on the same call, which is why a resize is an
+  ordinary event in the stream rather than a signal handler. (b) *No `Ref AppState`.* The
+  sketch reached for one by analogy with `docs/http-stateful-server-v0.md`, where state is
+  genuinely shared across concurrent connection tasks; here exactly one task touches the
+  tree, and the loop threads it as a parameter. A `Ref` would have bought shared mutable
+  state for nothing.
+
+- [ ] `P2` **TUI `app.run`: resize and the worker-message path are implemented but
+  unverified.** No automated gate exercises `run` at all — it takes over the terminal and
+  blocks on stdin, and the `tests/conformance/run` harness inherits stdin, so a fixture
+  there would hang or vary by environment. What WAS verified by hand against
+  `examples/tui_dashboard.sprout`: EOF closes the channel and tears down cleanly (exit 0);
+  typed keys decode, update the tree and repaint incrementally; a widget-emitted `Quit` ends
+  the loop; `TermIdle` produces ticks at the configured cadence (four in 1.2s at
+  `tick_ms = 250`). What was NOT: the `TermResized` arm (needs a real SIGWINCH, so a pty),
+  and the `boot`/`SigMsg` arm by which a worker task posts a message (needs a spawned task
+  inside a running app). Both are single `match` arms over paths whose pieces are covered —
+  `apply` is unit-tested and `screen_resize` has its own suite — but the wiring is not.
+  Closing this wants a pty-driven fixture; `stdlib.process` can spawn one, which is the
+  likely shape.
+
+- [ ] `P3` **stdlib ships no container widget.** A container is expressible today — it is a
+  widget whose hidden state is a `List (Widget m)`, which `examples/tui_dashboard.sprout`
+  demonstrates in about thirty lines, broadcasting events to children and spending
+  `layout.row`/`layout.column` on their regions. But every application currently has to write
+  that itself. `row`/`column`/`grid` container widgets belong to the M4 widget library, noted
+  here so the gap is attributed rather than rediscovered.
 
 - [x] `P1` **Unicode width and grapheme clusters — LANDED 2026-09-06 as `stdlib/unicode`.** Split
   out of TUI M2 because it is a stdlib capability in its own right. `codepoint_width` implements

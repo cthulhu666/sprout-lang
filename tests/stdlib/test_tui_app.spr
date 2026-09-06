@@ -1,0 +1,121 @@
+module tests.tui_app
+
+# The pump's pure core. Design: docs/tui-widgets-v0.md §3.6.
+#
+# `run` needs a terminal, but the decision it makes on every signal does not:
+# `step` takes a widget and an event and returns the next widget plus whether
+# the loop keeps going. Everything interesting about the loop is in there, so
+# that is what this suite pins — no terminal, no channel, no scheduler.
+
+import stdlib.test (check_eq, run_suite)
+import stdlib.tui.app as app
+import stdlib.tui.event as event
+import stdlib.tui.geometry as g
+import stdlib.tui.screen as scr
+import stdlib.tui.style as sty
+import stdlib.tui.widget as widget
+
+type Msg (..) deriving (Eq, ToString) =
+  | Bumped Int
+  | Hushed
+
+# A counter whose reported width is its count, so an update is observable
+# without reaching into the hidden state.
+fn counter_on_event(n: Int, ev: event.Event) -> (Int, List Msg) =
+  match ev with
+  | event.TickEvent -> (n, [Bumped(n)])
+  | event.KeyPress _ _ -> (n, [Hushed])
+  | _ -> (n, Nil)
+
+fn counter_measure(n: Int, avail: g.Size) -> g.Size = g.Size(n, 1)
+
+fn counter_render(n: Int, r: g.Region, s: scr.Screen) -> Unit !{IO} = do
+  stop <- scr.screen_write(s, g.region_col(r), g.region_row(r), to_string(n),
+                           sty.style_default())
+  ()
+
+fn counter(n: Int) -> widget.Widget Msg =
+  widget.Widget(widget.View(state = n, on_event = counter_on_event,
+                            render = counter_render, measure = counter_measure))
+
+# `Bumped n` grows the widget by one and quits once it has reached 3. Growing
+# is done by replacing the box, which is what a real `update` does when a
+# message rebuilds part of the tree.
+fn update(m: Msg, w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow) =
+  match m with
+  | Bumped n -> bump(n, w)
+  | Hushed -> (w, app.Continue)
+
+fn bump(n: Int, w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow) =
+  if n >= 3 then (counter(n), app.Quit)
+  else (counter(n + 1), app.Continue)
+
+fn width_of(w: widget.Widget Msg) -> Int =
+  g.size_cols(widget.measure(w, g.Size(80, 24)))
+
+fn applied_width(msgs: List Msg, w: widget.Widget Msg) -> Int =
+  match app.apply(update, msgs, w) with
+  | (w2, _) -> width_of(w2)
+
+fn applied_flow(msgs: List Msg, w: widget.Widget Msg) -> app.Flow =
+  match app.apply(update, msgs, w) with
+  | (_, f) -> f
+
+fn stepped_width(w: widget.Widget Msg, ev: event.Event) -> Int =
+  match app.step(update, w, ev) with
+  | (w2, _) -> width_of(w2)
+
+fn stepped_flow(w: widget.Widget Msg, ev: event.Event) -> app.Flow =
+  match app.step(update, w, ev) with
+  | (_, f) -> f
+
+fn key() -> event.Event = event.KeyPress(event.KEnter, event.mods_none())
+
+fn main() -> Unit !{IO} =
+  run_suite("tui app", [
+    # ── Flow is an ordinary value ───────────────────────────────────────────
+    check_eq("Continue prints", to_string(app.Continue), "Continue"),
+    check_eq("Quit prints", to_string(app.Quit), "Quit"),
+    check_eq("Continue is not Quit", app.Continue == app.Quit, false),
+
+    # ── apply: folding messages through update ──────────────────────────────
+    check_eq("no messages leaves the widget alone", applied_width(Nil, counter(0)), 0),
+    check_eq("no messages continues", applied_flow(Nil, counter(0)), app.Continue),
+    check_eq("one message updates the widget", applied_width([Bumped(0)], counter(0)), 1),
+    check_eq("one message continues", applied_flow([Bumped(0)], counter(0)), app.Continue),
+
+    # Threading: each message sees the widget the previous one produced, so two
+    # bumps land at 2 rather than both at 1.
+    check_eq("messages thread through the widget",
+             applied_width([Bumped(0), Bumped(1)], counter(0)), 2),
+    check_eq("a message that changes nothing still threads",
+             applied_width([Hushed, Bumped(0), Hushed], counter(0)), 1),
+
+    # ── apply: Quit stops the fold ──────────────────────────────────────────
+    check_eq("a quitting message reports Quit",
+             applied_flow([Bumped(3)], counter(3)), app.Quit),
+    # The quitting message's own update still lands; the ones after it do not.
+    check_eq("the fold stops at the first Quit",
+             applied_width([Bumped(3), Bumped(0)], counter(3)), 3),
+    check_eq("and stays quit", applied_flow([Bumped(3), Bumped(0)], counter(3)), app.Quit),
+    check_eq("a later Quit is still reached",
+             applied_flow([Hushed, Bumped(3)], counter(3)), app.Quit),
+
+    # ── step: event in, next widget and flow out ────────────────────────────
+    # A tick makes the counter emit `Bumped n`, which update turns into growth.
+    check_eq("step routes an event through update", stepped_width(counter(0), event.TickEvent), 1),
+    check_eq("step continues while update does", stepped_flow(counter(0), event.TickEvent),
+             app.Continue),
+    check_eq("step quits when update does", stepped_flow(counter(3), event.TickEvent), app.Quit),
+
+    # A keypress emits `Hushed`, which changes nothing — an event a widget
+    # ignores must not disturb the tree.
+    check_eq("an ignored event leaves the widget alone", stepped_width(counter(2), key()), 2),
+    check_eq("an ignored event continues", stepped_flow(counter(2), key()), app.Continue),
+
+    # An event that produces NO message at all: neither widget nor flow moves.
+    check_eq("an event with no message leaves the widget alone",
+             stepped_width(counter(2), event.Paste("x")), 2),
+    check_eq("an event with no message continues",
+             stepped_flow(counter(2), event.Paste("x")), app.Continue)
+  ])

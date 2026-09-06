@@ -1,0 +1,197 @@
+module main
+
+# A whole TUI in one file: the widget box, the layout engine and the message
+# pump. Design: docs/tui-widgets-v0.md.
+#
+# Three leaf widgets with three DIFFERENT hidden state types — an Int, a
+# List String and a String — sit in one tree, and a container widget holds them
+# in a `List (Widget Msg)` without being able to see any of their states. That
+# is the existential doing its job: `s` is private, `m` is shared.
+#
+# Run it in a terminal; press q to quit.
+
+import stdlib.string as string
+import stdlib.tui.app as app
+import stdlib.tui.event as event
+import stdlib.tui.geometry as g
+import stdlib.tui.layout as layout
+import stdlib.tui.screen as scr
+import stdlib.tui.style as sty
+import stdlib.tui.text as text
+import stdlib.tui.widget as widget
+
+# The one vocabulary every widget in this application speaks.
+type Msg (..) deriving (Eq, ToString) =
+  | Quit
+  | Typed String
+
+fn dim() -> sty.Style = sty.with_fg(sty.style_default(), sty.Ansi(8))
+
+fn bright() -> sty.Style = sty.with_bold(sty.style_default(), true)
+
+# Write one line, clipped to the region — a widget must never paint outside the
+# region it was handed.
+fn line(s: scr.Screen, r: g.Region, row: Int, txt: String,
+        st: sty.Style) -> Unit !{IO} = do
+  stop <- scr.screen_write(s, g.region_col(r), g.region_row(r) + row,
+                           text.truncate(txt, g.region_cols(r)), st)
+  ()
+
+# ── a ticking counter: hidden state is Int ──────────────────────────────────
+
+fn ticks_on_event(n: Int, ev: event.Event) -> (Int, List Msg) =
+  match ev with
+  | event.TickEvent -> (n + 1, Nil)
+  | _ -> (n, Nil)
+
+fn ticks_measure(n: Int, avail: g.Size) -> g.Size = g.Size(g.size_cols(avail), 2)
+
+fn ticks_render(n: Int, r: g.Region, s: scr.Screen) -> Unit !{IO} = do
+  line(s, r, 0, "ticks", dim())
+  line(s, r, 1, to_string(n), bright())
+
+fn ticks() -> widget.Widget Msg =
+  widget.Widget(widget.View(state = 0, on_event = ticks_on_event,
+                            render = ticks_render, measure = ticks_measure))
+
+# ── a key log: hidden state is List String ──────────────────────────────────
+
+# `q` is this widget's business, so it is this widget that says `Quit`. The
+# application never inspects a keystroke.
+fn keys_on_event(log: List String, ev: event.Event) -> (List String, List Msg) =
+  match ev with
+  | event.KeyPress k mods -> on_key(log, k)
+  | _ -> (log, Nil)
+
+fn on_key(log: List String, k: event.Key) -> (List String, List Msg) =
+  match k with
+  | event.KChar c -> on_char(log, c)
+  | _ -> (Cons(to_string(k), log), [Typed(to_string(k))])
+
+fn on_char(log: List String, c: Char) -> (List String, List Msg) =
+  if c == 'q' then (log, [Quit])
+  else (Cons(char_to_string(c), log), [Typed(char_to_string(c))])
+
+fn keys_measure(log: List String, avail: g.Size) -> g.Size = avail
+
+fn keys_render(log: List String, r: g.Region, s: scr.Screen) -> Unit !{IO} = do
+  line(s, r, 0, "keys", dim())
+  render_lines(s, r, 1, text.wrap_to(string.join(" ", log), g.region_cols(r)))
+
+# Wrapping is why `text` measures COLUMNS: a CJK ideograph is two of them, so a
+# character count would overflow the region.
+fn render_lines(s: scr.Screen, r: g.Region, row: Int,
+                lines: List String) -> Unit !{IO} =
+  match lines with
+  | Nil -> ()
+  | [l | rest] -> render_line_then(s, r, row, l, rest)
+
+fn render_line_then(s: scr.Screen, r: g.Region, row: Int, l: String,
+                    rest: List String) -> Unit !{IO} =
+  if row >= g.region_rows(r) then ()
+  else render_and_recurse(s, r, row, l, rest)
+
+fn render_and_recurse(s: scr.Screen, r: g.Region, row: Int, l: String,
+                      rest: List String) -> Unit !{IO} = do
+  line(s, r, row, l, sty.style_default())
+  render_lines(s, r, row + 1, rest)
+
+fn keys() -> widget.Widget Msg =
+  widget.Widget(widget.View(state = Nil, on_event = keys_on_event,
+                            render = keys_render, measure = keys_measure))
+
+# ── a static label: hidden state is String ──────────────────────────────────
+
+fn label_on_event(txt: String, ev: event.Event) -> (String, List Msg) = (txt, Nil)
+
+fn label_measure(txt: String, avail: g.Size) -> g.Size =
+  g.Size(text.width(txt), 1)
+
+fn label_render(txt: String, r: g.Region, s: scr.Screen) -> Unit !{IO} =
+  line(s, r, 0, txt, bright())
+
+fn label(txt: String) -> widget.Widget Msg =
+  widget.Widget(widget.View(state = txt, on_event = label_on_event,
+                            render = label_render, measure = label_measure))
+
+# ── a container: hidden state is a list of OTHER widgets ────────────────────
+
+# The container cannot see any child's state, only send it events and give it a
+# region. Containers proper are M4; this is the smallest one that shows the
+# widget model and the layout engine meeting.
+type Box = (vertical: Bool, dims: List layout.Dimension,
+            kids: List (widget.Widget Msg))
+
+fn box_on_event(b: Box, ev: event.Event) -> (Box, List Msg) =
+  match broadcast(b.kids, ev, Nil, Nil) with
+  | (kids, msgs) -> (b with (kids = kids), msgs)
+
+# Every child sees every event, in order, and their messages are concatenated.
+fn broadcast(kids: List (widget.Widget Msg), ev: event.Event,
+             wacc: List (widget.Widget Msg),
+             macc: List Msg) -> (List(widget.Widget Msg), List Msg) =
+  match kids with
+  | Nil -> (list_reverse(wacc), list_reverse(macc))
+  | [k | rest] -> broadcast_step(widget.on_event(k, ev), rest, ev, wacc, macc)
+
+fn broadcast_step(r: (widget.Widget Msg, List Msg), rest: List (widget.Widget Msg),
+                  ev: event.Event, wacc: List (widget.Widget Msg),
+                  macc: List Msg) -> (List(widget.Widget Msg), List Msg) =
+  match r with
+  | (k2, msgs) -> broadcast(rest, ev, Cons(k2, wacc), push_all(msgs, macc))
+
+fn push_all(msgs: List Msg, acc: List Msg) -> List Msg =
+  list_fold(\ (a, m) -> Cons(m, a), acc, msgs)
+
+fn box_measure(b: Box, avail: g.Size) -> g.Size = avail
+
+fn box_render(b: Box, r: g.Region, s: scr.Screen) -> Unit !{IO} =
+  render_kids(b.kids, regions_of(b, r), s)
+
+fn regions_of(b: Box, r: g.Region) -> List g.Region =
+  if b.vertical then layout.column(r, b.dims) else layout.row(r, b.dims)
+
+fn render_kids(kids: List (widget.Widget Msg), regions: List g.Region,
+               s: scr.Screen) -> Unit !{IO} =
+  match kids with
+  | Nil -> ()
+  | [k | rest] -> render_kid(k, rest, regions, s)
+
+fn render_kid(k: widget.Widget Msg, rest: List (widget.Widget Msg),
+              regions: List g.Region, s: scr.Screen) -> Unit !{IO} =
+  match regions with
+  | Nil -> ()
+  | [r | rrest] -> render_kid_then(k, r, s, rest, rrest)
+
+fn render_kid_then(k: widget.Widget Msg, r: g.Region, s: scr.Screen,
+                   rest: List (widget.Widget Msg),
+                   rrest: List g.Region) -> Unit !{IO} = do
+  widget.render(k, r, s)
+  render_kids(rest, rrest, s)
+
+fn box(vertical: Bool, dims: List layout.Dimension,
+       kids: List (widget.Widget Msg)) -> widget.Widget Msg =
+  widget.Widget(widget.View(state = Box(vertical = vertical, dims = dims, kids = kids),
+                            on_event = box_on_event, render = box_render,
+                            measure = box_measure))
+
+# ── the application ─────────────────────────────────────────────────────────
+
+# A header and a footer of one row each, with the body taking the rest.
+fn root() -> widget.Widget Msg =
+  box(true, [layout.Cells(1), layout.Fraction(1), layout.Cells(1)],
+      [label("Sprout TUI — M3"), body(), label("q to quit")])
+
+# Two panes side by side: the counter takes a third, the key log the rest.
+fn body() -> widget.Widget Msg =
+  box(false, [layout.Fraction(1), layout.Fraction(2)], [ticks(), keys()])
+
+# Widgets already did the work; the application only decides when to stop.
+fn update(m: Msg, w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow) =
+  match m with
+  | Quit -> (w, app.Quit)
+  | Typed _ -> (w, app.Continue)
+
+fn main() -> Unit !{IO} =
+  app.run(app.App(root = root(), update = update, tick_ms = 250,
+                  boot = app.no_boot))

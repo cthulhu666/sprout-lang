@@ -1,0 +1,229 @@
+module stdlib.tui.app
+
+# The message pump and render loop. Design: docs/tui-widgets-v0.md §3.6.
+#
+# The loop's decision on every signal is a PURE function — `step` takes a
+# widget and an event and returns the next widget plus whether to keep going —
+# and `run` is the shell that supplies signals and paints the result. That split
+# is why the interesting half of this module is unit-testable with no terminal,
+# no channel and no scheduler.
+
+import stdlib.bytes as bytes
+import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_send, chan_recv, chan_close)
+import stdlib.task (Scope, with_scope, task_spawn, task_cancelled, scope_cancel)
+import stdlib.terminal as terminal
+import stdlib.tui.event as event
+import stdlib.tui.geometry as geometry
+import stdlib.tui.keys as keys
+import stdlib.tui.screen as screen
+import stdlib.tui.style as style
+import stdlib.tui.widget as widget
+
+# Whether the loop keeps going. A value rather than an exception, because
+# Sprout has none — the same reasoning as `TimeoutResult`.
+export type Flow (..) deriving (Eq, ToString) =
+  | Continue
+  | Quit
+
+# What the pump multiplexes onto its one channel. `chan_select` is recv-only,
+# same-typed and has no `default` arm, so differently-typed sources cannot be
+# selected across; one sum-typed channel is the shape that works today. A
+# worker task posts `SigMsg`, the input task posts `SigEvent`, and the loop
+# cannot tell — nor need to — which task a signal came from.
+export type Signal m (..) =
+  | SigEvent event.Event
+  | SigMsg m
+
+# `update` is the application's half: it receives what widgets said and decides
+# both the next tree and whether to stop. Widget-local state lives inside the
+# widget, so this is for cross-widget concerns only — there is deliberately no
+# separate `Ref AppState`, because the loop threads the tree as a parameter and
+# nothing is shared between tasks.
+export type App m = (
+  root: widget.Widget m,
+  update: m -> widget.Widget m -> (widget.Widget m, Flow),
+  tick_ms: Int,
+  boot: Scope -> Chan(Signal m) -> Unit !{IO}
+)
+
+# The default `boot` for an application with no worker tasks.
+export fn no_boot(scope: Scope, ch: Chan (Signal m)) -> Unit !{IO} = ()
+
+# ── The pure core ───────────────────────────────────────────────────────────
+
+# Fold messages through `update`, threading the tree, and STOP at the first
+# `Quit`. The quitting message's own update still lands — it is how an app
+# paints a farewell frame — but the ones behind it do not, because the tree
+# they would act on is already being torn down.
+export fn apply(update: m -> widget.Widget m -> (widget.Widget m, Flow),
+                msgs: List m, w: widget.Widget m) -> (widget.Widget m, Flow) =
+  match msgs with
+  | Nil -> (w, Continue)
+  | [msg | rest] -> apply_step(update, update(msg, w), rest)
+
+fn apply_step(update: m -> widget.Widget m -> (widget.Widget m, Flow),
+              r: (widget.Widget m, Flow),
+              rest: List m) -> (widget.Widget m, Flow) =
+  match r with
+  | (w2, Quit) -> (w2, Quit)
+  | (w2, Continue) -> apply(update, rest, w2)
+
+# One event, end to end: the widget tree sees it, whatever it says goes through
+# `update`, and the result is the next tree plus the loop's verdict.
+export fn step(update: m -> widget.Widget m -> (widget.Widget m, Flow),
+               w: widget.Widget m, ev: event.Event) -> (widget.Widget m, Flow) =
+  match widget.on_event(w, ev) with
+  | (w2, msgs) -> apply(update, msgs, w2)
+
+# ── The shell ───────────────────────────────────────────────────────────────
+
+# Take over the terminal, pump signals until the application quits or input
+# ends, then put the terminal back exactly as it was found.
+export fn run(spec: App m) -> Unit !{IO} =
+  with_scope(\scope -> run_in(scope, spec))
+
+fn run_in(scope: Scope, spec: App m) -> Unit !{IO} = do
+  terminal.raw_enter()
+  terminal.enter_alt_screen()
+  terminal.hide_cursor()
+  ch <- chan_new(scope, 64)
+  task_spawn(scope, \_ -> input_task(ch, spec.tick_ms))
+  spec.boot(scope, ch)
+  size <- current_size()
+  s <- screen.screen_new(size)
+  paint(s, spec.root, size)
+  pump(ch, s, spec.root, spec.update, size)
+  # The input task is parked in `read_avail` or on a send; cancelling the scope
+  # drops it, which is what lets `with_scope`'s join return. Without this the
+  # join would wait on a loop that never ends.
+  scope_cancel(scope)
+  terminal.show_cursor()
+  terminal.exit_alt_screen()
+  terminal.raw_exit()
+
+# `TermSize` is rows-first and `geometry.Size` is columns-first; converting is
+# the caller's job by design, so it happens here rather than in `geometry`.
+fn current_size() -> geometry.Size !{IO} = do
+  ts <- terminal.size()
+  geometry.Size(terminal.size_cols(ts), terminal.size_rows(ts))
+
+fn paint(s: screen.Screen, w: widget.Widget m, size: geometry.Size) -> Unit !{IO} = do
+  screen.screen_clear(s, style.style_default())
+  widget.render(w, geometry.region_at_origin(size), s)
+  frame <- screen.diff_to_ansi(s)
+  terminal.write(frame)
+
+fn pump(ch: Chan (Signal m), s: screen.Screen, w: widget.Widget m,
+        update: m -> widget.Widget m -> (widget.Widget m, Flow),
+        size: geometry.Size) -> Unit !{IO} = do
+  r <- chan_recv(ch)
+  on_signal(ch, s, w, update, size, r)
+
+# A closed channel means the input task saw EOF or a read error: there is
+# nothing left to drive the loop, so it ends the same way a `Quit` does.
+fn on_signal(ch: Chan (Signal m), s: screen.Screen, w: widget.Widget m,
+             update: m -> widget.Widget m -> (widget.Widget m, Flow),
+             size: geometry.Size, r: Recv (Signal m)) -> Unit !{IO} =
+  match r with
+  | Closed -> ()
+  | Got sig -> on_sig(ch, s, w, update, size, sig)
+
+fn on_sig(ch: Chan (Signal m), s: screen.Screen, w: widget.Widget m,
+          update: m -> widget.Widget m -> (widget.Widget m, Flow),
+          size: geometry.Size, sig: Signal m) -> Unit !{IO} =
+  match sig with
+  | SigEvent ev -> on_event_sig(ch, s, w, update, size, ev)
+  # A message from a worker task takes the same path as one a widget said.
+  | SigMsg msg -> advance(ch, s, update, size, apply(update, [msg], w))
+
+# A resize is handled here rather than by a widget: the screen itself has to be
+# replaced, and no widget can do that.
+fn on_event_sig(ch: Chan (Signal m), s: screen.Screen, w: widget.Widget m,
+                update: m -> widget.Widget m -> (widget.Widget m, Flow),
+                size: geometry.Size, ev: event.Event) -> Unit !{IO} =
+  match ev with
+  | event.ResizeEvent ns -> resized(ch, s, w, update, ns)
+  | _ -> advance(ch, s, update, size, step(update, w, ev))
+
+# A resized screen is blank in both buffers, so the next paint is a full
+# repaint — the terminal's contents after a resize are not knowable.
+fn resized(ch: Chan (Signal m), s: screen.Screen, w: widget.Widget m,
+           update: m -> widget.Widget m -> (widget.Widget m, Flow),
+           ns: geometry.Size) -> Unit !{IO} = do
+  s2 <- screen.screen_resize(s, ns)
+  paint(s2, w, ns)
+  pump(ch, s2, w, update, ns)
+
+fn advance(ch: Chan (Signal m), s: screen.Screen,
+           update: m -> widget.Widget m -> (widget.Widget m, Flow),
+           size: geometry.Size, r: (widget.Widget m, Flow)) -> Unit !{IO} =
+  match r with
+  # The final frame is painted before returning, so a farewell message is seen.
+  | (w2, Quit) -> paint(s, w2, size)
+  | (w2, Continue) -> repaint(ch, s, w2, update, size)
+
+fn repaint(ch: Chan (Signal m), s: screen.Screen, w: widget.Widget m,
+           update: m -> widget.Widget m -> (widget.Widget m, Flow),
+           size: geometry.Size) -> Unit !{IO} = do
+  paint(s, w, size)
+  pump(ch, s, w, update, size)
+
+# ── The input task ──────────────────────────────────────────────────────────
+
+# One task owns the terminal: `read_avail` permits exactly one waiter, and a
+# second would wedge the scheduler. Everything else reaches the loop through
+# the channel.
+fn input_task(ch: Chan (Signal m), tick_ms: Int) -> Unit !{IO} =
+  input_loop(ch, tick_ms, bytes.empty())
+
+fn input_loop(ch: Chan (Signal m), tick_ms: Int, held: Bytes) -> Unit !{IO} = do
+  stopped <- task_cancelled()
+  input_next(ch, tick_ms, held, stopped)
+
+fn input_next(ch: Chan (Signal m), tick_ms: Int, held: Bytes,
+              stopped: Bool) -> Unit !{IO} =
+  if stopped then ()
+  else read_once(ch, tick_ms, held)
+
+fn read_once(ch: Chan (Signal m), tick_ms: Int, held: Bytes) -> Unit !{IO} = do
+  inp <- terminal.read_avail(4096, tick_ms)
+  on_input(ch, tick_ms, held, inp)
+
+# `held` is the trailing partial sequence the decoder could not resolve — half a
+# UTF-8 character, an unterminated CSI — carried into the next read rather than
+# guessed at.
+fn on_input(ch: Chan (Signal m), tick_ms: Int, held: Bytes,
+            inp: terminal.TermInput) -> Unit !{IO} =
+  match inp with
+  | terminal.TermBytes b -> decoded(ch, tick_ms, bytes.append(held, b))
+  # The deadline elapsing IS the frame tick — no separate timer task, because
+  # `read_avail` already reports it.
+  | terminal.TermIdle -> send_one(ch, tick_ms, held, SigEvent(event.TickEvent))
+  | terminal.TermResized -> send_resize(ch, tick_ms, held)
+  # Closing is how the loop is told there will be no more signals.
+  | terminal.TermEof -> chan_close(ch)
+  | terminal.TermFailed _ -> chan_close(ch)
+
+fn decoded(ch: Chan (Signal m), tick_ms: Int, all: Bytes) -> Unit !{IO} =
+  match keys.decode(all) with
+  | (evs, rest) -> send_events(ch, tick_ms, rest, evs)
+
+fn send_events(ch: Chan (Signal m), tick_ms: Int, held: Bytes,
+               evs: List event.Event) -> Unit !{IO} =
+  match evs with
+  | Nil -> input_loop(ch, tick_ms, held)
+  | [e | rest] -> send_then(ch, tick_ms, held, rest, e)
+
+fn send_then(ch: Chan (Signal m), tick_ms: Int, held: Bytes,
+             rest: List event.Event, e: event.Event) -> Unit !{IO} = do
+  chan_send(ch, SigEvent(e))
+  send_events(ch, tick_ms, held, rest)
+
+fn send_one(ch: Chan (Signal m), tick_ms: Int, held: Bytes,
+            sig: Signal m) -> Unit !{IO} = do
+  chan_send(ch, sig)
+  input_loop(ch, tick_ms, held)
+
+fn send_resize(ch: Chan (Signal m), tick_ms: Int, held: Bytes) -> Unit !{IO} = do
+  size <- current_size()
+  send_one(ch, tick_ms, held, SigEvent(event.ResizeEvent(size)))
