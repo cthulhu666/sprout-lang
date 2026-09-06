@@ -1,0 +1,8 @@
+# A lambda in ARGUMENT position whose annotation contradicts the callee's slot.
+#
+# `list_map` over `[1, 2]` fixes the element slot to Int, so the written `String`
+# is a claim the callee already refutes. The slot is the fact and the annotation
+# is the claim; a disagreement is reported rather than silently resolved.
+module main
+
+fn main() -> Unit !{IO} = list_each(print, list_map(\ (x: String) -> x, [1, 2]))

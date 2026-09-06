@@ -620,8 +620,21 @@ Lambda expressions are anonymous functions.
   list_fold(\(acc, b) -> Hold(volume_m3 = acc.volume_m3 + b.volume_m3), no_hold, bays)
   ```
 
-  A lambda in any other position (a `let` initializer, a record field) has no such
-  slot, and its parameters are inferred solely from its body.
+  A lambda in any other position (a `let` initializer, a `where` binding, a record
+  field) has no such slot. Its parameters are then ordinary inference variables,
+  solved by everything that constrains them — the body **and any use of the
+  binding**:
+
+  ```sprout
+  # `s` is fixed by the USE, not the body: `${s}` alone leaves `ToString s`
+  # ambiguous, and this resolves only because `f` is applied to a String.
+  let f = \s -> `<${s}>`
+  in f("hi")
+  ```
+
+  A top-level `let` is the case with no use in scope to help: there the binding
+  generalizes on its own, so a body whose class constraint nothing resolves is
+  rejected as ambiguous.
 - Function application is **n-ary**: a call saturates its callee. **Under-application
   of a known function** — supplying fewer arguments than its declared arity — is a
   **compile error** (`'f' expects N arguments, got M`); use a `_`-placeholder partial

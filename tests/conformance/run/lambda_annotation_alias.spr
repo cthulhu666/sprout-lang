@@ -1,0 +1,13 @@
+# The annotation names a `type alias`, which resolves only through the alias
+# environment. Guards the plumbing: an alias declaration is registered DURING the
+# declaration walk, so an implementation that snapshots the alias environment
+# once per module misses it and this file fails to resolve `Name`.
+#
+# Also a second instance of the top-level-`let` case: nothing but the annotation
+# can fix the parameter here either.
+
+type alias Name = String
+
+let greet = \ (n: Name) -> `hi ${n}`
+
+fn main() -> Unit !{IO} = print(greet("bob"))

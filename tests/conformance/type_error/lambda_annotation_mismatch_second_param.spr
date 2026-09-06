@@ -1,0 +1,7 @@
+# Only the SECOND parameter's annotation conflicts: `acc` agrees with the seed,
+# `x` does not agree with the element type. Guards against a check that stops at
+# the first parameter, or that compares whole arrow spines rather than slots.
+module main
+
+fn main() -> Unit !{IO} =
+  print(list_fold(\ (acc: Int, x: String) -> acc, 0, [1, 2]))

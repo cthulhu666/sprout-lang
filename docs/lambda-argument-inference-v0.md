@@ -137,6 +137,13 @@ combining a `where C a` constraint with a lambda argument, so
 
 ## 7. Follow-up
 
+> **Superseded by [`lambda-parameter-annotations-v0.md`](./lambda-parameter-annotations-v0.md).**
+> Two claims below are stale. The example's failure is now a located Sprout
+> diagnostic (`dispatch-verify: ambiguous type variable in to_string`), not the
+> `clang` link error quoted; and the same shape *inside* a function does not fail
+> at all, because the use site solves the parameter. The gap is narrower than this
+> section implies and is primarily a **checking** gap, not an inference gap.
+
 Lambda parameter annotations are parsed into `ast.Param String (Maybe TypeExpr)`
 and then discarded: `make_fresh_param_types` allocates a fresh variable per
 parameter without consulting the annotation, and `extend_env_with_params` drops
