@@ -1,0 +1,275 @@
+module stdlib.tui.keys
+
+# Terminal input decoding: bytes in, events out, nothing held back except what
+# is genuinely a prefix of something longer. Design: docs/tui-core-v0.md §3.2.
+#
+# This replaces the C decoder in practice. `term_read_key` recognises exactly
+# `ESC [ A/B/C/D`; given `ESC [ 1;5C` it matches nothing, returns "escape", and
+# leaves `;5C` to surface as three fake keypresses. Here the framing of a CSI
+# sequence is parsed properly, so an unrecognised one is CONSUMED rather than
+# leaked back as text.
+#
+# The function is total and has no notion of time, which is what makes it
+# testable against byte fixtures. A trailing prefix — a lone ESC, an
+# unterminated CSI, half a UTF-8 sequence — comes back as the remainder for the
+# caller to prepend to its next read. Resolving a lone ESC into the Escape key
+# needs a timeout, and that belongs to the pump, not here.
+
+import stdlib.bytes as bytes
+import stdlib.string as string
+import stdlib.tui.event as event
+import stdlib.tui.geometry as geometry
+import stdlib.unicode.utf8 as utf8
+
+fn byte_at(b: Bytes, i: Int) -> Int =
+  match bytes.get(b, i) with
+  | Just v -> v
+  | Nothing -> 0
+
+fn imod(n: Int, d: Int) -> Int = n - (n / d) * d
+
+# One decoding step: an event and where it ended, a consumed span with nothing
+# to report, or "this is a prefix, keep it".
+type Step (..) =
+  | Emit event.Event Int
+  | Skip Int
+  | Incomplete
+
+export fn decode(input: Bytes) -> (List event.Event, Bytes) =
+  go(input, bytes.length(input), 0, Nil)
+
+fn go(b: Bytes, n: Int, i: Int, acc: List event.Event) -> (List event.Event, Bytes) =
+  if i >= n then (list_reverse(acc), bytes.empty())
+  else resume(b, n, i, acc, step(b, n, i))
+
+fn resume(b: Bytes, n: Int, i: Int, acc: List event.Event,
+          s: Step) -> (List event.Event, Bytes) =
+  match s with
+  | Emit e next -> go(b, n, next, Cons(e, acc))
+  | Skip next -> go(b, n, next, acc)
+  | Incomplete -> (list_reverse(acc), bytes.slice(b, i, n - i))
+
+fn step(b: Bytes, n: Int, i: Int) -> Step = dispatch(b, n, i, byte_at(b, i))
+
+fn dispatch(b: Bytes, n: Int, i: Int, b0: Int) -> Step =
+  if b0 == 27 then esc_step(b, n, i)
+  # CR and LF both mean Enter: with OPOST off the terminal sends CR, and a
+  # piped stdin sends LF.
+  else if b0 == 13 || b0 == 10 then plain(event.KEnter, i + 1)
+  else if b0 == 9 then plain(event.KTab, i + 1)
+  # 0x08 is what the key is defined to send; 0x7F is what terminals actually
+  # send. Both are Backspace, and treating DEL as Delete is the classic bug.
+  else if b0 == 8 || b0 == 127 then plain(event.KBackspace, i + 1)
+  else if b0 < 32 then Emit(event.KeyPress(ctrl_key(b0), event.mods_ctrl()), i + 1)
+  else if b0 < 128 then plain(event.KChar(char_from_codepoint(b0)), i + 1)
+  else utf8_step(b, n, i, b0)
+
+fn plain(k: event.Key, next: Int) -> Step =
+  Emit(event.KeyPress(k, event.mods_none()), next)
+
+# A control byte IS its letter with the top bits cleared, so ctrl-a is 1 and
+# ctrl-z is 26. Above the letters the chords run over punctuation — ctrl-@ is
+# 0, ctrl-\ is 28 — where `byte + 64` is the right mapping and lowercase is
+# not available.
+fn ctrl_key(b0: Int) -> event.Key =
+  if b0 >= 1 && b0 <= 26 then event.KChar(char_from_codepoint(b0 + 96))
+  else event.KChar(char_from_codepoint(b0 + 64))
+
+# Framing comes from `utf8.seq_length` rather than a second lead-byte table
+# here, so there is one authority on where a sequence ends.
+fn utf8_step(b: Bytes, n: Int, i: Int, b0: Int) -> Step =
+  let len = utf8.seq_length(b0)
+  in
+  if i + len > n then Incomplete
+  else plain(event.KChar(char_from_codepoint(utf8.codepoint_at(b, i))), i + len)
+
+# ── ESC ─────────────────────────────────────────────────────────────────────
+
+fn esc_step(b: Bytes, n: Int, i: Int) -> Step =
+  if i + 1 >= n then Incomplete
+  else esc_body(b, n, i, byte_at(b, i + 1))
+
+fn esc_body(b: Bytes, n: Int, i: Int, b1: Int) -> Step =
+  if b1 == 91 then csi_step(b, n, i)
+  else if b1 == 79 then ss3_step(b, n, i)
+  else alt_step(b, n, i)
+
+# ESC before anything else is the meta prefix. Decoding the REMAINDER and
+# adding alt to whatever it produced handles `ESC a` and `ESC ESC [ A` with one
+# rule; enumerating alt-variants of every key would need a second table that
+# could drift from the first.
+fn alt_step(b: Bytes, n: Int, i: Int) -> Step = add_alt(step(b, n, i + 1))
+
+fn add_alt(s: Step) -> Step =
+  match s with
+  | Emit e next -> Emit(alt_event(e), next)
+  | Skip next -> Skip(next)
+  | Incomplete -> Incomplete
+
+fn alt_event(e: event.Event) -> event.Event =
+  match e with
+  | event.KeyPress k m -> event.KeyPress(k, event.with_alt(m))
+  | other -> other
+
+# SS3: `ESC O P..S` are F1..F4, the form most terminals send in application
+# keypad mode.
+fn ss3_step(b: Bytes, n: Int, i: Int) -> Step =
+  if i + 2 >= n then Incomplete
+  else ss3_final(byte_at(b, i + 2), i + 3)
+
+fn ss3_final(f: Int, next: Int) -> Step =
+  if f >= 80 && f <= 83 then plain(event.KF(f - 79), next) else Skip(next)
+
+# ── CSI ─────────────────────────────────────────────────────────────────────
+
+# A CSI sequence is `ESC [`, parameter and intermediate bytes (0x20..0x3F),
+# then one final byte (0x40..0x7E). Knowing the framing is what lets an
+# unrecognised sequence be dropped whole instead of leaking its tail.
+fn csi_final_index(b: Bytes, n: Int, j: Int) -> Int =
+  if j >= n then -1
+  else scan_final(b, n, j, byte_at(b, j))
+
+fn scan_final(b: Bytes, n: Int, j: Int, v: Int) -> Int =
+  if v >= 32 && v <= 63 then csi_final_index(b, n, j + 1)
+  else if v >= 64 && v <= 126 then j
+  else -1
+
+fn csi_step(b: Bytes, n: Int, i: Int) -> Step =
+  csi_at(b, n, i, csi_final_index(b, n, i + 2))
+
+fn csi_at(b: Bytes, n: Int, i: Int, fin: Int) -> Step =
+  if fin < 0 then Incomplete
+  else csi_parsed(b, n, i, fin, ascii(b, i + 2, fin - i - 2), byte_at(b, fin))
+
+# CSI parameters are ASCII digits, `;` and `<`, so the decode never fails; the
+# fallback keeps this total without inventing an error path callers must handle.
+fn ascii(b: Bytes, start: Int, count: Int) -> String =
+  match bytes.to_string(bytes.slice(b, start, count)) with
+  | Ok s -> s
+  | Err _ -> ""
+
+fn csi_parsed(b: Bytes, n: Int, i: Int, fin: Int, params: String, f: Int) -> Step =
+  if string.starts_with(params, "<") then mouse_step(params, f, fin + 1)
+  else if params == "200" && f == 126 then paste_step(b, n, fin + 1)
+  else csi_key(params, f, fin + 1)
+
+# ── CSI: keys ───────────────────────────────────────────────────────────────
+
+fn param_at(params: String, k: Int) -> Int =
+  match list_nth(string.split(params, ";"), k) with
+  | Nothing -> 0
+  | Just raw ->
+      match parse_int(raw) with
+      | Nothing -> 0
+      | Just v -> v
+
+fn list_nth(xs: List String, k: Int) -> Maybe String =
+  match xs with
+  | Nil -> Nothing
+  | Cons h rest -> if k <= 0 then Just(h) else list_nth(rest, k - 1)
+
+# The modifier parameter is `1 + bitfield`, bits 1=shift, 2=alt, 4=ctrl. A
+# missing parameter reads as 0, which is not a valid encoding, so it maps to
+# no modifiers rather than to shift.
+fn mods_of(p: Int) -> event.Mods =
+  if p <= 0 then event.mods_none() else mods_bits(p - 1)
+
+fn mods_bits(bits: Int) -> event.Mods =
+  event.Mods(imod(bits / 4, 2) == 1, imod(bits / 2, 2) == 1, imod(bits, 2) == 1)
+
+fn csi_key(params: String, f: Int, next: Int) -> Step =
+  if f == 126 then tilde_key(param_at(params, 0), mods_of(param_at(params, 1)), next)
+  else letter_key(f, mods_of(param_at(params, 1)), next)
+
+fn letter_key(f: Int, m: event.Mods, next: Int) -> Step =
+  match final_key(f) with
+  | Nothing -> Skip(next)
+  | Just k -> Emit(event.KeyPress(k, m), next)
+
+fn final_key(f: Int) -> Maybe event.Key =
+  if f == 65 then Just(event.KUp)
+  else if f == 66 then Just(event.KDown)
+  else if f == 67 then Just(event.KRight)
+  else if f == 68 then Just(event.KLeft)
+  else if f == 70 then Just(event.KEnd)
+  else if f == 72 then Just(event.KHome)
+  # `ESC [ Z` is shift-tab, and it carries no modifier parameter, so it is its
+  # own key rather than KTab with a synthesised shift.
+  else if f == 90 then Just(event.KBackTab)
+  else if f >= 80 && f <= 83 then Just(event.KF(f - 79))
+  else Nothing
+
+fn tilde_key(p: Int, m: event.Mods, next: Int) -> Step =
+  match tilde_code(p) with
+  | Nothing -> Skip(next)
+  | Just k -> Emit(event.KeyPress(k, m), next)
+
+# The numeric keypad/editing block. 7 and 8 are the older Home/End codes that
+# some terminals still send.
+fn tilde_code(p: Int) -> Maybe event.Key =
+  if p == 1 || p == 7 then Just(event.KHome)
+  else if p == 2 then Just(event.KInsert)
+  else if p == 3 then Just(event.KDelete)
+  else if p == 4 || p == 8 then Just(event.KEnd)
+  else if p == 5 then Just(event.KPageUp)
+  else if p == 6 then Just(event.KPageDown)
+  else if p >= 11 && p <= 15 then Just(event.KF(p - 10))
+  else if p >= 17 && p <= 21 then Just(event.KF(p - 11))
+  else if p >= 23 && p <= 24 then Just(event.KF(p - 12))
+  else Nothing
+
+# ── CSI: SGR mouse ──────────────────────────────────────────────────────────
+
+# xterm: "CSI < followed by semicolon-separated encoded button value, the Cx
+# and Cy ordinates and a final character which is M for button press and m for
+# button release." Coordinates are 1-based on the wire and 0-based here.
+fn mouse_step(params: String, f: Int, next: Int) -> Step =
+  mouse_event(param_at(string.slice(params, 1, string.length(params) - 1), 0),
+              param_at(string.slice(params, 1, string.length(params) - 1), 1),
+              param_at(string.slice(params, 1, string.length(params) - 1), 2),
+              f, next)
+
+fn mouse_event(btn: Int, col: Int, row: Int, f: Int, next: Int) -> Step =
+  if f == 77 then Emit(event.MousePress(mouse_button(btn), at(col, row)), next)
+  else if f == 109 then Emit(event.MouseRelease(mouse_button(btn), at(col, row)), next)
+  else Skip(next)
+
+fn at(col: Int, row: Int) -> geometry.Offset = geometry.Offset(col - 1, row - 1)
+
+# The low two bits pick the button; 4/8/16 are shift/meta/control and are
+# masked off, since `Event` carries no modifiers on a mouse report. Wheel
+# buttons reuse the button-1 and button-2 codes with 64 added.
+fn mouse_button(btn: Int) -> event.MouseButton =
+  if btn >= 64 then (if imod(btn - 64, 4) == 0 then event.MouseWheelUp
+                     else event.MouseWheelDown)
+  else if imod(btn, 4) == 0 then event.MouseLeft
+  else if imod(btn, 4) == 1 then event.MouseMiddle
+  else event.MouseRight
+
+# ── CSI: bracketed paste ────────────────────────────────────────────────────
+
+# Everything between `ESC [ 200 ~` and `ESC [ 201 ~` is text, including bytes
+# that look like escape sequences — that is the whole point of the mode, and
+# decoding the body would re-open the injection it exists to prevent. Without
+# the terminator the paste is a prefix, not a short paste.
+fn paste_step(b: Bytes, n: Int, start: Int) -> Step =
+  paste_at(b, start, bytes.find(bytes.slice(b, start, n - start), end_marker()))
+
+fn end_marker() -> Bytes =
+  bytes.append(bytes.singleton(27), bytes.from_string("[201~"))
+
+fn paste_at(b: Bytes, start: Int, found: Maybe Int) -> Step =
+  match found with
+  | Nothing -> Incomplete
+  | Just rel ->
+      Emit(event.Paste(paste_text(b, start, rel)), start + rel + bytes.length(end_marker()))
+
+# Unlike CSI parameters, a paste body is arbitrary user text and CAN fail to
+# decode — a paste of binary, or one containing U+0000, which a Sprout String
+# cannot hold. Both collapse to the empty string rather than to an error,
+# because `Paste String` has nowhere to put one; a caller that needs the bytes
+# needs a different event.
+fn paste_text(b: Bytes, start: Int, count: Int) -> String =
+  match bytes.to_string(bytes.slice(b, start, count)) with
+  | Ok s -> s
+  | Err _ -> ""

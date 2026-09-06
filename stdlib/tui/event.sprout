@@ -1,0 +1,84 @@
+module stdlib.tui.event
+
+# The event vocabulary. Separate from `stdlib.tui.keys` so a widget can match
+# on an `Event` without importing the decoder: widgets depend on the
+# vocabulary, not on the parser. Design: docs/tui-core-v0.md §4.
+
+import stdlib.tui.geometry as geometry
+
+# A key is a code plus a SEPARATE modifier set, never one constructor per
+# combination — crossterm, tcell and the kitty protocol are unanimous on this,
+# and fusing them would give 8 constructors per key.
+#
+# `KBackTab` is its own code rather than `KTab` + shift, following crossterm:
+# the wire sequence `ESC [ Z` carries no modifier parameter, so synthesising
+# one would be a fiction the caller cannot distinguish from a real report.
+export type Key (..) deriving (Eq, ToString) =
+  | KChar Char
+  | KEnter
+  | KTab
+  | KBackTab
+  | KBackspace
+  | KDelete
+  | KInsert
+  | KEsc
+  | KUp
+  | KDown
+  | KLeft
+  | KRight
+  | KHome
+  | KEnd
+  | KPageUp
+  | KPageDown
+  | KF Int
+
+# ctrl, alt, shift. Sprout has no bitflags, and these three are exactly what
+# the legacy encoding can deliver — meta, super and hyper need the kitty
+# protocol, which is a follow-up.
+export type Mods (..) deriving (Eq, ToString) =
+  | Mods Bool Bool Bool
+
+export fn mods_none() -> Mods = Mods(false, false, false)
+
+export fn mods_ctrl() -> Mods = Mods(true, false, false)
+
+export fn mods_alt() -> Mods = Mods(false, true, false)
+
+export fn mods_shift() -> Mods = Mods(false, false, true)
+
+export fn mods_has_ctrl(m: Mods) -> Bool = match m with | Mods c _ _ -> c
+
+export fn mods_has_alt(m: Mods) -> Bool = match m with | Mods _ a _ -> a
+
+export fn mods_has_shift(m: Mods) -> Bool = match m with | Mods _ _ s -> s
+
+export fn with_alt(m: Mods) -> Mods =
+  Mods(mods_has_ctrl(m), true, mods_has_shift(m))
+
+# Wheel motion arrives as a button press in the SGR protocol, so it is a
+# button here rather than a separate event — that is the wire's shape, and
+# inventing a different one would need a mapping nothing else uses. xterm's
+# ctlseqs: "Wheel mice may return buttons 4 and 5. Those buttons are
+# represented by the same event codes as buttons 1 and 2 respectively, except
+# that 64 is added to the event code."
+export type MouseButton (..) deriving (Eq, ToString) =
+  | MouseLeft
+  | MouseMiddle
+  | MouseRight
+  | MouseWheelUp
+  | MouseWheelDown
+
+export type Event (..) deriving (Eq, ToString) =
+  | KeyPress Key Mods
+  | MousePress MouseButton geometry.Offset
+  # SGR reports the button on release as well — the final character is what
+  # distinguishes the two ("M for button press and m for button release"), not
+  # the button value. Normal-mode tracking loses it; nothing here decodes
+  # normal mode, so the button is kept rather than discarded to match a format
+  # this module does not read.
+  | MouseRelease MouseButton geometry.Offset
+  | Paste String
+  # Produced by the pump from `TermResized` and from timers, never by the
+  # decoder — they are in this type because a widget matches ONE event type.
+  | ResizeEvent geometry.Size
+  | TickEvent

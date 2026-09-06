@@ -1,0 +1,167 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import stdlib.string as string
+import stdlib.tui.geometry as g
+import stdlib.tui.screen as scr
+import stdlib.tui.style as sty
+import stdlib.unicode.utf8 as utf8
+
+# The double-buffered screen and its diff. Stateful, so this suite uses the
+# TestState form rather than `run_suite`. Design: docs/tui-core-v0.md §3.3, §3.5.
+#
+# The cases that matter are the wide-cell ones: a cluster two columns wide owns
+# the cell to its right, and every way of disturbing that pair has to leave the
+# grid in a state the renderer can still describe.
+
+fn esc() -> String = char_to_str(27)
+
+# `ESC [ row ; col H`, 1-based, which is what a cursor move looks like on the
+# wire. Written out here so an expectation reads as the bytes it asserts.
+fn cup(row: Int, col: Int) -> String =
+  `${esc()}[${to_string(row)};${to_string(col)}H`
+
+fn reset() -> String = `${esc()}[0m`
+
+fn plain() -> sty.Style = sty.style_default()
+
+# `screen_write` reports the column it stopped at; most cases here do not care.
+fn w(s: scr.Screen, col: Int, row: Int, text: String, style: sty.Style) -> Unit !{IO} = do
+  stop <- scr.screen_write(s, col, row, text, style)
+  ()
+
+fn main() -> Unit !{IO} = do
+  state <- new_state()
+  narrow_cases(state)
+  wide_cases(state)
+  diff_cases(state)
+  summary(state)
+
+fn narrow_cases(state: TestState) -> Unit !{IO} = do
+  s <- scr.screen_new(g.Size(10, 3))
+  assert_eq(state, "a new screen reports its size", scr.screen_size(s), g.Size(10, 3))
+
+  blank <- scr.text_at(s, 0, 0)
+  assert_eq(state, "every cell starts as a space", blank, " ")
+
+  w(s, 0, 0, "hi", plain())
+  a <- scr.text_at(s, 0, 0)
+  b <- scr.text_at(s, 1, 0)
+  assert_eq(state, "the first character lands in column 0", a, "h")
+  assert_eq(state, "the second in column 1", b, "i")
+
+  # A combining mark joins the cell to its left rather than taking its own —
+  # this is why a cell holds a cluster and not a codepoint.
+  w(s, 0, 1, utf8.from_codepoints([101, 769]), plain())
+  acute <- scr.text_at(s, 0, 1)
+  after <- scr.text_at(s, 1, 1)
+  assert_eq(state, "e plus U+0301 is ONE cell", acute, utf8.from_codepoints([101, 769]))
+  assert_eq(state, "and the cell after it is untouched", after, " ")
+
+  # Writing off the right edge stops rather than wrapping: wrapping is a layout
+  # decision, and a screen that silently reflowed would hide a caller's bug.
+  w(s, 8, 2, "abcd", plain())
+  last <- scr.text_at(s, 9, 2)
+  assert_eq(state, "the last column takes the second character", last, "b")
+
+  stop <- scr.screen_write(s, 8, 2, "abcd", plain())
+  assert_eq(state, "and the write reports stopping at the edge", stop, 10)
+
+fn wide_cases(state: TestState) -> Unit !{IO} = do
+  s <- scr.screen_new(g.Size(6, 2))
+
+  w(s, 0, 0, "日", plain())
+  wide <- scr.text_at(s, 0, 0)
+  cont <- scr.is_continuation_at(s, 1, 0)
+  assert_eq(state, "a wide cluster occupies its own cell", wide, "日")
+  assert_true(state, "and claims the cell to its right as a continuation", cont)
+
+  advance <- scr.screen_write(s, 0, 1, "日", plain())
+  assert_eq(state, "a wide cluster advances the column by two", advance, 2)
+
+  # Writing over the RIGHT half of a wide pair. tcell calls this undefined; a
+  # pure language has no undefined available, so the left half is repaired to a
+  # space — leaving it would emit a cursor move into the middle of a character.
+  w(s, 1, 0, "x", plain())
+  repaired <- scr.text_at(s, 0, 0)
+  overwritten <- scr.text_at(s, 1, 0)
+  assert_eq(state, "the orphaned left half becomes a space", repaired, " ")
+  assert_eq(state, "and the new character takes the cell", overwritten, "x")
+
+  # Writing over the LEFT half has to clean up the right half too, or the
+  # continuation would outlive the cell that owned it.
+  w(s, 2, 1, "日", plain())
+  w(s, 2, 1, "y", plain())
+  narrowed <- scr.text_at(s, 2, 1)
+  orphan <- scr.text_at(s, 3, 1)
+  still_cont <- scr.is_continuation_at(s, 3, 1)
+  assert_eq(state, "the narrow character takes the cell", narrowed, "y")
+  assert_eq(state, "and the stale continuation becomes a space", orphan, " ")
+  assert_true(state, "the stale continuation is no longer a continuation",! still_cont)
+
+  # A wide cluster with nowhere to put its second half. xterm and tcell agree:
+  # "Wide runes that are printed in the last column will be replaced with a
+  # single width space on output."
+  w(s, 5, 0, "日", plain())
+  edge <- scr.text_at(s, 5, 0)
+  assert_eq(state, "a wide cluster in the last column becomes a space", edge, " ")
+
+fn diff_cases(state: TestState) -> Unit !{IO} = do
+  s <- scr.screen_new(g.Size(8, 2))
+
+  # A fresh screen equals its own front buffer, so there is nothing to send.
+  first <- scr.diff_to_ansi(s)
+  assert_eq(state, "an unchanged screen emits nothing", first, "")
+
+  w(s, 2, 0, "hi", plain())
+  d <- scr.diff_to_ansi(s)
+  assert_eq(state, "a changed run is one cursor move, one style and the text",
+            d, cup(1, 3) ++ reset() ++ "hi" ++ reset())
+
+  again <- scr.diff_to_ansi(s)
+  assert_eq(state, "the diff is consumed: sending the same frame twice sends it once",
+            again, "")
+
+  # Two separate runs on one row get their own cursor moves, because the cells
+  # between them did not change and must not be repainted.
+  w(s, 0, 1, "a", plain())
+  w(s, 5, 1, "b", plain())
+  two <- scr.diff_to_ansi(s)
+  assert_eq(state, "two runs, two cursor moves",
+            two, cup(2, 1) ++ reset() ++ "a" ++ cup(2, 6) ++ reset() ++ "b" ++ reset())
+
+  # A wide cell is emitted once, not once per column: its continuation carries
+  # no text of its own, even though it did change.
+  w(s, 0, 0, "日", plain())
+  wide <- scr.diff_to_ansi(s)
+  assert_eq(state, "a wide cell emits one cluster for two columns",
+            wide, cup(1, 1) ++ reset() ++ "日" ++ reset())
+
+  # A style change inside a run is emitted where it happens rather than
+  # restarting the run with a fresh cursor move.
+  w(s, 3, 1, "a", plain())
+  w(s, 4, 1, "b", sty.with_bold(plain(), true))
+  styled <- scr.diff_to_ansi(s)
+  assert_eq(state, "a style change mid-run is emitted inline",
+            styled,
+            cup(2, 4) ++ reset() ++ "a"
+              ++ sty.style_to_ansi(sty.with_bold(plain(), true)) ++ "b" ++ reset())
+
+  # The same wide cell under a NON-default style. This is the case that proves
+  # the continuation is skipped rather than merely silent: a continuation
+  # reports the default style, so emitting one would insert a stray reset
+  # between the cluster and whatever follows. With a default-styled cell the
+  # two behaviours are byte-identical, which is why that test alone did not
+  # catch a deliberately broken skip.
+  s2 <- scr.screen_new(g.Size(4, 1))
+  w(s2, 0, 0, "日", sty.with_bold(plain(), true))
+  bold_wide <- scr.diff_to_ansi(s2)
+  assert_eq(state, "a styled wide cell emits no stray reset for its continuation",
+            bold_wide,
+            cup(1, 1) ++ sty.style_to_ansi(sty.with_bold(plain(), true)) ++ "日" ++ reset())
+
+  # Clearing is an ordinary mutation of the back buffer, so it diffs like one.
+  scr.screen_clear(s, plain())
+  cleared <- scr.diff_to_ansi(s)
+  assert_true(state, "clearing a written screen produces output",
+              string.length(cleared) > 0)
+  after_clear <- scr.diff_to_ansi(s)
+  assert_eq(state, "and clearing twice sends nothing the second time", after_clear, "")
