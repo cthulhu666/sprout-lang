@@ -503,6 +503,15 @@ test-stdlib-compiler-stage1: bootstrap-from-seed (_test-stdlib "build/compile_dr
 [group('test')]
 test-stdlib-stage2: (_test-stdlib "build/compile_driver_bin_stage2")
 
+# Exercise the Stop review-gate hook in a throwaway repo. Pure Python, no toolchain
+# deps — the hook itself never runs in CI, so this is what keeps it from rotting.
+[group('test')]
+test-review-gate:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  D=$(mktemp -d /tmp/sprout_review_gate_XXXXXX); trap 'rm -rf "$D"' EXIT
+  python3 scripts/test_review_gate.py "$D"
+
 # Run a single test file with stage-1.
 [group('test')]
 test-file file: (_test-file "build/compile_driver_bin_stage1" file)
@@ -2884,6 +2893,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "ir-golden-diff|ir-golden-diff"
     "gate-audit|gate-audit"
     "seed-dep-check|seed-dep-check"
+    "review-gate|test-review-gate"
     # Added when Assertion D landed: both had names that CLAIM verification while nothing
     # ran them. c-runtime-test's ten C-level assertions were unrunnable for however long it
     # took someone to try (the runtime split into sprout_scheduler.c/sprout_poll.c broke its

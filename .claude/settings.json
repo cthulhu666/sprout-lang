@@ -19,6 +19,16 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 scripts/review_gate.py"
+          }
+        ]
+      }
     ]
   },
   "permissions": {
