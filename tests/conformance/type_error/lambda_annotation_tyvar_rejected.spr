@@ -1,0 +1,13 @@
+# A type variable in a lambda parameter annotation is rejected in v0.
+#
+# The reader of `\(x: a) -> …` means the `a` of the enclosing signature one line
+# up. Sprout has no lexically scoped type variables, so it cannot mean that; it
+# would be a fresh variable that merely happens to unify. Accepting it would make
+# the annotation appear meaningful while meaning something else, which is worse
+# than the pre-2026-09 behaviour of ignoring it outright. See
+# docs/lambda-parameter-annotations-v0.md §2.1.
+module main
+
+fn twice(xs: List a) -> List a = list_map(\ (x: a) -> x, xs)
+
+fn main() -> Unit !{IO} = print(list_length(twice([1, 2])))

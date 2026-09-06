@@ -4511,6 +4511,46 @@ op-classification already in place.
   the question to settle first is whether a method SHOULD be alias-qualifiable given that
   dispatch is by instance rather than by module.
 
+- [ ] `P3` **`fmt` skips normalization on any line containing a backtick template.** Found
+  2026-09-06 while adding lambda-annotation fixtures. Two adjacent lines, same construct:
+
+  ```sprout
+  let plain     = \(s: String) -> s          # fmt rewrites to `\ (s: String)`
+  let templated = \(s: String) -> `<${s}>`   # fmt leaves it alone
+  ```
+
+  Both spellings are then reported `ok` by `fmt` on the template line, so the formatter has
+  two canonical forms for one construct depending on whether a template appears anywhere on
+  the line. Not a corruption — the residue of the line-based `format_source` design whose
+  multi-line-template bug was fixed in `7d1171f`. Consequence: a corpus mixes `\(` and `\ (`
+  and `fmt --check` accepts both, so the inconsistency cannot be gated away.
+
+- [ ] `P2` **Top-level `let` annotations sharing a type-variable NAME share one variable
+  across the whole module.** Found 2026-09-06 while reviewing
+  `docs/lambda-parameter-annotations-v0.md`. `build_type_var_dict` (`infer.sprout:376-379`)
+  seeds each lowercase name as `TVar(tyvar_id(name))` — one variable *per name*, not a fresh
+  one per declaration — and the substitution threads across declarations, so one binding's
+  annotation narrows another's. Loudly:
+
+  ```sprout
+  let p1: Maybe a = Just(1)
+  let p2: Maybe a = Just("x")
+  # ERROR: type annotation mismatch for `p2`: Type mismatch: String vs Int
+  ```
+
+  and silently, which is worse:
+
+  ```sprout
+  let bump:  a -> a = \x -> x + 1     # narrows `a` to Int …
+  let ident: a -> a = \x -> x         # … so `ident` checks clean as Int -> Int
+  ident("hello")                      # ERROR: Call type mismatch: Int vs String in function main
+  ```
+
+  `ident` is accepted at a type nobody wrote and the error lands on an innocent call site.
+  Each declaration's annotation variables should be freshened per declaration. Note this is
+  why `docs/lambda-parameter-annotations-v0.md` §2.1 rejects type variables in lambda
+  annotations rather than reusing `let_annotation_type` — the proposal must not inherit this.
+
 - [x] `P2` **Passing `print` as a VALUE emits a call to a symbol that does not exist. FIXED
   2026-09-06, same day it was filed.** The entry below scoped it to `print`; measuring first
   found **twelve** intrinsics with the identical hole, and two distinct failure stages.

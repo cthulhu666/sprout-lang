@@ -1,0 +1,8 @@
+# A top-level `let` bound to an annotated lambda, where the annotation is the
+# ONLY evidence available. A top-level binding generalizes alone, with no use
+# site in scope to solve the parameter, so `${s}` used to leave `ToString s`
+# ambiguous and the file was rejected. The annotation now determines it.
+
+let wrap_it = \ (s: String) -> `<${s}>`
+
+fn main() -> Unit !{IO} = print(wrap_it("hi"))

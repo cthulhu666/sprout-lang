@@ -1,0 +1,7 @@
+# Non-regression: an annotation that AGREES with the callee's slot stays silent
+# and changes nothing. Compiled before the annotation was honoured (the slot
+# supplied the type and the annotation was ignored) and must still compile now
+# that the two are unified.
+
+fn main() -> Unit !{IO} =
+  list_each(print, list_map(\ (x: Int) -> x + 1, [1, 2, 3]))

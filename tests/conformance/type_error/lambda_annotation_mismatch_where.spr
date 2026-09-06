@@ -1,0 +1,13 @@
+# A `where`-bound lambda whose parameter annotation contradicts the use site.
+#
+# Before lambda parameter annotations were honoured this compiled clean: the
+# parameter's type was solved from `wrap_it(n)` and the written `String` was
+# never consulted, so the annotation was decoration permitted to lie.
+module main
+
+fn shout(n: Int) -> String =
+  wrap_it(n)
+where
+  wrap_it = \ (s: String) -> `<${s}>`
+
+fn main() -> Unit !{IO} = print(shout(3))

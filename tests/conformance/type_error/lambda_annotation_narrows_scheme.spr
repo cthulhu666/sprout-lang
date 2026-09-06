@@ -1,0 +1,14 @@
+# A top-level `let` bound to an annotated lambda whose body carries no class
+# constraint. Nothing forced the parameters, so before the annotation was
+# honoured this generalized to `forall a b. a -> b -> a` — MORE general than
+# written — and `first(1, 2)` type-checked against a signature saying String.
+#
+# The annotation now pins the scheme to `String -> Int -> String`, so the call is
+# the error it always should have been. This is the regression test for the one
+# class of program whose meaning this change alters: compiles before and after,
+# with a narrower inferred scheme.
+module main
+
+let first = \ (s: String, n: Int) -> s
+
+fn main() -> Unit !{IO} = print(first(1, 2))
