@@ -1,0 +1,214 @@
+import stdlib.test (TestCase, check_eq, run_suite)
+import stdlib.bytes as bytes
+import stdlib.tui.event as ev
+import stdlib.tui.geometry as g
+import stdlib.tui.keys as keys
+
+# The escape-sequence decoder: `Bytes -> (List Event, Bytes)`, total and with
+# no notion of time. Design: docs/tui-core-v0.md §3.2.
+#
+# The regression that motivates the whole milestone is here: the C decoder
+# (`term_read_key`) recognises exactly `ESC [ A/B/C/D`, so given `ESC [ 1;5C`
+# it returns "escape" and leaks `;5C` back as three fake keypresses. Nothing
+# could test that, because a C function reading fd 0 is not reachable from a
+# golden-stdout fixture. As a pure function it is just a byte fixture.
+
+fn bs(vals: List Int) -> Bytes =
+  fold(\ (acc, v) -> bytes.append(acc, bytes.singleton(v)), bytes.empty(), vals)
+
+# ESC followed by ASCII, which is every sequence in this file.
+fn e(rest: String) -> Bytes = bytes.append(bytes.singleton(27), bytes.from_string(rest))
+
+fn events(input: Bytes) -> List ev.Event = match keys.decode(input) with | (evs, _) -> evs
+
+# Compared as a list of ints: `Bytes` has no Eq, and a byte-level expectation
+# reads better than a length.
+fn leftover(input: Bytes) -> List Int =
+  match keys.decode(input) with
+  | (_, rest) -> byte_list(rest, 0, bytes.length(rest), Nil)
+
+fn byte_list(b: Bytes, i: Int, n: Int, acc: List Int) -> List Int =
+  if i >= n then list_reverse(acc)
+  else
+    match bytes.get(b, i) with
+    | Just v -> byte_list(b, i + 1, n, Cons(v, acc))
+    | Nothing -> list_reverse(acc)
+
+fn key(k: ev.Key) -> List ev.Event = [ev.KeyPress(k, ev.mods_none())]
+
+fn key_mod(k: ev.Key, m: ev.Mods) -> List ev.Event = [ev.KeyPress(k, m)]
+
+fn none() -> List Int = Nil
+
+fn no_events() -> List ev.Event = Nil
+
+fn main() -> Unit !{IO} =
+  run_suite("tui.keys", [
+    # --- nothing in, nothing out ---
+    check_eq("empty input yields no events", events(bytes.empty()), no_events()),
+    check_eq("empty input leaves no remainder", leftover(bytes.empty()), none()),
+
+    # --- plain printable ASCII ---
+    check_eq("one letter", events(bytes.from_string("a")), key(ev.KChar('a'))),
+    check_eq("a letter leaves no remainder", leftover(bytes.from_string("a")), none()),
+    check_eq("several letters decode in order", events(bytes.from_string("hi")),
+             [ev.KeyPress(ev.KChar('h'), ev.mods_none()),
+              ev.KeyPress(ev.KChar('i'), ev.mods_none())]),
+    check_eq("space is an ordinary character", events(bytes.from_string(" ")),
+             key(ev.KChar(' '))),
+
+    # --- named control bytes ---
+    check_eq("carriage return is Enter", events(bs([13])), key(ev.KEnter)),
+    check_eq("line feed is Enter too", events(bs([10])), key(ev.KEnter)),
+    check_eq("tab", events(bs([9])), key(ev.KTab)),
+    check_eq("backspace, the 0x08 form", events(bs([8])), key(ev.KBackspace)),
+    check_eq("DEL is backspace, which is what terminals actually send",
+             events(bs([127])), key(ev.KBackspace)),
+
+    # --- ctrl chords: a control byte IS the letter with the top bits cleared ---
+    check_eq("ctrl-a", events(bs([1])), key_mod(ev.KChar('a'), ev.mods_ctrl())),
+    check_eq("ctrl-c", events(bs([3])), key_mod(ev.KChar('c'), ev.mods_ctrl())),
+    check_eq("ctrl-z", events(bs([26])), key_mod(ev.KChar('z'), ev.mods_ctrl())),
+    # 0 and 28..31 are ctrl chords over punctuation, not letters: ctrl-@ is 0
+    # and ctrl-\ is 28, following `char = byte + 64`.
+    check_eq("ctrl-@ is byte zero", events(bs([0])), key_mod(ev.KChar('@'), ev.mods_ctrl())),
+    check_eq("ctrl-backslash", events(bs([28])), key_mod(ev.KChar('\\'), ev.mods_ctrl())),
+
+    # --- UTF-8 is assembled into one KChar ---
+    check_eq("two-byte sequence", events(bytes.from_string("é")), key(ev.KChar('é'))),
+    check_eq("three-byte sequence", events(bytes.from_string("日")), key(ev.KChar('日'))),
+    check_eq("four-byte sequence", events(bytes.from_string("😀")), key(ev.KChar('😀'))),
+    check_eq("a letter after a multi-byte character", events(bytes.from_string("éa")),
+             [ev.KeyPress(ev.KChar('é'), ev.mods_none()),
+              ev.KeyPress(ev.KChar('a'), ev.mods_none())]),
+
+    # --- CSI arrows: the four the C decoder gets right ---
+    check_eq("up", events(e("[A")), key(ev.KUp)),
+    check_eq("down", events(e("[B")), key(ev.KDown)),
+    check_eq("right", events(e("[C")), key(ev.KRight)),
+    check_eq("left", events(e("[D")), key(ev.KLeft)),
+    check_eq("home, the CSI H form", events(e("[H")), key(ev.KHome)),
+    check_eq("end, the CSI F form", events(e("[F")), key(ev.KEnd)),
+    check_eq("shift-tab has no modifier parameter to read", events(e("[Z")), key(ev.KBackTab)),
+
+    # --- THE REGRESSION: a modified arrow ---
+    check_eq("ctrl-right decodes as one event", events(e("[1;5C")),
+             key_mod(ev.KRight, ev.mods_ctrl())),
+    check_eq("ctrl-right leaves NOTHING behind — the C decoder leaks three bytes here",
+             leftover(e("[1;5C")), none()),
+    check_eq("shift-up", events(e("[1;2A")), key_mod(ev.KUp, ev.mods_shift())),
+    check_eq("alt-down", events(e("[1;3B")), key_mod(ev.KDown, ev.mods_alt())),
+    check_eq("ctrl-shift-left", events(e("[1;6D")),
+             key_mod(ev.KLeft, ev.Mods(true, false, true))),
+    check_eq("all three modifiers at once", events(e("[1;8C")),
+             key_mod(ev.KRight, ev.Mods(true, true, true))),
+
+    # --- CSI-tilde: the numbered keys ---
+    check_eq("insert", events(e("[2~")), key(ev.KInsert)),
+    check_eq("delete", events(e("[3~")), key(ev.KDelete)),
+    check_eq("page up", events(e("[5~")), key(ev.KPageUp)),
+    check_eq("page down", events(e("[6~")), key(ev.KPageDown)),
+    check_eq("home, the CSI 1~ form", events(e("[1~")), key(ev.KHome)),
+    check_eq("end, the CSI 4~ form", events(e("[4~")), key(ev.KEnd)),
+    check_eq("F5", events(e("[15~")), key(ev.KF(5))),
+    check_eq("F12", events(e("[24~")), key(ev.KF(12))),
+    check_eq("a modified tilde key", events(e("[3;5~")), key_mod(ev.KDelete, ev.mods_ctrl())),
+
+    # --- SS3: F1..F4 arrive in their own form ---
+    check_eq("F1 via SS3", events(e("OP")), key(ev.KF(1))),
+    check_eq("F4 via SS3", events(e("OS")), key(ev.KF(4))),
+    check_eq("F1 via the CSI form", events(e("[1;5P")), key_mod(ev.KF(1), ev.mods_ctrl())),
+
+    # --- ESC as a meta prefix ---
+    # Decoding the remainder and adding alt handles `ESC a` and `ESC [ A`
+    # alike, so alt-Up needs no separate case.
+    check_eq("alt-a", events(e("a")), key_mod(ev.KChar('a'), ev.mods_alt())),
+    check_eq("alt-up", events(bytes.append(bytes.singleton(27), e("[A"))),
+             key_mod(ev.KUp, ev.mods_alt())),
+    # The alt prefix composes with whatever the remainder decoded to, so a
+    # modifier the inner sequence already carries survives rather than being
+    # overwritten. That is the payoff of recursing instead of tabulating.
+    check_eq("ctrl-alt-a: ESC then a ctrl byte",
+             events(bs([27, 1])), key_mod(ev.KChar('a'), ev.Mods(true, true, false))),
+    check_eq("alt-ctrl-right: the inner sequence's modifiers survive",
+             events(bytes.append(bytes.singleton(27), e("[1;5C"))),
+             key_mod(ev.KRight, ev.Mods(true, true, false))),
+    check_eq("ESC then an unknown CSI is skipped, not turned into a key",
+             events(bytes.append(bytes.singleton(27), e("[9999x"))), no_events()),
+    check_eq("ESC then a lone ESC is still a prefix",
+             leftover(bs([27, 27])), [27, 27]),
+
+    # --- SGR mouse ---
+    check_eq("left button press at column 12, row 5", events(e("[<0;12;5M")),
+             [ev.MousePress(ev.MouseLeft, g.Offset(11, 4))]),
+    check_eq("middle button", events(e("[<1;1;1M")),
+             [ev.MousePress(ev.MouseMiddle, g.Offset(0, 0))]),
+    check_eq("right button", events(e("[<2;3;4M")),
+             [ev.MousePress(ev.MouseRight, g.Offset(2, 3))]),
+    check_eq("wheel up", events(e("[<64;3;4M")),
+             [ev.MousePress(ev.MouseWheelUp, g.Offset(2, 3))]),
+    check_eq("wheel down", events(e("[<65;3;4M")),
+             [ev.MousePress(ev.MouseWheelDown, g.Offset(2, 3))]),
+    # SGR marks release with the FINAL CHARACTER, not the button value — xterm:
+    # "a final character which is M for button press and m for button release".
+    # So the button survives a release here, where normal-mode tracking (which
+    # this module does not decode) would have lost it to the value 3.
+    check_eq("release keeps the button",
+             events(e("[<0;12;5m")), [ev.MouseRelease(ev.MouseLeft, g.Offset(11, 4))]),
+
+    # --- bracketed paste ---
+    check_eq("a paste is one event carrying its text",
+             events(bytes.append(e("[200~"), bytes.append(bytes.from_string("hi"), e("[201~")))),
+             [ev.Paste("hi")]),
+    check_eq("a paste containing what looks like an escape sequence stays text",
+             events(bytes.append(e("[200~"), bytes.append(e("[A"), e("[201~")))),
+             [ev.Paste(char_to_str(27) ++ "[A")]),
+    check_eq("an unterminated paste is incomplete, not a truncated one",
+             events(bytes.append(e("[200~"), bytes.from_string("hi"))), no_events()),
+    check_eq("and the whole unterminated paste is held, introducer included",
+             leftover(bytes.append(e("[200~"), bytes.from_string("hi"))),
+             [27, 91, 50, 48, 48, 126, 104, 105]),
+    check_eq("a paste carries multi-byte text intact",
+             events(bytes.append(e("[200~"), bytes.append(bytes.from_string("日本"), e("[201~")))),
+             [ev.Paste("日本")]),
+    check_eq("an empty paste is still a paste event",
+             events(bytes.append(e("[200~"), e("[201~"))), [ev.Paste("")]),
+    check_eq("a key after a paste decodes",
+             events(bytes.append(bytes.append(e("[200~"), e("[201~")), bytes.from_string("a"))),
+             [ev.Paste(""), ev.KeyPress(ev.KChar('a'), ev.mods_none())]),
+
+    # --- INCOMPLETE INPUT: every proper prefix is held, never guessed ---
+    # This is §3.2: the decoder has no timer, so a lone ESC is a prefix, and
+    # resolving it as the Escape key belongs to the caller's timeout.
+    check_eq("a lone ESC produces no event", events(bs([27])), no_events()),
+    check_eq("a lone ESC is returned whole", leftover(bs([27])), [27]),
+    check_eq("ESC [ is a prefix", events(e("[")), no_events()),
+    check_eq("ESC [ is returned whole", leftover(e("[")), [27, 91]),
+    check_eq("a half-typed CSI parameter is a prefix", events(e("[1;5")), no_events()),
+    check_eq("a half-typed CSI parameter is returned whole", leftover(e("[1;5")),
+             [27, 91, 49, 59, 53]),
+    check_eq("ESC O with no final byte is a prefix", leftover(e("O")), [27, 79]),
+    check_eq("a truncated UTF-8 sequence is a prefix",
+             leftover(bs([226, 150])), [226, 150]),
+    check_eq("a truncated UTF-8 sequence produces no event", events(bs([226, 150])),
+             no_events()),
+
+    # --- a complete event followed by a prefix: emit the one, hold the other ---
+    check_eq("the complete part is emitted",
+             events(bytes.append(bytes.from_string("a"), bs([27]))), key(ev.KChar('a'))),
+    check_eq("the incomplete tail is held",
+             leftover(bytes.append(bytes.from_string("a"), bs([27]))), [27]),
+    check_eq("a full sequence then a partial one",
+             events(bytes.append(e("[A"), e("["))), key(ev.KUp)),
+    check_eq("and the partial one is held whole",
+             leftover(bytes.append(e("[A"), e("["))), [27, 91]),
+
+    # --- an unrecognised but well-formed sequence is CONSUMED, not leaked ---
+    # Leaking its bytes back is exactly the C decoder's bug: the tail surfaces
+    # as fake keypresses. Dropping a sequence we do not understand is the
+    # lesser evil, and it is bounded because CSI framing tells us where it ends.
+    check_eq("an unknown CSI final byte produces no event", events(e("[9999x")), no_events()),
+    check_eq("an unknown CSI sequence is consumed whole", leftover(e("[9999x")), none()),
+    check_eq("and a key after it still decodes",
+             events(bytes.append(e("[9999x"), bytes.from_string("a"))), key(ev.KChar('a')))
+  ])

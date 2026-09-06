@@ -29,6 +29,27 @@ fn cp3(b0: Int, b1: Int, b2: Int) -> Int =
 fn cp4(b0: Int, b1: Int, b2: Int, b3: Int) -> Int =
   (b0 - 240) * 262144 + (b1 - 128) * 4096 + (b2 - 128) * 64 + (b3 - 128)
 
+# How many bytes the sequence starting with this lead byte occupies. Exported
+# because a byte-stream reader — the TUI key decoder — has to know whether it
+# has the whole sequence BEFORE decoding it, and reimplementing the lead-byte
+# table there would be a second authority on UTF-8's framing.
+export fn seq_length(b0: Int) -> Int =
+  if b0 < 128 then 1
+  else if b0 < 224 then 2
+  else if b0 < 240 then 3
+  else 4
+
+# The codepoint encoded at byte offset `i`. The caller must have checked that
+# `i + seq_length(byte at i)` is within the buffer; a truncated sequence reads
+# missing bytes as zero and yields a wrong answer rather than failing.
+export fn codepoint_at(b: Bytes, i: Int) -> Int = cp_of(byte_at(b, i), b, i)
+
+fn cp_of(b0: Int, b: Bytes, i: Int) -> Int =
+  if b0 < 128 then b0
+  else if b0 < 224 then cp2(b0, byte_at(b, i + 1))
+  else if b0 < 240 then cp3(b0, byte_at(b, i + 1), byte_at(b, i + 2))
+  else cp4(b0, byte_at(b, i + 1), byte_at(b, i + 2), byte_at(b, i + 3))
+
 # Returns a List, not a Vec: every consumer walks it head-first, and the
 # grapheme state machine is a recursion over exactly that shape.
 export fn codepoints(s: String) -> List Int =
@@ -41,16 +62,7 @@ fn decode_go(b: Bytes, i: Int, n: Int, acc: List Int) -> List Int =
   else decode_step(b, i, n, acc, byte_at(b, i))
 
 fn decode_step(b: Bytes, i: Int, n: Int, acc: List Int, b0: Int) -> List Int =
-  if b0 < 128 then decode_go(b, i + 1, n, Cons(b0, acc))
-  else if b0 < 224 then
-    decode_go(b, i + 2, n, Cons(cp2(b0, byte_at(b, i + 1)), acc))
-  else if b0 < 240 then
-    decode_go(b, i + 3, n,
-              Cons(cp3(b0, byte_at(b, i + 1), byte_at(b, i + 2)), acc))
-  else
-    decode_go(b, i + 4, n,
-              Cons(cp4(b0, byte_at(b, i + 1), byte_at(b, i + 2),
-                       byte_at(b, i + 3)), acc))
+  decode_go(b, i + seq_length(b0), n, Cons(cp_of(b0, b, i), acc))
 
 # Rebuild a String from codepoints. One concat pass, not `++` in a loop.
 export fn from_codepoints(cps: List Int) -> String =

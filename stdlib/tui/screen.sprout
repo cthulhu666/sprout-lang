@@ -1,0 +1,317 @@
+module stdlib.tui.screen
+
+# A double-buffered character grid and the minimal ANSI needed to bring a
+# terminal from the last frame to this one. Design: docs/tui-core-v0.md §3.3,
+# §3.5.
+#
+# Widgets write the BACK buffer; `diff_to_ansi` compares it against the front
+# buffer, emits only what changed, and swaps. `term_write` fflushes on every
+# call, so a frame is assembled into one String and written once — per-cell
+# writes would be a syscall per cell.
+
+import stdlib.mutable (MutMatrix, mutmatrix_new, mutmatrix_at, mutmatrix_set,
+                       mutmatrix_rows, mutmatrix_cols)
+import stdlib.string as string
+import stdlib.tui.geometry as geometry
+import stdlib.tui.style as style
+import stdlib.unicode.grapheme as grapheme
+import stdlib.unicode.utf8 as utf8
+import stdlib.unicode.width as uwidth
+
+# A cell holds a grapheme CLUSTER — a primary codepoint plus any combining
+# marks — not a single codepoint, so `e` + U+0301 is one cell. The primary is
+# an Int rather than a Char because Sprout has no `Char -> Int` and the cluster
+# has to be measurable; see BACKLOG.md.
+#
+# `Continuation` is the right half of a wide cluster. An explicit constructor
+# rather than a sentinel value, so every `match` over a cell is total.
+export type Cell (..) deriving (Eq, ToString) =
+  | Cell Int (List Int) style.Style
+  | Continuation
+
+export type Screen (..) =
+  | Screen (MutMatrix Cell) (MutMatrix Cell)
+
+fn blank() -> Cell = Cell(32, Nil, style.style_default())
+
+export fn screen_new(size: geometry.Size) -> Screen !{IO} = do
+  front <- mutmatrix_new(geometry.size_rows(size), geometry.size_cols(size), blank())
+  back <- mutmatrix_new(geometry.size_rows(size), geometry.size_cols(size), blank())
+  Screen(front, back)
+
+fn front_of(s: Screen) -> MutMatrix Cell = match s with | Screen f _ -> f
+
+fn back_of(s: Screen) -> MutMatrix Cell = match s with | Screen _ b -> b
+
+export fn screen_size(s: Screen) -> geometry.Size =
+  geometry.Size(mutmatrix_cols(back_of(s)), mutmatrix_rows(back_of(s)))
+
+export fn screen_cols(s: Screen) -> Int = mutmatrix_cols(back_of(s))
+
+export fn screen_rows(s: Screen) -> Int = mutmatrix_rows(back_of(s))
+
+fn in_bounds(s: Screen, col: Int, row: Int) -> Bool =
+  col >= 0 && row >= 0 && col < screen_cols(s) && row < screen_rows(s)
+
+export fn cell_at(s: Screen, col: Int, row: Int) -> Cell !{IO} =
+  if in_bounds(s, col, row) then mutmatrix_at(back_of(s), row, col) else blank()
+
+# The text a cell renders as. A `Continuation` renders as nothing at all: the
+# wide cluster to its left already covered both columns.
+export fn cell_text(c: Cell) -> String =
+  match c with
+  | Continuation -> ""
+  | Cell primary combining _ -> utf8.from_codepoints(Cons(primary, combining))
+
+export fn cell_style(c: Cell) -> style.Style =
+  match c with
+  | Continuation -> style.style_default()
+  | Cell _ _ st -> st
+
+export fn is_continuation(c: Cell) -> Bool =
+  match c with
+  | Continuation -> true
+  | Cell _ _ _ -> false
+
+export fn text_at(s: Screen, col: Int, row: Int) -> String !{IO} =
+  cell_text(cell_at(s, col, row))
+
+export fn is_continuation_at(s: Screen, col: Int, row: Int) -> Bool !{IO} =
+  is_continuation(cell_at(s, col, row))
+
+# ── Placing clusters ────────────────────────────────────────────────────────
+
+# The width of the PRIMARY codepoint, not the sum over the cluster. Summing
+# would make an emoji ZWJ sequence four columns wide; tcell measures the same
+# way, taking the width from its `mainc` and ignoring `combc`. Combining marks
+# are zero-width anyway, so the two agree everywhere except the ZWJ case, where
+# only this answer is usable.
+fn cluster_width(cluster: List Int) -> Int =
+  match cluster with
+  | Nil -> 1
+  | [primary | _] -> imax(1, uwidth.codepoint_width(primary))
+
+fn imax(a: Int, b: Int) -> Int = if a > b then a else b
+
+# Break the pair that `col` lands in, if it lands in one. Two directions,
+# because a write can land on either half:
+#   - on a continuation: the wide cell to the LEFT loses its second column
+#   - on a wide cell: the continuation to its RIGHT loses its owner
+# Either way the survivor becomes a space, because a half-drawn character has
+# no representation the renderer can emit.
+fn repair(s: Screen, col: Int, row: Int) -> Unit !{IO} = do
+  here <- cell_at(s, col, row)
+  repair_here(s, col, row, here)
+
+fn repair_here(s: Screen, col: Int, row: Int, here: Cell) -> Unit !{IO} =
+  if is_continuation(here) then set_raw(s, col - 1, row, blank())
+  else repair_right(s, col, row, here)
+
+fn repair_right(s: Screen, col: Int, row: Int, here: Cell) -> Unit !{IO} =
+  if cell_columns(here) == 2 then set_raw(s, col + 1, row, blank()) else ()
+
+fn cell_columns(c: Cell) -> Int =
+  match c with
+  | Continuation -> 1
+  | Cell primary _ _ -> imax(1, uwidth.codepoint_width(primary))
+
+fn set_raw(s: Screen, col: Int, row: Int, c: Cell) -> Unit !{IO} =
+  if in_bounds(s, col, row) then mutmatrix_set(back_of(s), row, col, c) else ()
+
+# Place one cluster and report how many columns it took. Out of bounds is a
+# no-op reporting 0, so a caller walking a string cannot run off the row.
+export fn screen_put(s: Screen, col: Int, row: Int, cluster: List Int,
+                     st: style.Style) -> Int !{IO} =
+  if ! in_bounds (s, col, row) then 0
+  else put_sized(s, col, row, cluster, st, cluster_width(cluster))
+
+fn put_sized(s: Screen, col: Int, row: Int, cluster: List Int, st: style.Style,
+             wide: Int) -> Int !{IO} =
+  # "Wide runes that are printed in the last column will be replaced with a
+  # single width space on output" — xterm, and tcell after it. There is nowhere
+  # to put the second half, and drawing half a character is worse than a gap.
+  if wide == 2 && col + 1 >= screen_cols(s) then do
+    repair(s, col, row)
+    set_raw(s, col, row, Cell(32, Nil, st))
+    1
+  else if wide == 2 then do
+    repair(s, col, row)
+    repair(s, col + 1, row)
+    set_raw(s, col, row, cluster_cell(cluster, st))
+    set_raw(s, col + 1, row, Continuation)
+    2
+  else do
+    repair(s, col, row)
+    set_raw(s, col, row, cluster_cell(cluster, st))
+    1
+
+fn cluster_cell(cluster: List Int, st: style.Style) -> Cell =
+  match cluster with
+  | Nil -> Cell(32, Nil, st)
+  | Cons primary combining -> Cell(primary, combining, st)
+
+# Segment into grapheme clusters and place each one. Returns the column after
+# the last cluster written. Stops at the right edge rather than wrapping:
+# wrapping is a layout decision, and reflowing here would hide a caller's bug.
+export fn screen_write(s: Screen, col: Int, row: Int, text: String,
+                       st: style.Style) -> Int !{IO} =
+  write_go(s, col, row, cluster_list(text), st)
+
+fn cluster_list(text: String) -> List (List Int) =
+  let cps = utf8.codepoints(text)
+  in
+  split_clusters(cps, grapheme.cluster_sizes(cps), Nil)
+
+fn split_clusters(cps: List Int, sizes: List Int,
+                  acc: List (List Int)) -> List (List Int) =
+  match sizes with
+  | Nil -> list_reverse(acc)
+  | Cons n rest ->
+      split_clusters(drop_n(cps, n), rest, Cons(take_n(cps, n, Nil), acc))
+
+fn take_n(xs: List Int, n: Int, acc: List Int) -> List Int =
+  if n <= 0 then list_reverse(acc)
+  else
+    match xs with
+    | Nil -> list_reverse(acc)
+    | Cons h rest -> take_n(rest, n - 1, Cons(h, acc))
+
+fn drop_n(xs: List Int, n: Int) -> List Int =
+  if n <= 0 then xs
+  else
+    match xs with
+    | Nil -> Nil
+    | Cons _ rest -> drop_n(rest, n - 1)
+
+fn write_go(s: Screen, col: Int, row: Int, clusters: List (List Int),
+            st: style.Style) -> Int !{IO} =
+  match clusters with
+  | Nil -> col
+  | Cons c rest -> write_step(s, col, row, c, rest, st)
+
+fn write_step(s: Screen, col: Int, row: Int, c: List Int,
+              rest: List (List Int), st: style.Style) -> Int !{IO} = do
+  used <- screen_put(s, col, row, c, st)
+  write_next(s, col, row, rest, st, used)
+
+fn write_next(s: Screen, col: Int, row: Int, rest: List (List Int),
+              st: style.Style, used: Int) -> Int !{IO} =
+  if used == 0 then col else write_go(s, col + used, row, rest, st)
+
+export fn screen_clear(s: Screen, st: style.Style) -> Unit !{IO} =
+  clear_rows(s, 0, Cell(32, Nil, st))
+
+fn clear_rows(s: Screen, row: Int, c: Cell) -> Unit !{IO} =
+  if row >= screen_rows(s) then ()
+  else do
+    clear_cols(s, 0, row, c)
+    clear_rows(s, row + 1, c)
+
+fn clear_cols(s: Screen, col: Int, row: Int, c: Cell) -> Unit !{IO} =
+  if col >= screen_cols(s) then ()
+  else do
+    set_raw(s, col, row, c)
+    clear_cols(s, col + 1, row, c)
+
+# ── Diffing ─────────────────────────────────────────────────────────────────
+
+fn esc() -> String = char_to_str(27)
+
+# `ESC [ row ; col H`, 1-based on the wire, 0-based here.
+fn cup(row: Int, col: Int) -> String =
+  `${esc()}[${int_to_string(row + 1)};${int_to_string(col + 1)}H`
+
+# Emit what changed and swap the buffers. The result is one String for one
+# `term_write`; the pieces are accumulated in reverse and joined once, per
+# docs/string-building-v0.md — `++` in a loop over a full frame is the shape
+# that measurably hurts.
+export fn diff_to_ansi(s: Screen) -> String !{IO} = do
+  parts <- diff_rows(s, 0, Nil)
+  finish(s, parts)
+
+fn finish(s: Screen, parts: List String) -> String !{IO} =
+  match parts with
+  | Nil -> ""
+  # Anything at all was emitted, so close with a reset and take the back
+  # buffer as the new front.
+  | [_ | _] -> do
+      commit_rows(s, 0)
+      string_concat_many(list_reverse(Cons(style.style_to_ansi(style.style_default()), parts)))
+
+fn diff_rows(s: Screen, row: Int, acc: List String) -> List String !{IO} =
+  if row >= screen_rows(s) then acc
+  else do
+    next <- diff_row(s, row, 0, acc)
+    diff_rows(s, row + 1, next)
+
+# Walks one row looking for the start of a changed run.
+fn diff_row(s: Screen, row: Int, col: Int, acc: List String) -> List String !{IO} =
+  if col >= screen_cols(s) then acc
+  else do
+    changed <- cell_changed(s, col, row)
+    if changed then start_run(s, row, col, acc) else diff_row(s, row, col + 1, acc)
+
+fn cell_changed(s: Screen, col: Int, row: Int) -> Bool !{IO} = do
+  b <- mutmatrix_at(back_of(s), row, col)
+  f <- mutmatrix_at(front_of(s), row, col)
+  b != f
+
+# A run opens with a cursor move, then emits cells until one is unchanged.
+# The style is re-emitted at the start of every run rather than tracked across
+# runs: `style_to_ansi` is absolute, so a run that assumes nothing is a run
+# that cannot be desynchronised by anything between it and the last one.
+fn start_run(s: Screen, row: Int, col: Int, acc: List String) -> List String !{IO} =
+  run_cells(s, row, col, Cons(cup(row, col), acc), no_style())
+
+# A style no real cell can equal, so the first cell of a run always emits one.
+fn no_style() -> Maybe style.Style = Nothing
+
+fn run_cells(s: Screen, row: Int, col: Int, acc: List String,
+             last: Maybe style.Style) -> List String !{IO} =
+  if col >= screen_cols(s) then acc
+  else do
+    changed <- cell_changed(s, col, row)
+    if changed then emit_cell(s, row, col, acc, last) else diff_row(s, row, col, acc)
+
+fn emit_cell(s: Screen, row: Int, col: Int, acc: List String,
+             last: Maybe style.Style) -> List String !{IO} = do
+  c <- mutmatrix_at(back_of(s), row, col)
+  emit_known(s, row, col, acc, last, c)
+
+# A `Continuation` is skipped: the wide cluster before it already wrote both
+# columns, and emitting anything here would advance the cursor into the middle
+# of a character. It still counts as part of the run, so the run does not
+# break across a wide cell.
+fn emit_known(s: Screen, row: Int, col: Int, acc: List String,
+              last: Maybe style.Style, c: Cell) -> List String !{IO} =
+  if is_continuation(c) then run_cells(s, row, col + 1, acc, last)
+  else
+    run_cells(s, row, col + 1,
+              Cons(cell_text(c), style_prefix(acc, last, cell_style(c))),
+              Just(cell_style(c)))
+
+fn style_prefix(acc: List String, last: Maybe style.Style,
+                st: style.Style) -> List String =
+  match last with
+  | Just prev -> if prev == st then acc else Cons(style.style_to_ansi(st), acc)
+  | Nothing -> Cons(style.style_to_ansi(st), acc)
+
+fn commit_rows(s: Screen, row: Int) -> Unit !{IO} =
+  if row >= screen_rows(s) then ()
+  else do
+    commit_cols(s, row, 0)
+    commit_rows(s, row + 1)
+
+fn commit_cols(s: Screen, row: Int, col: Int) -> Unit !{IO} =
+  if col >= screen_cols(s) then ()
+  else do
+    c <- mutmatrix_at(back_of(s), row, col)
+    mutmatrix_set(front_of(s), row, col, c)
+    commit_cols(s, row, col + 1)
+
+# A resized screen is a NEW screen, blank in both buffers: the terminal's
+# contents after a resize are not something a program can know, so the next
+# frame has to be a full repaint. That is also the recovery path when a
+# terminal's idea of a character's width disagrees with ours.
+export fn screen_resize(s: Screen, size: geometry.Size) -> Screen !{IO} =
+  screen_new(size)
