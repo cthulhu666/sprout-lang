@@ -1,0 +1,59 @@
+module main
+
+# Golden-stdout coverage for the M2 TUI core, end to end: bytes in through the
+# decoder, cells out through the screen diff.
+#
+# The unit suites in tests/stdlib/ assert the same bytes, but they assert them
+# against expressions built from the same helpers the implementation uses. This
+# fixture pins the ACTUAL stdout of a real binary, so a change in how a frame
+# is assembled shows up as a diff even if both sides of a unit assertion moved
+# together.
+#
+# Sibling of terminal_escapes.spr, which covers stdlib.terminal's output half.
+# Its header notes the input half was not golden-stdout testable because it
+# depends on stdin and isatty; that is no longer true of DECODING, which is now
+# a pure function over bytes and is exercised below.
+
+import stdlib.bytes as bytes
+import stdlib.string as string
+import stdlib.terminal as term
+import stdlib.tui.keys as keys
+import stdlib.tui.geometry as geometry
+import stdlib.tui.screen as screen
+import stdlib.tui.style as style
+import stdlib.unicode.utf8 as utf8
+
+fn esc(rest: String) -> Bytes =
+  bytes.append(bytes.singleton(27), bytes.from_string(rest))
+
+fn show(input: Bytes) -> String =
+  match keys.decode(input) with
+  | (evs, rest) -> `${to_string(evs)} +${to_string(bytes.length(rest))} held`
+
+fn main() -> Unit !{IO} = do
+  # --- the decoder ---
+  # ctrl-right: one event, nothing held. The C decoder returns "escape" here
+  # and leaks three bytes.
+  print(show(esc("[1;5C")))
+  # A complete key followed by a prefix: emit the one, hold the other.
+  print(show(bytes.append(bytes.from_string("a"), bytes.singleton(27))))
+  # SGR mouse, 1-based on the wire and 0-based in the event.
+  print(show(esc("[<0;12;5M")))
+  # Bracketed paste keeps its body as text, escape sequences included.
+  print(show(bytes.append(esc("[200~"), bytes.append(esc("[A"), esc("[201~")))))
+
+  # --- the screen ---
+  s <- screen.screen_new(geometry.Size(12, 2))
+  first <- screen.screen_write(s, 0, 0, "ab", style.style_default())
+  second <- screen.screen_write(s, 3, 0, "日本", style.with_bold(style.style_default(), true))
+  third <- screen.screen_write(s, 8, 0, utf8.from_codepoints([101, 769]),
+                               style.style_default())
+  print(`columns after each write: ${to_string(first)} ${to_string(second)} ${to_string(third)}`)
+
+  frame <- screen.diff_to_ansi(s)
+  term.write(frame)
+  term.write("\n")
+
+  # The same frame again is empty: the diff was consumed by the first call.
+  repeat <- screen.diff_to_ansi(s)
+  print(`second diff is ${to_string(string.length(repeat))} bytes`)

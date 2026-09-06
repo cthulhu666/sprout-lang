@@ -1,6 +1,6 @@
 # `stdlib/tui` core — v0
 
-Status: **design, pending implementation.** Milestone M2 of the TUI/IDE arc (M0 = terminal I/O
+Status: **implemented.** Milestone M2 of the TUI/IDE arc (M0 = terminal I/O
 runtime, M1 = `stdlib.fs`, then `stdlib.unicode` split out of this milestone and landed ahead of
 it — `docs/stdlib-unicode-v0.md`). Non-normative: `docs/spec-v0.md` is unaffected — this milestone
 adds no syntax, no typing rule and no builtin.
@@ -206,7 +206,7 @@ separate change with its own consumers to migrate.
 
 No builtin is added, so `runtime/APPROVED_BUILTINS` is unchanged.
 
-## 7. Deferred, to be filed in `BACKLOG.md` with this change
+## 7. Deferred, filed in `BACKLOG.md` §4 with this change
 
 1. **The kitty keyboard protocol.** Would remove the ESC ambiguity (§3.2) outright and deliver
    meta/super/hyper and key-release events, at the cost of a capability negotiation. The legacy
@@ -221,28 +221,39 @@ No builtin is added, so `runtime/APPROVED_BUILTINS` is unchanged.
 
 ## 8. Tests
 
-Every module in this milestone is pure, so all of it is `run_suite`/`check_eq` in
-`tests/stdlib/` — no terminal, no fixture process:
+No terminal and no fixture process. `geometry`, `style`, `event` and `keys` are pure, so those are
+`run_suite`/`check_eq`; `screen` mutates a `MutMatrix` and so uses the `TestState` form. **162
+assertions, all passing.**
 
-- `test_tui_geometry.spr` — intersect/clamp/split, empty and degenerate regions.
-- `test_tui_style.spr` — `style_to_ansi` byte-exactness for each `Color` arm and attribute combination.
-- `test_tui_keys.spr` — the bulk. Byte fixtures per sequence family: plain ASCII, ctrl chords,
+- `test_tui_geometry.spr` — 37: intersect/clamp/split, empty and degenerate regions.
+- `test_tui_style.spr` — 19: `style_to_ansi` byte-exactness for each `Color` arm and attribute combination.
+- `test_tui_keys.spr` — 80, the bulk. Byte fixtures per sequence family: plain ASCII, ctrl chords,
   UTF-8 assembly, `ESC [ A`–`D`, modified arrows (`ESC [ 1;5C`), `ESC O P` (F1, SS3 form), `ESC [ 15~`
   (F5, CSI-tilde form), SGR mouse (`ESC [ < 0;12;5M`), bracketed paste, and — the point of §3.2 —
   every proper prefix of each of those returning `([], <the whole input>)`.
-- `test_tui_screen.spr` — a diff over a known mutation emits exactly the changed run; an unchanged
-  frame emits the empty string. Plus the §3.3 cases, which are where this gets interesting: a wide
-  cluster claims the cell to its right; writing over that `Continuation` repairs the wide cell to a
-  space; a wide cluster in the last column becomes a space; a combining mark joins the cell to its
-  left rather than taking its own; and a diff that crosses a wide cell moves the cursor by columns,
-  not by cells.
+- `test_tui_screen.spr` — 26: a diff over a known mutation emits exactly the changed run; an
+  unchanged frame emits the empty string. Plus the §3.3 cases, which are where this gets
+  interesting: a wide cluster claims the cell to its right; writing over that `Continuation` repairs
+  the wide cell to a space; writing over the wide cell clears its stale continuation; a wide cluster
+  in the last column becomes a space; a combining mark joins the cell to its left rather than taking
+  its own; and a diff that crosses a wide cell emits one cluster for two columns.
 
-Byte-exact ANSI output also gets a `tests/conformance/run/` fixture following
-`terminal_escapes.{spr,out}`.
+Byte-exact ANSI output also gets `tests/conformance/run/tui_frame.{spr,out}`, following
+`terminal_escapes.{spr,out}`. It pins the stdout of a real binary, which the unit suites cannot:
+those assert bytes against expressions built from the same helpers the implementation uses, so both
+sides of an assertion can move together. Note the sibling fixture's header says the input half of
+`stdlib.terminal` is not golden-stdout testable because it depends on stdin and `isatty` — that
+stopped being true of *decoding* with this milestone, and `tui_frame` exercises it.
 
 The regression that motivates the milestone is a test in its own right: `ESC [ 1;5C` must decode to
 one `KeyPress KRight (Mods true false false)` and leave an empty remainder — where the C decoder
 returns `escape` and leaks three bytes.
+
+**The screen suite was mutation-tested**, because it passed on its first run and a suite that has
+never been red is not yet evidence. Disabling wide-cell repair turns three cases red; dropping the
+last-column rule turns one red; making the diff stop skipping `Continuation` cells turned **none**
+red — a default-styled wide cell makes the two behaviours byte-identical. The suite gained a
+*bold* wide cell for that, which catches the stray reset the broken skip emits.
 
 ## 9. Verification
 
