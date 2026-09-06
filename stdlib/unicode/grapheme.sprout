@@ -1,0 +1,148 @@
+module stdlib.unicode.grapheme
+
+# Extended grapheme cluster segmentation, UAX #29 (GB1–GB9c, GB11–GB13, GB999).
+# Rules and their sources: docs/stdlib-unicode-v0.md §3.2.
+#
+# The core works on CODEPOINTS, not on a String, for two reasons: Sprout has no
+# `Char -> Int` (see stdlib/unicode/utf8.sprout), and a Sprout String cannot
+# carry U+0000 — it is a NUL-terminated C string, so a String-level API could
+# not even represent the conformance suite's NUL cases.
+
+import stdlib.unicode.lookup as lookup
+import stdlib.unicode.tables as tables
+import stdlib.unicode.utf8 as utf8
+
+fn gcb_chunk(i: Int) -> String = tables.gcb_chunk(i)
+fn extpict_chunk(i: Int) -> String = tables.extpict_chunk(i)
+fn incb_chunk(i: Int) -> String = tables.incb_chunk(i)
+
+# Hangul syllables are computed rather than tabled: within AC00..D7A3 a syllable
+# is LV when (cp - 0xAC00) is a multiple of 28 and LVT otherwise. That is 798 of
+# the ranges GraphemeBreakProperty.txt would otherwise contribute — more than
+# half the file.
+fn hangul_class(cp: Int) -> Maybe String =
+  if cp < 44032 then Nothing
+  else if cp > 55203 then Nothing
+  else if lookup.imod(cp - 44032, 28) == 0 then Just("m") else Just("n")
+
+# Tags: R=CR N=LF C=Control X=Extend Z=ZWJ S=SpacingMark P=Prepend
+#       I=Regional_Indicator l=L v=V t=T m=LV n=LVT O=Any
+export fn gcb(cp: Int) -> String =
+  match hangul_class(cp) with
+  | Just h -> h
+  | Nothing -> gcb_tabled(cp)
+
+fn gcb_tabled(cp: Int) -> String =
+  match lookup.find_tag(tables.gcb_count(), gcb_chunk, cp) with
+  | Just t -> t
+  | Nothing -> "O"
+
+fn is_extpict(cp: Int) -> Bool =
+  lookup.has_tag(tables.extpict_count(), extpict_chunk, cp)
+
+fn incb_class(cp: Int) -> String =
+  match lookup.find_tag(tables.incb_count(), incb_chunk, cp) with
+  | Just t -> t
+  | Nothing -> "O"
+
+# GB11 (emoji ZWJ), GB12/GB13 (regional-indicator pairs) and GB9c (Indic
+# conjuncts) all depend on what came BEFORE the previous character, so this is
+# a state machine rather than a pairwise predicate.
+#
+#   ri    consecutive Regional_Indicators ending at the previous codepoint
+#   pict  0 none, 1 inside ExtPict Extend*, 2 that run followed by ZWJ
+#   incb  0 none, 1 Consonant seen, 2 Consonant then a Linker
+export type BreakState (..) =
+  | BreakState Int Int Int
+
+fn ri_of(s: BreakState) -> Int = match s with | BreakState ri _ _ -> ri
+fn pict_of(s: BreakState) -> Int = match s with | BreakState _ p _ -> p
+fn incb_of(s: BreakState) -> Int = match s with | BreakState _ _ i -> i
+
+fn is_ctrl(c: String) -> Bool = c == "C" || c == "R" || c == "N"
+
+fn advance(st: BreakState, cur: String, cp: Int) -> BreakState =
+  BreakState(next_ri(st, cur), next_pict(st, cur, cp), next_incb(st, cp))
+
+fn next_ri(st: BreakState, cur: String) -> Int =
+  if cur == "I" then ri_of(st) + 1 else 0
+
+fn next_pict(st: BreakState, cur: String, cp: Int) -> Int =
+  if is_extpict(cp) then 1
+  else if pict_of(st) == 1 && cur == "X" then 1
+  else if pict_of(st) == 1 && cur == "Z" then 2
+  else 0
+
+fn next_incb(st: BreakState, cp: Int) -> Int =
+  let c = incb_class(cp)
+  in
+  if c == "C" then 1
+  else if incb_of(st) == 0 then 0
+  else if c == "K" then 2
+  else if c == "X" then incb_of(st)
+  else 0
+
+# True when there is NO boundary between `prev` and `cur`. Rules are tried in
+# UAX #29 order; the first that applies wins, and GB999 is the fallthrough.
+fn joined(prev: String, cur: String, st: BreakState, cp: Int) -> Bool =
+  if prev == "R" && cur == "N" then true  # GB3
+  else if is_ctrl(prev) then false  # GB4
+  else if is_ctrl(cur) then false  # GB5
+  else if prev == "l" && (cur == "l" || cur == "v" || cur == "m" || cur == "n") then true  # GB6
+  else if (prev == "m" || prev == "v") && (cur == "v" || cur == "t") then true  # GB7
+  else if (prev == "n" || prev == "t") && cur == "t" then true  # GB8
+  else if cur == "X" || cur == "Z" then true  # GB9
+  else if cur == "S" then true  # GB9a
+  else if prev == "P" then true  # GB9b
+  else if incb_of(st) == 2 && incb_class(cp) == "C" then true  # GB9c
+  else if pict_of(st) == 2 && is_extpict(cp) then true  # GB11
+  else if prev == "I" && cur == "I" && lookup.imod(ri_of(st), 2) == 1 then true  # GB12/13
+  else false  # GB999
+
+# Sizes, in codepoints, of each cluster. The primary API: everything else is
+# built on it.
+export fn cluster_sizes(cps: List Int) -> List Int =
+  match cps with
+  | Nil -> Nil
+  | Cons c rest ->
+      sizes_go(rest, gcb(c), advance(BreakState(0, 0, 0), gcb(c), c), 1, Nil)
+
+fn sizes_go(rest: List Int, prev: String, st: BreakState,
+            run: Int, acc: List Int) -> List Int =
+  match rest with
+  | Nil -> list_reverse(Cons(run, acc))
+  | Cons c more -> step(more, prev, st, run, acc, c, gcb(c))
+
+fn step(more: List Int, prev: String, st: BreakState, run: Int,
+        acc: List Int, c: Int, cur: String) -> List Int =
+  if joined(prev, cur, st, c) then
+    sizes_go(more, cur, advance(st, cur, c), run + 1, acc)
+  else
+    sizes_go(more, cur, advance(st, cur, c), 1, Cons(run, acc))
+
+# String-level convenience. Cannot represent a cluster containing U+0000; the
+# codepoint API above is the one to use when that matters.
+export fn graphemes(s: String) -> List String =
+  let cps = utf8.codepoints(s)
+  in
+  build(cps, cluster_sizes(cps), Nil)
+
+fn build(cps: List Int, sizes: List Int, acc: List String) -> List String =
+  match sizes with
+  | Nil -> list_reverse(acc)
+  | Cons n rest ->
+      build(drop_n(cps, n), rest, Cons(utf8.from_codepoints(take_n(cps, n, Nil)), acc))
+
+fn take_n(xs: List Int, n: Int, acc: List Int) -> List Int =
+  if n <= 0 then list_reverse(acc)
+  else
+    match xs with
+    | Nil -> list_reverse(acc)
+    | Cons h rest -> take_n(rest, n - 1, Cons(h, acc))
+
+fn drop_n(xs: List Int, n: Int) -> List Int =
+  if n <= 0 then xs
+  else
+    match xs with
+    | Nil -> Nil
+    | Cons _ rest -> drop_n(rest, n - 1)

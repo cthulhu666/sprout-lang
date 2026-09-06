@@ -1,0 +1,35 @@
+module stdlib.unicode.width
+
+# How many terminal columns a codepoint occupies.
+# Rules and their sources: docs/stdlib-unicode-v0.md §3.1.
+#
+#   2  East Asian Width W or F        (UAX #11)
+#   0  general category Mn, Me, Cf, Cc
+#   1  everything else, Ambiguous included
+#
+# The API is over codepoints (Int), not Char, because Sprout has no
+# `Char -> Int` — see stdlib/unicode/utf8.sprout.
+
+import stdlib.unicode.lookup as lookup
+import stdlib.unicode.tables as tables
+import stdlib.unicode.utf8 as utf8
+
+fn zerow_chunk(i: Int) -> String = tables.zerow_chunk(i)
+fn wide_chunk(i: Int) -> String = tables.wide_chunk(i)
+
+# Zero is checked FIRST and wins: U+302A..302D and U+3099..309A are East Asian
+# Wide *and* combining marks, and a combining mark occupies no columns whatever
+# its width class. The two tables are kept separate precisely so this precedence
+# is expressible; merging them would make the answer depend on search order.
+export fn codepoint_width(cp: Int) -> Int =
+  if cp >= 32 then
+    if cp < 127 then 1 else general_width(cp)
+  else general_width(cp)
+
+fn general_width(cp: Int) -> Int =
+  if lookup.has_tag(tables.zerow_count(), zerow_chunk, cp) then 0
+  else if lookup.has_tag(tables.wide_count(), wide_chunk, cp) then 2
+  else 1
+
+export fn string_width(s: String) -> Int =
+  fold(\ (acc, cp) -> acc + codepoint_width(cp), 0, utf8.codepoints(s))

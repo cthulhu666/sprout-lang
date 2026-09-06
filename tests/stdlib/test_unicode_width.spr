@@ -1,0 +1,97 @@
+import stdlib.test (TestCase, check_eq, run_suite)
+import stdlib.unicode.width as width
+import stdlib.unicode.utf8 as utf8
+
+# Column width, UAX #11 plus the general-category zero-width rule.
+# Every expectation below is quoted from the UCD file that decides it, named in
+# the label, so a failure says which datum moved rather than which opinion
+# differs. Rules: docs/stdlib-unicode-v0.md §3.1.
+
+fn w(cp: Int) -> Int = width.codepoint_width(cp)
+
+fn main() -> Unit !{IO} =
+  run_suite("unicode.width", [
+    # --- ASCII fast path (no table touched) ---
+    check_eq("space", w(32), 1),
+    check_eq("A", w(65), 1),
+    check_eq("tilde, last printable ASCII", w(126), 1),
+
+    # --- Cc: control characters take no columns ---
+    # DerivedGeneralCategory: 0000..001F ; Cc
+    check_eq("NUL is Cc", w(0), 0),
+    check_eq("BEL is Cc", w(7), 0),
+    check_eq("DEL is Cc", w(127), 0),
+
+    # --- W and F both mean two columns ---
+    # EastAsianWidth: 4E00..9FFF ; W, FF21..FF3A ; F, 1F600..1F64F ; W
+    check_eq("CJK ideograph U+4E00 is W", w(19968), 2),
+    check_eq("CJK ideograph U+9FFF, top of the same range", w(40959), 2),
+    check_eq("Hangul Choseong U+1100 is W", w(4352), 2),
+    check_eq("fullwidth A U+FF21 is F", w(65313), 2),
+    check_eq("grinning face U+1F600 is W", w(128512), 2),
+
+    # --- Halfwidth is NARROW. H is not a third width class; it is one column. ---
+    # EastAsianWidth: FF66..FF6F ; H, 20A9 ; H
+    check_eq("halfwidth katakana WO U+FF66 is H, so narrow", w(65382), 1),
+    check_eq("won sign U+20A9 is H, so narrow", w(8361), 1),
+
+    # --- Ambiguous is narrow too. A width that depends on the reader's locale
+    # is not a width a renderer can use, so A resolves to 1 unconditionally. ---
+    # EastAsianWidth: 00A1 ; A
+    check_eq("inverted exclamation U+00A1 is A, resolved narrow", w(161), 1),
+
+    # --- Mn/Me/Cf: zero, whatever the East Asian class says ---
+    # DerivedGeneralCategory: 0300..036F ; Mn, 200B..200F ; Cf, 00AD ; Cf
+    check_eq("combining acute U+0301 is Mn", w(769), 0),
+    check_eq("zero width space U+200B is Cf", w(8203), 0),
+    check_eq("ZWJ U+200D is Cf", w(8205), 0),
+    check_eq("soft hyphen U+00AD is Cf", w(173), 0),
+
+    # --- Mc is a SPACING combining mark: one column, not zero. U+11000 and
+    # U+11001 are adjacent and differ only in Mc vs Mn. ---
+    check_eq("Brahmi candrabindu U+11000 is Mc", w(69632), 1),
+    check_eq("Brahmi anusvara U+11001 is Mn", w(69633), 0),
+
+    # --- The overlap that forces two tables rather than one ---
+    # U+302A..302D and U+3099..309A are East Asian W *and* category Mn. Zero
+    # wins. Merged into one sorted table the answer would depend on search
+    # order; see stdlib/unicode/width.sprout.
+    check_eq("U+302A is W and Mn: zero wins", w(12330), 0),
+    check_eq("U+302D, top of that range", w(12333), 0),
+    check_eq("U+3099 is W and Mn: zero wins", w(12441), 0),
+    check_eq("U+309A, top of that range", w(12442), 0),
+
+    # --- Binary-search boundaries: last F, first H, one block apart ---
+    check_eq("U+FF60 is the last F before the halfwidth block", w(65376), 2),
+    check_eq("U+FF61 is the first H of it", w(65377), 1),
+    check_eq("U+FFE0 is F again", w(65504), 2),
+    check_eq("U+FFE8 is H", w(65512), 1),
+
+    # --- Unassigned defaults to narrow: Cn is in neither table ---
+    # DerivedGeneralCategory: 0378..0379 ; Cn, and no EastAsianWidth entry.
+    check_eq("reserved U+0378", w(888), 1),
+    check_eq("U+10FFFF, the last codepoint", w(1114111), 1),
+
+    # --- string_width sums over decoded codepoints ---
+    check_eq("empty string", width.string_width(""), 0),
+    check_eq("plain ASCII", width.string_width("hello"), 5),
+    check_eq("three CJK characters are six columns",
+             width.string_width("日本語"), 6),
+    # Built from codepoints, not written as a literal: decomposed `e` + U+0301
+    # and precomposed U+00E9 are indistinguishable in a source file, and only
+    # the first tests that a combining mark adds no column.
+    check_eq("base plus combining mark U+0065 U+0301 is one column",
+             width.string_width(utf8.from_codepoints([101, 769])), 1),
+    check_eq("mixed ASCII and wide", width.string_width("a日b"), 4),
+
+    check_eq("precomposed U+00E9 is one column too",
+             width.string_width(utf8.from_codepoints([233])), 1),
+
+    # --- UTF-8 decode covers all four lengths ---
+    check_eq("one-byte", list_length(utf8.codepoints("a")), 1),
+    check_eq("two-byte U+00E9", list_length(utf8.codepoints("é")), 1),
+    check_eq("three-byte U+65E5", list_length(utf8.codepoints("日")), 1),
+    check_eq("four-byte U+1F600", list_length(utf8.codepoints("😀")), 1),
+    check_eq("round trip through codepoints",
+             utf8.from_codepoints(utf8.codepoints("aé日😀")), "aé日😀")
+  ])

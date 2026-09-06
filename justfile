@@ -974,6 +974,37 @@ seed-stale:
 llvm-where ll_file line:
   bash scripts/llvm_diag.sh "{{ll_file}}" "{{line}}"
 
+# ── Code generation ───────────────────────────────────────────────────────────
+
+# Regenerate stdlib/unicode/tables.sprout and the grapheme conformance suite
+# from the Unicode Character Database.
+#
+# Run this ONLY when moving to a new Unicode version: update the pins in
+# scripts/fetch_ucd.sh and the version in docs/stdlib-unicode-v0.md, then run
+# this and commit the two generated files.  The UCD itself is not vendored
+# (docs/stdlib-unicode-v0.md §3.5); it lands in build/ucd/, which is ignored.
+#
+# The generator is Sprout, and it imports stdlib.unicode.lookup for the base-62
+# encoder — the same module the runtime search decodes with, so writer and
+# reader cannot drift.  That is why this needs --package-root.
+[group('dev')]
+gen-unicode-tables: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  STAGE1="{{build_dir}}/compile_driver_bin_stage1"
+  UCD="{{build_dir}}/ucd"
+  bash scripts/fetch_ucd.sh "$UCD"
+  TMPD=$(mktemp -d)
+  trap 'rm -rf "$TMPD"' EXIT
+  echo "==> Building the generator..."
+  "$STAGE1" --emit-ir "{{stdlib_root}}" --package-root "{{justfile_directory()}}" \
+    tools/gen_unicode_tables.sprout > "$TMPD/gen.ll"
+  clang "$TMPD/gen.ll" {{runtime_src}} -O2 {{clang_extra}} -o "$TMPD/gen"
+  echo "==> Generating..."
+  "$TMPD/gen" "$UCD" "{{justfile_directory()}}"
+  echo "==> Wrote stdlib/unicode/tables.sprout and"
+  echo "    tests/stdlib/test_unicode_grapheme_conformance.spr"
+
 # ── DoD CI Gates ──────────────────────────────────────────────────────────────
 #
 # These recipes enforce DoD items #7–#10 — the checks that previously lived in

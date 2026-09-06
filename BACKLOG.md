@@ -1986,6 +1986,16 @@ Legend:
 - [ ] `P1` Add line wrapping / viewport helpers in stdlib. **Scheduled as TUI M2** (`stdlib/tui/geometry.sprout` + `stdlib/tui/screen.sprout`).
 - [ ] `P1` Add basic event loop utility for TUI apps. **Scheduled as TUI M3.** Unblocked by the parked-stdin work above — an event loop that could not run a timer alongside input was the thing this entry could not have delivered before. Note one shape constraint found while scoping it: `chan_select` is recv-only, same-typed, and has no `default` arm, so the pump multiplexes input/timers/workers over ONE sum-typed channel rather than selecting across several. That is a workaround for the `chan_select` limitation already tracked in the concurrency arc, recorded here so the pump's shape is attributed to it rather than read as a design preference.
 
+- [x] `P1` **Unicode width and grapheme clusters — LANDED 2026-09-06 as `stdlib/unicode`.** Split
+  out of TUI M2 because it is a stdlib capability in its own right. `codepoint_width` implements
+  UAX #11 (W and F are two columns; **Halfwidth and Ambiguous are one**) plus the `Mn`/`Me`/`Cf`/`Cc`
+  zero-width rule, and `cluster_sizes` implements UAX #29 in full including GB9c — **766/766 of the
+  Unicode Consortium's own `GraphemeBreakTest.txt` cases pass**. Tables are generated from a pinned,
+  checksum-verified UCD 17.0.0 by `just gen-unicode-tables`; design and the two API changes the
+  language forced are in `docs/stdlib-unicode-v0.md`. Three language gaps came out of it, filed
+  under *Compiler / Stdlib Misc*: no `Char -> Int`, a String holding U+0000 is silently corrupt, and
+  `x <- pure(e)` leaves `x` unusable.
+
 ### 5) Data Structures and Collections
 
 - [x] `P1` Add practical indexed sequence type (`Array`/`Vector`) for UI lists.
@@ -4184,6 +4194,13 @@ op-classification already in place.
   - **Follow-on, and a prerequisite for the nursery:** the freelists are still wiped and rebuilt from *all* regions every sweep. A minor collection that marks only young objects but still rebuilds the whole heap's freelist is not proportional to the young set, which defeats the nursery. Making the lists generation-scoped — stop wiping, remove/re-add only the swept regions' entries — is the natural next increment, and the per-region touched-class bookkeeping it needs already exists (`fl_region_commit`/`fl_region_rollback`).
 - [ ] `P2` **GC trigger is object-count-blind, not byte-aware** (`runtime/sprout_runtime.c` `sprout_gc_maybe_collect_threshold`, ~line 879): the collector fires when `g_managed_heap_count >= g_gc_threshold` (default 4096 objects, adaptive ×2 up to an optional cap), and `g_managed_heap_count` increments by exactly 1 per managed object regardless of size — a `VectorVal`'s backing `data` array is allocated via plain `malloc`, invisible to the trigger. Consequence (measured on a 20k-append benchmark, `SPROUT_DEBUG_GC=1`): many-small allocs over-collect (the old list-based `Semigroup (Vec a)` round-trip spewed ~3000 cons cells per append → **40,002 collections**, low peak RSS ~12 MB but ~2s pure GC overhead); few-but-large allocs under-collect (the `vector_concat` builtin allocates 1 managed object per append → only **11 collections**, but ~4096 dead 16 KB result vectors pile up between cycles → ~64–95 MB transient peak, ~40× faster but higher peak). Not a leak — reclaimed next cycle — but higher peak RSS can be the direct flip side of an allocation-count speedup, and will resurface with `MutVec`/large-buffer churn. Fix: make the trigger byte-aware (count bytes, not objects) so large payloads count proportionally toward the threshold. Tunable today without touching data structures via `SPROUT_GC_THRESHOLD`. Surfaced 2026-07-12 landing the `vector_concat`/`Semigroup (Vec a)` dispatch fix (§5 above); see also `docs/gc-profile-findings-2026-07-03.md`.
   - **Now amplified by the `adapt_factor` default of 3.0** (`:1371`): the garbage budget between collections is `(factor − 1) × live` *objects*, so a workload retaining large invisible payloads now tolerates 2× as many of them as it did at 2.0. Measured harmless on today's workloads (`digit_recognizer` +1.3 MB — its live set is small ADT nodes, not big buffers), but this raises the cost of the byte-blindness bug for any future large-buffer churn. If a workload shows unexpected peak RSS, try `SPROUT_GC_ADAPT_FACTOR=2` before assuming a leak.
+  - **FIRST MEASURED INSTANCE — 2026-09-06. The predicted "future large-buffer churn" arrived, and the gap is ~100,000×.** `:4158` recorded the risk as *"stays open … rather than being disproven"*; this is it firing. Compiling one function holding a 1,600-element `Vec Int` literal (`--emit-ir`, a single basic block, ~17,820 IR lines out) peaks at **3,188 MB RSS to produce 767 KB of output**, while the collector's own log at that moment reports the live set as **71,178 objects / `cstr=11990 (31.6KB)`**. Almost none of the 3.2 GB is live — it is large dead strings the count-based trigger cannot see. Scaling is clean quadratic in *emitted IR bytes*: RSS ≈ 1.0×10⁻⁵ × (IR bytes)², holding to ±15% across two unrelated program shapes over a 4× size range. It is confined to `emit-ir` — `--phase bundle`/`check`/`lower`/`effects` are flat on the same inputs (12→14 MB and 20→25 MB for a 2× input).
+    - **`SPROUT_GC_THRESHOLD` cannot investigate this, and reaching for it will mislead you.** It sets only the *floor* (`:2623`, `if (target < base) target = base`), so with an adaptive target already in the millions — 7,725,933 objects here — lowering it changes nothing: 3188 MB → 3189 / 3205 / 3215 MB at 4096 / 512 / 64. That flat result reads as "the memory must be live" and is worthless evidence. The knobs that bind are `SPROUT_GC_ADAPT_FACTOR` and `SPROUT_GC_ADAPT_CAP`.
+    - **A count-based cap is NOT the fix — it trades quadratic memory for a livelock.** `SPROUT_GC_ADAPT_CAP=50000` collapses peak RSS to **10 MB**, proving the garbage is collectable, but the run never finishes: live (71,178) permanently exceeds the cap (50,000), so every allocation triggers a full mark — **363,713 cycles at ~980 µs each, `alloc_since_gc=1`, `swept=0`**, killed at a 300 s timeout. `SPROUT_GC_ADAPT_FACTOR=1.2` is the other extreme and barely moves it (3,019 MB). This is the concrete argument that the trigger must become byte-aware rather than merely tighter, and it is a ready-made reproducer for whoever implements that. Note the livelock detector (`SPROUT_GC_LIVELOCK_*`) did not abort a textbook livelock.
+
+- [ ] `P2` **`ir_lowering` assembles IR text with `++` in a recursion, at all three nesting levels** (`lower_ops:387`, `lower_blocks:396`, `lower_fns:464`, plus the same shape in `sprout_ir.print_ops:662`/`print_blocks:671`/`print_fns:691`). Each of n frames concatenates onto the entire remaining tail, so emitting a block of n ops copies O(n × total) bytes to produce O(total) of output. `docs/string-building-v0.md` prohibits exactly this and `string.join` (`stdlib/string.sprout:323`) shows the sanctioned form — accumulate pieces into a reversed `List`, then one `string_concat_many`. The fix is mechanical and local.
+  - **This does NOT contradict the "string concatenation was the wrong target" correction at `:4156` — the two measure different regimes, and both stand.** That correction profiled a *real* compiler input (`ast_to_ir.sprout`, 452 KB → 4.17 MB IR) and correctly found the live heap is 85% ADT nodes and only 12.5% CSTR: real code is many small blocks, so each `lower_ops` recursion is over ~10–50 ops and the quadratic term never grows. The regime that hurts is **one block with a very large op count**, where n is the whole function: a 1,600-element list literal lowers to ~17,820 ops in a single block and costs 3.2 GB (see the byte-blindness entry above). So this is not "the emit path allocates too much" in general — it is a per-block quadratic that ordinary code never reaches and machine-generated or literal-heavy code hits immediately. Do not re-open `:4156` on the strength of this.
+  - Interacts with the byte-blind GC trigger above: the churn alone would be collectable, and the byte-blind trigger alone would have little to collect. Fixing **either** removes the quadratic RSS; fixing this one is cheaper and lower-risk, but it hides the GC bug rather than closing it. **Unmeasured:** whether the fix actually collapses the curve — that needs a stage-2 build to confirm, and the claim should not be repeated as fact until someone runs it.
 
 - [x] `P1` **Green-task setup is 75% of HTTP-server CPU; a worker pool is measured at 3.5–5.4× —
   design + prototype in `docs/green-task-pool-v0.md`. `serve_pooled` LANDED 2026-08-10** (Design A,
@@ -4460,6 +4477,94 @@ op-classification already in place.
   them). `compile-examples-stage1` stops at IR, and `smoke-shapes` (`justfile:987-1005`) only
   greps the emitted text — neither resolves a symbol. Undefined-symbol regressions are therefore
   visible on five files out of 61.
+- [ ] `P2` **A large list/`Vec` literal is not a usable way to ship a data table.** Measured
+  2026-09-06 while scoping Unicode width/grapheme tables for `stdlib/tui`. A literal of N `Int`s
+  lowers to **~11 IR lines per element** and costs O(N²) compiler memory (see the two entries under
+  *GC & Runtime Performance*): 800 → 825 MB, 1,200 → 1,817 MB, 1,600 → 3,188 MB, 2,000 → 4,631 MB.
+  Past that it stops compiling at all — **N=6,000 fails immediately with
+  `builtin sprout_gc_push_root: GC root pool exhausted`** (`sprout_runtime.c:1613`; the pool is a
+  fixed `RootNode g_root_pool[131072]`, `:1599`). 131072 ÷ 6000 ≈ 22 roots per element is consistent
+  with the compiler's own per-frame rooting over a non-tail recursion the length of the literal, but
+  **that accounting is inferred, not verified** — all that is established is the ceiling's location
+  between 2,000 and 6,000 and the message it fails with.
+  - **Workaround that works today, and the reason it works: ship the table as a STRING literal and
+    decode it at startup.** The same 2,000 entries cost **49 MB and 218 IR lines** as one string
+    constant versus 4,631 MB and 22,220 lines as a list — a string literal is one token and one
+    `@.str` constant, so the emitted IR is *constant-size regardless of table size*. Lexing a string
+    literal is still superlinear in its length (80 KB source → 1.9 GB), so a large table wants
+    **chunking across several literals of a few KB each** plus a compact encoding (delta-varint, not
+    fixed-width hex) — compactness is a compile-time constraint here, not an aesthetic one.
+  - Fixing the quadratic (the `ir_lowering` entry) would move the memory curve but **not** the root-pool
+    ceiling, which is a separate fixed-size limit. Both need to go before a literal table of a few
+    thousand entries is viable.
+
+- [ ] `P2` **There is no `Char -> Int`.** Surfaced 2026-09-06 building `stdlib/unicode`. The prelude
+  declares `extern fn char_from_codepoint(cp: Int) -> Char` (`stdlib/prelude.sprout:1772`) and
+  nothing going the other way, so a `Char` can be compared and printed but never *measured*. Any
+  character-property API — width, category, grapheme class, `is_digit` on a non-ASCII digit — is
+  therefore unwritable over `Char`.
+  - The value is already there. `runtime/sprout_runtime.c:6441` says so outright: *"a Char IS its
+    Unicode codepoint (an immediate i64), so this is the identity"*. Only the type stops a caller
+    reading it; `char_codepoint : Char -> Int` would be the same identity function with the arrow
+    reversed, and needs no new runtime capability.
+  - Workaround in use: `stdlib/unicode/utf8.sprout` decodes a `String`'s UTF-8 bytes to
+    `List Int` itself, and every `stdlib/unicode` entry point is keyed on `Int`. Where a numeric
+    value must come out of a *character*, the house idiom is an index into an alphabet string
+    (`string.hex_digit_value`, `lookup.b62_digit_value`) — which works for 62 known characters and
+    does not generalise.
+  - Blocks: a `Char`-shaped public API for `stdlib/unicode`, and `stdlib/tui`'s per-cell width
+    lookups if those ever want to hold a `Char` rather than a codepoint.
+
+- [ ] `P2` **A String containing U+0000 is silently corrupt: the length header and the bytes
+  disagree.** Found 2026-09-06 by the `GraphemeBreakTest.txt` case `0D 00`, which reported one
+  cluster where two were expected. Sprout Strings are NUL-terminated C strings with a length in the
+  heap header, and `string_from_char(char_from_codepoint(0))` writes a header saying 1 byte over
+  content whose `strlen` is 0. Three-line repro, all four numbers measured:
+
+  ```
+  string.byte_length(string_from_char(char_from_codepoint(0)))        == 1   # header
+  string.byte_length("A" ++ string_from_char(char_from_codepoint(0)) ++ "B") == 2   # "AB"
+  string.byte_length(utf8.from_codepoints([65, 0, 66]))               == 2
+  list_length(utf8.codepoints(utf8.from_codepoints([65, 0, 66])))     == 2
+  ```
+
+  The NUL is *dropped*, not truncated at — `A` and `B` both survive. `SPROUT_GC_HDRCHECK=1` turns
+  this from silent into an abort, which is what confirms it is an invariant violation rather than a
+  documented limitation:
+
+  ```
+  [sprout] HDRCHECK: str_byte_len aux=1 strlen=0
+  ```
+
+  (`sprout_runtime.c:6184-6194` asserts header length == `strlen`.) Options, in rough order of
+  cost: reject U+0000 in `char_to_str`/`string_from_char` with a located panic (loud, cheap, closes
+  the corruption); or make the header the sole authority on length and stop calling `strlen`, which
+  is a wider change than this warrants until something needs embedded NULs.
+  - Consequence for `stdlib/unicode`: `cluster_sizes : List Int -> List Int` is the primary API and
+    `graphemes : String -> List String` is documented as lossy for U+0000. The conformance suite is
+    written at codepoint level for this reason — a String-level suite would have tested a shorter
+    string than intended on every NUL case and passed.
+
+- [ ] `P3` **`x <- pure(e)` in a do-block leaves `x` unusable: the Applicative is never pinned.**
+  Surfaced 2026-09-06 writing `tools/gen_unicode_tables.sprout`. Three-line repro:
+
+  ```sprout
+  fn main() -> Unit !{IO} = do
+    s <- pure("abc")
+    print(s ++ "!")
+  ```
+
+  ```
+  ERROR: check: `++` needs matching Semigroup operands: Type mismatch: $t2553 String vs String
+  ```
+
+  `pure : a -> f a` and nothing constrains `f`, so the bind yields `$t String` rather than `String`
+  and every later use of `s` mismatches. The surrounding `do` is already committed to one
+  Applicative, so this looks like the do-block failing to unify its steps' functor with `pure`'s —
+  **that reading is inferred from the error, not confirmed in `infer`**. Note the message names the
+  *operator*, not the binding, so it points at the wrong line.
+  - Workaround: pass the value as a function parameter instead of binding it, or annotate. Both are
+    used in `tools/gen_unicode_tables.sprout` (see the comment at `fn run`).
 
   </details>
 

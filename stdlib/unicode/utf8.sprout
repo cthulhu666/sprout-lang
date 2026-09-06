@@ -1,0 +1,57 @@
+module stdlib.unicode.utf8
+
+# Codepoint access for Strings.
+#
+# Sprout has `char_from_codepoint` (Int -> Char) but NO inverse: there is no
+# way to get a Char's numeric value. `string.string_chars` therefore yields
+# Chars that can be compared but not measured, so any property lookup — width,
+# grapheme class — has to decode the UTF-8 bytes itself. That is what this
+# module is for.
+#
+# Strings are valid UTF-8 by construction (the runtime validates on every
+# String-producing boundary), so decoding assumes well-formed input.
+
+import stdlib.string as string
+import stdlib.bytes as bytes
+
+fn byte_at(b: Bytes, i: Int) -> Int =
+  match bytes.get(b, i) with
+  | Just v -> v
+  | Nothing -> 0
+
+# Continuation bytes contribute 6 bits each; the lead byte carries the rest.
+# Written as arithmetic rather than shifts/masks so it needs no bitwise import.
+fn cp2(b0: Int, b1: Int) -> Int = (b0 - 192) * 64 + (b1 - 128)
+
+fn cp3(b0: Int, b1: Int, b2: Int) -> Int =
+  (b0 - 224) * 4096 + (b1 - 128) * 64 + (b2 - 128)
+
+fn cp4(b0: Int, b1: Int, b2: Int, b3: Int) -> Int =
+  (b0 - 240) * 262144 + (b1 - 128) * 4096 + (b2 - 128) * 64 + (b3 - 128)
+
+# Returns a List, not a Vec: every consumer walks it head-first, and the
+# grapheme state machine is a recursion over exactly that shape.
+export fn codepoints(s: String) -> List Int =
+  let b = bytes.from_string(s)
+  in
+  list_reverse(decode_go(b, 0, bytes.length(b), Nil))
+
+fn decode_go(b: Bytes, i: Int, n: Int, acc: List Int) -> List Int =
+  if i >= n then acc
+  else decode_step(b, i, n, acc, byte_at(b, i))
+
+fn decode_step(b: Bytes, i: Int, n: Int, acc: List Int, b0: Int) -> List Int =
+  if b0 < 128 then decode_go(b, i + 1, n, Cons(b0, acc))
+  else if b0 < 224 then
+    decode_go(b, i + 2, n, Cons(cp2(b0, byte_at(b, i + 1)), acc))
+  else if b0 < 240 then
+    decode_go(b, i + 3, n,
+              Cons(cp3(b0, byte_at(b, i + 1), byte_at(b, i + 2)), acc))
+  else
+    decode_go(b, i + 4, n,
+              Cons(cp4(b0, byte_at(b, i + 1), byte_at(b, i + 2),
+                       byte_at(b, i + 3)), acc))
+
+# Rebuild a String from codepoints. One concat pass, not `++` in a loop.
+export fn from_codepoints(cps: List Int) -> String =
+  string_concat_many(list_map(\cp -> string.string_from_char(char_from_codepoint(cp)), cps))

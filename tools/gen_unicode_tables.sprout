@@ -1,0 +1,412 @@
+module tools.gen_unicode_tables
+
+# Generates stdlib/unicode/tables.sprout and the grapheme conformance test from
+# Unicode Character Database extracts.  Design: docs/stdlib-unicode-v0.md.
+#
+# Usage: gen_unicode_tables <ucd-dir> <repo-root>
+#
+# The UCD files are NOT vendored; the design doc pins the version and the URLs.
+# This program is written in Sprout on purpose: it is the first real consumer of
+# stdlib.fs outside its own tests.
+
+import stdlib.fs as fs
+import stdlib.string as string
+
+export type Range (..) =
+  | Range Int Int String  # lo, hi (inclusive), one-character class tag
+
+export fn range_lo(r: Range) -> Int = match r with | Range lo _ _ -> lo
+export fn range_hi(r: Range) -> Int = match r with | Range _ hi _ -> hi
+export fn range_tag(r: Range) -> String = match r with | Range _ _ tag -> tag
+
+# ── UCD line parsing ────────────────────────────────────────────────────────
+# Every UCD data file shares one shape: `range ; value [; value2] # comment`,
+# with blank and comment-only lines interleaved.
+
+export fn strip_comment(line: String) -> String =
+  match string.split_once(line, "#") with
+  | Nothing -> line
+  | Just (before, _) -> before
+
+export fn hex_value(raw: String) -> Int =
+  hex_value_go(string.trim(raw), 0, 0)
+
+fn hex_value_go(raw: String, i: Int, acc: Int) -> Int =
+  if i >= string.length(raw) then acc
+  else
+    match string.hex_digit_value(string.char_at_or(raw, i, '0')) with
+    | Nothing -> acc
+    | Just d -> hex_value_go(raw, i + 1, acc * 16 + d)
+
+# "0300..036F" -> (768, 879); "094D" -> (1101, 1101)
+export fn parse_span(field: String) -> (Int, Int) =
+  match string.split_once(string.trim(field), "..") with
+  | Nothing -> span_single(hex_value(field))
+  | Just (lo, hi) -> (hex_value(lo), hex_value(hi))
+
+fn span_single(cp: Int) -> (Int, Int) = (cp, cp)
+fn span_lo(s: (Int, Int)) -> Int = match s with | (lo, _) -> lo
+fn span_hi(s: (Int, Int)) -> Int = match s with | (_, hi) -> hi
+
+export fn line_fields(line: String) -> List String =
+  list_map(\f -> string.trim(f), string.split(strip_comment(line), ";"))
+
+export fn field_at(fields: List String, i: Int) -> String =
+  match fields with
+  | Nil -> ""
+  | Cons head rest -> if i <= 0 then head else field_at(rest, i - 1)
+
+fn is_data_line(fields: List String) -> Bool =
+  if list_length(fields) < 2 then false
+  else ! string.is_empty (field_at(fields, 0))
+
+# ── Selecting ranges out of a file ──────────────────────────────────────────
+# `want` sees the whole field list (InCB rows carry two value fields) and
+# returns Just <tag> to keep the row.
+
+export fn select_ranges(text: String, want: List String -> Maybe String) -> List Range =
+  list_reverse(fold(\ (acc, line) -> select_step(acc, line, want), Nil,
+                    string.split(text, "\n")))
+
+fn select_step(acc: List Range, line: String,
+               want: List String -> Maybe String) -> List Range =
+  let fields = line_fields(line)
+  in
+  if ! is_data_line (fields) then acc
+  else
+    match want(fields) with
+    | Nothing -> acc
+    | Just tag -> Cons(range_of(field_at(fields, 0), tag), acc)
+
+fn range_of(span_field: String, tag: String) -> Range =
+  let s = parse_span(span_field)
+  in
+  Range(span_lo(s), span_hi(s), tag)
+
+# ── Property selectors ──────────────────────────────────────────────────────
+
+# Two columns is exactly East Asian Width W or F (UAX #11); Halfwidth is NARROW.
+fn want_wide(fields: List String) -> Maybe String =
+  let v = field_at(fields, 1)
+  in
+  if v == "W" then Just("2") else if v == "F" then Just("2") else Nothing
+
+# Zero columns is a general-category question, not a width one: combining marks
+# (Mn, Me), format characters (Cf) and controls (Cc).
+fn want_zero(fields: List String) -> Maybe String =
+  let v = field_at(fields, 1)
+  in
+  if v == "Mn" then Just("0")
+  else if v == "Me" then Just("0")
+  else if v == "Cf" then Just("0")
+  else if v == "Cc" then Just("0")
+  else Nothing
+
+# Grapheme_Cluster_Break, minus LV/LVT which are computed (see design §3.3).
+fn want_gcb(fields: List String) -> Maybe String =
+  let v = field_at(fields, 1)
+  in
+  if v == "CR" then Just("R")
+  else if v == "LF" then Just("N")
+  else if v == "Control" then Just("C")
+  else if v == "Extend" then Just("X")
+  else if v == "ZWJ" then Just("Z")
+  else if v == "SpacingMark" then Just("S")
+  else if v == "Prepend" then Just("P")
+  else if v == "Regional_Indicator" then Just("I")
+  else if v == "L" then Just("l")
+  else if v == "V" then Just("v")
+  else if v == "T" then Just("t")
+  else Nothing
+
+fn want_extpict(fields: List String) -> Maybe String =
+  if field_at(fields, 1) == "Extended_Pictographic" then Just("E") else Nothing
+
+fn want_incb(fields: List String) -> Maybe String =
+  if field_at(fields, 1) != "InCB" then Nothing
+  else
+    let v = field_at(fields, 2)
+    in
+    if v == "Consonant" then Just("C")
+    else if v == "Extend" then Just("X")
+    else if v == "Linker" then Just("K")
+    else Nothing
+
+# ── base-62 encoding ────────────────────────────────────────────────────────
+# Digits, then uppercase, then lowercase: an alphabet whose ASCII order matches
+# numeric order, so a lexicographic compare of two encodings IS a numeric
+# compare.  That is what lets the table be binary-searched without decoding it.
+
+export fn b62_digit(v: Int) -> String =
+  if v < 10 then char_to_string(char_from_codepoint(48 + v))
+  else if v < 36 then char_to_string(char_from_codepoint(65 + v - 10))
+  else char_to_string(char_from_codepoint(97 + v - 36))
+
+# Sprout has no `%` operator (stdlib/math.sprout:211), so remainder is explicit.
+export fn imod(n: Int, d: Int) -> Int = n - (n / d) * d
+
+# 62^4 = 14,776,336 > 0x10FFFF, so four digits cover every codepoint.
+export fn b62_4(n: Int) -> String =
+  b62_digit(imod(n / 238328, 62)) ++ b62_digit(imod(n / 3844, 62))
+    ++ b62_digit(imod(n / 62, 62)) ++ b62_digit(imod(n, 62))
+
+# ── Emitting a table ────────────────────────────────────────────────────────
+# One entry is lo(4) + hi(4) + tag(1) = 9 characters, entries sorted by lo.
+
+fn entry_text(r: Range) -> String =
+  b62_4(range_lo(r)) ++ b62_4(range_hi(r)) ++ range_tag(r)
+
+export fn sort_ranges(rs: List Range) -> Vec Range =
+  vec_sort_by(range_lo, vec_from_list(rs))
+
+fn entries_text(sorted: Vec Range) -> String =
+  string_concat_many(list_reverse(fold(\ (acc, r) -> Cons(entry_text(r), acc), Nil, sorted)))
+
+# Chunked because lexing one large string literal is itself superlinear
+# (measured: 8 KB -> 49 MB, 80 KB -> 1.9 GB of compiler RSS).
+fn chunk_lines(body: String, per_chunk: Int, i: Int, acc: List String) -> List String =
+  let total = string.length(body)
+      start = i * per_chunk
+  in
+  if start >= total then list_reverse(acc)
+  else
+    let count = if start + per_chunk > total then total - start else per_chunk
+    in
+    chunk_lines(body, per_chunk, i + 1,
+                Cons(`  | ${to_string(i)} -> "${string.slice(body, start, count)}"`, acc))
+
+fn emit_table(name: String, sorted: Vec Range) -> String =
+  emit_chunked(name, entries_text(sorted), vec_length(sorted), "export ")
+
+# Shared by the tables and the conformance data: a count, a chunk count, and a
+# chunk accessor. `_chunks` exists so a consumer that needs the whole body can
+# concatenate it without knowing the chunk size.
+fn emit_chunked(name: String, body: String, count: Int, vis: String) -> String =
+  let chunks = chunk_lines(body, 3600, 0, Nil)
+      preamble = Cons(`${vis}fn ${name}_count() -> Int = ${to_string(count)}`,
+                 Cons(`${vis}fn ${name}_chunks() -> Int = ${to_string(list_length(chunks))}`,
+                 Cons("",
+                 Cons(`${vis}fn ${name}_chunk(i: Int) -> String =`,
+                 Cons("  match i with", Nil)))))
+  in
+  string.join("\n", list_append(preamble, append_default(chunks)))
+
+fn append_default(chunks: List String) -> List String =
+  list_append(chunks, Cons("  | _ -> \"\"", Cons("", Nil)))
+
+# ── Conformance suite ───────────────────────────────────────────────────────
+# GraphemeBreakTest.txt lines look like
+#     ÷ 000D × 000A ÷    # ÷ [0.2] <CR> × [3.0] <LF> ÷ [0.3]
+# where ÷ is a cluster boundary and × is "no boundary here". Encoded as
+#     <codepoints, 4 chars each>;<cluster sizes, 4 chars each>
+# one case per line — strings again, not a list literal, for the compiler
+# reason in docs/stdlib-unicode-v0.md §3.4.
+
+export fn parse_case(line: String) -> String =
+  case_go(string.words(strip_comment(line)), Nil, Nil, 0)
+
+fn case_go(tokens: List String, cps: List String, sizes: List String,
+           cur: Int) -> String =
+  match tokens with
+  | Nil -> case_text(cps, sizes)
+  | Cons tok rest ->
+      if tok == break_mark() then
+        case_go(rest, cps, close_cluster(sizes, cur), 0)
+      else if tok == joint_mark() then case_go(rest, cps, sizes, cur)
+      else case_go(rest, Cons(b62_4(hex_value(tok)), cps), sizes, cur + 1)
+
+# U+00F7 DIVISION SIGN and U+00D7 MULTIPLICATION SIGN, built from codepoints
+# rather than written as literals: whether Sprout accepts a `\u{...}` escape is
+# not something this generator needs to depend on.
+fn break_mark() -> String = string.string_from_char(char_from_codepoint(247))
+fn joint_mark() -> String = string.string_from_char(char_from_codepoint(215))
+
+fn close_cluster(sizes: List String, cur: Int) -> List String =
+  if cur == 0 then sizes else Cons(b62_4(cur), sizes)
+
+fn case_text(cps: List String, sizes: List String) -> String =
+  string_concat_many(list_reverse(cps)) ++ ";" ++ string_concat_many(list_reverse(sizes))
+
+export fn conformance_cases(text: String) -> List String =
+  list_reverse(fold(\ (acc, line) -> conformance_step(acc, line), Nil,
+                    string.split(text, "\n")))
+
+fn conformance_step(acc: List String, line: String) -> List String =
+  let body = string.trim(strip_comment(line))
+  in
+  if string.is_empty(body) then acc
+  else
+    let encoded = parse_case(line)
+    in
+    if string.starts_with(encoded, ";") then acc else Cons(encoded, acc)
+
+# ── Driver ──────────────────────────────────────────────────────────────────
+
+fn main() -> Unit !{IO} = do
+  args <- argv_all()
+  run(arg_at(args, 0), arg_at(args, 1))
+
+# The inputs are parameters rather than `<-` bindings: a `pure(...)` binding
+# leaves the type unanchored and `++` then finds no Semigroup instance.
+fn run(ucd: String, repo: String) -> Unit !{IO} = do
+  eaw <- read_or_die(ucd, "EastAsianWidth.txt")
+  dgc <- read_or_die(ucd, "DerivedGeneralCategory.txt")
+  gbp <- read_or_die(ucd, "GraphemeBreakProperty.txt")
+  emo <- read_or_die(ucd, "emoji-data.txt")
+  dcp <- read_or_die(ucd, "DerivedCoreProperties.txt")
+  gbt <- read_or_die(ucd, "GraphemeBreakTest.txt")
+  write_tables(repo, eaw, dgc, gbp, emo, dcp)
+  write_conformance(repo, gbt)
+
+fn write_conformance(repo: String, gbt: String) -> Unit !{IO} =
+  let cases = conformance_cases(gbt)
+      text = string.join("\n", [
+        conformance_header(),
+        emit_chunked("gbt", string.join("\n", cases), list_length(cases), ""),
+        conformance_body()
+      ])
+  in
+  do
+    write_file(repo ++ "/tests/stdlib/test_unicode_grapheme_conformance.spr", text)
+    print(`conformance suite: ${to_string(list_length(cases))} cases`)
+
+fn write_file(path: String, text: String) -> Unit !{IO} =
+  match fs.write_text(path, text) with
+  | Ok _ -> ()
+  | Err msg -> panic(`gen_unicode_tables: cannot write ${path}: ${msg}`)
+
+fn conformance_header() -> String =
+  string.join("\n", [
+    "import stdlib.test (TestState, new_state, assert_eq, summary)",
+    "import stdlib.unicode.grapheme as grapheme",
+    "import stdlib.unicode.lookup as lookup",
+    "import stdlib.unicode.utf8 as utf8",
+    "import stdlib.string as string",
+    "",
+    "# GENERATED by tools/gen_unicode_tables.sprout from the Unicode 17.0.0",
+    "# GraphemeBreakTest.txt. Do not edit by hand.",
+    "#",
+    "# Each case is <codepoints, 4 base-62 chars each>;<cluster sizes, likewise>.",
+    "# Cases live in string chunks rather than a list literal because a literal",
+    "# of this many elements costs O(n^2) compiler memory — see BACKLOG.md.",
+    ""
+  ])
+
+# Emitted source must already be fmt-clean, or `just fmt` rewrites the file
+# after every generation and `just fmt-check` goes red on a fresh checkout.
+# The one rule this hits is the single-parameter lambda: `\n ->`, no space.
+fn conformance_body() -> String =
+  string.join("\n", [
+    "fn all_data() -> String =",
+    "  string_concat_many(collect_chunks(0, gbt_chunks(), Nil))",
+    "",
+    "fn collect_chunks(i: Int, n: Int, acc: List String) -> List String =",
+    "  if i >= n then list_reverse(acc)",
+    "  else collect_chunks(i + 1, n, Cons(gbt_chunk(i), acc))",
+    "",
+    "fn decode4(s: String, i: Int, n: Int, acc: List Int) -> List Int =",
+    "  if i >= n then list_reverse(acc)",
+    "  else decode4(s, i + 4, n, Cons(lookup.b62_decode(string.slice(s, i, 4)), acc))",
+    "",
+    "# Tested at the CODEPOINT level, not by round-tripping through a String:",
+    "# a Sprout String is NUL-terminated, so the suite's U+0000 cases would lose",
+    "# that codepoint and silently pass with the wrong cluster count.",
+    "#",
+    "# Both sides render as comma-joined sizes so a failure reads as",
+    "# \"1,2 vs 3\" rather than as two opaque structures.",
+    "fn actual_sizes(cps_enc: String) -> String =",
+    "  string.join(\",\", list_map(\\n -> to_string(n),",
+    "    grapheme.cluster_sizes(decode4(cps_enc, 0, string.length(cps_enc), Nil))))",
+    "",
+    "fn expected_sizes(sizes_enc: String) -> String =",
+    "  string.join(\",\", list_map(\\n -> to_string(n),",
+    "                            decode4(sizes_enc, 0, string.length(sizes_enc), Nil)))",
+    "",
+    "fn run_case(state: TestState, c: String) -> Unit !{IO} =",
+    "  match string.split_once(c, \";\") with",
+    "  | Nothing -> ()",
+    "  | Just (cps_enc, sizes_enc) ->",
+    "      assert_eq(state, `case ${cps_enc}`,",
+    "                actual_sizes(cps_enc), expected_sizes(sizes_enc))",
+    "",
+    "fn run_cases(state: TestState, cases: List String) -> Unit !{IO} =",
+    "  match cases with",
+    "  | Nil -> ()",
+    "  | Cons c rest -> do",
+    "      run_case(state, c)",
+    "      run_cases(state, rest)",
+    "",
+    "fn main() -> Unit !{IO} = do",
+    "  state <- new_state()",
+    "  run_cases(state, string.split(all_data(), \"\\n\"))",
+    "  summary(state)",
+    ""
+  ])
+
+# An unreadable input must fail loudly: silently generating a table from an
+# empty file would produce a plausible-looking module that answers every query
+# with the default.
+fn read_or_die(dir: String, name: String) -> String !{IO} =
+  match fs.read_text(dir ++ "/" ++ name) with
+  | Ok text -> text
+  | Err e -> panic(`gen_unicode_tables: cannot read ${dir}/${name}: ${e}`)
+
+fn write_tables(repo: String, eaw: String, dgc: String, gbp: String,
+                emo: String, dcp: String) -> Unit !{IO} =
+  # `zerow` and `wide` stay SEPARATE tables, searched zero-first, because the
+  # two sources genuinely overlap: U+302A..302D and U+3099..309A are East Asian
+  # Wide *and* category Mn. A combining mark occupies no columns whatever its
+  # width class, so zero must win — merging them into one sorted table would
+  # make the answer depend on which duplicate the binary search landed on.
+  # Ranges never overlap *within* a single UCD property file, so each table is
+  # internally unambiguous and no interval arithmetic is needed.
+  let zerow = sort_ranges(select_ranges(dgc, want_zero))
+      wide = sort_ranges(select_ranges(eaw, want_wide))
+      gcb = sort_ranges(select_ranges(gbp, want_gcb))
+      extpict = sort_ranges(select_ranges(emo, want_extpict))
+      incb = sort_ranges(select_ranges(dcp, want_incb))
+      text = string.join("\n", [
+        header(),
+        emit_table("zerow", zerow),
+        emit_table("wide", wide),
+        emit_table("gcb", gcb),
+        emit_table("extpict", extpict),
+        emit_table("incb", incb)
+      ])
+  in
+  do
+    # Bare statement, not `<-`: the directory usually exists, and a real
+    # failure surfaces from write_text below with a better message.
+    fs.make_dir_all(repo ++ "/stdlib/unicode")
+    write_and_report(repo ++ "/stdlib/unicode/tables.sprout", text,
+                     vec_length(zerow) + vec_length(wide), vec_length(gcb),
+                     vec_length(extpict), vec_length(incb))
+
+# fs.write_text is matched directly rather than bound with `<-`: a do-block
+# binding strips the Result wrapper, so `r <- ...` would yield Unit.
+fn write_and_report(path: String, text: String,
+                    w: Int, g: Int, e: Int, i: Int) -> Unit !{IO} =
+  match fs.write_text(path, text) with
+  | Err msg -> print(`write failed: ${msg}`)
+  | Ok _ ->
+      print(`tables.sprout: width=${to_string(w)} gcb=${to_string(g)}`
+            ++ ` extpict=${to_string(e)} incb=${to_string(i)}`)
+
+fn header() -> String =
+  string.join("\n", [
+    "module stdlib.unicode.tables",
+    "",
+    "# GENERATED by tools/gen_unicode_tables.sprout from Unicode 17.0.0.",
+    "# Do not edit by hand; see docs/stdlib-unicode-v0.md.",
+    "",
+    "# One entry is lo(4) + hi(4) + tag(1) in base-62, entries sorted by lo.",
+    "# The alphabet is order-preserving, so a lexicographic compare of two",
+    "# encodings is a numeric compare — that is what lets the table be",
+    "# binary-searched in place, with no decode step and no mutable cache.",
+    ""
+  ])
+
+fn arg_at(args: List String, i: Int) -> String =
+  match args with
+  | Nil -> ""
+  | Cons head rest -> if i <= 0 then head else arg_at(rest, i - 1)
