@@ -850,14 +850,15 @@ where
 # controlled and appears once, and every response carries a byte-accurate
 # Content-Length. `http_response` remains the shared status-line/body path for other
 # callers (http_client, echo helpers).
+fn as_server_error(err: HttpStatusError) -> HttpServerError =
+  match err with
+  | HttpUnsupportedStatus code -> HttpServerUnsupportedStatus(code)
+
 export fn render(resp: HttpServerResponse) -> ServerResult String =
   match resp with
   | HttpServerResponse status headers body ->
       do
-        line <- status_line(status) |> result_map_error(\err ->
-          match err with
-          | HttpUnsupportedStatus code -> HttpServerUnsupportedStatus(code)
-        )
+        line <- status_line(status) |> result_map_error(as_server_error)
         Ok(assemble_response(line, response_headers(headers, body), body))
 
 # Recoverable, TOTALLY bounded write: a send to a peer that has vanished (reset/EPIPE) fails as an

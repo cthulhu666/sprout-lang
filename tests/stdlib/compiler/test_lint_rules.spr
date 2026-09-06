@@ -388,6 +388,75 @@ let layout_class_effect_sig =
 let brace_in_string =
   "fn snippet() -> String = \"class Foo { fn f(x: Int) -> Int }\"\n"
 
+# --- multi-line-lambda-arg fixtures --------------------------------------
+
+# The shape the rule exists for: control flow inside a call argument, spread
+# over lines the reader has to reassemble before the call itself makes sense.
+let multiline_match_lambda =
+  "fn evs(xs: List (Maybe Int)) -> List Int =\n" ++
+  "  filter_map(\\o -> match o with\n" ++
+  "                   | Nothing -> Nothing\n" ++
+  "                   | Just p -> Just(p + 1),\n" ++
+  "             xs)\n"
+
+# `let .. in` is the same AST node as `match` (spec §5.1), so it is the same
+# finding — this is the front_gap shape from uncharted-suns.
+let multiline_let_lambda =
+  "fn gaps(xs: List Int) -> List Int =\n" ++
+  "  filter_map(\\o -> let d = measure(o)\n" ++
+  "                   in if d > 0 then Just(d) else Nothing,\n" ++
+  "             xs)\n"
+
+let multiline_if_lambda =
+  "fn pick(xs: List Int) -> List Int =\n" ++
+  "  find_map(\\a -> if a > 0\n" ++
+  "                 then Just(a)\n" ++
+  "                 else Nothing,\n" ++
+  "           xs)\n"
+
+# Control flow that fits on its line reads fine and stays silent — the rule is
+# about the reassembly cost, not about `if` in an argument.
+let single_line_if_lambda =
+  "fn pick(xs: List Int) -> List Int =\n" ++
+  "  filter_map(\\a -> if a > 0 then Just(a) else Nothing, xs)\n"
+
+# Width-only wrapping: a record literal too wide for one line is not the thing
+# this rule is for, however many lines it takes.
+let multiline_record_lambda =
+  "fn evs(ms: Int, xs: List Int) -> List Ev =\n" ++
+  "  list_map(\\p -> Ev(ms = ms, kind = 1,\n" ++
+  "                    actor = p),\n" ++
+  "           xs)\n"
+
+# Not an argument: a `where`-bound lambda is out of scope even when its body is
+# a multi-line match.
+let multiline_lambda_in_where =
+  "fn pick(xs: List Int) -> List Int = filter_map(f, xs)\n" ++
+  "where\n" ++
+  "  f = \\a -> if a > 0\n" ++
+  "            then Just(a)\n" ++
+  "            else Nothing\n"
+
+# A `_` placeholder is a lambda by the time the rule sees it (spec §5.3), so a
+# wrapped placeholder call must not read as a hand-written multi-line lambda.
+let multiline_placeholder_partial =
+  "fn evs(ms: Int, xs: List Int) -> List Int =\n" ++
+  "  list_map(shape(ms, 1,\n" ++
+  "                 2, _),\n" ++
+  "           xs)\n"
+
+# Two of them in one call are two findings, not one per call.
+let two_multiline_lambdas =
+  "fn both(xs: List Int, ys: List Int) -> Int =\n" ++
+  "  combine(filter_map(\\a -> if a > 0\n" ++
+  "                           then Just(a)\n" ++
+  "                           else Nothing,\n" ++
+  "                     xs),\n" ++
+  "          filter_map(\\b -> if b > 0\n" ++
+  "                           then Just(b)\n" ++
+  "                           else Nothing,\n" ++
+  "                     ys))\n"
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -512,5 +581,31 @@ fn main() -> Unit !{IO} =
     # through the pre-commit hook, so the property is worth pinning.
     assert_eq(state, "brace syntax inside a string literal: no finding",
       count_by_rule(lint_rules.lint_ast(brace_in_string), "deprecated-brace-body"), 0)
+
+    # --- multi-line-lambda-arg -------------------------------------------
+    assert_eq(state, "multi-line match lambda in a call argument: one finding",
+      count_by_rule(lint_rules.lint_ast(multiline_match_lambda), "multi-line-lambda-arg"), 1)
+    assert_eq(state, "multi-line let..in lambda in a call argument: one finding",
+      count_by_rule(lint_rules.lint_ast(multiline_let_lambda), "multi-line-lambda-arg"), 1)
+    assert_eq(state, "multi-line if lambda in a call argument: one finding",
+      count_by_rule(lint_rules.lint_ast(multiline_if_lambda), "multi-line-lambda-arg"), 1)
+
+    # Anchored on the lambda itself — the `\` the author has to lift out.
+    assert_eq(state, "multi-line match lambda: anchored at the lambda's line",
+      first_line(lint_rules.lint_ast(multiline_match_lambda)), 2)
+    assert_eq(state, "multi-line match lambda: rule id",
+      first_rule(lint_rules.lint_ast(multiline_match_lambda)), "multi-line-lambda-arg")
+
+    assert_eq(state, "single-line if lambda: no finding",
+      count_by_rule(lint_rules.lint_ast(single_line_if_lambda), "multi-line-lambda-arg"), 0)
+    assert_eq(state, "multi-line record literal lambda (width, not control flow): no finding",
+      count_by_rule(lint_rules.lint_ast(multiline_record_lambda), "multi-line-lambda-arg"), 0)
+    assert_eq(state, "multi-line lambda bound in a where block (not an argument): no finding",
+      count_by_rule(lint_rules.lint_ast(multiline_lambda_in_where), "multi-line-lambda-arg"), 0)
+    assert_eq(state, "wrapped `_` placeholder partial: no finding",
+      count_by_rule(lint_rules.lint_ast(multiline_placeholder_partial), "multi-line-lambda-arg"), 0)
+
+    assert_eq(state, "two multi-line lambdas in one call: two findings",
+      count_by_rule(lint_rules.lint_ast(two_multiline_lambdas), "multi-line-lambda-arg"), 2)
 
     summary(state)
