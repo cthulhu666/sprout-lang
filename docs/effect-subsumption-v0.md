@@ -4,24 +4,39 @@ Status: **DESIGN, awaiting approval.** Revised after review (2026-09-07, round 2
 found two blockers in the previous revision; both are independently reproduced and both
 now have a mechanism.
 
-The fix has **three parts**, at three different boundaries. No one of them subsumes
-another, and the first revision had only the first:
+The fix has **four parts**, at four different boundaries. No one subsumes another. Each
+review round has found one more, so treat this list as *known incomplete*: revision 1 had
+only part 1, revision 2 added parts 2 and 3, revision 3 added part 4.
 
-| # | boundary | mechanism | §ance |
+| # | boundary | how the effect escapes | mechanism | § |
+|---|---|---|---|---|
+| 1 | a function value entering a slot | compared, wrong direction allowed | directional comparison, polarity-annotated | §6.3 |
+| 2 | a peer join (`if`/`match`/elements/operands) | unified, difference swallowed | effect LUB **and GLB by depth parity** | §6.5 |
+| 3 | an instance method vs its class signature | never compared — scheme level | declared-vs-declared comparison | §6.1a |
+| 4 | a zero-arg call on a local/expression callee | **dropped before any comparison** | read the arrow's effect at `argc <= 0` | §6.6 |
+
+Part 4 is different in kind from the other three, which all compare two effects
+somewhere. Here nothing is compared, which is why an instrumented compiler that rejects
+every concrete pure/IO arrow meet reports **zero errors** on it.
+
+**Migration cost, now measured for three of four parts:**
+
+| part | in-tree | downstream | note |
 |---|---|---|---|
-| 1 | a function value crossing into a slot | directional comparison, polarity-annotated | §6.3 |
-| 2 | a peer join (`if`/`match`/operands) | effect LUB via existing `merge_effects` | §6.5 |
-| 3 | an instance method vs its class's signature | declared-vs-declared comparison | §6.1a |
+| 1 | 0 | 0 | 2 flagged sites, both the safe direction (§5) |
+| 2 | 0 | 0 | concrete joins only; variable-effect joins unmeasured |
+| 3 | 0 | 0 | **no method-level effect annotation exists anywhere** — 259 in-tree class/instance method signatures and 3 downstream, all pure, so no instance can differ from its class |
+| 4 | 0 | unmeasured | `BACKLOG.md` census; but see §6.6 |
 
-Corrected from the previous revision: §6.1's universality claim is **false** (part 3 is
-the counterexample); §6.4's invariance recommendation is **withdrawn** (it regresses a
-currently-legal program); §7 promised a diagnostic the check cannot produce; §6.2
-overstated the call-site inconsistency; the audit is 36 sites, not 35.
+Part 2's zero is for the corpus as it stands; the mechanism must still newly reject
+§6.5's currently-legal example, which is a correctness requirement rather than a
+migration cost.
 
-**Migration cost is measured zero for part 1 only.** Parts 2 and 3 are unmeasured, and
-part 2 must newly reject at least one currently-legal shape (§6.5's example) — so the
-overall cost is not yet zero-proven. Re-running the detector with parts 2 and 3
-instrumented is the remaining measurement, and it should precede implementation.
+Corrected from the previous revision: §6.5's "no GLB is needed" was **wrong** and its
+six-site inventory was the **wrong ontology** (§6.5); §6.1a's bare-name lookup is
+**unsound under name shadowing and duplicate method names** (§6.1a); §6.1's universality
+claim is false; §6.4's invariance recommendation is withdrawn; §7 promised a diagnostic
+the check cannot produce; the audit is 36 sites, not 35.
 
 Requires amending `docs/spec-v0.md` §7 note property 2, which states the behaviour this
 document removes. Supersedes the withdrawn `effect-var-rigidity-v0.md`, whose scope
@@ -213,8 +228,28 @@ effects — no inference and no unification involved:
   expected. `pure` instance under an `!{IO}` class stays legal (an instance may promise
   *less*); an `!{IO}` instance under a pure class is the rejection.
 
-`class_method_mode_error` (`:9409`) already looks the class method up from `env` at this
-point, so the lookup pattern exists.
+**But the bare-name lookup is unsound, and this is the part that needs work.** Two
+conditions that compile today break it:
+
+- **Two classes declaring the same method name.** Both compile; the name resolves to the
+  last registered. So `dict_get(name, env)` at instance-check time can return the *other*
+  class's scheme, and with differing effects that is a false rejection of a legal
+  instance — or a false acceptance of an illegal one.
+- **A top-level function shadowing a method name.** `fn calc(s: String) -> String`
+  alongside a class method `calc` compiles clean, and the bare name maps to the unrelated
+  function — so the check would compare the instance's `!{IO}` against that function's
+  `Pure` and reject a program that is legal today. This is the hazard
+  `test_local_shadows_class_method.spr` already guards elsewhere.
+
+The `@class:` marker cannot stand in: `register_class_method_markers` stores
+`Scheme(type_params, Nil, TConst(class_name), EffectPure, Nil)` — the effect slot is
+always `Pure`. And `check_instance_method` does not currently receive the class name at
+all, only `inst_constraints` (the where-clause).
+
+So part 3 needs a **class-qualified registration key** for method signatures plus the
+class identity threaded into instance checking. Small, but not the one-line lookup an
+earlier draft described. `class_method_mode_error` (`:9409`) shows the lookup pattern but
+inherits the same bare-name weakness.
 
 Note what this does **not** duplicate: rule 8 already checks an instance method's *body*
 against its *own* declaration (`effect_pure_instance_method_does_io.spr`, cited at
@@ -345,14 +380,82 @@ cases are untouched: two pure branches join to pure, two IO branches to IO.
 Order-independence comes free, because `merge_effects` is commutative on these cases —
 which is precisely what a fixed polarity could not deliver.
 
-**No greatest lower bound is needed.** A join always produces a *value*, and a value sits
-in covariant position; the LUB is computed first, and only then does that value meet
-whatever slot it flows into. An earlier draft of this section asked for a GLB inside
-contravariant positions — that case does not arise.
+**A greatest lower bound IS needed — an earlier draft of this section was wrong.** That
+draft argued a join always produces a value, values sit in covariant position, so a GLB
+never arises. That answers the wrong question: the GLB is needed *inside the join's own
+recursion*, not because of where the joined value lands. Counterexample, legal today and
+it runs:
 
-So the polarity flag stays two-valued and joins are handled by a combining rule at the
-~6 peer sites, not by a third polarity. §9 needs fixtures for both branch orders of the
-same program.
+```sprout
+fn f1(cb: Int -> Int !{IO}, n: Int) -> Int !{IO} = cb(n)
+fn f2(cb: Int -> Int,       n: Int) -> Int       = cb(n)
+fn pick(b: Bool) -> ((Int -> Int !{IO}) -> Int -> Int !{IO}) = if b then f1 else f2
+pick(false)(shout, 1)        # f2's PURE cb slot receives an IO function
+```
+
+Applying `merge_effects` at *every* arrow of the joined type yields exactly `pick`'s
+declared return, so nothing downstream rejects and the launder survives the fix. The
+correct join of two function types takes the **LUB at even depth and the GLB at odd
+(parameter) depth** — standard function subtyping. Here that gives
+`(Int -> Int) -> Int -> Int !{IO}`, against which `pick`'s declared return is correctly
+rejected at `:8929`.
+
+So part 2 is "join by depth parity", not "apply merge_effects". The alternative — reject
+outright any join whose parameter arrows differ concretely — is simpler and adequate for
+a corpus with zero such joins; the doc must pick one, and the simpler one should be
+chosen only with the restriction stated.
+
+**The six-site inventory is the wrong ontology.** A unification is a *join* whenever its
+"expected" side is a fresh or accumulating variable, which is a dynamic property of the
+unification, not a static property of the site. Demonstrated:
+
+- **Match arms** join at `:4096` (`infer_branch_unify`, each arm unified against a
+  progressively-bound fresh `ret_type`) — a site §6.2's table files under
+  *(actual, expected)*, i.e. as directional. Annotate it by its bucket and mixed matches
+  reject in one arm order and not the other.
+- **List/constructor elements** join through the call site: `run_all([tame, shout], 1)`
+  reports `pure vs !{IO}` while `run_all([shout, tame], 1)` reports `!{IO} vs pure` —
+  the fold's winner flips with element order.
+- **`++` operands** likewise, surfacing as "needs matching Semigroup operands".
+
+So LUB-at-`:1283` fixes `if` alone. The audit needs a rule keyed on *accumulation* —
+widen wherever a result variable is folded over peers — rather than a list of six sites.
+§9 needs match-order and element-order fixture pairs, not just the `if` pair.
+
+### 6.6 The effect is DROPPED at a zero-arg call on a local callee — BLOCKER
+
+The other three parts all compare two effects. This one has nothing to compare:
+
+```sprout
+fn io_thunk() -> Int !{IO} = do { print("io"); 7 }
+
+fn launder() -> Int =
+  let t = io_thunk
+  in t()                       # compiles, links, PRINTS
+```
+
+Verified: runs and prints; `--phase effects` reports `main.launder: declared pure,
+inferred pure`; and the instrumented compiler — which rejects every concrete pure/IO
+arrow meet anywhere — gives **0 errors**. That silence is the evidence: no comparison
+takes place, so parts 1–3 are all structurally incapable of catching it.
+
+Control: the direct spelling `fn launder() -> Int = io_thunk()` **is** rejected by rule 8.
+The hole is precisely the local or expression callee.
+
+**Mechanism.** `infer.call_effect_of` with `argc <= 0` returns `scheme_effects(scheme)`
+raw, and `infer_call_general`'s `arrows_effect(t, argc)` returns `Pure` for `argc <= 0`
+with no scheme fallback. A `let`-bound local's `mono()` scheme carries `EffectPure` at
+scheme level while the real effect sits on the arrow, so the arrow effect is discarded.
+The fix is to read the arrow's effect at `argc <= 0` rather than returning `Pure`.
+
+`BACKLOG.md` recorded both twins but classified them as "conservative (accept, do not
+reject)" with "nothing in-tree hits either" — corrected 2026-09-07. Accepting a program
+that runs IO under a pure signature is not conservatism, and the shape needs no record
+field or `if`; a plain `let` reaches it.
+
+A second spelling, `(if b then t1 else t2)()`, also typechecks `(pure, pure)` but fails
+at emit with "ast_to_ir: indirect call not yet supported". It becomes live the day
+indirect calls land, so fixing this is also a prerequisite for that work.
 
 ### 6.4 Variance inside type constructors — recommendation WITHDRAWN
 
