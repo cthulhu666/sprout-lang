@@ -1,0 +1,16 @@
+module main
+
+# An alias naming an arrow, annotated at the use site. `Handler !{IO}` reaches
+# inference as an effect wrapper over a type NAME, so the effect can only land
+# once the alias has expanded to an arrow. Neither the alias-expansion change nor
+# the annotation fix covers this pair on its own.
+
+type alias Handler = Int -> Int
+
+fn shout(n: Int) -> Int !{IO} = do
+  print("io")
+  n + 1
+
+fn take(f: Handler !{IO}, n: Int) -> Int = f(n)
+
+fn main() -> Unit !{IO} = print(int_to_string(take(shout, 1)))
