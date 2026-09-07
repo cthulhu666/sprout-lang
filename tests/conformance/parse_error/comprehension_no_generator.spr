@@ -1,3 +1,4 @@
+# sprout-ignore-all lint/unparsed: parse-error fixture — this file must not parse
 module main
 
 # List comprehensions: docs/list-comprehensions-v0.md, spec 5.10.

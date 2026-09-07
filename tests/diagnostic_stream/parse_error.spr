@@ -1,3 +1,4 @@
+# sprout-ignore-all lint/unparsed: parse-error fixture — this file must not parse
 # Fixture for `just diagnostic-stream-smoke`: an `if` with no `else`.
 #
 # Parse errors surface through the BUNDLER, not the checker, so they take a

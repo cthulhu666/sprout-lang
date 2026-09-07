@@ -1,3 +1,5 @@
+# sprout-ignore-all lint/redundant-vec-from-list: explicit_wrap below IS the shape the rule targets
+
 import stdlib.test (TestState, new_state, assert_eq, summary)
 
 # A Vec-typed parameter, exercised below with a bare list literal at the call

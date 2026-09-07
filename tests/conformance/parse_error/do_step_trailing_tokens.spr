@@ -1,3 +1,4 @@
+# sprout-ignore-all lint/unparsed: parse-error fixture — this file must not parse
 # A `do` step that does not consume its whole line must be rejected, not
 # silently truncated.
 #

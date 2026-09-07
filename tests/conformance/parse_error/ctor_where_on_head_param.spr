@@ -1,3 +1,4 @@
+# sprout-ignore-all lint/unparsed: parse-error fixture — this file must not parse
 # A `where` constraint on a constructor with NO `exists` prefix would constrain a
 # head parameter (Haskell's deprecated DatatypeContexts). Rejected at parse time.
 type Foo a = | Bar a where ToString a

@@ -473,6 +473,60 @@ let unparseable =
 let unlexable =
   "fn f() -> String = \"abc\n"
 
+# --- suppression directives ---------------------------------------------
+#
+# `# sprout-ignore-all lint/<rule>: <reason>`, transliterated from Biome's
+# `// biome-ignore-all <category>: <explanation>` (biomejs.dev/analyzer/
+# suppressions). Rule name and explanation are both required and the directive
+# is honoured only at the top of the file, exactly as Biome specifies.
+
+let suppressed_unparseable =
+  "# sprout-ignore-all lint/unparsed: parse-error fixture, by construction\n" ++
+  unparseable
+
+let suppressed_unlexable =
+  "# sprout-ignore-all lint/unparsed: lex-error fixture, by construction\n" ++
+  unlexable
+
+let suppressed_wrong_rule =
+  "# sprout-ignore-all lint/staircase-of-doom: not the rule that fires here\n" ++
+  unparseable
+
+let suppressed_staircase =
+  "# sprout-ignore-all lint/staircase-of-doom: this file IS the staircase test\n" ++
+  three_deep_chain
+
+# Two directives, and a `module` line between them — the header block is a
+# block, not just line 1, so both must still be found.
+let suppressed_two_rules =
+  "# sprout-ignore-all lint/unparsed: first\n" ++
+  "module main\n" ++
+  "# sprout-ignore-all lint/staircase-of-doom: second\n" ++
+  unparseable
+
+# Past the first line of code the directive is an ordinary comment.
+let suppression_after_code =
+  "fn noop() -> Int = 1\n" ++
+  "# sprout-ignore-all lint/unparsed: too late to count\n" ++
+  unparseable
+
+# Both halves are mandatory: no explanation, and a category missing `lint/`.
+let suppression_no_reason =
+  "# sprout-ignore-all lint/unparsed\n" ++
+  unparseable
+
+let suppression_bad_category =
+  "# sprout-ignore-all unparsed: category needs the lint/ prefix\n" ++
+  unparseable
+
+# A well-formed directive naming `malformed-suppression` must NOT silence the
+# report of the broken one below it — otherwise a typo could be papered over by
+# the very mechanism whose typo it is.
+let suppression_self_shield =
+  "# sprout-ignore-all lint/malformed-suppression: cannot silence its own diagnostic\n" ++
+  "# sprout-ignore-all lint/unparsed\n" ++
+  unparseable
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -484,6 +538,17 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "unlexable file: reported, not silently clean", count_list(lint_rules.lint_ast(unlexable)), 1)
     assert_eq(state, "unlexable file: rule id", first_rule(lint_rules.lint_ast(unlexable)), "unparsed")
     assert_eq(state, "unlexable file: anchored at the offending line", first_line(lint_rules.lint_ast(unlexable)), 1)
+
+    assert_eq(state, "ignore-all: suppresses the named rule on an unparseable file", count_list(lint_rules.lint_ast(suppressed_unparseable)), 0)
+    assert_eq(state, "ignore-all: suppresses a lex failure too", count_list(lint_rules.lint_ast(suppressed_unlexable)), 0)
+    assert_eq(state, "ignore-all: a different rule id suppresses nothing", count_by_rule(lint_rules.lint_ast(suppressed_wrong_rule), "unparsed"), 1)
+    assert_eq(state, "ignore-all: suppresses an AST rule", count_by_rule(lint_rules.lint_ast(suppressed_staircase), "staircase-of-doom"), 0)
+    assert_eq(state, "ignore-all: found anywhere in the header block", count_list(lint_rules.lint_ast(suppressed_two_rules)), 0)
+    assert_eq(state, "ignore-all: not honoured past the header block", count_by_rule(lint_rules.lint_ast(suppression_after_code), "unparsed"), 1)
+    assert_eq(state, "ignore-all: missing explanation is itself reported", count_by_rule(lint_rules.lint_ast(suppression_no_reason), "malformed-suppression"), 1)
+    assert_eq(state, "ignore-all: missing explanation suppresses nothing", count_by_rule(lint_rules.lint_ast(suppression_no_reason), "unparsed"), 1)
+    assert_eq(state, "ignore-all: category needs the lint/ prefix", count_by_rule(lint_rules.lint_ast(suppression_bad_category), "malformed-suppression"), 1)
+    assert_eq(state, "ignore-all: cannot suppress its own malformed-directive report", count_by_rule(lint_rules.lint_ast(suppression_self_shield), "malformed-suppression"), 1)
 
     assert_eq(state, "docs example (depth 2): below min_staircase_depth=3, no finding", count_list(lint_rules.lint_ast(docs_example)), 0)
 

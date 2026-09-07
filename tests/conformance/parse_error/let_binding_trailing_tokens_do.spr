@@ -1,3 +1,4 @@
+# sprout-ignore-all lint/unparsed: parse-error fixture — this file must not parse
 module main
 
 # A `let … in` step whose binding line carries tokens past the end of the binding.

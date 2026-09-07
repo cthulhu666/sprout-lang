@@ -54,6 +54,36 @@ cannot be read as "every file was linted".
 per-line formatting when the lexer fails, so it can legitimately report `ok` on a
 file that does not parse.
 
+**Suppressing a rule.** A file turns one rule off for its whole length with a
+header comment:
+
+```
+# sprout-ignore-all lint/<rule-id>: <reason>
+```
+
+The rule id is the one in brackets in the finding. Both halves are required — a
+directive naming no rule, or carrying no reason after the `:`, is itself reported as
+`[malformed-suppression]` and suppresses nothing, so a typo cannot read as a working
+suppression.
+
+The directive is honoured only in the file's leading header block (the `module` /
+`import` / comment / blank lines before the first line of code). That is not a style
+rule: the header is read as text before the tokenizer runs, which is what lets a file
+that never parses suppress `[unparsed]` at all. Past the first line of code the same
+text is an ordinary comment. `tests/conformance/parse_error/` is the worked example —
+every fixture there exists in order *not* to parse.
+
+The form follows [Biome's `// biome-ignore-all`](https://biomejs.dev/analyzer/suppressions/),
+which is the closest prior art that ports: all of Biome's suppression forms are line
+comments, and Sprout has no block comments. ESLint's file-level form is
+`/* eslint-disable */`, with no line-comment equivalent. The `lint/` prefix is what
+leaves room for `fmt/` categories later — the reason Biome namespaces its own.
+
+There is no per-line or per-range form yet, so a rule that is right about one site in
+a file can only be silenced across the whole file. `tests/stdlib/test_vec_literal_coercion.spr`
+is the case that costs something today: one deliberate `vec_from_list` needs the
+suppression and the file's other eight uses lose the rule with it.
+
 ### Platforms
 
 Supported hosts today are **macOS** and **Linux**. The two workflows cover different
