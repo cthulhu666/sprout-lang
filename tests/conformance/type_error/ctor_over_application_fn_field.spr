@@ -1,0 +1,22 @@
+module main
+
+# The case that killed the first rationale for sharing `over_application_error`
+# with functions. That message ends "if it returns a function, apply the rest in a
+# separate call: `F(…)(…)`", and the argument for keeping it was that a constructor
+# with a function-typed field can return a function.
+#
+# It cannot. `F(double)` has type `F`, not `Int -> Int`, so `F(double)(3)` is
+# rejected on its own (`Type mismatch: F vs Int -> $t`). A constructor's result is
+# always its own ADT, so the advice is unreachable for EVERY constructor and this is
+# the shape that proves it — not just the nullary one.
+
+type F = | F (Int -> Int)
+
+fn double(n: Int) -> Int = n * 2
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(f_value(F(double, 3))))
+
+fn f_value(x: F) -> Int =
+  match x with
+  | F g -> g(1)

@@ -2,7 +2,8 @@ module main
 
 # A constructor named without parentheses is a function value, exactly as
 # `Ctor(_, …, _)` already was. Every shape below failed to lower before the
-# eta-expansion in `lowering.lower_value_var`.
+# eta-expansion in `infer.value_ref_eta` — in INFER, not the backend, so that the
+# rewrite lands before dictionary injection (see the existential twin fixture).
 
 type Wrapped = | Wrapped Int
 

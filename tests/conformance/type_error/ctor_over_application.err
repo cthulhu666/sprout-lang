@@ -1,1 +1,1 @@
-'Nothing' expects 0 arguments, got 1
+'Nothing' expects 0 arguments, got 1 — a constructor is saturated by its declared fields, and its result is its own type, never a function
