@@ -27,28 +27,27 @@ Legend:
   that is neither `IO` nor a lowercase variable where `effect_from_maybe_labels` builds the
   `Effect`; migration cost measured zero. Decide `!{}` (empty row, used in three tests, undefined by
   §7) in the same change. `docs/effect-enforcement-v0.md`.
-- [ ] `P3` **Four residues of the parenthesised-arrow effect drop**, all verified by execution.
-  Fixtures: `tests/conformance/{type_error,run,parse_error}/effect_paren_arrow_annotation*` and
-  `effect_annotation_before_arrow.spr`.
-  - **A trailing annotation on a non-arrow type is discarded** — `Int !{IO}` has no effect slot.
-    §7 rule 9 now records that it carries no meaning; rejecting it outright would be more honest,
-    and it touches the same constructor as the `!{NOPE}` check above, so **decide the two
-    together**.
-  - **Return position cannot spell "returns an effectful function."**
-    `parser.parse_return_type_cont` splits `-> (Int -> Int) !{IO}` into return type `Int -> Int`
-    plus FnDecl effect `IO`, i.e. "this function performs IO". Parameter and stored positions
-    express it fine; return position has no spelling for it.
-  - **Two annotations on one arrow resolve last-one-wins, silently.** `f: (Int -> Int !{e}) !{IO}`
-    type-checks with the written `!{e}` gone and no diagnostic, and `!{}` would downgrade an arrow
-    to pure the same way. Rule 9 admits one annotation per arrow, so this is a rejection case;
-    `types.attach_arrow_effect` has no error channel, which is why it is not one yet. **The
-    reachable spelling is an annotated alias** — spec §5.6.2's own example shape: given
-    `type alias Handler = Int -> Int !{IO}`, a use site `h: Handler !{e}` types as
-    `Int -> Int !{e}`, so the alias's declared `!{IO}` is erased by an annotation that reads as
-    merely adding polymorphism, and the overwritten one is not visible at the use site at all.
-  - **An annotation followed by a further `->` does not parse.** `(a -> b) !{IO} -> C` fails at the
-    `->` because `parse_type_expr_cont` returns after consuming the annotation without looking for
-    one. Enclosing it works and is correct, so this is a grammar wart, not a missing capability.
+- [ ] `P3` **A trailing effect annotation on a non-arrow type is discarded** — `Int !{IO}` has no
+  effect slot. §7 rule 9 now records that it carries no meaning; rejecting it outright would be
+  more honest, and it touches the same constructor as the `!{NOPE}` check above, so **decide the two
+  together**. Verified by execution; fixtures under
+  `tests/conformance/{type_error,run,parse_error}/effect_paren_arrow_annotation*`.
+- [ ] `P3` **Return position cannot spell "returns an effectful function."**
+  `parser.parse_return_type_cont` splits `-> (Int -> Int) !{IO}` into return type `Int -> Int` plus
+  FnDecl effect `IO`, i.e. "this function performs IO". Parameter and stored positions express it
+  fine; return position has no spelling for it.
+- [ ] `P3` **Two effect annotations on one arrow resolve last-one-wins, silently.**
+  `f: (Int -> Int !{e}) !{IO}` type-checks with the written `!{e}` gone and no diagnostic, and `!{}`
+  would downgrade an arrow to pure the same way. Rule 9 admits one annotation per arrow, so this is
+  a rejection case; `types.attach_arrow_effect` has no error channel, which is why it is not one
+  yet. **The reachable spelling is an annotated alias**, spec §5.6.2's own example shape: given
+  `type alias Handler = Int -> Int !{IO}`, a use site `h: Handler !{e}` types as `Int -> Int !{e}`,
+  so the alias's declared `!{IO}` is erased by an annotation that reads as merely adding
+  polymorphism, and the overwritten one is not visible at the use site at all.
+- [ ] `P3` **An effect annotation followed by a further `->` does not parse.** `(a -> b) !{IO} -> C`
+  fails at the `->` because `parse_type_expr_cont` returns after consuming the annotation without
+  looking for one. Enclosing it works and is correct, so this is a grammar wart, not a missing
+  capability. Fixture: `effect_annotation_before_arrow.spr`.
 - [ ] `P3` **The effect report is one wave, not a fixed point.** An inferred effect is never written
   back to the env, so a caller of a mis-declared function is not flagged until that function is
   annotated and the compile repeated — `--phase effects` counts are a lower bound.
@@ -148,29 +147,28 @@ Legend:
 
 **Existentials / GADTs**
 
-- [~] `P2` **Existentials / GADTs (staged).** Stages 0a and 0b are complete, including multi-method,
-  superclass, module-qualified and cross-module shapes. Analysis, staging and prior art:
-  `docs/gadts-v0.md` (non-normative); spec §5.6 (experimental).
-  - [ ] `P4` **`validate_ctor_where` only checks the FIRST constraint arg.** `where Convert a b`
-    with `b` unbound by the `exists` prefix is accepted. Latent (multi-parameter classes are
-    unsupported), but the validator's stated contract is not upheld. Fix: validate every `TypeName`
-    argument.
-  - [ ] `P4` **`check_existential_constraints` is a dead no-op hook** — body emptied, still called
-    from `infer.sprout`. Wire a real check or drop the call and keep the comment as the home marker.
-  - [ ] `P4` **Extend constraint-head class validation to instance/class positions.** A
-    variable-first `where a ToString` is rejected on a `FnDecl`; the same swap on an `InstanceDecl`
-    context-constraint or a `ClassDecl` superclass silently drops the constraint.
-  - [ ] `P4` **Ambiguous existential construction → opaque arity error.** `Bag([])` leaves the
-    constraint's var free, so no witness is injected and it surfaces as
-    `ctor application has wrong arity`. It fails loudly; the message should be a located "cannot
-    determine which `C` instance to pack". Unique to compound-field existentials.
-  - [ ] `P4` **First-mentioning field wildcard-bound while a later field binds the var.** Both
-    passes select the first field *mentioning* the constrained var, so `T _ x` seeds no given and
-    fails with "No instance". Consistent across both passes and loud, so not a soundness hole. Fix:
-    pick the first VAR-BOUND mentioning field, in both passes, in lockstep.
-  - [ ] `P4` **Stage 1 — index refinement (full GADTs) (XL).** Needs an OutsideIn-style
-    local-equality solver, bidirectional checking and constraint-aware exhaustiveness. Out of scope
-    for v0/v1 (`docs/scoped-type-variables-analysis-2026-07-26.md`).
+- [ ] `P4` **Existentials — `validate_ctor_where` only checks the FIRST constraint arg.**
+  `where Convert a b` with `b` unbound by the `exists` prefix is accepted. Latent, since
+  multi-parameter classes are unsupported, but the validator's stated contract is not upheld. Fix:
+  validate every `TypeName` argument. Stages 0a and 0b are complete; analysis, staging and prior art
+  are in `docs/gadts-v0.md` (non-normative), spec §5.6 (experimental).
+- [ ] `P4` **Existentials — `check_existential_constraints` is a dead no-op hook**, body emptied
+  and still called from `infer.sprout`. Wire a real check, or drop the call and keep the comment as
+  the home marker.
+- [ ] `P4` **Existentials — extend constraint-head class validation to instance/class positions.**
+  A variable-first `where a ToString` is rejected on a `FnDecl`; the same swap on an `InstanceDecl`
+  context-constraint or a `ClassDecl` superclass silently drops the constraint.
+- [ ] `P4` **Existentials — ambiguous construction gives an opaque arity error.** `Bag([])` leaves
+  the constraint's var free, so no witness is injected and it surfaces as
+  `ctor application has wrong arity`. It fails loudly, but the message should be a located "cannot
+  determine which `C` instance to pack". Unique to compound-field existentials.
+- [ ] `P4` **Existentials — first-mentioning field wildcard-bound while a later field binds the
+  var.** Both passes select the first field *mentioning* the constrained var, so `T _ x` seeds no
+  given and fails with "No instance". Consistent across both passes and loud, so not a soundness
+  hole. Fix: pick the first VAR-BOUND mentioning field, in both passes, in lockstep.
+- [ ] `P4` **Existentials Stage 1 — index refinement (full GADTs) (XL).** Needs an OutsideIn-style
+  local-equality solver, bidirectional checking and constraint-aware exhaustiveness. Out of scope
+  for v0/v1 (`docs/scoped-type-variables-analysis-2026-07-26.md`).
 
 **Operators, intrinsics and dispatch**
 
@@ -368,13 +366,13 @@ Legend:
   dance, which exists only because a timerfd close must happen exactly once. Rewrites timer
   semantics for `task_sleep`/`with_timeout`/`select` across both backends at once; kqueue
   (`EVFILT_TIMER`, no descriptor) cannot exercise the regression locally.
-  - **A listener readiness primitive was scoped 2026-08-11 and DEFERRED — do not build it as one
-    small builtin.** It needs *two* (a non-parking accept as well, since `tcp_accept` parks
-    indefinitely on EAGAIN by design, so "wait then accept" is not bounded); its motivating case —
-    backing off under descriptor exhaustion — is already solved in C; and its value is gated on
-    the timerfd-free backend anyway. Build it when a concrete caller must give up on accepting (a
-    supervisor rebinding a listener, a drain-then-rebind reload), both builtins together with that
-    caller.
+- [ ] `P3` **A listener readiness primitive was scoped 2026-08-11 and DEFERRED — do not build it
+  as one small builtin.** It needs *two*, a non-parking accept as well, since `tcp_accept` parks
+  indefinitely on EAGAIN by design and "wait then accept" is therefore not bounded. Its motivating
+  case, backing off under descriptor exhaustion, is already solved in C, and its value is gated on
+  the timerfd-free backend above anyway. Build it when a concrete caller must give up on accepting
+  — a supervisor rebinding a listener, a drain-then-rebind reload — both builtins together with
+  that caller.
 - [ ] `P3` **A force-dropped handler still leaks its connection.** `force_drop_task` tears down
   poller registrations but `park_close_fd` is -1 for a handle-table-owned conn, so the fd is never
   closed and `g_conn_used[conn]` stays 1; repeated cancel-and-restart cycles exhaust the 2048-entry
@@ -470,9 +468,7 @@ Legend:
   is fixed. Survey is unanimous — warning, never an error, with an underscore opt-out (Rust
   `unused_must_use`, GHC `-Wunused-do-bind`, Swift SE-0047). Recommended as a **driver-side lint
   pass**, not an `infer` change: `CompileResult` has no channel for a warning on a *successful*
-  compile, so emitting from `infer` means changing the compiler's core result type across four
-  drivers. Remaining blockers are the two decisions (warn vs error; whether CI gates on it), not the
-  code.
+  compile. Remaining blockers are the two decisions (warn vs error; whether CI gates on it).
 - [ ] `P3` **Three R2 producers still mint Strings that can violate the `String` invariant:**
   `term_read_line`, `env_get`, `argv_get`. None has a cheap NUL repro any more (the OS NUL-delimits
   env and argv; `term_read_line` truncates at the NUL — data loss, not an inconsistent header),
@@ -511,40 +507,30 @@ Legend:
 
 ### 4) Terminal UI Runtime
 
-- [ ] `P1` **TUI M4 — the widget library (`stdlib/tui/widgets/`).** M0–M3 shipped the core and
-  routing landed 2026-09-07, so the `View` contract is settled — which is why the set is written
-  now: every `View` construction breaks on a field addition, and `route` was the last field.
-  **stdlib ships no widget at all today.** `docs/tui-widgets-v0.md` covers the widget box, layout
-  and pump, **not** the set, so the set wants its own design pass with a prior-art survey before C1.
-  **That pass is `docs/tui-widget-set-v0.md` (2026-09-07), scoped to C1.** It carries one breaking
-  change: `View.measure` returns a `Measured` (size plus per-axis `Fixed`/`Greedy`) instead of a
-  `Size`, because a widget cannot otherwise ask for "whatever is left" — the only way to say it
-  through a `Size` is a large number, and `solve` pays `Auto` before fractions, so the design's
-  first draft starved a `fraction` sibling to a zero-size region
-  (`solve(24, [Auto(24), Fraction(1)])` is `[24, 0]`, verified by running it). Four `View`
-  constructions exist today; the migration will not stay this small. Two facts it records:
-  `View.measure` has one caller in the tree and it is a unit test, and `layout.Auto` is built
-  nowhere outside `solve`'s own tests — content-driven sizing is built but unjoined, and C1 is
-  what joins it. Evidence the containers are missing: `examples/tui_dashboard.sprout` hand-writes
-  its `Box` in 93 lines and 15 helpers of a 284-line example, implementing four traversals a stdlib
-  container should own once; the `Delivery` walk is now written twice in-tree, identically (the
-  example and `tests/stdlib/test_tui_route.spr`). The first-claimant rule is a convention each
-  container reimplements rather than something the framework enforces.
-  - **C1 — containers and the static set.** `row`/`column`/`grid` over the existing `layout`
-    solvers, an opaque `Slot` (`cells`/`fraction`/`fit`) so a child and its size cannot desync, plus
-    `label`, `static`, `spacer`, the four child traversals exported for reuse, and a both-axes
-    clipped paint helper. Acceptance test: `examples/tui_dashboard.sprout` loses its `Box` section
-    entirely.
-  - **C2 — focus and the interactive set.** `button`, `input`, `list_view`. Focus is what makes
-    `ToEvent` reachable. **Do not start C2 with the two routing `P3`s below open** — they are
-    corrections to the contract C2 is written against.
-  - **C3 — the larger widgets.** `scroll_view`, `tabs`, `tree`, `table`, `text_area`. Split off
-    because `text_area` carries the language work below.
-  - **Language work, sign-off first (Collaboration Rule 6).** `text_area`/`input` want
-    `mutvec_insert` / `mutvec_remove`. `insert` composes from `push` + shift; `remove` needs a new
-    `vector_remove` builtin — approve before C3 starts, not during. Same family as the deferred
-    `pop`/`truncate`/ `clear` in §5. Prior art in-tree: `stdlib/repl.sprout` owns the only
-    text-editing primitives.
+- [ ] `P1` **TUI M4 — the widget library (`stdlib/tui/widgets/`).** stdlib ships no widget at all
+  today. M0–M3 shipped the core and routing landed 2026-09-07, so the `View` contract is settled
+  — which is why the set is written now: every `View` construction breaks on a field addition, and
+  `route` was the last field. The C1 design pass is `docs/tui-widget-set-v0.md` (2026-09-07), which
+  carries one breaking change: `View.measure` returns a `Measured` rather than a `Size`, without
+  which a widget cannot ask for "whatever is left". Evidence the containers are missing:
+  `examples/tui_dashboard.sprout` hand-writes its `Box` in 93 lines and 15 helpers of a 284-line
+  example, and the `Delivery` walk is now written twice in-tree, identically. The first-claimant
+  rule is a convention each container reimplements rather than something the framework enforces.
+- [ ] `P1` **TUI M4 C1 — containers and the static set.** `row`/`column`/`grid` over the existing
+  `layout` solvers, an opaque `Slot` (`cells`/`fraction`/`fit`) so a child and its size cannot
+  desync, plus `label`, `static`, `spacer`, the four child traversals exported for reuse, and a
+  both-axes clipped paint helper. Acceptance test: `examples/tui_dashboard.sprout` loses its `Box`
+  section entirely. Designed in `docs/tui-widget-set-v0.md`.
+- [ ] `P1` **TUI M4 C2 — focus and the interactive set.** `button`, `input`, `list_view`. Focus is
+  what makes `ToEvent` reachable. **Do not start C2 with the two routing `P3`s below open** — they
+  are corrections to the contract C2 is written against.
+- [ ] `P2` **TUI M4 C3 — the larger widgets.** `scroll_view`, `tabs`, `tree`, `table`,
+  `text_area`. Split off because `text_area` carries the language work below.
+- [ ] `P2` **TUI M4 language work — `mutvec_insert`/`mutvec_remove`, sign-off first (Collaboration
+  Rule 6).** `text_area`/`input` want both. `insert` composes from `push` + shift; `remove` needs a
+  new `vector_remove` builtin — approve before C3 starts, not during. Same family as the deferred
+  `pop`/`truncate`/`clear` in §5. Prior art in-tree: `stdlib/repl.sprout` owns the only
+  text-editing primitives.
 - [ ] `P3` **`just tui-resize-probe` is opt-in, and one resize property stays uncovered.** Every arm
   of `app.run` is verified now, the `TermResized` one by that probe — but it depends on
   `script(1)` and on process timing and has no CI track record, so it is in no aggregate gate (green
@@ -741,15 +727,11 @@ Legend:
   specific to `!`. Output is idempotent, lint-clean and parses identically — a readability defect
   only — but `!` is the only boolean negation Sprout has and the docs present `!x` as the idiom,
   which `just fmt` then rewrites into a form nobody would write by hand. In argument position the
-  preceding comma loses its space too: `takes("x", !flag())` becomes `takes("x",! flag ())`.
-  **Mechanism:** `is_call_like_pp_other` (`formatter.sprout`) does not recognise `!` as a prev-prev
-  token after which `ident(` is a call, so the `(`-spacing fallback fires — the postfix-`.` and
-  `..` cases are handled there by an explicit `token_text(pp) == …` arm and `!` wants the same
-  one, plus a look at `needs_space_curr_bang`'s counterpart for the space *after* `!`. `!` was not a
-  prefix operator when the formatter was written. **It already costs something:**
-  `tests/stdlib/test_ir_codegen_cpr_maybe_externs.spr` wanted `!str_starts_with(out, "ERR: ")` and
-  had to be written as an `if … then false else true` instead. Wants a `tests/fmt/` fixture
-  pinning `!flag()`, `!x` and the argument-position case.
+  preceding comma loses its space too. Mechanism: `is_call_like_pp_other` (`formatter.sprout`) does
+  not recognise `!` as a prev-prev token after which `ident(` is a call, so the `(`-spacing fallback
+  fires; the postfix-`.` and `..` cases have an explicit arm there and `!` wants the same, plus
+  `needs_space_curr_bang`'s counterpart for the space *after* `!`. It already costs something —
+  `test_ir_codegen_cpr_maybe_externs.spr` had to write `if … then false else true` instead.
 - [ ] `P3` **`fmt` drops the space between two adjacent parenthesized type atoms.**
   `Widget s (s -> s) (s -> String)` becomes `… (s -> s)(s -> String)`, which reads as application
   rather than two fields. Same family as the landed `[` fix: `needs_space_word_or_op` has no case
@@ -764,34 +746,26 @@ Legend:
   an inner space and sometimes not, within one file — possibly column-budget driven. Needs a
   fixture with multiple `Just(Just(x))` at different indentation depths.
 - [ ] `P2` **Lint suppression, then wire `lint` into CI.** Three things that must ship together,
-  since green-but-unenforced returns to red. **(a) The pragma.** Direction chosen 2026-08-12,
-  Rust-inspired: a same-line trailing `# lint: allow(<rule>)`, rule name **mandatory** — Rust
-  requires it while ESLint/clang-tidy/golangci-lint permit a blanket form, and a blanket allow would
-  silently swallow unrelated findings. Same-line rather than next-line so it cannot drift off its
-  target. Implement as a post-parse filter inside `lint_rules.lint_ast`, **not** `fmt_driver`, so a
-  future editor lint surface cannot disagree with the gate —
-  `drop_desugared_matches`/`drop_desugared_list_patterns` already re-read raw source lines keyed on
-  `(line, rule_id)`, i.e. this mechanism minus a user-facing spelling. Scope limit:
-  `formatter.lint_source` issues carry no rule id, so the contract covers AST rules only. **(b) The
-  two incidental rewrites.** `just lint` is permanently red — 10 findings across 4 files. Two
-  files violate deliberately because the raw form *is* the test subject
-  (`test_list_pattern_runtime.spr`, `test_vec_literal_coercion.spr:29`); the other two need only a
-  `[h | _]` rewrite (`test_lint_rules.spr:20,25,34`, `test_existential_prefix_compound.spr:43`).
-  **(c) `lint` into `ci-fast-gates`** — it is currently a pre-commit gate only, which is why the
-  red set drifted in both directions with nothing watching. Needs a docs home: a `## Lint` section
-  in `docs/style-guide-v0.md`, the tool having none today. ~40 lines plus tests, but it is a
-  `stdlib/compiler/` edit and drags the full reseed / golden-IR / bundle-smoke chain.
-  - [ ] `P2` **Per-line suppression is the follow-on that is bigger than it looks.** It must scan
-    every line, not just the header, so a `#` inside a multi-line backtick template can false-match
-    — the hazard `formatter.lint_spans` exists to handle, and the class of bug fixed in `7d1171f`.
-    And a line-number anchor cannot serve the `unparsed` case at all: inserting the directive shifts
-    the position it anchors to, and `parse_error/missing_else.spr` reports at 3:1 in a 2-line file.
-  - [ ] `P3` **Report a suppression that no longer suppresses anything.** Biome and staticcheck both
-    flag an unused suppression and rustc reaches the same end with `#[expect]`; without it these
-    directives accumulate unreviewed. Needs the unfiltered finding set alongside the filtered one.
-    Rust's `#[expect]` is the strictly better fit for the two deliberate files — it turns the
-    suppression into a second assertion that the construct is still present — held back only to
-    avoid shipping two mechanisms at once.
+  since green-but-unenforced returns to red. **(a) The pragma**, direction chosen 2026-08-12: a
+  same-line trailing `# lint: allow(<rule>)` with the rule name mandatory — Rust requires it while
+  ESLint/clang-tidy/golangci-lint permit a blanket form that would silently swallow unrelated
+  findings. Implement it as a post-parse filter in `lint_rules.lint_ast`, **not** `fmt_driver`, so a
+  future editor surface cannot disagree with the gate; `formatter.lint_source` issues carry no rule
+  id, so the contract covers AST rules only. **(b)** `just lint` is permanently red — 10 findings
+  across 4 files, two violating deliberately because the raw form *is* the test subject. **(c)** Put
+  `lint` in `ci-fast-gates`; it is pre-commit only today, which is why the red set drifted
+  unwatched. Needs a `## Lint` section in `docs/style-guide-v0.md`.
+- [ ] `P2` **Per-line lint suppression is the follow-on that is bigger than it looks.** It must scan
+  every line, not just the header, so a `#` inside a multi-line backtick template can false-match
+  — the hazard `formatter.lint_spans` exists to handle, and the class of bug fixed in `7d1171f`.
+  And a line-number anchor cannot serve the `unparsed` case at all: inserting the directive shifts
+  the position it anchors to, and `parse_error/missing_else.spr` reports at 3:1 in a 2-line file.
+- [ ] `P3` **Report a lint suppression that no longer suppresses anything.** Biome and staticcheck
+  both flag an unused suppression and rustc reaches the same end with `#[expect]`; without it these
+  directives accumulate unreviewed. Needs the unfiltered finding set alongside the filtered one.
+  Rust's `#[expect]` is the strictly better fit for the two deliberate files — it turns the
+  suppression into a second assertion that the construct is still present — held back only to
+  avoid shipping two mechanisms at once.
 - [~] `P2` **Formatter/linter beyond the baseline.** Four AST lint rules shipped
   (`staircase-of-doom`, `redundant-vec-from-list`, `list-shape-pattern`, `list-prefix-pattern`) on
   top of `formatter.sprout`'s text-based Style checks. **Remaining roadmap** from
@@ -930,12 +904,10 @@ Legend:
   duplicate within the session's own decls is rejected on both. `check_program_with_env` passes
   imports and the prelude as env schemes so their instances arrive as `@inst:` markers, while
   `check_overlapping_instances` scans `decls`, which holds only the session's own source. **Open
-  question that sets the severity:** which instance wins at dispatch. If the session's wins,
-  shadowing is the de facto semantics and needs specifying; if the prelude's wins, the session
-  instance is silently dead and clearly wants rejecting. **Decision required before implementing**
-  (semantics, not a patch): reject for consistency with `--phase check`, at the cost of an
-  affordance most REPLs offer, or define session-level instance shadowing in the spec. Today is
-  neither.
+  question that sets the severity:** which instance wins at dispatch — if the session's, shadowing
+  is the de facto semantics and needs specifying; if the prelude's, the session instance is silently
+  dead and wants rejecting. **Decide before implementing:** reject for consistency with
+  `--phase check`, or define session-level instance shadowing in the spec. Today is neither.
 - [ ] `P2` **`Validation` type + error-accumulating `Applicative`** — the killer app (form-style
   validation collecting *all* errors). Needs its own type (`Valid a | Invalid e`) because a type
   admits one `Applicative` and `Result`'s is fail-fast; the instance requires `Semigroup e`.
@@ -1081,12 +1053,11 @@ Legend:
   `get_architecture` and `trace_call_path` are useless on Sprout and on `uncharted-suns`. The C-side
   wiring exists on two unmerged branches of the fork `cthulhu666/codebase-memory-mcp`
   (`codex/sprout-support` tip `94d30b0`, clean feature commit `434926e`;
-  `codex/sprout-index-persistence-fix` `70f55b0`). **It did not stall on Sprout** — it stalled on
-  a CBM *core* defect recorded in `94d30b0`: the direct page writer produces inconsistent on-disk
-  graphs for mixed real-world projects. `cbm_write_db` is still the live path on CBM `main` and the
-  fork has never fetched `upstream/main` (four months behind), so the first question is whether that
-  is already fixed upstream. Scope decided: **full expression coverage in one pass**, not
-  declarations-only — without `CALLS` edges the index offers little over grep.
+  `codex/sprout-index-persistence-fix` `70f55b0`). It did not stall on Sprout but on a CBM *core*
+  defect recorded in `94d30b0` — the direct page writer produces inconsistent on-disk graphs for
+  mixed projects. The fork has never fetched `upstream/main`, so the first question is whether that
+  is fixed there. Scope decided: full expression coverage in one pass, since without `CALLS` edges
+  the index offers little over grep.
 - [ ] `P2` **`tree-sitter-sprout/` is ungated and has drifted from the language.** No `justfile`
   recipe runs `tree-sitter` at all, so nothing has ever checked the grammar against real source: 14
   verified divergences, including records (`( f: T )` vs the grammar's `{ }`) and field access
@@ -1115,15 +1086,13 @@ Legend:
 - [ ] `P2` **A LOWERCASE type name in a parameter/return annotation is silently a fresh type
   VARIABLE, so a typo'd type is accepted and the error lands somewhere else entirely.** The
   uppercase case is already rejected at the annotation by the bundler's `unresolved_in_types` —
-  measured, do not re-implement it. What is open is lowercase: `fn dot(a: vec3, b: vec3) -> Double`
-  with `Vec3` declared right above compiles clean, then field reads off the tyvar park deferred
-  obligations, numeric defaulting pins them to `Int`, and the failure surfaces as a
-  `Return type mismatch: Int vs Double` blaming the body's return — ~1700 lines away in the
-  reporter's tree. Shares the mechanism with the numeric-defaulting item in §1; fixing the
-  defaulting order improves the message but still accepts the annotation. **Suggested rule, low
-  false-positive rate:** reject or warn on a lowercase annotation whose name matches a declared type
-  in scope **case-insensitively**. A blanket "type variables must be declared" rule is the Rust
-  answer, a much larger breaking change needing its own design.
+  measured, do not re-implement it. Open is lowercase: `fn dot(a: vec3, b: vec3) -> Double` with
+  `Vec3` declared right above compiles clean, then field reads off the tyvar park deferred
+  obligations, numeric defaulting pins them to `Int`, and the failure surfaces as
+  `Return type mismatch: Int vs Double`, ~1700 lines from the annotation in the reporter's tree.
+  Same mechanism as the numeric-defaulting item in §1. **Suggested rule:** reject or warn on a
+  lowercase annotation matching a declared type case-insensitively; a blanket "type variables must
+  be declared" rule is the Rust answer, and much larger.
 - [ ] `P2` **A `wrap` type in a user-defined function's annotation does not canonicalize across
   modules.** `fn f(v: linalg.Vec3)` in user code sees `linalg.Vec3` as distinct from the value's
   `stdlib.linalg.Vec3` (Call type mismatch). Values flow fine into the defining module's own
@@ -1154,67 +1123,15 @@ Legend:
 > below are the execution units; the doc is the source of truth for *why* each is shaped the way it
 > is.
 
-- [ ] `P1` **Windows Milestone A — compile *to* Windows.** Umbrella. **PARKED after W2
-  (2026-08-16), deliberately — not blocked, not half-landed.** W0a/W0b/W1/W2 and the `windows` CI
-  job are all on master, no branch outstanding, every gate green; `docs/windows-port-v0.md` §5.1 is
-  the resume point. Driver: uncharted-suns is intended to ship on Steam, which needs a Windows
-  `.exe`, and that game links this repo's `runtime/*.c` directly. Scope is the runtime and nothing
-  else — **codegen is already portable** (`unknown-unknown-unknown` triple, no datalayout; the
-  golden IR cross-compiles to clean Win64 COFF for both targets, now gated by
-  `just windows-ir-gate`). Toolchain decision: **develop with mingw-w64, ship with MSVC**, enforced
-  by writing the Windows backend against pure Win32 + ISO C and never against mingw's POSIX shims
-  — free at line one, expensive to retrofit, and it already paid off at W1 where MSVC refuted a
-  mingw-clean claim. **Standing constraint (Kuba, 2026-08-16): the port changes no macOS or Linux
-  behaviour or logic** — Windows arms go alongside the POSIX code, never through a refactor of it.
-  Minimum OS: Windows 10 version 2004.
-  - [ ] `P1` **W3 — Winsock, files, arena, threads, console.** Winsock2 (`SOCKET` is not an `int`
-    fd; `WSAStartup`, `closesocket`, `WSAGetLastError`) across every `tcp_*` builtin and the handle
-    table. **Includes `sprout_scheduler.c:30`** — its `#include <unistd.h>` for `close()` is that
-    TU's only remaining MSVC blocker, and the call it guards is `force_drop_task` closing an
-    unowned-fd park's socket, so it becomes `closesocket` with the rest; promote the TU to
-    `windows_tu_check.sh`'s EXPECTED when it lands. **Two items W2 handed over:** the DNS-pipe swap
-    (own entry below) and widening the poller interface's `int fd` (the WSAPoll arm casts to
-    `SOCKET`; the cast goes when the handle table converts). Also `VirtualAlloc`
-    `MEM_RESERVE`/`MEM_COMMIT` for the `mmap(PROT_NONE)` GC arena (the easiest item); **no work for
-    the 2 async-DNS `pthread_create` sites under mingw** (winpthreads is present) — `CreateThread`
-    returns only for MSVC; `SetConsoleMode` + `ENABLE_VIRTUAL_TERMINAL_PROCESSING` for the 14
-    `termios`-family occurrences; `GetModuleFileNameA` for `readlink`/`_NSGetExecutablePath`;
-    `_ftelli64` (not `ftello` — only `_ftelli64` exists under both toolchains); stub `getrlimit`.
-    Unimplemented surfaces return the established `"…unsupported on this platform"` shape, never a
-    silent success.
-  - [ ] `P1` **Async DNS parks on a `pipe()` — no Windows readiness poller can watch it.**
-    `sprout_runtime.c:7102` uses a `pipe()` read end as the completion signal from the detached
-    `getaddrinfo` thread; neither `WSAPoll` nor AFD (socket-only) can poll it. Fix: a self-connected
-    loopback pair — the channel carries exactly one completion byte, so it is equivalent. Winsock
-    has no `socketpair()`; the emulation is `bind`/`listen(1)`/`getsockname`/`connect`/`accept`,
-    confirmed by libuv hand-rolling exactly that. A blocking `accept` suffices where libuv needs
-    `AcceptEx`. Moved from W2 because the call sits in a TU that does not compile for Windows until
-    W3 clears `regex.h` at line 7.
-  - [ ] `P2` **W4 — crash diagnostics.** 10 `sigaction`/`sigaltstack` occurrences →
-    `AddVectoredExceptionHandler` (W0a confirmed there is no POSIX path to fall back on); 13
-    `backtrace` occurrences → `CaptureStackBackTrace`. **Not DbgHelp** — `dbghelp.h` is absent
-    from the mingw sysroot, so frames come back as raw addresses and symbolization is a separate
-    question. May degrade to a loud stub without blocking a ship, but not to silence: the
-    alternate-signal-stack design exists precisely so a stack-overflow SIGSEGV prints a diagnostic.
-  - [ ] `P1` **W5 — link, game, run smoke.** First `.exe`. The `windows` CI job gains its final
-    step: link and **run** a task/IO smoke against the `WSAPoll` backend, mirroring what `macos`
-    does for kqueue. Builds with clang targeting `x86_64-pc-windows-msvc`, not mingw — the local
-    loop is mingw, so MSVC must be the gated one or the pure-Win32 rule rots unobserved.
-  - [ ] `P3` **AFD/wepoll poller backend — gated on evidence, not a design question.**
-    Deliberately not adopted at W2 because **it buys no capability**: wepoll only works with sockets
-    (structural — AFD *is* the driver beneath Winsock), so it reaches no further than `WSAPoll`
-    and does not solve the DNS-pipe problem. Its only advantage is a registered set instead of a
-    re-passed array, i.e. scale, bounded here by `g_conn_fd[2048]` → ~16 KB per wait worst case.
-    Cheap to adopt later (the poller is a 6-function interface). **Re-open on:** a *measured*
-    `WSAPoll` bottleneck; `g_conn_fd`'s 2048 cap being raised toward five figures (**open question
-    whether that is deliberate or arbitrary**); or a need to poll a non-socket other than the DNS
-    pipe, which forces IOCP instead. Cost: undocumented NT interfaces plus vendored third-party
-    code, needing explicit approval.
-  - [ ] `P3` **IOCP poller backend — the one option that is NOT cheap to revisit.** Recorded so
-    the asymmetry is not forgotten: swapping `WSAPoll` for AFD is a one-file change behind the
-    existing interface, but IOCP is a *completion* model and reshapes the park protocol itself. It
-    is nonetheless the only option reaching non-socket handles, so a future need to park on
-    something that is neither a socket nor the DNS pipe lands here. What Go and libuv use.
+- [ ] `P1` **Windows Milestone A — compile *to* Windows.** Umbrella, **parked after W2
+  (2026-08-16) deliberately** — W0a/W0b/W1/W2 and the `windows` CI job are all on master, every
+  gate green, no branch outstanding. Remaining: W3 (Winsock, files, the `VirtualAlloc` arena,
+  threads, console), the async-DNS `pipe()` swap no Windows readiness poller can watch, W4 (crash
+  diagnostics) and W5 (first `.exe`, linked and *run* under MSVC). Driver: uncharted-suns ships on
+  Steam and links this repo's `runtime/*.c`. Scope is the runtime only — codegen already
+  cross-compiles to clean Win64 COFF, gated by `just windows-ir-gate`. `docs/windows-port-v0.md` is
+  the authority: §5.1 is the resume point, §6 the measured W3 surface inventory, §4.3.1 the
+  `WSAPoll` decision with the AFD/wepoll and IOCP re-open triggers.
 - [ ] `P2` **POSIX `<regex.h>` has no MSVC equivalent.** One use, `regex_compile_ere`, via
   `regcomp`/`REG_EXTENDED`. Filed separately from W3 because stubbing it removes a
   **language-visible** feature rather than an internal capability — vendor a small ERE
@@ -1312,19 +1229,14 @@ deferral happened, not for current behaviour. Still open:
   `tests/conformance/type_error/`.
 - [ ] `P2` **DECISION NEEDED — derived `ToString`: qualified or bare name?** `to_string` on a
   `deriving (ToString)` type prints the declaring module's qualified name when imported and the bare
-  name when declared in the entry file, compounding per nesting level. **Not a spec violation** —
-  §12 wants valid source, and the qualified form is writable and compiles. **The defect is the
-  inconsistency**: an artifact of `bundler.sprout:1126` running `expand_deriving_decls` on
-  already-qualified decls, so the qualified name is reused as the display literal. Nobody chose it,
-  and the consequence is that extracting a type from the entry file into a module silently changes
-  program output. **Prior art (verified):** Haskell derived `Show` is unqualified and promises
-  `Read`/`Show` are inverses; Rust `Debug` and Python's dataclass `__repr__` are bare; Java records
-  disclaim parsing — both languages promising round-trippability chose unqualified anyway. **The
-  directions are not equally costed:** "strip to the last dot-segment" is a helper call in two
-  `deriving.sprout` emitters, while "qualify everywhere" is not implementable as stated, since an
-  entry file has no module header and uniform qualification would first require inventing a module
-  identity for it. **Recommendation: strip.** Seed-gated; `test_imported_records.spr` deliberately
-  asserts only the field rendering so it bakes in neither side.
+  name when declared in the entry file, compounding per nesting level. Not a spec violation — §12
+  wants valid source and the qualified form compiles. The defect is the **inconsistency**, an
+  artifact of `bundler.sprout:1126` running `expand_deriving_decls` on already-qualified decls, so
+  extracting a type from the entry file into a module silently changes program output. Prior art,
+  verified: Haskell's derived `Show` is unqualified though it promises `Read`/`Show` are inverses;
+  Rust's `Debug` is bare; Java records disclaim parsing. Stripping to the last dot-segment is a
+  helper call in two `deriving.sprout` emitters; qualifying everywhere needs a module identity an
+  entry file does not have. **Recommendation: strip.** Seed-gated.
 - [ ] `P3` **Records PR3 — parser tests** for record-vs-tuple, record-vs-call and shadowing, plus
   the §8 error-message fixtures.
 - [ ] `P2` **Algebraic effect handlers (phase 1: one-shot linear handlers).**
@@ -1396,16 +1308,12 @@ deferral happened, not for current behaviour. Still open:
 - [ ] `P1` **`unifier.apply_full_subst` does not terminate on a cyclic substitution.** Found via the
   LSP: `sproutd` at 99.7% CPU for 15 minutes with RSS flat at 2.4 MB, the stack cycling
   `instantiate_with_vars → apply_full_subst → apply_full_subst → …`. Flat RSS with unbounded
-  time means it is cycling a fixed structure — consistent with a binding `α := … α …` that
-  an occurs check should make impossible, though **that is not proven** (re-expansion of a shared
-  substitution chain fits the evidence too). **Trigger, bisected:** two `task_fork`s whose forked
-  function calls any *imported-module* function — one fork is fine, two forks calling only prelude
-  builtins are fine, so the `Task` machinery is a red herring and imported-scheme instantiation is
-  the common factor. An 18-line repro and the trigger table are in
-  `docs/module-surface-authority-v0.md` §7.1. Now unreachable from editors (the env path that
-  reached it is retired), so latent — but it is a real non-termination and other routes to it are
-  unproven. **Any fix needs a time-bounded harness:** an in-process `.spr` test cannot bound its own
-  runtime and would hang `just test` instead of failing it.
+  time means it cycles a fixed structure — consistent with a binding `α := … α …` that an
+  occurs check should make impossible, though that is **not proven**. Trigger, bisected: two
+  `task_fork`s whose forked function calls any *imported-module* function, so `Task` is a red
+  herring and imported-scheme instantiation is the common factor. Repro and trigger table:
+  `docs/module-surface-authority-v0.md` §7.1. Unreachable from editors now, so latent. **Any fix
+  needs a time-bounded harness** — an in-process `.spr` test would hang `just test`, not fail it.
 
 ### Sprout-IR / Model-C codegen
 
@@ -1422,19 +1330,15 @@ deferral happened, not for current behaviour. Still open:
   `zext i1 … to i64` in `lower_op`, then relax the filter. Unit will need the same shape —
   likely a constant-zero op or a typecheck-time rejection, since Unit has no LLVM value.
 - [ ] `P2` **Tuple-return CPR does not fire on a SELF-RECURSIVE call**, so a recursive
-  tuple-returning reduction boxes once per step. CPR fires correctly on the outer call; on the
-  function's own recursive edge the worker calls the BOXED wrapper, which allocates, then reloads
-  and repacks — one heap tuple plus an unpack/repack per step, and the self-tail-call TCO would
-  otherwise turn into a loop is lost. **Measured A/B in one binary, bit-identical results: `ln` 4.3
-  ns/call accumulator-threaded vs 12.4 ns/call tuple-returning (2.8×), and ~29.5 ns/call on a cold
-  heap — the difference being GC.** Re-runnable:
-  `bench/math_transcendental/accumulator_vs_tuple_bench.sprout`. Pinned by
-  `test_tuple_return_cpr.spr`, whose "KNOWN GAP" assertion flips when this is fixed. **Consequence
-  today:** `sqrt_reduce`/`ln_reduce`/`cbrt_reduce` thread an accumulator, which reads as a
-  workaround but is the faster shape. Likely fix: let `translate_tail_unboxed` chain a
-  self-recursive tuple return to `@<self>_worker`, as Tier-2 CPR already does for a tail-call into
-  *another* worker — **the TCO caveat is the thing to resolve**, since here the self-call IS the
-  tail call, so the fix must keep it one rather than trade one cost for the other.
+  tuple-returning reduction boxes once per step. CPR fires on the outer call; on the function's own
+  recursive edge the worker calls the BOXED wrapper, which allocates, then reloads and repacks —
+  one heap tuple plus an unpack/repack per step, and the self-tail-call TCO is lost. Measured A/B in
+  one binary, bit-identical results: `ln` 4.3 ns/call accumulator-threaded vs 12.4 ns/call
+  tuple-returning (2.8×), ~29.5 ns/call on a cold heap, the difference being GC. Re-runnable at
+  `bench/math_transcendental/accumulator_vs_tuple_bench.sprout`, pinned by
+  `test_tuple_return_cpr.spr` whose "KNOWN GAP" assertion flips when fixed. Likely fix: chain a
+  self-recursive tuple return to `@<self>_worker` in `translate_tail_unboxed` — the TCO caveat is
+  the thing to resolve, since here the self-call IS the tail call.
 - [ ] `P2` **Capturing IIFE returning String fails to translate.**
   `fn f(n: Int) -> String = (\x -> int_to_string(x + n))(7)` fails in `translate_program` even
   though every component (capturing lambda, IIFE, `int_to_string` GC trigger, String return) works
@@ -1467,19 +1371,14 @@ deferral happened, not for current behaviour. Still open:
   elimination of a rooted allocation.
 - [ ] `P3` **CPR for bare-type-variable results — the filed design is WITHDRAWN, do not re-open it
   as filed.** Requested as "restore CPR for generics" on the assumption the §1 ABI bugfix switched
-  CPR off for generics. **It had not** — the gate declines *bare* type variables only, and a
-  generic declared `-> Maybe b` still workerizes with the constructor fully fused (verified in
-  emitted IR). **Why the residual gap cannot pay:** by parametricity a function declared `-> a`
-  cannot construct its result, and CPR's win comes exclusively from fusing a tail constructor into
-  the unboxed return — so the bare-tyvar population is structurally the population with nothing to
-  fuse, and a worker for it merely relocates two loads from caller to callee. **Correction to the
-  §1 cross-reference:** the conservative gate is not scaffolding to remove — under this analysis
-  it is permanently correct. **What is still on the table** if the per-box price is worth chasing:
-  (a) inlining small generics *before* the CPR router runs, so the result type is concrete when the
-  router looks (the IIFE-inlining machinery exists, but this misses recursive callees); (b)
-  specializing the body per instantiated head, which conflicts with type erasure and separate
-  compilation; (c) attacking allocation cost directly — the allocator-attributes item above.
-  Re-file under whichever is chosen rather than reopening this.
+  CPR off for generics. It had not: the gate declines *bare* type variables only, and a generic
+  declared `-> Maybe b` still workerizes with the constructor fully fused. The residual gap cannot
+  pay — by parametricity a function declared `-> a` cannot construct its result, and CPR's win
+  comes only from fusing a tail constructor into the unboxed return, so the bare-tyvar population is
+  structurally the one with nothing to fuse. The conservative gate is permanently correct, not
+  scaffolding to remove. Still on the table: inline small generics before the CPR router runs;
+  specialize per instantiated head; or attack allocation cost via the allocator-attributes item
+  above. Re-file under whichever is chosen.
 - [ ] `P3` **Tier-2 CPR: bare-name `adt_index` collision.** `build_adt_ctor_index` keys by the bare
   type name and every reader uses bare `type_head_name`, so two modules declaring width-2 types with
   the same bare name collide last-write-wins; a catch-all repack then uses the wrong `(tag, arity)`
@@ -1509,18 +1408,15 @@ deferral happened, not for current behaviour. Still open:
   be literals. Decide hex-float (`0x1.8p3`) at the same time; it is the only exact-and-readable
   spelling for a power of two. **Read the item below before assuming the const path is a speedup.**
 - [ ] `P3` **Do NOT re-attempt const-folding Double-literal globals as a performance fix —
-  measured, reverted 2026-08-06.** The mechanism is real (a module-level `let` becomes a *mutable*
-  global whose address escapes to the root registrar, so LLVM cannot fold it), and routing `TFloat`
+  measured, reverted 2026-08-06.** The mechanism is real (a module-level `let` is a *mutable* global
+  whose address escapes to the root registrar, so LLVM cannot fold it), and routing `TFloat`
   literals to the `GlobalConst` path worked — `adrp` 65→26, `ldr` 86→41 — but **lost
-  overall**: `mov`+`movk` went 181→358, a net +163 instructions, because the i64-uniform value ABI
-  makes LLVM see an *integer* constant, and an arbitrary 64-bit immediate on arm64 costs 4
-  instructions against `adrp`+`ldr`'s 2 plus an L1 hit. Paired wall clock put `ln` at median ratio
-  1.12 (slower). Two further dead ends: LLVM removed floating-point constexprs, so `1.0 / two8` has
-  no constexpr form; and folding inside the compiler needs printing a computed Double back as an
-  exactly round-tripping decimal, which `double_to_string` cannot do. **If revisited, the only
-  promising variant** is emitting the global as `double`-typed rather than `i64`-typed so LLVM
-  applies its FP constant cost model — which needs `IRLoadGlobal` to know the global's type, and
-  must be measured.
+  overall**: `mov`+`movk` went 181→358, because the i64-uniform value ABI makes LLVM see an
+  *integer* constant, and an arbitrary 64-bit immediate on arm64 costs 4 instructions against
+  `adrp`+`ldr`'s 2. Paired wall clock put `ln` at ratio 1.12, slower. Dead ends: LLVM removed
+  floating-point constexprs; and folding in the compiler needs an exactly round-tripping decimal,
+  which `double_to_string` cannot print. **If revisited**, emit the global as `double`-typed so LLVM
+  applies its FP cost model.
 - [ ] `P3` **Re-run the B3 SIMD checkpoint now that B1-Double has landed.** The last checkpoint
   (against B2 only) found zero vector-lane ops anywhere in the digit recognizer's row kernels, with
   `-Rpass-analysis=loop-vectorize` naming the blocker as "call instruction cannot be vectorized" —
@@ -1543,28 +1439,22 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   binding captured by a lambda and any linear lambda parameter, because a closure may run 0..n times
   and its call count is untracked; M4.5 borrowing did not lift this and extends the rejection to
   borrowed values, since whether a captured borrow is sound depends on whether the closure escapes
-  and outlives the consume — a distinction Sprout does not have. Known-hard (Linear Haskell
-  shipped it incomplete). The move-into-a-one-shot-closure slice landed as M4.4a; what is left:
-  - **A linear value captured at an UNANNOTATED parameter** (the true 0..n case), including the
-    combinator-over-a-borrow form `list_each(xs, \x -> write(conn, x))`, whose borrow half needs an
-    escape/lifetime notion, not just a call-count bound.
-  - **Linear lambda *parameters*** (`\c -> close(c)`). Orthogonal to `once`, which bounds how often
-    a closure runs rather than what may be handed to it. Needs the lambda's own parameter types to
-    carry ownership.
-  - **A linear `Scope`** — it only ever arrives as a lambda parameter, so it is the linear-lambda-
-    parameter case on top of the multiple-use case.
+  and outlives the consume — a distinction Sprout does not have. Known-hard: Linear Haskell
+  shipped it incomplete. The move-into-a-one-shot-closure slice landed as M4.4a. Left: a linear
+  value captured at an UNANNOTATED parameter (the true 0..n case, including
+  `list_each(xs, \x -> write(conn, x))`, whose borrow half needs an escape notion); linear lambda
+  *parameters* (`\c -> close(c)`, needing the lambda's own parameter types to carry ownership); and
+  a linear `Scope`, which is both at once.
 - [ ] `P2` **Decide whether a wildcard pattern over a linear value is a consume or a leak.** A
-  *semantics* question, not a bug. Three shapes accepted today: a linear parameter dropped by a
+  *semantics* question, not a bug. Three shapes are accepted today: a linear parameter dropped by a
   wildcard arm; the same over an unbound linear scrutinee; and `match w with | Wrap _ -> 0` dropping
-  a linear **field** (`linear_viral_field` covers only the double-use direction). **Position A
-  (ships today):** "use" is syntactic per spec §5.8 — the scrutinee IS referenced, so the first
-  two satisfy the rule and the third never names the field. This is the inherent "a consume need not
-  do anything useful" limit; Rust has the same property minus `Drop`, which Sprout lacks. **Position
-  B:** a consume should mean destructured *or* passed on, making all three leaks — stronger, at
-  the cost of a rule saying which patterns count. **The cost of A** is that
-  `type linear Wrap = Wrap TcpConnection` + `Wrap _` silently leaks an fd and looks deliberate.
-  Needs a call before any code; survey Rust's `let _ =` vs `let _x =` and Austral's linear-field
-  rules first.
+  a linear **field**. **Position A (ships today):** "use" is syntactic per spec §5.8 — the
+  scrutinee IS referenced and the third never names the field; this is the inherent "a consume need
+  not do anything useful" limit, which Rust shares minus `Drop`. **Position B:** a consume should
+  mean destructured *or* passed on, making all three leaks, at the cost of a rule saying which
+  patterns count. A's cost: `type linear Wrap = Wrap TcpConnection` plus `Wrap _` silently leaks an
+  fd and looks deliberate. Survey Rust's `let _ =` vs `let _x =` and Austral's linear-field rules
+  first.
 - [ ] `P2` **`borrowing` inside arrow-type syntax.** `fn apply(g: (borrowing File) -> Int, f: File)`
   cannot be written — arrow types have no ownership slot, so an annotated arrow means *consuming*.
   **Real and not blocked by M4.4:** a function-typed *parameter* over a linear value typechecks
@@ -1593,15 +1483,14 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   that the binder scope avoids.
 - [ ] `P3` **Linearity bound on a type parameter (enabler for `borrowing a`).** A modifier on a
   type-variable parameter stays rejected, which also blocks the receiver-borrowing class shape
-  `class Peekable a { fn peek(r: borrowing a) -> Int }` — so M4.6's method lift reaches only a
-  method's *concrete* linear parameters. **Not a representation limit** (ownership sits in the type
-  and survives instantiation) but a *universe* limit: without a bound on `a`, `borrowing Int` is an
-  error while `borrowing a` instantiated at `Int` silently is not, and that inconsistency is the
-  tell that this is polymorphism over linear types (an explicit M4.2 non-goal). Prior art, both
-  verified: **Swift SE-0427** makes generic parameters `Copyable` by default, requiring
-  `<T: ~Copyable>` to opt out; **Austral** annotates every type parameter with a universe
-  (`Free`/`Linear`/`Type`). Scope: pick a spelling, thread the bound through class/fn type
-  parameters, enforce it at instantiation, then delete the `type_is_tyvar` rejection.
+  `class Peekable a { fn peek(r: borrowing a) -> Int }`, so M4.6's method lift reaches only a
+  method's *concrete* linear parameters. Not a representation limit — ownership sits in the type
+  and survives instantiation — but a *universe* limit: without a bound on `a`, `borrowing Int` is
+  an error while `borrowing a` instantiated at `Int` silently is not, the tell that this is
+  polymorphism over linear types (an explicit M4.2 non-goal). Prior art, both verified: Swift
+  SE-0427 makes generic parameters `Copyable` by default, `<T: ~Copyable>` opting out; Austral
+  annotates every type parameter with a universe. Scope: pick a spelling, thread the bound through
+  class/fn type parameters, enforce at instantiation, then delete the `type_is_tyvar` rejection.
 - [ ] `P3` **Linear-record ergonomics for OWNED records.** M4.5 lifted this only for `borrowing`
   parameters: `p.x + p.y` is legal for `p: borrowing Pos` and remains a reuse for an owned `p`. The
   field-read borrow is keyed on the binding's mode, not on `TGetField` syntax, deliberately —
@@ -1666,19 +1555,14 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
 
 - [ ] `P2` **IR classification-consistency verifier (the M5 "Option 2").** A greenfield
   `stdlib/compiler/ir_verify.sprout` wired into `compile_program_streaming` after
-  `ir_rooting.insert_roots`, run as a CI/debug gate, emitting a loud located compiler-internal
-  error. **Not linear types** — it targets the same bug class via classification *consistency*:
-  for GC rooting the safety-critical half is totality/coverage, not no-reuse, since heap SSA values
-  are naturally multiply-read. **Teeth (family 1):** for every heap-producing op whose kind derives
-  from a type, re-derive the expected kind from an *independent* structural source
-  (`type_kind.type_is_non_heap_scalar` for `IRCall` returns via the callee signature; `field_kinds`
-  for `IRGetField`/`IRLoadEnvSlot`/`IRGetTupleField`) and assert the two agree, treating
-  `IRTUnknown` as "either acceptable" so there are no false positives. This catches the historical
-  `IRCall`-wrong-kind shape without touching the 447 KB translator. **Family 2, deferred within the
-  task:** re-verify the post-rooting IR directly (every heap value live across a trigger sits in a
-  root bracket) — but only with an *independent* liveness/trigger derivation, else it is circular;
-  more cost, less historical payoff. Ship family 1 first. Weeks not months, additive, and a genuine
-  evidence-gathering down-payment on full M5 should that later prove justified.
+  `ir_rooting.insert_roots`, run as a CI/debug gate. **Not linear types** — it targets the same
+  bug class via classification *consistency*, the safety-critical half for GC rooting being coverage
+  rather than no-reuse. **Family 1:** for every heap-producing op whose kind derives from a type,
+  re-derive the expected kind from an independent structural source (`type_kind` for `IRCall`
+  returns, `field_kinds` for `IRGetField`/`IRLoadEnvSlot`/`IRGetTupleField`) and assert the two
+  agree, treating `IRTUnknown` as either-acceptable so there are no false positives; this catches
+  the historical `IRCall`-wrong-kind shape without touching the translator. **Family 2, deferred:**
+  re-verify the post-rooting IR, needing an independent liveness derivation or it is circular.
 
 ### Native REPL & Analysis Service
 
@@ -1792,43 +1676,23 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   recipe change); A is the canonical fix. Verify B first. Expected 2–3× on top of the landed
   rooting work.
 - [ ] `P2` **GC trigger is object-count-blind, not byte-aware.** `sprout_gc_maybe_collect_threshold`
-  fires on `g_managed_heap_count >= g_gc_threshold`, and the count increments by exactly 1 per
-  managed object regardless of size — a `VectorVal`'s backing array is a plain `malloc`, invisible
-  to the trigger. So many-small allocs over-collect and few-but-large under-collect. Amplified by
-  the `adapt_factor` default of 3.0: the garbage budget between collections is
-  `(factor − 1) × live` *objects*, so a workload retaining large invisible payloads now tolerates
-  twice as many.
-  - **FIRST MEASURED INSTANCE — 2026-09-06, and the gap is ~100,000×.** Compiling one function
-    holding a 1,600-element `Vec Int` literal peaks at **3,188 MB RSS to produce 767 KB of output**,
-    while the collector reports the live set as 71,178 objects / 31.6 KB of strings. Scaling is
-    clean quadratic in emitted IR bytes (RSS ≈ 1.0×10⁻⁵ × bytes², ±15% across two program
-    shapes over a 4× size range), and confined to `emit-ir` — `bundle`/`check`/`lower`/`effects`
-    are flat on the same inputs.
-  - **`SPROUT_GC_THRESHOLD` cannot investigate this and will mislead you.** It sets only the
-    *floor*, so with an adaptive target already at 7.7M objects, lowering it changes nothing: 3188
-    MB → 3189 / 3205 / 3215 MB at 4096 / 512 / 64. That flat result reads as "the memory must be
-    live" and is worthless evidence. The knobs that bind are `SPROUT_GC_ADAPT_FACTOR` and
-    `SPROUT_GC_ADAPT_CAP`.
-  - **A count-based cap is NOT the fix — it trades quadratic memory for a livelock.**
-    `SPROUT_GC_ADAPT_CAP=50000` collapses peak RSS to 10 MB, proving the garbage is collectable, but
-    the run never finishes: live (71,178) permanently exceeds the cap, so every allocation triggers
-    a full mark — 363,713 cycles at ~980 µs, `alloc_since_gc=1`, `swept=0`, killed at 300 s. This
-    is the concrete argument that the trigger must become byte-aware rather than merely tighter, and
-    it is a ready-made reproducer. Note the livelock detector did not abort a textbook livelock.
+  fires on `g_managed_heap_count >= g_gc_threshold`, and the count increments by 1 per managed
+  object regardless of size — a `VectorVal`'s backing array is a plain `malloc`, invisible to the
+  trigger. Many-small over-collects, few-but-large under-collects, amplified by the `adapt_factor`
+  default of 3.0. First measured instance 2026-09-06 and the gap is ~100,000×: one function holding
+  a 1,600-element `Vec Int` literal peaks at 3,188 MB RSS to produce 767 KB of output.
+  `docs/gc-generational-v0.md` §11 has the measurements and two results worth not re-deriving —
+  `SPROUT_GC_THRESHOLD` cannot investigate this and its flat readings will mislead you, and a
+  count-based cap is not the fix because it trades the quadratic memory for a livelock (which is
+  also a ready-made reproducer).
 - [ ] `P2` **`ir_lowering` assembles IR text with `++` in a recursion at all three nesting levels**
   (`lower_ops`, `lower_blocks`, `lower_fns`, and the same shape in `sprout_ir.print_*`). Each of n
   frames concatenates onto the entire remaining tail, so emitting a block of n ops copies O(n ×
-  total) bytes. `docs/string-building-v0.md` prohibits exactly this and `string.join` shows the
-  sanctioned form. The fix is mechanical and local.
-  - **This does NOT contradict the "string concatenation was the wrong target" correction — the
-    two measure different regimes and both stand.** That correction profiled a *real* input and
-    correctly found the live heap is 85% ADT nodes and 12.5% CSTR: real code is many small blocks,
-    so each recursion is over ~10–50 ops and the quadratic term never grows. The regime that hurts
-    is **one block with a very large op count** — a 1,600-element literal lowers to ~17,820 ops in
-    a single block. Interacts with the byte-blind trigger above: fixing **either** removes the
-    quadratic RSS, and this one is cheaper and lower-risk, but it hides the GC bug rather than
-    closing it. **Unmeasured:** whether the fix actually collapses the curve — that needs a
-    stage-2 build, and the claim should not be repeated as fact until someone runs it.
+  total) bytes. `docs/string-building-v0.md` §6 prohibits exactly this and `string.join` shows the
+  sanctioned form; the fix is mechanical and local. §11 there has the regime analysis — why this
+  does not contradict the "string concatenation was the wrong target" correction, and why fixing it
+  hides the byte-blind GC trigger rather than closing it. Whether the fix collapses the curve is
+  unmeasured.
 - [ ] `P2` **The freelists are still wiped and rebuilt from *all* regions every sweep** — a
   prerequisite for the nursery, since a minor collection that marks only young objects but rebuilds
   the whole heap's freelist is not proportional to the young set. Making them generation-scoped
@@ -1911,16 +1775,14 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   function.
 - [~] `P1` **Arity mismatch through a function-typed VALUE is a clean runtime error, not a working
   call.** Both halves of the miscompile are closed — direct calls check arity in both directions,
-  and every closure now carries its parameter count in the GC header's aux field with
-  `sprout_closure_arity_check` guarding each `IRApplyClosure` (gate: `just closure-arity-smoke`,
-  both mismatch directions panicking cleanly with a positive control). **Still open, and it is a
-  language call:** the guard *rejects* a mismatch, it does not make one work, so `h(1)(2)` for a
-  two-parameter `h` errors at runtime and the type `Int -> Int -> Int` still advertises a currying
-  the ABI does not implement. Closing it is either §8.3 generic apply (build a PAP on
-  under-application) — which reverses C-b's landed decision that under-application is an error —
-  or Package C-a's arity-aware types, which makes both mismatches *compile* errors and is the only
-  option that makes the type system honest about a value's arity. Either way the arity field is now
-  paid for. `docs/currying-and-pipe-decision-v1.md`.
+  and every closure carries its parameter count in the GC header's aux field with
+  `sprout_closure_arity_check` guarding each `IRApplyClosure` (gate: `just closure-arity-smoke`).
+  **Still open, and it is a language call:** the guard *rejects* a mismatch, it does not make one
+  work, so `h(1)(2)` for a two-parameter `h` errors at runtime and the type `Int -> Int -> Int`
+  still advertises a currying the ABI does not implement. Closing it is either §8.3 generic apply,
+  which reverses C-b's landed decision that under-application is an error, or Package C-a's
+  arity-aware types, which makes both mismatches *compile* errors.
+  `docs/currying-and-pipe-decision-v1.md`.
 - [ ] `P2` **A redefined typeclass collides in the class-method wrapper symbol.** A file declaring
   `class Eq a` when the prelude also declares one emits two `@__cm_Eq_eq` definitions and the IR is
   rejected. Module qualification is threaded *most* of the way — the dictionary parameter is
@@ -2024,44 +1886,31 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   `string_from_char(char_from_codepoint(0))` writes a header saying 1 byte over content whose
   `strlen` is 0. The NUL is *dropped*, not truncated at — `"A" ++ NUL ++ "B"` has byte length 2
   and both letters survive. `SPROUT_GC_HDRCHECK=1` turns it from silent into an abort
-  (`HDRCHECK: str_byte_len aux=1 strlen=0`), which is what confirms it is an invariant violation
-  rather than a documented limitation. Options: reject U+0000 in `char_to_str`/`string_from_char`
-  with a located panic (loud, cheap, closes the corruption), or make the header the sole authority
-  on length and stop calling `strlen` — a wider change than this warrants until something needs
-  embedded NULs. Consequence: `unicode.cluster_sizes : List Int -> List Int` is the primary API and
-  `graphemes : String -> List String` is documented as lossy for U+0000; the conformance suite is
-  written at codepoint level for this reason.
+  (`HDRCHECK: str_byte_len aux=1 strlen=0`), confirming an invariant violation rather than a
+  documented limitation. Options: reject U+0000 in `char_to_str`/`string_from_char` with a located
+  panic, or make the header the sole authority on length and stop calling `strlen` — wider than
+  this warrants until something needs embedded NULs. Consequence: `unicode.cluster_sizes` is the
+  primary API and `graphemes` is documented lossy for U+0000.
 - [ ] `P2` **A large list/`Vec` literal is not a usable way to ship a data table.** A literal of N
-  `Int`s lowers to ~11 IR lines per element and costs O(N²) compiler memory: 800 → 825 MB, 1,200
-  → 1,817 MB, 1,600 → 3,188 MB, 2,000 → 4,631 MB. Past that it stops compiling at all —
-  **N=6,000 fails immediately with `GC root pool exhausted`** (a fixed
-  `RootNode g_root_pool[131072]`). 131072 ÷ 6000 ≈ 22 roots per element is consistent with
-  per-frame rooting over a non-tail recursion the length of the literal, but **that accounting is
-  inferred, not verified**; what is established is the ceiling's location between 2,000 and 6,000
-  and the message it fails with.
-  - **Workaround that works today: ship the table as a STRING literal and decode it at startup.**
-    The same 2,000 entries cost **49 MB and 218 IR lines** versus 4,631 MB and 22,220 lines — a
-    string literal is one token and one `@.str` constant, so emitted IR is constant-size regardless
-    of table size. Lexing a string literal is still superlinear in its length (80 KB source → 1.9
-    GB), so a large table wants **chunking across several literals of a few KB** plus a compact
-    encoding (delta-varint, not fixed-width hex): compactness is a compile-time constraint here, not
-    an aesthetic one.
-  - Fixing the `ir_lowering` quadratic would move the memory curve but **not** the root-pool
-    ceiling, which is a separate fixed-size limit. Both must go before a literal table of a few
-    thousand entries is viable.
+  `Int`s lowers to ~11 IR lines per element and costs O(N²) compiler memory: 800 → 825 MB, 2,000
+  → 4,631 MB. Past that it stops compiling at all — N=6,000 fails immediately with
+  `GC root pool exhausted` (a fixed `RootNode g_root_pool[131072]`). The ceiling's location between
+  2,000 and 6,000 is established; the ~22-roots-per-element accounting is inferred, not verified.
+  **Workaround that works today: ship the table as a STRING literal and decode it at startup** —
+  the same 2,000 entries cost 49 MB and 218 IR lines, emitted IR being constant-size whatever the
+  table. Lexing is still superlinear in literal length (80 KB source → 1.9 GB), so chunk across
+  several few-KB literals with a compact encoding. Fixing the `ir_lowering` quadratic moves the
+  memory curve but not the root-pool ceiling — a separate fixed limit, and both must go.
 - [ ] `P2` **Allow a layout `do` block inside call parentheses** — an inline multi-statement
   effectful lambda as a call argument. `range_fold(\ (s, k) -> do <newline> stmt1 …, seed, r)`
-  fails with "Expected )"; today the lambda must be `let`-bound and passed by name. Verified by
-  probe to affect *all* argument positions and single- as well as multi-statement, so it is not a
-  non-final-argument issue. **Root cause:** the do-step layout scanner ends a block only on EOF or a
-  dedent, never on a bracket, and `update_bracket_depth` clamps close-brackets at zero — so a `)`
-  closing an *enclosing* `(` is invisible and the block over-consumes to EOF. **Fix** (the standard
-  layout rule that an explicit close bracket ends an implicit layout context, cf. Haskell's layout
-  parse-error rule): let depth go negative and end the step and the block when a closer would take
-  it below 0, and on a depth-0 `,`. Especially wanted because the data-last convention puts the
-  lambda in the first, most natural inline slot. Layout is delicate — guard against regressions in
-  existing do-blocks, which never reach negative depth. Same family as the B1 parse-error item in
-  §1.
+  fails with "Expected )"; today the lambda must be `let`-bound and passed by name. A probe shows it
+  affects all argument positions, single- as well as multi-statement, so it is not a
+  non-final-argument issue. Root cause: the do-step layout scanner ends a block only on EOF or a
+  dedent, never on a bracket, and `update_bracket_depth` clamps close-brackets at zero, so a `)`
+  closing an enclosing `(` is invisible and the block over-consumes to EOF. Fix is the standard
+  layout rule (cf. Haskell's parse-error rule): let depth go negative, ending the step and the block
+  when a closer takes it below 0, and on a depth-0 `,`. Guard existing do-blocks against
+  regressions.
 - [ ] `P2` **Add a `module prelude` header to `prelude.sprout`** so all its symbols get an
   `@prelude.` prefix in emitted IR, eliminating future POSIX/libc symbol collisions — the `pipe`
   → `pipe_apply` rename is the tactical fix, this is the principled one. Requires a
@@ -2077,12 +1926,10 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   *following* top-level declaration. Spec §5.2.1 requires `in` dedented to the `let` column, so the
   rejection is conformant — but the one-line form is the canonical ML spelling and the error names
   a line the author did not write. Root cause: `parse_let_block`'s binding-end scan is line-based,
-  so a same-line `in` cannot terminate a binding slice. Two separable parts: **(a)** fix the
-  diagnostic to point at the `in` and say it must be dedented — cheap and worth doing alone;
-  **(b)** accept the form, which needs a spec change plus a binding-end scan stopping at a
-  `let`-balanced `in`. **(b) is the risky half:** the balancing miscounts when a binding's RHS holds
-  a `do` block containing a `let` *statement* (a `let` with no matching `in`), which would swallow
-  the real terminator.
+  so a same-line `in` cannot terminate a binding slice. **(a)** Fix the diagnostic to point at the
+  `in` — cheap, worth doing alone. **(b)** Accept the form: needs a spec change and a scan
+  stopping at a `let`-balanced `in`, and that balancing miscounts when a binding's RHS holds a `do`
+  block with a `let` *statement*, which swallows the real terminator.
 - [ ] `P3` **`parse_do_let_bindings` never reads its `binding_col`, so a misaligned binding is
   silently absorbed.** The split between bindings falls out of wherever `parse_expr` happens to
   stop, so a third binding at a column that is neither the binding nor the block column is accepted.
@@ -2190,18 +2037,14 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   starting with it. **Feasibility unverified**: some tokens are expression-legal only in context, so
   the test needs a way to avoid false failures, and that design question is the actual work.
 - [ ] `P3` **Type-driven-design gaps from the "parse, don't validate" audit.** Adherence is strong
-  overall (the refining compile pipeline, the `wrap` taxonomy in `source.sprout`); these remain.
-  *Compiler, seed-gated:* (a) `Token TokenKind String pos` lets kind and payload disagree —
-  `Token(TokenIntKind, "hello", pos)` is representable, unlike the `Expr`/`Pattern` ADTs where each
-  variant carries its own typed payload; (b) operators are raw `String` in the AST
-  (`BinaryExpr String …`), where a closed `BinOp`/`UnOp` ADT would make bogus operators
-  unrepresentable; (c) `is_function_scheme`/`is_polymorphic_scheme -> Bool` are boolean-blind, where
-  a `SchemeShape = MonoValue | PolyValue | FnValue` is more honest; (d) scalar-ness is recomputed
-  downstream by string-matching the type name instead of being carried on the `Type` ADT — a
-  validate-don't-parse miss. *Stdlib:* `NodeInterp (Vec String) Bool` in `template.sprout` (the
-  `Bool` is `is_safe`) → `Escaping = Safe | Escaped`; smallest diff of the set, one file, ~5
-  sites. `Ord.compare` returning an `Int` sentinel is the highest-value gap and is tracked
-  separately in §7.5.
+  overall; these remain. *Compiler, seed-gated:* `Token TokenKind String pos` lets kind and payload
+  disagree, unlike the `Expr`/`Pattern` ADTs where each variant carries its own typed payload;
+  operators are raw `String` in the AST, where a closed `BinOp`/`UnOp` would make bogus ones
+  unrepresentable; `is_function_scheme`/`is_polymorphic_scheme -> Bool` are boolean-blind where a
+  `SchemeShape` is honest; scalar-ness is recomputed downstream by string-matching the type name
+  instead of riding on the `Type` ADT. *Stdlib:* `NodeInterp (Vec String) Bool` in `template.sprout`
+  → `Escaping = Safe | Escaped`, the smallest diff of the set. `Ord.compare`'s `Int` sentinel is
+  the highest-value gap and is tracked separately in §7.5.
 - [ ] `P3` **Re-add `SPROUT_TIME_PHASES` per-phase compile timing on the typed path.** The
   direct-codegen retirement deleted the machinery that emitted the
   `[phase] bundle=… check=… lower=…` stderr line; it was only ever wired to the now-gone path,
@@ -2218,42 +2061,30 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
 
 ### CI / Build Performance
 
-- [ ] `P2` **The apt LLVM install has no retry and no cache, and it hung CI for 24 min.** Both the
-  `test` and `lsp` jobs run a bare `sudo apt-get update && sudo apt-get install -y llvm clang …`
-  with no retry, no timeout and no package cache; on one run that step sat in progress for **24
-  minutes** against **24 seconds** on the run 43 minutes earlier — a ~60× stall before a line of
-  Sprout compiled. Two properties make it worse than an ordinary flake. **It cannot fail fast:**
-  GitHub's default job timeout is 6 hours, so a stalled mirror burns the whole budget rather than
-  erroring, and from the checks list it is indistinguishable from a long test run. **And the
-  workflow caches the deterministic thing and not the fragile one** — the local, reproducible
-  bootstrap (23 s) is cached while the networked third-party fetch is not, which is the risk exactly
-  inverted. Options, cheapest first: (a) wrap both steps in a retry loop (3 attempts, backoff); (b)
-  add `timeout-minutes` so it fails in ~5 min instead of hanging — the smallest change that
-  restores fail-fast; (c) cache the apt archives or use a prebuilt LLVM action, which also cuts the
-  normal-case 24 s. **(a)+(b) is the recommended first increment;** (c) should be measured before it
-  is assumed to help, since 24 s is not a bottleneck.
+- [ ] `P2` **The apt LLVM install has no retry and no cache, and it hung CI for 24 min.** The `test`
+  and `lsp` jobs run a bare `sudo apt-get update && sudo apt-get install -y llvm clang …` with no
+  retry, no timeout and no package cache; on one run that step sat 24 minutes against 24 seconds on
+  the run 43 minutes earlier. It cannot fail fast — GitHub's default job timeout is 6 hours, so a
+  stalled mirror burns the whole budget rather than erroring, and from the checks list it looks like
+  a long test run. And the workflow caches the deterministic thing and not the fragile one: the
+  reproducible bootstrap (23 s) is cached, the networked third-party fetch is not. Recommended first
+  increment is a retry loop plus `timeout-minutes`; measure before assuming an apt cache helps.
 - [ ] `P2` **Straggler heavy bundlers still run on every PR.** The compiler-suite directory gate
   misses the ~10 `tests/stdlib/test_ir_*` suites that also bundle the whole compiler (one is 222k IR
-  lines / ~17 s emit) but live in flat `tests/stdlib/`. Either move them under
-  `tests/stdlib/compiler/` (or a `tests/stdlib/ir/` gated the same way), or gate by an explicit file
-  list. Also open: LPT (largest-first) dispatch in
+  lines / ~17 s emit) but live in flat `tests/stdlib/`. Move them under `tests/stdlib/compiler/`, or
+  gate by an explicit file list. Also open: LPT (largest-first) dispatch in
   `_test-stdlib`/`_compile-examples`/`ci-fast-gates` so a 50 s pole stops stranding idle lanes, and
   folding the serial `verify-bootstrap-fixed-point` (~23 s) into the `ci-fast-gates` fan-out.
-  - *Sizing caveat:* the 846 s compiler-suite figure predates the quadratic-`strlen` fix (which took
-    `just test` from ~1840 s to 1192 s CPU) and should be re-measured before it sizes any work. All
-    older wall-time numbers were taken on a self-hosted GCE worker; CI now runs on GitHub-hosted
-    `ubuntu-latest`, so the worker-capacity levers are superseded too.
+  Re-measure first: the 846 s compiler-suite figure predates the quadratic-`strlen` fix, and all the
+  older wall-times came from a self-hosted GCE worker, not today's GitHub-hosted `ubuntu-latest`.
 - [ ] `P3` **CI has no arm64 Linux job, and `linux-smoke`'s value is latency, not OS coverage.**
-  `linux-smoke` adds no OS coverage over CI — `ci.yml` is `ubuntu-latest` with the same env, and
-  `ci-fast-gates` already contains `task-io-smoke`, so CI runs the identical recipe on the identical
-  OS. What it covers that CI does not is the **architecture**: the container is the host's (aarch64
-  on an Apple-silicon Mac), CI is x86_64. So the scheduler, epoll/timerfd and GC are smoke-tested on
-  arm64 Linux **only on a contributor's Mac, by an opt-in gate**, while `release.yml` publishes
-  `sprout-linux-aarch64` from an `ubuntu-24.04-arm` runner that builds the binary and never runs
-  `task-io-smoke` on it. Fix is cheap and needs no QEMU: that runner is free on public repos and
-  already in use, so add an arm64 job (or a `runs-on` matrix) to `ci.yml` — or at minimum run
-  `task-io-smoke` in `release.yml`'s aarch64 job before uploading. A QEMU `linux-smoke-amd64` is
-  then unnecessary: the arch CI lacks is the one the local gate already provides.
+  `linux-smoke` adds no OS coverage — `ci.yml` is `ubuntu-latest` with the same env and
+  `ci-fast-gates` already contains `task-io-smoke`. What it covers is the *architecture*: its
+  container is the host's (aarch64 on an Apple-silicon Mac), CI is x86_64. So the scheduler,
+  epoll/timerfd and GC are smoke-tested on arm64 Linux only on a contributor's Mac, by an opt-in
+  gate, while `release.yml` builds `sprout-linux-aarch64` on an `ubuntu-24.04-arm` runner and never
+  runs `task-io-smoke` on it. That runner is free on public repos, so add an arm64 job to `ci.yml`,
+  or at minimum run `task-io-smoke` in `release.yml` before uploading. No QEMU needed.
 - [ ] `P3` **Flatten the pre-existing `staircase-of-doom` sites** exposed by the records PRs and
   committed around with `--no-verify`: `infer.sprout`'s `resolve_obligation` family, `infer_range`
   and `typecheck_fn_decl` body; two `lowering.sprout` sites; one in `driver.sprout`. **These are not
@@ -2278,18 +2109,15 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   (ASan ~2× slower, 2–3× fatter, on a memory-tight worker at capacity 2) was measured against a
   self-hosted box that no longer exists.
 - [ ] `P2` **Compare each `extern fn`'s C definition against the emitted `declare`.** The
-  *duplicate-declaration* half is gated — `scripts/check_extern_signatures.sh` enforces "one C
-  symbol, one Sprout `extern fn` declaration" — but it never reads `runtime/*.c`, so the type
-  comparison is untouched and is the whole of what remains. This is the **second** silent extern-ABI
-  mismatch found by accident: `_Bool`-vs-`i64` Bool returns (four instances), and before that CPR
-  width-3 needing `sret` (`native_set_to_list` silently returned `Nil` for months). Both were
-  invisible to `opt --passes=verify` and to linking, because LLVM only sees the `declare`. Two
-  increments: (a) a script parsing each `extern fn`, deriving the expected C signature and failing
-  on a mismatch against the definition — wired into `ci-fast-gates`; (b) longer term, generate the
-  C prototypes from the Sprout declarations so the two cannot drift. Note (a) also closes the
-  reverse audit hole the Bool bug exposed: `check_approved_builtins.sh` greps `long long <name>(`,
-  so any builtin with a different return type is invisible to `APPROVED_BUILTINS` too — four had
-  escaped for their whole history.
+  duplicate-declaration half is gated — `scripts/check_extern_signatures.sh` enforces one C symbol
+  to one `extern fn` — but it never reads `runtime/*.c`, so the type comparison is untouched and
+  is the whole of what remains. Second silent extern-ABI mismatch found by accident:
+  `_Bool`-vs-`i64` Bool returns, after CPR width-3 needing `sret` (`native_set_to_list` returned
+  `Nil` for months). Both were invisible to `opt --passes=verify` and to linking, because LLVM only
+  sees the `declare`. Derive each expected C signature from its `extern fn` and fail on a mismatch,
+  wired into `ci-fast-gates`; longer term generate the C prototypes from the declarations. That also
+  closes the reverse hole: `check_approved_builtins.sh` greps `long long <name>(`, so a builtin
+  returning anything else is invisible to `APPROVED_BUILTINS`.
 - [ ] `P3` **Transactional bootstrap (never destroy the last-good stage-1).** A failed bootstrap can
   delete the only working stage-1 binary, leaving no way forward but the committed seed. Bootstrap
   should stage the new binary to a temp path, verify it (fixed point + a smoke) before swapping, and
@@ -2307,47 +2135,34 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
 
 - [~] `P1` **A `where`-constrained function used as a first-class VALUE.** Fixed everywhere the
   dictionary is readable at the mention, by rewriting a bare mention into the eta-lambda the
-  programmer could have written (`eta_expand_constrained_arg`), placed in `infer_arg_slots`
-  **before** an argument is classified — one call frame deeper, inside `infer_var`, the
-  synthesized lambda lands on the eager branch where resolution has only the constrained function's
-  own signature to go on. All five remaining value positions were then closed by a single resolver
-  fix (`constraint_var_dict` walks the callee's declared type alongside the instantiated type
-  instead of scanning the return type for any `@inst` hit). **Residual: the reporter's original
-  failure has never been reproduced.** They reported the unresolved-dict poison thunk's
-  *"compiler-soundness backstop; please report"* message; ten probe shapes here reached the arity
-  panic or ran correctly and **none** emitted a poison thunk. `Double` was the strongest candidate
-  and is eliminated (a forwarded `ToString` dict at `Double` runs correctly; the `Eq` half is a
-  located compile error, there being no `instance Eq Double`). So either a further shape reaches the
-  poison, or a compiler version difference is in play. **This matters because the poison-sink entry
-  records that "there is no source-level RED that INVOKES a poison"** — a real source-level poison
-  would falsify that and is the more severe bug. **Get the exact triggering expression from the
-  reporter before choosing a fix**; a poison-reaching shape needs the producer-side guard, not the
-  eta path.
+  programmer could have written (`eta_expand_constrained_arg`) in `infer_arg_slots`; the five
+  remaining value positions then closed with a single resolver fix. **Residual: the reporter's
+  original failure has never been reproduced.** They reported the unresolved-dict poison thunk's
+  "please report" message; ten probe shapes here reached the arity panic or ran correctly and none
+  emitted a poison, `Double` included. That matters because the poison-sink entry records that no
+  source-level RED INVOKES a poison — a real one falsifies that and is the more severe bug. **Get
+  the triggering expression from the reporter first**; a poison-reaching shape needs a producer
+  guard.
 - [~] `P1` **Core verifier for dictionary passing — phase 2b (IR-level) pending.** Phases 1 and 2a
   are landed: `verify_dispatch.sprout` re-derives each constraint variable's type from the callee's
-  SOURCE signature, matched one-directionally against the concrete argument types — genuinely
-  **independent** of the resolver, so it also self-guards a `canonicalize_constrained_markers`
-  regression — and rejects a call whose injected `TDict` head disagrees. Return-type dispatch is
-  in scope as of 2a. **What phase 1 skips rather than verifies:** forwarded/polymorphic dicts inside
-  a generic function (the constraint truth is still a type variable), and the `++`/`mconcat`
-  **lowering-discard** case where the resolved dict is correct but dropped during IR emission —
-  which a post-resolve pass structurally cannot see. That second one is what **phase 2b** is for:
-  correlate the threaded dict *argument* in the lowered IR against the constraint's resolved head,
-  `translate_append_operands` being the historical discard site. **Residual gap in phase 1:**
-  class-method return-type dispatch via `TMethodRef` is uncovered — the signature table is
-  `TFnDecl`-based and `check_call` keys `TVar` callees.
+  SOURCE signature, genuinely independent of the resolver, and rejects a call whose injected `TDict`
+  head disagrees. What phase 1 skips rather than verifies: forwarded/polymorphic dicts inside a
+  generic function, and the `++`/`mconcat` **lowering-discard** case where the resolved dict is
+  correct but dropped during IR emission, which a post-resolve pass structurally cannot see. Phase
+  2b is for that second one — correlate the threaded dict argument in the lowered IR against the
+  constraint's resolved head, `translate_append_operands` being the historical discard site.
+  Residual gap in phase 1: class-method return-type dispatch via `TMethodRef` is uncovered, the
+  signature table being `TFnDecl`-based while `check_call` keys `TVar` callees.
 - [ ] `P2` **The remaining ungated scan can still pick the wrong marker.** When
   `check_instance_for_marker` cannot identify which argument carries the class variable it calls
-  `check_instance_fwd` with `Nothing`, keeping the ungated class-only scan, which has the same
-  first-in-dict-order defect. Repro: two constraints `ToString a, ToString b` rendered with
-  `to_string` — **both** calls lower to the dict for `a`, so the `b` value renders through `a`'s
-  instance. (`SPROUT_TRACE_DISPATCH=1` confirms the *caller* resolves all four dicts correctly; the
-  mis-selection is inside the callee.) **The obvious fix does not work:** gating that site as well
-  breaks the prelude's `map4` with `No instance of Applicative for a function type`, so the scan is
-  load-bearing for at least the Applicative shape. Closing it needs the post-pass repair to cover
-  the no-class-var-arg case — `dispatch_type_for_vars` already searches the declared parameter
-  types structurally and can find a class variable nested inside a container, which
-  `class_var_arg_or_fallback` cannot — and then the Applicative path re-checked against it.
+  `check_instance_fwd` with `Nothing`, keeping the class-only scan and its first-in-dict-order
+  defect. Repro: two constraints `ToString a, ToString b` rendered with `to_string` — both calls
+  lower to `a`'s dict, so the `b` value renders through `a`'s instance, and
+  `SPROUT_TRACE_DISPATCH=1` shows the caller resolving all four correctly, so the mis-selection is
+  inside the callee. Gating that site too breaks the prelude's `map4`, leaving the scan load-bearing
+  for at least the Applicative shape. Closing it needs the post-pass repair to cover the
+  no-class-var-arg case — `dispatch_type_for_vars` finds a class variable nested in a container,
+  `class_var_arg_or_fallback` cannot — then Applicative re-checked against it.
 - [ ] `P2` **The uncovered-dictionary diagnostic prints a compiler-internal placeholder and gives
   advice that cannot be followed.** For an unannotated parameter it says "add
   `where ToString _unann_n`" — and `_unann_<param>` is a synthesized placeholder the compiler's
@@ -2383,38 +2198,24 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   uncovered-dictionary check). The eta-expansion path should reject with the same ambiguity message
   the applied form uses, at the mention's position.
 - [ ] `P3` **Records are invisible to CPR.** `build_adt_ctor_index_go` matches `ast.TypeDecl` and
-  drops `ast.RecordDecl` into its skip arm, so a record type gets no `adt_index` entry — and
-  everything keyed off that index treats a record result as un-unboxable, so a function returning a
-  record is never given an unboxed worker however scalar its fields. **Costs nothing today, and that
-  is measured:** the motivating conversion's hot path emitted no worker before *or* after, so CPR
-  was not firing on the equivalent ADT either. Worth filing because the asymmetry is invisible at
-  the call site and silently *caps* an optimization rather than breaking anything — and because
-  "the result type has no ADT ctors" has now bitten twice from two type forms
-  (`docs/scalar-replacement-v0.md` Stage 1 already had to special-case tuple results for the same
-  reason). A record is a single-constructor product with a real tag and arity in the *same*
-  `CtorInfo` table, so the fix is plausibly just indexing `RecordDecl` alongside `TypeDecl`; verify
-  against the tuple-shaped catch-all hazard first, and gate on `just ir-golden-diff`.
+  drops `ast.RecordDecl` into its skip arm, so a record type gets no `adt_index` entry and a
+  function returning a record is never given an unboxed worker however scalar its fields. Costs
+  nothing measured today — the motivating hot path emitted no worker before *or* after. Worth
+  fixing because the asymmetry is invisible at the call site and silently *caps* an optimization
+  rather than breaking anything, and because "the result type has no ADT ctors" has now bitten from
+  two type forms (`docs/scalar-replacement-v0.md` Stage 1 special-cased tuple results for the same
+  reason). A record is a single-constructor product in the same `CtorInfo` table, so indexing
+  `RecordDecl` alongside `TypeDecl` is plausibly the whole fix; check the tuple-shaped catch-all
+  hazard first and gate on `just ir-golden-diff`.
 - [ ] `P3` **String templates lower to more allocations than the `++` chain they replace; make the
-  choice moot.** Full analysis: `docs/string-building-v0.md` §10 — that doc is the authority,
-  this entry exists so the work is findable. A backtick template builds a `List String` of the parts
-  then calls `string_concat_many`, so it allocates **n+2** objects against `++`'s **n−1**, at
-  every size, with no part count at which it catches up. It buys back copying (linear vs `++`'s
-  quadratic), so it loses below a ~1–2 KB result and wins above ~3 KB, reaching 9.41× at 13 KB.
-  **Counter-intuitive part, worth not re-deriving: the discriminator is bytes copied, not part
-  count** — each added part costs the template a `Cons` cell *and* a `to_string` call, so count
-  loads both sides and cancels. **Filed rather than fixed** because it is not a measured bottleneck;
-  the real payoff is deleting the guidance burden, so that "choose on readability" becomes the whole
-  rule and the PR #171 mistake (opened believing interpolation *saved* allocations) becomes
-  impossible rather than merely documented. **Options:** (a) syntactic — emit a `++` chain when
-  effective parts ≤ 4; wins or ties in every measured cell at 2 and 4 parts, one function, no
-  runtime change, but has a tail (four ~10 KB interpolations pessimised ~2.25×); (b) type-directed
-  — an `ast_to_ir` peephole picking `++` when every element's render length is
-  compile-time-bounded (`Int`/`Bool`/`Char`/literal), tail-free and **recommended**; (c) runtime —
-  a flat `alloca` buffer plus a `string_concat_n` builtin, which deletes the crossover but **needs
-  builtin approval up front** and careful shadow-stack rooting. **Blockers before code:** a
-  prior-art survey of how C#/Java/Kotlin/Scala choose an interpolation lowering, and builtin
-  approval for (c). **And the regression test must assert on emitted IR**, not on the resulting
-  string: the point is *which lowering is chosen*, and an output-only test passes under either.
+  choice moot.** A backtick template allocates n+2 objects against `++`'s n−1 at every size, but
+  buys back linear copying, so it loses below a ~1–2 KB result and wins above ~3 KB. Filed rather
+  than fixed: not a measured bottleneck, and the real payoff is deleting the guidance burden so
+  "choose on readability" becomes the whole rule. `docs/string-building-v0.md` §10 is the authority
+  and holds the measurements, the lowering options (§10.3 Variant 2, type-directed on provable
+  bounds, is the recommended one) and the blockers in §10.5 — a prior-art survey of how
+  C#/Java/Kotlin/Scala choose an interpolation lowering, and builtin approval for the runtime
+  option.
 - [ ] `P3` **`extern fn str_slice(s: String, from: Int, to: Int)` misnames its third parameter.** It
   is a **length**, not an end index — the runtime signature is `(s, start, length)` and the
   prelude documents it inline, but the declaration says `to`. Reading the declaration rather than

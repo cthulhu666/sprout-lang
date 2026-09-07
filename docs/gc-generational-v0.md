@@ -319,3 +319,36 @@ compose (Generational ZGC, G1). It is not throwaway work under any tier.
   nursery. It would also address the 34% of pass-1 slot-steps that step over
   already-FREE slots, which a nursery leaves untouched. Immix §5.3 implies the two
   compose better than either alone.
+
+## 11. The trigger is object-count-blind — first measured instance (2026-09-06)
+
+`sprout_gc_maybe_collect_threshold` fires on `g_managed_heap_count >= g_gc_threshold`,
+and the count increments by exactly 1 per managed object regardless of size — a
+`VectorVal`'s backing array is a plain `malloc`, invisible to the trigger. Many-small
+allocations over-collect, few-but-large under-collect. The `adapt_factor` default of
+3.0 amplifies it: the garbage budget between collections is `(factor − 1) × live`
+*objects*, so a workload retaining large invisible payloads tolerates twice as many.
+
+### 11.1 The gap is ~100,000×
+
+Compiling one function holding a 1,600-element `Vec Int` literal peaks at **3,188 MB
+RSS to produce 767 KB of output**, while the collector reports the live set as 71,178
+objects / 31.6 KB of strings. Scaling is clean quadratic in emitted IR bytes
+(RSS ≈ 1.0×10⁻⁵ × bytes², ±15% across two program shapes over a 4× size range) and
+confined to `emit-ir` — `bundle`/`check`/`lower`/`effects` are flat on the same inputs.
+
+### 11.2 `SPROUT_GC_THRESHOLD` cannot investigate this and will mislead you
+
+It sets only the *floor*, so with an adaptive target already at 7.7M objects, lowering
+it changes nothing: 3188 MB → 3189 / 3205 / 3215 MB at 4096 / 512 / 64. That flat
+result reads as "the memory must be live" and is worthless as evidence. The knobs that
+bind are `SPROUT_GC_ADAPT_FACTOR` and `SPROUT_GC_ADAPT_CAP`.
+
+### 11.3 A count-based cap is NOT the fix — it trades quadratic memory for a livelock
+
+`SPROUT_GC_ADAPT_CAP=50000` collapses peak RSS to 10 MB, proving the garbage is
+collectable, but the run never finishes: live (71,178) permanently exceeds the cap, so
+every allocation triggers a full mark — 363,713 cycles at ~980 µs, `alloc_since_gc=1`,
+`swept=0`, killed at 300 s. This is the concrete argument that the trigger must become
+byte-aware rather than merely tighter, and it is a ready-made reproducer. Note the
+livelock detector did not abort a textbook livelock.
