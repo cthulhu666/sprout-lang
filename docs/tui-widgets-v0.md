@@ -46,18 +46,21 @@ constraint solver.
 > prism-shaped, taking a backward `unf: n -> Maybe m`. Read that document for the routing
 > half — §3.1 and §3.8 below describe the contract as it shipped in M3.
 
-> **A proposed change, not yet implemented.** `docs/tui-widget-set-v0.md` §4.3
-> replaces `measure`'s return with a `Measured` record — a size plus a per-axis
-> `Fixed`/`Greedy` — because a `Size` alone cannot say "give me whatever is
-> left", and the workaround (a large number) is read by `solve` as a
-> high-priority demand instead. The signature below is what the code does today.
+> **Superseded in part by `docs/tui-widget-set-v0.md`.** `measure` returns a
+> `Measured` — a size plus a per-axis `Fixed`/`Greedy` — because a `Size` alone
+> cannot say "give me whatever is left", and the workaround (a large number) is
+> read by `solve` as a high-priority demand instead. Shown below as it now is;
+> that document's §4.3 has the reasoning.
 
 ```sprout
+type Grow = | Fixed | Greedy
+type Measured = (size: Size, cols: Grow, rows: Grow)
+
 type View s m = (
   state:    s,
   on_event: s -> Event -> (s, List m, List (Cmd m)),
   render:   s -> Region -> Screen -> Unit !{IO},
-  measure:  s -> Size -> Size
+  measure:  s -> Size -> Measured
 )
 
 type Widget m = | exists s. Widget (View s m)
@@ -302,7 +305,7 @@ does not write an empty list in every arm.
 | `stdlib/tui/text.sprout` | cluster segmentation, `width`, `wrap_to`, `truncate` | pure half |
 | `stdlib/tui/layout.sprout` | `Dimension`, `Edge`, `solve`, `row`, `column`, `grid`, `dock` | pure half |
 | `stdlib/tui/geometry.sprout` | `split_right`, `split_bottom` added | pure half |
-| `stdlib/tui/widget.sprout` | `View`, `Widget`, `WidgetId`, `Cmd`, `on_event`, `feed`, `measure`, `render`, `map_msgs`, `cmd_run`, `cmd_map` | app-loop half |
+| `stdlib/tui/widget.sprout` | `View`, `Widget`, `WidgetId`, `Cmd`, `on_event`, `feed`, `measure`, `render`, `map_msgs`, `cmd_run`, `cmd_map`; later `Grow`, `Measured`, `fixed_size`, `greedy_size` (M4, `docs/tui-widget-set-v0.md` §4.3) | app-loop half |
 | `stdlib/tui/app.sprout` | `Flow`, `Signal`, `App`, `apply`, `step`, `run`, `done` | app-loop half |
 
 Both modules grew a routing surface afterwards — `Delivery`, `route`, `deliver`, `step_to`,

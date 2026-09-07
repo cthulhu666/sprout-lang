@@ -1,6 +1,6 @@
 # TUI M4 — the widget set, slice C1: containers and static content
 
-> Status: **design, not yet implemented**. Non-normative; `docs/spec-v0.md` is
+> Status: **implemented** (C1). Non-normative; `docs/spec-v0.md` is
 > unaffected. Covers `stdlib/tui/widgets/` — the widget *set*. The widget
 > *model* (the box, layout, the pump) is `docs/tui-widgets-v0.md`, and addressed
 > delivery is `docs/tui-routing-v0.md`.
@@ -106,9 +106,9 @@ and does not establish.
 ```sprout
 export type Slot m          # constructors NOT exported
 
-export fn cells(n: Int, w: Widget m) -> Slot m       # exactly n
-export fn fraction(n: Int, w: Widget m) -> Slot m    # weight n of what is left
-export fn fit(w: Widget m) -> Slot m                 # the child's own measurement
+export fn cells(n: Int, child: Widget m) -> Slot m     # exactly n
+export fn fraction(n: Int, child: Widget m) -> Slot m  # weight n of what is left
+export fn fit(child: Widget m) -> Slot m               # the child's measurement
 ```
 
 *Two parallel lists cannot desync.* The dashboard carries `dims` and `kids`
@@ -125,9 +125,12 @@ states for three meanings. Constructor functions give exactly three
 imports, and let `fit_max` (§10) arrive additively rather than as a fourth
 constructor every user match has to grow a case for.
 
-`grid` takes plain `Dimension` templates rather than slots: a grid cell's size
-comes from the row and column templates, not from the child in it, so `fit` has
-no meaning there.
+`grid` takes `Dimension` templates rather than slots: a grid cell's size comes
+from the row and column templates, not from the child in it, so `fit` has no
+meaning there. The two templates are tagged `Cols`/`Rows` (guidelines §7) —
+they are the same type, sit side by side, and a swap silently transposes the
+grid rather than failing. Verified the tag bites: passing them the other way
+round is `Call type mismatch: … Cols vs Rows`.
 
 ### 4.3 `measure` reports how a widget grows, not just how big it is
 
@@ -248,8 +251,12 @@ export type Measured = (size: geometry.Size, cols: Grow, rows: Grow)
 
 export type View s m = ( … , measure: s -> geometry.Size -> Measured )
 
-# The leaf spelling, so a widget with nothing to say about growth says it once.
+# The two leaf spellings, so a widget with nothing to say about growth says it
+# once. `greedy_size` was not in the first draft; the dashboard's log pane
+# needed it, and under the old contract it said the same thing by returning
+# `avail` — the spelling §4.3 removes.
 export fn fixed_size(sz: geometry.Size) -> Measured
+export fn greedy_size(sz: geometry.Size) -> Measured
 ```
 
 ```sprout
@@ -257,14 +264,18 @@ module stdlib.tui.widgets.container
 
 export type Slot m                # opaque; §4.2
 
-export fn cells(n: Int, w: Widget m) -> Slot m
-export fn fraction(n: Int, w: Widget m) -> Slot m
-export fn fit(w: Widget m) -> Slot m
+export fn cells(n: Int, child: Widget m) -> Slot m
+export fn fraction(n: Int, child: Widget m) -> Slot m
+export fn fit(child: Widget m) -> Slot m
 
-export fn row(kids: List (Slot m)) -> Widget m
-export fn column(kids: List (Slot m)) -> Widget m
-export fn grid(cols: List layout.Dimension, rows: List layout.Dimension,
-               kids: List (Widget m)) -> Widget m
+# A grid's two templates are both `List layout.Dimension` and adjacent, so a
+# swap silently transposes the layout. Tagged, per guidelines §7.
+export wrap Cols = List layout.Dimension
+export wrap Rows = List layout.Dimension
+
+export fn row(slots: List (Slot m)) -> Widget m
+export fn column(slots: List (Slot m)) -> Widget m
+export fn grid(cols: Cols, rows: Rows, kids: List (Widget m)) -> Widget m
 ```
 
 ```sprout
@@ -272,13 +283,13 @@ module stdlib.tui.widgets.children
 
 # The four traversals, over a bare child list, so every future child-holding
 # widget reuses them instead of writing a fifth copy.
-export fn broadcast(ws: List (Widget m),
-                    ev: Event) -> (List (Widget m), List m, List (Cmd m))
-export fn deliver_first(ws: List (Widget m), target: WidgetId,
-                        d: Delivery m) -> Maybe (List (Widget m), List m, List (Cmd m))
-export fn render_zip(ws: List (Widget m), rs: List Region,
-                     s: Screen) -> Unit !{IO}
-export fn measure_all(ws: List (Widget m), avail: Size) -> List Measured
+export fn broadcast(evt: Event,
+                    kids: List (Widget m)) -> (List (Widget m), List m, List (Cmd m))
+export fn deliver_first(target: WidgetId, d: Delivery m,
+                        kids: List (Widget m)) -> Maybe (List (Widget m), List m, List (Cmd m))
+export fn render_zip(regions: List Region, screen: Screen,
+                     kids: List (Widget m)) -> Unit !{IO}
+export fn measure_all(avail: Size, kids: List (Widget m)) -> List Measured
 ```
 
 ```sprout
@@ -302,11 +313,17 @@ simple static content" and `Label` is derived from it.
 module stdlib.tui.widgets.paint
 
 # Clipped on both axes: a widget never paints outside the region it was handed.
-export fn line(s: Screen, r: Region, row: Int, t: String,
-               st: style.Style) -> Unit !{IO}
-export fn lines(s: Screen, r: Region, from_row: Int, ls: List String,
-                st: style.Style) -> Unit !{IO}
+export fn line(screen: Screen, region: Region, row: Int, content: String,
+               style: Style) -> Unit !{IO}
+export fn lines(screen: Screen, region: Region, from_row: Int,
+                content: List String, style: Style) -> Unit !{IO}
 ```
+
+Receiver-first rather than data-last, which is a deviation from guidelines §6
+and the only one in this change. These two wrap `screen.screen_write` and are
+called beside it in every `render`; neither is ever `|>`-chained, since both
+return `Unit`. Matching the module they wrap reads better than matching the
+convention.
 
 Grid children fill cells row-major. A child with no cell is rendered into an
 empty region rather than dropped, so `geometry.is_empty` remains the single
@@ -346,10 +363,18 @@ widgets and their tests today:
 
 | site | change |
 |---|---|
-| `examples/tui_dashboard.sprout:83,116,150,228` | four `measure` fns return `Measured`; three are `widget.fixed_size(…)` |
-| `tests/stdlib/test_tui_widget.spr` | constructions plus the one `measure` assertion (`:84`) |
-| `tests/stdlib/test_tui_route.spr` | constructions only |
+| `examples/tui_dashboard.sprout` | two surviving `measure` fns — `fixed_size` for the clock, `greedy_size` for the log; the other two went with the hand-written `Box` and `label` |
+| `tests/stdlib/test_tui_widget.spr` | two constructions plus the `measure` assertion |
+| `tests/stdlib/test_tui_route.spr` | leaf and container constructions |
+| `tests/stdlib/test_tui_cmd.spr` | one construction plus a `measure` reader |
+| `tests/stdlib/test_tui_app.spr` | one construction plus a `measure` reader |
 | `docs/tui-widgets-v0.md` §3.1 | the `View` record it prints |
+
+Five files, not the three this table first listed: `test_tui_cmd` and `test_tui_app`
+build `View`s too, which a grep for `measure` found and reading the §8 draft did
+not. `widget.greedy_size` was added alongside `fixed_size` for the same reason
+the dashboard needed it — a log pane genuinely does yield, and under the old
+contract it said so by returning `avail`, the exact spelling §4.3 removes.
 
 `widget.fixed_size` exists so the common leaf case is one call rather than a
 record literal, keeping the diff mechanical. Nothing outside `stdlib/tui` and its
@@ -382,16 +407,21 @@ abstraction.
   can be embedded across vocabularies, and nothing in-tree exercises a prism
   wrapping a repacking generic container — the existing widget tests are all
   monomorphic.
-- **The spike, re-run on the real type.** §11's evidence used a tuple; `Slot` is
-  an opaque generic ADT holding the existential in a constructor payload, which
-  is a different lowering path.
+- **The spike's shape, on the real type.** §11's evidence used a tuple; `Slot`
+  is an opaque generic ADT holding the existential in a constructor payload, a
+  different lowering path. No separate test was needed in the end — every
+  assertion in `test_tui_container.spr` runs through `ct.cells`/`fraction`/`fit`,
+  so the real shape is exercised twenty-seven times over.
 - `tests/stdlib/test_tui_text.spr` — extend, or a new `test_tui_widgets_text.spr`:
   `label` and `static` measure their content; both clip to a region narrower and
   shorter than the content, asserted by reading cells back with `screen.text_at`
   rather than by inspecting the widget.
-- `tests/stdlib/test_tui_route.spr` — its hand-written container is replaced by
-  the stdlib one. The assertions do not change; that they still pass is the
-  evidence the semantics moved verbatim (§4.4).
+- `tests/stdlib/test_tui_route.spr` — **kept its own hand-written container**,
+  against the plan above. Replacing it would have made the routing suite depend
+  on the container it is meant to be independent evidence for; what it exercises
+  is `widget.deliver` and the `Maybe` decline directly, which nothing else does.
+  The verbatim-move claim (§4.4) is carried instead by the walk's own assertions
+  in `test_tui_container.spr` — first claimant, decline, duplicate-id order.
 - Golden IR: adding a container to `examples/` does not add a corpus file, but
   rewriting `tui_dashboard` changes its golden. Per AGENTS.md #12 the diff is
   read before regenerating.

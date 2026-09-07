@@ -60,7 +60,8 @@ fn dup_handler(n: Int, d: widget.Delivery Msg) -> (Int, Says, Asks) =
 
 fn leaf_on_event(n: Int, ev: event.Event) -> (Int, Says, Asks) = (n, Nil, Nil)
 
-fn leaf_measure(n: Int, avail: g.Size) -> g.Size = g.Size(n, 1)
+fn leaf_measure(n: Int, avail: g.Size) -> widget.Measured =
+  widget.fixed_size(g.Size(n, 1))
 
 fn leaf_render(n: Int, r: g.Region, s: scr.Screen) -> Unit !{IO} = ()
 
@@ -87,7 +88,8 @@ fn mute(n: Int) -> widget.Widget Msg =
 
 fn box_on_event(kids: Kids, ev: event.Event) -> (Kids, Says, Asks) = (kids, Nil, Nil)
 
-fn box_measure(kids: Kids, avail: g.Size) -> g.Size = avail
+fn box_measure(kids: Kids, avail: g.Size) -> widget.Measured =
+  widget.fixed_size(avail)
 
 fn box_render(kids: Kids, r: g.Region, s: scr.Screen) -> Unit !{IO} = ()
 

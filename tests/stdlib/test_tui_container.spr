@@ -1,0 +1,264 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.tui.event as event
+import stdlib.tui.geometry as g
+import stdlib.tui.layout as layout
+import stdlib.tui.screen as scr
+import stdlib.tui.widget as widget
+import stdlib.tui.widgets.container as ct
+import stdlib.tui.widgets.text as txt
+
+# Containers and the static set. Design: docs/tui-widget-set-v0.md.
+#
+# Layout is asserted by RENDERING and reading cells back, not by inspecting a
+# region list: `regions_of` is private, and what a user can observe is where the
+# glyphs landed. That also makes the starvation case below a real regression
+# test — a starved child is one whose text is simply absent.
+
+type Msg (..) deriving (Eq, ToString) =
+  | Tick
+  | Said String
+
+# ── observing a rendered tree ───────────────────────────────────────────────
+
+fn painted(w: widget.Widget Msg, cols: Int, rows: Int) -> scr.Screen !{IO} = do
+  s <- scr.screen_new(g.Size(cols, rows))
+  widget.render(w, g.Region(0, 0, cols, rows), s)
+  s
+
+# The first cell of a row — enough to tell which widget owns it, since each
+# fixture below starts its lines with a distinct letter.
+fn head_of(s: scr.Screen, row: Int) -> String !{IO} = scr.text_at(s, 0, row)
+
+fn grow_of(w: widget.Widget Msg, cols: Int, rows: Int) -> String =
+  to_string(widget.measure(w, g.Size(cols, rows)).rows)
+
+fn size_of(w: widget.Widget Msg, cols: Int, rows: Int) -> String =
+  to_string(widget.measure(w, g.Size(cols, rows)).size)
+
+fn main() -> Unit !{IO} = do
+  state <- new_state()
+  starvation_cases(state)
+  fit_cases(state)
+  measure_cases(state)
+  broadcast_cases(state)
+  delivery_cases(state)
+  prism_cases(state)
+  static_cases(state)
+  summary(state)
+
+# ── the starvation regression ───────────────────────────────────────────────
+
+# A panel with a fraction body, in a `fit` slot, beside a fraction sibling.
+#
+# This is the case the first draft of the design got wrong. It signalled
+# "greedy" by reporting `avail` from `measure`, which the parent turned into
+# `layout.Auto(24)` — and `solve` pays Auto BEFORE fractions, so the panel took
+# all 24 rows and MAIN was laid out into a zero-row region and vanished with no
+# error. `Grow` exists so a yielding child becomes a `Fraction` instead.
+fn panel() -> widget.Widget Msg =
+  ct.column([ct.cells(1, txt.label("TITLE")), ct.fraction(1, txt.label("BODY"))])
+
+fn starved() -> widget.Widget Msg =
+  ct.column([ct.fit(panel()), ct.fraction(1, txt.label("MAIN"))])
+
+# The same shape with content rather than a fraction inside: a genuinely
+# content-sized panel must NOT take the whole axis.
+fn snug() -> widget.Widget Msg =
+  ct.column([ct.fit(txt.static(["AAA", "AAA"])), ct.fraction(1, txt.label("MAIN"))])
+
+fn starvation_cases(state: TestState) -> Unit !{IO} = do
+  s <- painted(starved(), 20, 24)
+  t0 <- head_of(s, 0)
+  t1 <- head_of(s, 1)
+  t12 <- head_of(s, 12)
+  assert_eq(state, "a fit panel keeps its own title", t0, "T")
+  assert_eq(state, "the panel's fraction body follows it", t1, "B")
+  # The regression proper: under the old rule this row was blank.
+  assert_eq(state, "a fraction sibling of a greedy fit slot is not starved",
+            t12, "M")
+  # A container that yields must report that it yields.
+  assert_eq(state, "a container holding a fraction grows greedily",
+            grow_of(panel(), 20, 24), "Greedy")
+
+  s2 <- painted(snug(), 20, 24)
+  u0 <- head_of(s2, 0)
+  u2 <- head_of(s2, 2)
+  assert_eq(state, "a content-sized panel paints its content", u0, "A")
+  # Two lines of content, so the sibling starts at row 2 — not row 24.
+  assert_eq(state, "a fit slot takes only what its child measured", u2, "M")
+  assert_eq(state, "a container of fixed children stays fixed",
+            grow_of(ct.column([ct.fit(txt.label("x"))]), 20, 24), "Fixed")
+
+# ── fit resolves through the child's measure ────────────────────────────────
+
+fn fit_cases(state: TestState) -> Unit !{IO} = do
+  # A three-line static in a fit slot occupies exactly three rows.
+  s <- painted(stacked(), 20, 10)
+  a0 <- head_of(s, 0)
+  a3 <- head_of(s, 3)
+  assert_eq(state, "a fit static starts at the top", a0, "A")
+  assert_eq(state, "the next slot begins after the measured height", a3, "Z")
+
+fn stacked() -> widget.Widget Msg =
+  ct.column([ct.fit(txt.static(["AAA", "AAA", "AAA"])),
+             ct.fraction(1, txt.label("ZZZ"))])
+
+# ── a container's own Measured ──────────────────────────────────────────────
+
+fn measure_cases(state: TestState) -> Unit !{IO} = do
+  # Along the axis the asks sum; across it they take the widest.
+  assert_eq(state, "a column sums heights and takes the widest line",
+            size_of(ct.column([ct.fit(txt.label("abcd")),
+                               ct.fit(txt.static(["ef", "gh"]))]), 20, 24),
+            to_string(g.Size(4, 3)))
+  # A row does the same on the other axis.
+  assert_eq(state, "a row sums widths and takes the tallest",
+            size_of(ct.row([ct.fit(txt.label("ab")),
+                            ct.fit(txt.static(["c", "d"]))]), 20, 24),
+            to_string(g.Size(3, 2)))
+  # Clamped to what is available, never larger.
+  assert_eq(state, "a container never measures larger than avail",
+            size_of(ct.column([ct.fit(txt.static(["a", "b", "c", "d"]))]), 20, 2),
+            to_string(g.Size(1, 2)))
+  # A grid's growth comes from its templates. The two are tagged, so passing
+  # them the other way round is a type error rather than a transposed grid.
+  assert_eq(state, "a grid with a fraction template grows greedily",
+            grow_of(ct.grid(ct.Cols([layout.Cells(4)]),
+                            ct.Rows([layout.Fraction(1)]),
+                            [txt.label("a")]), 20, 24),
+            "Greedy")
+  assert_eq(state, "a grid of fixed templates stays fixed",
+            grow_of(ct.grid(ct.Cols([layout.Cells(4)]),
+                            ct.Rows([layout.Cells(2)]),
+                            [txt.label("a")]), 20, 24),
+            "Fixed")
+
+# ── broadcast reaches every child, in order ─────────────────────────────────
+
+fn talker(name: String) -> widget.Widget Msg =
+  widget.Widget(widget.View(state = name, on_event = talker_on_event,
+                            route = widget.no_route,
+                            render = talker_render, measure = talker_measure))
+
+fn talker_on_event(name: String,
+                   ev: event.Event) -> (String, List Msg, List(widget.Cmd Msg)) =
+  (name, [Said(name)], Nil)
+
+fn talker_measure(name: String, avail: g.Size) -> widget.Measured =
+  widget.fixed_size(g.Size(1, 1))
+
+fn talker_render(name: String, r: g.Region, s: scr.Screen) -> Unit !{IO} = ()
+
+fn said(w: widget.Widget Msg) -> String =
+  match widget.on_event(w, event.TickEvent) with
+  | (_, msgs, _) -> to_string(msgs)
+
+fn broadcast_cases(state: TestState) -> Unit !{IO} =
+  # Declaration order, not reverse: a widget's reply depends on the state the
+  # previous event left, so order is part of the contract.
+  assert_eq(state, "every child sees the event, in declaration order",
+            said(ct.column([ct.fit(talker("a")), ct.fit(talker("b")),
+                            ct.fit(talker("c"))])),
+            to_string([Said("a"), Said("b"), Said("c")]))
+
+# ── addressed delivery stops at the first claimant ──────────────────────────
+
+fn claimer(name: String) -> widget.Widget Msg =
+  widget.Widget(widget.View(state = name, on_event = talker_on_event,
+                            route = widget.route_if(widget.WidgetId(name),
+                                                    claim_handler, _, _, _),
+                            render = talker_render, measure = talker_measure))
+
+fn claim_handler(name: String,
+                 d: widget.Delivery Msg) -> (String, List Msg, List(widget.Cmd Msg)) =
+  (name, [Said(name)], Nil)
+
+fn delivered(w: widget.Widget Msg, name: String) -> String =
+  match widget.deliver(w, widget.WidgetId(name), widget.ToMsg(Tick)) with
+  | Nothing -> "none"
+  | Just (_, msgs, _) -> to_string(msgs)
+
+fn delivery_cases(state: TestState) -> Unit !{IO} = do
+  let tree = ct.column([ct.fit(claimer("a")), ct.fit(claimer("b"))])
+  assert_eq(state, "a container forwards to the child that claims",
+            delivered(tree, "b"), to_string([Said("b")]))
+  # A decline must stay a decline all the way up, or the fallback to `update`
+  # in the app loop never fires.
+  assert_eq(state, "a container declines what no child claims",
+            delivered(tree, "zzz"), "none")
+  # Two children answering to one id resolve by tree order, not by delivering
+  # the same answer twice.
+  assert_eq(state, "a duplicated id resolves to the first in tree order",
+            delivered(ct.column([ct.fit(claimer("dup")), ct.fit(claimer("dup"))]),
+                      "dup"),
+            to_string([Said("dup")]))
+
+# ── a container embedded in another vocabulary ──────────────────────────────
+
+# Genericity in `m` exists so a container can be embedded in an application
+# that speaks something else. `map_msgs` is a prism, and a container repacks
+# its children on the way back, so the two compose only if the prism's backward
+# half survives the repack — the composition nothing else in the tree covers.
+
+type Outer (..) deriving (Eq, ToString) =
+  | Wrapped Msg
+  | Foreign
+
+fn wrap_msg(m: Msg) -> Outer = Wrapped(m)
+
+fn unwrap_msg(o: Outer) -> Maybe Msg =
+  match o with
+  | Wrapped m -> Just(m)
+  | Foreign -> Nothing
+
+fn embedded() -> widget.Widget Outer =
+  widget.map_msgs(wrap_msg, unwrap_msg,
+                  ct.column([ct.fit(claimer("a")), ct.fit(claimer("b"))]))
+
+fn outer_delivered(w: widget.Widget Outer, name: String, d: Outer) -> String =
+  match widget.deliver(w, widget.WidgetId(name), widget.ToMsg(d)) with
+  | Nothing -> "none"
+  | Just (_, msgs, _) -> to_string(msgs)
+
+fn prism_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "a delivery crosses the prism into an embedded container",
+            outer_delivered(embedded(), "b", Wrapped (Tick)),
+            to_string([Wrapped (Said("b"))]))
+  # A message the embedded widget does not speak is declined, not guessed at,
+  # so it still reaches the outer application.
+  assert_eq(state, "a foreign message is declined by the embedded container",
+            outer_delivered(embedded(), "b", Foreign), "none")
+  # Broadcast crosses too, and comes back retargeted.
+  assert_eq(state, "an event crosses the prism and the reply is retargeted",
+            said_outer(embedded()),
+            to_string([Wrapped (Said("a")), Wrapped (Said("b"))]))
+
+fn said_outer(w: widget.Widget Outer) -> String =
+  match widget.on_event(w, event.TickEvent) with
+  | (_, msgs, _) -> to_string(msgs)
+
+# ── label, static, spacer ───────────────────────────────────────────────────
+
+fn static_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "a label measures its own width, one row high",
+            size_of(txt.label("hello"), 20, 24), to_string(g.Size(5, 1)))
+  assert_eq(state, "a static measures its widest line and its line count",
+            size_of(txt.static(["ab", "cdef"]), 20, 24), to_string(g.Size(4, 2)))
+  assert_eq(state, "a spacer measures nothing",
+            size_of(txt.spacer(), 20, 24), to_string(g.Size(0, 0)))
+  assert_eq(state, "static content never yields",
+            grow_of(txt.static(["ab"]), 20, 24), "Fixed")
+
+  # Clipping, on both axes. `screen_write` stops at the SCREEN edge, so without
+  # the region clip a wide label would overwrite whatever sits beside it and a
+  # tall static would paint below its region.
+  s <- painted(ct.row([ct.cells(3, txt.label("XXXXXXXX")),
+                       ct.fraction(1, txt.label("Y"))]), 20, 3)
+  y <- scr.text_at(s, 3, 0)
+  assert_eq(state, "a label wider than its region does not overwrite a sibling",
+            y, "Y")
+
+  s2 <- painted(ct.column([ct.cells(2, txt.static(["A", "B", "C", "D"]))]), 20, 5)
+  below <- scr.text_at(s2, 0, 2)
+  assert_eq(state, "a static taller than its region does not paint below it",
+            below, " ")

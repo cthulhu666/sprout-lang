@@ -1,0 +1,96 @@
+module stdlib.tui.widgets.children
+
+# The four traversals every container needs, over a bare child list. Exported
+# rather than buried in `container` because `scroll_view`, `tabs` and `tree`
+# need the same four, and an application writing a container with its own
+# layout should not have to write a fifth copy. Design:
+# docs/tui-widget-set-v0.md §5.
+
+import stdlib.tui.event as event
+import stdlib.tui.geometry as geometry
+import stdlib.tui.screen as scr
+import stdlib.tui.widget as widget
+
+# Accumulate reversed and reverse once, so a long child list is linear rather
+# than quadratic in `++`.
+fn push_all(xs: List a, acc: List a) -> List a =
+  list_fold(\ (seen, x) -> Cons(x, seen), acc, xs)
+
+# ── broadcast ───────────────────────────────────────────────────────────────
+
+# Every child sees the event, in order, and their messages and commands are
+# concatenated. A container forwards what its children ask for without knowing
+# what any of it means.
+export fn broadcast(evt: event.Event,
+                    kids: List (widget.Widget m)) -> (List(widget.Widget m), List m, List(widget.Cmd m)) =
+  broadcast_go(evt, kids, Nil, Nil, Nil)
+
+fn broadcast_go(evt: event.Event, ws: List (widget.Widget m),
+                wacc: List (widget.Widget m), macc: List m,
+                cacc: List (widget.Cmd m)) -> (List(widget.Widget m), List m, List(widget.Cmd m)) =
+  match ws with
+  | Nil -> (list_reverse(wacc), list_reverse(macc), list_reverse(cacc))
+  | [w | rest] -> broadcast_step(widget.on_event(w, evt), evt, rest, wacc, macc, cacc)
+
+fn broadcast_step(r: (widget.Widget m, List m, List(widget.Cmd m)),
+                  evt: event.Event, rest: List (widget.Widget m),
+                  wacc: List (widget.Widget m), macc: List m,
+                  cacc: List (widget.Cmd m)) -> (List(widget.Widget m), List m, List(widget.Cmd m)) =
+  match r with
+  | (w2, msgs, cmds) ->
+      broadcast_go(evt, rest, Cons(w2, wacc), push_all(msgs, macc), push_all(cmds, cacc))
+
+# ── addressed delivery ──────────────────────────────────────────────────────
+
+# An addressed delivery goes DOWN, not to everyone: try each child until one
+# claims the address, and answer `Nothing` if none did, so an unclaimed answer
+# still reaches `update`. Stopping at the first claimant makes a duplicated id
+# resolve by tree order rather than delivering the same answer twice.
+export fn deliver_first(target: widget.WidgetId, d: widget.Delivery m,
+                        kids: List (widget.Widget m)) -> Maybe (List(widget.Widget m), List m, List(widget.Cmd m)) =
+  deliver_go(target, d, kids, Nil)
+
+fn deliver_go(target: widget.WidgetId, d: widget.Delivery m,
+              ws: List (widget.Widget m),
+              seen: List (widget.Widget m)) -> Maybe (List(widget.Widget m), List m, List(widget.Cmd m)) =
+  match ws with
+  | Nil -> Nothing
+  | [w | rest] ->
+      match widget.deliver(w, target, d) with
+      | Nothing -> deliver_go(target, d, rest, Cons(w, seen))
+      | Just claimed -> Just(deliver_hit(claimed, rest, seen))
+
+# A child that declined is unchanged, so only the claimant is spliced back in.
+fn deliver_hit(r: (widget.Widget m, List m, List(widget.Cmd m)),
+               rest: List (widget.Widget m),
+               seen: List (widget.Widget m)) -> (List(widget.Widget m), List m, List(widget.Cmd m)) =
+  match r with
+  | (w2, msgs, cmds) -> (list_append(list_reverse(Cons(w2, seen)), rest), msgs, cmds)
+
+# ── painting and measuring ──────────────────────────────────────────────────
+
+# Children against their regions, pairwise. A child with no region is not
+# painted; a region with no child is left as the frame's clear left it.
+export fn render_zip(regions: List geometry.Region, screen: scr.Screen,
+                     kids: List (widget.Widget m)) -> Unit !{IO} =
+  match kids with
+  | Nil -> ()
+  | [w | rest] -> render_pair(w, rest, regions, screen)
+
+fn render_pair(w: widget.Widget m, rest: List (widget.Widget m),
+               rs: List geometry.Region, s: scr.Screen) -> Unit !{IO} =
+  match rs with
+  | Nil -> ()
+  | [r | rrest] -> render_then(w, r, s, rest, rrest)
+
+fn render_then(w: widget.Widget m, r: geometry.Region, s: scr.Screen,
+               rest: List (widget.Widget m),
+               rrest: List geometry.Region) -> Unit !{IO} = do
+  widget.render(w, r, s)
+  render_zip(rrest, s, rest)
+
+# Each child against the container's FULL `avail`, never a running remainder:
+# a child's reported size must not depend on its position among its siblings.
+export fn measure_all(avail: geometry.Size,
+                      kids: List (widget.Widget m)) -> List widget.Measured =
+  list_map(widget.measure(_, avail), kids)

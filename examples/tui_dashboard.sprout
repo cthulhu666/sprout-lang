@@ -1,12 +1,11 @@
 module main
 
-# A whole TUI in one file: the widget box, the layout engine and the message
-# pump. Design: docs/tui-widgets-v0.md.
+# A whole TUI: two widgets of the application's own, arranged with stdlib
+# containers. Design: docs/tui-widgets-v0.md, docs/tui-widget-set-v0.md.
 #
-# Three leaf widgets with three DIFFERENT hidden state types — a record, a
-# List String and a String — sit in one tree, and a container widget holds them
-# in a `List (Widget Msg)` without being able to see any of their states. That
-# is the existential doing its job: `s` is private, `m` is shared.
+# Two leaf widgets with DIFFERENT hidden state types — a record and a
+# List String — sit in one tree, and neither can see the other's state. That is
+# the existential doing its job: `s` is private, `m` is shared.
 #
 # The clock is the round trip: it ASKS for the time with an addressed command
 # and the answer is delivered back to it, never to the application. Design:
@@ -19,11 +18,13 @@ import stdlib.time as time
 import stdlib.tui.app as app
 import stdlib.tui.event as event
 import stdlib.tui.geometry as g
-import stdlib.tui.layout as layout
 import stdlib.tui.screen as scr
 import stdlib.tui.style as sty
 import stdlib.tui.text as text
 import stdlib.tui.widget as widget
+import stdlib.tui.widgets.container as ct
+import stdlib.tui.widgets.paint as paint
+import stdlib.tui.widgets.text as txt
 
 # The one vocabulary every widget in this application speaks.
 type Msg (..) deriving (Eq, ToString) =
@@ -34,14 +35,6 @@ type Msg (..) deriving (Eq, ToString) =
 fn dim() -> sty.Style = sty.with_fg(sty.style_default(), sty.Ansi(8))
 
 fn bright() -> sty.Style = sty.with_bold(sty.style_default(), true)
-
-# Write one line, clipped to the region — a widget must never paint outside the
-# region it was handed.
-fn line(s: scr.Screen, r: g.Region, row: Int, txt: String,
-        st: sty.Style) -> Unit !{IO} = do
-  stop <- scr.screen_write(s, g.region_col(r), g.region_row(r) + row,
-                           text.truncate(txt, g.region_cols(r)), st)
-  ()
 
 # What a widget hands back besides its new state: what it said, and what it
 # wants done. Named once, because every widget below repeats the pair.
@@ -80,11 +73,14 @@ fn stamped(t: Ticks, m: Msg) -> Ticks =
 
 fn first_of(t: Ticks, us: Int) -> Int = if t.first == 0 then us else t.first
 
-fn ticks_measure(t: Ticks, avail: g.Size) -> g.Size = g.Size(g.size_cols(avail), 2)
+# Two rows of content, as wide as it is given: a definite height is what lets a
+# caller put this in a `fit` slot.
+fn ticks_measure(t: Ticks, avail: g.Size) -> widget.Measured =
+  widget.fixed_size(g.Size(g.size_cols(avail), 2))
 
 fn ticks_render(t: Ticks, r: g.Region, s: scr.Screen) -> Unit !{IO} = do
-  line(s, r, 0, "ticks", dim())
-  line(s, r, 1, `${t.n}  up ${uptime_s(t)}s`, bright())
+  paint.line(s, r, 0, "ticks", dim())
+  paint.line(s, r, 1, `${t.n}  up ${uptime_s(t)}s`, bright())
 
 fn uptime_s(t: Ticks) -> Int =
   if t.first == 0 then 0 else (t.now - t.first) / 1000000
@@ -113,160 +109,37 @@ fn on_char(log: List String, c: Char) -> (List String, Says, Asks) =
   if c == 'q' then (log, [Quit], Nil)
   else (Cons(char_to_string(c), log), [Typed(char_to_string(c))], Nil)
 
-fn keys_measure(log: List String, avail: g.Size) -> g.Size = avail
-
-fn keys_render(log: List String, r: g.Region, s: scr.Screen) -> Unit !{IO} = do
-  line(s, r, 0, "keys", dim())
-  render_lines(s, r, 1, text.wrap_to(string.join(" ", log), g.region_cols(r)))
+# A log fills whatever it is given, which is what `Greedy` says. Under the old
+# contract this was `-> avail`, a number the layout engine could only read as a
+# demand for all of it.
+fn keys_measure(log: List String, avail: g.Size) -> widget.Measured =
+  widget.greedy_size(avail)
 
 # Wrapping is why `text` measures COLUMNS: a CJK ideograph is two of them, so a
-# character count would overflow the region.
-fn render_lines(s: scr.Screen, r: g.Region, row: Int,
-                lines: List String) -> Unit !{IO} =
-  match lines with
-  | Nil -> ()
-  | [l | rest] -> render_line_then(s, r, row, l, rest)
-
-fn render_line_then(s: scr.Screen, r: g.Region, row: Int, l: String,
-                    rest: List String) -> Unit !{IO} =
-  if row >= g.region_rows(r) then ()
-  else render_and_recurse(s, r, row, l, rest)
-
-fn render_and_recurse(s: scr.Screen, r: g.Region, row: Int, l: String,
-                      rest: List String) -> Unit !{IO} = do
-  line(s, r, row, l, sty.style_default())
-  render_lines(s, r, row + 1, rest)
+# character count would overflow the region. `paint.lines` stops at the
+# region's bottom edge, so the wrap needs no row arithmetic of its own.
+fn keys_render(log: List String, r: g.Region, s: scr.Screen) -> Unit !{IO} = do
+  paint.line(s, r, 0, "keys", dim())
+  paint.lines(s, r, 1, text.wrap_to(string.join(" ", log), g.region_cols(r)),
+              sty.style_default())
 
 fn keys() -> widget.Widget Msg =
   widget.Widget(widget.View(state = Nil, on_event = keys_on_event,
                             route = widget.no_route,
                             render = keys_render, measure = keys_measure))
 
-# ── a static label: hidden state is String ──────────────────────────────────
-
-fn label_on_event(txt: String, ev: event.Event) -> (String, Says, Asks) =
-  (txt, Nil, Nil)
-
-fn label_measure(txt: String, avail: g.Size) -> g.Size =
-  g.Size(text.width(txt), 1)
-
-fn label_render(txt: String, r: g.Region, s: scr.Screen) -> Unit !{IO} =
-  line(s, r, 0, txt, bright())
-
-fn label(txt: String) -> widget.Widget Msg =
-  widget.Widget(widget.View(state = txt, on_event = label_on_event,
-                            route = widget.no_route,
-                            render = label_render, measure = label_measure))
-
-# ── a container: hidden state is a list of OTHER widgets ────────────────────
-
-# The container cannot see any child's state, only send it events and give it a
-# region. Containers proper are M4; this is the smallest one that shows the
-# widget model and the layout engine meeting.
-type Box = (vertical: Bool, dims: List layout.Dimension,
-            kids: List (widget.Widget Msg))
-
-fn box_on_event(b: Box, ev: event.Event) -> (Box, Says, Asks) =
-  match broadcast(b.kids, ev, Nil, Nil, Nil) with
-  | (kids, msgs, cmds) -> (b with (kids = kids), msgs, cmds)
-
-# Every child sees every event, in order; their messages AND their commands are
-# concatenated. A container forwards what its children ask for without knowing
-# what any of it means — which is the whole point of the message vocabulary.
-fn broadcast(kids: List (widget.Widget Msg), ev: event.Event,
-             wacc: List (widget.Widget Msg), macc: Says,
-             cacc: Asks) -> (List(widget.Widget Msg), Says, Asks) =
-  match kids with
-  | Nil -> (list_reverse(wacc), list_reverse(macc), list_reverse(cacc))
-  | [k | rest] -> broadcast_step(widget.on_event(k, ev), rest, ev, wacc, macc, cacc)
-
-fn broadcast_step(r: (widget.Widget Msg, Says, Asks),
-                  rest: List (widget.Widget Msg), ev: event.Event,
-                  wacc: List (widget.Widget Msg), macc: Says,
-                  cacc: Asks) -> (List(widget.Widget Msg), Says, Asks) =
-  match r with
-  | (k2, msgs, cmds) ->
-      broadcast(rest, ev, Cons(k2, wacc), push_all(msgs, macc), push_all(cmds, cacc))
-
-fn push_all(xs: List a, acc: List a) -> List a =
-  list_fold(\ (seen, x) -> Cons(x, seen), acc, xs)
-
-# An addressed delivery goes DOWN, not to everyone: the container tries each
-# child until one claims the address, and answers `Nothing` if none did. It
-# alone holds the children, so it is the only thing that can carry an address
-# across the existential. Every application writes this today; containers
-# proper are M4.
-fn box_route(b: Box, target: widget.WidgetId,
-             d: widget.Delivery Msg) -> Maybe (Box, Says, Asks) =
-  route_kids(b, b.kids, target, d, Nil)
-
-# Stopping at the first claimant makes a duplicated id resolve to tree order
-# rather than delivering the same answer twice.
-fn route_kids(b: Box, kids: List (widget.Widget Msg), target: widget.WidgetId,
-              d: widget.Delivery Msg,
-              seen: List (widget.Widget Msg)) -> Maybe (Box, Says, Asks) =
-  match kids with
-  | Nil -> Nothing
-  | [k | rest] -> route_step(b, k, rest, target, d, seen)
-
-fn route_step(b: Box, k: widget.Widget Msg, rest: List (widget.Widget Msg),
-              target: widget.WidgetId, d: widget.Delivery Msg,
-              seen: List (widget.Widget Msg)) -> Maybe (Box, Says, Asks) =
-  match widget.deliver(k, target, d) with
-  | Nothing -> route_kids(b, rest, target, d, Cons(k, seen))
-  | Just claimed -> Just(route_hit(b, claimed, rest, seen))
-
-# A child that declines is unchanged, so only the claiming one has to be
-# spliced back into the list.
-fn route_hit(b: Box, r: (widget.Widget Msg, Says, Asks),
-             rest: List (widget.Widget Msg),
-             seen: List (widget.Widget Msg)) -> (Box, Says, Asks) =
-  match r with
-  | (k2, msgs, cmds) ->
-      (b with (kids = list_append(list_reverse(Cons(k2, seen)), rest)), msgs, cmds)
-
-fn box_measure(b: Box, avail: g.Size) -> g.Size = avail
-
-fn box_render(b: Box, r: g.Region, s: scr.Screen) -> Unit !{IO} =
-  render_kids(b.kids, regions_of(b, r), s)
-
-fn regions_of(b: Box, r: g.Region) -> List g.Region =
-  if b.vertical then layout.column(r, b.dims) else layout.row(r, b.dims)
-
-fn render_kids(kids: List (widget.Widget Msg), regions: List g.Region,
-               s: scr.Screen) -> Unit !{IO} =
-  match kids with
-  | Nil -> ()
-  | [k | rest] -> render_kid(k, rest, regions, s)
-
-fn render_kid(k: widget.Widget Msg, rest: List (widget.Widget Msg),
-              regions: List g.Region, s: scr.Screen) -> Unit !{IO} =
-  match regions with
-  | Nil -> ()
-  | [r | rrest] -> render_kid_then(k, r, s, rest, rrest)
-
-fn render_kid_then(k: widget.Widget Msg, r: g.Region, s: scr.Screen,
-                   rest: List (widget.Widget Msg),
-                   rrest: List g.Region) -> Unit !{IO} = do
-  widget.render(k, r, s)
-  render_kids(rest, rrest, s)
-
-fn box(vertical: Bool, dims: List layout.Dimension,
-       kids: List (widget.Widget Msg)) -> widget.Widget Msg =
-  widget.Widget(widget.View(state = Box(vertical = vertical, dims = dims, kids = kids),
-                            on_event = box_on_event, route = box_route,
-                            render = box_render, measure = box_measure))
-
 # ── the application ─────────────────────────────────────────────────────────
 
-# A header and a footer of one row each, with the body taking the rest.
+# A header and a footer of one row each, with the body taking the rest. The
+# containers are stdlib's; this file has none of its own.
 fn root() -> widget.Widget Msg =
-  box(true, [layout.Cells(1), layout.Fraction(1), layout.Cells(1)],
-      [label("Sprout TUI"), body(), label("q to quit")])
+  ct.column([ct.cells(1, txt.label_styled(bright(), "Sprout TUI")),
+             ct.fraction(1, body()),
+             ct.cells(1, txt.label_styled(dim(), "q to quit"))])
 
-# Two panes side by side: the counter takes a third, the key log the rest.
+# Two panes side by side: the clock takes a third, the key log the rest.
 fn body() -> widget.Widget Msg =
-  box(false, [layout.Fraction(1), layout.Fraction(2)], [ticks(), keys()])
+  ct.row([ct.fraction(1, ticks()), ct.fraction(2, keys())])
 
 # Widgets already did the work; the application only decides when to stop.
 #

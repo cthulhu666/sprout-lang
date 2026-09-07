@@ -1,0 +1,45 @@
+module stdlib.tui.widgets.paint
+
+# Writing into a region without escaping it. `screen.screen_write` clips at the
+# SCREEN edge, not the region's, so a widget that paints a string wider than
+# its region silently overwrites its neighbour's cells and the frame diff shows
+# nothing wrong. Every widget author needs this; it lives here once.
+# Design: docs/tui-widget-set-v0.md §4.5.
+#
+# Receiver-first, not data-last (guidelines §6): these mirror
+# `screen.screen_write`, which they wrap and which every caller sits beside.
+# Neither is ever `|>`-chained — both return Unit.
+
+import stdlib.tui.geometry as geometry
+import stdlib.tui.screen as scr
+import stdlib.tui.style as sty
+import stdlib.tui.text as text
+
+# One line at `row` rows down from the region's top, clipped on BOTH axes — a
+# row past the region's height paints nothing rather than painting below it.
+export fn line(screen: scr.Screen, region: geometry.Region, row: Int,
+               content: String, style: sty.Style) -> Unit !{IO} =
+  if row < 0 || row >= geometry.region_rows(region) then ()
+  else write_clipped(screen, region, row, content, style)
+
+fn write_clipped(screen: scr.Screen, region: geometry.Region, row: Int,
+                 content: String, style: sty.Style) -> Unit !{IO} = do
+  end <- scr.screen_write(screen, geometry.region_col(region),
+                          geometry.region_row(region) + row,
+                          text.truncate(content, geometry.region_cols(region)),
+                          style)
+  ()
+
+# Successive lines from `from_row` down, stopping at the region's bottom edge.
+export fn lines(screen: scr.Screen, region: geometry.Region, from_row: Int,
+                content: List String, style: sty.Style) -> Unit !{IO} =
+  match content with
+  | Nil -> ()
+  | [l | rest] ->
+      if from_row >= geometry.region_rows(region) then ()
+      else lines_step(screen, region, from_row, l, rest, style)
+
+fn lines_step(screen: scr.Screen, region: geometry.Region, row: Int, l: String,
+              rest: List String, style: sty.Style) -> Unit !{IO} = do
+  line(screen, region, row, l, style)
+  lines(screen, region, row + 1, rest, style)

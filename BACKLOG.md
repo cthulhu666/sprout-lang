@@ -507,20 +507,11 @@ Legend:
 
 ### 4) Terminal UI Runtime
 
-- [ ] `P1` **TUI M4 — the widget library (`stdlib/tui/widgets/`).** stdlib ships no widget at all
-  today. M0–M3 shipped the core and routing landed 2026-09-07, so the `View` contract is settled
-  — which is why the set is written now: every `View` construction breaks on a field addition, and
-  `route` was the last field. The C1 design pass is `docs/tui-widget-set-v0.md` (2026-09-07), which
-  carries one breaking change: `View.measure` returns a `Measured` rather than a `Size`, without
-  which a widget cannot ask for "whatever is left". Evidence the containers are missing:
-  `examples/tui_dashboard.sprout` hand-writes its `Box` in 93 lines and 15 helpers of a 284-line
-  example, and the `Delivery` walk is now written twice in-tree, identically. The first-claimant
-  rule is a convention each container reimplements rather than something the framework enforces.
-- [ ] `P1` **TUI M4 C1 — containers and the static set.** `row`/`column`/`grid` over the existing
-  `layout` solvers, an opaque `Slot` (`cells`/`fraction`/`fit`) so a child and its size cannot
-  desync, plus `label`, `static`, `spacer`, the four child traversals exported for reuse, and a
-  both-axes clipped paint helper. Acceptance test: `examples/tui_dashboard.sprout` loses its `Box`
-  section entirely. Designed in `docs/tui-widget-set-v0.md`.
+- [ ] `P1` **TUI M4 — the widget library (`stdlib/tui/widgets/`).** C1 landed 2026-09-07:
+  `container`/`children`/`text`/`paint` ship `row`/`column`/`grid`, an opaque `Slot`, `label`/
+  `static`/`spacer` and the four child traversals; `examples/tui_dashboard.sprout` went 284 → 157
+  lines with no container of its own. `View.measure` now returns a `Measured` so a child can ask
+  for "whatever is left". C2–C3 below remain. Design: `docs/tui-widget-set-v0.md`.
 - [ ] `P1` **TUI M4 C2 — focus and the interactive set.** `button`, `input`, `list_view`. Focus is
   what makes `ToEvent` reachable. **Do not start C2 with the two routing `P3`s below open** — they
   are corrections to the contract C2 is written against.

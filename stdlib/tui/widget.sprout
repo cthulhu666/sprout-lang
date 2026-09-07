@@ -68,6 +68,30 @@ fn cmd_mapped(f: m -> n, g: Unit -> m !{IO}, u: Unit) -> n !{IO} = do
   x <- g(())
   f(x)
 
+# Whether a widget wants a size, or wants whatever is left. A `Size` cannot say
+# the second: every number in that vocabulary reads as a demand, and `solve`
+# pays fixed asks before fractions — so "I yield" spelled as a large number
+# becomes "I demand everything" and starves the siblings it meant to yield to.
+# Design: docs/tui-widget-set-v0.md §4.3.
+export type Grow (..) deriving (Eq, ToString) =
+  | Fixed
+  | Greedy
+
+# What `measure` answers: a natural size, plus how the widget grows on each
+# axis. A container turns `Greedy` into `layout.Fraction` and `Fixed` into
+# `layout.Auto`.
+export type Measured = (size: geometry.Size, cols: Grow, rows: Grow)
+
+# The leaf spelling — a widget with a definite size and nothing to say about
+# growth, which is most of them.
+export fn fixed_size(sz: geometry.Size) -> Measured =
+  Measured(size = sz, cols = Fixed, rows = Fixed)
+
+# The other leaf spelling: a widget that fills what it is given on both axes,
+# such as a log pane. `sz` is its size if nothing is left to divide.
+export fn greedy_size(sz: geometry.Size) -> Measured =
+  Measured(size = sz, cols = Greedy, rows = Greedy)
+
 # The five things a widget can do, over its own state type. `on_event`
 # broadcasts, `route` is addressed; both are pure, asking for IO with a `Cmd`
 # rather than performing any, which is what keeps a widget testable and the
@@ -83,7 +107,7 @@ export type View s m = (
   on_event: s -> event.Event -> (s, List m, List (Cmd m)),
   route: s -> WidgetId -> Delivery m -> Maybe(s, List m, List (Cmd m)),
   render: s -> geometry.Region -> screen.Screen -> Unit !{IO},
-  measure: s -> geometry.Size -> geometry.Size
+  measure: s -> geometry.Size -> Measured
 )
 
 # A widget nothing is ever addressed to — every leaf until it wants a command
@@ -168,8 +192,8 @@ fn repack_route(v: View s m,
   | Nothing -> Nothing
   | Just t -> Just(repack(v, t))
 
-# The widget's natural size within `avail` — what `layout.Auto` carries.
-export fn measure(w: Widget m, avail: geometry.Size) -> geometry.Size =
+# The widget's natural size within `avail`, and how it grows.
+export fn measure(w: Widget m, avail: geometry.Size) -> Measured =
   match w with
   | Widget v -> v.measure(v.state, avail)
 
