@@ -1536,6 +1536,14 @@ check-approved-builtins:
 check-extern-signatures:
   ./scripts/check_extern_signatures.sh
 
+# AGENTS.md "Backlog Discipline" rules 1 and 2: BACKLOG.md wraps at 100 columns,
+# no entry exceeds 10 lines, and a landed entry is deleted rather than ticked.
+# The column check is what makes the line budget mean anything — without it one
+# line can hold a paragraph and the entry limit measures editor width.
+[group('smoke')]
+backlog-shape:
+  ./scripts/backlog_shape.sh
+
 # DoD #10 — example canary RUN.  The canary set must compile AND run to
 # completion without crashing.  `just compile-examples-stage1` only covers
 # compile; this recipe adds the runtime check.
@@ -2926,6 +2934,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     # one — so this catches a class of defect that produces silently wrong output
     # with no diagnostic. gate-audit caught it being unwired before it ever ran here.
     "extern-signatures|check-extern-signatures"
+    "backlog-shape|backlog-shape"
   )
   declare -a pids=() labels=()
   idx=0; active=0
@@ -3097,7 +3106,7 @@ gate-quick: fmt-check test compile-examples-stage1 smoke-shapes bundle-smoke
 # advisory), so it runs in the body rather than as an arg-less dependency.
 # Full CI-parity battery (slow, ~15-25m); a green run means CI will not surprise you.
 [group('gate')]
-gate: seed-dep-check fmt-check smoke-shapes bundle-smoke loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate check-approved-builtins check-extern-signatures verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test lsp-smoke task-io-smoke http-client-binary-gate http-tls-gate test-stress
+gate: seed-dep-check fmt-check smoke-shapes bundle-smoke loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate check-approved-builtins check-extern-signatures backlog-shape verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test lsp-smoke task-io-smoke http-client-binary-gate http-tls-gate test-stress
   #!/usr/bin/env bash
   set -euo pipefail
   echo "==> gate: gc-safety-check --strict..."
