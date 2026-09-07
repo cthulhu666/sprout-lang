@@ -309,6 +309,27 @@ export fn type_result(e: Type, a: Type) -> Type = TApp(TApp (TConst(type_id("Res
 export fn effect_pure() -> Effect = EffectPure
 export fn effect_io() -> Effect = EffectIO
 
+# Where a written `!{...}` lands on a type. It attaches to the INNERMOST arrow,
+# matching parser.make_type_arrow's hoist, so `(a -> b -> C) !{IO}` and
+# `a -> b -> C !{IO}` denote one type. A type with no arrow has no effect slot,
+# so the annotation is dropped. Two annotations on one arrow — `(a -> b !{e})
+# !{IO}` — resolve last-one-wins; §7 rule 9 admits only one and neither spelling
+# is rejected yet.
+#
+# Shared for the same reason `effect_from_labels` below is: `infer` and
+# `iface_codec` walk the same AST and must not disagree.
+export fn attach_arrow_effect(t: Type, eff: Effect) -> Type =
+  match t with
+  | TFunc p r e own -> attach_along_spine(p, r, e, own, eff)
+  | _ -> t
+
+# While the return is itself an arrow the effect belongs further in; the arrow
+# that returns a non-arrow is the one that takes it.
+fn attach_along_spine(p: Type, r: Type, e: Effect, own: Ownership, eff: Effect) -> Type =
+  match r with
+  | TFunc _ _ _ _ -> TFunc(p, attach_arrow_effect(r, eff), e, own)
+  | _ -> TFunc(p, r, eff, own)
+
 # The one place a written `!{...}` annotation becomes an Effect.
 #
 # `infer` and `iface_codec` each grew their own copy of this, and they did NOT

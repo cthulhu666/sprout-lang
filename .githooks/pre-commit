@@ -41,6 +41,10 @@ trap "rm -rf '$tmp'" EXIT
 
 while IFS= read -r f; do
   [[ -z "$f" || ! -f "$f" ]] && continue
+  # tests/conformance/parse_error/ holds files that MUST NOT parse — that is what
+  # the gate there asserts. Neither fmt nor lint can say anything about them, and
+  # linting one reports the deliberate parse error as a failure.
+  case "$f" in tests/conformance/parse_error/*) continue ;; esac
   if ! "$FMT" fmt --check "$f" > "$tmp/fmt.err" 2>&1; then
     needs_fmt+=("$f")
   fi

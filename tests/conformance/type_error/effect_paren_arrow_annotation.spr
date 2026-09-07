@@ -1,0 +1,13 @@
+module main
+
+# Parenthesising an arrow must not erase its effect annotation.
+#
+# `take` declares `f` as an IO-performing arrow and calls it, so rule 8 rejects
+# the pure signature — exactly as it does for the unparenthesised twin
+# `f: Int -> Int !{IO}`, which has always been caught here.
+
+fn tame(n: Int) -> Int = n + 1
+
+fn take(f: (Int -> Int) !{IO}, n: Int) -> Int = f(n)
+
+fn main() -> Unit !{IO} = print(int_to_string(take(tame, 1)))

@@ -1,0 +1,43 @@
+module main
+
+# Parenthesising an arrow does not change what it denotes: `(a -> b) !{IO}` and
+# `a -> b !{IO}` are one type, and a multi-arrow annotation lands on the
+# innermost arrow in both spellings. The reject twin is
+# tests/conformance/type_error/effect_paren_arrow_annotation.spr.
+
+fn shout(n: Int) -> Int !{IO} = do
+  print("io")
+  n + 1
+
+fn noisy_add(a: Int, b: Int) -> Int !{IO} = do
+  print("add")
+  a + b
+
+fn take_paren(f: (Int -> Int) !{IO}, n: Int) -> Int !{IO} = f(n)
+
+fn take_bare(f: Int -> Int !{IO}, n: Int) -> Int !{IO} = f(n)
+
+# `noisy_add : Int -> Int -> Int !{IO}` reaches a parenthesised slot, so the
+# annotation must sit on the same arrow in both.
+fn apply2_paren(f: (Int -> Int -> Int) !{IO}, a: Int, b: Int) -> Int !{IO} = f(a, b)
+
+# An unannotated parenthesised arrow stays pure and still accepts a pure fn.
+fn take_pure(f: (Int -> Int), n: Int) -> Int = f(n)
+
+fn tame(n: Int) -> Int = n + 1
+
+# An annotation followed by a further `->` must be ENCLOSED. The unenclosed
+# spelling is a parse error — tests/conformance/parse_error/
+# effect_annotation_before_arrow.spr — and this enclosed one denotes
+# `(Int -> Int !{IO}) -> Int`, which is why `counts` satisfies it.
+fn counts(f: Int -> Int !{IO}) -> Int = 1
+
+fn use_enclosed(g: ((Int -> Int) !{IO}) -> Int) -> Int = g(shout)
+
+fn main() -> Unit !{IO} = do
+  print(int_to_string(take_paren(shout, 1)))
+  print(int_to_string(take_bare(shout, 1)))
+  print(int_to_string(apply2_paren(noisy_add, 2, 3)))
+  print(int_to_string(take_pure(tame, 9)))
+  print(int_to_string(use_enclosed(counts)))
+  print("done")

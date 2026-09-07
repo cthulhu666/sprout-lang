@@ -431,6 +431,17 @@ concrete:
 The general lesson is the one §4 already records in a different form: a fixture chosen to keep output
 small is a fixture that has excluded something, and what it excluded is invisible in a green run.
 
+**A third divergence, found 2026-09-07.** Both walks also dropped a standalone `TypeEffect` node,
+which is how the parser delivers an annotation on a *parenthesised* arrow: `make_type_arrow` hoists a
+trailing annotation only onto an arrow it is building, and parentheses close the arrow first. So
+`f: (Int -> Int) !{IO}` typed as a pure arrow in `infer` and encoded as one here, while the
+unparenthesised twin was handled correctly — a pure signature could take an IO-performing callback
+with rule 8 seeing nothing. Both now call one `types.attach_arrow_effect`, which lands the effect on
+the innermost arrow so the two spellings agree, and `iface_effects.sprout` gained a `Wrapped.accept`
+method whose parenthesised parameter must encode as `(TFunc (TConst Int) (TConst Unit) (EffectIO)
+consume)`. Note this walk pair has now diverged three times: sharing one function, rather than
+aligning two copies again, is the point of the fix.
+
 ### 9.3 Measurement
 
 Identical corpus, 696 files, 5859 unique declarations, before and after:

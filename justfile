@@ -1219,6 +1219,14 @@ effect-report-smoke: bootstrap-from-seed
     tr ')' ')\n' < "$TMPD/iface" | grep -A2 'NamedScheme run_with' >&2
     failed=$((failed + 1))
   fi
+  # A PARENTHESISED arrow parameter reaches the walk as a TypeEffect wrapper, not
+  # as labels on the TypeArrow. Dropping that wrapper typed the parameter pure
+  # against its own source text.
+  if ! grep -q '(TFunc (TConst Int) (TConst Unit) (EffectIO) consume)' "$TMPD/iface"; then
+    echo "effect-report-smoke: 'accept' lost the !{IO} on its parenthesised arrow:" >&2
+    tr ')' ')\n' < "$TMPD/iface" | grep -A2 'NamedScheme accept' >&2
+    failed=$((failed + 1))
+  fi
   if (( failed > 0 )); then
     echo "effect-report-smoke: $failed assertion(s) failed" >&2; exit 1
   fi

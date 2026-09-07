@@ -646,7 +646,9 @@ fn typeexpr_to_type_with_vars(te: ast.TypeExpr, local_vars: Dict types.Type) -> 
                   typeexpr_to_type_with_vars(ret, local_vars),
                   types.effect_from_labels(effs),
                   types.OwnConsume)
-  | ast.TypeEffect inner _ -> typeexpr_to_type_with_vars(inner, local_vars)
+  | ast.TypeEffect inner effs ->
+      types.attach_arrow_effect(typeexpr_to_type_with_vars(inner, local_vars),
+                                types.effect_from_labels(Just(effs)))
   | ast.TupleType parts ->
       types.TTuple(typeexpr_list_to_types(parts, local_vars))
 

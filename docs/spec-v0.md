@@ -1784,6 +1784,22 @@ Effect note for v0:
    so satisfies the singleton limit above; it is rejected under this sentence
    rather than that one.
 
+   **An annotation attaches to the innermost arrow, and parentheses do not move
+   it.** In `a -> b -> C !{IO}` the effect belongs to `b -> C`, and
+   `(a -> b -> C) !{IO}` denotes that same type. An annotation followed by a
+   further `->` must itself be enclosed: write `((a -> b) !{IO}) -> C`, not
+   `(a -> b) !{IO} -> C`, which does not parse. On a type with no arrow —
+   `Int !{IO}` — there is no effect slot and the annotation carries no meaning.
+
+   > **Not yet enforced (2026-09-07).** At most one annotation applies to an
+   > arrow. Writing two — by nesting, `(a -> b !{e}) !{IO}`, or by annotating an
+   > alias that already carries one, `type alias H = Int -> Int !{IO}` used as
+   > `H !{e}` — is not a form this section defines, and is a rejection case. The
+   > compiler does not reject it: the outer annotation silently replaces the
+   > inner one, and in the alias spelling the replaced annotation is not visible
+   > at the use site. Tracked in `BACKLOG.md`. Do not read the placement rule
+   > above as licensing a second annotation.
+
    **An effect variable may appear only in a function type.** Writing one in a
    *stored* position — a record field, a constructor payload, or the type a
    `wrap` names — is rejected.

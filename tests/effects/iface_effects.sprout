@@ -33,6 +33,12 @@ export class Sink a
 export class Runner a
   fn run_with(s: a, f: Int -> Unit !{e}) -> Unit !{e}
 
+# A PARENTHESISED arrow parameter. The parens close the arrow before the
+# annotation is read, so it reaches the walk as a `TypeEffect` wrapper rather
+# than as labels on the TypeArrow; the arrow must still carry (EffectIO).
+export class Wrapped a
+  fn accept(s: a, f: (Int -> Unit) !{IO}) -> Unit !{IO}
+
 export type Stderr = Stderr
 
 instance Sink Stderr

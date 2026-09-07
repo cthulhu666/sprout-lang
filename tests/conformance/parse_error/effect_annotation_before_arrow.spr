@@ -1,0 +1,10 @@
+module main
+
+# An effect annotation followed by a further `->` must be enclosed:
+# `parse_type_expr_cont` consumes the annotation and returns without looking for
+# the arrow. The enclosed spelling `((Int -> Int) !{IO}) -> Int` parses and is
+# covered by tests/conformance/run/effect_paren_arrow_annotation_ok.spr.
+
+fn hof(g: (Int -> Int) !{IO} -> Int, n: Int) -> Int = n
+
+fn main() -> Unit !{IO} = print("x")

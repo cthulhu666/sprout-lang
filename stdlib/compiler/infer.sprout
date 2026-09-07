@@ -173,14 +173,17 @@ export fn type_from_ast(te: ast.TypeExpr, local_vars: Dict types.Type) -> types.
       # on the INNERMOST arrow), and inference threw it away one step later.
       types.TFunc(type_from_ast(param, local_vars), type_from_ast(ret, local_vars),
         effect_from_maybe_labels(effs), types.OwnConsume)
-  # A bare effect suffix on a NON-arrow type. `Type` has no effect slot outside
-  # TFunc, so there is nowhere to put it — but nothing is lost: the two positions
-  # where a trailing annotation is meaningful are both intercepted earlier. On an
-  # arrow, parser.make_type_arrow hoists it into the TypeArrow above; on a
-  # declaration's return type, the decl parser splits it out into the FnDecl's own
-  # `effects` field (parser.sprout:1760), which is how `fn main() -> Unit !{IO}`
-  # carries an effect with no arrow to hang it on.
-  | ast.TypeEffect inner _ -> type_from_ast(inner, local_vars)
+  # A trailing effect suffix that reached inference as a wrapper. A declaration's
+  # return type never does — parser.parse_return_type_cont splits it into the
+  # FnDecl's own `effects` field — and neither does `a -> b !{IO}`, which
+  # parser.make_type_arrow hoists into the TypeArrow above. What does is a
+  # PARENTHESISED arrow, `(a -> b) !{IO}`: the parens close the arrow before the
+  # annotation is read, so the hoist has nothing to fire on. Dropping the wrapper
+  # here typed that parameter PURE against its own source text. On a non-arrow
+  # (`Int !{IO}`) there is still no slot, so it is discarded.
+  | ast.TypeEffect inner effs ->
+      types.attach_arrow_effect(type_from_ast(inner, local_vars),
+        types.effect_from_labels(Just(effs)))
   | ast.TupleType parts -> types.TTuple(type_list_from_ast(parts, local_vars))
 
 fn lookup_type_var(name: String, local_vars: Dict types.Type) -> types.Type =
@@ -6828,9 +6831,11 @@ fn check_duplicate_fn_decls(decls: List ast.Decl, seen: Dict Bool) -> Maybe(sour
 # The walk must mirror what type_from_ast does to the SAME TypeExpr, because the
 # marker key is derived from that type. Getting this wrong is how the first cut
 # of this check leaked (code review, 2026-08-15):
-#   - TypeEffect: type_from_ast DROPS the annotation and recurses into `inner`,
-#     so `a !{IO}` has exactly the head of `a`. Stopping here let an effect
-#     annotation smuggle a bare variable head past the check.
+#   - TypeEffect: type_from_ast recurses into `inner`, and on a NON-arrow drops
+#     the annotation, so `a !{IO}` has exactly the head of `a`. Stopping here let
+#     an effect annotation smuggle a bare variable head past the check. (On an
+#     arrow the annotation is now kept, which changes the effect but not the
+#     head — an arrow has none, and the next case rejects it anyway.)
 #   - TypeArrow: becomes TFunc, which has no constructor head at all. Function
 #     types have no instances (spec §8.5), and the pre-existing diagnostic for
 #     that fires at the CALL site — the same misblame this pass exists to remove
@@ -6853,8 +6858,9 @@ fn instance_head_problem(te: ast.TypeExpr) -> Maybe String =
 # `TypeApply(TypeApply(TypeName "Pair", TypeName "a"), TypeName "b")` — the spine
 # has to be walked or only the last argument is seen. Two forms are not spines:
 # a tuple's arguments are its elements (its head is the TupleN constructor), and
-# TypeEffect is transparent, because type_from_ast drops the annotation and the
-# marker key is derived from the type it produces.
+# TypeEffect is transparent, because the marker key is derived from the type
+# type_from_ast produces and an annotation changes an arrow's effect, never a
+# head or its arguments.
 fn instance_head_args(te: ast.TypeExpr) -> List ast.TypeExpr =
   match te with
   | ast.TupleType items -> items
