@@ -208,11 +208,12 @@ target widget re-announces through its `List m`. This inverts M3's everything-fl
 None. No new syntax, no typing rule, no diagnostic, no builtin — `runtime/APPROVED_BUILTINS`
 is unchanged.
 
-One language gap was confirmed while writing the tests, adjacent to the two `type alias`
-items already filed: **an alias inside another alias's body is not expanded**, though an
-alias inside a signature's tuple is. `type alias Reply = Maybe (Widget Msg, Says, Asks)`
-fails with ``Type mismatch: Says vs List Msg``; spelling the body out works. Filed in
-`BACKLOG.md`.
+One language gap was confirmed while writing the tests — **an alias inside another alias's
+body is not expanded** — and has since been FIXED (2026-09-07, spec §5.6.2). It shared a
+root cause with the two `type alias` items filed alongside it: inference stored an alias
+only when its body eta-reduced. `type alias Reply = Maybe (Widget Msg, Says, Asks)` now
+works, so the spelled-out bodies in `tests/stdlib/test_tui_route.spr` are no longer
+forced.
 
 ## 6. Compatibility
 

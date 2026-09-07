@@ -321,18 +321,6 @@ fn bind_fresh_vars(names: List String, env: Dict types.Type) -> Dict types.Type 
 fn te_to_type(te: ast.TypeExpr, alias_env: Dict types.Type) -> types.Type =
   infer.type_from_ast(te, bind_fresh_vars(te_var_names(te, Nil), alias_env))
 
-# Nullary type aliases → their expansion, mirroring infer.pre_scan_fn_decls so
-# `:i SomeAlias` resolves through the alias.  Parametric aliases are rare in REPL
-# queries and are left unexpanded.
-fn collect_alias_env(decls: List ast.Decl, acc: Dict types.Type) -> Dict types.Type =
-  match decls with
-  | Nil -> acc
-  | Cons d rest ->
-      match d with
-      | ast.AliasDecl name Nil rhs _ ->
-          collect_alias_env(rest, dict_set(name, infer.type_from_ast(rhs, dict_empty()), acc))
-      | _ -> collect_alias_env(rest, acc)
-
 # --- Type-expression rendering (mirrors the reference: compound args parenthesized) ---
 
 fn te_is_compound(te: ast.TypeExpr) -> Bool =
@@ -448,7 +436,7 @@ fn parse_query_type(query: String) -> Result String ast.TypeExpr =
 export fn instance_match_names_for_type(prog: ast.Program, query_te: ast.TypeExpr) -> List String =
   match prog with
   | ast.Program decls _ ->
-      sort_strings(collect_matches(decls, query_te, collect_alias_env(decls, dict_empty()), Nil))
+      sort_strings(collect_matches(decls, query_te, infer.alias_env_or(decls, dict_empty()), Nil))
 
 # String-query convenience: parse the query directly (no session name-resolution)
 # and return the rendered query alongside the matches.  Used where the query

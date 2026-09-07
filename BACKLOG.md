@@ -2116,14 +2116,11 @@ Legend:
   the routing change; `examples/tui_dashboard.sprout`'s `ticks_route` is the live instance,
   harmless only because nothing constructs a `ToEvent` yet. Do it with focus, not before.
 
-- [ ] `P3` **An alias inside another alias's BODY is not expanded**, though an alias inside a
-  signature's tuple is. `type alias Says = List Msg` then
-  `type alias Reply = Maybe (Widget Msg, Says, Asks)` makes every use of `Reply` fail with
-  ``Type mismatch: Says vs List Msg``; spelling the body out works, as does
-  `fn f(...) -> (Int, Says, Asks)` directly in a signature. Surfaced 2026-09-07 writing
-  `tests/stdlib/test_tui_route.spr`. Third in the family with the two `type alias` items
-  above (parameterized arrow-bodied aliases, aliases in record-field position) and probably
-  one root cause: alias expansion is not run over an alias's own body.
+- [x] `P3` **An alias inside another alias's BODY is not expanded. FIXED 2026-09-07** by the
+  alias-expansion change below, which was indeed the one root cause this entry guessed at.
+  Aliases are now registered in dependency order, so an alias body that names another alias
+  expands when it is stored. Repro that used to fail — `type alias Says = List Msg` then
+  `type alias Reply = Maybe (Int, Says, Asks)` — compiles and runs.
 
 - [ ] `P1` **TUI M4 — the widget library (`stdlib/tui/widgets/`).** M0–M3 shipped the core
   (`geometry`, `screen`, `style`, `event`, `keys`, `text`, `layout`, `widget`, `app`) and
@@ -2323,39 +2320,42 @@ Legend:
   (b) support a linear parameter in a synthesized eta lambda, which is the deferred feature.
   Spec §5.3 carries the restriction so it is not a silent surprise.
 
-- [ ] `P3` **A parameterized type alias whose body is a FUNCTION TYPE is never expanded.**
-  `type alias Cmd m = Unit -> m !{IO}` parses, but using it fails with
-  `Type mismatch: main.Cmd Int vs Unit -> $t…`. It is the *combination* that breaks, which
-  is worth stating precisely because two nearby shapes are fine and in use:
+- [x] `P3` **Type aliases were expanded only in one shape. FIXED 2026-09-07** —
+  parameterized aliases now expand for any body and any arity, and in every position.
+  Spec: §5.6.2. Conformance: `run/type_alias_params`, `run/type_alias_in_type_decl`,
+  `run/type_alias_forward`, `type_error/type_alias_arity`, `type_error/type_alias_recursive`.
 
-  | shape | works? |
-  |---|---|
-  | `type alias Boxed a = Result String a` — parameterized, non-arrow | **yes** — this is `net.TcpResult`, `http_server.ServerResult`, `scram.ScramResult`; 14 uses in stdlib |
-  | `type alias H = Int -> Int !{IO}` — unparameterized, arrow | **yes**, effect included |
-  | `type alias Fn a = Int -> a` — parameterized, arrow | **no**, even with no effect anywhere |
+  The original entry recorded which shapes worked and guessed the arrow was the problem.
+  The mechanism was narrower: `alias_env` is a `Dict types.Type`, one type per name with
+  nowhere to hold a parameter, so `register_single_param_alias` stored an alias only if its
+  body **eta-reduced** — RHS exactly `TApp inner (TVar param)`, i.e. the parameter last.
+  Everything else hit `| _ -> alias_env` and was discarded silently. That predicts, and
+  measurement confirmed, three failures beyond the arrow: a tuple body, a parameter that is
+  not last (`Flip a = Result a String` fails where `Boxed a = Result String a` works), and
+  two or more parameters (`AliasDecl name [param]` matches one, the rest fall through a
+  catch-all). The AST, bundler and iface codec all carried the parameter list correctly;
+  inference was the only stage that dropped it.
 
-  So it is neither an effects bug nor a general alias bug. Found 2026-09-06 while sizing the
-  TUI command type; worked around with a newtype ADT, which is the better spelling there
-  anyway. *(An earlier draft of this entry said "parameterized type aliases are never
-  expanded", which is wrong — it would send a reader to audit 14 working call sites.)*
+  An alias is now stored as its body with the parameters bound to sentinel tyvars and
+  expanded by `unifier.apply_subst`, which already substitutes through `TApp`/`TFunc`/
+  `TTuple`. Registration happens once, before any other pass, in dependency order — so
+  declaration order stopped mattering and an alias may stand on one declared below it.
+  A cycle is rejected at the declaration; a wrong argument count is rejected where written.
 
-  **A second, independent alias gap found the same day: an alias used as a RECORD FIELD type
-  is not expanded either** — unparameterized and non-arrow though it may be.
+  **The record-field half of this entry was a SEPARATE root cause, also fixed.** Field and
+  signature types were built against `dict_empty()` — no alias environment at all — in
+  FOUR places, found one at a time and the last three by review: `register_type_decl_raw`'s
+  `TypeDecl` arm and `register_record_fields` (constructor and record fields), the same
+  function's `WrapDecl` arm (a `wrap`'s inner type), `register_class_method` (a class
+  method's declared signature, which is the scheme every call site reads) and
+  `check_instance_method` (the implementation's own signature, so the two halves of one
+  method disagreed). All now resolve aliases. This was a **spec violation**, not only a
+  rough edge: §5.6.1 says `type alias Foo = Int` makes the two interchangeable *everywhere*,
+  and the spec's own example failed in a record field.
 
-  ```sprout
-  type alias Names = List String
-  fn shout(ns: Names) -> (Names, Int) = (ns, list_length(ns))   # fine
-  type Bag = (items: Names, tag: String)
-  fn read_bag(b: Bag) -> Int = list_length(b.items)
-  # ERROR: Type mismatch: List $t2555 vs main.Names in function main.read_bag
-  ```
-
-  The field keeps the alias name instead of its expansion, so reading it yields a type
-  nothing else unifies with. Consistent with the working stdlib aliases, which all appear in
-  function signatures rather than record fields. Surfaced when `examples/tui_dashboard.sprout`
-  tried to name its child-list type: aliases for the message and command lists (signature
-  positions) work and are now used there; the one for the container's `kids` field had to be
-  reverted to the spelled-out type.
+  **Known limit, stated in §5.6.2:** the arity check walks declarations and signatures, not
+  annotations inside function bodies. A wrong-arity alias in a lambda annotation still
+  reports as a type mismatch naming the alias rather than as an arity error.
 
 - [ ] `P3` **stdlib ships no container widget.** A container is expressible today — it is a
   widget whose hidden state is a `List (Widget m)`, which `examples/tui_dashboard.sprout`
@@ -5167,6 +5167,11 @@ op-classification already in place.
   the compiler reports success, so it reads as a toolchain problem rather than a Sprout one. And it
   is silent for a parameter the optimiser never needs — an unused one still appears in the `define`
   line, so the failure is unconditional on the *name*, not on use.
+
+  Hit again 2026-09-07 in the alias expander (`alias_visit_entry(name, entry: Maybe AliasEntry, …)`
+  broke `build-stage2`), and filed a second time because the entry above was not found first — the
+  duplicate is folded back in here. Two sightings in two days on a plain English noun is the
+  argument for `%p$<name>` over waiting for a third.
 
 - [ ] `P3` **DCE keeps an unreachable stdlib function in one corpus file.** Observed 2026-09-05
   when `stdlib.string.split` landed: `tests/golden/ir/examples__sentry_api.sprout.ll` gained

@@ -1,0 +1,57 @@
+# A parameterized type alias expands structurally: the parameter may sit
+# anywhere in the body, the body may be a tuple or an arrow, and an alias may
+# stand on another alias. Before this was fixed only one shape worked — the
+# parameter as the last argument of a type application, which is the single form
+# an eta-reduction could store.
+
+type alias Boxed a = Result String a
+type alias Flip a = Result a String
+type alias Pairing a b = Result a b
+type alias Pair m = (m, Int)
+type alias Fn a = Int -> a
+type alias Names = List String
+type alias Tagged a = (Names, a)
+
+fn or_zero(r: Boxed Int) -> Int =
+  match r with
+  | Ok v -> v
+  | Err _ -> 0
+
+fn flip_tag(r: Flip Int) -> String =
+  match r with
+  | Ok s -> s
+  | Err n -> to_string(n)
+
+fn pairing_tag(r: Pairing Int String) -> String =
+  match r with
+  | Ok s -> s
+  | Err n -> to_string(n)
+
+fn bump(p: Pair String) -> Int =
+  match p with
+  | (_, n) -> n + 1
+
+fn apply_twice(f: Fn Int, n: Int) -> Int = f(f(n))
+
+# An annotation inside a body resolves against the same aliases a signature
+# does, through the env's mirrored copy rather than the declaration walk's.
+fn first_or(d: Int, p: Pair Int) -> Int =
+  pick(p)
+  where pick = \ (q: Pair Int) -> fst_int(q, d)
+
+fn fst_int(p: Pair Int, d: Int) -> Int =
+  match p with
+  | (a, _) -> a + d
+
+fn tag_count(t: Tagged Int) -> Int =
+  match t with
+  | (ns, k) -> list_length(ns) + k
+
+fn main() -> Unit !{IO} = do
+  print(to_string(or_zero(Ok(7))))
+  print(flip_tag(Err(41)))
+  print(pairing_tag(Ok("done")))
+  print(to_string(bump(("x", 1))))
+  print(to_string(apply_twice(\ (n: Int) -> n * 2, 3)))
+  print(to_string(tag_count((["a", "b"], 5))))
+  print(to_string(first_or(5, (3, 9))))

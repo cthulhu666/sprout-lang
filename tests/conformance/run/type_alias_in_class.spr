@@ -1,0 +1,18 @@
+# A class method's declared signature and an instance's implementation of it
+# must resolve aliases the same way. They were built from different alias
+# environments, so an alias in a method's return type met its own expansion and
+# failed.
+
+type alias Names = List String
+
+class Labelled a
+  fn labels(x: a) -> Names
+
+type Tag = | Tag String
+
+instance Labelled Tag
+  fn labels(x: Tag) -> Names =
+    match x with
+    | Tag s -> [s, "end"]
+
+fn main() -> Unit !{IO} = print(to_string(list_length(labels(Tag("hi")))))

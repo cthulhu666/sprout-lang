@@ -1,0 +1,10 @@
+# Two aliases of the same name. The store is keyed by name and arity, so these
+# do not overwrite each other — but only one of them can be found by name, and
+# which one is an accident of declaration order. Rejected instead.
+
+type alias F a = List a
+type alias F a b = Result a b
+
+fn one(x: F Int) -> Int = list_length(x)
+
+fn main() -> Unit !{IO} = print(to_string(one([1, 2])))
