@@ -77,14 +77,14 @@ fi
 #
 # NOTE, verified 2026-08-11 — do NOT "fix" this by asserting B1 does not fire. It DOES
 # fire here, and correctly: the emitted IR contains
-#     define i64 @__sprout_ir_lambda_N(i64 %env$, i64 %__sprout_ph_0)
+#     define i64 @__sprout_ir_lambda_N(i64 %p$env$, i64 %p$__sprout_ph_0)
 # whose body bounds-checks (`icmp uge` → panic) and then does the inlined load indexed
 # by %__sprout_ph_0 — the placeholder bound as the CLOSURE'S PARAMETER. That is the
 # inline happening inside the closure body at call time, which is both safe (a
 # `Vector Double` element is a scalar, so no unrooted heap pointer — the ① hazard does
 # not apply) and desirable. What ② forbids is the arity hard-Err, not the inline.
 if b1_partial_ir="$(emit "$FIX/fixture_b1_partial.spr" 2>/dev/null)" && [ -n "$b1_partial_ir" ]; then
-  if grep -qEe '^define .*@__sprout_ir_lambda_[0-9]+\(.*%__sprout_ph_0' <<<"$b1_partial_ir"; then
+  if grep -qEe '^define .*@__sprout_ir_lambda_[0-9]+\(.*%p[$]__sprout_ph_0' <<<"$b1_partial_ir"; then
     echo "  ok: partial application compiles and builds a placeholder closure"
   else
     echo "  FAIL: under-applied vector_get_direct compiled but built NO placeholder closure"; fail=1

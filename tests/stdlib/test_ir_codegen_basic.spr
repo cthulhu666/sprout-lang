@@ -25,7 +25,7 @@ fn identity_program() -> sprout_ir.IRProgram =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction("id", Cons(("x", sprout_ir.IRTHeap), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
-        sprout_ir.IRRet("%x"),
+        sprout_ir.IRRet(sprout_ir.param_ssa("x")),
         Nil)),
       Nil)),
     Nil), Nil, Nil, Nil)
@@ -58,10 +58,12 @@ fn main() -> Unit !{IO} =
                 contains(ir_lowering.lower_program(answer_program()), "add i64 0, 42")),
 
     # Identity function: parameter typed as i64 and returned directly.
+    # The `p$` prefix is pinned literally here: it is what keeps a parameter out
+    # of the block-label namespace, so an accidental change must fail loudly.
     check_true("identity emits typed parameter",
-                contains(ir_lowering.lower_program(identity_program()), "define i64 @id(i64 %x)")),
+                contains(ir_lowering.lower_program(identity_program()), "define i64 @id(i64 %p$x)")),
     check_true("identity returns the parameter",
-                contains(ir_lowering.lower_program(identity_program()), "ret i64 %x")),
+                contains(ir_lowering.lower_program(identity_program()), "ret i64 %p$x")),
 
     # Synthetic C-ABI main shim is always present so the IR links cleanly.
     check_true("main shim is emitted",

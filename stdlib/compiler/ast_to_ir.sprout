@@ -245,7 +245,7 @@ fn dict_has(k: String, d: Dict String) -> Bool =
 
 # Look up a free var's current SSA name:
 # - If in captures dict (was a capture in an outer lambda), use that SSA name.
-# - If in params (a function parameter), use "%" ++ v.
+# - If in params (a function parameter), use sprout_ir.param_ssa(v).
 # Returns Nothing if not found (should not happen after filter_capturable).
 # O(log n).
 fn lookup_free_var_ssa(v: String, params: List String,
@@ -254,7 +254,7 @@ fn lookup_free_var_ssa(v: String, params: List String,
   | Just ssa -> Just(ssa)
   | Nothing ->
       if param_known(v, params)
-      then Just("%" ++ v)
+      then Just(sprout_ir.param_ssa(v))
       else Nothing
 
 # Build the list of SSA names for captured free vars (in order).
@@ -356,10 +356,10 @@ fn build_load_env_ops_go(frees: List String, kinds: List sprout_ir.IRType, base_
       match kinds with
       | Nil ->
           # Defensive: more frees than kinds (should not happen); treat as heap.
-          Cons(sprout_ir.IRLoadEnvSlot("%t$" ++ int_to_string(base_idx + i), "%env$", i + 1, sprout_ir.IRTHeap),
+          Cons(sprout_ir.IRLoadEnvSlot("%t$" ++ int_to_string(base_idx + i), sprout_ir.param_ssa("env$"), i + 1, sprout_ir.IRTHeap),
                build_load_env_ops_go(rest_frees, Nil, base_idx, i + 1))
       | Cons k rest_kinds ->
-          Cons(sprout_ir.IRLoadEnvSlot("%t$" ++ int_to_string(base_idx + i), "%env$", i + 1, k),
+          Cons(sprout_ir.IRLoadEnvSlot("%t$" ++ int_to_string(base_idx + i), sprout_ir.param_ssa("env$"), i + 1, k),
                build_load_env_ops_go(rest_frees, rest_kinds, base_idx, i + 1))
 
 # ---------------------------------------------------------------------------
@@ -390,7 +390,7 @@ fn build_load_env_ops_go(frees: List String, kinds: List sprout_ir.IRType, base_
 #
 # Supports the scalar subset of Sprout used for the IR-codegen bring-up:
 #   - fn foo() -> Int = <intlit>            → IRConst + IRRet
-#   - fn id(x: Int) -> Int = x              → IRRet "%x"   (parameter reference)
+#   - fn id(x: Int) -> Int = x              → IRRet "%p$x" (parameter reference)
 #   - fn add1(x: Int) -> Int = x + 1        → IRConst, IRIAdd, IRRet
 #   - fn sub1, mul2 — likewise for Sub / Mul
 #   - fn is_zero(x: Int) -> Bool = x == 0   → IRConst, IRICmp, IRRet
@@ -905,7 +905,7 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
       | Just ssa -> Ok((Nil, cur_label, cur_ops, ssa, idx))
       | Nothing ->
           if param_known(name, params)
-          then Ok((Nil, cur_label, cur_ops, "%" ++ name, idx))
+          then Ok((Nil, cur_label, cur_ops, sprout_ir.param_ssa(name), idx))
           else
             match dict_get(name, ctors) with
             | Just entry ->
@@ -5110,7 +5110,7 @@ fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
             # callable at the call site. No defensive type check — that would
             # contradict the is_supported_arg_type trust contract and create an
             # asymmetry with the captures branch above.
-            translate_closure_call("%" ++ fname, args, params, ctors, idx,
+            translate_closure_call(sprout_ir.param_ssa(fname), args, params, ctors, idx,
                                    cur_label, cur_ops, captures, lifted_ref, top_level, let_names, fn_arities,
                                    lambda_ctr_ref, lifted_idx_ref, name_prefix)
           else if set_member(fname, let_names)
@@ -6111,14 +6111,16 @@ fn tco_scan_incomings(self_name: String, all: List sprout_ir.IRBlock, incomings:
       | Just args -> tco_scan_incomings(self_name, all, rest, phi_block, worklist, Cons((pred, args, val, phi_block), acc))
       | Nothing -> tco_scan_incomings(self_name, all, rest, phi_block, Cons(val, worklist), acc)
 
-# Per-param slot info: (orig_name, slot_ssa, in_name=%<p>$in, kind).
+# Per-param slot info: (orig_name, slot_ssa, in_name=%p$<p>$in, kind).
+# in_name must go through param_ssa: tco_rename_params moves `<p>$in` into the
+# IRFunction param list, so it is the lowering pass that renders it.
 fn tco_build_slots(params: List (String, sprout_ir.IRType), idx: Int,
                    acc: List (String, String, String, sprout_ir.IRType)) ->
     (List (String, String, String, sprout_ir.IRType), Int) =
   match params with
   | Nil -> (list_reverse(acc), idx)
   | Cons (p, kind) rest ->
-      tco_build_slots(rest, idx + 1, Cons((p, fresh_name("%t", idx), "%" ++ p ++ "$in", kind), acc))
+      tco_build_slots(rest, idx + 1, Cons((p, fresh_name("%t", idx), sprout_ir.param_ssa(p ++ "$in"), kind), acc))
 
 fn tco_rename_params(params: List (String, sprout_ir.IRType)) -> List (String, sprout_ir.IRType) =
   match params with
@@ -6134,7 +6136,7 @@ fn tco_load_ops(slots: List (String, String, String, sprout_ir.IRType)) -> List 
   match slots with
   | Nil -> Nil
   | Cons (p, slot, _in, kind) rest ->
-      Cons(sprout_ir.IRTcoLoad("%" ++ p, "i64", slot, kind), tco_load_ops(rest))
+      Cons(sprout_ir.IRTcoLoad(sprout_ir.param_ssa(p), "i64", slot, kind), tco_load_ops(rest))
 
 # Zip the per-param slots with a tail call's args -> IRTcoBack stores.
 fn tco_zip_stores(slots: List (String, String, String, sprout_ir.IRType), args: List String) -> List (String, String, String) =
@@ -7356,7 +7358,7 @@ fn build_wrapper_arg_params(idx: Int, arity: Int) -> List (String, sprout_ir.IRT
 
 fn build_wrapper_arg_ssas(idx: Int, arity: Int) -> List String =
   if idx >= arity then Nil
-  else Cons("%a" ++ int_to_string(idx), build_wrapper_arg_ssas(idx + 1, arity))
+  else Cons(sprout_ir.param_ssa("a" ++ int_to_string(idx)), build_wrapper_arg_ssas(idx + 1, arity))
 
 export fn build_top_level_let_names(decls: List typed_ast.TypedDecl) -> Set =
   match decls with

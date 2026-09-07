@@ -148,16 +148,16 @@ declare i64 @double_from_bits(i64)
 @stdlib.math.two52_bits = private constant i64 4841369599423283200
 @stdlib.math.two63 = global i64 zeroinitializer
 
-define i64 @stdlib.math.sq(i64 %v) {
+define i64 @stdlib.math.sq(i64 %p$v) {
 entry:
-  %t$0$la = bitcast i64 %v to double
-  %t$0$lb = bitcast i64 %v to double
+  %t$0$la = bitcast i64 %p$v to double
+  %t$0$lb = bitcast i64 %p$v to double
   %t$0$fr = fmul double %t$0$la, %t$0$lb
   %t$0 = bitcast double %t$0$fr to i64
   ret i64 %t$0
 }
 
-define i64 @stdlib.math.raw_biased_exp(i64 %x) {
+define i64 @stdlib.math.raw_biased_exp(i64 %p$x) {
 entry:
   %t$0 = load i64, ptr @stdlib.math.exp_field_unit
   %t$1 = icmp eq i64 %t$0, 0
@@ -168,23 +168,23 @@ divpanic_1:
   call i64 @panic(i64 %t$3)
   unreachable
 divok_1:
-  %t$4 = sdiv i64 %x, %t$0
+  %t$4 = sdiv i64 %p$x, %t$0
   ret i64 %t$4
 }
 
-define i64 @stdlib.math.two_pow(i64 %n) {
+define i64 @stdlib.math.two_pow(i64 %p$n) {
 entry:
   %t$0 = load i64, ptr @stdlib.math.exp_bias
-  %t$1 = add i64 %n, %t$0
+  %t$1 = add i64 %p$n, %t$0
   %t$2 = load i64, ptr @stdlib.math.exp_field_unit
   %t$3 = mul i64 %t$1, %t$2
   ret i64 %t$3
 }
 
-define i64 @stdlib.math.floor_div_2(i64 %e) {
+define i64 @stdlib.math.floor_div_2(i64 %p$e) {
 entry:
   %t$0 = load i64, ptr @stdlib.math.exp_floor_bias
-  %t$1 = add i64 %e, %t$0
+  %t$1 = add i64 %p$e, %t$0
   %t$2 = add i64 0, 2
   %t$3 = icmp eq i64 %t$2, 0
   br i1 %t$3, label %divpanic_3, label %divok_3
@@ -200,10 +200,10 @@ divok_3:
   ret i64 %t$8
 }
 
-define i64 @stdlib.math.floor_div_3(i64 %e) {
+define i64 @stdlib.math.floor_div_3(i64 %p$e) {
 entry:
   %t$0 = load i64, ptr @stdlib.math.exp_floor_bias
-  %t$1 = add i64 %e, %t$0
+  %t$1 = add i64 %p$e, %t$0
   %t$2 = add i64 0, 3
   %t$3 = icmp eq i64 %t$2, 0
   br i1 %t$3, label %divpanic_3, label %divok_3
@@ -219,41 +219,41 @@ divok_3:
   ret i64 %t$8
 }
 
-define i64 @stdlib.math.scale_down_pow2(i64 %x, i64 %n) {
+define i64 @stdlib.math.scale_down_pow2(i64 %p$x, i64 %p$n) {
 entry:
   %t$0 = load i64, ptr @stdlib.math.exp_field_unit
-  %t$1 = mul i64 %n, %t$0
-  %t$2 = sub i64 %x, %t$1
+  %t$1 = mul i64 %p$n, %t$0
+  %t$2 = sub i64 %p$x, %t$1
   ret i64 %t$2
 }
 
-define i64 @stdlib.math.is_nan(i64 %x) {
+define i64 @stdlib.math.is_nan(i64 %p$x) {
 entry:
-  %t$0$fa = bitcast i64 %x to double
-  %t$0$fb = bitcast i64 %x to double
+  %t$0$fa = bitcast i64 %p$x to double
+  %t$0$fb = bitcast i64 %p$x to double
   %t$0 = fcmp oeq double %t$0$fa, %t$0$fb
   %t$1 = zext i1 %t$0 to i64
   %t$2 = xor i64 %t$1, 1
   ret i64 %t$2
 }
 
-define i64 @stdlib.math.abs(i64 %x) {
+define i64 @stdlib.math.abs(i64 %p$x) {
 entry:
   %t$0 = bitcast double 0.0 to i64
-  %t$1$fa = bitcast i64 %x to double
+  %t$1$fa = bitcast i64 %p$x to double
   %t$1$fb = bitcast i64 %t$0 to double
   %t$1 = fcmp olt double %t$1$fa, %t$1$fb
   %t$2 = zext i1 %t$1 to i64
   %t$13 = trunc i64 %t$2 to i1
   br i1 %t$13, label %then_3, label %else_3
 then_3:
-  %t$5$fa = bitcast i64 %x to double
+  %t$5$fa = bitcast i64 %p$x to double
   %t$5$fr = fneg double %t$5$fa
   %t$5 = bitcast double %t$5$fr to i64
   br label %join_3
 else_3:
   %t$6 = bitcast double 0.0 to i64
-  %t$7$fa = bitcast i64 %x to double
+  %t$7$fa = bitcast i64 %p$x to double
   %t$7$fb = bitcast i64 %t$6 to double
   %t$7 = fcmp oeq double %t$7$fa, %t$7$fb
   %t$8 = zext i1 %t$7 to i64
@@ -265,17 +265,17 @@ then_9:
 else_9:
   br label %join_9
 join_9:
-  %t$10 = phi i64 [%t$11, %then_9], [%x, %else_9]
+  %t$10 = phi i64 [%t$11, %then_9], [%p$x, %else_9]
   br label %join_3
 join_3:
   %t$4 = phi i64 [%t$5, %then_3], [%t$10, %join_9]
   ret i64 %t$4
 }
 
-define i64 @stdlib.math.round_nearest_pos(i64 %x) {
+define i64 @stdlib.math.round_nearest_pos(i64 %p$x) {
 entry:
   %t$0 = load i64, ptr @stdlib.math.two52
-  %t$1$fa = bitcast i64 %x to double
+  %t$1$fa = bitcast i64 %p$x to double
   %t$1$fb = bitcast i64 %t$0 to double
   %t$1 = fcmp oge double %t$1$fa, %t$1$fb
   %t$2 = zext i1 %t$1 to i64
@@ -285,7 +285,7 @@ then_3:
   br label %join_3
 else_3:
   %t$5 = load i64, ptr @stdlib.math.two52
-  %t$6$la = bitcast i64 %x to double
+  %t$6$la = bitcast i64 %p$x to double
   %t$6$lb = bitcast i64 %t$5 to double
   %t$6$fr = fadd double %t$6$la, %t$6$lb
   %t$6 = bitcast double %t$6$fr to i64
@@ -296,14 +296,14 @@ else_3:
   %t$8 = bitcast double %t$8$fr to i64
   br label %join_3
 join_3:
-  %t$4 = phi i64 [%x, %then_3], [%t$8, %else_3]
+  %t$4 = phi i64 [%p$x, %then_3], [%t$8, %else_3]
   ret i64 %t$4
 }
 
-define i64 @stdlib.math.round_nearest(i64 %x) {
+define i64 @stdlib.math.round_nearest(i64 %p$x) {
 entry:
   %t$0 = bitcast double 0.0 to i64
-  %t$1$fa = bitcast i64 %x to double
+  %t$1$fa = bitcast i64 %p$x to double
   %t$1$fb = bitcast i64 %t$0 to double
   %t$1 = fcmp olt double %t$1$fa, %t$1$fb
   %t$2 = zext i1 %t$1 to i64
@@ -313,7 +313,7 @@ then_3:
   %t$5 = bitcast double 0.0 to i64
   %t$6 = bitcast double 0.0 to i64
   %t$7$la = bitcast i64 %t$6 to double
-  %t$7$lb = bitcast i64 %x to double
+  %t$7$lb = bitcast i64 %p$x to double
   %t$7$fr = fsub double %t$7$la, %t$7$lb
   %t$7 = bitcast double %t$7$fr to i64
   %t$8 = call i64 @stdlib.math.round_nearest_pos(i64 %t$7)
@@ -323,20 +323,20 @@ then_3:
   %t$9 = bitcast double %t$9$fr to i64
   br label %join_3
 else_3:
-  %t$10 = call i64 @stdlib.math.round_nearest_pos(i64 %x)
+  %t$10 = call i64 @stdlib.math.round_nearest_pos(i64 %p$x)
   br label %join_3
 join_3:
   %t$4 = phi i64 [%t$9, %then_3], [%t$10, %else_3]
   ret i64 %t$4
 }
 
-define i64 @stdlib.math.floor(i64 %x) {
+define i64 @stdlib.math.floor(i64 %p$x) {
 entry:
-  %t$0 = call i64 @stdlib.math.round_nearest(i64 %x)
+  %t$0 = call i64 @stdlib.math.round_nearest(i64 %p$x)
   br label %arm_0_1
 arm_0_1:
   %t$3 = bitcast double 0.0 to i64
-  %t$4$fa = bitcast i64 %x to double
+  %t$4$fa = bitcast i64 %p$x to double
   %t$4$fb = bitcast i64 %t$3 to double
   %t$4 = fcmp oeq double %t$4$fa, %t$4$fb
   %t$5 = zext i1 %t$4 to i64
@@ -346,7 +346,7 @@ then_6:
   br label %join_6
 else_6:
   %t$8$fa = bitcast i64 %t$0 to double
-  %t$8$fb = bitcast i64 %x to double
+  %t$8$fb = bitcast i64 %p$x to double
   %t$8 = fcmp ogt double %t$8$fa, %t$8$fb
   %t$9 = zext i1 %t$8 to i64
   %t$14 = trunc i64 %t$9 to i1
@@ -364,7 +364,7 @@ join_10:
   %t$11 = phi i64 [%t$13, %then_10], [%t$0, %else_10]
   br label %join_6
 join_6:
-  %t$7 = phi i64 [%x, %then_6], [%t$11, %join_10]
+  %t$7 = phi i64 [%p$x, %then_6], [%t$11, %join_10]
   br label %join_1
 arm_1_1:
   call void @sprout_abort_match()
@@ -374,22 +374,22 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @stdlib.math.sqrt_iter(i64 %x$in, i64 %guess$in, i64 %i$in) {
+define i64 @stdlib.math.sqrt_iter(i64 %p$x$in, i64 %p$guess$in, i64 %p$i$in) {
 entry:
   %t$13 = alloca i64
-  store i64 %x$in, ptr %t$13
+  store i64 %p$x$in, ptr %t$13
   %t$14 = alloca i64
-  store i64 %guess$in, ptr %t$14
+  store i64 %p$guess$in, ptr %t$14
   %t$15 = alloca i64
-  store i64 %i$in, ptr %t$15
+  store i64 %p$i$in, ptr %t$15
   %t$16 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
-  %x = load i64, ptr %t$13
-  %guess = load i64, ptr %t$14
-  %i = load i64, ptr %t$15
+  %p$x = load i64, ptr %t$13
+  %p$guess = load i64, ptr %t$14
+  %p$i = load i64, ptr %t$15
   %t$0 = add i64 0, 6
-  %t$1 = icmp sge i64 %i, %t$0
+  %t$1 = icmp sge i64 %p$i, %t$0
   %t$2 = zext i1 %t$1 to i64
   %t$12 = trunc i64 %t$2 to i1
   br i1 %t$12, label %then_3, label %else_3
@@ -397,11 +397,11 @@ then_3:
   br label %join_3
 else_3:
   %t$5 = bitcast double 0.5 to i64
-  %t$6$la = bitcast i64 %x to double
-  %t$6$lb = bitcast i64 %guess to double
+  %t$6$la = bitcast i64 %p$x to double
+  %t$6$lb = bitcast i64 %p$guess to double
   %t$6$fr = fdiv double %t$6$la, %t$6$lb
   %t$6 = bitcast double %t$6$fr to i64
-  %t$7$la = bitcast i64 %guess to double
+  %t$7$la = bitcast i64 %p$guess to double
   %t$7$lb = bitcast i64 %t$6 to double
   %t$7$fr = fadd double %t$7$la, %t$7$lb
   %t$7 = bitcast double %t$7$fr to i64
@@ -410,20 +410,20 @@ else_3:
   %t$8$fr = fmul double %t$8$la, %t$8$lb
   %t$8 = bitcast double %t$8$fr to i64
   %t$9 = add i64 0, 1
-  %t$10 = add i64 %i, %t$9
-  store i64 %x, ptr %t$13
+  %t$10 = add i64 %p$i, %t$9
+  store i64 %p$x, ptr %t$13
   store i64 %t$8, ptr %t$14
   store i64 %t$10, ptr %t$15
   call void @llvm.stackrestore(ptr %t$16)
   br label %tco_loop
 join_3:
-  %t$4 = phi i64 [%guess, %then_3]
+  %t$4 = phi i64 [%p$guess, %then_3]
   ret i64 %t$4
 }
 
-define i64 @stdlib.math.sqrt_reduce(i64 %x) {
+define i64 @stdlib.math.sqrt_reduce(i64 %p$x) {
 entry:
-  %t$0 = call i64 @stdlib.math.raw_biased_exp(i64 %x)
+  %t$0 = call i64 @stdlib.math.raw_biased_exp(i64 %p$x)
   %t$1 = add i64 0, 0
   %t$2 = icmp eq i64 %t$0, %t$1
   %t$3 = zext i1 %t$2 to i64
@@ -431,7 +431,7 @@ entry:
   br i1 %t$14, label %then_4, label %else_4
 then_4:
   %t$6 = load i64, ptr @stdlib.math.two54
-  %t$7$la = bitcast i64 %x to double
+  %t$7$la = bitcast i64 %p$x to double
   %t$7$lb = bitcast i64 %t$6 to double
   %t$7$fr = fmul double %t$7$la, %t$7$lb
   %t$7 = bitcast double %t$7$fr to i64
@@ -442,19 +442,19 @@ then_4:
   br label %join_4
 else_4:
   %t$12 = add i64 0, 0
-  %t$13 = call i64 @stdlib.math.sqrt_reduce_norm(i64 %x, i64 %t$12)
+  %t$13 = call i64 @stdlib.math.sqrt_reduce_norm(i64 %p$x, i64 %t$12)
   br label %join_4
 join_4:
   %t$5 = phi i64 [%t$11, %then_4], [%t$13, %else_4]
   ret i64 %t$5
 }
 
-define i64 @stdlib.math.sqrt_reduce_norm(i64 %x, i64 %adj) {
+define i64 @stdlib.math.sqrt_reduce_norm(i64 %p$x, i64 %p$adj) {
 entry:
-  %t$0 = call i64 @stdlib.math.raw_biased_exp(i64 %x)
+  %t$0 = call i64 @stdlib.math.raw_biased_exp(i64 %p$x)
   %t$1 = load i64, ptr @stdlib.math.exp_bias
   %t$2 = sub i64 %t$0, %t$1
-  %t$3 = add i64 %t$2, %adj
+  %t$3 = add i64 %t$2, %p$adj
   br label %arm_0_4
 arm_0_4:
   %t$6 = call i64 @stdlib.math.floor_div_2(i64 %t$3)
@@ -462,8 +462,8 @@ arm_0_4:
 arm_0_7:
   %t$9 = add i64 0, 2
   %t$10 = mul i64 %t$9, %t$6
-  %t$11 = sub i64 %t$10, %adj
-  %t$12 = call i64 @stdlib.math.scale_down_pow2(i64 %x, i64 %t$11)
+  %t$11 = sub i64 %t$10, %p$adj
+  %t$12 = call i64 @stdlib.math.scale_down_pow2(i64 %p$x, i64 %t$11)
   br label %arm_0_13
 arm_0_13:
   %t$15 = call i64 @stdlib.math.two_pow(i64 %t$6)
@@ -494,16 +494,16 @@ join_4:
   ret i64 %t$5
 }
 
-define i64 @stdlib.math.sqrt(i64 %x) {
+define i64 @stdlib.math.sqrt(i64 %p$x) {
 entry:
-  %t$0 = call i64 @stdlib.math.is_nan(i64 %x)
+  %t$0 = call i64 @stdlib.math.is_nan(i64 %p$x)
   %t$24 = trunc i64 %t$0 to i1
   br i1 %t$24, label %then_1, label %else_1
 then_1:
   br label %join_1
 else_1:
   %t$3 = bitcast double 0.0 to i64
-  %t$4$fa = bitcast i64 %x to double
+  %t$4$fa = bitcast i64 %p$x to double
   %t$4$fb = bitcast i64 %t$3 to double
   %t$4 = fcmp olt double %t$4$fa, %t$4$fb
   %t$5 = zext i1 %t$4 to i64
@@ -514,7 +514,7 @@ then_6:
   br label %join_6
 else_6:
   %t$9 = bitcast double 0.0 to i64
-  %t$10$fa = bitcast i64 %x to double
+  %t$10$fa = bitcast i64 %p$x to double
   %t$10$fb = bitcast i64 %t$9 to double
   %t$10 = fcmp oeq double %t$10$fa, %t$10$fb
   %t$11 = zext i1 %t$10 to i64
@@ -524,12 +524,12 @@ then_12:
   br label %join_12
 else_12:
   %t$14 = bitcast double 0.5 to i64
-  %t$15$la = bitcast i64 %x to double
+  %t$15$la = bitcast i64 %p$x to double
   %t$15$lb = bitcast i64 %t$14 to double
   %t$15$fr = fmul double %t$15$la, %t$15$lb
   %t$15 = bitcast double %t$15$fr to i64
   %t$16$fa = bitcast i64 %t$15 to double
-  %t$16$fb = bitcast i64 %x to double
+  %t$16$fb = bitcast i64 %p$x to double
   %t$16 = fcmp oeq double %t$16$fa, %t$16$fb
   %t$17 = zext i1 %t$16 to i64
   %t$21 = trunc i64 %t$17 to i1
@@ -537,23 +537,23 @@ else_12:
 then_18:
   br label %join_18
 else_18:
-  %t$20 = call i64 @stdlib.math.sqrt_reduce(i64 %x)
+  %t$20 = call i64 @stdlib.math.sqrt_reduce(i64 %p$x)
   br label %join_18
 join_18:
-  %t$19 = phi i64 [%x, %then_18], [%t$20, %else_18]
+  %t$19 = phi i64 [%p$x, %then_18], [%t$20, %else_18]
   br label %join_12
 join_12:
-  %t$13 = phi i64 [%x, %then_12], [%t$19, %join_18]
+  %t$13 = phi i64 [%p$x, %then_12], [%t$19, %join_18]
   br label %join_6
 join_6:
   %t$7 = phi i64 [%t$8, %then_6], [%t$13, %join_12]
   br label %join_1
 join_1:
-  %t$2 = phi i64 [%x, %then_1], [%t$7, %join_6]
+  %t$2 = phi i64 [%p$x, %then_1], [%t$7, %join_6]
   ret i64 %t$2
 }
 
-define i64 @stdlib.math.exp_series(i64 %r) {
+define i64 @stdlib.math.exp_series(i64 %p$r) {
 entry:
   %t$0 = bitcast double 1.0 to i64
   %t$1 = bitcast double 1.0 to i64
@@ -563,7 +563,7 @@ entry:
   %t$4$lb = bitcast i64 %t$3 to double
   %t$4$fr = fdiv double %t$4$la, %t$4$lb
   %t$4 = bitcast double %t$4$fr to i64
-  %t$5$la = bitcast i64 %r to double
+  %t$5$la = bitcast i64 %p$r to double
   %t$5$lb = bitcast i64 %t$4 to double
   %t$5$fr = fmul double %t$5$la, %t$5$lb
   %t$5 = bitcast double %t$5$fr to i64
@@ -574,7 +574,7 @@ entry:
   %t$9$lb = bitcast i64 %t$8 to double
   %t$9$fr = fdiv double %t$9$la, %t$9$lb
   %t$9 = bitcast double %t$9$fr to i64
-  %t$10$la = bitcast i64 %r to double
+  %t$10$la = bitcast i64 %p$r to double
   %t$10$lb = bitcast i64 %t$9 to double
   %t$10$fr = fmul double %t$10$la, %t$10$lb
   %t$10 = bitcast double %t$10$fr to i64
@@ -585,7 +585,7 @@ entry:
   %t$14$lb = bitcast i64 %t$13 to double
   %t$14$fr = fdiv double %t$14$la, %t$14$lb
   %t$14 = bitcast double %t$14$fr to i64
-  %t$15$la = bitcast i64 %r to double
+  %t$15$la = bitcast i64 %p$r to double
   %t$15$lb = bitcast i64 %t$14 to double
   %t$15$fr = fmul double %t$15$la, %t$15$lb
   %t$15 = bitcast double %t$15$fr to i64
@@ -596,7 +596,7 @@ entry:
   %t$19$lb = bitcast i64 %t$18 to double
   %t$19$fr = fdiv double %t$19$la, %t$19$lb
   %t$19 = bitcast double %t$19$fr to i64
-  %t$20$la = bitcast i64 %r to double
+  %t$20$la = bitcast i64 %p$r to double
   %t$20$lb = bitcast i64 %t$19 to double
   %t$20$fr = fmul double %t$20$la, %t$20$lb
   %t$20 = bitcast double %t$20$fr to i64
@@ -607,7 +607,7 @@ entry:
   %t$24$lb = bitcast i64 %t$23 to double
   %t$24$fr = fdiv double %t$24$la, %t$24$lb
   %t$24 = bitcast double %t$24$fr to i64
-  %t$25$la = bitcast i64 %r to double
+  %t$25$la = bitcast i64 %p$r to double
   %t$25$lb = bitcast i64 %t$24 to double
   %t$25$fr = fmul double %t$25$la, %t$25$lb
   %t$25 = bitcast double %t$25$fr to i64
@@ -618,7 +618,7 @@ entry:
   %t$29$lb = bitcast i64 %t$28 to double
   %t$29$fr = fdiv double %t$29$la, %t$29$lb
   %t$29 = bitcast double %t$29$fr to i64
-  %t$30$la = bitcast i64 %r to double
+  %t$30$la = bitcast i64 %p$r to double
   %t$30$lb = bitcast i64 %t$29 to double
   %t$30$fr = fmul double %t$30$la, %t$30$lb
   %t$30 = bitcast double %t$30$fr to i64
@@ -629,7 +629,7 @@ entry:
   %t$34$lb = bitcast i64 %t$33 to double
   %t$34$fr = fdiv double %t$34$la, %t$34$lb
   %t$34 = bitcast double %t$34$fr to i64
-  %t$35$la = bitcast i64 %r to double
+  %t$35$la = bitcast i64 %p$r to double
   %t$35$lb = bitcast i64 %t$34 to double
   %t$35$fr = fmul double %t$35$la, %t$35$lb
   %t$35 = bitcast double %t$35$fr to i64
@@ -640,7 +640,7 @@ entry:
   %t$39$lb = bitcast i64 %t$38 to double
   %t$39$fr = fdiv double %t$39$la, %t$39$lb
   %t$39 = bitcast double %t$39$fr to i64
-  %t$40$la = bitcast i64 %r to double
+  %t$40$la = bitcast i64 %p$r to double
   %t$40$lb = bitcast i64 %t$39 to double
   %t$40$fr = fmul double %t$40$la, %t$40$lb
   %t$40 = bitcast double %t$40$fr to i64
@@ -651,7 +651,7 @@ entry:
   %t$44$lb = bitcast i64 %t$43 to double
   %t$44$fr = fdiv double %t$44$la, %t$44$lb
   %t$44 = bitcast double %t$44$fr to i64
-  %t$45$la = bitcast i64 %r to double
+  %t$45$la = bitcast i64 %p$r to double
   %t$45$lb = bitcast i64 %t$44 to double
   %t$45$fr = fmul double %t$45$la, %t$45$lb
   %t$45 = bitcast double %t$45$fr to i64
@@ -662,7 +662,7 @@ entry:
   %t$49$lb = bitcast i64 %t$48 to double
   %t$49$fr = fdiv double %t$49$la, %t$49$lb
   %t$49 = bitcast double %t$49$fr to i64
-  %t$50$la = bitcast i64 %r to double
+  %t$50$la = bitcast i64 %p$r to double
   %t$50$lb = bitcast i64 %t$49 to double
   %t$50$fr = fmul double %t$50$la, %t$50$lb
   %t$50 = bitcast double %t$50$fr to i64
@@ -673,7 +673,7 @@ entry:
   %t$54$lb = bitcast i64 %t$53 to double
   %t$54$fr = fdiv double %t$54$la, %t$54$lb
   %t$54 = bitcast double %t$54$fr to i64
-  %t$55$la = bitcast i64 %r to double
+  %t$55$la = bitcast i64 %p$r to double
   %t$55$lb = bitcast i64 %t$54 to double
   %t$55$fr = fmul double %t$55$la, %t$55$lb
   %t$55 = bitcast double %t$55$fr to i64
@@ -761,7 +761,7 @@ entry:
   %t$76$lb = bitcast i64 %t$75 to double
   %t$76$fr = fadd double %t$76$la, %t$76$lb
   %t$76 = bitcast double %t$76$fr to i64
-  %t$77$la = bitcast i64 %r to double
+  %t$77$la = bitcast i64 %p$r to double
   %t$77$lb = bitcast i64 %t$76 to double
   %t$77$fr = fmul double %t$77$la, %t$77$lb
   %t$77 = bitcast double %t$77$fr to i64
@@ -772,10 +772,10 @@ entry:
   ret i64 %t$78
 }
 
-define i64 @stdlib.math.round_to_int_pos(i64 %v) {
+define i64 @stdlib.math.round_to_int_pos(i64 %p$v) {
 entry:
   %t$0 = load i64, ptr @stdlib.math.two52
-  %t$1$la = bitcast i64 %v to double
+  %t$1$la = bitcast i64 %p$v to double
   %t$1$lb = bitcast i64 %t$0 to double
   %t$1$fr = fadd double %t$1$la, %t$1$lb
   %t$1 = bitcast double %t$1$fr to i64
@@ -784,10 +784,10 @@ entry:
   ret i64 %t$3
 }
 
-define i64 @stdlib.math.round_to_int(i64 %v) {
+define i64 @stdlib.math.round_to_int(i64 %p$v) {
 entry:
   %t$0 = bitcast double 0.0 to i64
-  %t$1$fa = bitcast i64 %v to double
+  %t$1$fa = bitcast i64 %p$v to double
   %t$1$fb = bitcast i64 %t$0 to double
   %t$1 = fcmp olt double %t$1$fa, %t$1$fb
   %t$2 = zext i1 %t$1 to i64
@@ -797,36 +797,36 @@ then_3:
   %t$5 = add i64 0, 0
   %t$6 = bitcast double 0.0 to i64
   %t$7$la = bitcast i64 %t$6 to double
-  %t$7$lb = bitcast i64 %v to double
+  %t$7$lb = bitcast i64 %p$v to double
   %t$7$fr = fsub double %t$7$la, %t$7$lb
   %t$7 = bitcast double %t$7$fr to i64
   %t$8 = call i64 @stdlib.math.round_to_int_pos(i64 %t$7)
   %t$9 = sub i64 %t$5, %t$8
   br label %join_3
 else_3:
-  %t$10 = call i64 @stdlib.math.round_to_int_pos(i64 %v)
+  %t$10 = call i64 @stdlib.math.round_to_int_pos(i64 %p$v)
   br label %join_3
 join_3:
   %t$4 = phi i64 [%t$9, %then_3], [%t$10, %else_3]
   ret i64 %t$4
 }
 
-define i64 @stdlib.math.exp_scale(i64 %y, i64 %ki) {
+define i64 @stdlib.math.exp_scale(i64 %p$y, i64 %p$ki) {
 entry:
   %t$0 = add i64 0, 1023
-  %t$1 = icmp sgt i64 %ki, %t$0
+  %t$1 = icmp sgt i64 %p$ki, %t$0
   %t$2 = zext i1 %t$1 to i64
   %t$14 = trunc i64 %t$2 to i1
   br i1 %t$14, label %then_3, label %else_3
 then_3:
   %t$5 = add i64 0, 1023
   %t$6 = call i64 @stdlib.math.two_pow(i64 %t$5)
-  %t$7$la = bitcast i64 %y to double
+  %t$7$la = bitcast i64 %p$y to double
   %t$7$lb = bitcast i64 %t$6 to double
   %t$7$fr = fmul double %t$7$la, %t$7$lb
   %t$7 = bitcast double %t$7$fr to i64
   %t$8 = add i64 0, 1023
-  %t$9 = sub i64 %ki, %t$8
+  %t$9 = sub i64 %p$ki, %t$8
   %t$10 = call i64 @stdlib.math.two_pow(i64 %t$9)
   %t$11$la = bitcast i64 %t$7 to double
   %t$11$lb = bitcast i64 %t$10 to double
@@ -834,8 +834,8 @@ then_3:
   %t$11 = bitcast double %t$11$fr to i64
   br label %join_3
 else_3:
-  %t$12 = call i64 @stdlib.math.two_pow(i64 %ki)
-  %t$13$la = bitcast i64 %y to double
+  %t$12 = call i64 @stdlib.math.two_pow(i64 %p$ki)
+  %t$13$la = bitcast i64 %p$y to double
   %t$13$lb = bitcast i64 %t$12 to double
   %t$13$fr = fmul double %t$13$la, %t$13$lb
   %t$13 = bitcast double %t$13$fr to i64
@@ -845,10 +845,10 @@ join_3:
   ret i64 %t$4
 }
 
-define i64 @stdlib.math.exp(i64 %x) {
+define i64 @stdlib.math.exp(i64 %p$x) {
 entry:
   %t$0 = load i64, ptr @stdlib.math.inv_ln2
-  %t$1$la = bitcast i64 %x to double
+  %t$1$la = bitcast i64 %p$x to double
   %t$1$lb = bitcast i64 %t$0 to double
   %t$1$fr = fmul double %t$1$la, %t$1$lb
   %t$1 = bitcast double %t$1$fr to i64
@@ -864,20 +864,20 @@ arm_0_6:
   %t$9$lb = bitcast i64 %t$8 to double
   %t$9$fr = fmul double %t$9$la, %t$9$lb
   %t$9 = bitcast double %t$9$fr to i64
-  %t$10$la = bitcast i64 %x to double
+  %t$10$la = bitcast i64 %p$x to double
   %t$10$lb = bitcast i64 %t$9 to double
   %t$10$fr = fsub double %t$10$la, %t$10$lb
   %t$10 = bitcast double %t$10$fr to i64
   br label %arm_0_11
 arm_0_11:
-  %t$13 = call i64 @stdlib.math.is_nan(i64 %x)
+  %t$13 = call i64 @stdlib.math.is_nan(i64 %p$x)
   %t$46 = trunc i64 %t$13 to i1
   br i1 %t$46, label %then_14, label %else_14
 then_14:
   br label %join_14
 else_14:
   %t$16 = bitcast double 710.0 to i64
-  %t$17$fa = bitcast i64 %x to double
+  %t$17$fa = bitcast i64 %p$x to double
   %t$17$fb = bitcast i64 %t$16 to double
   %t$17 = fcmp ogt double %t$17$fa, %t$17$fb
   %t$18 = zext i1 %t$17 to i64
@@ -891,7 +891,7 @@ else_19:
   %t$23$fa = bitcast i64 %t$22 to double
   %t$23$fr = fneg double %t$23$fa
   %t$23 = bitcast double %t$23$fr to i64
-  %t$24$fa = bitcast i64 %x to double
+  %t$24$fa = bitcast i64 %p$x to double
   %t$24$fb = bitcast i64 %t$23 to double
   %t$24 = fcmp olt double %t$24$fa, %t$24$fb
   %t$25 = zext i1 %t$24 to i64
@@ -932,7 +932,7 @@ join_19:
   %t$20 = phi i64 [%t$21, %then_19], [%t$27, %join_26]
   br label %join_14
 join_14:
-  %t$15 = phi i64 [%x, %then_14], [%t$20, %join_19]
+  %t$15 = phi i64 [%p$x, %then_14], [%t$20, %join_19]
   br label %join_11
 arm_1_11:
   call void @sprout_abort_match()
@@ -954,15 +954,15 @@ join_3:
   ret i64 %t$4
 }
 
-define i64 @stdlib.math.ln_series(i64 %m) {
+define i64 @stdlib.math.ln_series(i64 %p$m) {
 entry:
   %t$0 = bitcast double 1.0 to i64
-  %t$1$la = bitcast i64 %m to double
+  %t$1$la = bitcast i64 %p$m to double
   %t$1$lb = bitcast i64 %t$0 to double
   %t$1$fr = fsub double %t$1$la, %t$1$lb
   %t$1 = bitcast double %t$1$fr to i64
   %t$2 = bitcast double 1.0 to i64
-  %t$3$la = bitcast i64 %m to double
+  %t$3$la = bitcast i64 %p$m to double
   %t$3$lb = bitcast i64 %t$2 to double
   %t$3$fr = fadd double %t$3$la, %t$3$lb
   %t$3 = bitcast double %t$3$fr to i64
@@ -1101,9 +1101,9 @@ join_5:
   ret i64 %t$6
 }
 
-define i64 @stdlib.math.ln_reduce(i64 %x) {
+define i64 @stdlib.math.ln_reduce(i64 %p$x) {
 entry:
-  %t$0 = call i64 @stdlib.math.raw_biased_exp(i64 %x)
+  %t$0 = call i64 @stdlib.math.raw_biased_exp(i64 %p$x)
   %t$1 = add i64 0, 0
   %t$2 = icmp eq i64 %t$0, %t$1
   %t$3 = zext i1 %t$2 to i64
@@ -1111,7 +1111,7 @@ entry:
   br i1 %t$14, label %then_4, label %else_4
 then_4:
   %t$6 = load i64, ptr @stdlib.math.two54
-  %t$7$la = bitcast i64 %x to double
+  %t$7$la = bitcast i64 %p$x to double
   %t$7$lb = bitcast i64 %t$6 to double
   %t$7$fr = fmul double %t$7$la, %t$7$lb
   %t$7 = bitcast double %t$7$fr to i64
@@ -1125,14 +1125,14 @@ then_4:
   br label %join_4
 else_4:
   %t$12 = bitcast double 0.0 to i64
-  %t$13 = call i64 @stdlib.math.ln_reduce_norm(i64 %x, i64 %t$12)
+  %t$13 = call i64 @stdlib.math.ln_reduce_norm(i64 %p$x, i64 %t$12)
   br label %join_4
 join_4:
   %t$5 = phi i64 [%t$11, %then_4], [%t$13, %else_4]
   ret i64 %t$5
 }
 
-define i64 @stdlib.math.ln_reduce_norm(i64 %x, i64 %adj) {
+define i64 @stdlib.math.ln_reduce_norm(i64 %p$x, i64 %p$adj) {
 entry:
   br label %arm_0_0
 arm_0_0:
@@ -1145,7 +1145,7 @@ divpanic_3:
   call i64 @panic(i64 %t$5)
   unreachable
 divok_3:
-  %t$6 = sdiv i64 %x, %t$2
+  %t$6 = sdiv i64 %p$x, %t$2
   br label %arm_0_7
 arm_0_7:
   %t$9 = load i64, ptr @stdlib.math.exp_bias
@@ -1158,7 +1158,7 @@ arm_0_12:
   %t$15 = sub i64 %t$6, %t$14
   %t$16 = load i64, ptr @stdlib.math.exp_field_unit
   %t$17 = mul i64 %t$15, %t$16
-  %t$18 = sub i64 %x, %t$17
+  %t$18 = sub i64 %p$x, %t$17
   br label %arm_0_19
 arm_0_19:
   %t$21 = load i64, ptr @stdlib.math.sqrt2
@@ -1170,7 +1170,7 @@ arm_0_19:
   br i1 %t$40, label %then_24, label %else_24
 then_24:
   %t$26$la = bitcast i64 %t$11 to double
-  %t$26$lb = bitcast i64 %adj to double
+  %t$26$lb = bitcast i64 %p$adj to double
   %t$26$fr = fadd double %t$26$la, %t$26$lb
   %t$26 = bitcast double %t$26$fr to i64
   %t$27 = bitcast double 1.0 to i64
@@ -1196,7 +1196,7 @@ then_24:
   br label %join_24
 else_24:
   %t$35$la = bitcast i64 %t$11 to double
-  %t$35$lb = bitcast i64 %adj to double
+  %t$35$lb = bitcast i64 %p$adj to double
   %t$35$fr = fadd double %t$35$la, %t$35$lb
   %t$35 = bitcast double %t$35$fr to i64
   %t$36 = load i64, ptr @stdlib.math.ln2
@@ -1239,16 +1239,16 @@ join_0:
   ret i64 %t$1
 }
 
-define i64 @stdlib.math.ln(i64 %x) {
+define i64 @stdlib.math.ln(i64 %p$x) {
 entry:
-  %t$0 = call i64 @stdlib.math.is_nan(i64 %x)
+  %t$0 = call i64 @stdlib.math.is_nan(i64 %p$x)
   %t$27 = trunc i64 %t$0 to i1
   br i1 %t$27, label %then_1, label %else_1
 then_1:
   br label %join_1
 else_1:
   %t$3 = bitcast double 0.0 to i64
-  %t$4$fa = bitcast i64 %x to double
+  %t$4$fa = bitcast i64 %p$x to double
   %t$4$fb = bitcast i64 %t$3 to double
   %t$4 = fcmp olt double %t$4$fa, %t$4$fb
   %t$5 = zext i1 %t$4 to i64
@@ -1259,7 +1259,7 @@ then_6:
   br label %join_6
 else_6:
   %t$9 = bitcast double 0.0 to i64
-  %t$10$fa = bitcast i64 %x to double
+  %t$10$fa = bitcast i64 %p$x to double
   %t$10$fb = bitcast i64 %t$9 to double
   %t$10 = fcmp oeq double %t$10$fa, %t$10$fb
   %t$11 = zext i1 %t$10 to i64
@@ -1275,12 +1275,12 @@ then_12:
   br label %join_12
 else_12:
   %t$17 = bitcast double 0.5 to i64
-  %t$18$la = bitcast i64 %x to double
+  %t$18$la = bitcast i64 %p$x to double
   %t$18$lb = bitcast i64 %t$17 to double
   %t$18$fr = fmul double %t$18$la, %t$18$lb
   %t$18 = bitcast double %t$18$fr to i64
   %t$19$fa = bitcast i64 %t$18 to double
-  %t$19$fb = bitcast i64 %x to double
+  %t$19$fb = bitcast i64 %p$x to double
   %t$19 = fcmp oeq double %t$19$fa, %t$19$fb
   %t$20 = zext i1 %t$19 to i64
   %t$24 = trunc i64 %t$20 to i1
@@ -1288,10 +1288,10 @@ else_12:
 then_21:
   br label %join_21
 else_21:
-  %t$23 = call i64 @stdlib.math.ln_reduce(i64 %x)
+  %t$23 = call i64 @stdlib.math.ln_reduce(i64 %p$x)
   br label %join_21
 join_21:
-  %t$22 = phi i64 [%x, %then_21], [%t$23, %else_21]
+  %t$22 = phi i64 [%p$x, %then_21], [%t$23, %else_21]
   br label %join_12
 join_12:
   %t$13 = phi i64 [%t$16, %then_12], [%t$22, %join_21]
@@ -1300,26 +1300,26 @@ join_6:
   %t$7 = phi i64 [%t$8, %then_6], [%t$13, %join_12]
   br label %join_1
 join_1:
-  %t$2 = phi i64 [%x, %then_1], [%t$7, %join_6]
+  %t$2 = phi i64 [%p$x, %then_1], [%t$7, %join_6]
   ret i64 %t$2
 }
 
-define i64 @stdlib.math.cbrt_iter(i64 %x$in, i64 %guess$in, i64 %i$in) {
+define i64 @stdlib.math.cbrt_iter(i64 %p$x$in, i64 %p$guess$in, i64 %p$i$in) {
 entry:
   %t$18 = alloca i64
-  store i64 %x$in, ptr %t$18
+  store i64 %p$x$in, ptr %t$18
   %t$19 = alloca i64
-  store i64 %guess$in, ptr %t$19
+  store i64 %p$guess$in, ptr %t$19
   %t$20 = alloca i64
-  store i64 %i$in, ptr %t$20
+  store i64 %p$i$in, ptr %t$20
   %t$21 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
-  %x = load i64, ptr %t$18
-  %guess = load i64, ptr %t$19
-  %i = load i64, ptr %t$20
+  %p$x = load i64, ptr %t$18
+  %p$guess = load i64, ptr %t$19
+  %p$i = load i64, ptr %t$20
   %t$0 = add i64 0, 6
-  %t$1 = icmp sge i64 %i, %t$0
+  %t$1 = icmp sge i64 %p$i, %t$0
   %t$2 = zext i1 %t$1 to i64
   %t$17 = trunc i64 %t$2 to i1
   br i1 %t$17, label %then_3, label %else_3
@@ -1328,14 +1328,14 @@ then_3:
 else_3:
   %t$5 = bitcast double 2.0 to i64
   %t$6$la = bitcast i64 %t$5 to double
-  %t$6$lb = bitcast i64 %guess to double
+  %t$6$lb = bitcast i64 %p$guess to double
   %t$6$fr = fmul double %t$6$la, %t$6$lb
   %t$6 = bitcast double %t$6$fr to i64
-  %t$7$la = bitcast i64 %guess to double
-  %t$7$lb = bitcast i64 %guess to double
+  %t$7$la = bitcast i64 %p$guess to double
+  %t$7$lb = bitcast i64 %p$guess to double
   %t$7$fr = fmul double %t$7$la, %t$7$lb
   %t$7 = bitcast double %t$7$fr to i64
-  %t$8$la = bitcast i64 %x to double
+  %t$8$la = bitcast i64 %p$x to double
   %t$8$lb = bitcast i64 %t$7 to double
   %t$8$fr = fdiv double %t$8$la, %t$8$lb
   %t$8 = bitcast double %t$8$fr to i64
@@ -1354,20 +1354,20 @@ else_3:
   %t$13$fr = fmul double %t$13$la, %t$13$lb
   %t$13 = bitcast double %t$13$fr to i64
   %t$14 = add i64 0, 1
-  %t$15 = add i64 %i, %t$14
-  store i64 %x, ptr %t$18
+  %t$15 = add i64 %p$i, %t$14
+  store i64 %p$x, ptr %t$18
   store i64 %t$13, ptr %t$19
   store i64 %t$15, ptr %t$20
   call void @llvm.stackrestore(ptr %t$21)
   br label %tco_loop
 join_3:
-  %t$4 = phi i64 [%guess, %then_3]
+  %t$4 = phi i64 [%p$guess, %then_3]
   ret i64 %t$4
 }
 
-define i64 @stdlib.math.cbrt_reduce(i64 %x) {
+define i64 @stdlib.math.cbrt_reduce(i64 %p$x) {
 entry:
-  %t$0 = call i64 @stdlib.math.raw_biased_exp(i64 %x)
+  %t$0 = call i64 @stdlib.math.raw_biased_exp(i64 %p$x)
   %t$1 = add i64 0, 0
   %t$2 = icmp eq i64 %t$0, %t$1
   %t$3 = zext i1 %t$2 to i64
@@ -1375,7 +1375,7 @@ entry:
   br i1 %t$14, label %then_4, label %else_4
 then_4:
   %t$6 = load i64, ptr @stdlib.math.two54
-  %t$7$la = bitcast i64 %x to double
+  %t$7$la = bitcast i64 %p$x to double
   %t$7$lb = bitcast i64 %t$6 to double
   %t$7$fr = fmul double %t$7$la, %t$7$lb
   %t$7 = bitcast double %t$7$fr to i64
@@ -1386,19 +1386,19 @@ then_4:
   br label %join_4
 else_4:
   %t$12 = add i64 0, 0
-  %t$13 = call i64 @stdlib.math.cbrt_reduce_norm(i64 %x, i64 %t$12)
+  %t$13 = call i64 @stdlib.math.cbrt_reduce_norm(i64 %p$x, i64 %t$12)
   br label %join_4
 join_4:
   %t$5 = phi i64 [%t$11, %then_4], [%t$13, %else_4]
   ret i64 %t$5
 }
 
-define i64 @stdlib.math.cbrt_reduce_norm(i64 %x, i64 %adj) {
+define i64 @stdlib.math.cbrt_reduce_norm(i64 %p$x, i64 %p$adj) {
 entry:
-  %t$0 = call i64 @stdlib.math.raw_biased_exp(i64 %x)
+  %t$0 = call i64 @stdlib.math.raw_biased_exp(i64 %p$x)
   %t$1 = load i64, ptr @stdlib.math.exp_bias
   %t$2 = sub i64 %t$0, %t$1
-  %t$3 = add i64 %t$2, %adj
+  %t$3 = add i64 %t$2, %p$adj
   br label %arm_0_4
 arm_0_4:
   %t$6 = call i64 @stdlib.math.floor_div_3(i64 %t$3)
@@ -1406,8 +1406,8 @@ arm_0_4:
 arm_0_7:
   %t$9 = add i64 0, 3
   %t$10 = mul i64 %t$9, %t$6
-  %t$11 = sub i64 %t$10, %adj
-  %t$12 = call i64 @stdlib.math.scale_down_pow2(i64 %x, i64 %t$11)
+  %t$11 = sub i64 %t$10, %p$adj
+  %t$12 = call i64 @stdlib.math.scale_down_pow2(i64 %p$x, i64 %t$11)
   br label %arm_0_13
 arm_0_13:
   %t$15 = call i64 @stdlib.math.two_pow(i64 %t$6)
@@ -1439,16 +1439,16 @@ join_4:
   ret i64 %t$5
 }
 
-define i64 @stdlib.math.cbrt(i64 %x) {
+define i64 @stdlib.math.cbrt(i64 %p$x) {
 entry:
-  %t$0 = call i64 @stdlib.math.is_nan(i64 %x)
+  %t$0 = call i64 @stdlib.math.is_nan(i64 %p$x)
   %t$28 = trunc i64 %t$0 to i1
   br i1 %t$28, label %then_1, label %else_1
 then_1:
   br label %join_1
 else_1:
   %t$3 = bitcast double 0.0 to i64
-  %t$4$fa = bitcast i64 %x to double
+  %t$4$fa = bitcast i64 %p$x to double
   %t$4$fb = bitcast i64 %t$3 to double
   %t$4 = fcmp oeq double %t$4$fa, %t$4$fb
   %t$5 = zext i1 %t$4 to i64
@@ -1458,7 +1458,7 @@ then_6:
   br label %join_6
 else_6:
   %t$8 = bitcast double 0.0 to i64
-  %t$9$fa = bitcast i64 %x to double
+  %t$9$fa = bitcast i64 %p$x to double
   %t$9$fb = bitcast i64 %t$8 to double
   %t$9 = fcmp olt double %t$9$fa, %t$9$fb
   %t$10 = zext i1 %t$9 to i64
@@ -1468,7 +1468,7 @@ then_11:
   %t$13 = bitcast double 0.0 to i64
   %t$14 = bitcast double 0.0 to i64
   %t$15$la = bitcast i64 %t$14 to double
-  %t$15$lb = bitcast i64 %x to double
+  %t$15$lb = bitcast i64 %p$x to double
   %t$15$fr = fsub double %t$15$la, %t$15$lb
   %t$15 = bitcast double %t$15$fr to i64
   %t$16 = call i64 @stdlib.math.cbrt(i64 %t$15)
@@ -1479,12 +1479,12 @@ then_11:
   br label %join_11
 else_11:
   %t$18 = bitcast double 0.5 to i64
-  %t$19$la = bitcast i64 %x to double
+  %t$19$la = bitcast i64 %p$x to double
   %t$19$lb = bitcast i64 %t$18 to double
   %t$19$fr = fmul double %t$19$la, %t$19$lb
   %t$19 = bitcast double %t$19$fr to i64
   %t$20$fa = bitcast i64 %t$19 to double
-  %t$20$fb = bitcast i64 %x to double
+  %t$20$fb = bitcast i64 %p$x to double
   %t$20 = fcmp oeq double %t$20$fa, %t$20$fb
   %t$21 = zext i1 %t$20 to i64
   %t$25 = trunc i64 %t$21 to i1
@@ -1492,27 +1492,27 @@ else_11:
 then_22:
   br label %join_22
 else_22:
-  %t$24 = call i64 @stdlib.math.cbrt_reduce(i64 %x)
+  %t$24 = call i64 @stdlib.math.cbrt_reduce(i64 %p$x)
   br label %join_22
 join_22:
-  %t$23 = phi i64 [%x, %then_22], [%t$24, %else_22]
+  %t$23 = phi i64 [%p$x, %then_22], [%t$24, %else_22]
   br label %join_11
 join_11:
   %t$12 = phi i64 [%t$17, %then_11], [%t$23, %join_22]
   br label %join_6
 join_6:
-  %t$7 = phi i64 [%x, %then_6], [%t$12, %join_11]
+  %t$7 = phi i64 [%p$x, %then_6], [%t$12, %join_11]
   br label %join_1
 join_1:
-  %t$2 = phi i64 [%x, %then_1], [%t$7, %join_6]
+  %t$2 = phi i64 [%p$x, %then_1], [%t$7, %join_6]
   ret i64 %t$2
 }
 
-define i64 @stdlib.math.is_odd_int(i64 %y) {
+define i64 @stdlib.math.is_odd_int(i64 %p$y) {
 entry:
-  %t$0 = call i64 @stdlib.math.floor(i64 %y)
+  %t$0 = call i64 @stdlib.math.floor(i64 %p$y)
   %t$1$fa = bitcast i64 %t$0 to double
-  %t$1$fb = bitcast i64 %y to double
+  %t$1$fb = bitcast i64 %p$y to double
   %t$1 = fcmp oeq double %t$1$fa, %t$1$fb
   %t$2 = zext i1 %t$1 to i64
   %t$15 = trunc i64 %t$2 to i1
@@ -1520,7 +1520,7 @@ entry:
 then_3:
   %t$5 = bitcast double 2.0 to i64
   %t$6 = bitcast double 0.5 to i64
-  %t$7$la = bitcast i64 %y to double
+  %t$7$la = bitcast i64 %p$y to double
   %t$7$lb = bitcast i64 %t$6 to double
   %t$7$fr = fmul double %t$7$la, %t$7$lb
   %t$7 = bitcast double %t$7$fr to i64
@@ -1529,7 +1529,7 @@ then_3:
   %t$9$lb = bitcast i64 %t$8 to double
   %t$9$fr = fmul double %t$9$la, %t$9$lb
   %t$9 = bitcast double %t$9$fr to i64
-  %t$10$la = bitcast i64 %y to double
+  %t$10$la = bitcast i64 %p$y to double
   %t$10$lb = bitcast i64 %t$9 to double
   %t$10$fr = fsub double %t$10$la, %t$10$lb
   %t$10 = bitcast double %t$10$fr to i64
@@ -1547,17 +1547,17 @@ join_3:
   ret i64 %t$4
 }
 
-define i64 @stdlib.math.is_small_int(i64 %y) {
+define i64 @stdlib.math.is_small_int(i64 %p$y) {
 entry:
-  %t$0 = call i64 @stdlib.math.floor(i64 %y)
+  %t$0 = call i64 @stdlib.math.floor(i64 %p$y)
   %t$1$fa = bitcast i64 %t$0 to double
-  %t$1$fb = bitcast i64 %y to double
+  %t$1$fb = bitcast i64 %p$y to double
   %t$1 = fcmp oeq double %t$1$fa, %t$1$fb
   %t$2 = zext i1 %t$1 to i64
   %t$10 = trunc i64 %t$2 to i1
   br i1 %t$10, label %then_3, label %else_3
 then_3:
-  %t$5 = call i64 @stdlib.math.abs(i64 %y)
+  %t$5 = call i64 @stdlib.math.abs(i64 %p$y)
   %t$6 = bitcast double 1024.0 to i64
   %t$7$fa = bitcast i64 %t$5 to double
   %t$7$fb = bitcast i64 %t$6 to double
@@ -1572,22 +1572,22 @@ join_3:
   ret i64 %t$4
 }
 
-define i64 @stdlib.math.ipow(i64 %base$in, i64 %e$in, i64 %acc$in) {
+define i64 @stdlib.math.ipow(i64 %p$base$in, i64 %p$e$in, i64 %p$acc$in) {
 entry:
   %t$25 = alloca i64
-  store i64 %base$in, ptr %t$25
+  store i64 %p$base$in, ptr %t$25
   %t$26 = alloca i64
-  store i64 %e$in, ptr %t$26
+  store i64 %p$e$in, ptr %t$26
   %t$27 = alloca i64
-  store i64 %acc$in, ptr %t$27
+  store i64 %p$acc$in, ptr %t$27
   %t$28 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
-  %base = load i64, ptr %t$25
-  %e = load i64, ptr %t$26
-  %acc = load i64, ptr %t$27
+  %p$base = load i64, ptr %t$25
+  %p$e = load i64, ptr %t$26
+  %p$acc = load i64, ptr %t$27
   %t$0 = bitcast double 0.5 to i64
-  %t$1$la = bitcast i64 %e to double
+  %t$1$la = bitcast i64 %p$e to double
   %t$1$lb = bitcast i64 %t$0 to double
   %t$1$fr = fmul double %t$1$la, %t$1$lb
   %t$1 = bitcast double %t$1$fr to i64
@@ -1595,7 +1595,7 @@ tco_loop:
   br label %arm_0_3
 arm_0_3:
   %t$5 = bitcast double 1.0 to i64
-  %t$6$fa = bitcast i64 %e to double
+  %t$6$fa = bitcast i64 %p$e to double
   %t$6$fb = bitcast i64 %t$5 to double
   %t$6 = fcmp olt double %t$6$fa, %t$6$fb
   %t$7 = zext i1 %t$6 to i64
@@ -1609,7 +1609,7 @@ else_8:
   %t$11$lb = bitcast i64 %t$2 to double
   %t$11$fr = fmul double %t$11$la, %t$11$lb
   %t$11 = bitcast double %t$11$fr to i64
-  %t$12$la = bitcast i64 %e to double
+  %t$12$la = bitcast i64 %p$e to double
   %t$12$lb = bitcast i64 %t$11 to double
   %t$12$fr = fsub double %t$12$la, %t$12$lb
   %t$12 = bitcast double %t$12$fr to i64
@@ -1621,12 +1621,12 @@ else_8:
   %t$23 = trunc i64 %t$15 to i1
   br i1 %t$23, label %then_16, label %else_16
 then_16:
-  %t$18$la = bitcast i64 %base to double
-  %t$18$lb = bitcast i64 %base to double
+  %t$18$la = bitcast i64 %p$base to double
+  %t$18$lb = bitcast i64 %p$base to double
   %t$18$fr = fmul double %t$18$la, %t$18$lb
   %t$18 = bitcast double %t$18$fr to i64
-  %t$19$la = bitcast i64 %acc to double
-  %t$19$lb = bitcast i64 %base to double
+  %t$19$la = bitcast i64 %p$acc to double
+  %t$19$lb = bitcast i64 %p$base to double
   %t$19$fr = fmul double %t$19$la, %t$19$lb
   %t$19 = bitcast double %t$19$fr to i64
   store i64 %t$18, ptr %t$25
@@ -1635,17 +1635,17 @@ then_16:
   call void @llvm.stackrestore(ptr %t$28)
   br label %tco_loop
 else_16:
-  %t$21$la = bitcast i64 %base to double
-  %t$21$lb = bitcast i64 %base to double
+  %t$21$la = bitcast i64 %p$base to double
+  %t$21$lb = bitcast i64 %p$base to double
   %t$21$fr = fmul double %t$21$la, %t$21$lb
   %t$21 = bitcast double %t$21$fr to i64
   store i64 %t$21, ptr %t$25
   store i64 %t$2, ptr %t$26
-  store i64 %acc, ptr %t$27
+  store i64 %p$acc, ptr %t$27
   call void @llvm.stackrestore(ptr %t$28)
   br label %tco_loop
 join_8:
-  %t$9 = phi i64 [%acc, %then_8]
+  %t$9 = phi i64 [%p$acc, %then_8]
   br label %join_3
 arm_1_3:
   call void @sprout_abort_match()
@@ -1655,10 +1655,10 @@ join_3:
   ret i64 %t$4
 }
 
-define i64 @stdlib.math.ipow_recip(i64 %x, i64 %e) {
+define i64 @stdlib.math.ipow_recip(i64 %p$x, i64 %p$e) {
 entry:
   %t$0 = bitcast double 1.0 to i64
-  %t$1 = call i64 @stdlib.math.ipow(i64 %x, i64 %e, i64 %t$0)
+  %t$1 = call i64 @stdlib.math.ipow(i64 %p$x, i64 %p$e, i64 %t$0)
   br label %arm_0_2
 arm_0_2:
   %t$4 = bitcast double 0.5 to i64
@@ -1675,11 +1675,11 @@ arm_0_2:
 then_8:
   %t$10 = bitcast double 1.0 to i64
   %t$11$la = bitcast i64 %t$10 to double
-  %t$11$lb = bitcast i64 %x to double
+  %t$11$lb = bitcast i64 %p$x to double
   %t$11$fr = fdiv double %t$11$la, %t$11$lb
   %t$11 = bitcast double %t$11$fr to i64
   %t$12 = bitcast double 1.0 to i64
-  %t$13 = call i64 @stdlib.math.ipow(i64 %t$11, i64 %e, i64 %t$12)
+  %t$13 = call i64 @stdlib.math.ipow(i64 %t$11, i64 %p$e, i64 %t$12)
   br label %join_8
 else_8:
   %t$14 = bitcast double 1.0 to i64
@@ -1699,19 +1699,19 @@ join_2:
   ret i64 %t$3
 }
 
-define i64 @stdlib.math.pow(i64 %x$in, i64 %y$in) {
+define i64 @stdlib.math.pow(i64 %p$x$in, i64 %p$y$in) {
 entry:
   %t$166 = alloca i64
-  store i64 %x$in, ptr %t$166
+  store i64 %p$x$in, ptr %t$166
   %t$167 = alloca i64
-  store i64 %y$in, ptr %t$167
+  store i64 %p$y$in, ptr %t$167
   %t$168 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
-  %x = load i64, ptr %t$166
-  %y = load i64, ptr %t$167
+  %p$x = load i64, ptr %t$166
+  %p$y = load i64, ptr %t$167
   %t$0 = bitcast double 0.0 to i64
-  %t$1$fa = bitcast i64 %y to double
+  %t$1$fa = bitcast i64 %p$y to double
   %t$1$fb = bitcast i64 %t$0 to double
   %t$1 = fcmp oeq double %t$1$fa, %t$1$fb
   %t$2 = zext i1 %t$1 to i64
@@ -1722,7 +1722,7 @@ then_3:
   br label %join_3
 else_3:
   %t$6 = bitcast double 1.0 to i64
-  %t$7$fa = bitcast i64 %x to double
+  %t$7$fa = bitcast i64 %p$x to double
   %t$7$fb = bitcast i64 %t$6 to double
   %t$7 = fcmp oeq double %t$7$fa, %t$7$fb
   %t$8 = zext i1 %t$7 to i64
@@ -1732,14 +1732,14 @@ then_9:
   %t$11 = bitcast double 1.0 to i64
   br label %join_9
 else_9:
-  %t$12 = call i64 @stdlib.math.is_nan(i64 %x)
+  %t$12 = call i64 @stdlib.math.is_nan(i64 %p$x)
   %t$17 = trunc i64 %t$12 to i1
   br i1 %t$17, label %then_13, label %else_13
 then_13:
   %t$15 = add i64 0, 1
   br label %join_13
 else_13:
-  %t$16 = call i64 @stdlib.math.is_nan(i64 %y)
+  %t$16 = call i64 @stdlib.math.is_nan(i64 %p$y)
   br label %join_13
 join_13:
   %t$14 = phi i64 [%t$15, %then_13], [%t$16, %else_13]
@@ -1750,18 +1750,18 @@ then_18:
   br label %join_18
 else_18:
   %t$21 = bitcast double 0.5 to i64
-  %t$22$la = bitcast i64 %y to double
+  %t$22$la = bitcast i64 %p$y to double
   %t$22$lb = bitcast i64 %t$21 to double
   %t$22$fr = fmul double %t$22$la, %t$22$lb
   %t$22 = bitcast double %t$22$fr to i64
   %t$23$fa = bitcast i64 %t$22 to double
-  %t$23$fb = bitcast i64 %y to double
+  %t$23$fb = bitcast i64 %p$y to double
   %t$23 = fcmp oeq double %t$23$fa, %t$23$fb
   %t$24 = zext i1 %t$23 to i64
   %t$162 = trunc i64 %t$24 to i1
   br i1 %t$162, label %then_25, label %else_25
 then_25:
-  %t$27 = call i64 @stdlib.math.abs(i64 %x)
+  %t$27 = call i64 @stdlib.math.abs(i64 %p$x)
   %t$28 = bitcast double 1.0 to i64
   %t$29$fa = bitcast i64 %t$27 to double
   %t$29$fb = bitcast i64 %t$28 to double
@@ -1773,14 +1773,14 @@ then_31:
   %t$33 = bitcast double 1.0 to i64
   br label %join_31
 else_31:
-  %t$34 = call i64 @stdlib.math.abs(i64 %x)
+  %t$34 = call i64 @stdlib.math.abs(i64 %p$x)
   %t$35 = bitcast double 1.0 to i64
   %t$36$fa = bitcast i64 %t$34 to double
   %t$36$fb = bitcast i64 %t$35 to double
   %t$36 = fcmp ogt double %t$36$fa, %t$36$fb
   %t$37 = zext i1 %t$36 to i64
   %t$38 = bitcast double 0.0 to i64
-  %t$39$fa = bitcast i64 %y to double
+  %t$39$fa = bitcast i64 %p$y to double
   %t$39$fb = bitcast i64 %t$38 to double
   %t$39 = fcmp ogt double %t$39$fa, %t$39$fb
   %t$40 = zext i1 %t$39 to i64
@@ -1802,7 +1802,7 @@ join_31:
   br label %join_25
 else_25:
   %t$49 = bitcast double 0.0 to i64
-  %t$50$fa = bitcast i64 %x to double
+  %t$50$fa = bitcast i64 %p$x to double
   %t$50$fb = bitcast i64 %t$49 to double
   %t$50 = fcmp oeq double %t$50$fa, %t$50$fb
   %t$51 = zext i1 %t$50 to i64
@@ -1810,14 +1810,14 @@ else_25:
   br i1 %t$161, label %then_52, label %else_52
 then_52:
   %t$54 = bitcast double 0.0 to i64
-  %t$55$fa = bitcast i64 %y to double
+  %t$55$fa = bitcast i64 %p$y to double
   %t$55$fb = bitcast i64 %t$54 to double
   %t$55 = fcmp ogt double %t$55$fa, %t$55$fb
   %t$56 = zext i1 %t$55 to i64
   %t$80 = trunc i64 %t$56 to i1
   br i1 %t$80, label %then_57, label %else_57
 then_57:
-  %t$59 = call i64 @stdlib.math.is_odd_int(i64 %y)
+  %t$59 = call i64 @stdlib.math.is_odd_int(i64 %p$y)
   %t$63 = trunc i64 %t$59 to i1
   br i1 %t$63, label %then_60, label %else_60
 then_60:
@@ -1826,16 +1826,16 @@ else_60:
   %t$62 = bitcast double 0.0 to i64
   br label %join_60
 join_60:
-  %t$61 = phi i64 [%x, %then_60], [%t$62, %else_60]
+  %t$61 = phi i64 [%p$x, %then_60], [%t$62, %else_60]
   br label %join_57
 else_57:
-  %t$64 = call i64 @stdlib.math.is_odd_int(i64 %y)
+  %t$64 = call i64 @stdlib.math.is_odd_int(i64 %p$y)
   %t$73 = trunc i64 %t$64 to i1
   br i1 %t$73, label %then_65, label %else_65
 then_65:
   %t$67 = bitcast double 1.0 to i64
   %t$68$la = bitcast i64 %t$67 to double
-  %t$68$lb = bitcast i64 %x to double
+  %t$68$lb = bitcast i64 %p$x to double
   %t$68$fr = fdiv double %t$68$la, %t$68$lb
   %t$68 = bitcast double %t$68$fr to i64
   %t$69 = bitcast double 0.0 to i64
@@ -1868,19 +1868,19 @@ join_57:
   br label %join_52
 else_52:
   %t$81 = bitcast double 0.5 to i64
-  %t$82$la = bitcast i64 %x to double
+  %t$82$la = bitcast i64 %p$x to double
   %t$82$lb = bitcast i64 %t$81 to double
   %t$82$fr = fmul double %t$82$la, %t$82$lb
   %t$82 = bitcast double %t$82$fr to i64
   %t$83$fa = bitcast i64 %t$82 to double
-  %t$83$fb = bitcast i64 %x to double
+  %t$83$fb = bitcast i64 %p$x to double
   %t$83 = fcmp oeq double %t$83$fa, %t$83$fb
   %t$84 = zext i1 %t$83 to i64
   %t$160 = trunc i64 %t$84 to i1
   br i1 %t$160, label %then_85, label %else_85
 then_85:
   %t$87 = bitcast double 0.0 to i64
-  %t$88$fa = bitcast i64 %y to double
+  %t$88$fa = bitcast i64 %p$y to double
   %t$88$fb = bitcast i64 %t$87 to double
   %t$88 = fcmp ogt double %t$88$fa, %t$88$fb
   %t$89 = zext i1 %t$88 to i64
@@ -1888,14 +1888,14 @@ then_85:
   br i1 %t$119, label %then_90, label %else_90
 then_90:
   %t$92 = bitcast double 0.0 to i64
-  %t$93$fa = bitcast i64 %x to double
+  %t$93$fa = bitcast i64 %p$x to double
   %t$93$fb = bitcast i64 %t$92 to double
   %t$93 = fcmp olt double %t$93$fa, %t$93$fb
   %t$94 = zext i1 %t$93 to i64
   %t$99 = trunc i64 %t$94 to i1
   br i1 %t$99, label %then_95, label %else_95
 then_95:
-  %t$97 = call i64 @stdlib.math.is_odd_int(i64 %y)
+  %t$97 = call i64 @stdlib.math.is_odd_int(i64 %p$y)
   br label %join_95
 else_95:
   %t$98 = add i64 0, 0
@@ -1918,14 +1918,14 @@ join_100:
   br label %join_90
 else_90:
   %t$106 = bitcast double 0.0 to i64
-  %t$107$fa = bitcast i64 %x to double
+  %t$107$fa = bitcast i64 %p$x to double
   %t$107$fb = bitcast i64 %t$106 to double
   %t$107 = fcmp olt double %t$107$fa, %t$107$fb
   %t$108 = zext i1 %t$107 to i64
   %t$113 = trunc i64 %t$108 to i1
   br i1 %t$113, label %then_109, label %else_109
 then_109:
-  %t$111 = call i64 @stdlib.math.is_odd_int(i64 %y)
+  %t$111 = call i64 @stdlib.math.is_odd_int(i64 %p$y)
   br label %join_109
 else_109:
   %t$112 = add i64 0, 0
@@ -1948,39 +1948,39 @@ join_90:
   br label %join_85
 else_85:
   %t$120 = bitcast double 0.0 to i64
-  %t$121$fa = bitcast i64 %x to double
+  %t$121$fa = bitcast i64 %p$x to double
   %t$121$fb = bitcast i64 %t$120 to double
   %t$121 = fcmp olt double %t$121$fa, %t$121$fb
   %t$122 = zext i1 %t$121 to i64
   %t$159 = trunc i64 %t$122 to i1
   br i1 %t$159, label %then_123, label %else_123
 then_123:
-  %t$125 = call i64 @stdlib.math.floor(i64 %y)
+  %t$125 = call i64 @stdlib.math.floor(i64 %p$y)
   %t$126$fa = bitcast i64 %t$125 to double
-  %t$126$fb = bitcast i64 %y to double
+  %t$126$fb = bitcast i64 %p$y to double
   %t$126 = fcmp oeq double %t$126$fa, %t$126$fb
   %t$127 = zext i1 %t$126 to i64
   %t$140 = trunc i64 %t$127 to i1
   br i1 %t$140, label %then_128, label %else_128
 then_128:
-  %t$130 = call i64 @stdlib.math.is_odd_int(i64 %y)
+  %t$130 = call i64 @stdlib.math.is_odd_int(i64 %p$y)
   %t$138 = trunc i64 %t$130 to i1
   br i1 %t$138, label %then_131, label %else_131
 then_131:
-  %t$133$fa = bitcast i64 %x to double
+  %t$133$fa = bitcast i64 %p$x to double
   %t$133$fr = fneg double %t$133$fa
   %t$133 = bitcast double %t$133$fr to i64
-  %t$134 = call i64 @stdlib.math.pow(i64 %t$133, i64 %y)
+  %t$134 = call i64 @stdlib.math.pow(i64 %t$133, i64 %p$y)
   %t$135$fa = bitcast i64 %t$134 to double
   %t$135$fr = fneg double %t$135$fa
   %t$135 = bitcast double %t$135$fr to i64
   br label %join_131
 else_131:
-  %t$136$fa = bitcast i64 %x to double
+  %t$136$fa = bitcast i64 %p$x to double
   %t$136$fr = fneg double %t$136$fa
   %t$136 = bitcast double %t$136$fr to i64
   store i64 %t$136, ptr %t$166
-  store i64 %y, ptr %t$167
+  store i64 %p$y, ptr %t$167
   call void @llvm.stackrestore(ptr %t$168)
   br label %tco_loop
 join_131:
@@ -1993,12 +1993,12 @@ join_128:
   %t$129 = phi i64 [%t$132, %join_131], [%t$139, %else_128]
   br label %join_123
 else_123:
-  %t$141 = call i64 @stdlib.math.is_small_int(i64 %y)
+  %t$141 = call i64 @stdlib.math.is_small_int(i64 %p$y)
   %t$158 = trunc i64 %t$141 to i1
   br i1 %t$158, label %then_142, label %else_142
 then_142:
   %t$144 = bitcast double 0.0 to i64
-  %t$145$fa = bitcast i64 %y to double
+  %t$145$fa = bitcast i64 %p$y to double
   %t$145$fb = bitcast i64 %t$144 to double
   %t$145 = fcmp ogt double %t$145$fa, %t$145$fb
   %t$146 = zext i1 %t$145 to i64
@@ -2006,22 +2006,22 @@ then_142:
   br i1 %t$154, label %then_147, label %else_147
 then_147:
   %t$149 = bitcast double 1.0 to i64
-  %t$150 = call i64 @stdlib.math.ipow(i64 %x, i64 %y, i64 %t$149)
+  %t$150 = call i64 @stdlib.math.ipow(i64 %p$x, i64 %p$y, i64 %t$149)
   br label %join_147
 else_147:
   %t$151 = bitcast double 0.0 to i64
   %t$152$la = bitcast i64 %t$151 to double
-  %t$152$lb = bitcast i64 %y to double
+  %t$152$lb = bitcast i64 %p$y to double
   %t$152$fr = fsub double %t$152$la, %t$152$lb
   %t$152 = bitcast double %t$152$fr to i64
-  %t$153 = call i64 @stdlib.math.ipow_recip(i64 %x, i64 %t$152)
+  %t$153 = call i64 @stdlib.math.ipow_recip(i64 %p$x, i64 %t$152)
   br label %join_147
 join_147:
   %t$148 = phi i64 [%t$150, %then_147], [%t$153, %else_147]
   br label %join_142
 else_142:
-  %t$155 = call i64 @stdlib.math.ln(i64 %x)
-  %t$156$la = bitcast i64 %y to double
+  %t$155 = call i64 @stdlib.math.ln(i64 %p$x)
+  %t$156$la = bitcast i64 %p$y to double
   %t$156$lb = bitcast i64 %t$155 to double
   %t$156$fr = fmul double %t$156$la, %t$156$lb
   %t$156 = bitcast double %t$156$fr to i64
@@ -2053,10 +2053,10 @@ join_3:
   ret i64 %t$4
 }
 
-define i64 @main.roots(i64 %x) {
+define i64 @main.roots(i64 %p$x) {
 entry:
-  %t$0 = call i64 @stdlib.math.sqrt(i64 %x)
-  %t$1 = call i64 @stdlib.math.cbrt(i64 %x)
+  %t$0 = call i64 @stdlib.math.sqrt(i64 %p$x)
+  %t$1 = call i64 @stdlib.math.cbrt(i64 %p$x)
   %t$2$la = bitcast i64 %t$0 to double
   %t$2$lb = bitcast i64 %t$1 to double
   %t$2$fr = fadd double %t$2$la, %t$2$lb
@@ -2064,16 +2064,16 @@ entry:
   ret i64 %t$2
 }
 
-define i64 @main.logs_and_exps(i64 %x) {
+define i64 @main.logs_and_exps(i64 %p$x) {
 entry:
-  %t$0 = call i64 @stdlib.math.ln(i64 %x)
-  %t$1 = call i64 @stdlib.math.exp(i64 %x)
+  %t$0 = call i64 @stdlib.math.ln(i64 %p$x)
+  %t$1 = call i64 @stdlib.math.exp(i64 %p$x)
   %t$2$la = bitcast i64 %t$0 to double
   %t$2$lb = bitcast i64 %t$1 to double
   %t$2$fr = fadd double %t$2$la, %t$2$lb
   %t$2 = bitcast double %t$2$fr to i64
   %t$3 = bitcast double 4.0 to i64
-  %t$4 = call i64 @stdlib.math.pow(i64 %x, i64 %t$3)
+  %t$4 = call i64 @stdlib.math.pow(i64 %p$x, i64 %t$3)
   %t$5$la = bitcast i64 %t$2 to double
   %t$5$lb = bitcast i64 %t$4 to double
   %t$5$fr = fadd double %t$5$la, %t$5$lb
@@ -2081,12 +2081,12 @@ entry:
   ret i64 %t$5
 }
 
-define i64 @main.wide(i64 %x) {
+define i64 @main.wide(i64 %p$x) {
 entry:
   %t$0 = bitcast double 10.0 to i64
   %t$1 = bitcast double 300.0 to i64
   %t$2 = call i64 @stdlib.math.pow(i64 %t$0, i64 %t$1)
-  %t$3$la = bitcast i64 %x to double
+  %t$3$la = bitcast i64 %p$x to double
   %t$3$lb = bitcast i64 %t$2 to double
   %t$3$fr = fmul double %t$3$la, %t$3$lb
   %t$3 = bitcast double %t$3$fr to i64
@@ -2099,7 +2099,7 @@ entry:
   %t$8$fr = fsub double %t$8$la, %t$8$lb
   %t$8 = bitcast double %t$8$fr to i64
   %t$9 = call i64 @stdlib.math.pow(i64 %t$5, i64 %t$8)
-  %t$10$la = bitcast i64 %x to double
+  %t$10$la = bitcast i64 %p$x to double
   %t$10$lb = bitcast i64 %t$9 to double
   %t$10$fr = fmul double %t$10$la, %t$10$lb
   %t$10 = bitcast double %t$10$fr to i64
@@ -2111,15 +2111,15 @@ entry:
   ret i64 %t$12
 }
 
-define i64 @main.total(i64 %x) {
+define i64 @main.total(i64 %p$x) {
 entry:
-  %t$0 = call i64 @main.roots(i64 %x)
-  %t$1 = call i64 @main.logs_and_exps(i64 %x)
+  %t$0 = call i64 @main.roots(i64 %p$x)
+  %t$1 = call i64 @main.logs_and_exps(i64 %p$x)
   %t$2$la = bitcast i64 %t$0 to double
   %t$2$lb = bitcast i64 %t$1 to double
   %t$2$fr = fadd double %t$2$la, %t$2$lb
   %t$2 = bitcast double %t$2$fr to i64
-  %t$3 = call i64 @main.wide(i64 %x)
+  %t$3 = call i64 @main.wide(i64 %p$x)
   %t$4$la = bitcast i64 %t$2 to double
   %t$4$lb = bitcast i64 %t$3 to double
   %t$4$fr = fadd double %t$4$la, %t$4$lb
@@ -2137,9 +2137,9 @@ entry:
   ret i64 %t$3
 }
 
-define i64 @__tc_ToString_Double_to_string(i64 %value) {
+define i64 @__tc_ToString_Double_to_string(i64 %p$value) {
 entry:
-  %t$0 = call i64 @double_to_string(i64 %value)
+  %t$0 = call i64 @double_to_string(i64 %p$value)
   ret i64 %t$0
 }
 

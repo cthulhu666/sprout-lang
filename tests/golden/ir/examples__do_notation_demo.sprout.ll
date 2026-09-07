@@ -115,7 +115,7 @@ declare i64 @ref_write(i64, i64)
 @.cname.13 = private unnamed_addr constant [9 x i8] c"IntRange\00"
 @.cfkinds.13 = private unnamed_addr constant [4 x i8] c"iii\00"
 
-define i64 @examples.do_notation_demo.half_if_even(i64 %x) {
+define i64 @examples.do_notation_demo.half_if_even(i64 %p$x) {
 entry:
   %t$0 = add i64 0, 2
   %t$1 = icmp eq i64 %t$0, 0
@@ -126,10 +126,10 @@ divpanic_1:
   call i64 @panic(i64 %t$3)
   unreachable
 divok_1:
-  %t$4 = sdiv i64 %x, %t$0
+  %t$4 = sdiv i64 %p$x, %t$0
   %t$5 = add i64 0, 2
   %t$6 = mul i64 %t$4, %t$5
-  %t$7 = icmp eq i64 %t$6, %x
+  %t$7 = icmp eq i64 %t$6, %p$x
   %t$8 = zext i1 %t$7 to i64
   %t$18 = trunc i64 %t$8 to i1
   br i1 %t$18, label %then_9, label %else_9
@@ -143,7 +143,7 @@ divpanic_12:
   call i64 @panic(i64 %t$14)
   unreachable
 divok_12:
-  %t$15 = sdiv i64 %x, %t$11
+  %t$15 = sdiv i64 %p$x, %t$11
   %t$16 = call i64 @sprout_alloc_obj(i64 1, i64 1)
   %t$16$ptr = inttoptr i64 %t$16 to ptr
   %t$16$f0 = getelementptr i64, ptr %t$16$ptr, i64 0
@@ -157,10 +157,10 @@ join_9:
   ret i64 %t$10
 }
 
-define i64 @examples.do_notation_demo.positive(i64 %x) {
+define i64 @examples.do_notation_demo.positive(i64 %p$x) {
 entry:
   %t$0 = add i64 0, 0
-  %t$1 = icmp sgt i64 %x, %t$0
+  %t$1 = icmp sgt i64 %p$x, %t$0
   %t$2 = zext i1 %t$1 to i64
   %t$9 = trunc i64 %t$2 to i1
   br i1 %t$9, label %then_3, label %else_3
@@ -168,7 +168,7 @@ then_3:
   %t$5 = call i64 @sprout_alloc_obj(i64 7, i64 1)
   %t$5$ptr = inttoptr i64 %t$5 to ptr
   %t$5$f0 = getelementptr i64, ptr %t$5$ptr, i64 0
-  store i64 %x, ptr %t$5$f0
+  store i64 %p$x, ptr %t$5$f0
   br label %join_3
 else_3:
   %t$6 = getelementptr inbounds { i64, [13 x i8] }, ptr @.str.2, i64 0, i32 1, i64 0
@@ -187,9 +187,9 @@ join_3:
   ret i64 %t$4
 }
 
-define i64 @examples.do_notation_demo.maybe_sum(i64 %left, i64 %right) {
+define i64 @examples.do_notation_demo.maybe_sum(i64 %p$left, i64 %p$right) {
 entry:
-  %t$0$st = call { i64, i64 } @examples.do_notation_demo.half_if_even_worker(i64 %left)
+  %t$0$st = call { i64, i64 } @examples.do_notation_demo.half_if_even_worker(i64 %p$left)
   %t$0 = extractvalue { i64, i64 } %t$0$st, 0
   %t$1 = extractvalue { i64, i64 } %t$0$st, 1
   %t$2 = add i64 0, 0
@@ -199,7 +199,7 @@ do_short_2:
   %t$5 = call i64 @sprout_alloc_obj(i64 0, i64 0)
   br label %do_done_2
 do_cont_2:
-  %t$6$st = call { i64, i64 } @examples.do_notation_demo.half_if_even_worker(i64 %right)
+  %t$6$st = call { i64, i64 } @examples.do_notation_demo.half_if_even_worker(i64 %p$right)
   %t$6 = extractvalue { i64, i64 } %t$6$st, 0
   %t$7 = extractvalue { i64, i64 } %t$6$st, 1
   %t$8 = add i64 0, 0
@@ -223,9 +223,9 @@ do_done_2:
   ret i64 %t$15
 }
 
-define i64 @examples.do_notation_demo.result_sum(i64 %left, i64 %right) {
+define i64 @examples.do_notation_demo.result_sum(i64 %p$left, i64 %p$right) {
 entry:
-  %t$0$st = call { i64, i64 } @examples.do_notation_demo.positive_worker(i64 %left)
+  %t$0$st = call { i64, i64 } @examples.do_notation_demo.positive_worker(i64 %p$left)
   %t$0 = extractvalue { i64, i64 } %t$0$st, 0
   %t$1 = extractvalue { i64, i64 } %t$0$st, 1
   %t$2 = add i64 0, 8
@@ -242,7 +242,7 @@ do_short_2:
   %t$18 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %do_done_2
 do_cont_2:
-  %t$6$st = call { i64, i64 } @examples.do_notation_demo.positive_worker(i64 %right)
+  %t$6$st = call { i64, i64 } @examples.do_notation_demo.positive_worker(i64 %p$right)
   %t$6 = extractvalue { i64, i64 } %t$6$st, 0
   %t$7 = extractvalue { i64, i64 } %t$6$st, 1
   %t$8 = add i64 0, 8
@@ -273,16 +273,16 @@ do_done_2:
   ret i64 %t$15
 }
 
-define i64 @examples.do_notation_demo.render_maybe(i64 %value) {
+define i64 @examples.do_notation_demo.render_maybe(i64 %p$value) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %value)
+  %t$0 = call i64 @sprout_tag(i64 %p$value)
   br label %arm_0_1
 arm_0_1:
   %t$3 = add i64 0, 1
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %value, i64 0)
+  %t$5 = call i64 @sprout_field(i64 %p$value, i64 0)
   %t$6 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.3, i64 0, i32 1, i64 0
   %t$7 = ptrtoint ptr %t$6 to i64
   %t$14 = alloca i64
@@ -314,16 +314,16 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @examples.do_notation_demo.render_result(i64 %value) {
+define i64 @examples.do_notation_demo.render_result(i64 %p$value) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %value)
+  %t$0 = call i64 @sprout_tag(i64 %p$value)
   br label %arm_0_1
 arm_0_1:
   %t$3 = add i64 0, 7
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %value, i64 0)
+  %t$5 = call i64 @sprout_field(i64 %p$value, i64 0)
   %t$6 = getelementptr inbounds { i64, [8 x i8] }, ptr @.str.5, i64 0, i32 1, i64 0
   %t$7 = ptrtoint ptr %t$6 to i64
   %t$16 = alloca i64
@@ -344,7 +344,7 @@ arm_1_1:
   %t$11 = icmp eq i64 %t$0, %t$10
   br i1 %t$11, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t$12 = call i64 @sprout_field(i64 %value, i64 0)
+  %t$12 = call i64 @sprout_field(i64 %p$value, i64 0)
   %t$13 = getelementptr inbounds { i64, [8 x i8] }, ptr @.str.6, i64 0, i32 1, i64 0
   %t$14 = ptrtoint ptr %t$13 to i64
   %t$23 = alloca i64
@@ -394,19 +394,19 @@ entry:
   ret i64 %t$13
 }
 
-define i64 @__tc_Semigroup_String_append(i64 %left, i64 %right) {
+define i64 @__tc_Semigroup_String_append(i64 %p$left, i64 %p$right) {
 entry:
-  %t$0 = call i64 @str_concat(i64 %left, i64 %right)
+  %t$0 = call i64 @str_concat(i64 %p$left, i64 %p$right)
   ret i64 %t$0
 }
 
-define i64 @__tc_ToString_Int_to_string(i64 %value) {
+define i64 @__tc_ToString_Int_to_string(i64 %p$value) {
 entry:
-  %t$0 = call i64 @int_to_string(i64 %value)
+  %t$0 = call i64 @int_to_string(i64 %p$value)
   ret i64 %t$0
 }
 
-define { i64, i64 } @examples.do_notation_demo.half_if_even_worker(i64 %x) {
+define { i64, i64 } @examples.do_notation_demo.half_if_even_worker(i64 %p$x) {
 entry:
   %t$0 = add i64 0, 2
   %t$1 = icmp eq i64 %t$0, 0
@@ -417,10 +417,10 @@ divpanic_1:
   call i64 @panic(i64 %t$3)
   unreachable
 divok_1:
-  %t$4 = sdiv i64 %x, %t$0
+  %t$4 = sdiv i64 %p$x, %t$0
   %t$5 = add i64 0, 2
   %t$6 = mul i64 %t$4, %t$5
-  %t$7 = icmp eq i64 %t$6, %x
+  %t$7 = icmp eq i64 %t$6, %p$x
   %t$8 = zext i1 %t$7 to i64
   %t$9 = trunc i64 %t$8 to i1
   br i1 %t$9, label %then_9, label %else_9
@@ -434,7 +434,7 @@ divpanic_11:
   call i64 @panic(i64 %t$13)
   unreachable
 divok_11:
-  %t$14 = sdiv i64 %x, %t$10
+  %t$14 = sdiv i64 %p$x, %t$10
   %t$15$r0 = insertvalue { i64, i64 } undef, i64 1, 0
   %t$15$r1 = insertvalue { i64, i64 } %t$15$r0, i64 %t$14, 1
   ret { i64, i64 } %t$15$r1
@@ -444,16 +444,16 @@ else_9:
   ret { i64, i64 } %t$16$r1
 }
 
-define { i64, i64 } @examples.do_notation_demo.positive_worker(i64 %x) {
+define { i64, i64 } @examples.do_notation_demo.positive_worker(i64 %p$x) {
 entry:
   %t$0 = add i64 0, 0
-  %t$1 = icmp sgt i64 %x, %t$0
+  %t$1 = icmp sgt i64 %p$x, %t$0
   %t$2 = zext i1 %t$1 to i64
   %t$3 = trunc i64 %t$2 to i1
   br i1 %t$3, label %then_3, label %else_3
 then_3:
   %t$4$r0 = insertvalue { i64, i64 } undef, i64 7, 0
-  %t$4$r1 = insertvalue { i64, i64 } %t$4$r0, i64 %x, 1
+  %t$4$r1 = insertvalue { i64, i64 } %t$4$r0, i64 %p$x, 1
   ret { i64, i64 } %t$4$r1
 else_3:
   %t$5 = getelementptr inbounds { i64, [13 x i8] }, ptr @.str.10, i64 0, i32 1, i64 0

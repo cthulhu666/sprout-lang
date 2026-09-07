@@ -116,7 +116,7 @@ declare i64 @ref_write(i64, i64)
 @.cname.13 = private unnamed_addr constant [9 x i8] c"IntRange\00"
 @.cfkinds.13 = private unnamed_addr constant [4 x i8] c"iii\00"
 
-define i64 @examples.wrap_typed_money.cents_fraction(i64 %total) {
+define i64 @examples.wrap_typed_money.cents_fraction(i64 %p$total) {
 entry:
   %t$0 = add i64 0, 100
   %t$1 = icmp eq i64 %t$0, 0
@@ -127,17 +127,17 @@ divpanic_1:
   call i64 @panic(i64 %t$3)
   unreachable
 divok_1:
-  %t$4 = sdiv i64 %total, %t$0
+  %t$4 = sdiv i64 %p$total, %t$0
   %t$5 = add i64 0, 100
   %t$6 = mul i64 %t$4, %t$5
-  %t$7 = sub i64 %total, %t$6
+  %t$7 = sub i64 %p$total, %t$6
   ret i64 %t$7
 }
 
-define i64 @examples.wrap_typed_money.pad2(i64 %n) {
+define i64 @examples.wrap_typed_money.pad2(i64 %p$n) {
 entry:
   %t$0 = add i64 0, 10
-  %t$1 = icmp slt i64 %n, %t$0
+  %t$1 = icmp slt i64 %p$n, %t$0
   %t$2 = zext i1 %t$1 to i64
   %t$10 = trunc i64 %t$2 to i1
   br i1 %t$10, label %then_3, label %else_3
@@ -147,7 +147,7 @@ then_3:
   %t$11 = alloca i64
   store i64 %t$6, ptr %t$11
   %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
-  %t$7 = call i64 @__tc_ToString_Int_to_string(i64 %n)
+  %t$7 = call i64 @__tc_ToString_Int_to_string(i64 %p$n)
   %t$13 = alloca i64
   store i64 %t$7, ptr %t$13
   %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
@@ -155,14 +155,14 @@ then_3:
   %t$15 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %join_3
 else_3:
-  %t$9 = call i64 @__tc_ToString_Int_to_string(i64 %n)
+  %t$9 = call i64 @__tc_ToString_Int_to_string(i64 %p$n)
   br label %join_3
 join_3:
   %t$4 = phi i64 [%t$8, %then_3], [%t$9, %else_3]
   ret i64 %t$4
 }
 
-define i64 @examples.wrap_typed_money.cents_add(i64 %a, i64 %b) {
+define i64 @examples.wrap_typed_money.cents_add(i64 %p$a, i64 %p$b) {
 entry:
   br label %arm_0_0
 arm_0_0:
@@ -172,7 +172,7 @@ body_0_0:
 arm_0_2:
   br label %body_0_2
 body_0_2:
-  %t$4 = add i64 %a, %b
+  %t$4 = add i64 %p$a, %p$b
   br label %join_2
 arm_1_2:
   call void @sprout_abort_match()
@@ -188,7 +188,7 @@ join_0:
   ret i64 %t$1
 }
 
-define i64 @examples.wrap_typed_money.cents_sub(i64 %a, i64 %b) {
+define i64 @examples.wrap_typed_money.cents_sub(i64 %p$a, i64 %p$b) {
 entry:
   br label %arm_0_0
 arm_0_0:
@@ -198,7 +198,7 @@ body_0_0:
 arm_0_2:
   br label %body_0_2
 body_0_2:
-  %t$4 = sub i64 %a, %b
+  %t$4 = sub i64 %p$a, %p$b
   br label %join_2
 arm_1_2:
   call void @sprout_abort_match()
@@ -214,23 +214,23 @@ join_0:
   ret i64 %t$1
 }
 
-define i64 @examples.wrap_typed_money.describe_transfer(i64 %from, i64 %to, i64 %amount) {
+define i64 @examples.wrap_typed_money.describe_transfer(i64 %p$from, i64 %p$to, i64 %p$amount) {
 entry:
   %t$0 = getelementptr inbounds { i64, [10 x i8] }, ptr @.str.2, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
   %t$14 = alloca i64
-  store i64 %to, ptr %t$14
+  store i64 %p$to, ptr %t$14
   %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
   %t$16 = alloca i64
-  store i64 %from, ptr %t$16
+  store i64 %p$from, ptr %t$16
   %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
   %t$18 = alloca i64
-  store i64 %amount, ptr %t$18
+  store i64 %p$amount, ptr %t$18
   %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
   %t$20 = alloca i64
   store i64 %t$1, ptr %t$20
   %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
-  %t$2 = call i64 @__tc_ToString_examples_wrap_typed_money_Cents_to_string(i64 %amount)
+  %t$2 = call i64 @__tc_ToString_examples_wrap_typed_money_Cents_to_string(i64 %p$amount)
   %t$22 = alloca i64
   store i64 %t$2, ptr %t$22
   %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
@@ -249,7 +249,7 @@ entry:
   %t$30 = alloca i64
   store i64 %t$6, ptr %t$30
   %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)
-  %t$7 = call i64 @__tc_ToString_examples_wrap_typed_money_AccountId_to_string(i64 %from)
+  %t$7 = call i64 @__tc_ToString_examples_wrap_typed_money_AccountId_to_string(i64 %p$from)
   %t$32 = alloca i64
   store i64 %t$7, ptr %t$32
   %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
@@ -268,7 +268,7 @@ entry:
   %t$40 = alloca i64
   store i64 %t$11, ptr %t$40
   %t$41 = call i64 @sprout_gc_push_i64_root(ptr %t$40)
-  %t$12 = call i64 @__tc_ToString_examples_wrap_typed_money_AccountId_to_string(i64 %to)
+  %t$12 = call i64 @__tc_ToString_examples_wrap_typed_money_AccountId_to_string(i64 %p$to)
   %t$42 = alloca i64
   store i64 %t$12, ptr %t$42
   %t$43 = call i64 @sprout_gc_push_i64_root(ptr %t$42)
@@ -339,19 +339,19 @@ entry:
   ret i64 %t$23
 }
 
-define i64 @__tc_Semigroup_String_append(i64 %left, i64 %right) {
+define i64 @__tc_Semigroup_String_append(i64 %p$left, i64 %p$right) {
 entry:
-  %t$0 = call i64 @str_concat(i64 %left, i64 %right)
+  %t$0 = call i64 @str_concat(i64 %p$left, i64 %p$right)
   ret i64 %t$0
 }
 
-define i64 @__tc_ToString_Int_to_string(i64 %value) {
+define i64 @__tc_ToString_Int_to_string(i64 %p$value) {
 entry:
-  %t$0 = call i64 @int_to_string(i64 %value)
+  %t$0 = call i64 @int_to_string(i64 %p$value)
   ret i64 %t$0
 }
 
-define i64 @__tc_ToString_examples_wrap_typed_money_AccountId_to_string(i64 %id) {
+define i64 @__tc_ToString_examples_wrap_typed_money_AccountId_to_string(i64 %p$id) {
 entry:
   br label %arm_0_0
 arm_0_0:
@@ -360,12 +360,12 @@ body_0_0:
   %t$2 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.8, i64 0, i32 1, i64 0
   %t$3 = ptrtoint ptr %t$2 to i64
   %t$6 = alloca i64
-  store i64 %id, ptr %t$6
+  store i64 %p$id, ptr %t$6
   %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
   %t$8 = alloca i64
   store i64 %t$3, ptr %t$8
   %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
-  %t$4 = call i64 @__tc_ToString_Int_to_string(i64 %id)
+  %t$4 = call i64 @__tc_ToString_Int_to_string(i64 %p$id)
   %t$10 = alloca i64
   store i64 %t$4, ptr %t$10
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
@@ -380,7 +380,7 @@ join_0:
   ret i64 %t$1
 }
 
-define i64 @__tc_ToString_examples_wrap_typed_money_Cents_to_string(i64 %amount) {
+define i64 @__tc_ToString_examples_wrap_typed_money_Cents_to_string(i64 %p$amount) {
 entry:
   br label %arm_0_0
 arm_0_0:
@@ -397,12 +397,12 @@ divpanic_5:
   call i64 @panic(i64 %t$7)
   unreachable
 divok_5:
-  %t$8 = sdiv i64 %amount, %t$4
+  %t$8 = sdiv i64 %p$amount, %t$4
   %t$17 = alloca i64
   store i64 %t$3, ptr %t$17
   %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
   %t$19 = alloca i64
-  store i64 %amount, ptr %t$19
+  store i64 %p$amount, ptr %t$19
   %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
   %t$9 = call i64 @__tc_ToString_Int_to_string(i64 %t$8)
   %t$21 = alloca i64
@@ -420,7 +420,7 @@ divok_5:
   %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
   %t$13 = call i64 @__tc_Semigroup_String_append(i64 %t$10, i64 %t$12)
   %t$28 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$14 = call i64 @examples.wrap_typed_money.cents_fraction(i64 %amount)
+  %t$14 = call i64 @examples.wrap_typed_money.cents_fraction(i64 %p$amount)
   %t$29 = alloca i64
   store i64 %t$13, ptr %t$29
   %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)

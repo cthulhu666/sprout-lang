@@ -21,33 +21,33 @@ fn contains(haystack: String, needle: String) -> Bool =
 #
 # entry:
 #   %t0 = const 0
-#   %t1 = icmp slt %x, %t0
+#   %t1 = icmp slt %p$x, %t0
 #   condbr %t1, then_2, else_3
 # then_2:
 #   %t5 = const 0
-#   %t6 = isub %t5, %x
+#   %t6 = isub %t5, %p$x
 #   br join_4
 # else_3:
 #   br join_4
 # join_4:
-#   %t7 = phi i64 [%t6, then_2], [%x, else_3]
+#   %t7 = phi i64 [%t6, then_2], [%p$x, else_3]
 #   ret %t7
 fn abs_program() -> sprout_ir.IRProgram =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction("abs", Cons(("x", sprout_ir.IRTHeap), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
         sprout_ir.IRConst("%t0", 0),
-        Cons(sprout_ir.IRICmp("%t1", "slt", "%x", "%t0"),
+        Cons(sprout_ir.IRICmp("%t1", "slt", sprout_ir.param_ssa("x"), "%t0"),
         Cons(sprout_ir.IRCondBr("%t1", "then_2", "else_3"), Nil)))),
       Cons(sprout_ir.IRBlock("then_2", Cons(
         sprout_ir.IRConst("%t5", 0),
-        Cons(sprout_ir.IRISub("%t6", "%t5", "%x"),
+        Cons(sprout_ir.IRISub("%t6", "%t5", sprout_ir.param_ssa("x")),
         Cons(sprout_ir.IRBr("join_4"), Nil)))),
       Cons(sprout_ir.IRBlock("else_3", Cons(
         sprout_ir.IRBr("join_4"), Nil)),
       Cons(sprout_ir.IRBlock("join_4", Cons(
         sprout_ir.IRPhi("%t7", "i64",
-          Cons(("%t6", "then_2"), Cons(("%x", "else_3"), Nil))),
+          Cons(("%t6", "then_2"), Cons((sprout_ir.param_ssa("x"), "else_3"), Nil))),
         Cons(sprout_ir.IRRet("%t7"), Nil))),
       Nil))))),
     Nil), Nil, Nil, Nil)
@@ -61,14 +61,14 @@ fn abs_program() -> sprout_ir.IRProgram =
 # Layout:
 #   entry:                          x == 0 ?
 #     %t0 = const 0
-#     %t1 = icmp eq %x, %t0
+#     %t1 = icmp eq %p$x, %t0
 #     condbr %t1, then_2, else_3
 #   then_2:  (outer then: return 0)
 #     %t5 = const 0
 #     br join_4
 #   else_3:  (outer else: nested if x > 0)
 #     %t6 = const 0
-#     %t7 = icmp sgt %x, %t6
+#     %t7 = icmp sgt %p$x, %t6
 #     condbr %t7, then_8, else_9
 #   then_8:  (inner then: return 1)
 #     %t11 = const 1
@@ -89,14 +89,14 @@ fn sign_program() -> sprout_ir.IRProgram =
     sprout_ir.IRFunction("sign", Cons(("x", sprout_ir.IRTHeap), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
         sprout_ir.IRConst("%t0", 0),
-        Cons(sprout_ir.IRICmp("%t1", "eq", "%x", "%t0"),
+        Cons(sprout_ir.IRICmp("%t1", "eq", sprout_ir.param_ssa("x"), "%t0"),
         Cons(sprout_ir.IRCondBr("%t1", "then_2", "else_3"), Nil)))),
       Cons(sprout_ir.IRBlock("then_2", Cons(
         sprout_ir.IRConst("%t5", 0),
         Cons(sprout_ir.IRBr("join_4"), Nil))),
       Cons(sprout_ir.IRBlock("else_3", Cons(
         sprout_ir.IRConst("%t6", 0),
-        Cons(sprout_ir.IRICmp("%t7", "sgt", "%x", "%t6"),
+        Cons(sprout_ir.IRICmp("%t7", "sgt", sprout_ir.param_ssa("x"), "%t6"),
         Cons(sprout_ir.IRCondBr("%t7", "then_8", "else_9"), Nil)))),
       Cons(sprout_ir.IRBlock("then_8", Cons(
         sprout_ir.IRConst("%t11", 1),
@@ -134,9 +134,9 @@ fn main() -> Unit !{IO} =
 
     # --- Lowering: abs.
     check_true("abs defines i64 result",
-                contains(ir_lowering.lower_program(abs_program()), "define i64 @abs(i64 %x)")),
+                contains(ir_lowering.lower_program(abs_program()), "define i64 @abs(i64 %p$x)")),
     check_true("abs emits icmp slt",
-                contains(ir_lowering.lower_program(abs_program()), "icmp slt i64 %x, %t0")),
+                contains(ir_lowering.lower_program(abs_program()), "icmp slt i64 %p$x, %t0")),
     check_true("abs emits conditional branch",
                 contains(ir_lowering.lower_program(abs_program()), "br i1 %t1, label %then_2, label %else_3")),
     check_true("abs emits then-block label",
@@ -148,13 +148,13 @@ fn main() -> Unit !{IO} =
     check_true("abs emits unconditional br to join",
                 contains(ir_lowering.lower_program(abs_program()), "br label %join_4")),
     check_true("abs emits phi i64 merging two values",
-                contains(ir_lowering.lower_program(abs_program()), "phi i64 [%t6, %then_2], [%x, %else_3]")),
+                contains(ir_lowering.lower_program(abs_program()), "phi i64 [%t6, %then_2], [%p$x, %else_3]")),
     check_true("abs returns i64 %t7",
                 contains(ir_lowering.lower_program(abs_program()), "ret i64 %t7")),
 
     # --- Lowering: nested sign-or-zero.
     check_true("sign defines i64 result",
-                contains(ir_lowering.lower_program(sign_program()), "define i64 @sign(i64 %x)")),
+                contains(ir_lowering.lower_program(sign_program()), "define i64 @sign(i64 %p$x)")),
     # Outer condbr.
     check_true("sign emits outer condbr",
                 contains(ir_lowering.lower_program(sign_program()), "br i1 %t1, label %then_2, label %else_3")),

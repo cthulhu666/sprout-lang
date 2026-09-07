@@ -52,26 +52,26 @@ declare i64 @str_len(i64)
 declare i64 @str_find(i64, i64)
 declare i64 @str_starts_with(i64, i64)
 
-define i64 @apply(i64 %f, i64 %x) {
+define i64 @apply(i64 %p$f, i64 %p$x) {
 entry:
-  call void @sprout_closure_arity_check(i64 %f, i64 1)
-  %t$0$env_ptr = inttoptr i64 %f to ptr
+  call void @sprout_closure_arity_check(i64 %p$f, i64 1)
+  %t$0$env_ptr = inttoptr i64 %p$f to ptr
   %t$0$code = load ptr, ptr %t$0$env_ptr
-  %t$0 = call i64 (i64, i64) %t$0$code(i64 %f, i64 %x)
+  %t$0 = call i64 (i64, i64) %t$0$code(i64 %p$f, i64 %p$x)
   ret i64 %t$0
 }
 
-define i64 @__sprout_ir_lambda_0(i64 %env$, i64 %n) {
+define i64 @__sprout_ir_lambda_0(i64 %p$env$, i64 %p$n) {
 entry:
   %t$0 = add i64 0, 1
-  %t$1 = add i64 %n, %t$0
+  %t$1 = add i64 %p$n, %t$0
   ret i64 %t$1
 }
 
-define i64 @__sprout_ir_lambda_1(i64 %env$, i64 %n) {
+define i64 @__sprout_ir_lambda_1(i64 %p$env$, i64 %p$n) {
 entry:
   %t$0 = add i64 0, 2
-  %t$1 = mul i64 %n, %t$0
+  %t$1 = mul i64 %p$n, %t$0
   ret i64 %t$1
 }
 

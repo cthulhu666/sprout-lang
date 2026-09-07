@@ -104,20 +104,20 @@ declare i64 @ref_write(i64, i64)
 @.cname.13 = private unnamed_addr constant [9 x i8] c"IntRange\00"
 @.cfkinds.13 = private unnamed_addr constant [4 x i8] c"iii\00"
 
-define i64 @main.swap_pair(i64 %a, i64 %b) {
+define i64 @main.swap_pair(i64 %p$a, i64 %p$b) {
 entry:
   %t$0 = call i64 @sprout_alloc_tuple_blob(i64 16)
   %t$0$ptr = inttoptr i64 %t$0 to ptr
   %t$0$s0 = getelementptr i64, ptr %t$0$ptr, i64 0
-  store i64 %b, ptr %t$0$s0
+  store i64 %p$b, ptr %t$0$s0
   %t$0$s1 = getelementptr i64, ptr %t$0$ptr, i64 1
-  store i64 %a, ptr %t$0$s1
+  store i64 %p$a, ptr %t$0$s1
   ret i64 %t$0
 }
 
-define i64 @main.use_pair(i64 %a, i64 %b) {
+define i64 @main.use_pair(i64 %p$a, i64 %p$b) {
 entry:
-  %t$0$st = call { i64, i64 } @main.swap_pair_worker(i64 %a, i64 %b)
+  %t$0$st = call { i64, i64 } @main.swap_pair_worker(i64 %p$a, i64 %p$b)
   %t$0 = extractvalue { i64, i64 } %t$0$st, 0
   %t$1 = extractvalue { i64, i64 } %t$0$st, 1
   %t$2 = add i64 %t$0, %t$1
@@ -133,10 +133,10 @@ entry:
   ret i64 %t$3
 }
 
-define { i64, i64 } @main.swap_pair_worker(i64 %a, i64 %b) {
+define { i64, i64 } @main.swap_pair_worker(i64 %p$a, i64 %p$b) {
 entry:
-  %t$0$r0 = insertvalue { i64, i64 } undef, i64 %b, 0
-  %t$0$r1 = insertvalue { i64, i64 } %t$0$r0, i64 %a, 1
+  %t$0$r0 = insertvalue { i64, i64 } undef, i64 %p$b, 0
+  %t$0$r1 = insertvalue { i64, i64 } %t$0$r0, i64 %p$a, 1
   ret { i64, i64 } %t$0$r1
 }
 

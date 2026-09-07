@@ -58,9 +58,9 @@ declare i64 @str_starts_with(i64, i64)
 @.cname.2 = private unnamed_addr constant [5 x i8] c"Blue\00"
 @.cfkinds.2 = private unnamed_addr constant [1 x i8] c"\00"
 
-define i64 @color_code(i64 %c) {
+define i64 @color_code(i64 %p$c) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %c)
+  %t$0 = call i64 @sprout_tag(i64 %p$c)
   br label %arm_0_1
 arm_0_1:
   %t$3 = add i64 0, 0

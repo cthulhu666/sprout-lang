@@ -17,15 +17,15 @@ fn make_loop_fn() -> sprout_ir.IRFunction =
     "i64",
     Cons(sprout_ir.IRBlock("entry",
       Cons(sprout_ir.IRConst("%t$0", 0),
-      Cons(sprout_ir.IRICmp("%t$1", "sle", "%n", "%t$0"),
+      Cons(sprout_ir.IRICmp("%t$1", "sle", sprout_ir.param_ssa("n"), "%t$0"),
       Cons(sprout_ir.IRCondBr("%t$1", "then_3", "else_3"), Nil)))),
     Cons(sprout_ir.IRBlock("then_3",
-      Cons(sprout_ir.IRCall("%t$5", sprout_ir.IRTScalar, "str_len", Cons("%s", Nil)),
+      Cons(sprout_ir.IRCall("%t$5", sprout_ir.IRTScalar, "str_len", Cons(sprout_ir.param_ssa("s"), Nil)),
       Cons(sprout_ir.IRBr("join_3"), Nil))),
     Cons(sprout_ir.IRBlock("else_3",
       Cons(sprout_ir.IRConst("%t$6", 1),
-      Cons(sprout_ir.IRISub("%t$7", "%n", "%t$6"),
-      Cons(sprout_ir.IRStrFromInt("%t$8", "%n"),
+      Cons(sprout_ir.IRISub("%t$7", sprout_ir.param_ssa("n"), "%t$6"),
+      Cons(sprout_ir.IRStrFromInt("%t$8", sprout_ir.param_ssa("n")),
       Cons(sprout_ir.IRCall("%t$9", sprout_ir.IRTScalar, "main.loop", Cons("%t$7", Cons("%t$8", Nil))),
       Cons(sprout_ir.IRBr("join_3"), Nil)))))),
     Cons(sprout_ir.IRBlock("join_3",
@@ -52,7 +52,7 @@ fn make_nested_fn() -> sprout_ir.IRFunction =
       Cons(sprout_ir.IRConst("%base2", 20), Cons(sprout_ir.IRBr("join2"), Nil))),
     Cons(sprout_ir.IRBlock("else2",
       Cons(sprout_ir.IRConst("%one", 1),
-      Cons(sprout_ir.IRISub("%x", "%n", "%one"),
+      Cons(sprout_ir.IRISub("%x", sprout_ir.param_ssa("n"), "%one"),
       Cons(sprout_ir.IRCall("%rx", sprout_ir.IRTScalar, "main.g", Cons("%x", Nil)),
       Cons(sprout_ir.IRBr("join2"), Nil))))),
     Cons(sprout_ir.IRBlock("join2",
@@ -84,7 +84,7 @@ fn make_single_arm_fn() -> sprout_ir.IRFunction =
       Cons(sprout_ir.IRConst("%base1", 10), Cons(sprout_ir.IRBr("join1"), Nil))),
     Cons(sprout_ir.IRBlock("else1",
       Cons(sprout_ir.IRConst("%one", 1),
-      Cons(sprout_ir.IRISub("%x", "%n", "%one"),
+      Cons(sprout_ir.IRISub("%x", sprout_ir.param_ssa("n"), "%one"),
       Cons(sprout_ir.IRBr("arm_0"), Nil)))),
     Cons(sprout_ir.IRBlock("arm_0",
       Cons(sprout_ir.IRCall("%r", sprout_ir.IRTScalar, "main.h", Cons("%x", Nil)),
@@ -107,7 +107,7 @@ fn make_no_self_call_fn() -> sprout_ir.IRFunction =
     "i64",
     Cons(sprout_ir.IRBlock("entry",
       Cons(sprout_ir.IRConst("%one", 1),
-      Cons(sprout_ir.IRIAdd("%r", "%n", "%one"),
+      Cons(sprout_ir.IRIAdd("%r", sprout_ir.param_ssa("n"), "%one"),
       Cons(sprout_ir.IRRet("%r"), Nil)))),
     Nil))
 
@@ -129,7 +129,7 @@ fn make_non_tail_fn() -> sprout_ir.IRFunction =
       Cons(sprout_ir.IRConst("%base", 10), Cons(sprout_ir.IRBr("join1"), Nil))),
     Cons(sprout_ir.IRBlock("else1",
       Cons(sprout_ir.IRConst("%one", 1),
-      Cons(sprout_ir.IRISub("%x", "%n", "%one"),
+      Cons(sprout_ir.IRISub("%x", sprout_ir.param_ssa("n"), "%one"),
       Cons(sprout_ir.IRCall("%r", sprout_ir.IRTScalar, "main.g", Cons("%x", Nil)),
       Cons(sprout_ir.IRIAdd("%w", "%r", "%r"),
       Cons(sprout_ir.IRBr("join1"), Nil)))))),
@@ -146,8 +146,8 @@ fn main() -> Unit !{IO} =
         do
           let ncir = ir_lowering.lower_fn_with_table(unchanged, dict_empty())
           assert_true(state, "no-self-call: not rewritten (no tco_loop)", string.contains(ncir, "tco_loop") == false)
-          assert_true(state, "no-self-call: param kept (not renamed to $in)", string.contains(ncir, "%n$in") == false)
-          assert_true(state, "no-self-call: define keeps plain param", string.contains(ncir, "define i64 @main.inc(i64 %n)"))
+          assert_true(state, "no-self-call: param kept (not renamed to $in)", string.contains(ncir, "%p$n$in") == false)
+          assert_true(state, "no-self-call: define keeps plain param", string.contains(ncir, "define i64 @main.inc(i64 %p$n)"))
     match ast_to_ir.tco_rewrite(make_non_tail_fn(), 400) with
     | (nt, _ni4) ->
         do
@@ -166,7 +166,7 @@ fn main() -> Unit !{IO} =
     | (nested, _ni) ->
         do
           let nir = ir_lowering.lower_fn_with_table(nested, dict_empty())
-          assert_true(state, "nested: renames param", string.contains(nir, "@main.g(i64 %n$in)"))
+          assert_true(state, "nested: renames param", string.contains(nir, "@main.g(i64 %p$n$in)"))
           assert_true(state, "nested: has tco_loop", string.contains(nir, "tco_loop:"))
           assert_true(state, "nested: back-edge to loop", string.contains(nir, "br label %tco_loop"))
           assert_true(state, "nested: self-call gone", string.contains(nir, "call i64 @main.g") == false)
@@ -175,11 +175,11 @@ fn main() -> Unit !{IO} =
         do
           let ir = ir_lowering.lower_fn_with_table(rewritten, dict_empty())
           assert_true(state, "renames params to $in",
-            string.contains(ir, "define i64 @main.loop(i64 %n$in, i64 %s$in)"))
+            string.contains(ir, "define i64 @main.loop(i64 %p$n$in, i64 %p$s$in)"))
           assert_true(state, "has a tco_loop block", string.contains(ir, "tco_loop:"))
           assert_true(state, "entry stacksaves", string.contains(ir, "@llvm.stacksave()"))
-          assert_true(state, "loop header reloads n", string.contains(ir, "%n = load i64, ptr"))
-          assert_true(state, "loop header reloads s", string.contains(ir, "%s = load i64, ptr"))
+          assert_true(state, "loop header reloads n", string.contains(ir, "%p$n = load i64, ptr"))
+          assert_true(state, "loop header reloads s", string.contains(ir, "%p$s = load i64, ptr"))
           assert_true(state, "back-edge stores new n", string.contains(ir, "store i64 %t$7, ptr"))
           assert_true(state, "back-edge stores new s", string.contains(ir, "store i64 %t$8, ptr"))
           assert_true(state, "back-edge stackrestores", string.contains(ir, "@llvm.stackrestore"))

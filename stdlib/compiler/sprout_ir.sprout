@@ -476,6 +476,13 @@ export type IRBlock (..) = IRBlock String (List IROp)
 # determined by the AST→IR translator from the function body's inferred type.
 export type IRFunction (..) = IRFunction String (List (String, IRType)) String (List IRBlock)
 
+# The SSA name of a parameter.  LLVM keeps local values and block labels in ONE
+# namespace, so a bare `%entry` collides with the entry block; '$' cannot occur
+# in a Sprout identifier, so this prefix is disjoint from every label.  Every
+# module that names a param goes through here, or the rooting pass — which keys
+# its heap-origin set on these names — silently stops seeing parameters.
+export fn param_ssa(name: String) -> String = "%p$" ++ name
+
 # CtorReg carries the metadata emitted as @sprout_register_ctor calls in @main.
 # Fields: name (source-level, possibly qualified), tag, arity, field_kinds.
 # field_kinds encoding: 'i'=Int, 'b'=Bool, 's'=String/Char, 'p'=ADT/closure/tuple,

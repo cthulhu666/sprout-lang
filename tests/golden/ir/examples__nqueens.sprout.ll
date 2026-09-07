@@ -128,23 +128,23 @@ entry:
   ret i64 %t$1
 }
 
-define i64 @vec_append(i64 %value, i64 %vec) {
+define i64 @vec_append(i64 %p$value, i64 %p$vec) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %vec)
+  %t$0 = call i64 @sprout_tag(i64 %p$vec)
   br label %arm_0_1
 arm_0_1:
   %t$3 = add i64 0, 10
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %vec, i64 0)
+  %t$5 = call i64 @sprout_field(i64 %p$vec, i64 0)
   %t$8 = alloca i64
-  store i64 %value, ptr %t$8
+  store i64 %p$value, ptr %t$8
   %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
   %t$10 = alloca i64
   store i64 %t$5, ptr %t$10
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
-  %t$6 = call i64 @vector_append(i64 %t$5, i64 %value)
+  %t$6 = call i64 @vector_append(i64 %t$5, i64 %p$value)
   %t$12 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$13 = alloca i64
   store i64 %t$6, ptr %t$13
@@ -163,20 +163,20 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @vec_get(i64 %index, i64 %vec) {
+define i64 @vec_get(i64 %p$index, i64 %p$vec) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %vec)
+  %t$0 = call i64 @sprout_tag(i64 %p$vec)
   br label %arm_0_1
 arm_0_1:
   %t$3 = add i64 0, 10
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %vec, i64 0)
+  %t$5 = call i64 @sprout_field(i64 %p$vec, i64 0)
   %t$7 = alloca i64
   store i64 %t$5, ptr %t$7
   %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
-  %t$6 = call i64 @vector_get(i64 %t$5, i64 %index)
+  %t$6 = call i64 @vector_get(i64 %t$5, i64 %p$index)
   %t$9 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_1
 arm_1_1:
@@ -187,9 +187,9 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @vec_get_or(i64 %index, i64 %fallback, i64 %vec) {
+define i64 @vec_get_or(i64 %p$index, i64 %p$fallback, i64 %p$vec) {
 entry:
-  %t$0$st = call { i64, i64 } @vec_get_worker(i64 %index, i64 %vec)
+  %t$0$st = call { i64, i64 } @vec_get_worker(i64 %p$index, i64 %p$vec)
   %t$0 = extractvalue { i64, i64 } %t$0$st, 0
   %t$1 = extractvalue { i64, i64 } %t$0$st, 1
   br label %arm_0_2
@@ -209,27 +209,27 @@ arm_2_2:
   call void @sprout_abort_match()
   unreachable
 join_2:
-  %t$3 = phi i64 [%t$1, %body_0_2], [%fallback, %body_1_2]
+  %t$3 = phi i64 [%t$1, %body_0_2], [%p$fallback, %body_1_2]
   ret i64 %t$3
 }
 
-define i64 @vec_set(i64 %index, i64 %value, i64 %vec) {
+define i64 @vec_set(i64 %p$index, i64 %p$value, i64 %p$vec) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %vec)
+  %t$0 = call i64 @sprout_tag(i64 %p$vec)
   br label %arm_0_1
 arm_0_1:
   %t$3 = add i64 0, 10
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %vec, i64 0)
+  %t$5 = call i64 @sprout_field(i64 %p$vec, i64 0)
   %t$8 = alloca i64
-  store i64 %value, ptr %t$8
+  store i64 %p$value, ptr %t$8
   %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
   %t$10 = alloca i64
   store i64 %t$5, ptr %t$10
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
-  %t$6 = call i64 @vector_set(i64 %t$5, i64 %index, i64 %value)
+  %t$6 = call i64 @vector_set(i64 %t$5, i64 %p$index, i64 %p$value)
   %t$12 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$13 = alloca i64
   store i64 %t$6, ptr %t$13
@@ -254,21 +254,21 @@ entry:
   ret i64 %t$0
 }
 
-define i64 @examples.nqueens.make_bool_vec(i64 %size$in, i64 %i$in, i64 %acc$in) {
+define i64 @examples.nqueens.make_bool_vec(i64 %p$size$in, i64 %p$i$in, i64 %p$acc$in) {
 entry:
   %t$10 = alloca i64
-  store i64 %size$in, ptr %t$10
+  store i64 %p$size$in, ptr %t$10
   %t$11 = alloca i64
-  store i64 %i$in, ptr %t$11
+  store i64 %p$i$in, ptr %t$11
   %t$12 = alloca i64
-  store i64 %acc$in, ptr %t$12
+  store i64 %p$acc$in, ptr %t$12
   %t$13 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
-  %size = load i64, ptr %t$10
-  %i = load i64, ptr %t$11
-  %acc = load i64, ptr %t$12
-  %t$0 = icmp sge i64 %i, %size
+  %p$size = load i64, ptr %t$10
+  %p$i = load i64, ptr %t$11
+  %p$acc = load i64, ptr %t$12
+  %t$0 = icmp sge i64 %p$i, %p$size
   %t$1 = zext i1 %t$0 to i64
   %t$9 = trunc i64 %t$1 to i1
   br i1 %t$9, label %then_2, label %else_2
@@ -276,27 +276,27 @@ then_2:
   br label %join_2
 else_2:
   %t$4 = add i64 0, 1
-  %t$5 = add i64 %i, %t$4
+  %t$5 = add i64 %p$i, %t$4
   %t$6 = add i64 0, 0
   %t$14 = alloca i64
-  store i64 %acc, ptr %t$14
+  store i64 %p$acc, ptr %t$14
   %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
-  %t$7 = call i64 @vec_append(i64 %t$6, i64 %acc)
+  %t$7 = call i64 @vec_append(i64 %t$6, i64 %p$acc)
   %t$16 = call i64 @sprout_gc_pop_roots(i64 1)
-  store i64 %size, ptr %t$10
+  store i64 %p$size, ptr %t$10
   store i64 %t$5, ptr %t$11
   store i64 %t$7, ptr %t$12
   call void @llvm.stackrestore(ptr %t$13)
   br label %tco_loop
 join_2:
-  %t$3 = phi i64 [%acc, %then_2]
+  %t$3 = phi i64 [%p$acc, %then_2]
   ret i64 %t$3
 }
 
-define i64 @examples.nqueens.is_free(i64 %col, i64 %pd, i64 %nd, i64 %cols, i64 %pos_diag, i64 %neg_diag) {
+define i64 @examples.nqueens.is_free(i64 %p$col, i64 %p$pd, i64 %p$nd, i64 %p$cols, i64 %p$pos_diag, i64 %p$neg_diag) {
 entry:
   %t$0 = add i64 0, 0
-  %t$1 = call i64 @vec_get_or(i64 %col, i64 %t$0, i64 %cols)
+  %t$1 = call i64 @vec_get_or(i64 %p$col, i64 %t$0, i64 %p$cols)
   %t$2 = add i64 0, 0
   %t$3 = icmp eq i64 %t$1, %t$2
   %t$4 = zext i1 %t$3 to i64
@@ -304,7 +304,7 @@ entry:
   br i1 %t$13, label %then_5, label %else_5
 then_5:
   %t$7 = add i64 0, 0
-  %t$8 = call i64 @vec_get_or(i64 %pd, i64 %t$7, i64 %pos_diag)
+  %t$8 = call i64 @vec_get_or(i64 %p$pd, i64 %t$7, i64 %p$pos_diag)
   %t$9 = add i64 0, 0
   %t$10 = icmp eq i64 %t$8, %t$9
   %t$11 = zext i1 %t$10 to i64
@@ -318,7 +318,7 @@ join_5:
   br i1 %t$22, label %then_14, label %else_14
 then_14:
   %t$16 = add i64 0, 0
-  %t$17 = call i64 @vec_get_or(i64 %nd, i64 %t$16, i64 %neg_diag)
+  %t$17 = call i64 @vec_get_or(i64 %p$nd, i64 %t$16, i64 %p$neg_diag)
   %t$18 = add i64 0, 0
   %t$19 = icmp eq i64 %t$17, %t$18
   %t$20 = zext i1 %t$19 to i64
@@ -331,9 +331,9 @@ join_14:
   ret i64 %t$15
 }
 
-define i64 @examples.nqueens.queens(i64 %n, i64 %row, i64 %col, i64 %cols, i64 %pos_diag, i64 %neg_diag) {
+define i64 @examples.nqueens.queens(i64 %p$n, i64 %p$row, i64 %p$col, i64 %p$cols, i64 %p$pos_diag, i64 %p$neg_diag) {
 entry:
-  %t$0 = icmp eq i64 %row, %n
+  %t$0 = icmp eq i64 %p$row, %p$n
   %t$1 = zext i1 %t$0 to i64
   %t$40 = trunc i64 %t$1 to i1
   br i1 %t$40, label %then_2, label %else_2
@@ -341,7 +341,7 @@ then_2:
   %t$4 = add i64 0, 1
   br label %join_2
 else_2:
-  %t$5 = icmp sge i64 %col, %n
+  %t$5 = icmp sge i64 %p$col, %p$n
   %t$6 = zext i1 %t$5 to i64
   %t$39 = trunc i64 %t$6 to i1
   br i1 %t$39, label %then_7, label %else_7
@@ -350,61 +350,61 @@ then_7:
   br label %join_7
 else_7:
   %t$10 = add i64 0, 1
-  %t$11 = add i64 %col, %t$10
+  %t$11 = add i64 %p$col, %t$10
   %t$41 = alloca i64
-  store i64 %pos_diag, ptr %t$41
+  store i64 %p$pos_diag, ptr %t$41
   %t$42 = call i64 @sprout_gc_push_i64_root(ptr %t$41)
   %t$43 = alloca i64
-  store i64 %neg_diag, ptr %t$43
+  store i64 %p$neg_diag, ptr %t$43
   %t$44 = call i64 @sprout_gc_push_i64_root(ptr %t$43)
   %t$45 = alloca i64
-  store i64 %cols, ptr %t$45
+  store i64 %p$cols, ptr %t$45
   %t$46 = call i64 @sprout_gc_push_i64_root(ptr %t$45)
-  %t$12 = call i64 @examples.nqueens.queens(i64 %n, i64 %row, i64 %t$11, i64 %cols, i64 %pos_diag, i64 %neg_diag)
-  %t$13 = add i64 %row, %col
-  %t$14 = sub i64 %row, %col
-  %t$15 = add i64 %t$14, %n
+  %t$12 = call i64 @examples.nqueens.queens(i64 %p$n, i64 %p$row, i64 %t$11, i64 %p$cols, i64 %p$pos_diag, i64 %p$neg_diag)
+  %t$13 = add i64 %p$row, %p$col
+  %t$14 = sub i64 %p$row, %p$col
+  %t$15 = add i64 %t$14, %p$n
   %t$16 = add i64 0, 1
   %t$17 = sub i64 %t$15, %t$16
-  %t$18 = call i64 @examples.nqueens.is_free(i64 %col, i64 %t$13, i64 %t$17, i64 %cols, i64 %pos_diag, i64 %neg_diag)
+  %t$18 = call i64 @examples.nqueens.is_free(i64 %p$col, i64 %t$13, i64 %t$17, i64 %p$cols, i64 %p$pos_diag, i64 %p$neg_diag)
   %t$37 = trunc i64 %t$18 to i1
   %t$47 = call i64 @sprout_gc_pop_roots(i64 3)
   br i1 %t$37, label %then_19, label %else_19
 then_19:
   %t$21 = add i64 0, 1
-  %t$22 = add i64 %row, %t$21
+  %t$22 = add i64 %p$row, %t$21
   %t$23 = add i64 0, 0
   %t$24 = add i64 0, 1
   %t$48 = alloca i64
-  store i64 %pos_diag, ptr %t$48
+  store i64 %p$pos_diag, ptr %t$48
   %t$49 = call i64 @sprout_gc_push_i64_root(ptr %t$48)
   %t$50 = alloca i64
-  store i64 %neg_diag, ptr %t$50
+  store i64 %p$neg_diag, ptr %t$50
   %t$51 = call i64 @sprout_gc_push_i64_root(ptr %t$50)
   %t$52 = alloca i64
-  store i64 %cols, ptr %t$52
+  store i64 %p$cols, ptr %t$52
   %t$53 = call i64 @sprout_gc_push_i64_root(ptr %t$52)
-  %t$25 = call i64 @vec_set(i64 %col, i64 %t$24, i64 %cols)
+  %t$25 = call i64 @vec_set(i64 %p$col, i64 %t$24, i64 %p$cols)
   %t$54 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$26 = add i64 %row, %col
+  %t$26 = add i64 %p$row, %p$col
   %t$27 = add i64 0, 1
   %t$55 = alloca i64
   store i64 %t$25, ptr %t$55
   %t$56 = call i64 @sprout_gc_push_i64_root(ptr %t$55)
-  %t$28 = call i64 @vec_set(i64 %t$26, i64 %t$27, i64 %pos_diag)
-  %t$29 = sub i64 %row, %col
-  %t$30 = add i64 %t$29, %n
+  %t$28 = call i64 @vec_set(i64 %t$26, i64 %t$27, i64 %p$pos_diag)
+  %t$29 = sub i64 %p$row, %p$col
+  %t$30 = add i64 %t$29, %p$n
   %t$31 = add i64 0, 1
   %t$32 = sub i64 %t$30, %t$31
   %t$33 = add i64 0, 1
   %t$57 = alloca i64
   store i64 %t$28, ptr %t$57
   %t$58 = call i64 @sprout_gc_push_i64_root(ptr %t$57)
-  %t$34 = call i64 @vec_set(i64 %t$32, i64 %t$33, i64 %neg_diag)
+  %t$34 = call i64 @vec_set(i64 %t$32, i64 %t$33, i64 %p$neg_diag)
   %t$59 = alloca i64
   store i64 %t$34, ptr %t$59
   %t$60 = call i64 @sprout_gc_push_i64_root(ptr %t$59)
-  %t$35 = call i64 @examples.nqueens.queens(i64 %n, i64 %t$22, i64 %t$23, i64 %t$25, i64 %t$28, i64 %t$34)
+  %t$35 = call i64 @examples.nqueens.queens(i64 %p$n, i64 %t$22, i64 %t$23, i64 %t$25, i64 %t$28, i64 %t$34)
   %t$61 = call i64 @sprout_gc_pop_roots(i64 5)
   br label %join_19
 else_19:
@@ -422,7 +422,7 @@ join_2:
   ret i64 %t$3
 }
 
-define i64 @examples.nqueens.count_solutions(i64 %n) {
+define i64 @examples.nqueens.count_solutions(i64 %p$n) {
 entry:
   %t$0 = add i64 0, 0
   %t$1 = add i64 0, 0
@@ -431,10 +431,10 @@ entry:
   %t$20 = alloca i64
   store i64 %t$3, ptr %t$20
   %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
-  %t$4 = call i64 @examples.nqueens.make_bool_vec(i64 %n, i64 %t$2, i64 %t$3)
+  %t$4 = call i64 @examples.nqueens.make_bool_vec(i64 %p$n, i64 %t$2, i64 %t$3)
   %t$22 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$5 = add i64 0, 2
-  %t$6 = mul i64 %t$5, %n
+  %t$6 = mul i64 %t$5, %p$n
   %t$7 = add i64 0, 1
   %t$8 = sub i64 %t$6, %t$7
   %t$9 = add i64 0, 0
@@ -448,7 +448,7 @@ entry:
   %t$11 = call i64 @examples.nqueens.make_bool_vec(i64 %t$8, i64 %t$9, i64 %t$10)
   %t$27 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$12 = add i64 0, 2
-  %t$13 = mul i64 %t$12, %n
+  %t$13 = mul i64 %t$12, %p$n
   %t$14 = add i64 0, 1
   %t$15 = sub i64 %t$13, %t$14
   %t$16 = add i64 0, 0
@@ -464,24 +464,24 @@ entry:
   %t$33 = alloca i64
   store i64 %t$18, ptr %t$33
   %t$34 = call i64 @sprout_gc_push_i64_root(ptr %t$33)
-  %t$19 = call i64 @examples.nqueens.queens(i64 %n, i64 %t$0, i64 %t$1, i64 %t$4, i64 %t$11, i64 %t$18)
+  %t$19 = call i64 @examples.nqueens.queens(i64 %p$n, i64 %t$0, i64 %t$1, i64 %t$4, i64 %t$11, i64 %t$18)
   %t$35 = call i64 @sprout_gc_pop_roots(i64 3)
   ret i64 %t$19
 }
 
-define i64 @examples.nqueens.format_ms_parts(i64 %ms, i64 %micros) {
+define i64 @examples.nqueens.format_ms_parts(i64 %p$ms, i64 %p$micros) {
 entry:
   %t$0 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.0, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
   %t$23 = alloca i64
   store i64 %t$1, ptr %t$23
   %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
-  %t$2 = call i64 @int_to_string(i64 %ms)
+  %t$2 = call i64 @int_to_string(i64 %p$ms)
   %t$3 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.1, i64 0, i32 1, i64 0
   %t$4 = ptrtoint ptr %t$3 to i64
   %t$5 = add i64 0, 1000
-  %t$6 = mul i64 %ms, %t$5
-  %t$7 = sub i64 %micros, %t$6
+  %t$6 = mul i64 %p$ms, %t$5
+  %t$7 = sub i64 %p$micros, %t$6
   %t$8 = add i64 0, 100
   %t$9 = icmp eq i64 %t$8, 0
   %t$25 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -570,7 +570,7 @@ divok_9:
   ret i64 %t$22
 }
 
-define i64 @examples.nqueens.format_ms(i64 %micros) {
+define i64 @examples.nqueens.format_ms(i64 %p$micros) {
 entry:
   %t$0 = add i64 0, 1000
   %t$1 = icmp eq i64 %t$0, 0
@@ -581,12 +581,12 @@ divpanic_1:
   call i64 @panic(i64 %t$3)
   unreachable
 divok_1:
-  %t$4 = sdiv i64 %micros, %t$0
-  %t$5 = call i64 @examples.nqueens.format_ms_parts(i64 %t$4, i64 %micros)
+  %t$4 = sdiv i64 %p$micros, %t$0
+  %t$5 = call i64 @examples.nqueens.format_ms_parts(i64 %t$4, i64 %p$micros)
   ret i64 %t$5
 }
 
-define i64 @examples.nqueens.print_result(i64 %n, i64 %c, i64 %t0) {
+define i64 @examples.nqueens.print_result(i64 %p$n, i64 %p$c, i64 %p$t0) {
 entry:
   %t$0 = call i64 @stdlib.time.now_micros()
   %t$1 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.5, i64 0, i32 1, i64 0
@@ -594,7 +594,7 @@ entry:
   %t$20 = alloca i64
   store i64 %t$2, ptr %t$20
   %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
-  %t$3 = call i64 @int_to_string(i64 %n)
+  %t$3 = call i64 @int_to_string(i64 %p$n)
   %t$4 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.6, i64 0, i32 1, i64 0
   %t$5 = ptrtoint ptr %t$4 to i64
   %t$22 = alloca i64
@@ -603,10 +603,10 @@ entry:
   %t$24 = alloca i64
   store i64 %t$5, ptr %t$24
   %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
-  %t$6 = call i64 @int_to_string(i64 %c)
+  %t$6 = call i64 @int_to_string(i64 %p$c)
   %t$7 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.7, i64 0, i32 1, i64 0
   %t$8 = ptrtoint ptr %t$7 to i64
-  %t$9 = sub i64 %t$0, %t0
+  %t$9 = sub i64 %t$0, %p$t0
   %t$26 = alloca i64
   store i64 %t$6, ptr %t$26
   %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
@@ -688,11 +688,11 @@ entry:
   ret i64 %t$19
 }
 
-define i64 @examples.nqueens.bench_n(i64 %n) {
+define i64 @examples.nqueens.bench_n(i64 %p$n) {
 entry:
   %t$0 = call i64 @stdlib.time.now_micros()
-  %t$1 = call i64 @examples.nqueens.count_solutions(i64 %n)
-  %t$2 = call i64 @examples.nqueens.print_result(i64 %n, i64 %t$1, i64 %t$0)
+  %t$1 = call i64 @examples.nqueens.count_solutions(i64 %p$n)
+  %t$2 = call i64 @examples.nqueens.print_result(i64 %p$n, i64 %t$1, i64 %t$0)
   ret i64 %t$2
 }
 
@@ -713,10 +713,10 @@ entry:
   ret i64 %t$11
 }
 
-define { i64, i64 } @vec_get_worker(i64 %index, i64 %vec) {
+define { i64, i64 } @vec_get_worker(i64 %p$index, i64 %p$vec) {
 entry:
-  %t$0 = call i64 @sprout_field(i64 %vec, i64 0)
-  %t$1$st = call { i64, i64 } @vector_get_unboxed(i64 %t$0, i64 %index)
+  %t$0 = call i64 @sprout_field(i64 %p$vec, i64 0)
+  %t$1$st = call { i64, i64 } @vector_get_unboxed(i64 %t$0, i64 %p$index)
   %t$1 = extractvalue { i64, i64 } %t$1$st, 0
   %t$2 = extractvalue { i64, i64 } %t$1$st, 1
   %t$3$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0

@@ -106,15 +106,15 @@ declare i64 @ref_write(i64, i64)
 @.cname.13 = private unnamed_addr constant [9 x i8] c"IntRange\00"
 @.cfkinds.13 = private unnamed_addr constant [4 x i8] c"iii\00"
 
-define i64 @$entry.cat(i64 %a, i64 %b) {
+define i64 @$entry.cat(i64 %p$a, i64 %p$b) {
 entry:
   %t$1 = alloca i64
-  store i64 %b, ptr %t$1
+  store i64 %p$b, ptr %t$1
   %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
   %t$3 = alloca i64
-  store i64 %a, ptr %t$3
+  store i64 %p$a, ptr %t$3
   %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
-  %t$0 = call i64 @__tc_Semigroup_String_append(i64 %a, i64 %b)
+  %t$0 = call i64 @__tc_Semigroup_String_append(i64 %p$a, i64 %p$b)
   %t$5 = call i64 @sprout_gc_pop_roots(i64 2)
   ret i64 %t$0
 }
@@ -138,9 +138,9 @@ entry:
   ret i64 %t$5
 }
 
-define i64 @__tc_Semigroup_String_append(i64 %left, i64 %right) {
+define i64 @__tc_Semigroup_String_append(i64 %p$left, i64 %p$right) {
 entry:
-  %t$0 = call i64 @str_concat(i64 %left, i64 %right)
+  %t$0 = call i64 @str_concat(i64 %p$left, i64 %p$right)
   ret i64 %t$0
 }
 

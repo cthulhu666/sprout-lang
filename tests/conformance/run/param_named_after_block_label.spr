@@ -1,0 +1,42 @@
+# Regression: a parameter named after a block label the backend emits.
+#
+# LLVM keeps local values and block labels in ONE namespace, so an unmangled
+# `%entry` parameter collides with the `entry:` label every function opens with
+# and clang rejects the module: "error: unable to create block named 'entry'".
+# Parameters are the only user-controlled name that reaches the value namespace
+# unprefixed, so every label prefix ast_to_ir emits is covered here.
+#
+# Expected stdout: 42 / 1 / 7 / 10 / 43 / 15
+
+type Opt = Some Int | None
+
+fn bump(entry: Int) -> Int = entry + 1
+
+fn pick(join_0: Bool, then_0: Int, else_0: Int) -> Int =
+  if join_0 then then_0 else else_0
+
+fn unwrap(arm_0_1: Opt) -> Int =
+  match arm_0_1 with
+  | Some v -> v
+  | None -> 0
+
+# Tail-recursive: the TCO pass renames each param to `<p>$in` and reloads it
+# under its own name inside the `tco_loop` block.
+fn total(tco_loop: Int, body_0_1: Int) -> Int =
+  if tco_loop <= 0 then body_0_1
+  else total(tco_loop - 1, body_0_1 + tco_loop)
+
+# A param in value position: called as a closure, then captured by a lambda.
+fn twice(entry: Int -> Int, else_1: Int) -> Int = entry(entry(else_1))
+
+fn adder(entry: Int) -> Int -> Int = \n -> n + entry
+
+fn main() -> Unit !{IO} =
+  do
+    print(bump(41))
+    print(pick(true, 1, 2))
+    print(unwrap(Some(7)))
+    print(total(4, 0))
+    print(twice(bump, 41))
+    let add10 = adder(10)
+    print(add10(5))

@@ -110,9 +110,9 @@ declare i64 @ref_write(i64, i64)
 @.cname.16 = private unnamed_addr constant [10 x i8] c"main.Blue\00"
 @.cfkinds.16 = private unnamed_addr constant [1 x i8] c"\00"
 
-define i64 @main.color_of(i64 %tag) {
+define i64 @main.color_of(i64 %p$tag) {
 entry:
-  %t$0$st = call { i64, i64 } @__tc_Enum_main_Color_from_ordinal_worker(i64 %tag)
+  %t$0$st = call { i64, i64 } @__tc_Enum_main_Color_from_ordinal_worker(i64 %p$tag)
   %t$0 = extractvalue { i64, i64 } %t$0$st, 0
   %t$1 = extractvalue { i64, i64 } %t$0$st, 1
   br label %arm_0_2
@@ -146,9 +146,9 @@ entry:
   ret i64 %t$3
 }
 
-define i64 @__tc_Enum_main_Color_ordinal(i64 %v) {
+define i64 @__tc_Enum_main_Color_ordinal(i64 %p$v) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %v)
+  %t$0 = call i64 @sprout_tag(i64 %p$v)
   br label %arm_0_1
 arm_0_1:
   %t$3 = add i64 0, 14
@@ -179,10 +179,10 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__tc_Enum_main_Color_from_ordinal(i64 %n) {
+define i64 @__tc_Enum_main_Color_from_ordinal(i64 %p$n) {
 entry:
   %t$0 = add i64 0, 0
-  %t$1 = icmp eq i64 %n, %t$0
+  %t$1 = icmp eq i64 %p$n, %t$0
   %t$2 = zext i1 %t$1 to i64
   %t$24 = trunc i64 %t$2 to i1
   br i1 %t$24, label %then_3, label %else_3
@@ -199,7 +199,7 @@ then_3:
   br label %join_3
 else_3:
   %t$7 = add i64 0, 1
-  %t$8 = icmp eq i64 %n, %t$7
+  %t$8 = icmp eq i64 %p$n, %t$7
   %t$9 = zext i1 %t$8 to i64
   %t$23 = trunc i64 %t$9 to i1
   br i1 %t$23, label %then_10, label %else_10
@@ -216,7 +216,7 @@ then_10:
   br label %join_10
 else_10:
   %t$14 = add i64 0, 2
-  %t$15 = icmp eq i64 %n, %t$14
+  %t$15 = icmp eq i64 %p$n, %t$14
   %t$16 = zext i1 %t$15 to i64
   %t$22 = trunc i64 %t$16 to i1
   br i1 %t$22, label %then_17, label %else_17
@@ -245,10 +245,10 @@ join_3:
   ret i64 %t$4
 }
 
-define { i64, i64 } @__tc_Enum_main_Color_from_ordinal_worker(i64 %n) {
+define { i64, i64 } @__tc_Enum_main_Color_from_ordinal_worker(i64 %p$n) {
 entry:
   %t$0 = add i64 0, 0
-  %t$1 = icmp eq i64 %n, %t$0
+  %t$1 = icmp eq i64 %p$n, %t$0
   %t$2 = zext i1 %t$1 to i64
   %t$3 = trunc i64 %t$2 to i1
   br i1 %t$3, label %then_3, label %else_3
@@ -259,7 +259,7 @@ then_3:
   ret { i64, i64 } %t$5$r1
 else_3:
   %t$6 = add i64 0, 1
-  %t$7 = icmp eq i64 %n, %t$6
+  %t$7 = icmp eq i64 %p$n, %t$6
   %t$8 = zext i1 %t$7 to i64
   %t$9 = trunc i64 %t$8 to i1
   br i1 %t$9, label %then_9, label %else_9
@@ -270,7 +270,7 @@ then_9:
   ret { i64, i64 } %t$11$r1
 else_9:
   %t$12 = add i64 0, 2
-  %t$13 = icmp eq i64 %n, %t$12
+  %t$13 = icmp eq i64 %p$n, %t$12
   %t$14 = zext i1 %t$13 to i64
   %t$15 = trunc i64 %t$14 to i1
   br i1 %t$15, label %then_15, label %else_15

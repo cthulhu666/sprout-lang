@@ -173,11 +173,19 @@ fn main() -> Unit !{IO} =
     # SSA names. The fix renames the implicit env-pointer param to `env$` (a
     # name that source-Sprout cannot tokenize). Vehicle: outer IIFE `(\\g -> g(5))`
     # inlines (arc b); inner `\\env -> env + 1` is the lifted lambda that gets an
-    # implicit env pointer, so the lowered LLVM must contain `%env$`.
+    # implicit env pointer, so the lowered LLVM must contain `%p$env$`.
     t11 <- translated_ok_ir_contains(
       "fn f() -> Int = (\\g -> g(5))(\\env -> env + 1)",
-      "%env$")
-    assert_true(state, "T11: lambda param named env does not collide with implicit env ptr (implicit slot renamed to %env$)", t11)
+      "%p$env$")
+    assert_true(state, "T11: lambda param named env does not collide with implicit env ptr (implicit slot renamed to %p$env$)", t11)
+
+    # T11b: the same collision against a BLOCK label rather than another param.
+    # Every function opens with `entry:`, and LLVM keeps labels and locals in one
+    # namespace, so an unprefixed `%entry` was rejected by the assembler.
+    t11b <- translated_ok_ir_contains(
+      "fn f(entry: Int) -> Int = entry + 1",
+      "define i64 @f(i64 %p$entry)")
+    assert_true(state, "T11b: a param named entry does not collide with the entry block label", t11b)
 
     # T12: CRITICAL — extern guard bypass. The __sprout_ reservation prefix check
     # only fires for TFnDecl. A user `extern fn __sprout_ir_lambda_0` slips

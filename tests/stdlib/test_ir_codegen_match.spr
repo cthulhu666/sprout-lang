@@ -102,7 +102,7 @@ fn tag_program() -> sprout_ir.IRProgram =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction("get_tag_demo", Cons(("h", sprout_ir.IRTHeap), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
-        sprout_ir.IRGetTag("%t0", "%h"),
+        sprout_ir.IRGetTag("%t0", sprout_ir.param_ssa("h")),
         Cons(sprout_ir.IRRet("%t0"), Nil))),
       Nil)),
     Nil), Nil, Nil, Nil)
@@ -112,7 +112,7 @@ fn field_program_scalar() -> sprout_ir.IRProgram =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction("get_field_scalar", Cons(("h", sprout_ir.IRTHeap), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
-        sprout_ir.IRGetField("%t0", "%h", 0, sprout_ir.IRTScalar),
+        sprout_ir.IRGetField("%t0", sprout_ir.param_ssa("h"), 0, sprout_ir.IRTScalar),
         Cons(sprout_ir.IRRet("%t0"), Nil))),
       Nil)),
     Nil), Nil, Nil, Nil)
@@ -128,7 +128,7 @@ fn field_program_heap() -> sprout_ir.IRProgram =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction("get_field_heap", Cons(("h", sprout_ir.IRTHeap), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
-        sprout_ir.IRGetField("%f", "%h", 0, sprout_ir.IRTHeap),
+        sprout_ir.IRGetField("%f", sprout_ir.param_ssa("h"), 0, sprout_ir.IRTHeap),
         Cons(sprout_ir.IRMakeCtor("%marker", "Marker", 50, Nil),
         Cons(sprout_ir.IRMakeCtor("%r", "WrapBoxed", 99,
                                   Cons("%f", Cons("%marker", Nil))),
@@ -143,7 +143,7 @@ fn field_program_scalar_across_trigger() -> sprout_ir.IRProgram =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction("get_field_scalar_across", Cons(("h", sprout_ir.IRTHeap), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
-        sprout_ir.IRGetField("%n", "%h", 0, sprout_ir.IRTScalar),
+        sprout_ir.IRGetField("%n", sprout_ir.param_ssa("h"), 0, sprout_ir.IRTScalar),
         Cons(sprout_ir.IRMakeCtor("%marker", "Marker", 50, Nil),
         Cons(sprout_ir.IRMakeCtor("%r", "WrapInt", 51,
                                   Cons("%n", Cons("%marker", Nil))),
@@ -186,23 +186,21 @@ fn main() -> Unit !{IO} =
     # --- IRGetTag lowers to call @sprout_tag ---
     assert_true(state, "IRGetTag lowers to call @sprout_tag",
                 contains(ir_lowering.lower_program(tag_program()),
-                         "%t0 = call i64 @sprout_tag(i64 %h)"))
-    # /code-review-v2 fix #5 regression: lower_params used to produce
-    # `i64 %%h` when hand-built IRPrograms supplied param names already
-    # prefixed with '%'. After stripping the prefix from test programs
-    # (and updating lower_params expectations), the function signature
-    # must contain `i64 %h` (single %).
-    assert_true(state, "hand-built tag_program signature uses single %",
+                         "%t0 = call i64 @sprout_tag(i64 %p$h)"))
+    # /code-review-v2 fix #5 regression: the param list holds BARE names, and
+    # lower_params is the only place a '%' is added.  A name supplied already
+    # prefixed used to render `i64 %%h`; today it would render `i64 %p$%h`.
+    assert_true(state, "hand-built tag_program signature is param_ssa-prefixed",
                 contains(ir_lowering.lower_program(tag_program()),
-                         "define i64 @get_tag_demo(i64 %h)"))
-    assert_false(state, "must NOT emit `i64 %%h` (double %) — regression guard",
+                         "define i64 @get_tag_demo(i64 %p$h)"))
+    assert_false(state, "must NOT double-prefix a param name — regression guard",
                  contains(ir_lowering.lower_program(tag_program()),
-                          "i64 %%h"))
+                          "i64 %p$%h"))
 
     # --- IRGetField lowers to call @sprout_field with index ---
     assert_true(state, "IRGetField lowers to call @sprout_field(handle, idx)",
                 contains(ir_lowering.lower_program(field_program_scalar()),
-                         "%t0 = call i64 @sprout_field(i64 %h, i64 0)"))
+                         "%t0 = call i64 @sprout_field(i64 %p$h, i64 0)"))
 
     # --- IRAbortMatch emits call + unreachable ---
     # /code-review fix #15: @sprout_abort_match declared void noreturn;
