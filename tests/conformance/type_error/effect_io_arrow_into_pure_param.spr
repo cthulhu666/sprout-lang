@@ -1,0 +1,23 @@
+module main
+
+# An `!{IO}` function reaching a PURE arrow parameter. `pure_map` declares no
+# effect, yet mapping `shout` over the list prints three times — verified by
+# compiling and running this file on 2026-09-07.
+#
+# No effect VARIABLE is involved: `list_map`'s callback is a plain arrow. The
+# cause is spec §7 note property 2, "Unification of an arrow's effect is total …
+# Rejection happens at the declaration boundary and nowhere else", implemented at
+# unifier.unify_arrow_effects. So an arrow's effect is never compared anywhere a
+# function VALUE crosses a boundary, only where one is declared.
+#
+# RED as of this commit: the file compiles clean. It is the acceptance test for
+# arrow-position effect subsumption; see docs/effect-var-rigidity-v0.md.
+
+fn shout(n: Int) -> Int !{IO} =
+  do
+    print("io")
+    n + 1
+
+fn pure_map(xs: List Int) -> List Int = list_map(shout, xs)
+
+fn main() -> Unit !{IO} = print(to_string(list_length(pure_map([1, 2, 3]))))
