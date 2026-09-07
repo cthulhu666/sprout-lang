@@ -1889,10 +1889,48 @@ Effect note for v0:
 
 > **Enforcement of the effect rules.** Rules 8, 9, 10 and 11 are all **enforced** as of
 > 2026-08-16. `fn shout(s: String) -> Unit = print(s)` is a compile error; an effect
-> annotation is a checked contract, and a missing `!{IO}` now means the compiler has
-> verified the function performs no IO. This replaces a note that stood for the whole of v0
+> annotation is a checked contract. This replaces a note that stood for the whole of v0
 > saying the opposite.
 >
+> > **Correction (2026-09-07): this note said a missing `!{IO}` "means the compiler has
+> > verified the function performs no IO". That is not true, and the overclaim is worth
+> > naming precisely.** What is verified is a declaration's **own body**. A function's
+> > declared purity is *not* enforced once a function is passed as a **value**:
+> >
+> > ```sprout
+> > fn pure_map(xs: List Int) -> List Int = list_map(shout, xs)   # prints. no !{IO} anywhere.
+> > ```
+> >
+> > Verified by running: `pure_map` is accepted, `--phase effects` reports it
+> > `declared pure, inferred pure`, and the IO runs. `list_map`'s callback is a plain
+> > arrow, so this is one line of ordinary Sprout, and since Sprout is functional-first the
+> > guarantee fails across most higher-order code. Property 2 below is the reason — an
+> > arrow's effect is unified and never compared, so a mismatch is not a type error.
+> >
+> > Four boundaries are known to escape, each verified by running:
+> >
+> > 1. **A function value entering a slot** — argument, return, record field, element.
+> > 2. **An instance method declaring an effect its class signature does not**, so callers
+> >    dispatching through the class inherit the class's weaker claim.
+> > 3. **A zero-arg call on a local callee** — `let t = io_thunk in t()`. A nullary function
+> >    has no arrow to carry an effect at all.
+> > 4. **A call through an effect-variable parameter under a pure declaration** —
+> >    `fn pure_apply(g: Int -> Int !{e}, n: Int) -> Int = g(n)` is accepted;
+> >    `--phase effects` reports it `declared pure, inferred !{$e30}`, and passing an
+> >    `!{IO}` function runs the IO.
+> >
+> > 1, 2 and 4 are `docs/effect-subsumption-v0.md`, which carries the replacement text for
+> > properties 2 and 3. 3 is a different bug — `docs/nullary-type-collapse-v0.md` — and no
+> > effect check reaches it.
+> >
+> > Until those land, the enforced guarantee is narrow and is best stated negatively: a
+> > declaration is checked against **the effects its own body's calls infer**, and an
+> > effect that arrives through a function value — as an argument, a class dispatch, a
+> > nullary thunk, or an effect variable — does not participate in that inference. A
+> > pure signature is therefore evidence about the body as written, not a guarantee about
+> > what runs.
+>
+
 > Which check covers which rule:
 >
 > - **8** and **11** are one check. Rule 11 ("a pure function body may not call `!{IO}`

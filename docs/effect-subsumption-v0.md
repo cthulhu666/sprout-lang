@@ -1,46 +1,48 @@
 # Effect subsumption at arrow positions (v0)
 
-Status: **DESIGN, awaiting approval.** Revised after review (2026-09-07, round 2), which
-found two blockers in the previous revision; both are independently reproduced and both
-now have a mechanism.
+Status: **DESIGN, awaiting approval.** Revision 4 (2026-09-07). Scope narrowed: what was
+part 4 is a separate bug and has moved to `docs/nullary-type-collapse-v0.md`.
 
-The fix has **four parts**, at four different boundaries. No one subsumes another. Each
-review round has found one more, so treat this list as *known incomplete*: revision 1 had
-only part 1, revision 2 added parts 2 and 3, revision 3 added part 4.
+The fix has **three parts**, at three different boundaries. No one subsumes another. Each
+review round found one more boundary, so treat this list as *known incomplete*: revision 1
+had only part 1, revision 2 added parts 2 and 3, revision 3 added a fourth that revision 4
+removed as not-an-effect-problem.
 
 | # | boundary | how the effect escapes | mechanism | § |
 |---|---|---|---|---|
 | 1 | a function value entering a slot | compared, wrong direction allowed | directional comparison, polarity-annotated | §6.3 |
 | 2 | a peer join (`if`/`match`/elements/operands) | unified, difference swallowed | effect LUB **and GLB by depth parity** | §6.5 |
 | 3 | an instance method vs its class signature | never compared — scheme level | declared-vs-declared comparison | §6.1a |
-| 4 | a zero-arg call on a local/expression callee | **dropped before any comparison** | read the arrow's effect at `argc <= 0` | §6.6 |
 
-Part 4 is different in kind from the other three, which all compare two effects
-somewhere. Here nothing is compared, which is why an instrumented compiler that rejects
-every concrete pure/IO arrow meet reports **zero errors** on it.
+All three compare two effects somewhere, which is what makes them one design.
 
-**Migration cost, now measured for three of four parts:**
+**Migration cost, measured for all three:**
 
 | part | in-tree | downstream | note |
 |---|---|---|---|
 | 1 | 0 | 0 | 2 flagged sites, both the safe direction (§5) |
 | 2 | 0 | 0 | concrete joins only; variable-effect joins unmeasured |
 | 3 | 0 | 0 | **no method-level effect annotation exists anywhere** — 259 in-tree class/instance method signatures and 3 downstream, all pure, so no instance can differ from its class |
-| 4 | 0 | unmeasured | `BACKLOG.md` census; but see §6.6 |
 
 Part 2's zero is for the corpus as it stands; the mechanism must still newly reject
 §6.5's currently-legal example, which is a correctness requirement rather than a
 migration cost.
 
-Corrected from the previous revision: §6.5's "no GLB is needed" was **wrong** and its
+Corrected in this revision: former part 4 was not an effect bug and its stated mechanism
+was not implementable (§6.6); §6.4's covariance recommendation is **unsound for `Ref`**
+and is replaced by a per-constructor rule (§6.4); §7's "no IR change" promise is now true
+*because* the scope narrowed, and says what it excludes.
+
+Corrected in revision 3, retained: §6.5's "no GLB is needed" was **wrong** and its
 six-site inventory was the **wrong ontology** (§6.5); §6.1a's bare-name lookup is
 **unsound under name shadowing and duplicate method names** (§6.1a); §6.1's universality
-claim is false; §6.4's invariance recommendation is withdrawn; §7 promised a diagnostic
-the check cannot produce; the audit is 36 sites, not 35.
+claim is false; §7 promised a diagnostic the check cannot produce; the audit is 36 sites,
+not 35.
 
-Requires amending `docs/spec-v0.md` §7 note property 2, which states the behaviour this
-document removes. Supersedes the withdrawn `effect-var-rigidity-v0.md`, whose scope
-(effect *variables* only) was a corner of the hole described here.
+Requires amending `docs/spec-v0.md` §7 note properties 2 **and 3**, which state the
+behaviour this document removes (§10). Supersedes the withdrawn
+`effect-var-rigidity-v0.md`, whose scope (effect *variables* only) was a corner of the
+hole described here.
 
 ## 1. Problem statement
 
@@ -332,6 +334,63 @@ Then audit the ~35 call sites to pass the correct initial polarity. That audit i
 bulk of the work and cannot be skipped: a site left on the wrong polarity is a silent
 hole or a false rejection, and neither shows up in a corpus that has zero violations.
 
+### 6.4 Variance inside type constructors — per-constructor, not global
+
+`List (Int -> Int)` versus `List (Int -> Int !{IO})`: invariant, or propagate polarity?
+
+An earlier draft recommended **invariance** on the grounds that the corpus contains zero
+occurrences, so it "costs nothing". That reasoning was wrong — zero occurrences measures
+the corpus, not the shape's plausibility, and a one-line counterexample is legal today:
+
+```sprout
+fn run_all(fs: List (Int -> Int !{IO}), n: Int) -> Int !{IO} = ...
+run_all([shout, tame], 1)        # mixed handler list; `tame` is pure
+```
+
+Verified legal under stage-1, and the elements meet the slot *through* the `TApp` arm.
+Under invariance the pure element is rejected — a natural "list of handlers, some of them
+pure" turned into an error. That is the same pattern as the in-tree route table, which
+survives today only because its pure lambdas meet `Route`'s payload at the constructor
+argument rather than through the `Vec`.
+
+**But blanket covariance is unsound, and `Ref` is the counterexample** (found 2026-09-07,
+after the draft that recommended it). `ref_write : forall a. Ref a -> a -> Unit !{IO}`
+puts `a` in a parameter position, so `Ref` cannot be covariant in it. The classic aliasing
+shape is writable in Sprout today:
+
+```sprout
+fn sink(cell: Ref (Int -> Int !{IO})) -> Unit !{IO} = ref_write(cell, shout)
+
+fn main() -> Unit !{IO} = do
+  pure_cell <- ref_new(tame)     # Ref (Int -> Int)
+  sink(pure_cell)                # covariance would allow this
+  f <- ref_read(pure_cell)       # f : Int -> Int, believed pure
+  print(int_to_string(f(1)))     # prints "io"
+```
+
+Verified: type-checks, links, and prints `io`. Under covariance a correct implementation
+would still accept it, because every step is individually legal — so covariance does not
+merely miss this, it *blesses* it.
+
+**So variance is per-constructor, not global.** A constructor whose parameter appears only
+in result positions of its operations may be covariant; one whose parameter appears in an
+argument position must be invariant. `List` and `Vec` are immutable and covariant; `Ref`
+is invariant. That is the standard rule (Java's arrays are the famous counterexample to
+getting it wrong, and are checked at runtime for exactly this reason).
+
+The v0 surface is small enough to enumerate rather than infer, but **the enumeration is
+stdlib-wide, not prelude-wide** — a first draft of this section said "`Ref` is the only
+mutable container in the prelude", which is true and misleading. `stdlib/mutable.sprout`
+exports two more: `MutVec a` (`mutvec_set(v, i, val)`, `mutvec_push`) and `MutMatrix a`
+(`mutmatrix_set`). Both take the parameter as an argument, so all three are invariant, and
+`MutVec` is load-bearing downstream — `stdlib/linalg.sprout` builds every `Vec3` through
+it.
+
+**Decide by enumeration, and make an unlisted constructor invariant by default** — a wrong
+invariance is a rejected legal program, a wrong covariance is this hole, so the default
+must fail towards rejecting. If a general rule is wanted later it is inferable from each
+constructor's declared field positions, which is a separate change.
+
 ### 6.5 Peer-join sites need an effect LUB, not a polarity — BLOCKER
 
 Six of the 36 sites join two *peers*: `if`/`match` branch results, binary operands. At
@@ -402,8 +461,13 @@ rejected at `:8929`.
 
 So part 2 is "join by depth parity", not "apply merge_effects". The alternative — reject
 outright any join whose parameter arrows differ concretely — is simpler and adequate for
-a corpus with zero such joins; the doc must pick one, and the simpler one should be
-chosen only with the restriction stated.
+a corpus with zero such joins.
+
+**Recommendation: depth parity.** The simpler rule rejects programs that are legal and
+correct under the relation §5 establishes, and it does so at a *join*, which is the one
+place a user cannot annotate their way out. Its only advantage is implementation effort,
+and the GLB it avoids is the same `merge_effects` dual applied at odd depth — small next
+to the 36-site polarity audit part 1 needs anyway.
 
 **The six-site inventory is the wrong ontology.** A unification is a *join* whenever its
 "expected" side is a fresh or accumulating variable, which is a dynamic property of the
@@ -422,67 +486,41 @@ So LUB-at-`:1283` fixes `if` alone. The audit needs a rule keyed on *accumulatio
 widen wherever a result variable is folded over peers — rather than a list of six sites.
 §9 needs match-order and element-order fixture pairs, not just the `if` pair.
 
-### 6.6 The effect is DROPPED at a zero-arg call on a local callee — BLOCKER
+### 6.6 Zero-arg calls — REMOVED from this design, revision 4
 
-The other three parts all compare two effects. This one has nothing to compare:
+Revision 3 added a fourth part here: `fn launder() -> Int = let t = io_thunk in t()`
+compiles, links and prints, with `--phase effects` reporting `declared pure, inferred
+pure`. That program is real and still broken. It is not part of this design, for two
+reasons found on 2026-09-07.
 
-```sprout
-fn io_thunk() -> Int !{IO} = do { print("io"); 7 }
+**Its stated mechanism does not exist.** Revision 3 said "read the arrow's effect at
+`argc <= 0` rather than returning `Pure`". There is no arrow. `--phase check` prints
+`main.io_thunk : Int !{IO}` against `main.io_unary : Int -> Int !{IO}` — a nullary
+function's type *is* its return type, and the effect sits on the `Scheme` with nothing in
+the type to carry it.
 
-fn launder() -> Int =
-  let t = io_thunk
-  in t()                       # compiles, links, PRINTS
-```
+**It is not an effect bug.** The same collapse means a nullary function value and a plain
+`Int` are one type, which produces two symptoms that have nothing to do with effects: a
+function reference passed where an `Int` is expected reaches integer arithmetic as a
+closure handle, and `fn f(x: Int) -> Int = x()` type-checks and segfaults on
+`inttoptr`-then-call. No effect check reaches either.
 
-Verified: runs and prints; `--phase effects` reports `main.launder: declared pure,
-inferred pure`; and the instrumented compiler — which rejects every concrete pure/IO
-arrow meet anywhere — gives **0 errors**. That silence is the evidence: no comparison
-takes place, so parts 1–3 are all structurally incapable of catching it.
+Moved to `docs/nullary-type-collapse-v0.md`, filed `P1`. It is the arity-0 corner of an
+already-open language question — whether function types encode arity (`BACKLOG.md`, the
+`h(1)(2)` entry; `docs/currying-and-pipe-decision-v1.md` Package C-a) — and belongs with
+that decision, not this one.
 
-Control: the direct spelling `fn launder() -> Int = io_thunk()` **is** rejected by rule 8.
-The hole is precisely the local or expression callee.
-
-**Mechanism.** `infer.call_effect_of` with `argc <= 0` returns `scheme_effects(scheme)`
-raw, and `infer_call_general`'s `arrows_effect(t, argc)` returns `Pure` for `argc <= 0`
-with no scheme fallback. A `let`-bound local's `mono()` scheme carries `EffectPure` at
-scheme level while the real effect sits on the arrow, so the arrow effect is discarded.
-The fix is to read the arrow's effect at `argc <= 0` rather than returning `Pure`.
-
-`BACKLOG.md` recorded both twins but classified them as "conservative (accept, do not
-reject)" with "nothing in-tree hits either" — corrected 2026-09-07. Accepting a program
-that runs IO under a pure signature is not conservatism, and the shape needs no record
-field or `if`; a plain `let` reaches it.
-
-A second spelling, `(if b then t1 else t2)()`, also typechecks `(pure, pure)` but fails
-at emit with "ast_to_ir: indirect call not yet supported". It becomes live the day
-indirect calls land, so fixing this is also a prerequisite for that work.
-
-### 6.4 Variance inside type constructors — recommendation WITHDRAWN
-
-`List (Int -> Int)` versus `List (Int -> Int !{IO})`: invariant, or propagate polarity?
-
-An earlier draft recommended **invariance** on the grounds that the corpus contains zero
-occurrences, so it "costs nothing". That reasoning was wrong — zero occurrences measures
-the corpus, not the shape's plausibility, and a one-line counterexample is legal today:
-
-```sprout
-fn run_all(fs: List (Int -> Int !{IO}), n: Int) -> Int !{IO} = ...
-run_all([shout, tame], 1)        # mixed handler list; `tame` is pure
-```
-
-Verified legal under stage-1, and the elements meet the slot *through* the `TApp` arm.
-Under invariance the pure element is rejected — a natural "list of handlers, some of them
-pure" turned into an error. That is the same pattern as the in-tree route table, which
-survives today only because its pure lambdas meet `Route`'s payload at the constructor
-argument rather than through the `Vec`.
-
-So polarity should propagate into type-constructor arguments. If invariance is chosen
-anyway for implementation reasons, this example belongs in the doc as an acknowledged
-regression with a named workaround, not as a cost of zero.
+**Nothing in parts 1–3 depends on it.** Their boundaries are all comparisons between two
+effects that both exist. The reverse is not true: the nullary fix is a prerequisite for
+closing the zero-arg laundering, and this design does not close it. Say so when this
+lands, or the purity guarantee will be read as complete when one shape still escapes.
 
 ## 7. Syntax, types, and errors
 
-No syntax change. No IR change — check-only, so `ir-golden-diff` should report 0.
+No syntax change. **No IR change — check-only, so `ir-golden-diff` should report 0.** That
+promise holds only because revision 4 narrowed the scope: it was false while §6.6 was part
+of this design, since every resolution of the nullary collapse is ABI-visible. Parts 1–3
+add comparisons and change no lowering.
 
 Type-system impact: effect comparison becomes directional at arrow positions. Effect
 *variables* are unaffected — they still bind to anything, which is what keeps
@@ -514,11 +552,15 @@ change worth costing on its own merits.
 
 The reverse direction produces no diagnostic. Pre-existing fixtures matching
 `performs IO but is declared pure` via `grep -qF` are untouched — that wording stays on
-the declaration-boundary rule. **But the fixture already written for this change is not:**
-`tests/conformance/type_error/effect_io_arrow_into_pure_param.err` currently holds
-`performs IO but is declared pure`, which the new arrow message does not contain, so it
-would stay RED after a correct implementation. Its `.err` must carry the new wording, and
-its comment still points at the deleted `effect-var-rigidity-v0.md`.
+the declaration-boundary rule.
+
+**Fixed in revision 4:** `tests/conformance/type_error/effect_io_arrow_into_pure_param.err`
+held `performs IO but is declared pure` — the declaration-boundary wording, which the arrow
+message above does not contain — so the fixture would have stayed RED after a *correct*
+implementation. It now carries the first line above, and is quarantined in
+`test-type-errors`' xfail list so the gate is green while the check is unimplemented and
+goes red with `UNEXPECTED MATCH` when it lands. That makes the wording load-bearing: change
+the message and the fixture stops self-healing, so change both together.
 
 ## 8. Composes with, does not replace, the declaration-boundary gaps
 
@@ -572,9 +614,16 @@ Accept (`tests/conformance/run/`) — the over-correction guards:
 - `effect_polymorphic_combinator_ok` — `list_each(print, xs)` and a pinned `!{e}` used at
   both IO and pure, pinning that variables still bind freely.
 - `effect_mixed_handler_list_ok` — §6.4's `run_all([shout, tame], 1)`, pinning that
-  polarity propagates into type-constructor arguments.
+  polarity propagates into an *immutable* type-constructor argument.
 - `effect_join_uniform_ok` — a join of two arrows with the *same* effect, pinning that
   §6.5's LUB does not reject the ordinary case.
+
+And one more reject fixture for §6.4, which the accept list above cannot cover:
+- `effect_io_arrow_through_ref` — the `Ref` aliasing shape. It must be rejected at
+  `sink(pure_cell)`. Pair it with `effect_mixed_handler_list_ok` deliberately: the two
+  differ only in the constructor, so together they pin that variance is per-constructor
+  and not a single global switch. A build that made both pass or both fail would satisfy
+  neither.
 
 Gates: full `just test`, `compile-examples-stage1` (the two HTTP examples are the §5
 witnesses and must stay green), `effect-report-smoke`, `ir-golden-diff` (expect 0), plus
@@ -582,11 +631,49 @@ a downstream run against `uncharted-suns`.
 
 ## 10. Spec and docs
 
-- `docs/spec-v0.md` §7 — **normative, and the blocking edit**: note property 2 must be
-  replaced. "Rejection happens at the declaration boundary and nowhere else" becomes a
-  statement that an arrow's effect is compared directionally wherever a function value
-  crosses a boundary, with `pure ⊑ IO` one-way. Property 3 ("an unresolved effect variable
-  is accepted") stays as written.
+- `docs/spec-v0.md` §7 — **normative, and the blocking edit.** Two of the three properties
+  change. Exact replacement text below; it lands *with* the implementation, not before,
+  since the spec is normative and must not describe a check that does not run.
+
+  **Property 2** currently reads:
+
+  > **Unification of an arrow's effect is total.** It binds effect variables and never
+  > fails, so two arrows whose effects differ are not thereby a type error and a program's
+  > acceptance never depends on effect inference reaching a particular answer mid-way.
+  > Rejection happens at the declaration boundary and nowhere else.
+
+  becomes:
+
+  > **An arrow's effect is compared wherever a function value crosses a boundary**, not
+  > only at a declaration. The relation is subsumption, `pure ⊑ IO`, and it is one-way: a
+  > pure function may stand where an effectful one is required, never the reverse. The
+  > comparison is directional — the position decides which side is expected — and it
+  > descends into arrows with the polarity flipped at each parameter. Unification of an
+  > effect *variable* is still total: a variable binds to anything and never fails, which
+  > is what keeps effect-polymorphic combinators usable at both pure and effectful
+  > instantiations. Inside a type constructor the comparison propagates only where that
+  > constructor's parameter is covariant; a constructor whose operations take the
+  > parameter as an argument — `Ref` — is invariant in it.
+
+  **Property 3** currently ends "Every imprecision in effect inference must therefore fail
+  towards accepting a program, not rejecting one." As written that forbids this design:
+  the whole point is that a *known* concrete mismatch is now rejected. Narrow it to what
+  it was actually protecting:
+
+  > **An unresolved effect variable is accepted.** `!{e}` is neither satisfied nor
+  > violated until instantiation; where the checker does not know *which effect a variable
+  > will take*, it accepts. That is a rule about effect variables, not a general licence:
+  > two effects that are both concrete and differ are compared and may be rejected.
+
+  Property 1 (subsumption not equality, at declarations) stays as written and is the same
+  relation this extends to arrows.
+
+  **Landed already, ahead of the implementation:** the enforcement note's opening claim
+  that "a missing `!{IO}` now means the compiler has verified the function performs no IO"
+  was false and is corrected in place, because a false normative claim should not wait on
+  a fix. It now scopes the guarantee to a declaration's own body and names the three
+  escaping boundaries. That correction is independent of this design and stands whether or
+  not it is approved.
 - `docs/effect-enforcement-v0.md` — add a section recording that §14's premise was
   narrower than stated, and cross-reference this document.
 - `BACKLOG.md` — the deferred *rigid effect variables* item (skolemising a declared effect

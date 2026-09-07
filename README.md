@@ -49,8 +49,11 @@ Running with `USER="  Ada  "` prints `Hello, Ada`. More in [`examples/`](./examp
 - **Effects in types, and they are checked** — pure functions are unannotated;
   effectful ones carry `!{IO}` (with singleton effect variables `!{e}` for
   higher-order helpers). A body that performs IO under a pure signature is a
-  compile error, so a missing `!{IO}` means the compiler verified the function
-  does none. Over-declaring is fine — the rule is *inferred ⊑ declared*, not
+  compile error. **The check is on a declaration's own body, not on effects that
+  arrive through a function value** — passing an `!{IO}` function into a pure
+  arrow parameter is still accepted today, so a missing `!{IO}` is not yet a
+  guarantee about what runs (spec §7 enforcement note lists the four escapes).
+  Over-declaring is fine — the rule is *inferred ⊑ declared*, not
   equality. Open effect rows are not supported yet. Aborting is *not* an effect:
   `panic` is pure, so an unreachable-by-invariant arm does not make its function
   effectful ([why](docs/effect-enforcement-v0.md#6-is-panic-an-effect-decided-no)).
