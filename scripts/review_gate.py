@@ -76,39 +76,54 @@ def interesting(path):
     return not path.startswith(IGNORED)
 
 
+def worktree_roots(root):
+    """Every checkout of this repo. Work here happens in linked worktrees, so a gate
+    reading only the main one reviews nothing."""
+    roots = [
+        Path(line[len("worktree ") :]).resolve()
+        for line in git(root, "worktree", "list", "--porcelain").splitlines()
+        if line.startswith("worktree ")
+    ]
+    return roots or [root]
+
+
 def changed_paths(root):
     # --porcelain=v1 -uall: one line per changed or untracked file, "XY path".
+    # `key` carries the worktree so two checkouts of one path stay distinct; `path`
+    # stays repo-relative because that is what the CHECKLIST predicates match on.
     out = []
-    for line in git(root, "status", "--porcelain=v1", "-uall").splitlines():
-        if len(line) < 4:
-            continue
-        status, path = line[:2], line[3:]
-        # A rename prints "old -> new"; the new name is what a reviewer reads.
-        if " -> " in path:
-            path = path.split(" -> ", 1)[1]
-        path = path.strip('"')
-        if interesting(path):
-            out.append((status, path))
+    for wt in worktree_roots(root):
+        for line in git(wt, "status", "--porcelain=v1", "-uall").splitlines():
+            if len(line) < 4:
+                continue
+            status, path = line[:2], line[3:]
+            # A rename prints "old -> new"; the new name is what a reviewer reads.
+            if " -> " in path:
+                path = path.split(" -> ", 1)[1]
+            path = path.strip('"')
+            if interesting(path):
+                key = path if wt == root else f"{wt.name}/{path}"
+                out.append((status, key, path, wt))
     return out
 
 
-def tree_state(root, paths):
+def tree_state(paths):
     """One digest per changed path, so the report can name what moved since baseline.
 
     An untracked file is stat'd rather than read — an untracked build artifact
     would otherwise be hashed in full on every single Stop.
     """
     state = {}
-    for status, path in paths:
+    for status, key, path, wt in paths:
         if status == "??":
             try:
-                st = (root / path).stat()
+                st = (wt / path).stat()
                 body = f"{st.st_size}:{st.st_mtime_ns}"
             except OSError:
                 body = "gone"
         else:
-            body = git(root, "diff", "HEAD", "--", path)
-        state[path] = status + ":" + hashlib.sha256(body.encode()).hexdigest()
+            body = git(wt, "diff", "HEAD", "--", path)
+        state[key] = status + ":" + hashlib.sha256(body.encode()).hexdigest()
     return state
 
 
@@ -125,12 +140,12 @@ def main():
     if not root:
         log("not a git repo — pass through")
         return 0
-    root = Path(root)
+    root = Path(root).resolve()
 
     paths = changed_paths(root)
     if not paths:
         return 0
-    now = tree_state(root, paths)
+    now = tree_state(paths)
     fp = digest(now)
 
     # State lives in the git dir, so it is per-worktree and never committed.
@@ -161,8 +176,8 @@ def main():
         return 0
 
     base = state["baseline"]
-    moved = [(s, p) for s, p in paths if now[p] != base.get(p)]
-    moved += [(" X", p) for p in sorted(set(base) - set(now))]
+    moved = [(s, k, p) for s, k, p, _ in paths if now[k] != base.get(k)]
+    moved += [(" X", k, k) for k in sorted(set(base) - set(now))]
 
     lines = [
         "REVIEW GATE — this change has not been reviewed. Review it against the",
@@ -170,11 +185,11 @@ def main():
         "",
         "Changed this session:",
     ]
-    lines += [f"  {status} {path}" for status, path in moved]
+    lines += [f"  {status} {key}" for status, key, _ in moved]
     lines.append("")
     n = 0
     for applies, item, how in CHECKLIST:
-        if not any(applies(p) for _, p in moved):
+        if not any(applies(p) for _, _, p in moved):
             continue
         n += 1
         lines.append(f"{n}) {item}")

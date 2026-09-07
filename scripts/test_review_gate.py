@@ -114,12 +114,31 @@ results.append(
     )
 )
 
+# Work happens in linked worktrees here, so a gate reading only the main checkout
+# reviews nothing. Fresh session: it baselines, then the worktree edit moves it.
+WT = S.parent / (S.name + "-wt")
+shutil.rmtree(WT, ignore_errors=True)
+g("worktree", "add", "-q", "-b", "wt-branch", str(WT))
+results.append(run("12a. fresh session baselines", 0, session="sess3"))
+
+(WT / "stdlib/compiler").mkdir(parents=True, exist_ok=True)
+(WT / "stdlib/compiler/types.sprout").write_text("edited in a worktree\n")
+results.append(
+    run(
+        "12b. an edit in a linked worktree is seen",
+        2,
+        present=["types.sprout", "idiomatic-sprout.md", "compiler-internals.md"],
+        session="sess3",
+    )
+)
+
 # sess1 has spent 3 blocks by now (cases 3, 5, 10 — case 9 ran under sess2), so
 # two more are shown and every state after the cap passes through with the notice.
 for i in range(4):
     write("stdlib/prelude.sprout", "a\n" + "b\n" * (i + 2))
     results.append(run(f"11.{i}. block {i + 4} of cap {5}", 2 if i < 2 else 0))
 
+shutil.rmtree(WT, ignore_errors=True)
 state = json.loads((S / ".git/claude-review-gate/sess1.json").read_text())
 print("state:", {k: (v if k != "seen" else len(v)) for k, v in state.items()})
 print("\nSUITE", "PASSED" if all(results) else "FAILED")

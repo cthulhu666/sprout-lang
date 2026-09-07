@@ -5,7 +5,10 @@
 #
 # The basics list is DERIVED from docs/guidelines.md's `### N.` headings (and
 # their audience tags) at runtime, so it never drifts out of sync with the doc.
-# Always exits 0 — this hook informs, never blocks.
+#
+# Informs, never blocks — so the text goes to stdout as JSON `additionalContext`, NOT
+# stderr. Stderr from a hook that exits 0 reaches the debug log only and Claude never
+# sees it, which made this hook a no-op for the whole audience it was written for.
 
 set -euo pipefail
 
@@ -20,8 +23,8 @@ esac
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 doc="$script_dir/../docs/guidelines.md"
 
-{
-  echo "[guidelines] About to edit Sprout source. Recheck docs/guidelines.md:"
+text=$({
+  echo "About to edit Sprout source. Recheck docs/guidelines.md:"
   if [ -f "$doc" ]; then
     # Print each numbered basic as "N. Title   [audience tags]", pulling both the
     # heading and the bracketed tags out of the doc so #7/#8/... appear for free.
@@ -46,6 +49,10 @@ doc="$script_dir/../docs/guidelines.md"
     echo "  (could not locate guidelines.md at $doc — read the repo copy directly)"
   fi
   echo "For idiomatic shapes (let..else, combinators, pipes, wrap): docs/idiomatic-sprout.md"
-} >&2
+  echo "Comments: brief and local (style-guide-v0 §11) — intent and invariants, not mechanism."
+})
+
+printf '%s' "$text" \
+  | jq -Rs '{hookSpecificOutput:{hookEventName:"PreToolUse",additionalContext:.}}'
 
 exit 0
