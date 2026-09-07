@@ -8,9 +8,12 @@
 #
 # Loop safety, three ways: the first Stop of a session records the tree as the
 # BASELINE (pre-existing dirt never fires), a state already shown is never shown
-# twice, and MAX_BLOCKS caps a session no matter what.
+# twice, and MAX_BLOCKS_PER_TURN caps any single user turn.
 #
 # The checklist is path-aware: only the items whose paths actually moved are shown.
+# "Moved" means since the last ACCEPTED review, not since the session began — an
+# unmoving baseline grows the report, and the checklist filter with it, until every
+# item fires on every block and the gate is noise.
 #
 # Wired as a Stop hook from .claude/settings.json.
 import hashlib
@@ -20,7 +23,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-MAX_BLOCKS = 5
+# Per USER TURN, not per session. Termination is the harness's job already: Claude Code
+# force-ends a turn after CLAUDE_CODE_STOP_HOOK_BLOCK_CAP (default 8) consecutive
+# blocking Stops. This only has to sit under that, so a runaway is released quietly here
+# instead of by the platform's warning — and the budget refills every turn.
+MAX_BLOCKS_PER_TURN = 3
 
 # Generated artifacts, not reviewed prose or code. Excluding them also keeps a
 # post-`refresh-seed` Stop cheap: the seed is 13 MB and its diff runs to hundreds
@@ -76,55 +83,53 @@ def interesting(path):
     return not path.startswith(IGNORED)
 
 
-def worktree_roots(root):
-    """Every checkout of this repo. Work here happens in linked worktrees, so a gate
-    reading only the main one reviews nothing."""
-    roots = [
-        Path(line[len("worktree ") :]).resolve()
-        for line in git(root, "worktree", "list", "--porcelain").splitlines()
-        if line.startswith("worktree ")
-    ]
-    return roots or [root]
-
-
 def changed_paths(root):
     # --porcelain=v1 -uall: one line per changed or untracked file, "XY path".
-    # `key` carries the worktree so two checkouts of one path stay distinct; `path`
-    # stays repo-relative because that is what the CHECKLIST predicates match on.
     out = []
-    for wt in worktree_roots(root):
-        for line in git(wt, "status", "--porcelain=v1", "-uall").splitlines():
-            if len(line) < 4:
-                continue
-            status, path = line[:2], line[3:]
-            # A rename prints "old -> new"; the new name is what a reviewer reads.
-            if " -> " in path:
-                path = path.split(" -> ", 1)[1]
-            path = path.strip('"')
-            if interesting(path):
-                key = path if wt == root else f"{wt.name}/{path}"
-                out.append((status, key, path, wt))
+    for line in git(root, "status", "--porcelain=v1", "-uall").splitlines():
+        if len(line) < 4:
+            continue
+        status, path = line[:2], line[3:]
+        # A rename prints "old -> new"; the new name is what a reviewer reads.
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1]
+        path = path.strip('"')
+        if interesting(path):
+            out.append((status, path))
     return out
 
 
-def tree_state(paths):
+def tree_state(root, paths):
     """One digest per changed path, so the report can name what moved since baseline.
 
     An untracked file is stat'd rather than read — an untracked build artifact
     would otherwise be hashed in full on every single Stop.
     """
     state = {}
-    for status, key, path, wt in paths:
+    for status, path in paths:
         if status == "??":
             try:
-                st = (wt / path).stat()
+                st = (root / path).stat()
                 body = f"{st.st_size}:{st.st_mtime_ns}"
             except OSError:
                 body = "gone"
         else:
-            body = git(wt, "diff", "HEAD", "--", path)
-        state[key] = status + ":" + hashlib.sha256(body.encode()).hexdigest()
+            body = git(root, "diff", "HEAD", "--", path)
+        state[path] = status + ":" + hashlib.sha256(body.encode()).hexdigest()
     return state
+
+
+def new_turn(d, state):
+    """(is this Stop the start of a new user turn, turn id to store).
+
+    prompt_id is a UUID correlating a user prompt with every event downstream of it.
+    It is optional in the payload; when it is absent, stop_hook_active carries the
+    same signal, being false exactly on a turn's first Stop.
+    """
+    pid = d.get("prompt_id")
+    if pid:
+        return pid != state.get("turn"), pid
+    return not d.get("stop_hook_active"), state.get("turn")
 
 
 def digest(state):
@@ -135,7 +140,11 @@ def main():
     d = json.load(sys.stdin)
     session = d.get("session_id") or "no-session"
 
-    root = os.environ.get("CLAUDE_PROJECT_DIR") or d.get("cwd") or "."
+    # The checkout THIS session works in, taken from `cwd`. CLAUDE_PROJECT_DIR is the
+    # main checkout even for a session in a linked worktree, and this repo has 66 of
+    # them: reviewing all of them reports other sessions' concurrent edits as if they
+    # were this session's, which is a review this session cannot perform.
+    root = d.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or "."
     root = git(root, "rev-parse", "--show-toplevel").strip()
     if not root:
         log("not a git repo — pass through")
@@ -143,9 +152,7 @@ def main():
     root = Path(root).resolve()
 
     paths = changed_paths(root)
-    if not paths:
-        return 0
-    now = tree_state(paths)
+    now = tree_state(root, paths)
     fp = digest(now)
 
     # State lives in the git dir, so it is per-worktree and never committed.
@@ -158,17 +165,40 @@ def main():
         state = None
 
     if state is None:
-        # First Stop of the session: whatever is dirty now predates the agent.
-        state_path.write_text(json.dumps({"baseline": now, "seen": [fp], "blocks": 0}))
+        # First Stop of the session: whatever is dirty now predates the agent. This runs
+        # even for a clean tree, which then baselines as empty — skipping it there would
+        # spend the baseline on the session's first real change and never review it.
+        state_path.write_text(
+            json.dumps(
+                {"baseline": now, "seen": [fp], "blocks": 0, "turn": d.get("prompt_id")}
+            )
+        )
         log("baseline recorded — pass through")
         return 0
 
-    if fp in state["seen"]:
+    if not paths:
+        # The tree went clean — committed or reverted. Nothing is pending review, so
+        # re-anchor; otherwise the landed files reappear as phantom deletions in the
+        # next report, which is the same staleness as a frozen baseline.
+        if state["baseline"]:
+            state["baseline"] = now
+            state_path.write_text(json.dumps(state))
         return 0
 
+    if fp in state["seen"]:
+        # Reported once, and the agent then ended a turn without touching another
+        # file: the review was answered. Re-anchor, so the next report names what is
+        # new rather than everything touched since the session began.
+        state["baseline"] = now
+        state_path.write_text(json.dumps(state))
+        return 0
+
+    fresh, turn = new_turn(d, state)
+    if fresh:
+        state["turn"], state["blocks"] = turn, 0
     state["seen"].append(fp)
     state["blocks"] += 1
-    over_cap = state["blocks"] > MAX_BLOCKS
+    over_cap = state["blocks"] > MAX_BLOCKS_PER_TURN
     state_path.write_text(json.dumps(state))
 
     if over_cap:
@@ -176,20 +206,20 @@ def main():
         return 0
 
     base = state["baseline"]
-    moved = [(s, k, p) for s, k, p, _ in paths if now[k] != base.get(k)]
-    moved += [(" X", k, k) for k in sorted(set(base) - set(now))]
+    moved = [(s, p) for s, p in paths if now[p] != base.get(p)]
+    moved += [(" X", p) for p in sorted(set(base) - set(now))]
 
     lines = [
         "REVIEW GATE — this change has not been reviewed. Review it against the",
         "checklist, state the verdict per item, and fix what fails before stopping.",
         "",
-        "Changed this session:",
+        "Changed since the last review:",
     ]
-    lines += [f"  {status} {key}" for status, key, _ in moved]
+    lines += [f"  {status} {path}" for status, path in moved]
     lines.append("")
     n = 0
     for applies, item, how in CHECKLIST:
-        if not any(applies(p) for _, _, p in moved):
+        if not any(applies(p) for _, p in moved):
             continue
         n += 1
         lines.append(f"{n}) {item}")
