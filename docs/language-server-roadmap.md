@@ -78,6 +78,15 @@ editor and IDE support.
 >   renders it: a monomorphic scheme's rendering is sniffed by
 >   `analysis_service_driver.make_eval_source` for a trailing effect, and a constraint on
 >   a concrete head is already discharged
+> - ~~a class method dropped its constraints too~~ **done**: the clause above renders
+>   `Scheme`'s constraint list and a class method's is empty — nothing fills one, and its
+>   calls dispatch off the `@class:` marker instead — so `fmap` still read
+>   `(b -> c) -> a b -> a c` while `map`, an ordinary function over the same class, read
+>   `(a -> b) -> c a -> c b where Functor c`. `compiler.env_scheme` now recovers the clause
+>   from the marker for display only; the same list is read by
+>   `infer.inject_constrained_fn_dicts_via_field` at call sites, so a method must not carry
+>   one in the env. The head is POSITIONAL: the class variable renames to `a`, and a source
+>   name would print `Functor f` against a type reading `a b -> a c`
 > - ~~unimplemented methods~~ **done**: every JSON-RPC *request* now gets a reply
 >   (`-32601` when the method is not implemented); notifications stay silent. It used to
 >   end in `else ()`, dropping requests too. A real client sends four such methods on the

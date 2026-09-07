@@ -320,8 +320,46 @@ fn scheme_from_env(expr: String, env: Dict types.Scheme) -> ExprSchemeResult =
 # prefix it does not have.
 fn env_scheme(name: String, env: Dict types.Scheme) -> Maybe types.Scheme =
   match dict_get(name, env) with
-  | Just scheme -> Just(scheme)
-  | Nothing -> dict_get(source.entry_module_prefix ++ name, env)
+  | Just scheme -> Just(with_class_constraint(name, scheme, env))
+  | Nothing ->
+      match dict_get(source.entry_module_prefix ++ name, env) with
+      | Nothing -> Nothing
+      | Just scheme -> Just(with_class_constraint(name, scheme, env))
+
+# A class method's Scheme has no constraint list — nothing fills one, and its calls
+# dispatch off the `@class:` marker instead — so `fmap` renders with nothing explaining its
+# `a b` head. Recovered for DISPLAY only: `infer.inject_constrained_fn_dicts_via_field`
+# reads this list at call sites, so a method must not carry one in the env.
+#
+# Keyed by the bare method name: `unqualify_entry_names` leaves `@class:` keys alone.
+# Replacing the list is safe — a method cannot declare a `where` clause, and
+# `infer.register_fn_decl_scheme` drops the marker for a function that takes the name.
+fn with_class_constraint(name: String, s: types.Scheme, env: Dict types.Scheme) -> types.Scheme =
+  match dict_get("@class:" ++ name, env) with
+  | Nothing -> s
+  | Just marker ->
+      match class_constraint_of(marker, types.scheme_vars(s)) with
+      | Nothing -> s
+      | Just c -> types.scheme_with_constraints(s, Cons(c, Nil))
+
+# The marker holds the class's type parameters over a `TConst(class_name)` body. Single
+# parameter only: a constraint pair carries one head, so a two-parameter class has no one
+# variable to name.
+fn class_constraint_of(marker: types.Scheme, method_vars: List String) -> Maybe (String, String) =
+  match types.scheme_vars(marker) with
+  | [class_var] ->
+      match index_of_name(class_var, method_vars, 0) with
+      | Nothing -> Nothing
+      | Just k ->
+          match types.scheme_type(marker) with
+          | types.TConst id -> Just((types.constraint_head_at(k), types.type_id_name(id)))
+          | _ -> Nothing
+  | _ -> Nothing
+
+fn index_of_name(needle: String, names: List String, k: Int) -> Maybe Int =
+  match names with
+  | Nil -> Nothing
+  | Cons h t -> if h == needle then Just(k) else index_of_name(needle, t, k + 1)
 
 # Rendered form, for hover and :type. Nothing on any failure — a caller that needs to
 # say WHY calls scheme_of_expr_in_source and matches the reason.
