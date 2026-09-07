@@ -1,0 +1,75 @@
+module main
+
+# Drives the resize arm of `app.run` end to end. A child process sends this
+# process a real SIGWINCH, so `term_read_avail` answers `TermResized`, the pump
+# replaces the screen and repaints in full.
+#
+# Needs a pty on stdin: `term_raw_enter` returns early on a non-tty and never
+# arms the handler, and SIGWINCH's default disposition is ignore. The window
+# never has to change size — the runtime reports the flag, not a measurement.
+#
+# The observable is the repaint. `screen_resize` blanks both buffers, so the
+# next `diff_to_ansi` re-emits the whole frame: MARKER appears twice in stdout
+# with the signal and once without. `--no-winch` is that control.
+
+import stdlib.args as args
+import stdlib.chan (Chan, chan_send)
+import stdlib.process as process
+import stdlib.task (Scope, task_spawn, task_sleep)
+import stdlib.tui.app as app
+import stdlib.tui.event as event
+import stdlib.tui.geometry as g
+import stdlib.tui.screen as scr
+import stdlib.tui.style as sty
+import stdlib.tui.text as text
+import stdlib.tui.widget as widget
+
+type Msg (..) = | Done
+
+fn marker() -> String = "RESIZE-PROBE-MARKER"
+
+fn label_on_event(txt: String,
+                  ev: event.Event) -> (String, List Msg, List(widget.Cmd Msg)) =
+  (txt, Nil, Nil)
+
+fn label_measure(txt: String, avail: g.Size) -> g.Size = g.Size(text.width(txt), 1)
+
+fn label_render(txt: String, r: g.Region, s: scr.Screen) -> Unit !{IO} = do
+  stop <- scr.screen_write(s, g.region_col(r), g.region_row(r),
+                           text.truncate(txt, g.region_cols(r)), sty.style_default())
+  ()
+
+fn root() -> widget.Widget Msg =
+  widget.Widget(widget.View(state = marker(), on_event = label_on_event,
+                            route = widget.no_route,
+                            render = label_render, measure = label_measure))
+
+# Any message ends the loop; the driver sends exactly one.
+fn update(m: Msg,
+          w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow, List(widget.Cmd Msg)) =
+  app.done(w, app.Quit)
+
+# `proc_run` fork+execs directly, so `sh`'s parent is this process.
+fn raise_winch() -> Unit !{IO} = do
+  r <- process.proc_run(["sh", "-c", "kill -WINCH $PPID"])
+  ()
+
+fn signalled(winch: Bool) -> Unit !{IO} =
+  if winch then raise_winch() else ()
+
+# Sleeps bracket the signal so the repaint it causes is not racing the first
+# paint or the quit.
+fn driver(winch: Bool, ch: Chan (app.Signal Msg), u: Unit) -> Unit !{IO} = do
+  task_sleep(400)
+  signalled(winch)
+  task_sleep(600)
+  chan_send(ch, app.SigMsg(Done))
+
+fn boot(winch: Bool, scope: Scope, ch: Chan (app.Signal Msg)) -> Unit !{IO} =
+  task_spawn(scope, driver(winch, ch, _))
+
+fn main() -> Unit !{IO} = do
+  a <- args.parse_argv()
+  let winch = ! args.arg_flag (a, "no-winch")
+  app.run(app.App(root = root(), update = update, tick_ms = 100,
+                  boot = boot(winch, _, _)))

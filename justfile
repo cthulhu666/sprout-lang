@@ -3049,6 +3049,19 @@ plugin-run:
 lsp-smoke: build-sproutd
   bash scripts/lsp_smoke.sh
 
+# Drive `app.run`'s TermResized arm under a pty. OPT-IN, not in any aggregate:
+# it depends on `script(1)` and on process timing, and has no CI track record
+# yet. Every other arm of `run` is reachable with piped stdin; this one needs a
+# tty, because term_raw_enter arms the SIGWINCH handler only for one.
+[group('test')]
+tui-resize-probe: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  SRC="tests/tui_smoke/resize_probe.spr"
+  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$SRC" > "{{build_dir}}/resize_probe.ll"
+  clang "{{build_dir}}/resize_probe.ll" {{runtime_src}} -O2 {{clang_extra}} -o "{{build_dir}}/resize_probe"
+  SPROUT_RESIZE_PROBE_BIN="{{build_dir}}/resize_probe" bash scripts/tui_resize_probe.sh
+
 # ── Aggregate Gates ───────────────────────────────────────────────────────────
 #
 # One-shot verification batteries so the pre-commit ritual is a single command
