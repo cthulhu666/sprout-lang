@@ -32,9 +32,7 @@ fn unwrap_child(o: Outer) -> Maybe Msg =
 type alias Says = List Msg
 type alias Asks = List(widget.Cmd Msg)
 type alias Kids = List(widget.Widget Msg)
-# Spelled out rather than built from `Says`/`Asks`: an alias inside another
-# alias's BODY is not expanded, though one inside a signature's tuple is.
-type alias Reply = Maybe(widget.Widget Msg, List Msg, List(widget.Cmd Msg))
+type alias Reply = Maybe(widget.Widget Msg, Says, Asks)
 
 fn load(name: String, u: Unit) -> Msg !{IO} = Loaded(name)
 

@@ -1,0 +1,28 @@
+# A type alias is visible to declarations written ABOVE it, like a type
+# declaration. Aliases used to be registered as the declaration walk passed
+# them, so a signature above the alias saw an environment without it and the
+# ordering rule was arbitrary.
+
+fn head_or(d: String, ns: Names) -> String =
+  match ns with
+  | [] -> d
+  | [h | _] -> h
+
+fn width(p: Span) -> Int =
+  match p with
+  | (lo, hi) -> hi - lo
+
+type alias Names = List String
+type alias Span = (Int, Int)
+
+# An alias standing on one declared after it, too.
+type alias Labelled a = (Names, a)
+
+fn label_count(l: Labelled Int) -> Int =
+  match l with
+  | (ns, k) -> list_length(ns) * k
+
+fn main() -> Unit !{IO} = do
+  print(head_or("none", ["first", "second"]))
+  print(to_string(width((3, 11))))
+  print(to_string(label_count((["a", "b"], 4))))

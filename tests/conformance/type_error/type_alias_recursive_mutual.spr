@@ -1,0 +1,9 @@
+# A cycle through another alias has no finite expansion either, and the message
+# must not claim the alias refers to itself.
+
+type alias A = List B
+type alias B = List A
+
+fn count(a: A) -> Int = list_length(a)
+
+fn main() -> Unit !{IO} = print(to_string(count([])))

@@ -159,8 +159,7 @@ type InstanceMethodResult =
 export fn type_from_ast(te: ast.TypeExpr, local_vars: Dict types.Type) -> types.Type =
   match te with
   | ast.TypeName name -> lookup_type_var(name, local_vars)
-  | ast.TypeApply base arg ->
-      types.TApp(type_from_ast(base, local_vars), type_from_ast(arg, local_vars))
+  | ast.TypeApply base arg -> type_apply_from_ast(base, arg, local_vars)
   | ast.TypeArrow param ret effs ->
       # An ANNOTATED arrow type means consuming: arrow-type syntax cannot yet
       # spell `borrowing` (deferred — see BACKLOG "modifiers in arrow types"), so
@@ -224,6 +223,281 @@ fn type_list_from_ast(parts: List ast.TypeExpr, local_vars: Dict types.Type) -> 
   match parts with
   | Nil -> Nil
   | Cons h t -> Cons(type_from_ast(h, local_vars), type_list_from_ast(t, local_vars))
+
+# ---------------------------------------------------------------------------
+# Type alias expansion
+# ---------------------------------------------------------------------------
+#
+# A parameterized alias is stored as its BODY with the parameters bound to
+# sentinel type variables, keyed by name and arity. Applying it is then a
+# SUBSTITUTION over that body, which works for a body of any shape — a tuple, an
+# arrow, a parameter that is not last. A type-level application only works when
+# the parameter can be eta-reduced off the end, which is why `Result String a`
+# used to be the only shape that expanded.
+#
+# The arity rides in the key because `alias_env` is a `Dict types.Type` shared
+# with the type-variable dict: one name holds one type, and `F a` and `F a b`
+# are different aliases. `@` and `:` cannot appear in a type name, so no user
+# name collides with a key (the same guarantee `@qualalias:` relies on).
+
+fn alias_fn_prefix() -> String = "@aliasfn:"
+
+fn alias_fn_key(name: String, arity: Int) -> String =
+  alias_fn_prefix() ++ name ++ ":" ++ int_to_string(arity)
+
+# Keyed by alias as well as position, so that an alias body which expands
+# another alias cannot capture the inner one's parameters.
+fn alias_param_sentinel(name: String, index: Int) -> String =
+  "__aliasparam__" ++ name ++ ":" ++ int_to_string(index)
+
+# The head and arguments of `F a b`, which parses left-nested as
+# `TypeApply (TypeApply F a) b`. Nothing when the head is not a plain name.
+fn type_spine(te: ast.TypeExpr, args: List ast.TypeExpr) -> Maybe (String, List ast.TypeExpr) =
+  match te with
+  | ast.TypeName name -> Just((name, args))
+  | ast.TypeApply base arg -> type_spine(base, Cons(arg, args))
+  | _ -> Nothing
+
+fn type_apply_from_ast(base: ast.TypeExpr, arg: ast.TypeExpr,
+                       local_vars: Dict types.Type) -> types.Type =
+  match type_spine(base, [arg]) with
+  | Nothing -> plain_type_apply(base, arg, local_vars)
+  | Just (name, args) -> alias_apply_or_plain(name, args, base, arg, local_vars)
+
+fn plain_type_apply(base: ast.TypeExpr, arg: ast.TypeExpr,
+                    local_vars: Dict types.Type) -> types.Type =
+  types.TApp(type_from_ast(base, local_vars), type_from_ast(arg, local_vars))
+
+# A spine whose head is not an alias of THIS arity is an ordinary application —
+# including a zero-parameter alias applied to arguments (`type alias E = Result
+# String` then `E Int`), which resolves through lookup_type_var and applies.
+fn alias_apply_or_plain(name: String, args: List ast.TypeExpr, base: ast.TypeExpr,
+                        arg: ast.TypeExpr, local_vars: Dict types.Type) -> types.Type =
+  match alias_body(name, list_length(args), local_vars) with
+  | Nothing -> plain_type_apply(base, arg, local_vars)
+  | Just body ->
+      unifier.apply_subst(
+        alias_arg_subst(name, 0, type_list_from_ast(args, local_vars), dict_empty()),
+        body)
+
+fn alias_body(name: String, arity: Int, local_vars: Dict types.Type) -> Maybe types.Type =
+  match dict_get(alias_fn_key(name, arity), local_vars) with
+  | Just t -> Just(t)
+  | Nothing -> alias_body_unqualified(name, arity, local_vars)
+
+# The env path spells an imported alias with the importer's prefix while the
+# schemes carry short names. Stripping is gated on the prefix being a known
+# import alias, exactly as resolve_qualified_type_name gates it — otherwise
+# `mod.Pair` would collide with a local `Pair`, which is a different type.
+fn alias_body_unqualified(name: String, arity: Int,
+                          local_vars: Dict types.Type) -> Maybe types.Type =
+  if str_find(name, ".") == -1 then Nothing
+  else
+    match dict_get(str_concat("@qualalias:", before_first_dot(name)), local_vars) with
+    | Just _ -> dict_get(alias_fn_key(string.after_last_dot(name), arity), local_vars)
+    | Nothing -> Nothing
+
+fn alias_arg_subst(name: String, index: Int, args: List types.Type,
+                   acc: Dict types.Type) -> Dict types.Type =
+  match args with
+  | Nil -> acc
+  | Cons a rest ->
+      alias_arg_subst(name, index + 1, rest,
+        dict_set(alias_param_sentinel(name, index), a, acc))
+
+# The parameters as the body sees them while it is being stored.
+fn alias_param_vars(name: String, index: Int, params: List String,
+                    acc: Dict types.Type) -> Dict types.Type =
+  match params with
+  | Nil -> acc
+  | Cons p rest ->
+      alias_param_vars(name, index + 1, rest,
+        dict_set(p, types.TVar(types.tyvar_id(alias_param_sentinel(name, index))), acc))
+
+# A zero-parameter alias keeps its plain name, which is what lookup_type_var
+# reads for a bare `TypeName`.
+export fn register_alias(name: String, params: List String, rhs: ast.TypeExpr,
+                         acc: Dict types.Type) -> Dict types.Type =
+  match params with
+  | Nil -> dict_set(name, type_from_ast(rhs, acc), acc)
+  | _ ->
+      dict_set(alias_fn_key(name, list_length(params)),
+               type_from_ast(rhs, alias_param_vars(name, 0, params, acc)),
+               acc)
+
+# Every alias in the module, registered before anything else is checked and in
+# DEPENDENCY order — so a signature may name an alias declared below it, and an
+# alias may stand on one declared after it. Registration used to happen as the
+# declaration walk passed each alias, which made position a rule nobody had
+# written down.
+type AliasEntry =
+  | AliasEntry String (List String) ast.TypeExpr source.SourcePos
+
+fn entry_name(e: AliasEntry) -> String =
+  match e with | AliasEntry n _ _ _ -> n
+
+type AliasBuild =
+  | AliasesOk (Dict types.Type)
+  | AliasesErr source.SourcePos String
+
+# Reverse post-order, plus the names already emitted. A name found on the
+# current path closes a cycle: an alias is expanded at its use, so a self-
+# referential one has no finite expansion.
+type AliasWalk =
+  | WalkOk (List String) (Dict Bool)
+  | WalkCycle String
+
+export fn register_all_aliases(decls: List ast.Decl, base: Dict types.Type) -> AliasBuild =
+  build_aliases(alias_entries(decls, Nil), base)
+
+# For callers that RENDER types rather than check them — the analysis service's
+# `:i`. A module whose aliases do not resolve still answers queries, with
+# whatever base it was given; reporting the cycle is the checker's job.
+export fn alias_env_or(decls: List ast.Decl, base: Dict types.Type) -> Dict types.Type =
+  match register_all_aliases(decls, base) with
+  | AliasesOk resolved -> resolved
+  | AliasesErr _ _ -> base
+
+fn build_aliases(entries: List AliasEntry, base: Dict types.Type) -> AliasBuild =
+  match duplicate_alias(entries, dict_empty()) with
+  | Just e -> duplicate_alias_err(e)
+  | Nothing -> ordered_aliases(entries, base)
+
+# The table is keyed by NAME, so of two aliases sharing one only the last is
+# reachable — including when they differ in arity, where the shadowed one is
+# not merely hidden but impossible to write. Rejected rather than resolved by
+# declaration order.
+fn duplicate_alias(entries: List AliasEntry, seen: Dict Bool) -> Maybe AliasEntry =
+  match entries with
+  | Nil -> Nothing
+  | Cons e rest ->
+      match dict_get(entry_name(e), seen) with
+      | Just _ -> Just(e)
+      | Nothing -> duplicate_alias(rest, dict_set(entry_name(e), true, seen))
+
+fn duplicate_alias_err(e: AliasEntry) -> AliasBuild =
+  match e with
+  | AliasEntry name _ _ pos ->
+      AliasesErr(pos, "type alias `" ++ string.after_last_dot(name) ++
+                      "` is declared more than once in this module")
+
+fn ordered_aliases(entries: List AliasEntry, base: Dict types.Type) -> AliasBuild =
+  order_to_aliases(alias_order(entry_names(entries, Nil), table, dict_empty(), Nil),
+                   table, base, entries)
+  where table = alias_table(entries, dict_empty())
+
+fn order_to_aliases(w: AliasWalk, table: Dict AliasEntry, base: Dict types.Type,
+                    entries: List AliasEntry) -> AliasBuild =
+  match w with
+  | WalkCycle c -> AliasesErr(alias_pos(c, entries), alias_cycle_message(c))
+  | WalkOk out _ -> AliasesOk(register_ordered(list_reverse(out), table, base))
+
+# Names the alias the walk closed on, which may be reached through others, so
+# the wording covers a mutual cycle as well as a self-reference.
+fn alias_cycle_message(name: String) -> String =
+  "type alias `" ++ string.after_last_dot(name) ++ "` is part of a type alias cycle — " ++
+  "an alias is expanded where it is used, so a cycle has no finite expansion"
+
+fn alias_entries(decls: List ast.Decl, acc: List AliasEntry) -> List AliasEntry =
+  match decls with
+  | Nil -> list_reverse(acc)
+  | Cons d rest ->
+      match d with
+      | ast.AliasDecl name params rhs pos ->
+          alias_entries(rest, Cons (AliasEntry(name, params, rhs, pos), acc))
+      | _ -> alias_entries(rest, acc)
+
+fn alias_table(entries: List AliasEntry, acc: Dict AliasEntry) -> Dict AliasEntry =
+  match entries with
+  | Nil -> acc
+  | Cons e rest -> alias_table(rest, dict_set(entry_name(e), e, acc))
+
+fn entry_names(entries: List AliasEntry, acc: List String) -> List String =
+  match entries with
+  | Nil -> list_reverse(acc)
+  | Cons e rest -> entry_names(rest, Cons(entry_name(e), acc))
+
+fn alias_pos(name: String, entries: List AliasEntry) -> source.SourcePos =
+  match entries with
+  | Nil -> no_pos()
+  | Cons e rest ->
+      match e with
+      | AliasEntry n _ _ pos -> if n == name then pos else alias_pos(name, rest)
+
+fn alias_order(names: List String, table: Dict AliasEntry, visited: Dict Bool,
+               out: List String) -> AliasWalk =
+  match names with
+  | Nil -> WalkOk(out, visited)
+  | Cons n rest ->
+      match alias_visit(n, table, dict_empty(), visited, out) with
+      | WalkCycle c -> WalkCycle(c)
+      | WalkOk out2 visited2 -> alias_order(rest, table, visited2, out2)
+
+fn alias_visit(name: String, table: Dict AliasEntry, path: Dict Bool,
+               visited: Dict Bool, out: List String) -> AliasWalk =
+  match dict_get(name, visited) with
+  | Just _ -> WalkOk(out, visited)
+  | Nothing ->
+      match dict_get(name, path) with
+      | Just _ -> WalkCycle(name)
+      | Nothing -> alias_visit_entry(name, dict_get(name, table), table, path, visited, out)
+
+# A name that is not an alias is not an edge — it is an ordinary type, and the
+# declared-name validation pass owns whether it exists.
+fn alias_visit_entry(name: String, found: Maybe AliasEntry, table: Dict AliasEntry,
+                     path: Dict Bool, visited: Dict Bool, out: List String) -> AliasWalk =
+  match found with
+  | Nothing -> WalkOk(out, visited)
+  | Just e ->
+      alias_visit_deps(name, alias_deps(e, table), table,
+                       dict_set(name, true, path), visited, out)
+
+fn alias_visit_deps(name: String, deps: List String, table: Dict AliasEntry,
+                    path: Dict Bool, visited: Dict Bool, out: List String) -> AliasWalk =
+  match deps with
+  | Nil -> WalkOk(Cons(name, out), dict_set(name, true, visited))
+  | Cons d rest ->
+      match alias_visit(d, table, path, visited, out) with
+      | WalkCycle c -> WalkCycle(c)
+      | WalkOk out2 visited2 -> alias_visit_deps(name, rest, table, path, visited2, out2)
+
+fn alias_deps(e: AliasEntry, table: Dict AliasEntry) -> List String =
+  match e with
+  | AliasEntry _ _ rhs _ -> alias_dep_filter(te_type_names(rhs, Nil), table, Nil)
+
+fn alias_dep_filter(names: List String, table: Dict AliasEntry,
+                    acc: List String) -> List String =
+  match names with
+  | Nil -> acc
+  | Cons n rest ->
+      match dict_get(n, table) with
+      | Just _ -> alias_dep_filter(rest, table, Cons(n, acc))
+      | Nothing -> alias_dep_filter(rest, table, acc)
+
+fn register_ordered(names: List String, table: Dict AliasEntry,
+                    acc: Dict types.Type) -> Dict types.Type =
+  match names with
+  | Nil -> acc
+  | Cons n rest ->
+      match dict_get(n, table) with
+      | Nothing -> register_ordered(rest, table, acc)
+      | Just e ->
+          match e with
+          | AliasEntry name params rhs _ ->
+              register_ordered(rest, table, register_alias(name, params, rhs, acc))
+
+export fn te_type_names(te: ast.TypeExpr, acc: List String) -> List String =
+  match te with
+  | ast.TypeName n -> Cons(n, acc)
+  | ast.TypeApply l r -> te_type_names(l, te_type_names(r, acc))
+  | ast.TypeArrow p r _ -> te_type_names(p, te_type_names(r, acc))
+  | ast.TypeEffect inner _ -> te_type_names(inner, acc)
+  | ast.TupleType parts -> te_type_names_list(parts, acc)
+
+fn te_type_names_list(parts: List ast.TypeExpr, acc: List String) -> List String =
+  match parts with
+  | Nil -> acc
+  | Cons h rest -> te_type_names(h, te_type_names_list(rest, acc))
 
 export fn effect_from_maybe_labels(labels: Maybe (List String)) -> types.Effect =
   types.effect_from_labels(labels)
@@ -610,23 +884,24 @@ fn template_ret(t: types.Type) -> types.Type =
 # Constructor registration
 # ---------------------------------------------------------------------------
 
-export fn register_type_decl(decl: ast.Decl, env: GlobalEnv) -> GlobalEnv =
-  GlobalEnv(register_type_decl_raw(decl, global_env_dict(env)))
-
-# Raw variant operating on Dict, used internally where the env is still
-# unwrapped (e.g. inside check_fn_body for body-scope auxiliaries).
-fn register_type_decl_raw(decl: ast.Decl, env: Dict types.Scheme) -> Dict types.Scheme =
+# `alias_env` is the base the field types resolve against: an alias is
+# transparent in a constructor or record field, not only in a signature
+# (spec-v0 §5.6.1). Field types were built against an empty dict, so `Foo`
+# stayed opaque and would not meet the `Int` it was declared to be — which is
+# why this takes the environment rather than defaulting it.
+fn register_type_decl_raw(decl: ast.Decl, alias_env: Dict types.Type,
+                          env: Dict types.Scheme) -> Dict types.Scheme =
   match decl with
   | ast.TypeDecl name params ctors _ mult _ ->
       mark_type_multiplicity(name, mult,
-        register_ctors_for_type(name, params, build_local_params(params, dict_empty()), ctors, env))
+        register_ctors_for_type(name, params, build_local_params(params, alias_env), ctors, env))
   # WrapDecl: synthesize a single-constructor type with the same name as the
   # wrap. The constructor's argument type is the wrap's inner type. This gives
   # the typechecker a scheme `inner -> Foo` for Foo(x), and a destructor entry
   # for `match | Foo x ->`.  Zero type parameters by design (the inner type
   # may itself be polymorphic, but Foo always has the same representation).
   | ast.WrapDecl name inner _ ->
-      register_ctors_for_type(name, Nil, dict_empty(),
+      register_ctors_for_type(name, Nil, alias_env,
         [ast.TypeConstructor(name, [inner], Nil, Nil)], env)
   | _ -> env
 
@@ -799,14 +1074,6 @@ fn list_append_label(xs: List String, y: String) -> List String =
 # ---------------------------------------------------------------------------
 # List helpers (type-specific reverse functions)
 # ---------------------------------------------------------------------------
-
-fn list_reverse(xs: List types.Type) -> List types.Type =
-  list_rev_acc(xs, Nil)
-
-fn list_rev_acc(xs: List types.Type, acc: List types.Type) -> List types.Type =
-  match xs with
-  | Nil -> acc
-  | Cons h t -> list_rev_acc(t, Cons(h, acc))
 
 fn typed_expr_list_reverse(xs: List typed_ast.TypedExpr) -> List typed_ast.TypedExpr =
   typed_expr_rev_acc(xs, Nil)
@@ -4988,10 +5255,11 @@ fn register_record_fields(
   rec_name: String,
   type_params: List String,
   fields: List ast.RecordFieldDecl,
+  alias_env: Dict types.Type,
   env: Dict types.Scheme
 ) -> Dict types.Scheme =
   register_record_fields_loop(rec_name, type_params, fields,
-    build_record_local_vars(rec_name, type_params, dict_empty()), env)
+    build_record_local_vars(rec_name, type_params, alias_env), env)
 
 fn build_record_local_vars(rec_name: String, type_params: List String, acc: Dict types.Type) -> Dict types.Type =
   match type_params with
@@ -5813,6 +6081,9 @@ fn undetermined_source_message(src_expr: ast.Expr) -> String =
 # Program-level typechecking
 # ---------------------------------------------------------------------------
 
+# Aliases are resolved before anything else: every later pass reads types
+# through `alias_env`, so it has to be complete first. A cycle among them is
+# reported here rather than diverging in the expander.
 export fn typecheck_decls(
   state: unifier.InferState,
   decls: List ast.Decl,
@@ -5820,16 +6091,31 @@ export fn typecheck_decls(
   subst: Dict types.Type,
   eff_subst: Dict types.Effect
 ) -> typed_ast.TypedResult !{IO} =
+  # The importer's type-name spellings, lifted out of the env's @qual* markers
+  # into the alias_env — which is the base every local_vars dict is built on
+  # (build_type_var_dict), so lookup_type_var sees them at every annotation
+  # position without threading a new parameter through inference.
+  match register_all_aliases(decls, import_aliases_from_env(env)) with
+  | AliasesErr pos msg -> pure_typed_err(pos, msg)
+  | AliasesOk alias_env -> typecheck_decls_resolved(state, decls, env, subst, eff_subst, alias_env)
+
+fn pure_typed_err(pos: source.SourcePos, msg: String) -> typed_ast.TypedResult !{IO} =
+  do
+    typed_ast.TypedErr(pos, msg)
+
+fn typecheck_decls_resolved(
+  state: unifier.InferState,
+  decls: List ast.Decl,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  qual_env: Dict types.Type
+) -> typed_ast.TypedResult !{IO} =
   do
     # Pre-scan: register all FnDecl signatures (constraint field included) in env
     # before processing bodies.  This enables forward references and
     # mutual recursion (e.g., decorated_sort_split calling decorated_sort which
     # is defined later in the same file).
-    # The importer's type-name spellings, lifted out of the env's @qual* markers
-    # into the alias_env — which is the base every local_vars dict is built on
-    # (build_type_var_dict), so lookup_type_var sees them at every annotation
-    # position without threading a new parameter through inference.
-    let qual_env = import_aliases_from_env(env)
     let scanned_env = pre_scan_fn_decls(decls, env, qual_env)
     unifier.set_ctor_map(state, build_ctor_map(decls, dict_empty()))
     # Strict type-name validation: walk every TypeExpr in every type/alias/record
@@ -5848,6 +6134,9 @@ export fn typecheck_decls(
     match validate_all_decls(decls, declared_types) with
     | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
     | Nothing ->
+      match validate_alias_uses(decls, alias_arities(decls, dict_empty())) with
+      | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
+      | Nothing ->
       match validate_constraints_all(decls, collect_declared_class_names(decls, class_names_from_env(env, Nil))) with
       | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
       | Nothing ->
@@ -5871,7 +6160,10 @@ export fn typecheck_decls(
                 # @type: markers. From here on the env flows between decls as the
                 # wrap-protected GlobalEnv, and out to importers as the checked env.
                 # ftv is unaffected: a marker's body is a TConst, never a free var.
-                match typecheck_decls_inner(state, decls, GlobalEnv(scanned_env_with_types), subst, eff_subst, qual_env, Nil, unifier.ftv_env(scanned_env_with_types)) with
+                # Mirrored once, up front: an annotation inside a body reads
+                # aliases from the env, and a body may be checked above the
+                # declaration whose alias it names.
+                match typecheck_decls_inner(state, decls, mirror_alias_env(qual_env, GlobalEnv(scanned_env_with_types)), subst, eff_subst, qual_env, Nil, unifier.ftv_env(scanned_env_with_types)) with
                 | typed_ast.TypedErr p m -> typed_ast.TypedErr(p, m)
                 | typed_ast.TypedOk prog schemes ->
                     # Final gate: a DEFINED `main` must be a well-formed entrypoint.
@@ -6011,6 +6303,171 @@ fn validate_all_decls(decls: List ast.Decl, declared: List String) -> Maybe(sour
       match validate_decl(decl, declared) with
       | Just e -> Just((ast.decl_pos(decl), e))
       | Nothing -> validate_all_decls(rest, declared)
+
+# ---------------------------------------------------------------------------
+# Alias arity validation
+# ---------------------------------------------------------------------------
+#
+# An alias is expanded by substituting its parameters, so a use that supplies
+# the wrong number of them has no expansion at all. Reported where it is
+# written: the expander leaves such a use alone, and it would otherwise surface
+# as a mismatch between the alias name and whatever it should have become.
+#
+# A ZERO-parameter alias is exempt from the count. `type alias E = Result
+# String` applied to one argument expands and then applies, which is how a
+# partially applied body is meant to be used.
+#
+# Signature positions are covered here and not by validate_te, which reaches
+# only type declarations (its own comment records that gap).
+
+fn alias_arities(decls: List ast.Decl, acc: Dict Int) -> Dict Int =
+  match decls with
+  | Nil -> acc
+  | Cons d rest ->
+      match d with
+      | ast.AliasDecl name params _ _ ->
+          alias_arities(rest, dict_set(name, list_length(params), acc))
+      | _ -> alias_arities(rest, acc)
+
+# Exact name only. `arities` holds THIS module's aliases, and a use spelled
+# `mod.Pair` names another module's; matching it against a local `Pair` would
+# report an arity the writer never declared.
+fn alias_arity_of(name: String, arities: Dict Int) -> Maybe Int =
+  dict_get(name, arities)
+
+fn alias_arity_error(name: String, given: Int, arities: Dict Int) -> Maybe String =
+  match alias_arity_of(name, arities) with
+  | Nothing -> Nothing
+  | Just want ->
+      if want == 0 then Nothing
+      else if want == given then Nothing
+      else Just("type alias `" ++ string.after_last_dot(name) ++ "` takes " ++
+                arg_count_text(want) ++ ", given " ++ int_to_string(given))
+
+fn arg_count_text(n: Int) -> String =
+  if n == 1 then "1 type argument" else int_to_string(n) ++ " type arguments"
+
+fn validate_alias_uses(decls: List ast.Decl, arities: Dict Int) -> Maybe(source.SourcePos, String) =
+  match decls with
+  | Nil -> Nothing
+  | Cons decl rest ->
+      match alias_uses_in_decl(decl, arities) with
+      | Just e -> Just((ast.decl_pos(decl), e))
+      | Nothing -> validate_alias_uses(rest, arities)
+
+fn alias_uses_in_decl(decl: ast.Decl, arities: Dict Int) -> Maybe String =
+  match decl with
+  | ast.FnDecl _ params ret _ _ _ _ -> alias_uses_in_sig(params, ret, arities)
+  | ast.ExternFnDecl _ params ret _ _ -> alias_uses_in_sig(params, ret, arities)
+  | ast.TypeDecl _ _ ctors _ _ _ -> alias_uses_in_ctors(ctors, arities)
+  | ast.RecordDecl _ _ fields _ _ _ -> alias_uses_in_fields(fields, arities)
+  | ast.AliasDecl _ _ rhs _ -> alias_uses_in_te(rhs, arities)
+  | ast.WrapDecl _ inner _ -> alias_uses_in_te(inner, arities)
+  | ast.ClassDecl _ _ methods _ _ -> alias_uses_in_class_methods(methods, arities)
+  | ast.InstanceDecl _ _ methods _ -> alias_uses_in_instance_methods(methods, arities)
+  | _ -> Nothing
+
+fn alias_uses_in_class_methods(methods: List ast.ClassMethodSig,
+                               arities: Dict Int) -> Maybe String =
+  match methods with
+  | Nil -> Nothing
+  | Cons m rest ->
+      match m with
+      | ast.ClassMethodSig _ params ret _ ->
+          match alias_uses_in_sig(params, Just(ret), arities) with
+          | Just e -> Just(e)
+          | Nothing -> alias_uses_in_class_methods(rest, arities)
+
+fn alias_uses_in_instance_methods(methods: List ast.InstanceMethodImpl,
+                                  arities: Dict Int) -> Maybe String =
+  match methods with
+  | Nil -> Nothing
+  | Cons m rest ->
+      match m with
+      | ast.InstanceMethodImpl _ params ret _ _ ->
+          match alias_uses_in_sig(params, ret, arities) with
+          | Just e -> Just(e)
+          | Nothing -> alias_uses_in_instance_methods(rest, arities)
+
+fn alias_uses_in_sig(params: List ast.Param, ret: Maybe ast.TypeExpr,
+                     arities: Dict Int) -> Maybe String =
+  match alias_uses_in_params(params, arities) with
+  | Just e -> Just(e)
+  | Nothing -> alias_uses_in_maybe_te(ret, arities)
+
+fn alias_uses_in_params(params: List ast.Param, arities: Dict Int) -> Maybe String =
+  match params with
+  | Nil -> Nothing
+  | Cons p rest ->
+      match p with
+      | ast.Param _ te_maybe _ ->
+          match alias_uses_in_maybe_te(te_maybe, arities) with
+          | Just e -> Just(e)
+          | Nothing -> alias_uses_in_params(rest, arities)
+
+fn alias_uses_in_maybe_te(te: Maybe ast.TypeExpr, arities: Dict Int) -> Maybe String =
+  match te with
+  | Nothing -> Nothing
+  | Just t -> alias_uses_in_te(t, arities)
+
+fn alias_uses_in_ctors(ctors: List ast.TypeConstructor, arities: Dict Int) -> Maybe String =
+  match ctors with
+  | Nil -> Nothing
+  | Cons c rest ->
+      match c with
+      | ast.TypeConstructor _ fields _ _ ->
+          match alias_uses_in_te_list(fields, arities) with
+          | Just e -> Just(e)
+          | Nothing -> alias_uses_in_ctors(rest, arities)
+
+fn alias_uses_in_fields(fields: List ast.RecordFieldDecl, arities: Dict Int) -> Maybe String =
+  match fields with
+  | Nil -> Nothing
+  | Cons f rest ->
+      match f with
+      | ast.RecordFieldDecl _ ftype ->
+          match alias_uses_in_te(ftype, arities) with
+          | Just e -> Just(e)
+          | Nothing -> alias_uses_in_fields(rest, arities)
+
+fn alias_uses_in_te(te: ast.TypeExpr, arities: Dict Int) -> Maybe String =
+  match te with
+  | ast.TypeName name -> alias_arity_error(name, 0, arities)
+  | ast.TypeApply _ _ -> alias_uses_in_apply(te, type_spine(te, Nil), arities)
+  | ast.TypeArrow p r _ ->
+      match alias_uses_in_te(p, arities) with
+      | Just e -> Just(e)
+      | Nothing -> alias_uses_in_te(r, arities)
+  | ast.TypeEffect inner _ -> alias_uses_in_te(inner, arities)
+  | ast.TupleType parts -> alias_uses_in_te_list(parts, arities)
+
+# The whole spine is ONE use: `Pairing Int String` is an application of arity 2,
+# not an arity-1 application nested inside another. Descending into the left
+# spine would read the inner node as an under-applied use and report it.
+fn alias_uses_in_apply(te: ast.TypeExpr, spine: Maybe (String, List ast.TypeExpr),
+                       arities: Dict Int) -> Maybe String =
+  match spine with
+  | Nothing -> alias_uses_in_apply_parts(te, arities)
+  | Just (name, args) ->
+      match alias_arity_error(name, list_length(args), arities) with
+      | Just e -> Just(e)
+      | Nothing -> alias_uses_in_te_list(args, arities)
+
+fn alias_uses_in_apply_parts(te: ast.TypeExpr, arities: Dict Int) -> Maybe String =
+  match te with
+  | ast.TypeApply l r ->
+      match alias_uses_in_te(l, arities) with
+      | Just e -> Just(e)
+      | Nothing -> alias_uses_in_te(r, arities)
+  | _ -> Nothing
+
+fn alias_uses_in_te_list(parts: List ast.TypeExpr, arities: Dict Int) -> Maybe String =
+  match parts with
+  | Nil -> Nothing
+  | Cons h rest ->
+      match alias_uses_in_te(h, arities) with
+      | Just e -> Just(e)
+      | Nothing -> alias_uses_in_te_list(rest, arities)
 
 # ---------------------------------------------------------------------------
 # Constraint class-name validation
@@ -6599,24 +7056,6 @@ fn build_inst_key_set(decls: List ast.Decl, acc: Dict Bool) -> Dict Bool =
                              ++ type_head_str(type_from_ast(head_te, dict_empty())), true, acc))
       | _ -> build_inst_key_set(rest, acc)
 
-# Pre-scan pass: register FnDecl signatures (with their constraint field) and
-# TypeDecl constructors for all declarations without typechecking bodies.
-# Also tracks AliasDecl entries so that type aliases in signatures are resolved.
-# TypeDecl pre-scanning is required to allow forward references to type
-# constructors (e.g. a fn defined before the type it uses in the same module).
-# For a single-parameter type alias `F a = G H a`, store `G H` in alias_env so that
-# TypeApply (TypeName "F") X is resolved by type_from_ast's TApp branch to `G H X`.
-# Only handles the structural form TApp T (TVar sentinel); silently skips other forms.
-fn register_single_param_alias(
-  name: String, param: String, rhs_te: ast.TypeExpr, alias_env: Dict types.Type
-) -> Dict types.Type =
-  match type_from_ast(rhs_te, dict_set(param, types.TVar(types.tyvar_id(sentinel)), dict_empty())) with
-  | types.TApp inner_ty (types.TVar tname) ->
-      if types.tyvar_identity(tname) == sentinel then dict_set(name, inner_ty, alias_env)
-      else alias_env
-  | _ -> alias_env
-  where sentinel = str_concat("__aliasparam__", param)
-
 # An extern is always marked global, but its signature is bound only when the name
 # is free: a module re-declaring an extern already in scope must not shadow the
 # scheme that is there, and the marker must not be lost to that skip either.
@@ -6635,6 +7074,8 @@ fn pre_scan_extern(
         dict_set("@arity:" ++ name, arity_marker(list_length(params)),
           dict_set(name, scheme_from_fn_parts(name, params, ret_type_maybe, effects_maybe, alias_env), env)))
 
+# Register every FnDecl signature and TypeDecl constructor without checking a
+# body, so a declaration may reference one written below it.
 fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Dict types.Type) -> Dict types.Scheme =
   match decls with
   | Nil -> env
@@ -6649,15 +7090,13 @@ fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Di
           pre_scan_fn_decls(rest,
             pre_scan_extern(name, params, ret_type_maybe, effects_maybe, alias_env, env),
             alias_env)
-      | ast.AliasDecl name [] rhs_te _ ->
-          pre_scan_fn_decls(rest, env,
-            dict_set(name, type_from_ast(rhs_te, dict_empty()), alias_env))
-      | ast.AliasDecl name [param] rhs_te _ ->
-          pre_scan_fn_decls(rest, env, register_single_param_alias(name, param, rhs_te, alias_env))
+      # Every alias is already in `alias_env`, put there in dependency order by
+      # register_all_aliases before this walk starts.
+      | ast.AliasDecl _ _ _ _ -> pre_scan_fn_decls(rest, env, alias_env)
       | ast.TypeDecl _ _ _ _ _ _ ->
-          pre_scan_fn_decls(rest, register_type_decl_raw(decl, env), alias_env)
+          pre_scan_fn_decls(rest, register_type_decl_raw(decl, alias_env, env), alias_env)
       | ast.WrapDecl _ _ _ ->
-          pre_scan_fn_decls(rest, register_type_decl_raw(decl, env), alias_env)
+          pre_scan_fn_decls(rest, register_type_decl_raw(decl, alias_env, env), alias_env)
       | _ -> pre_scan_fn_decls(rest, env, alias_env)
 
 # ---------------------------------------------------------------------------
@@ -7226,12 +7665,10 @@ fn typecheck_singleton(
   env_ftv: List String
 ) -> GroupResult !{IO} =
   match decl with
-  | ast.AliasDecl name [] rhs_te _ ->
-      alias_group_ok(i, decl, out, env, subst, env_ftv,
-        dict_set(name, type_from_ast(rhs_te, dict_empty()), alias_env))
-  | ast.AliasDecl name [param] rhs_te _ ->
-      alias_group_ok(i, decl, out, env, subst, env_ftv,
-        register_single_param_alias(name, param, rhs_te, alias_env))
+  # `alias_env` already holds every alias in the module; the declaration is a
+  # pass-through whose only remaining job is to reach the typed output.
+  | ast.AliasDecl _ _ _ _ ->
+      alias_group_ok(i, decl, out, env, subst, env_ftv, alias_env)
   | _ ->
       do
         r <- typecheck_decl(state, decl, env, subst, eff_subst, alias_env, env_ftv)
@@ -7464,14 +7901,18 @@ fn typecheck_decl(
   # TypedDeclOk boundary.
   match decl with
   | ast.TypeDecl _ _ _ _ _ _ ->
-      TypedDeclOk(typed_ast.TPassThrough(decl), register_type_decl(decl, env), env_ftv, subst)
+      TypedDeclOk(typed_ast.TPassThrough(decl),
+        GlobalEnv(register_type_decl_raw(decl, alias_env, global_env_dict(env))),
+        env_ftv, subst)
   | ast.WrapDecl _ _ _ ->
       # WrapDecl uses the same single-ctor-synthesizing path as TypeDecl.
-      TypedDeclOk(typed_ast.TPassThrough(decl), register_type_decl(decl, env), env_ftv, subst)
+      TypedDeclOk(typed_ast.TPassThrough(decl),
+        GlobalEnv(register_type_decl_raw(decl, alias_env, global_env_dict(env))),
+        env_ftv, subst)
   | ast.RecordDecl rec_name type_params fields _ mult _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl),
         GlobalEnv(mark_type_multiplicity(rec_name, mult,
-          register_record_fields(rec_name, type_params, fields, global_env_dict(env)))),
+          register_record_fields(rec_name, type_params, fields, alias_env, global_env_dict(env)))),
         env_ftv, subst)
   | ast.FnDecl name _ _ _ _ _ decl_pos ->
       # Unreachable. typecheck_group routes EVERY FnDecl through typecheck_fn_group,
@@ -7523,7 +7964,7 @@ fn typecheck_decl(
       TypedDeclOk(typed_ast.TPassThrough(decl), env, env_ftv, subst)
   | ast.ClassDecl class_name type_params methods superclasses _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl),
-        GlobalEnv(register_class_methods(type_params, methods,
+        GlobalEnv(register_class_methods(type_params, methods, alias_env,
           register_class_method_markers(class_name, type_params, methods,
             register_superclass_markers(class_name, superclasses, global_env_dict(env))))),
         env_ftv, subst)
@@ -9183,13 +9624,16 @@ fn is_unknown_ref(msg: String) -> Bool =
 # ClassDecl: method registration + constraint markers
 # ---------------------------------------------------------------------------
 
-fn register_class_methods(type_params: List String, methods: List ast.ClassMethodSig, env: Dict types.Scheme) -> Dict types.Scheme =
+fn register_class_methods(type_params: List String, methods: List ast.ClassMethodSig,
+                          alias_env: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
   match methods with
   | Nil -> env
   | Cons sig rest ->
-      register_class_methods(type_params, rest, register_class_method(type_params, sig, env))
+      register_class_methods(type_params, rest, alias_env,
+        register_class_method(type_params, sig, alias_env, env))
 
-fn register_class_method(type_params: List String, sig: ast.ClassMethodSig, env: Dict types.Scheme) -> Dict types.Scheme =
+fn register_class_method(type_params: List String, sig: ast.ClassMethodSig,
+                         alias_env: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
   match sig with
   | ast.ClassMethodSig name params ret_type effects_maybe ->
       # Extend the class type params with any additional lowercase type variables
@@ -9197,9 +9641,12 @@ fn register_class_method(type_params: List String, sig: ast.ClassMethodSig, env:
       # `fmap(f: a -> b, xs: f a) -> f b`).  Without this, method-specific
       # vars become TConst instead of TVar, corrupting the inferred substitution
       # at call sites and producing spurious "No instance of X for Y" errors.
+      #
+      # Over `alias_env`, so a method's signature resolves aliases as its
+      # implementations do — the call site reads THIS scheme.
       dict_set(name, scheme_from_fn_parts_inner(
         collect_ret_type_vars(Just(ret_type), collect_param_type_vars(params, type_params)),
-        name, params, Just(ret_type), effects_maybe, dict_empty()), env)
+        name, params, Just(ret_type), effects_maybe, alias_env), env)
 
 fn register_class_method_markers(class_name: String, type_params: List String, methods: List ast.ClassMethodSig, env: Dict types.Scheme) -> Dict types.Scheme =
   match methods with
@@ -9342,7 +9789,10 @@ fn check_instance_method(
         # and the substitution threaded across top-level declarations must never
         # be able to reach either of them. Nothing merges an instance method's
         # substitution into that thread, so within one method the name is unique.
-        let decl_scheme = scheme_from_fn_parts("#inst/" ++ name, params, ret_maybe, eff_maybe, dict_empty())
+        # The class's own method declaration resolves aliases, so this must too
+        # or the two sides of one method disagree. `alias_env` does not reach
+        # this deep; the env's `@aliasty:` markers carry the same table.
+        let decl_scheme = scheme_from_fn_parts("#inst/" ++ name, params, ret_maybe, eff_maybe, aliases_for_annotations(env))
         (inst_type, prog_to_fresh) <- unifier.instantiate_with_vars(state, decl_scheme)
         let fwd_env = seed_forward_markers(inst_constraints, prog_to_fresh, env)
         let body_env = extend_env_with_params(params, ctor_param_types(inst_type), fwd_env)

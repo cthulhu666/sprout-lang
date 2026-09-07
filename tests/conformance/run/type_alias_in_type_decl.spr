@@ -1,0 +1,36 @@
+# An alias is transparent in a CONSTRUCTOR or RECORD FIELD, not only in a
+# function signature. spec-v0 §5.6.1 says `type alias Foo = Int` makes the two
+# interchangeable everywhere; field types were built with no alias environment
+# at all, so `Foo` stayed opaque and would not meet `Int`.
+
+type alias Foo = Int
+type alias Names = List String
+type alias Pair m = (m, Int)
+
+type Holder = (n: Foo, tags: Names)
+
+type Wrapped a =
+  | Wrapped (Pair a)
+  | Empty
+
+# A `wrap`'s inner type is a field position too. It registers through the same
+# function as a constructor field and was the arm that kept an empty alias
+# environment after the others were fixed.
+wrap Tagged = Names
+
+fn read(h: Holder) -> Int = h.n + list_length(h.tags)
+
+fn inner(w: Wrapped String) -> Int =
+  match w with
+  | Wrapped (_, n) -> n
+  | Empty -> 0
+
+fn untag(t: Tagged) -> Int =
+  match t with
+  | Tagged ns -> list_length(ns)
+
+fn main() -> Unit !{IO} = do
+  print(to_string(read(Holder(n = 5, tags = ["a", "b", "c"]))))
+  print(to_string(inner(Wrapped(("x", 9)))))
+  print(to_string(inner(Empty)))
+  print(to_string(untag(Tagged(["a", "b"]))))

@@ -1014,7 +1014,38 @@ typechecker while sharing the underlying representation.
 Int` makes `Foo` interchangeable with `Int` everywhere. A `wrap` is opaque to
 callers and requires explicit construction or pattern matching.
 
-### 5.6.2 Type identity
+### 5.6.2 `type alias` declaration
+
+```sprout
+type alias Names = List String
+type alias Pair m = (m, Int)
+type alias Handler a = Int -> a !{IO}
+```
+
+A `type alias` introduces a **transparent name for a type**. It declares no new
+type: every use is replaced by the right-hand side, so an alias and the type it
+names are the same type in every position — a signature, a record or
+constructor field, an annotation inside a body.
+
+An alias may take parameters. `type alias F a b = T` is applied as `F X Y`, and
+the use expands to `T` with `a` and `b` replaced by `X` and `Y`. The body may be
+of any shape: a type application, a tuple, an arrow, or another alias.
+
+- **Arity is exact.** An alias declared with *k* parameters must be applied to
+  exactly *k* arguments. A zero-parameter alias is exempt, because its body may
+  itself be a partially applied type constructor: `type alias E = Result String`
+  may be written `E Int`. A mismatch is reported where it is written in a
+  declaration or a signature; in an annotation *inside* a function body it is
+  reported instead as a type mismatch naming the alias.
+- **An alias may not be part of a cycle**, whether it refers to itself or
+  reaches itself through other aliases. Expansion is substitution at the use
+  site, so a cycle has no finite expansion; it is rejected at the declaration.
+- **A name may be declared as an alias only once** in a module, including at
+  different arities.
+- **Declaration order does not matter.** An alias is visible to declarations
+  written above it, as a type declaration is.
+
+### 5.6.3 Type identity
 
 Two types are equal **iff they have the same canonical identity assigned by name
 resolution** — not iff their unqualified names match. Name resolution maps every
@@ -1036,7 +1067,7 @@ stdlib one.
 > room for a future generative identity (functors / path-dependent types) without
 > a spec change.
 
-### 5.6.3 Record declaration
+### 5.6.4 Record declaration
 
 ```sprout
 type Point = (x: Int, y: Int)

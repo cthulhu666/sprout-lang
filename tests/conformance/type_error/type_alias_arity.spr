@@ -1,0 +1,13 @@
+# An alias applied to the wrong number of arguments is reported where it is
+# written. Under-application used to leave the alias name standing as an opaque
+# type, so the error surfaced later as a mismatch between `Pairing` and whatever
+# it should have expanded to.
+
+type alias Pairing a b = Result a b
+
+fn tag(r: Pairing Int) -> String =
+  match r with
+  | Ok s -> s
+  | Err _ -> "err"
+
+fn main() -> Unit !{IO} = print(tag(Ok("x")))

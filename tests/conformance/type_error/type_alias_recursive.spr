@@ -1,0 +1,9 @@
+# An alias is expanded at its use sites, so one that refers to itself has no
+# finite expansion. Rejected at the declaration rather than diverging in the
+# expander.
+
+type alias Loop = List Loop
+
+fn count(l: Loop) -> Int = list_length(l)
+
+fn main() -> Unit !{IO} = print(to_string(count([])))
