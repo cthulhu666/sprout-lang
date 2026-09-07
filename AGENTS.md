@@ -123,13 +123,17 @@ Workflow:
 work — git, the design docs and `docs/spec-v0.md` are the record. Same anti-bloat argument as the
 memory rules below, one level out.
 
-1. **Shape.** An entry is a bold title plus **at most three lines**: what is broken, where, and why it
-   matters. Anything longer is a design doc — write `docs/<feature>-v0.md` and link it. Measurements,
-   prior-art surveys and rejected alternatives live in the doc, not the entry.
+1. **Shape.** Wrap `BACKLOG.md` at **100 columns**, and keep an entry to **at most 10 lines**: a bold
+   title, then what is broken, where, and why it matters. Anything longer is a design doc — write
+   `docs/<feature>-v0.md` and link it. Measurements, prior-art surveys and rejected alternatives live
+   in the doc, not the entry. `just backlog-shape` checks both halves; a line budget means nothing
+   while one line can hold a paragraph. Wrapped at 100, entries sit at p50 6 lines and p90 12, so 10
+   is the existing tail. This rule first said "three lines", which **38 of 312 entries met** — a gate
+   that is red on arrival gets switched off.
 2. **Death trigger (the anti-bloat rule).** When the work lands, **delete the entry as part of
    landing**. Its durable content moves to the design doc it names, or to the spec; a lesson about
-   *process* rather than the feature goes in this file. Do not leave a `[x]` entry behind, and do not
-   keep an "original report follows" block — git has it.
+   *process* rather than the feature goes in this file. Do not leave a `[x]` entry behind — the gate
+   rejects one — and do not keep an "original report follows" block, because git has it.
 3. **Before filing, grep for it.** A duplicate filing is the failure this discipline exists to
    prevent, and it has happened at least three times: one bug filed on the 5th and again on the 7th
    with a smaller scope, one `just fmt` defect filed three times across two sections, one
