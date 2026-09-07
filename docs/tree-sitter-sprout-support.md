@@ -12,8 +12,8 @@ Not a normative language spec.
 >   of sync with the language** — see "Verified grammar gaps".
 > - **CBM side.** Contrary to this document's previous status note, the extension entry **does
 >   exist** — on two unmerged branches of the fork `cthulhu666/codebase-memory-mcp`:
->   `codex/sprout-support` (`434926e`, 2026-04-21) and `codex/sprout-index-persistence-fix`
->   (`70f55b0`, 2026-04-22). They carry the vendored grammar, the `grammar_sprout.c` shim,
+>   `codex/sprout-support` (tip `94d30b0`; its clean feature commit is `434926e`, 2026-04-21) and
+>   `codex/sprout-index-persistence-fix` (`70f55b0`, 2026-04-22). They carry the vendored grammar, the `grammar_sprout.c` shim,
 >   `CBM_LANG_SPROUT`, a full `lang_specs.c` row, `.sprout` in `EXT_TABLE`, Sprout cases in
 >   `extract_defs.c` / `extract_calls.c` / `extract_imports.c` / `helpers.c`, `THIRD_PARTY.md`
 >   attribution, and tests.
@@ -42,21 +42,24 @@ consumers (this repo and `uncharted-suns`) are both call-graph shaped.
 
 ## Verified Grammar Gaps
 
-Measured against the 801-file corpus (147 `.sprout` + 654 `.spr`). Reference for syntax and
-precedence is `stdlib/compiler/parser.sprout`; the operator/token list is
-`stdlib/compiler/lexer.sprout:343`.
+Measured at `e53f8f00` against the 892-file corpus (166 `.sprout` + 726 `.spr`). Reference for
+syntax and precedence is `stdlib/compiler/parser.sprout`; the operator/token list is
+`stdlib/compiler/lexer.sprout:344` (`try_ops`).
+
+Counts and line numbers are a snapshot, not an invariant — re-measure before sizing the work.
+Each citation names the enclosing function so `git grep` re-finds it once it drifts.
 
 ### Declarations
 
 | Gap | Reality | Corpus evidence |
 |---|---|---|
-| `extern fn name(...) -> T`, no body | keyword absent from grammar | 141 uses; `stdlib/bits.sprout:46` |
-| `deriving (C, ...)` trailing clause | absent | 206 uses; `examples/records_demo.sprout:12` |
-| `wrap Name = TypeExpr` | absent — it is the 7th declaration keyword (`parser.sprout:2068`) | `stdlib/linalg.sprout:12` |
-| `(..)` constructor-visibility marker | absent (`parser.sprout:2307`) | `stdlib/json.sprout:8` |
+| `extern fn name(...) -> T`, no body | keyword absent from grammar | 152 declarations; `stdlib/bits.sprout:47` |
+| `deriving (C, ...)` trailing clause | absent | 84 clauses; `examples/records_demo.sprout:12` |
+| `wrap Name = TypeExpr` | absent — it is the 7th declaration keyword (`parser.sprout:2143 is_decl_keyword`) | `stdlib/linalg.sprout:12` |
+| `(..)` constructor-visibility marker | absent (`parser.sprout:2382 exports_ctors`) | `stdlib/json.sprout:8` |
 | `type linear Name` | contextual marker, absent | `stdlib/net.sprout:100` |
 | **Records** | grammar says `{ }` (`grammar.js:142`); real syntax is `( field: T, ... )` | `examples/records_demo.sprout:14` |
-| Effect rows `!{IO}` | absent | `stdlib/fs.sprout:31` |
+| Effect rows `!{IO}` | absent | `stdlib/fs.sprout:33` |
 | `where` block after a function body | absent | `stdlib/bytes.sprout:140` |
 
 ### Expressions (required for `CALLS`)
@@ -68,8 +71,8 @@ precedence is `stdlib/compiler/parser.sprout`; the operator/token list is
 | Field access | grammar says `get e f` (`grammar.js:393`); real syntax is postfix `e.f` | `examples/records_demo.sprout:26` |
 | `with (...)` record update | absent | `examples/records_demo.sprout:32` |
 | `let … in` / `let … else` | absent; the current `let_declaration` rule misparses the expression form | `tests/stdlib/test_let_else.spr:9` |
-| `_` placeholder partial application | absent (`parser.sprout:1170`) | — |
-| Operators `++ >> << .. %`, string templates, `exists`/GADT forms | absent | `lexer.sprout:343` |
+| `_` placeholder partial application | absent (`parser.sprout:1170 arg_is_hole`) | — |
+| Operators `++ >> << .. %`, string templates, `exists`/GADT forms | absent | `lexer.sprout:344 try_ops` |
 
 ## Sprout-Specific Parser Constraints
 
@@ -125,8 +128,8 @@ checkpoints (`94d30b0`, `70f55b0`) for now. Resolve drift across `cbm.h`, `lang_
 The grammar is currently **not gated at all** — no `justfile` recipe runs `tree-sitter`, which is
 why it drifted. Before editing `grammar.js`:
 
-- `scripts/ts_parse_coverage.sh` — `tree-sitter parse` over all 801 files, reporting per-file
-  `ERROR`/`MISSING` counts and a corpus-wide rate.
+- `scripts/ts_parse_coverage.sh` — `tree-sitter parse` over every `.sprout` and `.spr` file,
+  reporting per-file `ERROR`/`MISSING` counts and a corpus-wide rate.
 - `just tree-sitter-test` — `tree-sitter test` plus the coverage script, wired into CI.
 
 **Differential oracle.** `sproutd --analysis-service <stdlib_root>` speaks JSON-lines and answers
@@ -142,15 +145,16 @@ Close every row in "Verified grammar gaps". Regenerate and commit `src/parser.c`
 `src/grammar.json`, `src/node-types.json`. Extend `test/corpus/` past the single `basic.txt` —
 one file per declaration form, following the `tools/tree-sitter-form/test/corpus/` layout.
 
-**Exit criterion: 0 `ERROR` nodes across all 801 files**, per the step-2 harness.
+**Exit criterion: 0 `ERROR` nodes across the whole corpus**, per the step-2 harness.
 
 ### 4. Re-vendor and finish the CBM wiring
 
 1. Copy regenerated artifacts into `internal/cbm/vendored/grammars/sprout/`. The branch's copy
    predates both `e90b31d8 "tree-sitter: fix sprout binding and layout regressions"` and all of
    step 3.
-2. **Register `.spr`.** The branch registered only `.sprout`, missing **654 of 801** files. No
-   collision: no `.spr*` entry exists in CBM's `EXT_TABLE`.
+2. **Register `.spr`.** The branch registered only `.sprout`, missing **726 of 892** files — the
+   whole test corpus, and the larger half. No collision: no `.spr*` entry exists in CBM's
+   `EXT_TABLE`.
 3. `helpers.c` — `cbm_is_test_file()` for `tests/**/*.spr`; `func_kinds_sprout[]`; a Sprout
    keyword list for `cbm_is_keyword()` (currently falls back to `generic_keywords`).
 4. **Pipe call edges.** Add `binary_expression` to `sprout_call_types` and extend the Sprout
@@ -188,7 +192,7 @@ one file per declaration form, following the `tools/tree-sitter-form/test/corpus
 
 ## Verification
 
-1. `just tree-sitter-test` — corpus green, 0 `ERROR` nodes across 801 files.
+1. `just tree-sitter-test` — corpus green, 0 `ERROR` nodes across every `.sprout` and `.spr` file.
 2. Differential oracle — zero disagreements between `tags.scm` and
    `symbol_locations_in_source`.
 3. `make -f Makefile.cbm test` and `scripts/lint.sh` green.
