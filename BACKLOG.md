@@ -3285,8 +3285,9 @@ version's status block was wrong about what exists).
   unmerged since April.** CBM's project for this repo holds **1 node, 0 edges** — the bare
   `Project` node — so `search_graph`, `get_architecture` and `trace_call_path` are useless on
   Sprout, including on `uncharted-suns`. The C-side wiring already exists on two unmerged
-  branches of the fork `cthulhu666/codebase-memory-mcp` (`codex/sprout-support` `434926e`,
-  `codex/sprout-index-persistence-fix` `70f55b0`): vendored grammar, `CBM_LANG_SPROUT`, a full
+  branches of the fork `cthulhu666/codebase-memory-mcp` (`codex/sprout-support`, tip `94d30b0`,
+  clean feature commit `434926e`; `codex/sprout-index-persistence-fix` `70f55b0`): vendored
+  grammar, `CBM_LANG_SPROUT`, a full
   `lang_specs.c` row, extractor cases, `THIRD_PARTY.md` row, tests. **It did not stall on
   Sprout** — it stalled on a CBM *core* defect, recorded in `94d30b0`: *"The direct page writer
   currently produces inconsistent on-disk graphs for mixed real-world projects, including Sprout
@@ -3298,15 +3299,16 @@ version's status block was wrong about what exists).
   recipe runs `tree-sitter` at all, so nothing has ever checked the grammar against real source.
   It is a self-declared conservative scaffold with 14 verified divergences — records are `( f: T )`
   but the grammar says `{ }`; field access is postfix `e.f` but the grammar has `get e f`; and
-  `extern` (141 uses), `deriving` (206 uses), `wrap`, `linear`, `(..)`, `|>`, effect rows `!{IO}`,
-  `let..in` / `let..else`, `with (…)` and the operators `++ >> << .. %` are absent outright. The
-  fix has a prerequisite: **build the measuring instrument first** — `scripts/ts_parse_coverage.sh`
-  over all 801 files plus a `just tree-sitter-test` recipe — because tree-sitter degrades to
+  `extern` (152 declarations), `deriving` (84 clauses), `wrap`, `linear`, `(..)`, `|>`, effect rows
+  `!{IO}`, `let..in` / `let..else`, `with (…)` and the operators `++ >> << .. %` are absent
+  outright. The fix has a prerequisite: **build the measuring instrument first** —
+  `scripts/ts_parse_coverage.sh` over the whole corpus plus a `just tree-sitter-test` recipe —
+  because tree-sitter degrades to
   `ERROR` nodes silently, so without a corpus-wide rate you cannot tell 95% coverage from 40%.
   `sproutd --analysis-service` is a ready-made differential oracle: diff its
   `symbol_locations_in_source` against the `queries/tags.scm` captures per file.
 - [ ] `P3` **`.spr` was never registered with CBM.** The April branch added only `.sprout` to
-  `EXT_TABLE`, which misses **654 of 801** Sprout files — the entire test corpus. No collision:
+  `EXT_TABLE`, which misses **726 of 892** Sprout files — the entire test corpus. No collision:
   CBM has no `.spr*` entry today. Also needs a `cbm_is_test_file()` case, since `.spr` files are
   non-importable entrypoint scripts rather than library modules.
 - [ ] `P3` **CBM's `TEST(sprout_basics)` asserts on syntax Sprout does not have.** It uses
