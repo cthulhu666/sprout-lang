@@ -916,7 +916,13 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
                     # The unboxing sret optimization lands in PR 2b.
                     if actual_ar == 0
                     then translate_zero_arity_ctor(name, tag, idx, cur_label, cur_ops, name_prefix)
-                    else Err("ast_to_ir: bare reference to non-zero-arity ctor '" ++ name ++ "' (eta/partial application) deferred to follow-up PR")
+                    # Unreachable from source: infer's value_ref_eta rewrites a bare
+                    # field-carrying constructor into `\(x…) -> C(x…)` before lowering,
+                    # so only a saturated TCall reaches the ctor path. Kept as an
+                    # internal-invariant backstop — reaching it means that rewrite was
+                    # skipped, and a silent fallthrough would emit a closure-shaped
+                    # value with no code pointer.
+                    else Err("ast_to_ir: internal: bare reference to non-zero-arity ctor '" ++ name ++ "' survived eta-expansion in infer")
             | Nothing ->
                 # M3 PR 5: top-level `let x = expr` declarations are stored in
                 # LLVM globals; TVar references load from the global slot.

@@ -656,6 +656,22 @@ Lambda expressions are anonymous functions.
   (above) to partially apply. A function whose declared return type is itself a
   function (e.g. `-> Int -> Int`) is not under-application: it is saturated at its own
   parameter count and returns that function.
+- A **data constructor is a function value when named without parentheses**, and
+  under-applying one is the same compile error as under-applying a function. A
+  constructor `C` of arity N>0 mentioned in value position denotes exactly
+  `C(_, …, _)` — the N-parameter lambda that constructs — so `list_map(Just, xs)`
+  is legal and means `list_map(\x -> Just(x), xs)`. This holds for every
+  constructor form: an ADT constructor, a `wrap`'s constructor, and an
+  existential one (whose hidden witnesses are resolved at the implied call, as at
+  a written one). A **nullary** constructor is a plain value, not a function:
+  `Nothing` is a `Maybe a`, never `\-> Nothing`. A record type name is not a
+  constructor and is not bound as a value at all (§5.6). One restriction: a
+  constructor with a **linear** field cannot be used as a function value in either
+  spelling, because the implied lambda would take a linear parameter and
+  higher-order linearity is deferred (§5.8); construct it with a written call.
+  A **parameter** may shadow a constructor's name — `parse_param` accepts any
+  identifier, unlike a pattern, where a capitalized name is a constructor pattern —
+  and inside that scope the name is the local, not the constructor.
 - **Applying a function-typed *value* is checked at run time, not compile time.** A
   function type does not determine how many arguments one application consumes: a
   two-parameter lambda `\ (x, y) -> …` and a nested pair of one-parameter lambdas

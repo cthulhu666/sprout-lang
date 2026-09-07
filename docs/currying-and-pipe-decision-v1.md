@@ -347,6 +347,31 @@ Non-hole arguments are captured **by expression**, re-evaluated per call: `add(_
 `\x -> add(x, g())`, so `g()` runs on each invocation. For pure `g` (the common case; Sprout
 tracks effects) this is unobservable; a user wanting single evaluation binds the value first.
 
+### 9a.4b A bare constructor is the all-holes spelling (added 2026-09-07)
+
+C-b left one gap that only showed up under use. `C(_, _)` worked from the start — it is an
+ordinary call with holes — but the *bare* `C` did not: it typechecked and then failed in the
+backend with `bare reference to non-zero-arity ctor '…' (eta/partial application) deferred to
+follow-up PR`, a promise nothing tracked. Under-applying a constructor (`C(1)` where C takes
+two fields) missed the check-time arity rule for a related reason and died in the same place,
+while `f(1)` on a two-parameter function had always been a clean check error.
+
+Both came from one omission: `pre_scan_fn_decls` records an `@arity:` marker for functions and
+constructors got none, so `fn_declared_arity` answered `Nothing` for every constructor and both
+readers that consult it went quiet. Constructors now carry a `@ctor:<name>` marker of their own
+(the same sentinel idiom), which restores the arity error and lets `infer.value_ref_eta` rewrite
+a bare mention into the lambda `C(_, …, _)` already denotes.
+
+Two properties of doing it in `infer` rather than in the backend are worth recording:
+
+- It runs **before dictionary injection**, so a constrained existential constructor
+  (`| Drawable (any Shape)`) works — its hidden witness slots are filled at the synthesized call
+  exactly as at a written one. A backend-level wrapper would have had to reject that case, since
+  by then the evidence is gone.
+- The machinery already existed. A value-position mention of a `where`-constrained function was
+  eta-expanded this way already, and it bailed on constructors *only* for want of the arity
+  marker — so the constructor case is that path finally reaching its second caller, not a new one.
+
 ### 9a.5 How C-b reshapes the decision
 
 - It **satisfies "pass partials around"** — `add(_, 3)` is a first-class value you can store,

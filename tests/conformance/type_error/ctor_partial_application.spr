@@ -1,0 +1,14 @@
+module main
+
+# Sprout is n-ary: a call must be saturated, and `_` is the spelling for a
+# partial application. A function already reports that at check time; a
+# constructor used to escape the check and fail in the backend instead.
+
+type Pair = | Pair Int String
+
+fn render(p: Pair) -> String =
+  match p with
+  | Pair n s -> int_to_string(n) ++ s
+
+fn main() -> Unit !{IO} =
+  list_each(print, list_map(render, list_map(Pair(7), ["a", "b"])))

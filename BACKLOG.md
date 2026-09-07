@@ -2110,20 +2110,109 @@ Legend:
   `unifier.sprout:86` calling accept-when-unknown "the only safe direction for a
   conservatism knob": it is safe against false rejections and unsafe against this.
 
-- [ ] `P2` **A bare non-zero-arity constructor cannot be used as a function value.**
-  `apply_to(Wrap, 5)` fails with `ERROR: ast_to_ir: bare reference to non-zero-arity ctor
-  'main.Wrap' (eta/partial application) deferred to follow-up PR`
-  (`ast_to_ir.sprout:919`). `Wrap(_)` works and is the current spelling. Verified 2026-09-07
-  by compiling and running both halves. **Nothing tracked this** — the diagnostic promises a
-  follow-up PR that was never filed, so it is recorded here now.
+- [x] `P2` **A bare non-zero-arity constructor cannot be used as a function value. FIXED
+  2026-09-07.** `apply_to(Wrap, 5)` failed with `ERROR: ast_to_ir: bare reference to
+  non-zero-arity ctor 'main.Wrap' (eta/partial application) deferred to follow-up PR`
+  (`ast_to_ir.sprout:919`) — a follow-up nothing tracked. It sat directly on the
+  widget-embedding path: `map_msgs(ChildMsg, unf, w)` is the natural call at every embedding
+  site and was exactly the failing shape.
 
-  It sits directly on the widget-embedding path: `map_msgs(ChildMsg, unf, w)` is the natural
-  call at every embedding site and is exactly the failing shape, so every user of that API
-  hits it on their first embed. Adjacent to the eta-wrapper work in commit `483c74c6`
-  (`ast_to_ir`: lower an intrinsic's eta wrapper instead of calling an absent symbol) but not
-  covered by it. Fix is to synthesise the same eta wrapper for a constructor reference in
-  value position. Until then, document the `(_)` spelling wherever a constructor-as-function
-  argument is expected.
+  **The fix is not the one filed here.** This entry proposed synthesising an IR-level eta
+  wrapper in `ast_to_ir`, mirroring commit `483c74c6`. Two facts found by probing rather than
+  reading made that the wrong layer. First, `C(_, _)` *already worked* — the `_`-placeholder
+  desugar (`parser.sprout:1170`) turns any call with holes into a lambda at parse time — so
+  the feature existed and only the implicit spelling was missing. Second, `infer` already
+  eta-expands a value-position mention of a `where`-constrained function
+  (`constrained_fn_eta`), and that path bailed on constructors for one reason: it asks
+  `fn_declared_arity`, which reads an `@arity:` marker that `pre_scan_fn_decls` writes for
+  functions only.
+
+  So the change is a marker, not a backend feature: `register_one_ctor` now records
+  `@ctor:<name>` (the established sentinel idiom), `fn_declared_arity` falls back to it, and
+  `constrained_fn_eta` — renamed `value_ref_eta`, since it now serves two kinds of reference —
+  fires for constructors too. Both of its call sites benefit: `infer_var` (value position) and
+  `eta_expand_constrained_arg` (argument position, the one that routes through the push-down
+  path). `lowering` and `ast_to_ir` are unchanged; `ast_to_ir:919` became an
+  internal-invariant backstop and is reworded as one.
+
+  Four consequences worth keeping:
+
+  - **Under-application of a constructor is now a check-time arity error**, the same
+    `'C' expects N arguments, got M (Sprout is n-ary; use `_` for partial application)` a
+    function gets. It used to escape the check entirely and surface as an `ast_to_ir` internal
+    message, purely because of the missing marker. Fixture:
+    `tests/conformance/type_error/ctor_partial_application`.
+  - **Over-application names the constructor and the count** instead of reporting a unification
+    artifact. `Nothing(1)` was `Call type mismatch: Maybe $t2562 vs Int -> $t2563`, which names
+    neither. Found by probing the marker's other reader rather than by a failing test — the full
+    suite was green over it. The message is `over_application_error`, shared with functions, and
+    its trailing "if it returns a function, apply the rest in a separate call" reads oddly for a
+    nullary constructor; it is left shared deliberately, since that phrasing was already written
+    to be conditional (see its comment) and a field-carrying constructor CAN return a function
+    (`type F = | F (Int -> Int)`, then `F(g)(3)`). Fixture:
+    `tests/conformance/type_error/ctor_over_application`.
+  - `Nothing()` — applying a nullary constructor to no arguments — is accepted, and was accepted
+    before. Checked explicitly because `fn_declared_arity` now answers `Just 0` for nullary
+    constructors and feeds `callee_has_zero_declared_arity`, which separates `mk()` from
+    `adder()`; the concern was that the marker had silently changed that branch. Verified by
+    running the shape under a compiler built from the pre-change seed: identical.
+  - **A constrained existential constructor works**, and was expected not to. Because the
+    rewrite runs in `infer` it lands BEFORE dictionary injection, so the synthesized call gets
+    its hidden witness slots exactly as a hand-written one does. A backend-level wrapper would
+    have had to reject that case. Fixture:
+    `tests/conformance/run/ctor_as_function_value_existential`.
+
+  **A parameter may shadow a constructor, and the first implementation got that wrong** — found
+  by `/code-review`, not by any gate. `bind_local_scheme` drops a shadowed function's `@arity:`
+  marker; the new `@ctor:` marker was not dropped alongside it, on the stated reasoning that a
+  constructor name cannot be shadowed because a capitalized name in a pattern is a constructor
+  pattern. True of patterns, **false of parameters**: `parse_param` accepts any identifier. Only
+  PRELUDE constructors are exposed (own-module and imported ones are bundler-qualified, so a bare
+  parameter cannot collide), which is why the whole test corpus was green over it. Both readers
+  went wrong: `fn f(Just: Int) -> Int = Just + 1` was rewritten into `\x -> Just(x)` and rejected
+  as `Int vs $t -> $t`, naming nothing the user wrote; and `fn f(Nothing: Int -> Int) = Nothing()`
+  had its under-application check defeated — it compiled, linked, and died at run time on a
+  closure arity mismatch. Fixed by dropping `@ctor:` in `bind_local_scheme`. Guarded by
+  `tests/stdlib/test_ctor_shadowed_by_param.spr` (5 assertions) and
+  `tests/conformance/type_error/shadowed_ctor_under_application`, both A/B-verified against a
+  compiler built from the pre-change seed.
+
+  Worth recording as a fact about this change rather than only about its fix: the broken version
+  was pushed with auto-merge armed and **every gate green** — full suite, 35/35 `ci-fast-gates`,
+  `ir-golden-diff` at 0 differences, 54/54 examples. Nothing in the corpus contains a parameter
+  named `Just`, so nothing could have caught it. The lesson generalises past this entry: adding a
+  key to a shared lookup table means auditing its WRITERS as well as its readers —
+  `fn_declared_arity`'s three readers were checked and `bind_local_scheme`, which edits the env,
+  was never looked at, and that is exactly where the defect was. The second half is the
+  prelude/user asymmetry: prelude names are unqualified and user names are bundler-qualified, so
+  any name-keyed mechanism behaves differently for `Just` than for `main.Pair`, and a same-module
+  test cannot see the difference. Any future marker family inherits both hazards.
+
+  Coverage: `tests/conformance/run/ctor_as_function_value` (ADT, `wrap`, prelude, polymorphic
+  multi-ctor, and the `_` spelling agreeing) and `tests/stdlib/test_ctor_as_function_value.spr`
+  (adds the imported-module case — plus both eta call sites and the nullary-stays-a-value guard).
+  Spec §5.3; rationale in `docs/currying-and-pipe-decision-v1.md` §9a.4b.
+
+  On the imported case, one mechanism note, because the obvious explanation is the wrong one:
+  `module_loader.is_marker_key` keeps `@`-prefixed keys unprefixed across an import, so a marker
+  and a qualified scheme would seem liable to disagree. They do not, and not because the lookup
+  is forgiving — on the compile path the **bundler qualifies before infer runs**, so
+  `register_one_ctor` sees `rec_fixture.Holder` and keys `@ctor:rec_fixture.Holder` from the same
+  string the reference uses. The unprefixed-marker rule never comes into play. The imported test
+  is still worth having: it is what distinguishes that from a lookup that only happens to agree.
+
+- [ ] `P3` **A constructor with a LINEAR field cannot be used as a function value**, and the
+  rejection names a synthesized parameter. `type linear Tok` + `type Box = | Box Tok`, then
+  `apply(Box, Tok(5))`, gives `linear lambda parameter '__eta_x0' is not yet supported (higher-order
+  linearity is deferred; …)`. Surfaced 2026-09-07 by `/code-review` on the ctor-as-function-value
+  change. The underlying restriction is the deferred higher-order-linearity work, not new — the
+  explicit `Box(_)` spelling produces the identical message with `__sprout_ph_0`, and before the
+  change the bare spelling reached the backend error instead. What *is* new is that spec §5.3 now
+  documents the bare spelling as idiomatic, so the wart is reachable from code the spec blesses.
+  Two separable pieces: (a) name the constructor rather than the eta parameter in the message,
+  which is a `linear_check` change and is worth doing on its own since `_` has the same wart; and
+  (b) support a linear parameter in a synthesized eta lambda, which is the deferred feature.
+  Spec §5.3 carries the restriction so it is not a silent surprise.
 
 - [ ] `P3` **A parameterized type alias whose body is a FUNCTION TYPE is never expanded.**
   `type alias Cmd m = Unit -> m !{IO}` parses, but using it fails with

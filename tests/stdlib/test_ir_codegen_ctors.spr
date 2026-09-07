@@ -334,11 +334,13 @@ fn main() -> Unit !{IO} =
     # ---------------------------------------------------------------------------
     # Fix A and Fix B: the explicit Err paths in ast_to_ir (`bare reference to
     # non-zero-arity ctor` and `wrong arity`) are defensive backstops for
-    # hand-built IR or future IR-synthesis passes — the typechecker rejects
-    # the same sources with TYPE errors before ast_to_ir is reached, so they
-    # cannot be exercised via translated_err_contains. The backstop Err
-    # remains load-bearing; see translate_expr (TVar→ctor) and
-    # translate_boxed_ctor_call in ast_to_ir.sprout.
+    # hand-built IR or future IR-synthesis passes, so they cannot be exercised
+    # via translated_err_contains. Neither is reachable from source: an
+    # under-applied ctor is a check-time arity error (`@ctor:` marker,
+    # infer.fn_declared_arity), and a bare field-carrying ctor is rewritten into
+    # `\(x…) -> C(x…)` by infer.value_ref_eta before lowering. Both were
+    # reachable until 2026-09-07, which is what the ctor-as-function-value work
+    # closed — the backstops stayed, the sources that hit them did not.
 
     # Fix C: ctor with an ADT-typed field.  HolderBoxed is a 3-arity boxed
     # ctor (max_arity=3) whose first field is an ADT value (InnerT, also

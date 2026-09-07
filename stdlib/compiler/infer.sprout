@@ -681,15 +681,29 @@ fn register_one_ctor(
   # at the construction site — no constructor-specific obligation code needed.
   | ast.TypeConstructor name fields exist_vars exist_constraints ->
       dict_set(
-        name,
-        types.scheme_quantified(
-          list_append(type_params, exist_vars),
-          ctor_fn_type(fields, build_local_params(exist_vars, local_vars), result_type),
-          types.EffectPure,
-          exist_constraint_pairs(exist_constraints)
-        ),
-        env
+        ctor_arity_key(name),
+        arity_marker(list_length(fields)),
+        dict_set(
+          name,
+          types.scheme_quantified(
+            list_append(type_params, exist_vars),
+            ctor_fn_type(fields, build_local_params(exist_vars, local_vars), result_type),
+            types.EffectPure,
+            exist_constraint_pairs(exist_constraints)
+          ),
+          env
+        )
       )
+
+# A constructor's declared field count, recorded with the same sentinel idiom as
+# `@arity:` (see arity_marker). Two readers need it and neither can get it from
+# the scheme: fn_declared_arity, so an under-applied constructor is an arity error
+# at check time rather than a backend failure; and value_ref_eta, which must tell a
+# constructor from an ordinary top-level function before eta-expanding a bare
+# mention. Registered for EVERY constructor — ADT, `wrap`, and existential alike,
+# since all three arrive through register_one_ctor. Records never reach here:
+# a record type name is not bound as a value at all.
+fn ctor_arity_key(name: String) -> String = "@ctor:" ++ name
 
 # Convert a constructor's existential constraints to the scheme constraint field's
 # (head_token, class) shape. The head_token is the exist var's own name: a ctor
@@ -1092,8 +1106,13 @@ fn value_var_node(name: String, t: types.Type, pos: source.SourcePos, env: Dict 
               typed_ast.TMethodRef(name, types.type_id_name(class_name), t, pos, typed_ast.EvUnresolved)
           | _ -> typed_ast.TVar(name, t, pos)
 
-# A value-position reference to a user `fn` carrying its own `where` clause, rewritten into the
-# eta-lambda the programmer could have written by hand: `label` becomes `\__eta_x0 -> label(__eta_x0)`.
+# A value-position reference that has to become a call, rewritten into the eta-lambda the
+# programmer could have written by hand: `label` becomes `\__eta_x0 -> label(__eta_x0)`.
+#
+# Two references need it, for the same underlying reason — a bare mention has no call site, and
+# the passes downstream only know how to give a name its arguments AT one.
+#
+# (a) A user `fn` carrying its own `where` clause.
 #
 # Constrained functions take one hidden parameter per method of each constraint's class (plus its
 # transitive superclasses), appended after the user-visible ones. A CALL supplies those — infer
@@ -1106,16 +1125,28 @@ fn value_var_node(name: String, t: types.Type, pos: source.SourcePos, env: Dict 
 # already handle. Nothing here resolves a dictionary: that stays resolve's job (lowering.sprout §M3b-5),
 # and the tyvar-headed case a `where`-constrained caller needs forwards for free.
 #
+# (b) A constructor of one or more fields, named without parentheses.
+#
+# `Ctor(_, …, _)` builds this same lambda already (parser.sprout, `_`-placeholder desugaring), so
+# the shape was always reachable — only the implicit spelling was missing, and it failed in the
+# backend rather than at check. Rewriting here rather than in ast_to_ir keeps every downstream pass
+# on a path it already exercises, and puts the rewrite BEFORE dictionary injection, which is what
+# lets a constrained existential (`| Drawable (any Shape)`) work: its hidden witness slots are
+# filled at the synthesized call, exactly as they are at a hand-written one.
+#
 # Class methods are excluded — the `@class:` marker routes them to TMethodRef, which lowering
-# eta-expands from Evidence. Zero-arity functions are excluded too: there is no lambda to build, and
+# eta-expands from Evidence. Zero-arity names are excluded too: there is no lambda to build, and
 # `\-> make()` is not a shape the language has.
-fn constrained_fn_eta(name: String, scheme: types.Scheme, pos: source.SourcePos, env: Dict types.Scheme) -> Maybe ast.Expr =
+fn value_ref_eta(name: String, scheme: types.Scheme, pos: source.SourcePos, env: Dict types.Scheme) -> Maybe ast.Expr =
   match dict_get("@class:" ++ name, env) with
   | Just _ -> Nothing
   | Nothing ->
       match types.scheme_constraints(scheme) with
-      | [] -> Nothing
       | [_ | _] -> constrained_fn_eta_lambda(name, pos, env)
+      | [] ->
+          match dict_get(ctor_arity_key(name), env) with
+          | Just _ -> constrained_fn_eta_lambda(name, pos, env)
+          | Nothing -> Nothing
 
 # Arity comes from the DECLARED parameter count, not from counting arrows in the type: a zero-parameter
 # function returning a function has the same `a -> b` scheme as a one-parameter function, so the type
@@ -1182,7 +1213,7 @@ fn infer_var(
   match dict_get(name, env) with
   | Nothing -> InferErr(pos, "Unknown variable: " ++ name)
   | Just scheme ->
-      match constrained_fn_eta(name, scheme, pos, env) with
+      match value_ref_eta(name, scheme, pos, env) with
       # Re-enter inference on the synthesized lambda, the same way the dotted-name case above
       # re-enters on a field chain.  The call inside it is an ordinary call, so it routes through
       # infer_call_var rather than back to here — the rewrite cannot recur.
@@ -1406,7 +1437,7 @@ fn type_name_is_linear(name: String, env: Dict types.Scheme) -> Bool =
   | Nothing -> false
 
 fn fn_declared_arity(name: String, env: Dict types.Scheme) -> Maybe Int =
-  match dict_get("@arity:" ++ name, env) with
+  match arity_marker_for(name, env) with
   | Nothing -> Nothing
   | Just scheme ->
       match scheme with
@@ -1414,6 +1445,17 @@ fn fn_declared_arity(name: String, env: Dict types.Scheme) -> Maybe Int =
           match body with
           | types.TConst id -> parse_int(types.type_id_name(id))
           | _ -> Nothing
+
+# A function's `@arity:` marker, else a constructor's `@ctor:` one. Order is
+# arbitrary — a name cannot hold both — and BOTH are removed by bind_local_scheme
+# when a local takes the name. A constructor name being unshadowable is true of
+# patterns and false of parameters, which is the trap: `parse_param` accepts any
+# identifier, so a prelude constructor's unqualified name can be a parameter. See
+# bind_local_scheme for why that reaches this function.
+fn arity_marker_for(name: String, env: Dict types.Scheme) -> Maybe types.Scheme =
+  match dict_get("@arity:" ++ name, env) with
+  | Just scheme -> Just(scheme)
+  | Nothing -> dict_get(ctor_arity_key(name), env)
 
 fn call_arity_error(name: String, got: Int, want: Int) -> String =
   "'" ++ name ++ "' expects " ++ int_to_string(want) ++ " arguments, got "
@@ -1447,8 +1489,22 @@ fn over_application_error(name: String, got: Int, want: Int) -> String =
 # type. See under_application_error and tests/stdlib/test_shadow_underapp_compiles.spr.
 # M4.6: no ownership mask to drop alongside it any more — the local's own TYPE
 # carries its ownership, so a shadowed function's modes cannot leak onto it.
+#
+# `@ctor:{name}` goes with it, and the reason that is NOT redundant is that a
+# PARAMETER is not a pattern. A capitalized name in a *pattern* parses as a
+# constructor pattern and can never bind, but `parse_param` takes any identifier, so
+# `fn f(Just: Int) -> Int = Just + 1` binds a local called `Just`. Own-module and
+# imported constructors are bundler-qualified (`main.Pair`) and cannot collide with a
+# bare parameter name, so PRELUDE constructors — `Just`, `Nothing`, `Cons`, `Ok`,
+# `Err` — are the whole exposed surface. Without this removal such a parameter
+# inherits the constructor's arity, and BOTH readers go wrong: `value_ref_eta`
+# rewrites the local into `\x -> Just(x)`, and `callee_has_zero_declared_arity`
+# reports the local as zero-arity, defeating resolve_zero_arg_call's
+# under-application check. See tests/stdlib/test_ctor_shadowed_by_param.spr and
+# tests/conformance/type_error/shadowed_ctor_under_application.spr.
 fn bind_local_scheme(name: String, scheme: types.Scheme, env: Dict types.Scheme) -> Dict types.Scheme =
-  dict_set(name, scheme, dict_remove("@arity:" ++ name, env))
+  dict_set(name, scheme,
+    dict_remove(ctor_arity_key(name), dict_remove("@arity:" ++ name, env)))
 
 # Nothing if the call is saturated or the callee has no declared arity — a
 # function-typed value (Approach A's job) or a LOCAL binding shadowing a top-level
@@ -3096,11 +3152,12 @@ fn infer_call_args(
               push_down_arg_slots(s1, es1, callee_type, slots, types.TVar(types.tyvar_id(ret))),
               es1, slots, Nil, types.EffectPure)
 
-# A bare `VarExpr` naming a constrained function, as its eta-lambda; anything else unchanged.
+# A bare `VarExpr` naming a constrained function or a constructor, as its eta-lambda; anything
+# else unchanged.
 fn eta_expand_constrained_arg(e: ast.Expr, env: Dict types.Scheme) -> ast.Expr =
   let ast.VarExpr name pos = e else e
       Just scheme = dict_get(name, env) else e
-      Just expanded = constrained_fn_eta(name, scheme, pos, env) else e
+      Just expanded = value_ref_eta(name, scheme, pos, env) else e
   in expanded
 
 fn has_lambda_slot(slots: List ArgSlot) -> Bool =
@@ -3124,7 +3181,7 @@ fn infer_arg_slots(
   match args with
   | Nil -> SlotsOk(arg_slot_list_reverse(acc), subst, eff_subst)
   | Cons arg0 rest ->
-      # Rewrite a bare mention of a constrained function into its eta-lambda HERE rather than in
+      # Rewrite a bare mention of a constrained function or constructor into its eta-lambda HERE rather than in
       # infer_var, because this match is where an argument's fate is decided: a lambda is held back
       # and later typed against the callee's declared parameter, while everything else is inferred
       # eagerly with no expected type.  A dictionary resolved eagerly has only the constrained

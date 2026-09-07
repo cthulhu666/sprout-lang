@@ -1,0 +1,53 @@
+module main
+
+# A constructor named without parentheses is a function value, exactly as
+# `Ctor(_, …, _)` already was. Every shape below failed to lower before the
+# eta-expansion in `lowering.lower_value_var`.
+
+type Wrapped = | Wrapped Int
+
+type Pair = | Pair Int String
+
+type Msg a = | ChildMsg a | Quit
+
+wrap Meters = Int
+
+fn unwrap(w: Wrapped) -> Int =
+  match w with
+  | Wrapped n -> n
+
+fn render_pair(p: Pair) -> String =
+  match p with
+  | Pair n s -> int_to_string(n) ++ s
+
+fn render_msg(m: Msg Int) -> String =
+  match m with
+  | ChildMsg n -> "child:" ++ int_to_string(n)
+  | Quit -> "quit"
+
+fn meters_value(m: Meters) -> Int =
+  match m with
+  | Meters n -> n
+
+fn show_maybe(m: Maybe Int) -> String =
+  match m with
+  | Just n -> int_to_string(n)
+  | Nothing -> "-"
+
+fn apply1(f: Int -> Wrapped, n: Int) -> Wrapped = f(n)
+
+fn apply2(f: Int -> String -> Pair, n: Int, s: String) -> Pair = f(n, s)
+
+fn main() -> Unit !{IO} = do
+  # Arity 1, scalar field.
+  print(int_to_string(unwrap(apply1(Wrapped, 5))))
+  # Arity 2, mixed field kinds (scalar + heap).
+  print(render_pair(apply2(Pair, 7, "!")))
+  # A prelude constructor.
+  list_each(print, list_map(show_maybe, list_map(Just, [1, 2])))
+  # A polymorphic constructor of a multi-constructor ADT.
+  list_each(print, list_map(render_msg, list_map(ChildMsg, [3, 4])))
+  # A `wrap` constructor, whose construction is the identity.
+  list_each(print, list_map(int_to_string, list_map(meters_value, list_map(Meters, [9]))))
+  # The explicit spelling still means the same thing.
+  print(render_pair(apply2(Pair(_, _), 8, "?")))
