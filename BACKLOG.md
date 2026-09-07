@@ -2074,8 +2074,23 @@ Legend:
   useful, which is why the demo still issues none. Options to weigh: a `WidgetId` on the
   message, a routing wrapper around a child, or `update` returning a targeted event.
 
-- [ ] `P2` **Record-field effect variables are erased at construction, so a pure signature
-  can launder IO.** `type Box = (f: Int -> Int !{e})` plus `fn pure_user(b: Box, n: Int) ->
+- [x] `P2` **Record-field effect variables are erased at construction, so a pure signature
+  can launder IO. FIXED 2026-09-07 — effect variables are now rejected in stored positions
+  (spec §7 rule 9, `checker.stored_effect_var_error`).** Kuba chose the variable-only ban over
+  the wider "no effect annotation in a stored position": the wider rule rests on the premise
+  that a stored arrow's effect cannot be tracked, and both concrete spellings are in fact
+  correctly rejected today (verified by probe), so it would have deleted `http_server.Route`,
+  `log.Logger`, `tui.App.boot`, `tui.Cmd` and `tui.View.render` for nothing. Migration cost was
+  measured at **0 sites in this repo and 0 in `uncharted-suns`** — all 140 in-tree `!{e}` uses
+  are in signatures — with the detector control-tested against four known-positive probes
+  first. **Three stored positions, not two** — a `wrap`'s inner type is one, found in review
+  against `docs/guidelines.md` §2a rather than by a failing test. Fixtures
+  `type_error/effect_var_in_record_field`, `type_error/effect_var_in_ctor_payload`,
+  `type_error/effect_var_in_wrap`, `run/effect_concrete_io_stored_ok`. Rationale, the rejected alternative and the deferred
+  effect-parameters-on-type-constructors question: `docs/effect-enforcement-v0.md` §14. Original
+  report follows.
+
+  `type Box = (f: Int -> Int !{e})` plus `fn pure_user(b: Box, n: Int) ->
   Int = b.f(n)` compiles and RUNS IO inside a function declared pure — verified by running
   it, twice, independently. `e` is not a parameter of `Box`, so the constructor scheme
   quantifies and discards it (`types.scheme_quantified` / `scheme_effect_vars_of`); field
@@ -2094,6 +2109,21 @@ Legend:
   that is a Design Change Process question, not a bug fix. Also amend the comment at
   `unifier.sprout:86` calling accept-when-unknown "the only safe direction for a
   conservatism knob": it is safe against false rejections and unsafe against this.
+
+- [ ] `P2` **A bare non-zero-arity constructor cannot be used as a function value.**
+  `apply_to(Wrap, 5)` fails with `ERROR: ast_to_ir: bare reference to non-zero-arity ctor
+  'main.Wrap' (eta/partial application) deferred to follow-up PR`
+  (`ast_to_ir.sprout:919`). `Wrap(_)` works and is the current spelling. Verified 2026-09-07
+  by compiling and running both halves. **Nothing tracked this** — the diagnostic promises a
+  follow-up PR that was never filed, so it is recorded here now.
+
+  It sits directly on the widget-embedding path: `map_msgs(ChildMsg, unf, w)` is the natural
+  call at every embedding site and is exactly the failing shape, so every user of that API
+  hits it on their first embed. Adjacent to the eta-wrapper work in commit `483c74c6`
+  (`ast_to_ir`: lower an intrinsic's eta wrapper instead of calling an absent symbol) but not
+  covered by it. Fix is to synthesise the same eta wrapper for a constructor reference in
+  value position. Until then, document the `(_)` spelling wherever a constructor-as-function
+  argument is expected.
 
 - [ ] `P3` **A parameterized type alias whose body is a FUNCTION TYPE is never expanded.**
   `type alias Cmd m = Unit -> m !{IO}` parses, but using it fails with

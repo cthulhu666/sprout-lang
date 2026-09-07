@@ -821,3 +821,82 @@ justifies.
 
 Full suite green, 51/51 examples, `ir-golden-diff` 0 differences (a check-only change emits no
 codegen), and the compiler bootstraps itself to a fixed point under the corrected rule.
+
+## 14. Rule 9: an effect variable may not be stored (2026-09-07)
+
+The first **soundness** hole in this campaign, as opposed to the conformance gaps §12 and §13
+closed. Every previous item made the checker agree with the spec about programs that were
+already safe; this one admitted a program that was not.
+
+```sprout
+type Box = (f: Int -> Int !{e})
+fn pure_user(b: Box, n: Int) -> Int = b.f(n)   # declared pure — was ACCEPTED
+```
+
+Handed a box holding an `!{IO}` function, `pure_user` compiled clean and printed. The same
+holds for a constructor payload (`type Thunk = | Thunk (Unit -> Int !{e})`), which is the
+shape a command type wants and therefore the one an author is most likely to reach for.
+
+**There are three stored positions, not two.** A `wrap` is a newtype — constructing one stores
+the value — so `wrap Handler = Int -> Int !{e}` launders identically. That arm was missing from
+the first implementation, which matched `RecordDecl` and `TypeDecl` and sent every other `Decl`
+to a catch-all. It was found by reviewing the function against `docs/guidelines.md` §2a ("when
+a match classifies an ADT, enumerate every variant") and confirmed by running the leak, not by
+a failing test — no test could have failed, because the fixture for the case did not exist yet.
+`stored_effect_var_in_decl` now spells out all nine `Decl` variants, each exempt one carrying
+the reason it is exempt.
+
+**The mechanism is quantification, not storage.** `e` is not a parameter of `Box`, so the
+constructor's scheme quantifies it and then has nowhere to record what it was bound to.
+Construction discards it; reading the field re-instantiates a fresh, unconstrained variable;
+and rule 8 admits an unconstrained effect — correctly, since that let-through is exactly what
+makes every prelude HOF legal (§13's `effect_one_variable_unpinned_ok` pins that it must).
+The information that would separate the two cases is destroyed at the construction site, which
+is why the naive repair fails: flipping the `(Pure, EffectVar _)` arm at `unifier.sprout:88`
+also rejects a pure function calling an unpinned effect-polymorphic callee, a legitimate
+program.
+
+**Decision (Kuba, 2026-09-07): ban effect variables in stored positions.** The alternative
+considered and rejected was banning *any* effect annotation in a stored position. It rests on
+the premise that a stored arrow's effect cannot be tracked, and that premise is false — both
+concrete spellings are correctly rejected today:
+
+| stored form | pure function unwraps and calls it | verdict |
+|---|---|---|
+| `(f: Int -> Int !{IO})` record field | `b.f(n)` | rejected, rule 8 |
+| `Cmd (Unit -> Int !{IO})` payload | `match c with \| Cmd f -> f(())` | rejected, rule 8 |
+| `(f: Int -> Int !{e})` record field | `b.f(n)` | **accepted — the hole** |
+
+The wider ban would also have deleted five load-bearing stdlib types — `http_server.Route`,
+`log.Logger`, `tui.App.boot`, `tui.Cmd`, `tui.View.render` — i.e. the route table, the logger,
+the widget renderer and the command architecture that *replaced* the unsound design.
+
+**Migration cost: zero, measured.** Stored-position effect variables across `stdlib/`,
+`examples/`, `tests/`, `bench/`: **0**. Across `uncharted-suns`, the sole downstream repo:
+**0**. All 140 in-tree `!{e}` occurrences are in function signatures, which the rule does not
+touch. The detector was control-tested against four known-positive probes before the zero was
+believed.
+
+**Where it lives.** `checker.stored_effect_var_error`, a syntactic walk of `RecordDecl` fields
+and `TypeDecl` constructor payloads. Syntactic because there is nothing to infer — the
+variable is unbound by construction — and because the declaration is where the author wrote
+it. It walks both annotation carriers, `TypeArrow`'s trailing labels and the standalone
+`TypeEffect` node; a check reading only one would leave the other spelling open. A label counts
+as a variable when it is lowercase-initial, deliberately *not* "anything that is not `IO`": an
+unrecognised uppercase label such as `!{NOPE}` is a separate open item in `BACKLOG.md` and
+reporting it here would misname it.
+
+Applied on the same path as rule 8's post-pass, and for the same reason — `--phase effects`
+calls `typecheck_typed_with_effects` directly, so the census still enumerates a program this
+rejects.
+
+**Deferred, not blocked.** Making the effect-polymorphic design *expressible* rather than
+banned needs effect parameters on type constructors (`type Cmd m e`). That is absent from
+`docs/effect-system-v1-draft.md` entirely — not deferred by it, never considered — and nothing
+built so far demonstrates need for it: the concrete `!{IO}` newtype works. A later feature is
+purely additive over this ban, which rejects an *unbound* variable and would give it a binder.
+
+Fixtures: `type_error/effect_var_in_record_field`, `type_error/effect_var_in_ctor_payload`,
+`type_error/effect_var_in_wrap`, and `run/effect_concrete_io_stored_ok` — the accept twin,
+covering all three stored positions with a concrete `!{IO}` *and* a signature-position
+variable, so an over-correction cannot pass.

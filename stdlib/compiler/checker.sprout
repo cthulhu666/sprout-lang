@@ -56,14 +56,33 @@ export fn check_program_with_env(prog: ast.Program, extra: List (String, types.S
           r <- infer.typecheck_decls(state, decls, dict_from_list(builtin_entries() ++ extra), dict_empty(), dict_empty())
           match r with
           | typed_ast.TypedErr pos msg -> CheckErr(pos, msg)
-          | typed_ast.TypedOk _ env -> CheckOk(env)
+          | typed_ast.TypedOk _ env ->
+              match stored_effect_var_error(decls) with
+              | Nothing -> CheckOk(env)
+              | Just (pos, msg) -> CheckErr(pos, msg)
 
 # Like check_program_with_env but returns the full TypedResult (TypedProgram + env).
 # Used by lower_driver to feed the lowering pass.
 export fn typecheck_typed(prog: ast.Program, extra: List (String, types.Scheme)) -> typed_ast.TypedResult !{IO} =
   do
     (result, reports) <- typecheck_typed_with_effects(prog, extra)
-    enforce_effects(result, reports)
+    enforce_stored_effect_vars(prog, enforce_effects(result, reports))
+
+# Rule 9's stored-position half, applied on the SAME path as rule 8's post-pass
+# and for the same reason: `--phase effects` calls
+# `typecheck_typed_with_effects` directly, so the census still enumerates a
+# program this rejects. Type declarations carry no expressions, so the
+# un-desugared `prog` is the right thing to read.
+fn enforce_stored_effect_vars(prog: ast.Program,
+                              result: typed_ast.TypedResult) -> typed_ast.TypedResult =
+  match result with
+  | typed_ast.TypedErr _ _ -> result
+  | typed_ast.TypedOk _ _ ->
+      match prog with
+      | ast.Program decls _ ->
+          match stored_effect_var_error(decls) with
+          | Nothing -> result
+          | Just (pos, msg) -> typed_ast.TypedErr(pos, msg)
 
 # spec-v0.md §7 rule 8, enforced. A declaration whose body performs IO under a
 # pure signature is rejected here.
@@ -190,6 +209,145 @@ fn effect_gap_others(rest: List unifier.EffectReport) -> String =
   | _ ->
       "\n  " ++ int_to_string(list_length(rest)) ++ " more in this program:"
         ++ list_fold(\ (acc, r) -> acc ++ "\n    " ++ unifier.effect_report_name(r), "", rest)
+
+# ---------------------------------------------------------------------------
+# Stored effect variables — spec-v0.md §7 rule 9
+# ---------------------------------------------------------------------------
+#
+# An effect variable belongs to a FUNCTION TYPE. Written in a stored position — a
+# record field or a constructor payload — it is unsound, and the reason is
+# quantification rather than storage: `e` is not a parameter of the type, so the
+# constructor's scheme quantifies it and then has nowhere to record what it was
+# bound to. Reading the field re-instantiates a fresh, unconstrained variable,
+# which rule 8 lets through (correctly — that let-through is what makes every
+# prelude HOF legal). The result was IO running inside a function the checker
+# believed pure.
+#
+# A concrete `!{IO}` in the same position has nothing to quantify and stays
+# legal; five stdlib types depend on it. Fixtures pin both sides:
+# type_error/effect_var_in_record_field, type_error/effect_var_in_ctor_payload,
+# run/effect_concrete_io_stored_ok.
+#
+# Syntactic, so it reads the declaration rather than an inference result — there
+# is nothing to infer, and the position is exactly where the author wrote it.
+fn stored_effect_var_error(decls: List ast.Decl) -> Maybe(source.SourcePos, String) =
+  match decls with
+  | Nil -> Nothing
+  | Cons d rest ->
+      match stored_effect_var_in_decl(d) with
+      | Just err -> Just(err)
+      | Nothing -> stored_effect_var_error(rest)
+
+# Every variant is spelled out, per docs/guidelines.md §2a: this answers a
+# question ABOUT a declaration form, so a catch-all is right only for today's
+# variants. A `Decl` added later that stores a type would slip through silently —
+# which is the exact hole this function exists to close, and is how `WrapDecl`
+# was missed on the first draft.
+#
+# THREE variants are stored positions. A `wrap` is a newtype: constructing one
+# stores the value, so `wrap Handler = Int -> Int !{e}` launders IO exactly as a
+# constructor payload does.
+#
+# The rest are exempt because they declare FUNCTION TYPES, which is where an
+# effect variable belongs:
+#   FnDecl, ExternFnDecl, ClassDecl, InstanceDecl — signatures.
+#   LetDecl — a value annotation; a top-level `let` must be pure (spec §5.2) and
+#     its effect annotation is discarded today, which is a separate open item.
+#   AliasDecl — transparent, so its body is judged where the alias is USED.
+#     Dependency worth knowing: an alias is not expanded in a record field today,
+#     and whoever fixes that must re-check this walk. It runs before expansion,
+#     so an alias body carrying an effect variable would reach a field as a bare
+#     `TypeName` and be invisible here.
+fn stored_effect_var_in_decl(d: ast.Decl) -> Maybe(source.SourcePos, String) =
+  match d with
+  | ast.RecordDecl name _ fields _ _ pos -> stored_in_fields(name, fields, pos)
+  | ast.TypeDecl name _ ctors _ _ pos -> stored_in_ctors(name, ctors, pos)
+  | ast.WrapDecl name inner pos -> stored_in_wrap(name, inner, pos)
+  | ast.FnDecl _ _ _ _ _ _ _ -> Nothing
+  | ast.ExternFnDecl _ _ _ _ _ -> Nothing
+  | ast.LetDecl _ _ _ _ -> Nothing
+  | ast.ClassDecl _ _ _ _ _ -> Nothing
+  | ast.InstanceDecl _ _ _ _ -> Nothing
+  | ast.AliasDecl _ _ _ _ -> Nothing
+
+fn stored_in_wrap(tname: String, inner: ast.TypeExpr,
+                  pos: source.SourcePos) -> Maybe(source.SourcePos, String) =
+  match effect_var_in_type(inner) with
+  | Just v -> Just((pos, stored_effect_var_message(tname, "its wrapped type", v)))
+  | Nothing -> Nothing
+
+fn stored_in_fields(tname: String, fields: List ast.RecordFieldDecl,
+                    pos: source.SourcePos) -> Maybe(source.SourcePos, String) =
+  match fields with
+  | Nil -> Nothing
+  | Cons (ast.RecordFieldDecl fname ftype) rest ->
+      match effect_var_in_type(ftype) with
+      | Just v -> Just((pos, stored_effect_var_message(tname, `field \`${fname}\``, v)))
+      | Nothing -> stored_in_fields(tname, rest, pos)
+
+fn stored_in_ctors(tname: String, ctors: List ast.TypeConstructor,
+                   pos: source.SourcePos) -> Maybe(source.SourcePos, String) =
+  match ctors with
+  | Nil -> Nothing
+  | Cons (ast.TypeConstructor cname payloads _ _) rest ->
+      match first_effect_var(payloads) with
+      | Just v -> Just((pos, stored_effect_var_message(tname, `constructor \`${cname}\``, v)))
+      | Nothing -> stored_in_ctors(tname, rest, pos)
+
+fn first_effect_var(ts: List ast.TypeExpr) -> Maybe String =
+  match ts with
+  | Nil -> Nothing
+  | Cons t rest ->
+      match effect_var_in_type(t) with
+      | Just v -> Just(v)
+      | Nothing -> first_effect_var(rest)
+
+# Both annotation carriers are walked: `TypeArrow`'s trailing labels and the
+# standalone `TypeEffect` node. A check that read only one would leave the other
+# spelling open, and the parser produces both.
+fn effect_var_in_type(t: ast.TypeExpr) -> Maybe String =
+  match t with
+  | ast.TypeName _ -> Nothing
+  | ast.TypeApply a b -> first_effect_var([a, b])
+  | ast.TupleType ts -> first_effect_var(ts)
+  | ast.TypeEffect inner labels ->
+      match effect_var_label(labels) with
+      | Just v -> Just(v)
+      | Nothing -> effect_var_in_type(inner)
+  | ast.TypeArrow a b labels ->
+      match effect_var_label(arrow_labels(labels)) with
+      | Just v -> Just(v)
+      | Nothing -> first_effect_var([a, b])
+
+fn arrow_labels(labels: Maybe (List String)) -> List String =
+  match labels with
+  | Nothing -> Nil
+  | Just ls -> ls
+
+# Lowercase-initial is what distinguishes a variable from a label. Deliberately
+# NOT "anything that is not IO": an unrecognised uppercase label like `!{NOPE}`
+# is a separate open question, and reporting it here would misname it.
+fn effect_var_label(labels: List String) -> Maybe String =
+  match labels with
+  | Nil -> Nothing
+  | Cons l rest ->
+      if effect_label_is_var(l) then Just(l) else effect_var_label(rest)
+
+fn effect_label_is_var(name: String) -> Bool =
+  str_find(name, ".") == -1 &&
+  (c == "a" || c == "b" || c == "c" || c == "d" || c == "e" ||
+   c == "f" || c == "g" || c == "h" || c == "i" || c == "j" ||
+   c == "k" || c == "l" || c == "m" || c == "n" || c == "o" ||
+   c == "p" || c == "q" || c == "r" || c == "s" || c == "t" ||
+   c == "u" || c == "v" || c == "w" || c == "x" || c == "y" || c == "z")
+  where c = str_slice(name, 0, 1)
+
+# The phrase the conformance fixtures pin is "in a stored position".
+fn stored_effect_var_message(tname: String, where_desc: String, v: String) -> String =
+  `\`${tname}\` writes the effect variable \`!{${v}}\` in a stored position (${where_desc})`
+    ++ " — it is discarded when a value is constructed, so reading it back yields a"
+    ++ " fresh unconstrained effect and IO escapes a pure signature."
+    ++ " Use a concrete `!{IO}` there instead (spec-v0.md §7 rule 9)"
 
 # Like typecheck_typed but hands back the declared-vs-inferred effect census
 # alongside the result, and does NOT enforce it. The reports live on the

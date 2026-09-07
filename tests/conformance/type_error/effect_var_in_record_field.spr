@@ -1,0 +1,26 @@
+module main
+
+# spec-v0.md §7 rule 9: an effect variable belongs to a FUNCTION TYPE. One
+# written in a stored position — a record field or a constructor payload — is
+# discarded when the value is constructed, and cannot be enforced afterwards.
+#
+# This is a SOUNDNESS fixture, not a conformance one. `e` is not a parameter of
+# `Box`, so the constructor's scheme quantifies it and then has nowhere to record
+# what it was bound to. Reading `b.f` re-instantiates a fresh, unconstrained
+# variable, and rule 8 lets an unconstrained effect through — correctly, since
+# that is what makes every prelude HOF legal. The result was that `pure_user`
+# below was accepted, ran `print`, and the checker still believed it was pure.
+#
+# The concrete spelling `!{IO}` in the same position is sound and stays legal;
+# see tests/conformance/run/effect_concrete_io_stored_ok.spr.
+
+type Box = (f: Int -> Int !{e})
+
+fn shout(n: Int) -> Int !{IO} = do
+  print("IO RAN INSIDE A PURE-DECLARED FN")
+  n + 1
+
+fn pure_user(b: Box, n: Int) -> Int = b.f(n)
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(pure_user(Box(f = shout(_)), 1)))
