@@ -22,6 +22,15 @@ if ! printf '%s' "$CMD" | grep -qE '(^|[ \t&|;`(])git[ \t]+([^ \t]+[ \t]+)*commi
   exit 0
 fi
 
+# The hook's cwd is the project dir, but commits are made in a worktree — as
+# `cd <dir> && git commit` or `git -C <dir> commit`. Resolve the target from the command
+# itself, or the gate inspects a tree with nothing staged and passes everything.
+TARGET=$(printf '%s' "$CMD" | sed -n -E "s/.*git[[:space:]]+-C[[:space:]]+[\"']?([^\"'[:space:]]+).*/\1/p" | head -1)
+if [[ -z "$TARGET" ]]; then
+  TARGET=$(printf '%s' "$CMD" | sed -n -E "s/^[[:space:]]*cd[[:space:]]+[\"']?([^\"'&|;[:space:]]+).*/\1/p" | head -1)
+fi
+if [[ -n "$TARGET" && -d "$TARGET" ]]; then cd "$TARGET"; fi
+
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || true)
 if [[ -z "$REPO_ROOT" ]]; then exit 0; fi
 cd "$REPO_ROOT"

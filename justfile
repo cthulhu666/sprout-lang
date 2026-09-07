@@ -512,6 +512,15 @@ test-review-gate:
   D=$(mktemp -d /tmp/sprout_review_gate_XXXXXX); trap 'rm -rf "$D"' EXIT
   python3 scripts/test_review_gate.py "$D"
 
+# Exercise the seed-gate and guidelines-reminder hooks. Same rationale as above: a hook
+# is only run by Claude Code, so nothing else notices when one stops firing.
+[group('test')]
+test-shell-hooks:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  D=$(mktemp -d /tmp/sprout_shell_hooks_XXXXXX); trap 'rm -rf "$D" "$D-wt"' EXIT
+  python3 scripts/test_shell_hooks.py "$D"
+
 # Run a single test file with stage-1.
 [group('test')]
 test-file file: (_test-file "build/compile_driver_bin_stage1" file)
@@ -2894,6 +2903,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "gate-audit|gate-audit"
     "seed-dep-check|seed-dep-check"
     "review-gate|test-review-gate"
+    "shell-hooks|test-shell-hooks"
     # Added when Assertion D landed: both had names that CLAIM verification while nothing
     # ran them. c-runtime-test's ten C-level assertions were unrunnable for however long it
     # took someone to try (the runtime split into sprout_scheduler.c/sprout_poll.c broke its

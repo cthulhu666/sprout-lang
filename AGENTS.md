@@ -72,6 +72,10 @@ Use commit messages that explain intent:
 
 **Seed gate** — `scripts/seed_gate.sh`, wired as a PreToolUse Bash hook. Intercepts `git commit` and blocks if `stdlib/compiler/*.sprout` or `stdlib/*.sprout` is staged without a refreshed `bootstrap/compile_driver.ll`. Bypass (when IR is genuinely unchanged): run `just verify-bootstrap-fixed-point` then `just seed-fp-ack`.
 
+> **Both gates read every worktree, not just the main checkout — and until 2026-09-07 neither did.** Each resolved a single root from `CLAUDE_PROJECT_DIR` (review gate) or the hook's own cwd (seed gate), which is always the main checkout. A session doing its work in a linked worktree — the normal case here, and the one `feedback_worktree_path_prefix_trap` pushes you into — was therefore reviewed zero times and could commit compiler sources with a stale seed unopposed. Measured on a real session: `blocks: 0`, with a 3645-path baseline holding nothing but the main checkout's untracked dirt. The review gate now unions `git worktree list` and reports an out-of-main path as `<worktree>/<path>`; the seed gate resolves the target from the command's own `cd <dir>` or `git -C <dir>`. Covered by `just test-shell-hooks` and case 12 of `just test-review-gate`; both run in `just ci-fast-gates`.
+>
+> **A hook that informs must write JSON to stdout, never stderr.** Claude never sees stderr from a hook that exits 0 — it goes to the debug log only ([hooks reference](https://code.claude.com/docs/en/hooks)). `scripts/guidelines_reminder.sh` printed its checklist to stderr and exited 0 for its whole life, so the one gate that points at `docs/guidelines.md` before a `.sprout` edit reached nobody. It now emits `{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":…}}` on stdout, the shape `.claude/hooks/just-test-tee` already used. Only a hook that exits 2 may use stderr, and that text becomes the blocking message.
+
 > **Caveat — `just seed-stale` and CI answer different questions, and a comment-only edit splits them.** Three checks are easy to run together and are not the same thing:
 >
 > | check | compares | run by |
