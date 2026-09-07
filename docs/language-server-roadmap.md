@@ -85,8 +85,18 @@ editor and IDE support.
 >   `(a -> b) -> c a -> c b where Functor c`. `compiler.env_scheme` now recovers the clause
 >   from the marker for display only; the same list is read by
 >   `infer.inject_constrained_fn_dicts_via_field` at call sites, so a method must not carry
->   one in the env. The head is POSITIONAL: the class variable renames to `a`, and a source
->   name would print `Functor f` against a type reading `a b -> a c`
+>   one in the env. The head is POSITIONAL, so it survives whatever the binder is renamed to
+> - ~~a rendered variable was not the one the author wrote~~ **done**: `build_var_rename`
+>   lettered every binder a, b, c… by its position in `scheme_vars`, but that list is
+>   assembled differently per declaration kind — a class method's class parameter is
+>   prepended (`infer.register_class_method`) and a constructor's come from the type
+>   declaration (`infer.register_one_ctor`). So `fmap` read `(b -> c) -> a b -> a c where
+>   Functor a` while `map`, the same class, read `(a -> b) -> c a -> c b where Functor c`;
+>   and `Ok`/`Err` disagreed about what `Result a b` named. Only a `$t` binder is renamed
+>   now — `$` cannot open a user identifier, so the test is exact — and a generated one
+>   skips any letter a source binder already spells. Matches GHC, which prints
+>   `fmap :: Functor f => (a -> b) -> f a -> f b`. Effect variables still leak `$e14`
+>   (BACKLOG)
 > - ~~unimplemented methods~~ **done**: every JSON-RPC *request* now gets a reply
 >   (`-32601` when the method is not implemented); notifications stay silent. It used to
 >   end in `else ()`, dropping requests too. A real client sends four such methods on the

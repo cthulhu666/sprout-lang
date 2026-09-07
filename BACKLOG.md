@@ -4363,6 +4363,14 @@ op-classification already in place.
 
 ### Native REPL & Analysis Service
 
+- [ ] `P2` **A rendered effect variable leaks its generated name.** `list_fold` hovers as
+  `(a -> b -> a !{$e14}) -> a -> List b -> a !{$e14}` though the prelude declares `!{e}`.
+  `types.effect_suffix` prints `EffectVar name` verbatim and no rename reaches it —
+  `build_var_rename` covers type variables only. Same defect class as the binder renaming
+  fixed 2026-09-07, different machinery: effect vars live in `Scheme`'s `effect_vars` and
+  have no display pass at all. Fix is the mirror of `rename_generated` over that list, with
+  the letters drawn from a separate sequence so a type var and an effect var never collide.
+
 - [x] `P0` **FIXED 2026-08-17. BUG: no spelling of an imported extern worked in the REPL.**
   `import stdlib.bits` then `bit_or(3, 5)` gave `Unknown variable: bit_or`, and `bits.bit_or(3, 5)`
   gave `Unknown variable: bits.bit_or` — while `:type bits.bit_or` answered `Int -> Int -> Int`.

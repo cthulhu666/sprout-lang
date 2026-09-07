@@ -646,11 +646,12 @@ fn scheme_effect_suffix(t: Type, eff: Effect) -> String =
   | _ -> effect_suffix(eff)
 
 # ---------------------------------------------------------------------------
-# GHC-style variable renaming for scheme display
+# Variable renaming for scheme display
 # ---------------------------------------------------------------------------
 #
-# Rename bound vars to a, b, c, ... in the order they appear in scheme_vars.
-# This matches Python typechecker's scheme_to_string renaming convention.
+# The point is to hide an inference-generated `$t2150`, which reads as a compiler leak. A
+# variable the author spelled is already the best name for itself, so it is printed as
+# written — the same answer GHC gives (`fmap :: Functor f => (a -> b) -> f a -> f b`).
 
 fn nth_var_name(n: Int) -> String =
   if n == 0 then "a" else if n == 1 then "b" else if n == 2 then "c" else
@@ -658,10 +659,43 @@ fn nth_var_name(n: Int) -> String =
   if n == 6 then "g" else if n == 7 then "h" else if n == 8 then "i" else
   if n == 9 then "j" else "t" ++ int_to_string(n)
 
+# The three families the compiler mints, each matched at its own spelling. `$` opens every
+# unifier-minted variable and `_unann@` every unannotated-slot placeholder — neither is a
+# name source can write, so those two are exact. The parser's existential variable is the
+# odd one out: `existv0` is writeable, so it is matched only with a numeric tail.
+fn is_generated_var(name: String) -> Bool =
+  str_starts_with(name, "$") || str_starts_with(name, "_unann@") || is_exist_var(name)
+
+fn is_exist_var(name: String) -> Bool =
+  if str_starts_with(name, "existv") then
+    match parse_int(str_slice(name, 6, str_len(name))) with
+    | Just _ -> true
+    | Nothing -> false
+  else false
+
+# A binder's POSITION must not decide its display name. Each declaration kind assembles the
+# list its own way — a class method prepends its class parameter (infer.register_class_method),
+# a constructor takes the type declaration's (infer.register_one_ctor) — so the same position
+# means something different in each, and only the name itself is common to them.
 fn build_var_rename(vars: List String, n: Int, acc: Dict String) -> Dict String =
+  rename_generated(vars, n, vars, acc)
+
+# `taken` is every binder, source-written ones included: a generated var must not claim a
+# letter one of them already spells, or two distinct variables print as one name.
+fn rename_generated(vars: List String, n: Int, taken: List String, acc: Dict String) -> Dict String =
   match vars with
   | Nil -> acc
-  | Cons v rest -> build_var_rename(rest, n + 1, dict_set(v, nth_var_name(n), acc))
+  | Cons v rest ->
+      if is_generated_var(v) then
+        rename_generated_at(next_free_letter(n, taken), v, rest, taken, acc)
+      else rename_generated(rest, n, taken, acc)
+
+fn rename_generated_at(k: Int, v: String, rest: List String, taken: List String,
+                       acc: Dict String) -> Dict String =
+  rename_generated(rest, k + 1, taken, dict_set(v, nth_var_name(k), acc))
+
+fn next_free_letter(n: Int, taken: List String) -> Int =
+  if list_member(nth_var_name(n), taken) then next_free_letter(n + 1, taken) else n
 
 fn apply_rename_type(rename: Dict String, t: Type) -> Type =
   match t with
@@ -690,7 +724,7 @@ fn rename_vars_list(vars: List String, rename: Dict String) -> List String =
 
 fn scheme_to_string_renamed(vars: List String, t: Type, eff: Effect,
                             constraints: List (String, String)) -> String =
-  "forall " ++ join_list(" ", renamed) ++ ". " ++ type_to_string(apply_rename_type(rename, t)) ++ scheme_effect_suffix(t, eff) ++ where_suffix(renamed, constraints)
+  "forall " ++ join_list(" ", renamed) ++ ". " ++ type_to_string(apply_rename_type(rename, t)) ++ scheme_effect_suffix(t, eff) ++ where_suffix(renamed, rename, constraints)
   where rename = build_var_rename(vars, 0, dict_empty())
         renamed = rename_vars_list(vars, rename)
 
@@ -708,38 +742,46 @@ fn scheme_to_string_renamed(vars: List String, t: Type, eff: Effect,
 # read — `analysis_service_driver.make_eval_source` tests it for a trailing effect to
 # decide how to run an expression — and a constraint on a concrete head is already
 # discharged, so there is nothing there for a reader either.
-fn where_suffix(renamed_vars: List String, constraints: List (String, String)) -> String =
-  match constraint_terms(renamed_vars, constraints) with
+fn where_suffix(renamed_vars: List String, rename: Dict String,
+                constraints: List (String, String)) -> String =
+  match constraint_terms(renamed_vars, rename, constraints) with
   | Nil -> ""
   | terms -> " where " ++ join_list(", ", terms)
 
-fn constraint_terms(renamed_vars: List String,
+fn constraint_terms(renamed_vars: List String, rename: Dict String,
                     constraints: List (String, String)) -> List String =
   match constraints with
   | Nil -> Nil
   | Cons pair rest ->
       match pair with
       | (head, class_name) ->
-          match constraint_head_name(renamed_vars, head) with
-          | Just name -> Cons(class_name ++ " " ++ name, constraint_terms(renamed_vars, rest))
-          | Nothing -> constraint_terms(renamed_vars, rest)
+          match constraint_head_name(renamed_vars, rename, head) with
+          | Just name -> Cons(class_name ++ " " ++ name, constraint_terms(renamed_vars, rename, rest))
+          | Nothing -> constraint_terms(renamed_vars, rename, rest)
 
-# "#pos:<k>" → the k-th binder's display name; "#app:<Name>" and a bare "<Name>" → the
-# constructor itself; "#none" and "" → a headless obligation, which names no type and so
-# has nothing to print. A position past the end of the binder list is skipped rather than
-# guessed: naming the wrong variable is worse than naming none.
-fn constraint_head_name(renamed_vars: List String, head: String) -> Maybe String =
+# "#pos:<k>" → the k-th binder's display name; "#app:<Name>" → the constructor itself;
+# "#none" and "" → a headless obligation, which names no type and so has nothing to print.
+# A position past the end of the binder list is skipped rather than guessed: naming the
+# wrong variable is worse than naming none.
+#
+# A bare head names a VARIABLE and so must follow the rename, or the clause names something
+# the type body does not show: an existential's head is the generated `existv0`
+# (infer.exist_constraint_pairs). A concrete head is in no rename and passes through.
+fn constraint_head_name(renamed_vars: List String, rename: Dict String,
+                        head: String) -> Maybe String =
   if head == "" || head == "#none" then Nothing
   else if str_starts_with(head, "#pos:") then
     match parse_int(str_slice(head, 5, str_len(head))) with
     | Nothing -> Nothing
     | Just k -> nth_string(renamed_vars, k)
   else if str_starts_with(head, "#app:") then Just(str_slice(head, 5, str_len(head)))
-  else Just(head)
+  else
+    match dict_get(head, rename) with
+    | Just renamed -> Just(renamed)
+    | Nothing -> Just(head)
 
 # Writer for the positional head token `constraint_head_name` reads. Position, not source
-# name: a synthesized constraint's variable is renamed for display, so a name token would
-# print `Functor f` against a type reading `a b -> a c`.
+# name: a generated binder still renames, so only its index survives the rendering.
 export fn constraint_head_at(k: Int) -> String = "#pos:" ++ int_to_string(k)
 
 fn nth_string(xs: List String, k: Int) -> Maybe String =
@@ -749,9 +791,9 @@ fn nth_string(xs: List String, k: Int) -> Maybe String =
     | Nil -> Nothing
     | Cons h t -> if k == 0 then Just(h) else nth_string(t, k - 1)
 
-# A type rendered with the given variables shown as `a`, `b`, … instead of the inference engine's
-# internal `$t` names. A diagnostic that names a type the user did not write needs this: `$t2150`
-# is an implementation detail, and printing it reads as a compiler leak rather than an explanation.
+# A type rendered with its inference-generated variables shown as `a`, `b`, … A diagnostic
+# that names a type the user did not write needs this: `$t2150` is an implementation detail,
+# and printing it reads as a compiler leak rather than an explanation.
 export fn type_to_string_renamed(vars: List String, t: Type) -> String =
   type_to_string(apply_rename_type(build_var_rename(vars, 0, dict_empty()), t))
 
