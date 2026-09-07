@@ -669,9 +669,12 @@ Lambda expressions are anonymous functions.
   constructor with a **linear** field cannot be used as a function value in either
   spelling, because the implied lambda would take a linear parameter and
   higher-order linearity is deferred (§5.8); construct it with a written call.
-  A **parameter** may shadow a constructor's name — `parse_param` accepts any
-  identifier, unlike a pattern, where a capitalized name is a constructor pattern —
-  and inside that scope the name is the local, not the constructor.
+  A **parameter** may shadow a constructor's name — a parameter is not a pattern, and
+  a capitalized name is a binder there rather than a constructor pattern — and inside
+  that scope the name denotes the local. The shadowing is total, which matters for
+  `Cons` and `Nil` specifically: a list literal desugars to those constructors, so a
+  parameter named `Cons` makes every `[…]` literal in its scope ill-typed. Shadowing a
+  constructor is legal but rarely what you want; the desugared forms are why.
 - **Applying a function-typed *value* is checked at run time, not compile time.** A
   function type does not determine how many arguments one application consumes: a
   two-parameter lambda `\ (x, y) -> …` and a nested pair of one-parameter lambdas

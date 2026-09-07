@@ -1,0 +1,18 @@
+module main
+
+# Shadowing a constructor with a parameter is legal (see
+# tests/stdlib/test_ctor_shadowed_by_param.spr), but it is TOTAL, and `Cons`/`Nil`
+# are the names where that bites: a list literal desugars to them, so a parameter
+# called `Cons` makes every `[…]` in its scope ill-typed.
+#
+# Pre-existing — the constructor's scheme has always been shadowed by the local
+# binding, and this rejects identically under a compiler built from the pre-change
+# seed. It is pinned here because spec §5.3 now states the shadowing rule, and the
+# rule is misleading without this case: the names the accept-side test picks
+# (`Just`, `Nothing`, `Ok`) all happen not to trip it.
+
+fn g(Cons: Int, xs: List Int) -> Int =
+  list_fold(\ (a, x) -> a + x * Cons, 0, [1, 2])
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(g(10, [])))

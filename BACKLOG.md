@@ -2145,12 +2145,19 @@ Legend:
   - **Over-application names the constructor and the count** instead of reporting a unification
     artifact. `Nothing(1)` was `Call type mismatch: Maybe $t2562 vs Int -> $t2563`, which names
     neither. Found by probing the marker's other reader rather than by a failing test — the full
-    suite was green over it. The message is `over_application_error`, shared with functions, and
-    its trailing "if it returns a function, apply the rest in a separate call" reads oddly for a
-    nullary constructor; it is left shared deliberately, since that phrasing was already written
-    to be conditional (see its comment) and a field-carrying constructor CAN return a function
-    (`type F = | F (Int -> Int)`, then `F(g)(3)`). Fixture:
-    `tests/conformance/type_error/ctor_over_application`.
+    suite was green over it. Constructors get their own message
+    (`ctor_over_application_error`) rather than sharing the function one, whose tail reads "if it
+    returns a function, apply the rest in a separate call: `C(…)(…)`".
+
+    **The first version of this entry argued the sharing was fine and was wrong.** It claimed a
+    field-carrying constructor CAN return a function — `type F = | F (Int -> Int)`, then
+    `F(g)(3)` — which sounds right and is not: `F(g)` has type `F`, not `Int -> Int`, so
+    `F(g)(3)` is rejected on its own as `F vs Int -> $t`. A constructor's result type is always
+    its own ADT, so the advice is unreachable for EVERY constructor, nullary or not. Caught by
+    `/code-review` for the nullary case; verifying it turned up that the supposed counterexample
+    refutes the rule too. Fixtures: `tests/conformance/type_error/ctor_over_application` and
+    `…/ctor_over_application_fn_field`, the second being that counterexample, kept precisely
+    because it is the shape that looks like it should work.
   - `Nothing()` — applying a nullary constructor to no arguments — is accepted, and was accepted
     before. Checked explicitly because `fn_declared_arity` now answers `Just 0` for nullary
     constructors and feeds `callee_has_zero_declared_arity`, which separates `mk()` from
@@ -2176,6 +2183,14 @@ Legend:
   `tests/stdlib/test_ctor_shadowed_by_param.spr` (5 assertions) and
   `tests/conformance/type_error/shadowed_ctor_under_application`, both A/B-verified against a
   compiler built from the pre-change seed.
+
+  The shadowing is **total**, and `Cons`/`Nil` are where that bites: a list literal desugars to
+  them, so a parameter named `Cons` makes every `[…]` in its scope ill-typed. Pre-existing (the
+  scheme has always been shadowed by the local binding; it rejects identically under the
+  pre-change seed) and not touched here, but pinned by
+  `tests/conformance/type_error/cons_shadowed_by_param` because spec §5.3 now states the
+  shadowing rule and the rule misleads without it — the three names the accept-side test picks
+  (`Just`, `Nothing`, `Ok`) all happen not to trip it.
 
   Worth recording as a fact about this change rather than only about its fix: the broken version
   was pushed with auto-merge armed and **every gate green** — full suite, 35/35 `ci-fast-gates`,

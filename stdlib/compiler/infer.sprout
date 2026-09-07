@@ -1479,6 +1479,28 @@ fn over_application_error(name: String, got: Int, want: Int) -> String =
     ++ int_to_string(got) ++ " — if it returns a function, apply the rest in a"
     ++ " separate call: `" ++ name ++ "(…)(…)`"
 
+# The same mistake at a CONSTRUCTOR, which cannot take the advice above. A
+# constructor's result type is its own ADT, so it is never a function and there is
+# nothing for a second application to consume — not merely for a nullary one, but for
+# every constructor: `type F = | F (Int -> Int)` gives `F(g) : F`, and `F(g)(3)` is
+# rejected as `F vs Int -> $t`. Pinned by
+# tests/conformance/type_error/ctor_over_application{,_fn_field}, the second of which
+# exists because the function-typed-field case is the one that looks like a
+# counterexample and is not.
+fn ctor_over_application_error(name: String, got: Int, want: Int) -> String =
+  "'" ++ name ++ "' expects " ++ int_to_string(want) ++ " arguments, got "
+    ++ int_to_string(got) ++ " — a constructor is saturated by its declared fields,"
+    ++ " and its result is its own type, never a function"
+
+# Which of the two over-application messages fits `name`. A local shadowing a
+# constructor never reaches here: bind_local_scheme drops both markers, so
+# fn_declared_arity answers Nothing and no arity error is raised at all.
+fn over_application_error_for(name: String, got: Int, want: Int,
+                              env: Dict types.Scheme) -> String =
+  match dict_get(ctor_arity_key(name), env) with
+  | Just _ -> ctor_over_application_error(name, got, want)
+  | Nothing -> over_application_error(name, got, want)
+
 # A local binding (parameter, pattern var, do-bind) that reuses a top-level
 # function's name shadows it, so it must drop that function's `@arity:{name}`
 # marker: the name now refers to a value, whose under-application is a value-level
@@ -1516,7 +1538,7 @@ fn call_arity_error_for(name: String, got: Int, env: Dict types.Scheme) -> Maybe
   | Nothing -> Nothing
   | Just want ->
       if got < want then Just(call_arity_error(name, got, want))
-      else if got > want then Just(over_application_error(name, got, want))
+      else if got > want then Just(over_application_error_for(name, got, want, env))
       else Nothing
 
 # A zero-parameter function whose declared return type is itself a function has a
