@@ -5,6 +5,10 @@ the `geometry` additions) landed first; `stdlib/tui/widget.sprout` and
 `stdlib/tui/app.sprout` followed. Builds on `docs/tui-core-v0.md` (M2), which owns
 `geometry`, `style`, `event`, `keys` and `screen`.
 
+> This doc owns the widget *model* — the box, the layout engine, the pump. The
+> widget *set* that stdlib ships is `docs/tui-widget-set-v0.md` (M4), and
+> addressed delivery is `docs/tui-routing-v0.md`.
+
 ## 1. Problem
 
 M2 delivered a frame: a `Region`, a `Style`, a decoded `Event`, and a double-buffered
@@ -41,6 +45,12 @@ constraint solver.
 > `Cmd` carries a return address and is built with `cmd`/`cmd_to`; and `map_msgs` is
 > prism-shaped, taking a backward `unf: n -> Maybe m`. Read that document for the routing
 > half — §3.1 and §3.8 below describe the contract as it shipped in M3.
+
+> **A proposed change, not yet implemented.** `docs/tui-widget-set-v0.md` §4.3
+> replaces `measure`'s return with a `Measured` record — a size plus a per-axis
+> `Fixed`/`Greedy` — because a `Size` alone cannot say "give me whatever is
+> left", and the workaround (a large number) is read by `solve` as a
+> high-priority demand instead. The signature below is what the code does today.
 
 ```sprout
 type View s m = (

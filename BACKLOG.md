@@ -487,15 +487,25 @@ Legend:
   landed 2026-09-07, so the `View` contract is settled — which is why the set is written now: every
   `View` construction breaks on a field addition, and `route` was the last field. **stdlib ships no
   widget at all today.** `docs/tui-widgets-v0.md` covers the widget box, layout and pump, **not** the
-  set, so the set wants its own design pass with a prior-art survey before C1.
+  set, so the set wants its own design pass with a prior-art survey before C1. **That pass is
+  `docs/tui-widget-set-v0.md` (2026-09-07), scoped to C1.** It carries one breaking change:
+  `View.measure` returns a `Measured` (size plus per-axis `Fixed`/`Greedy`) instead of a `Size`,
+  because a widget cannot otherwise ask for "whatever is left" — the only way to say it through a
+  `Size` is a large number, and `solve` pays `Auto` before fractions, so the design's first draft
+  starved a `fraction` sibling to a zero-size region (`solve(24, [Auto(24), Fraction(1)])` is
+  `[24, 0]`, verified by running it). Four `View` constructions exist today; the migration will not
+  stay this small. Two facts it records: `View.measure` has one caller in the tree and it is a unit
+  test, and `layout.Auto` is built nowhere outside `solve`'s own tests — content-driven sizing is
+  built but unjoined, and C1 is what joins it.
   Evidence the containers are missing: `examples/tui_dashboard.sprout` hand-writes its `Box` in 93
   lines and 15 helpers of a 284-line example, implementing four traversals a stdlib container should
   own once; the `Delivery` walk is now written twice in-tree, identically (the example and
   `tests/stdlib/test_tui_route.spr`). The first-claimant rule is a convention each container
   reimplements rather than something the framework enforces.
   - **C1 — containers and the static set.** `row`/`column`/`grid` over the existing `layout` solvers,
-    plus `static` and `label`. Acceptance test: `examples/tui_dashboard.sprout` loses its `Box` section
-    entirely.
+    an opaque `Slot` (`cells`/`fraction`/`fit`) so a child and its size cannot desync, plus `label`,
+    `static`, `spacer`, the four child traversals exported for reuse, and a both-axes clipped paint
+    helper. Acceptance test: `examples/tui_dashboard.sprout` loses its `Box` section entirely.
   - **C2 — focus and the interactive set.** `button`, `input`, `list_view`. Focus is what makes
     `ToEvent` reachable. **Do not start C2 with the two routing `P3`s below open** — they are
     corrections to the contract C2 is written against.
