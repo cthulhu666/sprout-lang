@@ -141,31 +141,31 @@ declare i64 @ref_write(i64, i64)
 @.cname.18 = private unnamed_addr constant [35 x i8] c"examples.list_pattern_demo.Unknown\00"
 @.cfkinds.18 = private unnamed_addr constant [2 x i8] c"p\00"
 
-define i64 @filter(i64 %pred, i64 %xs, i64 %__tc_Filterable_0_filter_values, i64 %__tc_Filterable_0_filter_map_values, i64 %__tc_Filterable_0_partition_values) {
+define i64 @filter(i64 %p$pred, i64 %p$xs, i64 %p$__tc_Filterable_0_filter_values, i64 %p$__tc_Filterable_0_filter_map_values, i64 %p$__tc_Filterable_0_partition_values) {
 entry:
   %t$1 = alloca i64
-  store i64 %xs, ptr %t$1
+  store i64 %p$xs, ptr %t$1
   %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
   %t$3 = alloca i64
-  store i64 %pred, ptr %t$3
+  store i64 %p$pred, ptr %t$3
   %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
   %t$5 = alloca i64
-  store i64 %__tc_Filterable_0_partition_values, ptr %t$5
+  store i64 %p$__tc_Filterable_0_partition_values, ptr %t$5
   %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
   %t$7 = alloca i64
-  store i64 %__tc_Filterable_0_filter_values, ptr %t$7
+  store i64 %p$__tc_Filterable_0_filter_values, ptr %t$7
   %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
   %t$9 = alloca i64
-  store i64 %__tc_Filterable_0_filter_map_values, ptr %t$9
+  store i64 %p$__tc_Filterable_0_filter_map_values, ptr %t$9
   %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
-  %t$0 = call i64 @__cm_Filterable_filter_values(i64 %pred, i64 %xs, i64 %__tc_Filterable_0_filter_values, i64 %__tc_Filterable_0_filter_map_values, i64 %__tc_Filterable_0_partition_values)
+  %t$0 = call i64 @__cm_Filterable_filter_values(i64 %p$pred, i64 %p$xs, i64 %p$__tc_Filterable_0_filter_values, i64 %p$__tc_Filterable_0_filter_map_values, i64 %p$__tc_Filterable_0_partition_values)
   %t$11 = call i64 @sprout_gc_pop_roots(i64 5)
   ret i64 %t$0
 }
 
-define i64 @examples.list_pattern_demo.parse_args(i64 %args) {
+define i64 @examples.list_pattern_demo.parse_args(i64 %p$args) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %args)
+  %t$0 = call i64 @sprout_tag(i64 %p$args)
   br label %arm_0_1
 arm_0_1:
   %t$3 = add i64 0, 5
@@ -179,7 +179,7 @@ arm_1_1:
   %t$7 = icmp eq i64 %t$0, %t$6
   br i1 %t$7, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t$8 = call i64 @sprout_field(i64 %args, i64 0)
+  %t$8 = call i64 @sprout_field(i64 %p$args, i64 0)
   %t$9 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.0, i64 0, i32 1, i64 0
   %t$10 = ptrtoint ptr %t$9 to i64
   %t$11$lptr = inttoptr i64 %t$8 to ptr
@@ -190,7 +190,7 @@ body_1_1:
   %t$13 = icmp eq i64 %t$11, %t$12
   br i1 %t$13, label %ntest_8, label %arm_2_1
 ntest_8:
-  %t$14 = call i64 @sprout_field(i64 %args, i64 1)
+  %t$14 = call i64 @sprout_field(i64 %p$args, i64 1)
   %t$15 = call i64 @sprout_tag(i64 %t$14)
   %t$16 = add i64 0, 6
   %t$17 = icmp eq i64 %t$15, %t$16
@@ -211,7 +211,7 @@ arm_2_1:
   %t$21 = icmp eq i64 %t$0, %t$20
   br i1 %t$21, label %body_2_1, label %arm_3_1
 body_2_1:
-  %t$22 = call i64 @sprout_field(i64 %args, i64 0)
+  %t$22 = call i64 @sprout_field(i64 %p$args, i64 0)
   %t$23 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.1, i64 0, i32 1, i64 0
   %t$24 = ptrtoint ptr %t$23 to i64
   %t$25$lptr = inttoptr i64 %t$22 to ptr
@@ -222,7 +222,7 @@ body_2_1:
   %t$27 = icmp eq i64 %t$25, %t$26
   br i1 %t$27, label %ntest_22, label %arm_3_1
 ntest_22:
-  %t$28 = call i64 @sprout_field(i64 %args, i64 1)
+  %t$28 = call i64 @sprout_field(i64 %p$args, i64 1)
   %t$29 = call i64 @sprout_tag(i64 %t$28)
   %t$30 = add i64 0, 6
   %t$31 = icmp eq i64 %t$29, %t$30
@@ -255,7 +255,7 @@ arm_3_1:
   %t$40 = icmp eq i64 %t$0, %t$39
   br i1 %t$40, label %body_3_1, label %arm_4_1
 body_3_1:
-  %t$41 = call i64 @sprout_field(i64 %args, i64 0)
+  %t$41 = call i64 @sprout_field(i64 %p$args, i64 0)
   %t$42 = getelementptr inbounds { i64, [8 x i8] }, ptr @.str.2, i64 0, i32 1, i64 0
   %t$43 = ptrtoint ptr %t$42 to i64
   %t$44$lptr = inttoptr i64 %t$41 to ptr
@@ -266,7 +266,7 @@ body_3_1:
   %t$46 = icmp eq i64 %t$44, %t$45
   br i1 %t$46, label %ntest_41, label %arm_4_1
 ntest_41:
-  %t$47 = call i64 @sprout_field(i64 %args, i64 1)
+  %t$47 = call i64 @sprout_field(i64 %p$args, i64 1)
   %t$48 = call i64 @sprout_tag(i64 %t$47)
   %t$49 = add i64 0, 6
   %t$50 = icmp eq i64 %t$48, %t$49
@@ -319,7 +319,7 @@ arm_4_1:
   %t$70 = icmp eq i64 %t$0, %t$69
   br i1 %t$70, label %body_4_1, label %arm_5_1
 body_4_1:
-  %t$71 = call i64 @sprout_field(i64 %args, i64 0)
+  %t$71 = call i64 @sprout_field(i64 %p$args, i64 0)
   %t$72 = getelementptr inbounds { i64, [8 x i8] }, ptr @.str.4, i64 0, i32 1, i64 0
   %t$73 = ptrtoint ptr %t$72 to i64
   %t$74$lptr = inttoptr i64 %t$71 to ptr
@@ -330,7 +330,7 @@ body_4_1:
   %t$76 = icmp eq i64 %t$74, %t$75
   br i1 %t$76, label %ntest_71, label %arm_5_1
 ntest_71:
-  %t$77 = call i64 @sprout_field(i64 %args, i64 1)
+  %t$77 = call i64 @sprout_field(i64 %p$args, i64 1)
   %t$78 = call i64 @sprout_tag(i64 %t$77)
   %t$79 = add i64 0, 6
   %t$80 = icmp eq i64 %t$78, %t$79
@@ -363,12 +363,12 @@ ntest_82:
   br label %join_1
 arm_5_1:
   %t$108 = alloca i64
-  store i64 %args, ptr %t$108
+  store i64 %p$args, ptr %t$108
   %t$109 = call i64 @sprout_gc_push_i64_root(ptr %t$108)
   %t$89 = call i64 @sprout_alloc_obj(i64 18, i64 1)
   %t$89$ptr = inttoptr i64 %t$89 to ptr
   %t$89$f0 = getelementptr i64, ptr %t$89$ptr, i64 0
-  store i64 %args, ptr %t$89$f0
+  store i64 %p$args, ptr %t$89$f0
   %t$110 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_1
 arm_6_1:
@@ -379,9 +379,9 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @examples.list_pattern_demo.describe_command(i64 %cmd) {
+define i64 @examples.list_pattern_demo.describe_command(i64 %p$cmd) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %cmd)
+  %t$0 = call i64 @sprout_tag(i64 %p$cmd)
   br label %arm_0_1
 arm_0_1:
   %t$3 = add i64 0, 17
@@ -396,7 +396,7 @@ arm_1_1:
   %t$8 = icmp eq i64 %t$0, %t$7
   br i1 %t$8, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t$9 = call i64 @sprout_field(i64 %cmd, i64 0)
+  %t$9 = call i64 @sprout_field(i64 %p$cmd, i64 0)
   %t$10 = getelementptr inbounds { i64, [11 x i8] }, ptr @.str.6, i64 0, i32 1, i64 0
   %t$11 = ptrtoint ptr %t$10 to i64
   %t$59 = alloca i64
@@ -413,8 +413,8 @@ arm_2_1:
   %t$14 = icmp eq i64 %t$0, %t$13
   br i1 %t$14, label %body_2_1, label %arm_3_1
 body_2_1:
-  %t$15 = call i64 @sprout_field(i64 %cmd, i64 0)
-  %t$16 = call i64 @sprout_field(i64 %cmd, i64 1)
+  %t$15 = call i64 @sprout_field(i64 %p$cmd, i64 0)
+  %t$16 = call i64 @sprout_field(i64 %p$cmd, i64 1)
   %t$17 = getelementptr inbounds { i64, [9 x i8] }, ptr @.str.7, i64 0, i32 1, i64 0
   %t$18 = ptrtoint ptr %t$17 to i64
   %t$64 = alloca i64
@@ -459,9 +459,9 @@ arm_3_1:
   %t$28 = icmp eq i64 %t$0, %t$27
   br i1 %t$28, label %body_3_1, label %arm_4_1
 body_3_1:
-  %t$29 = call i64 @sprout_field(i64 %cmd, i64 0)
-  %t$30 = call i64 @sprout_field(i64 %cmd, i64 1)
-  %t$31 = call i64 @sprout_field(i64 %cmd, i64 2)
+  %t$29 = call i64 @sprout_field(i64 %p$cmd, i64 0)
+  %t$30 = call i64 @sprout_field(i64 %p$cmd, i64 1)
+  %t$31 = call i64 @sprout_field(i64 %p$cmd, i64 2)
   %t$32 = add i64 0, 1
   %t$33 = icmp eq i64 %t$31, %t$32
   br i1 %t$33, label %ntest_31, label %arm_4_1
@@ -500,9 +500,9 @@ arm_4_1:
   %t$42 = icmp eq i64 %t$0, %t$41
   br i1 %t$42, label %body_4_1, label %arm_5_1
 body_4_1:
-  %t$43 = call i64 @sprout_field(i64 %cmd, i64 0)
-  %t$44 = call i64 @sprout_field(i64 %cmd, i64 1)
-  %t$45 = call i64 @sprout_field(i64 %cmd, i64 2)
+  %t$43 = call i64 @sprout_field(i64 %p$cmd, i64 0)
+  %t$44 = call i64 @sprout_field(i64 %p$cmd, i64 1)
+  %t$45 = call i64 @sprout_field(i64 %p$cmd, i64 2)
   %t$46 = add i64 0, 0
   %t$47 = icmp eq i64 %t$45, %t$46
   br i1 %t$47, label %ntest_45, label %arm_5_1
@@ -552,9 +552,9 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @examples.list_pattern_demo.sum_ints(i64 %xs) {
+define i64 @examples.list_pattern_demo.sum_ints(i64 %p$xs) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %xs)
+  %t$0 = call i64 @sprout_tag(i64 %p$xs)
   br label %arm_0_1
 arm_0_1:
   %t$3 = add i64 0, 5
@@ -568,8 +568,8 @@ arm_1_1:
   %t$7 = icmp eq i64 %t$0, %t$6
   br i1 %t$7, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t$8 = call i64 @sprout_field(i64 %xs, i64 0)
-  %t$9 = call i64 @sprout_field(i64 %xs, i64 1)
+  %t$8 = call i64 @sprout_field(i64 %p$xs, i64 0)
+  %t$9 = call i64 @sprout_field(i64 %p$xs, i64 1)
   %t$10 = call i64 @sprout_tag(i64 %t$9)
   %t$11 = add i64 0, 5
   %t$12 = icmp eq i64 %t$10, %t$11
@@ -581,8 +581,8 @@ arm_2_1:
   %t$14 = icmp eq i64 %t$0, %t$13
   br i1 %t$14, label %body_2_1, label %arm_3_1
 body_2_1:
-  %t$15 = call i64 @sprout_field(i64 %xs, i64 0)
-  %t$16 = call i64 @sprout_field(i64 %xs, i64 1)
+  %t$15 = call i64 @sprout_field(i64 %p$xs, i64 0)
+  %t$16 = call i64 @sprout_field(i64 %p$xs, i64 1)
   %t$17 = call i64 @sprout_tag(i64 %t$16)
   %t$18 = add i64 0, 6
   %t$19 = icmp eq i64 %t$17, %t$18
@@ -602,8 +602,8 @@ arm_3_1:
   %t$27 = icmp eq i64 %t$0, %t$26
   br i1 %t$27, label %body_3_1, label %arm_4_1
 body_3_1:
-  %t$28 = call i64 @sprout_field(i64 %xs, i64 0)
-  %t$29 = call i64 @sprout_field(i64 %xs, i64 1)
+  %t$28 = call i64 @sprout_field(i64 %p$xs, i64 0)
+  %t$29 = call i64 @sprout_field(i64 %p$xs, i64 1)
   %t$30 = call i64 @examples.list_pattern_demo.sum_ints(i64 %t$29)
   %t$31 = add i64 %t$28, %t$30
   br label %join_1
@@ -914,18 +914,18 @@ entry:
   ret i64 %t$67
 }
 
-define i64 @__cm_Filterable_filter_values(i64 %pred, i64 %xs, i64 %__tc_Filterable_0_filter_values, i64 %__tc_Filterable_0_filter_map_values, i64 %__tc_Filterable_0_partition_values) {
+define i64 @__cm_Filterable_filter_values(i64 %p$pred, i64 %p$xs, i64 %p$__tc_Filterable_0_filter_values, i64 %p$__tc_Filterable_0_filter_map_values, i64 %p$__tc_Filterable_0_partition_values) {
 entry:
-  call void @sprout_closure_arity_check(i64 %__tc_Filterable_0_filter_values, i64 2)
-  %t$0$env_ptr = inttoptr i64 %__tc_Filterable_0_filter_values to ptr
+  call void @sprout_closure_arity_check(i64 %p$__tc_Filterable_0_filter_values, i64 2)
+  %t$0$env_ptr = inttoptr i64 %p$__tc_Filterable_0_filter_values to ptr
   %t$0$code = load ptr, ptr %t$0$env_ptr
-  %t$0 = call i64 (i64, i64, i64) %t$0$code(i64 %__tc_Filterable_0_filter_values, i64 %pred, i64 %xs)
+  %t$0 = call i64 (i64, i64, i64) %t$0$code(i64 %p$__tc_Filterable_0_filter_values, i64 %p$pred, i64 %p$xs)
   ret i64 %t$0
 }
 
-define i64 @__tc_Semigroup_String_append(i64 %left, i64 %right) {
+define i64 @__tc_Semigroup_String_append(i64 %p$left, i64 %p$right) {
 entry:
-  %t$0 = call i64 @str_concat(i64 %left, i64 %right)
+  %t$0 = call i64 @str_concat(i64 %p$left, i64 %p$right)
   ret i64 %t$0
 }
 

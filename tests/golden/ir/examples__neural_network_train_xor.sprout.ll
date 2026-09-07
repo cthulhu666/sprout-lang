@@ -116,16 +116,16 @@ declare i64 @vector_push(i64, i64)
 @.cname.15 = private unnamed_addr constant [25 x i8] c"stdlib.mutable.MutMatrix\00"
 @.cfkinds.15 = private unnamed_addr constant [4 x i8] c"iip\00"
 
-define i64 @stdlib.mutable.mutvec_raw(i64 %v) {
+define i64 @stdlib.mutable.mutvec_raw(i64 %p$v) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %v)
+  %t$0 = call i64 @sprout_tag(i64 %p$v)
   br label %arm_0_1
 arm_0_1:
   %t$3 = add i64 0, 14
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %v, i64 0)
+  %t$5 = call i64 @sprout_field(i64 %p$v, i64 0)
   br label %join_1
 arm_1_1:
   call void @sprout_abort_match()
@@ -135,12 +135,12 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @stdlib.mutable.mutvec_new(i64 %n, i64 %val) {
+define i64 @stdlib.mutable.mutvec_new(i64 %p$n, i64 %p$val) {
 entry:
   %t$2 = alloca i64
-  store i64 %val, ptr %t$2
+  store i64 %p$val, ptr %t$2
   %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$0 = call i64 @vec_make_filled(i64 %n, i64 %val)
+  %t$0 = call i64 @vec_make_filled(i64 %p$n, i64 %p$val)
   %t$4 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$5 = alloca i64
   store i64 %t$0, ptr %t$5
@@ -153,39 +153,39 @@ entry:
   ret i64 %t$1
 }
 
-define i64 @stdlib.mutable.mutvec_at(i64 %v, i64 %i) {
+define i64 @stdlib.mutable.mutvec_at(i64 %p$v, i64 %p$i) {
 entry:
-  %t$0 = call i64 @stdlib.mutable.mutvec_raw(i64 %v)
-  %t$1 = call i64 @vector_get_direct(i64 %t$0, i64 %i)
+  %t$0 = call i64 @stdlib.mutable.mutvec_raw(i64 %p$v)
+  %t$1 = call i64 @vector_get_direct(i64 %t$0, i64 %p$i)
   ret i64 %t$1
 }
 
-define i64 @stdlib.mutable.mutvec_set(i64 %v, i64 %i, i64 %val) {
+define i64 @stdlib.mutable.mutvec_set(i64 %p$v, i64 %p$i, i64 %p$val) {
 entry:
-  %t$0 = call i64 @stdlib.mutable.mutvec_raw(i64 %v)
-  %t$1 = call i64 @vector_mutset(i64 %t$0, i64 %i, i64 %val)
+  %t$0 = call i64 @stdlib.mutable.mutvec_raw(i64 %p$v)
+  %t$1 = call i64 @vector_mutset(i64 %t$0, i64 %p$i, i64 %p$val)
   ret i64 %t$1
 }
 
-define i64 @examples.neural_network_train_xor.idx_w1(i64 %j, i64 %i) {
+define i64 @examples.neural_network_train_xor.idx_w1(i64 %p$j, i64 %p$i) {
 entry:
   %t$0 = add i64 0, 2
-  %t$1 = mul i64 %j, %t$0
-  %t$2 = add i64 %t$1, %i
+  %t$1 = mul i64 %p$j, %t$0
+  %t$2 = add i64 %t$1, %p$i
   ret i64 %t$2
 }
 
-define i64 @examples.neural_network_train_xor.idx_b1(i64 %j) {
+define i64 @examples.neural_network_train_xor.idx_b1(i64 %p$j) {
 entry:
   %t$0 = add i64 0, 4
-  %t$1 = add i64 %t$0, %j
+  %t$1 = add i64 %t$0, %p$j
   ret i64 %t$1
 }
 
-define i64 @examples.neural_network_train_xor.idx_w2(i64 %j) {
+define i64 @examples.neural_network_train_xor.idx_w2(i64 %p$j) {
 entry:
   %t$0 = add i64 0, 6
-  %t$1 = add i64 %t$0, %j
+  %t$1 = add i64 %t$0, %p$j
   ret i64 %t$1
 }
 
@@ -195,52 +195,52 @@ entry:
   ret i64 %t$0
 }
 
-define i64 @examples.neural_network_train_xor.dabs(i64 %x) {
+define i64 @examples.neural_network_train_xor.dabs(i64 %p$x) {
 entry:
   %t$0 = bitcast double 0.0 to i64
-  %t$1$fa = bitcast i64 %x to double
+  %t$1$fa = bitcast i64 %p$x to double
   %t$1$fb = bitcast i64 %t$0 to double
   %t$1 = fcmp olt double %t$1$fa, %t$1$fb
   %t$2 = zext i1 %t$1 to i64
   %t$6 = trunc i64 %t$2 to i1
   br i1 %t$6, label %then_3, label %else_3
 then_3:
-  %t$5$fa = bitcast i64 %x to double
+  %t$5$fa = bitcast i64 %p$x to double
   %t$5$fr = fneg double %t$5$fa
   %t$5 = bitcast double %t$5$fr to i64
   br label %join_3
 else_3:
   br label %join_3
 join_3:
-  %t$4 = phi i64 [%t$5, %then_3], [%x, %else_3]
+  %t$4 = phi i64 [%t$5, %then_3], [%p$x, %else_3]
   ret i64 %t$4
 }
 
-define i64 @examples.neural_network_train_xor.softsign(i64 %x) {
+define i64 @examples.neural_network_train_xor.softsign(i64 %p$x) {
 entry:
   %t$0 = bitcast double 1.0 to i64
-  %t$1 = call i64 @examples.neural_network_train_xor.dabs(i64 %x)
+  %t$1 = call i64 @examples.neural_network_train_xor.dabs(i64 %p$x)
   %t$2$la = bitcast i64 %t$0 to double
   %t$2$lb = bitcast i64 %t$1 to double
   %t$2$fr = fadd double %t$2$la, %t$2$lb
   %t$2 = bitcast double %t$2$fr to i64
-  %t$3$la = bitcast i64 %x to double
+  %t$3$la = bitcast i64 %p$x to double
   %t$3$lb = bitcast i64 %t$2 to double
   %t$3$fr = fdiv double %t$3$la, %t$3$lb
   %t$3 = bitcast double %t$3$fr to i64
   ret i64 %t$3
 }
 
-define i64 @examples.neural_network_train_xor.softsign_deriv_from_out(i64 %s) {
+define i64 @examples.neural_network_train_xor.softsign_deriv_from_out(i64 %p$s) {
 entry:
   %t$0 = bitcast double 1.0 to i64
-  %t$1 = call i64 @examples.neural_network_train_xor.dabs(i64 %s)
+  %t$1 = call i64 @examples.neural_network_train_xor.dabs(i64 %p$s)
   %t$2$la = bitcast i64 %t$0 to double
   %t$2$lb = bitcast i64 %t$1 to double
   %t$2$fr = fsub double %t$2$la, %t$2$lb
   %t$2 = bitcast double %t$2$fr to i64
   %t$3 = bitcast double 1.0 to i64
-  %t$4 = call i64 @examples.neural_network_train_xor.dabs(i64 %s)
+  %t$4 = call i64 @examples.neural_network_train_xor.dabs(i64 %p$s)
   %t$5$la = bitcast i64 %t$3 to double
   %t$5$lb = bitcast i64 %t$4 to double
   %t$5$fr = fsub double %t$5$la, %t$5$lb
@@ -252,9 +252,9 @@ entry:
   ret i64 %t$6
 }
 
-define i64 @examples.neural_network_train_xor.mod_int(i64 %a, i64 %m) {
+define i64 @examples.neural_network_train_xor.mod_int(i64 %p$a, i64 %p$m) {
 entry:
-  %t$0 = icmp eq i64 %m, 0
+  %t$0 = icmp eq i64 %p$m, 0
   br i1 %t$0, label %divpanic_0, label %divok_0
 divpanic_0:
   %t$1 = getelementptr inbounds { i64, [17 x i8] }, ptr @.str.0, i64 0, i32 1, i64 0
@@ -262,16 +262,16 @@ divpanic_0:
   call i64 @panic(i64 %t$2)
   unreachable
 divok_0:
-  %t$3 = sdiv i64 %a, %m
-  %t$4 = mul i64 %t$3, %m
-  %t$5 = sub i64 %a, %t$4
+  %t$3 = sdiv i64 %p$a, %p$m
+  %t$4 = mul i64 %t$3, %p$m
+  %t$5 = sub i64 %p$a, %t$4
   ret i64 %t$5
 }
 
-define i64 @examples.neural_network_train_xor.lcg_next(i64 %state) {
+define i64 @examples.neural_network_train_xor.lcg_next(i64 %p$state) {
 entry:
   %t$0 = add i64 0, 1664525
-  %t$1 = mul i64 %t$0, %state
+  %t$1 = mul i64 %t$0, %p$state
   %t$2 = add i64 0, 1013904223
   %t$3 = add i64 %t$1, %t$2
   %t$4 = add i64 0, 2147483648
@@ -279,10 +279,10 @@ entry:
   ret i64 %t$5
 }
 
-define i64 @examples.neural_network_train_xor.lcg_to_weight(i64 %state) {
+define i64 @examples.neural_network_train_xor.lcg_to_weight(i64 %p$state) {
 entry:
   %t$0 = add i64 0, 2000
-  %t$1 = call i64 @examples.neural_network_train_xor.mod_int(i64 %state, i64 %t$0)
+  %t$1 = call i64 @examples.neural_network_train_xor.mod_int(i64 %p$state, i64 %t$0)
   %t$2 = add i64 0, 1000
   %t$3 = sub i64 %t$1, %t$2
   %t$4$fr = sitofp i64 %t$3 to double
@@ -295,22 +295,22 @@ entry:
   ret i64 %t$6
 }
 
-define i64 @examples.neural_network_train_xor.hidden_out(i64 %w, i64 %j, i64 %x1, i64 %x2) {
+define i64 @examples.neural_network_train_xor.hidden_out(i64 %p$w, i64 %p$j, i64 %p$x1, i64 %p$x2) {
 entry:
   %t$0 = add i64 0, 0
-  %t$1 = call i64 @examples.neural_network_train_xor.idx_w1(i64 %j, i64 %t$0)
-  %t$2 = call i64 @stdlib.mutable.mutvec_at(i64 %w, i64 %t$1)
+  %t$1 = call i64 @examples.neural_network_train_xor.idx_w1(i64 %p$j, i64 %t$0)
+  %t$2 = call i64 @stdlib.mutable.mutvec_at(i64 %p$w, i64 %t$1)
   %t$3 = add i64 0, 1
-  %t$4 = call i64 @examples.neural_network_train_xor.idx_w1(i64 %j, i64 %t$3)
-  %t$5 = call i64 @stdlib.mutable.mutvec_at(i64 %w, i64 %t$4)
-  %t$6 = call i64 @examples.neural_network_train_xor.idx_b1(i64 %j)
-  %t$7 = call i64 @stdlib.mutable.mutvec_at(i64 %w, i64 %t$6)
+  %t$4 = call i64 @examples.neural_network_train_xor.idx_w1(i64 %p$j, i64 %t$3)
+  %t$5 = call i64 @stdlib.mutable.mutvec_at(i64 %p$w, i64 %t$4)
+  %t$6 = call i64 @examples.neural_network_train_xor.idx_b1(i64 %p$j)
+  %t$7 = call i64 @stdlib.mutable.mutvec_at(i64 %p$w, i64 %t$6)
   %t$8$la = bitcast i64 %t$2 to double
-  %t$8$lb = bitcast i64 %x1 to double
+  %t$8$lb = bitcast i64 %p$x1 to double
   %t$8$fr = fmul double %t$8$la, %t$8$lb
   %t$8 = bitcast double %t$8$fr to i64
   %t$9$la = bitcast i64 %t$5 to double
-  %t$9$lb = bitcast i64 %x2 to double
+  %t$9$lb = bitcast i64 %p$x2 to double
   %t$9$fr = fmul double %t$9$la, %t$9$lb
   %t$9 = bitcast double %t$9$fr to i64
   %t$10$la = bitcast i64 %t$8 to double
@@ -325,20 +325,20 @@ entry:
   ret i64 %t$12
 }
 
-define i64 @examples.neural_network_train_xor.forward(i64 %w, i64 %x1, i64 %x2) {
+define i64 @examples.neural_network_train_xor.forward(i64 %p$w, i64 %p$x1, i64 %p$x2) {
 entry:
   %t$0 = add i64 0, 0
-  %t$1 = call i64 @examples.neural_network_train_xor.hidden_out(i64 %w, i64 %t$0, i64 %x1, i64 %x2)
+  %t$1 = call i64 @examples.neural_network_train_xor.hidden_out(i64 %p$w, i64 %t$0, i64 %p$x1, i64 %p$x2)
   %t$2 = add i64 0, 1
-  %t$3 = call i64 @examples.neural_network_train_xor.hidden_out(i64 %w, i64 %t$2, i64 %x1, i64 %x2)
+  %t$3 = call i64 @examples.neural_network_train_xor.hidden_out(i64 %p$w, i64 %t$2, i64 %p$x1, i64 %p$x2)
   %t$4 = add i64 0, 0
   %t$5 = call i64 @examples.neural_network_train_xor.idx_w2(i64 %t$4)
-  %t$6 = call i64 @stdlib.mutable.mutvec_at(i64 %w, i64 %t$5)
+  %t$6 = call i64 @stdlib.mutable.mutvec_at(i64 %p$w, i64 %t$5)
   %t$7 = add i64 0, 1
   %t$8 = call i64 @examples.neural_network_train_xor.idx_w2(i64 %t$7)
-  %t$9 = call i64 @stdlib.mutable.mutvec_at(i64 %w, i64 %t$8)
+  %t$9 = call i64 @stdlib.mutable.mutvec_at(i64 %p$w, i64 %t$8)
   %t$10 = call i64 @examples.neural_network_train_xor.idx_b2()
-  %t$11 = call i64 @stdlib.mutable.mutvec_at(i64 %w, i64 %t$10)
+  %t$11 = call i64 @stdlib.mutable.mutvec_at(i64 %p$w, i64 %t$10)
   %t$12$la = bitcast i64 %t$6 to double
   %t$12$lb = bitcast i64 %t$1 to double
   %t$12$fr = fmul double %t$12$la, %t$12$lb
@@ -358,59 +358,59 @@ entry:
   ret i64 %t$15
 }
 
-define i64 @examples.neural_network_train_xor.accum(i64 %g, i64 %i, i64 %delta) {
+define i64 @examples.neural_network_train_xor.accum(i64 %p$g, i64 %p$i, i64 %p$delta) {
 entry:
-  %t$0 = call i64 @stdlib.mutable.mutvec_at(i64 %g, i64 %i)
+  %t$0 = call i64 @stdlib.mutable.mutvec_at(i64 %p$g, i64 %p$i)
   %t$1$la = bitcast i64 %t$0 to double
-  %t$1$lb = bitcast i64 %delta to double
+  %t$1$lb = bitcast i64 %p$delta to double
   %t$1$fr = fadd double %t$1$la, %t$1$lb
   %t$1 = bitcast double %t$1$fr to i64
-  %t$2 = call i64 @stdlib.mutable.mutvec_set(i64 %g, i64 %i, i64 %t$1)
+  %t$2 = call i64 @stdlib.mutable.mutvec_set(i64 %p$g, i64 %p$i, i64 %t$1)
   %t$3 = add i64 0, 0
   ret i64 %t$3
 }
 
-define i64 @examples.neural_network_train_xor.accum_hidden(i64 %w, i64 %g, i64 %j, i64 %w2_j, i64 %h_j, i64 %d, i64 %x1, i64 %x2) {
+define i64 @examples.neural_network_train_xor.accum_hidden(i64 %p$w, i64 %p$g, i64 %p$j, i64 %p$w2_j, i64 %p$h_j, i64 %p$d, i64 %p$x1, i64 %p$x2) {
 entry:
-  %t$0$la = bitcast i64 %d to double
-  %t$0$lb = bitcast i64 %w2_j to double
+  %t$0$la = bitcast i64 %p$d to double
+  %t$0$lb = bitcast i64 %p$w2_j to double
   %t$0$fr = fmul double %t$0$la, %t$0$lb
   %t$0 = bitcast double %t$0$fr to i64
-  %t$1 = call i64 @examples.neural_network_train_xor.softsign_deriv_from_out(i64 %h_j)
+  %t$1 = call i64 @examples.neural_network_train_xor.softsign_deriv_from_out(i64 %p$h_j)
   %t$2$la = bitcast i64 %t$0 to double
   %t$2$lb = bitcast i64 %t$1 to double
   %t$2$fr = fmul double %t$2$la, %t$2$lb
   %t$2 = bitcast double %t$2$fr to i64
   %t$3 = add i64 0, 0
-  %t$4 = call i64 @examples.neural_network_train_xor.idx_w1(i64 %j, i64 %t$3)
+  %t$4 = call i64 @examples.neural_network_train_xor.idx_w1(i64 %p$j, i64 %t$3)
   %t$5$la = bitcast i64 %t$2 to double
-  %t$5$lb = bitcast i64 %x1 to double
+  %t$5$lb = bitcast i64 %p$x1 to double
   %t$5$fr = fmul double %t$5$la, %t$5$lb
   %t$5 = bitcast double %t$5$fr to i64
-  %t$6 = call i64 @examples.neural_network_train_xor.accum(i64 %g, i64 %t$4, i64 %t$5)
+  %t$6 = call i64 @examples.neural_network_train_xor.accum(i64 %p$g, i64 %t$4, i64 %t$5)
   %t$7 = add i64 0, 1
-  %t$8 = call i64 @examples.neural_network_train_xor.idx_w1(i64 %j, i64 %t$7)
+  %t$8 = call i64 @examples.neural_network_train_xor.idx_w1(i64 %p$j, i64 %t$7)
   %t$9$la = bitcast i64 %t$2 to double
-  %t$9$lb = bitcast i64 %x2 to double
+  %t$9$lb = bitcast i64 %p$x2 to double
   %t$9$fr = fmul double %t$9$la, %t$9$lb
   %t$9 = bitcast double %t$9$fr to i64
-  %t$10 = call i64 @examples.neural_network_train_xor.accum(i64 %g, i64 %t$8, i64 %t$9)
-  %t$11 = call i64 @examples.neural_network_train_xor.idx_b1(i64 %j)
-  %t$12 = call i64 @examples.neural_network_train_xor.accum(i64 %g, i64 %t$11, i64 %t$2)
+  %t$10 = call i64 @examples.neural_network_train_xor.accum(i64 %p$g, i64 %t$8, i64 %t$9)
+  %t$11 = call i64 @examples.neural_network_train_xor.idx_b1(i64 %p$j)
+  %t$12 = call i64 @examples.neural_network_train_xor.accum(i64 %p$g, i64 %t$11, i64 %t$2)
   %t$13 = add i64 0, 0
   ret i64 %t$13
 }
 
-define i64 @examples.neural_network_train_xor.accum_sample_grad(i64 %w, i64 %g, i64 %x1, i64 %x2, i64 %target) {
+define i64 @examples.neural_network_train_xor.accum_sample_grad(i64 %p$w, i64 %p$g, i64 %p$x1, i64 %p$x2, i64 %p$target) {
 entry:
   %t$0 = add i64 0, 0
-  %t$1 = call i64 @examples.neural_network_train_xor.hidden_out(i64 %w, i64 %t$0, i64 %x1, i64 %x2)
+  %t$1 = call i64 @examples.neural_network_train_xor.hidden_out(i64 %p$w, i64 %t$0, i64 %p$x1, i64 %p$x2)
   %t$2 = add i64 0, 1
-  %t$3 = call i64 @examples.neural_network_train_xor.hidden_out(i64 %w, i64 %t$2, i64 %x1, i64 %x2)
-  %t$4 = call i64 @examples.neural_network_train_xor.forward(i64 %w, i64 %x1, i64 %x2)
+  %t$3 = call i64 @examples.neural_network_train_xor.hidden_out(i64 %p$w, i64 %t$2, i64 %p$x1, i64 %p$x2)
+  %t$4 = call i64 @examples.neural_network_train_xor.forward(i64 %p$w, i64 %p$x1, i64 %p$x2)
   %t$5 = bitcast double 2.0 to i64
   %t$6$la = bitcast i64 %t$4 to double
-  %t$6$lb = bitcast i64 %target to double
+  %t$6$lb = bitcast i64 %p$target to double
   %t$6$fr = fsub double %t$6$la, %t$6$lb
   %t$6 = bitcast double %t$6$fr to i64
   %t$7$la = bitcast i64 %t$5 to double
@@ -423,43 +423,43 @@ entry:
   %t$10$lb = bitcast i64 %t$1 to double
   %t$10$fr = fmul double %t$10$la, %t$10$lb
   %t$10 = bitcast double %t$10$fr to i64
-  %t$11 = call i64 @examples.neural_network_train_xor.accum(i64 %g, i64 %t$9, i64 %t$10)
+  %t$11 = call i64 @examples.neural_network_train_xor.accum(i64 %p$g, i64 %t$9, i64 %t$10)
   %t$12 = add i64 0, 1
   %t$13 = call i64 @examples.neural_network_train_xor.idx_w2(i64 %t$12)
   %t$14$la = bitcast i64 %t$7 to double
   %t$14$lb = bitcast i64 %t$3 to double
   %t$14$fr = fmul double %t$14$la, %t$14$lb
   %t$14 = bitcast double %t$14$fr to i64
-  %t$15 = call i64 @examples.neural_network_train_xor.accum(i64 %g, i64 %t$13, i64 %t$14)
+  %t$15 = call i64 @examples.neural_network_train_xor.accum(i64 %p$g, i64 %t$13, i64 %t$14)
   %t$16 = call i64 @examples.neural_network_train_xor.idx_b2()
-  %t$17 = call i64 @examples.neural_network_train_xor.accum(i64 %g, i64 %t$16, i64 %t$7)
+  %t$17 = call i64 @examples.neural_network_train_xor.accum(i64 %p$g, i64 %t$16, i64 %t$7)
   %t$18 = add i64 0, 0
   %t$19 = call i64 @examples.neural_network_train_xor.idx_w2(i64 %t$18)
-  %t$20 = call i64 @stdlib.mutable.mutvec_at(i64 %w, i64 %t$19)
+  %t$20 = call i64 @stdlib.mutable.mutvec_at(i64 %p$w, i64 %t$19)
   %t$21 = add i64 0, 1
   %t$22 = call i64 @examples.neural_network_train_xor.idx_w2(i64 %t$21)
-  %t$23 = call i64 @stdlib.mutable.mutvec_at(i64 %w, i64 %t$22)
+  %t$23 = call i64 @stdlib.mutable.mutvec_at(i64 %p$w, i64 %t$22)
   %t$24 = add i64 0, 0
-  %t$25 = call i64 @examples.neural_network_train_xor.accum_hidden(i64 %w, i64 %g, i64 %t$24, i64 %t$20, i64 %t$1, i64 %t$7, i64 %x1, i64 %x2)
+  %t$25 = call i64 @examples.neural_network_train_xor.accum_hidden(i64 %p$w, i64 %p$g, i64 %t$24, i64 %t$20, i64 %t$1, i64 %t$7, i64 %p$x1, i64 %p$x2)
   %t$26 = add i64 0, 1
-  %t$27 = call i64 @examples.neural_network_train_xor.accum_hidden(i64 %w, i64 %g, i64 %t$26, i64 %t$23, i64 %t$3, i64 %t$7, i64 %x1, i64 %x2)
+  %t$27 = call i64 @examples.neural_network_train_xor.accum_hidden(i64 %p$w, i64 %p$g, i64 %t$26, i64 %t$23, i64 %t$3, i64 %t$7, i64 %p$x1, i64 %p$x2)
   %t$28 = add i64 0, 0
   ret i64 %t$28
 }
 
-define i64 @examples.neural_network_train_xor.zero_grads(i64 %g$in, i64 %i$in) {
+define i64 @examples.neural_network_train_xor.zero_grads(i64 %p$g$in, i64 %p$i$in) {
 entry:
   %t$12 = alloca i64
-  store i64 %g$in, ptr %t$12
+  store i64 %p$g$in, ptr %t$12
   %t$13 = alloca i64
-  store i64 %i$in, ptr %t$13
+  store i64 %p$i$in, ptr %t$13
   %t$14 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
-  %g = load i64, ptr %t$12
-  %i = load i64, ptr %t$13
+  %p$g = load i64, ptr %t$12
+  %p$i = load i64, ptr %t$13
   %t$0 = add i64 0, 9
-  %t$1 = icmp sge i64 %i, %t$0
+  %t$1 = icmp sge i64 %p$i, %t$0
   %t$2 = zext i1 %t$1 to i64
   %t$11 = trunc i64 %t$2 to i1
   br i1 %t$11, label %then_3, label %else_3
@@ -468,10 +468,10 @@ then_3:
   br label %join_3
 else_3:
   %t$6 = bitcast double 0.0 to i64
-  %t$7 = call i64 @stdlib.mutable.mutvec_set(i64 %g, i64 %i, i64 %t$6)
+  %t$7 = call i64 @stdlib.mutable.mutvec_set(i64 %p$g, i64 %p$i, i64 %t$6)
   %t$8 = add i64 0, 1
-  %t$9 = add i64 %i, %t$8
-  store i64 %g, ptr %t$12
+  %t$9 = add i64 %p$i, %t$8
+  store i64 %p$g, ptr %t$12
   store i64 %t$9, ptr %t$13
   call void @llvm.stackrestore(ptr %t$14)
   br label %tco_loop
@@ -480,25 +480,25 @@ join_3:
   ret i64 %t$4
 }
 
-define i64 @examples.neural_network_train_xor.apply_update(i64 %w$in, i64 %g$in, i64 %lr$in, i64 %i$in) {
+define i64 @examples.neural_network_train_xor.apply_update(i64 %p$w$in, i64 %p$g$in, i64 %p$lr$in, i64 %p$i$in) {
 entry:
   %t$15 = alloca i64
-  store i64 %w$in, ptr %t$15
+  store i64 %p$w$in, ptr %t$15
   %t$16 = alloca i64
-  store i64 %g$in, ptr %t$16
+  store i64 %p$g$in, ptr %t$16
   %t$17 = alloca i64
-  store i64 %lr$in, ptr %t$17
+  store i64 %p$lr$in, ptr %t$17
   %t$18 = alloca i64
-  store i64 %i$in, ptr %t$18
+  store i64 %p$i$in, ptr %t$18
   %t$19 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
-  %w = load i64, ptr %t$15
-  %g = load i64, ptr %t$16
-  %lr = load i64, ptr %t$17
-  %i = load i64, ptr %t$18
+  %p$w = load i64, ptr %t$15
+  %p$g = load i64, ptr %t$16
+  %p$lr = load i64, ptr %t$17
+  %p$i = load i64, ptr %t$18
   %t$0 = add i64 0, 9
-  %t$1 = icmp sge i64 %i, %t$0
+  %t$1 = icmp sge i64 %p$i, %t$0
   %t$2 = zext i1 %t$1 to i64
   %t$14 = trunc i64 %t$2 to i1
   br i1 %t$14, label %then_3, label %else_3
@@ -506,9 +506,9 @@ then_3:
   %t$5 = add i64 0, 0
   br label %join_3
 else_3:
-  %t$6 = call i64 @stdlib.mutable.mutvec_at(i64 %w, i64 %i)
-  %t$7 = call i64 @stdlib.mutable.mutvec_at(i64 %g, i64 %i)
-  %t$8$la = bitcast i64 %lr to double
+  %t$6 = call i64 @stdlib.mutable.mutvec_at(i64 %p$w, i64 %p$i)
+  %t$7 = call i64 @stdlib.mutable.mutvec_at(i64 %p$g, i64 %p$i)
+  %t$8$la = bitcast i64 %p$lr to double
   %t$8$lb = bitcast i64 %t$7 to double
   %t$8$fr = fmul double %t$8$la, %t$8$lb
   %t$8 = bitcast double %t$8$fr to i64
@@ -516,12 +516,12 @@ else_3:
   %t$9$lb = bitcast i64 %t$8 to double
   %t$9$fr = fsub double %t$9$la, %t$9$lb
   %t$9 = bitcast double %t$9$fr to i64
-  %t$10 = call i64 @stdlib.mutable.mutvec_set(i64 %w, i64 %i, i64 %t$9)
+  %t$10 = call i64 @stdlib.mutable.mutvec_set(i64 %p$w, i64 %p$i, i64 %t$9)
   %t$11 = add i64 0, 1
-  %t$12 = add i64 %i, %t$11
-  store i64 %w, ptr %t$15
-  store i64 %g, ptr %t$16
-  store i64 %lr, ptr %t$17
+  %t$12 = add i64 %p$i, %t$11
+  store i64 %p$w, ptr %t$15
+  store i64 %p$g, ptr %t$16
+  store i64 %p$lr, ptr %t$17
   store i64 %t$12, ptr %t$18
   call void @llvm.stackrestore(ptr %t$19)
   br label %tco_loop
@@ -530,15 +530,15 @@ join_3:
   ret i64 %t$4
 }
 
-define i64 @examples.neural_network_train_xor.sq_err(i64 %w, i64 %x1, i64 %x2, i64 %target) {
+define i64 @examples.neural_network_train_xor.sq_err(i64 %p$w, i64 %p$x1, i64 %p$x2, i64 %p$target) {
 entry:
-  %t$0 = call i64 @examples.neural_network_train_xor.forward(i64 %w, i64 %x1, i64 %x2)
+  %t$0 = call i64 @examples.neural_network_train_xor.forward(i64 %p$w, i64 %p$x1, i64 %p$x2)
   %t$1$la = bitcast i64 %t$0 to double
-  %t$1$lb = bitcast i64 %target to double
+  %t$1$lb = bitcast i64 %p$target to double
   %t$1$fr = fsub double %t$1$la, %t$1$lb
   %t$1 = bitcast double %t$1$fr to i64
   %t$2$la = bitcast i64 %t$0 to double
-  %t$2$lb = bitcast i64 %target to double
+  %t$2$lb = bitcast i64 %p$target to double
   %t$2$fr = fsub double %t$2$la, %t$2$lb
   %t$2 = bitcast double %t$2$fr to i64
   %t$3$la = bitcast i64 %t$1 to double
@@ -548,24 +548,24 @@ entry:
   ret i64 %t$3
 }
 
-define i64 @examples.neural_network_train_xor.mse(i64 %w) {
+define i64 @examples.neural_network_train_xor.mse(i64 %p$w) {
 entry:
   %t$0 = bitcast double 0.0 to i64
   %t$1 = bitcast double 0.0 to i64
   %t$2 = bitcast double 0.0 to i64
-  %t$3 = call i64 @examples.neural_network_train_xor.sq_err(i64 %w, i64 %t$0, i64 %t$1, i64 %t$2)
+  %t$3 = call i64 @examples.neural_network_train_xor.sq_err(i64 %p$w, i64 %t$0, i64 %t$1, i64 %t$2)
   %t$4 = bitcast double 0.0 to i64
   %t$5 = bitcast double 1.0 to i64
   %t$6 = bitcast double 1.0 to i64
-  %t$7 = call i64 @examples.neural_network_train_xor.sq_err(i64 %w, i64 %t$4, i64 %t$5, i64 %t$6)
+  %t$7 = call i64 @examples.neural_network_train_xor.sq_err(i64 %p$w, i64 %t$4, i64 %t$5, i64 %t$6)
   %t$8 = bitcast double 1.0 to i64
   %t$9 = bitcast double 0.0 to i64
   %t$10 = bitcast double 1.0 to i64
-  %t$11 = call i64 @examples.neural_network_train_xor.sq_err(i64 %w, i64 %t$8, i64 %t$9, i64 %t$10)
+  %t$11 = call i64 @examples.neural_network_train_xor.sq_err(i64 %p$w, i64 %t$8, i64 %t$9, i64 %t$10)
   %t$12 = bitcast double 1.0 to i64
   %t$13 = bitcast double 1.0 to i64
   %t$14 = bitcast double 0.0 to i64
-  %t$15 = call i64 @examples.neural_network_train_xor.sq_err(i64 %w, i64 %t$12, i64 %t$13, i64 %t$14)
+  %t$15 = call i64 @examples.neural_network_train_xor.sq_err(i64 %p$w, i64 %t$12, i64 %t$13, i64 %t$14)
   %t$16$la = bitcast i64 %t$3 to double
   %t$16$lb = bitcast i64 %t$7 to double
   %t$16$fr = fadd double %t$16$la, %t$16$lb
@@ -586,55 +586,55 @@ entry:
   ret i64 %t$20
 }
 
-define i64 @examples.neural_network_train_xor.train_epoch(i64 %w, i64 %g, i64 %lr) {
+define i64 @examples.neural_network_train_xor.train_epoch(i64 %p$w, i64 %p$g, i64 %p$lr) {
 entry:
   %t$0 = add i64 0, 0
-  %t$1 = call i64 @examples.neural_network_train_xor.zero_grads(i64 %g, i64 %t$0)
+  %t$1 = call i64 @examples.neural_network_train_xor.zero_grads(i64 %p$g, i64 %t$0)
   %t$2 = bitcast double 0.0 to i64
   %t$3 = bitcast double 0.0 to i64
   %t$4 = bitcast double 0.0 to i64
-  %t$5 = call i64 @examples.neural_network_train_xor.accum_sample_grad(i64 %w, i64 %g, i64 %t$2, i64 %t$3, i64 %t$4)
+  %t$5 = call i64 @examples.neural_network_train_xor.accum_sample_grad(i64 %p$w, i64 %p$g, i64 %t$2, i64 %t$3, i64 %t$4)
   %t$6 = bitcast double 0.0 to i64
   %t$7 = bitcast double 1.0 to i64
   %t$8 = bitcast double 1.0 to i64
-  %t$9 = call i64 @examples.neural_network_train_xor.accum_sample_grad(i64 %w, i64 %g, i64 %t$6, i64 %t$7, i64 %t$8)
+  %t$9 = call i64 @examples.neural_network_train_xor.accum_sample_grad(i64 %p$w, i64 %p$g, i64 %t$6, i64 %t$7, i64 %t$8)
   %t$10 = bitcast double 1.0 to i64
   %t$11 = bitcast double 0.0 to i64
   %t$12 = bitcast double 1.0 to i64
-  %t$13 = call i64 @examples.neural_network_train_xor.accum_sample_grad(i64 %w, i64 %g, i64 %t$10, i64 %t$11, i64 %t$12)
+  %t$13 = call i64 @examples.neural_network_train_xor.accum_sample_grad(i64 %p$w, i64 %p$g, i64 %t$10, i64 %t$11, i64 %t$12)
   %t$14 = bitcast double 1.0 to i64
   %t$15 = bitcast double 1.0 to i64
   %t$16 = bitcast double 0.0 to i64
-  %t$17 = call i64 @examples.neural_network_train_xor.accum_sample_grad(i64 %w, i64 %g, i64 %t$14, i64 %t$15, i64 %t$16)
+  %t$17 = call i64 @examples.neural_network_train_xor.accum_sample_grad(i64 %p$w, i64 %p$g, i64 %t$14, i64 %t$15, i64 %t$16)
   %t$18 = add i64 0, 0
-  %t$19 = call i64 @examples.neural_network_train_xor.apply_update(i64 %w, i64 %g, i64 %lr, i64 %t$18)
+  %t$19 = call i64 @examples.neural_network_train_xor.apply_update(i64 %p$w, i64 %p$g, i64 %p$lr, i64 %t$18)
   ret i64 %t$19
 }
 
-define i64 @examples.neural_network_train_xor.train_verbose(i64 %w$in, i64 %g$in, i64 %lr$in, i64 %epoch$in, i64 %total$in, i64 %band$in) {
+define i64 @examples.neural_network_train_xor.train_verbose(i64 %p$w$in, i64 %p$g$in, i64 %p$lr$in, i64 %p$epoch$in, i64 %p$total$in, i64 %p$band$in) {
 entry:
   %t$11 = alloca i64
-  store i64 %w$in, ptr %t$11
+  store i64 %p$w$in, ptr %t$11
   %t$12 = alloca i64
-  store i64 %g$in, ptr %t$12
+  store i64 %p$g$in, ptr %t$12
   %t$13 = alloca i64
-  store i64 %lr$in, ptr %t$13
+  store i64 %p$lr$in, ptr %t$13
   %t$14 = alloca i64
-  store i64 %epoch$in, ptr %t$14
+  store i64 %p$epoch$in, ptr %t$14
   %t$15 = alloca i64
-  store i64 %total$in, ptr %t$15
+  store i64 %p$total$in, ptr %t$15
   %t$16 = alloca i64
-  store i64 %band$in, ptr %t$16
+  store i64 %p$band$in, ptr %t$16
   %t$17 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
-  %w = load i64, ptr %t$11
-  %g = load i64, ptr %t$12
-  %lr = load i64, ptr %t$13
-  %epoch = load i64, ptr %t$14
-  %total = load i64, ptr %t$15
-  %band = load i64, ptr %t$16
-  %t$0 = icmp sgt i64 %epoch, %total
+  %p$w = load i64, ptr %t$11
+  %p$g = load i64, ptr %t$12
+  %p$lr = load i64, ptr %t$13
+  %p$epoch = load i64, ptr %t$14
+  %p$total = load i64, ptr %t$15
+  %p$band = load i64, ptr %t$16
+  %t$0 = icmp sgt i64 %p$epoch, %p$total
   %t$1 = zext i1 %t$0 to i64
   %t$10 = trunc i64 %t$1 to i1
   br i1 %t$10, label %then_2, label %else_2
@@ -643,22 +643,22 @@ then_2:
   br label %join_2
 else_2:
   %t$18 = alloca i64
-  store i64 %w, ptr %t$18
+  store i64 %p$w, ptr %t$18
   %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
   %t$20 = alloca i64
-  store i64 %g, ptr %t$20
+  store i64 %p$g, ptr %t$20
   %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
-  %t$5 = call i64 @examples.neural_network_train_xor.report_loss(i64 %w, i64 %epoch, i64 %band)
-  %t$6 = call i64 @examples.neural_network_train_xor.train_epoch(i64 %w, i64 %g, i64 %lr)
+  %t$5 = call i64 @examples.neural_network_train_xor.report_loss(i64 %p$w, i64 %p$epoch, i64 %p$band)
+  %t$6 = call i64 @examples.neural_network_train_xor.train_epoch(i64 %p$w, i64 %p$g, i64 %p$lr)
   %t$7 = add i64 0, 1
-  %t$8 = add i64 %epoch, %t$7
+  %t$8 = add i64 %p$epoch, %t$7
   %t$22 = call i64 @sprout_gc_pop_roots(i64 2)
-  store i64 %w, ptr %t$11
-  store i64 %g, ptr %t$12
-  store i64 %lr, ptr %t$13
+  store i64 %p$w, ptr %t$11
+  store i64 %p$g, ptr %t$12
+  store i64 %p$lr, ptr %t$13
   store i64 %t$8, ptr %t$14
-  store i64 %total, ptr %t$15
-  store i64 %band, ptr %t$16
+  store i64 %p$total, ptr %t$15
+  store i64 %p$band, ptr %t$16
   call void @llvm.stackrestore(ptr %t$17)
   br label %tco_loop
 join_2:
@@ -666,22 +666,22 @@ join_2:
   ret i64 %t$3
 }
 
-define i64 @examples.neural_network_train_xor.report_loss(i64 %w, i64 %epoch, i64 %band) {
+define i64 @examples.neural_network_train_xor.report_loss(i64 %p$w, i64 %p$epoch, i64 %p$band) {
 entry:
-  %t$0 = call i64 @examples.neural_network_train_xor.mod_int(i64 %epoch, i64 %band)
+  %t$0 = call i64 @examples.neural_network_train_xor.mod_int(i64 %p$epoch, i64 %p$band)
   %t$1 = add i64 0, 0
   %t$2 = icmp eq i64 %t$0, %t$1
   %t$3 = zext i1 %t$2 to i64
   %t$19 = trunc i64 %t$3 to i1
   br i1 %t$19, label %then_4, label %else_4
 then_4:
-  %t$6 = call i64 @examples.neural_network_train_xor.mse(i64 %w)
+  %t$6 = call i64 @examples.neural_network_train_xor.mse(i64 %p$w)
   %t$7 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.1, i64 0, i32 1, i64 0
   %t$8 = ptrtoint ptr %t$7 to i64
   %t$20 = alloca i64
   store i64 %t$8, ptr %t$20
   %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
-  %t$9 = call i64 @__tc_ToString_Int_to_string(i64 %epoch)
+  %t$9 = call i64 @__tc_ToString_Int_to_string(i64 %p$epoch)
   %t$22 = alloca i64
   store i64 %t$9, ptr %t$22
   %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
@@ -718,22 +718,22 @@ join_4:
   ret i64 %t$5
 }
 
-define i64 @examples.neural_network_train_xor.init_weights(i64 %w$in, i64 %i$in, i64 %state$in) {
+define i64 @examples.neural_network_train_xor.init_weights(i64 %p$w$in, i64 %p$i$in, i64 %p$state$in) {
 entry:
   %t$13 = alloca i64
-  store i64 %w$in, ptr %t$13
+  store i64 %p$w$in, ptr %t$13
   %t$14 = alloca i64
-  store i64 %i$in, ptr %t$14
+  store i64 %p$i$in, ptr %t$14
   %t$15 = alloca i64
-  store i64 %state$in, ptr %t$15
+  store i64 %p$state$in, ptr %t$15
   %t$16 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
-  %w = load i64, ptr %t$13
-  %i = load i64, ptr %t$14
-  %state = load i64, ptr %t$15
+  %p$w = load i64, ptr %t$13
+  %p$i = load i64, ptr %t$14
+  %p$state = load i64, ptr %t$15
   %t$0 = add i64 0, 9
-  %t$1 = icmp sge i64 %i, %t$0
+  %t$1 = icmp sge i64 %p$i, %t$0
   %t$2 = zext i1 %t$1 to i64
   %t$12 = trunc i64 %t$2 to i1
   br i1 %t$12, label %then_3, label %else_3
@@ -741,12 +741,12 @@ then_3:
   %t$5 = add i64 0, 0
   br label %join_3
 else_3:
-  %t$6 = call i64 @examples.neural_network_train_xor.lcg_to_weight(i64 %state)
-  %t$7 = call i64 @stdlib.mutable.mutvec_set(i64 %w, i64 %i, i64 %t$6)
+  %t$6 = call i64 @examples.neural_network_train_xor.lcg_to_weight(i64 %p$state)
+  %t$7 = call i64 @stdlib.mutable.mutvec_set(i64 %p$w, i64 %p$i, i64 %t$6)
   %t$8 = add i64 0, 1
-  %t$9 = add i64 %i, %t$8
-  %t$10 = call i64 @examples.neural_network_train_xor.lcg_next(i64 %state)
-  store i64 %w, ptr %t$13
+  %t$9 = add i64 %p$i, %t$8
+  %t$10 = call i64 @examples.neural_network_train_xor.lcg_next(i64 %p$state)
+  store i64 %p$w, ptr %t$13
   store i64 %t$9, ptr %t$14
   store i64 %t$10, ptr %t$15
   call void @llvm.stackrestore(ptr %t$16)
@@ -756,9 +756,9 @@ join_3:
   ret i64 %t$4
 }
 
-define i64 @examples.neural_network_train_xor.predict(i64 %w, i64 %x1, i64 %x2) {
+define i64 @examples.neural_network_train_xor.predict(i64 %p$w, i64 %p$x1, i64 %p$x2) {
 entry:
-  %t$0 = call i64 @examples.neural_network_train_xor.forward(i64 %w, i64 %x1, i64 %x2)
+  %t$0 = call i64 @examples.neural_network_train_xor.forward(i64 %p$w, i64 %p$x1, i64 %p$x2)
   %t$1 = bitcast double 0.5 to i64
   %t$2$fa = bitcast i64 %t$0 to double
   %t$2$fb = bitcast i64 %t$1 to double
@@ -824,21 +824,21 @@ entry:
   ret i64 %t$32
 }
 
-define i64 @__tc_Semigroup_String_append(i64 %left, i64 %right) {
+define i64 @__tc_Semigroup_String_append(i64 %p$left, i64 %p$right) {
 entry:
-  %t$0 = call i64 @str_concat(i64 %left, i64 %right)
+  %t$0 = call i64 @str_concat(i64 %p$left, i64 %p$right)
   ret i64 %t$0
 }
 
-define i64 @__tc_ToString_Double_to_string(i64 %value) {
+define i64 @__tc_ToString_Double_to_string(i64 %p$value) {
 entry:
-  %t$0 = call i64 @double_to_string(i64 %value)
+  %t$0 = call i64 @double_to_string(i64 %p$value)
   ret i64 %t$0
 }
 
-define i64 @__tc_ToString_Int_to_string(i64 %value) {
+define i64 @__tc_ToString_Int_to_string(i64 %p$value) {
 entry:
-  %t$0 = call i64 @int_to_string(i64 %value)
+  %t$0 = call i64 @int_to_string(i64 %p$value)
   ret i64 %t$0
 }
 

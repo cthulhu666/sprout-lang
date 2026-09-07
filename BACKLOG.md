@@ -5136,9 +5136,24 @@ op-classification already in place.
   Cheap and mechanical, but it is a compiler-source change, so it costs a reseed and a golden
   cycle — hence P3 rather than folding it into the fix above.
 
-- [ ] `P2` **A function PARAMETER named `entry` emits invalid IR.** Surfaced 2026-09-05 while
-  writing `tests/stdlib/test_fs.spr`; worked around there by renaming the parameter to `item`.
-  `fn f(entry: Int) -> Int = entry + 1` compiles and typechecks, then fails to assemble:
+- [x] `P2` **A function PARAMETER named `entry` emits invalid IR. FIXED 2026-09-07.** Parameters
+  now render as `%p$<name>` via `sprout_ir.param_ssa`, the single helper `ast_to_ir`,
+  `ir_lowering.lower_params` and `ir_rooting` all go through; convention documented in
+  [docs/compiler-internals.md §Emitted SSA names](docs/compiler-internals.md). The fix reached
+  eight sites, not the two named below — `env$` and the eta wrapper's `a0…aN` are synthesized
+  *parameters* and travel the same path, so missing them would have broken every closure.
+  Two findings worth keeping. **The blast radius was the root-slot ORDER, not the names.**
+  `ir_rooting` seeds heap-origin from a Set keyed on the SSA name, so re-prefixing permutes
+  which root lands in which slot; 51 of 62 goldens are byte-identical modulo the prefix, and the
+  other 11 differ only in `store`/`pop_roots` lines. Verified by running the affected examples
+  under both compilers with `SPROUT_GC_STRESS=1` (collect on every allocation) — identical
+  stdout and exit status. **A green gate can pin the old spelling**: `scripts/b1_gate.sh` grepped
+  the `define` line for `%__sprout_ph_0` and was the one red gate.
+  Original report follows.
+
+  Surfaced 2026-09-05 while writing `tests/stdlib/test_fs.spr`; worked around there by renaming
+  the parameter to `item`. `fn f(entry: Int) -> Int = entry + 1` compiled and typechecked, then
+  failed to assemble:
 
   ```
   error: unable to create block named 'entry'
@@ -5156,17 +5171,14 @@ op-classification already in place.
   unprefixed, so the same collision is available for any block label the backend emits:
   `join_1`, `arm_0_0` and `body_0_1` are all legal Sprout identifiers.
 
-  **Fix direction.** Prefix parameters the way temporaries already are — `%p$<name>` — rather than
+  **Fix taken.** Prefix parameters the way temporaries already are — `%p$<name>` — rather than
   renaming the entry block, since that closes the whole family instead of the one instance and
-  matches the existing `t$` convention (no block label contains `$`). Not done here because it is a
-  compiler-source change: it needs the full seed protocol and it renames a parameter in **every**
-  emitted function, so all 60 golden IR files move. That is its own PR, not a rider on a stdlib
-  change (Collaboration Rule 2).
+  matches the existing `t$` convention (no block label contains `$`).
 
-  Two smaller notes for whoever takes it. The diagnostic surfaces at `clang`/`opt`, i.e. *after*
-  the compiler reports success, so it reads as a toolchain problem rather than a Sprout one. And it
-  is silent for a parameter the optimiser never needs — an unused one still appears in the `define`
-  line, so the failure is unconditional on the *name*, not on use.
+  Two notes on how it presented. The diagnostic surfaced at `clang`/`opt`, i.e. *after* the
+  compiler reported success, so it read as a toolchain problem rather than a Sprout one. And it
+  was silent for a parameter the optimiser never needs — an unused one still appears in the
+  `define` line, so the failure was unconditional on the *name*, not on use.
 
   Hit again 2026-09-07 in the alias expander (`alias_visit_entry(name, entry: Maybe AliasEntry, …)`
   broke `build-stage2`), and filed a second time because the entry above was not found first — the

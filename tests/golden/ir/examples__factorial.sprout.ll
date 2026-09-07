@@ -104,10 +104,10 @@ declare i64 @ref_write(i64, i64)
 @.cname.13 = private unnamed_addr constant [9 x i8] c"IntRange\00"
 @.cfkinds.13 = private unnamed_addr constant [4 x i8] c"iii\00"
 
-define i64 @$entry.fact(i64 %n) {
+define i64 @$entry.fact(i64 %p$n) {
 entry:
   %t$0 = add i64 0, 0
-  %t$1 = icmp eq i64 %n, %t$0
+  %t$1 = icmp eq i64 %p$n, %t$0
   %t$2 = zext i1 %t$1 to i64
   %t$10 = trunc i64 %t$2 to i1
   br i1 %t$10, label %then_3, label %else_3
@@ -116,9 +116,9 @@ then_3:
   br label %join_3
 else_3:
   %t$6 = add i64 0, 1
-  %t$7 = sub i64 %n, %t$6
+  %t$7 = sub i64 %p$n, %t$6
   %t$8 = call i64 @$entry.fact(i64 %t$7)
-  %t$9 = mul i64 %n, %t$8
+  %t$9 = mul i64 %p$n, %t$8
   br label %join_3
 join_3:
   %t$4 = phi i64 [%t$5, %then_3], [%t$9, %else_3]

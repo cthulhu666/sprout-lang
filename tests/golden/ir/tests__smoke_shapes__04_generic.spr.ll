@@ -104,18 +104,18 @@ declare i64 @ref_write(i64, i64)
 @.cname.13 = private unnamed_addr constant [9 x i8] c"IntRange\00"
 @.cfkinds.13 = private unnamed_addr constant [4 x i8] c"iii\00"
 
-define i64 @main.contains(i64 %x$in, i64 %xs$in) {
+define i64 @main.contains(i64 %p$x$in, i64 %p$xs$in) {
 entry:
   %t$17 = alloca i64
-  store i64 %x$in, ptr %t$17
+  store i64 %p$x$in, ptr %t$17
   %t$18 = alloca i64
-  store i64 %xs$in, ptr %t$18
+  store i64 %p$xs$in, ptr %t$18
   %t$19 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
-  %x = load i64, ptr %t$17
-  %xs = load i64, ptr %t$18
-  %t$0 = call i64 @sprout_tag(i64 %xs)
+  %p$x = load i64, ptr %t$17
+  %p$xs = load i64, ptr %t$18
+  %t$0 = call i64 @sprout_tag(i64 %p$xs)
   br label %arm_0_1
 arm_0_1:
   %t$3 = add i64 0, 5
@@ -129,9 +129,9 @@ arm_1_1:
   %t$7 = icmp eq i64 %t$0, %t$6
   br i1 %t$7, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t$8 = call i64 @sprout_field(i64 %xs, i64 0)
-  %t$9 = call i64 @sprout_field(i64 %xs, i64 1)
-  %t$10 = icmp eq i64 %t$8, %x
+  %t$8 = call i64 @sprout_field(i64 %p$xs, i64 0)
+  %t$9 = call i64 @sprout_field(i64 %p$xs, i64 1)
+  %t$10 = icmp eq i64 %t$8, %p$x
   %t$11 = zext i1 %t$10 to i64
   %t$16 = trunc i64 %t$11 to i1
   br i1 %t$16, label %then_12, label %else_12
@@ -139,7 +139,7 @@ then_12:
   %t$14 = add i64 0, 1
   br label %join_12
 else_12:
-  store i64 %x, ptr %t$17
+  store i64 %p$x, ptr %t$17
   store i64 %t$9, ptr %t$18
   call void @llvm.stackrestore(ptr %t$19)
   br label %tco_loop

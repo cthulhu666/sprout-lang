@@ -126,7 +126,7 @@ declare i64 @ref_write(i64, i64)
 @$entry.r2 = global i64 zeroinitializer
 @$entry.r1 = global i64 zeroinitializer
 
-define i64 @$entry.mod100(i64 %n) {
+define i64 @$entry.mod100(i64 %p$n) {
 entry:
   %t$0 = add i64 0, 100
   %t$1 = icmp eq i64 %t$0, 0
@@ -137,24 +137,24 @@ divpanic_1:
   call i64 @panic(i64 %t$3)
   unreachable
 divok_1:
-  %t$4 = sdiv i64 %n, %t$0
+  %t$4 = sdiv i64 %p$n, %t$0
   %t$5 = add i64 0, 100
   %t$6 = mul i64 %t$4, %t$5
-  %t$7 = sub i64 %n, %t$6
+  %t$7 = sub i64 %p$n, %t$6
   ret i64 %t$7
 }
 
-define i64 @$entry.dial_after(i64 %dial, i64 %rot) {
+define i64 @$entry.dial_after(i64 %p$dial, i64 %p$rot) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %rot)
+  %t$0 = call i64 @sprout_tag(i64 %p$rot)
   br label %arm_0_1
 arm_0_1:
   %t$3 = add i64 0, 16
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %rot, i64 0)
-  %t$6 = sub i64 %dial, %t$5
+  %t$5 = call i64 @sprout_field(i64 %p$rot, i64 0)
+  %t$6 = sub i64 %p$dial, %t$5
   %t$7 = call i64 @$entry.mod100(i64 %t$6)
   br label %join_1
 arm_1_1:
@@ -162,8 +162,8 @@ arm_1_1:
   %t$9 = icmp eq i64 %t$0, %t$8
   br i1 %t$9, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t$10 = call i64 @sprout_field(i64 %rot, i64 0)
-  %t$11 = add i64 %dial, %t$10
+  %t$10 = call i64 @sprout_field(i64 %p$rot, i64 0)
+  %t$11 = add i64 %p$dial, %t$10
   %t$12 = call i64 @$entry.mod100(i64 %t$11)
   br label %join_1
 arm_2_1:
@@ -174,18 +174,18 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @$entry.count_hits(i64 %rots$in, i64 %dial$in) {
+define i64 @$entry.count_hits(i64 %p$rots$in, i64 %p$dial$in) {
 entry:
   %t$23 = alloca i64
-  store i64 %rots$in, ptr %t$23
+  store i64 %p$rots$in, ptr %t$23
   %t$24 = alloca i64
-  store i64 %dial$in, ptr %t$24
+  store i64 %p$dial$in, ptr %t$24
   %t$25 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
-  %rots = load i64, ptr %t$23
-  %dial = load i64, ptr %t$24
-  %t$0 = call i64 @sprout_tag(i64 %rots)
+  %p$rots = load i64, ptr %t$23
+  %p$dial = load i64, ptr %t$24
+  %t$0 = call i64 @sprout_tag(i64 %p$rots)
   br label %arm_0_1
 arm_0_1:
   %t$3 = add i64 0, 15
@@ -199,9 +199,9 @@ arm_1_1:
   %t$7 = icmp eq i64 %t$0, %t$6
   br i1 %t$7, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t$8 = call i64 @sprout_field(i64 %rots, i64 0)
-  %t$9 = call i64 @sprout_field(i64 %rots, i64 1)
-  %t$10 = call i64 @$entry.dial_after(i64 %dial, i64 %t$8)
+  %t$8 = call i64 @sprout_field(i64 %p$rots, i64 0)
+  %t$9 = call i64 @sprout_field(i64 %p$rots, i64 1)
+  %t$10 = call i64 @$entry.dial_after(i64 %p$dial, i64 %t$8)
   %t$11 = add i64 0, 0
   %t$12 = icmp eq i64 %t$10, %t$11
   %t$13 = zext i1 %t$12 to i64
@@ -209,12 +209,12 @@ body_1_1:
   br i1 %t$22, label %then_14, label %else_14
 then_14:
   %t$16 = add i64 0, 1
-  %t$17 = call i64 @$entry.dial_after(i64 %dial, i64 %t$8)
+  %t$17 = call i64 @$entry.dial_after(i64 %p$dial, i64 %t$8)
   %t$18 = call i64 @$entry.count_hits(i64 %t$9, i64 %t$17)
   %t$19 = add i64 %t$16, %t$18
   br label %join_14
 else_14:
-  %t$20 = call i64 @$entry.dial_after(i64 %dial, i64 %t$8)
+  %t$20 = call i64 @$entry.dial_after(i64 %p$dial, i64 %t$8)
   store i64 %t$9, ptr %t$23
   store i64 %t$20, ptr %t$24
   call void @llvm.stackrestore(ptr %t$25)
@@ -230,9 +230,9 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @$entry.clicks_to_zero(i64 %dial, i64 %rot) {
+define i64 @$entry.clicks_to_zero(i64 %p$dial, i64 %p$rot) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %rot)
+  %t$0 = call i64 @sprout_tag(i64 %p$rot)
   br label %arm_0_1
 arm_0_1:
   %t$3 = add i64 0, 16
@@ -240,7 +240,7 @@ arm_0_1:
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
   %t$5 = add i64 0, 0
-  %t$6 = icmp eq i64 %dial, %t$5
+  %t$6 = icmp eq i64 %p$dial, %t$5
   %t$7 = zext i1 %t$6 to i64
   %t$11 = trunc i64 %t$7 to i1
   br i1 %t$11, label %then_8, label %else_8
@@ -250,7 +250,7 @@ then_8:
 else_8:
   br label %join_8
 join_8:
-  %t$9 = phi i64 [%t$10, %then_8], [%dial, %else_8]
+  %t$9 = phi i64 [%t$10, %then_8], [%p$dial, %else_8]
   br label %join_1
 arm_1_1:
   %t$12 = add i64 0, 17
@@ -258,7 +258,7 @@ arm_1_1:
   br i1 %t$13, label %body_1_1, label %arm_2_1
 body_1_1:
   %t$14 = add i64 0, 0
-  %t$15 = icmp eq i64 %dial, %t$14
+  %t$15 = icmp eq i64 %p$dial, %t$14
   %t$16 = zext i1 %t$15 to i64
   %t$22 = trunc i64 %t$16 to i1
   br i1 %t$22, label %then_17, label %else_17
@@ -267,7 +267,7 @@ then_17:
   br label %join_17
 else_17:
   %t$20 = add i64 0, 100
-  %t$21 = sub i64 %t$20, %dial
+  %t$21 = sub i64 %t$20, %p$dial
   br label %join_17
 join_17:
   %t$18 = phi i64 [%t$19, %then_17], [%t$21, %else_17]
@@ -280,23 +280,23 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @$entry.rotation_clicks(i64 %rot) {
+define i64 @$entry.rotation_clicks(i64 %p$rot) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %rot)
+  %t$0 = call i64 @sprout_tag(i64 %p$rot)
   br label %arm_0_1
 arm_0_1:
   %t$3 = add i64 0, 16
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %rot, i64 0)
+  %t$5 = call i64 @sprout_field(i64 %p$rot, i64 0)
   br label %join_1
 arm_1_1:
   %t$6 = add i64 0, 17
   %t$7 = icmp eq i64 %t$0, %t$6
   br i1 %t$7, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t$8 = call i64 @sprout_field(i64 %rot, i64 0)
+  %t$8 = call i64 @sprout_field(i64 %p$rot, i64 0)
   br label %join_1
 arm_2_1:
   call void @sprout_abort_match()
@@ -306,10 +306,10 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @$entry.passes_in_rotation(i64 %dial, i64 %rot) {
+define i64 @$entry.passes_in_rotation(i64 %p$dial, i64 %p$rot) {
 entry:
-  %t$0 = call i64 @$entry.rotation_clicks(i64 %rot)
-  %t$1 = call i64 @$entry.clicks_to_zero(i64 %dial, i64 %rot)
+  %t$0 = call i64 @$entry.rotation_clicks(i64 %p$rot)
+  %t$1 = call i64 @$entry.clicks_to_zero(i64 %p$dial, i64 %p$rot)
   %t$2 = icmp slt i64 %t$0, %t$1
   %t$3 = zext i1 %t$2 to i64
   %t$17 = trunc i64 %t$3 to i1
@@ -319,8 +319,8 @@ then_4:
   br label %join_4
 else_4:
   %t$7 = add i64 0, 1
-  %t$8 = call i64 @$entry.rotation_clicks(i64 %rot)
-  %t$9 = call i64 @$entry.clicks_to_zero(i64 %dial, i64 %rot)
+  %t$8 = call i64 @$entry.rotation_clicks(i64 %p$rot)
+  %t$9 = call i64 @$entry.clicks_to_zero(i64 %p$dial, i64 %p$rot)
   %t$10 = sub i64 %t$8, %t$9
   %t$11 = add i64 0, 100
   %t$12 = icmp eq i64 %t$11, 0
@@ -339,9 +339,9 @@ join_4:
   ret i64 %t$5
 }
 
-define i64 @$entry.count_passes(i64 %rots, i64 %dial) {
+define i64 @$entry.count_passes(i64 %p$rots, i64 %p$dial) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %rots)
+  %t$0 = call i64 @sprout_tag(i64 %p$rots)
   br label %arm_0_1
 arm_0_1:
   %t$3 = add i64 0, 15
@@ -355,10 +355,10 @@ arm_1_1:
   %t$7 = icmp eq i64 %t$0, %t$6
   br i1 %t$7, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t$8 = call i64 @sprout_field(i64 %rots, i64 0)
-  %t$9 = call i64 @sprout_field(i64 %rots, i64 1)
-  %t$10 = call i64 @$entry.passes_in_rotation(i64 %dial, i64 %t$8)
-  %t$11 = call i64 @$entry.dial_after(i64 %dial, i64 %t$8)
+  %t$8 = call i64 @sprout_field(i64 %p$rots, i64 0)
+  %t$9 = call i64 @sprout_field(i64 %p$rots, i64 1)
+  %t$10 = call i64 @$entry.passes_in_rotation(i64 %p$dial, i64 %t$8)
+  %t$11 = call i64 @$entry.dial_after(i64 %p$dial, i64 %t$8)
   %t$12 = call i64 @$entry.count_passes(i64 %t$9, i64 %t$11)
   %t$13 = add i64 %t$10, %t$12
   br label %join_1

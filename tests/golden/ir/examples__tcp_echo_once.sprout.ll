@@ -204,16 +204,16 @@ entry:
   ret i64 %t$0
 }
 
-define i64 @stdlib.net.tcp_error_message(i64 %err) {
+define i64 @stdlib.net.tcp_error_message(i64 %p$err) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %err)
+  %t$0 = call i64 @sprout_tag(i64 %p$err)
   br label %arm_0_1
 arm_0_1:
   %t$3 = add i64 0, 15
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %err, i64 0)
+  %t$5 = call i64 @sprout_field(i64 %p$err, i64 0)
   br label %join_1
 arm_1_1:
   %t$6 = add i64 0, 16
@@ -228,21 +228,21 @@ arm_2_1:
   %t$11 = icmp eq i64 %t$0, %t$10
   br i1 %t$11, label %body_2_1, label %arm_3_1
 body_2_1:
-  %t$12 = call i64 @sprout_field(i64 %err, i64 0)
+  %t$12 = call i64 @sprout_field(i64 %p$err, i64 0)
   br label %join_1
 arm_3_1:
   %t$13 = add i64 0, 18
   %t$14 = icmp eq i64 %t$0, %t$13
   br i1 %t$14, label %body_3_1, label %arm_4_1
 body_3_1:
-  %t$15 = call i64 @sprout_field(i64 %err, i64 0)
+  %t$15 = call i64 @sprout_field(i64 %p$err, i64 0)
   br label %join_1
 arm_4_1:
   %t$16 = add i64 0, 19
   %t$17 = icmp eq i64 %t$0, %t$16
   br i1 %t$17, label %body_4_1, label %arm_5_1
 body_4_1:
-  %t$18 = call i64 @sprout_field(i64 %err, i64 0)
+  %t$18 = call i64 @sprout_field(i64 %p$err, i64 0)
   br label %join_1
 arm_5_1:
   %t$19 = add i64 0, 20
@@ -273,7 +273,7 @@ arm_8_1:
   %t$32 = icmp eq i64 %t$0, %t$31
   br i1 %t$32, label %body_8_1, label %arm_9_1
 body_8_1:
-  %t$33 = call i64 @sprout_field(i64 %err, i64 0)
+  %t$33 = call i64 @sprout_field(i64 %p$err, i64 0)
   br label %join_1
 arm_9_1:
   call void @sprout_abort_match()
@@ -283,16 +283,16 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @stdlib.net.tcp_connection_handle(i64 %conn) {
+define i64 @stdlib.net.tcp_connection_handle(i64 %p$conn) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %conn)
+  %t$0 = call i64 @sprout_tag(i64 %p$conn)
   br label %arm_0_1
 arm_0_1:
   %t$3 = add i64 0, 24
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %conn, i64 0)
+  %t$5 = call i64 @sprout_field(i64 %p$conn, i64 0)
   br label %join_1
 arm_1_1:
   call void @sprout_abort_match()
@@ -302,16 +302,16 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @stdlib.net.tcp_listener_handle(i64 %listener) {
+define i64 @stdlib.net.tcp_listener_handle(i64 %p$listener) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %listener)
+  %t$0 = call i64 @sprout_tag(i64 %p$listener)
   br label %arm_0_1
 arm_0_1:
   %t$3 = add i64 0, 25
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %listener, i64 0)
+  %t$5 = call i64 @sprout_field(i64 %p$listener, i64 0)
   br label %join_1
 arm_1_1:
   call void @sprout_abort_match()
@@ -321,21 +321,21 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @stdlib.net.write_all(i64 %conn, i64 %payload) {
+define i64 @stdlib.net.write_all(i64 %p$conn, i64 %p$payload) {
 entry:
-  %t$0 = call i64 @stdlib.net.tcp_connection_handle(i64 %conn)
+  %t$0 = call i64 @stdlib.net.tcp_connection_handle(i64 %p$conn)
   %t$2 = alloca i64
-  store i64 %payload, ptr %t$2
+  store i64 %p$payload, ptr %t$2
   %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$1 = call i64 @tcp_write_all(i64 %t$0, i64 %payload)
+  %t$1 = call i64 @tcp_write_all(i64 %t$0, i64 %p$payload)
   %t$4 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$1
 }
 
-define i64 @stdlib.net.read_avail_go(i64 %handle, i64 %deadline_us) {
+define i64 @stdlib.net.read_avail_go(i64 %p$handle, i64 %p$deadline_us) {
 entry:
   %t$0 = load i64, ptr @stdlib.net.read_chunk
-  %t$1 = call i64 @tcp_read_some(i64 %handle, i64 %t$0)
+  %t$1 = call i64 @tcp_read_some(i64 %p$handle, i64 %t$0)
   %t$2 = call i64 @sprout_tag(i64 %t$1)
   br label %arm_0_3
 arm_0_3:
@@ -364,7 +364,7 @@ body_1_3:
   %t$14 = icmp eq i64 %t$12, %t$13
   br i1 %t$14, label %ntest_11, label %arm_2_3
 ntest_11:
-  %t$15 = musttail call i64 @stdlib.net.read_avail_wait(i64 %handle, i64 %deadline_us)
+  %t$15 = musttail call i64 @stdlib.net.read_avail_wait(i64 %p$handle, i64 %p$deadline_us)
   ret i64 %t$15
 arm_2_3:
   %t$16 = add i64 0, 8
@@ -389,11 +389,11 @@ join_3:
   ret i64 %t$4
 }
 
-define i64 @stdlib.net.read_avail_wait(i64 %handle, i64 %deadline_us) {
+define i64 @stdlib.net.read_avail_wait(i64 %p$handle, i64 %p$deadline_us) {
 entry:
   %t$0 = call i64 @stdlib.time.now_micros()
   %t$1 = load i64, ptr @stdlib.net.poll_read
-  %t$2 = sub i64 %deadline_us, %t$0
+  %t$2 = sub i64 %p$deadline_us, %t$0
   %t$3 = add i64 0, 1000
   %t$4 = icmp eq i64 %t$3, 0
   br i1 %t$4, label %divpanic_4, label %divok_4
@@ -404,7 +404,7 @@ divpanic_4:
   unreachable
 divok_4:
   %t$7 = sdiv i64 %t$2, %t$3
-  %t$8$st = call { i64, i64 } @tcp_wait_worker(i64 %handle, i64 %t$1, i64 %t$7)
+  %t$8$st = call { i64, i64 } @tcp_wait_worker(i64 %p$handle, i64 %t$1, i64 %t$7)
   %t$8 = extractvalue { i64, i64 } %t$8$st, 0
   %t$9 = extractvalue { i64, i64 } %t$8$st, 1
   %t$10 = add i64 0, 8
@@ -427,7 +427,7 @@ do_cont_10:
   %t$22 = trunc i64 %t$16 to i1
   br i1 %t$22, label %then_17, label %else_17
 then_17:
-  %t$19 = musttail call i64 @stdlib.net.read_avail_go(i64 %handle, i64 %deadline_us)
+  %t$19 = musttail call i64 @stdlib.net.read_avail_go(i64 %p$handle, i64 %p$deadline_us)
   ret i64 %t$19
 else_17:
   %t$20 = call i64 @sprout_alloc_obj(i64 21, i64 0)
@@ -448,31 +448,31 @@ do_done_10:
   ret i64 %t$23
 }
 
-define i64 @stdlib.net.read_avail_timeout(i64 %conn, i64 %timeout_ms) {
+define i64 @stdlib.net.read_avail_timeout(i64 %p$conn, i64 %p$timeout_ms) {
 entry:
   %t$6 = alloca i64
-  store i64 %conn, ptr %t$6
+  store i64 %p$conn, ptr %t$6
   %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
   %t$0 = call i64 @stdlib.time.now_micros()
-  %t$1 = call i64 @stdlib.net.tcp_connection_handle(i64 %conn)
+  %t$1 = call i64 @stdlib.net.tcp_connection_handle(i64 %p$conn)
   %t$2 = add i64 0, 1000
-  %t$3 = mul i64 %timeout_ms, %t$2
+  %t$3 = mul i64 %p$timeout_ms, %t$2
   %t$4 = add i64 %t$0, %t$3
   %t$5 = call i64 @stdlib.net.read_avail_go(i64 %t$1, i64 %t$4)
   %t$8 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$5
 }
 
-define i64 @stdlib.net.close(i64 %conn) {
+define i64 @stdlib.net.close(i64 %p$conn) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %conn)
+  %t$0 = call i64 @sprout_tag(i64 %p$conn)
   br label %arm_0_1
 arm_0_1:
   %t$3 = add i64 0, 24
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %conn, i64 0)
+  %t$5 = call i64 @sprout_field(i64 %p$conn, i64 0)
   %t$6 = call i64 @tcp_close(i64 %t$5)
   br label %join_1
 arm_1_1:
@@ -483,9 +483,9 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @stdlib.net.listen_local(i64 %port) {
+define i64 @stdlib.net.listen_local(i64 %p$port) {
 entry:
-  %t$0 = call i64 @tcp_listen(i64 %port)
+  %t$0 = call i64 @tcp_listen(i64 %p$port)
   %t$1 = call i64 @sprout_alloc_obj(i64 25, i64 1)
   %t$1$ptr = inttoptr i64 %t$1 to ptr
   %t$1$f0 = getelementptr i64, ptr %t$1$ptr, i64 0
@@ -493,9 +493,9 @@ entry:
   ret i64 %t$1
 }
 
-define i64 @stdlib.net.accept(i64 %listener) {
+define i64 @stdlib.net.accept(i64 %p$listener) {
 entry:
-  %t$0 = call i64 @stdlib.net.tcp_listener_handle(i64 %listener)
+  %t$0 = call i64 @stdlib.net.tcp_listener_handle(i64 %p$listener)
   %t$1$st = call { i64, i64 } @tcp_accept_worker(i64 %t$0)
   %t$1 = extractvalue { i64, i64 } %t$1$st, 0
   %t$2 = extractvalue { i64, i64 } %t$1$st, 1
@@ -535,16 +535,16 @@ do_done_3:
   ret i64 %t$9
 }
 
-define i64 @stdlib.net.close_listener(i64 %listener) {
+define i64 @stdlib.net.close_listener(i64 %p$listener) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %listener)
+  %t$0 = call i64 @sprout_tag(i64 %p$listener)
   br label %arm_0_1
 arm_0_1:
   %t$3 = add i64 0, 25
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %listener, i64 0)
+  %t$5 = call i64 @sprout_field(i64 %p$listener, i64 0)
   %t$6 = call i64 @tcp_close_listener(i64 %t$5)
   br label %join_1
 arm_1_1:
@@ -555,23 +555,23 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @stdlib.terminal.write(i64 %text) {
+define i64 @stdlib.terminal.write(i64 %p$text) {
 entry:
   %t$1 = alloca i64
-  store i64 %text, ptr %t$1
+  store i64 %p$text, ptr %t$1
   %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
-  %t$0 = call i64 @term_write(i64 %text)
+  %t$0 = call i64 @term_write(i64 %p$text)
   %t$3 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$0
 }
 
-define i64 @examples.tcp_echo_once.echo(i64 %conn) {
+define i64 @examples.tcp_echo_once.echo(i64 %p$conn) {
 entry:
   %t$0 = add i64 0, 30000
   %t$54 = alloca i64
-  store i64 %conn, ptr %t$54
+  store i64 %p$conn, ptr %t$54
   %t$55 = call i64 @sprout_gc_push_i64_root(ptr %t$54)
-  %t$1$st = call { i64, i64 } @stdlib.net.read_avail_timeout_worker(i64 %conn, i64 %t$0)
+  %t$1$st = call { i64, i64 } @stdlib.net.read_avail_timeout_worker(i64 %p$conn, i64 %t$0)
   %t$1 = extractvalue { i64, i64 } %t$1$st, 0
   %t$2 = extractvalue { i64, i64 } %t$1$st, 1
   %t$56 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -585,9 +585,9 @@ body_0_3:
   store i64 %t$2, ptr %t$57
   %t$58 = call i64 @sprout_gc_push_i64_root(ptr %t$57)
   %t$59 = alloca i64
-  store i64 %conn, ptr %t$59
+  store i64 %p$conn, ptr %t$59
   %t$60 = call i64 @sprout_gc_push_i64_root(ptr %t$59)
-  %t$7$st = call { i64, i64 } @stdlib.net.write_all_worker(i64 %conn, i64 %t$2)
+  %t$7$st = call { i64, i64 } @stdlib.net.write_all_worker(i64 %p$conn, i64 %t$2)
   %t$7 = extractvalue { i64, i64 } %t$7$st, 0
   %t$8 = extractvalue { i64, i64 } %t$7$st, 1
   %t$61 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -600,7 +600,7 @@ body_0_9:
   %t$13 = getelementptr inbounds { i64, [8 x i8] }, ptr @.str.5, i64 0, i32 1, i64 0
   %t$14 = ptrtoint ptr %t$13 to i64
   %t$62 = alloca i64
-  store i64 %conn, ptr %t$62
+  store i64 %p$conn, ptr %t$62
   %t$63 = call i64 @sprout_gc_push_i64_root(ptr %t$62)
   %t$64 = alloca i64
   store i64 %t$14, ptr %t$64
@@ -670,7 +670,7 @@ body_1_9:
   %t$31 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.8, i64 0, i32 1, i64 0
   %t$32 = ptrtoint ptr %t$31 to i64
   %t$86 = alloca i64
-  store i64 %conn, ptr %t$86
+  store i64 %p$conn, ptr %t$86
   %t$87 = call i64 @sprout_gc_push_i64_root(ptr %t$86)
   %t$88 = alloca i64
   store i64 %t$28, ptr %t$88
@@ -742,7 +742,7 @@ body_1_3:
   %t$45 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.10, i64 0, i32 1, i64 0
   %t$46 = ptrtoint ptr %t$45 to i64
   %t$110 = alloca i64
-  store i64 %conn, ptr %t$110
+  store i64 %p$conn, ptr %t$110
   %t$111 = call i64 @sprout_gc_push_i64_root(ptr %t$110)
   %t$112 = alloca i64
   store i64 %t$42, ptr %t$112
@@ -802,9 +802,9 @@ arm_2_3:
 join_3:
   %t$4 = phi i64 [%t$10, %join_9], [%t$52, %body_1_3]
   %t$134 = alloca i64
-  store i64 %conn, ptr %t$134
+  store i64 %p$conn, ptr %t$134
   %t$135 = call i64 @sprout_gc_push_i64_root(ptr %t$134)
-  %t$53 = call i64 @stdlib.net.close(i64 %conn)
+  %t$53 = call i64 @stdlib.net.close(i64 %p$conn)
   %t$136 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$53
 }
@@ -914,14 +914,14 @@ join_4:
   ret i64 %t$23
 }
 
-define i64 @__tc_ToString_String_to_string(i64 %value) {
+define i64 @__tc_ToString_String_to_string(i64 %p$value) {
 entry:
-  ret i64 %value
+  ret i64 %p$value
 }
 
-define { i64, i64 } @stdlib.net.accept_worker(i64 %listener) {
+define { i64, i64 } @stdlib.net.accept_worker(i64 %p$listener) {
 entry:
-  %t$0 = call i64 @stdlib.net.tcp_listener_handle(i64 %listener)
+  %t$0 = call i64 @stdlib.net.tcp_listener_handle(i64 %p$listener)
   %t$1$st = call { i64, i64 } @tcp_accept_worker(i64 %t$0)
   %t$1 = extractvalue { i64, i64 } %t$1$st, 0
   %t$2 = extractvalue { i64, i64 } %t$1$st, 1
@@ -981,15 +981,15 @@ wrepack_next_15:
   unreachable
 }
 
-define { i64, i64 } @stdlib.net.read_avail_timeout_worker(i64 %conn, i64 %timeout_ms) {
+define { i64, i64 } @stdlib.net.read_avail_timeout_worker(i64 %p$conn, i64 %p$timeout_ms) {
 entry:
   %t$15 = alloca i64
-  store i64 %conn, ptr %t$15
+  store i64 %p$conn, ptr %t$15
   %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
   %t$0 = call i64 @stdlib.time.now_micros()
-  %t$1 = call i64 @stdlib.net.tcp_connection_handle(i64 %conn)
+  %t$1 = call i64 @stdlib.net.tcp_connection_handle(i64 %p$conn)
   %t$2 = add i64 0, 1000
-  %t$3 = mul i64 %timeout_ms, %t$2
+  %t$3 = mul i64 %p$timeout_ms, %t$2
   %t$4 = add i64 %t$0, %t$3
   %t$5 = call i64 @stdlib.net.read_avail_go(i64 %t$1, i64 %t$4)
   %t$17 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -1016,13 +1016,13 @@ wrepack_next_11:
   unreachable
 }
 
-define { i64, i64 } @stdlib.net.write_all_worker(i64 %conn, i64 %payload) {
+define { i64, i64 } @stdlib.net.write_all_worker(i64 %p$conn, i64 %p$payload) {
 entry:
-  %t$0 = call i64 @stdlib.net.tcp_connection_handle(i64 %conn)
+  %t$0 = call i64 @stdlib.net.tcp_connection_handle(i64 %p$conn)
   %t$11 = alloca i64
-  store i64 %payload, ptr %t$11
+  store i64 %p$payload, ptr %t$11
   %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
-  %t$1 = call i64 @tcp_write_all(i64 %t$0, i64 %payload)
+  %t$1 = call i64 @tcp_write_all(i64 %t$0, i64 %p$payload)
   %t$13 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$2 = call i64 @sprout_tag(i64 %t$1)
   %t$3 = add i64 0, 7
@@ -1047,9 +1047,9 @@ wrepack_next_7:
   unreachable
 }
 
-define { i64, i64 } @tcp_accept_worker(i64 %listener) {
+define { i64, i64 } @tcp_accept_worker(i64 %p$listener) {
 entry:
-  %t$0 = call i64 @tcp_accept(i64 %listener)
+  %t$0 = call i64 @tcp_accept(i64 %p$listener)
   %t$1 = call i64 @sprout_tag(i64 %t$0)
   %t$2 = add i64 0, 7
   %t$3 = icmp eq i64 %t$1, %t$2
@@ -1073,9 +1073,9 @@ wrepack_next_6:
   unreachable
 }
 
-define { i64, i64 } @tcp_wait_worker(i64 %conn, i64 %interest, i64 %ms) {
+define { i64, i64 } @tcp_wait_worker(i64 %p$conn, i64 %p$interest, i64 %p$ms) {
 entry:
-  %t$0 = call i64 @tcp_wait(i64 %conn, i64 %interest, i64 %ms)
+  %t$0 = call i64 @tcp_wait(i64 %p$conn, i64 %p$interest, i64 %p$ms)
   %t$1 = call i64 @sprout_tag(i64 %t$0)
   %t$2 = add i64 0, 7
   %t$3 = icmp eq i64 %t$1, %t$2

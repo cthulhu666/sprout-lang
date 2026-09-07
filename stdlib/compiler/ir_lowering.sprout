@@ -434,14 +434,14 @@ fn lower_tuple_stores(blob_result: String, args: List String, idx: Int) -> Strin
       (if rest == Nil then "" else "\n") ++
       lower_tuple_stores(blob_result, rest, idx + 1)
 
-# Build the comma-separated "i64 %a, i64 %b, ..." parameter list.
+# Build the comma-separated "i64 %p$a, i64 %p$b, ..." parameter list.
 # Param kinds (IRType) are intentionally ignored at lowering — they only
 # affect rooting decisions upstream of this pass; every param lowers to i64.
 fn lower_params(params: List (String, sprout_ir.IRType)) -> String =
   match params with
   | Nil -> ""
-  | [(p, _)] -> "i64 %" ++ p
-  | Cons (p, _) rest -> "i64 %" ++ p ++ ", " ++ lower_params(rest)
+  | [(p, _)] -> "i64 " ++ sprout_ir.param_ssa(p)
+  | Cons (p, _) rest -> "i64 " ++ sprout_ir.param_ssa(p) ++ ", " ++ lower_params(rest)
 
 export fn lower_fn_with_table(f: sprout_ir.IRFunction, fn_table: Dict (String, Int)) -> String =
   match f with

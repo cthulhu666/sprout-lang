@@ -109,14 +109,14 @@ declare i64 @ref_write(i64, i64)
 @.cname.13 = private unnamed_addr constant [9 x i8] c"IntRange\00"
 @.cfkinds.13 = private unnamed_addr constant [4 x i8] c"iii\00"
 
-define i64 @main.swap(i64 %pair) {
+define i64 @main.swap(i64 %p$pair) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  %t$2$ptr = inttoptr i64 %pair to ptr
+  %t$2$ptr = inttoptr i64 %p$pair to ptr
   %t$2$gep = getelementptr i64, ptr %t$2$ptr, i64 0
   %t$2 = load i64, ptr %t$2$gep
-  %t$3$ptr = inttoptr i64 %pair to ptr
+  %t$3$ptr = inttoptr i64 %p$pair to ptr
   %t$3$gep = getelementptr i64, ptr %t$3$ptr, i64 1
   %t$3 = load i64, ptr %t$3$gep
   %t$5 = alloca i64
@@ -141,18 +141,18 @@ join_0:
   ret i64 %t$1
 }
 
-define i64 @__sprout_ir_eta___tc_ToString_Bool_to_string_0(i64 %env$, i64 %a0) {
+define i64 @__sprout_ir_eta___tc_ToString_Bool_to_string_0(i64 %p$env$, i64 %p$a0) {
 entry:
-  %ret = call i64 @__tc_ToString_Bool_to_string(i64 %a0)
+  %ret = call i64 @__tc_ToString_Bool_to_string(i64 %p$a0)
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta___tc_ToString_Int_to_string_1(i64 %env$, i64 %a0) {
+define i64 @__sprout_ir_eta___tc_ToString_Int_to_string_1(i64 %p$env$, i64 %p$a0) {
 entry:
   %t$0 = alloca i64
-  store i64 %a0, ptr %t$0
+  store i64 %p$a0, ptr %t$0
   %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %ret = call i64 @__tc_ToString_Int_to_string(i64 %a0)
+  %ret = call i64 @__tc_ToString_Int_to_string(i64 %p$a0)
   %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %ret
 }
@@ -194,30 +194,30 @@ entry:
   ret i64 %t$7
 }
 
-define i64 @__cm_ToString_to_string(i64 %value, i64 %__tc_ToString_0_to_string) {
+define i64 @__cm_ToString_to_string(i64 %p$value, i64 %p$__tc_ToString_0_to_string) {
 entry:
-  call void @sprout_closure_arity_check(i64 %__tc_ToString_0_to_string, i64 1)
-  %t$0$env_ptr = inttoptr i64 %__tc_ToString_0_to_string to ptr
+  call void @sprout_closure_arity_check(i64 %p$__tc_ToString_0_to_string, i64 1)
+  %t$0$env_ptr = inttoptr i64 %p$__tc_ToString_0_to_string to ptr
   %t$0$code = load ptr, ptr %t$0$env_ptr
-  %t$0 = call i64 (i64, i64) %t$0$code(i64 %__tc_ToString_0_to_string, i64 %value)
+  %t$0 = call i64 (i64, i64) %t$0$code(i64 %p$__tc_ToString_0_to_string, i64 %p$value)
   ret i64 %t$0
 }
 
-define i64 @__tc_Semigroup_String_append(i64 %left, i64 %right) {
+define i64 @__tc_Semigroup_String_append(i64 %p$left, i64 %p$right) {
 entry:
-  %t$0 = call i64 @str_concat(i64 %left, i64 %right)
+  %t$0 = call i64 @str_concat(i64 %p$left, i64 %p$right)
   ret i64 %t$0
 }
 
-define i64 @__tc_ToString_Int_to_string(i64 %value) {
+define i64 @__tc_ToString_Int_to_string(i64 %p$value) {
 entry:
-  %t$0 = call i64 @int_to_string(i64 %value)
+  %t$0 = call i64 @int_to_string(i64 %p$value)
   ret i64 %t$0
 }
 
-define i64 @__tc_ToString_Bool_to_string(i64 %value) {
+define i64 @__tc_ToString_Bool_to_string(i64 %p$value) {
 entry:
-  %t$6 = trunc i64 %value to i1
+  %t$6 = trunc i64 %p$value to i1
   br i1 %t$6, label %then_0, label %else_0
 then_0:
   %t$2 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.0, i64 0, i32 1, i64 0
@@ -232,23 +232,23 @@ join_0:
   ret i64 %t$1
 }
 
-define i64 @__tc_ToString_Tuple_a_b_to_string(i64 %t, i64 %__tc_ToString_0_to_string, i64 %__tc_ToString_1_to_string) {
+define i64 @__tc_ToString_Tuple_a_b_to_string(i64 %p$t, i64 %p$__tc_ToString_0_to_string, i64 %p$__tc_ToString_1_to_string) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  %t$2$ptr = inttoptr i64 %t to ptr
+  %t$2$ptr = inttoptr i64 %p$t to ptr
   %t$2$gep = getelementptr i64, ptr %t$2$ptr, i64 0
   %t$2 = load i64, ptr %t$2$gep
-  %t$3$ptr = inttoptr i64 %t to ptr
+  %t$3$ptr = inttoptr i64 %p$t to ptr
   %t$3$gep = getelementptr i64, ptr %t$3$ptr, i64 1
   %t$3 = load i64, ptr %t$3$gep
   %t$4 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.2, i64 0, i32 1, i64 0
   %t$5 = ptrtoint ptr %t$4 to i64
   %t$16 = alloca i64
-  store i64 %__tc_ToString_1_to_string, ptr %t$16
+  store i64 %p$__tc_ToString_1_to_string, ptr %t$16
   %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
   %t$18 = alloca i64
-  store i64 %__tc_ToString_0_to_string, ptr %t$18
+  store i64 %p$__tc_ToString_0_to_string, ptr %t$18
   %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
   %t$20 = alloca i64
   store i64 %t$2, ptr %t$20
@@ -259,7 +259,7 @@ arm_0_0:
   %t$24 = alloca i64
   store i64 %t$5, ptr %t$24
   %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
-  %t$6 = call i64 @__cm_ToString_to_string(i64 %t$2, i64 %__tc_ToString_0_to_string)
+  %t$6 = call i64 @__cm_ToString_to_string(i64 %t$2, i64 %p$__tc_ToString_0_to_string)
   %t$26 = alloca i64
   store i64 %t$6, ptr %t$26
   %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
@@ -278,7 +278,7 @@ arm_0_0:
   %t$34 = alloca i64
   store i64 %t$10, ptr %t$34
   %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
-  %t$11 = call i64 @__cm_ToString_to_string(i64 %t$3, i64 %__tc_ToString_1_to_string)
+  %t$11 = call i64 @__cm_ToString_to_string(i64 %t$3, i64 %p$__tc_ToString_1_to_string)
   %t$36 = alloca i64
   store i64 %t$11, ptr %t$36
   %t$37 = call i64 @sprout_gc_push_i64_root(ptr %t$36)

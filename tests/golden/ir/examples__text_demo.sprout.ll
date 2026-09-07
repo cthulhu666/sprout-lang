@@ -134,35 +134,35 @@ declare i64 @split_words(i64)
 @.cname.14 = private unnamed_addr constant [29 x i8] c"stdlib.bytes.Utf8DecodeError\00"
 @.cfkinds.14 = private unnamed_addr constant [2 x i8] c"s\00"
 
-define i64 @stdlib.string.concat(i64 %left, i64 %right) {
+define i64 @stdlib.string.concat(i64 %p$left, i64 %p$right) {
 entry:
-  %t$0 = call i64 @str_concat(i64 %left, i64 %right)
+  %t$0 = call i64 @str_concat(i64 %p$left, i64 %p$right)
   ret i64 %t$0
 }
 
-define i64 @stdlib.string.length(i64 %raw) {
+define i64 @stdlib.string.length(i64 %p$raw) {
 entry:
   %t$1 = alloca i64
-  store i64 %raw, ptr %t$1
+  store i64 %p$raw, ptr %t$1
   %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
-  %t$0 = call i64 @str_len(i64 %raw)
+  %t$0 = call i64 @str_len(i64 %p$raw)
   %t$3 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$0
 }
 
-define i64 @stdlib.string.char_at(i64 %raw, i64 %index) {
+define i64 @stdlib.string.char_at(i64 %p$raw, i64 %p$index) {
 entry:
   %t$1 = alloca i64
-  store i64 %raw, ptr %t$1
+  store i64 %p$raw, ptr %t$1
   %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
-  %t$0 = call i64 @str_char_at(i64 %raw, i64 %index)
+  %t$0 = call i64 @str_char_at(i64 %p$raw, i64 %p$index)
   %t$3 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$0
 }
 
-define i64 @stdlib.string.char_at_or(i64 %raw, i64 %index, i64 %fallback) {
+define i64 @stdlib.string.char_at_or(i64 %p$raw, i64 %p$index, i64 %p$fallback) {
 entry:
-  %t$0$st = call { i64, i64 } @stdlib.string.char_at_worker(i64 %raw, i64 %index)
+  %t$0$st = call { i64, i64 } @stdlib.string.char_at_worker(i64 %p$raw, i64 %p$index)
   %t$0 = extractvalue { i64, i64 } %t$0$st, 0
   %t$1 = extractvalue { i64, i64 } %t$0$st, 1
   br label %arm_0_2
@@ -182,20 +182,20 @@ arm_2_2:
   call void @sprout_abort_match()
   unreachable
 join_2:
-  %t$3 = phi i64 [%t$1, %body_0_2], [%fallback, %body_1_2]
+  %t$3 = phi i64 [%t$1, %body_0_2], [%p$fallback, %body_1_2]
   ret i64 %t$3
 }
 
-define i64 @stdlib.string.string_from_char(i64 %ch) {
+define i64 @stdlib.string.string_from_char(i64 %p$ch) {
 entry:
-  %t$0 = call i64 @char_to_string(i64 %ch)
+  %t$0 = call i64 @char_to_string(i64 %p$ch)
   ret i64 %t$0
 }
 
-define i64 @examples.text_demo.is_word_separator(i64 %ch) {
+define i64 @examples.text_demo.is_word_separator(i64 %p$ch) {
 entry:
   %t$0 = add i64 0, 32
-  %t$1 = icmp eq i64 %ch, %t$0
+  %t$1 = icmp eq i64 %p$ch, %t$0
   %t$2 = zext i1 %t$1 to i64
   %t$9 = trunc i64 %t$2 to i1
   br i1 %t$9, label %then_3, label %else_3
@@ -204,7 +204,7 @@ then_3:
   br label %join_3
 else_3:
   %t$6 = add i64 0, 9
-  %t$7 = icmp eq i64 %ch, %t$6
+  %t$7 = icmp eq i64 %p$ch, %t$6
   %t$8 = zext i1 %t$7 to i64
   br label %join_3
 join_3:
@@ -216,7 +216,7 @@ then_10:
   br label %join_10
 else_10:
   %t$13 = add i64 0, 10
-  %t$14 = icmp eq i64 %ch, %t$13
+  %t$14 = icmp eq i64 %p$ch, %t$13
   %t$15 = zext i1 %t$14 to i64
   br label %join_10
 join_10:
@@ -228,7 +228,7 @@ then_17:
   br label %join_17
 else_17:
   %t$20 = add i64 0, 13
-  %t$21 = icmp eq i64 %ch, %t$20
+  %t$21 = icmp eq i64 %p$ch, %t$20
   %t$22 = zext i1 %t$21 to i64
   br label %join_17
 join_17:
@@ -236,10 +236,10 @@ join_17:
   ret i64 %t$18
 }
 
-define i64 @examples.text_demo.is_vowel(i64 %ch) {
+define i64 @examples.text_demo.is_vowel(i64 %p$ch) {
 entry:
   %t$0 = add i64 0, 97
-  %t$1 = icmp eq i64 %ch, %t$0
+  %t$1 = icmp eq i64 %p$ch, %t$0
   %t$2 = zext i1 %t$1 to i64
   %t$9 = trunc i64 %t$2 to i1
   br i1 %t$9, label %then_3, label %else_3
@@ -248,7 +248,7 @@ then_3:
   br label %join_3
 else_3:
   %t$6 = add i64 0, 101
-  %t$7 = icmp eq i64 %ch, %t$6
+  %t$7 = icmp eq i64 %p$ch, %t$6
   %t$8 = zext i1 %t$7 to i64
   br label %join_3
 join_3:
@@ -260,7 +260,7 @@ then_10:
   br label %join_10
 else_10:
   %t$13 = add i64 0, 105
-  %t$14 = icmp eq i64 %ch, %t$13
+  %t$14 = icmp eq i64 %p$ch, %t$13
   %t$15 = zext i1 %t$14 to i64
   br label %join_10
 join_10:
@@ -272,7 +272,7 @@ then_17:
   br label %join_17
 else_17:
   %t$20 = add i64 0, 111
-  %t$21 = icmp eq i64 %ch, %t$20
+  %t$21 = icmp eq i64 %p$ch, %t$20
   %t$22 = zext i1 %t$21 to i64
   br label %join_17
 join_17:
@@ -284,7 +284,7 @@ then_24:
   br label %join_24
 else_24:
   %t$27 = add i64 0, 117
-  %t$28 = icmp eq i64 %ch, %t$27
+  %t$28 = icmp eq i64 %p$ch, %t$27
   %t$29 = zext i1 %t$28 to i64
   br label %join_24
 join_24:
@@ -296,7 +296,7 @@ then_31:
   br label %join_31
 else_31:
   %t$34 = add i64 0, 121
-  %t$35 = icmp eq i64 %ch, %t$34
+  %t$35 = icmp eq i64 %p$ch, %t$34
   %t$36 = zext i1 %t$35 to i64
   br label %join_31
 join_31:
@@ -308,7 +308,7 @@ then_38:
   br label %join_38
 else_38:
   %t$41 = add i64 0, 65
-  %t$42 = icmp eq i64 %ch, %t$41
+  %t$42 = icmp eq i64 %p$ch, %t$41
   %t$43 = zext i1 %t$42 to i64
   br label %join_38
 join_38:
@@ -320,7 +320,7 @@ then_45:
   br label %join_45
 else_45:
   %t$48 = add i64 0, 69
-  %t$49 = icmp eq i64 %ch, %t$48
+  %t$49 = icmp eq i64 %p$ch, %t$48
   %t$50 = zext i1 %t$49 to i64
   br label %join_45
 join_45:
@@ -332,7 +332,7 @@ then_52:
   br label %join_52
 else_52:
   %t$55 = add i64 0, 73
-  %t$56 = icmp eq i64 %ch, %t$55
+  %t$56 = icmp eq i64 %p$ch, %t$55
   %t$57 = zext i1 %t$56 to i64
   br label %join_52
 join_52:
@@ -344,7 +344,7 @@ then_59:
   br label %join_59
 else_59:
   %t$62 = add i64 0, 79
-  %t$63 = icmp eq i64 %ch, %t$62
+  %t$63 = icmp eq i64 %p$ch, %t$62
   %t$64 = zext i1 %t$63 to i64
   br label %join_59
 join_59:
@@ -356,7 +356,7 @@ then_66:
   br label %join_66
 else_66:
   %t$69 = add i64 0, 85
-  %t$70 = icmp eq i64 %ch, %t$69
+  %t$70 = icmp eq i64 %p$ch, %t$69
   %t$71 = zext i1 %t$70 to i64
   br label %join_66
 join_66:
@@ -368,7 +368,7 @@ then_73:
   br label %join_73
 else_73:
   %t$76 = add i64 0, 89
-  %t$77 = icmp eq i64 %ch, %t$76
+  %t$77 = icmp eq i64 %p$ch, %t$76
   %t$78 = zext i1 %t$77 to i64
   br label %join_73
 join_73:
@@ -380,7 +380,7 @@ then_80:
   br label %join_80
 else_80:
   %t$83 = add i64 0, 261
-  %t$84 = icmp eq i64 %ch, %t$83
+  %t$84 = icmp eq i64 %p$ch, %t$83
   %t$85 = zext i1 %t$84 to i64
   br label %join_80
 join_80:
@@ -392,7 +392,7 @@ then_87:
   br label %join_87
 else_87:
   %t$90 = add i64 0, 281
-  %t$91 = icmp eq i64 %ch, %t$90
+  %t$91 = icmp eq i64 %p$ch, %t$90
   %t$92 = zext i1 %t$91 to i64
   br label %join_87
 join_87:
@@ -404,7 +404,7 @@ then_94:
   br label %join_94
 else_94:
   %t$97 = add i64 0, 243
-  %t$98 = icmp eq i64 %ch, %t$97
+  %t$98 = icmp eq i64 %p$ch, %t$97
   %t$99 = zext i1 %t$98 to i64
   br label %join_94
 join_94:
@@ -416,7 +416,7 @@ then_101:
   br label %join_101
 else_101:
   %t$104 = add i64 0, 260
-  %t$105 = icmp eq i64 %ch, %t$104
+  %t$105 = icmp eq i64 %p$ch, %t$104
   %t$106 = zext i1 %t$105 to i64
   br label %join_101
 join_101:
@@ -428,7 +428,7 @@ then_108:
   br label %join_108
 else_108:
   %t$111 = add i64 0, 280
-  %t$112 = icmp eq i64 %ch, %t$111
+  %t$112 = icmp eq i64 %p$ch, %t$111
   %t$113 = zext i1 %t$112 to i64
   br label %join_108
 join_108:
@@ -440,7 +440,7 @@ then_115:
   br label %join_115
 else_115:
   %t$118 = add i64 0, 211
-  %t$119 = icmp eq i64 %ch, %t$118
+  %t$119 = icmp eq i64 %p$ch, %t$118
   %t$120 = zext i1 %t$119 to i64
   br label %join_115
 join_115:
@@ -448,35 +448,35 @@ join_115:
   ret i64 %t$116
 }
 
-define i64 @examples.text_demo.initials_from(i64 %raw$in, i64 %index$in, i64 %take_next$in, i64 %acc$in) {
+define i64 @examples.text_demo.initials_from(i64 %p$raw$in, i64 %p$index$in, i64 %p$take_next$in, i64 %p$acc$in) {
 entry:
   %t$31 = alloca i64
-  store i64 %raw$in, ptr %t$31
+  store i64 %p$raw$in, ptr %t$31
   %t$32 = alloca i64
-  store i64 %index$in, ptr %t$32
+  store i64 %p$index$in, ptr %t$32
   %t$33 = alloca i64
-  store i64 %take_next$in, ptr %t$33
+  store i64 %p$take_next$in, ptr %t$33
   %t$34 = alloca i64
-  store i64 %acc$in, ptr %t$34
+  store i64 %p$acc$in, ptr %t$34
   %t$35 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
-  %raw = load i64, ptr %t$31
-  %index = load i64, ptr %t$32
-  %take_next = load i64, ptr %t$33
-  %acc = load i64, ptr %t$34
+  %p$raw = load i64, ptr %t$31
+  %p$index = load i64, ptr %t$32
+  %p$take_next = load i64, ptr %t$33
+  %p$acc = load i64, ptr %t$34
   %t$0 = add i64 0, 63
-  %t$1 = call i64 @stdlib.string.char_at_or(i64 %raw, i64 %index, i64 %t$0)
+  %t$1 = call i64 @stdlib.string.char_at_or(i64 %p$raw, i64 %p$index, i64 %t$0)
   br label %arm_0_2
 arm_0_2:
   %t$36 = alloca i64
-  store i64 %raw, ptr %t$36
+  store i64 %p$raw, ptr %t$36
   %t$37 = call i64 @sprout_gc_push_i64_root(ptr %t$36)
   %t$38 = alloca i64
-  store i64 %acc, ptr %t$38
+  store i64 %p$acc, ptr %t$38
   %t$39 = call i64 @sprout_gc_push_i64_root(ptr %t$38)
-  %t$4 = call i64 @stdlib.string.length(i64 %raw)
-  %t$5 = icmp sge i64 %index, %t$4
+  %t$4 = call i64 @stdlib.string.length(i64 %p$raw)
+  %t$5 = icmp sge i64 %p$index, %t$4
   %t$6 = zext i1 %t$5 to i64
   %t$30 = trunc i64 %t$6 to i1
   %t$40 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -489,35 +489,35 @@ else_7:
   br i1 %t$29, label %then_10, label %else_10
 then_10:
   %t$12 = add i64 0, 1
-  %t$13 = add i64 %index, %t$12
+  %t$13 = add i64 %p$index, %t$12
   %t$14 = add i64 0, 1
-  store i64 %raw, ptr %t$31
+  store i64 %p$raw, ptr %t$31
   store i64 %t$13, ptr %t$32
   store i64 %t$14, ptr %t$33
-  store i64 %acc, ptr %t$34
+  store i64 %p$acc, ptr %t$34
   call void @llvm.stackrestore(ptr %t$35)
   br label %tco_loop
 else_10:
-  %t$28 = trunc i64 %take_next to i1
+  %t$28 = trunc i64 %p$take_next to i1
   br i1 %t$28, label %then_16, label %else_16
 then_16:
   %t$18 = add i64 0, 1
-  %t$19 = add i64 %index, %t$18
+  %t$19 = add i64 %p$index, %t$18
   %t$20 = add i64 0, 0
   %t$41 = alloca i64
-  store i64 %raw, ptr %t$41
+  store i64 %p$raw, ptr %t$41
   %t$42 = call i64 @sprout_gc_push_i64_root(ptr %t$41)
   %t$43 = alloca i64
-  store i64 %acc, ptr %t$43
+  store i64 %p$acc, ptr %t$43
   %t$44 = call i64 @sprout_gc_push_i64_root(ptr %t$43)
   %t$21 = call i64 @stdlib.string.string_from_char(i64 %t$1)
   %t$45 = alloca i64
   store i64 %t$21, ptr %t$45
   %t$46 = call i64 @sprout_gc_push_i64_root(ptr %t$45)
-  %t$22 = call i64 @stdlib.string.concat(i64 %acc, i64 %t$21)
+  %t$22 = call i64 @stdlib.string.concat(i64 %p$acc, i64 %t$21)
   %t$47 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$48 = call i64 @sprout_gc_pop_roots(i64 1)
-  store i64 %raw, ptr %t$31
+  store i64 %p$raw, ptr %t$31
   store i64 %t$19, ptr %t$32
   store i64 %t$20, ptr %t$33
   store i64 %t$22, ptr %t$34
@@ -525,16 +525,16 @@ then_16:
   br label %tco_loop
 else_16:
   %t$24 = add i64 0, 1
-  %t$25 = add i64 %index, %t$24
+  %t$25 = add i64 %p$index, %t$24
   %t$26 = add i64 0, 0
-  store i64 %raw, ptr %t$31
+  store i64 %p$raw, ptr %t$31
   store i64 %t$25, ptr %t$32
   store i64 %t$26, ptr %t$33
-  store i64 %acc, ptr %t$34
+  store i64 %p$acc, ptr %t$34
   call void @llvm.stackrestore(ptr %t$35)
   br label %tco_loop
 join_7:
-  %t$8 = phi i64 [%acc, %then_7]
+  %t$8 = phi i64 [%p$acc, %then_7]
   br label %join_2
 arm_1_2:
   call void @sprout_abort_match()
@@ -544,49 +544,49 @@ join_2:
   ret i64 %t$3
 }
 
-define i64 @examples.text_demo.initials(i64 %raw) {
+define i64 @examples.text_demo.initials(i64 %p$raw) {
 entry:
   %t$0 = add i64 0, 0
   %t$1 = add i64 0, 1
   %t$2 = getelementptr inbounds { i64, [1 x i8] }, ptr @.str.0, i64 0, i32 1, i64 0
   %t$3 = ptrtoint ptr %t$2 to i64
   %t$5 = alloca i64
-  store i64 %raw, ptr %t$5
+  store i64 %p$raw, ptr %t$5
   %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
   %t$7 = alloca i64
   store i64 %t$3, ptr %t$7
   %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
-  %t$4 = call i64 @examples.text_demo.initials_from(i64 %raw, i64 %t$0, i64 %t$1, i64 %t$3)
+  %t$4 = call i64 @examples.text_demo.initials_from(i64 %p$raw, i64 %t$0, i64 %t$1, i64 %t$3)
   %t$9 = call i64 @sprout_gc_pop_roots(i64 2)
   ret i64 %t$4
 }
 
-define i64 @examples.text_demo.strip_vowels_from(i64 %raw$in, i64 %index$in, i64 %acc$in) {
+define i64 @examples.text_demo.strip_vowels_from(i64 %p$raw$in, i64 %p$index$in, i64 %p$acc$in) {
 entry:
   %t$22 = alloca i64
-  store i64 %raw$in, ptr %t$22
+  store i64 %p$raw$in, ptr %t$22
   %t$23 = alloca i64
-  store i64 %index$in, ptr %t$23
+  store i64 %p$index$in, ptr %t$23
   %t$24 = alloca i64
-  store i64 %acc$in, ptr %t$24
+  store i64 %p$acc$in, ptr %t$24
   %t$25 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
-  %raw = load i64, ptr %t$22
-  %index = load i64, ptr %t$23
-  %acc = load i64, ptr %t$24
+  %p$raw = load i64, ptr %t$22
+  %p$index = load i64, ptr %t$23
+  %p$acc = load i64, ptr %t$24
   %t$0 = add i64 0, 63
-  %t$1 = call i64 @stdlib.string.char_at_or(i64 %raw, i64 %index, i64 %t$0)
+  %t$1 = call i64 @stdlib.string.char_at_or(i64 %p$raw, i64 %p$index, i64 %t$0)
   br label %arm_0_2
 arm_0_2:
   %t$26 = alloca i64
-  store i64 %raw, ptr %t$26
+  store i64 %p$raw, ptr %t$26
   %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
   %t$28 = alloca i64
-  store i64 %acc, ptr %t$28
+  store i64 %p$acc, ptr %t$28
   %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
-  %t$4 = call i64 @stdlib.string.length(i64 %raw)
-  %t$5 = icmp sge i64 %index, %t$4
+  %t$4 = call i64 @stdlib.string.length(i64 %p$raw)
+  %t$5 = icmp sge i64 %p$index, %t$4
   %t$6 = zext i1 %t$5 to i64
   %t$21 = trunc i64 %t$6 to i1
   %t$30 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -599,35 +599,35 @@ else_7:
   br i1 %t$20, label %then_10, label %else_10
 then_10:
   %t$12 = add i64 0, 1
-  %t$13 = add i64 %index, %t$12
-  store i64 %raw, ptr %t$22
+  %t$13 = add i64 %p$index, %t$12
+  store i64 %p$raw, ptr %t$22
   store i64 %t$13, ptr %t$23
-  store i64 %acc, ptr %t$24
+  store i64 %p$acc, ptr %t$24
   call void @llvm.stackrestore(ptr %t$25)
   br label %tco_loop
 else_10:
   %t$15 = add i64 0, 1
-  %t$16 = add i64 %index, %t$15
+  %t$16 = add i64 %p$index, %t$15
   %t$31 = alloca i64
-  store i64 %raw, ptr %t$31
+  store i64 %p$raw, ptr %t$31
   %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
   %t$33 = alloca i64
-  store i64 %acc, ptr %t$33
+  store i64 %p$acc, ptr %t$33
   %t$34 = call i64 @sprout_gc_push_i64_root(ptr %t$33)
   %t$17 = call i64 @stdlib.string.string_from_char(i64 %t$1)
   %t$35 = alloca i64
   store i64 %t$17, ptr %t$35
   %t$36 = call i64 @sprout_gc_push_i64_root(ptr %t$35)
-  %t$18 = call i64 @stdlib.string.concat(i64 %acc, i64 %t$17)
+  %t$18 = call i64 @stdlib.string.concat(i64 %p$acc, i64 %t$17)
   %t$37 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$38 = call i64 @sprout_gc_pop_roots(i64 1)
-  store i64 %raw, ptr %t$22
+  store i64 %p$raw, ptr %t$22
   store i64 %t$16, ptr %t$23
   store i64 %t$18, ptr %t$24
   call void @llvm.stackrestore(ptr %t$25)
   br label %tco_loop
 join_7:
-  %t$8 = phi i64 [%acc, %then_7]
+  %t$8 = phi i64 [%p$acc, %then_7]
   br label %join_2
 arm_1_2:
   call void @sprout_abort_match()
@@ -637,40 +637,40 @@ join_2:
   ret i64 %t$3
 }
 
-define i64 @examples.text_demo.strip_vowels(i64 %raw) {
+define i64 @examples.text_demo.strip_vowels(i64 %p$raw) {
 entry:
   %t$0 = add i64 0, 0
   %t$1 = getelementptr inbounds { i64, [1 x i8] }, ptr @.str.1, i64 0, i32 1, i64 0
   %t$2 = ptrtoint ptr %t$1 to i64
   %t$4 = alloca i64
-  store i64 %raw, ptr %t$4
+  store i64 %p$raw, ptr %t$4
   %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
   %t$6 = alloca i64
   store i64 %t$2, ptr %t$6
   %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
-  %t$3 = call i64 @examples.text_demo.strip_vowels_from(i64 %raw, i64 %t$0, i64 %t$2)
+  %t$3 = call i64 @examples.text_demo.strip_vowels_from(i64 %p$raw, i64 %t$0, i64 %t$2)
   %t$8 = call i64 @sprout_gc_pop_roots(i64 2)
   ret i64 %t$3
 }
 
-define i64 @examples.text_demo.summarize(i64 %raw) {
+define i64 @examples.text_demo.summarize(i64 %p$raw) {
 entry:
   %t$43 = alloca i64
-  store i64 %raw, ptr %t$43
+  store i64 %p$raw, ptr %t$43
   %t$44 = call i64 @sprout_gc_push_i64_root(ptr %t$43)
-  %t$0 = call i64 @stdlib.string.length(i64 %raw)
+  %t$0 = call i64 @stdlib.string.length(i64 %p$raw)
   %t$1 = call i64 @__tc_ToString_Int_to_string(i64 %t$0)
   %t$45 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 0
   %t$5 = add i64 0, 63
-  %t$6 = call i64 @stdlib.string.char_at_or(i64 %raw, i64 %t$4, i64 %t$5)
+  %t$6 = call i64 @stdlib.string.char_at_or(i64 %p$raw, i64 %t$4, i64 %t$5)
   %t$46 = alloca i64
   store i64 %t$1, ptr %t$46
   %t$47 = call i64 @sprout_gc_push_i64_root(ptr %t$46)
   %t$48 = alloca i64
-  store i64 %raw, ptr %t$48
+  store i64 %p$raw, ptr %t$48
   %t$49 = call i64 @sprout_gc_push_i64_root(ptr %t$48)
   %t$7 = call i64 @stdlib.string.string_from_char(i64 %t$6)
   %t$50 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -683,13 +683,13 @@ arm_0_8:
   store i64 %t$1, ptr %t$53
   %t$54 = call i64 @sprout_gc_push_i64_root(ptr %t$53)
   %t$55 = alloca i64
-  store i64 %raw, ptr %t$55
+  store i64 %p$raw, ptr %t$55
   %t$56 = call i64 @sprout_gc_push_i64_root(ptr %t$55)
-  %t$10 = call i64 @stdlib.string.length(i64 %raw)
+  %t$10 = call i64 @stdlib.string.length(i64 %p$raw)
   %t$11 = add i64 0, 1
   %t$12 = sub i64 %t$10, %t$11
   %t$13 = add i64 0, 63
-  %t$14 = call i64 @stdlib.string.char_at_or(i64 %raw, i64 %t$12, i64 %t$13)
+  %t$14 = call i64 @stdlib.string.char_at_or(i64 %p$raw, i64 %t$12, i64 %t$13)
   %t$15 = call i64 @stdlib.string.string_from_char(i64 %t$14)
   %t$57 = call i64 @sprout_gc_pop_roots(i64 3)
   br label %arm_0_16
@@ -704,9 +704,9 @@ arm_0_16:
   store i64 %t$1, ptr %t$62
   %t$63 = call i64 @sprout_gc_push_i64_root(ptr %t$62)
   %t$64 = alloca i64
-  store i64 %raw, ptr %t$64
+  store i64 %p$raw, ptr %t$64
   %t$65 = call i64 @sprout_gc_push_i64_root(ptr %t$64)
-  %t$18 = call i64 @examples.text_demo.initials(i64 %raw)
+  %t$18 = call i64 @examples.text_demo.initials(i64 %p$raw)
   %t$66 = call i64 @sprout_gc_pop_roots(i64 4)
   br label %arm_0_19
 arm_0_19:
@@ -723,9 +723,9 @@ arm_0_19:
   store i64 %t$1, ptr %t$73
   %t$74 = call i64 @sprout_gc_push_i64_root(ptr %t$73)
   %t$75 = alloca i64
-  store i64 %raw, ptr %t$75
+  store i64 %p$raw, ptr %t$75
   %t$76 = call i64 @sprout_gc_push_i64_root(ptr %t$75)
-  %t$21 = call i64 @examples.text_demo.strip_vowels(i64 %raw)
+  %t$21 = call i64 @examples.text_demo.strip_vowels(i64 %p$raw)
   %t$77 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$78 = call i64 @sprout_gc_pop_roots(i64 4)
   br label %arm_0_22
@@ -883,21 +883,21 @@ join_3:
   ret i64 %t$4
 }
 
-define i64 @__tc_Semigroup_String_append(i64 %left, i64 %right) {
+define i64 @__tc_Semigroup_String_append(i64 %p$left, i64 %p$right) {
 entry:
-  %t$0 = call i64 @str_concat(i64 %left, i64 %right)
+  %t$0 = call i64 @str_concat(i64 %p$left, i64 %p$right)
   ret i64 %t$0
 }
 
-define i64 @__tc_ToString_Int_to_string(i64 %value) {
+define i64 @__tc_ToString_Int_to_string(i64 %p$value) {
 entry:
-  %t$0 = call i64 @int_to_string(i64 %value)
+  %t$0 = call i64 @int_to_string(i64 %p$value)
   ret i64 %t$0
 }
 
-define { i64, i64 } @stdlib.string.char_at_worker(i64 %raw, i64 %index) {
+define { i64, i64 } @stdlib.string.char_at_worker(i64 %p$raw, i64 %p$index) {
 entry:
-  %t$0$st = call { i64, i64 } @str_char_at_unboxed(i64 %raw, i64 %index)
+  %t$0$st = call { i64, i64 } @str_char_at_unboxed(i64 %p$raw, i64 %p$index)
   %t$0 = extractvalue { i64, i64 } %t$0$st, 0
   %t$1 = extractvalue { i64, i64 } %t$0$st, 1
   %t$2$r0 = insertvalue { i64, i64 } undef, i64 %t$0, 0

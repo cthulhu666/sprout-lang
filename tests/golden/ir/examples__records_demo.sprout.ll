@@ -150,19 +150,19 @@ entry:
   ret i64 %t$6
 }
 
-define i64 @examples.records_demo.read_budget_ms(i64 %s) {
+define i64 @examples.records_demo.read_budget_ms(i64 %p$s) {
 entry:
-  %t$0 = call i64 @sprout_field(i64 %s, i64 2)
+  %t$0 = call i64 @sprout_field(i64 %p$s, i64 2)
   %t$1 = call i64 @sprout_field(i64 %t$0, i64 1)
   ret i64 %t$1
 }
 
-define i64 @examples.records_demo.promote(i64 %s) {
+define i64 @examples.records_demo.promote(i64 %p$s) {
 entry:
   %t$0 = getelementptr inbounds { i64, [16 x i8] }, ptr @.str.1, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
   %t$2 = add i64 0, 443
-  %t$3 = call i64 @sprout_field(i64 %s, i64 2)
+  %t$3 = call i64 @sprout_field(i64 %p$s, i64 2)
   %t$5 = alloca i64
   store i64 %t$1, ptr %t$5
   %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
@@ -181,13 +181,13 @@ entry:
   ret i64 %t$4
 }
 
-define i64 @examples.records_demo.relax_read_budget(i64 %s) {
+define i64 @examples.records_demo.relax_read_budget(i64 %p$s) {
 entry:
-  %t$0 = call i64 @sprout_field(i64 %s, i64 0)
-  %t$1 = call i64 @sprout_field(i64 %s, i64 1)
-  %t$2 = call i64 @sprout_field(i64 %s, i64 2)
+  %t$0 = call i64 @sprout_field(i64 %p$s, i64 0)
+  %t$1 = call i64 @sprout_field(i64 %p$s, i64 1)
+  %t$2 = call i64 @sprout_field(i64 %p$s, i64 2)
   %t$3 = call i64 @sprout_field(i64 %t$2, i64 0)
-  %t$4 = call i64 @sprout_field(i64 %s, i64 2)
+  %t$4 = call i64 @sprout_field(i64 %p$s, i64 2)
   %t$5 = call i64 @sprout_field(i64 %t$4, i64 1)
   %t$6 = add i64 0, 2
   %t$7 = mul i64 %t$5, %t$6
@@ -215,12 +215,12 @@ entry:
   ret i64 %t$9
 }
 
-define i64 @examples.records_demo.tag_env(i64 %value) {
+define i64 @examples.records_demo.tag_env(i64 %p$value) {
 entry:
   %t$0 = getelementptr inbounds { i64, [4 x i8] }, ptr @.str.2, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
   %t$3 = alloca i64
-  store i64 %value, ptr %t$3
+  store i64 %p$value, ptr %t$3
   %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
   %t$5 = alloca i64
   store i64 %t$1, ptr %t$5
@@ -228,22 +228,22 @@ entry:
   %t$2 = call i64 @sprout_alloc_obj(i64 16, i64 2)
   %t$2$ptr = inttoptr i64 %t$2 to ptr
   %t$2$f0 = getelementptr i64, ptr %t$2$ptr, i64 0
-  store i64 %value, ptr %t$2$f0
+  store i64 %p$value, ptr %t$2$f0
   %t$2$f1 = getelementptr i64, ptr %t$2$ptr, i64 1
   store i64 %t$1, ptr %t$2$f1
   %t$7 = call i64 @sprout_gc_pop_roots(i64 2)
   ret i64 %t$2
 }
 
-define i64 @examples.records_demo.describe(i64 %s) {
+define i64 @examples.records_demo.describe(i64 %p$s) {
 entry:
-  %t$0 = call i64 @sprout_field(i64 %s, i64 0)
+  %t$0 = call i64 @sprout_field(i64 %p$s, i64 0)
   %t$1 = call i64 @__tc_ToString_String_to_string(i64 %t$0)
   %t$2 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.3, i64 0, i32 1, i64 0
   %t$3 = ptrtoint ptr %t$2 to i64
-  %t$4 = call i64 @sprout_field(i64 %s, i64 1)
+  %t$4 = call i64 @sprout_field(i64 %p$s, i64 1)
   %t$22 = alloca i64
-  store i64 %s, ptr %t$22
+  store i64 %p$s, ptr %t$22
   %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
   %t$24 = alloca i64
   store i64 %t$1, ptr %t$24
@@ -255,7 +255,7 @@ entry:
   %t$6 = call i64 @__tc_ToString_String_to_string(i64 %t$5)
   %t$7 = getelementptr inbounds { i64, [8 x i8] }, ptr @.str.4, i64 0, i32 1, i64 0
   %t$8 = ptrtoint ptr %t$7 to i64
-  %t$9 = call i64 @examples.records_demo.read_budget_ms(i64 %s)
+  %t$9 = call i64 @examples.records_demo.read_budget_ms(i64 %p$s)
   %t$28 = alloca i64
   store i64 %t$6, ptr %t$28
   %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
@@ -483,37 +483,37 @@ entry:
   ret i64 %t$39
 }
 
-define i64 @__tc_Semigroup_String_append(i64 %left, i64 %right) {
+define i64 @__tc_Semigroup_String_append(i64 %p$left, i64 %p$right) {
 entry:
-  %t$0 = call i64 @str_concat(i64 %left, i64 %right)
+  %t$0 = call i64 @str_concat(i64 %p$left, i64 %p$right)
   ret i64 %t$0
 }
 
-define i64 @__tc_Eq_Int_eq(i64 %left, i64 %right) {
+define i64 @__tc_Eq_Int_eq(i64 %p$left, i64 %p$right) {
 entry:
-  %t$0 = icmp eq i64 %left, %right
+  %t$0 = icmp eq i64 %p$left, %p$right
   %t$1 = zext i1 %t$0 to i64
   ret i64 %t$1
 }
 
-define i64 @__tc_Eq_String_eq(i64 %left, i64 %right) {
+define i64 @__tc_Eq_String_eq(i64 %p$left, i64 %p$right) {
 entry:
-  %t$0$lptr = inttoptr i64 %left to ptr
-  %t$0$rptr = inttoptr i64 %right to ptr
+  %t$0$lptr = inttoptr i64 %p$left to ptr
+  %t$0$rptr = inttoptr i64 %p$right to ptr
   %t$0$i1 = call i1 @str_eq(ptr %t$0$lptr, ptr %t$0$rptr)
   %t$0 = zext i1 %t$0$i1 to i64
   ret i64 %t$0
 }
 
-define i64 @__tc_ToString_Int_to_string(i64 %value) {
+define i64 @__tc_ToString_Int_to_string(i64 %p$value) {
 entry:
-  %t$0 = call i64 @int_to_string(i64 %value)
+  %t$0 = call i64 @int_to_string(i64 %p$value)
   ret i64 %t$0
 }
 
-define i64 @__tc_ToString_Bool_to_string(i64 %value) {
+define i64 @__tc_ToString_Bool_to_string(i64 %p$value) {
 entry:
-  %t$6 = trunc i64 %value to i1
+  %t$6 = trunc i64 %p$value to i1
   br i1 %t$6, label %then_0, label %else_0
 then_0:
   %t$2 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.8, i64 0, i32 1, i64 0
@@ -528,21 +528,21 @@ join_0:
   ret i64 %t$1
 }
 
-define i64 @__tc_ToString_String_to_string(i64 %value) {
+define i64 @__tc_ToString_String_to_string(i64 %p$value) {
 entry:
-  ret i64 %value
+  ret i64 %p$value
 }
 
-define i64 @__tc_Eq_examples_records_demo_Timeouts_eq(i64 %left, i64 %right) {
+define i64 @__tc_Eq_examples_records_demo_Timeouts_eq(i64 %p$left, i64 %p$right) {
 entry:
-  %t$0 = call i64 @sprout_field(i64 %left, i64 0)
-  %t$1 = call i64 @sprout_field(i64 %right, i64 0)
+  %t$0 = call i64 @sprout_field(i64 %p$left, i64 0)
+  %t$1 = call i64 @sprout_field(i64 %p$right, i64 0)
   %t$2 = call i64 @__tc_Eq_Int_eq(i64 %t$0, i64 %t$1)
   %t$9 = trunc i64 %t$2 to i1
   br i1 %t$9, label %then_3, label %else_3
 then_3:
-  %t$5 = call i64 @sprout_field(i64 %left, i64 1)
-  %t$6 = call i64 @sprout_field(i64 %right, i64 1)
+  %t$5 = call i64 @sprout_field(i64 %p$left, i64 1)
+  %t$6 = call i64 @sprout_field(i64 %p$right, i64 1)
   %t$7 = call i64 @__tc_Eq_Int_eq(i64 %t$5, i64 %t$6)
   br label %join_3
 else_3:
@@ -553,15 +553,15 @@ join_3:
   ret i64 %t$4
 }
 
-define i64 @__tc_ToString_examples_records_demo_Timeouts_to_string(i64 %value) {
+define i64 @__tc_ToString_examples_records_demo_Timeouts_to_string(i64 %p$value) {
 entry:
   %t$0 = getelementptr inbounds { i64, [10 x i8] }, ptr @.str.10, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
   %t$2 = getelementptr inbounds { i64, [14 x i8] }, ptr @.str.11, i64 0, i32 1, i64 0
   %t$3 = ptrtoint ptr %t$2 to i64
-  %t$4 = call i64 @sprout_field(i64 %value, i64 0)
+  %t$4 = call i64 @sprout_field(i64 %p$value, i64 0)
   %t$20 = alloca i64
-  store i64 %value, ptr %t$20
+  store i64 %p$value, ptr %t$20
   %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
   %t$22 = alloca i64
   store i64 %t$1, ptr %t$22
@@ -579,7 +579,7 @@ entry:
   %t$8 = ptrtoint ptr %t$7 to i64
   %t$9 = getelementptr inbounds { i64, [11 x i8] }, ptr @.str.13, i64 0, i32 1, i64 0
   %t$10 = ptrtoint ptr %t$9 to i64
-  %t$11 = call i64 @sprout_field(i64 %value, i64 1)
+  %t$11 = call i64 @sprout_field(i64 %p$value, i64 1)
   %t$29 = alloca i64
   store i64 %t$6, ptr %t$29
   %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
@@ -623,16 +623,16 @@ entry:
   ret i64 %t$19
 }
 
-define i64 @__tc_Eq_examples_records_demo_Server_eq(i64 %left, i64 %right) {
+define i64 @__tc_Eq_examples_records_demo_Server_eq(i64 %p$left, i64 %p$right) {
 entry:
-  %t$0 = call i64 @sprout_field(i64 %left, i64 0)
-  %t$1 = call i64 @sprout_field(i64 %right, i64 0)
+  %t$0 = call i64 @sprout_field(i64 %p$left, i64 0)
+  %t$1 = call i64 @sprout_field(i64 %p$right, i64 0)
   %t$2 = call i64 @__tc_Eq_String_eq(i64 %t$0, i64 %t$1)
   %t$9 = trunc i64 %t$2 to i1
   br i1 %t$9, label %then_3, label %else_3
 then_3:
-  %t$5 = call i64 @sprout_field(i64 %left, i64 1)
-  %t$6 = call i64 @sprout_field(i64 %right, i64 1)
+  %t$5 = call i64 @sprout_field(i64 %p$left, i64 1)
+  %t$6 = call i64 @sprout_field(i64 %p$right, i64 1)
   %t$7 = call i64 @__tc_Eq_Int_eq(i64 %t$5, i64 %t$6)
   br label %join_3
 else_3:
@@ -643,8 +643,8 @@ join_3:
   %t$16 = trunc i64 %t$4 to i1
   br i1 %t$16, label %then_10, label %else_10
 then_10:
-  %t$12 = call i64 @sprout_field(i64 %left, i64 2)
-  %t$13 = call i64 @sprout_field(i64 %right, i64 2)
+  %t$12 = call i64 @sprout_field(i64 %p$left, i64 2)
+  %t$13 = call i64 @sprout_field(i64 %p$right, i64 2)
   %t$14 = call i64 @__tc_Eq_examples_records_demo_Timeouts_eq(i64 %t$12, i64 %t$13)
   br label %join_10
 else_10:

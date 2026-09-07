@@ -154,92 +154,92 @@ declare i64 @split_words(i64)
 @.cfkinds.18 = private unnamed_addr constant [2 x i8] c"s\00"
 @stdlib.regex.unsupported_prefix = global i64 zeroinitializer
 
-define i64 @fold(i64 %step, i64 %init, i64 %xs, i64 %__tc_Foldable_0_fold_values, i64 %__tc_Foldable_0_fold_while_values) {
+define i64 @fold(i64 %p$step, i64 %p$init, i64 %p$xs, i64 %p$__tc_Foldable_0_fold_values, i64 %p$__tc_Foldable_0_fold_while_values) {
 entry:
   %t$1 = alloca i64
-  store i64 %xs, ptr %t$1
+  store i64 %p$xs, ptr %t$1
   %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
   %t$3 = alloca i64
-  store i64 %step, ptr %t$3
+  store i64 %p$step, ptr %t$3
   %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
   %t$5 = alloca i64
-  store i64 %init, ptr %t$5
+  store i64 %p$init, ptr %t$5
   %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
   %t$7 = alloca i64
-  store i64 %__tc_Foldable_0_fold_while_values, ptr %t$7
+  store i64 %p$__tc_Foldable_0_fold_while_values, ptr %t$7
   %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
   %t$9 = alloca i64
-  store i64 %__tc_Foldable_0_fold_values, ptr %t$9
+  store i64 %p$__tc_Foldable_0_fold_values, ptr %t$9
   %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
-  %t$0 = call i64 @__cm_Foldable_fold_values(i64 %step, i64 %init, i64 %xs, i64 %__tc_Foldable_0_fold_values, i64 %__tc_Foldable_0_fold_while_values)
+  %t$0 = call i64 @__cm_Foldable_fold_values(i64 %p$step, i64 %p$init, i64 %p$xs, i64 %p$__tc_Foldable_0_fold_values, i64 %p$__tc_Foldable_0_fold_while_values)
   %t$11 = call i64 @sprout_gc_pop_roots(i64 5)
   ret i64 %t$0
 }
 
-define i64 @__sprout_ir_lambda_0(i64 %env$, i64 %acc, i64 %x) {
+define i64 @__sprout_ir_lambda_0(i64 %p$env$, i64 %p$acc, i64 %p$x) {
 entry:
-  %t$0$env_ptr = inttoptr i64 %env$ to ptr
+  %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
   %t$0 = load i64, ptr %t$0$slot_ptr
   %t$7 = alloca i64
-  store i64 %acc, ptr %t$7
+  store i64 %p$acc, ptr %t$7
   %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
   call void @sprout_closure_arity_check(i64 %t$0, i64 1)
   %t$1$env_ptr = inttoptr i64 %t$0 to ptr
   %t$1$code = load ptr, ptr %t$1$env_ptr
-  %t$1 = call i64 (i64, i64) %t$1$code(i64 %t$0, i64 %x)
+  %t$1 = call i64 (i64, i64) %t$1$code(i64 %t$0, i64 %p$x)
   %t$6 = trunc i64 %t$1 to i1
   %t$9 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$6, label %then_2, label %else_2
 then_2:
   %t$4 = add i64 0, 1
-  %t$5 = add i64 %acc, %t$4
+  %t$5 = add i64 %p$acc, %t$4
   br label %join_2
 else_2:
   br label %join_2
 join_2:
-  %t$3 = phi i64 [%t$5, %then_2], [%acc, %else_2]
+  %t$3 = phi i64 [%t$5, %then_2], [%p$acc, %else_2]
   ret i64 %t$3
 }
 
-define i64 @count(i64 %pred, i64 %xs, i64 %__tc_Foldable_0_fold_values, i64 %__tc_Foldable_0_fold_while_values) {
+define i64 @count(i64 %p$pred, i64 %p$xs, i64 %p$__tc_Foldable_0_fold_values, i64 %p$__tc_Foldable_0_fold_while_values) {
 entry:
   %t$3 = alloca i64
-  store i64 %xs, ptr %t$3
+  store i64 %p$xs, ptr %t$3
   %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
   %t$5 = alloca i64
-  store i64 %pred, ptr %t$5
+  store i64 %p$pred, ptr %t$5
   %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
   %t$7 = alloca i64
-  store i64 %__tc_Foldable_0_fold_while_values, ptr %t$7
+  store i64 %p$__tc_Foldable_0_fold_while_values, ptr %t$7
   %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
   %t$9 = alloca i64
-  store i64 %__tc_Foldable_0_fold_values, ptr %t$9
+  store i64 %p$__tc_Foldable_0_fold_values, ptr %t$9
   %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
   %t$0 = call i64 @sprout_alloc_closure(i64 16, i64 2)
   %t$0$raw = inttoptr i64 %t$0 to ptr
   store ptr @__sprout_ir_lambda_0, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
-  store i64 %pred, ptr %t$0$raw$slot$1
+  store i64 %p$pred, ptr %t$0$raw$slot$1
   %t$1 = add i64 0, 0
   %t$11 = alloca i64
   store i64 %t$0, ptr %t$11
   %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
-  %t$2 = call i64 @fold(i64 %t$0, i64 %t$1, i64 %xs, i64 %__tc_Foldable_0_fold_values, i64 %__tc_Foldable_0_fold_while_values)
+  %t$2 = call i64 @fold(i64 %t$0, i64 %t$1, i64 %p$xs, i64 %p$__tc_Foldable_0_fold_values, i64 %p$__tc_Foldable_0_fold_while_values)
   %t$13 = call i64 @sprout_gc_pop_roots(i64 5)
   ret i64 %t$2
 }
 
-define i64 @stdlib.regex.raw_pattern(i64 %re) {
+define i64 @stdlib.regex.raw_pattern(i64 %p$re) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %re)
+  %t$0 = call i64 @sprout_tag(i64 %p$re)
   br label %arm_0_1
 arm_0_1:
   %t$3 = add i64 0, 16
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %re, i64 0)
+  %t$5 = call i64 @sprout_field(i64 %p$re, i64 0)
   br label %join_1
 arm_1_1:
   call void @sprout_abort_match()
@@ -249,37 +249,37 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @stdlib.regex.unsupported_detail(i64 %msg) {
+define i64 @stdlib.regex.unsupported_detail(i64 %p$msg) {
 entry:
   %t$0 = load i64, ptr @stdlib.regex.unsupported_prefix
   %t$7 = alloca i64
-  store i64 %msg, ptr %t$7
+  store i64 %p$msg, ptr %t$7
   %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
   %t$1 = call i64 @str_len(i64 %t$0)
-  %t$2 = call i64 @str_len(i64 %msg)
+  %t$2 = call i64 @str_len(i64 %p$msg)
   %t$3 = load i64, ptr @stdlib.regex.unsupported_prefix
   %t$4 = call i64 @str_len(i64 %t$3)
   %t$5 = sub i64 %t$2, %t$4
-  %t$6 = call i64 @str_slice(i64 %msg, i64 %t$1, i64 %t$5)
+  %t$6 = call i64 @str_slice(i64 %p$msg, i64 %t$1, i64 %t$5)
   %t$9 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$6
 }
 
-define i64 @stdlib.regex.classify_compile_error(i64 %msg) {
+define i64 @stdlib.regex.classify_compile_error(i64 %p$msg) {
 entry:
   %t$0 = load i64, ptr @stdlib.regex.unsupported_prefix
   %t$8 = alloca i64
-  store i64 %msg, ptr %t$8
+  store i64 %p$msg, ptr %t$8
   %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
-  %t$1 = call i64 @str_starts_with(i64 %msg, i64 %t$0)
+  %t$1 = call i64 @str_starts_with(i64 %p$msg, i64 %t$0)
   %t$7 = trunc i64 %t$1 to i1
   %t$10 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$7, label %then_2, label %else_2
 then_2:
   %t$11 = alloca i64
-  store i64 %msg, ptr %t$11
+  store i64 %p$msg, ptr %t$11
   %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
-  %t$4 = call i64 @stdlib.regex.unsupported_detail(i64 %msg)
+  %t$4 = call i64 @stdlib.regex.unsupported_detail(i64 %p$msg)
   %t$13 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$14 = alloca i64
   store i64 %t$4, ptr %t$14
@@ -292,12 +292,12 @@ then_2:
   br label %join_2
 else_2:
   %t$17 = alloca i64
-  store i64 %msg, ptr %t$17
+  store i64 %p$msg, ptr %t$17
   %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
   %t$6 = call i64 @sprout_alloc_obj(i64 14, i64 1)
   %t$6$ptr = inttoptr i64 %t$6 to ptr
   %t$6$f0 = getelementptr i64, ptr %t$6$ptr, i64 0
-  store i64 %msg, ptr %t$6$f0
+  store i64 %p$msg, ptr %t$6$f0
   %t$19 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_2
 join_2:
@@ -305,12 +305,12 @@ join_2:
   ret i64 %t$3
 }
 
-define i64 @stdlib.regex.compile(i64 %pattern) {
+define i64 @stdlib.regex.compile(i64 %p$pattern) {
 entry:
   %t$12 = alloca i64
-  store i64 %pattern, ptr %t$12
+  store i64 %p$pattern, ptr %t$12
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
-  %t$0$st = call { i64, i64 } @regex_validate_worker(i64 %pattern)
+  %t$0$st = call { i64, i64 } @regex_validate_worker(i64 %p$pattern)
   %t$0 = extractvalue { i64, i64 } %t$0$st, 0
   %t$1 = extractvalue { i64, i64 } %t$0$st, 1
   %t$14 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -321,12 +321,12 @@ arm_0_2:
   br i1 %t$5, label %body_0_2, label %arm_1_2
 body_0_2:
   %t$15 = alloca i64
-  store i64 %pattern, ptr %t$15
+  store i64 %p$pattern, ptr %t$15
   %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
   %t$6 = call i64 @sprout_alloc_obj(i64 16, i64 1)
   %t$6$ptr = inttoptr i64 %t$6 to ptr
   %t$6$f0 = getelementptr i64, ptr %t$6$ptr, i64 0
-  store i64 %pattern, ptr %t$6$f0
+  store i64 %p$pattern, ptr %t$6$f0
   %t$17 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$18 = alloca i64
   store i64 %t$6, ptr %t$18
@@ -364,95 +364,95 @@ join_2:
   ret i64 %t$3
 }
 
-define i64 @stdlib.regex.is_match(i64 %re, i64 %text) {
+define i64 @stdlib.regex.is_match(i64 %p$re, i64 %p$text) {
 entry:
-  %t$0 = call i64 @stdlib.regex.raw_pattern(i64 %re)
+  %t$0 = call i64 @stdlib.regex.raw_pattern(i64 %p$re)
   %t$2 = alloca i64
-  store i64 %text, ptr %t$2
+  store i64 %p$text, ptr %t$2
   %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
   %t$4 = alloca i64
   store i64 %t$0, ptr %t$4
   %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$1 = call i64 @regex_is_match(i64 %t$0, i64 %text)
+  %t$1 = call i64 @regex_is_match(i64 %t$0, i64 %p$text)
   %t$6 = call i64 @sprout_gc_pop_roots(i64 2)
   ret i64 %t$1
 }
 
-define i64 @stdlib.regex.find_first(i64 %re, i64 %text) {
+define i64 @stdlib.regex.find_first(i64 %p$re, i64 %p$text) {
 entry:
-  %t$0 = call i64 @stdlib.regex.raw_pattern(i64 %re)
+  %t$0 = call i64 @stdlib.regex.raw_pattern(i64 %p$re)
   %t$2 = alloca i64
-  store i64 %text, ptr %t$2
+  store i64 %p$text, ptr %t$2
   %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
   %t$4 = alloca i64
   store i64 %t$0, ptr %t$4
   %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$1 = call i64 @regex_find_match(i64 %t$0, i64 %text)
+  %t$1 = call i64 @regex_find_match(i64 %t$0, i64 %p$text)
   %t$6 = call i64 @sprout_gc_pop_roots(i64 2)
   ret i64 %t$1
 }
 
-define i64 @stdlib.regex.replace_all_literal(i64 %re, i64 %replacement, i64 %text) {
+define i64 @stdlib.regex.replace_all_literal(i64 %p$re, i64 %p$replacement, i64 %p$text) {
 entry:
-  %t$0 = call i64 @stdlib.regex.raw_pattern(i64 %re)
+  %t$0 = call i64 @stdlib.regex.raw_pattern(i64 %p$re)
   %t$2 = alloca i64
-  store i64 %text, ptr %t$2
+  store i64 %p$text, ptr %t$2
   %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
   %t$4 = alloca i64
-  store i64 %replacement, ptr %t$4
+  store i64 %p$replacement, ptr %t$4
   %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
   %t$6 = alloca i64
   store i64 %t$0, ptr %t$6
   %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
-  %t$1 = call i64 @regex_replace_all_literal(i64 %t$0, i64 %replacement, i64 %text)
+  %t$1 = call i64 @regex_replace_all_literal(i64 %t$0, i64 %p$replacement, i64 %p$text)
   %t$8 = call i64 @sprout_gc_pop_roots(i64 3)
   ret i64 %t$1
 }
 
-define i64 @stdlib.regex.escape(i64 %raw) {
+define i64 @stdlib.regex.escape(i64 %p$raw) {
 entry:
   %t$1 = alloca i64
-  store i64 %raw, ptr %t$1
+  store i64 %p$raw, ptr %t$1
   %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
-  %t$0 = call i64 @regex_escape(i64 %raw)
+  %t$0 = call i64 @regex_escape(i64 %p$raw)
   %t$3 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$0
 }
 
-define i64 @stdlib.string.length(i64 %raw) {
+define i64 @stdlib.string.length(i64 %p$raw) {
 entry:
   %t$1 = alloca i64
-  store i64 %raw, ptr %t$1
+  store i64 %p$raw, ptr %t$1
   %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
-  %t$0 = call i64 @str_len(i64 %raw)
+  %t$0 = call i64 @str_len(i64 %p$raw)
   %t$3 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$0
 }
 
-define i64 @stdlib.string.slice(i64 %raw, i64 %start, i64 %count) {
+define i64 @stdlib.string.slice(i64 %p$raw, i64 %p$start, i64 %p$count) {
 entry:
-  %t$0 = call i64 @str_slice(i64 %raw, i64 %start, i64 %count)
+  %t$0 = call i64 @str_slice(i64 %p$raw, i64 %p$start, i64 %p$count)
   ret i64 %t$0
 }
 
-define i64 @examples.regex_demo.render_match(i64 %raw, i64 %start, i64 %end, i64 %replaced, i64 %escaped) {
+define i64 @examples.regex_demo.render_match(i64 %p$raw, i64 %p$start, i64 %p$end, i64 %p$replaced, i64 %p$escaped) {
 entry:
   %t$0 = getelementptr inbounds { i64, [9 x i8] }, ptr @.str.0, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
-  %t$2 = sub i64 %end, %start
+  %t$2 = sub i64 %p$end, %p$start
   %t$26 = alloca i64
-  store i64 %replaced, ptr %t$26
+  store i64 %p$replaced, ptr %t$26
   %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
   %t$28 = alloca i64
-  store i64 %raw, ptr %t$28
+  store i64 %p$raw, ptr %t$28
   %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
   %t$30 = alloca i64
-  store i64 %escaped, ptr %t$30
+  store i64 %p$escaped, ptr %t$30
   %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)
   %t$32 = alloca i64
   store i64 %t$1, ptr %t$32
   %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
-  %t$3 = call i64 @stdlib.string.slice(i64 %raw, i64 %start, i64 %t$2)
+  %t$3 = call i64 @stdlib.string.slice(i64 %p$raw, i64 %p$start, i64 %t$2)
   %t$34 = alloca i64
   store i64 %t$3, ptr %t$34
   %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
@@ -472,7 +472,7 @@ entry:
   %t$42 = alloca i64
   store i64 %t$7, ptr %t$42
   %t$43 = call i64 @sprout_gc_push_i64_root(ptr %t$42)
-  %t$9 = call i64 @stdlib.string.slice(i64 %raw, i64 %t$8, i64 %start)
+  %t$9 = call i64 @stdlib.string.slice(i64 %p$raw, i64 %t$8, i64 %p$start)
   %t$44 = alloca i64
   store i64 %t$9, ptr %t$44
   %t$45 = call i64 @sprout_gc_push_i64_root(ptr %t$44)
@@ -491,9 +491,9 @@ entry:
   %t$52 = alloca i64
   store i64 %t$13, ptr %t$52
   %t$53 = call i64 @sprout_gc_push_i64_root(ptr %t$52)
-  %t$14 = call i64 @stdlib.string.length(i64 %raw)
-  %t$15 = sub i64 %t$14, %end
-  %t$16 = call i64 @stdlib.string.slice(i64 %raw, i64 %end, i64 %t$15)
+  %t$14 = call i64 @stdlib.string.length(i64 %p$raw)
+  %t$15 = sub i64 %t$14, %p$end
+  %t$16 = call i64 @stdlib.string.slice(i64 %p$raw, i64 %p$end, i64 %t$15)
   %t$54 = alloca i64
   store i64 %t$16, ptr %t$54
   %t$55 = call i64 @sprout_gc_push_i64_root(ptr %t$54)
@@ -512,7 +512,7 @@ entry:
   %t$62 = alloca i64
   store i64 %t$20, ptr %t$62
   %t$63 = call i64 @sprout_gc_push_i64_root(ptr %t$62)
-  %t$21 = call i64 @__tc_Semigroup_String_append(i64 %t$20, i64 %replaced)
+  %t$21 = call i64 @__tc_Semigroup_String_append(i64 %t$20, i64 %p$replaced)
   %t$64 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$22 = getelementptr inbounds { i64, [10 x i8] }, ptr @.str.4, i64 0, i32 1, i64 0
   %t$23 = ptrtoint ptr %t$22 to i64
@@ -527,20 +527,20 @@ entry:
   %t$70 = alloca i64
   store i64 %t$24, ptr %t$70
   %t$71 = call i64 @sprout_gc_push_i64_root(ptr %t$70)
-  %t$25 = call i64 @__tc_Semigroup_String_append(i64 %t$24, i64 %escaped)
+  %t$25 = call i64 @__tc_Semigroup_String_append(i64 %t$24, i64 %p$escaped)
   %t$72 = call i64 @sprout_gc_pop_roots(i64 4)
   ret i64 %t$25
 }
 
-define i64 @examples.regex_demo.summarize_found(i64 %re, i64 %raw) {
+define i64 @examples.regex_demo.summarize_found(i64 %p$re, i64 %p$raw) {
 entry:
   %t$29 = alloca i64
-  store i64 %re, ptr %t$29
+  store i64 %p$re, ptr %t$29
   %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
   %t$31 = alloca i64
-  store i64 %raw, ptr %t$31
+  store i64 %p$raw, ptr %t$31
   %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
-  %t$0 = call i64 @stdlib.regex.find_first(i64 %re, i64 %raw)
+  %t$0 = call i64 @stdlib.regex.find_first(i64 %p$re, i64 %p$raw)
   %t$1 = call i64 @sprout_tag(i64 %t$0)
   %t$33 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_2
@@ -560,15 +560,15 @@ ntest_6:
   %t$12 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.5, i64 0, i32 1, i64 0
   %t$13 = ptrtoint ptr %t$12 to i64
   %t$34 = alloca i64
-  store i64 %re, ptr %t$34
+  store i64 %p$re, ptr %t$34
   %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
   %t$36 = alloca i64
-  store i64 %raw, ptr %t$36
+  store i64 %p$raw, ptr %t$36
   %t$37 = call i64 @sprout_gc_push_i64_root(ptr %t$36)
   %t$38 = alloca i64
   store i64 %t$13, ptr %t$38
   %t$39 = call i64 @sprout_gc_push_i64_root(ptr %t$38)
-  %t$14 = call i64 @stdlib.regex.replace_all_literal(i64 %re, i64 %t$13, i64 %raw)
+  %t$14 = call i64 @stdlib.regex.replace_all_literal(i64 %p$re, i64 %t$13, i64 %p$raw)
   %t$40 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$15 = getelementptr inbounds { i64, [15 x i8] }, ptr @.str.6, i64 0, i32 1, i64 0
   %t$16 = ptrtoint ptr %t$15 to i64
@@ -583,7 +583,7 @@ ntest_6:
   %t$46 = alloca i64
   store i64 %t$17, ptr %t$46
   %t$47 = call i64 @sprout_gc_push_i64_root(ptr %t$46)
-  %t$18 = call i64 @examples.regex_demo.render_match(i64 %raw, i64 %t$10, i64 %t$11, i64 %t$14, i64 %t$17)
+  %t$18 = call i64 @examples.regex_demo.render_match(i64 %p$raw, i64 %t$10, i64 %t$11, i64 %t$14, i64 %t$17)
   %t$48 = call i64 @sprout_gc_pop_roots(i64 4)
   br label %join_2
 arm_1_2:
@@ -592,12 +592,12 @@ arm_1_2:
   br i1 %t$20, label %body_1_2, label %arm_2_2
 body_1_2:
   %t$49 = alloca i64
-  store i64 %re, ptr %t$49
+  store i64 %p$re, ptr %t$49
   %t$50 = call i64 @sprout_gc_push_i64_root(ptr %t$49)
   %t$51 = alloca i64
-  store i64 %raw, ptr %t$51
+  store i64 %p$raw, ptr %t$51
   %t$52 = call i64 @sprout_gc_push_i64_root(ptr %t$51)
-  %t$21 = call i64 @stdlib.regex.is_match(i64 %re, i64 %raw)
+  %t$21 = call i64 @stdlib.regex.is_match(i64 %p$re, i64 %p$raw)
   %t$53 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$28 = trunc i64 %t$21 to i1
   br i1 %t$28, label %then_22, label %else_22
@@ -620,12 +620,12 @@ join_2:
   ret i64 %t$3
 }
 
-define i64 @examples.regex_demo.summarize(i64 %raw) {
+define i64 @examples.regex_demo.summarize(i64 %p$raw) {
 entry:
   %t$0 = getelementptr inbounds { i64, [18 x i8] }, ptr @.str.9, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
   %t$26 = alloca i64
-  store i64 %raw, ptr %t$26
+  store i64 %p$raw, ptr %t$26
   %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
   %t$28 = alloca i64
   store i64 %t$1, ptr %t$28
@@ -645,9 +645,9 @@ body_0_4:
   store i64 %t$3, ptr %t$32
   %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
   %t$34 = alloca i64
-  store i64 %raw, ptr %t$34
+  store i64 %p$raw, ptr %t$34
   %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
-  %t$8 = call i64 @examples.regex_demo.summarize_found(i64 %t$3, i64 %raw)
+  %t$8 = call i64 @examples.regex_demo.summarize_found(i64 %t$3, i64 %p$raw)
   %t$36 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %join_4
 arm_1_4:
@@ -743,27 +743,27 @@ join_3:
   ret i64 %t$4
 }
 
-define i64 @__cm_Foldable_fold_values(i64 %step, i64 %init, i64 %xs, i64 %__tc_Foldable_0_fold_values, i64 %__tc_Foldable_0_fold_while_values) {
+define i64 @__cm_Foldable_fold_values(i64 %p$step, i64 %p$init, i64 %p$xs, i64 %p$__tc_Foldable_0_fold_values, i64 %p$__tc_Foldable_0_fold_while_values) {
 entry:
-  call void @sprout_closure_arity_check(i64 %__tc_Foldable_0_fold_values, i64 3)
-  %t$0$env_ptr = inttoptr i64 %__tc_Foldable_0_fold_values to ptr
+  call void @sprout_closure_arity_check(i64 %p$__tc_Foldable_0_fold_values, i64 3)
+  %t$0$env_ptr = inttoptr i64 %p$__tc_Foldable_0_fold_values to ptr
   %t$0$code = load ptr, ptr %t$0$env_ptr
-  %t$0 = call i64 (i64, i64, i64, i64) %t$0$code(i64 %__tc_Foldable_0_fold_values, i64 %step, i64 %init, i64 %xs)
+  %t$0 = call i64 (i64, i64, i64, i64) %t$0$code(i64 %p$__tc_Foldable_0_fold_values, i64 %p$step, i64 %p$init, i64 %p$xs)
   ret i64 %t$0
 }
 
-define i64 @__tc_Semigroup_String_append(i64 %left, i64 %right) {
+define i64 @__tc_Semigroup_String_append(i64 %p$left, i64 %p$right) {
 entry:
-  %t$0 = call i64 @str_concat(i64 %left, i64 %right)
+  %t$0 = call i64 @str_concat(i64 %p$left, i64 %p$right)
   ret i64 %t$0
 }
 
-define { i64, i64 } @regex_validate_worker(i64 %pattern) {
+define { i64, i64 } @regex_validate_worker(i64 %p$pattern) {
 entry:
   %t$10 = alloca i64
-  store i64 %pattern, ptr %t$10
+  store i64 %p$pattern, ptr %t$10
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
-  %t$0 = call i64 @regex_validate(i64 %pattern)
+  %t$0 = call i64 @regex_validate(i64 %p$pattern)
   %t$12 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$1 = call i64 @sprout_tag(i64 %t$0)
   %t$2 = add i64 0, 7
@@ -788,12 +788,12 @@ wrepack_next_6:
   unreachable
 }
 
-define { i64, i64 } @stdlib.regex.compile_worker(i64 %pattern) {
+define { i64, i64 } @stdlib.regex.compile_worker(i64 %p$pattern) {
 entry:
   %t$21 = alloca i64
-  store i64 %pattern, ptr %t$21
+  store i64 %p$pattern, ptr %t$21
   %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
-  %t$0$st = call { i64, i64 } @regex_validate_worker(i64 %pattern)
+  %t$0$st = call { i64, i64 } @regex_validate_worker(i64 %p$pattern)
   %t$0 = extractvalue { i64, i64 } %t$0$st, 0
   %t$1 = extractvalue { i64, i64 } %t$0$st, 1
   %t$23 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -804,12 +804,12 @@ arm_0_2:
   br i1 %t$5, label %body_0_2, label %arm_1_2
 body_0_2:
   %t$24 = alloca i64
-  store i64 %pattern, ptr %t$24
+  store i64 %p$pattern, ptr %t$24
   %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
   %t$6 = call i64 @sprout_alloc_obj(i64 16, i64 1)
   %t$6$ptr = inttoptr i64 %t$6 to ptr
   %t$6$f0 = getelementptr i64, ptr %t$6$ptr, i64 0
-  store i64 %pattern, ptr %t$6$f0
+  store i64 %p$pattern, ptr %t$6$f0
   %t$26 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$27 = alloca i64
   store i64 %t$6, ptr %t$27

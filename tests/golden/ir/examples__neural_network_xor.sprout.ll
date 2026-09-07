@@ -104,10 +104,10 @@ declare i64 @ref_write(i64, i64)
 @.cname.13 = private unnamed_addr constant [9 x i8] c"IntRange\00"
 @.cfkinds.13 = private unnamed_addr constant [4 x i8] c"iii\00"
 
-define i64 @examples.neural_network_xor.relu(i64 %x) {
+define i64 @examples.neural_network_xor.relu(i64 %p$x) {
 entry:
   %t$0 = bitcast double 0.0 to i64
-  %t$1$fa = bitcast i64 %x to double
+  %t$1$fa = bitcast i64 %p$x to double
   %t$1$fb = bitcast i64 %t$0 to double
   %t$1 = fcmp olt double %t$1$fa, %t$1$fb
   %t$2 = zext i1 %t$1 to i64
@@ -119,18 +119,18 @@ then_3:
 else_3:
   br label %join_3
 join_3:
-  %t$4 = phi i64 [%t$5, %then_3], [%x, %else_3]
+  %t$4 = phi i64 [%t$5, %then_3], [%p$x, %else_3]
   ret i64 %t$4
 }
 
-define i64 @examples.neural_network_xor.neuron(i64 %w1, i64 %w2, i64 %bias, i64 %x1, i64 %x2) {
+define i64 @examples.neural_network_xor.neuron(i64 %p$w1, i64 %p$w2, i64 %p$bias, i64 %p$x1, i64 %p$x2) {
 entry:
-  %t$0$la = bitcast i64 %w1 to double
-  %t$0$lb = bitcast i64 %x1 to double
+  %t$0$la = bitcast i64 %p$w1 to double
+  %t$0$lb = bitcast i64 %p$x1 to double
   %t$0$fr = fmul double %t$0$la, %t$0$lb
   %t$0 = bitcast double %t$0$fr to i64
-  %t$1$la = bitcast i64 %w2 to double
-  %t$1$lb = bitcast i64 %x2 to double
+  %t$1$la = bitcast i64 %p$w2 to double
+  %t$1$lb = bitcast i64 %p$x2 to double
   %t$1$fr = fmul double %t$1$la, %t$1$lb
   %t$1 = bitcast double %t$1$fr to i64
   %t$2$la = bitcast i64 %t$0 to double
@@ -138,24 +138,24 @@ entry:
   %t$2$fr = fadd double %t$2$la, %t$2$lb
   %t$2 = bitcast double %t$2$fr to i64
   %t$3$la = bitcast i64 %t$2 to double
-  %t$3$lb = bitcast i64 %bias to double
+  %t$3$lb = bitcast i64 %p$bias to double
   %t$3$fr = fsub double %t$3$la, %t$3$lb
   %t$3 = bitcast double %t$3$fr to i64
   %t$4 = call i64 @examples.neural_network_xor.relu(i64 %t$3)
   ret i64 %t$4
 }
 
-define i64 @examples.neural_network_xor.xor_net(i64 %x1, i64 %x2) {
+define i64 @examples.neural_network_xor.xor_net(i64 %p$x1, i64 %p$x2) {
 entry:
   %t$0 = bitcast double 1.0 to i64
   %t$1 = bitcast double 1.0 to i64
   %t$2 = bitcast double 0.0 to i64
-  %t$3 = call i64 @examples.neural_network_xor.neuron(i64 %t$0, i64 %t$1, i64 %t$2, i64 %x1, i64 %x2)
+  %t$3 = call i64 @examples.neural_network_xor.neuron(i64 %t$0, i64 %t$1, i64 %t$2, i64 %p$x1, i64 %p$x2)
   %t$4 = bitcast double 2.0 to i64
   %t$5 = bitcast double 1.0 to i64
   %t$6 = bitcast double 1.0 to i64
   %t$7 = bitcast double 1.0 to i64
-  %t$8 = call i64 @examples.neural_network_xor.neuron(i64 %t$5, i64 %t$6, i64 %t$7, i64 %x1, i64 %x2)
+  %t$8 = call i64 @examples.neural_network_xor.neuron(i64 %t$5, i64 %t$6, i64 %t$7, i64 %p$x1, i64 %p$x2)
   %t$9$la = bitcast i64 %t$4 to double
   %t$9$lb = bitcast i64 %t$8 to double
   %t$9$fr = fmul double %t$9$la, %t$9$lb
@@ -167,9 +167,9 @@ entry:
   ret i64 %t$10
 }
 
-define i64 @examples.neural_network_xor.predict(i64 %x1, i64 %x2) {
+define i64 @examples.neural_network_xor.predict(i64 %p$x1, i64 %p$x2) {
 entry:
-  %t$0 = call i64 @examples.neural_network_xor.xor_net(i64 %x1, i64 %x2)
+  %t$0 = call i64 @examples.neural_network_xor.xor_net(i64 %p$x1, i64 %p$x2)
   %t$1 = bitcast double 0.5 to i64
   %t$2$fa = bitcast i64 %t$0 to double
   %t$2$fb = bitcast i64 %t$1 to double

@@ -116,7 +116,7 @@ fn test4_program() -> sprout_ir.IRProgram =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction("phi_heap", Cons(("cond", sprout_ir.IRTHeap), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
-        sprout_ir.IRCondBr("%cond", "then", "else"), Nil)),
+        sprout_ir.IRCondBr(sprout_ir.param_ssa("cond"), "then", "else"), Nil)),
       Cons(sprout_ir.IRBlock("then", Cons(
         sprout_ir.IRStrConst("%xt", "%xt_raw", "x"),
         Cons(sprout_ir.IRBr("join"), Nil))),
@@ -153,8 +153,8 @@ fn test5_program() -> sprout_ir.IRProgram =
     sprout_ir.IRFunction("f_heap_param", Cons(("s", sprout_ir.IRTHeap), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry",
         Cons(sprout_ir.IRConst("%z0", 0),
-        Cons(sprout_ir.IRCall("%r0", sprout_ir.IRTUnknown, "bar", Cons("%s", Nil)),
-        Cons(sprout_ir.IRMakeCtor("%ctor", "T3", 0, Cons("%s", Cons("%z0", Cons("%z0", Nil)))),
+        Cons(sprout_ir.IRCall("%r0", sprout_ir.IRTUnknown, "bar", Cons(sprout_ir.param_ssa("s"), Nil)),
+        Cons(sprout_ir.IRMakeCtor("%ctor", "T3", 0, Cons(sprout_ir.param_ssa("s"), Cons("%z0", Cons("%z0", Nil)))),
         Cons(sprout_ir.IRRet("%ctor"), Nil))))),
       Nil)),
     Nil), Nil, Nil, Nil)
@@ -393,7 +393,7 @@ fn test15_program() -> sprout_ir.IRProgram =
         sprout_ir.IRStrConst("%z1", "%z1_raw", "z"),
         Cons(sprout_ir.IRStrConst("%z2", "%z2_raw", "w"),
         Cons(sprout_ir.IRStrConcat("%z", "%z1", "%z2"),
-        Cons(sprout_ir.IRStrConcat("%r", "%p", "%z"),
+        Cons(sprout_ir.IRStrConcat("%r", sprout_ir.param_ssa("p"), "%z"),
         Cons(sprout_ir.IRRet("%r"), Nil)))))),
       Nil))),
     Nil), Nil, Nil, Nil)
@@ -438,8 +438,8 @@ fn test17_program() -> sprout_ir.IRProgram =
       Cons(("p", sprout_ir.IRTHeap), Cons(("v", sprout_ir.IRTHeap), Nil)), "i64", Cons(
       sprout_ir.IRBlock("entry",
         Cons(sprout_ir.IRConst("%i", 0),
-        Cons(sprout_ir.IRCall("%x", sprout_ir.IRTScalar, "vector_get_direct", Cons("%v", Cons("%i", Nil))),
-        Cons(sprout_ir.IRRet("%p"), Nil)))),
+        Cons(sprout_ir.IRCall("%x", sprout_ir.IRTScalar, "vector_get_direct", Cons(sprout_ir.param_ssa("v"), Cons("%i", Nil))),
+        Cons(sprout_ir.IRRet(sprout_ir.param_ssa("p")), Nil)))),
       Nil)),
     Nil), Nil, Nil, Nil)
 
@@ -453,8 +453,8 @@ fn test18_program() -> sprout_ir.IRProgram =
       Cons(("p", sprout_ir.IRTHeap), Cons(("v", sprout_ir.IRTHeap), Nil)), "i64", Cons(
       sprout_ir.IRBlock("entry",
         Cons(sprout_ir.IRConst("%i", 0),
-        Cons(sprout_ir.IRCall("%x", sprout_ir.IRTHeap, "vector_get", Cons("%v", Cons("%i", Nil))),
-        Cons(sprout_ir.IRRet("%p"), Nil)))),
+        Cons(sprout_ir.IRCall("%x", sprout_ir.IRTHeap, "vector_get", Cons(sprout_ir.param_ssa("v"), Cons("%i", Nil))),
+        Cons(sprout_ir.IRRet(sprout_ir.param_ssa("p")), Nil)))),
       Nil)),
     Nil), Nil, Nil, Nil)
 
@@ -467,8 +467,8 @@ fn test19_program() -> sprout_ir.IRProgram =
       sprout_ir.IRBlock("entry",
         Cons(sprout_ir.IRConst("%i", 0),
         Cons(sprout_ir.IRConst("%val", 7),
-        Cons(sprout_ir.IRCall("%x", sprout_ir.IRTScalar, "vector_mutset", Cons("%v", Cons("%i", Cons("%val", Nil)))),
-        Cons(sprout_ir.IRRet("%p"), Nil))))),
+        Cons(sprout_ir.IRCall("%x", sprout_ir.IRTScalar, "vector_mutset", Cons(sprout_ir.param_ssa("v"), Cons("%i", Cons("%val", Nil)))),
+        Cons(sprout_ir.IRRet(sprout_ir.param_ssa("p")), Nil))))),
       Nil)),
     Nil), Nil, Nil, Nil)
 
@@ -489,8 +489,8 @@ fn test20_program() -> sprout_ir.IRProgram =
       sprout_ir.IRBlock("entry",
         Cons(sprout_ir.IRConst("%i", 0),
         Cons(sprout_ir.IRCallUnboxed2("%tag", "%vo", sprout_ir.IRTScalar,
-                                      "vector_get_unboxed", Cons("%v", Cons("%i", Nil))),
-        Cons(sprout_ir.IRRet("%p"), Nil)))),
+                                      "vector_get_unboxed", Cons(sprout_ir.param_ssa("v"), Cons("%i", Nil))),
+        Cons(sprout_ir.IRRet(sprout_ir.param_ssa("p")), Nil)))),
       Nil)),
     Nil), Nil, Nil, Nil)
 
@@ -513,8 +513,8 @@ fn test21_program() -> sprout_ir.IRProgram =
       Cons(("txt", sprout_ir.IRTHeap), Nil))), "i64", Cons(
       sprout_ir.IRBlock("entry",
         Cons(sprout_ir.IRCallUnboxed2("%tag", "%ro", sprout_ir.IRTHeap,
-                                      "hypothetical_allocating_unboxed", Cons("%pat", Cons("%txt", Nil))),
-        Cons(sprout_ir.IRRet("%p"), Nil))),
+                                      "hypothetical_allocating_unboxed", Cons(sprout_ir.param_ssa("pat"), Cons(sprout_ir.param_ssa("txt"), Nil))),
+        Cons(sprout_ir.IRRet(sprout_ir.param_ssa("p")), Nil))),
       Nil)),
     Nil), Nil, Nil, Nil)
 
@@ -527,8 +527,8 @@ fn test22_program() -> sprout_ir.IRProgram =
       Cons(("p", sprout_ir.IRTHeap), Cons(("name", sprout_ir.IRTHeap), Nil)), "i64", Cons(
       sprout_ir.IRBlock("entry",
         Cons(sprout_ir.IRCallUnboxed2("%tag", "%eo", sprout_ir.IRTHeap,
-                                      "env_get_unboxed", Cons("%name", Nil)),
-        Cons(sprout_ir.IRRet("%p"), Nil))),
+                                      "env_get_unboxed", Cons(sprout_ir.param_ssa("name"), Nil)),
+        Cons(sprout_ir.IRRet(sprout_ir.param_ssa("p")), Nil))),
       Nil)),
     Nil), Nil, Nil, Nil)
 
@@ -547,13 +547,13 @@ fn test23_program() -> sprout_ir.IRProgram =
     sprout_ir.IRFunction("f23",
       Cons(("p", sprout_ir.IRTHeap), Cons(("x", sprout_ir.IRTScalar), Nil)), "i64", Cons(
       sprout_ir.IRBlock("entry",
-        Cons(sprout_ir.IRCall("%r0", sprout_ir.IRTScalar, "g23", Cons("%x", Nil)),
-        Cons(sprout_ir.IRRet("%p"), Nil))),
+        Cons(sprout_ir.IRCall("%r0", sprout_ir.IRTScalar, "g23", Cons(sprout_ir.param_ssa("x"), Nil)),
+        Cons(sprout_ir.IRRet(sprout_ir.param_ssa("p")), Nil))),
       Nil)),
     Cons(
     sprout_ir.IRFunction("g23", Cons(("x", sprout_ir.IRTScalar), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry",
-        Cons(sprout_ir.IRIAdd("%r", "%x", "%x"),
+        Cons(sprout_ir.IRIAdd("%r", sprout_ir.param_ssa("x"), sprout_ir.param_ssa("x")),
         Cons(sprout_ir.IRRet("%r"), Nil))),
       Nil)),
     Nil)), Nil, Nil, Nil)
@@ -566,13 +566,13 @@ fn test24_program() -> sprout_ir.IRProgram =
     sprout_ir.IRFunction("f24",
       Cons(("p", sprout_ir.IRTHeap), Cons(("x", sprout_ir.IRTScalar), Nil)), "i64", Cons(
       sprout_ir.IRBlock("entry",
-        Cons(sprout_ir.IRCall("%r0", sprout_ir.IRTScalar, "h24", Cons("%x", Nil)),
-        Cons(sprout_ir.IRRet("%p"), Nil))),
+        Cons(sprout_ir.IRCall("%r0", sprout_ir.IRTScalar, "h24", Cons(sprout_ir.param_ssa("x"), Nil)),
+        Cons(sprout_ir.IRRet(sprout_ir.param_ssa("p")), Nil))),
       Nil)),
     Cons(
     sprout_ir.IRFunction("h24", Cons(("x", sprout_ir.IRTScalar), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry",
-        Cons(sprout_ir.IRMakeCtor("%c", "Box", 1, Cons("%x", Nil)),
+        Cons(sprout_ir.IRMakeCtor("%c", "Box", 1, Cons(sprout_ir.param_ssa("x"), Nil)),
         Cons(sprout_ir.IRRet("%c"), Nil))),
       Nil)),
     Nil)), Nil, Nil, Nil)
@@ -586,13 +586,13 @@ fn test25_program() -> sprout_ir.IRProgram =
     sprout_ir.IRFunction("f25",
       Cons(("p", sprout_ir.IRTHeap), Cons(("x", sprout_ir.IRTScalar), Nil)), "i64", Cons(
       sprout_ir.IRBlock("entry",
-        Cons(sprout_ir.IRCall("%r0", sprout_ir.IRTScalar, "grec25", Cons("%x", Nil)),
-        Cons(sprout_ir.IRRet("%p"), Nil))),
+        Cons(sprout_ir.IRCall("%r0", sprout_ir.IRTScalar, "grec25", Cons(sprout_ir.param_ssa("x"), Nil)),
+        Cons(sprout_ir.IRRet(sprout_ir.param_ssa("p")), Nil))),
       Nil)),
     Cons(
     sprout_ir.IRFunction("grec25", Cons(("x", sprout_ir.IRTScalar), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry",
-        Cons(sprout_ir.IRCall("%r", sprout_ir.IRTScalar, "grec25", Cons("%x", Nil)),
+        Cons(sprout_ir.IRCall("%r", sprout_ir.IRTScalar, "grec25", Cons(sprout_ir.param_ssa("x"), Nil)),
         Cons(sprout_ir.IRRet("%r"), Nil))),
       Nil)),
     Nil)), Nil, Nil, Nil)
@@ -607,19 +607,19 @@ fn test26_program() -> sprout_ir.IRProgram =
     sprout_ir.IRFunction("f26",
       Cons(("p", sprout_ir.IRTHeap), Cons(("x", sprout_ir.IRTScalar), Nil)), "i64", Cons(
       sprout_ir.IRBlock("entry",
-        Cons(sprout_ir.IRCall("%r0", sprout_ir.IRTScalar, "a26", Cons("%x", Nil)),
-        Cons(sprout_ir.IRRet("%p"), Nil))),
+        Cons(sprout_ir.IRCall("%r0", sprout_ir.IRTScalar, "a26", Cons(sprout_ir.param_ssa("x"), Nil)),
+        Cons(sprout_ir.IRRet(sprout_ir.param_ssa("p")), Nil))),
       Nil)),
     Cons(
     sprout_ir.IRFunction("a26", Cons(("x", sprout_ir.IRTScalar), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry",
-        Cons(sprout_ir.IRCall("%r", sprout_ir.IRTScalar, "b26", Cons("%x", Nil)),
+        Cons(sprout_ir.IRCall("%r", sprout_ir.IRTScalar, "b26", Cons(sprout_ir.param_ssa("x"), Nil)),
         Cons(sprout_ir.IRRet("%r"), Nil))),
       Nil)),
     Cons(
     sprout_ir.IRFunction("b26", Cons(("x", sprout_ir.IRTScalar), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry",
-        Cons(sprout_ir.IRIAdd("%r", "%x", "%x"),
+        Cons(sprout_ir.IRIAdd("%r", sprout_ir.param_ssa("x"), sprout_ir.param_ssa("x")),
         Cons(sprout_ir.IRRet("%r"), Nil))),
       Nil)),
     Nil))), Nil, Nil, Nil)
@@ -633,19 +633,19 @@ fn test27_program() -> sprout_ir.IRProgram =
     sprout_ir.IRFunction("f27",
       Cons(("p", sprout_ir.IRTHeap), Cons(("x", sprout_ir.IRTScalar), Nil)), "i64", Cons(
       sprout_ir.IRBlock("entry",
-        Cons(sprout_ir.IRCall("%r0", sprout_ir.IRTScalar, "a27", Cons("%x", Nil)),
-        Cons(sprout_ir.IRRet("%p"), Nil))),
+        Cons(sprout_ir.IRCall("%r0", sprout_ir.IRTScalar, "a27", Cons(sprout_ir.param_ssa("x"), Nil)),
+        Cons(sprout_ir.IRRet(sprout_ir.param_ssa("p")), Nil))),
       Nil)),
     Cons(
     sprout_ir.IRFunction("a27", Cons(("x", sprout_ir.IRTScalar), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry",
-        Cons(sprout_ir.IRCall("%r", sprout_ir.IRTScalar, "b27", Cons("%x", Nil)),
+        Cons(sprout_ir.IRCall("%r", sprout_ir.IRTScalar, "b27", Cons(sprout_ir.param_ssa("x"), Nil)),
         Cons(sprout_ir.IRRet("%r"), Nil))),
       Nil)),
     Cons(
     sprout_ir.IRFunction("b27", Cons(("x", sprout_ir.IRTScalar), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry",
-        Cons(sprout_ir.IRMakeCtor("%c", "Box", 1, Cons("%x", Nil)),
+        Cons(sprout_ir.IRMakeCtor("%c", "Box", 1, Cons(sprout_ir.param_ssa("x"), Nil)),
         Cons(sprout_ir.IRRet("%c"), Nil))),
       Nil)),
     Nil))), Nil, Nil, Nil)

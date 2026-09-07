@@ -131,9 +131,9 @@ declare i64 @ref_write(i64, i64)
 @$entry.r2 = global i64 zeroinitializer
 @$entry.r1 = global i64 zeroinitializer
 
-define i64 @$entry.modn(i64 %n, i64 %m) {
+define i64 @$entry.modn(i64 %p$n, i64 %p$m) {
 entry:
-  %t$0 = icmp eq i64 %m, 0
+  %t$0 = icmp eq i64 %p$m, 0
   br i1 %t$0, label %divpanic_0, label %divok_0
 divpanic_0:
   %t$1 = getelementptr inbounds { i64, [17 x i8] }, ptr @.str.0, i64 0, i32 1, i64 0
@@ -141,16 +141,16 @@ divpanic_0:
   call i64 @panic(i64 %t$2)
   unreachable
 divok_0:
-  %t$3 = sdiv i64 %n, %m
-  %t$4 = mul i64 %t$3, %m
-  %t$5 = sub i64 %n, %t$4
+  %t$3 = sdiv i64 %p$n, %p$m
+  %t$4 = mul i64 %t$3, %p$m
+  %t$5 = sub i64 %p$n, %t$4
   ret i64 %t$5
 }
 
-define i64 @$entry.pow10(i64 %k) {
+define i64 @$entry.pow10(i64 %p$k) {
 entry:
   %t$0 = add i64 0, 0
-  %t$1 = icmp eq i64 %k, %t$0
+  %t$1 = icmp eq i64 %p$k, %t$0
   %t$2 = zext i1 %t$1 to i64
   %t$11 = trunc i64 %t$2 to i1
   br i1 %t$11, label %then_3, label %else_3
@@ -160,7 +160,7 @@ then_3:
 else_3:
   %t$6 = add i64 0, 10
   %t$7 = add i64 0, 1
-  %t$8 = sub i64 %k, %t$7
+  %t$8 = sub i64 %p$k, %t$7
   %t$9 = call i64 @$entry.pow10(i64 %t$8)
   %t$10 = mul i64 %t$6, %t$9
   br label %join_3
@@ -169,10 +169,10 @@ join_3:
   ret i64 %t$4
 }
 
-define i64 @$entry.num_digits(i64 %n) {
+define i64 @$entry.num_digits(i64 %p$n) {
 entry:
   %t$0 = add i64 0, 10
-  %t$1 = icmp slt i64 %n, %t$0
+  %t$1 = icmp slt i64 %p$n, %t$0
   %t$2 = zext i1 %t$1 to i64
   %t$14 = trunc i64 %t$2 to i1
   br i1 %t$14, label %then_3, label %else_3
@@ -190,7 +190,7 @@ divpanic_8:
   call i64 @panic(i64 %t$10)
   unreachable
 divok_8:
-  %t$11 = sdiv i64 %n, %t$7
+  %t$11 = sdiv i64 %p$n, %t$7
   %t$12 = call i64 @$entry.num_digits(i64 %t$11)
   %t$13 = add i64 %t$6, %t$12
   br label %join_3
@@ -199,19 +199,19 @@ join_3:
   ret i64 %t$4
 }
 
-define i64 @$entry.is_even(i64 %n) {
+define i64 @$entry.is_even(i64 %p$n) {
 entry:
   %t$0 = add i64 0, 2
-  %t$1 = call i64 @$entry.modn(i64 %n, i64 %t$0)
+  %t$1 = call i64 @$entry.modn(i64 %p$n, i64 %t$0)
   %t$2 = add i64 0, 0
   %t$3 = icmp eq i64 %t$1, %t$2
   %t$4 = zext i1 %t$3 to i64
   ret i64 %t$4
 }
 
-define i64 @$entry.split_half(i64 %n) {
+define i64 @$entry.split_half(i64 %p$n) {
 entry:
-  %t$0 = call i64 @$entry.num_digits(i64 %n)
+  %t$0 = call i64 @$entry.num_digits(i64 %p$n)
   %t$1 = add i64 0, 2
   %t$2 = icmp eq i64 %t$1, 0
   br i1 %t$2, label %divpanic_2, label %divok_2
@@ -231,8 +231,8 @@ divpanic_7:
   call i64 @panic(i64 %t$9)
   unreachable
 divok_7:
-  %t$10 = sdiv i64 %n, %t$6
-  %t$11 = call i64 @$entry.num_digits(i64 %n)
+  %t$10 = sdiv i64 %p$n, %t$6
+  %t$11 = call i64 @$entry.num_digits(i64 %p$n)
   %t$12 = add i64 0, 2
   %t$13 = icmp eq i64 %t$12, 0
   br i1 %t$13, label %divpanic_13, label %divok_13
@@ -244,7 +244,7 @@ divpanic_13:
 divok_13:
   %t$16 = sdiv i64 %t$11, %t$12
   %t$17 = call i64 @$entry.pow10(i64 %t$16)
-  %t$18 = call i64 @$entry.modn(i64 %n, i64 %t$17)
+  %t$18 = call i64 @$entry.modn(i64 %p$n, i64 %t$17)
   %t$19 = call i64 @sprout_alloc_obj(i64 17, i64 2)
   %t$19$ptr = inttoptr i64 %t$19 to ptr
   %t$19$f0 = getelementptr i64, ptr %t$19$ptr, i64 0
@@ -254,17 +254,17 @@ divok_13:
   ret i64 %t$19
 }
 
-define i64 @$entry.halves_equal(i64 %h) {
+define i64 @$entry.halves_equal(i64 %p$h) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %h)
+  %t$0 = call i64 @sprout_tag(i64 %p$h)
   br label %arm_0_1
 arm_0_1:
   %t$3 = add i64 0, 17
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %h, i64 0)
-  %t$6 = call i64 @sprout_field(i64 %h, i64 1)
+  %t$5 = call i64 @sprout_field(i64 %p$h, i64 0)
+  %t$6 = call i64 @sprout_field(i64 %p$h, i64 1)
   %t$7 = icmp eq i64 %t$5, %t$6
   %t$8 = zext i1 %t$7 to i64
   br label %join_1
@@ -276,14 +276,14 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @$entry.is_repeated_twice(i64 %n) {
+define i64 @$entry.is_repeated_twice(i64 %p$n) {
 entry:
-  %t$0 = call i64 @$entry.num_digits(i64 %n)
+  %t$0 = call i64 @$entry.num_digits(i64 %p$n)
   %t$1 = call i64 @$entry.is_even(i64 %t$0)
   %t$7 = trunc i64 %t$1 to i1
   br i1 %t$7, label %then_2, label %else_2
 then_2:
-  %t$4 = call i64 @$entry.split_half(i64 %n)
+  %t$4 = call i64 @$entry.split_half(i64 %p$n)
   %t$5 = call i64 @$entry.halves_equal(i64 %t$4)
   br label %join_2
 else_2:
@@ -294,22 +294,22 @@ join_2:
   ret i64 %t$3
 }
 
-define i64 @$entry.repeated_by_chunk(i64 %n$in, i64 %base$in, i64 %pat$in) {
+define i64 @$entry.repeated_by_chunk(i64 %p$n$in, i64 %p$base$in, i64 %p$pat$in) {
 entry:
   %t$19 = alloca i64
-  store i64 %n$in, ptr %t$19
+  store i64 %p$n$in, ptr %t$19
   %t$20 = alloca i64
-  store i64 %base$in, ptr %t$20
+  store i64 %p$base$in, ptr %t$20
   %t$21 = alloca i64
-  store i64 %pat$in, ptr %t$21
+  store i64 %p$pat$in, ptr %t$21
   %t$22 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
-  %n = load i64, ptr %t$19
-  %base = load i64, ptr %t$20
-  %pat = load i64, ptr %t$21
+  %p$n = load i64, ptr %t$19
+  %p$base = load i64, ptr %t$20
+  %p$pat = load i64, ptr %t$21
   %t$0 = add i64 0, 0
-  %t$1 = icmp eq i64 %n, %t$0
+  %t$1 = icmp eq i64 %p$n, %t$0
   %t$2 = zext i1 %t$1 to i64
   %t$18 = trunc i64 %t$2 to i1
   br i1 %t$18, label %then_3, label %else_3
@@ -317,13 +317,13 @@ then_3:
   %t$5 = add i64 0, 1
   br label %join_3
 else_3:
-  %t$6 = call i64 @$entry.modn(i64 %n, i64 %base)
-  %t$7 = icmp eq i64 %t$6, %pat
+  %t$6 = call i64 @$entry.modn(i64 %p$n, i64 %p$base)
+  %t$7 = icmp eq i64 %t$6, %p$pat
   %t$8 = zext i1 %t$7 to i64
   %t$17 = trunc i64 %t$8 to i1
   br i1 %t$17, label %then_9, label %else_9
 then_9:
-  %t$11 = icmp eq i64 %base, 0
+  %t$11 = icmp eq i64 %p$base, 0
   br i1 %t$11, label %divpanic_11, label %divok_11
 divpanic_11:
   %t$12 = getelementptr inbounds { i64, [17 x i8] }, ptr @.str.5, i64 0, i32 1, i64 0
@@ -331,10 +331,10 @@ divpanic_11:
   call i64 @panic(i64 %t$13)
   unreachable
 divok_11:
-  %t$14 = sdiv i64 %n, %base
+  %t$14 = sdiv i64 %p$n, %p$base
   store i64 %t$14, ptr %t$19
-  store i64 %base, ptr %t$20
-  store i64 %pat, ptr %t$21
+  store i64 %p$base, ptr %t$20
+  store i64 %p$pat, ptr %t$21
   call void @llvm.stackrestore(ptr %t$22)
   br label %tco_loop
 else_9:
@@ -348,30 +348,30 @@ join_3:
   ret i64 %t$4
 }
 
-define i64 @$entry.matches_period(i64 %n, i64 %d) {
+define i64 @$entry.matches_period(i64 %p$n, i64 %p$d) {
 entry:
-  %t$0 = call i64 @$entry.pow10(i64 %d)
-  %t$1 = call i64 @$entry.pow10(i64 %d)
-  %t$2 = call i64 @$entry.modn(i64 %n, i64 %t$1)
-  %t$3 = call i64 @$entry.repeated_by_chunk(i64 %n, i64 %t$0, i64 %t$2)
+  %t$0 = call i64 @$entry.pow10(i64 %p$d)
+  %t$1 = call i64 @$entry.pow10(i64 %p$d)
+  %t$2 = call i64 @$entry.modn(i64 %p$n, i64 %t$1)
+  %t$3 = call i64 @$entry.repeated_by_chunk(i64 %p$n, i64 %t$0, i64 %t$2)
   ret i64 %t$3
 }
 
-define i64 @$entry.has_period_from(i64 %n$in, i64 %len$in, i64 %d$in) {
+define i64 @$entry.has_period_from(i64 %p$n$in, i64 %p$len$in, i64 %p$d$in) {
 entry:
   %t$24 = alloca i64
-  store i64 %n$in, ptr %t$24
+  store i64 %p$n$in, ptr %t$24
   %t$25 = alloca i64
-  store i64 %len$in, ptr %t$25
+  store i64 %p$len$in, ptr %t$25
   %t$26 = alloca i64
-  store i64 %d$in, ptr %t$26
+  store i64 %p$d$in, ptr %t$26
   %t$27 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
-  %n = load i64, ptr %t$24
-  %len = load i64, ptr %t$25
-  %d = load i64, ptr %t$26
-  %t$0 = icmp sge i64 %d, %len
+  %p$n = load i64, ptr %t$24
+  %p$len = load i64, ptr %t$25
+  %p$d = load i64, ptr %t$26
+  %t$0 = icmp sge i64 %p$d, %p$len
   %t$1 = zext i1 %t$0 to i64
   %t$23 = trunc i64 %t$1 to i1
   br i1 %t$23, label %then_2, label %else_2
@@ -379,7 +379,7 @@ then_2:
   %t$4 = add i64 0, 0
   br label %join_2
 else_2:
-  %t$5 = call i64 @$entry.modn(i64 %len, i64 %d)
+  %t$5 = call i64 @$entry.modn(i64 %p$len, i64 %p$d)
   %t$6 = add i64 0, 0
   %t$7 = icmp ne i64 %t$5, %t$6
   %t$8 = zext i1 %t$7 to i64
@@ -387,14 +387,14 @@ else_2:
   br i1 %t$22, label %then_9, label %else_9
 then_9:
   %t$11 = add i64 0, 1
-  %t$12 = add i64 %d, %t$11
-  store i64 %n, ptr %t$24
-  store i64 %len, ptr %t$25
+  %t$12 = add i64 %p$d, %t$11
+  store i64 %p$n, ptr %t$24
+  store i64 %p$len, ptr %t$25
   store i64 %t$12, ptr %t$26
   call void @llvm.stackrestore(ptr %t$27)
   br label %tco_loop
 else_9:
-  %t$14 = call i64 @$entry.matches_period(i64 %n, i64 %d)
+  %t$14 = call i64 @$entry.matches_period(i64 %p$n, i64 %p$d)
   %t$21 = trunc i64 %t$14 to i1
   br i1 %t$21, label %then_15, label %else_15
 then_15:
@@ -402,9 +402,9 @@ then_15:
   br label %join_15
 else_15:
   %t$18 = add i64 0, 1
-  %t$19 = add i64 %d, %t$18
-  store i64 %n, ptr %t$24
-  store i64 %len, ptr %t$25
+  %t$19 = add i64 %p$d, %t$18
+  store i64 %p$n, ptr %t$24
+  store i64 %p$len, ptr %t$25
   store i64 %t$19, ptr %t$26
   call void @llvm.stackrestore(ptr %t$27)
   br label %tco_loop
@@ -419,29 +419,29 @@ join_2:
   ret i64 %t$3
 }
 
-define i64 @$entry.is_repeated_any(i64 %n) {
+define i64 @$entry.is_repeated_any(i64 %p$n) {
 entry:
-  %t$0 = call i64 @$entry.num_digits(i64 %n)
+  %t$0 = call i64 @$entry.num_digits(i64 %p$n)
   %t$1 = add i64 0, 1
-  %t$2 = call i64 @$entry.has_period_from(i64 %n, i64 %t$0, i64 %t$1)
+  %t$2 = call i64 @$entry.has_period_from(i64 %p$n, i64 %t$0, i64 %t$1)
   ret i64 %t$2
 }
 
-define i64 @$entry.sum_range(i64 %lo$in, i64 %hi$in, i64 %pred$in) {
+define i64 @$entry.sum_range(i64 %p$lo$in, i64 %p$hi$in, i64 %p$pred$in) {
 entry:
   %t$17 = alloca i64
-  store i64 %lo$in, ptr %t$17
+  store i64 %p$lo$in, ptr %t$17
   %t$18 = alloca i64
-  store i64 %hi$in, ptr %t$18
+  store i64 %p$hi$in, ptr %t$18
   %t$19 = alloca i64
-  store i64 %pred$in, ptr %t$19
+  store i64 %p$pred$in, ptr %t$19
   %t$20 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
-  %lo = load i64, ptr %t$17
-  %hi = load i64, ptr %t$18
-  %pred = load i64, ptr %t$19
-  %t$0 = icmp sgt i64 %lo, %hi
+  %p$lo = load i64, ptr %t$17
+  %p$hi = load i64, ptr %t$18
+  %p$pred = load i64, ptr %t$19
+  %t$0 = icmp sgt i64 %p$lo, %p$hi
   %t$1 = zext i1 %t$0 to i64
   %t$16 = trunc i64 %t$1 to i1
   br i1 %t$16, label %then_2, label %else_2
@@ -450,31 +450,31 @@ then_2:
   br label %join_2
 else_2:
   %t$21 = alloca i64
-  store i64 %pred, ptr %t$21
+  store i64 %p$pred, ptr %t$21
   %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
-  call void @sprout_closure_arity_check(i64 %pred, i64 1)
-  %t$5$env_ptr = inttoptr i64 %pred to ptr
+  call void @sprout_closure_arity_check(i64 %p$pred, i64 1)
+  %t$5$env_ptr = inttoptr i64 %p$pred to ptr
   %t$5$code = load ptr, ptr %t$5$env_ptr
-  %t$5 = call i64 (i64, i64) %t$5$code(i64 %pred, i64 %lo)
+  %t$5 = call i64 (i64, i64) %t$5$code(i64 %p$pred, i64 %p$lo)
   %t$15 = trunc i64 %t$5 to i1
   %t$23 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$15, label %then_6, label %else_6
 then_6:
   %t$8 = add i64 0, 1
-  %t$9 = add i64 %lo, %t$8
+  %t$9 = add i64 %p$lo, %t$8
   %t$24 = alloca i64
-  store i64 %pred, ptr %t$24
+  store i64 %p$pred, ptr %t$24
   %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
-  %t$10 = call i64 @$entry.sum_range(i64 %t$9, i64 %hi, i64 %pred)
+  %t$10 = call i64 @$entry.sum_range(i64 %t$9, i64 %p$hi, i64 %p$pred)
   %t$26 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$11 = add i64 %lo, %t$10
+  %t$11 = add i64 %p$lo, %t$10
   br label %join_6
 else_6:
   %t$12 = add i64 0, 1
-  %t$13 = add i64 %lo, %t$12
+  %t$13 = add i64 %p$lo, %t$12
   store i64 %t$13, ptr %t$17
-  store i64 %hi, ptr %t$18
-  store i64 %pred, ptr %t$19
+  store i64 %p$hi, ptr %t$18
+  store i64 %p$pred, ptr %t$19
   call void @llvm.stackrestore(ptr %t$20)
   br label %tco_loop
 join_6:
@@ -485,9 +485,9 @@ join_2:
   ret i64 %t$3
 }
 
-define i64 @$entry.sum_ranges(i64 %rs, i64 %pred) {
+define i64 @$entry.sum_ranges(i64 %p$rs, i64 %p$pred) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %rs)
+  %t$0 = call i64 @sprout_tag(i64 %p$rs)
   br label %arm_0_1
 arm_0_1:
   %t$3 = add i64 0, 15
@@ -501,8 +501,8 @@ arm_1_1:
   %t$7 = icmp eq i64 %t$0, %t$6
   br i1 %t$7, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t$8 = call i64 @sprout_field(i64 %rs, i64 0)
-  %t$9 = call i64 @sprout_field(i64 %rs, i64 1)
+  %t$8 = call i64 @sprout_field(i64 %p$rs, i64 0)
+  %t$9 = call i64 @sprout_field(i64 %p$rs, i64 1)
   %t$10 = call i64 @sprout_tag(i64 %t$8)
   br label %arm_0_11
 arm_0_11:
@@ -516,10 +516,10 @@ body_0_11:
   store i64 %t$9, ptr %t$20
   %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
   %t$22 = alloca i64
-  store i64 %pred, ptr %t$22
+  store i64 %p$pred, ptr %t$22
   %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
-  %t$17 = call i64 @$entry.sum_range(i64 %t$15, i64 %t$16, i64 %pred)
-  %t$18 = call i64 @$entry.sum_ranges(i64 %t$9, i64 %pred)
+  %t$17 = call i64 @$entry.sum_range(i64 %t$15, i64 %t$16, i64 %p$pred)
+  %t$18 = call i64 @$entry.sum_ranges(i64 %t$9, i64 %p$pred)
   %t$24 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$19 = add i64 %t$17, %t$18
   br label %join_11
@@ -543,19 +543,19 @@ entry:
   ret i64 %t$0
 }
 
-define i64 @__sprout_ir_eta_$entry.is_repeated_twice_0(i64 %env$, i64 %a0) {
+define i64 @__sprout_ir_eta_$entry.is_repeated_twice_0(i64 %p$env$, i64 %p$a0) {
 entry:
   %t$0 = alloca i64
-  store i64 %a0, ptr %t$0
+  store i64 %p$a0, ptr %t$0
   %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %ret = call i64 @$entry.is_repeated_twice(i64 %a0)
+  %ret = call i64 @$entry.is_repeated_twice(i64 %p$a0)
   %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta_$entry.is_repeated_any_1(i64 %env$, i64 %a0) {
+define i64 @__sprout_ir_eta_$entry.is_repeated_any_1(i64 %p$env$, i64 %p$a0) {
 entry:
-  %ret = call i64 @$entry.is_repeated_any(i64 %a0)
+  %ret = call i64 @$entry.is_repeated_any(i64 %p$a0)
   ret i64 %ret
 }
 

@@ -140,12 +140,12 @@ declare i64 @proc_run_stdin_vec(i64, i64)
 @.cname.15 = private unnamed_addr constant [26 x i8] c"stdlib.process.ProcResult\00"
 @.cfkinds.15 = private unnamed_addr constant [4 x i8] c"ipp\00"
 
-define i64 @vec_from_list(i64 %xs) {
+define i64 @vec_from_list(i64 %p$xs) {
 entry:
   %t$2 = alloca i64
-  store i64 %xs, ptr %t$2
+  store i64 %p$xs, ptr %t$2
   %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$0 = call i64 @vector_from_list(i64 %xs)
+  %t$0 = call i64 @vector_from_list(i64 %p$xs)
   %t$4 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$5 = alloca i64
   store i64 %t$0, ptr %t$5
@@ -158,26 +158,26 @@ entry:
   ret i64 %t$1
 }
 
-define i64 @stdlib.bytes.to_string(i64 %value) {
+define i64 @stdlib.bytes.to_string(i64 %p$value) {
 entry:
   %t$1 = alloca i64
-  store i64 %value, ptr %t$1
+  store i64 %p$value, ptr %t$1
   %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
-  %t$0 = call i64 @bytes_to_utf8(i64 %value)
+  %t$0 = call i64 @bytes_to_utf8(i64 %p$value)
   %t$3 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$0
 }
 
-define i64 @stdlib.process.proc_exit(i64 %r) {
+define i64 @stdlib.process.proc_exit(i64 %p$r) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %r)
+  %t$0 = call i64 @sprout_tag(i64 %p$r)
   br label %arm_0_1
 arm_0_1:
   %t$3 = add i64 0, 15
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %r, i64 0)
+  %t$5 = call i64 @sprout_field(i64 %p$r, i64 0)
   br label %join_1
 arm_1_1:
   call void @sprout_abort_match()
@@ -187,25 +187,25 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @stdlib.process.proc_ok(i64 %r) {
+define i64 @stdlib.process.proc_ok(i64 %p$r) {
 entry:
-  %t$0 = call i64 @stdlib.process.proc_exit(i64 %r)
+  %t$0 = call i64 @stdlib.process.proc_exit(i64 %p$r)
   %t$1 = add i64 0, 0
   %t$2 = icmp eq i64 %t$0, %t$1
   %t$3 = zext i1 %t$2 to i64
   ret i64 %t$3
 }
 
-define i64 @stdlib.process.proc_stdout_bytes(i64 %r) {
+define i64 @stdlib.process.proc_stdout_bytes(i64 %p$r) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %r)
+  %t$0 = call i64 @sprout_tag(i64 %p$r)
   br label %arm_0_1
 arm_0_1:
   %t$3 = add i64 0, 15
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %r, i64 1)
+  %t$5 = call i64 @sprout_field(i64 %p$r, i64 1)
   br label %join_1
 arm_1_1:
   call void @sprout_abort_match()
@@ -215,9 +215,9 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @stdlib.process.proc_stdout_text(i64 %r) {
+define i64 @stdlib.process.proc_stdout_text(i64 %p$r) {
 entry:
-  %t$0 = call i64 @stdlib.process.proc_stdout_bytes(i64 %r)
+  %t$0 = call i64 @stdlib.process.proc_stdout_bytes(i64 %p$r)
   %t$2 = alloca i64
   store i64 %t$0, ptr %t$2
   %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
@@ -226,15 +226,15 @@ entry:
   ret i64 %t$1
 }
 
-define i64 @stdlib.process.proc_stdout_or(i64 %r, i64 %fallback) {
+define i64 @stdlib.process.proc_stdout_or(i64 %p$r, i64 %p$fallback) {
 entry:
   %t$8 = alloca i64
-  store i64 %r, ptr %t$8
+  store i64 %p$r, ptr %t$8
   %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
   %t$10 = alloca i64
-  store i64 %fallback, ptr %t$10
+  store i64 %p$fallback, ptr %t$10
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
-  %t$0$st = call { i64, i64 } @stdlib.process.proc_stdout_text_worker(i64 %r)
+  %t$0$st = call { i64, i64 } @stdlib.process.proc_stdout_text_worker(i64 %p$r)
   %t$0 = extractvalue { i64, i64 } %t$0$st, 0
   %t$1 = extractvalue { i64, i64 } %t$0$st, 1
   %t$12 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -255,16 +255,16 @@ arm_2_2:
   call void @sprout_abort_match()
   unreachable
 join_2:
-  %t$3 = phi i64 [%t$1, %body_0_2], [%fallback, %body_1_2]
+  %t$3 = phi i64 [%t$1, %body_0_2], [%p$fallback, %body_1_2]
   ret i64 %t$3
 }
 
-define i64 @stdlib.process.proc_run(i64 %argv) {
+define i64 @stdlib.process.proc_run(i64 %p$argv) {
 entry:
   %t$2 = alloca i64
-  store i64 %argv, ptr %t$2
+  store i64 %p$argv, ptr %t$2
   %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$0 = call i64 @vec_from_list(i64 %argv)
+  %t$0 = call i64 @vec_from_list(i64 %p$argv)
   %t$4 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$5 = alloca i64
   store i64 %t$0, ptr %t$5
@@ -274,27 +274,27 @@ entry:
   ret i64 %t$1
 }
 
-define i64 @stdlib.process.proc_run_stdin(i64 %argv, i64 %stdin_data) {
+define i64 @stdlib.process.proc_run_stdin(i64 %p$argv, i64 %p$stdin_data) {
 entry:
   %t$2 = alloca i64
-  store i64 %stdin_data, ptr %t$2
+  store i64 %p$stdin_data, ptr %t$2
   %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
   %t$4 = alloca i64
-  store i64 %argv, ptr %t$4
+  store i64 %p$argv, ptr %t$4
   %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$0 = call i64 @vec_from_list(i64 %argv)
+  %t$0 = call i64 @vec_from_list(i64 %p$argv)
   %t$6 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$7 = alloca i64
   store i64 %t$0, ptr %t$7
   %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
-  %t$1 = call i64 @proc_run_stdin_vec(i64 %t$0, i64 %stdin_data)
+  %t$1 = call i64 @proc_run_stdin_vec(i64 %t$0, i64 %p$stdin_data)
   %t$9 = call i64 @sprout_gc_pop_roots(i64 2)
   ret i64 %t$1
 }
 
-define i64 @examples.process_demo.status_line(i64 %ok) {
+define i64 @examples.process_demo.status_line(i64 %p$ok) {
 entry:
-  %t$6 = trunc i64 %ok to i1
+  %t$6 = trunc i64 %p$ok to i1
   br i1 %t$6, label %then_0, label %else_0
 then_0:
   %t$2 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.0, i64 0, i32 1, i64 0
@@ -309,22 +309,22 @@ join_0:
   ret i64 %t$1
 }
 
-define i64 @examples.process_demo.show_result(i64 %label, i64 %r) {
+define i64 @examples.process_demo.show_result(i64 %p$label, i64 %p$r) {
 entry:
   %t$0 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.2, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
   %t$20 = alloca i64
-  store i64 %r, ptr %t$20
+  store i64 %p$r, ptr %t$20
   %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
   %t$22 = alloca i64
-  store i64 %label, ptr %t$22
+  store i64 %p$label, ptr %t$22
   %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
   %t$24 = alloca i64
   store i64 %t$1, ptr %t$24
   %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
-  %t$2 = call i64 @__tc_Semigroup_String_append(i64 %label, i64 %t$1)
+  %t$2 = call i64 @__tc_Semigroup_String_append(i64 %p$label, i64 %t$1)
   %t$26 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$3 = call i64 @stdlib.process.proc_ok(i64 %r)
+  %t$3 = call i64 @stdlib.process.proc_ok(i64 %p$r)
   %t$4 = call i64 @examples.process_demo.status_line(i64 %t$3)
   %t$27 = alloca i64
   store i64 %t$2, ptr %t$27
@@ -344,7 +344,7 @@ entry:
   %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
   %t$8 = call i64 @__tc_Semigroup_String_append(i64 %t$5, i64 %t$7)
   %t$36 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$9 = call i64 @stdlib.process.proc_exit(i64 %r)
+  %t$9 = call i64 @stdlib.process.proc_exit(i64 %p$r)
   %t$37 = alloca i64
   store i64 %t$8, ptr %t$37
   %t$38 = call i64 @sprout_gc_push_i64_root(ptr %t$37)
@@ -366,7 +366,7 @@ entry:
   %t$44 = alloca i64
   store i64 %t$16, ptr %t$44
   %t$45 = call i64 @sprout_gc_push_i64_root(ptr %t$44)
-  %t$17 = call i64 @stdlib.process.proc_stdout_or(i64 %r, i64 %t$16)
+  %t$17 = call i64 @stdlib.process.proc_stdout_or(i64 %p$r, i64 %t$16)
   %t$46 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$47 = alloca i64
   store i64 %t$17, ptr %t$47
@@ -511,21 +511,21 @@ entry:
   ret i64 %t$31
 }
 
-define i64 @__tc_Semigroup_String_append(i64 %left, i64 %right) {
+define i64 @__tc_Semigroup_String_append(i64 %p$left, i64 %p$right) {
 entry:
-  %t$0 = call i64 @str_concat(i64 %left, i64 %right)
+  %t$0 = call i64 @str_concat(i64 %p$left, i64 %p$right)
   ret i64 %t$0
 }
 
-define i64 @__tc_ToString_Int_to_string(i64 %value) {
+define i64 @__tc_ToString_Int_to_string(i64 %p$value) {
 entry:
-  %t$0 = call i64 @int_to_string(i64 %value)
+  %t$0 = call i64 @int_to_string(i64 %p$value)
   ret i64 %t$0
 }
 
-define { i64, i64 } @stdlib.process.proc_stdout_text_worker(i64 %r) {
+define { i64, i64 } @stdlib.process.proc_stdout_text_worker(i64 %p$r) {
 entry:
-  %t$0 = call i64 @stdlib.process.proc_stdout_bytes(i64 %r)
+  %t$0 = call i64 @stdlib.process.proc_stdout_bytes(i64 %p$r)
   %t$11 = alloca i64
   store i64 %t$0, ptr %t$11
   %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)

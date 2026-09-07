@@ -116,18 +116,18 @@ declare i64 @ref_write(i64, i64)
 @.cname.17 = private unnamed_addr constant [37 x i8] c"examples.existential_shapes.Drawable\00"
 @.cfkinds.17 = private unnamed_addr constant [4 x i8] c"_pp\00"
 
-define i64 @list_each_go(i64 %f$in, i64 %xs$in) {
+define i64 @list_each_go(i64 %p$f$in, i64 %p$xs$in) {
 entry:
   %t$12 = alloca i64
-  store i64 %f$in, ptr %t$12
+  store i64 %p$f$in, ptr %t$12
   %t$13 = alloca i64
-  store i64 %xs$in, ptr %t$13
+  store i64 %p$xs$in, ptr %t$13
   %t$14 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
-  %f = load i64, ptr %t$12
-  %xs = load i64, ptr %t$13
-  %t$0 = call i64 @sprout_tag(i64 %xs)
+  %p$f = load i64, ptr %t$12
+  %p$xs = load i64, ptr %t$13
+  %t$0 = call i64 @sprout_tag(i64 %p$xs)
   br label %arm_0_1
 arm_0_1:
   %t$3 = add i64 0, 5
@@ -141,20 +141,20 @@ arm_1_1:
   %t$7 = icmp eq i64 %t$0, %t$6
   br i1 %t$7, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t$8 = call i64 @sprout_field(i64 %xs, i64 0)
-  %t$9 = call i64 @sprout_field(i64 %xs, i64 1)
+  %t$8 = call i64 @sprout_field(i64 %p$xs, i64 0)
+  %t$9 = call i64 @sprout_field(i64 %p$xs, i64 1)
   %t$15 = alloca i64
-  store i64 %f, ptr %t$15
+  store i64 %p$f, ptr %t$15
   %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
   %t$17 = alloca i64
   store i64 %t$9, ptr %t$17
   %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
-  call void @sprout_closure_arity_check(i64 %f, i64 1)
-  %t$10$env_ptr = inttoptr i64 %f to ptr
+  call void @sprout_closure_arity_check(i64 %p$f, i64 1)
+  %t$10$env_ptr = inttoptr i64 %p$f to ptr
   %t$10$code = load ptr, ptr %t$10$env_ptr
-  %t$10 = call i64 (i64, i64) %t$10$code(i64 %f, i64 %t$8)
+  %t$10 = call i64 (i64, i64) %t$10$code(i64 %p$f, i64 %t$8)
   %t$19 = call i64 @sprout_gc_pop_roots(i64 2)
-  store i64 %f, ptr %t$12
+  store i64 %p$f, ptr %t$12
   store i64 %t$9, ptr %t$13
   call void @llvm.stackrestore(ptr %t$14)
   br label %tco_loop
@@ -166,15 +166,15 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @list_each(i64 %f, i64 %xs) {
+define i64 @list_each(i64 %p$f, i64 %p$xs) {
 entry:
   %t$1 = alloca i64
-  store i64 %xs, ptr %t$1
+  store i64 %p$xs, ptr %t$1
   %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
   %t$3 = alloca i64
-  store i64 %f, ptr %t$3
+  store i64 %p$f, ptr %t$3
   %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
-  %t$0 = call i64 @list_each_go(i64 %f, i64 %xs)
+  %t$0 = call i64 @list_each_go(i64 %p$f, i64 %p$xs)
   %t$5 = call i64 @sprout_gc_pop_roots(i64 2)
   ret i64 %t$0
 }
@@ -185,18 +185,18 @@ entry:
   ret i64 %t$0
 }
 
-define i64 @examples.existential_shapes.describe(i64 %d) {
+define i64 @examples.existential_shapes.describe(i64 %p$d) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %d)
+  %t$0 = call i64 @sprout_tag(i64 %p$d)
   br label %arm_0_1
 arm_0_1:
   %t$3 = add i64 0, 17
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %d, i64 0)
-  %t$6 = call i64 @sprout_field(i64 %d, i64 1)
-  %t$7 = call i64 @sprout_field(i64 %d, i64 2)
+  %t$5 = call i64 @sprout_field(i64 %p$d, i64 0)
+  %t$6 = call i64 @sprout_field(i64 %p$d, i64 1)
+  %t$7 = call i64 @sprout_field(i64 %p$d, i64 2)
   %t$20 = alloca i64
   store i64 %t$5, ptr %t$20
   %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
@@ -267,39 +267,39 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Circle_area_0(i64 %env$, i64 %a0) {
+define i64 @__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Circle_area_0(i64 %p$env$, i64 %p$a0) {
 entry:
-  %ret = call i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_Circle_area(i64 %a0)
+  %ret = call i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_Circle_area(i64 %p$a0)
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Circle_name_1(i64 %env$, i64 %a0) {
+define i64 @__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Circle_name_1(i64 %p$env$, i64 %p$a0) {
 entry:
-  %ret = call i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_Circle_name(i64 %a0)
+  %ret = call i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_Circle_name(i64 %p$a0)
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Rect_area_2(i64 %env$, i64 %a0) {
+define i64 @__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Rect_area_2(i64 %p$env$, i64 %p$a0) {
 entry:
-  %ret = call i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_Rect_area(i64 %a0)
+  %ret = call i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_Rect_area(i64 %p$a0)
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Rect_name_3(i64 %env$, i64 %a0) {
+define i64 @__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Rect_name_3(i64 %p$env$, i64 %p$a0) {
 entry:
-  %ret = call i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_Rect_name(i64 %a0)
+  %ret = call i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_Rect_name(i64 %p$a0)
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Square_area_4(i64 %env$, i64 %a0) {
+define i64 @__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Square_area_4(i64 %p$env$, i64 %p$a0) {
 entry:
-  %ret = call i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_Square_area(i64 %a0)
+  %ret = call i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_Square_area(i64 %p$a0)
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Square_name_5(i64 %env$, i64 %a0) {
+define i64 @__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Square_name_5(i64 %p$env$, i64 %p$a0) {
 entry:
-  %ret = call i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_Square_name(i64 %a0)
+  %ret = call i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_Square_name(i64 %p$a0)
   ret i64 %ret
 }
 
@@ -438,12 +438,12 @@ entry:
   ret i64 %t$19
 }
 
-define i64 @__sprout_ir_lambda_6(i64 %env$, i64 %d) {
+define i64 @__sprout_ir_lambda_6(i64 %p$env$, i64 %p$d) {
 entry:
   %t$2 = alloca i64
-  store i64 %d, ptr %t$2
+  store i64 %p$d, ptr %t$2
   %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$0 = call i64 @examples.existential_shapes.describe(i64 %d)
+  %t$0 = call i64 @examples.existential_shapes.describe(i64 %p$d)
   %t$4 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$1$ptr = inttoptr i64 %t$0 to ptr
   %t$1 = call i64 @print_str(ptr %t$1$ptr)
@@ -467,45 +467,45 @@ entry:
   ret i64 %t$2
 }
 
-define i64 @__cm_Shape_area(i64 %s, i64 %__tc_examples.existential_shapes.Shape_0_area, i64 %__tc_examples.existential_shapes.Shape_0_name) {
+define i64 @__cm_Shape_area(i64 %p$s, i64 %p$__tc_examples.existential_shapes.Shape_0_area, i64 %p$__tc_examples.existential_shapes.Shape_0_name) {
 entry:
-  call void @sprout_closure_arity_check(i64 %__tc_examples.existential_shapes.Shape_0_area, i64 1)
-  %t$0$env_ptr = inttoptr i64 %__tc_examples.existential_shapes.Shape_0_area to ptr
+  call void @sprout_closure_arity_check(i64 %p$__tc_examples.existential_shapes.Shape_0_area, i64 1)
+  %t$0$env_ptr = inttoptr i64 %p$__tc_examples.existential_shapes.Shape_0_area to ptr
   %t$0$code = load ptr, ptr %t$0$env_ptr
-  %t$0 = call i64 (i64, i64) %t$0$code(i64 %__tc_examples.existential_shapes.Shape_0_area, i64 %s)
+  %t$0 = call i64 (i64, i64) %t$0$code(i64 %p$__tc_examples.existential_shapes.Shape_0_area, i64 %p$s)
   ret i64 %t$0
 }
 
-define i64 @__cm_Shape_name(i64 %s, i64 %__tc_examples.existential_shapes.Shape_0_area, i64 %__tc_examples.existential_shapes.Shape_0_name) {
+define i64 @__cm_Shape_name(i64 %p$s, i64 %p$__tc_examples.existential_shapes.Shape_0_area, i64 %p$__tc_examples.existential_shapes.Shape_0_name) {
 entry:
-  call void @sprout_closure_arity_check(i64 %__tc_examples.existential_shapes.Shape_0_name, i64 1)
-  %t$0$env_ptr = inttoptr i64 %__tc_examples.existential_shapes.Shape_0_name to ptr
+  call void @sprout_closure_arity_check(i64 %p$__tc_examples.existential_shapes.Shape_0_name, i64 1)
+  %t$0$env_ptr = inttoptr i64 %p$__tc_examples.existential_shapes.Shape_0_name to ptr
   %t$0$code = load ptr, ptr %t$0$env_ptr
-  %t$0 = call i64 (i64, i64) %t$0$code(i64 %__tc_examples.existential_shapes.Shape_0_name, i64 %s)
+  %t$0 = call i64 (i64, i64) %t$0$code(i64 %p$__tc_examples.existential_shapes.Shape_0_name, i64 %p$s)
   ret i64 %t$0
 }
 
-define i64 @__tc_ToString_Double_to_string(i64 %value) {
+define i64 @__tc_ToString_Double_to_string(i64 %p$value) {
 entry:
-  %t$0 = call i64 @double_to_string(i64 %value)
+  %t$0 = call i64 @double_to_string(i64 %p$value)
   ret i64 %t$0
 }
 
-define i64 @__tc_ToString_String_to_string(i64 %value) {
+define i64 @__tc_ToString_String_to_string(i64 %p$value) {
 entry:
-  ret i64 %value
+  ret i64 %p$value
 }
 
-define i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_Circle_area(i64 %s) {
+define i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_Circle_area(i64 %p$s) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %s)
+  %t$0 = call i64 @sprout_tag(i64 %p$s)
   br label %arm_0_1
 arm_0_1:
   %t$3 = add i64 0, 14
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %s, i64 0)
+  %t$5 = call i64 @sprout_field(i64 %p$s, i64 0)
   %t$6 = call i64 @examples.existential_shapes.pi()
   %t$7$fr = sitofp i64 %t$5 to double
   %t$7 = bitcast double %t$7$fr to i64
@@ -528,24 +528,24 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_Circle_name(i64 %s) {
+define i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_Circle_name(i64 %p$s) {
 entry:
   %t$0 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.1, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
   ret i64 %t$1
 }
 
-define i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_Rect_area(i64 %s) {
+define i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_Rect_area(i64 %p$s) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %s)
+  %t$0 = call i64 @sprout_tag(i64 %p$s)
   br label %arm_0_1
 arm_0_1:
   %t$3 = add i64 0, 15
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %s, i64 0)
-  %t$6 = call i64 @sprout_field(i64 %s, i64 1)
+  %t$5 = call i64 @sprout_field(i64 %p$s, i64 0)
+  %t$6 = call i64 @sprout_field(i64 %p$s, i64 1)
   %t$7$fr = sitofp i64 %t$5 to double
   %t$7 = bitcast double %t$7$fr to i64
   %t$8$fr = sitofp i64 %t$6 to double
@@ -563,23 +563,23 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_Rect_name(i64 %s) {
+define i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_Rect_name(i64 %p$s) {
 entry:
   %t$0 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.2, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
   ret i64 %t$1
 }
 
-define i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_Square_area(i64 %s) {
+define i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_Square_area(i64 %p$s) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %s)
+  %t$0 = call i64 @sprout_tag(i64 %p$s)
   br label %arm_0_1
 arm_0_1:
   %t$3 = add i64 0, 16
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %s, i64 0)
+  %t$5 = call i64 @sprout_field(i64 %p$s, i64 0)
   %t$6$fr = sitofp i64 %t$5 to double
   %t$6 = bitcast double %t$6$fr to i64
   %t$7$fr = sitofp i64 %t$5 to double
@@ -597,7 +597,7 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_Square_name(i64 %s) {
+define i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_Square_name(i64 %p$s) {
 entry:
   %t$0 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.3, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64

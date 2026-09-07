@@ -21,15 +21,15 @@ fn make_a() -> sprout_ir.IRFunction =
     "i64",
     Cons(sprout_ir.IRBlock("entry",
       Cons(sprout_ir.IRConst("%t0", 0),
-      Cons(sprout_ir.IRICmp("%t1", "sle", "%x", "%t0"),
+      Cons(sprout_ir.IRICmp("%t1", "sle", sprout_ir.param_ssa("x"), "%t0"),
       Cons(sprout_ir.IRCondBr("%t1", "thenb", "elseb"), Nil)))),
     Cons(sprout_ir.IRBlock("thenb",
       Cons(sprout_ir.IRBr("joinb"), Nil)),
     Cons(sprout_ir.IRBlock("elseb",
-      Cons(sprout_ir.IRCall("%r", sprout_ir.IRTHeap, "main.b", Cons("%x", Cons("%y", Nil))),
+      Cons(sprout_ir.IRCall("%r", sprout_ir.IRTHeap, "main.b", Cons(sprout_ir.param_ssa("x"), Cons(sprout_ir.param_ssa("y"), Nil))),
       Cons(sprout_ir.IRBr("joinb"), Nil))),
     Cons(sprout_ir.IRBlock("joinb",
-      Cons(sprout_ir.IRPhi("%m", "i64", Cons(("%y", "thenb"), Cons(("%r", "elseb"), Nil))),
+      Cons(sprout_ir.IRPhi("%m", "i64", Cons((sprout_ir.param_ssa("y"), "thenb"), Cons(("%r", "elseb"), Nil))),
       Cons(sprout_ir.IRRet("%m"), Nil))),
     Nil)))))
 
@@ -40,10 +40,10 @@ fn make_self_tco_fn() -> sprout_ir.IRFunction =
     Cons(("x", sprout_ir.IRTScalar), Cons(("y", sprout_ir.IRTHeap), Nil)),
     "i64",
     Cons(sprout_ir.IRBlock("entry",
-      Cons(sprout_ir.IRTcoEntry(Cons(("%slot", "i64", "%x$in"), Nil), "%sp"),
+      Cons(sprout_ir.IRTcoEntry(Cons(("%slot", "i64", sprout_ir.param_ssa("x$in")), Nil), "%sp"),
       Cons(sprout_ir.IRBr("tco_loop"), Nil))),
     Cons(sprout_ir.IRBlock("tco_loop",
-      Cons(sprout_ir.IRCall("%r", sprout_ir.IRTHeap, "main.b", Cons("%x", Cons("%y", Nil))),
+      Cons(sprout_ir.IRCall("%r", sprout_ir.IRTHeap, "main.b", Cons(sprout_ir.param_ssa("x"), Cons(sprout_ir.param_ssa("y"), Nil))),
       Cons(sprout_ir.IRRet("%r"), Nil))),
     Nil)))
 
@@ -54,7 +54,7 @@ fn make_i1_fn() -> sprout_ir.IRFunction =
     Cons(("x", sprout_ir.IRTScalar), Cons(("y", sprout_ir.IRTHeap), Nil)),
     "i1",
     Cons(sprout_ir.IRBlock("entry",
-      Cons(sprout_ir.IRCall("%r", sprout_ir.IRTScalar, "main.b", Cons("%x", Cons("%y", Nil))),
+      Cons(sprout_ir.IRCall("%r", sprout_ir.IRTScalar, "main.b", Cons(sprout_ir.param_ssa("x"), Cons(sprout_ir.param_ssa("y"), Nil))),
       Cons(sprout_ir.IRRet("%r"), Nil))),
     Nil))
 

@@ -26,16 +26,16 @@ fn contains(haystack: String, needle: String) -> Bool =
 #
 # entry:
 #   %t0 = const 0
-#   %t1 = icmp eq %n, %t0
+#   %t1 = icmp eq %p$n, %t0
 #   condbr %t1, then_2, else_3
 # then_2:
 #   %t5 = const 1
 #   br join_4
 # else_3:
 #   %t6 = const 1
-#   %t7 = isub %n, %t6
+#   %t7 = isub %p$n, %t6
 #   %t8 = call i64 @fact(%t7)
-#   %t9 = imul %n, %t8
+#   %t9 = imul %p$n, %t8
 #   br join_4
 # join_4:
 #   %t10 = phi i64 [%t5, then_2], [%t9, else_3]
@@ -45,16 +45,16 @@ fn fact_program() -> sprout_ir.IRProgram =
     sprout_ir.IRFunction("fact", Cons(("n", sprout_ir.IRTHeap), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
         sprout_ir.IRConst("%t0", 0),
-        Cons(sprout_ir.IRICmp("%t1", "eq", "%n", "%t0"),
+        Cons(sprout_ir.IRICmp("%t1", "eq", sprout_ir.param_ssa("n"), "%t0"),
         Cons(sprout_ir.IRCondBr("%t1", "then_2", "else_3"), Nil)))),
       Cons(sprout_ir.IRBlock("then_2", Cons(
         sprout_ir.IRConst("%t5", 1),
         Cons(sprout_ir.IRBr("join_4"), Nil))),
       Cons(sprout_ir.IRBlock("else_3", Cons(
         sprout_ir.IRConst("%t6", 1),
-        Cons(sprout_ir.IRISub("%t7", "%n", "%t6"),
+        Cons(sprout_ir.IRISub("%t7", sprout_ir.param_ssa("n"), "%t6"),
         Cons(sprout_ir.IRCall("%t8", sprout_ir.IRTScalar, "fact", Cons("%t7", Nil)),
-        Cons(sprout_ir.IRIMul("%t9", "%n", "%t8"),
+        Cons(sprout_ir.IRIMul("%t9", sprout_ir.param_ssa("n"), "%t8"),
         Cons(sprout_ir.IRBr("join_4"), Nil)))))),
       Cons(sprout_ir.IRBlock("join_4", Cons(
         sprout_ir.IRPhi("%t10", "i64",
@@ -68,43 +68,43 @@ fn fact_program() -> sprout_ir.IRProgram =
 #
 # entry:
 #   %t0 = const 2
-#   %t1 = icmp slt %n, %t0
+#   %t1 = icmp slt %p$n, %t0
 #   condbr %t1, then_2, else_3
 # then_2:
 #   br join_4
 # else_3:
 #   %t5 = const 1
-#   %t6 = isub %n, %t5
+#   %t6 = isub %p$n, %t5
 #   %t7 = call i64 @fib(%t6)
 #   %t8 = const 2
-#   %t9 = isub %n, %t8
+#   %t9 = isub %p$n, %t8
 #   %t10 = call i64 @fib(%t9)
 #   %t11 = iadd %t7, %t10
 #   br join_4
 # join_4:
-#   %t12 = phi i64 [%n, then_2], [%t11, else_3]
+#   %t12 = phi i64 [%p$n, then_2], [%t11, else_3]
 #   ret %t12
 fn fib_program() -> sprout_ir.IRProgram =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction("fib", Cons(("n", sprout_ir.IRTHeap), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
         sprout_ir.IRConst("%t0", 2),
-        Cons(sprout_ir.IRICmp("%t1", "slt", "%n", "%t0"),
+        Cons(sprout_ir.IRICmp("%t1", "slt", sprout_ir.param_ssa("n"), "%t0"),
         Cons(sprout_ir.IRCondBr("%t1", "then_2", "else_3"), Nil)))),
       Cons(sprout_ir.IRBlock("then_2", Cons(
         sprout_ir.IRBr("join_4"), Nil)),
       Cons(sprout_ir.IRBlock("else_3", Cons(
         sprout_ir.IRConst("%t5", 1),
-        Cons(sprout_ir.IRISub("%t6", "%n", "%t5"),
+        Cons(sprout_ir.IRISub("%t6", sprout_ir.param_ssa("n"), "%t5"),
         Cons(sprout_ir.IRCall("%t7", sprout_ir.IRTScalar, "fib", Cons("%t6", Nil)),
         Cons(sprout_ir.IRConst("%t8", 2),
-        Cons(sprout_ir.IRISub("%t9", "%n", "%t8"),
+        Cons(sprout_ir.IRISub("%t9", sprout_ir.param_ssa("n"), "%t8"),
         Cons(sprout_ir.IRCall("%t10", sprout_ir.IRTScalar, "fib", Cons("%t9", Nil)),
         Cons(sprout_ir.IRIAdd("%t11", "%t7", "%t10"),
         Cons(sprout_ir.IRBr("join_4"), Nil))))))))),
       Cons(sprout_ir.IRBlock("join_4", Cons(
         sprout_ir.IRPhi("%t12", "i64",
-          Cons(("%n", "then_2"), Cons(("%t11", "else_3"), Nil))),
+          Cons((sprout_ir.param_ssa("n"), "then_2"), Cons(("%t11", "else_3"), Nil))),
         Cons(sprout_ir.IRRet("%t12"), Nil))),
       Nil))))),
     Nil), Nil, Nil, Nil)
@@ -117,13 +117,13 @@ fn twice_and_add4_program() -> sprout_ir.IRProgram =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction("twice", Cons(("n", sprout_ir.IRTHeap), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
-        sprout_ir.IRIAdd("%t0", "%n", "%n"),
+        sprout_ir.IRIAdd("%t0", sprout_ir.param_ssa("n"), sprout_ir.param_ssa("n")),
         Cons(sprout_ir.IRRet("%t0"), Nil))),
       Nil)),
     Cons(sprout_ir.IRFunction("add4", Cons(("n", sprout_ir.IRTHeap), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
-        sprout_ir.IRCall("%t0", sprout_ir.IRTScalar, "twice", Cons("%n", Nil)),
-        Cons(sprout_ir.IRCall("%t1", sprout_ir.IRTScalar, "twice", Cons("%n", Nil)),
+        sprout_ir.IRCall("%t0", sprout_ir.IRTScalar, "twice", Cons(sprout_ir.param_ssa("n"), Nil)),
+        Cons(sprout_ir.IRCall("%t1", sprout_ir.IRTScalar, "twice", Cons(sprout_ir.param_ssa("n"), Nil)),
         Cons(sprout_ir.IRIAdd("%t2", "%t0", "%t1"),
         Cons(sprout_ir.IRRet("%t2"), Nil))))),
       Nil)),
@@ -144,7 +144,7 @@ fn main() -> Unit !{IO} =
 
     # --- Lowering: fact.
     check_true("fact defines i64 result",
-                contains(ir_lowering.lower_program(fact_program()), "define i64 @fact(i64 %n)")),
+                contains(ir_lowering.lower_program(fact_program()), "define i64 @fact(i64 %p$n)")),
     check_true("fact emits recursive call site",
                 contains(ir_lowering.lower_program(fact_program()), "%t8 = call i64 @fact(i64 %t7)")),
     check_true("fact emits then-block",
@@ -159,7 +159,7 @@ fn main() -> Unit !{IO} =
 
     # --- Lowering: fib — two recursive call sites with different args.
     check_true("fib defines i64 result",
-                contains(ir_lowering.lower_program(fib_program()), "define i64 @fib(i64 %n)")),
+                contains(ir_lowering.lower_program(fib_program()), "define i64 @fib(i64 %p$n)")),
     check_true("fib emits first recursive call site (fib(n-1))",
                 contains(ir_lowering.lower_program(fib_program()), "%t7 = call i64 @fib(i64 %t6)")),
     check_true("fib emits second recursive call site (fib(n-2))",
@@ -168,18 +168,18 @@ fn main() -> Unit !{IO} =
                 contains(ir_lowering.lower_program(fib_program()), "add i64 %t7, %t10")),
     check_true("fib emits phi merging n with sum",
                 contains(ir_lowering.lower_program(fib_program()),
-                         "phi i64 [%n, %then_2], [%t11, %else_3]")),
+                         "phi i64 [%p$n, %then_2], [%t11, %else_3]")),
 
     # --- Lowering: sequencing two call sites in one block (add4 → twice).
     check_true("add4 defines i64 result",
                 contains(ir_lowering.lower_program(twice_and_add4_program()),
-                         "define i64 @add4(i64 %n)")),
+                         "define i64 @add4(i64 %p$n)")),
     check_true("add4 emits first twice() call",
                 contains(ir_lowering.lower_program(twice_and_add4_program()),
-                         "%t0 = call i64 @twice(i64 %n)")),
+                         "%t0 = call i64 @twice(i64 %p$n)")),
     check_true("add4 emits second twice() call",
                 contains(ir_lowering.lower_program(twice_and_add4_program()),
-                         "%t1 = call i64 @twice(i64 %n)")),
+                         "%t1 = call i64 @twice(i64 %p$n)")),
     check_true("fact lowered IR compiles under clang", fact_compiles),
     check_true("add4 lowered IR compiles under clang", add4_compiles)
   ])

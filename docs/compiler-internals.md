@@ -121,6 +121,30 @@ Regression tests: `tests/stdlib/compiler/test_scalar_global_no_root.spr` (global
 
 `just gc-safety-check` lints `runtime/sprout_runtime.c` for `const char*`/`char*` parameters live across `sprout_gc_maybe_collect_threshold()` calls. Run after editing any C builtin that allocates heap strings. Use `just gc-safety-check --strict` to fail on any finding; the default mode warns only.
 
+## Emitted SSA names: LLVM has ONE namespace for locals and block labels
+
+`%x` and `x:` collide in LLVM's textual IR. Every compiler-minted name therefore carries a
+`$`, which Sprout's lexer cannot produce in a source identifier: temporaries are `%t$N`, the
+closure env pointer is `env$`, a TCO'd parameter arrives as `<p>$in`. Parameters were the
+one exception — they reached the value namespace as the user wrote them, so
+`fn f(entry: Int)` emitted `%entry` alongside `entry:` and clang refused the module with
+`error: unable to create block named 'entry'`. The same was available for `join_N`,
+`arm_i_j`, `body_i_j` and `tco_loop`, all legal Sprout identifiers.
+
+`sprout_ir.param_ssa` is now the single source of that name (`%p$<name>`). **Three modules
+must agree on it** and all three go through the helper: `ast_to_ir` when it references a
+param, `ir_lowering.lower_params` when it renders the `define` line, and
+`ir_rooting.params_heap_origin_loop`, which keys its heap-origin set on these names — a
+disagreement there is not a compile error, it silently stops seeding parameters and
+under-roots them.
+
+Only *parameters* were ever exposed. A `match` or `let` binding lowers to `%t$N`, which is
+why `stdlib/fs.sprout` could always write `Ok entry`.
+
+Regression tests: `tests/conformance/run/param_named_after_block_label.spr` (compiles, links
+and runs a function per label family), plus T11/T11b in
+`tests/stdlib/test_ir_codegen_closures.spr`.
+
 ## CPR extern ABI: width=2 is direct, width=3 is sret
 
 **Intentional design — do not remove the sret branch.**

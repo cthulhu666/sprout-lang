@@ -111,18 +111,18 @@ declare i64 @ref_write(i64, i64)
 @.cname.15 = private unnamed_addr constant [35 x i8] c"examples.existential_widget.Widget\00"
 @.cfkinds.15 = private unnamed_addr constant [2 x i8] c"p\00"
 
-define i64 @list_each_go(i64 %f$in, i64 %xs$in) {
+define i64 @list_each_go(i64 %p$f$in, i64 %p$xs$in) {
 entry:
   %t$12 = alloca i64
-  store i64 %f$in, ptr %t$12
+  store i64 %p$f$in, ptr %t$12
   %t$13 = alloca i64
-  store i64 %xs$in, ptr %t$13
+  store i64 %p$xs$in, ptr %t$13
   %t$14 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
-  %f = load i64, ptr %t$12
-  %xs = load i64, ptr %t$13
-  %t$0 = call i64 @sprout_tag(i64 %xs)
+  %p$f = load i64, ptr %t$12
+  %p$xs = load i64, ptr %t$13
+  %t$0 = call i64 @sprout_tag(i64 %p$xs)
   br label %arm_0_1
 arm_0_1:
   %t$3 = add i64 0, 5
@@ -136,20 +136,20 @@ arm_1_1:
   %t$7 = icmp eq i64 %t$0, %t$6
   br i1 %t$7, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t$8 = call i64 @sprout_field(i64 %xs, i64 0)
-  %t$9 = call i64 @sprout_field(i64 %xs, i64 1)
+  %t$8 = call i64 @sprout_field(i64 %p$xs, i64 0)
+  %t$9 = call i64 @sprout_field(i64 %p$xs, i64 1)
   %t$15 = alloca i64
-  store i64 %f, ptr %t$15
+  store i64 %p$f, ptr %t$15
   %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
   %t$17 = alloca i64
   store i64 %t$9, ptr %t$17
   %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
-  call void @sprout_closure_arity_check(i64 %f, i64 1)
-  %t$10$env_ptr = inttoptr i64 %f to ptr
+  call void @sprout_closure_arity_check(i64 %p$f, i64 1)
+  %t$10$env_ptr = inttoptr i64 %p$f to ptr
   %t$10$code = load ptr, ptr %t$10$env_ptr
-  %t$10 = call i64 (i64, i64) %t$10$code(i64 %f, i64 %t$8)
+  %t$10 = call i64 (i64, i64) %t$10$code(i64 %p$f, i64 %t$8)
   %t$19 = call i64 @sprout_gc_pop_roots(i64 2)
-  store i64 %f, ptr %t$12
+  store i64 %p$f, ptr %t$12
   store i64 %t$9, ptr %t$13
   call void @llvm.stackrestore(ptr %t$14)
   br label %tco_loop
@@ -161,34 +161,34 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @list_each(i64 %f, i64 %xs) {
+define i64 @list_each(i64 %p$f, i64 %p$xs) {
 entry:
   %t$1 = alloca i64
-  store i64 %xs, ptr %t$1
+  store i64 %p$xs, ptr %t$1
   %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
   %t$3 = alloca i64
-  store i64 %f, ptr %t$3
+  store i64 %p$f, ptr %t$3
   %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
-  %t$0 = call i64 @list_each_go(i64 %f, i64 %xs)
+  %t$0 = call i64 @list_each_go(i64 %p$f, i64 %p$xs)
   %t$5 = call i64 @sprout_gc_pop_roots(i64 2)
   ret i64 %t$0
 }
 
-define i64 @examples.existential_widget.count_up(i64 %n) {
+define i64 @examples.existential_widget.count_up(i64 %p$n) {
 entry:
   %t$0 = add i64 0, 1
-  %t$1 = add i64 %n, %t$0
+  %t$1 = add i64 %p$n, %t$0
   ret i64 %t$1
 }
 
-define i64 @examples.existential_widget.show_count(i64 %n) {
+define i64 @examples.existential_widget.show_count(i64 %p$n) {
 entry:
   %t$0 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.0, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
   %t$8 = alloca i64
   store i64 %t$1, ptr %t$8
   %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
-  %t$2 = call i64 @int_to_string(i64 %n)
+  %t$2 = call i64 @int_to_string(i64 %p$n)
   %t$3 = call i64 @__tc_ToString_String_to_string(i64 %t$2)
   %t$10 = alloca i64
   store i64 %t$3, ptr %t$10
@@ -222,26 +222,26 @@ entry:
   ret i64 %t$7
 }
 
-define i64 @examples.existential_widget.add_dot(i64 %buf) {
+define i64 @examples.existential_widget.add_dot(i64 %p$buf) {
 entry:
   %t$0 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.1, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
   %t$3 = alloca i64
-  store i64 %buf, ptr %t$3
+  store i64 %p$buf, ptr %t$3
   %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
   %t$5 = alloca i64
   store i64 %t$1, ptr %t$5
   %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
-  %t$2 = call i64 @__tc_Semigroup_String_append(i64 %buf, i64 %t$1)
+  %t$2 = call i64 @__tc_Semigroup_String_append(i64 %p$buf, i64 %t$1)
   %t$7 = call i64 @sprout_gc_pop_roots(i64 2)
   ret i64 %t$2
 }
 
-define i64 @examples.existential_widget.show_buf(i64 %buf) {
+define i64 @examples.existential_widget.show_buf(i64 %p$buf) {
 entry:
   %t$0 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.2, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
-  %t$2 = call i64 @__tc_ToString_String_to_string(i64 %buf)
+  %t$2 = call i64 @__tc_ToString_String_to_string(i64 %p$buf)
   %t$3 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.3, i64 0, i32 1, i64 0
   %t$4 = ptrtoint ptr %t$3 to i64
   %t$10 = alloca i64
@@ -292,16 +292,16 @@ entry:
   ret i64 %t$9
 }
 
-define i64 @examples.existential_widget.run(i64 %w, i64 %n) {
+define i64 @examples.existential_widget.run(i64 %p$w, i64 %p$n) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %w)
+  %t$0 = call i64 @sprout_tag(i64 %p$w)
   br label %arm_0_1
 arm_0_1:
   %t$3 = add i64 0, 15
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %w, i64 0)
+  %t$5 = call i64 @sprout_field(i64 %p$w, i64 0)
   %t$6 = call i64 @sprout_field(i64 %t$5, i64 2)
   %t$7 = call i64 @sprout_field(i64 %t$5, i64 1)
   %t$8 = call i64 @sprout_field(i64 %t$5, i64 0)
@@ -314,7 +314,7 @@ body_0_1:
   %t$15 = alloca i64
   store i64 %t$8, ptr %t$15
   %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
-  %t$9 = call i64 @examples.existential_widget.step_n(i64 %t$7, i64 %t$8, i64 %n)
+  %t$9 = call i64 @examples.existential_widget.step_n(i64 %t$7, i64 %t$8, i64 %p$n)
   %t$17 = call i64 @sprout_gc_pop_roots(i64 2)
   call void @sprout_closure_arity_check(i64 %t$6, i64 1)
   %t$10$env_ptr = inttoptr i64 %t$6 to ptr
@@ -330,22 +330,22 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @examples.existential_widget.step_n(i64 %step$in, i64 %st$in, i64 %n$in) {
+define i64 @examples.existential_widget.step_n(i64 %p$step$in, i64 %p$st$in, i64 %p$n$in) {
 entry:
   %t$10 = alloca i64
-  store i64 %step$in, ptr %t$10
+  store i64 %p$step$in, ptr %t$10
   %t$11 = alloca i64
-  store i64 %st$in, ptr %t$11
+  store i64 %p$st$in, ptr %t$11
   %t$12 = alloca i64
-  store i64 %n$in, ptr %t$12
+  store i64 %p$n$in, ptr %t$12
   %t$13 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
-  %step = load i64, ptr %t$10
-  %st = load i64, ptr %t$11
-  %n = load i64, ptr %t$12
+  %p$step = load i64, ptr %t$10
+  %p$st = load i64, ptr %t$11
+  %p$n = load i64, ptr %t$12
   %t$0 = add i64 0, 0
-  %t$1 = icmp sle i64 %n, %t$0
+  %t$1 = icmp sle i64 %p$n, %t$0
   %t$2 = zext i1 %t$1 to i64
   %t$9 = trunc i64 %t$2 to i1
   br i1 %t$9, label %then_3, label %else_3
@@ -353,57 +353,57 @@ then_3:
   br label %join_3
 else_3:
   %t$14 = alloca i64
-  store i64 %step, ptr %t$14
+  store i64 %p$step, ptr %t$14
   %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
-  call void @sprout_closure_arity_check(i64 %step, i64 1)
-  %t$5$env_ptr = inttoptr i64 %step to ptr
+  call void @sprout_closure_arity_check(i64 %p$step, i64 1)
+  %t$5$env_ptr = inttoptr i64 %p$step to ptr
   %t$5$code = load ptr, ptr %t$5$env_ptr
-  %t$5 = call i64 (i64, i64) %t$5$code(i64 %step, i64 %st)
+  %t$5 = call i64 (i64, i64) %t$5$code(i64 %p$step, i64 %p$st)
   %t$6 = add i64 0, 1
-  %t$7 = sub i64 %n, %t$6
+  %t$7 = sub i64 %p$n, %t$6
   %t$16 = call i64 @sprout_gc_pop_roots(i64 1)
-  store i64 %step, ptr %t$10
+  store i64 %p$step, ptr %t$10
   store i64 %t$5, ptr %t$11
   store i64 %t$7, ptr %t$12
   call void @llvm.stackrestore(ptr %t$13)
   br label %tco_loop
 join_3:
-  %t$4 = phi i64 [%st, %then_3]
+  %t$4 = phi i64 [%p$st, %then_3]
   ret i64 %t$4
 }
 
-define i64 @__sprout_ir_eta_examples.existential_widget.count_up_0(i64 %env$, i64 %a0) {
+define i64 @__sprout_ir_eta_examples.existential_widget.count_up_0(i64 %p$env$, i64 %p$a0) {
 entry:
-  %ret = call i64 @examples.existential_widget.count_up(i64 %a0)
+  %ret = call i64 @examples.existential_widget.count_up(i64 %p$a0)
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta_examples.existential_widget.show_count_1(i64 %env$, i64 %a0) {
+define i64 @__sprout_ir_eta_examples.existential_widget.show_count_1(i64 %p$env$, i64 %p$a0) {
 entry:
   %t$0 = alloca i64
-  store i64 %a0, ptr %t$0
+  store i64 %p$a0, ptr %t$0
   %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %ret = call i64 @examples.existential_widget.show_count(i64 %a0)
+  %ret = call i64 @examples.existential_widget.show_count(i64 %p$a0)
   %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta_examples.existential_widget.add_dot_2(i64 %env$, i64 %a0) {
+define i64 @__sprout_ir_eta_examples.existential_widget.add_dot_2(i64 %p$env$, i64 %p$a0) {
 entry:
   %t$0 = alloca i64
-  store i64 %a0, ptr %t$0
+  store i64 %p$a0, ptr %t$0
   %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %ret = call i64 @examples.existential_widget.add_dot(i64 %a0)
+  %ret = call i64 @examples.existential_widget.add_dot(i64 %p$a0)
   %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta_examples.existential_widget.show_buf_3(i64 %env$, i64 %a0) {
+define i64 @__sprout_ir_eta_examples.existential_widget.show_buf_3(i64 %p$env$, i64 %p$a0) {
 entry:
   %t$0 = alloca i64
-  store i64 %a0, ptr %t$0
+  store i64 %p$a0, ptr %t$0
   %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %ret = call i64 @examples.existential_widget.show_buf(i64 %a0)
+  %ret = call i64 @examples.existential_widget.show_buf(i64 %p$a0)
   %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %ret
 }
@@ -504,13 +504,13 @@ entry:
   ret i64 %t$13
 }
 
-define i64 @__sprout_ir_lambda_4(i64 %env$, i64 %w) {
+define i64 @__sprout_ir_lambda_4(i64 %p$env$, i64 %p$w) {
 entry:
   %t$0 = add i64 0, 3
   %t$3 = alloca i64
-  store i64 %w, ptr %t$3
+  store i64 %p$w, ptr %t$3
   %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
-  %t$1 = call i64 @examples.existential_widget.run(i64 %w, i64 %t$0)
+  %t$1 = call i64 @examples.existential_widget.run(i64 %p$w, i64 %t$0)
   %t$5 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$2$ptr = inttoptr i64 %t$1 to ptr
   %t$2 = call i64 @print_str(ptr %t$2$ptr)
@@ -534,15 +534,15 @@ entry:
   ret i64 %t$2
 }
 
-define i64 @__tc_Semigroup_String_append(i64 %left, i64 %right) {
+define i64 @__tc_Semigroup_String_append(i64 %p$left, i64 %p$right) {
 entry:
-  %t$0 = call i64 @str_concat(i64 %left, i64 %right)
+  %t$0 = call i64 @str_concat(i64 %p$left, i64 %p$right)
   ret i64 %t$0
 }
 
-define i64 @__tc_ToString_String_to_string(i64 %value) {
+define i64 @__tc_ToString_String_to_string(i64 %p$value) {
 entry:
-  ret i64 %value
+  ret i64 %p$value
 }
 
 define i32 @main(i32 %argc, ptr %argv) {

@@ -108,20 +108,20 @@ declare i64 @ref_write(i64, i64)
 @.cname.15 = private unnamed_addr constant [15 x i8] c"$entry.Nothing\00"
 @.cfkinds.15 = private unnamed_addr constant [1 x i8] c"\00"
 
-define i64 @$entry.map(i64 %f, i64 %m) {
+define i64 @$entry.map(i64 %p$f, i64 %p$m) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %m)
+  %t$0 = call i64 @sprout_tag(i64 %p$m)
   br label %arm_0_1
 arm_0_1:
   %t$3 = add i64 0, 14
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %m, i64 0)
-  call void @sprout_closure_arity_check(i64 %f, i64 1)
-  %t$6$env_ptr = inttoptr i64 %f to ptr
+  %t$5 = call i64 @sprout_field(i64 %p$m, i64 0)
+  call void @sprout_closure_arity_check(i64 %p$f, i64 1)
+  %t$6$env_ptr = inttoptr i64 %p$f to ptr
   %t$6$code = load ptr, ptr %t$6$env_ptr
-  %t$6 = call i64 (i64, i64) %t$6$code(i64 %f, i64 %t$5)
+  %t$6 = call i64 (i64, i64) %t$6$code(i64 %p$f, i64 %t$5)
   %t$11 = alloca i64
   store i64 %t$6, ptr %t$11
   %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
@@ -146,16 +146,16 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @$entry.inc(i64 %x) {
+define i64 @$entry.inc(i64 %p$x) {
 entry:
   %t$0 = add i64 0, 1
-  %t$1 = add i64 %x, %t$0
+  %t$1 = add i64 %p$x, %t$0
   ret i64 %t$1
 }
 
-define i64 @__sprout_ir_eta_$entry.inc_0(i64 %env$, i64 %a0) {
+define i64 @__sprout_ir_eta_$entry.inc_0(i64 %p$env$, i64 %p$a0) {
 entry:
-  %ret = call i64 @$entry.inc(i64 %a0)
+  %ret = call i64 @$entry.inc(i64 %p$a0)
   ret i64 %ret
 }
 

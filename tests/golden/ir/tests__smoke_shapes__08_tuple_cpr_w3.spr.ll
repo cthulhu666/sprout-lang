@@ -104,16 +104,16 @@ declare i64 @ref_write(i64, i64)
 @.cname.13 = private unnamed_addr constant [9 x i8] c"IntRange\00"
 @.cfkinds.13 = private unnamed_addr constant [4 x i8] c"iii\00"
 
-define i64 @main.rgb3(i64 %k) {
+define i64 @main.rgb3(i64 %p$k) {
 entry:
   %t$0 = add i64 0, 1
-  %t$1 = add i64 %k, %t$0
+  %t$1 = add i64 %p$k, %t$0
   %t$2 = add i64 0, 2
-  %t$3 = add i64 %k, %t$2
+  %t$3 = add i64 %p$k, %t$2
   %t$4 = call i64 @sprout_alloc_tuple_blob(i64 24)
   %t$4$ptr = inttoptr i64 %t$4 to ptr
   %t$4$s0 = getelementptr i64, ptr %t$4$ptr, i64 0
-  store i64 %k, ptr %t$4$s0
+  store i64 %p$k, ptr %t$4$s0
   %t$4$s1 = getelementptr i64, ptr %t$4$ptr, i64 1
   store i64 %t$1, ptr %t$4$s1
   %t$4$s2 = getelementptr i64, ptr %t$4$ptr, i64 2
@@ -121,9 +121,9 @@ entry:
   ret i64 %t$4
 }
 
-define i64 @main.use_rgb(i64 %k) {
+define i64 @main.use_rgb(i64 %p$k) {
 entry:
-  %t$0$st = call { i64, i64, i64 } @main.rgb3_worker(i64 %k)
+  %t$0$st = call { i64, i64, i64 } @main.rgb3_worker(i64 %p$k)
   %t$0 = extractvalue { i64, i64, i64 } %t$0$st, 0
   %t$1 = extractvalue { i64, i64, i64 } %t$0$st, 1
   %t$2 = extractvalue { i64, i64, i64 } %t$0$st, 2
@@ -144,13 +144,13 @@ entry:
   ret i64 %t$2
 }
 
-define { i64, i64, i64 } @main.rgb3_worker(i64 %k) {
+define { i64, i64, i64 } @main.rgb3_worker(i64 %p$k) {
 entry:
   %t$0 = add i64 0, 1
-  %t$1 = add i64 %k, %t$0
+  %t$1 = add i64 %p$k, %t$0
   %t$2 = add i64 0, 2
-  %t$3 = add i64 %k, %t$2
-  %t$4$r0 = insertvalue { i64, i64, i64 } undef, i64 %k, 0
+  %t$3 = add i64 %p$k, %t$2
+  %t$4$r0 = insertvalue { i64, i64, i64 } undef, i64 %p$k, 0
   %t$4$r1 = insertvalue { i64, i64, i64 } %t$4$r0, i64 %t$1, 1
   %t$4$r2 = insertvalue { i64, i64, i64 } %t$4$r1, i64 %t$3, 2
   ret { i64, i64, i64 } %t$4$r2
