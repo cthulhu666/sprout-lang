@@ -3,14 +3,19 @@ module main
 # A whole TUI in one file: the widget box, the layout engine and the message
 # pump. Design: docs/tui-widgets-v0.md.
 #
-# Three leaf widgets with three DIFFERENT hidden state types — an Int, a
+# Three leaf widgets with three DIFFERENT hidden state types — a record, a
 # List String and a String — sit in one tree, and a container widget holds them
 # in a `List (Widget Msg)` without being able to see any of their states. That
 # is the existential doing its job: `s` is private, `m` is shared.
 #
+# The clock is the round trip: it ASKS for the time with an addressed command
+# and the answer is delivered back to it, never to the application. Design:
+# docs/tui-routing-v0.md.
+#
 # Run it in a terminal; press q to quit.
 
 import stdlib.string as string
+import stdlib.time as time
 import stdlib.tui.app as app
 import stdlib.tui.event as event
 import stdlib.tui.geometry as g
@@ -24,6 +29,7 @@ import stdlib.tui.widget as widget
 type Msg (..) deriving (Eq, ToString) =
   | Quit
   | Typed String
+  | Stamped Int
 
 fn dim() -> sty.Style = sty.with_fg(sty.style_default(), sty.Ansi(8))
 
@@ -42,21 +48,51 @@ fn line(s: scr.Screen, r: g.Region, row: Int, txt: String,
 type alias Says = List Msg
 type alias Asks = List(widget.Cmd Msg)
 
-# ── a ticking counter: hidden state is Int ──────────────────────────────────
+# ── a clock: hidden state counts ticks and holds a routed answer ────────────
 
-fn ticks_on_event(n: Int, ev: event.Event) -> (Int, Says, Asks) =
+# The widget that ASKS for IO and gets the answer back. It never reads the
+# clock itself — `on_event` is pure — and the application never learns a time
+# exists, because the answer is addressed to this widget and delivered here.
+type Ticks = (n: Int, first: Int, now: Int)
+
+fn ticks_id() -> widget.WidgetId = widget.WidgetId("ticks")
+
+fn read_clock(u: Unit) -> Msg !{IO} = do
+  us <- time.wall_micros()
+  Stamped(us)
+
+fn ticks_on_event(t: Ticks, ev: event.Event) -> (Ticks, Says, Asks) =
   match ev with
-  | event.TickEvent -> (n + 1, Nil, Nil)
-  | _ -> (n, Nil, Nil)
+  | event.TickEvent ->
+      (t with (n = t.n + 1), Nil, [widget.cmd_to(ticks_id(), read_clock(_))])
+  | _ -> (t, Nil, Nil)
 
-fn ticks_measure(n: Int, avail: g.Size) -> g.Size = g.Size(g.size_cols(avail), 2)
+# The other end of the round trip. Only messages addressed to `ticks` arrive.
+fn ticks_route(t: Ticks, d: widget.Delivery Msg) -> (Ticks, Says, Asks) =
+  match d with
+  | widget.ToMsg m -> (stamped(t, m), Nil, Nil)
+  | widget.ToEvent _ -> (t, Nil, Nil)
 
-fn ticks_render(n: Int, r: g.Region, s: scr.Screen) -> Unit !{IO} = do
+fn stamped(t: Ticks, m: Msg) -> Ticks =
+  match m with
+  | Stamped us -> (t with (first = first_of(t, us), now = us))
+  | _ -> t
+
+fn first_of(t: Ticks, us: Int) -> Int = if t.first == 0 then us else t.first
+
+fn ticks_measure(t: Ticks, avail: g.Size) -> g.Size = g.Size(g.size_cols(avail), 2)
+
+fn ticks_render(t: Ticks, r: g.Region, s: scr.Screen) -> Unit !{IO} = do
   line(s, r, 0, "ticks", dim())
-  line(s, r, 1, to_string(n), bright())
+  line(s, r, 1, `${t.n}  up ${uptime_s(t)}s`, bright())
+
+fn uptime_s(t: Ticks) -> Int =
+  if t.first == 0 then 0 else (t.now - t.first) / 1000000
 
 fn ticks() -> widget.Widget Msg =
-  widget.Widget(widget.View(state = 0, on_event = ticks_on_event,
+  widget.Widget(widget.View(state = Ticks(n = 0, first = 0, now = 0),
+                            on_event = ticks_on_event,
+                            route = widget.route_if(ticks_id(), ticks_route, _, _, _),
                             render = ticks_render, measure = ticks_measure))
 
 # ── a key log: hidden state is List String ──────────────────────────────────
@@ -103,6 +139,7 @@ fn render_and_recurse(s: scr.Screen, r: g.Region, row: Int, l: String,
 
 fn keys() -> widget.Widget Msg =
   widget.Widget(widget.View(state = Nil, on_event = keys_on_event,
+                            route = widget.no_route,
                             render = keys_render, measure = keys_measure))
 
 # ── a static label: hidden state is String ──────────────────────────────────
@@ -118,6 +155,7 @@ fn label_render(txt: String, r: g.Region, s: scr.Screen) -> Unit !{IO} =
 
 fn label(txt: String) -> widget.Widget Msg =
   widget.Widget(widget.View(state = txt, on_event = label_on_event,
+                            route = widget.no_route,
                             render = label_render, measure = label_measure))
 
 # ── a container: hidden state is a list of OTHER widgets ────────────────────
@@ -153,6 +191,40 @@ fn broadcast_step(r: (widget.Widget Msg, Says, Asks),
 fn push_all(xs: List a, acc: List a) -> List a =
   list_fold(\ (seen, x) -> Cons(x, seen), acc, xs)
 
+# An addressed delivery goes DOWN, not to everyone: the container tries each
+# child until one claims the address, and answers `Nothing` if none did. It
+# alone holds the children, so it is the only thing that can carry an address
+# across the existential. Every application writes this today; containers
+# proper are M4.
+fn box_route(b: Box, target: widget.WidgetId,
+             d: widget.Delivery Msg) -> Maybe (Box, Says, Asks) =
+  route_kids(b, b.kids, target, d, Nil)
+
+# Stopping at the first claimant makes a duplicated id resolve to tree order
+# rather than delivering the same answer twice.
+fn route_kids(b: Box, kids: List (widget.Widget Msg), target: widget.WidgetId,
+              d: widget.Delivery Msg,
+              seen: List (widget.Widget Msg)) -> Maybe (Box, Says, Asks) =
+  match kids with
+  | Nil -> Nothing
+  | [k | rest] -> route_step(b, k, rest, target, d, seen)
+
+fn route_step(b: Box, k: widget.Widget Msg, rest: List (widget.Widget Msg),
+              target: widget.WidgetId, d: widget.Delivery Msg,
+              seen: List (widget.Widget Msg)) -> Maybe (Box, Says, Asks) =
+  match widget.deliver(k, target, d) with
+  | Nothing -> route_kids(b, rest, target, d, Cons(k, seen))
+  | Just claimed -> Just(route_hit(b, claimed, rest, seen))
+
+# A child that declines is unchanged, so only the claiming one has to be
+# spliced back into the list.
+fn route_hit(b: Box, r: (widget.Widget Msg, Says, Asks),
+             rest: List (widget.Widget Msg),
+             seen: List (widget.Widget Msg)) -> (Box, Says, Asks) =
+  match r with
+  | (k2, msgs, cmds) ->
+      (b with (kids = list_append(list_reverse(Cons(k2, seen)), rest)), msgs, cmds)
+
 fn box_measure(b: Box, avail: g.Size) -> g.Size = avail
 
 fn box_render(b: Box, r: g.Region, s: scr.Screen) -> Unit !{IO} =
@@ -182,25 +254,30 @@ fn render_kid_then(k: widget.Widget Msg, r: g.Region, s: scr.Screen,
 fn box(vertical: Bool, dims: List layout.Dimension,
        kids: List (widget.Widget Msg)) -> widget.Widget Msg =
   widget.Widget(widget.View(state = Box(vertical = vertical, dims = dims, kids = kids),
-                            on_event = box_on_event, render = box_render,
-                            measure = box_measure))
+                            on_event = box_on_event, route = box_route,
+                            render = box_render, measure = box_measure))
 
 # ── the application ─────────────────────────────────────────────────────────
 
 # A header and a footer of one row each, with the body taking the rest.
 fn root() -> widget.Widget Msg =
   box(true, [layout.Cells(1), layout.Fraction(1), layout.Cells(1)],
-      [label("Sprout TUI — M3"), body(), label("q to quit")])
+      [label("Sprout TUI"), body(), label("q to quit")])
 
 # Two panes side by side: the counter takes a third, the key log the rest.
 fn body() -> widget.Widget Msg =
   box(false, [layout.Fraction(1), layout.Fraction(2)], [ticks(), keys()])
 
 # Widgets already did the work; the application only decides when to stop.
+#
+# A `Stamped` never arrives here in practice — it is addressed to `ticks` and
+# delivered there. It reaches `update` only if that widget has gone, which is
+# the fallback the framework guarantees rather than dropping the answer.
 fn update(m: Msg, w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow, Asks) =
   match m with
   | Quit -> app.done(w, app.Quit)
   | Typed _ -> app.done(w, app.Continue)
+  | Stamped _ -> app.done(w, app.Continue)
 
 fn main() -> Unit !{IO} =
   app.run(app.App(root = root(), update = update, tick_ms = 250,

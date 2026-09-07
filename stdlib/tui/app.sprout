@@ -35,6 +35,11 @@ export type Flow (..) deriving (Eq, ToString) =
 export type Signal m (..) =
   | SigEvent event.Event
   | SigMsg m
+  # A command's answer with a return address. `Signal` is exported and `boot`
+  # workers post into the same channel, so a worker can address a widget
+  # directly — supported, not accidental: it is how a background producer feeds
+  # one pane without the application having to relay.
+  | SigTo widget.WidgetId m
 
 # `update` is the application's half: it receives what widgets said and decides
 # the next tree, whether to stop, and what IO to ask for. Widget-local state
@@ -92,8 +97,35 @@ fn push_all(xs: List a, acc: List a) -> List a =
 # command both halves asked for.
 export fn step(update: m -> widget.Widget m -> (widget.Widget m, Flow, List(widget.Cmd m)), w: widget.Widget m,
                ev: event.Event) -> (widget.Widget m, Flow, List(widget.Cmd m)) =
-  match widget.on_event(w, ev) with
+  stepped(update, widget.on_event(w, ev))
+
+# What the tree said, absorbed into the loop's verdict. Shared with `step_to`,
+# whose claimed reply has exactly this shape.
+fn stepped(update: m -> widget.Widget m -> (widget.Widget m, Flow, List(widget.Cmd m)),
+           r: (widget.Widget m, List m, List(widget.Cmd m))) -> (widget.Widget m, Flow, List(widget.Cmd m)) =
+  match r with
   | (w2, msgs, cmds) -> step_apply(cmds, apply(update, msgs, w2))
+
+# One addressed message, end to end — the same contract as `step`, but to one
+# named widget rather than the whole tree.
+#
+# When nothing claims the address the message goes to `update` instead. A stale
+# address is not something the framework can resolve, but the answer is a value
+# of the application's own message type, which `update` is already total over;
+# dropping it silently would give the choice to no one.
+export fn step_to(update: m -> widget.Widget m -> (widget.Widget m, Flow, List(widget.Cmd m)),
+                  w: widget.Widget m, target: widget.WidgetId,
+                  msg: m) -> (widget.Widget m, Flow, List(widget.Cmd m)) =
+  delivered(update, w, msg, widget.deliver(w, target, widget.ToMsg(msg)))
+
+fn delivered(update: m -> widget.Widget m -> (widget.Widget m, Flow, List(widget.Cmd m)),
+             w: widget.Widget m, msg: m,
+             r: Maybe (widget.Widget m, List m, List(widget.Cmd m))) -> (widget.Widget m, Flow, List(widget.Cmd m)) =
+  match r with
+  # Nothing claimed it, so nothing happened: the original tree stands, and the
+  # message goes where every unaddressed one goes.
+  | Nothing -> apply(update, [msg], w)
+  | Just t -> stepped(update, t)
 
 # The widget asked first, so its commands lead; `update` may have added more.
 fn step_apply(wcmds: List (widget.Cmd m),
@@ -161,6 +193,10 @@ fn on_sig(scope: Scope, ch: Chan (Signal m), s: screen.Screen, w: widget.Widget 
   | SigEvent ev -> on_event_sig(scope, ch, s, w, update, size, ev)
   # A completed command's result takes the same path as one a widget said.
   | SigMsg msg -> advance(scope, ch, s, update, size, apply(update, [msg], w))
+  # An addressed answer goes through `advance` like every other path, so a
+  # route-emitted `Quit` paints its farewell frame and drops what follows.
+  | SigTo target msg -> advance(scope, ch, s, update, size,
+                                step_to(update, w, target, msg))
 
 # A resize is handled here rather than by a widget: the screen itself has to be
 # replaced, and no widget can do that.
@@ -204,7 +240,14 @@ fn spawn_cmd(scope: Scope, ch: Chan (Signal m), c: widget.Cmd m) -> Unit !{IO} =
 
 fn run_cmd(ch: Chan (Signal m), c: widget.Cmd m, u: Unit) -> Unit !{IO} = do
   msg <- widget.cmd_run(c)
-  chan_send(ch, SigMsg(msg))
+  chan_send(ch, addressed(widget.cmd_addr(c), msg))
+
+# Two commands complete in whatever order their tasks finish, addressed or
+# not, so a route handler must tolerate answers arriving out of order.
+fn addressed(a: Maybe widget.WidgetId, msg: m) -> Signal m =
+  match a with
+  | Nothing -> SigMsg(msg)
+  | Just target -> SigTo(target, msg)
 
 fn repaint(scope: Scope, ch: Chan (Signal m), s: screen.Screen, w: widget.Widget m,
            update: m -> widget.Widget m -> (widget.Widget m, Flow, List(widget.Cmd m)),

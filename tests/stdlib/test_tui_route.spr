@@ -1,0 +1,338 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.tui.app as app
+import stdlib.tui.event as event
+import stdlib.tui.geometry as g
+import stdlib.tui.screen as scr
+import stdlib.tui.style as sty
+import stdlib.tui.widget as widget
+
+# Addressed delivery: how a command's answer gets back to the widget that asked.
+# Design: docs/tui-routing-v0.md.
+#
+# `on_event` broadcasts — every widget sees every event. `route` is the opposite
+# direction: one named widget, and a report of whether anyone was home. The
+# report is the load-bearing part. Without it an answer to a widget that has
+# since been closed would vanish with nothing able to observe it, and two
+# widgets sharing an id would both act on the same reply.
+
+type Msg (..) deriving (Eq, ToString) =
+  | Loaded String
+  | Noted String
+
+# A second vocabulary, for the prism half of `map_msgs`.
+type Outer (..) deriving (Eq, ToString) =
+  | Child Msg
+  | Own Int
+
+fn unwrap_child(o: Outer) -> Maybe Msg =
+  match o with
+  | Child m -> Just(m)
+  | Own _ -> Nothing
+
+type alias Says = List Msg
+type alias Asks = List(widget.Cmd Msg)
+type alias Kids = List(widget.Widget Msg)
+# Spelled out rather than built from `Says`/`Asks`: an alias inside another
+# alias's BODY is not expanded, though one inside a signature's tuple is.
+type alias Reply = Maybe(widget.Widget Msg, List Msg, List(widget.Cmd Msg))
+
+fn load(name: String, u: Unit) -> Msg !{IO} = Loaded(name)
+
+# ── a leaf that answers to its own id ───────────────────────────────────────
+
+# The reply names the widget that produced it, which is how a test observes
+# WHICH leaf a delivery reached — the states themselves are behind the
+# existential and no test may reach into them.
+fn leaf_handler(name: String, n: Int, d: widget.Delivery Msg) -> (Int, Says, Asks) =
+  match d with
+  | widget.ToMsg m -> (n + 1, [Noted(name)], [widget.cmd_to(widget.WidgetId(name),
+                                                            load(name ++ "-route", _))])
+  # An event delivered to one widget rather than broadcast — the substrate
+  # focus is built on.
+  | widget.ToEvent e -> (n + 10, [Noted(name ++ "-ev")], Nil)
+
+fn a_handler(n: Int, d: widget.Delivery Msg) -> (Int, Says, Asks) =
+  leaf_handler("a", n, d)
+
+fn b_handler(n: Int, d: widget.Delivery Msg) -> (Int, Says, Asks) =
+  leaf_handler("b", n, d)
+
+fn dup_handler(n: Int, d: widget.Delivery Msg) -> (Int, Says, Asks) =
+  leaf_handler("dup", n, d)
+
+fn leaf_on_event(n: Int, ev: event.Event) -> (Int, Says, Asks) = (n, Nil, Nil)
+
+fn leaf_measure(n: Int, avail: g.Size) -> g.Size = g.Size(n, 1)
+
+fn leaf_render(n: Int, r: g.Region, s: scr.Screen) -> Unit !{IO} = ()
+
+fn leaf(name: String, handler: Int -> widget.Delivery Msg -> (Int, Says, Asks),
+        n: Int) -> widget.Widget Msg =
+  widget.Widget(widget.View(state = n, on_event = leaf_on_event,
+                            route = widget.route_if(widget.WidgetId(name), handler, _, _, _),
+                            render = leaf_render, measure = leaf_measure))
+
+fn leaf_a(n: Int) -> widget.Widget Msg = leaf("a", a_handler, n)
+
+fn leaf_b(n: Int) -> widget.Widget Msg = leaf("b", b_handler, n)
+
+fn leaf_dup(n: Int) -> widget.Widget Msg = leaf("dup", dup_handler, n)
+
+# A widget nothing is addressed to — the shape every leaf in the widget library
+# will have until it needs a command of its own.
+fn mute(n: Int) -> widget.Widget Msg =
+  widget.Widget(widget.View(state = n, on_event = leaf_on_event,
+                            route = widget.no_route, render = leaf_render,
+                            measure = leaf_measure))
+
+# ── a container that forwards a delivery down ───────────────────────────────
+
+fn box_on_event(kids: Kids, ev: event.Event) -> (Kids, Says, Asks) = (kids, Nil, Nil)
+
+fn box_measure(kids: Kids, avail: g.Size) -> g.Size = avail
+
+fn box_render(kids: Kids, r: g.Region, s: scr.Screen) -> Unit !{IO} = ()
+
+# A container is the only thing that can carry an address down, because it
+# alone holds its children. It stops at the FIRST child that claims the
+# address, so a duplicated id resolves deterministically to tree order rather
+# than being delivered twice.
+fn box_route(kids: Kids, target: widget.WidgetId,
+             d: widget.Delivery Msg) -> Maybe (Kids, Says, Asks) =
+  box_route_go(kids, target, d, Nil)
+
+fn box_route_go(kids: Kids, target: widget.WidgetId, d: widget.Delivery Msg,
+                seen: Kids) -> Maybe (Kids, Says, Asks) =
+  match kids with
+  | Nil -> Nothing
+  | [k | rest] -> box_route_step(k, rest, target, d, seen)
+
+fn box_route_step(k: widget.Widget Msg, rest: Kids, target: widget.WidgetId,
+                  d: widget.Delivery Msg, seen: Kids) -> Maybe (Kids, Says, Asks) =
+  match widget.deliver(k, target, d) with
+  # A child that declines is unchanged, so it joins the walked prefix as it is.
+  | Nothing -> box_route_go(rest, target, d, Cons(k, seen))
+  | Just claimed -> Just(box_route_hit(claimed, rest, seen))
+
+fn box_route_hit(r: (widget.Widget Msg, Says, Asks), rest: Kids,
+                 seen: Kids) -> (Kids, Says, Asks) =
+  match r with
+  | (k2, msgs, cmds) -> (list_append(list_reverse(Cons(k2, seen)), rest), msgs, cmds)
+
+fn box(kids: Kids) -> widget.Widget Msg =
+  widget.Widget(widget.View(state = kids, on_event = box_on_event, route = box_route,
+                            render = box_render, measure = box_measure))
+
+# ── reading a reply without unpacking the box ───────────────────────────────
+
+fn hit_of(r: Reply) -> Bool =
+  match r with
+  | Nothing -> false
+  | Just _ -> true
+
+# `"none"` rather than `"[]"`: a decline carries no message LIST, which is a
+# different thing from carrying an empty one, and the type is what makes the
+# two impossible to confuse.
+fn said_of(r: Reply) -> String =
+  match r with
+  | Nothing -> "none"
+  | Just (_, msgs, _) -> to_string(msgs)
+
+fn asked_of(r: Reply) -> Int =
+  match r with
+  | Nothing -> -1
+  | Just (_, _, cs) -> list_length(cs)
+
+fn to(w: widget.Widget Msg, name: String) -> Reply =
+  widget.deliver(w, widget.WidgetId(name), widget.ToMsg(Loaded("x")))
+
+fn ev_to(w: widget.Widget Msg, name: String) -> Reply =
+  widget.deliver(w, widget.WidgetId(name), widget.ToEvent(event.TickEvent))
+
+fn addr_of(c: widget.Cmd m) -> String =
+  match widget.cmd_addr(c) with
+  | Nothing -> "-"
+  | Just i -> widget.id_text(i)
+
+fn main() -> Unit !{IO} = do
+  state <- new_state()
+  leaf_cases(state)
+  container_cases(state)
+  address_cases(state)
+  prism_cases(state)
+  fallback_cases(state)
+  summary(state)
+
+# ── a leaf answers only to its own id ───────────────────────────────────────
+
+fn leaf_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "a leaf claims its own id", hit_of(to(leaf_a(0), "a")), true)
+  assert_eq(state, "a leaf ignores another id", hit_of(to(leaf_a(0), "b")), false)
+  # Not "says an empty list" — says nothing at all. A decline has no reply to
+  # carry, which is the whole reason `route` answers `Maybe`.
+  assert_eq(state, "an unclaimed delivery carries no reply",
+            said_of(to(leaf_a(0), "b")), "none")
+  assert_eq(state, "and asks for nothing", asked_of(to(leaf_a(0), "b")), -1)
+  assert_eq(state, "a claimed delivery replies in the application's vocabulary",
+            said_of(to(leaf_a(0), "a")), "[Noted(a)]")
+  assert_eq(state, "a no_route widget claims nothing", hit_of(to(mute(0), "a")), false)
+  # An event delivered to ONE widget, which `on_event` cannot express.
+  assert_eq(state, "an addressed event reaches the same leaf",
+            said_of(ev_to(leaf_a(0), "a")), "[Noted(a-ev)]")
+  assert_eq(state, "an addressed event respects the address",
+            hit_of(ev_to(leaf_a(0), "b")), false)
+
+# ── a container carries a delivery down ─────────────────────────────────────
+
+fn container_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "a container reaches the addressed child",
+            said_of(to(box([leaf_a(0), leaf_b(0)]), "a")), "[Noted(a)]")
+  assert_eq(state, "and reaches its sibling by the sibling's id",
+            said_of(to(box([leaf_a(0), leaf_b(0)]), "b")), "[Noted(b)]")
+  assert_eq(state, "an address no child claims is reported unhandled",
+            hit_of(to(box([leaf_a(0), leaf_b(0)]), "zz")), false)
+  assert_eq(state, "delivery descends more than one level",
+            said_of(to(box([mute(0), box([mute(0), leaf_b(0)])]), "b")), "[Noted(b)]")
+  # Nothing enforces id uniqueness, so the rule has to be stated and tested.
+  assert_eq(state, "a duplicated id resolves to the first in tree order",
+            said_of(to(box([leaf_dup(1), leaf_dup(2)]), "dup")), "[Noted(dup)]")
+  assert_eq(state, "and is delivered exactly once",
+            asked_of(to(box([leaf_dup(1), leaf_dup(2)]), "dup")), 1)
+
+# ── an address survives being retargeted ────────────────────────────────────
+
+fn address_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "cmd_to carries the asker's id",
+            addr_of(widget.cmd_to(widget.WidgetId("a"), load("x", _))), "a")
+  assert_eq(state, "cmd is application-global",
+            addr_of(widget.cmd(load("x", _))), "-")
+  # The one that would rot silently: retargeting a command's RESULT must not
+  # lose who asked for it, or an embedded widget's answer becomes undeliverable.
+  assert_eq(state, "cmd_map preserves the return address",
+            addr_of(widget.cmd_map(Child, widget.cmd_to(widget.WidgetId("a"),
+                                                        load("x", _)))), "a")
+  assert_eq(state, "cmd_map leaves a global command global",
+            addr_of(widget.cmd_map(Child, widget.cmd(load("x", _)))), "-")
+  assert_eq(state, "a routed reply asks in its own name",
+            addr_of_first(to(leaf_a(0), "a")), "a")
+
+fn addr_of_first(r: Reply) -> String =
+  match r with
+  | Nothing -> "declined"
+  | Just (_, _, cs) -> addr_of_head(cs)
+
+fn addr_of_head(cs: Asks) -> String =
+  match cs with
+  | Nil -> "none"
+  | [c | _] -> addr_of(c)
+
+# ── the prism: delivery in another application's vocabulary ─────────────────
+#
+# `route` puts `m` in INPUT position, which is the first contravariant use of
+# the message type in the widget contract. A plain functor cannot survive that,
+# so `map_msgs` takes the backward half too: `unf` recognises the messages that
+# belong to the embedded widget and rejects the rest.
+
+fn wrapped(n: Int) -> widget.Widget Outer =
+  widget.map_msgs(Child, unwrap_child, leaf_a(n))
+
+fn outer_to(w: widget.Widget Outer, name: String,
+            m: Outer) -> Maybe(widget.Widget Outer, List Outer, List(widget.Cmd Outer)) =
+  widget.deliver(w, widget.WidgetId(name), widget.ToMsg(m))
+
+fn outer_hit(r: Maybe (widget.Widget Outer, List Outer,
+                       List(widget.Cmd Outer))) -> Bool =
+  match r with
+  | Nothing -> false
+  | Just _ -> true
+
+fn outer_said(r: Maybe (widget.Widget Outer, List Outer,
+                        List(widget.Cmd Outer))) -> String =
+  match r with
+  | Nothing -> "none"
+  | Just (_, msgs, _) -> to_string(msgs)
+
+fn prism_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "a delivery in the embedded vocabulary routes through",
+            outer_hit(outer_to(wrapped(0), "a", Child (Loaded("x")))), true)
+  assert_eq(state, "and its reply comes back retargeted",
+            outer_said(outer_to(wrapped(0), "a", Child (Loaded("x")))),
+            "[Child(Noted(a))]")
+  # A message the embedded widget does not speak is not its business. Reported
+  # unhandled rather than guessed at, so the application still sees it.
+  assert_eq(state, "a foreign message is not delivered",
+            outer_hit(outer_to(wrapped(0), "a", Own(1))), false)
+  assert_eq(state, "a foreign message produces no reply",
+            outer_said(outer_to(wrapped(0), "a", Own(1))), "none")
+  # An event carries no message, so it passes the prism untouched.
+  assert_eq(state, "an addressed event crosses the prism",
+            outer_hit(widget.deliver(wrapped(0), widget.WidgetId("a"),
+                                     widget.ToEvent(event.TickEvent))), true)
+
+# ── unhandled falls back to the application ─────────────────────────────────
+#
+# A stale address — the asker closed while its command was in flight — is not
+# an error the framework can resolve. But the reply is a value of the
+# application's own message type, which `update` is already total over, so
+# handing it there is strictly better than dropping it silently.
+
+fn upd(m: Msg, w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow, Asks) =
+  match m with
+  | Loaded s -> (w, app.Continue, [widget.cmd(load("app-saw-" ++ s, _))])
+  | Noted _ -> (w, app.Continue, [widget.cmd(load("from-update", _))])
+
+fn quit_upd(m: Msg, w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow, Asks) =
+  (w, app.Quit, Nil)
+
+fn tree() -> widget.Widget Msg = box([leaf_a(0), leaf_b(0)])
+
+fn stepped(target: String) -> (widget.Widget Msg, app.Flow, Asks) =
+  app.step_to(upd, tree(), widget.WidgetId(target), Loaded("x"))
+
+fn step_cmds(r: (widget.Widget Msg, app.Flow, Asks)) -> Int =
+  match r with
+  | (_, _, cs) -> list_length(cs)
+
+fn step_flow(r: (widget.Widget Msg, app.Flow, Asks)) -> app.Flow =
+  match r with
+  | (_, f, _) -> f
+
+fn fallback_cases(state: TestState) -> Unit !{IO} = do
+  # Handled: the leaf replies `Noted(a)`, so `update` sees that and not the
+  # original `Loaded` — one command from each half.
+  assert_eq(state, "a routed reply reaches the widget, then update",
+            step_cmds(stepped("a")), 2)
+  # Unhandled: nothing claimed it, so `update` receives the original message.
+  assert_eq(state, "an unroutable reply falls back to update",
+            step_cmds(stepped("zz")), 1)
+  ran(state, stepped("zz"))
+  order(state, stepped("a"))
+  assert_eq(state, "a routed reply can still quit the application",
+            step_flow(app.step_to(quit_upd, tree(), widget.WidgetId("a"),
+                                  Loaded("x"))), app.Quit)
+
+fn ran(state: TestState, r: (widget.Widget Msg, app.Flow, Asks)) -> Unit !{IO} =
+  match r with
+  | (_, _, cs) -> ran_all(state, "the application saw the undeliverable message",
+                          cs, "[Loaded(app-saw-x)]")
+
+# The widget asked first, so its command leads — the same invariant `step`
+# holds for an event, now on the delivery path.
+fn order(state: TestState, r: (widget.Widget Msg, app.Flow, Asks)) -> Unit !{IO} =
+  match r with
+  | (_, _, cs) -> ran_all(state, "a routed widget's command leads the application's",
+                          cs, "[Loaded(a-route), Loaded(from-update)]")
+
+fn ran_all(state: TestState, label: String, cs: Asks,
+           want: String) -> Unit !{IO} = do
+  msgs <- run_all(cs, Nil)
+  assert_eq(state, label, to_string(msgs), want)
+
+fn run_all(cs: Asks, acc: Says) -> Says !{IO} =
+  match cs with
+  | Nil -> list_reverse(acc)
+  | [c | rest] -> run_next(c, rest, acc)
+
+fn run_next(c: widget.Cmd Msg, rest: Asks, acc: Says) -> Says !{IO} = do
+  m <- widget.cmd_run(c)
+  run_all(rest, Cons(m, acc))
