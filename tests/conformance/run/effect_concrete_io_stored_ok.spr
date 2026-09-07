@@ -1,0 +1,50 @@
+module main
+
+# The ACCEPT twin of tests/conformance/type_error/effect_var_in_record_field.spr
+# and its constructor-payload sibling.
+#
+# The rejection is on effect VARIABLES in stored positions. A concrete `!{IO}`
+# in the same two positions is sound and must stay legal: it has nothing to
+# quantify, so nothing is discarded at construction and rule 8 still catches a
+# pure function that unwraps and calls it. Five stdlib types depend on this —
+# `http_server.Route`, `log.Logger`, `tui.App.boot`, `tui.Cmd`, `tui.View.render`
+# — and a check that rejected any effect annotation in a field would delete all
+# of them.
+#
+# The second half guards the other side: an effect variable in a FUNCTION
+# SIGNATURE is untouched by the rule. That is where it belongs and where all 140
+# in-tree uses of it live.
+
+# Stored concrete IO, record-field position.
+type Sink = (emit: String -> Unit !{IO})
+
+# Stored concrete IO, constructor-payload position.
+type Job = | Job (Unit -> Int !{IO})
+
+# Stored concrete IO, wrapped-type position — the third stored position.
+wrap Announce = String -> Unit !{IO}
+
+fn run_sink(s: Sink, msg: String) -> Unit !{IO} = s.emit(msg)
+
+fn run_job(j: Job) -> Int !{IO} =
+  match j with
+  | Job f -> f(())
+
+# Signature-position effect variable: still legal, still polymorphic.
+fn twice(f: Int -> Unit !{e}, n: Int) -> Unit !{e} = do
+  f(n)
+  f(n)
+
+fn quiet(n: Int) -> Unit = ()
+
+fn say(a: Announce, msg: String) -> Unit !{IO} =
+  match a with
+  | Announce f -> f(msg)
+
+fn main() -> Unit !{IO} = do
+  run_sink(Sink(emit = print(_)), "sink")
+  n <- run_job(Job(\_ -> 7))
+  print(int_to_string(n))
+  say(Announce(print(_)), "wrapped")
+  twice(quiet, 0)
+  print("done")

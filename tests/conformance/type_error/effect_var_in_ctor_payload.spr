@@ -1,0 +1,23 @@
+module main
+
+# The constructor-payload twin of effect_var_in_record_field.spr. Same rule, same
+# mechanism; a separate fixture because the two positions are built by different
+# AST nodes (`TypeConstructor` vs `RecordFieldDecl`) and a check that walked only
+# one of them would leave the other open.
+#
+# This is the shape a command type wants — `stdlib/tui/widget.sprout`'s `Cmd` —
+# which is exactly why it is worth pinning: the effect-polymorphic spelling is
+# the tempting one, and it is the unsound one.
+
+type Thunk = | Thunk (Unit -> Int !{e})
+
+fn shout(u: Unit) -> Int !{IO} = do
+  print("IO RAN INSIDE A PURE-DECLARED FN")
+  7
+
+fn pure_unwrap(t: Thunk) -> Int =
+  match t with
+  | Thunk f -> f(())
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(pure_unwrap(Thunk(shout(_)))))

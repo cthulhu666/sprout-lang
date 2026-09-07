@@ -1712,6 +1712,16 @@ Effect note for v0:
    including on a parameter's arrow. Note `!{IO, e}` names only one variable and
    so satisfies the singleton limit above; it is rejected under this sentence
    rather than that one.
+
+   **An effect variable may appear only in a function type.** Writing one in a
+   *stored* position — a record field, a constructor payload, or the type a
+   `wrap` names — is rejected.
+   The declaration quantifies the variable and then has nowhere to record what it
+   was bound to, so construction discards it and reading the field back yields a
+   fresh, unconstrained variable, which rule 8 admits; the effect is therefore
+   unenforceable and IO can escape a pure signature. A concrete `!{IO}` in the
+   same position is unaffected and remains the way to store an effectful
+   function.
 10. `main` must use a concrete effect annotation when effectful; it may not be
     effect-polymorphic.
 11. A pure function body may not call `!{IO}` functions unless it is allowed by

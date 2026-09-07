@@ -1,0 +1,24 @@
+module main
+
+# The third stored position, and the one a catch-all hid. `wrap` is a newtype:
+# constructing one stores the value, so an effect variable in the wrapped type
+# launders IO exactly as a record field or a constructor payload does.
+#
+# Found by reviewing `stored_effect_var_in_decl` against docs/guidelines.md §2a
+# ("when a match classifies an ADT, enumerate every variant") rather than by a
+# failing test — the first draft matched `RecordDecl` and `TypeDecl` and sent
+# every other `Decl` to `| _ -> Nothing`. Verified laundering before the arm
+# existed: this file compiled and printed.
+
+wrap Handler = Int -> Int !{e}
+
+fn shout(n: Int) -> Int !{IO} = do
+  print("IO RAN INSIDE A PURE-DECLARED FN (via wrap)")
+  n + 1
+
+fn pure_user(h: Handler, n: Int) -> Int =
+  match h with
+  | Handler f -> f(n)
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(pure_user(Handler(shout(_)), 1)))
