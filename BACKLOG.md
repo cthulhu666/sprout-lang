@@ -2349,6 +2349,46 @@ Legend:
   already told. Fixing it would need `lint_source`'s return shape to change and would double-report
   one failure.
 
+- [x] `P2` **Lint suppression — file-level `sprout-ignore-all`.** Landed 2026-09-07, the direct
+  consequence of the entry above: once an unparseable file was reported, the 12 fixtures that exist
+  in order *not* to parse became lint failures, and a new one could not be committed without
+  `--no-verify`.
+
+  `# sprout-ignore-all lint/<rule>: <reason>` in the header block, transliterated from
+  [Biome's `// biome-ignore-all`](https://biomejs.dev/analyzer/suppressions/). Biome is the closest
+  prior art that ports: all its suppression forms are line comments and Sprout has no block
+  comments, whereas ESLint's file-level form (`/* eslint-disable */`) has no line equivalent and its
+  disable comments explicitly do not apply to parse errors. Rule name and reason both required, as
+  Biome requires them; a malformed directive is reported as `[malformed-suppression]` and suppresses
+  nothing.
+
+  Header-block-only is load-bearing, not stylistic: the header is read as text before `tokenize`,
+  which is the only reason a file that never lexes can suppress `unparsed`. The block's boundary is
+  derived from `source.strip_headers` itself (every line it removes it replaces with a blank one)
+  rather than re-deriving it, so there is no second header predicate to drift — a wrapped
+  `import (a,\n b)` list is the case that would break first.
+
+  Outside `compile_driver`'s import closure, so the seed moved by its fingerprint line only.
+
+- [ ] `P2` **Lint suppression — per-line form.** `sprout-ignore-all` is file-wide, so a rule that is
+  right about one site can only be silenced across the whole file.
+  `tests/stdlib/test_vec_literal_coercion.spr` is the live cost: `explicit_wrap` is deliberately the
+  shape `redundant-vec-from-list` targets, and suppressing it takes the rule off the file's other
+  eight `vec_from_list` uses. Follow Biome again — `# sprout-ignore lint/<rule>: <reason>` applying
+  to the next line, and `# sprout-ignore-start` / `-end` for a range.
+
+  Two things make this bigger than the file-level form rather than an easy sequel. It must scan
+  every line, not just the header, so a `#` inside a multi-line backtick template can false-match —
+  the hazard `formatter.lint_spans` exists to handle for the line-based rules, and the class of bug
+  fixed in `7d1171f`. And the anchor is a line number, so it cannot serve the `unparsed` case at
+  all: inserting the directive shifts the very position it anchors to, and
+  `tests/conformance/parse_error/missing_else.spr` reports at 3:1 in a 2-line file, past the end.
+
+- [ ] `P3` **Report a suppression that no longer suppresses anything.** Both Biome and staticcheck
+  flag an unused suppression, and rustc reaches the same end with `#[expect]`; without it these
+  directives accumulate unreviewed once the code under them changes. Needs the unfiltered finding
+  set alongside the filtered one, which is why it was not folded into the landing above.
+
 ### Prelude extern relocation — status and open questions
 
 **Done 2026-08-15.** `stdlib/prelude.sprout` declared **85 `extern fn`s**, every one of them

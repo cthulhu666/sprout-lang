@@ -879,10 +879,120 @@ fn brace_body_scan(tokens: Vec token.Token, i: Int, n: Int, acc: List LintFindin
 fn brace_body_findings(tokens: Vec token.Token) -> List LintFinding =
   brace_body_scan(tokens, 0, vec_length(tokens), Nil)
 
-# lint_ast: run every AST-based rule over a source file. Parse failures yield
-# no findings (formatter.lint_source's text-based checks already cover files
-# that don't even parse; this rule set only has something to say once the
-# file is syntactically valid).
+# ---------------------------------------------------------------------------
+# Suppression directives
+#
+# `# sprout-ignore-all lint/<rule>: <reason>` turns one rule off for the whole
+# file. Transliterated from Biome's `// biome-ignore-all <category>:
+# <explanation>` (biomejs.dev/analyzer/suppressions), which is the closest prior
+# art that ports: every Biome suppression form is a LINE comment, and Sprout has
+# no block comments. ESLint's file-level form is `/* eslint-disable */` with no
+# line equivalent, so it could not be followed here.
+#
+# Both the rule name and the explanation are required, as Biome requires them.
+# An unexplained suppression is the one that accumulates unreviewed.
+#
+# The directive is honoured only in the leading header block. That is not
+# stylistic: the header is read as text before `tokenize` runs, which is what
+# lets a file that never lexes suppress `unparsed` at all.
+
+let ignore_all_directive: String = "sprout-ignore-all"
+let ignore_all_category: String = "lint"
+
+type IgnoreDirective (..) =
+  | IgnoreRule String
+  | IgnoreMalformed String
+
+# The leading header block, numbered from 1, taken FROM `strip_headers` rather
+# than by re-deriving where the header ends: every line it removes it replaces
+# with a blank one, so the header block is exactly the prefix of `src` whose
+# stripped counterpart is blank. Deriving it leaves source.sprout the single
+# authority for that boundary — a second predicate here would drift from it, and
+# a wrapped `import (a,\n b)` list is the case that would break first.
+fn header_lines(src: String) -> List (Int, String) =
+  header_lines_go(str_split_lines(src), str_split_lines(source.strip_headers(src)), 1, Nil)
+
+fn header_lines_go(orig: List String, stripped: List String, n: Int, acc: List (Int, String)) -> List (Int, String) =
+  match (orig, stripped) with
+  | (Cons o os, Cons s ss) ->
+      if string.trim(s) == "" then header_lines_go(os, ss, n + 1, Cons((n, o), acc))
+      else list_reverse(acc)
+  | _ -> list_reverse(acc)
+
+# The text after `#`, for a line whose first non-space character is one.
+fn comment_body(line: String) -> Maybe String =
+  match string.split_once(string.trim(line), "#") with
+  | Just (before, after) -> if before == "" then Just(string.trim(after)) else Nothing
+  | Nothing -> Nothing
+
+# `lint/<rule>` -> the rule id. Nothing when the category is missing or wrong:
+# the prefix is what leaves room for `fmt/` and `assist/` categories later,
+# which is why Biome namespaces its own.
+fn directive_rule_id(category: String) -> Maybe String =
+  match string.split_once(string.trim(category), "/") with
+  | Just (head, rule) ->
+      if head == ignore_all_category && string.trim(rule) != "" then Just(string.trim(rule))
+      else Nothing
+  | Nothing -> Nothing
+
+let needs_rule_msg: String =
+  "names no rule — write `" ++ ignore_all_directive ++ " " ++ ignore_all_category ++ "/<rule>: <reason>`"
+
+let needs_reason_msg: String =
+  "needs `: <reason>` — a suppression with no explanation cannot be reviewed"
+
+# Nothing for a comment that is not a directive at all — an ordinary comment
+# must stay ordinary. A comment that opens with the directive word but does not
+# complete it IS reported, or a typo in the tail would silently do nothing.
+fn parse_ignore_all(body: String) -> Maybe IgnoreDirective =
+  if body == ignore_all_directive then Just(IgnoreMalformed(needs_rule_msg))
+  else
+    match string.split_once(body, " ") with
+    | Nothing -> Nothing
+    | Just (word, tail) ->
+        if word != ignore_all_directive then Nothing
+        else
+          match string.split_once(tail, ":") with
+          | Nothing -> Just(IgnoreMalformed(needs_reason_msg))
+          | Just (category, reason) ->
+              if string.trim(reason) == "" then Just(IgnoreMalformed(needs_reason_msg))
+              else
+                match directive_rule_id(category) with
+                | Nothing -> Just(IgnoreMalformed(needs_rule_msg))
+                | Just rule -> Just(IgnoreRule(rule))
+
+fn line_directive(numbered: (Int, String)) -> Maybe (Int, IgnoreDirective) =
+  match numbered with
+  | (n, line) ->
+      match comment_body(line) with
+      | Nothing -> Nothing
+      | Just body ->
+          match parse_ignore_all(body) with
+          | Nothing -> Nothing
+          | Just d -> Just((n, d))
+
+fn file_directives(src: String) -> List (Int, IgnoreDirective) =
+  list_filter_map(line_directive, header_lines(src))
+
+fn directive_rule(d: (Int, IgnoreDirective)) -> Maybe String =
+  match d with
+  | (_, IgnoreRule rule) -> Just(rule)
+  | _ -> Nothing
+
+# A malformed directive is never itself suppressible: it is the diagnostic that
+# keeps a typo from reading as a working suppression.
+fn directive_malformed(d: (Int, IgnoreDirective)) -> Maybe LintFinding =
+  match d with
+  | (n, IgnoreMalformed why) ->
+      Just(LintFinding(n, 1, "malformed-suppression",
+        "`" ++ ignore_all_directive ++ "` " ++ why))
+  | _ -> Nothing
+
+fn finding_rule_id(f: LintFinding) -> String =
+  match f with
+  | LintFinding _ _ rule_id _ -> rule_id
+
+# ---------------------------------------------------------------------------
 # A file that does not lex or parse cannot have a single AST rule run against
 # it. Reporting it as clean would make an unchecked file indistinguishable from
 # a checked one, so the failure is itself a finding: it prints through the same
@@ -891,7 +1001,8 @@ fn brace_body_findings(tokens: Vec token.Token) -> List LintFinding =
 fn unparsed_finding(pos: source.SourcePos, reason: String) -> LintFinding =
   mk_finding(pos, "unparsed", reason ++ " — no lint rule could be checked")
 
-export fn lint_ast(src: String) -> List LintFinding =
+# Every AST-based rule over a source file, before suppression is applied.
+fn ast_findings(src: String) -> List LintFinding =
   match lexer.tokenize(source.strip_headers(src)) with
   | Err (token.TokenizeError msg pos) -> [unparsed_finding(pos, msg)]
   | Ok toks ->
@@ -901,3 +1012,10 @@ export fn lint_ast(src: String) -> List LintFinding =
           list_append(drop_desugared_matches(src, lint_program(prog)),
             list_append(list_shape_findings(src, prog),
               list_append(list_prefix_findings(src, prog), brace_body_findings(toks))))
+
+export fn lint_ast(src: String) -> List LintFinding =
+  list_append(list_filter_map(directive_malformed, ds), list_filter(kept, ast_findings(src)))
+where
+  ds = file_directives(src)
+  suppressed = list_filter_map(directive_rule, ds)
+  kept = \ (f: LintFinding) -> ! name_in_list (finding_rule_id(f), suppressed)

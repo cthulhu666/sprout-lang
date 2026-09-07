@@ -1,3 +1,4 @@
+# sprout-ignore-all lint/unparsed: parse-error fixture — this file must not parse
 module main
 
 # The `else` arm has its own discarded end index — `parse_let_binding_sub` bound

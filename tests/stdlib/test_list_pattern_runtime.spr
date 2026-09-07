@@ -8,6 +8,9 @@
 # desugar regression that produces structurally different (but parse-legal)
 # AST — without paying for tautological cross-checks on wildcard-fallthrough
 # arms where both sides return -1 by construction.
+#
+# sprout-ignore-all lint/list-shape-pattern: the raw form is half of the parity check
+# sprout-ignore-all lint/list-prefix-pattern: the raw form is half of the parity check
 
 import stdlib.test (TestState, new_state, assert_eq, summary)
 import stdlib.compiler.ast as ast
