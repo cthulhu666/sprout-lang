@@ -50,16 +50,16 @@ Legend:
 - [ ] `P3` **The effect report is one wave, not a fixed point.** An inferred effect is never written
   back to the env, so a caller of a mis-declared function is not flagged until that function is
   annotated and the compile repeated — `--phase effects` counts are a lower bound.
-- [ ] `P3` **Two zero-arg effect losses (twins).** `infer.call_effect_of` with `argc <= 0` returns an
-  unfreshened program-level `EffectVar`; `infer_call_general`'s `arrows_effect(t, argc)` returns
-  `Pure` for `argc <= 0` with no scheme fallback, losing the effect of a zero-arg call on an
-  expression callee. Both conservative; nothing in-tree hits either.
 - [ ] `P3` **Rule 9 is not checked on a class METHOD SIGNATURE** — no body, so no effect report is
   recorded. Any instance of the class is rejected, so only a class declared and never instantiated
   escapes. `docs/effect-enforcement-v0.md` §13.
 
 **Types and inference**
 
+- [ ] `P1` **A nullary function's type IS its return type — `() -> T` collapses to `T`**, so a
+  function value and a plain `T` are one type. `fn f(x: Int) -> Int = x()` type-checks and segfaults;
+  an `!{IO}` thunk bound by `let` launders its effect. Memory-unsafe from ordinary well-typed source,
+  and it blocks part 4 of effect subsumption. Decision open: `docs/nullary-type-collapse-v0.md`.
 - [ ] `P1` **Int overflow policy (DEFERRED 2026-07-06).** `+`/`-`/`*` do silent two's-complement wrap
   (plain `add/sub/mul i64`, no `nsw`), contradicting the spec's arbitrary-precision `Int` intent.
   Option A (trap/panic, Swift/Rust-debug/Zig) vs Option B (Go: wrap, compile-error on literals only);
