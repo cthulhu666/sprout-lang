@@ -2125,6 +2125,49 @@ Legend:
   above (parameterized arrow-bodied aliases, aliases in record-field position) and probably
   one root cause: alias expansion is not run over an alias's own body.
 
+- [ ] `P1` **TUI M4 — the widget library (`stdlib/tui/widgets/`).** M0–M3 shipped the core
+  (`geometry`, `screen`, `style`, `event`, `keys`, `text`, `layout`, `widget`, `app`) and
+  routing landed 2026-09-07, so the `View` contract is settled — which is why the widget set
+  is written now rather than earlier: every `View` construction breaks on a field addition,
+  and `route` was the last field. **stdlib ships no widget at all today.** Filed 2026-09-07
+  because the milestone existed only as forward references from the three entries it resolves
+  (the container gap below, id namespacing and `route_when` above) and as an out-of-repo plan
+  file, which §Agent Memory Discipline says is the wrong home for it. Design of the core:
+  `docs/tui-widgets-v0.md` — it covers the widget box, layout and the pump, **not** the
+  widget set, so the set wants its own design pass (prior-art survey included) before C1.
+
+  **The evidence the containers are missing.** `examples/tui_dashboard.sprout` hand-writes its
+  `Box` container in **93 lines and 15 helpers of a 284-line example** (`:166-258`) — a third
+  of the file is the container, not the application. It implements four traversals a stdlib
+  container should own once: broadcast an event to children and concatenate their messages and
+  commands; walk a `Delivery` down and stop at the first child that claims it; solve the
+  region list through `layout.row`/`column`; and render children against it pairwise. The
+  delivery walk is now written **twice in-tree, identically** — the example and
+  `tests/stdlib/test_tui_route.spr`. The first-claimant rule is a convention each container
+  reimplements rather than something the framework enforces, so shipping the container is also
+  what makes id-collision behaviour uniform.
+
+  - **C1 — containers and the static set.** `row`/`column`/`grid` container widgets over the
+    existing `layout` solvers, plus `static` and `label`. Rewrite
+    `examples/tui_dashboard.sprout` onto them, which is the acceptance test: the example
+    should lose its `Box` section entirely. Closes the container entry below.
+  - **C2 — focus and the interactive set.** `button`, `input`, `list_view`. Focus is what
+    makes `ToEvent` reachable, and both routing `P3`s above are scoped to land with it:
+    `route_when` (an unhandled key must be able to bubble, which `route_if` prevents) and
+    `WidgetId` namespacing (two copies of one widget answer to one id). Do not start C2 with
+    those two left open — they are corrections to the contract C2 is written against.
+  - **C3 — the larger widgets.** `scroll_view`, `tabs`, `tree`, `table`, `text_area`. Split
+    off because `text_area` carries the language work below and should not gate the rest.
+
+  **Language work, and it needs sign-off first.** `text_area`/`input` want `mutvec_insert` /
+  `mutvec_remove` in `stdlib.mutable`. `insert` composes from `push` + shift, but `remove`
+  needs a new builtin (`vector_remove`) — **Collaboration Rule 6, so approve it before C3
+  starts, not during.** Same family as the deferred `pop`/`truncate`/`clear` in *Growable
+  `MutVec` — the deferred operations* (§5 `P3`). Prior art for the editing widget is
+  in-tree: `stdlib/repl.sprout` already owns `insert_at`, `delete_before` and
+  `history_prev`/`history_next`, and those are the only text-editing primitives anywhere in
+  the tree.
+
 - [x] `P2` **Record-field effect variables are erased at construction, so a pure signature
   can launder IO. FIXED 2026-09-07 — effect variables are now rejected in stored positions
   (spec §7 rule 9, `checker.stored_effect_var_error`).** Kuba chose the variable-only ban over
@@ -2319,7 +2362,8 @@ Legend:
   demonstrates in about thirty lines, broadcasting events to children and spending
   `layout.row`/`layout.column` on their regions. But every application currently has to write
   that itself. `row`/`column`/`grid` container widgets belong to the M4 widget library, noted
-  here so the gap is attributed rather than rediscovered. As of the command landing the demo's
+  here so the gap is attributed rather than rediscovered — **scoped as M4 C1 above, which is
+  where it gets closed.** As of the command landing the demo's
   container also has to forward its children's *commands*, which is more boilerplate per
   application and strengthens the case. **Routing landed 2026-09-07 and adds a third
   hand-written traversal**: the downward walk of a `Delivery`, stopping at the first child
