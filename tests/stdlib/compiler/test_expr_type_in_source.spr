@@ -62,6 +62,15 @@ fn constrained_source() -> String =
     ++ "\n"
     ++ "fn show_via(x: a) -> String where MyShow a = myshow(x)\n"
 
+# An existential constructor: the only place a generated variable reaches BOTH halves of the
+# rendering, since its constraint head is the variable's own name rather than a position.
+fn existential_source() -> String =
+  "class MyShow a {\n"
+    ++ "  fn myshow(x: a) -> String\n"
+    ++ "}\n"
+    ++ "\n"
+    ++ "type Shown = | Shown (any MyShow)\n"
+
 fn source_using_package() -> String =
   "import demo.greet (greeting)\n"
     ++ "\n"
@@ -198,12 +207,46 @@ fn main() -> Unit !{IO} =
 
     # --- a class method is constrained by its own class ---
     #
-    # Its Scheme carries no constraint list, so `fmap` rendered as `(b -> c) -> a b -> a c`
-    # with nothing explaining the `a b`. The class variable is quantified first, hence
-    # `Functor a` here and `Functor c` for `map`.
+    # Its Scheme carries no constraint list, so `fmap` rendered with nothing explaining its
+    # higher-kinded head.
     method <- rendered_type(plain_source(), "fmap", sr, Nil, cache)
     assert_true(state, "a class method reports the class that constrains its variable",
-      string.contains(method, "where ") && string.contains(method, "Functor a"))
+      string.contains(method, "where ") && string.contains(method, "Functor f"))
+
+    # The prelude writes `fn fmap(f: a -> b, xs: f a) -> f b`, and that is what hover shows.
+    # Renaming by binder position printed `(b -> c) -> a b -> a c where Functor a`, because
+    # a method's class parameter is prepended to its binders and so always landed on `a`.
+    assert_true(state, "a class method's variables read as the class declares them",
+      string.contains(method, "(a -> b) -> f a -> f b"))
+
+    # A free function over the same class is written with its own letters and keeps them, so
+    # the two now differ only where the source does.
+    free_fn <- rendered_type(plain_source(), "map", sr, Nil, cache)
+    assert_true(state, "a free function keeps the variables its signature declares",
+      string.contains(free_fn, "(a -> b) -> c a -> c b")
+        && string.contains(free_fn, "Functor c"))
+
+    # --- a constructor names the type's parameters, not its own argument order ---
+    #
+    # `type Result e a = Ok a | Err e`. Binders come from the TYPE declaration, so position
+    # ordering lettered one constructor's payload `b` and the other's `a`, and `Result a b`
+    # meant something different on each line.
+    ok_ctor <- rendered_type(plain_source(), "Ok", sr, Nil, cache)
+    assert_true(state, "a constructor reports the type parameters as declared",
+      string.contains(ok_ctor, "a -> Result e a"))
+
+    err_ctor <- rendered_type(plain_source(), "Err", sr, Nil, cache)
+    assert_true(state, "a sibling constructor agrees on what those parameters are called",
+      string.contains(err_ctor, "e -> Result e a"))
+
+    # `parser.build_any_field` names this variable, not the author, so it is renamed like any
+    # other generated one — and the clause must follow, since its head is that same name.
+    exist_ctor <- rendered_type(existential_source(), "Shown", sr, Nil, cache)
+    assert_true(state, "an existential constructor renames the variable the parser minted",
+      string.contains(exist_ctor, "existv") == false)
+
+    assert_true(state, "its constraint names the variable its type shows",
+      string.contains(exist_ctor, "a -> ") && string.contains(exist_ctor, "MyShow a"))
 
     # A buffer-declared class: its marker is keyed by the bare method name while its class
     # name renders qualified, so assuming the two share a spelling breaks here.

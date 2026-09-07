@@ -30,37 +30,104 @@ fn main() -> Unit !{IO} =
     # A rendered scheme that drops its constraints is not the type of anything. Without
     # the where clause, `minimum` reads as `forall a b. a b -> Maybe b` — a higher-kinded
     # application with no explanation, which is worse than saying nothing.
+    #
+    # The binders below are `$t…` throughout: only an inference-generated name is renamed,
+    # so a source-spelled binder would print itself and stop exercising the rename.
     check_eq("a positional constraint renders as a where clause",
-      types.scheme_to_string(types.scheme_quantified(Cons("x", Nil),
-        types.TFunc(types.TVar(types.tyvar_id("x")), types.type_string(), types.EffectPure, types.OwnConsume),
+      types.scheme_to_string(types.scheme_quantified(Cons("$t0", Nil),
+        types.TFunc(types.TVar(types.tyvar_id("$t0")), types.type_string(), types.EffectPure, types.OwnConsume),
         types.EffectPure, Cons(("#pos:0", "MyShow"), Nil))),
       "forall a. a -> String where MyShow a"),
 
     # The head token decodes against the RENAMED binders, so `#pos:0` prints as `a`
     # whatever the inference engine called the variable.
     check_eq("a concrete head renders by name, beside a positional one",
-      types.scheme_to_string(types.scheme_quantified(Cons("x", Nil),
-        types.TApp(types.TConst(types.type_id("Box")), types.TVar(types.tyvar_id("x"))),
+      types.scheme_to_string(types.scheme_quantified(Cons("$t0", Nil),
+        types.TApp(types.TConst(types.type_id("Box")), types.TVar(types.tyvar_id("$t0"))),
         types.EffectPure, Cons(("#pos:0", "Show2"), Cons(("Box", "Fold2"), Nil)))),
       "forall a. Box a where Show2 a, Fold2 Box"),
 
     # The clause follows the effect, matching how a signature is written.
     check_eq("the where clause follows the effect suffix",
-      types.scheme_to_string(types.scheme_quantified(Cons("x", Nil),
-        types.TFunc(types.TVar(types.tyvar_id("x")), types.type_string(), types.EffectIO, types.OwnConsume),
+      types.scheme_to_string(types.scheme_quantified(Cons("$t0", Nil),
+        types.TFunc(types.TVar(types.tyvar_id("$t0")), types.type_string(), types.EffectIO, types.OwnConsume),
         types.EffectIO, Cons(("#pos:0", "MyShow"), Nil))),
       "forall a. a -> String !{IO} where MyShow a"),
 
     # A headless constraint names no type, so there is nothing to print it against.
     check_eq("a headless constraint contributes nothing",
-      types.scheme_to_string(types.scheme_quantified(Cons("x", Nil),
-        types.TVar(types.tyvar_id("x")), types.EffectPure, Cons(("#none", "Sized"), Nil))),
+      types.scheme_to_string(types.scheme_quantified(Cons("$t0", Nil),
+        types.TVar(types.tyvar_id("$t0")), types.EffectPure, Cons(("#none", "Sized"), Nil))),
       "forall a. a"),
 
     check_eq("an unconstrained scheme renders no where clause",
-      types.scheme_to_string(types.scheme_quantified(Cons("x", Nil),
-        types.TVar(types.tyvar_id("x")), types.EffectPure, Nil)),
+      types.scheme_to_string(types.scheme_quantified(Cons("$t0", Nil),
+        types.TVar(types.tyvar_id("$t0")), types.EffectPure, Nil)),
       "forall a. a"),
+
+    # --- which names survive rendering ---
+    #
+    # A binder the author wrote is printed as written. Renaming it by binder position gave
+    # the two constructors of one type contradictory letters — `Ok : b -> Result a b` beside
+    # `Err : a -> Result a b` — because the position a variable holds in the type
+    # declaration is not the order it appears in a constructor's arrow.
+    check_eq("a source-written binder prints itself",
+      types.scheme_to_string(types.scheme_quantified(Cons("e", Cons("a", Nil)),
+        types.TFunc(types.TVar(types.tyvar_id("a")),
+          types.TApp(types.TApp(types.TConst(types.type_id("Result")), types.TVar(types.tyvar_id("e"))),
+            types.TVar(types.tyvar_id("a"))),
+          types.EffectPure, types.OwnConsume),
+        types.EffectPure, Nil)),
+      "forall e a. a -> Result e a"),
+
+    # `$` cannot open a user identifier (unifier.fresh), so the prefix is a total test for
+    # "the engine minted this", not a heuristic.
+    check_eq("an inference-generated binder is renamed",
+      types.scheme_to_string(types.scheme_quantified(Cons("$t7", Cons("$t2", Nil)),
+        types.TFunc(types.TVar(types.tyvar_id("$t7")), types.TVar(types.tyvar_id("$t2")),
+          types.EffectPure, types.OwnConsume),
+        types.EffectPure, Nil)),
+      "forall a b. a -> b"),
+
+    # A scheme can hold both kinds at once. Handing `$t0` the letter `a` would collide with
+    # the source binder already called `a` and merge two distinct variables into one name.
+    check_eq("a renamed binder skips a letter a source binder holds",
+      types.scheme_to_string(types.scheme_quantified(Cons("a", Cons("$t0", Nil)),
+        types.TFunc(types.TVar(types.tyvar_id("a")), types.TVar(types.tyvar_id("$t0")),
+          types.EffectPure, types.OwnConsume),
+        types.EffectPure, Nil)),
+      "forall a b. a -> b"),
+
+    # A positional head still decodes, so a class method names the variable its type shows.
+    check_eq("a positional head names a source-written binder",
+      types.scheme_to_string(types.scheme_quantified(Cons("f", Cons("a", Nil)),
+        types.TApp(types.TVar(types.tyvar_id("f")), types.TVar(types.tyvar_id("a"))),
+        types.EffectPure, Cons(("#pos:0", "Functor"), Nil))),
+      "forall f a. f a where Functor f"),
+
+    # `infer.unann_param_var` mints the placeholder for a slot the author left unannotated.
+    # Its own comment calls it a name no source program can write, which is what makes the
+    # match on it exact.
+    check_eq("an unannotated-slot placeholder is renamed",
+      types.scheme_to_string(types.scheme_quantified(Cons("_unann@id/x", Nil),
+        types.TFunc(types.TVar(types.tyvar_id("_unann@id/x")), types.TVar(types.tyvar_id("_unann@id/x")),
+          types.EffectPure, types.OwnConsume),
+        types.EffectPure, Nil)),
+      "forall a. a -> a"),
+
+    # `parser.build_any_field` mints this for `(any ToString)`. Unlike the two above it is a
+    # spelling a user could write, so only a numeric tail counts.
+    check_eq("an existential variable is renamed",
+      types.scheme_to_string(types.scheme_quantified(Cons("existv0", Nil),
+        types.TFunc(types.TVar(types.tyvar_id("existv0")), types.TConst(types.type_id("Shown")),
+          types.EffectPure, types.OwnConsume),
+        types.EffectPure, Cons(("existv0", "ToString"), Nil))),
+      "forall a. a -> Shown where ToString a"),
+
+    check_eq("a name merely starting with existv is left alone",
+      types.scheme_to_string(types.scheme_quantified(Cons("existvalue", Nil),
+        types.TVar(types.tyvar_id("existvalue")), types.EffectPure, Nil)),
+      "forall existvalue. existvalue"),
 
     # The monomorphic branch is deliberately untouched: its rendering is not just read by
     # a human, it is sniffed by the REPL's eval path to decide how to run an expression
