@@ -16,6 +16,11 @@ Legend:
 
 **Effects**
 
+- [ ] `P1` **A declared effect is not enforced once a function is passed as a VALUE.**
+  `fn pure_map(xs: List Int) -> List Int = list_map(shout, xs)` runs IO and reports
+  `declared pure, inferred pure`; an instance may also strengthen its class's effect, and a
+  pure declaration may call an `!{e}` parameter. Three parts, migration cost measured zero
+  on 127 in-tree + 199 downstream files. `docs/effect-subsumption-v0.md`.
 - [ ] `P2` **Top-level `let` initializers are not checked for purity.** Spec §6 states the rule
   normatively and nothing checks it — `let boom = print("x")` type-checks. `LetDecl` discards the
   initializer's inferred effect and `--phase effects` does not enumerate top-level `let`s, so the

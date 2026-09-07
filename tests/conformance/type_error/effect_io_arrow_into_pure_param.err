@@ -1,1 +1,1 @@
-performs IO but is declared pure
+a function that performs IO cannot be used where a pure one is required
