@@ -737,6 +737,11 @@ fn constraint_head_name(renamed_vars: List String, head: String) -> Maybe String
   else if str_starts_with(head, "#app:") then Just(str_slice(head, 5, str_len(head)))
   else Just(head)
 
+# Writer for the positional head token `constraint_head_name` reads. Position, not source
+# name: a synthesized constraint's variable is renamed for display, so a name token would
+# print `Functor f` against a type reading `a b -> a c`.
+export fn constraint_head_at(k: Int) -> String = "#pos:" ++ int_to_string(k)
+
 fn nth_string(xs: List String, k: Int) -> Maybe String =
   if k < 0 then Nothing
   else

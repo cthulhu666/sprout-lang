@@ -196,6 +196,27 @@ fn main() -> Unit !{IO} =
     assert_true(state, "a constrained name reports the constraint that makes it one",
       string.contains(constrained, "where ") && string.contains(constrained, "MyShow a"))
 
+    # --- a class method is constrained by its own class ---
+    #
+    # Its Scheme carries no constraint list, so `fmap` rendered as `(b -> c) -> a b -> a c`
+    # with nothing explaining the `a b`. The class variable is quantified first, hence
+    # `Functor a` here and `Functor c` for `map`.
+    method <- rendered_type(plain_source(), "fmap", sr, Nil, cache)
+    assert_true(state, "a class method reports the class that constrains its variable",
+      string.contains(method, "where ") && string.contains(method, "Functor a"))
+
+    # A buffer-declared class: its marker is keyed by the bare method name while its class
+    # name renders qualified, so assuming the two share a spelling breaks here.
+    own_method <- rendered_type(constrained_source(), "myshow", sr, Nil, cache)
+    assert_true(state, "a class method declared in the same source reports its class",
+      string.contains(own_method, "where ") && string.contains(own_method, "MyShow a"))
+
+    # Negative control: "attach a clause to any name found in the env" passes both
+    # assertions above and fails here.
+    unconstrained <- rendered_type(plain_source(), "twice", sr, Nil, cache)
+    assert_true(state, "an unconstrained function reports no constraints",
+      string.contains(unconstrained, "where ") == false)
+
     # The recovery is for a NAME. An ill-typed expression has no env entry to fall back
     # on, so its diagnostics survive — without this control, "answer from the env on any
     # failure" would look identical and would swallow every real type error.
