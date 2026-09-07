@@ -339,3 +339,24 @@ annoying.
 4. **Re-run `just bench-string-concat`** after, and update §4. A change to the
    lowering moves the crossover by construction; if the numbers do not move, the
    change did not take effect.
+
+## 11. The `ir_lowering` case — where the quadratic actually bites
+
+`lower_ops`, `lower_blocks`, `lower_fns` and the same shape in `sprout_ir.print_*`
+assemble IR text with `++` in a recursion at all three nesting levels. Each of n frames
+concatenates onto the entire remaining tail, so emitting a block of n ops copies
+O(n × total) bytes. §6 prohibits exactly this and `string.join` is the sanctioned form;
+the fix is mechanical and local.
+
+**This does not contradict the "string concatenation was the wrong target" correction —
+the two measure different regimes and both stand.** That correction profiled a *real*
+input and correctly found the live heap is 85% ADT nodes and 12.5% CSTR: real code is
+many small blocks, so each recursion runs over ~10–50 ops and the quadratic term never
+grows. The regime that hurts is **one block with a very large op count** — a
+1,600-element literal lowers to ~17,820 ops in a single block.
+
+It interacts with the byte-blind GC trigger (`docs/gc-generational-v0.md` §11): fixing
+**either** removes the quadratic RSS. This one is cheaper and lower-risk, but it hides
+the GC bug rather than closing it. **Unmeasured:** whether the fix actually collapses
+the curve. That needs a stage-2 build, and the claim should not be repeated as fact
+until someone runs it.
