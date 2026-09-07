@@ -1,0 +1,18 @@
+module main
+
+# Reuse over a container. Correct under linear semantics — a Maybe of a resource
+# cannot be consumed twice — and a NEW restriction on code that compiled before
+# containment; see docs/linearity-virality-v0.md §7.
+
+type linear File = File Int
+
+fn close_all(m: Maybe File) -> Int =
+  match m with
+  | Just f -> match f with | File n -> n
+  | Nothing -> 0
+
+fn go() -> Int =
+  let m = Just(File(1))
+  in close_all(m) + close_all(m)
+
+fn main() -> Unit !{IO} = print(to_string(go()))

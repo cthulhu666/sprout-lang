@@ -1,0 +1,17 @@
+module main
+
+# Branch convergence over a container. All three existing rules — leak, reuse and
+# convergence — start seeing containers, not just the leak rule.
+
+type linear File = File Int
+
+fn close_all(m: Maybe File) -> Int =
+  match m with
+  | Just f -> match f with | File n -> n
+  | Nothing -> 0
+
+fn go(b: Bool) -> Int =
+  let m = Just(File(1))
+  in if b then close_all(m) else 0
+
+fn main() -> Unit !{IO} = print(to_string(go(true)))

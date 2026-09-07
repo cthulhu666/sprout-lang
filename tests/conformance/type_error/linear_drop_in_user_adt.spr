@@ -1,0 +1,14 @@
+module main
+
+# A USER-declared container, which is the row a `List`/`Maybe`/tuple special case
+# would leave open. Nothing about `Box` is known to the checker beyond its shape.
+
+type linear File = File Int
+
+type Box a = Box a
+
+fn go() -> Int =
+  let b = Box(File(1))
+  in 7
+
+fn main() -> Unit !{IO} = print(to_string(go()))

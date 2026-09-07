@@ -1276,7 +1276,18 @@ binder that can hold a linear value — **function parameters**, **do-block `let
 **match-arm pattern variables** (a variable pattern aliases the whole linear
 scrutinee; a constructor/tuple sub-pattern binds a linear field), and **`<-`
 do-bind** variables — in `fn`, top-level `let`, and instance-method bodies, and is
-checked on every control-flow path:
+checked on every control-flow path.
+
+A binder carries the obligation when its type **is** a linear type or **contains**
+one as a type argument or tuple component. `let m = Just(File(1))` is bound by the
+rules below even though `Maybe File` is not itself a linear type, and so is a
+user-declared container (`Box File`) — the test is structural, not a list of known
+containers. A **function type is not descended**: `Unit -> File` is a recipe for a
+resource rather than a resource, so binding one and never calling it leaks nothing.
+Containment does not make the containing type linear; it decides which *bindings*
+are tracked (see "Containment virality" under Deferred, below).
+
+The rules:
 
 - **Reuse** — a linear binding referenced more than once along a path is rejected.
 - **Leak** — a linear binding referenced zero times in its scope is rejected.
@@ -1292,9 +1303,12 @@ checked on every control-flow path:
   silence. The **final** statement is exempt — it is the block's result, so the
   obligation passes to the caller.
 
-  Containment is checked because in a `Maybe`/`Result` block *every* statement has
-  type `Maybe X`/`Result E X`; a rule reading only the type's head could never fire
-  in a short-circuiting block. A bare type variable is rejected conservatively —
+  Containment is checked here for a reason of its own: in a `Maybe`/`Result` block
+  *every* statement has type `Maybe X`/`Result E X`, so a rule reading only the
+  type's head could never fire in a short-circuiting block at all. It is the same
+  containment the binder rules use, and one predicate answers for both — they
+  disagreed until 2026-09-07, which made `Maybe File` a leak in statement position
+  and not in binder position. A bare type variable is rejected conservatively —
   the body is checked with the variable rigid, and a caller may instantiate it at
   a linear type — which can refuse a program that only ever instantiates it at a
   non-linear type. Sprout has no linearity bound on a type parameter with which to
@@ -1491,8 +1505,15 @@ it inside the task instead.
   combinator form (`list_each(xs, \x -> write(conn, x))`) is still out of reach.
   The spawn-a-handler server shape is no longer: it is a move into a one-shot
   closure, and `stdlib.http_server` now runs on the linear socket API throughout.
-- Containment virality — linearity is *per-declaration*: a record that merely
-  contains a linear field is not itself linear (contrast Austral).
+- Containment virality **as a property of types** — linearity is still
+  *per-declaration*: a record that merely contains a linear field is not itself
+  linear (contrast Austral), so `Maybe File` is not a linear type and a *parameter*
+  of that type is not a linear parameter. What containment does decide is which
+  **bindings** carry the use-exactly-once obligation, which is checked (above).
+  Making it a type property would reach parameter modes, borrowing and field reads;
+  it is deferred until a linearity bound on type parameters exists to say "`Chan` is
+  non-linear in its argument", without which some correct concurrent code becomes
+  unwritable in its natural shape. See `docs/linearity-virality-v0.md`.
 - `borrowing` inside an **arrow type**, and a modifier on a **type-variable**
   parameter. Both are described above; both need work this milestone deliberately
   did not take on (a parser change, and a linearity bound on type parameters).

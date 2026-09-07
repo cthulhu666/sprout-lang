@@ -1,0 +1,15 @@
+module main
+
+# A linear value inside a NON-linear container, bound by `let..in`. The type head
+# of the binder is `Maybe`, which is not linear, but the `File` it carries is
+# created and dropped. The discarded-do-step path already rejects this shape
+# (linear_discarded_container); the binder path must agree — see
+# docs/linearity-virality-v0.md §1.1.
+
+type linear File = File Int
+
+fn go() -> Int =
+  let m = Just(File(1))
+  in 7
+
+fn main() -> Unit !{IO} = print(to_string(go()))

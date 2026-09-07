@@ -1,0 +1,14 @@
+module main
+
+# A match-arm variable binding a container of a linear. The arm binder gets its
+# type from the constructor field, so this exercises the same predicate one level
+# down from the `let` case.
+
+type linear File = File Int
+
+fn go() -> Int =
+  match Just(Just (File(1))) with
+  | Just m -> 7
+  | Nothing -> 0
+
+fn main() -> Unit !{IO} = print(to_string(go()))

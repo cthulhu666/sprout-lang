@@ -1,10 +1,22 @@
 # Containment virality for linear types — design note (v0)
 
-Status: **design note, pre-approval.** Written 2026-08-26. Asks for a call on whether a type
-that *contains* a linear value is itself linear ("virality"), which is the root cause behind a
-`P1` soundness item and a `P3` design item in `BACKLOG.md` that are, on inspection, the same
-question. No implementation has landed; the one-line probe described in §10 was built, measured,
-and reverted.
+Status: **Option 1 DECIDED and LANDED 2026-09-07** (Kuba). A binder whose type *contains* a
+linear type carries the use-exactly-once obligation; linearity remains per-declaration as a
+property of *types*, so Option 2 (full virality) stays deferred behind a linearity bound on type
+parameters, per §7 and §11. Written 2026-08-26 as a pre-approval note asking that call.
+
+Two corrections to what shipped, against §4's "one predicate swap at `linear_check.sprout:190`":
+
+- **Two swaps, not one.** A `do`-block `let` reaches `lin_do_let`, a second binder path with its
+  own head-only test, which the `:190` swap does not touch — measured 2026-09-07, `do { let m =
+  Just(File(1)); 7 }` still compiled after it. Fixture `linear_drop_in_do_let`.
+- **The §8 diagnostic was the bulk of the work.** Naming the contained type needs the binder list
+  to carry types rather than names, which threads through `pattern_linear_binders`,
+  `unconsumed_binder` and the scope-close plumbing. The predicate was one line; this was not.
+
+Also landed: `type_mentions_linear` is now derived from `first_linear_in`, a single walk returning
+*which* linear type was found — so the containment notion the two paths share has one definition
+and the diagnostic reads it rather than recomputing it.
 
 Companion to the M4 linearity docs — `docs/linear-types-m4-scoping-2026-08-01.md`,
 `docs/linear-types-m4.2-enforcement-2026-08-06.md`, `docs/linear-borrowing-v0.md`,

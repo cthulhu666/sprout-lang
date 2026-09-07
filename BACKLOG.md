@@ -4052,19 +4052,26 @@ and `docs/linear-types-m4.2-enforcement-2026-08-06.md`. Deferred, in the order t
   `tests/stdlib/test_linear_cross_module.spr` `consume_annotated`.
 - [x] **Enforcement at top-level `let` and instance-method bodies — DONE** (2026-08-06). Wired via
   `letdecl_linear_gate` (LetDecl) and `fn_linear_gate` in `check_instance_method`.
-- [ ] `P3` **Containment virality.** Linearity is per-declaration: a record that merely *contains*
-  a linear field is not itself linear (contrast Austral, which computes linearity by containment).
-  Decide whether to adopt virality; if so, compute a type's linearity from its fields' universes
-  rather than only its own `@linear:` marker.
-  **Design note written 2026-08-26: [docs/linearity-virality-v0.md](docs/linearity-virality-v0.md),
-  awaiting a call.** This entry and the `P1` "a linear value dropped *inside a container*" below
-  are the SAME question — the `P1` is not independently fixable, because "catch drops inside
-  containers" *is* deciding this. Do not work either one in isolation. The note also finds that
-  Sprout already answers containment inconsistently (`type_mentions_linear` in statement position
-  vs head-only `type_is_linear` at the binder, both measured), so this is closing an existing
-  incoherence rather than adding a rule. The note recommends the binder-only scope first and asks
-  that full virality be decided jointly with the effect-bind `P2` above, which wants the opposite
-  answer for parameters.
+- [~] `P3` **Containment virality — binder half DECIDED and LANDED 2026-09-07; type half still
+  open.** Merged here with the former `P1` "a linear value dropped *inside a container*", which the
+  design note showed was the same question. Decision (Kuba): **Option 1**, containment decides which
+  *bindings* carry the obligation; linearity stays per-declaration as a property of *types*, so a
+  record containing a linear field is still not itself linear (contrast Austral) and a `Maybe File`
+  *parameter* is still not a linear parameter. Spec §5.8 states both halves.
+  **What landed:** `pattern_linear_binders` and `lin_do_let` ask `type_mentions_linear` instead of
+  head-only `type_is_linear` — two binder paths, not the one the note predicted; and
+  `type_mentions_linear` is now derived from `first_linear_in`, which returns *which* linear type it
+  found so the leak diagnostic can name it (`its type \`List File\` contains the linear type
+  \`File\``). Fixtures `type_error/linear_drop_in_{maybe,list,tuple,user_adt,do_let,match_arm}` and
+  `linear_container_{reuse,branch_diverge}`, positive + carve-out controls in
+  `tests/stdlib/test_linear_binders.spr`. Corpus-neutral: all suites, 54/54 examples, and the sole
+  downstream consumer's two linear-using files check clean.
+  **Still open — Option 2, full virality** (linearity computed by containment *everywhere*, reaching
+  parameter modes, borrowing filters and field reads). Blocked on a linearity bound for type
+  parameters, and to be decided **jointly with the effect-bind `P2` below**, which wants the opposite
+  answer for parameters. §6 of the note has the two questions it opens (a type variable's universe;
+  declaration-level recursion needing a visited set) that the binder scope avoids because a binder's
+  type is already concrete. See [docs/linearity-virality-v0.md](docs/linearity-virality-v0.md).
 - [ ] `P3` **Cross-module linear-reject conformance coverage.** The `type_error` harness invokes
   `--phase check` without `--package-root`, so a cross-module *misuse* of an imported `type linear`
   cannot be expressed as a conformance fixture. Cross-module enforcement is verified manually and
@@ -4238,41 +4245,7 @@ and `docs/linear-types-m4.2-enforcement-2026-08-06.md`. Deferred, in the order t
 - [ ] `P3` **`&`/`&mut` (shared-XOR-mutable) split.** v0 ships borrow-vs-consume only; a
   read-vs-write refinement is a later increment. `docs/linear-borrowing-v0.md` §2, §13.
 
-- [ ] `P1` **A linear value dropped *inside a container* is not caught — `let..in` binder path**
-  (found 2026-08-10 while designing the green-task pool, `docs/green-task-pool-v0.md` §7.4). A bare
-  drop is caught; wrapping the value in anything hides it:
-
-  **Design note written 2026-08-26: [docs/linearity-virality-v0.md](docs/linearity-virality-v0.md),
-  awaiting a call — do not implement before reading it.** All five rows below re-verified against
-  `f8556ab0`; the table is accurate. Three things the note adds. (1) This is **the same question**
-  as the `P3` "Containment virality" above, so it is not independently fixable — the note is
-  written against both. (2) The root cause is one predicate: `linear_check.sprout:190` calls
-  head-only `type_is_linear` while the discarded-`do`-step rule at `:1034` calls the containment-
-  aware `type_mentions_linear`, so `Maybe Res` is already a leak in statement position and not in
-  binder position (both measured). The containment predicate ships today. (3) A one-line swap at
-  `:190` was built via `just build-stage2` and measured: it closes all four rows **including the
-  user-ADT `Box` row** (it walks `TApp` structurally rather than enumerating containers), keeps the
-  single-use control compiling, and is corpus-neutral — `test-stdlib-stage2` all suites passed and
-  all 52 examples compiled. Note it also makes *reuse* fire on containers, which is correct under
-  linear semantics but is a new restriction; see §7 of the note.
-
-  | shape | result |
-  |---|---|
-  | `let r = Res(1) in 7` | **caught** — "linear value 'r' is never used" |
-  | `let xs = [Res(1)] in 7` | silently dropped |
-  | `let p = (Res(1), 2) in 7` | silently dropped |
-  | `let b = Box(Res(1)) in 7` (user ADT) | silently dropped |
-  | `let m = Just(Res(1)) in 7` | silently dropped |
-
-  Distinct from the DONE discarded-do-step work at `:1066`, which added a *containment* test for
-  `_ <- e` / non-final do-steps. This is the **pure `let..in` binder**: no obligation attaches to
-  `xs` because `List Res` is not itself linear, so no rule ever asks about the `Res(1)` inside.
-  Also adjacent to the open Position A/B call at `:1100` (constructor-field discard) — the same
-  question of what counts as a real consume. Probes in `docs/green-task-pool-v0.md` §7.4 are
-  ready-made fixtures. **Ranked P1 because it is soundness, not ergonomics:** the practical
-  consequence is that a resource pool protects its *contents* (each acquired resource must be
-  consumed exactly once — verified) but dropping the pool itself with resources inside is silent.
-
+- [x] `P1` **A linear value dropped *inside a container* is not caught.** DONE 2026-09-07 — merged into the `P3` "Containment virality" entry above, which the design note showed was the same question; the decision, what landed, and the still-open type half are recorded there. All five rows of the original table (`[Res(1)]`, `(Res(1), 2)`, `Just(Res(1))`, `Box(Res(1))` and the bare control) are now conformance fixtures.
 - [ ] `P2` **Raise priority: the over-strict effect-bind fallback now has a concrete consumer.**
   The "*Remaining over-strict edge*" recorded at `:1059` — `x <- e` where `e : Container Linear
   !{IO}` types `x` as the payload, so a non-linear container of a linear is conservatively rejected
