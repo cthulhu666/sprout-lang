@@ -1,0 +1,91 @@
+import stdlib.test (check_eq, check_true, run_suite)
+import testsupport.rec_fixture (Cfg, Holder, Empty, default_cfg, cfg_sum)
+
+# A constructor named without parentheses is a function value (spec §5.3).
+#
+# `infer.value_ref_eta` rewrites the bare mention into `\(x…) -> C(x…)`, the same
+# lambda `C(_, …, _)` has always desugared to. Two call sites drive it and they are
+# different code paths, so both are exercised below: `eta_expand_constrained_arg`
+# for a mention in ARGUMENT position, and `infer_var` for one anywhere else.
+#
+# The imported cases are the reason this file imports a fixture module. The
+# rewrite is keyed on a `@ctor:<name>` env marker, and markers ride across a
+# module boundary unprefixed while schemes are qualified — so a same-module test
+# cannot tell a working lookup from one that only happens to agree.
+
+type Wrapped = | Wrapped Int
+
+type Pair = | Pair Int String
+
+type Msg a = | ChildMsg a | Quit
+
+wrap Meters = Int
+
+fn unwrap(w: Wrapped) -> Int =
+  match w with
+  | Wrapped n -> n
+
+fn render_pair(p: Pair) -> String =
+  match p with
+  | Pair n s -> `${int_to_string(n)}${s}`
+
+fn msg_value(m: Msg Int) -> Int =
+  match m with
+  | ChildMsg n -> n
+  | Quit -> 0
+
+fn meters_value(m: Meters) -> Int =
+  match m with
+  | Meters n -> n
+
+fn holder_sum(h: Holder) -> Int =
+  match h with
+  | Holder c -> cfg_sum(c)
+  | Empty -> 0
+
+fn maybe_or(d: Int, m: Maybe Int) -> Int =
+  match m with
+  | Just n -> n
+  | Nothing -> d
+
+# Value position that is NOT a call argument: a return value. This reaches
+# `infer_var`, whereas every `list_map(C, …)` below reaches
+# `eta_expand_constrained_arg` instead.
+fn wrapped_ctor() -> Int -> Wrapped = Wrapped
+
+fn pair_ctor() -> Int -> String -> Pair = Pair
+
+# A zero-arity constructor must stay a plain value. Were the rewrite to fire here
+# it would build `\-> Nothing()`, which is not a shape the language has, and this
+# file would not compile.
+fn none_of() -> Maybe Int = Nothing
+
+fn empty_holder() -> Holder = Empty
+
+fn sum_list(xs: List Int) -> Int = list_fold(\ (acc, x) -> acc + x, 0, xs)
+
+fn main() -> Unit !{IO} =
+  run_suite("ctor_as_function_value", [
+    # --- argument position, same module ---
+    check_eq("arity 1, scalar field", sum_list(list_map(unwrap, list_map(Wrapped, [5, 6]))), 11),
+    check_eq("polymorphic ctor of a multi-ctor ADT",
+             sum_list(list_map(msg_value, list_map(ChildMsg, [3, 4]))), 7),
+    check_eq("wrap ctor, whose construction is the identity",
+             sum_list(list_map(meters_value, list_map(Meters, [9, 1]))), 10),
+    check_eq("prelude ctor", sum_list(list_map(maybe_or(0, _), list_map(Just, [2, 5]))), 7),
+
+    # --- argument position, imported module ---
+    check_eq("imported ctor", sum_list(list_map(holder_sum, list_map(Holder, [default_cfg()]))), 100),
+
+    # --- non-argument value position ---
+    check_eq("ctor as a return value, arity 1", unwrap(wrapped_ctor()(7)), 7),
+    check_eq("ctor as a return value, arity 2", render_pair(pair_ctor()(8, "!")), "8!"),
+
+    # --- the explicit spelling agrees ---
+    check_eq("bare and `_` spellings agree",
+             sum_list(list_map(unwrap, list_map(Wrapped(_), [5, 6]))), 11),
+
+    # --- zero arity is untouched ---
+    check_eq("zero-arity ctor stays a value", maybe_or(42, none_of()), 42),
+    check_eq("zero-arity imported ctor stays a value", holder_sum(empty_holder()), 0)
+  ])

@@ -1,0 +1,17 @@
+module main
+
+# The over-application twin of ctor_partial_application.
+#
+# Supplying a constructor too MANY arguments used to surface as a unification
+# artifact — `Call type mismatch: Maybe $t2562 vs Int -> $t2563` — which names
+# neither the constructor nor the count. The `@ctor:` arity marker routes it
+# through the same check a function's over-application gets, so the message names
+# the actual mistake.
+
+fn show(m: Maybe Int) -> String =
+  match m with
+  | Just n -> int_to_string(n)
+  | Nothing -> "-"
+
+fn main() -> Unit !{IO} =
+  print(show(Nothing(1)))

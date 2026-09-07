@@ -1,0 +1,17 @@
+module main
+
+# A parameter shadowing a nullary prelude constructor must keep the local's own
+# under-application check, not inherit the constructor's arity of 0.
+#
+# Regression twin of tests/stdlib/test_ctor_shadowed_by_param.spr, on the side that
+# must stay REJECTED: with `@ctor:Nothing` leaking onto the local,
+# `callee_has_zero_declared_arity` answered true, which defeated
+# `resolve_zero_arg_call`'s under-application check — this compiled, linked, and
+# died at run time on a closure arity mismatch instead.
+
+fn f(Nothing: Int -> Int) -> Int -> Int = Nothing()
+
+fn double(n: Int) -> Int = n * 2
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(f(double)(3)))

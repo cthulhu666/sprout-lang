@@ -1,0 +1,28 @@
+module main
+
+# A constrained existential constructor named without parentheses.
+#
+# `Drawable` packs one hidden witness slot per method of `Shape`, and only a call
+# site can be given those — infer injects the evidence there, resolve fills it,
+# lowering appends the witnesses. That is why the eta-expansion lives in infer and
+# not in the backend: it runs BEFORE dictionary injection, so the synthesized call
+# gets its witnesses exactly as a hand-written `Drawable(c)` does.
+
+class Shape a
+  fn area(x: a) -> Int
+
+type Circle = | Circle Int
+
+instance Shape Circle
+  fn area(x: Circle) -> Int =
+    match x with
+    | Circle r -> r * r * 3
+
+type Drawable = | Drawable (any Shape)
+
+fn draw(d: Drawable) -> Int =
+  match d with
+  | Drawable s -> area(s)
+
+fn main() -> Unit !{IO} =
+  list_each(print, list_map(draw, list_map(Drawable, [Circle(2), Circle(3)])))

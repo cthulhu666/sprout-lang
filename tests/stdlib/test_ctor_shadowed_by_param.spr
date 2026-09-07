@@ -1,0 +1,53 @@
+import stdlib.test (check_eq, run_suite)
+
+# A PARAMETER may shadow a constructor name, which a pattern may not.
+#
+# `parse_param` accepts any identifier, so `fn f(Just: Int) -> Int` binds a local
+# called `Just`; a capitalized name in a *pattern* is parsed as a constructor
+# pattern and can never bind. That asymmetry is the whole content of this file.
+#
+# It matters only for PRELUDE constructors. Own-module and imported ones are
+# bundler-qualified (`main.Pair`, `rec_fixture.Holder`) and cannot collide with a
+# bare parameter name, so `Just` / `Nothing` / `Cons` / `Ok` / `Err` are the entire
+# exposed surface — and a same-module test cannot reach it.
+#
+# Regression: the `@ctor:` arity marker that makes a bare constructor a function
+# value was keyed by name and not dropped in `bind_local_scheme`, so every local
+# below inherited the prelude constructor's arity. `Just + 1` was rewritten into
+# `\x -> Just(x)` and rejected as `Int vs $t -> $t`, naming nothing the user wrote.
+
+fn use_as_value(Just: Int) -> Int = Just + 1
+
+fn call_at_local_arity(Just: Int -> Int -> Int) -> Int = Just(1, 2)
+
+fn call_nullary_named_local(Nothing: Int -> Int) -> Int = Nothing(7)
+
+fn add(a: Int, b: Int) -> Int = a + b
+
+fn double(n: Int) -> Int = n * 2
+
+# Lambda parameters take the same path.
+fn lambda_param_shadow(xs: List Int) -> List Int = list_map(\Ok -> Ok + 1, xs)
+
+fn sum_list(xs: List Int) -> Int = list_fold(\ (acc, x) -> acc + x, 0, xs)
+
+# The constructor itself is unaffected outside the shadowing scope.
+fn still_a_function_value(xs: List Int) -> Int =
+  sum_list(list_map(\m -> maybe_or(0, m), list_map(Just, xs)))
+
+fn maybe_or(d: Int, m: Maybe Int) -> Int =
+  match m with
+  | Just n -> n
+  | Nothing -> d
+
+fn main() -> Unit !{IO} =
+  run_suite("ctor_shadowed_by_param", [
+    check_eq("param shadowing a nullary ctor is a plain value", use_as_value(41), 42),
+    check_eq("param shadowing a ctor is called at the LOCAL's arity",
+             call_at_local_arity(add), 3),
+    check_eq("param named for a nullary ctor keeps its own arity",
+             call_nullary_named_local(double), 14),
+    check_eq("lambda param shadows too", sum_list(lambda_param_shadow([1, 2])), 5),
+    check_eq("the ctor is still a function value where it is not shadowed",
+             still_a_function_value([3, 4]), 7)
+  ])
