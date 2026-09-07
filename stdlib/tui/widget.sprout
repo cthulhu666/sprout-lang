@@ -20,43 +20,89 @@ export fn id_text(i: WidgetId) -> String =
   match i with
   | WidgetId s -> s
 
+export fn id_eq(a: WidgetId, b: WidgetId) -> Bool = id_text(a) == id_text(b)
+
+# What travels DOWN to one addressed widget, as opposed to `on_event`, which
+# broadcasts to every widget in the tree. A message is a command's answer
+# coming home; an event is a keystroke going to whoever holds focus. One sum
+# rather than two entry points, so the widget contract opens once.
+export type Delivery m (..) =
+  | ToMsg m
+  | ToEvent event.Event
+
 # A unit of IO that a widget or application WANTS performed, but does not
 # perform. Pure code builds one; only the app loop runs it, in a task of its
-# own, so a slow read cannot stall the frame.
+# own, so a slow read cannot stall the frame. The `Maybe WidgetId` is the
+# return address: `Just id` delivers the answer back to that widget.
 #
 # A newtype over a concrete `!{IO}` arrow rather than an effect-polymorphic
 # field: an `!{e}` field is erased when the record is constructed, which lets
 # IO run inside a function the checker still believes is pure.
 export type Cmd m (..) =
-  | Cmd (Unit -> m !{IO})
+  | Cmd (Maybe WidgetId) (Unit -> m !{IO})
+
+# Work whose answer belongs to the application: quit, reload everything.
+export fn cmd(f: Unit -> m !{IO}) -> Cmd m = Cmd(Nothing, f)
+
+# Work whose answer belongs to the widget that asked for it.
+export fn cmd_to(id: WidgetId, f: Unit -> m !{IO}) -> Cmd m = Cmd(Just(id), f)
+
+export fn cmd_addr(c: Cmd m) -> Maybe WidgetId =
+  match c with
+  | Cmd a _ -> a
 
 # Perform the work. The app loop calls this and nothing else does.
 export fn cmd_run(c: Cmd m) -> m !{IO} =
   match c with
-  | Cmd f -> f(())
+  | Cmd _ f -> f(())
 
 # Retarget a command's result, so an embedded widget's work reports in the
 # embedding application's vocabulary. Pure: it composes thunks, runs neither.
+# The address rides through unchanged — retargeting what an answer SAYS must
+# not change who it is FOR.
 export fn cmd_map(f: m -> n, c: Cmd m) -> Cmd n =
   match c with
-  | Cmd g -> Cmd(cmd_mapped(f, g, _))
+  | Cmd a g -> Cmd(a, cmd_mapped(f, g, _))
 
 fn cmd_mapped(f: m -> n, g: Unit -> m !{IO}, u: Unit) -> n !{IO} = do
   x <- g(())
   f(x)
 
-# The four things a widget can do, over its own state type.
+# The five things a widget can do, over its own state type. `on_event`
+# broadcasts, `route` is addressed; both are pure, asking for IO with a `Cmd`
+# rather than performing any, which is what keeps a widget testable and the
+# loop responsive.
 #
-# `on_event` is pure: it reports messages, and it asks for IO with a `Cmd`
-# rather than performing any. That is what keeps a widget testable, and it is
-# also what keeps the loop responsive — a command runs in its own task, while
-# IO performed inline would block every other widget's next frame.
+# `route` answers `Nothing` when the delivery was not this widget's. Declining
+# and handling-without-change are indistinguishable from outside, so the
+# distinction has to be in the reply — and as `Maybe` rather than a flag beside
+# the state, a decline cannot also carry a state, a message or a command that
+# the caller would have to be trusted to discard.
 export type View s m = (
   state: s,
   on_event: s -> event.Event -> (s, List m, List (Cmd m)),
+  route: s -> WidgetId -> Delivery m -> Maybe(s, List m, List (Cmd m)),
   render: s -> geometry.Region -> screen.Screen -> Unit !{IO},
   measure: s -> geometry.Size -> geometry.Size
 )
+
+# A widget nothing is ever addressed to — every leaf until it wants a command
+# of its own. Declines everything, so an undeliverable answer reaches the
+# application instead of disappearing here.
+export fn no_route(st: s, target: WidgetId,
+                   d: Delivery m) -> Maybe(s, List m, List (Cmd m)) =
+  Nothing
+
+# The leaf spelling: handle a delivery addressed to `mine`. Applied with `_`
+# holes as a field value, since the field wants the last three arguments.
+#
+# The claim is by ADDRESS, not by what the handler did: an answer arriving at
+# the widget that asked for it has got home whether or not the state moved.
+export fn route_if(mine: WidgetId,
+                   handler: s -> Delivery m -> (s, List m, List (Cmd m)),
+                   st: s, target: WidgetId,
+                   d: Delivery m) -> Maybe(s, List m, List (Cmd m)) =
+  if id_eq(mine, target) then Just(handler(st, d)) else Nothing
 
 # `s` is EXISTENTIAL and `m` is UNIVERSAL, which is the whole design: a text
 # input and a tree sit in one `List (Widget AppMsg)` with neither able to see
@@ -105,6 +151,23 @@ fn feed_step(r: (Widget m, List m, List (Cmd m)), rest: List event.Event,
 fn push_all(xs: List a, acc: List a) -> List a =
   list_fold(\ (seen, x) -> Cons(x, seen), acc, xs)
 
+# Hand one delivery to ONE widget, named. `Nothing` means nobody was home; a
+# container forwards down and answers with whatever its children said, which is
+# the only way an address can cross the existential — the framework cannot see
+# through `Widget m` to know whether it holds children at all.
+export fn deliver(w: Widget m, target: WidgetId,
+                  d: Delivery m) -> Maybe (Widget m, List m, List (Cmd m)) =
+  match w with
+  | Widget v -> repack_route(v, v.route(v.state, target, d))
+
+# The reply now has `on_event`'s shape under the `Maybe`, so repacking is the
+# same function both paths already needed.
+fn repack_route(v: View s m,
+                r: Maybe (s, List m, List (Cmd m))) -> Maybe (Widget m, List m, List (Cmd m)) =
+  match r with
+  | Nothing -> Nothing
+  | Just t -> Just(repack(v, t))
+
 # The widget's natural size within `avail` — what `layout.Auto` carries.
 export fn measure(w: Widget m, avail: geometry.Size) -> geometry.Size =
   match w with
@@ -121,12 +184,47 @@ export fn render(w: Widget m, r: geometry.Region, s: screen.Screen) -> Unit !{IO
 # one. This is what makes `m`
 # universal rather than merely fixed: without it, a reusable widget would have
 # to be written against the vocabulary of every application that used it.
-export fn map_msgs(f: m -> n, w: Widget m) -> Widget n =
+#
+# A PRISM, not a functor: `route` takes `m`, so a message must be translated
+# backwards too, and `n -> m` does not exist. `unf` recognises the messages
+# that belong to the embedded widget and rejects the rest — an embedder that
+# tags with `ChildMsg` already owns that match. docs/tui-routing-v0.md §3.3.
+export fn map_msgs(f: m -> n, unf: n -> Maybe m, w: Widget m) -> Widget n =
   match w with
   | Widget v -> Widget (View(state = v.state,
                             on_event = mapped_on_event(f, v.on_event, _, _),
+                            route = mapped_route(f, unf, v.route, _, _, _),
                             render = v.render,
                             measure = v.measure))
+
+fn mapped_route(f: m -> n, unf: n -> Maybe m,
+                inner: s -> WidgetId -> Delivery m -> Maybe(s, List m, List (Cmd m)),
+                st: s, target: WidgetId,
+                d: Delivery n) -> Maybe(s, List n, List (Cmd n)) =
+  match narrow(unf, d) with
+  # A message in a vocabulary the embedded widget does not speak is not its
+  # business. Declined rather than guessed at, so it still reaches the
+  # application.
+  | Nothing -> Nothing
+  | Just inner_d -> remap(f, inner(st, target, inner_d))
+
+# An event carries no message, so it crosses untouched; only `ToMsg` needs the
+# prism's backward half.
+fn narrow(unf: n -> Maybe m, d: Delivery n) -> Maybe (Delivery m) =
+  match d with
+  | ToEvent e -> Just(ToEvent(e))
+  | ToMsg nm -> as_delivery(unf(nm))
+
+fn as_delivery(r: Maybe m) -> Maybe (Delivery m) =
+  match r with
+  | Nothing -> Nothing
+  | Just mm -> Just(ToMsg(mm))
+
+fn remap(f: m -> n,
+         r: Maybe (s, List m, List (Cmd m))) -> Maybe(s, List n, List (Cmd n)) =
+  match r with
+  | Nothing -> Nothing
+  | Just t -> Just(remap_one(f, t))
 
 # Applied above with `_` holes for the last two arguments, leaving
 # `s -> Event -> (s, List n, List (Cmd n))` — the field's type. Sprout is
@@ -136,7 +234,13 @@ export fn map_msgs(f: m -> n, w: Widget m) -> Widget n =
 fn mapped_on_event(f: m -> n,
                    inner: s -> event.Event -> (s, List m, List (Cmd m)),
                    st: s, ev: event.Event) -> (s, List n, List (Cmd n)) =
-  match inner(st, ev) with
-  # The commands are retargeted too: an embedded widget's work must report in
-  # the embedding vocabulary, or the outer app receives a message it cannot read.
+  remap_one(f, inner(st, ev))
+
+# Both replies have this shape, so both retargetings are this one function. The
+# commands are retargeted alongside the messages: an embedded widget's work must
+# report in the embedding vocabulary, or the outer app receives a message it
+# cannot read.
+fn remap_one(f: m -> n,
+             r: (s, List m, List (Cmd m))) -> (s, List n, List (Cmd n)) =
+  match r with
   | (s2, msgs, cmds) -> (s2, list_map(f, msgs), list_map(cmd_map(f, _), cmds))

@@ -95,6 +95,8 @@ declare i64 @str_slice_bytes(i64, i64, i64)
 declare i64 @str_starts_with_at_byte(i64, i64, i64)
 declare i64 @str_split_lines(i64)
 declare i64 @split_words(i64)
+declare i64 @time_now_micros()
+declare i64 @wall_time_micros()
 declare i64 @__scope_open()
 declare i64 @__scope_join(i64)
 declare i64 @__scope_spawn(i64, i64)
@@ -219,31 +221,35 @@ declare i64 @vector_push(i64, i64)
 @.str.90 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
 @.str.91 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
 @.str.92 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"ticks\00" }
-@.str.93 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"keys\00" }
-@.str.94 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c" \00" }
-@.str.95 = private unnamed_addr constant { i64, [18 x i8] } { i64 278538, [18 x i8] c"Sprout TUI — M3\00" }
-@.str.96 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"q to quit\00" }
-@.str.97 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"KChar(\00" }
-@.str.98 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
-@.str.99 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"KEnter\00" }
-@.str.100 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"KTab\00" }
-@.str.101 = private unnamed_addr constant { i64, [9 x i8] } { i64 131082, [9 x i8] c"KBackTab\00" }
-@.str.102 = private unnamed_addr constant { i64, [11 x i8] } { i64 163850, [11 x i8] c"KBackspace\00" }
-@.str.103 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c"KDelete\00" }
-@.str.104 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c"KInsert\00" }
-@.str.105 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"KEsc\00" }
-@.str.106 = private unnamed_addr constant { i64, [4 x i8] } { i64 49162, [4 x i8] c"KUp\00" }
-@.str.107 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"KDown\00" }
-@.str.108 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"KLeft\00" }
-@.str.109 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"KRight\00" }
-@.str.110 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"KHome\00" }
-@.str.111 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"KEnd\00" }
-@.str.112 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c"KPageUp\00" }
-@.str.113 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"KPageDown\00" }
-@.str.114 = private unnamed_addr constant { i64, [4 x i8] } { i64 49162, [4 x i8] c"KF(\00" }
-@.str.115 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
-@.str.116 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"m\00" }
-@.str.117 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"n\00" }
+@.str.93 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"ticks\00" }
+@.str.94 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"  up \00" }
+@.str.95 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"s\00" }
+@.str.96 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
+@.str.97 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"keys\00" }
+@.str.98 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c" \00" }
+@.str.99 = private unnamed_addr constant { i64, [11 x i8] } { i64 163850, [11 x i8] c"Sprout TUI\00" }
+@.str.100 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"q to quit\00" }
+@.str.101 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"KChar(\00" }
+@.str.102 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
+@.str.103 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"KEnter\00" }
+@.str.104 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"KTab\00" }
+@.str.105 = private unnamed_addr constant { i64, [9 x i8] } { i64 131082, [9 x i8] c"KBackTab\00" }
+@.str.106 = private unnamed_addr constant { i64, [11 x i8] } { i64 163850, [11 x i8] c"KBackspace\00" }
+@.str.107 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c"KDelete\00" }
+@.str.108 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c"KInsert\00" }
+@.str.109 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"KEsc\00" }
+@.str.110 = private unnamed_addr constant { i64, [4 x i8] } { i64 49162, [4 x i8] c"KUp\00" }
+@.str.111 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"KDown\00" }
+@.str.112 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"KLeft\00" }
+@.str.113 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"KRight\00" }
+@.str.114 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"KHome\00" }
+@.str.115 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"KEnd\00" }
+@.str.116 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c"KPageUp\00" }
+@.str.117 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"KPageDown\00" }
+@.str.118 = private unnamed_addr constant { i64, [4 x i8] } { i64 49162, [4 x i8] c"KF(\00" }
+@.str.119 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
+@.str.120 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"m\00" }
+@.str.121 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"n\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -398,36 +404,44 @@ declare i64 @vector_push(i64, i64)
 @.cfkinds.75 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.76 = private unnamed_addr constant [25 x i8] c"stdlib.tui.screen.Screen\00"
 @.cfkinds.76 = private unnamed_addr constant [3 x i8] c"pp\00"
-@.cname.77 = private unnamed_addr constant [22 x i8] c"stdlib.tui.widget.Cmd\00"
-@.cfkinds.77 = private unnamed_addr constant [2 x i8] c"p\00"
-@.cname.79 = private unnamed_addr constant [25 x i8] c"stdlib.tui.widget.Widget\00"
-@.cfkinds.79 = private unnamed_addr constant [2 x i8] c"p\00"
-@.cname.80 = private unnamed_addr constant [24 x i8] c"stdlib.tui.app.Continue\00"
-@.cfkinds.80 = private unnamed_addr constant [1 x i8] c"\00"
-@.cname.81 = private unnamed_addr constant [20 x i8] c"stdlib.tui.app.Quit\00"
-@.cfkinds.81 = private unnamed_addr constant [1 x i8] c"\00"
-@.cname.82 = private unnamed_addr constant [24 x i8] c"stdlib.tui.app.SigEvent\00"
-@.cfkinds.82 = private unnamed_addr constant [2 x i8] c"p\00"
-@.cname.83 = private unnamed_addr constant [22 x i8] c"stdlib.tui.app.SigMsg\00"
-@.cfkinds.83 = private unnamed_addr constant [2 x i8] c"_\00"
-@.cname.85 = private unnamed_addr constant [24 x i8] c"stdlib.tui.layout.Cells\00"
-@.cfkinds.85 = private unnamed_addr constant [2 x i8] c"i\00"
-@.cname.86 = private unnamed_addr constant [27 x i8] c"stdlib.tui.layout.Fraction\00"
-@.cfkinds.86 = private unnamed_addr constant [2 x i8] c"i\00"
-@.cname.87 = private unnamed_addr constant [23 x i8] c"stdlib.tui.layout.Auto\00"
-@.cfkinds.87 = private unnamed_addr constant [2 x i8] c"i\00"
-@.cname.88 = private unnamed_addr constant [22 x i8] c"stdlib.tui.layout.Top\00"
-@.cfkinds.88 = private unnamed_addr constant [1 x i8] c"\00"
-@.cname.89 = private unnamed_addr constant [25 x i8] c"stdlib.tui.layout.Bottom\00"
-@.cfkinds.89 = private unnamed_addr constant [1 x i8] c"\00"
-@.cname.90 = private unnamed_addr constant [23 x i8] c"stdlib.tui.layout.Left\00"
-@.cfkinds.90 = private unnamed_addr constant [1 x i8] c"\00"
-@.cname.91 = private unnamed_addr constant [24 x i8] c"stdlib.tui.layout.Right\00"
+@.cname.77 = private unnamed_addr constant [24 x i8] c"stdlib.tui.widget.ToMsg\00"
+@.cfkinds.77 = private unnamed_addr constant [2 x i8] c"_\00"
+@.cname.78 = private unnamed_addr constant [26 x i8] c"stdlib.tui.widget.ToEvent\00"
+@.cfkinds.78 = private unnamed_addr constant [2 x i8] c"p\00"
+@.cname.79 = private unnamed_addr constant [22 x i8] c"stdlib.tui.widget.Cmd\00"
+@.cfkinds.79 = private unnamed_addr constant [3 x i8] c"pp\00"
+@.cname.81 = private unnamed_addr constant [25 x i8] c"stdlib.tui.widget.Widget\00"
+@.cfkinds.81 = private unnamed_addr constant [2 x i8] c"p\00"
+@.cname.82 = private unnamed_addr constant [24 x i8] c"stdlib.tui.app.Continue\00"
+@.cfkinds.82 = private unnamed_addr constant [1 x i8] c"\00"
+@.cname.83 = private unnamed_addr constant [20 x i8] c"stdlib.tui.app.Quit\00"
+@.cfkinds.83 = private unnamed_addr constant [1 x i8] c"\00"
+@.cname.84 = private unnamed_addr constant [24 x i8] c"stdlib.tui.app.SigEvent\00"
+@.cfkinds.84 = private unnamed_addr constant [2 x i8] c"p\00"
+@.cname.85 = private unnamed_addr constant [22 x i8] c"stdlib.tui.app.SigMsg\00"
+@.cfkinds.85 = private unnamed_addr constant [2 x i8] c"_\00"
+@.cname.86 = private unnamed_addr constant [21 x i8] c"stdlib.tui.app.SigTo\00"
+@.cfkinds.86 = private unnamed_addr constant [3 x i8] c"p_\00"
+@.cname.88 = private unnamed_addr constant [24 x i8] c"stdlib.tui.layout.Cells\00"
+@.cfkinds.88 = private unnamed_addr constant [2 x i8] c"i\00"
+@.cname.89 = private unnamed_addr constant [27 x i8] c"stdlib.tui.layout.Fraction\00"
+@.cfkinds.89 = private unnamed_addr constant [2 x i8] c"i\00"
+@.cname.90 = private unnamed_addr constant [23 x i8] c"stdlib.tui.layout.Auto\00"
+@.cfkinds.90 = private unnamed_addr constant [2 x i8] c"i\00"
+@.cname.91 = private unnamed_addr constant [22 x i8] c"stdlib.tui.layout.Top\00"
 @.cfkinds.91 = private unnamed_addr constant [1 x i8] c"\00"
-@.cname.93 = private unnamed_addr constant [10 x i8] c"main.Quit\00"
+@.cname.92 = private unnamed_addr constant [25 x i8] c"stdlib.tui.layout.Bottom\00"
+@.cfkinds.92 = private unnamed_addr constant [1 x i8] c"\00"
+@.cname.93 = private unnamed_addr constant [23 x i8] c"stdlib.tui.layout.Left\00"
 @.cfkinds.93 = private unnamed_addr constant [1 x i8] c"\00"
-@.cname.94 = private unnamed_addr constant [11 x i8] c"main.Typed\00"
-@.cfkinds.94 = private unnamed_addr constant [2 x i8] c"s\00"
+@.cname.94 = private unnamed_addr constant [24 x i8] c"stdlib.tui.layout.Right\00"
+@.cfkinds.94 = private unnamed_addr constant [1 x i8] c"\00"
+@.cname.96 = private unnamed_addr constant [10 x i8] c"main.Quit\00"
+@.cfkinds.96 = private unnamed_addr constant [1 x i8] c"\00"
+@.cname.97 = private unnamed_addr constant [11 x i8] c"main.Typed\00"
+@.cfkinds.97 = private unnamed_addr constant [2 x i8] c"s\00"
+@.cname.98 = private unnamed_addr constant [13 x i8] c"main.Stamped\00"
+@.cfkinds.98 = private unnamed_addr constant [2 x i8] c"i\00"
 @stdlib.terminal.esc = global i64 zeroinitializer
 
 define i64 @list_map_go(i64 %f, i64 %xs) {
@@ -2088,6 +2102,12 @@ entry:
   %t$4 = call i64 @string_concat_many(i64 %t$3)
   %t$23 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$4
+}
+
+define i64 @stdlib.time.wall_micros() {
+entry:
+  %t$0 = call i64 @wall_time_micros()
+  ret i64 %t$0
 }
 
 define i64 @stdlib.task.scope_handle(i64 %scope) {
@@ -11090,16 +11110,86 @@ entry:
   ret i64 %t$0
 }
 
+define i64 @stdlib.tui.widget.id_text(i64 %i) {
+entry:
+  br label %arm_0_0
+arm_0_0:
+  br label %body_0_0
+body_0_0:
+  br label %join_0
+arm_1_0:
+  call void @sprout_abort_match()
+  unreachable
+join_0:
+  %t$1 = phi i64 [%i, %body_0_0]
+  ret i64 %t$1
+}
+
+define i64 @stdlib.tui.widget.id_eq(i64 %a, i64 %b) {
+entry:
+  %t$0 = call i64 @stdlib.tui.widget.id_text(i64 %a)
+  %t$1 = call i64 @stdlib.tui.widget.id_text(i64 %b)
+  %t$2$lptr = inttoptr i64 %t$0 to ptr
+  %t$2$rptr = inttoptr i64 %t$1 to ptr
+  %t$2$i1 = call i1 @str_eq(ptr %t$2$lptr, ptr %t$2$rptr)
+  %t$2 = zext i1 %t$2$i1 to i64
+  ret i64 %t$2
+}
+
+define i64 @stdlib.tui.widget.cmd_to(i64 %id, i64 %f) {
+entry:
+  %t$2 = alloca i64
+  store i64 %id, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$4 = alloca i64
+  store i64 %f, ptr %t$4
+  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
+  %t$0 = call i64 @sprout_alloc_obj(i64 1, i64 1)
+  %t$0$ptr = inttoptr i64 %t$0 to ptr
+  %t$0$f0 = getelementptr i64, ptr %t$0$ptr, i64 0
+  store i64 %id, ptr %t$0$f0
+  %t$6 = alloca i64
+  store i64 %t$0, ptr %t$6
+  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
+  %t$1 = call i64 @sprout_alloc_obj(i64 79, i64 2)
+  %t$1$ptr = inttoptr i64 %t$1 to ptr
+  %t$1$f0 = getelementptr i64, ptr %t$1$ptr, i64 0
+  store i64 %t$0, ptr %t$1$f0
+  %t$1$f1 = getelementptr i64, ptr %t$1$ptr, i64 1
+  store i64 %f, ptr %t$1$f1
+  %t$8 = call i64 @sprout_gc_pop_roots(i64 3)
+  ret i64 %t$1
+}
+
+define i64 @stdlib.tui.widget.cmd_addr(i64 %c) {
+entry:
+  %t$0 = call i64 @sprout_tag(i64 %c)
+  br label %arm_0_1
+arm_0_1:
+  %t$3 = add i64 0, 79
+  %t$4 = icmp eq i64 %t$0, %t$3
+  br i1 %t$4, label %body_0_1, label %arm_1_1
+body_0_1:
+  %t$5 = call i64 @sprout_field(i64 %c, i64 0)
+  br label %join_1
+arm_1_1:
+  call void @sprout_abort_match()
+  unreachable
+join_1:
+  %t$2 = phi i64 [%t$5, %body_0_1]
+  ret i64 %t$2
+}
+
 define i64 @stdlib.tui.widget.cmd_run(i64 %c) {
 entry:
   %t$0 = call i64 @sprout_tag(i64 %c)
   br label %arm_0_1
 arm_0_1:
-  %t$3 = add i64 0, 77
+  %t$3 = add i64 0, 79
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %c, i64 0)
+  %t$5 = call i64 @sprout_field(i64 %c, i64 1)
   %t$6 = add i64 0, 0
   call void @sprout_closure_arity_check(i64 %t$5, i64 1)
   %t$7$env_ptr = inttoptr i64 %t$5 to ptr
@@ -11114,12 +11204,45 @@ join_1:
   ret i64 %t$2
 }
 
+define i64 @stdlib.tui.widget.no_route(i64 %st, i64 %target, i64 %d) {
+entry:
+  %t$0 = call i64 @sprout_alloc_obj(i64 0, i64 0)
+  ret i64 %t$0
+}
+
+define i64 @stdlib.tui.widget.route_if(i64 %mine, i64 %handler, i64 %st, i64 %target, i64 %d) {
+entry:
+  %t$0 = call i64 @stdlib.tui.widget.id_eq(i64 %mine, i64 %target)
+  %t$6 = trunc i64 %t$0 to i1
+  br i1 %t$6, label %then_1, label %else_1
+then_1:
+  call void @sprout_closure_arity_check(i64 %handler, i64 2)
+  %t$3$env_ptr = inttoptr i64 %handler to ptr
+  %t$3$code = load ptr, ptr %t$3$env_ptr
+  %t$3 = call i64 (i64, i64, i64) %t$3$code(i64 %handler, i64 %st, i64 %d)
+  %t$7 = alloca i64
+  store i64 %t$3, ptr %t$7
+  %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
+  %t$4 = call i64 @sprout_alloc_obj(i64 1, i64 1)
+  %t$4$ptr = inttoptr i64 %t$4 to ptr
+  %t$4$f0 = getelementptr i64, ptr %t$4$ptr, i64 0
+  store i64 %t$3, ptr %t$4$f0
+  %t$9 = call i64 @sprout_gc_pop_roots(i64 1)
+  br label %join_1
+else_1:
+  %t$5 = call i64 @sprout_alloc_obj(i64 0, i64 0)
+  br label %join_1
+join_1:
+  %t$2 = phi i64 [%t$4, %then_1], [%t$5, %else_1]
+  ret i64 %t$2
+}
+
 define i64 @stdlib.tui.widget.on_event(i64 %w, i64 %ev) {
 entry:
   %t$0 = call i64 @sprout_tag(i64 %w)
   br label %arm_0_1
 arm_0_1:
-  %t$3 = add i64 0, 79
+  %t$3 = add i64 0, 81
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
@@ -11163,62 +11286,143 @@ arm_0_0:
   %t$5 = call i64 @sprout_field(i64 %v, i64 1)
   %t$6 = call i64 @sprout_field(i64 %v, i64 2)
   %t$7 = call i64 @sprout_field(i64 %v, i64 3)
-  %t$11 = alloca i64
-  store i64 %t$2, ptr %t$11
-  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
-  %t$13 = alloca i64
-  store i64 %t$3, ptr %t$13
-  %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
-  %t$15 = alloca i64
-  store i64 %t$4, ptr %t$15
-  %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
-  %t$17 = alloca i64
-  store i64 %t$5, ptr %t$17
-  %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
-  %t$19 = alloca i64
-  store i64 %t$6, ptr %t$19
-  %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
-  %t$21 = alloca i64
-  store i64 %t$7, ptr %t$21
-  %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
-  %t$8 = call i64 @sprout_alloc_obj(i64 78, i64 4)
-  %t$8$ptr = inttoptr i64 %t$8 to ptr
-  %t$8$f0 = getelementptr i64, ptr %t$8$ptr, i64 0
-  store i64 %t$2, ptr %t$8$f0
-  %t$8$f1 = getelementptr i64, ptr %t$8$ptr, i64 1
-  store i64 %t$5, ptr %t$8$f1
-  %t$8$f2 = getelementptr i64, ptr %t$8$ptr, i64 2
-  store i64 %t$6, ptr %t$8$f2
-  %t$8$f3 = getelementptr i64, ptr %t$8$ptr, i64 3
-  store i64 %t$7, ptr %t$8$f3
-  %t$23 = call i64 @sprout_gc_pop_roots(i64 3)
+  %t$8 = call i64 @sprout_field(i64 %v, i64 4)
+  %t$12 = alloca i64
+  store i64 %t$2, ptr %t$12
+  %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
+  %t$14 = alloca i64
+  store i64 %t$3, ptr %t$14
+  %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
+  %t$16 = alloca i64
+  store i64 %t$4, ptr %t$16
+  %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
+  %t$18 = alloca i64
+  store i64 %t$5, ptr %t$18
+  %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
+  %t$20 = alloca i64
+  store i64 %t$6, ptr %t$20
+  %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
+  %t$22 = alloca i64
+  store i64 %t$7, ptr %t$22
+  %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
   %t$24 = alloca i64
   store i64 %t$8, ptr %t$24
   %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
-  %t$9 = call i64 @sprout_alloc_obj(i64 79, i64 1)
+  %t$9 = call i64 @sprout_alloc_obj(i64 80, i64 5)
   %t$9$ptr = inttoptr i64 %t$9 to ptr
   %t$9$f0 = getelementptr i64, ptr %t$9$ptr, i64 0
-  store i64 %t$8, ptr %t$9$f0
-  %t$26 = call i64 @sprout_gc_pop_roots(i64 1)
+  store i64 %t$2, ptr %t$9$f0
+  %t$9$f1 = getelementptr i64, ptr %t$9$ptr, i64 1
+  store i64 %t$5, ptr %t$9$f1
+  %t$9$f2 = getelementptr i64, ptr %t$9$ptr, i64 2
+  store i64 %t$6, ptr %t$9$f2
+  %t$9$f3 = getelementptr i64, ptr %t$9$ptr, i64 3
+  store i64 %t$7, ptr %t$9$f3
+  %t$9$f4 = getelementptr i64, ptr %t$9$ptr, i64 4
+  store i64 %t$8, ptr %t$9$f4
+  %t$26 = call i64 @sprout_gc_pop_roots(i64 4)
   %t$27 = alloca i64
   store i64 %t$9, ptr %t$27
   %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
-  %t$10 = call i64 @sprout_alloc_tuple_blob(i64 24)
+  %t$10 = call i64 @sprout_alloc_obj(i64 81, i64 1)
   %t$10$ptr = inttoptr i64 %t$10 to ptr
-  %t$10$s0 = getelementptr i64, ptr %t$10$ptr, i64 0
-  store i64 %t$9, ptr %t$10$s0
-  %t$10$s1 = getelementptr i64, ptr %t$10$ptr, i64 1
-  store i64 %t$3, ptr %t$10$s1
-  %t$10$s2 = getelementptr i64, ptr %t$10$ptr, i64 2
-  store i64 %t$4, ptr %t$10$s2
-  %t$29 = call i64 @sprout_gc_pop_roots(i64 4)
+  %t$10$f0 = getelementptr i64, ptr %t$10$ptr, i64 0
+  store i64 %t$9, ptr %t$10$f0
+  %t$29 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$30 = alloca i64
+  store i64 %t$10, ptr %t$30
+  %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)
+  %t$11 = call i64 @sprout_alloc_tuple_blob(i64 24)
+  %t$11$ptr = inttoptr i64 %t$11 to ptr
+  %t$11$s0 = getelementptr i64, ptr %t$11$ptr, i64 0
+  store i64 %t$10, ptr %t$11$s0
+  %t$11$s1 = getelementptr i64, ptr %t$11$ptr, i64 1
+  store i64 %t$3, ptr %t$11$s1
+  %t$11$s2 = getelementptr i64, ptr %t$11$ptr, i64 2
+  store i64 %t$4, ptr %t$11$s2
+  %t$32 = call i64 @sprout_gc_pop_roots(i64 4)
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
   unreachable
 join_0:
-  %t$1 = phi i64 [%t$10, %arm_0_0]
+  %t$1 = phi i64 [%t$11, %arm_0_0]
   ret i64 %t$1
+}
+
+define i64 @stdlib.tui.widget.deliver(i64 %w, i64 %target, i64 %d) {
+entry:
+  %t$0 = call i64 @sprout_tag(i64 %w)
+  br label %arm_0_1
+arm_0_1:
+  %t$3 = add i64 0, 81
+  %t$4 = icmp eq i64 %t$0, %t$3
+  br i1 %t$4, label %body_0_1, label %arm_1_1
+body_0_1:
+  %t$5 = call i64 @sprout_field(i64 %w, i64 0)
+  %t$6 = call i64 @sprout_field(i64 %t$5, i64 2)
+  %t$7 = call i64 @sprout_field(i64 %t$5, i64 0)
+  %t$10 = alloca i64
+  store i64 %t$5, ptr %t$10
+  %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
+  call void @sprout_closure_arity_check(i64 %t$6, i64 3)
+  %t$8$env_ptr = inttoptr i64 %t$6 to ptr
+  %t$8$code = load ptr, ptr %t$8$env_ptr
+  %t$8 = call i64 (i64, i64, i64, i64) %t$8$code(i64 %t$6, i64 %t$7, i64 %target, i64 %d)
+  %t$12 = alloca i64
+  store i64 %t$8, ptr %t$12
+  %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
+  %t$9 = call i64 @stdlib.tui.widget.repack_route(i64 %t$5, i64 %t$8)
+  %t$14 = call i64 @sprout_gc_pop_roots(i64 2)
+  br label %join_1
+arm_1_1:
+  call void @sprout_abort_match()
+  unreachable
+join_1:
+  %t$2 = phi i64 [%t$9, %body_0_1]
+  ret i64 %t$2
+}
+
+define i64 @stdlib.tui.widget.repack_route(i64 %v, i64 %r) {
+entry:
+  %t$0 = call i64 @sprout_tag(i64 %r)
+  br label %arm_0_1
+arm_0_1:
+  %t$3 = add i64 0, 0
+  %t$4 = icmp eq i64 %t$0, %t$3
+  br i1 %t$4, label %body_0_1, label %arm_1_1
+body_0_1:
+  %t$5 = call i64 @sprout_alloc_obj(i64 0, i64 0)
+  br label %join_1
+arm_1_1:
+  %t$6 = add i64 0, 1
+  %t$7 = icmp eq i64 %t$0, %t$6
+  br i1 %t$7, label %body_1_1, label %arm_2_1
+body_1_1:
+  %t$8 = call i64 @sprout_field(i64 %r, i64 0)
+  %t$11 = alloca i64
+  store i64 %v, ptr %t$11
+  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
+  %t$13 = alloca i64
+  store i64 %t$8, ptr %t$13
+  %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
+  %t$9 = call i64 @stdlib.tui.widget.repack(i64 %v, i64 %t$8)
+  %t$15 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$16 = alloca i64
+  store i64 %t$9, ptr %t$16
+  %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
+  %t$10 = call i64 @sprout_alloc_obj(i64 1, i64 1)
+  %t$10$ptr = inttoptr i64 %t$10 to ptr
+  %t$10$f0 = getelementptr i64, ptr %t$10$ptr, i64 0
+  store i64 %t$9, ptr %t$10$f0
+  %t$18 = call i64 @sprout_gc_pop_roots(i64 1)
+  br label %join_1
+arm_2_1:
+  call void @sprout_abort_match()
+  unreachable
+join_1:
+  %t$2 = phi i64 [%t$5, %body_0_1], [%t$10, %body_1_1]
+  ret i64 %t$2
 }
 
 define i64 @stdlib.tui.widget.render(i64 %w, i64 %r, i64 %s) {
@@ -11226,12 +11430,12 @@ entry:
   %t$0 = call i64 @sprout_tag(i64 %w)
   br label %arm_0_1
 arm_0_1:
-  %t$3 = add i64 0, 79
+  %t$3 = add i64 0, 81
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
   %t$5 = call i64 @sprout_field(i64 %w, i64 0)
-  %t$6 = call i64 @sprout_field(i64 %t$5, i64 2)
+  %t$6 = call i64 @sprout_field(i64 %t$5, i64 3)
   %t$7 = call i64 @sprout_field(i64 %t$5, i64 0)
   call void @sprout_closure_arity_check(i64 %t$6, i64 3)
   %t$8$env_ptr = inttoptr i64 %t$6 to ptr
@@ -11311,7 +11515,7 @@ body_0_1:
   %t$16 = alloca i64
   store i64 %acc, ptr %t$16
   %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
-  %t$5 = call i64 @sprout_alloc_obj(i64 80, i64 0)
+  %t$5 = call i64 @sprout_alloc_obj(i64 82, i64 0)
   %t$18 = alloca i64
   store i64 %t$5, ptr %t$18
   %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
@@ -11371,7 +11575,7 @@ arm_0_0:
   %t$3$gep = getelementptr i64, ptr %t$3$ptr, i64 1
   %t$3 = load i64, ptr %t$3$gep
   %t$4 = call i64 @sprout_tag(i64 %t$3)
-  %t$5 = add i64 0, 81
+  %t$5 = add i64 0, 83
   %t$6 = icmp eq i64 %t$4, %t$5
   br i1 %t$6, label %ntest_3, label %arm_1_0
 ntest_3:
@@ -11387,7 +11591,7 @@ ntest_3:
   %t$24 = alloca i64
   store i64 %t$7, ptr %t$24
   %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
-  %t$8 = call i64 @sprout_alloc_obj(i64 81, i64 0)
+  %t$8 = call i64 @sprout_alloc_obj(i64 83, i64 0)
   %t$26 = alloca i64
   store i64 %t$8, ptr %t$26
   %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
@@ -11418,7 +11622,7 @@ arm_1_0:
   %t$13$gep = getelementptr i64, ptr %t$13$ptr, i64 1
   %t$13 = load i64, ptr %t$13$gep
   %t$14 = call i64 @sprout_tag(i64 %t$13)
-  %t$15 = add i64 0, 80
+  %t$15 = add i64 0, 82
   %t$16 = icmp eq i64 %t$14, %t$15
   br i1 %t$16, label %ntest_13, label %arm_2_0
 ntest_13:
@@ -11492,53 +11696,151 @@ entry:
 
 define i64 @stdlib.tui.app.step(i64 %update, i64 %w, i64 %ev) {
 entry:
-  %t$8 = alloca i64
-  store i64 %w, ptr %t$8
-  %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
-  %t$10 = alloca i64
-  store i64 %update, ptr %t$10
-  %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
-  %t$12 = alloca i64
-  store i64 %ev, ptr %t$12
-  %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
+  %t$2 = alloca i64
+  store i64 %w, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$4 = alloca i64
+  store i64 %update, ptr %t$4
+  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
+  %t$6 = alloca i64
+  store i64 %ev, ptr %t$6
+  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
   %t$0 = call i64 @stdlib.tui.widget.on_event(i64 %w, i64 %ev)
-  %t$14 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$15 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$8 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$9 = alloca i64
+  store i64 %t$0, ptr %t$9
+  %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
+  %t$1 = call i64 @stdlib.tui.app.stepped(i64 %update, i64 %t$0)
+  %t$11 = call i64 @sprout_gc_pop_roots(i64 3)
+  ret i64 %t$1
+}
+
+define i64 @stdlib.tui.app.stepped(i64 %update, i64 %r) {
+entry:
+  br label %arm_0_0
+arm_0_0:
+  %t$2$ptr = inttoptr i64 %r to ptr
+  %t$2$gep = getelementptr i64, ptr %t$2$ptr, i64 0
+  %t$2 = load i64, ptr %t$2$gep
+  %t$3$ptr = inttoptr i64 %r to ptr
+  %t$3$gep = getelementptr i64, ptr %t$3$ptr, i64 1
+  %t$3 = load i64, ptr %t$3$gep
+  %t$4$ptr = inttoptr i64 %r to ptr
+  %t$4$gep = getelementptr i64, ptr %t$4$ptr, i64 2
+  %t$4 = load i64, ptr %t$4$gep
+  %t$7 = alloca i64
+  store i64 %update, ptr %t$7
+  %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
+  %t$9 = alloca i64
+  store i64 %t$2, ptr %t$9
+  %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
+  %t$11 = alloca i64
+  store i64 %t$3, ptr %t$11
+  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
+  %t$13 = alloca i64
+  store i64 %t$4, ptr %t$13
+  %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
+  %t$5 = call i64 @stdlib.tui.app.apply(i64 %update, i64 %t$3, i64 %t$2)
+  %t$15 = alloca i64
+  store i64 %t$5, ptr %t$15
+  %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
+  %t$6 = call i64 @stdlib.tui.app.step_apply(i64 %t$4, i64 %t$5)
+  %t$17 = call i64 @sprout_gc_pop_roots(i64 5)
+  br label %join_0
+arm_1_0:
+  call void @sprout_abort_match()
+  unreachable
+join_0:
+  %t$1 = phi i64 [%t$6, %arm_0_0]
+  ret i64 %t$1
+}
+
+define i64 @stdlib.tui.app.step_to(i64 %update, i64 %w, i64 %target, i64 %msg) {
+entry:
+  %t$3 = alloca i64
+  store i64 %w, ptr %t$3
+  %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
+  %t$5 = alloca i64
+  store i64 %update, ptr %t$5
+  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
+  %t$7 = alloca i64
+  store i64 %target, ptr %t$7
+  %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
+  %t$9 = alloca i64
+  store i64 %msg, ptr %t$9
+  %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
+  %t$0 = call i64 @sprout_alloc_obj(i64 77, i64 1)
+  %t$0$ptr = inttoptr i64 %t$0 to ptr
+  %t$0$f0 = getelementptr i64, ptr %t$0$ptr, i64 0
+  store i64 %msg, ptr %t$0$f0
+  %t$11 = alloca i64
+  store i64 %t$0, ptr %t$11
+  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
+  %t$1 = call i64 @stdlib.tui.widget.deliver(i64 %w, i64 %target, i64 %t$0)
+  %t$13 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$14 = alloca i64
+  store i64 %t$1, ptr %t$14
+  %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
+  %t$2 = call i64 @stdlib.tui.app.delivered(i64 %update, i64 %w, i64 %msg, i64 %t$1)
+  %t$16 = call i64 @sprout_gc_pop_roots(i64 5)
+  ret i64 %t$2
+}
+
+define i64 @stdlib.tui.app.delivered(i64 %update, i64 %w, i64 %msg, i64 %r) {
+entry:
+  %t$0 = call i64 @sprout_tag(i64 %r)
   br label %arm_0_1
 arm_0_1:
-  %t$3$ptr = inttoptr i64 %t$0 to ptr
-  %t$3$gep = getelementptr i64, ptr %t$3$ptr, i64 0
-  %t$3 = load i64, ptr %t$3$gep
-  %t$4$ptr = inttoptr i64 %t$0 to ptr
-  %t$4$gep = getelementptr i64, ptr %t$4$ptr, i64 1
-  %t$4 = load i64, ptr %t$4$gep
-  %t$5$ptr = inttoptr i64 %t$0 to ptr
-  %t$5$gep = getelementptr i64, ptr %t$5$ptr, i64 2
-  %t$5 = load i64, ptr %t$5$gep
+  %t$3 = add i64 0, 0
+  %t$4 = icmp eq i64 %t$0, %t$3
+  br i1 %t$4, label %body_0_1, label %arm_1_1
+body_0_1:
+  %t$12 = alloca i64
+  store i64 %w, ptr %t$12
+  %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
+  %t$14 = alloca i64
+  store i64 %update, ptr %t$14
+  %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
   %t$16 = alloca i64
-  store i64 %update, ptr %t$16
+  store i64 %msg, ptr %t$16
   %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
+  %t$5 = call i64 @sprout_alloc_obj(i64 5, i64 0)
   %t$18 = alloca i64
-  store i64 %t$3, ptr %t$18
+  store i64 %t$5, ptr %t$18
   %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
-  %t$20 = alloca i64
-  store i64 %t$4, ptr %t$20
-  %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
-  %t$22 = alloca i64
-  store i64 %t$5, ptr %t$22
-  %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
-  %t$6 = call i64 @stdlib.tui.app.apply(i64 %update, i64 %t$4, i64 %t$3)
-  %t$24 = alloca i64
-  store i64 %t$6, ptr %t$24
-  %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
-  %t$7 = call i64 @stdlib.tui.app.step_apply(i64 %t$5, i64 %t$6)
-  %t$26 = call i64 @sprout_gc_pop_roots(i64 5)
+  %t$6 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$6$ptr = inttoptr i64 %t$6 to ptr
+  %t$6$f0 = getelementptr i64, ptr %t$6$ptr, i64 0
+  store i64 %msg, ptr %t$6$f0
+  %t$6$f1 = getelementptr i64, ptr %t$6$ptr, i64 1
+  store i64 %t$5, ptr %t$6$f1
+  %t$20 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$21 = alloca i64
+  store i64 %t$6, ptr %t$21
+  %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
+  %t$7 = call i64 @stdlib.tui.app.apply(i64 %update, i64 %t$6, i64 %w)
+  %t$23 = call i64 @sprout_gc_pop_roots(i64 3)
   br label %join_1
 arm_1_1:
+  %t$8 = add i64 0, 1
+  %t$9 = icmp eq i64 %t$0, %t$8
+  br i1 %t$9, label %body_1_1, label %arm_2_1
+body_1_1:
+  %t$10 = call i64 @sprout_field(i64 %r, i64 0)
+  %t$24 = alloca i64
+  store i64 %update, ptr %t$24
+  %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
+  %t$26 = alloca i64
+  store i64 %t$10, ptr %t$26
+  %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
+  %t$11 = call i64 @stdlib.tui.app.stepped(i64 %update, i64 %t$10)
+  %t$28 = call i64 @sprout_gc_pop_roots(i64 2)
+  br label %join_1
+arm_2_1:
   call void @sprout_abort_match()
   unreachable
 join_1:
-  %t$2 = phi i64 [%t$7, %arm_0_1]
+  %t$2 = phi i64 [%t$7, %body_0_1], [%t$11, %body_1_1]
   ret i64 %t$2
 }
 
@@ -11894,7 +12196,7 @@ entry:
   %t$0 = call i64 @sprout_tag(i64 %sig)
   br label %arm_0_1
 arm_0_1:
-  %t$3 = add i64 0, 82
+  %t$3 = add i64 0, 84
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
@@ -11902,53 +12204,90 @@ body_0_1:
   %t$6 = musttail call i64 @stdlib.tui.app.on_event_sig$u(i64 %scope, i64 %ch, i64 %s, i64 %w, i64 %update, i64 %size, i64 %t$5)
   ret i64 %t$6
 arm_1_1:
-  %t$7 = add i64 0, 83
+  %t$7 = add i64 0, 85
   %t$8 = icmp eq i64 %t$0, %t$7
   br i1 %t$8, label %body_1_1, label %arm_2_1
 body_1_1:
   %t$9 = call i64 @sprout_field(i64 %sig, i64 0)
-  %t$15 = alloca i64
-  store i64 %w, ptr %t$15
-  %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
-  %t$17 = alloca i64
-  store i64 %update, ptr %t$17
-  %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
-  %t$19 = alloca i64
-  store i64 %size, ptr %t$19
-  %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
-  %t$21 = alloca i64
-  store i64 %scope, ptr %t$21
-  %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
-  %t$23 = alloca i64
-  store i64 %s, ptr %t$23
-  %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
-  %t$25 = alloca i64
-  store i64 %ch, ptr %t$25
-  %t$26 = call i64 @sprout_gc_push_i64_root(ptr %t$25)
-  %t$27 = alloca i64
-  store i64 %t$9, ptr %t$27
-  %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
+  %t$22 = alloca i64
+  store i64 %w, ptr %t$22
+  %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
+  %t$24 = alloca i64
+  store i64 %update, ptr %t$24
+  %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
+  %t$26 = alloca i64
+  store i64 %size, ptr %t$26
+  %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
+  %t$28 = alloca i64
+  store i64 %scope, ptr %t$28
+  %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
+  %t$30 = alloca i64
+  store i64 %s, ptr %t$30
+  %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)
+  %t$32 = alloca i64
+  store i64 %ch, ptr %t$32
+  %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
+  %t$34 = alloca i64
+  store i64 %t$9, ptr %t$34
+  %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
   %t$10 = call i64 @sprout_alloc_obj(i64 5, i64 0)
-  %t$29 = alloca i64
-  store i64 %t$10, ptr %t$29
-  %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
+  %t$36 = alloca i64
+  store i64 %t$10, ptr %t$36
+  %t$37 = call i64 @sprout_gc_push_i64_root(ptr %t$36)
   %t$11 = call i64 @sprout_alloc_obj(i64 6, i64 2)
   %t$11$ptr = inttoptr i64 %t$11 to ptr
   %t$11$f0 = getelementptr i64, ptr %t$11$ptr, i64 0
   store i64 %t$9, ptr %t$11$f0
   %t$11$f1 = getelementptr i64, ptr %t$11$ptr, i64 1
   store i64 %t$10, ptr %t$11$f1
-  %t$31 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$32 = alloca i64
-  store i64 %t$11, ptr %t$32
-  %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
+  %t$38 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$39 = alloca i64
+  store i64 %t$11, ptr %t$39
+  %t$40 = call i64 @sprout_gc_push_i64_root(ptr %t$39)
   %t$12 = call i64 @stdlib.tui.app.apply(i64 %update, i64 %t$11, i64 %w)
-  %t$34 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$41 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$13 = add i64 0, 0
-  %t$35 = call i64 @sprout_gc_pop_roots(i64 6)
+  %t$42 = call i64 @sprout_gc_pop_roots(i64 6)
   %t$14 = musttail call i64 @stdlib.tui.app.advance$u(i64 %scope, i64 %ch, i64 %s, i64 %update, i64 %size, i64 %t$12, i64 %t$13)
   ret i64 %t$14
 arm_2_1:
+  %t$15 = add i64 0, 86
+  %t$16 = icmp eq i64 %t$0, %t$15
+  br i1 %t$16, label %body_2_1, label %arm_3_1
+body_2_1:
+  %t$17 = call i64 @sprout_field(i64 %sig, i64 0)
+  %t$18 = call i64 @sprout_field(i64 %sig, i64 1)
+  %t$43 = alloca i64
+  store i64 %w, ptr %t$43
+  %t$44 = call i64 @sprout_gc_push_i64_root(ptr %t$43)
+  %t$45 = alloca i64
+  store i64 %update, ptr %t$45
+  %t$46 = call i64 @sprout_gc_push_i64_root(ptr %t$45)
+  %t$47 = alloca i64
+  store i64 %size, ptr %t$47
+  %t$48 = call i64 @sprout_gc_push_i64_root(ptr %t$47)
+  %t$49 = alloca i64
+  store i64 %scope, ptr %t$49
+  %t$50 = call i64 @sprout_gc_push_i64_root(ptr %t$49)
+  %t$51 = alloca i64
+  store i64 %s, ptr %t$51
+  %t$52 = call i64 @sprout_gc_push_i64_root(ptr %t$51)
+  %t$53 = alloca i64
+  store i64 %ch, ptr %t$53
+  %t$54 = call i64 @sprout_gc_push_i64_root(ptr %t$53)
+  %t$55 = alloca i64
+  store i64 %t$17, ptr %t$55
+  %t$56 = call i64 @sprout_gc_push_i64_root(ptr %t$55)
+  %t$57 = alloca i64
+  store i64 %t$18, ptr %t$57
+  %t$58 = call i64 @sprout_gc_push_i64_root(ptr %t$57)
+  %t$19 = call i64 @stdlib.tui.app.step_to(i64 %update, i64 %w, i64 %t$17, i64 %t$18)
+  %t$59 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$20 = add i64 0, 0
+  %t$60 = call i64 @sprout_gc_pop_roots(i64 6)
+  %t$21 = musttail call i64 @stdlib.tui.app.advance$u(i64 %scope, i64 %ch, i64 %s, i64 %update, i64 %size, i64 %t$19, i64 %t$20)
+  ret i64 %t$21
+arm_3_1:
   call void @sprout_abort_match()
   unreachable
 }
@@ -12120,7 +12459,7 @@ arm_0_0:
   %t$3$gep = getelementptr i64, ptr %t$3$ptr, i64 1
   %t$3 = load i64, ptr %t$3$gep
   %t$4 = call i64 @sprout_tag(i64 %t$3)
-  %t$5 = add i64 0, 81
+  %t$5 = add i64 0, 83
   %t$6 = icmp eq i64 %t$4, %t$5
   br i1 %t$6, label %ntest_3, label %arm_1_0
 ntest_3:
@@ -12144,7 +12483,7 @@ arm_1_0:
   %t$9$gep = getelementptr i64, ptr %t$9$ptr, i64 1
   %t$9 = load i64, ptr %t$9$gep
   %t$10 = call i64 @sprout_tag(i64 %t$9)
-  %t$11 = add i64 0, 80
+  %t$11 = add i64 0, 82
   %t$12 = icmp eq i64 %t$10, %t$11
   br i1 %t$12, label %ntest_9, label %arm_2_0
 ntest_9:
@@ -12303,27 +12642,73 @@ entry:
 
 define i64 @stdlib.tui.app.run_cmd(i64 %ch, i64 %c, i64 %u) {
 entry:
-  %t$3 = alloca i64
-  store i64 %ch, ptr %t$3
-  %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
-  %t$5 = alloca i64
-  store i64 %c, ptr %t$5
-  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
+  %t$4 = alloca i64
+  store i64 %ch, ptr %t$4
+  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
+  %t$6 = alloca i64
+  store i64 %c, ptr %t$6
+  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
   %t$0 = call i64 @stdlib.tui.widget.cmd_run(i64 %c)
-  %t$7 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$1 = call i64 @stdlib.tui.widget.cmd_addr(i64 %c)
   %t$8 = alloca i64
   store i64 %t$0, ptr %t$8
   %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
-  %t$1 = call i64 @sprout_alloc_obj(i64 83, i64 1)
-  %t$1$ptr = inttoptr i64 %t$1 to ptr
-  %t$1$f0 = getelementptr i64, ptr %t$1$ptr, i64 0
-  store i64 %t$0, ptr %t$1$f0
-  %t$10 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$11 = alloca i64
-  store i64 %t$1, ptr %t$11
-  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
-  %t$2 = call i64 @stdlib.chan.chan_send(i64 %ch, i64 %t$1)
-  %t$13 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$10 = alloca i64
+  store i64 %t$1, ptr %t$10
+  %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
+  %t$2 = call i64 @stdlib.tui.app.addressed(i64 %t$1, i64 %t$0)
+  %t$12 = call i64 @sprout_gc_pop_roots(i64 3)
+  %t$13 = alloca i64
+  store i64 %t$2, ptr %t$13
+  %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
+  %t$3 = call i64 @stdlib.chan.chan_send(i64 %ch, i64 %t$2)
+  %t$15 = call i64 @sprout_gc_pop_roots(i64 2)
+  ret i64 %t$3
+}
+
+define i64 @stdlib.tui.app.addressed(i64 %a, i64 %msg) {
+entry:
+  %t$0 = call i64 @sprout_tag(i64 %a)
+  br label %arm_0_1
+arm_0_1:
+  %t$3 = add i64 0, 0
+  %t$4 = icmp eq i64 %t$0, %t$3
+  br i1 %t$4, label %body_0_1, label %arm_1_1
+body_0_1:
+  %t$10 = alloca i64
+  store i64 %msg, ptr %t$10
+  %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
+  %t$5 = call i64 @sprout_alloc_obj(i64 85, i64 1)
+  %t$5$ptr = inttoptr i64 %t$5 to ptr
+  %t$5$f0 = getelementptr i64, ptr %t$5$ptr, i64 0
+  store i64 %msg, ptr %t$5$f0
+  %t$12 = call i64 @sprout_gc_pop_roots(i64 1)
+  br label %join_1
+arm_1_1:
+  %t$6 = add i64 0, 1
+  %t$7 = icmp eq i64 %t$0, %t$6
+  br i1 %t$7, label %body_1_1, label %arm_2_1
+body_1_1:
+  %t$8 = call i64 @sprout_field(i64 %a, i64 0)
+  %t$13 = alloca i64
+  store i64 %msg, ptr %t$13
+  %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
+  %t$15 = alloca i64
+  store i64 %t$8, ptr %t$15
+  %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
+  %t$9 = call i64 @sprout_alloc_obj(i64 86, i64 2)
+  %t$9$ptr = inttoptr i64 %t$9 to ptr
+  %t$9$f0 = getelementptr i64, ptr %t$9$ptr, i64 0
+  store i64 %t$8, ptr %t$9$f0
+  %t$9$f1 = getelementptr i64, ptr %t$9$ptr, i64 1
+  store i64 %msg, ptr %t$9$f1
+  %t$17 = call i64 @sprout_gc_pop_roots(i64 2)
+  br label %join_1
+arm_2_1:
+  call void @sprout_abort_match()
+  unreachable
+join_1:
+  %t$2 = phi i64 [%t$5, %body_0_1], [%t$9, %body_1_1]
   ret i64 %t$2
 }
 
@@ -12544,7 +12929,7 @@ body_1_1:
   %t$39 = alloca i64
   store i64 %t$12, ptr %t$39
   %t$40 = call i64 @sprout_gc_push_i64_root(ptr %t$39)
-  %t$13 = call i64 @sprout_alloc_obj(i64 82, i64 1)
+  %t$13 = call i64 @sprout_alloc_obj(i64 84, i64 1)
   %t$13$ptr = inttoptr i64 %t$13 to ptr
   %t$13$f0 = getelementptr i64, ptr %t$13$ptr, i64 0
   store i64 %t$12, ptr %t$13$f0
@@ -12711,7 +13096,7 @@ entry:
   %t$10 = alloca i64
   store i64 %ch, ptr %t$10
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
-  %t$0 = call i64 @sprout_alloc_obj(i64 82, i64 1)
+  %t$0 = call i64 @sprout_alloc_obj(i64 84, i64 1)
   %t$0$ptr = inttoptr i64 %t$0 to ptr
   %t$0$f0 = getelementptr i64, ptr %t$0$ptr, i64 0
   store i64 %e, ptr %t$0$f0
@@ -12797,7 +13182,7 @@ entry:
   %t$12 = alloca i64
   store i64 %t$1, ptr %t$12
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
-  %t$2 = call i64 @sprout_alloc_obj(i64 82, i64 1)
+  %t$2 = call i64 @sprout_alloc_obj(i64 84, i64 1)
   %t$2$ptr = inttoptr i64 %t$2 to ptr
   %t$2$f0 = getelementptr i64, ptr %t$2$ptr, i64 0
   store i64 %t$1, ptr %t$2$f0
@@ -12952,21 +13337,21 @@ entry:
   %t$0 = call i64 @sprout_tag(i64 %d)
   br label %arm_0_1
 arm_0_1:
-  %t$3 = add i64 0, 85
+  %t$3 = add i64 0, 88
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
   %t$5 = add i64 0, 1
   br label %join_1
 arm_1_1:
-  %t$6 = add i64 0, 86
+  %t$6 = add i64 0, 89
   %t$7 = icmp eq i64 %t$0, %t$6
   br i1 %t$7, label %body_1_1, label %arm_2_1
 body_1_1:
   %t$8 = add i64 0, 0
   br label %join_1
 arm_2_1:
-  %t$9 = add i64 0, 87
+  %t$9 = add i64 0, 90
   %t$10 = icmp eq i64 %t$0, %t$9
   br i1 %t$10, label %body_2_1, label %arm_3_1
 body_2_1:
@@ -12985,21 +13370,21 @@ entry:
   %t$0 = call i64 @sprout_tag(i64 %d)
   br label %arm_0_1
 arm_0_1:
-  %t$3 = add i64 0, 85
+  %t$3 = add i64 0, 88
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
   %t$5 = add i64 0, 0
   br label %join_1
 arm_1_1:
-  %t$6 = add i64 0, 86
+  %t$6 = add i64 0, 89
   %t$7 = icmp eq i64 %t$0, %t$6
   br i1 %t$7, label %body_1_1, label %arm_2_1
 body_1_1:
   %t$8 = add i64 0, 0
   br label %join_1
 arm_2_1:
-  %t$9 = add i64 0, 87
+  %t$9 = add i64 0, 90
   %t$10 = icmp eq i64 %t$0, %t$9
   br i1 %t$10, label %body_2_1, label %arm_3_1
 body_2_1:
@@ -13018,7 +13403,7 @@ entry:
   %t$0 = call i64 @sprout_tag(i64 %d)
   br label %arm_0_1
 arm_0_1:
-  %t$3 = add i64 0, 85
+  %t$3 = add i64 0, 88
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
@@ -13027,7 +13412,7 @@ body_0_1:
   %t$7 = call i64 @stdlib.tui.layout.imax(i64 %t$6, i64 %t$5)
   br label %join_1
 arm_1_1:
-  %t$8 = add i64 0, 87
+  %t$8 = add i64 0, 90
   %t$9 = icmp eq i64 %t$0, %t$8
   br i1 %t$9, label %body_1_1, label %arm_2_1
 body_1_1:
@@ -13036,7 +13421,7 @@ body_1_1:
   %t$12 = call i64 @stdlib.tui.layout.imax(i64 %t$11, i64 %t$10)
   br label %join_1
 arm_2_1:
-  %t$13 = add i64 0, 86
+  %t$13 = add i64 0, 89
   %t$14 = icmp eq i64 %t$0, %t$13
   br i1 %t$14, label %body_2_1, label %arm_3_1
 body_2_1:
@@ -13103,7 +13488,7 @@ entry:
 
 define i64 @stdlib.tui.layout.take_state(i64 %cells, i64 %auto) {
 entry:
-  %t$0 = call i64 @sprout_alloc_obj(i64 92, i64 2)
+  %t$0 = call i64 @sprout_alloc_obj(i64 95, i64 2)
   %t$0$ptr = inttoptr i64 %t$0 to ptr
   %t$0$f0 = getelementptr i64, ptr %t$0$ptr, i64 0
   store i64 %cells, ptr %t$0$f0
@@ -13133,7 +13518,7 @@ body_1_1:
   %t$10 = call i64 @sprout_tag(i64 %t$8)
   br label %arm_0_11
 arm_0_11:
-  %t$13 = add i64 0, 85
+  %t$13 = add i64 0, 88
   %t$14 = icmp eq i64 %t$10, %t$13
   br i1 %t$14, label %body_0_11, label %arm_1_11
 body_0_11:
@@ -13153,7 +13538,7 @@ arm_0_20:
   %t$62 = alloca i64
   store i64 %shares, ptr %t$62
   %t$63 = call i64 @sprout_gc_push_i64_root(ptr %t$62)
-  %t$25 = call i64 @sprout_alloc_obj(i64 92, i64 2)
+  %t$25 = call i64 @sprout_alloc_obj(i64 95, i64 2)
   %t$25$ptr = inttoptr i64 %t$25 to ptr
   %t$25$f0 = getelementptr i64, ptr %t$25$ptr, i64 0
   store i64 %t$23, ptr %t$25$f0
@@ -13182,7 +13567,7 @@ join_20:
   %t$21 = phi i64 [%t$27, %arm_0_20]
   br label %join_11
 arm_1_11:
-  %t$28 = add i64 0, 87
+  %t$28 = add i64 0, 90
   %t$29 = icmp eq i64 %t$10, %t$28
   br i1 %t$29, label %body_1_11, label %arm_2_11
 body_1_11:
@@ -13202,7 +13587,7 @@ arm_0_35:
   %t$72 = alloca i64
   store i64 %shares, ptr %t$72
   %t$73 = call i64 @sprout_gc_push_i64_root(ptr %t$72)
-  %t$40 = call i64 @sprout_alloc_obj(i64 92, i64 2)
+  %t$40 = call i64 @sprout_alloc_obj(i64 95, i64 2)
   %t$40$ptr = inttoptr i64 %t$40 to ptr
   %t$40$f0 = getelementptr i64, ptr %t$40$ptr, i64 0
   store i64 %t$37, ptr %t$40$f0
@@ -13231,7 +13616,7 @@ join_35:
   %t$36 = phi i64 [%t$42, %arm_0_35]
   br label %join_11
 arm_2_11:
-  %t$43 = add i64 0, 86
+  %t$43 = add i64 0, 89
   %t$44 = icmp eq i64 %t$10, %t$43
   br i1 %t$44, label %body_2_11, label %arm_3_11
 body_2_11:
@@ -13523,7 +13908,7 @@ entry:
   %t$0 = call i64 @sprout_tag(i64 %d)
   br label %arm_0_1
 arm_0_1:
-  %t$3 = add i64 0, 86
+  %t$3 = add i64 0, 89
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
@@ -13543,14 +13928,14 @@ body_0_1:
   %t$18 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_1
 arm_1_1:
-  %t$10 = add i64 0, 85
+  %t$10 = add i64 0, 88
   %t$11 = icmp eq i64 %t$0, %t$10
   br i1 %t$11, label %body_1_1, label %arm_2_1
 body_1_1:
   %t$12 = call i64 @sprout_alloc_obj(i64 5, i64 0)
   br label %join_1
 arm_2_1:
-  %t$13 = add i64 0, 87
+  %t$13 = add i64 0, 90
   %t$14 = icmp eq i64 %t$0, %t$13
   br i1 %t$14, label %body_2_1, label %arm_3_1
 body_2_1:
@@ -14100,7 +14485,34 @@ entry:
   ret i64 %t$6
 }
 
-define i64 @main.ticks_on_event(i64 %n, i64 %ev) {
+define i64 @main.ticks_id() {
+entry:
+  %t$0 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.92, i64 0, i32 1, i64 0
+  %t$1 = ptrtoint ptr %t$0 to i64
+  ret i64 %t$1
+}
+
+define i64 @main.read_clock(i64 %u) {
+entry:
+  %t$0 = call i64 @stdlib.time.wall_micros()
+  %t$1 = call i64 @sprout_alloc_obj(i64 98, i64 1)
+  %t$1$ptr = inttoptr i64 %t$1 to ptr
+  %t$1$f0 = getelementptr i64, ptr %t$1$ptr, i64 0
+  store i64 %t$0, ptr %t$1$f0
+  ret i64 %t$1
+}
+
+define i64 @__sprout_ir_lambda_32(i64 %env$, i64 %__sprout_ph_0) {
+entry:
+  %t$1 = alloca i64
+  store i64 %__sprout_ph_0, ptr %t$1
+  %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
+  %t$0 = call i64 @main.read_clock(i64 %__sprout_ph_0)
+  %t$3 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t$0
+}
+
+define i64 @main.ticks_on_event(i64 %t, i64 %ev) {
 entry:
   %t$0 = call i64 @sprout_tag(i64 %ev)
   br label %arm_0_1
@@ -14109,16 +14521,124 @@ arm_0_1:
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
-  %t$5 = add i64 0, 1
-  %t$6 = add i64 %n, %t$5
-  %t$7 = call i64 @sprout_alloc_obj(i64 5, i64 0)
-  %t$13 = alloca i64
-  store i64 %t$7, ptr %t$13
-  %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
-  %t$8 = call i64 @sprout_alloc_obj(i64 5, i64 0)
+  %t$5 = call i64 @sprout_field(i64 %t, i64 0)
+  %t$6 = add i64 0, 1
+  %t$7 = add i64 %t$5, %t$6
+  %t$8 = call i64 @sprout_field(i64 %t, i64 1)
+  %t$9 = call i64 @sprout_field(i64 %t, i64 2)
+  %t$10 = call i64 @sprout_alloc_obj(i64 99, i64 3)
+  %t$10$ptr = inttoptr i64 %t$10 to ptr
+  %t$10$f0 = getelementptr i64, ptr %t$10$ptr, i64 0
+  store i64 %t$7, ptr %t$10$f0
+  %t$10$f1 = getelementptr i64, ptr %t$10$ptr, i64 1
+  store i64 %t$8, ptr %t$10$f1
+  %t$10$f2 = getelementptr i64, ptr %t$10$ptr, i64 2
+  store i64 %t$9, ptr %t$10$f2
+  %t$21 = alloca i64
+  store i64 %t$10, ptr %t$21
+  %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
+  %t$11 = call i64 @sprout_alloc_obj(i64 5, i64 0)
+  %t$12 = call i64 @main.ticks_id()
+  %t$23 = alloca i64
+  store i64 %t$11, ptr %t$23
+  %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
+  %t$25 = alloca i64
+  store i64 %t$12, ptr %t$25
+  %t$26 = call i64 @sprout_gc_push_i64_root(ptr %t$25)
+  %t$13 = call i64 @sprout_alloc_closure(i64 8, i64 1)
+  %t$13$raw = inttoptr i64 %t$13 to ptr
+  store ptr @__sprout_ir_lambda_32, ptr %t$13$raw
+  %t$27 = alloca i64
+  store i64 %t$13, ptr %t$27
+  %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
+  %t$14 = call i64 @stdlib.tui.widget.cmd_to(i64 %t$12, i64 %t$13)
+  %t$29 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$30 = alloca i64
+  store i64 %t$14, ptr %t$30
+  %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)
+  %t$15 = call i64 @sprout_alloc_obj(i64 5, i64 0)
+  %t$32 = alloca i64
+  store i64 %t$15, ptr %t$32
+  %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
+  %t$16 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$16$ptr = inttoptr i64 %t$16 to ptr
+  %t$16$f0 = getelementptr i64, ptr %t$16$ptr, i64 0
+  store i64 %t$14, ptr %t$16$f0
+  %t$16$f1 = getelementptr i64, ptr %t$16$ptr, i64 1
+  store i64 %t$15, ptr %t$16$f1
+  %t$34 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$35 = alloca i64
+  store i64 %t$16, ptr %t$35
+  %t$36 = call i64 @sprout_gc_push_i64_root(ptr %t$35)
+  %t$17 = call i64 @sprout_alloc_tuple_blob(i64 24)
+  %t$17$ptr = inttoptr i64 %t$17 to ptr
+  %t$17$s0 = getelementptr i64, ptr %t$17$ptr, i64 0
+  store i64 %t$10, ptr %t$17$s0
+  %t$17$s1 = getelementptr i64, ptr %t$17$ptr, i64 1
+  store i64 %t$11, ptr %t$17$s1
+  %t$17$s2 = getelementptr i64, ptr %t$17$ptr, i64 2
+  store i64 %t$16, ptr %t$17$s2
+  %t$37 = call i64 @sprout_gc_pop_roots(i64 3)
+  br label %join_1
+arm_1_1:
+  %t$38 = alloca i64
+  store i64 %t, ptr %t$38
+  %t$39 = call i64 @sprout_gc_push_i64_root(ptr %t$38)
+  %t$18 = call i64 @sprout_alloc_obj(i64 5, i64 0)
+  %t$40 = alloca i64
+  store i64 %t$18, ptr %t$40
+  %t$41 = call i64 @sprout_gc_push_i64_root(ptr %t$40)
+  %t$19 = call i64 @sprout_alloc_obj(i64 5, i64 0)
+  %t$42 = alloca i64
+  store i64 %t$19, ptr %t$42
+  %t$43 = call i64 @sprout_gc_push_i64_root(ptr %t$42)
+  %t$20 = call i64 @sprout_alloc_tuple_blob(i64 24)
+  %t$20$ptr = inttoptr i64 %t$20 to ptr
+  %t$20$s0 = getelementptr i64, ptr %t$20$ptr, i64 0
+  store i64 %t, ptr %t$20$s0
+  %t$20$s1 = getelementptr i64, ptr %t$20$ptr, i64 1
+  store i64 %t$18, ptr %t$20$s1
+  %t$20$s2 = getelementptr i64, ptr %t$20$ptr, i64 2
+  store i64 %t$19, ptr %t$20$s2
+  %t$44 = call i64 @sprout_gc_pop_roots(i64 3)
+  br label %join_1
+arm_2_1:
+  call void @sprout_abort_match()
+  unreachable
+join_1:
+  %t$2 = phi i64 [%t$17, %body_0_1], [%t$20, %arm_1_1]
+  ret i64 %t$2
+}
+
+define i64 @main.ticks_route(i64 %t, i64 %d) {
+entry:
+  %t$0 = call i64 @sprout_tag(i64 %d)
+  br label %arm_0_1
+arm_0_1:
+  %t$3 = add i64 0, 77
+  %t$4 = icmp eq i64 %t$0, %t$3
+  br i1 %t$4, label %body_0_1, label %arm_1_1
+body_0_1:
+  %t$5 = call i64 @sprout_field(i64 %d, i64 0)
   %t$15 = alloca i64
-  store i64 %t$8, ptr %t$15
+  store i64 %t, ptr %t$15
   %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
+  %t$17 = alloca i64
+  store i64 %t$5, ptr %t$17
+  %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
+  %t$6 = call i64 @main.stamped(i64 %t, i64 %t$5)
+  %t$19 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$20 = alloca i64
+  store i64 %t$6, ptr %t$20
+  %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
+  %t$7 = call i64 @sprout_alloc_obj(i64 5, i64 0)
+  %t$22 = alloca i64
+  store i64 %t$7, ptr %t$22
+  %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
+  %t$8 = call i64 @sprout_alloc_obj(i64 5, i64 0)
+  %t$24 = alloca i64
+  store i64 %t$8, ptr %t$24
+  %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
   %t$9 = call i64 @sprout_alloc_tuple_blob(i64 24)
   %t$9$ptr = inttoptr i64 %t$9 to ptr
   %t$9$s0 = getelementptr i64, ptr %t$9$ptr, i64 0
@@ -14127,36 +14647,92 @@ body_0_1:
   store i64 %t$7, ptr %t$9$s1
   %t$9$s2 = getelementptr i64, ptr %t$9$ptr, i64 2
   store i64 %t$8, ptr %t$9$s2
-  %t$17 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$26 = call i64 @sprout_gc_pop_roots(i64 3)
   br label %join_1
 arm_1_1:
-  %t$10 = call i64 @sprout_alloc_obj(i64 5, i64 0)
-  %t$18 = alloca i64
-  store i64 %t$10, ptr %t$18
-  %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
-  %t$11 = call i64 @sprout_alloc_obj(i64 5, i64 0)
-  %t$20 = alloca i64
-  store i64 %t$11, ptr %t$20
-  %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
-  %t$12 = call i64 @sprout_alloc_tuple_blob(i64 24)
-  %t$12$ptr = inttoptr i64 %t$12 to ptr
-  %t$12$s0 = getelementptr i64, ptr %t$12$ptr, i64 0
-  store i64 %n, ptr %t$12$s0
-  %t$12$s1 = getelementptr i64, ptr %t$12$ptr, i64 1
-  store i64 %t$10, ptr %t$12$s1
-  %t$12$s2 = getelementptr i64, ptr %t$12$ptr, i64 2
-  store i64 %t$11, ptr %t$12$s2
-  %t$22 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$10 = add i64 0, 78
+  %t$11 = icmp eq i64 %t$0, %t$10
+  br i1 %t$11, label %body_1_1, label %arm_2_1
+body_1_1:
+  %t$27 = alloca i64
+  store i64 %t, ptr %t$27
+  %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
+  %t$12 = call i64 @sprout_alloc_obj(i64 5, i64 0)
+  %t$29 = alloca i64
+  store i64 %t$12, ptr %t$29
+  %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
+  %t$13 = call i64 @sprout_alloc_obj(i64 5, i64 0)
+  %t$31 = alloca i64
+  store i64 %t$13, ptr %t$31
+  %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
+  %t$14 = call i64 @sprout_alloc_tuple_blob(i64 24)
+  %t$14$ptr = inttoptr i64 %t$14 to ptr
+  %t$14$s0 = getelementptr i64, ptr %t$14$ptr, i64 0
+  store i64 %t, ptr %t$14$s0
+  %t$14$s1 = getelementptr i64, ptr %t$14$ptr, i64 1
+  store i64 %t$12, ptr %t$14$s1
+  %t$14$s2 = getelementptr i64, ptr %t$14$ptr, i64 2
+  store i64 %t$13, ptr %t$14$s2
+  %t$33 = call i64 @sprout_gc_pop_roots(i64 3)
   br label %join_1
 arm_2_1:
   call void @sprout_abort_match()
   unreachable
 join_1:
-  %t$2 = phi i64 [%t$9, %body_0_1], [%t$12, %arm_1_1]
+  %t$2 = phi i64 [%t$9, %body_0_1], [%t$14, %body_1_1]
   ret i64 %t$2
 }
 
-define i64 @main.ticks_measure(i64 %n, i64 %avail) {
+define i64 @main.stamped(i64 %t, i64 %m) {
+entry:
+  %t$0 = call i64 @sprout_tag(i64 %m)
+  br label %arm_0_1
+arm_0_1:
+  %t$3 = add i64 0, 98
+  %t$4 = icmp eq i64 %t$0, %t$3
+  br i1 %t$4, label %body_0_1, label %arm_1_1
+body_0_1:
+  %t$5 = call i64 @sprout_field(i64 %m, i64 0)
+  %t$6 = call i64 @sprout_field(i64 %t, i64 0)
+  %t$7 = call i64 @main.first_of(i64 %t, i64 %t$5)
+  %t$8 = call i64 @sprout_alloc_obj(i64 99, i64 3)
+  %t$8$ptr = inttoptr i64 %t$8 to ptr
+  %t$8$f0 = getelementptr i64, ptr %t$8$ptr, i64 0
+  store i64 %t$6, ptr %t$8$f0
+  %t$8$f1 = getelementptr i64, ptr %t$8$ptr, i64 1
+  store i64 %t$7, ptr %t$8$f1
+  %t$8$f2 = getelementptr i64, ptr %t$8$ptr, i64 2
+  store i64 %t$5, ptr %t$8$f2
+  br label %join_1
+arm_1_1:
+  br label %join_1
+arm_2_1:
+  call void @sprout_abort_match()
+  unreachable
+join_1:
+  %t$2 = phi i64 [%t$8, %body_0_1], [%t, %arm_1_1]
+  ret i64 %t$2
+}
+
+define i64 @main.first_of(i64 %t, i64 %us) {
+entry:
+  %t$0 = call i64 @sprout_field(i64 %t, i64 1)
+  %t$1 = add i64 0, 0
+  %t$2 = icmp eq i64 %t$0, %t$1
+  %t$3 = zext i1 %t$2 to i64
+  %t$7 = trunc i64 %t$3 to i1
+  br i1 %t$7, label %then_4, label %else_4
+then_4:
+  br label %join_4
+else_4:
+  %t$6 = call i64 @sprout_field(i64 %t, i64 1)
+  br label %join_4
+join_4:
+  %t$5 = phi i64 [%us, %then_4], [%t$6, %else_4]
+  ret i64 %t$5
+}
+
+define i64 @main.ticks_measure(i64 %t, i64 %avail) {
 entry:
   %t$0 = call i64 @stdlib.tui.geometry.size_cols(i64 %avail)
   %t$1 = add i64 0, 2
@@ -14169,41 +14745,140 @@ entry:
   ret i64 %t$2
 }
 
-define i64 @main.ticks_render(i64 %n, i64 %r, i64 %s) {
+define i64 @main.ticks_render(i64 %t, i64 %r, i64 %s) {
 entry:
   %t$0 = add i64 0, 0
-  %t$1 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.92, i64 0, i32 1, i64 0
+  %t$1 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.93, i64 0, i32 1, i64 0
   %t$2 = ptrtoint ptr %t$1 to i64
-  %t$9 = alloca i64
-  store i64 %s, ptr %t$9
-  %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
-  %t$11 = alloca i64
-  store i64 %r, ptr %t$11
-  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
-  %t$13 = alloca i64
-  store i64 %t$2, ptr %t$13
-  %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
+  %t$22 = alloca i64
+  store i64 %t, ptr %t$22
+  %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
+  %t$24 = alloca i64
+  store i64 %s, ptr %t$24
+  %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
+  %t$26 = alloca i64
+  store i64 %r, ptr %t$26
+  %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
+  %t$28 = alloca i64
+  store i64 %t$2, ptr %t$28
+  %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
   %t$3 = call i64 @main.dim()
-  %t$15 = alloca i64
-  store i64 %t$3, ptr %t$15
-  %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
+  %t$30 = alloca i64
+  store i64 %t$3, ptr %t$30
+  %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)
   %t$4 = call i64 @main.line(i64 %s, i64 %r, i64 %t$0, i64 %t$2, i64 %t$3)
-  %t$17 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$32 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$5 = add i64 0, 1
-  %t$6 = call i64 @__tc_ToString_Int_to_string(i64 %n)
-  %t$18 = alloca i64
-  store i64 %t$6, ptr %t$18
-  %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
-  %t$7 = call i64 @main.bright()
-  %t$20 = alloca i64
-  store i64 %t$7, ptr %t$20
-  %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
-  %t$8 = call i64 @main.line(i64 %s, i64 %r, i64 %t$5, i64 %t$6, i64 %t$7)
-  %t$22 = call i64 @sprout_gc_pop_roots(i64 4)
-  ret i64 %t$8
+  %t$6 = call i64 @sprout_field(i64 %t, i64 0)
+  %t$7 = call i64 @__tc_ToString_Int_to_string(i64 %t$6)
+  %t$8 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.94, i64 0, i32 1, i64 0
+  %t$9 = ptrtoint ptr %t$8 to i64
+  %t$10 = call i64 @main.uptime_s(i64 %t)
+  %t$33 = alloca i64
+  store i64 %t$7, ptr %t$33
+  %t$34 = call i64 @sprout_gc_push_i64_root(ptr %t$33)
+  %t$35 = alloca i64
+  store i64 %t$9, ptr %t$35
+  %t$36 = call i64 @sprout_gc_push_i64_root(ptr %t$35)
+  %t$11 = call i64 @__tc_ToString_Int_to_string(i64 %t$10)
+  %t$12 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.95, i64 0, i32 1, i64 0
+  %t$13 = ptrtoint ptr %t$12 to i64
+  %t$37 = alloca i64
+  store i64 %t$11, ptr %t$37
+  %t$38 = call i64 @sprout_gc_push_i64_root(ptr %t$37)
+  %t$39 = alloca i64
+  store i64 %t$13, ptr %t$39
+  %t$40 = call i64 @sprout_gc_push_i64_root(ptr %t$39)
+  %t$14 = call i64 @sprout_alloc_obj(i64 5, i64 0)
+  %t$41 = alloca i64
+  store i64 %t$14, ptr %t$41
+  %t$42 = call i64 @sprout_gc_push_i64_root(ptr %t$41)
+  %t$15 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$15$ptr = inttoptr i64 %t$15 to ptr
+  %t$15$f0 = getelementptr i64, ptr %t$15$ptr, i64 0
+  store i64 %t$13, ptr %t$15$f0
+  %t$15$f1 = getelementptr i64, ptr %t$15$ptr, i64 1
+  store i64 %t$14, ptr %t$15$f1
+  %t$43 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$44 = alloca i64
+  store i64 %t$15, ptr %t$44
+  %t$45 = call i64 @sprout_gc_push_i64_root(ptr %t$44)
+  %t$16 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$16$ptr = inttoptr i64 %t$16 to ptr
+  %t$16$f0 = getelementptr i64, ptr %t$16$ptr, i64 0
+  store i64 %t$11, ptr %t$16$f0
+  %t$16$f1 = getelementptr i64, ptr %t$16$ptr, i64 1
+  store i64 %t$15, ptr %t$16$f1
+  %t$46 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$47 = alloca i64
+  store i64 %t$16, ptr %t$47
+  %t$48 = call i64 @sprout_gc_push_i64_root(ptr %t$47)
+  %t$17 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$17$ptr = inttoptr i64 %t$17 to ptr
+  %t$17$f0 = getelementptr i64, ptr %t$17$ptr, i64 0
+  store i64 %t$9, ptr %t$17$f0
+  %t$17$f1 = getelementptr i64, ptr %t$17$ptr, i64 1
+  store i64 %t$16, ptr %t$17$f1
+  %t$49 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$50 = alloca i64
+  store i64 %t$17, ptr %t$50
+  %t$51 = call i64 @sprout_gc_push_i64_root(ptr %t$50)
+  %t$18 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$18$ptr = inttoptr i64 %t$18 to ptr
+  %t$18$f0 = getelementptr i64, ptr %t$18$ptr, i64 0
+  store i64 %t$7, ptr %t$18$f0
+  %t$18$f1 = getelementptr i64, ptr %t$18$ptr, i64 1
+  store i64 %t$17, ptr %t$18$f1
+  %t$52 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$53 = alloca i64
+  store i64 %t$18, ptr %t$53
+  %t$54 = call i64 @sprout_gc_push_i64_root(ptr %t$53)
+  %t$19 = call i64 @string_concat_many(i64 %t$18)
+  %t$55 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$56 = alloca i64
+  store i64 %t$19, ptr %t$56
+  %t$57 = call i64 @sprout_gc_push_i64_root(ptr %t$56)
+  %t$20 = call i64 @main.bright()
+  %t$58 = alloca i64
+  store i64 %t$20, ptr %t$58
+  %t$59 = call i64 @sprout_gc_push_i64_root(ptr %t$58)
+  %t$21 = call i64 @main.line(i64 %s, i64 %r, i64 %t$5, i64 %t$19, i64 %t$20)
+  %t$60 = call i64 @sprout_gc_pop_roots(i64 5)
+  ret i64 %t$21
 }
 
-define i64 @__sprout_ir_eta_main.ticks_on_event_32(i64 %env$, i64 %a0, i64 %a1) {
+define i64 @main.uptime_s(i64 %t) {
+entry:
+  %t$0 = call i64 @sprout_field(i64 %t, i64 1)
+  %t$1 = add i64 0, 0
+  %t$2 = icmp eq i64 %t$0, %t$1
+  %t$3 = zext i1 %t$2 to i64
+  %t$15 = trunc i64 %t$3 to i1
+  br i1 %t$15, label %then_4, label %else_4
+then_4:
+  %t$6 = add i64 0, 0
+  br label %join_4
+else_4:
+  %t$7 = call i64 @sprout_field(i64 %t, i64 2)
+  %t$8 = call i64 @sprout_field(i64 %t, i64 1)
+  %t$9 = sub i64 %t$7, %t$8
+  %t$10 = add i64 0, 1000000
+  %t$11 = icmp eq i64 %t$10, 0
+  br i1 %t$11, label %divpanic_11, label %divok_11
+divpanic_11:
+  %t$12 = getelementptr inbounds { i64, [17 x i8] }, ptr @.str.96, i64 0, i32 1, i64 0
+  %t$13 = ptrtoint ptr %t$12 to i64
+  call i64 @panic(i64 %t$13)
+  unreachable
+divok_11:
+  %t$14 = sdiv i64 %t$9, %t$10
+  br label %join_4
+join_4:
+  %t$5 = phi i64 [%t$6, %then_4], [%t$14, %divok_11]
+  ret i64 %t$5
+}
+
+define i64 @__sprout_ir_eta_main.ticks_on_event_33(i64 %env$, i64 %a0, i64 %a1) {
 entry:
   %t$0 = alloca i64
   store i64 %a1, ptr %t$0
@@ -14216,7 +14891,46 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta_main.ticks_render_33(i64 %env$, i64 %a0, i64 %a1, i64 %a2) {
+define i64 @__sprout_ir_eta_main.ticks_route_35(i64 %env$, i64 %a0, i64 %a1) {
+entry:
+  %t$0 = alloca i64
+  store i64 %a1, ptr %t$0
+  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
+  %t$2 = alloca i64
+  store i64 %a0, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %ret = call i64 @main.ticks_route(i64 %a0, i64 %a1)
+  %t$4 = call i64 @sprout_gc_pop_roots(i64 2)
+  ret i64 %ret
+}
+
+define i64 @__sprout_ir_lambda_34(i64 %env$, i64 %__sprout_ph_0, i64 %__sprout_ph_1, i64 %__sprout_ph_2) {
+entry:
+  %t$0 = call i64 @main.ticks_id()
+  %t$3 = alloca i64
+  store i64 %__sprout_ph_2, ptr %t$3
+  %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
+  %t$5 = alloca i64
+  store i64 %__sprout_ph_1, ptr %t$5
+  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
+  %t$7 = alloca i64
+  store i64 %__sprout_ph_0, ptr %t$7
+  %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
+  %t$9 = alloca i64
+  store i64 %t$0, ptr %t$9
+  %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
+  %t$1 = call i64 @sprout_alloc_closure(i64 8, i64 2)
+  %t$1$raw = inttoptr i64 %t$1 to ptr
+  store ptr @__sprout_ir_eta_main.ticks_route_35, ptr %t$1$raw
+  %t$11 = alloca i64
+  store i64 %t$1, ptr %t$11
+  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
+  %t$2 = call i64 @stdlib.tui.widget.route_if(i64 %t$0, i64 %t$1, i64 %__sprout_ph_0, i64 %__sprout_ph_1, i64 %__sprout_ph_2)
+  %t$13 = call i64 @sprout_gc_pop_roots(i64 5)
+  ret i64 %t$2
+}
+
+define i64 @__sprout_ir_eta_main.ticks_render_36(i64 %env$, i64 %a0, i64 %a1, i64 %a2) {
 entry:
   %t$0 = alloca i64
   store i64 %a2, ptr %t$0
@@ -14232,7 +14946,7 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta_main.ticks_measure_34(i64 %env$, i64 %a0, i64 %a1) {
+define i64 @__sprout_ir_eta_main.ticks_measure_37(i64 %env$, i64 %a0, i64 %a1) {
 entry:
   %t$0 = alloca i64
   store i64 %a1, ptr %t$0
@@ -14248,44 +14962,65 @@ entry:
 define i64 @main.ticks() {
 entry:
   %t$0 = add i64 0, 0
-  %t$1 = call i64 @sprout_alloc_closure(i64 8, i64 2)
-  %t$1$raw = inttoptr i64 %t$1 to ptr
-  store ptr @__sprout_ir_eta_main.ticks_on_event_32, ptr %t$1$raw
-  %t$6 = alloca i64
-  store i64 %t$1, ptr %t$6
-  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
-  %t$2 = call i64 @sprout_alloc_closure(i64 8, i64 3)
-  %t$2$raw = inttoptr i64 %t$2 to ptr
-  store ptr @__sprout_ir_eta_main.ticks_render_33, ptr %t$2$raw
-  %t$8 = alloca i64
-  store i64 %t$2, ptr %t$8
-  %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
-  %t$3 = call i64 @sprout_alloc_closure(i64 8, i64 2)
-  %t$3$raw = inttoptr i64 %t$3 to ptr
-  store ptr @__sprout_ir_eta_main.ticks_measure_34, ptr %t$3$raw
+  %t$1 = add i64 0, 0
+  %t$2 = add i64 0, 0
+  %t$3 = call i64 @sprout_alloc_obj(i64 99, i64 3)
+  %t$3$ptr = inttoptr i64 %t$3 to ptr
+  %t$3$f0 = getelementptr i64, ptr %t$3$ptr, i64 0
+  store i64 %t$0, ptr %t$3$f0
+  %t$3$f1 = getelementptr i64, ptr %t$3$ptr, i64 1
+  store i64 %t$1, ptr %t$3$f1
+  %t$3$f2 = getelementptr i64, ptr %t$3$ptr, i64 2
+  store i64 %t$2, ptr %t$3$f2
   %t$10 = alloca i64
   store i64 %t$3, ptr %t$10
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
-  %t$4 = call i64 @sprout_alloc_obj(i64 78, i64 4)
-  %t$4$ptr = inttoptr i64 %t$4 to ptr
-  %t$4$f0 = getelementptr i64, ptr %t$4$ptr, i64 0
-  store i64 %t$0, ptr %t$4$f0
-  %t$4$f1 = getelementptr i64, ptr %t$4$ptr, i64 1
-  store i64 %t$1, ptr %t$4$f1
-  %t$4$f2 = getelementptr i64, ptr %t$4$ptr, i64 2
-  store i64 %t$2, ptr %t$4$f2
-  %t$4$f3 = getelementptr i64, ptr %t$4$ptr, i64 3
-  store i64 %t$3, ptr %t$4$f3
-  %t$12 = call i64 @sprout_gc_pop_roots(i64 3)
-  %t$13 = alloca i64
-  store i64 %t$4, ptr %t$13
-  %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
-  %t$5 = call i64 @sprout_alloc_obj(i64 79, i64 1)
-  %t$5$ptr = inttoptr i64 %t$5 to ptr
-  %t$5$f0 = getelementptr i64, ptr %t$5$ptr, i64 0
-  store i64 %t$4, ptr %t$5$f0
-  %t$15 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %t$5
+  %t$4 = call i64 @sprout_alloc_closure(i64 8, i64 2)
+  %t$4$raw = inttoptr i64 %t$4 to ptr
+  store ptr @__sprout_ir_eta_main.ticks_on_event_33, ptr %t$4$raw
+  %t$12 = alloca i64
+  store i64 %t$4, ptr %t$12
+  %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
+  %t$5 = call i64 @sprout_alloc_closure(i64 8, i64 3)
+  %t$5$raw = inttoptr i64 %t$5 to ptr
+  store ptr @__sprout_ir_lambda_34, ptr %t$5$raw
+  %t$14 = alloca i64
+  store i64 %t$5, ptr %t$14
+  %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
+  %t$6 = call i64 @sprout_alloc_closure(i64 8, i64 3)
+  %t$6$raw = inttoptr i64 %t$6 to ptr
+  store ptr @__sprout_ir_eta_main.ticks_render_36, ptr %t$6$raw
+  %t$16 = alloca i64
+  store i64 %t$6, ptr %t$16
+  %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
+  %t$7 = call i64 @sprout_alloc_closure(i64 8, i64 2)
+  %t$7$raw = inttoptr i64 %t$7 to ptr
+  store ptr @__sprout_ir_eta_main.ticks_measure_37, ptr %t$7$raw
+  %t$18 = alloca i64
+  store i64 %t$7, ptr %t$18
+  %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
+  %t$8 = call i64 @sprout_alloc_obj(i64 80, i64 5)
+  %t$8$ptr = inttoptr i64 %t$8 to ptr
+  %t$8$f0 = getelementptr i64, ptr %t$8$ptr, i64 0
+  store i64 %t$3, ptr %t$8$f0
+  %t$8$f1 = getelementptr i64, ptr %t$8$ptr, i64 1
+  store i64 %t$4, ptr %t$8$f1
+  %t$8$f2 = getelementptr i64, ptr %t$8$ptr, i64 2
+  store i64 %t$5, ptr %t$8$f2
+  %t$8$f3 = getelementptr i64, ptr %t$8$ptr, i64 3
+  store i64 %t$6, ptr %t$8$f3
+  %t$8$f4 = getelementptr i64, ptr %t$8$ptr, i64 4
+  store i64 %t$7, ptr %t$8$f4
+  %t$20 = call i64 @sprout_gc_pop_roots(i64 5)
+  %t$21 = alloca i64
+  store i64 %t$8, ptr %t$21
+  %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
+  %t$9 = call i64 @sprout_alloc_obj(i64 81, i64 1)
+  %t$9$ptr = inttoptr i64 %t$9 to ptr
+  %t$9$f0 = getelementptr i64, ptr %t$9$ptr, i64 0
+  store i64 %t$8, ptr %t$9$f0
+  %t$23 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t$9
 }
 
 define i64 @main.keys_on_event(i64 %log, i64 %ev) {
@@ -14379,7 +15114,7 @@ arm_1_1:
   %t$27 = alloca i64
   store i64 %t$9, ptr %t$27
   %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
-  %t$10 = call i64 @sprout_alloc_obj(i64 94, i64 1)
+  %t$10 = call i64 @sprout_alloc_obj(i64 97, i64 1)
   %t$10$ptr = inttoptr i64 %t$10 to ptr
   %t$10$f0 = getelementptr i64, ptr %t$10$ptr, i64 0
   store i64 %t$9, ptr %t$10$f0
@@ -14434,7 +15169,7 @@ then_3:
   %t$19 = alloca i64
   store i64 %log, ptr %t$19
   %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
-  %t$5 = call i64 @sprout_alloc_obj(i64 93, i64 0)
+  %t$5 = call i64 @sprout_alloc_obj(i64 96, i64 0)
   %t$21 = alloca i64
   store i64 %t$5, ptr %t$21
   %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
@@ -14488,7 +15223,7 @@ else_3:
   %t$38 = alloca i64
   store i64 %t$12, ptr %t$38
   %t$39 = call i64 @sprout_gc_push_i64_root(ptr %t$38)
-  %t$13 = call i64 @sprout_alloc_obj(i64 94, i64 1)
+  %t$13 = call i64 @sprout_alloc_obj(i64 97, i64 1)
   %t$13$ptr = inttoptr i64 %t$13 to ptr
   %t$13$f0 = getelementptr i64, ptr %t$13$ptr, i64 0
   store i64 %t$12, ptr %t$13$f0
@@ -14534,7 +15269,7 @@ entry:
   ret i64 %avail
 }
 
-define i64 @__sprout_ir_eta___tc_Foldable_List_fold_values_35(i64 %env$, i64 %a0, i64 %a1, i64 %a2) {
+define i64 @__sprout_ir_eta___tc_Foldable_List_fold_values_38(i64 %env$, i64 %a0, i64 %a1, i64 %a2) {
 entry:
   %t$0 = alloca i64
   store i64 %a2, ptr %t$0
@@ -14550,7 +15285,7 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta___tc_Foldable_List_fold_while_values_36(i64 %env$, i64 %a0, i64 %a1, i64 %a2, i64 %a3) {
+define i64 @__sprout_ir_eta___tc_Foldable_List_fold_while_values_39(i64 %env$, i64 %a0, i64 %a1, i64 %a2, i64 %a3) {
 entry:
   %t$0 = alloca i64
   store i64 %a3, ptr %t$0
@@ -14572,7 +15307,7 @@ entry:
 define i64 @main.keys_render(i64 %log, i64 %r, i64 %s) {
 entry:
   %t$0 = add i64 0, 0
-  %t$1 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.93, i64 0, i32 1, i64 0
+  %t$1 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.97, i64 0, i32 1, i64 0
   %t$2 = ptrtoint ptr %t$1 to i64
   %t$14 = alloca i64
   store i64 %s, ptr %t$14
@@ -14593,20 +15328,20 @@ entry:
   %t$4 = call i64 @main.line(i64 %s, i64 %r, i64 %t$0, i64 %t$2, i64 %t$3)
   %t$24 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$5 = add i64 0, 1
-  %t$6 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.94, i64 0, i32 1, i64 0
+  %t$6 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.98, i64 0, i32 1, i64 0
   %t$7 = ptrtoint ptr %t$6 to i64
   %t$25 = alloca i64
   store i64 %t$7, ptr %t$25
   %t$26 = call i64 @sprout_gc_push_i64_root(ptr %t$25)
   %t$8 = call i64 @sprout_alloc_closure(i64 8, i64 3)
   %t$8$raw = inttoptr i64 %t$8 to ptr
-  store ptr @__sprout_ir_eta___tc_Foldable_List_fold_values_35, ptr %t$8$raw
+  store ptr @__sprout_ir_eta___tc_Foldable_List_fold_values_38, ptr %t$8$raw
   %t$27 = alloca i64
   store i64 %t$8, ptr %t$27
   %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
   %t$9 = call i64 @sprout_alloc_closure(i64 8, i64 4)
   %t$9$raw = inttoptr i64 %t$9 to ptr
-  store ptr @__sprout_ir_eta___tc_Foldable_List_fold_while_values_36, ptr %t$9$raw
+  store ptr @__sprout_ir_eta___tc_Foldable_List_fold_while_values_39, ptr %t$9$raw
   %t$29 = alloca i64
   store i64 %t$9, ptr %t$29
   %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
@@ -14755,7 +15490,7 @@ entry:
   ret i64 %t$5
 }
 
-define i64 @__sprout_ir_eta_main.keys_on_event_37(i64 %env$, i64 %a0, i64 %a1) {
+define i64 @__sprout_ir_eta_main.keys_on_event_40(i64 %env$, i64 %a0, i64 %a1) {
 entry:
   %t$0 = alloca i64
   store i64 %a1, ptr %t$0
@@ -14768,7 +15503,23 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta_main.keys_render_38(i64 %env$, i64 %a0, i64 %a1, i64 %a2) {
+define i64 @__sprout_ir_eta_stdlib.tui.widget.no_route_41(i64 %env$, i64 %a0, i64 %a1, i64 %a2) {
+entry:
+  %t$0 = alloca i64
+  store i64 %a2, ptr %t$0
+  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
+  %t$2 = alloca i64
+  store i64 %a1, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$4 = alloca i64
+  store i64 %a0, ptr %t$4
+  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
+  %ret = call i64 @stdlib.tui.widget.no_route(i64 %a0, i64 %a1, i64 %a2)
+  %t$6 = call i64 @sprout_gc_pop_roots(i64 3)
+  ret i64 %ret
+}
+
+define i64 @__sprout_ir_eta_main.keys_render_42(i64 %env$, i64 %a0, i64 %a1, i64 %a2) {
 entry:
   %t$0 = alloca i64
   store i64 %a2, ptr %t$0
@@ -14784,7 +15535,7 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta_main.keys_measure_39(i64 %env$, i64 %a0, i64 %a1) {
+define i64 @__sprout_ir_eta_main.keys_measure_43(i64 %env$, i64 %a0, i64 %a1) {
 entry:
   %ret = call i64 @main.keys_measure(i64 %a0, i64 %a1)
   ret i64 %ret
@@ -14793,47 +15544,55 @@ entry:
 define i64 @main.keys() {
 entry:
   %t$0 = call i64 @sprout_alloc_obj(i64 5, i64 0)
-  %t$6 = alloca i64
-  store i64 %t$0, ptr %t$6
-  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
+  %t$7 = alloca i64
+  store i64 %t$0, ptr %t$7
+  %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
   %t$1 = call i64 @sprout_alloc_closure(i64 8, i64 2)
   %t$1$raw = inttoptr i64 %t$1 to ptr
-  store ptr @__sprout_ir_eta_main.keys_on_event_37, ptr %t$1$raw
-  %t$8 = alloca i64
-  store i64 %t$1, ptr %t$8
-  %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
+  store ptr @__sprout_ir_eta_main.keys_on_event_40, ptr %t$1$raw
+  %t$9 = alloca i64
+  store i64 %t$1, ptr %t$9
+  %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
   %t$2 = call i64 @sprout_alloc_closure(i64 8, i64 3)
   %t$2$raw = inttoptr i64 %t$2 to ptr
-  store ptr @__sprout_ir_eta_main.keys_render_38, ptr %t$2$raw
-  %t$10 = alloca i64
-  store i64 %t$2, ptr %t$10
-  %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
-  %t$3 = call i64 @sprout_alloc_closure(i64 8, i64 2)
+  store ptr @__sprout_ir_eta_stdlib.tui.widget.no_route_41, ptr %t$2$raw
+  %t$11 = alloca i64
+  store i64 %t$2, ptr %t$11
+  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
+  %t$3 = call i64 @sprout_alloc_closure(i64 8, i64 3)
   %t$3$raw = inttoptr i64 %t$3 to ptr
-  store ptr @__sprout_ir_eta_main.keys_measure_39, ptr %t$3$raw
-  %t$12 = alloca i64
-  store i64 %t$3, ptr %t$12
-  %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
-  %t$4 = call i64 @sprout_alloc_obj(i64 78, i64 4)
-  %t$4$ptr = inttoptr i64 %t$4 to ptr
-  %t$4$f0 = getelementptr i64, ptr %t$4$ptr, i64 0
-  store i64 %t$0, ptr %t$4$f0
-  %t$4$f1 = getelementptr i64, ptr %t$4$ptr, i64 1
-  store i64 %t$1, ptr %t$4$f1
-  %t$4$f2 = getelementptr i64, ptr %t$4$ptr, i64 2
-  store i64 %t$2, ptr %t$4$f2
-  %t$4$f3 = getelementptr i64, ptr %t$4$ptr, i64 3
-  store i64 %t$3, ptr %t$4$f3
-  %t$14 = call i64 @sprout_gc_pop_roots(i64 4)
+  store ptr @__sprout_ir_eta_main.keys_render_42, ptr %t$3$raw
+  %t$13 = alloca i64
+  store i64 %t$3, ptr %t$13
+  %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
+  %t$4 = call i64 @sprout_alloc_closure(i64 8, i64 2)
+  %t$4$raw = inttoptr i64 %t$4 to ptr
+  store ptr @__sprout_ir_eta_main.keys_measure_43, ptr %t$4$raw
   %t$15 = alloca i64
   store i64 %t$4, ptr %t$15
   %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
-  %t$5 = call i64 @sprout_alloc_obj(i64 79, i64 1)
+  %t$5 = call i64 @sprout_alloc_obj(i64 80, i64 5)
   %t$5$ptr = inttoptr i64 %t$5 to ptr
   %t$5$f0 = getelementptr i64, ptr %t$5$ptr, i64 0
-  store i64 %t$4, ptr %t$5$f0
-  %t$17 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %t$5
+  store i64 %t$0, ptr %t$5$f0
+  %t$5$f1 = getelementptr i64, ptr %t$5$ptr, i64 1
+  store i64 %t$1, ptr %t$5$f1
+  %t$5$f2 = getelementptr i64, ptr %t$5$ptr, i64 2
+  store i64 %t$2, ptr %t$5$f2
+  %t$5$f3 = getelementptr i64, ptr %t$5$ptr, i64 3
+  store i64 %t$3, ptr %t$5$f3
+  %t$5$f4 = getelementptr i64, ptr %t$5$ptr, i64 4
+  store i64 %t$4, ptr %t$5$f4
+  %t$17 = call i64 @sprout_gc_pop_roots(i64 5)
+  %t$18 = alloca i64
+  store i64 %t$5, ptr %t$18
+  %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
+  %t$6 = call i64 @sprout_alloc_obj(i64 81, i64 1)
+  %t$6$ptr = inttoptr i64 %t$6 to ptr
+  %t$6$f0 = getelementptr i64, ptr %t$6$ptr, i64 0
+  store i64 %t$5, ptr %t$6$f0
+  %t$20 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t$6
 }
 
 define i64 @main.label_on_event(i64 %txt, i64 %ev) {
@@ -14899,7 +15658,7 @@ entry:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_eta_main.label_on_event_40(i64 %env$, i64 %a0, i64 %a1) {
+define i64 @__sprout_ir_eta_main.label_on_event_44(i64 %env$, i64 %a0, i64 %a1) {
 entry:
   %t$0 = alloca i64
   store i64 %a1, ptr %t$0
@@ -14912,7 +15671,23 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta_main.label_render_41(i64 %env$, i64 %a0, i64 %a1, i64 %a2) {
+define i64 @__sprout_ir_eta_stdlib.tui.widget.no_route_45(i64 %env$, i64 %a0, i64 %a1, i64 %a2) {
+entry:
+  %t$0 = alloca i64
+  store i64 %a2, ptr %t$0
+  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
+  %t$2 = alloca i64
+  store i64 %a1, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$4 = alloca i64
+  store i64 %a0, ptr %t$4
+  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
+  %ret = call i64 @stdlib.tui.widget.no_route(i64 %a0, i64 %a1, i64 %a2)
+  %t$6 = call i64 @sprout_gc_pop_roots(i64 3)
+  ret i64 %ret
+}
+
+define i64 @__sprout_ir_eta_main.label_render_46(i64 %env$, i64 %a0, i64 %a1, i64 %a2) {
 entry:
   %t$0 = alloca i64
   store i64 %a2, ptr %t$0
@@ -14928,7 +15703,7 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta_main.label_measure_42(i64 %env$, i64 %a0, i64 %a1) {
+define i64 @__sprout_ir_eta_main.label_measure_47(i64 %env$, i64 %a0, i64 %a1) {
 entry:
   %t$0 = alloca i64
   store i64 %a1, ptr %t$0
@@ -14943,47 +15718,55 @@ entry:
 
 define i64 @main.label(i64 %txt) {
 entry:
-  %t$5 = alloca i64
-  store i64 %txt, ptr %t$5
-  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
+  %t$6 = alloca i64
+  store i64 %txt, ptr %t$6
+  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
   %t$0 = call i64 @sprout_alloc_closure(i64 8, i64 2)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_eta_main.label_on_event_40, ptr %t$0$raw
-  %t$7 = alloca i64
-  store i64 %t$0, ptr %t$7
-  %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
+  store ptr @__sprout_ir_eta_main.label_on_event_44, ptr %t$0$raw
+  %t$8 = alloca i64
+  store i64 %t$0, ptr %t$8
+  %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
   %t$1 = call i64 @sprout_alloc_closure(i64 8, i64 3)
   %t$1$raw = inttoptr i64 %t$1 to ptr
-  store ptr @__sprout_ir_eta_main.label_render_41, ptr %t$1$raw
-  %t$9 = alloca i64
-  store i64 %t$1, ptr %t$9
-  %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
-  %t$2 = call i64 @sprout_alloc_closure(i64 8, i64 2)
+  store ptr @__sprout_ir_eta_stdlib.tui.widget.no_route_45, ptr %t$1$raw
+  %t$10 = alloca i64
+  store i64 %t$1, ptr %t$10
+  %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
+  %t$2 = call i64 @sprout_alloc_closure(i64 8, i64 3)
   %t$2$raw = inttoptr i64 %t$2 to ptr
-  store ptr @__sprout_ir_eta_main.label_measure_42, ptr %t$2$raw
-  %t$11 = alloca i64
-  store i64 %t$2, ptr %t$11
-  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
-  %t$3 = call i64 @sprout_alloc_obj(i64 78, i64 4)
-  %t$3$ptr = inttoptr i64 %t$3 to ptr
-  %t$3$f0 = getelementptr i64, ptr %t$3$ptr, i64 0
-  store i64 %txt, ptr %t$3$f0
-  %t$3$f1 = getelementptr i64, ptr %t$3$ptr, i64 1
-  store i64 %t$0, ptr %t$3$f1
-  %t$3$f2 = getelementptr i64, ptr %t$3$ptr, i64 2
-  store i64 %t$1, ptr %t$3$f2
-  %t$3$f3 = getelementptr i64, ptr %t$3$ptr, i64 3
-  store i64 %t$2, ptr %t$3$f3
-  %t$13 = call i64 @sprout_gc_pop_roots(i64 4)
+  store ptr @__sprout_ir_eta_main.label_render_46, ptr %t$2$raw
+  %t$12 = alloca i64
+  store i64 %t$2, ptr %t$12
+  %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
+  %t$3 = call i64 @sprout_alloc_closure(i64 8, i64 2)
+  %t$3$raw = inttoptr i64 %t$3 to ptr
+  store ptr @__sprout_ir_eta_main.label_measure_47, ptr %t$3$raw
   %t$14 = alloca i64
   store i64 %t$3, ptr %t$14
   %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
-  %t$4 = call i64 @sprout_alloc_obj(i64 79, i64 1)
+  %t$4 = call i64 @sprout_alloc_obj(i64 80, i64 5)
   %t$4$ptr = inttoptr i64 %t$4 to ptr
   %t$4$f0 = getelementptr i64, ptr %t$4$ptr, i64 0
-  store i64 %t$3, ptr %t$4$f0
-  %t$16 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %t$4
+  store i64 %txt, ptr %t$4$f0
+  %t$4$f1 = getelementptr i64, ptr %t$4$ptr, i64 1
+  store i64 %t$0, ptr %t$4$f1
+  %t$4$f2 = getelementptr i64, ptr %t$4$ptr, i64 2
+  store i64 %t$1, ptr %t$4$f2
+  %t$4$f3 = getelementptr i64, ptr %t$4$ptr, i64 3
+  store i64 %t$2, ptr %t$4$f3
+  %t$4$f4 = getelementptr i64, ptr %t$4$ptr, i64 4
+  store i64 %t$3, ptr %t$4$f4
+  %t$16 = call i64 @sprout_gc_pop_roots(i64 5)
+  %t$17 = alloca i64
+  store i64 %t$4, ptr %t$17
+  %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
+  %t$5 = call i64 @sprout_alloc_obj(i64 81, i64 1)
+  %t$5$ptr = inttoptr i64 %t$5 to ptr
+  %t$5$f0 = getelementptr i64, ptr %t$5$ptr, i64 0
+  store i64 %t$4, ptr %t$5$f0
+  %t$19 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t$5
 }
 
 define i64 @main.box_on_event(i64 %b, i64 %ev) {
@@ -15038,7 +15821,7 @@ arm_0_5:
   %t$34 = alloca i64
   store i64 %t$11, ptr %t$34
   %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
-  %t$12 = call i64 @sprout_alloc_obj(i64 95, i64 3)
+  %t$12 = call i64 @sprout_alloc_obj(i64 100, i64 3)
   %t$12$ptr = inttoptr i64 %t$12 to ptr
   %t$12$f0 = getelementptr i64, ptr %t$12$ptr, i64 0
   store i64 %t$10, ptr %t$12$f0
@@ -15213,7 +15996,7 @@ join_0:
   ret i64 %t$1
 }
 
-define i64 @__sprout_ir_lambda_43(i64 %env$, i64 %seen, i64 %x) {
+define i64 @__sprout_ir_lambda_48(i64 %env$, i64 %seen, i64 %x) {
 entry:
   %t$1 = alloca i64
   store i64 %x, ptr %t$1
@@ -15241,12 +16024,288 @@ entry:
   %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
   %t$0 = call i64 @sprout_alloc_closure(i64 8, i64 2)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_43, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_48, ptr %t$0$raw
   %t$6 = alloca i64
   store i64 %t$0, ptr %t$6
   %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
   %t$1 = call i64 @list_fold(i64 %t$0, i64 %acc, i64 %xs)
   %t$8 = call i64 @sprout_gc_pop_roots(i64 3)
+  ret i64 %t$1
+}
+
+define i64 @main.box_route(i64 %b, i64 %target, i64 %d) {
+entry:
+  %t$0 = call i64 @sprout_field(i64 %b, i64 2)
+  %t$3 = alloca i64
+  store i64 %target, ptr %t$3
+  %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
+  %t$5 = alloca i64
+  store i64 %d, ptr %t$5
+  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
+  %t$7 = alloca i64
+  store i64 %b, ptr %t$7
+  %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
+  %t$9 = alloca i64
+  store i64 %t$0, ptr %t$9
+  %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
+  %t$1 = call i64 @sprout_alloc_obj(i64 5, i64 0)
+  %t$11 = alloca i64
+  store i64 %t$1, ptr %t$11
+  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
+  %t$2 = call i64 @main.route_kids(i64 %b, i64 %t$0, i64 %target, i64 %d, i64 %t$1)
+  %t$13 = call i64 @sprout_gc_pop_roots(i64 5)
+  ret i64 %t$2
+}
+
+define i64 @main.route_kids(i64 %b, i64 %kids, i64 %target, i64 %d, i64 %seen) {
+entry:
+  %t$0 = add i64 0, 0
+  %t$2 = alloca i64
+  store i64 %target, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$4 = alloca i64
+  store i64 %seen, ptr %t$4
+  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
+  %t$6 = alloca i64
+  store i64 %kids, ptr %t$6
+  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
+  %t$8 = alloca i64
+  store i64 %d, ptr %t$8
+  %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
+  %t$10 = alloca i64
+  store i64 %b, ptr %t$10
+  %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
+  %t$1 = call i64 @main.route_kids$u(i64 %b, i64 %kids, i64 %target, i64 %d, i64 %seen, i64 %t$0)
+  %t$12 = call i64 @sprout_gc_pop_roots(i64 5)
+  ret i64 %t$1
+}
+
+define i64 @main.route_kids$u(i64 %b, i64 %kids, i64 %target, i64 %d, i64 %seen, i64 %pbpad$5) {
+entry:
+  %t$0 = call i64 @sprout_tag(i64 %kids)
+  br label %arm_0_1
+arm_0_1:
+  %t$3 = add i64 0, 5
+  %t$4 = icmp eq i64 %t$0, %t$3
+  br i1 %t$4, label %body_0_1, label %arm_1_1
+body_0_1:
+  %t$5 = call i64 @sprout_alloc_obj(i64 0, i64 0)
+  br label %join_1
+arm_1_1:
+  %t$6 = add i64 0, 6
+  %t$7 = icmp eq i64 %t$0, %t$6
+  br i1 %t$7, label %body_1_1, label %arm_2_1
+body_1_1:
+  %t$8 = call i64 @sprout_field(i64 %kids, i64 0)
+  %t$9 = call i64 @sprout_field(i64 %kids, i64 1)
+  %t$10 = musttail call i64 @main.route_step$u(i64 %b, i64 %t$8, i64 %t$9, i64 %target, i64 %d, i64 %seen)
+  ret i64 %t$10
+arm_2_1:
+  call void @sprout_abort_match()
+  unreachable
+join_1:
+  %t$2 = phi i64 [%t$5, %body_0_1]
+  ret i64 %t$2
+}
+
+define i64 @main.route_step(i64 %b, i64 %k, i64 %rest, i64 %target, i64 %d, i64 %seen) {
+entry:
+  %t$1 = alloca i64
+  store i64 %target, ptr %t$1
+  %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
+  %t$3 = alloca i64
+  store i64 %seen, ptr %t$3
+  %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
+  %t$5 = alloca i64
+  store i64 %rest, ptr %t$5
+  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
+  %t$7 = alloca i64
+  store i64 %k, ptr %t$7
+  %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
+  %t$9 = alloca i64
+  store i64 %d, ptr %t$9
+  %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
+  %t$11 = alloca i64
+  store i64 %b, ptr %t$11
+  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
+  %t$0 = call i64 @main.route_step$u(i64 %b, i64 %k, i64 %rest, i64 %target, i64 %d, i64 %seen)
+  %t$13 = call i64 @sprout_gc_pop_roots(i64 6)
+  ret i64 %t$0
+}
+
+define i64 @main.route_step$u(i64 %b, i64 %k, i64 %rest, i64 %target, i64 %d, i64 %seen) {
+entry:
+  %t$13 = alloca i64
+  store i64 %target, ptr %t$13
+  %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
+  %t$15 = alloca i64
+  store i64 %seen, ptr %t$15
+  %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
+  %t$17 = alloca i64
+  store i64 %rest, ptr %t$17
+  %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
+  %t$19 = alloca i64
+  store i64 %k, ptr %t$19
+  %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
+  %t$21 = alloca i64
+  store i64 %d, ptr %t$21
+  %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
+  %t$23 = alloca i64
+  store i64 %b, ptr %t$23
+  %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
+  %t$0$st = call { i64, i64 } @stdlib.tui.widget.deliver_worker(i64 %k, i64 %target, i64 %d)
+  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
+  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$25 = call i64 @sprout_gc_pop_roots(i64 6)
+  br label %arm_0_2
+arm_0_2:
+  %t$4 = add i64 0, 0
+  %t$5 = icmp eq i64 %t$0, %t$4
+  br i1 %t$5, label %body_0_2, label %arm_1_2
+body_0_2:
+  %t$26 = alloca i64
+  store i64 %target, ptr %t$26
+  %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
+  %t$28 = alloca i64
+  store i64 %seen, ptr %t$28
+  %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
+  %t$30 = alloca i64
+  store i64 %rest, ptr %t$30
+  %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)
+  %t$32 = alloca i64
+  store i64 %k, ptr %t$32
+  %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
+  %t$34 = alloca i64
+  store i64 %d, ptr %t$34
+  %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
+  %t$36 = alloca i64
+  store i64 %b, ptr %t$36
+  %t$37 = call i64 @sprout_gc_push_i64_root(ptr %t$36)
+  %t$6 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$6$ptr = inttoptr i64 %t$6 to ptr
+  %t$6$f0 = getelementptr i64, ptr %t$6$ptr, i64 0
+  store i64 %k, ptr %t$6$f0
+  %t$6$f1 = getelementptr i64, ptr %t$6$ptr, i64 1
+  store i64 %seen, ptr %t$6$f1
+  %t$7 = add i64 0, 0
+  %t$38 = call i64 @sprout_gc_pop_roots(i64 6)
+  %t$8 = musttail call i64 @main.route_kids$u(i64 %b, i64 %rest, i64 %target, i64 %d, i64 %t$6, i64 %t$7)
+  ret i64 %t$8
+arm_1_2:
+  %t$9 = add i64 0, 1
+  %t$10 = icmp eq i64 %t$0, %t$9
+  br i1 %t$10, label %body_1_2, label %arm_2_2
+body_1_2:
+  %t$39 = alloca i64
+  store i64 %t$1, ptr %t$39
+  %t$40 = call i64 @sprout_gc_push_i64_root(ptr %t$39)
+  %t$41 = alloca i64
+  store i64 %seen, ptr %t$41
+  %t$42 = call i64 @sprout_gc_push_i64_root(ptr %t$41)
+  %t$43 = alloca i64
+  store i64 %rest, ptr %t$43
+  %t$44 = call i64 @sprout_gc_push_i64_root(ptr %t$43)
+  %t$45 = alloca i64
+  store i64 %b, ptr %t$45
+  %t$46 = call i64 @sprout_gc_push_i64_root(ptr %t$45)
+  %t$11 = call i64 @main.route_hit(i64 %b, i64 %t$1, i64 %rest, i64 %seen)
+  %t$47 = call i64 @sprout_gc_pop_roots(i64 4)
+  %t$48 = alloca i64
+  store i64 %t$11, ptr %t$48
+  %t$49 = call i64 @sprout_gc_push_i64_root(ptr %t$48)
+  %t$12 = call i64 @sprout_alloc_obj(i64 1, i64 1)
+  %t$12$ptr = inttoptr i64 %t$12 to ptr
+  %t$12$f0 = getelementptr i64, ptr %t$12$ptr, i64 0
+  store i64 %t$11, ptr %t$12$f0
+  %t$50 = call i64 @sprout_gc_pop_roots(i64 1)
+  br label %join_2
+arm_2_2:
+  call void @sprout_abort_match()
+  unreachable
+join_2:
+  %t$3 = phi i64 [%t$12, %body_1_2]
+  ret i64 %t$3
+}
+
+define i64 @main.route_hit(i64 %b, i64 %r, i64 %rest, i64 %seen) {
+entry:
+  br label %arm_0_0
+arm_0_0:
+  %t$2$ptr = inttoptr i64 %r to ptr
+  %t$2$gep = getelementptr i64, ptr %t$2$ptr, i64 0
+  %t$2 = load i64, ptr %t$2$gep
+  %t$3$ptr = inttoptr i64 %r to ptr
+  %t$3$gep = getelementptr i64, ptr %t$3$ptr, i64 1
+  %t$3 = load i64, ptr %t$3$gep
+  %t$4$ptr = inttoptr i64 %r to ptr
+  %t$4$gep = getelementptr i64, ptr %t$4$ptr, i64 2
+  %t$4 = load i64, ptr %t$4$gep
+  %t$5 = call i64 @sprout_field(i64 %b, i64 0)
+  %t$6 = call i64 @sprout_field(i64 %b, i64 1)
+  %t$12 = alloca i64
+  store i64 %seen, ptr %t$12
+  %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
+  %t$14 = alloca i64
+  store i64 %rest, ptr %t$14
+  %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
+  %t$16 = alloca i64
+  store i64 %t$2, ptr %t$16
+  %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
+  %t$18 = alloca i64
+  store i64 %t$3, ptr %t$18
+  %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
+  %t$20 = alloca i64
+  store i64 %t$4, ptr %t$20
+  %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
+  %t$22 = alloca i64
+  store i64 %t$6, ptr %t$22
+  %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
+  %t$7 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$7$ptr = inttoptr i64 %t$7 to ptr
+  %t$7$f0 = getelementptr i64, ptr %t$7$ptr, i64 0
+  store i64 %t$2, ptr %t$7$f0
+  %t$7$f1 = getelementptr i64, ptr %t$7$ptr, i64 1
+  store i64 %seen, ptr %t$7$f1
+  %t$24 = alloca i64
+  store i64 %t$7, ptr %t$24
+  %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
+  %t$8 = call i64 @list_reverse(i64 %t$7)
+  %t$26 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$27 = alloca i64
+  store i64 %t$8, ptr %t$27
+  %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
+  %t$9 = call i64 @list_append(i64 %t$8, i64 %rest)
+  %t$29 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$30 = alloca i64
+  store i64 %t$9, ptr %t$30
+  %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)
+  %t$10 = call i64 @sprout_alloc_obj(i64 100, i64 3)
+  %t$10$ptr = inttoptr i64 %t$10 to ptr
+  %t$10$f0 = getelementptr i64, ptr %t$10$ptr, i64 0
+  store i64 %t$5, ptr %t$10$f0
+  %t$10$f1 = getelementptr i64, ptr %t$10$ptr, i64 1
+  store i64 %t$6, ptr %t$10$f1
+  %t$10$f2 = getelementptr i64, ptr %t$10$ptr, i64 2
+  store i64 %t$9, ptr %t$10$f2
+  %t$32 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$33 = alloca i64
+  store i64 %t$10, ptr %t$33
+  %t$34 = call i64 @sprout_gc_push_i64_root(ptr %t$33)
+  %t$11 = call i64 @sprout_alloc_tuple_blob(i64 24)
+  %t$11$ptr = inttoptr i64 %t$11 to ptr
+  %t$11$s0 = getelementptr i64, ptr %t$11$ptr, i64 0
+  store i64 %t$10, ptr %t$11$s0
+  %t$11$s1 = getelementptr i64, ptr %t$11$ptr, i64 1
+  store i64 %t$3, ptr %t$11$s1
+  %t$11$s2 = getelementptr i64, ptr %t$11$ptr, i64 2
+  store i64 %t$4, ptr %t$11$s2
+  %t$35 = call i64 @sprout_gc_pop_roots(i64 6)
+  br label %join_0
+arm_1_0:
+  call void @sprout_abort_match()
+  unreachable
+join_0:
+  %t$1 = phi i64 [%t$11, %arm_0_0]
   ret i64 %t$1
 }
 
@@ -15454,7 +16513,7 @@ entry:
   ret i64 %t$3
 }
 
-define i64 @__sprout_ir_eta_main.box_on_event_44(i64 %env$, i64 %a0, i64 %a1) {
+define i64 @__sprout_ir_eta_main.box_on_event_49(i64 %env$, i64 %a0, i64 %a1) {
 entry:
   %t$0 = alloca i64
   store i64 %a1, ptr %t$0
@@ -15467,7 +16526,23 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta_main.box_render_45(i64 %env$, i64 %a0, i64 %a1, i64 %a2) {
+define i64 @__sprout_ir_eta_main.box_route_50(i64 %env$, i64 %a0, i64 %a1, i64 %a2) {
+entry:
+  %t$0 = alloca i64
+  store i64 %a2, ptr %t$0
+  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
+  %t$2 = alloca i64
+  store i64 %a1, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$4 = alloca i64
+  store i64 %a0, ptr %t$4
+  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
+  %ret = call i64 @main.box_route(i64 %a0, i64 %a1, i64 %a2)
+  %t$6 = call i64 @sprout_gc_pop_roots(i64 3)
+  ret i64 %ret
+}
+
+define i64 @__sprout_ir_eta_main.box_render_51(i64 %env$, i64 %a0, i64 %a1, i64 %a2) {
 entry:
   %t$0 = alloca i64
   store i64 %a2, ptr %t$0
@@ -15483,7 +16558,7 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta_main.box_measure_46(i64 %env$, i64 %a0, i64 %a1) {
+define i64 @__sprout_ir_eta_main.box_measure_52(i64 %env$, i64 %a0, i64 %a1) {
 entry:
   %ret = call i64 @main.box_measure(i64 %a0, i64 %a1)
   ret i64 %ret
@@ -15491,13 +16566,13 @@ entry:
 
 define i64 @main.box(i64 %vertical, i64 %dims, i64 %kids) {
 entry:
-  %t$6 = alloca i64
-  store i64 %kids, ptr %t$6
-  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
-  %t$8 = alloca i64
-  store i64 %dims, ptr %t$8
-  %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
-  %t$0 = call i64 @sprout_alloc_obj(i64 95, i64 3)
+  %t$7 = alloca i64
+  store i64 %kids, ptr %t$7
+  %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
+  %t$9 = alloca i64
+  store i64 %dims, ptr %t$9
+  %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
+  %t$0 = call i64 @sprout_alloc_obj(i64 100, i64 3)
   %t$0$ptr = inttoptr i64 %t$0 to ptr
   %t$0$f0 = getelementptr i64, ptr %t$0$ptr, i64 0
   store i64 %vertical, ptr %t$0$f0
@@ -15505,55 +16580,63 @@ entry:
   store i64 %dims, ptr %t$0$f1
   %t$0$f2 = getelementptr i64, ptr %t$0$ptr, i64 2
   store i64 %kids, ptr %t$0$f2
-  %t$10 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$11 = alloca i64
-  store i64 %t$0, ptr %t$11
-  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
+  %t$11 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$12 = alloca i64
+  store i64 %t$0, ptr %t$12
+  %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
   %t$1 = call i64 @sprout_alloc_closure(i64 8, i64 2)
   %t$1$raw = inttoptr i64 %t$1 to ptr
-  store ptr @__sprout_ir_eta_main.box_on_event_44, ptr %t$1$raw
-  %t$13 = alloca i64
-  store i64 %t$1, ptr %t$13
-  %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
+  store ptr @__sprout_ir_eta_main.box_on_event_49, ptr %t$1$raw
+  %t$14 = alloca i64
+  store i64 %t$1, ptr %t$14
+  %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
   %t$2 = call i64 @sprout_alloc_closure(i64 8, i64 3)
   %t$2$raw = inttoptr i64 %t$2 to ptr
-  store ptr @__sprout_ir_eta_main.box_render_45, ptr %t$2$raw
-  %t$15 = alloca i64
-  store i64 %t$2, ptr %t$15
-  %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
-  %t$3 = call i64 @sprout_alloc_closure(i64 8, i64 2)
+  store ptr @__sprout_ir_eta_main.box_route_50, ptr %t$2$raw
+  %t$16 = alloca i64
+  store i64 %t$2, ptr %t$16
+  %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
+  %t$3 = call i64 @sprout_alloc_closure(i64 8, i64 3)
   %t$3$raw = inttoptr i64 %t$3 to ptr
-  store ptr @__sprout_ir_eta_main.box_measure_46, ptr %t$3$raw
-  %t$17 = alloca i64
-  store i64 %t$3, ptr %t$17
-  %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
-  %t$4 = call i64 @sprout_alloc_obj(i64 78, i64 4)
-  %t$4$ptr = inttoptr i64 %t$4 to ptr
-  %t$4$f0 = getelementptr i64, ptr %t$4$ptr, i64 0
-  store i64 %t$0, ptr %t$4$f0
-  %t$4$f1 = getelementptr i64, ptr %t$4$ptr, i64 1
-  store i64 %t$1, ptr %t$4$f1
-  %t$4$f2 = getelementptr i64, ptr %t$4$ptr, i64 2
-  store i64 %t$2, ptr %t$4$f2
-  %t$4$f3 = getelementptr i64, ptr %t$4$ptr, i64 3
-  store i64 %t$3, ptr %t$4$f3
-  %t$19 = call i64 @sprout_gc_pop_roots(i64 4)
+  store ptr @__sprout_ir_eta_main.box_render_51, ptr %t$3$raw
+  %t$18 = alloca i64
+  store i64 %t$3, ptr %t$18
+  %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
+  %t$4 = call i64 @sprout_alloc_closure(i64 8, i64 2)
+  %t$4$raw = inttoptr i64 %t$4 to ptr
+  store ptr @__sprout_ir_eta_main.box_measure_52, ptr %t$4$raw
   %t$20 = alloca i64
   store i64 %t$4, ptr %t$20
   %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
-  %t$5 = call i64 @sprout_alloc_obj(i64 79, i64 1)
+  %t$5 = call i64 @sprout_alloc_obj(i64 80, i64 5)
   %t$5$ptr = inttoptr i64 %t$5 to ptr
   %t$5$f0 = getelementptr i64, ptr %t$5$ptr, i64 0
-  store i64 %t$4, ptr %t$5$f0
-  %t$22 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %t$5
+  store i64 %t$0, ptr %t$5$f0
+  %t$5$f1 = getelementptr i64, ptr %t$5$ptr, i64 1
+  store i64 %t$1, ptr %t$5$f1
+  %t$5$f2 = getelementptr i64, ptr %t$5$ptr, i64 2
+  store i64 %t$2, ptr %t$5$f2
+  %t$5$f3 = getelementptr i64, ptr %t$5$ptr, i64 3
+  store i64 %t$3, ptr %t$5$f3
+  %t$5$f4 = getelementptr i64, ptr %t$5$ptr, i64 4
+  store i64 %t$4, ptr %t$5$f4
+  %t$22 = call i64 @sprout_gc_pop_roots(i64 5)
+  %t$23 = alloca i64
+  store i64 %t$5, ptr %t$23
+  %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
+  %t$6 = call i64 @sprout_alloc_obj(i64 81, i64 1)
+  %t$6$ptr = inttoptr i64 %t$6 to ptr
+  %t$6$f0 = getelementptr i64, ptr %t$6$ptr, i64 0
+  store i64 %t$5, ptr %t$6$f0
+  %t$25 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t$6
 }
 
 define i64 @main.root() {
 entry:
   %t$0 = add i64 0, 1
   %t$1 = add i64 0, 1
-  %t$2 = call i64 @sprout_alloc_obj(i64 85, i64 1)
+  %t$2 = call i64 @sprout_alloc_obj(i64 88, i64 1)
   %t$2$ptr = inttoptr i64 %t$2 to ptr
   %t$2$f0 = getelementptr i64, ptr %t$2$ptr, i64 0
   store i64 %t$1, ptr %t$2$f0
@@ -15561,7 +16644,7 @@ entry:
   %t$23 = alloca i64
   store i64 %t$2, ptr %t$23
   %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
-  %t$4 = call i64 @sprout_alloc_obj(i64 86, i64 1)
+  %t$4 = call i64 @sprout_alloc_obj(i64 89, i64 1)
   %t$4$ptr = inttoptr i64 %t$4 to ptr
   %t$4$f0 = getelementptr i64, ptr %t$4$ptr, i64 0
   store i64 %t$3, ptr %t$4$f0
@@ -15569,7 +16652,7 @@ entry:
   %t$25 = alloca i64
   store i64 %t$4, ptr %t$25
   %t$26 = call i64 @sprout_gc_push_i64_root(ptr %t$25)
-  %t$6 = call i64 @sprout_alloc_obj(i64 85, i64 1)
+  %t$6 = call i64 @sprout_alloc_obj(i64 88, i64 1)
   %t$6$ptr = inttoptr i64 %t$6 to ptr
   %t$6$f0 = getelementptr i64, ptr %t$6$ptr, i64 0
   store i64 %t$5, ptr %t$6$f0
@@ -15607,7 +16690,7 @@ entry:
   %t$10$f1 = getelementptr i64, ptr %t$10$ptr, i64 1
   store i64 %t$9, ptr %t$10$f1
   %t$37 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$11 = getelementptr inbounds { i64, [18 x i8] }, ptr @.str.95, i64 0, i32 1, i64 0
+  %t$11 = getelementptr inbounds { i64, [11 x i8] }, ptr @.str.99, i64 0, i32 1, i64 0
   %t$12 = ptrtoint ptr %t$11 to i64
   %t$38 = alloca i64
   store i64 %t$10, ptr %t$38
@@ -15621,7 +16704,7 @@ entry:
   store i64 %t$13, ptr %t$43
   %t$44 = call i64 @sprout_gc_push_i64_root(ptr %t$43)
   %t$14 = call i64 @main.body()
-  %t$15 = getelementptr inbounds { i64, [10 x i8] }, ptr @.str.96, i64 0, i32 1, i64 0
+  %t$15 = getelementptr inbounds { i64, [10 x i8] }, ptr @.str.100, i64 0, i32 1, i64 0
   %t$16 = ptrtoint ptr %t$15 to i64
   %t$45 = alloca i64
   store i64 %t$14, ptr %t$45
@@ -15677,7 +16760,7 @@ define i64 @main.body() {
 entry:
   %t$0 = add i64 0, 0
   %t$1 = add i64 0, 1
-  %t$2 = call i64 @sprout_alloc_obj(i64 86, i64 1)
+  %t$2 = call i64 @sprout_alloc_obj(i64 89, i64 1)
   %t$2$ptr = inttoptr i64 %t$2 to ptr
   %t$2$f0 = getelementptr i64, ptr %t$2$ptr, i64 0
   store i64 %t$1, ptr %t$2$f0
@@ -15685,7 +16768,7 @@ entry:
   %t$14 = alloca i64
   store i64 %t$2, ptr %t$14
   %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
-  %t$4 = call i64 @sprout_alloc_obj(i64 86, i64 1)
+  %t$4 = call i64 @sprout_alloc_obj(i64 89, i64 1)
   %t$4$ptr = inttoptr i64 %t$4 to ptr
   %t$4$f0 = getelementptr i64, ptr %t$4$ptr, i64 0
   store i64 %t$3, ptr %t$4$f0
@@ -15758,44 +16841,59 @@ entry:
   %t$0 = call i64 @sprout_tag(i64 %m)
   br label %arm_0_1
 arm_0_1:
-  %t$3 = add i64 0, 93
+  %t$3 = add i64 0, 96
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
-  %t$11 = alloca i64
-  store i64 %w, ptr %t$11
-  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
-  %t$5 = call i64 @sprout_alloc_obj(i64 81, i64 0)
-  %t$13 = alloca i64
-  store i64 %t$5, ptr %t$13
-  %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
+  %t$15 = alloca i64
+  store i64 %w, ptr %t$15
+  %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
+  %t$5 = call i64 @sprout_alloc_obj(i64 83, i64 0)
+  %t$17 = alloca i64
+  store i64 %t$5, ptr %t$17
+  %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
   %t$6 = call i64 @stdlib.tui.app.done(i64 %w, i64 %t$5)
-  %t$15 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$19 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %join_1
 arm_1_1:
-  %t$7 = add i64 0, 94
+  %t$7 = add i64 0, 97
   %t$8 = icmp eq i64 %t$0, %t$7
   br i1 %t$8, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t$16 = alloca i64
-  store i64 %w, ptr %t$16
-  %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
-  %t$9 = call i64 @sprout_alloc_obj(i64 80, i64 0)
-  %t$18 = alloca i64
-  store i64 %t$9, ptr %t$18
-  %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
+  %t$20 = alloca i64
+  store i64 %w, ptr %t$20
+  %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
+  %t$9 = call i64 @sprout_alloc_obj(i64 82, i64 0)
+  %t$22 = alloca i64
+  store i64 %t$9, ptr %t$22
+  %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
   %t$10 = call i64 @stdlib.tui.app.done(i64 %w, i64 %t$9)
-  %t$20 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$24 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %join_1
 arm_2_1:
+  %t$11 = add i64 0, 98
+  %t$12 = icmp eq i64 %t$0, %t$11
+  br i1 %t$12, label %body_2_1, label %arm_3_1
+body_2_1:
+  %t$25 = alloca i64
+  store i64 %w, ptr %t$25
+  %t$26 = call i64 @sprout_gc_push_i64_root(ptr %t$25)
+  %t$13 = call i64 @sprout_alloc_obj(i64 82, i64 0)
+  %t$27 = alloca i64
+  store i64 %t$13, ptr %t$27
+  %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
+  %t$14 = call i64 @stdlib.tui.app.done(i64 %w, i64 %t$13)
+  %t$29 = call i64 @sprout_gc_pop_roots(i64 2)
+  br label %join_1
+arm_3_1:
   call void @sprout_abort_match()
   unreachable
 join_1:
-  %t$2 = phi i64 [%t$6, %body_0_1], [%t$10, %body_1_1]
+  %t$2 = phi i64 [%t$6, %body_0_1], [%t$10, %body_1_1], [%t$14, %body_2_1]
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_eta_main.update_47(i64 %env$, i64 %a0, i64 %a1) {
+define i64 @__sprout_ir_eta_main.update_53(i64 %env$, i64 %a0, i64 %a1) {
 entry:
   %t$0 = alloca i64
   store i64 %a1, ptr %t$0
@@ -15808,7 +16906,7 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta_stdlib.tui.app.no_boot_48(i64 %env$, i64 %a0, i64 %a1) {
+define i64 @__sprout_ir_eta_stdlib.tui.app.no_boot_54(i64 %env$, i64 %a0, i64 %a1) {
 entry:
   %ret = call i64 @stdlib.tui.app.no_boot(i64 %a0, i64 %a1)
   ret i64 %ret
@@ -15822,18 +16920,18 @@ entry:
   %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
   %t$1 = call i64 @sprout_alloc_closure(i64 8, i64 2)
   %t$1$raw = inttoptr i64 %t$1 to ptr
-  store ptr @__sprout_ir_eta_main.update_47, ptr %t$1$raw
+  store ptr @__sprout_ir_eta_main.update_53, ptr %t$1$raw
   %t$2 = add i64 0, 250
   %t$8 = alloca i64
   store i64 %t$1, ptr %t$8
   %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
   %t$3 = call i64 @sprout_alloc_closure(i64 8, i64 2)
   %t$3$raw = inttoptr i64 %t$3 to ptr
-  store ptr @__sprout_ir_eta_stdlib.tui.app.no_boot_48, ptr %t$3$raw
+  store ptr @__sprout_ir_eta_stdlib.tui.app.no_boot_54, ptr %t$3$raw
   %t$10 = alloca i64
   store i64 %t$3, ptr %t$10
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
-  %t$4 = call i64 @sprout_alloc_obj(i64 84, i64 4)
+  %t$4 = call i64 @sprout_alloc_obj(i64 87, i64 4)
   %t$4$ptr = inttoptr i64 %t$4 to ptr
   %t$4$f0 = getelementptr i64, ptr %t$4$ptr, i64 0
   store i64 %t$0, ptr %t$4$f0
@@ -15990,7 +17088,7 @@ arm_0_1:
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
   %t$5 = call i64 @sprout_field(i64 %value, i64 0)
-  %t$6 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.97, i64 0, i32 1, i64 0
+  %t$6 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.101, i64 0, i32 1, i64 0
   %t$7 = ptrtoint ptr %t$6 to i64
   %t$83 = alloca i64
   store i64 %t$7, ptr %t$83
@@ -16001,7 +17099,7 @@ body_0_1:
   %t$86 = call i64 @sprout_gc_push_i64_root(ptr %t$85)
   %t$9 = call i64 @__tc_Semigroup_String_append(i64 %t$7, i64 %t$8)
   %t$87 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$10 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.98, i64 0, i32 1, i64 0
+  %t$10 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.102, i64 0, i32 1, i64 0
   %t$11 = ptrtoint ptr %t$10 to i64
   %t$88 = alloca i64
   store i64 %t$9, ptr %t$88
@@ -16017,7 +17115,7 @@ arm_1_1:
   %t$14 = icmp eq i64 %t$0, %t$13
   br i1 %t$14, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t$15 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.99, i64 0, i32 1, i64 0
+  %t$15 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.103, i64 0, i32 1, i64 0
   %t$16 = ptrtoint ptr %t$15 to i64
   br label %join_1
 arm_2_1:
@@ -16025,7 +17123,7 @@ arm_2_1:
   %t$18 = icmp eq i64 %t$0, %t$17
   br i1 %t$18, label %body_2_1, label %arm_3_1
 body_2_1:
-  %t$19 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.100, i64 0, i32 1, i64 0
+  %t$19 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.104, i64 0, i32 1, i64 0
   %t$20 = ptrtoint ptr %t$19 to i64
   br label %join_1
 arm_3_1:
@@ -16033,7 +17131,7 @@ arm_3_1:
   %t$22 = icmp eq i64 %t$0, %t$21
   br i1 %t$22, label %body_3_1, label %arm_4_1
 body_3_1:
-  %t$23 = getelementptr inbounds { i64, [9 x i8] }, ptr @.str.101, i64 0, i32 1, i64 0
+  %t$23 = getelementptr inbounds { i64, [9 x i8] }, ptr @.str.105, i64 0, i32 1, i64 0
   %t$24 = ptrtoint ptr %t$23 to i64
   br label %join_1
 arm_4_1:
@@ -16041,7 +17139,7 @@ arm_4_1:
   %t$26 = icmp eq i64 %t$0, %t$25
   br i1 %t$26, label %body_4_1, label %arm_5_1
 body_4_1:
-  %t$27 = getelementptr inbounds { i64, [11 x i8] }, ptr @.str.102, i64 0, i32 1, i64 0
+  %t$27 = getelementptr inbounds { i64, [11 x i8] }, ptr @.str.106, i64 0, i32 1, i64 0
   %t$28 = ptrtoint ptr %t$27 to i64
   br label %join_1
 arm_5_1:
@@ -16049,7 +17147,7 @@ arm_5_1:
   %t$30 = icmp eq i64 %t$0, %t$29
   br i1 %t$30, label %body_5_1, label %arm_6_1
 body_5_1:
-  %t$31 = getelementptr inbounds { i64, [8 x i8] }, ptr @.str.103, i64 0, i32 1, i64 0
+  %t$31 = getelementptr inbounds { i64, [8 x i8] }, ptr @.str.107, i64 0, i32 1, i64 0
   %t$32 = ptrtoint ptr %t$31 to i64
   br label %join_1
 arm_6_1:
@@ -16057,7 +17155,7 @@ arm_6_1:
   %t$34 = icmp eq i64 %t$0, %t$33
   br i1 %t$34, label %body_6_1, label %arm_7_1
 body_6_1:
-  %t$35 = getelementptr inbounds { i64, [8 x i8] }, ptr @.str.104, i64 0, i32 1, i64 0
+  %t$35 = getelementptr inbounds { i64, [8 x i8] }, ptr @.str.108, i64 0, i32 1, i64 0
   %t$36 = ptrtoint ptr %t$35 to i64
   br label %join_1
 arm_7_1:
@@ -16065,7 +17163,7 @@ arm_7_1:
   %t$38 = icmp eq i64 %t$0, %t$37
   br i1 %t$38, label %body_7_1, label %arm_8_1
 body_7_1:
-  %t$39 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.105, i64 0, i32 1, i64 0
+  %t$39 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.109, i64 0, i32 1, i64 0
   %t$40 = ptrtoint ptr %t$39 to i64
   br label %join_1
 arm_8_1:
@@ -16073,7 +17171,7 @@ arm_8_1:
   %t$42 = icmp eq i64 %t$0, %t$41
   br i1 %t$42, label %body_8_1, label %arm_9_1
 body_8_1:
-  %t$43 = getelementptr inbounds { i64, [4 x i8] }, ptr @.str.106, i64 0, i32 1, i64 0
+  %t$43 = getelementptr inbounds { i64, [4 x i8] }, ptr @.str.110, i64 0, i32 1, i64 0
   %t$44 = ptrtoint ptr %t$43 to i64
   br label %join_1
 arm_9_1:
@@ -16081,7 +17179,7 @@ arm_9_1:
   %t$46 = icmp eq i64 %t$0, %t$45
   br i1 %t$46, label %body_9_1, label %arm_10_1
 body_9_1:
-  %t$47 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.107, i64 0, i32 1, i64 0
+  %t$47 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.111, i64 0, i32 1, i64 0
   %t$48 = ptrtoint ptr %t$47 to i64
   br label %join_1
 arm_10_1:
@@ -16089,7 +17187,7 @@ arm_10_1:
   %t$50 = icmp eq i64 %t$0, %t$49
   br i1 %t$50, label %body_10_1, label %arm_11_1
 body_10_1:
-  %t$51 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.108, i64 0, i32 1, i64 0
+  %t$51 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.112, i64 0, i32 1, i64 0
   %t$52 = ptrtoint ptr %t$51 to i64
   br label %join_1
 arm_11_1:
@@ -16097,7 +17195,7 @@ arm_11_1:
   %t$54 = icmp eq i64 %t$0, %t$53
   br i1 %t$54, label %body_11_1, label %arm_12_1
 body_11_1:
-  %t$55 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.109, i64 0, i32 1, i64 0
+  %t$55 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.113, i64 0, i32 1, i64 0
   %t$56 = ptrtoint ptr %t$55 to i64
   br label %join_1
 arm_12_1:
@@ -16105,7 +17203,7 @@ arm_12_1:
   %t$58 = icmp eq i64 %t$0, %t$57
   br i1 %t$58, label %body_12_1, label %arm_13_1
 body_12_1:
-  %t$59 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.110, i64 0, i32 1, i64 0
+  %t$59 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.114, i64 0, i32 1, i64 0
   %t$60 = ptrtoint ptr %t$59 to i64
   br label %join_1
 arm_13_1:
@@ -16113,7 +17211,7 @@ arm_13_1:
   %t$62 = icmp eq i64 %t$0, %t$61
   br i1 %t$62, label %body_13_1, label %arm_14_1
 body_13_1:
-  %t$63 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.111, i64 0, i32 1, i64 0
+  %t$63 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.115, i64 0, i32 1, i64 0
   %t$64 = ptrtoint ptr %t$63 to i64
   br label %join_1
 arm_14_1:
@@ -16121,7 +17219,7 @@ arm_14_1:
   %t$66 = icmp eq i64 %t$0, %t$65
   br i1 %t$66, label %body_14_1, label %arm_15_1
 body_14_1:
-  %t$67 = getelementptr inbounds { i64, [8 x i8] }, ptr @.str.112, i64 0, i32 1, i64 0
+  %t$67 = getelementptr inbounds { i64, [8 x i8] }, ptr @.str.116, i64 0, i32 1, i64 0
   %t$68 = ptrtoint ptr %t$67 to i64
   br label %join_1
 arm_15_1:
@@ -16129,7 +17227,7 @@ arm_15_1:
   %t$70 = icmp eq i64 %t$0, %t$69
   br i1 %t$70, label %body_15_1, label %arm_16_1
 body_15_1:
-  %t$71 = getelementptr inbounds { i64, [10 x i8] }, ptr @.str.113, i64 0, i32 1, i64 0
+  %t$71 = getelementptr inbounds { i64, [10 x i8] }, ptr @.str.117, i64 0, i32 1, i64 0
   %t$72 = ptrtoint ptr %t$71 to i64
   br label %join_1
 arm_16_1:
@@ -16138,7 +17236,7 @@ arm_16_1:
   br i1 %t$74, label %body_16_1, label %arm_17_1
 body_16_1:
   %t$75 = call i64 @sprout_field(i64 %value, i64 0)
-  %t$76 = getelementptr inbounds { i64, [4 x i8] }, ptr @.str.114, i64 0, i32 1, i64 0
+  %t$76 = getelementptr inbounds { i64, [4 x i8] }, ptr @.str.118, i64 0, i32 1, i64 0
   %t$77 = ptrtoint ptr %t$76 to i64
   %t$93 = alloca i64
   store i64 %t$77, ptr %t$93
@@ -16149,7 +17247,7 @@ body_16_1:
   %t$96 = call i64 @sprout_gc_push_i64_root(ptr %t$95)
   %t$79 = call i64 @__tc_Semigroup_String_append(i64 %t$77, i64 %t$78)
   %t$97 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$80 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.115, i64 0, i32 1, i64 0
+  %t$80 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.119, i64 0, i32 1, i64 0
   %t$81 = ptrtoint ptr %t$80 to i64
   %t$98 = alloca i64
   store i64 %t$79, ptr %t$98
@@ -16396,7 +17494,7 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_eta___tc_Eq_Int_eq_49(i64 %env$, i64 %a0, i64 %a1) {
+define i64 @__sprout_ir_eta___tc_Eq_Int_eq_55(i64 %env$, i64 %a0, i64 %a1) {
 entry:
   %ret = call i64 @__tc_Eq_Int_eq(i64 %a0, i64 %a1)
   ret i64 %ret
@@ -16459,7 +17557,7 @@ then_18:
   %t$51 = call i64 @sprout_gc_push_i64_root(ptr %t$50)
   %t$20 = call i64 @sprout_alloc_closure(i64 8, i64 2)
   %t$20$raw = inttoptr i64 %t$20 to ptr
-  store ptr @__sprout_ir_eta___tc_Eq_Int_eq_49, ptr %t$20$raw
+  store ptr @__sprout_ir_eta___tc_Eq_Int_eq_55, ptr %t$20$raw
   %t$52 = alloca i64
   store i64 %t$20, ptr %t$52
   %t$53 = call i64 @sprout_gc_push_i64_root(ptr %t$52)
@@ -17004,6 +18102,45 @@ else_90:
   ret { i64, i64 } %t$95$r1
 }
 
+define { i64, i64 } @stdlib.tui.widget.deliver_worker(i64 %w, i64 %target, i64 %d) {
+entry:
+  %t$0 = call i64 @sprout_field(i64 %w, i64 0)
+  %t$1 = call i64 @sprout_field(i64 %t$0, i64 2)
+  %t$2 = call i64 @sprout_field(i64 %t$0, i64 0)
+  %t$14 = alloca i64
+  store i64 %t$0, ptr %t$14
+  %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
+  call void @sprout_closure_arity_check(i64 %t$1, i64 3)
+  %t$3$env_ptr = inttoptr i64 %t$1 to ptr
+  %t$3$code = load ptr, ptr %t$3$env_ptr
+  %t$3 = call i64 (i64, i64, i64, i64) %t$3$code(i64 %t$1, i64 %t$2, i64 %target, i64 %d)
+  %t$16 = alloca i64
+  store i64 %t$3, ptr %t$16
+  %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
+  %t$4 = call i64 @stdlib.tui.widget.repack_route(i64 %t$0, i64 %t$3)
+  %t$18 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$5 = call i64 @sprout_tag(i64 %t$4)
+  %t$6 = add i64 0, 0
+  %t$7 = icmp eq i64 %t$5, %t$6
+  br i1 %t$7, label %wrepack_hit_6, label %wrepack_next_6
+wrepack_hit_6:
+  %t$9$r0 = insertvalue { i64, i64 } undef, i64 %t$5, 0
+  %t$9$r1 = insertvalue { i64, i64 } %t$9$r0, i64 0, 1
+  ret { i64, i64 } %t$9$r1
+wrepack_next_6:
+  %t$10 = add i64 0, 1
+  %t$11 = icmp eq i64 %t$5, %t$10
+  br i1 %t$11, label %wrepack_hit_10, label %wrepack_next_10
+wrepack_hit_10:
+  %t$12 = call i64 @sprout_field(i64 %t$4, i64 0)
+  %t$13$r0 = insertvalue { i64, i64 } undef, i64 %t$5, 0
+  %t$13$r1 = insertvalue { i64, i64 } %t$13$r0, i64 %t$12, 1
+  ret { i64, i64 } %t$13$r1
+wrepack_next_10:
+  call void @sprout_abort_match()
+  unreachable
+}
+
 define { i64, i64 } @stdlib.unicode.grapheme.hangul_class_worker(i64 %cp) {
 entry:
   %t$0 = add i64 0, 44032
@@ -17036,13 +18173,13 @@ else_8:
   %t$17 = trunc i64 %t$16 to i1
   br i1 %t$17, label %then_17, label %else_17
 then_17:
-  %t$18 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.116, i64 0, i32 1, i64 0
+  %t$18 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.120, i64 0, i32 1, i64 0
   %t$19 = ptrtoint ptr %t$18 to i64
   %t$20$r0 = insertvalue { i64, i64 } undef, i64 1, 0
   %t$20$r1 = insertvalue { i64, i64 } %t$20$r0, i64 %t$19, 1
   ret { i64, i64 } %t$20$r1
 else_17:
-  %t$21 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.117, i64 0, i32 1, i64 0
+  %t$21 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.121, i64 0, i32 1, i64 0
   %t$22 = ptrtoint ptr %t$21 to i64
   %t$23$r0 = insertvalue { i64, i64 } undef, i64 1, 0
   %t$23$r1 = insertvalue { i64, i64 } %t$23$r0, i64 %t$22, 1
@@ -17328,51 +18465,63 @@ entry:
   %cname_ptr_76 = getelementptr inbounds [25 x i8], ptr @.cname.76, i64 0, i64 0
   %cfkinds_ptr_76 = getelementptr inbounds [3 x i8], ptr @.cfkinds.76, i64 0, i64 0
   %creg_76 = call i64 @sprout_register_ctor(i64 76, ptr %cname_ptr_76, i64 2, ptr %cfkinds_ptr_76)
-  %cname_ptr_77 = getelementptr inbounds [22 x i8], ptr @.cname.77, i64 0, i64 0
+  %cname_ptr_77 = getelementptr inbounds [24 x i8], ptr @.cname.77, i64 0, i64 0
   %cfkinds_ptr_77 = getelementptr inbounds [2 x i8], ptr @.cfkinds.77, i64 0, i64 0
   %creg_77 = call i64 @sprout_register_ctor(i64 77, ptr %cname_ptr_77, i64 1, ptr %cfkinds_ptr_77)
-  %cname_ptr_79 = getelementptr inbounds [25 x i8], ptr @.cname.79, i64 0, i64 0
-  %cfkinds_ptr_79 = getelementptr inbounds [2 x i8], ptr @.cfkinds.79, i64 0, i64 0
-  %creg_79 = call i64 @sprout_register_ctor(i64 79, ptr %cname_ptr_79, i64 1, ptr %cfkinds_ptr_79)
-  %cname_ptr_80 = getelementptr inbounds [24 x i8], ptr @.cname.80, i64 0, i64 0
-  %cfkinds_ptr_80 = getelementptr inbounds [1 x i8], ptr @.cfkinds.80, i64 0, i64 0
-  %creg_80 = call i64 @sprout_register_ctor(i64 80, ptr %cname_ptr_80, i64 0, ptr %cfkinds_ptr_80)
-  %cname_ptr_81 = getelementptr inbounds [20 x i8], ptr @.cname.81, i64 0, i64 0
-  %cfkinds_ptr_81 = getelementptr inbounds [1 x i8], ptr @.cfkinds.81, i64 0, i64 0
-  %creg_81 = call i64 @sprout_register_ctor(i64 81, ptr %cname_ptr_81, i64 0, ptr %cfkinds_ptr_81)
+  %cname_ptr_78 = getelementptr inbounds [26 x i8], ptr @.cname.78, i64 0, i64 0
+  %cfkinds_ptr_78 = getelementptr inbounds [2 x i8], ptr @.cfkinds.78, i64 0, i64 0
+  %creg_78 = call i64 @sprout_register_ctor(i64 78, ptr %cname_ptr_78, i64 1, ptr %cfkinds_ptr_78)
+  %cname_ptr_79 = getelementptr inbounds [22 x i8], ptr @.cname.79, i64 0, i64 0
+  %cfkinds_ptr_79 = getelementptr inbounds [3 x i8], ptr @.cfkinds.79, i64 0, i64 0
+  %creg_79 = call i64 @sprout_register_ctor(i64 79, ptr %cname_ptr_79, i64 2, ptr %cfkinds_ptr_79)
+  %cname_ptr_81 = getelementptr inbounds [25 x i8], ptr @.cname.81, i64 0, i64 0
+  %cfkinds_ptr_81 = getelementptr inbounds [2 x i8], ptr @.cfkinds.81, i64 0, i64 0
+  %creg_81 = call i64 @sprout_register_ctor(i64 81, ptr %cname_ptr_81, i64 1, ptr %cfkinds_ptr_81)
   %cname_ptr_82 = getelementptr inbounds [24 x i8], ptr @.cname.82, i64 0, i64 0
-  %cfkinds_ptr_82 = getelementptr inbounds [2 x i8], ptr @.cfkinds.82, i64 0, i64 0
-  %creg_82 = call i64 @sprout_register_ctor(i64 82, ptr %cname_ptr_82, i64 1, ptr %cfkinds_ptr_82)
-  %cname_ptr_83 = getelementptr inbounds [22 x i8], ptr @.cname.83, i64 0, i64 0
-  %cfkinds_ptr_83 = getelementptr inbounds [2 x i8], ptr @.cfkinds.83, i64 0, i64 0
-  %creg_83 = call i64 @sprout_register_ctor(i64 83, ptr %cname_ptr_83, i64 1, ptr %cfkinds_ptr_83)
-  %cname_ptr_85 = getelementptr inbounds [24 x i8], ptr @.cname.85, i64 0, i64 0
+  %cfkinds_ptr_82 = getelementptr inbounds [1 x i8], ptr @.cfkinds.82, i64 0, i64 0
+  %creg_82 = call i64 @sprout_register_ctor(i64 82, ptr %cname_ptr_82, i64 0, ptr %cfkinds_ptr_82)
+  %cname_ptr_83 = getelementptr inbounds [20 x i8], ptr @.cname.83, i64 0, i64 0
+  %cfkinds_ptr_83 = getelementptr inbounds [1 x i8], ptr @.cfkinds.83, i64 0, i64 0
+  %creg_83 = call i64 @sprout_register_ctor(i64 83, ptr %cname_ptr_83, i64 0, ptr %cfkinds_ptr_83)
+  %cname_ptr_84 = getelementptr inbounds [24 x i8], ptr @.cname.84, i64 0, i64 0
+  %cfkinds_ptr_84 = getelementptr inbounds [2 x i8], ptr @.cfkinds.84, i64 0, i64 0
+  %creg_84 = call i64 @sprout_register_ctor(i64 84, ptr %cname_ptr_84, i64 1, ptr %cfkinds_ptr_84)
+  %cname_ptr_85 = getelementptr inbounds [22 x i8], ptr @.cname.85, i64 0, i64 0
   %cfkinds_ptr_85 = getelementptr inbounds [2 x i8], ptr @.cfkinds.85, i64 0, i64 0
   %creg_85 = call i64 @sprout_register_ctor(i64 85, ptr %cname_ptr_85, i64 1, ptr %cfkinds_ptr_85)
-  %cname_ptr_86 = getelementptr inbounds [27 x i8], ptr @.cname.86, i64 0, i64 0
-  %cfkinds_ptr_86 = getelementptr inbounds [2 x i8], ptr @.cfkinds.86, i64 0, i64 0
-  %creg_86 = call i64 @sprout_register_ctor(i64 86, ptr %cname_ptr_86, i64 1, ptr %cfkinds_ptr_86)
-  %cname_ptr_87 = getelementptr inbounds [23 x i8], ptr @.cname.87, i64 0, i64 0
-  %cfkinds_ptr_87 = getelementptr inbounds [2 x i8], ptr @.cfkinds.87, i64 0, i64 0
-  %creg_87 = call i64 @sprout_register_ctor(i64 87, ptr %cname_ptr_87, i64 1, ptr %cfkinds_ptr_87)
-  %cname_ptr_88 = getelementptr inbounds [22 x i8], ptr @.cname.88, i64 0, i64 0
-  %cfkinds_ptr_88 = getelementptr inbounds [1 x i8], ptr @.cfkinds.88, i64 0, i64 0
-  %creg_88 = call i64 @sprout_register_ctor(i64 88, ptr %cname_ptr_88, i64 0, ptr %cfkinds_ptr_88)
-  %cname_ptr_89 = getelementptr inbounds [25 x i8], ptr @.cname.89, i64 0, i64 0
-  %cfkinds_ptr_89 = getelementptr inbounds [1 x i8], ptr @.cfkinds.89, i64 0, i64 0
-  %creg_89 = call i64 @sprout_register_ctor(i64 89, ptr %cname_ptr_89, i64 0, ptr %cfkinds_ptr_89)
+  %cname_ptr_86 = getelementptr inbounds [21 x i8], ptr @.cname.86, i64 0, i64 0
+  %cfkinds_ptr_86 = getelementptr inbounds [3 x i8], ptr @.cfkinds.86, i64 0, i64 0
+  %creg_86 = call i64 @sprout_register_ctor(i64 86, ptr %cname_ptr_86, i64 2, ptr %cfkinds_ptr_86)
+  %cname_ptr_88 = getelementptr inbounds [24 x i8], ptr @.cname.88, i64 0, i64 0
+  %cfkinds_ptr_88 = getelementptr inbounds [2 x i8], ptr @.cfkinds.88, i64 0, i64 0
+  %creg_88 = call i64 @sprout_register_ctor(i64 88, ptr %cname_ptr_88, i64 1, ptr %cfkinds_ptr_88)
+  %cname_ptr_89 = getelementptr inbounds [27 x i8], ptr @.cname.89, i64 0, i64 0
+  %cfkinds_ptr_89 = getelementptr inbounds [2 x i8], ptr @.cfkinds.89, i64 0, i64 0
+  %creg_89 = call i64 @sprout_register_ctor(i64 89, ptr %cname_ptr_89, i64 1, ptr %cfkinds_ptr_89)
   %cname_ptr_90 = getelementptr inbounds [23 x i8], ptr @.cname.90, i64 0, i64 0
-  %cfkinds_ptr_90 = getelementptr inbounds [1 x i8], ptr @.cfkinds.90, i64 0, i64 0
-  %creg_90 = call i64 @sprout_register_ctor(i64 90, ptr %cname_ptr_90, i64 0, ptr %cfkinds_ptr_90)
-  %cname_ptr_91 = getelementptr inbounds [24 x i8], ptr @.cname.91, i64 0, i64 0
+  %cfkinds_ptr_90 = getelementptr inbounds [2 x i8], ptr @.cfkinds.90, i64 0, i64 0
+  %creg_90 = call i64 @sprout_register_ctor(i64 90, ptr %cname_ptr_90, i64 1, ptr %cfkinds_ptr_90)
+  %cname_ptr_91 = getelementptr inbounds [22 x i8], ptr @.cname.91, i64 0, i64 0
   %cfkinds_ptr_91 = getelementptr inbounds [1 x i8], ptr @.cfkinds.91, i64 0, i64 0
   %creg_91 = call i64 @sprout_register_ctor(i64 91, ptr %cname_ptr_91, i64 0, ptr %cfkinds_ptr_91)
-  %cname_ptr_93 = getelementptr inbounds [10 x i8], ptr @.cname.93, i64 0, i64 0
+  %cname_ptr_92 = getelementptr inbounds [25 x i8], ptr @.cname.92, i64 0, i64 0
+  %cfkinds_ptr_92 = getelementptr inbounds [1 x i8], ptr @.cfkinds.92, i64 0, i64 0
+  %creg_92 = call i64 @sprout_register_ctor(i64 92, ptr %cname_ptr_92, i64 0, ptr %cfkinds_ptr_92)
+  %cname_ptr_93 = getelementptr inbounds [23 x i8], ptr @.cname.93, i64 0, i64 0
   %cfkinds_ptr_93 = getelementptr inbounds [1 x i8], ptr @.cfkinds.93, i64 0, i64 0
   %creg_93 = call i64 @sprout_register_ctor(i64 93, ptr %cname_ptr_93, i64 0, ptr %cfkinds_ptr_93)
-  %cname_ptr_94 = getelementptr inbounds [11 x i8], ptr @.cname.94, i64 0, i64 0
-  %cfkinds_ptr_94 = getelementptr inbounds [2 x i8], ptr @.cfkinds.94, i64 0, i64 0
-  %creg_94 = call i64 @sprout_register_ctor(i64 94, ptr %cname_ptr_94, i64 1, ptr %cfkinds_ptr_94)
+  %cname_ptr_94 = getelementptr inbounds [24 x i8], ptr @.cname.94, i64 0, i64 0
+  %cfkinds_ptr_94 = getelementptr inbounds [1 x i8], ptr @.cfkinds.94, i64 0, i64 0
+  %creg_94 = call i64 @sprout_register_ctor(i64 94, ptr %cname_ptr_94, i64 0, ptr %cfkinds_ptr_94)
+  %cname_ptr_96 = getelementptr inbounds [10 x i8], ptr @.cname.96, i64 0, i64 0
+  %cfkinds_ptr_96 = getelementptr inbounds [1 x i8], ptr @.cfkinds.96, i64 0, i64 0
+  %creg_96 = call i64 @sprout_register_ctor(i64 96, ptr %cname_ptr_96, i64 0, ptr %cfkinds_ptr_96)
+  %cname_ptr_97 = getelementptr inbounds [11 x i8], ptr @.cname.97, i64 0, i64 0
+  %cfkinds_ptr_97 = getelementptr inbounds [2 x i8], ptr @.cfkinds.97, i64 0, i64 0
+  %creg_97 = call i64 @sprout_register_ctor(i64 97, ptr %cname_ptr_97, i64 1, ptr %cfkinds_ptr_97)
+  %cname_ptr_98 = getelementptr inbounds [13 x i8], ptr @.cname.98, i64 0, i64 0
+  %cfkinds_ptr_98 = getelementptr inbounds [2 x i8], ptr @.cfkinds.98, i64 0, i64 0
+  %creg_98 = call i64 @sprout_register_ctor(i64 98, ptr %cname_ptr_98, i64 1, ptr %cfkinds_ptr_98)
   call void @__sprout_init_globals()
   call i64 @__sprout_user_main()
   ret i32 0

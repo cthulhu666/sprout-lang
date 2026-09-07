@@ -36,6 +36,10 @@ type Outer (..) deriving (Eq, ToString) =
 
 fn to_outer(m: Msg) -> Outer = Inner(m)
 
+fn from_outer(o: Outer) -> Maybe Msg =
+  match o with
+  | Inner m -> Just(m)
+
 # ── a counter: hidden state is Int ──────────────────────────────────────────
 
 fn counter_on_event(n: Int, ev: event.Event) -> (Int, List Msg, List(widget.Cmd Msg)) =
@@ -53,6 +57,7 @@ fn counter_render(n: Int, r: g.Region, s: scr.Screen) -> Unit !{IO} = do
 
 fn counter(n: Int) -> widget.Widget Msg =
   widget.Widget(widget.View(state = n, on_event = counter_on_event,
+                            route = widget.no_route,
                             render = counter_render, measure = counter_measure))
 
 # ── a label: hidden state is String ─────────────────────────────────────────
@@ -70,6 +75,7 @@ fn label_render(t: String, r: g.Region, s: scr.Screen) -> Unit !{IO} = do
 
 fn label(t: String) -> widget.Widget Msg =
   widget.Widget(widget.View(state = t, on_event = label_on_event,
+                            route = widget.no_route,
                             render = label_render, measure = label_measure))
 
 # ── a container: hidden state is a list of other widgets ────────────────────
@@ -104,6 +110,7 @@ fn paint_then(k: widget.Widget Msg, r: g.Region, s: scr.Screen,
 
 fn box(dims: List layout.Dimension, kids: List (widget.Widget Msg)) -> widget.Widget Msg =
   widget.Widget(widget.View(state = Box(dims = dims, kids = kids),
+                            route = widget.no_route,
                             on_event = box_on_event, render = box_render,
                             measure = box_measure))
 
@@ -136,7 +143,7 @@ fn main() -> Unit !{IO} = do
   # Two widgets with DIFFERENT hidden state types, measured through one list.
   print(to_string(list_map(measured, [counter(3), label("hello")])))
   # A retargeted vocabulary.
-  print(said_outer(widget.map_msgs(to_outer, counter(4)), key()))
+  print(said_outer(widget.map_msgs(to_outer, from_outer, counter(4)), key()))
 
   # --- the pump, pure ---
   print(flow_after(counter(0), key()))

@@ -2047,6 +2047,13 @@ Legend:
   ended it. Note the first attempt at this measured the whole pipeline's elapsed time,
   which is bounded by the `sleep` holding stdin open, not by the app — it read 8s whether
   the app exited early or not, and proved nothing. The app has to timestamp its own exit.)*
+  *(Amended 2026-09-07: the `SigTo` arm is VERIFIED too, by the same technique with a
+  negative control. A widget asks for work addressed to itself on a keypress; its `route`
+  replies with a message that quits, while `update` on that same message returns `Continue`.
+  Stdin fed one key then held open 8s, the app timestamping its own exit: `run()` returned
+  after **1 ms** with `route_if`, and after **7679 ms** — i.e. EOF — in an identical build
+  with `no_route`. The control is the load-bearing half; the 1 ms alone would not
+  distinguish "routing worked" from "something else quit early".)*
   The `TermResized` arm remains unverified and still needs a pty. No automated gate exercises `run` at all — it takes over the terminal and
   blocks on stdin, and the `tests/conformance/run` harness inherits stdin, so a fixture
   there would hang or vary by environment. What WAS verified by hand against
@@ -2060,19 +2067,63 @@ Legend:
   Closing the remaining half wants a pty-driven fixture; `stdlib.process` can spawn one,
   which is the likely shape.
 
-- [ ] `P2` **A command's result reaches `update`, which cannot route it to the widget that
-  asked.** `App.update` receives `m` and an opaque `Widget m`; it can replace the tree but
-  cannot address *into* it, so when a file-tree widget asks to read a directory the answer
-  arrives somewhere that cannot give it back. Elm and Bubbletea solve this in the
-  application — the model holds sub-models and `update` dispatches explicitly — which works
-  because their models are records, not existentials. Sprout's `Widget m` deliberately hides
-  its state, so the same move is unavailable. Surfaced 2026-09-06 while trying to give
-  `examples/tui_dashboard.sprout` a command to demonstrate: every honest version needed a
-  route back to one specific widget. **This is M4 container work**: a container already
-  broadcasts events to its children, so it is the thing that can carry an addressed message
-  down. Until it exists, only application-global commands (quit, reload everything) are
-  useful, which is why the demo still issues none. Options to weigh: a `WidgetId` on the
-  message, a routing wrapper around a child, or `update` returning a targeted event.
+- [x] `P2` **A command's result reaches `update`, which cannot route it to the widget that
+  asked. FIXED 2026-09-07.** Design, prior-art survey and the four rejected alternatives:
+  `docs/tui-routing-v0.md`. A `Cmd` carries a `Maybe WidgetId` return address, `View` gains a
+  `route` field taking a `Delivery m = ToMsg m | ToEvent event.Event`, and `app.step_to`
+  delivers an addressed answer down the tree. `examples/tui_dashboard.sprout` now issues a
+  real command — its clock asks for the wall time each tick and the answer comes back to it,
+  never to `update`.
+
+  Three findings worth keeping. (a) **`route` is the first contravariant occurrence of `m` in
+  the widget contract, and it kills `map_msgs` as a functor.** Every other `m` in `View` is
+  output-only, which is why the two-argument form was writable; with `route` added the
+  wrapper needs `n -> m`, which does not exist. The compiler is explicit — ``Signature too
+  general for its body: type variable n merged with declared variable m``. Fixed by making
+  it a prism, `map_msgs(f: m -> n, unf: n -> Maybe m, w)`; Elm never hits this because `msg`
+  is covariant everywhere in its surface. Found by review, before implementation.
+  (b) **Whether a delivery was claimed has to be in the reply, because nothing else can
+  observe it** — a widget that ignores one returns its state unchanged, indistinguishable
+  from one that handled it and changed nothing. The first implementation put a `Bool` beside
+  the state, which review then killed: `(s, Bool, List m, List (Cmd m))` can express *I
+  declined, and here are some messages*, and `step_to` discarded those silently, so the type
+  promised four components and the framework honoured one or four depending on the flag.
+  `Maybe (s, List m, List (Cmd m))` makes the bad reply unrepresentable instead of merely
+  undocumented (guidelines #3), and pays for itself in code: `deliver` reuses `on_event`'s
+  repack and `map_msgs` retargets both replies through one helper, since the two shapes only
+  diverged because of the flag. (c) **The `Delivery` sum was folded in for focus, which needs targeted
+  *events* and would otherwise have forced a sixth `View` field** — one breaking change to
+  every `View` construction instead of two.
+
+- [ ] `P3` **A widget's ids become addressable from outside when it is embedded, with no
+  namespacing.** `map_msgs` retargets the message type but leaves `WidgetId` alone, so two
+  copies of the same widget embedded in one application answer to the same id and the
+  container's first-claimant rule silently picks one. Surfaced 2026-09-07 landing routing
+  (`docs/tui-routing-v0.md` §3.3), where the shape of the fix is already in place but
+  unbuilt: `WidgetId` is an *input* to `route`, so the `map_msgs` wrapper can strip a prefix
+  on the way in, and a `cmd_map` variant can prepend one on the way out. Wants doing when the
+  widget library gives people a reason to embed the same widget twice — i.e. with the M4
+  containers, not before.
+
+- [ ] `P3` **`route_if` claims by ADDRESS, which is right for a command's answer and wrong
+  for a focused keystroke.** It answers `Just` whenever the id matches, whatever the handler
+  did with the `Delivery` — the documented contract, since a `ToMsg` arriving at the widget
+  that asked for it *has* got home whether or not the state moved. Under M4 focus the same
+  rule silently eats a key: `ToEvent` reaches the focused widget, the widget ignores it, and
+  the claim stops it falling back to `update`, so an unhandled key cannot bubble. Both
+  behaviours are wanted, so the fix is a second combinator whose handler returns the flag
+  (`route_when`, say) rather than a change to `route_if`. Surfaced 2026-09-07 by review of
+  the routing change; `examples/tui_dashboard.sprout`'s `ticks_route` is the live instance,
+  harmless only because nothing constructs a `ToEvent` yet. Do it with focus, not before.
+
+- [ ] `P3` **An alias inside another alias's BODY is not expanded**, though an alias inside a
+  signature's tuple is. `type alias Says = List Msg` then
+  `type alias Reply = Maybe (Widget Msg, Says, Asks)` makes every use of `Reply` fail with
+  ``Type mismatch: Says vs List Msg``; spelling the body out works, as does
+  `fn f(...) -> (Int, Says, Asks)` directly in a signature. Surfaced 2026-09-07 writing
+  `tests/stdlib/test_tui_route.spr`. Third in the family with the two `type alias` items
+  above (parameterized arrow-bodied aliases, aliases in record-field position) and probably
+  one root cause: alias expansion is not run over an alias's own body.
 
 - [x] `P2` **Record-field effect variables are erased at construction, so a pure signature
   can launder IO. FIXED 2026-09-07 — effect variables are now rejected in stored positions
@@ -2270,8 +2321,13 @@ Legend:
   that itself. `row`/`column`/`grid` container widgets belong to the M4 widget library, noted
   here so the gap is attributed rather than rediscovered. As of the command landing the demo's
   container also has to forward its children's *commands*, which is more boilerplate per
-  application and strengthens the case; see the message-routing entry above, which the same
-  container work is the natural place to solve.
+  application and strengthens the case. **Routing landed 2026-09-07 and adds a third
+  hand-written traversal**: the downward walk of a `Delivery`, stopping at the first child
+  that claims the address. That walk is now written twice in-tree, identically —
+  `examples/tui_dashboard.sprout` and `tests/stdlib/test_tui_route.spr` — which is the
+  clearest signal yet that it belongs in a stdlib container. Note the first-claimant rule is a
+  *convention the container implements*, not something the framework enforces, so shipping the
+  container is also what makes id-collision behaviour uniform.
 
 - [x] `P1` **Unicode width and grapheme clusters — LANDED 2026-09-06 as `stdlib/unicode`.** Split
   out of TUI M2 because it is a stdlib capability in its own right. `codepoint_width` implements

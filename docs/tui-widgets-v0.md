@@ -37,6 +37,11 @@ constraint solver.
 
 ### 3.1 The widget box hides its state and exposes its message type
 
+> **Superseded in part by `docs/tui-routing-v0.md`.** `View` has a fifth field, `route`;
+> `Cmd` carries a return address and is built with `cmd`/`cmd_to`; and `map_msgs` is
+> prism-shaped, taking a backward `unf: n -> Maybe m`. Read that document for the routing
+> half — §3.1 and §3.8 below describe the contract as it shipped in M3.
+
 ```sprout
 type View s m = (
   state:    s,
@@ -231,6 +236,10 @@ tracked separately and is far too large to bundle here.
 
 ### 3.8 A widget asks for IO with a command, and never performs it
 
+> **Superseded by `docs/tui-routing-v0.md`.** `Cmd` carries a return address, and an
+> addressed answer comes back as `SigTo` rather than `SigMsg`. The paragraphs below describe
+> the shape as it shipped in M3.
+
 `on_event` is pure, so a widget that needs to read a directory cannot simply do it. It
 returns a **command** — a description of work — and the app loop runs it:
 
@@ -286,6 +295,9 @@ does not write an empty list in every arm.
 | `stdlib/tui/widget.sprout` | `View`, `Widget`, `WidgetId`, `Cmd`, `on_event`, `feed`, `measure`, `render`, `map_msgs`, `cmd_run`, `cmd_map` | app-loop half |
 | `stdlib/tui/app.sprout` | `Flow`, `Signal`, `App`, `apply`, `step`, `run`, `done` | app-loop half |
 
+Both modules grew a routing surface afterwards — `Delivery`, `route`, `deliver`, `step_to`,
+`SigTo` — in `docs/tui-routing-v0.md` §4.
+
 The split is at the pure/IO seam: everything in the first three is a total function over
 values, unit-testable with `run_suite`/`check_eq` and no terminal.
 
@@ -297,10 +309,12 @@ into a pure `step`/`apply` core and the `run` shell that performs what they aske
 **Composition beyond a single widget is M4.** A container is expressible today — it is a
 widget whose hidden state is a `List (Widget m)`, which `examples/tui_dashboard.sprout`
 demonstrates in about thirty lines — but stdlib ships no `row`/`column` container yet, and
-each application therefore re-writes the broadcast of events *and commands* to its children.
-M4 also has to answer how a command's **result** gets back to the widget that asked: `update`
-receives it holding an opaque `Widget m` it cannot address into, so only application-global
-commands are useful until a container can route one down. Both are filed in `BACKLOG.md`.
+each application therefore re-writes the broadcast of events *and commands* to its children,
+and now the downward walk of a delivery as well.
+
+How a command's **result** gets back to the widget that asked is **answered** in
+`docs/tui-routing-v0.md`: the command carries a return address and `route` walks it down.
+The container gap itself is still open and still filed in `BACKLOG.md`.
 
 ## 5. Syntax, type-system and error-message impact
 

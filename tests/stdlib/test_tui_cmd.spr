@@ -24,6 +24,12 @@ type Outer (..) deriving (Eq, ToString) =
 
 fn wrap_msg(m: Msg) -> Outer = Wrapped(m)
 
+# `map_msgs` is a prism, so it needs the backward half too: which outer
+# messages are the embedded widget's. Design: docs/tui-routing-v0.md §3.3.
+fn unwrap_msg(o: Outer) -> Maybe Msg =
+  match o with
+  | Wrapped m -> Just(m)
+
 # The command body. Declared `!{IO}` because a real one reads a file; this one
 # stays deterministic so the suite asserts on its result.
 fn load(name: String, u: Unit) -> Msg !{IO} = Loaded(name)
@@ -33,7 +39,7 @@ fn load(name: String, u: Unit) -> Msg !{IO} = Loaded(name)
 fn loader_on_event(n: Int, ev: event.Event) -> (Int, List Msg, List(widget.Cmd Msg)) =
   match ev with
   # A key asks for work rather than doing it.
-  | event.KeyPress _ _ -> (n + 1, [Ticked(n)], [widget.Cmd(load("keyed", _))])
+  | event.KeyPress _ _ -> (n + 1, [Ticked(n)], [widget.cmd(load("keyed", _))])
   # A tick reports, and asks for nothing.
   | event.TickEvent -> (n + 1, [Ticked(n)], Nil)
   | _ -> (n, Nil, Nil)
@@ -47,6 +53,7 @@ fn loader_render(n: Int, r: g.Region, s: scr.Screen) -> Unit !{IO} = do
 
 fn loader(n: Int) -> widget.Widget Msg =
   widget.Widget(widget.View(state = n, on_event = loader_on_event,
+                            route = widget.no_route,
                             render = loader_render, measure = loader_measure))
 
 fn key() -> event.Event = event.KeyPress(event.KEnter, event.mods_none())
@@ -93,7 +100,7 @@ fn main() -> Unit !{IO} = do
 
 fn ord_update(m: Msg, w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow,
                                                 List(widget.Cmd Msg)) =
-  (w, app.Continue, [widget.Cmd(load("from-update", _))])
+  (w, app.Continue, [widget.cmd(load("from-update", _))])
 
 fn order_cases(state: TestState) -> Unit !{IO} =
   match app.step(ord_update, loader(0), key()) with
@@ -154,8 +161,8 @@ fn batching_cases(state: TestState) -> Unit !{IO} = do
 
 fn map_cases(state: TestState) -> Unit !{IO} = do
   assert_eq(state, "a mapped widget still asks",
-            cmds_of(widget.map_msgs(wrap_msg, loader(0)), key()), 1)
-  mapped_run(state, first_cmd(widget.map_msgs(wrap_msg, loader(0)), key()))
+            cmds_of(widget.map_msgs(wrap_msg, unwrap_msg, loader(0)), key()), 1)
+  mapped_run(state, first_cmd(widget.map_msgs(wrap_msg, unwrap_msg, loader(0)), key()))
 
 fn mapped_run(state: TestState, c: Maybe (widget.Cmd Outer)) -> Unit !{IO} =
   match c with

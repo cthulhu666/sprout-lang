@@ -28,6 +28,14 @@ type Outer (..) deriving (Eq, ToString) =
 
 fn wrap_msg(m: Msg) -> Outer = Wrapped(m)
 
+# The backward half of the prism `map_msgs` needs: which outer messages belong
+# to the embedded widget. `Ignored` does not, which is what makes this a prism
+# and not an isomorphism.
+fn unwrap_msg(o: Outer) -> Maybe Msg =
+  match o with
+  | Wrapped m -> Just(m)
+  | Ignored -> Nothing
+
 # ── a counter: hidden state is Int ──────────────────────────────────────────
 
 fn counter_on_event(n: Int,
@@ -47,6 +55,7 @@ fn counter_render(n: Int, r: g.Region, s: scr.Screen) -> Unit !{IO} = do
 
 fn counter(n: Int) -> widget.Widget Msg =
   widget.Widget(widget.View(state = n, on_event = counter_on_event,
+                            route = widget.no_route,
                             render = counter_render, measure = counter_measure))
 
 # ── a label: hidden state is String ─────────────────────────────────────────
@@ -64,6 +73,7 @@ fn label_render(s: String, r: g.Region, sc: scr.Screen) -> Unit !{IO} = do
 
 fn label(s: String) -> widget.Widget Msg =
   widget.Widget(widget.View(state = s, on_event = label_on_event,
+                            route = widget.no_route,
                             render = label_render, measure = label_measure))
 
 # ── reading a box without unpacking it ──────────────────────────────────────
@@ -162,7 +172,7 @@ fn tick_once(w: widget.Widget Msg) -> widget.Widget Msg =
 # ── retargeting the message type ────────────────────────────────────────────
 
 fn map_cases(state: TestState) -> Unit !{IO} = do
-  let outer = widget.map_msgs(wrap_msg, counter(5))
+  let outer = widget.map_msgs(wrap_msg, unwrap_msg, counter(5))
   assert_eq(state, "map_msgs retargets the emitted messages",
             said_outer(outer, key()), "[Wrapped(Bumped(5))]")
   assert_eq(state, "map_msgs leaves the hidden state alone", width_of(outer), 5)

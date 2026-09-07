@@ -39,6 +39,7 @@ fn counter_render(n: Int, r: g.Region, s: scr.Screen) -> Unit !{IO} = do
 
 fn counter(n: Int) -> widget.Widget Msg =
   widget.Widget(widget.View(state = n, on_event = counter_on_event,
+                            route = widget.no_route,
                             render = counter_render, measure = counter_measure))
 
 # `Bumped n` grows the widget by one and quits once it has reached 3. Growing
@@ -89,23 +90,24 @@ fn noop(tag: String, u: Unit) -> Msg !{IO} = Hushed
 # A widget that reports AND asks, so a step can produce commands from both.
 fn asking_on_event(n: Int, ev: event.Event) -> (Int, List Msg, List(widget.Cmd Msg)) =
   match ev with
-  | event.TickEvent -> (n, [Bumped(n)], [widget.Cmd(noop("widget", _))])
+  | event.TickEvent -> (n, [Bumped(n)], [widget.cmd(noop("widget", _))])
   | _ -> (n, Nil, Nil)
 
 fn asking(n: Int) -> widget.Widget Msg =
   widget.Widget(widget.View(state = n, on_event = asking_on_event,
+                            route = widget.no_route,
                             render = counter_render, measure = counter_measure))
 
 fn asking_update(m: Msg, w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow,
                                                    List(widget.Cmd Msg)) =
   match m with
-  | Bumped n -> (counter(n + 1), app.Continue, [widget.Cmd(noop("update", _))])
+  | Bumped n -> (counter(n + 1), app.Continue, [widget.cmd(noop("update", _))])
   | Hushed -> app.done(w, app.Continue)
 
 # Quits, and asks for one last thing on the way out.
 fn quit_update(m: Msg, w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow,
                                                  List(widget.Cmd Msg)) =
-  (w, app.Quit, [widget.Cmd(noop("farewell", _))])
+  (w, app.Quit, [widget.cmd(noop("farewell", _))])
 
 fn asked(msgs: List Msg, w: widget.Widget Msg) -> Int =
   match app.apply(asking_update, msgs, w) with
