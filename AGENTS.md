@@ -112,10 +112,34 @@ Workflow:
 ## Docs & Spec
 
 1. Keep `README.md`, `docs/spec-v0.md`, and relevant `docs/*.md` aligned with current behavior after every feature or semantics change.
-2. If a task listed in roadmap/TODO sections is completed, update or remove it in the same change.
-3. If new follow-up work is discovered during implementation, add it to the appropriate roadmap/TODO section with concise scope.
+2. If a task listed in roadmap/TODO sections is completed, **remove** it in the same change — see "Backlog Discipline".
+3. If new follow-up work is discovered during implementation, add it to the appropriate roadmap/TODO section with concise scope, under the shape rule in "Backlog Discipline".
 4. `docs/spec-v0.md` is the normative source of truth for the stable Sprout core; supporting design docs explain rationale and tradeoffs but do not override it.
 5. If a change alters syntax, semantics, typing rules, evaluation order, visibility/export rules, or diagnostics expectations, update the relevant spec/docs before considering the task complete.
+
+## Backlog Discipline
+
+`BACKLOG.md` is the single canonical backlog. It is a list of **open work**, not a record of finished
+work — git, the design docs and `docs/spec-v0.md` are the record. Same anti-bloat argument as the
+memory rules below, one level out.
+
+1. **Shape.** An entry is a bold title plus **at most three lines**: what is broken, where, and why it
+   matters. Anything longer is a design doc — write `docs/<feature>-v0.md` and link it. Measurements,
+   prior-art surveys and rejected alternatives live in the doc, not the entry.
+2. **Death trigger (the anti-bloat rule).** When the work lands, **delete the entry as part of
+   landing**. Its durable content moves to the design doc it names, or to the spec; a lesson about
+   *process* rather than the feature goes in this file. Do not leave a `[x]` entry behind, and do not
+   keep an "original report follows" block — git has it.
+3. **Before filing, grep for it.** A duplicate filing is the failure this discipline exists to
+   prevent, and it has happened at least three times: one bug filed on the 5th and again on the 7th
+   with a smaller scope, one `just fmt` defect filed three times across two sections, one
+   lint-suppression gap twice. A bold title makes the grep work — write one.
+4. **Open work does not hide inside a closed entry.** A "still open" or "remaining" bullet under a
+   `[x]` item is invisible to anyone scanning for todos. Promote it to its own `[ ]` entry, or it does
+   not exist. Seven such items were recovered in the 2026-09-07 slimming.
+
+Measured, so the cost is not hypothetical: before that pass the file was 5,886 lines and 971 KB, of
+which resolved entries were **59% of the lines** and were longer on average than the open ones.
 
 ## Agent Memory Discipline
 
