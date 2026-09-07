@@ -2038,7 +2038,31 @@ Legend:
   tree, and the loop threads it as a parameter. A `Ref` would have bought shared mutable
   state for nothing.
 
-- [ ] `P2` **TUI `app.run`: the resize path is implemented but unverified.**
+- [x] `P2` **TUI `app.run`: the resize path is implemented but unverified. CLOSED 2026-09-07 —
+  every arm of `run` is now verified.** The `TermResized` arm has a repeatable gate,
+  `just tui-resize-probe` (`scripts/tui_resize_probe.sh` + `tests/tui_smoke/resize_probe.spr`).
+  Deliberately OPT-IN, in no aggregate gate: it depends on `script(1)` and on process timing and
+  has no CI track record. Green 10/10 on macOS and 3/3 on Linux (`just linux-run
+  tui-resize-probe`, epoll backend); wiring it into `ci-fast-gates` is a later call.
+
+  **The "needs a pty" reason recorded below was wrong, and the correction is the whole
+  design.** `term_read_avail` answers `TermResized` from a *flag* its SIGWINCH handler sets
+  (`runtime/sprout_runtime.c:4004`) — no size is ever measured — so an ordinary `kill -WINCH`
+  exercises the arm and the window need not change. What actually needs the tty is
+  `term_raw_enter`: it returns early on `!isatty(STDIN_FILENO)` **before** the `sigaction`, so
+  on piped stdin no handler is armed and SIGWINCH's default disposition is ignore. Chasing "a
+  real SIGWINCH needs a real window change" would have led to `TIOCSWINSZ` on a pty master and
+  new builtins; the fixture needs neither.
+
+  Shape: run under `script(1)`, have a child `sh` signal the app (`proc_run` fork+execs
+  directly, so `$PPID` is the app itself — no pid discovery, no timing race in the harness),
+  and count painted frames. `resized` replaces the screen and a fresh screen is blank in both
+  buffers, so the next `diff_to_ansi` re-emits the whole frame: the marker appears twice with
+  the signal and once in the control run. The control is the load-bearing half.
+
+  Still uncovered, and not worth a builtin: that a **changed** size is adopted. That needs
+  `TIOCSWINSZ` on the pty master, which `script(1)` owns and does not expose.
+
   *(Amended 2026-09-06: the `SigMsg` half of this is now VERIFIED. Landing commands gave
   it a driver — a scratch program whose widget asks for IO on a keypress, whose command
   writes a marker file, and whose `update` quits on the command's result. Run with stdin
@@ -2054,9 +2078,10 @@ Legend:
   after **1 ms** with `route_if`, and after **7679 ms** — i.e. EOF — in an identical build
   with `no_route`. The control is the load-bearing half; the 1 ms alone would not
   distinguish "routing worked" from "something else quit early".)*
-  The `TermResized` arm remains unverified and still needs a pty. No automated gate exercises `run` at all — it takes over the terminal and
-  blocks on stdin, and the `tests/conformance/run` harness inherits stdin, so a fixture
-  there would hang or vary by environment. What WAS verified by hand against
+  The original report follows. Note its standing claim that "no automated gate exercises `run`
+  at all" — true when written, and the reason `tests/conformance/run` is still the wrong home
+  for this: that harness inherits stdin, so a fixture there would hang or vary by environment.
+  What WAS verified by hand against
   `examples/tui_dashboard.sprout`: EOF closes the channel and tears down cleanly (exit 0);
   typed keys decode, update the tree and repaint incrementally; a widget-emitted `Quit` ends
   the loop; `TermIdle` produces ticks at the configured cadence (four in 1.2s at
@@ -2065,7 +2090,9 @@ Legend:
   inside a running app). Both are single `match` arms over paths whose pieces are covered —
   `apply` is unit-tested and `screen_resize` has its own suite — but the wiring is not.
   Closing the remaining half wants a pty-driven fixture; `stdlib.process` can spawn one,
-  which is the likely shape.
+  which is the likely shape. *(That last guess was half right: `stdlib.process` is in the
+  fixture, but to raise the signal, not to spawn the pty — `proc_run` blocks and collects
+  output, so it cannot drive an interactive child. `script(1)` supplies the pty.)*
 
 - [x] `P2` **A command's result reaches `update`, which cannot route it to the widget that
   asked. FIXED 2026-09-07.** Design, prior-art survey and the four rejected alternatives:

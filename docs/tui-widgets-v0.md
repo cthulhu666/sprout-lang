@@ -378,5 +378,17 @@ appeared and the loop had already returned at t=3s, so the result travelled task
 `on_sig` → `apply`, and EOF was demonstrably not what ended it. (The first attempt timed the
 whole shell pipeline, whose elapsed time is bounded by the `sleep` holding stdin open rather
 than by the app — it read 8s either way and proved nothing. The app has to timestamp its own
-exit.) **The resize path remains unverified**: `TermResized` needs a real SIGWINCH, so a pty.
-Tracked in `BACKLOG.md`.
+exit.)
+
+The **resize path is now verified too**, by `just tui-resize-probe`
+(`scripts/tui_resize_probe.sh` + `tests/tui_smoke/resize_probe.spr`). A pty is needed, but not
+for the reason this paragraph used to give: the runtime reports a *flag* set by its SIGWINCH
+handler, not a measured size, so an ordinary `kill -WINCH` exercises the arm — what needs the
+tty is `term_raw_enter`, which returns early on a non-tty and never installs the handler. The
+fixture runs under `script(1)`, has a child `sh` signal it (`proc_run` fork+execs directly, so
+`$PPID` is the app), and counts frames: `screen_resize` blanks both buffers, so the next
+`diff_to_ansi` re-emits the whole frame. The marker appears twice with the signal and once in
+the control run. Green 10/10 on macOS and 3/3 on Linux (epoll backend, via `just linux-run`).
+
+Still uncovered: that a **changed** size is adopted. That needs `TIOCSWINSZ` on the pty
+master, which `script(1)` owns and does not expose.
