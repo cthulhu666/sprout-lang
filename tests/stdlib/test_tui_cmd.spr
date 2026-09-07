@@ -44,7 +44,8 @@ fn loader_on_event(n: Int, ev: event.Event) -> (Int, List Msg, List(widget.Cmd M
   | event.TickEvent -> (n + 1, [Ticked(n)], Nil)
   | _ -> (n, Nil, Nil)
 
-fn loader_measure(n: Int, avail: g.Size) -> g.Size = g.Size(n, 1)
+fn loader_measure(n: Int, avail: g.Size) -> widget.Measured =
+  widget.fixed_size(g.Size(n, 1))
 
 fn loader_render(n: Int, r: g.Region, s: scr.Screen) -> Unit !{IO} = do
   stop <- scr.screen_write(s, g.region_col(r), g.region_row(r), to_string(n),
@@ -69,7 +70,7 @@ fn fed_cmds(w: widget.Widget a, evs: List event.Event) -> Int =
   | (_, _, cs) -> list_length(cs)
 
 fn width_of(w: widget.Widget a) -> Int =
-  g.size_cols(widget.measure(w, g.Size(80, 24)))
+  g.size_cols(widget.measure(w, g.Size(80, 24)).size)
 
 fn stepped(w: widget.Widget a, ev: event.Event) -> widget.Widget a =
   match widget.on_event(w, ev) with

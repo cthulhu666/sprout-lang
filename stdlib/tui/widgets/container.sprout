@@ -1,0 +1,286 @@
+module stdlib.tui.widgets.container
+
+# Containers: `row`, `column`, `grid`. Generic in the message type, so one
+# container serves every application while its children's states stay hidden
+# from it and from each other. Design: docs/tui-widget-set-v0.md §4.1-4.4.
+
+import stdlib.tui.event as event
+import stdlib.tui.geometry as geometry
+import stdlib.tui.layout as layout
+import stdlib.tui.screen as screen
+import stdlib.tui.widget as widget
+import stdlib.tui.widgets.children as children
+
+# A child and the space it asks for, inseparably. Opaque: exporting the
+# constructors would embed all of `layout.Dimension`, and `layout.Auto` is
+# public — so `Sized(Auto 5, w)` would be writable, meaning "Cells 5 at a lower
+# shrink priority" and ignoring the child's own measurement. Four representable
+# states for three meanings. The three functions below are the three meanings.
+export type Slot m =
+  | SlotCells Int (widget.Widget m)
+  | SlotFraction Int (widget.Widget m)
+  | SlotFit (widget.Widget m)
+
+# Exactly n cells along the container's axis.
+export fn cells(n: Int, child: widget.Widget m) -> Slot m = SlotCells(n, child)
+
+# Weight n of whatever the fixed asks leave.
+export fn fraction(n: Int, child: widget.Widget m) -> Slot m = SlotFraction(n, child)
+
+# Whatever the child's own `measure` asks for — and if the child answers
+# `Greedy`, whatever is left instead.
+export fn fit(child: widget.Widget m) -> Slot m = SlotFit(child)
+
+# A grid's two templates are both `List layout.Dimension` and sit side by side,
+# so swapping them silently transposes the layout — a wrong grid rather than an
+# error. Tagged so the typechecker rejects the swap (guidelines §7).
+export wrap Cols = List layout.Dimension
+
+export wrap Rows = List layout.Dimension
+
+fn slot_widget(s: Slot m) -> widget.Widget m =
+  match s with
+  | SlotCells _ w -> w
+  | SlotFraction _ w -> w
+  | SlotFit w -> w
+
+# Which way children are laid out. Named for the direction children advance,
+# not for the axis that is cut, because "horizontal" is ambiguous about which.
+type Arrange (..) deriving (Eq, ToString) =
+  | Across
+  | Down
+
+fn along(a: Arrange, sz: geometry.Size) -> Int =
+  match a with
+  | Across -> geometry.size_cols(sz)
+  | Down -> geometry.size_rows(sz)
+
+fn across(a: Arrange, sz: geometry.Size) -> Int =
+  match a with
+  | Across -> geometry.size_rows(sz)
+  | Down -> geometry.size_cols(sz)
+
+fn grow_along(a: Arrange, m: widget.Measured) -> widget.Grow =
+  match a with
+  | Across -> m.cols
+  | Down -> m.rows
+
+fn grow_across(a: Arrange, m: widget.Measured) -> widget.Grow =
+  match a with
+  | Across -> m.rows
+  | Down -> m.cols
+
+fn imax(a: Int, b: Int) -> Int = if a > b then a else b
+
+fn imin(a: Int, b: Int) -> Int = if a < b then a else b
+
+# ── row and column ──────────────────────────────────────────────────────────
+
+type Box m = (arrange: Arrange, slots: List (Slot m))
+
+# A `fit` child that says `Greedy` becomes a `Fraction`, never a large `Auto`:
+# `solve` pays Auto before fractions, so a big Auto is a demand and would
+# starve the very siblings the child meant to yield to.
+fn dim_of(a: Arrange, avail: geometry.Size, s: Slot m) -> layout.Dimension =
+  match s with
+  | SlotCells n _ -> layout.Cells(n)
+  | SlotFraction n _ -> layout.Fraction(n)
+  | SlotFit w -> fit_dim(a, widget.measure(w, avail))
+
+fn fit_dim(a: Arrange, m: widget.Measured) -> layout.Dimension =
+  match grow_along(a, m) with
+  | widget.Greedy -> layout.Fraction(1)
+  | widget.Fixed -> layout.Auto(along(a, m.size))
+
+fn regions_of(b: Box m, r: geometry.Region) -> List geometry.Region =
+  let dims = list_map(dim_of(b.arrange, geometry.region_size(r), _), b.slots)
+  in
+  match b.arrange with
+  | Across -> layout.row(r, dims)
+  | Down -> layout.column(r, dims)
+
+fn box_kids(b: Box m) -> List(widget.Widget m) = list_map(slot_widget, b.slots)
+
+fn box_on_event(b: Box m,
+                ev: event.Event) -> (Box m, List m, List(widget.Cmd m)) =
+  box_repack(b, children.broadcast(ev, box_kids(b)))
+
+fn box_repack(b: Box m,
+              r: (List(widget.Widget m), List m, List(widget.Cmd m))) -> (Box m, List m, List(widget.Cmd m)) =
+  match r with
+  | (ws, msgs, cmds) -> (b with (slots = respan(b.slots, ws)), msgs, cmds)
+
+# Put the traversal's rebuilt children back in their slots, keeping each slot's
+# size. The two lists are the same length by construction — `box_kids` built
+# the second from the first — so a mismatch would be a bug here, not input.
+fn respan(slots: List (Slot m), ws: List (widget.Widget m)) -> List (Slot m) =
+  match slots with
+  | Nil -> Nil
+  | [s | srest] ->
+      match ws with
+      | Nil -> Nil
+      | [w | wrest] -> Cons(reseat(s, w), respan(srest, wrest))
+
+fn reseat(s: Slot m, w: widget.Widget m) -> Slot m =
+  match s with
+  | SlotCells n _ -> SlotCells(n, w)
+  | SlotFraction n _ -> SlotFraction(n, w)
+  | SlotFit _ -> SlotFit(w)
+
+fn box_route(b: Box m, target: widget.WidgetId,
+             d: widget.Delivery m) -> Maybe (Box m, List m, List(widget.Cmd m)) =
+  map(box_repack(b, _), children.deliver_first(target, d, box_kids(b)))
+
+fn box_render(b: Box m, r: geometry.Region, s: screen.Screen) -> Unit !{IO} =
+  children.render_zip(regions_of(b, r), s, box_kids(b))
+
+# Size is the sum of the children's asks along the axis and the largest across
+# it, clamped to `avail`. Growth is `Greedy` along the axis if any slot is a
+# fraction or any `fit` child is itself greedy — a container that yields is one
+# whose children yield.
+fn box_measure(b: Box m, avail: geometry.Size) -> widget.Measured =
+  let ms = children.measure_all(avail, box_kids(b))
+      n_along = imin(sum_along(b.arrange, b.slots, ms), along(b.arrange, avail))
+      n_across = imin(max_across(b.arrange, ms), across(b.arrange, avail))
+  in
+  sized(b.arrange, n_along, n_across,
+        any_greedy_along(b.arrange, b.slots, ms),
+        any_greedy(grow_across(b.arrange, _), ms))
+
+fn sized(a: Arrange, n_along: Int, n_across: Int, g_along: widget.Grow,
+         g_across: widget.Grow) -> widget.Measured =
+  match a with
+  | Across -> widget.Measured(size = geometry.Size(n_along, n_across),
+                              cols = g_along, rows = g_across)
+  | Down -> widget.Measured(size = geometry.Size(n_across, n_along),
+                            cols = g_across, rows = g_along)
+
+fn sum_along(a: Arrange, slots: List (Slot m), ms: List widget.Measured) -> Int =
+  list_fold(\ (acc, n) -> acc + n, 0, ask_alongs(a, slots, ms))
+
+# A `cells` slot asks for its literal size; the others ask for what the child
+# measured, which is a floor for a fraction rather than its final share.
+fn ask_alongs(a: Arrange, slots: List (Slot m),
+              ms: List widget.Measured) -> List Int =
+  match slots with
+  | Nil -> Nil
+  | [s | srest] ->
+      match ms with
+      | Nil -> Nil
+      | [m | mrest] -> Cons(ask_along(a, s, m), ask_alongs(a, srest, mrest))
+
+fn ask_along(a: Arrange, s: Slot m, m: widget.Measured) -> Int =
+  match s with
+  | SlotCells n _ -> imax(0, n)
+  | SlotFraction _ _ -> along(a, m.size)
+  | SlotFit _ -> along(a, m.size)
+
+fn max_across(a: Arrange, ms: List widget.Measured) -> Int =
+  list_fold(\ (acc, m) -> imax(acc, across(a, m.size)), 0, ms)
+
+fn any_greedy(pick: widget.Measured -> widget.Grow,
+              ms: List widget.Measured) -> widget.Grow =
+  list_fold(\ (acc, m) -> join_grow(acc, pick(m)), widget.Fixed, ms)
+
+fn join_grow(a: widget.Grow, b: widget.Grow) -> widget.Grow =
+  match a with
+  | widget.Greedy -> widget.Greedy
+  | widget.Fixed -> b
+
+# A fraction slot yields by definition; a fit slot yields only if its child does.
+fn any_greedy_along(a: Arrange, slots: List (Slot m),
+                    ms: List widget.Measured) -> widget.Grow =
+  match slots with
+  | Nil -> widget.Fixed
+  | [s | srest] ->
+      match ms with
+      | Nil -> widget.Fixed
+      | [m | mrest] ->
+          join_grow(slot_greedy_along(a, s, m), any_greedy_along(a, srest, mrest))
+
+fn slot_greedy_along(a: Arrange, s: Slot m, m: widget.Measured) -> widget.Grow =
+  match s with
+  | SlotCells _ _ -> widget.Fixed
+  | SlotFraction _ _ -> widget.Greedy
+  | SlotFit _ -> grow_along(a, m)
+
+fn box(a: Arrange, slots: List (Slot m)) -> widget.Widget m =
+  widget.Widget(widget.View(state = Box(arrange = a, slots = slots),
+                            on_event = box_on_event, route = box_route,
+                            render = box_render, measure = box_measure))
+
+# Children side by side, each keeping the full height.
+export fn row(slots: List (Slot m)) -> widget.Widget m = box(Across, slots)
+
+# Children stacked, each keeping the full width.
+export fn column(slots: List (Slot m)) -> widget.Widget m = box(Down, slots)
+
+# ── grid ────────────────────────────────────────────────────────────────────
+
+# A grid cell's size comes from the row and column templates, not from the
+# child sitting in it, so slots have no meaning here and the templates are
+# plain dimensions.
+type Grid m = (cols: List layout.Dimension, rows: List layout.Dimension,
+               kids: List (widget.Widget m))
+
+fn grid_regions(g: Grid m, r: geometry.Region) -> List geometry.Region =
+  list_flat_map(\band -> band, layout.grid(r, g.cols, g.rows))
+
+fn grid_on_event(g: Grid m,
+                 ev: event.Event) -> (Grid m, List m, List(widget.Cmd m)) =
+  grid_repack(g, children.broadcast(ev, g.kids))
+
+fn grid_repack(g: Grid m,
+               r: (List(widget.Widget m), List m, List(widget.Cmd m))) -> (Grid m, List m, List(widget.Cmd m)) =
+  match r with
+  | (ws, msgs, cmds) -> (g with (kids = ws), msgs, cmds)
+
+fn grid_route(g: Grid m, target: widget.WidgetId,
+              d: widget.Delivery m) -> Maybe (Grid m, List m, List(widget.Cmd m)) =
+  map(grid_repack(g, _), children.deliver_first(target, d, g.kids))
+
+# Children fill cells row-major. A child past the last cell gets no region and
+# so paints nothing; it still receives events and deliveries, because being
+# off the grid is not the same as being gone.
+fn grid_render(g: Grid m, r: geometry.Region, s: screen.Screen) -> Unit !{IO} =
+  children.render_zip(grid_regions(g, r), s, g.kids)
+
+# The templates are the whole story: a fraction anywhere in an axis makes the
+# grid yield on it, otherwise the axis is the sum of its fixed asks.
+fn grid_measure(g: Grid m, avail: geometry.Size) -> widget.Measured =
+  widget.Measured(size = geometry.Size(imin(template_sum(g.cols), geometry.size_cols(avail)),
+                                       imin(template_sum(g.rows), geometry.size_rows(avail))),
+                  cols = template_grow(g.cols), rows = template_grow(g.rows))
+
+fn template_sum(ds: List layout.Dimension) -> Int =
+  list_fold(\ (acc, d) -> acc + template_ask(d), 0, ds)
+
+fn template_ask(d: layout.Dimension) -> Int =
+  match d with
+  | layout.Cells n -> imax(0, n)
+  | layout.Auto n -> imax(0, n)
+  | layout.Fraction _ -> 0
+
+fn template_grow(ds: List layout.Dimension) -> widget.Grow =
+  list_fold(\ (acc, d) -> join_grow(acc, dim_grow(d)), widget.Fixed, ds)
+
+fn dim_grow(d: layout.Dimension) -> widget.Grow =
+  match d with
+  | layout.Fraction _ -> widget.Greedy
+  | layout.Cells _ -> widget.Fixed
+  | layout.Auto _ -> widget.Fixed
+
+export fn grid(cols: Cols, rows: Rows,
+               kids: List (widget.Widget m)) -> widget.Widget m =
+  widget.Widget(widget.View(state = Grid(cols = col_dims(cols),
+                                         rows = row_dims(rows), kids = kids),
+                            on_event = grid_on_event, route = grid_route,
+                            render = grid_render, measure = grid_measure))
+
+fn col_dims(c: Cols) -> List layout.Dimension =
+  match c with
+  | Cols ds -> ds
+
+fn row_dims(r: Rows) -> List layout.Dimension =
+  match r with
+  | Rows ds -> ds

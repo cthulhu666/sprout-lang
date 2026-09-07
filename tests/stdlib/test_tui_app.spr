@@ -30,7 +30,8 @@ fn counter_on_event(n: Int,
   | event.KeyPress _ _ -> (n, [Hushed], Nil)
   | _ -> (n, Nil, Nil)
 
-fn counter_measure(n: Int, avail: g.Size) -> g.Size = g.Size(n, 1)
+fn counter_measure(n: Int, avail: g.Size) -> widget.Measured =
+  widget.fixed_size(g.Size(n, 1))
 
 fn counter_render(n: Int, r: g.Region, s: scr.Screen) -> Unit !{IO} = do
   stop <- scr.screen_write(s, g.region_col(r), g.region_row(r), to_string(n),
@@ -57,7 +58,7 @@ fn bump(n: Int, w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow,
   else app.done(counter(n + 1), app.Continue)
 
 fn width_of(w: widget.Widget Msg) -> Int =
-  g.size_cols(widget.measure(w, g.Size(80, 24)))
+  g.size_cols(widget.measure(w, g.Size(80, 24)).size)
 
 fn applied_width(msgs: List Msg, w: widget.Widget Msg) -> Int =
   match app.apply(update, msgs, w) with

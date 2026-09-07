@@ -46,7 +46,8 @@ fn counter_on_event(n: Int,
   | _ -> (n, Nil, Nil)
 
 # The window onto the hidden state: reported width IS the count.
-fn counter_measure(n: Int, avail: g.Size) -> g.Size = g.Size(n, 1)
+fn counter_measure(n: Int, avail: g.Size) -> widget.Measured =
+  widget.fixed_size(g.Size(n, 1))
 
 fn counter_render(n: Int, r: g.Region, s: scr.Screen) -> Unit !{IO} = do
   stop <- scr.screen_write(s, g.region_col(r), g.region_row(r), to_string(n),
@@ -64,7 +65,8 @@ fn label_on_event(s: String,
                   ev: event.Event) -> (String, List Msg, List(widget.Cmd Msg)) =
   (s, [Said(s)], Nil)
 
-fn label_measure(s: String, avail: g.Size) -> g.Size = g.Size(string.length(s), 1)
+fn label_measure(s: String, avail: g.Size) -> widget.Measured =
+  widget.fixed_size(g.Size(string.length(s), 1))
 
 fn label_render(s: String, r: g.Region, sc: scr.Screen) -> Unit !{IO} = do
   stop <- scr.screen_write(sc, g.region_col(r), g.region_row(r), s,
@@ -81,7 +83,7 @@ fn label(s: String) -> widget.Widget Msg =
 # Width of a widget, i.e. its hidden state made observable. Generic in the
 # message type so the `map_msgs` cases can use it too.
 fn width_of(w: widget.Widget a) -> Int =
-  g.size_cols(widget.measure(w, g.Size(80, 24)))
+  g.size_cols(widget.measure(w, g.Size(80, 24)).size)
 
 fn stepped(w: widget.Widget a, ev: event.Event) -> widget.Widget a =
   match widget.on_event(w, ev) with

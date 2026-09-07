@@ -1,0 +1,55 @@
+module stdlib.tui.widgets.text
+
+# Static content: `label` for one line, `static` for several, `spacer` for
+# none. Neither reflows — wrapping makes measured height a function of width,
+# and inside a `row` the width a child is finally given is not the width it
+# measured against, so a wrapping widget would be right in a `column` and
+# quietly wrong beside it. Wrap at the call site, where the width is known.
+# Design: docs/tui-widget-set-v0.md §4.6.
+
+import stdlib.tui.event as event
+import stdlib.tui.geometry as geometry
+import stdlib.tui.screen as screen
+import stdlib.tui.style as style
+import stdlib.tui.text as text
+import stdlib.tui.widget as widget
+import stdlib.tui.widgets.paint as paint
+
+# One line or many is the same widget; `label` is the one-line spelling.
+type Block = (st: style.Style, ls: List String)
+
+fn block_on_event(b: Block,
+                  ev: event.Event) -> (Block, List m, List(widget.Cmd m)) =
+  (b, Nil, Nil)
+
+# As wide as its widest line and as tall as it has lines. Static content never
+# yields, so both axes are `Fixed`.
+fn block_measure(b: Block, avail: geometry.Size) -> widget.Measured =
+  widget.fixed_size(geometry.Size(widest(b.ls), list_length(b.ls)))
+
+fn widest(ls: List String) -> Int =
+  list_fold(\ (acc, l) -> imax(acc, text.width(l)), 0, ls)
+
+fn imax(a: Int, b: Int) -> Int = if a > b then a else b
+
+fn block_render(b: Block, r: geometry.Region, s: screen.Screen) -> Unit !{IO} =
+  paint.lines(s, r, 0, b.ls, b.st)
+
+fn block(st: style.Style, ls: List String) -> widget.Widget m =
+  widget.Widget(widget.View(state = Block(st = st, ls = ls),
+                            on_event = block_on_event, route = widget.no_route,
+                            render = block_render, measure = block_measure))
+
+# Style is a separate function rather than a defaulted parameter, since Sprout
+# has no default arguments.
+export fn label(t: String) -> widget.Widget m = block(style.style_default(), [t])
+
+export fn label_styled(st: style.Style, t: String) -> widget.Widget m = block(st, [t])
+
+export fn static(ls: List String) -> widget.Widget m = block(style.style_default(), ls)
+
+export fn static_styled(st: style.Style, ls: List String) -> widget.Widget m = block(st, ls)
+
+# Paints nothing and measures zero. Needed the moment anyone centres a widget
+# by padding it with fractions on both sides — the padding has to be something.
+export fn spacer() -> widget.Widget m = block(style.style_default(), Nil)
