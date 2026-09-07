@@ -1,0 +1,14 @@
+module main
+
+# A `let` inside a `do` block reaches lin_do_let, NOT pattern_linear_binders, so
+# it is a second binder path with its own linearity test. Measured 2026-09-07:
+# missed by the pattern-path fix alone.
+
+type linear File = File Int
+
+fn go() -> Int !{IO} =
+  do
+    let m = Just(File(1))
+    7
+
+fn main() -> Unit !{IO} = print(to_string(go()))

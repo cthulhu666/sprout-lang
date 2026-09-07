@@ -48,6 +48,26 @@ import stdlib.compiler.source as source
 # A consumed linear binding: its name, and where it was consumed.
 export type LinUse (..) = LinUse String source.SourcePos
 
+# A binder carrying a linear obligation: its name, and the type that gives it one.
+# The type travels with the name because under containment they differ — `xs` is
+# obliged because `List File` MENTIONS `File`, and a diagnostic naming only `xs`
+# describes a rule the reader cannot look up.
+type LinBinder (..) = LinBinder String types.Type
+
+fn lbind_name(b: LinBinder) -> String =
+  match b with | LinBinder n _ -> n
+
+fn lbind_type(b: LinBinder) -> types.Type =
+  match b with | LinBinder _ t -> t
+
+fn binder_names(bs: List LinBinder) -> List String =
+  list_map(lbind_name, bs)
+
+fn app_binders(a: List LinBinder, b: List LinBinder) -> List LinBinder =
+  match a with
+  | Nil -> b
+  | Cons x rest -> Cons(x, app_binders(rest, b))
+
 # Result of a use-set computation: the linear bindings CONSUMED (each at most once
 # along any path) and those merely BORROWED, or a diagnostic. Two sets, not one:
 # a borrow neither discharges the once-only obligation nor collides with another
@@ -184,10 +204,18 @@ fn ctor_field_types_at(ctor: String, value_type: types.Type, env: Dict types.Sch
           Just(list_map(\ft -> apply_tvar_subst(struct_match(ctor_result_ty(body), value_type, dict_empty()), ft),
                         ctor_param_tys(body)))
 
-# The linear-typed variables a pattern binds when matched against `value_type`.
-fn pattern_linear_binders(pat: ast.Pattern, value_type: types.Type, env: Dict types.Scheme) -> List String =
+# The variables a pattern binds that carry a linear obligation, when matched
+# against `value_type`.
+#
+# `type_mentions_linear`, not `type_is_linear`: a binder is obliged when its type
+# CONTAINS a linear type, not only when its head is one. Head-only left every
+# container silently leaking — `let m = Just(File(1)) in 7` compiled — while the
+# discarded-do-step rule next door already used containment for the same reason.
+# See docs/linearity-virality-v0.md §1.1.
+fn pattern_linear_binders(pat: ast.Pattern, value_type: types.Type, env: Dict types.Scheme) -> List LinBinder =
   match pat with
-  | ast.VarPattern name _ -> if type_is_linear(value_type, env) then Cons(name, Nil) else Nil
+  | ast.VarPattern name _ ->
+      if type_mentions_linear(value_type, env) then Cons(LinBinder(name, value_type), Nil) else Nil
   | ast.WildcardPattern _ -> Nil
   | ast.IntPattern _ _ -> Nil
   | ast.BoolPattern _ _ -> Nil
@@ -203,10 +231,10 @@ fn pattern_linear_binders(pat: ast.Pattern, value_type: types.Type, env: Dict ty
       | Just field_tys -> pattern_binders_list(subpats, field_tys, env)
       | Nothing -> Nil
 
-fn pattern_binders_list(pats: List ast.Pattern, tys: List types.Type, env: Dict types.Scheme) -> List String =
+fn pattern_binders_list(pats: List ast.Pattern, tys: List types.Type, env: Dict types.Scheme) -> List LinBinder =
   match (pats, tys) with
   | (Cons p prest, Cons t trest) ->
-      app_names(pattern_linear_binders(p, t, env), pattern_binders_list(prest, trest, env))
+      app_binders(pattern_linear_binders(p, t, env), pattern_binders_list(prest, trest, env))
   | _ -> Nil
 
 # In a `x <- m` do-bind the bound variable's type is m's payload. The monad kind
@@ -235,10 +263,11 @@ fn app_names(a: List String, b: List String) -> List String =
 
 # Each name in `binders` must appear in `consumed` (else it leaked); returns the
 # first unconsumed one.
-fn unconsumed_binder(binders: List String, consumed: List LinUse) -> Maybe String =
+fn unconsumed_binder(binders: List LinBinder, consumed: List LinUse) -> Maybe LinBinder =
   match binders with
   | Nil -> Nothing
-  | Cons b rest -> if luse_member(b, consumed) then unconsumed_binder(rest, consumed) else Just(b)
+  | Cons b rest ->
+      if luse_member(lbind_name(b), consumed) then unconsumed_binder(rest, consumed) else Just(b)
 
 fn remove_all(names: List String, us: List LinUse) -> List LinUse =
   match names with
@@ -262,6 +291,24 @@ fn reuse_msg(name: String) -> String =
 
 fn leak_msg(name: String) -> String =
   "linear value '" ++ name ++ "' is never used (linear values must be used exactly once)"
+
+# The leak wording for a BINDER, which under containment may be obliged by a type
+# it merely contains. `let xs = [File(1)]` reported as "linear value 'xs'" is
+# accurate and useless: `List File` is not a linear type, and a reader who has
+# only met the `type linear` rule cannot see why `xs` is bound by it. So name the
+# type and the linear type inside it. A binder that IS linear keeps the original
+# wording — there is nothing to explain there.
+fn leak_binder_msg(b: LinBinder, env: Dict types.Scheme) -> String =
+  if type_is_linear(lbind_type(b), env) then leak_msg(lbind_name(b))
+  else contained_leak_msg(lbind_name(b), lbind_type(b), first_linear_in(lbind_type(b), env))
+
+fn contained_leak_msg(name: String, t: types.Type, inner: Maybe types.Type) -> String =
+  match inner with
+  | Nothing -> leak_msg(name)
+  | Just lin ->
+      "linear value '" ++ name ++ "' is never used: its type `" ++ types.type_to_string(t)
+        ++ "` contains the linear type `" ++ types.type_to_string(lin)
+        ++ "` (linear values must be used exactly once)"
 
 fn diverge_msg(name: String) -> String =
   "linear value '" ++ name ++ "' is used in some branches but not others (every branch must use it exactly once)"
@@ -810,11 +857,11 @@ fn pattern_all_binders_list(pats: List ast.Pattern) -> List String =
 # exactly once inside (reuse is caught by seq2; a leftover binder is a leak);
 # borrowed binders must NOT be consumed at all. Either way they are removed from
 # both sets reported to the enclosing scope.
-fn scope_consumed(binders: List String, from_borrow: Bool, body: typed_ast.TypedExpr,
+fn scope_consumed(binders: List LinBinder, from_borrow: Bool, body: typed_ast.TypedExpr,
                   leak_pos: source.SourcePos, sc: LinScope, env: Dict types.Scheme) -> LinRes =
-  match lin_consumed(body, scope_add(binders, from_borrow, sc), env) with
+  match lin_consumed(body, scope_add(binder_names(binders), from_borrow, sc), env) with
   | LinErr p m -> LinErr(p, m)
-  | LinOk consumed borrowed -> scope_close(binders, from_borrow, consumed, borrowed, leak_pos)
+  | LinOk consumed borrowed -> scope_close(binders, from_borrow, consumed, borrowed, leak_pos, env)
 
 fn scope_add(names: List String, from_borrow: Bool, sc: LinScope) -> LinScope =
   if from_borrow then scope_add_borrowed(names, scope_shadow(names, sc))
@@ -823,22 +870,25 @@ fn scope_add(names: List String, from_borrow: Bool, sc: LinScope) -> LinScope =
 fn scope_add_borrowed(names: List String, sc: LinScope) -> LinScope =
   LinScope(scope_owned(sc), app_names(names, scope_borrowed(sc)))
 
-fn scope_close(binders: List String, from_borrow: Bool, consumed: List LinUse,
-               borrowed: List LinUse, leak_pos: source.SourcePos) -> LinRes =
+fn scope_close(binders: List LinBinder, from_borrow: Bool, consumed: List LinUse,
+               borrowed: List LinUse, leak_pos: source.SourcePos,
+               env: Dict types.Scheme) -> LinRes =
   if from_borrow then scope_close_borrowed(binders, consumed, borrowed)
-  else scope_close_owned(binders, consumed, borrowed, leak_pos)
+  else scope_close_owned(binders, consumed, borrowed, leak_pos, env)
 
-fn scope_close_borrowed(binders: List String, consumed: List LinUse,
+fn scope_close_borrowed(binders: List LinBinder, consumed: List LinUse,
                         borrowed: List LinUse) -> LinRes =
-  match first_consumed_borrow(binders, consumed) with
+  match first_consumed_borrow(binder_names(binders), consumed) with
   | Just u -> LinErr(luse_pos(u), borrowed_binder_msg(luse_name(u)))
-  | Nothing -> LinOk(remove_all(binders, consumed), remove_all(binders, borrowed))
+  | Nothing -> LinOk(remove_all(binder_names(binders), consumed),
+                     remove_all(binder_names(binders), borrowed))
 
-fn scope_close_owned(binders: List String, consumed: List LinUse, borrowed: List LinUse,
-                     leak_pos: source.SourcePos) -> LinRes =
+fn scope_close_owned(binders: List LinBinder, consumed: List LinUse, borrowed: List LinUse,
+                     leak_pos: source.SourcePos, env: Dict types.Scheme) -> LinRes =
   match unconsumed_binder(binders, consumed) with
-  | Just leaked -> LinErr(leak_pos, leak_msg(leaked))
-  | Nothing -> LinOk(remove_all(binders, consumed), remove_all(binders, borrowed))
+  | Just leaked -> LinErr(leak_pos, leak_binder_msg(leaked, env))
+  | Nothing -> LinOk(remove_all(binder_names(binders), consumed),
+                     remove_all(binder_names(binders), borrowed))
 
 fn arm_pos(br: typed_ast.TypedMatchBranch) -> source.SourcePos =
   match br with
@@ -920,18 +970,18 @@ fn wildcard_discards_linear(pat: ast.Pattern, t: types.Type, env: Dict types.Sch
 fn wildcard_bind_msg() -> String =
   "`_ <-` discards a linear value: a wildcard binds no name, so nothing can consume it (linear values must be used exactly once); bind a name and consume it"
 
-fn lin_do_bind_rest(binders: List String, ec: List LinUse, eb: List LinUse,
+fn lin_do_bind_rest(binders: List LinBinder, ec: List LinUse, eb: List LinUse,
                     e: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
                     sc: LinScope, env: Dict types.Scheme) -> LinRes =
-  match lin_do(rest, scope_add_owned(binders, sc), env) with
+  match lin_do(rest, scope_add_owned(binder_names(binders), sc), env) with
   | LinErr p m -> LinErr(p, m)
-  | LinOk restc restb -> lin_do_bind_close(binders, ec, eb, restc, restb, e)
+  | LinOk restc restb -> lin_do_bind_close(binders, ec, eb, restc, restb, e, env)
 
-fn lin_do_bind_close(binders: List String, ec: List LinUse, eb: List LinUse,
+fn lin_do_bind_close(binders: List LinBinder, ec: List LinUse, eb: List LinUse,
                      restc: List LinUse, restb: List LinUse,
-                     e: typed_ast.TypedExpr) -> LinRes =
+                     e: typed_ast.TypedExpr, env: Dict types.Scheme) -> LinRes =
   match unconsumed_binder(binders, restc) with
-  | Just leaked -> LinErr(typed_ast.typed_expr_pos(e), leak_msg(leaked))
+  | Just leaked -> LinErr(typed_ast.typed_expr_pos(e), leak_binder_msg(leaked, env))
   | Nothing -> lin_do_bind_after(binders, ec, eb, restc, restb, e)
 
 # When THIS bind is fallible the steps after it are conditional, so a consume of a
@@ -947,13 +997,14 @@ fn lin_do_bind_close(binders: List String, ec: List LinUse, eb: List LinUse,
 # Regressions: tests/conformance/type_error/borrow_after_fallible_bind (a `Result`
 # block) and .../consume_after_fallible_bind_effect_block (a `Unit !{IO}` block,
 # which the old block-type keying missed entirely — see `bind_short_circuits`).
-fn lin_do_bind_after(binders: List String, ec: List LinUse, eb: List LinUse,
+fn lin_do_bind_after(binders: List LinBinder, ec: List LinUse, eb: List LinUse,
                      restc: List LinUse, restb: List LinUse,
                      e: typed_ast.TypedExpr) -> LinRes =
   match conditional_consume(bind_short_circuits(typed_ast.typed_expr_type(e)),
-                            remove_all(binders, restc)) with
+                            remove_all(binder_names(binders), restc)) with
   | Just u -> LinErr(luse_pos(u), after_fallible_msg(luse_name(u)))
-  | Nothing -> seq2(ec, eb, remove_all(binders, restc), remove_all(binders, restb))
+  | Nothing -> seq2(ec, eb, remove_all(binder_names(binders), restc),
+                    remove_all(binder_names(binders), restb))
 
 fn conditional_consume(sc_bind: Bool, outer: List LinUse) -> Maybe LinUse =
   if ! sc_bind then Nothing
@@ -1016,28 +1067,42 @@ fn discardable_type(t: types.Type, env: Dict types.Scheme) -> Bool =
   if type_is_tyvar(t) then true
   else type_mentions_linear(t, env)
 
-# True when `t` is a linear type or carries one as a type argument or tuple
-# component. Containment is not optional here: in a Maybe/Result do-block EVERY
-# step has type `Maybe X` / `Result E X`, so a head-only test could never fire in
-# a short-circuiting block at all. This matches `do_bind_type`/`payload_type`
-# above, which unwrap for the same reason and are documented as sound-because-
-# over-strict.
+# The linear type inside `t`, if any — `t` itself when its head is linear, else
+# the first one found among its type arguments and tuple components.
+#
+# Containment is not optional: in a Maybe/Result do-block EVERY step has type
+# `Maybe X` / `Result E X`, so a head-only test could never fire in a
+# short-circuiting block at all. It is equally not optional for a binder — a
+# `let` over `Maybe File` drops the File just as surely — and the two paths
+# disagreed until 2026-09-07. Both now ask THIS function, which is why it returns
+# the type rather than a Bool: the leak diagnostic has to name the contained type,
+# since the value the author wrote is not the value the rule is about.
 #
 # Does NOT descend into a function type: `Unit -> File` is a recipe for a
 # resource, not a resource, and discarding one leaks nothing.
-fn type_mentions_linear(t: types.Type, env: Dict types.Scheme) -> Bool =
-  if type_is_linear(t, env) then true
+fn first_linear_in(t: types.Type, env: Dict types.Scheme) -> Maybe types.Type =
+  if type_is_linear(t, env) then Just(t)
   else
     match t with
     | types.TApp base arg ->
-        if type_mentions_linear(base, env) then true else type_mentions_linear(arg, env)
-    | types.TTuple items -> any_mentions_linear(items, env)
-    | _ -> false
+        match first_linear_in(base, env) with
+        | Just found -> Just(found)
+        | Nothing -> first_linear_in(arg, env)
+    | types.TTuple items -> first_linear_in_list(items, env)
+    | _ -> Nothing
 
-fn any_mentions_linear(ts: List types.Type, env: Dict types.Scheme) -> Bool =
+fn first_linear_in_list(ts: List types.Type, env: Dict types.Scheme) -> Maybe types.Type =
   match ts with
-  | Nil -> false
-  | Cons t rest -> if type_mentions_linear(t, env) then true else any_mentions_linear(rest, env)
+  | Nil -> Nothing
+  | Cons t rest ->
+      match first_linear_in(t, env) with
+      | Just found -> Just(found)
+      | Nothing -> first_linear_in_list(rest, env)
+
+fn type_mentions_linear(t: types.Type, env: Dict types.Scheme) -> Bool =
+  match first_linear_in(t, env) with
+  | Just _ -> true
+  | Nothing -> false
 
 # A bare reference (`do { x; 0 }`) needs its own wording: `x` IS referenced
 # exactly once, so telling the author to "bind its result" describes a rule the
@@ -1069,7 +1134,7 @@ fn lin_do_let(name: String, rhs: typed_ast.TypedExpr, rest: List typed_ast.Typed
   | LinErr p m -> LinErr(p, m)
   | LinOk rc rb ->
       lin_do_let_body(name, rhs, rc, rb, rest, sc, env,
-                      type_is_linear(typed_ast.typed_expr_type(rhs), env))
+                      type_mentions_linear(typed_ast.typed_expr_type(rhs), env))
 
 # A linear do-let binding is OWNED, scoped to `rest`, consumed exactly once there.
 fn lin_do_let_body(name: String, rhs: typed_ast.TypedExpr, rc: List LinUse, rb: List LinUse,
@@ -1077,14 +1142,16 @@ fn lin_do_let_body(name: String, rhs: typed_ast.TypedExpr, rc: List LinUse, rb: 
                    env: Dict types.Scheme, is_lin: Bool) -> LinRes =
   match lin_do(rest, extend_scope(is_lin, name, sc), env) with
   | LinErr p m -> LinErr(p, m)
-  | LinOk restc restb -> lin_do_let_close(name, rhs, rc, rb, restc, restb, is_lin)
+  | LinOk restc restb -> lin_do_let_close(name, rhs, rc, rb, restc, restb, is_lin, env)
 
 fn lin_do_let_close(name: String, rhs: typed_ast.TypedExpr, rc: List LinUse, rb: List LinUse,
-                    restc: List LinUse, restb: List LinUse, is_lin: Bool) -> LinRes =
+                    restc: List LinUse, restb: List LinUse, is_lin: Bool,
+                    env: Dict types.Scheme) -> LinRes =
   if ! is_lin then seq2(rc, rb, restc, restb)
   else if luse_member(name, restc) then
     seq2(rc, rb, luse_remove(name, restc), luse_remove(name, restb))
-  else LinErr(typed_ast.typed_expr_pos(rhs), leak_msg(name))
+  else LinErr(typed_ast.typed_expr_pos(rhs),
+              leak_binder_msg(LinBinder(name, typed_ast.typed_expr_type(rhs)), env))
 
 # A non-linear do-`let` must SHADOW, not be ignored: `let c = 5` over a linear
 # `c` has to drop the old entry, or `c + 1` is credited as consuming the resource.

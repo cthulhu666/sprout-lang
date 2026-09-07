@@ -1,0 +1,12 @@
+module main
+
+# A tuple component. `type_mentions_linear` descends TTuple, so this is the shape
+# that proves the walk is structural rather than a List/Maybe special case.
+
+type linear File = File Int
+
+fn go() -> Int =
+  let p = (File(1), 2)
+  in 7
+
+fn main() -> Unit !{IO} = print(to_string(go()))

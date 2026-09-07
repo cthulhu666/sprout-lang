@@ -8,6 +8,8 @@ import stdlib.test (check_eq, run_suite)
 type linear File = File Int
 type linear Wrap = Wrap File
 
+type Box a = Box a
+
 fn use_file(f: File) -> Int = match f with | File n -> n
 
 # let..in alias, used once.
@@ -54,6 +56,69 @@ fn wildcard_non_linear(n: Int) -> Maybe Int =
     _ <- Just(n)
     Just(n + 1)
 
+# --- containment (docs/linearity-virality-v0.md, Option 1) --------------------
+#
+# A binder is obliged when its type CONTAINS a linear type, not only when its head
+# is one. These are the positive half: a rule that rejected every container of a
+# linear would close the leak and be useless. The leak/reuse/divergence
+# counterparts are tests/conformance/type_error/linear_drop_in_* and
+# linear_container_*.
+
+fn close_all(m: Maybe File) -> Int =
+  match m with
+  | Just f -> use_file(f)
+  | Nothing -> 0
+
+fn close_list(fs: List File) -> Int =
+  match fs with
+  | Nil -> 0
+  | Cons f rest -> use_file(f) + close_list(rest)
+
+# `Maybe File` bound by `let..in`, consumed exactly once.
+fn container_used_once(n: Int) -> Int =
+  let m = Just(File(n))
+  in close_all(m)
+
+# A tuple component, and the non-linear component still readable alongside it.
+fn tuple_used_once(n: Int) -> Int =
+  let p = (File(n), 10)
+  in match p with | (f, k) -> use_file(f) + k
+
+# A user-declared container: `Box` is nothing special to the checker.
+fn boxed_used_once(n: Int) -> Int =
+  let b = Box(File(n))
+  in match b with | Box f -> use_file(f)
+
+# The same shape through a do-block `let`, which is a separate binder path
+# (lin_do_let) from the pattern one.
+fn do_let_container_once(n: Int) -> Maybe Int =
+  do
+    let fs = [File(n)]
+    Just(close_list(fs))
+
+# §5.8's function-type carve-out, pinned: `type_mentions_linear` must NOT descend
+# an arrow. `Unit -> File` is a recipe for a resource, not a resource, so binding
+# one and never calling it leaks nothing and must keep compiling.
+fn recipe_is_not_a_resource(n: Int) -> Int =
+  let make = \k -> File(k)
+  in n
+
+# The same carve-out reached through a BARE CONSTRUCTOR used as a value, which is
+# a function value (`Int -> File`) and so a linear type behind an arrow. Binding
+# one and never calling it allocates nothing and must stay legal.
+fn ctor_value_is_not_a_resource(n: Int) -> Int =
+  let mk = File
+  in n
+
+fn ctor_value_applied_once(n: Int) -> Int =
+  let mk = File
+  in use_file(mk(n))
+
+# A container of a NON-linear type is untouched by any of this.
+fn plain_container(n: Int) -> Int =
+  let xs = [n, n + 1]
+  in list_length(xs)
+
 fn main() -> Unit !{IO} =
   run_suite("linear_binders", [
     check_eq("let..in alias once", via_let(File(1)), 1),
@@ -61,5 +126,13 @@ fn main() -> Unit !{IO} =
     check_eq("viral field once", via_field(Wrap (File(3))), 3),
     check_eq("do-bind once", via_dobind(Just (File(4))), Just(4)),
     check_eq("trailing linear in a Maybe block", via_trailing_maybe(5), Just(5)),
-    check_eq("non-linear `_ <-` still legal", wildcard_non_linear(6), Just(7))
+    check_eq("non-linear `_ <-` still legal", wildcard_non_linear(6), Just(7)),
+    check_eq("Maybe of a linear, used once", container_used_once(7), 7),
+    check_eq("tuple holding a linear, used once", tuple_used_once(8), 18),
+    check_eq("user ADT holding a linear, used once", boxed_used_once(9), 9),
+    check_eq("do-let List of a linear, used once", do_let_container_once(10), Just(10)),
+    check_eq("a function returning a linear is not a resource", recipe_is_not_a_resource(11), 11),
+    check_eq("a bare linear ctor as a value is not a resource", ctor_value_is_not_a_resource(12), 12),
+    check_eq("a bare linear ctor applied once", ctor_value_applied_once(13), 13),
+    check_eq("container of a non-linear is untouched", plain_container(14), 2)
   ])
