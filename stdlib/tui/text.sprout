@@ -90,6 +90,12 @@ export fn width(text: String) -> Int = clusters_width(clusters(text))
 export fn clusters_width(cs: List (List Int)) -> Int =
   list_fold(\ (acc, c) -> acc + cluster_width(c), 0, cs)
 
+# Columns the widest of several lines occupies — what a stack of them measures
+# to. Empty is 0 columns, not "no width": a widget still has a size. O(n) in
+# the codepoints of all the lines.
+export fn widest(ls: List String) -> Int =
+  maybe_with_default(0, maximum(list_map(width, ls)))
+
 # ── Truncation ──────────────────────────────────────────────────────────────
 
 # The longest prefix fitting in `cols` columns. A wide cluster that would

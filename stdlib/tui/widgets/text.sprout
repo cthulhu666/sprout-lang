@@ -25,12 +25,7 @@ fn block_on_event(b: Block,
 # As wide as its widest line and as tall as it has lines. Static content never
 # yields, so both axes are `Fixed`.
 fn block_measure(b: Block, avail: geometry.Size) -> widget.Measured =
-  widget.fixed_size(geometry.Size(widest(b.ls), list_length(b.ls)))
-
-fn widest(ls: List String) -> Int =
-  list_fold(\ (acc, l) -> imax(acc, text.width(l)), 0, ls)
-
-fn imax(a: Int, b: Int) -> Int = if a > b then a else b
+  widget.fixed_size(geometry.Size(text.widest(b.ls), list_length(b.ls)))
 
 fn block_render(b: Block, r: geometry.Region, s: screen.Screen) -> Unit !{IO} =
   paint.lines(s, r, 0, b.ls, b.st)

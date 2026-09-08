@@ -1,7 +1,7 @@
 # TUI M4 — the widget set, slice C2: focus and the interactive set
 
-> Status: **C2a implemented** (`ToFocus`, `focus_ring`, `button`); C2b is
-> `docs/tui-input-v0.md` — `input` implemented, `list_view` designed.
+> Status: **implemented** — C2a (`ToFocus`, `focus_ring`, `button`) and C2b
+> (`docs/tui-input-v0.md`, `docs/tui-list-view-v0.md`).
 > Non-normative;
 > `docs/spec-v0.md` is unaffected. The widget *model* is
 > `docs/tui-widgets-v0.md`, addressed delivery is `docs/tui-routing-v0.md`, and
@@ -215,7 +215,8 @@ container are unchanged.
 
 `input` and `list_view` are plain consumers of the contract above: state a
 `focused: Bool` plus their own, `route_when` on their id, claim the keys they
-use and decline the rest. Designed in **`docs/tui-input-v0.md`**.
+use and decline the rest. Designed in **`docs/tui-input-v0.md`** and
+**`docs/tui-list-view-v0.md`**.
 
 This section previously said a caret edit was `string.take` / `string.drop`.
 That was wrong — those count codepoints, and a caret between them can land

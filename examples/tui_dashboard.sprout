@@ -1,28 +1,31 @@
 module main
 
-# A whole TUI: two widgets of the application's own, arranged with stdlib
-# containers. Design: docs/tui-widgets-v0.md, docs/tui-widget-set-v0.md.
+# A whole TUI, and an interactive one: two stdlib widgets share the keyboard
+# through a focus ring, and a widget of the application's own shows what they
+# said. Design: docs/tui-widgets-v0.md, docs/tui-focus-v0.md,
+# docs/tui-list-view-v0.md.
 #
-# Two leaf widgets with DIFFERENT hidden state types — a record and a
-# List String — sit in one tree, and neither can see the other's state. That is
-# the existential doing its job: `s` is private, `m` is shared.
+# Three leaf widgets with DIFFERENT hidden state types — a zipper, a selection
+# index and a List String — sit in one tree, and none can see another's. That
+# is the existential doing its job: `s` is private, `m` is shared.
 #
 # The clock is the round trip: it ASKS for the time with an addressed command
 # and the answer is delivered back to it, never to the application. Design:
 # docs/tui-routing-v0.md.
 #
-# Run it in a terminal; press q to quit.
+# Run it in a terminal; Tab moves between the field and the list, Esc quits.
 
-import stdlib.string as string
 import stdlib.time as time
 import stdlib.tui.app as app
 import stdlib.tui.event as event
 import stdlib.tui.geometry as g
 import stdlib.tui.screen as scr
 import stdlib.tui.style as sty
-import stdlib.tui.text as text
 import stdlib.tui.widget as widget
 import stdlib.tui.widgets.container as ct
+import stdlib.tui.widgets.focus as focus
+import stdlib.tui.widgets.input as inp
+import stdlib.tui.widgets.list_view as lv
 import stdlib.tui.widgets.paint as paint
 import stdlib.tui.widgets.text as txt
 
@@ -30,6 +33,9 @@ import stdlib.tui.widgets.text as txt
 type Msg (..) deriving (Eq, ToString) =
   | Quit
   | Typed String
+  | Filed String
+  | Lit Int
+  | Picked Int
   | Stamped Int
 
 fn dim() -> sty.Style = sty.with_fg(sty.style_default(), sty.Ansi(8))
@@ -40,6 +46,79 @@ fn bright() -> sty.Style = sty.with_bold(sty.style_default(), true)
 # wants done. Named once, because every widget below repeats the pair.
 type alias Says = List Msg
 type alias Asks = List(widget.Cmd Msg)
+
+# ── the two stdlib widgets that share the keyboard ──────────────────────────
+
+fn name_id() -> widget.WidgetId = widget.WidgetId("name")
+
+fn planets_id() -> widget.WidgetId = widget.WidgetId("planets")
+
+fn planets() -> List String =
+  ["Mercury", "Venus", "Earth", "Mars", "Jupiter", "Saturn"]
+
+# The field says its whole value on every edit, and its line on Enter: the
+# application cannot read a widget, so what it is told is all it knows.
+fn field() -> widget.Widget Msg =
+  inp.input_with(name_id(), Typed,
+                 inp.input_opts() with (initial = "Ada",
+                                        on_submit = Just(Filed)))
+
+# Highlighting and choosing are separate messages, as Textual's `Highlighted`
+# and `Selected` are: moving through a list is not picking from it.
+fn list_of_planets() -> widget.Widget Msg =
+  lv.list_view_with(planets_id(), planets(), Picked,
+                    lv.list_opts() with (on_highlight = Just(Lit), page = 3))
+
+# ── a log: hidden state is List String ──────────────────────────────────────
+
+fn log_id() -> widget.WidgetId = widget.WidgetId("log")
+
+# Both channels in one widget. Messages arrive ADDRESSED, from `update`; the
+# keyboard arrives on the broadcast, and only for keys the focused widget
+# declined — which is exactly what makes Esc an application binding rather
+# than something the field would swallow.
+fn log_on_event(ls: List String, ev: event.Event) -> (List String, Says, Asks) =
+  match ev with
+  | event.KeyPress k _ -> if quits(k) then (ls, [Quit], Nil) else (ls, Nil, Nil)
+  | _ -> (ls, Nil, Nil)
+
+fn quits(k: event.Key) -> Bool =
+  match k with
+  | event.KEsc -> true
+  | _ -> false
+
+fn log_route(ls: List String, d: widget.Delivery Msg) -> (List String, Says, Asks) =
+  match d with
+  | widget.ToMsg m -> (Cons(entry(m), ls), Nil, Nil)
+  | widget.ToEvent _ -> (ls, Nil, Nil)
+  | widget.ToFocus _ -> (ls, Nil, Nil)
+
+# A message the log has no words for prints `?`; every one that reaches it is
+# named above.
+fn entry(m: Msg) -> String =
+  match m with
+  | Typed s -> `typed ${s}`
+  | Filed s -> `filed ${s}`
+  | Lit i -> `over ${item_at(i, planets())}`
+  | Picked i -> `chose ${item_at(i, planets())}`
+  | _ -> "?"
+
+fn item_at(i: Int, xs: List String) -> String =
+  match xs with
+  | Nil -> "?"
+  | [x | rest] -> if i <= 0 then x else item_at(i - 1, rest)
+
+fn log_measure(ls: List String, avail: g.Size) -> widget.Measured =
+  widget.greedy_size(avail)
+
+fn log_render(ls: List String, r: g.Region, s: scr.Screen) -> Unit !{IO} = do
+  paint.line(s, r, 0, "log", dim())
+  paint.lines(s, r, 1, ls, sty.style_default())
+
+fn log() -> widget.Widget Msg =
+  widget.Widget(widget.View(state = Nil, on_event = log_on_event,
+                            route = widget.route_if(log_id(), log_route, _, _, _),
+                            render = log_render, measure = log_measure))
 
 # ── a clock: hidden state counts ticks and holds a routed answer ────────────
 
@@ -69,10 +148,10 @@ fn ticks_route(t: Ticks, d: widget.Delivery Msg) -> (Ticks, Says, Asks) =
 
 fn stamped(t: Ticks, m: Msg) -> Ticks =
   match m with
-  | Stamped us -> (t with (first = first_of(t, us), now = us))
+  | Stamped us -> (t with (first = first_at(t, us), now = us))
   | _ -> t
 
-fn first_of(t: Ticks, us: Int) -> Int = if t.first == 0 then us else t.first
+fn first_at(t: Ticks, us: Int) -> Int = if t.first == 0 then us else t.first
 
 # Two rows of content, as wide as it is given: a definite height is what lets a
 # caller put this in a `fit` slot.
@@ -92,66 +171,44 @@ fn ticks() -> widget.Widget Msg =
                             route = widget.route_if(ticks_id(), ticks_route, _, _, _),
                             render = ticks_render, measure = ticks_measure))
 
-# ── a key log: hidden state is List String ──────────────────────────────────
-
-# `q` is this widget's business, so it is this widget that says `Quit`. The
-# application never inspects a keystroke.
-fn keys_on_event(log: List String, ev: event.Event) -> (List String, Says, Asks) =
-  match ev with
-  | event.KeyPress k mods -> on_key(log, k)
-  | _ -> (log, Nil, Nil)
-
-fn on_key(log: List String, k: event.Key) -> (List String, Says, Asks) =
-  match k with
-  | event.KChar c -> on_char(log, c)
-  | _ -> (Cons(to_string(k), log), [Typed(to_string(k))], Nil)
-
-fn on_char(log: List String, c: Char) -> (List String, Says, Asks) =
-  if c == 'q' then (log, [Quit], Nil)
-  else (Cons(char_to_string(c), log), [Typed(char_to_string(c))], Nil)
-
-# A log fills whatever it is given, which is what `Greedy` says. Under the old
-# contract this was `-> avail`, a number the layout engine could only read as a
-# demand for all of it.
-fn keys_measure(log: List String, avail: g.Size) -> widget.Measured =
-  widget.greedy_size(avail)
-
-# Wrapping is why `text` measures COLUMNS: a CJK ideograph is two of them, so a
-# character count would overflow the region. `paint.lines` stops at the
-# region's bottom edge, so the wrap needs no row arithmetic of its own.
-fn keys_render(log: List String, r: g.Region, s: scr.Screen) -> Unit !{IO} = do
-  paint.line(s, r, 0, "keys", dim())
-  paint.lines(s, r, 1, text.wrap_to(string.join(" ", log), g.region_cols(r)),
-              sty.style_default())
-
-fn keys() -> widget.Widget Msg =
-  widget.Widget(widget.View(state = Nil, on_event = keys_on_event,
-                            route = widget.no_route,
-                            render = keys_render, measure = keys_measure))
-
 # ── the application ─────────────────────────────────────────────────────────
 
-# A header and a footer of one row each, with the body taking the rest. The
-# containers are stdlib's; this file has none of its own.
+# The ring wraps the whole tree, so every widget keeps its addressed delivery
+# and exactly one of the two named widgets holds the keyboard. Focus starts on
+# the head of the list, so the field is live without a first Tab.
 fn root() -> widget.Widget Msg =
-  ct.column([ct.cells(1, txt.label_styled(bright(), "Sprout TUI")),
-             ct.fraction(1, body()),
-             ct.cells(1, txt.label_styled(dim(), "q to quit"))])
+  focus.focus_ring([name_id(), planets_id()],
+                   ct.column([ct.cells(1, txt.label_styled(bright(), "Sprout TUI")),
+                              ct.fraction(1, body()),
+                              ct.cells(1, txt.label_styled(dim(), footer()))]))
 
-# Two panes side by side: the clock takes a third, the key log the rest.
+fn footer() -> String = "Tab moves, arrows select, Enter chooses, Esc quits"
+
+# The list on the left, the field and what it all said on the right.
 fn body() -> widget.Widget Msg =
-  ct.row([ct.fraction(1, ticks()), ct.fraction(2, keys())])
+  ct.row([ct.fraction(1, list_of_planets()), ct.fraction(2, pane())])
 
-# Widgets already did the work; the application only decides when to stop.
+fn pane() -> widget.Widget Msg =
+  ct.column([ct.cells(1, field()), ct.fraction(1, log()), ct.fit(ticks())])
+
+# Widgets already did the work; the application decides when to stop and who
+# hears the rest. Handing a message on is `deliver` — the same addressed
+# channel the framework uses for a command's answer.
 #
-# A `Stamped` never arrives here in practice — it is addressed to `ticks` and
+# A `Stamped` never arrives here in practice: it is addressed to `ticks` and
 # delivered there. It reaches `update` only if that widget has gone, which is
 # the fallback the framework guarantees rather than dropping the answer.
 fn update(m: Msg, w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow, Asks) =
   match m with
   | Quit -> app.done(w, app.Quit)
-  | Typed _ -> app.done(w, app.Continue)
   | Stamped _ -> app.done(w, app.Continue)
+  | _ -> app.done(told(w, m), app.Continue)
+
+# The log says nothing and asks for nothing, so its reply carries only the new
+# widget; a target that has gone leaves the tree as it was.
+fn told(w: widget.Widget Msg, m: Msg) -> widget.Widget Msg =
+  let Just(w2, _, _) = widget.deliver(w, log_id(), widget.ToMsg(m)) else w
+  in w2
 
 fn main() -> Unit !{IO} =
   app.run(app.App(root = root(), update = update, tick_ms = 250,

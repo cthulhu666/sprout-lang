@@ -1,7 +1,7 @@
 # TUI M4 — the widget set, slice C2b: the text field
 
-> Status: **`input` implemented**; `list_view` designed here (§7), not yet
-> implemented. Non-normative; `docs/spec-v0.md` is unaffected. Focus is
+> Status: **implemented**. Non-normative; `docs/spec-v0.md` is unaffected. The
+> slice's other widget is `docs/tui-list-view-v0.md`; focus is
 > `docs/tui-focus-v0.md`, the widget model `docs/tui-widgets-v0.md`, addressed
 > delivery `docs/tui-routing-v0.md`.
 
@@ -184,19 +184,12 @@ Additive except `button.ButtonStyle`, which becomes `focus.FocusStyle`; two
 in-tree references. `button` now declines a modified Enter or Space, which is a
 behaviour change and is the point of §4.4.
 
-## 7. `list_view`, next
+## 7. `list_view`
 
-`list_view(id, items, on_select)`: a selection index, `KUp`/`KDown`/`KHome`/`KEnd`/
-`KPageUp`/`KPageDown` to move it, `KEnter` to choose. Textual posts both
-`ListView.Highlighted` ("Posted when the highlighted item changes") and
-`ListView.Selected`, and both are wanted here for the same reason as §4.2 — so
-`ListOpts` carries an optional `on_highlight`.
-
-Brick styles the selection with three attributes, `listAttr`,
-`listSelectedAttr` ("when the list does not have focus") and
-`listSelectedFocusedAttr`; a two-field `FocusStyle` cannot express that a list
-which has lost focus still has a selection, so `ListStyle` has all three. The
-viewport follows the selection, by §4.5's argument.
+The slice's other widget, designed and implemented in
+**`docs/tui-list-view-v0.md`**. It takes §4.5's derived window and inverts
+§4.2: what leaves a list is an *index*, because the application supplied the
+items and a line cannot name a row when two are identical.
 
 ## 8. Tests
 

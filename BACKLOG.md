@@ -507,11 +507,11 @@ Legend:
   `static`/`spacer` and the four child traversals; `examples/tui_dashboard.sprout` went 284 → 157
   lines with no container of its own. `View.measure` now returns a `Measured` so a child can ask
   for "whatever is left". C2–C3 below remain. Design: `docs/tui-widget-set-v0.md`.
-- [ ] `P1` **TUI M4 C2b — the selection widget.** `list_view`: a selection index, arrows/Home/End/
-  PageUp/PageDown to move it, Enter to choose, `on_highlight` optional beside `on_select`, and a
-  three-field `ListStyle` because a blurred list still has a selection. `input` landed 2026-09-08.
-  Carries the first interactive example: `examples/tui_dashboard.sprout` still demonstrates nothing
-  focusable. Design: `docs/tui-input-v0.md` §7.
+- [ ] `P2` **TUI `list_view` — items are fixed at construction.** A list is built from a
+  `List String` and keeps it, so a filter box over one, or a list built from a model that updates,
+  has no way to change what it holds; rebuilding the tree resets every widget's state, focus
+  included. Per-item rendering is the same gap one level out — Brick's `renderList` takes
+  `Bool -> e -> Widget n`, so an item can be any widget. Design: `docs/tui-list-view-v0.md` §8.
 - [ ] `P3` **TUI `input` — word motion, selection and the chord family.** `ctrl-w`/`ctrl-u`,
   ctrl-arrows, a selection anchor beside the caret, and the terminal clipboard. Deliberately not
   claimed by C2b: every one is a binding an application may want, and a field that took them would
@@ -520,8 +520,9 @@ Legend:
   behaves the same way; reaching it means deleting from between a base character and its mark.
   Design: `docs/tui-input-v0.md` §9.
 - [ ] `P2` **TUI focus — click-to-focus needs a retained hit-test tree.** Containers discard the
-  solved region list after painting, so nothing can answer "what is under the pointer", and
-  `focus_ring` is keyboard-only. Design: `docs/tui-focus-v0.md` §9.
+  solved region list after painting, so nothing can answer "what is under the pointer",
+  `focus_ring` is keyboard-only, and a `list_view` row cannot be clicked either.
+  Design: `docs/tui-focus-v0.md` §9.
 - [ ] `P3` **TUI focus — terminal cursor placement, and focus trapping.** `app.run` hides the
   cursor for the whole session, so a focused `input` paints its own caret cell; Brick instead
   feeds `appChooseCursor` from the ring. Trapping — a widget that consumes Tab itself — is the
