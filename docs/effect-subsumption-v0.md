@@ -1,25 +1,29 @@
 # Effect subsumption at arrow positions (v0)
 
-Status: **DESIGN, awaiting approval.** Revision 4 (2026-09-07). Scope narrowed: what was
+Status: **DESIGN, awaiting approval.** Revision 5 (2026-09-08). Adds part 0 after a review
+found part 1 has a one-token bypass without it. Revision 4 narrowed the scope: what was
 part 4 is a separate bug and has moved to `docs/nullary-type-collapse-v0.md`.
 
-The fix has **three parts**, at three different boundaries. No one subsumes another. Each
-review round found one more boundary, so treat this list as *known incomplete*: revision 1
-had only part 1, revision 2 added parts 2 and 3, revision 3 added a fourth that revision 4
-removed as not-an-effect-problem.
+The fix has **four parts**. No one subsumes another. Each review round found one more
+boundary, so treat this list as *known incomplete*: revision 1 had only part 1, revision 2
+added parts 2 and 3, revision 3 added a fourth that revision 4 removed as
+not-an-effect-problem, and revision 5 added part 0 at the front.
 
 | # | boundary | how the effect escapes | mechanism | § |
 |---|---|---|---|---|
+| 0 | an unknown effect label | parsed as an effect **variable**, so every rule that exempts variables exempts it | reject a label that is not `IO` | §6.0 |
 | 1 | a function value entering a slot | compared, wrong direction allowed | directional comparison, polarity-annotated | §6.3 |
 | 2 | a peer join (`if`/`match`/elements/operands) | unified, difference swallowed | effect LUB **and GLB by depth parity** | §6.5 |
 | 3 | an instance method vs its class signature | never compared — scheme level | declared-vs-declared comparison | §6.1a |
 
-All three compare two effects somewhere, which is what makes them one design.
+Parts 1–3 compare two effects somewhere, which is what makes them one design. **Part 0 is
+a prerequisite, not a peer:** part 1 is unsound without it (§6.0), so they land together.
 
-**Migration cost, measured for all three:**
+**Migration cost, measured for all four:**
 
 | part | in-tree | downstream | note |
 |---|---|---|---|
+| 0 | 0 | 0 | every effect annotation in `stdlib/`, `examples/`, `tests/`, `bench/` enumerated 2026-08-16: only `IO` (2020) and lowercase variables (69). Open question `!{}`, written in three tests — decide with this change |
 | 1 | 0 | 0 | 2 flagged sites, both the safe direction (§5) |
 | 2 | 0 | 0 | concrete joins only; variable-effect joins unmeasured |
 | 3 | 0 | 0 | **no method-level effect annotation exists anywhere** — 259 in-tree class/instance method signatures and 3 downstream, all pure, so no instance can differ from its class |
@@ -183,6 +187,48 @@ for the permissive half.
 
 ## 6. Implementation overview (for approval)
 
+### 6.0 An unknown effect label is a variable, which bypasses part 1 — PREREQUISITE
+
+Found in review round 5. `!{NOPE}` type-checks, and it does not become an inert label — it
+becomes an effect **variable**:
+
+```sprout
+fn sneak(n: Int) -> Int !{NOPE} = do { print("io"); n + 1 }
+fn pure_map(xs: List Int) -> List Int = list_map(sneak, xs)
+```
+
+```
+main.sneak    : Int -> Int !{$e30}        <- the written NOPE
+main.pure_map : List Int -> List Int
+```
+
+Verified by compiling and running: prints `io` per element under a fully pure signature.
+
+**Why this is part of this design and not an unrelated wart.** §6.3's rule table exempts
+variables — "either side a variable → bind as today" — and that arm is load-bearing, since
+it is what keeps every `!{e}` combinator working. An unknown label is a variable, so the
+exemption covers it. After parts 1–3 land, **replacing `!{IO}` with `!{NOPE}` re-opens §1's
+hole in one token**, and the resulting program is conformant against the amended spec
+(§10). A guarantee with a one-token opt-out is not a guarantee.
+
+**Mechanism.** Reject any label that is neither `IO` nor a lowercase effect variable, where
+`effect_from_maybe_labels` builds the `Effect`. Migration cost is zero, already measured
+(header table). `docs/spec-v0.md` §7 rule 9 already admits only three annotation forms, so
+this rejects nothing rule 9 ever permitted — it closes the gap between the rule and its
+enforcement rather than adding a rule.
+
+**Decide `!{}` in the same change.** The empty row is written in three tests
+(`test_eta_forwarding.spr` ×2, `test_devirt_classmethods.spr`) and evidently means "pure",
+and §7 does not define it. A validator written from rule 9 as it stands rejects all three,
+so either rule 9 gains it as a spelling of purity or those signatures drop it.
+
+**The deeper requirement this exposes: the comparison must be TOTAL over `Effect`.**
+`types.Effect` has four constructors — `EffectPure`, `EffectIO`, `EffectRow (List String)`,
+`EffectVar String`. Revision 4's §6.3 table specified two cells and gestured at a third,
+and this bypass is what an unspecified cell looks like from the outside. §6.3 and §6.5 now
+specify every cell. Treat a non-total match on `Effect` as the defect class, not `NOPE` as
+the defect.
+
 ### 6.1 `unify_tfunc` covers every arrow COMPARISON — which is not every boundary
 
 The detector lives in `unify_tfunc` and fires at every position where two arrows are
@@ -220,12 +266,12 @@ dispatching through the class scheme inherits the class's weaker claim.
 effects — no inference and no unification involved:
 
 - The class method's declared effect is already in scope. `register_class_method`
-  (`infer.sprout:9170`) builds the class method's scheme from its `effects_maybe` and
+  (`infer.sprout`) builds the class method's scheme from its `effects_maybe` and
   registers it under the bare method name, and that registration happens at `:7504`,
   before `check_instance_methods` at `:7510`. So inside `check_instance_method` the class
   effect is `types.scheme_effects(dict_get(name, env))`.
 - The instance method's declared effect is `eff_maybe`, already threaded through
-  `instance_method_checked` (`:9358`).
+  `instance_method_checked`.
 - Reject unless `instance ⊑ class` — the §5 relation, with the class signature as
   expected. `pure` instance under an `!{IO}` class stays legal (an instance may promise
   *less*); an `!{IO}` instance under a pure class is the rejection.
@@ -250,7 +296,7 @@ all, only `inst_constraints` (the where-clause).
 
 So part 3 needs a **class-qualified registration key** for method signatures plus the
 class identity threaded into instance checking. Small, but not the one-line lookup an
-earlier draft described. `class_method_mode_error` (`:9409`) shows the lookup pattern but
+earlier draft described. `class_method_mode_error` shows the lookup pattern but
 inherits the same bare-name weakness.
 
 Note what this does **not** duplicate: rule 8 already checks an instance method's *body*
@@ -281,17 +327,26 @@ different positions. All four cells verified by probe:
 | return | pure fn as IO result | `pure vs !{IO}` | ACCEPT |
 
 The cause is that `infer`'s `unify_types` call sites do not share an (expected, actual)
-convention. Full classification of the 35 sites:
+convention. Classification of the 36 sites (35 in `infer.sprout`, one in
+`analysis_service_driver`), by what the site does:
 
-| convention | count | examples |
+| convention | count | where |
 |---|---|---|
-| (actual, expected) | ~22 | 8929 return, 5095 record field, 397, 1256, 4096, 4510, 4957, 5337, 5729, 9376 |
-| (expected, actual) | ~7 | 1712 call argument, 3223, pattern sites 4142/4170/4236, 3705, 1064 |
-| **peer — neither side expected** | ~6 | 1283 if-join, binop operands 3357/3414/3440/3533, 1680 |
+| (actual, expected) | ~22 | declaration return, record field, and most inference sites |
+| (expected, actual) | ~7 | call argument; the pattern-checking sites |
+| **peer — neither side expected** | ~6 | `if`-join, binary operands, match-arm accumulation |
+
+> **The concrete site list must be REGENERATED at implementation time, and this table is
+> deliberately not keyed on line numbers.** Revision 4 carried a line-numbered version whose
+> citations were wrong on the tree it shipped against — `merge_effects` is at `:1044`, not
+> `:766`; `register_class_method` `:9641`, not `:9170`; `unify_ok` `:379`, not `:394`; only
+> `unify_arrow_effects:425` was right. Since the audit *executes from* this classification,
+> a stale table is worse than none: it reads as a completed survey. Regenerate by grepping
+> `unify_types(` and classifying each hit, and record the result in the implementing PR
+> rather than here, where it rots. The counts above are the shape to expect, not a checklist.
 
 So there *is* a dominant convention and an earlier draft of this section overstated the
-chaos: it claimed "only the call site follows" the left=expected convention documented at
-`unifier.sprout:540`, which is wrong — the pattern-checking sites follow it too. The
+chaos: it claimed "only the call site follows" the left=expected convention documented in `unifier.sprout`, which is wrong — the pattern-checking sites follow it too. The
 conclusion survives regardless: two conventions plus a peer category mean argument order
 cannot carry direction. `unifier.list_vec_hint` already works around the same flip for
 types by writing a direction-agnostic diagnostic.
@@ -299,7 +354,7 @@ types by writing a direction-agnostic diagnostic.
 **So the design passes polarity explicitly** rather than inferring it from position. The
 peer category is the one that breaks a two-valued flag — see §6.5.
 
-**Audit rule: annotate polarity, never reorder arguments.** `unifier.sprout:540` binds
+**Audit rule: annotate polarity, never reorder arguments.** `unify_types` binds
 right→left so the left (expected/older) `TVar` stays canonical, which `@fwd`/`@eta_fwd`
 marker reachability depends on. Adding a flag preserves that bit-for-bit; "normalising" a
 site by swapping its arguments would silently change which tyvar survives as canonical.
@@ -307,7 +362,7 @@ That failure would surface only in dictionary forwarding through `where C m` fun
 concrete instances devirtualize the dict away — so it would not show up in a corpus sweep.
 
 **One caller lives outside `infer`**, making the audit 36 sites:
-`analysis_service_driver.unify_ok` (:394), the type-search matcher. A directional rule
+`analysis_service_driver.unify_ok`, the type-search matcher. A directional rule
 changes tooling behaviour there — a search for `Int -> Int` would stop matching
 `Int -> Int !{IO}` — and arguably search should match across the subtype relation rather
 than adopt the checker's direction. Decide it explicitly rather than inherit it.
@@ -322,17 +377,43 @@ Thread a polarity argument through `unify_types` → `unify_applied` → `unify_
   This is ordinary function subtyping, and it is what makes a second-order case
   (`((A -> B) -> C) -> D`) come out right rather than backwards.
 
-At `unify_tfunc`, with polarity resolving which side is expected:
+At `unify_tfunc`, with polarity resolving which side is expected. **The table is total over
+`Effect`'s four constructors, and must stay that way** — revision 4 specified three lines
+and the unspecified cell was the §6.0 bypass:
 
-```
-expected = Pure, actual = IO   -> reject
-expected = IO,   actual = Pure -> accept        (§5)
-either side a variable         -> bind as today (keeps every !{e} combinator working)
-```
+| expected \ actual | `EffectPure` | `EffectIO` | `EffectVar` | `EffectRow` |
+|---|---|---|---|---|
+| **`EffectPure`** | accept | **reject** | bind | unreachable |
+| **`EffectIO`** | accept (§5) | accept | bind | unreachable |
+| **`EffectVar`** | bind | bind | bind | unreachable |
+| **`EffectRow`** | unreachable | unreachable | unreachable | unreachable |
 
-Then audit the ~35 call sites to pass the correct initial polarity. That audit is the
-bulk of the work and cannot be skipped: a site left on the wrong polarity is a silent
-hole or a false rejection, and neither shows up in a corpus that has zero violations.
+- **bind** is today's total unification, and is what keeps every `!{e}` combinator working.
+  It is the one arm an attacker can aim at, which is why part 0 must make an unknown label
+  ill-formed rather than a variable.
+- **unreachable** is a claim, not a shrug: rule 9 admits only a single concrete effect, a
+  single variable, or nothing, and part 0 enforces it — so no *conformant* signature builds
+  an `EffectRow`. Inference still builds rows internally (`merge_effects`), so the arm must
+  exist and must **hard-error** rather than fall through to `bind`. A row reaching this
+  comparison means part 0 has a hole, and the loud failure is how that gets found.
+
+Then audit the 36 call sites (35 in `infer.sprout`, one in `analysis_service_driver`) to
+pass the correct initial polarity.
+
+**Make the audit self-checking rather than trusting it.** A site left on the wrong polarity
+is a silent hole or a false rejection, and neither shows up in a corpus with zero
+violations — so a green suite is not evidence the audit was done right. Two mechanisms,
+both cheap:
+
+1. **Remove the symmetric spelling.** Make the bare `unify_types` private and expose
+   `unify_expect_actual`, `unify_actual_expected`, `unify_join`. An unconverted site then
+   fails to compile instead of silently inheriting a default, and each call site states its
+   convention where a reviewer reads it. Precedent: `unify_tfunc_owned` already hard-rejects
+   ownership mismatches at the same layer.
+2. **Flip-test the minority buckets.** The `(expected, actual)` and peer buckets are ~7 and
+   ~6 sites. One fixture each that goes red when that site's annotation is flipped — the
+   generalisation of §9's branch-swap pairs. The dominant bucket stays unpinned per-site,
+   but every site is at least *forced to declare*.
 
 ### 6.4 Variance inside type constructors — per-constructor, not global
 
@@ -394,7 +475,7 @@ constructor's declared field positions, which is a separate change.
 ### 6.5 Peer-join sites need an effect LUB, not a polarity — BLOCKER
 
 Six of the 36 sites join two *peers*: `if`/`match` branch results, binary operands. At
-`infer.sprout:1283` the call is `unify_types(then_type, else_type)` — neither side is
+the `if`-join the call is `unify_types(then_type, else_type)` — neither side is
 expected, so no polarity value is correct:
 
 ```sprout
@@ -416,7 +497,7 @@ Both available answers are wrong:
 *combined*, not unified: the joined arrow carries `merge_effects(e1, e2)`. Then the
 ordinary directional comparison downstream does the rejecting.
 
-`infer.merge_effects` (`:766`) is already exactly that least upper bound:
+`infer.merge_effects` is already exactly that least upper bound:
 
 ```sprout
 | (types.EffectIO, _)          -> types.EffectIO      # IO absorbs
@@ -426,7 +507,7 @@ ordinary directional comparison downstream does the rejecting.
 | _                            -> merge_effect_labels(a, b)
 ```
 
-It is **already called at the if-join** (`:1290-1291`) — but only for the *expression's*
+It is **already called at the if-join** — but only for the *expression's*
 own effect, never for the effects *inside* the branch types. The join unifies the two
 arrow types and swallows the difference. So the change is to apply the function already
 sitting at that call site one level deeper.
@@ -438,6 +519,21 @@ cases are untouched: two pure branches join to pure, two IO branches to IO.
 
 Order-independence comes free, because `merge_effects` is commutative on these cases —
 which is precisely what a fixed polarity could not deliver.
+
+**The GLB must be specified over all four constructors too** (§6.0's requirement, applied
+here). `merge_effects` is the LUB and is already total; its dual is not written yet:
+
+| GLB | `EffectPure` | `EffectIO` | `EffectVar` | `EffectRow` |
+|---|---|---|---|---|
+| **`EffectPure`** | `Pure` | `Pure` | `Pure` | hard-error |
+| **`EffectIO`** | `Pure` | `IO` | bind, as LUB does | hard-error |
+| **`EffectVar`** | `Pure` | bind | bind | hard-error |
+| **`EffectRow`** | hard-error | hard-error | hard-error | hard-error |
+
+`Pure` is the GLB's absorbing element exactly as `IO` is the LUB's, which is what makes the
+parameter-position join demand the *weaker* obligation of the two branches. The row arms
+hard-error for §6.3's reason: part 0 means no conformant signature builds one, so reaching
+here is evidence of a hole, and silence would hide it.
 
 **A greatest lower bound IS needed — an earlier draft of this section was wrong.** That
 draft argued a join always produces a value, values sit in covariant position, so a GLB
@@ -457,7 +553,7 @@ declared return, so nothing downstream rejects and the launder survives the fix.
 correct join of two function types takes the **LUB at even depth and the GLB at odd
 (parameter) depth** — standard function subtyping. Here that gives
 `(Int -> Int) -> Int -> Int !{IO}`, against which `pick`'s declared return is correctly
-rejected at `:8929`.
+rejected at the return comparison.
 
 So part 2 is "join by depth parity", not "apply merge_effects". The alternative — reject
 outright any join whose parameter arrows differ concretely — is simpler and adequate for
@@ -473,7 +569,7 @@ to the 36-site polarity audit part 1 needs anyway.
 "expected" side is a fresh or accumulating variable, which is a dynamic property of the
 unification, not a static property of the site. Demonstrated:
 
-- **Match arms** join at `:4096` (`infer_branch_unify`, each arm unified against a
+- **Match arms** join in `infer_branch_unify` (each arm unified against a
   progressively-bound fresh `ret_type`) — a site §6.2's table files under
   *(actual, expected)*, i.e. as directional. Annotate it by its bucket and mixed matches
   reject in one arm order and not the other.
@@ -482,7 +578,7 @@ unification, not a static property of the site. Demonstrated:
   the fold's winner flips with element order.
 - **`++` operands** likewise, surfacing as "needs matching Semigroup operands".
 
-So LUB-at-`:1283` fixes `if` alone. The audit needs a rule keyed on *accumulation* —
+So LUB at the `if`-join fixes `if` alone. The audit needs a rule keyed on *accumulation* —
 widen wherever a result variable is folded over peers — rather than a list of six sites.
 §9 needs match-order and element-order fixture pairs, not just the `if` pair.
 
@@ -535,12 +631,12 @@ positions, no AST. An earlier draft promised
 ```
 
 which cannot be emitted: the callee's whole arrow is unified in ONE `unify_types` call
-(`infer.sprout:1712`), so *which* parameter failed is not known without decomposing
+in one `unify_types` call, so *which* parameter failed is not known without decomposing
 argument unification per-parameter or threading an error context. `unifier.list_vec_hint`
 exists for exactly this reason — the unifier can only speak name-agnostically.
 
 What is deliverable: the unifier supplies the effect pair, and the wrapping site adds the
-callee name it already holds (`callee_display`, `infer.sprout:1697`):
+callee name it already holds (`callee_display`):
 
 ```
 a function that performs IO cannot be used where a pure one is required
@@ -587,6 +683,14 @@ found two more, so treat this inventory as *known incomplete* rather than exhaus
 - **The class/instance boundary of §6.1a**, in both its concrete (`class` pure /
   `instance !{IO}`) and effect-variable (`class !{e}`) forms. Not a footnote — plain
   typeclass code, and the reason §6.1a adds a third check.
+- **A top-level `let` initializer**, added revision 5. `let seeded = shout(41)` compiles,
+  binds `seeded : Int`, and runs the IO at startup; `--phase effects` does not enumerate
+  top-level `let`s at all, so the census cannot see it either (both verified 2026-09-08).
+  Parts 0–3 miss it — there is no arrow comparison, no join and no class. Already tracked
+  in `BACKLOG.md` and `docs/effect-enforcement-v0.md`, and spec §5.2 already prohibits it
+  normatively; it is listed here because a design that omits a boundary the repo *already
+  knows about* will mislead its own landing note. Not in scope: the fix couples to the
+  value restriction, which is its own decision.
 
 The lesson for §4's method: a corpus census counts what the instrument can *see*, and
 this instrument sees arrow comparisons. Two boundaries that carry effects are not arrow
@@ -597,6 +701,11 @@ comparisons, and a zero says nothing about them.
 TDD — the reject fixtures fail (compile clean) before the change and must pass after.
 
 Reject (`tests/conformance/type_error/`):
+- `effect_unknown_label` — §6.0, `fn f() -> Int !{NOPE}`. **Write this one first**: it is
+  the cheapest of the set and every other reject fixture is defeatable while it fails.
+- `effect_unknown_label_launders` — the full §6.0 program, `list_map(sneak, xs)` under a
+  pure signature. Distinct from the above on purpose: rejecting the *annotation* and closing
+  the *hole* are different claims, and a fix that only warned would pass the first.
 - `effect_io_arrow_into_pure_param` — **already written**, currently RED: the `list_map`
   case from §1. Its `.err` needs the §7 wording, not the declaration-boundary wording it
   currently carries.
@@ -629,6 +738,17 @@ Gates: full `just test`, `compile-examples-stage1` (the two HTTP examples are th
 witnesses and must stay green), `effect-report-smoke`, `ir-golden-diff` (expect 0), plus
 a downstream run against `uncharted-suns`.
 
+**A migration gap the zero-cost measurement cannot see.** Inference never produces an
+effect-polymorphic HOF: `fn helper(f, n) = f(n)` generalises to
+`forall a b. (a -> b) -> a -> b` with *concrete pure* arrows, so `helper(shout, n)`
+launders today and part 1 will correctly reject it. The only remedy is a hand-written
+`!{e}`, and the prelude does not offer one for the shape people reach for — `list_map`'s
+callback is a plain pure arrow, and only `list_each` takes `!{e}` (returning `Unit`). So
+after this lands, **"map an IO function over a list" has no stdlib spelling.** The corpus
+measures zero because nothing in it does that yet, which is exactly why the number is
+silent here. Annotating `list_map`/`list_fold` with `!{e}` is the obvious follow-up and
+should be costed with this change rather than discovered by the first user.
+
 ## 10. Spec and docs
 
 - `docs/spec-v0.md` §7 — **normative, and the blocking edit.** Two of the three properties
@@ -644,26 +764,45 @@ a downstream run against `uncharted-suns`.
 
   becomes:
 
-  > **An arrow's effect is compared wherever a function value crosses a boundary**, not
-  > only at a declaration. The relation is subsumption, `pure ⊑ IO`, and it is one-way: a
-  > pure function may stand where an effectful one is required, never the reverse. The
-  > comparison is directional — the position decides which side is expected — and it
-  > descends into arrows with the polarity flipped at each parameter. Unification of an
-  > effect *variable* is still total: a variable binds to anything and never fails, which
-  > is what keeps effect-polymorphic combinators usable at both pure and effectful
-  > instantiations. Inside a type constructor the comparison propagates only where that
-  > constructor's parameter is covariant; a constructor whose operations take the
-  > parameter as an argument — `Ref` — is invariant in it.
+  > **An arrow's effect is compared where a function value is supplied against an expected
+  > type**, not only at a declaration. The relation is subsumption, `pure ⊑ IO`, and it is
+  > one-way: a pure function may stand where an effectful one is required, never the
+  > reverse. The comparison is directional — the position decides which side is expected —
+  > and it descends into arrows with the polarity flipped at each parameter.
+  >
+  > Where two types are joined as **peers** — the branches of an `if` or `match`, the
+  > elements of a list, the operands of a binary operator — neither side is expected. The
+  > joined arrow takes the least upper bound of the two effects at result positions and the
+  > greatest lower bound at parameter positions, so the join is independent of branch order
+  > and the ordinary directional comparison downstream does the rejecting.
+  >
+  > Unification of an effect *variable* is still total: a variable binds to anything and
+  > never fails, which is what keeps effect-polymorphic combinators usable at both pure and
+  > effectful instantiations. Inside a type constructor the comparison propagates only where
+  > that constructor's parameter is covariant; a constructor whose operations take the
+  > parameter as an argument — `Ref`, `MutVec`, `MutMatrix` — is invariant in it.
+  >
+  > Two positions are **not** covered and are stated so the property is not read as
+  > total: a nullary function, which has no arrow to carry an effect, and a top-level `let`
+  > initializer, which §5.2 prohibits from being effectful but which nothing checks.
 
   **Property 3** currently ends "Every imprecision in effect inference must therefore fail
   towards accepting a program, not rejecting one." As written that forbids this design:
   the whole point is that a *known* concrete mismatch is now rejected. Narrow it to what
   it was actually protecting:
 
-  > **An unresolved effect variable is accepted.** `!{e}` is neither satisfied nor
-  > violated until instantiation; where the checker does not know *which effect a variable
-  > will take*, it accepts. That is a rule about effect variables, not a general licence:
-  > two effects that are both concrete and differ are compared and may be rejected.
+  > **At a comparison, an unresolved effect variable binds rather than fails.** `!{e}` is
+  > neither satisfied nor violated until instantiation, so where a comparison does not know
+  > which effect a variable will take, it binds and continues. This is a rule about
+  > *unification*, and it licenses nothing elsewhere: two concrete effects that differ are
+  > compared and may be rejected, and the rules governing what a **signature** may declare
+  > (rules 8, 9 and 11) are unaffected by it.
+  >
+  > An effect *label* that is not `IO` is **ill-formed**, not a variable. Rule 9 admits a
+  > single concrete effect, a single lowercase variable, or nothing; anything else is
+  > rejected where the annotation is read. Without this the rule above is an opt-out — an
+  > unrecognised label would parse as a variable, bind against everything, and carry IO
+  > through a pure signature unchallenged.
 
   Property 1 (subsumption not equality, at declarations) stays as written and is the same
   relation this extends to arrows.

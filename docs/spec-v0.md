@@ -1907,7 +1907,7 @@ Effect note for v0:
 > > guarantee fails across most higher-order code. Property 2 below is the reason — an
 > > arrow's effect is unified and never compared, so a mismatch is not a type error.
 > >
-> > Four boundaries are known to escape, each verified by running:
+> > Five boundaries are known to escape, each verified by running:
 > >
 > > 1. **A function value entering a slot** — argument, return, record field, element.
 > > 2. **An instance method declaring an effect its class signature does not**, so callers
@@ -1918,10 +1918,18 @@ Effect note for v0:
 > >    `fn pure_apply(g: Int -> Int !{e}, n: Int) -> Int = g(n)` is accepted;
 > >    `--phase effects` reports it `declared pure, inferred !{$e30}`, and passing an
 > >    `!{IO}` function runs the IO.
+> > 5. **A top-level `let` initializer.** `let seeded = shout(41)` runs IO at startup;
+> >    §5.2 prohibits it normatively and nothing checks it. `--phase effects` does not
+> >    enumerate top-level `let`s, so the census does not see it either.
 > >
-> > 1, 2 and 4 are `docs/effect-subsumption-v0.md`, which carries the replacement text for
-> > properties 2 and 3. 3 is a different bug — `docs/nullary-type-collapse-v0.md` — and no
-> > effect check reaches it.
+> > A sixth is adjacent rather than a boundary: an **unrecognised effect label** parses as
+> > an effect *variable*, so `!{NOPE}` type-checks and laundering through it is accepted —
+> > rule 9 admits no such form, and enforcement has not caught up with the rule.
+> >
+> > 1, 2, 4 and the label gap are `docs/effect-subsumption-v0.md`, which carries the
+> > replacement text for properties 2 and 3. 3 is a different bug —
+> > `docs/nullary-type-collapse-v0.md` — and no effect check reaches it. 5 couples to the
+> > value restriction and is tracked in `BACKLOG.md`.
 > >
 > > Until those land, the enforced guarantee is narrow and is best stated negatively: a
 > > declaration is checked against **the effects its own body's calls infer**, and an
