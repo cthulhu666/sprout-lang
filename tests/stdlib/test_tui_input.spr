@@ -124,6 +124,20 @@ fn typing_cases(state: TestState) -> Unit !{IO} = do
             "[Changed(a), Changed(ab), Changed(abc)]")
   assert_eq(state, "a paste arrives whole",
             typed([event.Paste("hi")]), "[Changed(hi)]")
+  # A control character in a cell is written to the terminal verbatim: a
+  # newline moves the real cursor and the rest of the frame lands a row down,
+  # marked clean so nothing repaints it. Flattened to spaces, not dropped.
+  assert_eq(state, "a pasted newline and tab become spaces",
+            typed([event.Paste("a\nb\tc")]), "[Changed(a b c)]")
+  # U+0085 is a line terminator to a terminal, and nothing in the width tables
+  # marks it — so the C1 half of Cc corrupts a frame exactly as C0 does.
+  assert_eq(state, "so does a C1 control",
+            typed([event.Paste("a" ++ utf8.from_codepoints([133]) ++ "b")]),
+            "[Changed(a b)]")
+  # The other way text enters the line, and the same rule.
+  assert_eq(state, "an initial value is flattened too",
+            typed_with(inp.input_opts() with (initial = "a\nb"), chars("c")),
+            "[Changed(a bc)]")
   assert_eq(state, "an initial value is the starting point, unannounced",
             typed_with(inp.input_opts() with (initial = "ab"), chars("c")),
             "[Changed(abc)]")
@@ -198,6 +212,13 @@ fn after(w: widget.Widget Msg, evs: List event.Event) -> widget.Widget Msg =
 fn live(evs: List event.Event) -> widget.Widget Msg =
   after(ring_of(field()), evs)
 
+# A CJK ideograph occupies two columns, so a caret on one needs both.
+fn cjk() -> String = utf8.from_codepoints([26085])
+
+fn wide_caret() -> widget.Widget Msg =
+  after(ring_of(field_with(inp.input_opts() with (initial = "abc" ++ cjk()))),
+        [key(event.KLeft)])
+
 fn painted(w: widget.Widget Msg, cols: Int) -> scr.Screen !{IO} = do
   s <- scr.screen_new(g.Size(cols, 1))
   widget.render(w, g.Region(0, 0, cols, 1), s)
@@ -269,6 +290,19 @@ fn render_cases(state: TestState) -> Unit !{IO} = do
   none <- into(live(chars("ab")), 4, 0)
   assert_eq(state, "a region of no columns terminates and paints nothing",
             none, "    ")
+  # A caret on a double-width cluster needs TWO columns; reserving one paints
+  # neither the character nor the focus, since `truncate` drops a wide cluster
+  # whole. The window scrolls one further to make room.
+  wide <- shown(wide_caret(), 4)
+  assert_eq(state, "a wide caret is painted, scrolling to make room", wide,
+            "bc" ++ cjk())
+  wide_lit <- caret_at(wide_caret(), 4, 2)
+  assert_eq(state, "and carries the focused style", wide_lit, true)
+  # One column cannot hold a two-column character, and `truncate` drops a wide
+  # cluster whole rather than halving it — so this paints nothing at all. A
+  # decision, not an accident: half a character would desynchronise the row.
+  wide_narrow <- shown(wide_caret(), 1)
+  assert_eq(state, "a wide caret in one column paints nothing", wide_narrow, " ")
   s <- painted(after(ring_of(field_with(underlined())), chars("ab")), 6)
   under <- underline_at(s, 2)
   assert_eq(state, "a supplied style paints the caret", under, true)

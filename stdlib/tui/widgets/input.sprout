@@ -13,6 +13,7 @@ import stdlib.tui.text as text
 import stdlib.tui.widget as widget
 import stdlib.tui.widgets.focus as focus
 import stdlib.tui.widgets.paint as paint
+import stdlib.unicode.utf8 as utf8
 
 # Everything optional, in a record: Sprout has no default arguments, and two
 # adjacent same-typed parameters swap silently. Start from `input_opts()` and
@@ -31,10 +32,27 @@ export fn input_opts() -> InputOpts m =
 # impossible to invalidate — an index into codepoints can land inside one, and
 # its column would then be uncomputable (§4.1). `before` is reversed, so both
 # edits at the caret are head operations. Brick's editor is the same shape.
+#
+# INVARIANT — no cluster here holds a control character. `opened` and
+# `inserted` are the only ways text enters, and both flatten; every other
+# operation moves or drops clusters already in the line. A new entry point must
+# flatten too, or a newline reaches a screen cell and corrupts the frame (§4.8).
 type Zipper = (before: List (List Int), after: List (List Int))
 
 fn opened(s: String) -> Zipper =
-  Zipper(before = list_reverse(text.clusters(s)), after = Nil)
+  Zipper(before = list_reverse(text.clusters(flattened(s))), after = Nil)
+
+# Blanked rather than dropped, as bubbles' `textinput` does: losing the rest of
+# a paste is worse than flattening it. What a control character does to the
+# frame is docs/tui-input-v0.md §4.8.
+fn flattened(s: String) -> String =
+  utf8.from_codepoints(list_map(blanked, utf8.codepoints(s)))
+
+# Unicode's Cc category exactly: U+0000–U+001F and U+007F–U+009F. The C1 half
+# matters as much as the C0 one — U+0085 is a line terminator to a terminal,
+# and `codepoint_width` gives it a cell like any other unlisted codepoint.
+fn blanked(cp: Int) -> Int =
+  if cp < 32 || (cp >= 127 && cp <= 159) then 32 else cp
 
 fn line_text(z: Zipper) -> String =
   text.from_clusters(list_append(list_reverse(z.before), z.after))
@@ -44,7 +62,7 @@ fn line_text(z: Zipper) -> String =
 # the last existing cluster takes part: no boundary rule reaches further back
 # than that, and re-segmenting the whole line would make each keystroke O(n).
 fn inserted(z: Zipper, s: String) -> Maybe Zipper =
-  if string.is_empty(s) then Nothing else Just(rejoined(z, s))
+  if string.is_empty(s) then Nothing else Just(rejoined(z, flattened(s)))
 
 fn rejoined(z: Zipper, s: String) -> Zipper =
   match z.before with
@@ -190,8 +208,12 @@ fn field_render(f: Field m, r: geometry.Region, s: scr.Screen) -> Unit !{IO} =
   if f.has_focus then window_render(f, r, shown_before(f, r), s)
   else paint.line(s, r, 0, line_text(f.line), f.opts.look.normal)
 
+# The caret's OWN width is what the window reserves, not one column: on a CJK
+# or emoji cluster a single reserved column truncates it away, painting neither
+# the character nor the focus (§4.5).
 fn shown_before(f: Field m, r: geometry.Region) -> List (List Int) =
-  scrolled(list_reverse(f.line.before), geometry.region_cols(r) - 1)
+  scrolled(list_reverse(f.line.before),
+           geometry.region_cols(r) - text.width(caret_cluster(f.line)))
 
 # The caret is one cell painted in the focused style, between the two halves
 # of the line; `paint.at` clips each part at the region's edge.

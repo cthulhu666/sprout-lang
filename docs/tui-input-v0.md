@@ -105,6 +105,12 @@ and `Home` brings the start back with no state to reset.
 
 An unfocused field has no caret to follow and shows the start of its value.
 
+The window reserves the caret cluster's **own width**, not one column. A CJK
+ideograph or emoji is two columns, and `text.truncate` drops a wide cluster
+whole rather than halving it — so a single reserved column paints neither the
+character nor the focus, and the caret silently disappears exactly when it sits
+on one. Reserving `cluster_width` scrolls the window one further instead.
+
 ### 4.6 The caret is a painted cell
 
 `app.run` hides the terminal's cursor for the session, so the caret is one cell
@@ -123,6 +129,23 @@ is four positional slots two of which are the same type. `InputOpts` is built by
 changes. Same argument as `ButtonStyle` in C2a — which this change generalises
 into `focus.FocusStyle`, since the normal/focused pair belongs to focus rather
 than to any one widget.
+
+### 4.8 A single line cannot hold a control character
+
+Text enters the line at two points — `initial` and every insertion — and both
+flatten Unicode's Cc category (U+0000–U+001F, U+007F–U+009F) to a space, so the
+zipper never holds one. The C1 half is not optional: U+0085 is a line
+terminator to a terminal, and `codepoint_width` gives it an ordinary cell.
+
+This is not tidiness. `cluster_width` reports 1 for U+000A, `screen` stores it
+as an ordinary cell, and `diff_to_ansi` emits cell text in runs with no
+per-cell cursor move — so a pasted newline is written to the terminal verbatim,
+the real cursor drops a row, every later cell of that run lands on the wrong
+one, and `commit_rows` then marks them clean, so nothing repaints the damage.
+
+Replaced rather than dropped, as bubbles' `textinput` does
+(`runeutil.NewSanitizer(ReplaceTabs(" "), ReplaceNewlines(" "))`): losing the
+rest of a paste is worse than flattening it, and the user can see what arrived.
 
 ## 5. Surface
 
@@ -204,7 +227,14 @@ Painting: the value; the caret cell after the last character, on the character
 it sits on, and at the start of an empty field; no caret when unfocused; a value
 wider than the region shows the caret's end, and `Home` brings the start back; a
 region of one column holds the caret alone and one of *zero* columns terminates
-and paints nothing; a supplied `look` paints the caret and the default does not.
+and paints nothing; a supplied `look` paints the caret and the default does not;
+a caret on a double-width cluster is painted, the window scrolling to make room,
+and in a one-column region it paints nothing, since half a character is not one.
+
+Control characters: a pasted newline and tab become spaces, a C1 control does
+too, and an `initial` value is flattened the same way (§4.8). Each was checked
+against the unflattened code, since a control character is invisible in an
+assertion's own output — the C1 case reads as `Changed(ab)` when it fails.
 
 ## 9. Deferred, filed in `BACKLOG.md` §4
 
