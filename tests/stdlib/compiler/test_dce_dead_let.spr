@@ -1,0 +1,63 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.compiler.source as source
+import stdlib.compiler.types as types
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.dce as dce
+
+# Dead Let Elimination (`dce.elim_program`) and the nullary arrow.
+#
+# A call's purity is read off the CALLEE's type. A nullary callee is a
+# `TThunk ret eff`, which carries its own effect slot; a parameterised one is a
+# `TFunc`. Both have to be read, and the failure is silent either way — a pure
+# binding nothing uses simply survives into the IR.
+#
+# The effectful cases are the ones that must not regress: dropping a call that
+# performs IO is a miscompile, not a missed optimisation.
+
+fn pos() -> source.SourcePos = source.SourcePos(index = 0, line = 0, column = 0)
+
+fn int_ty() -> types.Type = types.TConst(types.type_id("Int"))
+
+fn arrow_ty(eff: types.Effect) -> types.Type =
+  types.TFunc(int_ty(), int_ty(), eff, types.OwnBorrow)
+
+# `do  let dead = <call>  0` — the binding is never read, so only purity of the
+# call decides whether the step survives.
+fn dead_binding(callee_ty: types.Type, args: List typed_ast.TypedExpr) -> typed_ast.TypedExpr =
+  typed_ast.TDo(
+    [typed_ast.TDoLetStep("dead",
+        typed_ast.TCall(typed_ast.TVar("f", callee_ty, pos()), args, int_ty(), pos())),
+      typed_ast.TDoExprStep(typed_ast.TInt(0, int_ty(), pos()))],
+    int_ty(), pos())
+
+fn one_arg() -> List typed_ast.TypedExpr = [typed_ast.TInt(1, int_ty(), pos())]
+
+fn steps_after_dle(body: typed_ast.TypedExpr) -> Int =
+  match dce.elim_program(typed_ast.TypedProgram([decl(body)])) with
+  | typed_ast.TypedProgram decls -> step_count(decls)
+
+fn decl(body: typed_ast.TypedExpr) -> typed_ast.TypedDecl =
+  typed_ast.TFnDecl("main", Nil, Nothing, Nothing, Nil, body)
+
+fn step_count(decls: List typed_ast.TypedDecl) -> Int =
+  match decls with
+  | Nil -> 0 - 1
+  | [d | _] ->
+      match d with
+      | typed_ast.TFnDecl _ _ _ _ _ body ->
+          match body with
+          | typed_ast.TDo steps _ _ -> list_length(steps)
+          | _ -> 0 - 1
+      | _ -> 0 - 1
+
+fn main() -> Unit !{IO} =
+  run_suite("dce_dead_let", [
+    check_eq("pure nullary call is eliminated",
+      steps_after_dle(dead_binding(types.TThunk(int_ty(), types.EffectPure), Nil)), 1),
+    check_eq("effectful nullary call is kept",
+      steps_after_dle(dead_binding(types.TThunk(int_ty(), types.EffectIO), Nil)), 2),
+    check_eq("pure call with an argument is eliminated",
+      steps_after_dle(dead_binding(arrow_ty(types.EffectPure), one_arg())), 1),
+    check_eq("effectful call with an argument is kept",
+      steps_after_dle(dead_binding(arrow_ty(types.EffectIO), one_arg())), 2)
+  ])
