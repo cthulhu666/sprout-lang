@@ -505,3 +505,30 @@ True
 - **User-module functions only**: stdlib and prelude functions do not carry debug metadata. `bt` shows "source not available" for any stdlib frame, which is expected — stdlib sources are not distributed with binaries.
 - **ADT function bodies**: `fr v` (frame variables) is not available; inspect via `register read` and `sprout_debug_adt`.
 
+
+## Running one test file
+
+```
+./build/compile_driver_bin_stage1 --emit-ir stdlib tests/stdlib/test_foo.spr > /tmp/t.ll \
+  && clang /tmp/t.ll runtime/*.c -O2 -o /tmp/t && /tmp/t
+```
+
+Three details this line gets wrong if you shorten it. The root argument is the literal path
+`stdlib` — `stdlib_root` is the justfile *variable's* name, and passing it verbatim fails with
+``builtin `read_file`: prelude: No such file or directory``. The runtime is **three** `.c` files, so
+`runtime/*.c`; naming only `sprout_runtime.c` link-fails on `_http_park` / `_async_resolve`. On
+macOS the link also needs `-framework Security -framework CoreFoundation` (the justfile's
+`clang_extra`).
+
+**A test that imports `testsupport.*` needs `--package-root`, and `just test-file` does not pass
+it.** `_test-file` runs `--emit-ir "{{stdlib_root}}" "{{file}}"` with no package root, so a
+`testsupport.*` import resolves to nothing and every type from it is reported as ``unknown type
+`X`: nothing in scope declares that name`` — including in `tests/stdlib/test_imported_records.spr`,
+which is green in CI. Only the `_test-stdlib` runner passes
+`--package-root "{{justfile_directory()}}"`. So either run the whole directory
+(`mise exec -- just test-stdlib-core-stage1`) or invoke the driver directly with the flag:
+
+```
+./build/compile_driver_bin_stage1 --emit-ir <repo-root>/stdlib --package-root <repo-root> \
+  tests/stdlib/test_foo.spr
+```

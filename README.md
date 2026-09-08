@@ -88,7 +88,7 @@ parses but is deprecated and reported by the linter as `deprecated-brace-body`.
 - [Compiler internals](./docs/compiler-internals.md) · [packaging](./docs/packaging-v0.md) · [language server](./docs/language-server-roadmap.md)
 - [Builtins reference](./docs/builtins-reference.md) — host builtins + collections.
 - [Toolchain, build & implementation status](./docs/development.md)
-- [Debugging](./docs/debugging.md) · [Bootstrap chain](./docs/bootstrap-chain.md)
+- [Debugging](./docs/debugging.md) · [Gates](./docs/gates.md) · [Bootstrap chain](./docs/bootstrap-chain.md)
 - [Backlog & roadmap](./BACKLOG.md)
 - Design drafts: [effect system](./docs/effect-system-v0-plan.md) ([v1](./docs/effect-system-v1-draft.md)) · [int ranges](./docs/int-ranges-v1-draft.md) · [char & text](./docs/char-text-v1-draft.md) · [sequencing sugar](./docs/sequencing-sugar-v1-draft.md)
 
