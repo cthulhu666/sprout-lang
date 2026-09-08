@@ -1888,18 +1888,39 @@ fn infer_call_var(
 # the innermost arrow; merging rather than indexing keeps this correct for a
 # hand-written type that places it somewhere else.
 #
-# A zero-argument call reads its effect off the Scheme rather than off the thunk
-# arrow that now carries it (build_fn_type_modes puts it there). The two agree for
-# a declared signature and diverge for a thunk bound by `let`, which is why that
-# case still launders its effect — docs/nullary-type-collapse-v0.md §2.
+# At argc 0 the Scheme is merged in rather than replaced: it carries the
+# declaration-site effect and the arrow carries the use-site one. They agree for
+# a declared signature, and a `let` binding keeps only the arrow.
 fn call_effect_of(scheme: types.Scheme, t: types.Type, argc: Int) -> types.Effect =
-  if argc <= 0 then types.scheme_effects(scheme) else arrows_effect(t, argc)
+  if argc <= 0
+  then merge_effects(types.scheme_effects(scheme), arrows_effect(t, argc))
+  else arrows_effect(t, argc)
 
+# A ZERO-ARGUMENT call consumes the thunk arrow, so the thunk's effect is
+# performed and has to be read. Only at the entry: the same `argc <= 0` reached
+# through the recursion is the end of the consumed chain, where a thunk-typed
+# RESULT is handed back rather than invoked, and reading it would be wrong.
 fn arrows_effect(t: types.Type, argc: Int) -> types.Effect =
+  if argc <= 0 then thunk_effect(t) else consumed_arrows_effect(t, argc)
+
+# Enumerated, not a catch-all: a future arrow-carrying variant answering Pure here
+# would launder its effect at every nullary call, which is the bug this function
+# exists to fix. A TFunc reaching this arm wants parameters and got none — the
+# arity check rejects that, and none of its arrows are consumed.
+fn thunk_effect(t: types.Type) -> types.Effect =
+  match t with
+  | types.TThunk _ eff -> eff
+  | types.TFunc _ _ _ _ -> types.EffectPure
+  | types.TVar _ -> types.EffectPure
+  | types.TConst _ -> types.EffectPure
+  | types.TApp _ _ -> types.EffectPure
+  | types.TTuple _ -> types.EffectPure
+
+fn consumed_arrows_effect(t: types.Type, argc: Int) -> types.Effect =
   if argc <= 0 then types.EffectPure
   else
     match t with
-    | types.TFunc _ ret eff _ -> merge_effects(eff, arrows_effect(ret, argc - 1))
+    | types.TFunc _ ret eff _ -> merge_effects(eff, consumed_arrows_effect(ret, argc - 1))
     # Fewer arrows than arguments: an over-application the arity check has
     # already rejected, or a type variable standing in for a callee whose shape
     # is not yet known. Nothing to read either way.

@@ -1,0 +1,19 @@
+module main
+
+fn io_thunk() -> Int !{IO} = do
+  print("io")
+  34
+
+# `mk` hands the thunk back; it does not invoke it, so `mk(n)` is pure even
+# though the thunk is `!{IO}`. The effect walk must read only the arrows a call
+# CONSUMES — one here — and stop before the thunk it lands on. Reading that one
+# too would reject `pick`, which is the failure this fixture exists to catch.
+fn mk(n: Int) -> (() -> Int !{IO}) = io_thunk
+
+fn ignore_thunk(g: () -> Int !{IO}) -> Int = 1
+
+fn pick(n: Int) -> Int = n + ignore_thunk(mk(n))
+
+fn main() -> Unit !{IO} = do
+  print(int_to_string(pick(1)))
+  print(int_to_string(mk(2)()))

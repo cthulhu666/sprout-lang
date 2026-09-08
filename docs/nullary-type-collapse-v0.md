@@ -1,16 +1,15 @@
 # The nullary type collapse (v0)
 
-Status: **Shape LANDED 2026-09-08 (Option A′, §9); effect laundering (§2) still open.**
+Status: **LANDED 2026-09-08 (Option A′, §9). All three symptoms fixed; no fixture quarantined.**
 Filed 2026-09-07. Every claim below was verified by compiling and running on master
 `40808541` (tree `e73d8152`).
 
 `types.TThunk ret eff` is the zero-parameter arrow: no parameter, no ownership, its own
 effect slot. `() -> T` parses — only directly before `->`, so `()` remains a parse error as
-a standalone type — and is distinct from `Unit -> T`. Symptoms 2 and 3 are rejected and
-their fixtures are out of quarantine. Symptom 1 is NOT fixed: `call_effect_of` still reads
-a nullary call's effect off the Scheme rather than off the arrow, so
-`nullary_local_callee_launders_effect` stays quarantined. That is the remaining work, and
-it is what §7 needs for effect subsumption.
+a standalone type — and is distinct from `Unit -> T`. All three symptoms are rejected and
+no fixture is quarantined. Symptom 1 followed in a second change: `arrows_effect` reads the
+thunk's effect slot at arity 0, which closes both the local and the expression callee, and
+unblocks the effect subsumption in §7.
 
 A nullary function's type *was* its return type: `() -> T` collapsed to `T`, so a function
 value and a plain `T` were the same type. One absent type constructor produced three
@@ -60,6 +59,13 @@ Two mechanisms in `infer` sit on top of the collapse and were filed separately a
 is conservative — accepting a program that runs IO under a pure signature is the rule-8
 hole — and neither is separately fixable, because the effect they should read is not on
 any arrow.
+
+> Both were fixed together once the arrow existed, and the shared `arrows_effect` covered
+> both call paths at once. The `argc <= 0` test had to be split first: at the entry it
+> means a zero-argument call, which consumes the thunk and performs its effect, but reached
+> through the recursion it means the arguments ran out, where a thunk-typed *result* is
+> handed back and reading its effect would reject a pure `mk(1)`. Guarded by
+> `tests/conformance/run/thunk_returned_not_invoked_is_pure.spr`.
 
 ## 3. Symptom 2 — a function reference enters integer arithmetic
 
@@ -152,12 +158,10 @@ merged) describes four boundaries at which a declared effect escapes. Parts 1–
 why that document's instrumented compiler — which rejects *every* concrete pure/IO arrow
 meet — reports **zero errors** on symptom 1.
 
-Its part 4 (§6.6) proposes *"read the arrow's effect at `argc <= 0`"*. That is not
-implementable: at arity 0 there is no arrow to read. Two consequences for that design:
-
-- §6.6 should be dropped from it and made to depend on this document, leaving parts 1–3
-  to land on their own measured zero migration cost.
-- Its §7 promise of "check-only, no IR change" does not survive either resolution below.
+Its part 4 (§6.6) proposes *"read the arrow's effect at `argc <= 0`"*. That was not
+implementable when filed, because at arity 0 there was no arrow to read. `TThunk` supplied
+one and part 4 is now done — `arrows_effect` reads the thunk's slot at the entry — so §6.6
+is discharged rather than dropped, and parts 1–3 remain independent.
 
 ## 8. Prior art
 
@@ -267,11 +271,14 @@ goes red. The match is `grep -qF` against the `.err` file (`justfile:798`), so a
 commits to the diagnostic's wording — which is why all three were filed red and quarantined
 only once §9 settled which diagnostic is correct.
 
-Landed state: `nullary_int_in_callee_position` (`Type mismatch: Int vs () ->`) and
-`nullary_ref_is_not_its_result` (`() -> Int`) now reject and are out of the xfail list.
-`nullary_local_callee_launders_effect` remains in it. `tests/conformance/run/`
-`nullary_thunk_type_ok.spr` pins the positive shape — a thunk in a parameter and in a
-constructor payload — which is the case Option B could not express.
+Landed state: the xfail list is empty. `nullary_int_in_callee_position` (`Type mismatch:
+Int vs () ->`) and `nullary_ref_is_not_its_result` (`Type mismatch: Int vs () -> Int`)
+reject on the shape; `nullary_local_callee_launders_effect` and
+`nullary_expr_callee_launders_effect` reject on the effect, one per call path.
+`tests/conformance/run/nullary_thunk_type_ok.spr` pins the positive shape — a thunk in a
+parameter and in a constructor payload — which is the case Option B could not express, and
+`thunk_returned_not_invoked_is_pure.spr` pins the negative space: returning a thunk is pure,
+only invoking it is not.
 
 > `BACKLOG.md` claimed on 2026-08-16 that `tests/conformance/type_error/` "has no `XFAIL`
 > manifest". That was false when written: the `xfail` parameter had existed since

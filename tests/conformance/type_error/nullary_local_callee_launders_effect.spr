@@ -1,8 +1,8 @@
 module main
 
 # Binding a nullary IO function to a local must not launder its effect. The
-# direct spelling `io_thunk()` is already rejected by rule 8; the local callee
-# is the hole, because the effect has no arrow to travel on.
+# direct call reads it off the callee's Scheme; only the thunk arrow survives
+# the `let`, so this spelling is the one that proves the arrow is consulted.
 
 fn io_thunk() -> Int !{IO} = do
   print("io")
