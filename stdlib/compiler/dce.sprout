@@ -22,11 +22,19 @@ import stdlib.compiler.ast as ast
 # Purity check
 # ---------------------------------------------------------------------------
 
+# Both arrows carry their own effect: a nullary callee is a TThunk, everything
+# else a TFunc. The catch-all answers "impure" and so keeps the binding, which is
+# the safe direction here — a variant nobody taught this function about costs an
+# optimisation, never a dropped effect.
 fn is_pure_callee_type(t: types.Type) -> Bool =
   match t with
-  | types.TFunc _ _ eff _ -> match eff with
-      | types.EffectPure -> true
-      | _ -> false
+  | types.TFunc _ _ eff _ -> effect_is_pure(eff)
+  | types.TThunk _ eff -> effect_is_pure(eff)
+  | _ -> false
+
+fn effect_is_pure(eff: types.Effect) -> Bool =
+  match eff with
+  | types.EffectPure -> true
   | _ -> false
 
 fn is_pure_expr(e: typed_ast.TypedExpr) -> Bool =

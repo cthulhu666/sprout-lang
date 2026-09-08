@@ -1748,13 +1748,6 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
 
 **Codegen and IR correctness**
 
-- [ ] `P3` **`dce.is_pure_callee_type` reads a thunk as impure, so pure nullary calls survive DCE.**
-  `dce.sprout:27` answers the TFunc arm from the arrow's effect but falls to `| _ -> false` for
-  `TThunk`, which carries an effect slot of its own. Conservative, so no miscompile — a pure `f()`
-  simply survives elimination. Left out of the TThunk landing on purpose: it is an optimisation
-  change, and folding it into a semantics change would put un-attributable movement in the golden
-  IR diff. Fix is the three-line arm plus a golden re-snapshot read for exactly that delta.
-
 - [ ] `P3` **`ast_to_ir` headers contradict the code beneath them, and one helper is dead.** The
   Bool/Unit codegen restrictions were lifted; the comments announcing them were not.
   `translate_lambda`'s header still reads "Rejects: Bool-returning lambda … deferred to a follow-up
