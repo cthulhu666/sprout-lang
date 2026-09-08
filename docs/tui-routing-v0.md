@@ -132,10 +132,9 @@ rejects the rest. An embedder that tags with `ChildMsg` already owns that patter
 **This is a breaking change to an exported stdlib function**, and the only one in this change
 that is not additive. `App.update` is unchanged; `map_msgs` is not.
 
-`unf` is also where a namespacing wrapper belongs. Composing `map_msgs` makes an inner
-widget's ids reachable from outside, and `WidgetId` is an input to `route`, so a wrapper can
-strip a prefix on the way in and a `cmd_map` variant prepend it on the way out. Not built
-here; the shape has somewhere to live.
+Namespacing is a *separate* wrapper rather than part of `unf`: two copies of one widget
+collide in a single vocabulary too, where there is no message type to retarget. Built in
+§3.9.
 
 ### 3.4 An unclaimed answer falls back to `update`
 
@@ -196,11 +195,61 @@ application-level observer — a status bar counting loaded files — learns of 
 target widget re-announces through its `List m`. This inverts M3's everything-flows-through-
 `update` property, deliberately.
 
+### 3.8 `route_when`: the claim belongs to the handler, not the address
+
+`route_if` answers `Just` whenever the id matches, whatever the handler did. That is right
+for a `ToMsg` — an answer arriving at the widget that asked for it has got home whether or
+not the state moved — and wrong for a `ToEvent` under focus:
+
+```
+a key reaches the focused widget -> the widget ignores it
+  -> route_if claims it anyway -> app.delivered sees Just -> no fallback
+  -> the application's global binding never fires
+```
+
+Both behaviours are wanted, so this is a second combinator rather than a change to
+`route_if`. The handler returns the `Maybe` itself:
+
+```sprout
+export fn route_when(mine: WidgetId,
+                     handler: s -> Delivery m -> Maybe(s, List m, List (Cmd m)),
+                     st: s, target: WidgetId, d: Delivery m) -> Maybe(s, List m, List (Cmd m))
+```
+
+The type is the argument. Under `route_if` the framework must *invent* a reply for a widget
+that had none — the test for it reads `expected none, got []`, an empty message list standing
+in for the absence of one, which §3.2 exists to make impossible.
+
+### 3.9 `namespaced`: qualifying an embedded widget's ids
+
+`map_msgs` retargets the message type and leaves `WidgetId` alone, so two copies of one
+widget answer to the same address and `deliver_first` silently picks the first. This is not a
+`map_msgs` problem — two copies in the *same* vocabulary collide too, where there is no
+message type to retarget — so it is its own wrapper:
+
+```sprout
+export fn namespaced(prefix: String, w: Widget m) -> Widget m
+export fn cmd_readdress(f: WidgetId -> WidgetId, c: Cmd m) -> Cmd m
+```
+
+A `WidgetId` travels in exactly two directions, so the wrapper has two seams and no more:
+inward as `route`'s target, where the prefix is stripped (`Nothing` if absent, so a foreign
+address is declined rather than forwarded); outward as a `Cmd`'s return address, where it is
+put back. `cmd_readdress` is `cmd_map`'s complement — one retargets what an answer *says*,
+the other who it is *for*. A global command has no address and stays global.
+
+Half of it would be worse than none: strip inward without qualifying outward and the answer
+comes back addressed to a name nothing outside the wrapper knows.
+
+Opt-in, not automatic. A container cannot namespace its children on its own — `Slot` carries
+no name, and inventing one from list position would make an id depend on sibling order. Named
+slots can be built over this primitive if C2 shows containers need them.
+
 ## 4. Surface
 
 | Module | Added | Changed |
 |---|---|---|
-| `stdlib/tui/widget.sprout` | `Delivery`, `cmd`, `cmd_to`, `cmd_addr`, `no_route`, `route_if`, `deliver`, `id_eq` | `Cmd` carries `Maybe WidgetId`; `View` gains `route`; `map_msgs` takes `unf` |
+| `stdlib/tui/widget.sprout` | `Delivery`, `cmd`, `cmd_to`, `cmd_addr`, `no_route`, `route_if`, `route_when`, `deliver`, `id_eq`, `namespaced`, `cmd_readdress` | `Cmd` carries `Maybe WidgetId`; `View` gains `route`; `map_msgs` takes `unf` |
 | `stdlib/tui/app.sprout` | `step_to`, `SigTo` | `run_cmd` posts `SigTo` for an addressed command |
 
 ## 5. Syntax, type-system and error-message impact
@@ -226,9 +275,12 @@ Additive except for three breaking changes, all to a contract two days old:
 
 Migrated in this change: four test suites, one conformance fixture, one example.
 
+§3.8 and §3.9 landed later (2026-09-08) and are purely additive: `route_when` sits beside
+`route_if`, `namespaced` and `cmd_readdress` are new names. No existing construction changes.
+
 ## 7. Tests
 
-`tests/stdlib/test_tui_route.spr` — 29 assertions, all pure:
+`tests/stdlib/test_tui_route.spr` — 47 assertions, all pure:
 
 - a leaf claims its own id and ignores another's; `no_route` claims nothing
 - a declined delivery carries **no reply at all**, distinguished from one carrying an empty
@@ -244,6 +296,12 @@ Migrated in this change: four test suites, one conformance fixture, one example.
 - `step_to`: a routed answer reaches the widget then `update`; an unroutable one falls back to
   `update` carrying the original message; the routed widget's command leads the application's;
   a routed answer can still quit
+- `route_when`: a handler's decline is reported unhandled and carries no reply, while the same
+  widget claims a delivery it did use — and a container propagates both verdicts, which is
+  what lets an unused key reach `update`
+- `namespaced`: a widget answers to its qualified id and no longer to its bare one nor to
+  another namespace's; two copies of one widget are told apart by return address; an outgoing
+  command is readdressed; namespaces nest in both directions; `measure` is untouched
 
 **What is not covered by an automated test.** The `SigTo` arm of `run`, for the same reason
 `run` has never been covered: it takes over the terminal and blocks on stdin.

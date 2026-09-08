@@ -41,9 +41,9 @@ a sibling widget into nothing, and because the contract is four constructions ol
 
 Non-goals for C1: focus, and therefore every interactive widget (`button`,
 `input`, `list_view`) — that is C2, and it must not start before the two routing
-corrections it is written against have landed — `BACKLOG.md` §4 "A widget's ids
-become addressable from outside when it is embedded" and "`route_if` claims by
-ADDRESS". Scrolling, borders, tabs, tables and `text_area` are C3.
+corrections it is written against have landed. They since have, on 2026-09-08,
+as `widget.route_when` and `widget.namespaced` (`docs/tui-routing-v0.md`
+§3.8–3.9), so C2 is unblocked. Scrolling, borders, tabs, tables and `text_area` are C3.
 Reflowing text is deferred with a reason (§4.6). No new builtin: the
 `vector_remove` question belongs to C3's `text_area`, not here.
 
