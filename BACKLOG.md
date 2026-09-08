@@ -1754,13 +1754,6 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   simply survives elimination. Left out of the TThunk landing on purpose: it is an optimisation
   change, and folding it into a semantics change would put un-attributable movement in the golden
   IR diff. Fix is the three-line arm plus a golden re-snapshot read for exactly that delta.
-- [ ] `P3` **The `Unit -> result` eta workaround outlived the collapse that motivated it.**
-  `lowering.eta_actual_type_for_scheme_match` (`:779`) and its copy
-  `resolve.mr_eta_actual_type_for_scheme_match` (`:389`) peel a `Unit` parameter because "zero-arg
-  methods are inferred as their result type". They no longer are — a nullary method is `() -> T`,
-  handled by the TThunk arm above the workaround — so the peel should be unreachable for any
-  well-typed program. Proving that (and deleting `type_is_unit`, which has no other caller in
-  either file) needs its own change with a dictionary-lowering test for a nullary class method.
 
 - [ ] `P3` **`ast_to_ir` headers contradict the code beneath them, and one helper is dead.** The
   Bool/Unit codegen restrictions were lifted; the comments announcing them were not.

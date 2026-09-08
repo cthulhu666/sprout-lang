@@ -257,7 +257,15 @@ the parameter `() -> T`. A genuine `Unit`-taking closure — declared `Unit -> T
 tree that relied on the collapse was `test_lowering.spr`'s `p1c-zero-arg`, which declared
 `(Unit -> Int)` and passed the zero-arg class method `make`; it only ever type-checked
 because the collapse made `make : a`, bridged by the `Unit`-peel workaround in
-`eta_actual_type_for_scheme_match` (now scheduled for removal, `BACKLOG.md`).
+`eta_actual_type_for_scheme_match`.
+
+That peel is now deleted, along with its copy in `resolve` and both `type_is_unit`
+helpers. It was unreachable twice over: a class method signature is parsed as
+`fn n(…) -> T` (`parser.parse_class_method_sig`), so its scheme is a `TFunc` or a `TThunk`
+and never the bare type the peel keys on; and `lowering.try_eta_in_class` requires a
+`TFunc` before it asks, so a nullary method in value position — now a `TThunk` — no longer
+reaches it. Confirmed by compiling the whole corpus with the arm replaced by a `panic`:
+every `tests/stdlib` suite and all 54 examples passed untouched.
 
 `.iface` moves 6 → 7. A v6 file is rejected loudly rather than read leniently: decoded
 under v7 rules every nullary signature would come back as its bare return type, which is
