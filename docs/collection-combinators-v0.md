@@ -150,7 +150,9 @@ inherent rather than a limitation.
   has no public length; `count(\_ -> true, xs)` is the O(n) stand-in.
 - `position` / `index_of`, and `take`/`drop`/`zip` (List-shaped, not derivable
   from `Foldable`).
-- An effectful predicate — the same blocker as `class Each`.
+- An effectful predicate — **not** the `class Each` blocker, as this line said until 2026-09-08.
+  Blocked on `Filterable` stating what order `pred` runs in; an effect needs one to mean anything.
+  See `docs/effect-polymorphism-policy-v0.md`.
 - `Dict`/`Set` instances, gated on those types getting `Functor`/`Foldable`.
 
 Recorded in `BACKLOG.md`.

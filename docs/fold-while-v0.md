@@ -28,9 +28,13 @@ comments naming the early exit as the reason they are not combinators.
 Keep `fold` allocation-free and unchanged in cost — it is the primitive the self-hosted compiler
 leans on hardest.
 
-**Non-goals.** Laziness. An iterator/generator protocol. Monomorphization. Effectful `cond`
-(the same `class Each` blocker that gates an effectful `filter` predicate). A `Step`/`Continue`/`Done`
-sentinel type in the prelude — derivable, see §6, and shipped only when a caller needs it.
+**Non-goals.** Laziness. An iterator/generator protocol. Monomorphization. Effectful `cond` —
+**permanently, and not for the reason first recorded here**: this was written up as the `class Each`
+blocker, but THE LAW below lets a non-linear instance ask `cond` more than once about equal values,
+so its multiplicity is deliberately open and an effect in that slot has no defined meaning
+(`docs/effect-polymorphism-policy-v0.md`). An effectful `step`, whose order and multiplicity the law
+*does* pin, stays open. A `Step`/`Continue`/`Done` sentinel type in the prelude — derivable, see §6,
+and shipped only when a caller needs it.
 
 ## 3. Prior art
 
@@ -182,4 +186,6 @@ instance that under-checks `cond`, against which every consumer must still answe
 
 - The `Step` / `fold_step` sentinel form (§6), when a peek-and-refuse caller appears.
 - `length` / `is_empty` as `Foldable` methods — unchanged by this, still `BACKLOG.md` §(a).
-- An effectful `cond`, blocked on the same `class Each` work as an effectful `filter` predicate.
+- An effectful `step` — admissible under `docs/effect-polymorphism-policy-v0.md`, since THE LAW pins
+  its order and multiplicity. Lands with the `Foldable` change, after effect subsumption.
+  (An effectful `cond` is **decided against**, not deferred — see §2.)

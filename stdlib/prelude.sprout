@@ -828,8 +828,9 @@ export fn fold_while(step: b -> a -> b, cond: b -> Bool, init: b, xs: f a) -> b 
   fold_while_values(step, cond, init, xs)
 
 # O(n) per instance: keep the elements satisfying `pred`, in order, in the same
-# container kind that came in. `pred` is pure — an effectful predicate would
-# need an effect row on the class method, which the dispatcher does not carry.
+# container kind that came in. `pred` is pure because the class fixes no order
+# for predicate application, so an effect has nothing to sequence against — not
+# a dispatcher limit. See docs/effect-polymorphism-policy-v0.md.
 export fn filter(pred: a -> Bool, xs: c a) -> c a where Filterable c =
   filter_values(pred, xs)
 

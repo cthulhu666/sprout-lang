@@ -154,8 +154,11 @@ Semantics:
   `Maybe (k, a)`, not `Maybe a`, so no key is recomputed. `O(n)` in both element
   count and key evaluations; `O(1)` extra allocation beyond the carried pair.
 - The key function is **pure**: `Foldable.fold_values` has no effect row
-  (`prelude.sprout:703`), so an effectful key is a type error, not a silent
-  reordering hazard.
+  (`prelude.sprout:769`), so an effectful key is a type error, not a silent
+  reordering hazard. (`docs/effect-polymorphism-policy-v0.md` admits `!{e}` on
+  `fold_values`'s `step`, which removes the obstacle but does not by itself make
+  an effectful key legal — `min_by` would have to annotate its own key
+  parameter, a separate call.)
 - `minimum`/`maximum` are defined as `min_by(\value -> value, xs)` /
   `max_by(\value -> value, xs)`, mirroring how `vec_sort` is defined over
   `vec_sort_by`.

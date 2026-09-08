@@ -1,0 +1,22 @@
+module main
+
+# spec-v0.md §7 rule 8, reached through an `!{e}` CLASS METHOD. An effect handed
+# to an effect-polymorphic slot must propagate out to the caller's declaration
+# rather than stop at the dispatcher — without that, every verdict in
+# docs/effect-polymorphism-policy-v0.md would license a laundering channel.
+
+class Walk f
+  fn walk_each(g: a -> Unit !{e}, xs: f a) -> Unit !{e}
+
+instance Walk List
+  fn walk_each(g: a -> Unit !{e}, xs: List a) -> Unit !{e} =
+    list_each(g, xs)
+
+fn shout(n: Int) -> Unit !{IO} =
+  print(int_to_string(n))
+
+fn sneaky(xs: List Int) -> Unit =
+  walk_each(shout, xs)
+
+fn main() -> Unit !{IO} =
+  sneaky([1, 2, 3])

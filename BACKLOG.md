@@ -22,6 +22,10 @@ Legend:
   pure declaration may call an `!{e}` parameter. Four parts including unknown-label rejection
   above; migration cost measured zero on 127 in-tree + 199 downstream files.
   `docs/effect-subsumption-v0.md`.
+- [ ] `P2` **`Foldable`'s `step` slot should be effect-polymorphic; `cond` must not be.** The policy
+  in `docs/effect-polymorphism-policy-v0.md` admits `!{e}` where the contract pins order and
+  multiplicity — true of `step` (left fold), false of `cond` (law lets an instance re-ask it).
+  13 signatures, zero measured breakage; lands after effect subsumption.
 - [ ] `P2` **Top-level `let` initializers are not checked for purity.** Spec §6 states the rule
   normatively and nothing checks it — `let boom = print("x")` type-checks. `LetDecl` discards the
   initializer's inferred effect and `--phase effects` does not enumerate top-level `let`s, so the
@@ -677,8 +681,8 @@ Legend:
   become mandatory for every future instance. Note `list_length` is private, so List has no public
   length and `count(\_ -> true, xs)` is the O(n) stand-in. (c) `position`/`index_of`, and
   `take`/`drop`/`zip` (List-shaped, not `Foldable`-derivable). (d) `Dict`/`Set` instances, gated on
-  those types getting `Functor`/`Foldable`. (e) An effectful predicate (`a -> Bool !{e}`), the same
-  B2 blocker as `class Each`.
+  those types getting `Functor`/`Foldable`. (e) An effectful predicate (`a -> Bool !{e}`) needs
+  `Filterable` to state `pred`'s call order, not B2 (`docs/effect-polymorphism-policy-v0.md`).
 
 ### 6) Modules and Packaging
 
