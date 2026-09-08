@@ -1439,9 +1439,7 @@ fn value_ref_eta(name: String, scheme: types.Scheme, pos: source.SourcePos, env:
           | Just _ -> constrained_fn_eta_lambda(name, pos, env)
           | Nothing -> Nothing
 
-# Arity comes from the DECLARED parameter count, not from counting arrows in the type: a zero-parameter
-# function returning a function has the same `a -> b` scheme as a one-parameter function, so the type
-# cannot tell them apart (the reason fn_declared_arity exists — see call_arity_error_for). A local
+# Arity comes from the DECLARED parameter count, not from counting arrows in the type. A local
 # binding that shadows a top-level function drops the marker in bind_local_scheme, so a shadowed name
 # returns Nothing here and keeps today's behaviour.
 fn constrained_fn_eta_lambda(name: String, pos: source.SourcePos, env: Dict types.Scheme) -> Maybe ast.Expr =
@@ -1832,11 +1830,9 @@ fn call_arity_error_for(name: String, got: Int, env: Dict types.Scheme) -> Maybe
       else if got > want then Just(over_application_error_for(name, got, want, env))
       else Nothing
 
-# A zero-parameter function whose declared return type is itself a function has a
-# scheme indistinguishable from a one-parameter function's — both are `a -> b`. So
-# the no-argument branch of infer_call_resolve cannot tell `mk()` (exact arity)
-# from `adder()` (missing its argument) by type alone, and used to reject both.
-# The declared parameter count is what separates them.
+# `mk()` (exact arity) and `adder()` (missing its argument) once shared a scheme,
+# so only the declared parameter count told them apart. `() -> T` distinguishes
+# them in the type now, leaving this redundant with it — see resolve_zero_arg_call.
 fn callee_has_zero_declared_arity(callee: ast.Expr, env: Dict types.Scheme) -> Bool =
   match callee with
   | ast.VarExpr name _ ->
@@ -1892,9 +1888,10 @@ fn infer_call_var(
 # the innermost arrow; merging rather than indexing keeps this correct for a
 # hand-written type that places it somewhere else.
 #
-# A zero-argument call consumes no arrow, so its effect has to come off the
-# Scheme — that is where `fn main() -> Unit !{IO}` keeps its !{IO}, there being
-# no arrow in a nullary signature to hold one.
+# A zero-argument call reads its effect off the Scheme rather than off the thunk
+# arrow that now carries it (build_fn_type_modes puts it there). The two agree for
+# a declared signature and diverge for a thunk bound by `let`, which is why that
+# case still launders its effect — docs/nullary-type-collapse-v0.md §2.
 fn call_effect_of(scheme: types.Scheme, t: types.Type, argc: Int) -> types.Effect =
   if argc <= 0 then types.scheme_effects(scheme) else arrows_effect(t, argc)
 

@@ -1,0 +1,10 @@
+module main
+
+# `()` is an empty PARAMETER LIST, not a type (spec-v0 §5.2). It is accepted in
+# type position only directly before `->`. Without this fixture a refactor that
+# let bare `()` fall through to parse_type_atom would parse it as an empty
+# TupleType and every other gate would stay green.
+
+fn f(u: ()) -> Int = 1
+
+fn main() -> Unit !{IO} = print(int_to_string(f(())))
