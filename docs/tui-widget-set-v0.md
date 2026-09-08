@@ -226,6 +226,10 @@ example's helper clips columns but not rows, so a row index past the region's
 height paints outside it. That is a latent bug in the example, fixed by adopting
 the shared helper rather than by patching the copy.
 
+`at` is the same write starting a column in from the region's left edge, for a
+widget that styles *part* of a line — `input`'s caret is the first
+(`docs/tui-input-v0.md` §4.6), and any internal highlight is the next.
+
 ### 4.6 `label` and `static` do not reflow
 
 `label(text)` is one line; `static(lines)` is a list of lines already split.

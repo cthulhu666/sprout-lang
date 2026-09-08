@@ -68,7 +68,10 @@ fn cluster_is(cluster: List Int, cp: Int) -> Bool =
   | Nil -> false
   | [primary | _] -> primary == cp
 
-fn render(cs: List (List Int)) -> String =
+# The inverse of `clusters`. Exported because an editable line is held AS
+# clusters — a caret between codepoints can split one, and its column would
+# then be uncomputable. Design: docs/tui-input-v0.md §4.1.
+export fn from_clusters(cs: List (List Int)) -> String =
   utf8.from_codepoints(flatten(cs))
 
 fn flatten(xs: List (List Int)) -> List Int =
@@ -82,7 +85,9 @@ fn prepend_all(xs: List Int, acc: List Int) -> List Int =
 # Columns the text occupies. O(n) in codepoints.
 export fn width(text: String) -> Int = clusters_width(clusters(text))
 
-fn clusters_width(cs: List (List Int)) -> Int =
+# Columns a cluster list occupies, for a caller that already holds one and
+# would otherwise pay a re-segmentation to ask `width`.
+export fn clusters_width(cs: List (List Int)) -> Int =
   list_fold(\ (acc, c) -> acc + cluster_width(c), 0, cs)
 
 # ── Truncation ──────────────────────────────────────────────────────────────
@@ -93,7 +98,7 @@ fn clusters_width(cs: List (List Int)) -> Int =
 # column arithmetic for the rest of the line.
 export fn truncate(text: String, cols: Int) -> String =
   if cols <= 0 then ""
-  else render(take_cols(clusters(text), cols, Nil))
+  else from_clusters(take_cols(clusters(text), cols, Nil))
 
 fn take_cols(cs: List (List Int), left: Int,
              acc: List (List Int)) -> List (List Int) =
@@ -143,7 +148,7 @@ fn finish_line(state: (List (List Int), List (List (List Int)))) -> List (List (
 # One hard line, greedily filled. Words are the runs between space runs; the
 # spaces are dropped, which is what collapses a run of them at a break.
 fn wrap_line(line: List (List Int), cols: Int) -> List String =
-  list_map(render, fill(words(line), Nil, 0, Nil, cols))
+  list_map(from_clusters, fill(words(line), Nil, 0, Nil, cols))
 
 fn words(cs: List (List Int)) -> List (List (List Int)) =
   list_reverse(finish_word(split_words(cs, Nil, Nil)))

@@ -9,7 +9,19 @@ module stdlib.tui.widgets.focus
 import stdlib.tui.event as event
 import stdlib.tui.geometry as geometry
 import stdlib.tui.screen as scr
+import stdlib.tui.style as style
 import stdlib.tui.widget as widget
+
+# How a widget looks on each side of the focus line. Two bare `Style` arguments
+# in a row would swap silently, inverting which state looks focused; named
+# fields make that a compile error (guidelines §7). Here rather than in one
+# widget, because the pair exists for focus and every focusable widget wants it.
+export type FocusStyle = (normal: style.Style, focused: style.Style)
+
+# Reverse video, the one attribute every terminal has.
+export fn focus_style_default() -> FocusStyle =
+  FocusStyle(normal = style.style_default(),
+             focused = style.with_reverse(style.style_default(), true))
 
 # `at` is an id, not an index into `ids`: a name that matches no widget parks
 # focus rather than failing (§4.6), so the ring must be able to hold a position

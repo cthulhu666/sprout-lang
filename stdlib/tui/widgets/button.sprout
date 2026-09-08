@@ -9,21 +9,16 @@ module stdlib.tui.widgets.button
 import stdlib.tui.event as event
 import stdlib.tui.geometry as geometry
 import stdlib.tui.screen as scr
-import stdlib.tui.style as style
 import stdlib.tui.text as text
 import stdlib.tui.widget as widget
+import stdlib.tui.widgets.focus as focus
 import stdlib.tui.widgets.paint as paint
-
-# Two bare `Style` arguments in a row would swap silently, inverting which
-# state looks focused. Named fields make the swap a compile error; guidelines
-# §7 sends a multi-field distinction to a record rather than a `wrap`.
-export type ButtonStyle = (normal: style.Style, focused: style.Style)
 
 # `has_focus` is the widget's own copy of "the keyboard is mine", set by the
 # focus ring. It cannot be asked for: `Widget m` erases the state type, so
 # nothing outside can read it (docs/tui-focus-v0.md §4.1).
 type Btn m = (id: widget.WidgetId, label: String, on_press: m,
-              look: ButtonStyle, has_focus: Bool)
+              look: focus.FocusStyle, has_focus: Bool)
 
 # Everything a button reacts to arrives addressed, so the broadcast is idle.
 fn btn_on_event(b: Btn m,
@@ -42,14 +37,17 @@ fn btn_handler(b: Btn m,
 fn btn_key(b: Btn m,
            e: event.Event) -> Maybe (Btn m, List m, List(widget.Cmd m)) =
   match e with
-  | event.KeyPress k _ -> btn_activate(b, k)
+  | event.KeyPress k mods -> btn_activate(b, k, mods)
   | _ -> Nothing
 
-# Enter and Space, and only while focused. Tab is declined either way, which
-# is what leaves it to the ring.
-fn btn_activate(b: Btn m,
-                k: event.Key) -> Maybe (Btn m, List m, List(widget.Cmd m)) =
-  if b.has_focus && activates(k) then Just((b, [b.on_press], Nil)) else Nothing
+# Enter and Space, and only while focused and unmodified. Tab is declined
+# either way, which is what leaves it to the ring; alt-space is the
+# application's chord to bind, not a press.
+fn btn_activate(b: Btn m, k: event.Key,
+                mods: event.Mods) -> Maybe (Btn m, List m, List(widget.Cmd m)) =
+  if b.has_focus && ! event.mods_is_chord (mods) && activates(k)
+  then Just((b, [b.on_press], Nil))
+  else Nothing
 
 fn activates(k: event.Key) -> Bool =
   match k with
@@ -73,14 +71,10 @@ fn btn_widget(b: Btn m) -> widget.Widget m =
 
 export fn button(id: widget.WidgetId, label: String,
                  on_press: m) -> widget.Widget m =
-  button_styled(id, default_style(), label, on_press)
+  button_styled(id, focus.focus_style_default(), label, on_press)
 
-# Reverse video for focus, since it is the one attribute every terminal has.
-export fn default_style() -> ButtonStyle =
-  ButtonStyle(normal = style.style_default(),
-              focused = style.with_reverse(style.style_default(), true))
-
-export fn button_styled(id: widget.WidgetId, look: ButtonStyle, label: String,
+export fn button_styled(id: widget.WidgetId, look: focus.FocusStyle,
+                        label: String,
                         on_press: m) -> widget.Widget m =
   btn_widget(Btn(id = id, label = label, on_press = on_press, look = look,
                  has_focus = false))

@@ -8175,7 +8175,7 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @stdlib.tui.text.render(i64 %p$cs) {
+define i64 @stdlib.tui.text.from_clusters(i64 %p$cs) {
 entry:
   %t$2 = alloca i64
   store i64 %p$cs, ptr %t$2
@@ -8340,7 +8340,7 @@ else_3:
   %t$20 = alloca i64
   store i64 %t$9, ptr %t$20
   %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
-  %t$10 = call i64 @stdlib.tui.text.render(i64 %t$9)
+  %t$10 = call i64 @stdlib.tui.text.from_clusters(i64 %t$9)
   %t$22 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_3
 join_3:
@@ -8679,12 +8679,12 @@ join_0:
   ret i64 %t$1
 }
 
-define i64 @__sprout_ir_eta_stdlib.tui.text.render_14(i64 %p$env$, i64 %p$a0) {
+define i64 @__sprout_ir_eta_stdlib.tui.text.from_clusters_14(i64 %p$env$, i64 %p$a0) {
 entry:
   %t$0 = alloca i64
   store i64 %p$a0, ptr %t$0
   %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %ret = call i64 @stdlib.tui.text.render(i64 %p$a0)
+  %ret = call i64 @stdlib.tui.text.from_clusters(i64 %p$a0)
   %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %ret
 }
@@ -8696,7 +8696,7 @@ entry:
   %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
   %t$0 = call i64 @sprout_alloc_closure(i64 8, i64 1)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_eta_stdlib.tui.text.render_14, ptr %t$0$raw
+  store ptr @__sprout_ir_eta_stdlib.tui.text.from_clusters_14, ptr %t$0$raw
   %t$9 = alloca i64
   store i64 %t$0, ptr %t$9
   %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)

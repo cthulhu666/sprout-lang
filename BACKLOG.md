@@ -515,11 +515,18 @@ Legend:
   `static`/`spacer` and the four child traversals; `examples/tui_dashboard.sprout` went 284 → 157
   lines with no container of its own. `View.measure` now returns a `Measured` so a child can ask
   for "whatever is left". C2–C3 below remain. Design: `docs/tui-widget-set-v0.md`.
-- [ ] `P1` **TUI M4 C2b — the text-entry and selection widgets.** `input`, `list_view`. C2a landed
-  2026-09-08 (`ToFocus`, `focus_ring`, `button`), so both are plain consumers of a settled focus
-  contract and need no builtin — a caret edit is `string.take`/`drop`. Carries the first
-  interactive example: `examples/tui_dashboard.sprout` still demonstrates nothing focusable.
-  Design: `docs/tui-focus-v0.md` §7.
+- [ ] `P1` **TUI M4 C2b — the selection widget.** `list_view`: a selection index, arrows/Home/End/
+  PageUp/PageDown to move it, Enter to choose, `on_highlight` optional beside `on_select`, and a
+  three-field `ListStyle` because a blurred list still has a selection. `input` landed 2026-09-08.
+  Carries the first interactive example: `examples/tui_dashboard.sprout` still demonstrates nothing
+  focusable. Design: `docs/tui-input-v0.md` §7.
+- [ ] `P3` **TUI `input` — word motion, selection and the chord family.** `ctrl-w`/`ctrl-u`,
+  ctrl-arrows, a selection anchor beside the caret, and the terminal clipboard. Deliberately not
+  claimed by C2b: every one is a binding an application may want, and a field that took them would
+  give no way to opt out. Same file, one known limitation: deleting the cluster BETWEEN two that
+  would themselves combine leaves them as two, because only insertion re-segments. Brick's zipper
+  behaves the same way; reaching it means deleting from between a base character and its mark.
+  Design: `docs/tui-input-v0.md` §9.
 - [ ] `P2` **TUI focus — click-to-focus needs a retained hit-test tree.** Containers discard the
   solved region list after painting, so nothing can answer "what is under the pointer", and
   `focus_ring` is keyboard-only. Design: `docs/tui-focus-v0.md` §9.
