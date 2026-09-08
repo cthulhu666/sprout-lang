@@ -83,11 +83,18 @@ fn render_pair(w: widget.Widget m, rest: List (widget.Widget m),
   | Nil -> ()
   | [r | rrest] -> render_then(w, r, s, rest, rrest)
 
+# Each child is painted under its own region as the clip, so a child that
+# writes outside the region it was given cannot reach a sibling's cells
+# (docs/tui-scroll-view-v0.md §4.5).
 fn render_then(w: widget.Widget m, r: geometry.Region, s: scr.Screen,
                rest: List (widget.Widget m),
                rrest: List geometry.Region) -> Unit !{IO} = do
-  widget.render(w, r, s)
+  scr.screen_clipped(s, r, render_one(w, r, s, _))
   render_zip(rrest, s, rest)
+
+fn render_one(w: widget.Widget m, r: geometry.Region, s: scr.Screen,
+              u: Unit) -> Unit !{IO} =
+  widget.render(w, r, s)
 
 # Each child against the container's FULL `avail`, never a running remainder:
 # a child's reported size must not depend on its position among its siblings.

@@ -230,6 +230,13 @@ the shared helper rather than by patching the copy.
 widget that styles *part* of a line — `input`'s caret is the first
 (`docs/tui-input-v0.md` §4.6), and any internal highlight is the next.
 
+**Since C3a this is belt and braces.** The screen carries a clip and
+`children.render_zip` sets it to each child's region, so a widget that paints
+outside its region is *stopped*, not merely discouraged
+(`docs/tui-scroll-view-v0.md` §4.5). `paint.*` is still the shorter way to write
+a line, and still does the one thing the clip cannot: it truncates the *text*,
+where a clipped cluster would silently consume a column.
+
 ### 4.6 `label` and `static` do not reflow
 
 `label(text)` is one line; `static(lines)` is a list of lines already split.

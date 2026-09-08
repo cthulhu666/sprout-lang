@@ -1,10 +1,10 @@
 module stdlib.tui.widgets.paint
 
-# Writing into a region without escaping it. `screen.screen_write` clips at the
-# SCREEN edge, not the region's, so a widget that paints a string wider than
-# its region silently overwrites its neighbour's cells and the frame diff shows
-# nothing wrong. Every widget author needs this; it lives here once.
-# Design: docs/tui-widget-set-v0.md §4.5.
+# Writing into a region without escaping it. A container sets the screen's clip
+# to each child's region, so a stray write is dropped rather than landing on a
+# neighbour; what these add is TRUNCATION — a clipped cluster still consumes a
+# column, so a string wider than its region would shift what follows it.
+# Design: docs/tui-widget-set-v0.md §4.5, docs/tui-scroll-view-v0.md §4.5.
 #
 # Receiver-first, not data-last (guidelines §6): these mirror
 # `screen.screen_write`, which they wrap and which every caller sits beside.
