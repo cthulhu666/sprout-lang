@@ -173,6 +173,9 @@ export fn type_from_ast(te: ast.TypeExpr, local_vars: Dict types.Type) -> types.
       # on the INNERMOST arrow), and inference threw it away one step later.
       types.TFunc(type_from_ast(param, local_vars), type_from_ast(ret, local_vars),
         effect_from_maybe_labels(effs), types.OwnConsume)
+  # No parameter, so no ownership to read — the two fields TFunc carries for one.
+  | ast.TypeThunk ret effs ->
+      types.TThunk(type_from_ast(ret, local_vars), effect_from_maybe_labels(effs))
   # A trailing effect suffix that reached inference as a wrapper. A declaration's
   # return type never does — parser.parse_return_type_cont splits it into the
   # FnDecl's own `effects` field — and neither does `a -> b !{IO}`, which
@@ -494,6 +497,7 @@ export fn te_type_names(te: ast.TypeExpr, acc: List String) -> List String =
   | ast.TypeName n -> Cons(n, acc)
   | ast.TypeApply l r -> te_type_names(l, te_type_names(r, acc))
   | ast.TypeArrow p r _ -> te_type_names(p, te_type_names(r, acc))
+  | ast.TypeThunk r _ -> te_type_names(r, acc)
   | ast.TypeEffect inner _ -> te_type_names(inner, acc)
   | ast.TupleType parts -> te_type_names_list(parts, acc)
 
@@ -601,6 +605,7 @@ fn collect_te_vars(te: ast.TypeExpr, acc: List String) -> List String =
       collect_te_vars(arg, collect_te_vars(base, acc))
   | ast.TypeArrow param ret _ ->
       collect_te_vars(ret, collect_te_vars(param, acc))
+  | ast.TypeThunk ret _ -> collect_te_vars(ret, acc)
   | ast.TypeEffect inner _ -> collect_te_vars(inner, acc)
   | ast.TupleType parts -> collect_te_vars_list(parts, acc)
 
@@ -783,13 +788,6 @@ fn ret_from_maybe_with_vars(owner: String, maybe_te: Maybe ast.TypeExpr, local_v
   | Nothing -> types.TVar(types.tyvar_id(unann_ret_var(owner)))
   | Just te -> type_from_ast(te, local_vars)
 
-# An arrow chain whose every parameter CONSUMES. Used where no declaration is in
-# reach to say otherwise.
-fn build_fn_type(params: List types.Type, ret: types.Type) -> types.Type =
-  match params with
-  | Nil -> ret
-  | Cons p rest -> types.TFunc(p, build_fn_type(rest, ret), types.EffectPure, types.OwnConsume)
-
 # DECLARATION side (M4.6): one ownership per declared parameter. This one call is
 # what puts `borrowing` (and, since M4.4a, `once`) into the type of every
 # top-level fn, extern fn, class method and instance method — they all reach
@@ -802,16 +800,25 @@ fn build_fn_type(params: List types.Type, ret: types.Type) -> types.Type =
 # partial application — every arrow is consumed at once, so an outer-arrow effect
 # would describe an application that cannot be written.
 #
-# A ZERO-parameter function has no arrow to carry anything, which is why the
-# declared effect also stays on the Scheme: `fn main() -> Unit !{IO}` types as
-# plain `Unit`, and Scheme's effect field is the only place its !{IO} can live.
-# types.scheme_to_string knows this and prints whichever one is load-bearing.
+# A ZERO-parameter function is `() -> ret`, not `ret`. An empty parameter list is
+# still an arrow — one with no parameter — and it holds the declared effect, so
+# `fn main() -> Unit !{IO}` types as `() -> Unit !{IO}`.
+#
+# The split matters: `Nil` means "no parameters at all" only at the entry, and
+# "end of the chain" in the recursion. Thunking the shared base case would wrap
+# every function's RETURN type.
 fn build_fn_type_modes(params: List types.Type, modes: List ast.ParamMode, ret: types.Type,
                        eff: types.Effect) -> types.Type =
   match params with
+  | Nil -> types.TThunk(ret, eff)
+  | _ -> build_arrow_chain(params, modes, ret, eff)
+
+fn build_arrow_chain(params: List types.Type, modes: List ast.ParamMode, ret: types.Type,
+                     eff: types.Effect) -> types.Type =
+  match params with
   | Nil -> ret
   | Cons p rest ->
-      types.TFunc(p, build_fn_type_modes(rest, mode_list_tail(modes), ret, eff),
+      types.TFunc(p, build_arrow_chain(rest, mode_list_tail(modes), ret, eff),
         arrow_effect_at(rest, eff), own_of_mode(mode_list_head(modes)))
 
 # The effect belongs to the last arrow only; every earlier one is a pure step
@@ -857,7 +864,11 @@ fn build_fn_type_like(params: List types.Type, template: types.Type, ret: types.
 fn template_own(t: types.Type) -> types.Ownership =
   match t with
   | types.TFunc _ _ _ own -> own
-  | _ -> types.OwnConsume
+  | types.TThunk _ _ -> types.OwnConsume
+  | types.TVar _ -> types.OwnConsume
+  | types.TConst _ -> types.OwnConsume
+  | types.TApp _ _ -> types.OwnConsume
+  | types.TTuple _ -> types.OwnConsume
 
 # Inherit the arrow's effect from the callee, exactly as template_own inherits
 # its ownership, and for the same reason: this function builds "the callee's type
@@ -873,15 +884,25 @@ fn template_own(t: types.Type) -> types.Ownership =
 # (IO, Pure) meeting is then absorbed by the conservative arm. The bug would only
 # appear for a callee whose effect variable is not also reachable from a
 # parameter, which is the case no canary would have covered.
+# A thunk is an arrow, so its effect is inherited like TFunc's. Only the
+# genuinely arrow-less types fall back to Pure.
 fn template_eff(t: types.Type) -> types.Effect =
   match t with
   | types.TFunc _ _ eff _ -> eff
-  | _ -> types.EffectPure
+  | types.TThunk _ eff -> eff
+  | types.TVar _ -> types.EffectPure
+  | types.TConst _ -> types.EffectPure
+  | types.TApp _ _ -> types.EffectPure
+  | types.TTuple _ -> types.EffectPure
 
 fn template_ret(t: types.Type) -> types.Type =
   match t with
   | types.TFunc _ ret _ _ -> ret
-  | _ -> t
+  | types.TThunk ret _ -> ret
+  | types.TVar _ -> t
+  | types.TConst _ -> t
+  | types.TApp _ _ -> t
+  | types.TTuple _ -> t
 
 # ---------------------------------------------------------------------------
 # Constructor registration
@@ -1824,10 +1845,17 @@ fn callee_has_zero_declared_arity(callee: ast.Expr, env: Dict types.Scheme) -> B
       | Nothing -> false
   | _ -> false
 
-fn type_is_function(t: types.Type) -> Bool =
+# Not "is this a function" — a thunk is one, and is the one callee a
+# zero-argument call is entitled to. The question is whether arguments are
+# still owed.
+fn type_expects_arguments(t: types.Type) -> Bool =
   match t with
   | types.TFunc _ _ _ _ -> true
-  | _ -> false
+  | types.TThunk _ _ -> false
+  | types.TVar _ -> false
+  | types.TConst _ -> false
+  | types.TApp _ _ -> false
+  | types.TTuple _ -> false
 
 # Infer a call whose callee is a bare variable `name` (the common case).
 fn infer_call_var(
@@ -1951,11 +1979,12 @@ fn infer_call_inner(
           | CallOk ret_t s3 es3 call_eff ->
               check_call_constraint(callee, typed_callee, typed_args, subst, env, ret_t, s3, es3, call_eff, pos, prog_to_fresh)
 
-# A call with no arguments. A function-typed result is only an error when the
-# callee is NOT a known zero-parameter function: `mk()` where `fn mk() -> Int ->
-# Int` is exact arity and legal, while `adder()` where `fn adder(n: Int) -> …` is
-# missing its argument. Both have the same resolved type, so `zero_arity_ok`
-# carries the declared parameter count the type cannot express.
+# A call with no arguments. It demands `() -> ret` and unifies, exactly as the
+# argument branch below demands `arg -> ret`; without that arrow the callee type
+# WAS the result type, which is the nullary collapse.
+#
+# `mk()` (`fn mk() -> Int -> Int`) and `adder()` (`fn adder(n: Int) -> …`) no
+# longer share a resolved type, so `zero_arity_ok` is now redundant with it.
 fn resolve_zero_arg_call(
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
@@ -1966,10 +1995,11 @@ fn resolve_zero_arg_call(
   zero_arity_ok: Bool,
   pos: source.SourcePos
 ) -> CallResult =
-  if type_is_function(resolved) && ! zero_arity_ok
+  if type_expects_arguments(resolved) && ! zero_arity_ok
   then CallErr(pos, callee_display ++ " requires arguments but was called with none")
   else
-    match unifier.unify_types(subst, eff_subst, resolved, ret_type) with
+    match unifier.unify_types(subst, eff_subst, resolved,
+            types.TThunk(ret_type, eff)) with
     | unifier.UnifyErr e -> CallErr(pos, "Call type mismatch: " ++ e)
     | unifier.UnifyOk s3 es3 ->
         CallOk(unifier.apply_subst(s3, ret_type), s3, es3, unifier.apply_effect_subst(es3, eff))
@@ -2269,6 +2299,7 @@ fn any_function_typed_arg(args: List typed_ast.TypedExpr, subst: Dict types.Type
   | Cons a rest ->
       match unifier.apply_subst(subst, typed_ast.typed_expr_type(a)) with
       | types.TFunc _ _ _ _ -> true
+      | types.TThunk _ _ -> true
       | _ -> any_function_typed_arg(rest, subst)
 
 # Walk each arg looking for one whose raw TVar head maps to a @fwd marker.
@@ -2580,6 +2611,10 @@ fn find_class_var_in_type(orig: types.Type, inst: types.Type, class_var: String)
           | Just r -> Just(r)
           | Nothing -> find_class_var_in_type(orr, ir, class_var)
       | _ -> Nothing
+  | types.TThunk orr _ ->
+      match inst with
+      | types.TThunk ir _ -> find_class_var_in_type(orr, ir, class_var)
+      | _ -> Nothing
   | types.TTuple oitems ->
       match inst with
       | types.TTuple iitems -> find_class_var_in_tuple_lists(oitems, iitems, class_var)
@@ -2614,6 +2649,10 @@ fn dispatch_type_walk(
           | Nothing -> dispatch_type_walk(ret, rest_args, ret_t, subst, class_var)
       | Nil ->
           find_class_var_in_type(scheme_type, unifier.apply_subst(subst, ret_t), class_var)
+  # A nullary method keeps its class variable in the thunk's result, and `ret_t`
+  # IS that result — unwrap the arrow or the two never align.
+  | types.TThunk r _ ->
+      find_class_var_in_type(r, unifier.apply_subst(subst, ret_t), class_var)
   | _ ->
       find_class_var_in_type(scheme_type, unifier.apply_subst(subst, ret_t), class_var)
 
@@ -2642,6 +2681,7 @@ fn type_contains_var(t: types.Type, names: List String) -> Bool =
   | types.TConst _ -> false
   | types.TApp a b -> if type_contains_var(a, names) then true else type_contains_var(b, names)
   | types.TFunc p r _ _ -> if type_contains_var(p, names) then true else type_contains_var(r, names)
+  | types.TThunk r _ -> type_contains_var(r, names)
   | types.TTuple items -> tuple_contains_var(items, names)
 
 fn tuple_contains_var(items: List types.Type, names: List String) -> Bool =
@@ -3232,6 +3272,7 @@ fn concrete_missing_inst(class_name: String, t: types.Type, env: Dict types.Sche
       # default dict (→ silent miscompile: a closure read via the wrong instance).
       match t with
       | types.TFunc _ _ _ _ -> Just("a function type")
+      | types.TThunk _ _ -> Just("a function type")
       | _ -> Nothing
 
 # Resolve one field constraint's dict from its head_token. A CONCRETE-ctor head
@@ -4538,10 +4579,22 @@ fn ctor_result_type(t: types.Type) -> types.Type =
 # Declared return type of a function with `n_params` parameters: strip exactly
 # `n_params` leading arrows. Preserves a function-typed return (e.g. -> Int -> Int),
 # unlike ctor_result_type which strips all arrows (correct only for constructors).
+#
+# Only a NULLARY function's own thunk is stripped, and only at entry. Peeling in
+# the recursion would eat a thunk-valued return: `fn mk(x: Int) -> (() -> Int)`
+# declares the thunk, it does not declare `Int`.
 fn fn_return_type(t: types.Type, n_params: Int) -> types.Type =
-  if n_params <= 0 then t
+  if n_params <= 0 then thunk_result(t) else strip_arrows(t, n_params)
+
+fn thunk_result(t: types.Type) -> types.Type =
+  match t with
+  | types.TThunk ret _ -> ret
+  | _ -> t
+
+fn strip_arrows(t: types.Type, n: Int) -> types.Type =
+  if n <= 0 then t
   else match t with
-    | types.TFunc _ ret _ _ -> fn_return_type(ret, n_params - 1)
+    | types.TFunc _ ret _ _ -> strip_arrows(ret, n - 1)
     | _ -> t
 
 fn ctor_param_types(t: types.Type) -> List types.Type =
@@ -4670,6 +4723,7 @@ fn skolem_for_var_in(declared: types.Type, actual: types.Type, var: String) -> M
       match skolem_for_var_in(d1, a1, var) with
       | Just sk -> Just(sk)
       | Nothing -> skolem_for_var_in(dr, ar, var)
+  | (types.TThunk dr _, types.TThunk ar _) -> skolem_for_var_in(dr, ar, var)
   | (types.TTuple d_items, types.TTuple a_items) -> skolem_for_var_in_list(d_items, a_items, var)
   | _ -> Nothing
 
@@ -5722,6 +5776,7 @@ fn yields_int_range(name: String, env: Dict types.Scheme) -> Bool =
 fn final_result_type(t: types.Type) -> types.Type =
   match t with
   | types.TFunc _ ret _ _ -> final_result_type(ret)
+  | types.TThunk ret _ -> final_result_type(ret)
   | _ -> t
 
 fn is_int_range(t: types.Type) -> Bool =
@@ -6248,6 +6303,7 @@ fn validate_te(te: ast.TypeExpr, decl_name: String, declared: List String) -> Ma
       match validate_te(param, decl_name, declared) with
       | Just e -> Just(e)
       | Nothing -> validate_te(ret, decl_name, declared)
+  | ast.TypeThunk ret _ -> validate_te(ret, decl_name, declared)
   | ast.TypeEffect inner _ -> validate_te(inner, decl_name, declared)
   | ast.TupleType parts -> validate_te_list(parts, decl_name, declared)
 
@@ -6441,6 +6497,7 @@ fn alias_uses_in_te(te: ast.TypeExpr, arities: Dict Int) -> Maybe String =
       match alias_uses_in_te(p, arities) with
       | Just e -> Just(e)
       | Nothing -> alias_uses_in_te(r, arities)
+  | ast.TypeThunk r _ -> alias_uses_in_te(r, arities)
   | ast.TypeEffect inner _ -> alias_uses_in_te(inner, arities)
   | ast.TupleType parts -> alias_uses_in_te_list(parts, arities)
 
@@ -6850,6 +6907,7 @@ fn instance_head_problem(te: ast.TypeExpr) -> Maybe String =
   | ast.TypeApply base _ -> instance_head_problem(base)
   | ast.TypeEffect inner _ -> instance_head_problem(inner)
   | ast.TypeArrow _ _ _ -> Just("a function type")
+  | ast.TypeThunk _ _ -> Just("a function type")
   | ast.TupleType _ -> Nothing
 
 # The ARGUMENTS of the head, in source order.
@@ -8603,6 +8661,7 @@ fn has_unresolved_tvar_in_type(t: types.Type) -> Bool =
   | types.TConst _ -> false
   | types.TApp base arg -> has_unresolved_tvar_in_type(base) || has_unresolved_tvar_in_type(arg)
   | types.TFunc param ret _ _ -> has_unresolved_tvar_in_type(param) || has_unresolved_tvar_in_type(ret)
+  | types.TThunk ret _ -> has_unresolved_tvar_in_type(ret)
   | types.TTuple items -> has_unresolved_tvar_in_type_list(items)
 
 fn has_unresolved_tvar_in_type_list(items: List types.Type) -> Bool =
@@ -8802,6 +8861,7 @@ fn render_written(written: Dict String, t: types.Type) -> types.Type =
   | types.TConst _ -> t
   | types.TApp base arg -> types.TApp(render_written(written, base), render_written(written, arg))
   | types.TFunc p r eff own -> types.TFunc(render_written(written, p), render_written(written, r), eff, own)
+  | types.TThunk r eff -> types.TThunk(render_written(written, r), eff)
   | types.TTuple items -> types.TTuple(render_written_list(written, items))
 
 fn render_written_list(written: Dict String, items: List types.Type) -> List types.Type =
@@ -9261,6 +9321,10 @@ fn match_scheme_body(pattern: types.Type, vars: List String, actual: types.Type,
   | types.TFunc pp pr _ _ ->
       match actual with
       | types.TFunc ap ar _ _ -> match_scheme_body(pp, vars, ap, match_scheme_body(pr, vars, ar, theta))
+      | _ -> theta
+  | types.TThunk pr _ ->
+      match actual with
+      | types.TThunk ar _ -> match_scheme_body(pr, vars, ar, theta)
       | _ -> theta
   | types.TTuple pitems ->
       match actual with

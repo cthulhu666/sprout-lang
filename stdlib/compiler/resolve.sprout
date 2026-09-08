@@ -389,11 +389,12 @@ fn mr_eta_class_type_from_scheme(class_param: String, scheme_type: types.Type, a
 fn mr_eta_actual_type_for_scheme_match(scheme_type: types.Type, actual_type: types.Type) -> types.Type =
   match scheme_type with
   | types.TFunc _ _ _ _ -> actual_type
+  | types.TThunk _ _ -> actual_type
   | _ ->
       match actual_type with
       | types.TFunc param ret _ _ ->
-          # Zero-arg methods are inferred as their result type, but can appear
-          # in value position as Unit -> result.
+          # Legacy shape: a zero-arg method appearing in value position as
+          # `Unit -> result`. Its own type is now `() -> result` (TThunk above).
           if type_is_unit(param) then ret else actual_type
       | _ -> actual_type
 
@@ -413,6 +414,10 @@ fn match_type_vars(pattern: types.Type, actual: types.Type, acc: Dict types.Type
   | types.TFunc pparam pret _ _ ->
       match actual with
       | types.TFunc aparam aret _ _ -> match_type_vars(pret, aret, match_type_vars(pparam, aparam, acc))
+      | _ -> acc
+  | types.TThunk pret _ ->
+      match actual with
+      | types.TThunk aret _ -> match_type_vars(pret, aret, acc)
       | _ -> acc
   | types.TTuple pitems ->
       match actual with
@@ -656,6 +661,7 @@ fn type_expr_head_name(te: ast.TypeExpr) -> String =
   | ast.TypeName name -> name
   | ast.TypeApply base _ -> type_expr_head_name(base)
   | ast.TypeArrow _ _ _ -> "Fn"
+  | ast.TypeThunk _ _ -> "Fn"
   | ast.TypeEffect _ _ -> "Eff"
   | ast.TupleType items -> "Tuple" ++ int_to_string(list_length(items))
 
@@ -700,6 +706,8 @@ fn substitute_type_expr(te: ast.TypeExpr, subs: Dict ast.TypeExpr) -> ast.TypeEx
       ast.TypeApply(substitute_type_expr(base, subs), substitute_type_expr(arg, subs))
   | ast.TypeArrow from_ to_ effs ->
       ast.TypeArrow(substitute_type_expr(from_, subs), substitute_type_expr(to_, subs), effs)
+  | ast.TypeThunk to_ effs ->
+      ast.TypeThunk(substitute_type_expr(to_, subs), effs)
   | ast.TupleType items ->
       ast.TupleType(list_map(\item -> substitute_type_expr(item, subs), items))
   | _ -> te

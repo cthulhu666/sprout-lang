@@ -172,6 +172,10 @@ fn struct_match(decl: types.Type, concrete: types.Type, acc: Dict types.Type) ->
       match concrete with
       | types.TFunc c d _ _ -> struct_match(b, d, struct_match(a, c, acc))
       | _ -> acc
+  | types.TThunk b _ ->
+      match concrete with
+      | types.TThunk d _ -> struct_match(b, d, acc)
+      | _ -> acc
   | types.TTuple items ->
       match concrete with
       | types.TTuple citems -> struct_match_list(items, citems, acc)
@@ -191,6 +195,7 @@ fn apply_tvar_subst(sub: Dict types.Type, t: types.Type) -> types.Type =
       | Nothing -> t
   | types.TApp f x -> types.TApp(apply_tvar_subst(sub, f), apply_tvar_subst(sub, x))
   | types.TFunc a b e o -> types.TFunc(apply_tvar_subst(sub, a), apply_tvar_subst(sub, b), e, o)
+  | types.TThunk b e -> types.TThunk(apply_tvar_subst(sub, b), e)
   | types.TTuple items -> types.TTuple(list_map(\i -> apply_tvar_subst(sub, i), items))
   | _ -> t
 
@@ -1354,6 +1359,7 @@ fn type_is_tyvar(t: types.Type) -> Bool =
 fn type_is_func(t: types.Type) -> Bool =
   match t with
   | types.TFunc _ _ _ _ -> true
+  | types.TThunk _ _ -> true
   | _ -> false
 
 # The linear parameters that own their argument (no modifier, or `consuming`).

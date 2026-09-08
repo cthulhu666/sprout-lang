@@ -212,9 +212,37 @@ fn is_constructor_name(name: String) -> Bool =
 # Type expression parsing
 
 export fn parse_type_expr(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.TypeExpr, Int) =
+  match match_empty_params(tokens, i) with
+  | Just i2 -> parse_thunk_type(tokens, i2)
+  | Nothing ->
+      do
+        (left, i2) <- parse_type_apply(tokens, i)
+        parse_type_expr_cont(tokens, i2, left)
+
+# `()` is an empty PARAMETER LIST, not a type, so it is only accepted directly
+# before `->`. Nothing is consumed unless both tokens match.
+fn match_empty_params(tokens: Vec token.Token, i: Int) -> Maybe Int =
+  match match_symbol(tokens, i, "(") with
+  | Nothing -> Nothing
+  | Just (_, i2) ->
+      match match_symbol(tokens, i2, ")") with
+      | Nothing -> Nothing
+      | Just (_, i3) -> Just(i3)
+
+fn parse_thunk_type(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.TypeExpr, Int) =
   do
-    (left, i2) <- parse_type_apply(tokens, i)
-    parse_type_expr_cont(tokens, i2, left)
+    (_, i2) <- expected_symbol("->", tokens, i)
+    (ret_raw, i3) <- parse_type_expr(tokens, i2)
+    Ok((make_type_thunk(ret_raw, tokens, i3), i3))
+
+# The effect-placement rules of make_type_arrow, with no parameter to carry.
+fn make_type_thunk(right_raw: ast.TypeExpr, tokens: Vec token.Token, i: Int) -> ast.TypeExpr =
+  match right_raw with
+  | ast.TypeEffect base effs -> ast.TypeThunk(base, Just(effs))
+  | _ ->
+      match parse_effect_annotation(tokens, i) with
+      | (Nothing, _) -> ast.TypeThunk(right_raw, Nothing)
+      | (Just effs, _) -> ast.TypeThunk(right_raw, Just(effs))
 
 fn parse_type_expr_cont(tokens: Vec token.Token, i: Int, left: ast.TypeExpr) -> Result ParseError (ast.TypeExpr, Int) =
   match match_symbol(tokens, i, "->") with

@@ -318,6 +318,10 @@ fn effect_var_in_type(t: ast.TypeExpr) -> Maybe String =
       match effect_var_label(arrow_labels(labels)) with
       | Just v -> Just(v)
       | Nothing -> first_effect_var([a, b])
+  | ast.TypeThunk b labels ->
+      match effect_var_label(arrow_labels(labels)) with
+      | Just v -> Just(v)
+      | Nothing -> effect_var_in_type(b)
 
 fn arrow_labels(labels: Maybe (List String)) -> List String =
   match labels with

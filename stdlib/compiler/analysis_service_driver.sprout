@@ -301,6 +301,7 @@ fn te_var_names(te: ast.TypeExpr, acc: List String) -> List String =
   | ast.TypeName name -> if is_tyvar_name(name) then Cons(name, acc) else acc
   | ast.TypeApply base arg -> te_var_names(arg, te_var_names(base, acc))
   | ast.TypeArrow l r _ -> te_var_names(r, te_var_names(l, acc))
+  | ast.TypeThunk r _ -> te_var_names(r, acc)
   | ast.TypeEffect inner _ -> te_var_names(inner, acc)
   | ast.TupleType parts -> te_var_names_list(parts, acc)
 
@@ -327,6 +328,7 @@ fn te_is_compound(te: ast.TypeExpr) -> Bool =
   match te with
   | ast.TypeApply _ _ -> true
   | ast.TypeArrow _ _ _ -> true
+  | ast.TypeThunk _ _ -> true
   | ast.TypeEffect _ _ -> true
   | _ -> false
 
@@ -348,6 +350,7 @@ fn te_to_string(te: ast.TypeExpr) -> String =
   | ast.TypeName name -> string.after_last_dot(name)
   | ast.TypeApply base arg -> te_to_string(base) ++ " " ++ te_arg_to_string(arg)
   | ast.TypeArrow l r effs -> te_arrow_left(l) ++ " -> " ++ te_to_string(r) ++ arrow_effect_suffix(effs)
+  | ast.TypeThunk r effs -> "() -> " ++ te_to_string(r) ++ arrow_effect_suffix(effs)
   | ast.TypeEffect inner effs -> te_to_string(inner) ++ effect_suffix(effs)
   | ast.TupleType parts -> "(" ++ string.join(", ", te_to_string_list(parts)) ++ ")"
 
@@ -357,6 +360,7 @@ fn te_arg_to_string(te: ast.TypeExpr) -> String =
 fn te_arrow_left(l: ast.TypeExpr) -> String =
   match l with
   | ast.TypeArrow _ _ _ -> "(" ++ te_to_string(l) ++ ")"
+  | ast.TypeThunk _ _ -> "(" ++ te_to_string(l) ++ ")"
   | _ -> te_to_string(l)
 
 fn te_to_string_list(parts: List ast.TypeExpr) -> List String =
@@ -804,6 +808,7 @@ fn compile_and_run_eval(src: String, state: StartupState) -> json.Json !{IO} =
 export fn is_function_scheme(s: types.Scheme) -> Bool =
   match types.scheme_type(s) with
   | types.TFunc _ _ _ _ -> true
+  | types.TThunk _ _ -> true
   | _ -> false
 
 export fn is_polymorphic_scheme(s: types.Scheme) -> Bool =

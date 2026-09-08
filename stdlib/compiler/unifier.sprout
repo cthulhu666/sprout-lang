@@ -292,6 +292,7 @@ export fn apply_subst(subst: Dict types.Type, t: types.Type) -> types.Type =
       types.TApp(apply_subst(subst, base), apply_subst(subst, arg))
   | types.TFunc param ret eff own ->
       types.TFunc(apply_subst(subst, param), apply_subst(subst, ret), eff, own)
+  | types.TThunk ret eff -> types.TThunk(apply_subst(subst, ret), eff)
   | types.TTuple items ->
       types.TTuple(apply_subst_list(subst, items))
 
@@ -333,6 +334,8 @@ export fn apply_full_subst(subst: Dict types.Type, eff_subst: Dict types.Effect,
         apply_effect_subst(eff_subst, eff),
         own
       )
+  | types.TThunk ret eff ->
+      types.TThunk(apply_full_subst(subst, eff_subst, ret), apply_effect_subst(eff_subst, eff))
   | types.TTuple items ->
       types.TTuple(apply_full_subst_list(subst, eff_subst, items))
 
@@ -351,6 +354,7 @@ fn occurs(name: String, subst: Dict types.Type, t: types.Type) -> Bool =
   | types.TConst _ -> false
   | types.TApp base arg -> occurs(name, subst, base) || occurs(name, subst, arg)
   | types.TFunc param ret _ _ -> occurs(name, subst, param) || occurs(name, subst, ret)
+  | types.TThunk ret _ -> occurs(name, subst, ret)
   | types.TTuple items -> occurs_list(name, subst, items)
 
 fn occurs_list(name: String, subst: Dict types.Type, items: List types.Type) -> Bool =
@@ -405,6 +409,13 @@ fn unify_tfunc(subst: Dict types.Type, eff_subst: Dict types.Effect,
   match unify_applied(subst, unify_arrow_effects(eff_subst, e1, e2), p1, p2) with
   | UnifyErr e -> UnifyErr(e)
   | UnifyOk s1 es1 -> unify_applied(s1, es1, apply_subst(s1, r1), apply_subst(s1, r2))
+
+# A thunk has no parameter and no ownership, so this is unify_tfunc without
+# either: meet the effects on the same bind-never-reject terms, then the results.
+fn unify_tthunk(subst: Dict types.Type, eff_subst: Dict types.Effect,
+                r1: types.Type, e1: types.Effect,
+                r2: types.Type, e2: types.Effect) -> Unified =
+  unify_applied(subst, unify_arrow_effects(eff_subst, e1, e2), r1, r2)
 
 # Arrow-position effect unification BINDS but never REJECTS.
 #
@@ -524,6 +535,7 @@ fn unify_applied(
   | (types.TApp bl al, types.TApp br ar) -> unify_tapp(subst, eff_subst, bl, al, br, ar)
   | (types.TFunc p1 r1 e1 o1, types.TFunc p2 r2 e2 o2) ->
       unify_tfunc_owned(subst, eff_subst, l, r, p1, r1, e1, o1, p2, r2, e2, o2)
+  | (types.TThunk r1 e1, types.TThunk r2 e2) -> unify_tthunk(subst, eff_subst, r1, e1, r2, e2)
   | (types.TTuple xs, types.TTuple ys) -> unify_list(subst, eff_subst, xs, ys)
   | _ ->
       UnifyErr(type_mismatch_error(l, r))

@@ -1,0 +1,20 @@
+module main
+
+# `() -> T` is a real type: a thunk can be named in a parameter, stored in a
+# constructor payload, and called. This is the shape effect subsumption needs
+# and the one Option B could not express.
+
+type Deferred =
+  | Deferred (() -> Int)
+
+fn force(d: Deferred) -> Int =
+  match d with
+  | Deferred f -> f()
+
+fn run_twice(g: () -> Int) -> Int = g() + g()
+
+fn five() -> Int = 5
+
+fn main() -> Unit !{IO} = do
+  print(int_to_string(force(Deferred(five))))
+  print(int_to_string(run_twice(five)))
