@@ -88,6 +88,15 @@ diff is large even for a small deletion — IR temporaries and `@.str.N` constan
 sequentially, so removing code from mid-function renumbers everything after it; the *goldens* are
 the load-bearing half, not the seed diff's size.
 
+### 0 differences is weak evidence for a purity change in `dce`
+
+Both halves of the 2026-09-08 nullary DCE work reported 62 files, 0 differences: the arm that
+*eliminates* more (a pure nullary call bound to an unused name) and the arrow walk that *keeps*
+more (a curried `!{IO}` call that was being dropped — a real dropped-effect miscompile). No
+golden program binds a call it then ignores, in either direction, so the corpus cannot observe
+`is_pure_callee_type` at all. A change there needs a synthetic test over `dce.elim_program` and
+an executable fixture; the golden gate will report clean either way.
+
 ## Bootstrap seed — `scripts/seed_gate.sh`, `just refresh-seed`
 
 Wired as a PreToolUse Bash hook. Intercepts `git commit` and blocks if `stdlib/compiler/*.sprout` or
