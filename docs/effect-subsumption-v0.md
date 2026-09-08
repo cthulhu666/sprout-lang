@@ -92,7 +92,9 @@ effectful one is required — legal, since it is idiomatic and load-bearing (§5
 
 **Non-goals.** Open effect rows (`!{IO|e}`); effect parameters on type constructors; new
 effect labels; changing what `!{e}` means; the declaration-boundary gaps of §8, which are
-a separate and much smaller change that composes with this one.
+a separate and much smaller change that composes with this one. Also not *where* `!{e}`
+should be written in a public signature — that is `docs/effect-polymorphism-policy-v0.md`,
+whose `Foldable` application waits on this change landing first.
 
 ## 3. Prior art
 

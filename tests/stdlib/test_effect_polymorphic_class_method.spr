@@ -1,0 +1,47 @@
+import stdlib.test (check_eq, run_suite)
+
+# An `!{e}` slot on a CLASS METHOD works, at both instantiations. Two docs
+# claimed it could not, and nothing in the suite contradicted them; that is the
+# gap this closes for `docs/effect-polymorphism-policy-v0.md`.
+#
+# Reject twin: tests/conformance/type_error/effect_var_class_method_into_pure_caller.spr.
+
+class Walk f
+  fn walk_fold(step: b -> a -> b !{e}, init: b, xs: f a) -> b !{e}
+
+instance Walk List
+  fn walk_fold(step: b -> a -> b !{e}, init: b, xs: List a) -> b !{e} =
+    list_fold(step, init, xs)
+
+instance Walk Vec
+  fn walk_fold(step: b -> a -> b !{e}, init: b, xs: Vec a) -> b !{e} =
+    vec_fold(step, init, xs)
+
+# Pure instantiation of the `!{e}` slot: this caller declares no effect, so
+# `!{e}` must unify with pure rather than infecting it. The string also pins
+# left-to-right order, which is what licenses the effectful instantiation.
+fn spell(xs: List Int) -> String =
+  walk_fold(\ (acc, x) -> acc ++ int_to_string(x), "", xs)
+
+fn spell_vec(xs: Vec Int) -> String =
+  walk_fold(\ (acc, x) -> acc ++ int_to_string(x), "", xs)
+
+fn shout(acc: Int, x: Int) -> Int !{IO} =
+  do
+    print(int_to_string(x))
+    acc + x
+
+# Effectful instantiation, honestly declared. The effect propagates out of the
+# class method to here and is enforced at this signature.
+fn sum_loudly(xs: List Int) -> Int !{IO} =
+  walk_fold(shout, 0, xs)
+
+fn main() -> Unit !{IO} =
+  run_suite("effect_polymorphic_class_method", [
+    # (1) `!{e}` instantiated pure; left-to-right order over List.
+    check_eq("pure instantiation, List order", spell([1, 2, 3]), "123"),
+    # (2) same method, second instance — the effect row survives dispatch.
+    check_eq("pure instantiation, Vec order", spell_vec([4, 5]), "45"),
+    # (3) `!{e}` instantiated at IO, under an honest `!{IO}` caller.
+    check_eq("io instantiation runs", sum_loudly([1, 2, 3]), 6)
+  ])

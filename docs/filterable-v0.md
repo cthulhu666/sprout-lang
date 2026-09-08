@@ -111,10 +111,17 @@ same shape `Foldable List.fold_values` already uses.
 
 ## 6. Purity
 
-`pred : a -> Bool`, not `a -> Bool !{e}`. An effect-polymorphic class method is
-the `class Each` generalization that B2 blocks; until that is fixed, an
-effectful predicate stays a hand-written fold. This matches `Foldable`, whose
-`fold_values` has no effect row either.
+`pred : a -> Bool`, not `a -> Bool !{e}`. **Corrected 2026-09-08: this section
+previously blamed B2, which is wrong on both counts.** An effect-polymorphic
+class method compiles, runs, and enforces the effect at the caller today — B2 is
+about an instance body calling its *own* method, and these instances delegate to
+`list_filter`/`vec_filter` instead. There is no implementation obstacle.
+
+The real reason is a contract gap: `Filterable` does not say what order `pred`
+runs in, and an effect needs an order to be meaningful. Stating that order is
+the prerequisite, and it is a real choice — pinning it forecloses a parallel
+`Vec` filter. See `docs/effect-polymorphism-policy-v0.md`, which gives the rule
+and the per-slot verdicts.
 
 ## 7. Deferred
 
