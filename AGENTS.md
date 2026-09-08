@@ -6,13 +6,10 @@ This file defines project-local working rules for humans and coding agents contr
 
 Sprout is a statically typed, functional-first language aimed at strong safety with beginner-friendly ergonomics.
 
-Primary design references:
-- `docs/spec-v0.md`
-- `docs/idiomatic-sprout.md` (**start here to write Sprout** — the idiomatic shapes: `let..else`, combinators, pipes, `wrap`)
-- `docs/style-guide-v0.md`
-- `docs/language-design-v0.md`
-- `docs/language-design-best-practices.md`
-- `docs/guidelines.md` (code authoring guidelines for stdlib and compiler)
+Primary design references: `docs/spec-v0.md` (normative), `docs/idiomatic-sprout.md`
+(**start here to write Sprout** — `let..else`, combinators, pipes, `wrap`), `docs/style-guide-v0.md`,
+`docs/language-design-v0.md`, `docs/language-design-best-practices.md`, and `docs/guidelines.md`
+(authoring guidelines for stdlib and compiler code).
 
 ## Definition of Ready
 
@@ -33,33 +30,19 @@ For coding tasks, work is done only when **all applicable** items below are true
 4. `mise exec -- just fmt` has been run and any reformatted files staged, for any change that touches `.sprout` or `.spr` files.
 5. The full test suite has been run via `mise exec -- just test` (no explicit test filter) for any change to **language semantics, `stdlib/`, builtins, runtime behavior, or the normative spec**.
 6. `mise exec -- just compile-examples-stage1` passes (or the failing examples exactly match the pre-existing known-broken set). Run after every change that touches `stdlib/`, the runtime, or any example file.
-7. **Compiler-source changes** (any edit under `stdlib/compiler/`) — smoke shapes: each shape in `tests/smoke_shapes/*.spr` emits IR cleanly via `compile_driver_bin_stage1 --emit-ir`, the IR contains at least one `define` block, and contains no `str_concat(ptr null,…)` occurrence (null-ptr codegen regression guard).
-8. **Compiler-source changes** (any edit under `stdlib/compiler/`) — bundle smoke: `compile_driver_bin_stage1 --phase bundle` on `stdlib/compiler/token.sprout`, `stdlib/compiler/ast.sprout`, and `stdlib/prelude.sprout` produces non-empty output containing no dot-prefix qualified names (lines beginning with `.`).
-9. **Compiler-source changes** (any edit under `stdlib/compiler/`) — bootstrap seed: run `just refresh-seed` and stage the updated `bootstrap/compile_driver.ll`. CI's `just verify-bootstrap-fixed-point` gates on this; a stale seed blocks all CI gates. Use the 2-step bootstrap if the committed seed predates a parser change (see [docs/debugging.md §2-Step Bootstrap Protocol](docs/debugging.md#2-step-bootstrap-protocol)).
-10. **Runtime changes** (any edit to `runtime/sprout_runtime.c`) — APPROVED_BUILTINS: every newly-added `long long <name>(…)` function is also listed in `runtime/APPROVED_BUILTINS` with an inline justification explaining why the operation cannot be done in Sprout. Per "Builtin vs Stdlib" rules 4–6.
-11. **Bootstrap/runtime changes** (any edit under `bootstrap/` or to `runtime/sprout_runtime.c`) — example canary: `examples/tuples.sprout`, `examples/factorial.sprout`, `examples/maybe_map.sprout`, `examples/typeclass_collections_demo.sprout`, `examples/fizzbuzz.sprout` each compile *and run* to completion without crash. (`just compile-examples-stage1` only covers compile.) **Run `just run-example-canary`** — it emits IR, links, and *runs* each of the five, failing on a non-zero exit. Corrected 2026-08-20: this line previously said running them "is currently a manual gate until CI covers it", which had stopped being true — the recipe is wired in as `example-canary` inside `just ci-fast-gates`, and CI runs that aggregate (`.github/workflows/ci.yml`, the `just ci-fast-gates` step). So `ci-fast-gates` satisfies this item, and the stale note was liable to send you hand-running five examples that a gate you already ran had covered.
-12. **Codegen-affecting changes** (any edit that can alter emitted IR — `stdlib/compiler/`, `stdlib/`, the prelude, or a module's public name surface) **and any change that ADDS a file to the golden corpus — `examples/*.sprout` or `tests/smoke_shapes/*.spr`** (see the note below; adding an example is a gated change even though it edits no compiler code) — golden IR: `just ir-golden-diff` passes. If it reports diffs, **read them before regenerating**: confirm each shift is the change you intended, then run `just ir-golden-snapshot` and stage `tests/golden/ir/`. Regenerating an unread diff launders a regression into an "expected" snapshot, which is the one way this gate can be defeated.
-
-    > **`just ir-golden-diff` output is TRUNCATED — do not mistake it for the diff.** `scripts/ir_golden_diff.sh:55` pipes each file's diff through `head -40`, so a change touching 16 files shows at most ~640 lines. One such change produced a 27,274-line real diff, i.e. the report was a 2% sample — and the visible part contained only string-constant renumbering while the hidden part contained three new function bodies and a rewritten `int_from_lexed`. "The report looks harmless" is therefore not evidence of anything. To actually read it: run `just ir-golden-snapshot`, then inspect `git diff tests/golden/ir` (which is complete and revertible) before staging. A useful triage on the full diff is to classify every `-` line — additive changes show removals only in `@.str.N` declarations and their `getelementptr` references, so any *other* removed line is existing code that changed and needs explaining.
-
-    > **`@.str.N` is not the only renumbered identifier, and a SUBTRACTIVE change produces insertions.** Compiler-generated wrappers carry a sequential counter too — `__sprout_ir_eta_<target>_<N>`, `__sprout_ir_lambda_<N>` — and unlike string constants those appear in `define` lines, so a renumbered wrapper reads as a brand-new function to any check keyed on define names. Removing dead code renumbers them: the 2026-08-27 DCE landing shed 874,281 lines and still showed **96,392 insertions**, and a subset check first flagged 24 goldens as having "added" defines before normalising the counter (`06_tuple_param` kept the same two `ToString` wrappers, moved `_25`/`_26` → `_0`/`_1`, while seven others vanished with their pruned targets). Classify by the *target* name with the trailing `_<digits>` stripped, never by the full symbol.
-    >
-    > **When the diff is too large to read, say so and check a property instead.** That DCE diff was 970k lines across 56 files; "I read it" would have been a lie, and regenerating unread is the one way this gate is defeated. The substitute that carries real weight is a structural invariant the change is supposed to have — for a pure deletion, *every `define` in each new golden already exists in the old one* (verified 60/60), paired with a behavioural differential that compiles **and runs** each corpus file under both compilers and compares stdout and exit status. State which check you actually ran.
-
-    > **A NEW example is a golden-corpus change, and "codegen-affecting" does not read that way.** `scripts/ir_golden_diff.sh:103` walks `examples/*.sprout` **and** `tests/smoke_shapes/*.spr`, so the corpus is defined by what is *in those directories*, not by what you edited. Add a file there and the gate fails with `MISSING GOLDEN: … -> expected tests/golden/ir/examples__<name>.sprout.ll` — even though you touched no compiler source and no existing golden moved. This caught a two-file examples-only PR on 2026-08-18: every other gate was green and only `ir-golden-diff` was red. Fix is `just ir-golden-snapshot` + stage `tests/golden/ir/`; for a purely additive change the snapshot writes only the new files, and *that* is the thing to verify — if it also modifies an existing golden, your new file perturbed another file's IR and the "read the diff first" rule above applies in full.
-    >
-    > The inclusion rule has one asymmetry worth knowing (`ir_golden_diff.sh:69-95`): a corpus file is required to have a golden only if it currently emits non-empty, `ERROR:`-free IR that passes `opt --passes=verify`. One that does not is skipped **silently** — but only while no golden exists for it. So the gate's silence about a non-compiling example is not a permanent exemption: it flips to `MISSING GOLDEN` the moment that file starts compiling, and to `REGRESSION` if it ever stops. Adding a deliberately-uncompilable fixture to `examples/` therefore passes today and can fail later for reasons unrelated to the commit that breaks it.
-
-    > **RESEED BEFORE YOU DIFF, or the gate answers a question you did not ask.** `bootstrap-from-seed` decides whether to rebuild stage-1 by comparing the binary's mtime against `bootstrap/compile_driver.ll` and `runtime/*.c` — and **nothing else** (`justfile:877`). `stdlib/compiler/*.sprout` is not in that comparison. So after editing compiler source, every gate that depends on `bootstrap-from-seed` — `ir-golden-diff` included — happily prints `==> Stage-1 binary is up-to-date with seed + runtime; skipping bootstrap.` and runs the **old** binary. `ir-golden-diff` then compares goldens emitted by the pre-edit compiler against goldens committed by the pre-edit compiler: guaranteed `0 differences`, proving nothing. This is worse than a red gate, because a green one gets cited as evidence. Correct order for a compiler-source change is `just refresh-seed` **first**, then `ir-golden-diff`. **`just seed-dep-check` does not relieve you of this.** That gate (added 2026-08-25) closes a *different* staleness axis — it asserts every gate recipe consuming `build/compile_driver_bin_stage1` also depends on `bootstrap-from-seed`, so no gate runs a binary older than the seed. Seed-vs-**source** drift is exactly the case above and is still ungated, because it is `refresh-seed`'s job and nothing can infer it from the recipe graph.
-    >
-    > This also makes the pair a usable proof for a *deletion*. To show removed code was unreachable, check **both** halves: (a) `git diff bootstrap/compile_driver.ll` is NON-empty — the edit reached the binary; and (b) `ir-golden-diff` reports 0 differences — nothing in the corpus depended on it. Either half alone is worthless: an empty seed diff means you never rebuilt, and a clean golden diff without it is the vacuous case above. Used this way on 2026-08-23 to retire an unreachable `++` arm in `ast_to_ir.translate_binary` (seed −324 lines net, 60/60 goldens byte-identical). Note the seed diff is large even for a small deletion — IR temporaries and `@.str.N` constants are numbered sequentially, so removing code from mid-function renumbers everything after it; the *goldens* are the load-bearing half, not the seed diff's size.
+7. **Compiler-source changes** (any edit under `stdlib/compiler/`) — smoke shapes: every `tests/smoke_shapes/*.spr` emits IR cleanly via `compile_driver_bin_stage1 --emit-ir`, with at least one `define` block and no `str_concat(ptr null,…)` (null-ptr codegen regression guard).
+8. **Compiler-source changes** — bundle smoke: `compile_driver_bin_stage1 --phase bundle` on `stdlib/compiler/token.sprout`, `stdlib/compiler/ast.sprout` and `stdlib/prelude.sprout` produces non-empty output containing no dot-prefixed qualified names (lines beginning with `.`).
+9. **Compiler-source changes** — bootstrap seed: run `just refresh-seed` and stage the updated `bootstrap/compile_driver.ll`. A stale seed blocks every CI gate (`just verify-bootstrap-fixed-point`). Use the 2-step bootstrap if the committed seed predates a parser change ([docs/debugging.md §2-Step Bootstrap Protocol](docs/debugging.md#2-step-bootstrap-protocol)).
+10. **Runtime changes** (any edit to `runtime/sprout_runtime.c`) — APPROVED_BUILTINS: every newly-added `long long <name>(…)` function is also listed in `runtime/APPROVED_BUILTINS` with an inline justification for why the operation cannot be done in Sprout (per "Builtin vs Stdlib" 4–6).
+11. **Bootstrap/runtime changes** (any edit under `bootstrap/` or to `runtime/sprout_runtime.c`) — example canary: `just run-example-canary` compiles *and runs* five examples, which `just compile-examples-stage1` does not. It is part of `just ci-fast-gates`, so running that aggregate satisfies this item ([docs/gates.md](docs/gates.md)).
+12. **Codegen-affecting changes** (anything that can alter emitted IR — `stdlib/compiler/`, `stdlib/`, the prelude, a module's public name surface) **and any change that ADDS a file to `examples/` or `tests/smoke_shapes/`** — golden IR: `just ir-golden-diff` passes. For a compiler-source edit, `just refresh-seed` **first** or the gate runs the pre-edit binary and proves nothing. If it reports diffs, read them before regenerating — the report is truncated, so run `just ir-golden-snapshot` and read the complete `git diff tests/golden/ir` before staging. Regenerating an unread diff launders a regression into an "expected" snapshot, the one way this gate is defeated. Details and the traps: [docs/gates.md §Golden IR](docs/gates.md).
 13. The changes are committed.
 14. A self-review has been performed before handoff.
 
 **Verification notes:**
-- During implementation, run individual test files for fast feedback (see "Code and Testing" §How to run tests); `mise exec -- just test` is the full gate required for #5.
-- **Changes to `runtime/`, the scheduler, or `stdlib/net.sprout` / `stdlib/http_server.sprout`: run `mise exec -- just linux-smoke` before pushing.** Every other local gate runs the kqueue backend; CI runs epoll + timerfd, and the two diverge in ways that are *unreachable* on macOS — `task_sleep` needs a descriptor on Linux and none on macOS, and `accept(2)` passes already-pending network errors through on Linux only. Two such failures reached CI on locally-green branches on 2026-08-11. This is a recommendation, not a Definition of Done item, because it needs a container runtime; the gate is opt-in for that reason. Requires the repo to live under `$HOME` (the container sees it through the VM's `$HOME` mount).
-- Docs/examples-only changes may skip the full suite when they do not modify `stdlib/`, test expectations, or the normative spec, but must still be verified in a way that matches the change.
+- During implementation, run individual test files for fast feedback (§Code and Testing); `mise exec -- just test` is the full gate required for #5.
+- **Changes to `runtime/`, the scheduler, `stdlib/net.sprout` or `stdlib/http_server.sprout`: run `mise exec -- just linux-smoke` before pushing.** Local gates run kqueue while CI runs epoll + timerfd, and the two diverge in ways unreachable on macOS ([docs/gates.md](docs/gates.md)). A recommendation, not a Definition of Done item, because it needs a container runtime.
+- Docs/examples-only changes may skip the full suite when they do not modify `stdlib/`, test expectations or the normative spec, but must still be verified in a way that matches the change.
 
 ## Commit Guidance
 
@@ -68,35 +51,20 @@ Use commit messages that explain intent:
 - `parser: add infix precedence for comparison operators`
 - `types: improve error for mismatched function arguments`
 
-**Review gate** — `scripts/review_gate.py`, wired as a Stop hook in `.claude/settings.json`. Once per distinct working-tree state it refuses the turn and prints a path-aware checklist: idiomatic Sprout for `.sprout`/`.spr`, `docs/guidelines.md` for `stdlib/`, GC/rooting for `stdlib/compiler/` and `runtime/`, docs+spec sync always. Stop is the only unconditional exit from a turn, so it is the only event that can gate "the change is finished" — `PostToolUse` fires mid-edit and cannot block. It cannot loop: the session's first Stop records the tree as a baseline, a state already shown is never shown twice, and `MAX_BLOCKS_PER_TURN` caps any one user turn. Generated artifacts (`bootstrap/compile_driver.ll`, `tests/golden/ir/`, `build/`, `.claude/`) are invisible to it, so a reseed or a golden snapshot never trips it. Test with `just test-review-gate`.
+**Review gate** — `scripts/review_gate.py`, a Stop hook. Once per distinct working-tree state it
+refuses the turn and prints a path-aware checklist: idiomatic Sprout for `.sprout`/`.spr`,
+`docs/guidelines.md` for `stdlib/`, GC/rooting for `stdlib/compiler/` and `runtime/`, docs+spec sync
+always. Generated artifacts (the seed, `tests/golden/ir/`, `build/`, `.claude/`) are invisible to it,
+so a reseed or a golden snapshot never trips it. Test with `just test-review-gate`.
 
-> **The gate's budget is per USER TURN, and deliberately weaker than the loop safety it looks like.** Terminating a runaway is not this hook's job: Claude Code force-ends a turn after `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP` (default **8**) *consecutive* blocking Stops, resetting that count on any non-blocking transition. `MAX_BLOCKS_PER_TURN = 3` only has to sit under 8, so a runaway is released quietly by our `systemMessage` instead of by the platform's warning. Until 2026-09-07 this was `MAX_BLOCKS = 5` counted over the whole **session**, which duplicated platform behaviour at the wrong scope: the fuse blew a few changes in and the gate was then silently dead for the rest of the session — worst in exactly the long sessions it matters most in. A turn is identified by the payload's `prompt_id` ("UUID correlating a user prompt with all subsequent events"); it is optional, and `stop_hook_active` is the fallback, being false exactly on a turn's first Stop.
->
-> **The baseline re-anchors on an accepted review, and a clean tree still baselines.** `moved` is measured against the last state the agent was shown and then left alone — not against session start. A frozen baseline grows the report *and the checklist filter* until all four items fire on every block regardless of what changed, which is how the gate becomes noise. Two edges follow from that. The baseline is now recorded even when the tree is clean: the early return for "nothing changed" used to run first, so a session starting in a fresh worktree — the normal case here — spent its baseline on its own first change and never reviewed it. And a tree that goes clean again re-anchors too, or the files you just committed reappear as phantom `X` deletions in the next report.
+**Seed gate** — `scripts/seed_gate.sh`, a PreToolUse Bash hook. Intercepts `git commit` and blocks if
+`stdlib/compiler/*.sprout` or `stdlib/*.sprout` is staged without a refreshed
+`bootstrap/compile_driver.ll`. Bypass when the IR is genuinely unchanged: `just
+verify-bootstrap-fixed-point`, then `just seed-fp-ack` as its own step with nothing touching the
+index before the commit. A new prelude `extern fn` is **not** an IR-unchanged edit — reseed fully.
 
-**Seed gate** — `scripts/seed_gate.sh`, wired as a PreToolUse Bash hook. Intercepts `git commit` and blocks if `stdlib/compiler/*.sprout` or `stdlib/*.sprout` is staged without a refreshed `bootstrap/compile_driver.ll`. Bypass (when IR is genuinely unchanged): run `just verify-bootstrap-fixed-point` then `just seed-fp-ack`.
-
-> **Both gates read every worktree, not just the main checkout — and until 2026-09-07 neither did.** Each resolved a single root from `CLAUDE_PROJECT_DIR` (review gate) or the hook's own cwd (seed gate), which is always the main checkout. A session doing its work in a linked worktree — the normal case here, and the one `feedback_worktree_path_prefix_trap` pushes you into — was therefore reviewed zero times and could commit compiler sources with a stale seed unopposed. Measured on a real session: `blocks: 0`, with a 3645-path baseline holding nothing but the main checkout's untracked dirt. Each gate now resolves the checkout the session is actually in: the review gate from the Stop payload's `cwd`, the seed gate from the command's own `cd <dir>` or `git -C <dir>`. Covered by `just test-shell-hooks` and case 12 of `just test-review-gate`; both run in `just ci-fast-gates`.
->
-> **Corrected 2026-09-07, same day: the first repair unioned `git worktree list`, which is a different bug, not a fix.** This repo has 66 worktrees. Reading all of them makes every session's gate fire on *other* sessions' concurrent edits — a review the blocked session cannot perform and did not cause. Measured while writing this: a session with `git status` empty in its own worktree was blocked three times in two minutes on another session's `fix/type-alias-expansion` work, spending 3 of its 5 lifetime blocks; its baseline held 3,678 paths, of which 3,645 were the main checkout's untracked dirt. The right scope was never a union — it is the one worktree named by `cwd`, which also drops 66 `git status` invocations and 3,659 `stat()` calls per Stop.
->
-> **A hook that informs must write JSON to stdout, never stderr.** Claude never sees stderr from a hook that exits 0 — it goes to the debug log only ([hooks reference](https://code.claude.com/docs/en/hooks)). `scripts/guidelines_reminder.sh` printed its checklist to stderr and exited 0 for its whole life, so the one gate that points at `docs/guidelines.md` before a `.sprout` edit reached nobody. It now emits `{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":…}}` on stdout, the shape `.claude/hooks/just-test-tee` already used. Only a hook that exits 2 may use stderr, and that text becomes the blocking message.
-
-> **Caveat — `just seed-stale` and CI answer different questions, and a comment-only edit splits them.** Three checks are easy to run together and are not the same thing:
->
-> | check | compares | run by |
-> |---|---|---|
-> | `scripts/seed_gate.sh` (commit hook) | staged tree hash vs `.git/seed-fp-ack` | local `git commit` |
-> | `just seed-stale` | `shasum` of `stdlib/compiler/*.sprout` vs the `; seed-fingerprint:` line at the top of the seed | nothing automatic |
-> | `just verify-bootstrap-fixed-point` | the re-emitted IR is byte-identical | **CI** (`.github/workflows/ci.yml`) |
->
-> Edit only a comment in a compiler source and the source bytes change while the emitted IR does not, so `seed-stale` reports STALE while the fixed point holds. **CI runs only the fixed-point check, so a red `seed-stale` is not evidence CI will fail** — and `seed-stale`'s own message says "Run: just refresh-seed", which will send you through a full reseed you did not need. For an IR-unchanged edit the bypass above (verify, then ack) is the correct path; reseed when you want the fingerprint line back in sync, not because the fixed point demands it. Note the commit hook compares *tree hashes*, not fingerprints: `just seed-fp-ack` must be its own step with nothing touching the index between it and the commit, or the ack goes stale and the hook blocks for a reason unrelated to the seed.
-
-> **Caveat — a new prelude `extern fn` is NOT an IR-unchanged edit.** `ir_lowering.lower_extern_decls` emits a `declare` for *every* bundled prelude extern, and `compile_driver` bundles the prelude, so adding one `extern fn` to `stdlib/prelude.sprout` adds one `declare` line to `bootstrap/compile_driver.ll`. `verify-bootstrap-fixed-point` will break; use a full `just refresh-seed` (delete the stale stage-1 binary first), **not** the `seed-fp-ack` bypass — even though `stdlib/compiler/` was untouched. No 2-step bootstrap is needed (no parser/compiler-source change; the seed diff is purely the additive declare line).
-
-Workflow:
-1. Do the work. Run all applicable DoD checks (tests, smoke-shapes, etc.).
-2. Commit with `git commit …`. The seed gate blocks if seed is stale.
+Both hooks scope to the worktree named by the session's `cwd`. Budgets, failure modes and the
+`seed-stale`-vs-CI distinction: [docs/gates.md](docs/gates.md).
 
 ## Collaboration Rules
 
@@ -119,63 +87,46 @@ Workflow:
 
 ## Backlog Discipline
 
-`BACKLOG.md` is the single canonical backlog. It is a list of **open work**, not a record of finished
-work — git, the design docs and `docs/spec-v0.md` are the record. Same anti-bloat argument as the
-memory rules below, one level out.
+`BACKLOG.md` is the single canonical backlog. It is a list of **open work**, not a record of
+finished work — git, the design docs and `docs/spec-v0.md` are the record.
 
-1. **Shape.** Wrap `BACKLOG.md` at **100 columns**, and keep an entry to **at most 10 lines**: a bold
-   title, then what is broken, where, and why it matters. Anything longer is a design doc — write
-   `docs/<feature>-v0.md` and link it. Measurements, prior-art surveys and rejected alternatives live
-   in the doc, not the entry. `just backlog-shape` checks both halves; a line budget means nothing
-   while one line can hold a paragraph. Wrapped at 100, entries sit at p50 6 lines and p90 12, so 10
-   is the existing tail. This rule first said "three lines", which **38 of 312 entries met** — a gate
-   that is red on arrival gets switched off.
-2. **Death trigger (the anti-bloat rule).** When the work lands, **delete the entry as part of
-   landing**. Its durable content moves to the design doc it names, or to the spec; a lesson about
-   *process* rather than the feature goes in this file. Do not leave a `[x]` entry behind — the gate
-   rejects one — and do not keep an "original report follows" block, because git has it.
+1. **Shape.** Wrap at **100 columns**; an entry is **at most 10 lines** — a bold title, then what is
+   broken, where, and why it matters. Anything longer is a design doc: write `docs/<feature>-v0.md`
+   and link it, and keep measurements, prior-art surveys and rejected alternatives there.
+   `just backlog-shape` checks both halves, since a line budget means nothing while one line can
+   hold a paragraph. 10 is the existing p90, not an aspiration — a gate that is red on arrival gets
+   switched off.
+2. **Death trigger (the anti-bloat rule).** When the work lands, delete the entry as part of
+   landing. Its durable content moves to the design doc it names, or to the spec; a lesson about
+   *process* rather than the feature goes in this file. No `[x]` entries — the gate rejects one —
+   and no "original report follows" block, because git has it.
 3. **Before filing, grep for it.** A duplicate filing is the failure this discipline exists to
-   prevent, and it has happened at least three times: one bug filed on the 5th and again on the 7th
-   with a smaller scope, one `just fmt` defect filed three times across two sections, one
-   lint-suppression gap twice. A bold title makes the grep work — write one.
+   prevent, and it has happened at least three times. A bold title makes the grep work — write one.
 4. **Open work does not hide inside a closed entry.** A "still open" or "remaining" bullet under a
-   `[x]` item is invisible to anyone scanning for todos. Promote it to its own `[ ]` entry, or it does
-   not exist. Seven such items were recovered in the 2026-09-07 slimming.
-
-Measured, so the cost is not hypothetical: before that pass the file was 5,886 lines and 971 KB, of
-which resolved entries were **59% of the lines** and were longer on average than the open ones.
+   `[x]` item is invisible to anyone scanning for todos. Promote it to its own `[ ]` entry, or it
+   does not exist.
 
 ## Agent Memory Discipline
 
 Coding agents keep a private auto-memory outside the repo. It is a cache of **non-repo continuity**, not an archive — keep it small and evictable. The repo is the durable record; memory is not.
 
-1. **Write gate.** Before saving a memory, route repo-appropriate content to the repo instead:
-   - Design rationale, goals/non-goals, prior-art surveys, API/semantics decisions → a `docs/<feature>-v0.md` design doc.
-   - Deferred or newly-discovered follow-up work → `BACKLOG.md` (the single canonical backlog).
-   - Anything a PR reviewer would want to see, or that git history / a design doc / `BACKLOG.md` / code+comments already records → the repo. Write the repo artifact and stop; do not also mirror it into memory.
+1. **Write gate.** Route repo-appropriate content to the repo instead: design rationale, goals/non-goals, prior-art surveys and API/semantics decisions to a `docs/<feature>-v0.md`; deferred or newly-discovered work to `BACKLOG.md`; anything a PR reviewer would want to see, or that git, a design doc or code+comments already records, to the repo. Write the repo artifact and stop — do not also mirror it into memory.
 2. **Lifecycle (the anti-bloat rule).** A `project`-type memory is transient in-flight scaffolding, valid only while its work is unlanded. **When the work lands (merged/committed) and its durable facts are in git + docs + `BACKLOG.md`, delete the memory or collapse it to a one-line pointer — as part of landing, not a later sweep.** "Landed" is the death trigger. This is what removes the need for periodic index cleanups.
 3. **What memory is legitimately for.** Working-style feedback, cross-repo/workflow lessons that touch no repo file, and session/branch continuity. These are stable and few — they are not the bloat. If unsure whether an item is memory- or repo-worthy, it goes in the repo.
 
 ## Design Change Process
 
-For any non-trivial language change, include:
+For any non-trivial language change, present: the problem statement; goals and non-goals; a
+prior-art survey; a high-level implementation overview for approval **before editing**; the syntax
+and semantics impact, type-system impact and error-message impact; compatibility and migration
+notes; tests added or updated; and the spec/docs update, with normative vs experimental status made
+explicit.
 
-1. Problem statement.
-2. Goals and non-goals.
-3. **Prior-art survey.** When the decision is a choice among established alternatives — a
-   semantics, diagnostics, or policy question comparable languages have also faced — present
-   a brief survey of how state-of-the-art languages handle it: the options they took and the
-   consensus or notable divergences, so the choice is grounded in prior art rather than
-   invented. Keep it short (a handful of languages); every claim must be verified against a
-   primary source (language reference/spec) — do not present an unconfirmed survey row or
-   hedge it with a confidence label. Present this *with* the decision, before asking for a call.
-4. High-level implementation overview for approval before editing.
-5. Syntax and semantics impact.
-6. Type-system impact.
-7. Error-message impact.
-8. Compatibility/migration notes.
-9. Tests added/updated.
-10. Spec/docs updated, with the normative vs experimental status made explicit.
+**Prior-art survey** — when the decision is a choice among established alternatives that comparable
+languages have also faced, show briefly how a handful of state-of-the-art languages handle it and
+where they diverge, so the choice is grounded rather than invented. Every claim must be verified
+against a primary source (language reference or spec) — do not present an unconfirmed row or hedge
+it with a confidence label. Present this *with* the decision, before asking for a call.
 
 ## Code and Testing
 
@@ -192,28 +143,13 @@ For any non-trivial language change, include:
 ### How to run tests
 
 8. Preferred execution path: `mise exec -- just <task>`
-9. For fast iteration during development, run a single test file directly:
+9. Fast single-file iteration — three details are easy to get wrong, see
+   [docs/debugging.md §Running one test file](docs/debugging.md#running-one-test-file):
    `./build/compile_driver_bin_stage1 --emit-ir stdlib tests/stdlib/test_foo.spr > /tmp/t.ll && clang /tmp/t.ll runtime/*.c -O2 -o /tmp/t && /tmp/t`
-   Three details this line gets wrong if you shorten it: the root argument is the
-   literal path `stdlib` (`stdlib_root` is the justfile *variable's* name, and passing
-   it verbatim fails with ``builtin `read_file`: prelude: No such file or directory``);
-   the runtime is **three** `.c` files, so `runtime/*.c` — naming only
-   `sprout_runtime.c` link-fails on `_http_park` / `_async_resolve`; and on macOS the
-   link also needs `-framework Security -framework CoreFoundation` (the justfile's
-   `clang_extra`).
-   **A test that imports `testsupport.*` needs `--package-root` — and `just test-file`
-   does NOT pass it** (corrected 2026-08-18; this line previously claimed the opposite
-   and sends you chasing a phantom bug). `_test-file` runs
-   `--emit-ir "{{stdlib_root}}" "{{file}}"` with no package root, so a `testsupport.*`
-   import resolves to nothing and every type from it is reported as
-   ``unknown type `X`: nothing in scope declares that name`` — including in
-   `tests/stdlib/test_imported_records.spr`, which is green in CI. Only the
-   `_test-stdlib` runner passes `--package-root "{{justfile_directory()}}"`. So for a
-   `testsupport.*` test either run the whole directory
-   (`mise exec -- just test-stdlib-core-stage1`) or invoke the driver directly and add
-   the flag yourself:
-   `./build/compile_driver_bin_stage1 --emit-ir <repo-root>/stdlib --package-root <repo-root> tests/stdlib/test_foo.spr`.
-   The full gate is `mise exec -- just test` (required by Definition of Done #5).
+   - the root argument is the literal path `stdlib`, not the justfile variable's name;
+   - the runtime is all three `runtime/*.c`; on macOS add `-framework Security -framework CoreFoundation`;
+   - a test importing `testsupport.*` needs `--package-root <repo-root>`, which `just test-file` does **not** pass.
+   The full gate is `mise exec -- just test` (Definition of Done #5).
 
 ## Directory Conventions
 
@@ -222,11 +158,9 @@ For any non-trivial language change, include:
 - `stdlib/` language-level standard library source (`prelude.sprout`).
 - `stdlib/compiler/` self-hosted compiler source (`parser`, `infer`, `ast_to_ir`, `ir_lowering`, `compile_driver`, etc.).
 - `runtime/` C runtime, GC, poller and scheduler (`sprout_runtime.c`, `sprout_poll.c`, `sprout_scheduler.c`); link all three.
-- `tests/stdlib/` native Sprout test files (`.spr`); run via `just test`.
-- `tests/conformance/` executable language behavior fixtures.
+- `tests/stdlib/` native Sprout test files (`.spr`, run via `just test`); `tests/conformance/` executable language behavior fixtures.
 - `bootstrap/` committed LLVM IR seed (`compile_driver.ll`) for stage-1 bootstrap.
-- `mise.toml` toolchain definition.
-- `justfile` standard developer tasks.
+- `mise.toml` toolchain definition; `justfile` standard developer tasks.
 
 ## Builtin vs Stdlib
 
@@ -240,6 +174,7 @@ For any non-trivial language change, include:
 ## Compiler Internals and Debugging Tools
 
 - **Before editing `stdlib/compiler/` or `runtime/`:** read [docs/compiler-internals.md](docs/compiler-internals.md) for GC ABI invariants, type-aware rooting rules, and the GC safety linter.
+- **When a gate fires, or you are about to override or change one:** [docs/gates.md](docs/gates.md) — what each gate checks, how it has been defeated, and the evidence.
 - **When something is broken:** see [docs/debugging.md](docs/debugging.md) for diagnostic phases (`--phase`), the 2-step bootstrap protocol (parser-change catch-22), and `just llvm-where <ll_file> <line>` (maps an `opt --passes=verify` error line to its enclosing Sprout function).
 
 ## Known Limitations
@@ -248,17 +183,11 @@ See [README.md §Not Yet Supported](./README.md#not-yet-supported-common-gotchas
 
 ## Pull Requests (GitHub)
 
-The remote is **GitHub** (`github.com/cthulhu666/sprout-lang`). Land work via a feature branch + PR to `master`.
-
-**`master` is branch-protected — every change goes through a PR, including docs.** Direct pushes to `master` are rejected for everyone (the rules are enforced for admins, and all pushers authenticate as the repo owner). The protection is:
-
-- Require a PR before merging (0 required approvals, so you can self-merge your own PR).
-- Require the `test` status check (the CI `test` job) to pass.
-- Require the branch to be up to date with `master` before merging (strict).
-- Require linear history; merges are **rebase-only** (merge-commit and squash are disabled).
-- Force-pushes and branch deletion on `master` are blocked.
-
-The standard loop:
+The remote is **GitHub** (`github.com/cthulhu666/sprout-lang`). Land work via a feature branch + PR
+to `master`, which is branch-protected: every change goes through a PR, including docs, and direct
+pushes are rejected for everyone. The protection requires a PR (0 approvals, so you can self-merge),
+the `test` status check, the branch to be up to date (strict) and linear history (rebase-only); it
+blocks force-pushes and deletion of `master`.
 
 ```
 git switch -c my-change
@@ -268,12 +197,10 @@ gh pr create --base master --fill
 # stop here: leave the PR open. Merging is Kuba's call.
 ```
 
-**Agents must not enable auto-merge.** Never pass `--auto` to `gh pr merge`; never set auto-merge
-via the API or web UI. An agent's job ends at "PR open, CI running" — report the number and stop.
-A queued auto-merge lands the change later, unwatched, skipping the review window. Merge only when
-asked for that PR, and then merge it in that turn (`gh pr merge <n> --rebase`) once CI is green on
-the current head.
+**Agents must not enable auto-merge** — no `--auto`, no API or web toggle. An agent's job ends at
+"PR open, CI running"; a queued merge lands the change later, unwatched. Merge only when asked for
+that PR, in that turn (`gh pr merge <n> --rebase`), once CI is green on the current head.
 
-- **`gh` is managed by mise** (`gh` in `mise.toml`); run `gh auth login` once if unauthenticated. Sprout is developed in git worktrees; `gh` reads the repo through the git CLI, so it works from a worktree (unlike the former Gitea `tea` client). Merged branches are auto-deleted. GitHub's auto-merge feature is available on the repo but is off-limits to agents (above).
-- **CI runs on GitHub-hosted runners** (`.github/workflows/ci.yml`, `runs-on: ubuntu-latest`) — there is no self-hosted worker to provision or dispatch. Releases (`.github/workflows/release.yml`) build linux x86_64 + aarch64 artifacts on tag push and publish via `softprops/action-gh-release`.
-- **Seed-staleness merge cascade.** Because the branch must be up to date before merging, when `master` moves under an open PR that touches `stdlib/compiler/` you must rebase onto the new `master` **and** regenerate `bootstrap/compile_driver.ll` (`just refresh-seed`) before the merge unblocks — the up-to-date rule turns this into a pre-merge gate rather than a post-merge surprise.
+- **`gh` is managed by mise**; run `gh auth login` once if unauthenticated. It reads the repo through the git CLI, so it works from a worktree. Merged branches are auto-deleted.
+- **CI runs on GitHub-hosted runners** (`.github/workflows/ci.yml`, `ubuntu-latest`) — no self-hosted worker to provision. Releases (`.github/workflows/release.yml`) build linux x86_64 + aarch64 on tag push.
+- **Seed-staleness merge cascade.** The up-to-date rule means that when `master` moves under an open PR touching `stdlib/compiler/`, you must rebase **and** `just refresh-seed` before the merge unblocks — a pre-merge gate rather than a post-merge surprise.
