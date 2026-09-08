@@ -265,9 +265,15 @@ git switch -c my-change
 # ... edit, commit ...
 git push -u origin my-change
 gh pr create --base master --fill
-gh pr merge --auto --rebase        # lands automatically when CI is green + up-to-date
+# stop here: leave the PR open. Merging is Kuba's call.
 ```
 
-- **`gh` is managed by mise** (`gh` in `mise.toml`); run `gh auth login` once if unauthenticated. Sprout is developed in git worktrees; `gh` reads the repo through the git CLI, so it works from a worktree (unlike the former Gitea `tea` client). Auto-merge is enabled and merged branches are auto-deleted.
+**Agents must not enable auto-merge.** Never pass `--auto` to `gh pr merge`; never set auto-merge
+via the API or web UI. An agent's job ends at "PR open, CI running" — report the number and stop.
+A queued auto-merge lands the change later, unwatched, skipping the review window. Merge only when
+asked for that PR, and then merge it in that turn (`gh pr merge <n> --rebase`) once CI is green on
+the current head.
+
+- **`gh` is managed by mise** (`gh` in `mise.toml`); run `gh auth login` once if unauthenticated. Sprout is developed in git worktrees; `gh` reads the repo through the git CLI, so it works from a worktree (unlike the former Gitea `tea` client). Merged branches are auto-deleted. GitHub's auto-merge feature is available on the repo but is off-limits to agents (above).
 - **CI runs on GitHub-hosted runners** (`.github/workflows/ci.yml`, `runs-on: ubuntu-latest`) — there is no self-hosted worker to provision or dispatch. Releases (`.github/workflows/release.yml`) build linux x86_64 + aarch64 artifacts on tag push and publish via `softprops/action-gh-release`.
 - **Seed-staleness merge cascade.** Because the branch must be up to date before merging, when `master` moves under an open PR that touches `stdlib/compiler/` you must rebase onto the new `master` **and** regenerate `bootstrap/compile_driver.ll` (`just refresh-seed`) before the merge unblocks — the up-to-date rule turns this into a pre-merge gate rather than a post-merge surprise.
