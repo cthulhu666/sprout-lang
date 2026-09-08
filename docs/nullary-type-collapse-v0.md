@@ -1,13 +1,22 @@
 # The nullary type collapse (v0)
 
-Status: **BUG REPORT, design decided (§9, Option A′, 2026-09-08), unimplemented.** Filed
-2026-09-07. Every claim below was verified
-by compiling and running on master `40808541` (tree `e73d8152`); the commits since are
-docs-only, so no compiler source has moved under it.
+Status: **Shape LANDED 2026-09-08 (Option A′, §9); effect laundering (§2) still open.**
+Filed 2026-09-07. Every claim below was verified by compiling and running on master
+`40808541` (tree `e73d8152`).
 
-A nullary function's type *is* its return type. `() -> T` collapses to `T`, so a function
-value and a plain `T` are the same type. One absent type constructor produces three
-symptoms, one of which is memory-unsafe.
+`types.TThunk ret eff` is the zero-parameter arrow: no parameter, no ownership, its own
+effect slot. `() -> T` parses — only directly before `->`, so `()` remains a parse error as
+a standalone type — and is distinct from `Unit -> T`. Symptoms 2 and 3 are rejected and
+their fixtures are out of quarantine. Symptom 1 is NOT fixed: `call_effect_of` still reads
+a nullary call's effect off the Scheme rather than off the arrow, so
+`nullary_local_callee_launders_effect` stays quarantined. That is the remaining work, and
+it is what §7 needs for effect subsumption.
+
+A nullary function's type *was* its return type: `() -> T` collapsed to `T`, so a function
+value and a plain `T` were the same type. One absent type constructor produced three
+symptoms, one of which was memory-unsafe. Sections 1–8 below describe the bug as it stood
+when filed, in the present tense of that report; §9 decides, §9.5 records the break, §10
+the fixtures.
 
 ## 1. The fact
 
@@ -186,7 +195,7 @@ nothing.
 type unspellable and compensates with position checks. Haskell manages without the type
 because laziness removes the need for it, not because it guards the two positions.
 
-## 9. The decision (open)
+## 9. The decision
 
 **Option A — give a nullary function a real arrow type**, `Unit -> T`. Fixes all three
 symptoms uniformly, and the runtime already models arity 0
@@ -234,17 +243,35 @@ Measured cost, so it is not relitigated as a surprise:
 This also settles §10: the diagnostics can now be committed to, so the three fixtures
 deferred there can be written.
 
-## 10. Tests — deferred deliberately, with the reason
+## 9.5 Compatibility
 
-`_test-reject` takes an xfail list of basenames (`justfile:761`); `type_error/` currently
-passes an empty one. It self-heals: a listed fixture that starts matching reports
-`UNEXPECTED MATCH (remove from xfail)` and the gate goes red. So a red fixture *can* be
-quarantined here.
+Breaking, in one direction only: a nullary function passed where `Unit -> T` is expected no
+longer type-checks, because `() -> T` and `Unit -> T` are now distinct. The fix is to spell
+the parameter `() -> T`. A genuine `Unit`-taking closure — declared `Unit -> T`, called as
+`f(())`, and supplied as `\u -> …` — is unaffected; `stdlib/task.sprout` and
+`stdlib/tui/widget.sprout` are both this shape and needed no change. The one site in the
+tree that relied on the collapse was `test_lowering.spr`'s `p1c-zero-arg`, which declared
+`(Unit -> Int)` and passed the zero-arg class method `make`; it only ever type-checked
+because the collapse made `make : a`, bridged by the `Unit`-peel workaround in
+`eta_actual_type_for_scheme_match` (now scheduled for removal, `BACKLOG.md`).
 
-The blocker is that the match is `grep -qF` against the `.err` file (`justfile:798`), so a
-fixture must commit to the diagnostic's wording — and which diagnostic is correct depends
-on §9. A guessed string would never self-heal, which is worse than no fixture. File all
-three with the design decision.
+`.iface` moves 6 → 7. A v6 file is rejected loudly rather than read leniently: decoded
+under v7 rules every nullary signature would come back as its bare return type, which is
+this bug reintroduced across a module boundary.
+
+## 10. Tests
+
+`_test-reject` takes an xfail list of basenames (`justfile:761`) and self-heals: a listed
+fixture that starts matching reports `UNEXPECTED MATCH (remove from xfail)` and the gate
+goes red. The match is `grep -qF` against the `.err` file (`justfile:798`), so a fixture
+commits to the diagnostic's wording — which is why all three were filed red and quarantined
+only once §9 settled which diagnostic is correct.
+
+Landed state: `nullary_int_in_callee_position` (`Type mismatch: Int vs () ->`) and
+`nullary_ref_is_not_its_result` (`() -> Int`) now reject and are out of the xfail list.
+`nullary_local_callee_launders_effect` remains in it. `tests/conformance/run/`
+`nullary_thunk_type_ok.spr` pins the positive shape — a thunk in a parameter and in a
+constructor payload — which is the case Option B could not express.
 
 > `BACKLOG.md` claimed on 2026-08-16 that `tests/conformance/type_error/` "has no `XFAIL`
 > manifest". That was false when written: the `xfail` parameter had existed since

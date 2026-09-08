@@ -57,11 +57,14 @@ Legend:
 
 **Types and inference**
 
-- [ ] `P1` **A nullary function's type IS its return type — `() -> T` collapses to `T`**, so a
-  function value and a plain `T` are one type. `fn f(x: Int) -> Int = x()` type-checks and
-  segfaults; an `!{IO}` thunk bound by `let` launders its effect. Memory-unsafe from ordinary
-  well-typed source, and it blocks part 4 of effect subsumption. Decision open:
-  `docs/nullary-type-collapse-v0.md`.
+- [ ] `P2` **A nullary call reads its effect off the Scheme, not off its arrow**, so an `!{IO}`
+  thunk bound by `let` and then called still launders its effect under a pure signature. The
+  `TThunk` arrow landed 2026-09-08 and fixed the two SHAPE symptoms (the segfault included), but
+  `infer.call_effect_of` still branches on `argc <= 0` to `types.scheme_effects` and
+  `arrows_effect` returns Pure at argc 0 — neither looks at the thunk's own effect slot, which now
+  exists. Repro is red and quarantined: `tests/conformance/type_error/`
+  `nullary_local_callee_launders_effect.spr`. Blocks part 4 of effect subsumption.
+  `docs/nullary-type-collapse-v0.md` §2, §7.
 - [ ] `P1` **Int overflow policy (DEFERRED 2026-07-06).** `+`/`-`/`*` do silent two's-complement
   wrap (plain `add/sub/mul i64`, no `nsw`), contradicting the spec's arbitrary-precision `Int`
   intent. Option A (trap/panic, Swift/Rust-debug/Zig) vs Option B (Go: wrap, compile-error on
