@@ -512,9 +512,19 @@ Legend:
   `static`/`spacer` and the four child traversals; `examples/tui_dashboard.sprout` went 284 → 157
   lines with no container of its own. `View.measure` now returns a `Measured` so a child can ask
   for "whatever is left". C2–C3 below remain. Design: `docs/tui-widget-set-v0.md`.
-- [ ] `P1` **TUI M4 C2 — focus and the interactive set.** `button`, `input`, `list_view`. Focus is
-  what makes `ToEvent` reachable. Unblocked 2026-09-08: the two routing corrections it is written
-  against landed as `widget.route_when` and `widget.namespaced` (`docs/tui-routing-v0.md` §3.8–3.9).
+- [ ] `P1` **TUI M4 C2b — the text-entry and selection widgets.** `input`, `list_view`. C2a landed
+  2026-09-08 (`ToFocus`, `focus_ring`, `button`), so both are plain consumers of a settled focus
+  contract and need no builtin — a caret edit is `string.take`/`drop`. Carries the first
+  interactive example: `examples/tui_dashboard.sprout` still demonstrates nothing focusable.
+  Design: `docs/tui-focus-v0.md` §7.
+- [ ] `P2` **TUI focus — click-to-focus needs a retained hit-test tree.** Containers discard the
+  solved region list after painting, so nothing can answer "what is under the pointer", and
+  `focus_ring` is keyboard-only. Design: `docs/tui-focus-v0.md` §9.
+- [ ] `P3` **TUI focus — terminal cursor placement, and focus trapping.** `app.run` hides the
+  cursor for the whole session, so a focused `input` paints its own caret cell; Brick instead
+  feeds `appChooseCursor` from the ring. Trapping — a widget that consumes Tab itself — is the
+  opt-in §4.5 declines to make implicit. Both are cosmetic until an application asks.
+  Design: `docs/tui-focus-v0.md` §9.
 - [ ] `P2` **TUI M4 C3 — the larger widgets.** `scroll_view`, `tabs`, `tree`, `table`,
   `text_area`. Split off because `text_area` carries the language work below.
 - [ ] `P2` **TUI M4 language work — `mutvec_insert`/`mutvec_remove`, sign-off first (Collaboration

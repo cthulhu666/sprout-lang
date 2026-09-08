@@ -1,0 +1,144 @@
+module stdlib.tui.widgets.focus
+
+# Which widget the keyboard belongs to. Design: docs/tui-focus-v0.md.
+#
+# A wrapper rather than state beside the tree: focus changes over time, and
+# `app.App`'s `update` would have to return one — breaking every application to
+# hand it a job the framework can do (§4.3).
+
+import stdlib.tui.event as event
+import stdlib.tui.geometry as geometry
+import stdlib.tui.screen as scr
+import stdlib.tui.widget as widget
+
+# `at` is an id, not an index into `ids`: a name that matches no widget parks
+# focus rather than failing (§4.6), so the ring must be able to hold a position
+# nothing answers to.
+type Ring m = (ids: List widget.WidgetId, at: Maybe widget.WidgetId,
+               child: widget.Widget m)
+
+# ── the ring's position ─────────────────────────────────────────────────────
+
+fn first_of(ids: List widget.WidgetId) -> Maybe widget.WidgetId =
+  match ids with
+  | Nil -> Nothing
+  | [x | _] -> Just(x)
+
+# The id after `cur`, wrapping — and the first id when there is no current one
+# or `cur` has since left the list. Retreating is this over the reversed list,
+# which is why there is no second walk.
+fn ring_next(ids: List widget.WidgetId,
+             cur: Maybe widget.WidgetId) -> Maybe widget.WidgetId =
+  let Just id = cur else first_of(ids)
+  in after(ids, id, ids)
+
+fn after(rest: List widget.WidgetId, id: widget.WidgetId,
+         all: List widget.WidgetId) -> Maybe widget.WidgetId =
+  match rest with
+  | Nil -> first_of(all)
+  | [x | more] ->
+      if widget.id_eq(x, id) then wrapped(more, all) else after(more, id, all)
+
+fn wrapped(more: List widget.WidgetId,
+           all: List widget.WidgetId) -> Maybe widget.WidgetId =
+  match more with
+  | Nil -> first_of(all)
+  | [y | _] -> Just(y)
+
+# Focus may only be set to a name the ring holds, as Brick's `focusSetCurrent`
+# also requires; an id outside the list starts the ring focused on nothing.
+fn member(ids: List widget.WidgetId,
+          id: widget.WidgetId) -> Maybe widget.WidgetId =
+  if any(widget.id_eq(id, _), ids) then Just(id) else Nothing
+
+# ── telling a widget ────────────────────────────────────────────────────────
+
+# A widget that declines is left as it is: the id list is the author's claim
+# about the tree, and nothing can check it (§4.6).
+fn notify(child: widget.Widget m, who: Maybe widget.WidgetId,
+          on: Bool) -> (widget.Widget m, List m, List(widget.Cmd m)) =
+  let Just id = who else (child, Nil, Nil)
+      Just t = widget.deliver(child, id, widget.ToFocus(on)) else (child, Nil, Nil)
+  in t
+
+# Blur first, so no widget can observe two focused peers.
+fn move_focus(r: Ring m,
+              to: Maybe widget.WidgetId) -> (Ring m, List m, List(widget.Cmd m)) =
+  let (dark, said, asked) = notify(r.child, r.at, false)
+      (lit, said2, asked2) = notify(dark, to, true)
+  in (Ring(ids = r.ids, at = to, child = lit),
+      list_append(said, said2), list_append(asked, asked2))
+
+# ── the widget ──────────────────────────────────────────────────────────────
+
+# Keyboard input is focused; everything else broadcasts (§4.4). A tick is
+# addressed to nobody, and the mouse belongs to whatever is under the pointer,
+# which needs hit-testing the framework does not have.
+fn ring_on_event(r: Ring m,
+                 ev: event.Event) -> (Ring m, List m, List(widget.Cmd m)) =
+  match ev with
+  | event.KeyPress k _ -> on_key(r, ev, k)
+  | event.Paste _ -> to_focused(r, ev)
+  | _ -> broadcast(r, ev)
+
+# Tab is read before the focused widget sees it, so a greedy handler cannot
+# trap focus (§4.5).
+fn on_key(r: Ring m, ev: event.Event,
+          k: event.Key) -> (Ring m, List m, List(widget.Cmd m)) =
+  match k with
+  | event.KTab -> move_focus(r, ring_next(r.ids, r.at))
+  | event.KBackTab -> move_focus(r, ring_next(list_reverse(r.ids), r.at))
+  | _ -> to_focused(r, ev)
+
+# The fall-through `route_when` exists for: a key the focused widget declines
+# still reaches everything the broadcast reaches.
+fn to_focused(r: Ring m,
+              ev: event.Event) -> (Ring m, List m, List(widget.Cmd m)) =
+  let Just id = r.at else broadcast(r, ev)
+      Just t = widget.deliver(r.child, id, widget.ToEvent(ev)) else broadcast(r, ev)
+  in rewrap(r, t)
+
+fn broadcast(r: Ring m,
+             ev: event.Event) -> (Ring m, List m, List(widget.Cmd m)) =
+  rewrap(r, widget.on_event(r.child, ev))
+
+fn rewrap(r: Ring m,
+          t: (widget.Widget m, List m, List(widget.Cmd m))) -> (Ring m, List m, List(widget.Cmd m)) =
+  match t with
+  | (c2, said, asked) -> (r with (child = c2), said, asked)
+
+# Addressed delivery passes straight through, so wrapping the root leaves
+# routing exactly as it was.
+fn ring_route(r: Ring m, target: widget.WidgetId,
+              d: widget.Delivery m) -> Maybe (Ring m, List m, List(widget.Cmd m)) =
+  map(rewrap(r, _), widget.deliver(r.child, target, d))
+
+fn ring_render(r: Ring m, reg: geometry.Region, s: scr.Screen) -> Unit !{IO} =
+  widget.render(r.child, reg, s)
+
+fn ring_measure(r: Ring m, avail: geometry.Size) -> widget.Measured =
+  widget.measure(r.child, avail)
+
+fn ring_widget(r: Ring m) -> widget.Widget m =
+  widget.Widget(widget.View(state = r, on_event = ring_on_event,
+                            route = ring_route, render = ring_render,
+                            measure = ring_measure))
+
+# The first notification's messages and commands are DROPPED — the tree is
+# built before `app.run` exists, so there is no loop to receive them. A
+# `ToFocus` handler is therefore a plain state change and nothing else.
+fn ring_start(ids: List widget.WidgetId, at: Maybe widget.WidgetId,
+              child: widget.Widget m) -> widget.Widget m =
+  let (lit, _, _) = notify(child, at, true)
+  in ring_widget(Ring(ids = ids, at = at, child = lit))
+
+# Focus starts on the head of `ids`, so an application is keyboard-usable
+# without a first Tab.
+export fn focus_ring(ids: List widget.WidgetId,
+                     child: widget.Widget m) -> widget.Widget m =
+  ring_start(ids, first_of(ids), child)
+
+# The same, starting somewhere else — restoring a remembered focus.
+export fn focus_ring_at(ids: List widget.WidgetId, start: widget.WidgetId,
+                        child: widget.Widget m) -> widget.Widget m =
+  ring_start(ids, member(ids, start), child)

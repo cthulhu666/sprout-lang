@@ -40,10 +40,12 @@ In scope, and not in the first draft: **one breaking change to `View.measure`**
 a sibling widget into nothing, and because the contract is four constructions old.
 
 Non-goals for C1: focus, and therefore every interactive widget (`button`,
-`input`, `list_view`) — that is C2, and it must not start before the two routing
-corrections it is written against have landed. They since have, on 2026-09-08,
-as `widget.route_when` and `widget.namespaced` (`docs/tui-routing-v0.md`
-§3.8–3.9), so C2 is unblocked. Scrolling, borders, tabs, tables and `text_area` are C3.
+`input`, `list_view`) — that is C2, designed in `docs/tui-focus-v0.md`. It could
+not start before the two routing corrections it is written against had landed;
+they did, on 2026-09-08, as `widget.route_when` and `widget.namespaced`
+(`docs/tui-routing-v0.md` §3.8–3.9). C2a (`ToFocus`, `focus_ring`, `button`)
+landed the same day; `input` and `list_view` are C2b. Scrolling, borders, tabs,
+tables and `text_area` are C3.
 Reflowing text is deferred with a reason (§4.6). No new builtin: the
 `vector_remove` question belongs to C3's `text_area`, not here.
 

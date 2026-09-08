@@ -1,0 +1,302 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.tui.event as event
+import stdlib.tui.geometry as g
+import stdlib.tui.screen as scr
+import stdlib.tui.style as sty
+import stdlib.tui.widget as widget
+import stdlib.tui.widgets.button as btn
+import stdlib.tui.widgets.container as ct
+import stdlib.tui.widgets.focus as focus
+
+# Focus: which widget the keyboard belongs to. Design: docs/tui-focus-v0.md.
+#
+# `on_event` broadcasts and `route` is addressed; focus is the rule that turns
+# a keystroke from the first into the second. Every case here is observed
+# through what the probes SAY, because their states are behind the existential
+# and no test may reach into them.
+
+type Msg (..) deriving (Eq, ToString) =
+  | Noted String
+  | Pressed Int
+
+type alias Says = List Msg
+type alias Asks = List(widget.Cmd Msg)
+type alias Reply = Maybe(widget.Widget Msg, Says, Asks)
+
+# ── a probe that reports every way it can be reached ────────────────────────
+
+# Broadcast and addressed delivery are distinguishable in the reply, which is
+# the whole point: a test can tell WHICH path a key took.
+fn probe_on_event(name: String, n: Int,
+                  ev: event.Event) -> (Int, Says, Asks) =
+  (n, [Noted(name ++ ":bcast")], Nil)
+
+fn probe_handler(name: String, n: Int,
+                 d: widget.Delivery Msg) -> Maybe (Int, Says, Asks) =
+  match d with
+  | widget.ToMsg m -> Just((n, [Noted(name ++ ":msg")], Nil))
+  | widget.ToFocus f -> Just((n, [Noted(name ++ focus_tag(f))], Nil))
+  | widget.ToEvent e -> probe_key(name, n, e)
+
+fn focus_tag(f: Bool) -> String = if f then ":focus" else ":blur"
+
+# Claims `x` and declines every other key, so the fall-through of §4.4 is
+# reachable — a focused widget that ignores a key must not swallow it.
+fn probe_key(name: String, n: Int,
+             e: event.Event) -> Maybe (Int, Says, Asks) =
+  match e with
+  | event.KeyPress k _ -> probe_char(name, n, k)
+  | _ -> Nothing
+
+fn probe_char(name: String, n: Int, k: event.Key) -> Maybe (Int, Says, Asks) =
+  match k with
+  | event.KChar c -> probe_claim(name, n, c)
+  | _ -> Nothing
+
+fn probe_claim(name: String, n: Int, c: Char) -> Maybe (Int, Says, Asks) =
+  if c == 'x' then Just((n, [Noted(name ++ ":x")], Nil)) else Nothing
+
+fn probe_render(n: Int, r: g.Region, s: scr.Screen) -> Unit !{IO} = ()
+
+fn probe_measure(n: Int, avail: g.Size) -> widget.Measured =
+  widget.fixed_size(g.Size(1, 1))
+
+fn probe(name: String, on_ev: Int -> event.Event -> (Int, Says, Asks),
+         handler: Int -> widget.Delivery Msg -> Maybe (Int, Says, Asks)) -> widget.Widget Msg =
+  widget.Widget(widget.View(state = 0, on_event = on_ev,
+                            route = widget.route_when(widget.WidgetId(name),
+                                                      handler, _, _, _),
+                            render = probe_render, measure = probe_measure))
+
+fn a_on_event(n: Int, ev: event.Event) -> (Int, Says, Asks) =
+  probe_on_event("a", n, ev)
+
+fn a_handler(n: Int, d: widget.Delivery Msg) -> Maybe (Int, Says, Asks) =
+  probe_handler("a", n, d)
+
+fn b_on_event(n: Int, ev: event.Event) -> (Int, Says, Asks) =
+  probe_on_event("b", n, ev)
+
+fn b_handler(n: Int, d: widget.Delivery Msg) -> Maybe (Int, Says, Asks) =
+  probe_handler("b", n, d)
+
+fn c_on_event(n: Int, ev: event.Event) -> (Int, Says, Asks) =
+  probe_on_event("c", n, ev)
+
+fn c_handler(n: Int, d: widget.Delivery Msg) -> Maybe (Int, Says, Asks) =
+  probe_handler("c", n, d)
+
+fn probe_a() -> widget.Widget Msg = probe("a", a_on_event, a_handler)
+
+fn probe_b() -> widget.Widget Msg = probe("b", b_on_event, b_handler)
+
+fn probe_c() -> widget.Widget Msg = probe("c", c_on_event, c_handler)
+
+# ── observing ───────────────────────────────────────────────────────────────
+
+fn key(k: event.Key) -> event.Event = event.KeyPress(k, event.mods_none())
+
+fn said(r: (widget.Widget Msg, Says, Asks)) -> String =
+  match r with
+  | (_, msgs, _) -> to_string(msgs)
+
+fn fed(w: widget.Widget Msg, evs: List event.Event) -> String =
+  said(widget.feed(w, evs))
+
+fn hit_of(r: Reply) -> Bool =
+  match r with
+  | Nothing -> false
+  | Just _ -> true
+
+fn said_of(r: Reply) -> String =
+  match r with
+  | Nothing -> "none"
+  | Just (_, msgs, _) -> to_string(msgs)
+
+fn pair() -> widget.Widget Msg =
+  ct.column([ct.fit(probe_a()), ct.fit(probe_b())])
+
+fn ring(names: List String) -> widget.Widget Msg =
+  focus.focus_ring(list_map(widget.WidgetId, names), pair())
+
+fn ids() -> List widget.WidgetId = list_map(widget.WidgetId, ["a", "b"])
+
+# Two entries cannot tell advancing from retreating — both land on the other
+# one. Direction is only observable from three.
+fn trio() -> widget.Widget Msg =
+  ct.column([ct.fit(probe_a()), ct.fit(probe_b()), ct.fit(probe_c())])
+
+fn trio_ring() -> widget.Widget Msg =
+  focus.focus_ring(list_map(widget.WidgetId, ["a", "b", "c"]), trio())
+
+# ── the buttons ─────────────────────────────────────────────────────────────
+
+fn buttons() -> widget.Widget Msg =
+  ct.column([ct.fit(btn.button(widget.WidgetId("b1"), "one", Pressed(1))),
+             ct.fit(btn.button(widget.WidgetId("b2"), "two", Pressed(2)))])
+
+fn button_ring() -> widget.Widget Msg =
+  focus.focus_ring(list_map(widget.WidgetId, ["b1", "b2"]), buttons())
+
+fn lone_button() -> widget.Widget Msg =
+  btn.button(widget.WidgetId("b1"), "ok", Pressed(1))
+
+fn to_button(w: widget.Widget Msg, d: widget.Delivery Msg) -> Reply =
+  widget.deliver(w, widget.WidgetId("b1"), d)
+
+# Underline rather than reverse, so the assertion cannot pass on the default.
+fn underlined_button() -> widget.Widget Msg =
+  btn.button_styled(widget.WidgetId("b1"),
+                    btn.ButtonStyle(normal = sty.style_default(),
+                                    focused = sty.with_underline(sty.style_default(),
+                                                                 true)),
+                    "ok", Pressed(1))
+
+fn painted(w: widget.Widget Msg, cols: Int) -> scr.Screen !{IO} = do
+  s <- scr.screen_new(g.Size(cols, 1))
+  widget.render(w, g.Region(0, 0, cols, 1), s)
+  s
+
+fn reverse_at(s: scr.Screen, col: Int) -> Bool !{IO} = do
+  c <- scr.cell_at(s, col, 0)
+  sty.style_reverse(scr.cell_style(c))
+
+fn underline_at(s: scr.Screen, col: Int) -> Bool !{IO} = do
+  c <- scr.cell_at(s, col, 0)
+  sty.style_underline(scr.cell_style(c))
+
+# `text_at` answers one cell, and the assertion is about the whole label.
+fn row_text(s: scr.Screen, col: Int, cols: Int) -> String !{IO} =
+  if col >= cols then "" else row_step(s, col, cols)
+
+fn row_step(s: scr.Screen, col: Int, cols: Int) -> String !{IO} = do
+  here <- scr.text_at(s, col, 0)
+  rest <- row_text(s, col + 1, cols)
+  here ++ rest
+
+fn main() -> Unit !{IO} = do
+  state <- new_state()
+  dispatch_cases(state)
+  movement_cases(state)
+  passthrough_cases(state)
+  button_cases(state)
+  button_render_cases(state)
+  summary(state)
+
+# ── the keyboard belongs to one widget ──────────────────────────────────────
+
+fn dispatch_cases(state: TestState) -> Unit !{IO} = do
+  # Focus starts on the head of `ids`, so an application is usable without a
+  # first Tab. `b` never sees the key.
+  assert_eq(state, "a key reaches only the focused widget",
+            fed(ring(["a", "b"]), [key(event.KChar('x'))]), "[Noted(a:x)]")
+  # The case `route_when` exists for: the focused widget declines, so the key
+  # falls back to the broadcast every widget still sees.
+  assert_eq(state, "a key the focused widget declines falls through to broadcast",
+            fed(ring(["a", "b"]), [key(event.KEnter)]),
+            "[Noted(a:bcast), Noted(b:bcast)]")
+  # A tick is addressed to nobody.
+  assert_eq(state, "a non-key event broadcasts without consulting focus",
+            fed(ring(["a", "b"]), [event.TickEvent]),
+            "[Noted(a:bcast), Noted(b:bcast)]")
+  assert_eq(state, "an empty ring broadcasts everything",
+            fed(ring(Nil), [key(event.KChar('x'))]),
+            "[Noted(a:bcast), Noted(b:bcast)]")
+  # §4.6: the id list is the author's claim about the tree and nothing can
+  # check it, so a name that matches no widget parks focus rather than failing.
+  assert_eq(state, "an id naming nothing parks focus on nobody",
+            fed(ring(["zz", "a"]), [key(event.KChar('x'))]),
+            "[Noted(a:bcast), Noted(b:bcast)]")
+
+# ── Tab moves it ────────────────────────────────────────────────────────────
+
+fn movement_cases(state: TestState) -> Unit !{IO} = do
+  # Blur before focus, so a widget can never observe two focused peers.
+  assert_eq(state, "a move blurs the old widget before focusing the new",
+            fed(ring(["a", "b"]), [key(event.KTab)]),
+            "[Noted(a:blur), Noted(b:focus)]")
+  assert_eq(state, "and the key then reaches the new one",
+            fed(ring(["a", "b"]), [key(event.KTab), key(event.KChar('x'))]),
+            "[Noted(a:blur), Noted(b:focus), Noted(b:x)]")
+  assert_eq(state, "Tab wraps at the end of the ring",
+            fed(ring(["a", "b"]), [key(event.KTab), key(event.KTab),
+                                   key(event.KChar('x'))]),
+            "[Noted(a:blur), Noted(b:focus), Noted(b:blur), Noted(a:focus), Noted(a:x)]")
+  assert_eq(state, "Tab advances to the next of three",
+            fed(trio_ring(), [key(event.KTab), key(event.KChar('x'))]),
+            "[Noted(a:blur), Noted(b:focus), Noted(b:x)]")
+  # The pair above would pass on a forward walk too; only three entries make
+  # the direction observable.
+  assert_eq(state, "Shift-Tab retreats and wraps at the start",
+            fed(trio_ring(), [key(event.KBackTab), key(event.KChar('x'))]),
+            "[Noted(a:blur), Noted(c:focus), Noted(c:x)]")
+  # §4.5: the ring reads Tab first, so no handler can trap focus.
+  assert_eq(state, "the ring takes Tab before the focused widget sees it",
+            fed(focus.focus_ring(ids(), probe_a()), [key(event.KTab)]),
+            "[Noted(a:blur)]")
+  assert_eq(state, "focus_ring_at starts where it is told",
+            fed(focus.focus_ring_at(ids(), widget.WidgetId("b"), pair()),
+                [key(event.KChar('x'))]),
+            "[Noted(b:x)]")
+
+# ── the ring is transparent to everything else ──────────────────────────────
+
+fn passthrough_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "an addressed message still reaches a child through the ring",
+            said_of(widget.deliver(ring(["a", "b"]), widget.WidgetId("b"),
+                                   widget.ToMsg(Noted("q")))),
+            "[Noted(b:msg)]")
+  assert_eq(state, "an address no child claims is still reported unhandled",
+            hit_of(widget.deliver(ring(["a", "b"]), widget.WidgetId("zz"),
+                                  widget.ToMsg(Noted("q")))),
+            false)
+  assert_eq(state, "the ring measures as its child",
+            to_string(widget.measure(ring(["a", "b"]), g.Size(20, 10)).size),
+            to_string(widget.measure(pair(), g.Size(20, 10)).size))
+
+# ── button ──────────────────────────────────────────────────────────────────
+
+fn button_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "a focused button fires on Enter",
+            fed(button_ring(), [key(event.KEnter)]), "[Pressed(1)]")
+  assert_eq(state, "and on Space",
+            fed(button_ring(), [key(event.KChar(' '))]), "[Pressed(1)]")
+  # Only the focused one fires, which is the reason focus exists.
+  assert_eq(state, "Tab moves which button Enter fires",
+            fed(button_ring(), [key(event.KTab), key(event.KEnter)]),
+            "[Pressed(2)]")
+  # A bare button starts unfocused, so this is the unfocused path directly.
+  assert_eq(state, "an unfocused button ignores Enter",
+            hit_of(to_button(lone_button(), widget.ToEvent(key(event.KEnter)))),
+            false)
+  # §4.5 depends on this: the ring reads Tab first, and the button would
+  # decline it anyway.
+  assert_eq(state, "a button declines Tab",
+            hit_of(to_button(lone_button(), widget.ToEvent(key(event.KTab)))),
+            false)
+  assert_eq(state, "a button claims a focus notification and says nothing",
+            said_of(to_button(lone_button(), widget.ToFocus(true))), "[]")
+  # An answer addressed to a widget that asked for nothing is not its business.
+  assert_eq(state, "a button declines a message",
+            hit_of(to_button(lone_button(), widget.ToMsg(Noted("q")))), false)
+
+fn button_render_cases(state: TestState) -> Unit !{IO} = do
+  s <- painted(lone_button(), 10)
+  t <- row_text(s, 0, 6)
+  assert_eq(state, "a button paints its label in brackets", t, "[ ok ]")
+  assert_eq(state, "and sizes itself to fit them",
+            to_string(widget.measure(lone_button(), g.Size(20, 10)).size),
+            to_string(g.Size(6, 1)))
+  plain <- reverse_at(s, 0)
+  assert_eq(state, "an unfocused button paints normally", plain, false)
+  fs <- painted(focus.focus_ring(list_map(widget.WidgetId, ["b1"]),
+                                 lone_button()), 10)
+  hot <- reverse_at(fs, 0)
+  assert_eq(state, "a focused button paints reversed", hot, true)
+  us <- painted(focus.focus_ring(list_map(widget.WidgetId, ["b1"]),
+                                 underlined_button()), 10)
+  lined <- underline_at(us, 0)
+  assert_eq(state, "button_styled paints the focused style it was given",
+            lined, true)
+  not_reversed <- reverse_at(us, 0)
+  assert_eq(state, "and not the default one", not_reversed, false)

@@ -71,6 +71,7 @@ Nothing enforces id uniqueness. See §3.4 for what that costs and how it is boun
 export type Delivery m (..) =
   | ToMsg m
   | ToEvent event.Event
+  | ToFocus Bool   # added by C2; docs/tui-focus-v0.md §4.2
 
 route: s -> WidgetId -> Delivery m -> Maybe (s, List m, List (Cmd m))
 ```
