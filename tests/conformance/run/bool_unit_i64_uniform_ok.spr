@@ -1,0 +1,30 @@
+module main
+
+# Bool and Unit are i64-uniform through the IR pipeline: a Bool-bodied lambda,
+# a Bool capture, and Bool/Unit constructor fields all lower with no widening
+# op at the boundary.
+
+type Flag =
+  | Flag Bool
+
+type Holder =
+  | Holder Unit Int
+
+fn apply_pred(p: Int -> Bool, n: Int) -> Bool = p(n)
+
+fn unwrap(f: Flag) -> Bool =
+  match f with
+  | Flag b -> b
+
+fn count(h: Holder) -> Int =
+  match h with
+  | Holder _ n -> n
+
+fn show(b: Bool) -> String = if b then "true" else "false"
+
+fn main() -> Unit !{IO} = do
+  print(show(apply_pred(\x -> x > 3, 5)))
+  let flag = 4 > 3
+  print(show(apply_pred(\_ -> flag, 0)))
+  print(show(unwrap(Flag(3 > 2))))
+  print(int_to_string(count(Holder((), 5))))

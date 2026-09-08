@@ -1,0 +1,19 @@
+module main
+
+# A named function with a tuple parameter reaches a higher-order call site
+# through an eta wrapper whose parameter is i64, like every other closure
+# argument — not a by-value tuple.
+
+fn fst_of(p: (Int, Int)) -> Int =
+  match p with
+  | (a, _) -> a
+
+fn snd_of(p: (Int, Int)) -> Int =
+  match p with
+  | (_, b) -> b
+
+fn apply_to(g: (Int, Int) -> Int, p: (Int, Int)) -> Int = g(p)
+
+fn main() -> Unit !{IO} = do
+  print(int_to_string(apply_to(fst_of, (7, 9))))
+  print(int_to_string(apply_to(snd_of, (7, 9))))

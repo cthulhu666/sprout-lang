@@ -1308,18 +1308,6 @@ deferral happened, not for current behaviour. Still open:
 
 ### Sprout-IR / Model-C codegen
 
-- [ ] `P1` **Bool return and Bool capture in closures — needs `IRZextI1ToI64` +
-  `IRTruncI64ToI1`.** `translate_lambda` rejects (a) lambdas whose body type is Bool (the lifted fn
-  always returns `i64` while a Bool body produces `i1`) and (b) lambdas capturing a Bool-typed outer
-  variable (`IRLoadEnvSlot` returns `i64`, the source value is `i1`). Both need selective
-  widening/narrowing: the zext at the lifted body's `IRRet`, the trunc after each Bool
-  `IRLoadEnvSlot`.
-- [ ] `P1` **Add `IRZextI1ToI64` so Bool ctor fields can lower.** `ir_lowering`'s `IRMakeCtor`
-  hardcodes `i64 %argN` per field slot; Bool expressions produce `i1`. A defensive filter in
-  `ast_to_ir` currently returns `Err "Bool ctor field not yet supported"`. Add the op to
-  `sprout_ir.sprout`, have `translate_args_ctor` insert it when the arg's typed type is Bool, emit
-  `zext i1 … to i64` in `lower_op`, then relax the filter. Unit will need the same shape —
-  likely a constant-zero op or a typecheck-time rejection, since Unit has no LLVM value.
 - [ ] `P2` **Tuple-return CPR does not fire on a SELF-RECURSIVE call**, so a recursive
   tuple-returning reduction boxes once per step. CPR fires on the outer call; on the function's own
   recursive edge the worker calls the BOXED wrapper, which allocates, then reloads and repacks —
@@ -1759,11 +1747,20 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
 
 **Codegen and IR correctness**
 
-- [ ] `P1` **Closure wrapper calling convention for named functions with tuple parameters.**
-  `emit_named_fn_wrapper_lines` generates `(ptr %env, { ptr, ptr } %a0)` while every generic
-  higher-order function passes the element as `i64`. Fix: detect tuple param types in
-  `build_wrapper_params` and emit an `inttoptr` + `load` conversion before calling the named
-  function.
+- [ ] `P3` **`ast_to_ir` headers contradict the code beneath them, and one helper is dead.** The
+  Bool/Unit codegen restrictions were lifted; the comments announcing them were not.
+  `translate_lambda`'s header still reads "Rejects: Bool-returning lambda … deferred to a follow-up
+  PR" (`ast_to_ir.sprout:2105`) sixteen lines above "Bool-return guard removed", and
+  `is_supported_arg_type`'s still promises the ctor guard "keeps its own deferred restrictions on
+  Bool and Unit" (`:812`) ten lines above "Bool is ACCEPTED" / "Unit is ACCEPTED".
+  `find_bool_capture` (`:2072`) has no caller left. ~15 lines to fix, but a compiler-source change,
+  so it costs a full reseed plus the golden-IR gate.
+- [ ] `P3` **48 compiler comments cite `codegen.sprout`, deleted 2026-07-12 in `5f29b9da`.** Spread
+  over `ast_to_ir` (31), `ir_lowering` (7), `sprout_ir` (6), `type_kind` and `field_kinds` (2 each),
+  mostly as "mirrors codegen.sprout:<fn>" provenance notes whose target cannot be opened. They read
+  as live cross-references and send a reader looking for a file that is two months gone. Either
+  re-anchor each to the surviving definition or drop the citation; decide once and sweep.
+
 - [~] `P1` **Arity mismatch through a function-typed VALUE is a clean runtime error, not a working
   call.** Both halves of the miscompile are closed — direct calls check arity in both directions,
   and every closure carries its parameter count in the GC header's aux field with
