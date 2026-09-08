@@ -1,0 +1,217 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import stdlib.tui.event as event
+import stdlib.tui.geometry as g
+import stdlib.tui.screen as scr
+import stdlib.tui.widget as widget
+import stdlib.tui.widgets.container as ct
+import stdlib.tui.widgets.focus as focus
+import stdlib.tui.widgets.scroll_view as sv
+import stdlib.tui.widgets.text as txt
+
+# A window onto a child too big for it. Design: docs/tui-scroll-view-v0.md.
+#
+# The offset is never read out — `Widget m` erases the state — so it is
+# observed through what the view PAINTS. A neighbour probe beside it makes a
+# declined key visible as a broadcast rather than as silence.
+
+type Msg (..) deriving (Eq, ToString) =
+  | Ping
+  | Noted String
+
+type alias Says = List Msg
+type alias Asks = List(widget.Cmd Msg)
+
+# ── the tree ────────────────────────────────────────────────────────────────
+
+fn view_id() -> widget.WidgetId = widget.WidgetId("sv")
+
+fn kid_id() -> widget.WidgetId = widget.WidgetId("kid")
+
+# Five rows of five columns, in a viewport of two by five.
+fn tall() -> widget.Widget Msg =
+  txt.static(["one", "two", "three", "four", "five"])
+
+fn wide() -> widget.Widget Msg = txt.static(["abcdefgh"])
+
+fn small() -> widget.Widget Msg = txt.static(["ab"])
+
+fn note_on_event(n: Int, ev: event.Event) -> (Int, Says, Asks) =
+  (n, [Noted("bcast")], Nil)
+
+fn note_render(n: Int, r: g.Region, s: scr.Screen) -> Unit !{IO} = ()
+
+fn note_measure(n: Int, avail: g.Size) -> widget.Measured =
+  widget.fixed_size(g.Size(1, 1))
+
+# Claims nothing, so it only ever speaks on the broadcast — which makes "the
+# view declined" and "the view said nothing" two different transcripts.
+fn note() -> widget.Widget Msg =
+  widget.Widget(widget.View(state = 0, on_event = note_on_event,
+                            route = widget.no_route, render = note_render,
+                            measure = note_measure))
+
+fn kid_handler(n: Int, d: widget.Delivery Msg) -> (Int, Says, Asks) =
+  (n, [Noted("kid")], Nil)
+
+# A child with an address of its own: a scroll view must carry a delivery
+# through to it rather than swallowing it.
+fn addressed() -> widget.Widget Msg =
+  widget.Widget(widget.View(state = 0, on_event = note_on_event,
+                            route = widget.route_if(kid_id(), kid_handler, _, _, _),
+                            render = note_render, measure = note_measure))
+
+fn view() -> widget.Widget Msg = sv.scroll_view(view_id(), tall())
+
+fn view_of(w: widget.Widget Msg, o: sv.ScrollOpts) -> widget.Widget Msg =
+  sv.scroll_view_with(view_id(), w, o)
+
+fn ring_of(w: widget.Widget Msg) -> widget.Widget Msg =
+  focus.focus_ring([view_id()], w)
+
+fn beside(w: widget.Widget Msg) -> widget.Widget Msg =
+  ring_of(ct.column([ct.fit(w), ct.fit(note())]))
+
+# ── observing ───────────────────────────────────────────────────────────────
+
+fn key(k: event.Key) -> event.Event = event.KeyPress(k, event.mods_none())
+
+fn chord(k: event.Key) -> event.Event = event.KeyPress(k, event.mods_ctrl())
+
+fn hit_of(r: Maybe (widget.Widget Msg, Says, Asks)) -> Bool =
+  match r with
+  | Nothing -> false
+  | Just _ -> true
+
+fn said_of(r: Maybe (widget.Widget Msg, Says, Asks)) -> String =
+  match r with
+  | Nothing -> "declined"
+  | Just (_, msgs, _) -> to_string(msgs)
+
+fn said(r: (widget.Widget Msg, Says, Asks)) -> String =
+  match r with
+  | (_, msgs, _) -> to_string(msgs)
+
+fn fed(w: widget.Widget Msg, evs: List event.Event) -> String =
+  said(widget.feed(beside(w), evs))
+
+fn after(w: widget.Widget Msg, evs: List event.Event) -> widget.Widget Msg =
+  match widget.feed(w, evs) with
+  | (w2, _, _) -> w2
+
+fn live(w: widget.Widget Msg, evs: List event.Event) -> widget.Widget Msg =
+  after(ring_of(w), evs)
+
+fn row_text(s: scr.Screen, row: Int, col: Int, cols: Int) -> String !{IO} =
+  if col >= cols then "" else row_step(s, row, col, cols)
+
+fn row_step(s: scr.Screen, row: Int, col: Int, cols: Int) -> String !{IO} = do
+  here <- scr.text_at(s, col, row)
+  rest <- row_text(s, row, col + 1, cols)
+  here ++ rest
+
+fn rows_from(s: scr.Screen, row: Int, rows: Int, cols: Int) -> String !{IO} =
+  if row >= rows then "" else rows_step(s, row, rows, cols)
+
+fn rows_step(s: scr.Screen, row: Int, rows: Int, cols: Int) -> String !{IO} = do
+  here <- row_text(s, row, 0, cols)
+  rest <- rows_from(s, row + 1, rows, cols)
+  if row + 1 >= rows then here else here ++ "|" ++ rest
+
+fn shown(w: widget.Widget Msg, cols: Int, rows: Int) -> String !{IO} = do
+  s <- scr.screen_new(g.Size(cols, rows))
+  widget.render(w, g.Region(0, 0, cols, rows), s)
+  rows_from(s, 0, rows, cols)
+
+# A region SHORTER than the screen, so anything painted past the viewport is
+# still visible in the answer.
+fn into(w: widget.Widget Msg, cols: Int, rows: Int,
+        region_rows: Int) -> String !{IO} = do
+  s <- scr.screen_new(g.Size(cols, rows))
+  widget.render(w, g.Region(0, 0, cols, region_rows), s)
+  rows_from(s, 0, rows, cols)
+
+fn main() -> Unit !{IO} = do
+  state <- new_state()
+  window_cases(state)
+  moving_cases(state)
+  declining_cases(state)
+  summary(state)
+
+# ── what shows ──────────────────────────────────────────────────────────────
+
+fn window_cases(state: TestState) -> Unit !{IO} = do
+  top <- shown(ring_of(view()), 5, 2)
+  assert_eq(state, "a scroll view starts at the top of its child", top,
+            "one  |two  ")
+
+  # The child is handed a region as tall as it asked for, so what keeps rows
+  # three to five off the screen is the clip, not the child's own restraint.
+  spill <- into(ring_of(view()), 5, 4, 2)
+  assert_eq(state, "and paints nothing below the viewport", spill,
+            "one  |two  |     |     ")
+
+  down <- shown(live(view(), [key(event.KDown)]), 5, 2)
+  assert_eq(state, "Down moves the window by a step", down, "two  |three")
+
+  ending <- shown(live(view(), [key(event.KEnd)]), 5, 2)
+  assert_eq(state, "End shows the last screenful", ending, "four |five ")
+
+  home <- shown(live(view(), [key(event.KEnd), key(event.KHome)]), 5, 2)
+  assert_eq(state, "Home returns to the top", home, "one  |two  ")
+
+  paged <- shown(live(view_of(tall(), sv.scroll_opts() with (page = 2)),
+                      [key(event.KPageDown)]), 5, 2)
+  assert_eq(state, "PageDown moves by a page", paged, "three|four ")
+
+  # The offset clamps to the last screenful, not to the last row: scrolling
+  # past the end would show blank rows below the content.
+  clamped <- shown(live(view(), [key(event.KEnd), key(event.KDown)]), 5, 2)
+  assert_eq(state, "a step past the end stays on the last screenful", clamped,
+            "four |five ")
+
+  # A child WIDER than the view scrolls on the other axis by the same rule.
+  right <- shown(live(view_of(wide(), sv.scroll_opts()), [key(event.KRight)]), 4, 1)
+  assert_eq(state, "Right moves the window sideways", right, "bcde")
+
+  back <- shown(live(view_of(wide(), sv.scroll_opts()),
+                     [key(event.KRight), key(event.KLeft)]), 4, 1)
+  assert_eq(state, "and Left brings it back", back, "abcd")
+
+# ── what it says ────────────────────────────────────────────────────────────
+
+fn moving_cases(state: TestState) -> Unit !{IO} = do
+  # A scroll view has nothing to report: moving the window is not an event in
+  # the application's vocabulary. Claimed keys are therefore silent, and the
+  # probe's silence is what proves the key was claimed at all.
+  assert_eq(state, "a move is claimed and says nothing",
+            fed(view(), [key(event.KDown)]), "[]")
+  assert_eq(state, "Up at the top is claimed too",
+            fed(view(), [key(event.KUp)]), "[]")
+  assert_eq(state, "as is a page that cannot move",
+            fed(view(), [key(event.KPageUp)]), "[]")
+
+fn declining_cases(state: TestState) -> Unit !{IO} = do
+  # A focused view claims its keys whether or not there is anywhere to go: a
+  # handler is pure and is given no region, so "does this fit?" is a question
+  # only `render` can answer. The window simply does not move.
+  assert_eq(state, "a view whose content fits still claims a scroll key",
+            fed(view_of(small(), sv.scroll_opts()), [key(event.KDown)]), "[]")
+  fits <- shown(live(view_of(small(), sv.scroll_opts()), [key(event.KDown)]), 5, 2)
+  assert_eq(state, "and does not move", fits, "ab   |     ")
+  assert_eq(state, "a chord is an application's binding, not a scroll",
+            fed(view(), [chord(event.KDown)]), "[Noted(bcast)]")
+  assert_eq(state, "and so is a key the view does not use",
+            fed(view(), [key(event.KEnter)]), "[Noted(bcast)]")
+
+  # Unfocused, with no ring to hand it focus: the keyboard is somebody else's.
+  assert_true(state, "an unfocused view declines a key addressed to it",
+              ! hit_of (widget.deliver(view(), view_id(),
+                                      widget.ToEvent(key(event.KDown)))))
+  assert_true(state, "but claims a focus notification",
+              hit_of(widget.deliver(view(), view_id(), widget.ToFocus(true))))
+
+  # A scroll view is a container: an address it does not own goes to the child.
+  assert_eq(state, "an address the view does not own reaches its child",
+            said_of(widget.deliver(sv.scroll_view(view_id(), addressed()),
+                                   kid_id(), widget.ToMsg(Ping))),
+            "[Noted(kid)]")

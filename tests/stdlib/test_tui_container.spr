@@ -3,6 +3,7 @@ import stdlib.tui.event as event
 import stdlib.tui.geometry as g
 import stdlib.tui.layout as layout
 import stdlib.tui.screen as scr
+import stdlib.tui.style as sty
 import stdlib.tui.widget as widget
 import stdlib.tui.widgets.container as ct
 import stdlib.tui.widgets.text as txt
@@ -44,7 +45,38 @@ fn main() -> Unit !{IO} = do
   delivery_cases(state)
   prism_cases(state)
   static_cases(state)
+  clip_cases(state)
   summary(state)
+
+# A container paints each child under its own region as the clip, so a child
+# that writes outside the region it was given cannot reach a sibling's cells.
+# Design: docs/tui-scroll-view-v0.md §4.5.
+fn rude_render(n: Int, r: g.Region, s: scr.Screen) -> Unit !{IO} = do
+  # Deliberately one row ABOVE the region it was given, and painted after its
+  # sibling — `screen_write` clips at the SCREEN edge, so without the region
+  # clip this lands on top of the neighbour's text.
+  end <- scr.screen_write(s, g.region_col(r), g.region_row(r) - 1, "rude",
+                          sty.style_default())
+  ()
+
+fn rude_measure(n: Int, avail: g.Size) -> widget.Measured =
+  widget.fixed_size(g.Size(4, 1))
+
+fn rude() -> widget.Widget Msg =
+  widget.Widget(widget.View(state = 0, on_event = quiet_on_event,
+                            route = widget.no_route, render = rude_render,
+                            measure = rude_measure))
+
+fn quiet_on_event(n: Int, ev: event.Event) -> (Int, List Msg, List(widget.Cmd Msg)) =
+  (n, Nil, Nil)
+
+fn clip_cases(state: TestState) -> Unit !{IO} = do
+  s <- painted(ct.column([ct.cells(1, txt.label("keep")), ct.cells(1, rude())]),
+               6, 2)
+  neighbour <- head_of(s, 0)
+  own <- head_of(s, 1)
+  assert_eq(state, "a child cannot paint into its sibling's row", neighbour, "k")
+  assert_eq(state, "and its own row keeps what it did paint there", own, " ")
 
 # ── the starvation regression ───────────────────────────────────────────────
 

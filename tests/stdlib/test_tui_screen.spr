@@ -33,6 +33,7 @@ fn main() -> Unit !{IO} = do
   narrow_cases(state)
   wide_cases(state)
   diff_cases(state)
+  clip_cases(state)
   summary(state)
 
 fn narrow_cases(state: TestState) -> Unit !{IO} = do
@@ -64,6 +65,15 @@ fn narrow_cases(state: TestState) -> Unit !{IO} = do
 
   stop <- scr.screen_write(s, 8, 2, "abcd", plain())
   assert_eq(state, "and the write reports stopping at the edge", stop, 10)
+
+  # The LEFT edge is not symmetric with the right: there is still row ahead, so
+  # the hidden clusters are counted and the rest lands. A scroll view shifts
+  # its child into negative columns and needs exactly this.
+  landed <- scr.screen_write(s, 0 - 2, 0, "wxyz", plain())
+  first <- scr.text_at(s, 0, 0)
+  assert_eq(state, "a write starting left of the screen paints what reaches it",
+            first, "y")
+  assert_eq(state, "and reports the column past its last cluster", landed, 2)
 
 fn wide_cases(state: TestState) -> Unit !{IO} = do
   s <- scr.screen_new(g.Size(6, 2))
@@ -165,3 +175,65 @@ fn diff_cases(state: TestState) -> Unit !{IO} = do
               string.length(cleared) > 0)
   after_clear <- scr.diff_to_ansi(s)
   assert_eq(state, "and clearing twice sends nothing the second time", after_clear, "")
+
+# The clip is what makes painting over another widget's cells impossible
+# rather than merely discouraged. Design: docs/tui-scroll-view-v0.md §4.
+fn clip_cases(state: TestState) -> Unit !{IO} = do
+  s <- scr.screen_new(g.Size(6, 3))
+
+  full <- scr.screen_clip(s)
+  assert_eq(state, "a new screen clips to the whole of itself", full,
+            g.Region(0, 0, 6, 3))
+
+  scr.screen_clipped(s, g.Region(0, 0, 6, 1), \ (u) -> w(s, 0, 1, "xx", plain()))
+  outside <- scr.text_at(s, 0, 1)
+  assert_eq(state, "a write outside the clip paints nothing", outside, " ")
+
+  restored <- scr.screen_clip(s)
+  assert_eq(state, "and the clip is restored when the action returns", restored,
+            g.Region(0, 0, 6, 3))
+
+  # The columns before the clip are still WALKED, so the part that shows lands
+  # where it belongs. Gating the whole write would paint nothing at all.
+  scr.screen_clipped(s, g.Region(2, 0, 4, 3), \ (u) -> w(s, 0, 0, "abcd", plain()))
+  cut <- scr.text_at(s, 1, 0)
+  kept <- scr.text_at(s, 2, 0)
+  moved <- scr.text_at(s, 3, 0)
+  assert_eq(state, "a write straddling the clip loses its hidden half", cut, " ")
+  assert_eq(state, "keeps the visible one", kept, "c")
+  assert_eq(state, "and that half stays in the column it was written to", moved, "d")
+
+  # Nesting intersects: a child cannot widen its way back out to cells its
+  # parent excluded, which is what makes the clip a guarantee.
+  scr.screen_clipped(s, g.Region(0, 2, 2, 1),
+                     \ (u) -> scr.screen_clipped(s, g.Region(0, 2, 6, 1),
+                                                 \ (v) -> w(s, 0, 2, "pqrs", plain())))
+  inner <- scr.text_at(s, 1, 2)
+  widened <- scr.text_at(s, 2, 2)
+  assert_eq(state, "a nested clip paints inside both", inner, "q")
+  assert_true(state, "and cannot widen past the one it nests in", widened == " ")
+
+  # A wide cluster whose second column is outside the clip has nowhere to put
+  # its continuation — the same case as the screen's last column.
+  s2 <- scr.screen_new(g.Size(6, 1))
+  scr.screen_clipped(s2, g.Region(0, 0, 3, 1), \ (u) -> w(s2, 2, 0, "日", plain()))
+  straddle <- scr.text_at(s2, 2, 0)
+  spilled <- scr.text_at(s2, 3, 0)
+  assert_eq(state, "a wide cluster straddling the clip edge becomes a space",
+            straddle, " ")
+  assert_eq(state, "and paints nothing past it", spilled, " ")
+
+  # An empty clip is not a missing one: the frame still runs, and nothing lands.
+  s3 <- scr.screen_new(g.Size(4, 2))
+  scr.screen_clipped(s3, g.Region(0, 0, 4, 0), \ (u) -> w(s3, 0, 0, "zz", plain()))
+  none <- scr.text_at(s3, 0, 0)
+  assert_eq(state, "a clip of no rows drops everything", none, " ")
+
+  # Clearing is an ordinary write, so it obeys the clip too — a container that
+  # clears its own region must not blank its neighbour's.
+  s4 <- scr.screen_new(g.Size(4, 2))
+  w(s4, 0, 1, "keep", plain())
+  scr.screen_clipped(s4, g.Region(0, 0, 4, 1),
+                     \ (u) -> scr.screen_clear(s4, sty.with_bold(plain(), true)))
+  survivor <- scr.text_at(s4, 0, 1)
+  assert_eq(state, "a clear inside a clip leaves the cells outside it", survivor, "k")

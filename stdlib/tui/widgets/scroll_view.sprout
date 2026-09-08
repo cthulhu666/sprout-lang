@@ -1,0 +1,153 @@
+module stdlib.tui.widgets.scroll_view
+
+# A window onto a child too big for it. Design: docs/tui-scroll-view-v0.md.
+#
+# The child is scroll-UNAWARE: it is handed a region the size it asked for,
+# shifted by the offset, and the screen's clip keeps it inside the viewport.
+
+import stdlib.tui.event as event
+import stdlib.tui.geometry as geometry
+import stdlib.tui.screen as scr
+import stdlib.tui.widget as widget
+
+export type ScrollOpts = (step: Int, page: Int)
+
+export fn scroll_opts() -> ScrollOpts = ScrollOpts(step = 1, page = 10)
+
+# Where the window sits on one axis. `FromBottom` is what lets `End` be exact
+# without knowing the viewport: a handler is pure and is given no region, so
+# the last screenful is a request the RENDERER resolves, not a number the
+# handler can compute.
+type Pos (..) =
+  | FromTop Int
+  | FromBottom Int
+
+type Sv m = (id: widget.WidgetId, child: widget.Widget m, opts: ScrollOpts,
+             across: Pos, down: Pos, has_focus: Bool)
+
+type alias Reply m = Maybe(Sv m, List m, List(widget.Cmd m))
+
+# The child hears the broadcast; a scroll view is a container, not a lid.
+fn sv_on_event(v: Sv m,
+               ev: event.Event) -> (Sv m, List m, List(widget.Cmd m)) =
+  sv_repack(v, widget.on_event(v.child, ev))
+
+fn sv_repack(v: Sv m,
+             r: (widget.Widget m, List m, List(widget.Cmd m))) -> (Sv m, List m, List(widget.Cmd m)) =
+  match r with
+  | (w2, msgs, cmds) -> ((v with (child = w2)), msgs, cmds)
+
+# An address this view does not own belongs to the child: a scroll view must
+# not swallow a delivery meant for what it wraps.
+fn sv_route(v: Sv m, target: widget.WidgetId, d: widget.Delivery m) -> Reply m =
+  if widget.id_eq(v.id, target) then sv_handler(v, d)
+  else map(sv_repack(v, _), widget.deliver(v.child, target, d))
+
+fn sv_handler(v: Sv m, d: widget.Delivery m) -> Reply m =
+  match d with
+  # A scroll view asks for no work of its own.
+  | widget.ToMsg _ -> Nothing
+  | widget.ToFocus x -> Just(((v with (has_focus = x)), Nil, Nil))
+  | widget.ToEvent e -> if v.has_focus then sv_event(v, e) else Nothing
+
+fn sv_event(v: Sv m, e: event.Event) -> Reply m =
+  match e with
+  | event.KeyPress k mods -> sv_key(v, k, mods)
+  | _ -> Nothing
+
+# ctrl-Down and alt-Down are an application's bindings, not a scroll.
+fn sv_key(v: Sv m, k: event.Key, mods: event.Mods) -> Reply m =
+  if event.mods_is_chord(mods) then Nothing else sv_plain(v, k)
+
+# Every claimed key is silent: moving a window is not an event in the
+# application's vocabulary, and there is no index to report.
+fn sv_plain(v: Sv m, k: event.Key) -> Reply m =
+  match k with
+  | event.KDown -> scrolled_down(v, v.opts.step)
+  | event.KUp -> scrolled_down(v, 0 - v.opts.step)
+  | event.KPageDown -> scrolled_down(v, v.opts.page)
+  | event.KPageUp -> scrolled_down(v, 0 - v.opts.page)
+  | event.KRight -> scrolled_across(v, v.opts.step)
+  | event.KLeft -> scrolled_across(v, 0 - v.opts.step)
+  | event.KHome -> settled(v with (down = FromTop(0)))
+  | event.KEnd -> settled(v with (down = FromBottom(0)))
+  | _ -> Nothing
+
+fn scrolled_down(v: Sv m, d: Int) -> Reply m =
+  settled(v with (down = advanced(v.down, d)))
+
+fn scrolled_across(v: Sv m, d: Int) -> Reply m =
+  settled(v with (across = advanced(v.across, d)))
+
+fn settled(v: Sv m) -> Reply m = Just((v, Nil, Nil))
+
+# Only the near end clamps, because it is the only one a pure handler knows:
+# the far end is `render`'s to enforce, against an extent measured there.
+fn advanced(p: Pos, d: Int) -> Pos =
+  match p with
+  | FromTop n -> FromTop(imax(0, n + d))
+  | FromBottom k -> FromBottom(imax(0, k - d))
+
+# ── what shows ──────────────────────────────────────────────────────────────
+
+fn imax(a: Int, b: Int) -> Int = if a > b then a else b
+
+fn imin(a: Int, b: Int) -> Int = if a < b then a else b
+
+# A `Greedy` axis has no natural extent — it means "whatever I am given" — so
+# that axis does not scroll and the child gets the viewport. A `Fixed` child
+# smaller than the viewport is still given the whole of it rather than being
+# squeezed to its own size, which is what a container would have done.
+fn extent_of(natural: Int, grow: widget.Grow, avail: Int) -> Int =
+  match grow with
+  | widget.Fixed -> imax(natural, avail)
+  | widget.Greedy -> avail
+
+fn resolved(p: Pos, extent: Int, avail: Int) -> Int =
+  let far = imax(0, extent - avail)
+  in
+  match p with
+  | FromTop n -> imin(n, far)
+  | FromBottom k -> imax(0, far - k)
+
+fn sv_render(v: Sv m, r: geometry.Region, s: scr.Screen) -> Unit !{IO} =
+  painted(v, r, s, widget.measure(v.child, geometry.region_size(r)))
+
+fn painted(v: Sv m, r: geometry.Region, s: scr.Screen,
+           m: widget.Measured) -> Unit !{IO} =
+  let cols = extent_of(geometry.size_cols(m.size), m.cols, geometry.region_cols(r))
+      rows = extent_of(geometry.size_rows(m.size), m.rows, geometry.region_rows(r))
+      col = resolved(v.across, cols, geometry.region_cols(r))
+      row = resolved(v.down, rows, geometry.region_rows(r))
+  in
+  scr.screen_clipped(s, r, child_into(v, shifted(r, col, row, cols, rows), s, _))
+
+fn child_into(v: Sv m, r: geometry.Region, s: scr.Screen,
+              u: Unit) -> Unit !{IO} =
+  widget.render(v.child, r, s)
+
+# The child is given the whole of itself, moved so that the part in view lands
+# in the region. What keeps the rest off the screen is the clip.
+fn shifted(r: geometry.Region, col: Int, row: Int, cols: Int,
+           rows: Int) -> geometry.Region =
+  geometry.Region(geometry.region_col(r) - col, geometry.region_row(r) - row,
+                  cols, rows)
+
+# Greedy on both axes: a scroll view takes what it is given, which is the
+# point of one. Its natural size is its child's.
+fn sv_measure(v: Sv m, avail: geometry.Size) -> widget.Measured =
+  widget.greedy_size(widget.measure(v.child, avail).size)
+
+fn sv_widget(v: Sv m) -> widget.Widget m =
+  widget.Widget(widget.View(state = v, on_event = sv_on_event,
+                            route = sv_route, render = sv_render,
+                            measure = sv_measure))
+
+export fn scroll_view(id: widget.WidgetId,
+                      child: widget.Widget m) -> widget.Widget m =
+  scroll_view_with(id, child, scroll_opts())
+
+export fn scroll_view_with(id: widget.WidgetId, child: widget.Widget m,
+                           opts: ScrollOpts) -> widget.Widget m =
+  sv_widget(Sv(id = id, child = child, opts = opts, across = FromTop(0),
+               down = FromTop(0), has_focus = false))

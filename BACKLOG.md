@@ -528,8 +528,19 @@ Legend:
   feeds `appChooseCursor` from the ring. Trapping — a widget that consumes Tab itself — is the
   opt-in §4.5 declines to make implicit. Both are cosmetic until an application asks.
   Design: `docs/tui-focus-v0.md` §9.
-- [ ] `P2` **TUI M4 C3 — the larger widgets.** `scroll_view`, `tabs`, `tree`, `table`,
-  `text_area`. Split off because `text_area` carries the language work below.
+- [ ] `P2` **TUI M4 C3 — the larger widgets.** `tabs`, `tree`, `table`, `text_area`. `scroll_view`
+  and the screen clip it needed landed as C3a (`docs/tui-scroll-view-v0.md`); the rest are still
+  open, and `text_area` carries the language work below.
+- [ ] `P2` **TUI `scroll_view` — overshooting the far end stores dead presses.** Clamping to the
+  last screenful needs the viewport, and a handler is pure and gets no region, so `FromTop n` grows
+  past the end and the same number of presses must be undone before the window moves back. `Home`
+  and `End` land exactly, so recovery is one key. Root cause is the pure-handler contract — the
+  same wall `ListOpts.page` hit. Design: `docs/tui-scroll-view-v0.md` §4.8.
+- [ ] `P3` **TUI `scroll_view` — no scrollbars, and no auto-scroll to a focused child.** Nothing
+  indicates that content continues past the viewport; an indicator needs a style vocabulary and
+  touches the `Ambiguous`-width question below. Brick's `visible` — scroll until the focused child
+  shows — needs the child's solved position, so it waits on the retained hit-test tree the
+  click-to-focus entry above describes. Design: `docs/tui-scroll-view-v0.md` §8.
 - [ ] `P2` **TUI M4 language work — `mutvec_insert`/`mutvec_remove`, sign-off first (Collaboration
   Rule 6).** `text_area`/`input` want both. `insert` composes from `push` + shift; `remove` needs a
   new `vector_remove` builtin — approve before C3 starts, not during. Same family as the deferred

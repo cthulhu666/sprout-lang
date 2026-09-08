@@ -152,7 +152,9 @@ covers both the 16-colour and 256-colour palettes (SGR `38;5;n`), matching cross
 ### 3.5 Rendering is a diff, and a frame is one write
 
 `Screen` holds a front and a back `MutMatrix Cell` (`stdlib/mutable.sprout:171` — it exists, with
-`mutmatrix_get`/`set`/`fill` already). Widgets write the back buffer; `diff_to_ansi` walks both,
+`mutmatrix_get`/`set`/`fill` already), and a `Ref Region` clip: writes outside the clip are dropped,
+which is how a container keeps a child inside the region it was given and how a scroll view keeps
+its child inside the viewport (`docs/tui-scroll-view-v0.md`). Widgets write the back buffer; `diff_to_ansi` walks both,
 emits a cursor move plus a styled run for each changed span, swaps, and returns one `String`. The
 app writes it with a single `term_write`.
 
@@ -168,7 +170,7 @@ accumulated in reverse and joined with one `string_concat_many` pass, the same s
 | `stdlib/tui/style.sprout` | `Color`, `Style`, `style_to_ansi`, `style_default` |
 | `stdlib/tui/event.sprout` | `Key`, `Mods`, `MouseButton`, `Event` |
 | `stdlib/tui/keys.sprout` | `decode : Bytes -> (List Event, Bytes)` |
-| `stdlib/tui/screen.sprout` | `Cell`, `Screen`, `screen_new`, `screen_put`, `screen_write`, `diff_to_ansi`, `screen_resize` |
+| `stdlib/tui/screen.sprout` | `Cell`, `Screen`, `screen_new`, `screen_put`, `screen_write`, `screen_clip`, `screen_clipped`, `diff_to_ansi`, `screen_resize` |
 
 `screen.sprout` imports `stdlib.unicode.width` and `stdlib.unicode.grapheme`; nothing else in the
 milestone depends on Unicode. `screen_write` is the string-level entry point — it segments into

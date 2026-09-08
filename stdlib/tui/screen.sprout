@@ -28,19 +28,30 @@ export type Cell (..) deriving (Eq, ToString) =
   | Cell Int (List Int) style.Style
   | Continuation
 
+# The third field is the CLIP: writes outside it are dropped. It is mutable
+# because `render` is pure in a widget's state and can only narrow the clip for
+# the duration of a call — see `screen_clipped`.
+#
+# INVARIANT — the clip only ever narrows: `screen_new` starts it at the whole
+# screen and `screen_clipped` intersects, so no widget can widen its way out to
+# a region its parent excluded. `shows` tests the grid bounds separately, so a
+# violation would misplace a widget rather than corrupt memory.
 export type Screen (..) =
-  | Screen (MutMatrix Cell) (MutMatrix Cell)
+  | Screen (MutMatrix Cell) (MutMatrix Cell) (Ref geometry.Region)
 
 fn blank() -> Cell = Cell(32, Nil, style.style_default())
 
 export fn screen_new(size: geometry.Size) -> Screen !{IO} = do
   front <- mutmatrix_new(geometry.size_rows(size), geometry.size_cols(size), blank())
   back <- mutmatrix_new(geometry.size_rows(size), geometry.size_cols(size), blank())
-  Screen(front, back)
+  clip <- ref_new(geometry.region_at_origin(size))
+  Screen(front, back, clip)
 
-fn front_of(s: Screen) -> MutMatrix Cell = match s with | Screen f _ -> f
+fn front_of(s: Screen) -> MutMatrix Cell = match s with | Screen f _ _ -> f
 
-fn back_of(s: Screen) -> MutMatrix Cell = match s with | Screen _ b -> b
+fn back_of(s: Screen) -> MutMatrix Cell = match s with | Screen _ b _ -> b
+
+fn clip_of(s: Screen) -> Ref geometry.Region = match s with | Screen _ _ c -> c
 
 export fn screen_size(s: Screen) -> geometry.Size =
   geometry.Size(mutmatrix_cols(back_of(s)), mutmatrix_rows(back_of(s)))
@@ -109,14 +120,33 @@ fn cell_columns(c: Cell) -> Int =
   # primary's width, and the combining marks it carries are not consulted.
   | Cell primary _ _ -> text.cluster_width([primary])
 
-fn set_raw(s: Screen, col: Int, row: Int, c: Cell) -> Unit !{IO} =
-  if in_bounds(s, col, row) then mutmatrix_set(back_of(s), row, col, c) else ()
+fn set_raw(s: Screen, col: Int, row: Int, c: Cell) -> Unit !{IO} = do
+  show <- shows(s, col, row)
+  if show then mutmatrix_set(back_of(s), row, col, c) else ()
 
-# Place one cluster and report how many columns it took. Out of bounds is a
-# no-op reporting 0, so a caller walking a string cannot run off the row.
+# The clip is consulted here and nowhere else on the write path, so a string
+# that starts outside it still walks into it (docs/tui-scroll-view-v0.md §4.3).
+fn shows(s: Screen, col: Int, row: Int) -> Bool !{IO} = do
+  clip <- screen_clip(s)
+  in_bounds(s, col, row) && inside(clip, col, row)
+
+# `geometry.contains` in loose coordinates, and it must stay equal to it. Every
+# cell write runs this, and building the `Offset` that `contains` wants would
+# allocate once per cell — a full clear is the screen's area. An empty region
+# admits nothing, since its right edge equals its left.
+fn inside(r: geometry.Region, col: Int, row: Int) -> Bool =
+  col >= geometry.region_col(r) && col < geometry.region_right(r)
+    && row >= geometry.region_row(r) && row < geometry.region_bottom(r)
+
+# Place one cluster and report how many columns it took. Off the RIGHT edge is
+# a no-op reporting 0, so a caller walking a string cannot run off the row.
+# Left of column 0 is different: there is still row ahead, so the cluster is
+# counted and not painted, and a string shifted left by a scroll view paints
+# the part that reaches the screen.
 export fn screen_put(s: Screen, col: Int, row: Int, cluster: List Int,
                      st: style.Style) -> Int !{IO} =
-  if ! in_bounds (s, col, row) then 0
+  if col < 0 then cluster_width(cluster)
+  else if ! in_bounds (s, col, row) then 0
   else put_sized(s, col, row, cluster, st, cluster_width(cluster))
 
 fn put_sized(s: Screen, col: Int, row: Int, cluster: List Int, st: style.Style,
@@ -129,15 +159,25 @@ fn put_sized(s: Screen, col: Int, row: Int, cluster: List Int, st: style.Style,
     set_raw(s, col, row, Cell(32, Nil, st))
     1
   else if wide == 2 then do
-    repair(s, col, row)
-    repair(s, col + 1, row)
-    set_raw(s, col, row, cluster_cell(cluster, st))
-    set_raw(s, col + 1, row, Continuation)
-    2
+    left <- shows(s, col, row)
+    right <- shows(s, col + 1, row)
+    put_pair(s, col, row, cluster, st, left && right)
   else do
     repair(s, col, row)
     set_raw(s, col, row, cluster_cell(cluster, st))
     1
+
+# Both halves or neither: a pair with one half outside the clip has nowhere to
+# put the other, so the visible half becomes a space — the rule the last column
+# already follows. Both columns are still claimed, because the cluster occupies
+# them whether or not it painted.
+fn put_pair(s: Screen, col: Int, row: Int, cluster: List Int, st: style.Style,
+            whole: Bool) -> Int !{IO} = do
+  repair(s, col, row)
+  repair(s, col + 1, row)
+  set_raw(s, col, row, if whole then cluster_cell(cluster, st) else Cell(32, Nil, st))
+  set_raw(s, col + 1, row, if whole then Continuation else Cell(32, Nil, st))
+  2
 
 fn cluster_cell(cluster: List Int, st: style.Style) -> Cell =
   match cluster with
@@ -285,3 +325,18 @@ fn commit_cols(s: Screen, row: Int, col: Int) -> Unit !{IO} =
 # terminal's idea of a character's width disagrees with ours.
 export fn screen_resize(s: Screen, size: geometry.Size) -> Screen !{IO} =
   screen_new(size)
+
+# ── Clipping ────────────────────────────────────────────────────────────────
+
+export fn screen_clip(s: Screen) -> geometry.Region !{IO} = ref_read(clip_of(s))
+
+# Narrow the clip for the duration of `act`, then put back what was in force.
+# The new clip is the INTERSECTION, so a child can only ever see less than its
+# parent allowed — which is what makes the clip a guarantee rather than a
+# request. Restoring in this frame is what saves a stack.
+export fn screen_clipped(s: Screen, r: geometry.Region,
+                         act: Unit -> Unit !{IO}) -> Unit !{IO} = do
+  outer <- screen_clip(s)
+  ref_write(clip_of(s), geometry.intersect(outer, r))
+  act(())
+  ref_write(clip_of(s), outer)
