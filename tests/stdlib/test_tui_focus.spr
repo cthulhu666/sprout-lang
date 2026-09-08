@@ -199,6 +199,12 @@ fn dispatch_cases(state: TestState) -> Unit !{IO} = do
   assert_eq(state, "a non-key event broadcasts without consulting focus",
             fed(ring(["a", "b"]), [event.TickEvent]),
             "[Noted(a:bcast), Noted(b:bcast)]")
+  # The mouse belongs to whatever is under the pointer, which needs hit-testing
+  # the framework does not have — so it broadcasts rather than following focus.
+  assert_eq(state, "a mouse press broadcasts rather than following focus",
+            fed(ring(["a", "b"]),
+                [event.MousePress(event.MouseLeft, g.Offset(0, 0))]),
+            "[Noted(a:bcast), Noted(b:bcast)]")
   assert_eq(state, "an empty ring broadcasts everything",
             fed(ring(Nil), [key(event.KChar('x'))]),
             "[Noted(a:bcast), Noted(b:bcast)]")
@@ -206,6 +212,12 @@ fn dispatch_cases(state: TestState) -> Unit !{IO} = do
   # check it, so a name that matches no widget parks focus rather than failing.
   assert_eq(state, "an id naming nothing parks focus on nobody",
             fed(ring(["zz", "a"]), [key(event.KChar('x'))]),
+            "[Noted(a:bcast), Noted(b:bcast)]")
+  # An empty ring has nowhere to move focus TO, so Tab is not its business —
+  # an application computing its ring from a model that currently has no
+  # focusable widget must not lose its global Tab binding.
+  assert_eq(state, "an empty ring passes Tab through untouched",
+            fed(ring(Nil), [key(event.KTab)]),
             "[Noted(a:bcast), Noted(b:bcast)]")
 
 # ── Tab moves it ────────────────────────────────────────────────────────────
@@ -234,6 +246,12 @@ fn movement_cases(state: TestState) -> Unit !{IO} = do
   assert_eq(state, "the ring takes Tab before the focused widget sees it",
             fed(focus.focus_ring(ids(), probe_a()), [key(event.KTab)]),
             "[Noted(a:blur)]")
+  # A ring of one wraps to the widget already focused. Blurring and refocusing
+  # it would reset a widget that commits on blur, so the move is skipped.
+  assert_eq(state, "a ring of one does not blur and refocus on Tab",
+            fed(focus.focus_ring(list_map(widget.WidgetId, ["a"]), probe_a()),
+                [key(event.KTab)]),
+            "[]")
   assert_eq(state, "focus_ring_at starts where it is told",
             fed(focus.focus_ring_at(ids(), widget.WidgetId("b"), pair()),
                 [key(event.KChar('x'))]),
@@ -249,6 +267,13 @@ fn passthrough_cases(state: TestState) -> Unit !{IO} = do
   assert_eq(state, "an address no child claims is still reported unhandled",
             hit_of(widget.deliver(ring(["a", "b"]), widget.WidgetId("zz"),
                                   widget.ToMsg(Noted("q")))),
+            false)
+  # The ring is the only thing that may set focus inside itself. Forwarding an
+  # outside `ToFocus` would light a second widget while `at` still names the
+  # first, and the next Tab would blur the wrong one.
+  assert_eq(state, "the ring declines a focus notification aimed past it",
+            hit_of(widget.deliver(ring(["a", "b"]), widget.WidgetId("b"),
+                                  widget.ToFocus(true))),
             false)
   assert_eq(state, "the ring measures as its child",
             to_string(widget.measure(ring(["a", "b"]), g.Size(20, 10)).size),

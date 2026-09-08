@@ -147,8 +147,24 @@ existential again. Failing loudly would mean crashing an application over a
 typo'd name in a list the compiler has no way to verify; falling through is the
 direction that keeps the application usable and the bug visible.
 
-An empty ring focuses nothing and broadcasts everything, which is exactly M3's
-behaviour — so wrapping a tree in `focus_ring([], w)` is the identity on input.
+Two sizes fall out of the same rule. An **empty** ring focuses nothing and has
+nowhere to send focus, so it does not take `Tab` either — `focus_ring([], w)` is
+the identity on input, ordinary keys and `Tab` alike, which is exactly M3's
+behaviour. Swallowing `Tab` there would cost an application its global binding
+whenever the ring it computes from its model happened to come out empty. A ring
+of **one** wraps to the widget already focused: the key is still the ring's, but
+nothing is re-announced, because blurring a widget only to focus it again would
+reset one that commits on blur.
+
+### 4.7 The ring is the only thing that sets focus inside itself
+
+`route` forwards every delivery to the child except `ToFocus`, which it
+declines. An outside focus notification — from application code calling
+`deliver`, or from an enclosing ring — would light a second widget while `at`
+still named the first, leaving two widgets that each believe they hold the
+keyboard and a `Tab` that blurs the wrong one. §4.2 says a focus change is
+addressed to exactly one widget; this is what holds that at the ring's boundary.
+Nested rings are a non-goal (§2), so declining is the whole rule.
 
 ## 5. Surface (C2a)
 
@@ -188,7 +204,7 @@ axes.
 No syntax, typing-rule or evaluation-order change; `docs/spec-v0.md` is
 untouched. Everything is additive except the `Delivery` variant, which makes
 existing exhaustive matches on it fail to compile — loudly, at every site, which
-is the point. In-tree that is five files.
+is the point. In-tree that is three files and four match sites.
 
 `route_if`, `route_when`, `map_msgs`, `namespaced`, `deliver` and every C1
 container are unchanged.
@@ -212,7 +228,10 @@ Written failing first, against `focus_ring` stubbed to focus nothing and
 
 Focus dispatch: a key reaches only the focused widget; a key the focused widget
 declines falls through to broadcast; a non-key event broadcasts without
-consulting focus; an empty ring broadcasts everything.
+consulting focus, the mouse included, since hit-testing is a non-goal; an empty
+ring broadcasts everything, `Tab` included (§4.6);
+a ring of one leaves its widget alone on `Tab`; a `ToFocus` delivered past the
+ring is declined (§4.7).
 
 Focus movement: `Tab` advances and wraps at the end; `Shift-Tab` retreats and
 wraps at the start — over a ring of **three**, since a pair cannot tell the two
