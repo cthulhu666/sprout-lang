@@ -19,19 +19,21 @@ Legend:
 - [ ] `P1` **A declared effect is not enforced once a function is passed as a VALUE.**
   `fn pure_map(xs: List Int) -> List Int = list_map(shout, xs)` runs IO and reports
   `declared pure, inferred pure`; an instance may also strengthen its class's effect, and a
-  pure declaration may call an `!{e}` parameter. Three parts, migration cost measured zero
-  on 127 in-tree + 199 downstream files. `docs/effect-subsumption-v0.md`.
+  pure declaration may call an `!{e}` parameter. Four parts including unknown-label rejection
+  above; migration cost measured zero on 127 in-tree + 199 downstream files.
+  `docs/effect-subsumption-v0.md`.
 - [ ] `P2` **Top-level `let` initializers are not checked for purity.** Spec §6 states the rule
   normatively and nothing checks it — `let boom = print("x")` type-checks. `LetDecl` discards the
   initializer's inferred effect and `--phase effects` does not enumerate top-level `let`s, so the
   first step is extending the census, not writing the check (215 top-level `let`s in tree). Couples
   to the value restriction at the same line (`docs/fundamentals-code-review-handoff-2026-07-03.md`
   §W3/§W6).
-- [ ] `P2` **An unknown effect label is accepted and inert — `!{NOPE}` type-checks**, and a pure
-  caller of it is accepted too, so it opts out of rule-8/11 enforcement silently. Reject anything
-  that is neither `IO` nor a lowercase variable where `effect_from_maybe_labels` builds the
-  `Effect`; migration cost measured zero. Decide `!{}` (empty row, used in three tests, undefined by
-  §7) in the same change. `docs/effect-enforcement-v0.md`.
+- [ ] `P1` **An unknown effect label is accepted as a VARIABLE — `!{NOPE}` type-checks and
+  launders IO.** Not inert, as this entry said until 2026-09-08: `!{NOPE}` becomes `$e30`, so it
+  binds against anything and `list_map(sneak, xs)` runs IO under a pure signature. Reject a label
+  that is neither `IO` nor a lowercase variable; decide `!{}` in the same change. **Lands with
+  effect subsumption as its part 0** — that design's variable-exempt arm is unsound without it.
+  `docs/effect-subsumption-v0.md` §6.0.
 - [ ] `P3` **A trailing effect annotation on a non-arrow type is discarded** — `Int !{IO}` has no
   effect slot. §7 rule 9 now records that it carries no meaning; rejecting it outright would be
   more honest, and it touches the same constructor as the `!{NOPE}` check above, so **decide the two
