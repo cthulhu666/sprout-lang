@@ -48,7 +48,8 @@ fn counter_on_event(n: Int, ev: event.Event) -> (Int, List Msg, List(widget.Cmd 
   | event.KeyPress _ _ -> (n, [Hit(n)], Nil)
   | _ -> (n, Nil, Nil)
 
-fn counter_measure(n: Int, avail: g.Size) -> g.Size = g.Size(n, 1)
+fn counter_measure(n: Int, avail: g.Size) -> widget.Measured =
+  widget.fixed_size(g.Size(n, 1))
 
 fn counter_render(n: Int, r: g.Region, s: scr.Screen) -> Unit !{IO} = do
   stop <- scr.screen_write(s, g.region_col(r), g.region_row(r), to_string(n),
@@ -66,7 +67,8 @@ fn label_on_event(t: String,
                   ev: event.Event) -> (String, List Msg, List(widget.Cmd Msg)) =
   (t, [Loud(t)], Nil)
 
-fn label_measure(t: String, avail: g.Size) -> g.Size = g.Size(string.length(t), 1)
+fn label_measure(t: String, avail: g.Size) -> widget.Measured =
+  widget.fixed_size(g.Size(string.length(t), 1))
 
 fn label_render(t: String, r: g.Region, s: scr.Screen) -> Unit !{IO} = do
   stop <- scr.screen_write(s, g.region_col(r), g.region_row(r), t,
@@ -85,7 +87,8 @@ type Box = (dims: List layout.Dimension, kids: List (widget.Widget Msg))
 fn box_on_event(b: Box, ev: event.Event) -> (Box, List Msg, List(widget.Cmd Msg)) =
   (b, Nil, Nil)
 
-fn box_measure(b: Box, avail: g.Size) -> g.Size = avail
+fn box_measure(b: Box, avail: g.Size) -> widget.Measured =
+  widget.fixed_size(avail)
 
 fn box_render(b: Box, r: g.Region, s: scr.Screen) -> Unit !{IO} =
   paint_kids(b.kids, layout.row(r, b.dims), s)
@@ -133,7 +136,7 @@ fn said(w: widget.Widget Msg, evs: List event.Event) -> String =
 
 fn flow_after(w: widget.Widget Msg, ev: event.Event) -> String =
   match app.step(update, w, ev) with
-  | (w2, f, _) -> `${to_string(f)} width=${to_string(g.size_cols(widget.measure(w2, g.Size(9, 9))))}`
+  | (w2, f, _) -> `${to_string(f)} width=${to_string(g.size_cols(widget.measure(w2, g.Size(9, 9)).size))}`
 
 fn main() -> Unit !{IO} = do
   # --- the box, pure ---
@@ -162,7 +165,7 @@ fn main() -> Unit !{IO} = do
   term.write("\n")
 
 fn measured(w: widget.Widget Msg) -> Int =
-  g.size_cols(widget.measure(w, g.Size(80, 24)))
+  g.size_cols(widget.measure(w, g.Size(80, 24)).size)
 
 fn said_outer(w: widget.Widget Outer, ev: event.Event) -> String =
   match widget.on_event(w, ev) with

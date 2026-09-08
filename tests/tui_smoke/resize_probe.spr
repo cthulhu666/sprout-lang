@@ -32,7 +32,8 @@ fn label_on_event(txt: String,
                   ev: event.Event) -> (String, List Msg, List(widget.Cmd Msg)) =
   (txt, Nil, Nil)
 
-fn label_measure(txt: String, avail: g.Size) -> g.Size = g.Size(text.width(txt), 1)
+fn label_measure(txt: String, avail: g.Size) -> widget.Measured =
+  widget.fixed_size(g.Size(text.width(txt), 1))
 
 fn label_render(txt: String, r: g.Region, s: scr.Screen) -> Unit !{IO} = do
   stop <- scr.screen_write(s, g.region_col(r), g.region_row(r),

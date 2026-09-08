@@ -358,8 +358,7 @@ that leaves open and §9 closes it.
 ## 8. Compatibility and migration
 
 **Breaking, once, at its cheapest point.** `View.measure` changes return type
-(§4.3), so every `View` construction in the tree must be touched. That is four
-widgets and their tests today:
+(§4.3), so every `View` construction in the tree must be touched:
 
 | site | change |
 |---|---|
@@ -368,12 +367,21 @@ widgets and their tests today:
 | `tests/stdlib/test_tui_route.spr` | leaf and container constructions |
 | `tests/stdlib/test_tui_cmd.spr` | one construction plus a `measure` reader |
 | `tests/stdlib/test_tui_app.spr` | one construction plus a `measure` reader |
+| `tests/conformance/run/tui_widgets.spr` | three constructions plus two `measure` readers |
+| `tests/tui_smoke/resize_probe.spr` | one construction |
 | `docs/tui-widgets-v0.md` §3.1 | the `View` record it prints |
 
-Five files, not the three this table first listed: `test_tui_cmd` and `test_tui_app`
-build `View`s too, which a grep for `measure` found and reading the §8 draft did
-not. `widget.greedy_size` was added alongside `fixed_size` for the same reason
-the dashboard needed it — a log pane genuinely does yield, and under the old
+**Sweep a breaking signature change by symbol, not by directory.** `View`
+constructions live in four trees — `examples/`, `tests/stdlib/`,
+`tests/conformance/run/`, `tests/tui_smoke/` — and scoping to the first two put
+this table at three, then five. The seven are one repo-wide grep for
+`widget.View(`/`View(state`, minus three hits
+(`examples/existential_widget.sprout`, `tests/stdlib/test_parametric_records.spr`,
+`tests/stdlib/test_existential_cross_module.spr`) that declare their own
+`WidgetView` with no `measure` field.
+
+`widget.greedy_size` was added alongside `fixed_size` for the reason the
+dashboard needed it — a log pane genuinely does yield, and under the old
 contract it said so by returning `avail`, the exact spelling §4.3 removes.
 
 `widget.fixed_size` exists so the common leaf case is one call rather than a
