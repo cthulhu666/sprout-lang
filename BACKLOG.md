@@ -506,7 +506,7 @@ Legend:
   `container`/`children`/`text`/`paint` ship `row`/`column`/`grid`, an opaque `Slot`, `label`/
   `static`/`spacer` and the four child traversals; `examples/tui_dashboard.sprout` went 284 → 157
   lines with no container of its own. `View.measure` now returns a `Measured` so a child can ask
-  for "whatever is left". C2–C3 below remain. Design: `docs/tui-widget-set-v0.md`.
+  for "whatever is left". C3 below remains. Design: `docs/tui-widget-set-v0.md`.
 - [ ] `P2` **TUI `list_view` — items are fixed at construction.** A list is built from a
   `List String` and keeps it, so a filter box over one, or a list built from a model that updates,
   has no way to change what it holds; rebuilding the tree resets every widget's state, focus

@@ -146,7 +146,7 @@ widget declined. It becomes a log fed by addressed messages, and Esc replaces
 ## 7. Tests
 
 `tests/stdlib/test_tui_list_view.spr`, written failing first against a stub
-that claims nothing and paints nothing — 27 of 40 red.
+that claims nothing and paints nothing — 27 of its first 40 assertions red.
 
 Moving: `Down` and `Up` report the new index; `Up` at the start and `Down` at
 the end are *claimed and silent*, which a neighbour probe beside the list
