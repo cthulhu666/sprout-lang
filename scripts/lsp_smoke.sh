@@ -258,13 +258,17 @@ resp="$(drive_with_roots "$PKG_ROOT" "$INIT" "$(open_doc "$PKG_URI" "$PKG_SRC")"
 echo "$resp" | grep -q '"id":34,"result":{"contents":'
 check "hover resolves a name from a package-root module" $?
 
-# A declared effect must reach the editor. A zero-parameter function has no arrow to
-# carry one, so its effect lives only on the Scheme — and typing a *reference* to it
-# loses that, which reported every `main` in the tree as pure `Unit`. Asserted here
-# rather than only in the unit suite because hover is where a user reads it.
+# A declared effect must reach the editor. Typing a *reference* to a name is pure, so
+# an effect that hover reads off the reference rather than off the name's own entry is
+# lost — which reported every `main` in the tree as pure `Unit`. Asserted here rather
+# than only in the unit suite because hover is where a user reads it.
+#
+# The arrow is part of the answer: a nullary function is `() -> Unit !{IO}`, not
+# `Unit !{IO}`, and hover showing it is what tells the reader `boot` is callable
+# rather than a value.
 EFF='module main\n\nfn boot() -> Unit !{IO} = ()\n'
 resp="$(drive "$INIT" "$(open_doc "$URI" "$EFF")" "$(hov_req 35 "$URI" 2 4)")"
-echo "$resp" | grep -q '"id":35,"result":{"contents":{"kind":"plaintext","value":"Unit !{IO}"}}'
+echo "$resp" | grep -q '"id":35,"result":{"contents":{"kind":"plaintext","value":"() -> Unit !{IO}"}}'
 check "hover reports the effect of a nullary effectful function" $?
 
 # The control. An effect that rides on an arrow always survived; asserting only the
