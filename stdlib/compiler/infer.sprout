@@ -1921,10 +1921,15 @@ fn consumed_arrows_effect(t: types.Type, argc: Int) -> types.Effect =
   else
     match t with
     | types.TFunc _ ret eff _ -> merge_effects(eff, consumed_arrows_effect(ret, argc - 1))
-    # Fewer arrows than arguments: an over-application the arity check has
-    # already rejected, or a type variable standing in for a callee whose shape
-    # is not yet known. Nothing to read either way.
-    | _ -> types.EffectPure
+    # Fewer arrows than arguments: an over-application the arity check rejects,
+    # or a TVar for a callee whose shape is not known yet. A TThunk takes no
+    # argument, so it is that same rejected shape. Enumerated like thunk_effect:
+    # a future arrow-carrying variant must not answer Pure here.
+    | types.TThunk _ _ -> types.EffectPure
+    | types.TVar _ -> types.EffectPure
+    | types.TConst _ -> types.EffectPure
+    | types.TApp _ _ -> types.EffectPure
+    | types.TTuple _ -> types.EffectPure
 
 # `print` is a type-erased runtime renderer, so it cannot recover per-element
 # types of a tuple (a Bool prints as 1, a static-String element as its raw

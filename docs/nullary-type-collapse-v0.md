@@ -278,7 +278,9 @@ reject on the shape; `nullary_local_callee_launders_effect` and
 `tests/conformance/run/nullary_thunk_type_ok.spr` pins the positive shape — a thunk in a
 parameter and in a constructor payload — which is the case Option B could not express, and
 `thunk_returned_not_invoked_is_pure.spr` pins the negative space: returning a thunk is pure,
-only invoking it is not.
+only invoking it is not. `nullary_over_application` pins the arity rejection that keeps a
+thunk with arguments left against it out of the effect walk — the case `infer`'s
+`consumed_arrows_effect` answers `Pure` for.
 
 > `BACKLOG.md` claimed on 2026-08-16 that `tests/conformance/type_error/` "has no `XFAIL`
 > manifest". That was false when written: the `xfail` parameter had existed since
