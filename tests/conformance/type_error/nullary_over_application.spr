@@ -1,0 +1,10 @@
+module main
+
+# A nullary function over-applied. Its type is `() -> Int` — an arrow that takes
+# no argument, so the surplus one is an arity error, the same rejection a
+# parameterised callee gets in over_application_plain.spr. This is what keeps a
+# thunk with arguments left against it out of the effect walk in `infer`.
+
+fn now() -> Int = 7
+
+fn main() -> Unit !{IO} = print(int_to_string(now(1)))
