@@ -305,8 +305,10 @@ does not write an empty list in every arm.
 | `stdlib/tui/text.sprout` | cluster segmentation, `width`, `wrap_to`, `truncate` | pure half |
 | `stdlib/tui/layout.sprout` | `Dimension`, `Edge`, `solve`, `row`, `column`, `grid`, `dock` | pure half |
 | `stdlib/tui/geometry.sprout` | `split_right`, `split_bottom` added | pure half |
-| `stdlib/tui/widget.sprout` | `View`, `Widget`, `WidgetId`, `Cmd`, `on_event`, `feed`, `measure`, `render`, `map_msgs`, `cmd_run`, `cmd_map`; later `Grow`, `Measured`, `fixed_size`, `greedy_size` (M4, `docs/tui-widget-set-v0.md` §4.3) and `route_when`, `namespaced`, `cmd_readdress` (`docs/tui-routing-v0.md` §3.8–3.9) | app-loop half |
+| `stdlib/tui/widget.sprout` | `View`, `Widget`, `WidgetId`, `Cmd`, `on_event`, `feed`, `measure`, `render`, `map_msgs`, `cmd_run`, `cmd_map`; later `Grow`, `Measured`, `fixed_size`, `greedy_size` (M4, `docs/tui-widget-set-v0.md` §4.3) and `route_when`, `namespaced`, `cmd_readdress` (`docs/tui-routing-v0.md` §3.8–3.9) and `ToFocus` (C2, `docs/tui-focus-v0.md` §4.2) | app-loop half |
 | `stdlib/tui/app.sprout` | `Flow`, `Signal`, `App`, `apply`, `step`, `run`, `done` | app-loop half |
+| `stdlib/tui/widgets/focus.sprout` | `focus_ring`, `focus_ring_at` | C2, `docs/tui-focus-v0.md` |
+| `stdlib/tui/widgets/button.sprout` | `button`, `button_styled` | C2, `docs/tui-focus-v0.md` |
 
 Both modules grew a routing surface afterwards — `Delivery`, `route`, `deliver`, `step_to`,
 `SigTo` — in `docs/tui-routing-v0.md` §4.

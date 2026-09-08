@@ -48,6 +48,8 @@ fn leaf_handler(name: String, n: Int, d: widget.Delivery Msg) -> (Int, Says, Ask
   # An event delivered to one widget rather than broadcast — the substrate
   # focus is built on.
   | widget.ToEvent e -> (n + 10, [Noted(name ++ "-ev")], Nil)
+  # In no focus ring, so this never arrives; the match still has to be total.
+  | widget.ToFocus _ -> (n, Nil, Nil)
 
 fn a_handler(n: Int, d: widget.Delivery Msg) -> (Int, Says, Asks) =
   leaf_handler("a", n, d)
@@ -350,6 +352,7 @@ fn picky_handler(n: Int, d: widget.Delivery Msg) -> Maybe (Int, Says, Asks) =
   match d with
   | widget.ToMsg m -> Just((n + 1, [Noted("picky")], Nil))
   | widget.ToEvent e -> picky_key(n, e)
+  | widget.ToFocus _ -> Nothing
 
 # Uses a keypress and declines the rest. The catch-all is right for a variant
 # that does not exist yet: an event this widget cannot read is one it has no

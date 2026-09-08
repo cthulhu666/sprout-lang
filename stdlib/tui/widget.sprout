@@ -30,6 +30,10 @@ export fn id_eq(a: WidgetId, b: WidgetId) -> Bool = id_text(a) == id_text(b)
 export type Delivery m (..) =
   | ToMsg m
   | ToEvent event.Event
+  # Focus gained or lost. Addressed to one widget, never broadcast — `on_event`
+  # is the broadcast channel, and "everyone gained focus" must not be a value
+  # anything can build. Design: docs/tui-focus-v0.md §4.2.
+  | ToFocus Bool
 
 # A unit of IO that a widget or application WANTS performed, but does not
 # perform. Pure code builds one; only the app loop runs it, in a task of its
@@ -251,11 +255,12 @@ fn mapped_route(f: m -> n, unf: n -> Maybe m,
   | Nothing -> Nothing
   | Just inner_d -> remap(f, inner(st, target, inner_d))
 
-# An event carries no message, so it crosses untouched; only `ToMsg` needs the
-# prism's backward half.
+# Neither an event nor a focus change carries a message, so both cross
+# untouched; only `ToMsg` needs the prism's backward half.
 fn narrow(unf: n -> Maybe m, d: Delivery n) -> Maybe (Delivery m) =
   match d with
   | ToEvent e -> Just(ToEvent(e))
+  | ToFocus f -> Just(ToFocus(f))
   | ToMsg nm -> as_delivery(unf(nm))
 
 fn as_delivery(r: Maybe m) -> Maybe (Delivery m) =

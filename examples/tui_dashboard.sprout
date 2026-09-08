@@ -65,6 +65,7 @@ fn ticks_route(t: Ticks, d: widget.Delivery Msg) -> (Ticks, Says, Asks) =
   match d with
   | widget.ToMsg m -> (stamped(t, m), Nil, Nil)
   | widget.ToEvent _ -> (t, Nil, Nil)
+  | widget.ToFocus _ -> (t, Nil, Nil)
 
 fn stamped(t: Ticks, m: Msg) -> Ticks =
   match m with

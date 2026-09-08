@@ -1,0 +1,86 @@
+module stdlib.tui.widgets.button
+
+# A label that says one thing when pressed. Design: docs/tui-focus-v0.md.
+#
+# The first widget whose behaviour depends on focus, and the smallest one that
+# does: it claims Enter and Space while focused and nothing at all otherwise,
+# so an unused key still reaches the application's own bindings.
+
+import stdlib.tui.event as event
+import stdlib.tui.geometry as geometry
+import stdlib.tui.screen as scr
+import stdlib.tui.style as style
+import stdlib.tui.text as text
+import stdlib.tui.widget as widget
+import stdlib.tui.widgets.paint as paint
+
+# Two bare `Style` arguments in a row would swap silently, inverting which
+# state looks focused. Named fields make the swap a compile error; guidelines
+# §7 sends a multi-field distinction to a record rather than a `wrap`.
+export type ButtonStyle = (normal: style.Style, focused: style.Style)
+
+# `has_focus` is the widget's own copy of "the keyboard is mine", set by the
+# focus ring. It cannot be asked for: `Widget m` erases the state type, so
+# nothing outside can read it (docs/tui-focus-v0.md §4.1).
+type Btn m = (id: widget.WidgetId, label: String, on_press: m,
+              look: ButtonStyle, has_focus: Bool)
+
+# Everything a button reacts to arrives addressed, so the broadcast is idle.
+fn btn_on_event(b: Btn m,
+                ev: event.Event) -> (Btn m, List m, List(widget.Cmd m)) =
+  (b, Nil, Nil)
+
+fn btn_handler(b: Btn m,
+               d: widget.Delivery m) -> Maybe (Btn m, List m, List(widget.Cmd m)) =
+  match d with
+  # A button asks for no work, so an answer addressed to it is not its
+  # business and belongs to `update`.
+  | widget.ToMsg _ -> Nothing
+  | widget.ToFocus f -> Just((b with (has_focus = f), Nil, Nil))
+  | widget.ToEvent e -> btn_key(b, e)
+
+fn btn_key(b: Btn m,
+           e: event.Event) -> Maybe (Btn m, List m, List(widget.Cmd m)) =
+  match e with
+  | event.KeyPress k _ -> btn_activate(b, k)
+  | _ -> Nothing
+
+# Enter and Space, and only while focused. Tab is declined either way, which
+# is what leaves it to the ring.
+fn btn_activate(b: Btn m,
+                k: event.Key) -> Maybe (Btn m, List m, List(widget.Cmd m)) =
+  if b.has_focus && activates(k) then Just((b, [b.on_press], Nil)) else Nothing
+
+fn activates(k: event.Key) -> Bool =
+  match k with
+  | event.KEnter -> true
+  | event.KChar c -> c == ' '
+  | _ -> false
+
+fn caption(b: Btn m) -> String = "[ " ++ b.label ++ " ]"
+
+fn btn_measure(b: Btn m, avail: geometry.Size) -> widget.Measured =
+  widget.fixed_size(geometry.Size(text.width(caption(b)), 1))
+
+fn btn_render(b: Btn m, r: geometry.Region, s: scr.Screen) -> Unit !{IO} =
+  paint.line(s, r, 0, caption(b),
+             if b.has_focus then b.look.focused else b.look.normal)
+
+fn btn_widget(b: Btn m) -> widget.Widget m =
+  widget.Widget(widget.View(state = b, on_event = btn_on_event,
+                            route = widget.route_when(b.id, btn_handler, _, _, _),
+                            render = btn_render, measure = btn_measure))
+
+export fn button(id: widget.WidgetId, label: String,
+                 on_press: m) -> widget.Widget m =
+  button_styled(id, default_style(), label, on_press)
+
+# Reverse video for focus, since it is the one attribute every terminal has.
+export fn default_style() -> ButtonStyle =
+  ButtonStyle(normal = style.style_default(),
+              focused = style.with_reverse(style.style_default(), true))
+
+export fn button_styled(id: widget.WidgetId, look: ButtonStyle, label: String,
+                        on_press: m) -> widget.Widget m =
+  btn_widget(Btn(id = id, label = label, on_press = on_press, look = look,
+                 has_focus = false))
