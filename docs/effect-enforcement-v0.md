@@ -85,10 +85,13 @@ is never a partial application, and `_` placeholders desugar to ordinary lambdas
 the parser had already made the choice. `build_fn_type_modes` now places the declared effect on the
 innermost arrow, matching what a hand-written signature produces.
 
-A **zero-parameter** function has no arrow to carry anything, so the declared effect stays on the
-`Scheme` as well; that is where `fn main() -> Unit !{IO}` keeps its `!{IO}`.
-`types.scheme_to_string` prints whichever of the two is load-bearing, so an effectful function does
-not render as `String -> Unit !{IO} !{IO}`.
+A **zero-parameter** function used to have no arrow to carry anything, so the declared effect was
+kept on the `Scheme` as well. Since the `TThunk` arrow landed (2026-09-08,
+`docs/nullary-type-collapse-v0.md`) it has one: `fn main() -> Unit !{IO}` types as
+`() -> Unit !{IO}` and the effect sits in the thunk's own slot. The `Scheme` field is still written
+and is still what `call_effect_of` reads at arity 0 — that mismatch is the remaining half of the
+collapse. `types.scheme_to_string` prints whichever of the two is load-bearing, so an effectful
+function does not render as `String -> Unit !{IO} !{IO}`.
 
 ## 4. What shipped: `--phase effects`
 

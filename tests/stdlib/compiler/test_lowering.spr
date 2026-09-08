@@ -482,9 +482,11 @@ fn main() -> Unit !{IO} =
     assert_true(state, "p1c-decode: picks Decode Int not Decode String",
       str_starts_with(lowered_fn_lambda_inner_callee(r_p1c_decode, "test"), "__tc_Decode_Int_"))
 
-    r_p1c_make <- run_lower("class Make a {\n  fn make() -> a\n}\ninstance Make Int {\n  fn make() -> Int = 1\n}\ninstance Make String {\n  fn make() -> String = \"s\"\n}\nfn test(f: (Unit -> Int) -> Int) -> Int = f(make)")
+    # `() -> Int`, not `Unit -> Int`: `make()` takes no argument, and the two are
+    # different types. Dispatch must come from the RESULT, as in p1c-decode above.
+    r_p1c_make <- run_lower("class Make a {\n  fn make() -> a\n}\ninstance Make Int {\n  fn make() -> Int = 1\n}\ninstance Make String {\n  fn make() -> String = \"s\"\n}\nfn test(f: (() -> Int) -> Int) -> Int = f(make)")
     assert_true(state, "p1c-zero-arg: lowers ok", is_lower_ok(r_p1c_make))
-    assert_true(state, "p1c-zero-arg: picks Make Int not Make Unit",
+    assert_true(state, "p1c-zero-arg: picks Make Int not Make String",
       str_starts_with(lowered_fn_lambda_inner_callee(r_p1c_make, "test"), "__tc_Make_Int_"))
 
     # P2: forwarded parameterised constraint (MyEq (Box a)) with NO MyEq a in scope.

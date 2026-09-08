@@ -53,8 +53,9 @@ editor and IDE support.
 >   answers with the `Scheme` the env holds under *its own key*, and only a non-name
 >   expression goes through the sentinel. The sentinel types a **reference** to the name,
 >   and referencing a value is pure, so a declared effect living only on the `Scheme` was
->   replaced by the sentinel's own — which is every zero-parameter function, since it has
->   no arrow to carry the effect (`types.scheme_effect_suffix`). Every `main` in the tree
+>   replaced by the sentinel's own — which is every zero-parameter function, since it had
+>   no arrow to carry the effect (`types.scheme_effect_suffix`; a nullary function has had
+>   one since the 2026-09-08 `TThunk` change). Every `main` in the tree
 >   hovered as plain `Unit`. Not hover-only: the REPL's `:type` and the analysis service
 >   read the same function. Measured on the real server, `fn main() -> Unit !{IO}` before
 >   and after: `Unit` → `Unit !{IO}`
