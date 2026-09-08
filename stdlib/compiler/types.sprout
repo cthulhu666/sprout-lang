@@ -85,6 +85,9 @@ export fn ownership_is_once(o: Ownership) -> Bool =
 #   TConst — a type constant ("Int", "Bool", "Maybe", …)
 #   TApp  — type application: TApp (TConst "Maybe") (TConst "Int") = Maybe Int
 #   TFunc — function type with associated effect row and parameter ownership
+#   TThunk — a function type of ARITY ZERO, written `() -> T`. Distinct from
+#     `Unit -> T`, which is TFunc and takes one argument. No Ownership field:
+#     there is no parameter to own. See docs/nullary-type-collapse-v0.md.
 #   TTuple — tuple type (Int, Bool, …)
 
 # ---------------------------------------------------------------------------
@@ -110,6 +113,7 @@ export type Type (..) =
   | TConst TypeId
   | TApp Type Type
   | TFunc Type Type Effect Ownership
+  | TThunk Type Effect
   | TTuple (List Type)
 
 # Mint a TypeId from a canonical (already-resolved) name. The bundler/resolver is the
@@ -149,6 +153,7 @@ export fn type_mentions_skolem(t: Type) -> Bool =
   | TConst id -> is_skolem_name(type_id_name(id))
   | TApp base arg -> type_mentions_skolem(base) || type_mentions_skolem(arg)
   | TFunc p r _ _ -> type_mentions_skolem(p) || type_mentions_skolem(r)
+  | TThunk r _ -> type_mentions_skolem(r)
   | TTuple items -> any_mentions_skolem(items)
 
 fn any_mentions_skolem(items: List Type) -> Bool =
@@ -311,24 +316,32 @@ export fn effect_io() -> Effect = EffectIO
 
 # Where a written `!{...}` lands on a type. It attaches to the INNERMOST arrow,
 # matching parser.make_type_arrow's hoist, so `(a -> b -> C) !{IO}` and
-# `a -> b -> C !{IO}` denote one type. A type with no arrow has no effect slot,
-# so the annotation is dropped. Two annotations on one arrow — `(a -> b !{e})
-# !{IO}` — resolve last-one-wins; §7 rule 9 admits only one and neither spelling
-# is rejected yet.
+# `a -> b -> C !{IO}` denote one type. A thunk IS an arrow and takes the effect
+# directly; a type with no arrow at all has no effect slot, so the annotation is
+# dropped. Two annotations on one arrow — `(a -> b !{e}) !{IO}` — resolve
+# outer-wins; §7 rule 9 admits only one and neither spelling is rejected yet.
 #
 # Shared for the same reason `effect_from_labels` below is: `infer` and
 # `iface_codec` walk the same AST and must not disagree.
 export fn attach_arrow_effect(t: Type, eff: Effect) -> Type =
   match t with
   | TFunc p r e own -> attach_along_spine(p, r, e, own, eff)
-  | _ -> t
+  | TThunk r _ -> TThunk(r, eff)
+  | TVar _ -> t
+  | TConst _ -> t
+  | TApp _ _ -> t
+  | TTuple _ -> t
 
 # While the return is itself an arrow the effect belongs further in; the arrow
 # that returns a non-arrow is the one that takes it.
 fn attach_along_spine(p: Type, r: Type, e: Effect, own: Ownership, eff: Effect) -> Type =
   match r with
   | TFunc _ _ _ _ -> TFunc(p, attach_arrow_effect(r, eff), e, own)
-  | _ -> TFunc(p, r, eff, own)
+  | TThunk _ _ -> TFunc(p, attach_arrow_effect(r, eff), e, own)
+  | TVar _ -> TFunc(p, r, eff, own)
+  | TConst _ -> TFunc(p, r, eff, own)
+  | TApp _ _ -> TFunc(p, r, eff, own)
+  | TTuple _ -> TFunc(p, r, eff, own)
 
 # The one place a written `!{...}` annotation becomes an Effect.
 #
@@ -414,6 +427,7 @@ fn ftv_acc(t: Type, acc: List String) -> List String =
   | TConst _ -> acc
   | TApp base arg -> ftv_acc(base, ftv_acc(arg, acc))
   | TFunc param ret _ _ -> ftv_acc(param, ftv_acc(ret, acc))
+  | TThunk ret _ -> ftv_acc(ret, acc)
   | TTuple items -> ftv_list_acc(items, acc)
 
 fn ftv_list_acc(items: List Type, acc: List String) -> List String =
@@ -507,6 +521,7 @@ fn ftv_effect_type_acc(t: Type, acc: List String) -> List String =
   | TApp base arg -> ftv_effect_type_acc(base, ftv_effect_type_acc(arg, acc))
   | TFunc param ret eff _ ->
       ftv_effect_type_acc(param, ftv_effect_type_acc(ret, list_union(ftv_effect(eff), acc)))
+  | TThunk ret eff -> ftv_effect_type_acc(ret, list_union(ftv_effect(eff), acc))
   | TTuple items -> ftv_effect_type_list_acc(items, acc)
 
 fn ftv_effect_type_list_acc(items: List Type, acc: List String) -> List String =
@@ -564,6 +579,10 @@ fn type_row_labels(t: Type) -> List String =
       match effect_row_labels(eff) with
       | Nil -> first_row_labels(type_row_labels(param), ret)
       | labels -> labels
+  | TThunk ret eff ->
+      match effect_row_labels(eff) with
+      | Nil -> type_row_labels(ret)
+      | labels -> labels
   | TTuple items -> type_list_row_labels(items)
 
 # `Nil` from the left branch means "keep looking", so fall through to the right.
@@ -620,6 +639,10 @@ fn type_to_string_aux(t: Type, as_arg: Bool) -> String =
       if as_arg
       then wrap_parens(func_to_string(param, ret, eff, own))
       else func_to_string(param, ret, eff, own)
+  | TThunk ret eff ->
+      if as_arg
+      then wrap_parens(thunk_to_string(ret, eff))
+      else thunk_to_string(ret, eff)
   | TTuple items -> "(" ++ join_types(items) ++ ")"
 
 # The ownership tag is printed as a prefix on the parameter, matching the
@@ -628,6 +651,11 @@ fn type_to_string_aux(t: Type, as_arg: Bool) -> String =
 fn func_to_string(param: Type, ret: Type, eff: Effect, own: Ownership) -> String =
   ownership_prefix(own) ++ type_to_string_aux(param, true) ++ " -> "
     ++ type_to_string_aux(ret, false) ++ effect_suffix(eff)
+
+# An empty parameter list, not a `Unit` argument: `() -> T` and `Unit -> T` are
+# different types and print differently.
+fn thunk_to_string(ret: Type, eff: Effect) -> String =
+  "() -> " ++ type_to_string_aux(ret, false) ++ effect_suffix(eff)
 
 fn ownership_prefix(own: Ownership) -> String =
   match own with
@@ -656,15 +684,19 @@ export fn effect_to_string(e: Effect) -> String =
 fn scheme_body(s: Scheme) -> String =
   type_to_string(scheme_type(s)) ++ scheme_effect_suffix(scheme_type(s), scheme_effects(s))
 
-# A declared effect is recorded in TWO places — on the innermost arrow of the
-# type, and on the Scheme — because a zero-parameter function has no arrow to
-# hold one (`fn main() -> Unit !{IO}` types as plain `Unit`). Printing both would
-# render every effectful function as `String -> Unit !{IO} !{IO}`, so the arrow
-# wins whenever there is an arrow: func_to_string has already emitted it.
+# A declared effect is recorded in TWO places — on the arrow and on the Scheme.
+# Printing both would render every effectful function as
+# `String -> Unit !{IO} !{IO}`, so the arrow wins whenever there is one:
+# func_to_string and thunk_to_string have already emitted it. Only a type with no
+# arrow at all falls back to the Scheme's copy.
 fn scheme_effect_suffix(t: Type, eff: Effect) -> String =
   match t with
   | TFunc _ _ _ _ -> ""
-  | _ -> effect_suffix(eff)
+  | TThunk _ _ -> ""
+  | TVar _ -> effect_suffix(eff)
+  | TConst _ -> effect_suffix(eff)
+  | TApp _ _ -> effect_suffix(eff)
+  | TTuple _ -> effect_suffix(eff)
 
 # ---------------------------------------------------------------------------
 # Variable renaming for scheme display
@@ -728,6 +760,7 @@ fn apply_rename_type(rename: Dict String, t: Type) -> Type =
   | TApp base arg -> TApp(apply_rename_type(rename, base), apply_rename_type(rename, arg))
   | TFunc param ret eff own ->
       TFunc(apply_rename_type(rename, param), apply_rename_type(rename, ret), eff, own)
+  | TThunk ret eff -> TThunk(apply_rename_type(rename, ret), eff)
   | TTuple items -> TTuple(apply_rename_type_list(rename, items))
 
 fn apply_rename_type_list(rename: Dict String, ts: List Type) -> List Type =
@@ -852,6 +885,9 @@ fn type_eq(left: Type, right: Type) -> Bool =
   | TApp f a -> match right with | TApp g b -> type_eq(f, g) && type_eq(a, b) | _ -> false
   | TFunc p r e o -> match right with
       | TFunc q s f w -> type_eq(p, q) && type_eq(r, s) && effect_eq(e, f) && ownership_eq(o, w)
+      | _ -> false
+  | TThunk r e -> match right with
+      | TThunk s f -> type_eq(r, s) && effect_eq(e, f)
       | _ -> false
   | TTuple ts -> match right with | TTuple us -> types_eq(ts, us) | _ -> false
 

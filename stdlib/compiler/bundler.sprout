@@ -1269,6 +1269,7 @@ fn qualify_type_expr(ctx: ResolveCtx, t: ast.TypeExpr) -> ast.TypeExpr =
   | ast.TypeName name -> ast.TypeName(qualify_type_name(ctx, name))
   | ast.TypeApply base arg -> ast.TypeApply(qualify_type_expr(ctx, base), qualify_type_expr(ctx, arg))
   | ast.TypeArrow left right effects -> ast.TypeArrow(qualify_type_expr(ctx, left), qualify_type_expr(ctx, right), effects)
+  | ast.TypeThunk right effects -> ast.TypeThunk(qualify_type_expr(ctx, right), effects)
   | ast.TypeEffect base effects -> ast.TypeEffect(qualify_type_expr(ctx, base), effects)
   | ast.TupleType items -> ast.TupleType(qualify_type_list(ctx, items))
 
@@ -1700,6 +1701,7 @@ fn type_over_floor(t: ast.TypeExpr) -> Bool =
       type_name_starts_lower(name) || str_list_member(name, floor_type_names())
   | ast.TypeApply base arg -> type_over_floor(base) && type_over_floor(arg)
   | ast.TypeArrow left right _ -> type_over_floor(left) && type_over_floor(right)
+  | ast.TypeThunk right _ -> type_over_floor(right)
   | ast.TypeEffect base _ -> type_over_floor(base)
   | ast.TupleType items -> types_over_floor(items)
 
@@ -1792,6 +1794,7 @@ fn unresolved_in_type(t: ast.TypeExpr, declared: Dict String) -> Maybe String =
   | ast.TypeName name -> if type_name_in_scope(name, declared) then Nothing else Just(name)
   | ast.TypeApply base arg -> or_unresolved(unresolved_in_type(base, declared), arg, declared)
   | ast.TypeArrow left right _ -> or_unresolved(unresolved_in_type(left, declared), right, declared)
+  | ast.TypeThunk right _ -> unresolved_in_type(right, declared)
   | ast.TypeEffect base _ -> unresolved_in_type(base, declared)
   | ast.TupleType items -> unresolved_in_types(items, declared)
 

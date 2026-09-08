@@ -24,6 +24,7 @@ import stdlib.string as string
 #              | ( TConst <atom> )
 #              | ( TApp <type> <type> )
 #              | ( TFunc <type> <type> <effect> <own> )
+#              | ( TThunk <type> <effect> )      # `() -> T`, no param, no own
 #              | ( TTuple <types> )
 #   <own>     := borrow | consume        # M4.6 parameter ownership
 #   <effect>  := ( EffectPure )
@@ -74,6 +75,8 @@ export fn encode_type(t: types.Type) -> String =
   | types.TFunc a b e o ->
       string_concat_many(["(TFunc ", encode_type(a), " ", encode_type(b), " ", encode_effect(e),
                           " ", encode_ownership(o), ")"])
+  | types.TThunk b e ->
+      string_concat_many(["(TThunk ", encode_type(b), " ", encode_effect(e), ")"])
   | types.TTuple ts ->
       string_concat_many(["(TTuple ", encode_type_list(ts), ")"])
 
@@ -222,6 +225,7 @@ fn decode_type_by_tag(s: String, bytes: Bytes, i: Int, total: Int, tag: String) 
   else if tag == "TConst" then decode_tconst_at(s, bytes, i, total)
   else if tag == "TApp" then decode_tapp_at(s, bytes, i, total)
   else if tag == "TFunc" then decode_tfunc_at(s, bytes, i, total)
+  else if tag == "TThunk" then decode_tthunk_at(s, bytes, i, total)
   else if tag == "TTuple" then decode_ttuple_at(s, bytes, i, total)
   else Nothing
 
@@ -254,6 +258,12 @@ fn decode_tfunc_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.T
       Just(own_atom, n) = read_atom(s, bytes, skip_ws(s, bytes, m, total), total) else Nothing
       Just end = expect_char(s, bytes, skip_ws(s, bytes, n, total), total, ')') else Nothing
   in Just((types.TFunc(t1, t2, e, ownership_from_str(own_atom)), end))
+
+fn decode_tthunk_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Type, Int) =
+  let Just(t1, j) = decode_type_at(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing
+      Just(e, k) = decode_effect_at(s, bytes, skip_ws(s, bytes, j, total), total) else Nothing
+      Just end = expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') else Nothing
+  in Just((types.TThunk(t1, e), end))
 
 # The ownership tag on the wire. This is what carries `borrowing` ACROSS a module
 # boundary for a type that reaches the importer as a Scheme rather than as a
@@ -359,7 +369,7 @@ fn collect_types(s: String, bytes: Bytes, i: Int, total: Int, acc: List types.Ty
 #
 # `version` is encoded as a bare atom and checked by string equality. When
 # v2 lands, decoder gets an if-chain or a parsed-int conversion.
-# (Current version is 6 — see decode_iface_version for the change log.)
+# (Current version is 7 — see decode_iface_version for the change log.)
 
 export type NamedScheme (..) =
   | NamedScheme String types.Scheme
@@ -529,12 +539,13 @@ fn decode_iface_v2_tail(s: String, bytes: Bytes, i: Int, total: Int, version: In
 # v2→v3 added the Scheme constraint field; v3→v4 changed the constraint pair wire
 # form from (position, class) to (head_token, class); v4→v5 added the M4.6
 # parameter-ownership tag to TFunc; v5→v6 added the M4.4a `once` case to that tag
-# and to ParamMode. Old ifaces are rejected loudly (the Scheme wire format
-# changed) — from v5 on that matters doubly, since an older iface decoded
+# and to ParamMode; v6→v7 added the TypeThunk tag, so a nullary signature is
+# `() -> T` rather than bare `T`. Old ifaces are rejected loudly (the Scheme wire
+# format changed) — from v5 on that matters doubly, since an older iface decoded
 # leniently would silently read every `borrowing`/`once` parameter as consuming,
 # which is the exact silent erasure both milestones exist to remove.
 fn decode_iface_version(s: String) -> Maybe Int =
-  if s == "6" then Just(6) else Nothing
+  if s == "7" then Just(7) else Nothing
 
 fn decode_named_scheme_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List NamedScheme, Int) =
   match expect_char(s, bytes, i, total, '(') with
@@ -646,6 +657,9 @@ fn typeexpr_to_type_with_vars(te: ast.TypeExpr, local_vars: Dict types.Type) -> 
                   typeexpr_to_type_with_vars(ret, local_vars),
                   types.effect_from_labels(effs),
                   types.OwnConsume)
+  | ast.TypeThunk ret effs ->
+      types.TThunk(typeexpr_to_type_with_vars(ret, local_vars),
+                   types.effect_from_labels(effs))
   | ast.TypeEffect inner effs ->
       types.attach_arrow_effect(typeexpr_to_type_with_vars(inner, local_vars),
                                 types.effect_from_labels(Just(effs)))
@@ -700,13 +714,22 @@ fn effect_from_maybe_labels(labels: Maybe (List String)) -> types.Effect =
 # the scheme's effect field but absent from the type — and `call_effect_of` reads
 # the arrows, not that field, for any call with arguments. Latent for the same
 # reason as `typeexpr_to_type_with_vars` above: no consumer reads it back yet.
+# No params at all is `() -> ret`; the same `Nil` inside the recursion is only the
+# end of the chain. Splitting them apart is what keeps a nullary declaration from
+# decoding as its bare return type.
 fn params_to_func_type(params: List ast.Param, ret: types.Type, local_vars: Dict types.Type,
                        eff: types.Effect) -> types.Type =
+  match params with
+  | Nil -> types.TThunk(ret, eff)
+  | _ -> params_arrow_chain(params, ret, local_vars, eff)
+
+fn params_arrow_chain(params: List ast.Param, ret: types.Type, local_vars: Dict types.Type,
+                      eff: types.Effect) -> types.Type =
   match params with
   | Nil -> ret
   | Cons (ast.Param _ maybe_te mode) rest ->
       types.TFunc(param_type_from_maybe(maybe_te, local_vars),
-                  params_to_func_type(rest, ret, local_vars, eff),
+                  params_arrow_chain(rest, ret, local_vars, eff),
                   params_arrow_effect(rest, eff),
                   linear_check.ownership_of_param_mode(mode))
 
@@ -1058,6 +1081,8 @@ export fn encode_ast_typeexpr(te: ast.TypeExpr) -> String =
       string_concat_many(["(TypeApply ", encode_ast_typeexpr(base), " ", encode_ast_typeexpr(arg), ")"])
   | ast.TypeArrow param ret effects ->
       string_concat_many(["(TypeArrow ", encode_ast_typeexpr(param), " ", encode_ast_typeexpr(ret), " ", encode_maybe_str_list(effects), ")"])
+  | ast.TypeThunk ret effects ->
+      string_concat_many(["(TypeThunk ", encode_ast_typeexpr(ret), " ", encode_maybe_str_list(effects), ")"])
   | ast.TypeEffect inner labels ->
       string_concat_many(["(TypeEffect ", encode_ast_typeexpr(inner), " ", encode_str_list(labels), ")"])
   | ast.TupleType parts ->
@@ -1560,6 +1585,7 @@ fn decode_ast_typeexpr_by_tag(s: String, bytes: Bytes, i: Int, total: Int, tag: 
   if tag == "TypeName" then decode_typename_at(s, bytes, i, total)
   else if tag == "TypeApply" then decode_typeapply_at(s, bytes, i, total)
   else if tag == "TypeArrow" then decode_typearrow_at(s, bytes, i, total)
+  else if tag == "TypeThunk" then decode_typethunk_at(s, bytes, i, total)
   else if tag == "TypeEffect" then decode_typeeffect_at(s, bytes, i, total)
   else if tag == "TupleType" then decode_tupletype_at(s, bytes, i, total)
   else Nothing
@@ -1581,6 +1607,12 @@ fn decode_typearrow_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast
       Just(effects, m) = decode_maybe_str_list_at(s, bytes, skip_ws(s, bytes, k, total), total) else Nothing
       Just end = expect_char(s, bytes, skip_ws(s, bytes, m, total), total, ')') else Nothing
   in Just((ast.TypeArrow(param, ret, effects), end))
+
+fn decode_typethunk_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.TypeExpr, Int) =
+  let Just(ret, j) = decode_ast_typeexpr_at(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing
+      Just(effects, k) = decode_maybe_str_list_at(s, bytes, skip_ws(s, bytes, j, total), total) else Nothing
+      Just end = expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') else Nothing
+  in Just((ast.TypeThunk(ret, effects), end))
 
 fn decode_typeeffect_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.TypeExpr, Int) =
   let Just(inner, j) = decode_ast_typeexpr_at(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing

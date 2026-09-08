@@ -178,4 +178,5 @@ export fn type_to_type_expr(t: types.Type) -> ast.TypeExpr =
   | types.TConst name -> ast.TypeName(types.type_id_name(name))
   | types.TApp f x -> ast.TypeApply(type_to_type_expr(f), type_to_type_expr(x))
   | types.TFunc a b _ _ -> ast.TypeArrow(type_to_type_expr(a), type_to_type_expr(b), Nothing)
+  | types.TThunk b _ -> ast.TypeThunk(type_to_type_expr(b), Nothing)
   | types.TTuple items -> ast.TupleType(list_map(\i -> type_to_type_expr(i), items))

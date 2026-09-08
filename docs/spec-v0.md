@@ -1791,6 +1791,17 @@ Effect note for v0:
    `(a -> b) !{IO} -> C`, which does not parse. On a type with no arrow —
    `Int !{IO}` — there is no effect slot and the annotation carries no meaning.
 
+   **A zero-parameter function has an arrow.** `fn f() -> T` has type `() -> T`,
+   not `T`: an empty parameter list is an arrow with no parameter, and it carries
+   the declared effect like any other. `fn main() -> Unit !{IO}` therefore has
+   type `() -> Unit !{IO}`.
+
+   `()` is not itself a type — it is only an empty parameter list, and is
+   accepted in type position only directly before `->`. `() -> T` and
+   `Unit -> T` are distinct types: the first names a function taking no
+   arguments, the second one taking a single `Unit`. Neither is assignable to
+   the other, and calling a `() -> T` requires the empty argument list `f()`.
+
    > **Not yet enforced (2026-09-07).** At most one annotation applies to an
    > arrow. Writing two — by nesting, `(a -> b !{e}) !{IO}`, or by annotating an
    > alias that already carries one, `type alias H = Int -> Int !{IO}` used as

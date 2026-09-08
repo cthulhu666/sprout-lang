@@ -5,10 +5,13 @@ import stdlib.compiler.source as source
 # No source positions: type exprs are always sub-components of larger nodes
 # whose positions carry the error context.
 
+# TypeThunk is `() -> T`: an arrow with no parameter, NOT `Unit -> T`. The two
+# are different types and a `fn f()` declaration means the former.
 export type TypeExpr (..) =
   | TypeName String
   | TypeApply TypeExpr TypeExpr
   | TypeArrow TypeExpr TypeExpr (Maybe (List String))
+  | TypeThunk TypeExpr (Maybe (List String))
   | TypeEffect TypeExpr (List String)
   | TupleType (List TypeExpr)
 

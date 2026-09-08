@@ -127,6 +127,10 @@ export fn match_te(pattern: ast.TypeExpr, concrete: types.Type, theta: Dict type
           | Nothing -> Nothing
           | Just theta1 -> match_te(pr, cr, theta1)
       | _ -> Nothing
+  | ast.TypeThunk pr _ ->
+      match concrete with
+      | types.TThunk cr _ -> match_te(pr, cr, theta)
+      | _ -> Nothing
   | ast.TypeEffect te _ -> match_te(te, concrete, theta)
   | ast.TupleType items ->
       match concrete with
@@ -160,6 +164,7 @@ export fn type_head_str(t: types.Type) -> Maybe String =
   | types.TTuple items -> Just("Tuple" ++ int_to_string(list_length(items)))
   | types.TVar _ -> Nothing
   | types.TFunc _ _ _ _ -> Nothing
+  | types.TThunk _ _ -> Nothing
 
 fn type_head_str_eq(a: types.Type, b: types.Type) -> Bool =
   match type_head_str(a) with

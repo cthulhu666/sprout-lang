@@ -62,6 +62,13 @@ fn dump_type_arrow(left: ast.TypeExpr, right: ast.TypeExpr, maybe_effs: Maybe (L
   | Just effs ->
       sexp("type-arrow", [dump_type(left), dump_type(right), dump_effects_list(effs)])
 
+fn dump_type_thunk(right: ast.TypeExpr, maybe_effs: Maybe (List String)) -> String =
+  match maybe_effs with
+  | Nothing ->
+      sexp("type-thunk", [dump_type(right)])
+  | Just effs ->
+      sexp("type-thunk", [dump_type(right), dump_effects_list(effs)])
+
 fn dump_type(t: ast.TypeExpr) -> String =
   match t with
   | ast.TypeName name ->
@@ -70,6 +77,8 @@ fn dump_type(t: ast.TypeExpr) -> String =
       sexp("type-apply", [dump_type(base), dump_type(arg)])
   | ast.TypeArrow left right maybe_effs ->
       dump_type_arrow(left, right, maybe_effs)
+  | ast.TypeThunk right maybe_effs ->
+      dump_type_thunk(right, maybe_effs)
   | ast.TypeEffect base effs ->
       sexp("type-effect", Cons(dump_type(base), q_list(effs)))
   | ast.TupleType items ->

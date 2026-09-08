@@ -138,6 +138,7 @@ fn lookup_scheme_type(name: String, env: Dict types.Scheme) -> types.Type =
 fn tfunc_result_type(t: types.Type) -> types.Type =
   match t with
   | types.TFunc _ ret _ _ -> tfunc_result_type(ret)
+  | types.TThunk ret _ -> tfunc_result_type(ret)
   | _ -> t
 
 # generate_typed_param_vars: build TVar nodes for each user param, assigning
@@ -668,6 +669,7 @@ fn type_expr_head_name(te: ast.TypeExpr) -> String =
   | ast.TypeName name -> name
   | ast.TypeApply base _ -> type_expr_head_name(base)
   | ast.TypeArrow _ _ _ -> "Fn"
+  | ast.TypeThunk _ _ -> "Fn"
   | ast.TypeEffect _ _ -> "Eff"
   | ast.TupleType items -> "Tuple" ++ int_to_string(list_length(items))
 
@@ -699,6 +701,10 @@ fn mangle_type_expr(te: ast.TypeExpr) -> String =
       mangle_type_expr(base) ++ "_" ++ mangle_type_expr(arg)
   | ast.TypeArrow l r effects_maybe ->
       "Fn_" ++ mangle_type_expr(l) ++ "_" ++ mangle_type_expr(r) ++ mangle_effects_suffix(effects_maybe)
+  # `Fn0_`, not `Fn_Unit_`: `() -> T` and `Unit -> T` are different types and must
+  # not collide in a mangled symbol.
+  | ast.TypeThunk r effects_maybe ->
+      "Fn0_" ++ mangle_type_expr(r) ++ mangle_effects_suffix(effects_maybe)
   | ast.TypeEffect base _ -> mangle_type_expr(base) ++ "_eff"
   | ast.TupleType items -> "Tuple_" ++ mangle_type_args(items)
 
@@ -774,11 +780,12 @@ fn eta_class_type_from_scheme(class_param: String, scheme_type: types.Type, actu
 fn eta_actual_type_for_scheme_match(scheme_type: types.Type, actual_type: types.Type) -> types.Type =
   match scheme_type with
   | types.TFunc _ _ _ _ -> actual_type
+  | types.TThunk _ _ -> actual_type
   | _ ->
       match actual_type with
       | types.TFunc param ret _ _ ->
-          # Zero-arg methods are inferred as their result type, but can appear
-          # in value position as Unit -> result.
+          # Legacy shape: a zero-arg method appearing in value position as
+          # `Unit -> result`. Its own type is now `() -> result` (TThunk above).
           if type_is_unit(param) then ret else actual_type
       | _ -> actual_type
 
@@ -798,6 +805,10 @@ fn match_type_vars(pattern: types.Type, actual: types.Type, acc: Dict types.Type
   | types.TFunc pparam pret _ _ ->
       match actual with
       | types.TFunc aparam aret _ _ -> match_type_vars(pret, aret, match_type_vars(pparam, aparam, acc))
+      | _ -> acc
+  | types.TThunk pret _ ->
+      match actual with
+      | types.TThunk aret _ -> match_type_vars(pret, aret, acc)
       | _ -> acc
   | types.TTuple pitems ->
       match actual with
@@ -913,6 +924,12 @@ fn append_hidden_param_types(t: types.Type, hidden_params: List types.Type) -> t
   match t with
   | types.TFunc param ret eff own ->
       types.TFunc(param, append_hidden_param_types(ret, hidden_params), eff, own)
+  # Dicts become a nullary method's real parameters, filling the empty parameter
+  # list the thunk stands for — so they replace it rather than nest inside it.
+  | types.TThunk ret eff ->
+      match hidden_params with
+      | Nil -> types.TThunk(ret, eff)
+      | _ -> prepend_func_params(hidden_params, ret)
   | _ -> prepend_func_params(hidden_params, t)
 
 fn prepend_func_params(params: List types.Type, ret: types.Type) -> types.Type =
@@ -938,6 +955,7 @@ fn type_to_eta_typeexpr(t: types.Type) -> ast.TypeExpr =
   | types.TApp base arg -> ast.TypeApply(type_to_eta_typeexpr(base), type_to_eta_typeexpr(arg))
   | types.TFunc param ret _ _ ->
       ast.TypeArrow(type_to_eta_typeexpr(param), type_to_eta_typeexpr(ret), Nothing)
+  | types.TThunk ret _ -> ast.TypeThunk(type_to_eta_typeexpr(ret), Nothing)
   | types.TTuple items -> ast.TupleType(list_map(\item -> type_to_eta_typeexpr(item), items))
 
 fn lookup_eta_inner_dicts_general(class_name: String, head: String, actual_param: types.Type, ctx: LowerCtx) -> Maybe (List typed_ast.TypedExpr) =
@@ -1601,6 +1619,8 @@ fn substitute_type_expr(te: ast.TypeExpr, subs: Dict ast.TypeExpr) -> ast.TypeEx
       ast.TypeApply(substitute_type_expr(base, subs), substitute_type_expr(arg, subs))
   | ast.TypeArrow from_ to_ effs ->
       ast.TypeArrow(substitute_type_expr(from_, subs), substitute_type_expr(to_, subs), effs)
+  | ast.TypeThunk to_ effs ->
+      ast.TypeThunk(substitute_type_expr(to_, subs), effs)
   | ast.TupleType items ->
       ast.TupleType(list_map(\item -> substitute_type_expr(item, subs), items))
   | _ -> te
