@@ -7,6 +7,7 @@ module stdlib.tui.widget
 # is testable without a terminal — which is the reason `on_event` and `measure`
 # are pure and only painting is `!{IO}`.
 
+import stdlib.string as string
 import stdlib.tui.event as event
 import stdlib.tui.geometry as geometry
 import stdlib.tui.screen as screen
@@ -68,6 +69,14 @@ fn cmd_mapped(f: m -> n, g: Unit -> m !{IO}, u: Unit) -> n !{IO} = do
   x <- g(())
   f(x)
 
+# Retarget a command's RETURN ADDRESS, leaving what it says alone — the exact
+# complement of `cmd_map`. A namespacing wrapper needs it: the answer must come
+# back to the qualified id, not the bare one the inner widget knows itself by.
+# An application-global command has no address and stays global.
+export fn cmd_readdress(f: WidgetId -> WidgetId, c: Cmd m) -> Cmd m =
+  match c with
+  | Cmd a g -> Cmd(map(f, a), g)
+
 # Whether a widget wants a size, or wants whatever is left. A `Size` cannot say
 # the second: every number in that vocabulary reads as a demand, and `solve`
 # pays fixed asks before fractions — so "I yield" spelled as a large number
@@ -127,6 +136,16 @@ export fn route_if(mine: WidgetId,
                    st: s, target: WidgetId,
                    d: Delivery m) -> Maybe(s, List m, List (Cmd m)) =
   if id_eq(mine, target) then Just(handler(st, d)) else Nothing
+
+# The other half: the claim is the HANDLER's to make, not the address's. A
+# focused widget that ignores a keystroke must let it fall back to `update`,
+# which `route_if` cannot express — it has got home either way, which is right
+# for a command's answer and wrong for a key.
+export fn route_when(mine: WidgetId,
+                     handler: s -> Delivery m -> Maybe(s, List m, List (Cmd m)),
+                     st: s, target: WidgetId,
+                     d: Delivery m) -> Maybe(s, List m, List (Cmd m)) =
+  if id_eq(mine, target) then handler(st, d) else Nothing
 
 # `s` is EXISTENTIAL and `m` is UNIVERSAL, which is the whole design: a text
 # input and a tree sit in one `List (Widget AppMsg)` with neither able to see
@@ -268,3 +287,60 @@ fn remap_one(f: m -> n,
              r: (s, List m, List (Cmd m))) -> (s, List n, List (Cmd n)) =
   match r with
   | (s2, msgs, cmds) -> (s2, list_map(f, msgs), list_map(cmd_map(f, _), cmds))
+
+# Qualify a widget's ids, so two copies of one widget can sit in one tree
+# without answering to each other's address. Separate from `map_msgs` because
+# a collision happens between two copies in ONE vocabulary too, where there is
+# no message type to retarget. Nests, so a tree can qualify at every level.
+#
+# Both directions or neither: an incoming address loses the prefix on the way
+# down, and an outgoing command's return address gains it on the way up. Half
+# of that would deliver an answer to a name nothing outside the wrapper knows.
+export fn namespaced(prefix: String, w: Widget m) -> Widget m =
+  match w with
+  | Widget v -> Widget (View(state = v.state,
+                             on_event = namespaced_on_event(prefix, v.on_event, _, _),
+                             route = namespaced_route(prefix, v.route, _, _, _),
+                             render = v.render,
+                             measure = v.measure))
+
+# A prefix is a plain `String`, not a `WidgetId`: nothing is ever delivered to
+# "panel", only to "panel.something".
+fn namespace_sep() -> String = "."
+
+fn qualify(prefix: String, i: WidgetId) -> WidgetId =
+  WidgetId(prefix ++ namespace_sep() ++ id_text(i))
+
+# `Nothing` when the address belongs elsewhere, which the wrapper declines
+# rather than forwards — the inner widget must never see an address that was
+# not meant for it.
+fn unqualify(prefix: String, target: WidgetId) -> Maybe WidgetId =
+  map(WidgetId, string.strip_prefix(id_text(target), prefix ++ namespace_sep()))
+
+fn namespaced_on_event(prefix: String,
+                       inner: s -> event.Event -> (s, List m, List (Cmd m)),
+                       st: s, ev: event.Event) -> (s, List m, List (Cmd m)) =
+  requalify(prefix, inner(st, ev))
+
+fn namespaced_route(prefix: String,
+                    inner: s -> WidgetId -> Delivery m -> Maybe(s, List m, List (Cmd m)),
+                    st: s, target: WidgetId,
+                    d: Delivery m) -> Maybe(s, List m, List (Cmd m)) =
+  and_then(namespaced_deliver(prefix, inner, st, d, _), unqualify(prefix, target))
+
+# Separate because `and_then` wants the stripped target last, and everything
+# else the wrapper needs is already bound when an address arrives.
+fn namespaced_deliver(prefix: String,
+                      inner: s -> WidgetId -> Delivery m -> Maybe(s, List m, List (Cmd m)),
+                      st: s, d: Delivery m,
+                      target: WidgetId) -> Maybe(s, List m, List (Cmd m)) =
+  map(requalify(prefix, _), inner(st, target, d))
+
+# Only the commands move: a message carries no address, and the state is the
+# inner widget's own.
+fn requalify(prefix: String,
+             r: (s, List m, List (Cmd m))) -> (s, List m, List (Cmd m)) =
+  match r with
+  | (s2, msgs, cmds) -> (s2, msgs, list_map(cmd_readdress(q, _), cmds))
+where
+  q = qualify(prefix, _)

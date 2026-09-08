@@ -513,8 +513,8 @@ Legend:
   lines with no container of its own. `View.measure` now returns a `Measured` so a child can ask
   for "whatever is left". C2–C3 below remain. Design: `docs/tui-widget-set-v0.md`.
 - [ ] `P1` **TUI M4 C2 — focus and the interactive set.** `button`, `input`, `list_view`. Focus is
-  what makes `ToEvent` reachable. **Do not start C2 with the two routing `P3`s below open** — they
-  are corrections to the contract C2 is written against.
+  what makes `ToEvent` reachable. Unblocked 2026-09-08: the two routing corrections it is written
+  against landed as `widget.route_when` and `widget.namespaced` (`docs/tui-routing-v0.md` §3.8–3.9).
 - [ ] `P2` **TUI M4 C3 — the larger widgets.** `scroll_view`, `tabs`, `tree`, `table`,
   `text_area`. Split off because `text_area` carries the language work below.
 - [ ] `P2` **TUI M4 language work — `mutvec_insert`/`mutvec_remove`, sign-off first (Collaboration
@@ -545,18 +545,6 @@ Legend:
   disagrees — emoji ZWJ sequences, Ambiguous-width under a CJK locale — renders at an
   unpredicted width and every later cursor move drifts. Any real fix is a negotiation with the
   terminal. Recovery today is a full repaint, which `screen_resize` provides.
-- [ ] `P3` **A widget's ids become addressable from outside when it is embedded, with no
-  namespacing.** `map_msgs` retargets the message type but leaves `WidgetId` alone, so two copies of
-  one widget answer to the same id and the container's first-claimant rule silently picks one. The
-  shape of the fix is already in place: `WidgetId` is an *input* to `route`, so the `map_msgs`
-  wrapper can strip a prefix on the way in and a `cmd_map` variant prepend one on the way out. Wants
-  doing with the M4 containers, not before. `docs/tui-routing-v0.md` §3.3.
-- [ ] `P3` **`route_if` claims by ADDRESS, which is right for a command's answer and wrong for a
-  focused keystroke.** It answers `Just` whenever the id matches, whatever the handler did —
-  correct for a `ToMsg`, which has got home either way. Under M4 focus the same rule silently eats a
-  key: a `ToEvent` reaches the focused widget, the widget ignores it, and the claim stops it falling
-  back to `update`. Both behaviours are wanted, so the fix is a second combinator whose handler
-  returns the flag (`route_when`), not a change to `route_if`. Do it with focus, not before.
 - [ ] `P3` **A constructor with a LINEAR field cannot be used as a function value**, and the
   rejection names a synthesized parameter: `apply(Box, Tok(5))` gives
   `linear lambda parameter '__eta_x0' is not yet supported`. The underlying restriction is the

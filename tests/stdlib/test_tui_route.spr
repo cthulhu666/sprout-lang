@@ -161,6 +161,8 @@ fn main() -> Unit !{IO} = do
   address_cases(state)
   prism_cases(state)
   fallback_cases(state)
+  decline_cases(state)
+  namespace_cases(state)
   summary(state)
 
 # ── a leaf answers only to its own id ───────────────────────────────────────
@@ -336,3 +338,97 @@ fn run_all(cs: Asks, acc: Says) -> Says !{IO} =
 fn run_next(c: widget.Cmd Msg, rest: Asks, acc: Says) -> Says !{IO} = do
   m <- widget.cmd_run(c)
   run_all(rest, Cons(m, acc))
+
+# ── a widget that declines what it did not use ──────────────────────────────
+#
+# `route_if` claims by address, which is right for a command's answer: it has
+# got home whether or not the state moved. A focused keystroke is the opposite.
+# A widget that ignores the key must let it fall back to `update`, or a global
+# binding is silently eaten by whoever happens to hold focus.
+
+fn picky_handler(n: Int, d: widget.Delivery Msg) -> Maybe (Int, Says, Asks) =
+  match d with
+  | widget.ToMsg m -> Just((n + 1, [Noted("picky")], Nil))
+  | widget.ToEvent e -> picky_key(n, e)
+
+# Uses a keypress and declines the rest. The catch-all is right for a variant
+# that does not exist yet: an event this widget cannot read is one it has no
+# business claiming.
+fn picky_key(n: Int, e: event.Event) -> Maybe (Int, Says, Asks) =
+  match e with
+  | event.KeyPress _ _ -> Just((n + 10, [Noted("picky-key")], Nil))
+  | _ -> Nothing
+
+fn picky(n: Int) -> widget.Widget Msg =
+  widget.Widget(widget.View(state = n, on_event = leaf_on_event,
+                            route = widget.route_when(widget.WidgetId("picky"),
+                                                      picky_handler, _, _, _),
+                            render = leaf_render, measure = leaf_measure))
+
+fn key_to(w: widget.Widget Msg, name: String) -> Reply =
+  widget.deliver(w, widget.WidgetId(name),
+                 widget.ToEvent(event.KeyPress(event.KEnter, event.mods_none())))
+
+fn decline_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "route_when claims a delivery its handler used",
+            said_of(key_to(picky(0), "picky")), "[Noted(picky-key)]")
+  assert_eq(state, "route_when declines one its handler did not use",
+            hit_of(ev_to(picky(0), "picky")), false)
+  assert_eq(state, "a declined delivery carries no reply",
+            said_of(ev_to(picky(0), "picky")), "none")
+  assert_eq(state, "route_when still answers only to its own address",
+            hit_of(key_to(picky(0), "other")), false)
+  # The consequence that makes this a blocker for focus: an unused key is
+  # reported unhandled all the way up, so `update` still gets its chance.
+  assert_eq(state, "a container reports an unused key unhandled",
+            hit_of(ev_to(box([mute(0), picky(0)]), "picky")), false)
+  assert_eq(state, "and still reports a used one handled",
+            hit_of(key_to(box([mute(0), picky(0)]), "picky")), true)
+
+# ── namespacing: two copies of a widget, addressed apart ────────────────────
+#
+# `map_msgs` retargets the message type and leaves `WidgetId` alone, so two
+# copies of one widget answer to the same id and the first-claimant rule
+# silently picks one. `namespaced` qualifies both directions: it strips its
+# prefix off an incoming address and puts it back on an outgoing command's
+# return address.
+
+fn namespaced_leaf(prefix: String, n: Int) -> widget.Widget Msg =
+  widget.namespaced(prefix, leaf_a(n))
+
+fn qualified(prefix: String, i: widget.WidgetId) -> widget.WidgetId =
+  widget.WidgetId(prefix ++ "." ++ widget.id_text(i))
+
+fn namespace_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "a namespaced widget answers to its qualified id",
+            said_of(to(namespaced_leaf("panel", 0), "panel.a")), "[Noted(a)]")
+  assert_eq(state, "and no longer to its bare one",
+            hit_of(to(namespaced_leaf("panel", 0), "a")), false)
+  assert_eq(state, "nor to another namespace's",
+            hit_of(to(namespaced_leaf("panel", 0), "other.a")), false)
+  # The collision the blocker describes: two copies of ONE widget, told apart.
+  assert_eq(state, "two copies answer to their own namespaces",
+            addr_of_first(to(box([namespaced_leaf("l", 0), namespaced_leaf("r", 0)]), "r.a")), "r.a")
+  assert_eq(state, "and the first no longer claims the second's address",
+            addr_of_first(to(box([namespaced_leaf("l", 0), namespaced_leaf("r", 0)]), "l.a")), "l.a")
+  # Outward: an answer addressed to the bare id would be undeliverable at the
+  # next hop up, because nothing outside the wrapper knows that name.
+  assert_eq(state, "an outgoing command is readdressed on the way out",
+            addr_of_first(to(namespaced_leaf("panel", 0), "panel.a")), "panel.a")
+  assert_eq(state, "namespaces nest",
+            said_of(to(widget.namespaced("outer", namespaced_leaf("inner", 0)),
+                       "outer.inner.a")), "[Noted(a)]")
+  assert_eq(state, "and nest on the way out too",
+            addr_of_first(to(widget.namespaced("outer", namespaced_leaf("inner", 0)),
+                             "outer.inner.a")), "outer.inner.a")
+  assert_eq(state, "an addressed event is namespaced too",
+            said_of(ev_to(namespaced_leaf("panel", 0), "panel.a")), "[Noted(a-ev)]")
+  assert_eq(state, "namespacing leaves measure alone",
+            g.size_cols(widget.measure(namespaced_leaf("panel", 7), g.Size(80, 24)).size), 7)
+  assert_eq(state, "cmd_readdress qualifies an addressed command",
+            addr_of(widget.cmd_readdress(qualified("panel", _),
+                                         widget.cmd_to(widget.WidgetId("a"),
+                                                       load("x", _)))), "panel.a")
+  assert_eq(state, "and leaves a global command global",
+            addr_of(widget.cmd_readdress(qualified("panel", _),
+                                         widget.cmd(load("x", _)))), "-")
