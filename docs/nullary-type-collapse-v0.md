@@ -1,6 +1,7 @@
 # The nullary type collapse (v0)
 
-Status: **BUG REPORT, design undecided.** Filed 2026-09-07. Every claim below was verified
+Status: **BUG REPORT, design decided (§9, Option A′, 2026-09-08), unimplemented.** Filed
+2026-09-07. Every claim below was verified
 by compiling and running on master `40808541` (tree `e73d8152`); the commits since are
 docs-only, so no compiler source has moved under it.
 
@@ -149,22 +150,91 @@ implementable: at arity 0 there is no arrow to read. Two consequences for that d
   to land on their own measured zero migration cost.
 - Its §7 promise of "check-only, no IR change" does not survive either resolution below.
 
-## 8. The decision (open)
+## 8. Prior art
+
+Each row was read from the cited reference.
+
+| language | a zero-parameter function's type | collapses to the result type? |
+|---|---|---|
+| OCaml | `unit -> t` — `Stdlib.read_line : unit -> string` | no |
+| Standard ML | `unit -> t` — `TIMER.startCPUTimer : unit -> cpu_timer` | no |
+| Rust | `fn() -> T`; the parameter list in `BareFunctionType` is optional | no |
+| Swift | `() -> T`; `function-type → (parameter-clause?) -> type` | no |
+| Scala | `=> T` for a parameterless *method*; `() => T` = `Function0[T]` for the value | no |
+| Haskell | a binding with no arguments has the type of its value | **yes** |
+
+**The one language that collapses is the one that is lazy.** In Haskell a nullary function
+and its value are operationally the same thing, so there is nothing to tell apart — lambda
+abstraction requires `n ≥ 1` parameters and no zero-argument arrow exists. Sprout is
+strict, which is what makes the same collapse unsafe here: the thunk and the `Int` it
+returns are different values, and §3 shows the checker and codegen each picking a
+different one.
+
+**Scala is the closest case to Sprout's syntax and still does not collapse.** It permits
+`def a: Int` with no parameter list — the spelling Sprout has — and types it `=> Int`, not
+`Int`. The spec is explicit that "method types do not exist as types of values": naming the
+method converts it to `() => Int`. So admitting the parameterless *declaration* does not
+require collapsing the *type*. Scala pays for that syntax with a second type former rather
+than with an absent one.
+
+Rust and Swift take a third shape worth naming: a genuine empty parameter list (`fn()`,
+`()`) rather than a unit parameter. That is a real alternative to Option A — `() -> T` as
+its own arrow rather than sugar for `Unit -> T` — and it leaves nullary call sites passing
+nothing.
+
+**Option B has no precedent here.** No surveyed language leaves the zero-argument function
+type unspellable and compensates with position checks. Haskell manages without the type
+because laziness removes the need for it, not because it guards the two positions.
+
+## 9. The decision (open)
 
 **Option A — give a nullary function a real arrow type**, `Unit -> T`. Fixes all three
 symptoms uniformly, and the runtime already models arity 0
 (`sprout_alloc_closure(size, arity)` accepts `0`; the closure header has an arity field).
 Cost: ABI-visible, and it changes what every nullary declaration's type prints as.
 
+> **`Unit -> T` is already taken.** `fn takes_unit(u: Unit) -> Int` checks as
+> `main.takes_unit : Unit -> Int` today (verified 2026-09-08). Option A would give
+> `fn takes_nothing() -> Int` that same type, merging two declarations that are distinct
+> in the surface syntax. A′ does not, because Sprout already *writes* the empty parameter
+> list — `fn f()`, not `fn f(u: Unit)` — so `() -> T` is the type that matches what the
+> declaration says.
+
+**Option A′ — an arrow with an empty parameter list**, `() -> T`, distinct from `Unit -> T`.
+The Rust/Swift shape. Same fix as A and the same ABI visibility, but a nullary call site
+keeps passing nothing rather than a unit value, and `f()` stays the call spelling instead
+of becoming `f(())`. Costs a second arrow arity in `types` that A does not.
+
 **Option B — check the two positions instead.** Reject a non-arrow in callee position, and
 reject a function reference where a non-function is expected. Cheaper and not ABI-visible,
 but `() -> T` stays unspellable as a type, so "a thunk that performs IO" cannot be written
-as a record field or a parameter — which is the shape §6.6 needs.
+as a record field or a parameter — which is the shape §6.6 needs. §8 found no language
+that resolves this the way B proposes.
 
-Undecided. The choice determines whether the effect-subsumption work can proceed as
-check-only.
+**Decided 2026-09-08 — Option A′.** A asks the type system to describe a parameter the
+programmer did not write: the declaration syntax is an empty parameter list, not a `Unit`
+binder, and `Unit -> T` already belongs to `fn f(u: Unit) -> T`. The notation is free —
+`()` is a parse error in type position today (`let u: () = ()` → `Expected type at 3:9`),
+so `() -> T` collides with nothing.
 
-## 9. Tests — deferred deliberately, with the reason
+Measured cost, so it is not relitigated as a surprise:
+
+- `types.Type`'s arrow is `TFunc Type Type Effect Ownership` — curried and binary, with no
+  way to say "no parameter". A′ needs a new constructor, not a new field. A sentinel
+  parameter type would be the magic-value spelling of the same change.
+- **73 `TFunc` match arms** across 12 files must each decide what they do at arity 0:
+  `infer` 23, `types` 12, `linear_check` 12, `lowering` 11, `unifier` 4, `resolve` 4, and
+  one or two each in `verify_dispatch`, `typed_ast`, `iface_codec`, `dce`, `ast_to_ir`,
+  `analysis_service_driver`.
+- The collapse itself is two lines: `build_fn_type` (`infer.sprout:790`) and
+  `build_fn_type_modes` (`:812`) both return `ret` unchanged at `Nil`.
+- `.iface` serialises types, so the format version goes 6 → 7
+  (`iface_codec.decode_iface_version`) and CI's iface cache purges.
+
+This also settles §10: the diagnostics can now be committed to, so the three fixtures
+deferred there can be written.
+
+## 10. Tests — deferred deliberately, with the reason
 
 `_test-reject` takes an xfail list of basenames (`justfile:761`); `type_error/` currently
 passes an empty one. It self-heals: a listed fixture that starts matching reports
@@ -173,7 +243,7 @@ quarantined here.
 
 The blocker is that the match is `grep -qF` against the `.err` file (`justfile:798`), so a
 fixture must commit to the diagnostic's wording — and which diagnostic is correct depends
-on §8. A guessed string would never self-heal, which is worse than no fixture. File all
+on §9. A guessed string would never self-heal, which is worse than no fixture. File all
 three with the design decision.
 
 > `BACKLOG.md` claimed on 2026-08-16 that `tests/conformance/type_error/` "has no `XFAIL`
