@@ -229,11 +229,17 @@ fn match_empty_params(tokens: Vec token.Token, i: Int) -> Maybe Int =
       | Nothing -> Nothing
       | Just (_, i3) -> Just(i3)
 
+# Say the rule, not just the missing token: `()` on its own is not a type, and
+# "Expected ->" reads as an invitation to add one anywhere.
 fn parse_thunk_type(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.TypeExpr, Int) =
-  do
-    (_, i2) <- expected_symbol("->", tokens, i)
-    (ret_raw, i3) <- parse_type_expr(tokens, i2)
-    Ok((make_type_thunk(ret_raw, tokens, i3), i3))
+  match match_symbol(tokens, i, "->") with
+  | Nothing ->
+      Err(ParseError("`()` is an empty parameter list, not a type; write `() -> T` at "
+        ++ pos_str(cur_pos(tokens, i)), cur_pos(tokens, i)))
+  | Just (_, i2) ->
+      do
+        (ret_raw, i3) <- parse_type_expr(tokens, i2)
+        Ok((make_type_thunk(ret_raw, tokens, i3), i3))
 
 # The effect-placement rules of make_type_arrow, with no parameter to carry.
 fn make_type_thunk(right_raw: ast.TypeExpr, tokens: Vec token.Token, i: Int) -> ast.TypeExpr =

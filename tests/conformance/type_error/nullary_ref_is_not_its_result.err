@@ -1,1 +1,1 @@
-() -> Int
+Type mismatch: Int vs () -> Int
