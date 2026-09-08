@@ -424,9 +424,10 @@ boundaries at `tests/conformance/type_error/polymorphic_recursion_{partial,const
 
 ### 8.4 A latent effect bug this fixed
 
-`types.mono` hardcodes `EffectPure`, and `call_effect_of` reads a scheme's effect
-field only when `argc <= 0`. So a **nullary** self-call took its effect from a
-scheme that claimed purity regardless of the declaration:
+`types.mono` hardcodes `EffectPure`, and `call_effect_of` read a scheme's effect
+field and nothing else when `argc <= 0` (it now merges the thunk arrow's too). So
+a **nullary** self-call took its effect from a scheme that claimed purity
+regardless of the declaration:
 
 ```
 fn spin() -> Unit !{IO} = spin()

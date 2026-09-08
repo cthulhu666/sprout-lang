@@ -1,0 +1,19 @@
+module main
+
+# The same laundering as nullary_local_callee_launders_effect, reached by the
+# other call path: the callee is an EXPRESSION, not a name, so inference reads
+# the effect off the inferred type alone with no Scheme to fall back on.
+
+type Box = | Box (() -> Int !{IO})
+
+fn unbox(b: Box) -> (() -> Int !{IO}) =
+  match b with
+  | Box f -> f
+
+fn launder(b: Box) -> Int = unbox(b)()
+
+fn io_thunk() -> Int !{IO} = do
+  print("io")
+  34
+
+fn main() -> Unit !{IO} = print(int_to_string(launder(Box(io_thunk))))
