@@ -21,6 +21,12 @@ fn int_ty() -> types.Type = types.TConst(types.type_id("Int"))
 fn arrow_ty(eff: types.Effect) -> types.Type =
   types.TFunc(int_ty(), int_ty(), eff, types.OwnBorrow)
 
+# `Int -> Int -> Int`, the shape of a two-parameter declaration. `infer` puts a
+# declared effect on the LAST arrow, so `outer` is Pure for every such function
+# and reading it alone reports the whole call pure.
+fn curried_ty(outer: types.Effect, inner: types.Effect) -> types.Type =
+  types.TFunc(int_ty(), arrow_ty(inner), outer, types.OwnBorrow)
+
 # `do  let dead = <call>  0` — the binding is never read, so only purity of the
 # call decides whether the step survives.
 fn dead_binding(callee_ty: types.Type, args: List typed_ast.TypedExpr) -> typed_ast.TypedExpr =
@@ -31,6 +37,9 @@ fn dead_binding(callee_ty: types.Type, args: List typed_ast.TypedExpr) -> typed_
     int_ty(), pos())
 
 fn one_arg() -> List typed_ast.TypedExpr = [typed_ast.TInt(1, int_ty(), pos())]
+
+fn two_args() -> List typed_ast.TypedExpr =
+  [typed_ast.TInt(1, int_ty(), pos()), typed_ast.TInt(2, int_ty(), pos())]
 
 fn steps_after_dle(body: typed_ast.TypedExpr) -> Int =
   match dce.elim_program(typed_ast.TypedProgram([decl(body)])) with
@@ -59,5 +68,13 @@ fn main() -> Unit !{IO} =
     check_eq("pure call with an argument is eliminated",
       steps_after_dle(dead_binding(arrow_ty(types.EffectPure), one_arg())), 1),
     check_eq("effectful call with an argument is kept",
-      steps_after_dle(dead_binding(arrow_ty(types.EffectIO), one_arg())), 2)
+      steps_after_dle(dead_binding(arrow_ty(types.EffectIO), one_arg())), 2),
+    check_eq("saturated curried call is kept for an effect on the inner arrow",
+      steps_after_dle(dead_binding(curried_ty(types.EffectPure, types.EffectIO), two_args())), 2),
+    check_eq("saturated curried call is eliminated when every arrow is pure",
+      steps_after_dle(dead_binding(curried_ty(types.EffectPure, types.EffectPure), two_args())), 1),
+    # One argument against two arrows: the inner arrow is returned, not consumed,
+    # so its effect has not happened yet and the binding is still dead weight.
+    check_eq("partial application stops before the arrow it does not consume",
+      steps_after_dle(dead_binding(curried_ty(types.EffectPure, types.EffectIO), one_arg())), 1)
   ])

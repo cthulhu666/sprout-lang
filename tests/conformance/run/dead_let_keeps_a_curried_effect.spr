@@ -1,0 +1,15 @@
+module main
+
+# A declared effect sits on the LAST arrow, so a two-parameter `!{IO}` function
+# has a PURE outer arrow. Dead Let Elimination reads the arrows a call consumes;
+# reading only the outermost one called this call pure and deleted it, and
+# reachability then dropped `logit` itself. The effect must survive the binding
+# being dead — only the name is unused, not the work.
+
+fn logit(a: Int, b: Int) -> Int !{IO} = do
+  print("effect")
+  a + b
+
+fn main() -> Unit !{IO} = do
+  let dead = logit(1, 2)
+  print("done")
