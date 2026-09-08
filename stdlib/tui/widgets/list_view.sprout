@@ -38,13 +38,18 @@ export fn list_opts() -> ListOpts m =
   ListOpts(start = 0, on_highlight = Nothing, page = 10,
            look = list_style_default())
 
-# INVARIANTS — `count` is `items`' length, which holds because items never
-# change after construction; anything that makes them change must move it too.
+# INVARIANTS — `count` and `width` are `items`' length and widest line, both
+# measured once; that holds because items never change after construction, and
+# anything that makes them change must move both. A container calls `measure`
+# on a `fit` child every frame, so re-clustering every line there would cost a
+# repaint the whole list's text.
+#
 # `sel` is a valid index into `items`, except in an empty list where it is 0
 # and never read. `has_focus` is the list's own copy of "the keyboard is mine",
 # set by the ring (docs/tui-focus-v0.md §4.1).
 type Lst m = (id: widget.WidgetId, items: List String, on_select: Int -> m,
-              opts: ListOpts m, count: Int, sel: Int, has_focus: Bool)
+              opts: ListOpts m, count: Int, width: Int, sel: Int,
+              has_focus: Bool)
 
 type alias Reply m = Maybe(Lst m, List m, List(widget.Cmd m))
 
@@ -132,7 +137,9 @@ fn lst_render(l: Lst m, r: geometry.Region, s: scr.Screen) -> Unit !{IO} =
                first_shown(l.sel, geometry.region_rows(r)))
 
 # Stops at the region's bottom edge rather than painting the rest and letting
-# `paint.line` drop it, so a long list costs its window and not its length.
+# `paint.line` drop it. The items ABOVE the window are still walked one cons at
+# a time — a cons list has no other way to reach the window's first item — so a
+# repaint costs the window plus whatever it has scrolled past.
 fn painted_rows(l: Lst m, r: geometry.Region, s: scr.Screen, its: List String,
                 i: Int, start: Int) -> Unit !{IO} =
   match its with
@@ -155,7 +162,7 @@ fn style_at(l: Lst m, i: Int) -> style.Style =
 # the height its item count would ask for. The natural size is what it would
 # take if nothing were left to divide.
 fn lst_measure(l: Lst m, avail: geometry.Size) -> widget.Measured =
-  widget.greedy_size(geometry.Size(text.widest(l.items), l.count))
+  widget.greedy_size(geometry.Size(l.width, l.count))
 
 fn lst_widget(l: Lst m) -> widget.Widget m =
   widget.Widget(widget.View(state = l, on_event = lst_on_event,
@@ -177,5 +184,5 @@ export fn list_view_with(id: widget.WidgetId, items: List String,
 fn started(id: widget.WidgetId, items: List String, on_select: Int -> m,
            opts: ListOpts m, count: Int) -> widget.Widget m =
   lst_widget(Lst(id = id, items = items, on_select = on_select, opts = opts,
-                 count = count, sel = clamped_into(count, opts.start),
-                 has_focus = false))
+                 count = count, width = text.widest(items),
+                 sel = clamped_into(count, opts.start), has_focus = false))
