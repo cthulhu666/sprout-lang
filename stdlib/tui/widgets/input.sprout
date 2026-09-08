@@ -1,0 +1,226 @@
+module stdlib.tui.widgets.input
+
+# One line of editable text. Design: docs/tui-input-v0.md.
+#
+# The value leaves only as an `on_change` message: `Widget m` erases the state
+# type, so an application cannot read the field and must mirror what it hears.
+
+import stdlib.string as string
+import stdlib.tui.event as event
+import stdlib.tui.geometry as geometry
+import stdlib.tui.screen as scr
+import stdlib.tui.text as text
+import stdlib.tui.widget as widget
+import stdlib.tui.widgets.focus as focus
+import stdlib.tui.widgets.paint as paint
+
+# Everything optional, in a record: Sprout has no default arguments, and two
+# adjacent same-typed parameters swap silently. Start from `input_opts()` and
+# override with `with`.
+export type InputOpts m = (initial: String, on_submit: Maybe (String -> m),
+                           look: focus.FocusStyle)
+
+# No submit handler, so Enter falls through to the application (§4.4).
+export fn input_opts() -> InputOpts m =
+  InputOpts(initial = "", on_submit = Nothing,
+            look = focus.focus_style_default())
+
+# ── the line ────────────────────────────────────────────────────────────────
+
+# A caret is a position BETWEEN grapheme clusters, which is what makes it
+# impossible to invalidate — an index into codepoints can land inside one, and
+# its column would then be uncomputable (§4.1). `before` is reversed, so both
+# edits at the caret are head operations. Brick's editor is the same shape.
+type Zipper = (before: List (List Int), after: List (List Int))
+
+fn opened(s: String) -> Zipper =
+  Zipper(before = list_reverse(text.clusters(s)), after = Nil)
+
+fn line_text(z: Zipper) -> String =
+  text.from_clusters(list_append(list_reverse(z.before), z.after))
+
+# A mark arrives as its own key event, so the join has to be re-segmented or
+# it becomes a cluster of its own and the caret stops inside a character. Only
+# the last existing cluster takes part: no boundary rule reaches further back
+# than that, and re-segmenting the whole line would make each keystroke O(n).
+fn inserted(z: Zipper, s: String) -> Maybe Zipper =
+  if string.is_empty(s) then Nothing else Just(rejoined(z, s))
+
+fn rejoined(z: Zipper, s: String) -> Zipper =
+  match z.before with
+  | Nil -> (z with (before = list_reverse(text.clusters(s))))
+  | [last | rest] -> (z with (before = regrown(last, rest, s)))
+
+fn regrown(last: List Int, rest: List (List Int),
+           s: String) -> List (List Int) =
+  list_append(list_reverse(text.clusters(text.from_clusters([last]) ++ s)),
+              rest)
+
+# `Nothing` where there is nothing to remove: the key is still the field's —
+# backspace at the start must not reach the application — but no value changed,
+# so nothing is announced.
+fn backspaced(z: Zipper) -> Maybe Zipper =
+  match z.before with
+  | Nil -> Nothing
+  | [_ | rest] -> Just((z with (before = rest)))
+
+fn deleted(z: Zipper) -> Maybe Zipper =
+  match z.after with
+  | Nil -> Nothing
+  | [_ | rest] -> Just((z with (after = rest)))
+
+fn stepped_left(z: Zipper) -> Zipper =
+  match z.before with
+  | Nil -> z
+  | [c | rest] -> Zipper(before = rest, after = Cons(c, z.after))
+
+fn stepped_right(z: Zipper) -> Zipper =
+  match z.after with
+  | Nil -> z
+  | [c | rest] -> Zipper(before = Cons(c, z.before), after = rest)
+
+fn to_start(z: Zipper) -> Zipper =
+  Zipper(before = Nil, after = list_append(list_reverse(z.before), z.after))
+
+fn to_end(z: Zipper) -> Zipper =
+  Zipper(before = list_append(list_reverse(z.after), z.before), after = Nil)
+
+# ── the widget ──────────────────────────────────────────────────────────────
+
+# `has_focus` is the field's own copy of "the keyboard is mine", set by the
+# ring (docs/tui-focus-v0.md §4.1).
+type Field m = (id: widget.WidgetId, on_change: String -> m, opts: InputOpts m,
+                line: Zipper, has_focus: Bool)
+
+type alias Reply m = Maybe(Field m, List m, List(widget.Cmd m))
+
+# Everything a field reacts to arrives addressed, so the broadcast is idle.
+fn field_on_event(f: Field m,
+                  ev: event.Event) -> (Field m, List m, List(widget.Cmd m)) =
+  (f, Nil, Nil)
+
+fn field_handler(f: Field m, d: widget.Delivery m) -> Reply m =
+  match d with
+  # A field asks for no work, so an answer addressed to it belongs to `update`.
+  | widget.ToMsg _ -> Nothing
+  | widget.ToFocus x -> Just(((f with (has_focus = x)), Nil, Nil))
+  | widget.ToEvent e -> if f.has_focus then field_event(f, e) else Nothing
+
+fn field_event(f: Field m, e: event.Event) -> Reply m =
+  match e with
+  | event.KeyPress k mods -> field_key(f, k, mods)
+  | event.Paste s -> changed(f, inserted(f.line, s))
+  # A tick, a resize and the mouse are not a text field's, and neither is
+  # whatever is added next: declining leaves it to the application.
+  | _ -> Nothing
+
+# ctrl-a decodes as `KChar 'a'` with ctrl (keys.sprout:63), so a field that
+# read the key alone would type "a" and eat the application's chord with it.
+fn field_key(f: Field m, k: event.Key, mods: event.Mods) -> Reply m =
+  if event.mods_is_chord(mods) then Nothing else field_plain(f, k)
+
+# Tab, the arrows it does not use, Esc and the function keys all fall through
+# — a field owns its line, not the keyboard.
+fn field_plain(f: Field m, k: event.Key) -> Reply m =
+  match k with
+  | event.KChar c -> changed(f, inserted(f.line, string.string_from_char(c)))
+  | event.KBackspace -> changed(f, backspaced(f.line))
+  | event.KDelete -> changed(f, deleted(f.line))
+  | event.KLeft -> moved(f, stepped_left(f.line))
+  | event.KRight -> moved(f, stepped_right(f.line))
+  | event.KHome -> moved(f, to_start(f.line))
+  | event.KEnd -> moved(f, to_end(f.line))
+  | event.KEnter -> submitted(f)
+  | _ -> Nothing
+
+# The whole value, not a delta: the application cannot read the field, so a
+# delta would leave it rebuilding the line from keystrokes.
+fn changed(f: Field m, z: Maybe Zipper) -> Reply m =
+  match z with
+  | Nothing -> Just((f, Nil, Nil))
+  | Just z2 -> Just(((f with (line = z2)), [f.on_change(line_text(z2))], Nil))
+
+fn moved(f: Field m, z: Zipper) -> Reply m =
+  Just(((f with (line = z)), Nil, Nil))
+
+fn submitted(f: Field m) -> Reply m = map(sent_by(f, _), f.opts.on_submit)
+
+fn sent_by(f: Field m,
+           say: String -> m) -> (Field m, List m, List(widget.Cmd m)) =
+  (f, [say(line_text(f.line))], Nil)
+
+# ── what it paints ──────────────────────────────────────────────────────────
+
+# The window is a function of the caret, so there is no scroll position to
+# drift out of step with it: drop leading clusters until what precedes the
+# caret fits, leaving the caret itself on the last column.
+#
+# The width is carried rather than remeasured, which keeps this linear, and the
+# empty case ends it — a region of ZERO columns leaves a negative budget, which
+# no amount of dropping can satisfy.
+fn scrolled(before: List (List Int), budget: Int) -> List (List Int) =
+  narrowed(before, text.clusters_width(before), budget)
+
+fn narrowed(cs: List (List Int), w: Int, budget: Int) -> List (List Int) =
+  if w <= budget then cs
+  else
+    match cs with
+    | Nil -> Nil
+    | [c | rest] -> narrowed(rest, w - text.cluster_width(c), budget)
+
+fn rest_of(cs: List (List Int)) -> List (List Int) =
+  match cs with
+  | Nil -> Nil
+  | [_ | rest] -> rest
+
+# The caret sits ON the cluster after it, or on a blank cell at the end of the
+# line. Painted, because `app.run` hides the terminal's own cursor for the
+# session (docs/tui-focus-v0.md §9).
+fn caret_cluster(z: Zipper) -> String =
+  match z.after with
+  | Nil -> " "
+  | [c | _] -> text.from_clusters([c])
+
+fn past_caret(z: Zipper) -> String =
+  text.from_clusters(rest_of(z.after))
+
+# An unfocused field has no caret to keep in view, so it shows the start of
+# its value — the window only follows a caret that is there.
+fn field_render(f: Field m, r: geometry.Region, s: scr.Screen) -> Unit !{IO} =
+  if f.has_focus then window_render(f, r, shown_before(f, r), s)
+  else paint.line(s, r, 0, line_text(f.line), f.opts.look.normal)
+
+fn shown_before(f: Field m, r: geometry.Region) -> List (List Int) =
+  scrolled(list_reverse(f.line.before), geometry.region_cols(r) - 1)
+
+# The caret is one cell painted in the focused style, between the two halves
+# of the line; `paint.at` clips each part at the region's edge.
+fn window_render(f: Field m, r: geometry.Region, pre: List (List Int),
+                 s: scr.Screen) -> Unit !{IO} = do
+  paint.at(s, r, 0, 0, text.from_clusters(pre), f.opts.look.normal)
+  paint.at(s, r, 0, text.clusters_width(pre), caret_cluster(f.line),
+           f.opts.look.focused)
+  paint.at(s, r, 0, text.clusters_width(pre) + text.width(caret_cluster(f.line)),
+           past_caret(f.line), f.opts.look.normal)
+
+# One row, and as wide as it is given: a field beside a label must not have to
+# be told a width, and a value longer than its region scrolls rather than
+# demanding more. The natural width includes the caret's own column.
+fn field_measure(f: Field m, avail: geometry.Size) -> widget.Measured =
+  widget.Measured(size = geometry.Size(text.width(line_text(f.line)) + 1, 1),
+                  cols = widget.Greedy, rows = widget.Fixed)
+
+fn field_widget(f: Field m) -> widget.Widget m =
+  widget.Widget(widget.View(state = f, on_event = field_on_event,
+                            route = widget.route_when(f.id, field_handler, _, _, _),
+                            render = field_render, measure = field_measure))
+
+export fn input(id: widget.WidgetId, on_change: String -> m) -> widget.Widget m =
+  input_with(id, on_change, input_opts())
+
+# The caret starts at the end of `initial`, where a reader's eye is; the
+# initial value is a starting point, not an edit, so nothing is announced.
+export fn input_with(id: widget.WidgetId, on_change: String -> m,
+                     opts: InputOpts m) -> widget.Widget m =
+  field_widget(Field(id = id, on_change = on_change, opts = opts,
+                     line = opened(opts.initial), has_focus = false))

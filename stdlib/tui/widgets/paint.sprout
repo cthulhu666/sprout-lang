@@ -8,7 +8,7 @@ module stdlib.tui.widgets.paint
 #
 # Receiver-first, not data-last (guidelines §6): these mirror
 # `screen.screen_write`, which they wrap and which every caller sits beside.
-# Neither is ever `|>`-chained — both return Unit.
+# None is ever `|>`-chained — they all return Unit.
 
 import stdlib.tui.geometry as geometry
 import stdlib.tui.screen as scr
@@ -29,6 +29,18 @@ fn write_clipped(screen: scr.Screen, region: geometry.Region, row: Int,
                           text.truncate(content, geometry.region_cols(region)),
                           style)
   ()
+
+# The same, starting `col` columns in from the region's left edge. A widget
+# that styles part of a line — a caret, a highlighted match — needs to paint
+# at an offset without inventing the clipping again.
+export fn at(screen: scr.Screen, region: geometry.Region, row: Int, col: Int,
+             content: String, style: sty.Style) -> Unit !{IO} =
+  if col < 0 || col >= geometry.region_cols(region) then ()
+  else line(screen, indented(region, col), row, content, style)
+
+fn indented(r: geometry.Region, col: Int) -> geometry.Region =
+  geometry.Region(geometry.region_col(r) + col, geometry.region_row(r),
+                  geometry.region_cols(r) - col, geometry.region_rows(r))
 
 # Successive lines from `from_row` down, stopping at the region's bottom edge.
 export fn lines(screen: scr.Screen, region: geometry.Region, from_row: Int,

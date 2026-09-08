@@ -1,7 +1,8 @@
 # TUI M4 — the widget set, slice C2: focus and the interactive set
 
-> Status: **C2a implemented** (`ToFocus`, `focus_ring`, `button`); **C2b
-> designed, not implemented** (`input`, `list_view` — §7). Non-normative;
+> Status: **C2a implemented** (`ToFocus`, `focus_ring`, `button`); C2b is
+> `docs/tui-input-v0.md` — `input` implemented, `list_view` designed.
+> Non-normative;
 > `docs/spec-v0.md` is unaffected. The widget *model* is
 > `docs/tui-widgets-v0.md`, addressed delivery is `docs/tui-routing-v0.md`, and
 > the containers this builds on are `docs/tui-widget-set-v0.md`.
@@ -209,17 +210,18 @@ is the point. In-tree that is three files and four match sites.
 `route_if`, `route_when`, `map_msgs`, `namespaced`, `deliver` and every C1
 container are unchanged.
 
-## 7. C2b, designed here so it redesigns nothing
+## 7. C2b
 
-`input(id, on_change)` and `list_view(id, items, on_select)` are then plain
-consumers of the contract above: state a `focused: Bool` plus their own,
-`route_when` on their id, claim the keys they use and decline the rest.
+`input` and `list_view` are plain consumers of the contract above: state a
+`focused: Bool` plus their own, `route_when` on their id, claim the keys they
+use and decline the rest. Designed in **`docs/tui-input-v0.md`**.
 
-**`input` needs no builtin and no language work.** Insert and delete at a caret
-are `string.take` / `string.drop` / `++`, linear in the line — the
+This section previously said a caret edit was `string.take` / `string.drop`.
+That was wrong — those count codepoints, and a caret between them can land
+inside a grapheme cluster, where it has no column. See that document §4.1. The
+conclusion it was supporting still holds: no builtin and no language work. The
 `mutvec_insert` / `mutvec_remove` question in `BACKLOG.md` §4 belongs to C3's
-`text_area`, which edits a buffer of many lines, and is not reached by this
-slice.
+`text_area`, which edits many lines, and is not reached by this slice.
 
 ## 8. Tests
 

@@ -52,6 +52,12 @@ export fn mods_has_alt(m: Mods) -> Bool = match m with | Mods _ a _ -> a
 
 export fn mods_has_shift(m: Mods) -> Bool = match m with | Mods _ _ s -> s
 
+# Whether the key is a CHORD rather than typing. Shift is excluded: it is part
+# of producing the character, so `KChar 'A'` with shift is still typing, while
+# ctrl-a and alt-a are bindings a widget must leave to the application.
+export fn mods_is_chord(m: Mods) -> Bool =
+  mods_has_ctrl(m) || mods_has_alt(m)
+
 export fn with_alt(m: Mods) -> Mods =
   Mods(mods_has_ctrl(m), true, mods_has_shift(m))
 

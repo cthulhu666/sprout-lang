@@ -1,0 +1,295 @@
+import stdlib.string as string
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.tui.event as event
+import stdlib.tui.geometry as g
+import stdlib.tui.screen as scr
+import stdlib.tui.style as sty
+import stdlib.unicode.utf8 as utf8
+import stdlib.tui.widget as widget
+import stdlib.tui.widgets.container as ct
+import stdlib.tui.widgets.focus as focus
+import stdlib.tui.widgets.input as inp
+
+# A line of text with a caret. Design: docs/tui-input-v0.md.
+#
+# The value is only ever observed through what the widget SAYS, never read out
+# of it — `Widget m` erases the state, which is why `on_change` exists at all.
+# A neighbour probe sits beside the field so a key it declines is visible as a
+# broadcast rather than as silence.
+
+type Msg (..) deriving (Eq, ToString) =
+  | Changed String
+  | Submitted String
+  | Noted String
+
+type alias Says = List Msg
+type alias Asks = List(widget.Cmd Msg)
+
+# ── the tree ────────────────────────────────────────────────────────────────
+
+fn field_id() -> widget.WidgetId = widget.WidgetId("in")
+
+fn note_on_event(n: Int, ev: event.Event) -> (Int, Says, Asks) =
+  (n, [Noted("bcast")], Nil)
+
+fn note_render(n: Int, r: g.Region, s: scr.Screen) -> Unit !{IO} = ()
+
+fn note_measure(n: Int, avail: g.Size) -> widget.Measured =
+  widget.fixed_size(g.Size(1, 1))
+
+# Claims nothing, so it only ever speaks on the broadcast — which makes
+# "the field declined" and "the field said nothing" two different transcripts.
+fn note() -> widget.Widget Msg =
+  widget.Widget(widget.View(state = 0, on_event = note_on_event,
+                            route = widget.no_route, render = note_render,
+                            measure = note_measure))
+
+fn field() -> widget.Widget Msg = inp.input(field_id(), Changed)
+
+fn field_with(o: inp.InputOpts Msg) -> widget.Widget Msg =
+  inp.input_with(field_id(), Changed, o)
+
+# Focus starts on the head of the ring, so the field is live without a Tab.
+fn ring_of(w: widget.Widget Msg) -> widget.Widget Msg =
+  focus.focus_ring([field_id()], w)
+
+fn beside(w: widget.Widget Msg) -> widget.Widget Msg =
+  ring_of(ct.column([ct.fit(w), ct.fit(note())]))
+
+# ── observing ───────────────────────────────────────────────────────────────
+
+fn key(k: event.Key) -> event.Event = event.KeyPress(k, event.mods_none())
+
+fn chord(k: event.Key) -> event.Event = event.KeyPress(k, event.mods_ctrl())
+
+fn hit_of(r: Maybe (widget.Widget Msg, Says, Asks)) -> Bool =
+  match r with
+  | Nothing -> false
+  | Just _ -> true
+
+fn said(r: (widget.Widget Msg, Says, Asks)) -> String =
+  match r with
+  | (_, msgs, _) -> to_string(msgs)
+
+fn typed(evs: List event.Event) -> String =
+  said(widget.feed(beside(field()), evs))
+
+fn typed_with(o: inp.InputOpts Msg, evs: List event.Event) -> String =
+  said(widget.feed(beside(field_with(o)), evs))
+
+fn chars(s: String) -> List event.Event =
+  list_map(\c -> key(event.KChar(c)), vec_to_list(string.string_chars(s)))
+
+fn acute() -> event.Event = key(event.KChar(char_from_codepoint(769)))
+
+fn e_acute() -> String = utf8.from_codepoints([101, 769])
+
+# ── what it says ────────────────────────────────────────────────────────────
+
+fn typing_cases(state: TestState) -> Unit !{IO} = do
+  # Every edit reports the WHOLE value: the application cannot read the field,
+  # so a delta would leave it reconstructing the line from keystrokes.
+  assert_eq(state, "each character says the new value",
+            typed(chars("ab")), "[Changed(a), Changed(ab)]")
+  assert_eq(state, "backspace deletes before the caret",
+            typed(chars("ab") ++ [key(event.KBackspace)]),
+            "[Changed(a), Changed(ab), Changed(a)]")
+  # Claimed but not an edit, so it says nothing AND does not broadcast.
+  assert_eq(state, "backspace at the start is claimed and silent",
+            typed([key(event.KBackspace)]), "[]")
+  assert_eq(state, "moving the caret says nothing",
+            typed(chars("ab") ++ [key(event.KLeft)]),
+            "[Changed(a), Changed(ab)]")
+  assert_eq(state, "typing at a moved caret inserts there",
+            typed(chars("ac") ++ [key(event.KLeft)] ++ chars("b")),
+            "[Changed(a), Changed(ac), Changed(abc)]")
+  assert_eq(state, "delete removes after the caret",
+            typed(chars("ab") ++ [key(event.KLeft), key(event.KDelete)]),
+            "[Changed(a), Changed(ab), Changed(a)]")
+  assert_eq(state, "delete at the end is claimed and silent",
+            typed(chars("a") ++ [key(event.KDelete)]), "[Changed(a)]")
+  # Right is the only motion whose omission every other case survives: with
+  # `stepped_right` a no-op, Left-then-type still inserts in the right place.
+  assert_eq(state, "Right steps back over what Left stepped past",
+            typed(chars("ac") ++ [key(event.KLeft), key(event.KRight)]
+                  ++ chars("b")),
+            "[Changed(a), Changed(ac), Changed(acb)]")
+  assert_eq(state, "and at the end it is claimed and silent",
+            typed(chars("a") ++ [key(event.KRight)]), "[Changed(a)]")
+  assert_eq(state, "Home then typing prepends",
+            typed(chars("bc") ++ [key(event.KHome)] ++ chars("a")),
+            "[Changed(b), Changed(bc), Changed(abc)]")
+  assert_eq(state, "End returns to the far side",
+            typed(chars("ab") ++ [key(event.KHome), key(event.KEnd)] ++ chars("c")),
+            "[Changed(a), Changed(ab), Changed(abc)]")
+  assert_eq(state, "a paste arrives whole",
+            typed([event.Paste("hi")]), "[Changed(hi)]")
+  assert_eq(state, "an initial value is the starting point, unannounced",
+            typed_with(inp.input_opts() with (initial = "ab"), chars("c")),
+            "[Changed(abc)]")
+
+# ── what it leaves alone ────────────────────────────────────────────────────
+
+fn declining_cases(state: TestState) -> Unit !{IO} = do
+  # keys.sprout:63 decodes ctrl-a as `KChar 'a'` with ctrl set, so a field that
+  # inserted on any KChar would type "a" AND eat the application's chord.
+  assert_eq(state, "a ctrl chord is not typing",
+            typed([chord(event.KChar('a'))]), "[Noted(bcast)]")
+  assert_eq(state, "nor is an alt chord",
+            typed([event.KeyPress(event.KChar('a'), event.mods_alt())]),
+            "[Noted(bcast)]")
+  # Enter is the application's unless the field was given something to say.
+  assert_eq(state, "Enter falls through when nothing listens for it",
+            typed(chars("a") ++ [key(event.KEnter)]),
+            "[Changed(a), Noted(bcast)]")
+  assert_eq(state, "and submits the value when something does",
+            typed_with(inp.input_opts() with (on_submit = Just(Submitted)),
+                       chars("a") ++ [key(event.KEnter)]),
+            "[Changed(a), Submitted(a)]")
+  # §4.5: the ring reads Tab first, so this is what a field must NOT swallow.
+  assert_eq(state, "Tab is the ring's",
+            typed([key(event.KTab)]), "[]")
+  assert_eq(state, "an unfocused field ignores a key",
+            said(widget.feed(ct.column([ct.fit(field()), ct.fit(note())]),
+                             chars("a"))),
+            "[Noted(bcast)]")
+  # And declines it even when addressed directly: the ring routes keys by
+  # focus, so a key arriving at an unfocused field is the application's doing.
+  assert_eq(state, "and declines one addressed to it directly",
+            hit_of(widget.deliver(field(), field_id(),
+                                  widget.ToEvent(key(event.KChar('a'))))),
+            false)
+  # The other half of the same route: focus itself is always claimed.
+  assert_eq(state, "but claims a focus notification",
+            hit_of(widget.deliver(field(), field_id(), widget.ToFocus(true))),
+            true)
+  # A field asks for no work, so an answer addressed to it is the
+  # application's — declining is what gets it there.
+  assert_eq(state, "and declines a message",
+            hit_of(widget.deliver(field(), field_id(),
+                                  widget.ToMsg(Noted("x")))),
+            false)
+
+# ── clusters, not codepoints ────────────────────────────────────────────────
+
+fn cluster_cases(state: TestState) -> Unit !{IO} = do
+  # The mark arrives as its own key event (keys.sprout:84 emits one KChar per
+  # codepoint), so insertion has to re-segment at the join or the caret ends
+  # up inside a cluster.
+  assert_eq(state, "a combining mark joins the character before it",
+            typed(chars("e") ++ [acute()]),
+            "[Changed(e), Changed(" ++ e_acute() ++ ")]")
+  assert_eq(state, "and backspace removes the whole cluster",
+            typed(chars("e") ++ [acute(), key(event.KBackspace)]),
+            "[Changed(e), Changed(" ++ e_acute() ++ "), Changed()]")
+  assert_eq(state, "one Left steps over a cluster, not a codepoint",
+            typed(chars("e") ++ [acute(), key(event.KLeft)] ++ chars("x")),
+            "[Changed(e), Changed(" ++ e_acute() ++ "), Changed(x" ++ e_acute() ++ ")]")
+  assert_eq(state, "a pasted cluster is one caret stop",
+            typed([event.Paste(e_acute()), key(event.KBackspace)]),
+            "[Changed(" ++ e_acute() ++ "), Changed()]")
+
+# ── what it paints ──────────────────────────────────────────────────────────
+
+fn after(w: widget.Widget Msg, evs: List event.Event) -> widget.Widget Msg =
+  match widget.feed(w, evs) with
+  | (w2, _, _) -> w2
+
+fn live(evs: List event.Event) -> widget.Widget Msg =
+  after(ring_of(field()), evs)
+
+fn painted(w: widget.Widget Msg, cols: Int) -> scr.Screen !{IO} = do
+  s <- scr.screen_new(g.Size(cols, 1))
+  widget.render(w, g.Region(0, 0, cols, 1), s)
+  s
+
+fn row_text(s: scr.Screen, col: Int, cols: Int) -> String !{IO} =
+  if col >= cols then "" else row_step(s, col, cols)
+
+fn row_step(s: scr.Screen, col: Int, cols: Int) -> String !{IO} = do
+  here <- scr.text_at(s, col, 0)
+  rest <- row_text(s, col + 1, cols)
+  here ++ rest
+
+fn reverse_at(s: scr.Screen, col: Int) -> Bool !{IO} = do
+  c <- scr.cell_at(s, col, 0)
+  sty.style_reverse(scr.cell_style(c))
+
+fn shown(w: widget.Widget Msg, cols: Int) -> String !{IO} = do
+  s <- painted(w, cols)
+  row_text(s, 0, cols)
+
+# A region NARROWER than the screen, so what a widget paints outside it is
+# still visible in the answer.
+fn into(w: widget.Widget Msg, cols: Int, region_cols: Int) -> String !{IO} = do
+  s <- scr.screen_new(g.Size(cols, 1))
+  widget.render(w, g.Region(0, 0, region_cols, 1), s)
+  row_text(s, 0, cols)
+
+fn caret_at(w: widget.Widget Msg, cols: Int, col: Int) -> Bool !{IO} = do
+  s <- painted(w, cols)
+  reverse_at(s, col)
+
+fn underline_at(s: scr.Screen, col: Int) -> Bool !{IO} = do
+  c <- scr.cell_at(s, col, 0)
+  sty.style_underline(scr.cell_style(c))
+
+# Underlined rather than reversed, so the assertion cannot pass on the default.
+fn underlined() -> inp.InputOpts Msg =
+  inp.input_opts()
+  with (look = focus.FocusStyle(normal = sty.style_default(),
+                               focused = sty.with_underline(sty.style_default(),
+                                                            true)))
+
+fn render_cases(state: TestState) -> Unit !{IO} = do
+  v <- shown(live(chars("ab")), 6)
+  assert_eq(state, "a field paints its value", v, "ab    ")
+  # The caret is a painted cell, not the terminal's cursor: `app.run` hides
+  # that for the whole session.
+  c2 <- caret_at(live(chars("ab")), 6, 2)
+  assert_eq(state, "the caret is the cell after the last character", c2, true)
+  c1 <- caret_at(live(chars("ab") ++ [key(event.KLeft)]), 6, 1)
+  assert_eq(state, "and moves onto the character it sits on", c1, true)
+  c0 <- caret_at(ring_of(field()), 6, 0)
+  assert_eq(state, "an empty focused field shows a caret at the start", c0, true)
+  bare <- caret_at(field(), 6, 0)
+  assert_eq(state, "an unfocused field paints no caret", bare, false)
+  # The window follows the caret, so the tail is what a long value shows —
+  # there is no scroll field to drift, the window is a function of the caret.
+  long <- shown(live(chars("abcdef")), 4)
+  assert_eq(state, "a value wider than the region shows the caret's end", long, "def ")
+  home <- shown(live(chars("abcdef") ++ [key(event.KHome)]), 4)
+  assert_eq(state, "and Home brings the start back", home, "abcd")
+  # One column holds the caret and nothing else.
+  narrow <- shown(live(chars("ab")), 1)
+  assert_eq(state, "one column holds the caret alone", narrow, " ")
+  # ZERO columns asks for a window no amount of dropping can produce, and a
+  # container can hand one out — a `fit` slot in a row that ran out of room.
+  # The search for space must end anyway, and paint nothing.
+  none <- into(live(chars("ab")), 4, 0)
+  assert_eq(state, "a region of no columns terminates and paints nothing",
+            none, "    ")
+  s <- painted(after(ring_of(field_with(underlined())), chars("ab")), 6)
+  under <- underline_at(s, 2)
+  assert_eq(state, "a supplied style paints the caret", under, true)
+  plain <- reverse_at(s, 2)
+  assert_eq(state, "and not the default one", plain, false)
+
+fn measure_cases(state: TestState) -> Unit !{IO} = do
+  # As wide as it is given: a field beside a label must not have to be told a
+  # width, and a value longer than the region scrolls rather than growing.
+  assert_eq(state, "a field takes the width it is offered",
+            to_string(widget.measure(field(), g.Size(20, 5)).cols), "Greedy")
+  assert_eq(state, "and is exactly one row tall",
+            to_string(widget.measure(field(), g.Size(20, 5)).rows), "Fixed")
+  assert_eq(state, "its natural height is that one row",
+            g.size_rows(widget.measure(field(), g.Size(20, 5)).size), 1)
+
+fn main() -> Unit !{IO} = do
+  state <- new_state()
+  typing_cases(state)
+  declining_cases(state)
+  cluster_cases(state)
+  render_cases(state)
+  measure_cases(state)
+  summary(state)
