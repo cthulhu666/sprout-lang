@@ -1,0 +1,181 @@
+module stdlib.tui.widgets.list_view
+
+# A list of lines with one of them selected. Design: docs/tui-list-view-v0.md.
+#
+# What leaves the widget is an INDEX, not the line: `Widget m` erases the
+# state, so the application keeps the items it supplied and an index is what
+# names one of them — two identical lines are not the same row.
+
+import stdlib.tui.event as event
+import stdlib.tui.geometry as geometry
+import stdlib.tui.screen as scr
+import stdlib.tui.style as style
+import stdlib.tui.text as text
+import stdlib.tui.widget as widget
+import stdlib.tui.widgets.paint as paint
+
+# Three styles, not `focus.FocusStyle`'s two: a list that has lost the
+# keyboard still HAS a selection, and must be able to show it more quietly
+# than the focused one. Brick splits `listSelectedAttr` from
+# `listSelectedFocusedAttr` for the same reason.
+export type ListStyle = (normal: style.Style, selected: style.Style,
+                         selected_focused: style.Style)
+
+# Reverse video where the keyboard is, bold where it is not.
+export fn list_style_default() -> ListStyle =
+  ListStyle(normal = style.style_default(),
+            selected = style.with_bold(style.style_default(), true),
+            selected_focused = style.with_reverse(style.style_default(), true))
+
+# `page` is told rather than measured: `render` is pure in the state, so a
+# widget cannot write the height it was last drawn at back for a key handler
+# to read. Brick's `listMoveByPages` is an `EventM` action for that reason;
+# here the caller names the number, beside the region it gave the list.
+export type ListOpts m = (start: Int, on_highlight: Maybe (Int -> m), page: Int,
+                          look: ListStyle)
+
+export fn list_opts() -> ListOpts m =
+  ListOpts(start = 0, on_highlight = Nothing, page = 10,
+           look = list_style_default())
+
+# INVARIANTS — `count` is `items`' length, which holds because items never
+# change after construction; anything that makes them change must move it too.
+# `sel` is a valid index into `items`, except in an empty list where it is 0
+# and never read. `has_focus` is the list's own copy of "the keyboard is mine",
+# set by the ring (docs/tui-focus-v0.md §4.1).
+type Lst m = (id: widget.WidgetId, items: List String, on_select: Int -> m,
+              opts: ListOpts m, count: Int, sel: Int, has_focus: Bool)
+
+type alias Reply m = Maybe(Lst m, List m, List(widget.Cmd m))
+
+# Everything a list reacts to arrives addressed, so the broadcast is idle.
+fn lst_on_event(l: Lst m,
+                ev: event.Event) -> (Lst m, List m, List(widget.Cmd m)) =
+  (l, Nil, Nil)
+
+fn lst_handler(l: Lst m, d: widget.Delivery m) -> Reply m =
+  match d with
+  # A list asks for no work, so an answer addressed to it belongs to `update`.
+  | widget.ToMsg _ -> Nothing
+  | widget.ToFocus x -> Just(((l with (has_focus = x)), Nil, Nil))
+  | widget.ToEvent e -> if l.has_focus then lst_event(l, e) else Nothing
+
+fn lst_event(l: Lst m, e: event.Event) -> Reply m =
+  match e with
+  | event.KeyPress k mods -> lst_key(l, k, mods)
+  # A tick, a resize, a paste and the mouse are not a list's, and neither is
+  # whatever is added next: declining leaves it to the application.
+  | _ -> Nothing
+
+# ctrl-Down and alt-Down are an application's bindings, not a move.
+fn lst_key(l: Lst m, k: event.Key, mods: event.Mods) -> Reply m =
+  if event.mods_is_chord(mods) then Nothing else lst_plain(l, k)
+
+# Tab, the arrows it does not use, Esc and the letters all fall through — a
+# list owns its selection, not the keyboard.
+fn lst_plain(l: Lst m, k: event.Key) -> Reply m =
+  match k with
+  | event.KDown -> moved_by(l, 1)
+  | event.KUp -> moved_by(l, 0 - 1)
+  | event.KPageDown -> moved_by(l, l.opts.page)
+  | event.KPageUp -> moved_by(l, 0 - l.opts.page)
+  | event.KHome -> moved_to(l, 0)
+  | event.KEnd -> moved_to(l, l.count - 1)
+  | event.KEnter -> chosen(l)
+  | _ -> Nothing
+
+# ── the selection ───────────────────────────────────────────────────────────
+
+# An empty list has no index to name, so a key it would use is claimed — the
+# application must not see a stray Down — and nothing is announced.
+fn moved_to(l: Lst m, i: Int) -> Reply m =
+  if l.count == 0 then Just((l, Nil, Nil))
+  else settled(l, clamped_into(l.count, i))
+
+fn moved_by(l: Lst m, d: Int) -> Reply m = moved_to(l, l.sel + d)
+
+# Every move clamps rather than refusing, so a page runs to the end and stops
+# there; the caller's `start` goes through the same rule, since an index
+# outside the list must not leave it unselectable.
+fn clamped_into(count: Int, i: Int) -> Int =
+  if count == 0 then 0
+  else if i < 0 then 0
+  else if i >= count then count - 1
+  else i
+
+# A move that lands where it started says nothing: Down at the end is the
+# list's key, but there is no new selection to report.
+fn settled(l: Lst m, i: Int) -> Reply m =
+  if i == l.sel then Just((l, Nil, Nil))
+  else Just(((l with (sel = i)), highlighted(l, i), Nil))
+
+fn highlighted(l: Lst m, i: Int) -> List m =
+  maybe_with_default(Nil, map(spoken_at(i, _), l.opts.on_highlight))
+
+fn spoken_at(i: Int, say: Int -> m) -> List m = [say(i)]
+
+fn chosen(l: Lst m) -> Reply m =
+  if l.count == 0 then Just((l, Nil, Nil))
+  else Just((l, [l.on_select(l.sel)], Nil))
+
+# ── what it paints ──────────────────────────────────────────────────────────
+
+# The window is a function of the selection, so there is no scroll position to
+# drift out of step with it (docs/tui-input-v0.md §4.5 takes the same rule for
+# the caret): the top of the list until the selection passes the last row,
+# and the selection on that row from then on.
+fn first_shown(sel: Int, rows: Int) -> Int =
+  if sel < rows then 0 else sel - rows + 1
+
+fn lst_render(l: Lst m, r: geometry.Region, s: scr.Screen) -> Unit !{IO} =
+  painted_rows(l, r, s, l.items, 0,
+               first_shown(l.sel, geometry.region_rows(r)))
+
+# Stops at the region's bottom edge rather than painting the rest and letting
+# `paint.line` drop it, so a long list costs its window and not its length.
+fn painted_rows(l: Lst m, r: geometry.Region, s: scr.Screen, its: List String,
+                i: Int, start: Int) -> Unit !{IO} =
+  match its with
+  | Nil -> ()
+  | [it | rest] ->
+      if i - start >= geometry.region_rows(r) then ()
+      else painted_step(l, r, s, it, rest, i, start)
+
+fn painted_step(l: Lst m, r: geometry.Region, s: scr.Screen, it: String,
+                rest: List String, i: Int, start: Int) -> Unit !{IO} = do
+  if i < start then () else paint.line(s, r, i - start, it, style_at(l, i))
+  painted_rows(l, r, s, rest, i + 1, start)
+
+fn style_at(l: Lst m, i: Int) -> style.Style =
+  if i != l.sel then l.opts.look.normal
+  else if l.has_focus then l.opts.look.selected_focused
+  else l.opts.look.selected
+
+# Fills what it is given on both axes: a list scrolls rather than demanding
+# the height its item count would ask for. The natural size is what it would
+# take if nothing were left to divide.
+fn lst_measure(l: Lst m, avail: geometry.Size) -> widget.Measured =
+  widget.greedy_size(geometry.Size(text.widest(l.items), l.count))
+
+fn lst_widget(l: Lst m) -> widget.Widget m =
+  widget.Widget(widget.View(state = l, on_event = lst_on_event,
+                            route = widget.route_when(l.id, lst_handler, _, _, _),
+                            render = lst_render, measure = lst_measure))
+
+export fn list_view(id: widget.WidgetId, items: List String,
+                    on_select: Int -> m) -> widget.Widget m =
+  list_view_with(id, items, on_select, list_opts())
+
+# The selection starts at `opts.start`, and nothing is announced: construction
+# is not a move, and a list that spoke before the first frame would report a
+# highlight the application had not yet drawn.
+export fn list_view_with(id: widget.WidgetId, items: List String,
+                         on_select: Int -> m,
+                         opts: ListOpts m) -> widget.Widget m =
+  started(id, items, on_select, opts, list_length(items))
+
+fn started(id: widget.WidgetId, items: List String, on_select: Int -> m,
+           opts: ListOpts m, count: Int) -> widget.Widget m =
+  lst_widget(Lst(id = id, items = items, on_select = on_select, opts = opts,
+                 count = count, sel = clamped_into(count, opts.start),
+                 has_focus = false))

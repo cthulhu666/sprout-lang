@@ -1,0 +1,312 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.tui.event as event
+import stdlib.tui.geometry as g
+import stdlib.tui.screen as scr
+import stdlib.tui.style as sty
+import stdlib.tui.widget as widget
+import stdlib.tui.widgets.container as ct
+import stdlib.tui.widgets.focus as focus
+import stdlib.tui.widgets.list_view as lv
+
+# A list with one selected row. Design: docs/tui-list-view-v0.md.
+#
+# The selection is only ever observed through what the widget SAYS or paints,
+# never read out of it — `Widget m` erases the state. A neighbour probe sits
+# beside the list so a key it declines is visible as a broadcast rather than
+# as silence.
+
+type Msg (..) deriving (Eq, ToString) =
+  | Chose Int
+  | Lit Int
+  | Noted String
+
+type alias Says = List Msg
+type alias Asks = List(widget.Cmd Msg)
+
+# ── the tree ────────────────────────────────────────────────────────────────
+
+fn list_id() -> widget.WidgetId = widget.WidgetId("ls")
+
+fn items() -> List String = ["alpha", "beta", "gamma"]
+
+fn many() -> List String = ["a", "b", "c", "d", "e"]
+
+fn note_on_event(n: Int, ev: event.Event) -> (Int, Says, Asks) =
+  (n, [Noted("bcast")], Nil)
+
+fn note_render(n: Int, r: g.Region, s: scr.Screen) -> Unit !{IO} = ()
+
+fn note_measure(n: Int, avail: g.Size) -> widget.Measured =
+  widget.fixed_size(g.Size(1, 1))
+
+# Claims nothing, so it only ever speaks on the broadcast — which makes "the
+# list declined" and "the list said nothing" two different transcripts.
+fn note() -> widget.Widget Msg =
+  widget.Widget(widget.View(state = 0, on_event = note_on_event,
+                            route = widget.no_route, render = note_render,
+                            measure = note_measure))
+
+fn view() -> widget.Widget Msg = lv.list_view(list_id(), items(), Chose)
+
+fn view_of(its: List String, o: lv.ListOpts Msg) -> widget.Widget Msg =
+  lv.list_view_with(list_id(), its, Chose, o)
+
+# An `on_highlight` is what makes a move observable at all; the default has
+# none, which is its own case below.
+fn highlighting() -> lv.ListOpts Msg =
+  lv.list_opts() with (on_highlight = Just(Lit))
+
+fn ring_of(w: widget.Widget Msg) -> widget.Widget Msg =
+  focus.focus_ring([list_id()], w)
+
+fn beside(w: widget.Widget Msg) -> widget.Widget Msg =
+  ring_of(ct.column([ct.fit(w), ct.fit(note())]))
+
+# ── observing ───────────────────────────────────────────────────────────────
+
+fn key(k: event.Key) -> event.Event = event.KeyPress(k, event.mods_none())
+
+fn chord(k: event.Key) -> event.Event = event.KeyPress(k, event.mods_ctrl())
+
+fn hit_of(r: Maybe (widget.Widget Msg, Says, Asks)) -> Bool =
+  match r with
+  | Nothing -> false
+  | Just _ -> true
+
+fn said(r: (widget.Widget Msg, Says, Asks)) -> String =
+  match r with
+  | (_, msgs, _) -> to_string(msgs)
+
+fn fed(w: widget.Widget Msg, evs: List event.Event) -> String =
+  said(widget.feed(beside(w), evs))
+
+fn moved(o: lv.ListOpts Msg, evs: List event.Event) -> String =
+  fed(view_of(items(), o), evs)
+
+# ── where the selection goes ────────────────────────────────────────────────
+
+fn moving_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "Down moves the highlight",
+            moved(highlighting(), [key(event.KDown)]), "[Lit(1)]")
+  assert_eq(state, "Up moves it back",
+            moved(highlighting(), [key(event.KDown), key(event.KUp)]),
+            "[Lit(1), Lit(0)]")
+  # Claimed but not a move, so it says nothing AND does not broadcast — the
+  # same rule as backspace at the start of a field.
+  assert_eq(state, "Up at the start is claimed and silent",
+            moved(highlighting(), [key(event.KUp)]), "[]")
+  assert_eq(state, "Down at the end is too",
+            moved(highlighting(), [key(event.KDown), key(event.KDown),
+                          key(event.KDown)]),
+            "[Lit(1), Lit(2)]")
+  assert_eq(state, "End goes to the last",
+            moved(highlighting(), [key(event.KEnd)]), "[Lit(2)]")
+  assert_eq(state, "Home returns to the first",
+            moved(highlighting(), [key(event.KEnd), key(event.KHome)]),
+            "[Lit(2), Lit(0)]")
+  # The default has no `on_highlight`, so a move is claimed and silent. This
+  # is what distinguishes "nobody is listening" from "the key fell through".
+  assert_eq(state, "a move is silent when nothing listens for it",
+            fed(view(), [key(event.KDown)]), "[]")
+
+fn page_cases(state: TestState) -> Unit !{IO} = do
+  # A page is a number the widget is TOLD: `render` is pure in the state, so
+  # nothing can write the last drawn height back for a key handler to read.
+  assert_eq(state, "PageDown moves by a page",
+            fed(view_of(many(), highlighting() with (page = 2)), [key(event.KPageDown)]),
+            "[Lit(2)]")
+  assert_eq(state, "PageUp moves back by a page",
+            fed(view_of(many(), highlighting() with (page = 2)),
+                [key(event.KEnd), key(event.KPageUp)]),
+            "[Lit(4), Lit(2)]")
+  assert_eq(state, "a page past the end stops at the last",
+            fed(view_of(many(), highlighting() with (page = 3)),
+                [key(event.KPageDown), key(event.KPageDown)]),
+            "[Lit(3), Lit(4)]")
+  assert_eq(state, "and one past the start at the first",
+            fed(view_of(many(), highlighting() with (page = 3)), [key(event.KPageUp)]),
+            "[]")
+
+fn choosing_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "Enter chooses the highlighted item",
+            fed(view(), [key(event.KDown), key(event.KEnter)]), "[Chose(1)]")
+  assert_eq(state, "a start index is where it begins",
+            fed(view_of(items(), lv.list_opts() with (start = 2)),
+                [key(event.KEnter)]), "[Chose(2)]")
+  # The list is the caller's, and so is the index; a start outside it is a
+  # mistake that must not make an unselectable list.
+  assert_eq(state, "a start past the end clamps to the last",
+            fed(view_of(items(), lv.list_opts() with (start = 9)),
+                [key(event.KEnter)]), "[Chose(2)]")
+  assert_eq(state, "and a negative one to the first",
+            fed(view_of(items(), lv.list_opts() with (start = 0 - 3)),
+                [key(event.KEnter)]), "[Chose(0)]")
+  # An empty list has no index to name, so every key it would use is claimed
+  # and silent rather than reporting a selection that does not exist.
+  assert_eq(state, "an empty list has nothing to choose",
+            fed(view_of(Nil, highlighting()), [key(event.KEnter)]), "[]")
+  assert_eq(state, "and nothing to move to",
+            fed(view_of(Nil, highlighting()), [key(event.KDown)]), "[]")
+
+# ── what it leaves alone ────────────────────────────────────────────────────
+
+fn declining_cases(state: TestState) -> Unit !{IO} = do
+  # keys.sprout:63 decodes a control byte as a KChar with ctrl set, and the
+  # arrows carry modifiers too: ctrl-Down is an application's binding.
+  assert_eq(state, "a ctrl chord is not a move",
+            fed(view_of(items(), highlighting()), [chord(event.KDown)]),
+            "[Noted(bcast)]")
+  assert_eq(state, "nor is an alt chord",
+            fed(view_of(items(), highlighting()),
+                [event.KeyPress(event.KDown, event.mods_alt())]),
+            "[Noted(bcast)]")
+  # §4.5 of the focus design: the ring reads Tab first, so this is what a list
+  # must not swallow.
+  assert_eq(state, "Tab is the ring's", fed(view(), [key(event.KTab)]), "[]")
+  assert_eq(state, "a key it does not use falls through",
+            fed(view(), [key(event.KChar('q'))]), "[Noted(bcast)]")
+  assert_eq(state, "an unfocused list ignores a key",
+            said(widget.feed(ct.column([ct.fit(view()), ct.fit(note())]),
+                             [key(event.KDown)])),
+            "[Noted(bcast)]")
+  # And declines it even when addressed directly: the ring routes keys by
+  # focus, so a key arriving at an unfocused list is the application's doing.
+  assert_eq(state, "and declines one addressed to it directly",
+            hit_of(widget.deliver(view(), list_id(),
+                                  widget.ToEvent(key(event.KDown)))),
+            false)
+  assert_eq(state, "but claims a focus notification",
+            hit_of(widget.deliver(view(), list_id(), widget.ToFocus(true))),
+            true)
+  # A list asks for no work, so an answer addressed to it is the
+  # application's — declining is what gets it there.
+  assert_eq(state, "and declines a message",
+            hit_of(widget.deliver(view(), list_id(), widget.ToMsg(Noted("x")))),
+            false)
+
+# ── what it paints ──────────────────────────────────────────────────────────
+
+fn after(w: widget.Widget Msg, evs: List event.Event) -> widget.Widget Msg =
+  match widget.feed(w, evs) with
+  | (w2, _, _) -> w2
+
+fn live(evs: List event.Event) -> widget.Widget Msg =
+  after(ring_of(view()), evs)
+
+fn painted(w: widget.Widget Msg, cols: Int, rows: Int) -> scr.Screen !{IO} = do
+  s <- scr.screen_new(g.Size(cols, rows))
+  widget.render(w, g.Region(0, 0, cols, rows), s)
+  s
+
+fn row_text(s: scr.Screen, row: Int, col: Int, cols: Int) -> String !{IO} =
+  if col >= cols then "" else row_step(s, row, col, cols)
+
+fn row_step(s: scr.Screen, row: Int, col: Int, cols: Int) -> String !{IO} = do
+  here <- scr.text_at(s, col, row)
+  rest <- row_text(s, row, col + 1, cols)
+  here ++ rest
+
+fn rows_from(s: scr.Screen, row: Int, rows: Int, cols: Int) -> String !{IO} =
+  if row >= rows then "" else rows_step(s, row, rows, cols)
+
+fn rows_step(s: scr.Screen, row: Int, rows: Int, cols: Int) -> String !{IO} = do
+  here <- row_text(s, row, 0, cols)
+  rest <- rows_from(s, row + 1, rows, cols)
+  if row + 1 >= rows then here else here ++ "|" ++ rest
+
+fn shown(w: widget.Widget Msg, cols: Int, rows: Int) -> String !{IO} = do
+  s <- painted(w, cols, rows)
+  rows_from(s, 0, rows, cols)
+
+# A region SHORTER than the screen, so what a widget paints outside it is
+# still visible in the answer.
+fn into(w: widget.Widget Msg, cols: Int, rows: Int,
+        region_rows: Int) -> String !{IO} = do
+  s <- scr.screen_new(g.Size(cols, rows))
+  widget.render(w, g.Region(0, 0, cols, region_rows), s)
+  rows_from(s, 0, rows, cols)
+
+fn reverse_at(s: scr.Screen, row: Int) -> Bool !{IO} = do
+  c <- scr.cell_at(s, 0, row)
+  sty.style_reverse(scr.cell_style(c))
+
+fn bold_at(s: scr.Screen, row: Int) -> Bool !{IO} = do
+  c <- scr.cell_at(s, 0, row)
+  sty.style_bold(scr.cell_style(c))
+
+fn underline_at(s: scr.Screen, row: Int) -> Bool !{IO} = do
+  c <- scr.cell_at(s, 0, row)
+  sty.style_underline(scr.cell_style(c))
+
+# Underlined rather than reversed, so the assertion cannot pass on the default.
+fn underlined() -> lv.ListOpts Msg =
+  lv.list_opts()
+  with (look = lv.ListStyle(normal = sty.style_default(),
+                            selected = sty.style_default(),
+                            selected_focused =
+                              sty.with_underline(sty.style_default(), true)))
+
+fn render_cases(state: TestState) -> Unit !{IO} = do
+  v <- shown(ring_of(view()), 5, 3)
+  assert_eq(state, "a list paints its items", v, "alpha|beta |gamma")
+  cut <- shown(ring_of(view()), 3, 3)
+  assert_eq(state, "an item wider than the region is cut to it", cut,
+            "alp|bet|gam")
+  s <- painted(live([key(event.KDown)]), 5, 3)
+  lit1 <- reverse_at(s, 1)
+  assert_eq(state, "the selected row carries the focused style", lit1, true)
+  dark0 <- reverse_at(s, 0)
+  assert_eq(state, "and the others do not", dark0, false)
+  # Brick keeps `listSelectedAttr` apart from `listSelectedFocusedAttr` for
+  # this: a list that has lost the keyboard still has a selection to show.
+  blur <- painted(view(), 5, 3)
+  blur_sel <- bold_at(blur, 0)
+  assert_eq(state, "an unfocused list still marks its selection", blur_sel,
+            true)
+  blur_rev <- reverse_at(blur, 0)
+  assert_eq(state, "but not as the focused one", blur_rev, false)
+  # The window is a function of the selection, so there is no scroll position
+  # to drift: the selection sits on the last row once it passes the height.
+  tail <- shown(after(ring_of(view_of(many(), lv.list_opts())),
+                      [key(event.KEnd)]), 1, 2)
+  assert_eq(state, "the window follows the selection off the bottom", tail,
+            "d|e")
+  top <- shown(after(ring_of(view_of(many(), lv.list_opts())),
+                     [key(event.KEnd), key(event.KHome)]), 1, 2)
+  assert_eq(state, "and Home brings the top back", top, "a|b")
+  # A container can hand out a region of no rows — a `fit` slot in a column
+  # that ran out of room. The search for a window must end anyway.
+  none <- into(live(Nil), 5, 2, 0)
+  assert_eq(state, "a region of no rows paints nothing", none, "     |     ")
+  u <- painted(ring_of(view_of(items(), underlined())), 5, 3)
+  under <- underline_at(u, 0)
+  assert_eq(state, "a supplied style paints the selection", under, true)
+  plain <- reverse_at(u, 0)
+  assert_eq(state, "and not the default one", plain, false)
+
+fn measure_cases(state: TestState) -> Unit !{IO} = do
+  # A list fills what it is given on both axes: it scrolls rather than asking
+  # for the height its item count would demand.
+  assert_eq(state, "a list takes the width it is offered",
+            to_string(widget.measure(view(), g.Size(20, 5)).cols), "Greedy")
+  assert_eq(state, "and the height",
+            to_string(widget.measure(view(), g.Size(20, 5)).rows), "Greedy")
+  assert_eq(state, "its natural width is its widest item",
+            g.size_cols(widget.measure(view(), g.Size(20, 5)).size), 5)
+  assert_eq(state, "and its natural height is its item count",
+            g.size_rows(widget.measure(view(), g.Size(20, 5)).size), 3)
+  # `text.widest` answers 0 columns for no lines rather than nothing at all: a
+  # widget still has a size, and a container must be given a number.
+  assert_eq(state, "an empty list is no columns wide",
+            g.size_cols(widget.measure(view_of(Nil, lv.list_opts()),
+                                       g.Size(20, 5)).size), 0)
+
+fn main() -> Unit !{IO} = do
+  state <- new_state()
+  moving_cases(state)
+  page_cases(state)
+  choosing_cases(state)
+  declining_cases(state)
+  render_cases(state)
+  measure_cases(state)
+  summary(state)
