@@ -873,6 +873,13 @@ Legend:
   would make the null-fill structurally unreachable — remain parked as M3b; see
   `docs/dict-resolution-north-star-plan-2026-06-30.md` for the sentinel-flow map and why M4/M5/M3b
   were parked.
+- [ ] `P2` **A nullary class method in value position under a forwarded dict fails to compile.**
+  `run_thunk(blank)` inside `fn f(x: t) -> t where Blank t` dies with `ast_to_ir: unbound variable
+  '__eta_unresolved_Blank_blank'`. `lowering.try_eta_in_class` (`:1045`) opens on a `TFunc` gate and
+  a nullary method has been a `TThunk` since the type collapse landed, so it bails to the unresolved
+  fallback. A concrete instance devirtualises and compiles — only the forwarded path breaks. The
+  gate wants a `TThunk` arm. `docs/nullary-type-collapse-v0.md` §9.5 leans on this same gate to
+  explain why the deleted `Unit`-peel was unreachable.
 - [ ] `P2` **Complete the M3b eta→single-authority collapse (blocked on tyvar canonicalization).**
   Lowering's `try_eta_in_class`/`try_eta_forwarded_without_class` remain a second resolution
   authority for one shape: a polymorphic (type-variable-head) forwarded value-position class method.

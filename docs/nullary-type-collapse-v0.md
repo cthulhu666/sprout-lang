@@ -267,6 +267,12 @@ and never the bare type the peel keys on; and `lowering.try_eta_in_class` requir
 reaches it. Confirmed by compiling the whole corpus with the arm replaced by a `panic`:
 every `tests/stdlib` suite and all 54 examples passed untouched.
 
+That second reason is a defect, not a design: the `TFunc` gate does not decline the shape,
+it *fails* on it. A nullary method passed unapplied under a forwarded dictionary dies with
+`ast_to_ir: unbound variable '__eta_unresolved_…'` (`BACKLOG.md` §7.5). The peel would not
+have rescued it — it keys on the scheme, which is a `TThunk` here — but the peel's death is
+independent of that gate being wrong.
+
 `.iface` moves 6 → 7. A v6 file is rejected loudly rather than read leniently: decoded
 under v7 rules every nullary signature would come back as its bare return type, which is
 this bug reintroduced across a module boundary.

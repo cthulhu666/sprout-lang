@@ -6,7 +6,10 @@ import stdlib.test (check_eq, run_suite)
 # instances, because one dictionary chosen for both would still pass at one type.
 #
 # `fold_all` also passes `combine` unapplied, which is the eta-expansion path for
-# a constrained method in value position — the other half of the same lowering.
+# a PARAMETERISED method in value position. The nullary method cannot be passed
+# unapplied at all — `try_eta_in_class` gates on TFunc and a thunk falls through
+# to the unresolved sentinel (`BACKLOG.md` §7.5), so that shape is absent here
+# because it does not compile, not because it is uninteresting.
 
 class Blank t
   fn blank() -> t

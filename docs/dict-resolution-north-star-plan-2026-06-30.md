@@ -481,7 +481,7 @@ while the `resolve_tdict` fallback exists, and MUST be handled (with tests) when
    uncovered shapes: multi-param classes, deeply-nested `TApp` heads, the multi-same-class-constraint
    `@eta_fwd` disambiguation). M3b-5's deletion of `resolve_tdict` collapses them to one authority —
    that is the real fix; until then the `mr_*` helpers in resolve are verbatim copies of lowering's
-   (`match_type_vars`, `type_is_unit`, `eta_class_type` family) that can silently drift.
+   (`match_type_vars`, `eta_class_type` family) that can silently drift.
 
 **If full M3b is ever done — design notes.** Option A: resolve emits `EvInstance` for the
 concrete subtree + an opaque `EvForward` marker; lowering fills the forward slot from

@@ -22,15 +22,30 @@ import stdlib.compiler.ast as ast
 # Purity check
 # ---------------------------------------------------------------------------
 
-# Both arrows carry their own effect: a nullary callee is a TThunk, everything
-# else a TFunc. The catch-all answers "impure" and so keeps the binding, which is
-# the safe direction here — a variant nobody taught this function about costs an
-# optimisation, never a dropped effect.
-fn is_pure_callee_type(t: types.Type) -> Bool =
+# A call performs the effect of every arrow it CONSUMES, and `infer` records a
+# declared effect on the innermost one — so a two-parameter `!{IO}` function has a
+# pure outer arrow, and reading that alone deletes an effectful call. Mirrors
+# `infer.arrows_effect`, which decides the same question at check time.
+#
+# `argc <= 0` means two things, as it does there: at the entry a zero-argument
+# call, which consumes a thunk arrow and performs its effect; through the
+# recursion the end of the consumed chain, where what is left is returned rather
+# than invoked. Every catch-all answers "impure", which keeps the binding — the
+# direction that costs an optimisation rather than an effect.
+fn is_pure_callee_type(t: types.Type, argc: Int) -> Bool =
+  if argc <= 0 then thunk_is_pure(t) else consumed_arrows_pure(t, argc)
+
+fn thunk_is_pure(t: types.Type) -> Bool =
   match t with
-  | types.TFunc _ _ eff _ -> effect_is_pure(eff)
   | types.TThunk _ eff -> effect_is_pure(eff)
   | _ -> false
+
+fn consumed_arrows_pure(t: types.Type, argc: Int) -> Bool =
+  if argc <= 0 then true
+  else
+    match t with
+    | types.TFunc _ ret eff _ -> effect_is_pure(eff) && consumed_arrows_pure(ret, argc - 1)
+    | _ -> false
 
 fn effect_is_pure(eff: types.Effect) -> Bool =
   match eff with
@@ -52,7 +67,7 @@ fn is_pure_expr(e: typed_ast.TypedExpr) -> Bool =
   | typed_ast.TMatch scrut arms _ _ ->
       is_pure_expr(scrut) && all_pure_arms(arms)
   | typed_ast.TCall callee args _ _ ->
-      is_pure_callee_type(typed_ast.typed_expr_type(callee)) &&
+      is_pure_callee_type(typed_ast.typed_expr_type(callee), list_length(args)) &&
       is_pure_expr(callee) && all_pure_list(args)
   | typed_ast.TDict _ _ _ _ -> true
   | typed_ast.TMethodRef _ _ _ _ _ -> panic("dce.is_pure_expr: TMethodRef survived lowering (internal error)")
