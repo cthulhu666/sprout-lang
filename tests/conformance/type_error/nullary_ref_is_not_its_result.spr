@@ -1,0 +1,13 @@
+module main
+
+# A reference to a nullary function is a function, not its result. Without the
+# `() -> T` arrow the checker reads `io_thunk` as `Int` and admits it to integer
+# arithmetic while codegen builds a closure for the same expression.
+
+fn io_thunk() -> Int !{IO} = do
+  print("io")
+  34
+
+fn take(x: Int) -> Int = x + 1
+
+fn main() -> Unit !{IO} = print(int_to_string(take(io_thunk)))

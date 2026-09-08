@@ -838,12 +838,16 @@ _test-reject stage dir noun xfail="":
   fi
   echo "==> All {{noun}} fixtures rejected as expected"
 
-# Stage-1 negative type-checking gate. No xfail — every fixture is expected to
-# be rejected with its diagnostic. (Overlapping-instance and do-block
+# Stage-1 negative type-checking gate. (Overlapping-instance and do-block
 # family-conflict diagnostics landed in PR-3; missing_nested_instance{,_maybe}
 # via the resolve pass in #110.)
+#
+# The three nullary_* fixtures are quarantined until the `TThunk` arrow lands:
+# at arity 0 there is no arrow to unify against, so all three are ACCEPTED today
+# (docs/nullary-type-collapse-v0.md). Quarantine self-heals — a match reports
+# UNEXPECTED MATCH and reddens the gate.
 [group('test')]
-test-type-errors: bootstrap-from-seed (_test-reject "build/compile_driver_bin_stage1" "type_error" "type-error" "")
+test-type-errors: bootstrap-from-seed (_test-reject "build/compile_driver_bin_stage1" "type_error" "type-error" "nullary_int_in_callee_position nullary_ref_is_not_its_result nullary_local_callee_launders_effect")
 
 # Stage-1 negative parse gate: tests/conformance/parse_error/<n>.spr must be
 # rejected at parse time with the diagnostic substring in <n>.err.

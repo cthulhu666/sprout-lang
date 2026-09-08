@@ -1,0 +1,15 @@
+module main
+
+# Binding a nullary IO function to a local must not launder its effect. The
+# direct spelling `io_thunk()` is already rejected by rule 8; the local callee
+# is the hole, because the effect has no arrow to travel on.
+
+fn io_thunk() -> Int !{IO} = do
+  print("io")
+  34
+
+fn launder() -> Int =
+  let t = io_thunk
+  in t()
+
+fn main() -> Unit !{IO} = print(int_to_string(launder()))

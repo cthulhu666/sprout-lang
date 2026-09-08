@@ -1,0 +1,10 @@
+module main
+
+# Calling a non-function is a type error. At arity 0 the checker must build an
+# expected `() -> a` and unify against it, exactly as arity 1 builds `Int -> a`.
+# Without that arrow every `Int` satisfies the callee position and the integer
+# is dereferenced as a code pointer at run time.
+
+fn launder(x: Int) -> Int = x()
+
+fn main() -> Unit !{IO} = print(int_to_string(launder(42)))
