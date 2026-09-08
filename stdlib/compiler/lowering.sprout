@@ -773,26 +773,9 @@ fn lookup_method_scheme(method_name: String, scheme_env: Dict types.Scheme) -> M
   | Nothing -> dict_get(string.after_last_dot(method_name), scheme_env)
 
 fn eta_class_type_from_scheme(class_param: String, scheme_type: types.Type, actual_type: types.Type, fallback: types.Type) -> types.Type =
-  match dict_get(class_param, match_type_vars(scheme_type, eta_actual_type_for_scheme_match(scheme_type, actual_type), dict_empty())) with
+  match dict_get(class_param, match_type_vars(scheme_type, actual_type, dict_empty())) with
   | Nothing -> fallback
   | Just class_type -> class_type
-
-fn eta_actual_type_for_scheme_match(scheme_type: types.Type, actual_type: types.Type) -> types.Type =
-  match scheme_type with
-  | types.TFunc _ _ _ _ -> actual_type
-  | types.TThunk _ _ -> actual_type
-  | _ ->
-      match actual_type with
-      | types.TFunc param ret _ _ ->
-          # Legacy shape: a zero-arg method appearing in value position as
-          # `Unit -> result`. Its own type is now `() -> result` (TThunk above).
-          if type_is_unit(param) then ret else actual_type
-      | _ -> actual_type
-
-fn type_is_unit(t: types.Type) -> Bool =
-  match t with
-  | types.TConst name -> types.type_id_name(name) == "Unit"
-  | _ -> false
 
 fn match_type_vars(pattern: types.Type, actual: types.Type, acc: Dict types.Type) -> Dict types.Type =
   match pattern with

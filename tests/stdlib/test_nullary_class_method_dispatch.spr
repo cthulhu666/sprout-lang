@@ -1,0 +1,33 @@
+import stdlib.test (check_eq, run_suite)
+
+# A NULLARY class method reached through a forwarded dictionary. A concrete
+# instance devirtualises the dict away, so only a `where Blank t` function
+# exercises the lowering path that reads `blank` out of a dictionary. Two
+# instances, because one dictionary chosen for both would still pass at one type.
+#
+# `fold_all` also passes `combine` unapplied, which is the eta-expansion path for
+# a constrained method in value position — the other half of the same lowering.
+
+class Blank t
+  fn blank() -> t
+  fn combine(x: t, y: t) -> t
+
+instance Blank Int
+  fn blank() -> Int = 0
+  fn combine(x: Int, y: Int) -> Int = x + y
+
+instance Blank String
+  fn blank() -> String = ""
+  fn combine(x: String, y: String) -> String = x ++ y
+
+fn pad(x: t) -> t where Blank t = combine(blank(), combine(x, blank()))
+
+fn fold_all(xs: List t) -> t where Blank t = list_fold(combine, blank(), xs)
+
+fn main() -> Unit !{IO} =
+  run_suite("nullary_class_method_dispatch", [
+    check_eq("forwarded dict, Int", pad(7), 7),
+    check_eq("forwarded dict, String", pad("x"), "x"),
+    check_eq("nullary method as a fold seed, Int", fold_all([1, 2, 3]), 6),
+    check_eq("nullary method as a fold seed, String", fold_all(["a", "b"]), "ab")
+  ])
