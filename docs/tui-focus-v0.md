@@ -183,17 +183,18 @@ export fn focus_ring(ids: List WidgetId, child: Widget m) -> Widget m
 export fn focus_ring_at(ids: List WidgetId, start: WidgetId,
                         child: Widget m) -> Widget m
 
-# stdlib/tui/widgets/button.sprout
-# Two bare `Style` arguments would swap silently, inverting which state looks
-# focused — the same trap C1's `grid` tagged its two `List Dimension`
-# templates against. A record, per guidelines §7's multi-field case.
-export type ButtonStyle = (normal: Style, focused: Style)
-export fn default_style() -> ButtonStyle
+# stdlib/tui/widgets/focus.sprout — the normal/focused pair. Two bare `Style`
+# arguments would swap silently, inverting which state looks focused; a record
+# makes that a compile error, per guidelines §7's multi-field case. C2b moved
+# it here from `button`, since every focusable widget wants it.
+export type FocusStyle = (normal: Style, focused: Style)
+export fn focus_style_default() -> FocusStyle
 
-# Fires `on_press` on Enter or Space while focused, and claims nothing else —
-# so an unused key still reaches the application.
+# stdlib/tui/widgets/button.sprout
+# Fires `on_press` on Enter or Space while focused and unmodified, and claims
+# nothing else — so an unused key still reaches the application.
 export fn button(id: WidgetId, label: String, on_press: m) -> Widget m
-export fn button_styled(id: WidgetId, look: ButtonStyle, label: String,
+export fn button_styled(id: WidgetId, look: FocusStyle, label: String,
                         on_press: m) -> Widget m
 ```
 
