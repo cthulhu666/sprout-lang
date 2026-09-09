@@ -1,0 +1,15 @@
+module main
+
+# A class-side row with NO instance. As a by-product of the instance walk the
+# class-side row check fired only when a matching instance existed, so this
+# program compiled — and a class method signature records no EffectReport
+# (docs/effect-enforcement-v0.md §13.7), so nothing else reaches it either.
+#
+# The expected position is the CLASS declaration's, which is also what makes the
+# scan standalone: reporting from the instance walk pointed the caret at the
+# instance while the message named the class method.
+
+class Quiet a
+  fn calc(x: a) -> Int !{IO, e}
+
+fn main() -> Unit !{IO} = print("done")

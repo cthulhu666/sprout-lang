@@ -1,13 +1,14 @@
 module main
 
-# A multi-label row is rule 9's error, and rule 9 must be the one to report it.
+# A row on BOTH sides. It must never be reported as a MISMATCH: a row is outside
+# the order spec §7 rule 8's comparison ranks, and left to rank one it said
+# `declared !{IO, e}, but the class declares !{IO, e}` — a contradiction on its
+# face. The two sides are written identically here so any mismatch complaint is
+# wrong by construction.
 #
-# The instance/class effect comparison (spec §7 rule 8) runs first, in the
-# whole-program validator chain, and a row is outside the order it ranks. Left to
-# rank one, it reported `declared !{IO, e}, but the class declares !{IO, e}` — a
-# contradiction on its face, and it masked the real diagnostic. The two sides are
-# written IDENTICALLY here so that any complaint about a mismatch is wrong by
-# construction.
+# The class-side scan reaches it first and names the class method; its single-side
+# twins are effect_row_on_class_method_no_instance.spr and
+# effect_row_on_instance_method_only.spr.
 
 class Quiet a
   fn calc(x: a) -> Int !{IO, e}

@@ -64,11 +64,23 @@ fi
 # legal program while naming a class that declares the opposite effect.
 # Here because the shape needs two sibling modules, which needs a package root.
 col="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_class_name_collision.spr" 2>&1)"
-if ! errors "$col" >/dev/null; then
+if echo "$col" | grep -q '^OK$' && ! errors "$col" >/dev/null; then
   echo "PASS collision: same-short-named classes from two modules judged separately"
 else
   echo "FAIL collision: legal program rejected — class-keyed effect lookup collapsed two classes"
   errors "$col" | head -3
+  fail=1
+fi
+
+# The firing half of the same lookup. The assertion above is acceptance-only, so a
+# key that never matches an imported class passes it; this one fails unless the
+# effect declared by a class in ANOTHER module is found and enforced.
+rej="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_cross_module_class_reject.spr" 2>&1)"
+if echo "$rej" | grep -qF 'of class `demo.enc_quiet.Enc`: declared !{IO}, but the class declares pure'; then
+  echo "PASS cross-module reject: an imported class's declared effect is enforced"
+else
+  echo "FAIL cross-module reject: expected a rule-8 mismatch naming demo.enc_quiet.Enc"
+  echo "$rej" | tail -3
   fail=1
 fi
 

@@ -428,15 +428,31 @@ answers**:
   face — and masked that message. Regression:
   `tests/conformance/type_error/effect_row_on_class_method.spr`, which writes both sides
   identically so any mismatch complaint is wrong by construction.
-- **class-side row → reject here.** A class method signature has no body and records no
-  report at all (`docs/effect-enforcement-v0.md` §13.7), so nothing else reaches it.
-  Declining both sides — the first fix — meant a class declaring `!{IO, e}` over an
-  instance declaring `!{IO}` was accepted, and `pure_user` ran the IO. Found by a second
-  code review, verified by running. Regression:
+- **class-side row → reject, from a scan of its own.** A class method signature has no body
+  and records no report at all (`docs/effect-enforcement-v0.md` §13.7), so nothing else
+  reaches it. Declining both sides — the first fix — meant a class declaring `!{IO, e}` over
+  an instance declaring `!{IO}` was accepted, and `pure_user` ran the IO. Regression:
   `tests/conformance/type_error/effect_row_on_class_signature.spr`.
 
 The pair is the point: "a row is someone else's problem" is true on one side and false on
 the other, and the first fix applied it to both.
+
+**Rejecting the class-side row from inside the instance walk was still wrong, twice over.**
+A third code review found both, verified by running. It fired only when a matching instance
+existed, so a class declaring `!{IO, e}` with **no** instance stayed accepted — the escape
+the section above claims is closed was only conditionally closed. And it reported at the
+*instance's* position while naming the class's method, a caret pointing at correct code
+(`docs/guidelines.md` §5). Both dissolve in a standalone `ClassDecl` scan running ahead of
+the instance walk, which also restores the symmetry the instance walk wanted all along: it
+now declines a row on either side, because by then both are owned elsewhere. Regressions:
+`effect_row_on_class_method_no_instance.spr` (no instance; the `.err` pins the class's
+line) and `effect_row_on_instance_method_only.spr` (a well-formed class signature, so rule
+9 still names the instance).
+
+The **two-variable** half of rule 9's singleton clause has no such scan and is still
+unreachable on a class method signature — that escape is real and remains open, recorded in
+`docs/effect-enforcement-v0.md` §13.7. Only the row half was closed, because only the row
+half can let an effect cross.
 
 **The cell this section left to the implementing PR was decided by execution, not by
 judgement.** Pure class / `!{e}` instance is not a variable being conservatively refused —
@@ -461,7 +477,8 @@ with it the registration, so `register_class_method` is unchanged from `master`.
 
 **Placement, and the bug that decided it.** The check is a whole-program pass in
 `typecheck_decls_resolved`'s validator chain, beside `check_missing_superclass_instances`
-— it reads the decl list, so it sees every class before it judges any instance.
+— it reads the decl list, so it sees every class before it judges any instance. It is two
+scans over that list: the class-row scan (below) first, then the instance walk.
 
 The first implementation ran at the `ast.InstanceDecl` arm instead, where the class effect
 is whatever the env holds *so far*. An instance declared **above** its class therefore

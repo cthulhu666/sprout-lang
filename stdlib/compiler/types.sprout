@@ -400,10 +400,11 @@ export fn effect_var_name_is_wellformed(name: String) -> Bool =
 # standing behind another where only the outer is visible to callers, today an
 # instance method behind its class signature (docs/effect-subsumption-v0.md §6.1a).
 # Both sides are as written: no inference, no unification.
-# A multi-label row is not an effect spec-v0.md §7 defines; rule 9 rejects it and
-# names it. `parser.checked_effect_names` passes it through — it validates LABELS,
-# not arity — so a row does reach the passes that run before rule 9, and each must
-# decline it rather than form an opinion.
+# A multi-label row is not an effect spec-v0.md §7 defines.
+# `parser.checked_effect_names` passes it through — it validates LABELS, not arity —
+# so a row reaches the passes that run before rule 9. Each must recognise one rather
+# than rank it: either to leave it to rule 9, or, where rule 9 cannot see it, to
+# reject it in rule 9's own words.
 export fn effect_is_row(e: Effect) -> Bool =
   match e with
   | EffectRow _ -> true

@@ -1,0 +1,19 @@
+module main
+import demo.enc_quiet as quiet
+
+# The firing half of the cross-module story. app_class_name_collision.spr is
+# acceptance-only, so it passes just as well if the class-qualified key never
+# matches at all; this one fails unless the lookup resolves an IMPORTED class.
+#
+# `quiet.Enc.enc` is pure, so the `!{IO}` here must be rejected naming
+# `demo.enc_quiet.Enc` — spec §7 rule 8.
+
+type Q = Q
+
+instance quiet.Enc Q
+  fn enc(x: Q) -> Int !{IO} =
+    do
+      print("io")
+      2
+
+fn main() -> Unit !{IO} = print("done")

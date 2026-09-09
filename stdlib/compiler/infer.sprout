@@ -9828,7 +9828,36 @@ fn register_fn_decl_scheme(
 # Distinct from rule 8's body check, which compares a body against its OWN
 # declaration: in every program rejected here those two agree.
 export fn check_instance_class_effects(decls: List ast.Decl) -> Maybe(source.SourcePos, String) =
-  first_instance_effect_error(decls, class_effect_table(decls, dict_empty()))
+  match first_class_row_error(decls) with
+  | Just err -> Just(err)
+  | Nothing -> first_instance_effect_error(decls, class_effect_table(decls, dict_empty()))
+
+# A class-side row is rule 9's error, but a class method signature has no body and
+# so records no EffectReport (docs/effect-enforcement-v0.md §13.7) — nothing else
+# reaches it. Its own scan, not a by-product of the instance walk: there it fired
+# only when a matching instance existed, and reported at the instance's position.
+fn first_class_row_error(decls: List ast.Decl) -> Maybe(source.SourcePos, String) =
+  match decls with
+  | Nil -> Nothing
+  | Cons decl rest ->
+      match decl with
+      | ast.ClassDecl class_name _ methods _ pos ->
+          match first_class_method_row(class_name, methods) with
+          | Just msg -> Just((pos, msg))
+          | Nothing -> first_class_row_error(rest)
+      | _ -> first_class_row_error(rest)
+
+fn first_class_method_row(class_name: String, methods: List ast.ClassMethodSig) -> Maybe String =
+  match methods with
+  | Nil -> Nothing
+  | Cons sig rest ->
+      match sig with
+      | ast.ClassMethodSig name _ _ effects_maybe ->
+          let eff = types.effect_from_labels(effects_maybe)
+          in
+            if types.effect_is_row(eff)
+            then Just(class_row_message(name, class_name, eff))
+            else first_class_method_row(class_name, rest)
 
 # Keyed by CLASS, verbatim as the decl spells it. A method NAME identifies no
 # class: two classes may declare one and a top-level `fn` may shadow one, and both
@@ -9904,20 +9933,19 @@ fn instance_method_effect_error(class_name: String, method: ast.InstanceMethodIm
                                 declared: Dict types.Effect) -> Maybe String =
   match method with
   | ast.InstanceMethodImpl name _ _ eff_maybe _ ->
-      # No entry means the class is not in scope, which is already diagnosed as an
-      # unknown instance head; a second message for it here would double-report.
+      # No entry means the class declares no such method: either the class is not in
+      # scope, already diagnosed as an unknown instance head, or the instance defines
+      # a method the class does not — accepted silently today (BACKLOG §Dispatch
+      # Soundness). Neither is this check's to report.
       let Just class_eff = class_method_declared_effect(class_name, name, declared) else Nothing
           inst_eff = types.effect_from_labels(eff_maybe)
       in
-        # A row needs OPPOSITE answers on the two sides. An instance method has a
-        # body, so it records an EffectReport and rule 9 names its row properly —
-        # ranking it here only masks that. A class method signature has no body
-        # and no report (effect-enforcement-v0.md §13.7), so deferring its row
-        # means nobody reports it and the instance's effect crosses unchecked.
-        if types.effect_is_row(inst_eff)
+        # A row is outside the order `effect_declared_at_most` ranks, and ranking one
+        # makes it compare equal to itself and quietly accept. Both sides are owned
+        # elsewhere: rule 9 has the instance's, which has a body and so an
+        # EffectReport, and `first_class_row_error` has the class's.
+        if types.effect_is_row(inst_eff) || types.effect_is_row(class_eff)
         then Nothing
-        else if types.effect_is_row(class_eff)
-        then Just(class_row_message(name, class_name, class_eff))
         else if types.effect_declared_at_most(inst_eff, class_eff)
         then Nothing
         else Just(instance_effect_message(name, class_name, inst_eff, class_eff))
