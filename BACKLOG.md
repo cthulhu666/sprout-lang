@@ -895,6 +895,16 @@ Legend:
   would make the null-fill structurally unreachable — remain parked as M3b; see
   `docs/dict-resolution-north-star-plan-2026-06-30.md` for the sentinel-flow map and why M4/M5/M3b
   were parked.
+- [ ] `P1` **A forwarded eta slot is picked by name when the class variable is not the head.**
+  `lowering.eta_forwarded_impl` keys on the tvar head of the method's class position; with no
+  head it falls to `find_forwarded_method_any`, which returns the FIRST slot carrying that
+  method name regardless of which constraint owns it. Under two same-class constraints
+  `fn nlist(xs: List t) -> Int` runs the `Blank a` instance for both operands — verified,
+  `(101, 101)` for an expected `(101, 201)`. The same shape as a nullary result (`() -> List a`)
+  is declined loudly instead, so the two arms disagree. Fix: decline the any-slot fallback when
+  more than one forwarded entry carries the method, or resolve the class variable properly via
+  `class_param_for` + `match_type_vars` as `eta_class_type` already does. Changes which programs
+  compile, so Design Change Process.
 - [ ] `P2` **Complete the M3b eta→single-authority collapse (blocked on tyvar canonicalization).**
   Lowering's `try_eta_in_class`/`try_eta_forwarded_without_class` remain a second resolution
   authority for one shape: a polymorphic (type-variable-head) forwarded value-position class method.
