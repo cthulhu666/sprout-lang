@@ -1,0 +1,54 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.compiler as compiler
+import stdlib.compiler.bundler as bundler
+import stdlib.compiler.source as source
+import stdlib.env as env
+
+# The instance-vs-class effect check is a decl-scan, the shape
+# compiler-internals.md §"Whole-program passes: scan `decls` AND read `env`"
+# warns can see an empty vocabulary on this front end. It also reads `env`, for a
+# class that is imported rather than declared; these pin the verdicts.
+#
+# The accept cases belong here for the same reason as the rejects: an
+# over-correction on this front end is invisible to the conformance fixtures,
+# which all run `--phase check`.
+
+fn is_compile_ok(r: compiler.CompileResult) -> Bool =
+  match r with
+  | compiler.CompileOk _ -> true
+  | compiler.CompileFail _ -> false
+
+fn session(body: String) -> String = `module app.session\n\n${body}\n`
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    match env.get("SPROUT_STDLIB_ROOT") with
+    # Loud, not silent: a skipped run reports "0 passed", which reads as green.
+    | Nothing -> print("SKIP: SPROUT_STDLIB_ROOT unset — no assertion ran")
+    | Just stdlib_root ->
+        do
+          cache <- bundler.new_load_env()
+          r_io <- compiler.compile_source_with_cache(
+            session(`class Quiet a\n  fn calc(x: a) -> Int\n\ntype Q = Q\n\ninstance Quiet Q\n  fn calc(x: Q) -> Int !{IO} = do\n    print("io")\n    1`),
+            source.StdlibRoot(stdlib_root), cache)
+          assert_true(state, "REPL: instance strengthening its class rejected", is_compile_ok(r_io) == false)
+          # Order-independence on this front end too: the class is declared AFTER
+          # the instance that must be checked against it.
+          r_order <- compiler.compile_source_with_cache(
+            session(`type Q = Q\n\ninstance Quiet Q\n  fn calc(x: Q) -> Int !{IO} = do\n    print("io")\n    1\n\nclass Quiet a\n  fn calc(x: a) -> Int`),
+            source.StdlibRoot(stdlib_root), cache)
+          assert_true(state, "REPL: instance declared above its class still checked", is_compile_ok(r_order) == false)
+          # The over-correction guard: an instance may promise LESS.
+          r_weaker <- compiler.compile_source_with_cache(
+            session(`class Loud a\n  fn boom(x: a) -> Int !{IO}\n\ntype B = B\n\ninstance Loud B\n  fn boom(x: B) -> Int = 2`),
+            source.StdlibRoot(stdlib_root), cache)
+          assert_true(state, "REPL: instance promising less accepted", is_compile_ok(r_weaker))
+          # A class method's `!{e}` tied to its instance's — the cell an equality
+          # reading would reject.
+          r_var <- compiler.compile_source_with_cache(
+            session(`class Walk f\n  fn wfold(step: b -> a -> b !{e}, init: b, xs: f a) -> b !{e}\n\ninstance Walk List\n  fn wfold(step: b -> a -> b !{e}, init: b, xs: List a) -> b !{e} =\n    list_fold(step, init, xs)`),
+            source.StdlibRoot(stdlib_root), cache)
+          assert_true(state, "REPL: tied effect variables accepted", is_compile_ok(r_var))
+    summary(state)

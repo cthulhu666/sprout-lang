@@ -29,6 +29,12 @@ import stdlib.compiler.source as source
 # gives the bundler license to emit none of the module, and the whole point here
 # is that the compiler's code reaches the IR.
 #
+# **What it actually covers, measured 2026-09-09:** `ast`, `lexer`, `parser`,
+# `source`, `token`, `types` — the modules `repl.run()` reaches. DCE prunes the
+# rest, so `infer`, `lowering`, `ast_to_ir` and `ir_lowering` are NOT in this
+# golden and a change to them reports "0 differences" for want of coverage, not
+# for want of a diff. Read that zero accordingly.
+#
 # `stdlib.compiler.source` is imported DIRECTLY, and used, on purpose. The
 # transitive path through `stdlib.repl` is what supplies the breadth, but it is
 # also invisible — were `repl` ever refactored to stop reaching the compiler,

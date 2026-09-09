@@ -1,0 +1,23 @@
+module main
+
+# spec-v0.md §7 rule 8 at the instance/class boundary — `docs/effect-subsumption-v0.md`
+# §6.1a, part 3. A call dispatches through the CLASS signature, so the instance's own
+# declaration is invisible there: `pure_user` reports pure and runs the IO.
+#
+# Not a duplicate of effect_pure_instance_method_does_io.spr. That one checks a body
+# against its OWN declaration (rule 8) and both sides here agree — the instance really
+# does declare `!{IO}` and really does perform it. The missing edge is own-declaration
+# against CLASS-declaration, and neither check implies the other.
+
+class Quiet a
+  fn calc(x: a) -> Int
+
+instance Quiet Int
+  fn calc(x: Int) -> Int !{IO} =
+    do
+      print("io")
+      x + 1
+
+fn pure_user(n: Int) -> Int = calc(n)
+
+fn main() -> Unit !{IO} = print(int_to_string(pure_user(41)))

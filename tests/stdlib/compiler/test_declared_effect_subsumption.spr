@@ -1,0 +1,55 @@
+import stdlib.test (check_true, check_false, run_suite)
+import stdlib.compiler.types as types
+
+# `effect_declared_at_most(inner, outer)` — one DECLARED effect standing behind
+# another, where only the outer one is visible to callers. Today's caller is the
+# instance/class boundary (docs/effect-subsumption-v0.md §6.1a).
+#
+# All nine cells, plus both `EffectRow` arms. Totality is the point: §6.0 landed
+# because an unenumerated case defaulted to "variable", and this relation has the
+# same shape of hazard — a cell nobody wrote down becomes whatever the fallthrough
+# happens to be. The conformance fixtures cover three cells; this covers the rest.
+
+fn main() -> Unit !{IO} =
+  run_suite("declared_effect_subsumption", [
+    # --- outer pure: only pure fits underneath ---------------------------
+    check_true("pure under pure",
+      types.effect_declared_at_most(types.EffectPure, types.EffectPure)),
+    check_false("!{IO} under pure",
+      types.effect_declared_at_most(types.EffectIO, types.EffectPure)),
+    # An inner variable absorbs whatever the body performs, so a pure outer
+    # cannot cover it — verified by execution in
+    # tests/conformance/type_error/effect_instance_var_under_pure_class.spr.
+    check_false("a variable under pure",
+      types.effect_declared_at_most(types.EffectVar("e"), types.EffectPure)),
+
+    # --- outer variable: instantiated per call site, so !{IO} escapes it ---
+    check_true("pure under a variable",
+      types.effect_declared_at_most(types.EffectPure, types.EffectVar("e"))),
+    check_true("a variable under the same variable",
+      types.effect_declared_at_most(types.EffectVar("e"), types.EffectVar("e"))),
+    # Alpha-renaming: both name the outer declaration's own quantified variable,
+    # so the spelling carries no information. tests/stdlib/
+    # test_effect_polymorphic_class_method.spr is the end-to-end witness.
+    check_true("a variable under a differently-named variable",
+      types.effect_declared_at_most(types.EffectVar("d"), types.EffectVar("e"))),
+    check_false("!{IO} under a variable",
+      types.effect_declared_at_most(types.EffectIO, types.EffectVar("e"))),
+
+    # --- outer !{IO}: the top, so everything fits ------------------------
+    check_true("pure under !{IO}",
+      types.effect_declared_at_most(types.EffectPure, types.EffectIO)),
+    check_true("a variable under !{IO}",
+      types.effect_declared_at_most(types.EffectVar("e"), types.EffectIO)),
+    check_true("!{IO} under !{IO}",
+      types.effect_declared_at_most(types.EffectIO, types.EffectIO)),
+
+    # --- rows: unreachable from a conformant signature, decided anyway ----
+    # Rule 9 admits one label, so part 0 rejects every source spelling of a row.
+    # Ranking one would make `EffectRow` compare equal to itself and quietly
+    # accept; both arms answer false instead.
+    check_false("a row as the inner side",
+      types.effect_declared_at_most(types.EffectRow(["IO", "e"]), types.EffectIO)),
+    check_false("a row as the outer side",
+      types.effect_declared_at_most(types.EffectPure, types.EffectRow(["IO", "e"])))
+  ])

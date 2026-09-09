@@ -833,6 +833,14 @@ only case that escapes. Left as-is: enforcement lives on the declaration-boundar
 adding a second, body-less check path for class signatures is a larger change than the escape
 justifies.
 
+**Update 2026-09-09.** The body-less class signature is now read, though not for rule 9: an
+instance method's declared effect is compared against its class method's, so an instance may
+promise less effect than its class and never more (`docs/effect-subsumption-v0.md` §6.1a,
+spec §7 rule 8). That gap was the same blind spot reached from the instance side — this section
+records that a class signature carries no `EffectReport`, and the missing comparison was the
+consequence. The rule-9 escape above is unchanged: a class declared and never instantiated still
+escapes, because the new check runs at the `instance` declaration.
+
 Full suite green, 51/51 examples, `ir-golden-diff` 0 differences (a check-only change emits no
 codegen), and the compiler bootstraps itself to a fixed point under the corrected rule.
 

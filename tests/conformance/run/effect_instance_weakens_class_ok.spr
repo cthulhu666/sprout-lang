@@ -1,0 +1,59 @@
+module main
+
+# The over-correction guard for docs/effect-subsumption-v0.md §6.1a: every cell of
+# the instance-vs-class table that must ACCEPT, in one program. An instance may
+# promise LESS effect than its class — a call dispatches through the class
+# signature, so a weaker implementation is always within the caller's budget.
+#
+# The reject twins are effect_instance_strengthens_class{,_var}.spr and
+# effect_instance_var_under_pure_class.spr. A check that rejects any arm here has
+# read the relation as equality rather than subsumption.
+
+class Loud a
+  fn boom(x: a) -> Int !{IO}
+
+type A = A
+type B = B
+type C = C
+
+# !{IO} class / !{IO} instance.
+instance Loud A
+  fn boom(x: A) -> Int !{IO} =
+    do
+      print("A")
+      1
+
+# !{IO} class / pure instance — the instance promises less.
+instance Loud B
+  fn boom(x: B) -> Int = 2
+
+class Quiet a
+  fn hush(x: a) -> Int
+
+# pure class / pure instance.
+instance Quiet C
+  fn hush(x: C) -> Int = 3
+
+# An `!{e}` class method: the variable ties to the instance's, and a pure
+# instance under it promises less. The tied arm is also exercised end-to-end by
+# tests/stdlib/test_effect_polymorphic_class_method.spr.
+class Walk f
+  fn wfold(step: b -> a -> b !{e}, init: b, xs: f a) -> b !{e}
+
+instance Walk List
+  fn wfold(step: b -> a -> b !{e}, init: b, xs: List a) -> b !{e} =
+    list_fold(step, init, xs)
+
+class Zeroed a
+  fn zero(x: a) -> Int !{e}
+
+instance Zeroed C
+  fn zero(x: C) -> Int = 7
+
+fn main() -> Unit !{IO} =
+  do
+    print(int_to_string(boom(A)))
+    print(int_to_string(boom(B)))
+    print(int_to_string(hush(C)))
+    print(int_to_string(wfold(\ (acc, x) -> acc + x, 0, [1, 2, 3])))
+    print(int_to_string(zero(C)))

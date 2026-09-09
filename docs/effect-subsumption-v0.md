@@ -1,6 +1,7 @@
 # Effect subsumption at arrow positions (v0)
 
-Status: **Part 0 LANDED 2026-09-09 (§6.0). Parts 1–3 DESIGN, awaiting approval.**
+Status: **Parts 0 and 3 LANDED 2026-09-09 (§6.0, §6.1a). Parts 1–2 DESIGN, awaiting
+approval.**
 Revision 6 (2026-09-09). The nullary type collapse
 landed on master (`docs/nullary-type-collapse-v0.md`, Option A′): the zero-arg boundary
 revision 4 excluded is now **closed** (§6.6), and the new `TThunk` arrow is a second
@@ -18,7 +19,11 @@ not-an-effect-problem, and revision 5 added part 0 at the front.
 | 0 | an unknown effect label | parsed as an effect **variable**, so every rule that exempts variables exempts it | reject a label that is not `IO` | §6.0 |
 | 1 | a function value entering a slot | compared, wrong direction allowed | directional comparison, polarity-annotated | §6.3 |
 | 2 | a peer join (`if`/`match`/elements/operands) | unified, difference swallowed | effect LUB **and GLB by depth parity** | §6.5 |
-| 3 | an instance method vs its class signature | never compared — scheme level | declared-vs-declared comparison | §6.1a |
+| 3 ✅ | an instance method vs its class signature | was never compared — scheme level | declared-vs-declared comparison | §6.1a |
+
+Parts 0 and 3 have landed. Neither was a prerequisite of the other; part 3 went second
+because it needs no part of part 1 — it compares two declarations and touches no
+unification site, so the 36-site polarity audit is not on its path.
 
 Parts 1–3 compare two effects somewhere, which is what makes them one design. **Part 0 was
 a prerequisite, not a peer:** part 1 is unsound without it (§6.0). It landed first and
@@ -32,7 +37,7 @@ land *without* it.
 | 0 | 0 | 0 | every effect annotation in `stdlib/`, `examples/`, `tests/`, `bench/` re-enumerated 2026-09-09: `IO` (2596) and lowercase variables (81); every other spelling sits in a deliberately-ill-formed `type_error` fixture or a compiler comment. Confirmed zero on landing: the whole compiler source passes the new check (stage-3 builds). `!{}` was admitted rather than rejected, so its three signatures are untouched |
 | 1 | 0 | 0 | 2 flagged sites, both the safe direction (§5) |
 | 2 | 0 | 0 | concrete joins only; variable-effect joins unmeasured |
-| 3 | 0 | 0 | one method-level effect annotation exists as of this change: `test_effect_polymorphic_class_method.spr` declares `!{e}` on a class method and its instances alike, which §6.1a's relation accepts — so still zero. Every other class/instance method signature (259 in-tree, 3 downstream, measured 2026-09-08) is pure |
+| 3 | 0 | 0 | **confirmed on landing.** One method-level effect annotation exists: `test_effect_polymorphic_class_method.spr` declares `!{e}` on a class method and its instances alike, which the relation accepts. Every other class/instance method signature (259 in-tree, 3 downstream, measured 2026-09-08) is pure. The census is no longer the evidence: stage 3 builds, which runs the check over the whole compiler source |
 
 Part 2's zero is for the corpus as it stands; the mechanism must still newly reject
 §6.5's currently-legal example, which is a correctness requirement rather than a
@@ -296,7 +301,7 @@ arity 0 — undoing exactly what the nullary fix bought. The measurement in §4 
 `TThunk` and does not cover it; thunk-typed slots did not exist to be measured, so the
 zero there is inherited, not observed.
 
-### 6.1a But an effect can cross without any arrow comparison — BLOCKER
+### 6.1a But an effect can cross without any arrow comparison — LANDED 2026-09-09
 
 The original claim ("one check covers every position") is false. A class method's
 declared effect and its instance's declared effect are compared at the scheme level, not
@@ -318,8 +323,10 @@ happens, so its silence is positive evidence that this boundary is not an arrow
 comparison at all. No effect variable and no higher-order type is involved — this is
 plain typeclass code.
 
-An instance may therefore *strengthen* the effect its class declares, and every caller
-dispatching through the class scheme inherits the class's weaker claim.
+An instance could therefore *strengthen* the effect its class declares, and every caller
+dispatching through the class scheme inherited the class's weaker claim. The rest of this
+section is the design as written before it landed; **As landed** below records what
+differs.
 
 **Mechanism.** A third check, at instance-method checking, comparing two *declared*
 effects — no inference and no unification involved:
@@ -385,6 +392,86 @@ are worth pinning now:
 The remaining cells follow from `instance ⊑ class` with `pure ⊑ e ⊑ IO` read pointwise;
 write the table out in the implementation and keep it total, because §6.0 is the record of
 what an unspecified cell costs.
+
+**As landed.** `types.effect_declared_at_most(inner, outer)` is the relation, and it is
+exactly `pure ⊑ e ⊑ IO`:
+
+| class ↓ / instance → | pure | `!{e}` | `!{IO}` |
+|---|---|---|---|
+| **pure** | accept | reject | reject |
+| **`!{e}`** | accept | accept | reject |
+| **`!{IO}`** | accept | accept | accept |
+
+All nine cells plus both `EffectRow` arms are pinned by
+`tests/stdlib/compiler/test_declared_effect_subsumption.spr`. A row answers **false** on
+either side rather than ranking: ranking one would make it compare equal to itself and
+quietly accept, which is the §6.0 failure shape.
+
+**The cell this section left to the implementing PR was decided by execution, not by
+judgement.** Pure class / `!{e}` instance is not a variable being conservatively refused —
+the instance's variable is unconstrained by a class signature that has no `e` to
+instantiate, so rule 8 checks the body against it and an **IO body satisfies it**. The
+probe compiles, links, and prints under a pure caller, exactly as the concrete arm does;
+it is `tests/conformance/type_error/effect_instance_var_under_pure_class.spr`. The `!{e}`
+class / `!{IO}` instance cell was verified the same way. Neither is an over-correction, and
+neither cost a design round.
+
+**Both bare-name hazards above were confirmed to compile on master before the fix**, so
+the class-qualified key is load-bearing rather than defensive:
+`tests/conformance/run/effect_class_method_name_not_unique_ok.spr` is both shapes in one
+program, and it was A/B'd — with the key degraded to the bare method name, that fixture is
+rejected with `class main.Loud declares pure`, which is `Quiet`'s signature leaking through
+the shared name.
+
+The key is `@classmethod:{class}:{method}`, registered by `register_class_method` beside
+the bare-name binding call sites read. `@`-prefixed keys already cross module boundaries
+unprefixed and survive selective import (`module_loader.is_marker_key`), so an instance in
+one module sees a class declared in another with no extra plumbing. It is deliberately
+**not** removed by `register_fn_decl_scheme` the way `@class:` is: a top-level function
+shadowing a method name says nothing about whether instances of that class must obey it.
+
+**Placement, and the bug that decided it.** The check is a whole-program pass in
+`typecheck_decls_resolved`'s validator chain, beside `check_missing_superclass_instances`
+— it reads the decl list, so it sees every class before it judges any instance.
+
+The first implementation ran at the `ast.InstanceDecl` arm instead, where the class effect
+is whatever the env holds *so far*. An instance declared **above** its class therefore
+found no class effect and was skipped in silence: the program compiled, and
+`pure_user() -> Int` printed `io`. Verified by running before the move, and pinned by
+`tests/conformance/type_error/effect_instance_strengthens_class_before_decl.spr`. The spec
+note says "Declaration order is not significant", so a rejection that depends on source
+order is not the rule it states.
+
+This is §6.0's lesson on a second axis. There the covered set was left open along the
+*field* axis — a walk enumerated every `Decl` variant and still missed a field discarded
+with `_`. Here it was open along the *ordering* axis, and no amount of care about fields
+would have closed it. Reading the whole decl list closes both at once: every instance
+method's declared effect is reachable from an `InstanceDecl` node, and every class is in
+the list regardless of where.
+
+`deriving.sprout` synthesizes eight `InstanceMethodImpl`s and passes `Nothing` for the
+effect slot in all eight, so a derived instance can never trip it.
+
+The class side is read from the `ClassDecl`s in the decl list, with the `@classmethod:` env
+key as the fallback for a class that is *imported* rather than declared — required by
+`docs/compiler-internals.md` §"Whole-program passes: scan `decls` AND read `env`", since
+`module_loader.load_module` typechecks one module's own decls and supplies its imports as
+env schemes with no `ClassDecl` to read.
+
+The key uses the **short** class name (`string.after_last_dot`), like every other
+`@`-marker family — compiler-internals.md §"Env-path type names are SHORT" records that a
+qualified key there breaks lookups silently rather than loudly, and
+`check_missing_superclass_instances` normalizes the same way. On the bundling path the two
+sides agree either way, verified with a two-module package under both a selective import
+and an alias-qualified instance head (`instance quiet.Quiet Q`), each rejected naming
+`mylib.quiet.Quiet`. It is the env path the normalization is for, and that path has no
+direct in-tree witness: no stdlib module declares an instance of an imported class, so
+`just test`'s front-end-agreement gate cannot distinguish the two spellings. The failure
+mode is a skipped check, never a false rejection.
+
+Front-end verdicts are pinned by `tests/stdlib/compiler/test_repl_instance_class_effect.spr`
+against `compile_source_with_cache`, as that section requires — rejects and accepts alike,
+since an over-correction there is invisible to fixtures that all run `--phase check`.
 
 `docs/effect-enforcement-v0.md` §13.7 already records that a class method signature has
 no body and so records no `EffectReport`; this is the same blind spot reached from the
@@ -784,6 +871,12 @@ Reject (`tests/conformance/type_error/`):
 - `effect_io_arrow_second_order` — a callback-of-a-callback, pinning that the polarity
   flip in §6.3 is applied rather than assumed.
 - `effect_instance_strengthens_class` — §6.1a, concrete form. Plus an `!{e}`-class variant.
+  **Landed**, plus two the list did not anticipate:
+  `effect_instance_var_under_pure_class` (the cell §6.1a left open) and
+  `effect_instance_strengthens_class_before_decl` (the ordering bypass, found in
+  self-review). Accept side: `effect_instance_weakens_class_ok` (the five accepting cells
+  in one program) and `effect_class_method_name_not_unique_ok` (both bare-name hazards).
+  Unit: `test_declared_effect_subsumption.spr`, all nine cells plus both row arms.
 - `effect_io_arrow_join_then` and `effect_io_arrow_join_else` — §6.5, **the same program
   with the branches swapped**. Two fixtures, not one: a single one passes under a wrong
   fixed polarity, and the pair is what makes order-independence testable at all.
