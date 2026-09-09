@@ -3,6 +3,7 @@ import stdlib.string as string
 import stdlib.compiler.token as token
 import stdlib.compiler.source as source
 import stdlib.compiler.ast as ast
+import stdlib.compiler.types as types
 
 # ---------------------------------------------------------------------------
 # Parse error
@@ -239,51 +240,88 @@ fn parse_thunk_type(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.T
   | Just (_, i2) ->
       do
         (ret_raw, i3) <- parse_type_expr(tokens, i2)
-        Ok((make_type_thunk(ret_raw, tokens, i3), i3))
+        (thunk, _) <- make_type_thunk(ret_raw, tokens, i3)
+        Ok((thunk, i3))
 
 # The effect-placement rules of make_type_arrow, with no parameter to carry.
-fn make_type_thunk(right_raw: ast.TypeExpr, tokens: Vec token.Token, i: Int) -> ast.TypeExpr =
+fn make_type_thunk(right_raw: ast.TypeExpr, tokens: Vec token.Token,
+                   i: Int) -> Result ParseError (ast.TypeExpr, Int) =
   match right_raw with
-  | ast.TypeEffect base effs -> ast.TypeThunk(base, Just(effs))
+  | ast.TypeEffect base effs -> Ok((ast.TypeThunk(base, Just(effs)), i))
   | _ ->
-      match parse_effect_annotation(tokens, i) with
-      | (Nothing, _) -> ast.TypeThunk(right_raw, Nothing)
-      | (Just effs, _) -> ast.TypeThunk(right_raw, Just(effs))
+      do
+        (effs_maybe, i2) <- parse_effect_annotation(tokens, i)
+        Ok((ast.TypeThunk(right_raw, effs_maybe), i2))
 
 fn parse_type_expr_cont(tokens: Vec token.Token, i: Int, left: ast.TypeExpr) -> Result ParseError (ast.TypeExpr, Int) =
   match match_symbol(tokens, i, "->") with
   | Just (_, i2) ->
       do
         (right_raw, i3) <- parse_type_expr(tokens, i2)
-        Ok((make_type_arrow(left, right_raw, tokens, i3), i3))
+        (arrow, _) <- make_type_arrow(left, right_raw, tokens, i3)
+        Ok((arrow, i3))
   | Nothing ->
-      match parse_effect_annotation(tokens, i) with
-      | (Nothing, i2) -> Ok((left, i2))
-      | (Just effs, i2) -> Ok((ast.TypeEffect(left, effs), i2))
+      do
+        (effs_maybe, i2) <- parse_effect_annotation(tokens, i)
+        Ok((type_expr_with_effect(left, effs_maybe), i2))
 
-fn make_type_arrow(left: ast.TypeExpr, right_raw: ast.TypeExpr, tokens: Vec token.Token, i: Int) -> ast.TypeExpr =
+fn type_expr_with_effect(left: ast.TypeExpr, effs: Maybe (List String)) -> ast.TypeExpr =
+  match effs with
+  | Nothing -> left
+  | Just labels -> ast.TypeEffect(left, labels)
+
+fn make_type_arrow(left: ast.TypeExpr, right_raw: ast.TypeExpr, tokens: Vec token.Token,
+                   i: Int) -> Result ParseError (ast.TypeExpr, Int) =
   match right_raw with
-  | ast.TypeEffect base effs -> ast.TypeArrow(left, base, Just(effs))
+  | ast.TypeEffect base effs -> Ok((ast.TypeArrow(left, base, Just(effs)), i))
   | _ ->
-      match parse_effect_annotation(tokens, i) with
-      | (Nothing, _) -> ast.TypeArrow(left, right_raw, Nothing)
-      | (Just effs, _) -> ast.TypeArrow(left, right_raw, Just(effs))
+      do
+        (effs_maybe, i2) <- parse_effect_annotation(tokens, i)
+        Ok((ast.TypeArrow(left, right_raw, effs_maybe), i2))
 
-fn parse_effect_annotation(tokens: Vec token.Token, i: Int) -> (Maybe (List String), Int) =
+# THE one place a written `!{...}` is read, which is why spec-v0.md §7 rule 9's
+# label check lives here: every position that can carry an annotation — a return
+# type, a parameter, a LAMBDA parameter, a field, a constraint — reaches it, so
+# the covered set is closed by construction rather than enumerated by a walk.
+fn parse_effect_annotation(tokens: Vec token.Token,
+                           i: Int) -> Result ParseError (Maybe (List String), Int) =
   match match_symbol(tokens, i, "!") with
-  | Nothing -> (Nothing, i)
+  | Nothing -> Ok((Nothing, i))
   | Just (_, i2) ->
       match match_symbol(tokens, i2, "{") with
-      | Nothing -> (Nothing, i)
+      | Nothing -> Ok((Nothing, i))
       | Just (_, i3) ->
           match match_symbol(tokens, i3, "}") with
-          | Just (_, i4) -> (Just (Nil), i4)
+          | Just (_, i4) -> Ok((Just (Nil), i4))
           | Nothing ->
               match collect_effect_names(tokens, i3) with
               | (names, i4) ->
                   match match_symbol(tokens, i4, "}") with
-                  | Just (_, i5) -> (Just(names), i5)
-                  | Nothing -> (Nothing, i)
+                  | Just (_, i5) -> checked_effect_names(names, tokens, i3, i5)
+                  | Nothing -> Ok((Nothing, i))
+
+# `IO` or a lowercase variable; anything else is ill-formed rather than an
+# effect variable that would bind against everything (spec-v0.md §7 rule 9).
+fn checked_effect_names(names: List String, tokens: Vec token.Token, at: Int,
+                        end: Int) -> Result ParseError (Maybe (List String), Int) =
+  match first_unknown_effect_label(names) with
+  | Nothing -> Ok((Just(names), end))
+  | Just bad -> Err(make_error(unknown_effect_label_message(bad), tokens, at))
+
+fn first_unknown_effect_label(names: List String) -> Maybe String =
+  match names with
+  | Nil -> Nothing
+  | Cons l rest ->
+      if types.effect_label_is_known(l) || types.effect_label_is_var(l)
+      then first_unknown_effect_label(rest)
+      else Just(l)
+
+# The phrase the conformance fixtures pin is "unknown effect".
+fn unknown_effect_label_message(label: String) -> String =
+  `unknown effect \`!{${label}}\` — spec-v0.md §7 rule 9 admits one concrete`
+    ++ " effect (`!{IO}`), one lowercase effect variable (`!{e}`), or `!{}` for"
+    ++ " purity. An unrecognised label binds like a variable, so IO would cross"
+    ++ " a pure signature unchallenged."
 
 fn collect_effect_names(tokens: Vec token.Token, i: Int) -> (List String, Int) =
   match match_ident(tokens, i) with
@@ -1930,9 +1968,9 @@ fn parse_return_type_cont(tokens: Vec token.Token, i: Int, ty_raw: ast.TypeExpr)
   match ty_raw with
   | ast.TypeEffect base effs -> Ok((Just(base), Just(effs), i))
   | _ ->
-      match parse_effect_annotation(tokens, i) with
-      | (Nothing, i2) -> Ok((Just(ty_raw), Nothing, i2))
-      | (Just effs, i2) -> Ok((Just(ty_raw), Just(effs), i2))
+      do
+        (effs_maybe, i2) <- parse_effect_annotation(tokens, i)
+        Ok((Just(ty_raw), effs_maybe, i2))
 
 fn parse_optional_constraints(tokens: Vec token.Token, i: Int) -> Result ParseError (List ast.TypeConstraint, Int) =
   match match_keyword(tokens, i, "where") with
@@ -2013,15 +2051,18 @@ fn parse_class_method_sig(tokens: Vec token.Token, i: Int) -> Result ParseError 
     (_, i6) <- expected_symbol(")", tokens, i5)
     (_, i7) <- expected_symbol("->", tokens, i6)
     (ret_raw, i8) <- parse_type_expr(tokens, i7)
-    Ok((make_class_method_sig(token.token_text(name_tok), list_reverse(params), ret_raw, tokens, i8), i8))
+    (sig, _) <- make_class_method_sig(token.token_text(name_tok), list_reverse(params), ret_raw, tokens, i8)
+    Ok((sig, i8))
 
-fn make_class_method_sig(name: String, params: List ast.Param, ret_raw: ast.TypeExpr, tokens: Vec token.Token, i: Int) -> ast.ClassMethodSig =
+fn make_class_method_sig(name: String, params: List ast.Param, ret_raw: ast.TypeExpr,
+                         tokens: Vec token.Token,
+                         i: Int) -> Result ParseError (ast.ClassMethodSig, Int) =
   match ret_raw with
-  | ast.TypeEffect base effs -> ast.ClassMethodSig(name, params, base, Just(effs))
+  | ast.TypeEffect base effs -> Ok((ast.ClassMethodSig(name, params, base, Just(effs)), i))
   | _ ->
-      match parse_effect_annotation(tokens, i) with
-      | (Nothing, _) -> ast.ClassMethodSig(name, params, ret_raw, Nothing)
-      | (Just effs, _) -> ast.ClassMethodSig(name, params, ret_raw, Just(effs))
+      do
+        (effs_maybe, i2) <- parse_effect_annotation(tokens, i)
+        Ok((ast.ClassMethodSig(name, params, ret_raw, effs_maybe), i2))
 
 fn collect_class_method_sigs(tokens: Vec token.Token, i: Int, acc: List ast.ClassMethodSig) -> Result ParseError (List ast.ClassMethodSig, Int) =
   if tok_is_keyword(tok_at(tokens, i), "fn") then

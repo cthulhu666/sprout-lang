@@ -896,9 +896,12 @@ and `TypeDecl` constructor payloads. Syntactic because there is nothing to infer
 variable is unbound by construction — and because the declaration is where the author wrote
 it. It walks both annotation carriers, `TypeArrow`'s trailing labels and the standalone
 `TypeEffect` node; a check reading only one would leave the other spelling open. A label counts
-as a variable when it is lowercase-initial, deliberately *not* "anything that is not `IO`": an
-unrecognised uppercase label such as `!{NOPE}` is a separate open item in `BACKLOG.md` and
-reporting it here would misname it.
+as a variable when it is lowercase-initial, deliberately *not* "anything that is not `IO`":
+an unrecognised uppercase label such as `!{NOPE}` is a *different* rule-9 violation and
+reporting it here would misname it. It is rejected in `parser.parse_effect_annotation`,
+the one place a written `!{...}` is read, so it covers positions this walk cannot reach —
+a lambda parameter, and a class method signature, which records no `EffectReport` at all.
+A walk over declarations was tried first and missed both.
 
 Applied on the same path as rule 8's post-pass, and for the same reason — `--phase effects`
 calls `typecheck_typed_with_effects` directly, so the census still enumerates a program this

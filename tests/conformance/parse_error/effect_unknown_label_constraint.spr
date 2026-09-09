@@ -1,0 +1,18 @@
+module main
+
+# A `where` constraint carries type expressions, so an annotation parses there.
+# Missed by an earlier declaration walk, which discarded every constraint slot;
+# the program then failed as "ambiguous type variable", naming the wrong thing.
+#
+# `type_from_ast` drops the effect here, so nothing launders — an unchecked
+# position is the defect, not the leak.
+
+class Enumish a
+  fn ord(v: a) -> Int
+
+instance Enumish Int
+  fn ord(v: Int) -> Int = v
+
+fn tagged(x: a) -> Int where Enumish (a !{NOPE}) = ord(x)
+
+fn main() -> Unit !{IO} = print(int_to_string(tagged(1)))

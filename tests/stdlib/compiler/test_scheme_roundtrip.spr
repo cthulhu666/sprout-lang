@@ -97,6 +97,26 @@ fn main() -> Unit !{IO} =
               Just(sch(Nil, Cons("e", Nil),
                        types.TFunc(types.TConst(types.type_id("Int")), types.TConst(types.type_id("Int")), types.EffectVar("e"), types.OwnConsume),
                        types.EffectPure)))
+    # Regression: a GENERATED effect variable must round-trip. `unifier.fresh_effect`
+    # spells them `$eN` and `--emit-iface` writes them verbatim, so a decoder that
+    # admits only source-level lowercase names rejects the compiler's own output —
+    # `--check-iface` answered INVALID for any effect-polymorphic export.
+    assert_eq(state, "generated effect var round-trips",
+              roundtrip(sch(Nil, Cons("$e30", Nil),
+                            types.TFunc(types.TConst(types.type_id("Int")), types.TConst(types.type_id("Int")), types.EffectVar("$e30"), types.OwnConsume),
+                            types.EffectPure)),
+              Just(sch(Nil, Cons("$e30", Nil),
+                       types.TFunc(types.TConst(types.type_id("Int")), types.TConst(types.type_id("Int")), types.EffectVar("$e30"), types.OwnConsume),
+                       types.EffectPure)))
+    # An interface is a file on disk, so the decoder enforces rule 9's label rule
+    # as well: a hand-edited `(EffectVar NOPE)` must not reintroduce the unknown
+    # label the parser rejects in source. Deliberately asymmetric — the encoder
+    # writes whatever it is given, and the decoder is the boundary.
+    assert_eq(state, "effect var rejects a non-variable name",
+              roundtrip(sch(Nil, Nil,
+                            types.TFunc(types.TConst(types.type_id("Int")), types.TConst(types.type_id("Int")), types.EffectVar("NOPE"), types.OwnConsume),
+                            types.EffectPure)),
+              Nothing)
     assert_eq(state, "effect row multi",
               roundtrip(sch(Nil, Nil,
                             types.TFunc(types.TConst(types.type_id("Int")), types.TConst(types.type_id("Int")), types.EffectRow(Cons("IO", Cons("Async", Nil))), types.OwnConsume),

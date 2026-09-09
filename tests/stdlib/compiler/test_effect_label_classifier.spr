@@ -1,0 +1,31 @@
+import stdlib.test (check_true, check_false, run_suite)
+import stdlib.compiler.types as types
+import stdlib.string as string
+
+# The lexical rule that decides whether `!{x}` is an effect VARIABLE or a
+# concrete label. Rule 9's well-formed-label clause rejects whatever is neither,
+# so a drift here silently widens or narrows what the compiler accepts.
+#
+# The empty name is the case worth pinning: it reaches here from a malformed
+# interface atom, and must not classify as a variable.
+
+fn main() -> Unit !{IO} =
+  run_suite("effect_label_classifier", [
+    check_true("a bare lowercase name is a variable", types.effect_label_is_var("e")),
+    check_true("a longer lowercase name is a variable", types.effect_label_is_var("io")),
+
+    check_false("`IO` is a concrete label, not a variable", types.effect_label_is_var("IO")),
+    check_false("an unrecognised uppercase label is not a variable", types.effect_label_is_var("NOPE")),
+    check_false("the empty name is not a variable", types.effect_label_is_var("")),
+    check_false("a qualified name is not a variable", types.effect_label_is_var("mod.e")),
+    check_false("a leading underscore is not a variable", types.effect_label_is_var("_e")),
+
+    # The classifier the rule above is built on. `is_ascii_alpha` accepts both
+    # cases, so it cannot answer this question.
+    check_true("'a' is lowercase", string.is_ascii_lower('a')),
+    check_true("'z' is lowercase", string.is_ascii_lower('z')),
+    check_false("'A' is not lowercase", string.is_ascii_lower('A')),
+    check_false("'Z' is not lowercase", string.is_ascii_lower('Z')),
+    check_false("a digit is not lowercase", string.is_ascii_lower('0')),
+    check_false("'_' is not lowercase", string.is_ascii_lower('_'))
+  ])

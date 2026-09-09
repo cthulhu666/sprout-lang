@@ -1,0 +1,19 @@
+module main
+
+# Regression: a lambda parameter's annotation is a position no declaration walk
+# reaches, and `!{NOPE}` there parsed as an effect variable — this exact program
+# compiled and printed `io` three times under `pure_map`'s pure signature.
+#
+# The reason the check moved to the parser: every annotation flows through one
+# function there, so the covered set is closed by construction rather than being
+# whatever the walk happened to enumerate.
+
+fn sneak(n: Int) -> Int !{IO} =
+  do
+    print("io")
+    n + 1
+
+fn pure_map(xs: List Int) -> List Int =
+  (\ (g: Int -> Int !{NOPE}) -> list_map(g, xs))(sneak)
+
+fn main() -> Unit !{IO} = print(int_to_string(list_length(pure_map([1, 2, 3]))))

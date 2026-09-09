@@ -1,0 +1,17 @@
+module main
+
+# The hole the annotation opens, not just the annotation: `!{NOPE}` becomes an
+# effect variable, so it binds against `list_map`'s pure callback slot and the
+# IO runs under `pure_map`'s pure signature. Verified printing before the fix.
+#
+# Separate fixture from effect_unknown_label.spr on purpose: a change that only
+# warned on the annotation would pass that one and leave this program running.
+
+fn sneak(n: Int) -> Int !{NOPE} =
+  do
+    print("io")
+    n + 1
+
+fn pure_map(xs: List Int) -> List Int = list_map(sneak, xs)
+
+fn main() -> Unit !{IO} = print(int_to_string(list_length(pure_map([1, 2, 3]))))

@@ -1,0 +1,23 @@
+module main
+
+# `!{}` spells purity explicitly, per spec-v0.md §7 rule 9. It is the form
+# docs/effect-system-v0-plan.md §15 made canonical — an omitted annotation is
+# sugar for it — and its meaning survives any future effect alphabet, since the
+# empty set is pure however many labels exist.
+#
+# The ACCEPT twin of effect_unknown_label.spr: the same validator decides both,
+# and a check written from rule 9's three-form list alone rejects this.
+
+fn explicit(n: Int) -> Int !{} = n + 1
+
+fn omitted(n: Int) -> Int = n + 1
+
+# The two spellings must agree where it is observable: both meet `list_map`'s
+# pure callback slot.
+fn both_map(xs: List Int) -> List Int = list_map(explicit, list_map(omitted, xs))
+
+fn main() -> Unit !{IO} =
+  do
+    print(int_to_string(explicit(1)))
+    print(int_to_string(list_length(both_map([1, 2, 3]))))
+    print("done")

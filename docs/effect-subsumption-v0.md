@@ -1,6 +1,7 @@
 # Effect subsumption at arrow positions (v0)
 
-Status: **DESIGN, awaiting approval.** Revision 6 (2026-09-09). The nullary type collapse
+Status: **Part 0 LANDED 2026-09-09 (§6.0). Parts 1–3 DESIGN, awaiting approval.**
+Revision 6 (2026-09-09). The nullary type collapse
 landed on master (`docs/nullary-type-collapse-v0.md`, Option A′): the zero-arg boundary
 revision 4 excluded is now **closed** (§6.6), and the new `TThunk` arrow is a second
 comparison site part 1 must cover (§6.1). Revision 5 added part 0 after a review found
@@ -19,14 +20,16 @@ not-an-effect-problem, and revision 5 added part 0 at the front.
 | 2 | a peer join (`if`/`match`/elements/operands) | unified, difference swallowed | effect LUB **and GLB by depth parity** | §6.5 |
 | 3 | an instance method vs its class signature | never compared — scheme level | declared-vs-declared comparison | §6.1a |
 
-Parts 1–3 compare two effects somewhere, which is what makes them one design. **Part 0 is
-a prerequisite, not a peer:** part 1 is unsound without it (§6.0), so they land together.
+Parts 1–3 compare two effects somewhere, which is what makes them one design. **Part 0 was
+a prerequisite, not a peer:** part 1 is unsound without it (§6.0). It landed first and
+alone, which satisfies that constraint — the requirement was only that part 1 must not
+land *without* it.
 
 **Migration cost, measured for all four:**
 
 | part | in-tree | downstream | note |
 |---|---|---|---|
-| 0 | 0 | 0 | every effect annotation in `stdlib/`, `examples/`, `tests/`, `bench/` re-enumerated 2026-09-09: `IO` (2596) and lowercase variables (81); every other spelling sits in a deliberately-ill-formed `type_error` fixture or a compiler comment. Open question `!{}`, written in three tests — decide with this change |
+| 0 | 0 | 0 | every effect annotation in `stdlib/`, `examples/`, `tests/`, `bench/` re-enumerated 2026-09-09: `IO` (2596) and lowercase variables (81); every other spelling sits in a deliberately-ill-formed `type_error` fixture or a compiler comment. Confirmed zero on landing: the whole compiler source passes the new check (stage-3 builds). `!{}` was admitted rather than rejected, so its three signatures are untouched |
 | 1 | 0 | 0 | 2 flagged sites, both the safe direction (§5) |
 | 2 | 0 | 0 | concrete joins only; variable-effect joins unmeasured |
 | 3 | 0 | 0 | one method-level effect annotation exists as of this change: `test_effect_polymorphic_class_method.spr` declares `!{e}` on a class method and its instances alike, which §6.1a's relation accepts — so still zero. Every other class/instance method signature (259 in-tree, 3 downstream, measured 2026-09-08) is pure |
@@ -198,7 +201,39 @@ for the permissive half.
 
 ## 6. Implementation overview (for approval)
 
-### 6.0 An unknown effect label is a variable, which bypasses part 1 — PREREQUISITE
+### 6.0 An unknown effect label is a variable, which bypasses part 1 — LANDED 2026-09-09
+
+**Status: implemented.** `!{}` is admitted as an explicit spelling of purity — the form
+`docs/effect-system-v0-plan.md` §15 already made canonical, with omission as its sugar —
+so rule 9 now lists four annotation forms and the three in-tree `!{}` signatures stand
+unchanged. Spec §7 rule 9 and property 3 carry the rule; parts 1–3 below are unaffected
+and still awaiting approval.
+
+**The rejection belongs in the PARSER, and two attempts at a declaration walk are why.**
+`parser.parse_effect_annotation` is the one place a written `!{...}` is read, so the
+covered set is closed by construction. A walk over `ast.Decl` was tried first and missed
+two positions in succession — a `where` constraint, found in review, and then a **lambda
+parameter**, found by a code review after the first version was pushed. The lambda case
+compiled and printed `io` three times under a pure signature: the very laundering this
+part claims to close, still open. Enumerating every `Decl` *variant* is not the same as
+reading every *field*, and the exhaustiveness checker cannot see a field discarded with `_`.
+
+Section §6.0's stated mechanism was also stale in two ways:
+
+- **"Two functions build the `Effect`, and the rejection goes in both."** They now both
+  delegate to one `types.effect_from_labels`, which has no error channel and no position —
+  so the check could not live there either way.
+- **The interface half is real, and its first version was wrong.**
+  `iface_codec.decode_effect_var_at` must admit a *well-formed variable name*, not a
+  lowercase one: a generalized scheme carries `$eN` from `unifier.fresh_effect`, and
+  `--emit-iface` writes it verbatim, so a lowercase-only guard made the compiler's own
+  output fail `--check-iface`. It was green in-tree only because no stdlib module exports
+  an effect-polymorphic function — of 99 interfaces the encoded effects are 18257
+  `EffectPure` and 1435 `EffectIO`, with zero `EffectVar`. That is corpus evidence, and
+  corpus evidence is exactly what this document warns against elsewhere.
+
+---
+
 
 Found in review round 5. `!{NOPE}` type-checks, and it does not become an inert label — it
 becomes an effect **variable**:

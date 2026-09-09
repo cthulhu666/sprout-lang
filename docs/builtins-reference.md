@@ -854,6 +854,7 @@ String module (in `stdlib/string.sprout`):
 - `is_ascii_whitespace(ch: Char) -> Bool`
 - `is_ascii_digit(ch: Char) -> Bool`
 - `is_ascii_alpha(ch: Char) -> Bool`
+- `is_ascii_lower(ch: Char) -> Bool` — case-sensitive, which `is_ascii_alpha` cannot express
 - `is_ascii_alnum(ch: Char) -> Bool`
 - `is_ident_start(ch: Char) -> Bool`
 - `is_ident_continue(ch: Char) -> Bool`
