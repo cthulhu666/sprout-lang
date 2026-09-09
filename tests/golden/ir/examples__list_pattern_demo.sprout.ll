@@ -141,28 +141,6 @@ declare i64 @ref_write(i64, i64)
 @.cname.18 = private unnamed_addr constant [35 x i8] c"examples.list_pattern_demo.Unknown\00"
 @.cfkinds.18 = private unnamed_addr constant [2 x i8] c"p\00"
 
-define i64 @filter(i64 %p$pred, i64 %p$xs, i64 %p$__tc_Filterable_0_filter_values, i64 %p$__tc_Filterable_0_filter_map_values, i64 %p$__tc_Filterable_0_partition_values) {
-entry:
-  %t$1 = alloca i64
-  store i64 %p$xs, ptr %t$1
-  %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
-  %t$3 = alloca i64
-  store i64 %p$pred, ptr %t$3
-  %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
-  %t$5 = alloca i64
-  store i64 %p$__tc_Filterable_0_partition_values, ptr %t$5
-  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
-  %t$7 = alloca i64
-  store i64 %p$__tc_Filterable_0_filter_values, ptr %t$7
-  %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
-  %t$9 = alloca i64
-  store i64 %p$__tc_Filterable_0_filter_map_values, ptr %t$9
-  %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
-  %t$0 = call i64 @__cm_Filterable_filter_values(i64 %p$pred, i64 %p$xs, i64 %p$__tc_Filterable_0_filter_values, i64 %p$__tc_Filterable_0_filter_map_values, i64 %p$__tc_Filterable_0_partition_values)
-  %t$11 = call i64 @sprout_gc_pop_roots(i64 5)
-  ret i64 %t$0
-}
-
 define i64 @examples.list_pattern_demo.parse_args(i64 %p$args) {
 entry:
   %t$0 = call i64 @sprout_tag(i64 %p$args)
@@ -912,15 +890,6 @@ entry:
   %t$67$ptr = inttoptr i64 %t$66 to ptr
   %t$67 = call i64 @print_str(ptr %t$67$ptr)
   ret i64 %t$67
-}
-
-define i64 @__cm_Filterable_filter_values(i64 %p$pred, i64 %p$xs, i64 %p$__tc_Filterable_0_filter_values, i64 %p$__tc_Filterable_0_filter_map_values, i64 %p$__tc_Filterable_0_partition_values) {
-entry:
-  call void @sprout_closure_arity_check(i64 %p$__tc_Filterable_0_filter_values, i64 2)
-  %t$0$env_ptr = inttoptr i64 %p$__tc_Filterable_0_filter_values to ptr
-  %t$0$code = load ptr, ptr %t$0$env_ptr
-  %t$0 = call i64 (i64, i64, i64) %t$0$code(i64 %p$__tc_Filterable_0_filter_values, i64 %p$pred, i64 %p$xs)
-  ret i64 %t$0
 }
 
 define i64 @__tc_Semigroup_String_append(i64 %p$left, i64 %p$right) {

@@ -14,11 +14,13 @@ import stdlib.compiler.dce as dce
 # The governing asymmetry, which most of these tests exist to pin: deleting a
 # LIVE declaration is catastrophic (a link failure at best, a silently missing
 # instance at worst), while keeping a dead one merely wastes lines. So the pass
-# over-approximates on purpose — it collects every `TVar` name it sees WITHOUT
-# tracking shadowing, and it keeps whole categories (externs, type decls) rather
-# than reasoning about them. `keeps_a_shadowed_name_conservatively` below asserts
-# that over-approximation directly, so a later "optimisation" that makes the pass
-# precise has to delete a test to do it.
+# keeps whole categories — externs, type declarations, a fragment with no entry —
+# rather than reasoning about them, and roots by name the two callees that codegen
+# names with a string literal.
+#
+# Shadowing is the one place it does reason: a name a binder has taken is a local,
+# not an edge. Both directions are pinned below, since a binder that fails to
+# shadow costs lines while one that shadows too far deletes a live declaration.
 
 fn pos() -> source.SourcePos = source.SourcePos(index = 0, line = 0, column = 0)
 
@@ -40,6 +42,15 @@ fn calls(callees: List String) -> typed_ast.TypedExpr =
   | Cons c rest -> typed_ast.TCall(var(c), Cons(calls(rest), Nil), int_ty(), pos())
 
 fn leaf(name: String) -> typed_ast.TypedDecl = fn_calling(name, Nil)
+
+# `main` with a hand-built body, for the fixtures whose point is that shape.
+fn main_returning(body: typed_ast.TypedExpr) -> typed_ast.TypedDecl =
+  typed_ast.TFnDecl("main", Nil, Nothing, Nothing, Nil, body)
+
+fn lam(params: List String, body: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
+  typed_ast.TLambda(list_map(named_param, params), body, int_ty(), pos())
+
+fn named_param(n: String) -> ast.Param = ast.Param(n, Nothing, ast.ModeDefault)
 
 fn prog(decls: List typed_ast.TypedDecl) -> typed_ast.TypedProgram =
   typed_ast.TypedProgram(decls)
@@ -118,12 +129,6 @@ fn main() -> Unit !{IO} =
       prog([fn_calling("main", []),
             typed_ast.TPassThrough(ast.WrapDecl("Meters", ast.TypeName("Int"), pos()))])))
 
-    # 9. The deliberate over-approximation. `helper` is referenced only by a name
-    #    that a shadow-aware pass would resolve to a local binding; this pass
-    #    keeps it anyway. Asserting the conservative behaviour makes the safety
-    #    margin a fact of the test suite rather than an implementation accident.
-    shadowed = kept([fn_calling("main", ["helper"]), leaf("helper")])
-
     # 10. REGRESSION. A fragment with no entry point must come back untouched.
     #     `ir_pipeline.compile_program_streaming` also translates snippets — the
     #     differential rooting tests hand it three functions and no `main` — and
@@ -144,6 +149,50 @@ fn main() -> Unit !{IO} =
     appended = kept([typed_ast.TFnDecl("main", Nil, Nothing, Nothing, Nil,
                        typed_ast.TBinary("++", lit(), lit(), int_ty(), pos())),
                      leaf("list_append"), leaf("unused")])
+
+    # 13. A lambda parameter named `helper` shadows the top-level `helper`, so
+    #     the body's `TVar` is a local and the declaration has no caller.
+    lam_shadow = kept([main_returning(lam(["helper"], var("helper"))),
+                       leaf("helper")])
+
+    # 14. The control for 13: a parameter that shadows something ELSE leaves the
+    #     reference to `helper` intact.
+    lam_other = kept([main_returning(lam(["other"], var("helper"))),
+                      leaf("helper")])
+
+    # 15. A match binder shadows for the width of its arm only — the scrutinee
+    #     is outside it.
+    arm_shadow = kept([main_returning(
+                         typed_ast.TMatch(lit(),
+                           [typed_ast.TypedMatchBranch(
+                              ast.VarPattern("helper", pos()), var("helper"))],
+                           int_ty(), pos())),
+                       leaf("helper")])
+
+    # 16. The control for 15: the scrutinee is evaluated before the binder
+    #     exists, so a reference there is a real edge.
+    scrut_seen = kept([main_returning(
+                         typed_ast.TMatch(var("helper"),
+                           [typed_ast.TypedMatchBranch(
+                              ast.VarPattern("helper", pos()), lit())],
+                           int_ty(), pos())),
+                       leaf("helper")])
+
+    # 17. A do-binding scopes over the steps that FOLLOW it.
+    do_shadow = kept([main_returning(
+                        typed_ast.TDo([typed_ast.TDoLetStep("helper", lit()),
+                                       typed_ast.TDoExprStep(var("helper"))],
+                                      int_ty(), pos())),
+                      leaf("helper")])
+
+    # 18. The control for 17, and the arm most easily written backwards: a
+    #     binding's own right-hand side is outside its scope.
+    do_rhs_seen = kept([main_returning(
+                          typed_ast.TDo([typed_ast.TDoLetStep("helper",
+                                                              var("helper")),
+                                         typed_ast.TDoExprStep(lit())],
+                                        int_ty(), pos())),
+                        leaf("helper")])
   in run_suite("dce_reachable", [
     check_true("keeps a called function", has_name("used", basic)),
     check_true("keeps the entry point", has_name("main", basic)),
@@ -169,9 +218,6 @@ fn main() -> Unit !{IO} =
 
     check_true("type declarations are never pruned", types_kept == 2),
 
-    check_true("over-approximates rather than resolving shadowing",
-      has_name("helper", shadowed)),
-
     check_true("a fragment with no entry point is left whole (a)", has_name("mkbox", fragment)),
     check_true("a fragment with no entry point is left whole (b)", has_name("unbox", fragment)),
 
@@ -181,5 +227,18 @@ fn main() -> Unit !{IO} =
 
     check_true("`++` roots the synthesized list_append callee",
       has_name("list_append", appended)),
-    check_true("rooting list_append does not disable pruning",! has_name ("unused", appended))
+    check_true("rooting list_append does not disable pruning",! has_name ("unused", appended)),
+
+    check_true("a lambda parameter shadows the name it reuses",
+      ! has_name ("helper", lam_shadow)),
+    check_true("a parameter of another name shadows nothing",
+      has_name("helper", lam_other)),
+    check_true("a match binder shadows inside its arm",
+      ! has_name ("helper", arm_shadow)),
+    check_true("a match binder does not reach the scrutinee",
+      has_name("helper", scrut_seen)),
+    check_true("a do-binding shadows the steps after it",
+      ! has_name ("helper", do_shadow)),
+    check_true("a do-binding does not shadow its own right-hand side",
+      has_name("helper", do_rhs_seen))
   ])
