@@ -889,6 +889,15 @@ Legend:
   would make the null-fill structurally unreachable — remain parked as M3b; see
   `docs/dict-resolution-north-star-plan-2026-06-30.md` for the sentinel-flow map and why M4/M5/M3b
   were parked.
+- [ ] `P1` **An ambiguous class-method reference is diagnosed at codegen, with no source location.**
+  The three `tests/conformance/emit_error/ambiguous_forwarded_*.spr` shapes pass `--phase check`
+  and then fail at emit with `ast_to_ir: unbound variable '__eta_unresolved_<Class>_<method>'` —
+  a compiler-internal sentinel, no line, no column. So the LSP and every check-phase gate accept
+  the program and the user learns at build time. Two of the shapes are unresolvable identity
+  (see below); the cross-class one is genuinely ambiguous source and wants a real
+  "ambiguous method reference: `blank` is declared by both `Blank` and `Sizer`" at check time,
+  with a way to say which — Sprout has no qualified `Blank::blank` form. Ambiguity detection
+  belongs where constraints are known, not at slot-selection time.
 - [ ] `P2` **An eta'd class method under two same-class constraints is rejected, not resolved.**
   The occurrence's type is a fresh tvar that no `@eta_fwd` marker names, so lowering cannot tell
   which constraint it belongs to; it now declines instead of taking the first slot, which was

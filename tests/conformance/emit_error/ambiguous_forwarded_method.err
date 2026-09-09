@@ -1,1 +1,1 @@
-ast_to_ir: unbound variable '__eta_unresolved_Make_from_int'
+ERROR: ast_to_ir: unbound variable '__eta_unresolved_Make_from_int'

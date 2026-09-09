@@ -1,0 +1,34 @@
+module main
+
+# Two constrained classes declaring the same method name. `blank` at type `a` is
+# supplied by both, and no type distinguishes them, so the reference is genuinely
+# ambiguous — Sprout has no qualified `Blank::blank` form to say which.
+#
+# It used to resolve by scanning forwarded slots, which a Dict returns in KEY order:
+# the answer was alphabetical. Renaming `Blank` to `Zed` — nothing else — made the
+# same program run `Sizer`'s instance instead, 106 where 7 was intended.
+#
+# Rejected at emit rather than at check, with a compiler-internal message; a located
+# "ambiguous method reference" diagnostic is the wanted shape (`BACKLOG.md` §7.5).
+
+class Blank t
+  fn blank() -> t
+  fn combine(x: t, y: t) -> t
+
+class Sizer t
+  fn blank() -> t
+  fn size(x: t) -> Int
+
+instance Blank Int
+  fn blank() -> Int = 0
+  fn combine(x: Int, y: Int) -> Int = x + y
+
+instance Sizer Int
+  fn blank() -> Int = 99
+  fn size(x: Int) -> Int = x
+
+fn run_thunk(th: () -> a) -> a = th()
+
+fn seeded(x: a) -> a where Blank a, Sizer a = combine(x, run_thunk(blank))
+
+fn main() -> Unit !{IO} = print(int_to_string(seeded(7)))
