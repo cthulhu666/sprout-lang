@@ -1,0 +1,18 @@
+module main
+
+# The position rule 9's other clauses cannot reach. A class method has no body,
+# so no EffectReport is recorded for it — stated in
+# effect_two_variables_instance.spr, where the same escape is harmless because
+# every instance of such a class is rejected anyway.
+#
+# Here it is not harmless: the instance is ordinary and pure, so nothing else
+# rejects, and `calc`'s class scheme carries an unconstrained effect variable
+# that every dispatching caller inherits.
+
+class Quiet a
+  fn calc(x: a) -> Int !{NOPE}
+
+instance Quiet Int
+  fn calc(x: Int) -> Int = x + 1
+
+fn main() -> Unit !{IO} = print(int_to_string(calc(1)))

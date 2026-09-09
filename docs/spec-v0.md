@@ -1778,11 +1778,23 @@ Effect note for v0:
    variable on every effect-polymorphic parameter instead.
 
    An annotation is a single concrete effect (`!{IO}`), a single effect variable
-   (`!{e}`), or omitted for purity. A multi-label row — `!{IO, e}`, `!{a, b}` —
-   is not a form this section defines and is rejected wherever it is written,
-   including on a parameter's arrow. Note `!{IO, e}` names only one variable and
-   so satisfies the singleton limit above; it is rejected under this sentence
-   rather than that one.
+   (`!{e}`), the empty row `!{}`, or omitted. The last two both mean purity:
+   `!{}` spells it explicitly and an omitted annotation is sugar for it. A
+   multi-label row — `!{IO, e}`, `!{a, b}` — is not a form this section defines
+   and is rejected wherever it is written, including on a parameter's arrow.
+   Note `!{IO, e}` names only one variable and so satisfies the singleton limit
+   above; it is rejected under this sentence rather than that one.
+
+   **A label that is not a concrete effect this version defines is ill-formed**,
+   not an effect variable. `IO` is the only such label in v0. A lowercase name is
+   a variable; anything else — `!{NOPE}` — is rejected **where the annotation is
+   read**, which is one place, so every position that can carry one is covered:
+   a return type, a parameter, a *lambda* parameter, a record field, a
+   constructor payload, an alias, a `where` constraint and a class method
+   signature alike. A decoded module interface is checked separately, at its own
+   boundary. Without this the rule above has a one-token opt-out: an unrecognised
+   label would parse as a variable, bind against everything, and carry IO through
+   a pure signature unchallenged.
 
    **An annotation attaches to the innermost arrow, and parentheses do not move
    it.** In `a -> b -> C !{IO}` the effect belongs to `b -> C`, and
@@ -1920,18 +1932,19 @@ Effect note for v0:
 > >    §5.2 prohibits it normatively and nothing checks it. `--phase effects` does not
 > >    enumerate top-level `let`s, so the census does not see it either.
 > >
-> > Adjacent rather than a boundary: an **unrecognised effect label** parses as
-> > an effect *variable*, so `!{NOPE}` type-checks and laundering through it is accepted —
-> > rule 9 admits no such form, and enforcement has not caught up with the rule.
+> > Adjacent rather than a boundary, and **closed 2026-09-09**: an unrecognised effect
+> > label used to parse as an effect *variable*, so `!{NOPE}` type-checked and laundered
+> > through the variable exemption. Rule 9 now rejects it where the annotation is read, in
+> > every position one may be written.
 > >
 > > A fifth boundary escaped when this correction was first written (2026-09-07): a
 > > zero-arg call on a local callee, `let t = io_thunk in t()`. The nullary type collapse
 > > fix closed it — a zero-parameter function now has a `() -> T` arrow that carries its
 > > effect — and the probe is rejected under rule 8 (`docs/nullary-type-collapse-v0.md`).
 > >
-> > 1, 2, 3 and the label gap are `docs/effect-subsumption-v0.md`, which carries the
-> > replacement text for properties 2 and 3. 4 couples to the value restriction and is
-> > tracked in `BACKLOG.md`.
+> > 1, 2 and 3 are `docs/effect-subsumption-v0.md`, which carries the replacement text for
+> > property 2; the label gap was that document's part 0 and has landed. 4 couples to the
+> > value restriction and is tracked in `BACKLOG.md`.
 > >
 > > Until those land, the enforced guarantee is narrow and is best stated negatively: a
 > > declaration is checked against **the effects its own body's calls infer**, and an
@@ -1945,9 +1958,16 @@ Effect note for v0:
 >   functions…") is rule 8 stated operationally — a body calling an `!{IO}` function infers
 >   `!{IO}`, which a pure signature does not admit. Its escape clause is honoured: where the
 >   body's effect resolves to a variable rather than to `!{IO}`, the declaration is accepted.
-> - **9** is the singleton rule: a signature may name **at most one** effect variable, and
->   may not write a multi-label row. It is checked against the **declared signature**, never
->   against what the body infers. That distinction is normative, because the two questions
+> - **9** has three clauses and three checks, all read from the **declared signature** and
+>   never from what the body infers. The *singleton* clause — a signature may name at most
+>   one effect variable, and may not write a multi-label row. The *stored-position* clause —
+>   an effect variable may not sit in a record field, constructor payload or `wrap` body.
+>   And the *well-formed-label* clause — a label that is not a concrete effect this version
+>   defines is ill-formed rather than a variable. Unlike the other two it is decided where
+>   the annotation is READ rather than from a declared signature, so it covers positions no
+>   declaration walk reaches: a lambda parameter, and a class method signature, which
+>   records no effect report at all. The signature-not-body distinction is normative for the
+>   first two clauses, because the two questions
 >   have different answers in both directions: a signature naming two variables whose body
 >   never combines them infers no row and would pass an inference-side check, while two
 >   fresh instantiations of a *single* variable — `fn f(n: Int) -> Unit !{e}` called twice —
@@ -1969,6 +1989,11 @@ Effect note for v0:
 >    violated until instantiation; where the checker does not know, it accepts. Every
 >    imprecision in effect inference must therefore fail towards accepting a program, not
 >    rejecting one.
+>
+>    This licenses nothing about which labels may be *written*. An effect label that is
+>    not `IO` is ill-formed (rule 9) and is rejected where the annotation is read —
+>    otherwise the acceptance above is an opt-out, since an unrecognised label would
+>    parse as a variable and inherit it.
 >
 > Enforcement runs as a pass over the whole program rather than aborting at the first
 > offending declaration, so a codebase adopting it sees every gap in one compile.

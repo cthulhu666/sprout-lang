@@ -19,8 +19,8 @@ Legend:
 - [ ] `P1` **A declared effect is not enforced once a function is passed as a VALUE.**
   `fn pure_map(xs: List Int) -> List Int = list_map(shout, xs)` runs IO and reports
   `declared pure, inferred pure`; an instance may also strengthen its class's effect, and a
-  pure declaration may call an `!{e}` parameter. Four parts including unknown-label rejection
-  below; migration cost measured zero on 127 in-tree + 199 downstream files.
+  pure declaration may call an `!{e}` parameter. Part 0 (unknown-label rejection) has landed;
+  parts 1–3 remain. Migration cost measured zero on 127 in-tree + 199 downstream files.
   `docs/effect-subsumption-v0.md`.
 - [ ] `P2` **`Foldable`'s `step` slot should be effect-polymorphic; `cond` must not be.** The policy
   in `docs/effect-polymorphism-policy-v0.md` admits `!{e}` where the contract pins order and
@@ -32,16 +32,11 @@ Legend:
   first step is extending the census, not writing the check (215 top-level `let`s in tree). Couples
   to the value restriction at the same line (`docs/fundamentals-code-review-handoff-2026-07-03.md`
   §W3/§W6).
-- [ ] `P1` **An unknown effect label is accepted as a VARIABLE — `!{NOPE}` type-checks and
-  launders IO.** Not inert, as this entry said until 2026-09-08: `!{NOPE}` becomes `$e30`, so it
-  binds against anything and `list_map(sneak, xs)` runs IO under a pure signature. Reject a label
-  that is neither `IO` nor a lowercase variable; decide `!{}` in the same change. **Lands with
-  effect subsumption as its part 0** — that design's variable-exempt arm is unsound without it.
-  `docs/effect-subsumption-v0.md` §6.0.
 - [ ] `P3` **A trailing effect annotation on a non-arrow type is discarded** — `Int !{IO}` has no
   effect slot. §7 rule 9 now records that it carries no meaning; rejecting it outright would be
-  more honest, and it touches the same constructor as the `!{NOPE}` check above, so **decide the two
-  together**. Verified by execution; fixtures under
+  more honest. The unknown-label check already reaches this position (`Int !{NOPE}` is rejected),
+  so what remains is deciding whether a *well-formed* label is an error here. Verified by
+  execution; fixtures under
   `tests/conformance/{type_error,run,parse_error}/effect_paren_arrow_annotation*`.
 - [ ] `P3` **Return position cannot spell "returns an effectful function."**
   `parser.parse_return_type_cont` splits `-> (Int -> Int) !{IO}` into return type `Int -> Int` plus

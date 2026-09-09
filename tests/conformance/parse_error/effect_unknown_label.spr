@@ -1,0 +1,13 @@
+module main
+
+# spec-v0.md §7 rule 9: an annotation is one concrete effect (`!{IO}`), one
+# effect variable (`!{e}`), `!{}`, or omitted. `NOPE` is none of those.
+#
+# It parsed as an effect VARIABLE, which is why this is a hole rather than a
+# wart: every rule that exempts variables exempted it. Rejecting the annotation
+# and closing the laundering are separate claims — the latter is
+# effect_unknown_label_launders.spr.
+
+fn plain(n: Int) -> Int !{NOPE} = n + 1
+
+fn main() -> Unit !{IO} = print(int_to_string(plain(1)))

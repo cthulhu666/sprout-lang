@@ -1,0 +1,48 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.compiler as compiler
+import stdlib.compiler.bundler as bundler
+import stdlib.compiler.source as source
+import stdlib.env as env
+
+# Rule 9's unknown-label check is a decl-scan, the shape compiler-internals.md
+# §"Whole-program passes" warns can see an empty program on this front end. It
+# bundles now, so it does not — these pin the behaviour, not that mechanism.
+#
+# The accept cases belong here too: an over-correction on this path would be
+# invisible to the conformance fixtures, which all run `--phase check`.
+
+fn is_compile_ok(r: compiler.CompileResult) -> Bool =
+  match r with
+  | compiler.CompileOk _ -> true
+  | compiler.CompileFail _ -> false
+
+fn session(body: String) -> String = `module app.session\n\n${body}\n`
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    match env.get("SPROUT_STDLIB_ROOT") with
+    # Loud, not silent: a skipped run reports "0 passed", which reads as green.
+    | Nothing -> print("SKIP: SPROUT_STDLIB_ROOT unset — no assertion ran")
+    | Just stdlib_root ->
+        do
+          cache <- bundler.new_load_env()
+          r_bad <- compiler.compile_source_with_cache(
+            session("fn plain(n: Int) -> Int !{NOPE} = n + 1"),
+            source.StdlibRoot(stdlib_root), cache)
+          assert_true(state, "REPL: unknown effect label rejected", is_compile_ok(r_bad) == false)
+          # The position no report-based rule reaches, checked on this front end too.
+          r_class <- compiler.compile_source_with_cache(
+            session("class Quiet a\n  fn calc(x: a) -> Int !{NOPE}"),
+            source.StdlibRoot(stdlib_root), cache)
+          assert_true(state, "REPL: unknown label on a class method rejected", is_compile_ok(r_class) == false)
+          r_empty <- compiler.compile_source_with_cache(
+            session("fn plain(n: Int) -> Int !{} = n + 1"),
+            source.StdlibRoot(stdlib_root), cache)
+          assert_true(state, "REPL: empty row accepted as purity", is_compile_ok(r_empty))
+          r_var <- compiler.compile_source_with_cache(
+            session("fn hof(f: Int -> Int !{e}, n: Int) -> Int !{e} = f(n)"),
+            source.StdlibRoot(stdlib_root), cache)
+          assert_true(state, "REPL: effect variable still accepted", is_compile_ok(r_var))
+    summary(state)

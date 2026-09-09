@@ -302,9 +302,9 @@ fn first_effect_var(ts: List ast.TypeExpr) -> Maybe String =
       | Just v -> Just(v)
       | Nothing -> first_effect_var(rest)
 
-# Both annotation carriers are walked: `TypeArrow`'s trailing labels and the
-# standalone `TypeEffect` node. A check that read only one would leave the other
-# spelling open, and the parser produces both.
+# Both annotation carriers are walked: `TypeArrow`/`TypeThunk` trailing labels
+# and the standalone `TypeEffect` node. A check that read only one would leave
+# the other spelling open, and the parser produces both.
 fn effect_var_in_type(t: ast.TypeExpr) -> Maybe String =
   match t with
   | ast.TypeName _ -> Nothing
@@ -328,23 +328,14 @@ fn arrow_labels(labels: Maybe (List String)) -> List String =
   | Nothing -> Nil
   | Just ls -> ls
 
-# Lowercase-initial is what distinguishes a variable from a label. Deliberately
-# NOT "anything that is not IO": an unrecognised uppercase label like `!{NOPE}`
-# is a separate open question, and reporting it here would misname it.
+# Lowercase-initial is what distinguishes a variable from a label. An
+# unrecognised label never reaches here: the parser rejects it where the
+# annotation is read (spec-v0.md §7 rule 9).
 fn effect_var_label(labels: List String) -> Maybe String =
   match labels with
   | Nil -> Nothing
   | Cons l rest ->
-      if effect_label_is_var(l) then Just(l) else effect_var_label(rest)
-
-fn effect_label_is_var(name: String) -> Bool =
-  str_find(name, ".") == -1 &&
-  (c == "a" || c == "b" || c == "c" || c == "d" || c == "e" ||
-   c == "f" || c == "g" || c == "h" || c == "i" || c == "j" ||
-   c == "k" || c == "l" || c == "m" || c == "n" || c == "o" ||
-   c == "p" || c == "q" || c == "r" || c == "s" || c == "t" ||
-   c == "u" || c == "v" || c == "w" || c == "x" || c == "y" || c == "z")
-  where c = str_slice(name, 0, 1)
+      if types.effect_label_is_var(l) then Just(l) else effect_var_label(rest)
 
 # The phrase the conformance fixtures pin is "in a stored position".
 fn stored_effect_var_message(tname: String, where_desc: String, v: String) -> String =

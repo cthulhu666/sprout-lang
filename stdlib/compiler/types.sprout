@@ -369,6 +369,33 @@ fn effect_of_label_list(ls: List String) -> Effect =
 fn effect_of_single_label(label: String) -> Effect =
   if label == "IO" then EffectIO else EffectVar(label)
 
+# The concrete effect labels v0 defines. The label→constructor map above must
+# gain an arm per effect anyway; this exists so every place that only asks
+# "is this a label or a variable?" shares one answer.
+export fn effect_label_is_known(name: String) -> Bool =
+  name == "IO"
+
+# Lowercase-initial is what makes a name an effect VARIABLE rather than a label.
+# Here rather than in its callers for the reason `effect_from_labels` is: `infer`,
+# `checker` and `iface_codec` each read annotations, and a lexical rule they do
+# not share is one they will disagree on.
+export fn effect_label_is_var(name: String) -> Bool =
+  if str_find(name, ".") == -1 then starts_lowercase(name) else false
+
+# `char_at` is what makes the empty name answer false rather than depend on how
+# a zero-length slice compares.
+fn starts_lowercase(name: String) -> Bool =
+  match string.char_at(name, 0) with
+  | Nothing -> false
+  | Just ch -> string.is_ascii_lower(ch)
+
+# Every name an `EffectVar` may legitimately carry: what source can write, plus
+# the `$eN` that `unifier.fresh_effect` generates and an interface records
+# verbatim. `$` is not an identifier start (tests/stdlib/test_lexer_dollar_
+# reserved.spr), so admitting it cannot readmit a source-writable label.
+export fn effect_var_name_is_wellformed(name: String) -> Bool =
+  effect_label_is_var(name) || string.starts_with(name, "$")
+
 # ---------------------------------------------------------------------------
 # Scheme accessors / constructors
 # ---------------------------------------------------------------------------
@@ -500,7 +527,7 @@ fn effect_var_labels(labels: List String) -> List String =
   match labels with
   | Nil -> Nil
   | Cons label rest ->
-      if label == "IO" then effect_var_labels(rest)
+      if effect_label_is_known(label) then effect_var_labels(rest)
       else Cons(label, effect_var_labels(rest))
 
 # Every effect variable reachable from a type, including the ones buried in a

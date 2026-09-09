@@ -309,10 +309,19 @@ fn decode_effect_row_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ty
       Just end = expect_char(s, bytes, skip_ws(s, bytes, j, total), total, ')') else Nothing
   in Just((types.EffectRow(xs), end))
 
+# An interface is a file on disk, so the source-side rule-9 check is not enough:
+# a hand-edited `(EffectVar NOPE)` would otherwise reintroduce the unknown label
+# the parser rejects. A malformed effect fails the decode, as every other
+# malformed node here does.
+#
+# The test is well-formed-VARIABLE-NAME, not lowercase: a generalized scheme
+# carries `$eN`, so a lowercase-only guard rejected this encoder's own output.
 fn decode_effect_var_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Effect, Int) =
   match read_atom_then_close(s, bytes, i, total) with
   | Nothing -> Nothing
-  | Just (name, end) -> Just((types.EffectVar(name), end))
+  | Just (name, end) ->
+      if types.effect_var_name_is_wellformed(name) then Just((types.EffectVar(name), end))
+      else Nothing
 
 # Decodes `( atom* )` as a List String.
 fn decode_str_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List String, Int) =
