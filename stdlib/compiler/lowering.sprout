@@ -994,12 +994,19 @@ fn resolve_eta_fwd_type_name_dict(class_name: String, tvar_name: String, pos: so
       | _ -> Nothing
 
 # The tvar-headed position of a method's own type: the first parameter of a
-# parameterised method, the result of a nullary one, whose TThunk has no parameter
-# at all. `eta_forwarded_impl` reads the head off it to pick the matching slot.
+# parameterised method, the result of a nullary one, whose TThunk has no parameter.
+# A nullary result is taken only when it IS the tvar; nested under a constructor
+# there is no head to key on, and `eta_forwarded_impl` would fall back to the first
+# slot carrying the name — another constraint's instance, silently.
 fn eta_class_position(t: types.Type) -> Maybe types.Type =
   match t with
   | types.TFunc param _ _ _ -> Just(param)
-  | types.TThunk ret _ -> Just(ret)
+  | types.TThunk ret _ -> tvar_position(ret)
+  | _ -> Nothing
+
+fn tvar_position(t: types.Type) -> Maybe types.Type =
+  match t with
+  | types.TVar _ -> Just(t)
   | _ -> Nothing
 
 fn try_eta_forwarded_without_class(name: String, t: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =

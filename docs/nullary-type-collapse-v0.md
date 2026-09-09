@@ -270,9 +270,11 @@ every `tests/stdlib` suite and all 54 examples passed untouched.
 That second reason holds, but declining is only safe because something else catches the
 shape. `lower_value_var` falls through to `try_eta_forwarded_without_class`, which gated on
 `TFunc` too — so a nullary method passed unapplied under a forwarded dictionary died as
-`ast_to_ir: unbound variable '__eta_unresolved_…'`. That fallback now admits a `TThunk` and
-picks the slot by the tvar head of the method's *result* type, which is where a nullary
-method's class variable sits. `try_eta_in_class` stays `TFunc`-only, so the peel's
+`ast_to_ir: unbound variable '__eta_unresolved_…'`. That fallback now admits a `TThunk`
+whose result *is* the class variable, keying on that tvar head. A result with the variable
+nested under a constructor (`() -> List a`) still declines: there is no head to read, and
+the any-slot fallback behind it would take the first slot carrying the method name — another
+constraint's instance, silently. `try_eta_in_class` stays `TFunc`-only, so the peel's
 unreachability above is unchanged.
 
 `.iface` moves 6 → 7. A v6 file is rejected loudly rather than read leniently: decoded

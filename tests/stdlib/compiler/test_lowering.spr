@@ -131,6 +131,26 @@ fn lambda_arg_inner_callee(body: typed_ast.TypedExpr) -> String =
       | _ -> "__first_arg_not_lambda"
   | _ -> "__body_not_call"
 
+# A declined method reference lowers to a bare var, not an eta lambda — this reads
+# its name so a test can tell "declined loudly" from "picked a slot".
+fn lambda_arg_var_name(body: typed_ast.TypedExpr) -> String =
+  match body with
+  | typed_ast.TCall _ args _ _ ->
+      match args with
+      | [typed_ast.TVar name _ _ | _] -> name
+      | _ -> "__first_arg_not_var"
+  | _ -> "__body_not_call"
+
+fn lowered_fn_first_arg_var(result: LowerOutcome, fname: String) -> String =
+  match result with
+  | LErr _ -> "__lower_err"
+  | LOk prog ->
+      match prog with
+      | typed_ast.TypedProgram decls ->
+          match first_fn_body_named(decls, fname) with
+          | Nothing -> "__no_fn"
+          | Just body -> lambda_arg_var_name(body)
+
 fn lowered_fn_lambda_inner_callee(result: LowerOutcome, fname: String) -> String =
   match result with
   | LErr _ -> "__lower_err"
@@ -508,5 +528,21 @@ fn main() -> Unit !{IO} =
       str_starts_with(lowered_fn_lambda_inner_callee(r_tvar_fwd, "test"), "__tc_MyEq_0_"))
     assert_eq(state, "tvar-fwd: 2 args in inner call (value args only, no dict in lambda body)",
       lowered_fn_lambda_inner_arg_count(r_tvar_fwd, "test"), 2)
+
+    # A nullary method under a forwarded constraint. Its type is a TThunk with no
+    # parameter, so the slot is chosen by the tvar head of the RESULT.
+    r_thunk_fwd <- run_lower("class Blank a {\n  fn blank() -> a\n}\nfn test(f: (() -> a) -> Int) -> Int where Blank a = f(blank)")
+    assert_true(state, "thunk-fwd: lowers ok", is_lower_ok(r_thunk_fwd))
+    assert_true(state, "thunk-fwd: uses forwarded slot (__tc_Blank_0_)",
+      str_starts_with(lowered_fn_lambda_inner_callee(r_thunk_fwd, "test"), "__tc_Blank_0_"))
+
+    # Same, but the result is `List a` — the class variable is nested, so there is no
+    # tvar head to key on. The any-slot fallback would take the FIRST slot carrying
+    # the method, silently running another constraint's instance; declining keeps the
+    # loud `__eta_unresolved_` failure instead.
+    r_thunk_nested <- run_lower("class Blank a {\n  fn blanks() -> List a\n}\nfn test(f: (() -> List a) -> Int) -> Int where Blank a = f(blanks)")
+    assert_true(state, "thunk-nested: lowers ok", is_lower_ok(r_thunk_nested))
+    assert_true(state, "thunk-nested: declines rather than guessing a slot",
+      str_starts_with(lowered_fn_first_arg_var(r_thunk_nested, "test"), "__eta_unresolved_"))
 
     summary(state)
