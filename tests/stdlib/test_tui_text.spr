@@ -14,6 +14,10 @@ fn joined(xs: List String) -> String = string.join("|", xs)
 
 fn wrapped(s: String, cols: Int) -> String = joined(text.wrap_to(s, cols))
 
+# `truncate_left` speaks in clusters, since both its callers already hold them.
+fn left_of(s: String, cols: Int) -> String =
+  text.from_clusters(text.truncate_left(cols, text.clusters(s)))
+
 # Sprout has no `\u{...}` escape, so non-ASCII fixtures are built from
 # codepoints, as `test_tui_screen.spr` already does. 769 is U+0301 COMBINING
 # ACUTE ACCENT; 19990/30028 are 世/界, both East Asian Wide.
@@ -24,6 +28,8 @@ fn a_e_acute_b() -> String = utf8.from_codepoints([97, 101, 769, 98])
 fn shi() -> String = utf8.from_codepoints([19990])
 
 fn shi_jie() -> String = utf8.from_codepoints([19990, 30028])
+
+fn jie() -> String = utf8.from_codepoints([30028])
 
 fn a_shi_jie() -> String = utf8.from_codepoints([97, 19990, 30028])
 
@@ -50,6 +56,23 @@ fn main() -> Unit !{IO} =
     # character is not a character.
     check_eq("truncate never splits a wide cluster", text.truncate(a_shi_jie(), 2), "a"),
     check_eq("truncate to zero is empty", text.truncate("abc", 0), ""),
+
+    # ── truncate_left ───────────────────────────────────────────────────────
+    # The mirror: what a caret at the right-hand edge of a window keeps.
+    check_eq("truncate_left shorter than the limit is identity",
+             left_of("ab", 5), "ab"),
+    check_eq("truncate_left keeps the END of the line", left_of("abcdef", 3),
+             "def"),
+    check_eq("truncate_left keeps a wide cluster that fits exactly",
+             left_of(a_shi_jie(), 4), shi_jie()),
+    # One column short of the pair, so the leading half is dropped WHOLE and
+    # the spare column is left blank — half a character is not a character.
+    check_eq("truncate_left never splits a wide cluster",
+             left_of(a_shi_jie(), 3), jie()),
+    check_eq("truncate_left to zero is empty", left_of("abc", 0), ""),
+    # A region narrower than the caret's own cluster leaves a NEGATIVE budget,
+    # which no amount of dropping can satisfy — the empty list is what ends it.
+    check_eq("a negative budget terminates", left_of("abc", -2), ""),
 
     # ── wrap ────────────────────────────────────────────────────────────────
     check_eq("empty wraps to nothing", joined(text.wrap_to("", 5)), ""),

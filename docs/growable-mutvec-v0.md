@@ -158,7 +158,9 @@ Tracked in `BACKLOG.md`.
 ## Shrinking (2026-09-09)
 
 `text_area` and the IDE's line buffer need to remove a line, and `BACKLOG.md` recorded that as
-needing a `vector_remove` builtin. It does not. A removal is two things — slide the tail down, and
+needing a `vector_remove` builtin. (`text_area` turned out not to be a consumer: a widget handler
+is pure and every `mutvec_*` operation is `!{IO}`, so it holds a persistent zipper instead —
+`docs/tui-text-area-v0.md` §1. The reasoning below stands for the operations themselves.) It does not. A removal is two things — slide the tail down, and
 shorten the length — and only the second has no Sprout spelling, because `->len` lives inside the
 `VectorVal` whose backing array has no Sprout-visible handle. The shift is `vector_get_direct` +
 `vector_mutset` in a loop.

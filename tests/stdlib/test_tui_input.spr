@@ -134,6 +134,11 @@ fn typing_cases(state: TestState) -> Unit !{IO} = do
   assert_eq(state, "so does a C1 control",
             typed([event.Paste("a" ++ utf8.from_codepoints([133]) ++ "b")]),
             "[Changed(a b)]")
+  # U+2028 LINE SEPARATOR is not Cc, so the Cc test alone lets it through — and
+  # a terminal may break the line on it while the width tables give it a cell.
+  assert_eq(state, "and a line separator outside Cc",
+            typed([event.Paste("a" ++ utf8.from_codepoints([8232]) ++ "b")]),
+            "[Changed(a b)]")
   # The other way text enters the line, and the same rule.
   assert_eq(state, "an initial value is flattened too",
             typed_with(inp.input_opts() with (initial = "a\nb"), chars("c")),

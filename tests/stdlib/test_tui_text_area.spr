@@ -1,0 +1,275 @@
+import stdlib.string as string
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.tui.event as event
+import stdlib.tui.geometry as g
+import stdlib.tui.screen as scr
+import stdlib.tui.style as sty
+import stdlib.unicode.utf8 as utf8
+import stdlib.tui.widget as widget
+import stdlib.tui.widgets.container as ct
+import stdlib.tui.widgets.focus as focus
+import stdlib.tui.widgets.text_area as ta
+
+# Many lines of editable text. Design: docs/tui-text-area-v0.md.
+#
+# The document is only ever observed through what the widget SAYS, never read
+# out of it — `Widget m` erases the state. A neighbour probe sits beside the
+# area so a key it declines is visible as a broadcast rather than as silence.
+# The buffer's own behaviour is tests/stdlib/test_tui_buffer.spr; what is here
+# is the wiring, the keys and the window.
+
+type Msg (..) deriving (Eq, ToString) =
+  | Changed String
+  | Noted String
+
+type alias Says = List Msg
+type alias Asks = List(widget.Cmd Msg)
+
+# ── the tree ────────────────────────────────────────────────────────────────
+
+fn area_id() -> widget.WidgetId = widget.WidgetId("ta")
+
+fn note_on_event(n: Int, ev: event.Event) -> (Int, Says, Asks) =
+  (n, [Noted("bcast")], Nil)
+
+fn note_render(n: Int, r: g.Region, s: scr.Screen) -> Unit !{IO} = ()
+
+fn note_measure(n: Int, avail: g.Size) -> widget.Measured =
+  widget.fixed_size(g.Size(1, 1))
+
+fn note() -> widget.Widget Msg =
+  widget.Widget(widget.View(state = 0, on_event = note_on_event,
+                            route = widget.no_route, render = note_render,
+                            measure = note_measure))
+
+fn area() -> widget.Widget Msg = ta.text_area(area_id(), Changed)
+
+fn area_with(o: ta.TextAreaOpts Msg) -> widget.Widget Msg =
+  ta.text_area_with(area_id(), Changed, o)
+
+fn started(s: String) -> ta.TextAreaOpts Msg =
+  ta.text_area_opts() with (initial = s)
+
+# Focus starts on the head of the ring, so the area is live without a Tab.
+fn ring_of(w: widget.Widget Msg) -> widget.Widget Msg =
+  focus.focus_ring([area_id()], w)
+
+fn beside(w: widget.Widget Msg) -> widget.Widget Msg =
+  ring_of(ct.column([ct.fit(w), ct.fit(note())]))
+
+# ── observing ───────────────────────────────────────────────────────────────
+
+fn key(k: event.Key) -> event.Event = event.KeyPress(k, event.mods_none())
+
+fn chord(k: event.Key) -> event.Event = event.KeyPress(k, event.mods_ctrl())
+
+fn hit_of(r: Maybe (widget.Widget Msg, Says, Asks)) -> Bool =
+  match r with
+  | Nothing -> false
+  | Just _ -> true
+
+fn said(r: (widget.Widget Msg, Says, Asks)) -> String =
+  match r with
+  | (_, msgs, _) -> to_string(msgs)
+
+fn typed(evs: List event.Event) -> String =
+  said(widget.feed(beside(area()), evs))
+
+fn typed_with(o: ta.TextAreaOpts Msg, evs: List event.Event) -> String =
+  said(widget.feed(beside(area_with(o)), evs))
+
+fn chars(s: String) -> List event.Event =
+  list_map(\c -> key(event.KChar(c)), vec_to_list(string.string_chars(s)))
+
+fn cjk() -> String = utf8.from_codepoints([26085])
+
+# ── what it says ────────────────────────────────────────────────────────────
+
+fn typing_cases(state: TestState) -> Unit !{IO} = do
+  # Every edit reports the WHOLE document (§4.8): the application cannot read
+  # the area, so a delta would leave it reassembling the text from keystrokes.
+  assert_eq(state, "each character says the whole document",
+            typed(chars("ab")), "[Changed(a), Changed(ab)]")
+  # Enter is an edit like any other, so the empty line it makes is announced.
+  assert_eq(state, "Enter breaks the line and says so",
+            typed(chars("a") ++ [key(event.KEnter)] ++ chars("b")),
+            "[Changed(a), Changed(a\n), Changed(a\nb)]")
+  assert_eq(state, "backspace at column 0 joins with the line above",
+            typed(chars("a") ++ [key(event.KEnter)] ++ chars("b")
+                  ++ [key(event.KHome), key(event.KBackspace)]),
+            "[Changed(a), Changed(a\n), Changed(a\nb), Changed(ab)]")
+  assert_eq(state, "backspace at the document start is claimed and silent",
+            typed([key(event.KBackspace)]), "[]")
+  assert_eq(state, "delete at the end of a line pulls the next one up",
+            typed_with(started("ab\ncd"),
+                       [key(event.KUp), key(event.KEnd), key(event.KDelete)]),
+            "[Changed(abcd)]")
+  assert_eq(state, "moving the caret says nothing",
+            typed(chars("ab") ++ [key(event.KLeft), key(event.KUp)]),
+            "[Changed(a), Changed(ab)]")
+  # Vertical motion is what this widget adds over `input`; the buffer's goal
+  # column is exercised in test_tui_buffer.spr.
+  assert_eq(state, "Up then typing inserts on the line above",
+            typed_with(started("ab\ncd"), [key(event.KUp)] ++ chars("x")),
+            "[Changed(abx\ncd)]")
+  assert_eq(state, "Down returns to the line below",
+            typed_with(started("ab\ncd"),
+                       [key(event.KUp), key(event.KDown)] ++ chars("x")),
+            "[Changed(ab\ncdx)]")
+  assert_eq(state, "a paste splits on its newlines",
+            typed([event.Paste("a\nb")]), "[Changed(a\nb)]")
+  # A tab in a cell is written to the terminal verbatim and moves the real
+  # cursor, so it is blanked here as it is in `input` (§4.11).
+  assert_eq(state, "a pasted tab is still blanked to a space",
+            typed([event.Paste("a\tb")]), "[Changed(a b)]")
+  assert_eq(state, "an initial value is the starting point, unannounced",
+            typed_with(started("ab\ncd"), chars("x")), "[Changed(ab\ncdx)]")
+
+# ── what it leaves alone ────────────────────────────────────────────────────
+
+fn declining_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "a ctrl chord is not typing",
+            typed([chord(event.KChar('a'))]), "[Noted(bcast)]")
+  assert_eq(state, "nor is an alt chord",
+            typed([event.KeyPress(event.KChar('a'), event.mods_alt())]),
+            "[Noted(bcast)]")
+  # §4.11: the ring reads Tab first, so this is what an area must NOT swallow.
+  assert_eq(state, "Tab is the ring's", typed([key(event.KTab)]), "[]")
+  assert_eq(state, "Esc is the application's",
+            typed([key(event.KEsc)]), "[Noted(bcast)]")
+  # Paging needs the viewport, which a pure handler is not given (§4.6) — so
+  # these fall through rather than doing half the job.
+  assert_eq(state, "PageUp falls through",
+            typed([key(event.KPageUp)]), "[Noted(bcast)]")
+  assert_eq(state, "and PageDown with it",
+            typed([key(event.KPageDown)]), "[Noted(bcast)]")
+  assert_eq(state, "an unfocused area ignores a key",
+            said(widget.feed(ct.column([ct.fit(area()), ct.fit(note())]),
+                             chars("a"))),
+            "[Noted(bcast)]")
+  assert_eq(state, "and declines one addressed to it directly",
+            hit_of(widget.deliver(area(), area_id(),
+                                  widget.ToEvent(key(event.KChar('a'))))),
+            false)
+  assert_eq(state, "but claims a focus notification",
+            hit_of(widget.deliver(area(), area_id(), widget.ToFocus(true))),
+            true)
+  # §4.10: no widget takes an application message today, and the vocabulary
+  # that would is an opts-supplied prism rather than a `Delivery` arm.
+  assert_eq(state, "and declines a message",
+            hit_of(widget.deliver(area(), area_id(),
+                                  widget.ToMsg(Noted("x")))),
+            false)
+
+# ── what it paints ──────────────────────────────────────────────────────────
+
+fn after(w: widget.Widget Msg, evs: List event.Event) -> widget.Widget Msg =
+  match widget.feed(w, evs) with
+  | (w2, _, _) -> w2
+
+fn live(o: ta.TextAreaOpts Msg,
+        evs: List event.Event) -> widget.Widget Msg =
+  after(ring_of(area_with(o)), evs)
+
+fn painted(w: widget.Widget Msg, cols: Int, rows: Int) -> scr.Screen !{IO} = do
+  s <- scr.screen_new(g.Size(cols, rows))
+  widget.render(w, g.Region(0, 0, cols, rows), s)
+  s
+
+fn row_text(s: scr.Screen, col: Int, cols: Int, row: Int) -> String !{IO} =
+  if col >= cols then "" else row_step(s, col, cols, row)
+
+fn row_step(s: scr.Screen, col: Int, cols: Int, row: Int) -> String !{IO} = do
+  here <- scr.text_at(s, col, row)
+  rest <- row_text(s, col + 1, cols, row)
+  here ++ rest
+
+# The frame as one string, rows joined by newline — what the area painted, seen
+# the way its own value reads.
+fn frame(w: widget.Widget Msg, cols: Int, rows: Int) -> String !{IO} = do
+  s <- painted(w, cols, rows)
+  ls <- rows_text(s, 0, cols, rows)
+  string.join("\n", ls)
+
+fn rows_text(s: scr.Screen, row: Int, cols: Int,
+             rows: Int) -> List String !{IO} =
+  if row >= rows then Nil else rows_step(s, row, cols, rows)
+
+fn rows_step(s: scr.Screen, row: Int, cols: Int,
+             rows: Int) -> List String !{IO} = do
+  here <- row_text(s, 0, cols, row)
+  rest <- rows_text(s, row + 1, cols, rows)
+  Cons(here, rest)
+
+fn caret_at(w: widget.Widget Msg, cols: Int, rows: Int, col: Int,
+            row: Int) -> Bool !{IO} = do
+  s <- painted(w, cols, rows)
+  c <- scr.cell_at(s, col, row)
+  sty.style_reverse(scr.cell_style(c))
+
+fn render_cases(state: TestState) -> Unit !{IO} = do
+  v <- frame(live(started("ab\ncd"), Nil), 4, 3)
+  assert_eq(state, "an area paints its lines", v, "ab  \ncd  \n    ")
+  # The caret is a painted cell, not the terminal's cursor: `app.run` hides
+  # that for the whole session.
+  c <- caret_at(live(started("ab\ncd"), Nil), 4, 3, 2, 1)
+  assert_eq(state, "the caret is the cell after the last character", c, true)
+  up <- caret_at(live(started("ab\ncd"), [key(event.KUp)]), 4, 3, 2, 0)
+  assert_eq(state, "and follows a vertical move", up, true)
+  bare <- caret_at(area_with(started("ab")), 4, 3, 0, 0)
+  assert_eq(state, "an unfocused area paints no caret", bare, false)
+  # The window is a function of the caret on BOTH axes (§4.6): with the caret
+  # on the last line, a two-row region shows the two lines ending there.
+  tall <- frame(live(started("l1\nl2\nl3"), Nil), 4, 2)
+  assert_eq(state, "a document taller than the region ends at the caret", tall,
+            "l2  \nl3  ")
+  top <- frame(live(started("l1\nl2\nl3"), [key(event.KUp), key(event.KUp)]),
+               4, 2)
+  assert_eq(state, "and moving up brings the start back", top, "l1  \nl2  ")
+  # An unfocused area has no caret to keep in view, so it shows its start.
+  still <- frame(area_with(started("l1\nl2\nl3")), 4, 2)
+  assert_eq(state, "an unfocused area shows the start of the document", still,
+            "l1  \nl2  ")
+  # Every line shifts by the SAME number of columns, or the text would jump
+  # from row to row as the caret moved.
+  wide <- frame(live(started("abcdef\nuvwxyz"), Nil), 4, 2)
+  assert_eq(state, "a horizontal window shifts every line alike", wide,
+            "def \nxyz ")
+  # A wide cluster cut in half by the window's left edge cannot be painted, but
+  # the columns it still owed have to be: dropping it outright would slide the
+  # rest of THAT line one column left of every other line.
+  split <- frame(live(started(cjk() ++ "xy\nabcd"), Nil), 4, 2)
+  assert_eq(state, "a wide cluster cut by the left edge leaves its columns",
+            split, " xy \nbcd ")
+  # A caret on a double-width cluster needs TWO columns; reserving one paints
+  # neither the character nor the focus, since `truncate` drops a wide cluster
+  # whole. The window scrolls one further to make room.
+  cj <- frame(live(started("abc" ++ cjk()), [key(event.KLeft)]), 4, 1)
+  assert_eq(state, "a wide caret is painted, scrolling to make room", cj,
+            "bc" ++ cjk())
+  cj_lit <- caret_at(live(started("abc" ++ cjk()), [key(event.KLeft)]), 4, 1,
+                     2, 0)
+  assert_eq(state, "and carries the focused style", cj_lit, true)
+  # A `fit` slot in a row that ran out of room hands out ZERO columns; the
+  # search for a window must end anyway, and paint nothing.
+  none <- frame(live(started("ab"), Nil), 0, 1)
+  assert_eq(state, "a region of no columns terminates and paints nothing",
+            none, "")
+
+fn measure_cases(state: TestState) -> Unit !{IO} = do
+  # Greedy on BOTH axes, with the offered size as the natural one: measuring
+  # the document would walk it on every frame (§4.6).
+  assert_eq(state, "an area takes the width it is offered",
+            to_string(widget.measure(area(), g.Size(20, 5)).cols), "Greedy")
+  assert_eq(state, "and the height with it",
+            to_string(widget.measure(area(), g.Size(20, 5)).rows), "Greedy")
+  assert_eq(state, "its natural size is the one offered",
+            g.size_rows(widget.measure(area(), g.Size(20, 5)).size), 5)
+
+fn main() -> Unit !{IO} = do
+  state <- new_state()
+  typing_cases(state)
+  declining_cases(state)
+  render_cases(state)
+  measure_cases(state)
+  summary(state)

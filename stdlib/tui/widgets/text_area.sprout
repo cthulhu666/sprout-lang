@@ -1,0 +1,205 @@
+module stdlib.tui.widgets.text_area
+
+# Many lines of editable text. Design: docs/tui-text-area-v0.md.
+#
+# The document lives in `stdlib.tui.buffer` and leaves only as an `on_change`
+# message: `Widget m` erases the state type, so an application cannot read the
+# area and must mirror what it hears.
+
+import stdlib.string as string
+import stdlib.tui.buffer as buffer
+import stdlib.tui.event as event
+import stdlib.tui.geometry as geometry
+import stdlib.tui.screen as scr
+import stdlib.tui.text as text
+import stdlib.tui.widget as widget
+import stdlib.tui.widgets.focus as focus
+import stdlib.tui.widgets.paint as paint
+
+# Everything optional, in a record: Sprout has no default arguments, and two
+# adjacent same-typed parameters swap silently. Start from `text_area_opts()`
+# and override with `with`. Enter belongs to the document (§4.3), so unlike
+# `input` there is no submit handler to supply.
+export type TextAreaOpts m = (initial: String, look: focus.FocusStyle)
+
+export fn text_area_opts() -> TextAreaOpts m =
+  TextAreaOpts(initial = "", look = focus.focus_style_default())
+
+# ── the widget ──────────────────────────────────────────────────────────────
+
+# `has_focus` is the area's own copy of "the keyboard is mine", set by the ring
+# (docs/tui-focus-v0.md §4.1).
+type Area m = (id: widget.WidgetId, on_change: String -> m,
+               opts: TextAreaOpts m, doc: buffer.Buffer, has_focus: Bool)
+
+type alias Reply m = Maybe(Area m, List m, List(widget.Cmd m))
+
+# Everything an area reacts to arrives addressed, so the broadcast is idle.
+fn area_on_event(a: Area m,
+                 ev: event.Event) -> (Area m, List m, List(widget.Cmd m)) =
+  (a, Nil, Nil)
+
+fn area_handler(a: Area m, d: widget.Delivery m) -> Reply m =
+  match d with
+  # An area asks for no work, and §4.10 leaves the control vocabulary to an
+  # opts-supplied prism rather than a `Delivery` arm.
+  | widget.ToMsg _ -> Nothing
+  | widget.ToFocus x -> Just(((a with (has_focus = x)), Nil, Nil))
+  | widget.ToEvent e -> if a.has_focus then area_event(a, e) else Nothing
+
+fn area_event(a: Area m, e: event.Event) -> Reply m =
+  match e with
+  | event.KeyPress k mods -> area_key(a, k, mods)
+  | event.Paste s -> changed(a, buffer.buffer_insert(s, a.doc))
+  # A tick, a resize and the mouse are not a text area's, and neither is
+  # whatever is added next: declining leaves it to the application.
+  | _ -> Nothing
+
+# ctrl-a decodes as `KChar 'a'` with ctrl (keys.sprout:63), so an area that
+# read the key alone would type "a" and eat the application's chord with it.
+fn area_key(a: Area m, k: event.Key, mods: event.Mods) -> Reply m =
+  if event.mods_is_chord(mods) then Nothing else area_plain(a, k)
+
+# Tab, Esc and the function keys fall through, as they do for `input`. So do
+# PageUp and PageDown: paging is measured against the viewport, which a pure
+# handler is not given (§4.6).
+fn area_plain(a: Area m, k: event.Key) -> Reply m =
+  match k with
+  | event.KChar c -> typed_in(a, string.string_from_char(c))
+  # Enter is an edit on the document, not a submission (§4.3).
+  | event.KEnter -> typed_in(a, "\n")
+  | event.KBackspace -> changed(a, buffer.buffer_backspace(a.doc))
+  | event.KDelete -> changed(a, buffer.buffer_delete(a.doc))
+  | event.KLeft -> moved(a, buffer.buffer_left(a.doc))
+  | event.KRight -> moved(a, buffer.buffer_right(a.doc))
+  | event.KUp -> moved(a, buffer.buffer_up(a.doc))
+  | event.KDown -> moved(a, buffer.buffer_down(a.doc))
+  | event.KHome -> moved(a, buffer.buffer_home(a.doc))
+  | event.KEnd -> moved(a, buffer.buffer_end(a.doc))
+  | _ -> Nothing
+
+fn typed_in(a: Area m, s: String) -> Reply m =
+  changed(a, buffer.buffer_insert(s, a.doc))
+
+# The whole document, not a delta: the application cannot read the area, so a
+# delta would leave it reassembling the text from keystrokes (§4.8). `Nothing`
+# is a claimed key that changed nothing — backspace at the start must not reach
+# the application, but there is no new value to announce.
+fn changed(a: Area m, b: Maybe buffer.Buffer) -> Reply m =
+  match b with
+  | Nothing -> Just((a, Nil, Nil))
+  | Just b2 ->
+      Just(((a with (doc = b2)), [a.on_change(buffer.buffer_text(b2))], Nil))
+
+fn moved(a: Area m, b: buffer.Buffer) -> Reply m =
+  Just(((a with (doc = b)), Nil, Nil))
+
+# ── what it paints ──────────────────────────────────────────────────────────
+
+# Where the frame starts and where the caret sits in it, derived fresh from the
+# caret every time (§4.6): `top` lines and `off` display columns are dropped,
+# and the caret lands at `row`/`col` within the region.
+type Window = (top: Int, off: Int, row: Int, col: Int, caret: String)
+
+# Both axes generalise `input` §4.5: drop until what precedes the caret fits.
+# No offset is stored, so nothing can drift out of step with the caret — the
+# handler is pure and could never have updated one correctly.
+fn window_of(a: Area m, r: geometry.Region) -> Window =
+  Window(top = top, off = text.clusters_width(before) - text.clusters_width(kept),
+         row = buffer.buffer_row(a.doc) - top, col = text.clusters_width(kept),
+         caret = caret)
+where
+  top = first_row(buffer.buffer_row(a.doc), geometry.region_rows(r))
+  cs = text.clusters(buffer.buffer_line(a.doc))
+  before = taken(cs, buffer.buffer_col(a.doc), Nil)
+  caret = caret_cluster(dropped(cs, buffer.buffer_col(a.doc)))
+  # The caret's OWN width is what the window reserves, not one column: on a CJK
+  # or emoji cluster a single reserved column truncates it away, painting
+  # neither the character nor the focus.
+  kept = text.truncate_left(geometry.region_cols(r) - text.width(caret),
+                            before)
+
+# The first line of the frame: enough dropped that the caret's line is the last
+# one, and none dropped while the whole document still fits.
+fn first_row(row: Int, rows: Int) -> Int =
+  if row < rows then 0 else row - rows + 1
+
+# The caret sits ON the cluster after it, or on a blank cell at the end of the
+# line. Painted, because `app.run` hides the terminal's own cursor for the
+# session (docs/tui-focus-v0.md §9).
+fn caret_cluster(after: List (List Int)) -> String =
+  match after with
+  | Nil -> " "
+  | [c | _] -> text.from_clusters([c])
+
+fn area_render(a: Area m, r: geometry.Region, s: scr.Screen) -> Unit !{IO} =
+  if a.has_focus then framed(a, r, s, window_of(a, r))
+  # An unfocused area has no caret to keep in view, so it shows the start of
+  # its document — the window only follows a caret that is there.
+  else paint.lines(s, r, 0, buffer.buffer_lines(a.doc), a.opts.look.normal)
+
+fn framed(a: Area m, r: geometry.Region, s: scr.Screen,
+          w: Window) -> Unit !{IO} = do
+  paint.lines(s, r, 0, list_map(shifted(w.off, _), visible(a, r, w)),
+              a.opts.look.normal)
+  paint.at(s, r, w.row, w.col, w.caret, a.opts.look.focused)
+
+fn visible(a: Area m, r: geometry.Region, w: Window) -> List String =
+  taken(dropped(buffer.buffer_lines(a.doc), w.top), geometry.region_rows(r),
+        Nil)
+
+# Every line shifts by the SAME number of columns, or the text would jump from
+# row to row as the caret moved.
+#
+# A wide cluster straddling the edge cannot be painted — `text.truncate` drops
+# one whole at the other edge for the same reason — but the columns it still
+# owed are blanked rather than dropped. Dropping them would slide the rest of
+# THAT line left of every other line, which is the alignment the shared offset
+# exists to keep.
+fn shifted(off: Int, l: String) -> String =
+  cut_left(text.clusters(l), off)
+
+fn cut_left(cs: List (List Int), off: Int) -> String =
+  if off <= 0 then string.repeat(" ", -off) ++ text.from_clusters(cs)
+  else
+    match cs with
+    | Nil -> ""
+    | [c | rest] -> cut_left(rest, off - text.cluster_width(c))
+
+fn dropped(xs: List a, n: Int) -> List a =
+  if n <= 0 then xs
+  else
+    match xs with
+    | Nil -> Nil
+    | [_ | rest] -> dropped(rest, n - 1)
+
+fn taken(xs: List a, n: Int, acc: List a) -> List a =
+  if n <= 0 then list_reverse(acc)
+  else
+    match xs with
+    | Nil -> list_reverse(acc)
+    | [x | rest] -> taken(rest, n - 1, Cons(x, acc))
+
+# As big as it is given, on BOTH axes: measuring the document instead would
+# walk it on every frame, since `measure` runs per frame for a `fit` child
+# (§4.6). A document taller or wider than its region scrolls rather than
+# demanding room.
+fn area_measure(a: Area m, avail: geometry.Size) -> widget.Measured =
+  widget.greedy_size(avail)
+
+fn area_widget(a: Area m) -> widget.Widget m =
+  widget.Widget(widget.View(state = a, on_event = area_on_event,
+                            route = widget.route_when(a.id, area_handler, _, _,
+                                                      _),
+                            render = area_render, measure = area_measure))
+
+export fn text_area(id: widget.WidgetId,
+                    on_change: String -> m) -> widget.Widget m =
+  text_area_with(id, on_change, text_area_opts())
+
+# The caret starts at the end of `initial`, where a reader's eye is; the
+# initial value is a starting point, not an edit, so nothing is announced.
+export fn text_area_with(id: widget.WidgetId, on_change: String -> m,
+                         opts: TextAreaOpts m) -> widget.Widget m =
+  area_widget(Area(id = id, on_change = on_change, opts = opts,
+                   doc = buffer.buffer_open(opts.initial), has_focus = false))
