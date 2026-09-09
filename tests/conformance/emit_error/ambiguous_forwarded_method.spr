@@ -1,0 +1,26 @@
+module main
+
+# `from_int`'s class variable is in its RESULT, so its class position carries no
+# tvar head and the forwarded slot cannot be chosen by key. Reaching the site
+# through the polymorphic `apply_int` leaves its type a fresh tvar that no
+# @eta_fwd marker names, so which of the two constraints this occurrence belongs
+# to is not recoverable at lowering. Both slots carry the method; picking either
+# runs one instance's code at the other's type. Rejected instead of guessed.
+
+class Make t
+  fn from_int(n: Int) -> t
+
+instance Make Int
+  fn from_int(n: Int) -> Int = n + 100
+
+instance Make String
+  fn from_int(n: Int) -> String = "made"
+
+fn apply_int(f: Int -> a, n: Int) -> a = f(n)
+
+fn makes(x: a, y: b) -> (a, b) where Make a, Make b =
+  (apply_int(from_int, 1), apply_int(from_int, 2))
+
+fn main() -> Unit !{IO} =
+  match makes(0, "q") with
+  | (m, n) -> print(int_to_string(m) ++ "|" ++ n)

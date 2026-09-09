@@ -1,0 +1,30 @@
+import stdlib.test (check_eq, run_suite)
+
+# An eta-expanded class method reads its implementation out of a forwarded
+# dictionary slot, keyed by the tvar the constraint names. When the method's class
+# position carries no tvar head — a concrete parameter with the class variable in
+# the result, as `parse`/`decode`/`from_int` all have — there is no key to look up
+# and selection falls back to scanning the slots by method name.
+#
+# One constraint means one slot, so that scan cannot pick wrongly. The ambiguous
+# case is rejected at compile time rather than tested here; see `test_lowering.spr`
+# ("any-slot, two constraints") for the shape and why it cannot be resolved.
+
+class Make t
+  fn from_int(n: Int) -> t
+
+instance Make Int
+  fn from_int(n: Int) -> Int = n + 100
+
+instance Make String
+  fn from_int(n: Int) -> String = "made"
+
+fn apply_int(f: Int -> a, n: Int) -> a = f(n)
+
+fn made_int(x: a) -> a where Make a = apply_int(from_int, 1)
+
+fn main() -> Unit !{IO} =
+  run_suite("forwarded_slot_selection", [
+    check_eq("single constraint, Int instance", made_int(0), 101),
+    check_eq("single constraint, String instance", made_int("q"), "made")
+  ])

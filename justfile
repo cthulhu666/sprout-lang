@@ -262,7 +262,7 @@ debug-run file: bootstrap-from-seed
 
 # Run all stdlib + compiler-stage tests (stage-1).
 [group('test')]
-test: test-stdlib-stage1 test-type-errors test-parse-errors test-executable-errors test-conformance-run test-package-resolution test-front-end-agreement
+test: test-stdlib-stage1 test-type-errors test-parse-errors test-executable-errors test-emit-errors test-conformance-run test-package-resolution test-front-end-agreement
 
 # The two typecheck front ends must reach the same verdict, and the editor one must
 # terminate. `--phase check` runs the bundler; the DEFAULT phase runs the env path, which
@@ -758,7 +758,7 @@ compile-bench: bootstrap-from-seed (_compile-examples "build/compile_driver_bin_
 # on the very rejection each fixture is asserting.) <noun> labels the summary; xfail =
 # fixtures whose expected diagnostic is not yet produced (tracked TODO).
 [private]
-_test-reject stage dir noun xfail="":
+_test-reject stage dir noun xfail="" phase="check":
   #!/usr/bin/env bash
   set -euo pipefail
   STAGE="{{stage}}"
@@ -794,7 +794,7 @@ _test-reject stage dir noun xfail="":
       is_xfail=0
       for xf in $XFAIL; do [[ "$name" == "$xf" ]] && is_xfail=1 && break; done
       expected="$(cat "$err")"
-      out="$("./$STAGE" --phase check "{{stdlib_root}}" "$spr" 2>&1)"
+      out="$("./$STAGE" --phase {{phase}} "{{stdlib_root}}" "$spr" 2>&1)"
       if echo "$out" | grep -qF -- "$expected"; then
         if [[ $is_xfail -eq 1 ]]; then
           echo "  UNEXPECTED MATCH (remove from xfail)" >> "$TMPD/$idx.out"; echo fail > "$TMPD/$idx.st"
@@ -861,6 +861,12 @@ test-parse-errors: bootstrap-from-seed (_test-reject "build/compile_driver_bin_s
 # has none, e.g. examples/sentry_api.sprout); tracked in BACKLOG §7.3.
 [group('test')]
 test-executable-errors: bootstrap-from-seed (_test-reject "build/compile_driver_bin_stage1" "executable_error" "executable-error" "missing_main")
+
+# Stage-1 negative EMIT gate: tests/conformance/emit_error/<n>.spr type-checks but
+# must be rejected downstream, at ast_to_ir. The other reject gates run `--phase
+# check` and so cannot see a diagnostic raised after it; `ir-typed` runs the IR path.
+[group('test')]
+test-emit-errors: bootstrap-from-seed (_test-reject "build/compile_driver_bin_stage1" "emit_error" "emit-error" "" "ir-typed")
 
 # Stage-2: emit IR → clang link for each example.
 [group('examples')]
@@ -2899,6 +2905,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "type-errors|test-type-errors"
     "parse-errors|test-parse-errors"
     "executable-errors|test-executable-errors"
+    "emit-errors|test-emit-errors"
     "conformance-run|test-conformance-run"
     "example-canary|run-example-canary"
     "gc-safety|gc-safety-check --strict"
