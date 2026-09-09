@@ -7,8 +7,9 @@ import stdlib.env as env
 
 # The instance-vs-class effect check is a decl-scan, the shape
 # compiler-internals.md §"Whole-program passes: scan `decls` AND read `env`"
-# warns can see an empty vocabulary on this front end. It also reads `env`, for a
-# class that is imported rather than declared; these pin the verdicts.
+# warns can see an empty vocabulary on this front end. It reads decls ONLY — no
+# `env` fallback, deliberately (docs/effect-subsumption-v0.md §6.1a) — so these
+# pin that this front end still supplies the vocabulary it needs.
 #
 # The accept cases belong here for the same reason as the rejects: an
 # over-correction on this front end is invisible to the conformance fixtures,

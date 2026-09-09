@@ -1,12 +1,12 @@
 module main
 
-# A row on the CLASS side only, and this check is the only thing that reaches it.
+# A row on the CLASS side only, and this check is the only thing that reaches it:
+# a class method signature has no body and so records no EffectReport
+# (docs/effect-enforcement-v0.md §13.7). Declining it here means declining it
+# everywhere, which let `pure_user` below run the IO.
 #
-# Its twin effect_row_on_class_method.spr writes the row on BOTH sides, so the
-# instance's own declaration records an EffectReport and rule 9 reports it. A
-# class method signature has no body and so records no report at all
-# (docs/effect-enforcement-v0.md §13.7) — declining a class-side row here means
-# declining it everywhere, which let `pure_user` below run the IO.
+# The expected position is the CLASS declaration's, not this instance's — the
+# message names a class method, so the caret must point at one (guidelines.md §5).
 
 class Quiet a
   fn calc(x: a) -> Int !{IO, e}

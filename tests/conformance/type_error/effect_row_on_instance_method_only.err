@@ -1,0 +1,1 @@
+15:39: ERROR: check: `instance calc(Int)` declares the effect row `!{IO, e}`

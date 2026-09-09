@@ -1994,12 +1994,17 @@ Effect note for v0:
 >   that an instance declared above its class is checked like any other — §16's "declaration
 >   order is not significant" applies to it. It is keyed by class rather than by method name,
 >   because a method name identifies no class: two classes may declare one, and a top-level
->   `fn` may shadow one, and both compile. A multi-label **row** on either side is rule 9's
->   to reject, not this check's — it runs earlier, so forming an opinion about a row would
->   mask rule 9's diagnostic with a worse one.
+>   `fn` may shadow one, and both compile. A multi-label **row** is never reported as a
+>   mismatch by it, because a row is outside the order it compares. On the *instance* side
+>   the row is left to rule 9, which names the instance's own signature. A row in a *class
+>   method* signature is rejected by a separate scan over the class declarations and
+>   reported at the class, because nothing else reaches one — see rule 9 below.
 > - **9** has three clauses and three checks, all read from the **declared signature** and
 >   never from what the body infers. The *singleton* clause — a signature may name at most
->   one effect variable, and may not write a multi-label row. The *stored-position* clause —
+>   one effect variable, and may not write a multi-label row. Its row half also runs over
+>   **class method signatures**, from rule 8's scan above, since those record no effect
+>   report; its two-variable half does not, and a class method naming two variables with no
+>   instance is still accepted. The *stored-position* clause —
 >   an effect variable may not sit in a record field, constructor payload or `wrap` body.
 >   And the *well-formed-label* clause — a label that is not a concrete effect this version
 >   defines is ill-formed rather than a variable. Unlike the other two it is decided where

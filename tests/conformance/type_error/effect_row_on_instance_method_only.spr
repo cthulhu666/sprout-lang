@@ -1,0 +1,17 @@
+module main
+
+# The other side of the row split: the CLASS signature is well-formed, so the
+# class-side scan is silent and rule 9 keeps ownership of the instance's row. It
+# names the instance's own signature, which is where the fault is.
+#
+# Its twin effect_row_on_class_method_no_instance.spr covers the class side. The
+# two together are why the check treats the sides asymmetrically: one has an
+# EffectReport to be diagnosed from, the other has none.
+
+class Quiet a
+  fn calc(x: a) -> Int !{IO}
+
+instance Quiet Int
+  fn calc(x: Int) -> Int !{IO, e} = x + 1
+
+fn main() -> Unit !{IO} = print(int_to_string(calc(1)))

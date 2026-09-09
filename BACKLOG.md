@@ -2210,6 +2210,14 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   `TDict`'s constraint head against its resolved argument type, which overlaps phase 2b above —
   wire it behind a debug/CI flag so this class fails at compile time rather than at the runtime
   poison backstop.
+- [ ] `P2` **An instance may define a method its class does not declare, silently.** `instance
+  Quiet Q` with a stray `fn extra(x: Q) -> Int !{IO}` type-checks clean; the method is dead (a call
+  to `extra` reports `Unknown variable`), so it launders nothing, but every whole-instance check
+  keyed on the class's method list skips it without a word — rule 8's effect comparison among them.
+  Found while fixing that check, whose comment had claimed such a method was "already diagnosed".
+  Fix: reject an instance method absent from its class's `ClassMethodSig` list, at the method,
+  naming the class. Needs a `type_error` fixture; check first whether a typo'd method name in a
+  legitimate instance currently produces a *worse* message than the missing-method one it becomes.
 - [ ] `P2` **Pattern-variable names share the fresh-tyvar namespace.** Pattern-bound variable names
   and the inferencer's fresh `t0`/`t1`/… names are drawn from the same namespace with no collision
   guard, so a pattern binding whose name collides with a fresh tyvar could shadow, or be shadowed
