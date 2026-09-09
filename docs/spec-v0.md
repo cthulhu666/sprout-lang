@@ -1907,38 +1907,38 @@ Effect note for v0:
 > > guarantee fails across most higher-order code. Property 2 below is the reason — an
 > > arrow's effect is unified and never compared, so a mismatch is not a type error.
 > >
-> > Five boundaries are known to escape, each verified by running:
+> > Four boundaries are known to escape, each verified by running (re-verified 2026-09-09):
 > >
 > > 1. **A function value entering a slot** — argument, return, record field, element.
 > > 2. **An instance method declaring an effect its class signature does not**, so callers
 > >    dispatching through the class inherit the class's weaker claim.
-> > 3. **A zero-arg call on a local callee** — `let t = io_thunk in t()`. A nullary function
-> >    has no arrow to carry an effect at all.
-> > 4. **A call through an effect-variable parameter under a pure declaration** —
+> > 3. **A call through an effect-variable parameter under a pure declaration** —
 > >    `fn pure_apply(g: Int -> Int !{e}, n: Int) -> Int = g(n)` is accepted;
 > >    `--phase effects` reports it `declared pure, inferred !{$e30}`, and passing an
 > >    `!{IO}` function runs the IO.
-> > 5. **A top-level `let` initializer.** `let seeded = shout(41)` runs IO at startup;
+> > 4. **A top-level `let` initializer.** `let seeded = shout(41)` runs IO at startup;
 > >    §5.2 prohibits it normatively and nothing checks it. `--phase effects` does not
 > >    enumerate top-level `let`s, so the census does not see it either.
 > >
-> > A sixth is adjacent rather than a boundary: an **unrecognised effect label** parses as
+> > Adjacent rather than a boundary: an **unrecognised effect label** parses as
 > > an effect *variable*, so `!{NOPE}` type-checks and laundering through it is accepted —
 > > rule 9 admits no such form, and enforcement has not caught up with the rule.
 > >
-> > 1, 2, 4 and the label gap are `docs/effect-subsumption-v0.md`, which carries the
-> > replacement text for properties 2 and 3. 3 is a different bug —
-> > `docs/nullary-type-collapse-v0.md` — and no effect check reaches it. 5 couples to the
-> > value restriction and is tracked in `BACKLOG.md`.
+> > A fifth boundary escaped when this correction was first written (2026-09-07): a
+> > zero-arg call on a local callee, `let t = io_thunk in t()`. The nullary type collapse
+> > fix closed it — a zero-parameter function now has a `() -> T` arrow that carries its
+> > effect — and the probe is rejected under rule 8 (`docs/nullary-type-collapse-v0.md`).
+> >
+> > 1, 2, 3 and the label gap are `docs/effect-subsumption-v0.md`, which carries the
+> > replacement text for properties 2 and 3. 4 couples to the value restriction and is
+> > tracked in `BACKLOG.md`.
 > >
 > > Until those land, the enforced guarantee is narrow and is best stated negatively: a
 > > declaration is checked against **the effects its own body's calls infer**, and an
-> > effect that arrives through a function value — as an argument, a class dispatch, a
-> > nullary thunk, or an effect variable — does not participate in that inference. A
-> > pure signature is therefore evidence about the body as written, not a guarantee about
-> > what runs.
+> > effect that arrives through a function value — as an argument, a class dispatch, or an
+> > effect variable — does not participate in that inference. A pure signature is
+> > therefore evidence about the body as written, not a guarantee about what runs.
 >
-
 > Which check covers which rule:
 >
 > - **8** and **11** are one check. Rule 11 ("a pure function body may not call `!{IO}`

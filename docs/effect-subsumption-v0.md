@@ -1,8 +1,11 @@
 # Effect subsumption at arrow positions (v0)
 
-Status: **DESIGN, awaiting approval.** Revision 5 (2026-09-08). Adds part 0 after a review
-found part 1 has a one-token bypass without it. Revision 4 narrowed the scope: what was
-part 4 is a separate bug and has moved to `docs/nullary-type-collapse-v0.md`.
+Status: **DESIGN, awaiting approval.** Revision 6 (2026-09-09). The nullary type collapse
+landed on master (`docs/nullary-type-collapse-v0.md`, Option A′): the zero-arg boundary
+revision 4 excluded is now **closed** (§6.6), and the new `TThunk` arrow is a second
+comparison site part 1 must cover (§6.1). Revision 5 added part 0 after a review found
+part 1 has a one-token bypass without it. Revision 4 narrowed the scope: what was part 4
+is a separate bug, moved to `docs/nullary-type-collapse-v0.md` — and fixed there.
 
 The fix has **four parts**. No one subsumes another. Each review round found one more
 boundary, so treat this list as *known incomplete*: revision 1 had only part 1, revision 2
@@ -23,19 +26,26 @@ a prerequisite, not a peer:** part 1 is unsound without it (§6.0), so they land
 
 | part | in-tree | downstream | note |
 |---|---|---|---|
-| 0 | 0 | 0 | every effect annotation in `stdlib/`, `examples/`, `tests/`, `bench/` enumerated 2026-08-16: only `IO` (2020) and lowercase variables (69). Open question `!{}`, written in three tests — decide with this change |
+| 0 | 0 | 0 | every effect annotation in `stdlib/`, `examples/`, `tests/`, `bench/` re-enumerated 2026-09-09: `IO` (2596) and lowercase variables (81); every other spelling sits in a deliberately-ill-formed `type_error` fixture or a compiler comment. Open question `!{}`, written in three tests — decide with this change |
 | 1 | 0 | 0 | 2 flagged sites, both the safe direction (§5) |
 | 2 | 0 | 0 | concrete joins only; variable-effect joins unmeasured |
-| 3 | 0 | 0 | **no method-level effect annotation exists anywhere** — 259 in-tree class/instance method signatures and 3 downstream, all pure, so no instance can differ from its class |
+| 3 | 0 | 0 | one method-level effect annotation exists as of this change: `test_effect_polymorphic_class_method.spr` declares `!{e}` on a class method and its instances alike, which §6.1a's relation accepts — so still zero. Every other class/instance method signature (259 in-tree, 3 downstream, measured 2026-09-08) is pure |
 
 Part 2's zero is for the corpus as it stands; the mechanism must still newly reject
 §6.5's currently-legal example, which is a correctness requirement rather than a
 migration cost.
 
-Corrected in this revision: former part 4 was not an effect bug and its stated mechanism
-was not implementable (§6.6); §6.4's covariance recommendation is **unsound for `Ref`**
-and is replaced by a per-constructor rule (§6.4); §7's "no IR change" promise is now true
-*because* the scope narrowed, and says what it excludes.
+Corrected in revision 6: the zero-arg escape is closed on master, so the boundary
+inventory (§8) and the property-2 replacement (§10) no longer list it; part 1 gains the
+`unify_tthunk` site (§6.1); §6.1a's declared-vs-declared comparison must be total over
+declared effects, with its variable/variable cell now pinned by an in-tree test (§6.1a);
+and the line-number citations revision 4 corrected had rotted again after one rebase, so
+they are gone rather than re-corrected (§6.1a, §6.2).
+
+Corrected in revision 4, retained: former part 4 was not an effect bug and its stated
+mechanism was not implementable (§6.6); §6.4's covariance recommendation is **unsound for
+`Ref`** and is replaced by a per-constructor rule (§6.4); §7's "no IR change" promise is
+now true *because* the scope narrowed, and says what it excludes.
 
 Corrected in revision 3, retained: §6.5's "no GLB is needed" was **wrong** and its
 six-site inventory was the **wrong ontology** (§6.5); §6.1a's bare-name lookup is
@@ -74,8 +84,7 @@ The cause is normative. `docs/spec-v0.md` §7, note property 2:
 > acceptance never depends on effect inference reaching a particular answer mid-way.
 > Rejection happens at the declaration boundary and nowhere else.
 
-Implemented at `unifier.unify_arrow_effects` (`unifier.sprout:425`), which swallows the
-`Err`. "Rejection happens at the declaration boundary and nowhere else" is exactly the
+Implemented at `unifier.unify_arrow_effects`, which swallows the `Err`. "Rejection happens at the declaration boundary and nowhere else" is exactly the
 sentence that permits the laundering: a function value crosses boundaries that are never
 declaration boundaries.
 
@@ -214,10 +223,12 @@ hole in one token**, and the resulting program is conformant against the amended
 (§10). A guarantee with a one-token opt-out is not a guarantee.
 
 **Mechanism.** Reject any label that is neither `IO` nor a lowercase effect variable, where
-`effect_from_maybe_labels` builds the `Effect`. Migration cost is zero, already measured
-(header table). `docs/spec-v0.md` §7 rule 9 already admits only three annotation forms, so
-this rejects nothing rule 9 ever permitted — it closes the gap between the rule and its
-enforcement rather than adding a rule.
+the `Effect` is built. Two functions do that — `infer.effect_from_maybe_labels` for source
+annotations and `iface_codec`'s private copy for interface decode — and the rejection goes
+in both, or a hand-edited interface file smuggles what source cannot spell. Migration cost
+is zero, already measured (header table). `docs/spec-v0.md` §7 rule 9 already admits only
+three annotation forms, so this rejects nothing rule 9 ever permitted — it closes the gap
+between the rule and its enforcement rather than adding a rule.
 
 **Decide `!{}` in the same change.** The empty row is written in three tests
 (`test_eta_forwarding.spr` ×2, `test_devirt_classmethods.spr`) and evidently means "pure",
@@ -238,6 +249,17 @@ unified. Confirmed across eight: call argument, inline lambda argument, function
 record field, ADT constructor payload, tuple component, list element, and `wrap` payload.
 `unify_tfunc_owned` delegates to it, so one check there covers all of them and no
 per-site enumeration is needed for coverage *of arrow comparisons*.
+
+**Revision 6: there are now two arrow constructors, so two comparison sites.** The
+nullary landing added `types.TThunk ret eff` — a zero-parameter arrow with its own effect
+slot — unified in `unifier.unify_tthunk`, which `unify_tfunc` never sees. Part 1's
+directional check therefore goes in both: at a thunk the effect sits at result depth, so
+it is compared at the *current* polarity with no flip (there is no parameter to flip on),
+and §6.5's join takes the LUB at a joined thunk's effect slot the same way. Without the
+thunk arm, an `!{IO}` thunk value entering a pure `() -> T` slot re-opens §1's hole at
+arity 0 — undoing exactly what the nullary fix bought. The measurement in §4 predates
+`TThunk` and does not cover it; thunk-typed slots did not exist to be measured, so the
+zero there is inherited, not observed.
 
 ### 6.1a But an effect can cross without any arrow comparison — BLOCKER
 
@@ -269,8 +291,8 @@ effects — no inference and no unification involved:
 
 - The class method's declared effect is already in scope. `register_class_method`
   (`infer.sprout`) builds the class method's scheme from its `effects_maybe` and
-  registers it under the bare method name, and that registration happens at `:7504`,
-  before `check_instance_methods` at `:7510`. So inside `check_instance_method` the class
+  registers it under the bare method name when the `ClassDecl` is processed — before any
+  of that class's instances are checked. So inside `check_instance_method` the class
   effect is `types.scheme_effects(dict_get(name, env))`.
 - The instance method's declared effect is `eff_maybe`, already threaded through
   `instance_method_checked`.
@@ -302,13 +324,32 @@ earlier draft described. `class_method_mode_error` shows the lookup pattern but
 inherits the same bare-name weakness.
 
 Note what this does **not** duplicate: rule 8 already checks an instance method's *body*
-against its *own* declaration (`effect_pure_instance_method_does_io.spr`, cited at
-`:9339`). The missing edge is own-declaration against class-declaration. Both are needed;
-neither implies the other.
+against its *own* declaration (`effect_pure_instance_method_does_io.spr`). The missing
+edge is own-declaration against class-declaration. Both are needed; neither implies the
+other.
 
 An effect variable on the class method (`class ... fn calc(x: a) -> Int !{e}`) is the
 same check with the same relation, since a variable is not above a concrete effect —
 consistent with §8's first arm.
+
+**And this comparison must be total over declared effects, by §6.0's own principle.** Each
+side is one of `Pure`, `IO`, or a variable (a `Row` on either side is part 0's hard-error,
+as in §6.3), which is nine cells, and the sentence above decides only some of them. Two
+are worth pinning now:
+
+- **variable / variable must accept** — a class declaring `!{e}` with instances declaring
+  `!{e}` is exactly `test_effect_polymorphic_class_method.spr`, added alongside
+  `docs/effect-polymorphism-policy-v0.md`; a check that rejects that cell breaks an
+  in-tree test on landing day.
+- **`Pure` class / variable instance is §8's second shape reached from the class side** —
+  an instance whose effect depends on its own arrow parameters, dispatched through a class
+  that promises purity. It needs the same quantified-vs-leaked guard §8 describes, and
+  deciding it belongs to the implementing PR, stated in the fixture set rather than
+  defaulted into.
+
+The remaining cells follow from `instance ⊑ class` with `pure ⊑ e ⊑ IO` read pointwise;
+write the table out in the implementation and keep it total, because §6.0 is the record of
+what an unspecified cell costs.
 
 `docs/effect-enforcement-v0.md` §13.7 already records that a class method signature has
 no body and so records no `EffectReport`; this is the same blind spot reached from the
@@ -340,12 +381,14 @@ convention. Classification of the 36 sites (35 in `infer.sprout`, one in
 
 > **The concrete site list must be REGENERATED at implementation time, and this table is
 > deliberately not keyed on line numbers.** Revision 4 carried a line-numbered version whose
-> citations were wrong on the tree it shipped against — `merge_effects` is at `:1044`, not
-> `:766`; `register_class_method` `:9641`, not `:9170`; `unify_ok` `:379`, not `:394`; only
-> `unify_arrow_effects:425` was right. Since the audit *executes from* this classification,
-> a stale table is worse than none: it reads as a completed survey. Regenerate by grepping
-> `unify_types(` and classifying each hit, and record the result in the implementing PR
-> rather than here, where it rots. The counts above are the shape to expect, not a checklist.
+> citations were wrong on the tree it shipped against; revision 5 corrected them; one master
+> rebase later the corrected numbers had rotted too, so revision 6 removed them — this
+> document now names compiler functions, never compiler lines. Since the audit *executes
+> from* this
+> classification, a stale table is worse than none: it reads as a completed survey.
+> Regenerate by grepping `unify_types(` and classifying each hit, and record the result in
+> the implementing PR rather than here, where it rots. The counts above are the shape to
+> expect, not a checklist.
 
 So there *is* a dominant convention and an earlier draft of this section overstated the
 chaos: it claimed "only the call site follows" the left=expected convention documented in `unifier.sprout`, which is wrong — the pattern-checking sites follow it too. The
@@ -584,34 +627,24 @@ So LUB at the `if`-join fixes `if` alone. The audit needs a rule keyed on *accum
 widen wherever a result variable is folded over peers — rather than a list of six sites.
 §9 needs match-order and element-order fixture pairs, not just the `if` pair.
 
-### 6.6 Zero-arg calls — REMOVED from this design, revision 4
+### 6.6 Zero-arg calls — removed in revision 4, CLOSED on master in revision 6's window
 
 Revision 3 added a fourth part here: `fn launder() -> Int = let t = io_thunk in t()`
-compiles, links and prints, with `--phase effects` reporting `declared pure, inferred
-pure`. That program is real and still broken. It is not part of this design, for two
-reasons found on 2026-09-07.
+compiled, linked and printed, with `--phase effects` reporting `declared pure, inferred
+pure`. Revision 4 removed it — its stated mechanism ("read the arrow's effect at
+`argc <= 0`") read an arrow that did not exist, and the collapse it sat on was a type bug
+producing two non-effect symptoms, one of them memory-unsafe. It moved to
+`docs/nullary-type-collapse-v0.md` as a prerequisite this design explicitly did not close.
 
-**Its stated mechanism does not exist.** Revision 3 said "read the arrow's effect at
-`argc <= 0` rather than returning `Pure`". There is no arrow. `--phase check` prints
-`main.io_thunk : Int !{IO}` against `main.io_unary : Int -> Int !{IO}` — a nullary
-function's type *is* its return type, and the effect sits on the `Scheme` with nothing in
-the type to carry it.
+That split has since been vindicated: the collapse landed on master 2026-09-08 (Option
+A′ — `types.TThunk ret eff`, a real zero-parameter arrow carrying its own effect), and
+the zero-arg laundering is closed. Re-verified 2026-09-09 by re-running revision 3's
+probe: `launder` is now rejected with `performs IO but is declared pure` under rule 8.
 
-**It is not an effect bug.** The same collapse means a nullary function value and a plain
-`Int` are one type, which produces two symptoms that have nothing to do with effects: a
-function reference passed where an `Int` is expected reaches integer arithmetic as a
-closure handle, and `fn f(x: Int) -> Int = x()` type-checks and segfaults on
-`inttoptr`-then-call. No effect check reaches either.
-
-Moved to `docs/nullary-type-collapse-v0.md`, filed `P1`. It is the arity-0 corner of an
-already-open language question — whether function types encode arity (`BACKLOG.md`, the
-`h(1)(2)` entry; `docs/currying-and-pipe-decision-v1.md` Package C-a) — and belongs with
-that decision, not this one.
-
-**Nothing in parts 1–3 depends on it.** Their boundaries are all comparisons between two
-effects that both exist. The reverse is not true: the nullary fix is a prerequisite for
-closing the zero-arg laundering, and this design does not close it. Say so when this
-lands, or the purity guarantee will be read as complete when one shape still escapes.
+Two consequences flow back into this design, both incorporated above: the boundary
+inventory no longer lists a zero-arg escape (§8; §10's property-2 text), and part 1 gains
+the `unify_tthunk` comparison site (§6.1) — a thunk is an arrow now, so part 1 must check
+it like one or re-open at arity 0 exactly the hole the nullary fix closed.
 
 ## 7. Syntax, types, and errors
 
@@ -632,8 +665,8 @@ positions, no AST. An earlier draft promised
 … the parameter `f` of `list_map` is declared `Int -> Int` …
 ```
 
-which cannot be emitted: the callee's whole arrow is unified in ONE `unify_types` call
-in one `unify_types` call, so *which* parameter failed is not known without decomposing
+which cannot be emitted: the callee's whole arrow is unified in ONE `unify_types` call,
+so *which* parameter failed is not known without decomposing
 argument unification per-parameter or threading an error context. `unifier.list_vec_hint`
 exists for exactly this reason — the unifier can only speak name-agnostically.
 
@@ -784,9 +817,10 @@ should be costed with this change rather than discovered by the first user.
   > that constructor's parameter is covariant; a constructor whose operations take the
   > parameter as an argument — `Ref`, `MutVec`, `MutMatrix` — is invariant in it.
   >
-  > Two positions are **not** covered and are stated so the property is not read as
-  > total: a nullary function, which has no arrow to carry an effect, and a top-level `let`
-  > initializer, which §5.2 prohibits from being effectful but which nothing checks.
+  > One position is **not** covered and is stated so the property is not read as total: a
+  > top-level `let` initializer, which §5.2 prohibits from being effectful but which
+  > nothing checks. A zero-parameter function carries its effect on its `() -> T` arrow
+  > and is compared like any other arrow.
 
   **Property 3** currently ends "Every imprecision in effect inference must therefore fail
   towards accepting a program, not rejecting one." As written that forbids this design:
@@ -812,7 +846,7 @@ should be costed with this change rather than discovered by the first user.
   **Landed already, ahead of the implementation:** the enforcement note's opening claim
   that "a missing `!{IO}` now means the compiler has verified the function performs no IO"
   was false and is corrected in place, because a false normative claim should not wait on
-  a fix. It now scopes the guarantee to a declaration's own body and names the three
+  a fix. It now scopes the guarantee to a declaration's own body and names the four
   escaping boundaries. That correction is independent of this design and stands whether or
   not it is approved.
 - `docs/effect-enforcement-v0.md` — add a section recording that §14's premise was
