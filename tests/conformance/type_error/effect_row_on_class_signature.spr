@@ -1,0 +1,24 @@
+module main
+
+# A row on the CLASS side only, and this check is the only thing that reaches it.
+#
+# Its twin effect_row_on_class_method.spr writes the row on BOTH sides, so the
+# instance's own declaration records an EffectReport and rule 9 reports it. A
+# class method signature has no body and so records no report at all
+# (docs/effect-enforcement-v0.md §13.7) — declining a class-side row here means
+# declining it everywhere, which let `pure_user` below run the IO.
+
+class Quiet a
+  fn calc(x: a) -> Int !{IO, e}
+
+type Q = Q
+
+instance Quiet Q
+  fn calc(x: Q) -> Int !{IO} =
+    do
+      print("io")
+      1
+
+fn pure_user() -> Int = calc(Q)
+
+fn main() -> Unit !{IO} = print(int_to_string(pure_user()))

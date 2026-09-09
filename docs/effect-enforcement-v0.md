@@ -833,13 +833,31 @@ only case that escapes. Left as-is: enforcement lives on the declaration-boundar
 adding a second, body-less check path for class signatures is a larger change than the escape
 justifies.
 
-**Update 2026-09-09.** The body-less class signature is now read, though not for rule 9: an
-instance method's declared effect is compared against its class method's, so an instance may
-promise less effect than its class and never more (`docs/effect-subsumption-v0.md` §6.1a,
-spec §7 rule 8). That gap was the same blind spot reached from the instance side — this section
-records that a class signature carries no `EffectReport`, and the missing comparison was the
-consequence. The rule-9 escape above is unchanged: a class declared and never instantiated still
-escapes, because the new check runs at the `instance` declaration.
+**Update 2026-09-09.** The body-less class signature is now read, at the `instance`
+declaration, and the limitation above narrows in two ways.
+
+An instance method's declared effect is compared against its class method's, so an instance
+may promise less effect than its class and never more (`docs/effect-subsumption-v0.md`
+§6.1a, spec §7 rule 8). That gap was this same blind spot reached from the instance side:
+a class signature carries no `EffectReport`, and the missing comparison was the consequence.
+
+And **one rule-9 clause is now read off the class signature itself** — a multi-label row.
+It has to be: the row is what that comparison would otherwise rank, and the "someone else
+reports it" assumption that holds for the *instance* side (which has a body, hence a report)
+is exactly what this section says is false for the class side.
+
+The two clauses now fail differently, verified by running:
+
+| class method declares | with an instance | class only |
+|---|---|---|
+| `!{IO, e}` (row) | rejected, **naming the class method** | accepted — the escape above |
+| `!{e}` … `!{d}` (singleton) | rejected, naming the *instance*'s own signature | accepted — the escape above |
+
+So the singleton clause is still not read off the class signature; it is caught, as this
+section already said, because every instance is rejected on its own signature. The row is
+the one clause where that indirect route does not exist — an instance may spell a
+conformant `!{IO}` under a class that spelled a row — which is why it needed the direct
+check. The escape is unchanged for a class declared and never instantiated.
 
 Full suite green, 51/51 examples, `ir-golden-diff` 0 differences (a check-only change emits no
 codegen), and the compiler bootstraps itself to a fixed point under the corrected rule.

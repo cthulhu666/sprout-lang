@@ -1783,6 +1783,13 @@ Effect note for v0:
    This compares two **declarations**. It does not subsume the first sentence, which
    checks an instance method's body against its own annotation, and neither implies the
    other: in every program this rule rejects, the body and its own annotation agree.
+
+   **The guarantee is about the two declarations, not about what runs.** Where both sides
+   declare a variable, property 3 below still applies to each of them independently: an
+   instance declaring `!{e}` may have a body that performs IO, and a caller may
+   instantiate `e` at purity. That is rule 8's standing variable exemption — a plain
+   `fn f(x: Int) -> Int !{e}` whose body prints launders the same way, with no class
+   involved — and this rule neither widens nor narrows it.
 9. Function types may quantify a singleton effect variable `!{e}`; use sites
    instantiate it with either purity or a concrete closed effect supported in v0.
    **Singleton is a limit, not a description**: a signature may name at most one

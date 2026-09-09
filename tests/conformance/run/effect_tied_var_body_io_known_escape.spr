@@ -1,0 +1,42 @@
+module main
+
+# A KNOWN ESCAPE, pinned so it is visible rather than incidental.
+#
+# Class and instance both declare `!{e}` — the accept cell of spec §7 rule 8's
+# instance/class comparison — and the instance body performs IO, so `pure_user`
+# is declared pure and prints. This is NOT that comparison failing: rule 8's
+# standing variable exemption (spec §7 property 3) is the channel, and the
+# control below launders identically with no typeclass anywhere.
+#
+# It sits one keystroke from effect_instance_weakens_class_ok.spr's `Zeroed`
+# class, which is exactly why it needs its own file: nothing there marks where
+# the accept cell stops guaranteeing anything.
+#
+# docs/effect-subsumption-v0.md part 1 is what closes the channel. When it lands
+# this file must fail, and that failure is the signal to retire it.
+
+class Zeroed a
+  fn zero(x: a) -> Int !{e}
+
+type C = C
+
+instance Zeroed C
+  fn zero(x: C) -> Int !{e} =
+    do
+      print("via class")
+      7
+
+# The control: same laundering, no class, no instance.
+fn plain(x: Int) -> Int !{e} =
+  do
+    print("via plain fn")
+    9
+
+fn pure_user() -> Int = zero(C)
+
+fn pure_plain() -> Int = plain(1)
+
+fn main() -> Unit !{IO} =
+  do
+    print(int_to_string(pure_user()))
+    print(int_to_string(pure_plain()))
