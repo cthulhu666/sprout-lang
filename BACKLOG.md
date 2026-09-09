@@ -20,7 +20,7 @@ Legend:
   `fn pure_map(xs: List Int) -> List Int = list_map(shout, xs)` runs IO and reports
   `declared pure, inferred pure`; an instance may also strengthen its class's effect, and a
   pure declaration may call an `!{e}` parameter. Four parts including unknown-label rejection
-  above; migration cost measured zero on 127 in-tree + 199 downstream files.
+  below; migration cost measured zero on 127 in-tree + 199 downstream files.
   `docs/effect-subsumption-v0.md`.
 - [ ] `P2` **`Foldable`'s `step` slot should be effect-polymorphic; `cond` must not be.** The policy
   in `docs/effect-polymorphism-policy-v0.md` admits `!{e}` where the contract pins order and

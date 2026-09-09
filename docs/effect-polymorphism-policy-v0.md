@@ -17,9 +17,10 @@ the two places that tried to explain it are both wrong:
 - `stdlib/prelude.sprout:830-832` attributed it to the dispatcher: "an effectful predicate would need
   an effect row on the class method, which the dispatcher does not carry."
 
-Both are disproved by a fifteen-line probe (§7). Both are also the wrong *kind* of reason: they cite
-an implementation limit for what is a contract decision. If the limit were lifted tomorrow, neither
-tells you what the signature should then be.
+Both are disproved by a fifteen-line probe (§7), and both places are rewritten in the change that
+adds this document — the quotes above are what they said. Both are also the wrong *kind* of reason:
+they cite an implementation limit for what is a contract decision. If the limit were lifted
+tomorrow, neither tells you what the signature should then be.
 
 ## 2. Goals / non-goals
 
