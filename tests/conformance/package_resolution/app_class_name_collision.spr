@@ -1,0 +1,26 @@
+module main
+import demo.enc_loud as loud
+import demo.enc_quiet as quiet
+
+# Two classes sharing a SHORT name across modules. Both instances declare exactly
+# what THEIR class declares, so spec §7 rule 8's instance/class comparison must
+# accept both — docs/effect-subsumption-v0.md §6.1a.
+#
+# It lives here because the collision needs two sibling modules, which only a
+# package root gives. A short-name-only key collapses the two classes into one
+# entry and judges `loud.Enc`'s instance against `quiet.Enc`'s pure effect,
+# rejecting a legal program and naming a class that declares the opposite.
+
+type L = L
+type Q = Q
+
+instance loud.Enc L
+  fn enc(x: L) -> Int !{IO} =
+    do
+      print("loud")
+      1
+
+instance quiet.Enc Q
+  fn enc(x: Q) -> Int = 2
+
+fn main() -> Unit !{IO} = print("done")

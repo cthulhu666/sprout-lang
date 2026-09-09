@@ -58,5 +58,19 @@ else
   fail=1
 fi
 
+# Class-name collision across roots: two modules declaring a class with the same
+# SHORT name and different declared effects. Rule 8's instance/class effect check
+# keys on the class, and a short-name-only key collapses the two — rejecting a
+# legal program while naming a class that declares the opposite effect.
+# Here because the shape needs two sibling modules, which needs a package root.
+col="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_class_name_collision.spr" 2>&1)"
+if ! errors "$col" >/dev/null; then
+  echo "PASS collision: same-short-named classes from two modules judged separately"
+else
+  echo "FAIL collision: legal program rejected — class-keyed effect lookup collapsed two classes"
+  errors "$col" | head -3
+  fail=1
+fi
+
 [ "$fail" -eq 0 ] && echo "==> package-resolution gate: OK" || echo "==> package-resolution gate: FAILED"
 exit $fail

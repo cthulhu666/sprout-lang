@@ -1,0 +1,6 @@
+module demo.enc_loud
+
+# Half of the class-name collision fixture: two modules declare a class with the
+# same SHORT name and different declared effects. See app_class_name_collision.spr.
+export class Enc a
+  fn enc(x: a) -> Int !{IO}
