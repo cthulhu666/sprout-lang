@@ -889,12 +889,6 @@ Legend:
   representation layer:** a method-level constraint inside a class is a parse error (`Expected }`)
   and there is no `forall` surface at all. Same root cause as `traverse`/`sequence` below — one
   surface change unblocks both; sequence them together.
-- [~] `P1` **`++` still hardcodes `String`/`List` in codegen.** The parser/infer half landed (`++`
-  desugars to `append`, instance resolution matches on the head constructor), but
-  `ast_to_ir.translate_append_operands` emits `IRConst 0` for every other concrete `Semigroup` type,
-  so `dict ++ dict` and `vec ++ vec` silently miscompile to null and crash despite the checker
-  resolving the correct witness. Fix: consume the discarded witness, keep the `String`/`List`
-  peepholes.
 - [~] `P1` **`__unresolved_*` dictionary sentinel leak.** The user-facing symptom (a SIGSEGV when a
   nested constrained dictionary is unsatisfiable) is fixed at check time by `resolve.sprout`, which
   rejects such programs before codegen. The sentinel *mechanics* — a single resolution path that
