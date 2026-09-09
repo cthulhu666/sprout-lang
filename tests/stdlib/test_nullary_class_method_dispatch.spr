@@ -5,11 +5,11 @@ import stdlib.test (check_eq, run_suite)
 # exercises the lowering path that reads `blank` out of a dictionary. Two
 # instances, because one dictionary chosen for both would still pass at one type.
 #
-# `fold_all` also passes `combine` unapplied, which is the eta-expansion path for
-# a PARAMETERISED method in value position. The nullary method cannot be passed
-# unapplied at all — `try_eta_in_class` gates on TFunc and a thunk falls through
-# to the unresolved sentinel (`BACKLOG.md` §7.5), so that shape is absent here
-# because it does not compile, not because it is uninteresting.
+# Value position is the second axis: `combine` passed unapplied is the
+# eta-expansion path for a PARAMETERISED method, `blank` passed unapplied the
+# same path for a nullary one. A nullary method's type is a `TThunk`, which
+# `lowering.try_eta_forwarded_without_class` must admit alongside `TFunc` — it
+# once gated on `TFunc` and this shape died as `__eta_unresolved_Blank_blank`.
 
 class Blank t
   fn blank() -> t
@@ -23,14 +23,35 @@ instance Blank String
   fn blank() -> String = ""
   fn combine(x: String, y: String) -> String = x ++ y
 
+fn run_thunk(th: () -> a) -> a = th()
+
 fn pad(x: t) -> t where Blank t = combine(blank(), combine(x, blank()))
 
 fn fold_all(xs: List t) -> t where Blank t = list_fold(combine, blank(), xs)
+
+# `blank` unapplied under a forwarded dict: the eta path, not a direct call.
+fn seeded(x: t) -> t where Blank t = combine(x, run_thunk(blank))
+
+# Two same-class constraints on different tvars. The forwarded slot is chosen by
+# the tvar head of the method's class position, which for a nullary method lives
+# in the RESULT type — a wrong choice runs the other instance's impl silently.
+fn seed_pair(x: a, y: b) -> (a, b) where Blank a, Blank b =
+  (combine(x, run_thunk(blank)), combine(y, run_thunk(blank)))
+
+fn seed_fst(x: a, y: b) -> a where Blank a, Blank b =
+  match seed_pair(x, y) with | (p, _) -> p
+
+fn seed_snd(x: a, y: b) -> b where Blank a, Blank b =
+  match seed_pair(x, y) with | (_, q) -> q
 
 fn main() -> Unit !{IO} =
   run_suite("nullary_class_method_dispatch", [
     check_eq("forwarded dict, Int", pad(7), 7),
     check_eq("forwarded dict, String", pad("x"), "x"),
     check_eq("nullary method as a fold seed, Int", fold_all([1, 2, 3]), 6),
-    check_eq("nullary method as a fold seed, String", fold_all(["a", "b"]), "ab")
+    check_eq("nullary method as a fold seed, String", fold_all(["a", "b"]), "ab"),
+    check_eq("nullary method in value position, Int", seeded(7), 7),
+    check_eq("nullary method in value position, String", seeded("x"), "x"),
+    check_eq("two constraints, slot picked by result tvar (Int)", seed_fst(7, "q"), 7),
+    check_eq("two constraints, slot picked by result tvar (String)", seed_snd(7, "q"), "q")
   ])
