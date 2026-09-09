@@ -545,4 +545,20 @@ fn main() -> Unit !{IO} =
     assert_true(state, "thunk-nested: declines rather than guessing a slot",
       str_starts_with(lowered_fn_first_arg_var(r_thunk_nested, "test"), "__eta_unresolved_"))
 
+    # A method whose class position has no tvar head — `from_int`'s parameter is
+    # `Int`, the class variable is in the result. With ONE constraint there is one
+    # slot and no choice to get wrong.
+    r_any_one <- run_lower("class Make a {\n  fn from_int(n: Int) -> a\n}\nfn test(f: (Int -> a) -> Int) -> Int where Make a = f(from_int)")
+    assert_true(state, "any-slot, one constraint: lowers ok", is_lower_ok(r_any_one))
+    assert_true(state, "any-slot, one constraint: resolves to the only slot",
+      str_starts_with(lowered_fn_lambda_inner_callee(r_any_one, "test"), "__tc_Make_0_"))
+
+    # An annotated parameter pins the tvar, so two constraints still resolve exactly
+    # here — the ambiguity needs the method to reach the site through a polymorphic
+    # helper, where its type is a fresh tvar. That shape is rejected; see
+    # tests/conformance/emit_error/ambiguous_forwarded_method.spr.
+    r_any_two <- run_lower("class Make a {\n  fn from_int(n: Int) -> a\n}\nfn test(f: (Int -> a) -> Int, g: (Int -> b) -> Int) -> Int where Make a, Make b = f(from_int)")
+    assert_true(state, "annotated param, two constraints: resolves by the pinned tvar",
+      str_starts_with(lowered_fn_lambda_inner_callee(r_any_two, "test"), "__tc_Make_0_"))
+
     summary(state)

@@ -1,0 +1,26 @@
+module main
+
+# The nullary counterpart of ambiguous_forwarded_method.spr. `blank`'s result IS
+# the class variable, so a single constraint resolves it by tvar head; a second
+# one puts `blank` in both slots while the occurrence's own type stays a fresh
+# tvar naming neither. Before this was rejected the first slot was taken, which
+# is right only when the occurrence happens to belong to the first constraint —
+# use it at the second, as `only_b` does, and an Int reaches String code.
+
+class Blank t
+  fn blank() -> t
+  fn combine(x: t, y: t) -> t
+
+instance Blank Int
+  fn blank() -> Int = 0
+  fn combine(x: Int, y: Int) -> Int = x + y
+
+instance Blank String
+  fn blank() -> String = ""
+  fn combine(x: String, y: String) -> String = x ++ y
+
+fn run_thunk(th: () -> a) -> a = th()
+
+fn only_b(x: a, y: b) -> b where Blank a, Blank b = combine(y, run_thunk(blank))
+
+fn main() -> Unit !{IO} = print(only_b(7, "q"))

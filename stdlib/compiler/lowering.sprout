@@ -1032,13 +1032,30 @@ fn find_forwarded_method_for_tvar(method_name: String, tvar_name: String, entrie
       else
         find_forwarded_method_for_tvar(method_name, tvar_name, rest)
 
+# Reached when the class position has no tvar head to key on. Only one candidate
+# slot makes the answer certain: which constraint an occurrence belongs to is not
+# recoverable here, since its type is a fresh tvar that no @eta_fwd marker names.
+# With several, any pick runs one instance's code at another's type, so decline and
+# leave the loud __eta_unresolved_ failure.
 fn find_forwarded_method_any(method_name: String, entries: List (String, Dict String)) -> Maybe String =
-  match entries with
+  match forwarded_method_impls(method_name, entries) with
   | Nil -> Nothing
+  | Cons impl_name rest -> if all_same_impl(impl_name, rest) then Just(impl_name) else Nothing
+
+fn forwarded_method_impls(method_name: String, entries: List (String, Dict String)) -> List String =
+  match entries with
+  | Nil -> Nil
   | Cons (_, method_map) rest ->
       match dict_get_method(method_name, method_map) with
-      | Just impl_name -> Just(impl_name)
-      | Nothing -> find_forwarded_method_any(method_name, rest)
+      | Just impl_name -> Cons(impl_name, forwarded_method_impls(method_name, rest))
+      | Nothing -> forwarded_method_impls(method_name, rest)
+
+# Several slots naming the SAME impl are still one answer — only distinct ones are
+# a choice this code cannot make.
+fn all_same_impl(impl_name: String, rest: List String) -> Bool =
+  match rest with
+  | Nil -> true
+  | Cons other more -> impl_name == other && all_same_impl(impl_name, more)
 
 fn find_eta_class_of_method(method_name: String, ctx: LowerCtx) -> Maybe String =
   match find_class_of_method(method_name, ctx_class_order(ctx)) with

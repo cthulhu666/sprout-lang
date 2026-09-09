@@ -32,17 +32,9 @@ fn fold_all(xs: List t) -> t where Blank t = list_fold(combine, blank(), xs)
 # `blank` unapplied under a forwarded dict: the eta path, not a direct call.
 fn seeded(x: t) -> t where Blank t = combine(x, run_thunk(blank))
 
-# Two same-class constraints on different tvars. The forwarded slot is chosen by
-# the tvar head of the method's class position, which for a nullary method lives
-# in the RESULT type — a wrong choice runs the other instance's impl silently.
-fn seed_pair(x: a, y: b) -> (a, b) where Blank a, Blank b =
-  (combine(x, run_thunk(blank)), combine(y, run_thunk(blank)))
-
-fn seed_fst(x: a, y: b) -> a where Blank a, Blank b =
-  match seed_pair(x, y) with | (p, _) -> p
-
-fn seed_snd(x: a, y: b) -> b where Blank a, Blank b =
-  match seed_pair(x, y) with | (_, q) -> q
+# A SECOND same-class constraint makes this shape unresolvable rather than harder:
+# both slots carry `blank` and the occurrence's type is a fresh tvar naming neither,
+# so it is rejected. See tests/conformance/emit_error/ambiguous_forwarded_nullary.spr.
 
 fn main() -> Unit !{IO} =
   run_suite("nullary_class_method_dispatch", [
@@ -51,7 +43,5 @@ fn main() -> Unit !{IO} =
     check_eq("nullary method as a fold seed, Int", fold_all([1, 2, 3]), 6),
     check_eq("nullary method as a fold seed, String", fold_all(["a", "b"]), "ab"),
     check_eq("nullary method in value position, Int", seeded(7), 7),
-    check_eq("nullary method in value position, String", seeded("x"), "x"),
-    check_eq("two constraints, slot picked by result tvar (Int)", seed_fst(7, "q"), 7),
-    check_eq("two constraints, slot picked by result tvar (String)", seed_snd(7, "q"), "q")
+    check_eq("nullary method in value position, String", seeded("x"), "x")
   ])
