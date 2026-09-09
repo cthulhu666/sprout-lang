@@ -39,6 +39,8 @@ import stdlib.compiler.sprout_ir as sprout_ir
 #   vector_mutset     — v->data[index] = value (plain store; Phase 2 GC's write
 #                       barrier will make this a trigger again — revisit then).
 #   vector_length     — returns v->len (pure read).
+#   vector_truncate   — zeroes v->data[n..len) and lowers v->len (plain stores;
+#                       no barrier, since a zero creates no old-to-young edge).
 # Keyed by exact runtime symbol: user functions never reuse a builtin name, and
 # polymorphic wrappers (mutvec_get, mutmatrix_get) route through vector_get and
 # are absent here, so they correctly stay triggers.
@@ -46,6 +48,7 @@ fn is_nonallocating_read(fname: String) -> Bool =
   fname == "vector_get_direct"
   || fname == "vector_mutset"
   || fname == "vector_length"
+  || fname == "vector_truncate"
 
 # B2 reach extension.  The Tier-1 CPR peephole rewrites a matched/do-bound
 # Maybe-returning read into an `_unboxed` { i64, i64 } extern (IRCallUnboxed2),

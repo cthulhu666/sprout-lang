@@ -8539,6 +8539,32 @@ long long vector_push(long long vec, long long value) {
   return 0;
 }
 
+/* Shorten to `n` elements, keeping the prefix.  The length is the only part of a
+ * shrink C has to do: it lives inside the VectorVal with no Sprout-visible
+ * handle, while the shifting is vector_get_direct + vector_mutset in a loop.
+ *
+ * The vacated slots are zeroed to keep spare capacity free of stale handles.
+ * This is insurance, not a fix: the collector sizes a vector's children by ->len,
+ * so a shortened vector already drops its tail, and nothing today reads
+ * data[len..cap) — vector_push overwrites data[len] before bumping ->len.  What
+ * it buys is that a future scanner sizing by ->cap, or a heap-walking tool,
+ * cannot dereference a swept pointer.  Zero BEFORE dropping ->len, so every slot
+ * in [0, len) is a valid handle at every instant; a zero reads as "no child"
+ * because sprout_gc_drain_marks skips a child whose heap lookup misses.
+ *
+ * In place, never into a fresh VectorVal: every copy of the handle must see the
+ * new length, the requirement vector_push documents for growth.  Allocates
+ * nothing, so neither argument needs rooting. */
+long long vector_truncate(long long vec, long long n) {
+  VectorVal* v = (VectorVal*)(uintptr_t)vec;
+  if (v == NULL) tcp_fail("vector_truncate: null vector");
+  if (n < 0) n = 0;
+  if (n >= v->len) return 0;  /* no effect, matching Rust's Vec::truncate */
+  for (long long i = n; i < v->len; i++) v->data[i] = 0;
+  v->len = n;
+  return 0;
+}
+
 long long vector_get_direct(long long vec, long long index) {
   VectorVal* v = (VectorVal*)(uintptr_t)vec;
   if (v == NULL) tcp_fail("vector_get_direct: null vector");

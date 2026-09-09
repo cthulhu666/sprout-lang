@@ -1,6 +1,6 @@
 # Growable `MutVec` — v0
 
-**Status:** shipped 2026-08-15, minimal surface. Behaviour is documented in
+**Status:** growth shipped 2026-08-15, shrinking 2026-09-09. Behaviour is documented in
 [builtins-reference.md](./builtins-reference.md#growing-a-mutvec); this document records the problem,
 the decisions, and what was deliberately left out.
 
@@ -150,11 +150,84 @@ following are known wants with known consumers, none blocking:
 - `mutvec_with_capacity(n)` / `mutvec_reserve(v, n)` — lets a caller that knows the size skip the
   regrowth entirely. Matters for per-frame stores, where the doubling reallocations are the whole
   cost.
-- `mutvec_pop(v) -> Maybe a`, `mutvec_truncate(v, n)`, `mutvec_clear(v)`. The downstream
-  `world_reset` is `truncate 0` written by hand, and individual removal is an open item in that
-  consumer's ECS docs for want of exactly this.
+- ~~`mutvec_pop(v) -> Maybe a`, `mutvec_truncate(v, n)`, `mutvec_clear(v)`~~ — shipped 2026-09-09,
+  along with `mutvec_remove` and `mutvec_insert`. See "Shrinking" below.
 
 Tracked in `BACKLOG.md`.
+
+## Shrinking (2026-09-09)
+
+`text_area` and the IDE's line buffer need to remove a line, and `BACKLOG.md` recorded that as
+needing a `vector_remove` builtin. It does not. A removal is two things — slide the tail down, and
+shorten the length — and only the second has no Sprout spelling, because `->len` lives inside the
+`VectorVal` whose backing array has no Sprout-visible handle. The shift is `vector_get_direct` +
+`vector_mutset` in a loop.
+
+**Decision — one builtin, `vector_truncate(v, n)`, scoped to the length.** `mutvec_remove` and
+`mutvec_insert` are ordinary stdlib code on top of it and of `vector_push`; `mutvec_pop`,
+`mutvec_truncate` and `mutvec_clear` fall out of the same call. `insert` needs nothing new at all —
+pushing the current last element is what lengthens the vector.
+
+The general test this applies: not *"is this operation primitive?"* but *"which byte of state does it
+change that Sprout cannot address?"* A `remove` looks primitive because it is one call in every
+other language's API; decomposed it is a loop Sprout can already write plus one field write it
+cannot.
+
+**Decision — the O(n) shift stays in Sprout.** A `memmove` builtin would be faster, and performance
+alone does not justify a builtin ("Builtin vs Stdlib" 6). At IDE scale a few thousand extern calls
+to delete a line is not a bottleneck; if a profile ever says otherwise, `vector_remove` can be added
+then with the measurement to justify it.
+
+**Decision — all four are total.** `remove` and `pop` return `Maybe a`; `insert` returns `Bool`. The
+first draft had `insert` panic, on the reasoning that it has no return value to report a miss in and
+that `mutvec_set` panics too. Both halves are wrong under guidelines.md §2, which is a *hard mandate*
+for `[Library]`: `panic` is for a violated internal invariant, explicitly "not for input the caller
+could plausibly supply", and an index is exactly that. That `mutvec_set` reaches a `tcp_fail` through
+`vector_mutset` is a pre-existing deviation, not a licence. `Bool` rather than `Maybe Unit` because a
+`<-` bind on a `Maybe` is a *fallible* bind — it would short-circuit the caller's block rather than
+discard, which is the opposite of what a caller ignoring the result wants.
+
+**Deviation, stated — argument order.** guidelines.md §6 wants the receiver last (`vec_get(index,
+vec)`). These take it first, matching the `mutvec_get`/`mutvec_set`/`mutvec_push` group they sit
+beside; the combinators in the same module (`mutvec_each`, `mutvec_fold`) are data-last as the rule
+asks. Splitting the difference *within* the indexed group would be worse than either convention
+applied consistently. Whether that group should move is a separate change to the whole API.
+
+**Decision — the vacated slots are zeroed.** This is insurance, not a fix, and the distinction is
+worth recording because the first draft of this change asserted it was a leak fix. It is not: the
+collector sizes a vector's children by `->len`, so a shortened vector already drops its tail, and
+nothing reads `data[len..cap)` — `vector_push` overwrites `data[len]` before bumping `->len`. What
+zeroing buys is that a future scanner sizing by `->cap`, or a heap-walking tool, cannot dereference
+a swept pointer. Go's `slices.Delete` zeroes for a stronger reason: Go's collector scans the backing
+array, so there it *is* a leak fix.
+
+Zero before lowering `->len`, so "every slot in `[0, len)` is a valid handle" holds at every instant
+rather than only at the ends. A zero is legal mid-loop: `sprout_gc_drain_marks` skips a child whose
+`sprout_heap_lookup` misses.
+
+**The price is that shrinking is O(len − n) rather than O(1)**, which matters most for `clear`: a
+caller emptying a large vector each iteration pays a full pass over the live region where a bare
+length store would be free. That is disclosed in `builtins-reference.md` rather than hidden, and it
+is the argument for revisiting the zeroing if a real caller ever measures it — the benefit is
+hypothetical and the cost is not.
+
+The safety of this builtin is a property of the *collector*, not of the operation. Under a moving
+collector, a stale handle left in spare capacity would be a pointer never forwarded — the same bits,
+silently wrong after the next collection. Non-moving is already load-bearing elsewhere
+(`sprout_runtime.c` says so at the sticky-mark-bit comment); this is one more place it is.
+
+### Prior art
+
+| language | is remove-by-index primitive? | returns | out of range |
+|---|---|---|---|
+| Rust `Vec` | `remove` and `truncate` are both `std` methods; the shift is `ptr::copy` inside | `remove` → `T`; `pop` → `Option<T>`; `truncate` → `()` | `remove` panics; `truncate` has no effect when `len >=` the current length |
+| Go `slices` | **No.** The language gives `append`/`copy`/`len`; `Delete[S ~[]E, E any](s S, i, j int) S` is a library function | the modified slice | — |
+| Java `ArrayList` | library method over `System.arraycopy` | `remove(int)` → the removed element | `IndexOutOfBoundsException` |
+
+Go is the closest analogue: the language exposes grow, copy and a length change, and removal is
+library code composed from them. That is the split adopted here. Rust settles `truncate`'s clamping
+behaviour, and Rust and Java agree that removal returns what it removed — free here, since the
+element is read to shift it anyway.
 
 ## Open question this does not answer
 
@@ -171,3 +244,22 @@ bounds against `len` rather than `cap`, including an index inside spare capacity
 `len == cap` vector from `mutvec_new`; two `mutvec_empty()` calls not sharing a buffer; and pushed
 `String` elements surviving regrowth, which exercises the collector scanning `data[0..len)`. Also
 run green under `SPROUT_GC_STRESS=1`.
+
+`tests/stdlib/test_mutvec_shrink.spr` — 58 assertions for the shrinking half. What they mostly pin
+is the *shift*, since that is the part written in Sprout: removal at the front, the middle and the
+last index (where the loop must run zero times rather than read past the end); insertion at `0`, in
+the middle, at `len`, into an empty vector, and across a regrowth, where the push inside `insert`
+reallocates mid-operation and the shift must run against the new buffer; insert-then-remove at the
+same index as an identity, which catches an off-by-one in either shift; an out-of-range remove or
+insert reporting the miss and leaving both length and contents alone, including that `len` is in
+range for an insert and `len + 1` is not; `truncate` clamping at both ends; a push after `clear`
+reading back rather than resurrecting; and removal seen through a handle copied beforehand, the
+same acceptance criterion growth has. Also run green under `SPROUT_GC_STRESS=1`.
+
+One group is there for the *lowering* rather than the arithmetic. `Maybe a` is CPR-able, so
+matching `mutvec_remove(v, i)` directly — the shape an author writes — routes to
+`mutvec_remove_worker` returning `{ tag, value }` unboxed, where the payload's rooting is governed
+by `IRCallUnboxed2` rather than by the heap `Just` the other assertions build. That is the path this
+change makes interesting, since the element leaves as a raw word at the moment the shift and
+truncate have erased its only other reference. `matched_cases` takes it with `String` elements and
+an allocation between the removal and the read.

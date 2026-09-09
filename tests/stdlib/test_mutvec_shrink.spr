@@ -1,0 +1,311 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import stdlib.mutable (MutVec, mutvec_new, mutvec_empty, mutvec_push, mutvec_at, mutvec_get, mutvec_set, mutvec_len, mutvec_fold, mutvec_insert, mutvec_remove, mutvec_pop, mutvec_truncate, mutvec_clear)
+
+# Shrinking a MutVec — `remove`, `pop`, `truncate`, `clear` — and the `insert`
+# that mirrors them. Design: docs/growable-mutvec-v0.md.
+#
+# Only the length change is a builtin (`vector_truncate`); the shifts are Sprout.
+# So what these assertions pin is mostly the SHIFT: that it moves every element
+# it should and no element it should not, in order.
+
+# Push the integers [i, n) in ascending order.
+fn push_range(v: MutVec Int, i: Int, n: Int) -> Unit !{IO} =
+  if i >= n then ()
+  else
+    do
+      _ <- mutvec_push(v, i)
+      push_range(v, i + 1, n)
+
+fn filled(n: Int) -> MutVec Int !{IO} =
+  do
+    v <- mutvec_empty()
+    _ <- push_range(v, 0, n)
+    v
+
+# Order-sensitive checksum: a permutation of the same elements gives a different
+# number, so a shift that scrambles rather than slides is visible.
+fn checksum(v: MutVec Int) -> Int !{IO} =
+  mutvec_fold(\ (acc, x) -> acc * 31 + x, 7, v)
+
+fn joined(v: MutVec Int) -> String !{IO} =
+  mutvec_fold(\ (acc, x) -> `${acc}${int_to_string(x)},`, "", v)
+
+fn joined_str(v: MutVec String) -> String !{IO} =
+  mutvec_fold(\ (acc, x) -> `${acc}${x},`, "", v)
+
+# Taken as an already-computed Maybe: inside a `do` block `x <- mutvec_remove(..)`
+# would fallible-bind and unwrap it, which is the case these assertions observe.
+fn or_else(m: Maybe Int, dflt: Int) -> Int =
+  match m with
+  | Just x -> x
+  | Nothing -> dflt
+
+# A remove whose result is not wanted. `_ <- mutvec_remove(..)` will not do: a
+# `<-` bind on a Maybe is a fallible bind, so it would return early from a Unit
+# block instead of discarding.
+fn discard(m: Maybe a) -> Unit = ()
+
+fn or_else_str(m: Maybe String, dflt: String) -> String =
+  match m with
+  | Just x -> x
+  | Nothing -> dflt
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    remove_cases(state)
+    matched_cases(state)
+    range_cases(state)
+    pop_cases(state)
+    truncate_cases(state)
+    insert_cases(state)
+    heap_cases(state)
+    summary(state)
+
+# ── remove ──────────────────────────────────────────────────────────────────
+
+fn remove_cases(state: TestState) -> Unit !{IO} =
+  do
+    # The middle case: the element leaves, the tail slides down, len drops by one.
+    mid <- filled(4)
+    assert_eq(state, "remove returns the element it removed",
+              or_else(mutvec_remove(mid, 1), 0 - 1), 1)
+    assert_eq(state, "remove shortens by one", mutvec_len(mid), 3)
+    m <- joined(mid)
+    assert_eq(state, "remove slides the tail down", m, "0,2,3,")
+
+    # The first element: every remaining element moves.
+    front <- filled(4)
+    assert_eq(state, "remove at 0 returns the head",
+              or_else(mutvec_remove(front, 0), 0 - 1), 0)
+    f <- joined(front)
+    assert_eq(state, "remove at 0 slides everything", f, "1,2,3,")
+
+    # The last element: nothing moves, only the length changes. This is the arm
+    # where the shift loop must run zero times rather than read past the end.
+    back <- filled(4)
+    assert_eq(state, "remove at the last index returns it",
+              or_else(mutvec_remove(back, 3), 0 - 1), 3)
+    b <- joined(back)
+    assert_eq(state, "remove at the last index moves nothing", b, "0,1,2,")
+
+    # A single-element vector empties.
+    one <- filled(1)
+    assert_eq(state, "remove the only element", or_else(mutvec_remove(one, 0), 0 - 1), 0)
+    assert_eq(state, "and the vector is empty", mutvec_len(one), 0)
+
+    # Repeated removal at the same index walks the vector down, and order is
+    # checked against a vector BUILT that way rather than against a literal.
+    walked <- filled(5)
+    _ <- discard(mutvec_remove(walked, 1))
+    _ <- discard(mutvec_remove(walked, 1))
+    expect <- mutvec_empty()
+    _ <- mutvec_push(expect, 0)
+    _ <- mutvec_push(expect, 3)
+    _ <- mutvec_push(expect, 4)
+    wc <- checksum(walked)
+    ec <- checksum(expect)
+    assert_eq(state, "two removes at the same index leave the right order", wc, ec)
+
+    # Removal is visible through a copy of the handle taken BEFORE it — the same
+    # requirement growth has, and the one that fails silently if `vector_truncate`
+    # ever shortened into a fresh VectorVal instead of in place.
+    orig <- filled(6)
+    let alias = orig
+    _ <- discard(mutvec_remove(orig, 0))
+    assert_eq(state, "an alias sees the shortened length", mutvec_len(alias), 5)
+    a0 <- mutvec_at(alias, 0)
+    assert_eq(state, "an alias sees the shifted contents", a0, 1)
+
+# Matching the call DIRECTLY, which is what an author writes and what the
+# helpers above deliberately avoid. It lowers differently: `Maybe a` is CPR-able,
+# so the call routes to `mutvec_remove_worker` returning `{ tag, value }` unboxed
+# rather than a heap `Just`. The payload therefore leaves the shift + truncate
+# that erased its only other reference as a raw word — so the element has to be a
+# heap value, and something has to allocate before it is read.
+fn taken(v: MutVec String, i: Int) -> String !{IO} =
+  match mutvec_remove(v, i) with
+  | Just x -> churned(x)
+  | Nothing -> "declined"
+
+fn churned(x: String) -> String !{IO} =
+  do
+    scratch <- mutvec_empty()
+    _ <- push_strings(scratch, 0, 60)
+    x
+
+fn popped(v: MutVec String) -> String !{IO} =
+  match mutvec_pop(v) with
+  | Just x -> churned(x)
+  | Nothing -> "empty"
+
+fn matched_cases(state: TestState) -> Unit !{IO} =
+  do
+    v <- mutvec_empty()
+    _ <- push_strings(v, 0, 12)
+    first <- taken(v, 0)
+    assert_eq(state, "a matched remove survives an allocation", first, "item-0")
+    mid <- taken(v, 3)
+    assert_eq(state, "and so does one from the middle", mid, "item-4")
+    last <- popped(v)
+    assert_eq(state, "a matched pop survives one too", last, "item-11")
+    assert_eq(state, "the vector shortened by all three", mutvec_len(v), 9)
+
+    empty <- mutvec_empty()
+    gone <- taken(empty, 0)
+    assert_eq(state, "a matched miss takes the Nothing arm", gone, "declined")
+
+fn range_cases(state: TestState) -> Unit !{IO} =
+  do
+    # Out of range is Nothing and changes nothing — the total half of the house
+    # split (`mutvec_get` is total, `mutvec_at` fails loudly).
+    v <- filled(3)
+    assert_eq(state, "remove past the end misses",
+              or_else(mutvec_remove(v, 3), 0 - 1), 0 - 1)
+    assert_eq(state, "remove at a negative index misses",
+              or_else(mutvec_remove(v, 0 - 1), 0 - 1), 0 - 1)
+    assert_eq(state, "a missed remove leaves the length alone", mutvec_len(v), 3)
+    kept <- joined(v)
+    assert_eq(state, "a missed remove leaves the contents alone", kept, "0,1,2,")
+
+    # Empty: `pop` reaches this through index -1, so it is one arm, not two.
+    e <- mutvec_empty()
+    assert_eq(state, "remove from empty misses", or_else(mutvec_remove(e, 0), 0 - 1),
+              0 - 1)
+    assert_eq(state, "pop from empty misses", or_else(mutvec_pop(e), 0 - 1), 0 - 1)
+
+# ── pop, truncate, clear ────────────────────────────────────────────────────
+
+fn pop_cases(state: TestState) -> Unit !{IO} =
+  do
+    v <- filled(3)
+    assert_eq(state, "pop returns the last element", or_else(mutvec_pop(v), 0 - 1), 2)
+    assert_eq(state, "pop shortens by one", mutvec_len(v), 2)
+    assert_eq(state, "pop again", or_else(mutvec_pop(v), 0 - 1), 1)
+    assert_eq(state, "and again", or_else(mutvec_pop(v), 0 - 1), 0)
+    assert_eq(state, "popping empties", mutvec_len(v), 0)
+    assert_eq(state, "one pop too many misses", or_else(mutvec_pop(v), 0 - 1), 0 - 1)
+
+fn truncate_cases(state: TestState) -> Unit !{IO} =
+  do
+    v <- filled(5)
+    _ <- mutvec_truncate(v, 2)
+    assert_eq(state, "truncate sets the length", mutvec_len(v), 2)
+    t <- joined(v)
+    assert_eq(state, "truncate keeps the prefix", t, "0,1,")
+
+    # A length at or past the end has no effect, matching Rust's `Vec::truncate`.
+    same <- filled(3)
+    _ <- mutvec_truncate(same, 3)
+    assert_eq(state, "truncate to the current length is a no-op", mutvec_len(same), 3)
+    _ <- mutvec_truncate(same, 99)
+    assert_eq(state, "truncate past the end is a no-op", mutvec_len(same), 3)
+    s <- joined(same)
+    assert_eq(state, "and leaves the contents alone", s, "0,1,2,")
+
+    # Negative clamps to zero rather than failing: there is no in-range answer to
+    # report and no return value to report it in.
+    neg <- filled(3)
+    _ <- mutvec_truncate(neg, 0 - 4)
+    assert_eq(state, "a negative length clamps to empty", mutvec_len(neg), 0)
+
+    c <- filled(4)
+    _ <- mutvec_clear(c)
+    assert_eq(state, "clear empties", mutvec_len(c), 0)
+    assert_eq(state, "a read after clear misses", or_else(mutvec_get(c, 0), 0 - 1),
+              0 - 1)
+
+    # The buffer is reused, not reallocated: pushing after a clear must write over
+    # the zeroed slots and read back, not resurrect what was there before.
+    _ <- mutvec_push(c, 42)
+    assert_eq(state, "push after clear starts a new length", mutvec_len(c), 1)
+    c0 <- mutvec_at(c, 0)
+    assert_eq(state, "push after clear reads back the new element", c0, 42)
+
+# ── insert ──────────────────────────────────────────────────────────────────
+
+fn insert_cases(state: TestState) -> Unit !{IO} =
+  do
+    mid <- filled(3)
+    assert_true(state, "insert reports that it inserted", mutvec_insert(mid, 1, 99))
+    assert_eq(state, "insert lengthens by one", mutvec_len(mid), 4)
+    m <- joined(mid)
+    assert_eq(state, "insert slides the tail up", m, "0,99,1,2,")
+
+    front <- filled(3)
+    _ <- mutvec_insert(front, 0, 99)
+    f <- joined(front)
+    assert_eq(state, "insert at 0 pushes everything up", f, "99,0,1,2,")
+
+    # At `len` insert is a push, which is the arm with no shift at all.
+    back <- filled(3)
+    _ <- mutvec_insert(back, 3, 99)
+    b <- joined(back)
+    assert_eq(state, "insert at the end appends", b, "0,1,2,99,")
+
+    e <- mutvec_empty()
+    _ <- mutvec_insert(e, 0, 5)
+    assert_eq(state, "insert into empty", mutvec_len(e), 1)
+    e0 <- mutvec_at(e, 0)
+    assert_eq(state, "and stores the element", e0, 5)
+
+    # Out of range reports false and changes nothing. `len` is IN range for an
+    # insert — that is the append — so the first index past it is `len + 1`.
+    oob <- filled(3)
+    assert_true(state, "insert past the end reports false",
+                ! mutvec_insert (oob, 4, 99))
+    assert_true(state, "insert at a negative index reports false",
+                ! mutvec_insert (oob, 0 - 1, 99))
+    assert_eq(state, "a refused insert leaves the length alone", mutvec_len(oob), 3)
+    untouched <- joined(oob)
+    assert_eq(state, "a refused insert leaves the contents alone", untouched, "0,1,2,")
+
+    # Insert then remove at the same index is the identity — the two shifts are
+    # mirror images, so this catches an off-by-one in either one of them.
+    rt <- filled(5)
+    was <- checksum(rt)
+    _ <- mutvec_insert(rt, 2, 99)
+    assert_eq(state, "round trip: remove returns what insert put in",
+              or_else(mutvec_remove(rt, 2), 0 - 1), 99)
+    now <- checksum(rt)
+    assert_eq(state, "insert then remove restores the vector", now, was)
+
+    # Insert across a regrowth: at len == cap the push inside `insert` reallocates
+    # mid-operation, so the shift must run against the NEW buffer.
+    grow <- mutvec_new(8, 1)
+    _ <- mutvec_insert(grow, 0, 99)
+    assert_eq(state, "insert that regrows keeps the length", mutvec_len(grow), 9)
+    g0 <- mutvec_at(grow, 0)
+    g8 <- mutvec_at(grow, 8)
+    assert_eq(state, "insert that regrows writes the hole", g0, 99)
+    assert_eq(state, "insert that regrows keeps the shifted tail", g8, 1)
+
+# ── heap elements ───────────────────────────────────────────────────────────
+
+fn push_strings(v: MutVec String, i: Int, n: Int) -> Unit !{IO} =
+  if i >= n then ()
+  else
+    do
+      _ <- mutvec_push(v, `item-${int_to_string(i)}`)
+      push_strings(v, i + 1, n)
+
+# The collector scans data[0..len), and a shrink puts slots outside it. What must
+# not happen is the reverse of the leak: an element still inside the length
+# collected because the shift left the only reference in a slot past the end.
+fn heap_cases(state: TestState) -> Unit !{IO} =
+  do
+    v <- mutvec_empty()
+    _ <- push_strings(v, 0, 30)
+    _ <- discard(mutvec_remove(v, 0))
+    _ <- discard(mutvec_remove(v, 0))
+    _ <- mutvec_truncate(v, 5)
+    # Allocate after the shrink, so a collection has somewhere to happen (and
+    # under SPROUT_GC_STRESS=1 it does) before the elements are read back.
+    churn <- mutvec_empty()
+    _ <- push_strings(churn, 0, 200)
+    assert_eq(state, "strings survive a shrink", mutvec_len(v), 5)
+    s <- joined_str(v)
+    assert_eq(state, "and keep their order and contents", s,
+              "item-2,item-3,item-4,item-5,item-6,")
+    assert_eq(state, "a removed string is returned intact",
+              or_else_str(mutvec_remove(v, 0), "?"), "item-2")

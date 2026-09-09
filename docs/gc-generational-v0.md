@@ -256,6 +256,16 @@ primitive)". Enumerated:
   > non-static function that writes into an existing object's payload
   > (`v->data[...] = `, `->value = `, and friends) and confirm each either carries
   > the barrier or is provably persistent.
+- **Writes into a live object, but not a barrier site: `vector_truncate`**
+  (added 2026-09-09, backing `mutvec_remove`/`truncate`/`clear`). It stores into an
+  already-allocated `VectorVal` — `data[i] = 0` over the vacated slots, then a lower
+  `->len` — so the grep above finds it, and it is listed here so the next reader does
+  not have to re-derive why it is absent from the line above. A NULL store creates no
+  old-to-young edge, and the `->len` write only *narrows* the scanned range. What a
+  card-marking or incremental design must still reason about is that second point: the
+  collector derives a vector's child count from `->len`, so this call retracts children
+  from an object mid-mutator, and the slots it retracts are zeroed rather than left
+  stale.
 - **Not barrier sites — the scheduler's stores into task structs**
   (`r->chan_pending`, `st->chan_pending`, `self->chan_pending`, `t->result` in
   `runtime/sprout_scheduler.c`). They are rooted by address (`/* rooted via
