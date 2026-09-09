@@ -11,7 +11,7 @@ module stdlib.mutable
 # (bundler.sprout:536 gives it `Nil` import specs), so a prelude wrapper pins its
 # extern. They are visible here implicitly.
 #
-# The four MUTABLE ones are declared below instead. They back `MutVec` and
+# The five MUTABLE ones are declared below instead. They back `MutVec` and
 # nothing else — the prelude never calls them — so under the rule "an extern lives
 # in the module that owns its type" this is where they belong. The split falls
 # exactly on the pure/`!{IO}` line.
@@ -21,14 +21,17 @@ module stdlib.mutable
 # by bare name once this module is in the bundle — which every `MutVec` user
 # already arranges by importing it.
 #
-# Two of them WRITE: `vector_mutset` and `vector_push`. Both are candidate
+# Two of them STORE A VALUE: `vector_mutset` and `vector_push`. Both are candidate
 # write-barrier sites for a future generational collector, and both carry the
 # ageprof hook that prices one. Every `MutVec`/`MutMatrix` mutation in this module
-# routes through those two, so there is no bypass.
+# routes through those two, so there is no bypass. `vector_truncate` writes too,
+# but only zeros and a length — it can create no old-to-young edge, so it needs no
+# barrier.
 extern fn vec_make_filled(n: Int, val: a) -> Vector a !{IO}
 extern fn vector_mutset(v: Vector a, i: Int, val: a) -> Unit !{IO}
 extern fn vector_get_direct(v: Vector a, i: Int) -> a !{IO}
 extern fn vector_push(v: Vector a, val: a) -> Unit !{IO}
+extern fn vector_truncate(v: Vector a, n: Int) -> Unit !{IO}
 
 # ---------------------------------------------------------------------------
 # MutVec — a 1-D mutable array (opaque; use the mutvec_* functions only)
@@ -109,6 +112,91 @@ export fn mutvec_set(v: MutVec a, i: Int, val: a) -> Unit !{IO} =
 # entry, so pushing from inside one of them is the caller's problem.
 export fn mutvec_push(v: MutVec a, val: a) -> Unit !{IO} =
   vector_push(mutvec_raw(v), val)
+
+# O(len - n) — every dropped slot is zeroed, so truncating to a SMALL `n` is the
+# expensive direction. Keeps the first `n` elements; `n` at or past the length has
+# no effect and a negative `n` empties. Like the growth above, the change happens
+# in place, so every copy of the handle sees it.
+export fn mutvec_truncate(v: MutVec a, n: Int) -> Unit !{IO} =
+  vector_truncate(mutvec_raw(v), n)
+
+# O(len), not O(1) — clearing zeroes every live slot. Length 0, keeping the
+# backing capacity: refilling a cleared vector reuses the buffer rather than
+# reallocating it.
+export fn mutvec_clear(v: MutVec a) -> Unit !{IO} =
+  vector_truncate(mutvec_raw(v), 0)
+
+# Copy each element from `j` onward one slot toward the front. `last` is the index
+# that empties; the loop reads `j + 1`, so it stops there.
+fn mutvec_shift_down(raw: Vector a, j: Int, last: Int) -> Unit !{IO} =
+  if j >= last then ()
+  else
+    do
+      next <- vector_get_direct(raw, j + 1)
+      _ <- vector_mutset(raw, j, next)
+      mutvec_shift_down(raw, j + 1, last)
+
+# The element is read BEFORE the shift: slot `i` is the first one the shift
+# overwrites. The truncate then drops the duplicate the shift leaves at the end.
+fn mutvec_removed(raw: Vector a, i: Int, len: Int) -> Maybe a !{IO} =
+  do
+    gone <- vector_get_direct(raw, i)
+    _ <- mutvec_shift_down(raw, i, len - 1)
+    _ <- vector_truncate(raw, len - 1)
+    Just(gone)
+
+# O(n - i). Remove the element at `i`, sliding the tail down, and return it.
+# Total: `Nothing` when `i` is out of range, leaving the vector untouched — the
+# same discipline as `mutvec_get`, and what makes `mutvec_pop` on an empty vector
+# fall out of this rather than needing an arm of its own.
+export fn mutvec_remove(v: MutVec a, i: Int) -> Maybe a !{IO} =
+  do
+    len <- mutvec_len(v)
+    if i < 0 || i >= len then Nothing else mutvec_removed(mutvec_raw(v), i, len)
+
+# O(1) amortised. Remove and return the last element; `Nothing` when empty.
+export fn mutvec_pop(v: MutVec a) -> Maybe a !{IO} =
+  do
+    len <- mutvec_len(v)
+    mutvec_remove(v, len - 1)
+
+# Copy each element from `j` down to `stop` one slot toward the back. Walks
+# downward so a slot is read before the element above it overwrites it.
+fn mutvec_shift_up(raw: Vector a, j: Int, stop: Int) -> Unit !{IO} =
+  if j <= stop then ()
+  else
+    do
+      prev <- vector_get_direct(raw, j - 1)
+      _ <- vector_mutset(raw, j, prev)
+      mutvec_shift_up(raw, j - 1, stop)
+
+# Pushing the current last element is what lengthens the vector; the shift then
+# opens the hole. Reading the tail before the push matters: the push may
+# reallocate, and the read is against the old length either way.
+fn mutvec_inserted(raw: Vector a, i: Int, len: Int, val: a) -> Bool !{IO} =
+  do
+    tail <- vector_get_direct(raw, len - 1)
+    _ <- vector_push(raw, tail)
+    _ <- mutvec_shift_up(raw, len - 1, i)
+    _ <- vector_mutset(raw, i, val)
+    true
+
+fn mutvec_appended(v: MutVec a, val: a) -> Bool !{IO} =
+  do
+    _ <- mutvec_push(v, val)
+    true
+
+# O(n - i). Insert `val` at `i`, sliding the tail up; `i == len` appends. Total:
+# `false` when `i` is outside `[0, len]`, leaving the vector untouched. An index
+# is caller input rather than a broken invariant, so it is reported rather than
+# panicked on, and `Bool` rather than `Maybe Unit` because a `<-` bind on a
+# `Maybe` would short-circuit the caller's block instead of discarding.
+export fn mutvec_insert(v: MutVec a, i: Int, val: a) -> Bool !{IO} =
+  do
+    len <- mutvec_len(v)
+    if i < 0 || i > len then false
+    else if i == len then mutvec_appended(v, val)
+    else mutvec_inserted(mutvec_raw(v), i, len, val)
 
 fn mutvec_each_go(f: a -> Unit !{IO}, raw: Vector a, i: Int, total: Int) -> Unit !{IO} =
   if i >= total then ()

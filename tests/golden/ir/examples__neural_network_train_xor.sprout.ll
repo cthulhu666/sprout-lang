@@ -79,6 +79,7 @@ declare i64 @vec_make_filled(i64, i64)
 declare i64 @vector_mutset(i64, i64, i64)
 declare i64 @vector_get_direct(i64, i64)
 declare i64 @vector_push(i64, i64)
+declare i64 @vector_truncate(i64, i64)
 @.str.0 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
 @.str.1 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"epoch \00" }
 @.str.2 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"  mse \00" }

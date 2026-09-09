@@ -541,7 +541,7 @@ Legend:
   Design: `docs/tui-focus-v0.md` §9.
 - [ ] `P2` **TUI M4 C3 — the larger widgets.** `tabs`, `tree`, `table`, `text_area`. `scroll_view`
   and the screen clip it needed landed as C3a (`docs/tui-scroll-view-v0.md`); the rest are still
-  open, and `text_area` carries the language work below.
+  open. The `MutVec` editing primitives `text_area` needs landed 2026-09-09, so nothing gates it.
 - [ ] `P2` **TUI `scroll_view` — overshooting either end stores dead presses.** Clamping to the far
   end needs the viewport, and a handler is pure and gets no region, so `FromTop n` grows past the
   bottom and `FromBottom k` past the top; the stored presses must be spent before the window moves
@@ -558,11 +558,6 @@ Legend:
   touches the `Ambiguous`-width question below. Brick's `visible` — scroll until the focused child
   shows — needs the child's solved position, so it waits on the retained hit-test tree the
   click-to-focus entry above describes. Design: `docs/tui-scroll-view-v0.md` §8.
-- [ ] `P2` **TUI M4 language work — `mutvec_insert`/`mutvec_remove`, sign-off first (Collaboration
-  Rule 6).** `text_area`/`input` want both. `insert` composes from `push` + shift; `remove` needs a
-  new `vector_remove` builtin — approve before C3 starts, not during. Same family as the deferred
-  `pop`/`truncate`/`clear` in §5. Prior art in-tree: `stdlib/repl.sprout` owns the only
-  text-editing primitives.
 - [ ] `P3` **`just tui-resize-probe` is opt-in, and one resize property stays uncovered.** Every arm
   of `app.run` is verified now, the `TermResized` one by that probe — but it depends on
   `script(1)` and on process timing and has no CI track record, so it is in no aggregate gate (green
@@ -648,11 +643,10 @@ Legend:
   maybe/later).
 - [ ] `P3` **Growable `MutVec` — the deferred operations**, listed so the omissions do not read as
   oversights. (a) `mutvec_with_capacity` / `mutvec_reserve` — skip the regrowth when the size is
-  known, for per-frame stores where the doubling reallocations *are* the cost; needs
-  `vector_reserve`. (b) `mutvec_pop` / `mutvec_truncate` / `mutvec_clear` — `truncate 0` is
-  hand-written downstream; `truncate`/`clear` need a trivial `vector_truncate`, `pop` composes from
-  `at` + `truncate`. (c) The open question: an ECS whose `world_new(cap)` fixes every column's
-  capacity only benefits if `world_spawn` can grow columns it does not own.
+  known, for stores where the doubling reallocations *are* the cost; needs `vector_reserve`. (b) The
+  open question: an ECS whose `world_new(cap)` fixes every column's capacity only benefits if
+  `world_spawn` can grow columns it does not own. Shrinking landed 2026-09-09
+  (`docs/growable-mutvec-v0.md` §Shrinking).
 - [ ] `P3` **No `fst` / `snd` in the prelude.** `\ (a, b) -> …` is a **two-parameter** lambda in
   Sprout, not tuple destructuring, so `count(\ (_, e) -> …, entries)` fails with
   `Bool vs Entry -> Bool` and the workaround is a named function with a tuple pattern per

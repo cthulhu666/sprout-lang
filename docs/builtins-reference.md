@@ -83,7 +83,7 @@ through the module's wrapper API:
 | `time_now_micros() -> Int` | `stdlib.time` | `time.now_micros()` — monotonic, for elapsed time |
 | `wall_time_micros() -> Int` | `stdlib.time` | `time.wall_micros()` — realtime, for timestamps |
 | `term_*` | `stdlib.terminal` | `terminal.write(…)`, `terminal.clear()`, … |
-| `vec_make_filled`, `vector_mutset`, `vector_get_direct`, `vector_push` | `stdlib.mutable` | the `MutVec` API |
+| `vec_make_filled`, `vector_mutset`, `vector_get_direct`, `vector_push`, `vector_truncate` | `stdlib.mutable` | the `MutVec` API |
 | `bytes_*` | `stdlib.bytes` | bare name |
 | `crypto_*` | `stdlib.crypto` | bare name |
 | `regex_*` | `stdlib.regex` | bare name |
@@ -948,6 +948,18 @@ Quick reference for the main collection types in the prelude and `stdlib`, with 
 - **`mutvec_len` counts elements, never capacity**, and `mutvec_get` / `mutvec_at` keep bounds-checking against the length. An index that lands in reserved-but-unwritten capacity misses (`Nothing`) or fails loudly, exactly as it did before the push.
 
 Doubling means the peak allocation can be up to 2× the final length. A caller that knows the size and cares about the peak should allocate it directly with `mutvec_new(n, fill)` and write by index. Iteration takes no snapshot — `mutvec_each` / `mutvec_fold` read the length once on entry, so pushing from inside one of them is the caller's problem.
+
+### Shrinking a `MutVec`
+
+`mutvec_remove(v, i)` slides the tail down and returns the removed element; `mutvec_insert(v, i, x)` slides it up. Both are O(n − i). `mutvec_pop` removes the last element, `mutvec_truncate(v, n)` keeps the first `n`, and `mutvec_clear` empties without releasing the capacity, so refilling a cleared vector reuses the buffer rather than reallocating it.
+
+Only the length change is a builtin (`vector_truncate`); the shifts are ordinary Sprout over `vector_get_direct` and `vector_mutset`. If a profile ever shows the shift dominating, that is the point to consider a `memmove` builtin — there is no measured case today.
+
+Three things to know:
+
+- **All five are total.** `remove` and `pop` return `Maybe a` — out of range is `Nothing`, like `mutvec_get`. `insert` returns `Bool`, `false` when the index is outside `[0, len]`; note `len` itself is in range, since inserting there is an append. `truncate` takes any `Int`: a negative `n` empties the vector and an `n` at or past the length has no effect. In every out-of-range case the vector is left untouched.
+- **`truncate` and `clear` are O(len − n), not O(1).** Shrinking zeroes every slot it drops, so `clear` on a large vector is a full pass over the live region, and truncating to a *small* `n` is the expensive direction. Zeroing is what keeps spare capacity free of stale handles; if you are clearing a large vector every iteration of a loop, that pass is the cost to weigh.
+- **Shrinking is in place**, like growth, so every copy of the handle sees the new length.
 
 If you find yourself repeatedly appending small fragments to a `String`, reach for `bytes.Builder` (collect fragments as `Bytes`, finalize once) or the `string_concat_many` builtin (one allocation for an arbitrary list of `String`s). String interpolation with `` `pre${x}post` `` desugars to `string_concat_many` automatically.
 
