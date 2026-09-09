@@ -546,6 +546,12 @@ Legend:
 - [ ] `P2` **TUI M4 C3 — the larger widgets.** `tabs`, `tree`, `table`. `scroll_view` and the screen
   clip it needed landed as C3a (`docs/tui-scroll-view-v0.md`), `text_area` as C3b
   (`docs/tui-text-area-v0.md`); the rest are still open.
+- [ ] `P3` **TUI `text_area` — `render` builds the whole document every frame.** `visible` calls
+  `buffer_lines`, which is `list_append(list_reverse(above), Cons(line, below))`, then throws all
+  but `region_rows` of it away; the unfocused branch does the same. `above`/`below` are already
+  the two halves the window needs, so O(region rows) is reachable — but the accessor's shape
+  depends on whether the IDE editor pane wants a window or the halves. Harmless for a commit
+  composer, not for a source file. Design: `docs/tui-text-area-v0.md` §4.6.
 - [ ] `P2` **TUI `text_area` — what C3b left out.** Soft wrap (needs height-for-width, which
   `Measured` cannot express); selection, clipboard and undo; word motion and the chord family;
   tab-stop expansion on paste, which today blanks a tab to one space and loses the indentation of
@@ -1842,15 +1848,15 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   `run-example-canary` (5 files) and `test-conformance-run` reach. Adding the ten to
   `is_hardcoded_intrinsic` moves any future regression one stage earlier, into a tool that runs
   everywhere. Costs a reseed and a golden cycle.
-- [ ] `P3` **DCE keeps an unreachable stdlib function in one corpus file.**
-  `examples__sentry_api.sprout.ll` gained `@stdlib.string.split` and `@…split_go` (~175 lines)
-  though nothing calls them; the other 13 corpus files importing `stdlib.string` prune both.
-  Harmless (dead IR, not wrong IR), filed because a per-file inconsistency in DCE grows. **Two
-  plausible explanations, both REFUTED by probe** — recorded so nobody re-derives them:
-  *name-prefix reachability* (a probe calling only `split_once` emits no `split`; the correlation
-  was perfect and the mechanism still wrong) and *the import set* (a probe with the same four
-  imports also emits no `split`). The trigger is something in the example's **body** — bisect
-  that, not its header.
+- [ ] `P3` **DCE keeps unreachable stdlib functions in a bundle.** (a) `examples__sentry_api…ll`
+  gains `@stdlib.string.split`/`@…split_go` (~175 lines) uncalled, while the other 13 corpus files
+  importing `stdlib.string` prune both; *name-prefix reachability* and *the import set* were both
+  probed and REFUTED, so the trigger is in the example's **body**, not its header. (b) A **binder**
+  matching a prelude name keeps that function alive: a parameter named `after` in
+  `stdlib/tui/line_zipper.sprout` added `@after` to `examples__tui_dashboard…ll` with zero callers,
+  and renaming it removed the function again (2026-09-09, A/B on one file); a record FIELD of the
+  same name does not. Harmless — dead IR, not wrong IR — but (b) means any local named
+  `map`/`after`/`filter` silently grows every bundle that reaches its module.
 
 **Types and inference**
 

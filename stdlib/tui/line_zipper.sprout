@@ -28,6 +28,9 @@ export fn zipper_open(s: String) -> Zipper =
 # Blanked rather than dropped, as bubbles' `textinput` does: losing the rest of
 # a paste is worse than flattening it. Line terminators are blanked here too —
 # a caller that wants them to SPLIT must do that before calling in.
+#
+# Blanking also keeps this one codepoint in, one out, which `rejoined` counts on
+# to locate the caret: dropping instead would leave it off by what was removed.
 export fn flatten(s: String) -> String =
   utf8.from_codepoints(list_map(blanked, utf8.codepoints(s)))
 
@@ -47,19 +50,43 @@ export fn zipper_text(z: Zipper) -> String =
 export fn zipper_insert(s: String, z: Zipper) -> Maybe Zipper =
   if string.is_empty(s) then Nothing else Just(rejoined(z, flatten(s)))
 
-# A mark arrives as its own key event, so the join has to be re-segmented or it
-# becomes a cluster of its own and the caret stops inside a character. Only the
-# last existing cluster takes part: no boundary rule reaches further back, and
-# re-segmenting the whole line would make each keystroke O(n).
+# A mark arrives as its own key event, so a join re-segments — on BOTH sides of
+# the caret. `e` typed in front of a lone accent forms one cluster, and
+# re-segmenting only behind would leave the caret inside it. One cluster each
+# side is enough: no boundary rule reaches further, which keeps this O(1).
 fn rejoined(z: Zipper, s: String) -> Zipper =
-  match z.before with
-  | Nil -> (z with (before = list_reverse(text.clusters(s))))
-  | [last | rest] -> (z with (before = regrown(last, rest, s)))
+  respanned(text.clusters(nearest_text(z.before) ++ s
+                          ++ nearest_text(z.after)),
+            list_length(nearest(z.before)) + string.length(s),
+            beyond(z.before), beyond(z.after))
 
-fn regrown(last: List Int, rest: List (List Int),
-           s: String) -> List (List Int) =
-  list_append(list_reverse(text.clusters(text.from_clusters([last]) ++ s)),
-              rest)
+fn nearest(cs: List (List Int)) -> List Int =
+  match cs with
+  | Nil -> Nil
+  | [c | _] -> c
+
+fn nearest_text(cs: List (List Int)) -> String =
+  text.from_clusters([nearest(cs)])
+
+fn beyond(cs: List (List Int)) -> List (List Int) =
+  match cs with
+  | Nil -> Nil
+  | [_ | rest] -> rest
+
+# The caret goes at the last boundary that does not fall inside a cluster of
+# the result, rounding toward the start as `zipper_to_display_col` does. A
+# cluster straddling `upto` is one the caret cannot enter.
+#
+# `tail` rather than `after`: a parameter shadowing a prelude name keeps that
+# prelude function alive in every bundle this module reaches.
+fn respanned(cs: List (List Int), upto: Int, kept: List (List Int),
+             tail: List (List Int)) -> Zipper =
+  match cs with
+  | Nil -> Zipper(before = kept, after = tail)
+  | [c | rest] ->
+      if list_length(c) > upto then
+        Zipper(before = kept, after = list_append(cs, tail))
+      else respanned(rest, upto - list_length(c), Cons(c, kept), tail)
 
 export fn zipper_backspace(z: Zipper) -> Maybe Zipper =
   match z.before with

@@ -65,11 +65,19 @@ also blanking U+2028/U+2029, so `text_area` shares one line implementation with
 this widget (`docs/tui-text-area-v0.md` §4.2). `input`'s public surface and
 behaviour are otherwise the same.
 
-**Insertion re-segments the join.** `keys.sprout:84` emits one `KChar` per
-codepoint, so a combining mark arrives as its own key event: appending it as a
-new cluster would leave a caret stop inside a character. The last existing
-cluster is re-segmented together with what is inserted — no grapheme boundary
-rule reaches further back than one cluster, so this is both correct and O(1).
+**Insertion re-segments the join, on both sides.** `keys.sprout:84` emits one
+`KChar` per codepoint, so a combining mark arrives as its own key event:
+appending it as a new cluster would leave a caret stop inside a character. The
+adjacent cluster on *each* side is re-segmented together with what is inserted
+— no grapheme boundary rule reaches further than one cluster either way, so
+this is correct and O(1).
+
+Behind the caret alone is not enough, fixed in C3b: a line can begin with a
+lone combining mark, and a base character typed in front of one forms a single
+cluster with the caret inside it — the next keystroke then lands between the
+halves and the mark migrates onto it. Where the insertion point falls inside a
+cluster the caret rounds toward the start of the line, as
+`zipper_to_display_col` does.
 
 ### 4.2 What leaves the widget is the whole value
 

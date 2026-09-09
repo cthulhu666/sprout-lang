@@ -266,10 +266,13 @@ viewport, the same wall as §4.6) and every chord.
 
 `stdlib/tui/buffer.sprout` exports `Buffer` opaquely with construction, the
 editing operations, the caret queries (`buffer_row`, `buffer_col`,
-`buffer_line`) and `buffer_text`. `buffer_line` exists so `render` places the
-caret without a walk of the whole document per frame, the cost §4.6 keeps out
-of `measure`. `line_zipper.sprout`
-exports `Zipper` and the single-line operations `input` needs.
+`buffer_line`) and `buffer_text`. `buffer_line` keeps the caret query off the
+document walk — it reads the current line directly instead of indexing
+`buffer_lines`. `render` still calls `buffer_lines`, so it is O(document) per
+frame where O(region rows) is reachable; filed in `BACKLOG.md` §4 rather than
+guessed at, since the shape depends on what the IDE pane needs.
+`line_zipper.sprout` exports `Zipper` and the single-line operations `input`
+needs.
 
 Argument order is data-last (`guidelines.md` §6): the buffer or zipper is the
 final parameter, so `buffer_insert` and `zipper_to_display_col` compose under
