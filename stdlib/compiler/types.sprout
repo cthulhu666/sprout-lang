@@ -396,6 +396,29 @@ fn starts_lowercase(name: String) -> Bool =
 export fn effect_var_name_is_wellformed(name: String) -> Bool =
   effect_label_is_var(name) || string.starts_with(name, "$")
 
+# `inner` may promise at most what `outer` declares — for one DECLARED effect
+# standing behind another where only the outer is visible to callers, today an
+# instance method behind its class signature (docs/effect-subsumption-v0.md §6.1a).
+# Both sides are as written: no inference, no unification.
+export fn effect_declared_at_most(inner: Effect, outer: Effect) -> Bool =
+  let Just inner_rank = effect_declared_rank(inner) else false
+      Just outer_rank = effect_declared_rank(outer) else false
+  in inner_rank <= outer_rank
+
+# pure ⊑ e ⊑ IO. A variable ranks between the two because it means a different
+# thing on each side and both readings land here: on the OUTER side it is
+# instantiated per call site, so it cannot cover a concrete `!{IO}` inner; on the
+# INNER side it absorbs whatever the body performs, so pure cannot cover it.
+#
+# `EffectRow` has no rank: a conformant signature cannot build one (rule 9 admits
+# one label), and ranking it would make it compare equal to itself and accept.
+fn effect_declared_rank(e: Effect) -> Maybe Int =
+  match e with
+  | EffectPure -> Just(0)
+  | EffectVar _ -> Just(1)
+  | EffectIO -> Just(2)
+  | EffectRow _ -> Nothing
+
 # ---------------------------------------------------------------------------
 # Scheme accessors / constructors
 # ---------------------------------------------------------------------------

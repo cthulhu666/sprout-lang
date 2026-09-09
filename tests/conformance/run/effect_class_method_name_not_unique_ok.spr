@@ -1,0 +1,46 @@
+module main
+
+# Why the instance-vs-class effect check keys on the CLASS, not on the method
+# name (docs/effect-subsumption-v0.md §6.1a). Two conditions make a bare-name
+# lookup return the wrong scheme, and both compile today — so a bare-name check
+# would reject this legal program.
+#
+# 1. Two classes declare `calc`. `register_class_method` binds both under the
+#    bare name, so the LAST one wins: here `Quiet` (pure), which is not the class
+#    `Loud L` implements.
+# 2. `speak` is a class method AND a top-level function. The bare name resolves
+#    to the function, whose effect has nothing to do with the class.
+
+class Loud a
+  fn calc(x: a) -> Int !{IO}
+
+class Quiet a
+  fn calc(x: a) -> Int
+
+type L = L
+type Q = Q
+
+instance Loud L
+  fn calc(x: L) -> Int !{IO} =
+    do
+      print("loud")
+      2
+
+instance Quiet Q
+  fn calc(x: Q) -> Int = 1
+
+class Speaker a
+  fn speak(x: a) -> Int !{IO}
+
+instance Speaker L
+  fn speak(x: L) -> Int !{IO} =
+    do
+      print("spoke")
+      5
+
+fn speak(s: String) -> String = s ++ "!"
+
+fn main() -> Unit !{IO} =
+  do
+    print(int_to_string(calc(Q)))
+    print(speak("hi"))

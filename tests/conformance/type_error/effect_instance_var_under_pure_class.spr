@@ -1,0 +1,21 @@
+module main
+
+# The cell docs/effect-subsumption-v0.md §6.1a leaves for the implementing PR:
+# a PURE class method against an instance declaring a bare `!{e}`. The class
+# signature has no `e` to instantiate, so nothing at a dispatch site constrains
+# it — and rule 8 checks the body against that unconstrained variable, which an
+# IO body satisfies. It is the concrete arm wearing a variable, so it is rejected
+# on the same ground.
+
+class Quiet a
+  fn calc(x: a) -> Int
+
+instance Quiet Int
+  fn calc(x: Int) -> Int !{e} =
+    do
+      print("io")
+      x + 1
+
+fn pure_user(n: Int) -> Int = calc(n)
+
+fn main() -> Unit !{IO} = print(int_to_string(pure_user(41)))

@@ -18,10 +18,10 @@ Legend:
 
 - [ ] `P1` **A declared effect is not enforced once a function is passed as a VALUE.**
   `fn pure_map(xs: List Int) -> List Int = list_map(shout, xs)` runs IO and reports
-  `declared pure, inferred pure`; an instance may also strengthen its class's effect, and a
-  pure declaration may call an `!{e}` parameter. Part 0 (unknown-label rejection) has landed;
-  parts 1–3 remain. Migration cost measured zero on 127 in-tree + 199 downstream files.
-  `docs/effect-subsumption-v0.md`.
+  `declared pure, inferred pure`, and a pure declaration may call an `!{e}` parameter.
+  Parts 0 (unknown-label rejection) and 3 (instance vs class) have landed; parts 1–2 remain,
+  and part 1 needs a 36-site polarity audit. Migration cost measured zero on 127 in-tree +
+  199 downstream files. `docs/effect-subsumption-v0.md`.
 - [ ] `P2` **`Foldable`'s `step` slot should be effect-polymorphic; `cond` must not be.** The policy
   in `docs/effect-polymorphism-policy-v0.md` admits `!{e}` where the contract pins order and
   multiplicity — true of `step` (left fold), false of `cond` (law lets an instance re-ask it).

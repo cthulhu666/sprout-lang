@@ -1,0 +1,25 @@
+module main
+
+# The same laundering as effect_instance_strengthens_class.spr with the instance
+# declared ABOVE its class. Its own fixture because it is a claim about the
+# CHECK's placement, not about the relation: the first implementation ran at the
+# `InstanceDecl` arm, where the class effect is whatever the env holds so far, so
+# this program was skipped in silence and printed under a pure caller.
+#
+# Spec §7 note: "Declaration order is not significant." A rejection that depends
+# on source order is not the rule the spec states.
+
+type Q = Q
+
+instance Quiet Q
+  fn calc(x: Q) -> Int !{IO} =
+    do
+      print("io")
+      1
+
+class Quiet a
+  fn calc(x: a) -> Int
+
+fn pure_user() -> Int = calc(Q)
+
+fn main() -> Unit !{IO} = print(int_to_string(pure_user()))

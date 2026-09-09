@@ -1769,6 +1769,20 @@ Effect note for v0:
 6. Pattern-bound variables are scoped to their branch.
 7. ADT constructors produce values of their declared type.
 8. Effect annotations are checked on function types; omitted annotations mean purity.
+
+   **An instance method may not declare more effect than its class method.** A call
+   dispatches through the class signature, so the instance's own annotation is invisible
+   to callers. Declaring *less* is legal — a pure implementation of an `!{IO}` method is
+   accepted, by the same subsumption that lets a pure body sit under an `!{IO}`
+   signature. Purity is below an effect variable, which is below `!{IO}`: a variable on
+   the class side is instantiated per call site and so cannot cover a concrete `!{IO}`
+   instance, and a variable on the instance side absorbs whatever the body performs and
+   so is not covered by a pure class. `!{e}` under `!{e}` is accepted however the two are
+   spelled, since both name the class method's own quantified variable.
+
+   This compares two **declarations**. It does not subsume the first sentence, which
+   checks an instance method's body against its own annotation, and neither implies the
+   other: in every program this rule rejects, the body and its own annotation agree.
 9. Function types may quantify a singleton effect variable `!{e}`; use sites
    instantiate it with either purity or a concrete closed effect supported in v0.
    **Singleton is a limit, not a description**: a signature may name at most one
@@ -1919,38 +1933,48 @@ Effect note for v0:
 > > guarantee fails across most higher-order code. Property 2 below is the reason — an
 > > arrow's effect is unified and never compared, so a mismatch is not a type error.
 > >
-> > Four boundaries are known to escape, each verified by running (re-verified 2026-09-09):
+> > Two boundaries are known to escape, each verified by running (re-verified 2026-09-09):
 > >
 > > 1. **A function value entering a slot** — argument, return, record field, element.
-> > 2. **An instance method declaring an effect its class signature does not**, so callers
-> >    dispatching through the class inherit the class's weaker claim.
-> > 3. **A call through an effect-variable parameter under a pure declaration** —
+> > 2. **A call through an effect-variable parameter under a pure declaration** —
 > >    `fn pure_apply(g: Int -> Int !{e}, n: Int) -> Int = g(n)` is accepted;
 > >    `--phase effects` reports it `declared pure, inferred !{$e30}`, and passing an
 > >    `!{IO}` function runs the IO.
-> > 4. **A top-level `let` initializer.** `let seeded = shout(41)` runs IO at startup;
-> >    §5.2 prohibits it normatively and nothing checks it. `--phase effects` does not
-> >    enumerate top-level `let`s, so the census does not see it either.
+> >
+> > And one that §5.2 prohibits normatively without any check enforcing it: **a top-level
+> > `let` initializer.** `let seeded = shout(41)` runs IO at startup. `--phase effects`
+> > does not enumerate top-level `let`s, so the census does not see it either; it couples
+> > to the value restriction and is tracked in `BACKLOG.md`.
+> >
+> > **Closed 2026-09-09:** an instance method could declare an effect its class signature
+> > does not, so callers dispatching through the class inherited the class's weaker claim.
+> > Rule 8 now compares the two declarations. This one needed no effect variable and no
+> > higher-order type — it was plain typeclass code
+> > (`docs/effect-subsumption-v0.md` §6.1a).
 > >
 > > Adjacent rather than a boundary, and **closed 2026-09-09**: an unrecognised effect
 > > label used to parse as an effect *variable*, so `!{NOPE}` type-checked and laundered
 > > through the variable exemption. Rule 9 now rejects it where the annotation is read, in
 > > every position one may be written.
 > >
-> > A fifth boundary escaped when this correction was first written (2026-09-07): a
+> > A further boundary escaped when this correction was first written (2026-09-07): a
 > > zero-arg call on a local callee, `let t = io_thunk in t()`. The nullary type collapse
 > > fix closed it — a zero-parameter function now has a `() -> T` arrow that carries its
 > > effect — and the probe is rejected under rule 8 (`docs/nullary-type-collapse-v0.md`).
 > >
-> > 1, 2 and 3 are `docs/effect-subsumption-v0.md`, which carries the replacement text for
-> > property 2; the label gap was that document's part 0 and has landed. 4 couples to the
-> > value restriction and is tracked in `BACKLOG.md`.
+> > Both remaining boundaries are `docs/effect-subsumption-v0.md`, which carries the
+> > replacement text for property 2; the label gap was that document's part 0 and the
+> > instance/class gap its part 3, and both have landed.
 > >
 > > Until those land, the enforced guarantee is narrow and is best stated negatively: a
 > > declaration is checked against **the effects its own body's calls infer**, and an
-> > effect that arrives through a function value — as an argument, a class dispatch, or an
-> > effect variable — does not participate in that inference. A pure signature is
-> > therefore evidence about the body as written, not a guarantee about what runs.
+> > effect that arrives through a function value — as an argument, or through an effect
+> > variable — does not participate in that inference. A pure signature is therefore
+> > evidence about the body as written, not a guarantee about what runs.
+> >
+> > A **class dispatch** is no longer on that list as such: an instance may no longer
+> > declare more effect than its class. It can still carry one of the two remaining
+> > channels, since a class method's arrow parameter is an arrow like any other.
 >
 > Which check covers which rule:
 >
@@ -1958,6 +1982,12 @@ Effect note for v0:
 >   functions…") is rule 8 stated operationally — a body calling an `!{IO}` function infers
 >   `!{IO}`, which a pure signature does not admit. Its escape clause is honoured: where the
 >   body's effect resolves to a variable rather than to `!{IO}`, the declaration is accepted.
+>   Rule 8's instance/class sentence is a **second, separate** check: two declared effects,
+>   no body and no inference. It runs as a whole-program pass over the declaration list, so
+>   that an instance declared above its class is checked like any other — §16's "declaration
+>   order is not significant" applies to it. It is keyed by class rather than by method name,
+>   because a method name identifies no class: two classes may declare one, and a top-level
+>   `fn` may shadow one, and both compile.
 > - **9** has three clauses and three checks, all read from the **declared signature** and
 >   never from what the body infers. The *singleton* clause — a signature may name at most
 >   one effect variable, and may not write a multi-label row. The *stored-position* clause —

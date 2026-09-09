@@ -1,0 +1,20 @@
+module main
+
+# The `!{e}` class arm of docs/effect-subsumption-v0.md §6.1a. A variable is not
+# above a concrete effect: a caller instantiates `e` at pure and gets a pure call,
+# so an instance pinning it to `!{IO}` launders exactly as the concrete arm does.
+# Distinct from effect_var_class_method_into_pure_caller.spr, where the class and
+# instance agree on `!{e}` and the leak is at the CALL site instead.
+
+class Chatty a
+  fn speak(x: a) -> Int !{e}
+
+instance Chatty Int
+  fn speak(x: Int) -> Int !{IO} =
+    do
+      print("io")
+      x + 1
+
+fn quiet(n: Int) -> Int = speak(n)
+
+fn main() -> Unit !{IO} = print(int_to_string(quiet(41)))
