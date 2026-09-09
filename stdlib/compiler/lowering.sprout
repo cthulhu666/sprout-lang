@@ -993,8 +993,17 @@ fn resolve_eta_fwd_type_name_dict(class_name: String, tvar_name: String, pos: so
           Just(eta_inner_dict_unreachable(class_name, pos))
       | _ -> Nothing
 
+# The tvar-headed position of a method's own type: the first parameter of a
+# parameterised method, the result of a nullary one, whose TThunk has no parameter
+# at all. `eta_forwarded_impl` reads the head off it to pick the matching slot.
+fn eta_class_position(t: types.Type) -> Maybe types.Type =
+  match t with
+  | types.TFunc param _ _ _ -> Just(param)
+  | types.TThunk ret _ -> Just(ret)
+  | _ -> Nothing
+
 fn try_eta_forwarded_without_class(name: String, t: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
-  let types.TFunc param _ _ _ = t else Nothing
+  let Just param = eta_class_position(t) else Nothing
       Just impl_name = eta_forwarded_impl(name, param, vec_to_list(dict_entries(ctx_fwd(ctx)))) else Nothing
   in Just(make_eta_lambda(impl_name, t, no_pos()))
 

@@ -267,11 +267,13 @@ and never the bare type the peel keys on; and `lowering.try_eta_in_class` requir
 reaches it. Confirmed by compiling the whole corpus with the arm replaced by a `panic`:
 every `tests/stdlib` suite and all 54 examples passed untouched.
 
-That second reason is a defect, not a design: the `TFunc` gate does not decline the shape,
-it *fails* on it. A nullary method passed unapplied under a forwarded dictionary dies with
-`ast_to_ir: unbound variable '__eta_unresolved_…'` (`BACKLOG.md` §7.5). The peel would not
-have rescued it — it keys on the scheme, which is a `TThunk` here — but the peel's death is
-independent of that gate being wrong.
+That second reason holds, but declining is only safe because something else catches the
+shape. `lower_value_var` falls through to `try_eta_forwarded_without_class`, which gated on
+`TFunc` too — so a nullary method passed unapplied under a forwarded dictionary died as
+`ast_to_ir: unbound variable '__eta_unresolved_…'`. That fallback now admits a `TThunk` and
+picks the slot by the tvar head of the method's *result* type, which is where a nullary
+method's class variable sits. `try_eta_in_class` stays `TFunc`-only, so the peel's
+unreachability above is unchanged.
 
 `.iface` moves 6 → 7. A v6 file is rejected loudly rather than read leniently: decoded
 under v7 rules every nullary signature would come back as its bare return type, which is
