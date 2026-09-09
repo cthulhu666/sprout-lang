@@ -303,8 +303,9 @@ a missing typeclass instance at runtime.** Concretely, this is a constraint on:
 parameters, match binders, do-bindings — as the free-variable check in the same
 file does, both reading one classifier (`bind_pat`). A `TVar` naming a bound name
 is a local, not an edge. `where` and `let … in` need no case of their own:
-`parser.wrap_where_binding` and `build_let_binding_match` both emit a single-arm
-`MatchExpr`, so the match-arm case already covers them.
+`parser.wrap_where_binding` and `build_let_binding_match` emit a `MatchExpr` — one
+arm, or two when a `let … else` supplies a fallback, whose residual pattern binds
+as well — so the match-arm case already covers every form.
 
 It collected names **without** tracking binders until 2026-09-09, which made the
 emitted program depend on what callers named their parameters — a prelude
@@ -328,6 +329,11 @@ root pushes — and rooting from an empty set would prune those to nothing, maki
 both sides of a differential comparison zero. A program without an entry is not
 one whose every declaration is unreachable; it is one where reachability is
 undefined, so the pass claims nothing and cuts nothing.
+
+A whole *file* can land here too, which is worth knowing before reading a golden
+as evidence about pruning. `examples/sentry_api.sprout` declares no `main`, so its
+snapshot keeps all 538 definitions — 228 of them referenced nowhere. That is this
+rule firing, not a pruning bug, and it has been mis-filed as one before.
 
 ## Whole-program passes: scan `decls` AND read `env`
 
