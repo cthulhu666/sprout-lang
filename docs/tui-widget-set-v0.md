@@ -45,9 +45,11 @@ not start before the two routing corrections it is written against had landed;
 they did, on 2026-09-08, as `widget.route_when` and `widget.namespaced`
 (`docs/tui-routing-v0.md` §3.8–3.9). C2a (`ToFocus`, `focus_ring`, `button`)
 landed the same day; `input` and `list_view` are C2b. Scrolling, borders, tabs,
-tables and `text_area` are C3.
-Reflowing text is deferred with a reason (§4.6). No new builtin: the
-`vector_remove` question belongs to C3's `text_area`, not here.
+tables and `text_area` are C3 — scrolling landed as C3a
+(`docs/tui-scroll-view-v0.md`), `text_area` as C3b (`docs/tui-text-area-v0.md`).
+Reflowing text is deferred with a reason (§4.6). No new builtin — and C3b
+answered the `vector_remove` question by not asking it: a widget handler is
+pure, so `text_area` holds a persistent zipper rather than a mutable vector.
 
 ## 3. Prior art
 

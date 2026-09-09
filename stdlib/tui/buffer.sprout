@@ -1,0 +1,214 @@
+module stdlib.tui.buffer
+
+# The document behind `text_area`: the lines above, the line being edited, the
+# lines below. Design: docs/tui-text-area-v0.md §4.1.
+#
+# `above` is reversed, so moving between adjacent lines is a head operation on
+# both sides — the same trick the line zipper plays on clusters, one level up.
+
+import stdlib.string as string
+import stdlib.tui.line_zipper as lz
+
+# `goal` is the display column a vertical move is trying to return to (§4.7).
+#
+# GOAL INVARIANT — `landed` is the ONLY place that sets `Just`; every other
+# construction of `Fields` sets `Nothing`. A new operation therefore clears the
+# goal by default and must justify keeping it, rather than the reverse. Getting
+# this backwards is not a crash: the caret silently drifts toward a column the
+# reader last visited several keystrokes ago.
+type Fields = (above: List String, line: lz.Zipper, below: List String,
+               goal: Maybe Int)
+
+# Opaque: a single-constructor ADT declared without `(..)`, so `Fields` can
+# grow a selection anchor later without breaking a caller (§4.9). A record
+# would be transparent whatever its declaration said.
+export type Buffer =
+  | Buf Fields
+
+fn fields(b: Buffer) -> Fields =
+  match b with
+  | Buf f -> f
+
+# ── opening and reading ─────────────────────────────────────────────────────
+
+export fn buffer_open(s: String) -> Buffer =
+  opened_at(split_lines(s))
+
+fn opened_at(ls: List String) -> Buffer =
+  match list_reverse(ls) with
+  | Nil -> Buf (Fields(above = Nil, line = lz.zipper_empty(), below = Nil,
+                      goal = Nothing))
+  | [last | rest] -> Buf (Fields(above = rest, line = lz.zipper_open(last),
+                                below = Nil, goal = Nothing))
+
+# Split on LF, CRLF and a lone CR (§4.4), then flatten what is left: blanking
+# CR as a control character instead would put a trailing space on every line of
+# every Windows paste.
+fn split_lines(s: String) -> List String =
+  list_map(lz.flatten, string.split(normalized(s), "\n"))
+
+fn normalized(s: String) -> String =
+  string.replace_all("\r", "\n", string.replace_all("\r\n", "\n", s))
+
+export fn buffer_lines(b: Buffer) -> List String = all_lines(fields(b))
+
+fn all_lines(f: Fields) -> List String =
+  list_append(list_reverse(f.above), Cons(lz.zipper_text(f.line), f.below))
+
+# §4.8 pins the join: `\n` between lines, no trailing terminator, `""` when
+# empty. Every application mirrors this value, so an ambiguity here becomes N
+# incompatible mirrors.
+export fn buffer_text(b: Buffer) -> String =
+  string.join("\n", all_lines(b |> fields))
+
+export fn buffer_row(b: Buffer) -> Int = list_length(fields(b).above)
+
+export fn buffer_col(b: Buffer) -> Int = lz.zipper_col(fields(b).line)
+
+# The line the caret is on. O(that line), where picking it out of
+# `buffer_lines` costs a walk of the whole document — which a renderer would
+# then pay on every frame.
+export fn buffer_line(b: Buffer) -> String = lz.zipper_text(fields(b).line)
+
+# ── editing ─────────────────────────────────────────────────────────────────
+
+# `Nothing` when nothing changed, so the widget can tell "I claimed the key but
+# the value stands" from "I changed the document".
+export fn buffer_insert(s: String, b: Buffer) -> Maybe Buffer =
+  if string.is_empty(s) then Nothing
+  else Just(inserted(fields(b), split_lines(s)))
+
+# The first segment joins the current line — through the zipper, so a combining
+# mark re-segments against the cluster it follows. Every later segment breaks
+# the line first.
+fn inserted(f: Fields, segs: List String) -> Buffer =
+  match segs with
+  | Nil -> Buf(f)
+  | [first | rest] -> broken(extended(f, first), rest)
+
+fn extended(f: Fields, seg: String) -> Fields =
+  (f with (line = maybe_with_default(f.line, lz.zipper_insert(seg, f.line)),
+           goal = Nothing))
+
+fn broken(f: Fields, segs: List String) -> Buffer =
+  match segs with
+  | Nil -> Buf(f)
+  | [seg | rest] -> broken(split_at_caret(f, seg), rest)
+
+# What precedes the caret stays behind on its own line; the new line starts
+# with `seg` and keeps everything that followed the caret.
+fn split_at_caret(f: Fields, seg: String) -> Fields =
+  Fields(above = Cons(lz.zipper_before_text(f.line), f.above),
+         line = restarted(seg, lz.zipper_after_text(f.line)),
+         below = f.below, goal = Nothing)
+
+fn restarted(head: String, tail: String) -> lz.Zipper =
+  maybe_with_default(fresh, lz.zipper_insert(head, fresh))
+where
+  fresh = lz.zipper_open(tail) |> lz.zipper_start
+
+export fn buffer_backspace(b: Buffer) -> Maybe Buffer =
+  backspaced(fields(b))
+
+fn backspaced(f: Fields) -> Maybe Buffer =
+  if lz.zipper_is_at_start(f.line) then joined_above(f)
+  else map(with_line(f, _), lz.zipper_backspace(f.line))
+
+fn with_line(f: Fields, z: lz.Zipper) -> Buffer =
+  Buf(Fields(above = f.above, line = z, below = f.below, goal = Nothing))
+
+# The caret lands at the seam, which is the end of what used to be the line
+# above — so the join is visible without moving the eye.
+fn joined_above(f: Fields) -> Maybe Buffer =
+  match f.above with
+  | Nil -> Nothing
+  | [prev | rest] ->
+      Just(Buf (Fields(above = rest,
+                      line = seamed(prev, lz.zipper_text(f.line)),
+                      below = f.below, goal = Nothing)))
+
+fn seamed(head: String, tail: String) -> lz.Zipper =
+  lz.zipper_to_display_col(lz.zipper_display_col(lz.zipper_open(head)),
+                           lz.zipper_open(head ++ tail))
+
+export fn buffer_delete(b: Buffer) -> Maybe Buffer =
+  deleted(fields(b))
+
+fn deleted(f: Fields) -> Maybe Buffer =
+  if lz.zipper_is_at_end(f.line) then pulled_up(f)
+  else map(with_line(f, _), lz.zipper_delete(f.line))
+
+fn pulled_up(f: Fields) -> Maybe Buffer =
+  match f.below with
+  | Nil -> Nothing
+  | [next | rest] ->
+      Just(Buf (Fields(above = f.above,
+                      line = seamed(lz.zipper_text(f.line), next),
+                      below = rest, goal = Nothing)))
+
+# ── moving ──────────────────────────────────────────────────────────────────
+
+export fn buffer_left(b: Buffer) -> Buffer = stepped_left(fields(b))
+
+fn stepped_left(f: Fields) -> Buffer =
+  if lz.zipper_is_at_start(f.line) then wrapped_up(f)
+  else Buf(Fields(above = f.above, line = lz.zipper_left(f.line),
+                  below = f.below, goal = Nothing))
+
+fn wrapped_up(f: Fields) -> Buffer =
+  match f.above with
+  | Nil -> Buf(f)
+  | [prev | rest] ->
+      Buf(Fields(above = rest, line = lz.zipper_open(prev),
+                 below = Cons(lz.zipper_text(f.line), f.below),
+                 goal = Nothing))
+
+export fn buffer_right(b: Buffer) -> Buffer = stepped_right(fields(b))
+
+fn stepped_right(f: Fields) -> Buffer =
+  if lz.zipper_is_at_end(f.line) then wrapped_down(f)
+  else Buf(Fields(above = f.above, line = lz.zipper_right(f.line),
+                  below = f.below, goal = Nothing))
+
+fn wrapped_down(f: Fields) -> Buffer =
+  match f.below with
+  | Nil -> Buf(f)
+  | [next | rest] ->
+      Buf(Fields(above = Cons(lz.zipper_text(f.line), f.above),
+                 line = lz.zipper_open(next) |> lz.zipper_start, below = rest,
+                 goal = Nothing))
+
+export fn buffer_home(b: Buffer) -> Buffer = anchored(fields(b), lz.zipper_start)
+
+export fn buffer_end(b: Buffer) -> Buffer = anchored(fields(b), lz.zipper_end)
+
+fn anchored(f: Fields, to: lz.Zipper -> lz.Zipper) -> Buffer =
+  Buf(Fields(above = f.above, line = to(f.line), below = f.below,
+             goal = Nothing))
+
+export fn buffer_up(b: Buffer) -> Buffer = moved_up(fields(b))
+
+fn moved_up(f: Fields) -> Buffer =
+  match f.above with
+  | Nil -> Buf(f)
+  | [prev | rest] ->
+      landed(prev, rest, Cons(lz.zipper_text(f.line), f.below), goal_of(f))
+
+export fn buffer_down(b: Buffer) -> Buffer = moved_down(fields(b))
+
+fn moved_down(f: Fields) -> Buffer =
+  match f.below with
+  | Nil -> Buf(f)
+  | [next | rest] ->
+      landed(next, Cons(lz.zipper_text(f.line), f.above), rest, goal_of(f))
+
+# The goal is taken from the caret only on the FIRST vertical move; after that
+# it is carried, which is what a run of Downs through short lines needs.
+fn goal_of(f: Fields) -> Int =
+  maybe_with_default(lz.zipper_display_col(f.line), f.goal)
+
+fn landed(target: String, above: List String, below: List String,
+          goal: Int) -> Buffer =
+  Buf(Fields(above = above,
+             line = lz.zipper_to_display_col(goal, lz.zipper_open(target)),
+             below = below, goal = Just(goal)))

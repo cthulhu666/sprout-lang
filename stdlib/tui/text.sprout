@@ -114,6 +114,27 @@ fn take_cols(cs: List (List Int), left: Int,
       if cluster_width(c) > left then list_reverse(acc)
       else take_cols(rest, left - cluster_width(c), Cons(c, acc))
 
+# The longest SUFFIX fitting in `cols` columns — `truncate`'s mirror, for a
+# window that follows a caret at the right-hand edge. Clusters in and out: both
+# callers hold them already, and a round trip through a String would pay for a
+# re-segmentation on every frame.
+#
+# A budget below zero is a region narrower than the caret's own cluster. The
+# empty case ends the search, which no amount of dropping could otherwise
+# satisfy.
+#
+# Data-last, unlike the older `truncate` above it: guidelines §6 binds a public
+# API, and this one is transforming its input rather than reading a subject.
+export fn truncate_left(cols: Int, cs: List (List Int)) -> List (List Int) =
+  narrowed(cs, clusters_width(cs), cols)
+
+fn narrowed(cs: List (List Int), w: Int, cols: Int) -> List (List Int) =
+  if w <= cols then cs
+  else
+    match cs with
+    | Nil -> Nil
+    | [c | rest] -> narrowed(rest, w - cluster_width(c), cols)
+
 # ── Wrapping ────────────────────────────────────────────────────────────────
 
 # Break `text` into lines of at most `cols` columns.

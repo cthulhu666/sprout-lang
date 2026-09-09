@@ -1,0 +1,160 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import stdlib.tui.buffer as buf
+import stdlib.unicode.utf8 as utf8
+
+# The document behind `text_area`, with no screen in it.
+# Design: docs/tui-text-area-v0.md §4.1, §4.4, §4.5, §4.7.
+
+# ── driving ─────────────────────────────────────────────────────────────────
+
+# An edit answers `Nothing` when nothing changed — the distinction the widget
+# uses to decide whether to announce a value. These helpers keep the buffer
+# either way; `changed` is what asserts on the answer itself.
+fn or_same(b: buf.Buffer, r: Maybe buf.Buffer) -> buf.Buffer =
+  maybe_with_default(b, r)
+
+fn changed(r: Maybe buf.Buffer) -> Bool =
+  match r with
+  | Just _ -> true
+  | Nothing -> false
+
+fn opened(s: String) -> buf.Buffer = buf.buffer_open(s)
+
+fn typed(b: buf.Buffer, s: String) -> buf.Buffer =
+  or_same(b, buf.buffer_insert(s, b))
+
+fn back(b: buf.Buffer) -> buf.Buffer = or_same(b, buf.buffer_backspace(b))
+
+fn del(b: buf.Buffer) -> buf.Buffer = or_same(b, buf.buffer_delete(b))
+
+fn ups(b: buf.Buffer, n: Int) -> buf.Buffer =
+  if n <= 0 then b else ups(buf.buffer_up(b), n - 1)
+
+fn lefts(b: buf.Buffer, n: Int) -> buf.Buffer =
+  if n <= 0 then b else lefts(buf.buffer_left(b), n - 1)
+
+# `row:col` in document space (§4.5) — the caret as a test can see it.
+fn at(b: buf.Buffer) -> String =
+  `${int_to_string(buf.buffer_row(b))}:${int_to_string(buf.buffer_col(b))}`
+
+fn nel() -> String = utf8.from_codepoints([65, 133, 66])
+
+fn acute() -> String = utf8.from_codepoints([769])
+
+fn e_acute() -> String = utf8.from_codepoints([101, 769])
+
+fn cjk() -> String = utf8.from_codepoints([24314])
+
+# ── the document ────────────────────────────────────────────────────────────
+
+fn round_trip_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "an empty buffer is the empty string",
+            buf.buffer_text(opened("")), "")
+  assert_eq(state, "one line round-trips", buf.buffer_text(opened("hello")),
+            "hello")
+  assert_eq(state, "many lines round-trip, joined by newline",
+            buf.buffer_text(opened("a\nb\nc")), "a\nb\nc")
+  # §4.8 pins no trailing terminator, so a trailing newline is a real final
+  # empty line rather than a decoration that round-trips away.
+  assert_eq(state, "a trailing newline opens a final empty line",
+            buf.buffer_text(opened("a\n")), "a\n")
+  assert_eq(state, "the caret starts at the end of the initial text",
+            at(opened("ab\ncd")), "1:2")
+
+fn split_join_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "a newline splits the line at the caret",
+            buf.buffer_text(typed(lefts(opened("abcd"), 2), "\n")), "ab\ncd")
+  assert_eq(state, "the caret lands at the start of the new line",
+            at(typed(lefts(opened("abcd"), 2), "\n")), "1:0")
+  assert_eq(state, "backspace at column 0 joins with the line above",
+            buf.buffer_text(back(buf.buffer_home(opened("ab\ncd")))), "abcd")
+  assert_eq(state, "the join leaves the caret at the seam",
+            at(back(buf.buffer_home(opened("ab\ncd")))), "0:2")
+  assert_eq(state, "delete at end of line pulls the next line up",
+            buf.buffer_text(del(buf.buffer_end(ups(opened("ab\ncd"), 1)))),
+            "abcd")
+
+fn motion_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "left at column 0 goes to the end of the line above",
+            at(buf.buffer_left(buf.buffer_home(opened("ab\ncd")))), "0:2")
+  assert_eq(state, "right at end of line goes to the start of the next",
+            at(buf.buffer_right(buf.buffer_end(ups(opened("ab\ncd"), 1)))),
+            "1:0")
+  assert_eq(state, "left at the document start stays put",
+            at(buf.buffer_left(buf.buffer_home(ups(opened("ab\ncd"), 1)))),
+            "0:0")
+  assert_eq(state, "End goes to the end of the current line",
+            at(buf.buffer_end(buf.buffer_home(opened("ab\ncd")))), "1:2")
+  # The document column counts CLUSTERS; a CJK cluster is two cells on screen
+  # and one column here (§4.5).
+  assert_eq(state, "the document column counts clusters, not cells",
+            at(typed(opened(""), cjk() ++ "a")), "0:2")
+  # What a renderer places the caret on, without a walk of the document.
+  assert_eq(state, "the caret's line is the one the row names",
+            buf.buffer_line(ups(opened("ab\ncd"), 1)), "ab")
+
+# ── the goal column (§4.7) ──────────────────────────────────────────────────
+
+fn goal_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "the caret clamps while passing a short line",
+            at(ups(opened("abcdef\nxy\nabcdef"), 1)), "1:2")
+  assert_eq(state, "a short line does not eat the goal column",
+            at(ups(opened("abcdef\nxy\nabcdef"), 2)), "0:6")
+  # The empty line is the case clamping gets wrong: it clamps to 0, and every
+  # later vertical move continues from 0.
+  assert_eq(state, "an empty line does not eat the goal column",
+            at(ups(opened("abcdef\n\nabcdef"), 2)), "0:6")
+  assert_eq(state, "Home clears the goal column",
+            at(ups(buf.buffer_home(ups(opened("abcdef\n\nabcdef"), 1)), 1)),
+            "0:0")
+  assert_eq(state, "an edit clears the goal column",
+            at(ups(typed(ups(opened("abcdef\n\nabcdef"), 1), "z"), 1)), "0:1")
+
+# ── what a paste becomes (§4.4) ─────────────────────────────────────────────
+
+fn paste_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "LF splits", buf.buffer_text(typed(opened(""), "a\nb")),
+            "a\nb")
+  # Blanking CR as a control character would leave "a \nb" — a trailing space
+  # on every line of every Windows paste.
+  assert_eq(state, "CRLF splits once, leaving no stray space",
+            buf.buffer_text(typed(opened(""), "a\r\nb")), "a\nb")
+  assert_eq(state, "a lone CR splits",
+            buf.buffer_text(typed(opened(""), "a\rb")), "a\nb")
+  assert_eq(state, "NEL is blanked, not split",
+            buf.buffer_text(typed(opened(""), nel())), "A B")
+  assert_eq(state, "a tab is blanked to one space",
+            buf.buffer_text(typed(opened(""), "a\tb")), "a b")
+
+fn cluster_cases(state: TestState) -> Unit !{IO} = do
+  # A combining mark arrives as its own key event. It must join the base on the
+  # NEW line, never reach back across the break.
+  assert_eq(state, "a mark after a break joins the base on the new line",
+            buf.buffer_text(typed(typed(typed(opened(""), "a\n"), "e"),
+                                  acute())),
+            "a\n" ++ e_acute())
+  assert_eq(state, "the joined cluster is one column",
+            at(typed(typed(typed(opened(""), "a\n"), "e"), acute())), "1:1")
+
+# ── declining (§4.8: only a real change is announced) ───────────────────────
+
+fn nochange_cases(state: TestState) -> Unit !{IO} = do
+  assert_true(state, "backspace at the document start reports no change",
+              ! changed (buf.buffer_backspace(buf.buffer_home(opened("ab")))))
+  assert_true(state, "delete at the document end reports no change",
+              ! changed (buf.buffer_delete(opened("ab"))))
+  assert_true(state, "an empty insert reports no change",
+              ! changed (buf.buffer_insert("", opened("ab"))))
+  assert_true(state, "backspace inside the document reports a change",
+              changed(buf.buffer_backspace(opened("ab"))))
+
+fn main() -> Unit !{IO} = do
+  state <- new_state()
+  round_trip_cases(state)
+  split_join_cases(state)
+  motion_cases(state)
+  goal_cases(state)
+  paste_cases(state)
+  cluster_cases(state)
+  nochange_cases(state)
+  summary(state)

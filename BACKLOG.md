@@ -210,6 +210,15 @@ Legend:
 
 **Modules and prelude**
 
+- [ ] `P2` **`export type` opacity is honoured on sums and silently ignored on records.** Verified
+  2026-09-09: `export type Sum = | A | B` without `(..)` hides `A` (`inner.A` → `Unknown
+  variable`), while a record is unconditionally transparent — both `r.x` and
+  `inner.Rec(x = 3, y = 4)` type-check across a module boundary whatever the declaration says.
+  So the marker that means "keep this abstract" does nothing on the one shape most likely to want
+  it, and silently: no diagnostic says the annotation was dropped. `stdlib/tui/buffer.sprout`
+  works around it by wrapping the record in a single-constructor ADT
+  (`docs/tui-text-area-v0.md` §4.9). Adjacent rulings: the `import M (T)` constructor question in
+  §7.5's neighbourhood, and `opaque type` under `wrap` ergonomics.
 - [ ] `P2` **Move `stdlib.compiler` to a dedicated tooling/compiler namespace** once the non-stdlib
   tooling-package model is settled.
 - [ ] `P3` **Reconsider the prelude-bundling default (polarity + trigger).** The prelude is bundled
@@ -534,9 +543,15 @@ Legend:
   feeds `appChooseCursor` from the ring. Trapping — a widget that consumes Tab itself — is the
   opt-in §4.5 declines to make implicit. Both are cosmetic until an application asks.
   Design: `docs/tui-focus-v0.md` §9.
-- [ ] `P2` **TUI M4 C3 — the larger widgets.** `tabs`, `tree`, `table`, `text_area`. `scroll_view`
-  and the screen clip it needed landed as C3a (`docs/tui-scroll-view-v0.md`); the rest are still
-  open. The `MutVec` editing primitives `text_area` needs landed 2026-09-09, so nothing gates it.
+- [ ] `P2` **TUI M4 C3 — the larger widgets.** `tabs`, `tree`, `table`. `scroll_view` and the screen
+  clip it needed landed as C3a (`docs/tui-scroll-view-v0.md`), `text_area` as C3b
+  (`docs/tui-text-area-v0.md`); the rest are still open.
+- [ ] `P2` **TUI `text_area` — what C3b left out.** Soft wrap (needs height-for-width, which
+  `Measured` cannot express); selection, clipboard and undo; word motion and the chord family;
+  tab-stop expansion on paste, which today blanks a tab to one space and loses the indentation of
+  pasted code; a jump-to-line control, whose intended shape is an opts-supplied prism rather than
+  a `Delivery` arm; and peeking away from the caret, which the derived window gives up. Each is
+  additive over the shipped surface. Design: `docs/tui-text-area-v0.md` §4.6, §4.10, §10.
 - [ ] `P2` **TUI `scroll_view` — overshooting either end stores dead presses.** Clamping to the far
   end needs the viewport, and a handler is pure and gets no region, so `FromTop n` grows past the
   bottom and `FromBottom k` past the top; the stored presses must be spent before the window moves

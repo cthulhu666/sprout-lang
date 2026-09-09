@@ -1,0 +1,126 @@
+module stdlib.tui.line_zipper
+
+# One line of text split at the caret, shared by `input` and `buffer`.
+# Design: docs/tui-text-area-v0.md §4.2, docs/tui-input-v0.md §4.1.
+#
+# A caret is a position BETWEEN grapheme clusters, which is what makes it
+# impossible to invalidate: an index into codepoints can land inside one and
+# its column would then be uncomputable. `before` is reversed, so both edits at
+# the caret are head operations.
+#
+# INVARIANT — no cluster here holds a control character. `zipper_open` and
+# `zipper_insert` are the only ways text enters and both flatten; every other
+# operation moves or drops clusters already present. A new entry point must
+# flatten too, or a newline reaches a screen cell and corrupts the frame.
+
+import stdlib.string as string
+import stdlib.tui.text as text
+import stdlib.unicode.utf8 as utf8
+
+export type Zipper = (before: List (List Int), after: List (List Int))
+
+export fn zipper_empty() -> Zipper = Zipper(before = Nil, after = Nil)
+
+# The caret lands at the end, where a reader's eye is.
+export fn zipper_open(s: String) -> Zipper =
+  Zipper(before = list_reverse(text.clusters(flatten(s))), after = Nil)
+
+# Blanked rather than dropped, as bubbles' `textinput` does: losing the rest of
+# a paste is worse than flattening it. Line terminators are blanked here too —
+# a caller that wants them to SPLIT must do that before calling in.
+export fn flatten(s: String) -> String =
+  utf8.from_codepoints(list_map(blanked, utf8.codepoints(s)))
+
+# Unicode's Cc category (U+0000–U+001F and U+007F–U+009F, so U+0085 NEL with
+# it), plus U+2028 Zl and U+2029 Zp, which are not Cc but are line separators
+# a terminal may break on while the width tables give each a cell.
+fn blanked(cp: Int) -> Int =
+  if cp < 32 || (cp >= 127 && cp <= 159) || cp == 8232 || cp == 8233 then 32
+  else cp
+
+export fn zipper_text(z: Zipper) -> String =
+  text.from_clusters(list_append(list_reverse(z.before), z.after))
+
+# `Nothing` where nothing changed: the key is still the field's — backspace at
+# the start must not reach the application — but no value moved, so nothing is
+# announced.
+export fn zipper_insert(s: String, z: Zipper) -> Maybe Zipper =
+  if string.is_empty(s) then Nothing else Just(rejoined(z, flatten(s)))
+
+# A mark arrives as its own key event, so the join has to be re-segmented or it
+# becomes a cluster of its own and the caret stops inside a character. Only the
+# last existing cluster takes part: no boundary rule reaches further back, and
+# re-segmenting the whole line would make each keystroke O(n).
+fn rejoined(z: Zipper, s: String) -> Zipper =
+  match z.before with
+  | Nil -> (z with (before = list_reverse(text.clusters(s))))
+  | [last | rest] -> (z with (before = regrown(last, rest, s)))
+
+fn regrown(last: List Int, rest: List (List Int),
+           s: String) -> List (List Int) =
+  list_append(list_reverse(text.clusters(text.from_clusters([last]) ++ s)),
+              rest)
+
+export fn zipper_backspace(z: Zipper) -> Maybe Zipper =
+  match z.before with
+  | Nil -> Nothing
+  | [_ | rest] -> Just((z with (before = rest)))
+
+export fn zipper_delete(z: Zipper) -> Maybe Zipper =
+  match z.after with
+  | Nil -> Nothing
+  | [_ | rest] -> Just((z with (after = rest)))
+
+export fn zipper_left(z: Zipper) -> Zipper =
+  match z.before with
+  | Nil -> z
+  | [c | rest] -> Zipper(before = rest, after = Cons(c, z.after))
+
+export fn zipper_right(z: Zipper) -> Zipper =
+  match z.after with
+  | Nil -> z
+  | [c | rest] -> Zipper(before = Cons(c, z.before), after = rest)
+
+export fn zipper_start(z: Zipper) -> Zipper =
+  Zipper(before = Nil, after = list_append(list_reverse(z.before), z.after))
+
+export fn zipper_end(z: Zipper) -> Zipper =
+  Zipper(before = list_append(list_reverse(z.after), z.before), after = Nil)
+
+# ── what a two-dimensional caller needs ─────────────────────────────────────
+
+export fn zipper_is_at_start(z: Zipper) -> Bool =
+  match z.before with
+  | Nil -> true
+  | _ -> false
+
+export fn zipper_is_at_end(z: Zipper) -> Bool =
+  match z.after with
+  | Nil -> true
+  | _ -> false
+
+# The caret in DOCUMENT space: a count of clusters, never of cells (§4.5).
+export fn zipper_col(z: Zipper) -> Int = list_length(z.before)
+
+export fn zipper_before_text(z: Zipper) -> String =
+  text.from_clusters(list_reverse(z.before))
+
+export fn zipper_after_text(z: Zipper) -> String = text.from_clusters(z.after)
+
+# The caret's DISPLAY column — what a goal column remembers (§4.7), and what
+# differs from `zipper_col` wherever a cluster is two cells wide.
+export fn zipper_display_col(z: Zipper) -> Int =
+  text.clusters_width(list_reverse(z.before))
+
+# The cluster boundary at or before `cols` display columns. Landing before it
+# rather than after is what keeps a goal column from stepping into the middle
+# of a wide cluster.
+export fn zipper_to_display_col(cols: Int, z: Zipper) -> Zipper =
+  advanced(zipper_start(z), cols, 0)
+
+fn advanced(z: Zipper, cols: Int, used: Int) -> Zipper =
+  match z.after with
+  | Nil -> z
+  | [c | _] ->
+      if used + text.cluster_width(c) > cols then z
+      else advanced(zipper_right(z), cols, used + text.cluster_width(c))

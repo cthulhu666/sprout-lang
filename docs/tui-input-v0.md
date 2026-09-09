@@ -18,8 +18,8 @@ application's chords alone.
 Goals: type, delete and move a caret in one line of text; the value reaches the
 application; the caret is visible; a line longer than its region stays usable.
 
-Non-goals: multi-line editing (`text_area`, C3, which is where
-`mutvec_insert`/`mutvec_remove` are actually needed); selection and clipboard;
+Non-goals: multi-line editing (`text_area`, C3, `docs/tui-text-area-v0.md` —
+pure like this one, and needing no `MutVec`); selection and clipboard;
 word-motion and the `ctrl-w`/`ctrl-u` chord family — every one of those is a
 binding an application may want, and a field that claimed them would take them
 away with no way to opt out; validation and masking; undo.
@@ -59,6 +59,11 @@ type Zipper = (before: List (List Int), after: List (List Int))
 with `before` reversed. A caret is a position *between* clusters, which cannot
 be invalid, and both edits at the caret are head operations rather than an O(n)
 string copy per keystroke. Brick reaches the same shape from the same problem.
+
+C3b moved this type out to `stdlib/tui/line_zipper.sprout`, unchanged apart from
+also blanking U+2028/U+2029, so `text_area` shares one line implementation with
+this widget (`docs/tui-text-area-v0.md` §4.2). `input`'s public surface and
+behaviour are otherwise the same.
 
 **Insertion re-segments the join.** `keys.sprout:84` emits one `KChar` per
 codepoint, so a combining mark arrives as its own key event: appending it as a
