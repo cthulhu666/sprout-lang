@@ -400,6 +400,17 @@ export fn effect_var_name_is_wellformed(name: String) -> Bool =
 # standing behind another where only the outer is visible to callers, today an
 # instance method behind its class signature (docs/effect-subsumption-v0.md §6.1a).
 # Both sides are as written: no inference, no unification.
+# A multi-label row is not an effect spec-v0.md §7 defines; rule 9 rejects it and
+# names it. `parser.checked_effect_names` passes it through — it validates LABELS,
+# not arity — so a row does reach the passes that run before rule 9, and each must
+# decline it rather than form an opinion.
+export fn effect_is_row(e: Effect) -> Bool =
+  match e with
+  | EffectRow _ -> true
+  | EffectPure -> false
+  | EffectIO -> false
+  | EffectVar _ -> false
+
 export fn effect_declared_at_most(inner: Effect, outer: Effect) -> Bool =
   let Just inner_rank = effect_declared_rank(inner) else false
       Just outer_rank = effect_declared_rank(outer) else false
@@ -410,8 +421,10 @@ export fn effect_declared_at_most(inner: Effect, outer: Effect) -> Bool =
 # instantiated per call site, so it cannot cover a concrete `!{IO}` inner; on the
 # INNER side it absorbs whatever the body performs, so pure cannot cover it.
 #
-# `EffectRow` has no rank: a conformant signature cannot build one (rule 9 admits
-# one label), and ranking it would make it compare equal to itself and accept.
+# `EffectRow` has no rank: it is outside the order, so it is neither within
+# another effect nor a thing another effect is within. Callers must ask
+# `effect_is_row` first — rule 9 owns a row, and reports it with a message that
+# says so.
 fn effect_declared_rank(e: Effect) -> Maybe Int =
   match e with
   | EffectPure -> Just(0)

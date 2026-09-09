@@ -1,0 +1,5 @@
+module demo.enc_quiet
+
+# The other half: same SHORT class name, pure where enc_loud's is `!{IO}`.
+export class Enc a
+  fn enc(x: a) -> Int

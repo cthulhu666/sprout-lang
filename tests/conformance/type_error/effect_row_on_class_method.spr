@@ -1,0 +1,18 @@
+module main
+
+# A multi-label row is rule 9's error, and rule 9 must be the one to report it.
+#
+# The instance/class effect comparison (spec §7 rule 8) runs first, in the
+# whole-program validator chain, and a row is outside the order it ranks. Left to
+# rank one, it reported `declared !{IO, e}, but the class declares !{IO, e}` — a
+# contradiction on its face, and it masked the real diagnostic. The two sides are
+# written IDENTICALLY here so that any complaint about a mismatch is wrong by
+# construction.
+
+class Quiet a
+  fn calc(x: a) -> Int !{IO, e}
+
+instance Quiet Int
+  fn calc(x: Int) -> Int !{IO, e} = x + 1
+
+fn main() -> Unit !{IO} = print(int_to_string(calc(1)))

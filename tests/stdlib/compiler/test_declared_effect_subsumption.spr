@@ -44,12 +44,22 @@ fn main() -> Unit !{IO} =
     check_true("!{IO} under !{IO}",
       types.effect_declared_at_most(types.EffectIO, types.EffectIO)),
 
-    # --- rows: unreachable from a conformant signature, decided anyway ----
-    # Rule 9 admits one label, so part 0 rejects every source spelling of a row.
-    # Ranking one would make `EffectRow` compare equal to itself and quietly
-    # accept; both arms answer false instead.
+    # --- rows: outside the order, and REACHABLE ---------------------------
+    # `parser.checked_effect_names` validates labels, not arity, so `!{IO, e}`
+    # parses and reaches every pass that runs before rule 9. A row is within
+    # nothing and contains nothing; callers ask `effect_is_row` first and decline,
+    # rather than reading a false here as "mismatch" — that read produced
+    # "declared !{IO, e}, but the class declares !{IO, e}".
+    # Regression: tests/conformance/type_error/effect_row_on_class_method.spr.
     check_false("a row as the inner side",
       types.effect_declared_at_most(types.EffectRow(["IO", "e"]), types.EffectIO)),
     check_false("a row as the outer side",
-      types.effect_declared_at_most(types.EffectPure, types.EffectRow(["IO", "e"])))
+      types.effect_declared_at_most(types.EffectPure, types.EffectRow(["IO", "e"]))),
+    check_false("a row is not within itself",
+      types.effect_declared_at_most(types.EffectRow(["IO", "e"]), types.EffectRow(["IO", "e"]))),
+
+    check_true("effect_is_row identifies a row", types.effect_is_row(types.EffectRow(["IO", "e"]))),
+    check_false("pure is not a row", types.effect_is_row(types.EffectPure)),
+    check_false("!{IO} is not a row", types.effect_is_row(types.EffectIO)),
+    check_false("a variable is not a row", types.effect_is_row(types.EffectVar("e")))
   ])

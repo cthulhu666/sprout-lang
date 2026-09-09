@@ -1987,7 +1987,9 @@ Effect note for v0:
 >   that an instance declared above its class is checked like any other — §16's "declaration
 >   order is not significant" applies to it. It is keyed by class rather than by method name,
 >   because a method name identifies no class: two classes may declare one, and a top-level
->   `fn` may shadow one, and both compile.
+>   `fn` may shadow one, and both compile. A multi-label **row** on either side is rule 9's
+>   to reject, not this check's — it runs earlier, so forming an opinion about a row would
+>   mask rule 9's diagnostic with a worse one.
 > - **9** has three clauses and three checks, all read from the **declared signature** and
 >   never from what the body infers. The *singleton* clause — a signature may name at most
 >   one effect variable, and may not write a multi-label row. The *stored-position* clause —

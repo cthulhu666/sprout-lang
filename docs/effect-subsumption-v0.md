@@ -402,10 +402,19 @@ exactly `pure ⊑ e ⊑ IO`:
 | **`!{e}`** | accept | accept | reject |
 | **`!{IO}`** | accept | accept | accept |
 
-All nine cells plus both `EffectRow` arms are pinned by
-`tests/stdlib/compiler/test_declared_effect_subsumption.spr`. A row answers **false** on
-either side rather than ranking: ranking one would make it compare equal to itself and
-quietly accept, which is the §6.0 failure shape.
+All nine cells plus the `EffectRow` arms are pinned by
+`tests/stdlib/compiler/test_declared_effect_subsumption.spr`.
+
+**A row is outside the order, and it is reachable.** `parser.checked_effect_names`
+validates labels, not arity, so `!{IO, e}` parses and reaches every pass that runs before
+rule 9 — the earlier claim that "a conformant signature cannot build one" was true of
+conformant signatures and irrelevant, since this pass also sees non-conformant ones. The
+relation answers false for a row on either side (a row is within nothing, including
+itself), and the *caller* asks `effect_is_row` first and declines. Without that, class and
+instance writing the same row produced `declared !{IO, e}, but the class declares
+!{IO, e}` — a contradiction on its face — and masked rule 9's correct message. Regression:
+`tests/conformance/type_error/effect_row_on_class_method.spr`, which writes both sides
+identically so any mismatch complaint is wrong by construction.
 
 **The cell this section left to the implementing PR was decided by execution, not by
 judgement.** Pure class / `!{e}` instance is not a variable being conservatively refused —
@@ -458,16 +467,29 @@ key as the fallback for a class that is *imported* rather than declared — requ
 `module_loader.load_module` typechecks one module's own decls and supplies its imports as
 env schemes with no `ClassDecl` to read.
 
-The key uses the **short** class name (`string.after_last_dot`), like every other
-`@`-marker family — compiler-internals.md §"Env-path type names are SHORT" records that a
-qualified key there breaks lookups silently rather than loudly, and
-`check_missing_superclass_instances` normalizes the same way. On the bundling path the two
-sides agree either way, verified with a two-module package under both a selective import
-and an alias-qualified instance head (`instance quiet.Quiet Q`), each rejected naming
-`mylib.quiet.Quiet`. It is the env path the normalization is for, and that path has no
-direct in-tree witness: no stdlib module declares an instance of an imported class, so
-`just test`'s front-end-agreement gate cannot distinguish the two spellings. The failure
-mode is a skipped check, never a false rejection.
+**Two keys per method, written together and read exact-first.** Neither spelling alone
+serves both paths, and picking one is a bug in whichever direction you pick:
+
+- **exact** (`@classmethod:demo.enc_loud.Enc:enc`) — the bundler qualifies both the
+  `ClassDecl` name and the instance head, so this keeps two classes that share a *short*
+  name apart.
+- **short** (`@classmethod:Enc:enc`) — the env-path fallback. There a class is registered
+  bare (compiler-internals.md §"Env-path type names are SHORT") while the instance head may
+  carry an import alias, so the exact key misses.
+
+A short-only key — which this document previously described, claiming "the failure mode is
+a skipped check, never a false rejection" — **was wrong, and a code review disproved it by
+running.** Two modules each declaring `class Enc a`, one `!{IO}` and one pure, collapse to
+one entry; the `!{IO}` class's instance is then judged against the *pure* class's effect and
+a legal program is rejected, with a diagnostic naming a class that declares the opposite of
+what it reports. It was also import-order dependent, the same order-sensitivity this part
+had just fixed on the declaration axis. Regression:
+`tests/conformance/package_resolution/app_class_name_collision.spr`, which lives there
+because the shape needs two sibling modules and only a package root supplies one.
+
+The env-path fallback still has no direct in-tree witness — no stdlib module declares an
+instance of an imported class — but it is now a *fallback* rather than the only key, so a
+miss degrades to a skipped check instead of a wrong answer.
 
 Front-end verdicts are pinned by `tests/stdlib/compiler/test_repl_instance_class_effect.spr`
 against `compile_source_with_cache`, as that section requires — rejects and accepts alike,
