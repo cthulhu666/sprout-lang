@@ -531,11 +531,17 @@ Legend:
 - [ ] `P2` **TUI M4 C3 — the larger widgets.** `tabs`, `tree`, `table`, `text_area`. `scroll_view`
   and the screen clip it needed landed as C3a (`docs/tui-scroll-view-v0.md`); the rest are still
   open, and `text_area` carries the language work below.
-- [ ] `P2` **TUI `scroll_view` — overshooting the far end stores dead presses.** Clamping to the
-  last screenful needs the viewport, and a handler is pure and gets no region, so `FromTop n` grows
-  past the end and the same number of presses must be undone before the window moves back. `Home`
-  and `End` land exactly, so recovery is one key. Root cause is the pure-handler contract — the
-  same wall `ListOpts.page` hit. Design: `docs/tui-scroll-view-v0.md` §4.8.
+- [ ] `P2` **TUI `scroll_view` — overshooting either end stores dead presses.** Clamping to the far
+  end needs the viewport, and a handler is pure and gets no region, so `FromTop n` grows past the
+  bottom and `FromBottom k` past the top; the stored presses must be spent before the window moves
+  back. `Home` and `End` land exactly, so recovery is one key. Root cause is the pure-handler
+  contract — the same wall `ListOpts.page` hit. Design: `docs/tui-scroll-view-v0.md` §4.8.
+- [ ] `P3` **TUI screen — a wide pair cut by a narrower clip cannot be repaired.** `repair` writes
+  through `set_raw`, so it is dropped outside the clip: a two-column cluster painted under a wide
+  clip and then cut between its halves by a narrower one keeps its live half, and the terminal
+  draws it two columns wide over a cell that now belongs to someone else. Unreachable with today's
+  widgets — nothing paints a wide cluster and then narrows across it — but `screen_clipped` is
+  public. Noted on `repair` in `stdlib/tui/screen.sprout`.
 - [ ] `P3` **TUI `scroll_view` — no scrollbars, and no auto-scroll to a focused child.** Nothing
   indicates that content continues past the viewport; an indicator needs a style vocabulary and
   touches the `Ambiguous`-width question below. Brick's `visible` — scroll until the focused child

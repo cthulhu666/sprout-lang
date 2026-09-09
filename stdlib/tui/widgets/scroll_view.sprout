@@ -81,8 +81,10 @@ fn scrolled_across(v: Sv m, d: Int) -> Reply m =
 
 fn settled(v: Sv m) -> Reply m = Just((v, Nil, Nil))
 
-# Only the near end clamps, because it is the only one a pure handler knows:
-# the far end is `render`'s to enforce, against an extent measured there.
+# Only the near end of the anchor in force clamps, because it is the only one a
+# pure handler knows: the far end is `render`'s to enforce, against an extent
+# measured there. So both anchors overshoot outwards, and the presses have to be
+# spent before the window moves back — `KHome`/`KEnd` are the one-key recovery.
 fn advanced(p: Pos, d: Int) -> Pos =
   match p with
   | FromTop n -> FromTop(imax(0, n + d))
