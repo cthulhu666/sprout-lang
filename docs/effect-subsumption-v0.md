@@ -402,6 +402,15 @@ exactly `pure ⊑ e ⊑ IO`:
 | **`!{e}`** | accept | accept | reject |
 | **`!{IO}`** | accept | accept | accept |
 
+**The accepting `!{e}`/`!{e}` cell guarantees nothing about what runs**, and that is not
+this rule's doing. An instance declaring `!{e}` whose body performs IO is accepted, and a
+pure caller runs it — but so is a plain `fn f(x: Int) -> Int !{e}` with the same body and
+no class anywhere. The channel is rule 8's standing variable exemption (spec §7 property 3),
+which part 1 closes. Pinned with its no-typeclass control by
+`tests/conformance/run/effect_tied_var_body_io_known_escape.spr`, because it otherwise sits
+one keystroke from `effect_instance_weakens_class_ok.spr`'s `Zeroed` class with nothing
+marking where the guarantee stops.
+
 All nine cells plus the `EffectRow` arms are pinned by
 `tests/stdlib/compiler/test_declared_effect_subsumption.spr`.
 
@@ -410,11 +419,24 @@ validates labels, not arity, so `!{IO, e}` parses and reaches every pass that ru
 rule 9 — the earlier claim that "a conformant signature cannot build one" was true of
 conformant signatures and irrelevant, since this pass also sees non-conformant ones. The
 relation answers false for a row on either side (a row is within nothing, including
-itself), and the *caller* asks `effect_is_row` first and declines. Without that, class and
-instance writing the same row produced `declared !{IO, e}, but the class declares
-!{IO, e}` — a contradiction on its face — and masked rule 9's correct message. Regression:
-`tests/conformance/type_error/effect_row_on_class_method.spr`, which writes both sides
-identically so any mismatch complaint is wrong by construction.
+itself), and the *caller* decides what to do — and **the two sides need opposite
+answers**:
+
+- **instance-side row → decline.** The instance method has a body, so it records an
+  `EffectReport` and `checker.enforce_effects` names the row properly. Ranking it here
+  produced `declared !{IO, e}, but the class declares !{IO, e}` — a contradiction on its
+  face — and masked that message. Regression:
+  `tests/conformance/type_error/effect_row_on_class_method.spr`, which writes both sides
+  identically so any mismatch complaint is wrong by construction.
+- **class-side row → reject here.** A class method signature has no body and records no
+  report at all (`docs/effect-enforcement-v0.md` §13.7), so nothing else reaches it.
+  Declining both sides — the first fix — meant a class declaring `!{IO, e}` over an
+  instance declaring `!{IO}` was accepted, and `pure_user` ran the IO. Found by a second
+  code review, verified by running. Regression:
+  `tests/conformance/type_error/effect_row_on_class_signature.spr`.
+
+The pair is the point: "a row is someone else's problem" is true on one side and false on
+the other, and the first fix applied it to both.
 
 **The cell this section left to the implementing PR was decided by execution, not by
 judgement.** Pure class / `!{e}` instance is not a variable being conservatively refused —
@@ -432,12 +454,10 @@ program, and it was A/B'd — with the key degraded to the bare method name, tha
 rejected with `class main.Loud declares pure`, which is `Quiet`'s signature leaking through
 the shared name.
 
-The key is `@classmethod:{class}:{method}`, registered by `register_class_method` beside
-the bare-name binding call sites read. `@`-prefixed keys already cross module boundaries
-unprefixed and survive selective import (`module_loader.is_marker_key`), so an instance in
-one module sees a class declared in another with no extra plumbing. It is deliberately
-**not** removed by `register_fn_decl_scheme` the way `@class:` is: a top-level function
-shadowing a method name says nothing about whether instances of that class must obey it.
+The key is `@classmethod:{class}:{method}`, and it names an entry in a table this check
+builds from the decl list — **not** an env marker. An earlier version did register it in
+`env` so an imported class could be looked up there; that fallback is gone (see below), and
+with it the registration, so `register_class_method` is unchanged from `master`.
 
 **Placement, and the bug that decided it.** The check is a whole-program pass in
 `typecheck_decls_resolved`'s validator chain, beside `check_missing_superclass_instances`
@@ -461,35 +481,38 @@ the list regardless of where.
 `deriving.sprout` synthesizes eight `InstanceMethodImpl`s and passes `Nothing` for the
 effect slot in all eight, so a derived instance can never trip it.
 
-The class side is read from the `ClassDecl`s in the decl list, with the `@classmethod:` env
-key as the fallback for a class that is *imported* rather than declared — required by
-`docs/compiler-internals.md` §"Whole-program passes: scan `decls` AND read `env`", since
-`module_loader.load_module` typechecks one module's own decls and supplies its imports as
-env schemes with no `ClassDecl` to read.
+The class side is read from the `ClassDecl`s in the decl list, keyed
+`@classmethod:{class as the decl spells it}:{method}`, **and from nothing else**.
 
-**Two keys per method, written together and read exact-first.** Neither spelling alone
-serves both paths, and picking one is a bug in whichever direction you pick:
+**The key is the class name verbatim, and there is no `env` fallback.** Both halves of that
+were arrived at by being wrong first.
 
-- **exact** (`@classmethod:demo.enc_loud.Enc:enc`) — the bundler qualifies both the
-  `ClassDecl` name and the instance head, so this keeps two classes that share a *short*
-  name apart.
-- **short** (`@classmethod:Enc:enc`) — the env-path fallback. There a class is registered
-  bare (compiler-internals.md §"Env-path type names are SHORT") while the instance head may
-  carry an import alias, so the exact key misses.
-
-A short-only key — which this document previously described, claiming "the failure mode is
-a skipped check, never a false rejection" — **was wrong, and a code review disproved it by
-running.** Two modules each declaring `class Enc a`, one `!{IO}` and one pure, collapse to
-one entry; the `!{IO}` class's instance is then judged against the *pure* class's effect and
-a legal program is rejected, with a diagnostic naming a class that declares the opposite of
-what it reports. It was also import-order dependent, the same order-sensitivity this part
-had just fixed on the declaration axis. Regression:
+A **short-name** key came first, on the strength of compiler-internals.md §"Env-path type
+names are SHORT" — a real rule, applied without checking what it cost. Two modules each
+declaring `class Enc a`, one `!{IO}` and one pure, collapse to one entry; the `!{IO}`
+class's instance is then judged against the *pure* class's effect, so a **legal program is
+rejected** and the diagnostic names a class declaring the opposite of what it reports. It
+was import-order dependent too — the same order-sensitivity this part had just fixed on the
+declaration axis. A code review disproved it by running. This document had claimed the
+failure mode was "a skipped check, never a false rejection"; it was not. Regression:
 `tests/conformance/package_resolution/app_class_name_collision.spr`, which lives there
 because the shape needs two sibling modules and only a package root supplies one.
 
-The env-path fallback still has no direct in-tree witness — no stdlib module declares an
-instance of an imported class — but it is now a *fallback* rather than the only key, so a
-miss degrades to a skipped check instead of a wrong answer.
+An **`env` fallback** came next, to satisfy compiler-internals.md §"Whole-program passes:
+scan `decls` AND read `env`". A second review found it carries the same collision, because
+on the env path a class is named bare on *both* sides — so the verbatim key and the short
+key are the same string there and the exact-first ordering buys nothing. Reading `env`
+adds no coverage on that path; it manufactures a wrong answer.
+
+So the check now reads decls only, and **deliberately does not follow that rule.** The
+rule exists so a pass does not silently see an empty vocabulary and reject valid code —
+here, seeing nothing means *skipping*, which is safe, while reading `env` produces the
+false rejection the rule is meant to prevent. Every path a user compiles through bundles
+(`--phase check`, `--emit-ir`, `compile_source_with_cache` — the last is why
+`test_repl_instance_class_effect.spr` still passes 4/4), so the only path that loses the
+check is `module_loader.load_module`'s isolated per-module typecheck, which had no witness
+and no corpus. Removing the fallback also made the `@classmethod:` env markers dead, and
+`register_class_method` is back to its `master` shape.
 
 Front-end verdicts are pinned by `tests/stdlib/compiler/test_repl_instance_class_effect.spr`
 against `compile_source_with_cache`, as that section requires — rejects and accepts alike,

@@ -6233,7 +6233,7 @@ fn typecheck_decls_resolved(
               match check_missing_superclass_instances(decls) with
               | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
               | Nothing ->
-              match check_instance_class_effects(decls, env) with
+              match check_instance_class_effects(decls) with
               | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
               | Nothing ->
                 match check_existential_constraints(decls) with
@@ -8054,7 +8054,7 @@ fn typecheck_decl(
       TypedDeclOk(typed_ast.TPassThrough(decl), env, env_ftv, subst)
   | ast.ClassDecl class_name type_params methods superclasses _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl),
-        GlobalEnv(register_class_methods(class_name, type_params, methods, alias_env,
+        GlobalEnv(register_class_methods(type_params, methods, alias_env,
           register_class_method_markers(class_name, type_params, methods,
             register_superclass_markers(class_name, superclasses, global_env_dict(env))))),
         env_ftv, subst)
@@ -9720,35 +9720,15 @@ fn is_unknown_ref(msg: String) -> Bool =
 # ClassDecl: method registration + constraint markers
 # ---------------------------------------------------------------------------
 
-fn register_class_methods(class_name: String, type_params: List String, methods: List ast.ClassMethodSig,
+fn register_class_methods(type_params: List String, methods: List ast.ClassMethodSig,
                           alias_env: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
   match methods with
   | Nil -> env
   | Cons sig rest ->
-      register_class_methods(class_name, type_params, rest, alias_env,
-        register_class_method(class_name, type_params, sig, alias_env, env))
+      register_class_methods(type_params, rest, alias_env,
+        register_class_method(type_params, sig, alias_env, env))
 
-# Keyed by CLASS: a method name identifies no class, since two classes may declare
-# one (the last registered wins under the bare name) and a top-level `fn` may
-# shadow one. Both compile — tests/conformance/run/
-# effect_class_method_name_not_unique_ok.spr is both shapes.
-#
-# TWO keys per method, written together and read exact-first. A class is spelled
-# differently on the two paths — qualified where the bundler ran, bare on the env
-# path (compiler-internals.md §"Env-path type names are SHORT") — and neither
-# spelling alone serves both:
-#
-#   exact — keeps `demo.enc_loud.Enc` and `demo.enc_quiet.Enc` apart, so two
-#           classes sharing a SHORT name are never judged against each other
-#   short — the env-path fallback, where the class is registered bare and the
-#           instance head may carry an import alias
-fn class_method_key(class_name: String, method_name: String) -> String =
-  "@classmethod:" ++ class_name ++ ":" ++ method_name
-
-fn class_method_short_key(class_name: String, method_name: String) -> String =
-  class_method_key(string.after_last_dot(class_name), method_name)
-
-fn register_class_method(class_name: String, type_params: List String, sig: ast.ClassMethodSig,
+fn register_class_method(type_params: List String, sig: ast.ClassMethodSig,
                          alias_env: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
   match sig with
   | ast.ClassMethodSig name params ret_type effects_maybe ->
@@ -9760,13 +9740,9 @@ fn register_class_method(class_name: String, type_params: List String, sig: ast.
       #
       # Over `alias_env`, so a method's signature resolves aliases as its
       # implementations do — the call site reads THIS scheme.
-      let scheme = scheme_from_fn_parts_inner(
-                     collect_ret_type_vars(Just(ret_type), collect_param_type_vars(params, type_params)),
-                     name, params, Just(ret_type), effects_maybe, alias_env)
-      in
-        dict_set(class_method_key(class_name, name), scheme,
-          dict_set(class_method_short_key(class_name, name), scheme,
-            dict_set(name, scheme, env)))
+      dict_set(name, scheme_from_fn_parts_inner(
+        collect_ret_type_vars(Just(ret_type), collect_param_type_vars(params, type_params)),
+        name, params, Just(ret_type), effects_maybe, alias_env), env)
 
 fn register_class_method_markers(class_name: String, type_params: List String, methods: List ast.ClassMethodSig, env: Dict types.Scheme) -> Dict types.Scheme =
   match methods with
@@ -9851,13 +9827,26 @@ fn register_fn_decl_scheme(
 #
 # Distinct from rule 8's body check, which compares a body against its OWN
 # declaration: in every program rejected here those two agree.
-export fn check_instance_class_effects(decls: List ast.Decl,
-                                       env: Dict types.Scheme) -> Maybe(source.SourcePos, String) =
-  first_instance_effect_error(decls, class_effect_table(decls, dict_empty()), env)
+export fn check_instance_class_effects(decls: List ast.Decl) -> Maybe(source.SourcePos, String) =
+  first_instance_effect_error(decls, class_effect_table(decls, dict_empty()))
 
-# The class side, by class-qualified key. Declarations first; `env` covers a class
-# that is imported rather than declared here, which is every class on the REPL /
-# analysis-service path (it supplies them as schemes, with no ClassDecl to read).
+# Keyed by CLASS, verbatim as the decl spells it. A method NAME identifies no
+# class: two classes may declare one and a top-level `fn` may shadow one, and both
+# compile (tests/conformance/run/effect_class_method_name_not_unique_ok.spr).
+# The bundler qualifies the ClassDecl name and the instance head alike, so the two
+# sides agree wherever this table is built, and `demo.enc_loud.Enc` stays distinct
+# from `demo.enc_quiet.Enc`
+# (tests/conformance/package_resolution/app_class_name_collision.spr).
+fn class_method_key(class_name: String, method_name: String) -> String =
+  "@classmethod:" ++ class_name ++ ":" ++ method_name
+
+# The class side, from the DECLARATIONS only. compiler-internals.md §"Whole-program
+# passes" asks a decl-scan to also read `env`; this one deliberately does not. On
+# the env path a class is named bare on BOTH sides, so a verbatim key and a short
+# key coincide there and two classes sharing a short name collapse into one entry.
+# Reading `env` would add no coverage there — it would manufacture a wrong answer.
+# Skipping where the bundler has not run is the safe failure; a false rejection is
+# not.
 fn class_effect_table(decls: List ast.Decl, acc: Dict types.Effect) -> Dict types.Effect =
   match decls with
   | Nil -> acc
@@ -9877,74 +9866,69 @@ fn class_method_effects(class_name: String, methods: List ast.ClassMethodSig,
           let eff = types.effect_from_labels(effects_maybe)
           in
             class_method_effects(class_name, rest,
-              dict_set(class_method_key(class_name, name), eff,
-                dict_set(class_method_short_key(class_name, name), eff, acc)))
+              dict_set(class_method_key(class_name, name), eff, acc))
 
 fn class_method_declared_effect(class_name: String, method_name: String,
-                                declared: Dict types.Effect,
-                                env: Dict types.Scheme) -> Maybe types.Effect =
-  match effect_for_class_key(class_method_key(class_name, method_name), declared, env) with
-  | Just eff -> Just(eff)
-  | Nothing ->
-      effect_for_class_key(class_method_short_key(class_name, method_name), declared, env)
+                                declared: Dict types.Effect) -> Maybe types.Effect =
+  dict_get(class_method_key(class_name, method_name), declared)
 
-fn effect_for_class_key(key: String, declared: Dict types.Effect,
-                        env: Dict types.Scheme) -> Maybe types.Effect =
-  match dict_get(key, declared) with
-  | Just eff -> Just(eff)
-  | Nothing ->
-      match dict_get(key, env) with
-      | Nothing -> Nothing
-      | Just scheme -> Just(types.scheme_effects(scheme))
-
-fn first_instance_effect_error(decls: List ast.Decl, declared: Dict types.Effect,
-                               env: Dict types.Scheme) -> Maybe(source.SourcePos, String) =
+fn first_instance_effect_error(decls: List ast.Decl,
+                               declared: Dict types.Effect) -> Maybe(source.SourcePos, String) =
   match decls with
   | Nil -> Nothing
   | Cons decl rest ->
       match decl with
       | ast.InstanceDecl constraint _ methods pos ->
-          match instance_decl_effect_error(constraint, methods, declared, env) with
+          match instance_decl_effect_error(constraint, methods, declared) with
           | Just msg -> Just((pos, msg))
-          | Nothing -> first_instance_effect_error(rest, declared, env)
-      | _ -> first_instance_effect_error(rest, declared, env)
+          | Nothing -> first_instance_effect_error(rest, declared)
+      | _ -> first_instance_effect_error(rest, declared)
 
 fn instance_decl_effect_error(constraint: ast.TypeConstraint,
                               methods: List ast.InstanceMethodImpl,
-                              declared: Dict types.Effect,
-                              env: Dict types.Scheme) -> Maybe String =
+                              declared: Dict types.Effect) -> Maybe String =
   match constraint with
   | ast.TypeConstraint class_name _ ->
-      first_instance_method_effect_error(class_name, methods, declared, env)
+      first_instance_method_effect_error(class_name, methods, declared)
 
 fn first_instance_method_effect_error(class_name: String, methods: List ast.InstanceMethodImpl,
-                                      declared: Dict types.Effect,
-                                      env: Dict types.Scheme) -> Maybe String =
+                                      declared: Dict types.Effect) -> Maybe String =
   match methods with
   | Nil -> Nothing
   | Cons method rest ->
-      match instance_method_effect_error(class_name, method, declared, env) with
+      match instance_method_effect_error(class_name, method, declared) with
       | Just msg -> Just(msg)
-      | Nothing -> first_instance_method_effect_error(class_name, rest, declared, env)
+      | Nothing -> first_instance_method_effect_error(class_name, rest, declared)
 
 fn instance_method_effect_error(class_name: String, method: ast.InstanceMethodImpl,
-                                declared: Dict types.Effect,
-                                env: Dict types.Scheme) -> Maybe String =
+                                declared: Dict types.Effect) -> Maybe String =
   match method with
   | ast.InstanceMethodImpl name _ _ eff_maybe _ ->
       # No entry means the class is not in scope, which is already diagnosed as an
       # unknown instance head; a second message for it here would double-report.
-      let Just class_eff = class_method_declared_effect(class_name, name, declared, env) else Nothing
+      let Just class_eff = class_method_declared_effect(class_name, name, declared) else Nothing
           inst_eff = types.effect_from_labels(eff_maybe)
       in
-        # A row is rule 9's to reject, and `checker.enforce_effects` says so
-        # properly. Ranked here it produced "declared !{IO, e}, but the class
-        # declares !{IO, e}" and hid the real message.
-        if types.effect_is_row(inst_eff) || types.effect_is_row(class_eff)
+        # A row needs OPPOSITE answers on the two sides. An instance method has a
+        # body, so it records an EffectReport and rule 9 names its row properly —
+        # ranking it here only masks that. A class method signature has no body
+        # and no report (effect-enforcement-v0.md §13.7), so deferring its row
+        # means nobody reports it and the instance's effect crosses unchecked.
+        if types.effect_is_row(inst_eff)
         then Nothing
+        else if types.effect_is_row(class_eff)
+        then Just(class_row_message(name, class_name, class_eff))
         else if types.effect_declared_at_most(inst_eff, class_eff)
         then Nothing
         else Just(instance_effect_message(name, class_name, inst_eff, class_eff))
+
+# Deliberately the wording `checker.enforce_effects` uses for a row, because it is
+# the same rule-9 violation reached from the only side that can see it.
+fn class_row_message(name: String, class_name: String, class_eff: types.Effect) -> String =
+  "class method `" ++ class_name ++ "." ++ name ++ "` declares the effect row `"
+    ++ types.effect_to_string(class_eff)
+    ++ "`, which spec-v0.md §7 does not define — an effect annotation is one concrete"
+    ++ " effect (`!{IO}`), one effect variable (`!{e}`), or omitted for purity"
 
 fn instance_effect_message(name: String, class_name: String, inst_eff: types.Effect,
                            class_eff: types.Effect) -> String =
