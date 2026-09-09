@@ -1848,15 +1848,12 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   `run-example-canary` (5 files) and `test-conformance-run` reach. Adding the ten to
   `is_hardcoded_intrinsic` moves any future regression one stage earlier, into a tool that runs
   everywhere. Costs a reseed and a golden cycle.
-- [ ] `P3` **DCE keeps unreachable stdlib functions in a bundle.** (a) `examples__sentry_api…ll`
-  gains `@stdlib.string.split`/`@…split_go` (~175 lines) uncalled, while the other 13 corpus files
-  importing `stdlib.string` prune both; *name-prefix reachability* and *the import set* were both
-  probed and REFUTED, so the trigger is in the example's **body**, not its header. (b) A **binder**
-  matching a prelude name keeps that function alive: a parameter named `after` in
-  `stdlib/tui/line_zipper.sprout` added `@after` to `examples__tui_dashboard…ll` with zero callers,
-  and renaming it removed the function again (2026-09-09, A/B on one file); a record FIELD of the
-  same name does not. Harmless — dead IR, not wrong IR — but (b) means any local named
-  `map`/`after`/`filter` silently grows every bundle that reaches its module.
+- [ ] `P3` **DCE keeps `@stdlib.string.split` in `examples__sentry_api…ll`.** ~175 lines
+  uncalled, while the other 13 corpus files importing `stdlib.string` prune both it and
+  `@…split_go`. *Name-prefix reachability*, *the import set* and *binder shadowing* were each
+  probed and REFUTED — the last one now by experiment: making `refs_expr` binder-aware changed 17
+  corpus files and left this one's three `split` definitions exactly where they were. The trigger
+  is in the example's **body**, not its header. Bisect that.
 
 **Types and inference**
 

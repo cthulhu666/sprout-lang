@@ -299,12 +299,23 @@ a missing typeclass instance at runtime.** Concretely, this is a constraint on:
   so the two cannot disagree about what the entry is. Adding a second entry
   convention means changing both.
 
-The pass is intentionally imprecise in the safe direction: it collects `TVar`
-names **without tracking binders**, so a lambda parameter shadowing a top-level
-function keeps that function alive. Do not "fix" this. Keeping a dead
-declaration costs lines; dropping a live one costs a working program, and
-`tests/stdlib/compiler/test_dce_reachable.spr` asserts the conservative
-behaviour so the trade stays deliberate.
+`refs_expr` threads the names a binder has taken — lambda and declaration
+parameters, match binders, do-bindings — as the free-variable check in the same
+file does, both reading one classifier (`bind_pat`). A `TVar` naming a bound name
+is a local, not an edge. `where` and `let … in` need no case of their own:
+`parser.wrap_where_binding` and `build_let_binding_match` both emit a single-arm
+`MatchExpr`, so the match-arm case already covers them.
+
+It collected names **without** tracking binders until 2026-09-09, which made the
+emitted program depend on what callers named their parameters — a prelude
+parameter named `count` invented an edge to the `Foldable` class method of that
+name and dragged `count`, `fold` and `__cm_Foldable_fold_values` into 15 of the
+62 corpus files. Removing that was worth 1,671 IR lines, 0.8% of the corpus, at
+no measurable compile-time cost.
+
+The imprecision that remains is deliberate and stays: whole categories are kept
+rather than reasoned about. Dropping a live declaration costs a working program,
+so a construct whose scoping this pass does not model must invent the edge.
 
 Externs and pass-through type declarations are kept unconditionally — a missing
 `declare` is a link error, and constructors are reached from patterns, which

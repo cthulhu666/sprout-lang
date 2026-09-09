@@ -103,31 +103,41 @@ fn all_pure_fields(fields: List typed_ast.TypedRecordField) -> Bool =
 # Free-variable check — is `name` free anywhere in the given construct?
 # ---------------------------------------------------------------------------
 
-fn param_binds(name: String, p: ast.Param) -> Bool =
+# The names a binder takes. One classifier serves both questions this file asks:
+# WHICH names a construct binds, for reachability below, and whether it binds a
+# GIVEN name, for the free-variable check here (guidelines §2a — reuse over a
+# sixth copy of "which names does this pattern bind?").
+fn bind_param(p: ast.Param, bound: Set) -> Set =
   match p with
-  | ast.Param n _ _ -> n == name
+  | ast.Param n _ _ -> set_insert(n, bound)
+
+fn bind_params(ps: List ast.Param, bound: Set) -> Set =
+  match ps with
+  | Nil -> bound
+  | Cons p rest -> bind_params(rest, bind_param(p, bound))
+
+fn bind_pat(pat: ast.Pattern, bound: Set) -> Set =
+  match pat with
+  | ast.VarPattern n _ -> set_insert(n, bound)
+  | ast.WildcardPattern _ -> bound
+  | ast.IntPattern _ _ -> bound
+  | ast.BoolPattern _ _ -> bound
+  | ast.StringPattern _ _ -> bound
+  | ast.CharPattern _ _ -> bound
+  | ast.UnitPattern _ -> bound
+  | ast.TuplePattern pats _ -> bind_pats(pats, bound)
+  | ast.ConstructorPattern _ pats _ -> bind_pats(pats, bound)
+
+fn bind_pats(pats: List ast.Pattern, bound: Set) -> Set =
+  match pats with
+  | Nil -> bound
+  | Cons p rest -> bind_pats(rest, bind_pat(p, bound))
 
 fn params_bind(name: String, ps: List ast.Param) -> Bool =
-  match ps with
-  | Nil -> false
-  | Cons p rest -> param_binds(name, p) || params_bind(name, rest)
+  set_member(name, bind_params(ps, set_empty()))
 
 fn pat_binds(name: String, pat: ast.Pattern) -> Bool =
-  match pat with
-  | ast.VarPattern n _ -> n == name
-  | ast.WildcardPattern _ -> false
-  | ast.IntPattern _ _ -> false
-  | ast.BoolPattern _ _ -> false
-  | ast.StringPattern _ _ -> false
-  | ast.CharPattern _ _ -> false
-  | ast.UnitPattern _ -> false
-  | ast.TuplePattern pats _ -> any_pat_binds(name, pats)
-  | ast.ConstructorPattern _ pats _ -> any_pat_binds(name, pats)
-
-fn any_pat_binds(name: String, pats: List ast.Pattern) -> Bool =
-  match pats with
-  | Nil -> false
-  | Cons p rest -> pat_binds(name, p) || any_pat_binds(name, rest)
+  set_member(name, bind_pat(pat, set_empty()))
 
 fn is_free(name: String, e: typed_ast.TypedExpr) -> Bool =
   match e with
@@ -317,36 +327,35 @@ export fn elim_program(prog: typed_ast.TypedProgram) -> typed_ast.TypedProgram =
 # `__tc_{Class}_{mangled}_{method}` TFnDecls, so by this point every live edge —
 # including every typeclass dispatch — is an ordinary TVar.
 #
-# The pass is deliberately IMPRECISE, in one direction only. It collects TVar
-# names without tracking binders, so a lambda parameter or match binding that
-# shares a top-level function's name adds an edge that keeps a dead function
-# alive. That is the safe error: dropping a live declaration is a link failure
-# or a silently missing instance, while keeping a dead one costs lines.
-# `tests/stdlib/compiler/test_dce_reachable.spr` asserts the over-approximation
-# directly, so making the pass precise means deleting a test on purpose.
+# The pass errs in one direction only: an invented edge costs lines, a missed one
+# is a link failure or a silently missing instance. Any construct whose scoping
+# this file does not model must therefore fall on the "invent the edge" side.
 
-# Names an expression references. Mirrors `is_free`'s traversal, but collecting
-# instead of testing — and with no binder handling, per the note above.
-fn refs_expr(e: typed_ast.TypedExpr, acc: Set) -> Set =
+# Names an expression references. Mirrors `is_free`'s traversal, binders and all,
+# but collecting instead of testing. `bound` holds the names a lambda parameter,
+# match binder or do-binding has taken: a TVar naming one of those is a local, and
+# an edge from it to a top-level declaration of that name would be invented.
+fn refs_expr(e: typed_ast.TypedExpr, bound: Set, acc: Set) -> Set =
   match e with
-  | typed_ast.TVar n _ _ -> set_insert(n, acc)
+  | typed_ast.TVar n _ _ -> if set_member(n, bound) then acc else set_insert(n, acc)
   | typed_ast.TInt _ _ _ -> acc
   | typed_ast.TFloat _ _ _ -> acc
   | typed_ast.TBool _ _ _ -> acc
   | typed_ast.TString _ _ _ -> acc
   | typed_ast.TChar _ _ _ -> acc
   | typed_ast.TUnit _ _ -> acc
-  | typed_ast.TTuple items _ _ -> refs_list(items, acc)
-  | typed_ast.TIf cond thn els _ _ -> refs_expr(els, refs_expr(thn, refs_expr(cond, acc)))
-  | typed_ast.TMatch scrut arms _ _ -> refs_arms(arms, refs_expr(scrut, acc))
-  | typed_ast.TCall callee args _ _ -> refs_list(args, refs_expr(callee, acc))
+  | typed_ast.TTuple items _ _ -> refs_list(items, bound, acc)
+  | typed_ast.TIf cond thn els _ _ ->
+      refs_expr(els, bound, refs_expr(thn, bound, refs_expr(cond, bound, acc)))
+  | typed_ast.TMatch scrut arms _ _ -> refs_arms(arms, bound, refs_expr(scrut, bound, acc))
+  | typed_ast.TCall callee args _ _ -> refs_list(args, bound, refs_expr(callee, bound, acc))
   # Neither can survive lowering — ast_to_ir rejects a TDict outright. Panicking
   # rather than returning `acc` keeps a future regression loud: silently
   # reporting "no references" here would delete the instance functions a
   # surviving dictionary points at.
   | typed_ast.TDict _ _ _ _ -> panic("dce.refs_expr: TDict survived lowering (internal error)")
   | typed_ast.TMethodRef _ _ _ _ _ -> panic("dce.refs_expr: TMethodRef survived lowering (internal error)")
-  | typed_ast.TLambda _ body _ _ -> refs_expr(body, acc)
+  | typed_ast.TLambda params body _ _ -> refs_expr(body, bind_params(params, bound), acc)
   # `++` on lists lowers to a call to the prelude's `list_append` whose name is a
   # STRING LITERAL in codegen (ast_to_ir.sprout:5400), so no TVar names it. Rooted
   # for every `++` rather than only for list operands: reproducing codegen's
@@ -354,55 +363,63 @@ fn refs_expr(e: typed_ast.TypedExpr, acc: Set) -> Set =
   # the cost of being wrong is a deleted callee. String `++` lowers to the
   # `str_concat` extern, which is kept anyway.
   | typed_ast.TBinary op l r _ _ ->
-      if op == "++" then set_insert("list_append", refs_expr(r, refs_expr(l, acc)))
-      else refs_expr(r, refs_expr(l, acc))
-  | typed_ast.TUnary _ operand _ _ -> refs_expr(operand, acc)
+      if op == "++" then
+        set_insert("list_append", refs_expr(r, bound, refs_expr(l, bound, acc)))
+      else refs_expr(r, bound, refs_expr(l, bound, acc))
+  | typed_ast.TUnary _ operand _ _ -> refs_expr(operand, bound, acc)
   # Likewise `a..b`, which lowers to a literal-named `range_up` call
   # (ast_to_ir.sprout:1104) rather than to an inline IntRange construction.
-  | typed_ast.TRange l r _ _ -> set_insert("range_up", refs_expr(r, refs_expr(l, acc)))
-  | typed_ast.TDo steps _ _ -> refs_steps(steps, acc)
-  | typed_ast.TRecord _ fields _ _ -> refs_fields(fields, acc)
-  | typed_ast.TGetField obj _ _ _ -> refs_expr(obj, acc)
-  | typed_ast.TRecordUpdate base fields _ _ -> refs_fields(fields, refs_expr(base, acc))
+  | typed_ast.TRange l r _ _ ->
+      set_insert("range_up", refs_expr(r, bound, refs_expr(l, bound, acc)))
+  | typed_ast.TDo steps _ _ -> refs_steps(steps, bound, acc)
+  | typed_ast.TRecord _ fields _ _ -> refs_fields(fields, bound, acc)
+  | typed_ast.TGetField obj _ _ _ -> refs_expr(obj, bound, acc)
+  | typed_ast.TRecordUpdate base fields _ _ ->
+      refs_fields(fields, bound, refs_expr(base, bound, acc))
 
-fn refs_list(es: List typed_ast.TypedExpr, acc: Set) -> Set =
+fn refs_list(es: List typed_ast.TypedExpr, bound: Set, acc: Set) -> Set =
   match es with
   | Nil -> acc
-  | Cons e rest -> refs_list(rest, refs_expr(e, acc))
+  | Cons e rest -> refs_list(rest, bound, refs_expr(e, bound, acc))
 
-# Pattern positions are not traversed: a constructor lowers to an inline
-# allocation, never to a callable symbol, so a pattern references nothing that
-# could be pruned.
-fn refs_arms(arms: List typed_ast.TypedMatchBranch, acc: Set) -> Set =
+# A pattern's own names are binders, not references: a constructor lowers to an
+# inline allocation rather than to a callable symbol, so nothing in a pattern
+# could be pruned by name.
+fn refs_arms(arms: List typed_ast.TypedMatchBranch, bound: Set, acc: Set) -> Set =
   match arms with
   | Nil -> acc
   | Cons arm rest ->
       match arm with
-      | typed_ast.TypedMatchBranch _ body -> refs_arms(rest, refs_expr(body, acc))
+      | typed_ast.TypedMatchBranch pat body ->
+          refs_arms(rest, bound, refs_expr(body, bind_pat(pat, bound), acc))
 
-fn refs_fields(fields: List typed_ast.TypedRecordField, acc: Set) -> Set =
+fn refs_fields(fields: List typed_ast.TypedRecordField, bound: Set, acc: Set) -> Set =
   match fields with
   | Nil -> acc
   | Cons f rest ->
       match f with
-      | typed_ast.TypedRecordField _ v -> refs_fields(rest, refs_expr(v, acc))
+      | typed_ast.TypedRecordField _ v -> refs_fields(rest, bound, refs_expr(v, bound, acc))
 
-fn refs_steps(steps: List typed_ast.TypedDoStep, acc: Set) -> Set =
+# A do-binding scopes over the steps that FOLLOW it, never over its own
+# right-hand side — `is_free_in_steps` reads the same shape.
+fn refs_steps(steps: List typed_ast.TypedDoStep, bound: Set, acc: Set) -> Set =
   match steps with
   | Nil -> acc
   | Cons step rest ->
       match step with
-      | typed_ast.TDoBindStep _ e -> refs_steps(rest, refs_expr(e, acc))
-      | typed_ast.TDoLetStep _ e -> refs_steps(rest, refs_expr(e, acc))
-      | typed_ast.TDoExprStep e -> refs_steps(rest, refs_expr(e, acc))
+      | typed_ast.TDoBindStep pat e ->
+          refs_steps(rest, bind_pat(pat, bound), refs_expr(e, bound, acc))
+      | typed_ast.TDoLetStep n e ->
+          refs_steps(rest, set_insert(n, bound), refs_expr(e, bound, acc))
+      | typed_ast.TDoExprStep e -> refs_steps(rest, bound, refs_expr(e, bound, acc))
 
 fn refs_instance_methods(ms: List typed_ast.TypedInstanceMethod, acc: Set) -> Set =
   match ms with
   | Nil -> acc
   | Cons m rest ->
       match m with
-      | typed_ast.TypedInstanceMethod _ _ _ _ body ->
-          refs_instance_methods(rest, refs_expr(body, acc))
+      | typed_ast.TypedInstanceMethod _ params _ _ body ->
+          refs_instance_methods(rest, refs_expr(body, bind_params(params, set_empty()), acc))
 
 # A pass-through carries a declaration the typed pipeline had no typed form for.
 # Today that is only type-level: a type, record, class, alias or wrap, none of
@@ -426,9 +443,9 @@ fn refs_passthrough(d: ast.Decl, acc: Set) -> Set =
 
 fn refs_decl(d: typed_ast.TypedDecl, acc: Set) -> Set =
   match d with
-  | typed_ast.TFnDecl _ _ _ _ _ body -> refs_expr(body, acc)
+  | typed_ast.TFnDecl _ params _ _ _ body -> refs_expr(body, bind_params(params, set_empty()), acc)
   | typed_ast.TExternFnDecl _ _ _ _ -> acc
-  | typed_ast.TLetDecl _ e -> refs_expr(e, acc)
+  | typed_ast.TLetDecl _ e -> refs_expr(e, set_empty(), acc)
   # Lowering replaces every instance with generated TFnDecls, so this arm is
   # defensive. Traversing rather than ignoring keeps it safe if that changes.
   | typed_ast.TInstanceDecl _ _ methods -> refs_instance_methods(methods, acc)
