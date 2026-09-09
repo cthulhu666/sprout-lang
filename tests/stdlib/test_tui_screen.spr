@@ -75,6 +75,16 @@ fn narrow_cases(state: TestState) -> Unit !{IO} = do
             first, "y")
   assert_eq(state, "and reports the column past its last cluster", landed, 2)
 
+  # A wide cluster straddling column 0 owns that column without being able to
+  # paint in it, so it blanks it — otherwise the cell underneath shows through
+  # a column something else has claimed.
+  w(s, 0, 1, "Z", plain())
+  hidden <- scr.screen_write(s, 0 - 1, 1, "日", plain())
+  under <- scr.text_at(s, 0, 1)
+  assert_eq(state, "a wide cluster straddling column 0 blanks the column it owns",
+            under, " ")
+  assert_eq(state, "and still reports both of its columns", hidden, 1)
+
 fn wide_cases(state: TestState) -> Unit !{IO} = do
   s <- scr.screen_new(g.Size(6, 2))
 

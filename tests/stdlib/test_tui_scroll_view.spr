@@ -33,6 +33,14 @@ fn tall() -> widget.Widget Msg =
 
 fn wide() -> widget.Widget Msg = txt.static(["abcdefgh"])
 
+# The same five rows as a CONTAINER rather than one block. A container reports
+# the sum of its children, and clamping that to `avail` used to leave a scroll
+# view with nothing to scroll — the shape every real caller has.
+fn stacked() -> widget.Widget Msg =
+  ct.column([ct.fit(txt.label("one")), ct.fit(txt.label("two")),
+             ct.fit(txt.label("three")), ct.fit(txt.label("four")),
+             ct.fit(txt.label("five"))])
+
 fn small() -> widget.Widget Msg = txt.static(["ab"])
 
 fn note_on_event(n: Int, ev: event.Event) -> (Int, Says, Asks) =
@@ -168,6 +176,18 @@ fn window_cases(state: TestState) -> Unit !{IO} = do
   clamped <- shown(live(view(), [key(event.KEnd), key(event.KDown)]), 5, 2)
   assert_eq(state, "a step past the end stays on the last screenful", clamped,
             "four |five ")
+
+  # The regression the first cut shipped with: every case above used one
+  # `static`, the only child whose measurement was not clamped to the viewport.
+  stack_top <- shown(ring_of(view_of(stacked(), sv.scroll_opts())), 5, 2)
+  assert_eq(state, "a column of widgets starts at the top", stack_top,
+            "one  |two  ")
+  stack_down <- shown(live(view_of(stacked(), sv.scroll_opts()),
+                           [key(event.KDown)]), 5, 2)
+  assert_eq(state, "and scrolls like any other child", stack_down, "two  |three")
+  stack_end <- shown(live(view_of(stacked(), sv.scroll_opts()),
+                          [key(event.KEnd)]), 5, 2)
+  assert_eq(state, "and reaches its last screenful", stack_end, "four |five ")
 
   # A child WIDER than the view scrolls on the other axis by the same rule.
   right <- shown(live(view_of(wide(), sv.scroll_opts()), [key(event.KRight)]), 4, 1)

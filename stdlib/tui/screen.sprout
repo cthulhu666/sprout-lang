@@ -35,7 +35,9 @@ export type Cell (..) deriving (Eq, ToString) =
 # INVARIANT — the clip only ever narrows: `screen_new` starts it at the whole
 # screen and `screen_clipped` intersects, so no widget can widen its way out to
 # a region its parent excluded. `shows` tests the grid bounds separately, so a
-# violation would misplace a widget rather than corrupt memory.
+# violation would misplace a widget rather than corrupt memory. It bounds where
+# a widget WRITES; one thing it cannot undo is a wide pair cut by a later,
+# narrower clip — see the limit noted on `repair`.
 export type Screen (..) =
   | Screen (MutMatrix Cell) (MutMatrix Cell) (Ref geometry.Region)
 
@@ -102,6 +104,11 @@ fn cluster_width(cluster: List Int) -> Int = text.cluster_width(cluster)
 #   - on a wide cell: the continuation to its RIGHT loses its owner
 # Either way the survivor becomes a space, because a half-drawn character has
 # no representation the renderer can emit.
+#
+# LIMIT — a repair is an ordinary write, so it is dropped outside the clip. A
+# pair painted under a wide clip and then cut by a narrower one keeps its live
+# half, which the terminal draws two columns wide. Out of reach today: nothing
+# paints a wide cluster and then narrows across it. See BACKLOG.md §4.
 fn repair(s: Screen, col: Int, row: Int) -> Unit !{IO} = do
   here <- cell_at(s, col, row)
   repair_here(s, col, row, here)
@@ -145,9 +152,23 @@ fn inside(r: geometry.Region, col: Int, row: Int) -> Bool =
 # the part that reaches the screen.
 export fn screen_put(s: Screen, col: Int, row: Int, cluster: List Int,
                      st: style.Style) -> Int !{IO} =
-  if col < 0 then cluster_width(cluster)
+  if col < 0 then put_left_of(s, col, row, st, cluster_width(cluster))
   else if ! in_bounds (s, col, row) then 0
   else put_sized(s, col, row, cluster, st, cluster_width(cluster))
+
+# A cluster off the left edge still OWNS the columns it spans, so a wide one
+# reaching column 0 blanks it rather than leaving whatever was there under a
+# column it claimed — the same "both halves or neither" rule as `put_pair`.
+fn put_left_of(s: Screen, col: Int, row: Int, st: style.Style,
+               wide: Int) -> Int !{IO} = do
+  if col + wide > 0 then blank_left_edge(s, row, st) else ()
+  wide
+
+# Only a two-column cluster starting at -1 reaches column 0, and `repair` first
+# because that column may be the left half of a pair of its own.
+fn blank_left_edge(s: Screen, row: Int, st: style.Style) -> Unit !{IO} = do
+  repair(s, 0, row)
+  set_raw(s, 0, row, Cell(32, Nil, st))
 
 fn put_sized(s: Screen, col: Int, row: Int, cluster: List Int, st: style.Style,
              wide: Int) -> Int !{IO} =

@@ -173,9 +173,17 @@ that channel. A container resolving a `fit` slot now emits
 `layout.Auto(measured)` for a fixed one.
 
 A container's own `Measured` follows from its slots: size is the sum of the
-children's asks along the axis and the largest across it, clamped to `avail`;
+children's asks along the axis and the largest across it;
 `Grow` is `Greedy` along the axis if any slot is a `fraction` or any `fit` child
-is itself greedy, and `Fixed` otherwise. Each child is measured against the
+is itself greedy, and `Fixed` otherwise.
+
+**A measurement is what a widget wants, not what it will get** — it is *not*
+clamped to `avail`, and `layout.solve` clamps what each ask is actually given
+(`layout.sprout` pays `Cells` and `Auto` from a budget capped at the room).
+Clamping it here cost nothing while the solver was the only caller, since the
+solver never asks about a size it is not about to hand out; it silently made
+`scroll_view` unable to scroll any container, because the one number it needs is
+the one the clamp destroys (`docs/tui-scroll-view-v0.md` §4.9). Each child is measured against the
 container's full `avail` — measuring against a running remainder would make a
 child's reported size depend on its position among its siblings.
 

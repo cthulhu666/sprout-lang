@@ -136,12 +136,15 @@ viewport, so a handler cannot do it. The position on each axis is therefore
 `FromTop n | FromBottom k`, and `render` resolves it against the extent it
 measures — `KEnd` is `FromBottom 0`, exact without anyone having computed it.
 
-A handler clamps only the near end, which it does know (`FromTop` never goes
-below 0). The cost is that stepping *past* the far end stores presses that must
-be undone before the window moves back: the view is right, the next keypress is
-not. `KHome` and `KEnd` always land exactly, so the recovery is one key.
-Filed in `BACKLOG.md` §4; the root cause is the pure-handler contract, which the
-effect fork in `docs/tui-widgets-v0.md` would settle.
+A handler clamps only the near end of whichever anchor is in force, which is the
+only end it knows: `FromTop n` cannot go below 0, `FromBottom k` cannot go below
+0. The *far* end of each is unbounded, and both directions overshoot — pressing
+`KDown` past the bottom grows `n`, and pressing `KUp` past the top under a
+`FromBottom` anchor grows `k`. Either way the view is painted correctly and the
+next keypress in the other direction does nothing visible until the stored
+presses are used up. `KHome` and `KEnd` always land exactly, so recovery is one
+key. Filed in `BACKLOG.md` §4; the root cause is the pure-handler contract,
+which the effect fork in `docs/tui-widgets-v0.md` would settle.
 
 ### 4.9 The extent comes from `Grow`, not from an unbounded measure
 
@@ -150,6 +153,13 @@ its natural extent, which is exactly the scrollable size; a `Greedy` axis has no
 natural extent — it means "whatever I am given" — so that axis does not scroll
 and the child is given the viewport. No sentinel "very large" size is measured
 against, and Textual's separately-declared virtual size is unnecessary.
+
+This only works because a measurement is now the *unclamped* ask. `box_measure`
+and `grid_measure` used to clamp theirs to `avail`, which made every container
+child report exactly the viewport and left `scroll_view` with nothing to scroll —
+found by code review, since every test here used a single `text.static`, the one
+child shape that dodged the clamp. The clamp was redundant: `layout.solve` caps
+what an ask is *given*, which is where the two meanings belong apart.
 
 The extent is measured every frame, so a child that shrinks cannot leave the view
 parked past its end: the resolution in §4.8 clamps against the size measured
@@ -184,6 +194,10 @@ the whole point of one. Its natural size is its child's.
 
 ## 6. Compatibility
 
+A container's `Measured.size` is no longer clamped to `avail` (§4.9). Layout
+results are unchanged — `layout.solve` already clamped every ask it pays — and
+the assertion that pinned the old contract is now the opposite one.
+
 Additive apart from `Screen`'s arity. Behaviour changes in one way: a widget that
 painted outside its region used to succeed and now does not. That is the fix, and
 no widget in the tree does it — `paint.*` was written to prevent exactly this.
@@ -209,9 +223,16 @@ content fits claims one anyway without moving; a chord and an unused key fall
 through to a neighbour probe; an unfocused view declines a key addressed to it,
 claims a focus notification, and passes an address it does not own to its child.
 
-Both new guarantees were checked by mutation, not just by going green: with the
-clip removed from `sv_render` the child paints two rows past its viewport, and
-with it removed from `render_zip` the rude child overwrites its sibling.
+The container-child cases are the ones code review's finding is filed under: a
+`ct.column` of five labels starts at the top, steps, and reaches its last
+screenful. Every other case uses a `text.static`, which is exactly why the clamp
+went unnoticed.
+
+Three guarantees were checked by mutation, not just by going green: with the clip
+removed from `sv_render` the child paints two rows past its viewport, with it
+removed from `render_zip` the rude child overwrites its sibling, and without the
+left-edge blanking a wide cluster straddling column 0 leaves the old glyph
+showing under a column it owns.
 
 ## 8. Deferred, filed in `BACKLOG.md` §4
 

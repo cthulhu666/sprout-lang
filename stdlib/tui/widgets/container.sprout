@@ -72,8 +72,6 @@ fn grow_across(a: Arrange, m: widget.Measured) -> widget.Grow =
 
 fn imax(a: Int, b: Int) -> Int = if a > b then a else b
 
-fn imin(a: Int, b: Int) -> Int = if a < b then a else b
-
 # ── row and column ──────────────────────────────────────────────────────────
 
 type Box m = (arrange: Arrange, slots: List (Slot m))
@@ -135,13 +133,15 @@ fn box_render(b: Box m, r: geometry.Region, s: screen.Screen) -> Unit !{IO} =
   children.render_zip(regions_of(b, r), s, box_kids(b))
 
 # Size is the sum of the children's asks along the axis and the largest across
-# it, clamped to `avail`. Growth is `Greedy` along the axis if any slot is a
-# fraction or any `fit` child is itself greedy — a container that yields is one
-# whose children yield.
+# it, and it is what the container WANTS — not clipped to `avail`, which would
+# lose the one number a scroll view needs. `layout.solve` clamps what each ask
+# is actually given. Growth is `Greedy` along the axis if any slot is a fraction
+# or any `fit` child is itself greedy — a container that yields is one whose
+# children yield.
 fn box_measure(b: Box m, avail: geometry.Size) -> widget.Measured =
   let ms = children.measure_all(avail, box_kids(b))
-      n_along = imin(sum_along(b.arrange, b.slots, ms), along(b.arrange, avail))
-      n_across = imin(max_across(b.arrange, ms), across(b.arrange, avail))
+      n_along = sum_along(b.arrange, b.slots, ms)
+      n_across = max_across(b.arrange, ms)
   in
   sized(b.arrange, n_along, n_across,
         any_greedy_along(b.arrange, b.slots, ms),
@@ -248,8 +248,7 @@ fn grid_render(g: Grid m, r: geometry.Region, s: screen.Screen) -> Unit !{IO} =
 # The templates are the whole story: a fraction anywhere in an axis makes the
 # grid yield on it, otherwise the axis is the sum of its fixed asks.
 fn grid_measure(g: Grid m, avail: geometry.Size) -> widget.Measured =
-  widget.Measured(size = geometry.Size(imin(template_sum(g.cols), geometry.size_cols(avail)),
-                                       imin(template_sum(g.rows), geometry.size_rows(avail))),
+  widget.Measured(size = geometry.Size(template_sum(g.cols), template_sum(g.rows)),
                   cols = template_grow(g.cols), rows = template_grow(g.rows))
 
 fn template_sum(ds: List layout.Dimension) -> Int =

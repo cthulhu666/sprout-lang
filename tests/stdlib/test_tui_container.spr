@@ -148,10 +148,19 @@ fn measure_cases(state: TestState) -> Unit !{IO} = do
             size_of(ct.row([ct.fit(txt.label("ab")),
                             ct.fit(txt.static(["c", "d"]))]), 20, 24),
             to_string(g.Size(3, 2)))
-  # Clamped to what is available, never larger.
-  assert_eq(state, "a container never measures larger than avail",
+  # A measurement is what the container WANTS, so it may exceed `avail` —
+  # `layout.solve` clamps what an ask is given. A scroll view needs the
+  # unclamped number, and clamping here silently made it unscrollable.
+  assert_eq(state, "a container measures what it wants, past avail",
             size_of(ct.column([ct.fit(txt.static(["a", "b", "c", "d"]))]), 20, 2),
-            to_string(g.Size(1, 2)))
+            to_string(g.Size(1, 4)))
+  # What it is GIVEN is still clamped: four rows of content in two rows of
+  # region paint two.
+  taller <- painted(ct.column([ct.fit(txt.static(["a", "b", "c", "d"]))]), 4, 2)
+  first <- head_of(taller, 0)
+  second <- head_of(taller, 1)
+  assert_eq(state, "and is still laid out inside the region it was given",
+            first ++ second, "ab")
   # A grid's growth comes from its templates. The two are tagged, so passing
   # them the other way round is a type error rather than a transposed grid.
   assert_eq(state, "a grid with a fraction template grows greedily",
