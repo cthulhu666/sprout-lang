@@ -193,6 +193,26 @@ fn main() -> Unit !{IO} =
                                          typed_ast.TDoExprStep(lit())],
                                         int_ty(), pos())),
                         leaf("helper")])
+
+    # 19. A do-BIND step combines the two: its pattern binds like a match arm,
+    #     over the following steps only. Neither 17 nor 18 reaches this arm.
+    bind_shadow = kept([main_returning(
+                          typed_ast.TDo([typed_ast.TDoBindStep(
+                                           ast.VarPattern("helper", pos()),
+                                           lit()),
+                                         typed_ast.TDoExprStep(var("helper"))],
+                                        int_ty(), pos())),
+                        leaf("helper")])
+
+    # 20. The control for 19: binding the right-hand side instead of the tail
+    #     would prune a live declaration, and only this fixture catches it.
+    bind_rhs_seen = kept([main_returning(
+                            typed_ast.TDo([typed_ast.TDoBindStep(
+                                             ast.VarPattern("helper", pos()),
+                                             var("helper")),
+                                           typed_ast.TDoExprStep(lit())],
+                                          int_ty(), pos())),
+                          leaf("helper")])
   in run_suite("dce_reachable", [
     check_true("keeps a called function", has_name("used", basic)),
     check_true("keeps the entry point", has_name("main", basic)),
@@ -240,5 +260,9 @@ fn main() -> Unit !{IO} =
     check_true("a do-binding shadows the steps after it",
       ! has_name ("helper", do_shadow)),
     check_true("a do-binding does not shadow its own right-hand side",
-      has_name("helper", do_rhs_seen))
+      has_name("helper", do_rhs_seen)),
+    check_true("a do-bind pattern shadows the steps after it",
+      ! has_name ("helper", bind_shadow)),
+    check_true("a do-bind pattern does not shadow its own right-hand side",
+      has_name("helper", bind_rhs_seen))
   ])
