@@ -84,6 +84,10 @@ fn acute() -> event.Event = key(event.KChar(char_from_codepoint(769)))
 
 fn e_acute() -> String = utf8.from_codepoints([101, 769])
 
+# A line CAN begin with a lone combining mark — a paste is enough to produce
+# one — and it is the case that puts the caret in front of a mark.
+fn orphan() -> String = utf8.from_codepoints([769, 97, 98])
+
 # ── what it says ────────────────────────────────────────────────────────────
 
 fn typing_cases(state: TestState) -> Unit !{IO} = do
@@ -207,6 +211,16 @@ fn cluster_cases(state: TestState) -> Unit !{IO} = do
   assert_eq(state, "a pasted cluster is one caret stop",
             typed([event.Paste(e_acute()), key(event.KBackspace)]),
             "[Changed(" ++ e_acute() ++ "), Changed()]")
+  # Re-segmenting only BEHIND the caret leaves it inside the cluster it just
+  # made, and the next keystroke then lands between `e` and its accent.
+  assert_eq(state, "a base typed in front of a lone mark joins it",
+            typed_with(inp.input_opts() with (initial = orphan()),
+                       [key(event.KHome)] ++ chars("e")),
+            "[Changed(" ++ e_acute() ++ "ab)]")
+  assert_eq(state, "and the mark stays on the character it joined",
+            typed_with(inp.input_opts() with (initial = orphan()),
+                       [key(event.KHome)] ++ chars("ez")),
+            "[Changed(" ++ e_acute() ++ "ab), Changed(z" ++ e_acute() ++ "ab)]")
 
 # ── what it paints ──────────────────────────────────────────────────────────
 

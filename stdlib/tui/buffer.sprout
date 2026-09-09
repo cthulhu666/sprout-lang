@@ -11,11 +11,11 @@ import stdlib.tui.line_zipper as lz
 
 # `goal` is the display column a vertical move is trying to return to (§4.7).
 #
-# GOAL INVARIANT — `landed` is the ONLY place that sets `Just`; every other
-# construction of `Fields` sets `Nothing`. A new operation therefore clears the
-# goal by default and must justify keeping it, rather than the reverse. Getting
-# this backwards is not a crash: the caret silently drifts toward a column the
-# reader last visited several keystrokes ago.
+# GOAL INVARIANT — `landed` is the only place that INTRODUCES one. A vertical
+# move carries whatever is there, including when it is blocked; everything else
+# constructs `Fields` with `Nothing`, blocked or not. Clearing on a blocked
+# vertical move forfeits the column; keeping it on a horizontal one drags the
+# caret back to a column the reader left several keystrokes ago.
 type Fields = (above: List String, line: lz.Zipper, below: List String,
                goal: Maybe Int)
 
@@ -65,9 +65,8 @@ export fn buffer_row(b: Buffer) -> Int = list_length(fields(b).above)
 
 export fn buffer_col(b: Buffer) -> Int = lz.zipper_col(fields(b).line)
 
-# The line the caret is on. O(that line), where picking it out of
-# `buffer_lines` costs a walk of the whole document — which a renderer would
-# then pay on every frame.
+# The line the caret is on, read directly rather than indexed out of
+# `buffer_lines`, which costs a walk of the whole document.
 export fn buffer_line(b: Buffer) -> String = lz.zipper_text(fields(b).line)
 
 # ── editing ─────────────────────────────────────────────────────────────────
@@ -78,29 +77,31 @@ export fn buffer_insert(s: String, b: Buffer) -> Maybe Buffer =
   if string.is_empty(s) then Nothing
   else Just(inserted(fields(b), split_lines(s)))
 
-# The first segment joins the current line — through the zipper, so a combining
-# mark re-segments against the cluster it follows. Every later segment breaks
-# the line first.
+# Several segments cannot be applied one at a time: the first would re-segment
+# against text the next break is about to move to another line, and the caret
+# would round back in front of it, splitting the line in the wrong place. The
+# caret's two halves are taken once, up front.
 fn inserted(f: Fields, segs: List String) -> Buffer =
   match segs with
-  | Nil -> Buf(f)
-  | [first | rest] -> broken(extended(f, first), rest)
+  | Nil -> Buf((f with (goal = Nothing)))
+  | [only] -> Buf(extended(f, only))
+  | [first | rest] ->
+      broken_at(f, lz.zipper_before_text(f.line) ++ first, rest,
+                lz.zipper_after_text(f.line))
 
 fn extended(f: Fields, seg: String) -> Fields =
   (f with (line = maybe_with_default(f.line, lz.zipper_insert(seg, f.line)),
            goal = Nothing))
 
-fn broken(f: Fields, segs: List String) -> Buffer =
-  match segs with
-  | Nil -> Buf(f)
-  | [seg | rest] -> broken(split_at_caret(f, seg), rest)
-
-# What precedes the caret stays behind on its own line; the new line starts
-# with `seg` and keeps everything that followed the caret.
-fn split_at_caret(f: Fields, seg: String) -> Fields =
-  Fields(above = Cons(lz.zipper_before_text(f.line), f.above),
-         line = restarted(seg, lz.zipper_after_text(f.line)),
-         below = f.below, goal = Nothing)
+# `done` is a finished line. Every segment but the last completes one; the last
+# starts the line the caret ends on and keeps what followed the caret.
+fn broken_at(f: Fields, done: String, rest: List String,
+             tail: String) -> Buffer =
+  match rest with
+  | Nil -> Buf (Fields(above = f.above, line = restarted(done, tail),
+                      below = f.below, goal = Nothing))
+  | [next | more] ->
+      broken_at((f with (above = Cons(done, f.above))), next, more, tail)
 
 fn restarted(head: String, tail: String) -> lz.Zipper =
   maybe_with_default(fresh, lz.zipper_insert(head, fresh))
@@ -155,9 +156,12 @@ fn stepped_left(f: Fields) -> Buffer =
   else Buf(Fields(above = f.above, line = lz.zipper_left(f.line),
                   below = f.below, goal = Nothing))
 
+# A move with nowhere to go is still a horizontal move, so it still clears the
+# goal — leaving it set sends the next vertical move to a column the reader has
+# already left.
 fn wrapped_up(f: Fields) -> Buffer =
   match f.above with
-  | Nil -> Buf(f)
+  | Nil -> Buf((f with (goal = Nothing)))
   | [prev | rest] ->
       Buf(Fields(above = rest, line = lz.zipper_open(prev),
                  below = Cons(lz.zipper_text(f.line), f.below),
@@ -172,7 +176,7 @@ fn stepped_right(f: Fields) -> Buffer =
 
 fn wrapped_down(f: Fields) -> Buffer =
   match f.below with
-  | Nil -> Buf(f)
+  | Nil -> Buf((f with (goal = Nothing)))
   | [next | rest] ->
       Buf(Fields(above = Cons(lz.zipper_text(f.line), f.above),
                  line = lz.zipper_open(next) |> lz.zipper_start, below = rest,
