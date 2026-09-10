@@ -267,7 +267,7 @@ another explicit phase, and the env path is the *default* phase. On the 51-file 
 | `vec_basics` | `Vec vs List` on correct source | `desugar_ctx.build_fn_sig_index` scans only the decls of the program being checked, so with the prelude arriving as schemes it never learned `vec_sort` takes a `Vec` and inserted no `vec_from_list` wrap |
 | `http_get_cli`, `sentry_api` | `Unknown constructor: HttpTimeout` | imported ADT constructors absent from the env |
 | `repl_hosted` | `Unknown variable: repl.run` | qualified name from an imported module unresolved |
-| `concurrent_fetch` | *never terminated* | cyclic substitution in `unifier.apply_full_subst`, reached only from this path |
+| `concurrent_fetch` | *never terminated* | a cyclic RENAMING in `unifier.instantiate`, not the cyclic unifier substitution first suspected — cause, evidence and fix in `docs/instantiate-renaming-v0.md` |
 
 The last one is why an editor session died rather than degraded: the LSP loop is single-threaded, so
 one non-terminating `didOpen` stops the server reading any further message — no diagnostics, no

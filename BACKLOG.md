@@ -1376,16 +1376,6 @@ deferral happened, not for current behaviour. Still open:
 
 ## Compiler Internals Follow-Ups
 
-- [ ] `P1` **`unifier.apply_full_subst` does not terminate on a cyclic substitution.** Found via the
-  LSP: `sproutd` at 99.7% CPU for 15 minutes with RSS flat at 2.4 MB, the stack cycling
-  `instantiate_with_vars → apply_full_subst → apply_full_subst → …`. Flat RSS with unbounded
-  time means it cycles a fixed structure — consistent with a binding `α := … α …` that an
-  occurs check should make impossible, though that is **not proven**. Trigger, bisected: two
-  `task_fork`s whose forked function calls any *imported-module* function, so `Task` is a red
-  herring and imported-scheme instantiation is the common factor. Repro and trigger table:
-  `docs/module-surface-authority-v0.md` §7.1. Unreachable from editors now, so latent. **Any fix
-  needs a time-bounded harness** — an in-process `.spr` test would hang `just test`, not fail it.
-
 ### Sprout-IR / Model-C codegen
 
 - [ ] `P2` **Tuple-return CPR does not fire on a SELF-RECURSIVE call**, so a recursive

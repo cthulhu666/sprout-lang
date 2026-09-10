@@ -1,0 +1,43 @@
+import stdlib.compiler.types as types
+import stdlib.compiler.unifier as unifier
+
+# The renaming shapes that make `instantiate` LOOP rather than answer wrongly, so
+# the red signal here is a hang and the gate that runs this file bounds its time.
+# An in-process .spr assertion cannot: it would hang `just test` instead of
+# failing it. See docs/instantiate-renaming-v0.md.
+
+fn tv(name: String) -> types.Type = types.TVar(types.tyvar_id(name))
+
+fn arrow(param: types.Type, ret: types.Type, e: types.Effect) -> types.Type =
+  types.TFunc(param, ret, e, types.OwnConsume)
+
+fn scheme_of(vars: List String, eff_vars: List String, t: types.Type) -> types.Scheme =
+  types.Scheme(vars, eff_vars, t, types.EffectPure, Nil)
+
+# `$t0` freshens to `$t0`: the map sends a binder to itself.
+fn self_cycle() -> types.Scheme =
+  scheme_of(Cons("$t0", Nil), Nil, arrow(tv("$t0"), tv("$t0"), types.EffectPure))
+
+# `$t1` freshens to `$t0` and `$t0` to `$t1`: the map sends each binder to the other.
+fn two_cycle() -> types.Scheme =
+  scheme_of(Cons("$t1", Cons("$t0", Nil)), Nil, arrow(tv("$t1"), tv("$t0"), types.EffectPure))
+
+fn effect_two_cycle() -> types.Scheme =
+  scheme_of(Nil, Cons("$e1", Cons("$e0", Nil)),
+    arrow(
+      arrow(types.type_int(), types.type_int(), types.EffectVar("$e1")),
+      arrow(types.type_int(), types.type_int(), types.EffectVar("$e0")),
+      types.EffectPure))
+
+fn instantiate_fresh(s: types.Scheme) -> Unit !{IO} =
+  do
+    st <- unifier.new_state()
+    t <- unifier.instantiate(st, s)
+    print(types.type_to_string(t))
+
+fn main() -> Unit !{IO} =
+  do
+    instantiate_fresh(self_cycle())
+    instantiate_fresh(two_cycle())
+    instantiate_fresh(effect_two_cycle())
+    print("renaming-terminates")

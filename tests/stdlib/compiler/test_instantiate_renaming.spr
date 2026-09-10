@@ -1,0 +1,103 @@
+import stdlib.test (check_true, run_suite)
+import stdlib.compiler.types as types
+import stdlib.compiler.unifier as unifier
+
+# Instantiating a scheme is a RENAMING, and a renaming is simultaneous: every
+# binder is replaced once, by its own fresh variable. `apply_full_subst` instead
+# CHASES — it re-applies the map to its own result — which is right for the
+# unifier's substitution and wrong here the moment a fresh name lands on a name
+# the same map still binds.
+#
+# It can. `generalize` names binders from `ftv`, so a scheme minted by one check
+# carries `$t<n>` binders, and `fresh` counts from a per-check counter that
+# starts at 0. Chasing then walks `$t2 -> $t0 -> $t1` and returns ONE variable
+# where the scheme quantified two, or cycles and never returns at all.
+#
+# The cycle is not tested here: it would hang `just test` rather than fail it.
+# `just test-instantiate-termination` bounds its time instead.
+
+# Binders spelled the way an imported scheme's are. `$t2` freshens to `$t0`,
+# which this scheme ALSO binds, and `$t0` freshens to `$t1`.
+fn fused_vars() -> List String = Cons("$t2", Cons("$t0", Nil))
+
+fn tv(name: String) -> types.Type = types.TVar(types.tyvar_id(name))
+
+fn arrow(param: types.Type, ret: types.Type, e: types.Effect) -> types.Type =
+  types.TFunc(param, ret, e, types.OwnConsume)
+
+fn scheme_of(vars: List String, eff_vars: List String, t: types.Type) -> types.Scheme =
+  types.Scheme(vars, eff_vars, t, types.EffectPure, Nil)
+
+# The two sides of an arrow must land on different variables. A shape that is not
+# an arrow answers false: a regression that changes the shape must not read as a pass.
+fn sides_distinct(t: types.Type) -> Bool =
+  match t with
+  | types.TFunc p r _ _ -> types.type_to_string(p) != types.type_to_string(r)
+  | _ -> false
+
+fn arrow_effect(t: types.Type) -> String =
+  match t with
+  | types.TFunc _ _ e _ -> types.effect_to_string(e)
+  | _ -> "NOT-AN-ARROW"
+
+# `(Int -> Int !{a}) -> Int -> Int !{b}`: the effect variables sit one level down,
+# where `build_effect_repl` renames them under the same chasing lookup.
+fn nested_effects_distinct(t: types.Type) -> Bool =
+  match t with
+  | types.TFunc p r _ _ -> arrow_effect(p) != arrow_effect(r)
+  | _ -> false
+
+fn fused_var_scheme() -> types.Scheme =
+  scheme_of(fused_vars(), Nil, arrow(tv("$t2"), tv("$t0"), types.EffectPure))
+
+fn source_binder_scheme() -> types.Scheme =
+  scheme_of(Cons("a", Cons("b", Nil)), Nil, arrow(tv("a"), tv("b"), types.EffectPure))
+
+fn fused_effect_scheme() -> types.Scheme =
+  scheme_of(Nil, Cons("$e2", Cons("$e0", Nil)),
+    arrow(
+      arrow(types.type_int(), types.type_int(), types.EffectVar("$e2")),
+      arrow(types.type_int(), types.type_int(), types.EffectVar("$e0")),
+      types.EffectPure))
+
+# A constructor scheme: both variables appear in the result, so both are ordinary
+# type params and neither is instantiated to a skolem.
+fn fused_ctor_scheme() -> types.Scheme =
+  scheme_of(fused_vars(), Nil,
+    arrow(tv("$t2"),
+      arrow(tv("$t0"),
+        types.TApp(types.TApp(types.TConst(types.type_id("Pair")), tv("$t2")), tv("$t0")),
+        types.EffectPure),
+      types.EffectPure))
+
+# The ctor's two leading parameters, which the two binders name.
+fn ctor_params_distinct(t: types.Type) -> Bool =
+  match t with
+  | types.TFunc p rest _ _ ->
+      match rest with
+      | types.TFunc q _ _ _ -> types.type_to_string(p) != types.type_to_string(q)
+      | _ -> false
+  | _ -> false
+
+# Every case starts from a counter at 0, which is what a check that did not mint
+# these binders has.
+fn main() -> Unit !{IO} =
+  do
+    s1 <- unifier.new_state()
+    fused <- unifier.instantiate(s1, fused_var_scheme())
+    s2 <- unifier.new_state()
+    control <- unifier.instantiate(s2, source_binder_scheme())
+    s3 <- unifier.new_state()
+    effects <- unifier.instantiate(s3, fused_effect_scheme())
+    s4 <- unifier.new_state()
+    ctor <- unifier.instantiate_ctor_pattern(s4, fused_ctor_scheme())
+    s5 <- unifier.new_state()
+    with_vars <- unifier.instantiate_with_vars(s5, fused_var_scheme())
+    run_suite("instantiate_renaming", [
+      check_true("two binders stay two variables", sides_distinct(fused)),
+      check_true("source-spelled binders are unaffected", sides_distinct(control)),
+      check_true("two effect binders stay two effect variables", nested_effects_distinct(effects)),
+      check_true("a ctor pattern keeps its params apart", ctor_params_distinct(ctor)),
+      check_true("instantiate_with_vars keeps them apart too",
+        sides_distinct(match with_vars with | (t, _) -> t))
+    ])
