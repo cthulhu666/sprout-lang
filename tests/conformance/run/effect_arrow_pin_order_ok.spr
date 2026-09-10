@@ -1,0 +1,39 @@
+module main
+
+# Order-independence for both pin directions. Every function below is legal: a
+# PURE arrow is usable wherever an `!{IO}` one is expected, so neither element
+# order nor call order may decide acceptance.
+#
+# Each shape appears twice, mirrored. The mirrors are the point — before bounded
+# effect variables, one order of each pair compiled and the other was rejected,
+# which is how a pin masquerading as a contract shows itself.
+
+fn quiet(n: Int) -> Int = n + 1
+
+fn shout(n: Int) -> Int !{IO} =
+  do
+    print("io")
+    n + 1
+
+# VALUE pin: the first element pinned the list's element type, and the second was
+# judged against it. Both orders belong in an `!{IO}` element slot.
+fn pure_first() -> List (Int -> Int !{IO}) = [quiet, shout]
+
+fn io_first() -> List (Int -> Int !{IO}) = [shout, quiet]
+
+# CONTRACT pin: `f` is lambda-bound, so it is pinned by whichever declared
+# parameter it meets first. `quiet` is pure and belongs in both slots.
+fn takes_io(f: Int -> Int !{IO}) -> Int = 3
+
+fn takes_pure(f: Int -> Int) -> Int = f(2)
+
+fn io_slot_first() -> Int = (\f -> takes_io(f) + takes_pure(f))(quiet)
+
+fn pure_slot_first() -> Int = (\f -> takes_pure(f) + takes_io(f))(quiet)
+
+fn main() -> Unit !{IO} =
+  do
+    print(int_to_string(list_length(pure_first())))
+    print(int_to_string(list_length(io_first())))
+    print(int_to_string(io_slot_first()))
+    print(int_to_string(pure_slot_first()))

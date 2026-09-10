@@ -1,9 +1,11 @@
 # Effect subsumption at arrow positions (v0)
 
-Status: **Parts 0, 1 and 3 LANDED (§6.0, §6.3, §6.1a). Part 2 DESIGN, awaiting approval.**
-Part 1 landed 2026-09-10: polarity threaded through `unify_types`, the symmetric spelling
-removed in favour of `unify_expect_actual` / `unify_actual_expected` / `unify_join`, and all
-36 sites classified (26/3/6 — see §6.2). Joins still bind without rejecting; that is part 2.
+Status: **Parts 0 and 3 LANDED (§6.0, §6.1a). Part 1 IN REVIEW — PR #267, draft, four
+confirmed defects (§6.4a). Part 2 DESIGN, awaiting approval.**
+Part 1's machinery is written — polarity threaded through `unify_types`, the symmetric
+spelling replaced by `unify_expect_actual` / `unify_actual_expected` / `unify_join`, 36 sites
+classified — but it both **falsely rejects legal code** and **does not deliver its
+guarantee**. It is not landable as written; see §6.4a for what a code review found.
 Revision 6 (2026-09-09). The nullary type collapse
 landed on master (`docs/nullary-type-collapse-v0.md`, Option A′): the zero-arg boundary
 revision 4 excluded is now **closed** (§6.6), and the new `TThunk` arrow is a second
@@ -37,7 +39,7 @@ land *without* it.
 | part | in-tree | downstream | note |
 |---|---|---|---|
 | 0 | 0 | 0 | every effect annotation in `stdlib/`, `examples/`, `tests/`, `bench/` re-enumerated 2026-09-09: `IO` (2596) and lowercase variables (81); every other spelling sits in a deliberately-ill-formed `type_error` fixture or a compiler comment. Confirmed zero on landing: the whole compiler source passes the new check (stage-3 builds). `!{}` was admitted rather than rejected, so its three signatures are untouched |
-| 1 | 0 | 0 | 2 flagged sites, both the safe direction (§5) |
+| 1 | **1** | 0 | the pre-implementation estimate said 0/0 from 2 flagged sites, and was wrong in-tree: `test_unboxed_maybe_shadow.spr` declares a parameter as a pure arrow and passes an `!{IO}` closure into it — a true positive needing an annotation. The estimate counted only the shapes it went looking for. It is also not the real cost until §6.4a's false rejections are fixed, since those reject legal code the corpus happens not to contain |
 | 2 | 0 | 0 | concrete joins only; variable-effect joins unmeasured |
 | 3 | 0 | 0 | **confirmed on landing.** One method-level effect annotation exists: `test_effect_polymorphic_class_method.spr` declares `!{e}` on a class method and its instances alike, which the relation accepts. Every other class/instance method signature (259 in-tree, 3 downstream, measured 2026-09-08) is pure. The census is no longer the evidence: stage 3 builds, which runs the check over the whole compiler source |
 
@@ -565,8 +567,11 @@ convention. Classification of the 36 sites (35 in `infer.sprout`, one in
 | (expected, actual) | ~7 | call argument; the pattern-checking sites |
 | **peer — neither side expected** | ~6 | `if`-join, binary operands, match-arm accumulation |
 
-**Regenerated at implementation time (part 1): 26 / 3 / 6.** The peer count matched
-exactly. The (expected, actual) count did not — the **call sites are (actual, expected)**,
+**Regenerated at implementation time (part 1): 26 / 3 / 6 — and the peer bucket had the
+right SIZE with the wrong MEMBERS.** Match-arm accumulation, which this table lists as a
+peer, was classified `unify_actual_expected`; `ctor_field_types` took the sixth peer slot
+instead. "The peer count matched exactly" was therefore evidence of nothing, and it read as
+confirmation. A count is not a checklist — compare the *members* against the rows above. The (expected, actual) count did not — the **call sites are (actual, expected)**,
 not (expected, actual) as predicted. The prediction reads the call's top-level comparison,
 but the only cell that decides anything sits one *flip* below it: at the parameter. Writing
 `unify_expect_actual(callee_type, call_shape)` — the spelling that reads correctly — makes
@@ -631,9 +636,14 @@ and the unspecified cell was the §6.0 bypass:
 | **`EffectVar`** | bind | bind | bind | unreachable |
 | **`EffectRow`** | unreachable | unreachable | unreachable | unreachable |
 
-- **bind** is today's total unification, and is what keeps every `!{e}` combinator working.
-  It is the one arm an attacker can aim at, which is why part 0 must make an unknown label
-  ill-formed rather than a variable.
+- **bind** is today's total unification. It was claimed to keep every `!{e}` combinator
+  working; it does not, because the table says nothing about *when* the variable is read.
+  A variable inference has already bound to `!{IO}` still enters this table as `EffectVar`
+  and binds, and one not yet bound can be pinned by an earlier argument and then act as a
+  concrete contract for a later one — §6.4a's soundness hole and its false rejections,
+  respectively. Both cells are "bind" in this table and neither behaves like it.
+  It is also the one arm an attacker can aim at, which is why part 0 must make an unknown
+  label ill-formed rather than a variable.
 - **unreachable was WRONG, and implementing it as a hard error is how that was found.**
   The claim was that no conformant signature builds an `EffectRow`, so a row here means
   part 0 has a hole. It does not: a *non*-conformant signature reaches this comparison
@@ -661,6 +671,102 @@ both cheap:
    ~6 sites. One fixture each that goes red when that site's annotation is flipped — the
    generalisation of §9's branch-swap pairs. The dominant bucket stays unpinned per-site,
    but every site is at least *forced to declare*.
+
+### 6.4a What a code review found in part 1's first implementation
+
+Four defects, every one reproduced by running. Two are false rejections of legal code, two
+are holes in the guarantee the change advertises. They share one shape: **the check fires on
+whatever the comparison happens to be holding, and cannot tell a declared contract from
+something inference pinned a moment earlier.**
+
+- **`!{e}` pass-through launders IO into a pure slot (soundness).** The polarity check reads
+  the raw effect field; nothing applies `eff_subst` first, so a variable already bound to
+  `!{IO}` still reads as `EffectVar` and takes the bind arm.
+  `fn id_fn(f: Int -> Int !{e}) -> (Int -> Int !{e}) = f` then
+  `fn get_pure() -> (Int -> Int) = id_fn(shout)` compiles and prints `io` — the exact shape
+  `type_error/effect_io_arrow_into_pure_return.spr` exists to reject.
+- **Match arms falsely rejected.** Each arm unifies against an accumulating fresh `ret_type`,
+  so the FIRST arm becomes the contract. `match b with | true -> quiet | false -> shout` in
+  an `!{IO}` slot is rejected while the `if` spelling — correctly a join — compiles.
+- **Argument order decides acceptance.** For a polymorphic callee a tyvar pinned by an
+  earlier argument is the expected side for later ones: `[quiet, shout]` is rejected,
+  `[shout, quiet]` is not. This also refutes "every `!{e}` combinator keeps working" —
+  `list_fold`'s step slot is `b -> a -> b !{e}` and it rejects previously-valid code.
+- **A mutable container defeats it, and this one was not a discovery.** Type arguments keep
+  the enclosing polarity, so `Ref (Int -> Int)` accepts an `!{IO}` write and reads back
+  pure; `call_pure : (Int -> Int) -> Int` then prints `io`. Revision 4 of this document
+  already says covariance is "**unsound for `Ref`**" and replaces it with the
+  per-constructor rule in §6.4. The implementation used blanket covariance regardless, with
+  a source comment rationalising it as "its own change, which nothing in the corpus needs
+  today" — a decision the design had already made, reversed silently at implementation
+  time because the corpus did not object. §6.4 is not optional for part 1.
+
+- **The pin bites from the CONTRACT side too**, which the four above missed. A lambda-bound
+  parameter is pinned by whichever declared slot it meets first:
+  `(\f -> takes_io(f) + takes_pure(f))(quiet)` is rejected while the same expression with
+  the two calls swapped compiles. `quiet` is pure and legal in both slots; `takes_io`'s
+  *written* `!{IO}` becomes an upper bound that the later comparison reads as if it were
+  the value's actual effect.
+
+**None of these has a local fix, and that is the finding.** "Apply the effect substitution"
+alone — the obvious patch for the first — *widens* the false-rejection class, because more
+pinned variables then read as concrete. The defects are coupled: they are one defect, which
+is that an equality unifier can say "these are the same" but not "this may flow into that",
+so every pin becomes a fake contract. Polarity supplies which *side* is expected; it cannot
+supply whether that side was ever written down. The missing information is **provenance**,
+and by the time `unify_tfunc` sees two effects it has been erased — which is why §6.2's
+"both sides are as written: no inference, no unification" was never implementable there.
+
+### 6.4b Bounded effect variables — the approved fix for §6.4a
+
+**Approved 2026-09-10.** Stop letting a tyvar pin turn an effect into a contract. At the
+moment a bind or effect meet happens, record *which role* the effect came from — a written
+contract or an observed value — as a bound on a freshened effect variable, and reject only
+when the bounds contradict: `lower = IO` while `upper = Pure`.
+
+This is MLsub's insight narrowed to Sprout's two-point lattice. Dolan states the root cause
+exactly: "the unification engine at the core of classical type inference accepts only
+equations, not subtyping constraints" (*Algebraic Subtyping*, §1). Scala 3's capture
+checking ships the directional-propagation form; Koka refused sub-effect constraints as
+undecidable **for full rows** and instead keeps inferred effects open. Sprout has no rows
+here — the lattice is `Pure ⊑ IO` — so the cost that made Koka refuse does not apply: two
+monotone sets and an eager contradiction check, no constraint language, no solver.
+
+- `bind_var`, which already has `polarity` in scope, freshens each concrete arrow effect
+  when binding a tyvar to an arrow-carrying type and records the concrete as a bound.
+  Actual-side origin ⇒ lower bound at covariant depth, upper at contravariant; expected-side
+  origin ⇒ the mirror.
+- Effect meets take a polarity: expected-concrete vs var ⇒ upper; actual-concrete vs var ⇒
+  lower; var–var ⇒ alias, merging both sets; concrete vs concrete ⇒ today's check, now
+  genuinely written-against-written. Every insert eagerly checks `IO ∈ lower ∧ Pure ∈ upper`.
+- Readout: `must_io` ⇒ `IO`, `must_pure` ⇒ `Pure`, unconstrained ⇒ generalize as today.
+- `infer.template_eff` stops returning `EffectPure` for a `TVar` template and manufactures a
+  fresh unconstrained variable — a hardcoded `Pure` there is an assertion the call site is
+  in no position to make, as its own comment already says.
+
+**Why no read-time policy can work, which is what rules out the cheaper options.**
+`[quiet, shout]` must be *accepted* as `List (Int -> Int !{IO})` and *rejected* as
+`List (Int -> Int)`. It is the same expression; the two differ only in a return annotation
+that has not been consulted when the `Cons` meet fires. So no verdict taken at that meet is
+right for both — the meet must defer *and remember that `shout` was IO*, which is a lower
+bound. Dually, the contract-pin pair differs only in a value arriving later, so a pin must
+be remembered as an upper bound rather than treated as the value's effect.
+
+Rejected alternatives: a post-pass over resolved types (the pin is still whichever side
+bound first, so it is order-dependent at readout); rejecting only on annotation-origin
+expected sides (regresses the pure-list case to accepted); "inference-origin variable ⇒
+accept" (at the failing comparison the expected effect is already a concrete `EffectPure`
+*inside* a pinned arrow, not a variable). A Koka-style open-instantiation fallback fixes
+four of the five but leaves the contract pin order-dependent, and was not taken.
+
+**As landed: the floor must RE-BIND, which the first implementation missed.** Recording a
+bound is not enough, because `apply_effect_subst` reads the *binding*, and the first
+implementation bound the freshened variable to whichever effect arrived first. `[shout,
+quiet]` under a pure element type therefore laundered: `quiet`'s pure overwrote `shout`'s
+IO and the annotation saw pure. Raising the floor now re-binds, since IO absorbs. Caught by
+the mirrored fixture and by nothing else — the other element order rejected correctly, so a
+single-order test would have shown green on exactly the bug this design exists to kill.
+**Every fixture with an order gets its mirror**; that is the discipline, not a nicety.
 
 ### 6.4 Variance inside type constructors — per-constructor, not global
 

@@ -842,10 +842,9 @@ _test-reject stage dir noun xfail="" phase="check":
 # family-conflict diagnostics landed in PR-3; missing_nested_instance{,_maybe}
 # via the resolve pass in #110.)
 #
-# effect_io_arrow_into_pure_param is quarantined: it is the acceptance test for
-# arrow-position effect subsumption (docs/effect-subsumption-v0.md), which is not
-# implemented. It self-heals — the gate goes RED with UNEXPECTED MATCH when the
-# check lands, which is the signal to drop it from this list.
+# The xfail list is empty. It held the arrow-position effect fixtures until that
+# check landed; the self-healing worked as designed — the gate went RED with
+# UNEXPECTED MATCH, which was the signal to empty it.
 [group('test')]
 test-type-errors: bootstrap-from-seed (_test-reject "build/compile_driver_bin_stage1" "type_error" "type-error" "")
 
