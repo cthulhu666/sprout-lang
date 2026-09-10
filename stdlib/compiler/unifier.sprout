@@ -966,20 +966,26 @@ fn ctor_result_of(t: types.Type) -> types.Type =
   | types.TFunc _ ret _ _ -> ctor_result_of(ret)
   | _ -> t
 
+# The renaming's DOMAIN is threaded whole, not consumed with the list, because a
+# target minted for the first binder must dodge the last one too.
 fn build_ctor_pattern_repl(state: InferState, vars: List String, result_ftv: List String, acc: Dict types.Type) -> Dict types.Type !{IO} =
+  build_ctor_pattern_repl_in(state, vars, vars, result_ftv, acc)
+
+fn build_ctor_pattern_repl_in(state: InferState, vars: List String, domain: List String,
+                              result_ftv: List String, acc: Dict types.Type) -> Dict types.Type !{IO} =
   match vars with
   | Nil -> acc
   | Cons v rest ->
       do
-        repl <- fresh_ctor_pattern_var(state, v, result_ftv)
-        build_ctor_pattern_repl(state, rest, result_ftv, dict_set(v, repl, acc))
+        repl <- fresh_ctor_pattern_var(state, v, domain, result_ftv)
+        build_ctor_pattern_repl_in(state, rest, domain, result_ftv, dict_set(v, repl, acc))
 
-fn fresh_ctor_pattern_var(state: InferState, v: String, result_ftv: List String) -> types.Type !{IO} =
-  if list_member(v, result_ftv) then fresh_pattern_tvar(state) else fresh_pattern_skolem(state)
+fn fresh_ctor_pattern_var(state: InferState, v: String, domain: List String, result_ftv: List String) -> types.Type !{IO} =
+  if list_member(v, result_ftv) then fresh_pattern_tvar(state, domain) else fresh_pattern_skolem(state)
 
-fn fresh_pattern_tvar(state: InferState) -> types.Type !{IO} =
+fn fresh_pattern_tvar(state: InferState, domain: List String) -> types.Type !{IO} =
   do
-    name <- fresh(state)
+    name <- fresh_outside(state, domain)
     types.TVar(types.tyvar_id(name))
 
 fn fresh_pattern_skolem(state: InferState) -> types.Type !{IO} =
@@ -998,21 +1004,44 @@ fn fresh_skolem(state: InferState) -> String !{IO} =
         ref_write(t_ref, n + 1)
         "$sk" ++ int_to_string(n)
 
+# Instantiation is a SIMULTANEOUS renaming, but `apply_full_subst` chases: it
+# re-applies the map to its own result. So a target the map still binds is
+# followed one step further and two binders come back as one variable — or the
+# map cycles and never returns. `fresh` counts from a per-check counter while an
+# imported scheme's binders are `$t<n>` from whichever check generalized it, so
+# the two overlap by construction; minting outside the domain is what separates
+# them. Terminates: the counter only rises and the domain is finite.
+fn fresh_outside(state: InferState, domain: List String) -> String !{IO} =
+  do
+    name <- fresh(state)
+    if list_member(name, domain) then fresh_outside(state, domain) else name
+
+fn fresh_effect_outside(state: InferState, domain: List String) -> String !{IO} =
+  do
+    name <- fresh_effect(state)
+    if list_member(name, domain) then fresh_effect_outside(state, domain) else name
+
 fn build_type_repl(state: InferState, vars: List String, acc: Dict types.Type) -> Dict types.Type !{IO} =
+  build_type_repl_in(state, vars, vars, acc)
+
+fn build_type_repl_in(state: InferState, vars: List String, domain: List String, acc: Dict types.Type) -> Dict types.Type !{IO} =
   match vars with
   | Nil -> acc
   | Cons v rest ->
       do
-        name <- fresh(state)
-        build_type_repl(state, rest, dict_set(v, types.TVar(types.tyvar_id(name)), acc))
+        name <- fresh_outside(state, domain)
+        build_type_repl_in(state, rest, domain, dict_set(v, types.TVar(types.tyvar_id(name)), acc))
 
 fn build_effect_repl(state: InferState, vars: List String, acc: Dict types.Effect) -> Dict types.Effect !{IO} =
+  build_effect_repl_in(state, vars, vars, acc)
+
+fn build_effect_repl_in(state: InferState, vars: List String, domain: List String, acc: Dict types.Effect) -> Dict types.Effect !{IO} =
   match vars with
   | Nil -> acc
   | Cons v rest ->
       do
-        name <- fresh_effect(state)
-        build_effect_repl(state, rest, dict_set(v, types.EffectVar(name), acc))
+        name <- fresh_effect_outside(state, domain)
+        build_effect_repl_in(state, rest, domain, dict_set(v, types.EffectVar(name), acc))
 
 # ---------------------------------------------------------------------------
 # generalize — universally quantify type variables free in t but not in env

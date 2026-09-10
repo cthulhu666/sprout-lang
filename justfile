@@ -262,7 +262,7 @@ debug-run file: bootstrap-from-seed
 
 # Run all stdlib + compiler-stage tests (stage-1).
 [group('test')]
-test: test-stdlib-stage1 test-type-errors test-parse-errors test-executable-errors test-emit-errors test-conformance-run test-package-resolution test-front-end-agreement
+test: test-stdlib-stage1 test-type-errors test-parse-errors test-executable-errors test-emit-errors test-conformance-run test-package-resolution test-front-end-agreement test-renaming-termination
 
 # The two typecheck front ends must reach the same verdict, and the editor one must
 # terminate. `--phase check` runs the bundler; the DEFAULT phase runs the env path, which
@@ -274,6 +274,38 @@ test: test-stdlib-stage1 test-type-errors test-parse-errors test-executable-erro
 [group('test')]
 test-front-end-agreement: bootstrap-from-seed
   bash scripts/front_end_agreement.sh
+
+# Instantiating a scheme must TERMINATE. `apply_full_subst` chases, so a renaming
+# whose fresh names land back in its own domain cycles forever — the LSP hang of
+# 2026-08-18 (docs/instantiate-renaming-v0.md). The red signal is a hang, which an
+# in-process .spr test cannot catch: it would hang `just test` rather than fail it.
+[group('test')]
+test-renaming-termination: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_renaming_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  FIX=tests/renaming_smoke/cyclic_renaming.spr
+  if ! "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$FIX" > "$TMPD/out.ll" 2>"$TMPD/emit.err"; then
+    echo "renaming-termination: emit-IR failed for $FIX" >&2; cat "$TMPD/emit.err" >&2; exit 1
+  fi
+  if ! clang "$TMPD/out.ll" {{runtime_src}} -O2 {{clang_extra}} -o "$TMPD/bin" 2>"$TMPD/link.err"; then
+    echo "renaming-termination: link failed" >&2; cat "$TMPD/link.err" >&2; exit 1
+  fi
+  set +e
+  # perl alarm = portable timeout; a HANG -> non-zero exit.
+  perl -e 'alarm 30; exec @ARGV' "$TMPD/bin" > "$TMPD/run.out" 2>"$TMPD/run.err"
+  ec=$?
+  set -e
+  if [ "$ec" -ne 0 ]; then
+    echo "renaming-termination: did not complete (exit $ec) — a cyclic renaming is looping" >&2
+    cat "$TMPD/run.out" >&2; cat "$TMPD/run.err" >&2; exit 1
+  fi
+  if ! grep -q "renaming-terminates" "$TMPD/run.out"; then
+    echo "renaming-termination: fixture ran but printed no completion marker" >&2
+    cat "$TMPD/run.out" >&2; exit 1
+  fi
+  echo "renaming-termination: ok"
 
 # Second-root (--package-root) module resolution gate: an app importing a module
 # from an extra package root resolves only when that root is registered
