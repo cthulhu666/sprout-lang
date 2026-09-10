@@ -1,12 +1,13 @@
 # Effect subsumption at arrow positions (v0)
 
-Status: **Parts 0 and 3 LANDED (§6.0, §6.1a). Part 1 IN REVIEW — PR #267, draft, four
-confirmed defects (§6.4a). Part 2 DESIGN, awaiting approval.**
-Part 1's machinery is written — polarity threaded through `unify_types`, the symmetric
-spelling replaced by `unify_expect_actual` / `unify_actual_expected` / `unify_join`, 36 sites
-classified — but it both **falsely rejects legal code** and **does not deliver its
-guarantee**. It is not landable as written; see §6.4a for what a code review found.
-Revision 6 (2026-09-09). The nullary type collapse
+Status: **Parts 0, 1 and 3 LANDED (§6.0, §6.3 + §6.4b, §6.1a). Part 2 DESIGN, awaiting
+approval — its scope is now smaller than §6.5 states; see §6.5a. Per-constructor variance
+(§6.4) is unimplemented; no program reaching it is known any more (§6.5a).**
+Part 1 landed 2026-09-10 as two commits: polarity threaded through `unify_types` with the
+symmetric spelling replaced by `unify_expect_actual` / `unify_actual_expected` /
+`unify_join` across 36 sites, then **bounded effect variables** (§6.4b) fixing the five
+defects a code review found in the first implementation (§6.4a).
+Revision 7 (2026-09-10). The nullary type collapse
 landed on master (`docs/nullary-type-collapse-v0.md`, Option A′): the zero-arg boundary
 revision 4 excluded is now **closed** (§6.6), and the new `TThunk` arrow is a second
 comparison site part 1 must cover (§6.1). Revision 5 added part 0 after a review found
@@ -71,6 +72,10 @@ behaviour this document removes (§10). Supersedes the withdrawn
 hole described here.
 
 ## 1. Problem statement
+
+*Written 2026-09-07, describing the state before this document's parts landed. The shape
+below is a compile error on master since 2026-09-10; the quoted property 2 is the text
+part 1 replaced. Kept in the present tense as the record of what was being fixed.*
 
 A function's declared purity is not enforced once a function is passed as a **value**.
 An `!{IO}` function reaching a pure arrow — in an argument, a return, or a record field
@@ -215,8 +220,8 @@ for the permissive half.
 **Status: implemented.** `!{}` is admitted as an explicit spelling of purity — the form
 `docs/effect-system-v0-plan.md` §15 already made canonical, with omission as its sugar —
 so rule 9 now lists four annotation forms and the three in-tree `!{}` signatures stand
-unchanged. Spec §7 rule 9 and property 3 carry the rule; parts 1–3 below are unaffected
-and still awaiting approval.
+unchanged. Spec §7 rule 9 and property 3 carry the rule; parts 1 and 3 below have since
+landed, and part 2 is unaffected by this one.
 
 **The rejection belongs in the PARSER, and two attempts at a declaration walk are why.**
 `parser.parse_effect_annotation` is the one place a written `!{...}` is read, so the
@@ -699,7 +704,10 @@ something inference pinned a moment earlier.**
   per-constructor rule in §6.4. The implementation used blanket covariance regardless, with
   a source comment rationalising it as "its own change, which nothing in the corpus needs
   today" — a decision the design had already made, reversed silently at implementation
-  time because the corpus did not object. §6.4 is not optional for part 1.
+  time because the corpus did not object. **Not reproducible on master since bounded
+  effect variables landed** — four shapes tried, all rejected (§6.5a). The conclusion
+  stands anyway: the rejection comes from a bound travelling through the shared type
+  variable, not from the descent being variance-correct.
 
 - **The pin bites from the CONTRACT side too**, which the four above missed. A lambda-bound
   parameter is pinned by whichever declared slot it meets first:
@@ -717,9 +725,12 @@ supply whether that side was ever written down. The missing information is **pro
 and by the time `unify_tfunc` sees two effects it has been erased — which is why §6.2's
 "both sides are as written: no inference, no unification" was never implementable there.
 
-### 6.4b Bounded effect variables — the approved fix for §6.4a
+### 6.4b Bounded effect variables — the fix for §6.4a, LANDED 2026-09-10
 
-**Approved 2026-09-10.** Stop letting a tyvar pin turn an effect into a contract. At the
+**Approved and landed 2026-09-10**, closing all five of §6.4a's defects — the `Ref` one
+included, but by bound propagation rather than by the per-constructor variance §6.4
+prescribes, which remains unimplemented (§6.5a). Stop letting a tyvar pin turn an effect
+into a contract. At the
 moment a bind or effect meet happens, record *which role* the effect came from — a written
 contract or an observed value — as a bound on a freshened effect variable, and reject only
 when the bounds contradict: `lower = IO` while `upper = Pure`.
@@ -935,6 +946,55 @@ So LUB at the `if`-join fixes `if` alone. The audit needs a rule keyed on *accum
 widen wherever a result variable is folded over peers — rather than a list of six sites.
 §9 needs match-order and element-order fixture pairs, not just the `if` pair.
 
+### 6.5a Bounded effect variables already fixed most of §6.5 — measured, revision 7
+
+**§6.5 above was written before part 1 landed and now overstates part 2's scope.** Every
+row below was run against master `48419f7b`:
+
+| shape | now |
+|---|---|
+| mixed `match` arms into a **pure** slot | **rejected** |
+| mixed `match` arms into an `!{IO}` slot, both arm orders | accepted |
+| mixed list elements, both element orders | correct in both (§9 fixtures) |
+| `if c then pure else io` into a **pure** slot | **accepted — laundered, prints** |
+| the same with the branches **swapped** | **rejected** — so branch order decides |
+| the second-order `pick`/`f1`/`f2` case above | **accepted — laundered, prints** |
+| `Ref` covariance, four shapes (§6.4a) | all rejected — see below |
+
+The accumulation ontology is therefore no longer the problem. An accumulating site unifies
+against a progressively-bound variable, so it goes through `unify_actual_expected`, and an
+arm's observed `!{IO}` is recorded as a **floor** — the declared slot's ceiling then
+contradicts it and the rejection lands at the declaration. Order-independence comes from
+the bounds being monotone, not from commutativity of a LUB.
+
+What still swallows is exactly `NoExpectation`: `unify_join` calls `unify_arrow_effects`,
+which binds and records no bound at all. Six sites (`infer.sprout` 1572, 3713, 3770, 3796,
+3889, 4061, plus `analysis_service_driver:390`).
+
+**And the swallow is not symmetric**, which §6.5 assumed it was. `if c then io else pure`
+is rejected today; only `if c then pure else io` launders. So "keep today's behaviour" is
+not the neutral option §6.5 lists — it is already an order-dependent rule. The mirrored
+reject pair §6.5 asks for (`effect_io_arrow_join_then` / `_else`) would therefore split
+against master today: whichever spells the IO branch first passes, and its twin fails.
+
+**This suggests a smaller part 2 than "join by depth parity".** A join could record a floor
+from whichever side is concretely `!{IO}` — reusing `record_lower`, already written — and
+let the downstream declaration comparison reject, which is exactly how the `match` spelling
+of the same program is already caught (row 1). Depth parity remains necessary for the
+second-order row, since a floor at even depth is a *ceiling* at odd depth; but that is the
+existing `bound_role` flip, not a new GLB table. **Cost this against §6.5's design before
+implementing — the two differ, and the measurement above is the reason.**
+
+**On the `Ref` row: a failed repro is not a proof.** Four shapes were tried — write-then-
+read in one body, a pure cell into a declared `Ref (Int -> Int)` slot, an IO write through
+a declared `Ref (Int -> Int !{IO})` parameter, and the same via a top-level `let` cell to
+break tyvar sharing. All four reject, because the floor a write records travels through the
+type variable the container's argument is bound to, whichever way the descent judged
+variance. That is a *different* mechanism from the one §6.4 specifies, so covariance for a
+mutable container is still wrong in principle and §6.4 is still the fix; what changed is
+that no known program reaches it. Do not close §6.4 on this evidence — it is evidence about
+four shapes.
+
 ### 6.6 Zero-arg calls — removed in revision 4, CLOSED on master in revision 6's window
 
 Revision 3 added a fourth part here: `fn launder() -> Int = let t = io_thunk in t()`
@@ -997,8 +1057,8 @@ the declaration-boundary rule.
 held `performs IO but is declared pure` — the declaration-boundary wording, which the arrow
 message above does not contain — so the fixture would have stayed RED after a *correct*
 implementation. It now carries the first line above, and is quarantined in
-`test-type-errors`' xfail list so the gate is green while the check is unimplemented and
-goes red with `UNEXPECTED MATCH` when it lands. That makes the wording load-bearing: change
+`test-type-errors`' xfail list so the gate was green while the check was unimplemented and
+went red with `UNEXPECTED MATCH` when it landed — the xfail list is now empty. That makes the wording load-bearing: change
 the message and the fixture stops self-healing, so change both together.
 
 ## 8. Composes with, does not replace, the declaration-boundary gaps
@@ -1087,7 +1147,11 @@ Gates: full `just test`, `compile-examples-stage1` (the two HTTP examples are th
 witnesses and must stay green), `effect-report-smoke`, `ir-golden-diff` (expect 0), plus
 a downstream run against `uncharted-suns`.
 
-**A migration gap the zero-cost measurement cannot see.** Inference never produces an
+**A migration gap the zero-cost measurement cannot see — now REALIZED (2026-09-10).**
+Confirmed by running on master: `fn map_io(xs: List Int) -> List Int !{IO} =
+list_map(shout, xs)` is rejected, an honest `!{IO}` caller and all. Filed as a `P1` in
+`BACKLOG.md`; the paragraph below is why the corpus measurement said nothing.
+Inference never produces an
 effect-polymorphic HOF: `fn helper(f, n) = f(n)` generalises to
 `forall a b. (a -> b) -> a -> b` with *concrete pure* arrows, so `helper(shout, n)`
 launders today and part 1 will correctly reject it. The only remedy is a hand-written
