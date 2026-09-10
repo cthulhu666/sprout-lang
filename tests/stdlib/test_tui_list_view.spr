@@ -265,6 +265,15 @@ fn content_cases(state: TestState) -> Unit !{IO} = do
             says(items(), contenting(),
                  [focus_on(), pressed(event.KEnd), rows_msg(Nil)]),
             "[Lit(2)]")
+  # Emptying must not SILENTLY move the selection either. If it resets `sel`
+  # while announcing nothing, the place survives the round trip in the
+  # application's mirror but not in the widget, and the two disagree with
+  # nothing in the transcript to show it.
+  assert_eq(state, "a list emptied and refilled keeps the user's place",
+            says(items(), contenting(),
+                 [focus_on(), pressed(event.KDown), rows_msg(Nil),
+                  rows_msg(["p", "q", "r"]), pressed(event.KEnter)]),
+            "[Lit(1), Chose(1)]")
   # Preserving the index preserves a POSITION, not an item: a filter narrowing
   # under the user needs the caller to say where the selection belongs.
   assert_eq(state, "the caller can name where the selection lands",
@@ -306,6 +315,18 @@ fn content_cases(state: TestState) -> Unit !{IO} = do
   # "the selection stayed on row 1 OF THE NEW CONTENT".
   kept_row <- row_text(kept, 1, 0, 5)
   assert_eq(state, "on the new content's row", kept_row, "y    ")
+  # Through the RING, not straight at the list: `Ring.at` lives in the ring's
+  # own state, so a content change that went through a rebuild would return
+  # focus to the ring's starting id. This is the half a state echo cannot
+  # deliver, and delivering to the list directly cannot observe it.
+  ringed <- painted(after_told(ring_of(view_of(items(), contenting())),
+                               [pressed(event.KDown),
+                                rows_msg(["x", "y", "z"])]), 5, 3)
+  ring_keeps <- reverse_at(ringed, 1)
+  assert_eq(state, "focus survives a content change at the ring", ring_keeps,
+            true)
+  ring_row <- row_text(ringed, 1, 0, 5)
+  assert_eq(state, "on the new content", ring_row, "y    ")
   # `count` and `width` are cached, so a replacement that moves one and not
   # the other leaves a list that measures as its old content.
   assert_eq(state, "the natural size follows the new content",
