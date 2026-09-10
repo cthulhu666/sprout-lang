@@ -1,0 +1,62 @@
+import stdlib.test (check_eq, check_true, run_suite)
+import stdlib.compiler.types as types
+import stdlib.compiler.unifier as unifier
+
+# What a peer join records, read straight off the substitution rather than
+# inferred from an accept/reject verdict at the end of a whole compile.
+#
+# The shape is `(Int -> Int !{cb}) -> Int -> Int !{res}`: a CALLBACK SLOT, which
+# is contravariant, under a result, which is not. Joining an `!{IO}` one with a
+# pure one must leave the slot at the MEET — the pure callback both branches
+# accept — whichever branch is compared first.
+
+fn arrow(cb_eff: types.Effect, res_eff: types.Effect) -> types.Type =
+  types.TFunc(
+    types.TFunc(types.type_int(), types.type_int(), cb_eff, types.OwnConsume),
+    types.TFunc(types.type_int(), types.type_int(), res_eff, types.OwnConsume),
+    types.EffectPure, types.OwnConsume)
+
+fn io_arrow() -> types.Type = arrow(types.EffectIO, types.EffectIO)
+
+fn pure_arrow() -> types.Type = arrow(types.EffectPure, types.EffectPure)
+
+fn result_var() -> types.Type = types.TVar(types.tyvar_id("r"))
+
+# What a laundered join renders as: the slot took the IO callback.
+fn io_join_rendering() -> String = "(Int -> Int !{IO}) -> Int -> Int !{IO}"
+
+# Both branches judged against one fresh result variable, the way `infer_if_join`
+# and `infer_branch_unify` do it. Renders the joined type, or the rejection.
+fn join(first: types.Type, second: types.Type) -> String =
+  let unifier.UnifyOk s1 es1 =
+        unifier.unify_actual_expected(dict_empty(), dict_empty(), first, result_var())
+        else unifier.UnifyErr e -> "REJECT"
+      unifier.UnifyOk s2 es2 =
+        unifier.unify_actual_expected(s1, es1, second, result_var())
+        else unifier.UnifyErr e -> "REJECT"
+  in types.type_to_string(unifier.apply_full_subst(s2, es2, result_var()))
+
+fn main() -> Unit !{IO} =
+  run_suite("effect_join_bounds", [
+    # The defect this pins: the pure branch's slot obligation was dropped, so the
+    # IO branch bound the slot to IO and the join laundered. The two orders leave
+    # the slot spelled differently — resolved pure, or a variable carrying a pure
+    # ceiling — so what is asserted is that neither is IO.
+    check_true("a joined callback slot does not take an IO callback",
+      join(pure_arrow(), io_arrow()) != io_join_rendering()),
+
+    # The mirror. A join has no first branch, so the two must not disagree.
+    check_true("and not in the other order either",
+      join(io_arrow(), pure_arrow()) != io_join_rendering()),
+
+    # Uniform joins keep their own effect — the meet of one effect is itself.
+    check_eq("two pure arrows join pure",
+      join(pure_arrow(), pure_arrow()),
+      "(Int -> Int) -> Int -> Int"),
+    check_eq("two IO arrows join IO",
+      join(io_arrow(), io_arrow()),
+      "(Int -> Int !{IO}) -> Int -> Int !{IO}"),
+
+    check_true("neither order rejects a legal join",
+      join(io_arrow(), pure_arrow()) != "REJECT")
+  ])

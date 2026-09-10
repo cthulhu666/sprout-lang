@@ -1,0 +1,23 @@
+module main
+
+# The accepting twin of effect_io_arrow_join_second_order{,_mirror}.spr. A
+# callback slot is CONTRAVARIANT, so joining an `!{IO}` slot with a pure one
+# leaves a slot that takes the pure callback both branches accept. Declaring it
+# that way is legal, and must stay legal whichever branch is written first.
+
+fn quiet(n: Int) -> Int = n + 1
+
+fn f1(cb: Int -> Int !{IO}, n: Int) -> Int !{IO} = cb(n)
+
+fn f2(cb: Int -> Int, n: Int) -> Int = cb(n)
+
+fn io_first(b: Bool) -> ((Int -> Int) -> Int -> Int !{IO}) = if b then f1 else f2
+
+fn pure_first(b: Bool) -> ((Int -> Int) -> Int -> Int !{IO}) = if b then f2 else f1
+
+fn main() -> Unit !{IO} =
+  do
+    print(int_to_string(io_first(true)(quiet, 1)))
+    print(int_to_string(io_first(false)(quiet, 1)))
+    print(int_to_string(pure_first(true)(quiet, 1)))
+    print(int_to_string(pure_first(false)(quiet, 1)))
