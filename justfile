@@ -847,7 +847,7 @@ _test-reject stage dir noun xfail="" phase="check":
 # implemented. It self-heals — the gate goes RED with UNEXPECTED MATCH when the
 # check lands, which is the signal to drop it from this list.
 [group('test')]
-test-type-errors: bootstrap-from-seed (_test-reject "build/compile_driver_bin_stage1" "type_error" "type-error" "effect_io_arrow_into_pure_param")
+test-type-errors: bootstrap-from-seed (_test-reject "build/compile_driver_bin_stage1" "type_error" "type-error" "")
 
 # Stage-1 negative parse gate: tests/conformance/parse_error/<n>.spr must be
 # rejected at parse time with the diagnostic substring in <n>.err.

@@ -1790,6 +1790,15 @@ Effect note for v0:
    instantiate `e` at purity. That is rule 8's standing variable exemption — a plain
    `fn f(x: Int) -> Int !{e}` whose body prints launders the same way, with no class
    involved — and this rule neither widens nor narrows it.
+
+   **A function VALUE may not enter a slot that permits less effect than it performs.**
+   Passing an `!{IO}` function where a pure arrow is required is rejected, in an argument,
+   in a return, and at any depth. The reverse is accepted: a pure function is usable
+   wherever an `!{IO}` one is expected, which is the same subsumption as above. The
+   comparison is **directional**, and the direction reverses when descending into an
+   arrow's parameter — so a function consuming a pure arrow may not stand where one
+   consuming an `!{IO}` arrow is required. An effect *variable* on either side binds
+   rather than rejects, which is what keeps `!{e}` combinators usable at both purities.
 9. Function types may quantify a singleton effect variable `!{e}`; use sites
    instantiate it with either purity or a concrete closed effect supported in v0.
    **Singleton is a limit, not a description**: a signature may name at most one

@@ -1,0 +1,21 @@
+module main
+
+# The ACCEPT half of the arrow-position rule: a PURE function is usable wherever
+# an !{IO} one is required, in a parameter and as a result. Subsumption, not
+# equality — a checker that unified the two effects rejects both of these, and
+# the type_error fixtures alone would not notice.
+#
+# Distinct from effect_over_declared_ok.spr, which pins a body against its OWN
+# declaration (rule 8). Here nothing is over-declared; the mismatch is at the
+# arrow, between a value and the slot it enters.
+
+fn quiet(n: Int) -> Int = n + 1
+
+fn take_io_fn(f: Int -> Int !{IO}) -> Int !{IO} = f(1)
+
+fn give_io_fn() -> (Int -> Int !{IO}) = quiet
+
+fn main() -> Unit !{IO} =
+  do
+    print(int_to_string(take_io_fn(quiet)))
+    print(int_to_string(give_io_fn()(41)))

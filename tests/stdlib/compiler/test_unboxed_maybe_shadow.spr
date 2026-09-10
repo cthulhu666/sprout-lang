@@ -10,7 +10,9 @@ import stdlib.test (TestState, new_state, assert_eq, summary)
 # is a closure application, not the prelude extern.  Correct result routes through
 # the passed closure; the bug routes to the C runtime's real env_get (→ Nothing).
 
-fn use_getter(env_get: String -> Maybe String, k: String) -> String !{IO} =
+# The slot carries `!{IO}` because the extern it shadows does; a pure slot here
+# rejects the `!{IO}` closure below (spec §7 rule 8, arrow positions).
+fn use_getter(env_get: String -> Maybe String !{IO}, k: String) -> String !{IO} =
   match env_get(k) with
   | Just v -> v
   | Nothing -> "MISS"

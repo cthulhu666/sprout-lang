@@ -140,7 +140,7 @@ export fn effect_report_has_row(r: EffectReport) -> Bool =
 export fn effect_report_row_labels(r: EffectReport) -> List String =
   types.scheme_row_labels(effect_report_decl_scheme(r))
 
-# What `unify_types` returns: BOTH substitutions, or a message.
+# What a unification returns: BOTH substitutions, or a message.
 #
 # This replaced `Result String (Dict types.Type)` when arrow effects started
 # unifying. The pair is deliberately one value rather than two returns: several
@@ -153,6 +153,28 @@ export fn effect_report_row_labels(r: EffectReport) -> List String =
 export type Unified (..) =
   | UnifyOk (Dict types.Type) (Dict types.Effect)
   | UnifyErr String
+
+# Which side of a unification carries the EXPECTED type. Argument order cannot
+# say it: the same (pure, IO) pair means opposite things at a parameter and at a
+# return, and `infer`'s call sites use both orders
+# (docs/effect-subsumption-v0.md §6.2).
+#
+# `NoExpectation` is a join — an `if` branch meeting its sibling, where neither
+# side is the contract. It binds without rejecting, which is what every site did
+# before this change; part 2 gives joins their own LUB/GLB rule.
+export type Polarity (..) =
+  | ExpectedLeft
+  | ExpectedRight
+  | NoExpectation
+
+# Descending into an arrow's PARAMETER swaps which side is the contract; the
+# result keeps it. Ordinary function subtyping, and what makes a second-order
+# case come out right rather than backwards.
+fn flip_polarity(p: Polarity) -> Polarity =
+  match p with
+  | ExpectedLeft -> ExpectedRight
+  | ExpectedRight -> ExpectedLeft
+  | NoExpectation -> NoExpectation
 
 export fn unified_subst(u: Unified, fallback: Dict types.Type) -> Dict types.Type =
   match u with
@@ -169,7 +191,7 @@ fn unified_of_bind(r: Result String (Dict types.Type), eff_subst: Dict types.Eff
   | Ok s -> UnifyOk(s, eff_subst)
   | Err e -> UnifyErr(e)
 
-# A `unify_types` call that deliberately does not participate in effect
+# A unification that deliberately does not participate in effect
 # inference. Grep for it to find every such site.
 #
 # Some callers sit behind a result type that carries only a type substitution —
@@ -377,66 +399,153 @@ fn bind_var(name: String, t: types.Type, subst: Dict types.Type) -> Result Strin
       else Ok(dict_set(name, t, subst))
 
 # ---------------------------------------------------------------------------
-# unify_types — pure structural unification
+# unification — pure and structural, with an explicit polarity
 # ---------------------------------------------------------------------------
 #
 # Returns an extended substitution, or an error message.
 # Callers that need to thread state must pass the updated subst to the next
-# unify_types call — this function is IO-free.
+# unification — this function is IO-free.
 
-export fn unify_types(
+# Three spellings, no symmetric one. Every caller states which side is the
+# contract, because a site left on the wrong direction is a silent hole or a
+# false rejection and neither shows up in a corpus with no violations — a green
+# suite is not evidence the audit was done (docs/effect-subsumption-v0.md §6.3).
+export fn unify_expect_actual(
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  expected: types.Type,
+  actual: types.Type
+) -> Unified =
+  unify_directed(subst, eff_subst, ExpectedLeft, expected, actual)
+
+export fn unify_actual_expected(
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  actual: types.Type,
+  expected: types.Type
+) -> Unified =
+  unify_directed(subst, eff_subst, ExpectedRight, actual, expected)
+
+# A peer meet: `if` branches, binary operands, match-arm accumulation. Neither
+# side is the contract, so no effect rejection happens here — today's behaviour,
+# until part 2 gives joins a LUB/GLB rule of their own.
+export fn unify_join(
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
   left: types.Type,
   right: types.Type
 ) -> Unified =
-  unify_applied(subst, eff_subst, apply_subst(subst, left), apply_subst(subst, right))
+  unify_directed(subst, eff_subst, NoExpectation, left, right)
+
+fn unify_directed(
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  polarity: Polarity,
+  left: types.Type,
+  right: types.Type
+) -> Unified =
+  unify_applied(subst, eff_subst, polarity,
+                apply_subst(subst, left), apply_subst(subst, right))
 
 # Helpers to avoid nested-match-in-arm pattern (Sprout typechecker limitation)
-fn unify_tapp(subst: Dict types.Type, eff_subst: Dict types.Effect, bl: types.Type, al: types.Type, br: types.Type, ar: types.Type) -> Unified =
-  match unify_applied(subst, eff_subst, bl, br) with
+# A type ARGUMENT keeps the enclosing polarity. Sprout declares no variance, so
+# `Vec (Int -> Int)` against `Vec (Int -> Int !{IO})` is judged as if the element
+# position were covariant — sound for reads, not for writes through a mutable
+# container. Narrowing it to invariance is its own change: it would reject the
+# accepting direction too, which nothing in the corpus needs today.
+fn unify_tapp(subst: Dict types.Type, eff_subst: Dict types.Effect, polarity: Polarity,
+              bl: types.Type, al: types.Type, br: types.Type, ar: types.Type) -> Unified =
+  match unify_applied(subst, eff_subst, polarity, bl, br) with
   | UnifyErr e -> UnifyErr(e)
-  | UnifyOk s1 es1 -> unify_applied(s1, es1, apply_subst(s1, al), apply_subst(s1, ar))
+  | UnifyOk s1 es1 ->
+      unify_applied(s1, es1, polarity, apply_subst(s1, al), apply_subst(s1, ar))
 
 # The arrows' effects meet here, and this is the ONLY place an effect variable
 # ever gets bound. `e1` and `e2` are unified BEFORE the parameter and return, so
 # a later failure discards the binding along with the substitution — the two
-# travel together in `Unified` precisely so a speculative unify_types that is
+# travel together in `Unified` precisely so a speculative unification that is
 # thrown away cannot leave an effect binding behind.
-fn unify_tfunc(subst: Dict types.Type, eff_subst: Dict types.Effect,
+fn unify_tfunc(subst: Dict types.Type, eff_subst: Dict types.Effect, polarity: Polarity,
                p1: types.Type, r1: types.Type, e1: types.Effect,
                p2: types.Type, r2: types.Type, e2: types.Effect) -> Unified =
-  match unify_applied(subst, unify_arrow_effects(eff_subst, e1, e2), p1, p2) with
+  match arrow_effect_error(polarity, e1, e2) with
+  | Just msg -> UnifyErr(msg)
+  | Nothing -> unify_tfunc_parts(subst, unify_arrow_effects(eff_subst, e1, e2), polarity,
+                                 p1, r1, p2, r2)
+
+fn unify_tfunc_parts(subst: Dict types.Type, eff_subst: Dict types.Effect, polarity: Polarity,
+                     p1: types.Type, r1: types.Type,
+                     p2: types.Type, r2: types.Type) -> Unified =
+  match unify_applied(subst, eff_subst, flip_polarity(polarity), p1, p2) with
   | UnifyErr e -> UnifyErr(e)
-  | UnifyOk s1 es1 -> unify_applied(s1, es1, apply_subst(s1, r1), apply_subst(s1, r2))
+  | UnifyOk s1 es1 ->
+      unify_applied(s1, es1, polarity, apply_subst(s1, r1), apply_subst(s1, r2))
 
 # A thunk has no parameter and no ownership, so this is unify_tfunc without
 # either: meet the effects on the same bind-never-reject terms, then the results.
-fn unify_tthunk(subst: Dict types.Type, eff_subst: Dict types.Effect,
+fn unify_tthunk(subst: Dict types.Type, eff_subst: Dict types.Effect, polarity: Polarity,
                 r1: types.Type, e1: types.Effect,
                 r2: types.Type, e2: types.Effect) -> Unified =
-  unify_applied(subst, unify_arrow_effects(eff_subst, e1, e2), r1, r2)
+  match arrow_effect_error(polarity, e1, e2) with
+  | Just msg -> UnifyErr(msg)
+  | Nothing -> unify_applied(subst, unify_arrow_effects(eff_subst, e1, e2), polarity, r1, r2)
 
-# Arrow-position effect unification BINDS but never REJECTS.
+# The BINDING half of an arrow-position meet — it still never rejects. The
+# rejecting half is `arrow_effect_error`, which runs first and decides on the
+# DECLARED effects; whatever survives that reaches here to bind variables.
 #
-# `unify_effects` has an Err arm for a row that meets an incompatible row, and
-# that arm must not reach a user. Sprout's rule at a declaration boundary is
-# SUBSUMPTION, not equality: a pure body under an `!{IO}` signature is legal and
-# idiomatic (spec §7), so two arrows whose effects differ are not thereby a type
-# error. Enforcement happens at the one place the language defines it —
-# `check_fn_body` comparing a body's inferred effect against its declaration —
-# and nowhere else.
-#
-# Getting this wrong is worse than leaving effects unchecked. Until this change,
-# populating arrow effects provably could not reject a program, because
-# `unify_applied` discarded the field; the moment it stops discarding it, every
-# effect imprecision anywhere in inference becomes a candidate compile error on
-# correct code. Swallowing the Err keeps the old guarantee: turning effect
-# inference on can make the REPORT wrong, never the ACCEPT/REJECT decision.
+# `unify_effects` has an Err arm for a row meeting an incompatible row, and that
+# arm must not reach a user: an effect imprecision anywhere in inference would
+# become a compile error on correct code. Swallowing it keeps that guarantee, so
+# inference can make the REPORT wrong but never the ACCEPT/REJECT decision —
+# which is now solely `arrow_effect_error`'s, on what the author wrote.
 fn unify_arrow_effects(eff_subst: Dict types.Effect, e1: types.Effect, e2: types.Effect) -> Dict types.Effect =
   match unify_effects(eff_subst, e1, e2) with
   | Ok es -> es
   | Err _ -> eff_subst
+
+# The arrow-position rule (spec §7, docs/effect-subsumption-v0.md §6.3): the
+# ACTUAL arrow may perform at most what the EXPECTED slot permits. Only the
+# concrete pure-slot/IO-value cell rejects; everything else binds as before, so
+# every `!{e}` combinator keeps working.
+#
+# A row is not something a conformant signature can write (rule 9), but
+# inference builds rows internally via `merge_effects`, so the arm is reachable
+# and says so rather than falling through to a silent accept.
+fn arrow_effect_error(polarity: Polarity, e1: types.Effect, e2: types.Effect) -> Maybe String =
+  match polarity with
+  | NoExpectation -> Nothing
+  | ExpectedLeft -> effect_slot_error(e1, e2)
+  | ExpectedRight -> effect_slot_error(e2, e1)
+
+# Total over both sides. A catch-all here would answer "accept" for a
+# constructor added later, and the one cell that must reject is a single pair —
+# so the wrong default is the silent one (guidelines.md §2a).
+#
+# A row DECLINES rather than rejects. The design predicted no row could reach
+# here; it can — a written `!{IO, e}` reaches this comparison at the call, ahead
+# of rule 9, and rejecting it masked rule 9's diagnostic with a worse one
+# (tests/conformance/type_error/effect_mixed_row.spr). Same shape as the
+# instance-side row in §6.1a: the pass that sees it first is not the pass that
+# should name it.
+fn effect_slot_error(expected: types.Effect, actual: types.Effect) -> Maybe String =
+  match (expected, actual) with
+  | (types.EffectRow _, _) -> Nothing
+  | (_, types.EffectRow _) -> Nothing
+  | (types.EffectPure, types.EffectIO) -> Just(io_into_pure_error())
+  | (types.EffectPure, types.EffectPure) -> Nothing
+  | (types.EffectPure, types.EffectVar _) -> Nothing
+  | (types.EffectIO, types.EffectPure) -> Nothing
+  | (types.EffectIO, types.EffectIO) -> Nothing
+  | (types.EffectIO, types.EffectVar _) -> Nothing
+  | (types.EffectVar _, types.EffectPure) -> Nothing
+  | (types.EffectVar _, types.EffectIO) -> Nothing
+  | (types.EffectVar _, types.EffectVar _) -> Nothing
+
+fn io_into_pure_error() -> String =
+  "a function that performs IO cannot be used where a pure one is required"
+    ++ " — spec-v0.md §7. A pure function is accepted wherever an `!{IO}` one is"
+    ++ " expected; the reverse would let the IO run behind a pure signature."
 
 # Parameter ownership is INVARIANT (M4.6): the two conventions are different
 # types and neither substitutes for the other. Both directions are unsound —
@@ -449,11 +558,12 @@ fn unify_arrow_effects(eff_subst: Dict types.Effect, e1: types.Effect, e2: types
 #
 # Effects are deliberately still ignored above; ownership is not, because an
 # ownership mismatch is a soundness bug rather than a conservatism knob.
-fn unify_tfunc_owned(subst: Dict types.Type, eff_subst: Dict types.Effect,
+fn unify_tfunc_owned(subst: Dict types.Type, eff_subst: Dict types.Effect, polarity: Polarity,
                      l: types.Type, r: types.Type,
                      p1: types.Type, r1: types.Type, e1: types.Effect, o1: types.Ownership,
                      p2: types.Type, r2: types.Type, e2: types.Effect, o2: types.Ownership) -> Unified =
-  if types.ownership_eq(o1, o2) then unify_tfunc(subst, eff_subst, p1, r1, e1, p2, r2, e2)
+  if types.ownership_eq(o1, o2)
+  then unify_tfunc(subst, eff_subst, polarity, p1, r1, e1, p2, r2, e2)
   else UnifyErr(ownership_mismatch_error(l, r, o1, o2))
 
 # The explanation branches on WHICH pair actually mismatched. It used to be a
@@ -513,6 +623,7 @@ fn type_head_name(t: types.Type) -> String =
 fn unify_applied(
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
+  polarity: Polarity,
   l: types.Type,
   r: types.Type
 ) -> Unified =
@@ -532,22 +643,27 @@ fn unify_applied(
       # identity. The bundler already resolves references to canonical names, so
       # equal identity means equal name; the prelude's canonical form is unqualified.
       if types.type_id_eq(a, b) then UnifyOk(subst, eff_subst) else UnifyErr(type_mismatch_error(l, r))
-  | (types.TApp bl al, types.TApp br ar) -> unify_tapp(subst, eff_subst, bl, al, br, ar)
+  | (types.TApp bl al, types.TApp br ar) -> unify_tapp(subst, eff_subst, polarity, bl, al, br, ar)
   | (types.TFunc p1 r1 e1 o1, types.TFunc p2 r2 e2 o2) ->
-      unify_tfunc_owned(subst, eff_subst, l, r, p1, r1, e1, o1, p2, r2, e2, o2)
-  | (types.TThunk r1 e1, types.TThunk r2 e2) -> unify_tthunk(subst, eff_subst, r1, e1, r2, e2)
-  | (types.TTuple xs, types.TTuple ys) -> unify_list(subst, eff_subst, xs, ys)
+      unify_tfunc_owned(subst, eff_subst, polarity, l, r, p1, r1, e1, o1, p2, r2, e2, o2)
+  | (types.TThunk r1 e1, types.TThunk r2 e2) ->
+      unify_tthunk(subst, eff_subst, polarity, r1, e1, r2, e2)
+  | (types.TTuple xs, types.TTuple ys) -> unify_list(subst, eff_subst, polarity, xs, ys)
   | _ ->
       UnifyErr(type_mismatch_error(l, r))
 
-fn unify_list_step(subst: Dict types.Type, eff_subst: Dict types.Effect, x: types.Type, y: types.Type, xr: List types.Type, yr: List types.Type) -> Unified =
-  match unify_applied(subst, eff_subst, apply_subst(subst, x), apply_subst(subst, y)) with
+fn unify_list_step(subst: Dict types.Type, eff_subst: Dict types.Effect, polarity: Polarity,
+                   x: types.Type, y: types.Type,
+                   xr: List types.Type, yr: List types.Type) -> Unified =
+  match unify_applied(subst, eff_subst, polarity,
+                      apply_subst(subst, x), apply_subst(subst, y)) with
   | UnifyErr e -> UnifyErr(e)
-  | UnifyOk s1 es1 -> unify_list(s1, es1, xr, yr)
+  | UnifyOk s1 es1 -> unify_list(s1, es1, polarity, xr, yr)
 
 fn unify_list(
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
+  polarity: Polarity,
   xs: List types.Type,
   ys: List types.Type
 ) -> Unified =
@@ -555,7 +671,7 @@ fn unify_list(
   | (Nil, Nil) -> UnifyOk(subst, eff_subst)
   | (Nil, _) -> UnifyErr("Tuple arity mismatch")
   | (_, Nil) -> UnifyErr("Tuple arity mismatch")
-  | (Cons x xr, Cons y yr) -> unify_list_step(subst, eff_subst, x, y, xr, yr)
+  | (Cons x xr, Cons y yr) -> unify_list_step(subst, eff_subst, polarity, x, y, xr, yr)
 
 # ---------------------------------------------------------------------------
 # unify_effects — pure effect-row unification
