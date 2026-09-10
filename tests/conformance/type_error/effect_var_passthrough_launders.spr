@@ -1,0 +1,20 @@
+module main
+
+# The `!{e}` pass-through hole. `id_fn` returns its argument's arrow unchanged, so
+# `e` is bound to `!{IO}` by the call — but the binding lives in the effect
+# substitution, and the return comparison read the raw field, saw `EffectVar`, and
+# took the bind arm.
+#
+# Verified to compile and print `io` before bounded effect variables: the same
+# program shape effect_io_arrow_into_pure_return.spr rejects directly.
+
+fn shout(n: Int) -> Int !{IO} =
+  do
+    print("io")
+    n + 1
+
+fn id_fn(f: Int -> Int !{e}) -> (Int -> Int !{e}) = f
+
+fn get_pure() -> (Int -> Int) = id_fn(shout)
+
+fn main() -> Unit !{IO} = print(int_to_string(get_pure()(1)))

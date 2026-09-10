@@ -1,0 +1,21 @@
+module main
+
+# An !{IO} arrow reaching a PURE element slot, with the pure element FIRST. Its
+# mirror is effect_io_in_pure_list_first.spr, and the pair is the point: the
+# same illegal program in two element orders must produce the same rejection.
+#
+# It also must be rejected at the RETURN — the declared element type is what makes
+# it illegal, and that annotation is not consulted at the `Cons` meet. Rejecting
+# at the element is rejecting before the evidence is in, which is why the same
+# expression is LEGAL in effect_arrow_pin_order_ok.spr under an !{IO} slot.
+
+fn quiet(n: Int) -> Int = n + 1
+
+fn shout(n: Int) -> Int !{IO} =
+  do
+    print("io")
+    n + 1
+
+fn pure_handlers() -> List (Int -> Int) = [quiet, shout]
+
+fn main() -> Unit !{IO} = print(int_to_string(list_length(pure_handlers())))

@@ -191,6 +191,19 @@ fn unified_of_bind(r: Result String (Dict types.Type), eff_subst: Dict types.Eff
   | Ok s -> UnifyOk(s, eff_subst)
   | Err e -> UnifyErr(e)
 
+# Was the type being bound a written slot or an observed value? At a join neither
+# is a contract, so nothing is recorded and the old behaviour stands.
+type BoundRole (..) =
+  | AsCeiling
+  | AsFloor
+  | NoBound
+
+fn bound_role(polarity: Polarity, bound_is_left: Bool) -> BoundRole =
+  match polarity with
+  | NoExpectation -> NoBound
+  | ExpectedLeft -> if bound_is_left then AsCeiling else AsFloor
+  | ExpectedRight -> if bound_is_left then AsFloor else AsCeiling
+
 # A unification that deliberately does not participate in effect
 # inference. Grep for it to find every such site.
 #
@@ -388,6 +401,165 @@ fn occurs_list(name: String, subst: Dict types.Type, items: List types.Type) -> 
 # bind_var — extend substitution, with occurs check
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Bounded effect variables (docs/effect-subsumption-v0.md §6.4b)
+# ---------------------------------------------------------------------------
+#
+# Bounds live in `eff_subst` under `@`-prefixed keys, which no effect variable can
+# spell, so the carrier and every `UnifyOk s es` site are unchanged. `@lo:v` is
+# "v must permit at least this"; `@hi:v` is "at most this". A contradiction —
+# lower IO under upper pure — is the §7 rejection, raised where it closes.
+fn lower_bound_key(v: String) -> String = "@lo:" ++ v
+
+fn upper_bound_key(v: String) -> String = "@hi:" ++ v
+
+fn effect_is_io(e: types.Effect) -> Bool =
+  match e with
+  | types.EffectIO -> true
+  | types.EffectPure -> false
+  | types.EffectVar _ -> false
+  | types.EffectRow _ -> false
+
+fn effect_is_pure(e: types.Effect) -> Bool =
+  match e with
+  | types.EffectPure -> true
+  | types.EffectIO -> false
+  | types.EffectVar _ -> false
+  | types.EffectRow _ -> false
+
+# A value performs at least `e`. Contradicts an existing pure ceiling.
+#
+# Raising the floor also RE-BINDS the variable, because the binding is what
+# `apply_effect_subst` reads later and IO absorbs. Leaving the first-arrival
+# binding in place is how `[shout, quiet]` under a pure element type laundered:
+# `quiet`'s pure overwrote `shout`'s IO and the annotation then saw pure.
+fn record_lower(eff_subst: Dict types.Effect, v: String,
+                e: types.Effect) -> Result String (Dict types.Effect) =
+  if ! effect_is_io (e) then Ok(eff_subst)
+  else if upper_is_pure(eff_subst, v) then Err(io_into_pure_error())
+  else Ok(dict_set(v, e, dict_set(lower_bound_key(v), e, eff_subst)))
+
+# A slot permits at most `e`. Contradicts an existing IO floor.
+fn record_upper(eff_subst: Dict types.Effect, v: String,
+                e: types.Effect) -> Result String (Dict types.Effect) =
+  if ! effect_is_pure (e) then Ok(eff_subst)
+  else if lower_is_io(eff_subst, v) then Err(io_into_pure_error())
+  else Ok(dict_set(upper_bound_key(v), e, eff_subst))
+
+# The traversal's result: the rewritten type, the next index, and the bounds owed.
+type Freshened (..) =
+  | Freshened types.Type Int (List (String, types.Effect))
+
+# Binding a tyvar to a type carrying CONCRETE arrow effects is what turns a value's
+# observed effect into a contract for everything that variable later meets.
+# Replace each with a variable derived from the owner and a positional index —
+# single assignment makes that collision-free without a name supply — and hand back
+# the concrete as a bound for the caller to record with the right role.
+fn freshen_arrow_effects(owner: String, t: types.Type, idx: Int) -> Freshened =
+  match t with
+  | types.TFunc p r e o ->
+      match freshen_arrow_effects(owner, p, idx) with
+      | Freshened p2 i1 b1 ->
+          match freshen_arrow_effects(owner, r, i1) with
+          | Freshened r2 i2 b2 ->
+              freshen_one(owner, types.TFunc(p2, r2, types.EffectVar(derived_var(owner, i2)), o),
+                          e, i2, list_append(b1, b2))
+  | types.TThunk r e ->
+      match freshen_arrow_effects(owner, r, idx) with
+      | Freshened r2 i1 b1 ->
+          freshen_one(owner, types.TThunk(r2, types.EffectVar(derived_var(owner, i1))),
+                      e, i1, b1)
+  | types.TApp b a ->
+      match freshen_arrow_effects(owner, b, idx) with
+      | Freshened b2 i1 b1 ->
+          match freshen_arrow_effects(owner, a, i1) with
+          | Freshened a2 i2 b2s -> Freshened(types.TApp(b2, a2), i2, list_append(b1, b2s))
+  | types.TTuple xs ->
+      match freshen_list(owner, xs, idx, Nil, Nil) with
+      | Freshened rebuilt i1 bs -> Freshened(rebuilt, i1, bs)
+  | types.TVar _ -> Freshened(t, idx, Nil)
+  | types.TConst _ -> Freshened(t, idx, Nil)
+
+# A concrete effect becomes a bound; a variable is left exactly as written, since
+# it is already flexible and its own bounds travel with it.
+fn freshen_one(owner: String, rebuilt: types.Type, e: types.Effect, idx: Int,
+               acc: List (String, types.Effect)) -> Freshened =
+  match e with
+  | types.EffectVar _ -> Freshened(restore_effect(rebuilt, e), idx, acc)
+  | types.EffectRow _ -> Freshened(restore_effect(rebuilt, e), idx, acc)
+  | types.EffectPure ->
+      Freshened(rebuilt, idx + 1, list_append(acc, [(derived_var(owner, idx), e)]))
+  | types.EffectIO ->
+      Freshened(rebuilt, idx + 1, list_append(acc, [(derived_var(owner, idx), e)]))
+
+# Enumerated, not defaulted: a future effect-carrying constructor would silently
+# DROP its effect here, and the loss is invisible — the type still checks
+# (guidelines.md §2a).
+fn restore_effect(t: types.Type, e: types.Effect) -> types.Type =
+  match t with
+  | types.TFunc p r _ o -> types.TFunc(p, r, e, o)
+  | types.TThunk r _ -> types.TThunk(r, e)
+  | types.TApp _ _ -> t
+  | types.TTuple _ -> t
+  | types.TVar _ -> t
+  | types.TConst _ -> t
+
+fn derived_var(owner: String, idx: Int) -> String =
+  "$b" ++ owner ++ "/" ++ int_to_string(idx)
+
+fn freshen_list(owner: String, xs: List types.Type, idx: Int,
+                acc: List types.Type, bs: List (String, types.Effect)) -> Freshened =
+  match xs with
+  | Nil -> Freshened(types.TTuple(list_reverse(acc)), idx, bs)
+  | Cons x rest ->
+      match freshen_arrow_effects(owner, x, idx) with
+      | Freshened x2 i1 b1 -> freshen_list(owner, rest, i1, Cons(x2, acc), list_append(bs, b1))
+
+# Bind, but leave the variable's effects flexible and remember what was seen.
+# At a join nothing is remembered, so the pre-change behaviour stands there.
+fn bind_bounded(name: String, t: types.Type, subst: Dict types.Type,
+                eff_subst: Dict types.Effect, role: BoundRole) -> Unified =
+  match role with
+  | NoBound -> unified_of_bind(bind_var(name, t, subst), eff_subst)
+  | AsCeiling -> bind_bounded_with(name, t, subst, eff_subst, role)
+  | AsFloor -> bind_bounded_with(name, t, subst, eff_subst, role)
+
+fn bind_bounded_with(name: String, t: types.Type, subst: Dict types.Type,
+                     eff_subst: Dict types.Effect, role: BoundRole) -> Unified =
+  match freshen_arrow_effects(name, t, 0) with
+  | Freshened rewritten _ bounds ->
+      match record_bounds(eff_subst, bounds, role) with
+      | Err e -> UnifyErr(e)
+      | Ok es1 -> unified_of_bind(bind_var(name, rewritten, subst), es1)
+
+fn record_bounds(eff_subst: Dict types.Effect, bounds: List (String, types.Effect),
+                 role: BoundRole) -> Result String (Dict types.Effect) =
+  match bounds with
+  | Nil -> Ok(eff_subst)
+  | Cons b rest ->
+      match b with
+      | (v, e) ->
+          match record_one_bound(eff_subst, v, e, role) with
+          | Err msg -> Err(msg)
+          | Ok es1 -> record_bounds(es1, rest, role)
+
+fn record_one_bound(eff_subst: Dict types.Effect, v: String, e: types.Effect,
+                    role: BoundRole) -> Result String (Dict types.Effect) =
+  match role with
+  | AsCeiling -> record_upper(eff_subst, v, e)
+  | AsFloor -> record_lower(eff_subst, v, e)
+  | NoBound -> Ok(eff_subst)
+
+fn lower_is_io(eff_subst: Dict types.Effect, v: String) -> Bool =
+  match dict_get(lower_bound_key(v), eff_subst) with
+  | Just e -> effect_is_io(e)
+  | Nothing -> false
+
+fn upper_is_pure(eff_subst: Dict types.Effect, v: String) -> Bool =
+  match dict_get(upper_bound_key(v), eff_subst) with
+  | Just e -> effect_is_pure(e)
+  | Nothing -> false
+
 fn bind_var(name: String, t: types.Type, subst: Dict types.Type) -> Result String (Dict types.Type) =
   match t with
   | types.TVar n ->
@@ -468,10 +640,9 @@ fn unify_tapp(subst: Dict types.Type, eff_subst: Dict types.Effect, polarity: Po
 fn unify_tfunc(subst: Dict types.Type, eff_subst: Dict types.Effect, polarity: Polarity,
                p1: types.Type, r1: types.Type, e1: types.Effect,
                p2: types.Type, r2: types.Type, e2: types.Effect) -> Unified =
-  match arrow_effect_error(polarity, e1, e2) with
-  | Just msg -> UnifyErr(msg)
-  | Nothing -> unify_tfunc_parts(subst, unify_arrow_effects(eff_subst, e1, e2), polarity,
-                                 p1, r1, p2, r2)
+  match arrow_effect_meet(eff_subst, polarity, e1, e2) with
+  | Err msg -> UnifyErr(msg)
+  | Ok es1 -> unify_tfunc_parts(subst, es1, polarity, p1, r1, p2, r2)
 
 fn unify_tfunc_parts(subst: Dict types.Type, eff_subst: Dict types.Effect, polarity: Polarity,
                      p1: types.Type, r1: types.Type,
@@ -486,19 +657,17 @@ fn unify_tfunc_parts(subst: Dict types.Type, eff_subst: Dict types.Effect, polar
 fn unify_tthunk(subst: Dict types.Type, eff_subst: Dict types.Effect, polarity: Polarity,
                 r1: types.Type, e1: types.Effect,
                 r2: types.Type, e2: types.Effect) -> Unified =
-  match arrow_effect_error(polarity, e1, e2) with
-  | Just msg -> UnifyErr(msg)
-  | Nothing -> unify_applied(subst, unify_arrow_effects(eff_subst, e1, e2), polarity, r1, r2)
+  match arrow_effect_meet(eff_subst, polarity, e1, e2) with
+  | Err msg -> UnifyErr(msg)
+  | Ok es1 -> unify_applied(subst, es1, polarity, r1, r2)
 
-# The BINDING half of an arrow-position meet — it still never rejects. The
-# rejecting half is `arrow_effect_error`, which runs first and decides on the
-# DECLARED effects; whatever survives that reaches here to bind variables.
+# The BINDING half of an arrow-position meet — it still never rejects. Rejection
+# is `arrow_effect_meet`'s, which calls this only for the cells that survive.
 #
 # `unify_effects` has an Err arm for a row meeting an incompatible row, and that
 # arm must not reach a user: an effect imprecision anywhere in inference would
 # become a compile error on correct code. Swallowing it keeps that guarantee, so
-# inference can make the REPORT wrong but never the ACCEPT/REJECT decision —
-# which is now solely `arrow_effect_error`'s, on what the author wrote.
+# inference can make the REPORT wrong but never the ACCEPT/REJECT decision.
 fn unify_arrow_effects(eff_subst: Dict types.Effect, e1: types.Effect, e2: types.Effect) -> Dict types.Effect =
   match unify_effects(eff_subst, e1, e2) with
   | Ok es -> es
@@ -512,11 +681,41 @@ fn unify_arrow_effects(eff_subst: Dict types.Effect, e1: types.Effect, e2: types
 # A row is not something a conformant signature can write (rule 9), but
 # inference builds rows internally via `merge_effects`, so the arm is reachable
 # and says so rather than falling through to a silent accept.
-fn arrow_effect_error(polarity: Polarity, e1: types.Effect, e2: types.Effect) -> Maybe String =
+# The meet, with the substitution applied so a variable already pinned to `!{IO}`
+# is judged as `!{IO}` rather than as a variable — §6.4a's laundering hole. A
+# variable that is still open records a bound instead of binding, so the verdict
+# waits for the side that is actually a contract (§6.4b).
+fn arrow_effect_meet(eff_subst: Dict types.Effect, polarity: Polarity,
+                     e1: types.Effect, e2: types.Effect) -> Result String (Dict types.Effect) =
   match polarity with
-  | NoExpectation -> Nothing
-  | ExpectedLeft -> effect_slot_error(e1, e2)
-  | ExpectedRight -> effect_slot_error(e2, e1)
+  | NoExpectation -> Ok(unify_arrow_effects(eff_subst, e1, e2))
+  | ExpectedLeft ->
+      effect_slot_meet(eff_subst, apply_effect_subst(eff_subst, e1),
+                       apply_effect_subst(eff_subst, e2))
+  | ExpectedRight ->
+      effect_slot_meet(eff_subst, apply_effect_subst(eff_subst, e2),
+                       apply_effect_subst(eff_subst, e1))
+
+fn effect_slot_meet(eff_subst: Dict types.Effect, expected: types.Effect,
+                    actual: types.Effect) -> Result String (Dict types.Effect) =
+  match (expected, actual) with
+  | (types.EffectVar v, _) ->
+      # The slot is open: what arrives is a floor on it.
+      record_lower(bind_open(eff_subst, v, actual), v, actual)
+  | (_, types.EffectVar v) ->
+      # The value is open: the slot is a ceiling on it.
+      record_upper(bind_open(eff_subst, v, expected), v, expected)
+  | _ ->
+      match effect_slot_error(expected, actual) with
+      | Just msg -> Err(msg)
+      | Nothing -> Ok(unify_arrow_effects(eff_subst, expected, actual))
+
+# Keep today's binding for a still-unbound variable so `!{e}` continues to resolve;
+# the bound recorded alongside is what makes the resolution checkable.
+fn bind_open(eff_subst: Dict types.Effect, v: String, e: types.Effect) -> Dict types.Effect =
+  match dict_get(v, eff_subst) with
+  | Just _ -> eff_subst
+  | Nothing -> unify_arrow_effects(eff_subst, types.EffectVar(v), e)
 
 # Total over both sides. A catch-all here would answer "accept" for a
 # constructor added later, and the one cell that must reject is a single pair —
@@ -634,8 +833,13 @@ fn unify_applied(
       # reachable after tuple pattern matching introduces fresh element vars.
       if types.tyvar_eq(a, b) then UnifyOk(subst, eff_subst)
       else unified_of_bind(bind_var(types.tyvar_identity(b), l, subst), eff_subst)
-  | (types.TVar a, _) -> unified_of_bind(bind_var(types.tyvar_identity(a), r, subst), eff_subst)
-  | (_, types.TVar b) -> unified_of_bind(bind_var(types.tyvar_identity(b), l, subst), eff_subst)
+  # The bound side's role decides how its concrete effects are remembered: a value
+  # gives a floor, a written slot gives a ceiling. `bind_bounded` freshens them so
+  # neither becomes a contract for whatever the variable meets next (§6.4b).
+  | (types.TVar a, _) ->
+      bind_bounded(types.tyvar_identity(a), r, subst, eff_subst, bound_role(polarity, false))
+  | (_, types.TVar b) ->
+      bind_bounded(types.tyvar_identity(b), l, subst, eff_subst, bound_role(polarity, true))
   | (types.TConst a, types.TConst b) ->
       # Module-qualified type identity (T7): exact match on the canonical name.
       # Bare-name comparison (after_last_dot both sides) silently unified two
