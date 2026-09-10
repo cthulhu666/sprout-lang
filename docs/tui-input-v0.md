@@ -169,7 +169,8 @@ export fn focus_style_default() -> FocusStyle          # reverse video when focu
 
 # stdlib/tui/widgets/input.sprout
 export type InputOpts m = (initial: String, on_submit: Maybe (String -> m),
-                           look: FocusStyle)
+                           look: FocusStyle,
+                           on_content: Maybe (m -> Maybe String))
 export fn input_opts() -> InputOpts m
 export fn input(id: WidgetId, on_change: String -> m) -> Widget m
 export fn input_with(id: WidgetId, on_change: String -> m,
@@ -183,6 +184,14 @@ export fn at(screen: Screen, region: Region, row: Int, col: Int,
 export fn from_clusters(cs: List (List Int)) -> String
 export fn clusters_width(cs: List (List Int)) -> Int
 ```
+
+`on_content` lets the application set the value — a search box being cleared, a
+suggestion being accepted. It carries no caret argument: `zipper_open` puts the
+caret at the end, which is where construction leaves it and where a value set
+programmatically wants it. The replacement is **silent** — `on_change` carries
+the text, and after a replacement the text is exactly what the application
+sent, so announcing it would echo its own value back
+(`docs/tui-content-update-v0.md` §9.1–9.2).
 
 Keys claimed while focused: printable `KChar` (unmodified), `KBackspace`,
 `KDelete`, `KLeft`, `KRight`, `KHome`, `KEnd`, `Paste`, and `KEnter` only with

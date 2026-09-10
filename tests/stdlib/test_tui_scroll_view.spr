@@ -17,6 +17,10 @@ import stdlib.tui.widgets.text as txt
 type Msg (..) deriving (Eq, ToString) =
   | Ping
   | Noted String
+  # The application sends DATA; the decoder is where it becomes a widget
+  # (§9.4 of docs/tui-content-update-v0.md). A `Widget m` could not travel in
+  # a message here anyway — it has no `Eq` or `ToString`.
+  | Show (List String)
 
 type alias Says = List Msg
 type alias Asks = List(widget.Cmd Msg)
@@ -70,8 +74,18 @@ fn addressed() -> widget.Widget Msg =
 
 fn view() -> widget.Widget Msg = sv.scroll_view(view_id(), tall())
 
-fn view_of(w: widget.Widget Msg, o: sv.ScrollOpts) -> widget.Widget Msg =
+fn view_of(w: widget.Widget Msg, o: sv.ScrollOpts Msg) -> widget.Widget Msg =
   sv.scroll_view_with(view_id(), w, o)
+
+# The decoder builds the child, which is the only place `m` and the concrete
+# `View s m` are both in scope.
+fn content_of(m: Msg) -> Maybe(widget.Widget Msg) =
+  match m with
+  | Show ls -> Just(txt.static(ls))
+  | _ -> Nothing
+
+fn contenting() -> sv.ScrollOpts Msg =
+  sv.scroll_opts() with (on_content = Just(content_of))
 
 fn ring_of(w: widget.Widget Msg) -> widget.Widget Msg =
   focus.focus_ring([view_id()], w)
@@ -138,11 +152,69 @@ fn into(w: widget.Widget Msg, cols: Int, rows: Int,
   widget.render(w, g.Region(0, 0, cols, region_rows), s)
   rows_from(s, 0, rows, cols)
 
+# ── content that arrives by message ─────────────────────────────────────────
+
+fn told_all(w: widget.Widget Msg, ds: List (widget.Delivery Msg),
+            acc: Says) -> (widget.Widget Msg, Says) =
+  match ds with
+  | Nil -> (w, acc)
+  | Cons d rest -> told_step(w, d, rest, acc, widget.deliver(w, view_id(), d))
+
+fn told_step(w: widget.Widget Msg, d: widget.Delivery Msg,
+             rest: List (widget.Delivery Msg), acc: Says,
+             r: Maybe (widget.Widget Msg, Says, Asks)) -> (widget.Widget Msg, Says) =
+  match r with
+  | Nothing -> told_all(w, rest, acc ++ [Noted("declined")])
+  | Just (w2, ms, _) -> told_all(w2, rest, acc ++ ms)
+
+fn after_told(w: widget.Widget Msg,
+              ds: List (widget.Delivery Msg)) -> widget.Widget Msg =
+  match told_all(w, ds, Nil) with
+  | (w2, _) -> w2
+
+fn says_sv(o: sv.ScrollOpts Msg, ds: List (widget.Delivery Msg)) -> String =
+  match told_all(view_of(tall(), o), ds, Nil) with
+  | (_, ms) -> to_string(ms)
+
+fn showing(ls: List String) -> widget.Delivery Msg = widget.ToMsg(Show(ls))
+
+fn pressed(k: event.Key) -> widget.Delivery Msg = widget.ToEvent(key(k))
+
+fn content_cases(state: TestState) -> Unit !{IO} = do
+  swapped <- shown(after_told(ring_of(view_of(tall(), contenting())),
+                              [showing(["a1", "b2", "c3", "d4", "e5"])]), 5, 2)
+  assert_eq(state, "a new child is what it paints", swapped, "a1   |b2   ")
+  # The point of the change: the child is replaced and the window stays where
+  # the user scrolled it, which rebuilding the scroll view cannot do.
+  kept <- shown(after_told(ring_of(view_of(tall(), contenting())),
+                           [pressed(event.KDown),
+                            showing(["a1", "b2", "c3", "d4", "e5"])]), 5, 2)
+  assert_eq(state, "and the offset survives the swap", kept, "b2   |c3   ")
+  # No clamp is needed anywhere: `Pos` is an ANCHOR and `resolved` re-derives
+  # the offset against the child's current extent every frame, so a child too
+  # short to scroll simply resolves to the top.
+  shorter <- shown(after_told(ring_of(view_of(tall(), contenting())),
+                              [pressed(event.KEnd), showing(["ab"])]), 5, 2)
+  assert_eq(state, "a shorter child needs no clamp", shorter, "ab   |     ")
+  # The `Nothing` path.
+  assert_eq(state, "an unrecognised message is declined",
+            says_sv(contenting(), [widget.ToMsg(Ping)]), "[Noted(declined)]")
+  assert_eq(state, "and a view without a decoder declines every message",
+            says_sv(sv.scroll_opts(), [showing(["ab"])]), "[Noted(declined)]")
+  # A decoder must not shadow the container: an address the view does not own
+  # is forwarded before the decoder ever sees it.
+  assert_eq(state, "a decoder does not swallow the child's own address",
+            said_of(widget.deliver(sv.scroll_view_with(view_id(), addressed(),
+                                                       contenting()),
+                                   kid_id(), widget.ToMsg(Ping))),
+            "[Noted(kid)]")
+
 fn main() -> Unit !{IO} = do
   state <- new_state()
   window_cases(state)
   moving_cases(state)
   declining_cases(state)
+  content_cases(state)
   summary(state)
 
 # ── what shows ──────────────────────────────────────────────────────────────

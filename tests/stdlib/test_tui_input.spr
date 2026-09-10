@@ -21,6 +21,10 @@ type Msg (..) deriving (Eq, ToString) =
   | Changed String
   | Submitted String
   | Noted String
+  # What an application sends to set the field's value (§9.2 of
+  # docs/tui-content-update-v0.md). No caret argument: `zipper_open` puts it at
+  # the end, which is where a value set programmatically wants it.
+  | SetTo String
 
 type alias Says = List Msg
 type alias Asks = List(widget.Cmd Msg)
@@ -76,6 +80,45 @@ fn typed(evs: List event.Event) -> String =
 
 fn typed_with(o: inp.InputOpts Msg, evs: List event.Event) -> String =
   said(widget.feed(beside(field_with(o)), evs))
+
+# ── addressed deliveries ────────────────────────────────────────────────────
+
+# One chain drives content, focus and keys in order. A declined delivery is
+# written into the transcript rather than dropped: "the field refused" and
+# "the field said nothing" are the two answers §9.1 turns on.
+fn told_all(w: widget.Widget Msg, ds: List (widget.Delivery Msg),
+            acc: Says) -> (widget.Widget Msg, Says) =
+  match ds with
+  | Nil -> (w, acc)
+  | Cons d rest -> told_step(w, d, rest, acc, widget.deliver(w, field_id(), d))
+
+fn told_step(w: widget.Widget Msg, d: widget.Delivery Msg,
+             rest: List (widget.Delivery Msg), acc: Says,
+             r: Maybe (widget.Widget Msg, Says, Asks)) -> (widget.Widget Msg, Says) =
+  match r with
+  | Nothing -> told_all(w, rest, acc ++ [Noted("declined")])
+  | Just (w2, ms, _) -> told_all(w2, rest, acc ++ ms)
+
+fn says(o: inp.InputOpts Msg, ds: List (widget.Delivery Msg)) -> String =
+  match told_all(field_with(o), ds, Nil) with
+  | (_, ms) -> to_string(ms)
+
+fn content_of(m: Msg) -> Maybe String =
+  match m with
+  | SetTo s -> Just(s)
+  | _ -> Nothing
+
+fn contenting() -> inp.InputOpts Msg =
+  inp.input_opts() with (on_content = Just(content_of))
+
+fn focus_on() -> widget.Delivery Msg = widget.ToFocus(true)
+
+fn set_to(s: String) -> widget.Delivery Msg = widget.ToMsg(SetTo(s))
+
+fn pressed(k: event.Key) -> widget.Delivery Msg = widget.ToEvent(key(k))
+
+fn typing(c: Char) -> widget.Delivery Msg =
+  widget.ToEvent(key(event.KChar(c)))
 
 fn chars(s: String) -> List event.Event =
   list_map(\c -> key(event.KChar(c)), vec_to_list(string.string_chars(s)))
@@ -338,9 +381,39 @@ fn measure_cases(state: TestState) -> Unit !{IO} = do
   assert_eq(state, "its natural height is that one row",
             g.size_rows(widget.measure(field(), g.Size(20, 5)).size), 1)
 
+fn content_cases(state: TestState) -> Unit !{IO} = do
+  # Replacement is SILENT (§9.1), so the value is observed by typing after it:
+  # one character reveals both the new text and where the caret sits.
+  assert_eq(state, "content arrives and the caret lands at the end",
+            says(contenting(), [focus_on(), set_to("abc"), typing('X')]),
+            "[Changed(abcX)]")
+  # The same transcript with nothing typed shows the silence on its own.
+  assert_eq(state, "and the replacement itself says nothing",
+            says(contenting(), [focus_on(), set_to("abc")]), "[]")
+  # Backspace is the sharper caret probe: it can only take the LAST character
+  # if the caret is behind it.
+  assert_eq(state, "backspace after a replacement takes the last character",
+            says(contenting(),
+                 [focus_on(), set_to("abc"), pressed(event.KBackspace)]),
+            "[Changed(ab)]")
+  # Replaces rather than appends, and drops what was typed before it.
+  assert_eq(state, "content replaces what the user had typed",
+            says(contenting(), [focus_on(), typing('z'), set_to("abc"),
+                                typing('X')]),
+            "[Changed(z), Changed(abcX)]")
+  # The `Nothing` path: a field that claimed every message addressed to it
+  # would swallow the application's own traffic.
+  assert_eq(state, "an unrecognised message is declined",
+            says(contenting(), [focus_on(), widget.ToMsg(Noted("x"))]),
+            "[Noted(declined)]")
+  assert_eq(state, "and a field without a decoder declines every message",
+            says(inp.input_opts(), [focus_on(), set_to("abc")]),
+            "[Noted(declined)]")
+
 fn main() -> Unit !{IO} = do
   state <- new_state()
   typing_cases(state)
+  content_cases(state)
   declining_cases(state)
   cluster_cases(state)
   render_cases(state)

@@ -1,8 +1,8 @@
 # TUI content updates (v0)
 
-Status: **APPROVED — option C (§5.3). Implemented for `list_view`**
-(`docs/tui-list-view-v0.md` §4.7); `input`, `text_area` and `scroll_view` remain, and
-`BACKLOG.md` §4 carries them. Non-normative; `docs/spec-v0.md` governs the language,
+Status: **IMPLEMENTED — option C (§5.3), on all four stateful widgets.**
+`list_view` (`docs/tui-list-view-v0.md` §4.7) landed first; `input`, `text_area` and
+`scroll_view` followed, per §9. Non-normative; `docs/spec-v0.md` governs the language,
 and nothing here proposes a language change.
 
 What landing the first widget confirmed: the decoder needed no new machinery in the
@@ -406,8 +406,8 @@ concrete `!{IO}` arrow (`widget.sprout:46`).
 **Docs:** under C, each per-widget doc gains its `on_content` section and
 `docs/tui-widget-set-v0.md` gains the pattern once; under B, `docs/tui-widgets-v0.md`
 §3.6 (the loop) and every per-widget doc gain a state type. The backlog entry **TUI
-content cannot change after construction** is deleted on landing either way, since it
-is this problem.
+content cannot change after construction** was this problem, and was deleted when the
+last widget landed.
 
 ## 8. Tests
 
@@ -433,3 +433,96 @@ For C, all six currently unwriteable:
 The default matters as much as the feature: a widget constructed without
 `on_content` must behave exactly as it does today, which the existing per-widget
 suites already assert and must keep passing unchanged.
+
+## 9. The remaining three widgets
+
+`list_view` landed first because its content is data and its state is an index into
+that data. The other three each differ from it in one way, and the differences decide
+the payload rather than being incidental.
+
+### 9.1 What is announced: only what the caller cannot already know
+
+`list_view` announces a replacement that moves the selection, because a clamp puts it
+somewhere the caller did not name. Neither text widget has that problem: `on_change`
+carries the *text*, and after a replacement the text is exactly what the application
+sent. So **a content replacement does not fire `on_change`**, on either.
+
+That is a rule, not a preference. Announcing would echo the application's own value
+back to it one message later, which is a loop for any `update` that answers
+`on_change` by re-sending. `scroll_view` has no announcement channel at all.
+
+### 9.2 `input` — the caret has one sensible place
+
+```sprout
+on_content: Maybe (m -> Maybe String)
+```
+
+No placement argument. `zipper_open` already puts the caret at the end — *"where a
+reader's eye is"* (`line_zipper.sprout:24`) — so a replacement matching construction
+needs no new decision, and a single-line field set programmatically has one
+conventional answer. A column can be added later without breaking this signature.
+
+### 9.3 `text_area` — a caret is worth restoring, and needs two numbers
+
+```sprout
+on_content: Maybe (m -> Maybe (String, Maybe (Int, Int)))
+```
+
+`Nothing` opens at the end of the document, as `buffer_open` does. The `(row, col)`
+is here because this is the case §6 names as the one that would flip the whole
+recommendation to option B: an IDE restoring a cursor into a file it reopens. Under
+option C it is a decoder payload rather than a model, so the flip is not needed — but
+only if the payload can carry it, which is why the placement is in from the start and
+not deferred as it nearly was for `list_view`.
+
+### 9.4 `scroll_view` — the content is a *widget*, and nothing needs clamping
+
+```sprout
+on_content: Maybe (m -> Maybe (widget.Widget m))
+```
+
+The odd one out: its content is a child widget, so replacement swaps the child and
+keeps `across`/`down`. No clamp is required, because `Sv` stores an **anchor**
+(`FromTop`/`FromBottom`) and `resolved` re-derives the offset against the child's
+current extent on every frame (`scroll_view.sprout:108`). A shorter child is already
+handled by the render path.
+
+The child's own state does not survive — it is a new widget. That is correct for the
+case this serves, a scrolled region over static content, and an interactive child
+wants its own `on_content` instead of being swapped wholesale.
+
+**This is the one widget where the change is not purely additive.** `ScrollOpts` had
+no type parameter and now needs one, so an annotation spelled `ScrollOpts` becomes
+`ScrollOpts m`. `scroll_opts()` and every existing construction are unaffected; the
+whole cost was one annotation in `test_tui_scroll_view.spr` and the signature block in
+`docs/tui-scroll-view-v0.md`.
+
+A decoder here cannot swallow the child's traffic: `sv_route` compares the target to
+its own id first and forwards everything else to the child unopened
+(`scroll_view.sprout:42`), so the decoder only ever sees a message addressed to the
+scroll view itself.
+
+### 9.5 One decoder runner, four payloads
+
+Each widget's `refilled` does different work, but running the decoder is identical
+everywhere and fully polymorphic, so it lives once in `widget.sprout`:
+
+```sprout
+export fn decoded(read_it: Maybe (m -> Maybe c), msg: m) -> Maybe c
+```
+
+Four copies of this appeared first, one per widget, differing only in `c`. That is
+the shape `docs/guidelines.md` §2a names — reuse beats another copy — and it is worth
+one exported function because `Nothing` here is what makes a widget *decline*: the
+rule that unrecognised traffic reaches `update` is then stated in one place rather
+than re-derived in each widget.
+
+### 9.6 Tests
+
+Per widget: content arrives and the state that should survive does; the default
+without a decoder is unchanged; an unrecognised message is declined and reaches
+`update`. Then one each for what differs — `input`'s caret at the end, `text_area`'s
+restored `(row, col)` and its end-of-document default, `scroll_view`'s offset
+surviving a swap and a shorter child not needing a clamp. Plus the negative that
+`on_change` does **not** fire on replacement (§9.1), which is the one a later
+"helpful" change would break silently.
