@@ -211,11 +211,13 @@ fn goto_cases(state: TestState) -> Unit !{IO} = do
   assert_eq(state, "an empty document clamps to the only position",
             at(gone_to(opened(""), 3, 3)), "0:0")
   # The round trip the API exists for: read a caret out of the document being
-  # closed, put it into the one being opened.
+  # closed, put it into the one being opened. The row and column DIFFER on
+  # purpose — a caret at 1:1 survives having its axes crossed, so it would pin
+  # the round trip while missing the one mistake that matters here.
   assert_eq(state, "a caret read out goes back in",
-            at(buf.buffer_goto(buf.buffer_caret(gone_to(opened("ab\ncd"), 1, 1)),
-                               opened("wx\nyz"))),
-            "1:1")
+            at(buf.buffer_goto(buf.buffer_caret(gone_to(opened("abc\ndefg"), 1, 3)),
+                               opened("wxyz\npqrs"))),
+            "1:3")
   assert_eq(state, "and clamps when the new document is smaller",
             at(buf.buffer_goto(buf.buffer_caret(gone_to(opened("ab\ncd"), 1, 2)),
                                opened("w"))),
@@ -227,9 +229,32 @@ fn goto_cases(state: TestState) -> Unit !{IO} = do
                                        1, 1))),
             "2:1")
 
+# `Caret` derives Eq, Ord and ToString and nothing exercised them. Each pair
+# below varies ONE axis: a derived instance that read the row and ignored the
+# column would satisfy every row case, so the column cases are what give the
+# row ones meaning.
+fn caret_cases(state: TestState) -> Unit !{IO} = do
+  assert_true(state, "two carets at the same place are equal",
+              buf.buffer_caret(gone_to(opened("ab\ncd"), 1, 1))
+                == buf.Caret(row = 1, col = 1))
+  assert_true(state, "and differ when only the row does",
+              ! (buf.Caret(row = 1, col = 2) == buf.Caret(row = 0, col = 2)))
+  assert_true(state, "and when only the column does",
+              ! (buf.Caret(row = 1, col = 1) == buf.Caret(row = 1, col = 2)))
+  # Reading order: the row decides, and the column only breaks a tie.
+  assert_true(state, "an earlier row sorts first whatever the column",
+              compare(buf.Caret(row = 1, col = 9),
+                      buf.Caret(row = 2, col = 0)) < 0)
+  assert_true(state, "and the column breaks a tie on the row",
+              compare(buf.Caret(row = 1, col = 1),
+                      buf.Caret(row = 1, col = 2)) < 0)
+  assert_eq(state, "a caret renders with its axes named",
+            to_string(buf.Caret(row = 4, col = 7)), "Caret(row = 4, col = 7)")
+
 fn main() -> Unit !{IO} = do
   state <- new_state()
   goto_cases(state)
+  caret_cases(state)
   round_trip_cases(state)
   split_join_cases(state)
   motion_cases(state)
