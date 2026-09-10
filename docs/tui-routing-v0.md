@@ -221,6 +221,13 @@ The type is the argument. Under `route_if` the framework must *invent* a reply f
 that had none — the test for it reads `expected none, got []`, an empty message list standing
 in for the absence of one, which §3.2 exists to make impossible.
 
+**A `ToMsg` can need declining too**, which narrows the rule above. A widget that reads
+content off the message stream (`list_view`'s `on_content`, `docs/tui-content-update-v0.md`)
+is addressed by messages it does not recognise, and claiming those would swallow the
+application's own traffic — so it declines them and `app.delivered` hands them to `update`.
+"Claim every `ToMsg`" holds for a widget that *asked* for the answer, by issuing the `Cmd`
+that produced it; it does not hold for one that merely listens.
+
 ### 3.9 `namespaced`: qualifying an embedded widget's ids
 
 `map_msgs` retargets the message type and leaves `WidgetId` alone, so two copies of one
