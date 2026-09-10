@@ -1797,15 +1797,24 @@ Effect note for v0:
    one is expected, which is the same subsumption as above. The comparison is
    **directional**, and the direction reverses when descending into an arrow's parameter —
    so a function consuming a pure arrow may not stand where one consuming an `!{IO}` arrow
-   is required. An effect *variable* on either side binds rather than rejects, which is
-   what keeps `!{e}` combinators usable at both purities.
+   is required. An effect *variable* on either side records a **bound** rather than
+   rejecting — a floor from an observed value, a ceiling from a written slot — and rejects
+   only where the two contradict. That is what keeps `!{e}` combinators usable at both
+   purities, while a variable inference has already resolved to `!{IO}` is still caught:
+   the bound, not the spelling, decides.
 
-   **Two gaps are known and not closed by this rule.** A type ARGUMENT is judged
-   covariantly, so an arrow reached through a mutable container (`Ref (Int -> Int)`) can be
-   replaced by an `!{IO}` one and read back through a pure type. And an effect variable
-   already bound to `!{IO}` by inference is compared as a variable, so an `!{e}`
-   pass-through function launders a concrete `!{IO}` arrow into a pure slot. Both are
-   reachable today.
+   **One gap is known and reachable.** A peer **join** has no expected side, so the two
+   arrows are combined by binding and the IO branch's effect can be swallowed:
+   `if c then pure_fn else io_fn` is accepted under a pure declared result and a
+   pure-declared caller then runs the IO, while the same program with the branches swapped
+   is rejected (`docs/effect-subsumption-v0.md` §6.5).
+
+   A type ARGUMENT is judged **covariantly**, which is unsound in principle for a mutable
+   container: `Ref` should be invariant in its argument. No program reaching it is known —
+   four `Ref` shapes that laundered before bounds were added are now rejected, because a
+   bound travels through the shared type variable whether or not the descent was
+   variance-correct. So the guarantee here rests on bounds, not on variance being right,
+   and per-constructor variance (§6.4) remains unimplemented.
 9. Function types may quantify a singleton effect variable `!{e}`; use sites
    instantiate it with either purity or a concrete closed effect supported in v0.
    **Singleton is a limit, not a description**: a signature may name at most one
@@ -1941,28 +1950,26 @@ Effect note for v0:
 > annotation is a checked contract. This replaces a note that stood for the whole of v0
 > saying the opposite.
 >
-> > **Correction (2026-09-07): this note said a missing `!{IO}` "means the compiler has
-> > verified the function performs no IO". That is not true, and the overclaim is worth
-> > naming precisely.** What is verified is a declaration's **own body**. A function's
-> > declared purity is *not* enforced once a function is passed as a **value**:
+> > **A correction stood here from 2026-09-07 to 2026-09-10 saying that declared purity was
+> > not enforced once a function became a value.** That was true and is no longer:
 > >
 > > ```sprout
-> > fn pure_map(xs: List Int) -> List Int = list_map(shout, xs)   # prints. no !{IO} anywhere.
+> > fn pure_map(xs: List Int) -> List Int = list_map(shout, xs)   # now a compile error
 > > ```
 > >
-> > Verified by running: `pure_map` is accepted, `--phase effects` reports it
-> > `declared pure, inferred pure`, and the IO runs. `list_map`'s callback is a plain
-> > arrow, so this is one line of ordinary Sprout, and since Sprout is functional-first the
-> > guarantee fails across most higher-order code. Property 2 below is the reason — an
-> > arrow's effect is unified and never compared, so a mismatch is not a type error.
+> > Rule 8's arrow-position paragraph is what rejects it, and a function value entering a
+> > slot — argument, return, record field, element — is checked in every one of those
+> > positions. **Closed 2026-09-10** (`docs/effect-subsumption-v0.md` part 1).
 > >
-> > Two boundaries are known to escape, each verified by running (re-verified 2026-09-09):
-> >
-> > 1. **A function value entering a slot** — argument, return, record field, element.
-> > 2. **A call through an effect-variable parameter under a pure declaration** —
-> >    `fn pure_apply(g: Int -> Int !{e}, n: Int) -> Int = g(n)` is accepted;
-> >    `--phase effects` reports it `declared pure, inferred !{$e30}`, and passing an
-> >    `!{IO}` function runs the IO.
+> > One boundary of that correction remains, verified by running: **a call through an
+> > effect-variable parameter under a pure declaration.**
+> > `fn pure_apply(g: Int -> Int !{e}, n: Int) -> Int = g(n)` is accepted, and passing an
+> > `!{IO}` function runs the IO. The same exemption reached directly — a declared `!{e}`
+> > whose body performs concrete IO, `fn sneak(n: Int) -> Int !{e} = shout(n)` — is
+> > accepted too. Both are rule 8's standing **variable exemption**, not an arrow-position
+> > gap: a signature's own effect variables are not rigid in its body, and effects have no
+> > rigidity mechanism at all (the type-variable analogue, `unifier.fresh_skolem`, does
+> > exist). `docs/effect-subsumption-v0.md` §8 costs both.
 > >
 > > And one that §5.2 prohibits normatively without any check enforcing it: **a top-level
 > > `let` initializer.** `let seeded = shout(41)` runs IO at startup. `--phase effects`
@@ -1985,19 +1992,18 @@ Effect note for v0:
 > > fix closed it — a zero-parameter function now has a `() -> T` arrow that carries its
 > > effect — and the probe is rejected under rule 8 (`docs/nullary-type-collapse-v0.md`).
 > >
-> > Both remaining boundaries are `docs/effect-subsumption-v0.md`, which carries the
-> > replacement text for property 2; the label gap was that document's part 0 and the
-> > instance/class gap its part 3, and both have landed.
+> > Parts 0, 1 and 3 of `docs/effect-subsumption-v0.md` have landed; part 2 (peer joins,
+> > §6.5) and per-constructor variance (§6.4) have not. Only the first is a reachable gap.
 > >
-> > Until those land, the enforced guarantee is narrow and is best stated negatively: a
-> > declaration is checked against **the effects its own body's calls infer**, and an
-> > effect that arrives through a function value — as an argument, or through an effect
-> > variable — does not participate in that inference. A pure signature is therefore
-> > evidence about the body as written, not a guarantee about what runs.
+> > **State the guarantee positively now, but not further than it goes.** A declaration is
+> > checked against the effects its own body's calls infer *and* against every function
+> > value crossing a slot boundary in either direction. What it is still not checked
+> > against: an effect arriving through an effect **variable**, and an arrow produced by a
+> > peer join. Both are named above with the shape that reaches them.
 > >
 > > A **class dispatch** is no longer on that list as such: an instance may no longer
-> > declare more effect than its class. It can still carry one of the two remaining
-> > channels, since a class method's arrow parameter is an arrow like any other.
+> > declare more effect than its class. It can still carry one of the remaining channels,
+> > since a class method's arrow parameter is an arrow like any other.
 >
 > Which check covers which rule:
 >
@@ -2041,10 +2047,22 @@ Effect note for v0:
 >    accepted: a pure body under an `!{IO}` signature is legal and is how a function
 >    states that its result is not a function of its arguments alone. Only
 >    *under*-declaration is rejected.
-> 2. **Unification of an arrow's effect is total.** It binds effect variables and never
->    fails, so two arrows whose effects differ are not thereby a type error and a
->    program's acceptance never depends on effect inference reaching a particular answer
->    mid-way. Rejection happens at the declaration boundary and nowhere else.
+> 2. **An arrow's effect is compared, and the comparison is directional.** Where one side
+>    is *expected* — a written slot — an `!{IO}` arrow is rejected and a pure one accepted,
+>    the direction reversing under a parameter. Effect **variables** bind on either path,
+>    carrying bounds that reject only where they contradict, so acceptance does not depend
+>    on effect inference reaching a particular answer mid-way: element order and argument
+>    order do not decide it.
+>
+>    **Branch order still does, and that is a defect, not a rule.** At a peer join neither
+>    side is expected, so unification stays total and binds; `if c then io_fn else pure_fn`
+>    is rejected while the same program with the branches swapped is accepted and launders.
+>    Part 2 of `docs/effect-subsumption-v0.md` is the fix; until it lands, a peer join of
+>    two arrows is the one place where the spelling decides the verdict.
+>
+>    This replaces "unification of an arrow's effect is total… rejection happens at the
+>    declaration boundary and nowhere else", which stood until 2026-09-10 and was the
+>    normative reason a function value could launder its effect into a pure slot.
 > 3. **An unresolved effect variable is accepted.** `!{e}` is neither satisfied nor
 >    violated until instantiation; where the checker does not know, it accepts. Every
 >    imprecision in effect inference must therefore fail towards accepting a program, not

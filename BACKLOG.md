@@ -16,13 +16,26 @@ Legend:
 
 **Effects**
 
-- [ ] `P1` **A peer join swallows an effect difference.** `if c then pure_fn else io_fn`
-  unifies the two arrows and keeps whichever effect binding lands first, so the branch that
-  performs IO can leave the join typed pure. The arrow-position rule does not reach it:
-  a join has no expected side, so `unify_join` binds without rejecting by construction.
-  Needs the LUB/GLB-by-depth-parity rule — `merge_effects` at a result, its dual at a
-  parameter — which is why it was not folded into part 1. Part 2 of
-  `docs/effect-subsumption-v0.md` §6.5; parts 0, 1 and 3 have landed.
+- [ ] `P1` **A peer join swallows an effect difference, and branch order decides.**
+  `if c then pure_fn else io_fn` under a pure declared result is accepted and a
+  pure-declared caller runs the IO; **swap the branches and the same program is rejected.**
+  Both verified by running on master. A join has no expected side, so `unify_join` records
+  no bound by construction. **Smaller than §6.5 states:** match arms and list elements are
+  now correct in both orders, leaving six `unify_join` sites, and a floor recorded at the
+  join may replace the LUB the design assumes. Part 2 of
+  `docs/effect-subsumption-v0.md` §6.5 + §6.5a (measured 2026-09-10).
+- [ ] `P1` **"Map an IO function over a list" now has no stdlib spelling.** Effect
+  subsumption part 1 landed, so `list_map(shout, xs)` is rejected even under an honest
+  `!{IO}` caller: `list_map`'s callback is `a -> b`, and only `list_fold` and `list_each`
+  carry `!{e}`. Verified by running on master. The corpus measured zero breakage because
+  nothing in it maps an effectful function yet — the number is silent, not reassuring, and
+  this is the first thing a user reaches for. Fix: `!{e}` on `list_map`, `list_filter`,
+  `list_filter_map`, `list_fold_while`, under the order-and-multiplicity test in
+  `docs/effect-polymorphism-policy-v0.md`. `docs/effect-subsumption-v0.md` §9.
+- [ ] `P3` **A type argument is judged covariantly, which is wrong for a mutable container.**
+  `Ref` should be invariant in its argument. No reaching program is known — four shapes that
+  laundered before bounded effect variables now reject, but via a bound travelling through
+  the shared tyvar, not via correct variance. `docs/effect-subsumption-v0.md` §6.4, §6.5a.
 - [ ] `P2` **`Foldable`'s `step` slot should be effect-polymorphic; `cond` must not be.** The policy
   in `docs/effect-polymorphism-policy-v0.md` admits `!{e}` where the contract pins order and
   multiplicity — true of `step` (left fold), false of `cond` (law lets an instance re-ask it).
