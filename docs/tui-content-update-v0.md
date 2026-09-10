@@ -302,8 +302,21 @@ Two details it must pin, neither hard:
   the selection cannot silently desynchronise, and no new option field is needed —
   note that `list_view` has no `on_change`, which is `input`'s and `text_area`'s.
   A replacement that leaves the index alone but changes the row *under* it announces
-  nothing, which is correct: the application supplied the rows, so it can already
-  join an unchanged index to the new content (`docs/tui-list-view-v0.md` §4.1).
+  nothing. That is correct **only when the application has the rows** — see the
+  limitation below.
+- **A claimed content message does not reach `update`.** `app.delivered` routes to
+  `update` on `Nothing` only; on `Just` it runs `stepped`, which applies `update` to
+  what the widget *said*. So content that arrives by an addressed command —
+  `cmd_to(list_id, …)`, which `app.sprout:250` turns into `SigTo` — is seen by the
+  widget and by nobody else, and the later `Chose i` names a row the application
+  cannot resolve. `App m` has no model to keep it in, which is exactly the gap
+  option B closes.
+
+  The idiom that avoids it: send content through `update`, not by return address.
+  An unaddressed `cmd` becomes `SigMsg` and lands in `update`, which forwards it
+  with `deliver(w, list_id, ToMsg(rows))` and can recompute the rows when the
+  selection comes back. A palette recomputes them from the query each keystroke
+  anyway. Reach for `cmd_to` only when the widget is the sole consumer.
 - **Content identity.** Replacing rows with an equal list still clamps and repaints.
   Harmless, and cheaper than an equality constraint on the element type.
 

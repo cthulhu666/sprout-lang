@@ -107,6 +107,12 @@ An **empty** list has no index to name. Every key it would use is still claimed
 — the application must not see a stray `Down` because the list happened to be
 empty this frame — and nothing is announced.
 
+The selection is **kept** while the list is empty, not reset, so a list emptied
+and refilled (§4.7) comes back where the user left it. Resetting it would move
+the selection without announcing it — and §4.2's silent move is silent because
+*nobody subscribed*, whereas this one would be invisible to a subscriber too,
+leaving the application's mirror of the selection wrong with nothing to show it.
+
 ### 4.7 Content arrives as a message the caller teaches it to read
 
 `on_content: Maybe (m -> Maybe (List String, Maybe Int))`. A reusable widget is
@@ -114,6 +120,12 @@ polymorphic in `m` and so cannot decode a message on its own; the decoder is the
 application's, supplied at construction, and a `Nothing` from it declines the
 delivery so unrelated traffic still reaches `update`. Design and the options
 rejected: `docs/tui-content-update-v0.md`.
+
+A claimed message stops there — `app.delivered` gives `update` only what the
+widget declined — so content sent by an addressed `cmd_to` is seen by the list
+and by nobody else, and the `Chose i` that follows names a row the application
+never held. Send content through `update` (an unaddressed `cmd`, forwarded with
+`deliver`) whenever the index has to be resolvable.
 
 The `Maybe Int` is brick's `listReplace` argument. Keeping `sel` keeps a
 *position*, not an item — under a narrowing filter the same index names a

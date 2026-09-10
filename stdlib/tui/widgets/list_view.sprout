@@ -46,9 +46,11 @@ export fn list_opts() -> ListOpts m =
 # must set `items`, `count` and `width` together or the widget measures and
 # paints as its old content.
 #
-# `sel` is a valid index into `items`, except in an empty list where it is 0
-# and never read. `has_focus` is the list's own copy of "the keyboard is mine",
-# set by the ring (docs/tui-focus-v0.md §4.1).
+# `sel` is a valid index into `items` whenever `count > 0`. In an empty list it
+# is whatever it last was and is never read — kept rather than zeroed so a list
+# emptied and refilled returns to the row the user left (see `settled`).
+# `has_focus` is the list's own copy of "the keyboard is mine", set by the ring
+# (docs/tui-focus-v0.md §4.1).
 type Lst m = (id: widget.WidgetId, items: List String, on_select: Int -> m,
               opts: ListOpts m, count: Int, width: Int, sel: Int,
               has_focus: Bool)
@@ -133,9 +135,10 @@ fn clamped_into(count: Int, i: Int) -> Int =
 # A move that lands where it started says nothing: Down at the end is the
 # list's key, but there is no new selection to report. An empty list has no
 # index to name at all, so the key is still claimed — the application must not
-# see a stray Down — and nothing is announced.
+# see a stray Down — and nothing is announced. `sel` is left alone rather than
+# reset, or emptying would be a move nothing announces (INVARIANTS above).
 fn settled(l: Lst m, want: Int) -> Reply m =
-  if l.count == 0 then Just(((l with (sel = 0)), Nil, Nil))
+  if l.count == 0 then Just((l, Nil, Nil))
   else spoken(l, clamped_into(l.count, want))
 
 fn spoken(l: Lst m, i: Int) -> Reply m =
