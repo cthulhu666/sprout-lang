@@ -174,11 +174,9 @@ fn effect_too_many_vars_message(r: unifier.EffectReport, vars: List String) -> S
 # same variable everywhere" advice does not apply. It is rejected because §7
 # defines no row form at all.
 fn effect_row_message(r: unifier.EffectReport) -> String =
-  "`" ++ unifier.effect_report_name(r) ++ "` declares the effect row `!{"
-    ++ join_effect_labels(unifier.effect_report_row_labels(r))
-    ++ "}`, which spec-v0.md §7 does not define — an effect annotation is one"
-    ++ " concrete effect (`!{IO}`), one effect variable (`!{e}`), or omitted for"
-    ++ " purity"
+  types.effect_row_undefined_message(
+    "`" ++ unifier.effect_report_name(r) ++ "`",
+    "!{" ++ join_effect_labels(unifier.effect_report_row_labels(r)) ++ "}")
 
 fn quoted_var_list(vars: List String) -> String =
   match vars with

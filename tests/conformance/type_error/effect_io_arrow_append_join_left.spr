@@ -1,10 +1,9 @@
 module main
 
 # `++` joins its two operands through a `unify_join` site part 2 did NOT change
-# (append_via_semigroup). It stays correct for a different reason than `if`: what
-# is joined here is `List X` against `List Y`, so the arrow sits under a type
-# argument and the ELEMENT variable carries the bounds. The swallow only loses an
-# effect when the joined thing is the arrow itself.
+# (append_via_semigroup). A join records no bound at any depth, so what rejects
+# here is the declared return type, closing the bound the way it does for `if`.
+# Both element effects are concrete, so the join has no variable to overwrite.
 #
 # Mirror: effect_io_arrow_append_join_right.spr. Both orders must reject.
 

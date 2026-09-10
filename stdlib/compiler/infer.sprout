@@ -1591,19 +1591,15 @@ fn infer_if_join(
   else_eff: types.Effect,
   pos: source.SourcePos
 ) -> InferResult !{IO} =
-  match unifier.unify_actual_expected(subst, eff_subst, typed_ast.typed_expr_type(typed_then), ret_type) with
-  | unifier.UnifyErr e -> InferErr(pos, "If branches must have same type: " ++ e)
-  | unifier.UnifyOk s5 es5 ->
-      match unifier.unify_actual_expected(s5, es5, typed_ast.typed_expr_type(typed_else), ret_type) with
-      | unifier.UnifyErr e -> InferErr(pos, "If branches must have same type: " ++ e)
-      | unifier.UnifyOk s6 es6 ->
-          InferOk(
-            typed_ast.TIf(typed_cond, typed_then, typed_else,
-                          unifier.apply_subst(s6, ret_type), pos),
-            s6, es6,
-            unifier.apply_effect_subst(es6,
-              merge_effects(cond_eff, merge_effects(then_eff, else_eff)))
-          )
+  let unifier.UnifyOk s5 es5 = unifier.unify_actual_expected(subst, eff_subst, typed_ast.typed_expr_type(typed_then), ret_type) else unifier.UnifyErr e -> InferErr(pos, "If branches must have same type: " ++ e)
+      unifier.UnifyOk s6 es6 = unifier.unify_actual_expected(s5, es5, typed_ast.typed_expr_type(typed_else), ret_type) else unifier.UnifyErr e -> InferErr(pos, "If branches must have same type: " ++ e)
+  in InferOk(
+       typed_ast.TIf(typed_cond, typed_then, typed_else,
+                     unifier.apply_subst(s6, ret_type), pos),
+       s6, es6,
+       unifier.apply_effect_subst(es6,
+         merge_effects(cond_eff, merge_effects(then_eff, else_eff)))
+     )
 
 # --- Call ---
 
@@ -9975,13 +9971,10 @@ fn instance_method_effect_error(class_name: String, method: ast.InstanceMethodIm
         then Nothing
         else Just(instance_effect_message(name, class_name, inst_eff, class_eff))
 
-# Deliberately the wording `checker.enforce_effects` uses for a row, because it is
-# the same rule-9 violation reached from the only side that can see it.
 fn class_row_message(name: String, class_name: String, class_eff: types.Effect) -> String =
-  "class method `" ++ class_name ++ "." ++ name ++ "` declares the effect row `"
-    ++ types.effect_to_string(class_eff)
-    ++ "`, which spec-v0.md §7 does not define — an effect annotation is one concrete"
-    ++ " effect (`!{IO}`), one effect variable (`!{e}`), or omitted for purity"
+  types.effect_row_undefined_message(
+    "class method `" ++ class_name ++ "." ++ name ++ "`",
+    types.effect_to_string(class_eff))
 
 fn instance_effect_message(name: String, class_name: String, inst_eff: types.Effect,
                            class_eff: types.Effect) -> String =

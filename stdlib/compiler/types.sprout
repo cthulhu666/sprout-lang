@@ -412,6 +412,33 @@ export fn effect_is_row(e: Effect) -> Bool =
   | EffectIO -> false
   | EffectVar _ -> false
 
+# Beside `effect_is_row` for its reason: `unifier` and `dce` each asked these and
+# each kept its own answer. Every variant is spelled out so a fifth one has to be
+# decided rather than silently answered false.
+export fn effect_is_io(e: Effect) -> Bool =
+  match e with
+  | EffectIO -> true
+  | EffectPure -> false
+  | EffectVar _ -> false
+  | EffectRow _ -> false
+
+export fn effect_is_pure(e: Effect) -> Bool =
+  match e with
+  | EffectPure -> true
+  | EffectIO -> false
+  | EffectVar _ -> false
+  | EffectRow _ -> false
+
+# Rule 9's row rejection, in one wording. Two passes reach it — `checker` for a
+# signature, `infer` for a class method it is the only side that can see — and
+# conformance `.err` files pin the text, so two copies drift silently.
+# `subject` is already quoted by its caller; `row` is already rendered.
+export fn effect_row_undefined_message(subject: String, row: String) -> String =
+  subject ++ " declares the effect row `" ++ row
+    ++ "`, which spec-v0.md §7 does not define — an effect annotation is one"
+    ++ " concrete effect (`!{IO}`), one effect variable (`!{e}`), or omitted for"
+    ++ " purity"
+
 export fn effect_declared_at_most(inner: Effect, outer: Effect) -> Bool =
   let Just inner_rank = effect_declared_rank(inner) else false
       Just outer_rank = effect_declared_rank(outer) else false

@@ -1029,15 +1029,28 @@ parity right. The second-order case §6.5 raised as the reason a GLB was unavoid
 rejected by the landed change with no GLB written: the flip at odd depth turns the floor
 into a ceiling on its own.
 
-**The other five `unify_join` sites keep the old swallow, and are correct anyway — for a
-different reason, which is worth stating because it is what bounds the change.** They join
-binary operands (`++`, numeric, comparison, equality) and a constructor result. In each,
-what is joined is a *container* — `List X` against `List Y` — so the arrow sits under a
-type argument and the ELEMENT variable carries the bounds. The swallow only discards an
-effect when the joined thing **is** the arrow, which was the `if` node's type and nothing
-else. Verified rather than argued: `[shout] ++ [quiet]` and `[quiet] ++ [shout]` are both
-rejected under a pure element type and both accepted under an `!{IO}` one, pinned by
-`effect_io_arrow_append_join_left` / `_right` and the accept guard.
+**The other five `unify_join` sites keep the old swallow.** They join binary operands
+(`++`, numeric, comparison, equality) and a constructor result.
+
+Revision 8 first recorded that these were safe because what they join is a *container*, so
+the arrow sits under a type argument where the element variable carries the bounds. **That
+was wrong, and the code says so plainly.** `unify_join` passes `NoExpectation`;
+`bound_role` answers `NoBound` for it unconditionally; `arrow_effect_meet`'s `NoExpectation`
+arm returns `Ok(unify_arrow_effects(…))`, which has no `Err` path at all. `unify_tapp`
+carries the enclosing polarity into a type argument, so this holds at *every* depth. A join
+records no bound and cannot reject, container or not.
+
+What actually rejects in the pinned fixtures is the **declared return type** — all three
+report `Return type mismatch in main.handlers` / `main.pick`, closing the bound at the
+declaration exactly as `if` does. `[shout] ++ [quiet]` survives its join because both
+element effects are *concrete*: a join has nothing to swallow unless one side carries an
+open effect variable the other can bind to pure. Whether that is reachable through `++` is
+open — filed in `BACKLOG.md`, not answered here.
+
+This is the fourth mechanism in this document that was asserted from a passing fixture and
+then had to be retracted (§6.4a's `Ref`, property 2's branch order, the `unify_join`
+rationale twice). The fixtures were green every time. **A green test reports the outcome and
+says nothing about which code path produced it** — read the path.
 
 Three consequences worth stating. The `if` node's type is now a *variable* resolved through
 the substitution rather than the then-branch's type — equivalent where the branches agree,

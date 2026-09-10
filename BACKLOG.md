@@ -16,6 +16,13 @@ Legend:
 
 **Effects**
 
+- [ ] `P2` **A peer join still swallows an OPEN effect variable, and nothing rules it out.**
+  `unify_join` passes `NoExpectation`, so `bound_role` answers `NoBound` and `arrow_effect_meet`
+  has no reject path — at every depth, since `unify_tapp` keeps the polarity. The five remaining
+  sites (`++`, numeric, comparison, equality, ctor result) are fine only because their arrows are
+  concrete; an open variable one side can bind to pure would launder. Find a reaching program, or
+  route those sites through a fresh result variable as `if` now does.
+  `docs/effect-subsumption-v0.md` §6.5b.
 - [ ] `P3` **A type argument is judged covariantly, which is wrong for a mutable container.**
   `Ref` should be invariant in its argument. No reaching program is known — four shapes that
   laundered before bounded effect variables now reject, but via a bound travelling through

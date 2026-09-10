@@ -22,6 +22,19 @@ fn main() -> Unit !{IO} =
     check_true("EffectIO eq", eq(types.EffectIO, types.EffectIO)),
     check_false("effect neq pure/io", eq(types.EffectPure, types.EffectIO)),
 
+    # `unifier` and `dce` both ask these, so both answers must stay one answer. A
+    # variable is neither: it is what is not yet known, and answering true either
+    # way is how an open effect gets decided by whichever side arrives first.
+    check_true("EffectIO is io", types.effect_is_io(types.EffectIO)),
+    check_false("EffectPure is not io", types.effect_is_io(types.EffectPure)),
+    check_false("a variable is not io", types.effect_is_io(types.EffectVar("e"))),
+    check_false("a row is not io", types.effect_is_io(types.EffectRow(Cons("IO", Nil)))),
+
+    check_true("EffectPure is pure", types.effect_is_pure(types.EffectPure)),
+    check_false("EffectIO is not pure", types.effect_is_pure(types.EffectIO)),
+    check_false("a variable is not pure", types.effect_is_pure(types.EffectVar("e"))),
+    check_false("a row is not pure", types.effect_is_pure(types.EffectRow(Nil))),
+
     check_eq("type_to_string Int", types.type_to_string(types.TConst(types.type_id("Int"))), "Int"),
     check_eq("type_to_string TVar", types.type_to_string(types.TVar(types.tyvar_id("a"))), "a"),
     check_eq("effect_to_string pure", types.effect_to_string(types.EffectPure), "pure"),
