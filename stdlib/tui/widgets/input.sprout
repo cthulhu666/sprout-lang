@@ -19,12 +19,13 @@ import stdlib.tui.widgets.paint as paint
 # adjacent same-typed parameters swap silently. Start from `input_opts()` and
 # override with `with`.
 export type InputOpts m = (initial: String, on_submit: Maybe (String -> m),
-                           look: focus.FocusStyle)
+                           look: focus.FocusStyle,
+                           on_content: Maybe (m -> Maybe String))
 
 # No submit handler, so Enter falls through to the application (§4.4).
 export fn input_opts() -> InputOpts m =
   InputOpts(initial = "", on_submit = Nothing,
-            look = focus.focus_style_default())
+            look = focus.focus_style_default(), on_content = Nothing)
 
 # ── the widget ──────────────────────────────────────────────────────────────
 
@@ -42,8 +43,10 @@ fn field_on_event(f: Field m,
 
 fn field_handler(f: Field m, d: widget.Delivery m) -> Reply m =
   match d with
-  # A field asks for no work, so an answer addressed to it belongs to `update`.
-  | widget.ToMsg _ -> Nothing
+  # A field asks for no work, so an answer addressed to it belongs to `update`
+  # — unless the application gave a decoder that recognises the message as a
+  # new value. Declining keeps the rest of its traffic flowing past.
+  | widget.ToMsg msg -> refilled(f, widget.decoded(f.opts.on_content, msg))
   | widget.ToFocus x -> Just(((f with (has_focus = x)), Nil, Nil))
   | widget.ToEvent e -> if f.has_focus then field_event(f, e) else Nothing
 
@@ -74,6 +77,18 @@ fn field_plain(f: Field m, k: event.Key) -> Reply m =
   | event.KEnd -> moved(f, lz.zipper_end(f.line))
   | event.KEnter -> submitted(f)
   | _ -> Nothing
+
+# ── content that arrives by message ─────────────────────────────────────────
+
+# Replacing the line says NOTHING. `on_change` carries the text, and after a
+# replacement the text is exactly what the application sent, so an announcement
+# would echo its own value back — a loop for an `update` that answers
+# `on_change` by re-sending. The caret lands at the end, as `zipper_open` puts
+# it at construction (docs/tui-content-update-v0.md §9.1-9.2).
+fn refilled(f: Field m, s: Maybe String) -> Reply m =
+  match s with
+  | Nothing -> Nothing
+  | Just t -> Just(((f with (line = lz.zipper_open(t))), Nil, Nil))
 
 # The whole value, not a delta: the application cannot read the field, so a
 # delta would leave it rebuilding the line from keystrokes.

@@ -523,15 +523,9 @@ Legend:
   `static`/`spacer` and the four child traversals; `examples/tui_dashboard.sprout` went 284 → 157
   lines with no container of its own. `View.measure` now returns a `Measured` so a child can ask
   for "whatever is left". C3 below remains. Design: `docs/tui-widget-set-v0.md`.
-- [ ] `P1` **TUI content updates — `input`, `text_area` and `scroll_view` still cannot change
-  content after construction.** `list_view` landed the pattern: an `on_content` decoder in opts,
-  supplied by the application because a reusable widget is polymorphic in `m` and cannot decode
-  `ToMsg` itself, carrying rows plus brick's selection placement. The other three keep resetting
-  the caret or the scroll offset on a rebuild, and `tree` should not be written before they have
-  it. Each is its own additive change. Design: `docs/tui-content-update-v0.md`, list §4.7.
 - [ ] `P2` **TUI `list_view` — per-item rendering.** An item is a `String`; brick's `renderList`
-  takes `Bool -> e -> Widget n`, so an item can be any widget. Separable from the content-update
-  entry above and should not ride along with it. Design: `docs/tui-list-view-v0.md` §8.
+  takes `Bool -> e -> Widget n`, so an item can be any widget. Deliberately not taken with the
+  content-update work, which has landed. Design: `docs/tui-list-view-v0.md` §8.
 - [ ] `P3` **TUI `input` — word motion, selection and the chord family.** `ctrl-w`/`ctrl-u`,
   ctrl-arrows, a selection anchor beside the caret, and the terminal clipboard. Deliberately not
   claimed by C2b: every one is a binding an application may want, and a field that took them would

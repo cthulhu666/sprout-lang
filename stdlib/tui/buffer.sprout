@@ -52,6 +52,31 @@ fn normalized(s: String) -> String =
 
 export fn buffer_lines(b: Buffer) -> List String = all_lines(fields(b))
 
+# The caret at `row`/`col`, each clamped into the document. The text does not
+# move; only the caret does. A caret restored into a file being reopened is
+# what this is for (docs/tui-content-update-v0.md §9.3).
+export fn buffer_goto(row: Int, col: Int, b: Buffer) -> Buffer =
+  walked(col, row, all_lines(fields(b)), Nil)
+
+fn walked(col: Int, n: Int, rest: List String, above: List String) -> Buffer =
+  match rest with
+  # Past the last line: back onto it rather than inventing an empty one, which
+  # would put a trailing newline in a document nobody edited.
+  | Nil -> backed_onto(col, above)
+  | [here | below] ->
+      if n <= 0 then landed_at(col, here, above, below)
+      else walked(col, n - 1, below, Cons(here, above))
+
+fn backed_onto(col: Int, above: List String) -> Buffer =
+  match above with
+  | Nil -> landed_at(col, "", Nil, Nil)
+  | [last | rest] -> landed_at(col, last, rest, Nil)
+
+fn landed_at(col: Int, here: String, above: List String,
+             below: List String) -> Buffer =
+  Buf(Fields(above = above, line = lz.zipper_at(col, lz.zipper_open(here)),
+              below = below, goal = Nothing))
+
 fn all_lines(f: Fields) -> List String =
   list_append(list_reverse(f.above), Cons(lz.zipper_text(f.line), f.below))
 

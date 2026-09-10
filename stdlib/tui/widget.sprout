@@ -151,6 +151,16 @@ export fn route_when(mine: WidgetId,
                      d: Delivery m) -> Maybe(s, List m, List (Cmd m)) =
   if id_eq(mine, target) then handler(st, d) else Nothing
 
+# Run an optional decoder over an incoming message. A REUSABLE widget is
+# polymorphic in `m` and so cannot read one itself; the application supplies
+# this at construction, and `Nothing` — no decoder, or one that does not
+# recognise the message — is what makes the widget decline the delivery
+# (docs/tui-content-update-v0.md §5.3). Every `on_content` goes through here.
+export fn decoded(read_it: Maybe (m -> Maybe c), msg: m) -> Maybe c =
+  match read_it with
+  | Nothing -> Nothing
+  | Just read -> read(msg)
+
 # `s` is EXISTENTIAL and `m` is UNIVERSAL, which is the whole design: a text
 # input and a tree sit in one `List (Widget AppMsg)` with neither able to see
 # the other's state, while both speak the one vocabulary the application

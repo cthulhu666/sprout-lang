@@ -211,8 +211,8 @@ nothing; a supplied style paints the selection and the default does not.
 
 ## 8. Deferred, filed in `BACKLOG.md` §4
 
-- **Items that change after construction** — landed for this widget (§4.7), and
-  still open for `input`, `text_area` and `scroll_view`. Designed in
+- **Items that change after construction** — landed (§4.7), here first and then
+  on `input`, `text_area` and `scroll_view`. Designed in
   `docs/tui-content-update-v0.md`.
 - **Per-item rendering.** Brick's `renderList` takes `Bool -> e -> Widget n`,
   so an item can be any widget; here an item is a `String`.

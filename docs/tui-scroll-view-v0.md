@@ -174,12 +174,20 @@ export fn screen_clipped(s: Screen, r: geometry.Region,
                          act: Unit -> Unit !{IO}) -> Unit !{IO}
 
 # stdlib/tui/widgets/scroll_view.sprout
-export type ScrollOpts = (step: Int, page: Int)
-export fn scroll_opts() -> ScrollOpts
+export type ScrollOpts m = (step: Int, page: Int,
+                            on_content: Maybe (m -> Maybe (Widget m)))
+export fn scroll_opts() -> ScrollOpts m
 export fn scroll_view(id: WidgetId, child: Widget m) -> Widget m
 export fn scroll_view_with(id: WidgetId, child: Widget m,
-                           opts: ScrollOpts) -> Widget m
+                           opts: ScrollOpts m) -> Widget m
 ```
+
+`on_content` swaps the child for one the application's decoder builds, keeping
+`across` and `down` (`docs/tui-content-update-v0.md` §9.4). Nothing is clamped
+on the way in: both are anchors and §4.3's `resolved` re-derives the offset
+against the new child's extent on the next frame, so a child too short to
+scroll resolves to the top by itself. It is the one place the content-update
+work was not additive — `ScrollOpts` gained a type parameter.
 
 `Screen`'s constructor gains a third field, the clip. It is
 `export type Screen (..)`, so that is a visible change; no code outside

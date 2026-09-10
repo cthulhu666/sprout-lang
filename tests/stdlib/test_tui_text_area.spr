@@ -21,6 +21,11 @@ import stdlib.tui.widgets.text_area as ta
 type Msg (..) deriving (Eq, ToString) =
   | Changed String
   | Noted String
+  # What an application sends to replace the document (§9.3 of
+  # docs/tui-content-update-v0.md). The `Maybe (Int, Int)` is the caret: a
+  # file being REOPENED wants the place it was left, and only the caller knows
+  # it. `Nothing` means the end of the document, as `buffer_open` gives.
+  | Opened String (Maybe (Int, Int))
 
 type alias Says = List Msg
 type alias Asks = List(widget.Cmd Msg)
@@ -266,9 +271,80 @@ fn measure_cases(state: TestState) -> Unit !{IO} = do
   assert_eq(state, "its natural size is the one offered",
             g.size_rows(widget.measure(area(), g.Size(20, 5)).size), 5)
 
+# ── addressed deliveries ────────────────────────────────────────────────────
+
+fn told_all(w: widget.Widget Msg, ds: List (widget.Delivery Msg),
+            acc: Says) -> (widget.Widget Msg, Says) =
+  match ds with
+  | Nil -> (w, acc)
+  | Cons d rest -> told_step(w, d, rest, acc, widget.deliver(w, area_id(), d))
+
+fn told_step(w: widget.Widget Msg, d: widget.Delivery Msg,
+             rest: List (widget.Delivery Msg), acc: Says,
+             r: Maybe (widget.Widget Msg, Says, Asks)) -> (widget.Widget Msg, Says) =
+  match r with
+  | Nothing -> told_all(w, rest, acc ++ [Noted("declined")])
+  | Just (w2, ms, _) -> told_all(w2, rest, acc ++ ms)
+
+fn says(o: ta.TextAreaOpts Msg, ds: List (widget.Delivery Msg)) -> String =
+  match told_all(area_with(o), ds, Nil) with
+  | (_, ms) -> to_string(ms)
+
+fn content_of(m: Msg) -> Maybe (String, Maybe (Int, Int)) =
+  match m with
+  | Opened s where_at -> Just((s, where_at))
+  | _ -> Nothing
+
+fn contenting() -> ta.TextAreaOpts Msg =
+  ta.text_area_opts() with (on_content = Just(content_of))
+
+fn focus_on() -> widget.Delivery Msg = widget.ToFocus(true)
+
+fn opened_msg(s: String) -> widget.Delivery Msg =
+  widget.ToMsg(Opened(s, Nothing))
+
+fn opened_at(s: String, row: Int, col: Int) -> widget.Delivery Msg =
+  widget.ToMsg(Opened(s, Just((row, col))))
+
+fn typing(c: Char) -> widget.Delivery Msg =
+  widget.ToEvent(key(event.KChar(c)))
+
+fn content_cases(state: TestState) -> Unit !{IO} = do
+  # Replacement is SILENT (§9.1), so the document is observed by typing after
+  # it: one character reveals both the new text and where the caret sits.
+  assert_eq(state, "a document arrives and the caret lands at its end",
+            says(contenting(), [focus_on(), opened_msg("ab\ncd"), typing('X')]),
+            "[Changed(ab\ncdX)]")
+  assert_eq(state, "and the replacement itself says nothing",
+            says(contenting(), [focus_on(), opened_msg("ab\ncd")]), "[]")
+  # The case §6 names as the one that would otherwise force option B: a caret
+  # restored into a file being reopened.
+  assert_eq(state, "a named caret is restored",
+            says(contenting(),
+                 [focus_on(), opened_at("ab\ncd", 0, 1), typing('X')]),
+            "[Changed(aXb\ncd)]")
+  assert_eq(state, "and a caret past the end clamps into the document",
+            says(contenting(),
+                 [focus_on(), opened_at("ab\ncd", 9, 9), typing('X')]),
+            "[Changed(ab\ncdX)]")
+  # Replaces rather than appends, and drops what was typed before it.
+  assert_eq(state, "content replaces what the user had typed",
+            says(contenting(),
+                 [focus_on(), typing('z'), opened_msg("ab"), typing('X')]),
+            "[Changed(z), Changed(abX)]")
+  # The `Nothing` path: an area that claimed every message addressed to it
+  # would swallow the application's own traffic.
+  assert_eq(state, "an unrecognised message is declined",
+            says(contenting(), [focus_on(), widget.ToMsg(Noted("x"))]),
+            "[Noted(declined)]")
+  assert_eq(state, "and an area without a decoder declines every message",
+            says(ta.text_area_opts(), [focus_on(), opened_msg("ab")]),
+            "[Noted(declined)]")
+
 fn main() -> Unit !{IO} = do
   state <- new_state()
   typing_cases(state)
+  content_cases(state)
   declining_cases(state)
   render_cases(state)
   measure_cases(state)

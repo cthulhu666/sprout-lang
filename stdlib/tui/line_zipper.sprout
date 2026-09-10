@@ -151,3 +151,15 @@ fn advanced(z: Zipper, cols: Int, used: Int) -> Zipper =
   | [c | _] ->
       if used + text.cluster_width(c) > cols then z
       else advanced(zipper_right(z), cols, used + text.cluster_width(c))
+
+# The caret at a CLUSTER column, clamped into the line at both ends — the unit
+# `zipper_col` reports, so this is its inverse. `zipper_to_display_col` above
+# is the same walk in cells, which is what a goal column needs; a caret being
+# restored to a position it was read from needs this one.
+export fn zipper_at(col: Int, z: Zipper) -> Zipper =
+  stepped_to(zipper_start(z), col)
+
+fn stepped_to(z: Zipper, n: Int) -> Zipper =
+  match z.after with
+  | Nil -> z
+  | [_ | _] -> if n <= 0 then z else stepped_to(zipper_right(z), n - 1)

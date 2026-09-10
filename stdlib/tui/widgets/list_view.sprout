@@ -67,7 +67,7 @@ fn lst_handler(l: Lst m, d: widget.Delivery m) -> Reply m =
   # A list asks for no work, so an answer addressed to it belongs to `update`
   # — unless the application gave a decoder that recognises the message as new
   # content. Declining is what keeps the rest of its traffic flowing past.
-  | widget.ToMsg msg -> refilled(l, decoded(l.opts.on_content, msg))
+  | widget.ToMsg msg -> refilled(l, widget.decoded(l.opts.on_content, msg))
   | widget.ToFocus x -> Just(((l with (has_focus = x)), Nil, Nil))
   | widget.ToEvent e -> if l.has_focus then lst_event(l, e) else Nothing
 
@@ -96,12 +96,6 @@ fn lst_plain(l: Lst m, k: event.Key) -> Reply m =
   | _ -> Nothing
 
 # ── content that arrives by message ─────────────────────────────────────────
-
-fn decoded(f: Maybe (m -> Maybe(List String, Maybe Int)),
-           msg: m) -> Maybe (List String, Maybe Int) =
-  match f with
-  | Nothing -> Nothing
-  | Just read -> read(msg)
 
 fn refilled(l: Lst m, c: Maybe (List String, Maybe Int)) -> Reply m =
   match c with
