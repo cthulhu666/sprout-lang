@@ -18,11 +18,13 @@ Goals: move a selection with the arrows, `Home`/`End` and page keys; choose an
 item; the application learns both; a list longer than its region stays usable;
 a list that has lost focus still shows what is selected.
 
-Non-goals: items that change after construction — a filter box rebuilding its
-list needs the tree rebuilt, which loses every widget's state and is its own
-slice. Per-item rendering (Brick's `Bool -> e -> Widget n`): items here are
+Non-goals: per-item rendering (Brick's `Bool -> e -> Widget n`): items here are
 `List String`. Multiple selection. Mouse selection, which needs the hit-test
 tree `docs/tui-focus-v0.md` §2 defers. Horizontal scrolling.
+
+Items that change after construction were a non-goal here and are §4.7 now:
+`docs/tui-content-update-v0.md` settled the shape and `list_view` is where it
+landed first.
 
 ## 3. Prior art
 
@@ -105,6 +107,21 @@ An **empty** list has no index to name. Every key it would use is still claimed
 — the application must not see a stray `Down` because the list happened to be
 empty this frame — and nothing is announced.
 
+### 4.7 Content arrives as a message the caller teaches it to read
+
+`on_content: Maybe (m -> Maybe (List String, Maybe Int))`. A reusable widget is
+polymorphic in `m` and so cannot decode a message on its own; the decoder is the
+application's, supplied at construction, and a `Nothing` from it declines the
+delivery so unrelated traffic still reaches `update`. Design and the options
+rejected: `docs/tui-content-update-v0.md`.
+
+The `Maybe Int` is brick's `listReplace` argument. Keeping `sel` keeps a
+*position*, not an item — under a narrowing filter the same index names a
+different row every keystroke — so the caller can name where the selection
+belongs. Both paths run through §4.6's clamp, which is the divergence from
+brick worth naming: brick sends an out-of-range index to 0, this to the last
+row, because one clamp rule for the widget beats parity with another framework.
+
 ## 5. Surface
 
 ```sprout
@@ -114,7 +131,8 @@ export type ListStyle = (normal: Style, selected: Style,
 export fn list_style_default() -> ListStyle
 
 export type ListOpts m = (start: Int, on_highlight: Maybe (Int -> m),
-                          page: Int, look: ListStyle)
+                          page: Int, look: ListStyle,
+                          on_content: Maybe (m -> Maybe (List String, Maybe Int)))
 export fn list_opts() -> ListOpts m
 export fn list_view(id: WidgetId, items: List String,
                     on_select: Int -> m) -> Widget m
@@ -165,6 +183,14 @@ ring's; an unused key falls through; an unfocused list ignores a key, declines
 one addressed to it directly, claims a focus notification, and declines a
 message.
 
+Content (§4.7): rows replace and the selection survives; one past the end of
+shorter content clamps and says so; an emptied list neither chooses nor
+announces; a named index lands, and one past the end clamps to the last row; a
+replacement that does not move the selection is silent; an unrecognised message
+is declined, and so is every message when no decoder was given. Painting and
+`measure` follow the new rows, which is what catches a replacement that moves
+`items` without `count` and `width`.
+
 Painting: the items; an item wider than the region is cut to it; the selected
 row carries the focused style and the others do not; an unfocused list marks
 its selection without the focused style; the window follows the selection off
@@ -173,8 +199,9 @@ nothing; a supplied style paints the selection and the default does not.
 
 ## 8. Deferred, filed in `BACKLOG.md` §4
 
-- **Items that change after construction.** A filter box over a list, and any
-  list built from a model that updates.
+- **Items that change after construction** — landed for this widget (§4.7), and
+  still open for `input`, `text_area` and `scroll_view`. Designed in
+  `docs/tui-content-update-v0.md`.
 - **Per-item rendering.** Brick's `renderList` takes `Bool -> e -> Widget n`,
   so an item can be any widget; here an item is a `String`.
 - **Mouse selection**, which needs the hit-test tree `docs/tui-focus-v0.md` §2

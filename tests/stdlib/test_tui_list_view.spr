@@ -19,6 +19,11 @@ type Msg (..) deriving (Eq, ToString) =
   | Chose Int
   | Lit Int
   | Noted String
+  # What an application sends to change the rows. Two spellings, because the
+  # decoder's payload carries a selection placement: `Rows` keeps the user's
+  # place, `RowsAt` takes the decision (docs/tui-content-update-v0.md §5.3).
+  | Rows (List String)
+  | RowsAt (List String) Int
 
 type alias Says = List Msg
 type alias Asks = List(widget.Cmd Msg)
@@ -56,6 +61,18 @@ fn view_of(its: List String, o: lv.ListOpts Msg) -> widget.Widget Msg =
 fn highlighting() -> lv.ListOpts Msg =
   lv.list_opts() with (on_highlight = Just(Lit))
 
+# The decoder an application supplies: it recognises its own content messages
+# and refuses everything else, which is what keeps unrelated traffic reaching
+# `update` instead of being swallowed by the widget it was addressed to.
+fn content_of(m: Msg) -> Maybe (List String, Maybe Int) =
+  match m with
+  | Rows rs -> Just((rs, Nothing))
+  | RowsAt rs i -> Just((rs, Just(i)))
+  | _ -> Nothing
+
+fn contenting() -> lv.ListOpts Msg =
+  highlighting() with (on_content = Just(content_of))
+
 fn ring_of(w: widget.Widget Msg) -> widget.Widget Msg =
   focus.focus_ring([list_id()], w)
 
@@ -82,6 +99,44 @@ fn fed(w: widget.Widget Msg, evs: List event.Event) -> String =
 
 fn moved(o: lv.ListOpts Msg, evs: List event.Event) -> String =
   fed(view_of(items(), o), evs)
+
+# ── addressed deliveries ────────────────────────────────────────────────────
+
+# Content, focus and keys all arrive the same way, so one chain drives them in
+# order. A declined delivery is written into the transcript rather than being
+# dropped: "the widget refused" and "the widget said nothing" are the two
+# answers this file most needs to tell apart.
+fn told_all(w: widget.Widget Msg, ds: List (widget.Delivery Msg),
+            acc: Says) -> (widget.Widget Msg, Says) =
+  match ds with
+  | Nil -> (w, acc)
+  | Cons d rest -> told_step(w, d, rest, acc, widget.deliver(w, list_id(), d))
+
+fn told_step(w: widget.Widget Msg, d: widget.Delivery Msg,
+             rest: List (widget.Delivery Msg), acc: Says,
+             r: Maybe (widget.Widget Msg, Says, Asks)) -> (widget.Widget Msg, Says) =
+  match r with
+  | Nothing -> told_all(w, rest, acc ++ [Noted("declined")])
+  | Just (w2, ms, _) -> told_all(w2, rest, acc ++ ms)
+
+fn says(its: List String, o: lv.ListOpts Msg,
+        ds: List (widget.Delivery Msg)) -> String =
+  match told_all(view_of(its, o), ds, Nil) with
+  | (_, ms) -> to_string(ms)
+
+fn after_told(w: widget.Widget Msg,
+              ds: List (widget.Delivery Msg)) -> widget.Widget Msg =
+  match told_all(w, ds, Nil) with
+  | (w2, _) -> w2
+
+fn focus_on() -> widget.Delivery Msg = widget.ToFocus(true)
+
+fn rows_msg(rs: List String) -> widget.Delivery Msg = widget.ToMsg(Rows(rs))
+
+fn rows_at(rs: List String, i: Int) -> widget.Delivery Msg =
+  widget.ToMsg(RowsAt(rs, i))
+
+fn pressed(k: event.Key) -> widget.Delivery Msg = widget.ToEvent(key(k))
 
 # ── where the selection goes ────────────────────────────────────────────────
 
@@ -183,6 +238,80 @@ fn declining_cases(state: TestState) -> Unit !{IO} = do
   assert_eq(state, "and declines a message",
             hit_of(widget.deliver(view(), list_id(), widget.ToMsg(Noted("x")))),
             false)
+
+# ── content that changes after construction ─────────────────────────────────
+
+fn content_cases(state: TestState) -> Unit !{IO} = do
+  # The point of the whole change: the rows are replaced and the selection is
+  # still where the user put it, which building a new widget cannot do.
+  assert_eq(state, "content arrives and the selection survives",
+            says(items(), contenting(),
+                 [focus_on(), pressed(event.KDown), rows_msg(["x", "y", "z"]),
+                  pressed(event.KEnter)]),
+            "[Lit(1), Chose(1)]")
+  # An index that survives into shorter content would name nothing, so it
+  # clamps — through `clamped_into`, the same rule `start` and every move use.
+  assert_eq(state, "a selection past the end of new content clamps",
+            says(items(), contenting(),
+                 [focus_on(), pressed(event.KEnd), rows_msg(["p"]),
+                  pressed(event.KEnter)]),
+            "[Lit(2), Lit(0), Chose(0)]")
+  assert_eq(state, "an emptied list has nothing to choose",
+            says(items(), contenting(),
+                 [focus_on(), rows_msg(Nil), pressed(event.KEnter)]), "[]")
+  # And nothing to announce: clamping a selection into an empty list would
+  # otherwise report index 0, naming a row that is not there.
+  assert_eq(state, "and emptying it announces no selection",
+            says(items(), contenting(),
+                 [focus_on(), pressed(event.KEnd), rows_msg(Nil)]),
+            "[Lit(2)]")
+  # Preserving the index preserves a POSITION, not an item: a filter narrowing
+  # under the user needs the caller to say where the selection belongs.
+  assert_eq(state, "the caller can name where the selection lands",
+            says(items(), contenting(),
+                 [focus_on(), rows_at(["p", "q", "r"], 2), pressed(event.KEnter)]),
+            "[Lit(2), Chose(2)]")
+  # Brick sends an out-of-range index to 0; this goes to the last row, because
+  # one clamp rule for the file beats parity with another framework.
+  assert_eq(state, "and an index past the end clamps to the last row",
+            says(items(), contenting(),
+                 [focus_on(), rows_at(["p", "q", "r"], 9), pressed(event.KEnter)]),
+            "[Lit(2), Chose(2)]")
+  # The silent case is the regression risk: an application mirroring the
+  # selection desynchronises invisibly if a move stops being announced.
+  assert_eq(state, "a replacement that does not move the selection is silent",
+            says(items(), contenting(),
+                 [focus_on(), rows_msg(["x", "y", "z"]), pressed(event.KEnter)]),
+            "[Chose(0)]")
+  # The `Nothing` path. A widget that claimed every message addressed to it
+  # would swallow the application's own traffic.
+  assert_eq(state, "an unrecognised message is still declined",
+            says(items(), contenting(),
+                 [focus_on(), widget.ToMsg(Noted("x"))]),
+            "[Noted(declined)]")
+  assert_eq(state, "and a list without a decoder declines every message",
+            says(items(), highlighting(), [focus_on(), rows_msg(["x"])]),
+            "[Noted(declined)]")
+  fresh <- shown(after_told(view_of(items(), contenting()),
+                            [rows_msg(["x", "y", "z"])]), 5, 3)
+  assert_eq(state, "replaced content is what it paints", fresh,
+            "x    |y    |z    ")
+  kept <- painted(after_told(view_of(items(), contenting()),
+                             [focus_on(), pressed(event.KDown),
+                              rows_msg(["x", "y", "z"])]), 5, 3)
+  kept_focus <- reverse_at(kept, 1)
+  assert_eq(state, "and focus and the selection survive it", kept_focus, true)
+  # Paired with the style above: the style alone is true of a list that
+  # ignored the replacement entirely, so the row's TEXT is what makes it say
+  # "the selection stayed on row 1 OF THE NEW CONTENT".
+  kept_row <- row_text(kept, 1, 0, 5)
+  assert_eq(state, "on the new content's row", kept_row, "y    ")
+  # `count` and `width` are cached, so a replacement that moves one and not
+  # the other leaves a list that measures as its old content.
+  assert_eq(state, "the natural size follows the new content",
+            g.size_cols(widget.measure(after_told(view_of(items(), contenting()),
+                                                  [rows_msg(["x"])]),
+                                       g.Size(20, 5)).size), 1)
 
 # ── what it paints ──────────────────────────────────────────────────────────
 
@@ -307,6 +436,7 @@ fn main() -> Unit !{IO} = do
   page_cases(state)
   choosing_cases(state)
   declining_cases(state)
+  content_cases(state)
   render_cases(state)
   measure_cases(state)
   summary(state)

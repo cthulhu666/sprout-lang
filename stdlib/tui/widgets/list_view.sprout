@@ -32,17 +32,19 @@ export fn list_style_default() -> ListStyle =
 # to read. Brick's `listMoveByPages` is an `EventM` action for that reason;
 # here the caller names the number, beside the region it gave the list.
 export type ListOpts m = (start: Int, on_highlight: Maybe (Int -> m), page: Int,
-                          look: ListStyle)
+                          look: ListStyle,
+                          on_content: Maybe (m -> Maybe(List String, Maybe Int)))
 
 export fn list_opts() -> ListOpts m =
   ListOpts(start = 0, on_highlight = Nothing, page = 10,
-           look = list_style_default())
+           look = list_style_default(), on_content = Nothing)
 
-# INVARIANTS — `count` and `width` are `items`' length and widest line, both
-# measured once; that holds because items never change after construction, and
-# anything that makes them change must move both. A container calls `measure`
-# on a `fit` child every frame, so re-clustering every line there would cost a
-# repaint the whole list's text.
+# INVARIANTS — `count` and `width` are `items`' length and widest line, cached
+# rather than derived: a container calls `measure` on a `fit` child every frame,
+# so re-clustering every line there would cost a repaint the whole list's text.
+# `items` changes in exactly two places — `started` and `replaced` — and each
+# must set `items`, `count` and `width` together or the widget measures and
+# paints as its old content.
 #
 # `sel` is a valid index into `items`, except in an empty list where it is 0
 # and never read. `has_focus` is the list's own copy of "the keyboard is mine",
@@ -60,8 +62,10 @@ fn lst_on_event(l: Lst m,
 
 fn lst_handler(l: Lst m, d: widget.Delivery m) -> Reply m =
   match d with
-  # A list asks for no work, so an answer addressed to it belongs to `update`.
-  | widget.ToMsg _ -> Nothing
+  # A list asks for no work, so an answer addressed to it belongs to `update`
+  # — unless the application gave a decoder that recognises the message as new
+  # content. Declining is what keeps the rest of its traffic flowing past.
+  | widget.ToMsg msg -> refilled(l, decoded(l.opts.on_content, msg))
   | widget.ToFocus x -> Just(((l with (has_focus = x)), Nil, Nil))
   | widget.ToEvent e -> if l.has_focus then lst_event(l, e) else Nothing
 
@@ -89,13 +93,31 @@ fn lst_plain(l: Lst m, k: event.Key) -> Reply m =
   | event.KEnter -> chosen(l)
   | _ -> Nothing
 
+# ── content that arrives by message ─────────────────────────────────────────
+
+fn decoded(f: Maybe (m -> Maybe(List String, Maybe Int)),
+           msg: m) -> Maybe (List String, Maybe Int) =
+  match f with
+  | Nothing -> Nothing
+  | Just read -> read(msg)
+
+fn refilled(l: Lst m, c: Maybe (List String, Maybe Int)) -> Reply m =
+  match c with
+  | Nothing -> Nothing
+  | Just (rows, place) -> replaced(l, rows, place, list_length(rows))
+
+# `count` and `width` move with `items` or the INVARIANTS above break. The
+# caller names the new selection or leaves it, and either way the index goes
+# through the clamp, so shorter content cannot leave a row selected that is no
+# longer there — and `settled` announces the move if there was one.
+fn replaced(l: Lst m, rows: List String, place: Maybe Int,
+            count: Int) -> Reply m =
+  settled(l with (items = rows, count = count, width = text.widest(rows)),
+          maybe_with_default(l.sel, place))
+
 # ── the selection ───────────────────────────────────────────────────────────
 
-# An empty list has no index to name, so a key it would use is claimed — the
-# application must not see a stray Down — and nothing is announced.
-fn moved_to(l: Lst m, i: Int) -> Reply m =
-  if l.count == 0 then Just((l, Nil, Nil))
-  else settled(l, clamped_into(l.count, i))
+fn moved_to(l: Lst m, i: Int) -> Reply m = settled(l, i)
 
 fn moved_by(l: Lst m, d: Int) -> Reply m = moved_to(l, l.sel + d)
 
@@ -109,8 +131,14 @@ fn clamped_into(count: Int, i: Int) -> Int =
   else i
 
 # A move that lands where it started says nothing: Down at the end is the
-# list's key, but there is no new selection to report.
-fn settled(l: Lst m, i: Int) -> Reply m =
+# list's key, but there is no new selection to report. An empty list has no
+# index to name at all, so the key is still claimed — the application must not
+# see a stray Down — and nothing is announced.
+fn settled(l: Lst m, want: Int) -> Reply m =
+  if l.count == 0 then Just(((l with (sel = 0)), Nil, Nil))
+  else spoken(l, clamped_into(l.count, want))
+
+fn spoken(l: Lst m, i: Int) -> Reply m =
   if i == l.sel then Just((l, Nil, Nil))
   else Just(((l with (sel = i)), highlighted(l, i), Nil))
 
