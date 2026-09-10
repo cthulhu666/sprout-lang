@@ -16,12 +16,13 @@ Legend:
 
 **Effects**
 
-- [ ] `P1` **A declared effect is not enforced once a function is passed as a VALUE.**
-  `fn pure_map(xs: List Int) -> List Int = list_map(shout, xs)` runs IO and reports
-  `declared pure, inferred pure`, and a pure declaration may call an `!{e}` parameter.
-  Parts 0 (unknown-label rejection) and 3 (instance vs class) have landed; parts 1–2 remain,
-  and part 1 needs a 36-site polarity audit. Migration cost measured zero on 127 in-tree +
-  199 downstream files. `docs/effect-subsumption-v0.md`.
+- [ ] `P1` **A peer join swallows an effect difference.** `if c then pure_fn else io_fn`
+  unifies the two arrows and keeps whichever effect binding lands first, so the branch that
+  performs IO can leave the join typed pure. The arrow-position rule does not reach it:
+  a join has no expected side, so `unify_join` binds without rejecting by construction.
+  Needs the LUB/GLB-by-depth-parity rule — `merge_effects` at a result, its dual at a
+  parameter — which is why it was not folded into part 1. Part 2 of
+  `docs/effect-subsumption-v0.md` §6.5; parts 0, 1 and 3 have landed.
 - [ ] `P2` **`Foldable`'s `step` slot should be effect-polymorphic; `cond` must not be.** The policy
   in `docs/effect-polymorphism-policy-v0.md` admits `!{e}` where the contract pins order and
   multiplicity — true of `step` (left fold), false of `cond` (law lets an instance re-ask it).

@@ -1,7 +1,9 @@
 # Effect subsumption at arrow positions (v0)
 
-Status: **Parts 0 and 3 LANDED 2026-09-09 (§6.0, §6.1a). Parts 1–2 DESIGN, awaiting
-approval.**
+Status: **Parts 0, 1 and 3 LANDED (§6.0, §6.3, §6.1a). Part 2 DESIGN, awaiting approval.**
+Part 1 landed 2026-09-10: polarity threaded through `unify_types`, the symmetric spelling
+removed in favour of `unify_expect_actual` / `unify_actual_expected` / `unify_join`, and all
+36 sites classified (26/3/6 — see §6.2). Joins still bind without rejecting; that is part 2.
 Revision 6 (2026-09-09). The nullary type collapse
 landed on master (`docs/nullary-type-collapse-v0.md`, Option A′): the zero-arg boundary
 revision 4 excluded is now **closed** (§6.6), and the new `TThunk` arrow is a second
@@ -563,6 +565,18 @@ convention. Classification of the 36 sites (35 in `infer.sprout`, one in
 | (expected, actual) | ~7 | call argument; the pattern-checking sites |
 | **peer — neither side expected** | ~6 | `if`-join, binary operands, match-arm accumulation |
 
+**Regenerated at implementation time (part 1): 26 / 3 / 6.** The peer count matched
+exactly. The (expected, actual) count did not — the **call sites are (actual, expected)**,
+not (expected, actual) as predicted. The prediction reads the call's top-level comparison,
+but the only cell that decides anything sits one *flip* below it: at the parameter. Writing
+`unify_expect_actual(callee_type, call_shape)` — the spelling that reads correctly — makes
+the parameter comparison treat the argument as the slot, and `list_map(shout, xs)` is
+**accepted**. It type-checks, and the whole suite passes. Only running the fixture shows it.
+
+That is the concrete reason this table says to regenerate rather than inherit: the wrong
+entry here is not a miscount, it is the headline bug surviving the fix that was supposed to
+close it.
+
 > **The concrete site list must be REGENERATED at implementation time, and this table is
 > deliberately not keyed on line numbers.** Revision 4 carried a line-numbered version whose
 > citations were wrong on the tree it shipped against; revision 5 corrected them; one master
@@ -620,11 +634,15 @@ and the unspecified cell was the §6.0 bypass:
 - **bind** is today's total unification, and is what keeps every `!{e}` combinator working.
   It is the one arm an attacker can aim at, which is why part 0 must make an unknown label
   ill-formed rather than a variable.
-- **unreachable** is a claim, not a shrug: rule 9 admits only a single concrete effect, a
-  single variable, or nothing, and part 0 enforces it — so no *conformant* signature builds
-  an `EffectRow`. Inference still builds rows internally (`merge_effects`), so the arm must
-  exist and must **hard-error** rather than fall through to `bind`. A row reaching this
-  comparison means part 0 has a hole, and the loud failure is how that gets found.
+- **unreachable was WRONG, and implementing it as a hard error is how that was found.**
+  The claim was that no conformant signature builds an `EffectRow`, so a row here means
+  part 0 has a hole. It does not: a *non*-conformant signature reaches this comparison
+  first. `fn writes(s: String) -> Unit !{IO, e}` is rejected by rule 9, but the call
+  `writes("hi")` unifies the arrow **before** rule 9 reports, so the hard error fired on
+  `effect_mixed_row.spr` and masked rule 9's diagnostic with an internal-error string.
+  The arm now **declines** — same resolution, and the same underlying mistake, as the
+  instance-side row in §6.1a: the pass that sees a row first is not the pass that should
+  name it. Both were "this cannot be reached" arguments that a fixture refuted in one run.
 
 Then audit the 36 call sites (35 in `infer.sprout`, one in `analysis_service_driver`) to
 pass the correct initial polarity.

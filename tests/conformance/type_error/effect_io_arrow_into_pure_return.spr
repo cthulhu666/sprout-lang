@@ -1,0 +1,17 @@
+module main
+
+# Return position: an !{IO} function handed back where a PURE arrow is declared.
+# The same effect pair as effect_io_arrow_into_pure_param.spr, reported in the
+# opposite order — which is why one flipped comparison arm cannot fix both, and
+# the direction has to be passed in (docs/effect-subsumption-v0.md §6.2).
+#
+# Verified RED by running before the check landed: this printed `io`.
+
+fn shout(n: Int) -> Int !{IO} =
+  do
+    print("io")
+    n + 1
+
+fn get_pure_fn() -> (Int -> Int) = shout
+
+fn main() -> Unit !{IO} = print(int_to_string(get_pure_fn()(1)))

@@ -1,0 +1,19 @@
+module main
+
+# Second order, and the only cell that distinguishes a real contravariant flip
+# from a lucky constant direction: `needs_pure` promises to consume a PURE arrow,
+# `run_io_consumer` hands its argument an !{IO} one. Accepting it lets
+# `needs_pure` call IO while its own signature says its callback cannot.
+#
+# A single global direction gets this backwards. Verified RED by running: printed `io`.
+
+fn shout(n: Int) -> Int !{IO} =
+  do
+    print("io")
+    n + 1
+
+fn needs_pure(g: Int -> Int) -> Int = g(1)
+
+fn run_io_consumer(f: (Int -> Int !{IO}) -> Int) -> Int !{IO} = f(shout)
+
+fn main() -> Unit !{IO} = print(int_to_string(run_io_consumer(needs_pure)))
