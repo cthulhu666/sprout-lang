@@ -443,13 +443,20 @@ the payload rather than being incidental.
 ### 9.1 What is announced: only what the caller cannot already know
 
 `list_view` announces a replacement that moves the selection, because a clamp puts it
-somewhere the caller did not name. Neither text widget has that problem: `on_change`
-carries the *text*, and after a replacement the text is exactly what the application
-sent. So **a content replacement does not fire `on_change`**, on either.
+somewhere the caller did not name. A text widget usually has no such problem —
+`on_change` carries the *text*, and the application just sent it — so **a content
+replacement is silent**. Announcing it would echo the caller's own value back one
+message later, a loop for any `update` that answers `on_change` by re-sending.
 
-That is a rule, not a preference. Announcing would echo the application's own value
-back to it one message later, which is a loop for any `update` that answers
-`on_change` by re-sending. `scroll_view` has no announcement channel at all.
+**Except when opening changed the text, and then it announces.** `buffer_open` and
+`zipper_open` normalise: every control character becomes a space (`flatten`), and
+CRLF and CR fold to LF. When that bites, the widget holds a value the application has
+never seen — exactly what it cannot already know — so the rule above *requires* the
+announcement rather than excusing it. Reopening a source file containing tabs is the
+case that made this concrete; the first cut of §9.2–9.3 was silent unconditionally
+and let the widget's document and the application's mirror diverge with nothing said.
+
+`scroll_view` has no announcement channel at all.
 
 ### 9.2 `input` — the caret has one sensible place
 
@@ -465,15 +472,21 @@ conventional answer. A column can be added later without breaking this signature
 ### 9.3 `text_area` — a caret is worth restoring, and needs two numbers
 
 ```sprout
-on_content: Maybe (m -> Maybe (String, Maybe (Int, Int)))
+on_content: Maybe (m -> Maybe (String, Maybe buffer.Caret))
 ```
 
-`Nothing` opens at the end of the document, as `buffer_open` does. The `(row, col)`
+`Nothing` opens at the end of the document, as `buffer_open` does. The `Caret`
 is here because this is the case §6 names as the one that would flip the whole
 recommendation to option B: an IDE restoring a cursor into a file it reopens. Under
 option C it is a decoder payload rather than a model, so the flip is not needed — but
 only if the payload can carry it, which is why the placement is in from the start and
 not deferred as it nearly was for `list_view`.
+
+A **record**, not a bare `(Int, Int)`: two adjacent same-typed fields swap silently,
+and since both axes clamp a swapped pair would place a plausible caret in the wrong
+spot rather than failing (`docs/guidelines.md` §3). `buffer_caret` is its inverse, so
+the round trip an IDE actually performs — read the caret out of the document being
+closed, put it into the one being opened — is one expression.
 
 ### 9.4 `scroll_view` — the content is a *widget*, and nothing needs clamping
 
@@ -484,12 +497,27 @@ on_content: Maybe (m -> Maybe (widget.Widget m))
 The odd one out: its content is a child widget, so replacement swaps the child and
 keeps `across`/`down`. No clamp is required, because `Sv` stores an **anchor**
 (`FromTop`/`FromBottom`) and `resolved` re-derives the offset against the child's
-current extent on every frame (`scroll_view.sprout:108`). A shorter child is already
+current extent on every frame (`scroll_view.sprout:124`). A shorter child is already
 handled by the render path.
 
 The child's own state does not survive — it is a new widget. That is correct for the
 case this serves, a scrolled region over static content, and an interactive child
 wants its own `on_content` instead of being swapped wholesale.
+
+**And if the old child had focus, the keyboard dies.** The new one is built with
+`has_focus = false`, `Ring.at` still names its id, and `ring_route` declines a
+`ToFocus` from outside (`focus.sprout:157`) — so nothing but a user Tab restores
+input. `scroll_view` cannot repair this: focus lives in the ring *above* it, and the
+child's `has_focus` is inside an existential it cannot read.
+
+This is an instance of a rule the focus design already states rather than a new
+break: `docs/tui-focus-v0.md` §4.6 has the ring keeping `at` "whether or not the
+corresponding widget claims the `ToFocus`", with keys broadcasting until the next
+Tab, and §4.7 makes the ring the only thing that can set focus inside itself. What
+is new is a way to reach that state without the author doing anything wrong. So:
+swap only children nobody types into. Pinned by two assertions in
+`test_tui_scroll_view.spr` and filed in `BACKLOG.md` §4, since the fix is a
+focus-model change rather than a widget one.
 
 **This is the one widget where the change is not purely additive.** `ScrollOpts` had
 no type parameter and now needs one, so an annotation spelled `ScrollOpts` becomes
@@ -522,7 +550,12 @@ than re-derived in each widget.
 Per widget: content arrives and the state that should survive does; the default
 without a decoder is unchanged; an unrecognised message is declined and reaches
 `update`. Then one each for what differs — `input`'s caret at the end, `text_area`'s
-restored `(row, col)` and its end-of-document default, `scroll_view`'s offset
-surviving a swap and a shorter child not needing a clamp. Plus the negative that
-`on_change` does **not** fire on replacement (§9.1), which is the one a later
-"helpful" change would break silently.
+restored caret and its end-of-document default, `scroll_view`'s offset surviving a
+swap and a shorter child not needing a clamp.
+
+Both halves of §9.1 need pinning, and the pair is what makes either meaningful: a
+replacement that changed nothing is silent, and one whose text was normalised
+announces. A later "helpful" change breaks one of them silently — making the
+replacement always speak, or never. `buffer_caret`/`buffer_goto` get the round trip
+they exist for, and `scroll_view` gets the focus limitation above pinned so it stays
+a decision rather than becoming a surprise.

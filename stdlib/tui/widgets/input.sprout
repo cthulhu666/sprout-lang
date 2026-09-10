@@ -80,15 +80,23 @@ fn field_plain(f: Field m, k: event.Key) -> Reply m =
 
 # ── content that arrives by message ─────────────────────────────────────────
 
-# Replacing the line says NOTHING. `on_change` carries the text, and after a
-# replacement the text is exactly what the application sent, so an announcement
-# would echo its own value back — a loop for an `update` that answers
-# `on_change` by re-sending. The caret lands at the end, as `zipper_open` puts
-# it at construction (docs/tui-content-update-v0.md §9.1-9.2).
+# The caret lands at the end, as `zipper_open` puts it at construction
+# (docs/tui-content-update-v0.md §9.2).
 fn refilled(f: Field m, s: Maybe String) -> Reply m =
   match s with
   | Nothing -> Nothing
-  | Just t -> Just(((f with (line = lz.zipper_open(t))), Nil, Nil))
+  | Just t -> set_to(f, lz.zipper_open(t), t)
+
+# Announce only what the application cannot already know (§9.1). Usually
+# nothing: it sent the text, so echoing it back would loop an `update` that
+# answers `on_change` by re-sending. But `zipper_open` FLATTENS — a tab or any
+# other control character becomes a space — and then the field holds a value
+# the application has never seen.
+fn set_to(f: Field m, z: lz.Zipper, sent: String) -> Reply m =
+  Just(((f with (line = z)), said, Nil))
+where
+  now = lz.zipper_text(z)
+  said = if now == sent then Nil else [f.on_change(now)]
 
 # The whole value, not a delta: the application cannot read the field, so a
 # delta would leave it rebuilding the line from keystrokes.

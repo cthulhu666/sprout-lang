@@ -523,6 +523,15 @@ Legend:
   `static`/`spacer` and the four child traversals; `examples/tui_dashboard.sprout` went 284 → 157
   lines with no container of its own. `View.measure` now returns a `Measured` so a child can ask
   for "whatever is left". C3 below remains. Design: `docs/tui-widget-set-v0.md`.
+- [ ] `P2` **Swapping a `scroll_view`'s child kills the keyboard for a focused descendant.**
+  `on_content` builds the new child with `has_focus = false` while `Ring.at` still names its id,
+  and `ring_route` declines an outside `ToFocus` (`focus.sprout:157`), so only a user Tab restores
+  input. Unfixable in the widget: focus lives in the ring above it and `has_focus` sits inside an
+  existential it cannot read. `docs/tui-focus-v0.md` §4.6 already allows this state; what is new
+  is reaching it without the author doing anything wrong. Needs a focus-model answer — the ring
+  re-asserting after a subtree changes, or an application-addressable focus command (§4.7 forbids
+  one today). Pinned in `tests/stdlib/test_tui_scroll_view.spr`. Design:
+  `docs/tui-content-update-v0.md` §9.4.
 - [ ] `P2` **TUI `list_view` — per-item rendering.** An item is a `String`; brick's `renderList`
   takes `Bool -> e -> Widget n`, so an item can be any widget. Deliberately not taken with the
   content-update work, which has landed. Design: `docs/tui-list-view-v0.md` §8.

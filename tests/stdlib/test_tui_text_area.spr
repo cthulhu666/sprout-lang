@@ -2,6 +2,7 @@ import stdlib.string as string
 import stdlib.test (TestState, new_state, assert_eq, summary)
 import stdlib.tui.event as event
 import stdlib.tui.geometry as g
+import stdlib.tui.buffer as buf
 import stdlib.tui.screen as scr
 import stdlib.tui.style as sty
 import stdlib.unicode.utf8 as utf8
@@ -22,10 +23,10 @@ type Msg (..) deriving (Eq, ToString) =
   | Changed String
   | Noted String
   # What an application sends to replace the document (§9.3 of
-  # docs/tui-content-update-v0.md). The `Maybe (Int, Int)` is the caret: a
+  # docs/tui-content-update-v0.md). The `Maybe buf.Caret` is the caret: a
   # file being REOPENED wants the place it was left, and only the caller knows
   # it. `Nothing` means the end of the document, as `buffer_open` gives.
-  | Opened String (Maybe (Int, Int))
+  | Opened String (Maybe buf.Caret)
 
 type alias Says = List Msg
 type alias Asks = List(widget.Cmd Msg)
@@ -290,7 +291,7 @@ fn says(o: ta.TextAreaOpts Msg, ds: List (widget.Delivery Msg)) -> String =
   match told_all(area_with(o), ds, Nil) with
   | (_, ms) -> to_string(ms)
 
-fn content_of(m: Msg) -> Maybe (String, Maybe (Int, Int)) =
+fn content_of(m: Msg) -> Maybe (String, Maybe buf.Caret) =
   match m with
   | Opened s where_at -> Just((s, where_at))
   | _ -> Nothing
@@ -304,7 +305,7 @@ fn opened_msg(s: String) -> widget.Delivery Msg =
   widget.ToMsg(Opened(s, Nothing))
 
 fn opened_at(s: String, row: Int, col: Int) -> widget.Delivery Msg =
-  widget.ToMsg(Opened(s, Just((row, col))))
+  widget.ToMsg(Opened(s, Just(buf.Caret(row = row, col = col))))
 
 fn typing(c: Char) -> widget.Delivery Msg =
   widget.ToEvent(key(event.KChar(c)))
@@ -332,6 +333,17 @@ fn content_cases(state: TestState) -> Unit !{IO} = do
             says(contenting(),
                  [focus_on(), typing('z'), opened_msg("ab"), typing('X')]),
             "[Changed(z), Changed(abX)]")
+  # `buffer_open` normalises: control characters become spaces and CRLF folds
+  # to LF, so the area ends up holding a document the application never sent.
+  # §9.1's rule is "announce what the caller cannot already know", and it
+  # cannot know its tabs became spaces — reopening a source file is exactly
+  # where this bites.
+  assert_eq(state, "a document that was normalised is announced",
+            says(contenting(), [focus_on(), opened_msg("a\tb")]),
+            "[Changed(a b)]")
+  assert_eq(state, "and a CRLF document too",
+            says(contenting(), [focus_on(), opened_msg("a\r\nb")]),
+            "[Changed(a\nb)]")
   # The `Nothing` path: an area that claimed every message addressed to it
   # would swallow the application's own traffic.
   assert_eq(state, "an unrecognised message is declined",
