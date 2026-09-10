@@ -1,0 +1,21 @@
+module main
+
+# The mirror of effect_io_arrow_match_second_order.spr: the PURE-slot arm is
+# written first. This is the order that laundered — `shout` ran inside `f2`,
+# which declares a pure callback slot — while the other order rejected.
+
+fn shout(n: Int) -> Int !{IO} =
+  do
+    print("io")
+    n + 1
+
+fn f1(cb: Int -> Int !{IO}, n: Int) -> Int !{IO} = cb(n)
+
+fn f2(cb: Int -> Int, n: Int) -> Int = cb(n)
+
+fn pick(b: Bool) -> ((Int -> Int !{IO}) -> Int -> Int !{IO}) =
+  match b with
+  | true -> f2
+  | false -> f1
+
+fn main() -> Unit !{IO} = print(int_to_string(pick(true)(shout, 1)))

@@ -1,0 +1,24 @@
+module main
+
+# The `if` second-order case, spelled as a `match`. Both go through the same
+# fresh-result-variable join, so the rule that stops `f2` receiving an IO callback
+# must not depend on which construct wrote it (docs/effect-subsumption-v0.md §6.5c).
+#
+# Mirror: effect_io_arrow_match_second_order_mirror.spr, which is the order that
+# laundered. Both must reject.
+
+fn shout(n: Int) -> Int !{IO} =
+  do
+    print("io")
+    n + 1
+
+fn f1(cb: Int -> Int !{IO}, n: Int) -> Int !{IO} = cb(n)
+
+fn f2(cb: Int -> Int, n: Int) -> Int = cb(n)
+
+fn pick(b: Bool) -> ((Int -> Int !{IO}) -> Int -> Int !{IO}) =
+  match b with
+  | true -> f1
+  | false -> f2
+
+fn main() -> Unit !{IO} = print(int_to_string(pick(false)(shout, 1)))
