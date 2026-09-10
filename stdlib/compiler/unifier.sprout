@@ -413,20 +413,6 @@ fn lower_bound_key(v: String) -> String = "@lo:" ++ v
 
 fn upper_bound_key(v: String) -> String = "@hi:" ++ v
 
-fn effect_is_io(e: types.Effect) -> Bool =
-  match e with
-  | types.EffectIO -> true
-  | types.EffectPure -> false
-  | types.EffectVar _ -> false
-  | types.EffectRow _ -> false
-
-fn effect_is_pure(e: types.Effect) -> Bool =
-  match e with
-  | types.EffectPure -> true
-  | types.EffectIO -> false
-  | types.EffectVar _ -> false
-  | types.EffectRow _ -> false
-
 # A value performs at least `e`. Contradicts an existing pure ceiling.
 #
 # Raising the floor also RE-BINDS the variable, because the binding is what
@@ -435,14 +421,14 @@ fn effect_is_pure(e: types.Effect) -> Bool =
 # `quiet`'s pure overwrote `shout`'s IO and the annotation then saw pure.
 fn record_lower(eff_subst: Dict types.Effect, v: String,
                 e: types.Effect) -> Result String (Dict types.Effect) =
-  if ! effect_is_io (e) then Ok(eff_subst)
+  if ! types.effect_is_io (e) then Ok(eff_subst)
   else if upper_is_pure(eff_subst, v) then Err(io_into_pure_error())
   else Ok(dict_set(v, e, dict_set(lower_bound_key(v), e, eff_subst)))
 
 # A slot permits at most `e`. Contradicts an existing IO floor.
 fn record_upper(eff_subst: Dict types.Effect, v: String,
                 e: types.Effect) -> Result String (Dict types.Effect) =
-  if ! effect_is_pure (e) then Ok(eff_subst)
+  if ! types.effect_is_pure (e) then Ok(eff_subst)
   else if lower_is_io(eff_subst, v) then Err(io_into_pure_error())
   else Ok(dict_set(upper_bound_key(v), e, eff_subst))
 
@@ -552,12 +538,12 @@ fn record_one_bound(eff_subst: Dict types.Effect, v: String, e: types.Effect,
 
 fn lower_is_io(eff_subst: Dict types.Effect, v: String) -> Bool =
   match dict_get(lower_bound_key(v), eff_subst) with
-  | Just e -> effect_is_io(e)
+  | Just e -> types.effect_is_io(e)
   | Nothing -> false
 
 fn upper_is_pure(eff_subst: Dict types.Effect, v: String) -> Bool =
   match dict_get(upper_bound_key(v), eff_subst) with
-  | Just e -> effect_is_pure(e)
+  | Just e -> types.effect_is_pure(e)
   | Nothing -> false
 
 fn bind_var(name: String, t: types.Type, subst: Dict types.Type) -> Result String (Dict types.Type) =
@@ -598,9 +584,15 @@ export fn unify_actual_expected(
 ) -> Unified =
   unify_directed(subst, eff_subst, ExpectedRight, actual, expected)
 
-# A peer meet: `if` branches, binary operands, match-arm accumulation. Neither
-# side is the contract, so no effect rejection happens here — today's behaviour,
-# until part 2 gives joins a LUB/GLB rule of their own.
+# A peer meet: binary operands, and the ADT-field join. Neither side is the
+# contract, so nothing here records a bound or rejects — `bound_role` answers
+# NoBound for NoExpectation, and `unify_tapp` carries that into a type argument,
+# so this holds at every depth rather than only at the top.
+#
+# Part 2 gave `if` a fresh result variable instead of a LUB/GLB rule, so `if` and
+# match arms no longer come here at all. What still does is safe only because a
+# concrete arrow has no effect variable to overwrite; an open one would be
+# swallowed (docs/effect-subsumption-v0.md §6.5b).
 export fn unify_join(
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
