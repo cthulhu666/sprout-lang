@@ -1147,20 +1147,34 @@ Gates: full `just test`, `compile-examples-stage1` (the two HTTP examples are th
 witnesses and must stay green), `effect-report-smoke`, `ir-golden-diff` (expect 0), plus
 a downstream run against `uncharted-suns`.
 
-**A migration gap the zero-cost measurement cannot see — now REALIZED (2026-09-10).**
-Confirmed by running on master: `fn map_io(xs: List Int) -> List Int !{IO} =
-list_map(shout, xs)` is rejected, an honest `!{IO}` caller and all. Filed as a `P1` in
-`BACKLOG.md`; the paragraph below is why the corpus measurement said nothing.
-Inference never produces an
-effect-polymorphic HOF: `fn helper(f, n) = f(n)` generalises to
+**A migration gap the zero-cost measurement cannot see — REALIZED, then RESOLVED as
+policy (2026-09-10).** Confirmed by running: `fn map_io(xs: List Int) -> List Int !{IO} =
+list_map(shout, xs)` is rejected, an honest `!{IO}` caller and all. Inference never
+produces an effect-polymorphic HOF: `fn helper(f, n) = f(n)` generalises to
 `forall a b. (a -> b) -> a -> b` with *concrete pure* arrows, so `helper(shout, n)`
-launders today and part 1 will correctly reject it. The only remedy is a hand-written
-`!{e}`, and the prelude does not offer one for the shape people reach for — `list_map`'s
-callback is a plain pure arrow, and only `list_each` takes `!{e}` (returning `Unit`). So
-after this lands, **"map an IO function over a list" has no stdlib spelling.** The corpus
-measures zero because nothing in it does that yet, which is exactly why the number is
-silent here. Annotating `list_map`/`list_fold` with `!{e}` is the obvious follow-up and
-should be costed with this change rather than discovered by the first user.
+laundered before part 1 and is correctly rejected now. The only remedy is a hand-written
+`!{e}`, and `list_map`'s callback is a plain pure arrow. The corpus measures zero because
+nothing in it does that yet, which is exactly why the number is silent here.
+
+**This paragraph used to end "annotating `list_map`/`list_fold` with `!{e}` is the obvious
+follow-up." That is wrong, and `docs/effect-polymorphism-policy-v0.md` — written after it
+— is why.** A callback slot may be effect-polymorphic exactly when the published contract
+fixes both the *order* and the *multiplicity* of its invocation. `list_fold` documents
+"left fold" and already carries `!{e}`; `list_map` documents neither, and §5 of that policy
+grades `Functor.fmap` **pure** for the same reason — an `!{e}` map would be an accidental
+promise that every future instance, `Dict` and `Set` included, iterates in a fixed order.
+
+So the rejection is the policy working, not a regression, and the operation is expressible
+today through the combinator whose contract does pin both — verified by running, printing
+in source order:
+
+```sprout
+fn map_io(xs: List Int) -> List Int !{IO} =
+  list_reverse(list_fold(\ (acc, x) -> Cons(shout(x), acc), Nil, xs))
+```
+
+What remains is ergonomics, not capability: a `list_traverse` that states its order in its
+own contract. That is `BACKLOG.md`'s existing `traverse`/`sequence` entry, not a new one.
 
 ## 10. Spec and docs
 
