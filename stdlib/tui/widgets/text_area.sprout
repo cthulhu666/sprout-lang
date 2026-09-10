@@ -22,7 +22,7 @@ import stdlib.tui.widgets.paint as paint
 # `input` there is no submit handler to supply.
 export type TextAreaOpts m = (initial: String, look: focus.FocusStyle,
                               on_content: Maybe (m -> Maybe(String,
-                                                             Maybe(Int, Int))))
+                                                             Maybe buffer.Caret)))
 
 export fn text_area_opts() -> TextAreaOpts m =
   TextAreaOpts(initial = "", look = focus.focus_style_default(),
@@ -88,24 +88,32 @@ fn typed_in(a: Area m, s: String) -> Reply m =
 
 # ── content that arrives by message ─────────────────────────────────────────
 
-# Replacing the document says NOTHING. `on_change` carries the text, and after
-# a replacement the text is exactly what the application sent, so announcing
-# would echo its own value back — a loop for an `update` that answers
-# `on_change` by re-sending (docs/tui-content-update-v0.md §9.1). The binder is
-# `body` because this module imports `stdlib.tui.text as text`.
-fn refilled(a: Area m, c: Maybe (String, Maybe (Int, Int))) -> Reply m =
+# The binder is `body` because this module imports `stdlib.tui.text as text`.
+fn refilled(a: Area m, c: Maybe (String, Maybe buffer.Caret)) -> Reply m =
   match c with
   | Nothing -> Nothing
   | Just (body, place) ->
-      Just(((a with (doc = placed(buffer.buffer_open(body), place))), Nil, Nil))
+      opened(a, placed(buffer.buffer_open(body), place), body)
+
+# Announce only what the application cannot already know
+# (docs/tui-content-update-v0.md §9.1). Usually that is nothing: it sent the
+# text, so echoing it back would loop an `update` that answers `on_change` by
+# re-sending. But `buffer_open` NORMALISES — tabs and the other control
+# characters become spaces, CRLF and CR fold to LF — and then the document is
+# something the application has never seen, which is what `on_change` is for.
+fn opened(a: Area m, b: buffer.Buffer, sent: String) -> Reply m =
+  Just(((a with (doc = b)), said, Nil))
+where
+  now = buffer.buffer_text(b)
+  said = if now == sent then Nil else [a.on_change(now)]
 
 # No caret named: the end of the document, which is where `buffer_open` leaves
-# it. A named one is clamped by `buffer_goto`, since the row and column are the
-# caller's claim about a document it has not seen laid out.
-fn placed(b: buffer.Buffer, place: Maybe (Int, Int)) -> buffer.Buffer =
+# it. A named one is clamped by `buffer_goto`, since it is the caller's claim
+# about a document it has not seen laid out.
+fn placed(b: buffer.Buffer, place: Maybe buffer.Caret) -> buffer.Buffer =
   match place with
   | Nothing -> b
-  | Just (row, col) -> buffer.buffer_goto(row, col, b)
+  | Just c -> buffer.buffer_goto(c, b)
 
 # The whole document, not a delta: the application cannot read the area, so a
 # delta would leave it reassembling the text from keystrokes (§4.8). `Nothing`

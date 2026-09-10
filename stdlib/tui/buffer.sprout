@@ -52,11 +52,20 @@ fn normalized(s: String) -> String =
 
 export fn buffer_lines(b: Buffer) -> List String = all_lines(fields(b))
 
-# The caret at `row`/`col`, each clamped into the document. The text does not
-# move; only the caret does. A caret restored into a file being reopened is
-# what this is for (docs/tui-content-update-v0.md §9.3).
-export fn buffer_goto(row: Int, col: Int, b: Buffer) -> Buffer =
-  walked(col, row, all_lines(fields(b)), Nil)
+# A position in the document. A record rather than two adjacent `Int`s, which
+# swap silently — and because both axes clamp, a swapped pair would land a
+# plausible caret in the wrong place instead of failing (guidelines §3).
+export type Caret = (row: Int, col: Int) deriving (Eq, Ord, ToString)
+
+export fn buffer_caret(b: Buffer) -> Caret =
+  Caret(row = buffer_row(b), col = buffer_col(b))
+
+# The caret at `c`, each axis clamped into the document. The text does not
+# move; only the caret does. `buffer_goto(buffer_caret(old), new)` is the whole
+# point: a caret carried into a file being reopened
+# (docs/tui-content-update-v0.md §9.3).
+export fn buffer_goto(c: Caret, b: Buffer) -> Buffer =
+  walked(c.col, c.row, all_lines(fields(b)), Nil)
 
 fn walked(col: Int, n: Int, rest: List String, above: List String) -> Buffer =
   match rest with

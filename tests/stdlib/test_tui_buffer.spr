@@ -179,7 +179,7 @@ fn nochange_cases(state: TestState) -> Unit !{IO} = do
               changed(buf.buffer_backspace(opened("ab"))))
 
 fn gone_to(b: buf.Buffer, row: Int, col: Int) -> buf.Buffer =
-  buf.buffer_goto(row, col, b)
+  buf.buffer_goto(buf.Caret(row = row, col = col), b)
 
 fn goto_cases(state: TestState) -> Unit !{IO} = do
   assert_eq(state, "goto lands on the named row and column",
@@ -210,6 +210,16 @@ fn goto_cases(state: TestState) -> Unit !{IO} = do
   # An empty document still has a caret to place.
   assert_eq(state, "an empty document clamps to the only position",
             at(gone_to(opened(""), 3, 3)), "0:0")
+  # The round trip the API exists for: read a caret out of the document being
+  # closed, put it into the one being opened.
+  assert_eq(state, "a caret read out goes back in",
+            at(buf.buffer_goto(buf.buffer_caret(gone_to(opened("ab\ncd"), 1, 1)),
+                               opened("wx\nyz"))),
+            "1:1")
+  assert_eq(state, "and clamps when the new document is smaller",
+            at(buf.buffer_goto(buf.buffer_caret(gone_to(opened("ab\ncd"), 1, 2)),
+                               opened("w"))),
+            "0:1")
   # A vertical move after a goto must not inherit a goal column from before it
   # (§4.7): the caret was placed, not moved through.
   assert_eq(state, "goto leaves no goal column behind",

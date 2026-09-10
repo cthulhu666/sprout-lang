@@ -5,6 +5,7 @@ import stdlib.tui.screen as scr
 import stdlib.tui.widget as widget
 import stdlib.tui.widgets.container as ct
 import stdlib.tui.widgets.focus as focus
+import stdlib.tui.widgets.input as inp
 import stdlib.tui.widgets.scroll_view as sv
 import stdlib.tui.widgets.text as txt
 
@@ -21,6 +22,9 @@ type Msg (..) deriving (Eq, ToString) =
   # (§9.4 of docs/tui-content-update-v0.md). A `Widget m` could not travel in
   # a message here anyway — it has no `Eq` or `ToString`.
   | Show (List String)
+  | Typed String
+  # Swaps in a focusABLE child, for the known-limitation case below.
+  | ShowField
 
 type alias Says = List Msg
 type alias Asks = List(widget.Cmd Msg)
@@ -82,7 +86,14 @@ fn view_of(w: widget.Widget Msg, o: sv.ScrollOpts Msg) -> widget.Widget Msg =
 fn content_of(m: Msg) -> Maybe(widget.Widget Msg) =
   match m with
   | Show ls -> Just(txt.static(ls))
+  | ShowField -> Just(inp.input(kid_id(), Typed))
   | _ -> Nothing
+
+# A scroll view whose child is FOCUSABLE and sits under a ring pointed at it.
+fn over_field() -> widget.Widget Msg =
+  focus.focus_ring([kid_id()],
+                   sv.scroll_view_with(view_id(), inp.input(kid_id(), Typed),
+                                       contenting()))
 
 fn contenting() -> sv.ScrollOpts Msg =
   sv.scroll_opts() with (on_content = Just(content_of))
@@ -201,6 +212,19 @@ fn content_cases(state: TestState) -> Unit !{IO} = do
             says_sv(contenting(), [widget.ToMsg(Ping)]), "[Noted(declined)]")
   assert_eq(state, "and a view without a decoder declines every message",
             says_sv(sv.scroll_opts(), [showing(["ab"])]), "[Noted(declined)]")
+  # KNOWN LIMITATION, pinned so it is a decision and not a surprise: swapping
+  # in a focusABLE child kills the keyboard. The new child is built unfocused,
+  # `Ring.at` still names its id, and `ring_route` declines an outside
+  # `ToFocus` (focus.sprout:157) — so nothing can re-point it but a user Tab.
+  # `on_content` here is for static content (docs/tui-content-update-v0.md
+  # §9.4); filed in BACKLOG.md §4. Flip these two when it is fixed.
+  assert_eq(state, "a focused child takes a key before a swap",
+            said(widget.feed(over_field(), [key(event.KChar('a'))])),
+            "[Typed(a)]")
+  assert_eq(state, "and loses the keyboard after one",
+            said(widget.feed(after_told(over_field(), [widget.ToMsg(ShowField)]),
+                             [key(event.KChar('a'))])),
+            "[]")
   # A decoder must not shadow the container: an address the view does not own
   # is forwarded before the decoder ever sees it.
   assert_eq(state, "a decoder does not swallow the child's own address",

@@ -250,7 +250,7 @@ to tab stops is additive later and needs column arithmetic in the paste path.
 ```sprout
 export type TextAreaOpts m = (initial: String, look: focus.FocusStyle,
                               on_content: Maybe (m -> Maybe (String,
-                                                             Maybe (Int, Int))))
+                                                             Maybe buffer.Caret)))
 
 export fn text_area_opts() -> TextAreaOpts m
 
@@ -262,12 +262,14 @@ export fn text_area_with(id: widget.WidgetId, on_change: String -> m,
 ```
 
 `on_content` replaces the document — opening a file into the pane. The
-`Maybe (Int, Int)` is the caret to restore, since a caret read out of one
+`Maybe buffer.Caret` is the caret to restore, since a caret read out of one
 document means nothing in another and only the caller knows where it belongs;
-`Nothing` opens at the end, as `buffer_open` does, and a named `(row, col)`
-is clamped by `buffer_goto`. The replacement is **silent**, for the reason
+`Nothing` opens at the end, as `buffer_open` does, and a named one is clamped
+by `buffer_goto`. The replacement is **silent**, for the reason
 `docs/tui-content-update-v0.md` §9.1 gives: `on_change` carries the text, which
-after a replacement is exactly what the application sent.
+the application just sent. **Unless opening normalised it** — §4.4's rules turn
+tabs into spaces and fold CRLF to LF — because then the document is one the
+application has never seen. Reopening a source file is exactly where that bites.
 
 Keys claimed when focused and unchorded: printable characters, Enter,
 Backspace, Delete, Left, Right, Up, Down, Home, End, and `Paste`. Everything
@@ -276,12 +278,15 @@ viewport, the same wall as §4.6) and every chord.
 
 `stdlib/tui/buffer.sprout` exports `Buffer` opaquely with construction, the
 editing operations, the caret queries (`buffer_row`, `buffer_col`,
-`buffer_line`), `buffer_text` and `buffer_goto` — the inverse of the caret
-queries, clamping both axes, over `line_zipper.zipper_at` for the column.
+`buffer_line`), `buffer_text`, and the `Caret` pair `buffer_caret`/`buffer_goto`
+— a record rather than two adjacent `Int`s, which swap silently and would place
+a plausible caret in the wrong spot since both axes clamp. `buffer_goto` clamps
+both axes, over `line_zipper.zipper_at` for the column.
 `zipper_at` walks in CLUSTERS, the unit `zipper_col` reports;
 `zipper_to_display_col` beside it is the same walk in cells, which is what a
-goal column needs and what a restored caret must not use. `buffer_line` keeps the caret query off the
-document walk — it reads the current line directly instead of indexing
+goal column needs and what a restored caret must not use. `buffer_line` keeps
+the caret query off the document walk — it reads the current line directly
+rather than indexing
 `buffer_lines`. `render` still calls `buffer_lines`, so it is O(document) per
 frame where O(region rows) is reachable; filed in `BACKLOG.md` §4 rather than
 guessed at, since the shape depends on what the IDE pane needs.

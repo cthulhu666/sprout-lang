@@ -401,6 +401,16 @@ fn content_cases(state: TestState) -> Unit !{IO} = do
             says(contenting(), [focus_on(), typing('z'), set_to("abc"),
                                 typing('X')]),
             "[Changed(z), Changed(abcX)]")
+  # `zipper_open` flattens control characters to spaces, so the field ends up
+  # holding a value the application never sent. That is the one case where the
+  # replacement must speak — §9.1's rule is "announce what the caller cannot
+  # already know", and it cannot know its tab became a space.
+  assert_eq(state, "a replacement that was flattened is announced",
+            says(contenting(), [focus_on(), set_to("a\tb")]),
+            "[Changed(a b)]")
+  assert_eq(state, "and the flattened value is what the field then holds",
+            says(contenting(), [focus_on(), set_to("a\tb"), typing('X')]),
+            "[Changed(a b), Changed(a bX)]")
   # The `Nothing` path: a field that claimed every message addressed to it
   # would swallow the application's own traffic.
   assert_eq(state, "an unrecognised message is declined",

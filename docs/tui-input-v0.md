@@ -189,8 +189,11 @@ export fn clusters_width(cs: List (List Int)) -> Int
 suggestion being accepted. It carries no caret argument: `zipper_open` puts the
 caret at the end, which is where construction leaves it and where a value set
 programmatically wants it. The replacement is **silent** — `on_change` carries
-the text, and after a replacement the text is exactly what the application
-sent, so announcing it would echo its own value back
+the text, and the application just sent it, so announcing would echo its own
+value back. **Unless `zipper_open` flattened it**: a tab or any other control
+character becomes a space (§4.11), and then the field holds a value the
+application has never seen, which is the one thing it cannot work out for
+itself, so that replacement does announce
 (`docs/tui-content-update-v0.md` §9.1–9.2).
 
 Keys claimed while focused: printable `KChar` (unmodified), `KBackspace`,
