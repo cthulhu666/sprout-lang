@@ -24,14 +24,6 @@ Legend:
   now correct in both orders, leaving six `unify_join` sites, and a floor recorded at the
   join may replace the LUB the design assumes. Part 2 of
   `docs/effect-subsumption-v0.md` §6.5 + §6.5a (measured 2026-09-10).
-- [ ] `P1` **"Map an IO function over a list" now has no stdlib spelling.** Effect
-  subsumption part 1 landed, so `list_map(shout, xs)` is rejected even under an honest
-  `!{IO}` caller: `list_map`'s callback is `a -> b`, and only `list_fold` and `list_each`
-  carry `!{e}`. Verified by running on master. The corpus measured zero breakage because
-  nothing in it maps an effectful function yet — the number is silent, not reassuring, and
-  this is the first thing a user reaches for. Fix: `!{e}` on `list_map`, `list_filter`,
-  `list_filter_map`, `list_fold_while`, under the order-and-multiplicity test in
-  `docs/effect-polymorphism-policy-v0.md`. `docs/effect-subsumption-v0.md` §9.
 - [ ] `P3` **A type argument is judged covariantly, which is wrong for a mutable container.**
   `Ref` should be invariant in its argument. No reaching program is known — four shapes that
   laundered before bounded effect variables now reject, but via a bound travelling through
@@ -978,6 +970,11 @@ Legend:
   blocked — the parser rejects a method-level `where Applicative f` constraint. Ship them first as
   free functions (`list_traverse`/`list_sequence`, `where Applicative f`, structure hardcoded —
   the `concat_map` pattern, verified to compile and run); the class needs the parser surface above.
+  **Also the ergonomic home for effectful mapping.** `list_map` stays pure by design
+  (`docs/effect-polymorphism-policy-v0.md` §5: order unpinned), so mapping an `!{IO}` function is
+  spelled `list_reverse(list_fold(\ (acc, x) -> Cons(f(x), acc), Nil, xs))` — correct and ordered,
+  because `list_fold` pins both, but clumsy. A `list_traverse` whose contract states its order is
+  the admissible fix; widening `list_map` is not.
 - [ ] `P2` **Nested return-type dispatch: `map2(g, pure(x), pure(y))` miscodegens when `f` is fixed
   only by context.** When an Applicative method's argument is itself return-type-dispatched and the
   concrete `f` comes only from the surrounding context, codegen emits an undefined `@map2` → link
