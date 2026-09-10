@@ -1,0 +1,18 @@
+# A wrap pattern's inner arg must be a binder. `Line 0` supplies exactly one
+# inner arg, so the diagnostic must blame its SHAPE, not the arg count — the
+# older wording ("must have exactly one inner arg") read as false here.
+#
+# Nested position specifically: the nested binders route wrap patterns through
+# bind_wrap_inner_arg, so this message became reachable from inside a tuple or
+# an ADT field, not just at the top level of a match.
+# See docs/deriving-wrap-v0.md §nested codegen bug.
+wrap Line = Int
+
+fn f(m: Maybe Line) -> Int =
+  match m with
+  | Just (Line 0) -> 100
+  | Just (Line x) -> x
+  | Nothing -> 0
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(f(Just (Line(0)))))

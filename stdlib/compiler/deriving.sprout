@@ -490,7 +490,9 @@ fn validate_wrap_deriving_classes_list(name: String, classes: List String) -> Ma
 fn validate_one_wrap_deriving_class(name: String, class_name: String) -> Maybe String =
   match parse_derivable_class(class_name) with
   | Nothing ->
-      Just("unknown class in deriving clause for `" ++ name ++ "`: `" ++ class_name ++ "` (v1 supports Eq, Ord, ToString, Enum)")
+      # The hint lists what a WRAP can derive, not the ADT set: Enum is rejected
+      # below, so advertising it would send the reader to a second error.
+      Just("unknown class in deriving clause for `" ++ name ++ "`: `" ++ class_name ++ "` (a wrap supports Eq, Ord, ToString)")
   | Just DcEnum ->
       Just("cannot derive `Enum` for `" ++ name ++ "`: a wrap always carries one payload, not an enumeration; Enum requires an ADT whose constructors are all nullary")
   | Just _ -> Nothing

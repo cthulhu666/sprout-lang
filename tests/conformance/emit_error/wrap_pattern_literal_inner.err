@@ -1,0 +1,1 @@
+a wrap pattern's inner arg must be a variable or `_`; a literal or nested pattern there is not supported

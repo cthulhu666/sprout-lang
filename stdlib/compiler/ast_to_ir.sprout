@@ -2990,14 +2990,23 @@ fn bind_ctor_field_args(args: List ast.Pattern, scrut_name: String,
 # Mirrors codegen.sprout emit_pattern_bind wrap branch (line 1253):
 #   "Wrap destructuring is identity: the scrut value IS the inner value."
 # Supports VarPattern (add var → s_name to captures) and WildcardPattern (no-op).
-# Any other pattern inside a wrap is rejected — they are not needed in practice and
-# would require recursive tag/field ops that this function deliberately avoids.
+# Any other pattern inside a wrap is rejected — it would require the recursive
+# tag/field ops this function deliberately avoids.
+#
+# The arity and the shape are reported separately on purpose: they are different
+# mistakes, and one combined "must have exactly one inner arg" message reads as
+# false for `Line 0`, which supplies exactly one. Reachable from a nested
+# position as well as the top of a match, since bind_tuple_items and
+# bind_ctor_field_args route nested wrap patterns here.
 fn bind_wrap_inner_arg(args: List ast.Pattern, s_name: String, captures: Dict String) ->
     Result String (Dict String) =
   match args with
   | [ast.VarPattern v _] -> Ok(dict_set(v, s_name, captures))
   | [ast.WildcardPattern _] -> Ok(captures)
-  | _ -> Err("ast_to_ir: wrap pattern must have exactly one inner arg (VarPattern or WildcardPattern)")
+  | [_] ->
+      Err("ast_to_ir: a wrap pattern's inner arg must be a variable or `_`; a literal or nested pattern there is not supported (bind it as `Foo x`, then match on `x`)")
+  | _ ->
+      Err("ast_to_ir: a wrap pattern takes exactly one inner arg, got " ++ int_to_string(list_length(args)))
 
 # Emit binding ops for each pattern item of a TuplePattern.
 # Handles VarPattern (IRGetTupleField bind), WildcardPattern (skip), nested
