@@ -1,0 +1,15 @@
+# Deriving on a `wrap` is structural, not lifted: the synthesized body calls the
+# INNER type's `to_string`, so deriving requires the inner type to be a member of
+# the class. `Opaque` derives nothing, so `wrap Tag = Opaque deriving (ToString)`
+# has no witness to delegate to and must be rejected rather than silently
+# rendering the representation.
+import stdlib.terminal as terminal
+
+type Opaque (..) =
+  | Opaque Int
+
+wrap Tag = Opaque deriving (ToString)
+
+fn main() -> Unit !{IO} =
+  do
+    terminal.write("unreachable")

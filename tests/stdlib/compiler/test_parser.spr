@@ -138,6 +138,22 @@ fn first_typedecl_deriving(src: String) -> List String =
                   | ast.TypeDecl _ _ _ deriving_classes _ _ -> deriving_classes
                   | _ -> Nil
 
+fn first_wrapdecl_deriving(src: String) -> List String =
+  match lexer.tokenize(src) with
+  | Err _ -> Nil
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> Nil
+      | Ok prog ->
+          match prog with
+          | ast.Program decls _ ->
+              match decls with
+              | [] -> Nil
+              | [d | _] ->
+                  match d with
+                  | ast.WrapDecl _ _ deriving_classes _ -> deriving_classes
+                  | _ -> Nil
+
 # True when the first decl is a `type linear ...` (multiplicity recorded as Linear).
 # This is the test that would catch a Linear->Unrestricted drop-the-bit regression:
 # it asserts the multiplicity the parser actually stored on the TypeDecl, not just
@@ -317,6 +333,27 @@ fn main() -> Unit !{IO} =
       parse_fails("type Color (..) deriving () = | Red"))
     assert_true(state, "deriving without parens rejected (bare ClassName)",
       parse_fails("type Color (..) deriving Eq = | Red"))
+    # deriving clause on WrapDecl. Placement is TRAILING (after the RHS), as on
+    # records: `wrap Name = T` is a self-contained RHS, unlike an ADT's `=` which
+    # opens a multi-line constructor list. parse_deriving_clause is shared.
+    assert_true(state, "wrap decl with deriving (Eq) parses",
+      parse_ok("wrap Line = Int deriving (Eq)"))
+    assert_true(state, "wrap decl with multi-class deriving parses",
+      parse_ok("wrap Line = Int deriving (Eq, Ord, ToString)"))
+    assert_true(state, "wrap decl without deriving still parses (backward compat)",
+      parse_ok("wrap Line = Int"))
+    assert_eq(state, "wrap deriving clause class count (three)",
+      list_length(first_wrapdecl_deriving("wrap Line = Int deriving (Eq, Ord, ToString)")), 3)
+    assert_eq(state, "wrap without deriving yields empty list",
+      list_length(first_wrapdecl_deriving("wrap Line = Int")), 0)
+    assert_true(state, "wrap deriving () empty class list rejected",
+      parse_fails("wrap Line = Int deriving ()"))
+    assert_true(state, "wrap deriving without parens rejected (bare ClassName)",
+      parse_fails("wrap Line = Int deriving Eq"))
+    # A parameterized inner type must not swallow the clause: `Dict a deriving`
+    # would misparse if the clause were read as another type argument.
+    assert_eq(state, "wrap over applied type keeps its deriving clause",
+      list_length(first_wrapdecl_deriving("wrap Env = Dict Int deriving (Eq)")), 1)
     assert_true(state, "deriving as let-binding identifier rejected (hard keyword)",
       parse_fails("let deriving = 1"))
     assert_true(state, "deriving as fn name rejected (hard keyword)",

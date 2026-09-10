@@ -539,7 +539,7 @@ fn build_ctor_table_acc(decls: List typed_ast.TypedDecl, next_tag: Int,
       # Wrap types: synthetic ctor with tag sentinel -1 (mirrors codegen.sprout wrap_tag() = -1).
       # Not added to regs — wrap types have no runtime allocation or tag.
       # next_tag is not incremented: wrap consumes no numeric tag slot.
-      | typed_ast.TPassThrough (ast.WrapDecl type_name inner _) ->
+      | typed_ast.TPassThrough (ast.WrapDecl type_name inner _ _) ->
           build_ctor_table_acc(rest, next_tag,
             dict_set(type_name, sprout_ir.CtorInfo(-1, 1, 1, fk.ctor_field_kinds_string(Cons(inner, Nil)), ""), acc),
             regs, cenv)
@@ -2752,7 +2752,8 @@ fn is_wrap_match(arms: List typed_ast.TypedMatchBranch,
 
 # Emit binding ops for each pattern arg of a ConstructorPattern.
 # Handles VarPattern (IRGetField bind), WildcardPattern (skip), nested
-# ConstructorPattern (tag test + new block), and nested TuplePattern (field
+# ConstructorPattern (tag test + new block, or an untested identity bind when
+# the nested ctor is a wrap), and nested TuplePattern (field
 # fetch + recursive tuple binding — no block break since tuples always match).
 # Literal patterns (Int/Bool/String/Char/Unit) as nested sub-patterns are
 # not supported in this PR and yield a clear Err naming the pattern type.
@@ -2813,6 +2814,25 @@ fn bind_ctor_field_args(args: List ast.Pattern, scrut_name: String,
             | Just nested_entry ->
                 match nested_entry with
                 | sprout_ir.CtorInfo nested_tag _na _nm nested_fks _ ->
+                  if nested_tag == -1
+                  then
+                    # Nested wrap (tag sentinel -1): the field IS the inner value,
+                    # unboxed. See the matching arm in bind_tuple_items for why a
+                    # tag test here segfaults on an unboxed payload and silently
+                    # misses the arm on a heap one. A wrap has one ctor, so no test
+                    # is needed and cur_lbl stays open.
+                    match fresh_name(name_prefix, idx) with
+                    | field_ssa ->
+                        match bind_wrap_inner_arg(nested_args, field_ssa, acc_captures) with
+                        | Err msg -> Err(msg)
+                        | Ok wrap_captures ->
+                            bind_ctor_field_args(rest_args, scrut_name, fks, idx + 1, field_idx + 1,
+                                                 name_prefix,
+                                                 Cons(sprout_ir.IRGetField(field_ssa, scrut_name, field_idx,
+                                                                           fk.fk_at(fks, field_idx)),
+                                                      cur_ops),
+                                                 wrap_captures, cur_lbl, miss_lbl, ctors, acc_extra)
+                  else
                     match fresh_name(name_prefix, idx) with
                     | field_ssa ->
                         match fresh_name(name_prefix, idx + 1) with
@@ -2982,7 +3002,8 @@ fn bind_wrap_inner_arg(args: List ast.Pattern, s_name: String, captures: Dict St
 # Emit binding ops for each pattern item of a TuplePattern.
 # Handles VarPattern (IRGetTupleField bind), WildcardPattern (skip), nested
 # TuplePattern (tuple fetch + recursive binding), and nested ConstructorPattern
-# (tag test + new block). Literal patterns yield a clear Err.
+# (tag test + new block, or an untested identity bind when the nested ctor is a
+# wrap). Literal patterns yield a clear Err.
 #
 # Same accumulator contract as bind_ctor_field_args: cur_ops and acc_extra
 # are REVERSED; base case reverses both before returning.
@@ -3034,6 +3055,26 @@ fn bind_tuple_items(items: List ast.Pattern, scrut_name: String,
           | Just nested_entry ->
               match nested_entry with
               | sprout_ir.CtorInfo nested_tag _na _nm nested_fks _ ->
+                if nested_tag == -1
+                then
+                  # Nested wrap (tag sentinel -1): the element IS the inner value,
+                  # unboxed. Emitting IRGetTag here would deref a raw Int as a
+                  # pointer, or read a heap payload's own tag and never match -1 —
+                  # a silent arm miss. A wrap has one ctor, so the match cannot
+                  # fail: no tag test, no branch, cur_lbl stays open.
+                  # Mirrors translate_match_arm_ctor's top-level wrap path.
+                  match fresh_name(name_prefix, idx) with
+                  | field_ssa ->
+                      match bind_wrap_inner_arg(nested_args, field_ssa, acc_captures) with
+                      | Err msg -> Err(msg)
+                      | Ok wrap_captures ->
+                          bind_tuple_items(rest_items, scrut_name, idx + 1, field_idx + 1,
+                                           name_prefix,
+                                           Cons(sprout_ir.IRGetTupleField(field_ssa, scrut_name, field_idx,
+                                                                          sprout_ir.IRTUnknown),
+                                                cur_ops),
+                                           wrap_captures, cur_lbl, miss_lbl, ctors, acc_extra)
+                else
                   match fresh_name(name_prefix, idx) with
                   | field_ssa ->
                       match fresh_name(name_prefix, idx + 1) with

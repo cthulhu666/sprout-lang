@@ -191,7 +191,7 @@ fn collect_decl_locations(
             Cons("alias", categories), Cons(name, names),
             Cons(pos.line + line_offset, lines),
             Cons(pos.column, cols))
-      | ast.WrapDecl name _ pos ->
+      | ast.WrapDecl name _ _ pos ->
           collect_decl_locations(rest, line_offset,
             Cons("type", categories), Cons(name, names),
             Cons(pos.line + line_offset, lines),

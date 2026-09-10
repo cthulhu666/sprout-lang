@@ -1,0 +1,1 @@
+cannot derive `Enum` for `Bad`: a wrap always carries one payload, not an enumeration; Enum requires an ADT whose constructors are all nullary

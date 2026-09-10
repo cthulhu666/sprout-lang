@@ -1,0 +1,12 @@
+# `deriving (Enum)` is ill-defined for a `wrap`: Enum requires a nullary-only
+# ADT (ordinal <-> constructor), but a wrap always carries exactly one payload.
+# The message must not blame "constructor `Bad` has fields" the way the ADT path
+# does — a wrap's constructor is implicit in the declaration, never written.
+# The error fires eagerly at the deriving site (bundle time), not at a use site.
+import stdlib.terminal as terminal
+
+wrap Bad = Int deriving (Enum)
+
+fn main() -> Unit !{IO} =
+  do
+    terminal.write("unreachable")

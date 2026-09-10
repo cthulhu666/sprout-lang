@@ -1005,8 +1005,8 @@ Restrictions:
 - No type parameters on the wrap itself in v0; the inner type may be
   parameterized (`wrap MyDict a = Dict a`) but the wrap itself is monomorphic.
 - The constructor name and type name are identical and cannot be set separately.
-- A `wrap` cannot derive typeclasses; explicit `instance` declarations are
-  required for class membership.
+- A `wrap` may derive `Eq`, `Ord` and `ToString` (§8.6); `Enum` is rejected.
+  Any other class membership needs an explicit `instance` declaration.
 
 Wrap types primarily enable **mistake-prevention without runtime cost**: types
 like `Metres` vs `Seconds`, `UserId` vs `OrderId`, or the `BodyEnv` /
@@ -2995,10 +2995,12 @@ provides per-type combinators covering the axes no class does:
 
 ## 8.6 Automatic Instance Derivation (`deriving`) (Experimental)
 
-A `type` declaration may carry a `deriving (...)` clause between the optional
-`(..)` constructor-export marker and the `=` sign.  The compiler synthesizes
-instance declarations for each listed class, eliminating the boilerplate of
-hand-writing instances whose body follows from the type's structure.
+An ADT `type` declaration may carry a `deriving (...)` clause between the
+optional `(..)` constructor-export marker and the `=` sign.  Records (§5.6.3)
+and `wrap` declarations (§5.6.1) carry it **trailing**, after the right-hand
+side.  The compiler synthesizes instance declarations for each listed class,
+eliminating the boilerplate of hand-writing instances whose body follows from
+the type's structure.
 
 ### Syntax
 
@@ -3006,10 +3008,17 @@ hand-writing instances whose body follows from the type's structure.
 type Name (..) deriving (Class1, Class2, ...) =
   | Ctor1 ...
   | Ctor2 ...
+
+type Rec = (f0: T0, f1: T1) deriving (Class1, Class2, ...)
+
+wrap Wrapped = T deriving (Class1, Class2, ...)
 ```
 
 `deriving` is a hard keyword.  The class-name list must be parenthesized and
 non-empty.  Whitespace and line breaks inside the parentheses are allowed.
+Placement differs only because an ADT's `=` opens a multi-line constructor list
+while a record's and a wrap's right-hand side is self-contained; the clause
+itself parses identically in all three positions.
 
 ### Derivable classes (this version)
 
@@ -3075,6 +3084,38 @@ Parametric records gain the same per-type-parameter constraints as parametric
 ADTs (`type Box a = (val: a, ...) deriving (Eq)` → `instance Eq (Box a) where Eq
 a`).
 
+**Wraps** (§5.6.1) support `deriving (Eq, Ord, ToString)`.  The clause is
+**trailing**, after the right-hand side, as on records:
+
+```sprout
+wrap Line = Int deriving (Eq, Ord, ToString)
+wrap Name = String deriving (Eq, Ord, ToString)
+```
+
+A `wrap Foo = T` *is* a single-constructor, single-positional-field product whose
+constructor is named after the type, so the synthesized bodies are the ADT
+emitters over that constructor:
+
+- `Eq` — `eq` on the inner value.
+- `Ord` — `compare` on the inner value.
+- `ToString` — `"Foo(inner)"`, positional (the ADT form), **not** a record's
+  `"Foo(f = v)"`.
+
+Derivation is **structural, not lifted**: `to_string(Line(3))` is `"Line(3)"`,
+never `"3"`.  A derived instance therefore requires the inner type to be a member
+of the class — deriving `ToString` for a `wrap` over a type with no `ToString`
+instance is an error, not a fallback to the representation.  Structural
+rendering keeps a `wrap` visible in output rather than reading as a transparent
+`type alias`, which is the distinction `wrap` exists to draw; it also matches
+Haskell's `stock` strategy and Rust's `#[derive(Debug)]`.  *Lifting* the inner
+type's instances through the wrap (`Num`, arithmetic operators) is separate,
+unimplemented work tracked in `BACKLOG.md`.
+
+`Enum` cannot be derived for a `wrap`: `from_ordinal` must construct a value, and
+a wrap's payload cannot be rebuilt from an `Int` alone.  `deriving (Enum)` on a
+wrap is an eager error at the deriving site.  A `wrap` takes no type parameters
+in v0 (§5.6.1), so no instance constraints are synthesized.
+
 Serialization (`Serialize`/`Deserialize`) and hashing (`Hash`) are intentionally
 **not** in v1.  Both require design decisions the language hasn't made yet —
 serialization needs a format-agnostic visitor abstraction (serde-style) rather
@@ -3087,6 +3128,9 @@ dicts.  Both are tracked in `BACKLOG.md`.
   supported (use one clause with all classes: `deriving (Eq, Ord, ToString)`).
 - Records support `deriving (Eq, Ord, ToString)` but **not** `Enum` (a record is
   a single product, not an enumeration — see Records below).
+- Wraps support `deriving (Eq, Ord, ToString)` but **not** `Enum` (a wrap always
+  carries one payload — see Wraps below). Derivation is structural, never lifted
+  through to the inner type.
 
 ### Error conditions
 
@@ -3096,6 +3140,11 @@ dicts.  Both are tracked in `BACKLOG.md`.
 - `deriving (Enum)` on a type with a field-bearing constructor: eager error at
   the deriving site: `cannot derive 'Enum' for 'Foo': constructor 'Bar' has
   fields; Enum requires all constructors to be nullary`.
+- `deriving (Enum)` on a wrap: eager error at the deriving site: `cannot derive
+  'Enum' for 'Foo': a wrap always carries one payload, not an enumeration; Enum
+  requires an ADT whose constructors are all nullary`. The wording differs from
+  the ADT case because a wrap's constructor is implicit in the declaration and
+  naming it would blame something the user never wrote.
 - Missing field-class instance: the synthesized body references `eq(f)`,
   `to_string(f)`, etc. on each field. If the field's type has no instance of
   the derived class, the standard "no instance" error fires at the use site
@@ -3107,6 +3156,9 @@ dicts.  Both are tracked in `BACKLOG.md`.
 - `docs/deriving-v1-draft.md` — full design rationale, including the
   rejected alternatives (`Generic`-based approach, compile-time handler
   approach) and the trajectory toward v2 user-defined deriving.
+- `docs/deriving-records-v0.md`, `docs/deriving-wrap-v0.md` — the record and
+  `wrap` extensions, including the structural-vs-lifted decision for wraps and
+  the prior-art survey behind it.
 - `BACKLOG.md` §1, §5 — companion items: strict type-name validation
   (improves deriving's phantom-type diagnostics), polymorphic-keyed dicts
   (unblocks `deriving (Hash)`), field-bearing Ord, format-agnostic

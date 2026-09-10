@@ -112,3 +112,9 @@ the concrete type.
   rejection.
 - `tests/stdlib/compiler/test_iface_ast_codec.spr` — RecordDecl round-trip with a
   non-empty `deriving_classes`.
+
+## See also
+
+`docs/deriving-wrap-v0.md` — the same extension for `wrap` declarations, which
+reuses the ADT emitters rather than gaining its own, and which a record of wrap
+fields depends on to derive at all.

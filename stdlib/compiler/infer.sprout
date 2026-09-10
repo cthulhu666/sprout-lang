@@ -924,7 +924,7 @@ fn register_type_decl_raw(decl: ast.Decl, alias_env: Dict types.Type,
   # the typechecker a scheme `inner -> Foo` for Foo(x), and a destructor entry
   # for `match | Foo x ->`.  Zero type parameters by design (the inner type
   # may itself be polymorphic, but Foo always has the same representation).
-  | ast.WrapDecl name inner _ ->
+  | ast.WrapDecl name inner _ _ ->
       register_ctors_for_type(name, Nil, alias_env,
         [ast.TypeConstructor(name, [inner], Nil, Nil)], env)
   | _ -> env
@@ -1038,7 +1038,7 @@ fn build_ctor_map(decls: List ast.Decl, acc: Dict (List String)) -> Dict (List S
       | ast.TypeDecl name _ ctors _ _ _ ->
           build_ctor_map(rest, dict_set(name, collect_ctor_names(ctors, Nil), acc))
       # WrapDecl: a single synthetic constructor with the same name as the type.
-      | ast.WrapDecl name _ _ ->
+      | ast.WrapDecl name _ _ _ ->
           build_ctor_map(rest, dict_set(name, Cons(name, Nil), acc))
       | _ -> build_ctor_map(rest, acc)
 
@@ -6333,7 +6333,7 @@ fn collect_declared_type_names(decls: List ast.Decl, acc: List String) -> List S
           collect_declared_type_names(rest, Cons(string.after_last_dot(name), acc))
       | ast.AliasDecl name _ _ _ ->
           collect_declared_type_names(rest, Cons(string.after_last_dot(name), acc))
-      | ast.WrapDecl name _ _ ->
+      | ast.WrapDecl name _ _ _ ->
           collect_declared_type_names(rest, Cons(string.after_last_dot(name), acc))
       | _ -> collect_declared_type_names(rest, acc)
 
@@ -6402,7 +6402,7 @@ fn validate_decl(decl: ast.Decl, declared: List String) -> Maybe String =
       validate_record_fields(fields, name, declared)
   | ast.AliasDecl name _ rhs _ ->
       validate_te(rhs, name, declared)
-  | ast.WrapDecl name inner _ ->
+  | ast.WrapDecl name inner _ _ ->
       validate_te(inner, name, declared)
   | _ -> Nothing
 
@@ -6472,7 +6472,7 @@ fn alias_uses_in_decl(decl: ast.Decl, arities: Dict Int) -> Maybe String =
   | ast.TypeDecl _ _ ctors _ _ _ -> alias_uses_in_ctors(ctors, arities)
   | ast.RecordDecl _ _ fields _ _ _ -> alias_uses_in_fields(fields, arities)
   | ast.AliasDecl _ _ rhs _ -> alias_uses_in_te(rhs, arities)
-  | ast.WrapDecl _ inner _ -> alias_uses_in_te(inner, arities)
+  | ast.WrapDecl _ inner _ _ -> alias_uses_in_te(inner, arities)
   | ast.ClassDecl _ _ methods _ _ -> alias_uses_in_class_methods(methods, arities)
   | ast.InstanceDecl _ _ methods _ -> alias_uses_in_instance_methods(methods, arities)
   | _ -> Nothing
@@ -7210,7 +7210,7 @@ fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Di
       | ast.AliasDecl _ _ _ _ -> pre_scan_fn_decls(rest, env, alias_env)
       | ast.TypeDecl _ _ _ _ _ _ ->
           pre_scan_fn_decls(rest, register_type_decl_raw(decl, alias_env, env), alias_env)
-      | ast.WrapDecl _ _ _ ->
+      | ast.WrapDecl _ _ _ _ ->
           pre_scan_fn_decls(rest, register_type_decl_raw(decl, alias_env, env), alias_env)
       | _ -> pre_scan_fn_decls(rest, env, alias_env)
 
@@ -8019,7 +8019,7 @@ fn typecheck_decl(
       TypedDeclOk(typed_ast.TPassThrough(decl),
         GlobalEnv(register_type_decl_raw(decl, alias_env, global_env_dict(env))),
         env_ftv, subst)
-  | ast.WrapDecl _ _ _ ->
+  | ast.WrapDecl _ _ _ _ ->
       # WrapDecl uses the same single-ctor-synthesizing path as TypeDecl.
       TypedDeclOk(typed_ast.TPassThrough(decl),
         GlobalEnv(register_type_decl_raw(decl, alias_env, global_env_dict(env))),
