@@ -1,0 +1,19 @@
+module main
+
+# The mirror of effect_io_arrow_join_else.spr: identical program, branches
+# swapped. This order was already rejected before part 2 — the IO branch came
+# first and so became the `if`'s type — which is exactly why its twin exists.
+# Keep both: a fix that only makes one pass has not made the join order-free.
+
+fn quiet(n: Int) -> Int = n + 1
+
+fn shout(n: Int) -> Int !{IO} =
+  do
+    print("io")
+    n + 1
+
+fn pick(c: Bool) -> (Int -> Int) = if c then shout else quiet
+
+fn pure_use(c: Bool) -> Int = pick(c)(1)
+
+fn main() -> Unit !{IO} = print(int_to_string(pure_use(true)))

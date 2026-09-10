@@ -1,1 +1,1 @@
-Type mismatch: Int vs Bool
+If branches must have same type: Type mismatch: Bool vs Int

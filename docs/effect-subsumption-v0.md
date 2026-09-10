@@ -1,13 +1,13 @@
 # Effect subsumption at arrow positions (v0)
 
-Status: **Parts 0, 1 and 3 LANDED (§6.0, §6.3 + §6.4b, §6.1a). Part 2 DESIGN, awaiting
-approval — its scope is now smaller than §6.5 states; see §6.5a. Per-constructor variance
-(§6.4) is unimplemented; no program reaching it is known any more (§6.5a).**
+Status: **ALL FOUR PARTS LANDED** — part 0 §6.0, part 1 §6.3 + §6.4b, part 2 §6.5b,
+part 3 §6.1a. **Per-constructor variance (§6.4) is unimplemented**; no program reaching it
+is known any more (§6.5a). Part 2 did not land as §6.5 designed it: see §6.5b.
 Part 1 landed 2026-09-10 as two commits: polarity threaded through `unify_types` with the
 symmetric spelling replaced by `unify_expect_actual` / `unify_actual_expected` /
 `unify_join` across 36 sites, then **bounded effect variables** (§6.4b) fixing the five
 defects a code review found in the first implementation (§6.4a).
-Revision 7 (2026-09-10). The nullary type collapse
+Revision 8 (2026-09-10). The nullary type collapse
 landed on master (`docs/nullary-type-collapse-v0.md`, Option A′): the zero-arg boundary
 revision 4 excluded is now **closed** (§6.6), and the new `TThunk` arrow is a second
 comparison site part 1 must cover (§6.1). Revision 5 added part 0 after a review found
@@ -836,7 +836,11 @@ invariance is a rejected legal program, a wrong covariance is this hole, so the 
 must fail towards rejecting. If a general rule is wanted later it is inferable from each
 constructor's declared field positions, which is a separate change.
 
-### 6.5 Peer-join sites need an effect LUB, not a polarity — BLOCKER
+### 6.5 Peer-join sites need an effect LUB, not a polarity — SUPERSEDED, see §6.5b
+
+*Kept as the reasoning that identified the blocker. Its diagnosis is right and its
+prescription — a LUB/GLB by depth parity — was not what landed; §6.5b explains why the
+cheaper fix is also the more principled one.*
 
 Six of the 36 sites join two *peers*: `if`/`match` branch results, binary operands. At
 the `if`-join the call is `unify_types(then_type, else_type)` — neither side is
@@ -974,8 +978,8 @@ which binds and records no bound at all. Six sites (`infer.sprout` 1572, 3713, 3
 **And the swallow is not symmetric**, which §6.5 assumed it was. `if c then io else pure`
 is rejected today; only `if c then pure else io` launders. So "keep today's behaviour" is
 not the neutral option §6.5 lists — it is already an order-dependent rule. The mirrored
-reject pair §6.5 asks for (`effect_io_arrow_join_then` / `_else`) would therefore split
-against master today: whichever spells the IO branch first passes, and its twin fails.
+reject pair §6.5 asks for (`effect_io_arrow_join_then` / `_else`) split exactly this way
+when written: `_then` passed on arrival and `_else` was red. Part 2 (§6.5b) closed it.
 
 **This suggests a smaller part 2 than "join by depth parity".** A join could record a floor
 from whichever side is concretely `!{IO}` — reusing `record_lower`, already written — and
@@ -985,7 +989,8 @@ second-order row, since a floor at even depth is a *ceiling* at odd depth; but t
 existing `bound_role` flip, not a new GLB table. **Cost this against §6.5's design before
 implementing — the two differ, and the measurement above is the reason.**
 
-**On the `Ref` row: a failed repro is not a proof.** Four shapes were tried — write-then-
+**On the `Ref` row: a failed repro is not a proof.** *(This paragraph is unaffected by
+§6.5b — `Ref` is still §6.4's, still unimplemented.)* Four shapes were tried — write-then-
 read in one body, a pure cell into a declared `Ref (Int -> Int)` slot, an IO write through
 a declared `Ref (Int -> Int !{IO})` parameter, and the same via a top-level `let` cell to
 break tyvar sharing. All four reject, because the floor a write records travels through the
@@ -994,6 +999,60 @@ variance. That is a *different* mechanism from the one §6.4 specifies, so covar
 mutable container is still wrong in principle and §6.4 is still the fix; what changed is
 that no known program reaches it. Do not close §6.4 on this evidence — it is evidence about
 four shapes.
+
+### 6.5b What part 2 actually was — LANDED 2026-09-10
+
+**An `if` had no result type of its own.** `infer_if_merge` unified the two branch types
+against each other with `unify_join`, then typed the node as
+`apply_subst(s5, then_type)` — so the then-branch became the node's type and the else
+branch's effect was discarded. That single line is the whole defect: it is why the launder
+existed, and why it was asymmetric (`if c then io else pure` was already rejected — the IO
+branch was first, so it won).
+
+**`match` never had the bug, and it shows the fix.** `infer_match` allocates a fresh
+variable and unifies *every* arm against it as an actual (`infer_branch_unify`), typing
+the node as the variable. No arm is any other arm's contract. `if` now does exactly this:
+
+```sprout
+v <- unifier.fresh(state)                       # a result type no branch owns
+unify_actual_expected(…, then_type, ret_type)   # both branches are ACTUALs
+unify_actual_expected(…, else_type, ret_type)
+TIf(…, apply_subst(s6, ret_type), pos)          # was apply_subst(s5, then_type)
+```
+
+**Why this is better than §6.5's LUB/GLB by depth parity, not merely cheaper.** The LUB
+design asks the join to *compute* a combined effect, which needs a lattice operation, its
+dual, and a rule for which depth uses which. Handing the join a fresh variable asks it to
+*compare* instead, and the comparison machinery — polarity, bounds, the `bound_role` flip
+under a parameter — already exists from part 1 and is already the thing that gets depth
+parity right. The second-order case §6.5 raised as the reason a GLB was unavoidable is
+rejected by the landed change with no GLB written: the flip at odd depth turns the floor
+into a ceiling on its own.
+
+**The other five `unify_join` sites keep the old swallow, and are correct anyway — for a
+different reason, which is worth stating because it is what bounds the change.** They join
+binary operands (`++`, numeric, comparison, equality) and a constructor result. In each,
+what is joined is a *container* — `List X` against `List Y` — so the arrow sits under a
+type argument and the ELEMENT variable carries the bounds. The swallow only discards an
+effect when the joined thing **is** the arrow, which was the `if` node's type and nothing
+else. Verified rather than argued: `[shout] ++ [quiet]` and `[quiet] ++ [shout]` are both
+rejected under a pure element type and both accepted under an `!{IO}` one, pinned by
+`effect_io_arrow_append_join_left` / `_right` and the accept guard.
+
+Three consequences worth stating. The `if` node's type is now a *variable* resolved through
+the substitution rather than the then-branch's type — equivalent where the branches agree,
+which is every previously-accepted program. Every `if` allocates one type variable, which
+shifts fresh-variable numbering; `ir-golden-diff` reports **62 files, 0 differences**, so
+none of it reaches the IR.
+
+**And the branch-mismatch diagnostic names its two types in the other order**, which the
+suite caught: `if x > 0 then x else false` reported `Type mismatch: Int vs Bool` and now
+reports `Bool vs Int`. The message is positional (`unifier` prints its two arguments in
+call order), so the old order was an artifact of the symmetric `unify_join(then, else)`
+call that no longer exists. The new order is the `(actual, expected)` convention every
+other `unify_actual_expected` site already uses — "you supplied `Bool` where `Int` was
+expected" — so this is a small improvement rather than a cost.
+`tests/conformance/type_error/if_branch_mismatch` pins it and says why.
 
 ### 6.6 Zero-arg calls — removed in revision 4, CLOSED on master in revision 6's window
 
@@ -1126,6 +1185,10 @@ Reject (`tests/conformance/type_error/`):
 - `effect_io_arrow_join_then` and `effect_io_arrow_join_else` — §6.5, **the same program
   with the branches swapped**. Two fixtures, not one: a single one passes under a wrong
   fixed polarity, and the pair is what makes order-independence testable at all.
+  **Landed**, and the pair earned its keep: `_then` passed on arrival and only `_else` was
+  red, which is the asymmetry §6.5 assumed away. Plus `effect_io_arrow_join_second_order` —
+  §6.5's own `f1`/`f2` counterexample, the one it said needed a GLB; it is rejected by the
+  parameter-position flip alone (§6.5b).
 
 Accept (`tests/conformance/run/`) — the over-correction guards:
 - `effect_pure_arrow_into_io_slot_ok` — §5's direction, both witnesses.
@@ -1133,8 +1196,11 @@ Accept (`tests/conformance/run/`) — the over-correction guards:
   both IO and pure, pinning that variables still bind freely.
 - `effect_mixed_handler_list_ok` — §6.4's `run_all([shout, tame], 1)`, pinning that
   polarity propagates into an *immutable* type-constructor argument.
-- `effect_join_uniform_ok` — a join of two arrows with the *same* effect, pinning that
-  §6.5's LUB does not reject the ordinary case.
+- `effect_join_arrow_order_ok` — **landed as one program instead of the planned
+  `effect_join_uniform_ok`**: mixed branches into an `!{IO}` slot in *both* orders, plus
+  both-pure and both-IO joins. The uniform cases alone would not have caught a join that
+  rejects a legal mixed one, and the mirrors are what pin order-independence on the accept
+  side as well as the reject side.
 
 And one more reject fixture for §6.4, which the accept list above cannot cover:
 - `effect_io_arrow_through_ref` — the `Ref` aliasing shape. It must be rejected at

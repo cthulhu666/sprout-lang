@@ -16,14 +16,6 @@ Legend:
 
 **Effects**
 
-- [ ] `P1` **A peer join swallows an effect difference, and branch order decides.**
-  `if c then pure_fn else io_fn` under a pure declared result is accepted and a
-  pure-declared caller runs the IO; **swap the branches and the same program is rejected.**
-  Both verified by running on master. A join has no expected side, so `unify_join` records
-  no bound by construction. **Smaller than §6.5 states:** match arms and list elements are
-  now correct in both orders, leaving six `unify_join` sites, and a floor recorded at the
-  join may replace the LUB the design assumes. Part 2 of
-  `docs/effect-subsumption-v0.md` §6.5 + §6.5a (measured 2026-09-10).
 - [ ] `P3` **A type argument is judged covariantly, which is wrong for a mutable container.**
   `Ref` should be invariant in its argument. No reaching program is known — four shapes that
   laundered before bounded effect variables now reject, but via a bound travelling through

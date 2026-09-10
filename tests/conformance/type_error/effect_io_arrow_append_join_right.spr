@@ -1,0 +1,16 @@
+module main
+
+# The mirror of effect_io_arrow_append_join_left.spr: the IO operand is on the
+# right instead. Same program, and it must produce the same rejection — an
+# operand's position in a `++` cannot decide whether the effect is enforced.
+
+fn quiet(n: Int) -> Int = n + 1
+
+fn shout(n: Int) -> Int !{IO} =
+  do
+    print("io")
+    n + 1
+
+fn handlers() -> List (Int -> Int) = [quiet] ++ [shout]
+
+fn main() -> Unit !{IO} = print(int_to_string(list_length(handlers())))

@@ -1,0 +1,25 @@
+module main
+
+# A peer join: neither branch is the expected side, so before part 2 the `if`'s
+# type was simply the THEN branch's and the else branch's effect was dropped.
+# Here the IO branch is second, so it is the one dropped and `pick` type-checks
+# as pure while `pure_use` runs the IO.
+#
+# Its mirror is effect_io_arrow_join_then.spr — the same program with the
+# branches swapped, which was already rejected. The pair is the point: a rule
+# that accepts one spelling and rejects the other is not a rule.
+#
+# Verified RED by running before part 2: this printed `io` under `pure_use`.
+
+fn quiet(n: Int) -> Int = n + 1
+
+fn shout(n: Int) -> Int !{IO} =
+  do
+    print("io")
+    n + 1
+
+fn pick(c: Bool) -> (Int -> Int) = if c then quiet else shout
+
+fn pure_use(c: Bool) -> Int = pick(c)(1)
+
+fn main() -> Unit !{IO} = print(int_to_string(pure_use(false)))

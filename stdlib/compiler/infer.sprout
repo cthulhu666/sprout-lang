@@ -1555,10 +1555,11 @@ fn infer_if_checked(
               match er with
               | InferErr pos e -> InferErr(pos, e)
               | InferOk typed_else s4 es4 else_eff ->
-                  infer_if_merge(s4, es4, typed_cond, typed_then, typed_else,
+                  infer_if_merge(state, s4, es4, typed_cond, typed_then, typed_else,
                                  cond_eff, then_eff, else_eff, pos)
 
 fn infer_if_merge(
+  state: unifier.InferState,
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
   typed_cond: typed_ast.TypedExpr,
@@ -1569,16 +1570,40 @@ fn infer_if_merge(
   else_eff: types.Effect,
   pos: source.SourcePos
 ) -> InferResult !{IO} =
-  match unifier.unify_join(subst, eff_subst, typed_ast.typed_expr_type(typed_then), typed_ast.typed_expr_type(typed_else)) with
+  do
+    v <- unifier.fresh(state)
+    infer_if_join(subst, eff_subst, types.TVar(types.tyvar_id(v)), typed_cond,
+                  typed_then, typed_else, cond_eff, then_eff, else_eff, pos)
+
+# Both branches are ACTUALs against a fresh result variable, which is how a match
+# arm is already judged (infer_branch_unify). Neither branch is the other's
+# contract, so branch order cannot decide the verdict and the bounds do the
+# rejecting at the declaration that closes them.
+fn infer_if_join(
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  ret_type: types.Type,
+  typed_cond: typed_ast.TypedExpr,
+  typed_then: typed_ast.TypedExpr,
+  typed_else: typed_ast.TypedExpr,
+  cond_eff: types.Effect,
+  then_eff: types.Effect,
+  else_eff: types.Effect,
+  pos: source.SourcePos
+) -> InferResult !{IO} =
+  match unifier.unify_actual_expected(subst, eff_subst, typed_ast.typed_expr_type(typed_then), ret_type) with
   | unifier.UnifyErr e -> InferErr(pos, "If branches must have same type: " ++ e)
   | unifier.UnifyOk s5 es5 ->
-      InferOk(
-        typed_ast.TIf(typed_cond, typed_then, typed_else,
-                      unifier.apply_subst(s5, typed_ast.typed_expr_type(typed_then)), pos),
-        s5, es5,
-        unifier.apply_effect_subst(es5,
-          merge_effects(cond_eff, merge_effects(then_eff, else_eff)))
-      )
+      match unifier.unify_actual_expected(s5, es5, typed_ast.typed_expr_type(typed_else), ret_type) with
+      | unifier.UnifyErr e -> InferErr(pos, "If branches must have same type: " ++ e)
+      | unifier.UnifyOk s6 es6 ->
+          InferOk(
+            typed_ast.TIf(typed_cond, typed_then, typed_else,
+                          unifier.apply_subst(s6, ret_type), pos),
+            s6, es6,
+            unifier.apply_effect_subst(es6,
+              merge_effects(cond_eff, merge_effects(then_eff, else_eff)))
+          )
 
 # --- Call ---
 
