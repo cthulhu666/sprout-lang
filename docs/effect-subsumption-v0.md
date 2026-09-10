@@ -1089,6 +1089,14 @@ the two strings match.
 This also removed the false rejection: `-> ((Int -> Int) -> Int -> Int !{IO})` is legal and
 now compiles whichever branch is written first.
 
+One consequence to state rather than leave for the next reader to rediscover. A concrete
+`!{IO}` in a contravariant position now records nothing — `record_upper` ignores anything
+that is not pure — and it also loses the re-binding `record_lower` performed as a side
+effect, so an `!{IO}` callback slot inside a bound type becomes an unconstrained effect
+variable. That is the permissive direction (an IO-accepting slot takes any callback), and
+probes in both directions found neither laundering nor false rejection. It is the reason the
+`!{IO}`-slot cells of the matrix reject on the *declaration* rather than inside the join.
+
 That is the fifth mechanism in this document asserted from a passing fixture and then
 retracted (§6.4a's `Ref`, property 2's branch order, the `unify_join` rationale twice, and
 §6.5b's order-independence). The fixtures were green every time. **A green test reports the

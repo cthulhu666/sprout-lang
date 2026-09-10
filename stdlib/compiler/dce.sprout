@@ -37,20 +37,15 @@ fn is_pure_callee_type(t: types.Type, argc: Int) -> Bool =
 
 fn thunk_is_pure(t: types.Type) -> Bool =
   match t with
-  | types.TThunk _ eff -> effect_is_pure(eff)
+  | types.TThunk _ eff -> types.effect_is_pure(eff)
   | _ -> false
 
 fn consumed_arrows_pure(t: types.Type, argc: Int) -> Bool =
   if argc <= 0 then true
   else
     match t with
-    | types.TFunc _ ret eff _ -> effect_is_pure(eff) && consumed_arrows_pure(ret, argc - 1)
+    | types.TFunc _ ret eff _ -> types.effect_is_pure(eff) && consumed_arrows_pure(ret, argc - 1)
     | _ -> false
-
-fn effect_is_pure(eff: types.Effect) -> Bool =
-  match eff with
-  | types.EffectPure -> true
-  | _ -> false
 
 fn is_pure_expr(e: typed_ast.TypedExpr) -> Bool =
   match e with
