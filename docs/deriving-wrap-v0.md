@@ -162,6 +162,15 @@ stale.
   rejection with wrap-specific wording.
 - `tests/conformance/type_error/deriving_wrap_inner_lacks_instance.{spr,err}` —
   structural derivation requires an inner-type instance.
+- `tests/conformance/type_error/deriving_unknown_class_on_wrap.{spr,err}` — the
+  unknown-class hint lists the wrap-derivable set, not the ADT one. Advertising
+  `Enum` would send the reader to a second error.
+- `tests/conformance/emit_error/wrap_pattern_literal_inner.{spr,err}` — a wrap
+  pattern's inner arg must be a binder, and the diagnostic blames its *shape*
+  rather than the arg count. The nested binders route wrap patterns through
+  `bind_wrap_inner_arg`, so this message became reachable from inside a tuple or
+  an ADT field; the capability gap itself is in `BACKLOG.md` under `wrap`
+  ergonomics.
 - `tests/stdlib/compiler/test_parser.spr` — clause placement, multi-class,
   backward compatibility, empty/unparenthesised rejection, and the
   applied-inner-type case (`= Dict Int deriving (Eq)`).

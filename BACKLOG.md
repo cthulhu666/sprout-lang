@@ -1322,6 +1322,10 @@ deferral happened, not for current behaviour. Still open:
   desugaring to a match, useful for all single-constructor types); an auto-generated zero-cost
   accessor; a named-field variant `wrap Foo { inner: T }`; and `opaque type` for Scala 3-style
   module-boundary transparency, distinct from the shipped `export type Name` export-opacity.
+  Also: a wrap pattern's inner arg must be a binder, so `| Line 0 ->` and `| Line (a, b) ->` are
+  rejected by `bind_wrap_inner_arg` at emit time rather than compiled — the payload has to be
+  bound first and matched separately. Lifting it means the recursive tag/field descent that
+  function avoids, which for a wrap is a plain identity bind plus the inner pattern's own test.
 - [ ] `P3` **Scoped type variables — deferred, no current demand.**
   `docs/scoped-type-variables-analysis-2026-07-26.md`. The feature does not apply today: implicit HM
   quantification means no lexical binder, and there are no local type annotations for a body `:: a`

@@ -1,0 +1,11 @@
+# The unknown-class hint must list what a WRAP can actually derive. Advertising
+# `Enum` here points at a dead end: validate_one_wrap_deriving_class rejects
+# `deriving (Enum)` on a wrap outright, so the hint would send the reader to a
+# second error. ADTs keep `Enum` in their hint because they can derive it.
+import stdlib.terminal as terminal
+
+wrap Line = Int deriving (Show)
+
+fn main() -> Unit !{IO} =
+  do
+    terminal.write("unreachable")

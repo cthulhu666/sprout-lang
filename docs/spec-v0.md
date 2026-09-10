@@ -1002,8 +1002,10 @@ heap-typed at the same SSA register.
 Restrictions:
 
 - The right-hand side is a single type expression (no `|` alternatives).
-- No type parameters on the wrap itself in v0; the inner type may be
-  parameterized (`wrap MyDict a = Dict a`) but the wrap itself is monomorphic.
+- No type parameters on the wrap itself in v0; the inner type may be an
+  *applied* parameterized type (`wrap BodyEnv = Dict types.Scheme`), but the
+  wrap is monomorphic. `wrap MyDict a = Dict a` binds `a` on the wrap and does
+  not parse — the name is followed directly by `=`.
 - The constructor name and type name are identical and cannot be set separately.
 - A `wrap` may derive `Eq`, `Ord` and `ToString` (§8.6); `Enum` is rejected.
   Any other class membership needs an explicit `instance` declaration.

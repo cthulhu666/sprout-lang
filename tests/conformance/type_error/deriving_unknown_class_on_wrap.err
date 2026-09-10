@@ -1,0 +1,1 @@
+unknown class in deriving clause for `Line`: `Show` (a wrap supports Eq, Ord, ToString)
