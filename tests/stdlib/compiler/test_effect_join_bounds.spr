@@ -57,6 +57,10 @@ fn main() -> Unit !{IO} =
       join(io_arrow(), io_arrow()),
       "(Int -> Int !{IO}) -> Int -> Int !{IO}"),
 
+    # Both orders, because "REJECT" also satisfies the not-IO assertions above —
+    # a one-sided guard leaves the mirror's false rejection invisible.
     check_true("neither order rejects a legal join",
-      join(io_arrow(), pure_arrow()) != "REJECT")
+      join(io_arrow(), pure_arrow()) != "REJECT"),
+    check_true("nor does the mirror",
+      join(pure_arrow(), io_arrow()) != "REJECT")
   ])
