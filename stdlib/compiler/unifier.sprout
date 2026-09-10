@@ -932,16 +932,16 @@ fn unify_effects_applied(
 
 export fn instantiate(state: InferState, scheme: types.Scheme) -> types.Type !{IO} =
   do
-    type_repl <- build_type_repl(state, types.scheme_vars(scheme), dict_empty())
-    effect_repl <- build_effect_repl(state, types.scheme_effect_vars(scheme), dict_empty())
+    type_repl <- build_type_repl(state, scheme, dict_empty())
+    effect_repl <- build_effect_repl(state, scheme, dict_empty())
     apply_full_subst(type_repl, effect_repl, types.scheme_type(scheme))
 
 # Like instantiate but also returns the prog-var → fresh-TVar substitution.
 # Used by infer.check_fn_body to build constraint-forwarding markers.
 export fn instantiate_with_vars(state: InferState, scheme: types.Scheme) -> (types.Type, Dict types.Type) !{IO} =
   do
-    type_repl <- build_type_repl(state, types.scheme_vars(scheme), dict_empty())
-    effect_repl <- build_effect_repl(state, types.scheme_effect_vars(scheme), dict_empty())
+    type_repl <- build_type_repl(state, scheme, dict_empty())
+    effect_repl <- build_effect_repl(state, scheme, dict_empty())
     let t = apply_full_subst(type_repl, effect_repl, types.scheme_type(scheme))
     (t, type_repl)
 
@@ -957,8 +957,8 @@ export fn instantiate_ctor_pattern(state: InferState, scheme: types.Scheme) -> t
   do
     let body = types.scheme_type(scheme)
     let result_ftv = types.ftv(ctor_result_of(body))
-    type_repl <- build_ctor_pattern_repl(state, types.scheme_vars(scheme), result_ftv, dict_empty())
-    effect_repl <- build_effect_repl(state, types.scheme_effect_vars(scheme), dict_empty())
+    type_repl <- build_ctor_pattern_repl(state, scheme, result_ftv, dict_empty())
+    effect_repl <- build_effect_repl(state, scheme, dict_empty())
     apply_full_subst(type_repl, effect_repl, body)
 
 fn ctor_result_of(t: types.Type) -> types.Type =
@@ -966,10 +966,19 @@ fn ctor_result_of(t: types.Type) -> types.Type =
   | types.TFunc _ ret _ _ -> ctor_result_of(ret)
   | _ -> t
 
-# The renaming's DOMAIN is threaded whole, not consumed with the list, because a
-# target minted for the first binder must dodge the last one too.
-fn build_ctor_pattern_repl(state: InferState, vars: List String, result_ftv: List String, acc: Dict types.Type) -> Dict types.Type !{IO} =
-  build_ctor_pattern_repl_in(state, vars, vars, result_ftv, acc)
+# What a renaming must avoid: the binders it rewrites AND the body's free
+# variables, since a body still names variables the environment owns and renaming
+# a binder onto one captures it. Threaded whole rather than consumed with the
+# list — a target minted for the first binder must dodge the last one too.
+fn type_repl_domain(scheme: types.Scheme) -> List String =
+  types.list_union(types.scheme_vars(scheme), types.ftv(types.scheme_type(scheme)))
+
+fn effect_repl_domain(scheme: types.Scheme) -> List String =
+  types.list_union(types.scheme_effect_vars(scheme),
+    types.scheme_effect_vars_of(types.scheme_type(scheme), types.scheme_effects(scheme)))
+
+fn build_ctor_pattern_repl(state: InferState, scheme: types.Scheme, result_ftv: List String, acc: Dict types.Type) -> Dict types.Type !{IO} =
+  build_ctor_pattern_repl_in(state, types.scheme_vars(scheme), type_repl_domain(scheme), result_ftv, acc)
 
 fn build_ctor_pattern_repl_in(state: InferState, vars: List String, domain: List String,
                               result_ftv: List String, acc: Dict types.Type) -> Dict types.Type !{IO} =
@@ -1021,8 +1030,8 @@ fn fresh_effect_outside(state: InferState, domain: List String) -> String !{IO} 
     name <- fresh_effect(state)
     if list_member(name, domain) then fresh_effect_outside(state, domain) else name
 
-fn build_type_repl(state: InferState, vars: List String, acc: Dict types.Type) -> Dict types.Type !{IO} =
-  build_type_repl_in(state, vars, vars, acc)
+fn build_type_repl(state: InferState, scheme: types.Scheme, acc: Dict types.Type) -> Dict types.Type !{IO} =
+  build_type_repl_in(state, types.scheme_vars(scheme), type_repl_domain(scheme), acc)
 
 fn build_type_repl_in(state: InferState, vars: List String, domain: List String, acc: Dict types.Type) -> Dict types.Type !{IO} =
   match vars with
@@ -1032,8 +1041,8 @@ fn build_type_repl_in(state: InferState, vars: List String, domain: List String,
         name <- fresh_outside(state, domain)
         build_type_repl_in(state, rest, domain, dict_set(v, types.TVar(types.tyvar_id(name)), acc))
 
-fn build_effect_repl(state: InferState, vars: List String, acc: Dict types.Effect) -> Dict types.Effect !{IO} =
-  build_effect_repl_in(state, vars, vars, acc)
+fn build_effect_repl(state: InferState, scheme: types.Scheme, acc: Dict types.Effect) -> Dict types.Effect !{IO} =
+  build_effect_repl_in(state, types.scheme_effect_vars(scheme), effect_repl_domain(scheme), acc)
 
 fn build_effect_repl_in(state: InferState, vars: List String, domain: List String, acc: Dict types.Effect) -> Dict types.Effect !{IO} =
   match vars with

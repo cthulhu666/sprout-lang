@@ -32,6 +32,7 @@ constructed scheme with a state whose counter is at 0:
 | `forall $t2 $t0. $t2 -> $t0` | `$t2 ↦ $t0`, `$t0 ↦ $t1` | `$t1 -> $t1` — two independent variables fused |
 | `forall $t0. $t0 -> $t0` | `$t0 ↦ $t0` | never returns (10s timeout, exit 124) |
 | `forall $t1 $t0. $t1 -> $t0` | `$t1 ↦ $t0`, `$t0 ↦ $t1` | never returns |
+| `forall a. a -> $t0`, `$t0` free | `a ↦ $t0` | `$t0 -> $t0` — a free variable captured |
 
 Effect variables have the identical defect through `apply_effect_subst`'s own
 chasing lookup, so a two-cycle over `$e<n>` binders hangs the same way.
@@ -68,10 +69,14 @@ fn fresh_outside(state: InferState, domain: List String) -> String !{IO} =
     if list_member(name, domain) then fresh_outside(state, domain) else name
 ```
 
-`build_type_repl`, `build_effect_repl` and `build_ctor_pattern_repl` thread the
-whole binder list as `domain` (not the shrinking tail — a target minted for the
-first binder must dodge the last one too) and mint through `fresh_outside` /
-`fresh_effect_outside`.
+The domain to avoid is the binders **plus the body's free variables**
+(`type_repl_domain` / `effect_repl_domain`). Binders alone is not enough:
+`generalize` quantifies the resolved type's free variables minus the
+environment's, so a scheme body still names variables the environment owns.
+`forall a. a -> $t0` renames `a` to `$t0` and comes back as `$t0 -> $t0` — the
+same fusion with a free variable in place of a binder. The whole list is threaded
+rather than consumed with the recursion, because a target minted for the first
+binder must dodge the last one too.
 
 With range ∩ domain = ∅ every lookup terminates in one step, and chasing then
 *equals* simultaneous substitution. `fresh_outside` terminates because the counter

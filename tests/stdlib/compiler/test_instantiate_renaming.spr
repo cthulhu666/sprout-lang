@@ -79,6 +79,33 @@ fn ctor_params_distinct(t: types.Type) -> Bool =
       | _ -> false
   | _ -> false
 
+
+# A renaming must also avoid the body's FREE variables. `generalize` quantifies
+# the free variables of the resolved type MINUS the environment's, so a scheme
+# body still mentions variables the environment owns — and renaming a binder onto
+# one captures it: the same fusion, with a free variable in place of a binder.
+fn captured_var_scheme() -> types.Scheme =
+  scheme_of(Cons("a", Nil), Nil, arrow(tv("a"), tv("$t0"), types.EffectPure))
+
+fn captured_effect_scheme() -> types.Scheme =
+  scheme_of(Nil, Cons("e", Nil),
+    arrow(
+      arrow(types.type_int(), types.type_int(), types.EffectVar("e")),
+      arrow(types.type_int(), types.type_int(), types.EffectVar("$e0")),
+      types.EffectPure))
+
+fn captured_ctor_scheme() -> types.Scheme =
+  scheme_of(Cons("a", Nil), Nil,
+    arrow(tv("a"),
+      arrow(tv("$t0"),
+        types.TApp(types.TApp(types.TConst(types.type_id("Pair")), tv("a")), tv("$t0")),
+        types.EffectPure),
+      types.EffectPure))
+
+fn instantiated_type(r: (types.Type, Dict types.Type)) -> types.Type =
+  match r with
+  | (t, _) -> t
+
 # Every case starts from a counter at 0, which is what a check that did not mint
 # these binders has.
 fn main() -> Unit !{IO} =
@@ -93,11 +120,22 @@ fn main() -> Unit !{IO} =
     ctor <- unifier.instantiate_ctor_pattern(s4, fused_ctor_scheme())
     s5 <- unifier.new_state()
     with_vars <- unifier.instantiate_with_vars(s5, fused_var_scheme())
+    s6 <- unifier.new_state()
+    captured <- unifier.instantiate(s6, captured_var_scheme())
+    s7 <- unifier.new_state()
+    captured_eff <- unifier.instantiate(s7, captured_effect_scheme())
+    s8 <- unifier.new_state()
+    captured_ctor <- unifier.instantiate_ctor_pattern(s8, captured_ctor_scheme())
     run_suite("instantiate_renaming", [
       check_true("two binders stay two variables", sides_distinct(fused)),
       check_true("source-spelled binders are unaffected", sides_distinct(control)),
       check_true("two effect binders stay two effect variables", nested_effects_distinct(effects)),
       check_true("a ctor pattern keeps its params apart", ctor_params_distinct(ctor)),
       check_true("instantiate_with_vars keeps them apart too",
-        sides_distinct(match with_vars with | (t, _) -> t))
+        sides_distinct(instantiated_type(with_vars))),
+      check_true("a binder is not renamed onto a free variable", sides_distinct(captured)),
+      check_true("an effect binder is not renamed onto a free one",
+        nested_effects_distinct(captured_eff)),
+      check_true("a ctor pattern avoids its free variables too",
+        ctor_params_distinct(captured_ctor))
     ])
