@@ -741,7 +741,10 @@ first-class signatures.)
 if n > 0 then "pos" else "non-pos"
 ```
 
-Both branches must type-check to the same type.
+Both branches must type-check to the same type. That type is a common one neither
+branch owns — as for a `match` result (§5.5) — so writing the branches in the other
+order cannot change whether the expression type-checks. This is what makes the effect
+rule of §7 rule 8 reach a join.
 
 ### 5.5 Match expression
 
@@ -1803,11 +1806,11 @@ Effect note for v0:
    purities, while a variable inference has already resolved to `!{IO}` is still caught:
    the bound, not the spelling, decides.
 
-   **One gap is known and reachable.** A peer **join** has no expected side, so the two
-   arrows are combined by binding and the IO branch's effect can be swallowed:
-   `if c then pure_fn else io_fn` is accepted under a pure declared result and a
-   pure-declared caller then runs the IO, while the same program with the branches swapped
-   is rejected (`docs/effect-subsumption-v0.md` §6.5).
+   **A peer join is covered too.** `if c then pure_fn else io_fn` is judged against a fresh
+   result type that neither branch owns, so both are compared as values and the verdict does
+   not depend on which branch is written first — the same treatment a `match` arm already
+   received. A join whose branches differ in effect is rejected wherever the result is
+   required to be pure, in either spelling.
 
    A type ARGUMENT is judged **covariantly**, which is unsound in principle for a mutable
    container: `Ref` should be invariant in its argument. No program reaching it is known —
@@ -1992,17 +1995,17 @@ Effect note for v0:
 > > fix closed it — a zero-parameter function now has a `() -> T` arrow that carries its
 > > effect — and the probe is rejected under rule 8 (`docs/nullary-type-collapse-v0.md`).
 > >
-> > Parts 0, 1 and 3 of `docs/effect-subsumption-v0.md` have landed; part 2 (peer joins,
-> > §6.5) and per-constructor variance (§6.4) have not. Only the first is a reachable gap.
+> > All four parts of `docs/effect-subsumption-v0.md` have landed. Per-constructor variance
+> > (§6.4) has not, and no program reaching it is known.
 > >
 > > **State the guarantee positively now, but not further than it goes.** A declaration is
 > > checked against the effects its own body's calls infer *and* against every function
-> > value crossing a slot boundary in either direction. What it is still not checked
-> > against: an effect arriving through an effect **variable**, and an arrow produced by a
-> > peer join. Both are named above with the shape that reaches them.
+> > value crossing a slot boundary in either direction, joins included. **One channel is
+> > still unchecked: an effect arriving through an effect variable**, in the two shapes
+> > named above.
 > >
 > > A **class dispatch** is no longer on that list as such: an instance may no longer
-> > declare more effect than its class. It can still carry one of the remaining channels,
+> > declare more effect than its class. It can still carry that one remaining channel,
 > > since a class method's arrow parameter is an arrow like any other.
 >
 > Which check covers which rule:
@@ -2051,14 +2054,10 @@ Effect note for v0:
 >    is *expected* — a written slot — an `!{IO}` arrow is rejected and a pure one accepted,
 >    the direction reversing under a parameter. Effect **variables** bind on either path,
 >    carrying bounds that reject only where they contradict, so acceptance does not depend
->    on effect inference reaching a particular answer mid-way: element order and argument
->    order do not decide it.
->
->    **Branch order still does, and that is a defect, not a rule.** At a peer join neither
->    side is expected, so unification stays total and binds; `if c then io_fn else pure_fn`
->    is rejected while the same program with the branches swapped is accepted and launders.
->    Part 2 of `docs/effect-subsumption-v0.md` is the fix; until it lands, a peer join of
->    two arrows is the one place where the spelling decides the verdict.
+>    on effect inference reaching a particular answer mid-way: **element order, argument
+>    order and branch order do not decide it.** A construct that joins peers — `if`, a
+>    `match` arm — introduces a fresh result type that none of the peers owns, so no peer
+>    becomes the contract for the others by being written first.
 >
 >    This replaces "unification of an arrow's effect is total… rejection happens at the
 >    declaration boundary and nowhere else", which stood until 2026-09-10 and was the

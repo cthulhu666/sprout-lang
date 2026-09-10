@@ -1,2 +1,5 @@
+# The order is (actual, expected): the else branch is judged against the type the
+# then branch bound into the `if`'s own fresh result variable.
+
 fn bad(x: Int) -> Int =
   if x > 0 then x else false

@@ -1,0 +1,43 @@
+module main
+
+# The over-correction guard for the join. Every function here is legal, and each
+# shape appears in both branch orders — the mirrors are the point, since a join
+# that rejects one spelling of a legal program is as wrong as one that accepts an
+# illegal one.
+
+fn quiet(n: Int) -> Int = n + 1
+
+fn louder(n: Int) -> Int = n + 2
+
+fn shout(n: Int) -> Int !{IO} =
+  do
+    print("io")
+    n + 1
+
+# Mixed effects into an `!{IO}` slot: a pure arrow is usable wherever an `!{IO}`
+# one is expected, whichever branch it sits in.
+fn mixed_pure_first(c: Bool) -> (Int -> Int !{IO}) = if c then quiet else shout
+
+fn mixed_io_first(c: Bool) -> (Int -> Int !{IO}) = if c then shout else quiet
+
+# Uniform joins: two branches with the SAME effect must be untouched.
+fn both_pure(c: Bool) -> (Int -> Int) = if c then quiet else louder
+
+fn both_io(c: Bool) -> (Int -> Int !{IO}) = if c then shout else shout
+
+# `++` is the other peer join a user can write. It goes through a different site
+# and stays correct for a different reason — the arrow sits under a type argument,
+# so the element variable carries the bounds — but the claim is the same one.
+fn appended_pure_first() -> List (Int -> Int !{IO}) = [quiet] ++ [shout]
+
+fn appended_io_first() -> List (Int -> Int !{IO}) = [shout] ++ [quiet]
+
+fn main() -> Unit !{IO} =
+  do
+    print(int_to_string(mixed_pure_first(true)(1)))
+    print(int_to_string(mixed_io_first(false)(1)))
+    print(int_to_string(both_pure(true)(1)))
+    print(int_to_string(both_pure(false)(1)))
+    print(int_to_string(both_io(true)(1)))
+    print(int_to_string(list_length(appended_pure_first())))
+    print(int_to_string(list_length(appended_io_first())))

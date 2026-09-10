@@ -1,0 +1,25 @@
+module main
+
+# The join's own recursion, one arrow deeper. `f2` declares a PURE callback slot
+# and `f1` an `!{IO}` one; joining them must not produce an arrow whose parameter
+# accepts either, because the branch that wins at runtime decides which body
+# actually receives the callback.
+#
+# `f2` is declared pure and calls `cb`, so handing it `shout` runs IO behind a
+# pure signature. Rejecting needs the direction to FLIP under a parameter: the
+# join takes the weaker obligation at odd depth, not the stronger one.
+#
+# Verified RED by running before part 2: this printed `io` from inside `f2`.
+
+fn shout(n: Int) -> Int !{IO} =
+  do
+    print("io")
+    n + 1
+
+fn f1(cb: Int -> Int !{IO}, n: Int) -> Int !{IO} = cb(n)
+
+fn f2(cb: Int -> Int, n: Int) -> Int = cb(n)
+
+fn pick(b: Bool) -> ((Int -> Int !{IO}) -> Int -> Int !{IO}) = if b then f1 else f2
+
+fn main() -> Unit !{IO} = print(int_to_string(pick(false)(shout, 1)))
