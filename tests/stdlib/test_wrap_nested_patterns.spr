@@ -1,0 +1,124 @@
+module main
+import stdlib.test (check_eq, check_true, run_suite)
+
+# Regression test: a `wrap` constructor pattern NESTED inside another pattern.
+#
+# A wrap value is unboxed — it IS its payload, with tag sentinel -1 and no
+# header. translate_match_arm_ctor honours that at the TOP level of a match, but
+# the two nested binders (bind_tuple_items, bind_ctor_field_args) emitted an
+# unconditional IRGetTag + tag comparison for any nested ConstructorPattern,
+# with no `tag == -1` check. The failure had two faces:
+#   - wrap over an unboxed type (Int): sprout_tag deref'd the raw integer as a
+#     pointer -> SIGSEGV.
+#   - wrap over a heap type (String): the tag read succeeded but returned the
+#     payload's own tag, which never equals -1, so the arm SILENTLY missed and
+#     execution fell through to "runtime error: non-exhaustive match".
+#
+# The second face is why this file tests values, not just liveness: a fix that
+# only stopped the crash could still take the wrong arm.
+#
+# This shape is what `deriving (Eq)` on a wrap emits (a tuple of two wrap ctor
+# patterns), so the bug blocked wrap deriving entirely — but it is reachable
+# from hand-written code with no deriving involved, as the cases below are.
+
+wrap Line = Int
+wrap Name = String
+
+# --- Nested in a tuple pattern (bind_tuple_items) ---
+
+fn add_lines(a: Line, b: Line) -> Int =
+  match (a, b) with
+  | (Line x, Line y) -> x + y
+
+# Wrap over a heap type: exercises the silent-miss face, where the stray tag
+# read does not crash but yields a tag that cannot match -1.
+fn join_names(a: Name, b: Name) -> String =
+  match (a, b) with
+  | (Name x, Name y) -> x ++ y
+
+# Mixed: a wrap pattern beside a plain binder and a wildcard, so the field_idx
+# walk has to stay aligned across arm kinds.
+fn line_with_tag(a: Line, t: Int, ignored: Int) -> Int =
+  match (a, t, ignored) with
+  | (Line x, n, _) -> x * n
+
+# Nested tuple containing wrap patterns: the recursive descent must keep the
+# no-tag-test behaviour at every depth.
+fn sum_deep(p: (Line, (Line, Line))) -> Int =
+  match p with
+  | (Line a, (Line b, Line c)) -> a + b + c
+
+# A wildcard as the wrap's inner arg still binds nothing and must not tag-test.
+fn count_pair(p: (Line, Line)) -> Int =
+  match p with
+  | (Line _, Line _) -> 2
+
+# --- Nested in an ADT constructor pattern's field (bind_ctor_field_args) ---
+
+fn line_or_zero(m: Maybe Line) -> Int =
+  match m with
+  | Just (Line x) -> x
+  | Nothing -> 0
+
+fn name_or_empty(m: Maybe Name) -> String =
+  match m with
+  | Just (Name s) -> s
+  | Nothing -> ""
+
+type Pair (..) =
+  | Pair Line Line
+
+fn pair_sum(p: Pair) -> Int =
+  match p with
+  | Pair (Line a) (Line b) -> a + b
+
+# Wrap inside a tuple inside an ADT field: crosses both binders in one pattern.
+type Holder (..) =
+  | Holder (Line, Line)
+
+fn holder_sum(h: Holder) -> Int =
+  match h with
+  | Holder (Line a, Line b) -> a + b
+
+# --- A real ADT arm must still tag-test correctly next to a wrap arm ---
+#
+# The fix is gated on tag == -1, so a boxed single-field ADT nested in a tuple
+# must keep its tag test. Without one, this would match the wrong arm.
+type Tagged (..) =
+  | TagA Int
+  | TagB Int
+
+fn which_tag(p: (Tagged, Line)) -> Int =
+  match p with
+  | (TagA n, Line x) -> n + x
+  | (TagB n, Line x) -> (n + x) * 100
+
+fn main() -> Unit !{IO} =
+  run_suite("wrap_nested_patterns", [
+    # --- tuple-nested, unboxed inner (was SIGSEGV) ---
+    check_eq("wrap pair in tuple pattern", add_lines(Line(2), Line(3)), 5),
+    check_eq("wrap pair, zero payload", add_lines(Line(0), Line(0)), 0),
+    check_eq("wrap pair, negative payload", add_lines(Line(-4), Line(1)), -3),
+
+    # --- tuple-nested, heap inner (was a silent non-exhaustive miss) ---
+    check_eq("wrap over String in tuple pattern", join_names(Name("ab"), Name("cd")), "abcd"),
+    check_eq("wrap over empty String", join_names(Name(""), Name("")), ""),
+
+    # --- alignment with neighbouring binders ---
+    check_eq("wrap beside binder and wildcard", line_with_tag(Line(6), 7, 99), 42),
+    check_eq("wrap in nested tuple", sum_deep((Line(1), (Line(2), Line(3)))), 6),
+    check_eq("wildcard inner arg", count_pair((Line(1), Line(2))), 2),
+
+    # --- ADT-field-nested (was SIGSEGV / silent miss) ---
+    check_eq("wrap in Just field", line_or_zero(Just (Line(4))), 4),
+    check_eq("Nothing arm still reached", line_or_zero(Nothing), 0),
+    check_eq("wrap over String in Just field", name_or_empty(Just (Name("hi"))), "hi"),
+    check_eq("two wrap fields in one ctor", pair_sum(Pair (Line(5), Line(6))), 11),
+    check_eq("wrap in tuple in ctor field", holder_sum(Holder((Line(3), Line(4)))), 7),
+
+    # --- a boxed ADT nested in a tuple must STILL tag-test ---
+    check_eq("boxed ADT keeps its tag test (first arm)", which_tag((TagA(1), Line(2))), 3),
+    check_eq("boxed ADT keeps its tag test (second arm)", which_tag((TagB(1), Line(2))), 300),
+    check_true("the two boxed arms are distinguishable",
+      which_tag((TagA(1), Line(2))) != which_tag((TagB(1), Line(2))))
+  ])

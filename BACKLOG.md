@@ -993,15 +993,15 @@ Legend:
   `ord_*` helpers, every instance, and every call site doing `compare(...) < 0`. Options: keep
   `Int`, migrate hard, or `compare_int` + a new `compare`.
 - [ ] `P2` **`wrap` instance lifting — reuse the base type's instances as the wrap type.**
-  `wrap Age = Int deriving (Num, Ord, ToString)` generating instances that unwrap → delegate →
-  rewrap, **while `Age` stays distinct from `Int`**. This is Haskell's GeneralizedNewtypeDeriving,
-  verified to preserve distinctness — NOT a coercion (auto-wrap destroys mistake-prevention,
-  auto-unwrap loses the wrap type; both are a transparent alias). Scope: operators with all-wrapped
-  operands (`age1 + age2 : Age`, `name1 ++ name2 : Name`). `++` falls out for free since it already
+  `wrap Age = Int deriving (Num)` generating instances that unwrap → delegate → rewrap, **while
+  `Age` stays distinct from `Int`**. This is Haskell's GeneralizedNewtypeDeriving, verified to
+  preserve distinctness — NOT a coercion (auto-wrap destroys mistake-prevention, auto-unwrap loses
+  the wrap type; both are a transparent alias). Scope: operators with all-wrapped operands
+  (`age1 + age2 : Age`, `name1 ++ name2 : Name`). `++` falls out for free since it already
   desugars to `Semigroup.append` — route the witness to the lifted instance, not the `String`
-  peephole. Out of scope: mixed `age + 1` with a bare literal (needs numeric-literal polymorphism).
-  `docs/coercions-and-literals-v1-draft.md` Case B; requires `spec-v0.md:343-344`'s "wrap cannot
-  derive" line to change.
+  peephole. Out of scope: mixed `age + 1` with a bare literal (needs numeric-literal polymorphism);
+  `Eq`/`Ord`/`ToString`, which now derive **structurally** (`docs/deriving-wrap-v0.md`) — lifting
+  must not silently re-render them. `docs/coercions-and-literals-v1-draft.md` Case B.
 - [ ] `P2` **Investigate qualified imported-constructor access** (low confidence).
   `import stdlib.foo as f` then `f.MkCtor(x)` gave `Unknown variable: f.MkCtor` for a parametric
   ADT, while the *type* `f.Box` and functions `f.mk_box` resolved fine and a non-parametric ADT's

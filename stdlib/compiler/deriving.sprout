@@ -3,15 +3,18 @@ import stdlib.compiler.ast as ast
 import stdlib.compiler.source as source
 
 # ---------------------------------------------------------------------------
-# Codegen for `deriving (...)` clauses on TypeDecls.
+# Codegen for `deriving (...)` clauses on TypeDecls, RecordDecls and WrapDecls.
 #
 # v1 scope: synthesize ast.InstanceDecl nodes for each (class, type) pair in
-# a TypeDecl's deriving list. Implements Eq, ToString, and Ord for all ADT
+# a declaration's deriving list. Implements Eq, ToString, and Ord for all ADT
 # shapes (nullary and field-bearing). Serialize/Deserialize were explored and
 # reverted on 2026-06-10; see docs/deriving-v1-draft.md "Scope revision" for why.
 #
+# Records get their own emitters (fields by name); wraps reuse the ADT emitters
+# over a reconstructed synthetic constructor — see "Wrap support" below.
+#
 # Entry point is expand_deriving_decls, called by the bundler after
-# qualification: it walks a list of decls, finds TypeDecls with non-empty
+# qualification: it walks a list of decls, finds those with non-empty
 # deriving_classes, and appends synthesized InstanceDecls.
 #
 # Design ref: docs/deriving-v1-draft.md
@@ -454,6 +457,44 @@ fn derive_instances_for_classes(name: String, type_params: List String, ctors: L
       | Nothing -> derive_instances_for_classes(name, type_params, ctors, pos, rest)
       | Just inst -> Cons(inst, derive_instances_for_classes(name, type_params, ctors, pos, rest))
 
+# --- Wrap support ------------------------------------------------------------
+#
+# A `wrap Line = Int` IS a single-constructor, single-positional-field ADT whose
+# constructor shares the type's name (spec §5.6.1). So deriving on a wrap needs
+# no emitters of its own: reconstruct that constructor and hand it to the ADT
+# path. Eq/Ord compare the one inner value; ToString renders `Line(3)`.
+#
+# Rendering is STRUCTURAL, not lifted — `Line(3)`, never `3`. This is the same
+# choice Haskell's stock strategy and Rust's derive(Debug) make, and it keeps a
+# wrap visible in output instead of reading as a transparent alias, which is the
+# distinction `wrap` exists to draw. Lifting instances through to the inner type
+# (`Num`, operators) is separate, unimplemented work — see BACKLOG.md.
+#
+# A wrap has no type parameters in v0, so the ADT path's per-type-param
+# constraint machinery is passed Nil and contributes nothing.
+fn wrap_synthetic_ctor(name: String, inner: ast.TypeExpr) -> ast.TypeConstructor =
+  ast.TypeConstructor(name, [inner], Nil, Nil)
+
+# Wraps derive Eq/Ord/ToString only. Enum is ill-defined: `from_ordinal` must
+# CONSTRUCT a value, and a wrap's payload cannot be rebuilt from an Int alone.
+# The ADT message ("constructor `Line` has fields") would blame a constructor
+# the user never wrote, so wraps get their own wording.
+fn validate_wrap_deriving_classes_list(name: String, classes: List String) -> Maybe String =
+  match classes with
+  | Nil -> Nothing
+  | Cons class_name rest ->
+      match validate_one_wrap_deriving_class(name, class_name) with
+      | Just err -> Just(err)
+      | Nothing -> validate_wrap_deriving_classes_list(name, rest)
+
+fn validate_one_wrap_deriving_class(name: String, class_name: String) -> Maybe String =
+  match parse_derivable_class(class_name) with
+  | Nothing ->
+      Just("unknown class in deriving clause for `" ++ name ++ "`: `" ++ class_name ++ "` (v1 supports Eq, Ord, ToString, Enum)")
+  | Just DcEnum ->
+      Just("cannot derive `Enum` for `" ++ name ++ "`: a wrap always carries one payload, not an enumeration; Enum requires an ADT whose constructors are all nullary")
+  | Just _ -> Nothing
+
 # --- Record emitters ---------------------------------------------------------
 #
 # A record is a single product: no sum, no tag, no constructor to match on. So
@@ -629,6 +670,14 @@ export fn expand_deriving_decls(decls: List ast.Decl) -> List ast.Decl =
           | _ -> Cons(d, list_append(
                           derive_record_instances_for_classes(name, type_params, fields, pos, deriving_classes),
                           expand_deriving_decls(rest)))
+      # A wrap reuses the ADT emitters over its synthetic constructor; no type
+      # parameters in v0, hence Nil.
+      | ast.WrapDecl name inner deriving_classes pos ->
+          match deriving_classes with
+          | Nil -> Cons(d, expand_deriving_decls(rest))
+          | _ -> Cons(d, list_append(
+                          derive_instances_for_classes(name, Nil, [wrap_synthetic_ctor(name, inner)], pos, deriving_classes),
+                          expand_deriving_decls(rest)))
       | _ -> Cons(d, expand_deriving_decls(rest))
 
 # --- Validation pass --------------------------------------------------------
@@ -655,6 +704,8 @@ fn validate_one_deriving_decl(d: ast.Decl) -> Maybe String =
       validate_deriving_classes_list(name, ctors, deriving_classes)
   | ast.RecordDecl name _ _ deriving_classes _ _ ->
       validate_record_deriving_classes_list(name, deriving_classes)
+  | ast.WrapDecl name _ deriving_classes _ ->
+      validate_wrap_deriving_classes_list(name, deriving_classes)
   | _ -> Nothing
 
 # Records derive Eq/Ord/ToString only; Enum is ill-defined (a record is one

@@ -432,7 +432,7 @@ fn refs_passthrough(d: ast.Decl, acc: Set) -> Set =
   | ast.RecordDecl _ _ _ _ _ _ -> acc
   | ast.ClassDecl _ _ _ _ _ -> acc
   | ast.AliasDecl _ _ _ _ -> acc
-  | ast.WrapDecl _ _ _ -> acc
+  | ast.WrapDecl _ _ _ _ -> acc
   | ast.ExternFnDecl _ _ _ _ _ -> acc
   | ast.FnDecl name _ _ _ _ _ _ ->
       panic("dce.refs_passthrough: untyped FnDecl `" ++ name ++ "` reached codegen (internal error)")

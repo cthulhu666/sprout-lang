@@ -1,0 +1,19 @@
+no_prelude
+
+# `no_prelude` is here for GOLDEN SIZE, not semantics. See `01_noparam.spr`.
+#
+# Pins the IR for a `wrap` ctor pattern NESTED inside a tuple pattern. A wrap is
+# unboxed (tag sentinel -1), so the emitted body must contain NO sprout_tag call
+# and no tag comparison for the two `Line` patterns — the tuple element IS the
+# payload. Emitting a tag read here segfaulted on an unboxed payload and
+# silently missed the arm on a heap one; `docs/deriving-wrap-v0.md` §nested
+# codegen bug. The behavioural counterpart is
+# `tests/stdlib/test_wrap_nested_patterns.spr`; this shape is the IR tripwire.
+
+wrap Line = Int
+
+fn add_lines(p: (Line, Line)) -> Int =
+  match p with
+  | (Line x, Line y) -> x + y
+
+fn main() -> Unit !{IO} = print(add_lines((Line(2), Line(3))))

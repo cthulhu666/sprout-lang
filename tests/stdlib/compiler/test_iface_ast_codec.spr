@@ -395,7 +395,11 @@ fn main() -> Unit !{IO} =
     # WrapDecl roundtrip — regression for the codec gap W5 exhaustiveness
     # surfaced (encode/decode of `wrap Foo = T` was missing entirely).
     assert_true(state, "WrapDecl roundtrip",
-      rt_decl(ast.WrapDecl("Money", ast.TypeName("Int"), pos0())))
+      rt_decl(ast.WrapDecl("Money", ast.TypeName("Int"), Nil, pos0())))
+    # Non-empty deriving list: an encoder that dropped the field would still
+    # round-trip the Nil case above, so the list must be exercised loaded.
+    assert_true(state, "WrapDecl roundtrip with deriving classes",
+      rt_decl(ast.WrapDecl("Money", ast.TypeName("Int"), ["Eq", "Ord", "ToString"], pos0())))
 
     # === TypeExpr variants ===
 

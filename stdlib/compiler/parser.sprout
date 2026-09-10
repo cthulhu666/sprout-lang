@@ -2276,16 +2276,20 @@ fn parse_decl_dispatch(tokens: Vec token.Token, i: Int) -> Result ParseError (as
       cur_pos(tokens, i)
     ))
 
-# wrap Name = TypeExpr
+# wrap Name = TypeExpr [deriving (Class, ...)]
 # Zero-cost distinct type: single-constructor, single-field. The constructor
 # is named after the type and is implicit in the declaration syntax.
+# `deriving` is trailing, as on records: the `= T` RHS is self-contained, unlike
+# an ADT's `=` which opens a multi-line constructor list. `deriving` is a hard
+# keyword, so it cannot be mistaken for a further type argument in `= Dict Int`.
 fn parse_wrap_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
   do
     (_, i2) <- expected_keyword("wrap", tokens, i)
     (name_tok, i3) <- expected_ident("wrap name", tokens, i2)
     (_, i4) <- expected_symbol("=", tokens, i3)
     (inner, i5) <- parse_type_expr(tokens, i4)
-    Ok((ast.WrapDecl(token.token_text(name_tok), inner, cur_pos(tokens, i)), i5))
+    (deriving_classes, i6) <- parse_deriving_clause(tokens, i5)
+    Ok((ast.WrapDecl(token.token_text(name_tok), inner, deriving_classes, cur_pos(tokens, i)), i6))
 
 fn parse_type_decl_or_record(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
   if is_alias_type_decl(tokens, i) then parse_alias_decl(tokens, i)

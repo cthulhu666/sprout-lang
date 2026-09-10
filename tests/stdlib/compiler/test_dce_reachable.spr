@@ -127,7 +127,7 @@ fn main() -> Unit !{IO} =
     #    patterns, which carry no `TVar`, so pruning these would be unsound.
     types_kept = count_decls(dce.elim_unreachable(
       prog([fn_calling("main", []),
-            typed_ast.TPassThrough(ast.WrapDecl("Meters", ast.TypeName("Int"), pos()))])))
+            typed_ast.TPassThrough(ast.WrapDecl("Meters", ast.TypeName("Int"), Nil, pos()))])))
 
     # 10. REGRESSION. A fragment with no entry point must come back untouched.
     #     `ir_pipeline.compile_program_streaming` also translates snippets — the
