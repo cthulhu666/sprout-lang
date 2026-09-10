@@ -1814,6 +1814,11 @@ Effect note for v0:
    received. A join whose branches differ in effect is rejected wherever the result is
    required to be pure, in either spelling.
 
+   **This holds under a parameter too.** A callback slot is contravariant, so joining an
+   `!{IO}` slot with a pure one leaves the slot at the pure callback *both* branches accept,
+   not at whichever branch was written first. Declaring such a join to accept an `!{IO}`
+   callback is rejected; declaring it to accept a pure one is legal.
+
    A type ARGUMENT is judged **covariantly**, which is unsound in principle for a mutable
    container: `Ref` should be invariant in its argument. No program reaching it is known —
    four `Ref` shapes that laundered before bounds were added are now rejected, because a

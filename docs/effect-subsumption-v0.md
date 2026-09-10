@@ -1047,10 +1047,59 @@ element effects are *concrete*: a join has nothing to swallow unless one side ca
 open effect variable the other can bind to pure. Whether that is reachable through `++` is
 open — filed in `BACKLOG.md`, not answered here.
 
-This is the fourth mechanism in this document that was asserted from a passing fixture and
-then had to be retracted (§6.4a's `Ref`, property 2's branch order, the `unify_join`
-rationale twice). The fixtures were green every time. **A green test reports the outcome and
-says nothing about which code path produced it** — read the path.
+### 6.5c Part 2 was order-independent only at first order — the GLB was unavoidable after all
+
+Part 2's claim was checked at the top level and asserted generally. One arrow deeper it was
+false: `if b then f2 else f1`, where `f1` takes an `!{IO}` callback and `f2` a pure one,
+**compiled and ran `shout` inside `f2`**, whose signature is `fn f2(cb: Int -> Int, n: Int)
+-> Int`. The mirror rejected. `match` behaved identically, so this predates part 2 rather
+than being caused by it.
+
+A 2×2 probe (branch order × declared slot) showed the declared slot made no difference at
+all: **only branch order decided the verdict**, and the IO-first order *falsely rejected* a
+legal program. Two defects, opposite directions.
+
+Reading the bounds off the substitution rather than guessing from verdicts gave the cause in
+one step. For the joined result variable `r`:
+
+```
+pure_first: joined = (Int -> Int !{$br/0}) -> Int -> Int !{$br/1}
+            hi($br/0) = -          ← f2's pure slot recorded NO ceiling
+            $br/0     = !{IO}      ← f1 then bound the slot to IO
+```
+
+`bind_bounded` receives `AsFloor` for this side, `freshen_arrow_effects` applied that one
+role at every depth, and `record_lower` ignores `Pure` — so the branch demanding a pure
+callback was forgotten, and the next branch bound the slot to IO.
+
+The fix is two halves, and **neither works alone**:
+
+1. `freshen_arrow_effects` carries the PARITY of each position. A parameter is
+   contravariant, so its bound flips to `AsCeiling`, which `record_upper` does record. This
+   is the GLB at odd depth §6.5 said was unavoidable — obtained by flipping which bound is
+   recorded, not by computing a second lattice operation.
+2. `bind_open` no longer binds IO over a pure ceiling. The ceiling **is** the meet, so it
+   stands and the declaration judges it.
+
+The slot now settles at the meet — the pure callback both branches accept — in either order.
+The two orders still *render* differently (resolved pure, versus a variable carrying a pure
+ceiling), which is why `test_effect_join_bounds` asserts that neither is IO rather than that
+the two strings match.
+
+This also removed the false rejection: `-> ((Int -> Int) -> Int -> Int !{IO})` is legal and
+now compiles whichever branch is written first.
+
+That is the fifth mechanism in this document asserted from a passing fixture and then
+retracted (§6.4a's `Ref`, property 2's branch order, the `unify_join` rationale twice, and
+§6.5b's order-independence). The fixtures were green every time. **A green test reports the
+outcome and says nothing about which code path produced it** — read the path.
+
+Two habits ended the streak, and both belong to §6.5c rather than to any of the retractions.
+Every claim about an *order* gets its mirrored twin written at the same time — the
+second-order fixture was the one case left unmirrored, and it was the one that was wrong.
+And a claim about a *mechanism* is read off the mechanism: `test_effect_join_bounds` calls
+the unifier directly and asserts on the bounds it records, which found in one run what three
+rounds of inference-from-verdicts had each got wrong.
 
 Three consequences worth stating. The `if` node's type is now a *variable* resolved through
 the substitution rather than the then-branch's type — equivalent where the branches agree,

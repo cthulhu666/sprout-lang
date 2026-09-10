@@ -433,35 +433,39 @@ fn record_upper(eff_subst: Dict types.Effect, v: String,
   else Ok(dict_set(upper_bound_key(v), e, eff_subst))
 
 # The traversal's result: the rewritten type, the next index, and the bounds owed.
+# Each bound carries the PARITY of the position it came from. A parameter owes the
+# opposite obligation to the arrow carrying it: without that, a pure callback slot
+# records a floor, `record_lower` drops it for not being IO, and the branch that
+# demands a pure callback is forgotten.
 type Freshened (..) =
-  | Freshened types.Type Int (List (String, types.Effect))
+  | Freshened types.Type Int (List (String, types.Effect, Bool))
 
 # Binding a tyvar to a type carrying CONCRETE arrow effects is what turns a value's
 # observed effect into a contract for everything that variable later meets.
 # Replace each with a variable derived from the owner and a positional index —
 # single assignment makes that collision-free without a name supply — and hand back
 # the concrete as a bound for the caller to record with the right role.
-fn freshen_arrow_effects(owner: String, t: types.Type, idx: Int) -> Freshened =
+fn freshen_arrow_effects(owner: String, t: types.Type, idx: Int, flipped: Bool) -> Freshened =
   match t with
   | types.TFunc p r e o ->
-      match freshen_arrow_effects(owner, p, idx) with
+      match freshen_arrow_effects(owner, p, idx,! flipped) with
       | Freshened p2 i1 b1 ->
-          match freshen_arrow_effects(owner, r, i1) with
+          match freshen_arrow_effects(owner, r, i1, flipped) with
           | Freshened r2 i2 b2 ->
               freshen_one(owner, types.TFunc(p2, r2, types.EffectVar(derived_var(owner, i2)), o),
-                          e, i2, list_append(b1, b2))
+                          e, i2, list_append(b1, b2), flipped)
   | types.TThunk r e ->
-      match freshen_arrow_effects(owner, r, idx) with
+      match freshen_arrow_effects(owner, r, idx, flipped) with
       | Freshened r2 i1 b1 ->
           freshen_one(owner, types.TThunk(r2, types.EffectVar(derived_var(owner, i1))),
-                      e, i1, b1)
+                      e, i1, b1, flipped)
   | types.TApp b a ->
-      match freshen_arrow_effects(owner, b, idx) with
+      match freshen_arrow_effects(owner, b, idx, flipped) with
       | Freshened b2 i1 b1 ->
-          match freshen_arrow_effects(owner, a, i1) with
+          match freshen_arrow_effects(owner, a, i1, flipped) with
           | Freshened a2 i2 b2s -> Freshened(types.TApp(b2, a2), i2, list_append(b1, b2s))
   | types.TTuple xs ->
-      match freshen_list(owner, xs, idx, Nil, Nil) with
+      match freshen_list(owner, xs, idx, Nil, Nil, flipped) with
       | Freshened rebuilt i1 bs -> Freshened(rebuilt, i1, bs)
   | types.TVar _ -> Freshened(t, idx, Nil)
   | types.TConst _ -> Freshened(t, idx, Nil)
@@ -469,14 +473,14 @@ fn freshen_arrow_effects(owner: String, t: types.Type, idx: Int) -> Freshened =
 # A concrete effect becomes a bound; a variable is left exactly as written, since
 # it is already flexible and its own bounds travel with it.
 fn freshen_one(owner: String, rebuilt: types.Type, e: types.Effect, idx: Int,
-               acc: List (String, types.Effect)) -> Freshened =
+               acc: List (String, types.Effect, Bool), flipped: Bool) -> Freshened =
   match e with
   | types.EffectVar _ -> Freshened(restore_effect(rebuilt, e), idx, acc)
   | types.EffectRow _ -> Freshened(restore_effect(rebuilt, e), idx, acc)
   | types.EffectPure ->
-      Freshened(rebuilt, idx + 1, list_append(acc, [(derived_var(owner, idx), e)]))
+      Freshened(rebuilt, idx + 1, list_append(acc, [(derived_var(owner, idx), e, flipped)]))
   | types.EffectIO ->
-      Freshened(rebuilt, idx + 1, list_append(acc, [(derived_var(owner, idx), e)]))
+      Freshened(rebuilt, idx + 1, list_append(acc, [(derived_var(owner, idx), e, flipped)]))
 
 # Enumerated, not defaulted: a future effect-carrying constructor would silently
 # DROP its effect here, and the loss is invisible — the type still checks
@@ -494,12 +498,14 @@ fn derived_var(owner: String, idx: Int) -> String =
   "$b" ++ owner ++ "/" ++ int_to_string(idx)
 
 fn freshen_list(owner: String, xs: List types.Type, idx: Int,
-                acc: List types.Type, bs: List (String, types.Effect)) -> Freshened =
+                acc: List types.Type, bs: List (String, types.Effect, Bool),
+                flipped: Bool) -> Freshened =
   match xs with
   | Nil -> Freshened(types.TTuple(list_reverse(acc)), idx, bs)
   | Cons x rest ->
-      match freshen_arrow_effects(owner, x, idx) with
-      | Freshened x2 i1 b1 -> freshen_list(owner, rest, i1, Cons(x2, acc), list_append(bs, b1))
+      match freshen_arrow_effects(owner, x, idx, flipped) with
+      | Freshened x2 i1 b1 ->
+          freshen_list(owner, rest, i1, Cons(x2, acc), list_append(bs, b1), flipped)
 
 # Bind, but leave the variable's effects flexible and remember what was seen.
 # At a join nothing is remembered, so the pre-change behaviour stands there.
@@ -512,22 +518,32 @@ fn bind_bounded(name: String, t: types.Type, subst: Dict types.Type,
 
 fn bind_bounded_with(name: String, t: types.Type, subst: Dict types.Type,
                      eff_subst: Dict types.Effect, role: BoundRole) -> Unified =
-  match freshen_arrow_effects(name, t, 0) with
+  match freshen_arrow_effects(name, t, 0, false) with
   | Freshened rewritten _ bounds ->
       match record_bounds(eff_subst, bounds, role) with
       | Err e -> UnifyErr(e)
       | Ok es1 -> unified_of_bind(bind_var(name, rewritten, subst), es1)
 
-fn record_bounds(eff_subst: Dict types.Effect, bounds: List (String, types.Effect),
+fn record_bounds(eff_subst: Dict types.Effect, bounds: List (String, types.Effect, Bool),
                  role: BoundRole) -> Result String (Dict types.Effect) =
   match bounds with
   | Nil -> Ok(eff_subst)
   | Cons b rest ->
       match b with
-      | (v, e) ->
-          match record_one_bound(eff_subst, v, e, role) with
+      | (v, e, flipped) ->
+          match record_one_bound(eff_subst, v, e, at_parity(role, flipped)) with
           | Err msg -> Err(msg)
           | Ok es1 -> record_bounds(es1, rest, role)
+
+# The joined slot may demand at most what EVERY branch accepts, where a result
+# must permit at least what every branch performs.
+fn at_parity(role: BoundRole, flipped: Bool) -> BoundRole =
+  if ! flipped then role
+  else
+    match role with
+    | AsCeiling -> AsFloor
+    | AsFloor -> AsCeiling
+    | NoBound -> NoBound
 
 fn record_one_bound(eff_subst: Dict types.Effect, v: String, e: types.Effect,
                     role: BoundRole) -> Result String (Dict types.Effect) =
@@ -704,10 +720,17 @@ fn effect_slot_meet(eff_subst: Dict types.Effect, expected: types.Effect,
 
 # Keep today's binding for a still-unbound variable so `!{e}` continues to resolve;
 # the bound recorded alongside is what makes the resolution checkable.
+#
+# A pure ceiling already on the variable outranks the binding. Binding IO over it
+# is how a joined callback slot forgot that one branch demands a pure callback:
+# the slot then read back as IO and matched a declaration promising IO. The
+# ceiling IS the meet, so it stands and the declaration judges it.
 fn bind_open(eff_subst: Dict types.Effect, v: String, e: types.Effect) -> Dict types.Effect =
   match dict_get(v, eff_subst) with
   | Just _ -> eff_subst
-  | Nothing -> unify_arrow_effects(eff_subst, types.EffectVar(v), e)
+  | Nothing ->
+      if types.effect_is_io(e) && upper_is_pure(eff_subst, v) then eff_subst
+      else unify_arrow_effects(eff_subst, types.EffectVar(v), e)
 
 # Total over both sides. A catch-all here would answer "accept" for a
 # constructor added later, and the one cell that must reject is a single pair —

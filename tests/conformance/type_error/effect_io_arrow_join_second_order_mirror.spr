@@ -1,0 +1,19 @@
+module main
+
+# The mirror of effect_io_arrow_join_second_order.spr: the PURE-slot branch is
+# written first. A rule that rejects one spelling and accepts the other is not a
+# rule — and this order laundered, running `shout` inside `f2`, which declares a
+# pure callback slot.
+
+fn shout(n: Int) -> Int !{IO} =
+  do
+    print("io")
+    n + 1
+
+fn f1(cb: Int -> Int !{IO}, n: Int) -> Int !{IO} = cb(n)
+
+fn f2(cb: Int -> Int, n: Int) -> Int = cb(n)
+
+fn pick(b: Bool) -> ((Int -> Int !{IO}) -> Int -> Int !{IO}) = if b then f2 else f1
+
+fn main() -> Unit !{IO} = print(int_to_string(pick(true)(shout, 1)))
