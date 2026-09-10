@@ -564,6 +564,14 @@ Legend:
   the two halves the window needs, so O(region rows) is reachable — but the accessor's shape
   depends on whether the IDE editor pane wants a window or the halves. Harmless for a commit
   composer, not for a source file. Design: `docs/tui-text-area-v0.md` §4.6.
+- [ ] `P2` **TUI `text_area` — an application can send a caret in but never read one out.**
+  `on_content` takes a `Maybe buffer.Caret`, and the only outbound is `on_change: String -> m`
+  (`text_area.sprout:231`), so nothing hands a `Caret` back. `docs/tui-content-update-v0.md` §9.3
+  motivates the payload with an IDE restoring a cursor into a file it reopens — that round trip is
+  not performable today: the app has no `Buffer` to call `buffer_caret` on, and mirroring the text
+  through `buffer_open` puts the caret at the end. So the app must invent two `Int`s, which is also
+  why wrapping `Caret`'s axes was tried and reverted — it guarded a value the app can never hold.
+  Wants a caret readout; shape depends on whether `on_change` widens or a second handler appears.
 - [ ] `P2` **TUI `text_area` — what C3b left out.** Soft wrap (needs height-for-width, which
   `Measured` cannot express); selection, clipboard and undo; word motion and the chord family;
   tab-stop expansion on paste, which today blanks a tab to one space and loses the indentation of

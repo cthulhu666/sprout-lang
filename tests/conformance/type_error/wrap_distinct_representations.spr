@@ -1,0 +1,19 @@
+# Two wraps over the SAME representation are distinct types. This is the whole
+# point of `wrap` (spec §5.6.1), and every use of it for mistake-prevention
+# rests on it.
+#
+# No passing test can pin this: `tests/stdlib/test_deriving_wrap.spr` says so in
+# as many words, because the rejected expression cannot appear in a file that
+# compiles.
+import stdlib.terminal as terminal
+
+wrap Metres = Int
+
+wrap Seconds = Int
+
+fn travelled(m: Metres) -> Metres = m
+
+fn main() -> Unit !{IO} =
+  do
+    let wrong = travelled(Seconds(3))
+    terminal.write("unreachable")
