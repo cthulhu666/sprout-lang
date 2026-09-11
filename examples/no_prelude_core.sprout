@@ -1,0 +1,101 @@
+no_prelude
+
+# `no_prelude` leaves only the floor: the 15 prelude externs whose signatures
+# mention primitive types only (docs/no-prelude-core-v0.md §4.1).
+#
+#   print  eprint  panic  int_to_string  double_to_string  char_to_string
+#   char_to_str  char_from_codepoint  to_double  str_concat  str_len
+#   str_slice  str_find  str_starts_with  str_compare
+#
+# Everything else is an Unknown variable error: List, Maybe, Vec, Dict, every
+# combinator and class, and the off-floor externs (argv_get, vector_*, map_*,
+# ref_*). `++` goes through Semigroup, and `${…}` through string_concat_many,
+# so both are out. Primitives, operators, match, do and effects are untouched.
+
+type Maybe a =
+  | Nothing
+  | Just a
+
+# `[a, b]` desugars to Cons/Nil by name, so a list literal builds this type.
+type List a =
+  | Cons a (List a)
+  | Nil
+
+type Setting =
+  | Setting String String
+
+# No prelude ToString to collide with.
+class Show a
+  fn show(value: a) -> String
+
+instance Show Setting
+  fn show(value: Setting) -> String =
+    match value with
+    | Setting key val -> str_concat(key, str_concat(" = ", val))
+
+fn reverse_onto(xs: List a, acc: List a) -> List a =
+  match xs with
+  | Nil -> acc
+  | Cons x rest -> reverse_onto(rest, Cons(x, acc))
+
+fn reverse(xs: List a) -> List a =
+  reverse_onto(xs, Nil)
+
+# str_find answers -1 when absent and counts characters, the unit str_slice takes.
+fn split_first(s: String, sep: String) -> Maybe (String, String) =
+  if at < 0 then Nothing
+  else Just((str_slice(s, 0, at), str_slice(s, at + str_len(sep), str_len(s))))
+where
+  at = str_find(s, sep)
+
+fn split_onto(s: String, sep: String, acc: List String) -> List String =
+  match split_first(s, sep) with
+  | Nothing -> Cons(s, acc)
+  | Just (field, rest) -> split_onto(rest, sep, Cons(field, acc))
+
+fn split(s: String, sep: String) -> List String =
+  reverse(split_onto(s, sep, Nil))
+
+fn parse_onto(fields: List String, acc: List Setting) -> List Setting =
+  match fields with
+  | Nil -> reverse(acc)
+  | Cons field rest ->
+      match split_first(field, "=") with
+      | Nothing -> parse_onto(rest, acc)
+      | Just (key, val) -> parse_onto(rest, Cons (Setting(key, val), acc))
+
+fn lookup(key: String, settings: List Setting) -> Maybe String =
+  match settings with
+  | Nil -> Nothing
+  | Cons (Setting k val) rest ->
+      if k == key then Just(val)
+      else lookup(key, rest)
+
+# `<-` picks its monad by unqualified name, so it binds the Maybe above.
+fn endpoint(settings: List Setting) -> Maybe String = do
+  host <- lookup("host", settings)
+  port <- lookup("port", settings)
+  Just(str_concat(host, str_concat(":", port)))
+
+fn describe(found: Maybe String) -> String =
+  match found with
+  | Nothing -> "endpoint: incomplete config"
+  | Just address -> str_concat("endpoint: ", address)
+
+fn print_all(settings: List Setting) -> Unit !{IO} =
+  match settings with
+  | Nil -> ()
+  | Cons setting rest ->
+      do
+        print(show(setting))
+        print_all(rest)
+
+let source = "host=localhost;port=8080;mode=strict"
+
+fn main() -> Unit !{IO} = do
+  print("settings:")
+  print_all(settings)
+  print(describe(endpoint(settings)))
+  print(describe(endpoint(Cons (Setting("host", "localhost"), Nil))))
+where
+  settings = parse_onto(split(source, ";"), Nil)

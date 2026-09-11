@@ -170,10 +170,29 @@ to be shadowed, and staying bare is what makes the two limits above go away.
 
 The opt-out is whole-file. Selective hiding (`hiding(null)`) is not provided.
 
-> **Known limitation.** The checker is still handed the prelude's schemes
-> unconditionally, so a `no_prelude` file that calls a prelude function
-> type-checks and then fails in the IR parser (`use of undefined value
-> '@negate'`) rather than reporting an unknown name. Tracked in `BACKLOG.md`.
+What a `no_prelude` file *does* receive is the **floor**: the prelude `extern fn`
+declarations whose signatures mention only primitive types. Those 15 names are
+
+```
+print  eprint  panic
+int_to_string  double_to_string  char_to_string  char_to_str
+char_from_codepoint  to_double
+str_concat  str_len  str_slice  str_find  str_starts_with  str_compare
+```
+
+Nothing else the prelude declares is in scope. Naming any other prelude name —
+a function, a type, a class, or an off-floor extern such as `argv_get`,
+`vector_*`, `map_*`, `native_set_*` or `ref_*` — is an `Unknown variable` error
+from the typechecker, reported with a source position.
+
+The floor carries no types, classes or instances, which is precisely what leaves
+the file's own `Maybe`, `Cons`/`Nil` and `class` declarations nothing to collide
+with. Two consequences follow from the same rule: `++` resolves through the
+`Semigroup` class and is therefore unavailable (use `str_concat`), and a
+`` `${…}` `` template lowers to `string_concat_many`, which is off-floor.
+`examples/no_prelude_core.sprout` is a complete program written against the
+floor; [no-prelude-core-v0.md](./no-prelude-core-v0.md) §4.1 gives the
+rationale for where the cut falls.
 
 ### Externs are outside the module system
 
