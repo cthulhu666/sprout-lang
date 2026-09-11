@@ -34,8 +34,7 @@ Nothing new in the widget contract: `View` gains no field.
 (`BACKLOG.md`, **TUI `list_view` and `tree` — per-item rendering**) and it should
 not be re-opened here. Multi-select and check-boxes, which `brick-filetree` has and no
 M5 module needs. Mouse, deferred with the hit-test tree. Filtering, which is the
-command palette's job over a flat list. Subtree-granular content updates (§8).
-Icons, columns and horizontal scrolling.
+command palette's job over a flat list. Icons, columns and horizontal scrolling.
 
 ## 3. Prior art
 
@@ -133,10 +132,27 @@ application supplies.
 on_expand: Maybe (List String -> m)
 ```
 
-The application does the IO in `update` and hands the tree back through
-`on_content`, exactly as `list_view` takes new rows. v0 replaces the **whole**
-tree rather than splicing one subtree — it reuses the landed channel unchanged
-and needs no second inbound path. §8 keeps the granular version.
+The application does the IO in `update` and hands the answer back through
+`on_content`, as `list_view` takes new rows. The payload is a small sum:
+
+```sprout
+export type Update (..) =
+  | Forest (List Node)             # replace everything
+  | At (List String) (List Node)   # the children of one path
+```
+
+**`At` is not an optimisation.** The first draft had only `Forest`, and building
+the demo proved it cannot express lazy loading at all: `app.sprout` states there
+is *"deliberately no separate `Ref AppState`"*, so the only state is the widget
+tree — and a widget's state is existential. An application answering
+`on_expand(["src"])` therefore has no way to know which *other* directories are
+currently open or already loaded, and so cannot reconstruct a whole forest. `At`
+names the path it read and carries only that directory's children; everything
+else, the open set and the selection included, stands.
+
+A path naming nothing changes nothing. The forest is the application's and a
+widget must not grow one, so a stale `At` — a directory read that finished after
+the user collapsed its parent — is inert rather than resurrecting a subtree.
 
 A node whose children are already `Loaded` expands with no message: it is not a
 request, and re-reading a directory the user merely collapsed and reopened would
@@ -194,10 +210,12 @@ export type Children (..) = | NoChildren | Unread | Loaded (List Node)
 
 export type Node = (label: String, children: Children)
 
+export type Update (..) = | Forest (List Node) | At (List String) (List Node)
+
 export type TreeOpts m = (start: List String, page: Int, look: ListStyle,
                           on_highlight: Maybe (List String -> m),
                           on_expand: Maybe (List String -> m),
-                          on_content: Maybe (m -> Maybe (List Node)))
+                          on_content: Maybe (m -> Maybe Update))
 
 export fn tree_opts() -> TreeOpts m
 
@@ -247,8 +265,6 @@ behavioural and is covered above: one asks for children, the other does not.
 
 ## 8. Deferred, filed in `BACKLOG.md`
 
-- **A replacement rebuilds the whole forest.** v0 swaps the lot; splicing one
-  path's children is what a large project wants.
 - **Sibling labels must be unique** — §4.1's constraint, lifted by
   `tui-tree-widget`'s caller-chosen identifier.
 - **Per-item rendering** — folded into `list_view`'s entry, not a second one.

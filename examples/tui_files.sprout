@@ -1,0 +1,173 @@
+module main
+
+# A file browser: a `tree` on the left reading real directories, a `text_area`
+# on the right showing the file under the cursor. Design: docs/tui-tree-v0.md,
+# docs/tui-content-update-v0.md.
+#
+# This is the shape `ide/filetree` needs, and the reason the tree's content
+# update carries `At` rather than a whole forest. An application has no model of
+# its own — `app.sprout` keeps no `Ref AppState`, and a widget's state is
+# existential — so `update` cannot rebuild a forest it has no way to read. It
+# answers `Expand` with the ONE directory it just read, and the widget splices.
+#
+# Both directions of the round trip are here: the widget asks (`on_expand`,
+# `on_select`), `update` does the IO in a command, and the answer goes back
+# ADDRESSED, so it reaches the widget without passing through `update` again.
+#
+# Run it in a terminal, from the repo root; Tab moves between the panes,
+# Right/Left open and close a directory, Enter shows a file, Esc quits.
+
+import stdlib.fs as fs
+import stdlib.chan (Chan, chan_send)
+import stdlib.task (Scope)
+import stdlib.fs.path as path
+import stdlib.tui.app as app
+import stdlib.tui.buffer as buf
+import stdlib.tui.event as event
+import stdlib.tui.geometry as g
+import stdlib.tui.screen as scr
+import stdlib.tui.style as sty
+import stdlib.tui.widget as widget
+import stdlib.tui.widgets.container as ct
+import stdlib.tui.widgets.focus as focus
+import stdlib.tui.widgets.text as txt
+import stdlib.tui.widgets.text_area as ta
+import stdlib.tui.widgets.tree as tr
+
+type Msg (..) =
+  # The tree asks; `update` answers with a command.
+  | Expand (List String)
+  | Open (List String)
+  # Answers, addressed back to the widget that asked.
+  | Listed (List String) (List tr.Node)
+  | Shown String
+  # The area announces every edit. Nothing listens — the file is not written
+  # back — but the handler is required, and dropping it here is the honest
+  # spelling of "read only for now".
+  | Edited String
+  | Quit
+
+type alias Says = List Msg
+type alias Asks = List(widget.Cmd Msg)
+
+# ── the panes ───────────────────────────────────────────────────────────────
+
+fn files_id() -> widget.WidgetId = widget.WidgetId("files")
+
+fn view_id() -> widget.WidgetId = widget.WidgetId("view")
+
+# Every directory starts unread, so nothing touches the disk until the user
+# opens something — the property `Unread` exists for.
+fn entry_node(e: (String, fs.Entry)) -> tr.Node =
+  match e with
+  | (name, info) ->
+      tr.Node(label = name,
+              children = if fs.entry_is_dir(info) then tr.Unread
+                         else tr.NoChildren)
+
+fn nodes_of(es: List (String, fs.Entry)) -> List tr.Node =
+  list_map(entry_node, es)
+
+# The path the widget names is a path of LABELS; `path.join` turns it into one
+# the filesystem takes. Never `"/"` by hand — the separator is `fs.path`'s.
+fn joined(segs: List String) -> String =
+  fold(\ (acc, seg) -> path.join(acc, seg), ".", segs)
+
+fn read_children(segs: List String) -> Msg !{IO} =
+  match fs.read_dir(joined(segs)) with
+  | Ok es -> Listed(segs, nodes_of(es))
+  # A directory that cannot be read becomes an empty one rather than an error
+  # pane: the tree shows it opened and holding nothing, which is what the user
+  # can act on.
+  | Err _ -> Listed(segs, Nil)
+
+fn read_body(segs: List String) -> Msg !{IO} =
+  match fs.read_text(joined(segs)) with
+  | Ok body -> Shown(body)
+  | Err e -> Shown(`cannot read ${joined(segs)}: ${e}`)
+
+fn listed_for(m: Msg) -> Maybe tr.Update =
+  match m with
+  | Listed segs ns -> Just(tr.At(segs, ns))
+  | _ -> Nothing
+
+fn shown_for(m: Msg) -> Maybe (String, Maybe buf.Caret) =
+  match m with
+  # The caret goes to the start: a file being OPENED is read from the top,
+  # unlike one being reopened where the place left matters.
+  | Shown body -> Just((body, Nothing))
+  | _ -> Nothing
+
+fn files() -> widget.Widget Msg =
+  tr.tree_with(files_id(), Nil, Open,
+               tr.tree_opts() with (on_expand = Just(Expand),
+                                    on_content = Just(listed_for), page = 10))
+
+fn viewer() -> widget.Widget Msg =
+  ta.text_area_with(view_id(), Edited,
+                    ta.text_area_opts() with (on_content = Just(shown_for)))
+
+# ── the application's own widget ────────────────────────────────────────────
+
+fn keys_id() -> widget.WidgetId = widget.WidgetId("keys")
+
+# Esc reaches the broadcast only because the focused widget DECLINED it — the
+# tree and the area both let it through, which is what makes it the
+# application's binding rather than something a pane swallows.
+fn keys_on_event(n: Int, ev: event.Event) -> (Int, Says, Asks) =
+  match ev with
+  | event.KeyPress k _ -> if quits(k) then (n, [Quit], Nil) else (n, Nil, Nil)
+  | _ -> (n, Nil, Nil)
+
+fn quits(k: event.Key) -> Bool =
+  match k with
+  | event.KEsc -> true
+  | _ -> false
+
+fn keys_render(n: Int, r: g.Region, s: scr.Screen) -> Unit !{IO} = ()
+
+fn keys_measure(n: Int, avail: g.Size) -> widget.Measured =
+  widget.fixed_size(g.Size(0, 0))
+
+fn keys() -> widget.Widget Msg =
+  widget.Widget(widget.View(state = 0, on_event = keys_on_event,
+                            route = widget.no_route, render = keys_render,
+                            measure = keys_measure))
+
+# ── the tree of widgets ─────────────────────────────────────────────────────
+
+fn footer() -> widget.Widget Msg =
+  txt.label("Tab moves, Right/Left open and close, Enter shows, Esc quits")
+
+fn body() -> widget.Widget Msg =
+  ct.row([ct.fraction(1, files()), ct.fraction(2, viewer())])
+
+fn root() -> widget.Widget Msg =
+  focus.focus_ring([files_id(), view_id()],
+                   ct.column([ct.fit(txt.label("Sprout files")),
+                              ct.fraction(1, body()), ct.fit(footer()),
+                              ct.fit(keys())]))
+
+# ── what the application decides ────────────────────────────────────────────
+
+# Only the two ASKS reach here. `Listed` and `Shown` are addressed to a widget,
+# so the pump delivers them without `update` seeing one — they appear below
+# only as the fallback the framework guarantees when the target has gone.
+fn update(m: Msg, w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow, Asks) =
+  match m with
+  | Quit -> app.done(w, app.Quit)
+  | Expand segs ->
+      (w, app.Continue, [widget.cmd_to(files_id(), \_ -> read_children(segs))])
+  | Open segs ->
+      (w, app.Continue, [widget.cmd_to(view_id(), \_ -> read_body(segs))])
+  | _ -> app.done(w, app.Continue)
+
+# The first read is the root directory, asked for before the first frame so the
+# tree is never briefly empty. `boot` posts into the same channel a command
+# answers on, which is what lets it address the tree directly.
+fn boot(scope: Scope, ch: Chan (app.Signal Msg)) -> Unit !{IO} = do
+  m <- read_children(Nil)
+  chan_send(ch, app.SigTo(files_id(), m))
+
+fn main() -> Unit !{IO} =
+  app.run(app.App(root = root(), update = update, tick_ms = 500, boot = boot))

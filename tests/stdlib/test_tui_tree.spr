@@ -24,6 +24,14 @@ type Msg (..) deriving (Eq, ToString) =
   # one would drag that through `deriving` for no test value.
   | Reload
   | ReloadSrc
+  # A SPLICE: the answer to `on_expand`, carrying one directory's children
+  # rather than a whole new forest. An application has no model of its own
+  # (`app.sprout`: "there is deliberately no separate `Ref AppState`"), so it
+  # cannot rebuild a forest it cannot read.
+  | SrcListed
+  # A splice at the ROOT: the initial load names no path, because the forest
+  # itself is what is being filled.
+  | RootListed
 
 type alias Says = List Msg
 type alias Asks = List(widget.Cmd Msg)
@@ -88,10 +96,12 @@ fn lighting() -> tr.TreeOpts Msg =
 fn expanding() -> tr.TreeOpts Msg =
   lighting() with (on_expand = Just(Expanded))
 
-fn content_of(m: Msg) -> Maybe (List tr.Node) =
+fn content_of(m: Msg) -> Maybe tr.Update =
   match m with
-  | Reload -> Just(roots_without_docs())
-  | ReloadSrc -> Just(roots_with_src())
+  | Reload -> Just(tr.Forest(roots_without_docs()))
+  | ReloadSrc -> Just(tr.Forest(roots_with_src()))
+  | SrcListed -> Just(tr.At(["src"], [leaf("main.spr")]))
+  | RootListed -> Just(tr.At(Nil, [leaf("only")]))
   | _ -> Nothing
 
 fn contenting() -> tr.TreeOpts Msg =
@@ -286,6 +296,29 @@ fn content_cases(state: TestState) -> Unit !{IO} = do
             says(roots(), contenting(),
                  [focus_on(), pressed(event.KDown), sent(Reload)]),
             "[Lit([docs]), Lit([src])]")
+  # The whole point of the splice: the answer to `on_expand` names ONE path and
+  # carries only that directory's children. Everything else stands, including a
+  # sibling the user opened earlier — which the application could not have
+  # reproduced, having no model to reproduce it from.
+  lazy <- shown(after_told(view_of(roots(), contenting()),
+                           [focus_on(), pressed(event.KDown),
+                            pressed(event.KRight), pressed(event.KUp),
+                            pressed(event.KRight), sent(SrcListed)]),
+                12, 7)
+  assert_eq(state, "a splice fills one path and leaves the rest alone", lazy,
+            "v src       |    main.spr|v docs      |    guide   |    api     |> empty     |  README    ")
+  # The empty path names the forest itself, which is how an application fills
+  # a tree it started empty — the case `boot` performs in examples/tui_files.
+  assert_eq(state, "a splice at the root fills the forest",
+            says(Nil, contenting(), [focus_on(), sent(RootListed),
+                                     pressed(event.KEnter)]),
+            "[Lit([only]), Chose([only])]")
+  # A splice at a path that is not there changes nothing rather than inventing
+  # one: the forest is the application's, and a widget must not grow it.
+  assert_eq(state, "a splice at a missing path is inert",
+            says(roots_without_docs(), contenting(),
+                 [focus_on(), sent(SrcListed), pressed(event.KDown)]),
+            "[Lit([empty])]")
   # An unrecognised message is DECLINED, so it reaches `update` instead of
   # being swallowed by the widget it was addressed to.
   assert_eq(state, "an unrecognised message is declined",
