@@ -3,105 +3,70 @@ import stdlib.string (string_digits, string_lines)
 import stdlib.fs as fs
 
 # Advent of Code 2025 Day 3: Battery Boost
-# For each bank line, pick digits in-order to maximize resulting number.
+# For each bank line, pick digits in order to maximize the resulting number.
 # part1 uses 2 picks; part2 uses 12 picks.
 
 export type Answers (..) =
   | Answers Int Int
 
-fn shrink_for_digit(digits: Vec Int, size: Int, drops: Int, digit: Int) -> (Int, Int) =
-  if size <= 0 then (size, drops)
-  else if drops <= 0 then (size, drops)
-  else
-    if vec_get_or(size - 1, 0, digits) < digit then shrink_for_digit(digits, size - 1, drops - 1, digit)
-    else (size, drops)
+# The greedy scan's state. `kept` is a scratch buffer whose first `size` entries
+# are the digits chosen so far; `drops` is how many more may still be discarded.
+type Pick = (kept: Vec Int, size: Int, drops: Int)
 
+# Overwrite inside the live prefix, grow past its end — the buffer is reused, so
+# a popped slot is refilled rather than reallocated.
 fn write_at_or_append(digits: Vec Int, index: Int, digit: Int) -> Vec Int =
   if index < vec_length(digits) then vec_set(index, digit, digits)
   else vec_append(digit, digits)
 
-fn push_digit(digits: Vec Int, size: Int, drops: Int, digit: Int) -> (Vec Int, (Int, Int)) =
-  (write_at_or_append(digits, shrunk_size, digit), (shrunk_size + 1, shrunk_drops))
+# Discard kept digits smaller than the arriving one while the budget allows:
+# each drop lets a bigger digit move left, which is always worth more.
+fn shrink_for(pick: Pick, digit: Int) -> Pick =
+  if pick.size <= 0 || pick.drops <= 0 then pick
+  else if vec_get_or(pick.size - 1, 0, pick.kept) < digit then
+    shrink_for(pick with (size = pick.size - 1, drops = pick.drops - 1), digit)
+  else pick
+
+fn push_digit(pick: Pick, digit: Int) -> Pick =
+  shrunk with (kept = write_at_or_append(shrunk.kept, shrunk.size, digit), size = shrunk.size + 1)
 where
-  (shrunk_size, shrunk_drops) = shrink_for_digit(digits, size, drops, digit)
+  shrunk = shrink_for(pick, digit)
 
-fn pick_digits(bank: Vec Int, index: Int, total: Int, digits: Vec Int, size: Int, drops: Int) -> (Vec Int, (Int, Int)) =
-  if index >= total then (digits, (size, drops))
-  else
-    match push_digit(digits, size, drops, vec_get_or(index, 0, bank)) with
-    | (next_digits, (next_size, next_drops)) ->
-        pick_digits(bank, index + 1, total, next_digits, next_size, next_drops)
+fn digits_to_int(digits: Vec Int) -> Int =
+  vec_fold(\ (acc, digit) -> acc * 10 + digit, 0, digits)
 
-fn fold_prefix_int(digits: Vec Int, index: Int, count: Int, acc: Int) -> Int =
-  if index >= count then acc
-  else fold_prefix_int(digits, index + 1, count, acc * 10 + vec_get_or(index, 0, digits))
+# One left-to-right scan keeps a near-monotonic run; its first `count` digits are
+# the largest in-order selection.
+fn picked_value(bank: Vec Int, drops: Int, count: Int) -> Int =
+  digits_to_int(vec_slice(0, count, scan.kept))
+where
+  scan = vec_fold(push_digit, Pick(kept = vec_empty(), size = 0, drops = drops), bank)
 
-fn best_value_vec(bank: Vec Int, count: Int) -> Int =
-  best_value_with_len(bank, len, count)
+fn best_value(bank: Vec Int, count: Int) -> Int =
+  if count <= 0 || count > len then 0
+  else picked_value(bank, len - count, count)
 where
   len = vec_length(bank)
 
-fn best_value_with_len(bank: Vec Int, len: Int, count: Int) -> Int =
-  if count <= 0 then 0
-  else if count > len then 0
-  else
-    match pick_digits(bank, 0, len, vec_empty(), 0, len - count) with
-    | (digits, _) -> fold_prefix_int(digits, 0, count, 0)
+fn sum_for_count(count: Int, banks: Vec (Vec Int)) -> Int =
+  vec_sum_by(best_value(_, count), banks)
 
-fn sum_best_values(banks: Vec (Vec Int), index: Int, total: Int, count: Int, acc: Int) -> Int =
-  if index >= total then acc
-  else
-    sum_best_values(
-      banks,
-      index + 1,
-      total,
-      count,
-      acc + best_value_vec(vec_get_or(index, vec_empty(), banks), count)
-    )
+fn has_digits(bank: Vec Int) -> Bool =
+  vec_length(bank) != 0
 
-fn sum_for_count(banks: Vec (Vec Int), count: Int) -> Int =
-  sum_best_values(banks, 0, total, count, 0)
-where
-  total = vec_length(banks)
+fn parse_banks(raw: String) -> Vec (Vec Int) =
+  raw
+  |> string_lines
+  |> vec_map(string_digits)
+  |> vec_filter(has_digits)
 
-fn append_if_non_empty_bank(banks: Vec (Vec Int), bank: Vec Int) -> Vec (Vec Int) =
-  if vec_length(bank) == 0 then banks
-  else vec_append(bank, banks)
-
-fn lines_to_banks(lines: Vec String, index: Int, total: Int, acc: Vec (Vec Int)) -> Vec (Vec Int) =
-  if index >= total then acc
-  else
-    lines_to_banks(
-      lines,
-      index + 1,
-      total,
-      next_acc
-    )
-where
-  bank = string_digits(vec_get_or(index, "", lines))
-  next_acc = append_if_non_empty_bank(acc, bank)
-
-fn parse_all_banks(raw: String) -> Vec (Vec Int) =
-  lines_to_banks_all(lines)
-where
-  lines = string_lines(raw)
-
-fn lines_to_banks_all(lines: Vec String) -> Vec (Vec Int) =
-  lines_to_banks(lines, 0, vec_length(lines), vec_empty())
-
-fn stdin_banks() -> Vec (Vec Int) !{IO} =
-  match fs.read_text("-") with
-  | Ok content -> parse_all_banks(content)
-  | Err msg -> panic("read_file: " ++ msg)
-
-fn solve_for_banks(banks: Vec (Vec Int)) -> Answers =
-  Answers(part1, part2)
-where
-  part1 = sum_for_count(banks, 2)
-  part2 = sum_for_count(banks, 12)
+fn solve_banks(banks: Vec (Vec Int)) -> Answers =
+  Answers(sum_for_count(2, banks), sum_for_count(12, banks))
 
 export fn solve_stdin() -> Answers !{IO} =
-  solve_for_banks(stdin_banks())
+  match fs.read_text("-") with
+  | Ok content -> content |> parse_banks |> solve_banks
+  | Err msg -> panic("read_file: " ++ msg)
 
 fn main() -> Unit !{IO} =
   print(solve_stdin())
