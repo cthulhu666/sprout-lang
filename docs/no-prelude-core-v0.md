@@ -534,6 +534,11 @@ regenerating.
   declarations are in the floor, since that file is where the authority lives.
 - `README.md` §"Not Yet Supported" — only if the `argv_get` removal is worth a
   user-facing note; probably not.
+- `examples/no_prelude_core.sprout` — a program written against the floor, and
+  the user-facing answer to "what can I still call?". Added later than the rest
+  of this list; it also carried the §10 spec and README updates, which had gone
+  in as the pre-implementation text and still described the seeded-schemes
+  behaviour this change removed.
 - `BACKLOG.md` — the three corrections in §0, and the derive-`ir_header`-from-the-floor
   follow-up from §4.2.
 
