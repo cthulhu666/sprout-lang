@@ -218,3 +218,24 @@ CI on locally-green branches on 2026-08-11.
 It stays a recommendation rather than a Definition of Done item because it needs a container
 runtime, and requires the repo to live under `$HOME` (the container sees it through the VM's `$HOME`
 mount).
+
+## CI — the `changes` job, and what a 30-second green `test` means
+
+`test` is the only required check on `master`, and it is strict (branch must be up to date). A
+docs-only PR used to pay its full ~20 min: `ci.yml`'s per-event detection only reached the
+`tests/stdlib/compiler/` suites, after bootstrap and `ci-fast-gates` had already run.
+
+The `changes` job now classifies the event once (~10 s) and every other job waits on it. `docs_only`
+is a strict allowlist — `docs/**` and top-level `*.md`, nothing else. `examples/` is compiled by
+`compile-examples-stage1`, `bench/` by `compile-bench`, and a `.github/` edit must run the workflow
+it edits, so none of those three counts as docs. Fail open, as before: any non-`pull_request` event,
+an unresolvable base, or a failed diff runs everything.
+
+**`test` skips its steps, never itself.** GitHub reports a workflow skipped by a path filter as
+*pending*, not as success, so a `paths-ignore` on this workflow would leave the required check
+pending forever and block every docs PR — the obvious fix is the broken one. `macos`, `lsp`,
+`intellij-plugin` and `windows` skip as whole jobs, which is safe only because none of them is
+required.
+
+So a `test` green in 30 seconds is not evidence the suite passed — only that nothing the suite can
+observe changed. Check the `changes` job's log before citing a green.
