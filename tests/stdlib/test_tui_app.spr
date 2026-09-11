@@ -9,7 +9,8 @@ module tests.tui_app
 # channel, no scheduler. Commands are collected here but never run; running one
 # needs IO, so `test_tui_cmd.spr` covers that half.
 
-import stdlib.test (check_eq, run_suite)
+import stdlib.bytes as bytes
+import stdlib.test (check_eq, check_true, run_suite)
 import stdlib.tui.app as app
 import stdlib.tui.event as event
 import stdlib.tui.geometry as g
@@ -189,5 +190,29 @@ fn main() -> Unit !{IO} =
     check_eq("an event with no message leaves the widget alone",
              stepped_width(counter(2), event.Paste("x")), 2),
     check_eq("an event with no message continues",
-             stepped_flow(counter(2), event.Paste("x")), app.Continue)
+             stepped_flow(counter(2), event.Paste("x")), app.Continue),
+
+    # --- THE ESCAPE TIMEOUT ---
+    # `keys.decode` holds a lone ESC as a prefix and says so: resolving it into
+    # the Escape key "belongs to the caller's timeout", which is this pump. The
+    # read deadline elapsing with the byte still held IS that timeout — without
+    # this, Esc never becomes a key on a real terminal and an application whose
+    # only quit binding is Esc cannot be quit at all.
+    check_true("a held lone ESC has timed out", app.escape_timed_out(esc())),
+    # A longer partial is genuinely mid-sequence — an arrow key is ESC [ A, and
+    # flushing at ESC would turn one keypress into three.
+    check_true("a held CSI prefix has not",
+               not(app.escape_timed_out(bytes.append(esc(),
+                                                     bytes.from_string("["))))),
+    check_true("nor has a held ESC O",
+               not(app.escape_timed_out(bytes.append(esc(),
+                                                     bytes.from_string("O"))))),
+    # Nothing held is the ordinary idle: a frame tick, not a keypress.
+    check_true("an empty hold has not", not(app.escape_timed_out(bytes.empty()))),
+    check_true("two ESCs have not",
+               not(app.escape_timed_out(bytes.append(esc(), esc()))))
   ])
+
+fn not(b: Bool) -> Bool = if b then false else true
+
+fn esc() -> Bytes = bytes.singleton(27)

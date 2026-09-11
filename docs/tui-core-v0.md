@@ -94,6 +94,15 @@ with a pending remainder of exactly `ESC`, that ESC was the Escape key. This is 
 parameter is load-bearing rather than decorative, and it confines the timing hack to a single
 place with a name.
 
+**Implemented in `app.idled` / `app.escape_timed_out`.** It was specified here and in
+`keys.sprout`'s header but missing from the pump until 2026-09-11: `TermIdle` carried `held`
+forward unchanged, so a lone ESC stayed held across every later read and Esc never became an
+event at all. `examples/tui_dashboard.sprout` advertised "Esc quits" and could not be quit on a
+terminal. The decoder's own suite was green throughout — it pins that a lone ESC is *held*,
+which was correct; nothing tested that anything ever resolved it. `scripts/tui_files_smoke.sh`
+now does, by holding stdin open so the exit cannot be `TermEof`. Only a bare ESC resolves; a
+longer remainder is genuinely mid-sequence, since an arrow key is `ESC [ A`.
+
 ### 3.3 A cell holds a grapheme cluster and owns the cell to its right when wide
 
 Pulled into M2 rather than deferred: a renderer that miscounts columns desynchronises the whole

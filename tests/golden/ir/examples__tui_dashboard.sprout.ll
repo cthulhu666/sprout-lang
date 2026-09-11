@@ -12743,20 +12743,20 @@ arm_0_1:
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
   %t$5 = call i64 @sprout_field(i64 %p$inp, i64 0)
-  %t$27 = alloca i64
-  store i64 %p$held, ptr %t$27
-  %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
-  %t$29 = alloca i64
-  store i64 %p$ch, ptr %t$29
-  %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
-  %t$31 = alloca i64
-  store i64 %t$5, ptr %t$31
-  %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
+  %t$26 = alloca i64
+  store i64 %p$held, ptr %t$26
+  %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
+  %t$28 = alloca i64
+  store i64 %p$ch, ptr %t$28
+  %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
+  %t$30 = alloca i64
+  store i64 %t$5, ptr %t$30
+  %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)
   %t$6 = call i64 @stdlib.bytes.append(i64 %p$held, i64 %t$5)
-  %t$33 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$32 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$7 = add i64 0, 0
   %t$8 = add i64 0, 0
-  %t$34 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$33 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$9 = musttail call i64 @stdlib.tui.app.decoded$u(i64 %p$ch, i64 %p$tick_ms, i64 %t$6, i64 %t$7, i64 %t$8)
   ret i64 %t$9
 arm_1_1:
@@ -12764,61 +12764,46 @@ arm_1_1:
   %t$11 = icmp eq i64 %t$0, %t$10
   br i1 %t$11, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t$35 = alloca i64
-  store i64 %p$held, ptr %t$35
-  %t$36 = call i64 @sprout_gc_push_i64_root(ptr %t$35)
+  %t$12 = add i64 0, 0
+  %t$13 = add i64 0, 0
+  %t$14 = musttail call i64 @stdlib.tui.app.idled$u(i64 %p$ch, i64 %p$tick_ms, i64 %p$held, i64 %t$12, i64 %t$13)
+  ret i64 %t$14
+arm_2_1:
+  %t$15 = add i64 0, 29
+  %t$16 = icmp eq i64 %t$0, %t$15
+  br i1 %t$16, label %body_2_1, label %arm_3_1
+body_2_1:
+  %t$17 = add i64 0, 0
+  %t$18 = add i64 0, 0
+  %t$19 = musttail call i64 @stdlib.tui.app.send_resize$u(i64 %p$ch, i64 %p$tick_ms, i64 %p$held, i64 %t$17, i64 %t$18)
+  ret i64 %t$19
+arm_3_1:
+  %t$20 = add i64 0, 30
+  %t$21 = icmp eq i64 %t$0, %t$20
+  br i1 %t$21, label %body_3_1, label %arm_4_1
+body_3_1:
+  %t$34 = alloca i64
+  store i64 %p$ch, ptr %t$34
+  %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
+  %t$22 = call i64 @stdlib.chan.chan_close(i64 %p$ch)
+  %t$36 = call i64 @sprout_gc_pop_roots(i64 1)
+  br label %join_1
+arm_4_1:
+  %t$23 = add i64 0, 31
+  %t$24 = icmp eq i64 %t$0, %t$23
+  br i1 %t$24, label %body_4_1, label %arm_5_1
+body_4_1:
   %t$37 = alloca i64
   store i64 %p$ch, ptr %t$37
   %t$38 = call i64 @sprout_gc_push_i64_root(ptr %t$37)
-  %t$12 = call i64 @sprout_alloc_obj(i64 63, i64 0)
-  %t$39 = alloca i64
-  store i64 %t$12, ptr %t$39
-  %t$40 = call i64 @sprout_gc_push_i64_root(ptr %t$39)
-  %t$13 = call i64 @sprout_alloc_obj(i64 88, i64 1)
-  %t$13$ptr = inttoptr i64 %t$13 to ptr
-  %t$13$f0 = getelementptr i64, ptr %t$13$ptr, i64 0
-  store i64 %t$12, ptr %t$13$f0
-  %t$41 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$14 = add i64 0, 0
-  %t$42 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$15 = musttail call i64 @stdlib.tui.app.send_one$u(i64 %p$ch, i64 %p$tick_ms, i64 %p$held, i64 %t$13, i64 %t$14)
-  ret i64 %t$15
-arm_2_1:
-  %t$16 = add i64 0, 29
-  %t$17 = icmp eq i64 %t$0, %t$16
-  br i1 %t$17, label %body_2_1, label %arm_3_1
-body_2_1:
-  %t$18 = add i64 0, 0
-  %t$19 = add i64 0, 0
-  %t$20 = musttail call i64 @stdlib.tui.app.send_resize$u(i64 %p$ch, i64 %p$tick_ms, i64 %p$held, i64 %t$18, i64 %t$19)
-  ret i64 %t$20
-arm_3_1:
-  %t$21 = add i64 0, 30
-  %t$22 = icmp eq i64 %t$0, %t$21
-  br i1 %t$22, label %body_3_1, label %arm_4_1
-body_3_1:
-  %t$43 = alloca i64
-  store i64 %p$ch, ptr %t$43
-  %t$44 = call i64 @sprout_gc_push_i64_root(ptr %t$43)
-  %t$23 = call i64 @stdlib.chan.chan_close(i64 %p$ch)
-  %t$45 = call i64 @sprout_gc_pop_roots(i64 1)
-  br label %join_1
-arm_4_1:
-  %t$24 = add i64 0, 31
-  %t$25 = icmp eq i64 %t$0, %t$24
-  br i1 %t$25, label %body_4_1, label %arm_5_1
-body_4_1:
-  %t$46 = alloca i64
-  store i64 %p$ch, ptr %t$46
-  %t$47 = call i64 @sprout_gc_push_i64_root(ptr %t$46)
-  %t$26 = call i64 @stdlib.chan.chan_close(i64 %p$ch)
-  %t$48 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$25 = call i64 @stdlib.chan.chan_close(i64 %p$ch)
+  %t$39 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_1
 arm_5_1:
   call void @sprout_abort_match()
   unreachable
 join_1:
-  %t$2 = phi i64 [%t$23, %body_3_1], [%t$26, %body_4_1]
+  %t$2 = phi i64 [%t$22, %body_3_1], [%t$25, %body_4_1]
   ret i64 %t$2
 }
 
@@ -12954,6 +12939,163 @@ entry:
   %t$15 = call i64 @sprout_gc_pop_roots(i64 4)
   %t$3 = musttail call i64 @stdlib.tui.app.send_events$u(i64 %p$ch, i64 %p$tick_ms, i64 %p$held, i64 %p$rest, i64 %t$2)
   ret i64 %t$3
+}
+
+define i64 @stdlib.tui.app.idled(i64 %p$ch, i64 %p$tick_ms, i64 %p$held) {
+entry:
+  %t$0 = add i64 0, 0
+  %t$1 = add i64 0, 0
+  %t$3 = alloca i64
+  store i64 %p$held, ptr %t$3
+  %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
+  %t$5 = alloca i64
+  store i64 %p$ch, ptr %t$5
+  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
+  %t$2 = call i64 @stdlib.tui.app.idled$u(i64 %p$ch, i64 %p$tick_ms, i64 %p$held, i64 %t$0, i64 %t$1)
+  %t$7 = call i64 @sprout_gc_pop_roots(i64 2)
+  ret i64 %t$2
+}
+
+define i64 @stdlib.tui.app.idled$u(i64 %p$ch, i64 %p$tick_ms, i64 %p$held, i64 %p$pbpad$3, i64 %p$pbpad$4) {
+entry:
+  %t$12 = alloca i64
+  store i64 %p$held, ptr %t$12
+  %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
+  %t$14 = alloca i64
+  store i64 %p$ch, ptr %t$14
+  %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
+  %t$0 = call i64 @stdlib.tui.app.escape_timed_out(i64 %p$held)
+  %t$11 = trunc i64 %t$0 to i1
+  %t$16 = call i64 @sprout_gc_pop_roots(i64 2)
+  br i1 %t$11, label %then_1, label %else_1
+then_1:
+  %t$3 = add i64 0, 0
+  %t$4 = add i64 0, 0
+  %t$5 = add i64 0, 0
+  %t$6 = musttail call i64 @stdlib.tui.app.send_esc$u(i64 %p$ch, i64 %p$tick_ms, i64 %t$3, i64 %t$4, i64 %t$5)
+  ret i64 %t$6
+else_1:
+  %t$17 = alloca i64
+  store i64 %p$held, ptr %t$17
+  %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
+  %t$19 = alloca i64
+  store i64 %p$ch, ptr %t$19
+  %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
+  %t$7 = call i64 @sprout_alloc_obj(i64 63, i64 0)
+  %t$21 = alloca i64
+  store i64 %t$7, ptr %t$21
+  %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
+  %t$8 = call i64 @sprout_alloc_obj(i64 88, i64 1)
+  %t$8$ptr = inttoptr i64 %t$8 to ptr
+  %t$8$f0 = getelementptr i64, ptr %t$8$ptr, i64 0
+  store i64 %t$7, ptr %t$8$f0
+  %t$23 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$9 = add i64 0, 0
+  %t$24 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$10 = musttail call i64 @stdlib.tui.app.send_one$u(i64 %p$ch, i64 %p$tick_ms, i64 %p$held, i64 %t$8, i64 %t$9)
+  ret i64 %t$10
+}
+
+define i64 @stdlib.tui.app.escape_timed_out(i64 %p$held) {
+entry:
+  %t$21 = alloca i64
+  store i64 %p$held, ptr %t$21
+  %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
+  %t$0 = call i64 @stdlib.bytes.length(i64 %p$held)
+  %t$1 = add i64 0, 1
+  %t$2 = icmp ne i64 %t$0, %t$1
+  %t$3 = zext i1 %t$2 to i64
+  %t$20 = trunc i64 %t$3 to i1
+  %t$23 = call i64 @sprout_gc_pop_roots(i64 1)
+  br i1 %t$20, label %then_4, label %else_4
+then_4:
+  %t$6 = add i64 0, 0
+  br label %join_4
+else_4:
+  %t$7 = add i64 0, 0
+  %t$8$st = call { i64, i64 } @stdlib.bytes.get_worker(i64 %p$held, i64 %t$7)
+  %t$8 = extractvalue { i64, i64 } %t$8$st, 0
+  %t$9 = extractvalue { i64, i64 } %t$8$st, 1
+  br label %arm_0_10
+arm_0_10:
+  %t$12 = add i64 0, 1
+  %t$13 = icmp eq i64 %t$8, %t$12
+  br i1 %t$13, label %body_0_10, label %arm_1_10
+body_0_10:
+  %t$14 = add i64 0, 27
+  %t$15 = icmp eq i64 %t$9, %t$14
+  %t$16 = zext i1 %t$15 to i64
+  br label %join_10
+arm_1_10:
+  %t$17 = add i64 0, 0
+  %t$18 = icmp eq i64 %t$8, %t$17
+  br i1 %t$18, label %body_1_10, label %arm_2_10
+body_1_10:
+  %t$19 = add i64 0, 0
+  br label %join_10
+arm_2_10:
+  call void @sprout_abort_match()
+  unreachable
+join_10:
+  %t$11 = phi i64 [%t$16, %body_0_10], [%t$19, %body_1_10]
+  br label %join_4
+join_4:
+  %t$5 = phi i64 [%t$6, %then_4], [%t$11, %join_10]
+  ret i64 %t$5
+}
+
+define i64 @stdlib.tui.app.send_esc(i64 %p$ch, i64 %p$tick_ms) {
+entry:
+  %t$0 = add i64 0, 0
+  %t$1 = add i64 0, 0
+  %t$2 = add i64 0, 0
+  %t$4 = alloca i64
+  store i64 %p$ch, ptr %t$4
+  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
+  %t$3 = call i64 @stdlib.tui.app.send_esc$u(i64 %p$ch, i64 %p$tick_ms, i64 %t$0, i64 %t$1, i64 %t$2)
+  %t$6 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t$3
+}
+
+define i64 @stdlib.tui.app.send_esc$u(i64 %p$ch, i64 %p$tick_ms, i64 %p$pbpad$2, i64 %p$pbpad$3, i64 %p$pbpad$4) {
+entry:
+  %t$9 = alloca i64
+  store i64 %p$ch, ptr %t$9
+  %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
+  %t$0 = call i64 @sprout_alloc_obj(i64 42, i64 0)
+  %t$11 = alloca i64
+  store i64 %t$0, ptr %t$11
+  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
+  %t$1 = call i64 @stdlib.tui.event.mods_none()
+  %t$13 = alloca i64
+  store i64 %t$1, ptr %t$13
+  %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
+  %t$2 = call i64 @sprout_alloc_obj(i64 58, i64 2)
+  %t$2$ptr = inttoptr i64 %t$2 to ptr
+  %t$2$f0 = getelementptr i64, ptr %t$2$ptr, i64 0
+  store i64 %t$0, ptr %t$2$f0
+  %t$2$f1 = getelementptr i64, ptr %t$2$ptr, i64 1
+  store i64 %t$1, ptr %t$2$f1
+  %t$15 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$16 = alloca i64
+  store i64 %t$2, ptr %t$16
+  %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
+  %t$3 = call i64 @sprout_alloc_obj(i64 88, i64 1)
+  %t$3$ptr = inttoptr i64 %t$3 to ptr
+  %t$3$f0 = getelementptr i64, ptr %t$3$ptr, i64 0
+  store i64 %t$2, ptr %t$3$f0
+  %t$18 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$19 = alloca i64
+  store i64 %t$3, ptr %t$19
+  %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
+  %t$4 = call i64 @stdlib.chan.chan_send(i64 %p$ch, i64 %t$3)
+  %t$21 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$5 = call i64 @stdlib.bytes.empty()
+  %t$6 = add i64 0, 0
+  %t$7 = add i64 0, 0
+  %t$22 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$8 = musttail call i64 @stdlib.tui.app.input_loop$u(i64 %p$ch, i64 %p$tick_ms, i64 %t$5, i64 %t$6, i64 %t$7)
+  ret i64 %t$8
 }
 
 define i64 @stdlib.tui.app.send_one(i64 %p$ch, i64 %p$tick_ms, i64 %p$held, i64 %p$sig) {
