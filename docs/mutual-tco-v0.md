@@ -158,9 +158,12 @@ Two guards, because the function can become self-recursive two different ways:
 1. **We emitted the self-call.** `mutual_tco_rewrite_fn` skips a function that still calls
    itself (`mutual_has_self_call`). Any surviving self-call is non-tail — self-TCO already
    turned the tail ones into `IRTcoBack`, and functions it restructured are skipped anyway.
-   Cost: 4 edges in the compiler's own seed (`types.thunk_to_string`, `infer.te_type_names`,
-   `iface_codec.encode_type`, `desugar_ctx.desugar_ctx_leaf_i`). Each already grew the stack
-   through its non-tail edge, so no guarantee is lost.
+   Cost: 4 edges in the compiler's own seed, carrier → callee —
+   `types.type_to_string_aux → types.thunk_to_string`,
+   `infer.te_type_names_list → infer.te_type_names`,
+   `desugar_ctx.desugar_expr_i → desugar_ctx.desugar_ctx_leaf_i`,
+   `iface_codec.join_types → iface_codec.encode_type`. Each carrier already recurses non-tail
+   over a list or AST spine, so it grew the stack regardless and no guarantee is lost.
 2. **The inliner created it.** A walker whose arms tail-call sibling walkers has no
    self-recursion in Sprout at all, and acquires it when the inliner pulls a cycle partner in.
    No static check can see that coming, so `ir_lowering` marks the calls of a `musttail`-carrying
