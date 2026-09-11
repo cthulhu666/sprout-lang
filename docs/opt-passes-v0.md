@@ -1,6 +1,6 @@
 # Sprout-level optimization passes (CSE, LICM) and the A/B harness — v0
 
-**Status:** proposed, 2026-09-11. Nothing here is implemented. No syntax, typing-rule,
+**Status:** M0 implemented 2026-09-11; M1 and M2 proposed. No syntax, typing-rule,
 evaluation-order or diagnostic change — these are semantics-preserving passes plus measurement
 tooling, so `spec-v0.md` is untouched.
 
@@ -75,7 +75,31 @@ is precisely the loop notion M2 proposes below, arrived at independently by a la
 
 ## Implementation overview
 
-### M0 — harness first, no new optimization
+### M0 — harness first, no new optimization — **landed 2026-09-11**
+
+What shipped, and where:
+
+| piece | file |
+|---|---|
+| `SPROUT_OPT_OFF` / `SPROUT_OPT_STATS` switchboard | `stdlib/compiler/opt_config.sprout` |
+| node census (`node_count`) | `stdlib/compiler/typed_ast.sprout` |
+| pipeline seam (`run_opt_passes`) | `stdlib/compiler/compiler.sprout` |
+| self-check gate | `just opt-harness-check`, in `just ci-fast-gates` |
+| A/B bench | `bench/optpasses/bench.sh`, `just bench-opt [pass]` |
+| first baseline | `bench/results-2026-09-11-opt.md` |
+
+**The prediction below was wrong, and the measurement is the point of having built this.** DLE
+removes **zero** nodes from every program in the bench corpus, the 110 054-node compiler included,
+so `SPROUT_OPT_OFF=dle` does *not* change a real binary. Self-validation therefore comes from
+`tests/opt_harness/dead_let.spr` — a deliberately wasteful shape where the pass removes 6 nodes and
+the switch demonstrably reaches emitted IR — asserted by `just opt-harness-check` on every CI run.
+The consolation is a clean baseline: whatever M1 removes will be the first node this pipeline has
+ever removed from real code.
+
+`dce.elim_unreachable`, the half of `dce.sprout` that *does* do large work, is not under the switch
+— it runs inside `ir_pipeline`, not at the `compiler.sprout` seam. Filed in `BACKLOG.md`.
+
+The rest of this section is the design as approved, kept because it is still the rationale.
 
 The instrument before the experiment, and the baseline M1/M2 are measured against. Today the A/B
 ritual is manual; `bench/unboxed_read/bench.sh:5-8` documents it:
@@ -175,8 +199,12 @@ and bisection, not as a supported user-facing knob.
 
 ## Tests
 
-- M0: a test asserting `SPROUT_OPT_OFF=dle` changes emitted IR (the harness's own self-check), and
-  that an unset variable leaves the pipeline byte-identical to today.
+- M0 *(landed)*: `tests/stdlib/compiler/test_opt_config.spr` (26 cases) pins the pure switchboard —
+  an unrecognised name disables nothing and is reported, and `SPROUT_OPT_STATS` follows the
+  runtime's truthiness rule rather than "the variable is set".
+  `tests/stdlib/compiler/test_typed_ast_node_count.spr` (12) pins the census, the delta case
+  included. `just opt-harness-check` is the end-to-end half: the switch reaches emitted IR, the
+  pass it disables preserves program output, and an unknown name leaves the output unchanged.
 - M1/M2: per-pass unit tests on the typed AST — fires where it should, and does **not** fire
   across an intervening effectful step. Effect-row negatives matter more than positives here.
 - Conformance: existing suites must be byte-identical with the pass OFF, which is the regression

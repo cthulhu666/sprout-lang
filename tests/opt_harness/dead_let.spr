@@ -1,0 +1,20 @@
+module main
+
+# The pass A/B harness's own fixture (docs/opt-passes-v0.md §M0).
+#
+# `unused` is pure and never read, so DLE deletes it and SPROUT_OPT_OFF=dle keeps
+# it — which is what `just opt-harness-check` compares. Real programs carry no
+# dead bindings (measured: DLE removes 0 nodes across the whole bench corpus), so
+# the harness needs a shape that is deliberately wasteful.
+#
+# A do-block rather than `let..in` on purpose: DLE rewrites TDoLetStep, so the
+# idiomatic pure-binding form would give the pass nothing to find.
+
+fn scaled(n: Int) -> Int =
+  do
+    let unused = n * n + 7
+    let kept = n * 2
+    kept + 1
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(scaled(20)))

@@ -92,6 +92,26 @@ scope). It deliberately does NOT flag (skips, never a false alarm):
 The last (lowering-discard) motivates the pending IR-level **phase 2b** (BACKLOG
 "Dispatch Soundness & Diagnostics" item 1).
 
+## Is an optimisation pass to blame? (`SPROUT_OPT_OFF`, `SPROUT_OPT_STATS`)
+
+Bisect a miscompile against the Sprout-level passes without rebuilding the compiler
+(docs/opt-passes-v0.md §M0):
+
+- `SPROUT_OPT_OFF=dle,cse` — comma list of passes to **disable**; unset means all on.
+  An unrecognised name warns and disables nothing, so a typo cannot silently
+  "fix" the bug.
+- `SPROUT_OPT_STATS=1` — one `[opt] <pass> on|off nodes=N removed=M` line per
+  compile on stderr, `removed` being the typed-AST node delta the pass produced.
+
+```
+SPROUT_OPT_STATS=1 ./build/compile_driver_bin_stage1 --emit-ir stdlib prog.spr >/dev/null
+```
+
+If a program misbehaves with a pass on and behaves with it off, that is a pass bug and
+the IR diff between the two runs is the whole evidence. Note that `removed=0` is the
+normal reading for `dle` on real code — see `bench/results-2026-09-11-opt.md` — so a zero
+is not itself a sign the switch failed to take; the `on`/`off` word in the line is.
+
 ## `just llvm-where <ll_file> <line>` — map an error line to its Sprout function
 
 When `opt --passes=verify` (or clang) reports a malformed-IR error at line N of a large `.ll` file, this tool walks the file up from line N to the nearest enclosing `define` and prints the Sprout qualified name.

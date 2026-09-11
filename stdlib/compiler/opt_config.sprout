@@ -1,0 +1,90 @@
+module stdlib.compiler.opt_config
+import stdlib.env as env
+import stdlib.string as string
+
+# Which optimisation passes run, and whether they report what they did
+# (docs/opt-passes-v0.md §M0).  Two switches, read once per compile:
+#
+#   SPROUT_OPT_OFF=dle,cse    comma list of passes to DISABLE; unset means all on
+#   SPROUT_OPT_STATS=1        per-pass node-count deltas on stderr
+#
+# The environment carries strings; `parse` turns them into `Pass` values once, so
+# a query cannot misspell a pass, and a name matching none is kept in
+# `unrecognised` rather than silently disabling nothing.
+#
+# Environment rather than a CLI flag because compile_driver dispatches on
+# positional list patterns, so a flag would thread through every arm;
+# SPROUT_VERIFY_DISPATCH_OFF set the precedent.
+
+export type Pass (..) deriving (Eq, ToString) =
+  | Dle
+  | Cse
+  | Licm
+
+export type OptConfig = (disabled: List Pass, unrecognised: List String, stats: Bool)
+
+export fn pass_name(p: Pass) -> String =
+  match p with
+  | Dle -> "dle"
+  | Cse -> "cse"
+  | Licm -> "licm"
+
+export fn pass_from_name(name: String) -> Maybe Pass =
+  match name with
+  | "dle" -> Just(Dle)
+  | "cse" -> Just(Cse)
+  | "licm" -> Just(Licm)
+  | _ -> Nothing
+
+export fn all_passes() -> List Pass =
+  [Dle, Cse, Licm]
+
+export fn parse(off: Maybe String, stats: Maybe String) -> OptConfig =
+  let names = requested_names(off)
+  in OptConfig(
+    disabled = list_filter_map(pass_from_name, names),
+    unrecognised = list_filter(is_unrecognised, names),
+    stats = truthy(stats)
+  )
+
+export fn from_env() -> OptConfig !{IO} =
+  do
+    let cfg = parse(env.get("SPROUT_OPT_OFF"), env.get("SPROUT_OPT_STATS"))
+    _ <- warn_unrecognised(cfg.unrecognised)
+    cfg
+
+export fn enabled(cfg: OptConfig, p: Pass) -> Bool =
+  ! list_member (p, cfg.disabled)
+
+fn requested_names(off: Maybe String) -> List String =
+  match off with
+  | Nothing -> []
+  | Just raw -> list_filter(is_named, list_map(normalise, string.split(raw, ",")))
+
+fn is_named(name: String) -> Bool =
+  ! string.is_empty (name)
+
+fn is_unrecognised(name: String) -> Bool =
+  match pass_from_name(name) with
+  | Nothing -> true
+  | Just _ -> false
+
+fn normalise(name: String) -> String =
+  string.to_lower_ascii(string.trim(name))
+
+# Follows the runtime's `sprout_debug_alloc_truthy` (sprout_runtime.c): set is not
+# enough, "0"/"false"/"off" are off, so SPROUT_OPT_STATS=0 does what it looks like.
+fn truthy(v: Maybe String) -> Bool =
+  match v with
+  | Nothing -> false
+  | Just raw -> is_truthy_word(normalise(raw))
+
+fn is_truthy_word(v: String) -> Bool =
+  ! (string.is_empty(v) || v == "0" || v == "false" || v == "off")
+
+fn warn_unrecognised(names: List String) -> Unit !{IO} =
+  match names with
+  | [] -> ()
+  | _ ->
+      eprint("[opt] warning: SPROUT_OPT_OFF names no such pass: " ++ string.join(",", names)
+             ++ " (known: " ++ string.join(",", list_map(pass_name, all_passes())) ++ ")")
