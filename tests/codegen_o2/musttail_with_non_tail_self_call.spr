@@ -1,0 +1,29 @@
+# A function that mixes a mutual TAIL edge with non-tail SELF recursion.
+#
+# `f` tail-calls `g` (a same-prototype cycle partner, so Phase A wants `musttail`)
+# and also recurses into itself non-tail. LLVM's tailcallelim rewrites the second
+# shape into an accumulator loop and inserts the accumulate `add` between the
+# `musttail` call and its `ret`, which is illegal — the backend then aborts with
+# "failed to perform tail call elimination on a call site marked musttail".
+#
+# Only -O2 runs that pass, and `just test` links test IR at -O0, so this file is
+# the gate that sees it.
+
+type Tree (..) =
+  | Leaf
+  | Nest (List Tree)
+  | Pair Tree Tree
+
+fn f(t: Tree) -> Int =
+  match t with
+  | Leaf -> 0
+  | Nest xs -> g(xs)
+  | Pair a b -> 1 + f(a) + f(b)
+
+fn g(xs: List Tree) -> Int =
+  match xs with
+  | Nil -> 0
+  | Cons x rest -> f(x) + g(rest)
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(f(Nest (Cons (Leaf, Cons (Pair (Leaf, Leaf), Nil))))))

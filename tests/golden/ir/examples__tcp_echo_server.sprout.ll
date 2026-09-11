@@ -335,7 +335,7 @@ entry:
 define i64 @stdlib.net.read_avail_go(i64 %p$handle, i64 %p$deadline_us) {
 entry:
   %t$0 = load i64, ptr @stdlib.net.read_chunk
-  %t$1 = call i64 @tcp_read_some(i64 %p$handle, i64 %t$0)
+  %t$1 = call i64 @tcp_read_some(i64 %p$handle, i64 %t$0) noinline
   %t$2 = call i64 @sprout_tag(i64 %t$1)
   br label %arm_0_3
 arm_0_3:
@@ -391,7 +391,7 @@ join_3:
 
 define i64 @stdlib.net.read_avail_wait(i64 %p$handle, i64 %p$deadline_us) {
 entry:
-  %t$0 = call i64 @stdlib.time.now_micros()
+  %t$0 = call i64 @stdlib.time.now_micros() noinline
   %t$1 = load i64, ptr @stdlib.net.poll_read
   %t$2 = sub i64 %p$deadline_us, %t$0
   %t$3 = add i64 0, 1000
@@ -404,7 +404,7 @@ divpanic_4:
   unreachable
 divok_4:
   %t$7 = sdiv i64 %t$2, %t$3
-  %t$8$st = call { i64, i64 } @tcp_wait_worker(i64 %p$handle, i64 %t$1, i64 %t$7)
+  %t$8$st = call { i64, i64 } @tcp_wait_worker(i64 %p$handle, i64 %t$1, i64 %t$7) noinline
   %t$8 = extractvalue { i64, i64 } %t$8$st, 0
   %t$9 = extractvalue { i64, i64 } %t$8$st, 1
   %t$10 = add i64 0, 8

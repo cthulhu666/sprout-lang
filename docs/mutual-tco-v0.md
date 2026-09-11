@@ -133,6 +133,43 @@ user code silently uses O(depth) stack and roots.
   optimize only calls that close a cycle, because that is where unbounded growth lives and
   where the cost/benefit is unambiguous.
 - **A user-facing annotation** (`@tailrec`-style opt-in or diagnostic). Deferred; see §7.
+- **Functions that also recurse into themselves non-tail** — excluded since 2026-09-11, see
+  §2.1. They keep ordinary calls.
+
+---
+
+### 2.1 The `tailcallelim` interaction (why two guards exist)
+
+LLVM's `tailcallelim` does not preserve the `musttail` invariant. Given a function that carries
+a `musttail` call *and* is self-recursive, it rewrites the self-recursion into an accumulator
+loop and puts the accumulate **between** the `musttail` call and its `ret`. The IR we emit is
+verifier-clean; the one `opt -passes='function(tailcallelim)'` produces is not, and the backend
+then aborts:
+
+```
+fatal error: error in backend: failed to perform tail call elimination on a call site marked musttail
+```
+
+Reproduced on Apple clang 17 and LLVM 22, at `-O2` only — `-O0` is fine, and `just test` links
+test IR with no `-O` flag, so nothing caught it until `tests/codegen_o2/` existed.
+
+Two guards, because the function can become self-recursive two different ways:
+
+1. **We emitted the self-call.** `mutual_tco_rewrite_fn` skips a function that still calls
+   itself (`mutual_has_self_call`). Any surviving self-call is non-tail — self-TCO already
+   turned the tail ones into `IRTcoBack`, and functions it restructured are skipped anyway.
+   Cost: 4 edges in the compiler's own seed (`types.thunk_to_string`, `infer.te_type_names`,
+   `iface_codec.encode_type`, `desugar_ctx.desugar_ctx_leaf_i`). Each already grew the stack
+   through its non-tail edge, so no guarantee is lost.
+2. **The inliner created it.** A walker whose arms tail-call sibling walkers has no
+   self-recursion in Sprout at all, and acquires it when the inliner pulls a cycle partner in.
+   No static check can see that coming, so `ir_lowering` marks every *other* direct call in a
+   `musttail`-carrying function `noinline`, and the inline never happens. 683 of the seed's
+   94 263 direct call sites (0.7%); compiling `infer.sprout` was 4.30–4.48 s before and
+   4.25–4.44 s after, i.e. no measurable cost.
+
+Both shapes are pinned end-to-end by `tests/codegen_o2/` and at unit level by
+`tests/stdlib/compiler/test_mutual_tco.spr`.
 
 ---
 

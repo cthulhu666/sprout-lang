@@ -3125,7 +3125,7 @@ entry:
 then_2:
   br label %join_2
 else_2:
-  %t$4 = call i64 @stdlib.unicode.utf8.byte_at(i64 %p$b, i64 %p$i)
+  %t$4 = call i64 @stdlib.unicode.utf8.byte_at(i64 %p$b, i64 %p$i) noinline
   %t$5 = musttail call i64 @stdlib.unicode.utf8.decode_step$u(i64 %p$b, i64 %p$i, i64 %p$n, i64 %p$acc, i64 %t$4)
   ret i64 %t$5
 join_2:
@@ -3148,9 +3148,9 @@ entry:
 
 define i64 @stdlib.unicode.utf8.decode_step$u(i64 %p$b, i64 %p$i, i64 %p$n, i64 %p$acc, i64 %p$b0) {
 entry:
-  %t$0 = call i64 @stdlib.unicode.utf8.seq_length(i64 %p$b0)
+  %t$0 = call i64 @stdlib.unicode.utf8.seq_length(i64 %p$b0) noinline
   %t$1 = add i64 %p$i, %t$0
-  %t$2 = call i64 @stdlib.unicode.utf8.cp_of(i64 %p$b0, i64 %p$b, i64 %p$i)
+  %t$2 = call i64 @stdlib.unicode.utf8.cp_of(i64 %p$b0, i64 %p$b, i64 %p$i) noinline
   %t$6 = alloca i64
   store i64 %p$b, ptr %t$6
   %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
@@ -3943,7 +3943,7 @@ then_2:
   %t$5 = sub i64 0, %t$4
   br label %join_2
 else_2:
-  %t$6 = call i64 @stdlib.tui.keys.byte_at(i64 %p$b, i64 %p$j)
+  %t$6 = call i64 @stdlib.tui.keys.byte_at(i64 %p$b, i64 %p$j) noinline
   %t$7 = musttail call i64 @stdlib.tui.keys.scan_final$u(i64 %p$b, i64 %p$n, i64 %p$j, i64 %t$6)
   ret i64 %t$7
 join_2:
@@ -6508,7 +6508,7 @@ arm_0_11:
   %t$18 = alloca i64
   store i64 %p$chunk, ptr %t$18
   %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
-  %t$13 = call i64 @stdlib.unicode.lookup.entry_at(i64 %p$chunk, i64 %t$10)
+  %t$13 = call i64 @stdlib.unicode.lookup.entry_at(i64 %p$chunk, i64 %t$10) noinline
   %t$20 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$14 = musttail call i64 @stdlib.unicode.lookup.probe$u(i64 %p$chunk, i64 %p$key, i64 %p$lo, i64 %p$hi, i64 %t$10, i64 %t$13)
   ret i64 %t$14
@@ -6549,11 +6549,11 @@ entry:
   %t$38 = alloca i64
   store i64 %p$chunk, ptr %t$38
   %t$39 = call i64 @sprout_gc_push_i64_root(ptr %t$38)
-  %t$2 = call i64 @stdlib.string.slice(i64 %p$e, i64 %t$0, i64 %t$1)
+  %t$2 = call i64 @stdlib.string.slice(i64 %p$e, i64 %t$0, i64 %t$1) noinline
   %t$40 = alloca i64
   store i64 %t$2, ptr %t$40
   %t$41 = call i64 @sprout_gc_push_i64_root(ptr %t$40)
-  %t$3 = call i64 @__tc_Ord_String_compare(i64 %p$key, i64 %t$2)
+  %t$3 = call i64 @__tc_Ord_String_compare(i64 %p$key, i64 %t$2) noinline
   %t$42 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 0
   %t$5 = icmp slt i64 %t$3, %t$4
@@ -6580,11 +6580,11 @@ else_7:
   %t$48 = alloca i64
   store i64 %p$chunk, ptr %t$48
   %t$49 = call i64 @sprout_gc_push_i64_root(ptr %t$48)
-  %t$16 = call i64 @stdlib.string.slice(i64 %p$e, i64 %t$14, i64 %t$15)
+  %t$16 = call i64 @stdlib.string.slice(i64 %p$e, i64 %t$14, i64 %t$15) noinline
   %t$50 = alloca i64
   store i64 %t$16, ptr %t$50
   %t$51 = call i64 @sprout_gc_push_i64_root(ptr %t$50)
-  %t$17 = call i64 @__tc_Ord_String_compare(i64 %p$key, i64 %t$16)
+  %t$17 = call i64 @__tc_Ord_String_compare(i64 %p$key, i64 %t$16) noinline
   %t$52 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$18 = add i64 0, 0
   %t$19 = icmp sgt i64 %t$17, %t$18
@@ -6605,7 +6605,7 @@ else_21:
   %t$54 = alloca i64
   store i64 %p$e, ptr %t$54
   %t$55 = call i64 @sprout_gc_push_i64_root(ptr %t$54)
-  %t$30 = call i64 @stdlib.string.slice(i64 %p$e, i64 %t$28, i64 %t$29)
+  %t$30 = call i64 @stdlib.string.slice(i64 %p$e, i64 %t$28, i64 %t$29) noinline
   %t$56 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$57 = alloca i64
   store i64 %t$30, ptr %t$57
@@ -7914,7 +7914,7 @@ body_0_1:
   %t$16 = alloca i64
   store i64 %t$5, ptr %t$16
   %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
-  %t$6 = call i64 @list_reverse(i64 %t$5)
+  %t$6 = call i64 @list_reverse(i64 %t$5) noinline
   %t$18 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_1
 arm_1_1:
@@ -7939,7 +7939,7 @@ body_1_1:
   %t$27 = alloca i64
   store i64 %t$10, ptr %t$27
   %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
-  %t$11 = call i64 @stdlib.unicode.grapheme.gcb(i64 %t$9)
+  %t$11 = call i64 @stdlib.unicode.grapheme.gcb(i64 %t$9) noinline
   %t$29 = call i64 @sprout_gc_pop_roots(i64 5)
   %t$12 = musttail call i64 @stdlib.unicode.grapheme.step$u(i64 %t$10, i64 %p$prev, i64 %p$st, i64 %p$run, i64 %p$acc, i64 %t$9, i64 %t$11)
   ret i64 %t$12
@@ -7990,7 +7990,7 @@ entry:
   %t$24 = alloca i64
   store i64 %p$acc, ptr %t$24
   %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
-  %t$0 = call i64 @stdlib.unicode.grapheme.joined(i64 %p$prev, i64 %p$cur, i64 %p$st, i64 %p$c)
+  %t$0 = call i64 @stdlib.unicode.grapheme.joined(i64 %p$prev, i64 %p$cur, i64 %p$st, i64 %p$c) noinline
   %t$15 = trunc i64 %t$0 to i1
   %t$26 = call i64 @sprout_gc_pop_roots(i64 5)
   br i1 %t$15, label %then_1, label %else_1
@@ -8007,7 +8007,7 @@ then_1:
   %t$33 = alloca i64
   store i64 %p$acc, ptr %t$33
   %t$34 = call i64 @sprout_gc_push_i64_root(ptr %t$33)
-  %t$3 = call i64 @stdlib.unicode.grapheme.advance(i64 %p$st, i64 %p$cur, i64 %p$c)
+  %t$3 = call i64 @stdlib.unicode.grapheme.advance(i64 %p$st, i64 %p$cur, i64 %p$c) noinline
   %t$4 = add i64 0, 1
   %t$5 = add i64 %p$run, %t$4
   %t$6 = add i64 0, 0
@@ -8028,7 +8028,7 @@ else_1:
   %t$42 = alloca i64
   store i64 %p$acc, ptr %t$42
   %t$43 = call i64 @sprout_gc_push_i64_root(ptr %t$42)
-  %t$9 = call i64 @stdlib.unicode.grapheme.advance(i64 %p$st, i64 %p$cur, i64 %p$c)
+  %t$9 = call i64 @stdlib.unicode.grapheme.advance(i64 %p$st, i64 %p$cur, i64 %p$c) noinline
   %t$10 = add i64 0, 1
   %t$44 = alloca i64
   store i64 %t$9, ptr %t$44
@@ -9918,7 +9918,7 @@ entry:
   %t$8 = alloca i64
   store i64 %p$c, ptr %t$8
   %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
-  %t$0 = call i64 @stdlib.tui.screen.screen_put(i64 %p$s, i64 %p$col, i64 %p$row, i64 %p$c, i64 %p$st)
+  %t$0 = call i64 @stdlib.tui.screen.screen_put(i64 %p$s, i64 %p$col, i64 %p$row, i64 %p$c, i64 %p$st) noinline
   %t$10 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$11 = call i64 @sprout_gc_pop_roots(i64 3)
   %t$1 = musttail call i64 @stdlib.tui.screen.write_next$u(i64 %p$s, i64 %p$col, i64 %p$row, i64 %p$rest, i64 %p$st, i64 %t$0)
@@ -10459,7 +10459,7 @@ entry:
   %t$7 = alloca i64
   store i64 %p$acc, ptr %t$7
   %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
-  %t$0 = call i64 @stdlib.tui.screen.cup(i64 %p$row, i64 %p$col)
+  %t$0 = call i64 @stdlib.tui.screen.cup(i64 %p$row, i64 %p$col) noinline
   %t$9 = alloca i64
   store i64 %t$0, ptr %t$9
   %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
@@ -10473,7 +10473,7 @@ entry:
   %t$12 = alloca i64
   store i64 %t$1, ptr %t$12
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
-  %t$2 = call i64 @stdlib.tui.screen.no_style()
+  %t$2 = call i64 @stdlib.tui.screen.no_style() noinline
   %t$3 = add i64 0, 0
   %t$14 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$4 = musttail call i64 @stdlib.tui.screen.run_cells$u(i64 %p$s, i64 %p$row, i64 %p$col, i64 %t$1, i64 %t$2, i64 %t$3)
@@ -10505,7 +10505,7 @@ entry:
 
 define i64 @stdlib.tui.screen.run_cells$u(i64 %p$s, i64 %p$row, i64 %p$col, i64 %p$acc, i64 %p$last, i64 %p$pbpad$5) {
 entry:
-  %t$0 = call i64 @stdlib.tui.screen.screen_cols(i64 %p$s)
+  %t$0 = call i64 @stdlib.tui.screen.screen_cols(i64 %p$s) noinline
   %t$1 = icmp sge i64 %p$col, %t$0
   %t$2 = zext i1 %t$1 to i64
   %t$14 = trunc i64 %t$2 to i1
@@ -10522,7 +10522,7 @@ else_3:
   %t$19 = alloca i64
   store i64 %p$acc, ptr %t$19
   %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
-  %t$5 = call i64 @stdlib.tui.screen.cell_changed(i64 %p$s, i64 %p$col, i64 %p$row)
+  %t$5 = call i64 @stdlib.tui.screen.cell_changed(i64 %p$s, i64 %p$col, i64 %p$row) noinline
   %t$13 = trunc i64 %t$5 to i1
   %t$21 = call i64 @sprout_gc_pop_roots(i64 3)
   br i1 %t$13, label %then_6, label %else_6
@@ -10559,7 +10559,7 @@ entry:
 
 define i64 @stdlib.tui.screen.emit_cell$u(i64 %p$s, i64 %p$row, i64 %p$col, i64 %p$acc, i64 %p$last, i64 %p$pbpad$5) {
 entry:
-  %t$0 = call i64 @stdlib.tui.screen.back_of(i64 %p$s)
+  %t$0 = call i64 @stdlib.tui.screen.back_of(i64 %p$s) noinline
   %t$3 = alloca i64
   store i64 %p$s, ptr %t$3
   %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
@@ -10572,7 +10572,7 @@ entry:
   %t$9 = alloca i64
   store i64 %t$0, ptr %t$9
   %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
-  %t$1 = call i64 @stdlib.mutable.mutmatrix_at(i64 %t$0, i64 %p$row, i64 %p$col)
+  %t$1 = call i64 @stdlib.mutable.mutmatrix_at(i64 %t$0, i64 %p$row, i64 %p$col) noinline
   %t$11 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$12 = call i64 @sprout_gc_pop_roots(i64 3)
   %t$2 = musttail call i64 @stdlib.tui.screen.emit_known$u(i64 %p$s, i64 %p$row, i64 %p$col, i64 %p$acc, i64 %p$last, i64 %t$1)
@@ -10600,7 +10600,7 @@ entry:
 
 define i64 @stdlib.tui.screen.emit_known$u(i64 %p$s, i64 %p$row, i64 %p$col, i64 %p$acc, i64 %p$last, i64 %p$c) {
 entry:
-  %t$0 = call i64 @stdlib.tui.screen.is_continuation(i64 %p$c)
+  %t$0 = call i64 @stdlib.tui.screen.is_continuation(i64 %p$c) noinline
   %t$17 = trunc i64 %t$0 to i1
   br i1 %t$17, label %then_1, label %else_1
 then_1:
@@ -10624,15 +10624,15 @@ else_1:
   %t$24 = alloca i64
   store i64 %p$acc, ptr %t$24
   %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
-  %t$9 = call i64 @stdlib.tui.screen.cell_text(i64 %p$c)
+  %t$9 = call i64 @stdlib.tui.screen.cell_text(i64 %p$c) noinline
   %t$26 = alloca i64
   store i64 %t$9, ptr %t$26
   %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
-  %t$10 = call i64 @stdlib.tui.screen.cell_style(i64 %p$c)
+  %t$10 = call i64 @stdlib.tui.screen.cell_style(i64 %p$c) noinline
   %t$28 = alloca i64
   store i64 %t$10, ptr %t$28
   %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
-  %t$11 = call i64 @stdlib.tui.screen.style_prefix(i64 %p$acc, i64 %p$last, i64 %t$10)
+  %t$11 = call i64 @stdlib.tui.screen.style_prefix(i64 %p$acc, i64 %p$last, i64 %t$10) noinline
   %t$30 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$31 = alloca i64
   store i64 %t$11, ptr %t$31
@@ -10647,7 +10647,7 @@ else_1:
   %t$34 = alloca i64
   store i64 %t$12, ptr %t$34
   %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
-  %t$13 = call i64 @stdlib.tui.screen.cell_style(i64 %p$c)
+  %t$13 = call i64 @stdlib.tui.screen.cell_style(i64 %p$c) noinline
   %t$36 = alloca i64
   store i64 %t$13, ptr %t$36
   %t$37 = call i64 @sprout_gc_push_i64_root(ptr %t$36)
@@ -11418,7 +11418,7 @@ body_0_1:
   %t$18 = alloca i64
   store i64 %t$5, ptr %t$18
   %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
-  %t$6 = call i64 @list_reverse(i64 %p$acc)
+  %t$6 = call i64 @list_reverse(i64 %p$acc) noinline
   %t$20 = alloca i64
   store i64 %t$6, ptr %t$20
   %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
@@ -11494,11 +11494,11 @@ ntest_3:
   %t$26 = alloca i64
   store i64 %t$8, ptr %t$26
   %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
-  %t$9 = call i64 @stdlib.tui.app.push_all(i64 %t$7, i64 %p$acc)
+  %t$9 = call i64 @stdlib.tui.app.push_all(i64 %t$7, i64 %p$acc) noinline
   %t$28 = alloca i64
   store i64 %t$9, ptr %t$28
   %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
-  %t$10 = call i64 @list_reverse(i64 %t$9)
+  %t$10 = call i64 @list_reverse(i64 %t$9) noinline
   %t$30 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$31 = alloca i64
   store i64 %t$10, ptr %t$31
@@ -11543,7 +11543,7 @@ ntest_13:
   %t$42 = alloca i64
   store i64 %t$17, ptr %t$42
   %t$43 = call i64 @sprout_gc_push_i64_root(ptr %t$42)
-  %t$18 = call i64 @stdlib.tui.app.push_all(i64 %t$17, i64 %p$acc)
+  %t$18 = call i64 @stdlib.tui.app.push_all(i64 %t$17, i64 %p$acc) noinline
   %t$44 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$45 = call i64 @sprout_gc_pop_roots(i64 3)
   %t$19 = musttail call i64 @stdlib.tui.app.apply_go(i64 %p$update, i64 %p$rest, i64 %t$12, i64 %t$18)
@@ -12001,7 +12001,7 @@ entry:
   %t$12 = alloca i64
   store i64 %p$ch, ptr %t$12
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
-  %t$0 = call i64 @stdlib.chan.chan_recv(i64 %p$ch)
+  %t$0 = call i64 @stdlib.chan.chan_recv(i64 %p$ch) noinline
   %t$14 = call i64 @sprout_gc_pop_roots(i64 6)
   %t$1 = musttail call i64 @stdlib.tui.app.on_signal$u(i64 %p$scope, i64 %p$ch, i64 %p$s, i64 %p$w, i64 %p$update, i64 %p$size, i64 %t$0)
   ret i64 %t$1
@@ -12143,7 +12143,7 @@ body_1_1:
   %t$39 = alloca i64
   store i64 %t$11, ptr %t$39
   %t$40 = call i64 @sprout_gc_push_i64_root(ptr %t$39)
-  %t$12 = call i64 @stdlib.tui.app.apply(i64 %p$update, i64 %t$11, i64 %p$w)
+  %t$12 = call i64 @stdlib.tui.app.apply(i64 %p$update, i64 %t$11, i64 %p$w) noinline
   %t$41 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$13 = add i64 0, 0
   %t$42 = call i64 @sprout_gc_pop_roots(i64 6)
@@ -12180,7 +12180,7 @@ body_2_1:
   %t$57 = alloca i64
   store i64 %t$18, ptr %t$57
   %t$58 = call i64 @sprout_gc_push_i64_root(ptr %t$57)
-  %t$19 = call i64 @stdlib.tui.app.step_to(i64 %p$update, i64 %p$w, i64 %t$17, i64 %t$18)
+  %t$19 = call i64 @stdlib.tui.app.step_to(i64 %p$update, i64 %p$w, i64 %t$17, i64 %t$18) noinline
   %t$59 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$20 = add i64 0, 0
   %t$60 = call i64 @sprout_gc_pop_roots(i64 6)
@@ -12254,7 +12254,7 @@ arm_1_1:
   %t$23 = alloca i64
   store i64 %p$ch, ptr %t$23
   %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
-  %t$8 = call i64 @stdlib.tui.app.step(i64 %p$update, i64 %p$w, i64 %p$ev)
+  %t$8 = call i64 @stdlib.tui.app.step(i64 %p$update, i64 %p$w, i64 %p$ev) noinline
   %t$9 = add i64 0, 0
   %t$25 = call i64 @sprout_gc_pop_roots(i64 7)
   %t$10 = musttail call i64 @stdlib.tui.app.advance$u(i64 %p$scope, i64 %p$ch, i64 %p$s, i64 %p$update, i64 %p$size, i64 %t$8, i64 %t$9)
@@ -12310,11 +12310,11 @@ entry:
   %t$14 = alloca i64
   store i64 %p$ch, ptr %t$14
   %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
-  %t$0 = call i64 @stdlib.tui.screen.screen_resize(i64 %p$s, i64 %p$ns)
+  %t$0 = call i64 @stdlib.tui.screen.screen_resize(i64 %p$s, i64 %p$ns) noinline
   %t$16 = alloca i64
   store i64 %t$0, ptr %t$16
   %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
-  %t$1 = call i64 @stdlib.tui.app.paint(i64 %t$0, i64 %p$w, i64 %p$ns)
+  %t$1 = call i64 @stdlib.tui.app.paint(i64 %t$0, i64 %p$w, i64 %p$ns) noinline
   %t$2 = add i64 0, 0
   %t$18 = call i64 @sprout_gc_pop_roots(i64 7)
   %t$3 = musttail call i64 @stdlib.tui.app.pump$u(i64 %p$scope, i64 %p$ch, i64 %t$0, i64 %p$w, i64 %p$update, i64 %p$ns, i64 %t$2)
@@ -12371,7 +12371,7 @@ ntest_3:
   %t$19 = alloca i64
   store i64 %p$s, ptr %t$19
   %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
-  %t$7 = call i64 @stdlib.tui.app.paint(i64 %p$s, i64 %t$2, i64 %p$size)
+  %t$7 = call i64 @stdlib.tui.app.paint(i64 %p$s, i64 %t$2, i64 %p$size) noinline
   %t$21 = call i64 @sprout_gc_pop_roots(i64 3)
   br label %join_0
 arm_1_0:
@@ -12482,7 +12482,7 @@ entry:
   %t$18 = alloca i64
   store i64 %t$0, ptr %t$18
   %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
-  %t$1 = call i64 @list_each(i64 %t$0, i64 %p$cs)
+  %t$1 = call i64 @list_each(i64 %t$0, i64 %p$cs) noinline
   %t$20 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$2 = add i64 0, 0
   %t$21 = call i64 @sprout_gc_pop_roots(i64 7)
@@ -12657,7 +12657,7 @@ entry:
   %t$13 = alloca i64
   store i64 %p$ch, ptr %t$13
   %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
-  %t$0 = call i64 @stdlib.tui.app.paint(i64 %p$s, i64 %p$w, i64 %p$size)
+  %t$0 = call i64 @stdlib.tui.app.paint(i64 %p$s, i64 %p$w, i64 %p$size) noinline
   %t$1 = add i64 0, 0
   %t$15 = call i64 @sprout_gc_pop_roots(i64 6)
   %t$2 = musttail call i64 @stdlib.tui.app.pump$u(i64 %p$scope, i64 %p$ch, i64 %p$s, i64 %p$w, i64 %p$update, i64 %p$size, i64 %t$1)
@@ -12701,7 +12701,7 @@ entry:
   %t$5 = alloca i64
   store i64 %p$ch, ptr %t$5
   %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
-  %t$0 = call i64 @stdlib.task.task_cancelled()
+  %t$0 = call i64 @stdlib.task.task_cancelled() noinline
   %t$1 = add i64 0, 0
   %t$7 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$2 = musttail call i64 @stdlib.tui.app.input_next$u(i64 %p$ch, i64 %p$tick_ms, i64 %p$held, i64 %t$0, i64 %t$1)
@@ -12763,7 +12763,7 @@ entry:
   %t$6 = alloca i64
   store i64 %p$ch, ptr %t$6
   %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
-  %t$1 = call i64 @stdlib.terminal.read_avail(i64 %t$0, i64 %p$tick_ms)
+  %t$1 = call i64 @stdlib.terminal.read_avail(i64 %t$0, i64 %p$tick_ms) noinline
   %t$2 = add i64 0, 0
   %t$8 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$3 = musttail call i64 @stdlib.tui.app.on_input$u(i64 %p$ch, i64 %p$tick_ms, i64 %p$held, i64 %t$1, i64 %t$2)
@@ -12806,7 +12806,7 @@ body_0_1:
   %t$30 = alloca i64
   store i64 %t$5, ptr %t$30
   %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)
-  %t$6 = call i64 @stdlib.bytes.append(i64 %p$held, i64 %t$5)
+  %t$6 = call i64 @stdlib.bytes.append(i64 %p$held, i64 %t$5) noinline
   %t$32 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$7 = add i64 0, 0
   %t$8 = add i64 0, 0
@@ -12839,7 +12839,7 @@ body_3_1:
   %t$34 = alloca i64
   store i64 %p$ch, ptr %t$34
   %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
-  %t$22 = call i64 @stdlib.chan.chan_close(i64 %p$ch)
+  %t$22 = call i64 @stdlib.chan.chan_close(i64 %p$ch) noinline
   %t$36 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_1
 arm_4_1:
@@ -12850,7 +12850,7 @@ body_4_1:
   %t$37 = alloca i64
   store i64 %p$ch, ptr %t$37
   %t$38 = call i64 @sprout_gc_push_i64_root(ptr %t$37)
-  %t$25 = call i64 @stdlib.chan.chan_close(i64 %p$ch)
+  %t$25 = call i64 @stdlib.chan.chan_close(i64 %p$ch) noinline
   %t$39 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_1
 arm_5_1:
@@ -12884,7 +12884,7 @@ entry:
   %t$9 = alloca i64
   store i64 %p$all, ptr %t$9
   %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
-  %t$0 = call i64 @stdlib.tui.keys.decode(i64 %p$all)
+  %t$0 = call i64 @stdlib.tui.keys.decode(i64 %p$all) noinline
   %t$11 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$12 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_1
@@ -12987,7 +12987,7 @@ entry:
   %t$12 = alloca i64
   store i64 %t$0, ptr %t$12
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
-  %t$1 = call i64 @stdlib.chan.chan_send(i64 %p$ch, i64 %t$0)
+  %t$1 = call i64 @stdlib.chan.chan_send(i64 %p$ch, i64 %t$0) noinline
   %t$14 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$2 = add i64 0, 0
   %t$15 = call i64 @sprout_gc_pop_roots(i64 4)
@@ -13018,7 +13018,7 @@ entry:
   %t$14 = alloca i64
   store i64 %p$ch, ptr %t$14
   %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
-  %t$0 = call i64 @stdlib.tui.app.escape_timed_out(i64 %p$held)
+  %t$0 = call i64 @stdlib.tui.app.escape_timed_out(i64 %p$held) noinline
   %t$11 = trunc i64 %t$0 to i1
   %t$16 = call i64 @sprout_gc_pop_roots(i64 2)
   br i1 %t$11, label %then_1, label %else_1
@@ -13120,7 +13120,7 @@ entry:
   %t$11 = alloca i64
   store i64 %t$0, ptr %t$11
   %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
-  %t$1 = call i64 @stdlib.tui.event.mods_none()
+  %t$1 = call i64 @stdlib.tui.event.mods_none() noinline
   %t$13 = alloca i64
   store i64 %t$1, ptr %t$13
   %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
@@ -13142,9 +13142,9 @@ entry:
   %t$19 = alloca i64
   store i64 %t$3, ptr %t$19
   %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
-  %t$4 = call i64 @stdlib.chan.chan_send(i64 %p$ch, i64 %t$3)
+  %t$4 = call i64 @stdlib.chan.chan_send(i64 %p$ch, i64 %t$3) noinline
   %t$21 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$5 = call i64 @stdlib.bytes.empty()
+  %t$5 = call i64 @stdlib.bytes.empty() noinline
   %t$6 = add i64 0, 0
   %t$7 = add i64 0, 0
   %t$22 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -13180,7 +13180,7 @@ entry:
   %t$8 = alloca i64
   store i64 %p$ch, ptr %t$8
   %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
-  %t$0 = call i64 @stdlib.chan.chan_send(i64 %p$ch, i64 %p$sig)
+  %t$0 = call i64 @stdlib.chan.chan_send(i64 %p$ch, i64 %p$sig) noinline
   %t$1 = add i64 0, 0
   %t$2 = add i64 0, 0
   %t$10 = call i64 @sprout_gc_pop_roots(i64 3)
@@ -13211,7 +13211,7 @@ entry:
   %t$7 = alloca i64
   store i64 %p$ch, ptr %t$7
   %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
-  %t$0 = call i64 @stdlib.tui.app.current_size()
+  %t$0 = call i64 @stdlib.tui.app.current_size() noinline
   %t$9 = alloca i64
   store i64 %t$0, ptr %t$9
   %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
@@ -15061,7 +15061,7 @@ entry:
   %t$15 = alloca i64
   store i64 %t$0, ptr %t$15
   %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
-  %t$1 = call i64 @stdlib.tui.screen.screen_clipped(i64 %p$s, i64 %p$r, i64 %t$0)
+  %t$1 = call i64 @stdlib.tui.screen.screen_clipped(i64 %p$s, i64 %p$r, i64 %t$0) noinline
   %t$17 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$2 = add i64 0, 0
   %t$3 = add i64 0, 0
@@ -18725,7 +18725,7 @@ arm_1_1:
 body_1_1:
   %t$8 = call i64 @sprout_field(i64 %p$content, i64 0)
   %t$9 = call i64 @sprout_field(i64 %p$content, i64 1)
-  %t$10 = call i64 @stdlib.tui.geometry.region_rows(i64 %p$region)
+  %t$10 = call i64 @stdlib.tui.geometry.region_rows(i64 %p$region) noinline
   %t$11 = icmp sge i64 %p$from_row, %t$10
   %t$12 = zext i1 %t$11 to i64
   %t$17 = trunc i64 %t$12 to i1
@@ -18786,7 +18786,7 @@ entry:
   %t$13 = alloca i64
   store i64 %p$l, ptr %t$13
   %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
-  %t$0 = call i64 @stdlib.tui.widgets.paint.line(i64 %p$screen, i64 %p$region, i64 %p$row, i64 %p$l, i64 %p$style)
+  %t$0 = call i64 @stdlib.tui.widgets.paint.line(i64 %p$screen, i64 %p$region, i64 %p$row, i64 %p$l, i64 %p$style) noinline
   %t$15 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$1 = add i64 0, 1
   %t$2 = add i64 %p$row, %t$1
@@ -21183,7 +21183,7 @@ body_1_1:
   %t$8 = call i64 @sprout_field(i64 %p$its, i64 0)
   %t$9 = call i64 @sprout_field(i64 %p$its, i64 1)
   %t$10 = sub i64 %p$i, %p$start
-  %t$11 = call i64 @stdlib.tui.geometry.region_rows(i64 %p$r)
+  %t$11 = call i64 @stdlib.tui.geometry.region_rows(i64 %p$r) noinline
   %t$12 = icmp sge i64 %t$10, %t$11
   %t$13 = zext i1 %t$12 to i64
   %t$18 = trunc i64 %t$13 to i1
@@ -21238,7 +21238,7 @@ then_2:
   br label %join_2
 else_2:
   %t$5 = sub i64 %p$i, %p$start
-  %t$6 = call i64 @stdlib.tui.widgets.list_view.style_at(i64 %p$l, i64 %p$i)
+  %t$6 = call i64 @stdlib.tui.widgets.list_view.style_at(i64 %p$l, i64 %p$i) noinline
   %t$13 = alloca i64
   store i64 %p$s, ptr %t$13
   %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
@@ -21257,7 +21257,7 @@ else_2:
   %t$23 = alloca i64
   store i64 %t$6, ptr %t$23
   %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
-  %t$7 = call i64 @stdlib.tui.widgets.paint.line(i64 %p$s, i64 %p$r, i64 %t$5, i64 %p$it, i64 %t$6)
+  %t$7 = call i64 @stdlib.tui.widgets.paint.line(i64 %p$s, i64 %p$r, i64 %t$5, i64 %p$it, i64 %t$6) noinline
   %t$25 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$26 = call i64 @sprout_gc_pop_roots(i64 4)
   br label %join_2

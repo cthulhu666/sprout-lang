@@ -127,7 +127,7 @@ fn vec_elem_addr_ir(r: String, v: String, i: String) -> String =
   "  " ++ r ++ "$data = load ptr, ptr " ++ r ++ "$dp\n" ++
   "  " ++ r ++ "$ep = getelementptr i64, ptr " ++ r ++ "$data, i64 " ++ i
 
-fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -> String =
+fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int), call_attr: String) -> String =
   match op with
   | sprout_ir.IRConst name n -> "  " ++ name ++ " = add i64 0, " ++ int_to_string(n)
   | sprout_ir.IRRet name -> "  ret " ++ ret_ty ++ " " ++ name
@@ -190,7 +190,7 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -
   | sprout_ir.IRCondBr cond t e -> "  br i1 " ++ cond ++ ", label %" ++ t ++ ", label %" ++ e
   | sprout_ir.IRPhi r ty pairs -> "  " ++ r ++ " = phi " ++ ty ++ " " ++ lower_phi_pairs(pairs)
   | sprout_ir.IRCall r _kind fname args ->
-      "  " ++ r ++ " = call i64 @" ++ fname ++ "(" ++ lower_call_args(args) ++ ")"
+      "  " ++ r ++ " = call i64 @" ++ fname ++ "(" ++ lower_call_args(args) ++ ")" ++ call_attr
   # Tier-1 CPR peephole: unboxed { i64, i64 } extern call + two extractvalues.
   # The struct SSA (<tag>$st) is synthesized here — it never exists at IR level.
   # The callee is declared explicitly in ir_header() (the 10 `declare { i64, i64 }
@@ -198,7 +198,7 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -
   # emitted; the C runtime provides `SproutUnboxed2 <fn>(long long, …)`
   # (ABI-identical to { i64, i64 }).
   | sprout_ir.IRCallUnboxed2 tag val _vk fname args ->
-      "  " ++ tag ++ "$st = call { i64, i64 } @" ++ fname ++ "(" ++ lower_call_args(args) ++ ")\n" ++
+      "  " ++ tag ++ "$st = call { i64, i64 } @" ++ fname ++ "(" ++ lower_call_args(args) ++ ")" ++ call_attr ++ "\n" ++
       "  " ++ tag ++ " = extractvalue { i64, i64 } " ++ tag ++ "$st, 0\n" ++
       "  " ++ val ++ " = extractvalue { i64, i64 } " ++ tag ++ "$st, 1"
   # Tier-2 CPR worker return: pack (tag, val) into the { i64, i64 } ABI and
@@ -212,7 +212,7 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -
   # (<s0>$st) is synthesized here — it never exists at IR level.  The worker is a Sprout
   # `define { i64, i64, i64 } @<fn>` emitted by emit_worker_fn, so no `declare` is needed.
   | sprout_ir.IRCallUnboxed3 s0 s1 s2 _vk fname args ->
-      "  " ++ s0 ++ "$st = call { i64, i64, i64 } @" ++ fname ++ "(" ++ lower_call_args(args) ++ ")\n" ++
+      "  " ++ s0 ++ "$st = call { i64, i64, i64 } @" ++ fname ++ "(" ++ lower_call_args(args) ++ ")" ++ call_attr ++ "\n" ++
       "  " ++ s0 ++ " = extractvalue { i64, i64, i64 } " ++ s0 ++ "$st, 0\n" ++
       "  " ++ s1 ++ " = extractvalue { i64, i64, i64 } " ++ s0 ++ "$st, 1\n" ++
       "  " ++ s2 ++ " = extractvalue { i64, i64, i64 } " ++ s0 ++ "$st, 2"
@@ -381,19 +381,19 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -
       "  " ++ result ++ " = musttail call i64 @" ++ callee ++ "(" ++ lower_call_args(args) ++ ")\n" ++
       "  ret i64 " ++ result
 
-fn lower_ops(ops: List sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -> String =
+fn lower_ops(ops: List sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int), call_attr: String) -> String =
   match ops with
   | Nil -> ""
-  | Cons op rest -> lower_op(op, ret_ty, str_table) ++ "\n" ++ lower_ops(rest, ret_ty, str_table)
+  | Cons op rest -> lower_op(op, ret_ty, str_table, call_attr) ++ "\n" ++ lower_ops(rest, ret_ty, str_table, call_attr)
 
-fn lower_block(b: sprout_ir.IRBlock, ret_ty: String, str_table: Dict (String, Int)) -> String =
+fn lower_block(b: sprout_ir.IRBlock, ret_ty: String, str_table: Dict (String, Int), call_attr: String) -> String =
   match b with
-  | sprout_ir.IRBlock label ops -> label ++ ":\n" ++ lower_ops(ops, ret_ty, str_table)
+  | sprout_ir.IRBlock label ops -> label ++ ":\n" ++ lower_ops(ops, ret_ty, str_table, call_attr)
 
-fn lower_blocks(bs: List sprout_ir.IRBlock, ret_ty: String, str_table: Dict (String, Int)) -> String =
+fn lower_blocks(bs: List sprout_ir.IRBlock, ret_ty: String, str_table: Dict (String, Int), call_attr: String) -> String =
   match bs with
   | Nil -> ""
-  | Cons b rest -> lower_block(b, ret_ty, str_table) ++ lower_blocks(rest, ret_ty, str_table)
+  | Cons b rest -> lower_block(b, ret_ty, str_table, call_attr) ++ lower_blocks(rest, ret_ty, str_table, call_attr)
 
 # Emit `alloca` + `store` for each TCO param slot.  Each line ends in '\n' so the
 # trailing `stacksave` (appended by the caller) starts on its own line.
@@ -446,7 +446,30 @@ fn lower_params(params: List (String, sprout_ir.IRType)) -> String =
 export fn lower_fn_with_table(f: sprout_ir.IRFunction, fn_table: Dict (String, Int)) -> String =
   match f with
   | sprout_ir.IRFunction name params ret_ty blocks ->
-      "define " ++ ret_ty ++ " @" ++ name ++ "(" ++ lower_params(params) ++ ") {\n" ++ lower_blocks(blocks, ret_ty, fn_table) ++ "}\n"
+      "define " ++ ret_ty ++ " @" ++ name ++ "(" ++ lower_params(params) ++ ") {\n"
+        ++ lower_blocks(blocks, ret_ty, fn_table, direct_call_attr(blocks)) ++ "}\n"
+
+# `noinline` on every direct call of a function that carries a `musttail` one.
+# Inlining a cycle partner INTO such a function makes it self-recursive, which
+# tailcallelim rewrites into an accumulator loop — breaking the musttail and
+# aborting the backend at -O2 (docs/mutual-tco-v0.md §2.1, tests/codegen_o2/).
+fn direct_call_attr(blocks: List sprout_ir.IRBlock) -> String =
+  if blocks_have_tail_call(blocks) then " noinline" else ""
+
+fn blocks_have_tail_call(bs: List sprout_ir.IRBlock) -> Bool =
+  match bs with
+  | Nil -> false
+  | Cons b rest ->
+      match b with
+      | sprout_ir.IRBlock _ ops -> if ops_have_tail_call(ops) then true else blocks_have_tail_call(rest)
+
+fn ops_have_tail_call(ops: List sprout_ir.IROp) -> Bool =
+  match ops with
+  | Nil -> false
+  | Cons op rest ->
+      match op with
+      | sprout_ir.IRTailCall _ _ _ _ -> true
+      | _ -> ops_have_tail_call(rest)
 
 fn lower_fn(f: sprout_ir.IRFunction, fn_tables: Dict (Dict (String, Int))) -> String =
   match f with

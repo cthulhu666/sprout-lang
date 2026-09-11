@@ -16186,7 +16186,7 @@ entry:
   %t$86 = alloca i64
   store i64 %p$acc, ptr %t$86
   %t$87 = call i64 @sprout_gc_push_i64_root(ptr %t$86)
-  %t$0 = call i64 @stdlib.json.hex4(i64 %p$s, i64 %p$i)
+  %t$0 = call i64 @stdlib.json.hex4(i64 %p$s, i64 %p$i) noinline
   %t$88 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_1
 arm_0_1:
@@ -16230,7 +16230,7 @@ then_19:
   %t$93 = alloca i64
   store i64 %t$24, ptr %t$93
   %t$94 = call i64 @sprout_gc_push_i64_root(ptr %t$93)
-  %t$25 = call i64 @str_starts_with_at_byte(i64 %p$s, i64 %t$22, i64 %t$24)
+  %t$25 = call i64 @str_starts_with_at_byte(i64 %p$s, i64 %t$22, i64 %t$24) noinline
   %t$95 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$62 = trunc i64 %t$25 to i1
   %t$96 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -16244,7 +16244,7 @@ then_26:
   %t$99 = alloca i64
   store i64 %p$acc, ptr %t$99
   %t$100 = call i64 @sprout_gc_push_i64_root(ptr %t$99)
-  %t$30 = call i64 @stdlib.json.hex4(i64 %p$s, i64 %t$29)
+  %t$30 = call i64 @stdlib.json.hex4(i64 %p$s, i64 %t$29) noinline
   %t$101 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_31
 arm_0_31:
@@ -16283,7 +16283,7 @@ then_43:
   %t$104 = alloca i64
   store i64 %p$acc, ptr %t$104
   %t$105 = call i64 @sprout_gc_push_i64_root(ptr %t$104)
-  %t$56 = call i64 @char_to_str(i64 %t$55)
+  %t$56 = call i64 @char_to_str(i64 %t$55) noinline
   %t$57 = call i64 @str_concat(i64 %p$acc, i64 %t$56)
   %t$106 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$107 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -16337,7 +16337,7 @@ else_73:
   %t$110 = alloca i64
   store i64 %p$acc, ptr %t$110
   %t$111 = call i64 @sprout_gc_push_i64_root(ptr %t$110)
-  %t$78 = call i64 @char_to_str(i64 %t$0)
+  %t$78 = call i64 @char_to_str(i64 %t$0) noinline
   %t$79 = call i64 @str_concat(i64 %p$acc, i64 %t$78)
   %t$112 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$113 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -16373,7 +16373,7 @@ entry:
   %t$110 = alloca i64
   store i64 %t$1, ptr %t$110
   %t$111 = call i64 @sprout_gc_push_i64_root(ptr %t$110)
-  %t$2 = call i64 @str_starts_with_at_byte(i64 %p$s, i64 %p$i, i64 %t$1)
+  %t$2 = call i64 @str_starts_with_at_byte(i64 %p$s, i64 %p$i, i64 %t$1) noinline
   %t$112 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$105 = trunc i64 %t$2 to i1
   %t$113 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -16402,7 +16402,7 @@ else_3:
   %t$121 = alloca i64
   store i64 %t$12, ptr %t$121
   %t$122 = call i64 @sprout_gc_push_i64_root(ptr %t$121)
-  %t$13 = call i64 @str_starts_with_at_byte(i64 %p$s, i64 %p$i, i64 %t$12)
+  %t$13 = call i64 @str_starts_with_at_byte(i64 %p$s, i64 %p$i, i64 %t$12) noinline
   %t$123 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$104 = trunc i64 %t$13 to i1
   %t$124 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -16431,7 +16431,7 @@ else_14:
   %t$132 = alloca i64
   store i64 %t$23, ptr %t$132
   %t$133 = call i64 @sprout_gc_push_i64_root(ptr %t$132)
-  %t$24 = call i64 @str_starts_with_at_byte(i64 %p$s, i64 %p$i, i64 %t$23)
+  %t$24 = call i64 @str_starts_with_at_byte(i64 %p$s, i64 %p$i, i64 %t$23) noinline
   %t$134 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$103 = trunc i64 %t$24 to i1
   %t$135 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -16460,7 +16460,7 @@ else_25:
   %t$143 = alloca i64
   store i64 %t$34, ptr %t$143
   %t$144 = call i64 @sprout_gc_push_i64_root(ptr %t$143)
-  %t$35 = call i64 @str_starts_with_at_byte(i64 %p$s, i64 %p$i, i64 %t$34)
+  %t$35 = call i64 @str_starts_with_at_byte(i64 %p$s, i64 %p$i, i64 %t$34) noinline
   %t$145 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$102 = trunc i64 %t$35 to i1
   %t$146 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -16489,7 +16489,7 @@ else_36:
   %t$154 = alloca i64
   store i64 %t$45, ptr %t$154
   %t$155 = call i64 @sprout_gc_push_i64_root(ptr %t$154)
-  %t$46 = call i64 @str_starts_with_at_byte(i64 %p$s, i64 %p$i, i64 %t$45)
+  %t$46 = call i64 @str_starts_with_at_byte(i64 %p$s, i64 %p$i, i64 %t$45) noinline
   %t$156 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$101 = trunc i64 %t$46 to i1
   %t$157 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -16518,7 +16518,7 @@ else_47:
   %t$165 = alloca i64
   store i64 %t$56, ptr %t$165
   %t$166 = call i64 @sprout_gc_push_i64_root(ptr %t$165)
-  %t$57 = call i64 @str_starts_with_at_byte(i64 %p$s, i64 %p$i, i64 %t$56)
+  %t$57 = call i64 @str_starts_with_at_byte(i64 %p$s, i64 %p$i, i64 %t$56) noinline
   %t$167 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$100 = trunc i64 %t$57 to i1
   %t$168 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -16547,7 +16547,7 @@ else_58:
   %t$176 = alloca i64
   store i64 %t$67, ptr %t$176
   %t$177 = call i64 @sprout_gc_push_i64_root(ptr %t$176)
-  %t$68 = call i64 @str_starts_with_at_byte(i64 %p$s, i64 %p$i, i64 %t$67)
+  %t$68 = call i64 @str_starts_with_at_byte(i64 %p$s, i64 %p$i, i64 %t$67) noinline
   %t$178 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$99 = trunc i64 %t$68 to i1
   %t$179 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -16562,7 +16562,7 @@ then_69:
   %t$182 = alloca i64
   store i64 %p$acc, ptr %t$182
   %t$183 = call i64 @sprout_gc_push_i64_root(ptr %t$182)
-  %t$74 = call i64 @char_to_str(i64 %t$73)
+  %t$74 = call i64 @char_to_str(i64 %t$73) noinline
   %t$75 = call i64 @str_concat(i64 %p$acc, i64 %t$74)
   %t$184 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$185 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -16580,7 +16580,7 @@ else_69:
   %t$190 = alloca i64
   store i64 %t$78, ptr %t$190
   %t$191 = call i64 @sprout_gc_push_i64_root(ptr %t$190)
-  %t$79 = call i64 @str_starts_with_at_byte(i64 %p$s, i64 %p$i, i64 %t$78)
+  %t$79 = call i64 @str_starts_with_at_byte(i64 %p$s, i64 %p$i, i64 %t$78) noinline
   %t$192 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$98 = trunc i64 %t$79 to i1
   %t$193 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -16595,7 +16595,7 @@ then_80:
   %t$196 = alloca i64
   store i64 %p$acc, ptr %t$196
   %t$197 = call i64 @sprout_gc_push_i64_root(ptr %t$196)
-  %t$85 = call i64 @char_to_str(i64 %t$84)
+  %t$85 = call i64 @char_to_str(i64 %t$84) noinline
   %t$86 = call i64 @str_concat(i64 %p$acc, i64 %t$85)
   %t$198 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$199 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -16613,7 +16613,7 @@ else_80:
   %t$204 = alloca i64
   store i64 %t$89, ptr %t$204
   %t$205 = call i64 @sprout_gc_push_i64_root(ptr %t$204)
-  %t$90 = call i64 @str_starts_with_at_byte(i64 %p$s, i64 %p$i, i64 %t$89)
+  %t$90 = call i64 @str_starts_with_at_byte(i64 %p$s, i64 %p$i, i64 %t$89) noinline
   %t$206 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$97 = trunc i64 %t$90 to i1
   %t$207 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -17577,7 +17577,7 @@ entry:
   %t$79 = alloca i64
   store i64 %p$s, ptr %t$79
   %t$80 = call i64 @sprout_gc_push_i64_root(ptr %t$79)
-  %t$0 = call i64 @stdlib.json.skip_ws(i64 %p$s, i64 %p$i0)
+  %t$0 = call i64 @stdlib.json.skip_ws(i64 %p$s, i64 %p$i0) noinline
   %t$81 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_1
 arm_0_1:
@@ -17589,7 +17589,7 @@ arm_0_1:
   %t$84 = alloca i64
   store i64 %t$4, ptr %t$84
   %t$85 = call i64 @sprout_gc_push_i64_root(ptr %t$84)
-  %t$5 = call i64 @str_starts_with_at_byte(i64 %p$s, i64 %t$0, i64 %t$4)
+  %t$5 = call i64 @str_starts_with_at_byte(i64 %p$s, i64 %t$0, i64 %t$4) noinline
   %t$86 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$78 = trunc i64 %t$5 to i1
   %t$87 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -17598,7 +17598,7 @@ then_6:
   %t$88 = alloca i64
   store i64 %p$s, ptr %t$88
   %t$89 = call i64 @sprout_gc_push_i64_root(ptr %t$88)
-  %t$8 = call i64 @stdlib.json.p_string(i64 %p$s, i64 %t$0)
+  %t$8 = call i64 @stdlib.json.p_string(i64 %p$s, i64 %t$0) noinline
   %t$90 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$9 = call i64 @sprout_tag(i64 %t$8)
   br label %arm_0_10
@@ -17665,7 +17665,7 @@ else_6:
   %t$103 = alloca i64
   store i64 %t$24, ptr %t$103
   %t$104 = call i64 @sprout_gc_push_i64_root(ptr %t$103)
-  %t$25 = call i64 @str_starts_with_at_byte(i64 %p$s, i64 %t$0, i64 %t$24)
+  %t$25 = call i64 @str_starts_with_at_byte(i64 %p$s, i64 %t$0, i64 %t$24) noinline
   %t$105 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$77 = trunc i64 %t$25 to i1
   %t$106 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -17682,7 +17682,7 @@ else_26:
   %t$109 = alloca i64
   store i64 %t$30, ptr %t$109
   %t$110 = call i64 @sprout_gc_push_i64_root(ptr %t$109)
-  %t$31 = call i64 @str_starts_with_at_byte(i64 %p$s, i64 %t$0, i64 %t$30)
+  %t$31 = call i64 @str_starts_with_at_byte(i64 %p$s, i64 %t$0, i64 %t$30) noinline
   %t$111 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$76 = trunc i64 %t$31 to i1
   %t$112 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -17699,7 +17699,7 @@ else_32:
   %t$115 = alloca i64
   store i64 %t$36, ptr %t$115
   %t$116 = call i64 @sprout_gc_push_i64_root(ptr %t$115)
-  %t$37 = call i64 @str_starts_with_at_byte(i64 %p$s, i64 %t$0, i64 %t$36)
+  %t$37 = call i64 @str_starts_with_at_byte(i64 %p$s, i64 %t$0, i64 %t$36) noinline
   %t$117 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$75 = trunc i64 %t$37 to i1
   %t$118 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -17740,7 +17740,7 @@ else_38:
   %t$127 = alloca i64
   store i64 %t$47, ptr %t$127
   %t$128 = call i64 @sprout_gc_push_i64_root(ptr %t$127)
-  %t$48 = call i64 @str_starts_with_at_byte(i64 %p$s, i64 %t$0, i64 %t$47)
+  %t$48 = call i64 @str_starts_with_at_byte(i64 %p$s, i64 %t$0, i64 %t$47) noinline
   %t$129 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$74 = trunc i64 %t$48 to i1
   %t$130 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -17781,7 +17781,7 @@ else_49:
   %t$139 = alloca i64
   store i64 %t$58, ptr %t$139
   %t$140 = call i64 @sprout_gc_push_i64_root(ptr %t$139)
-  %t$59 = call i64 @str_starts_with_at_byte(i64 %p$s, i64 %t$0, i64 %t$58)
+  %t$59 = call i64 @str_starts_with_at_byte(i64 %p$s, i64 %t$0, i64 %t$58) noinline
   %t$141 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$73 = trunc i64 %t$59 to i1
   %t$142 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -17813,7 +17813,7 @@ else_60:
   %t$149 = alloca i64
   store i64 %p$s, ptr %t$149
   %t$150 = call i64 @sprout_gc_push_i64_root(ptr %t$149)
-  %t$67 = call i64 @stdlib.json.is_num_start(i64 %p$s, i64 %t$0)
+  %t$67 = call i64 @stdlib.json.is_num_start(i64 %p$s, i64 %t$0) noinline
   %t$72 = trunc i64 %t$67 to i1
   %t$151 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$72, label %then_68, label %else_68
@@ -17821,7 +17821,7 @@ then_68:
   %t$152 = alloca i64
   store i64 %p$s, ptr %t$152
   %t$153 = call i64 @sprout_gc_push_i64_root(ptr %t$152)
-  %t$70 = call i64 @stdlib.json.p_number(i64 %p$s, i64 %t$0)
+  %t$70 = call i64 @stdlib.json.p_number(i64 %p$s, i64 %t$0) noinline
   %t$154 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_68
 else_68:

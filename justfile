@@ -1101,6 +1101,34 @@ smoke-shapes: bootstrap-from-seed
   fi
   echo "==> smoke-shapes ✓"
 
+# Optimized-codegen smoke.  Each tests/codegen_o2/*.spr must emit IR that survives
+# `clang -O2`.  Nothing else checks this: `just test` links test IR with no -O flag,
+# so a backend failure that only -O2 reaches (an LLVM pass breaking a `musttail`,
+# say) is invisible to every other gate while shipping binaries are built -O2.
+[group('smoke')]
+o2-codegen-smoke: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_o2cg_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  failed=0
+  for f in tests/codegen_o2/*.spr; do
+    [ -f "$f" ] || continue
+    ir="$TMPD/$(basename "$f").ll"
+    if ! "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$f" > "$ir" 2>"$TMPD/err"; then
+      echo "o2-codegen-smoke: emit-IR failed for $f" >&2; cat "$TMPD/err" >&2
+      failed=$((failed + 1)); continue
+    fi
+    if ! clang -c "$ir" -O2 {{clang_extra}} -o "$TMPD/obj.o" 2>"$TMPD/err"; then
+      echo "o2-codegen-smoke: clang -O2 failed for $f" >&2; cat "$TMPD/err" >&2
+      failed=$((failed + 1))
+    fi
+  done
+  if (( failed > 0 )); then
+    echo "o2-codegen-smoke: $failed shape(s) failed" >&2; exit 1
+  fi
+  echo "==> o2-codegen-smoke ✓"
+
 # DoD #8 — bundle smoke.  `--phase bundle` on token.sprout, ast.sprout, and
 # prelude.sprout must produce non-empty output with no dot-prefix qualified names.
 [group('smoke')]
@@ -2930,6 +2958,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
   GATES=(
     "approved-builtins|check-approved-builtins"
     "smoke-shapes|smoke-shapes"
+    "o2-codegen-smoke|o2-codegen-smoke"
     "bundle-smoke|bundle-smoke"
     "effect-report-smoke|effect-report-smoke"
     "fmt-check|fmt-check"
