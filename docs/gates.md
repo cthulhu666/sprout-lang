@@ -226,7 +226,8 @@ docs-only PR used to pay its full ~20 min: `ci.yml`'s per-event detection only r
 `tests/stdlib/compiler/` suites, after bootstrap and `ci-fast-gates` had already run.
 
 The `changes` job now classifies the event once (~10 s) and every other job waits on it. `docs_only`
-is a strict allowlist — `docs/**` and top-level `*.md`, nothing else. `examples/` is compiled by
+is a strict allowlist — `docs/**`, top-level `*.md`, and `LICENSE`/`NOTICE`, which are named
+literally because they carry no extension. Nothing else: `examples/` is compiled by
 `compile-examples-stage1`, `bench/` by `compile-bench`, and a `.github/` edit must run the workflow
 it edits, so none of those three counts as docs. Fail open, as before: any non-`pull_request` event,
 an unresolvable base, or a failed diff runs everything.

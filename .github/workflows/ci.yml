@@ -72,12 +72,14 @@ jobs:
             printf 'changed files:\n%s\n' "$CHANGED"
             echo "run_compiler=false" >> "$GITHUB_OUTPUT"
           fi
-          # docs_only: nothing outside docs/ and top-level *.md moved, so no gate in
-          # this repo can observe the change. Strict allowlist on purpose — examples/
-          # is compiled by compile-examples-stage1, bench/ by compile-bench, and a
-          # .github/ edit must run the workflow it edits. Fail open with run_compiler
-          # above: every early exit leaves docs_only unset (= false).
-          if printf '%s\n' "$CHANGED" | grep -qvE '^(docs/.*|[^/]*\.md)$'; then
+          # docs_only: nothing outside docs/, top-level *.md and the two extensionless
+          # prose files moved, so no gate in this repo can observe the change. Strict
+          # allowlist on purpose — examples/ is compiled by compile-examples-stage1,
+          # bench/ by compile-bench, and a .github/ edit must run the workflow it edits.
+          # LICENSE and NOTICE are named literally, not matched by a shape like [A-Z]+,
+          # so adding one stays a deliberate act. Fail open with run_compiler above:
+          # every early exit leaves docs_only unset (= false).
+          if printf '%s\n' "$CHANGED" | grep -qvE '^(docs/.*|[^/]*\.md|LICENSE|NOTICE)$'; then
             echo "non-docs paths changed — running the full suite"
             echo "docs_only=false" >> "$GITHUB_OUTPUT"
           else
