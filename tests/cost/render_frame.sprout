@@ -4,12 +4,24 @@ module main
 #
 # It paints FRAMES frames of a full screen through the real stack — container
 # layout, `widget.render`, `paint.line`, grapheme segmentation, the screen diff
-# — and does nothing else, so the allocation counters the runtime prints at exit
-# are the cost of rendering and of nothing else.
+# and its ANSI emission — and does nothing else, so the allocation counters the
+# runtime prints at exit are the cost of rendering and of nothing else.
 #
 # Everything here is pure computation over fixed inputs: no clock, no input, no
 # tick. That is what makes the counters repeat exactly, which is what lets a
 # budget be asserted on them at all.
+#
+# TWO PROPERTIES ARE LOAD-BEARING, and a later edit that drops either leaves the
+# budget guarding less than it appears to:
+#
+#   1. Every frame's content DIFFERS, because the frame index leads each row.
+#      `diff_to_ansi` emits only changed cells, so a screen that repeated would
+#      emit nothing from frame 2 on and the whole emission half — `cup`,
+#      `style_to_ansi`, the row commit — would sit outside the budget at ~1% of
+#      the total while the comment above claimed to cover it.
+#   2. One row in three carries NON-ASCII text. The ASCII fast path in
+#      `unicode.grapheme` means Latin rows never touch a UCD table, so a corpus
+#      of pure ASCII cannot see a regression in the table path at all.
 
 import stdlib.tui.geometry as g
 import stdlib.tui.screen as scr
@@ -29,37 +41,49 @@ fn frames() -> Int = 20
 
 fn size() -> g.Size = g.Size(cols(), rows())
 
-fn item(i: Int) -> String = `entry ${int_to_string(i)} — a plausible row of text`
+# Sprout has no `%` (stdlib/math.sprout:211).
+fn third(i: Int) -> Int = i - (i / 3) * 3
 
-fn items() -> List String = built(60, Nil)
+# Wide CJK and an Extended_Pictographic emoji, so the segmentation state machine
+# runs its table path and not only the fast one.
+fn tail(i: Int) -> String =
+  if third(i) == 0 then " 日本語のテキスト"
+  else if third(i) == 1 then " ✅ done"
+  else " plain and narrow"
 
-fn built(n: Int, acc: List String) -> List String =
-  if n <= 0 then acc else built(n - 1, Cons(item(n), acc))
+# The frame index LEADS, so every cell of the row changes between frames rather
+# than a tail the emitter could skip.
+fn item(n: Int, i: Int) -> String =
+  `f${int_to_string(n)} entry ${int_to_string(i)} — a row${tail(i)}`
 
-fn pane(name: String) -> widget.Widget Int =
-  lv.list_view(widget.WidgetId(name), items(), \i -> i)
+fn items(n: Int) -> List String = built(n, 60, Nil)
 
-fn tree() -> widget.Widget Int =
+fn built(n: Int, i: Int, acc: List String) -> List String =
+  if i <= 0 then acc else built(n, i - 1, Cons(item(n, i), acc))
+
+fn pane(n: Int, name: String) -> widget.Widget Int =
+  lv.list_view(widget.WidgetId(name), items(n), \i -> i)
+
+fn tree(n: Int) -> widget.Widget Int =
   ct.column([ct.fit(txt.label("cost probe")),
-             ct.fraction(1, ct.row([ct.fraction(1, pane("left")),
-                                    ct.fraction(2, pane("right"))])),
+             ct.fraction(1, ct.row([ct.fraction(1, pane(n, "left")),
+                                    ct.fraction(2, pane(n, "right"))])),
              ct.fit(txt.label("a footer, as every real screen has"))])
 
-fn painted(w: widget.Widget Int, s: scr.Screen, size: g.Size,
-           n: Int) -> Unit !{IO} =
-  if n <= 0 then () else frame(w, s, size, n)
+fn painted(s: scr.Screen, n: Int) -> Unit !{IO} =
+  if n <= 0 then () else frame(s, n)
 
-fn frame(w: widget.Widget Int, s: scr.Screen, size: g.Size,
-         n: Int) -> Unit !{IO} = do
+fn frame(s: scr.Screen, n: Int) -> Unit !{IO} = do
   scr.screen_clear(s, sty.style_default())
-  widget.render(w, g.region_at_origin(size), s)
-  # The diff is part of the path a real frame takes, so it is part of the price.
+  widget.render(tree(n), g.region_at_origin(size()), s)
+  # The diff and its emission are part of the path a real frame takes, so they
+  # are part of the price.
   scr.diff_to_ansi(s)
-  painted(w, s, size, n - 1)
+  painted(s, n - 1)
 
 # The denominator is printed rather than duplicated in the gate script, which
 # would drift the moment the workload changed size.
 fn main() -> Unit !{IO} = do
   s <- scr.screen_new(size())
-  painted(tree(), s, size(), frames())
+  painted(s, frames())
   print(`cost-probe cells=${int_to_string(cols() * rows() * frames())}`)

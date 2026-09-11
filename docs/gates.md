@@ -247,9 +247,21 @@ does not vary with the machine. Ratios catch a wrong exponent; budgets catch a b
 gate is the second kind, and today's bug was the second kind: correct complexity, 8× the constant.
 
 **`gc_swept` is the load-bearing counter, not `sprout_obj`.** Verified by building the probe against
-the pre-fix `grapheme`: objects came out *identical* at 15 per cell, swept at 71 against 20.
+the pre-fix `grapheme`: objects came out *identical* at 18 per cell, swept at 106 against 42.
 `sprout_obj` does not count cstr allocations, and that bug was `str_slice` churn — an objects-only
 budget would have passed it.
+
+**The floor matters as much as the ceiling**, because "cheap" and "did nothing" are the same number
+to a budget. A probe whose list renders no rows scores 5 and 6 against a ceiling of 26 and 60 — green,
+measuring an empty screen, with nothing else in the repo exercising `tests/cost/`. Both bounds are
+asserted, and both were verified to fire.
+
+**Two properties of the fixture are load-bearing.** Every frame's content differs, because
+`diff_to_ansi` emits only changed cells: a repeating screen emits nothing from frame 2 on, which
+leaves the whole ANSI-emission half outside the budget at ~1% of the total while looking covered.
+And one row in three is non-ASCII, because the ASCII fast path means Latin rows never reach a UCD
+table, so an all-ASCII corpus cannot see a regression in the table path at all. Both were found by
+review *after* the first version shipped with neither.
 
 The budget is generous on purpose: it catches a 2× arriving unnoticed, not ordinary churn, and the
 observed value prints on every run so drift is visible long before the ceiling. A legitimate change
