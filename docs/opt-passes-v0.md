@@ -1,13 +1,29 @@
 # Sprout-level optimization passes (CSE, LICM) and the A/B harness — v0
 
-**Status:** M0 implemented 2026-09-11; M1 and M2 proposed. No syntax, typing-rule,
-evaluation-order or diagnostic change — these are semantics-preserving passes plus measurement
-tooling, so `spec-v0.md` is untouched.
+**Status — arc parked 2026-09-11.** No syntax, typing-rule, evaluation-order or diagnostic change
+happened; `spec-v0.md` is untouched, as planned.
+
+| milestone | outcome |
+|---|---|
+| **M0** — A/B harness | **landed.** `SPROUT_OPT_OFF`/`SPROUT_OPT_STATS`, `just bench-opt`, `just opt-harness-check`. Baseline: `bench/results-2026-09-11-opt.md` |
+| **M1** — CSE | **measured and declined.** Opportunity real, payoff nil: `bench/results-2026-09-11-cse-census.md` |
+| **M2** — LICM | **open, not refuted by M1.** `BACKLOG.md` P3, gated on a hand-applied-hoist A/B |
+| **M3** — LLVM `declare` attributes / LTO | **open**, untouched by this arc. `BACKLOG.md` |
+
+**What this arc established, in one line:** the two passes it set out to add turned out not to be
+worth adding, and the instrument that proved it is the durable result. DLE removes zero nodes from
+real code; CSE has 673 real sites in the compiler that LLVM genuinely will not take, and taking 49
+of them by hand changed nothing measurable. Whoever proposes either pass again should read the two
+results files first — both are re-runnable.
+
+One open gap in the harness itself: `SPROUT_OPT_OFF` cannot reach `dce.elim_unreachable`, the pass
+that actually does large work, because it runs below the seam. `BACKLOG.md` P2.
 
 Scope correction up front: **DCE already exists.** `stdlib/compiler/dce.sprout` implements dead-let
-elimination and declaration reachability, wired at `compiler.sprout:554`/`:624`, with a purity
-oracle (`is_pure_callee_type`) that reads the effect row. The new passes are CSE and LICM; DCE is
-the shape they copy.
+elimination and declaration reachability. Dead-let runs through `compiler.run_opt_passes`
+(`compiler.sprout:457`, called from `:579` and `:651`); reachability runs separately inside
+`ir_pipeline.sprout:338`. The purity oracle (`is_pure_callee_type`, exposed as `dce.callee_is_pure`)
+reads the effect row. The proposed passes were CSE and LICM; DCE is the shape they copy.
 
 ## Problem
 
@@ -93,8 +109,9 @@ removes **zero** nodes from every program in the bench corpus, the 110 096-node 
 so `SPROUT_OPT_OFF=dle` does *not* change a real binary. Self-validation therefore comes from
 `tests/opt_harness/dead_let.spr` — a deliberately wasteful shape where the pass removes 6 nodes and
 the switch demonstrably reaches emitted IR — asserted by `just opt-harness-check` on every CI run.
-The consolation is a clean baseline: whatever M1 removes will be the first node this pipeline has
-ever removed from real code.
+The consolation was a clean baseline — whatever M1 removed would have been the first node this
+pipeline ever removed from real code. M1 was then measured and declined, so that baseline still
+stands unbroken.
 
 `dce.elim_unreachable`, the half of `dce.sprout` that *does* do large work, is not under the switch
 — it runs inside `ir_pipeline`, not at the `compiler.sprout` seam. Filed in `BACKLOG.md`.
@@ -104,6 +121,11 @@ only works because `opt_config.implemented` marks them pending and `SPROUT_OPT_O
 "nothing was disabled" — without it the knob quietly acquits a pass that never ran. **Flip the arm
 in the change that lands the pass**; `just opt-harness-check` asserts the warning, so a forgotten
 flip shows up as a red gate rather than a bad bisection.
+
+`Cse` deliberately **stays** in that vocabulary even though M1 was declined. Anyone following an
+older note and typing `SPROUT_OPT_OFF=cse` gets "not implemented yet — nothing was disabled",
+which is exactly what they need to know; dropping the name would answer "no such pass" and read
+like a typo. The status that matters lives in §M1, not the enum.
 
 The rest of this section is the design as approved, kept because it is still the rationale.
 
@@ -116,7 +138,7 @@ ritual is manual; `bench/unboxed_read/bench.sh:5-8` documents it:
 Stash-and-rebootstrap per measurement is slow and cannot run in CI.
 
 **Toggle and stats as environment variables**, following the established precedent —
-`compiler.sprout:538` already has `SPROUT_VERIFY_DISPATCH_OFF` as a pass kill-switch and `:445`
+`compiler.sprout:554` already has `SPROUT_VERIFY_DISPATCH_OFF` as a pass kill-switch and `:446`
 `SPROUT_VERIFY_DISPATCH_STATS` as a stats reporter:
 
 ```
@@ -230,13 +252,18 @@ and bisection, not as a supported user-facing knob.
 
 ## Tests
 
-- M0 *(landed)*: `tests/stdlib/compiler/test_opt_config.spr` (26 cases) pins the pure switchboard —
-  an unrecognised name disables nothing and is reported, and `SPROUT_OPT_STATS` follows the
-  runtime's truthiness rule rather than "the variable is set".
+- M0 *(landed)*: `tests/stdlib/compiler/test_opt_config.spr` (29 cases) pins the pure switchboard —
+  an unrecognised name disables nothing and is reported, a declared-but-unimplemented one says so,
+  and `SPROUT_OPT_STATS` follows the runtime's truthiness rule rather than "the variable is set".
   `tests/stdlib/compiler/test_typed_ast_node_count.spr` (12) pins the census, the delta case
-  included. `just opt-harness-check` is the end-to-end half: the switch reaches emitted IR, the
-  pass it disables preserves program output, and an unknown name leaves the output unchanged.
-- M1/M2: per-pass unit tests on the typed AST — fires where it should, and does **not** fire
+  included. `just opt-harness-check` is the end-to-end half: the stats line appears in both modes,
+  the pass removes a non-zero count, the two IRs differ, both binaries print the same thing, and
+  neither an unknown nor an unimplemented pass name changes the output.
+- M1 *(landed as an analysis, not a pass)*: `tests/stdlib/compiler/test_cse_census.spr` (26 cases).
+  The load-bearing ones are the negatives — an `if`'s two arms are not an opportunity, a repeated
+  `!{IO}` call is not counted at all, and one call in each of two bodies is not a within-body
+  duplicate. Each caught a real defect in the analysis while it was being written.
+- M2: per-pass unit tests on the typed AST — fires where it should, and does **not** fire
   across an intervening effectful step. Effect-row negatives matter more than positives here.
 - Conformance: existing suites must be byte-identical with the pass OFF, which is the regression
   net.
