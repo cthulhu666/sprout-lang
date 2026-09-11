@@ -2968,6 +2968,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "effect-report-smoke|effect-report-smoke"
     "fmt-check|fmt-check"
     "tui-files-smoke|tui-files-smoke"
+    "render-cost|render-cost-gate"
     "type-errors|test-type-errors"
     "parse-errors|test-parse-errors"
     "executable-errors|test-executable-errors"
@@ -3165,6 +3166,16 @@ tui-files-smoke: bootstrap-from-seed
   "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$SRC" > "{{build_dir}}/tui_files.ll"
   clang "{{build_dir}}/tui_files.ll" {{runtime_src}} -O2 {{clang_extra}} -o "{{build_dir}}/tui_files"
   SPROUT_TUI_FILES_BIN="{{build_dir}}/tui_files" bash scripts/tui_files_smoke.sh
+
+# Counts allocations rather than milliseconds, so the number repeats exactly.
+# Prices one frame of the real render stack against a per-cell budget.
+render-cost-gate: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  SRC="tests/cost/render_frame.sprout"
+  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$SRC" > "{{build_dir}}/render_cost.ll"
+  clang "{{build_dir}}/render_cost.ll" {{runtime_src}} -O2 {{clang_extra}} -o "{{build_dir}}/render_cost"
+  SPROUT_RENDER_COST_BIN="{{build_dir}}/render_cost" bash scripts/render_cost_gate.sh
 
 # ── Aggregate Gates ───────────────────────────────────────────────────────────
 #

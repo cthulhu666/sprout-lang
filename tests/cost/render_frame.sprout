@@ -1,0 +1,65 @@
+module main
+
+# A fixed render workload, for `scripts/render_cost_gate.sh` to price.
+#
+# It paints FRAMES frames of a full screen through the real stack — container
+# layout, `widget.render`, `paint.line`, grapheme segmentation, the screen diff
+# — and does nothing else, so the allocation counters the runtime prints at exit
+# are the cost of rendering and of nothing else.
+#
+# Everything here is pure computation over fixed inputs: no clock, no input, no
+# tick. That is what makes the counters repeat exactly, which is what lets a
+# budget be asserted on them at all.
+
+import stdlib.tui.geometry as g
+import stdlib.tui.screen as scr
+import stdlib.tui.style as sty
+import stdlib.tui.widget as widget
+import stdlib.tui.widgets.container as ct
+import stdlib.tui.widgets.list_view as lv
+import stdlib.tui.widgets.text as txt
+
+# The gate divides by these, so its budget is per painted cell rather than a
+# number that means nothing without this file open.
+fn cols() -> Int = 200
+
+fn rows() -> Int = 50
+
+fn frames() -> Int = 20
+
+fn size() -> g.Size = g.Size(cols(), rows())
+
+fn item(i: Int) -> String = `entry ${int_to_string(i)} — a plausible row of text`
+
+fn items() -> List String = built(60, Nil)
+
+fn built(n: Int, acc: List String) -> List String =
+  if n <= 0 then acc else built(n - 1, Cons(item(n), acc))
+
+fn pane(name: String) -> widget.Widget Int =
+  lv.list_view(widget.WidgetId(name), items(), \i -> i)
+
+fn tree() -> widget.Widget Int =
+  ct.column([ct.fit(txt.label("cost probe")),
+             ct.fraction(1, ct.row([ct.fraction(1, pane("left")),
+                                    ct.fraction(2, pane("right"))])),
+             ct.fit(txt.label("a footer, as every real screen has"))])
+
+fn painted(w: widget.Widget Int, s: scr.Screen, size: g.Size,
+           n: Int) -> Unit !{IO} =
+  if n <= 0 then () else frame(w, s, size, n)
+
+fn frame(w: widget.Widget Int, s: scr.Screen, size: g.Size,
+         n: Int) -> Unit !{IO} = do
+  scr.screen_clear(s, sty.style_default())
+  widget.render(w, g.region_at_origin(size), s)
+  # The diff is part of the path a real frame takes, so it is part of the price.
+  scr.diff_to_ansi(s)
+  painted(w, s, size, n - 1)
+
+# The denominator is printed rather than duplicated in the gate script, which
+# would drift the moment the workload changed size.
+fn main() -> Unit !{IO} = do
+  s <- scr.screen_new(size())
+  painted(tree(), s, size(), frames())
+  print(`cost-probe cells=${int_to_string(cols() * rows() * frames())}`)

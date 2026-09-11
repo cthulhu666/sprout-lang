@@ -667,6 +667,18 @@ Legend:
   `Semigroup (Dict v)`, and several `vec_*` (`map`/`filter`/`filter_map`/`reverse`/`slice`).
   `vec_sort_by`'s doc comment claims O(n log n) and rebuilds O(n²). Document true complexity inline
   or fix to linear. Findings and probes: `docs/fundamentals-code-review-handoff-2026-07-03.md`.
+- [ ] `P2` **`unicode.lookup` allocates a closure per table search.** `find_tag(count, chunk, cp)`
+  takes its chunk accessor as a `Int -> String` parameter, and passing `gcb_chunk` allocates a
+  closure at every call. Measured with `SPROUT_DEBUG_ALLOC` over a segmentation probe: 82,000
+  closures for 27,200 characters — one per lookup, three tables deep — falling to 200 once the ASCII
+  fast path skipped the searches. The fast path hid it for ASCII; non-Latin text still pays. Options
+  are a non-higher-order entry point per table, or making a static function argument not allocate.
+  `sample` never showed this — it flattened into `str_slice`; only the per-kind counters named it.
+- [ ] `P3` **Cost gates cover one workload.** `just render-cost-gate` budgets a TUI frame and
+  `tests/stdlib/test_byte_offset_cost.spr` pins one complexity claim; nothing prices a compile, a
+  parse or a stdlib hot path, so the same class of bug is still unguarded everywhere else. Worth a
+  `cost-golden` over 4–5 fixed workloads on the same counters before writing more one-off probes.
+  Shapes and when to use which: `docs/gates.md` §Render cost.
 - [ ] `P2` **Codepoint-indexed `str_slice` is still O(source_len)**, walking the source per call, so
   per-token callers are quadratic in input size. The byte-indexed direction shipped
   (`str_slice_bytes`, `str_starts_with_at_byte`) and is now genuinely O(1) in `|s|`; what remains is

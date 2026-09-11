@@ -223,6 +223,40 @@ Added 2026-09-11 for a specific class: LLVM passes that break the `musttail` inv
 A fixture belongs here when its *shape* is what provokes the optimizer, not its output; assert
 nothing about what it prints, and keep it small enough that the IR is readable when it fires.
 
+## Render cost — `just render-cost-gate`
+
+Paints 20 frames of a 200×50 screen through the real stack (`tests/cost/render_frame.sprout`) under
+`SPROUT_DEBUG_ALLOC=1`, and fails when the run exceeds a budget of allocations **per painted cell**.
+Every other gate asks whether the output is right; this one asks what it cost.
+
+Added 2026-09-11, after a bug that every existing gate passed: three UCD table searches per painted
+character, each slicing substrings per probe, ~100 ms a frame with a source file on screen. The
+output was correct throughout. A person using `examples/tui_files.sprout` found it.
+
+**It counts allocations, not time.** For a workload with no clock and no input the counters repeat
+exactly — byte-identical across runs — which is what an absolute budget needs and what
+`just bench-string-concat` cannot offer (its header says as much: a wall-clock number cannot carry a
+fixed threshold).
+
+Pick the shape from what you are pinning, because the repo now has both. A *complexity* claim — "the
+cost must not depend on this input's size" — is a **ratio** of two timed arms, and
+`tests/stdlib/test_byte_offset_cost.spr` shows how to make that non-flaky: vary only the size, take
+the minimum of several rounds, allow an order of magnitude. A *constant-factor* claim — "one frame
+must not cost more than this" — has no second arm to normalise against, so it needs a counter that
+does not vary with the machine. Ratios catch a wrong exponent; budgets catch a bad constant. This
+gate is the second kind, and today's bug was the second kind: correct complexity, 8× the constant.
+
+**`gc_swept` is the load-bearing counter, not `sprout_obj`.** Verified by building the probe against
+the pre-fix `grapheme`: objects came out *identical* at 15 per cell, swept at 71 against 20.
+`sprout_obj` does not count cstr allocations, and that bug was `str_slice` churn — an objects-only
+budget would have passed it.
+
+The budget is generous on purpose: it catches a 2× arriving unnoticed, not ordinary churn, and the
+observed value prints on every run so drift is visible long before the ceiling. A legitimate change
+that crosses it moves the ceiling in the same commit, with the new number in the message — the same
+discipline as a golden, for the same reason. Exact values are deliberately **not** pinned: the gate
+must also pass on CI's Linux x86_64.
+
 ## `just linux-smoke`
 
 Every other local gate runs the kqueue backend; CI runs epoll + timerfd, and the two diverge in ways
