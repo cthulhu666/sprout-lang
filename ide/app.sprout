@@ -1,0 +1,255 @@
+module ide.app
+
+# The IDE, wired together. Design: docs/ide-v0.md §3.
+#
+# A file tree on the left, an editor pane on the right, a status line under
+# both. Tab moves between the panes, Enter opens the file under the cursor,
+# ctrl-s writes it back, Esc or ctrl-q leaves.
+#
+# The application has no model of its own — `app.App` threads the tree and
+# nothing else — so every piece of state lives in the widget that owns it, and
+# `update` gets at one by ASKING. That is why the editor pane is a sibling of
+# `text_area` rather than a client of it (docs/ide-v0.md §5).
+#
+# SAVE HANDSHAKE — four sites that must agree, and no two of them are visible
+# together. `asked_to_save` sends `HandOver`, which `demand_for` must
+# recognise; `write_body` answers `Stored`, which `stored_for` must recognise.
+# Break either pairing and saving fails silently — `just ide-smoke` is what
+# catches it, by reading the file back off the disk.
+
+import stdlib.chan (Chan, chan_send)
+import stdlib.fs as fs
+import stdlib.task (Scope)
+import stdlib.tui.app as app
+import stdlib.tui.event as event
+import stdlib.tui.geometry as g
+import stdlib.tui.screen as scr
+import stdlib.tui.style as sty
+import stdlib.tui.widget as widget
+import stdlib.tui.widgets.container as ct
+import stdlib.tui.widgets.focus as focus
+import stdlib.tui.widgets.paint as paint
+import stdlib.tui.widgets.text as txt
+import stdlib.tui.widgets.tree as tr
+import ide.document as document
+import ide.editor as ed
+import ide.filetree as filetree
+import ide.keymap as keymap
+
+type Msg (..) =
+  # What the widgets ask for.
+  | Expand (List String)
+  | Choose (List String)
+  | Bound keymap.Command
+  # Answers, addressed back to the widget that asked.
+  | Listed (List String) (List tr.Node)
+  | Loaded document.FilePath String
+  | Stored document.FilePath
+  # What the panes announce, on their way to the status line.
+  | Labelled String
+  | Noted String
+  # The save handshake: a request with no payload, and the pane's answer.
+  | HandOver
+  | Saved ed.Saving
+
+type alias Says = List Msg
+type alias Asks = List(widget.Cmd Msg)
+
+fn files_id() -> widget.WidgetId = widget.WidgetId("files")
+
+fn editor_id() -> widget.WidgetId = widget.WidgetId("editor")
+
+fn bar_id() -> widget.WidgetId = widget.WidgetId("bar")
+
+# ── the panes ───────────────────────────────────────────────────────────────
+
+fn listed_for(m: Msg) -> Maybe tr.Update =
+  match m with
+  | Listed segs ns -> Just(tr.At(segs, ns))
+  | _ -> Nothing
+
+fn files() -> widget.Widget Msg =
+  filetree.filetree(files_id(), Choose,
+                    tr.tree_opts() with (on_expand = Just(Expand),
+                                         on_content = Just(listed_for),
+                                         page = 10))
+
+fn content_for(m: Msg) -> Maybe(document.FilePath, String) =
+  match m with
+  | Loaded p body -> Just((p, body))
+  | _ -> Nothing
+
+# The request carries no payload and the answer's CONSTRUCTOR does: only the
+# pane knows what it will answer, and only this module names it.
+fn demand_for(m: Msg) -> Maybe(ed.Saving -> Msg) =
+  match m with
+  | HandOver -> Just(Saved)
+  | _ -> Nothing
+
+fn stored_for(m: Msg) -> Maybe document.FilePath =
+  match m with
+  | Stored p -> Just(p)
+  | _ -> Nothing
+
+fn editor() -> widget.Widget Msg =
+  ed.editor_with(editor_id(),
+                 ed.editor_opts() with (on_label = Just(Labelled),
+                                        on_content = Just(content_for),
+                                        on_demand = Just(demand_for),
+                                        on_stored = Just(stored_for)))
+
+# ── the status line ─────────────────────────────────────────────────────────
+
+# A widget, not a field, for the reason everything else is one: `update` has
+# nowhere to keep a string between messages.
+type Bar = (text: String)
+
+fn bar_text(m: Msg) -> Maybe String =
+  match m with
+  | Labelled t -> Just(t)
+  | Noted t -> Just(t)
+  | _ -> Nothing
+
+fn bar_on_event(b: Bar, ev: event.Event) -> (Bar, Says, Asks) = (b, Nil, Nil)
+
+fn bar_handler(b: Bar, d: widget.Delivery Msg) -> Maybe (Bar, Says, Asks) =
+  match d with
+  | widget.ToMsg msg -> refilled(b, bar_text(msg))
+  | _ -> Nothing
+
+fn refilled(b: Bar, t: Maybe String) -> Maybe (Bar, Says, Asks) =
+  let Just s = t else Nothing
+  in Just((Bar(text = s), Nil, Nil))
+
+fn bar_render(b: Bar, r: g.Region, s: scr.Screen) -> Unit !{IO} =
+  paint.line(s, r, 0, b.text, sty.with_reverse(sty.style_default(), true))
+
+fn bar_measure(b: Bar, avail: g.Size) -> widget.Measured =
+  widget.fixed_size(g.Size(0, 1))
+
+fn bar() -> widget.Widget Msg =
+  widget.Widget(widget.View(state = Bar(text = "untitled"),
+                            on_event = bar_on_event,
+                            route = widget.route_when(bar_id(), bar_handler, _,
+                                                      _, _),
+                            render = bar_render, measure = bar_measure))
+
+# ── the bindings ────────────────────────────────────────────────────────────
+
+# Every chord reaches here because both panes decline chords, and Esc because
+# neither binds it. Nothing is painted: a widget is how an application gets a
+# look at the broadcast at all.
+fn keys_on_event(n: Int, ev: event.Event) -> (Int, Says, Asks) =
+  match ev with
+  | event.KeyPress k mods -> (n, bound(keymap.command_for(k, mods)), Nil)
+  | _ -> (n, Nil, Nil)
+
+fn bound(c: Maybe keymap.Command) -> Says =
+  let Just cmd = c else Nil
+  in [Bound(cmd)]
+
+fn keys_render(n: Int, r: g.Region, s: scr.Screen) -> Unit !{IO} = ()
+
+fn keys_measure(n: Int, avail: g.Size) -> widget.Measured =
+  widget.fixed_size(g.Size(0, 0))
+
+fn keys() -> widget.Widget Msg =
+  widget.Widget(widget.View(state = 0, on_event = keys_on_event,
+                            route = widget.no_route, render = keys_render,
+                            measure = keys_measure))
+
+# ── the tree of widgets ─────────────────────────────────────────────────────
+
+fn hints() -> widget.Widget Msg =
+  txt.label("Tab moves · Right/Left open and close · Enter shows · ctrl-s saves · Esc quits")
+
+fn body() -> widget.Widget Msg =
+  ct.row([ct.fraction(1, files()), ct.fraction(2, editor())])
+
+fn root() -> widget.Widget Msg =
+  focus.focus_ring([files_id(), editor_id()],
+                   ct.column([ct.fraction(1, body()), ct.fit(bar()),
+                              ct.fit(hints()), ct.fit(keys())]))
+
+# ── the IO the application asks for ─────────────────────────────────────────
+
+fn read_children(segs: List String) -> Msg !{IO} =
+  Listed(segs, filetree.children_of(segs))
+
+fn read_body(segs: List String) -> Msg !{IO} = read_at(filetree.joined(segs))
+
+fn read_at(p: document.FilePath) -> Msg !{IO} =
+  match fs.read_text(document.path_text(p)) with
+  | Ok body -> Loaded(p, body)
+  | Err e -> Noted(`cannot read ${document.path_text(p)}: ${e}`)
+
+fn write_body(p: document.FilePath, body: String) -> Msg !{IO} =
+  match fs.write_text(document.path_text(p), body) with
+  | Ok _ -> Stored(p)
+  | Err e -> Noted(`cannot write ${document.path_text(p)}: ${e}`)
+
+# ── what the application decides ────────────────────────────────────────────
+
+fn update(m: Msg, w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow, Asks) =
+  match m with
+  | Bound keymap.Quit -> app.done(w, app.Quit)
+  | Bound keymap.Save -> asked_to_save(w)
+  | Expand segs ->
+      (w, app.Continue, [widget.cmd_to(files_id(), \_ -> read_children(segs))])
+  | Choose segs ->
+      (w, app.Continue, [widget.cmd_to(editor_id(), \_ -> read_body(segs))])
+  | Saved sv -> saving(w, sv)
+  | Labelled _ -> to_bar(w, m)
+  | Noted _ -> to_bar(w, m)
+  # The rest are ADDRESSED to a widget, so they reach `update` only when the
+  # target has gone and the framework falls back here — there is nothing left
+  # to do with one. Spelled out rather than swept into a catch-all: a message
+  # added later needs a decision, and this way the build asks for it
+  # (docs/guidelines.md §2a).
+  | Listed _ _ -> app.done(w, app.Continue)
+  | Loaded _ _ -> app.done(w, app.Continue)
+  | Stored _ -> app.done(w, app.Continue)
+  | HandOver -> app.done(w, app.Continue)
+
+# The one SYNCHRONOUS interrogation: `widget.deliver` is pure, so `update` can
+# ask the pane for its text and act on the answer within the same message
+# rather than waiting for a round trip through the loop.
+#
+# Not `app.step_to`, which would send an unclaimed `HandOver` back to `update`
+# — and `update` would ask again, forever. Here a pane that is not there is
+# simply nothing to save.
+fn asked_to_save(w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow, Asks) =
+  let Just(w2, said, asked) = widget.deliver(w, editor_id(), widget.ToMsg(HandOver))
+                               else app.done(w, app.Continue)
+  in answered(asked, app.apply(update, said, w2))
+
+fn answered(asked: Asks,
+            r: (widget.Widget Msg, app.Flow, Asks)) -> (widget.Widget Msg, app.Flow, Asks) =
+  match r with
+  | (w2, flow, more) -> (w2, flow, list_append(asked, more))
+
+# `Stored` goes back ADDRESSED, so the pane learns it is clean without the
+# answer passing through here again.
+fn saving(w: widget.Widget Msg,
+          sv: ed.Saving) -> (widget.Widget Msg, app.Flow, Asks) =
+  match sv with
+  | ed.SaveTo p body ->
+      (w, app.Continue, [widget.cmd_to(editor_id(), \_ -> write_body(p, body))])
+  | ed.Unnamed -> to_bar(w, Noted("nothing to save: this buffer has no file"))
+
+# The bar's handler says nothing by construction, so the dropped `Says` is
+# empty. Folding it back would risk the loop `asked_to_save` avoids: a bar that
+# echoed a `Noted` would be told it again forever.
+fn to_bar(w: widget.Widget Msg, m: Msg) -> (widget.Widget Msg, app.Flow, Asks) =
+  let Just(w2, _, asked) = widget.deliver(w, bar_id(), widget.ToMsg(m))
+                            else app.done(w, app.Continue)
+  in (w2, app.Continue, asked)
+
+# The first read is the working directory, asked for before the first frame so
+# the tree is never briefly empty.
+fn boot(scope: Scope, ch: Chan (app.Signal Msg)) -> Unit !{IO} = do
+  m <- read_children(Nil)
+  chan_send(ch, app.SigTo(files_id(), m))
+
+export fn main() -> Unit !{IO} =
+  app.run(app.App(root = root(), update = update, tick_ms = 500, boot = boot))

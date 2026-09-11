@@ -180,6 +180,11 @@ jobs:
         # tests/stdlib/* excluding the compiler/ subdir — always runs.
         run: just test-stdlib-core-stage1
 
+      - name: Run IDE tests (stage-1)
+        if: needs.changes.outputs.docs_only != 'true'
+        # tests/ide/* — a directory of its own, since `ide/` lifts out whole.
+        run: just test-ide
+
       - name: Run compiler tests (stage-1)
         # tests/stdlib/compiler/* — gated by the `changes` job.
         if: needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.run_compiler == 'true'

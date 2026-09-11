@@ -1,0 +1,43 @@
+module ide.filetree
+
+# The IDE's project browser. Design: docs/ide-v0.md §7.
+#
+# The tree names a node by its path of LABELS, so what this module owns is the
+# translation to a path the filesystem takes, and the reading that happens at
+# the end of it. The widget itself is `stdlib.tui.widgets.tree`: nothing about
+# a project browser needs a tree of its own.
+
+import stdlib.fs as fs
+import stdlib.fs.path as path
+import stdlib.tui.widget as widget
+import stdlib.tui.widgets.tree as tr
+import ide.document as document
+
+# The root is the working directory, which is where the IDE was started.
+# `path.join` rather than `"/"` by hand — the separator is `fs.path`'s.
+export fn joined(segs: List String) -> document.FilePath =
+  document.FilePath(fold(\ (acc, seg) -> path.join(acc, seg), ".", segs))
+
+# A directory that cannot be read becomes an EMPTY one rather than an error
+# pane: the tree shows it opened and holding nothing, which is something the
+# user can act on, and a node has nowhere to put a message.
+export fn children_of(segs: List String) -> List tr.Node !{IO} =
+  match fs.read_dir(document.path_text(joined(segs))) with
+  | Ok es -> nodes_of(es)
+  | Err _ -> Nil
+
+export fn nodes_of(es: List (String, fs.Entry)) -> List tr.Node =
+  list_map(entry_node, es)
+
+# Every directory starts unread, so nothing touches the disk until the user
+# opens something — the property `Unread` exists for.
+fn entry_node(e: (String, fs.Entry)) -> tr.Node =
+  let (name, info) = e
+  in tr.Node(label = name,
+             children = if fs.entry_is_dir(info) then tr.Unread else tr.NoChildren)
+
+# The roots are empty until `boot` reads them, which is what keeps the first
+# frame from blocking on the disk.
+export fn filetree(id: widget.WidgetId, on_open: List String -> m,
+                   opts: tr.TreeOpts m) -> widget.Widget m =
+  tr.tree_with(id, Nil, on_open, opts)

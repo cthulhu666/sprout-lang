@@ -1,0 +1,33 @@
+import stdlib.test (TestCase, check_eq, run_suite)
+import stdlib.tui.event as event
+import ide.keymap as keymap
+
+# The IDE's bindings. Design: docs/ide-v0.md §6.
+#
+# A table rather than a `match` buried in `update`, so what the application
+# answers to is readable in one place and testable without a terminal.
+
+fn plain(k: event.Key) -> Maybe keymap.Command =
+  keymap.command_for(k, event.mods_none())
+
+fn ctrl(k: event.Key) -> Maybe keymap.Command =
+  keymap.command_for(k, event.mods_ctrl())
+
+fn alt(k: event.Key) -> Maybe keymap.Command =
+  keymap.command_for(k, event.mods_alt())
+
+fn main() -> Unit !{IO} =
+  run_suite("ide.keymap", [
+    check_eq("Esc quits", plain(event.KEsc), Just(keymap.Quit)),
+    check_eq("ctrl-q quits", ctrl(event.KChar('q')), Just(keymap.Quit)),
+    check_eq("ctrl-s saves", ctrl(event.KChar('s')), Just(keymap.Save)),
+    # A bare letter is text, and binding one would make the editor unusable the
+    # moment it held the keyboard.
+    check_eq("a bare letter is not a command", plain(event.KChar('s')), Nothing),
+    check_eq("a bare q is not a command", plain(event.KChar('q')), Nothing),
+    # The chord is ctrl's alone: alt-s is free for a later binding, and reading
+    # "any modifier" would take it silently.
+    check_eq("alt-s is unbound", alt(event.KChar('s')), Nothing),
+    check_eq("an unbound chord is not a command", ctrl(event.KChar('z')), Nothing),
+    check_eq("an unbound key is not a command", plain(event.KF(1)), Nothing)
+  ])

@@ -117,7 +117,8 @@ Full toolchain, tasks, driver CLI, and platform support live in
 - `stdlib/` — standard library (`prelude.sprout`) plus protocol helpers
 - `stdlib/compiler/` — self-hosted compiler (`parser`, `infer`/`checker`, `ast_to_ir`/`ir_lowering`, `compile_driver`)
 - `runtime/` — C runtime, GC, poller and scheduler (`sprout_runtime.c`, `sprout_poll.c`, `sprout_scheduler.c`)
-- `tests/` — test suites (native Sprout tests under `tests/stdlib/`)
+- `ide/` — the Sprout IDE, written in Sprout on `stdlib.tui` ([`docs/ide-v0.md`](docs/ide-v0.md))
+- `tests/` — test suites (native Sprout tests under `tests/stdlib/`, the IDE's under `tests/ide/`)
 - `tests/conformance/` — executable behavior fixtures (`run`, `parse_error`, `type_error`, `executable_error`)
 - `bootstrap/` — committed LLVM IR seed for stage-1 bootstrap
 - `mise.toml` / `justfile` — pinned toolchain and common commands

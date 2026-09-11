@@ -1,0 +1,35 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import ide.document as doc
+import ide.filetree as filetree
+
+# The IDE's project browser. Design: docs/ide-v0.md §7.
+#
+# The tree names a node by its PATH OF LABELS, so turning one into a path the
+# filesystem takes is this module's job and the part worth pinning. Reading a
+# directory is checked at its edges only — that a listing arrives, and what a
+# directory that cannot be read turns into.
+
+fn path_cases(state: TestState) -> Unit !{IO} = do
+  # The root of the tree is the working directory, which is where the IDE was
+  # started rather than anywhere absolute.
+  assert_eq(state, "no segments is the root", doc.path_text(filetree.joined(Nil)), ".")
+  assert_eq(state, "one segment hangs off the root",
+            doc.path_text(filetree.joined(["stdlib"])), "./stdlib")
+  assert_eq(state, "segments nest",
+            doc.path_text(filetree.joined(["stdlib", "tui", "app.sprout"])),
+            "./stdlib/tui/app.sprout")
+
+fn reading_cases(state: TestState) -> Unit !{IO} = do
+  here <- filetree.children_of(["stdlib", "tui"])
+  assert_true(state, "a real directory lists its entries", list_length(here) > 0)
+  # A directory that cannot be read becomes an EMPTY one rather than an error
+  # pane: the tree shows it opened and holding nothing, which is something the
+  # user can act on, and there is nowhere in a tree node to put a message.
+  gone <- filetree.children_of(["no", "such", "directory"])
+  assert_eq(state, "an unreadable directory is empty", list_length(gone), 0)
+
+fn main() -> Unit !{IO} = do
+  state <- new_state()
+  path_cases(state)
+  reading_cases(state)
+  summary(state)

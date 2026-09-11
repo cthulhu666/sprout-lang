@@ -1,0 +1,232 @@
+import stdlib.string as string
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.tui.event as event
+import stdlib.tui.geometry as g
+import stdlib.tui.screen as scr
+import stdlib.tui.widget as widget
+import stdlib.tui.widgets.container as ct
+import stdlib.tui.widgets.focus as focus
+import ide.document as doc
+import ide.editor as ed
+
+# The IDE's editor pane. Design: docs/ide-v0.md §5.
+#
+# The pane owns its document, so the text is never observed by reading the
+# widget — `Widget m` erases the state — but by ASKING, which is what the save
+# handshake is. Every case here drives it the way `app.update` does: an
+# addressed message in, messages out.
+
+type Msg (..) deriving (Eq, ToString) =
+  | Labelled String
+  | Loaded doc.FilePath String
+  | Save
+  | Saved ed.Saving
+  | Stored doc.FilePath
+  | Noted String
+
+fn at(p: String) -> doc.FilePath = doc.FilePath(p)
+
+type alias Says = List Msg
+type alias Asks = List(widget.Cmd Msg)
+
+# ── the tree ────────────────────────────────────────────────────────────────
+
+fn pane_id() -> widget.WidgetId = widget.WidgetId("editor")
+
+fn content_for(m: Msg) -> Maybe(doc.FilePath, String) =
+  match m with
+  | Loaded p body -> Just((p, body))
+  | _ -> Nothing
+
+# The reply CONSTRUCTOR, not the reply: only the pane knows what it will
+# answer, and only the application knows what its own message type calls it.
+fn demand_for(m: Msg) -> Maybe(ed.Saving -> Msg) =
+  match m with
+  | Save -> Just(Saved)
+  | _ -> Nothing
+
+fn stored_for(m: Msg) -> Maybe doc.FilePath =
+  match m with
+  | Stored p -> Just(p)
+  | _ -> Nothing
+
+fn opts() -> ed.EditorOpts Msg =
+  ed.editor_opts() with (on_label = Just(Labelled), on_content = Just(content_for),
+                         on_demand = Just(demand_for), on_stored = Just(stored_for))
+
+# A neighbour, so a key the pane DECLINES is visible as a broadcast rather than
+# as silence.
+fn note_on_event(n: Int, ev: event.Event) -> (Int, Says, Asks) =
+  (n, [Noted("bcast")], Nil)
+
+fn note_render(n: Int, r: g.Region, s: scr.Screen) -> Unit !{IO} = ()
+
+fn note_measure(n: Int, avail: g.Size) -> widget.Measured =
+  widget.fixed_size(g.Size(1, 1))
+
+fn note() -> widget.Widget Msg =
+  widget.Widget(widget.View(state = 0, on_event = note_on_event,
+                            route = widget.no_route, render = note_render,
+                            measure = note_measure))
+
+fn pane() -> widget.Widget Msg = ed.editor_with(pane_id(), opts())
+
+# Focus starts on the head of the ring, so the pane is live without a Tab.
+fn tree() -> widget.Widget Msg =
+  focus.focus_ring([pane_id()],
+                   ct.column([ct.fit(pane()), ct.fit(note())]))
+
+# The same tree with focus parked on a name nothing answers to, which is how an
+# unfocused pane is reached without a widget to Tab to.
+fn unfocused() -> widget.Widget Msg =
+  focus.focus_ring_at([pane_id(), widget.WidgetId("elsewhere")],
+                      widget.WidgetId("elsewhere"),
+                      ct.column([ct.fit(pane()), ct.fit(note())]))
+
+# ── observing ───────────────────────────────────────────────────────────────
+
+fn key(k: event.Key) -> event.Event = event.KeyPress(k, event.mods_none())
+
+fn chord(k: event.Key) -> event.Event = event.KeyPress(k, event.mods_ctrl())
+
+fn chars(s: String) -> List event.Event =
+  list_map(\c -> key(event.KChar(c)), vec_to_list(string.string_chars(s)))
+
+fn said(r: (widget.Widget Msg, Says, Asks)) -> String =
+  match r with
+  | (_, msgs, _) -> to_string(msgs)
+
+fn tree_of(r: (widget.Widget Msg, Says, Asks)) -> widget.Widget Msg =
+  match r with
+  | (w, _, _) -> w
+
+# One addressed message, exactly as `app.update` sends one.
+fn told(w: widget.Widget Msg, m: Msg) -> (widget.Widget Msg, Says, Asks) =
+  let Just t = widget.deliver(w, pane_id(), widget.ToMsg(m))
+               else (w, [Noted("declined")], Nil)
+  in t
+
+fn loaded_tree() -> widget.Widget Msg =
+  tree_of(told(tree(), Loaded(at("stdlib/a.txt"), "ab")))
+
+# ── what it says ────────────────────────────────────────────────────────────
+
+fn content_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "a file arriving is announced by name",
+            said(told(tree(), Loaded(at("stdlib/a.txt"), "ab"))),
+            "[Labelled(a.txt)]")
+  # The caret sits at the START of a file being opened, so the first character
+  # typed lands before the text rather than after it.
+  assert_eq(state, "an opened file is read from the top",
+            said(told(tree_of(widget.feed(loaded_tree(), chars("X"))), Save)),
+            "[Saved(SaveTo(FilePath(stdlib/a.txt), Xab))]")
+
+fn dirt_cases(state: TestState) -> Unit !{IO} = do
+  # The EDGE into dirtiness, not every keystroke: announcing per character
+  # would put a message on the loop for every key with nothing new to say.
+  assert_eq(state, "the first edit marks the label and the second is silent",
+            said(widget.feed(loaded_tree(), chars("xy"))),
+            "[Labelled(a.txt *)]")
+  assert_eq(state, "being stored cleans the label",
+            said(told(tree_of(widget.feed(loaded_tree(), chars("x"))),
+                      Stored(at("stdlib/a.txt")))),
+            "[Labelled(a.txt)]")
+  # A write can fail, so handing the text over is not itself a write and must
+  # not clean anything.
+  assert_eq(state, "handing over the text does not clean the label",
+            said(told(tree_of(widget.feed(loaded_tree(), chars("x"))), Save)),
+            "[Saved(SaveTo(FilePath(stdlib/a.txt), xab))]")
+
+fn saving_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "a pane with no file has nowhere to save",
+            said(told(tree(), Save)), "[Saved(Unnamed)]")
+  assert_eq(state, "a stored pane saves where it was stored",
+            said(told(tree_of(told(tree(), Stored(at("x/new.txt")))), Save)),
+            "[Saved(SaveTo(FilePath(x/new.txt), ))]")
+
+fn key_cases(state: TestState) -> Unit !{IO} = do
+  # ctrl-s must reach the application, so the pane declines every chord and the
+  # neighbour sees it broadcast.
+  assert_eq(state, "a chord is declined so the application keeps it",
+            said(widget.feed(loaded_tree(), [chord(event.KChar('s'))])),
+            "[Noted(bcast)]")
+  assert_eq(state, "an unfocused pane does not take keys",
+            said(widget.feed(tree_of(told(unfocused(), Loaded(at("a.txt"), "ab"))),
+                             chars("x"))),
+            "[Noted(bcast)]")
+
+# ── what it paints ──────────────────────────────────────────────────────────
+
+fn row_text(s: scr.Screen, col: Int, cols: Int, row: Int) -> String !{IO} =
+  if col >= cols then "" else row_step(s, col, cols, row)
+
+fn row_step(s: scr.Screen, col: Int, cols: Int, row: Int) -> String !{IO} = do
+  here <- scr.text_at(s, col, row)
+  rest <- row_text(s, col + 1, cols, row)
+  here ++ rest
+
+fn rows_text(s: scr.Screen, row: Int, cols: Int, rows: Int) -> List String !{IO} =
+  if row >= rows then Nil else rows_step(s, row, cols, rows)
+
+fn rows_step(s: scr.Screen, row: Int, cols: Int, rows: Int) -> List String !{IO} = do
+  here <- row_text(s, 0, cols, row)
+  rest <- rows_text(s, row + 1, cols, rows)
+  Cons(here, rest)
+
+# The frame as one string, rows joined by newline — what the pane painted, seen
+# the way its own value reads.
+fn frame(w: widget.Widget Msg, cols: Int, rows: Int) -> String !{IO} = do
+  s <- scr.screen_new(g.Size(cols, rows))
+  widget.render(w, g.Region(0, 0, cols, rows), s)
+  ls <- rows_text(s, 0, cols, rows)
+  string.join("\n", ls)
+
+# Without the neighbour: it exists to make a declined key visible, and a `fit`
+# row of it would take the region's last row away from the pane.
+fn alone() -> widget.Widget Msg = focus.focus_ring([pane_id()], pane())
+
+fn alone_unfocused() -> widget.Widget Msg =
+  focus.focus_ring_at([pane_id(), widget.WidgetId("elsewhere")],
+                      widget.WidgetId("elsewhere"), pane())
+
+fn showing(body: String) -> widget.Widget Msg =
+  tree_of(told(alone(), Loaded(at("a.txt"), body)))
+
+fn unfocused_showing(body: String) -> widget.Widget Msg =
+  tree_of(told(alone_unfocused(), Loaded(at("a.txt"), body)))
+
+fn gutter_cases(state: TestState) -> Unit !{IO} = do
+  # The gutter is what makes the pane an editor rather than a text area, and it
+  # takes its columns before the document sees the region.
+  f <- frame(showing("a\nb\nc"), 6, 3)
+  assert_eq(state, "numbers sit left of the text", f, "1 a   \n2 b   \n3 c   ")
+  # Width follows the LARGEST number, so the text stays on one column as the
+  # view moves rather than shifting under the reader at line 10.
+  g10 <- frame(showing("1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12"), 6, 3)
+  assert_eq(state, "a longer document widens the gutter", g10,
+            " 1 1  \n 2 2  \n 3 3  ")
+  # Past the last line there is nothing to number: a blank row with a number on
+  # it would claim the document is longer than it is.
+  short <- frame(showing("a\nb"), 6, 4)
+  assert_eq(state, "numbering stops where the document does", short,
+            "1 a   \n2 b   \n      \n      ")
+  # An unfocused pane shows the start of the document, so its numbering starts
+  # at 1 whatever the caret was doing.
+  away <- frame(unfocused_showing("a\nb"), 6, 2)
+  assert_eq(state, "an unfocused pane numbers from the top", away,
+            "1 a   \n2 b   ")
+  # A region too narrow for the gutter gives the document none of it. That the
+  # text region can be empty rather than negative is `split_left`'s clamp, and
+  # it is what keeps a very narrow split from painting outside itself.
+  thin <- frame(showing("a\nb"), 1, 2)
+  assert_eq(state, "a region narrower than the gutter still terminates", thin,
+            "1\n2")
+
+fn main() -> Unit !{IO} = do
+  state <- new_state()
+  content_cases(state)
+  dirt_cases(state)
+  saving_cases(state)
+  key_cases(state)
+  gutter_cases(state)
+  summary(state)

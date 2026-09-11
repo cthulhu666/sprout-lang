@@ -1,0 +1,51 @@
+import stdlib.test (TestCase, check_eq, check_true, check_false, run_suite)
+import ide.document as doc
+
+# What the IDE knows about an open file apart from its text. Pure and total, so
+# every case is pinned exactly. Design: docs/ide-v0.md §4.
+#
+# The record deliberately holds no text. A document that mirrored the editor's
+# buffer would cost a full-document rebuild per keystroke, which is the reason
+# the editor pane owns its buffer and answers a save by being asked.
+
+fn at(p: String) -> doc.FilePath = doc.FilePath(p)
+
+fn named() -> doc.Document = doc.opened(at("stdlib/tui/app.sprout"))
+
+fn main() -> Unit !{IO} =
+  run_suite("ide.document", [
+    # --- a buffer with nowhere to go ---
+    check_eq("a scratch buffer has no file", doc.doc_file(doc.scratch()), Nothing),
+    check_false("a scratch buffer starts clean", doc.is_dirty(doc.scratch())),
+    check_eq("a scratch buffer is titled", doc.title(doc.scratch()), "untitled"),
+    check_eq("nowhere to save a scratch buffer", doc.target(doc.scratch()), Nothing),
+
+    # --- a file ---
+    check_eq("an opened file remembers its path", doc.doc_file(named()),
+             Just(at("stdlib/tui/app.sprout"))),
+    check_false("an opened file starts clean", doc.is_dirty(named())),
+    check_eq("the title is the basename", doc.title(named()), "app.sprout"),
+    check_eq("a bare name is its own title", doc.title(doc.opened(at("notes.txt"))),
+             "notes.txt"),
+    check_eq("a save goes where it came from", doc.target(named()),
+             Just(at("stdlib/tui/app.sprout"))),
+
+    # --- editing and saving ---
+    check_true("an edit dirties", doc.is_dirty(doc.touched(named()))),
+    check_true("a second edit changes nothing",
+               doc.touched(doc.touched(named())) == doc.touched(named())),
+    check_false("a write cleans", doc.is_dirty(doc.written(doc.touched(named())))),
+    check_eq("a write keeps the path", doc.doc_file(doc.written(doc.touched(named()))),
+             Just(at("stdlib/tui/app.sprout"))),
+    # A pathless buffer cannot reach `written` through the application, but the
+    # function is total and must not invent a path if it is called anyway.
+    check_eq("a write invents no path", doc.doc_file(doc.written(doc.scratch())),
+             Nothing),
+
+    # --- what the status bar reads ---
+    check_eq("a clean label is the title", doc.label(named()), "app.sprout"),
+    check_eq("a dirty label is marked", doc.label(doc.touched(named())),
+             "app.sprout *"),
+    check_eq("a dirty scratch label is marked too",
+             doc.label(doc.touched(doc.scratch())), "untitled *")
+  ])

@@ -272,7 +272,7 @@ debug-run file: bootstrap-from-seed
 
 # Run all stdlib + compiler-stage tests (stage-1).
 [group('test')]
-test: test-stdlib-stage1 test-type-errors test-parse-errors test-executable-errors test-emit-errors test-conformance-run test-package-resolution test-front-end-agreement test-renaming-termination
+test: test-stdlib-stage1 test-ide test-type-errors test-parse-errors test-executable-errors test-emit-errors test-conformance-run test-package-resolution test-front-end-agreement test-renaming-termination
 
 # The two typecheck front ends must reach the same verdict, and the editor one must
 # terminate. `--phase check` runs the bundler; the DEFAULT phase runs the env path, which
@@ -527,6 +527,12 @@ _test-stdlib stage dirs="tests/stdlib tests/stdlib/compiler":
 # this is the local/master gate — keep it running BOTH dirs (DoD #5, `just test`).
 [group('test')]
 test-stdlib-stage1: bootstrap-from-seed (_test-stdlib "build/compile_driver_bin_stage1")
+
+# The IDE's own suites. A separate directory, not another `dirs` entry above,
+# because `ide/` lifts out of this repo whole (the plan's M8) and its tests go
+# with it.
+[group('test')]
+test-ide: bootstrap-from-seed (_test-stdlib "build/compile_driver_bin_stage1" "tests/ide")
 
 # Stage-1, core only (tests/stdlib/*, excluding the tests/stdlib/compiler/ subdir).
 # CI runs this on every PR; the compiler subdir is gated on compiler-affecting paths
@@ -3040,6 +3046,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "effect-report-smoke|effect-report-smoke"
     "fmt-check|fmt-check"
     "tui-files-smoke|tui-files-smoke"
+    "ide-smoke|ide-smoke"
     "render-cost|render-cost-gate"
     "type-errors|test-type-errors"
     "parse-errors|test-parse-errors"
@@ -3239,6 +3246,17 @@ tui-files-smoke: bootstrap-from-seed
   clang "{{build_dir}}/tui_files.ll" {{runtime_src}} -O2 {{clang_extra}} -o "{{build_dir}}/tui_files"
   SPROUT_TUI_FILES_BIN="{{build_dir}}/tui_files" bash scripts/tui_files_smoke.sh
 
+# Drives the IDE end to end: the tree opens a file, an edit reaches the disk.
+# The save handshake hands text out of an existential, so a file on disk with
+# the right bytes in it is the only proof `update` got the right bytes out.
+ide-smoke: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  SRC="ide/app.sprout"
+  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" --package-root "{{justfile_directory()}}" "$SRC" > "{{build_dir}}/ide.ll"
+  clang "{{build_dir}}/ide.ll" {{runtime_src}} -O2 {{clang_extra}} -o "{{build_dir}}/ide"
+  SPROUT_IDE_BIN="{{build_dir}}/ide" bash scripts/ide_smoke.sh
+
 # Counts allocations rather than milliseconds, so the number repeats exactly.
 # Prices one frame of the real render stack against a per-cell budget.
 render-cost-gate: bootstrap-from-seed
@@ -3276,7 +3294,7 @@ gate-quick: fmt-check test compile-examples-stage1 smoke-shapes bundle-smoke
 # advisory), so it runs in the body rather than as an arg-less dependency.
 # Full CI-parity battery (slow, ~15-25m); a green run means CI will not surprise you.
 [group('gate')]
-gate: seed-dep-check fmt-check smoke-shapes bundle-smoke tui-files-smoke render-cost-gate loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate check-approved-builtins check-extern-signatures backlog-shape verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test lsp-smoke task-io-smoke http-client-binary-gate http-tls-gate test-stress
+gate: seed-dep-check fmt-check smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate check-approved-builtins check-extern-signatures backlog-shape verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test lsp-smoke task-io-smoke http-client-binary-gate http-tls-gate test-stress
   #!/usr/bin/env bash
   set -euo pipefail
   echo "==> gate: gc-safety-check --strict..."
