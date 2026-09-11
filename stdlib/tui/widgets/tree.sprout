@@ -26,6 +26,15 @@ export type Children (..) =
 
 export type Node = (label: String, children: Children)
 
+# What an application may send back. `At` exists because an application has no
+# model of its own — `app.sprout` is explicit that there is "deliberately no
+# separate `Ref AppState`", and a widget's state is existential — so answering
+# `on_expand` with a whole forest would mean rebuilding one it cannot read.
+# `At` names the path it read and carries only that directory's children.
+export type Update (..) =
+  | Forest (List Node)
+  | At (List String) (List Node)
+
 # `ListStyle` is reused rather than copied, so a theme that styles a list
 # styles a tree (§4.6). `page` is told rather than measured, for `list_view`
 # §4.5's reason: a pure handler never learns the height it was drawn at.
@@ -33,7 +42,7 @@ export type TreeOpts m = (start: List String, page: Int,
                           look: list_view.ListStyle,
                           on_highlight: Maybe (List String -> m),
                           on_expand: Maybe (List String -> m),
-                          on_content: Maybe (m -> Maybe(List Node)))
+                          on_content: Maybe (m -> Maybe Update))
 
 export fn tree_opts() -> TreeOpts m =
   TreeOpts(start = Nil, page = 10, look = list_view.list_style_default(),
@@ -288,10 +297,40 @@ fn to_parent(t: Tr m) -> Reply m =
 
 # ── content that arrives by message ─────────────────────────────────────────
 
-fn refilled(t: Tr m, c: Maybe (List Node)) -> Reply m =
+fn refilled(t: Tr m, c: Maybe Update) -> Reply m =
   match c with
   | Nothing -> Nothing
-  | Just ns -> replaced(t with (roots = ns))
+  | Just u -> replaced(applied(t, u))
+
+fn applied(t: Tr m, u: Update) -> Tr m =
+  match u with
+  | Forest ns -> (t with (roots = ns))
+  | At path cs -> (t with (roots = spliced(t.roots, path, cs)))
+
+# Replace the children of the node at `path` and leave everything else alone.
+# A path naming nothing changes nothing: the forest is the application's, and a
+# widget must not grow one. Only the FIRST sibling matching each segment is
+# rewritten, as the walk resolves one (§4.1).
+fn spliced(ns: List Node, path: List String, cs: List Node) -> List Node =
+  match path with
+  # The empty path names the forest itself — the children of the root nobody
+  # writes. That is how an application fills a tree it started empty, which is
+  # the first thing `examples/tui_files.sprout` does.
+  | Nil -> cs
+  | [seg | rest] -> splice_at(ns, seg, rest, cs)
+
+fn splice_at(ns: List Node, seg: String, rest: List String,
+             cs: List Node) -> List Node =
+  match ns with
+  | Nil -> Nil
+  | [n | more] ->
+      if n.label == seg then Cons(rewritten(n, rest, cs), more)
+      else Cons(n, splice_at(more, seg, rest, cs))
+
+fn rewritten(n: Node, rest: List String, cs: List Node) -> Node =
+  match rest with
+  | Nil -> (n with (children = Loaded(cs)))
+  | _ -> (n with (children = Loaded(spliced(kids(n.children), rest, cs))))
 
 # The open set and the selection both survive. A selection the replacement no
 # longer contains moves, and THAT move is announced — the caller did not ask

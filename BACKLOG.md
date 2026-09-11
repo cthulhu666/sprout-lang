@@ -540,11 +540,6 @@ Legend:
   `renderList` takes `Bool -> e -> Widget n`, so an item can be any widget. Deliberately not taken
   with the content-update work, which has landed. One entry for both widgets, not two — the
   answer is the same shape. Design: `docs/tui-list-view-v0.md` §8, `docs/tui-tree-v0.md` §8.
-- [ ] `P2` **TUI `tree` — a replacement rebuilds the whole forest.** `on_content` takes a
-  `List Node` and swaps the lot, so refreshing one expanded directory re-sends every sibling a
-  large project has. Splicing one path's children is what the IDE wants; the open set and the
-  selection already survive, so what is missing is only the narrower payload. Design:
-  `docs/tui-tree-v0.md` §4.4, §8.
 - [ ] `P3` **TUI `tree` — sibling labels must be unique.** A node is named by its path of labels
   (`docs/tui-tree-v0.md` §4.1), so two siblings sharing one are indistinguishable: the walk takes
   the first, and because the open set is keyed by path, opening one opens both. A filesystem

@@ -2933,6 +2933,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "bundle-smoke|bundle-smoke"
     "effect-report-smoke|effect-report-smoke"
     "fmt-check|fmt-check"
+    "tui-files-smoke|tui-files-smoke"
     "type-errors|test-type-errors"
     "parse-errors|test-parse-errors"
     "executable-errors|test-executable-errors"
@@ -3120,6 +3121,16 @@ tui-resize-probe: bootstrap-from-seed
   "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$SRC" > "{{build_dir}}/resize_probe.ll"
   clang "{{build_dir}}/resize_probe.ll" {{runtime_src}} -O2 {{clang_extra}} -o "{{build_dir}}/resize_probe"
   SPROUT_RESIZE_PROBE_BIN="{{build_dir}}/resize_probe" bash scripts/tui_resize_probe.sh
+
+# Runs a TUI program rather than only compiling one. Piped stdin drives the
+# whole app loop — no pty, unlike the resize probe.
+tui-files-smoke: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  SRC="examples/tui_files.sprout"
+  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$SRC" > "{{build_dir}}/tui_files.ll"
+  clang "{{build_dir}}/tui_files.ll" {{runtime_src}} -O2 {{clang_extra}} -o "{{build_dir}}/tui_files"
+  SPROUT_TUI_FILES_BIN="{{build_dir}}/tui_files" bash scripts/tui_files_smoke.sh
 
 # ── Aggregate Gates ───────────────────────────────────────────────────────────
 #
