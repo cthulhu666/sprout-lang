@@ -1,0 +1,110 @@
+module stdlib.tui.widgets.viewport
+
+# A window onto a `Buffer`: which lines a region shows, how far they are
+# shifted, and where the caret sits among them. Design: docs/tui-text-area-v0.md
+# §4.6, which this is the extraction of.
+#
+# Here rather than inside one widget because a document is painted by more than
+# one: `text_area` is the stdlib's, and the IDE's editor pane is a sibling of it
+# (docs/ide-v0.md §5) that paints the same window beside a gutter. What differs
+# between them is the region and what else is in it, never the window.
+#
+# Nothing is stored: `top` and the horizontal offset are derived from the caret
+# on every frame, so neither can drift out of step with it.
+
+import stdlib.string as string
+import stdlib.tui.buffer as buffer
+import stdlib.tui.geometry as geometry
+import stdlib.tui.screen as scr
+import stdlib.tui.style as style
+import stdlib.tui.text as text
+import stdlib.tui.widgets.focus as focus
+import stdlib.tui.widgets.paint as paint
+
+# `top` lines and `off` display columns are dropped; the caret lands at
+# `row`/`col` within the region and is painted as the cluster it sits on.
+type Window = (top: Int, off: Int, row: Int, col: Int, caret: String)
+
+# Both axes drop until what precedes the caret fits.
+fn window_of(b: buffer.Buffer, r: geometry.Region) -> Window =
+  Window(top = top, off = text.clusters_width(before) - text.clusters_width(kept),
+         row = buffer.buffer_row(b) - top, col = text.clusters_width(kept),
+         caret = caret)
+where
+  top = first_row(buffer.buffer_row(b), geometry.region_rows(r))
+  cs = text.clusters(buffer.buffer_line(b))
+  before = taken(cs, buffer.buffer_col(b), Nil)
+  caret = caret_cluster(dropped(cs, buffer.buffer_col(b)))
+  # The caret's OWN width is what the window reserves, not one column: on a CJK
+  # or emoji cluster a single reserved column truncates it away, painting
+  # neither the character nor the focus.
+  kept = text.truncate_left(geometry.region_cols(r) - text.width(caret), before)
+
+# The first line of the frame: enough dropped that the caret's line is the last
+# one, and none dropped while the whole document still fits.
+export fn first_row(row: Int, rows: Int) -> Int =
+  if row < rows then 0 else row - rows + 1
+
+# The caret sits ON the cluster after it, or on a blank cell at the end of the
+# line. Painted, because `app.run` hides the terminal's own cursor for the
+# session (docs/tui-focus-v0.md §9).
+fn caret_cluster(after: List (List Int)) -> String =
+  match after with
+  | Nil -> " "
+  | [c | _] -> text.from_clusters([c])
+
+# ── painting ────────────────────────────────────────────────────────────────
+
+# The document from its first line, with no caret — what a widget that does not
+# hold the keyboard shows, since a window only follows a caret that is there.
+export fn paint_at_top(screen: scr.Screen, region: geometry.Region,
+                       b: buffer.Buffer, look: style.Style) -> Unit !{IO} =
+  paint.lines(screen, region, 0, buffer.buffer_lines(b), look)
+
+# The window around the caret, caret included.
+export fn paint_at_caret(screen: scr.Screen, region: geometry.Region,
+                         b: buffer.Buffer,
+                         look: focus.FocusStyle) -> Unit !{IO} =
+  framed(screen, region, b, look, window_of(b, region))
+
+fn framed(screen: scr.Screen, region: geometry.Region, b: buffer.Buffer,
+          look: focus.FocusStyle, w: Window) -> Unit !{IO} = do
+  paint.lines(screen, region, 0, list_map(shifted(w.off, _), visible(b, region, w)),
+              look.normal)
+  paint.at(screen, region, w.row, w.col, w.caret, look.focused)
+
+# The lines the region shows, unshifted.
+fn visible(b: buffer.Buffer, r: geometry.Region, w: Window) -> List String =
+  taken(dropped(buffer.buffer_lines(b), w.top), geometry.region_rows(r), Nil)
+
+# Every line shifts by the SAME number of columns, or the text would jump from
+# row to row as the caret moved.
+#
+# A wide cluster straddling the edge cannot be painted — `text.truncate` drops
+# one whole at the other edge for the same reason — but the columns it still
+# owed are blanked rather than dropped. Dropping them would slide the rest of
+# THAT line left of every other line, which is the alignment the shared offset
+# exists to keep.
+fn shifted(off: Int, l: String) -> String =
+  cut_left(text.clusters(l), off)
+
+fn cut_left(cs: List (List Int), off: Int) -> String =
+  if off <= 0 then string.repeat(" ", -off) ++ text.from_clusters(cs)
+  else
+    match cs with
+    | Nil -> ""
+    | [c | rest] -> cut_left(rest, off - text.cluster_width(c))
+
+fn dropped(xs: List a, n: Int) -> List a =
+  if n <= 0 then xs
+  else
+    match xs with
+    | Nil -> Nil
+    | [_ | rest] -> dropped(rest, n - 1)
+
+fn taken(xs: List a, n: Int, acc: List a) -> List a =
+  if n <= 0 then list_reverse(acc)
+  else
+    match xs with
+    | Nil -> list_reverse(acc)
+    | [x | rest] -> taken(rest, n - 1, Cons(x, acc))
