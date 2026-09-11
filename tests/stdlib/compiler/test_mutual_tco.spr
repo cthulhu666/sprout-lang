@@ -58,6 +58,45 @@ fn make_i1_fn() -> sprout_ir.IRFunction =
       Cons(sprout_ir.IRRet("%r"), Nil))),
     Nil))
 
+# A function that tail-calls its cycle partner AND recurses into itself non-tail.
+# LLVM's tailcallelim turns the self-call into an accumulator loop and puts the
+# accumulate between the musttail call and its ret — invalid IR, fatal at -O2.
+# Phase A must not emit musttail here.  End-to-end fixture: tests/codegen_o2/.
+fn make_self_calling_fn() -> sprout_ir.IRFunction =
+  sprout_ir.IRFunction("main.s",
+    Cons(("x", sprout_ir.IRTScalar), Cons(("y", sprout_ir.IRTHeap), Nil)),
+    "i64",
+    Cons(sprout_ir.IRBlock("entry",
+      Cons(sprout_ir.IRConst("%t0", 0),
+      Cons(sprout_ir.IRICmp("%t1", "sle", sprout_ir.param_ssa("x"), "%t0"),
+      Cons(sprout_ir.IRCondBr("%t1", "thenb", "elseb"), Nil)))),
+    Cons(sprout_ir.IRBlock("thenb",
+      Cons(sprout_ir.IRCall("%s", sprout_ir.IRTHeap, "main.s", Cons(sprout_ir.param_ssa("x"), Cons(sprout_ir.param_ssa("y"), Nil))),
+      Cons(sprout_ir.IRIAdd("%s2", "%s", "%t0"),
+      Cons(sprout_ir.IRRet("%s2"), Nil)))),
+    Cons(sprout_ir.IRBlock("elseb",
+      Cons(sprout_ir.IRCall("%r", sprout_ir.IRTHeap, "main.b", Cons(sprout_ir.param_ssa("x"), Cons(sprout_ir.param_ssa("y"), Nil))),
+      Cons(sprout_ir.IRRet("%r"), Nil))),
+    Nil))))
+
+# Tail-calls the cycle partner (→ musttail) and also calls an unrelated main.z.
+# The second call is what must come out `noinline`.
+fn make_two_call_fn() -> sprout_ir.IRFunction =
+  sprout_ir.IRFunction("main.t",
+    Cons(("x", sprout_ir.IRTScalar), Cons(("y", sprout_ir.IRTHeap), Nil)),
+    "i64",
+    Cons(sprout_ir.IRBlock("entry",
+      Cons(sprout_ir.IRConst("%t0", 0),
+      Cons(sprout_ir.IRICmp("%t1", "sle", sprout_ir.param_ssa("x"), "%t0"),
+      Cons(sprout_ir.IRCondBr("%t1", "thenb", "elseb"), Nil)))),
+    Cons(sprout_ir.IRBlock("thenb",
+      Cons(sprout_ir.IRCall("%z", sprout_ir.IRTHeap, "main.z", Cons(sprout_ir.param_ssa("x"), Cons(sprout_ir.param_ssa("y"), Nil))),
+      Cons(sprout_ir.IRRet("%z"), Nil))),
+    Cons(sprout_ir.IRBlock("elseb",
+      Cons(sprout_ir.IRCall("%r", sprout_ir.IRTHeap, "main.b", Cons(sprout_ir.param_ssa("x"), Cons(sprout_ir.param_ssa("y"), Nil))),
+      Cons(sprout_ir.IRRet("%r"), Nil))),
+    Nil))))
+
 # --- structural helper: count the incomings of block `lbl`'s first IRPhi. ---
 fn fn_blocks(f: sprout_ir.IRFunction) -> List sprout_ir.IRBlock =
   match f with | sprout_ir.IRFunction _ _ _ bs -> bs
@@ -106,6 +145,25 @@ fn main() -> Unit !{IO} =
     let sir = ir_lowering.lower_fn_with_table(stc, dict_empty())
     assert_true(state, "self-TCO'd fn: mutual edge skipped (no musttail)",
       string.contains(sir, "musttail") == false)
+
+    # 3b. Non-tail self-call → skipped (tailcallelim would break the musttail).
+    let slf = ast_to_ir.mutual_tco_rewrite_fn(make_self_calling_fn(), Cons(("main.b", 2), Nil))
+    let slfir = ir_lowering.lower_fn_with_table(slf, dict_empty())
+    assert_true(state, "non-tail self-call: mutual edge skipped (no musttail)",
+      string.contains(slfir, "musttail") == false)
+    assert_true(state, "non-tail self-call: partner call stays a plain call",
+      string.contains(slfir, "call i64 @main.b"))
+
+    # 3c. A musttail carrier marks its OTHER direct calls noinline, so the inliner
+    # cannot make it self-recursive and hand tailcallelim the same shape.
+    let carrier = ir_lowering.lower_fn_with_table(
+      ast_to_ir.mutual_tco_rewrite_fn(make_two_call_fn(), Cons(("main.b", 2), Nil)), dict_empty())
+    assert_true(state, "musttail carrier: the partner edge is still musttail",
+      string.contains(carrier, "musttail call i64 @main.b"))
+    assert_true(state, "musttail carrier: its other direct call carries noinline",
+      string.contains(carrier, "@main.z(i64 %p$x, i64 %p$y) noinline"))
+    assert_true(state, "no musttail: plain calls carry no noinline",
+      string.contains(bir, "noinline") == false)
 
     # 4. Non-i64 return → skipped.
     let i1f = ast_to_ir.mutual_tco_rewrite_fn(make_i1_fn(), Cons(("main.b", 2), Nil))

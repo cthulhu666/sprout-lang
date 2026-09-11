@@ -6452,6 +6452,32 @@ fn mutual_ops_have_tco_entry(ops: List sprout_ir.IROp) -> Bool =
       | sprout_ir.IRTcoEntry _ _ -> true
       | _ -> mutual_ops_have_tco_entry(rest)
 
+# True iff the function still calls ITSELF, which means non-tail: self-TCO turns
+# tail ones into IRTcoBack.  LLVM's tailcallelim would rewrite such a call into an
+# accumulator loop, breaking the musttail this function would otherwise get
+# (docs/mutual-tco-v0.md §2.1, tests/codegen_o2/).
+fn mutual_has_self_call(name: String, blocks: List sprout_ir.IRBlock) -> Bool =
+  match blocks with
+  | Nil -> false
+  | Cons b rest ->
+      if mutual_ops_call_self(name, tco_block_ops(b)) then true
+      else mutual_has_self_call(name, rest)
+
+fn mutual_ops_call_self(name: String, ops: List sprout_ir.IROp) -> Bool =
+  match ops with
+  | Nil -> false
+  | Cons op rest ->
+      if mutual_op_calls(name, op) then true else mutual_ops_call_self(name, rest)
+
+# The three direct-call ops, same set as `ir_rooting.op_raw_callee` — a fourth one
+# has to be added in both places.
+fn mutual_op_calls(name: String, op: sprout_ir.IROp) -> Bool =
+  match op with
+  | sprout_ir.IRCall _ _ fname _ -> fname == name
+  | sprout_ir.IRCallUnboxed2 _ _ _ fname _ -> fname == name
+  | sprout_ir.IRCallUnboxed3 _ _ _ _ fname _ -> fname == name
+  | _ -> false
+
 # Collect tagged hits for every eligible target: reuse tco_collect (finds tail
 # calls to a NAME within blocks) + tco_tail_safe_hits (result not consumed after),
 # then the IR-site arity guard (args count == callee arity) so a mismatched edge
@@ -6519,7 +6545,7 @@ export fn mutual_tco_rewrite_fn(f: sprout_ir.IRFunction, targets: List (String, 
     sprout_ir.IRFunction =
   match f with
   | sprout_ir.IRFunction name params ret_ty blocks ->
-      if ret_ty == "i64" && ! mutual_has_tco_entry (blocks)
+      if ret_ty == "i64" && ! mutual_has_tco_entry (blocks) && ! mutual_has_self_call (name, blocks)
       then mutual_finish_rewrite(name, params, ret_ty, blocks, mutual_collect_hits(targets, blocks), f)
       else f
 

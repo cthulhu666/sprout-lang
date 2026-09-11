@@ -208,6 +208,21 @@ stopped being true. The recipe is wired in as `example-canary` inside `just ci-f
 runs that aggregate (`.github/workflows/ci.yml`). Running `ci-fast-gates` satisfies the item; the
 stale note was liable to send you hand-running five examples a gate you already ran had covered.
 
+## Optimized codegen — `just o2-codegen-smoke`
+
+Emits IR for each `tests/codegen_o2/*.spr` and runs `clang -O2` on it, failing on a non-zero exit.
+Every other test path links test IR with **no `-O` flag** (`_test-stdlib` in the justfile), so an
+IR bug that only the `-O2` pass pipeline reaches is invisible to `just test` while every shipped
+binary is built `-O2`.
+
+Added 2026-09-11 for a specific class: LLVM passes that break the `musttail` invariant we emit.
+`tailcallelim` does exactly that (docs/mutual-tco-v0.md §2.1), and the failure is a backend
+`fatal error`, not a wrong answer — nothing softer would have caught it. Wired into
+`just ci-fast-gates` as `o2-codegen-smoke`.
+
+A fixture belongs here when its *shape* is what provokes the optimizer, not its output; assert
+nothing about what it prints, and keep it small enough that the IR is readable when it fires.
+
 ## `just linux-smoke`
 
 Every other local gate runs the kqueue backend; CI runs epoll + timerfd, and the two diverge in ways

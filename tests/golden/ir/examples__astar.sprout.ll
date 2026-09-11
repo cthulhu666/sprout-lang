@@ -605,9 +605,9 @@ entry:
 
 define i64 @examples.astar.astar_expand$u(i64 %p$x, i64 %p$y, i64 %p$g, i64 %p$rest, i64 %p$g_score, i64 %p$closed) {
 entry:
-  %t$0 = call i64 @examples.astar.cell_idx(i64 %p$x, i64 %p$y)
+  %t$0 = call i64 @examples.astar.cell_idx(i64 %p$x, i64 %p$y) noinline
   %t$1 = add i64 0, 1
-  %t$2 = call i64 @stdlib.mutable.mutvec_set(i64 %p$closed, i64 %t$0, i64 %t$1)
+  %t$2 = call i64 @stdlib.mutable.mutvec_set(i64 %p$closed, i64 %t$0, i64 %t$1) noinline
   %t$3 = add i64 0, 1
   %t$4 = add i64 %p$g, %t$3
   %t$10 = alloca i64
@@ -619,7 +619,7 @@ entry:
   %t$14 = alloca i64
   store i64 %p$closed, ptr %t$14
   %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
-  %t$5 = call i64 @examples.astar.expand_neighbors(i64 %p$x, i64 %p$y, i64 %t$4, i64 %p$closed, i64 %p$g_score, i64 %p$rest)
+  %t$5 = call i64 @examples.astar.expand_neighbors(i64 %p$x, i64 %p$y, i64 %t$4, i64 %p$closed, i64 %p$g_score, i64 %p$rest) noinline
   %t$6 = add i64 0, 0
   %t$7 = add i64 0, 0
   %t$8 = add i64 0, 0

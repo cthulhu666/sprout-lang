@@ -1,0 +1,62 @@
+# The same crash, reached the other way: no function here is self-recursive in
+# Sprout. `children` tail-calls several sibling walkers (Phase A emits `musttail`),
+# LLVM's inliner pulls some of them in, and `children` BECOMES self-recursive with
+# an accumulator — which tailcallelim then rewrites, breaking the `musttail` that
+# survived inlining.
+#
+# A static Sprout-level check cannot see this one coming: it depends on the
+# inliner's cost model, so the fix is to stop inlining INTO a function that
+# carries a `musttail` call. This is the shape a plain AST walker has.
+
+type Node (..) =
+  | Lit Int
+  | Seq (List Node)
+  | Block (List Step)
+  | Rec (List Field)
+  | Both Node Node
+
+type Step (..) =
+  | Do Node
+  | Bind String Node
+
+type Field (..) =
+  | Field String Node
+
+fn size(n: Node) -> Int =
+  1 + children(n)
+
+fn children(n: Node) -> Int =
+  match n with
+  | Lit _ -> 0
+  | Seq ns -> sizes(ns)
+  | Block steps -> step_sizes(steps)
+  | Rec fields -> field_sizes(fields)
+  | Both a b -> size(a) + size(b)
+
+fn sizes(ns: List Node) -> Int =
+  match ns with
+  | Nil -> 0
+  | Cons n rest -> size(n) + sizes(rest)
+
+fn step_sizes(steps: List Step) -> Int =
+  match steps with
+  | Nil -> 0
+  | Cons s rest -> 1 + step_size(s) + step_sizes(rest)
+
+fn step_size(s: Step) -> Int =
+  match s with
+  | Do n -> size(n)
+  | Bind _ n -> size(n)
+
+fn field_sizes(fields: List Field) -> Int =
+  match fields with
+  | Nil -> 0
+  | Cons f rest ->
+      match f with
+      | Field _ n -> 1 + size(n) + field_sizes(rest)
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(size(Seq (Cons (Lit(1),
+    Cons(Block (Cons (Do (Lit(2)), Nil)),
+    Cons(Rec (Cons (Field("a", Lit(3)), Nil)),
+    Cons(Both (Lit(4), Lit(5)), Nil))))))))
