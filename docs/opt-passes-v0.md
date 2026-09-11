@@ -17,13 +17,13 @@ Sprout-level calls, for two reasons visible in the emitted IR:
 
 1. **The shadow stack makes every function look like it clobbers memory.** Every rooted value gets
    an `alloca` whose address is passed to an opaque external call
-   (`tests/golden/ir/examples__aoc_2025_day_1.sprout.ll:393-396`):
+   (`tests/golden/ir/examples__aoc_2025_day_1.sprout.ll:682-685`):
 
    ```llvm
-   %t$8 = alloca i64
-   store i64 %t$6, ptr %t$8
-   %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)   ; alloca escapes
-   %t$7 = call i64 @print_value(i64 %t$6)
+   %t$6 = alloca i64
+   store i64 %t$1, ptr %t$6
+   %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)   ; alloca escapes
+   %t$2 = call i64 @print_value(i64 %t$1)
    ```
 
    LLVM's `FunctionAttrs` therefore infers `memory(readwrite)` on essentially every
