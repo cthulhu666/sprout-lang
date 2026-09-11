@@ -274,7 +274,9 @@ must also pass on CI's Linux x86_64.
 Compiles `tests/opt_harness/dead_let.spr` twice, once with every pass on and once with
 `SPROUT_OPT_OFF=dle`, and asserts four things: the stats line appears in both modes, the pass
 removes a non-zero number of nodes, the two IRs differ, and the two binaries print the same thing.
-It then compiles with `SPROUT_OPT_OFF=nosuchpass` and requires a warning plus unchanged output.
+It then compiles twice more with names that must *not* take effect: `nosuchpass` requires a "no
+such pass" warning plus unchanged output, and `cse` — declared in the switch's vocabulary but not
+implemented — requires a "not implemented yet" warning.
 
 The gate exists because every part of this can fail *quietly*. A switch that never reaches codegen,
 a pass that silently stops firing, a typo'd pass name that disables nothing — each leaves a green

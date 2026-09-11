@@ -11,19 +11,19 @@ ON and with the pass under test disabled via `SPROUT_OPT_OFF`.
 
 | program | nodes | removed | IR·on | IR·off | cc·on s | cc·off s | run·on s | run·off s |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| `astar` | 5 811 | 0 | 1 316 | 1 316 | 0.26 | 0.25 | 0.02 | 0.02 |
-| `nqueens` | 4 391 | 0 | 775 | 775 | 0.21 | 0.22 | 2.24 | 2.26 |
-| `math_transcendental` | 6 503 | 0 | 3 021 | 3 021 | 0.27 | 0.28 | 0.16 | 0.16 |
-| `unboxed_read` | 5 308 | 0 | 384 | 384 | 0.23 | 0.23 | 0.22 | 0.22 |
-| `digit_recognizer` | 7 721 | 0 | 3 561 | 3 561 | 0.33 | 0.34 | 0.51 | 0.52 |
-| `compile_driver` | 110 054 | 0 | 380 592 | 380 592 | 13.80 | 13.84 | — | — |
+| `astar` | 5 811 | 0 | 1 316 | 1 316 | 0.25 | 0.26 | 0.02 | 0.02 |
+| `nqueens` | 4 391 | 0 | 775 | 775 | 0.21 | 0.21 | 2.24 | 2.27 |
+| `math_transcendental` | 6 503 | 0 | 3 021 | 3 021 | 0.27 | 0.27 | 0.16 | 0.16 |
+| `unboxed_read` | 5 308 | 0 | 384 | 384 | 0.23 | 0.23 | 0.21 | 0.21 |
+| `digit_recognizer` | 7 721 | 0 | 3 561 | 3 561 | 0.34 | 0.35 | 0.52 | 0.51 |
+| `compile_driver` | 110 096 | 0 | 380 775 | 380 775 | 14.19 | 14.19 | — | — |
 
 `compile_driver` is the compiler emitting its own IR — the largest real Sprout program
 there is. It has no run column: the harness times `--emit-ir`, which is the row's point.
 
 ## The finding: DLE removes nothing from real code
 
-**Zero nodes, on every program, including the 110 054-node compiler.** ON and OFF emit
+**Zero nodes, on every program, including the 110 096-node compiler.** ON and OFF emit
 byte-identical IR everywhere in the corpus, so the two halves of the table agree by
 construction rather than by measurement.
 
@@ -42,8 +42,8 @@ Two consequences:
    the first node this pipeline has ever removed from a real program, so the baseline needs
    no subtraction and no argument about attribution.
 
-DLE also costs nothing: `compile_driver` compiles in 13.80 s with the pass and 13.84 s
-without, i.e. the difference is below the noise floor of a single run. There is no case for
+DLE also costs nothing: `compile_driver` compiles in 14.19 s either way, and no row in the
+table separates ON from OFF by more than run-to-run spread. There is no case for
 deleting it — it is free insurance against a future pass that *does* manufacture dead
 bindings, which is precisely what a worker/wrapper LICM split (M2) would do.
 

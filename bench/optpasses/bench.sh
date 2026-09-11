@@ -41,10 +41,14 @@ CORPUS=(
 # Minimum wall-clock over $RUNS attempts. The minimum estimates the cost; the
 # mean estimates the background load (bench/results-2026-08-06 §"On using the
 # minimum").
+# `/usr/bin/time -p` prints a `real` line whether the command succeeded or died,
+# so a crashed program would otherwise report a fast, identical time in both
+# columns and the A/B would read as a clean "no difference". RUN-FAIL instead.
 min_elapsed() {
-  local best="" out t i
+  local best="" out t i st
   for ((i = 0; i < RUNS; i++)); do
-    out=$( { /usr/bin/time -p "$@" >/dev/null; } 2>&1 )
+    out=$( { /usr/bin/time -p "$@" >/dev/null; } 2>&1 ); st=$?
+    (( st != 0 )) && { echo "RUN-FAIL"; return; }
     t=$(awk '/^real/{print $2}' <<< "$out")
     [[ -z "$t" ]] && continue
     if [[ -z "$best" ]] || awk -v a="$t" -v b="$best" 'BEGIN{exit !(a < b)}'; then best="$t"; fi
@@ -61,9 +65,29 @@ emit() {  # emit <src> <out.ll> <err> [pass-to-disable]
   fi
 }
 
+# Reads only the line for THIS pass. Once a second pass reports stats, an
+# unfiltered match returns one value per pass and every consumer downstream —
+# printf widths, the `!= 0` test — silently takes a multi-line string.
 stat_field() {  # stat_field <err-file> <key>
-  awk -v k="$2" '/^\[opt\]/ { for (i = 1; i <= NF; i++) if ($i ~ "^" k "=") { sub("^" k "=", "", $i); print $i } }' "$1"
+  awk -v p="$PASS" -v k="$2" \
+    '$1 == "[opt]" && $2 == p { for (i = 3; i <= NF; i++) if ($i ~ "^" k "=") { sub("^" k "=", "", $i); print $i } }' "$1"
 }
+
+# The compiler owns the list of pass names, so ask it rather than duplicating one
+# here. A typo'd pass disables nothing, and every column below would then agree
+# for a reason that has nothing to do with the pass.
+probe_err="$TMPD/probe.err"
+SPROUT_OPT_OFF="$PASS" "$CC" --emit-ir stdlib tests/opt_harness/dead_let.spr >/dev/null 2>"$probe_err" || true
+if grep -q 'no such pass' "$probe_err"; then
+  cat "$probe_err" >&2
+  echo "bench-opt: '$PASS' is not a pass — aborting rather than printing a meaningless A/B." >&2
+  exit 1
+fi
+if grep -q 'not implemented yet' "$probe_err"; then
+  cat "$probe_err" >&2
+  echo "bench-opt: '$PASS' is declared but does no work yet — every column would agree." >&2
+  exit 1
+fi
 
 echo "==> Pass A/B: $PASS  (compiler: $CC, $RUNS runs per timing, minimum reported)"
 echo

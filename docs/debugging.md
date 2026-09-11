@@ -97,9 +97,11 @@ The last (lowering-discard) motivates the pending IR-level **phase 2b** (BACKLOG
 Bisect a miscompile against the Sprout-level passes without rebuilding the compiler
 (docs/opt-passes-v0.md §M0):
 
-- `SPROUT_OPT_OFF=dle,cse` — comma list of passes to **disable**; unset means all on.
-  An unrecognised name warns and disables nothing, so a typo cannot silently
-  "fix" the bug.
+- `SPROUT_OPT_OFF=dle` — comma list of passes to **disable**; unset means all on.
+  Two warnings guard the misdiagnosis this knob invites: an unrecognised name
+  ("no such pass") and a name that is declared but not yet implemented — `cse`
+  and `licm` today ("not implemented yet … nothing was disabled"). Neither can
+  silently "fix" the bug you are chasing.
 - `SPROUT_OPT_STATS=1` — one `[opt] <pass> on|off nodes=N removed=M` line per
   compile on stderr, `removed` being the typed-AST node delta the pass produced.
 
