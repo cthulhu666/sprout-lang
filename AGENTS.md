@@ -24,6 +24,10 @@ Before starting to write code, ensure the following are true. These are entry co
 
 For coding tasks, work is done only when **all applicable** items below are true.
 
+**Run #14's self-review before #9 (reseed) and #12 (golden IR).** A finding after a reseed
+invalidates it and costs that cycle twice. The review gate is a Stop hook — it fires after the
+gates, so it cannot schedule this for you.
+
 1. The implementation is complete.
 2. The tests drafted under Definition of Ready (failing tests, regression tests, coverage-gap tests) now pass.
 3. Relevant docs/spec updates are complete and in sync with the implementation.
@@ -37,7 +41,7 @@ For coding tasks, work is done only when **all applicable** items below are true
 11. **Bootstrap/runtime changes** (any edit under `bootstrap/` or to `runtime/sprout_runtime.c`) — example canary: `just run-example-canary` compiles *and runs* five examples, which `just compile-examples-stage1` does not. It is part of `just ci-fast-gates`, so running that aggregate satisfies this item ([docs/gates.md](docs/gates.md)).
 12. **Codegen-affecting changes** (anything that can alter emitted IR — `stdlib/compiler/`, `stdlib/`, the prelude, a module's public name surface) **and any change that ADDS a file to `examples/` or `tests/smoke_shapes/`** — golden IR: `just ir-golden-diff` passes. For a compiler-source edit, `just refresh-seed` **first** or the gate runs the pre-edit binary and proves nothing. If it reports diffs, read them before regenerating — the report is truncated, so run `just ir-golden-snapshot` and read the complete `git diff tests/golden/ir` before staging. Regenerating an unread diff launders a regression into an "expected" snapshot, the one way this gate is defeated. Details and the traps: [docs/gates.md §Golden IR](docs/gates.md).
 13. The changes are committed.
-14. A self-review has been performed before handoff.
+14. A self-review has been performed against the review-gate checklist (§Commit Guidance) — early, per the note above, and again before handoff.
 
 **Verification notes:**
 - During implementation, run individual test files for fast feedback (§Code and Testing); `mise exec -- just test` is the full gate required for #5.
