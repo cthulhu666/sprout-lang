@@ -536,9 +536,20 @@ Legend:
   re-asserting after a subtree changes, or an application-addressable focus command (§4.7 forbids
   one today). Pinned in `tests/stdlib/test_tui_scroll_view.spr`. Design:
   `docs/tui-content-update-v0.md` §9.4.
-- [ ] `P2` **TUI `list_view` — per-item rendering.** An item is a `String`; brick's `renderList`
-  takes `Bool -> e -> Widget n`, so an item can be any widget. Deliberately not taken with the
-  content-update work, which has landed. Design: `docs/tui-list-view-v0.md` §8.
+- [ ] `P2` **TUI `list_view` and `tree` — per-item rendering.** An item is a `String`; brick's
+  `renderList` takes `Bool -> e -> Widget n`, so an item can be any widget. Deliberately not taken
+  with the content-update work, which has landed. One entry for both widgets, not two — the
+  answer is the same shape. Design: `docs/tui-list-view-v0.md` §8, `docs/tui-tree-v0.md` §8.
+- [ ] `P2` **TUI `tree` — a replacement rebuilds the whole forest.** `on_content` takes a
+  `List Node` and swaps the lot, so refreshing one expanded directory re-sends every sibling a
+  large project has. Splicing one path's children is what the IDE wants; the open set and the
+  selection already survive, so what is missing is only the narrower payload. Design:
+  `docs/tui-tree-v0.md` §4.4, §8.
+- [ ] `P3` **TUI `tree` — sibling labels must be unique.** A node is named by its path of labels
+  (`docs/tui-tree-v0.md` §4.1), so two siblings sharing one are indistinguishable: the walk takes
+  the first, and because the open set is keyed by path, opening one opens both. A filesystem
+  cannot produce this, which is why `ide/filetree` is safe, but a general caller can. The lift is
+  `tui-tree-widget`'s caller-chosen identifier. Pinned in `tests/stdlib/test_tui_tree.spr`.
 - [ ] `P3` **TUI `input` — word motion, selection and the chord family.** `ctrl-w`/`ctrl-u`,
   ctrl-arrows, a selection anchor beside the caret, and the terminal clipboard. Deliberately not
   claimed by C2b: every one is a binding an application may want, and a field that took them would
