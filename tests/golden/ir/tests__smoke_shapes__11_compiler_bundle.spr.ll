@@ -13903,7 +13903,7 @@ arm_3_1:
   br i1 %t$13, label %body_3_1, label %arm_4_1
 body_3_1:
   %t$14 = call i64 @sprout_field(i64 %p$pat, i64 0)
-  %t$15 = musttail call i64 @stdlib.compiler.parser.all_irrefutable_do_bind(i64 %t$14)
+  %t$15 = musttail call i64 @stdlib.compiler.parser.all_irrefutable_do_bind(i64 %t$14) noinline
   ret i64 %t$15
 arm_4_1:
   %t$16 = add i64 0, 0
@@ -15965,7 +15965,7 @@ then_21:
   %t$24 = call i64 @stdlib.compiler.parser.tok_pos(i64 %t$23) noinline
   %t$25 = call i64 @sprout_field(i64 %t$24, i64 2)
   %t$90 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$26 = musttail call i64 @stdlib.compiler.parser.collect_do_steps_at(i64 %p$tokens, i64 %p$i, i64 %p$do_line, i64 %t$25, i64 %p$acc)
+  %t$26 = musttail call i64 @stdlib.compiler.parser.collect_do_steps_at(i64 %p$tokens, i64 %p$i, i64 %p$do_line, i64 %t$25, i64 %p$acc) noinline
   ret i64 %t$26
 else_21:
   %t$91 = alloca i64
@@ -16066,7 +16066,7 @@ then_42:
   %t$127 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_42
 else_42:
-  %t$52 = musttail call i64 @stdlib.compiler.parser.collect_do_steps_at(i64 %p$tokens, i64 %p$i, i64 %p$do_line, i64 %p$block_col, i64 %p$acc)
+  %t$52 = musttail call i64 @stdlib.compiler.parser.collect_do_steps_at(i64 %p$tokens, i64 %p$i, i64 %p$do_line, i64 %p$block_col, i64 %p$acc) noinline
   ret i64 %t$52
 join_42:
   %t$43 = phi i64 [%t$51, %then_42]
@@ -16147,7 +16147,7 @@ body_0_11:
   store i64 %p$acc, ptr %t$16$f1
   %t$107 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$108 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$17 = musttail call i64 @stdlib.compiler.parser.collect_do_steps(i64 %p$tokens, i64 %t$9, i64 %p$do_line, i64 %p$block_col, i64 %t$16)
+  %t$17 = musttail call i64 @stdlib.compiler.parser.collect_do_steps(i64 %p$tokens, i64 %t$9, i64 %p$do_line, i64 %p$block_col, i64 %t$16) noinline
   ret i64 %t$17
 arm_1_11:
   %t$18 = add i64 0, 123
@@ -16175,7 +16175,7 @@ body_1_11:
   %t$22 = call i64 @list_append(i64 %t$21, i64 %p$acc) noinline
   %t$120 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$121 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$23 = musttail call i64 @stdlib.compiler.parser.collect_do_steps(i64 %p$tokens, i64 %t$9, i64 %p$do_line, i64 %p$block_col, i64 %t$22)
+  %t$23 = musttail call i64 @stdlib.compiler.parser.collect_do_steps(i64 %p$tokens, i64 %t$9, i64 %p$do_line, i64 %p$block_col, i64 %t$22) noinline
   ret i64 %t$23
 arm_2_11:
   %t$24 = add i64 0, 124
@@ -17707,7 +17707,7 @@ do_cont_10:
   %t$14$gep = getelementptr i64, ptr %t$14$ptr, i64 1
   %t$14 = load i64, ptr %t$14$gep
   %t$15 = add i64 0, 0
-  %t$16 = musttail call i64 @stdlib.compiler.parser.parse_expr$u(i64 %p$tokens, i64 %t$14, i64 %t$15)
+  %t$16 = musttail call i64 @stdlib.compiler.parser.parse_expr$u(i64 %p$tokens, i64 %t$14, i64 %t$15) noinline
   ret i64 %t$16
 do_done_10:
   %t$17 = phi i64 [%t$13, %do_short_10]
@@ -17828,7 +17828,7 @@ else_13:
   %t$21 = call i64 @stdlib.compiler.parser.tok_pos(i64 %t$20) noinline
   %t$22 = call i64 @sprout_field(i64 %t$21, i64 2)
   %t$56 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$23 = musttail call i64 @stdlib.compiler.parser.parse_let_block$u(i64 %p$tokens, i64 %t$8, i64 %t$22)
+  %t$23 = musttail call i64 @stdlib.compiler.parser.parse_let_block$u(i64 %p$tokens, i64 %t$8, i64 %t$22) noinline
   ret i64 %t$23
 join_13:
   %t$14 = phi i64 [%t$19, %then_13]
@@ -17917,7 +17917,7 @@ else_18:
   br i1 %t$30, label %then_25, label %else_25
 then_25:
   %t$27 = add i64 0, 0
-  %t$28 = musttail call i64 @stdlib.compiler.parser.parse_let_else_expr$u(i64 %p$tokens, i64 %p$i, i64 %t$27)
+  %t$28 = musttail call i64 @stdlib.compiler.parser.parse_let_else_expr$u(i64 %p$tokens, i64 %p$i, i64 %t$27) noinline
   ret i64 %t$28
 else_25:
   %t$55 = alloca i64
@@ -21019,7 +21019,7 @@ entry:
   %t$24 = call i64 @sprout_gc_pop_roots(i64 2)
   br i1 %t$19, label %then_4, label %else_4
 then_4:
-  %t$6 = musttail call i64 @stdlib.compiler.parser.parse_call_postfix(i64 %p$tokens, i64 %p$i, i64 %p$base)
+  %t$6 = musttail call i64 @stdlib.compiler.parser.parse_call_postfix(i64 %p$tokens, i64 %p$i, i64 %p$base) noinline
   ret i64 %t$6
 else_4:
   %t$25 = alloca i64
@@ -21033,7 +21033,7 @@ else_4:
   %t$29 = call i64 @sprout_gc_pop_roots(i64 2)
   br i1 %t$18, label %then_8, label %else_8
 then_8:
-  %t$10 = musttail call i64 @stdlib.compiler.parser.parse_field_postfix(i64 %p$tokens, i64 %p$i, i64 %p$base)
+  %t$10 = musttail call i64 @stdlib.compiler.parser.parse_field_postfix(i64 %p$tokens, i64 %p$i, i64 %p$base) noinline
   ret i64 %t$10
 else_8:
   %t$30 = alloca i64
@@ -21047,7 +21047,7 @@ else_8:
   %t$34 = call i64 @sprout_gc_pop_roots(i64 2)
   br i1 %t$17, label %then_12, label %else_12
 then_12:
-  %t$14 = musttail call i64 @stdlib.compiler.parser.parse_update_postfix(i64 %p$tokens, i64 %p$i, i64 %p$base)
+  %t$14 = musttail call i64 @stdlib.compiler.parser.parse_update_postfix(i64 %p$tokens, i64 %p$i, i64 %p$base) noinline
   ret i64 %t$14
 else_12:
   %t$35 = alloca i64
@@ -21215,7 +21215,7 @@ do_cont_22:
   %t$29 = call i64 @stdlib.compiler.parser.desugar_placeholder_call(i64 %p$callee, i64 %t$27, i64 %t$28) noinline
   %t$85 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$86 = call i64 @sprout_gc_pop_roots(i64 4)
-  %t$30 = musttail call i64 @stdlib.compiler.parser.parse_postfix_rest(i64 %p$tokens, i64 %t$26, i64 %t$29)
+  %t$30 = musttail call i64 @stdlib.compiler.parser.parse_postfix_rest(i64 %p$tokens, i64 %t$26, i64 %t$29) noinline
   ret i64 %t$30
 do_done_22:
   %t$31 = phi i64 [%t$25, %do_short_22]
@@ -21352,7 +21352,7 @@ do_cont_13:
   %t$21 = call i64 @stdlib.compiler.parser.fold_field_chain(i64 %p$base, i64 %t$19, i64 %t$20) noinline
   %t$59 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$60 = call i64 @sprout_gc_pop_roots(i64 3)
-  %t$22 = musttail call i64 @stdlib.compiler.parser.parse_postfix_rest(i64 %p$tokens, i64 %t$18, i64 %t$21)
+  %t$22 = musttail call i64 @stdlib.compiler.parser.parse_postfix_rest(i64 %p$tokens, i64 %t$18, i64 %t$21) noinline
   ret i64 %t$22
 do_done_13:
   %t$23 = phi i64 [%t$16, %do_short_13]
@@ -21711,7 +21711,7 @@ do_cont_31:
   store i64 %t$37, ptr %t$38$f2
   %t$108 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$109 = call i64 @sprout_gc_pop_roots(i64 4)
-  %t$39 = musttail call i64 @stdlib.compiler.parser.parse_postfix_rest(i64 %p$tokens, i64 %t$35, i64 %t$38)
+  %t$39 = musttail call i64 @stdlib.compiler.parser.parse_postfix_rest(i64 %p$tokens, i64 %t$35, i64 %t$38) noinline
   ret i64 %t$39
 do_done_31:
   %t$40 = phi i64 [%t$34, %do_short_31]
@@ -34507,7 +34507,7 @@ then_24:
   %t$27 = call i64 @stdlib.compiler.parser.tok_pos(i64 %t$26) noinline
   %t$28 = call i64 @sprout_field(i64 %t$27, i64 2)
   %t$82 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$29 = musttail call i64 @stdlib.compiler.parser.collect_class_method_sigs_layout_at(i64 %p$tokens, i64 %p$i, i64 %p$keyword_col, i64 %t$28, i64 %p$acc)
+  %t$29 = musttail call i64 @stdlib.compiler.parser.collect_class_method_sigs_layout_at(i64 %p$tokens, i64 %p$i, i64 %p$keyword_col, i64 %t$28, i64 %p$acc) noinline
   ret i64 %t$29
 else_24:
   %t$83 = alloca i64
@@ -34568,7 +34568,7 @@ then_35:
   %t$105 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_35
 else_35:
-  %t$45 = musttail call i64 @stdlib.compiler.parser.collect_class_method_sigs_layout_at(i64 %p$tokens, i64 %p$i, i64 %p$keyword_col, i64 %p$block_col, i64 %p$acc)
+  %t$45 = musttail call i64 @stdlib.compiler.parser.collect_class_method_sigs_layout_at(i64 %p$tokens, i64 %p$i, i64 %p$keyword_col, i64 %p$block_col, i64 %p$acc) noinline
   ret i64 %t$45
 join_35:
   %t$36 = phi i64 [%t$44, %then_35]
@@ -34635,7 +34635,7 @@ do_cont_2:
   %t$8$f1 = getelementptr i64, ptr %t$8$ptr, i64 1
   store i64 %p$acc, ptr %t$8$f1
   %t$27 = call i64 @sprout_gc_pop_roots(i64 4)
-  %t$9 = musttail call i64 @stdlib.compiler.parser.collect_class_method_sigs_layout(i64 %p$tokens, i64 %t$7, i64 %p$keyword_col, i64 %p$block_col, i64 %t$8)
+  %t$9 = musttail call i64 @stdlib.compiler.parser.collect_class_method_sigs_layout(i64 %p$tokens, i64 %t$7, i64 %p$keyword_col, i64 %p$block_col, i64 %t$8) noinline
   ret i64 %t$9
 do_done_2:
   %t$10 = phi i64 [%t$5, %do_short_2]
@@ -35753,7 +35753,7 @@ then_24:
   %t$27 = call i64 @stdlib.compiler.parser.tok_pos(i64 %t$26) noinline
   %t$28 = call i64 @sprout_field(i64 %t$27, i64 2)
   %t$82 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$29 = musttail call i64 @stdlib.compiler.parser.collect_instance_methods_layout_at(i64 %p$tokens, i64 %p$i, i64 %p$keyword_col, i64 %t$28, i64 %p$acc)
+  %t$29 = musttail call i64 @stdlib.compiler.parser.collect_instance_methods_layout_at(i64 %p$tokens, i64 %p$i, i64 %p$keyword_col, i64 %t$28, i64 %p$acc) noinline
   ret i64 %t$29
 else_24:
   %t$83 = alloca i64
@@ -35814,7 +35814,7 @@ then_35:
   %t$105 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_35
 else_35:
-  %t$45 = musttail call i64 @stdlib.compiler.parser.collect_instance_methods_layout_at(i64 %p$tokens, i64 %p$i, i64 %p$keyword_col, i64 %p$block_col, i64 %p$acc)
+  %t$45 = musttail call i64 @stdlib.compiler.parser.collect_instance_methods_layout_at(i64 %p$tokens, i64 %p$i, i64 %p$keyword_col, i64 %p$block_col, i64 %p$acc) noinline
   ret i64 %t$45
 join_35:
   %t$36 = phi i64 [%t$44, %then_35]
@@ -35881,7 +35881,7 @@ do_cont_2:
   %t$8$f1 = getelementptr i64, ptr %t$8$ptr, i64 1
   store i64 %p$acc, ptr %t$8$f1
   %t$27 = call i64 @sprout_gc_pop_roots(i64 4)
-  %t$9 = musttail call i64 @stdlib.compiler.parser.collect_instance_methods_layout(i64 %p$tokens, i64 %t$7, i64 %p$keyword_col, i64 %p$block_col, i64 %t$8)
+  %t$9 = musttail call i64 @stdlib.compiler.parser.collect_instance_methods_layout(i64 %p$tokens, i64 %t$7, i64 %p$keyword_col, i64 %p$block_col, i64 %t$8) noinline
   ret i64 %t$9
 do_done_2:
   %t$10 = phi i64 [%t$5, %do_short_2]
@@ -38073,7 +38073,7 @@ entry:
   %t$70 = call i64 @sprout_gc_pop_roots(i64 4)
   br i1 %t$61, label %then_4, label %else_4
 then_4:
-  %t$6 = musttail call i64 @stdlib.compiler.parser.scan_surface_from(i64 %p$tokens, i64 %p$j, i64 %p$exported, i64 %p$ctor_types, i64 %p$globals)
+  %t$6 = musttail call i64 @stdlib.compiler.parser.scan_surface_from(i64 %p$tokens, i64 %p$j, i64 %p$exported, i64 %p$ctor_types, i64 %p$globals) noinline
   ret i64 %t$6
 else_4:
   %t$71 = alloca i64
@@ -38166,7 +38166,7 @@ then_27:
   %t$105 = call i64 @sprout_gc_push_i64_root(ptr %t$104)
   %t$33 = call i64 @stdlib.compiler.parser.name_at(i64 %p$tokens, i64 %t$32, i64 %p$exported) noinline
   %t$106 = call i64 @sprout_gc_pop_roots(i64 4)
-  %t$34 = musttail call i64 @stdlib.compiler.parser.scan_surface_from(i64 %p$tokens, i64 %t$30, i64 %t$33, i64 %p$ctor_types, i64 %p$globals)
+  %t$34 = musttail call i64 @stdlib.compiler.parser.scan_surface_from(i64 %p$tokens, i64 %t$30, i64 %t$33, i64 %p$ctor_types, i64 %p$globals) noinline
   ret i64 %t$34
 else_27:
   %t$107 = alloca i64
@@ -38213,7 +38213,7 @@ then_39:
   %t$125 = call i64 @sprout_gc_push_i64_root(ptr %t$124)
   %t$48 = call i64 @stdlib.compiler.parser.name_at(i64 %p$tokens, i64 %t$47, i64 %p$ctor_types) noinline
   %t$126 = call i64 @sprout_gc_pop_roots(i64 5)
-  %t$49 = musttail call i64 @stdlib.compiler.parser.scan_surface_from(i64 %p$tokens, i64 %t$42, i64 %t$45, i64 %t$48, i64 %p$globals)
+  %t$49 = musttail call i64 @stdlib.compiler.parser.scan_surface_from(i64 %p$tokens, i64 %t$42, i64 %t$45, i64 %t$48, i64 %p$globals) noinline
   ret i64 %t$49
 else_39:
   %t$127 = alloca i64
@@ -38236,10 +38236,10 @@ else_39:
   %t$135 = call i64 @sprout_gc_pop_roots(i64 4)
   br i1 %t$58, label %then_54, label %else_54
 then_54:
-  %t$56 = musttail call i64 @stdlib.compiler.parser.scan_exported_type(i64 %p$tokens, i64 %p$j, i64 %p$exported, i64 %p$ctor_types, i64 %p$globals)
+  %t$56 = musttail call i64 @stdlib.compiler.parser.scan_exported_type(i64 %p$tokens, i64 %p$j, i64 %p$exported, i64 %p$ctor_types, i64 %p$globals) noinline
   ret i64 %t$56
 else_54:
-  %t$57 = musttail call i64 @stdlib.compiler.parser.scan_surface_from(i64 %p$tokens, i64 %p$j, i64 %p$exported, i64 %p$ctor_types, i64 %p$globals)
+  %t$57 = musttail call i64 @stdlib.compiler.parser.scan_surface_from(i64 %p$tokens, i64 %p$j, i64 %p$exported, i64 %p$ctor_types, i64 %p$globals) noinline
   ret i64 %t$57
 }
 
@@ -38280,7 +38280,7 @@ then_1:
   %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
   %t$7 = call i64 @stdlib.compiler.parser.name_at(i64 %p$tokens, i64 %t$6, i64 %p$exported) noinline
   %t$31 = call i64 @sprout_gc_pop_roots(i64 4)
-  %t$8 = musttail call i64 @stdlib.compiler.parser.scan_surface_from(i64 %p$tokens, i64 %t$4, i64 %t$7, i64 %p$ctor_types, i64 %p$globals)
+  %t$8 = musttail call i64 @stdlib.compiler.parser.scan_surface_from(i64 %p$tokens, i64 %t$4, i64 %t$7, i64 %p$ctor_types, i64 %p$globals) noinline
   ret i64 %t$8
 else_1:
   %t$9 = add i64 0, 1
@@ -38299,7 +38299,7 @@ else_1:
   %t$39 = call i64 @sprout_gc_push_i64_root(ptr %t$38)
   %t$11 = call i64 @stdlib.compiler.parser.skip_linear_marker(i64 %p$tokens, i64 %t$10) noinline
   %t$40 = call i64 @sprout_gc_pop_roots(i64 4)
-  %t$12 = musttail call i64 @stdlib.compiler.parser.scan_named_type(i64 %p$tokens, i64 %t$11, i64 %p$exported, i64 %p$ctor_types, i64 %p$globals)
+  %t$12 = musttail call i64 @stdlib.compiler.parser.scan_named_type(i64 %p$tokens, i64 %t$11, i64 %p$exported, i64 %p$ctor_types, i64 %p$globals) noinline
   ret i64 %t$12
 }
 
@@ -38345,7 +38345,7 @@ then_4:
   %t$34 = call i64 @sprout_gc_push_i64_root(ptr %t$33)
   %t$9 = call i64 @stdlib.compiler.parser.name_at(i64 %p$tokens, i64 %p$n, i64 %p$ctor_types) noinline
   %t$35 = call i64 @sprout_gc_pop_roots(i64 5)
-  %t$10 = musttail call i64 @stdlib.compiler.parser.scan_surface_from(i64 %p$tokens, i64 %t$7, i64 %t$8, i64 %t$9, i64 %p$globals)
+  %t$10 = musttail call i64 @stdlib.compiler.parser.scan_surface_from(i64 %p$tokens, i64 %t$7, i64 %t$8, i64 %t$9, i64 %p$globals) noinline
   ret i64 %t$10
 else_4:
   %t$11 = add i64 0, 1
@@ -38364,7 +38364,7 @@ else_4:
   %t$43 = call i64 @sprout_gc_push_i64_root(ptr %t$42)
   %t$13 = call i64 @stdlib.compiler.parser.name_at(i64 %p$tokens, i64 %p$n, i64 %p$exported) noinline
   %t$44 = call i64 @sprout_gc_pop_roots(i64 4)
-  %t$14 = musttail call i64 @stdlib.compiler.parser.scan_surface_from(i64 %p$tokens, i64 %t$12, i64 %t$13, i64 %p$ctor_types, i64 %p$globals)
+  %t$14 = musttail call i64 @stdlib.compiler.parser.scan_surface_from(i64 %p$tokens, i64 %t$12, i64 %t$13, i64 %p$ctor_types, i64 %p$globals) noinline
   ret i64 %t$14
 }
 
@@ -41140,7 +41140,7 @@ entry:
 define i64 @stdlib.compiler.lexer.scan_nested_template$u(i64 %p$raw, i64 %p$cursor, i64 %p$outer_start_pos, i64 %p$depth, i64 %p$toks_acc, i64 %p$pbpad$5) {
 entry:
   %t$0 = call i64 @stdlib.compiler.lexer.cursor_position(i64 %p$cursor) noinline
-  %t$1 = musttail call i64 @stdlib.compiler.lexer.scan_nested_template_with_start$u(i64 %p$raw, i64 %p$cursor, i64 %t$0, i64 %p$outer_start_pos, i64 %p$depth, i64 %p$toks_acc)
+  %t$1 = musttail call i64 @stdlib.compiler.lexer.scan_nested_template_with_start$u(i64 %p$raw, i64 %p$cursor, i64 %t$0, i64 %p$outer_start_pos, i64 %p$depth, i64 %p$toks_acc) noinline
   ret i64 %t$1
 }
 
@@ -41309,7 +41309,7 @@ body_1_22:
   %t$32$gep = getelementptr i64, ptr %t$32$ptr, i64 1
   %t$32 = load i64, ptr %t$32$gep
   %t$33 = add i64 0, 0
-  %t$34 = musttail call i64 @stdlib.compiler.lexer.scan_interp_body$u(i64 %p$raw, i64 %t$32, i64 %p$outer_start_pos, i64 %p$depth, i64 %t$31, i64 %t$33)
+  %t$34 = musttail call i64 @stdlib.compiler.lexer.scan_interp_body$u(i64 %p$raw, i64 %t$32, i64 %p$outer_start_pos, i64 %p$depth, i64 %t$31, i64 %t$33) noinline
   ret i64 %t$34
 arm_2_22:
   call void @sprout_abort_match()
@@ -41327,7 +41327,7 @@ join_2:
 
 define i64 @stdlib.compiler.lexer.scan_template_content(i64 %p$raw, i64 %p$cursor, i64 %p$start_pos, i64 %p$lit_acc, i64 %p$lit_start, i64 %p$toks_acc) {
 entry:
-  %t$0 = musttail call i64 @stdlib.compiler.lexer.scan_template_content$u(i64 %p$raw, i64 %p$cursor, i64 %p$start_pos, i64 %p$lit_acc, i64 %p$lit_start, i64 %p$toks_acc)
+  %t$0 = musttail call i64 @stdlib.compiler.lexer.scan_template_content$u(i64 %p$raw, i64 %p$cursor, i64 %p$start_pos, i64 %p$lit_acc, i64 %p$lit_start, i64 %p$toks_acc) noinline
   ret i64 %t$0
 }
 
@@ -41693,7 +41693,7 @@ body_0_2:
   store i64 %p$lit_acc, ptr %t$8$f1
   %t$64 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$65 = call i64 @sprout_gc_pop_roots(i64 6)
-  %t$9 = musttail call i64 @stdlib.compiler.lexer.scan_template_content$u(i64 %p$raw, i64 %p$cursor, i64 %p$start_pos, i64 %t$8, i64 %p$lit_start, i64 %p$toks_acc)
+  %t$9 = musttail call i64 @stdlib.compiler.lexer.scan_template_content$u(i64 %p$raw, i64 %p$cursor, i64 %p$start_pos, i64 %t$8, i64 %p$lit_start, i64 %p$toks_acc) noinline
   ret i64 %t$9
 arm_1_2:
   %t$10 = add i64 0, 1
@@ -41741,7 +41741,7 @@ body_0_16:
   %t$30 = trunc i64 %t$22 to i1
   br i1 %t$30, label %then_23, label %else_23
 then_23:
-  %t$25 = musttail call i64 @stdlib.compiler.lexer.scan_template_interp_start$u(i64 %p$raw, i64 %p$cursor, i64 %p$start_pos, i64 %p$lit_acc, i64 %p$lit_start, i64 %p$toks_acc)
+  %t$25 = musttail call i64 @stdlib.compiler.lexer.scan_template_interp_start$u(i64 %p$raw, i64 %p$cursor, i64 %p$start_pos, i64 %p$lit_acc, i64 %p$lit_start, i64 %p$toks_acc) noinline
   ret i64 %t$25
 else_23:
   %t$26 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.432, i64 0, i32 1, i64 0
@@ -41775,7 +41775,7 @@ else_23:
   store i64 %p$lit_acc, ptr %t$28$f1
   %t$95 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$96 = call i64 @sprout_gc_pop_roots(i64 5)
-  %t$29 = musttail call i64 @stdlib.compiler.lexer.scan_template_content$u(i64 %p$raw, i64 %t$13, i64 %p$start_pos, i64 %t$28, i64 %p$lit_start, i64 %p$toks_acc)
+  %t$29 = musttail call i64 @stdlib.compiler.lexer.scan_template_content$u(i64 %p$raw, i64 %t$13, i64 %p$start_pos, i64 %t$28, i64 %p$lit_start, i64 %p$toks_acc) noinline
   ret i64 %t$29
 arm_1_16:
   %t$31 = add i64 0, 0
@@ -41813,7 +41813,7 @@ body_1_16:
   store i64 %p$lit_acc, ptr %t$35$f1
   %t$111 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$112 = call i64 @sprout_gc_pop_roots(i64 5)
-  %t$36 = musttail call i64 @stdlib.compiler.lexer.scan_template_content$u(i64 %p$raw, i64 %t$13, i64 %p$start_pos, i64 %t$35, i64 %p$lit_start, i64 %p$toks_acc)
+  %t$36 = musttail call i64 @stdlib.compiler.lexer.scan_template_content$u(i64 %p$raw, i64 %t$13, i64 %p$start_pos, i64 %t$35, i64 %p$lit_start, i64 %p$toks_acc) noinline
   ret i64 %t$36
 arm_2_16:
   call void @sprout_abort_match()
@@ -42037,7 +42037,7 @@ body_1_16:
   %t$110 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$36 = add i64 0, 0
   %t$111 = call i64 @sprout_gc_pop_roots(i64 8)
-  %t$37 = musttail call i64 @stdlib.compiler.lexer.scan_template_interp_body$u(i64 %p$raw, i64 %t$27, i64 %p$start_pos, i64 %t$28, i64 %t$35, i64 %t$36)
+  %t$37 = musttail call i64 @stdlib.compiler.lexer.scan_template_interp_body$u(i64 %p$raw, i64 %t$27, i64 %p$start_pos, i64 %t$28, i64 %t$35, i64 %t$36) noinline
   ret i64 %t$37
 arm_2_16:
   call void @sprout_abort_match()
@@ -42141,7 +42141,7 @@ body_1_3:
   %t$14 = call i64 @sprout_alloc_obj(i64 5, i64 0)
   %t$15 = call i64 @stdlib.compiler.lexer.cursor_position(i64 %t$13) noinline
   %t$40 = call i64 @sprout_gc_pop_roots(i64 4)
-  %t$16 = musttail call i64 @stdlib.compiler.lexer.scan_template_content$u(i64 %p$raw, i64 %t$13, i64 %p$start_pos, i64 %t$14, i64 %t$15, i64 %t$12)
+  %t$16 = musttail call i64 @stdlib.compiler.lexer.scan_template_content$u(i64 %p$raw, i64 %t$13, i64 %p$start_pos, i64 %t$14, i64 %t$15, i64 %t$12) noinline
   ret i64 %t$16
 arm_2_3:
   call void @sprout_abort_match()
@@ -42398,7 +42398,7 @@ body_1_31:
   %t$44$f1 = getelementptr i64, ptr %t$44$ptr, i64 1
   store i64 %p$lit_acc, ptr %t$44$f1
   %t$128 = call i64 @sprout_gc_pop_roots(i64 7)
-  %t$45 = musttail call i64 @stdlib.compiler.lexer.scan_template_content$u(i64 %p$raw, i64 %t$43, i64 %p$start_pos, i64 %t$44, i64 %p$lit_start, i64 %p$toks_acc)
+  %t$45 = musttail call i64 @stdlib.compiler.lexer.scan_template_content$u(i64 %p$raw, i64 %t$43, i64 %p$start_pos, i64 %t$44, i64 %p$lit_start, i64 %p$toks_acc) noinline
   ret i64 %t$45
 arm_2_31:
   call void @sprout_abort_match()
@@ -43564,7 +43564,7 @@ entry:
 define i64 @stdlib.compiler.lexer.scan_template_from$u(i64 %p$raw, i64 %p$cursor, i64 %p$acc, i64 %p$pbpad$3) {
 entry:
   %t$0 = call i64 @stdlib.compiler.lexer.cursor_position(i64 %p$cursor) noinline
-  %t$1 = musttail call i64 @stdlib.compiler.lexer.scan_template_from_with_pos$u(i64 %p$raw, i64 %p$cursor, i64 %t$0, i64 %p$acc)
+  %t$1 = musttail call i64 @stdlib.compiler.lexer.scan_template_from_with_pos$u(i64 %p$raw, i64 %p$cursor, i64 %t$0, i64 %p$acc) noinline
   ret i64 %t$1
 }
 
@@ -43723,7 +43723,7 @@ body_1_22:
   %t$32$gep = getelementptr i64, ptr %t$32$ptr, i64 1
   %t$32 = load i64, ptr %t$32$gep
   %t$33 = add i64 0, 0
-  %t$34 = musttail call i64 @stdlib.compiler.lexer.tokenize_from$u(i64 %p$raw, i64 %t$32, i64 %t$31, i64 %t$33)
+  %t$34 = musttail call i64 @stdlib.compiler.lexer.tokenize_from$u(i64 %p$raw, i64 %t$32, i64 %t$31, i64 %t$33) noinline
   ret i64 %t$34
 arm_2_22:
   call void @sprout_abort_match()
@@ -45763,7 +45763,7 @@ arm_0_0:
   %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
   %t$6 = call i64 @stdlib.repl.trim(i64 %t$3) noinline
   %t$19 = call i64 @sprout_gc_pop_roots(i64 4)
-  %t$7 = musttail call i64 @stdlib.repl.append_space_names(i64 %t$5, i64 %t$6)
+  %t$7 = musttail call i64 @stdlib.repl.append_space_names(i64 %t$5, i64 %t$6) noinline
   ret i64 %t$7
 arm_1_0:
   call void @sprout_abort_match()
@@ -45823,7 +45823,7 @@ arm_1_9:
   %t$16 = icmp eq i64 %t$7, %t$15
   br i1 %t$16, label %body_1_9, label %arm_2_9
 body_1_9:
-  %t$17 = musttail call i64 @stdlib.repl.append_space_name_pair(i64 %p$acc, i64 %t$8)
+  %t$17 = musttail call i64 @stdlib.repl.append_space_name_pair(i64 %p$acc, i64 %t$8) noinline
   ret i64 %t$17
 arm_2_9:
   call void @sprout_abort_match()
@@ -46437,7 +46437,7 @@ arm_0_0:
   %t$5 = call i64 @stdlib.repl.append_unique_name(i64 %p$acc, i64 %t$4) noinline
   %t$15 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$16 = call i64 @sprout_gc_pop_roots(i64 3)
-  %t$6 = musttail call i64 @stdlib.repl.append_csv_names(i64 %t$5, i64 %t$3)
+  %t$6 = musttail call i64 @stdlib.repl.append_csv_names(i64 %t$5, i64 %t$3) noinline
   ret i64 %t$6
 arm_1_0:
   call void @sprout_abort_match()
@@ -46486,7 +46486,7 @@ arm_1_4:
   %t$11 = icmp eq i64 %t$2, %t$10
   br i1 %t$11, label %body_1_4, label %arm_2_4
 body_1_4:
-  %t$12 = musttail call i64 @stdlib.repl.append_csv_name_pair(i64 %p$acc, i64 %t$3)
+  %t$12 = musttail call i64 @stdlib.repl.append_csv_name_pair(i64 %p$acc, i64 %t$3) noinline
   ret i64 %t$12
 arm_2_4:
   call void @sprout_abort_match()
@@ -48895,7 +48895,7 @@ then_8:
   %t$12 = sub i64 0, %t$11
   %t$13 = add i64 0, 0
   %t$69 = call i64 @sprout_gc_pop_roots(i64 4)
-  %t$14 = musttail call i64 @stdlib.repl.interactive_read_line_loop$u(i64 %p$prompt, i64 %p$history, i64 %p$session, i64 %p$current, i64 %t$10, i64 %t$12, i64 %p$current, i64 %t$13)
+  %t$14 = musttail call i64 @stdlib.repl.interactive_read_line_loop$u(i64 %p$prompt, i64 %p$history, i64 %p$session, i64 %p$current, i64 %t$10, i64 %t$12, i64 %p$current, i64 %t$13) noinline
   ret i64 %t$14
 else_8:
   %t$15 = call i64 @vec_length(i64 %t$4) noinline
@@ -48908,7 +48908,7 @@ then_19:
   %t$21 = add i64 0, 1
   %t$22 = sub i64 0, %t$21
   %t$23 = add i64 0, 0
-  %t$24 = musttail call i64 @stdlib.repl.interactive_read_line_loop$u(i64 %p$prompt, i64 %p$history, i64 %p$session, i64 %p$current, i64 %p$cursor, i64 %t$22, i64 %p$current, i64 %t$23)
+  %t$24 = musttail call i64 @stdlib.repl.interactive_read_line_loop$u(i64 %p$prompt, i64 %p$history, i64 %p$session, i64 %p$current, i64 %p$cursor, i64 %t$22, i64 %p$current, i64 %t$23) noinline
   ret i64 %t$24
 else_19:
   %t$25 = call i64 @vec_length(i64 %t$4) noinline
@@ -48948,7 +48948,7 @@ then_29:
   %t$36 = sub i64 0, %t$35
   %t$37 = add i64 0, 0
   %t$85 = call i64 @sprout_gc_pop_roots(i64 6)
-  %t$38 = musttail call i64 @stdlib.repl.interactive_read_line_loop$u(i64 %p$prompt, i64 %p$history, i64 %p$session, i64 %t$31, i64 %t$34, i64 %t$36, i64 %t$31, i64 %t$37)
+  %t$38 = musttail call i64 @stdlib.repl.interactive_read_line_loop$u(i64 %p$prompt, i64 %p$history, i64 %p$session, i64 %t$31, i64 %t$34, i64 %t$36, i64 %t$31, i64 %t$37) noinline
   ret i64 %t$38
 else_29:
   %t$39 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.550, i64 0, i32 1, i64 0
@@ -48980,7 +48980,7 @@ else_29:
   %t$46 = sub i64 0, %t$45
   %t$47 = add i64 0, 0
   %t$99 = call i64 @sprout_gc_pop_roots(i64 5)
-  %t$48 = musttail call i64 @stdlib.repl.interactive_read_line_loop$u(i64 %p$prompt, i64 %p$history, i64 %p$session, i64 %p$current, i64 %p$cursor, i64 %t$46, i64 %p$current, i64 %t$47)
+  %t$48 = musttail call i64 @stdlib.repl.interactive_read_line_loop$u(i64 %p$prompt, i64 %p$history, i64 %p$session, i64 %p$current, i64 %p$cursor, i64 %t$46, i64 %p$current, i64 %t$47) noinline
   ret i64 %t$48
 arm_1_1:
   call void @sprout_abort_match()
@@ -49019,7 +49019,7 @@ entry:
   br i1 %t$14, label %then_3, label %else_3
 then_3:
   %t$5 = add i64 0, 0
-  %t$6 = musttail call i64 @stdlib.repl.interactive_read_line_loop$u(i64 %p$prompt, i64 %p$history, i64 %p$session, i64 %p$current, i64 %p$cursor, i64 %p$browse_index, i64 %p$draft, i64 %t$5)
+  %t$6 = musttail call i64 @stdlib.repl.interactive_read_line_loop$u(i64 %p$prompt, i64 %p$history, i64 %p$session, i64 %p$current, i64 %p$cursor, i64 %p$browse_index, i64 %p$draft, i64 %t$5) noinline
   ret i64 %t$6
 else_3:
   %t$7 = add i64 0, 1
@@ -49044,7 +49044,7 @@ else_3:
   %t$11 = sub i64 %p$cursor, %t$10
   %t$12 = add i64 0, 0
   %t$25 = call i64 @sprout_gc_pop_roots(i64 5)
-  %t$13 = musttail call i64 @stdlib.repl.interactive_read_line_loop$u(i64 %p$prompt, i64 %p$history, i64 %p$session, i64 %p$current, i64 %t$11, i64 %p$browse_index, i64 %p$draft, i64 %t$12)
+  %t$13 = musttail call i64 @stdlib.repl.interactive_read_line_loop$u(i64 %p$prompt, i64 %p$history, i64 %p$session, i64 %p$current, i64 %t$11, i64 %p$browse_index, i64 %p$draft, i64 %t$12) noinline
   ret i64 %t$13
 }
 
@@ -49096,7 +49096,7 @@ entry:
   br i1 %t$14, label %then_3, label %else_3
 then_3:
   %t$5 = add i64 0, 0
-  %t$6 = musttail call i64 @stdlib.repl.interactive_read_line_loop$u(i64 %p$prompt, i64 %p$history, i64 %p$session, i64 %p$current, i64 %p$cursor, i64 %p$browse_index, i64 %p$draft, i64 %t$5)
+  %t$6 = musttail call i64 @stdlib.repl.interactive_read_line_loop$u(i64 %p$prompt, i64 %p$history, i64 %p$session, i64 %p$current, i64 %p$cursor, i64 %p$browse_index, i64 %p$draft, i64 %t$5) noinline
   ret i64 %t$6
 else_3:
   %t$7 = add i64 0, 1
@@ -49121,7 +49121,7 @@ else_3:
   %t$11 = add i64 %p$cursor, %t$10
   %t$12 = add i64 0, 0
   %t$36 = call i64 @sprout_gc_pop_roots(i64 5)
-  %t$13 = musttail call i64 @stdlib.repl.interactive_read_line_loop$u(i64 %p$prompt, i64 %p$history, i64 %p$session, i64 %p$current, i64 %t$11, i64 %p$browse_index, i64 %p$draft, i64 %t$12)
+  %t$13 = musttail call i64 @stdlib.repl.interactive_read_line_loop$u(i64 %p$prompt, i64 %p$history, i64 %p$session, i64 %p$current, i64 %t$11, i64 %p$browse_index, i64 %p$draft, i64 %t$12) noinline
   ret i64 %t$13
 }
 
@@ -49877,7 +49877,7 @@ entry:
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
   %t$0 = call i64 @stdlib.terminal.term_read_key_once() noinline
   %t$12 = call i64 @sprout_gc_pop_roots(i64 5)
-  %t$1 = musttail call i64 @stdlib.repl.interactive_read_line_step$u(i64 %p$prompt, i64 %p$history, i64 %p$session, i64 %p$current, i64 %p$cursor, i64 %p$browse_index, i64 %p$draft, i64 %t$0)
+  %t$1 = musttail call i64 @stdlib.repl.interactive_read_line_step$u(i64 %p$prompt, i64 %p$history, i64 %p$session, i64 %p$current, i64 %p$cursor, i64 %p$browse_index, i64 %p$draft, i64 %t$0) noinline
   ret i64 %t$1
 }
 
@@ -51639,7 +51639,7 @@ body_0_1:
   %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
   %t$9 = call i64 @__tc_Semigroup_Vec_a_append(i64 %p$outputs, i64 %t$5) noinline
   %t$22 = call i64 @sprout_gc_pop_roots(i64 4)
-  %t$10 = musttail call i64 @stdlib.repl.execute_block_chunks(i64 %p$chunks, i64 %t$8, i64 %t$9, i64 %t$6)
+  %t$10 = musttail call i64 @stdlib.repl.execute_block_chunks(i64 %p$chunks, i64 %t$8, i64 %t$9, i64 %t$6) noinline
   ret i64 %t$10
 arm_1_1:
   %t$11 = add i64 0, 147
@@ -51681,7 +51681,7 @@ body_0_2:
   %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
   %t$6 = call i64 @stdlib.repl.handle_submission(i64 %t$1, i64 %p$session) noinline
   %t$19 = call i64 @sprout_gc_pop_roots(i64 4)
-  %t$7 = musttail call i64 @stdlib.repl.continue_block_execution(i64 %t$6, i64 %p$chunks, i64 %p$index, i64 %p$outputs)
+  %t$7 = musttail call i64 @stdlib.repl.continue_block_execution(i64 %t$6, i64 %p$chunks, i64 %p$index, i64 %p$outputs) noinline
   ret i64 %t$7
 arm_1_2:
   %t$8 = add i64 0, 0
@@ -51794,7 +51794,7 @@ body_0_1:
   %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
   %t$8 = call i64 @stdlib.repl.render_lines(i64 %p$prompt, i64 %t$5, i64 %t$7) noinline
   %t$21 = call i64 @sprout_gc_pop_roots(i64 4)
-  %t$9 = musttail call i64 @stdlib.repl.repl_loop_session(i64 %p$prompt, i64 %p$history, i64 %t$6)
+  %t$9 = musttail call i64 @stdlib.repl.repl_loop_session(i64 %p$prompt, i64 %p$history, i64 %t$6) noinline
   ret i64 %t$9
 arm_1_1:
   %t$10 = add i64 0, 147

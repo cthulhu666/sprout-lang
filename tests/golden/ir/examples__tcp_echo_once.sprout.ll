@@ -364,7 +364,7 @@ body_1_3:
   %t$14 = icmp eq i64 %t$12, %t$13
   br i1 %t$14, label %ntest_11, label %arm_2_3
 ntest_11:
-  %t$15 = musttail call i64 @stdlib.net.read_avail_wait(i64 %p$handle, i64 %p$deadline_us)
+  %t$15 = musttail call i64 @stdlib.net.read_avail_wait(i64 %p$handle, i64 %p$deadline_us) noinline
   ret i64 %t$15
 arm_2_3:
   %t$16 = add i64 0, 8
@@ -427,7 +427,7 @@ do_cont_10:
   %t$22 = trunc i64 %t$16 to i1
   br i1 %t$22, label %then_17, label %else_17
 then_17:
-  %t$19 = musttail call i64 @stdlib.net.read_avail_go(i64 %p$handle, i64 %p$deadline_us)
+  %t$19 = musttail call i64 @stdlib.net.read_avail_go(i64 %p$handle, i64 %p$deadline_us) noinline
   ret i64 %t$19
 else_17:
   %t$20 = call i64 @sprout_alloc_obj(i64 21, i64 0)

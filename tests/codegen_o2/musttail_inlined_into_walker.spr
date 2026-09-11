@@ -6,7 +6,9 @@
 #
 # A static Sprout-level check cannot see this one coming: it depends on the
 # inliner's cost model, so the fix is to stop inlining INTO a function that
-# carries a `musttail` call. This is the shape a plain AST walker has.
+# carries a `musttail` call. Here the partner is inlined at an ordinary call
+# site; `musttail_inlined_through_tail_edge.spr` covers the harder route, in
+# through the tail edge itself, which only the wider rule closes.
 
 type Node (..) =
   | Lit Int
@@ -35,13 +37,13 @@ fn children(n: Node) -> Int =
 
 fn sizes(ns: List Node) -> Int =
   match ns with
-  | Nil -> 0
-  | Cons n rest -> size(n) + sizes(rest)
+  | [] -> 0
+  | [n | rest] -> size(n) + sizes(rest)
 
 fn step_sizes(steps: List Step) -> Int =
   match steps with
-  | Nil -> 0
-  | Cons s rest -> 1 + step_size(s) + step_sizes(rest)
+  | [] -> 0
+  | [s | rest] -> 1 + step_size(s) + step_sizes(rest)
 
 fn step_size(s: Step) -> Int =
   match s with
@@ -50,13 +52,15 @@ fn step_size(s: Step) -> Int =
 
 fn field_sizes(fields: List Field) -> Int =
   match fields with
-  | Nil -> 0
-  | Cons f rest ->
+  | [] -> 0
+  | [f | rest] ->
       match f with
       | Field _ n -> 1 + size(n) + field_sizes(rest)
 
 fn main() -> Unit !{IO} =
-  print(int_to_string(size(Seq (Cons (Lit(1),
-    Cons(Block (Cons (Do (Lit(2)), Nil)),
-    Cons(Rec (Cons (Field("a", Lit(3)), Nil)),
-    Cons(Both (Lit(4), Lit(5)), Nil))))))))
+  print(int_to_string(size(Seq([
+    Lit(1),
+    Block([Do (Lit(2))]),
+    Rec([Field("a", Lit(3))]),
+    Both(Lit(4), Lit(5))
+  ]))))

@@ -378,7 +378,8 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int), c
   # requires nothing between the call and the ret).
   | sprout_ir.IRTailCall result callee args sp ->
       (if sp == "" then "" else "  call void @llvm.stackrestore(ptr " ++ sp ++ ")\n") ++
-      "  " ++ result ++ " = musttail call i64 @" ++ callee ++ "(" ++ lower_call_args(args) ++ ")\n" ++
+      "  " ++ result ++ " = musttail call i64 @" ++ callee ++ "(" ++ lower_call_args(args) ++ ")"
+        ++ call_attr ++ "\n" ++
       "  ret i64 " ++ result
 
 fn lower_ops(ops: List sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int), call_attr: String) -> String =
@@ -449,10 +450,11 @@ export fn lower_fn_with_table(f: sprout_ir.IRFunction, fn_table: Dict (String, I
       "define " ++ ret_ty ++ " @" ++ name ++ "(" ++ lower_params(params) ++ ") {\n"
         ++ lower_blocks(blocks, ret_ty, fn_table, direct_call_attr(blocks)) ++ "}\n"
 
-# `noinline` on every direct call of a function that carries a `musttail` one.
-# Inlining a cycle partner INTO such a function makes it self-recursive, which
-# tailcallelim rewrites into an accumulator loop — breaking the musttail and
-# aborting the backend at -O2 (docs/mutual-tco-v0.md §2.1, tests/codegen_o2/).
+# `noinline` on EVERY call of a function that carries a `musttail` one, the
+# musttail call included — inlining through it imports the partner's own calls,
+# which is enough to make the carrier self-recursive. tailcallelim then rewrites
+# that into an accumulator loop, breaking the musttail and aborting the backend
+# at -O2 (docs/mutual-tco-v0.md §2.1, tests/codegen_o2/).
 fn direct_call_attr(blocks: List sprout_ir.IRBlock) -> String =
   if blocks_have_tail_call(blocks) then " noinline" else ""
 

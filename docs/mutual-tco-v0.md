@@ -163,10 +163,19 @@ Two guards, because the function can become self-recursive two different ways:
    through its non-tail edge, so no guarantee is lost.
 2. **The inliner created it.** A walker whose arms tail-call sibling walkers has no
    self-recursion in Sprout at all, and acquires it when the inliner pulls a cycle partner in.
-   No static check can see that coming, so `ir_lowering` marks every *other* direct call in a
-   `musttail`-carrying function `noinline`, and the inline never happens. 683 of the seed's
-   94 263 direct call sites (0.7%); compiling `infer.sprout` was 4.30–4.48 s before and
-   4.25–4.44 s after, i.e. no measurable cost.
+   No static check can see that coming, so `ir_lowering` marks the calls of a `musttail`-carrying
+   function `noinline` and the inline never happens.
+
+   **Every** call, the `musttail` one included — that is not an over-approximation, it is the
+   fix. Marking only the other calls leaves the tail edge inlinable: LLVM inlines the partner
+   through it, the partner's own calls arrive unmarked, the wrapper they call follows, and the
+   carrier calls itself after all. `typed_ast.node_count` still aborted the backend with the
+   narrower rule; `musttail call … noinline` is legal IR and verifier-clean, and is what
+   actually closes it. `tests/codegen_o2/musttail_inlined_through_tail_edge.spr` is the fixture
+   that separates the two — it passes under the narrow rule's sibling fixture and fails here.
+
+   Cost: 683 of the seed's 94 263 direct call sites (0.7%); compiling `infer.sprout` was
+   4.30–4.48 s before and 4.25–4.44 s after, i.e. no measurable cost.
 
 Both shapes are pinned end-to-end by `tests/codegen_o2/` and at unit level by
 `tests/stdlib/compiler/test_mutual_tco.spr`.

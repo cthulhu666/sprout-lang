@@ -624,7 +624,7 @@ entry:
   %t$7 = add i64 0, 0
   %t$8 = add i64 0, 0
   %t$16 = call i64 @sprout_gc_pop_roots(i64 3)
-  %t$9 = musttail call i64 @examples.astar.astar_loop$u(i64 %t$5, i64 %p$g_score, i64 %p$closed, i64 %t$6, i64 %t$7, i64 %t$8)
+  %t$9 = musttail call i64 @examples.astar.astar_loop$u(i64 %t$5, i64 %p$g_score, i64 %p$closed, i64 %t$6, i64 %t$7, i64 %t$8) noinline
   ret i64 %t$9
 }
 
