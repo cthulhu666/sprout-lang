@@ -562,6 +562,26 @@ fn upper_is_pure(eff_subst: Dict types.Effect, v: String) -> Bool =
   | Just e -> types.effect_is_pure(e)
   | Nothing -> false
 
+# Aliasing one open effect variable to another must carry the BOUNDS across, not
+# only the binding (docs/effect-subsumption-v0.md §6.5d). A ceiling left under the
+# old name is unreachable once `apply_effect_subst` resolves past it, and the
+# ceiling is the only thing holding a joined pure slot.
+fn carry_bounds(eff_subst: Dict types.Effect, v: String) -> Dict types.Effect =
+  match apply_effect_subst(eff_subst, types.EffectVar(v)) with
+  | types.EffectVar w -> if w == v then eff_subst else carry_both(eff_subst, v, w)
+  | _ -> eff_subst
+
+# A union, not an overwrite: each slot is one-valued — `record_lower` stores only
+# IO and `record_upper` only Pure — so a carried bound can never weaken the target.
+fn carry_both(eff_subst: Dict types.Effect, from: String, to: String) -> Dict types.Effect =
+  carry_one(carry_one(eff_subst, lower_bound_key(from), lower_bound_key(to)),
+            upper_bound_key(from), upper_bound_key(to))
+
+fn carry_one(eff_subst: Dict types.Effect, from_key: String, to_key: String) -> Dict types.Effect =
+  match dict_get(from_key, eff_subst) with
+  | Nothing -> eff_subst
+  | Just e -> dict_set(to_key, e, eff_subst)
+
 fn bind_var(name: String, t: types.Type, subst: Dict types.Type) -> Result String (Dict types.Type) =
   match t with
   | types.TVar n ->
@@ -730,7 +750,7 @@ fn bind_open(eff_subst: Dict types.Effect, v: String, e: types.Effect) -> Dict t
   | Just _ -> eff_subst
   | Nothing ->
       if types.effect_is_io(e) && upper_is_pure(eff_subst, v) then eff_subst
-      else unify_arrow_effects(eff_subst, types.EffectVar(v), e)
+      else carry_bounds(unify_arrow_effects(eff_subst, types.EffectVar(v), e), v)
 
 # Total over both sides. A catch-all here would answer "accept" for a
 # constructor added later, and the one cell that must reject is a single pair —

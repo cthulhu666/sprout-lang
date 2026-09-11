@@ -36,6 +36,37 @@ fn join(first: types.Type, second: types.Type) -> String =
         else unifier.UnifyErr e -> "REJECT"
   in types.type_to_string(unifier.apply_full_subst(s2, es2, result_var()))
 
+# A slot carrying an OPEN effect variable — the `!{e}` of a signature the joined
+# value is passed to. Flowing the join into it aliases the joined slot's variable
+# to this one, and a ceiling left behind under the old name is unreachable after.
+fn alias_slot() -> types.Type =
+  types.TFunc(types.type_int(), types.type_int(), types.EffectVar("$alias"), types.OwnConsume)
+
+fn alias_slot_arrow() -> types.Type =
+  types.TFunc(alias_slot(),
+    types.TFunc(types.type_int(), types.type_int(), types.EffectIO, types.OwnConsume),
+    types.EffectPure, types.OwnConsume)
+
+fn io_callback() -> types.Type =
+  types.TFunc(types.type_int(), types.type_int(), types.EffectIO, types.OwnConsume)
+
+# Join, pass the result into a signature whose slot is open, then supply an IO
+# callback for that slot. The ceiling has to follow the alias or this accepts.
+fn io_through_alias(first: types.Type, second: types.Type) -> String =
+  let unifier.UnifyOk s1 es1 =
+        unifier.unify_actual_expected(dict_empty(), dict_empty(), first, result_var())
+        else unifier.UnifyErr e -> "REJECT"
+      unifier.UnifyOk s2 es2 =
+        unifier.unify_actual_expected(s1, es1, second, result_var())
+        else unifier.UnifyErr e -> "REJECT"
+      unifier.UnifyOk s3 es3 =
+        unifier.unify_actual_expected(s2, es2, result_var(), alias_slot_arrow())
+        else unifier.UnifyErr e -> "REJECT"
+      unifier.UnifyOk s4 es4 =
+        unifier.unify_actual_expected(s3, es3, io_callback(), alias_slot())
+        else unifier.UnifyErr e -> "REJECT"
+  in "ACCEPT"
+
 fn main() -> Unit !{IO} =
   run_suite("effect_join_bounds", [
     # The defect this pins: the pure branch's slot obligation was dropped, so the
@@ -48,6 +79,15 @@ fn main() -> Unit !{IO} =
     # The mirror. A join has no first branch, so the two must not disagree.
     check_true("and not in the other order either",
       join(io_arrow(), pure_arrow()) != io_join_rendering()),
+
+    # `!=` against the IO rendering is satisfied by a slot left as a BARE variable,
+    # which is what one order produces — so it passes while holding nothing. These
+    # two ask the question the rendering cannot: does the slot still refuse IO once
+    # it has been aliased to the `!{e}` of a signature it was passed to?
+    check_eq("a ceiling survives being aliased to another open variable",
+      io_through_alias(pure_arrow(), io_arrow()), "REJECT"),
+    check_eq("and in the other order too",
+      io_through_alias(io_arrow(), pure_arrow()), "REJECT"),
 
     # Uniform joins keep their own effect — the meet of one effect is itself.
     check_eq("two pure arrows join pure",

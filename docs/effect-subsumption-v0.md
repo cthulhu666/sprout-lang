@@ -1094,7 +1094,8 @@ One consequence to state rather than leave for the next reader to rediscover. A 
 that is not pure — and it also loses the re-binding `record_lower` performed as a side
 effect, so an `!{IO}` callback slot inside a bound type becomes an unconstrained effect
 variable. That is the permissive direction (an IO-accepting slot takes any callback), and
-probes in both directions found neither laundering nor false rejection. It is the reason the
+probes in both directions found neither laundering nor false rejection AT THAT DEPTH — §6.5d is
+the case they did not reach. It is the reason the
 `!{IO}`-slot cells of the matrix reject on the *declaration* rather than inside the join.
 
 That is the fifth mechanism in this document asserted from a passing fixture and then
@@ -1123,6 +1124,51 @@ call that no longer exists. The new order is the `(actual, expected)` convention
 other `unify_actual_expected` site already uses — "you supplied `Bool` where `Int` was
 expected" — so this is a small improvement rather than a cost.
 `tests/conformance/type_error/if_branch_mismatch` pins it and says why.
+
+
+### 6.5d The ceiling did not survive an alias — LANDED
+
+§6.5c made the ceiling load-bearing. `record_upper` no-ops on `!{IO}` and `record_lower`
+no longer re-binds at odd depth, so after a join the pure ceiling on a callback slot is
+the *only* thing holding it. It then turned out the ceiling did not survive the next step.
+
+A bound is keyed `@hi:v` on the variable's name. When two open effect variables meet,
+`unify_effects_applied`'s var–var arm aliases `v := w` — and the bounds stayed behind under
+`v`, which `apply_effect_subst` resolves past from then on. Passing a joined value into a
+signature with an `!{e}` slot is exactly that meeting:
+
+```sprout
+fn f1(cb: Int -> Int !{IO}) -> Int = 0
+fn f2(cb: Int -> Int) -> Int = cb(1)
+fn use_it(g: (Int -> Int !{e}) -> Int, cb: Int -> Int !{e}) -> Int !{e} = g(cb)
+
+use_it(if true then f2 else f1, shout)   # compiled, linked, and RAN the IO inside f2
+use_it(if false then f1 else f2, shout)  # rejected
+use_it(f2, shout)                        # rejected — no join, no alias
+```
+
+So the same asymmetry §6.5c set out to remove, one indirection further out: the join is
+what converts a concrete `Pure` into a ceiling-carrying variable that the alias then loses.
+§6.5's own design already said var–var should "alias, **merging both sets**"; the
+implementation aliased without merging.
+
+The fix is `carry_bounds`, called where `bind_open` creates the alias: resolve the variable
+through `apply_effect_subst`, and if it now names a different variable, carry `@lo:` and
+`@hi:` across. Each slot is one-valued — `record_lower` only ever stores IO, `record_upper`
+only Pure — so carrying is a union and can never weaken the target. Bounds recorded *after*
+an alias need nothing: `effect_slot_meet` applies the substitution before it reads a
+variable's name, so it already holds the representative.
+
+**What let it through.** `test_effect_join_bounds` was written for §6.5c precisely so the
+bounds would be read off the substitution instead of inferred from a verdict — and then
+asserted `join(...) != "(Int -> Int !{IO}) -> Int -> Int !{IO}"`. One order leaves the slot
+as a bare variable (`(Int -> Int !{$br/0}) -> Int -> Int !{IO}`), which satisfies that
+inequality while holding nothing at all. A rendering compared for inequality is a verdict
+wearing a substitution's clothes. The assertion added here joins, aliases the slot to a
+fresh `!{e}`, supplies an IO callback for it, and requires a rejection — in both orders,
+because without the fix one order accepts and the other does not.
+
+Sixth retraction, and the first where the retracted claim was the previous section's own.
 
 ### 6.6 Zero-arg calls — removed in revision 4, CLOSED on master in revision 6's window
 
