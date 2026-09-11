@@ -1,5 +1,5 @@
 module examples.aoc_2025_day_4
-import stdlib.string (char_at_or, concat, length, string_from_char, string_lines)
+import stdlib.string (char_at_or, join, length, string_from_char, string_lines)
 import stdlib.fs as fs
 
 # Advent of Code 2025 Day 4: Printing Department
@@ -9,101 +9,66 @@ import stdlib.fs as fs
 export type Answers (..) =
   | Answers Int Int
 
-fn bool_to_int(value: Bool) -> Int =
-  if value then 1
-  else 0
+# The eight surrounding cells as (row, col) deltas. A module-level binding, so
+# the table is built once rather than per cell examined. The `vec_from_list` is
+# required: a list literal converts on its own only in a `Vec`-expected position
+# (spec 5.5.1), and a `let` initializer is not one.
+let neighbors =
+  vec_from_list([(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)])
 
 fn line_at(grid: Vec String, row: Int) -> String =
   vec_get_or(row, "", grid)
 
+# Off-grid reads answer '.', so no caller needs a bounds check.
 fn cell_at(grid: Vec String, row: Int, col: Int) -> Char =
   if row < 0 then '.'
-  else char_at_or(line, col, '.')
-where
-  line = line_at(grid, row)
+  else char_at_or(line_at(grid, row), col, '.')
 
 fn is_roll(grid: Vec String, row: Int, col: Int) -> Bool =
   cell_at(grid, row, col) == '@'
 
-fn occupied_neighbors(grid: Vec String, row: Int, col: Int) -> Int =
-  bool_to_int(is_roll(grid, row - 1, col - 1))
-  + bool_to_int(is_roll(grid, row - 1, col))
-  + bool_to_int(is_roll(grid, row - 1, col + 1))
-  + bool_to_int(is_roll(grid, row, col - 1))
-  + bool_to_int(is_roll(grid, row, col + 1))
-  + bool_to_int(is_roll(grid, row + 1, col - 1))
-  + bool_to_int(is_roll(grid, row + 1, col))
-  + bool_to_int(is_roll(grid, row + 1, col + 1))
-
-fn is_accessible(grid: Vec String, row: Int, col: Int) -> Bool =
-  is_roll(grid, row, col) && occupied_neighbors(grid, row, col) < 4
-
-fn count_accessible_in_row(grid: Vec String, row: Int, col: Int, width: Int) -> Int =
-  if col >= width then 0
-  else bool_to_int(is_accessible(grid, row, col)) + count_accessible_in_row(grid, row, col + 1, width)
-
-fn count_accessible_rows(grid: Vec String, row: Int, height: Int) -> Int =
-  if row >= height then 0
-  else count_accessible_in_row(grid, row, 0, width) + count_accessible_rows(grid, row + 1, height)
+fn neighbor_is_roll(grid: Vec String, row: Int, col: Int, offset: (Int, Int)) -> Bool =
+  is_roll(grid, row + down, col + across)
 where
-  width = length(line_at(grid, row))
+  (down, across) = offset
+
+# A roll can be pulled out while fewer than four of its neighbours are rolls.
+fn is_accessible(grid: Vec String, row: Int, col: Int) -> Bool =
+  is_roll(grid, row, col)
+  && vec_count(neighbor_is_roll(grid, row, col, _), neighbors) < 4
+
+fn row_width(grid: Vec String, row: Int) -> Int =
+  length(line_at(grid, row))
+
+fn add_if_accessible(grid: Vec String, row: Int, acc: Int, col: Int) -> Int =
+  if is_accessible(grid, row, col) then acc + 1
+  else acc
+
+# `range_fold` rather than counting over `range_to_vec`: this runs once per row
+# per layer, and the vector of column indices would be pure garbage.
+fn count_accessible_in_row(grid: Vec String, row: Int) -> Int =
+  range_fold(add_if_accessible(grid, row, _, _), 0, range_up(0, row_width(grid, row) - 1))
 
 fn count_accessible_now(grid: Vec String) -> Int =
-  count_accessible_rows(grid, 0, vec_length(grid))
+  vec_sum([count_accessible_in_row(grid, row) for row in 0..(vec_length(grid) - 1)])
 
-fn remove_accessible_from_row(
-  grid: Vec String,
-  row: Int,
-  col: Int,
-  width: Int,
-  acc: String,
-  removed: Int
-) -> (String, Int) =
-  if col >= width then (acc, removed)
-  else
-    if is_accessible(grid, row, col) then
-      remove_accessible_from_row(grid, row, col + 1, width, concat(acc, "."), removed + 1)
-    else
-      remove_accessible_from_row(
-        grid,
-        row,
-        col + 1,
-        width,
-        concat(acc, string_from_char(char_at_or(line, col, '.'))),
-        removed
-      )
+fn cell_after(grid: Vec String, row: Int, col: Int) -> String =
+  if is_accessible(grid, row, col) then "."
+  else string_from_char(cell_at(grid, row, col))
+
+fn cleared_row(grid: Vec String, row: Int) -> String =
+  join("", [cell_after(grid, row, col) for col in 0..(row_width(grid, row) - 1)])
+
+fn strip_layer(grid: Vec String) -> Vec String =
+  [cleared_row(grid, row) for row in 0..(vec_length(grid) - 1)]
+
+# Peel one layer at a time. How many a layer removes is exactly how many cells
+# were accessible, so the count needs no separate bookkeeping.
+fn total_removable(grid: Vec String, removed: Int) -> Int =
+  if accessible == 0 then removed
+  else total_removable(strip_layer(grid), removed + accessible)
 where
-  line = line_at(grid, row)
-
-fn remove_accessible_rows(
-  grid: Vec String,
-  row: Int,
-  height: Int,
-  acc: Vec String,
-  removed: Int
-) -> (Vec String, Int) =
-  if row >= height then (acc, removed)
-  else
-    match remove_accessible_from_row(grid, row, 0, width, "", 0) with
-    | (next_row, row_removed) ->
-        remove_accessible_rows(
-          grid,
-          row + 1,
-          height,
-          vec_append(next_row, acc),
-          removed + row_removed
-        )
-where
-  width = length(line_at(grid, row))
-
-fn remove_accessible_once(grid: Vec String) -> (Vec String, Int) =
-  remove_accessible_rows(grid, 0, vec_length(grid), vec_empty(), 0)
-
-fn remove_accessible_layers(grid: Vec String, removed_total: Int) -> Int =
-  if removed_now == 0 then removed_total
-  else remove_accessible_layers(next_grid, removed_total + removed_now)
-where
-  (next_grid, removed_now) = remove_accessible_once(grid)
+  accessible = count_accessible_now(grid)
 
 fn is_non_empty_line(line: String) -> Bool =
   length(line) != 0
@@ -114,10 +79,7 @@ fn parse_grid(raw: String) -> Vec String =
   |> vec_filter(is_non_empty_line)
 
 fn solve_grid(grid: Vec String) -> Answers =
-  Answers(part1, part2)
-where
-  part1 = count_accessible_now(grid)
-  part2 = remove_accessible_layers(grid, 0)
+  Answers(count_accessible_now(grid), total_removable(grid, 0))
 
 export fn solve_stdin() -> Answers !{IO} =
   match fs.read_text("-") with
