@@ -1,0 +1,132 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.compiler.cse_census as cse_census
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.types as types
+import stdlib.compiler.source as source
+import stdlib.compiler.ast as ast
+
+# Unit tests for the CSE opportunity census (docs/opt-passes-v0.md §M1).
+#
+# The census decides whether M1 is worth building, so the number it reports has
+# to mean what it says. Two assertions carry that weight:
+#
+#   `branches`  — the same call in two arms of an `if` is NOT a CSE opportunity;
+#                 sharing it computes it on the path that did not need it. The
+#                 body-level count sees a duplicate, `region_dups` must not.
+#   `impure`    — a repeated `!{IO}` call is not shareable at all. Counting it
+#                 would inflate the answer in exactly the direction that argues
+#                 for building the pass.
+
+fn pos() -> source.SourcePos =
+  source.SourcePos(index = 0, line = 1, column = 1)
+
+fn int_t() -> types.Type =
+  types.TConst(types.type_id("Int"))
+
+fn fn_t(eff: types.Effect) -> types.Type =
+  types.TFunc(int_t(), int_t(), eff, types.OwnConsume)
+
+fn lit(n: Int) -> typed_ast.TypedExpr =
+  typed_ast.TInt(n, int_t(), pos())
+
+fn var_(name: String) -> typed_ast.TypedExpr =
+  typed_ast.TVar(name, int_t(), pos())
+
+fn call(name: String, eff: types.Effect, arg: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
+  typed_ast.TCall(typed_ast.TVar(name, fn_t(eff), pos()), [arg], int_t(), pos())
+
+fn pure_call(arg: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
+  call("f", types.effect_pure(), arg)
+
+fn add(left: typed_ast.TypedExpr, right: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
+  typed_ast.TBinary("+", left, right, int_t(), pos())
+
+fn decl(name: String, body: typed_ast.TypedExpr) -> typed_ast.TypedDecl =
+  typed_ast.TFnDecl(name, [], Nothing, Nothing, [], body)
+
+fn program(body: typed_ast.TypedExpr) -> typed_ast.TypedProgram =
+  typed_ast.TypedProgram([decl("g", body)])
+
+# The same call once in each of two bodies. CSE is within-body, so this is not an
+# opportunity — a program-wide tally would call it one and overstate the case for
+# building the pass.
+fn two_bodies_one_call_each() -> typed_ast.TypedProgram =
+  typed_ast.TypedProgram([decl("g", pure_call(var_("x"))), decl("h", pure_call(var_("x")))])
+
+fn taken(body: typed_ast.TypedExpr) -> cse_census.Census =
+  cse_census.census(program(body))
+
+# `f(x) + f(x)` — one straight-line region, so the second call is redundant.
+fn repeated_in_line() -> typed_ast.TypedExpr =
+  add(pure_call(var_("x")), pure_call(var_("x")))
+
+# `if c then f(x) else f(x)` — a duplicate to a body-wide count, but only one of
+# the two ever runs.
+fn repeated_across_branches() -> typed_ast.TypedExpr =
+  typed_ast.TIf(var_("c"), pure_call(var_("x")), pure_call(var_("x")), int_t(), pos())
+
+# Same shape, but the repeated call is in the SCRUTINEE and one arm — those do
+# both run, so the region walk must still see it.
+fn repeated_scrutinee_and_arm() -> typed_ast.TypedExpr =
+  typed_ast.TIf(pure_call(var_("x")), pure_call(var_("x")), lit(0), int_t(), pos())
+
+fn main() -> Unit !{IO} =
+  run_suite("cse_census", [
+    check_eq("empty program: no bodies", cse_census.census(typed_ast.TypedProgram([])).bodies, 0),
+    check_eq("one body is counted", taken(lit(1)).bodies, 1),
+    check_eq("a lone pure call is not a duplicate", taken(pure_call(var_("x"))).pure_calls, 1),
+    check_eq("a lone pure call: no redundancy", taken(pure_call(var_("x"))).dup_occurrences, 0),
+
+    check_eq("straight line: two calls seen", taken(repeated_in_line()).pure_calls, 2),
+    check_eq("straight line: one redundant", taken(repeated_in_line()).dup_occurrences, 1),
+    check_eq("straight line: region agrees", taken(repeated_in_line()).region_dups, 1),
+    check_eq("straight line: one candidate key", taken(repeated_in_line()).candidate_keys, 1),
+
+    check_eq("branches: body count sees a duplicate",
+             taken(repeated_across_branches()).dup_occurrences, 1),
+    check_eq("branches: region count does NOT",
+             taken(repeated_across_branches()).region_dups, 0),
+    check_eq("scrutinee and arm both run: region counts it",
+             taken(repeated_scrutinee_and_arm()).region_dups, 1),
+
+    check_eq("impure repetition is not an opportunity",
+             taken(add(call("io", types.effect_io(), var_("x")),
+                       call("io", types.effect_io(), var_("x")))).dup_occurrences, 0),
+    check_eq("impure calls are not counted at all",
+             taken(call("io", types.effect_io(), var_("x"))).pure_calls, 0),
+
+    check_eq("different arguments are different keys",
+             taken(add(pure_call(var_("x")), pure_call(var_("y")))).dup_occurrences, 0),
+    check_eq("different literals are different keys",
+             taken(add(pure_call(lit(1)), pure_call(lit(2)))).dup_occurrences, 0),
+    check_eq("equal literals are the same key",
+             taken(add(pure_call(lit(1)), pure_call(lit(1)))).dup_occurrences, 1),
+
+    check_eq("three occurrences are two redundancies",
+             taken(add(pure_call(var_("x")), add(pure_call(var_("x")), pure_call(var_("x")))))
+               .dup_occurrences, 2),
+
+    check_eq("duplicate_keys reports the repeated call",
+             list_length(cse_census.duplicate_keys(program(repeated_in_line()))), 1),
+    check_eq("duplicate_keys is empty when nothing repeats",
+             list_length(cse_census.duplicate_keys(program(pure_call(var_("x"))))), 0),
+    check_eq("one call in each of two bodies is not a duplicate",
+             list_length(cse_census.duplicate_keys(two_bodies_one_call_each())), 0),
+    check_eq("two bodies: candidate_keys agrees",
+             cse_census.census(two_bodies_one_call_each()).candidate_keys, 0),
+    check_eq("two bodies: both calls still counted",
+             cse_census.census(two_bodies_one_call_each()).pure_calls, 2),
+    # candidate_keys counts distinct shareable keys; the entries' values sum to
+    # dup_occurrences, so the two numbers cannot drift apart.
+    check_eq("candidate_keys counts within-body duplicates",
+             taken(repeated_in_line()).candidate_keys, 1),
+
+    # The region view is the one a decision rests on, so it must exclude what
+    # `duplicate_keys` includes: two arms of the same `if`.
+    check_eq("region keys: a straight-line repeat is listed",
+             list_length(cse_census.region_duplicate_keys(program(repeated_in_line()))), 1),
+    check_eq("region keys: two arms are NOT listed",
+             list_length(cse_census.region_duplicate_keys(program(repeated_across_branches()))), 0),
+    check_eq("region keys: scrutinee and arm are listed",
+             list_length(cse_census.region_duplicate_keys(program(repeated_scrutinee_and_arm()))), 1)
+  ])

@@ -35,6 +35,12 @@ import stdlib.compiler.ast as ast
 fn is_pure_callee_type(t: types.Type, argc: Int) -> Bool =
   if argc <= 0 then thunk_is_pure(t) else consumed_arrows_pure(t, argc)
 
+# The same question asked from a call site, for passes that need this oracle and
+# nothing else of DLE's (cse_census). One definition, so a purity fix cannot
+# reach one pass and miss another.
+export fn callee_is_pure(callee: typed_ast.TypedExpr, argc: Int) -> Bool =
+  is_pure_callee_type(typed_ast.typed_expr_type(callee), argc)
+
 fn thunk_is_pure(t: types.Type) -> Bool =
   match t with
   | types.TThunk _ eff -> types.effect_is_pure(eff)

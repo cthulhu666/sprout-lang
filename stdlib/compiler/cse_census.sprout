@@ -1,0 +1,285 @@
+module stdlib.compiler.cse_census
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.dce as dce
+import stdlib.string as string
+
+# How much common subexpression elimination is there to eliminate?
+#
+# M1 proposes CSE over Sprout-level calls (docs/opt-passes-v0.md). M0 measured
+# that the existing DLE removes ZERO nodes from every real program, which is the
+# reason this counter exists before the pass does: an optimisation nobody can
+# measure an opportunity for is not worth its complexity. This module counts the
+# opportunity and rewrites nothing.
+#
+# Two numbers, and the gap between them is the point:
+#
+#   dup_occurrences — repeated pure calls anywhere in one body. An UPPER bound:
+#     it counts occurrences in arms that never both run, and counts a nested call
+#     that sharing its parent would subsume.
+#   region_dups — repeated pure calls within one straight-line region, where a
+#     region ends at every `if` arm, `match` arm and lambda body. This is what
+#     CSE could actually share without computing something on a path that did not
+#     need it. `do` steps stay in the region: they run in order.
+#
+# What a key covers is deliberately narrow — a call is a candidate only when it
+# and everything under it serialises (`expr_key`), so a call taking a lambda or a
+# do-block is skipped rather than guessed at. The census therefore UNDERSTATES,
+# which is the safe direction for a number that decides whether to build a pass.
+
+export type Census = (
+  bodies: Int,
+  pure_calls: Int,
+  candidate_keys: Int,
+  dup_occurrences: Int,
+  region_dups: Int
+)
+
+export fn census(prog: typed_ast.TypedProgram) -> Census =
+  let bodies = body_list(prog)
+  in Census(
+    bodies = list_length(bodies),
+    pure_calls = sum_int(list_map(body_call_count, bodies)),
+    candidate_keys = list_length(duplicate_keys(prog)),
+    dup_occurrences = sum_int(list_map(body_dup_count, bodies)),
+    region_dups = sum_int(list_map(body_region_dups, bodies))
+  )
+
+# Every key worth sharing, against how many occurrences sharing it would remove.
+# Counted WITHIN each body and then summed: CSE is a within-body rewrite, so a
+# call appearing once in each of two bodies is not an opportunity, and a
+# program-wide tally would report it as one. The values sum to `dup_occurrences`.
+#
+# The reason to have this at all: a census whose top entry is nonsense is a broken
+# analysis, not a finding.
+export fn duplicate_keys(prog: typed_ast.TypedProgram) -> List (String, Int) =
+  dict_entries_list(list_fold(\ (acc, b) -> add_body_excess(b, acc), dict_empty(), body_list(prog)))
+
+fn add_body_excess(body: typed_ast.TypedExpr, acc: Dict Int) -> Dict Int =
+  list_fold(\ (a, e) -> add_excess(e, a), acc, dict_entries_list(body_keys(body)))
+
+fn add_excess(entry: (String, Int), acc: Dict Int) -> Dict Int =
+  match entry with
+  | (k, n) -> if n > 1 then dict_set(k, count_of(k, acc) + n - 1, acc) else acc
+
+# The same list restricted to what `region_dups` counts — the occurrences CSE
+# could actually reuse, rather than the upper bound. This is the list a decision
+# about building M1 should be read from.
+export fn region_duplicate_keys(prog: typed_ast.TypedProgram) -> List (String, Int) =
+  dict_entries_list(list_fold(\ (acc, b) -> merge_excess(body_region_excess(b), acc), dict_empty(),
+                              body_list(prog)))
+
+fn merge_excess(from: Dict Int, acc: Dict Int) -> Dict Int =
+  list_fold(\ (a, e) -> add_entry_count(e, a), acc, dict_entries_list(from))
+
+fn add_entry_count(entry: (String, Int), acc: Dict Int) -> Dict Int =
+  match entry with
+  | (k, n) -> dict_set(k, count_of(k, acc) + n, acc)
+
+# ---------------------------------------------------------------------------
+# Bodies
+# ---------------------------------------------------------------------------
+
+fn body_list(prog: typed_ast.TypedProgram) -> List typed_ast.TypedExpr =
+  match prog with
+  | typed_ast.TypedProgram decls -> list_fold(\ (acc, d) -> acc ++ decl_bodies(d), [], decls)
+
+fn decl_bodies(d: typed_ast.TypedDecl) -> List typed_ast.TypedExpr =
+  match d with
+  | typed_ast.TFnDecl _ _ _ _ _ body -> [body]
+  | typed_ast.TExternFnDecl _ _ _ _ -> []
+  | typed_ast.TLetDecl _ value -> [value]
+  | typed_ast.TInstanceDecl _ _ methods -> list_map(method_body, methods)
+  | typed_ast.TPassThrough _ -> []
+
+fn method_body(m: typed_ast.TypedInstanceMethod) -> typed_ast.TypedExpr =
+  match m with
+  | typed_ast.TypedInstanceMethod _ _ _ _ body -> body
+
+fn body_keys(body: typed_ast.TypedExpr) -> Dict Int =
+  collect(body, dict_empty())
+
+fn body_call_count(body: typed_ast.TypedExpr) -> Int =
+  vec_sum(dict_values(body_keys(body)))
+
+fn body_dup_count(body: typed_ast.TypedExpr) -> Int =
+  redundancy(body_keys(body))
+
+# Occurrences beyond the first, per key: what sharing would remove.
+fn redundancy(counts: Dict Int) -> Int =
+  vec_sum_by(\n -> n - 1, dict_values(counts))
+
+fn dict_entries_list(counts: Dict Int) -> List (String, Int) =
+  vec_to_list(dict_entries(counts))
+
+fn count_of(key: String, counts: Dict Int) -> Int =
+  maybe_with_default(0, dict_get(key, counts))
+
+fn sum_int(xs: List Int) -> Int =
+  list_fold(\ (acc, n) -> acc + n, 0, xs)
+
+# ---------------------------------------------------------------------------
+# Whole-body collection (the upper bound)
+# ---------------------------------------------------------------------------
+
+fn collect(e: typed_ast.TypedExpr, acc: Dict Int) -> Dict Int =
+  collect_children(e, record_call(e, acc))
+
+fn record_call(e: typed_ast.TypedExpr, acc: Dict Int) -> Dict Int =
+  match call_key(e) with
+  | Nothing -> acc
+  | Just k -> dict_set(k, count_of(k, acc) + 1, acc)
+
+# Just(key) exactly when `e` is a pure call whose whole tree serialises.
+fn call_key(e: typed_ast.TypedExpr) -> Maybe String =
+  match e with
+  | typed_ast.TCall _ _ _ _ -> expr_key(e)
+  | _ -> Nothing
+
+fn collect_children(e: typed_ast.TypedExpr, acc: Dict Int) -> Dict Int =
+  list_fold(\ (a, c) -> collect(c, a), acc, children(e))
+
+# ---------------------------------------------------------------------------
+# Region collection (the realistic figure)
+# ---------------------------------------------------------------------------
+#
+# `scan` threads two dicts: `seen`, the keys already computed on the path that
+# DOMINATES `e`, and `excess`, a running tally of occurrences a CSE could have
+# reused. An occurrence is counted the moment it repeats something already in
+# `seen`, so no arithmetic reconciles the two.
+#
+# An arm inherits the dominating path — a call in the scrutinee is available to
+# every arm — but the arms do not see each other, since only one runs, and the
+# code after the branch does not see either. A lambda body starts from nothing:
+# sharing into a closure means computing outside and capturing, which is M2's
+# hoisting question, not CSE's.
+
+fn body_region_excess(body: typed_ast.TypedExpr) -> Dict Int =
+  match scan(body, dict_empty(), dict_empty()) with
+  | (_, excess) -> excess
+
+fn body_region_dups(body: typed_ast.TypedExpr) -> Int =
+  vec_sum(dict_values(body_region_excess(body)))
+
+fn scan(e: typed_ast.TypedExpr, seen: Dict Int, excess: Dict Int) -> (Dict Int, Dict Int) =
+  match record_region_call(e, seen, excess) with
+  | (s, x) -> scan_children(e, s, x)
+
+fn record_region_call(e: typed_ast.TypedExpr, seen: Dict Int, excess: Dict Int) -> (Dict Int, Dict Int) =
+  match call_key(e) with
+  | Nothing -> (seen, excess)
+  | Just k -> (dict_set(k, count_of(k, seen) + 1, seen), bump_excess(k, count_of(k, seen), excess))
+
+fn bump_excess(key: String, already_seen: Int, excess: Dict Int) -> Dict Int =
+  if already_seen > 0 then dict_set(key, count_of(key, excess) + 1, excess) else excess
+
+fn scan_children(e: typed_ast.TypedExpr, seen: Dict Int, excess: Dict Int) -> (Dict Int, Dict Int) =
+  match e with
+  | typed_ast.TIf cond then_e else_e _ _ ->
+      match scan(cond, seen, excess) with
+      | (s, x) -> (s, scan_arms([then_e, else_e], s, x))
+  | typed_ast.TMatch scrut branches _ _ ->
+      match scan(scrut, seen, excess) with
+      | (s, x) -> (s, scan_arms(list_map(branch_body, branches), s, x))
+  | typed_ast.TLambda _ body _ _ ->
+      match scan(body, dict_empty(), excess) with
+      | (_, x) -> (seen, x)
+  | _ -> scan_list(children(e), seen, excess)
+
+# Every arm starts from the same dominating `seen`; only the tally carries over.
+fn scan_arms(arms: List typed_ast.TypedExpr, dominating: Dict Int, excess: Dict Int) -> Dict Int =
+  list_fold(\ (x, arm) -> arm_excess(arm, dominating, x), excess, arms)
+
+fn arm_excess(arm: typed_ast.TypedExpr, dominating: Dict Int, excess: Dict Int) -> Dict Int =
+  match scan(arm, dominating, excess) with
+  | (_, x) -> x
+
+fn scan_list(es: List typed_ast.TypedExpr, seen: Dict Int, excess: Dict Int) -> (Dict Int, Dict Int) =
+  list_fold(\ (state, c) -> scan_step(c, state), (seen, excess), es)
+
+fn scan_step(e: typed_ast.TypedExpr, state: (Dict Int, Dict Int)) -> (Dict Int, Dict Int) =
+  match state with
+  | (seen, excess) -> scan(e, seen, excess)
+
+# ---------------------------------------------------------------------------
+# Structure
+# ---------------------------------------------------------------------------
+
+fn children(e: typed_ast.TypedExpr) -> List typed_ast.TypedExpr =
+  match e with
+  | typed_ast.TVar _ _ _ -> []
+  | typed_ast.TInt _ _ _ -> []
+  | typed_ast.TFloat _ _ _ -> []
+  | typed_ast.TBool _ _ _ -> []
+  | typed_ast.TString _ _ _ -> []
+  | typed_ast.TChar _ _ _ -> []
+  | typed_ast.TUnit _ _ -> []
+  | typed_ast.TTuple items _ _ -> items
+  | typed_ast.TIf cond then_e else_e _ _ -> [cond, then_e, else_e]
+  | typed_ast.TMatch scrut branches _ _ -> [scrut] ++ list_map(branch_body, branches)
+  | typed_ast.TCall callee args _ _ -> [callee] ++ args
+  | typed_ast.TDict _ _ _ _ -> []
+  | typed_ast.TMethodRef _ _ _ _ _ -> []
+  | typed_ast.TLambda _ body _ _ -> [body]
+  | typed_ast.TBinary _ left right _ _ -> [left, right]
+  | typed_ast.TUnary _ operand _ _ -> [operand]
+  | typed_ast.TRange lo hi _ _ -> [lo, hi]
+  | typed_ast.TDo steps _ _ -> list_map(step_value, steps)
+  | typed_ast.TRecord _ fields _ _ -> list_map(field_value, fields)
+  | typed_ast.TGetField base _ _ _ -> [base]
+  | typed_ast.TRecordUpdate base fields _ _ -> [base] ++ list_map(field_value, fields)
+
+fn branch_body(b: typed_ast.TypedMatchBranch) -> typed_ast.TypedExpr =
+  match b with
+  | typed_ast.TypedMatchBranch _ body -> body
+
+fn step_value(s: typed_ast.TypedDoStep) -> typed_ast.TypedExpr =
+  match s with
+  | typed_ast.TDoBindStep _ value -> value
+  | typed_ast.TDoLetStep _ value -> value
+  | typed_ast.TDoExprStep value -> value
+
+fn field_value(f: typed_ast.TypedRecordField) -> typed_ast.TypedExpr =
+  match f with
+  | typed_ast.TypedRecordField _ value -> value
+
+# ---------------------------------------------------------------------------
+# Keys
+# ---------------------------------------------------------------------------
+#
+# Two expressions share a key exactly when CSE could treat them as the same
+# computation. Nothing that binds a name, branches, or performs an effect gets a
+# key, so the answer is conservative by construction. Strings carry their length
+# so that `f("a,b")` and `f("a", "b")` cannot collide.
+
+fn expr_key(e: typed_ast.TypedExpr) -> Maybe String =
+  match e with
+  | typed_ast.TVar name _ _ -> Just("v" ++ length_tagged(name))
+  | typed_ast.TInt n _ _ -> Just("i:" ++ int_to_string(n))
+  | typed_ast.TFloat raw _ _ -> Just("f" ++ length_tagged(raw))
+  | typed_ast.TBool b _ _ -> Just(if b then "b:1" else "b:0")
+  | typed_ast.TString s _ _ -> Just("s" ++ length_tagged(s))
+  | typed_ast.TChar c _ _ -> Just("c:" ++ int_to_string(c))
+  | typed_ast.TUnit _ _ -> Just("u")
+  | typed_ast.TTuple items _ _ -> wrap_keys("tup", items)
+  | typed_ast.TBinary op left right _ _ -> wrap_keys("bin" ++ length_tagged(op), [left, right])
+  | typed_ast.TUnary op operand _ _ -> wrap_keys("un" ++ length_tagged(op), [operand])
+  | typed_ast.TGetField base name _ _ -> wrap_keys("get" ++ length_tagged(name), [base])
+  | typed_ast.TCall callee args _ _ ->
+      if dce.callee_is_pure(callee, list_length(args))
+      then wrap_keys("call", [callee] ++ args)
+      else Nothing
+  | _ -> Nothing
+
+fn length_tagged(raw: String) -> String =
+  ":" ++ int_to_string(string.byte_length(raw)) ++ ":" ++ raw
+
+fn wrap_keys(tag: String, parts: List typed_ast.TypedExpr) -> Maybe String =
+  map(\parts_key -> "(" ++ tag ++ parts_key ++ ")", keys_of(parts))
+
+fn keys_of(es: List typed_ast.TypedExpr) -> Maybe String =
+  match es with
+  | [] -> Just("")
+  | [e | rest] ->
+      let Just k = expr_key(e) else Nothing
+          Just rest_key = keys_of(rest) else Nothing
+      in Just(" " ++ k ++ rest_key)

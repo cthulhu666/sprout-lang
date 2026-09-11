@@ -146,7 +146,27 @@ Two correctness instruments come free: `just ir-golden-diff` over the 64 files i
 is the review artifact for what a pass actually did, and `SPROUT_OPT_STATS` counts in CI catch a
 pass that silently falls to zero after an unrelated change.
 
-### M1 — CSE
+### M1 — CSE — **measured and DECLINED, 2026-09-11**
+
+**Not being built.** `bench/results-2026-09-11-cse-census.md` has the numbers; the short form:
+
+- The opportunity is real — 673 shareable repeated pure calls in the compiler
+  (`stdlib/compiler/cse_census.sprout`, `--phase cse-census`), 4–15 in user programs. Not the
+  zero DLE reported.
+- LLVM will not take it: in a minimal repro, 6 of 8 identical calls survive `opt -O2` inlined
+  but un-deduped, exactly as this doc predicted.
+- Taking it buys nothing. Hand-CSE of the 49 densest sites moved compile time 0.00% and
+  allocations by −0; hand-CSE of an *allocating* site removed **1** allocation out of 50.8
+  million. Both edits emitted byte-identical IR, which is also this rewrite's soundness evidence.
+
+The census counts **static** sites; what pays is **dynamic** frequency, and these fire a handful
+of times each per compile. That is the transferable lesson: a count of optimisation sites is not
+an estimate of a win, and two hand-applied rewrites settled in an hour what the pass would have
+taken a milestone to learn.
+
+The design below is kept because it is what was measured, and because `cse_census` is its
+analysis half — already written, if the question ever returns with a workload that has the
+multiplier this one lacked.
 
 Narrowest useful scope: within one function body, two calls with the same callee, syntactically
 equal arguments, and no intervening effectful step become one binding and a reuse. Reuses
@@ -156,7 +176,12 @@ Runs **before** DLE. `dce.sprout:17-19` records that DLE precedes reachability b
 bodies can only remove references; CSE sits one step earlier for the same reason — it creates
 shared bindings, which can only make more things dead.
 
-### M2 — LICM (gate on M1's measured results)
+### M2 — LICM (not refuted by M1's result; gate it on a DYNAMIC measurement)
+
+M1 failed for lack of a multiplier: its sites run a handful of times. LICM's target is recursion,
+where the body runs many times — the multiplier M1 lacked is exactly LICM's premise, so M1's
+verdict does not carry over. What does carry over is the method: gate it on an A/B of a
+hand-applied hoist, not on a count of invariant parameters.
 
 Sprout has no loops, only recursion that TCO lowers. So loop-invariant becomes: *in a self-recursive
 function, argument `i` is passed unchanged at every recursive call site* — a syntactic check on

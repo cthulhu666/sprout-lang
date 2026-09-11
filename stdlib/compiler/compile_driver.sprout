@@ -15,6 +15,7 @@ import stdlib.compiler.ir_lowering as ir_lowering
 import stdlib.compiler.ir_rooting as ir_rooting
 import stdlib.compiler.ir_pipeline as ir_pipeline
 import stdlib.compiler.iface_codec as iface_codec
+import stdlib.compiler.cse_census as cse_census
 import stdlib.compiler.source as source
 import stdlib.fs as fs
 
@@ -235,6 +236,36 @@ fn count_where(p: unifier.EffectReport -> Bool, reports: List unifier.EffectRepo
 # ---------------------------------------------------------------------------
 # Phase: lower — typeclass dictionary-passing lowering
 
+# Phase: cse-census — how many shareable repeated pure calls a program contains
+# (docs/opt-passes-v0.md §M1). Reports, never rewrites. Measured on the lowered
+# AST, which is where CSE would run and where `dce` already runs.
+#
+# `--phase cse-keys` also lists the shareable keys behind `region_dups`, because a
+# census whose entries are nonsense is a broken analysis rather than a finding.
+fn run_file_cse_census(path: String, stdlib_root: String, extra_roots: List String, keys: Bool, failed: Ref Int) -> Unit !{IO} =
+  do
+    result <- compiler.compile_phase_lower_with_roots(source.FilePath(path), source.StdlibRoot(stdlib_root), extra_roots)
+    match result with
+    | typed_ast.TypedErr pos msg -> report_error(failed, format_pos(pos) ++ "ERROR: " ++ msg)
+    | typed_ast.TypedOk typed_prog _ ->
+        do
+          print(census_line(cse_census.census(typed_prog)))
+          if keys then print_census_keys(cse_census.region_duplicate_keys(typed_prog)) else ()
+
+fn census_line(c: cse_census.Census) -> String =
+  "cse-census bodies=" ++ int_to_string(c.bodies)
+    ++ " pure_calls=" ++ int_to_string(c.pure_calls)
+    ++ " candidate_keys=" ++ int_to_string(c.candidate_keys)
+    ++ " dup_occurrences=" ++ int_to_string(c.dup_occurrences)
+    ++ " region_dups=" ++ int_to_string(c.region_dups)
+
+fn print_census_keys(entries: List (String, Int)) -> Unit !{IO} =
+  list_each(\e -> print(census_key_line(e)), entries)
+
+fn census_key_line(entry: (String, Int)) -> String =
+  match entry with
+  | (key, n) -> "  x" ++ int_to_string(n) ++ " " ++ key
+
 fn run_file_lower(path: String, stdlib_root: String, extra_roots: List String, failed: Ref Int) -> Unit !{IO} =
   do
     result <- compiler.compile_phase_lower_with_roots(source.FilePath(path), source.StdlibRoot(stdlib_root), extra_roots)
@@ -415,6 +446,8 @@ fn run_batch(stdlib_root: String, idx: Int, phase: String, extra_roots: List Str
         else if phase == "check" then run_file_check(path, stdlib_root, extra_roots, failed)
         else if phase == "lower" then run_file_lower(path, stdlib_root, extra_roots, failed)
         else if phase == "effects" then run_file_effects(path, stdlib_root, extra_roots, failed)
+        else if phase == "cse-census" then run_file_cse_census(path, stdlib_root, extra_roots, false, failed)
+        else if phase == "cse-keys" then run_file_cse_census(path, stdlib_root, extra_roots, true, failed)
         else if phase == "recheck" then run_file_recheck(path, stdlib_root, extra_roots, failed)
         else if phase == "ir-typed" then run_file_use_ir_codegen(path, stdlib_root, extra_roots, failed)
         # scan-info and dump-qualify have no diagnostic path of their own — they
@@ -427,7 +460,7 @@ fn run_batch(stdlib_root: String, idx: Int, phase: String, extra_roots: List Str
         # like it had worked. A gate asserting on a phase's output is only as good
         # as the driver's willingness to admit the phase does not exist.
         else report_error(failed, "ERROR: unknown phase `" ++ phase
-               ++ "`: expected bundle|check|effects|lower|recheck|scan-info|dump-qualify")
+               ++ "`: expected bundle|check|effects|cse-census|cse-keys|lower|recheck|scan-info|dump-qualify")
         # Keep going after a failure: a batch reports every bad file, and `failed`
         # is write-1-only so the status survives the remaining files.
         run_batch(stdlib_root, idx + 1, phase, extra_roots, failed)

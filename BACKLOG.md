@@ -287,14 +287,14 @@ Legend:
   which removes 0 nodes from every real program (`bench/results-2026-09-11-opt.md`), and cannot A/B
   the pass whose numbers would be large. Add a `reach` pass name and thread an `OptConfig` into
   `compile_program_streaming` (two callers). `docs/opt-passes-v0.md` §M0.
-- [ ] `P2` **No CSE or LICM over Sprout-level calls, and LLVM cannot supply them.** `-O2` runs, but
-  the shadow stack makes every allocating function look `memory(readwrite)` to `FunctionAttrs`
-  (`tests/golden/ir/examples__aoc_2025_day_1.sprout.ll:393-396`) and there is no LTO, so GVN/LICM
-  never touch a call. The licensing fact — purity, from the effect row — is erased before LLVM sees
-  the code, and `dce.is_pure_callee_type` already computes it. M1 = CSE within a body; M2 = hoisting
-  out of self-recursion via a worker/wrapper split, which can LOSE (a longer live range means more
-  GC roots held across more triggers). M0's harness is in (`just bench-opt`), and its baseline is a
-  true zero, so M1 is unblocked. `docs/opt-passes-v0.md`.
+- [ ] `P3` **No LICM over self-recursion, and LLVM cannot supply it.** The shadow stack makes every
+  allocating function look `memory(readwrite)` to `FunctionAttrs`
+  (`tests/golden/ir/examples__aoc_2025_day_1.sprout.ll:393-396`) and there is no LTO, so LLVM's
+  LICM never touches a call. Sprout-side, loop-invariant means *an argument passed unchanged at
+  every recursive call site*, hoisted via a worker/wrapper split — which can LOSE, since a longer
+  live range holds more GC roots across more triggers. CSE (the sibling pass) was measured and
+  declined: its sites were real but ran a handful of times each. Gate this on an A/B of a
+  hand-applied hoist, not on a count of invariant parameters. `docs/opt-passes-v0.md` §M2.
 
 **GC and runtime**
 
