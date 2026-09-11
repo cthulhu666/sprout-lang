@@ -147,6 +147,11 @@ Both axes, generalising `input` §4.5: drop lines and clusters until what
 precedes the caret fits. No stored offset, so nothing can drift out of step with
 the caret.
 
+The window lives in `stdlib.tui.widgets.viewport`, not in this widget: the IDE's
+editor pane paints the same document beside a gutter (`docs/ide-v0.md` §5.1) and
+is a sibling of the area rather than a client of it, so both paint through one
+implementation.
+
 Every visible line shifts by the same column offset, and a wide cluster the
 offset cuts in half is **blanked, not dropped** — dropping it slides the rest of
 that line one column left of every other line. Single-line `input` cannot hit
