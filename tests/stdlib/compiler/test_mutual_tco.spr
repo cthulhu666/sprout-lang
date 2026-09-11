@@ -154,12 +154,15 @@ fn main() -> Unit !{IO} =
     assert_true(state, "non-tail self-call: partner call stays a plain call",
       string.contains(slfir, "call i64 @main.b"))
 
-    # 3c. A musttail carrier marks its OTHER direct calls noinline, so the inliner
-    # cannot make it self-recursive and hand tailcallelim the same shape.
+    # 3c. A musttail carrier marks EVERY call noinline — the musttail one included,
+    # or the inliner pulls the partner in through the tail edge and makes the carrier
+    # self-recursive, which is the shape tailcallelim breaks.
     let carrier = ir_lowering.lower_fn_with_table(
       ast_to_ir.mutual_tco_rewrite_fn(make_two_call_fn(), Cons(("main.b", 2), Nil)), dict_empty())
     assert_true(state, "musttail carrier: the partner edge is still musttail",
       string.contains(carrier, "musttail call i64 @main.b"))
+    assert_true(state, "musttail carrier: the musttail call itself carries noinline",
+      string.contains(carrier, "musttail call i64 @main.b(i64 %p$x, i64 %p$y) noinline"))
     assert_true(state, "musttail carrier: its other direct call carries noinline",
       string.contains(carrier, "@main.z(i64 %p$x, i64 %p$y) noinline"))
     assert_true(state, "no musttail: plain calls carry no noinline",

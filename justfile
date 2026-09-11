@@ -1112,8 +1112,10 @@ o2-codegen-smoke: bootstrap-from-seed
   TMPD=$(mktemp -d /tmp/sprout_o2cg_XXXXXX)
   trap 'rm -rf "$TMPD"' EXIT
   failed=0
+  checked=0
   for f in tests/codegen_o2/*.spr; do
     [ -f "$f" ] || continue
+    checked=$((checked + 1))
     ir="$TMPD/$(basename "$f").ll"
     if ! "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$f" > "$ir" 2>"$TMPD/err"; then
       echo "o2-codegen-smoke: emit-IR failed for $f" >&2; cat "$TMPD/err" >&2
@@ -1127,7 +1129,10 @@ o2-codegen-smoke: bootstrap-from-seed
   if (( failed > 0 )); then
     echo "o2-codegen-smoke: $failed shape(s) failed" >&2; exit 1
   fi
-  echo "==> o2-codegen-smoke ✓"
+  if (( checked == 0 )); then
+    echo "o2-codegen-smoke: no fixtures matched — the glob is stale, not the tree empty" >&2; exit 1
+  fi
+  echo "==> o2-codegen-smoke ✓ ($checked shapes)"
 
 # DoD #8 — bundle smoke.  `--phase bundle` on token.sprout, ast.sprout, and
 # prelude.sprout must produce non-empty output with no dot-prefix qualified names.
