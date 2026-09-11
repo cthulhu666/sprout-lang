@@ -108,8 +108,20 @@ update: cmd_to(editor, write)  ->  Stored(path) addressed back to the pane
 ```
 
 Handing the text over is **not** a write, and nothing is marked clean by it — a write can fail.
-`on_stored` is what cleans, after the write happened, and because it carries the path it is also how
-a pane learns where it now lives.
+`on_stored` is what cleans, after the write happened.
+
+**A `Stored` is checked, never adopted.** `app.dispatched` spawns a task per command, so the answer
+can land any number of loop steps later — after another file has been opened, or after more typing.
+The pane accepts it only when the path is still the one it handed over and nothing has been typed
+since (an edit counter, compared against its value at the handover). A pane that took the path
+instead would aim the next ctrl-s at a file it is no longer showing, and write the document it *is*
+showing over that one. Two saves in flight with an edit between them are still told apart only by
+the counter, so the second's answer can clean the first: the window is one write long and the cost
+is a `*` clearing early.
+
+This is also why a `Stored` cannot *name* a pathless buffer. Naming one needs a save-as, which is
+§9's deferred work; letting an unsolicited answer do it is the same door the stale-path bug came
+through.
 
 `app.step_to` looks like the right tool for the interrogation and is not: when nothing claims the
 delivery it sends the message to `update`, and an `update` that answers by interrogating again loops

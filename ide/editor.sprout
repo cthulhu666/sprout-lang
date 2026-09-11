@@ -56,8 +56,12 @@ export fn editor_opts() -> EditorOpts m =
 
 # `has_focus` is the pane's own copy of "the keyboard is mine", set by the ring
 # (docs/tui-focus-v0.md §4.1).
+# `edits` counts buffer changes and `handed` remembers the count at the last
+# handover, which together answer "has anything been typed since the text we
+# gave out?" — the question a late `Stored` has to be checked against.
 type Pane m = (id: widget.WidgetId, opts: EditorOpts m, doc: document.Document,
-               body: buffer.Buffer, has_focus: Bool)
+               body: buffer.Buffer, has_focus: Bool, edits: Int,
+               handed: Maybe Int)
 
 type alias Reply m = Maybe(Pane m, List m, List(widget.Cmd m))
 
@@ -84,14 +88,22 @@ fn pane_handler(p: Pane m, d: widget.Delivery m) -> Reply m =
 fn answered(p: Pane m, msg: m) -> Reply m =
   let Just(f, body) = widget.decoded(p.opts.on_content, msg) else demanded(p, msg)
   in Just(settled(p, (p with (doc = document.opened(f),
-                              body = at_top(buffer.buffer_open(body))))))
+                              body = at_top(buffer.buffer_open(body)),
+                              handed = Nothing))))
 
 fn at_top(b: buffer.Buffer) -> buffer.Buffer =
   buffer.buffer_goto(buffer.Caret(row = 0, col = 0), b)
 
 fn demanded(p: Pane m, msg: m) -> Reply m =
   let Just reply = widget.decoded(p.opts.on_demand, msg) else restored(p, msg)
-  in Just((p, [reply(saving(p))], Nil))
+  in handed_over(p, reply, saving(p))
+
+# Only a real handover is remembered: nothing left the pane when it had nowhere
+# to write to.
+fn handed_over(p: Pane m, reply: Saving -> m, sv: Saving) -> Reply m =
+  match sv with
+  | SaveTo _ _ -> Just(((p with (handed = Just(p.edits))), [reply(sv)], Nil))
+  | Unnamed -> Just((p, [reply(sv)], Nil))
 
 # Handing the text over is not a write — a write can fail — so nothing here is
 # marked clean. `on_stored` is what does that, once the write has happened.
@@ -99,11 +111,27 @@ fn saving(p: Pane m) -> Saving =
   let Just f = document.target(p.doc) else Unnamed
   in SaveTo(f, buffer.buffer_text(p.body))
 
-# Stored AT a path, not merely stored: it is also how a pane that had nowhere
-# to save learns where it now lives.
+# A write runs in its OWN TASK (`app.sprout:239` spawns one), so `Stored` can
+# land long after the handover that produced it — after another file has been
+# opened, or after more typing. It is therefore CHECKED, never adopted: a pane
+# that took the path would aim the next save at a file it is no longer showing
+# and write this document over that one.
 fn restored(p: Pane m, msg: m) -> Reply m =
   let Just f = widget.decoded(p.opts.on_stored, msg) else Nothing
-  in Just(settled(p, (p with (doc = document.opened(f)))))
+  in confirmed(p, f)
+
+# Claimed either way — it was addressed here — but a stale answer changes
+# nothing. Two saves in flight with an edit between them are still told apart
+# only by the edit count, so the second's answer can clean the first's: the
+# window is one write long, and the cost is a `*` that clears early.
+fn confirmed(p: Pane m, f: document.FilePath) -> Reply m =
+  if untouched_since(p, f)
+  then Just(settled(p, (p with (doc = document.written(p.doc),
+                                handed = Nothing))))
+  else Just((p, Nil, Nil))
+
+fn untouched_since(p: Pane m, f: document.FilePath) -> Bool =
+  document.target(p.doc) == Just(f) && p.handed == Just(p.edits)
 
 # ── what it says back ───────────────────────────────────────────────────────
 
@@ -160,7 +188,8 @@ fn typed_in(p: Pane m, s: String) -> Reply m =
 # not dirty a document it did not edit.
 fn edited(p: Pane m, b: Maybe buffer.Buffer) -> Reply m =
   let Just b2 = b else Just((p, Nil, Nil))
-  in Just(settled(p, (p with (body = b2, doc = document.touched(p.doc)))))
+  in Just(settled(p, (p with (body = b2, doc = document.touched(p.doc),
+                              edits = p.edits + 1))))
 
 fn moved(p: Pane m, b: buffer.Buffer) -> Reply m =
   Just(((p with (body = b)), Nil, Nil))
@@ -232,4 +261,5 @@ export fn editor(id: widget.WidgetId) -> widget.Widget m =
 export fn editor_with(id: widget.WidgetId,
                       opts: EditorOpts m) -> widget.Widget m =
   pane_widget(Pane(id = id, opts = opts, doc = document.scratch(),
-                   body = buffer.buffer_open(""), has_focus = false))
+                   body = buffer.buffer_open(""), has_focus = false, edits = 0,
+                   handed = Nothing))
