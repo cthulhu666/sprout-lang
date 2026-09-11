@@ -1,0 +1,88 @@
+# An AST census — the shape that found this bug, reduced from typed_ast.node_count.
+#
+# No function here is self-recursive in Sprout. `children` tail-calls its sibling
+# walkers, so Phase A gives those edges `musttail`; the walkers in turn call the
+# `1 + children(e)` wrapper. Inlining a walker THROUGH the musttail edge imports
+# its calls, the wrapper follows, and `children` ends up calling itself — which
+# tailcallelim rewrites into an accumulator loop, breaking the musttail that
+# survived. Marking the calls of a musttail carrier `noinline` is not enough
+# unless the musttail call itself is marked too; this fixture is what proves it.
+
+type Expr (..) =
+  | Lit Int
+  | Name String
+  | Tuple (List Expr)
+  | Call Expr (List Expr)
+  | Match Expr (List Arm)
+  | Rec (List Field)
+  | Block (List Step)
+  | Cond Expr Expr Expr
+  | Bin String Expr Expr
+  | Un String Expr
+
+type Arm (..) =
+  | Arm String Expr
+
+type Field (..) =
+  | Field String Expr
+
+type Step (..) =
+  | Do Expr
+  | Bind String Expr
+
+fn count_expr(e: Expr) -> Int =
+  1 + children(e)
+
+fn children(e: Expr) -> Int =
+  match e with
+  | Lit _ -> 0
+  | Name _ -> 0
+  | Tuple items -> count_exprs(items)
+  | Call callee args -> count_expr(callee) + count_exprs(args)
+  | Match scrut arms -> count_expr(scrut) + count_arms(arms)
+  | Rec fields -> count_fields(fields)
+  | Block steps -> count_steps(steps)
+  | Cond c t f -> count_expr(c) + count_expr(t) + count_expr(f)
+  | Bin _ l r -> count_expr(l) + count_expr(r)
+  | Un _ operand -> count_expr(operand)
+
+fn count_exprs(es: List Expr) -> Int =
+  match es with
+  | [] -> 0
+  | [e | rest] -> count_expr(e) + count_exprs(rest)
+
+fn count_arms(arms: List Arm) -> Int =
+  match arms with
+  | [] -> 0
+  | [a | rest] ->
+      match a with
+      | Arm _ body -> 1 + count_expr(body) + count_arms(rest)
+
+fn count_fields(fields: List Field) -> Int =
+  match fields with
+  | [] -> 0
+  | [f | rest] ->
+      match f with
+      | Field _ value -> 1 + count_expr(value) + count_fields(rest)
+
+fn count_steps(steps: List Step) -> Int =
+  match steps with
+  | [] -> 0
+  | [s | rest] -> 1 + count_step(s) + count_steps(rest)
+
+fn count_step(s: Step) -> Int =
+  match s with
+  | Do value -> count_expr(value)
+  | Bind _ value -> count_expr(value)
+
+fn sample() -> Expr =
+  Call(Name("f"), [
+    Tuple([Lit(1), Lit(2)]),
+    Match(Name("x"), [Arm("a", Lit(3))]),
+    Rec([Field("k", Lit(4))]),
+    Block([Do (Lit(5)), Bind("y", Lit(6))]),
+    Cond(Lit(7), Bin("+", Lit(8), Lit(9)), Un("-", Lit(10)))
+  ])
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(count_expr(sample())))

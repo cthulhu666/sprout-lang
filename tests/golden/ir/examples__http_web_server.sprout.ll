@@ -3410,7 +3410,7 @@ do_cont_10:
   %t$22 = trunc i64 %t$16 to i1
   br i1 %t$22, label %then_17, label %else_17
 then_17:
-  %t$19 = musttail call i64 @stdlib.net.write_all_by_go(i64 %p$handle, i64 %p$payload, i64 %p$deadline_us, i64 %p$offset, i64 %p$total)
+  %t$19 = musttail call i64 @stdlib.net.write_all_by_go(i64 %p$handle, i64 %p$payload, i64 %p$deadline_us, i64 %p$offset, i64 %p$total) noinline
   ret i64 %t$19
 else_17:
   %t$20 = call i64 @sprout_alloc_obj(i64 30, i64 0)
@@ -3603,7 +3603,7 @@ body_1_3:
   %t$14 = icmp eq i64 %t$12, %t$13
   br i1 %t$14, label %ntest_11, label %arm_2_3
 ntest_11:
-  %t$15 = musttail call i64 @stdlib.net.read_avail_wait(i64 %p$handle, i64 %p$deadline_us)
+  %t$15 = musttail call i64 @stdlib.net.read_avail_wait(i64 %p$handle, i64 %p$deadline_us) noinline
   ret i64 %t$15
 arm_2_3:
   %t$16 = add i64 0, 8
@@ -3666,7 +3666,7 @@ do_cont_10:
   %t$22 = trunc i64 %t$16 to i1
   br i1 %t$22, label %then_17, label %else_17
 then_17:
-  %t$19 = musttail call i64 @stdlib.net.read_avail_go(i64 %p$handle, i64 %p$deadline_us)
+  %t$19 = musttail call i64 @stdlib.net.read_avail_go(i64 %p$handle, i64 %p$deadline_us) noinline
   ret i64 %t$19
 else_17:
   %t$20 = call i64 @sprout_alloc_obj(i64 30, i64 0)
@@ -5042,7 +5042,7 @@ body_1_4:
   %t$17 = call i64 @stdlib.bytes.builder_append(i64 %p$acc, i64 %t$16) noinline
   %t$38 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$39 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$18 = musttail call i64 @stdlib.url.decode_bytes(i64 %p$input, i64 %t$15, i64 %p$total, i64 %p$plus_space, i64 %t$17)
+  %t$18 = musttail call i64 @stdlib.url.decode_bytes(i64 %p$input, i64 %t$15, i64 %p$total, i64 %p$plus_space, i64 %t$17) noinline
   ret i64 %t$18
 arm_2_4:
   call void @sprout_abort_match()
@@ -7183,7 +7183,7 @@ arm_3_16:
   br i1 %t$43, label %body_3_16, label %arm_4_16
 body_3_16:
   %t$44 = call i64 @sprout_field(i64 %t$14, i64 0)
-  %t$45 = musttail call i64 @stdlib.http_server.scan_for_terminator$u(i64 %p$conn, i64 %p$acc, i64 %p$total, i64 %p$overlap, i64 %t$44, i64 %p$deadline, i64 %p$max_bytes)
+  %t$45 = musttail call i64 @stdlib.http_server.scan_for_terminator$u(i64 %p$conn, i64 %p$acc, i64 %p$total, i64 %p$overlap, i64 %t$44, i64 %p$deadline, i64 %p$max_bytes) noinline
   ret i64 %t$45
 arm_4_16:
   call void @sprout_abort_match()
@@ -7418,7 +7418,7 @@ body_1_26:
   %t$41 = add i64 %p$total, %t$40
   %t$42 = add i64 0, 0
   %t$137 = call i64 @sprout_gc_pop_roots(i64 3)
-  %t$43 = musttail call i64 @stdlib.http_server.read_until_headers$u(i64 %p$conn, i64 %t$4, i64 %t$41, i64 %t$20, i64 %p$deadline, i64 %p$max_bytes, i64 %t$42)
+  %t$43 = musttail call i64 @stdlib.http_server.read_until_headers$u(i64 %p$conn, i64 %t$4, i64 %t$41, i64 %t$20, i64 %p$deadline, i64 %p$max_bytes, i64 %t$42) noinline
   ret i64 %t$43
 arm_2_26:
   call void @sprout_abort_match()
@@ -12249,7 +12249,7 @@ body_1_2:
   %t$16$ptr = inttoptr i64 %t$14 to ptr
   %t$16$gep = getelementptr i64, ptr %t$16$ptr, i64 1
   %t$16 = load i64, ptr %t$16$gep
-  %t$17 = musttail call i64 @stdlib.template.parse_after_text$u(i64 %p$src, i64 %p$pos, i64 %p$total, i64 %p$acc, i64 %t$15, i64 %t$16)
+  %t$17 = musttail call i64 @stdlib.template.parse_after_text$u(i64 %p$src, i64 %p$pos, i64 %p$total, i64 %p$acc, i64 %t$15, i64 %t$16) noinline
   ret i64 %t$17
 arm_2_2:
   call void @sprout_abort_match()
@@ -12316,7 +12316,7 @@ do_cont_2:
   %t$8 = add i64 0, 0
   %t$9 = add i64 0, 0
   %t$29 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$10 = musttail call i64 @stdlib.template.dispatch_step$u(i64 %p$src, i64 %p$total, i64 %t$7, i64 %t$1, i64 %t$8, i64 %t$9)
+  %t$10 = musttail call i64 @stdlib.template.dispatch_step$u(i64 %p$src, i64 %p$total, i64 %t$7, i64 %t$1, i64 %t$8, i64 %t$9) noinline
   ret i64 %t$10
 do_done_2:
   %t$11 = phi i64 [%t$5, %do_short_2]
@@ -12353,7 +12353,7 @@ body_0_1:
   %t$5 = call i64 @sprout_field(i64 %p$step, i64 0)
   %t$6 = add i64 0, 0
   %t$7 = add i64 0, 0
-  %t$8 = musttail call i64 @stdlib.template.parse_seq$u(i64 %p$src, i64 %t$5, i64 %p$total, i64 %p$acc, i64 %t$6, i64 %t$7)
+  %t$8 = musttail call i64 @stdlib.template.parse_seq$u(i64 %p$src, i64 %t$5, i64 %p$total, i64 %p$acc, i64 %t$6, i64 %t$7) noinline
   ret i64 %t$8
 arm_1_1:
   %t$9 = add i64 0, 85
@@ -12376,7 +12376,7 @@ body_1_1:
   %t$14 = add i64 0, 0
   %t$15 = add i64 0, 0
   %t$30 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$16 = musttail call i64 @stdlib.template.parse_seq$u(i64 %p$src, i64 %t$12, i64 %p$total, i64 %t$13, i64 %t$14, i64 %t$15)
+  %t$16 = musttail call i64 @stdlib.template.parse_seq$u(i64 %p$src, i64 %t$12, i64 %p$total, i64 %t$13, i64 %t$14, i64 %t$15) noinline
   ret i64 %t$16
 arm_2_1:
   %t$17 = add i64 0, 87
@@ -12971,7 +12971,7 @@ then_27:
   %t$29 = call i64 @stdlib.template.after_word(i64 %p$inner) noinline
   %t$61 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$62 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$30 = musttail call i64 @stdlib.template.parse_if(i64 %p$src, i64 %p$body_pos, i64 %p$total, i64 %t$29)
+  %t$30 = musttail call i64 @stdlib.template.parse_if(i64 %p$src, i64 %p$body_pos, i64 %p$total, i64 %t$29) noinline
   ret i64 %t$30
 else_27:
   %t$31 = getelementptr inbounds { i64, [4 x i8] }, ptr @.str.203, i64 0, i32 1, i64 0
@@ -12992,7 +12992,7 @@ then_34:
   %t$36 = call i64 @stdlib.template.after_word(i64 %p$inner) noinline
   %t$67 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$68 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$37 = musttail call i64 @stdlib.template.parse_for(i64 %p$src, i64 %p$body_pos, i64 %p$total, i64 %t$36)
+  %t$37 = musttail call i64 @stdlib.template.parse_for(i64 %p$src, i64 %p$body_pos, i64 %p$total, i64 %t$36) noinline
   ret i64 %t$37
 else_34:
   %t$38 = getelementptr inbounds { i64, [20 x i8] }, ptr @.str.204, i64 0, i32 1, i64 0
@@ -13087,7 +13087,7 @@ do_cont_3:
   %t$9 = call i64 @stdlib.template.split_on(i64 %p$condstr, i64 %t$8) noinline
   %t$31 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$32 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$10 = musttail call i64 @stdlib.template.build_if(i64 %p$src, i64 %p$total, i64 %t$9, i64 %t$2)
+  %t$10 = musttail call i64 @stdlib.template.build_if(i64 %p$src, i64 %p$total, i64 %t$9, i64 %t$2) noinline
   ret i64 %t$10
 do_done_3:
   %t$11 = phi i64 [%t$6, %do_short_3]

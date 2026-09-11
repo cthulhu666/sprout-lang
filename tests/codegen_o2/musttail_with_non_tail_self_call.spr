@@ -22,8 +22,8 @@ fn f(t: Tree) -> Int =
 
 fn g(xs: List Tree) -> Int =
   match xs with
-  | Nil -> 0
-  | Cons x rest -> f(x) + g(rest)
+  | [] -> 0
+  | [x | rest] -> f(x) + g(rest)
 
 fn main() -> Unit !{IO} =
-  print(int_to_string(f(Nest (Cons (Leaf, Cons (Pair (Leaf, Leaf), Nil))))))
+  print(int_to_string(f(Nest([Leaf, Pair (Leaf, Leaf)]))))

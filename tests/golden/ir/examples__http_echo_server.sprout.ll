@@ -2719,7 +2719,7 @@ do_cont_10:
   %t$22 = trunc i64 %t$16 to i1
   br i1 %t$22, label %then_17, label %else_17
 then_17:
-  %t$19 = musttail call i64 @stdlib.net.write_all_by_go(i64 %p$handle, i64 %p$payload, i64 %p$deadline_us, i64 %p$offset, i64 %p$total)
+  %t$19 = musttail call i64 @stdlib.net.write_all_by_go(i64 %p$handle, i64 %p$payload, i64 %p$deadline_us, i64 %p$offset, i64 %p$total) noinline
   ret i64 %t$19
 else_17:
   %t$20 = call i64 @sprout_alloc_obj(i64 30, i64 0)
@@ -2912,7 +2912,7 @@ body_1_3:
   %t$14 = icmp eq i64 %t$12, %t$13
   br i1 %t$14, label %ntest_11, label %arm_2_3
 ntest_11:
-  %t$15 = musttail call i64 @stdlib.net.read_avail_wait(i64 %p$handle, i64 %p$deadline_us)
+  %t$15 = musttail call i64 @stdlib.net.read_avail_wait(i64 %p$handle, i64 %p$deadline_us) noinline
   ret i64 %t$15
 arm_2_3:
   %t$16 = add i64 0, 8
@@ -2975,7 +2975,7 @@ do_cont_10:
   %t$22 = trunc i64 %t$16 to i1
   br i1 %t$22, label %then_17, label %else_17
 then_17:
-  %t$19 = musttail call i64 @stdlib.net.read_avail_go(i64 %p$handle, i64 %p$deadline_us)
+  %t$19 = musttail call i64 @stdlib.net.read_avail_go(i64 %p$handle, i64 %p$deadline_us) noinline
   ret i64 %t$19
 else_17:
   %t$20 = call i64 @sprout_alloc_obj(i64 30, i64 0)
@@ -5631,7 +5631,7 @@ arm_3_16:
   br i1 %t$43, label %body_3_16, label %arm_4_16
 body_3_16:
   %t$44 = call i64 @sprout_field(i64 %t$14, i64 0)
-  %t$45 = musttail call i64 @stdlib.http_server.scan_for_terminator$u(i64 %p$conn, i64 %p$acc, i64 %p$total, i64 %p$overlap, i64 %t$44, i64 %p$deadline, i64 %p$max_bytes)
+  %t$45 = musttail call i64 @stdlib.http_server.scan_for_terminator$u(i64 %p$conn, i64 %p$acc, i64 %p$total, i64 %p$overlap, i64 %t$44, i64 %p$deadline, i64 %p$max_bytes) noinline
   ret i64 %t$45
 arm_4_16:
   call void @sprout_abort_match()
@@ -5866,7 +5866,7 @@ body_1_26:
   %t$41 = add i64 %p$total, %t$40
   %t$42 = add i64 0, 0
   %t$137 = call i64 @sprout_gc_pop_roots(i64 3)
-  %t$43 = musttail call i64 @stdlib.http_server.read_until_headers$u(i64 %p$conn, i64 %t$4, i64 %t$41, i64 %t$20, i64 %p$deadline, i64 %p$max_bytes, i64 %t$42)
+  %t$43 = musttail call i64 @stdlib.http_server.read_until_headers$u(i64 %p$conn, i64 %t$4, i64 %t$41, i64 %t$20, i64 %p$deadline, i64 %p$max_bytes, i64 %t$42) noinline
   ret i64 %t$43
 arm_2_26:
   call void @sprout_abort_match()

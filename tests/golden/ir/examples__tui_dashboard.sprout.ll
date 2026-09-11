@@ -3126,7 +3126,7 @@ then_2:
   br label %join_2
 else_2:
   %t$4 = call i64 @stdlib.unicode.utf8.byte_at(i64 %p$b, i64 %p$i) noinline
-  %t$5 = musttail call i64 @stdlib.unicode.utf8.decode_step$u(i64 %p$b, i64 %p$i, i64 %p$n, i64 %p$acc, i64 %t$4)
+  %t$5 = musttail call i64 @stdlib.unicode.utf8.decode_step$u(i64 %p$b, i64 %p$i, i64 %p$n, i64 %p$acc, i64 %t$4) noinline
   ret i64 %t$5
 join_2:
   %t$3 = phi i64 [%p$acc, %then_2]
@@ -3166,7 +3166,7 @@ entry:
   %t$10 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 0
   %t$11 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$5 = musttail call i64 @stdlib.unicode.utf8.decode_go$u(i64 %p$b, i64 %t$1, i64 %p$n, i64 %t$3, i64 %t$4)
+  %t$5 = musttail call i64 @stdlib.unicode.utf8.decode_go$u(i64 %p$b, i64 %t$1, i64 %p$n, i64 %t$3, i64 %t$4) noinline
   ret i64 %t$5
 }
 
@@ -3944,7 +3944,7 @@ then_2:
   br label %join_2
 else_2:
   %t$6 = call i64 @stdlib.tui.keys.byte_at(i64 %p$b, i64 %p$j) noinline
-  %t$7 = musttail call i64 @stdlib.tui.keys.scan_final$u(i64 %p$b, i64 %p$n, i64 %p$j, i64 %t$6)
+  %t$7 = musttail call i64 @stdlib.tui.keys.scan_final$u(i64 %p$b, i64 %p$n, i64 %p$j, i64 %t$6) noinline
   ret i64 %t$7
 join_2:
   %t$3 = phi i64 [%t$5, %then_2]
@@ -3980,7 +3980,7 @@ then_10:
   %t$12 = add i64 0, 1
   %t$13 = add i64 %p$j, %t$12
   %t$14 = add i64 0, 0
-  %t$15 = musttail call i64 @stdlib.tui.keys.csi_final_index$u(i64 %p$b, i64 %p$n, i64 %t$13, i64 %t$14)
+  %t$15 = musttail call i64 @stdlib.tui.keys.csi_final_index$u(i64 %p$b, i64 %p$n, i64 %t$13, i64 %t$14) noinline
   ret i64 %t$15
 else_10:
   %t$16 = add i64 0, 64
@@ -6510,7 +6510,7 @@ arm_0_11:
   %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
   %t$13 = call i64 @stdlib.unicode.lookup.entry_at(i64 %p$chunk, i64 %t$10) noinline
   %t$20 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$14 = musttail call i64 @stdlib.unicode.lookup.probe$u(i64 %p$chunk, i64 %p$key, i64 %p$lo, i64 %p$hi, i64 %t$10, i64 %t$13)
+  %t$14 = musttail call i64 @stdlib.unicode.lookup.probe$u(i64 %p$chunk, i64 %p$key, i64 %p$lo, i64 %p$hi, i64 %t$10, i64 %t$13) noinline
   ret i64 %t$14
 arm_1_11:
   call void @sprout_abort_match()
@@ -6566,7 +6566,7 @@ then_7:
   %t$10 = sub i64 %p$mid, %t$9
   %t$11 = add i64 0, 0
   %t$12 = add i64 0, 0
-  %t$13 = musttail call i64 @stdlib.unicode.lookup.find_go$u(i64 %p$chunk, i64 %p$key, i64 %p$lo, i64 %t$10, i64 %t$11, i64 %t$12)
+  %t$13 = musttail call i64 @stdlib.unicode.lookup.find_go$u(i64 %p$chunk, i64 %p$key, i64 %p$lo, i64 %t$10, i64 %t$11, i64 %t$12) noinline
   ret i64 %t$13
 else_7:
   %t$14 = add i64 0, 4
@@ -6597,7 +6597,7 @@ then_21:
   %t$24 = add i64 %p$mid, %t$23
   %t$25 = add i64 0, 0
   %t$26 = add i64 0, 0
-  %t$27 = musttail call i64 @stdlib.unicode.lookup.find_go$u(i64 %p$chunk, i64 %p$key, i64 %t$24, i64 %p$hi, i64 %t$25, i64 %t$26)
+  %t$27 = musttail call i64 @stdlib.unicode.lookup.find_go$u(i64 %p$chunk, i64 %p$key, i64 %t$24, i64 %p$hi, i64 %t$25, i64 %t$26) noinline
   ret i64 %t$27
 else_21:
   %t$28 = add i64 0, 8
@@ -7941,7 +7941,7 @@ body_1_1:
   %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
   %t$11 = call i64 @stdlib.unicode.grapheme.gcb(i64 %t$9) noinline
   %t$29 = call i64 @sprout_gc_pop_roots(i64 5)
-  %t$12 = musttail call i64 @stdlib.unicode.grapheme.step$u(i64 %t$10, i64 %p$prev, i64 %p$st, i64 %p$run, i64 %p$acc, i64 %t$9, i64 %t$11)
+  %t$12 = musttail call i64 @stdlib.unicode.grapheme.step$u(i64 %t$10, i64 %p$prev, i64 %p$st, i64 %p$run, i64 %p$acc, i64 %t$9, i64 %t$11) noinline
   ret i64 %t$12
 arm_2_1:
   call void @sprout_abort_match()
@@ -8013,7 +8013,7 @@ then_1:
   %t$6 = add i64 0, 0
   %t$7 = add i64 0, 0
   %t$35 = call i64 @sprout_gc_pop_roots(i64 4)
-  %t$8 = musttail call i64 @stdlib.unicode.grapheme.sizes_go$u(i64 %p$more, i64 %p$cur, i64 %t$3, i64 %t$5, i64 %p$acc, i64 %t$6, i64 %t$7)
+  %t$8 = musttail call i64 @stdlib.unicode.grapheme.sizes_go$u(i64 %p$more, i64 %p$cur, i64 %t$3, i64 %t$5, i64 %p$acc, i64 %t$6, i64 %t$7) noinline
   ret i64 %t$8
 else_1:
   %t$36 = alloca i64
@@ -8042,7 +8042,7 @@ else_1:
   %t$12 = add i64 0, 0
   %t$13 = add i64 0, 0
   %t$46 = call i64 @sprout_gc_pop_roots(i64 5)
-  %t$14 = musttail call i64 @stdlib.unicode.grapheme.sizes_go$u(i64 %p$more, i64 %p$cur, i64 %t$9, i64 %t$10, i64 %t$11, i64 %t$12, i64 %t$13)
+  %t$14 = musttail call i64 @stdlib.unicode.grapheme.sizes_go$u(i64 %p$more, i64 %p$cur, i64 %t$9, i64 %t$10, i64 %t$11, i64 %t$12, i64 %t$13) noinline
   ret i64 %t$14
 }
 
@@ -9875,7 +9875,7 @@ arm_1_1:
 body_1_1:
   %t$7 = call i64 @sprout_field(i64 %p$clusters, i64 0)
   %t$8 = call i64 @sprout_field(i64 %p$clusters, i64 1)
-  %t$9 = musttail call i64 @stdlib.tui.screen.write_step$u(i64 %p$s, i64 %p$col, i64 %p$row, i64 %t$7, i64 %t$8, i64 %p$st)
+  %t$9 = musttail call i64 @stdlib.tui.screen.write_step$u(i64 %p$s, i64 %p$col, i64 %p$row, i64 %t$7, i64 %t$8, i64 %p$st) noinline
   ret i64 %t$9
 arm_2_1:
   call void @sprout_abort_match()
@@ -9921,7 +9921,7 @@ entry:
   %t$0 = call i64 @stdlib.tui.screen.screen_put(i64 %p$s, i64 %p$col, i64 %p$row, i64 %p$c, i64 %p$st) noinline
   %t$10 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$11 = call i64 @sprout_gc_pop_roots(i64 3)
-  %t$1 = musttail call i64 @stdlib.tui.screen.write_next$u(i64 %p$s, i64 %p$col, i64 %p$row, i64 %p$rest, i64 %p$st, i64 %t$0)
+  %t$1 = musttail call i64 @stdlib.tui.screen.write_next$u(i64 %p$s, i64 %p$col, i64 %p$row, i64 %p$rest, i64 %p$st, i64 %t$0) noinline
   ret i64 %t$1
 }
 
@@ -9953,7 +9953,7 @@ then_3:
 else_3:
   %t$5 = add i64 %p$col, %p$used
   %t$6 = add i64 0, 0
-  %t$7 = musttail call i64 @stdlib.tui.screen.write_go$u(i64 %p$s, i64 %t$5, i64 %p$row, i64 %p$rest, i64 %p$st, i64 %t$6)
+  %t$7 = musttail call i64 @stdlib.tui.screen.write_go$u(i64 %p$s, i64 %t$5, i64 %p$row, i64 %p$rest, i64 %p$st, i64 %t$6) noinline
   ret i64 %t$7
 join_3:
   %t$4 = phi i64 [%p$col, %then_3]
@@ -10476,7 +10476,7 @@ entry:
   %t$2 = call i64 @stdlib.tui.screen.no_style() noinline
   %t$3 = add i64 0, 0
   %t$14 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$4 = musttail call i64 @stdlib.tui.screen.run_cells$u(i64 %p$s, i64 %p$row, i64 %p$col, i64 %t$1, i64 %t$2, i64 %t$3)
+  %t$4 = musttail call i64 @stdlib.tui.screen.run_cells$u(i64 %p$s, i64 %p$row, i64 %p$col, i64 %t$1, i64 %t$2, i64 %t$3) noinline
   ret i64 %t$4
 }
 
@@ -10528,12 +10528,12 @@ else_3:
   br i1 %t$13, label %then_6, label %else_6
 then_6:
   %t$8 = add i64 0, 0
-  %t$9 = musttail call i64 @stdlib.tui.screen.emit_cell$u(i64 %p$s, i64 %p$row, i64 %p$col, i64 %p$acc, i64 %p$last, i64 %t$8)
+  %t$9 = musttail call i64 @stdlib.tui.screen.emit_cell$u(i64 %p$s, i64 %p$row, i64 %p$col, i64 %p$acc, i64 %p$last, i64 %t$8) noinline
   ret i64 %t$9
 else_6:
   %t$10 = add i64 0, 0
   %t$11 = add i64 0, 0
-  %t$12 = musttail call i64 @stdlib.tui.screen.diff_row$u(i64 %p$s, i64 %p$row, i64 %p$col, i64 %p$acc, i64 %t$10, i64 %t$11)
+  %t$12 = musttail call i64 @stdlib.tui.screen.diff_row$u(i64 %p$s, i64 %p$row, i64 %p$col, i64 %p$acc, i64 %t$10, i64 %t$11) noinline
   ret i64 %t$12
 join_3:
   %t$4 = phi i64 [%p$acc, %then_3]
@@ -10575,7 +10575,7 @@ entry:
   %t$1 = call i64 @stdlib.mutable.mutmatrix_at(i64 %t$0, i64 %p$row, i64 %p$col) noinline
   %t$11 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$12 = call i64 @sprout_gc_pop_roots(i64 3)
-  %t$2 = musttail call i64 @stdlib.tui.screen.emit_known$u(i64 %p$s, i64 %p$row, i64 %p$col, i64 %p$acc, i64 %p$last, i64 %t$1)
+  %t$2 = musttail call i64 @stdlib.tui.screen.emit_known$u(i64 %p$s, i64 %p$row, i64 %p$col, i64 %p$acc, i64 %p$last, i64 %t$1) noinline
   ret i64 %t$2
 }
 
@@ -10607,7 +10607,7 @@ then_1:
   %t$3 = add i64 0, 1
   %t$4 = add i64 %p$col, %t$3
   %t$5 = add i64 0, 0
-  %t$6 = musttail call i64 @stdlib.tui.screen.run_cells$u(i64 %p$s, i64 %p$row, i64 %t$4, i64 %p$acc, i64 %p$last, i64 %t$5)
+  %t$6 = musttail call i64 @stdlib.tui.screen.run_cells$u(i64 %p$s, i64 %p$row, i64 %t$4, i64 %p$acc, i64 %p$last, i64 %t$5) noinline
   ret i64 %t$6
 else_1:
   %t$7 = add i64 0, 1
@@ -10658,7 +10658,7 @@ else_1:
   %t$38 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$15 = add i64 0, 0
   %t$39 = call i64 @sprout_gc_pop_roots(i64 4)
-  %t$16 = musttail call i64 @stdlib.tui.screen.run_cells$u(i64 %p$s, i64 %p$row, i64 %t$8, i64 %t$12, i64 %t$14, i64 %t$15)
+  %t$16 = musttail call i64 @stdlib.tui.screen.run_cells$u(i64 %p$s, i64 %p$row, i64 %t$8, i64 %t$12, i64 %t$14, i64 %t$15) noinline
   ret i64 %t$16
 }
 
@@ -11453,7 +11453,7 @@ body_1_1:
   %t$12$code = load ptr, ptr %t$12$env_ptr
   %t$12 = call i64 (i64, i64, i64) %t$12$code(i64 %p$update, i64 %t$10, i64 %p$w)
   %t$29 = call i64 @sprout_gc_pop_roots(i64 3)
-  %t$13 = musttail call i64 @stdlib.tui.app.apply_step(i64 %p$update, i64 %t$12, i64 %t$11, i64 %p$acc)
+  %t$13 = musttail call i64 @stdlib.tui.app.apply_step(i64 %p$update, i64 %t$12, i64 %t$11, i64 %p$acc) noinline
   ret i64 %t$13
 arm_2_1:
   call void @sprout_abort_match()
@@ -11546,7 +11546,7 @@ ntest_13:
   %t$18 = call i64 @stdlib.tui.app.push_all(i64 %t$17, i64 %p$acc) noinline
   %t$44 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$45 = call i64 @sprout_gc_pop_roots(i64 3)
-  %t$19 = musttail call i64 @stdlib.tui.app.apply_go(i64 %p$update, i64 %p$rest, i64 %t$12, i64 %t$18)
+  %t$19 = musttail call i64 @stdlib.tui.app.apply_go(i64 %p$update, i64 %p$rest, i64 %t$12, i64 %t$18) noinline
   ret i64 %t$19
 arm_2_0:
   call void @sprout_abort_match()
@@ -12003,7 +12003,7 @@ entry:
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
   %t$0 = call i64 @stdlib.chan.chan_recv(i64 %p$ch) noinline
   %t$14 = call i64 @sprout_gc_pop_roots(i64 6)
-  %t$1 = musttail call i64 @stdlib.tui.app.on_signal$u(i64 %p$scope, i64 %p$ch, i64 %p$s, i64 %p$w, i64 %p$update, i64 %p$size, i64 %t$0)
+  %t$1 = musttail call i64 @stdlib.tui.app.on_signal$u(i64 %p$scope, i64 %p$ch, i64 %p$s, i64 %p$w, i64 %p$update, i64 %p$size, i64 %t$0) noinline
   ret i64 %t$1
 }
 
@@ -12052,7 +12052,7 @@ arm_1_1:
   br i1 %t$7, label %body_1_1, label %arm_2_1
 body_1_1:
   %t$8 = call i64 @sprout_field(i64 %p$r, i64 0)
-  %t$9 = musttail call i64 @stdlib.tui.app.on_sig$u(i64 %p$scope, i64 %p$ch, i64 %p$s, i64 %p$w, i64 %p$update, i64 %p$size, i64 %t$8)
+  %t$9 = musttail call i64 @stdlib.tui.app.on_sig$u(i64 %p$scope, i64 %p$ch, i64 %p$s, i64 %p$w, i64 %p$update, i64 %p$size, i64 %t$8) noinline
   ret i64 %t$9
 arm_2_1:
   call void @sprout_abort_match()
@@ -12100,7 +12100,7 @@ arm_0_1:
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
   %t$5 = call i64 @sprout_field(i64 %p$sig, i64 0)
-  %t$6 = musttail call i64 @stdlib.tui.app.on_event_sig$u(i64 %p$scope, i64 %p$ch, i64 %p$s, i64 %p$w, i64 %p$update, i64 %p$size, i64 %t$5)
+  %t$6 = musttail call i64 @stdlib.tui.app.on_event_sig$u(i64 %p$scope, i64 %p$ch, i64 %p$s, i64 %p$w, i64 %p$update, i64 %p$size, i64 %t$5) noinline
   ret i64 %t$6
 arm_1_1:
   %t$7 = add i64 0, 89
@@ -12147,7 +12147,7 @@ body_1_1:
   %t$41 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$13 = add i64 0, 0
   %t$42 = call i64 @sprout_gc_pop_roots(i64 6)
-  %t$14 = musttail call i64 @stdlib.tui.app.advance$u(i64 %p$scope, i64 %p$ch, i64 %p$s, i64 %p$update, i64 %p$size, i64 %t$12, i64 %t$13)
+  %t$14 = musttail call i64 @stdlib.tui.app.advance$u(i64 %p$scope, i64 %p$ch, i64 %p$s, i64 %p$update, i64 %p$size, i64 %t$12, i64 %t$13) noinline
   ret i64 %t$14
 arm_2_1:
   %t$15 = add i64 0, 90
@@ -12184,7 +12184,7 @@ body_2_1:
   %t$59 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$20 = add i64 0, 0
   %t$60 = call i64 @sprout_gc_pop_roots(i64 6)
-  %t$21 = musttail call i64 @stdlib.tui.app.advance$u(i64 %p$scope, i64 %p$ch, i64 %p$s, i64 %p$update, i64 %p$size, i64 %t$19, i64 %t$20)
+  %t$21 = musttail call i64 @stdlib.tui.app.advance$u(i64 %p$scope, i64 %p$ch, i64 %p$s, i64 %p$update, i64 %p$size, i64 %t$19, i64 %t$20) noinline
   ret i64 %t$21
 arm_3_1:
   call void @sprout_abort_match()
@@ -12230,7 +12230,7 @@ arm_0_1:
 body_0_1:
   %t$5 = call i64 @sprout_field(i64 %p$ev, i64 0)
   %t$6 = add i64 0, 0
-  %t$7 = musttail call i64 @stdlib.tui.app.resized$u(i64 %p$scope, i64 %p$ch, i64 %p$s, i64 %p$w, i64 %p$update, i64 %t$5, i64 %t$6)
+  %t$7 = musttail call i64 @stdlib.tui.app.resized$u(i64 %p$scope, i64 %p$ch, i64 %p$s, i64 %p$w, i64 %p$update, i64 %t$5, i64 %t$6) noinline
   ret i64 %t$7
 arm_1_1:
   %t$11 = alloca i64
@@ -12257,7 +12257,7 @@ arm_1_1:
   %t$8 = call i64 @stdlib.tui.app.step(i64 %p$update, i64 %p$w, i64 %p$ev) noinline
   %t$9 = add i64 0, 0
   %t$25 = call i64 @sprout_gc_pop_roots(i64 7)
-  %t$10 = musttail call i64 @stdlib.tui.app.advance$u(i64 %p$scope, i64 %p$ch, i64 %p$s, i64 %p$update, i64 %p$size, i64 %t$8, i64 %t$9)
+  %t$10 = musttail call i64 @stdlib.tui.app.advance$u(i64 %p$scope, i64 %p$ch, i64 %p$s, i64 %p$update, i64 %p$size, i64 %t$8, i64 %t$9) noinline
   ret i64 %t$10
 arm_2_1:
   call void @sprout_abort_match()
@@ -12317,7 +12317,7 @@ entry:
   %t$1 = call i64 @stdlib.tui.app.paint(i64 %t$0, i64 %p$w, i64 %p$ns) noinline
   %t$2 = add i64 0, 0
   %t$18 = call i64 @sprout_gc_pop_roots(i64 7)
-  %t$3 = musttail call i64 @stdlib.tui.app.pump$u(i64 %p$scope, i64 %p$ch, i64 %t$0, i64 %p$w, i64 %p$update, i64 %p$ns, i64 %t$2)
+  %t$3 = musttail call i64 @stdlib.tui.app.pump$u(i64 %p$scope, i64 %p$ch, i64 %t$0, i64 %p$w, i64 %p$update, i64 %p$ns, i64 %t$2) noinline
   ret i64 %t$3
 }
 
@@ -12389,7 +12389,7 @@ ntest_9:
   %t$13$ptr = inttoptr i64 %p$r to ptr
   %t$13$gep = getelementptr i64, ptr %t$13$ptr, i64 2
   %t$13 = load i64, ptr %t$13$gep
-  %t$14 = musttail call i64 @stdlib.tui.app.dispatched$u(i64 %p$scope, i64 %p$ch, i64 %p$s, i64 %t$8, i64 %p$update, i64 %p$size, i64 %t$13)
+  %t$14 = musttail call i64 @stdlib.tui.app.dispatched$u(i64 %p$scope, i64 %p$ch, i64 %p$s, i64 %t$8, i64 %p$update, i64 %p$size, i64 %t$13) noinline
   ret i64 %t$14
 arm_2_0:
   call void @sprout_abort_match()
@@ -12486,7 +12486,7 @@ entry:
   %t$20 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$2 = add i64 0, 0
   %t$21 = call i64 @sprout_gc_pop_roots(i64 7)
-  %t$3 = musttail call i64 @stdlib.tui.app.repaint$u(i64 %p$scope, i64 %p$ch, i64 %p$s, i64 %p$w, i64 %p$update, i64 %p$size, i64 %t$2)
+  %t$3 = musttail call i64 @stdlib.tui.app.repaint$u(i64 %p$scope, i64 %p$ch, i64 %p$s, i64 %p$w, i64 %p$update, i64 %p$size, i64 %t$2) noinline
   ret i64 %t$3
 }
 
@@ -12660,7 +12660,7 @@ entry:
   %t$0 = call i64 @stdlib.tui.app.paint(i64 %p$s, i64 %p$w, i64 %p$size) noinline
   %t$1 = add i64 0, 0
   %t$15 = call i64 @sprout_gc_pop_roots(i64 6)
-  %t$2 = musttail call i64 @stdlib.tui.app.pump$u(i64 %p$scope, i64 %p$ch, i64 %p$s, i64 %p$w, i64 %p$update, i64 %p$size, i64 %t$1)
+  %t$2 = musttail call i64 @stdlib.tui.app.pump$u(i64 %p$scope, i64 %p$ch, i64 %p$s, i64 %p$w, i64 %p$update, i64 %p$size, i64 %t$1) noinline
   ret i64 %t$2
 }
 
@@ -12704,7 +12704,7 @@ entry:
   %t$0 = call i64 @stdlib.task.task_cancelled() noinline
   %t$1 = add i64 0, 0
   %t$7 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$2 = musttail call i64 @stdlib.tui.app.input_next$u(i64 %p$ch, i64 %p$tick_ms, i64 %p$held, i64 %t$0, i64 %t$1)
+  %t$2 = musttail call i64 @stdlib.tui.app.input_next$u(i64 %p$ch, i64 %p$tick_ms, i64 %p$held, i64 %t$0, i64 %t$1) noinline
   ret i64 %t$2
 }
 
@@ -12732,7 +12732,7 @@ then_0:
 else_0:
   %t$3 = add i64 0, 0
   %t$4 = add i64 0, 0
-  %t$5 = musttail call i64 @stdlib.tui.app.read_once$u(i64 %p$ch, i64 %p$tick_ms, i64 %p$held, i64 %t$3, i64 %t$4)
+  %t$5 = musttail call i64 @stdlib.tui.app.read_once$u(i64 %p$ch, i64 %p$tick_ms, i64 %p$held, i64 %t$3, i64 %t$4) noinline
   ret i64 %t$5
 join_0:
   %t$1 = phi i64 [%t$2, %then_0]
@@ -12766,7 +12766,7 @@ entry:
   %t$1 = call i64 @stdlib.terminal.read_avail(i64 %t$0, i64 %p$tick_ms) noinline
   %t$2 = add i64 0, 0
   %t$8 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$3 = musttail call i64 @stdlib.tui.app.on_input$u(i64 %p$ch, i64 %p$tick_ms, i64 %p$held, i64 %t$1, i64 %t$2)
+  %t$3 = musttail call i64 @stdlib.tui.app.on_input$u(i64 %p$ch, i64 %p$tick_ms, i64 %p$held, i64 %t$1, i64 %t$2) noinline
   ret i64 %t$3
 }
 
@@ -12811,7 +12811,7 @@ body_0_1:
   %t$7 = add i64 0, 0
   %t$8 = add i64 0, 0
   %t$33 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$9 = musttail call i64 @stdlib.tui.app.decoded$u(i64 %p$ch, i64 %p$tick_ms, i64 %t$6, i64 %t$7, i64 %t$8)
+  %t$9 = musttail call i64 @stdlib.tui.app.decoded$u(i64 %p$ch, i64 %p$tick_ms, i64 %t$6, i64 %t$7, i64 %t$8) noinline
   ret i64 %t$9
 arm_1_1:
   %t$10 = add i64 0, 28
@@ -12820,7 +12820,7 @@ arm_1_1:
 body_1_1:
   %t$12 = add i64 0, 0
   %t$13 = add i64 0, 0
-  %t$14 = musttail call i64 @stdlib.tui.app.idled$u(i64 %p$ch, i64 %p$tick_ms, i64 %p$held, i64 %t$12, i64 %t$13)
+  %t$14 = musttail call i64 @stdlib.tui.app.idled$u(i64 %p$ch, i64 %p$tick_ms, i64 %p$held, i64 %t$12, i64 %t$13) noinline
   ret i64 %t$14
 arm_2_1:
   %t$15 = add i64 0, 29
@@ -12829,7 +12829,7 @@ arm_2_1:
 body_2_1:
   %t$17 = add i64 0, 0
   %t$18 = add i64 0, 0
-  %t$19 = musttail call i64 @stdlib.tui.app.send_resize$u(i64 %p$ch, i64 %p$tick_ms, i64 %p$held, i64 %t$17, i64 %t$18)
+  %t$19 = musttail call i64 @stdlib.tui.app.send_resize$u(i64 %p$ch, i64 %p$tick_ms, i64 %p$held, i64 %t$17, i64 %t$18) noinline
   ret i64 %t$19
 arm_3_1:
   %t$20 = add i64 0, 30
@@ -12896,7 +12896,7 @@ arm_0_1:
   %t$4$gep = getelementptr i64, ptr %t$4$ptr, i64 1
   %t$4 = load i64, ptr %t$4$gep
   %t$5 = add i64 0, 0
-  %t$6 = musttail call i64 @stdlib.tui.app.send_events$u(i64 %p$ch, i64 %p$tick_ms, i64 %t$4, i64 %t$3, i64 %t$5)
+  %t$6 = musttail call i64 @stdlib.tui.app.send_events$u(i64 %p$ch, i64 %p$tick_ms, i64 %t$4, i64 %t$3, i64 %t$5) noinline
   ret i64 %t$6
 arm_1_1:
   call void @sprout_abort_match()
@@ -12931,7 +12931,7 @@ arm_0_1:
 body_0_1:
   %t$5 = add i64 0, 0
   %t$6 = add i64 0, 0
-  %t$7 = musttail call i64 @stdlib.tui.app.input_loop$u(i64 %p$ch, i64 %p$tick_ms, i64 %p$held, i64 %t$5, i64 %t$6)
+  %t$7 = musttail call i64 @stdlib.tui.app.input_loop$u(i64 %p$ch, i64 %p$tick_ms, i64 %p$held, i64 %t$5, i64 %t$6) noinline
   ret i64 %t$7
 arm_1_1:
   %t$8 = add i64 0, 6
@@ -12940,7 +12940,7 @@ arm_1_1:
 body_1_1:
   %t$10 = call i64 @sprout_field(i64 %p$evs, i64 0)
   %t$11 = call i64 @sprout_field(i64 %p$evs, i64 1)
-  %t$12 = musttail call i64 @stdlib.tui.app.send_then$u(i64 %p$ch, i64 %p$tick_ms, i64 %p$held, i64 %t$11, i64 %t$10)
+  %t$12 = musttail call i64 @stdlib.tui.app.send_then$u(i64 %p$ch, i64 %p$tick_ms, i64 %p$held, i64 %t$11, i64 %t$10) noinline
   ret i64 %t$12
 arm_2_1:
   call void @sprout_abort_match()
@@ -12991,7 +12991,7 @@ entry:
   %t$14 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$2 = add i64 0, 0
   %t$15 = call i64 @sprout_gc_pop_roots(i64 4)
-  %t$3 = musttail call i64 @stdlib.tui.app.send_events$u(i64 %p$ch, i64 %p$tick_ms, i64 %p$held, i64 %p$rest, i64 %t$2)
+  %t$3 = musttail call i64 @stdlib.tui.app.send_events$u(i64 %p$ch, i64 %p$tick_ms, i64 %p$held, i64 %p$rest, i64 %t$2) noinline
   ret i64 %t$3
 }
 
@@ -13026,7 +13026,7 @@ then_1:
   %t$3 = add i64 0, 0
   %t$4 = add i64 0, 0
   %t$5 = add i64 0, 0
-  %t$6 = musttail call i64 @stdlib.tui.app.send_esc$u(i64 %p$ch, i64 %p$tick_ms, i64 %t$3, i64 %t$4, i64 %t$5)
+  %t$6 = musttail call i64 @stdlib.tui.app.send_esc$u(i64 %p$ch, i64 %p$tick_ms, i64 %t$3, i64 %t$4, i64 %t$5) noinline
   ret i64 %t$6
 else_1:
   %t$17 = alloca i64
@@ -13046,7 +13046,7 @@ else_1:
   %t$23 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$9 = add i64 0, 0
   %t$24 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$10 = musttail call i64 @stdlib.tui.app.send_one$u(i64 %p$ch, i64 %p$tick_ms, i64 %p$held, i64 %t$8, i64 %t$9)
+  %t$10 = musttail call i64 @stdlib.tui.app.send_one$u(i64 %p$ch, i64 %p$tick_ms, i64 %p$held, i64 %t$8, i64 %t$9) noinline
   ret i64 %t$10
 }
 
@@ -13148,7 +13148,7 @@ entry:
   %t$6 = add i64 0, 0
   %t$7 = add i64 0, 0
   %t$22 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$8 = musttail call i64 @stdlib.tui.app.input_loop$u(i64 %p$ch, i64 %p$tick_ms, i64 %t$5, i64 %t$6, i64 %t$7)
+  %t$8 = musttail call i64 @stdlib.tui.app.input_loop$u(i64 %p$ch, i64 %p$tick_ms, i64 %t$5, i64 %t$6, i64 %t$7) noinline
   ret i64 %t$8
 }
 
@@ -13184,7 +13184,7 @@ entry:
   %t$1 = add i64 0, 0
   %t$2 = add i64 0, 0
   %t$10 = call i64 @sprout_gc_pop_roots(i64 3)
-  %t$3 = musttail call i64 @stdlib.tui.app.input_loop$u(i64 %p$ch, i64 %p$tick_ms, i64 %p$held, i64 %t$1, i64 %t$2)
+  %t$3 = musttail call i64 @stdlib.tui.app.input_loop$u(i64 %p$ch, i64 %p$tick_ms, i64 %p$held, i64 %t$1, i64 %t$2) noinline
   ret i64 %t$3
 }
 
@@ -13230,7 +13230,7 @@ entry:
   %t$14 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$3 = add i64 0, 0
   %t$15 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$4 = musttail call i64 @stdlib.tui.app.send_one$u(i64 %p$ch, i64 %p$tick_ms, i64 %p$held, i64 %t$2, i64 %t$3)
+  %t$4 = musttail call i64 @stdlib.tui.app.send_one$u(i64 %p$ch, i64 %p$tick_ms, i64 %p$held, i64 %t$2, i64 %t$3) noinline
   ret i64 %t$4
 }
 
@@ -14924,7 +14924,7 @@ body_1_1:
   %t$8 = call i64 @sprout_field(i64 %p$kids, i64 0)
   %t$9 = call i64 @sprout_field(i64 %p$kids, i64 1)
   %t$10 = add i64 0, 0
-  %t$11 = musttail call i64 @stdlib.tui.widgets.children.render_pair$u(i64 %t$8, i64 %t$9, i64 %p$regions, i64 %p$screen, i64 %t$10)
+  %t$11 = musttail call i64 @stdlib.tui.widgets.children.render_pair$u(i64 %t$8, i64 %t$9, i64 %p$regions, i64 %p$screen, i64 %t$10) noinline
   ret i64 %t$11
 arm_2_1:
   call void @sprout_abort_match()
@@ -14972,7 +14972,7 @@ arm_1_1:
 body_1_1:
   %t$8 = call i64 @sprout_field(i64 %p$rs, i64 0)
   %t$9 = call i64 @sprout_field(i64 %p$rs, i64 1)
-  %t$10 = musttail call i64 @stdlib.tui.widgets.children.render_then$u(i64 %p$w, i64 %t$8, i64 %p$s, i64 %p$rest, i64 %t$9)
+  %t$10 = musttail call i64 @stdlib.tui.widgets.children.render_then$u(i64 %p$w, i64 %t$8, i64 %p$s, i64 %p$rest, i64 %t$9) noinline
   ret i64 %t$10
 arm_2_1:
   call void @sprout_abort_match()
@@ -15066,7 +15066,7 @@ entry:
   %t$2 = add i64 0, 0
   %t$3 = add i64 0, 0
   %t$18 = call i64 @sprout_gc_pop_roots(i64 4)
-  %t$4 = musttail call i64 @stdlib.tui.widgets.children.render_zip$u(i64 %p$rrest, i64 %p$s, i64 %p$rest, i64 %t$2, i64 %t$3)
+  %t$4 = musttail call i64 @stdlib.tui.widgets.children.render_zip$u(i64 %p$rrest, i64 %p$s, i64 %p$rest, i64 %t$2, i64 %t$3) noinline
   ret i64 %t$4
 }
 
@@ -18734,7 +18734,7 @@ then_13:
   %t$15 = add i64 0, 0
   br label %join_13
 else_13:
-  %t$16 = musttail call i64 @stdlib.tui.widgets.paint.lines_step$u(i64 %p$screen, i64 %p$region, i64 %p$from_row, i64 %t$8, i64 %t$9, i64 %p$style)
+  %t$16 = musttail call i64 @stdlib.tui.widgets.paint.lines_step$u(i64 %p$screen, i64 %p$region, i64 %p$from_row, i64 %t$8, i64 %t$9, i64 %p$style) noinline
   ret i64 %t$16
 join_13:
   %t$14 = phi i64 [%t$15, %then_13]
@@ -18792,7 +18792,7 @@ entry:
   %t$2 = add i64 %p$row, %t$1
   %t$3 = add i64 0, 0
   %t$16 = call i64 @sprout_gc_pop_roots(i64 4)
-  %t$4 = musttail call i64 @stdlib.tui.widgets.paint.lines$u(i64 %p$screen, i64 %p$region, i64 %t$2, i64 %p$rest, i64 %p$style, i64 %t$3)
+  %t$4 = musttail call i64 @stdlib.tui.widgets.paint.lines$u(i64 %p$screen, i64 %p$region, i64 %t$2, i64 %p$rest, i64 %p$style, i64 %t$3) noinline
   ret i64 %t$4
 }
 
@@ -21192,7 +21192,7 @@ then_14:
   %t$16 = add i64 0, 0
   br label %join_14
 else_14:
-  %t$17 = musttail call i64 @stdlib.tui.widgets.list_view.painted_step$u(i64 %p$l, i64 %p$r, i64 %p$s, i64 %t$8, i64 %t$9, i64 %p$i, i64 %p$start)
+  %t$17 = musttail call i64 @stdlib.tui.widgets.list_view.painted_step$u(i64 %p$l, i64 %p$r, i64 %p$s, i64 %t$8, i64 %t$9, i64 %p$i, i64 %p$start) noinline
   ret i64 %t$17
 join_14:
   %t$15 = phi i64 [%t$16, %then_14]
@@ -21266,7 +21266,7 @@ join_2:
   %t$9 = add i64 0, 1
   %t$10 = add i64 %p$i, %t$9
   %t$11 = add i64 0, 0
-  %t$12 = musttail call i64 @stdlib.tui.widgets.list_view.painted_rows$u(i64 %p$l, i64 %p$r, i64 %p$s, i64 %p$rest, i64 %t$10, i64 %p$start, i64 %t$11)
+  %t$12 = musttail call i64 @stdlib.tui.widgets.list_view.painted_rows$u(i64 %p$l, i64 %p$r, i64 %p$s, i64 %p$rest, i64 %t$10, i64 %p$start, i64 %t$11) noinline
   ret i64 %t$12
 }
 

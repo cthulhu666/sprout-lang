@@ -16287,7 +16287,7 @@ then_43:
   %t$57 = call i64 @str_concat(i64 %p$acc, i64 %t$56)
   %t$106 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$107 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$58 = musttail call i64 @stdlib.json.p_string_run(i64 %p$s, i64 %t$46, i64 %t$57)
+  %t$58 = musttail call i64 @stdlib.json.p_string_run(i64 %p$s, i64 %t$46, i64 %t$57) noinline
   ret i64 %t$58
 else_43:
   %t$59 = call i64 @sprout_alloc_obj(i64 0, i64 0)
@@ -16341,7 +16341,7 @@ else_73:
   %t$79 = call i64 @str_concat(i64 %p$acc, i64 %t$78)
   %t$112 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$113 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$80 = musttail call i64 @stdlib.json.p_string_run(i64 %p$s, i64 %t$77, i64 %t$79)
+  %t$80 = musttail call i64 @stdlib.json.p_string_run(i64 %p$s, i64 %t$77, i64 %t$79) noinline
   ret i64 %t$80
 join_73:
   %t$74 = phi i64 [%t$75, %then_73]
@@ -16388,7 +16388,7 @@ then_3:
   %t$115 = call i64 @sprout_gc_push_i64_root(ptr %t$114)
   %t$9 = call i64 @str_concat(i64 %p$acc, i64 %t$8)
   %t$116 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$10 = musttail call i64 @stdlib.json.p_string_run(i64 %p$s, i64 %t$6, i64 %t$9)
+  %t$10 = musttail call i64 @stdlib.json.p_string_run(i64 %p$s, i64 %t$6, i64 %t$9) noinline
   ret i64 %t$10
 else_3:
   %t$11 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.140, i64 0, i32 1, i64 0
@@ -16417,7 +16417,7 @@ then_14:
   %t$126 = call i64 @sprout_gc_push_i64_root(ptr %t$125)
   %t$20 = call i64 @str_concat(i64 %p$acc, i64 %t$19)
   %t$127 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$21 = musttail call i64 @stdlib.json.p_string_run(i64 %p$s, i64 %t$17, i64 %t$20)
+  %t$21 = musttail call i64 @stdlib.json.p_string_run(i64 %p$s, i64 %t$17, i64 %t$20) noinline
   ret i64 %t$21
 else_14:
   %t$22 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.142, i64 0, i32 1, i64 0
@@ -16446,7 +16446,7 @@ then_25:
   %t$137 = call i64 @sprout_gc_push_i64_root(ptr %t$136)
   %t$31 = call i64 @str_concat(i64 %p$acc, i64 %t$30)
   %t$138 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$32 = musttail call i64 @stdlib.json.p_string_run(i64 %p$s, i64 %t$28, i64 %t$31)
+  %t$32 = musttail call i64 @stdlib.json.p_string_run(i64 %p$s, i64 %t$28, i64 %t$31) noinline
   ret i64 %t$32
 else_25:
   %t$33 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.144, i64 0, i32 1, i64 0
@@ -16475,7 +16475,7 @@ then_36:
   %t$148 = call i64 @sprout_gc_push_i64_root(ptr %t$147)
   %t$42 = call i64 @str_concat(i64 %p$acc, i64 %t$41)
   %t$149 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$43 = musttail call i64 @stdlib.json.p_string_run(i64 %p$s, i64 %t$39, i64 %t$42)
+  %t$43 = musttail call i64 @stdlib.json.p_string_run(i64 %p$s, i64 %t$39, i64 %t$42) noinline
   ret i64 %t$43
 else_36:
   %t$44 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.146, i64 0, i32 1, i64 0
@@ -16504,7 +16504,7 @@ then_47:
   %t$159 = call i64 @sprout_gc_push_i64_root(ptr %t$158)
   %t$53 = call i64 @str_concat(i64 %p$acc, i64 %t$52)
   %t$160 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$54 = musttail call i64 @stdlib.json.p_string_run(i64 %p$s, i64 %t$50, i64 %t$53)
+  %t$54 = musttail call i64 @stdlib.json.p_string_run(i64 %p$s, i64 %t$50, i64 %t$53) noinline
   ret i64 %t$54
 else_47:
   %t$55 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.148, i64 0, i32 1, i64 0
@@ -16533,7 +16533,7 @@ then_58:
   %t$170 = call i64 @sprout_gc_push_i64_root(ptr %t$169)
   %t$64 = call i64 @str_concat(i64 %p$acc, i64 %t$63)
   %t$171 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$65 = musttail call i64 @stdlib.json.p_string_run(i64 %p$s, i64 %t$61, i64 %t$64)
+  %t$65 = musttail call i64 @stdlib.json.p_string_run(i64 %p$s, i64 %t$61, i64 %t$64) noinline
   ret i64 %t$65
 else_58:
   %t$66 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.150, i64 0, i32 1, i64 0
@@ -16566,7 +16566,7 @@ then_69:
   %t$75 = call i64 @str_concat(i64 %p$acc, i64 %t$74)
   %t$184 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$185 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$76 = musttail call i64 @stdlib.json.p_string_run(i64 %p$s, i64 %t$72, i64 %t$75)
+  %t$76 = musttail call i64 @stdlib.json.p_string_run(i64 %p$s, i64 %t$72, i64 %t$75) noinline
   ret i64 %t$76
 else_69:
   %t$77 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.151, i64 0, i32 1, i64 0
@@ -16599,7 +16599,7 @@ then_80:
   %t$86 = call i64 @str_concat(i64 %p$acc, i64 %t$85)
   %t$198 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$199 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$87 = musttail call i64 @stdlib.json.p_string_run(i64 %p$s, i64 %t$83, i64 %t$86)
+  %t$87 = musttail call i64 @stdlib.json.p_string_run(i64 %p$s, i64 %t$83, i64 %t$86) noinline
   ret i64 %t$87
 else_80:
   %t$88 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.152, i64 0, i32 1, i64 0
@@ -16621,7 +16621,7 @@ else_80:
 then_91:
   %t$93 = add i64 0, 1
   %t$94 = add i64 %p$i, %t$93
-  %t$95 = musttail call i64 @stdlib.json.p_unicode(i64 %p$s, i64 %t$94, i64 %p$acc)
+  %t$95 = musttail call i64 @stdlib.json.p_unicode(i64 %p$s, i64 %t$94, i64 %p$acc) noinline
   ret i64 %t$95
 else_91:
   %t$96 = call i64 @sprout_alloc_obj(i64 0, i64 0)
@@ -17671,7 +17671,7 @@ else_6:
   %t$106 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$77, label %then_26, label %else_26
 then_26:
-  %t$28 = musttail call i64 @stdlib.json.p_object(i64 %p$s, i64 %t$0)
+  %t$28 = musttail call i64 @stdlib.json.p_object(i64 %p$s, i64 %t$0) noinline
   ret i64 %t$28
 else_26:
   %t$29 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.166, i64 0, i32 1, i64 0
@@ -17688,7 +17688,7 @@ else_26:
   %t$112 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$76, label %then_32, label %else_32
 then_32:
-  %t$34 = musttail call i64 @stdlib.json.p_array(i64 %p$s, i64 %t$0)
+  %t$34 = musttail call i64 @stdlib.json.p_array(i64 %p$s, i64 %t$0) noinline
   ret i64 %t$34
 else_32:
   %t$35 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.167, i64 0, i32 1, i64 0
