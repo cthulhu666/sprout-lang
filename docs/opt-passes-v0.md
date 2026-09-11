@@ -1,0 +1,183 @@
+# Sprout-level optimization passes (CSE, LICM) and the A/B harness — v0
+
+**Status:** proposed, 2026-09-11. Nothing here is implemented. No syntax, typing-rule,
+evaluation-order or diagnostic change — these are semantics-preserving passes plus measurement
+tooling, so `spec-v0.md` is untouched.
+
+Scope correction up front: **DCE already exists.** `stdlib/compiler/dce.sprout` implements dead-let
+elimination and declaration reachability, wired at `compiler.sprout:554`/`:624`, with a purity
+oracle (`is_pure_callee_type`) that reads the effect row. The new passes are CSE and LICM; DCE is
+the shape they copy.
+
+## Problem
+
+`-O2` already runs on every Sprout binary (`justfile:133` and ~20 sibling sites), so LLVM's
+`EarlyCSE`, `GVN`, `LICM` and `ADCE` are present. They fire on scalar operations and never on
+Sprout-level calls, for two reasons visible in the emitted IR:
+
+1. **The shadow stack makes every function look like it clobbers memory.** Every rooted value gets
+   an `alloca` whose address is passed to an opaque external call
+   (`tests/golden/ir/examples__aoc_2025_day_1.sprout.ll:393-396`):
+
+   ```llvm
+   %t$8 = alloca i64
+   store i64 %t$6, ptr %t$8
+   %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)   ; alloca escapes
+   %t$7 = call i64 @print_value(i64 %t$6)
+   ```
+
+   LLVM's `FunctionAttrs` therefore infers `memory(readwrite)` on essentially every
+   allocating Sprout function. Neither GVN nor LICM will dedupe or hoist a call it believes
+   writes arbitrary memory.
+
+2. **No LTO.** `clang a.ll b.c c.c -O2` compiles each translation unit separately, so `runtime/*.c`
+   bodies are invisible to the Sprout IR unit and every runtime import is a bare `declare` with no
+   attributes. Already filed in `BACKLOG.md` as "The emitted LLVM `declare`s carry no
+   attributes".
+
+The fact that licenses CSE and LICM — purity, from the effect row — is erased during lowering
+and never reaches LLVM in any form. The compiler knows it; the backend cannot.
+
+## Goals
+
+- CSE and LICM over Sprout-level calls, at the typed-AST tier where the effect row is still present.
+- An A/B harness that measures a pass ON vs OFF from **one** compiler build.
+- Static per-pass counters usable as a CI regression detector.
+
+## Non-goals
+
+- Re-implementing scalar CSE/LICM. LLVM does that well and already runs.
+- Any change to `-O2`, the rooting model, or the shadow stack.
+- An optimization that is not measurable with the harness in M0. If it cannot be measured, it does
+  not land.
+
+## Prior art
+
+The decision is where these passes live when a language has both its own typed IR and an LLVM
+backend. Every row verified against a primary source.
+
+| language | CSE | loop-invariant motion | where |
+|---|---|---|---|
+| **GHC** | `-fcse`, "off but enabled by `-O`" | `-ffull-laziness`, "floats let-bindings outside enclosing lambdas, in the hope they will be thereby computed less often"; same default | Core, its own IR — unchanged whether the backend is NCG or `-fllvm` |
+| **Swift** | no CSE pass in the current `Passes.def`; `redundant-load-elimination` instead | `PASS(LoopInvariantCodeMotion, "loop-invariant-code-motion", ...)`, `include/swift/SILOptimizer/PassManager/Passes.def:159` | SIL, above LLVM |
+| **Rust** | leans on LLVM | leans on LLVM | MIR passes exist, but the stated aim is "it means that LLVM has less work to do"; the distinctive win is that MIR "is generic (not monomorphized yet) [...] so all of the monomorphizations are cheaper" |
+| **OCaml (Flambda)** | not named | not named as LICM, but specialises on **invariant parameters**: arguments that "during the execution of the recursive function(s) themselves [...] never change" | its own IR |
+
+**Where they diverge, and why it matters here.** Rust delegates because its IR lowers cleanly to
+LLVM's memory model and it has no GC shadow stack obscuring effects. GHC and Swift keep the passes
+at their own IR because the licensing fact — purity for GHC, ownership/ARC for Swift — lives in
+their IR and dies below it. Sprout is in the second group for exactly GHC's reason. This is the same
+argument that put `dce.sprout` at the typed-AST tier rather than asking LLVM to do it.
+
+Flambda is the most directly useful row: its *invariant parameter* analysis over recursive functions
+is precisely the loop notion M2 proposes below, arrived at independently by a language with the same
+"loops are recursion" shape.
+
+## Implementation overview
+
+### M0 — harness first, no new optimization
+
+The instrument before the experiment, and the baseline M1/M2 are measured against. Today the A/B
+ritual is manual; `bench/unboxed_read/bench.sh:5-8` documents it:
+
+> This times a SINGLE compiler; the ON-vs-OFF A/B [...] is produced by building the compiler
+> once with the extension and once without (stash the `ir_rooting` change, rebuild from seed).
+
+Stash-and-rebootstrap per measurement is slow and cannot run in CI.
+
+**Toggle and stats as environment variables**, following the established precedent —
+`compiler.sprout:538` already has `SPROUT_VERIFY_DISPATCH_OFF` as a pass kill-switch and `:445`
+`SPROUT_VERIFY_DISPATCH_STATS` as a stats reporter:
+
+```
+SPROUT_OPT_OFF=cse,licm,dle    # comma list; absent = all on
+SPROUT_OPT_STATS=1             # eprint static counts per pass
+```
+
+Env vars rather than CLI flags: `compile_driver.sprout:446-482` dispatches on positional list
+patterns, so an orthogonal flag would have to be threaded through every arm. `compiler.sprout`
+already imports `stdlib.env`, so this adds no import and no bundle change, and stays inside the
+existing seed closure.
+
+`dce.elim_program` is pure and stays pure. Read the flag in the enclosing `!{IO}`
+`compile_phase_lower_with_roots` and pass an `OptConfig` record down.
+
+**Retrofit the toggle onto the existing DCE first.** This is what makes M0 self-validating:
+`SPROUT_OPT_OFF=dle` must produce a measurably different binary on day one. A harness that cannot
+detect a pass already known to do work will not detect CSE either.
+
+**`bench/optpasses/` and `just bench-opt`.** One compiler build; each program compiled twice (OFF,
+ON) and run warm; emits a table and writes `bench/results-<date>-opt.md` in the existing house
+format. Corpus from what already exists: `astar`, `nqueens`, `math_transcendental`, `unboxed_read`,
+`digit_recognizer` — plus **the compiler compiling itself**, the largest real Sprout program there
+is and the one whose speed is felt daily.
+
+Two correctness instruments come free: `just ir-golden-diff` over the 64 files in `tests/golden/ir/`
+is the review artifact for what a pass actually did, and `SPROUT_OPT_STATS` counts in CI catch a
+pass that silently falls to zero after an unrelated change.
+
+### M1 — CSE
+
+Narrowest useful scope: within one function body, two calls with the same callee, syntactically
+equal arguments, and no intervening effectful step become one binding and a reuse. Reuses
+`dce.is_pure_callee_type` verbatim.
+
+Runs **before** DLE. `dce.sprout:17-19` records that DLE precedes reachability because shrinking
+bodies can only remove references; CSE sits one step earlier for the same reason — it creates
+shared bindings, which can only make more things dead.
+
+### M2 — LICM (gate on M1's measured results)
+
+Sprout has no loops, only recursion that TCO lowers. So loop-invariant becomes: *in a self-recursive
+function, argument `i` is passed unchanged at every recursive call site* — a syntactic check on
+call sites, and genuinely easier here than after lowering, where it is dataflow through phis.
+Flambda reached the same formulation.
+
+Hoisting needs a worker/wrapper split: compute once in the wrapper, pass in as an extra parameter.
+The CPR machinery already performs this shape, which is both the feasibility argument and the reason
+this is a milestone rather than a follow-up commit.
+
+### M3 — the LLVM-side lever (orthogonal)
+
+The `BACKLOG.md` entry "The emitted LLVM `declare`s carry no attributes" — plus an `-flto`
+experiment (zero `flto` hits in the justfile today), which would let LLVM see runtime bodies and
+infer attributes on `vector_length` and `vector_get_direct` itself. That entry already records the
+trap: stack promotion is entangled with precise-GC rooting, so the safe attribute subset must be
+established first. Note that `readnone` is **false** for a pure Sprout function — it allocates,
+therefore it writes memory.
+
+## Preconditions and risks
+
+**Allocation identity.** Sprout-pure functions allocate, so deduping two calls makes both sites
+share one heap object. No `ptr_eq`/`physical_eq`/`same_object` exists in the prelude or
+`runtime/APPROVED_BUILTINS`, so object identity is unobservable and the sharing is sound. This is a
+**precondition of the pass, not a permanent property** — it belongs in the pass file header the
+way `ir_rooting.sprout:30-46` documents its non-allocating allow-list, so that adding a
+`ref`-identity builtin later trips over it.
+
+**LICM can lose.** Hoisting extends a value's live range, which means more GC roots held across more
+trigger points. In a precise-GC language that can cost more than the recomputation saved. Expect a
+regression on at least one benchmark; the harness is what settles it rather than argument.
+
+**Bootstrap.** These passes change the compiler's own emitted IR and the compiler compiles itself.
+Every M1/M2 landing needs `just refresh-seed` (DoD #9), the 2-step protocol if the IR shifts far,
+and a full 64-file golden regeneration (DoD #12) with the diff **read** before staging. Golden churn
+is the point, not noise: a CSE that produces no golden diff has proven it does nothing.
+
+**Convergence.** The bootstrap fixed point still holds — stage1 and stage2 implement the same
+pass, so both apply it identically — but the first landing needs the 2-step protocol
+(`docs/debugging.md` §2-Step Bootstrap Protocol).
+
+## Compatibility and migration
+
+None. The passes are semantics-preserving and default ON; `SPROUT_OPT_OFF` exists for measurement
+and bisection, not as a supported user-facing knob.
+
+## Tests
+
+- M0: a test asserting `SPROUT_OPT_OFF=dle` changes emitted IR (the harness's own self-check), and
+  that an unset variable leaves the pipeline byte-identical to today.
+- M1/M2: per-pass unit tests on the typed AST — fires where it should, and does **not** fire
+  across an intervening effectful step. Effect-row negatives matter more than positives here.
+- Conformance: existing suites must be byte-identical with the pass OFF, which is the regression
+  net.
