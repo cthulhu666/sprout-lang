@@ -41,6 +41,12 @@ fn main() -> Unit !{IO} =
     check_false("unrecognised alongside known still disables the known one",
                 opt_config.enabled(parsed(Just("dle,dse")), opt_config.Dle)),
     check_eq("pass_name round-trips", opt_config.pass_name(opt_config.Licm), "licm"),
+    # A declared-but-unimplemented pass must be distinguishable from a live one.
+    # `SPROUT_OPT_OFF=cse` parses, disables nothing, and would otherwise clear CSE
+    # of a fault it was never given the chance to have.
+    check_true("dle is implemented", opt_config.implemented(opt_config.Dle)),
+    check_false("cse is not implemented yet", opt_config.implemented(opt_config.Cse)),
+    check_false("licm is not implemented yet", opt_config.implemented(opt_config.Licm)),
     check_true("stats=1 on", stats_of(Just("1"))),
     check_true("stats=yes on", stats_of(Just("yes"))),
     check_false("stats=0 off", stats_of(Just("0"))),

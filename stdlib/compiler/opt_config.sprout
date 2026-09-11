@@ -39,6 +39,17 @@ export fn pass_from_name(name: String) -> Maybe Pass =
 export fn all_passes() -> List Pass =
   [Dle, Cse, Licm]
 
+# Which of those the pipeline actually runs. `Cse`/`Licm` are named before they
+# exist because the switch's vocabulary is the roadmap — but disabling one must
+# SAY it did nothing, or someone bisecting a miscompile with `SPROUT_OPT_OFF=cse`
+# clears CSE of a fault it was never given the chance to have. Flip the arm in
+# the same change that lands the pass.
+export fn implemented(p: Pass) -> Bool =
+  match p with
+  | Dle -> true
+  | Cse -> false
+  | Licm -> false
+
 export fn parse(off: Maybe String, stats: Maybe String) -> OptConfig =
   let names = requested_names(off)
   in OptConfig(
@@ -51,6 +62,7 @@ export fn from_env() -> OptConfig !{IO} =
   do
     let cfg = parse(env.get("SPROUT_OPT_OFF"), env.get("SPROUT_OPT_STATS"))
     _ <- warn_unrecognised(cfg.unrecognised)
+    _ <- warn_unimplemented(list_filter(is_pending, cfg.disabled))
     cfg
 
 export fn enabled(cfg: OptConfig, p: Pass) -> Bool =
@@ -81,6 +93,16 @@ fn truthy(v: Maybe String) -> Bool =
 
 fn is_truthy_word(v: String) -> Bool =
   ! (string.is_empty(v) || v == "0" || v == "false" || v == "off")
+
+fn is_pending(p: Pass) -> Bool =
+  ! implemented (p)
+
+fn warn_unimplemented(passes: List Pass) -> Unit !{IO} =
+  match passes with
+  | [] -> ()
+  | _ ->
+      eprint("[opt] warning: SPROUT_OPT_OFF names a pass that is not implemented yet: "
+             ++ string.join(",", list_map(pass_name, passes)) ++ " — nothing was disabled")
 
 fn warn_unrecognised(names: List String) -> Unit !{IO} =
   match names with

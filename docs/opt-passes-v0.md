@@ -89,7 +89,7 @@ What shipped, and where:
 | first baseline | `bench/results-2026-09-11-opt.md` |
 
 **The prediction below was wrong, and the measurement is the point of having built this.** DLE
-removes **zero** nodes from every program in the bench corpus, the 110 054-node compiler included,
+removes **zero** nodes from every program in the bench corpus, the 110 096-node compiler included,
 so `SPROUT_OPT_OFF=dle` does *not* change a real binary. Self-validation therefore comes from
 `tests/opt_harness/dead_let.spr` — a deliberately wasteful shape where the pass removes 6 nodes and
 the switch demonstrably reaches emitted IR — asserted by `just opt-harness-check` on every CI run.
@@ -98,6 +98,12 @@ ever removed from real code.
 
 `dce.elim_unreachable`, the half of `dce.sprout` that *does* do large work, is not under the switch
 — it runs inside `ir_pipeline`, not at the `compiler.sprout` seam. Filed in `BACKLOG.md`.
+
+`Pass` names `Cse` and `Licm` before they exist, so the switch's vocabulary is the roadmap. That
+only works because `opt_config.implemented` marks them pending and `SPROUT_OPT_OFF=cse` warns
+"nothing was disabled" — without it the knob quietly acquits a pass that never ran. **Flip the arm
+in the change that lands the pass**; `just opt-harness-check` asserts the warning, so a forgotten
+flip shows up as a red gate rather than a bad bisection.
 
 The rest of this section is the design as approved, kept because it is still the rationale.
 

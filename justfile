@@ -1167,7 +1167,10 @@ opt-harness-check: bootstrap-from-seed
     || { echo "opt-harness-check: no ON stats line" >&2; cat "$TMPD/on.err" >&2; exit 1; }
   grep -q '^\[opt\] dle off ' "$TMPD/off.err" \
     || { echo "opt-harness-check: SPROUT_OPT_OFF=dle did not disable the pass" >&2; exit 1; }
-  removed=$(sed -n 's/.*removed=\([0-9-]*\).*/\1/p' "$TMPD/on.err")
+  # Anchored to the dle line: unanchored, a second instrumented pass makes this a
+  # multi-line string and the -gt below fails as a syntax error, red-lighting this
+  # gate for a reason that has nothing to do with dle.
+  removed=$(sed -n 's/^\[opt\] dle .*removed=\(-\{0,1\}[0-9]\{1,\}\).*/\1/p' "$TMPD/on.err")
   [ "${removed:-0}" -gt 0 ] \
     || { echo "opt-harness-check: DLE removed $removed nodes from the fixture — it no longer fires" >&2; exit 1; }
 
@@ -1192,6 +1195,13 @@ opt-harness-check: bootstrap-from-seed
     || { echo "opt-harness-check: an unknown pass name was accepted silently" >&2; exit 1; }
   cmp -s "$TMPD/on.ll" "$TMPD/bogus.ll" \
     || { echo "opt-harness-check: an unknown pass name changed the output" >&2; exit 1; }
+
+  # A pass that is declared but not yet implemented must say so — otherwise
+  # `SPROUT_OPT_OFF=cse` clears CSE of a fault it never had a chance to have.
+  SPROUT_OPT_OFF=cse "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$F" \
+    > /dev/null 2>"$TMPD/pending.err"
+  grep -q 'not implemented yet' "$TMPD/pending.err" \
+    || { echo "opt-harness-check: disabling an unimplemented pass looked like it took effect" >&2; exit 1; }
 
   echo "==> opt-harness-check ✓ (dle removed $removed nodes; OFF restores them)"
 
