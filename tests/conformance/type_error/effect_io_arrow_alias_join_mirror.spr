@@ -1,0 +1,18 @@
+module main
+
+# The mirror of effect_io_arrow_alias_join.spr: the IO-slot arm is written first.
+# This order already rejected while the other laundered, which is the asymmetry
+# a join must not have.
+
+fn shout(n: Int) -> Int !{IO} =
+  do
+    print("io")
+    n + 1
+
+fn f1(cb: Int -> Int !{IO}) -> Int = 0
+
+fn f2(cb: Int -> Int) -> Int = cb(1)
+
+fn use_it(g: (Int -> Int !{e}) -> Int, cb: Int -> Int !{e}) -> Int !{e} = g(cb)
+
+fn main() -> Unit !{IO} = print(int_to_string(use_it(if false then f1 else f2, shout)))

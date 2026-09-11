@@ -1,0 +1,22 @@
+module main
+
+# The joined slot's pure ceiling must survive being ALIASED to another open
+# effect variable — here the `!{e}` of the signature the joined value is passed
+# to. A ceiling keyed on the name that became the alias is unreachable
+# afterwards, and `shout` then ran inside `f2`, whose slot is declared pure
+# (docs/effect-subsumption-v0.md §6.5d).
+#
+# Mirror: effect_io_arrow_alias_join_mirror.spr. Both orders must reject.
+
+fn shout(n: Int) -> Int !{IO} =
+  do
+    print("io")
+    n + 1
+
+fn f1(cb: Int -> Int !{IO}) -> Int = 0
+
+fn f2(cb: Int -> Int) -> Int = cb(1)
+
+fn use_it(g: (Int -> Int !{e}) -> Int, cb: Int -> Int !{e}) -> Int !{e} = g(cb)
+
+fn main() -> Unit !{IO} = print(int_to_string(use_it(if true then f2 else f1, shout)))
