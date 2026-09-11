@@ -1,0 +1,377 @@
+module stdlib.tui.widgets.tree
+
+# A hierarchy with one node selected. Design: docs/tui-tree-v0.md.
+#
+# What leaves the widget is a PATH, never a row index: the visible rows are a
+# flattening, so an index below an expanded node names a different node the
+# moment it opens (§4.1).
+
+import stdlib.string as string
+import stdlib.tui.event as event
+import stdlib.tui.geometry as geometry
+import stdlib.tui.screen as scr
+import stdlib.tui.style as style
+import stdlib.tui.text as text
+import stdlib.tui.widget as widget
+import stdlib.tui.widgets.list_view as list_view
+import stdlib.tui.widgets.paint as paint
+
+# Three states, because "not yet read" is not "empty" (§4.2). Collapsing them
+# renders an unread directory as a leaf, with no way to open it; `Loaded(Nil)`
+# is one that was read and had nothing in it.
+export type Children (..) =
+  | NoChildren
+  | Unread
+  | Loaded (List Node)
+
+export type Node = (label: String, children: Children)
+
+# `ListStyle` is reused rather than copied, so a theme that styles a list
+# styles a tree (§4.6). `page` is told rather than measured, for `list_view`
+# §4.5's reason: a pure handler never learns the height it was drawn at.
+export type TreeOpts m = (start: List String, page: Int,
+                          look: list_view.ListStyle,
+                          on_highlight: Maybe (List String -> m),
+                          on_expand: Maybe (List String -> m),
+                          on_content: Maybe (m -> Maybe(List Node)))
+
+export fn tree_opts() -> TreeOpts m =
+  TreeOpts(start = Nil, page = 10, look = list_view.list_style_default(),
+           on_highlight = Nothing, on_expand = Nothing, on_content = Nothing)
+
+# ── the widget ──────────────────────────────────────────────────────────────
+
+# INVARIANTS — `sel` is a path present in the flattening whenever the forest
+# has any visible row, which `started` establishes and `settled` maintains.
+# `open` holds the paths the user has opened, keyed by `key_of`; it survives a
+# content replacement, or refreshing a tree would collapse what the user spent
+# ten keystrokes opening (§4.3). `has_focus` is the tree's own copy of "the
+# keyboard is mine", set by the ring (docs/tui-focus-v0.md §4.1).
+type Tr m = (id: widget.WidgetId, roots: List Node,
+             on_select: List String -> m, opts: TreeOpts m, sel: List String,
+             open: Dict Bool, has_focus: Bool)
+
+type alias Reply m = Maybe(Tr m, List m, List(widget.Cmd m))
+
+# A visible row. `depth` drives the indent and `mark` the expander glyph; both
+# are derived while flattening, since neither is a property of the node alone.
+type Mark (..) =
+  | MLeaf
+  | MClosed
+  | MOpen
+
+type Row = (path: List String, label: String, depth: Int, mark: Mark)
+
+# Everything a tree reacts to arrives addressed, so the broadcast is idle.
+fn tr_on_event(t: Tr m,
+               ev: event.Event) -> (Tr m, List m, List(widget.Cmd m)) =
+  (t, Nil, Nil)
+
+fn tr_handler(t: Tr m, d: widget.Delivery m) -> Reply m =
+  match d with
+  # Declining is what keeps an application's other traffic flowing past a
+  # widget it was merely addressed through.
+  | widget.ToMsg msg -> refilled(t, widget.decoded(t.opts.on_content, msg))
+  | widget.ToFocus x -> Just(((t with (has_focus = x)), Nil, Nil))
+  | widget.ToEvent e -> if t.has_focus then tr_event(t, e) else Nothing
+
+fn tr_event(t: Tr m, e: event.Event) -> Reply m =
+  match e with
+  | event.KeyPress k mods -> tr_key(t, k, mods)
+  | _ -> Nothing
+
+# ctrl-Down and alt-Down are an application's bindings, not a move.
+fn tr_key(t: Tr m, k: event.Key, mods: event.Mods) -> Reply m =
+  if event.mods_is_chord(mods) then Nothing else tr_plain(t, k)
+
+# Tab, Esc, the function keys and the letters all fall through — a tree owns
+# its selection, not the keyboard.
+fn tr_plain(t: Tr m, k: event.Key) -> Reply m =
+  match k with
+  | event.KDown -> moved_by(t, 1)
+  | event.KUp -> moved_by(t, 0 - 1)
+  | event.KPageDown -> moved_by(t, t.opts.page)
+  | event.KPageUp -> moved_by(t, 0 - t.opts.page)
+  | event.KHome -> moved_to(t, 0)
+  | event.KEnd -> moved_to(t, list_length(rows_of(t)) - 1)
+  | event.KRight -> went_right(t)
+  | event.KLeft -> went_left(t)
+  | event.KEnter -> chosen(t)
+  | _ -> Nothing
+
+# ── the flattening ──────────────────────────────────────────────────────────
+
+# The open set is keyed on the path joined with a newline, which no label a
+# terminal can show contains — `fs.path`'s separator would collide with a
+# label that legitimately holds one.
+fn key_of(path: List String) -> String = string.join("\n", path)
+
+fn is_open(t: Tr m, path: List String) -> Bool =
+  match dict_get(key_of(path), t.open) with
+  | Just _ -> true
+  | Nothing -> false
+
+# Built reversed and turned once, so appending a row stays O(1).
+fn rows_of(t: Tr m) -> List Row =
+  list_reverse(flat_nodes(t, t.roots, Nil, 0, Nil))
+
+fn flat_nodes(t: Tr m, ns: List Node, here: List String, depth: Int,
+              acc: List Row) -> List Row =
+  match ns with
+  | Nil -> acc
+  | [n | rest] ->
+      flat_nodes(t, rest, here, depth, flat_one(t, n, here, depth, acc))
+
+fn flat_one(t: Tr m, n: Node, here: List String, depth: Int,
+            acc: List Row) -> List Row =
+  let path = here ++ [n.label]
+      row = Row(path = path, label = n.label, depth = depth,
+                mark = mark_of(t, n, path))
+  in if is_open(t, path) then
+       flat_kids(t, n.children, path, depth + 1, Cons(row, acc))
+     else Cons(row, acc)
+
+# An open `Unread` node contributes no rows: the read is in flight and the
+# widget has nothing to show yet.
+fn flat_kids(t: Tr m, c: Children, path: List String, depth: Int,
+             acc: List Row) -> List Row =
+  match c with
+  | Loaded ns -> flat_nodes(t, ns, path, depth, acc)
+  | _ -> acc
+
+fn mark_of(t: Tr m, n: Node, path: List String) -> Mark =
+  match n.children with
+  | NoChildren -> MLeaf
+  | _ -> if is_open(t, path) then MOpen else MClosed
+
+fn same_path(a: List String, b: List String) -> Bool =
+  match (a, b) with
+  | (Nil, Nil) -> true
+  | (Cons x xs, Cons y ys) -> if x == y then same_path(xs, ys) else false
+  | _ -> false
+
+fn index_of(rows: List Row, path: List String, i: Int) -> Int =
+  match rows with
+  | Nil -> 0
+  | [r | rest] ->
+      if same_path(r.path, path) then i else index_of(rest, path, i + 1)
+
+fn present(rows: List Row, path: List String) -> Bool =
+  match rows with
+  | Nil -> false
+  | [r | rest] -> if same_path(r.path, path) then true else present(rest, path)
+
+fn at_index(rows: List Row, i: Int) -> Maybe Row =
+  match rows with
+  | Nil -> Nothing
+  | [r | rest] -> if i <= 0 then Just(r) else at_index(rest, i - 1)
+
+# ── walking to a node ───────────────────────────────────────────────────────
+
+# The FIRST sibling wins a repeated label. That is §4.1's documented
+# ambiguity: a filesystem cannot produce it, and a general caller must make its
+# labels unique.
+fn named(ns: List Node, seg: String) -> Maybe Node =
+  match ns with
+  | Nil -> Nothing
+  | [n | rest] -> if n.label == seg then Just(n) else named(rest, seg)
+
+fn kids(c: Children) -> List Node =
+  match c with
+  | Loaded ns -> ns
+  | _ -> Nil
+
+fn node_at(ns: List Node, path: List String) -> Maybe Node =
+  match path with
+  | Nil -> Nothing
+  | [seg] -> named(ns, seg)
+  | [seg | rest] -> descended(named(ns, seg), rest)
+
+fn descended(n: Maybe Node, rest: List String) -> Maybe Node =
+  match n with
+  | Nothing -> Nothing
+  | Just nd -> node_at(kids(nd.children), rest)
+
+fn parent_of(path: List String) -> Maybe (List String) =
+  match path with
+  | Nil -> Nothing
+  | [_] -> Nothing
+  | _ -> Just(without_last(path))
+
+fn without_last(xs: List a) -> List a =
+  match list_reverse(xs) with
+  | Nil -> Nil
+  | [_ | rest] -> list_reverse(rest)
+
+# ── where the selection goes ────────────────────────────────────────────────
+
+fn moved_to(t: Tr m, i: Int) -> Reply m = settled(t, rows_of(t), i)
+
+fn moved_by(t: Tr m, d: Int) -> Reply m =
+  landed(t, rows_of(t), d)
+
+fn landed(t: Tr m, rows: List Row, d: Int) -> Reply m =
+  settled(t, rows, index_of(rows, t.sel, 0) + d)
+
+# Every move clamps rather than refusing, so a page runs to the end and stops
+# there. An empty forest has no path to name, so the key is still claimed —
+# the application must not see a stray Down — and nothing is announced.
+fn settled(t: Tr m, rows: List Row, want: Int) -> Reply m =
+  match at_index(rows, clamped_into(list_length(rows), want)) with
+  | Nothing -> Just((t, Nil, Nil))
+  | Just r -> spoken(t, r.path)
+
+fn clamped_into(count: Int, i: Int) -> Int =
+  if count == 0 then 0
+  else if i < 0 then 0
+  else if i >= count then count - 1
+  else i
+
+# A move that lands where it started says nothing: Down at the last row is the
+# tree's key, but there is no new selection to report.
+fn spoken(t: Tr m, path: List String) -> Reply m =
+  if same_path(path, t.sel) then Just((t, Nil, Nil))
+  else Just(((t with (sel = path)), highlighted(t, path), Nil))
+
+fn highlighted(t: Tr m, path: List String) -> List m =
+  maybe_with_default(Nil, map(spoken_at(path, _), t.opts.on_highlight))
+
+fn spoken_at(path: List String, say: List String -> m) -> List m = [say(path)]
+
+fn chosen(t: Tr m) -> Reply m =
+  if present(rows_of(t), t.sel) then Just((t, [t.on_select(t.sel)], Nil))
+  else Just((t, Nil, Nil))
+
+# ── opening and closing ─────────────────────────────────────────────────────
+
+fn went_right(t: Tr m) -> Reply m =
+  match node_at(t.roots, t.sel) with
+  | Nothing -> Just((t, Nil, Nil))
+  | Just n -> right_on(t, n)
+
+# Opening an UNREAD node asks the application to read it; a LOADED one asks
+# nothing, or collapsing and reopening a directory would hit the disk (§4.4).
+fn right_on(t: Tr m, n: Node) -> Reply m =
+  match n.children with
+  | NoChildren -> Just((t, Nil, Nil))
+  | Unread -> if is_open(t, t.sel) then Just((t, Nil, Nil)) else opened(t, true)
+  | Loaded cs -> if is_open(t, t.sel) then into_first(t, cs) else opened(t, false)
+
+fn opened(t: Tr m, ask: Bool) -> Reply m =
+  Just(((t with (open = dict_set(key_of(t.sel), true, t.open))),
+        if ask then asked(t, t.sel) else Nil, Nil))
+
+fn asked(t: Tr m, path: List String) -> List m =
+  maybe_with_default(Nil, map(ask_at(path, _), t.opts.on_expand))
+
+fn ask_at(path: List String, say: List String -> m) -> List m = [say(path)]
+
+# An open node with children keeps the child directly below it in the
+# flattening, so "into" is one step down. An open one with none stays put.
+fn into_first(t: Tr m, cs: List Node) -> Reply m =
+  match cs with
+  | Nil -> Just((t, Nil, Nil))
+  | [_ | _] -> moved_by(t, 1)
+
+# Left closes what is open and climbs otherwise, which is what makes a deep
+# tree escapable without reaching for Up.
+fn went_left(t: Tr m) -> Reply m =
+  if is_open(t, t.sel) then closed_here(t) else to_parent(t)
+
+fn closed_here(t: Tr m) -> Reply m =
+  Just(((t with (open = dict_remove(key_of(t.sel), t.open))), Nil, Nil))
+
+fn to_parent(t: Tr m) -> Reply m =
+  match parent_of(t.sel) with
+  | Nothing -> Just((t, Nil, Nil))
+  | Just p -> spoken(t, p)
+
+# ── content that arrives by message ─────────────────────────────────────────
+
+fn refilled(t: Tr m, c: Maybe (List Node)) -> Reply m =
+  match c with
+  | Nothing -> Nothing
+  | Just ns -> replaced(t with (roots = ns))
+
+# The open set and the selection both survive. A selection the replacement no
+# longer contains moves, and THAT move is announced — the caller did not ask
+# for it and cannot predict it (docs/tui-content-update-v0.md §9.1).
+fn replaced(t: Tr m) -> Reply m =
+  kept_or_moved(t, rows_of(t))
+
+fn kept_or_moved(t: Tr m, rows: List Row) -> Reply m =
+  if present(rows, t.sel) then Just((t, Nil, Nil)) else settled(t, rows, 0)
+
+# ── what it paints ──────────────────────────────────────────────────────────
+
+# The window is a function of the selection, so there is no scroll position to
+# drift out of step with it (`list_view` §4.4).
+fn first_shown(sel: Int, rows: Int) -> Int =
+  if sel < rows then 0 else sel - rows + 1
+
+fn mark_text(m: Mark) -> String =
+  match m with
+  | MLeaf -> " "
+  | MClosed -> ">"
+  | MOpen -> "v"
+
+fn line_of(row: Row) -> String =
+  mark_text(row.mark) ++ " " ++ string.repeat(" ", row.depth * 2) ++ row.label
+
+fn tr_render(t: Tr m, r: geometry.Region, s: scr.Screen) -> Unit !{IO} =
+  drawn(t, r, s, rows_of(t), 0,
+        first_shown(index_of(rows_of(t), t.sel, 0), geometry.region_rows(r)))
+
+fn drawn(t: Tr m, r: geometry.Region, s: scr.Screen, rows: List Row, i: Int,
+         start: Int) -> Unit !{IO} =
+  match rows with
+  | Nil -> ()
+  | [row | rest] ->
+      if i - start >= geometry.region_rows(r) then ()
+      else drawn_step(t, r, s, row, rest, i, start)
+
+fn drawn_step(t: Tr m, r: geometry.Region, s: scr.Screen, row: Row,
+              rest: List Row, i: Int, start: Int) -> Unit !{IO} = do
+  if i < start then ()
+  else paint.line(s, r, i - start, line_of(row), style_at(t, row))
+  drawn(t, r, s, rest, i + 1, start)
+
+fn style_at(t: Tr m, row: Row) -> style.Style =
+  if ! same_path (row.path, t.sel) then t.opts.look.normal
+  else if t.has_focus then t.opts.look.selected_focused
+  else t.opts.look.selected
+
+# Fills what it is given on both axes: a tree scrolls rather than demanding the
+# height its node count would ask for.
+fn tr_measure(t: Tr m, avail: geometry.Size) -> widget.Measured =
+  widget.greedy_size(geometry.Size(text.widest(list_map(line_of, rows_of(t))),
+                                   list_length(rows_of(t))))
+
+fn tr_widget(t: Tr m) -> widget.Widget m =
+  widget.Widget(widget.View(state = t, on_event = tr_on_event,
+                            route = widget.route_when(t.id, tr_handler, _, _,
+                                                      _),
+                            render = tr_render, measure = tr_measure))
+
+export fn tree(id: widget.WidgetId, roots: List Node,
+               on_select: List String -> m) -> widget.Widget m =
+  tree_with(id, roots, on_select, tree_opts())
+
+# `opts.start` goes through the same presence check as every later move: a path
+# that names nothing must not leave the tree unselectable.
+export fn tree_with(id: widget.WidgetId, roots: List Node,
+                    on_select: List String -> m,
+                    opts: TreeOpts m) -> widget.Widget m =
+  tr_widget(started(Tr(id = id, roots = roots, on_select = on_select,
+                       opts = opts, sel = opts.start, open = dict_empty(),
+                       has_focus = false)))
+
+fn started(t: Tr m) -> Tr m = rooted(t, rows_of(t))
+
+fn rooted(t: Tr m, rows: List Row) -> Tr m =
+  if present(rows, t.sel) then t else (t with (sel = first_path(rows)))
+
+fn first_path(rows: List Row) -> List String =
+  match rows with
+  | Nil -> Nil
+  | [r | _] -> r.path

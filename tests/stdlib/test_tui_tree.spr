@@ -1,0 +1,345 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.tui.event as event
+import stdlib.tui.geometry as g
+import stdlib.tui.screen as scr
+import stdlib.tui.widget as widget
+import stdlib.tui.widgets.container as ct
+import stdlib.tui.widgets.focus as focus
+import stdlib.tui.widgets.tree as tr
+
+# A hierarchy with one node selected. Design: docs/tui-tree-v0.md.
+#
+# What leaves the widget is a PATH, never a row index: the rows are a
+# flattening, so an index below an expanded node means something different the
+# moment it opens (§4.1). A neighbour probe sits beside the tree so a key it
+# declines is visible as a broadcast rather than as silence.
+
+type Msg (..) deriving (Eq, ToString) =
+  | Chose (List String)
+  | Lit (List String)
+  | Expanded (List String)
+  | Noted String
+  # Replacement trees. The payload is a TAG rather than a `List tr.Node`: the
+  # node type is mutually recursive with `Children`, and a message that carried
+  # one would drag that through `deriving` for no test value.
+  | Reload
+  | ReloadSrc
+
+type alias Says = List Msg
+type alias Asks = List(widget.Cmd Msg)
+
+# ── the forest ──────────────────────────────────────────────────────────────
+
+fn tree_id() -> widget.WidgetId = widget.WidgetId("tr")
+
+fn leaf(name: String) -> tr.Node =
+  tr.Node(label = name, children = tr.NoChildren)
+
+fn unread(name: String) -> tr.Node =
+  tr.Node(label = name, children = tr.Unread)
+
+fn loaded(name: String, cs: List tr.Node) -> tr.Node =
+  tr.Node(label = name, children = tr.Loaded(cs))
+
+# `src` is a directory nobody has read, `docs` one that has been, `empty` one
+# that was read and had nothing in it, `README` a file. Those are the four
+# shapes §4.2 exists to keep apart.
+fn roots() -> List tr.Node =
+  [unread("src"), loaded("docs", [leaf("guide"), leaf("api")]),
+   loaded("empty", Nil), leaf("README")]
+
+# What an application sends back after reading `src` off the disk.
+fn roots_with_src() -> List tr.Node =
+  [loaded("src", [leaf("main.spr")]),
+   loaded("docs", [leaf("guide"), leaf("api")]), loaded("empty", Nil),
+   leaf("README")]
+
+# A replacement that no longer contains the path the selection was on.
+fn roots_without_docs() -> List tr.Node =
+  [unread("src"), loaded("empty", Nil), leaf("README")]
+
+# Two siblings sharing a label — §4.1's documented ambiguity. The two differ in
+# KIND, or first-versus-last would be unobservable and the cases below would
+# pass whichever one the walk picked.
+fn roots_ambiguous() -> List tr.Node =
+  [unread("dup"), loaded("dup", [leaf("y")])]
+
+fn note_on_event(n: Int, ev: event.Event) -> (Int, Says, Asks) =
+  (n, [Noted("bcast")], Nil)
+
+fn note_render(n: Int, r: g.Region, s: scr.Screen) -> Unit !{IO} = ()
+
+fn note_measure(n: Int, avail: g.Size) -> widget.Measured =
+  widget.fixed_size(g.Size(1, 1))
+
+fn note() -> widget.Widget Msg =
+  widget.Widget(widget.View(state = 0, on_event = note_on_event,
+                            route = widget.no_route, render = note_render,
+                            measure = note_measure))
+
+fn view_of(ns: List tr.Node, o: tr.TreeOpts Msg) -> widget.Widget Msg =
+  tr.tree_with(tree_id(), ns, Chose, o)
+
+fn plain() -> tr.TreeOpts Msg = tr.tree_opts()
+
+fn lighting() -> tr.TreeOpts Msg =
+  tr.tree_opts() with (on_highlight = Just(Lit))
+
+fn expanding() -> tr.TreeOpts Msg =
+  lighting() with (on_expand = Just(Expanded))
+
+fn content_of(m: Msg) -> Maybe (List tr.Node) =
+  match m with
+  | Reload -> Just(roots_without_docs())
+  | ReloadSrc -> Just(roots_with_src())
+  | _ -> Nothing
+
+fn contenting() -> tr.TreeOpts Msg =
+  expanding() with (on_content = Just(content_of))
+
+fn ring_of(w: widget.Widget Msg) -> widget.Widget Msg =
+  focus.focus_ring([tree_id()], w)
+
+fn beside(w: widget.Widget Msg) -> widget.Widget Msg =
+  ring_of(ct.column([ct.fit(w), ct.fit(note())]))
+
+# ── observing ───────────────────────────────────────────────────────────────
+
+fn key(k: event.Key) -> event.Event = event.KeyPress(k, event.mods_none())
+
+fn chord(k: event.Key) -> event.Event = event.KeyPress(k, event.mods_ctrl())
+
+fn hit_of(r: Maybe (widget.Widget Msg, Says, Asks)) -> Bool =
+  match r with
+  | Nothing -> false
+  | Just _ -> true
+
+fn said(r: (widget.Widget Msg, Says, Asks)) -> String =
+  match r with
+  | (_, msgs, _) -> to_string(msgs)
+
+fn fed(w: widget.Widget Msg, evs: List event.Event) -> String =
+  said(widget.feed(beside(w), evs))
+
+fn moved(o: tr.TreeOpts Msg, evs: List event.Event) -> String =
+  fed(view_of(roots(), o), evs)
+
+# ── addressed deliveries ────────────────────────────────────────────────────
+
+# A declined delivery is written into the transcript rather than dropped:
+# "the widget refused" and "the widget said nothing" are the two answers this
+# file most needs to tell apart.
+fn told_all(w: widget.Widget Msg, ds: List (widget.Delivery Msg),
+            acc: Says) -> (widget.Widget Msg, Says) =
+  match ds with
+  | Nil -> (w, acc)
+  | Cons d rest -> told_step(w, d, rest, acc, widget.deliver(w, tree_id(), d))
+
+fn told_step(w: widget.Widget Msg, d: widget.Delivery Msg,
+             rest: List (widget.Delivery Msg), acc: Says,
+             r: Maybe (widget.Widget Msg, Says, Asks)) -> (widget.Widget Msg, Says) =
+  match r with
+  | Nothing -> told_all(w, rest, acc ++ [Noted("declined")])
+  | Just (w2, ms, _) -> told_all(w2, rest, acc ++ ms)
+
+fn says(ns: List tr.Node, o: tr.TreeOpts Msg,
+        ds: List (widget.Delivery Msg)) -> String =
+  match told_all(view_of(ns, o), ds, Nil) with
+  | (_, ms) -> to_string(ms)
+
+fn after_told(w: widget.Widget Msg,
+              ds: List (widget.Delivery Msg)) -> widget.Widget Msg =
+  match told_all(w, ds, Nil) with
+  | (w2, _) -> w2
+
+fn focus_on() -> widget.Delivery Msg = widget.ToFocus(true)
+
+fn pressed(k: event.Key) -> widget.Delivery Msg = widget.ToEvent(key(k))
+
+fn sent(m: Msg) -> widget.Delivery Msg = widget.ToMsg(m)
+
+# ── what the flattening shows ───────────────────────────────────────────────
+
+fn painted(w: widget.Widget Msg, cols: Int, rows: Int) -> scr.Screen !{IO} = do
+  s <- scr.screen_new(g.Size(cols, rows))
+  widget.render(w, g.Region(0, 0, cols, rows), s)
+  s
+
+fn row_text(s: scr.Screen, row: Int, col: Int, cols: Int) -> String !{IO} =
+  if col >= cols then "" else row_step(s, row, col, cols)
+
+fn row_step(s: scr.Screen, row: Int, col: Int, cols: Int) -> String !{IO} = do
+  here <- scr.text_at(s, col, row)
+  rest <- row_text(s, row, col + 1, cols)
+  here ++ rest
+
+fn rows_from(s: scr.Screen, row: Int, rows: Int, cols: Int) -> String !{IO} =
+  if row >= rows then "" else rows_step(s, row, rows, cols)
+
+fn rows_step(s: scr.Screen, row: Int, rows: Int, cols: Int) -> String !{IO} = do
+  here <- row_text(s, row, 0, cols)
+  rest <- rows_from(s, row + 1, rows, cols)
+  if row + 1 >= rows then here else here ++ "|" ++ rest
+
+fn shown(w: widget.Widget Msg, cols: Int, rows: Int) -> String !{IO} = do
+  s <- painted(w, cols, rows)
+  rows_from(s, 0, rows, cols)
+
+fn flat_cases(state: TestState) -> Unit !{IO} = do
+  # Everything starts closed, so a loaded subtree is hidden until it is opened
+  # — `docs` has two children and neither is a row.
+  rows0 <- shown(view_of(roots(), plain()), 10, 4)
+  assert_eq(state, "a closed node hides its subtree", rows0,
+            "> src     |> docs    |> empty   |  README  ")
+  # A leaf gets no marker, and an unread directory is marked expandable even
+  # though it has no children to show (§4.2).
+  opened <- shown(after_told(view_of(roots(), contenting()),
+                             [focus_on(), pressed(event.KDown),
+                              pressed(event.KRight)]),
+                  10, 6)
+  assert_eq(state, "opening a loaded node shows its children, indented", opened,
+            "> src     |v docs    |    guide |    api   |> empty   |  README  ")
+
+# ── where the selection goes ────────────────────────────────────────────────
+
+fn moving_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "Down moves to the next visible row",
+            moved(lighting(), [key(event.KDown)]), "[Lit([docs])]")
+  assert_eq(state, "Up moves back",
+            moved(lighting(), [key(event.KDown), key(event.KUp)]),
+            "[Lit([docs]), Lit([src])]")
+  assert_eq(state, "Up at the first row is claimed and silent",
+            moved(lighting(), [key(event.KUp)]), "[]")
+  assert_eq(state, "End goes to the last visible row",
+            moved(lighting(), [key(event.KEnd)]), "[Lit([README])]")
+  # The case a flat list cannot exercise: with `docs` open, Down from it steps
+  # INTO the subtree rather than over it.
+  assert_eq(state, "Down steps into an open subtree",
+            moved(lighting(), [key(event.KDown), key(event.KRight),
+                               key(event.KDown)]),
+            "[Lit([docs]), Lit([docs, guide])]")
+  # And the path is a path, not a row: `guide` is named by both its segments.
+  assert_eq(state, "Enter chooses by path",
+            moved(lighting(), [key(event.KDown), key(event.KRight),
+                               key(event.KDown), key(event.KEnter)]),
+            "[Lit([docs]), Lit([docs, guide]), Chose([docs, guide])]")
+  # Without a subscription a move says nothing at all.
+  assert_eq(state, "a move is silent when nothing subscribed",
+            moved(plain(), [key(event.KDown)]), "[]")
+
+fn opening_cases(state: TestState) -> Unit !{IO} = do
+  # Right on a closed node opens it; Right again steps to its first child.
+  assert_eq(state, "Right opens, then enters",
+            moved(lighting(), [key(event.KDown), key(event.KRight),
+                               key(event.KRight)]),
+            "[Lit([docs]), Lit([docs, guide])]")
+  # Left closes; Left again climbs to the parent.
+  assert_eq(state, "Left closes, then climbs",
+            moved(lighting(), [key(event.KDown), key(event.KRight),
+                               key(event.KDown), key(event.KLeft),
+                               key(event.KLeft)]),
+            "[Lit([docs]), Lit([docs, guide]), Lit([docs])]")
+  # A leaf has nothing to open, so Right is claimed and silent.
+  assert_eq(state, "Right on a leaf does nothing",
+            moved(lighting(), [key(event.KEnd), key(event.KRight)]),
+            "[Lit([README])]")
+  # Left on a root has no parent to climb to.
+  assert_eq(state, "Left at a root is claimed and silent",
+            moved(lighting(), [key(event.KLeft)]), "[]")
+
+fn expand_cases(state: TestState) -> Unit !{IO} = do
+  # §4.4: an UNREAD node asks the application to read it.
+  assert_eq(state, "opening an unread node asks for its children",
+            moved(expanding(), [key(event.KRight)]), "[Expanded([src])]")
+  # And a LOADED one does not — re-reading a directory the user merely
+  # collapsed and reopened would make a keystroke hit the disk.
+  assert_eq(state, "opening a loaded node asks for nothing",
+            moved(expanding(), [key(event.KDown), key(event.KRight)]),
+            "[Lit([docs])]")
+  assert_eq(state, "and neither does closing one",
+            moved(expanding(), [key(event.KDown), key(event.KRight),
+                                key(event.KLeft)]),
+            "[Lit([docs])]")
+
+# ── content that arrives by message ─────────────────────────────────────────
+
+fn content_cases(state: TestState) -> Unit !{IO} = do
+  # The open set survives a replacement: a tree the user spent keystrokes
+  # opening must not collapse because its content was refreshed (§4.3).
+  kept <- shown(after_told(view_of(roots(), contenting()),
+                           [focus_on(), pressed(event.KDown),
+                            pressed(event.KRight), sent(ReloadSrc)]),
+                10, 6)
+  assert_eq(state, "a replacement keeps what was open", kept,
+            "> src     |v docs    |    guide |    api   |> empty   |  README  ")
+  # The selection survives it too, so the next key continues from where the
+  # user was rather than from the top.
+  assert_eq(state, "and keeps the selection",
+            says(roots(), contenting(),
+                 [focus_on(), pressed(event.KDown), sent(ReloadSrc),
+                  pressed(event.KDown)]),
+            "[Lit([docs]), Lit([empty])]")
+  # A replacement that removes the selected path moves the selection, and that
+  # move IS announced: the caller did not ask for it and cannot predict it
+  # (docs/tui-content-update-v0.md §9.1).
+  assert_eq(state, "a replacement that drops the selection announces the move",
+            says(roots(), contenting(),
+                 [focus_on(), pressed(event.KDown), sent(Reload)]),
+            "[Lit([docs]), Lit([src])]")
+  # An unrecognised message is DECLINED, so it reaches `update` instead of
+  # being swallowed by the widget it was addressed to.
+  assert_eq(state, "an unrecognised message is declined",
+            says(roots(), contenting(), [sent(Noted("other"))]),
+            "[Noted(declined)]")
+  # With no decoder at all, every message is declined.
+  assert_eq(state, "no decoder declines content too",
+            says(roots(), lighting(), [sent(Reload)]), "[Noted(declined)]")
+
+fn ambiguous_cases(state: TestState) -> Unit !{IO} = do
+  # §4.1: two siblings with one label are indistinguishable. Both halves of
+  # what that costs are pinned as CONSTRAINTS, not asserted as virtues — a
+  # caller reading these should see why unique labels matter.
+  #
+  # The walk takes the first, so Right asks to read the `Unread` one even
+  # though a `Loaded` sibling of the same name is sitting right there.
+  assert_eq(state, "a repeated sibling label resolves to the first of them",
+            says(roots_ambiguous(), expanding(),
+                 [focus_on(), pressed(event.KRight)]),
+            "[Expanded([dup])]")
+  # And the open set is keyed by path, so opening one opens BOTH — the second
+  # `dup` shows its child without the user ever having touched it.
+  both <- shown(after_told(view_of(roots_ambiguous(), expanding()),
+                           [focus_on(), pressed(event.KRight)]),
+                10, 3)
+  assert_eq(state, "and opening one opens every sibling that shares the label",
+            both, "v dup     |v dup     |    y     ")
+
+# ── what it leaves alone ────────────────────────────────────────────────────
+
+fn declining_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "a ctrl chord is not the tree's",
+            moved(lighting(), [chord(event.KChar('a'))]), "[Noted(bcast)]")
+  assert_eq(state, "Tab is the ring's",
+            moved(lighting(), [key(event.KTab)]), "[]")
+  assert_eq(state, "Esc is the application's",
+            moved(lighting(), [key(event.KEsc)]), "[Noted(bcast)]")
+  assert_eq(state, "an unfocused tree ignores a key",
+            said(widget.feed(ct.column([ct.fit(view_of(roots(), lighting())),
+                                        ct.fit(note())]),
+                             [key(event.KDown)])),
+            "[Noted(bcast)]")
+  assert_eq(state, "but claims a focus notification",
+            hit_of(widget.deliver(view_of(roots(), lighting()), tree_id(),
+                                  widget.ToFocus(true))),
+            true)
+
+fn main() -> Unit !{IO} = do
+  state <- new_state()
+  flat_cases(state)
+  moving_cases(state)
+  opening_cases(state)
+  expand_cases(state)
+  content_cases(state)
+  ambiguous_cases(state)
+  declining_cases(state)
+  summary(state)

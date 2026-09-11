@@ -1,6 +1,6 @@
 # TUI `tree` (v0)
 
-Status: **DESIGN — C3c, approved in shape, not yet implemented.** Non-normative;
+Status: **IMPLEMENTED — C3c** (`stdlib/tui/widgets/tree.sprout`). Non-normative;
 `docs/spec-v0.md` governs the language and nothing here proposes a language change.
 
 Sibling designs: `docs/tui-list-view-v0.md` (the closest widget),
@@ -31,8 +31,8 @@ only when it is opened. The window follows the selection, as `list_view`'s does.
 Nothing new in the widget contract: `View` gains no field.
 
 **Non-goals.** Per-item widget rendering — already deferred for `list_view`
-(`BACKLOG.md`, **TUI `list_view` — per-item rendering**) and it should not be
-re-opened here. Multi-select and check-boxes, which `brick-filetree` has and no
+(`BACKLOG.md`, **TUI `list_view` and `tree` — per-item rendering**) and it should
+not be re-opened here. Multi-select and check-boxes, which `brick-filetree` has and no
 M5 module needs. Mouse, deferred with the hit-test tree. Filtering, which is the
 command palette's job over a flat list. Subtree-granular content updates (§8).
 Icons, columns and horizontal scrolling.
@@ -102,10 +102,15 @@ export type Children (..) =
   | Loaded (List Node)      # expandable, children known (possibly Nil)
 ```
 
-`Loaded(Nil)` is a directory that really is empty, and it renders differently
-from `Unread` — the reader learns the read happened. Three constructors rather
-than a `Maybe (List Node)` plus a `Bool`, so the illegal fourth state cannot be
-written (`docs/guidelines.md` §3).
+Three constructors rather than a `Maybe (List Node)` plus a `Bool`, so the
+illegal fourth state cannot be written (`docs/guidelines.md` §3).
+
+The distinction is **behavioural, not visual**: an open `Unread` and an open
+`Loaded(Nil)` paint identically, because they are in the same visible state —
+expanded, showing nothing. What differs is that opening the first asks the
+application for children and opening the second does not (§4.4). Writing §7's
+tests is what established that; the first draft of this section claimed a
+rendering difference that does not exist.
 
 ### 4.3 Expansion state is the widget's; node data is the application's
 
@@ -219,22 +224,31 @@ style the other.
 content-update suites share (`told_all`/`says`, with a `Noted` neighbour probe so
 a declined key is visible as a broadcast rather than as silence).
 
-- Flattening: a closed node hides its subtree; an `Unread` node renders as
-  expandable; `Loaded(Nil)` renders as expanded-and-empty, distinct from `Unread`.
+- Flattening: a closed node hides its subtree; opening a loaded one shows its
+  children, indented; a leaf carries no expander glyph.
 - Motion over the flattening, including Down stepping *into* an open subtree
   rather than over it — the case a flat list cannot exercise.
 - Right/Left on each of leaf, `Unread`, open and closed, and Left on a root.
 - `on_expand` fires for `Unread` and **not** for `Loaded` (§4.4's second half).
 - Content replacement keeps the open set and the selection; a replacement that
   removes the selected path moves the selection and announces it (§4.8).
-- A path whose label repeats among siblings — pins §4.1's documented ambiguity
-  rather than leaving it to be discovered.
+- §4.1's ambiguity, both halves: the walk resolves a repeated sibling label to
+  the **first**, and because the open set is keyed by path, opening one sibling
+  opens every sibling sharing the label. The two fixture nodes differ in *kind*
+  — first-versus-last is otherwise unobservable and the case would pass
+  whichever the walk picked.
 - Declining: chords, Tab, Esc, an unrecognised message, and a key while unfocused.
 
-## 8. Deferred, to file in `BACKLOG.md` when this lands
+**Not testable, and deliberately so:** an `Unread` node that is open renders
+identically to an open `Loaded(Nil)` — both are expanded and show nothing. They
+*are* in the same visible state; the difference is a read in flight, which is
+transient and not the reader's business. The distinction that matters is
+behavioural and is covered above: one asks for children, the other does not.
 
-- **Subtree-granular content updates.** v0 replaces the whole tree; splicing one
+## 8. Deferred, filed in `BACKLOG.md`
+
+- **A replacement rebuilds the whole forest.** v0 swaps the lot; splicing one
   path's children is what a large project wants.
-- **Caller-chosen node identifiers**, `tui-tree-widget`'s generic `Identifier`,
-  which lifts §4.1's sibling-label constraint.
-- **Per-item rendering** — one entry with `list_view`'s, not a second.
+- **Sibling labels must be unique** — §4.1's constraint, lifted by
+  `tui-tree-widget`'s caller-chosen identifier.
+- **Per-item rendering** — folded into `list_view`'s entry, not a second one.
