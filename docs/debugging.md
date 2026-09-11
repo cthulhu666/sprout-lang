@@ -114,6 +114,23 @@ the IR diff between the two runs is the whole evidence. Note that `removed=0` is
 normal reading for `dle` on real code — see `bench/results-2026-09-11-opt.md` — so a zero
 is not itself a sign the switch failed to take; the `on`/`off` word in the line is.
 
+## Where is a program repeating itself? (`--phase cse-census`, `--phase cse-keys`)
+
+Counts repeated pure calls per function body — an optimisation census, and equally a way to
+find a function that re-derives the same value several times:
+
+```
+compile_driver_bin_stage1 --phase cse-keys stdlib prog.spr
+cse-census bodies=3637 pure_calls=17493 candidate_keys=829 dup_occurrences=2114 region_dups=673
+  x118 (call v:29:stdlib.compiler.parser.tok_at v:6:tokens v:1:i)
+```
+
+`region_dups` is the figure to read: repeats within one straight-line region, so two arms of
+the same `if` do not count. `cse-keys` lists what is behind it, most useful sorted by count.
+
+Do not read a large number as a speed-up waiting to happen — it is a **static** count, and
+`bench/results-2026-09-11-cse-census.md` records what happened when one was cashed in.
+
 ## `just llvm-where <ll_file> <line>` — map an error line to its Sprout function
 
 When `opt --passes=verify` (or clang) reports a malformed-IR error at line N of a large `.ll` file, this tool walks the file up from line N to the nearest enclosing `define` and prints the Sprout qualified name.
