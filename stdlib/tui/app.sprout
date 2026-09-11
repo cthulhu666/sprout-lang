@@ -284,8 +284,8 @@ fn on_input(ch: Chan (Signal m), tick_ms: Int, held: Bytes,
   match inp with
   | terminal.TermBytes b -> decoded(ch, tick_ms, bytes.append(held, b))
   # The deadline elapsing IS the frame tick — no separate timer task, because
-  # `read_avail` already reports it.
-  | terminal.TermIdle -> send_one(ch, tick_ms, held, SigEvent(event.TickEvent))
+  # `read_avail` already reports it. It is also the ESCAPE TIMEOUT: see `idled`.
+  | terminal.TermIdle -> idled(ch, tick_ms, held)
   | terminal.TermResized -> send_resize(ch, tick_ms, held)
   # Closing is how the loop is told there will be no more signals.
   | terminal.TermEof -> chan_close(ch)
@@ -305,6 +305,31 @@ fn send_then(ch: Chan (Signal m), tick_ms: Int, held: Bytes,
              rest: List event.Event, e: event.Event) -> Unit !{IO} = do
   chan_send(ch, SigEvent(e))
   send_events(ch, tick_ms, held, rest)
+
+# `keys.decode` holds a lone ESC rather than guessing, and says the timeout
+# that resolves it belongs here (keys.sprout §ESC). This is that timeout: the
+# read deadline elapsed with the byte still held, so nothing is coming after it
+# and it is the Escape key. Without this Esc never becomes an event at all --
+# it stayed in `held` across every later read, and an application whose only
+# quit binding is Esc could not be quit.
+fn idled(ch: Chan (Signal m), tick_ms: Int, held: Bytes) -> Unit !{IO} =
+  if escape_timed_out(held) then send_esc(ch, tick_ms)
+  else send_one(ch, tick_ms, held, SigEvent(event.TickEvent))
+
+# Only a BARE ESC. A longer hold is genuinely mid-sequence -- an arrow key is
+# `ESC [ A` -- and flushing at the ESC would turn one keypress into three.
+export fn escape_timed_out(held: Bytes) -> Bool =
+  if bytes.length(held) != 1 then false
+  else
+    match bytes.get(held, 0) with
+    | Just b -> b == 27
+    | Nothing -> false
+
+# The hold is cleared with the same send: carrying it would re-emit Escape on
+# every subsequent idle.
+fn send_esc(ch: Chan (Signal m), tick_ms: Int) -> Unit !{IO} = do
+  chan_send(ch, SigEvent(event.KeyPress(event.KEsc, event.mods_none())))
+  input_loop(ch, tick_ms, bytes.empty())
 
 fn send_one(ch: Chan (Signal m), tick_ms: Int, held: Bytes,
             sig: Signal m) -> Unit !{IO} = do

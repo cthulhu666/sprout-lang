@@ -42,24 +42,42 @@ printf 'hello\n' > "$FIX/ZFILE"
 # Keys: Right expands whatever row 0 is, then Esc quits. Which entry that is
 # depends on readdir order, so the fixture holds exactly one directory — Right
 # on the file is inert and the child simply never appears, failing loudly.
-keys=$'\x1b[C\x1b'
+#
+# The writer SLEEPS after the Esc instead of closing, and that is the whole
+# point of the shape. `TermEof` closes the pump's channel, so a pipe that ends
+# quits the app whatever the keys were — an earlier version of this gate read
+# an exit as proof that Esc worked when it only proved EOF did. Holding the
+# stream open makes the exit attributable: it can only be the Escape key.
+#
+# Esc reaches the pump at all only because of the ESCAPE TIMEOUT: `keys.decode`
+# holds a lone ESC as a prefix, and `app.idled` resolves it when the read
+# deadline elapses with the byte still held. Before that existed, Esc was held
+# forever and `examples/tui_dashboard.sprout` could not be quit at all.
 
 # Outside the fixture: a file written into it would show up in the tree.
 out=$(mktemp /tmp/sprout_tui_files_out_XXXXXX)
 trap 'rm -rf "$FIX" "$out"' EXIT
-( cd "$FIX" && printf '%s' "$keys" | "$BIN" > "$out" 2>&1 ) &
+# The binary must be the LAST element of the pipeline and must not be wrapped
+# in a subshell that also waits for the writer: `$!` would then be that
+# subshell, which lives until the 12s sleep ends, and a prompt exit would read
+# as a hang. `exec` keeps the pid the shell reports the one that matters.
+{ printf '\x1b[C'; sleep 1; printf '\x1b'; sleep 12; } \
+  | ( cd "$FIX" && exec "$BIN" ) > "$out" 2>&1 &
 pid=$!
-for _ in $(seq 1 100); do
-  kill -0 $pid 2>/dev/null || break
+# 5s: comfortably after the Esc at 1s plus one read deadline, and comfortably
+# before the writer's 12s, so an exit inside the window cannot be EOF.
+quit=0
+for _ in $(seq 1 50); do
+  if ! kill -0 $pid 2>/dev/null; then quit=1; break; fi
   sleep 0.1
 done
-if kill -0 $pid 2>/dev/null; then
-  kill -9 $pid 2>/dev/null
-  wait $pid 2>/dev/null
-  echo "FAIL: tui_files did not exit on Esc within 10s" >&2
+kill -9 $pid 2>/dev/null
+wait $pid 2>/dev/null
+if [ "$quit" -ne 1 ]; then
+  echo "FAIL: still running 5s after Esc, with stdin still open" >&2
+  echo "      (the escape timeout in app.idled is what resolves a lone ESC)" >&2
   exit 1
 fi
-wait $pid 2>/dev/null
 
 fail=0
 want() {
@@ -79,8 +97,9 @@ want 'ZFILE' 'the fixture file'
 # -> addressed answer -> `At` splice -> repaint. This is the assertion that was
 # red before the empty-path fix, and the reason the gate exists.
 want 'QQQQQQ' "the expanded directory's child"
-# Leaving the alternate screen proves Esc was seen and the app shut down
-# cleanly rather than being killed by the timeout above.
+# Leaving the alternate screen proves the shutdown ran its restore path rather
+# than the process being killed. That Esc is what caused it is established by
+# the exit-window check above, not by this line.
 want '1049l' 'the alternate screen being left'
 
 if [ "$fail" -ne 0 ]; then
