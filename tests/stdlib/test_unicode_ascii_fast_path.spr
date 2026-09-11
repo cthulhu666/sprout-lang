@@ -1,0 +1,43 @@
+import stdlib.test (TestState, new_state, assert_true, assert_false, assert_eq, summary)
+import stdlib.unicode.grapheme as grapheme
+import stdlib.unicode.lookup as lookup
+import stdlib.unicode.tables as tables
+
+# `grapheme` answers three property lookups for printable ASCII without
+# consulting a table. This pins the premise that makes that legal: no printable
+# ASCII codepoint appears in any of the three tables, so the table would answer
+# exactly what the fast path answers. A regenerated UCD table that broke the
+# premise would make the fast path silently wrong, and only this says so.
+
+fn absent(count: Int, chunk: Int -> String, cp: Int) -> Bool =
+  match lookup.find_tag(count, chunk, cp) with
+  | Nothing -> true
+  | Just _ -> false
+
+fn checked(st: TestState, cp: Int) -> Unit !{IO} = do
+  assert_true(st, `gcb table skips ${int_to_string(cp)}`,
+              absent(tables.gcb_count(), tables.gcb_chunk, cp))
+  assert_false(st, `extpict table skips ${int_to_string(cp)}`,
+               lookup.has_tag(tables.extpict_count(), tables.extpict_chunk, cp))
+  assert_true(st, `incb table skips ${int_to_string(cp)}`,
+              absent(tables.incb_count(), tables.incb_chunk, cp))
+  assert_eq(st, `gcb of ${int_to_string(cp)}`, grapheme.gcb(cp), "O")
+
+fn printable_go(st: TestState, cp: Int) -> Unit !{IO} =
+  if cp > 126 then () else stepped(st, cp)
+
+fn stepped(st: TestState, cp: Int) -> Unit !{IO} = do
+  checked(st, cp)
+  printable_go(st, cp + 1)
+
+# The two codepoints either side of the fast path are tabled, so a range that
+# grew by one in either direction would stop matching the table.
+fn boundaries(st: TestState) -> Unit !{IO} = do
+  assert_false(st, "US (31) is not Other", grapheme.gcb(31) == "O")
+  assert_false(st, "DEL (127) is not Other", grapheme.gcb(127) == "O")
+
+fn main() -> Unit !{IO} = do
+  st <- new_state()
+  printable_go(st, 32)
+  boundaries(st)
+  summary(st)

@@ -116,6 +116,14 @@ The fast path is `0x20 <= cp < 0x7F`, *not* the `cp < 0x0300` this section origi
 wider bound is wrong: U+00AD SOFT HYPHEN is `Cf` and U+0000..001F are `Cc`, so both are zero-width
 and both sit below U+0300. Corrected during implementation, before it could ship.
 
+It applies to **all four** lookups, not only `codepoint_width`: `gcb`, `is_extpict` and `incb_class`
+take it too. Segmentation asks all three per codepoint, so a line of ASCII cost three searches per
+character until 2026-09-11 — measured at ~100 ms per TUI frame with a source file on screen, which
+made `examples/tui_files.sprout` sluggish and left Esc queued behind the repaints. What licenses the
+shortcut is that none of the three tables holds a printable-ASCII entry, so the search it replaces
+would fall through to the same default; `tests/stdlib/test_unicode_ascii_fast_path.spr` pins that
+against the shipped tables rather than against the UCD, so a regenerated table that broke it fails.
+
 The encoder and the search share one module (`stdlib/unicode/lookup.sprout`) and the *generator
 imports it* rather than reimplementing base-62. A drifting pair would emit a table that looks
 well-formed and answers wrongly, which no test of the output alone would catch.
@@ -193,6 +201,11 @@ with the seed untouched, and `just ir-golden-diff` reports no differences.
   ambiguous (U+00A1 — narrow), combining (U+0301 — zero), format (U+200B — zero), `Mc` vs `Mn` on the
   adjacent U+11000/U+11001, the W∩Mn overlap of §3.1, block boundaries either side of U+FF61, and the
   ASCII fast path.
+- `tests/stdlib/test_unicode_ascii_fast_path.spr` — 382 cases, one sweep of 0x20..0x7E per table.
+  It asserts the *premise* of §3.4's fast path rather than its answers: the gcb, extpict and InCB
+  tables have no entry for any printable ASCII codepoint, and 0x1F and 0x7F either side of the range
+  do, so the bound cannot grow unnoticed. Asserting the answers instead would pass against a table
+  the fast path had started to contradict.
 - `tests/stdlib/test_unicode_tables.spr` — 23 cases over the shipped table, not over the generator's
   intent: base-62 round-trips and stays order-preserving across the range and at every carry point,
   and each of the five tables is sorted, non-empty, disjoint and in range. Verified to discriminate

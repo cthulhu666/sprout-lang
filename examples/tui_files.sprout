@@ -95,7 +95,7 @@ fn shown_for(m: Msg) -> Maybe (String, Maybe buf.Caret) =
   match m with
   # The caret goes to the start: a file being OPENED is read from the top,
   # unlike one being reopened where the place left matters.
-  | Shown body -> Just((body, Nothing))
+  | Shown body -> Just((body, Just(buf.Caret(row = 0, col = 0))))
   | _ -> Nothing
 
 fn files() -> widget.Widget Msg =

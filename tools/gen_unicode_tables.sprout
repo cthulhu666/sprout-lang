@@ -362,6 +362,9 @@ fn write_tables(repo: String, eaw: String, dgc: String, gbp: String,
   # internally unambiguous and no interval arithmetic is needed.
   let zerow = sort_ranges(select_ranges(dgc, want_zero))
       wide = sort_ranges(select_ranges(eaw, want_wide))
+      # `grapheme` skips these three for printable ASCII on the premise that none
+      # of them covers it. Re-run tests/stdlib/test_unicode_ascii_fast_path.spr
+      # after regenerating: a UCD that started covering ASCII breaks the premise.
       gcb = sort_ranges(select_ranges(gbp, want_gcb))
       extpict = sort_ranges(select_ranges(emo, want_extpict))
       incb = sort_ranges(select_ranges(dcp, want_incb))
