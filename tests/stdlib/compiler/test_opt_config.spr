@@ -1,0 +1,51 @@
+import stdlib.test (check_true, check_false, check_eq, run_suite)
+import stdlib.compiler.opt_config as opt_config
+import stdlib.string as string
+
+# Unit tests for the optimisation-pass switchboard (docs/opt-passes-v0.md §M0).
+#
+# `parse` is pure, so the whole switch is pinned here without a compiler run. Two
+# conventions matter because each has a silent-wrong failure mode: an unrecognised
+# name disables nothing and is reported rather than dropped, and stats follows the
+# runtime's truthiness rule — "0"/"false"/"off"/empty are OFF, not just "the
+# variable is set".
+
+fn parsed(off: Maybe String) -> opt_config.OptConfig =
+  opt_config.parse(off, Nothing)
+
+fn unrecognised_of(raw: String) -> String =
+  string.join(",", parsed(Just(raw)).unrecognised)
+
+fn stats_of(raw: Maybe String) -> Bool =
+  opt_config.parse(Nothing, raw).stats
+
+fn main() -> Unit !{IO} =
+  run_suite("opt_config", [
+    check_true("unset: dle on", opt_config.enabled(parsed(Nothing), opt_config.Dle)),
+    check_true("unset: cse on", opt_config.enabled(parsed(Nothing), opt_config.Cse)),
+    check_true("unset: licm on", opt_config.enabled(parsed(Nothing), opt_config.Licm)),
+    check_false("unset: stats off", parsed(Nothing).stats),
+    check_false("one name: dle off", opt_config.enabled(parsed(Just("dle")), opt_config.Dle)),
+    check_true("one name: others stay on", opt_config.enabled(parsed(Just("dle")), opt_config.Cse)),
+    check_false("list: cse off", opt_config.enabled(parsed(Just("cse,licm")), opt_config.Cse)),
+    check_false("list: licm off", opt_config.enabled(parsed(Just("cse,licm")), opt_config.Licm)),
+    check_true("list: dle stays on", opt_config.enabled(parsed(Just("cse,licm")), opt_config.Dle)),
+    check_false("spaces and case: DLE off", opt_config.enabled(parsed(Just(" DLE , cse ")), opt_config.Dle)),
+    check_false("spaces and case: cse off", opt_config.enabled(parsed(Just(" DLE , cse ")), opt_config.Cse)),
+    check_true("empty value disables nothing", opt_config.enabled(parsed(Just("")), opt_config.Dle)),
+    check_true("empty list items ignored", opt_config.enabled(parsed(Just(",,")), opt_config.Dle)),
+    check_eq("unrecognised name is reported", unrecognised_of("dse"), "dse"),
+    check_true("unrecognised name disables nothing", opt_config.enabled(parsed(Just("dse")), opt_config.Dle)),
+    check_eq("known names are not reported", unrecognised_of("dle,cse"), ""),
+    check_eq("unrecognised reported alongside known", unrecognised_of("dle,dse"), "dse"),
+    check_false("unrecognised alongside known still disables the known one",
+                opt_config.enabled(parsed(Just("dle,dse")), opt_config.Dle)),
+    check_eq("pass_name round-trips", opt_config.pass_name(opt_config.Licm), "licm"),
+    check_true("stats=1 on", stats_of(Just("1"))),
+    check_true("stats=yes on", stats_of(Just("yes"))),
+    check_false("stats=0 off", stats_of(Just("0"))),
+    check_false("stats=false off", stats_of(Just("false"))),
+    check_false("stats=off off", stats_of(Just("off"))),
+    check_false("stats empty off", stats_of(Just(""))),
+    check_false("stats unset off", stats_of(Nothing))
+  ])

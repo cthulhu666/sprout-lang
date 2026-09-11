@@ -51,6 +51,16 @@ bench-string-concat: bootstrap-from-seed
   DRIVER="{{build_dir}}/compile_driver_bin_stage1" STDLIB="{{stdlib_root}}" \
     CLANG_EXTRA="{{clang_extra}}" bash scripts/bench_string_concat.sh
 
+# Optimisation-pass A/B over the bench corpus: `just bench-opt [pass]`
+# (docs/opt-passes-v0.md §M0). One compiler build, each program compiled with the
+# pass ON and OFF.
+#
+# NOT a gate, for bench-string-concat's reason — the run columns are wall-clock.
+# The gate half is `just opt-harness-check`, which asserts only exact properties.
+[group('dev')]
+bench-opt pass="dle": bootstrap-from-seed
+  bash bench/optpasses/bench.sh {{quote(pass)}}
+
 # Launch the interactive Sprout REPL via sproutd (self-configuring).
 # Prerequisites: just build-sproutd
 [group('dev')]
@@ -1133,6 +1143,57 @@ o2-codegen-smoke: bootstrap-from-seed
     echo "o2-codegen-smoke: no fixtures matched — the glob is stale, not the tree empty" >&2; exit 1
   fi
   echo "==> o2-codegen-smoke ✓ ($checked shapes)"
+
+# The pass A/B harness's self-check (docs/opt-passes-v0.md §M0).  Three properties,
+# each with a silent-wrong failure mode: the switch reaches emitted IR at all, the
+# pass it disables is semantics-preserving, and an unset variable leaves the
+# pipeline exactly where it was.  A harness that cannot detect DLE — a pass already
+# known to do work — would not detect CSE either.
+[group('smoke')]
+opt-harness-check: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_optharness_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  F=tests/opt_harness/dead_let.spr
+  [ -f "$F" ] || { echo "opt-harness-check: missing fixture $F" >&2; exit 1; }
+
+  SPROUT_OPT_STATS=1 "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$F" \
+    > "$TMPD/on.ll" 2>"$TMPD/on.err"
+  SPROUT_OPT_STATS=1 SPROUT_OPT_OFF=dle "{{build_dir}}/compile_driver_bin_stage1" --emit-ir \
+    "{{stdlib_root}}" "$F" > "$TMPD/off.ll" 2>"$TMPD/off.err"
+
+  grep -q '^\[opt\] dle on ' "$TMPD/on.err" \
+    || { echo "opt-harness-check: no ON stats line" >&2; cat "$TMPD/on.err" >&2; exit 1; }
+  grep -q '^\[opt\] dle off ' "$TMPD/off.err" \
+    || { echo "opt-harness-check: SPROUT_OPT_OFF=dle did not disable the pass" >&2; exit 1; }
+  removed=$(sed -n 's/.*removed=\([0-9-]*\).*/\1/p' "$TMPD/on.err")
+  [ "${removed:-0}" -gt 0 ] \
+    || { echo "opt-harness-check: DLE removed $removed nodes from the fixture — it no longer fires" >&2; exit 1; }
+
+  if cmp -s "$TMPD/on.ll" "$TMPD/off.ll"; then
+    echo "opt-harness-check: ON and OFF emit identical IR — the switch does not reach codegen" >&2
+    exit 1
+  fi
+
+  # Semantics-preserving: both binaries must print the same thing.
+  for v in on off; do
+    clang "$TMPD/$v.ll" {{runtime_src}} -O2 {{clang_extra}} -o "$TMPD/$v.bin" 2>/dev/null
+    "$TMPD/$v.bin" > "$TMPD/$v.out"
+  done
+  cmp -s "$TMPD/on.out" "$TMPD/off.out" \
+    || { echo "opt-harness-check: DLE changed program output — not semantics-preserving" >&2
+         diff "$TMPD/on.out" "$TMPD/off.out" >&2; exit 1; }
+
+  # An unrecognised pass name warns and disables nothing.
+  SPROUT_OPT_OFF=nosuchpass "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$F" \
+    > "$TMPD/bogus.ll" 2>"$TMPD/bogus.err"
+  grep -q 'no such pass' "$TMPD/bogus.err" \
+    || { echo "opt-harness-check: an unknown pass name was accepted silently" >&2; exit 1; }
+  cmp -s "$TMPD/on.ll" "$TMPD/bogus.ll" \
+    || { echo "opt-harness-check: an unknown pass name changed the output" >&2; exit 1; }
+
+  echo "==> opt-harness-check ✓ (dle removed $removed nodes; OFF restores them)"
 
 # DoD #8 — bundle smoke.  `--phase bundle` on token.sprout, ast.sprout, and
 # prelude.sprout must produce non-empty output with no dot-prefix qualified names.
@@ -2964,6 +3025,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "approved-builtins|check-approved-builtins"
     "smoke-shapes|smoke-shapes"
     "o2-codegen-smoke|o2-codegen-smoke"
+    "opt-harness-check|opt-harness-check"
     "bundle-smoke|bundle-smoke"
     "effect-report-smoke|effect-report-smoke"
     "fmt-check|fmt-check"

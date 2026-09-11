@@ -13,6 +13,7 @@ import stdlib.compiler.resolve as resolve
 import stdlib.compiler.verify_dispatch as verify_dispatch
 import stdlib.compiler.lowering as lowering
 import stdlib.compiler.dce as dce
+import stdlib.compiler.opt_config as opt_config
 import stdlib.compiler.ir_pipeline as ir_pipeline
 import stdlib.compiler.source as source
 import stdlib.fs as fs
@@ -450,6 +451,29 @@ fn report_verify_stats(prog: typed_ast.TypedProgram) -> Unit !{IO} =
           eprint("[verify-dispatch] stats: verified=" ++ int_to_string(ok)
                  ++ " skipped=" ++ int_to_string(sk) ++ " mismatched=" ++ int_to_string(mm))
 
+# The optimisation pipeline over the lowered typed AST (docs/opt-passes-v0.md §M0).
+# Every pass is ON unless SPROUT_OPT_OFF names it; the switches are read here so
+# the passes themselves stay pure.
+fn run_opt_passes(prog: typed_ast.TypedProgram) -> typed_ast.TypedProgram !{IO} =
+  do
+    cfg <- opt_config.from_env()
+    let dle_on = opt_config.enabled(cfg, opt_config.Dle)
+    let after = if dle_on then dce.elim_program(prog) else prog
+    _ <- report_opt_stats(cfg, opt_config.Dle, dle_on, prog, after)
+    after
+
+# Gated on cfg.stats because the census is two whole-program walks.
+fn report_opt_stats(cfg: opt_config.OptConfig, pass: opt_config.Pass, on: Bool,
+                    before: typed_ast.TypedProgram, after: typed_ast.TypedProgram) -> Unit !{IO} =
+  if cfg.stats
+  then report_opt_delta(pass, on, typed_ast.node_count(before), typed_ast.node_count(after))
+  else ()
+
+fn report_opt_delta(pass: opt_config.Pass, on: Bool, before: Int, after: Int) -> Unit !{IO} =
+  eprint("[opt] " ++ opt_config.pass_name(pass) ++ (if on then " on" else " off")
+         ++ " nodes=" ++ int_to_string(after)
+         ++ " removed=" ++ int_to_string(before - after))
+
 export fn compile_phase_bundle(path: source.FilePath, stdlib_root: source.StdlibRoot) -> bundler.BundleResult !{IO} =
   compile_phase_bundle_with_roots(path, stdlib_root, Nil)
 
@@ -551,7 +575,9 @@ export fn compile_phase_lower_with_roots(path: source.FilePath, stdlib_root: sou
     match check_result with
     | typed_ast.TypedErr pos msg -> typed_ast.TypedErr(pos, msg)
     | typed_ast.TypedOk typed_prog env ->
-        typed_ast.TypedOk(dce.elim_program(lowering.lower_program(typed_prog, env)), env)
+        do
+          optimised <- run_opt_passes(lowering.lower_program(typed_prog, env))
+          typed_ast.TypedOk(optimised, env)
 
 export fn compile_phase_recheck(path: source.FilePath, stdlib_root: source.StdlibRoot) -> typed_ast.TypedResult !{IO} =
   compile_phase_recheck_with_roots(path, stdlib_root, Nil)
@@ -621,7 +647,9 @@ fn compile_phase_lower_with_cache(path: source.FilePath, stdlib_root: source.Std
     match check_result with
     | typed_ast.TypedErr pos msg -> typed_ast.TypedErr(pos, msg)
     | typed_ast.TypedOk typed_prog env ->
-        typed_ast.TypedOk(dce.elim_program(lowering.lower_program(typed_prog, env)), env)
+        do
+          optimised <- run_opt_passes(lowering.lower_program(typed_prog, env))
+          typed_ast.TypedOk(optimised, env)
 
 fn compile_phase_recheck_with_cache(path: source.FilePath, stdlib_root: source.StdlibRoot, cache) -> typed_ast.TypedResult !{IO} =
   compile_phase_lower_with_cache(path, stdlib_root, cache)

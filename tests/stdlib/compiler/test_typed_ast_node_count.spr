@@ -1,0 +1,72 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.types as types
+import stdlib.compiler.source as source
+import stdlib.compiler.ast as ast
+
+# Unit tests for typed_ast.node_count — the census an optimisation pass reports
+# through (docs/opt-passes-v0.md §M0), as count-before minus count-after.
+#
+# The load-bearing assertion is `dle delta`: deleting one do-step must move the
+# count, and by its whole subtree. A census that counted only expressions would
+# still pass every other case here and report 1 instead of 2.
+
+fn pos() -> source.SourcePos =
+  source.SourcePos(index = 0, line = 1, column = 1)
+
+fn int_t() -> types.Type =
+  types.TConst(types.type_id("Int"))
+
+fn lit(n: Int) -> typed_ast.TypedExpr =
+  typed_ast.TInt(n, int_t(), pos())
+
+fn var_(name: String) -> typed_ast.TypedExpr =
+  typed_ast.TVar(name, int_t(), pos())
+
+fn count(body: typed_ast.TypedExpr) -> Int =
+  typed_ast.node_count(
+    typed_ast.TypedProgram([typed_ast.TFnDecl("f", [], Nothing, Nothing, [], body)]))
+
+fn do_block(steps: List typed_ast.TypedDoStep) -> typed_ast.TypedExpr =
+  typed_ast.TDo(steps, int_t(), pos())
+
+fn let_step(name: String, value: typed_ast.TypedExpr) -> typed_ast.TypedDoStep =
+  typed_ast.TDoLetStep(name, value)
+
+# `do let x = 1 / x` and the same block with the dead binding eliminated.
+fn with_dead_let() -> typed_ast.TypedExpr =
+  do_block([let_step("x", lit(1)), typed_ast.TDoExprStep(var_("y"))])
+
+fn without_dead_let() -> typed_ast.TypedExpr =
+  do_block([typed_ast.TDoExprStep(var_("y"))])
+
+fn main() -> Unit !{IO} =
+  run_suite("typed_ast_node_count", [
+    check_eq("empty program", typed_ast.node_count(typed_ast.TypedProgram([])), 0),
+    check_eq("extern declares no nodes",
+             typed_ast.node_count(typed_ast.TypedProgram(
+               [typed_ast.TExternFnDecl("e", [], Nothing, Nothing)])),
+             0),
+    check_eq("literal is one node", count(lit(1)), 1),
+    check_eq("if counts itself and three children",
+             count(typed_ast.TIf(var_("c"), lit(1), lit(2), int_t(), pos())), 4),
+    check_eq("call counts callee and args",
+             count(typed_ast.TCall(var_("f"), [lit(1), lit(2)], int_t(), pos())), 4),
+    check_eq("binary counts both operands",
+             count(typed_ast.TBinary("+", lit(1), lit(2), int_t(), pos())), 3),
+    check_eq("lambda counts its body",
+             count(typed_ast.TLambda([], lit(1), int_t(), pos())), 2),
+    check_eq("match counts scrutinee, branch and body",
+             count(typed_ast.TMatch(var_("s"),
+               [typed_ast.TypedMatchBranch(ast.WildcardPattern(pos()), lit(1))],
+               int_t(), pos())), 4),
+    check_eq("record counts field and value",
+             count(typed_ast.TRecord("R",
+               [typed_ast.TypedRecordField("a", lit(1))], int_t(), pos())), 3),
+    check_eq("unlowered dict is a leaf, not a panic",
+             count(typed_ast.TDict(ast.TypeConstraint("Eq", []), int_t(), pos(),
+                                   typed_ast.EvUnresolved)), 1),
+    check_eq("do block counts steps", count(with_dead_let()), 5),
+    check_eq("dle delta: one dead let step is two nodes",
+             count(with_dead_let()) - count(without_dead_let()), 2)
+  ])

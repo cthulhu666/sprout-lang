@@ -269,6 +269,23 @@ that crosses it moves the ceiling in the same commit, with the new number in the
 discipline as a golden, for the same reason. Exact values are deliberately **not** pinned: the gate
 must also pass on CI's Linux x86_64.
 
+## Optimisation-pass harness — `just opt-harness-check`
+
+Compiles `tests/opt_harness/dead_let.spr` twice, once with every pass on and once with
+`SPROUT_OPT_OFF=dle`, and asserts four things: the stats line appears in both modes, the pass
+removes a non-zero number of nodes, the two IRs differ, and the two binaries print the same thing.
+It then compiles with `SPROUT_OPT_OFF=nosuchpass` and requires a warning plus unchanged output.
+
+The gate exists because every part of this can fail *quietly*. A switch that never reaches codegen,
+a pass that silently stops firing, a typo'd pass name that disables nothing — each leaves a green
+build and a compiler that is no longer doing what the flag says. Added 2026-09-11 with M0
+(docs/opt-passes-v0.md); wired into `just ci-fast-gates` as `opt-harness-check`.
+
+The fixture is deliberately wasteful, and has to be: DLE removes **zero** nodes from every real
+program in the bench corpus (`bench/results-2026-09-11-opt.md`), so a realistic fixture would assert
+nothing. Keep the dead binding pure and unread — making it effectful or reading it turns the gate
+into a tautology that passes for the wrong reason.
+
 ## `just linux-smoke`
 
 Every other local gate runs the kqueue backend; CI runs epoll + timerfd, and the two diverge in ways

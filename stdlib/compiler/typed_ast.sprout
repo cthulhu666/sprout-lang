@@ -180,3 +180,91 @@ export fn type_to_type_expr(t: types.Type) -> ast.TypeExpr =
   | types.TFunc a b _ _ -> ast.TypeArrow(type_to_type_expr(a), type_to_type_expr(b), Nothing)
   | types.TThunk b _ -> ast.TypeThunk(type_to_type_expr(b), Nothing)
   | types.TTuple items -> ast.TupleType(list_map(\i -> type_to_type_expr(i), items))
+
+# ---------------------------------------------------------------------------
+# Node census
+# ---------------------------------------------------------------------------
+#
+# Total typed-expression nodes in a program.  An optimisation pass reports what
+# it did as count-before minus count-after (docs/opt-passes-v0.md §M0), so one
+# generic walker instruments every pass and a new pass needs no new counter.
+#
+# Declarations are frames, not nodes: only bodies count.  A do-step and a match
+# branch DO count, so that deleting one shows a delta larger than the expression
+# it carried.
+
+export fn node_count(prog: TypedProgram) -> Int =
+  match prog with
+  | TypedProgram decls -> count_decls(decls)
+
+fn count_decls(decls: List TypedDecl) -> Int =
+  list_fold(\ (acc, d) -> acc + count_decl(d), 0, decls)
+
+fn count_decl(d: TypedDecl) -> Int =
+  match d with
+  | TFnDecl _ _ _ _ _ body -> count_expr(body)
+  | TExternFnDecl _ _ _ _ -> 0
+  | TLetDecl _ value -> count_expr(value)
+  | TInstanceDecl _ _ methods -> count_methods(methods)
+  | TPassThrough _ -> 0
+
+fn count_methods(methods: List TypedInstanceMethod) -> Int =
+  list_fold(\ (acc, m) -> acc + count_method(m), 0, methods)
+
+fn count_method(m: TypedInstanceMethod) -> Int =
+  match m with
+  | TypedInstanceMethod _ _ _ _ body -> count_expr(body)
+
+fn count_exprs(es: List TypedExpr) -> Int =
+  list_fold(\ (acc, e) -> acc + count_expr(e), 0, es)
+
+fn count_expr(e: TypedExpr) -> Int =
+  1 + count_children(e)
+
+fn count_children(e: TypedExpr) -> Int =
+  match e with
+  | TVar _ _ _ -> 0
+  | TInt _ _ _ -> 0
+  | TFloat _ _ _ -> 0
+  | TBool _ _ _ -> 0
+  | TString _ _ _ -> 0
+  | TChar _ _ _ -> 0
+  | TUnit _ _ -> 0
+  | TTuple items _ _ -> count_exprs(items)
+  | TIf cond then_e else_e _ _ -> count_expr(cond) + count_expr(then_e) + count_expr(else_e)
+  | TMatch scrut branches _ _ -> count_expr(scrut) + count_branches(branches)
+  | TCall callee args _ _ -> count_expr(callee) + count_exprs(args)
+  | TDict _ _ _ _ -> 0
+  | TMethodRef _ _ _ _ _ -> 0
+  | TLambda _ body _ _ -> count_expr(body)
+  | TBinary _ left right _ _ -> count_expr(left) + count_expr(right)
+  | TUnary _ operand _ _ -> count_expr(operand)
+  | TRange lo hi _ _ -> count_expr(lo) + count_expr(hi)
+  | TDo steps _ _ -> count_steps(steps)
+  | TRecord _ fields _ _ -> count_fields(fields)
+  | TGetField base _ _ _ -> count_expr(base)
+  | TRecordUpdate base fields _ _ -> count_expr(base) + count_fields(fields)
+
+fn count_branches(branches: List TypedMatchBranch) -> Int =
+  list_fold(\ (acc, b) -> acc + count_branch(b), 0, branches)
+
+fn count_branch(b: TypedMatchBranch) -> Int =
+  match b with
+  | TypedMatchBranch _ body -> 1 + count_expr(body)
+
+fn count_steps(steps: List TypedDoStep) -> Int =
+  list_fold(\ (acc, s) -> acc + count_step(s), 0, steps)
+
+fn count_step(s: TypedDoStep) -> Int =
+  match s with
+  | TDoBindStep _ value -> 1 + count_expr(value)
+  | TDoLetStep _ value -> 1 + count_expr(value)
+  | TDoExprStep value -> 1 + count_expr(value)
+
+fn count_fields(fields: List TypedRecordField) -> Int =
+  list_fold(\ (acc, f) -> acc + count_field(f), 0, fields)
+
+fn count_field(f: TypedRecordField) -> Int =
+  match f with
+  | TypedRecordField _ value -> 1 + count_expr(value)
+
