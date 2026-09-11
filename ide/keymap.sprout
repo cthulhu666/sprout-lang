@@ -1,0 +1,35 @@
+module ide.keymap
+
+# What the IDE answers to. Design: docs/ide-v0.md §6.
+#
+# A table rather than a `match` inside `update`: the bindings are then readable
+# in one place, testable without a terminal, and the seam a configuration file
+# plugs into later.
+#
+# Only chords and Esc live here. A bare letter belongs to whichever pane holds
+# the keyboard — binding one would make the editor unusable the moment it had
+# focus — and the panes decline chords for exactly this reason.
+
+import stdlib.tui.event as event
+
+export type Command (..) deriving (Eq, ToString) =
+  | Quit
+  | Save
+
+export fn command_for(k: event.Key, mods: event.Mods) -> Maybe Command =
+  if event.mods_has_ctrl(mods) then chorded(k)
+  else if event.mods_is_chord(mods) then Nothing
+  else unmodified(k)
+
+fn chorded(k: event.Key) -> Maybe Command =
+  match k with
+  | event.KChar c -> lettered(c)
+  | _ -> Nothing
+
+fn lettered(c: Char) -> Maybe Command =
+  if c == 's' then Just(Save) else if c == 'q' then Just(Quit) else Nothing
+
+fn unmodified(k: event.Key) -> Maybe Command =
+  match k with
+  | event.KEsc -> Just(Quit)
+  | _ -> Nothing

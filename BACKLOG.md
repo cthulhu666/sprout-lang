@@ -585,12 +585,13 @@ Legend:
   path reached `grapheme`; before that it was 22% of a core with a source file on screen. Separating
   the two — keep the deadline, emit a tick only when asked — needs somewhere in `App` to ask.
   Design: `docs/tui-core-v0.md` §3.2.
-- [ ] `P3` **TUI `text_area` — `render` builds the whole document every frame.** `visible` calls
+- [ ] `P3` **TUI `viewport` — `render` builds the whole document every frame.** `visible` calls
   `buffer_lines`, which is `list_append(list_reverse(above), Cons(line, below))`, then throws all
   but `region_rows` of it away; the unfocused branch does the same. `above`/`below` are already
-  the two halves the window needs, so O(region rows) is reachable — but the accessor's shape
-  depends on whether the IDE editor pane wants a window or the halves. Harmless for a commit
-  composer, not for a source file. Design: `docs/tui-text-area-v0.md` §4.6.
+  the two halves the window needs, so O(region rows) is reachable. The accessor's shape was open
+  pending the IDE pane; it now wants a window AND a line count, for a gutter as wide as its
+  largest number (`ide/editor.sprout`), so both `text_area` and the pane pay it twice per frame.
+  Harmless for a commit composer, not for a source file. Design: `docs/tui-text-area-v0.md` §4.6.
 - [ ] `P2` **TUI `text_area` — an application can send a caret in but never read one out.**
   `on_content` takes a `Maybe buffer.Caret`, and the only outbound is `on_change: String -> m`
   (`text_area.sprout:231`), so nothing hands a `Caret` back. `docs/tui-content-update-v0.md` §9.3
@@ -652,6 +653,29 @@ Legend:
   pieces: (a) name the constructor rather than the eta parameter, a `linear_check` change worth
   doing on its own; (b) support a linear parameter in a synthesized eta lambda, the deferred
   feature.
+
+### 4.5) The IDE (`ide/`)
+
+Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Design:
+`docs/ide-v0.md`.
+
+- [ ] `P2` **IDE — one pane, no splits, no tabs, no palette.** `ide/app.sprout` wires exactly one
+  editor beside the tree, so a second file replaces the first and an unsaved edit goes with it.
+  `ide/pane.sprout` and `ide/palette.sprout` from the plan are unwritten, and both want the `tabs`
+  widget, which §4's C3 entry still lists as missing. A palette also needs somewhere to type a
+  path, which is what makes "save a scratch buffer" reachable — `ed.Unnamed` is the honest refusal
+  standing in for it today. Design: `docs/ide-v0.md` §9.
+- [ ] `P2` **IDE — reopening a file forgets where the caret was.** `ed.EditorOpts.on_content`
+  carries `(path, text)` and no caret, so every open starts at line 1. The payload is not the
+  blocker — §4's "an application can send a caret in but never read one out" is: the pane would
+  have to announce a `Caret` on the way out for anything to send back, and nothing reads one.
+  Fix that entry first; this is its first real consumer. Design: `docs/ide-v0.md` §5.
+- [ ] `P3` **`app.step_to` recurses forever when `update` re-sends the message it is given.**
+  `delivered` (`app.sprout:126`) answers an unclaimed delivery with `apply(update, [msg], w)`, so
+  an `update` arm whose handling of `msg` is `step_to(update, w, id, msg)` — the obvious spelling
+  of "ask that widget" — loops until the stack goes. `ide/app.sprout` uses `widget.deliver`
+  directly and handles `Nothing` itself to avoid it. Either document the constraint at `step_to`
+  or give it a form that cannot fall back to the sender.
 
 ### 5) Data Structures and Collections
 

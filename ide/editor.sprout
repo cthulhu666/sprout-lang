@@ -1,0 +1,235 @@
+module ide.editor
+
+# The IDE's editor pane. Design: docs/ide-v0.md §5.
+#
+# A SIBLING of `stdlib.tui.widgets.text_area`, not a client of it. The area
+# announces its whole document on every keystroke, because an application that
+# cannot read a widget has to mirror what it hears — and a mirror costs a
+# full-document rebuild per character typed. This pane owns its document
+# instead, identity and dirt included, and parts with the text once: when it is
+# ASKED, on a save.
+#
+# So the traffic it puts on the loop is a short label when the label changes,
+# and the text exactly when something is about to write it.
+
+import stdlib.string as string
+import stdlib.tui.buffer as buffer
+import stdlib.tui.event as event
+import stdlib.tui.geometry as geometry
+import stdlib.tui.screen as scr
+import stdlib.tui.widget as widget
+import stdlib.tui.widgets.focus as focus
+import stdlib.tui.widgets.paint as paint
+import stdlib.tui.widgets.viewport as viewport
+import ide.document as document
+
+# What the pane answers a save request with. `Unnamed` rather than an empty
+# path, so an application cannot write a file called "" by forgetting to check.
+export type Saving (..) deriving (Eq, ToString) =
+  | SaveTo document.FilePath String
+  | Unnamed
+
+# Everything optional, in a record, as every widget in the tree takes its
+# options: Sprout has no default arguments. Start from `editor_opts()` and
+# override with `with`.
+#
+# The three decoders are prisms over the application's own message type, the
+# vocabulary `docs/tui-content-update-v0.md` §4.10 leaves to opts rather than to
+# `Delivery` arms. A pane given none of them is a read-only viewer.
+export type EditorOpts m = (look: focus.FocusStyle,
+                            # The label, when it changes. Never the document.
+                            on_label: Maybe (String -> m),
+                            # A file arriving: its path and its text.
+                            on_content: Maybe (m -> Maybe(document.FilePath, String)),
+                            # "Hand me your text", decoded into the CONSTRUCTOR
+                            # of the reply — only the pane knows what it will
+                            # answer, only the application names it.
+                            on_demand: Maybe (m -> Maybe(Saving -> m)),
+                            # "It is on disk now, at this path."
+                            on_stored: Maybe (m -> Maybe document.FilePath))
+
+export fn editor_opts() -> EditorOpts m =
+  EditorOpts(look = focus.focus_style_default(), on_label = Nothing,
+             on_content = Nothing, on_demand = Nothing, on_stored = Nothing)
+
+# ── the widget ──────────────────────────────────────────────────────────────
+
+# `has_focus` is the pane's own copy of "the keyboard is mine", set by the ring
+# (docs/tui-focus-v0.md §4.1).
+type Pane m = (id: widget.WidgetId, opts: EditorOpts m, doc: document.Document,
+               body: buffer.Buffer, has_focus: Bool)
+
+type alias Reply m = Maybe(Pane m, List m, List(widget.Cmd m))
+
+# Everything a pane reacts to arrives addressed, so the broadcast is idle.
+fn pane_on_event(p: Pane m,
+                 ev: event.Event) -> (Pane m, List m, List(widget.Cmd m)) =
+  (p, Nil, Nil)
+
+fn pane_handler(p: Pane m, d: widget.Delivery m) -> Reply m =
+  match d with
+  | widget.ToMsg msg -> answered(p, msg)
+  | widget.ToFocus x -> Just(((p with (has_focus = x)), Nil, Nil))
+  | widget.ToEvent e -> if p.has_focus then pane_event(p, e) else Nothing
+
+# ── what the application says ───────────────────────────────────────────────
+
+# DECODER CHAIN — `on_content`, then `on_demand`, then `on_stored`, each
+# falling through to the next, declining when none claims the message. The
+# order decides any message two prisms both recognise, and a reader editing one
+# link cannot see the others: do not reorder without checking all three.
+#
+# A file being OPENED is read from the top, unlike one being reopened where the
+# place left matters — which the skeleton has nowhere to remember yet.
+fn answered(p: Pane m, msg: m) -> Reply m =
+  let Just(f, body) = widget.decoded(p.opts.on_content, msg) else demanded(p, msg)
+  in Just(settled(p, (p with (doc = document.opened(f),
+                              body = at_top(buffer.buffer_open(body))))))
+
+fn at_top(b: buffer.Buffer) -> buffer.Buffer =
+  buffer.buffer_goto(buffer.Caret(row = 0, col = 0), b)
+
+fn demanded(p: Pane m, msg: m) -> Reply m =
+  let Just reply = widget.decoded(p.opts.on_demand, msg) else restored(p, msg)
+  in Just((p, [reply(saving(p))], Nil))
+
+# Handing the text over is not a write — a write can fail — so nothing here is
+# marked clean. `on_stored` is what does that, once the write has happened.
+fn saving(p: Pane m) -> Saving =
+  let Just f = document.target(p.doc) else Unnamed
+  in SaveTo(f, buffer.buffer_text(p.body))
+
+# Stored AT a path, not merely stored: it is also how a pane that had nowhere
+# to save learns where it now lives.
+fn restored(p: Pane m, msg: m) -> Reply m =
+  let Just f = widget.decoded(p.opts.on_stored, msg) else Nothing
+  in Just(settled(p, (p with (doc = document.opened(f)))))
+
+# ── what it says back ───────────────────────────────────────────────────────
+
+fn settled(was: Pane m, now: Pane m) -> (Pane m, List m, List(widget.Cmd m)) =
+  (now, relabelled(was, now), Nil)
+
+# The EDGE, not every keystroke: a label that has not changed is nothing the
+# application needs telling, and announcing one per character typed would put a
+# message on the loop for every key with nothing new in it.
+fn relabelled(was: Pane m, now: Pane m) -> List m =
+  if document.label(was.doc) == document.label(now.doc) then Nil
+  else announced(now)
+
+fn announced(p: Pane m) -> List m =
+  let Just f = p.opts.on_label else Nil
+  in [f(document.label(p.doc))]
+
+# ── the keys ────────────────────────────────────────────────────────────────
+
+fn pane_event(p: Pane m, e: event.Event) -> Reply m =
+  match e with
+  | event.KeyPress k mods -> pane_key(p, k, mods)
+  | event.Paste s -> edited(p, buffer.buffer_insert(s, p.body))
+  # A tick, a resize and the mouse are not a pane's, and neither is whatever is
+  # added next: declining leaves it to the application.
+  | _ -> Nothing
+
+# Every chord falls through, which is what lets ctrl-s be the application's
+# save rather than something the focused pane swallows.
+fn pane_key(p: Pane m, k: event.Key, mods: event.Mods) -> Reply m =
+  if event.mods_is_chord(mods) then Nothing else pane_plain(p, k)
+
+# Tab, Esc and the function keys fall through, as they do for `text_area`. So
+# do PageUp and PageDown: paging is measured against the viewport, which a pure
+# handler is not given.
+fn pane_plain(p: Pane m, k: event.Key) -> Reply m =
+  match k with
+  | event.KChar c -> typed_in(p, string.string_from_char(c))
+  | event.KEnter -> typed_in(p, "\n")
+  | event.KBackspace -> edited(p, buffer.buffer_backspace(p.body))
+  | event.KDelete -> edited(p, buffer.buffer_delete(p.body))
+  | event.KLeft -> moved(p, buffer.buffer_left(p.body))
+  | event.KRight -> moved(p, buffer.buffer_right(p.body))
+  | event.KUp -> moved(p, buffer.buffer_up(p.body))
+  | event.KDown -> moved(p, buffer.buffer_down(p.body))
+  | event.KHome -> moved(p, buffer.buffer_home(p.body))
+  | event.KEnd -> moved(p, buffer.buffer_end(p.body))
+  | _ -> Nothing
+
+fn typed_in(p: Pane m, s: String) -> Reply m =
+  edited(p, buffer.buffer_insert(s, p.body))
+
+# `Nothing` is a claimed key that changed nothing — backspace at the start must
+# not dirty a document it did not edit.
+fn edited(p: Pane m, b: Maybe buffer.Buffer) -> Reply m =
+  let Just b2 = b else Just((p, Nil, Nil))
+  in Just(settled(p, (p with (body = b2, doc = document.touched(p.doc)))))
+
+fn moved(p: Pane m, b: buffer.Buffer) -> Reply m =
+  Just(((p with (body = b)), Nil, Nil))
+
+# ── what it paints ──────────────────────────────────────────────────────────
+
+# A gutter of line numbers, and the document beside it. The window itself is
+# `widgets.viewport`'s, shared with `text_area`; what a pane adds is the
+# columns it takes first.
+#
+# `top` is worked out here AND again inside `paint_at_caret`, and the two must
+# agree or the numbers slide against the lines. They do because the gutter takes
+# COLUMNS: `split_left` leaves the row count alone, so both are `first_row` of
+# the same caret over the same height.
+fn pane_render(p: Pane m, r: geometry.Region, s: scr.Screen) -> Unit !{IO} =
+  drawn(p, r, s, viewport.first_row(top_row(p), geometry.region_rows(r)),
+        list_length(buffer.buffer_lines(p.body)))
+
+# An unfocused pane has no caret to keep in view, so it shows the start of its
+# document — the window only follows a caret that is there.
+fn top_row(p: Pane m) -> Int =
+  if p.has_focus then buffer.buffer_row(p.body) else 0
+
+fn drawn(p: Pane m, r: geometry.Region, s: scr.Screen, top: Int,
+         total: Int) -> Unit !{IO} =
+  let width = digits(total) + 1
+      (gutter, text) = geometry.split_left(r, width)
+      rows = geometry.region_rows(r)
+      # Past the last line there is no number to paint, so the gutter stops
+      # where the document does rather than numbering blank rows.
+      shown = if total - top < rows then total - top else rows
+  in
+  do
+    paint.lines(s, gutter, 0, numbers(top, shown, width, Nil), p.opts.look.normal)
+    body_painted(p, text, s)
+
+fn body_painted(p: Pane m, r: geometry.Region, s: scr.Screen) -> Unit !{IO} =
+  if p.has_focus then viewport.paint_at_caret(s, r, p.body, p.opts.look)
+  else viewport.paint_at_top(s, r, p.body, p.opts.look.normal)
+
+fn digits(n: Int) -> Int = if n < 10 then 1 else 1 + digits(n / 10)
+
+# Right-aligned, one space short of the gutter so the numbers never touch the
+# text.
+fn numbers(top: Int, count: Int, width: Int, acc: List String) -> List String =
+  if count <= 0 then list_reverse(acc)
+  else numbers(top + 1, count - 1, width,
+               Cons(right_aligned(int_to_string(top + 1), width - 1), acc))
+
+fn right_aligned(s: String, width: Int) -> String =
+  string.repeat(" ", width - string.length(s)) ++ s
+
+# As big as it is given, on BOTH axes: a document taller or wider than its
+# region scrolls rather than demanding room.
+fn pane_measure(p: Pane m, avail: geometry.Size) -> widget.Measured =
+  widget.greedy_size(avail)
+
+fn pane_widget(p: Pane m) -> widget.Widget m =
+  widget.Widget(widget.View(state = p, on_event = pane_on_event,
+                            route = widget.route_when(p.id, pane_handler, _, _,
+                                                      _),
+                            render = pane_render, measure = pane_measure))
+
+export fn editor(id: widget.WidgetId) -> widget.Widget m =
+  editor_with(id, editor_opts())
+
+# A pane starts on a scratch document: empty, clean, and with nowhere to save
+# until a file arrives or a write names one.
+export fn editor_with(id: widget.WidgetId,
+                      opts: EditorOpts m) -> widget.Widget m =
+  pane_widget(Pane(id = id, opts = opts, doc = document.scratch(),
+                   body = buffer.buffer_open(""), has_focus = false))

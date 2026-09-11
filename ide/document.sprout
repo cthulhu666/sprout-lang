@@ -1,0 +1,52 @@
+module ide.document
+
+# What the IDE knows about an open file APART from its text. The text lives in
+# the editor pane and leaves it only on a save: `Widget m` erases a widget's
+# state, so an application cannot read one, and mirroring what it hears would
+# cost a full-document rebuild per keystroke. Design: docs/ide-v0.md §4.
+#
+# So this holds only what `update` decides with — where the text came from, and
+# whether it has been edited since it was last written.
+
+import stdlib.fs.path as path
+
+# Where a file lives, as opposed to what is in it. Both are `String` and they
+# travel together — `SaveTo(path, text)`, `Loaded(path, body)` — so swapping
+# them would write a file's own name into it. `wrap` is zero-cost and makes
+# that a compile error (docs/guidelines.md §7).
+export wrap FilePath = String deriving (Eq, Ord, ToString)
+
+export fn path_text(p: FilePath) -> String =
+  match p with
+  | FilePath s -> s
+
+# `file` is a `Maybe` because a buffer can exist before it has anywhere to go.
+export type Document = (file: Maybe FilePath, dirty: Bool) deriving (Eq, ToString)
+
+export fn scratch() -> Document = Document(file = Nothing, dirty = false)
+
+export fn opened(f: FilePath) -> Document = Document(file = Just(f), dirty = false)
+
+export fn doc_file(d: Document) -> Maybe FilePath = d.file
+
+export fn is_dirty(d: Document) -> Bool = d.dirty
+
+# The pane announces the edge into dirtiness rather than every keystroke, but a
+# repeat must not be able to mean anything different, so this is idempotent.
+export fn touched(d: Document) -> Document = d with (dirty = true)
+
+export fn written(d: Document) -> Document = d with (dirty = false)
+
+export fn title(d: Document) -> String =
+  maybe_with_default("untitled", map(basename_of, d.file))
+
+fn basename_of(f: FilePath) -> String = path.basename(path_text(f))
+
+# The title as the status bar shows it, dirt included.
+export fn label(d: Document) -> String =
+  if d.dirty then title(d) ++ " *" else title(d)
+
+# Where a save would write. `Nothing` means there is nowhere: naming a pathless
+# buffer needs somewhere to ask, which the skeleton has not got, and a `Maybe`
+# is what keeps `update` total over that.
+export fn target(d: Document) -> Maybe FilePath = d.file

@@ -162,7 +162,8 @@ it with a confidence label. Present this *with* the decision, before asking for 
 - `stdlib/` language-level standard library source (`prelude.sprout`).
 - `stdlib/compiler/` self-hosted compiler source (`parser`, `infer`, `ast_to_ir`, `ir_lowering`, `compile_driver`, etc.).
 - `runtime/` C runtime, GC, poller and scheduler (`sprout_runtime.c`, `sprout_poll.c`, `sprout_scheduler.c`); link all three.
-- `tests/stdlib/` native Sprout test files (`.spr`, run via `just test`); `tests/conformance/` executable language behavior fixtures.
+- `ide/` the Sprout IDE (`ide.*` modules, resolved with `--package-root`); imports `stdlib.*` and never the reverse, so it lifts out whole. Design: `docs/ide-v0.md`.
+- `tests/stdlib/` native Sprout test files (`.spr`, run via `just test`); `tests/ide/` the IDE's own suites (`just test-ide`); `tests/conformance/` executable language behavior fixtures.
 - `bootstrap/` committed LLVM IR seed (`compile_driver.ll`) for stage-1 bootstrap.
 - `mise.toml` toolchain definition; `justfile` standard developer tasks.
 
