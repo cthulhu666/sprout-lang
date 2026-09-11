@@ -37,15 +37,22 @@ printf 'hello\n' > "$FIX/ZFILE"
 # an exit would prove nothing. Holding the stream open makes the exit
 # attributable to Escape alone. The binary must be LAST in the pipeline so `$!`
 # is the process that matters.
-{ printf '\r'; sleep 1; printf '\t'; sleep 1; printf 'Q'; sleep 1; \
-  printf '\x13'; sleep 1; printf '\x1b'; sleep 12; } \
+#
+# The gap AFTER Enter is the one that has to be generous, and the only one that
+# does: the keys are pipe-buffered and so ordered against each other at any
+# speed, but the file read comes back on a task of its own, unordered against
+# them. Miss that window under `ci-fast-gates`' parallel load and every later
+# key lands on a still-empty buffer. The "never loaded" branch below exists so
+# that failure names itself instead of reading as a broken save.
+{ printf '\r'; sleep 3; printf '\t'; sleep 1; printf 'Q'; sleep 1; \
+  printf '\x13'; sleep 2; printf '\x1b'; sleep 20; } \
   | ( cd "$FIX" && exec "$BIN" ) > "$out" 2>&1 &
 pid=$!
 
-# 9s: after the Esc at 4s plus a read deadline, well before the writer's 12s, so
-# an exit inside the window cannot be EOF.
+# 15s: after the Esc at 7s plus a read deadline, well before the writer's 20s,
+# so an exit inside the window cannot be EOF.
 quit=0
-for _ in $(seq 1 90); do
+for _ in $(seq 1 150); do
   if ! kill -0 $pid 2>/dev/null; then quit=1; break; fi
   sleep 0.1
 done
@@ -54,7 +61,7 @@ wait $pid 2>/dev/null
 
 fail=0
 if [ "$quit" -ne 1 ]; then
-  echo "FAIL: still running 9s after Esc, with stdin still open" >&2
+  echo "FAIL: still running 15s after Esc, with stdin still open" >&2
   fail=1
 fi
 
@@ -63,9 +70,16 @@ fi
 # newline back again.
 got=$(cat "$FIX/ZFILE")
 if [ "$got" != "Qhello" ]; then
-  echo "FAIL: the save round trip did not reach the disk" >&2
-  echo "      wanted 'Qhello', got '$got'" >&2
-  echo "      (tree Enter -> read -> pane -> ctrl-s -> HandOver -> write)" >&2
+  if ! grep -q 'hello' "$out"; then
+    # The file never reached the pane, so nothing downstream of it was tested.
+    # A timing failure, not a broken handshake — widen the post-Enter gap.
+    echo "FAIL: the fixture never loaded, so the save was never exercised" >&2
+    echo "      Enter -> read_body -> Loaded did not land inside its window" >&2
+  else
+    echo "FAIL: the save round trip did not reach the disk" >&2
+    echo "      wanted 'Qhello', got '$got'" >&2
+    echo "      (tree Enter -> read -> pane -> ctrl-s -> HandOver -> write)" >&2
+  fi
   fail=1
 fi
 

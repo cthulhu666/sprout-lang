@@ -109,6 +109,11 @@ fn told(w: widget.Widget Msg, m: Msg) -> (widget.Widget Msg, Says, Asks) =
 fn loaded_tree() -> widget.Widget Msg =
   tree_of(told(tree(), Loaded(at("stdlib/a.txt"), "ab")))
 
+# Loaded, edited, and its text handed out — the state a `Stored` legitimately
+# answers.
+fn handed_over_tree() -> widget.Widget Msg =
+  tree_of(told(tree_of(widget.feed(loaded_tree(), chars("x"))), Save))
+
 # ── what it says ────────────────────────────────────────────────────────────
 
 fn content_cases(state: TestState) -> Unit !{IO} = do
@@ -128,8 +133,7 @@ fn dirt_cases(state: TestState) -> Unit !{IO} = do
             said(widget.feed(loaded_tree(), chars("xy"))),
             "[Labelled(a.txt *)]")
   assert_eq(state, "being stored cleans the label",
-            said(told(tree_of(widget.feed(loaded_tree(), chars("x"))),
-                      Stored(at("stdlib/a.txt")))),
+            said(told(handed_over_tree(), Stored(at("stdlib/a.txt")))),
             "[Labelled(a.txt)]")
   # A write can fail, so handing the text over is not itself a write and must
   # not clean anything.
@@ -140,9 +144,43 @@ fn dirt_cases(state: TestState) -> Unit !{IO} = do
 fn saving_cases(state: TestState) -> Unit !{IO} = do
   assert_eq(state, "a pane with no file has nowhere to save",
             said(told(tree(), Save)), "[Saved(Unnamed)]")
-  assert_eq(state, "a stored pane saves where it was stored",
+  # A `Stored` names a file this pane never handed anything over for, so it is
+  # not this pane's: taking the path is how a late answer aims the next save at
+  # the wrong file. Naming a pathless buffer needs a save-as, which the
+  # skeleton has not got.
+  assert_eq(state, "an unsolicited Stored does not name a pathless pane",
             said(told(tree_of(told(tree(), Stored(at("x/new.txt")))), Save)),
-            "[Saved(SaveTo(FilePath(x/new.txt), ))]")
+            "[Saved(Unnamed)]")
+
+# A write runs in its own task (`app.sprout:239` spawns one), so `Stored` can
+# land any number of loop steps after the `HandOver` that produced it — after
+# the pane has been edited again, or has moved to another file entirely.
+fn stale_cases(state: TestState) -> Unit !{IO} = do
+  # THE DATA-LOSS ONE. Save A, open B, then A's answer arrives: a pane that
+  # adopted the path would show B's text with A as its save target, and the
+  # next ctrl-s would write B over A.
+  assert_eq(state, "a late Stored does not retarget a pane that moved on",
+            said(told(moved_on(), Save)),
+            "[Saved(SaveTo(FilePath(b.txt), bbb))]")
+  # Saving does not clean what was typed AFTER the text was handed over — the
+  # file on disk does not have those characters in it.
+  assert_eq(state, "a late Stored does not clean an edit made since",
+            said(told(edited_since(), Stored(at("a.txt")))), "[]")
+
+# Load A, hand its text over, then load B. A's `Stored` lands last.
+fn moved_on() -> widget.Widget Msg =
+  tree_of(told(tree_of(told(tree_of(told(tree(), Loaded(at("a.txt"), "aaa"))),
+                            Save)),
+               Loaded(at("b.txt"), "bbb")))
+  |> \w -> tree_of(told(w, Stored(at("a.txt"))))
+
+# Load A, edit, hand the text over, edit again.
+fn edited_since() -> widget.Widget Msg =
+  tree_of(told(tree_of(widget.feed(tree_of(told(tree(),
+                                                Loaded(at("a.txt"), "ab"))),
+                                   chars("x"))),
+               Save))
+  |> \w -> tree_of(widget.feed(w, chars("y")))
 
 fn key_cases(state: TestState) -> Unit !{IO} = do
   # ctrl-s must reach the application, so the pane declines every chord and the
@@ -227,6 +265,7 @@ fn main() -> Unit !{IO} = do
   content_cases(state)
   dirt_cases(state)
   saving_cases(state)
+  stale_cases(state)
   key_cases(state)
   gutter_cases(state)
   summary(state)

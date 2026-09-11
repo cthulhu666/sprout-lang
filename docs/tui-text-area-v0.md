@@ -308,6 +308,7 @@ that produced in the tests are exactly what §6's rationale describes.
 ```
 stdlib/tui/line_zipper.sprout        one line, cluster-safe   ← input, buffer
 stdlib/tui/buffer.sprout             lines, caret, goal col   ← text_area, ide
+stdlib/tui/widgets/viewport.sprout   §4.6's window            ← text_area, ide
 stdlib/tui/widgets/text_area.sprout  the widget
 ```
 
