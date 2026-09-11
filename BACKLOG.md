@@ -564,6 +564,13 @@ Legend:
 - [ ] `P2` **TUI M4 C3 — the larger widgets.** `tabs`, `tree`, `table`. `scroll_view` and the screen
   clip it needed landed as C3a (`docs/tui-scroll-view-v0.md`), `text_area` as C3b
   (`docs/tui-text-area-v0.md`); the rest are still open.
+- [ ] `P3` **TUI — a tick repaints the whole tree even when nothing changed.** `App.tick_ms` is both
+  the input read deadline and the tick period, and the deadline is load-bearing: it is what resolves
+  a held ESC into a key. So an application wanting no animation still repaints twice a second, and
+  `diff_to_ansi` then emits nothing for it. Measured at 8.5 ms per idle frame once §3.4's ASCII fast
+  path reached `grapheme`; before that it was 22% of a core with a source file on screen. Separating
+  the two — keep the deadline, emit a tick only when asked — needs somewhere in `App` to ask.
+  Design: `docs/tui-core-v0.md` §3.2.
 - [ ] `P3` **TUI `text_area` — `render` builds the whole document every frame.** `visible` calls
   `buffer_lines`, which is `list_append(list_reverse(above), Cons(line, below))`, then throws all
   but `region_rows` of it away; the unfocused branch does the same. `above`/`below` are already

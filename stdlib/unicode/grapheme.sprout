@@ -25,12 +25,22 @@ fn hangul_class(cp: Int) -> Maybe String =
   else if cp > 55203 then Nothing
   else if lookup.imod(cp - 44032, 28) == 0 then Just("m") else Just("n")
 
+# The ASCII fast path of docs/stdlib-unicode-v0.md §3.4, which `width` already
+# takes. It rests on ONE premise held across three lookups and a generated
+# table: no printable-ASCII codepoint appears in gcb, extpict or incb, so each
+# search it replaces would fall through to the default it returns. Do not widen
+# the range, and do not regenerate tables.sprout, without re-running
+# tests/stdlib/test_unicode_ascii_fast_path.spr — it is what pins the premise.
+fn is_ascii_printable(cp: Int) -> Bool = cp >= 32 && cp < 127
+
 # Tags: R=CR N=LF C=Control X=Extend Z=ZWJ S=SpacingMark P=Prepend
 #       I=Regional_Indicator l=L v=V t=T m=LV n=LVT O=Any
 export fn gcb(cp: Int) -> String =
-  match hangul_class(cp) with
-  | Just h -> h
-  | Nothing -> gcb_tabled(cp)
+  if is_ascii_printable(cp) then "O"
+  else
+    match hangul_class(cp) with
+    | Just h -> h
+    | Nothing -> gcb_tabled(cp)
 
 fn gcb_tabled(cp: Int) -> String =
   match lookup.find_tag(tables.gcb_count(), gcb_chunk, cp) with
@@ -38,12 +48,15 @@ fn gcb_tabled(cp: Int) -> String =
   | Nothing -> "O"
 
 fn is_extpict(cp: Int) -> Bool =
-  lookup.has_tag(tables.extpict_count(), extpict_chunk, cp)
+  if is_ascii_printable(cp) then false
+  else lookup.has_tag(tables.extpict_count(), extpict_chunk, cp)
 
 fn incb_class(cp: Int) -> String =
-  match lookup.find_tag(tables.incb_count(), incb_chunk, cp) with
-  | Just t -> t
-  | Nothing -> "O"
+  if is_ascii_printable(cp) then "O"
+  else
+    match lookup.find_tag(tables.incb_count(), incb_chunk, cp) with
+    | Just t -> t
+    | Nothing -> "O"
 
 # GB11 (emoji ZWJ), GB12/GB13 (regional-indicator pairs) and GB9c (Indic
 # conjuncts) all depend on what came BEFORE the previous character, so this is
