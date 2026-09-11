@@ -281,6 +281,20 @@ Legend:
 - [ ] `P3` **Named `RuntimeLet` record for the runtime-let representation.** `classify_let_decls_ir`
   returns an anonymous positional pair. Blocked on records maturing in compiler code. Broader
   follow-on: adopt `GlobalName` at the other global-name sites so the wrap/unwrap seam shrinks.
+- [ ] `P2` **No A/B harness for a compiler optimization — measuring one costs two bootstraps.**
+  `bench/unboxed_read/bench.sh:5-8` documents the ritual: build the compiler with the change, stash
+  it, rebuild from seed, compare by hand. Slow, and it cannot run in CI, so a pass that silently
+  stops firing is invisible. Add `SPROUT_OPT_OFF=`/`SPROUT_OPT_STATS=1` (the
+  `SPROUT_VERIFY_DISPATCH_OFF` precedent, `compiler.sprout:445`/`:538`), retrofit them onto the
+  existing `dce` so the harness is self-validating, and add `bench/optpasses/` + `just bench-opt`
+  for a one-build A/B. `docs/opt-passes-v0.md` §M0.
+- [ ] `P2` **No CSE or LICM over Sprout-level calls, and LLVM cannot supply them.** `-O2` runs, but
+  the shadow stack makes every allocating function look `memory(readwrite)` to `FunctionAttrs`
+  (`tests/golden/ir/examples__aoc_2025_day_1.sprout.ll:393-396`) and there is no LTO, so GVN/LICM
+  never touch a call. The licensing fact — purity, from the effect row — is erased before LLVM sees
+  the code, and `dce.is_pure_callee_type` already computes it. M1 = CSE within a body; M2 = hoisting
+  out of self-recursion via a worker/wrapper split, which can LOSE (a longer live range means more
+  GC roots held across more triggers) — blocked on M0's numbers. `docs/opt-passes-v0.md`.
 
 **GC and runtime**
 
