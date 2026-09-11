@@ -24,16 +24,25 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="${SPROUT_RENDER_COST_BIN:-$ROOT/build/render_cost}"
 
-# Per painted cell. Observed 15 objects / 20 swept on 2026-09-11.
+# Per painted cell. Observed 18 objects / 42 swept on 2026-09-11.
 #
 # BOTH counters are budgeted, and gc_swept is the one that bites. Verified by
-# building this probe against the pre-fast-path `grapheme`: it scored 15 objects
-# — IDENTICAL — and 71 swept. `sprout_obj` does not count cstr allocations, and
-# the bug was `str_slice` churn, so an objects-only budget would have passed the
-# worst performance bug the TUI has had. Do not drop the swept budget as
-# redundant; it is the only one that sees strings.
-MAX_OBJ_PER_CELL=22
-MAX_SWEPT_PER_CELL=30
+# building this probe against the pre-fast-path `grapheme`: `sprout_obj` barely
+# moved while swept multiplied. `sprout_obj` does not count cstr allocations,
+# and that bug was `str_slice` churn, so an objects-only budget would have
+# passed the worst performance bug the TUI has had. Do not drop the swept budget
+# as redundant; it is the only one that sees strings.
+MAX_OBJ_PER_CELL=26
+MAX_SWEPT_PER_CELL=60
+
+# A FLOOR, because "cheap" and "did nothing" are the same number to a budget. A
+# layout regression that yields empty regions, or a list that renders no rows,
+# would otherwise leave this gate green while measuring an empty screen — and
+# nothing else in the repo exercises tests/cost/. Set near half the observed
+# value: far below any real improvement, far above a collapse (a probe rendering
+# two labels and nothing else scores 5 and 6).
+MIN_OBJ_PER_CELL=9
+MIN_SWEPT_PER_CELL=20
 
 if [ ! -x "$BIN" ]; then
   echo "ERROR: $BIN not found; run: just render-cost-gate" >&2
@@ -59,8 +68,10 @@ swept=$(printf '%s\n' "$line" | sed -n 's/.*gc_swept=\([0-9]*\).*/\1/p')
 
 # A missing count means the report did not appear — the runtime lost
 # SPROUT_DEBUG_ALLOC, or the probe stopped printing its denominator. Either way
-# the gate is blind, and a blind gate must fail rather than pass.
-if [ -z "$cells" ] || [ -z "$obj" ] || [ -z "$swept" ]; then
+# the gate is blind, and a blind gate must fail rather than pass. Zero cells
+# belongs here too: the division below would abort under `set -u` on the unset
+# quotient, blaming this script for a probe edited down to no frames.
+if [ -z "$cells" ] || [ "$cells" -eq 0 ] || [ -z "$obj" ] || [ -z "$swept" ]; then
   echo "FAIL: could not read the counters (cells='$cells' obj='$obj' swept='$swept')" >&2
   echo "--- stdout ---" >&2; cat "$out" >&2
   echo "--- stderr ---" >&2; cat "$err" >&2
@@ -72,18 +83,28 @@ swept_per=$(( (swept + cells - 1) / cells ))
 echo "==> render cost: ${obj_per} objects and ${swept_per} swept per painted cell" \
      "(${obj} / ${swept} over ${cells} cells)"
 
-fail=0
+over=0
+under=0
 if [ "$obj_per" -gt "$MAX_OBJ_PER_CELL" ]; then
   echo "FAIL: $obj_per objects per cell exceeds the budget of $MAX_OBJ_PER_CELL" >&2
-  fail=1
+  over=1
 fi
 if [ "$swept_per" -gt "$MAX_SWEPT_PER_CELL" ]; then
   echo "FAIL: $swept_per swept per cell exceeds the budget of $MAX_SWEPT_PER_CELL" >&2
-  fail=1
+  over=1
 fi
-if [ "$fail" -ne 0 ]; then
+if [ "$obj_per" -lt "$MIN_OBJ_PER_CELL" ] || [ "$swept_per" -lt "$MIN_SWEPT_PER_CELL" ]; then
+  echo "FAIL: $obj_per objects / $swept_per swept per cell is below the floor of" >&2
+  echo "      $MIN_OBJ_PER_CELL / $MIN_SWEPT_PER_CELL. The probe has stopped painting a full screen," >&2
+  echo "      so the ceiling above is guarding nothing. Check what it renders" >&2
+  echo "      before lowering the floor." >&2
+  under=1
+fi
+if [ "$over" -ne 0 ]; then
   echo "      Rendering got more expensive. Find what each frame now allocates" >&2
   echo "      before raising the ceiling — that is the bug this gate is for." >&2
+fi
+if [ "$over" -ne 0 ] || [ "$under" -ne 0 ]; then
   exit 1
 fi
 
