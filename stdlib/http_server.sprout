@@ -302,8 +302,8 @@ fn request_body_start(raw: String) -> Maybe Int =
 
 # The header block spans from just past the request line to the blank-line
 # terminator. A header-less request (HTTP/1.0-style) has the terminator right after
-# the request line, so `headers_end <= header_start` — return "" rather than slicing
-# a negative length (which aborts in str_slice).
+# the request line, so `headers_end <= header_start`; "" states that directly rather
+# than leaning on `slice` to clamp a negative count.
 fn header_block(raw: String, line_end: Int, headers_end: Int) -> String =
   if headers_end <= header_start then ""
   else string.slice(raw, header_start, headers_end - header_start)
@@ -554,7 +554,7 @@ where
   (req, headers, content_length) = prefix
   # `body_start` is already a byte offset — see read_until_headers. No conversion, and so no place
   # for a codepoint index to be mistaken for a byte one.
-  body = bytes.slice(raw, body_start, bytes.length(raw) - body_start)
+  body = bytes.drop(raw, body_start)
 
 fn headers_to_lines(keys: Vec String, headers: Dict String, index: Int, total: Int, acc: String) -> String =
   if index >= total then acc

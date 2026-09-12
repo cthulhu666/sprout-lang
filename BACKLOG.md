@@ -700,11 +700,9 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   `Dict` site plus the `Eq`/`ToString`/`dict_keys`/`dict_values`/`dict_entries` surface. Today's
   `Dict` forces callers to pre-stringify, which contradicts typeclass-based design. Unblocks
   `deriving (Hash)`.
-- [ ] `P2` **`string.slice` / `bytes.slice` abort on a negative index.** Exported, yet they
-  `tcp_fail`, which `docs/guidelines.md` #2 bans for `[Library]` code. `vec_slice` clamps.
-  Pick clamp or `Maybe` — a behaviour change either way.
-- [ ] `P3` **`string.slice` / `bytes.slice` are receiver-first**, against `docs/guidelines.md` #6;
-  `vec_slice(start, count, vec)` follows it. Breaking signature change.
+- [ ] `P3` **`stdlib.tui.keys` and `stdlib.repl` spell `drop` as a subtraction.** Four sites pass
+  `string.slice(s, n, string.length(s) - n)` where `string.drop(s, n)` says it. Readability only —
+  the count can no longer go negative (`docs/nat-refinement-v0.md`).
 - [ ] `P2` **Prelude O(n²) audit.** Several helpers are quadratic via naive list-append recursion
   and mostly undocumented: `ToString` for `List`/`Vec`/`Dict`, `mconcat`, `list_dedup`,
   `Semigroup (Dict v)`, and several `vec_*` (`map`/`filter`/`filter_map`/`reverse`/`slice`).

@@ -128,6 +128,13 @@ The convention prevents nested expressions like the current `lint_source` five-c
 
 **Scope — public APIs only.** A "public API" is a function whose callers live outside its defining module. This rule does **not** bind internal pipeline entry points that are never `|>`-chained: the compiler's `lower_program(prog, env)`, `check_program(prog)`, and `bundle_file(path, stdlib_root)` place the program receiver *first* deliberately — they are invoked by name in a fixed sequence, not composed into pipelines, so receiver-first is the clearer order there and is **not** a deviation from this rule.
 
+**Module-qualified modules are receiver-first, and that is not a deviation either.** `stdlib.string`
+and `stdlib.bytes` place the receiver first throughout (`string.take(raw, count)`,
+`bytes.get(value, index)`). The rule's examples are all *unqualified prelude globals*, where
+data-last is what keeps `vec_get(i, v)` pipeable; a call already carrying its namespace reads fine
+either way. Change one of these to data-last and the module becomes internally inconsistent to match
+a convention it was never under — so match the module you are in.
+
 **Pipe-style with `|>` is permitted, not required.** Use it for linear sequences of pure transforms where it reads top-to-bottom better than nested calls:
 
 ```sprout

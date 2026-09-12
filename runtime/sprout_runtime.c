@@ -5826,17 +5826,21 @@ _Bool str_eq(const char* left, const char* right) {
   return strcmp(left, right) == 0;
 }
 
-long long str_slice(long long s_i, long long start, long long length) {
+/* A negative start or count clamps to empty, matching vec_slice; only a null
+   string aborts. An index is caller input, not a violated invariant, so it gets
+   a total answer rather than tcp_fail (docs/guidelines.md #2). */
+long long str_slice(long long s_i, long long start, long long count) {
   const char* s = (const char*)(uintptr_t)s_i;
   if (s == NULL) tcp_fail("str_slice: null input");
-  if (start < 0 || length < 0) tcp_fail("str_slice: start/length must be >= 0");
+  if (start < 0) start = 0;
+  if (count < 0) count = 0;
   SPROUT_HANDLE(h_s, s_i);
   size_t total = sprout_utf8_codepoint_count(s);
   size_t start_byte = 0;
   size_t take = 0;
   if ((size_t)start < total) {
     start_byte = sprout_utf8_byte_offset(s, (size_t)start);
-    size_t end_codepoint = (size_t)start + (size_t)length;
+    size_t end_codepoint = (size_t)start + (size_t)count;
     if (end_codepoint > total) end_codepoint = total;
     size_t end_byte = sprout_utf8_byte_offset(s, end_codepoint);
     take = end_byte - start_byte;
@@ -9016,7 +9020,9 @@ long long bytes_slice(long long bytes_h, long long start, long long count) {
   SPROUT_GC_PUSH_I64_LOCAL(rooted_bytes);
   BytesVal* value = (BytesVal*)(uintptr_t)bytes_h;
   if (value == NULL) tcp_fail("bytes_slice: null bytes");
-  if (start < 0 || count < 0) tcp_fail("bytes_slice: start/count must be >= 0");
+  /* Clamped, not fatal — see str_slice. */
+  if (start < 0) start = 0;
+  if (count < 0) count = 0;
   size_t s = (size_t)start;
   size_t c = (size_t)count;
   if (s > value->len) s = value->len;

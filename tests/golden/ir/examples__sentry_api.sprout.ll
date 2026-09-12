@@ -10665,6 +10665,83 @@ entry:
   ret i64 %t$0
 }
 
+define i64 @stdlib.bytes.take(i64 %p$value, i64 %p$count) {
+entry:
+  %t$0 = add i64 0, 0
+  %t$1 = icmp sle i64 %p$count, %t$0
+  %t$2 = zext i1 %t$1 to i64
+  %t$14 = trunc i64 %t$2 to i1
+  br i1 %t$14, label %then_3, label %else_3
+then_3:
+  %t$5 = call i64 @stdlib.bytes.empty()
+  br label %join_3
+else_3:
+  %t$15 = alloca i64
+  store i64 %p$value, ptr %t$15
+  %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
+  %t$6 = call i64 @stdlib.bytes.length(i64 %p$value)
+  %t$7 = icmp sge i64 %p$count, %t$6
+  %t$8 = zext i1 %t$7 to i64
+  %t$13 = trunc i64 %t$8 to i1
+  %t$17 = call i64 @sprout_gc_pop_roots(i64 1)
+  br i1 %t$13, label %then_9, label %else_9
+then_9:
+  br label %join_9
+else_9:
+  %t$11 = add i64 0, 0
+  %t$18 = alloca i64
+  store i64 %p$value, ptr %t$18
+  %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
+  %t$12 = call i64 @stdlib.bytes.slice(i64 %p$value, i64 %t$11, i64 %p$count)
+  %t$20 = call i64 @sprout_gc_pop_roots(i64 1)
+  br label %join_9
+join_9:
+  %t$10 = phi i64 [%p$value, %then_9], [%t$12, %else_9]
+  br label %join_3
+join_3:
+  %t$4 = phi i64 [%t$5, %then_3], [%t$10, %join_9]
+  ret i64 %t$4
+}
+
+define i64 @stdlib.bytes.drop(i64 %p$value, i64 %p$count) {
+entry:
+  %t$0 = add i64 0, 0
+  %t$1 = icmp sle i64 %p$count, %t$0
+  %t$2 = zext i1 %t$1 to i64
+  %t$15 = trunc i64 %t$2 to i1
+  br i1 %t$15, label %then_3, label %else_3
+then_3:
+  br label %join_3
+else_3:
+  %t$16 = alloca i64
+  store i64 %p$value, ptr %t$16
+  %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
+  %t$5 = call i64 @stdlib.bytes.length(i64 %p$value)
+  %t$6 = icmp sge i64 %p$count, %t$5
+  %t$7 = zext i1 %t$6 to i64
+  %t$14 = trunc i64 %t$7 to i1
+  %t$18 = call i64 @sprout_gc_pop_roots(i64 1)
+  br i1 %t$14, label %then_8, label %else_8
+then_8:
+  %t$10 = call i64 @stdlib.bytes.empty()
+  br label %join_8
+else_8:
+  %t$19 = alloca i64
+  store i64 %p$value, ptr %t$19
+  %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
+  %t$11 = call i64 @stdlib.bytes.length(i64 %p$value)
+  %t$12 = sub i64 %t$11, %p$count
+  %t$13 = call i64 @stdlib.bytes.slice(i64 %p$value, i64 %p$count, i64 %t$12)
+  %t$21 = call i64 @sprout_gc_pop_roots(i64 1)
+  br label %join_8
+join_8:
+  %t$9 = phi i64 [%t$10, %then_8], [%t$13, %else_8]
+  br label %join_3
+join_3:
+  %t$4 = phi i64 [%p$value, %then_3], [%t$9, %join_8]
+  ret i64 %t$4
+}
+
 define i64 @stdlib.bytes.append(i64 %p$left, i64 %p$right) {
 entry:
   %t$1 = alloca i64

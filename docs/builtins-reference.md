@@ -68,7 +68,7 @@ Pure builtin in the prelude that nevertheless touches the terminal:
 
   It is not alone in this, only the most visible: most pure builtins abort the
   same way on a precondition violation (`vector_length` and `vector_get` abort on
-  a null vector, `str_slice` on a negative start or length), and they are pure too.
+  a null vector), and they are pure too.
   Normative in spec §6; survey in `docs/effect-enforcement-v0.md` §6.
 
 `!{IO}` builtins in modules — imported explicitly, then called by bare name or
@@ -171,7 +171,7 @@ Pure value transforms and runtime-backed persistent data helpers:
 - `char_from_codepoint(cp: Int) -> Char`
 - `str_concat(a: String, b: String) -> String`
 - `str_len(s: String) -> Int`
-- `str_slice(s: String, start: Int, count: Int) -> String`
+- `str_slice(s: String, start: Int, count: Int) -> String` (total: a negative `start` or `count` clamps to empty)
 - `str_char_at(s: String, index: Int) -> Maybe Char`
 - `str_find(s: String, needle: String) -> Int` (`-1` when not found)
 - `str_starts_with(s: String, prefix: String) -> Bool`
@@ -206,7 +206,7 @@ panics, and a negative *literal* count is a compile error.
 - `bytes_empty() -> Bytes`
 - `bytes_length(value: Bytes) -> Int`
 - `bytes_get(value: Bytes, index: Int) -> Maybe Int`
-- `bytes_slice(value: Bytes, start: Int, count: Int) -> Bytes`
+- `bytes_slice(value: Bytes, start: Int, count: Int) -> Bytes` (total: a negative `start` or `count` clamps to empty)
 - `bytes_append(left: Bytes, right: Bytes) -> Bytes`
 - `bytes_singleton(value: Int) -> Bytes`
 - `bytes_from_utf8(raw: String) -> Bytes`

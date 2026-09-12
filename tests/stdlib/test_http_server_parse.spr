@@ -1,11 +1,9 @@
 import stdlib.test (check_eq, run_suite)
 import stdlib.http_server (HttpRequest, HttpServerError, HttpInvalidRequest, HttpServerUnsupportedStatus, parse, request_method, request_path, request_body)
 
-# Regression: a header-less request (request line immediately followed by the blank
-# line) used to abort in str_slice — parse_request_prefix sliced a NEGATIVE header-
-# block length (headers_end == line_end). HTTP/1.0 permits no headers, so the parser
-# must accept it as an empty-header request, not crash. On the unfixed parser the
-# `header-less` case aborts the whole test binary (str_slice: length must be >= 0).
+# Regression: a header-less request (request line immediately followed by the blank line) once
+# sliced a NEGATIVE header-block length, since headers_end == line_end. HTTP/1.0 permits no
+# headers, so the parser must accept it as an empty-header request.
 
 fn describe(r: Result HttpServerError HttpRequest) -> String =
   match r with
