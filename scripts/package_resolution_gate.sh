@@ -107,5 +107,29 @@ else
   fail=1
 fi
 
+# Rejecting it is half the job; saying WHY is the other half. Bare "Unknown
+# variable" reads as a typo and sends the reader hunting for a missing
+# declaration instead of a missing marker, so both halves assert the note too.
+for half in "construct:$ctor" "pattern:$pat"; do
+  case_name="${half%%:*}"
+  out="${half#*:}"
+  if echo "$out" | grep -qF 'declares `Sealed`, which is not in scope here' &&
+     echo "$out" | grep -qF 'exported only with `(..)`'; then
+    echo "PASS wrap opacity ($case_name): the diagnostic names the module and the marker"
+  else
+    echo "FAIL wrap opacity ($case_name): expected a note naming demo.sealed and \`(..)\`"
+    echo "$out" | tail -3
+    fail=1
+  fi
+  # The canonical name reaches the binding regardless of export (BACKLOG: "a canonical
+  # name bypasses module privacy"), so a diagnostic that printed it would hand the
+  # reader the bypass. Name the module and the symbol separately.
+  if echo "$out" | grep -qF 'demo.sealed.Sealed'; then
+    echo "FAIL wrap opacity ($case_name): diagnostic leaks the canonical name"
+    echo "$out" | tail -3
+    fail=1
+  fi
+done
+
 [ "$fail" -eq 0 ] && echo "==> package-resolution gate: OK" || echo "==> package-resolution gate: FAILED"
 exit $fail

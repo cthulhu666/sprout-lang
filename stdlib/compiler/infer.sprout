@@ -1491,6 +1491,50 @@ fn build_field_chain(base: ast.Expr, rest: String, pos: source.SourcePos) -> ast
   | Nothing -> ast.GetFieldExpr(base, rest, pos)
   | Just (field, more) -> build_field_chain(ast.GetFieldExpr(base, field, pos), more, pos)
 
+# A name the bundler could not resolve is absent from every import list, yet the
+# module that declares it put it in the environment under its canonical name — its
+# own code calls it. So the module CAN be named, and "Unknown variable: x.Y", which
+# reads as a typo, can point at the marker that is actually missing.
+#
+# The canonical name is deliberately not printed. Spelled verbatim it reaches the
+# binding whatever the exports say (BACKLOG: "a canonical name bypasses module
+# privacy"), so printing it would hand the reader the bypass for the rule it explains.
+fn unresolved_name_hint(name: String, env: Dict types.Scheme) -> String =
+  match declaring_module(leaf, dict_keys(env), 0) with
+  | Nothing -> ""
+  | Just mod_name ->
+      "\n  note: `" ++ mod_name ++ "` declares `" ++ leaf
+        ++ "`, which is not in scope here: " ++ why
+  where leaf = string.after_last_dot(name)
+        why = if is_constructor_ref(name)
+              then "a constructor is exported only with `(..)` on its declaration (spec-v0 §5.6.1)"
+              else "check that it is exported, and named by the import"
+
+# The first environment key with the same last component, minus that component.
+# The value-side twin of `bundler.exporting_module`, and takes the first match for
+# the same reason: two modules declaring one name make either answer a guess, which
+# is why the note is worded as a lead rather than a verdict.
+#
+# Linear in the environment, and reached only after a lookup has already failed —
+# an error path, not the hot one. A file with many broken functions pays it once
+# per error; if that ever shows up in an editor profile, index by last component.
+#
+# `@`-prefixed keys are skipped. The environment is a shared namespace: alongside
+# the bindings it carries metadata under reserved prefixes (`@ctor:`, `@arity:`,
+# `@class:`, `@rec:`, …), and `@ctor:demo.sealed.Sealed` has the same last
+# component as the binding it describes.
+fn declaring_module(leaf: String, keys: Vec String, i: Int) -> Maybe String =
+  if i >= vec_length(keys) then Nothing
+  else
+    match vec_get(i, keys) with
+    | Nothing -> Nothing
+    | Just k ->
+        if str_starts_with(k, "@") == false
+           && str_find(k, ".") != -1
+           && string.after_last_dot(k) == leaf
+        then Just(str_slice(k, 0, str_len(k) - str_len(leaf) - 1))
+        else declaring_module(leaf, keys, i + 1)
+
 fn infer_var(
   state: unifier.InferState,
   env: Dict types.Scheme,
@@ -1500,7 +1544,7 @@ fn infer_var(
   pos: source.SourcePos
 ) -> InferResult !{IO} =
   match dict_get(name, env) with
-  | Nothing -> InferErr(pos, "Unknown variable: " ++ name)
+  | Nothing -> InferErr(pos, "Unknown variable: " ++ name ++ unresolved_name_hint(name, env))
   | Just scheme ->
       match value_ref_eta(name, scheme, pos, env) with
       # Re-enter inference on the synthesized lambda, the same way the dotted-name case above
@@ -1887,7 +1931,7 @@ fn infer_call_var(
   pos: source.SourcePos
 ) -> InferResult !{IO} =
   match dict_get(name, env) with
-  | Nothing -> InferErr(cpos, "Unknown variable: " ++ name)
+  | Nothing -> InferErr(cpos, "Unknown variable: " ++ name ++ unresolved_name_hint(name, env))
   | Just scheme ->
       do
         (t, prog_to_fresh) <- unifier.instantiate_with_vars(state, scheme)
@@ -4590,7 +4634,7 @@ fn infer_ctor_pattern(
   fields: List ast.Pattern
 ) -> InferResult !{IO} =
   match dict_get(name, env) with
-  | Nothing -> InferErr(pos, "Unknown constructor: " ++ name)
+  | Nothing -> InferErr(pos, "Unknown constructor: " ++ name ++ unresolved_name_hint(name, env))
   | Just scheme ->
       do
         # Pattern position: existential vars in the ctor scheme become rigid
@@ -9729,8 +9773,16 @@ fn fn_body_err(name: String, pos: source.SourcePos, msg: String) -> typed_ast.Bo
   # `__unresolved_Semigroup_a`) and produced misleading downstream errors.
   # All Unknown-variable / Unknown-constructor errors are now hard errors.
   if str_starts_with(name, "stdlib.compiler.")
-  then typed_ast.BodyErr(pos, "[DIAG] " ++ msg ++ " in function " ++ name)
-  else typed_ast.BodyErr(pos, msg ++ " in function " ++ name)
+  then typed_ast.BodyErr(pos, attribute_to_function("[DIAG] " ++ msg, name))
+  else typed_ast.BodyErr(pos, attribute_to_function(msg, name))
+
+# The attribution belongs on the headline. A diagnostic that elaborates on later
+# lines (see `unresolved_name_hint`) would otherwise get " in function f" stranded
+# below the explanation, attributing the note rather than the error.
+fn attribute_to_function(msg: String, name: String) -> String =
+  match string.split_once(msg, "\n") with
+  | Nothing -> msg ++ " in function " ++ name
+  | Just (head, rest) -> head ++ " in function " ++ name ++ "\n" ++ rest
 
 fn is_unknown_ref(msg: String) -> Bool =
   str_starts_with(msg, "Unknown variable: ") ||
