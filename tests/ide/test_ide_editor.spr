@@ -25,7 +25,7 @@ type Msg (..) deriving (Eq, ToString) =
   | Labelled String
   | Open doc.FilePath
   | Reading ed.Opening
-  | Loaded (st.Stamped v.Version String)
+  | Loaded (st.Stamped v.Version (doc.FilePath, String))
   | Save
   | Saved ed.Saving
   | Stored (st.Stamped v.Version doc.FilePath)
@@ -45,7 +45,7 @@ fn open_for(m: Msg) -> Maybe(doc.FilePath, ed.Opening -> Msg) =
   | Open p -> Just((p, Reading))
   | _ -> Nothing
 
-fn content_for(m: Msg) -> Maybe(st.Stamped v.Version String) =
+fn content_for(m: Msg) -> Maybe(st.Stamped v.Version (doc.FilePath, String)) =
   match m with
   | Loaded s -> Just(s)
   | _ -> Nothing
@@ -149,7 +149,7 @@ fn opening(w: widget.Widget Msg, p: doc.FilePath,
            body: String) -> (widget.Widget Msg, Says, Asks) =
   let r = claiming(w, p)
       Just rec = receipt(says(r)) else r
-  in told(tree_of(r), Loaded(st.stamp(rec, body)))
+  in told(tree_of(r), Loaded(st.stamp(rec, (p, body))))
 
 fn opened(w: widget.Widget Msg, p: doc.FilePath,
           body: String) -> widget.Widget Msg =
@@ -186,17 +186,29 @@ fn saved_of(sv: ed.Saving) -> Maybe v.Version =
 # ── what it says ────────────────────────────────────────────────────────────
 
 fn content_cases(state: TestState) -> Unit !{IO} = do
-  # The name lands on the CLAIM, before the text: a file too slow to read still
-  # shows whose pane it is. The receipt goes out in the same breath.
-  assert_eq(state, "claiming a file announces it and hands out a receipt",
+  # A claim mints a receipt and CHANGES NOTHING. A pane that took the name
+  # before the bytes would be a pane whose save target is a file it has not
+  # read — and the save would write the empty buffer over it.
+  assert_eq(state, "claiming a file only hands out a receipt",
             said(claiming(tree(), at("stdlib/a.txt"))),
-            "[Labelled(a.txt), Reading(ReadFrom(FilePath(stdlib/a.txt), Version(1)))]")
-  assert_eq(state, "the body arriving says nothing new",
-            said(opening(tree(), at("stdlib/a.txt"), "ab")), "[]")
+            "[Reading(ReadFrom(FilePath(stdlib/a.txt), Version(1)))]")
+  assert_eq(state, "the body arriving is what announces the name",
+            said(opening(tree(), at("stdlib/a.txt"), "ab")),
+            "[Labelled(a.txt)]")
+  # A READ CAN BE SLOW, AND A READ CAN FAIL. Either way the claim is all that
+  # has happened, so ctrl-s still saves the file the pane is showing — and a
+  # pane showing nothing still has nowhere to save.
+  assert_eq(state, "a save during a pending read saves what is still shown",
+            said(told(tree_of(claiming(loaded_tree(), at("b.txt"))), Save)),
+            "[Saved(SaveTo(FilePath(stdlib/a.txt), ab, Version(3)))]")
+  assert_eq(state, "a read that never lands leaves a fresh pane pathless",
+            said(told(tree_of(claiming(tree(), at("b.txt"))), Save)),
+            "[Saved(Unnamed)]")
   # A body nobody asked for cannot even be built: the only receipt in existence
   # is the one the claim handed out, and this pane is past it.
   assert_eq(state, "a body stamped for an earlier pane is dropped",
-            said(told(loaded_tree(), Loaded(st.stamp(v.origin(), "zz")))), "[]")
+            said(told(loaded_tree(),
+                      Loaded(st.stamp(v.origin(), (at("z.txt"), "zz"))))), "[]")
   # The caret sits at the START of a file being opened, so the first character
   # typed lands before the text rather than after it.
   assert_eq(state, "an opened file is read from the top",
@@ -268,7 +280,7 @@ fn read_race() -> widget.Widget Msg =
   let first = claiming(tree(), at("a.txt"))
       r = maybe_with_default(v.origin(), receipt(says(first)))
       later = opened(tree_of(first), at("b.txt"), "bbb")
-  in tree_of(told(later, Loaded(st.stamp(r, "aaa"))))
+  in tree_of(told(later, Loaded(st.stamp(r, (at("a.txt"), "aaa")))))
 
 fn key_cases(state: TestState) -> Unit !{IO} = do
   # ctrl-s must reach the application, so the pane declines every chord and the
