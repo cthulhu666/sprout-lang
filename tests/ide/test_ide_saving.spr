@@ -1,0 +1,45 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import ide.saving as saving
+
+# `--save-when`, the one PARSING surface in the IDE. The rest of `ide.app` is
+# wiring, and `just ide-smoke` drives that end to end by reading the fixture
+# back off the disk — but a keystroke script can only reach the values a person
+# would plausibly type. The edges below are reachable from a string and not
+# from a terminal. Design: docs/ide-save-v0.md §7.
+
+fn spec_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "manual asks for no trigger beyond the person",
+            to_string(saving.save_strategy("manual")), "Manually")
+  assert_eq(state, "unfocused saves on the way out of the pane",
+            to_string(saving.save_strategy("unfocused")), "WhenUnfocused")
+  # The conversion the pane cannot do for itself: a tick is 500 ms here, and
+  # `TickEvent` carries nothing that would let a widget work that out.
+  assert_eq(state, "a delay in milliseconds becomes a budget in ticks",
+            to_string(saving.save_strategy("idle:2000")), "WhenIdle(4)")
+  assert_eq(state, "one frame of delay is one tick",
+            to_string(saving.save_strategy("idle:500")), "WhenIdle(1)")
+
+# Every one of these is a mistake someone can make on the command line, and the
+# IDE takes the terminal over on the next line — so none of them may exit, and
+# none may produce a strategy that fires on the keystroke it is counting from.
+fn fallback_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "an absent flag is the default", to_string(saving.save_strategy("")),
+            "WhenIdle(2)")
+  assert_eq(state, "an unrecognised word is the default",
+            to_string(saving.save_strategy("nonsense")), "WhenIdle(2)")
+  assert_eq(state, "idle with no delay is the default",
+            to_string(saving.save_strategy("idle")), "WhenIdle(2)")
+  assert_eq(state, "an unparseable delay is the default",
+            to_string(saving.save_strategy("idle:soon")), "WhenIdle(2)")
+  # NOT zero ticks. A zero budget would fire on the tick carrying the keystroke
+  # it is supposed to be waiting after.
+  assert_eq(state, "a zero delay still waits a frame",
+            to_string(saving.save_strategy("idle:0")), "WhenIdle(1)")
+  assert_eq(state, "a negative delay still waits a frame",
+            to_string(saving.save_strategy("idle:-2000")), "WhenIdle(1)")
+
+fn main() -> Unit !{IO} = do
+  state <- new_state()
+  spec_cases(state)
+  fallback_cases(state)
+  summary(state)

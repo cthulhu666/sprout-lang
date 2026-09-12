@@ -4,7 +4,8 @@ module ide.app
 #
 # A file tree on the left, an editor pane on the right, a status line under
 # both. Tab moves between the panes, Enter opens the file under the cursor,
-# ctrl-s writes it back, Esc or ctrl-q leaves.
+# ctrl-s writes it back, Esc or ctrl-q leaves. It also saves on its own, on the
+# schedule `--save-when` picks (docs/ide-save-v0.md).
 #
 # The application has no model of its own — `app.App` threads the tree and
 # nothing else — so every piece of state lives in the widget that owns it, and
@@ -13,11 +14,16 @@ module ide.app
 #
 # TWO HANDSHAKES, the same shape. The pane is asked, mints a receipt, and this
 # module ferries it through the IO and back: `asked_to_save` sends `HandOver`,
-# `demand_for` decodes it, `write_body` answers `Written`, `wrote_for` decodes
-# that. Opening runs the same way through `Choose`/`open_for`/`read_at`/
+# `demand_for` recognises it, `write_body` answers `Written`, `wrote_for`
+# decodes that. Opening runs the same way through `Choose`/`open_for`/`read_at`/
 # `content_for`. Break any pairing and the step fails silently — `just
 # ide-smoke` is what catches it, by reading the file back off the disk.
+#
+# A save need not START at `HandOver`: under an autosave strategy the pane
+# emits `Saved` off a tick or a blur, and the rest of the chain is identical.
+# Design: docs/ide-save-v0.md.
 
+import stdlib.args as args
 import stdlib.chan (Chan, chan_send)
 import stdlib.fs as fs
 import stdlib.stamped as stamped
@@ -38,6 +44,7 @@ import ide.document as document
 import ide.editor as ed
 import ide.filetree as filetree
 import ide.keymap as keymap
+import ide.saving as saving
 
 type Msg (..) =
   # What the widgets ask for.
@@ -92,24 +99,26 @@ fn content_for(m: Msg) -> Maybe(stamped.Stamped version.Version (document.FilePa
   | Loaded st -> Just(st)
   | _ -> Nothing
 
-# The request carries no payload and the answer's CONSTRUCTOR does: only the
-# pane knows what it will answer, and only this module names it.
-fn demand_for(m: Msg) -> Maybe(ed.Saving -> Msg) =
+fn demand_for(m: Msg) -> Bool =
   match m with
-  | HandOver -> Just(Saved)
-  | _ -> Nothing
+  | HandOver -> true
+  | _ -> false
 
 fn wrote_for(m: Msg) -> Maybe ed.Wrote =
   match m with
   | Written wr -> Just(wr)
   | _ -> Nothing
 
-fn editor() -> widget.Widget Msg =
+# `Saved` is named ONCE, standing rather than read out of the request, because
+# a tick or a blur starts a save with no message to read it from.
+fn editor(when: ed.SaveWhen) -> widget.Widget Msg =
   ed.editor_with(editor_id(),
-                 ed.editor_opts() with (on_label = Just(Labelled),
+                 ed.editor_opts() with (save_when = when,
+                                        on_label = Just(Labelled),
                                         on_open = Just(open_for),
                                         on_content = Just(content_for),
                                         on_demand = Just(demand_for),
+                                        on_saving = Just(Saved),
                                         on_wrote = Just(wrote_for),
                                         on_note = Just(Noted)))
 
@@ -175,16 +184,18 @@ fn keys() -> widget.Widget Msg =
 
 # ── the tree of widgets ─────────────────────────────────────────────────────
 
-fn hints() -> widget.Widget Msg =
-  txt.label("Tab moves · Right/Left open and close · Enter shows · ctrl-s saves · Esc quits")
+# The hint follows the flag: a line promising only ctrl-s under a strategy that
+# also saves on its own would misdescribe the run it is printed in.
+fn hints(when: ed.SaveWhen) -> widget.Widget Msg =
+  txt.label(`Tab moves · Right/Left open and close · Enter shows · ${saving.describe(when)} · Esc quits`)
 
-fn body() -> widget.Widget Msg =
-  ct.row([ct.fraction(1, files()), ct.fraction(2, editor())])
+fn body(when: ed.SaveWhen) -> widget.Widget Msg =
+  ct.row([ct.fraction(1, files()), ct.fraction(2, editor(when))])
 
-fn root() -> widget.Widget Msg =
+fn root(when: ed.SaveWhen) -> widget.Widget Msg =
   focus.focus_ring([files_id(), editor_id()],
-                   ct.column([ct.fraction(1, body()), ct.fit(bar()),
-                              ct.fit(hints()), ct.fit(keys())]))
+                   ct.column([ct.fraction(1, body(when)), ct.fit(bar()),
+                              ct.fit(hints(when)), ct.fit(keys())]))
 
 # ── the IO the application asks for ─────────────────────────────────────────
 
@@ -285,5 +296,7 @@ fn boot(scope: Scope, ch: Chan (app.Signal Msg)) -> Unit !{IO} = do
   m <- read_children(Nil)
   chan_send(ch, app.SigTo(files_id(), m))
 
-export fn main() -> Unit !{IO} =
-  app.run(app.App(root = root(), update = update, tick_ms = 500, boot = boot))
+export fn main() -> Unit !{IO} = do
+  a <- args.parse_argv()
+  app.run(app.App(root = root(saving.save_when(a)), update = update,
+                  tick_ms = saving.tick_ms(), boot = boot))

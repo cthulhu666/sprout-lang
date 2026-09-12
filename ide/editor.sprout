@@ -53,14 +53,27 @@ export type Wrote (..) deriving (Eq, ToString) =
   | WroteTo (stamped.Stamped version.Version document.FilePath)
   | WriteFailed String
 
+# When the pane saves without being asked. `Manually` is not "never saves" —
+# ctrl-s reaches the pane as an ordinary request under all three. One of, not a
+# set: in a terminal a blur IS a keystroke, so a pane with both triggers on
+# would save twice for one Tab. Design: docs/ide-save-v0.md.
+export type SaveWhen (..) deriving (Eq, ToString) =
+  # TICKS of quiet, not milliseconds: `TickEvent` carries no payload, so a
+  # widget cannot convert. `ide.saving.idle_ticks` knows both numbers.
+  | WhenIdle Int
+  | WhenUnfocused
+  | Manually
+
 # Everything optional, in a record, as every widget in the tree takes its
 # options: Sprout has no default arguments. Start from `editor_opts()` and
 # override with `with`.
 #
-# The four decoders are prisms over the application's own message type, the
+# The decoders are prisms over the application's own message type, the
 # vocabulary `docs/tui-content-update-v0.md` §4.10 leaves to opts rather than to
 # `Delivery` arms. A pane given none of them is a read-only viewer.
 export type EditorOpts m = (look: focus.FocusStyle,
+                            # What starts a save nobody asked for.
+                            save_when: SaveWhen,
                             # The label, when it changes. Never the document.
                             on_label: Maybe (String -> m),
                             # "Open this file", and the constructor to claim it
@@ -72,10 +85,17 @@ export type EditorOpts m = (look: focus.FocusStyle,
                             # pair is why a pane never holds a path it has no
                             # bytes for — see `claimed`.
                             on_content: Maybe (m -> Maybe(stamped.Stamped version.Version (document.FilePath, String))),
-                            # "Hand me your text", decoded into the CONSTRUCTOR
-                            # of the reply — only the pane knows what it will
-                            # answer, only the application names it.
-                            on_demand: Maybe (m -> Maybe(Saving -> m)),
+                            # "Hand me your text": whether this message is the
+                            # request. A predicate rather than a decoder,
+                            # because the reply's constructor has to be
+                            # reachable when NO message started the save.
+                            on_demand: Maybe (m -> Bool),
+                            # How the pane names what it answers — only the
+                            # pane knows what it will say, only the application
+                            # knows what its own type calls it. Standing rather
+                            # than read out of the request, so a tick or a blur
+                            # can start a save too.
+                            on_saving: Maybe (Saving -> m),
                             # How a write ended. The path rides along so the
                             # message reads on its own; the receipt decides.
                             on_wrote: Maybe (m -> Maybe Wrote),
@@ -83,10 +103,12 @@ export type EditorOpts m = (look: focus.FocusStyle,
                             # failure it has claimed would vanish.
                             on_note: Maybe (String -> m))
 
+# `Manually` by default, so a pane nobody configured writes only when told to.
 export fn editor_opts() -> EditorOpts m =
-  EditorOpts(look = focus.focus_style_default(), on_label = Nothing,
-             on_open = Nothing, on_content = Nothing, on_demand = Nothing,
-             on_wrote = Nothing, on_note = Nothing)
+  EditorOpts(look = focus.focus_style_default(), save_when = Manually,
+             on_label = Nothing, on_open = Nothing, on_content = Nothing,
+             on_demand = Nothing, on_saving = Nothing, on_wrote = Nothing,
+             on_note = Nothing)
 
 # ── the widget ──────────────────────────────────────────────────────────────
 
@@ -101,30 +123,62 @@ export fn editor_opts() -> EditorOpts m =
 # a file picked while a write is out no longer kills the write's receipt.
 # `writing` is "a write of mine has not answered yet", which is what keeps two
 # writes of one file from being on their way to the disk at once.
+# `quiet` is how many ticks have arrived since the last edit — the measure
+# `WhenIdle` fires on (docs/ide-save-v0.md §5).
+# `refused` is "the text on show has already been offered to a write, and that
+# write failed", which is what stops a trigger offering it again every tick.
 type Pane m = (id: widget.WidgetId, opts: EditorOpts m, doc: document.Document,
                body: buffer.Buffer, has_focus: Bool,
                wanted: version.Version, shown: version.Version,
-               writing: Bool)
+               writing: Bool, quiet: Int, refused: Bool)
 
 type alias Reply m = Maybe(Pane m, List m, List(widget.Cmd m))
 
-# Everything a pane reacts to arrives addressed, so the broadcast is idle.
+# A tick is the one broadcast a pane acts on. It arrives HERE and not through
+# `pane_event` because the ring sends `TickEvent` to `broadcast` explicitly —
+# it is addressed to nobody — and because an unfocused pane holding unsaved
+# text is exactly the one that most wants saving.
 fn pane_on_event(p: Pane m,
                  ev: event.Event) -> (Pane m, List m, List(widget.Cmd m)) =
-  (p, Nil, Nil)
+  match ev with
+  | event.TickEvent -> ticked(p with (quiet = p.quiet + 1))
+  | _ -> (p, Nil, Nil)
+
+fn ticked(p: Pane m) -> (Pane m, List m, List(widget.Cmd m)) =
+  match p.opts.save_when with
+  | WhenIdle n -> if p.quiet >= n then unprompted(p) else (p, Nil, Nil)
+  | WhenUnfocused -> (p, Nil, Nil)
+  | Manually -> (p, Nil, Nil)
 
 fn pane_handler(p: Pane m, d: widget.Delivery m) -> Reply m =
   match d with
   | widget.ToMsg msg -> answered(p, msg)
-  | widget.ToFocus x -> Just(((p with (has_focus = x)), Nil, Nil))
+  | widget.ToFocus x -> Just(focused(p, x))
   | widget.ToEvent e -> if p.has_focus then pane_event(p, e) else Nothing
+
+# The EDGE out of focus, so a blur repeated cannot save twice. Gaining focus is
+# not a reason to write anything. The messages do reach the loop:
+# `focus.move_focus` blurs first and keeps what the blurred widget said.
+fn focused(p: Pane m, now: Bool) -> (Pane m, List m, List(widget.Cmd m)) =
+  if p.has_focus && ! now && leaving(p) then unprompted(shifted)
+  else (shifted, Nil, Nil)
+where
+  shifted = p with (has_focus = now)
+
+fn leaving(p: Pane m) -> Bool =
+  match p.opts.save_when with
+  | WhenUnfocused -> true
+  | WhenIdle _ -> false
+  | Manually -> false
 
 # ── what the application says ───────────────────────────────────────────────
 
 # DECODER CHAIN — `on_open`, `on_content`, `on_demand`, `on_wrote`, each
 # falling through to the next, declining when none claims the message. The
-# order decides any message two prisms both recognise, and a reader editing one
-# link cannot see the others: do not reorder without checking all four.
+# order decides any message two links both recognise, and a reader editing one
+# cannot see the others: do not reorder without checking all four. `on_demand`
+# is the odd link — a predicate, not a prism, because a save can start with no
+# message at all and the reply's name has to live in `on_saving` instead.
 #
 # Every answer that arrives from elsewhere — a body, a write confirmation —
 # comes STAMPED and is read through `stamped.fresh`, never taken as it is. A
@@ -158,7 +212,8 @@ fn begun(p: Pane m, content: Maybe (document.FilePath, String)) -> Reply m =
   in Just(settled(p, (p with (doc = document.opened(f),
                               body = at_top(buffer.buffer_open(b)),
                               wanted = version.next(p.wanted),
-                              shown = version.next(p.shown)))))
+                              shown = version.next(p.shown),
+                              refused = false))))
 
 fn at_top(b: buffer.Buffer) -> buffer.Buffer =
   buffer.buffer_goto(buffer.Caret(row = 0, col = 0), b)
@@ -166,15 +221,54 @@ fn at_top(b: buffer.Buffer) -> buffer.Buffer =
 # `shown` is handed out, not advanced: being asked for the text is not a change
 # to it, and the receipt has to name the text the write is about.
 fn demanded(p: Pane m, msg: m) -> Reply m =
-  let Just reply = widget.decoded(p.opts.on_demand, msg) else restored(p, msg)
-  in if p.writing then Just((p, [reply(Busy)], Nil))
-     else handed(p, reply, saving(p))
+  if asked(p, msg) then answering(p, offering(p)) else restored(p, msg)
+
+# What a person asking gets told — the text, or why not. The trigger paths do
+# not come through here: they must not answer at all (`unprompted`).
+fn offering(p: Pane m) -> Saving =
+  if p.writing then Busy else saving(p)
+
+fn asked(p: Pane m, msg: m) -> Bool =
+  let Just wants = p.opts.on_demand else false
+  in wants(msg)
+
+# A pane with nothing to answer WITH declines, which is the read-only viewer
+# `editor_opts()` describes.
+fn answering(p: Pane m, sv: Saving) -> Reply m =
+  let Just reply = p.opts.on_saving else Nothing
+  in handed(p, reply, sv)
+
+# A save NOBODY ASKED FOR, so it says nothing when it cannot happen. ctrl-s is
+# answered `Unnamed` or `Busy` because it asked; a trigger repeating either into
+# the status line every tick is worse than silence. A `Busy` pane stays due, so
+# the save follows the outstanding write instead of being dropped.
+fn unprompted(p: Pane m) -> (Pane m, List m, List(widget.Cmd m)) =
+  if is_due(p) then offered(p) else (p, Nil, Nil)
+
+fn offered(p: Pane m) -> (Pane m, List m, List(widget.Cmd m)) =
+  let Just reply = p.opts.on_saving else (p, Nil, Nil)
+  in handed_out(p, reply, saving(p))
+
+# `refused` is here and not in the explicit path on purpose: a person pressing
+# ctrl-s is never turned away for a reason they cannot see, and retrying a
+# transient failure on purpose is what that key is for.
+fn is_due(p: Pane m) -> Bool =
+  document.is_dirty(p.doc) && ! p.writing && has_target(p) && ! p.refused
+
+fn has_target(p: Pane m) -> Bool =
+  match document.target(p.doc) with
+  | Just _ -> true
+  | Nothing -> false
 
 # `writing` is set only when text actually LEAVES. An `Unnamed` answer starts no
 # write, so nothing would ever arrive to clear a flag set for it, and the pane
 # could never save again.
 fn handed(p: Pane m, reply: Saving -> m, sv: Saving) -> Reply m =
-  Just(((p with (writing = leaves(sv))), [reply(sv)], Nil))
+  Just(handed_out(p, reply, sv))
+
+fn handed_out(p: Pane m, reply: Saving -> m,
+              sv: Saving) -> (Pane m, List m, List(widget.Cmd m)) =
+  ((p with (writing = leaves(sv))), [reply(sv)], Nil)
 
 fn leaves(sv: Saving) -> Bool =
   match sv with
@@ -195,7 +289,13 @@ fn restored(p: Pane m, msg: m) -> Reply m =
 fn finished(p: Pane m, wr: Wrote) -> Reply m =
   match wr with
   | WroteTo st -> confirmed(released(p), stamped.fresh(p.shown, st))
-  | WriteFailed why -> Just((released(p), noted(p, why), Nil))
+  | WriteFailed why -> Just((barred(released(p)), noted(p, why), Nil))
+
+# A failed write BARS the bytes it failed on: the pane is left dirty, quiet and
+# free, which is precisely the state the trigger fires on, so a read-only file
+# would take a write every tick forever. Typing lifts the bar — new bytes are a
+# new question.
+fn barred(p: Pane m) -> Pane m = p with (refused = true)
 
 # ARRIVAL, not relevance. A write that has answered — with a path or with a
 # failure, on time or long after — is no longer on its way to the disk, so the
@@ -211,9 +311,22 @@ fn noted(p: Pane m, why: String) -> List m =
 # nothing. The payload is the path just written, which `fresh` has already
 # proved is this pane's own, so there is nothing left to read out of it.
 fn confirmed(p: Pane m, at: Maybe document.FilePath) -> Reply m =
-  let Just _ = at else Just((p, Nil, Nil))
+  let Just _ = at else Just(resumed(p))
   in Just(settled(p, (p with (doc = document.written(p.doc),
-                              shown = version.next(p.shown)))))
+                              shown = version.next(p.shown), refused = false))))
+
+# The answer was STALE, so bytes nobody has written are still on show. Saving
+# HERE rather than on the next trigger is what keeps `WhenUnfocused` whole: its
+# trigger fired while the write was out, was refused for `Busy`, and cannot fire
+# again — the pane is already unfocused, and ticks are not its trigger.
+fn resumed(p: Pane m) -> (Pane m, List m, List(widget.Cmd m)) =
+  if has_trigger(p) then unprompted(p) else (p, Nil, Nil)
+
+fn has_trigger(p: Pane m) -> Bool =
+  match p.opts.save_when with
+  | WhenIdle _ -> true
+  | WhenUnfocused -> true
+  | Manually -> false
 
 # ── what it says back ───────────────────────────────────────────────────────
 
@@ -268,11 +381,15 @@ fn typed_in(p: Pane m, s: String) -> Reply m =
 
 # `Nothing` is a claimed key that changed nothing — backspace at the start must
 # not dirty a document it did not edit.
+#
+# Quiet is measured from the last KEYSTROKE, so ticks banked before this one do
+# not count toward the quiet after it.
 fn edited(p: Pane m, b: Maybe buffer.Buffer) -> Reply m =
   let Just b2 = b else Just((p, Nil, Nil))
   in Just(settled(p, (p with (body = b2, doc = document.touched(p.doc),
                               wanted = version.next(p.wanted),
-                              shown = version.next(p.shown)))))
+                              shown = version.next(p.shown), quiet = 0,
+                              refused = false))))
 
 fn moved(p: Pane m, b: buffer.Buffer) -> Reply m =
   Just(((p with (body = b)), Nil, Nil))
@@ -346,4 +463,4 @@ export fn editor_with(id: widget.WidgetId,
   pane_widget(Pane(id = id, opts = opts, doc = document.scratch(),
                    body = buffer.buffer_open(""), has_focus = false,
                    wanted = version.origin(), shown = version.origin(),
-                   writing = false))
+                   writing = false, quiet = 0, refused = false))

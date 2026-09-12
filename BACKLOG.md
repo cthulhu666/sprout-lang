@@ -678,20 +678,14 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   nothing says why. `on_note` exists now and a failed write uses it, but `stamped.fresh` hides the
   payload of a reply it has judged stale, so the pane cannot name the file it dropped. Wants a note
   that does not need the payload, or `at_least`. Design: `docs/ide-v0.md` §5.2.
-- [ ] `P2` **IDE — saving is explicit only; there is no save strategy.** ctrl-s is the only way a
-  file reaches disk, where the editors this is measured against also save on idle and on losing
-  focus (VS Code `files.autoSave`, JetBrains "Save files if the IDE is idle for N seconds"). The
-  pane already sees `TickEvent` and `ToFocus`, so both triggers are reachable; the terminal offers
-  no focus reporting, so VS Code's `onWindowChange` is not. Wants `SaveWhen` in `EditorOpts`, and
-  `on_demand` split so the pane can emit a save unprompted. Design: to be written as
-  `docs/ide-save-v0.md`.
-- [ ] `P2` **IDE — no undo, which a save strategy would make dangerous.** Nothing takes a keystroke
-  back: the pane holds one `buffer.Buffer` and no history, and §4's `text_area` entry has the same
-  gap. Explicit saving makes that survivable, because an unsaved buffer is its own escape hatch.
-  Autosaving removes the floor — a mistyped key reaches disk on the next tick with git as the only
-  recovery. JetBrains takes that bet only because Local History catches it; Emacs declines it and
-  auto-saves to a separate `#foo#`. Wants an undo stack in the pane, and a decision on whether a
-  local history belongs in v0 at all. Design: `docs/ide-v0.md` §9.
+- [ ] `P1` **IDE — no undo, and autosave is now on by default.** Nothing takes a keystroke back:
+  the pane holds one `buffer.Buffer` and no history, and §4's `text_area` entry has the same gap.
+  Explicit saving used to make that survivable — an unsaved buffer was its own escape hatch — and
+  `docs/ide-save-v0.md` removed that floor: a mistyped key reaches disk a second later with git as
+  the only recovery. Every editor surveyed there has something underneath (Local History, `#foo#`,
+  Timeline); Sprout has nothing. `--save-when=manual` is the only mitigation today. Wants an undo
+  stack in the pane, and a decision on whether a local history belongs in v0. Design:
+  `docs/ide-save-v0.md` §8.
 - [ ] `P3` **`app.step_to` recurses forever when `update` re-sends the message it is given.**
   `delivered` (`app.sprout:126`) answers an unclaimed delivery with `apply(update, [msg], w)`, so
   an `update` arm whose handling of `msg` is `step_to(update, w, id, msg)` — the obvious spelling

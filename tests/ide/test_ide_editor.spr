@@ -52,22 +52,22 @@ fn content_for(m: Msg) -> Maybe(st.Stamped v.Version (doc.FilePath, String)) =
   | Loaded s -> Just(s)
   | _ -> Nothing
 
-# The reply CONSTRUCTOR, not the reply: only the pane knows what it will
-# answer, and only the application knows what its own message type calls it.
-fn demand_for(m: Msg) -> Maybe(ed.Saving -> Msg) =
+fn demand_for(m: Msg) -> Bool =
   match m with
-  | Save -> Just(Saved)
-  | _ -> Nothing
+  | Save -> true
+  | _ -> false
 
 fn wrote_for(m: Msg) -> Maybe ed.Wrote =
   match m with
   | Written wr -> Just(wr)
   | _ -> Nothing
 
+# `Saved` is named ONCE and stands: a tick or a blur starts a save with no
+# message for the pane to read a constructor out of.
 fn opts() -> ed.EditorOpts Msg =
   ed.editor_opts() with (on_label = Just(Labelled), on_open = Just(open_for),
                          on_content = Just(content_for),
-                         on_demand = Just(demand_for),
+                         on_demand = Just(demand_for), on_saving = Just(Saved),
                          on_wrote = Just(wrote_for), on_note = Just(Noted))
 
 # A neighbour, so a key the pane DECLINES is visible as a broadcast rather than
@@ -360,6 +360,193 @@ fn read_race() -> widget.Widget Msg =
       later = opened(tree_of(first), at("b.txt"), "bbb")
   in tree_of(told(later, Loaded(st.stamp(r, (at("a.txt"), "aaa")))))
 
+# ── when it saves without being asked ───────────────────────────────────────
+
+# Design: docs/ide-save-v0.md. A tick arrives on the BROADCAST channel and a
+# blur arrives addressed, so the two triggers are driven here exactly as the
+# app loop drives them: `widget.feed` for the tick, a real Tab across a
+# two-name ring for the blur.
+
+fn ticks(n: Int) -> List event.Event =
+  if n <= 0 then Nil else Cons(event.TickEvent, ticks(n - 1))
+
+fn tab() -> event.Event = key(event.KTab)
+
+fn pane_when(w: ed.SaveWhen) -> widget.Widget Msg =
+  ed.editor_with(pane_id(), opts() with (save_when = w))
+
+# WITHOUT the neighbour: it answers every broadcast, and a tick is a broadcast,
+# so it would put a `Noted(bcast)` beside every autosave.
+fn alone_when(w: ed.SaveWhen) -> widget.Widget Msg =
+  focus.focus_ring([pane_id()], pane_when(w))
+
+# A ring of TWO, because `stay_or_move` does nothing in a ring of one — a Tab
+# there is not a blur, and a blur is what has to be tested.
+fn paired_when(w: ed.SaveWhen) -> widget.Widget Msg =
+  focus.focus_ring([pane_id(), widget.WidgetId("elsewhere")], pane_when(w))
+
+# Loaded and typed into: dirty, named, with nothing in flight.
+fn dirty_when(w: ed.SaveWhen) -> widget.Widget Msg =
+  tree_of(widget.feed(opened(alone_when(w), at("stdlib/a.txt"), "ab"),
+                      chars("x")))
+
+fn idle_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "a tick short of the threshold saves nothing",
+            said(widget.feed(dirty_when(ed.WhenIdle(2)), ticks(1))), "[]")
+  assert_eq(state, "the threshold's tick hands the text over",
+            said(widget.feed(dirty_when(ed.WhenIdle(2)), ticks(2))),
+            "[Saved(SaveTo(FilePath(stdlib/a.txt), xab, Version(2)))]")
+  # Quiet is measured from the last KEYSTROKE. Ticks banked before one must not
+  # count toward the quiet after it, or a slow typist saves mid-word.
+  assert_eq(state, "an edit resets the count",
+            said(widget.feed(typed_after_a_tick(), ticks(1))), "[]")
+  # Three refusals, all SILENT — the pane was not asked, so it has nothing to
+  # answer, and `Unnamed` once a second is worse than saying nothing.
+  assert_eq(state, "a clean pane has nothing quiet is a reason to write",
+            said(widget.feed(opened(alone_when(ed.WhenIdle(2)),
+                                    at("stdlib/a.txt"), "ab"), ticks(4))), "[]")
+  assert_eq(state, "a pathless pane stays silent rather than saying Unnamed",
+            said(widget.feed(typed_scratch(), ticks(4))), "[]")
+  assert_eq(state, "a tick during a pending write stays silent rather than Busy",
+            said(widget.feed(busy_idle(), ticks(4))), "[]")
+  # Still DUE, not dropped: being refused for `Busy` must not cost the save, or
+  # an autosave that collides with a ctrl-s is simply lost. It goes out on the
+  # ANSWER, not on some later tick — `WhenUnfocused` has no later tick, and one
+  # rule for both strategies beats two.
+  assert_eq(state, "and the save follows the moment that write answers",
+            said(freed_busy_idle()),
+            "[Saved(SaveTo(FilePath(stdlib/a.txt), xyab, Version(3)))]")
+  assert_eq(state, "and is not sent a second time by the ticks after it",
+            said(widget.feed(tree_of(freed_busy_idle()), ticks(4))), "[]")
+
+# A tick, then a keystroke, then one more tick — two ticks in total, which
+# would fire a threshold of 2 if the edit did not reset the count.
+fn typed_after_a_tick() -> widget.Widget Msg =
+  tree_of(widget.feed(tree_of(widget.feed(dirty_when(ed.WhenIdle(2)), ticks(1))),
+                      chars("y")))
+
+fn typed_scratch() -> widget.Widget Msg =
+  tree_of(widget.feed(alone_when(ed.WhenIdle(2)), chars("q")))
+
+# Handed over, then typed into again: dirty AND writing, which is the one state
+# an explicit save answers `Busy` in.
+fn busy_idle() -> widget.Widget Msg =
+  tree_of(widget.feed(tree_of(told(dirty_when(ed.WhenIdle(2)), Save)),
+                      chars("y")))
+
+# The write answering. Its receipt is stale — the pane was typed into since —
+# so it cleans nothing, and the newer text goes out on the spot.
+fn freed_busy_idle() -> (widget.Widget Msg, Says, Asks) =
+  told(busy_idle(),
+       Written(ed.WroteTo(st.stamp(busy_receipt(), at("stdlib/a.txt")))))
+
+fn busy_receipt() -> v.Version =
+  maybe_with_default(v.origin(),
+                     saved_receipt(says(told(dirty_when(ed.WhenIdle(2)), Save))))
+
+# A write that FAILED must not be retried against the same bytes. The pane is
+# still dirty and still quiet, so without a bar every tick would hand the same
+# text over again — a read-only file would take a write, and put a note in the
+# status line, twice a second for as long as it stayed open.
+fn barred_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "a failed write bars the text it failed on",
+            said(widget.feed(failed_idle(), ticks(8))), "[]")
+  # The bar is on the TEXT, not on the file: new bytes are a new question, and
+  # a failure that was transient must not need a restart to recover from.
+  assert_eq(state, "typing again lifts the bar", said(typed_after_failure()),
+            "[Saved(SaveTo(FilePath(stdlib/a.txt), xzab, Version(3)))]")
+  # A person asking is never refused for a reason they cannot see. ctrl-s is
+  # how a transient failure is retried on purpose.
+  assert_eq(state, "ctrl-s ignores the bar", said(told(failed_idle(), Save)),
+            "[Saved(SaveTo(FilePath(stdlib/a.txt), xab, Version(2)))]")
+
+# Autosaved, then the write failed.
+fn failed_idle() -> widget.Widget Msg =
+  let saved = widget.feed(dirty_when(ed.WhenIdle(2)), ticks(2))
+  in tree_of(told(tree_of(saved),
+                  Written(ed.WriteFailed("cannot write stdlib/a.txt: read-only"))))
+
+fn typed_after_failure() -> (widget.Widget Msg, Says, Asks) =
+  let more = widget.feed(failed_idle(), chars("z"))
+  in widget.feed(tree_of(more), ticks(2))
+
+fn unfocus_cases(state: TestState) -> Unit !{IO} = do
+  # The messages a blur produces DO reach the loop: `focus.move_focus` blurs
+  # first and keeps what the blurred widget said.
+  assert_eq(state, "losing focus hands the text over",
+            said(blurred(ed.WhenUnfocused)),
+            "[Saved(SaveTo(FilePath(stdlib/a.txt), xab, Version(2)))]")
+  assert_eq(state, "losing focus on a clean pane says nothing",
+            said(widget.feed(opened(paired_when(ed.WhenUnfocused),
+                                    at("stdlib/a.txt"), "ab"), [tab()])), "[]")
+  # The EDGE OUT, not the edge in. Tabbing back is not a reason to write.
+  assert_eq(state, "regaining focus does not save", said(refocused()), "[]")
+  assert_eq(state, "quiet is not this strategy's trigger",
+            said(widget.feed(dirty_when(ed.WhenUnfocused), ticks(8))), "[]")
+  # THE ONE THIS STRATEGY CANNOT SURVIVE ALONE. A blur refused for `Busy` has
+  # no second chance: ticks are not this trigger, and the pane is already
+  # unfocused, so no further blur edge can happen. The write answering is the
+  # last moment anything is listening.
+  assert_eq(state, "a blur while a write is out is silent", said(blur_over_write()),
+            "[]")
+  assert_eq(state, "and the write answering saves what the blur could not",
+            said(after_blur_write()),
+            "[Saved(SaveTo(FilePath(stdlib/a.txt), xyab, Version(3)))]")
+
+# Typed, ctrl-s, typed again, then Tab away — so the blur lands while the first
+# write is still out.
+fn blur_over_write() -> (widget.Widget Msg, Says, Asks) =
+  let more = widget.feed(tree_of(saved_unfocused()), chars("y"))
+  in widget.feed(tree_of(more), [tab()])
+
+fn saved_unfocused() -> (widget.Widget Msg, Says, Asks) =
+  told(dirty_paired(ed.WhenUnfocused), Save)
+
+# That write answering. Its receipt is stale — the pane was typed into since —
+# so it cleans nothing, and what it leaves behind is a dirty pane whose trigger
+# has already been and gone.
+fn after_blur_write() -> (widget.Widget Msg, Says, Asks) =
+  told(tree_of(blur_over_write()),
+       Written(ed.WroteTo(st.stamp(unfocused_receipt(), at("stdlib/a.txt")))))
+
+fn unfocused_receipt() -> v.Version =
+  maybe_with_default(v.origin(), saved_receipt(says(saved_unfocused())))
+
+# Loaded into the two-name ring and typed into: dirty, focused, and with a real
+# neighbour to Tab to.
+fn dirty_paired(w: ed.SaveWhen) -> widget.Widget Msg =
+  tree_of(widget.feed(opened(paired_when(w), at("stdlib/a.txt"), "ab"),
+                      chars("x")))
+
+fn blurred(w: ed.SaveWhen) -> (widget.Widget Msg, Says, Asks) =
+  widget.feed(dirty_paired(w), [tab()])
+
+# Tab back in — but only after the blur's write has FAILED. The pane is dirty
+# again with nothing in flight, which is the one state where the edge is what
+# decides: a pane still writing, or one the write cleaned, would decline for
+# that reason instead and the direction would go untested.
+fn refocused() -> (widget.Widget Msg, Says, Asks) =
+  widget.feed(tree_of(told(tree_of(blurred(ed.WhenUnfocused)),
+                           Written(ed.WriteFailed("nope")))), [tab()])
+
+# `Manually` is "no trigger beyond the person", not "never saves" — ctrl-s goes
+# on working, which the cases above already cover through `Save`.
+fn manual_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "Manually ignores however long the pane is left alone",
+            said(widget.feed(dirty_when(ed.Manually), ticks(8))), "[]")
+  assert_eq(state, "Manually ignores a blur", said(blurred(ed.Manually)), "[]")
+  # A pane with nowhere to send its answer cannot save at all, which is the
+  # read-only viewer `editor_opts()` describes.
+  assert_eq(state, "a pane with no on_saving declines rather than autosaving",
+            said(widget.feed(viewer(), ticks(4))), "[]")
+
+fn viewer() -> widget.Widget Msg =
+  tree_of(widget.feed(opened(focus.focus_ring([pane_id()],
+                                              ed.editor_with(pane_id(),
+                                                             opts() with (save_when = ed.WhenIdle(1),
+                                                                          on_saving = Nothing))),
+                             at("stdlib/a.txt"), "ab"), chars("x")))
+
 fn key_cases(state: TestState) -> Unit !{IO} = do
   # ctrl-s must reach the application, so the pane declines every chord and the
   # neighbour sees it broadcast.
@@ -444,6 +631,10 @@ fn main() -> Unit !{IO} = do
   saving_cases(state)
   writing_cases(state)
   receipt_cases(state)
+  idle_cases(state)
+  barred_cases(state)
+  unfocus_cases(state)
+  manual_cases(state)
   stale_cases(state)
   key_cases(state)
   gutter_cases(state)

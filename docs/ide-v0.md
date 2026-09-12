@@ -54,6 +54,7 @@ Two consequences shape `ide/`:
 ide/app.sprout        wiring, the message type, `update`, the save handshake   (§3)
 ide/document.sprout   what is known about an open file apart from its text     (§4)
 ide/editor.sprout     the editor pane                                          (§5)
+ide/saving.sprout     when it saves, and the `--save-when` flag  (ide-save-v0.md)
 ide/keymap.sprout     key + modifiers -> command                               (§6)
 ide/filetree.sprout   label paths -> filesystem paths, and the reading         (§7)
 ```
@@ -162,6 +163,15 @@ delivery it sends the message to `update`, and an `update` that answers by inter
 forever. `ide/app.sprout` calls `widget.deliver` directly and handles `Nothing` itself. Filed in
 `BACKLOG.md` §4.5.
 
+**A save need not start at ctrl-s.** `EditorOpts.save_when` picks a trigger — `WhenIdle` counting
+ticks of quiet, `WhenUnfocused` on the edge out of focus, or `Manually` for neither — and the pane
+emits the same `Saved` message off it, so everything downstream of the handover is identical. Two
+things make this a separate design rather than a flag. The reply's constructor had to stop being
+read out of the request, because a tick is not a message (`on_demand` is now a predicate and
+`on_saving` stands beside it); and an unprompted save must be SILENT about refusals, because
+`Unnamed` or `Busy` in the status line once a second is worse than saying nothing. The IDE defaults
+to `idle:1000` and takes `--save-when`. Design: `docs/ide-save-v0.md`.
+
 ### 5.3 What it paints
 
 A gutter of line numbers, right-aligned, one space clear of the text, as wide as the largest number
@@ -195,10 +205,13 @@ nowhere to put a message, and "opened, holding nothing" is something the user ca
 - `tests/ide/*.spr`, run by `just test-ide` (in `just test`, and its own CI step). `_test-stdlib`
   takes explicit directories, so a new directory needs the recipe; it is separate from
   `tests/stdlib` so it lifts out with `ide/`.
-- `just ide-smoke` drives the real binary: Enter opens the fixture's file, Tab moves the keyboard,
-  a character is typed, ctrl-s writes, Esc quits. **The assertion is the file's content on disk.**
-  The pane's text lives inside an existential, so a file with the right bytes in it is the only
-  proof `update` got the right bytes out. Verified to fail when the save wiring is removed.
+- `just ide-smoke` drives the real binary three times, each run PINNED to one save strategy with
+  `--save-when`: ctrl-s under `manual`, a pause under `idle:500`, a Tab away under `unfocused`.
+  **The assertion is the file's content on disk.** The pane's text lives inside an existential, so a
+  file with the right bytes in it is the only proof `update` got the right bytes out. Pinning is
+  what keeps each run honest — with autosave on, a run that presses ctrl-s proves nothing about
+  ctrl-s. Each run verified to leave the file untouched when its own strategy is swapped for
+  `manual`.
 
 ## 9. Deferred, and what each is waiting on
 
@@ -219,4 +232,9 @@ nowhere to put a message, and "opened, holding nothing" is something the user ca
   keeps one write outstanding instead. §5.2.
 - **One receipt cannot answer two questions.** A read and a write in flight together need separate
   chains, or answering either kills the other. §5.2.
+- **A save that nobody asked for cannot answer.** `Unnamed` and `Busy` are right for ctrl-s and
+  wrong once a second; the trigger checks first and stays quiet. `docs/ide-save-v0.md` §4.4.
+- **Staying quiet is only half of it.** A refusal has to come back exactly once: a `Busy` save
+  resumes on the write's answer, and a failed one bars its own bytes so it cannot spin.
+  `docs/ide-save-v0.md` §4.5.
 - **The window math lived inside one widget.** Extracted to `widgets.viewport` rather than copied.
