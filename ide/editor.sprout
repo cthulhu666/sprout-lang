@@ -29,17 +29,29 @@ import ide.document as document
 # path, so an application cannot write a file called "" by forgetting to check.
 #
 # The `Version` is a RECEIPT: the application ferries it to the write and back
-# in the `Stored`, and the pane accepts that answer only if it is still at the
+# in the `WroteTo`, and the pane accepts that answer only if it is still at the
 # version it handed out. The application never reads it.
 export type Saving (..) deriving (Eq, ToString) =
   | SaveTo document.FilePath String version.Version
   | Unnamed
+  # One write outstanding. A second ask while one is in flight is refused, not
+  # queued: two writes of a file land on disk in whatever order their tasks
+  # finish, so the older text can win. The document stays dirty, which says so.
+  | Busy
 
 # What the pane answers a request to open a file with — the same receipt, for
 # the read. A file cannot be read before the pane has claimed it, which is what
 # gives the body arriving later something to be checked against.
 export type Opening (..) deriving (Eq, ToString) =
   | ReadFrom document.FilePath version.Version
+
+# What a write ANSWERS with. Two arms rather than a stamped path alone, because
+# the pane has to learn that a write FINISHED even when the answer is stale:
+# arrival is what frees it to save again, and relevance is a separate question
+# `stamped.fresh` decides one line further down.
+export type Wrote (..) deriving (Eq, ToString) =
+  | WroteTo (stamped.Stamped version.Version document.FilePath)
+  | WriteFailed String
 
 # Everything optional, in a record, as every widget in the tree takes its
 # options: Sprout has no default arguments. Start from `editor_opts()` and
@@ -64,14 +76,17 @@ export type EditorOpts m = (look: focus.FocusStyle,
                             # of the reply — only the pane knows what it will
                             # answer, only the application names it.
                             on_demand: Maybe (m -> Maybe(Saving -> m)),
-                            # "It is on disk now." The path rides along so the
+                            # How a write ended. The path rides along so the
                             # message reads on its own; the receipt decides.
-                            on_stored: Maybe (m -> Maybe(stamped.Stamped version.Version document.FilePath)))
+                            on_wrote: Maybe (m -> Maybe Wrote),
+                            # The pane's one way to speak plainly. Without it a
+                            # failure it has claimed would vanish.
+                            on_note: Maybe (String -> m))
 
 export fn editor_opts() -> EditorOpts m =
   EditorOpts(look = focus.focus_style_default(), on_label = Nothing,
              on_open = Nothing, on_content = Nothing, on_demand = Nothing,
-             on_stored = Nothing)
+             on_wrote = Nothing, on_note = Nothing)
 
 # ── the widget ──────────────────────────────────────────────────────────────
 
@@ -80,8 +95,11 @@ export fn editor_opts() -> EditorOpts m =
 # `ver` advances whenever an answer in flight stops being relevant — a file
 # claimed, a body filled in, a key typed, a write confirmed. An answer minted at
 # an earlier version is about a pane that no longer exists.
+# `writing` is "a write of mine has not answered yet", which is what keeps two
+# writes of one file from being on their way to the disk at once.
 type Pane m = (id: widget.WidgetId, opts: EditorOpts m, doc: document.Document,
-               body: buffer.Buffer, has_focus: Bool, ver: version.Version)
+               body: buffer.Buffer, has_focus: Bool, ver: version.Version,
+               writing: Bool)
 
 type alias Reply m = Maybe(Pane m, List m, List(widget.Cmd m))
 
@@ -98,7 +116,7 @@ fn pane_handler(p: Pane m, d: widget.Delivery m) -> Reply m =
 
 # ── what the application says ───────────────────────────────────────────────
 
-# DECODER CHAIN — `on_open`, `on_content`, `on_demand`, `on_stored`, each
+# DECODER CHAIN — `on_open`, `on_content`, `on_demand`, `on_wrote`, each
 # falling through to the next, declining when none claims the message. The
 # order decides any message two prisms both recognise, and a reader editing one
 # link cannot see the others: do not reorder without checking all four.
@@ -143,17 +161,45 @@ fn at_top(b: buffer.Buffer) -> buffer.Buffer =
 # change to it, and the receipt has to name the pane the text came from.
 fn demanded(p: Pane m, msg: m) -> Reply m =
   let Just reply = widget.decoded(p.opts.on_demand, msg) else restored(p, msg)
-  in Just((p, [reply(saving(p))], Nil))
+  in if p.writing then Just((p, [reply(Busy)], Nil))
+     else handed(p, reply, saving(p))
+
+# `writing` is set only when text actually LEAVES. An `Unnamed` answer starts no
+# write, so nothing would ever arrive to clear a flag set for it, and the pane
+# could never save again.
+fn handed(p: Pane m, reply: Saving -> m, sv: Saving) -> Reply m =
+  Just(((p with (writing = leaves(sv))), [reply(sv)], Nil))
+
+fn leaves(sv: Saving) -> Bool =
+  match sv with
+  | SaveTo _ _ _ -> true
+  | Unnamed -> false
+  | Busy -> false
 
 # Handing the text over is not a write — a write can fail — so nothing here is
-# marked clean. `on_stored` is what does that, once the write has happened.
+# marked clean. `on_wrote` is what does that, once the write has happened.
 fn saving(p: Pane m) -> Saving =
   let Just f = document.target(p.doc) else Unnamed
   in SaveTo(f, buffer.buffer_text(p.body), p.ver)
 
 fn restored(p: Pane m, msg: m) -> Reply m =
-  let Just st = widget.decoded(p.opts.on_stored, msg) else Nothing
-  in confirmed(p, stamped.fresh(p.ver, st))
+  let Just wr = widget.decoded(p.opts.on_wrote, msg) else Nothing
+  in finished(p, wr)
+
+fn finished(p: Pane m, wr: Wrote) -> Reply m =
+  match wr with
+  | WroteTo st -> confirmed(released(p), stamped.fresh(p.ver, st))
+  | WriteFailed why -> Just((released(p), noted(p, why), Nil))
+
+# ARRIVAL, not relevance. A write that has answered — with a path or with a
+# failure, on time or long after — is no longer on its way to the disk, so the
+# pane may save again. Whether the answer MEANS anything is a separate question,
+# and `stamped.fresh` is what asks it.
+fn released(p: Pane m) -> Pane m = p with (writing = false)
+
+fn noted(p: Pane m, why: String) -> List m =
+  let Just f = p.opts.on_note else Nil
+  in [f(why)]
 
 # Claimed either way — it was addressed here — but a stale answer changes
 # nothing. The payload is the path just written, which `fresh` has already
@@ -292,4 +338,4 @@ export fn editor_with(id: widget.WidgetId,
                       opts: EditorOpts m) -> widget.Widget m =
   pane_widget(Pane(id = id, opts = opts, doc = document.scratch(),
                    body = buffer.buffer_open(""), has_focus = false,
-                   ver = version.origin()))
+                   ver = version.origin(), writing = false))

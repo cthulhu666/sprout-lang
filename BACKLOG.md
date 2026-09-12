@@ -665,17 +665,25 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   blocker — §4's "an application can send a caret in but never read one out" is: the pane would
   have to announce a `Caret` on the way out for anything to send back, and nothing reads one.
   Fix that entry first; this is its first real consumer. Design: `docs/ide-v0.md` §5.
-- [ ] `P3` **IDE — two writes in flight can land on disk out of order.** `stamped.fresh` filters
-  the *answers* a pane accepts; it does not order the *writes*. Save, edit, save again puts two
-  `write_body` tasks in flight (`app.sprout:239` spawns one each). If the second lands first its
-  `Stored` cleans the label, and the first then overwrites the file with the older text while the
-  pane shows clean. A stale reply is no longer the mechanism — disk ordering is — so the fix is to
-  keep one write outstanding per pane and queue or drop the rest. Design: `docs/stale-replies-v0.md`
-  §8.
 - [ ] `P3` **IDE — an open that never completes says nothing.** A body dropped as stale (the user
   typed during the read) is claimed and discarded silently, so the file simply does not open and
-  nothing says why. A failed read at least reaches the status line. The pane has no way to speak
-  except `on_label`; giving it an `on_note` would cover both. Design: `docs/ide-v0.md` §5.2.
+  nothing says why. `on_note` exists now and a failed write uses it, but `stamped.fresh` hides the
+  payload of a reply it has judged stale, so the pane cannot name the file it dropped. Wants a note
+  that does not need the payload, or `at_least`. Design: `docs/ide-v0.md` §5.2.
+- [ ] `P2` **IDE — saving is explicit only; there is no save strategy.** ctrl-s is the only way a
+  file reaches disk, where the editors this is measured against also save on idle and on losing
+  focus (VS Code `files.autoSave`, JetBrains "Save files if the IDE is idle for N seconds"). The
+  pane already sees `TickEvent` and `ToFocus`, so both triggers are reachable; the terminal offers
+  no focus reporting, so VS Code's `onWindowChange` is not. Wants `SaveWhen` in `EditorOpts`, and
+  `on_demand` split so the pane can emit a save unprompted. Design: to be written as
+  `docs/ide-save-v0.md`.
+- [ ] `P2` **IDE — no undo, which a save strategy would make dangerous.** Nothing takes a keystroke
+  back: the pane holds one `buffer.Buffer` and no history, and §4's `text_area` entry has the same
+  gap. Explicit saving makes that survivable, because an unsaved buffer is its own escape hatch.
+  Autosaving removes the floor — a mistyped key reaches disk on the next tick with git as the only
+  recovery. JetBrains takes that bet only because Local History catches it; Emacs declines it and
+  auto-saves to a separate `#foo#`. Wants an undo stack in the pane, and a decision on whether a
+  local history belongs in v0 at all. Design: `docs/ide-v0.md` §9.
 - [ ] `P3` **`app.step_to` recurses forever when `update` re-sends the message it is given.**
   `delivered` (`app.sprout:126`) answers an unclaimed delivery with `apply(update, [msg], w)`, so
   an `update` arm whose handling of `msg` is `step_to(update, w, id, msg)` — the obvious spelling

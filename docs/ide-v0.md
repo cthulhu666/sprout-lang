@@ -104,8 +104,9 @@ the loop — `widget.deliver` is pure.
 ```
 ctrl-s -> keys widget -> Bound(Save) -> update
 update: widget.deliver(w, editor, ToMsg(HandOver))   <- pure, synchronous
-        pane replies [Saved(SaveTo(path, text, ver))]  or  [Saved(Unnamed)]
-update: cmd_to(editor, write)  ->  Stored(Stamped ver path) addressed back
+        pane replies [Saved(SaveTo(path, text, ver))], [Saved(Unnamed)]
+        or [Saved(Busy)] if a write of its own has not answered yet
+update: cmd_to(editor, write)  ->  Written(WroteTo(Stamped ver path)) back
         pane marks itself clean and announces the label without the `*`
 
 Enter -> tree -> Choose(segs) -> update
@@ -116,15 +117,26 @@ update: cmd_to(editor, read)   ->  Loaded(Stamped ver (path, body)) addressed ba
 ```
 
 Handing the text over is **not** a write, and nothing is marked clean by it — a write can fail.
-`on_stored` is what cleans, after the write happened. Being asked does not advance `ver` either:
+`on_wrote` is what cleans, after the write happened. Being asked does not advance `ver` either:
 the receipt has to name the pane the text came from.
 
 **Every answer is checked, never adopted.** `app.dispatched` spawns a task per command, so an
 answer can land any number of loop steps later — after another file has been opened, after more
 typing. `stamped.fresh` is the check and it cannot be skipped: the payload has no other accessor.
-A pane that adopted a `Stored`'s path instead would aim the next ctrl-s at a file it is no longer
+A pane that adopted the answer's path instead would aim the next ctrl-s at a file it is no longer
 showing and write the document it *is* showing over that one. Full rationale, including why the
 check is equality and why the version can never repeat: `docs/stale-replies-v0.md`.
+
+**One write outstanding.** A `Cmd` runs in its own task, so two writes of one file can be on their
+way to the disk at once and arrive in either order: save, type, save again, and the older text can
+land last while the pane shows clean. `stamped.fresh` cannot see that — the losing write is not a
+stale *reply*, it is a live *effect*. So the pane refuses a second handover while one is unanswered
+(`Saving.Busy`) and the document stays dirty, which is what says so.
+
+The flag is cleared on the answer's **arrival**, not on its relevance, and that is why a write
+answers with a two-armed `Wrote` rather than a stamped path. A failed write and a stale answer both
+mean the write is over; only a fresh `WroteTo` also means the document is clean. A pane that cleared
+its flag only on a fresh success would jam shut the first time a write failed, and never save again.
 
 **A claim mints a receipt and changes nothing else.** It exists so the body arriving later has
 something to be checked against; it is not an open. A read is slow and a read can fail — Enter on a
@@ -134,7 +146,7 @@ name at claim time would hold a save target it had never read, and ctrl-s in tha
 its empty buffer over the file. Path and text are therefore adopted **together**, in `begun`, or not
 at all.
 
-This is also why a `Stored` cannot *name* a pathless buffer: `confirmed` never reads the answer's
+This is also why a write's answer cannot *name* a pathless buffer: `confirmed` never reads the answer's
 payload, and `document.written` clears dirt and nothing else. Naming one needs a save-as, which is
 §9's deferred work; letting an answer do it is the same door the stale-path bug came through.
 
@@ -196,4 +208,6 @@ nowhere to put a message, and "opened, holding nothing" is something the user ca
   interrogates. §3.
 - **The mirror is quadratic.** Avoided by owning the document in the pane. §5.1.
 - **`step_to` can recurse forever.** Avoided locally, filed. §5.2.
+- **Two writes of one file race to the disk.** Outside what a stale-reply check can see; the pane
+  keeps one write outstanding instead. §5.2.
 - **The window math lived inside one widget.** Extracted to `widgets.viewport` rather than copied.
