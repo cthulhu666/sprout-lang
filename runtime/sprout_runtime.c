@@ -5792,16 +5792,6 @@ static size_t sprout_utf8_codepoint_count(const char* s) {
   return count;
 }
 
-static size_t sprout_utf8_byte_offset(const char* s, size_t codepoint_offset) {
-  size_t i = 0;
-  size_t count = 0;
-  while (s[i] != '\0' && count < codepoint_offset) {
-    i += sprout_utf8_step(s, i);
-    count++;
-  }
-  return i;
-}
-
 long long str_len(long long s_val) {
   const char* s = (const char*)s_val;
   if (s == NULL) tcp_fail("str_len: null input");
@@ -5835,16 +5825,23 @@ long long str_slice(long long s_i, long long start, long long count) {
   if (start < 0) start = 0;
   if (count < 0) count = 0;
   SPROUT_HANDLE(h_s, s_i);
-  size_t total = sprout_utf8_codepoint_count(s);
+  /* One bounded walk: forward to `start`, then `count` codepoints further,
+     stopping at the NUL either way. Costs O(start + count), not O(|s|) — the
+     separate codepoint_count pass existed only to clamp, and running off the
+     end of the string clamps for free. */
   size_t start_byte = 0;
-  size_t take = 0;
-  if ((size_t)start < total) {
-    start_byte = sprout_utf8_byte_offset(s, (size_t)start);
-    size_t end_codepoint = (size_t)start + (size_t)count;
-    if (end_codepoint > total) end_codepoint = total;
-    size_t end_byte = sprout_utf8_byte_offset(s, end_codepoint);
-    take = end_byte - start_byte;
+  size_t skipped = 0;
+  while (s[start_byte] != '\0' && skipped < (size_t)start) {
+    start_byte += sprout_utf8_step(s, start_byte);
+    skipped++;
   }
+  size_t end_byte = start_byte;
+  size_t taken = 0;
+  while (s[end_byte] != '\0' && taken < (size_t)count) {
+    end_byte += sprout_utf8_step(s, end_byte);
+    taken++;
+  }
+  size_t take = end_byte - start_byte;
   sprout_gc_maybe_collect_threshold();
   const char* slice_now = (const char*)(uintptr_t)sprout_handle_get(h_s);
   char* out = sprout_gc_alloc_cstr(take, "str_slice: out of memory");
@@ -5891,11 +5888,11 @@ static size_t sprout_cstr_byte_len(const char* s) {
 
 /* str_slice_bytes: O(L) byte-indexed substring (L = byte_len).
  *
- * Why this exists alongside str_slice: str_slice converts codepoint indices
- * to byte offsets via two O(N) walks (sprout_utf8_byte_offset, called twice),
- * plus an O(N) codepoint count for bounds. Hot loops that already track byte
- * positions (e.g. codegen.dbg_count_header_lines, which uses str_find for
- * ASCII delimiters) waste those walks; this variant skips them.
+ * Why this exists alongside str_slice: str_slice must walk the UTF-8 sequence
+ * to turn a codepoint index into a byte offset, so it costs O(start + count).
+ * A caller that already tracks byte positions (codegen.dbg_count_header_lines,
+ * the lexer, unicode.lookup's fixed-width ASCII tables) pays that walk for an
+ * answer it already has; this variant is O(byte_len) whatever the offset.
  *
  * Safety: the caller MUST pass byte_start and byte_start+byte_len at UTF-8
  * codepoint boundaries. We enforce this with two cheap O(1) checks: a

@@ -7,8 +7,8 @@ records why, and what the third option would look like if a measurement ever jus
 
 Related: `docs/linear-borrowing-v0.md` (why a Rust-style borrowed slice is out of reach),
 `docs/growable-mutvec-v0.md` (the owner half, already shipped), and the `BACKLOG.md` entry
-"Codepoint-indexed `str_slice` is still O(source_len)" — an independent defect, fixable without
-any view type.
+"Mid-string `str_slice` is O(start)" — an independent defect, fixable without any view type.
+(Its prefix half is fixed: `str_slice` now walks only to `start + count`.)
 
 Backlog references here are by **entry title, not line number**: `BACKLOG.md` shifts under every
 merge, and one of this note's own citations had already rotted by the time it was first reviewed.
@@ -19,7 +19,7 @@ Every windowing operation in Sprout allocates and copies. Verified in the tree:
 
 | operation | cost | where |
 |---|---|---|
-| `str_slice(s, from, count)` | copy + O(source_len) codepoint walk | `runtime/sprout_runtime.c` (`str_slice`) |
+| `str_slice(s, from, count)` | copy + O(from + count) codepoint walk | `runtime/sprout_runtime.c` (`str_slice`) |
 | `str_slice_bytes(s, off, len)` | copy, O(len) | `runtime/sprout_runtime.c` (`str_slice_bytes`) |
 | `bytes_slice(b, from, count)` | fresh `BytesVal` + `memcpy` | `runtime/sprout_runtime.c` (`bytes_slice`) |
 | `vec_slice(start, count, v)` | walks the range into a `List`, rebuilds a `Vec` | `stdlib/prelude.sprout` (`vec_slice_from`) |
@@ -299,7 +299,7 @@ This note exists so the design is ready if it is ever needed. It is not needed y
 speculatively would be building an optimisation without a measurement:
 
 - The hottest suspected case is **already fixed**. `stdlib/compiler/lexer.sprout:10` takes token
-  text with `str_slice_bytes`, the O(len) byte-indexed form — not the O(source_len) codepoint
+  text with `str_slice_bytes`, the O(len) byte-indexed form — not the codepoint-indexed
   `str_slice`. The lexer is not paying the cost this note is about.
 - The remaining 42 `str_slice` call sites across `stdlib/compiler/` are **short-input** work, not
   bulk text: suffix/prefix stripping on identifiers and on `@fwd:` / `@super:` / alias dict keys

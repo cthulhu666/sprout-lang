@@ -171,7 +171,7 @@ Pure value transforms and runtime-backed persistent data helpers:
 - `char_from_codepoint(cp: Int) -> Char`
 - `str_concat(a: String, b: String) -> String`
 - `str_len(s: String) -> Int`
-- `str_slice(s: String, start: Int, count: Int) -> String` (total: a negative `start` or `count` clamps to empty)
+- `str_slice(s: String, start: Int, count: Int) -> String` — O(start + count), not O(|s|) (total: a negative `start` or `count` clamps to empty)
 - `str_char_at(s: String, index: Int) -> Maybe Char`
 - `str_find(s: String, needle: String) -> Int` (`-1` when not found)
 - `str_starts_with(s: String, prefix: String) -> Bool`

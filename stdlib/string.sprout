@@ -47,7 +47,8 @@ export fn length(raw: String) -> Int =
 export fn byte_length(raw: String) -> Int =
   str_byte_len(raw)
 
-# O(codepoints in `raw` + `count`): the builtin finds UTF-8 boundaries, then copies the slice.
+# O(start + count): the builtin walks the UTF-8 sequence to `start`, then `count` further —
+# independent of `|raw|`, so slicing a prefix of a huge string is cheap.
 # A negative `start` or `count` clamps to empty rather than failing.
 export fn slice(raw: String, start: Int, count: Int) -> String =
   str_slice(raw, start, count)

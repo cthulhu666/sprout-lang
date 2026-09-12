@@ -728,15 +728,13 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   parse or a stdlib hot path, so the same class of bug is still unguarded everywhere else. Worth a
   `cost-golden` over 4–5 fixed workloads on the same counters before writing more one-off probes.
   Shapes and when to use which: `docs/gates.md` §Render cost.
-- [ ] `P2` **Codepoint-indexed `str_slice` is still O(source_len)**, walking the source per call, so
-  per-token callers are quadratic in input size. The byte-indexed direction shipped
-  (`str_slice_bytes`, `str_starts_with_at_byte`) and is now genuinely O(1) in `|s|`; what remains is
-  either leaving `str_slice` as the codepoint-indexed convenience with its cost documented, or
-  direction (b), a codepoint-to-byte index cache on String values. *(The shipped half is the lesson:
-  both byte functions originally opened with `strlen(s)` to bounds-check, so the replacement was
-  itself O(source_len) and every migrated scanner stayed quadratic — while three separate places,
-  this item included, stated the intended complexity. Nothing measured it. It is now guarded by a
-  cost test rather than a comment.)*
+- [ ] `P3` **Mid-string `str_slice` is O(start)**, so a scanner whose offset advances is still
+  quadratic. Prefix slicing no longer is — `str_slice` walks to `start + count` and stops, making
+  `slice(s, 0, k)` independent of `|s|`. Closing the rest needs a codepoint-to-byte cache on String
+  values, or byte-indexed callers. Measured shapes: `tests/stdlib/test_slice_cost.spr`.
+- [ ] `P3` **`string.take` / `string.drop` still walk the whole string.** Their
+  `count >= length(raw)` guard calls `str_len`, so neither sees the now-O(count) `slice`. Bytes >=
+  codepoints, so `byte_length(raw) <= count` (an O(1) header read) is a conservative replacement.
 - [ ] `P2` **B4 — `list_length` is unreliable on complex element ADTs.**
   `examples/digit_recognizer/recognizer.sprout` hand-writes two monomorphic length helpers purely
   because of it. Root-cause and fix so those can be deleted; add a regression over a `List` of a

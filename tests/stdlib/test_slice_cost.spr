@@ -1,0 +1,75 @@
+import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
+import stdlib.string as string
+import stdlib.terminal as terminal
+import stdlib.time as time
+
+# Pins the property that makes `string.slice` usable on large inputs: slicing a
+# PREFIX costs O(count), not O(|s|). A wrong cost is invisible to a correctness
+# test — the answers were always right — so the guard has to be a measurement.
+#
+# WHY THIS IS NOT A FLAKY TIMING TEST. The call count is fixed and only the string
+# LENGTH varies (1 KiB vs 1 MiB, a 1024x ratio), so a length-independent result
+# gives ratio ~1x and the regression gives hundreds; the budget allows 20x, an
+# order of magnitude either side. Both arms hold both strings live so heaps and
+# allocation counts match, and each takes the MINIMUM of several rounds so a
+# stalled shared runner cannot inflate a result. Measured 905x before the fix.
+#
+# Mid-string slicing is deliberately NOT asserted: it is still O(start) by
+# construction. See BACKLOG.md "Mid-string `str_slice` is O(start)".
+
+let iterations = 20000
+let rounds = 3
+let baseline_floor_us = 200
+let allowed_ratio = 20
+
+# O(total) doubling; `string.repeat` is itself quadratic.
+fn grow(s: String, k: Int) -> String =
+  if k <= 0 then s else grow(s ++ s, k - 1)
+
+# Hand-rolled recursion rather than a combinator: a list of results would allocate
+# per iteration and the allocation, not the slice, would dominate the measurement.
+# Always slices 2 codepoints at offset 0 — only |s| differs between arms.
+fn probe_prefix(s: String, n: Int, acc: Int) -> Int =
+  if n <= 0 then acc
+  else probe_prefix(s, n - 1, acc + string.length(string.slice(s, 0, 2)))
+
+# A probe that stopped doing work is penalised rather than reported as fast.
+fn min_prefix_us(s: String, remaining: Int, best: Int) -> Int !{IO} =
+  if remaining <= 0 then best
+  else
+    do
+      t0 <- time.now_micros()
+      let total = probe_prefix(s, iterations, 0)
+      t1 <- time.now_micros()
+      let elapsed = if total == iterations * 2 then t1 - t0 else t1 - t0 + 1000000
+      min_prefix_us(s, remaining - 1, if elapsed < best then elapsed else best)
+
+fn budget_us(baseline: Int) -> Int =
+  (if baseline < baseline_floor_us then baseline_floor_us else baseline) * allowed_ratio
+
+fn report(label: String, short_us: Int, long_us: Int) -> Unit !{IO} =
+  terminal.write("  [cost] " ++ label ++ ": 1KiB=" ++ int_to_string(short_us) ++
+             "us 1MiB=" ++ int_to_string(long_us) ++ "us budget=" ++
+             int_to_string(budget_us(short_us)) ++ "us\n")
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    let short_s = grow("ab", 9)
+    let long_s = grow("ab", 19)
+
+    assert_eq(state, "short is 1 KiB", string.byte_length(short_s), 1024)
+    assert_eq(state, "long is 1 MiB", string.byte_length(long_s), 1048576)
+
+    short_us <- min_prefix_us(short_s, rounds, 1000000000)
+    long_us <- min_prefix_us(long_s, rounds, 1000000000)
+    _ <- report("string.slice prefix", short_us, long_us)
+    assert_true(state, "prefix slice cost is independent of string length",
+      long_us <= budget_us(short_us))
+
+    # Both strings still reachable here, so the two arms had identical heaps.
+    assert_eq(state, "both strings still live",
+      string.byte_length(short_s) + string.byte_length(long_s), 1049600)
+
+    summary(state)
