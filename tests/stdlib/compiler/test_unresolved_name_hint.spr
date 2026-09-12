@@ -1,0 +1,116 @@
+module main
+
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.compiler as compiler
+import stdlib.compiler.source as source
+import stdlib.string as string
+import stdlib.env as env
+
+# A NAME THAT IS DECLARED BUT NOT EXPORTED MUST NOT READ AS A TYPO.
+#
+# `Unknown variable: sealed.Sealed` is what a misspelling produces, so the reader
+# goes looking for a missing declaration. The declaration is not missing — the
+# `(..)` marker is (spec-v0 §5.6.1) — and inference can tell, because the module
+# that owns the name put it in the environment under its canonical name while no
+# import list mentions it.
+#
+# Asserted through the env path (`compile_source_with_roots`) rather than the batch
+# CLI: it is the front end the REPL, the analysis service and the LSP share, and it
+# hands back the diagnostic as a value instead of a captured stream.
+
+fn stdlib_root() -> String !{IO} =
+  match env.get("SPROUT_STDLIB_ROOT") with
+  | Just root -> root
+  | Nothing -> "stdlib"
+
+fn package_root() -> String = "tests/conformance/package_resolution/roots"
+
+# `demo.sealed` exports the wrap WITHOUT `(..)`, so `Sealed` is the type only.
+fn hidden_ctor_source() -> String =
+  `import demo.sealed as sealed
+
+fn use_it() -> Int = sealed.unseal(sealed.Sealed(3))
+`
+
+# The destructor pattern is the same name on a different resolution path, so it
+# needs its own case — a hint wired into the expression path only would pass the
+# one above and leave this one reading as a typo.
+fn hidden_pattern_source() -> String =
+  `import demo.sealed as sealed
+
+fn peek(s: sealed.Sealed) -> Int =
+  match s with
+  | sealed.Sealed n -> n
+`
+
+# `demo.dup_one.hidden_helper` is a plain private function. `(..)` is irrelevant
+# to it, so the note must not cite the marker.
+fn hidden_fn_source() -> String =
+  `import demo.dup_one as d
+
+fn use_it() -> Int = d.hidden_helper()
+`
+
+# A name nothing declares is still a typo, and must stay one: a note here would
+# be a fabricated lead.
+fn genuine_typo_source() -> String =
+  `import demo.sealed as sealed
+
+fn use_it() -> Int = sealed.no_such_thing(3)
+`
+
+fn fail_message(result: compiler.CompileResult) -> String =
+  match result with
+  | compiler.CompileOk _ -> ""
+  | compiler.CompileFail diags ->
+      match diags with
+      | Nil -> ""
+      | [d | _] ->
+          match d with
+          | compiler.DiagError _ msg -> msg
+          | compiler.DiagWarning _ msg -> msg
+
+fn check(src: String, root: String) -> String !{IO} =
+  do
+    result <- compiler.compile_source_with_roots(src, source.StdlibRoot(root),
+      Cons(package_root(), Nil))
+    fail_message(result)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    root <- stdlib_root()
+
+    ctor <- check(hidden_ctor_source(), root)
+    assert_true(state, "a hidden constructor still fails to resolve",
+      string.contains(ctor, "Unknown variable: sealed.Sealed"))
+    assert_true(state, "the note names the module that declares it",
+      string.contains(ctor, "`demo.sealed` declares `Sealed`, which is not in scope here"))
+    assert_true(state, "the note names the marker that would publish it",
+      string.contains(ctor, "exported only with `(..)`"))
+
+    # Spelled verbatim, the canonical name reaches the binding whatever the exports say
+    # (BACKLOG: "a canonical name bypasses module privacy"). Printing it would turn the
+    # diagnostic into instructions for defeating the thing it explains.
+    assert_true(state, "the note does not hand out the canonical name",
+      string.contains(ctor, "demo.sealed.Sealed") == false)
+
+    pat <- check(hidden_pattern_source(), root)
+    assert_true(state, "a hidden destructor pattern still fails to resolve",
+      string.contains(pat, "Unknown constructor: sealed.Sealed"))
+    assert_true(state, "the pattern path carries the same note",
+      string.contains(pat, "`demo.sealed` declares `Sealed`, which is not in scope here"))
+
+    priv <- check(hidden_fn_source(), root)
+    assert_true(state, "a private function's note names its module",
+      string.contains(priv, "`demo.dup_one` declares `hidden_helper`"))
+    assert_true(state, "a private function's note does not cite `(..)`",
+      string.contains(priv, "(..)") == false)
+
+    typo <- check(genuine_typo_source(), root)
+    assert_true(state, "a genuine typo still fails to resolve",
+      string.contains(typo, "Unknown variable: sealed.no_such_thing"))
+    assert_true(state, "a genuine typo gets no note",
+      string.contains(typo, "note:") == false)
+
+    summary(state)

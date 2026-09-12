@@ -224,14 +224,15 @@ Legend:
   works around it by wrapping the record in a single-constructor ADT
   (`docs/tui-text-area-v0.md` §4.9). Adjacent rulings: the `import M (T)` constructor question in
   §7.5's neighbourhood, and `opaque type` under `wrap` ergonomics.
-- [ ] `P3` **A deliberately hidden constructor reports `Unknown variable`, not "not exported".**
-  `wrap_opacity.Sealed(3)` on a wrap exported without `(..)` gives `Unknown variable:
-  wrap_opacity.Sealed`; in pattern position `Unknown constructor`. Both read as a typo, so the
-  reader looks for a missing declaration instead of a missing marker. The bundler can tell the
-  difference — `sym_exported_types` holds the name while `sym_ctor_exports` does not
-  (`bundler.sprout:1007`) — so the message could name the type and say the declaration carries
-  no `(..)`. Applies equally to an ADT's hidden constructors, which have behaved this way since
-  `8ac68e12`; wrap opacity only made it reachable on a second shape.
+- [ ] `P1` **A canonical name bypasses module privacy entirely.** The bundler flattens every module
+  into one namespace, naming each symbol `<module>.<name>` whether it is exported or not, so an
+  importer that spells the canonical name reaches any private binding. Both halves compile AND run:
+  `demo.sealed.Sealed(-7)` forges a value whose smart constructor rejects it, and
+  `demo.dup_one.hidden_helper()` calls a function no module exports. That contradicts spec-v0 §5.6.1
+  ("callers cannot forge one") and §3, which makes the implementation wrong, not the spec. Affects
+  every private declaration, not just constructors — `export` and `(..)` are advisory against anyone
+  who knows the spelling. Needs a design call: inference cannot see module boundaries, so the check
+  belongs where qualification happens, and must not reject the bundler's OWN rewrites.
 - [ ] `P2` **Move `stdlib.compiler` to a dedicated tooling/compiler namespace** once the non-stdlib
   tooling-package model is settled.
 - [ ] `P3` **Reconsider the prelude-bundling default (polarity + trigger).** The prelude is bundled

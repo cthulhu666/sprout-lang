@@ -1047,6 +1047,11 @@ boundary, not of the declaration: inside the declaring module the constructor
 and the pattern are ordinary. This is the rule `export type` already uses
 (§3), applied to the one shape that previously ignored it.
 
+Reaching for a hidden constructor is an unknown-name error — `Unknown
+variable` in expression position, `Unknown constructor` in a pattern —
+carrying a note that names the declaring module and this marker, so the
+two cases stay distinguishable from a misspelling.
+
 Wrap types primarily enable **mistake-prevention without runtime cost**: types
 like `Metres` vs `Seconds`, `UserId` vs `OrderId`, or the `BodyEnv` /
 `GlobalEnv` distinction in the self-hosted compiler can be enforced by the
