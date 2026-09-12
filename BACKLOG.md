@@ -433,11 +433,6 @@ Legend:
   `split` returning two linear halves with disjoint operations (Rust's `TcpStream::split`, the more
   explicit option). Not solved by a raw-`Int` escape hatch — that discards consume-exactly-once
   instead of splitting it. This is the sole blocker on retiring the raw-handle `tcp_*` family.
-- [ ] `P3` **`bytes_slice`'s extern declaration has misleading parameter names.** The prelude and
-  `stdlib/bytes.sprout` declare `(b, from, to)`; the C implementation takes `(start, count)` and
-  clamps `count`. Anyone computing `to` from the declaration silently gets a shorter slice. Rename
-  to `start`/`count`. Trivial, but it touches the prelude, so it needs the seed-refresh path.
-
 **HTTP server**
 
 - [ ] `P1` **Decode `Transfer-Encoding: chunked` request bodies.** Refused with 501 today, which is

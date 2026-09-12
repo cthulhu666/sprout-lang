@@ -1792,7 +1792,7 @@ extern fn to_double(n: Int) -> Double
 extern fn str_concat(a: String, b: String) -> String
 extern fn string_concat_many(xs: List String) -> String
 extern fn str_len(s: String) -> Int
-extern fn str_slice(s: String, from: Int, to: Int) -> String
+extern fn str_slice(s: String, start: Int, count: Int) -> String
 extern fn str_char_at(s: String, i: Int) -> Maybe Char
 extern fn str_find(haystack: String, needle: String) -> Int
 extern fn str_starts_with(s: String, prefix: String) -> Bool

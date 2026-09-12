@@ -1,0 +1,42 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.bytes as bytes
+import stdlib.string as string
+
+# The third argument of `str_slice` and `bytes_slice` is a COUNT, not an end index, and every case
+# below is chosen so an end-index reading would fail it. `str_slice` counts codepoints while
+# `bytes.slice` counts bytes, so the two disagree on multi-byte text by design.
+
+fn rendered(value: Bytes) -> String =
+  match bytes.to_string(value) with
+  | Ok text -> text
+  | Err _ -> "<invalid utf-8>"
+
+fn from(raw: String) -> Bytes =
+  bytes.from_string(raw)
+
+fn main() -> Unit !{IO} =
+  run_suite("slice count semantics", [
+    # --- String ---
+    # An end-index reading of (6, 5) is empty, since 5 < 6.
+    check_eq("str third arg is a count", string.slice("hello world", 6, 5), "world"),
+    check_eq("str count mid", string.slice("hello", 1, 3), "ell"),
+    check_eq("str count zero", string.slice("hello", 2, 0), ""),
+    check_eq("str count clamps past end", string.slice("hello", 3, 100), "lo"),
+    # An end-index reading of (2, 4) is "ll"; the count reading runs off the end and clamps.
+    check_eq("str count outruns an end-index reading", string.slice("hello", 2, 4), "llo"),
+    check_eq("str start past end", string.slice("hello", 9, 2), ""),
+
+    # --- Bytes: the same contract, previously untested at this level ---
+    check_eq("bytes third arg is a count", rendered(bytes.slice(from("hello world"), 6, 5)),
+             "world"),
+    check_eq("bytes count mid", rendered(bytes.slice(from("hello"), 1, 3)), "ell"),
+    check_eq("bytes count zero", rendered(bytes.slice(from("hello"), 2, 0)), ""),
+    check_eq("bytes count clamps past end", rendered(bytes.slice(from("hello"), 3, 100)), "lo"),
+    check_eq("bytes count outruns an end-index reading", rendered(bytes.slice(from("hello"), 2, 4)),
+             "llo"),
+    check_eq("bytes start past end", rendered(bytes.slice(from("hello"), 9, 2)), ""),
+
+    # "Cześć" is 5 codepoints and 7 bytes; ś and ć are two bytes each.
+    check_eq("str counts codepoints", string.slice("Cześć", 3, 2), "ść"),
+    check_eq("bytes counts bytes", rendered(bytes.slice(from("Cześć"), 3, 2)), "ś")
+  ])

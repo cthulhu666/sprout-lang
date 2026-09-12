@@ -24,11 +24,10 @@ Every windowing operation in Sprout allocates and copies. Verified in the tree:
 | `bytes_slice(b, from, count)` | fresh `BytesVal` + `memcpy` | `runtime/sprout_runtime.c:9014` |
 | `vec_slice(start, count, v)` | walks the range into a `List`, rebuilds a `Vec` | `stdlib/prelude.sprout:433` |
 
-(The table names `str_slice`'s third parameter `count`, which is what it *is*. The prelude extern
-declares it `to`, and the runtime treats it as a length — a live trap, carrying `NB` comments at
-`stdlib/compiler/source.sprout:340` and `infer.sprout:8555`. The `BACKLOG.md` entry
-"`bytes_slice`'s extern declaration has misleading parameter names" files exactly this defect
-against `bytes_slice`; nobody has recorded that it is also true of `str_slice`.)
+(Both `str_slice` and `bytes_slice` used to declare their third parameter `to` while the runtime
+treated it as a length — two call sites carried `NB` comments about it. Renamed to `count` while
+writing this note; the exported `string.slice` / `bytes.slice` wrappers were always correct, so
+only stdlib-internal readers were exposed.)
 
 The consequence is not hypothetical. `tcp_write_some(conn, payload, offset)` takes a byte **offset
 instead of a re-sliced tail**, and `docs/builtins-reference.md:105` says why in as many words: it is
