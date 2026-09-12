@@ -1,6 +1,6 @@
 module main
 
-import stdlib.test (check_eq, check_true, run_suite)
+import stdlib.test (check_eq, run_suite)
 import testsupport.wrap_opacity as wrap_opacity
 
 # Cross-module `wrap` visibility. `Sealed` is exported WITHOUT `(..)`, so its
@@ -14,8 +14,13 @@ import testsupport.wrap_opacity as wrap_opacity
 # scanner-level assertions in tests/stdlib/compiler/test_module_surface_scan.spr
 # cover it instead.
 
+# Outside every value `seal` accepts, so a rejection cannot be mistaken for a
+# successful round trip. `-1` would be: it is what `seal` refuses AND what a
+# refusal reports, which made the rejection assertion pass with the guard deleted.
+let refused = -999
+
 fn sealed_round_trip(n: Int) -> Int =
-  maybe_with_default(-1, map(wrap_opacity.unseal, wrap_opacity.seal(n)))
+  maybe_with_default(refused, map(wrap_opacity.unseal, wrap_opacity.seal(n)))
 
 fn open_round_trip(n: Int) -> Int =
   match wrap_opacity.Open(n) with
@@ -25,8 +30,8 @@ fn main() -> Unit !{IO} =
   run_suite("wrap_opacity", [
     check_eq("an opaque wrap round-trips through its smart constructor",
       sealed_round_trip(7), 7),
-    check_true("the smart constructor can reject its input",
-      sealed_round_trip(-1) == -1),
+    check_eq("the smart constructor rejects what the wrap must never hold",
+      sealed_round_trip(-1), refused),
     check_eq("a (..) wrap is constructed and matched across the boundary",
       open_round_trip(42), 42)
   ])

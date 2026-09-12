@@ -131,15 +131,19 @@ fn main() -> Unit !{IO} =
     assert_true(state, "`export extern` does not put the name in the export set",
       has("exported_extern", exported) == false)
 
-    # --- equivalence with the text scanner being replaced ---
-    # The token scan must not silently change what the bundler sees; this is what
-    # makes swapping the two safe rather than hopeful.
+    # --- the bundler still delegates rather than re-deriving ---
+    # bundler.scan_source_info now CALLS parser.scan_module_surface, so these two
+    # cannot disagree today — they pin the delegation, not two implementations.
+    # That is still worth holding: the text scanner these replaced is exactly what
+    # a future "just read the line prefix here" shortcut would reintroduce, and it
+    # is what let the bundler and the REPL disagree about a module's surface for
+    # as long as they did (docs/module-surface-authority-v0.md §6).
     match bundler.scan_source_info(sample_source()) with
     | (_, text_exported, text_ctor_types) ->
         do
-          assert_true(state, "token scan agrees with the text scanner on exports",
+          assert_true(state, "the bundler reports the same export set",
             same_names(exported, text_exported))
-          assert_true(state, "token scan agrees with the text scanner on ctor exports",
+          assert_true(state, "the bundler reports the same ctor-export set",
             same_names(ctor_types, text_ctor_types))
 
     summary(state)
