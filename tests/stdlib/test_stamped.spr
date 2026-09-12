@@ -1,0 +1,49 @@
+module test_stamped
+
+import stdlib.test (TestCase, check_eq, check_true, check_false, run_suite)
+import stdlib.version as v
+import stdlib.stamped as st
+
+# A reply from an asynchronous request describes the moment it was asked for,
+# not the moment it arrives. `Stamped` is that reply carried together with a
+# witness of who the asker was, readable only by an asker who still matches.
+# Design: docs/stale-replies-v0.md.
+
+fn v0() -> v.Version = v.origin()
+fn v1() -> v.Version = v.next(v0())
+fn v2() -> v.Version = v.next(v1())
+
+# A reply minted for `at`, read back by someone now at `now`.
+fn read_at(now: v.Version, at: v.Version) -> Maybe String =
+  st.fresh(now, st.stamp(at, "body"))
+
+# The composite stamp the editor pane uses: a version alone cannot say WHICH
+# document moved on, only that something did.
+fn keyed(now: (v.Version, String), at: (v.Version, String)) -> Maybe Int =
+  st.fresh(now, st.stamp(at, 7))
+
+fn main() -> Unit !{IO} =
+  run_suite("stdlib.stamped", [
+    # --- a version never repeats ---
+    check_false("a step is not where it started", v0() == v1()),
+    check_false("two steps are not one", v1() == v2()),
+    check_false("two steps are not the start", v0() == v2()),
+    check_true("a step goes forward", ord_lt(v0(), v1())),
+    check_true("forward is transitive", ord_lt(v0(), v2())),
+    check_eq("two chains from the start agree", v.origin(), v.origin()),
+
+    # --- a reply is readable exactly where it was minted ---
+    check_eq("an unmoved asker reads its reply", read_at(v1(), v1()), Just("body")),
+    check_eq("an asker that moved on reads nothing", read_at(v2(), v1()), Nothing),
+    # The ABA case `Eq` would wave through if a version could repeat: an asker
+    # cannot go back to v1, so a reply minted there can never match again.
+    check_eq("a reply cannot be read by an earlier asker", read_at(v0(), v1()),
+             Nothing),
+
+    # --- the stamp says what relevance means ---
+    check_eq("same version, same document", keyed((v1(), "a"), (v1(), "a")), Just(7)),
+    check_eq("same version, other document", keyed((v1(), "b"), (v1(), "a")),
+             Nothing),
+    check_eq("same document, later version", keyed((v2(), "a"), (v1(), "a")),
+             Nothing)
+  ])

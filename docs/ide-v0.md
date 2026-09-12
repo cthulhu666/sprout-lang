@@ -64,8 +64,8 @@ ide/filetree.sprout   label paths -> filesystem paths, and the reading         (
 
 `wrap FilePath = String`, declared here because this module owns a file's identity, and
 `filetree.joined` is the seam where a path first becomes one. Where a file *lives* and what is *in
-it* are both `String` and they travel together — `SaveTo(path, text)`, `Loaded(path, body)` — so a
-swap would write a file's own name into it. The wrap is zero-cost and makes that a compile error
+it* are both `String` and they travel together — `SaveTo(path, text, ver)` — so a swap would write
+a file's own name into it. The wrap is zero-cost and makes that a compile error
 (`docs/guidelines.md` §7).
 
 `file` is a `Maybe` because a buffer can exist before it has anywhere to go, and `target` returns
@@ -95,33 +95,43 @@ The window itself is not duplicated. `stdlib.tui.widgets.viewport` is the extrac
 `text_area`'s window math — which lines a region shows, how far they shift, where the caret sits —
 and both widgets paint through it.
 
-### 5.2 The save handshake
+### 5.2 The two handshakes
 
-Four hops, no round trip through the loop for the first two:
+Opening and saving have the same shape: the pane is asked, mints a receipt, and `update` ferries
+that receipt through the IO and back without reading it. Neither first hop is a round trip through
+the loop — `widget.deliver` is pure.
 
 ```
 ctrl-s -> keys widget -> Bound(Save) -> update
 update: widget.deliver(w, editor, ToMsg(HandOver))   <- pure, synchronous
-        pane replies [Saved(SaveTo(path, text))]  or  [Saved(Unnamed)]
-update: cmd_to(editor, write)  ->  Stored(path) addressed back to the pane
+        pane replies [Saved(SaveTo(path, text, ver))]  or  [Saved(Unnamed)]
+update: cmd_to(editor, write)  ->  Stored(Stamped ver path) addressed back
         pane marks itself clean and announces the label without the `*`
+
+Enter -> tree -> Choose(segs) -> update
+update: widget.deliver(w, editor, ToMsg(Choose segs))
+        pane claims the file, announces its name, replies [Reading(ReadFrom(path, ver))]
+update: cmd_to(editor, read)   ->  Loaded(Stamped ver body) addressed back
 ```
 
 Handing the text over is **not** a write, and nothing is marked clean by it — a write can fail.
-`on_stored` is what cleans, after the write happened.
+`on_stored` is what cleans, after the write happened. Being asked does not advance `ver` either:
+the receipt has to name the pane the text came from.
 
-**A `Stored` is checked, never adopted.** `app.dispatched` spawns a task per command, so the answer
-can land any number of loop steps later — after another file has been opened, or after more typing.
-The pane accepts it only when the path is still the one it handed over and nothing has been typed
-since (an edit counter, compared against its value at the handover). A pane that took the path
-instead would aim the next ctrl-s at a file it is no longer showing, and write the document it *is*
-showing over that one. Two saves in flight with an edit between them are still told apart only by
-the counter, so the second's answer can clean the first: the window is one write long and the cost
-is a `*` clearing early.
+**Every answer is checked, never adopted.** `app.dispatched` spawns a task per command, so an
+answer can land any number of loop steps later — after another file has been opened, after more
+typing. `stamped.fresh` is the check and it cannot be skipped: the payload has no other accessor.
+A pane that adopted a `Stored`'s path instead would aim the next ctrl-s at a file it is no longer
+showing and write the document it *is* showing over that one. Full rationale, including why the
+check is equality and why the version can never repeat: `docs/stale-replies-v0.md`.
 
-This is also why a `Stored` cannot *name* a pathless buffer. Naming one needs a save-as, which is
-§9's deferred work; letting an unsolicited answer do it is the same door the stale-path bug came
-through.
+A file cannot be read before the pane has claimed it, which is what gives the body arriving later
+something to be checked against — and means the name appears at once, so a file slow to read still
+shows whose pane it is.
+
+This is also why a `Stored` cannot *name* a pathless buffer: `confirmed` never reads the answer's
+payload, and `document.written` clears dirt and nothing else. Naming one needs a save-as, which is
+§9's deferred work; letting an answer do it is the same door the stale-path bug came through.
 
 `app.step_to` looks like the right tool for the interrogation and is not: when nothing claims the
 delivery it sends the message to `update`, and an `update` that answers by interrogating again loops

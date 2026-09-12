@@ -615,7 +615,7 @@ declare i64 @fs_rename(i64, i64)
 @.str.490 = private unnamed_addr constant { i64, [44 x i8] } { i64 704522, [44 x i8] c":help :quit :q :exit :type :t :instances :i\00" }
 @.str.491 = private unnamed_addr constant { i64, [74 x i8] } { i64 1196042, [74 x i8] c"args bits bytes chan collections compiler crypto env fs http http_client \00" }
 @.str.492 = private unnamed_addr constant { i64, [76 x i8] } { i64 1228810, [76 x i8] c"http_middleware http_server json linalg log math mutable net process regex \00" }
-@.str.493 = private unnamed_addr constant { i64, [59 x i8] } { i64 950282, [59 x i8] c"repl rng scram string task template terminal test time url\00" }
+@.str.493 = private unnamed_addr constant { i64, [75 x i8] } { i64 1212426, [75 x i8] c"repl rng scram stamped string task template terminal test time url version\00" }
 @.str.494 = private unnamed_addr constant { i64, [15 x i8] } { i64 229386, [15 x i8] c"stdlib.prelude\00" }
 @.str.495 = private unnamed_addr constant { i64, [21 x i8] } { i64 327690, [21 x i8] c"read_file: prelude: \00" }
 @.str.496 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
@@ -45870,7 +45870,7 @@ entry:
   %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
   %t$5 = call i64 @__tc_Semigroup_String_append(i64 %t$2, i64 %t$4)
   %t$16 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$6 = getelementptr inbounds { i64, [59 x i8] }, ptr @.str.493, i64 0, i32 1, i64 0
+  %t$6 = getelementptr inbounds { i64, [75 x i8] }, ptr @.str.493, i64 0, i32 1, i64 0
   %t$7 = ptrtoint ptr %t$6 to i64
   %t$17 = alloca i64
   store i64 %t$5, ptr %t$17

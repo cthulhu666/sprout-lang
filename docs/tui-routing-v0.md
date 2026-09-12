@@ -152,8 +152,11 @@ Two hazards this does not fix, both the widget author's to defend against:
 
 - **Reincarnation.** Declared ids trade positional staleness for identity confusion — close a
   tab, reopen it, and an in-flight answer lands on a fresh instance that never asked. Harmless
-  for a directory listing, a bug for anything stateful. A generation counter is not worth the
-  machinery yet.
+  for a directory listing, a bug for anything stateful — and the first stateful widget built on
+  this hit it, as data loss (`docs/stale-replies-v0.md` §1). The machinery now exists:
+  `stdlib.stamped` carries a receipt out with the request and back with the answer, and the
+  widget reads the answer only through `fresh`. It is still the widget author's to apply; `Cmd`
+  does not carry it.
 - **Id collision.** Two widgets with the same id: the container stops at the first claimant,
   so delivery is deterministic in tree order rather than duplicated. That is a convention the
   container implements, not an invariant the framework enforces.

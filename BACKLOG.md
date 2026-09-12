@@ -666,17 +666,10 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   path, which is what makes "save a scratch buffer" reachable — `ed.Unnamed` is the honest refusal
   standing in for it today. Design: `docs/ide-v0.md` §9.
 - [ ] `P2` **IDE — reopening a file forgets where the caret was.** `ed.EditorOpts.on_content`
-  carries `(path, text)` and no caret, so every open starts at line 1. The payload is not the
+  carries a stamped body and no caret, so every open starts at line 1. The payload is not the
   blocker — §4's "an application can send a caret in but never read one out" is: the pane would
   have to announce a `Caret` on the way out for anything to send back, and nothing reads one.
   Fix that entry first; this is its first real consumer. Design: `docs/ide-v0.md` §5.
-- [ ] `P3` **IDE — two writes in flight are told apart only by an edit count.** A command runs in
-  its own task (`app.sprout:239`), so `ide.editor` checks a late `Stored` against the path it
-  handed over and an edit counter. Save, edit, save again: the first answer arriving second still
-  satisfies "no edit since the last handover" and clears the `*` while the second write may be
-  outstanding. Harmless — a dirt marker clears one write early, no data moves — and the window is
-  one write long. The fix is for the answer to name the handover it belongs to, which means a
-  revision on `Saving` and back through `on_stored`. Design: `docs/ide-v0.md` §5.2.
 - [ ] `P3` **`app.step_to` recurses forever when `update` re-sends the message it is given.**
   `delivered` (`app.sprout:126`) answers an unclaimed delivery with `apply(update, [msg], w)`, so
   an `update` arm whose handling of `msg` is `step_to(update, w, id, msg)` — the obvious spelling

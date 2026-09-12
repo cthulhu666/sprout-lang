@@ -1,3 +1,4 @@
+import stdlib.stamped as st
 import stdlib.string as string
 import stdlib.test (TestState, new_state, assert_eq, summary)
 import stdlib.tui.event as event
@@ -6,6 +7,7 @@ import stdlib.tui.screen as scr
 import stdlib.tui.widget as widget
 import stdlib.tui.widgets.container as ct
 import stdlib.tui.widgets.focus as focus
+import stdlib.version as v
 import ide.document as doc
 import ide.editor as ed
 
@@ -16,12 +18,17 @@ import ide.editor as ed
 # handshake is. Every case here drives it the way `app.update` does: an
 # addressed message in, messages out.
 
+# Both answers from elsewhere are STAMPED, and the version they carry is in
+# every expectation below on purpose: an unplanned extra bump would invalidate
+# receipts that are still in flight, and the numbers are where that shows.
 type Msg (..) deriving (Eq, ToString) =
   | Labelled String
-  | Loaded doc.FilePath String
+  | Open doc.FilePath
+  | Reading ed.Opening
+  | Loaded (st.Stamped v.Version String)
   | Save
   | Saved ed.Saving
-  | Stored doc.FilePath
+  | Stored (st.Stamped v.Version doc.FilePath)
   | Noted String
 
 fn at(p: String) -> doc.FilePath = doc.FilePath(p)
@@ -33,9 +40,14 @@ type alias Asks = List(widget.Cmd Msg)
 
 fn pane_id() -> widget.WidgetId = widget.WidgetId("editor")
 
-fn content_for(m: Msg) -> Maybe(doc.FilePath, String) =
+fn open_for(m: Msg) -> Maybe(doc.FilePath, ed.Opening -> Msg) =
   match m with
-  | Loaded p body -> Just((p, body))
+  | Open p -> Just((p, Reading))
+  | _ -> Nothing
+
+fn content_for(m: Msg) -> Maybe(st.Stamped v.Version String) =
+  match m with
+  | Loaded s -> Just(s)
   | _ -> Nothing
 
 # The reply CONSTRUCTOR, not the reply: only the pane knows what it will
@@ -45,13 +57,14 @@ fn demand_for(m: Msg) -> Maybe(ed.Saving -> Msg) =
   | Save -> Just(Saved)
   | _ -> Nothing
 
-fn stored_for(m: Msg) -> Maybe doc.FilePath =
+fn stored_for(m: Msg) -> Maybe(st.Stamped v.Version doc.FilePath) =
   match m with
-  | Stored p -> Just(p)
+  | Stored s -> Just(s)
   | _ -> Nothing
 
 fn opts() -> ed.EditorOpts Msg =
-  ed.editor_opts() with (on_label = Just(Labelled), on_content = Just(content_for),
+  ed.editor_opts() with (on_label = Just(Labelled), on_open = Just(open_for),
+                         on_content = Just(content_for),
                          on_demand = Just(demand_for), on_stored = Just(stored_for))
 
 # A neighbour, so a key the pane DECLINES is visible as a broadcast rather than
@@ -96,6 +109,10 @@ fn said(r: (widget.Widget Msg, Says, Asks)) -> String =
   match r with
   | (_, msgs, _) -> to_string(msgs)
 
+fn says(r: (widget.Widget Msg, Says, Asks)) -> Says =
+  match r with
+  | (_, msgs, _) -> msgs
+
 fn tree_of(r: (widget.Widget Msg, Says, Asks)) -> widget.Widget Msg =
   match r with
   | (w, _, _) -> w
@@ -106,25 +123,85 @@ fn told(w: widget.Widget Msg, m: Msg) -> (widget.Widget Msg, Says, Asks) =
                else (w, [Noted("declined")], Nil)
   in t
 
+# The receipt the pane minted when it claimed a file. There is no other way to
+# get one — `Version`'s constructor is not exported — so a body that skipped the
+# claim cannot be stamped at all, let alone accepted.
+fn receipt(msgs: Says) -> Maybe v.Version =
+  let [r | _] = list_filter_map(as_receipt, msgs) else Nothing
+  in Just(r)
+
+fn as_receipt(m: Msg) -> Maybe v.Version =
+  match m with
+  | Reading op -> Just(receipt_of(op))
+  | _ -> Nothing
+
+fn receipt_of(op: ed.Opening) -> v.Version =
+  match op with
+  | ed.ReadFrom _ r -> r
+
+# Opening, exactly as `app.update` does it: claim the file, then deliver its
+# body stamped with the receipt that came back.
+fn claiming(w: widget.Widget Msg,
+            p: doc.FilePath) -> (widget.Widget Msg, Says, Asks) =
+  told(w, Open(p))
+
+fn opening(w: widget.Widget Msg, p: doc.FilePath,
+           body: String) -> (widget.Widget Msg, Says, Asks) =
+  let r = claiming(w, p)
+      Just rec = receipt(says(r)) else r
+  in told(tree_of(r), Loaded(st.stamp(rec, body)))
+
+fn opened(w: widget.Widget Msg, p: doc.FilePath,
+          body: String) -> widget.Widget Msg =
+  tree_of(opening(w, p, body))
+
 fn loaded_tree() -> widget.Widget Msg =
-  tree_of(told(tree(), Loaded(at("stdlib/a.txt"), "ab")))
+  opened(tree(), at("stdlib/a.txt"), "ab")
 
 # Loaded, edited, and its text handed out — the state a `Stored` legitimately
-# answers.
-fn handed_over_tree() -> widget.Widget Msg =
-  tree_of(told(tree_of(widget.feed(loaded_tree(), chars("x"))), Save))
+# answers, with the receipt that answer has to carry back.
+fn handover_step() -> (widget.Widget Msg, Says, Asks) =
+  told(tree_of(widget.feed(loaded_tree(), chars("x"))), Save)
+
+fn handed_over_tree() -> widget.Widget Msg = tree_of(handover_step())
+
+fn handover() -> v.Version =
+  maybe_with_default(v.origin(), saved_receipt(says(handover_step())))
+
+# The receipt a save handed out, which its `Stored` has to carry back.
+fn saved_receipt(msgs: Says) -> Maybe v.Version =
+  let [r | _] = list_filter_map(as_saved, msgs) else Nothing
+  in Just(r)
+
+fn as_saved(m: Msg) -> Maybe v.Version =
+  match m with
+  | Saved sv -> saved_of(sv)
+  | _ -> Nothing
+
+fn saved_of(sv: ed.Saving) -> Maybe v.Version =
+  match sv with
+  | ed.SaveTo _ _ r -> Just(r)
+  | ed.Unnamed -> Nothing
 
 # ── what it says ────────────────────────────────────────────────────────────
 
 fn content_cases(state: TestState) -> Unit !{IO} = do
-  assert_eq(state, "a file arriving is announced by name",
-            said(told(tree(), Loaded(at("stdlib/a.txt"), "ab"))),
-            "[Labelled(a.txt)]")
+  # The name lands on the CLAIM, before the text: a file too slow to read still
+  # shows whose pane it is. The receipt goes out in the same breath.
+  assert_eq(state, "claiming a file announces it and hands out a receipt",
+            said(claiming(tree(), at("stdlib/a.txt"))),
+            "[Labelled(a.txt), Reading(ReadFrom(FilePath(stdlib/a.txt), Version(1)))]")
+  assert_eq(state, "the body arriving says nothing new",
+            said(opening(tree(), at("stdlib/a.txt"), "ab")), "[]")
+  # A body nobody asked for cannot even be built: the only receipt in existence
+  # is the one the claim handed out, and this pane is past it.
+  assert_eq(state, "a body stamped for an earlier pane is dropped",
+            said(told(loaded_tree(), Loaded(st.stamp(v.origin(), "zz")))), "[]")
   # The caret sits at the START of a file being opened, so the first character
   # typed lands before the text rather than after it.
   assert_eq(state, "an opened file is read from the top",
             said(told(tree_of(widget.feed(loaded_tree(), chars("X"))), Save)),
-            "[Saved(SaveTo(FilePath(stdlib/a.txt), Xab))]")
+            "[Saved(SaveTo(FilePath(stdlib/a.txt), Xab, Version(3)))]")
 
 fn dirt_cases(state: TestState) -> Unit !{IO} = do
   # The EDGE into dirtiness, not every keystroke: announcing per character
@@ -133,23 +210,25 @@ fn dirt_cases(state: TestState) -> Unit !{IO} = do
             said(widget.feed(loaded_tree(), chars("xy"))),
             "[Labelled(a.txt *)]")
   assert_eq(state, "being stored cleans the label",
-            said(told(handed_over_tree(), Stored(at("stdlib/a.txt")))),
+            said(told(handed_over_tree(),
+                      Stored(st.stamp(handover(), at("stdlib/a.txt"))))),
             "[Labelled(a.txt)]")
   # A write can fail, so handing the text over is not itself a write and must
   # not clean anything.
   assert_eq(state, "handing over the text does not clean the label",
             said(told(tree_of(widget.feed(loaded_tree(), chars("x"))), Save)),
-            "[Saved(SaveTo(FilePath(stdlib/a.txt), xab))]")
+            "[Saved(SaveTo(FilePath(stdlib/a.txt), xab, Version(3)))]")
 
 fn saving_cases(state: TestState) -> Unit !{IO} = do
   assert_eq(state, "a pane with no file has nowhere to save",
             said(told(tree(), Save)), "[Saved(Unnamed)]")
-  # A `Stored` names a file this pane never handed anything over for, so it is
-  # not this pane's: taking the path is how a late answer aims the next save at
-  # the wrong file. Naming a pathless buffer needs a save-as, which the
-  # skeleton has not got.
-  assert_eq(state, "an unsolicited Stored does not name a pathless pane",
-            said(told(tree_of(told(tree(), Stored(at("x/new.txt")))), Save)),
+  # `document.written` clears dirt and nothing else, so even a `Stored` whose
+  # receipt does match cannot teach a pane a path. Naming a pathless buffer
+  # needs a save-as, which the skeleton has not got.
+  assert_eq(state, "a Stored does not name a pathless pane",
+            said(told(tree_of(told(tree(),
+                                   Stored(st.stamp(v.origin(), at("x/new.txt"))))),
+                      Save)),
             "[Saved(Unnamed)]")
 
 # A write runs in its own task (`app.sprout:239` spawns one), so `Stored` can
@@ -161,26 +240,35 @@ fn stale_cases(state: TestState) -> Unit !{IO} = do
   # next ctrl-s would write B over A.
   assert_eq(state, "a late Stored does not retarget a pane that moved on",
             said(told(moved_on(), Save)),
-            "[Saved(SaveTo(FilePath(b.txt), bbb))]")
+            "[Saved(SaveTo(FilePath(b.txt), bbb, Version(4)))]")
   # Saving does not clean what was typed AFTER the text was handed over — the
   # file on disk does not have those characters in it.
   assert_eq(state, "a late Stored does not clean an edit made since",
-            said(told(edited_since(), Stored(at("a.txt")))), "[]")
+            said(told(edited_since(),
+                      Stored(st.stamp(handover(), at("stdlib/a.txt"))))), "[]")
+  # The same defect on the read side, which is the milder half: the pane would
+  # show A while the tree says B was chosen.
+  assert_eq(state, "a body that lost the race does not replace the one that won",
+            said(told(read_race(), Save)),
+            "[Saved(SaveTo(FilePath(b.txt), bbb, Version(3)))]")
 
 # Load A, hand its text over, then load B. A's `Stored` lands last.
 fn moved_on() -> widget.Widget Msg =
-  tree_of(told(tree_of(told(tree_of(told(tree(), Loaded(at("a.txt"), "aaa"))),
-                            Save)),
-               Loaded(at("b.txt"), "bbb")))
-  |> \w -> tree_of(told(w, Stored(at("a.txt"))))
+  let handed = told(opened(tree(), at("a.txt"), "aaa"), Save)
+      r = maybe_with_default(v.origin(), saved_receipt(says(handed)))
+      later = opened(tree_of(handed), at("b.txt"), "bbb")
+  in tree_of(told(later, Stored(st.stamp(r, at("a.txt")))))
 
 # Load A, edit, hand the text over, edit again.
 fn edited_since() -> widget.Widget Msg =
-  tree_of(told(tree_of(widget.feed(tree_of(told(tree(),
-                                                Loaded(at("a.txt"), "ab"))),
-                                   chars("x"))),
-               Save))
-  |> \w -> tree_of(widget.feed(w, chars("y")))
+  tree_of(widget.feed(handed_over_tree(), chars("y")))
+
+# Load A, load B, then A's body arrives — the read that lost the race.
+fn read_race() -> widget.Widget Msg =
+  let first = claiming(tree(), at("a.txt"))
+      r = maybe_with_default(v.origin(), receipt(says(first)))
+      later = opened(tree_of(first), at("b.txt"), "bbb")
+  in tree_of(told(later, Loaded(st.stamp(r, "aaa"))))
 
 fn key_cases(state: TestState) -> Unit !{IO} = do
   # ctrl-s must reach the application, so the pane declines every chord and the
@@ -189,8 +277,7 @@ fn key_cases(state: TestState) -> Unit !{IO} = do
             said(widget.feed(loaded_tree(), [chord(event.KChar('s'))])),
             "[Noted(bcast)]")
   assert_eq(state, "an unfocused pane does not take keys",
-            said(widget.feed(tree_of(told(unfocused(), Loaded(at("a.txt"), "ab"))),
-                             chars("x"))),
+            said(widget.feed(opened(unfocused(), at("a.txt"), "ab"), chars("x"))),
             "[Noted(bcast)]")
 
 # ── what it paints ──────────────────────────────────────────────────────────
@@ -228,10 +315,10 @@ fn alone_unfocused() -> widget.Widget Msg =
                       widget.WidgetId("elsewhere"), pane())
 
 fn showing(body: String) -> widget.Widget Msg =
-  tree_of(told(alone(), Loaded(at("a.txt"), body)))
+  opened(alone(), at("a.txt"), body)
 
 fn unfocused_showing(body: String) -> widget.Widget Msg =
-  tree_of(told(alone_unfocused(), Loaded(at("a.txt"), body)))
+  opened(alone_unfocused(), at("a.txt"), body)
 
 fn gutter_cases(state: TestState) -> Unit !{IO} = do
   # The gutter is what makes the pane an editor rather than a text area, and it
