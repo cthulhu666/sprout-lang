@@ -213,7 +213,8 @@ Sprout supports:
 - `import x.y.z as alias`
 - `import x.y.z (name1, name2)`
 - `import x.y.z as alias (name1, name2)`
-- `export fn ...`, `export type Name`, `export type Name(..)`, `export let ...` (top-level only)
+- `export fn ...`, `export type Name`, `export type Name(..)`, `export wrap Name`,
+  `export wrap Name (..)`, `export let ...` (top-level only)
 
 Resolution:
 
@@ -232,6 +233,10 @@ Resolution:
 - `import x.y.z (name1, name2)` imports only those names unqualified
 - importing `export type Name` exposes the type name only
 - importing `export type Name(..)` also exposes the type's constructors for pattern matches and calls
+- a `wrap`'s type and constructor share one name, so the same marker decides both:
+  `export wrap Name` exposes the type alone (abstract — construct it through a
+  function the module exports), `export wrap Name (..)` exposes the constructor and
+  the destructor pattern too
 - top-level declarations are internally namespaced by module, so imported modules no longer flatten into one global scope
 - a listed name the module does not export is an error, and so is binding one
   unqualified name twice from two modules — including via constructors two `(..)`

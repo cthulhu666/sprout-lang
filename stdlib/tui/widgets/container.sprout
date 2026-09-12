@@ -34,9 +34,9 @@ export fn fit(child: widget.Widget m) -> Slot m = SlotFit(child)
 # A grid's two templates are both `List layout.Dimension` and sit side by side,
 # so swapping them silently transposes the layout — a wrong grid rather than an
 # error. Tagged so the typechecker rejects the swap (guidelines §7).
-export wrap Cols = List layout.Dimension
+export wrap Cols (..) = List layout.Dimension
 
-export wrap Rows = List layout.Dimension
+export wrap Rows (..) = List layout.Dimension
 
 fn slot_widget(s: Slot m) -> widget.Widget m =
   match s with

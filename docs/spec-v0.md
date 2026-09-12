@@ -1024,10 +1024,28 @@ Restrictions:
 - No type parameters on the wrap itself in v0; the inner type may be an
   *applied* parameterized type (`wrap BodyEnv = Dict types.Scheme`), but the
   wrap is monomorphic. `wrap MyDict a = Dict a` binds `a` on the wrap and does
-  not parse — the name is followed directly by `=`.
+  not parse — the name is followed by `=`, or by the `(..)` marker below.
 - The constructor name and type name are identical and cannot be set separately.
 - A `wrap` may derive `Eq`, `Ord` and `ToString` (§8.6); `Enum` is rejected.
   Any other class membership needs an explicit `instance` declaration.
+
+**Export.** Because the type and its constructor share one name, `export` alone
+publishes the **type only**: the constructor, and with it the destructor
+pattern, stay module-private. `export wrap Foo (..) = T` publishes both. The
+marker sits between the name and the `=` — the same slot an ADT carries it in
+(§8.6), and so ahead of any trailing `deriving` clause.
+
+```sprout
+export wrap Age (..) = Int deriving (Eq, Ord)   # callers may write Age(30)
+export wrap Token = String                      # abstract: callers cannot forge one
+```
+
+An abstract wrap is built through a function the module exports — a smart
+constructor — which is what lets it carry an invariant its inner type cannot,
+as in a `Path` that rejects the empty string. Opacity is a property of the
+boundary, not of the declaration: inside the declaring module the constructor
+and the pattern are ordinary. This is the rule `export type` already uses
+(§3), applied to the one shape that previously ignored it.
 
 Wrap types primarily enable **mistake-prevention without runtime cost**: types
 like `Metres` vs `Seconds`, `UserId` vs `OrderId`, or the `BodyEnv` /
@@ -3037,14 +3055,16 @@ type Name (..) deriving (Class1, Class2, ...) =
 
 type Rec = (f0: T0, f1: T1) deriving (Class1, Class2, ...)
 
-wrap Wrapped = T deriving (Class1, Class2, ...)
+wrap Wrapped (..) = T deriving (Class1, Class2, ...)
 ```
 
 `deriving` is a hard keyword.  The class-name list must be parenthesized and
 non-empty.  Whitespace and line breaks inside the parentheses are allowed.
 Placement differs only because an ADT's `=` opens a multi-line constructor list
 while a record's and a wrap's right-hand side is self-contained; the clause
-itself parses identically in all three positions.
+itself parses identically in all three positions.  The optional `(..)`
+constructor-export marker precedes the `=` on both an ADT and a wrap (§5.6.1),
+so on a wrap it precedes the trailing clause as well.
 
 ### Derivable classes (this version)
 

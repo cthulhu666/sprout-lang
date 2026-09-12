@@ -15,7 +15,7 @@ import stdlib.fs.path as path
 # arrives as — so swapping
 # them would write a file's own name into it. `wrap` is zero-cost and makes
 # that a compile error (docs/guidelines.md §7).
-export wrap FilePath = String deriving (Eq, Ord, ToString)
+export wrap FilePath (..) = String deriving (Eq, Ord, ToString)
 
 export fn path_text(p: FilePath) -> String =
   match p with

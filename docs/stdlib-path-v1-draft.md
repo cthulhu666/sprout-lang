@@ -110,7 +110,10 @@ export wrap Dir  = String   # path that names (or will name) a directory
 
 Both are zero-cost String wraps under PR #36's `wrap` semantics. The
 distinction is type-level only: at runtime, both are identity wrappers
-around `String`. The benefit is **at the API surface**, where joining a
+around `String`. Neither carries `(..)`, so both are abstract outside
+`stdlib.fs.path` (spec-v0 §5.6.1) — which is what makes `file_checked`
+and `dir_checked` below the only way in, and so what lets the types mean
+"validated" rather than "annotated". The benefit is **at the API surface**, where joining a
 directory and a relative name yields one or the other depending on
 intent:
 

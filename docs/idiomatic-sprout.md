@@ -435,6 +435,22 @@ wrap StdlibRoot = String
 fn compile(path: FilePath, root: StdlibRoot) -> ...   # the arguments can't be swapped
 ```
 
+Exported, the type and its constructor share one name, so `(..)` says which of
+the two callers get. `export wrap Foo (..) = T` gives them both — the usual case,
+and what every wrap above wants. Leave it off and the constructor stays private,
+which makes an exported function the only way in and so lets the type mean
+*validated* rather than *labelled*:
+
+```sprout
+export wrap Port = Int                                  # no (..): callers cannot write Port(-1)
+
+export fn port(n: Int) -> Maybe Port =
+  if n < 1 || n > 65535 then Nothing else Just(Port(n))
+
+export fn port_number(p: Port) -> Int =                 # the pattern is private too,
+  match p with | Port n -> n                            # so export an accessor
+```
+
 ## Hide a type behind an interface with existentials
 
 When a collection must hold values of *different* types touched only through a

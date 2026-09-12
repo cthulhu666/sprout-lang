@@ -67,6 +67,8 @@ fn sample_source() -> String =
     ++ "\n"
     ++ "export wrap Wrapped = Int\n"
     ++ "\n"
+    ++ "export wrap WrappedOpen (..) = Int\n"
+    ++ "\n"
     ++ "extern fn plain_extern(a: Int) -> Int\n"
     ++ "\n"
     ++ "export extern fn exported_extern(a: Int) -> Int\n"
@@ -95,6 +97,7 @@ fn main() -> Unit !{IO} =
     assert_true(state, "a non-exported type is not", has("Private", exported) == false)
     assert_true(state, "export type alias is exported", has("Aliased", exported))
     assert_true(state, "export wrap is exported", has("Wrapped", exported))
+    assert_true(state, "export wrap (..) is exported too", has("WrappedOpen", exported))
 
     # The scar case: a contextual `linear` marker must not be mistaken for the name.
     assert_true(state, "export type linear exports the TYPE, not the word linear",
@@ -108,7 +111,12 @@ fn main() -> Unit !{IO} =
     assert_true(state, "a type without (..) does not export constructors",
       has("Closed", ctor_types) == false)
     assert_true(state, "(..) is found after a linear marker too", has("Owned", ctor_types))
-    assert_true(state, "wrap exports its synthetic constructor", has("Wrapped", ctor_types))
+    # A wrap's type and constructor share one name, so `(..)` is the only way to say
+    # which of the two is published. Without it the type is abstract: spec-v0 §5.6.1.
+    assert_true(state, "a wrap without (..) publishes no constructor",
+      has("Wrapped", ctor_types) == false)
+    assert_true(state, "a wrap with (..) publishes its synthetic constructor",
+      has("WrappedOpen", ctor_types))
     assert_true(state, "an alias exports no constructors", has("Aliased", ctor_types) == false)
 
     # --- globals: the reason this scan exists ---

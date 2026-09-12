@@ -160,6 +160,9 @@ fn is_call_like_pp_kw(ppv: String) -> Bool =
   else if ppv == "class" then false
   else if ppv == "instance" then false
   else if ppv == "type" then false
+  # `wrap Age (..)` — the constructor-export marker, not a call. Same slot and
+  # same spelling as on a `type` (spec-v0 §5.6.1), so the same answer.
+  else if ppv == "wrap" then false
   else true
 
 fn is_call_like_pp_other(prev: token.Token, pp: token.Token, next_tok: Maybe token.Token, has_equals_ahead: Bool) -> Bool =

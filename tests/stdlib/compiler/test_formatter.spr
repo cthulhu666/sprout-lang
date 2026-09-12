@@ -96,5 +96,15 @@ fn main() -> Unit !{IO} =
     # gain interior spaces.
     check_eq("constructor-export marker unchanged",
       formatter.format_source("type Color (..) deriving (Eq) =\n"),
-      "type Color (..) deriving (Eq) =\n")
+      "type Color (..) deriving (Eq) =\n"),
+
+    # A wrap carries the same marker in the same slot, so it is spaced the same
+    # way. Without the `wrap` arm in is_call_like_pp_kw the name+`(` reads as a
+    # CALL and comes out tight, giving one marker two spellings.
+    check_eq("the marker on a wrap is spaced like the marker on a type",
+      formatter.format_source("wrap Age (..) = Int\n"), "wrap Age (..) = Int\n"),
+    check_eq("a tight marker on a wrap is spaced out",
+      formatter.format_source("wrap Age(..) = Int\n"), "wrap Age (..) = Int\n"),
+    check_eq("a wrap without the marker is untouched",
+      formatter.format_source("wrap Age = Int\n"), "wrap Age = Int\n")
   ])
