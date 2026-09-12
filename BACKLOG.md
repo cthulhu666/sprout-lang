@@ -670,6 +670,17 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   blocker — §4's "an application can send a caret in but never read one out" is: the pane would
   have to announce a `Caret` on the way out for anything to send back, and nothing reads one.
   Fix that entry first; this is its first real consumer. Design: `docs/ide-v0.md` §5.
+- [ ] `P3` **IDE — two writes in flight can land on disk out of order.** `stamped.fresh` filters
+  the *answers* a pane accepts; it does not order the *writes*. Save, edit, save again puts two
+  `write_body` tasks in flight (`app.sprout:239` spawns one each). If the second lands first its
+  `Stored` cleans the label, and the first then overwrites the file with the older text while the
+  pane shows clean. A stale reply is no longer the mechanism — disk ordering is — so the fix is to
+  keep one write outstanding per pane and queue or drop the rest. Design: `docs/stale-replies-v0.md`
+  §8.
+- [ ] `P3` **IDE — an open that never completes says nothing.** A body dropped as stale (the user
+  typed during the read) is claimed and discarded silently, so the file simply does not open and
+  nothing says why. A failed read at least reaches the status line. The pane has no way to speak
+  except `on_label`; giving it an `on_note` would cover both. Design: `docs/ide-v0.md` §5.2.
 - [ ] `P3` **`app.step_to` recurses forever when `update` re-sends the message it is given.**
   `delivered` (`app.sprout:126`) answers an unclaimed delivery with `apply(update, [msg], w)`, so
   an `update` arm whose handling of `msg` is `step_to(update, w, id, msg)` — the obvious spelling

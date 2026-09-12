@@ -108,7 +108,7 @@ without ever reading it.
 
 | | request | pane answers | IO | reply |
 |---|---|---|---|---|
-| open | `Choose` → `on_open` | `ReadFrom path ver` | `read_at` | `Loaded (Stamped ver body)` |
+| open | `Choose` → `on_open` | `ReadFrom path ver` | `read_at` | `Loaded (Stamped ver (path, body))` |
 | save | `HandOver` → `on_demand` | `SaveTo path text ver` | `write_body` | `Stored (Stamped ver path)` |
 
 `Pane.ver` advances on every change to what the pane shows — a file claimed, a body filled in, a
@@ -117,9 +117,11 @@ name the pane the text came from.
 
 Three consequences worth naming:
 
-- A file cannot be read before the pane has claimed it, which is what gives a body arriving later
-  something to be checked against. The name therefore lands at claim time, so a file slow to read
-  still shows whose pane it is.
+- **A claim mints a receipt and changes nothing else.** It exists only so a body arriving later has
+  something to be checked against. The first cut also adopted the path at claim time, to show the
+  name before the text; that gave the pane a save target it had not read, and a ctrl-s during a slow
+  or failing read wrote the empty buffer over the file. Path and text are adopted together, in
+  `begun`, or not at all — a stamped *pair*, not a stamped body.
 - The pane no longer remembers its handover. The receipt carries it, so the `edits`/`handed` pair
   the first fix used is gone, and with it the chance of checking one and not the other.
 - `confirmed` does not read the answer's payload. `fresh` has already proved the path is this
@@ -140,7 +142,19 @@ receipts still in flight, and the numbers are where that shows.
 The guards were checked by mutation — `fresh` blunted to `Just(x)` turns all three stale cases red,
 and the read-race case then shows A's text where B's belongs.
 
-## 8. Deferred
+## 8. What this does not fix
+
+**Ordering of the effects themselves.** `fresh` filters the answers a receiver accepts; it says
+nothing about the order two writes reach the disk. Save, edit, save again puts two `write_body`
+tasks in flight; if the second lands first, its `Stored` is accepted and the first then overwrites
+the file with the older text. No stamp can see that, because the losing write is not a stale
+*reply* — it is a live *effect*. The fix is to keep one write outstanding per pane. Filed in
+`BACKLOG.md` §4.5.
+
+The general form is worth stating: staleness checking makes a receiver safe against answers that
+outlived their question. It does not make the world safe against requests that outlive each other.
+
+## 9. Deferred
 
 - **`at_least` for cache-like replies.** LSP diagnostics for document version 5 land, then version
   4's arrive late; both are stale against the buffer, but showing 4 after 5 is worse than showing

@@ -45,20 +45,21 @@ export type Opening (..) deriving (Eq, ToString) =
 # options: Sprout has no default arguments. Start from `editor_opts()` and
 # override with `with`.
 #
-# The three decoders are prisms over the application's own message type, the
+# The four decoders are prisms over the application's own message type, the
 # vocabulary `docs/tui-content-update-v0.md` §4.10 leaves to opts rather than to
 # `Delivery` arms. A pane given none of them is a read-only viewer.
 export type EditorOpts m = (look: focus.FocusStyle,
                             # The label, when it changes. Never the document.
                             on_label: Maybe (String -> m),
                             # "Open this file", and the constructor to claim it
-                            # with. The pane names the file at once; the text
-                            # follows.
+                            # with. Claiming mints a receipt and nothing more —
+                            # the file is not open until its bytes arrive.
                             on_open: Maybe (m -> Maybe(document.FilePath, Opening -> m)),
-                            # The text of a file, stamped with the receipt the
-                            # claim handed out. Which file it belongs to is the
-                            # receipt's business, not the payload's.
-                            on_content: Maybe (m -> Maybe(stamped.Stamped version.Version String)),
+                            # A file arriving: its path and its text TOGETHER,
+                            # stamped with the receipt the claim handed out. The
+                            # pair is why a pane never holds a path it has no
+                            # bytes for — see `claimed`.
+                            on_content: Maybe (m -> Maybe(stamped.Stamped version.Version (document.FilePath, String))),
                             # "Hand me your text", decoded into the CONSTRUCTOR
                             # of the reply — only the pane knows what it will
                             # answer, only the application names it.
@@ -76,9 +77,9 @@ export fn editor_opts() -> EditorOpts m =
 
 # `has_focus` is the pane's own copy of "the keyboard is mine", set by the ring
 # (docs/tui-focus-v0.md §4.1).
-# `ver` advances on every change to what the pane is showing — a file claimed,
-# a body filled in, a key typed, a write confirmed. An answer minted at an
-# earlier version is about a pane that no longer exists.
+# `ver` advances whenever an answer in flight stops being relevant — a file
+# claimed, a body filled in, a key typed, a write confirmed. An answer minted at
+# an earlier version is about a pane that no longer exists.
 type Pane m = (id: widget.WidgetId, opts: EditorOpts m, doc: document.Document,
                body: buffer.Buffer, has_focus: Bool, ver: version.Version)
 
@@ -111,13 +112,13 @@ fn answered(p: Pane m, msg: m) -> Reply m =
   let Just(f, reply) = widget.decoded(p.opts.on_open, msg) else filled(p, msg)
   in claimed(p, f, reply)
 
-# The name lands NOW and the text follows, so a file too slow to read still
-# shows whose it is. The old body goes at once for the same reason: the
-# previous file's text under this file's name is a lie either way.
+# A CLAIM MINTS A RECEIPT AND CHANGES NOTHING ELSE. A read is slow and a read
+# can fail, so until the bytes are here the pane is still showing — and still
+# saving — what it had before. A pane that took the name at claim time would
+# have a save target it had never read, and ctrl-s in that window would write
+# its empty buffer over the file.
 fn claimed(p: Pane m, f: document.FilePath, reply: Opening -> m) -> Reply m =
-  spoke(p, (p with (doc = document.opened(f), body = buffer.buffer_open(""),
-                    ver = v)),
-        [reply(ReadFrom(f, v))])
+  Just(((p with (ver = v)), [reply(ReadFrom(f, v))], Nil))
 where
   v = version.next(p.ver)
 
@@ -127,9 +128,12 @@ fn filled(p: Pane m, msg: m) -> Reply m =
   let Just st = widget.decoded(p.opts.on_content, msg) else demanded(p, msg)
   in begun(p, stamped.fresh(p.ver, st))
 
-fn begun(p: Pane m, body: Maybe String) -> Reply m =
-  let Just b = body else Just((p, Nil, Nil))
-  in Just(settled(p, (p with (body = at_top(buffer.buffer_open(b)),
+# Path and text are adopted TOGETHER or not at all, which is the invariant that
+# keeps a pane from ever naming a file whose bytes it has not got.
+fn begun(p: Pane m, content: Maybe (document.FilePath, String)) -> Reply m =
+  let Just(f, b) = content else Just((p, Nil, Nil))
+  in Just(settled(p, (p with (doc = document.opened(f),
+                              body = at_top(buffer.buffer_open(b)),
                               ver = version.next(p.ver)))))
 
 fn at_top(b: buffer.Buffer) -> buffer.Buffer =
@@ -163,12 +167,6 @@ fn confirmed(p: Pane m, at: Maybe document.FilePath) -> Reply m =
 
 fn settled(was: Pane m, now: Pane m) -> (Pane m, List m, List(widget.Cmd m)) =
   (now, relabelled(was, now), Nil)
-
-# `settled`, plus something of the pane's own to say. The label goes first: it
-# describes the pane the reply is about.
-fn spoke(was: Pane m, now: Pane m,
-         also: List m) -> Reply m =
-  Just((now, list_append(relabelled(was, now), also), Nil))
 
 # The EDGE, not every keystroke: a label that has not changed is nothing the
 # application needs telling, and announcing one per character typed would put a

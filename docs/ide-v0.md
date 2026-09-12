@@ -110,8 +110,9 @@ update: cmd_to(editor, write)  ->  Stored(Stamped ver path) addressed back
 
 Enter -> tree -> Choose(segs) -> update
 update: widget.deliver(w, editor, ToMsg(Choose segs))
-        pane claims the file, announces its name, replies [Reading(ReadFrom(path, ver))]
-update: cmd_to(editor, read)   ->  Loaded(Stamped ver body) addressed back
+        pane mints a receipt, replies [Reading(ReadFrom(path, ver))]
+update: cmd_to(editor, read)   ->  Loaded(Stamped ver (path, body)) addressed back
+        pane adopts path and text together, and announces the new label
 ```
 
 Handing the text over is **not** a write, and nothing is marked clean by it — a write can fail.
@@ -125,9 +126,13 @@ A pane that adopted a `Stored`'s path instead would aim the next ctrl-s at a fil
 showing and write the document it *is* showing over that one. Full rationale, including why the
 check is equality and why the version can never repeat: `docs/stale-replies-v0.md`.
 
-A file cannot be read before the pane has claimed it, which is what gives the body arriving later
-something to be checked against — and means the name appears at once, so a file slow to read still
-shows whose pane it is.
+**A claim mints a receipt and changes nothing else.** It exists so the body arriving later has
+something to be checked against; it is not an open. A read is slow and a read can fail — Enter on a
+*directory* reaches here too, since `tree.chosen` fires `on_select` for any selected row — so until
+the bytes arrive the pane is still showing, and still saving, the file it had. A pane that took the
+name at claim time would hold a save target it had never read, and ctrl-s in that window would write
+its empty buffer over the file. Path and text are therefore adopted **together**, in `begun`, or not
+at all.
 
 This is also why a `Stored` cannot *name* a pathless buffer: `confirmed` never reads the answer's
 payload, and `document.written` clears dirt and nothing else. Naming one needs a save-as, which is
