@@ -317,5 +317,6 @@ place a view would plainly pay — a large `Bytes` payload windowed repeatedly �
 and that one is already solved by an `offset` parameter. So the measurement to run is not "how
 slow is slicing" but "is there any site where the offset trick is unavailable or unbearable". If
 the answer stays no, this document's conclusion is **do nothing**, and that is a fine outcome for
-it. The `str_slice` codepoint walk should be fixed on its own terms — its backlog entry already
-proposes leaving it as the documented-cost convenience — not used as a pretext for a view type.
+it. The `str_slice` codepoint walk should be fixed on its own terms — its prefix half now is,
+and its backlog entry proposes a codepoint-to-byte cache for the rest — not used as a pretext
+for a view type.

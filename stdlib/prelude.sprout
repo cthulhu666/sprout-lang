@@ -1807,11 +1807,11 @@ extern fn str_compare(a: String, b: String) -> Int
 # scope.
 #
 # stdlib.string is a fair home for those five even though it is not a leaf, because it CALLS
-# three of them (`words`, `byte_length`, `string_lines`) and because every consumer but one is
-# a compiler source that already imports it. The exception is stdlib.json, which pays ~2,700
-# lines of unused stdlib.string and stdlib.bytes bodies for four externs at ~85 call sites —
-# an honest dependency for a text parser, and the concrete cost of having no cross-module DCE
-# (BACKLOG §7).
+# three of them (`words`, `byte_length`, `string_lines`) and because most consumers are compiler
+# sources that already import it. Two are not: stdlib.unicode.lookup, which already imported
+# stdlib.string so adds no bundling cost, and stdlib.json, which pays ~2,700 lines of unused
+# stdlib.string and stdlib.bytes bodies for four externs at ~85 call sites — an honest dependency
+# for a text parser, and the concrete cost of having no cross-module DCE (BACKLOG §7).
 
 # Raw vector — the PERSISTENT ops only. These back the immutable `Vec` whose combinators are
 # prelude code below, so they cannot move: the prelude has no imports (bundler.sprout:536) and a

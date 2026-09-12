@@ -19,8 +19,9 @@ import stdlib.bytes as bytes
 # (bundler.sprout:597 never registers them), so the import alone is sufficient — and a consumer
 # that forgets it gets `Unknown variable`, not a missing-import diagnostic.
 extern fn str_byte_len(s: String) -> Int
-# O(strlen + byte_len). Byte-indexed substring; faster than str_slice when the caller
-# already tracks byte positions (most compiler stdlib scanning loops).
+# O(byte_len), whatever the offset: the bounds check reads the CSTR header rather than
+# scanning. Byte-indexed substring; cheaper than str_slice when the caller already tracks
+# byte positions (most compiler stdlib scanning loops).
 # CALLER CONTRACT: byte_start and byte_start+byte_len MUST land on UTF-8 codepoint
 # boundaries. The runtime panics on a mid-codepoint split rather than silently emitting
 # invalid UTF-8. For codepoint-indexed slicing of arbitrary user input, use `str_slice`
