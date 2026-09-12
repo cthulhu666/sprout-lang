@@ -50,9 +50,11 @@ a lie. `fresh` therefore compares for equality, which is the stricter of the two
 
 **So the stamp must never repeat.** Equality is only sound if a stale stamp cannot find a matching
 present; the ABA case (3 → 4 → 3) is exactly what ordering is usually reached for. The repetition
-is the defect, so it is fixed in the stamp rather than papered over in the comparison:
-`version.Version` has no constructor from `Int` and no accessor, so a value is reachable only by
-stepping from `origin`.
+is the defect, so it is fixed by construction rather than papered over in the comparison: a
+`Version` field is only ever assigned `next` of itself, so a chain walks forward and never revisits.
+That is the holder's doing. Sealing `Version`'s constructor does not make one unforgeable — `origin`
+and `next` are exported and total, so any module can step to any value — it stops a caller putting
+an unrelated `Int` where a version belongs, which is the mistake that actually happens.
 
 A false *negative* under `fresh` — a reply dropped that was still fine — means the stamp is too
 broad (an edit count inside a directory listing's stamp), not that ordering is needed.
@@ -89,16 +91,18 @@ export fn fresh(now: s, st: Stamped s a) -> Maybe a where Eq s
 ```
 
 Both are pure and O(1). The enforcement is what is *absent*: there is no `unstamp`, no field
-accessor, and no `Stamped(..)` export, so the only route to the payload runs through `fresh`.
+accessor, and no `Stamped(..)` export, so the only route to the payload as a *value* runs through
+`fresh`. (`deriving ToString` will render it, which is a rendering and not a way to act on it.)
 Neither is a `wrap`, which §7 would otherwise ask for: exporting a `wrap` exports its constructor
-(spec §5.6.1), and a `Version` anyone can mint is not a version at all. A sealed single-constructor
-ADT is the only shape that hides one, at one small allocation per step.
+(spec §5.6.1), which would leave `Int` and `Version` one coercion apart. A sealed single-constructor
+ADT is what hides one, at one small allocation per step.
 Forgetting the check is not a mistake that can be made — it is not expressible. Same move as
 `wrap FilePath = String` (`docs/guidelines.md` §7): zero cost, and the error becomes a compile
 error.
 
 `s` is the caller's, because only the caller knows what a reply's relevance depends on. A
-`Version` alone says *something* moved; pair it with an identity when *what* moved matters.
+`Version` alone says *something* moved; pair it with an identity when *what* moved matters. One
+asker may also need more than one chain — see §6, where the pane keeps two.
 
 ## 6. Adoption in `ide/`
 
@@ -108,14 +112,29 @@ without ever reading it.
 
 | | request | pane answers | IO | reply |
 |---|---|---|---|---|
-| open | `Choose` → `on_open` | `ReadFrom path ver` | `read_at` | `Loaded (Stamped ver (path, body))` |
-| save | `HandOver` → `on_demand` | `SaveTo path text ver` | `write_body` | `Written (WroteTo (Stamped ver path))` |
+| open | `Choose` → `on_open` | `ReadFrom path wanted` | `read_at` | `Loaded (Stamped wanted (path, body))` |
+| save | `HandOver` → `on_demand` | `SaveTo path text shown` | `write_body` | `Written (WroteTo (Stamped shown path))` |
 
-`Pane.ver` advances on every change to what the pane shows — a file claimed, a body filled in, a
-key typed, a write confirmed. Being *asked* for the text does not advance it: the receipt has to
-name the pane the text came from.
+**The pane keeps two chains, not one.** A read and a write can be in flight at the same time, and
+they stop being relevant for different reasons:
 
-Three consequences worth naming:
+| | receipt | stale once |
+|---|---|---|
+| a body arriving | `wanted` | the pane claimed something else, adopted a body, or was typed into |
+| a write's answer | `shown` | the *text* changed — typed into, or another body adopted |
+
+A claim advances `wanted` and not `shown`, because a claim changes no text; a write confirming
+advances `shown` and not `wanted`, because it changes no file the pane is waiting for. Being
+*asked* for the text advances neither: the receipt has to name the text the write is about.
+
+The first cut used one counter for both, and the collision was two keystrokes away: click a file
+and press ctrl-s before the read lands, and both requests carry the same version, so whichever
+answers first invalidates the other. Either the file silently never opens, or the write confirms
+into a pane that has stopped listening and the `*` stays on a file that is in fact saved. It is
+§5's "`s` is the caller's" one notch further along — not only does the caller pick the stamp's
+type, one caller can need several chains, one per question it has to answer separately.
+
+Three more consequences worth naming:
 
 - **A claim mints a receipt and changes nothing else.** It exists only so a body arriving later has
   something to be checked against. The first cut also adopted the path at claim time, to show the

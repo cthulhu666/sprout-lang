@@ -92,13 +92,18 @@ export fn editor_opts() -> EditorOpts m =
 
 # `has_focus` is the pane's own copy of "the keyboard is mine", set by the ring
 # (docs/tui-focus-v0.md §4.1).
-# `ver` advances whenever an answer in flight stops being relevant — a file
-# claimed, a body filled in, a key typed, a write confirmed. An answer minted at
-# an earlier version is about a pane that no longer exists.
+# TWO counters, because a read and a write can be in flight at once and stop
+# being relevant for different reasons.
+# `wanted` is which file the pane last asked for: a body is stale once the pane
+# has claimed something else, adopted another, or been typed into.
+# `shown` is the text the pane is showing: a write's answer is stale once that
+# text has changed. A CLAIM does not change it — claiming changes nothing — so
+# a file picked while a write is out no longer kills the write's receipt.
 # `writing` is "a write of mine has not answered yet", which is what keeps two
 # writes of one file from being on their way to the disk at once.
 type Pane m = (id: widget.WidgetId, opts: EditorOpts m, doc: document.Document,
-               body: buffer.Buffer, has_focus: Bool, ver: version.Version,
+               body: buffer.Buffer, has_focus: Bool,
+               wanted: version.Version, shown: version.Version,
                writing: Bool)
 
 type alias Reply m = Maybe(Pane m, List m, List(widget.Cmd m))
@@ -136,15 +141,15 @@ fn answered(p: Pane m, msg: m) -> Reply m =
 # have a save target it had never read, and ctrl-s in that window would write
 # its empty buffer over the file.
 fn claimed(p: Pane m, f: document.FilePath, reply: Opening -> m) -> Reply m =
-  Just(((p with (ver = v)), [reply(ReadFrom(f, v))], Nil))
+  Just(((p with (wanted = w)), [reply(ReadFrom(f, w))], Nil))
 where
-  v = version.next(p.ver)
+  w = version.next(p.wanted)
 
 # A file being OPENED is read from the top, unlike one being reopened where the
 # place left matters — which the skeleton has nowhere to remember yet.
 fn filled(p: Pane m, msg: m) -> Reply m =
   let Just st = widget.decoded(p.opts.on_content, msg) else demanded(p, msg)
-  in begun(p, stamped.fresh(p.ver, st))
+  in begun(p, stamped.fresh(p.wanted, st))
 
 # Path and text are adopted TOGETHER or not at all, which is the invariant that
 # keeps a pane from ever naming a file whose bytes it has not got.
@@ -152,13 +157,14 @@ fn begun(p: Pane m, content: Maybe (document.FilePath, String)) -> Reply m =
   let Just(f, b) = content else Just((p, Nil, Nil))
   in Just(settled(p, (p with (doc = document.opened(f),
                               body = at_top(buffer.buffer_open(b)),
-                              ver = version.next(p.ver)))))
+                              wanted = version.next(p.wanted),
+                              shown = version.next(p.shown)))))
 
 fn at_top(b: buffer.Buffer) -> buffer.Buffer =
   buffer.buffer_goto(buffer.Caret(row = 0, col = 0), b)
 
-# The version is handed out, not advanced: being asked for the text is not a
-# change to it, and the receipt has to name the pane the text came from.
+# `shown` is handed out, not advanced: being asked for the text is not a change
+# to it, and the receipt has to name the text the write is about.
 fn demanded(p: Pane m, msg: m) -> Reply m =
   let Just reply = widget.decoded(p.opts.on_demand, msg) else restored(p, msg)
   in if p.writing then Just((p, [reply(Busy)], Nil))
@@ -180,7 +186,7 @@ fn leaves(sv: Saving) -> Bool =
 # marked clean. `on_wrote` is what does that, once the write has happened.
 fn saving(p: Pane m) -> Saving =
   let Just f = document.target(p.doc) else Unnamed
-  in SaveTo(f, buffer.buffer_text(p.body), p.ver)
+  in SaveTo(f, buffer.buffer_text(p.body), p.shown)
 
 fn restored(p: Pane m, msg: m) -> Reply m =
   let Just wr = widget.decoded(p.opts.on_wrote, msg) else Nothing
@@ -188,7 +194,7 @@ fn restored(p: Pane m, msg: m) -> Reply m =
 
 fn finished(p: Pane m, wr: Wrote) -> Reply m =
   match wr with
-  | WroteTo st -> confirmed(released(p), stamped.fresh(p.ver, st))
+  | WroteTo st -> confirmed(released(p), stamped.fresh(p.shown, st))
   | WriteFailed why -> Just((released(p), noted(p, why), Nil))
 
 # ARRIVAL, not relevance. A write that has answered — with a path or with a
@@ -207,7 +213,7 @@ fn noted(p: Pane m, why: String) -> List m =
 fn confirmed(p: Pane m, at: Maybe document.FilePath) -> Reply m =
   let Just _ = at else Just((p, Nil, Nil))
   in Just(settled(p, (p with (doc = document.written(p.doc),
-                              ver = version.next(p.ver)))))
+                              shown = version.next(p.shown)))))
 
 # ── what it says back ───────────────────────────────────────────────────────
 
@@ -265,7 +271,8 @@ fn typed_in(p: Pane m, s: String) -> Reply m =
 fn edited(p: Pane m, b: Maybe buffer.Buffer) -> Reply m =
   let Just b2 = b else Just((p, Nil, Nil))
   in Just(settled(p, (p with (body = b2, doc = document.touched(p.doc),
-                              ver = version.next(p.ver)))))
+                              wanted = version.next(p.wanted),
+                              shown = version.next(p.shown)))))
 
 fn moved(p: Pane m, b: buffer.Buffer) -> Reply m =
   Just(((p with (body = b)), Nil, Nil))
@@ -338,4 +345,5 @@ export fn editor_with(id: widget.WidgetId,
                       opts: EditorOpts m) -> widget.Widget m =
   pane_widget(Pane(id = id, opts = opts, doc = document.scratch(),
                    body = buffer.buffer_open(""), has_focus = false,
-                   ver = version.origin(), writing = false))
+                   wanted = version.origin(), shown = version.origin(),
+                   writing = false))

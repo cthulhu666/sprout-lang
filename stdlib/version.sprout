@@ -2,15 +2,19 @@ module stdlib.version
 
 # A counter that only goes forward, for saying WHEN a piece of state was.
 #
-# The constructor is not exported and there is no `Int` accessor, so a value is
-# reachable only by stepping from `origin`. That is the property `stamped.fresh`
-# rests on: a version that could repeat would let a stale reply find a matching
-# present and be accepted (docs/stale-replies-v0.md §3).
+# What `stamped.fresh` rests on is that a chain never repeats a value: one that
+# came round again would let a stale reply find a matching present
+# (docs/stale-replies-v0.md §3). That is a property of the HOLDER — a field only
+# ever assigned `next` of itself — and this type cannot enforce it.
+#
+# Sealing the constructor buys something narrower and still worth having: with
+# no `Version(n)` from an `Int` and no accessor back to one, a caller cannot put
+# an edit count or a line number where a version belongs. It does NOT make a
+# version unforgeable, since `origin` and `next` are exported and total.
 #
 # NOT a `wrap`, though guidelines.md §7 would otherwise ask for one: exporting a
-# wrap exports its constructor (spec §5.6.1), which would let any module mint
-# `Version(0)` and match a chain that had never moved. The sealed ADT costs one
-# small allocation per step and is what makes the sealing possible at all.
+# wrap exports its constructor (spec §5.6.1), leaving `Int` and `Version` one
+# coercion apart. The sealed ADT costs one small allocation per step.
 export type Version deriving (Eq, Ord, ToString) =
   | Version Int
 

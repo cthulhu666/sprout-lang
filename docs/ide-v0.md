@@ -104,21 +104,28 @@ the loop — `widget.deliver` is pure.
 ```
 ctrl-s -> keys widget -> Bound(Save) -> update
 update: widget.deliver(w, editor, ToMsg(HandOver))   <- pure, synchronous
-        pane replies [Saved(SaveTo(path, text, ver))], [Saved(Unnamed)]
+        pane replies [Saved(SaveTo(path, text, shown))], [Saved(Unnamed)]
         or [Saved(Busy)] if a write of its own has not answered yet
-update: cmd_to(editor, write)  ->  Written(WroteTo(Stamped ver path)) back
+update: cmd_to(editor, write)  ->  Written(WroteTo(Stamped shown path)) back
         pane marks itself clean and announces the label without the `*`
 
 Enter -> tree -> Choose(segs) -> update
 update: widget.deliver(w, editor, ToMsg(Choose segs))
-        pane mints a receipt, replies [Reading(ReadFrom(path, ver))]
-update: cmd_to(editor, read)   ->  Loaded(Stamped ver (path, body)) addressed back
+        pane mints a receipt, replies [Reading(ReadFrom(path, wanted))]
+update: cmd_to(editor, read)   ->  Loaded(Stamped wanted (path, body)) back
         pane adopts path and text together, and announces the new label
 ```
 
 Handing the text over is **not** a write, and nothing is marked clean by it — a write can fail.
-`on_wrote` is what cleans, after the write happened. Being asked does not advance `ver` either:
-the receipt has to name the pane the text came from.
+`on_wrote` is what cleans, after the write happened. Being asked advances neither counter: the
+receipt has to name the text the write is about.
+
+**Two requests, two receipts.** A read and a write can be in flight at once, and one counter cannot
+say when each stops being relevant — a claim changes no text, and a confirmed write changes no file
+the pane is waiting for. So the pane keeps `wanted` for what it asked to open and `shown` for the
+text it is showing. Sharing one made the two collide two keystrokes apart: pick a file, press ctrl-s
+before the read lands, and whichever answered first silently killed the other. Full table:
+`docs/stale-replies-v0.md` §6.
 
 **Every answer is checked, never adopted.** `app.dispatched` spawns a task per command, so an
 answer can land any number of loop steps later — after another file has been opened, after more
@@ -210,4 +217,6 @@ nowhere to put a message, and "opened, holding nothing" is something the user ca
 - **`step_to` can recurse forever.** Avoided locally, filed. §5.2.
 - **Two writes of one file race to the disk.** Outside what a stale-reply check can see; the pane
   keeps one write outstanding instead. §5.2.
+- **One receipt cannot answer two questions.** A read and a write in flight together need separate
+  chains, or answering either kills the other. §5.2.
 - **The window math lived inside one widget.** Extracted to `widgets.viewport` rather than copied.

@@ -11,7 +11,8 @@ module ide.document
 import stdlib.fs.path as path
 
 # Where a file lives, as opposed to what is in it. Both are `String` and they
-# travel together — `SaveTo(path, text)`, `Loaded(path, body)` — so swapping
+# travel together — `SaveTo(path, text, ver)`, and the `(path, body)` a body
+# arrives as — so swapping
 # them would write a file's own name into it. `wrap` is zero-cost and makes
 # that a compile error (docs/guidelines.md §7).
 export wrap FilePath = String deriving (Eq, Ord, ToString)
