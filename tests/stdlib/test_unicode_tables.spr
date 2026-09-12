@@ -82,6 +82,14 @@ fn chunk_chars(chunks: Int, chunk: Int -> String, i: Int, acc: Int) -> Int =
 fn total_chars(chunks: Int, chunk: Int -> String) -> Int =
   chunk_chars(chunks, chunk, 0, 0)
 
+# `lookup.entry_at` indexes a chunk by BYTE, which is only the same as indexing it
+# by codepoint while every chunk is ASCII. A non-ASCII tag would keep every other
+# invariant here intact and silently shift every entry after it.
+fn non_ascii_chunk(chunks: Int, chunk: Int -> String, i: Int) -> Int =
+  if i >= chunks then -1
+  else if string.byte_length(chunk(i)) != string.length(chunk(i)) then i
+  else non_ascii_chunk(chunks, chunk, i + 1)
+
 # The width tables are single-tag by construction: membership IS the answer.
 fn tag_bad(count: Int, chunk: Int -> String, want: String, i: Int) -> Int =
   if i >= count then -1
@@ -131,6 +139,18 @@ fn main() -> Unit !{IO} =
     check_eq("incb chunk bytes match the count",
              total_chars(tables.incb_chunks(), tables.incb_chunk),
              tables.incb_count() * 9),
+
+    # --- byte indexing == codepoint indexing, which `entry_at` relies on ---
+    check_eq("zerow chunks are ASCII",
+             non_ascii_chunk(tables.zerow_chunks(), tables.zerow_chunk, 0), -1),
+    check_eq("wide chunks are ASCII",
+             non_ascii_chunk(tables.wide_chunks(), tables.wide_chunk, 0), -1),
+    check_eq("gcb chunks are ASCII",
+             non_ascii_chunk(tables.gcb_chunks(), tables.gcb_chunk, 0), -1),
+    check_eq("extpict chunks are ASCII",
+             non_ascii_chunk(tables.extpict_chunks(), tables.extpict_chunk, 0), -1),
+    check_eq("incb chunks are ASCII",
+             non_ascii_chunk(tables.incb_chunks(), tables.incb_chunk, 0), -1),
 
     # --- lookup agrees with the entry it lands on ---
     # U+4E00..9FFF is the CJK block; probing lo, hi and both neighbours checks

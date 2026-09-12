@@ -54,10 +54,14 @@ fn b62_decode_go(raw: String, i: Int, n: Int, acc: Int) -> Int =
 export fn entry_width() -> Int = 9
 export fn entries_per_chunk() -> Int = 400
 
+# Byte-indexed, not codepoint-indexed: every entry is base-62 plus a one-character
+# tag, so a chunk is pure ASCII and the two indices coincide. That makes this O(1)
+# in the chunk length rather than O(offset) — `find_go` is a binary search called
+# per character, so the walk showed up as ~90% of grapheme segmentation.
 export fn entry_at(chunk: Int -> String, i: Int) -> String =
   let c = i / 400
   in
-  string.slice(chunk(c), (i - c * 400) * 9, 9)
+  str_slice_bytes(chunk(c), (i - c * 400) * 9, 9)
 
 # Binary search for the range containing `cp`, returning its one-character tag.
 # Ranges within one table never overlap (they come from a single UCD property

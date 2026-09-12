@@ -6436,7 +6436,7 @@ arm_0_5:
   %t$15 = alloca i64
   store i64 %t$7, ptr %t$15
   %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
-  %t$14 = call i64 @stdlib.string.slice(i64 %t$7, i64 %t$12, i64 %t$13)
+  %t$14 = call i64 @str_slice_bytes(i64 %t$7, i64 %t$12, i64 %t$13)
   %t$17 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_5
 arm_1_5:
