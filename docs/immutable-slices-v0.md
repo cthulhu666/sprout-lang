@@ -19,10 +19,10 @@ Every windowing operation in Sprout allocates and copies. Verified in the tree:
 
 | operation | cost | where |
 |---|---|---|
-| `str_slice(s, from, count)` | copy + O(source_len) codepoint walk | `runtime/sprout_runtime.c:5829` |
-| `str_slice_bytes(s, off, len)` | copy, O(len) | `runtime/sprout_runtime.c:5905` |
-| `bytes_slice(b, from, count)` | fresh `BytesVal` + `memcpy` | `runtime/sprout_runtime.c:9014` |
-| `vec_slice(start, count, v)` | walks the range into a `List`, rebuilds a `Vec` | `stdlib/prelude.sprout:433` |
+| `str_slice(s, from, count)` | copy + O(source_len) codepoint walk | `runtime/sprout_runtime.c` (`str_slice`) |
+| `str_slice_bytes(s, off, len)` | copy, O(len) | `runtime/sprout_runtime.c` (`str_slice_bytes`) |
+| `bytes_slice(b, from, count)` | fresh `BytesVal` + `memcpy` | `runtime/sprout_runtime.c` (`bytes_slice`) |
+| `vec_slice(start, count, v)` | walks the range into a `List`, rebuilds a `Vec` | `stdlib/prelude.sprout` (`vec_slice_from`) |
 
 (Both `str_slice` and `bytes_slice` used to declare their third parameter `to` while the runtime
 treated it as a length — two call sites carried `NB` comments about it. Renamed to `count` while
@@ -201,12 +201,10 @@ Semantics:
 - **Immutability.** `Bytes` is immutable, so two views of the same backing can never disagree. This
   is the property that removes the need for a borrow checker; it is load-bearing, not incidental.
 - **Bounds.** `view_get` returns `Maybe`, so no view can read outside its backing. For
-  `view_slice`, match `bytes_slice` exactly (`runtime/sprout_runtime.c:9019`): an over-long
-  `from`/`count` **clamps** to the backing, a **negative** one is a hard `tcp_fail` abort.
-  Matching is the right default for a v0 — a second, differing convention for the same operation
-  would be worse than an imperfect one. Flagging it anyway: aborting on a negative index is a
-  poor fit for a language with `Maybe`, and if that is ever revisited, both functions should
-  change together. (See also §1's note on the parameter naming, which is adjacent to this.)
+  `view_slice`, match `bytes_slice` exactly (in `runtime/sprout_runtime.c`): an over-long **or
+  negative** `from`/`count` **clamps** to the backing. `bytes_slice` aborted on a negative index
+  until the clamp landed; `docs/nat-refinement-v0.md` records why it clamps rather than returning
+  `Maybe`, and why a `Nat` parameter was rejected for now.
 - **Composition.** Slicing a view is O(1) and never nests: the result points at the *original*
   backing with an adjusted offset, so a loop that re-slices n times retains one buffer, not n.
 - **Retention.** A view keeps its whole backing alive. `view_to_bytes` is the documented escape,
@@ -276,8 +274,8 @@ TDD, per AGENTS.md §Code and Testing. Written and confirmed failing before any 
 
 1. `view_slice` of a view is O(1) and yields the same bytes as the equivalent `bytes_slice`
    (differential against the existing copying implementation, over a table of ranges).
-2. Bounds: zero-length, past-the-end and whole-backing ranges clamp identically to `bytes_slice`;
-   a negative `from` or `count` aborts, as `bytes_slice` does.
+2. Bounds: zero-length, past-the-end, whole-backing and negative ranges clamp identically to
+   `bytes_slice`.
 3. Retention: a view of a large backing, held across a forced collection, still reads correctly —
    the regression test for "the backing was swept out from under a view".
 4. `view_to_bytes` round-trips, and the result is independent (the backing becoming unreachable does

@@ -1,0 +1,44 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.bytes as bytes
+import stdlib.string as string
+
+# The slice family is total: a negative start or count yields an empty or whole result rather than
+# aborting, matching `vec_slice`. `take`/`drop` express "a prefix" and "the rest" without a
+# subtraction, which is where a negative count comes from in practice.
+
+fn rendered(value: Bytes) -> String =
+  match bytes.to_string(value) with
+  | Ok text -> text
+  | Err _ -> "<invalid utf-8>"
+
+fn from(raw: String) -> Bytes =
+  bytes.from_string(raw)
+
+fn main() -> Unit !{IO} =
+  run_suite("slice bounds", [
+    # --- negative arguments are clamped, not fatal ---
+    check_eq("str negative start", string.slice("hello", -2, 3), "hel"),
+    check_eq("str negative count", string.slice("hello", 1, -1), ""),
+    check_eq("str both negative", string.slice("hello", -4, -4), ""),
+    check_eq("bytes negative start", rendered(bytes.slice(from("hello"), -2, 3)), "hel"),
+    check_eq("bytes negative count", rendered(bytes.slice(from("hello"), 1, -1)), ""),
+    check_eq("bytes both negative", rendered(bytes.slice(from("hello"), -4, -4)), ""),
+
+    # --- bytes.take / bytes.drop, mirroring string.take / string.drop ---
+    check_eq("bytes take prefix", rendered(bytes.take(from("hello"), 2)), "he"),
+    check_eq("bytes take zero", rendered(bytes.take(from("hello"), 0)), ""),
+    check_eq("bytes take negative", rendered(bytes.take(from("hello"), -3)), ""),
+    check_eq("bytes take past end", rendered(bytes.take(from("hello"), 99)), "hello"),
+    check_eq("bytes drop rest", rendered(bytes.drop(from("hello"), 2)), "llo"),
+    check_eq("bytes drop zero", rendered(bytes.drop(from("hello"), 0)), "hello"),
+    check_eq("bytes drop negative", rendered(bytes.drop(from("hello"), -3)), "hello"),
+    check_eq("bytes drop past end", rendered(bytes.drop(from("hello"), 99)), ""),
+
+    # `take`/`drop` count BYTES, as every other `bytes` function does. "Cześć" is 5 codepoints in
+    # 7 bytes, so a codepoint reading of 5 would take all of it and drop nothing.
+    check_eq("bytes take counts bytes", rendered(bytes.take(from("Cześć"), 5)), "Cześ"),
+    check_eq("bytes drop counts bytes", rendered(bytes.drop(from("Cześć"), 5)), "ć"),
+    check_eq("bytes take and drop partition", rendered(bytes.append(bytes.take(from("hello"), 2),
+                                                                   bytes.drop(from("hello"), 2))),
+             "hello")
+  ])

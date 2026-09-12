@@ -33,9 +33,23 @@ export fn length(value: Bytes) -> Int =
 export fn get(value: Bytes, index: Int) -> Maybe Int =
   bytes_get(value, index)
 
-# O(count): allocates and copies the requested byte window.
+# O(count): allocates and copies the requested byte window. A negative `start` or
+# `count` clamps to empty rather than failing.
 export fn slice(value: Bytes, start: Int, count: Int) -> Bytes =
   bytes_slice(value, start, count)
+
+# O(count): the leading `count` bytes, or all of them when there are fewer.
+export fn take(value: Bytes, count: Int) -> Bytes =
+  if count <= 0 then empty()
+  else if count >= length(value) then value
+  else slice(value, 0, count)
+
+# O(|value| - count): everything past the leading `count` bytes. Pair with `take`
+# instead of writing `slice(v, n, length(v) - n)`, whose count can go negative.
+export fn drop(value: Bytes, count: Int) -> Bytes =
+  if count <= 0 then value
+  else if count >= length(value) then empty()
+  else slice(value, count, length(value) - count)
 
 # O(|left| + |right|): allocates one output buffer and copies both inputs.
 export fn append(left: Bytes, right: Bytes) -> Bytes =
