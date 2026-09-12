@@ -1411,8 +1411,9 @@ deferral happened, not for current behaviour. Still open:
 - [ ] `P2` **`stdlib.path` — the typed half.** `stdlib.fs.path` landed 2026-09-05 with the pure
   String-based ops (`join`, `basename`, `dirname`, `extension`, `stem`, `split`, `normalize`,
   `relative_to`, `is_absolute`), so what remains from `docs/stdlib-path-v1-draft.md` is the typed
-  surface: zero-cost `File`/`Dir` wraps, smart constructors `file_checked`/`dir_checked` rejecting
-  empty and NUL, migrating `read_file`/`write_file`/`*_exists`/`dir_list` to take them, and retiring
+  surface: `File`/`Dir` wraps exported WITHOUT `(..)`, so the validating `path.file`/`path.dir`
+  (empty and NUL rejected) are the only way in; migrating `read_file`/`write_file`/`*_exists`/
+  `dir_list` to take them, and retiring
   the compiler's `FilePath`/`StdlibRoot` into `path.File`/`path.Dir`. Constraints: POSIX-only, no
   absolute-vs-relative type distinction, no eager normalization, no symlink resolution, no
   byte-level paths. The POSIX-only constraint is unblocked by §10's **Milestone B**, not A —
