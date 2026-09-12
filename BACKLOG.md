@@ -2354,12 +2354,6 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   bounds, is the recommended one) and the blockers in §10.5 — a prior-art survey of how
   C#/Java/Kotlin/Scala choose an interpolation lowering, and builtin approval for the runtime
   option.
-- [ ] `P3` **`extern fn str_slice(s: String, from: Int, to: Int)` misnames its third parameter.** It
-  is a **length**, not an end index — the runtime signature is `(s, start, length)` and the
-  prelude documents it inline, but the declaration says `to`. Reading the declaration rather than
-  the comment produces a slice wrong by exactly `start` characters, silent whenever the caller
-  compares the result against something (it cost a session once). Rename to `len`. A prelude edit,
-  so it needs its own reseed cycle even though no IR changes.
 - [ ] `P3` **Write the ADT-vs-record concretization invariant into `docs/compiler-internals.md`.**
   An ADT constructor-application node is born concretely typed (`Box Int`), while a
   record-construction node carries `Box $a` with the binding living only in the substitution — so
