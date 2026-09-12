@@ -102,14 +102,14 @@ error.
 
 ## 6. Adoption in `ide/`
 
-Both of the editor pane's answers are stamped, and both handshakes have the same shape: the pane
+Both of the editor pane's answers carry a receipt, and both handshakes have the same shape: the pane
 is asked, mints a receipt, and `ide/app.sprout` ferries that receipt through the IO and back
 without ever reading it.
 
 | | request | pane answers | IO | reply |
 |---|---|---|---|---|
 | open | `Choose` → `on_open` | `ReadFrom path ver` | `read_at` | `Loaded (Stamped ver (path, body))` |
-| save | `HandOver` → `on_demand` | `SaveTo path text ver` | `write_body` | `Stored (Stamped ver path)` |
+| save | `HandOver` → `on_demand` | `SaveTo path text ver` | `write_body` | `Written (WroteTo (Stamped ver path))` |
 
 `Pane.ver` advances on every change to what the pane shows — a file claimed, a body filled in, a
 key typed, a write confirmed. Being *asked* for the text does not advance it: the receipt has to
@@ -126,7 +126,7 @@ Three consequences worth naming:
   the first fix used is gone, and with it the chance of checking one and not the other.
 - `confirmed` does not read the answer's payload. `fresh` has already proved the path is this
   pane's own, so `document.written` — which clears dirt and nothing else — is all that runs. A
-  `Stored` cannot teach a pane a path; naming a pathless buffer is what a save-as is for.
+  write's answer cannot teach a pane a path; naming a pathless buffer is what a save-as is for.
 
 `Listed`, the file tree's reply, is deliberately **not** stamped: it is keyed by the path it
 describes and applied to that node, so a late one restates a directory rather than misdescribing
@@ -139,20 +139,27 @@ through if a version could repeat. `tests/ide/test_ide_editor.spr` drives both h
 end and pins the version in every expectation on purpose: an unplanned extra bump would invalidate
 receipts still in flight, and the numbers are where that shows.
 
-The guards were checked by mutation — `fresh` blunted to `Just(x)` turns all three stale cases red,
-and the read-race case then shows A's text where B's belongs.
+The guards were checked by mutation. `fresh` blunted to `Just(x)` turns five cases red, the
+read-race one showing A's text where B's belongs. `released` made the identity — the pane never
+learning that a write finished — turns four, which is how the two checks are shown to be separate.
 
 ## 8. What this does not fix
 
 **Ordering of the effects themselves.** `fresh` filters the answers a receiver accepts; it says
 nothing about the order two writes reach the disk. Save, edit, save again puts two `write_body`
-tasks in flight; if the second lands first, its `Stored` is accepted and the first then overwrites
-the file with the older text. No stamp can see that, because the losing write is not a stale
-*reply* — it is a live *effect*. The fix is to keep one write outstanding per pane. Filed in
-`BACKLOG.md` §4.5.
+tasks in flight, and if the second lands first the first then overwrites the file with the older
+text. No stamp can see that, because the losing write is not a stale *reply* — it is a live
+*effect*.
 
 The general form is worth stating: staleness checking makes a receiver safe against answers that
 outlived their question. It does not make the world safe against requests that outlive each other.
+
+The editor pane closes it separately, and the shape of that fix says something about this one. It
+keeps ONE write outstanding and refuses the next (`docs/ide-v0.md` §5.2) — a piece of state with no
+version in it, cleared when an answer **arrives** rather than when it turns out to be relevant. That
+split is why a write answers with a two-armed `Wrote`: `fresh` deliberately offers no way to observe
+a reply it has judged stale, which is right for deciding what to believe and useless for deciding
+what has finished.
 
 ## 9. Deferred
 

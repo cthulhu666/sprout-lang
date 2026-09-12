@@ -13,7 +13,7 @@ module ide.app
 #
 # TWO HANDSHAKES, the same shape. The pane is asked, mints a receipt, and this
 # module ferries it through the IO and back: `asked_to_save` sends `HandOver`,
-# `demand_for` decodes it, `write_body` answers `Stored`, `stored_for` decodes
+# `demand_for` decodes it, `write_body` answers `Written`, `wrote_for` decodes
 # that. Opening runs the same way through `Choose`/`open_for`/`read_at`/
 # `content_for`. Break any pairing and the step fails silently — `just
 # ide-smoke` is what catches it, by reading the file back off the disk.
@@ -50,7 +50,7 @@ type Msg (..) =
   | Listed (List String) (List tr.Node)
   | Reading ed.Opening
   | Loaded (stamped.Stamped version.Version (document.FilePath, String))
-  | Stored (stamped.Stamped version.Version document.FilePath)
+  | Written ed.Wrote
   # What the panes announce, on their way to the status line.
   | Labelled String
   | Noted String
@@ -99,9 +99,9 @@ fn demand_for(m: Msg) -> Maybe(ed.Saving -> Msg) =
   | HandOver -> Just(Saved)
   | _ -> Nothing
 
-fn stored_for(m: Msg) -> Maybe(stamped.Stamped version.Version document.FilePath) =
+fn wrote_for(m: Msg) -> Maybe ed.Wrote =
   match m with
-  | Stored st -> Just(st)
+  | Written wr -> Just(wr)
   | _ -> Nothing
 
 fn editor() -> widget.Widget Msg =
@@ -110,7 +110,8 @@ fn editor() -> widget.Widget Msg =
                                         on_open = Just(open_for),
                                         on_content = Just(content_for),
                                         on_demand = Just(demand_for),
-                                        on_stored = Just(stored_for)))
+                                        on_wrote = Just(wrote_for),
+                                        on_note = Just(Noted)))
 
 # ── the status line ─────────────────────────────────────────────────────────
 
@@ -201,8 +202,8 @@ fn read_at(p: document.FilePath, r: version.Version) -> Msg !{IO} =
 fn write_body(p: document.FilePath, body: String,
               r: version.Version) -> Msg !{IO} =
   match fs.write_text(document.path_text(p), body) with
-  | Ok _ -> Stored(stamped.stamp(r, p))
-  | Err e -> Noted(`cannot write ${document.path_text(p)}: ${e}`)
+  | Ok _ -> Written(ed.WroteTo(stamped.stamp(r, p)))
+  | Err e -> Written(ed.WriteFailed(`cannot write ${document.path_text(p)}: ${e}`))
 
 # ── what the application decides ────────────────────────────────────────────
 
@@ -224,7 +225,7 @@ fn update(m: Msg, w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow, Asks) =
   # (docs/guidelines.md §2a).
   | Listed _ _ -> app.done(w, app.Continue)
   | Loaded _ -> app.done(w, app.Continue)
-  | Stored _ -> app.done(w, app.Continue)
+  | Written _ -> app.done(w, app.Continue)
   | HandOver -> app.done(w, app.Continue)
 
 # The one SYNCHRONOUS interrogation: `widget.deliver` is pure, so `update` can
@@ -259,8 +260,8 @@ fn answered(asked: Asks,
   match r with
   | (w2, flow, more) -> (w2, flow, list_append(asked, more))
 
-# `Stored` goes back ADDRESSED, so the pane learns it is clean without the
-# answer passing through here again.
+# The answer goes back ADDRESSED, so the pane learns how the write ended
+# without it passing through here again.
 fn saving(w: widget.Widget Msg,
           sv: ed.Saving) -> (widget.Widget Msg, app.Flow, Asks) =
   match sv with
@@ -268,6 +269,7 @@ fn saving(w: widget.Widget Msg,
       (w, app.Continue,
        [widget.cmd_to(editor_id(), \_ -> write_body(p, body, r))])
   | ed.Unnamed -> to_bar(w, Noted("nothing to save: this buffer has no file"))
+  | ed.Busy -> to_bar(w, Noted("still saving: the last write has not answered"))
 
 # The bar's handler says nothing by construction, so the dropped `Says` is
 # empty. Folding it back would risk the loop `asked_to_save` avoids: a bar that
