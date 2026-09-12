@@ -110,10 +110,17 @@ export wrap Dir  = String   # path that names (or will name) a directory
 
 Both are zero-cost String wraps under PR #36's `wrap` semantics. The
 distinction is type-level only: at runtime, both are identity wrappers
-around `String`. Neither carries `(..)`, so both are abstract outside
-`stdlib.fs.path` (spec-v0 §5.6.1) — which is what makes `file_checked`
-and `dir_checked` below the only way in, and so what lets the types mean
-"validated" rather than "annotated". The benefit is **at the API surface**, where joining a
+around `String`. As written neither carries `(..)`, so under spec-v0 §5.6.1
+both are abstract outside `stdlib.fs.path`.
+
+**Open, and this draft currently answers it both ways.** §"Smart constructor
+strategy" below keeps the data constructors exported for cheap construction at
+trusted internal sites, and the API surface lists unchecked `file`/`dir`
+pass-throughs — which needs `(..)` and leaves an unvalidated way in. Decide
+before implementing: add `(..)` and keep the pass-throughs (the types mean
+"labelled"), or drop both and make `file_checked`/`dir_checked` the only entry
+(the types mean "validated"). The second is why the wrap opacity rule exists;
+the first is what the rest of this draft assumes. The benefit is **at the API surface**, where joining a
 directory and a relative name yields one or the other depending on
 intent:
 

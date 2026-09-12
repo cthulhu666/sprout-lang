@@ -9,8 +9,9 @@ export wrap Sealed = Int
 
 export wrap Open (..) = Int
 
-# The smart constructor `Sealed` exists to justify: it rejects a negative count,
-# which a caller writing `Sealed(n)` directly could not be made to do.
+# `seal` is the smart constructor — the only way in, since `Sealed` itself is not
+# published. It rejects a negative count, which is the invariant a caller writing
+# `Sealed(n)` directly could not be made to respect.
 export fn seal(n: Int) -> Maybe Sealed =
   if n < 0 then Nothing else Just(Sealed(n))
 
