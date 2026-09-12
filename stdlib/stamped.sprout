@@ -6,7 +6,9 @@ module stdlib.stamped
 # and by the time it lands the asker may have moved on — opened another file,
 # typed another character. `Stamped` makes that gap impossible to ignore: the
 # constructor is not exported and there is no accessor, so the only route to the
-# payload is `fresh`, which demands the asker say who it is now.
+# payload AS A VALUE is `fresh`, which demands the asker say who it is now.
+# `deriving ToString` renders it for diagnostics; that is a rendering, not a way
+# to act on it.
 #
 # The stamp's type is the caller's, because only the caller knows what the
 # reply's relevance depends on. Pair a `version.Version` with an identity when

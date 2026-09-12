@@ -20,7 +20,9 @@ import ide.editor as ed
 
 # Both answers from elsewhere are STAMPED, and the version they carry is in
 # every expectation below on purpose: an unplanned extra bump would invalidate
-# receipts that are still in flight, and the numbers are where that shows.
+# receipts that are still in flight, and the numbers are where that shows. The
+# two chains count separately — a read carries `wanted`, a write carries
+# `shown` — so a claim advances one of them and not the other.
 type Msg (..) deriving (Eq, ToString) =
   | Labelled String
   | Open doc.FilePath
@@ -124,9 +126,10 @@ fn told(w: widget.Widget Msg, m: Msg) -> (widget.Widget Msg, Says, Asks) =
                else (w, [Noted("declined")], Nil)
   in t
 
-# The receipt the pane minted when it claimed a file. There is no other way to
-# get one — `Version`'s constructor is not exported — so a body that skipped the
-# claim cannot be stamped at all, let alone accepted.
+# The receipt the pane minted when it claimed a file. Asking the pane is not
+# the only way to build a `Version` — `origin` and `next` are both exported —
+# but it is the only way to learn which one this pane is at, which is what a
+# body has to match.
 fn receipt(msgs: Says) -> Maybe v.Version =
   let [r | _] = list_filter_map(as_receipt, msgs) else Nothing
   in Just(r)
@@ -199,10 +202,12 @@ fn content_cases(state: TestState) -> Unit !{IO} = do
             "[Labelled(a.txt)]")
   # A READ CAN BE SLOW, AND A READ CAN FAIL. Either way the claim is all that
   # has happened, so ctrl-s still saves the file the pane is showing — and a
-  # pane showing nothing still has nowhere to save.
+  # pane showing nothing still has nowhere to save. The claim above handed out
+  # `wanted` 3 and this save hands out `shown` 1: two requests, two receipts,
+  # so answering either one leaves the other still good.
   assert_eq(state, "a save during a pending read saves what is still shown",
             said(told(tree_of(claiming(loaded_tree(), at("b.txt"))), Save)),
-            "[Saved(SaveTo(FilePath(stdlib/a.txt), ab, Version(3)))]")
+            "[Saved(SaveTo(FilePath(stdlib/a.txt), ab, Version(1)))]")
   assert_eq(state, "a read that never lands leaves a fresh pane pathless",
             said(told(tree_of(claiming(tree(), at("b.txt"))), Save)),
             "[Saved(Unnamed)]")
@@ -215,7 +220,7 @@ fn content_cases(state: TestState) -> Unit !{IO} = do
   # typed lands before the text rather than after it.
   assert_eq(state, "an opened file is read from the top",
             said(told(tree_of(widget.feed(loaded_tree(), chars("X"))), Save)),
-            "[Saved(SaveTo(FilePath(stdlib/a.txt), Xab, Version(3)))]")
+            "[Saved(SaveTo(FilePath(stdlib/a.txt), Xab, Version(2)))]")
 
 fn dirt_cases(state: TestState) -> Unit !{IO} = do
   # The EDGE into dirtiness, not every keystroke: announcing per character
@@ -231,7 +236,7 @@ fn dirt_cases(state: TestState) -> Unit !{IO} = do
   # not clean anything.
   assert_eq(state, "handing over the text does not clean the label",
             said(told(tree_of(widget.feed(loaded_tree(), chars("x"))), Save)),
-            "[Saved(SaveTo(FilePath(stdlib/a.txt), xab, Version(3)))]")
+            "[Saved(SaveTo(FilePath(stdlib/a.txt), xab, Version(2)))]")
 
 fn saving_cases(state: TestState) -> Unit !{IO} = do
   assert_eq(state, "a pane with no file has nowhere to save",
@@ -244,6 +249,41 @@ fn saving_cases(state: TestState) -> Unit !{IO} = do
                                    Written(ed.WroteTo(st.stamp(v.origin(), at("x/new.txt")))))),
                       Save)),
             "[Saved(Unnamed)]")
+
+# ── two requests, two receipts ──────────────────────────────────────────────
+
+# A read and a write can be in flight AT THE SAME TIME, and they stop being
+# relevant for different reasons: a body once the pane has asked for something
+# else or been typed into, a write's answer once the TEXT has changed. One
+# counter cannot say both, so the pane keeps two.
+fn receipt_cases(state: TestState) -> Unit !{IO} = do
+  # Claim b, save a, and a's write answers first. Confirming the write changed
+  # nothing about what the pane asked for, so b must still open.
+  assert_eq(state, "a file claimed during a pending write still opens",
+            said(open_over_write()), "[Labelled(b.txt)]")
+  # Enter on a DIRECTORY reaches the pane too — `tree.chosen` fires for any row
+  # — and a claim changes nothing at all, least of all the text already on its
+  # way to the disk. The write must still be able to clean the label.
+  assert_eq(state, "a directory claimed during a pending write still cleans",
+            said(write_over_claim()), "[Labelled(a.txt)]")
+
+# a shown; claim b; save a; a's write confirms; b's body lands.
+fn open_over_write() -> (widget.Widget Msg, Says, Asks) =
+  let claimed = claiming(loaded_tree(), at("b.txt"))
+      rec = maybe_with_default(v.origin(), receipt(says(claimed)))
+      saved = told(tree_of(claimed), Save)
+      sr = maybe_with_default(v.origin(), saved_receipt(says(saved)))
+      done = told(tree_of(saved),
+                  Written(ed.WroteTo(st.stamp(sr, at("stdlib/a.txt")))))
+  in told(tree_of(done), Loaded(st.stamp(rec, (at("b.txt"), "bbb"))))
+
+# a edited and saved; Enter on a directory row; then the write confirms.
+fn write_over_claim() -> (widget.Widget Msg, Says, Asks) =
+  let saved = told(tree_of(widget.feed(loaded_tree(), chars("x"))), Save)
+      sr = maybe_with_default(v.origin(), saved_receipt(says(saved)))
+      dir = claiming(tree_of(saved), at("stdlib"))
+  in told(tree_of(dir),
+          Written(ed.WroteTo(st.stamp(sr, at("stdlib/a.txt")))))
 
 # A write runs in its own task too, so two writes of one file can be in flight
 # at once and reach the disk in whichever order their tasks finish. The pane
@@ -258,21 +298,21 @@ fn writing_cases(state: TestState) -> Unit !{IO} = do
   # nothing, but the write it belongs to is over and the next save must go.
   assert_eq(state, "a stale answer still frees the pane to save again",
             said(told(freed(edited_since()), Save)),
-            "[Saved(SaveTo(FilePath(stdlib/a.txt), xyab, Version(4)))]")
+            "[Saved(SaveTo(FilePath(stdlib/a.txt), xyab, Version(3)))]")
   # The case a success-only flag gets wrong: no answer with a path ever comes,
   # so a pane listening for one alone could never save again.
   assert_eq(state, "a failed write says why", said(failing()),
             "[Noted(cannot write stdlib/a.txt: nope)]")
   assert_eq(state, "a save after a failed write goes through",
             said(told(tree_of(failing()), Save)),
-            "[Saved(SaveTo(FilePath(stdlib/a.txt), xab, Version(3)))]")
+            "[Saved(SaveTo(FilePath(stdlib/a.txt), xab, Version(2)))]")
   # `Unnamed` starts no write, so nothing will ever answer it — a pane that
   # took itself to be writing here could never save again either.
   assert_eq(state, "refusing a pathless buffer does not jam it",
             said(told(tree_of(told(tree(), Save)), Save)), "[Saved(Unnamed)]")
   assert_eq(state, "a save after the write lands goes through",
             said(told(freed(handed_over_tree()), Save)),
-            "[Saved(SaveTo(FilePath(stdlib/a.txt), xab, Version(4)))]")
+            "[Saved(SaveTo(FilePath(stdlib/a.txt), xab, Version(3)))]")
 
 fn failing() -> (widget.Widget Msg, Says, Asks) =
   told(handed_over_tree(), Written(ed.WriteFailed("cannot write stdlib/a.txt: nope")))
@@ -290,7 +330,7 @@ fn stale_cases(state: TestState) -> Unit !{IO} = do
   # next ctrl-s would write B over A.
   assert_eq(state, "a late answer does not retarget a pane that moved on",
             said(told(moved_on(), Save)),
-            "[Saved(SaveTo(FilePath(b.txt), bbb, Version(4)))]")
+            "[Saved(SaveTo(FilePath(b.txt), bbb, Version(2)))]")
   # Saving does not clean what was typed AFTER the text was handed over — the
   # file on disk does not have those characters in it.
   assert_eq(state, "a late answer does not clean an edit made since",
@@ -300,7 +340,7 @@ fn stale_cases(state: TestState) -> Unit !{IO} = do
   # show A while the tree says B was chosen.
   assert_eq(state, "a body that lost the race does not replace the one that won",
             said(told(read_race(), Save)),
-            "[Saved(SaveTo(FilePath(b.txt), bbb, Version(3)))]")
+            "[Saved(SaveTo(FilePath(b.txt), bbb, Version(1)))]")
 
 # Load A, hand its text over, then load B. A's answer lands last.
 fn moved_on() -> widget.Widget Msg =
@@ -403,6 +443,7 @@ fn main() -> Unit !{IO} = do
   dirt_cases(state)
   saving_cases(state)
   writing_cases(state)
+  receipt_cases(state)
   stale_cases(state)
   key_cases(state)
   gutter_cases(state)
