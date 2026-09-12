@@ -15,7 +15,7 @@ import stdlib.tui.screen as screen
 # Every widget ID, keybinding and plugin key is a String underneath, because
 # `Dict` and `Set` are String-keyed only. Decided up front rather than
 # retrofitted; docs/tui-widgets-v0.md §3.7.
-export wrap WidgetId = String
+export wrap WidgetId (..) = String
 
 export fn id_text(i: WidgetId) -> String =
   match i with

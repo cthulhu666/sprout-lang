@@ -100,13 +100,13 @@ export fn ownership_is_once(o: Ownership) -> Bool =
 # below (type_id_eq / _display / _is_concrete / _symbol). A future generative identity
 # (functors / path-dependent types) is a representation swap here, not a compiler-wide
 # re-migration. Declared before Type so TConst can reference it.
-export wrap TypeId = String
+export wrap TypeId (..) = String
 
 # Type-variable identity (E0). Declared before Type so TVar can reference it.
 # Opaque wrapper over the name string today; E1 swaps the payload to an Int id
 # (identity) + retained name (display) without touching any consumer, since all
 # TVar producers/consumers route through the tyvar_* accessors below.
-export wrap TyVarId = String
+export wrap TyVarId (..) = String
 
 export type Type (..) =
   | TVar TyVarId

@@ -295,8 +295,8 @@ export fn fit(child: Widget m) -> Slot m
 
 # A grid's two templates are both `List layout.Dimension` and adjacent, so a
 # swap silently transposes the layout. Tagged, per guidelines §7.
-export wrap Cols = List layout.Dimension
-export wrap Rows = List layout.Dimension
+export wrap Cols (..) = List layout.Dimension
+export wrap Rows (..) = List layout.Dimension
 
 export fn row(slots: List (Slot m)) -> Widget m
 export fn column(slots: List (Slot m)) -> Widget m

@@ -185,7 +185,8 @@ The middle bullet of "do not use" is doing the real work — it's a *cost-benefi
 
 - Single-field only. Multi-field semantic structs use records or ADTs.
 - No type parameters on the wrap itself.
-- No constructor hiding. If invariants need a smart constructor, document the convention as a comment until private constructors land (see Deferred to v1 below).
+
+**A wrap can hide its constructor, so it can carry an invariant.** `export wrap Foo = T` publishes the type alone; the constructor and the destructor pattern stay module-private, and `export wrap Foo (..) = T` publishes both. Outside the module the only way in is then a function the module exports — a smart constructor — which is what lets the type mean "validated" rather than "annotated". Use the abstract form when the wrap exists to enforce something (`path.File` rejecting an empty string, an unforgeable resource handle); use `(..)` when it exists only to keep two same-typed values apart, which is the common case and every current use in this repo. An abstract wrap needs an exported accessor, since the pattern is hidden too.
 
 See `docs/spec-v0.md` §5.6.1 for the normative wrap declaration semantics.
 
@@ -217,7 +218,6 @@ The canonical failure this prevents: a reordering that silently breaks scenario 
 
 Each deferred item is annotated with the trigger condition that would prompt its inclusion.
 
-- **Smart constructors** (hiding raw constructors behind validating builders). *Trigger:* a private-constructor language feature (per-module export controls finer than per-symbol). With `wrap` shipped, the type-safety half is now achievable; the *enforcement* half (preventing direct construction from outside the defining module) still requires private constructors.
 - **Error-accumulation strategy** (fail-fast vs accumulate across the compiler). *Trigger:* enough multi-error UX work to know whether the cost of accumulation pays off.
 - **Naming convention for partial wrappers** (`head_opt` vs `try_head` vs `head?`). *Trigger:* the first stdlib case where a partial and total sibling both exist and need to be distinguished by name. Currently unneeded under basic #2.
 - **Pipe-style as positive style guidance** (mandate, not permission). *Trigger:* enough new data-last code accumulating that the cost/benefit of `|>` is empirically clear.

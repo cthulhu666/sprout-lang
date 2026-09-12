@@ -350,6 +350,18 @@ fn main() -> Unit !{IO} =
       parse_fails("wrap Line = Int deriving ()"))
     assert_true(state, "wrap deriving without parens rejected (bare ClassName)",
       parse_fails("wrap Line = Int deriving Eq"))
+    # The `(..)` constructor-export marker sits between the name and the `=`,
+    # the same slot an ADT uses, and so ahead of any trailing deriving clause.
+    # A wrap's type and constructor share one name, so this is the only way to
+    # publish the type while keeping the constructor private (spec-v0 §5.6.1).
+    assert_true(state, "wrap decl with (..) parses",
+      parse_ok("wrap Line (..) = Int"))
+    assert_true(state, "wrap decl with (..) and a deriving clause parses",
+      parse_ok("wrap Line (..) = Int deriving (Eq)"))
+    assert_eq(state, "(..) does not disturb the deriving clause",
+      list_length(first_wrapdecl_deriving("wrap Line (..) = Int deriving (Eq, Ord)")), 2)
+    assert_true(state, "a malformed marker is not silently skipped",
+      parse_fails("wrap Line (.) = Int"))
     # A parameterized inner type must not swallow the clause: `Dict a deriving`
     # would misparse if the clause were read as another type argument.
     assert_eq(state, "wrap over applied type keeps its deriving clause",

@@ -57,8 +57,9 @@ Running with `USER="  Ada  "` prints `Hello, Ada`. More in [`examples/`](./examp
   equality. Open effect rows are not supported yet. Aborting is *not* an effect:
   `panic` is pure, so an unreachable-by-invariant arm does not make its function
   effectful ([why](docs/effect-enforcement-v0.md#6-is-panic-an-effect-decided-no)).
-- **Zero-cost `wrap` newtypes**, first-class **tuples**, and function-local
-  `where` blocks (normative v0).
+- **Zero-cost `wrap` newtypes**, abstract across a module boundary unless declared
+  `export wrap Name (..)`, so one can carry an invariant its inner type cannot.
+  Plus first-class **tuples** and function-local `where` blocks (normative v0).
 - **Self-hosted compiler** — parser, typechecker, and codegen written in Sprout;
   native binaries via LLVM IR + clang; a small C runtime with a mark-sweep GC.
 - **Beginner-friendly diagnostics** — `line:col` errors, exhaustiveness checks,

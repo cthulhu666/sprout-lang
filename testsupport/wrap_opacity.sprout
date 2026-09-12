@@ -1,0 +1,19 @@
+module testsupport.wrap_opacity
+
+# A wrap's type and constructor share one name, so `(..)` is what says which of
+# the two is published (spec-v0 §5.6.1). Both halves live here so an importer can
+# exercise each: `Sealed` is abstract across the boundary and reachable only
+# through the smart constructor below, while `Open` is transparent.
+
+export wrap Sealed = Int
+
+export wrap Open (..) = Int
+
+# The smart constructor `Sealed` exists to justify: it rejects a negative count,
+# which a caller writing `Sealed(n)` directly could not be made to do.
+export fn seal(n: Int) -> Maybe Sealed =
+  if n < 0 then Nothing else Just(Sealed(n))
+
+export fn unseal(s: Sealed) -> Int =
+  match s with
+  | Sealed n -> n

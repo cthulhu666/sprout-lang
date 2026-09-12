@@ -40,8 +40,8 @@ export type SourceCursor (..) =
 # Distinct types so they can't be swapped at the (path, stdlib_root)
 # call-site pattern threaded through every compiler entry point.
 
-export wrap FilePath = String
-export wrap StdlibRoot = String
+export wrap FilePath (..) = String
+export wrap StdlibRoot (..) = String
 
 export fn filepath_str(p: FilePath) -> String =
   match p with | FilePath s -> s
@@ -55,9 +55,9 @@ export fn stdlib_root_str(r: StdlibRoot) -> String =
 # (e.g. "stdlib.compiler.ast.FnDecl"); env dicts are keyed by QualifiedName.
 # Mixing the three is a dict-miss bug — wraps make the swap a compile error.
 
-export wrap ModuleName = String
-export wrap RawName = String
-export wrap QualifiedName = String
+export wrap ModuleName (..) = String
+export wrap RawName (..) = String
+export wrap QualifiedName (..) = String
 
 export fn module_name_str(m: ModuleName) -> String =
   match m with | ModuleName s -> s
@@ -71,7 +71,7 @@ export fn qualified_name_str(q: QualifiedName) -> String =
 # GlobalName is the name of a top-level `let` global (an IR store target, @name).
 # Distinguishes it from function names, ctor names, and arbitrary strings so a
 # swap is a compile error rather than a silent wrong-slot store.
-export wrap GlobalName = String
+export wrap GlobalName (..) = String
 
 export fn global_name_str(g: GlobalName) -> String =
   match g with | GlobalName s -> s

@@ -2286,7 +2286,10 @@ fn parse_wrap_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.De
   do
     (_, i2) <- expected_keyword("wrap", tokens, i)
     (name_tok, i3) <- expected_ident("wrap name", tokens, i2)
-    (_, i4) <- expected_symbol("=", tokens, i3)
+    # The optional `(..)` constructor-export marker, in the same slot an ADT
+    # carries it and discarded the same way: it never reaches the AST, and the
+    # module surface recovers it by token scan (scan_exported_decl).
+    (_, i4) <- expected_symbol("=", tokens, skip_visibility(tokens, i3))
     (inner, i5) <- parse_type_expr(tokens, i4)
     (deriving_classes, i6) <- parse_deriving_clause(tokens, i5)
     Ok((ast.WrapDecl(token.token_text(name_tok), inner, deriving_classes, cur_pos(tokens, i)), i6))
@@ -2421,10 +2424,14 @@ fn scan_exported_decl(
     || tok_is_keyword(tok_at(tokens, j), "let")
     || tok_is_keyword(tok_at(tokens, j), "class") then
     scan_surface_from(tokens, j + 1, name_at(tokens, j + 1, exported), ctor_types, globals)
-  # A wrap's synthetic constructor shares the type's name, so it is exported with it.
+  # A wrap's synthetic constructor shares the type's name, so `(..)` is the only
+  # way to say which of the two is published — without it the type is exported
+  # and the constructor stays module-private (spec-v0 §5.6.1). A wrap takes no
+  # type parameters, so the marker sits directly after the name.
   else if tok_is_keyword(tok_at(tokens, j), "wrap") then
     scan_surface_from(tokens, j + 1, name_at(tokens, j + 1, exported),
-      name_at(tokens, j + 1, ctor_types), globals)
+      if exports_ctors(tokens, j + 2) then name_at(tokens, j + 1, ctor_types) else ctor_types,
+      globals)
   else if tok_is_keyword(tok_at(tokens, j), "type") then
     scan_exported_type(tokens, j, exported, ctor_types, globals)
   else

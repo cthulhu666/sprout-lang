@@ -1,0 +1,32 @@
+module main
+
+import stdlib.test (check_eq, check_true, run_suite)
+import testsupport.wrap_opacity as wrap_opacity
+
+# Cross-module `wrap` visibility. `Sealed` is exported WITHOUT `(..)`, so its
+# constructor stays module-private and this file cannot write `wrap_opacity.Sealed(3)`
+# — it must go through `seal`, which is what lets the wrap carry an invariant.
+# `Open` is exported WITH `(..)`, so it constructs and destructures here.
+#
+# The rejection half is not expressible as a runtime test: the type_error harness
+# takes no --package-root, so a cross-module compile failure has no fixture home
+# (same limitation recorded in tests/stdlib/test_linear_cross_module.spr). The
+# scanner-level assertions in tests/stdlib/compiler/test_module_surface_scan.spr
+# cover it instead.
+
+fn sealed_round_trip(n: Int) -> Int =
+  maybe_with_default(-1, map(wrap_opacity.unseal, wrap_opacity.seal(n)))
+
+fn open_round_trip(n: Int) -> Int =
+  match wrap_opacity.Open(n) with
+  | wrap_opacity.Open inner -> inner
+
+fn main() -> Unit !{IO} =
+  run_suite("wrap_opacity", [
+    check_eq("an opaque wrap round-trips through its smart constructor",
+      sealed_round_trip(7), 7),
+    check_true("the smart constructor can reject its input",
+      sealed_round_trip(-1) == -1),
+    check_eq("a (..) wrap is constructed and matched across the boundary",
+      open_round_trip(42), 42)
+  ])
