@@ -1,0 +1,9 @@
+module main
+import demo.sealed as sealed
+
+# An abstract wrap's constructor is not reachable from another module. Without the
+# `(..)` gate in parser.scan_exported_decl this compiles, and `seal`'s invariant
+# guards nothing — which is the whole point of the marker.
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(sealed.unseal(sealed.Sealed(3))))

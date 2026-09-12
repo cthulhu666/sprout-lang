@@ -1,0 +1,14 @@
+module main
+import demo.sealed as sealed
+
+# The destructor pattern is hidden with the constructor — they are one name. This
+# resolves on a different path from construction and reports `Unknown constructor`,
+# so it needs its own fixture: a gate on the value path alone would let an
+# importer unwrap what it cannot build.
+
+fn peek(s: sealed.Sealed) -> Int =
+  match s with
+  | sealed.Sealed n -> n
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(maybe_with_default(0, map(peek, sealed.seal(1)))))

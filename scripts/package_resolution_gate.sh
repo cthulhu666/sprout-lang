@@ -84,5 +84,28 @@ else
   fail=1
 fi
 
+# A wrap exported without `(..)` publishes its TYPE and not its constructor. This
+# needs --package-root, so it has no home among the type_error fixtures; both halves
+# live here. Construction and the destructor pattern resolve on different paths and
+# report different diagnostics, so each is asserted separately — a gate on one alone
+# would let an importer unwrap a value it cannot build.
+ctor="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_wrap_ctor_construct.spr" 2>&1)"
+if echo "$ctor" | grep -qF 'Unknown variable: sealed.Sealed'; then
+  echo "PASS wrap opacity: an abstract wrap's constructor is unreachable cross-module"
+else
+  echo "FAIL wrap opacity: expected 'Unknown variable: sealed.Sealed'"
+  echo "$ctor" | tail -3
+  fail=1
+fi
+
+pat="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_wrap_ctor_pattern.spr" 2>&1)"
+if echo "$pat" | grep -qF 'Unknown constructor: sealed.Sealed'; then
+  echo "PASS wrap opacity: the destructor pattern is hidden with the constructor"
+else
+  echo "FAIL wrap opacity: expected 'Unknown constructor: sealed.Sealed'"
+  echo "$pat" | tail -3
+  fail=1
+fi
+
 [ "$fail" -eq 0 ] && echo "==> package-resolution gate: OK" || echo "==> package-resolution gate: FAILED"
 exit $fail

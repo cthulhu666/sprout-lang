@@ -8,11 +8,13 @@ import testsupport.wrap_opacity as wrap_opacity
 # — it must go through `seal`, which is what lets the wrap carry an invariant.
 # `Open` is exported WITH `(..)`, so it constructs and destructures here.
 #
-# The rejection half is not expressible as a runtime test: the type_error harness
-# takes no --package-root, so a cross-module compile failure has no fixture home
-# (same limitation recorded in tests/stdlib/test_linear_cross_module.spr). The
-# scanner-level assertions in tests/stdlib/compiler/test_module_surface_scan.spr
-# cover it instead.
+# This file covers what an importer CAN do. The rejection half — that
+# `wrap_opacity.Sealed(3)` and `| wrap_opacity.Sealed n ->` are refused — needs a
+# compile failure, so it lives in scripts/package_resolution_gate.sh, the one
+# harness that passes --package-root: fixtures app_wrap_ctor_construct.spr and
+# app_wrap_ctor_pattern.spr. The type_error fixtures cannot host it (no
+# --package-root there), which is the limitation recorded in
+# tests/stdlib/test_linear_cross_module.spr.
 
 # Outside every value `seal` accepts, so a rejection cannot be mistaken for a
 # successful round trip. `-1` would be: it is what `seal` refuses AND what a

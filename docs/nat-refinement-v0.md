@@ -1,6 +1,7 @@
 # A non-negative integer type — why not yet
 
-Status: **parked**, with the blockers identified. Not normative.
+Status: **parked**, on blocker 3 alone since 2026-09-12 — blockers 1 and 2 were cleared by wrap
+constructor hiding. Not normative.
 
 ## The question
 
@@ -29,17 +30,23 @@ fn header_block(raw: String, line_end: Int, headers_end: Int) -> String =
 Fourteen in-repo call sites compute the count as a subtraction. Each owes a hand proof that the
 difference is non-negative; the ones that have it wrote it in prose.
 
-## Three blockers, each verified by compiling a probe
+## Three blockers, of which two have since fallen
 
-**1. A `wrap`'s constructor cannot be hidden.** `wrap Nat = Int` exported from one module, then
-`Nat(-5)` in another: compiles, exit 0. There is no `(..)` marker for a `wrap` and no `opaque type`.
-A smart constructor `nat : Int -> Maybe Nat` therefore guards nothing — callers can bypass it.
+**Blockers 1 and 2 were cleared on 2026-09-12** by wrap constructor hiding (spec-v0 §5.6.1). They
+are kept here, struck through, because the reasoning that follows was built on them and a reader
+needs to know which parts still load-bear.
 
-**2. The enforceable shape is not zero-cost.** `export type Nat = | MkNat Int` *without* `(..)` does
-hide its constructor (`Unknown variable: MkNat` across a module boundary), so the smart-constructor
-pattern works for an ADT. But spec §5.6.1 makes a `wrap` identity at the IR level — no allocation —
-while an ADT constructor is a real `sprout_make1`. An enforced `Nat` heap-allocates per index; in a
-lexer loop, per token. Zero-cost **or** enforceable, not both.
+**~~1. A `wrap`'s constructor cannot be hidden.~~** *Cleared.* It was true: `wrap Nat = Int`
+exported from one module, then `Nat(-5)` in another, compiled with exit 0, because there was no
+`(..)` marker for a `wrap`. There is now — `export wrap Nat = Int` publishes the type alone and
+keeps the constructor and the destructor pattern module-private, so `nat : Int -> Maybe Nat` is
+enforceable rather than advisory.
+
+**~~2. The enforceable shape is not zero-cost.~~** *Cleared, exactly as the prerequisites section
+below predicted.* The dilemma was that hiding a constructor required an ADT (`export type Nat =
+| MkNat Int`), which is a real `sprout_make1` allocation, while a `wrap` is identity at the IR
+level but unenforceable. Now the zero-cost shape **is** the enforceable one: a hidden wrap
+constructor costs nothing, so an enforced `Nat` does not allocate per index.
 
 **3. No arithmetic.** `Nat(2) + Nat(3)` → `+ needs Int or Double operands`. The prelude declares no
 `Num` class; `+`/`-` are compiler primitives over `Int`/`Double`, and spec §8.6 records that lifting
@@ -48,6 +55,12 @@ either, so even `slice(s, 3, 5)` would need an explicit constructor per literal.
 
 The same wall was already hit for typed paths: `BACKLOG.md` asks for `File`/`Dir` wraps reachable
 only through validating constructors, under **`stdlib.path` — the typed half**.
+
+## Why it stays parked: blocker 3, and the relocation argument below
+
+Blocker 3 alone is disqualifying — a `Nat` you cannot add to or subtract from is not a numeric
+type — and the section after it is independent of all three blockers. Both survive the change
+above, so the verdict is unchanged; only two of its three supports are gone.
 
 ## Even with all three, `Nat` relocates the check rather than removing it
 
@@ -84,9 +97,12 @@ All three are already filed in `BACKLOG.md`, under these titles:
 - **`wrap` instance lifting — reuse the base type's instances as the wrap type** — blocker 3. Note
   its own out-of-scope line: mixed `age + 1` with a bare literal needs numeric-literal polymorphism,
   which is a separate piece (`docs/coercions-and-literals-v1-draft.md` Case B).
-- **`export type` opacity is honoured on sums and silently ignored on records** — adjacent to
-  blocker 1; names `opaque type` under `wrap` ergonomics as the related ruling.
-- **`wrap` ergonomics follow-ups** — carries the `opaque type` request itself.
+- ~~**`export type` opacity …**~~ and ~~**`wrap` ergonomics follow-ups**~~ — blocker 1's
+  prerequisite. **Met 2026-09-12**; both entries remain open for their other halves (record
+  opacity, the auto-accessor, `opaque type`), neither of which blocks `Nat`.
 
-Blocker 2 is not separately filed and does not need to be: it dissolves once a `wrap` can hide its
-constructor, because then the zero-cost shape is also the enforceable one.
+Blocker 2 was never separately filed, on the reasoning that it would dissolve once a `wrap` could
+hide its constructor. That is what happened — recorded here because a prediction that came true is
+worth more to the next reader than one that was merely plausible.
+
+So the live prerequisite list is one item: blocker 3.
