@@ -8552,7 +8552,6 @@ fn match_fwd_marker_by_subst(
           else match_fwd_marker_by_subst(class_name, v, subst, rest, pos)
 
 # The type-variable name embedded in an "@fwd:{tvar}:{class}" key.
-# NB str_slice's third argument is a LENGTH, not an end index.
 fn fwd_key_tyvar_name(key: String, class_name: String) -> String =
   str_slice(key, str_len("@fwd:"), str_len(key) - str_len("@fwd:") - str_len(":" ++ class_name))
 

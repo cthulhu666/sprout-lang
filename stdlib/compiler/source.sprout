@@ -336,9 +336,6 @@ export fn line_paren_delta(line: String) -> Int =
 # the depth says is an import list and whose tail is in fact a comment. That is
 # how a comment inside a wrapped list came to swallow every name after it: the
 # lines were spliced verbatim, and the name scan stopped at the `#`.
-#
-# `str_slice`'s third argument is a LENGTH, not an end index — equal here only
-# because the slice starts at 0.
 export fn strip_line_comment(line: String) -> String =
   if i < 0 then line else str_slice(line, 0, i)
   where i = str_find(line, "#")
