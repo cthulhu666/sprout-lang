@@ -1,0 +1,57 @@
+module ide.saving
+
+# When the IDE saves, and how `--save-when` says so. Design: docs/ide-save-v0.md.
+#
+# Its own module rather than a corner of `ide.app` for two reasons. The
+# millisecond-to-tick conversion needs BOTH numbers — the loop's frame deadline
+# and the pane's tick budget — and neither the pane nor the flag can see the
+# other; this is where they meet. And `ide.app` exports `main`, so anything
+# living there is unreachable from a test that has a `main` of its own.
+
+import stdlib.args as args
+import stdlib.string as string
+import ide.editor as ed
+
+# One constant, two consumers: `app.App.tick_ms` and the budget `WhenIdle`
+# counts in. A widget cannot convert between them — `TickEvent` carries no
+# payload and `tick_ms` is the application's field.
+export fn tick_ms() -> Int = 500
+
+# Never zero, whatever the flag says: a delay shorter than one frame still has
+# to wait for a frame, and a budget of zero ticks would fire on the very tick
+# that carries the keystroke it is counting from.
+fn idle_ticks(ms: Int) -> Int = if ms < tick_ms() then 1 else ms / tick_ms()
+
+# `--save-when`. An absent flag reads as the empty spec, so "missing" and
+# "unrecognised" take one path and the default is named in one place.
+export fn save_when(a: args.Args) -> ed.SaveWhen =
+  save_strategy(args.arg_str(a, "save-when", ""))
+
+# VS Code's `files.autoSaveDelay`. Autosave is ON by default because a terminal
+# has no frame deactivation and no tab to close, so the idle timer is the only
+# continuous trigger there is (docs/ide-save-v0.md §7).
+fn default_ms() -> Int = 1000
+
+fn default_when() -> ed.SaveWhen = ed.WhenIdle(idle_ticks(default_ms()))
+
+# `manual | idle:MS | unfocused`. Anything else falls back rather than exiting:
+# the IDE takes the terminal over on the next line, so a usage error would be
+# printed into the alternate screen and scrubbed away with it.
+export fn save_strategy(spec: String) -> ed.SaveWhen =
+  match spec with
+  | "manual" -> ed.Manually
+  | "unfocused" -> ed.WhenUnfocused
+  | _ -> after_delay(string.strip_prefix(spec, "idle:"))
+
+fn after_delay(ms: Maybe String) -> ed.SaveWhen =
+  let Just text = ms else default_when()
+      Just n = parse_int(text) else default_when()
+  in ed.WhenIdle(idle_ticks(n))
+
+# What the status line promises, so a run under one strategy cannot advertise
+# another.
+export fn describe(when: ed.SaveWhen) -> String =
+  match when with
+  | ed.WhenIdle _ -> "ctrl-s saves, and so does a pause"
+  | ed.WhenUnfocused -> "ctrl-s saves, and so does Tab"
+  | ed.Manually -> "ctrl-s saves"
