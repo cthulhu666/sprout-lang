@@ -1,0 +1,14 @@
+module demo.sealed
+
+# A wrap exported WITHOUT `(..)`: the type is published, the constructor and the
+# destructor pattern are not (spec-v0 §5.6.1). `seal` is the only way in, which is
+# what lets the type carry an invariant its `Int` representation cannot.
+
+export wrap Sealed = Int
+
+export fn seal(n: Int) -> Maybe Sealed =
+  if n < 0 then Nothing else Just(Sealed(n))
+
+export fn unseal(s: Sealed) -> Int =
+  match s with
+  | Sealed n -> n
