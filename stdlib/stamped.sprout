@@ -1,0 +1,25 @@
+module stdlib.stamped
+
+# A value carried together with a witness of the state it was produced for.
+#
+# The answer to an asynchronous request describes the moment it was ASKED for,
+# and by the time it lands the asker may have moved on — opened another file,
+# typed another character. `Stamped` makes that gap impossible to ignore: the
+# constructor is not exported and there is no accessor, so the only route to the
+# payload is `fresh`, which demands the asker say who it is now.
+#
+# The stamp's type is the caller's, because only the caller knows what the
+# reply's relevance depends on. Pair a `version.Version` with an identity when
+# "something changed" is too coarse to say WHAT changed.
+# Design: docs/stale-replies-v0.md.
+export type Stamped s a deriving (Eq, ToString) =
+  | Stamped s a
+
+# Mint a reply for the state `now`. O(1).
+export fn stamp(now: s, x: a) -> Stamped s a = Stamped(now, x)
+
+# The payload, if the asker is still who it was when this was minted, and
+# `Nothing` if anything has moved since. O(1) plus the cost of `==` on `s`.
+export fn fresh(now: s, st: Stamped s a) -> Maybe a where Eq s =
+  match st with
+  | Stamped was x -> if was == now then Just(x) else Nothing

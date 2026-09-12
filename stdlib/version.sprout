@@ -1,0 +1,24 @@
+module stdlib.version
+
+# A counter that only goes forward, for saying WHEN a piece of state was.
+#
+# The constructor is not exported and there is no `Int` accessor, so a value is
+# reachable only by stepping from `origin`. That is the property `stamped.fresh`
+# rests on: a version that could repeat would let a stale reply find a matching
+# present and be accepted (docs/stale-replies-v0.md §3).
+#
+# NOT a `wrap`, though guidelines.md §7 would otherwise ask for one: exporting a
+# wrap exports its constructor (spec §5.6.1), which would let any module mint
+# `Version(0)` and match a chain that had never moved. The sealed ADT costs one
+# small allocation per step and is what makes the sealing possible at all.
+export type Version deriving (Eq, Ord, ToString) =
+  | Version Int
+
+# Where a chain starts. Two chains are independent, so versions are comparable
+# only against others from the same holder.
+export fn origin() -> Version = Version(0)
+
+# The next version. O(1).
+export fn next(v: Version) -> Version =
+  match v with
+  | Version n -> Version(n + 1)

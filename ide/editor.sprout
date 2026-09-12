@@ -12,6 +12,7 @@ module ide.editor
 # So the traffic it puts on the loop is a short label when the label changes,
 # and the text exactly when something is about to write it.
 
+import stdlib.stamped as stamped
 import stdlib.string as string
 import stdlib.tui.buffer as buffer
 import stdlib.tui.event as event
@@ -21,13 +22,24 @@ import stdlib.tui.widget as widget
 import stdlib.tui.widgets.focus as focus
 import stdlib.tui.widgets.paint as paint
 import stdlib.tui.widgets.viewport as viewport
+import stdlib.version as version
 import ide.document as document
 
 # What the pane answers a save request with. `Unnamed` rather than an empty
 # path, so an application cannot write a file called "" by forgetting to check.
+#
+# The `Version` is a RECEIPT: the application ferries it to the write and back
+# in the `Stored`, and the pane accepts that answer only if it is still at the
+# version it handed out. The application never reads it.
 export type Saving (..) deriving (Eq, ToString) =
-  | SaveTo document.FilePath String
+  | SaveTo document.FilePath String version.Version
   | Unnamed
+
+# What the pane answers a request to open a file with — the same receipt, for
+# the read. A file cannot be read before the pane has claimed it, which is what
+# gives the body arriving later something to be checked against.
+export type Opening (..) deriving (Eq, ToString) =
+  | ReadFrom document.FilePath version.Version
 
 # Everything optional, in a record, as every widget in the tree takes its
 # options: Sprout has no default arguments. Start from `editor_opts()` and
@@ -39,29 +51,36 @@ export type Saving (..) deriving (Eq, ToString) =
 export type EditorOpts m = (look: focus.FocusStyle,
                             # The label, when it changes. Never the document.
                             on_label: Maybe (String -> m),
-                            # A file arriving: its path and its text.
-                            on_content: Maybe (m -> Maybe(document.FilePath, String)),
+                            # "Open this file", and the constructor to claim it
+                            # with. The pane names the file at once; the text
+                            # follows.
+                            on_open: Maybe (m -> Maybe(document.FilePath, Opening -> m)),
+                            # The text of a file, stamped with the receipt the
+                            # claim handed out. Which file it belongs to is the
+                            # receipt's business, not the payload's.
+                            on_content: Maybe (m -> Maybe(stamped.Stamped version.Version String)),
                             # "Hand me your text", decoded into the CONSTRUCTOR
                             # of the reply — only the pane knows what it will
                             # answer, only the application names it.
                             on_demand: Maybe (m -> Maybe(Saving -> m)),
-                            # "It is on disk now, at this path."
-                            on_stored: Maybe (m -> Maybe document.FilePath))
+                            # "It is on disk now." The path rides along so the
+                            # message reads on its own; the receipt decides.
+                            on_stored: Maybe (m -> Maybe(stamped.Stamped version.Version document.FilePath)))
 
 export fn editor_opts() -> EditorOpts m =
   EditorOpts(look = focus.focus_style_default(), on_label = Nothing,
-             on_content = Nothing, on_demand = Nothing, on_stored = Nothing)
+             on_open = Nothing, on_content = Nothing, on_demand = Nothing,
+             on_stored = Nothing)
 
 # ── the widget ──────────────────────────────────────────────────────────────
 
 # `has_focus` is the pane's own copy of "the keyboard is mine", set by the ring
 # (docs/tui-focus-v0.md §4.1).
-# `edits` counts buffer changes and `handed` remembers the count at the last
-# handover, which together answer "has anything been typed since the text we
-# gave out?" — the question a late `Stored` has to be checked against.
+# `ver` advances on every change to what the pane is showing — a file claimed,
+# a body filled in, a key typed, a write confirmed. An answer minted at an
+# earlier version is about a pane that no longer exists.
 type Pane m = (id: widget.WidgetId, opts: EditorOpts m, doc: document.Document,
-               body: buffer.Buffer, has_focus: Bool, edits: Int,
-               handed: Maybe Int)
+               body: buffer.Buffer, has_focus: Bool, ver: version.Version)
 
 type alias Reply m = Maybe(Pane m, List m, List(widget.Cmd m))
 
@@ -78,65 +97,78 @@ fn pane_handler(p: Pane m, d: widget.Delivery m) -> Reply m =
 
 # ── what the application says ───────────────────────────────────────────────
 
-# DECODER CHAIN — `on_content`, then `on_demand`, then `on_stored`, each
+# DECODER CHAIN — `on_open`, `on_content`, `on_demand`, `on_stored`, each
 # falling through to the next, declining when none claims the message. The
 # order decides any message two prisms both recognise, and a reader editing one
-# link cannot see the others: do not reorder without checking all three.
+# link cannot see the others: do not reorder without checking all four.
 #
+# Every answer that arrives from elsewhere — a body, a write confirmation —
+# comes STAMPED and is read through `stamped.fresh`, never taken as it is. A
+# command runs in its own task (`app.sprout:239` spawns one), so an answer can
+# land any number of loop steps after the request that produced it: after
+# another file has been opened, after more typing. Design: docs/stale-replies-v0.md.
+fn answered(p: Pane m, msg: m) -> Reply m =
+  let Just(f, reply) = widget.decoded(p.opts.on_open, msg) else filled(p, msg)
+  in claimed(p, f, reply)
+
+# The name lands NOW and the text follows, so a file too slow to read still
+# shows whose it is. The old body goes at once for the same reason: the
+# previous file's text under this file's name is a lie either way.
+fn claimed(p: Pane m, f: document.FilePath, reply: Opening -> m) -> Reply m =
+  spoke(p, (p with (doc = document.opened(f), body = buffer.buffer_open(""),
+                    ver = v)),
+        [reply(ReadFrom(f, v))])
+where
+  v = version.next(p.ver)
+
 # A file being OPENED is read from the top, unlike one being reopened where the
 # place left matters — which the skeleton has nowhere to remember yet.
-fn answered(p: Pane m, msg: m) -> Reply m =
-  let Just(f, body) = widget.decoded(p.opts.on_content, msg) else demanded(p, msg)
-  in Just(settled(p, (p with (doc = document.opened(f),
-                              body = at_top(buffer.buffer_open(body)),
-                              handed = Nothing))))
+fn filled(p: Pane m, msg: m) -> Reply m =
+  let Just st = widget.decoded(p.opts.on_content, msg) else demanded(p, msg)
+  in begun(p, stamped.fresh(p.ver, st))
+
+fn begun(p: Pane m, body: Maybe String) -> Reply m =
+  let Just b = body else Just((p, Nil, Nil))
+  in Just(settled(p, (p with (body = at_top(buffer.buffer_open(b)),
+                              ver = version.next(p.ver)))))
 
 fn at_top(b: buffer.Buffer) -> buffer.Buffer =
   buffer.buffer_goto(buffer.Caret(row = 0, col = 0), b)
 
+# The version is handed out, not advanced: being asked for the text is not a
+# change to it, and the receipt has to name the pane the text came from.
 fn demanded(p: Pane m, msg: m) -> Reply m =
   let Just reply = widget.decoded(p.opts.on_demand, msg) else restored(p, msg)
-  in handed_over(p, reply, saving(p))
-
-# Only a real handover is remembered: nothing left the pane when it had nowhere
-# to write to.
-fn handed_over(p: Pane m, reply: Saving -> m, sv: Saving) -> Reply m =
-  match sv with
-  | SaveTo _ _ -> Just(((p with (handed = Just(p.edits))), [reply(sv)], Nil))
-  | Unnamed -> Just((p, [reply(sv)], Nil))
+  in Just((p, [reply(saving(p))], Nil))
 
 # Handing the text over is not a write — a write can fail — so nothing here is
 # marked clean. `on_stored` is what does that, once the write has happened.
 fn saving(p: Pane m) -> Saving =
   let Just f = document.target(p.doc) else Unnamed
-  in SaveTo(f, buffer.buffer_text(p.body))
+  in SaveTo(f, buffer.buffer_text(p.body), p.ver)
 
-# A write runs in its OWN TASK (`app.sprout:239` spawns one), so `Stored` can
-# land long after the handover that produced it — after another file has been
-# opened, or after more typing. It is therefore CHECKED, never adopted: a pane
-# that took the path would aim the next save at a file it is no longer showing
-# and write this document over that one.
 fn restored(p: Pane m, msg: m) -> Reply m =
-  let Just f = widget.decoded(p.opts.on_stored, msg) else Nothing
-  in confirmed(p, f)
+  let Just st = widget.decoded(p.opts.on_stored, msg) else Nothing
+  in confirmed(p, stamped.fresh(p.ver, st))
 
 # Claimed either way — it was addressed here — but a stale answer changes
-# nothing. Two saves in flight with an edit between them are still told apart
-# only by the edit count, so the second's answer can clean the first's: the
-# window is one write long, and the cost is a `*` that clears early.
-fn confirmed(p: Pane m, f: document.FilePath) -> Reply m =
-  if untouched_since(p, f)
-  then Just(settled(p, (p with (doc = document.written(p.doc),
-                                handed = Nothing))))
-  else Just((p, Nil, Nil))
-
-fn untouched_since(p: Pane m, f: document.FilePath) -> Bool =
-  document.target(p.doc) == Just(f) && p.handed == Just(p.edits)
+# nothing. The payload is the path just written, which `fresh` has already
+# proved is this pane's own, so there is nothing left to read out of it.
+fn confirmed(p: Pane m, at: Maybe document.FilePath) -> Reply m =
+  let Just _ = at else Just((p, Nil, Nil))
+  in Just(settled(p, (p with (doc = document.written(p.doc),
+                              ver = version.next(p.ver)))))
 
 # ── what it says back ───────────────────────────────────────────────────────
 
 fn settled(was: Pane m, now: Pane m) -> (Pane m, List m, List(widget.Cmd m)) =
   (now, relabelled(was, now), Nil)
+
+# `settled`, plus something of the pane's own to say. The label goes first: it
+# describes the pane the reply is about.
+fn spoke(was: Pane m, now: Pane m,
+         also: List m) -> Reply m =
+  Just((now, list_append(relabelled(was, now), also), Nil))
 
 # The EDGE, not every keystroke: a label that has not changed is nothing the
 # application needs telling, and announcing one per character typed would put a
@@ -189,7 +221,7 @@ fn typed_in(p: Pane m, s: String) -> Reply m =
 fn edited(p: Pane m, b: Maybe buffer.Buffer) -> Reply m =
   let Just b2 = b else Just((p, Nil, Nil))
   in Just(settled(p, (p with (body = b2, doc = document.touched(p.doc),
-                              edits = p.edits + 1))))
+                              ver = version.next(p.ver)))))
 
 fn moved(p: Pane m, b: buffer.Buffer) -> Reply m =
   Just(((p with (body = b)), Nil, Nil))
@@ -261,5 +293,5 @@ export fn editor(id: widget.WidgetId) -> widget.Widget m =
 export fn editor_with(id: widget.WidgetId,
                       opts: EditorOpts m) -> widget.Widget m =
   pane_widget(Pane(id = id, opts = opts, doc = document.scratch(),
-                   body = buffer.buffer_open(""), has_focus = false, edits = 0,
-                   handed = Nothing))
+                   body = buffer.buffer_open(""), has_focus = false,
+                   ver = version.origin()))
