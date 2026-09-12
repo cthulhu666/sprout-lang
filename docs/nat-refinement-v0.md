@@ -46,8 +46,8 @@ lexer loop, per token. Zero-cost **or** enforceable, not both.
 a base type's instances through a `wrap` is unimplemented. There is no numeric-literal polymorphism
 either, so even `slice(s, 3, 5)` would need an explicit constructor per literal.
 
-The same wall was already hit for typed paths: `BACKLOG.md` asks for "zero-cost `File`/`Dir` wraps,
-smart constructors `file_checked`/`dir_checked`" under **`stdlib.path` — the typed half**.
+The same wall was already hit for typed paths: `BACKLOG.md` asks for `File`/`Dir` wraps reachable
+only through validating constructors, under **`stdlib.path` — the typed half**.
 
 ## Even with all three, `Nat` relocates the check rather than removing it
 

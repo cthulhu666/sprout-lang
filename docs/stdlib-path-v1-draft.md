@@ -110,17 +110,7 @@ export wrap Dir  = String   # path that names (or will name) a directory
 
 Both are zero-cost String wraps under PR #36's `wrap` semantics. The
 distinction is type-level only: at runtime, both are identity wrappers
-around `String`. As written neither carries `(..)`, so under spec-v0 §5.6.1
-both are abstract outside `stdlib.fs.path`.
-
-**Open, and this draft currently answers it both ways.** §"Smart constructor
-strategy" below keeps the data constructors exported for cheap construction at
-trusted internal sites, and the API surface lists unchecked `file`/`dir`
-pass-throughs — which needs `(..)` and leaves an unvalidated way in. Decide
-before implementing: add `(..)` and keep the pass-throughs (the types mean
-"labelled"), or drop both and make `file_checked`/`dir_checked` the only entry
-(the types mean "validated"). The second is why the wrap opacity rule exists;
-the first is what the rest of this draft assumes. The benefit is **at the API surface**, where joining a
+around `String`. The benefit is **at the API surface**, where joining a
 directory and a relative name yields one or the other depending on
 intent:
 
@@ -160,17 +150,51 @@ Ops that need decomposition (`parent`, `basename`, `extension`) parse on
 demand using `str_find` / `str_slice`. This is O(length) per call but the
 call sites are rare and the constant factor is small.
 
-### Smart constructor strategy
+### Construction: validated, and that is the only way in
 
-- Data ctors `File` and `Dir` stay **exported**: cheap construction at
-  trusted internal sites (e.g. `dir_file(d, rel)`'s internal result).
-- Add `file_checked: String -> Result PathErr File` and
-  `dir_checked: String -> Result PathErr Dir` for the CLI-argv and
-  user-input boundary. These reject:
-  - empty string
-  - embedded NUL byte
-- No validation for `..` or `.` segments — preserve exact spelling.
-  `normalize` is opt-in (see below).
+**Decided 2026-09-12.** Neither wrap carries `(..)`, so both data
+constructors stay module-private (spec-v0 §5.6.1). The only entry is:
+
+- `file: String -> Result PathErr File`
+- `dir:  String -> Result PathErr Dir`
+
+which reject an empty string and an embedded NUL byte. No validation for
+`..` or `.` segments — preserve exact spelling; `normalize` is opt-in (see
+below). Module-internal code constructs freely, so `dir_file(d, rel)` and the
+other ops that *derive* a path from an existing one stay total: the `Result`
+is paid once, where a `String` first becomes a path, and never again.
+
+An earlier revision of this draft kept the data constructors exported "for
+cheap construction at trusted internal sites" and added `file_checked` /
+`dir_checked` beside them. That does not work, for two reasons:
+
+- **An exported infallible `file : String -> File` is the hidden constructor
+  under another name.** Hiding `File` while exporting `file` enforces nothing,
+  so "typed with an unchecked escape hatch" is just the labelled design with
+  extra ceremony.
+- **No call site wanted the escape hatch.** All 22 construction sites for the
+  compiler's `source.FilePath` / `source.StdlibRoot` live in the five driver
+  files and every one wraps an argv-derived string. There is no trusted-literal
+  site to serve, and after migration each driver parses argv once and threads
+  the typed value.
+
+The `_checked` suffix went with the escape hatch it existed to contrast with.
+`docs/guidelines.md` §2 is explicit that a suffix marking fallibility is not
+needed — the `Result` return type carries it — which is also how the landed
+`stdlib.fs.path` spells `extension` and `relative_to`.
+
+**Prior art.** The design space is bimodal, and this draft sits at the typed
+end of it:
+
+| | File vs Dir in the type? | Construction |
+|---|---|---|
+| Rust `std::path` | No — one `Path`, with runtime `is_file()`/`is_dir()` | `Path::new` "directly wraps a string slice … a cost-free conversion": no validation, cannot fail |
+| Haskell [`path`](https://hackage.haskell.org/package/path) | Yes — `Path b t` over base × type | Type is abstract; `parseAbsFile :: MonadThrow m => FilePath -> m (Path Abs File)` throws on invalid input |
+
+Haskell's `path` is the closest prior art and takes the same position. Note
+what it pays: four QuasiQuoters (`[absfile|/home/chris/foo.txt|]`) exist to
+construct paths from literals at compile time. Sprout has no equivalent, so a
+literal path here goes through the `Result` like any other string.
 
 ```sprout
 export type PathErr (..) =
@@ -188,11 +212,10 @@ module stdlib.path
 export wrap File = String
 export wrap Dir  = String
 
-export fn file(s: String) -> File = File(s)            # trust caller
-export fn dir(s: String)  -> Dir  = Dir(s)
-
-export fn file_checked(s: String) -> Result PathErr File
-export fn dir_checked(s: String)  -> Result PathErr Dir
+# The data ctors are NOT exported: no `(..)` on either wrap above, so these
+# two are the only way a String becomes a File or a Dir.
+export fn file(s: String) -> Result PathErr File
+export fn dir(s: String)  -> Result PathErr Dir
 
 # --- Inspection (lossless roundtrip) ---------------------------------
 
@@ -311,13 +334,7 @@ implementation. Three tiers of test cover the v1 surface:
    `type Path = AsFile File | AsDir Dir` for code that needs to be
    agnostic? Lean: skip in v1; add only if a concrete use case appears.
 
-3. **`File`/`Dir` data-ctor visibility** — keep them exported as proposed,
-   or hide them and force all construction through smart constructors?
-   Hiding rules out `dir("/literal/path")` as boilerplate-free
-   construction. Lean: keep exported for v1, revisit if a class of bugs
-   from unchecked construction shows up.
-
-4. **Coexistence with current compiler code** — should the migration
+3. **Coexistence with current compiler code** — should the migration
    happen in the same PR that introduces `stdlib.path`, or as a follow-up?
    Leaning: same PR — otherwise the test plan's tier 3 has nothing to
    verify against. But this raises the diff size for the introductory PR.
@@ -330,10 +347,22 @@ break any user-facing API.
 
 `read_file`'s signature changes from `String -> Result IoErr String !{IO}`
 to `File -> Result IoErr String !{IO}`. User code that calls
-`read_file("foo.txt")` directly breaks at that point and must call
-`read_file(path.file("foo.txt"))`. This is a breaking change to a public
-stdlib API, but it is deliberately the kind of change `stdlib.path`
-exists to force.
+`read_file("foo.txt")` directly breaks at that point and must parse the path
+first, which under the validated construction above is itself fallible:
+
+```sprout
+let Ok f = path.file("foo.txt") else Err(io_err_bad_path)
+in read_file(f)
+```
+
+That `else` arm exposes a seam this draft does not close: `path.file` fails
+with `PathErr` and `read_file` with `IoErr`, so a caller threading the two must
+map one into the other. Either `IoErr` absorbs a `PathErr` case or the stdlib
+offers the composed `read_path : String -> Result IoErr String`. Decide with
+the `IoErr` shape, which is out of scope here.
+
+This is a breaking change to a public stdlib API, but it is deliberately the
+kind of change `stdlib.path` exists to force.
 
 ## Sequencing
 
