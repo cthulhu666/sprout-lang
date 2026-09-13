@@ -21,7 +21,7 @@ fn decl_name(d: ast.Decl) -> String =
   | ast.FnDecl name _ _ _ _ _ _ -> name
   | ast.ExternFnDecl name _ _ _ _ -> name
   | ast.TypeDecl name _ _ _ _ _ -> name
-  | ast.RecordDecl name _ _ _ _ _ -> name
+  | ast.RecordDecl name _ _ _ _ _ _ -> name
   | ast.LetDecl name _ _ _ -> name
   | ast.ClassDecl name _ _ _ _ -> name
   | ast.AliasDecl name _ _ _ -> name

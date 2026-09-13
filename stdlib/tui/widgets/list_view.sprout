@@ -18,7 +18,7 @@ import stdlib.tui.widgets.paint as paint
 # keyboard still HAS a selection, and must be able to show it more quietly
 # than the focused one. Brick splits `listSelectedAttr` from
 # `listSelectedFocusedAttr` for the same reason.
-export type ListStyle = (normal: style.Style, selected: style.Style,
+export type ListStyle (..) = (normal: style.Style, selected: style.Style,
                          selected_focused: style.Style)
 
 # Reverse video where the keyboard is, bold where it is not.
@@ -31,7 +31,7 @@ export fn list_style_default() -> ListStyle =
 # widget cannot write the height it was last drawn at back for a key handler
 # to read. Brick's `listMoveByPages` is an `EventM` action for that reason;
 # here the caller names the number, beside the region it gave the list.
-export type ListOpts m = (start: Int, on_highlight: Maybe (Int -> m), page: Int,
+export type ListOpts m (..) = (start: Int, on_highlight: Maybe (Int -> m), page: Int,
                           look: ListStyle,
                           on_content: Maybe (m -> Maybe(List String, Maybe Int)))
 

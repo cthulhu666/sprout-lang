@@ -18,7 +18,7 @@ import stdlib.tui.widgets.paint as paint
 # Everything optional, in a record: Sprout has no default arguments, and two
 # adjacent same-typed parameters swap silently. Start from `input_opts()` and
 # override with `with`.
-export type InputOpts m = (initial: String, on_submit: Maybe (String -> m),
+export type InputOpts m (..) = (initial: String, on_submit: Maybe (String -> m),
                            look: focus.FocusStyle,
                            on_content: Maybe (m -> Maybe String))
 

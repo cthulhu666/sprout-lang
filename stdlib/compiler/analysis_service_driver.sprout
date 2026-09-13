@@ -169,7 +169,7 @@ fn collect_decl_locations(
             Cons("type", categories), Cons(name, names),
             Cons(pos.line + line_offset, lines),
             Cons(pos.column, cols))
-      | ast.RecordDecl name _ _ _ _ pos ->
+      | ast.RecordDecl name _ _ _ _ _ pos ->
           collect_decl_locations(rest, line_offset,
             Cons("type", categories), Cons(name, names),
             Cons(pos.line + line_offset, lines),

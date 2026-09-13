@@ -1,0 +1,10 @@
+module main
+import demo.recop as recop
+
+# The other half, and the one the bundler cannot settle: `o.x` is resolved from
+# the INFERRED type of `o`, long after names are gone, so inference is what has to
+# refuse it. `mk` is the module's own way in, which is what makes this reachable
+# at all.
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(recop.mk(3).x))

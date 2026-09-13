@@ -6,9 +6,11 @@ normatively documented in **`docs/spec-v0.md` §5.6.3** — declaration
 `p.x`, functional update `p with (x = v)`, **parametric records**
 (`type Box s = (val: s, label: String)`, construction infers `Box Int`), and
 **inline calls of function-typed fields** (`v.render(x)`). Records also work
-**across module boundaries** — verified 2026-08-10 by
+**across module boundaries** when exported `(..)` — verified 2026-08-10 by
 `tests/stdlib/test_imported_records.spr` after the `@rec:` name-identity gap that
-once blocked them was closed.
+once blocked them was closed. Without the marker the type is exported and its
+representation is not, which shipped 2026-09-13; see `spec-v0.md` §5.6.4
+**Export**.
 
 This document is the design **rationale and history**. Where its "Problem
 statement" (§1) and migration table (§9) describe a `{ }`-literal / `get p x`

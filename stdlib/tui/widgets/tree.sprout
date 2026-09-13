@@ -24,7 +24,7 @@ export type Children (..) =
   | Unread
   | Loaded (List Node)
 
-export type Node = (label: String, children: Children)
+export type Node (..) = (label: String, children: Children)
 
 # What an application may send back. `At` exists because an application has no
 # model of its own — `app.sprout` is explicit that there is "deliberately no
@@ -38,7 +38,7 @@ export type Update (..) =
 # `ListStyle` is reused rather than copied, so a theme that styles a list
 # styles a tree (§4.6). `page` is told rather than measured, for `list_view`
 # §4.5's reason: a pure handler never learns the height it was drawn at.
-export type TreeOpts m = (start: List String, page: Int,
+export type TreeOpts m (..) = (start: List String, page: Int,
                           look: list_view.ListStyle,
                           on_highlight: Maybe (List String -> m),
                           on_expand: Maybe (List String -> m),

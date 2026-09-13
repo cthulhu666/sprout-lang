@@ -17,7 +17,7 @@ import stdlib.string as string
 import stdlib.tui.text as text
 import stdlib.unicode.utf8 as utf8
 
-export type Zipper = (before: List (List Int), after: List (List Int))
+export type Zipper (..) = (before: List (List Int), after: List (List Int))
 
 export fn zipper_empty() -> Zipper = Zipper(before = Nil, after = Nil)
 

@@ -1,0 +1,218 @@
+module main
+
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.compiler as compiler
+import stdlib.compiler.source as source
+import stdlib.string as string
+import stdlib.env as env
+
+# `(..)` MEANS THE SAME THING ON A RECORD AS ON A SUM.
+#
+# The parser has always collected the marker on a record declaration; the bundler
+# dropped it, so `export type P = (x: Int, y: Int)` published the constructor and
+# the fields whatever the author wrote, and nothing said the annotation had been
+# ignored.
+#
+# Three operations reach a record's representation, and all three are gated
+# together. Gating only construction would be theatre: an abstract record's whole
+# point is that its module hands out values, and `v with (x = -5)` rebuilds any
+# value from any other. Haskell (2010 §5.2), OCaml and Rust all hide the fields
+# with the representation for the same reason.
+#
+# The controls below carry as much weight as the rejections. `Open` is the same
+# record with the marker, and a module-local record is a record whose author is
+# the one reading it — a rule that over-fires on either makes records unusable.
+
+fn stdlib_root() -> String !{IO} =
+  match env.get("SPROUT_STDLIB_ROOT") with
+  | Just root -> root
+  | Nothing -> "stdlib"
+
+fn package_root() -> String = "tests/conformance/package_resolution/roots"
+
+# --- rejected: the three ways into an abstract record ----------------------
+
+fn construct_opaque() -> String =
+  `import demo.recop as recop
+
+fn use_it() -> Int = recop.Opaque(x = 1, y = 2).x
+`
+
+fn read_opaque_field() -> String =
+  `import demo.recop as recop
+
+fn use_it() -> Int = recop.mk(3).x
+`
+
+fn update_opaque() -> String =
+  `import demo.recop as recop
+
+fn use_it() -> Int = recop.magnitude(recop.mk(3) with (y = 0))
+`
+
+# A selective import must not bind what the declaration did not publish. This is
+# the same question `import M (T)` answers for a sum's constructors.
+fn selective_import_opaque() -> String =
+  `import demo.recop (Opaque, mk)
+
+fn use_it() -> Int = Opaque(x = 1, y = 2).x
+`
+
+# --- controls: what the rule must NOT break --------------------------------
+
+fn transparent_record() -> String =
+  `import demo.recop as recop
+
+fn use_it() -> Int = (recop.Open(a = 1, b = 2) with (b = 5)).a
+`
+
+fn transparent_selective_import() -> String =
+  `import demo.recop (Open)
+
+fn use_it() -> Int = Open(a = 1, b = 2).b
+`
+
+# The TYPE is exported; only its representation is not. Naming it in a signature
+# has to keep working, or an abstract record cannot appear in an API at all.
+fn opaque_type_in_signature() -> String =
+  `import demo.recop as recop
+
+fn describe(o: recop.Opaque) -> Int = recop.magnitude(o)
+
+fn use_it() -> Int = describe(recop.mk(4))
+`
+
+# A record declared here, read here. No export marker is involved at all, and
+# this is the overwhelmingly common case.
+fn module_local_record() -> String =
+  `type Point = (x: Int, y: Int)
+
+fn use_it() -> Int = (Point(x = 1, y = 2) with (y = 7)).y
+`
+
+# --- regressions ------------------------------------------------------------
+
+# An instance introduces no name. Reading its module off its head type left a
+# prelude-headed instance attributed to the prelude, so the module that WROTE it
+# could not read its own private record inside it — and that program compiled
+# before records had opacity at all.
+fn own_record_in_prelude_headed_instance() -> String =
+  `type Point = (x: Int, y: Int)
+
+class Label a
+  fn label(v: a) -> String
+
+instance Label Int
+  fn label(v: Int) -> String = int_to_string(v + here().x)
+
+fn here() -> Point = Point(x = 1, y = 2)
+
+fn use_it() -> String = label(1)
+`
+
+# Publishing a representation takes `export` AND `(..)`. Deciding it from the
+# marker alone let an UNEXPORTED `type R (..)` hand its fields to anyone who
+# could get hold of a value — the type is unnameable outside, but an exported
+# function's return type carries one out. A sum has never behaved that way: the
+# export pre-scan only collects `(..)` from `export`-prefixed declarations.
+fn marker_without_export() -> String =
+  `import demo.recop as recop
+
+fn use_it() -> Int = (recop.escaped() with (y = 9)).x
+`
+
+# The "declared over there and withheld" note searches the environment by last
+# component. A record's canonical name reaches the environment only inside its
+# `@rec:` field keys, so surfacing those to the search — needed for the hidden
+# constructor's note — also pointed it at records in the reader's OWN file, and
+# at records that carry the marker already. Both halves of the note were then
+# false: the declaration is right there, and nothing was withheld.
+fn own_record_referenced_as_a_value() -> String =
+  `type Point (..) = (x: Int, y: Int)
+
+fn use_it() -> String = to_string(Point)
+`
+
+fn own_record_in_a_pattern() -> String =
+  `type P (..) = (x: Int, y: Int)
+
+fn f(p: P) -> Int =
+  match p with
+  | P a _ -> a
+`
+
+fn fail_message(result: compiler.CompileResult) -> String =
+  match result with
+  | compiler.CompileOk _ -> ""
+  | compiler.CompileFail diags ->
+      match diags with
+      | Nil -> ""
+      | [d | _] ->
+          match d with
+          | compiler.DiagError _ msg -> msg
+          | compiler.DiagWarning _ msg -> msg
+
+fn check(src: String, root: String) -> String !{IO} =
+  do
+    result <- compiler.compile_source_with_roots(src, source.StdlibRoot(root),
+      Cons(package_root(), Nil))
+    fail_message(result)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    root <- stdlib_root()
+
+    ctor <- check(construct_opaque(), root)
+    assert_true(state, "an unmarked record's constructor is not exported",
+      string.contains(ctor, "(..)"))
+
+    read <- check(read_opaque_field(), root)
+    assert_true(state, "an unmarked record's field cannot be read outside it",
+      string.contains(read, "is abstract here"))
+
+    upd <- check(update_opaque(), root)
+    assert_true(state, "an unmarked record cannot be rebuilt by update outside it",
+      string.contains(upd, "is abstract here"))
+
+    sel <- check(selective_import_opaque(), root)
+    assert_true(state, "a selective import does not bind an unpublished constructor",
+      sel != "")
+
+    # The rejections must say which module owns the type, or the reader cannot
+    # tell whose declaration to change.
+    assert_true(state, "the field message names the declaring module",
+      string.contains(read, "demo.recop"))
+
+    open_rec <- check(transparent_record(), root)
+    assert_true(state, "a `(..)` record still constructs, reads and updates",
+      open_rec == "")
+
+    open_sel <- check(transparent_selective_import(), root)
+    assert_true(state, "a selective import binds a published constructor",
+      open_sel == "")
+
+    sig <- check(opaque_type_in_signature(), root)
+    assert_true(state, "an abstract record's type name still works in a signature",
+      sig == "")
+
+    local <- check(module_local_record(), root)
+    assert_true(state, "a module-local record is unaffected", local == "")
+
+    inst <- check(own_record_in_prelude_headed_instance(), root)
+    assert_true(state, "a module reads its own record inside a prelude-headed instance",
+      inst == "")
+
+    unexported <- check(marker_without_export(), root)
+    assert_true(state, "`(..)` without `export` does not publish the representation",
+      string.contains(unexported, "is abstract here"))
+
+    own_value <- check(own_record_referenced_as_a_value(), root)
+    assert_true(state, "a record in this file gets no `declared elsewhere` note",
+      own_value != "" && string.contains(own_value, "note:") == false)
+
+    own_pat <- check(own_record_in_a_pattern(), root)
+    assert_true(state, "a record destructured in this file gets no note",
+      own_pat != "" && string.contains(own_pat, "note:") == false)
+
+    summary(state)

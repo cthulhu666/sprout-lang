@@ -10,7 +10,7 @@ import stdlib.tui.geometry as geometry
 import stdlib.tui.screen as scr
 import stdlib.tui.widget as widget
 
-export type ScrollOpts m = (step: Int, page: Int,
+export type ScrollOpts m (..) = (step: Int, page: Int,
                             on_content: Maybe (m -> Maybe(widget.Widget m)))
 
 export fn scroll_opts() -> ScrollOpts m =

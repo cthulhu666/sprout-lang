@@ -211,19 +211,21 @@ widget targets (§2) the difference does not signify.
 ### 4.9 The buffer type is opaque
 
 `Buffer` is a single-constructor ADT declared **without `(..)`** around a
-private record. Verified 2026-09-09: a sum without the marker hides its
-constructors (`inner.A` → `Unknown variable`), while a record is unconditionally
-transparent — both `r.x` and `inner.Rec(x = 3, y = 4)` type-check across a
-module boundary whatever the declaration says.
+private record. That wrapper was a workaround: as of 2026-09-09 a sum without
+the marker hid its constructors (`inner.A` → `Unknown variable`) while a record
+was unconditionally transparent, so wrapping was the only way to make a record
+abstract.
+
+That gap is closed (2026-09-13, `spec-v0.md` §5.6.4 **Export**): an unmarked
+record now hides its constructor, its field access and its `with` update. The
+ADT wrapper is therefore no longer load-bearing and `Buffer` could become a bare
+unmarked record, at the cost of a mechanical rewrite of every `match b with |
+Buffer r ->` in `buffer.sprout`. Left as is; the wrapper costs nothing.
 
 The point is selection. An `anchor` field is not shipped — there is no clipboard
 and no selection behaviour — but typing-replaces-selection rewrites every
 editing arm, and the representation must not be the thing standing in the way.
 Opacity buys that without shipping a field that is always `Nothing`.
-
-That `(..)` is honoured on sums and silently ignored on records is a language
-gap, filed in `BACKLOG.md` §1. The wrapper is the workaround for it, not an
-endorsement.
 
 ### 4.10 A control vocabulary is named, not built
 

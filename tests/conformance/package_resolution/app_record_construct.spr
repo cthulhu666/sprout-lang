@@ -1,0 +1,9 @@
+module main
+import demo.recop as recop
+
+# A record exported without `(..)` publishes its type and not its representation.
+# Construction is settled by the bundler — the constructor's name is never bound
+# outside the declaring module — so it reports as an unresolved name.
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(recop.Opaque(x = 1, y = 2).x))

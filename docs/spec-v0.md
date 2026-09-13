@@ -1068,8 +1068,8 @@ An abstract wrap is built through a function the module exports — a smart
 constructor — which is what lets it carry an invariant its inner type cannot,
 as in a `Path` that rejects the empty string. Opacity is a property of the
 boundary, not of the declaration: inside the declaring module the constructor
-and the pattern are ordinary. This is the rule `export type` already uses
-(§3), applied to the one shape that previously ignored it.
+and the pattern are ordinary. Records carry the same marker with the same
+meaning (§5.6.4).
 
 Reaching for a hidden constructor is an unknown-name error — `Unknown
 variable` in expression position, `Unknown constructor` in a pattern.
@@ -1156,8 +1156,8 @@ its labels: `(x: Int, y: Int)` is a record, `(Int, Int)` is a tuple. Records may
 type arguments (`Boxed(value = 5, tag = "n")` has type `Boxed Int`) and a field
 declared `a` reads back at the record's instantiated argument. A parametric record's
 type variable is shared across its fields, so two fields declared `a` must receive
-the same type. Records may be **used across module boundaries**: an imported
-record supports construction, field access, and `with` update at the use site.
+the same type. Records may be **used across module boundaries** when the
+declaration publishes its representation — see **Export** below.
 
 **Construction** is tag-prefixed, with `=` (a value binding, the same `=` as
 `let`):
@@ -1169,6 +1169,58 @@ fn origin() -> Point = Point(x = 0, y = 0)
 Every field must be supplied exactly once; there are no defaults, no partial
 construction, and no positional construction. The `:` (declaration) / `=`
 (construction) split is deliberate: `:` means *has type*, `=` means *has value*.
+
+**Export.** `export type P = (...)` publishes the **type only**. `export type P
+(..) = (...)` publishes the type *and* its representation: the constructor
+`P(x = ...)`, field access `p.x`, and `with` update. All three are gated
+together, because they are three ways to the same thing — a module that hands
+out one value of an abstract record would otherwise have handed out every other,
+since `v with (x = ...)` rebuilds from any value in hand.
+
+```sprout
+export type Caret (..) = (row: Int, col: Int)   # importers may build and read one
+export type Buffer = (lines: List String)       # abstract: reached only through this module
+type Scratch (..) = (n: Int)                    # abstract too — `(..)` publishes nothing alone
+```
+
+Publishing takes **both** keywords. `(..)` on a declaration that is not
+`export`ed publishes nothing, which matters because a value of an unexported
+type still escapes through an exported function's return type — the type is
+unnameable outside, but a value of it is not. This is how the marker already
+behaves on a sum, whose constructors are collected only from `export`ed
+declarations.
+
+This is the same marker, in the same slot, that an ADT (§8.6) and a `wrap`
+(§5.6.1) carry; a record simply has fields where those have constructors. Inside
+the declaring module an abstract record is ordinary — opacity is a property of
+the boundary, not of the declaration.
+
+A published record's constructor shares the value namespace with every other
+constructor, so the one-unqualified-name-per-file rule (§3) covers it: selectively
+importing a `(..)` record named `Box` alongside a sum whose `(..)` brings a
+constructor named `Box` is a collision, and is rejected. Import one of them, or
+import the modules whole and qualify.
+
+Reaching the constructor of an abstract record is an unknown-name error, with
+the same note §5.6.1 describes. Reading or updating a field is a distinct
+diagnostic, because the name resolved and the rule is about the type:
+
+```
+`demo.recop.Opaque` is abstract here: `demo.recop` does not publish its
+representation (`export type ... (..)`), so field `x` is readable only inside it
+(spec-v0 §5.6.4)
+```
+
+**An `instance` method is not gated.** An instance declaration introduces no
+name, so there is nothing to attribute it to a module with; a method body may
+read *and* `with`-update any record's fields — the full representation, not a
+read-only view. Attributing it to the type in its head was tried and
+does not work — a prelude-headed instance (`instance Label Int`) names no
+module, so the module that wrote it could not read its own records inside it —
+and would not have bought anything: an instance written *for* an abstract record
+resolves to that record's own module either way, so "declare a class, instance
+it for the foreign type, read the fields" stays open regardless. Closing it
+needs an orphan-instance rule, which v0 does not have.
 
 **Field access** is dot access on a variable chain:
 

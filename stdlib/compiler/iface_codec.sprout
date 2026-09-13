@@ -1397,8 +1397,8 @@ export fn encode_ast_decl(d: ast.Decl) -> String =
       string_concat_many(["(ExternFnDecl ", encode_quoted_str(name), " ", encode_ast_param_list(params), " ", encode_maybe_typeexpr(ret), " ", encode_maybe_str_list(effects), " ", encode_ast_pos(p), ")"])
   | ast.TypeDecl name type_params ctors deriving_classes mult p ->
       string_concat_many(["(TypeDecl ", encode_quoted_str(name), " ", encode_str_list(type_params), " ", encode_ast_type_constructor_list(ctors), " ", encode_str_list(deriving_classes), " ", encode_multiplicity(mult), " ", encode_ast_pos(p), ")"])
-  | ast.RecordDecl name type_params fields deriving_classes mult p ->
-      string_concat_many(["(RecordDecl ", encode_quoted_str(name), " ", encode_str_list(type_params), " ", encode_ast_record_field_decl_list(fields), " ", encode_str_list(deriving_classes), " ", encode_multiplicity(mult), " ", encode_ast_pos(p), ")"])
+  | ast.RecordDecl name type_params fields deriving_classes mult repr p ->
+      string_concat_many(["(RecordDecl ", encode_quoted_str(name), " ", encode_str_list(type_params), " ", encode_ast_record_field_decl_list(fields), " ", encode_str_list(deriving_classes), " ", encode_multiplicity(mult), " ", encode_representation(repr), " ", encode_ast_pos(p), ")"])
   | ast.LetDecl name body _ p ->
       # The `let x : T = e` annotation is definition-local (only used to check the
       # RHS at its definition site); importers need only the inferred scheme, so it
@@ -2289,6 +2289,19 @@ fn encode_multiplicity(m: ast.Multiplicity) -> String =
 fn multiplicity_from_str(s: String) -> ast.Multiplicity =
   if s == "Linear" then ast.Linear else ast.Unrestricted
 
+# An importer decides whether it may read a record's fields, so the marker has to
+# survive separate compilation exactly as it survives a bundle. The default on an
+# unrecognised string is Published, matching every other `*_from_str` here: an
+# interface written by an older compiler predates the distinction, and reading it
+# as Abstract would make its records unusable rather than merely unchecked.
+fn encode_representation(r: ast.Representation) -> String =
+  match r with
+  | ast.Abstract -> encode_quoted_str("Abstract")
+  | ast.Published -> encode_quoted_str("Published")
+
+fn representation_from_str(s: String) -> ast.Representation =
+  if s == "Abstract" then ast.Abstract else ast.Published
+
 fn decode_type_decl_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Decl, Int) =
   let Just(name, j) = decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing
       Just(type_params, k) = decode_str_list_at(s, bytes, skip_ws(s, bytes, j, total), total) else Nothing
@@ -2305,9 +2318,10 @@ fn decode_record_decl_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe
       Just(fields, m) = decode_ast_record_field_decl_list_at(s, bytes, skip_ws(s, bytes, k, total), total) else Nothing
       Just(deriving_classes, n) = decode_str_list_at(s, bytes, skip_ws(s, bytes, m, total), total) else Nothing
       Just(mult_str, mp) = decode_quoted_str_at(s, bytes, skip_ws(s, bytes, n, total), total) else Nothing
-      Just(pos, p) = decode_pos_at(s, bytes, skip_ws(s, bytes, mp, total), total) else Nothing
+      Just(repr_str, rp) = decode_quoted_str_at(s, bytes, skip_ws(s, bytes, mp, total), total) else Nothing
+      Just(pos, p) = decode_pos_at(s, bytes, skip_ws(s, bytes, rp, total), total) else Nothing
       Just end = expect_char(s, bytes, skip_ws(s, bytes, p, total), total, ')') else Nothing
-  in Just((ast.RecordDecl(name, type_params, fields, deriving_classes, multiplicity_from_str(mult_str), pos), end))
+  in Just((ast.RecordDecl(name, type_params, fields, deriving_classes, multiplicity_from_str(mult_str), representation_from_str(repr_str), pos), end))
 
 fn decode_let_decl_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Decl, Int) =
   let Just(name, j) = decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing

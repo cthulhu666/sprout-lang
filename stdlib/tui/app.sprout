@@ -46,7 +46,7 @@ export type Signal m (..) =
 # lives inside the widget, so this is for cross-widget concerns only — there is
 # deliberately no separate `Ref AppState`, because the loop threads the tree as
 # a parameter and nothing is shared between tasks.
-export type App m = (
+export type App m (..) = (
   root: widget.Widget m,
   update: m -> widget.Widget m -> (widget.Widget m, Flow, List(widget.Cmd m)),
   tick_ms: Int,

@@ -838,13 +838,16 @@ fn add_decl_to_symbols(mod_name: String, exported: List String, ctor_types: List
       add_scoped_values(mod_name, exported, decl, acc)
   | ast.TypeDecl name _ ctors _ _ _ ->
       add_type_to_symbols(mod_name, name, ctors, exported, ctor_types, acc)
-  | ast.RecordDecl name _ _ _ _ _ ->
-      add_record_to_symbols(mod_name, name, str_list_member(name, exported), acc)
+  | ast.RecordDecl name _ _ _ _ _ _ ->
+      add_record_to_symbols(mod_name, name, str_list_member(name, exported),
+        str_list_member(name, ctor_types), acc)
   | ast.ClassDecl name _ methods _ _ ->
       add_class_to_symbols(mod_name, name, methods, str_list_member(name, exported), acc)
   | ast.InstanceDecl _ _ _ _ -> acc
+  # An alias declares a name for a type and nothing else — no constructor, so
+  # nothing for `(..)` to govern.
   | ast.AliasDecl name _ _ _ ->
-      add_record_to_symbols(mod_name, name, str_list_member(name, exported), acc)
+      add_type_name_to_symbols(mod_name, name, str_list_member(name, exported), acc)
   # WrapDecl: register the type AND the synthetic constructor (same name) so
   # callers can reference both Foo (as a type) and Foo(...) (as a constructor).
   | ast.WrapDecl name inner _ _ ->
@@ -887,7 +890,30 @@ fn add_value_to_symbols(mod_name: String, name: String, is_exported: Bool, acc: 
                     et, ec, mn, ce, xs)
   where canonical = source.qualified_name_str(qualified_name(source.ModuleName(mod_name), source.RawName(name)))
 
-fn add_record_to_symbols(mod_name: String, name: String, is_exported: Bool, acc: ModuleSymbols) -> ModuleSymbols =
+# A record declares BOTH a type and a constructor under one name, the same shape
+# `wrap` has. Registering the constructor in the value maps is what subjects
+# `P(x = 1)` to `(..)`: an unmarked record binds it module-locally, so a foreign
+# module's spelling resolves to nothing and fails through the ordinary
+# unknown-name path, note and all.
+fn add_record_to_symbols(mod_name: String, name: String, is_exported: Bool,
+                         export_ctor: Bool, acc: ModuleSymbols) -> ModuleSymbols =
+  add_record_ctor(mod_name, name, export_ctor,
+    add_type_name_to_symbols(mod_name, name, is_exported, acc))
+
+fn add_record_ctor(mod_name: String, name: String, export_ctor: Bool, acc: ModuleSymbols) -> ModuleSymbols =
+  match acc with
+  | ModuleSymbols vl tl cl ev et ec mn ce xs ->
+      ModuleSymbols(dict_set(name, canonical, vl), tl, cl,
+                    if export_ctor then dict_set(name, canonical, ev) else ev,
+                    et, ec, mn,
+                    # Keyed by TYPE name, holding the one constructor, so a
+                    # selective `import M (P)` carries it exactly as it carries a
+                    # sum's constructors — one rule, one code path.
+                    if export_ctor then dict_set(name, dict_set(name, canonical, dict_empty()), ce) else ce,
+                    xs)
+  where canonical = source.qualified_name_str(qualified_name(source.ModuleName(mod_name), source.RawName(name)))
+
+fn add_type_name_to_symbols(mod_name: String, name: String, is_exported: Bool, acc: ModuleSymbols) -> ModuleSymbols =
   match acc with
   | ModuleSymbols vl tl cl ev et ec mn ce xs ->
       ModuleSymbols(vl, dict_set(name, canonical, tl), cl, ev,
@@ -1566,8 +1592,13 @@ fn qualify_expr(ctx: ResolveCtx, scope: List String, expr: ast.Expr) -> ast.Expr
       ast.IntRangeExpr(qualify_expr(ctx, scope, lo), qualify_expr(ctx, scope, hi), pos)
   | ast.DoExpr steps pos ->
       ast.DoExpr(qualify_do_steps(ctx, scope, steps), pos)
+  # Through the VALUE namespace, not the type one: `P(x = 1)` is a constructor
+  # application, and the value maps are the only ones `(..)` governs. Resolving it
+  # as a type name published every record's constructor on the strength of
+  # `export` alone. Both maps spell the answer `<module>.P`, so what changes is
+  # which marker decides, not what inference receives.
   | ast.RecordExpr type_name fields pos ->
-      ast.RecordExpr(qualify_type_name(ctx, type_name), qualify_record_fields(ctx, scope, fields), pos)
+      ast.RecordExpr(qualify_value_name(ctx, scope, type_name), qualify_record_fields(ctx, scope, fields), pos)
   | ast.GetFieldExpr record field_name pos ->
       ast.GetFieldExpr(qualify_expr(ctx, scope, record), field_name, pos)
   | ast.RecordUpdateExpr base fields pos ->
@@ -1673,13 +1704,14 @@ fn qualify_decl(ctx: ResolveCtx, decl: ast.Decl) -> ast.Decl =
         deriving_classes,
         mult,
         pos)
-  | ast.RecordDecl name type_params fields deriving_classes mult pos ->
+  | ast.RecordDecl name type_params fields deriving_classes mult repr pos ->
       ast.RecordDecl(
         dict_get_or(name, ctx_type_locals(ctx), name),
         type_params,
         qualify_record_field_decls(ctx, fields),
         deriving_classes,
         mult,
+        repr,
         pos)
   | ast.LetDecl name body anno pos ->
       ast.LetDecl(
@@ -1735,10 +1767,34 @@ fn qualify_all_modules_with(modules: List ParsedModule, all_symbols: Dict Module
   | Nil -> Nil
   | Cons mod rest ->
       match mod with
-      | ParsedModule _ _ _ _ _ decls ->
+      | ParsedModule _ _ _ _ ctor_types decls ->
           list_append(
-            qualify_decls(build_resolve_ctx(mod, all_symbols, stdlib_root, extra_roots, canonical), decls),
+            qualify_decls(build_resolve_ctx(mod, all_symbols, stdlib_root, extra_roots, canonical),
+                          publish_marked_records(ctor_types, decls)),
             qualify_all_modules_with(rest, all_symbols, stdlib_root, extra_roots, canonical))
+
+# Settle each record's Representation from the module's EXPORT SURFACE. Runs
+# before qualification, while the names are still the ones the author wrote and
+# the ones `ctor_types` holds.
+#
+# `ctor_types` is collected only from `export`-prefixed declarations
+# (parser.scan_surface_from), so membership means `export` AND `(..)` — exactly
+# what a sum's constructors already require. Reading the marker in the parser
+# instead made an unexported `type R (..)` publish its fields to anyone who could
+# obtain a value, which is not what the two markers mean together anywhere else.
+fn publish_marked_records(ctor_types: List String, decls: List ast.Decl) -> List ast.Decl =
+  match decls with
+  | Nil -> Nil
+  | Cons d rest ->
+      Cons(publish_if_marked(ctor_types, d), publish_marked_records(ctor_types, rest))
+
+fn publish_if_marked(ctor_types: List String, decl: ast.Decl) -> ast.Decl =
+  match decl with
+  | ast.RecordDecl name type_params fields deriving_classes mult _ pos ->
+      ast.RecordDecl(name, type_params, fields, deriving_classes, mult,
+        if str_list_member(name, ctor_types) then ast.Published else ast.Abstract,
+        pos)
+  | _ -> decl
 
 # ---------------------------------------------------------------------------
 # Post-qualification check: every type name must be one that exists
@@ -1882,7 +1938,7 @@ fn type_name_starts_lower(name: String) -> Bool =
 fn add_declared_type_name(decl: ast.Decl, acc: Dict String) -> Dict String =
   match decl with
   | ast.TypeDecl name _ _ _ _ _ -> dict_set(name, name, acc)
-  | ast.RecordDecl name _ _ _ _ _ -> dict_set(name, name, acc)
+  | ast.RecordDecl name _ _ _ _ _ _ -> dict_set(name, name, acc)
   | ast.AliasDecl name _ _ _ -> dict_set(name, name, acc)
   | ast.WrapDecl name _ _ _ -> dict_set(name, name, acc)
   # Classes share the namespace: a constraint's head and an `any C` existential
@@ -2112,7 +2168,7 @@ fn decl_display_name(decl: ast.Decl) -> String =
   | ast.FnDecl name _ _ _ _ _ _ -> name
   | ast.ExternFnDecl name _ _ _ _ -> name
   | ast.TypeDecl name _ _ _ _ _ -> name
-  | ast.RecordDecl name _ _ _ _ _ -> name
+  | ast.RecordDecl name _ _ _ _ _ _ -> name
   | ast.AliasDecl name _ _ _ -> name
   | ast.WrapDecl name _ _ _ -> name
   | ast.ClassDecl name _ _ _ _ -> name
@@ -2129,7 +2185,7 @@ fn unresolved_in_decl(decl: ast.Decl, declared: Dict String) -> Maybe String =
       | Nothing -> unresolved_in_expr(body, declared)
   | ast.ExternFnDecl _ params ret _ _ -> unresolved_in_signature(params, ret, Nil, declared)
   | ast.TypeDecl _ _ ctors _ _ _ -> unresolved_in_ctors(ctors, declared)
-  | ast.RecordDecl _ _ fields _ _ _ -> unresolved_in_record_fields(fields, declared)
+  | ast.RecordDecl _ _ fields _ _ _ _ -> unresolved_in_record_fields(fields, declared)
   | ast.AliasDecl _ _ rhs _ -> unresolved_in_type(rhs, declared)
   | ast.WrapDecl _ inner _ _ -> unresolved_in_type(inner, declared)
   | ast.ClassDecl _ _ methods supers _ ->
@@ -2283,7 +2339,7 @@ fn decl_orig_name(decl: ast.Decl) -> String =
   match decl with
   | ast.FnDecl name _ _ _ _ _ _ -> name
   | ast.TypeDecl name _ _ _ _ _ -> name
-  | ast.RecordDecl name _ _ _ _ _ -> name
+  | ast.RecordDecl name _ _ _ _ _ _ -> name
   | ast.LetDecl name _ _ _ -> name
   | ast.ClassDecl name _ _ _ _ -> name
   | ast.InstanceDecl constraint _ _ _ ->

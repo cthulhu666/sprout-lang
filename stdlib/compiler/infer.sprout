@@ -1344,9 +1344,16 @@ fn discharge_against_record(
 ) -> OneResult !{IO} =
   let field_name = unifier.field_obligation_field(o)
   in
+    # The same access as lookup_record_field_typed, reaching its receiver a
+    # declaration later. Both paths gate, or `fn peek(p) = p.x` slips through the
+    # one that cannot yet see what `p` is.
+    if record_is_abstract_here(rec_name, env) then
+      OneFailed(unifier.field_obligation_pos(o),
+        abstract_record_message(rec_name, field_name))
+    else
     let Just field_scheme = dict_get("@rec:" ++ rec_name ++ ":" ++ field_name, env)
           else OneFailed(unifier.field_obligation_pos(o),
-                 record_name_error(rec_name, field_name))
+                 record_name_error(rec_name, field_name, env))
     in
       do
         field_t <- record_field_access_type(state, field_scheme, type_args)
@@ -1506,11 +1513,22 @@ fn unresolved_name_message(kind: String, name: String, env: Dict types.Scheme) -
 # The canonical name is deliberately not printed. It is not a spelling the reader
 # may write (spec-v0 §3), so offering one would answer "how do I reach this?" with
 # a form the compiler rejects.
+#
+# NOTE PRECONDITIONS — all three must hold, and none is visible from one body.
+# Dropping any one of them has produced a note that contradicted itself:
+#   A. The environment key names a WITHHELD symbol. `key_subject` enforces this
+#      for the record case, which is the only one reached through a marker: a
+#      published record answered the search and was reported as "not in scope".
+#   B. The module found is not the one being compiled — `current_module` here.
+#      "`M` declares it and it is not in scope here" is a contradiction when `M`
+#      is here, and it sends the reader to fix an export they are looking at.
+#   C. The reference's own alias names that module — `names_that_module`, whose
+#      own comment carries the case that motivated it.
 fn unresolved_name_hint(name: String, env: Dict types.Scheme) -> String =
-  match declaring_module(leaf, dict_keys(env), 0) with
+  match declaring_module(leaf, dict_keys(env), 0, env) with
   | Nothing -> ""
   | Just mod_name ->
-      if names_that_module(name, mod_name)
+      if mod_name != current_module(env) && names_that_module(name, mod_name)
       then "\n  note: `" ++ mod_name ++ "` declares `" ++ leaf
              ++ "`, which is not in scope here: " ++ why
       else ""
@@ -1522,9 +1540,30 @@ fn unresolved_name_hint(name: String, env: Dict types.Scheme) -> String =
 # A record diagnostic is raised by field resolution rather than by the bundler's
 # type check, so a marked name reaches it without passing anything that renders
 # the marker. Rendered here, the rejection reads as the rule it is.
-fn record_name_error(type_name: String, field_name: String) -> String =
+#
+# The wording stays deliberately conflated — one lookup failed, and it cannot say
+# which half without asking. What it CAN do is ask on the error path only: when
+# nothing in the environment describes a record by this name, the type is the
+# missing half, and a hidden record's construction gets the same note a hidden
+# constructor gets. A known record with an unknown field takes no note, or every
+# misspelt field would be reported as a visibility problem.
+fn record_name_error(type_name: String, field_name: String, env: Dict types.Scheme) -> String =
   if source.is_canonical_marked(type_name) then source.canonical_name_message(type_name)
-  else "Unknown record type or field: " ++ type_name ++ "." ++ field_name
+  else if record_type_known(type_name, env) then base
+  else base ++ unresolved_name_hint(type_name, env)
+  where base = "Unknown record type or field: " ++ type_name ++ "." ++ field_name
+
+fn record_type_known(type_name: String, env: Dict types.Scheme) -> Bool =
+  has_key_with_prefix("@rec:" ++ type_name ++ ":", dict_keys(env), 0)
+
+fn has_key_with_prefix(prefix: String, keys: Vec String, i: Int) -> Bool =
+  if i >= vec_length(keys) then false
+  else
+    match vec_get(i, keys) with
+    | Nothing -> false
+    | Just k ->
+        if str_starts_with(k, prefix) then true
+        else has_key_with_prefix(prefix, keys, i + 1)
 
 # Does the reference's own alias name the module the search landed on? The search
 # matches on the last component alone, so `sealed.trim` finds `stdlib.string.trim`
@@ -1548,21 +1587,141 @@ fn names_that_module(name: String, mod_name: String) -> Bool =
 # an error path, not the hot one. A file with many broken functions pays it once
 # per error; if that ever shows up in an editor profile, index by last component.
 #
-# `@`-prefixed keys are skipped. The environment is a shared namespace: alongside
-# the bindings it carries metadata under reserved prefixes (`@ctor:`, `@arity:`,
-# `@class:`, `@rec:`, …), and `@ctor:demo.sealed.Sealed` has the same last
-# component as the binding it describes.
-fn declaring_module(leaf: String, keys: Vec String, i: Int) -> Maybe String =
+# Almost every `@`-prefixed key is skipped. The environment is a shared namespace:
+# alongside the bindings it carries metadata under reserved prefixes (`@ctor:`,
+# `@arity:`, `@class:`, `@rec:`, …), and `@ctor:demo.sealed.Sealed` has the same
+# last component as the binding it describes. `key_subject` below is the one
+# exception and says why.
+fn declaring_module(leaf: String, keys: Vec String, i: Int, env: Dict types.Scheme) -> Maybe String =
   if i >= vec_length(keys) then Nothing
   else
     match vec_get(i, keys) with
     | Nothing -> Nothing
     | Just k ->
-        if str_starts_with(k, "@") == false
-           && str_find(k, ".") != -1
-           && string.after_last_dot(k) == leaf
-        then Just(str_slice(k, 0, str_len(k) - str_len(leaf) - 1))
-        else declaring_module(leaf, keys, i + 1)
+        match key_subject(k, env) with
+        | "" -> declaring_module(leaf, keys, i + 1, env)
+        | subject ->
+            if str_find(subject, ".") != -1 && string.after_last_dot(subject) == leaf
+            then Just(str_slice(subject, 0, str_len(subject) - str_len(leaf) - 1))
+            else declaring_module(leaf, keys, i + 1, env)
+
+# The canonical name a key is ABOUT, or "" for a key that names nothing. A record
+# type is the one declaration whose canonical name reaches the environment only
+# from inside a marker — its FIELDS are the bindings, the type is not one — so
+# without this case a hidden record's construction error could name no module to
+# go and look at.
+#
+# Only an ABSTRACT record answers — precondition A of the note, see
+# `unresolved_name_hint`. A published record is in scope for anybody who imports
+# it, so "declared over there and withheld" is false of it.
+fn key_subject(k: String, env: Dict types.Scheme) -> String =
+  if str_starts_with(k, "@rec:") then abstract_record_subject(k, env)
+  else if str_starts_with(k, "@") then ""
+  else k
+
+fn abstract_record_subject(k: String, env: Dict types.Scheme) -> String =
+  let Just(rec_name, _) = string.split_once(str_slice(k, str_len("@rec:"), str_len(k)), ":") else ""
+      Just _ = dict_get(abstract_record_marker(rec_name), env) else ""
+  in rec_name
+
+# --- Record representation privacy (spec-v0 §5.6.4) -------------------------
+#
+# `(..)` on a record declaration publishes its constructor AND its fields.
+# Construction is settled by the bundler, which simply does not bind the
+# constructor's name outside the declaring module. The other two ways in —
+# reading a field and rebuilding one by `with` — cannot be settled there: they
+# are resolved from the INFERRED type of a value, long after names are gone, so
+# they are checked here.
+#
+# Gating construction alone would have been theatre. An abstract record exists to
+# be handed out by its module's own functions, and `v with (x = ...)` turns one
+# value into every other; leaving `with` open would leave the invariant open.
+
+fn abstract_record_marker(name: String) -> String = "@abstract:" ++ name
+
+# The module whose declarations are currently being inferred. The one env marker
+# whose VALUE carries the name rather than its key: the check needs to READ the
+# name, and a key-encoded marker is only ever asked whether it is present.
+fn current_module_marker() -> String = "@in_module"
+
+fn enter_module(members: List (Int, ast.Decl), env: GlobalEnv) -> GlobalEnv =
+  match members with
+  | Nil -> env
+  | [(_, decl) | _] ->
+      GlobalEnv(dict_set(current_module_marker(),
+        types.mono(types.TConst(types.type_id(group_module(decl)))),
+        global_env_dict(env)))
+
+# A group whose module cannot be determined. Not a legal module name, so it can
+# never equal a record's owner, and record_is_abstract_here reads it as "do not
+# gate" rather than as "some other module".
+fn unattributed_module() -> String = "?"
+
+# Every name a declaration introduces is canonical by the time inference sees it,
+# so any one of them names the module.
+#
+# An instance introduces no name and there is nothing else to read it off. The
+# type it is FOR was tried and abandoned: it is unavailable for a prelude-headed
+# instance (`instance Label Int` names no module), so a module could not read its
+# OWN private record inside one — a program that compiled before records had
+# opacity at all. Guessing "" there means "the prelude", which makes every record
+# in the writing module look foreign.
+#
+# Attributing to the head type also bought nothing: an instance written FOR an
+# abstract record resolves to that record's own module, so the escape hatch it
+# was meant to narrow — declare a class, instance it for the foreign type, read
+# the fields — was wide open either way. So instances do not gate, which is one
+# rule instead of a guess, and costs no correct program.
+# BACKLOG: `An instance is the one way past record opacity`.
+fn group_module(decl: ast.Decl) -> String =
+  match decl with
+  | ast.InstanceDecl _ _ _ _ -> unattributed_module()
+  | _ ->
+      match list_append(ast.decl_type_names(decl),
+                        ast.scope_names_module(ast.decl_value_scopes(decl))) with
+      | [] -> unattributed_module()
+      | [name | _] -> owning_module(name)
+
+fn current_module(env: Dict types.Scheme) -> String =
+  match dict_get(current_module_marker(), env) with
+  | Nothing -> ""
+  | Just scheme ->
+      match types.scheme_type(scheme) with
+      | types.TConst id -> types.type_id_name(id)
+      | _ -> ""
+
+# `demo.recop.Opaque` -> `demo.recop`; a prelude name has no module and yields "".
+fn owning_module(canonical: String) -> String =
+  if str_find(canonical, ".") == -1 then ""
+  else str_slice(canonical, 0,
+    str_len(canonical) - str_len(string.after_last_dot(canonical)) - 1)
+
+# Both names are canonical, so this is a prefix question and needs no import
+# information: `demo.recop.Opaque` is reachable from `demo.recop.mk` and nowhere
+# else.
+fn record_is_abstract_here(rec_name: String, env: Dict types.Scheme) -> Bool =
+  match dict_get(abstract_record_marker(rec_name), env) with
+  | Nothing -> false
+  | Just _ ->
+      here != unattributed_module() && owning_module(rec_name) != here
+      where here = current_module(env)
+
+# Says what is missing, not what the other module did: a record reaches this
+# without being exported at all (a value escapes through an exported function's
+# return type), and "M exports the type without `(..)`" would then be false and
+# would point at an `export` line the reader would have to ADD to fix nothing.
+fn abstract_record_message(rec_name: String, field_name: String) -> String =
+  "`" ++ rec_name ++ "` is abstract here: " ++ owner
+    ++ " does not publish its representation (`export type ... (..)`), so field `"
+    ++ field_name ++ "` is readable only inside it (spec-v0 §5.6.4)"
+  where owner = describe_module(owning_module(rec_name))
+
+# `$entry` is the synthetic name a headerless entry file is given (bundler
+# `name_entry_module`). It is not a spelling anyone can write, so it is described
+# rather than quoted.
+fn describe_module(mod_name: String) -> String =
+  if mod_name == "" || mod_name == source.entry_module_name then "the file declaring it"
+  else "`" ++ mod_name ++ "`"
 
 fn infer_var(
   state: unifier.InferState,
@@ -1790,6 +1949,16 @@ fn mark_type_multiplicity(name: String, mult: ast.Multiplicity, env: Dict types.
       dict_set("@any_linear", types.mono(types.TConst(types.type_id("linear"))),
         dict_set("@linear:" ++ name, types.mono(types.TConst(types.type_id("linear"))), env))
   | ast.Unrestricted -> env
+
+# Presence is the bit, as with @linear: above. Only the ABSTRACT case is marked:
+# a published record is the permissive one, and a marker for it would have to be
+# read by everything that reads a record rather than only by the check.
+fn mark_record_representation(name: String, repr: ast.Representation, env: Dict types.Scheme) -> Dict types.Scheme =
+  match repr with
+  | ast.Abstract ->
+      dict_set(abstract_record_marker(name),
+        types.mono(types.TConst(types.type_id("abstract"))), env)
+  | ast.Published -> env
 
 # Every type this module declares is recorded as a "@type:<TypeName>" env marker,
 # the same sentinel idiom as @linear:/@arity: above. Markers are exported to
@@ -5545,7 +5714,7 @@ fn infer_record_fields(
             | InferErr pos e -> InferErr(pos, e)
             | InferOk typed_val s1 es1 val_eff ->
                 match dict_get(str_concat("@rec:", str_concat(type_name, str_concat(":", fname))), env) with
-                | Nothing -> InferErr(pos, record_name_error(type_name, fname))
+                | Nothing -> InferErr(pos, record_name_error(type_name, fname, env))
                 | Just field_scheme ->
                     # Substitute the SHARED param vars into the field's declared type
                     # (not a per-field fresh instantiate) so all fields and the result
@@ -5639,6 +5808,9 @@ fn lookup_record_field_typed(
   rec_eff: types.Effect,
   pos: source.SourcePos
 ) -> InferResult !{IO} =
+  if record_is_abstract_here(rec_name, env) then
+    InferErr(pos, abstract_record_message(rec_name, field_name))
+  else
   match dict_get(str_concat("@rec:", str_concat(rec_name, str_concat(":", field_name))), env) with
   | Nothing ->
       do
@@ -5719,6 +5891,9 @@ fn infer_update_resolved(
   match record_head_name(resolved) with
   | Nothing -> InferErr(pos, "record update `with` requires a record value on the left")
   | Just rec_name ->
+      if record_is_abstract_here(rec_name, env) then
+        InferErr(pos, abstract_record_message(rec_name, first_field_name(fields)))
+      else
       match first_dup_field(fields) with
       | Just dup -> InferErr(pos, "field `" ++ dup ++ "` supplied twice for record " ++ rec_name)
       | Nothing ->
@@ -5750,6 +5925,13 @@ fn concrete_field_type(field_scheme: types.Scheme, type_args: List types.Type) -
   match field_scheme with
   | types.Scheme qvars _ body _ _ ->
       unifier.apply_subst(build_tvar_subst(qvars, type_args, dict_empty()), body)
+
+# For a diagnostic only: an update rejected outright names the first field it was
+# asked to write, which is the one the reader's cursor is on.
+fn first_field_name(fields: List ast.RecordField) -> String =
+  match fields with
+  | Nil -> ""
+  | [ast.RecordField fname _ | _] -> fname
 
 # First field name appearing more than once in a record literal / update list.
 fn first_dup_field(fields: List ast.RecordField) -> Maybe String =
@@ -6394,7 +6576,7 @@ fn collect_declared_type_names(decls: List ast.Decl, acc: List String) -> List S
       match decl with
       | ast.TypeDecl name _ _ _ _ _ ->
           collect_declared_type_names(rest, Cons(string.after_last_dot(name), acc))
-      | ast.RecordDecl name _ _ _ _ _ ->
+      | ast.RecordDecl name _ _ _ _ _ _ ->
           collect_declared_type_names(rest, Cons(string.after_last_dot(name), acc))
       | ast.AliasDecl name _ _ _ ->
           collect_declared_type_names(rest, Cons(string.after_last_dot(name), acc))
@@ -6463,7 +6645,7 @@ fn validate_decl(decl: ast.Decl, declared: List String) -> Maybe String =
   match decl with
   | ast.TypeDecl name _ ctors _ _ _ ->
       validate_ctors(ctors, name, declared)
-  | ast.RecordDecl name _ fields _ _ _ ->
+  | ast.RecordDecl name _ fields _ _ _ _ ->
       validate_record_fields(fields, name, declared)
   | ast.AliasDecl name _ rhs _ ->
       validate_te(rhs, name, declared)
@@ -6535,7 +6717,7 @@ fn alias_uses_in_decl(decl: ast.Decl, arities: Dict Int) -> Maybe String =
   | ast.FnDecl _ params ret _ _ _ _ -> alias_uses_in_sig(params, ret, arities)
   | ast.ExternFnDecl _ params ret _ _ -> alias_uses_in_sig(params, ret, arities)
   | ast.TypeDecl _ _ ctors _ _ _ -> alias_uses_in_ctors(ctors, arities)
-  | ast.RecordDecl _ _ fields _ _ _ -> alias_uses_in_fields(fields, arities)
+  | ast.RecordDecl _ _ fields _ _ _ _ -> alias_uses_in_fields(fields, arities)
   | ast.AliasDecl _ _ rhs _ -> alias_uses_in_te(rhs, arities)
   | ast.WrapDecl _ inner _ _ -> alias_uses_in_te(inner, arities)
   | ast.ClassDecl _ _ methods _ _ -> alias_uses_in_class_methods(methods, arities)
@@ -7775,16 +7957,19 @@ fn typecheck_group(
 ) -> GroupResult !{IO} =
   do
     let members = group_members(decl_vec, g)
+    # Every member of a group shares a module: a group is mutually recursive
+    # declarations, and the bundler rejects import cycles, so one cannot span two.
+    let genv = enter_module(members, env)
     match members with
     | Nil -> GroupOk(out, env, subst, alias_env, env_ftv)
     | Cons m rest ->
         if all_fn_decls(members)
-        then typecheck_fn_group(state, members, env, subst, eff_subst, alias_env, out, env_ftv)
+        then typecheck_fn_group(state, members, genv, subst, eff_subst, alias_env, out, env_ftv)
         else
           match rest with
           | Nil ->
               match m with
-              | (i, decl) -> typecheck_singleton(state, i, decl, env, subst, eff_subst, alias_env, out, env_ftv)
+              | (i, decl) -> typecheck_singleton(state, i, decl, genv, subst, eff_subst, alias_env, out, env_ftv)
           | [_ | _] ->
               GroupErr(no_pos(), "internal: a multi-member binding group must contain only FnDecls")
 
@@ -8088,10 +8273,11 @@ fn typecheck_decl(
       TypedDeclOk(typed_ast.TPassThrough(decl),
         GlobalEnv(register_type_decl_raw(decl, alias_env, global_env_dict(env))),
         env_ftv, subst)
-  | ast.RecordDecl rec_name type_params fields _ mult _ ->
+  | ast.RecordDecl rec_name type_params fields _ mult repr _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl),
-        GlobalEnv(mark_type_multiplicity(rec_name, mult,
-          register_record_fields(rec_name, type_params, fields, alias_env, global_env_dict(env)))),
+        GlobalEnv(mark_record_representation(rec_name, repr,
+          mark_type_multiplicity(rec_name, mult,
+            register_record_fields(rec_name, type_params, fields, alias_env, global_env_dict(env))))),
         env_ftv, subst)
   | ast.FnDecl name _ _ _ _ _ decl_pos ->
       # Unreachable. typecheck_group routes EVERY FnDecl through typecheck_fn_group,
