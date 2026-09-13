@@ -51,7 +51,7 @@ export fn drop(value: Bytes, count: Int) -> Bytes =
   else if count >= length(value) then empty()
   else slice(value, count, length(value) - count)
 
-# O(stop - start): the half-open window `[start, stop)` in BYTES — `string.slice_between`
+# O(stop): the half-open window `[start, stop)` in BYTES — `string.slice_between`
 # counts codepoints at the same offsets. Prefer this to `slice(v, start, stop - start)`,
 # whose count goes negative when the two offsets arrive out of order.
 export fn slice_between(value: Bytes, start: Int, stop: Int) -> Bytes =

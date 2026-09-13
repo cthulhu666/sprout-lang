@@ -5231,7 +5231,7 @@ then_18:
   %t$39 = alloca i64
   store i64 %p$b, ptr %t$39
   %t$40 = call i64 @sprout_gc_push_i64_root(ptr %t$39)
-  %t$22 = call i64 @stdlib.tui.keys.paste_step(i64 %p$b, i64 %p$n, i64 %t$21)
+  %t$22 = call i64 @stdlib.tui.keys.paste_step(i64 %p$b, i64 %t$21)
   %t$41 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_18
 else_18:
@@ -6234,7 +6234,7 @@ join_3:
   ret i64 %t$4
 }
 
-define i64 @stdlib.tui.keys.paste_step(i64 %p$b, i64 %p$n, i64 %p$start) {
+define i64 @stdlib.tui.keys.paste_step(i64 %p$b, i64 %p$start) {
 entry:
   %t$4 = alloca i64
   store i64 %p$b, ptr %t$4

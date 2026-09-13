@@ -16,20 +16,25 @@ export fn slice(value: Bytes, start: Nat, count: Nat) -> Bytes
 
 This records why that is not buildable in Sprout today, so the next person does not re-derive it.
 
-## The codebase already wants it
+## What the codebase looked like when this was asked
 
-The invariant is built by hand at every site. `stdlib/http_server.sprout`, in the header parser:
+The invariant was built by hand at every site. `stdlib/http_server.sprout`, in the header parser,
+as it stood on 2026-09-12:
 
 ```sprout
 # A header-less request (HTTP/1.0-style) has the terminator right after
 # the request line, so `headers_end <= header_start` — return "" rather than slicing
-# a negative length (which aborts in str_slice).
+# a negative length.
 fn header_block(raw: String, line_end: Int, headers_end: Int) -> String =
   if headers_end <= header_start then ""
 ```
 
-Fourteen in-repo call sites compute the count as a subtraction. Each owes a hand proof that the
-difference is non-negative; the ones that have it wrote it in prose.
+Fourteen in-repo call sites computed the count as a subtraction. Each owed a hand proof that the
+difference was non-negative; the ones that had it wrote it in prose.
+
+Both halves of that are now gone — `str_slice` clamps rather than aborting, and the guard above was
+deleted outright when `slice_between` landed. The quote is kept as the statement of the problem,
+not as live code; §What was done instead records how each half was closed.
 
 ## Three blockers, of which two have since fallen
 
@@ -121,9 +126,12 @@ existed — `template.slice_between`, `lexer.slice_between`, `repl.drop_last`/`d
    header_start` test and the `keep` clamp in its read loop both vanished, because an inverted or
    over-long window is already the empty or whole result.
 
-Deliberately not migrated: `stdlib/http.sprout` and `stdlib/regex.sprout` reach prelude externs by
-bare name and import no `stdlib.string`, so adopting these would be a dependency change; the
-compiler-side copies are in `BACKLOG.md` behind a reseed.
+Deliberately not migrated, and each for its own reason. `stdlib/compiler/lexer.sprout`'s
+`slice_between` is **byte**-indexed (`str_slice_bytes` over `source.cursor_byte_offset`), so the
+codepoint-indexed `string.slice_between` is not a drop-in and adopting it would change behaviour;
+it needs the `bytes` twin over a String, which does not exist. `stdlib/http.sprout` and
+`stdlib/regex.sprout` reach prelude externs by bare name and import no `stdlib.string`, so adopting
+these would be a dependency change. The compiler-side copies are in `BACKLOG.md` behind a reseed.
 
 ## Prerequisites, if this is revisited
 
