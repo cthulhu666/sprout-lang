@@ -6,6 +6,10 @@ Legend:
 - Priority: `P0` (critical), `P1` (important), `P2` (later)
 - Status: `[ ]` todo, `[~]` in progress, `[x]` done
 
+One backlog lives outside this file: `.claude/skills/sprout-review/BACKLOG.md`, because that
+skill is meant to be liftable into another repository whole. It is held to the same shape rules
+by `just backlog-shape`. Nothing else may split off without the same justification.
+
 ## Backlog
 
 ### 1) Language Core and Safety
