@@ -42,8 +42,12 @@ trap 'rm -rf "$WORK"' EXIT
 # The writer SLEEPS after the Esc rather than closing: `TermEof` closes the
 # pump's channel, so a pipe that ends quits the app whatever the keys were, and
 # an exit would prove nothing. Holding the stream open makes the exit
-# attributable to Escape alone. The binary must be LAST in the pipeline so `$!`
-# is the process that matters.
+# attributable to Escape alone.
+#
+# Hence the FIFO rather than a pipeline: the writer must OUTLIVE the window but
+# must not be WAITED ON. `wait` takes a pid and waits for its whole job, so
+# waiting on the app waited out the writer's sleep too — most of this gate's
+# runtime. docs/gates.md §Driven smokes.
 #
 # `run_fail` is local so a later run cannot be blamed for an earlier one's
 # failure: keying the output dump off the global would dump all three whenever
@@ -58,7 +62,14 @@ run_ide() {
   # second entry would make which file Enter opens depend on the filesystem.
   printf 'hello\n' > "$fix/ZFILE"
 
-  eval "$keys" | ( cd "$fix" && exec "$BIN" "--save-when=$strategy" ) > "$out" 2>&1 &
+  # The writer inherits neither stdin nor stderr: killing it orphans its
+  # trailing `sleep`, and an orphan holding this script's stderr open makes a
+  # caller reading to EOF wait out the delay just removed.
+  local fifo="$WORK/$name.keys"
+  mkfifo "$fifo"
+  eval "$keys" < /dev/null > "$fifo" 2>"$WORK/$name.keys.err" &
+  local wpid=$!
+  ( cd "$fix" && exec "$BIN" "--save-when=$strategy" ) < "$fifo" > "$out" 2>&1 &
   local pid=$!
 
   # 15s: after the last key plus a read deadline, well before the writer's 20s,
@@ -68,8 +79,11 @@ run_ide() {
     if ! kill -0 $pid 2>/dev/null; then quit=1; break; fi
     sleep 0.1
   done
-  kill -9 $pid 2>/dev/null
-  wait $pid 2>/dev/null
+  # The writer's own children first, while it still HAS children: killing the
+  # subshell reparents its trailing `sleep` and `-P` can no longer find it.
+  pkill -P $wpid 2>/dev/null
+  kill -9 $pid $wpid 2>/dev/null
+  wait $pid $wpid 2>/dev/null
 
   if [ "$quit" -ne 1 ]; then
     echo "FAIL [$name]: still running 15s after Esc, with stdin still open" >&2
@@ -106,6 +120,12 @@ run_ide() {
   if [ "$run_fail" -ne 0 ]; then
     echo "--- captured output [$name] ---" >&2
     cat -v "$out" >&2
+    # The writer's stderr goes to a file rather than the terminal, so a failure
+    # that started there would otherwise be invisible.
+    if [ -s "$WORK/$name.keys.err" ]; then
+      echo "--- keystroke writer stderr [$name] ---" >&2
+      cat -v "$WORK/$name.keys.err" >&2
+    fi
     fail=1
   fi
 }
