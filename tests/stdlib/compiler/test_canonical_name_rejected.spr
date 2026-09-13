@@ -1,0 +1,141 @@
+module main
+
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.compiler as compiler
+import stdlib.compiler.source as source
+import stdlib.string as string
+import stdlib.env as env
+
+# A CANONICAL NAME IS NOT A WAY TO REACH A MODULE.
+#
+# The bundler flattens every module into one namespace and names each symbol
+# `<module>.<name>` whether it is exported or not, so writing that name by hand
+# used to reach any private binding — `demo.sealed.Sealed(-7)` forged a value its
+# smart constructor rejects, and `demo.dup_one.hidden_helper()` called a function
+# no module exports. Both compiled AND ran.
+#
+# The rule is now the one Haskell and Go use: a foreign name is reachable only
+# through an import, under its alias. Visibility is then the `(..)`/`export`
+# question, which is a separate diagnostic (test_unresolved_name_hint).
+#
+# The negative controls below carry the weight. A canonical name and a record
+# field chain (`o.inner.n`) lex as ONE identifier token each — `.` is an
+# ident-continue character — so the check cannot be syntactic, and a rule that
+# over-fires takes record access down with it.
+
+fn stdlib_root() -> String !{IO} =
+  match env.get("SPROUT_STDLIB_ROOT") with
+  | Just root -> root
+  | Nothing -> "stdlib"
+
+fn package_root() -> String = "tests/conformance/package_resolution/roots"
+
+# Exported, and the module IS imported. Still rejected: the rule is about the
+# spelling, not about visibility.
+fn canonical_exported_value() -> String =
+  `import demo.dup_one as d
+
+fn use_it() -> Int = demo.dup_one.one_value()
+`
+
+# Never exported by anyone. This is the forged-value half.
+fn canonical_private_value() -> String =
+  `import demo.dup_one as d
+
+fn use_it() -> Int = demo.dup_one.hidden_helper()
+`
+
+fn canonical_type() -> String =
+  `import demo.sealed as sealed
+
+fn peek(s: demo.sealed.Sealed) -> Int = sealed.unseal(s)
+`
+
+fn canonical_pattern() -> String =
+  `import demo.sealed as sealed
+
+fn peek(s: sealed.Sealed) -> Int =
+  match s with
+  | demo.sealed.Sealed n -> n
+`
+
+# --- negative controls: what the rule must NOT break -----------------------
+
+fn alias_qualified() -> String =
+  `import demo.sealed as sealed
+
+fn use_it() -> Int = maybe_with_default(0, map(sealed.unseal, sealed.seal(1)))
+`
+
+fn record_field_chain() -> String =
+  `type Inner = (n: Int)
+type Outer = (inner: Inner)
+
+fn peek(o: Outer) -> Int = o.inner.n
+`
+
+fn module_level_field_chain() -> String =
+  `type Point = (x: Int, y: Int)
+
+let origin = Point(x = 1, y = 2)
+
+fn use_it() -> Int = origin.x
+`
+
+fn fail_message(result: compiler.CompileResult) -> String =
+  match result with
+  | compiler.CompileOk _ -> ""
+  | compiler.CompileFail diags ->
+      match diags with
+      | Nil -> ""
+      | [d | _] ->
+          match d with
+          | compiler.DiagError _ msg -> msg
+          | compiler.DiagWarning _ msg -> msg
+
+fn check(src: String, root: String) -> String !{IO} =
+  do
+    result <- compiler.compile_source_with_roots(src, source.StdlibRoot(root),
+      Cons(package_root(), Nil))
+    fail_message(result)
+
+fn names_the_rule(msg: String) -> Bool =
+  string.contains(msg, "is a canonical name")
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    root <- stdlib_root()
+
+    exported <- check(canonical_exported_value(), root)
+    assert_true(state, "a canonical name is rejected even for an exported symbol",
+      names_the_rule(exported))
+
+    private_val <- check(canonical_private_value(), root)
+    assert_true(state, "a canonical name no longer reaches a private function",
+      names_the_rule(private_val))
+
+    ty <- check(canonical_type(), root)
+    assert_true(state, "a canonical name is rejected in type position",
+      names_the_rule(ty))
+
+    patt <- check(canonical_pattern(), root)
+    assert_true(state, "a canonical name is rejected in pattern position",
+      names_the_rule(patt))
+
+    # The message must say what to do instead, or it only tells the reader that a
+    # spelling they had every reason to expect to work does not.
+    assert_true(state, "the message names the module to import",
+      string.contains(exported, "demo.dup_one"))
+
+    alias <- check(alias_qualified(), root)
+    assert_true(state, "the alias spelling still compiles", alias == "")
+
+    chain <- check(record_field_chain(), root)
+    assert_true(state, "a record field chain still compiles", chain == "")
+
+    mod_chain <- check(module_level_field_chain(), root)
+    assert_true(state, "a chain rooted at a module-level value still compiles",
+      mod_chain == "")
+
+    summary(state)

@@ -1491,6 +1491,13 @@ fn build_field_chain(base: ast.Expr, rest: String, pos: source.SourcePos) -> ast
   | Nothing -> ast.GetFieldExpr(base, rest, pos)
   | Just (field, more) -> build_field_chain(ast.GetFieldExpr(base, field, pos), more, pos)
 
+# A name the bundler marked as hand-written canonical is a rejected program, not
+# an unknown one, so it displaces the unknown-name wording entirely: telling the
+# reader a name they can see in the other module is "unknown" would be a lie.
+fn unresolved_name_message(kind: String, name: String, env: Dict types.Scheme) -> String =
+  if source.is_canonical_marked(name) then source.canonical_name_message(name)
+  else kind ++ name ++ unresolved_name_hint(name, env)
+
 # A name the bundler could not resolve is absent from every import list, yet the
 # module that declares it put it in the environment under its canonical name — its
 # own code calls it. So the module CAN be named, and "Unknown variable: x.Y", which
@@ -1544,7 +1551,7 @@ fn infer_var(
   pos: source.SourcePos
 ) -> InferResult !{IO} =
   match dict_get(name, env) with
-  | Nothing -> InferErr(pos, "Unknown variable: " ++ name ++ unresolved_name_hint(name, env))
+  | Nothing -> InferErr(pos, unresolved_name_message("Unknown variable: ", name, env))
   | Just scheme ->
       match value_ref_eta(name, scheme, pos, env) with
       # Re-enter inference on the synthesized lambda, the same way the dotted-name case above
@@ -1931,7 +1938,7 @@ fn infer_call_var(
   pos: source.SourcePos
 ) -> InferResult !{IO} =
   match dict_get(name, env) with
-  | Nothing -> InferErr(cpos, "Unknown variable: " ++ name ++ unresolved_name_hint(name, env))
+  | Nothing -> InferErr(cpos, unresolved_name_message("Unknown variable: ", name, env))
   | Just scheme ->
       do
         (t, prog_to_fresh) <- unifier.instantiate_with_vars(state, scheme)
@@ -4634,7 +4641,7 @@ fn infer_ctor_pattern(
   fields: List ast.Pattern
 ) -> InferResult !{IO} =
   match dict_get(name, env) with
-  | Nothing -> InferErr(pos, "Unknown constructor: " ++ name ++ unresolved_name_hint(name, env))
+  | Nothing -> InferErr(pos, unresolved_name_message("Unknown constructor: ", name, env))
   | Just scheme ->
       do
         # Pattern position: existential vars in the ctor scheme become rigid

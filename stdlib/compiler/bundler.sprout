@@ -112,12 +112,19 @@ type ImportBinding =
 #              method_names
 #              unqual_values unqual_types unqual_classes
 #              alias_val_exports alias_type_exports
+#              canonical_names
+#
+# `canonical_names` is the one entry that is not per-module: it is every
+# `<module>.<name>` in the bundle, and it is here so the two `qualify_*_name`
+# fallbacks can tell a hand-written canonical name from a field chain. See
+# `guard_canonical`.
 type ResolveCtx =
   | ResolveCtx
       (Dict String) (Dict String) (Dict String)
       (List String)
       (Dict String) (Dict String) (Dict String)
       (Dict (Dict String)) (Dict (Dict String))
+      (Dict String)
 
 # ---------------------------------------------------------------------------
 # ModuleSymbols accessors
@@ -155,66 +162,69 @@ fn sym_extern_names(s: ModuleSymbols) -> List String =
 # ---------------------------------------------------------------------------
 
 fn ctx_value_locals(c: ResolveCtx) -> Dict String =
-  match c with | ResolveCtx v _ _ _ _ _ _ _ _ -> v
+  match c with | ResolveCtx v _ _ _ _ _ _ _ _ _ -> v
 
 fn ctx_type_locals(c: ResolveCtx) -> Dict String =
-  match c with | ResolveCtx _ t _ _ _ _ _ _ _ -> t
+  match c with | ResolveCtx _ t _ _ _ _ _ _ _ _ -> t
 
 fn ctx_class_locals(c: ResolveCtx) -> Dict String =
-  match c with | ResolveCtx _ _ cl _ _ _ _ _ _ -> cl
+  match c with | ResolveCtx _ _ cl _ _ _ _ _ _ _ -> cl
 
 fn ctx_method_names(c: ResolveCtx) -> List String =
-  match c with | ResolveCtx _ _ _ mn _ _ _ _ _ -> mn
+  match c with | ResolveCtx _ _ _ mn _ _ _ _ _ _ -> mn
 
 fn ctx_unqual_values(c: ResolveCtx) -> Dict String =
-  match c with | ResolveCtx _ _ _ _ uv _ _ _ _ -> uv
+  match c with | ResolveCtx _ _ _ _ uv _ _ _ _ _ -> uv
 
 fn ctx_unqual_types(c: ResolveCtx) -> Dict String =
-  match c with | ResolveCtx _ _ _ _ _ ut _ _ _ -> ut
+  match c with | ResolveCtx _ _ _ _ _ ut _ _ _ _ -> ut
 
 fn ctx_unqual_classes(c: ResolveCtx) -> Dict String =
-  match c with | ResolveCtx _ _ _ _ _ _ uc _ _ -> uc
+  match c with | ResolveCtx _ _ _ _ _ _ uc _ _ _ -> uc
 
 fn ctx_alias_val_exports(c: ResolveCtx) -> Dict (Dict String) =
-  match c with | ResolveCtx _ _ _ _ _ _ _ ave _ -> ave
+  match c with | ResolveCtx _ _ _ _ _ _ _ ave _ _ -> ave
 
 fn ctx_alias_type_exports(c: ResolveCtx) -> Dict (Dict String) =
-  match c with | ResolveCtx _ _ _ _ _ _ _ _ ate -> ate
+  match c with | ResolveCtx _ _ _ _ _ _ _ _ ate _ -> ate
+
+fn ctx_canonical_names(c: ResolveCtx) -> Dict String =
+  match c with | ResolveCtx _ _ _ _ _ _ _ _ _ cn -> cn
 
 fn ctx_with_methods(c: ResolveCtx, extra: List String) -> ResolveCtx =
   match c with
-  | ResolveCtx vl tl cl mn uv ut uc ave ate ->
-      ResolveCtx(vl, tl, cl, list_append(mn, extra), uv, ut, uc, ave, ate)
+  | ResolveCtx vl tl cl mn uv ut uc ave ate cn ->
+      ResolveCtx(vl, tl, cl, list_append(mn, extra), uv, ut, uc, ave, ate, cn)
 
 fn ctx_with_alias_val(c: ResolveCtx, alias: String, exports: Dict String) -> ResolveCtx =
   match c with
-  | ResolveCtx vl tl cl mn uv ut uc ave ate ->
-      ResolveCtx(vl, tl, cl, mn, uv, ut, uc, dict_set(alias, exports, ave), ate)
+  | ResolveCtx vl tl cl mn uv ut uc ave ate cn ->
+      ResolveCtx(vl, tl, cl, mn, uv, ut, uc, dict_set(alias, exports, ave), ate, cn)
 
 fn ctx_with_alias_type(c: ResolveCtx, alias: String, exports: Dict String) -> ResolveCtx =
   match c with
-  | ResolveCtx vl tl cl mn uv ut uc ave ate ->
-      ResolveCtx(vl, tl, cl, mn, uv, ut, uc, ave, dict_set(alias, exports, ate))
+  | ResolveCtx vl tl cl mn uv ut uc ave ate cn ->
+      ResolveCtx(vl, tl, cl, mn, uv, ut, uc, ave, dict_set(alias, exports, ate), cn)
 
 fn ctx_with_unqual_value(c: ResolveCtx, name: String, canonical: String) -> ResolveCtx =
   match c with
-  | ResolveCtx vl tl cl mn uv ut uc ave ate ->
-      ResolveCtx(vl, tl, cl, mn, dict_set(name, canonical, uv), ut, uc, ave, ate)
+  | ResolveCtx vl tl cl mn uv ut uc ave ate cn ->
+      ResolveCtx(vl, tl, cl, mn, dict_set(name, canonical, uv), ut, uc, ave, ate, cn)
 
 fn ctx_with_unqual_type(c: ResolveCtx, name: String, canonical: String) -> ResolveCtx =
   match c with
-  | ResolveCtx vl tl cl mn uv ut uc ave ate ->
-      ResolveCtx(vl, tl, cl, mn, uv, dict_set(name, canonical, ut), uc, ave, ate)
+  | ResolveCtx vl tl cl mn uv ut uc ave ate cn ->
+      ResolveCtx(vl, tl, cl, mn, uv, dict_set(name, canonical, ut), uc, ave, ate, cn)
 
 fn ctx_with_unqual_class(c: ResolveCtx, name: String, canonical: String) -> ResolveCtx =
   match c with
-  | ResolveCtx vl tl cl mn uv ut uc ave ate ->
-      ResolveCtx(vl, tl, cl, mn, uv, ut, dict_set(name, canonical, uc), ave, ate)
+  | ResolveCtx vl tl cl mn uv ut uc ave ate cn ->
+      ResolveCtx(vl, tl, cl, mn, uv, ut, dict_set(name, canonical, uc), ave, ate, cn)
 
 fn empty_resolve_ctx() -> ResolveCtx =
   ResolveCtx(dict_empty(), dict_empty(), dict_empty(), Nil,
              dict_empty(), dict_empty(), dict_empty(),
-             dict_empty(), dict_empty())
+             dict_empty(), dict_empty(), dict_empty())
 
 # ---------------------------------------------------------------------------
 # Utilities
@@ -932,7 +942,8 @@ fn add_ctors(mod_name: String, ctors: List ast.TypeConstructor, export_ctors: Bo
 # Resolution context from imports
 # ---------------------------------------------------------------------------
 
-fn build_resolve_ctx(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String, extra_roots: List String) -> ResolveCtx =
+fn build_resolve_ctx(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String,
+                     extra_roots: List String, canonical: Dict String) -> ResolveCtx =
   match mod with
   | ParsedModule _ path specs _ _ _ ->
       match dict_get(path, all_symbols) with
@@ -944,7 +955,46 @@ fn build_resolve_ctx(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_
                        sym_class_locals(own_syms),
                        sym_method_names(own_syms),
                        dict_empty(), dict_empty(), dict_empty(),
-                       dict_empty(), dict_empty()))
+                       dict_empty(), dict_empty(), canonical))
+
+# Every `<module>.<name>` the bundle declares, keyed for lookup. Built once per
+# bundle and handed to every module's ResolveCtx: a name that is in here and that
+# module-alias resolution declined is a canonical name someone typed, which is the
+# only way it could have been produced (spec-v0 §3).
+#
+# Deliberately drawn from the `*_locals` tables, not the `exported_*` ones. A
+# PRIVATE name is exactly the one this rule has to catch.
+fn all_canonical_names(all_symbols: Dict ModuleSymbols) -> Dict String =
+  canonical_names_of(all_symbols, vec_to_str_list(dict_keys(all_symbols), 0), dict_empty())
+
+fn canonical_names_of(all_symbols: Dict ModuleSymbols, paths: List String,
+                      acc: Dict String) -> Dict String =
+  match paths with
+  | Nil -> acc
+  | Cons p rest ->
+      match dict_get(p, all_symbols) with
+      | Nothing -> canonical_names_of(all_symbols, rest, acc)
+      | Just syms ->
+          canonical_names_of(all_symbols, rest,
+            add_canonical(sym_class_locals(syms),
+              add_canonical(sym_type_locals(syms),
+                add_canonical(sym_value_locals(syms), acc))))
+
+# The VALUES of a locals table are the canonical names; the keys are the bare
+# ones. Undotted values are skipped — a headerless module's names are canonical
+# AND bare, and marking those would take every ordinary reference with them.
+fn add_canonical(src: Dict String, acc: Dict String) -> Dict String =
+  add_canonical_keys(src, dict_keys_list(src), acc)
+
+fn add_canonical_keys(src: Dict String, keys: List String, acc: Dict String) -> Dict String =
+  match keys with
+  | Nil -> acc
+  | Cons k rest ->
+      match dict_get(k, src) with
+      | Nothing -> add_canonical_keys(src, rest, acc)
+      | Just canonical ->
+          add_canonical_keys(src, rest,
+            if str_find(canonical, ".") == -1 then acc else dict_set(canonical, "", acc))
 
 fn apply_imports_to_ctx(specs: List module_loader.ImportSpec, all_symbols: Dict ModuleSymbols, stdlib_root: String, extra_roots: List String, ctx: ResolveCtx) -> ResolveCtx =
   match specs with
@@ -1274,7 +1324,10 @@ fn qualify_type_expr(ctx: ResolveCtx, t: ast.TypeExpr) -> ast.TypeExpr =
   | ast.TupleType items -> ast.TupleType(qualify_type_list(ctx, items))
 
 fn qualify_type_name(ctx: ResolveCtx, name: String) -> String =
-  if str_find(name, ".") != -1 then qualify_qualified_type(ctx, name)
+  if str_find(name, ".") != -1 then
+    match qualified_type_lookup(ctx, name) with
+    | Just canonical -> canonical
+    | Nothing -> guard_canonical(ctx, name)
   else
     match dict_get(name, ctx_type_locals(ctx)) with
     | Just canonical -> canonical
@@ -1289,20 +1342,24 @@ fn qualify_type_name(ctx: ResolveCtx, name: String) -> String =
                 | Just canonical -> canonical
                 | Nothing -> name
 
-fn qualify_qualified_type(ctx: ResolveCtx, name: String) -> String =
+# `Nothing` means module-alias resolution DECLINED, which a String return could
+# not express: a single-segment module makes `demo.sealed` resolve to itself, and
+# "unchanged" then reads as "declined". guard_canonical turns that confusion into
+# a rejected program, so the two must stay distinguishable.
+fn qualified_type_lookup(ctx: ResolveCtx, name: String) -> Maybe String =
   match split_at_dot(name) with
-  | ("", _) -> name
+  | ("", _) -> Nothing
   | (alias, symbol) ->
       match dict_get(alias, ctx_alias_type_exports(ctx)) with
-      | Nothing -> name
-      | Just exports ->
-          match dict_get(symbol, exports) with
-          | Nothing -> name
-          | Just canonical -> canonical
+      | Nothing -> Nothing
+      | Just exports -> dict_get(symbol, exports)
 
 fn qualify_value_name(ctx: ResolveCtx, scope: List String, name: String) -> String =
   if str_list_member(name, scope) then name
-  else if str_find(name, ".") != -1 then qualify_qualified_value(ctx, name)
+  else if str_find(name, ".") != -1 then
+    match qualified_value_lookup(ctx, name) with
+    | Just canonical -> canonical
+    | Nothing -> guard_canonical(ctx, name)
   else
     match dict_get(name, ctx_value_locals(ctx)) with
     | Just canonical -> canonical
@@ -1313,16 +1370,28 @@ fn qualify_value_name(ctx: ResolveCtx, scope: List String, name: String) -> Stri
           | Just canonical -> canonical
           | Nothing -> name
 
-fn qualify_qualified_value(ctx: ResolveCtx, name: String) -> String =
+fn qualified_value_lookup(ctx: ResolveCtx, name: String) -> Maybe String =
   match split_at_dot(name) with
-  | ("", _) -> name
+  | ("", _) -> Nothing
   | (alias, symbol) ->
       match dict_get(alias, ctx_alias_val_exports(ctx)) with
-      | Nothing -> name
-      | Just exports ->
-          match dict_get(symbol, exports) with
-          | Nothing -> name
-          | Just canonical -> canonical
+      | Nothing -> Nothing
+      | Just exports -> dict_get(symbol, exports)
+
+# A dotted name no import claims is normally a field chain (`o.inner.n`) or a
+# genuine typo, and is left alone for inference to read. One shape is neither: a
+# `<module>.<name>` someone typed. The bundler flattens modules into one namespace
+# under exactly those names, so before this guard such a name resolved straight to
+# the binding — exported or not — and `export` and `(..)` were advisory.
+#
+# Marked rather than reported here: `qualify_value_name` returns a String and has
+# no error channel, and the marked name cannot resolve (nothing declares one), so
+# the existing unknown-name paths raise it with the position they already have.
+# `infer.unresolved_name_message` and `unresolved_type_message` render it.
+fn guard_canonical(ctx: ResolveCtx, name: String) -> String =
+  match dict_get(name, ctx_canonical_names(ctx)) with
+  | Nothing -> name
+  | Just _ -> source.canonical_marker() ++ name
 
 # Dot access whose head is a MODULE-LEVEL value (docs/records-v0.md §4.3).
 #
@@ -1341,6 +1410,11 @@ fn qualify_qualified_value(ctx: ResolveCtx, name: String) -> String =
 # disagree about precedence for names qualification DOES claim (there, module
 # wins; at inference, the value would); that divergence predates this rule and is
 # left alone deliberately, since changing it would change shadowing semantics.
+fn claimed_by_import(ctx: ResolveCtx, name: String) -> Bool =
+  match qualified_value_lookup(ctx, name) with
+  | Nothing -> false
+  | Just _ -> true
+
 fn dotted_value_field_access(
   ctx: ResolveCtx,
   scope: List String,
@@ -1349,7 +1423,7 @@ fn dotted_value_field_access(
 ) -> Maybe ast.Expr =
   if str_find(name, ".") == -1 then Nothing
   else if str_list_member(name, scope) then Nothing
-  else if qualify_qualified_value(ctx, name) != name then Nothing
+  else if claimed_by_import(ctx, name) then Nothing
   else
     match string.split_once(name, ".") with
     | Nothing -> Nothing
@@ -1617,22 +1691,30 @@ fn qualify_decls(ctx: ResolveCtx, decls: List ast.Decl) -> List ast.Decl =
 # Main pipeline
 # ---------------------------------------------------------------------------
 
+# The canonical-name table is bundle-wide, so it is built ONCE here rather than
+# per module inside build_resolve_ctx — which would make it quadratic in modules.
 fn qualify_all_modules(modules: List ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String, extra_roots: List String) -> List ast.Decl =
+  qualify_all_modules_with(modules, all_symbols, stdlib_root, extra_roots,
+                           all_canonical_names(all_symbols))
+
+fn qualify_all_modules_with(modules: List ParsedModule, all_symbols: Dict ModuleSymbols,
+                            stdlib_root: String, extra_roots: List String,
+                            canonical: Dict String) -> List ast.Decl =
   match modules with
   | Nil -> Nil
   | Cons mod rest ->
       match mod with
       | ParsedModule _ _ _ _ _ decls ->
           list_append(
-            qualify_decls(build_resolve_ctx(mod, all_symbols, stdlib_root, extra_roots), decls),
-            qualify_all_modules(rest, all_symbols, stdlib_root, extra_roots))
+            qualify_decls(build_resolve_ctx(mod, all_symbols, stdlib_root, extra_roots, canonical), decls),
+            qualify_all_modules_with(rest, all_symbols, stdlib_root, extra_roots, canonical))
 
 # ---------------------------------------------------------------------------
 # Post-qualification check: every type name must be one that exists
 # ---------------------------------------------------------------------------
 #
 # `qualify_type_name` returns its input unchanged when nothing in scope claims
-# the name, and `qualify_qualified_type` does the same for a dotted one. That
+# the name, and a dotted one whose alias lookup declines goes the same way. That
 # fallback is load-bearing rather than a bug: `stdlib/prelude.sprout` carries no
 # `module` header, so `Maybe`, `List` and `Result` are declared UNQUALIFIED and
 # every use of them in every module resolves through exactly this path. At the
@@ -2045,10 +2127,13 @@ fn exporting_module(name: String, declared_names: List String) -> Maybe String =
       else exporting_module(name, rest)
 
 fn unresolved_type_message(name: String, decl_name: String, declared: Dict String) -> String =
-  match exporting_module(name, dict_keys_list(declared)) with
-  | Nothing -> base
-  | Just mod_name ->
-      base ++ ". `" ++ mod_name ++ "` exports it — add it to that module's import list"
+  if str_starts_with(name, source.canonical_marker())
+  then source.canonical_name_message(name)
+  else
+    match exporting_module(name, dict_keys_list(declared)) with
+    | Nothing -> base
+    | Just mod_name ->
+        base ++ ". `" ++ mod_name ++ "` exports it — add it to that module's import list"
   where base = "unknown type `" ++ name ++ "` in `" ++ decl_name
                ++ "`: nothing in scope declares that name"
 
@@ -2199,7 +2284,9 @@ fn dump_qualify_module(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdli
   | ParsedModule mod_name path _ _ _ decls ->
       Cons(module_header_line(mod_name),
       Cons(ctx_status_line(path, all_symbols),
-      qualify_debug_lines_acc(build_resolve_ctx(mod, all_symbols, stdlib_root, Nil), decls, Nil)))
+      qualify_debug_lines_acc(
+        build_resolve_ctx(mod, all_symbols, stdlib_root, Nil, all_canonical_names(all_symbols)),
+        decls, Nil)))
 
 fn dump_qualify_modules_acc(modules: List ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String) -> List String =
   match modules with

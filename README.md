@@ -196,6 +196,12 @@ the cut falls there.
 
 An **imported** file must declare a `module` header — only the entry may be headerless.
 
+**A module path is not a name.** `demo.sealed.unseal(v)` is rejected even where
+`import demo.sealed as sealed` is in scope: import the module and use the alias
+(`sealed.unseal(v)`). Sprout follows Haskell and Go here, not Java or Rust — those
+full-path spellings reached private bindings, so `export` guarded nothing against a
+caller who knew the convention.
+
 ## Partial Application with `_`
 
 Leave arguments as holes with `_`, and a call becomes a function of the holes —

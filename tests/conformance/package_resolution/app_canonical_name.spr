@@ -1,0 +1,11 @@
+module main
+import demo.dup_one as d
+
+# `hidden_helper` is not exported by anyone. The bundler still names it
+# `demo.dup_one.hidden_helper` in the flat namespace it builds, and spelling that
+# name by hand used to reach it — so `export` guarded nothing against a caller who
+# knew the convention. Rejected on the spelling now, before visibility is even
+# consulted (spec-v0 §3).
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(demo.dup_one.hidden_helper()))
