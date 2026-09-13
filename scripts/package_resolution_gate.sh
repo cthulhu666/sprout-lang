@@ -131,5 +131,17 @@ for half in "construct:$ctor" "pattern:$pat"; do
   fi
 done
 
+# The batch CLI's half of the canonical-name rule. The env front end has its own
+# (tests/stdlib/compiler/test_canonical_name_rejected.spr); the two have diverged
+# before over package roots, which is why neither stands in for the other.
+can="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_canonical_name.spr" 2>&1)"
+if echo "$can" | grep -qF 'is a canonical name, not a way to reach a module'; then
+  echo "PASS canonical name: a private binding is unreachable by its bundled name"
+else
+  echo "FAIL canonical name: expected demo.dup_one.hidden_helper to be rejected"
+  echo "$can" | tail -3
+  fail=1
+fi
+
 [ "$fail" -eq 0 ] && echo "==> package-resolution gate: OK" || echo "==> package-resolution gate: FAILED"
 exit $fail

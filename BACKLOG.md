@@ -224,15 +224,6 @@ Legend:
   works around it by wrapping the record in a single-constructor ADT
   (`docs/tui-text-area-v0.md` §4.9). Adjacent rulings: the `import M (T)` constructor question in
   §7.5's neighbourhood, and `opaque type` under `wrap` ergonomics.
-- [ ] `P1` **A canonical name bypasses module privacy entirely.** The bundler flattens every module
-  into one namespace, naming each symbol `<module>.<name>` whether it is exported or not, so an
-  importer that spells the canonical name reaches any private binding. Both halves compile AND run:
-  `demo.sealed.Sealed(-7)` forges a value whose smart constructor rejects it, and
-  `demo.dup_one.hidden_helper()` calls a function no module exports. That contradicts spec-v0 §5.6.1
-  ("callers cannot forge one") and §3, which makes the implementation wrong, not the spec. Affects
-  every private declaration, not just constructors — `export` and `(..)` are advisory against anyone
-  who knows the spelling. Needs a design call: inference cannot see module boundaries, so the check
-  belongs where qualification happens, and must not reject the bundler's OWN rewrites.
 - [ ] `P2` **Move `stdlib.compiler` to a dedicated tooling/compiler namespace** once the non-stdlib
   tooling-package model is settled.
 - [ ] `P3` **Reconsider the prelude-bundling default (polarity + trigger).** The prelude is bundled

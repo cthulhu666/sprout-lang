@@ -236,6 +236,34 @@ export fn strip_entry_names(msg: String) -> String =
 export fn display_ctor_name(name: String) -> String =
   string.after_last_dot(name)
 
+# ── Hand-written canonical names ─────────────────────────────────────────────
+#
+# The bundler names every symbol `<module>.<name>`, exported or not, and its
+# environment is that flat map — so a source name spelled the same way used to
+# resolve straight to the binding and walk past `export` and `(..)`. The bundler
+# now MARKS such a name with this prefix (`bundler.guard_canonical`), because the
+# phase that can tell a typed name from a rewritten one has no error channel, and
+# a marked name resolves nowhere. The unknown-name paths downstream raise it.
+#
+# The marker and the message live here rather than in either of them: the bundler
+# renders it for types, `infer` for values and patterns, and one rule should not
+# grow three explanations.
+export fn canonical_marker() -> String = "@canonical:"
+
+export fn is_canonical_marked(name: String) -> Bool =
+  string.starts_with(name, canonical_marker())
+
+export fn strip_canonical_marker(name: String) -> String =
+  if is_canonical_marked(name)
+  then str_slice(name, str_len(canonical_marker()), str_len(name))
+  else name
+
+export fn canonical_name_message(marked: String) -> String =
+  "`" ++ bare ++ "` is a canonical name, not a way to reach a module — import `"
+    ++ str_slice(bare, 0, str_len(bare) - str_len(string.after_last_dot(bare)) - 1)
+    ++ "` and use its alias (spec-v0 §3)"
+  where bare = strip_canonical_marker(marked)
+
 # ── Header stripping ─────────────────────────────────────────────────────────
 #
 # strip_headers removes the leading block of `module` / `import` / comment /

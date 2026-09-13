@@ -119,6 +119,30 @@ nothing, so an import line outlived the declaration it named; and a name bound
 twice kept the last binding, so which symbol a bare name meant depended on import
 order, with the only symptom a type error elsewhere naming neither import.
 
+**An import is the only way to reach another module.** A compiled program is one
+flat namespace in which every symbol is named `<module>.<name>`, exported or not;
+writing such a name in source is rejected, whether or not the module is imported
+and whether or not the name is exported:
+
+```sprout
+import demo.sealed as sealed
+
+sealed.unseal(v)            # the only spelling
+demo.sealed.unseal(v)       # rejected: a canonical name, not a path
+```
+
+Without this, a name that `export` or `(..)` deliberately withheld was reachable
+by anyone who knew the convention, and visibility was advisory. Haskell and Go
+draw the line in the same place — a qualified name is legal only through an
+import, and only for an exported symbol. Rust, Java and OCaml instead admit a
+full path but check visibility along it; Sprout's alias-based imports make the
+first rule the coherent one, and admitting paths later would be additive.
+
+This is a rule about spelling, applied before visibility: the diagnostic names
+the module to import rather than discussing exports. A dotted name that is *not*
+a canonical name is untouched, so field-access chains (`opts.look.normal`,
+§ Records) are unaffected.
+
 ### 3.1 Prelude scope
 
 **The prelude is available in every file, unconditionally.** Its declarations are
