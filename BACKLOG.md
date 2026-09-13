@@ -683,13 +683,12 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   payload of a reply it has judged stale, so the pane cannot name the file it dropped. Wants a note
   that does not need the payload, or `at_least`. Design: `docs/ide-v0.md` §5.2.
 - [ ] `P1` **IDE — no undo, and autosave is now on by default.** Nothing takes a keystroke back:
-  the pane holds one `buffer.Buffer` and no history, and §4's `text_area` entry has the same gap.
-  Explicit saving used to make that survivable — an unsaved buffer was its own escape hatch — and
-  `docs/ide-save-v0.md` removed that floor: a mistyped key reaches disk a second later with git as
-  the only recovery. Every editor surveyed there has something underneath (Local History, `#foo#`,
-  Timeline); Sprout has nothing. `--save-when=manual` is the only mitigation today. Wants an undo
-  stack in the pane, and a decision on whether a local history belongs in v0. Design:
-  `docs/ide-save-v0.md` §8.
+  the pane holds one `buffer.Buffer` and no history, and §4's `text_area` entry has the same gap —
+  both hold the same type, so one fix serves both. Autosave removed the floor that made it
+  survivable (an unsaved buffer was its own escape hatch): a mistyped key now reaches disk a second
+  later with git as the only recovery, and `--save-when=manual` is the only mitigation.
+  Designed but not implemented, and §9 (local history in v0?) wants a call:
+  `docs/tui-undo-v0.md`.
 - [ ] `P3` **`app.step_to` recurses forever when `update` re-sends the message it is given.**
   `delivered` (`app.sprout:126`) answers an unclaimed delivery with `apply(update, [msg], w)`, so
   an `update` arm whose handling of `msg` is `step_to(update, w, id, msg)` — the obvious spelling
