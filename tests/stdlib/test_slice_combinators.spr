@@ -1,0 +1,64 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.bytes as bytes
+import stdlib.string as string
+
+# `slice_between`, `take_last` and `drop_last` name the three windows whose longhand
+# spelling computes a count by subtraction, which is where a negative one comes from.
+# Each was reinvented privately in `stdlib/template.sprout`, `stdlib/compiler/lexer.sprout`
+# and `stdlib/repl.sprout` before living here.
+#
+# The `String` and `Bytes` halves index in DIFFERENT units — codepoints and bytes — so
+# every case below runs on both, and the UTF-8 cases pin the divergence rather than
+# working around it.
+
+fn rendered(value: Bytes) -> String =
+  match bytes.to_string(value) with
+  | Ok text -> text
+  | Err _ -> "<invalid utf-8>"
+
+fn from(raw: String) -> Bytes =
+  bytes.from_string(raw)
+
+fn main() -> Unit !{IO} =
+  run_suite("slice combinators", [
+    # --- slice_between: a half-open window, so stop is exclusive ---
+    check_eq("str between", string.slice_between("hello world", 6, 11), "world"),
+    check_eq("str between from zero", string.slice_between("hello", 0, 2), "he"),
+    check_eq("str between empty window", string.slice_between("hello", 2, 2), ""),
+    # The case the subtraction got wrong: stop < start must not slice a negative count.
+    check_eq("str between inverted", string.slice_between("hello", 4, 1), ""),
+    check_eq("str between past end", string.slice_between("hello", 3, 99), "lo"),
+    check_eq("str between negative start", string.slice_between("hello", -2, 3), "hel"),
+    check_eq("bytes between", rendered(bytes.slice_between(from("hello world"), 6, 11)), "world"),
+    check_eq("bytes between inverted", rendered(bytes.slice_between(from("hello"), 4, 1)), ""),
+    check_eq("bytes between past end", rendered(bytes.slice_between(from("hello"), 3, 99)), "lo"),
+
+    # --- take_last / drop_last: the suffix window, counted from the end ---
+    check_eq("str take_last", string.take_last("hello", 2), "lo"),
+    check_eq("str take_last zero", string.take_last("hello", 0), ""),
+    check_eq("str take_last negative", string.take_last("hello", -2), ""),
+    check_eq("str take_last past length", string.take_last("hello", 99), "hello"),
+    check_eq("str drop_last", string.drop_last("hello", 2), "hel"),
+    check_eq("str drop_last zero", string.drop_last("hello", 0), "hello"),
+    check_eq("str drop_last negative", string.drop_last("hello", -2), "hello"),
+    check_eq("str drop_last past length", string.drop_last("hello", 99), ""),
+    check_eq("bytes take_last", rendered(bytes.take_last(from("hello"), 2)), "lo"),
+    check_eq("bytes take_last past length", rendered(bytes.take_last(from("hello"), 99)), "hello"),
+    check_eq("bytes drop_last", rendered(bytes.drop_last(from("hello"), 2)), "hel"),
+    check_eq("bytes drop_last past length", rendered(bytes.drop_last(from("hello"), 99)), ""),
+
+    # --- take_last and drop_last partition the input ---
+    check_eq("str take_last ++ drop_last partition",
+      string.drop_last("hello", 2) ++ string.take_last("hello", 2), "hello"),
+
+    # --- the unit divergence, pinned rather than hidden ---
+    # "Cześć" is 5 codepoints and 7 bytes; ś and ć are two bytes each. At the SAME
+    # indices the String half takes four characters and the Bytes half splits ś in two.
+    check_eq("str between counts codepoints", string.slice_between("Cześć", 0, 4), "Cześ"),
+    check_eq("bytes between counts bytes", rendered(bytes.slice_between(from("Cześć"), 0, 4)),
+      "<invalid utf-8>"),
+    check_eq("bytes between on the ascii prefix", rendered(bytes.slice_between(from("Cześć"), 0, 3)),
+      "Cze"),
+    check_eq("str take_last counts codepoints", string.take_last("Cześć", 2), "ść"),
+    check_eq("bytes take_last counts bytes", rendered(bytes.take_last(from("Cześć"), 2)), "ć")
+  ])

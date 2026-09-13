@@ -1,7 +1,8 @@
 # A non-negative integer type — why not yet
 
-Status: **parked**, on blocker 3 alone since 2026-09-12 — blockers 1 and 2 were cleared by wrap
-constructor hiding. Not normative.
+Status: **declined for this problem** since 2026-09-13, not merely parked. Blockers 1 and 2 were
+cleared by wrap constructor hiding, and blocker 3 turned out not to bind here at all — the verdict
+now rests on the combinator argument below. Not normative.
 
 ## The question
 
@@ -56,13 +57,22 @@ either, so even `slice(s, 3, 5)` would need an explicit constructor per literal.
 The same wall was already hit for typed paths: `BACKLOG.md` asks for `File`/`Dir` wraps reachable
 only through validating constructors, under **`stdlib.path` — the typed half**.
 
-## Why it stays parked: blocker 3, and the relocation argument below
+## Blocker 3 does not actually bind — and an enforceable `Nat` was built
 
-Blocker 3 alone is disqualifying — a `Nat` you cannot add to or subtract from is not a numeric
-type — and the section after it is independent of all three blockers. Both survive the change
-above, so the verdict is unchanged; only two of its three supports are gone.
+The earlier verdict said blocker 3 was disqualifying. Probing it in 2026-09-13 showed otherwise: an
+abstract `wrap Nat = Int` with a smart constructor, a `slice_nat` taking two of them, and a
+cross-module caller all compile and run today, with the invariant enforced and nothing allocated.
+Slicing never needs `Nat` *arithmetic* — the caller stays in `Int` and converts at the boundary,
+which is exactly what #4 asks for. Blocker 3 blocks `Nat` as a **numeric type**; it never blocked
+`Nat` as a **boundary token**, and conflating the two is what made the old verdict look settled.
 
-## Even with all three, `Nat` relocates the check rather than removing it
+Hiding the constructor also added a cost the first draft could not have seen, because it predates
+the feature: every literal index now needs a call. `nat : Int -> Maybe Nat` puts a refutable binding
+at each one; a total `nat_clamp` scatters clamps across call sites, which is strictly worse than the
+single documented clamp inside `slice`. So the honest reading is that `Nat` is *available* and still
+not *worth it* — for the reason in the next section, which never depended on any of the three.
+
+## The real reason: `Nat` relocates the check, and a combinator removes it
 
 `Nat` is not closed under subtraction, and every hazardous site here *is* a subtraction —
 `bytes.length(raw) - body_start`. So `Nat - Nat` must be one of:
@@ -75,7 +85,25 @@ above, so the verdict is unchanged; only two of its three supports are gone.
 
 Only the second is real, and it is the same number of checks as today, moved earlier. That is the
 point of #4 — a boundary check once, then a type that cannot be invalid — but it is placement, not
-elimination, and it should be argued on that basis.
+elimination.
+
+Classifying every subtraction that feeds a `slice` in `stdlib/` and `ide/` shows what elimination
+looks like. There are three shapes, and a named window covers each:
+
+| Shape | Sites | What deletes the subtraction |
+|---|---|---|
+| `slice(v, n, length(v) - n)` | ~8 | `take` / `drop` |
+| `slice(s, start, stop - start)` | ~4 | `slice_between(s, start, stop)` |
+| `slice(s, length(s) - k, k)` | ~2 | `take_last` / `drop_last` |
+
+`Nat` helps none of them, and on the middle shape it *hurts*: `stop - start` over two `Nat`s
+reinstates the monus-vs-`Maybe` choice above, while `slice_between(s, start, stop)` has no
+subtraction to get wrong. Removing the computation that can produce an illegal value is strictly
+stronger than typing that computation's result.
+
+The decisive evidence is that the codebase reinvented these privately four times before they
+existed — `template.slice_between`, `lexer.slice_between`, `repl.drop_last`/`drop_last_count` and
+`http.str_drop` — and never once reached for a `Nat`.
 
 ## What was done instead
 
@@ -87,8 +115,15 @@ elimination, and it should be argued on that basis.
    Removing the subtraction is #3 achieved with today's language: the count cannot go negative
    because the caller never computes one.
 
-Remaining: the `string`-side sites that still spell `drop` as a subtraction (`stdlib/tui/keys.sprout`,
-`stdlib/repl.sprout`) can move to `string.drop`. Behaviour-preserving, not urgent.
+3. **`slice_between`, `take_last` and `drop_last` added to both `stdlib.string` and `stdlib.bytes`**
+   (2026-09-13), and the private reinventions and subtraction sites migrated onto them. Two of the
+   windows they name were guards in disguise: `http_server.header_block`'s `headers_end <=
+   header_start` test and the `keep` clamp in its read loop both vanished, because an inverted or
+   over-long window is already the empty or whole result.
+
+Deliberately not migrated: `stdlib/http.sprout` and `stdlib/regex.sprout` reach prelude externs by
+bare name and import no `stdlib.string`, so adopting these would be a dependency change; the
+compiler-side copies are in `BACKLOG.md` behind a reseed.
 
 ## Prerequisites, if this is revisited
 

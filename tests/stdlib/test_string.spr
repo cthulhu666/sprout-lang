@@ -35,6 +35,12 @@ fn main() -> Unit !{IO} =
 
     check_true("ends_with match", ends_with("hello", "llo")),
     check_false("ends_with no match", ends_with("hello", "hel")),
+    # `ends_with` carries no length guard — it leans on `take_last` returning the
+    # whole string, which cannot equal a longer suffix. These pin that.
+    check_false("ends_with suffix longer than raw", ends_with("hi", "hello")),
+    check_true("ends_with empty suffix", ends_with("hello", "")),
+    check_true("ends_with whole string", ends_with("hello", "hello")),
+    check_false("ends_with empty raw", ends_with("", "x")),
 
     check_true("contains match", contains("hello world", "world")),
     check_false("contains no match", contains("hello", "xyz")),

@@ -47,7 +47,7 @@ fn resume(b: Bytes, n: Int, i: Int, acc: List event.Event,
   match s with
   | Emit e next -> go(b, n, next, Cons(e, acc))
   | Skip next -> go(b, n, next, acc)
-  | Incomplete -> (list_reverse(acc), bytes.slice(b, i, n - i))
+  | Incomplete -> (list_reverse(acc), bytes.drop(b, i))
 
 fn step(b: Bytes, n: Int, i: Int) -> Step = dispatch(b, n, i, byte_at(b, i))
 
@@ -224,10 +224,9 @@ fn tilde_code(p: Int) -> Maybe event.Key =
 # and Cy ordinates and a final character which is M for button press and m for
 # button release." Coordinates are 1-based on the wire and 0-based here.
 fn mouse_step(params: String, f: Int, next: Int) -> Step =
-  mouse_event(param_at(string.slice(params, 1, string.length(params) - 1), 0),
-              param_at(string.slice(params, 1, string.length(params) - 1), 1),
-              param_at(string.slice(params, 1, string.length(params) - 1), 2),
-              f, next)
+  mouse_event(param_at(fields, 0), param_at(fields, 1), param_at(fields, 2), f, next)
+where
+  fields = string.drop(params, 1)
 
 fn mouse_event(btn: Int, col: Int, row: Int, f: Int, next: Int) -> Step =
   if f == 77 then Emit(event.MousePress(mouse_button(btn), at(col, row)), next)
@@ -253,7 +252,7 @@ fn mouse_button(btn: Int) -> event.MouseButton =
 # decoding the body would re-open the injection it exists to prevent. Without
 # the terminator the paste is a prefix, not a short paste.
 fn paste_step(b: Bytes, n: Int, start: Int) -> Step =
-  paste_at(b, start, bytes.find(bytes.slice(b, start, n - start), end_marker()))
+  paste_at(b, start, bytes.find(bytes.drop(b, start), end_marker()))
 
 fn end_marker() -> Bytes =
   bytes.append(bytes.singleton(27), bytes.from_string("[201~"))
