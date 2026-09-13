@@ -1417,16 +1417,15 @@ deferral happened, not for current behaviour. Still open:
   `SproutCtorMeta` + an ADT pretty-printer under `tools/`. M3: `just build-debug`/`debug-run`
   recipes and a docs section. Strictly opt-in; M1 scopes `!dbg` to user modules to avoid misleading
   attribution in multi-file bundles. Overlaps the narrower stack-overflow-diagnostic-v2 item in §7.
-- [ ] `P2` **`stdlib.path` — the typed half.** `stdlib.fs.path` landed 2026-09-05 with the pure
-  String-based ops (`join`, `basename`, `dirname`, `extension`, `stem`, `split`, `normalize`,
-  `relative_to`, `is_absolute`), so what remains from `docs/stdlib-path-v1-draft.md` is the typed
-  surface: `File`/`Dir` wraps exported WITHOUT `(..)`, so the validating `path.file`/`path.dir`
-  (empty and NUL rejected) are the only way in; migrating `read_file`/`write_file`/`*_exists`/
-  `dir_list` to take them, and retiring
-  the compiler's `FilePath`/`StdlibRoot` into `path.File`/`path.Dir`. Constraints: POSIX-only, no
-  absolute-vs-relative type distinction, no eager normalization, no symlink resolution, no
-  byte-level paths. The POSIX-only constraint is unblocked by §10's **Milestone B**, not A —
-  Win32 accepts forward slashes, so paths stay non-load-bearing until the compiler runs there.
+- [ ] `P3` **`stdlib.fs.path` — the typed half, and whether it earns its cost.** What remains from
+  `docs/stdlib-path-v1-draft.md` is `File`/`Dir` wraps exported without `(..)`, with `path.file`/
+  `path.dir` as the only way in; then migrating `read_text`/`write_text`/`is_file`/`is_dir`/
+  `list_dir` and retiring the compiler's `FilePath`/`StdlibRoot` into them. Construction is
+  **total** — `PathErr` was deleted 2026-09-13 once both its cases proved to be non-problems (the
+  runtime already rejects an empty path; an embedded NUL is unrepresentable), which also closed the
+  `PathErr`/`IoErr` seam. So the migration is mechanical but large: ~90 call sites plus 27 golden
+  lines. Dropped to P3 because the remaining value is intent-marking, not validation, and the one
+  place that threads a path already has wraps — see the draft's open question 4 before starting.
 - [ ] `P3` **Expand native ADT lowering.** `docs/native-adt-lowering-v1.md`. The `Nothing` singleton
   and immediate-match optimization for direct constructor-producing scrutinees landed; planned:
   broader constructor forwarding, whole-scrutinee binding, and specialized representations for tiny
