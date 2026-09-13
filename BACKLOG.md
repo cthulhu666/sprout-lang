@@ -224,6 +224,14 @@ Legend:
   works around it by wrapping the record in a single-constructor ADT
   (`docs/tui-text-area-v0.md` §4.9). Adjacent rulings: the `import M (T)` constructor question in
   §7.5's neighbourhood, and `opaque type` under `wrap` ergonomics.
+- [ ] `P3` **An unresolved name under a renamed alias gets no "declared here" note.** The note that
+  names the module declaring an unexported symbol (`infer.unresolved_name_hint`) searches the
+  environment by last component alone, so it cannot confirm the reference's alias names the module
+  it found. It requires the alias to equal the module's last segment — the default alias — and
+  stays silent otherwise, because `sealed.trim` finding `stdlib.string.trim` produced a note that
+  contradicted itself. `import demo.dup_one as d` then `d.hidden_helper()` therefore gets the bare
+  error. Fix: hand the bundler's per-module alias map down to inference, and key the search on it
+  instead of on the last segment. Pinned by `test_unresolved_name_hint.spr`'s renamed-alias case.
 - [ ] `P2` **Move `stdlib.compiler` to a dedicated tooling/compiler namespace** once the non-stdlib
   tooling-package model is settled.
 - [ ] `P3` **Reconsider the prelude-bundling default (polarity + trigger).** The prelude is bundled
