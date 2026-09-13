@@ -93,7 +93,7 @@ export fn entry_is_file(e: Entry) -> Bool =
 # checks it. `FsIoError` is what buys back the room those languages get from
 # being open: a newly classified errno moves out of it into its own
 # constructor.
-export type FsError (..) =
+export type FsError (..) deriving (ToString) =
   | FsNotFound String
   | FsPermissionDenied String
   | FsAlreadyExists String
