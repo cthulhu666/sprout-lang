@@ -1072,9 +1072,10 @@ and the pattern are ordinary. This is the rule `export type` already uses
 (§3), applied to the one shape that previously ignored it.
 
 Reaching for a hidden constructor is an unknown-name error — `Unknown
-variable` in expression position, `Unknown constructor` in a pattern —
-carrying a note that names the declaring module and this marker, so the
-two cases stay distinguishable from a misspelling.
+variable` in expression position, `Unknown constructor` in a pattern.
+Where the compiler can identify the declaring module it adds a note naming
+it and this marker, so the case stays distinguishable from a misspelling;
+the note is advisory and withheld when that module cannot be confirmed.
 
 Wrap types primarily enable **mistake-prevention without runtime cost**: types
 like `Metres` vs `Seconds`, `UserId` vs `OrderId`, or the `BodyEnv` /

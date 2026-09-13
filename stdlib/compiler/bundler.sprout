@@ -1327,7 +1327,7 @@ fn qualify_type_name(ctx: ResolveCtx, name: String) -> String =
   if str_find(name, ".") != -1 then
     match qualified_type_lookup(ctx, name) with
     | Just canonical -> canonical
-    | Nothing -> guard_canonical(ctx, name)
+    | Nothing -> guard_canonical(ctx, Nil, name)
   else
     match dict_get(name, ctx_type_locals(ctx)) with
     | Just canonical -> canonical
@@ -1354,12 +1354,31 @@ fn qualified_type_lookup(ctx: ResolveCtx, name: String) -> Maybe String =
       | Nothing -> Nothing
       | Just exports -> dict_get(symbol, exports)
 
+# DOTTED-NAME CASCADE — do not reorder, and do not drop a step, without checking
+# all four readings a dotted name has. Only the last is an error:
+#   A. A binder named by the WHOLE dotted name — the `scope` test below. Rare;
+#      a name with a dot in it is not writable as a binder, but lambdas and
+#      `do` binds thread names in verbatim.
+#   B. A field chain whose HEAD is a module-level value (`origin.x`) — claimed
+#      earlier, in `qualify_expr`, by `dotted_value_field_access`. It must stay
+#      ahead of this function: it declines whenever alias resolution would claim
+#      the name, so the two cannot both fire.
+#   C. An alias-qualified import (`sealed.unseal`) — `qualified_value_lookup`.
+#   D. Anything left: a field chain rooted at a LOCAL, a method name, a typo, or
+#      a hand-written canonical name. `guard_canonical` separates the last from
+#      the rest and must run here, after C has declined — running it earlier
+#      would reject `sealed.unseal`, whose canonical form is in the same table.
+#
+# `guard_canonical` re-tests the HEAD against `scope` because the test below
+# matches only the whole name: for `demo.dup_one.x` the binder is `demo`. Drop
+# that and a parameter named after a module turns a correct chain (reading D)
+# into a rejected program, which no test sees unless its fixture collides.
 fn qualify_value_name(ctx: ResolveCtx, scope: List String, name: String) -> String =
   if str_list_member(name, scope) then name
   else if str_find(name, ".") != -1 then
     match qualified_value_lookup(ctx, name) with
     | Just canonical -> canonical
-    | Nothing -> guard_canonical(ctx, name)
+    | Nothing -> guard_canonical(ctx, scope, name)
   else
     match dict_get(name, ctx_value_locals(ctx)) with
     | Just canonical -> canonical
@@ -1388,10 +1407,22 @@ fn qualified_value_lookup(ctx: ResolveCtx, name: String) -> Maybe String =
 # no error channel, and the marked name cannot resolve (nothing declares one), so
 # the existing unknown-name paths raise it with the position they already have.
 # `infer.unresolved_name_message` and `unresolved_type_message` render it.
-fn guard_canonical(ctx: ResolveCtx, name: String) -> String =
-  match dict_get(name, ctx_canonical_names(ctx)) with
-  | Nothing -> name
-  | Just _ -> source.canonical_marker() ++ name
+# `scope` is the enclosing binders. `qualify_value_name` tests the WHOLE dotted
+# name against it, which a field chain never matches — for `demo.dup_one.x` the
+# binder is `demo`, the HEAD. Without that second test a parameter named after a
+# module turns a correct chain into a rejected program, because the chain happens
+# to spell a canonical name. Types pass `Nil`: a type name's head is never a local.
+fn guard_canonical(ctx: ResolveCtx, scope: List String, name: String) -> String =
+  if str_list_member(head_segment(name), scope) then name
+  else
+    match dict_get(name, ctx_canonical_names(ctx)) with
+    | Nothing -> name
+    | Just _ -> source.canonical_marker() ++ name
+
+fn head_segment(name: String) -> String =
+  match split_at_dot(name) with
+  | ("", whole) -> whole
+  | (head, _) -> head
 
 # Dot access whose head is a MODULE-LEVEL value (docs/records-v0.md §4.3).
 #
@@ -1410,7 +1441,7 @@ fn guard_canonical(ctx: ResolveCtx, name: String) -> String =
 # disagree about precedence for names qualification DOES claim (there, module
 # wins; at inference, the value would); that divergence predates this rule and is
 # left alone deliberately, since changing it would change shadowing semantics.
-fn claimed_by_import(ctx: ResolveCtx, name: String) -> Bool =
+fn is_claimed_by_import(ctx: ResolveCtx, name: String) -> Bool =
   match qualified_value_lookup(ctx, name) with
   | Nothing -> false
   | Just _ -> true
@@ -1423,7 +1454,7 @@ fn dotted_value_field_access(
 ) -> Maybe ast.Expr =
   if str_find(name, ".") == -1 then Nothing
   else if str_list_member(name, scope) then Nothing
-  else if claimed_by_import(ctx, name) then Nothing
+  else if is_claimed_by_import(ctx, name) then Nothing
   else
     match string.split_once(name, ".") with
     | Nothing -> Nothing
@@ -2279,21 +2310,28 @@ fn qualify_debug_lines_acc(ctx: ResolveCtx, decls: List ast.Decl, acc: List Stri
   | Cons d rest ->
       qualify_debug_lines_acc(ctx, rest, Cons(qualify_debug_line(ctx, d), acc))
 
-fn dump_qualify_module(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String) -> List String =
+fn dump_qualify_module(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String,
+                       canonical: Dict String) -> List String =
   match mod with
   | ParsedModule mod_name path _ _ _ decls ->
       Cons(module_header_line(mod_name),
       Cons(ctx_status_line(path, all_symbols),
       qualify_debug_lines_acc(
-        build_resolve_ctx(mod, all_symbols, stdlib_root, Nil, all_canonical_names(all_symbols)),
+        build_resolve_ctx(mod, all_symbols, stdlib_root, Nil, canonical),
         decls, Nil)))
 
+# Same once-per-bundle rule as `qualify_all_modules`: build the canonical table
+# here, not inside the per-module function, or the debug dump is quadratic.
 fn dump_qualify_modules_acc(modules: List ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String) -> List String =
+  dump_qualify_modules_with(modules, all_symbols, stdlib_root, all_canonical_names(all_symbols))
+
+fn dump_qualify_modules_with(modules: List ParsedModule, all_symbols: Dict ModuleSymbols,
+                             stdlib_root: String, canonical: Dict String) -> List String =
   match modules with
   | Nil -> Nil
   | Cons mod rest ->
-      list_append(dump_qualify_module(mod, all_symbols, stdlib_root),
-                  dump_qualify_modules_acc(rest, all_symbols, stdlib_root))
+      list_append(dump_qualify_module(mod, all_symbols, stdlib_root, canonical),
+                  dump_qualify_modules_with(rest, all_symbols, stdlib_root, canonical))
 
 export fn dump_qualify_file(path: source.FilePath, stdlib_root: source.StdlibRoot) -> List String !{IO} =
   do

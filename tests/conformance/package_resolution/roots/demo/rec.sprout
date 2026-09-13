@@ -1,0 +1,8 @@
+module demo.rec
+
+# A record exported across a package root. Record type names take a different
+# route through inference than ADT and wrap names — their diagnostics are raised
+# by field resolution, not by the bundler's type check — so a rule about names
+# has to be checked here too or it reports through a path nobody rendered.
+
+export type P = (x: Int, y: Int)

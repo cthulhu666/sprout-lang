@@ -82,6 +82,29 @@ let origin = Point(x = 1, y = 2)
 fn use_it() -> Int = origin.x
 `
 
+# A chain whose head is a LOCAL and whose spelling happens to be a canonical
+# name. `qualify_value_name` tests the whole dotted name against the binder list,
+# which a chain never matches, so the guard saw only "this spells a canonical
+# name" and rejected a correct program. Renaming the parameter made it compile,
+# which is how it is not a resolution bug but a scope-test bug.
+fn local_head_shadowing_a_module() -> String =
+  `import demo.dup_one as d
+
+type Inner = (hidden_helper: Int)
+type Outer = (dup_one: Inner)
+
+fn get(demo: Outer) -> Int = demo.dup_one.hidden_helper
+`
+
+# A record type reaches inference through field resolution, which raises its own
+# "Unknown record type or field" rather than the bundler's type check — so the
+# marker reached a user-facing message verbatim.
+fn canonical_record_type() -> String =
+  `import demo.rec as rec
+
+fn use_it() -> Int = demo.rec.P(x = 1, y = 2).x
+`
+
 fn fail_message(result: compiler.CompileResult) -> String =
   match result with
   | compiler.CompileOk _ -> ""
@@ -127,6 +150,19 @@ fn main() -> Unit !{IO} =
     # spelling they had every reason to expect to work does not.
     assert_true(state, "the message names the module to import",
       string.contains(exported, "demo.dup_one"))
+
+    # Both halves of the advice: the message cannot know which module it is read
+    # in, and naming only the import tells a module to import itself.
+    assert_true(state, "the message covers being inside the declaring module",
+      string.contains(exported, "or unqualified inside it"))
+
+    rec <- check(canonical_record_type(), root)
+    assert_true(state, "a canonical record type reports the rule, not the marker",
+      names_the_rule(rec) && string.contains(rec, "@canonical:") == false)
+
+    shadow <- check(local_head_shadowing_a_module(), root)
+    assert_true(state, "a local whose name shadows a module keeps its field chain",
+      shadow == "")
 
     alias <- check(alias_qualified(), root)
     assert_true(state, "the alias spelling still compiles", alias == "")

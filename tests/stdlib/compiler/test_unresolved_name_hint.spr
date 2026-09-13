@@ -46,6 +46,17 @@ fn peek(s: sealed.Sealed) -> Int =
 # `demo.dup_one.hidden_helper` is a plain private function. `(..)` is irrelevant
 # to it, so the note must not cite the marker.
 fn hidden_fn_source() -> String =
+  `import demo.dup_one
+
+fn use_it() -> Int = dup_one.hidden_helper()
+`
+
+# The same reference under an `as` alias that does not spell the module's last
+# segment. The note is deliberately withheld: the search matches on the last
+# component alone, so it cannot confirm that the alias names the module it found,
+# and this is the price of never printing a wrong one (see wrong_alias_source).
+# Recoverable later by handing the alias map down from the bundler.
+fn hidden_fn_renamed_alias_source() -> String =
   `import demo.dup_one as d
 
 fn use_it() -> Int = d.hidden_helper()
@@ -57,6 +68,18 @@ fn genuine_typo_source() -> String =
   `import demo.sealed as sealed
 
 fn use_it() -> Int = sealed.no_such_thing(3)
+`
+
+# The leaf matches a name in a DIFFERENT module from the one the alias names.
+# `stdlib.string` is imported here and does export `trim`, so a note pointing at
+# it told the reader to check the two things that were already true and sent them
+# away from the real cause — the wrong alias. The search is by last segment only,
+# so it found `stdlib.string.trim` and reported it as though it were the answer.
+fn wrong_alias_source() -> String =
+  `import demo.sealed as sealed
+import stdlib.string as string
+
+fn use_it() -> Int = sealed.trim(3)
 `
 
 fn fail_message(result: compiler.CompileResult) -> String =
@@ -89,10 +112,10 @@ fn main() -> Unit !{IO} =
     assert_true(state, "the note names the marker that would publish it",
       string.contains(ctor, "exported only with `(..)`"))
 
-    # Spelled verbatim, the canonical name reaches the binding whatever the exports say
-    # (BACKLOG: "a canonical name bypasses module privacy"). Printing it would turn the
-    # diagnostic into instructions for defeating the thing it explains.
-    assert_true(state, "the note does not hand out the canonical name",
+    # A canonical name is not a spelling the reader may write (spec-v0 §3), so
+    # offering one would answer "how do I reach this?" with a form the compiler
+    # rejects. Name the module and the symbol separately instead.
+    assert_true(state, "the note does not offer the canonical name",
       string.contains(ctor, "demo.sealed.Sealed") == false)
 
     pat <- check(hidden_pattern_source(), root)
@@ -107,10 +130,24 @@ fn main() -> Unit !{IO} =
     assert_true(state, "a private function's note does not cite `(..)`",
       string.contains(priv, "(..)") == false)
 
+    renamed <- check(hidden_fn_renamed_alias_source(), root)
+    assert_true(state, "a renamed alias still fails to resolve",
+      string.contains(renamed, "Unknown variable: d.hidden_helper"))
+    assert_true(state, "a renamed alias gets no note rather than an unchecked one",
+      string.contains(renamed, "note:") == false)
+
     typo <- check(genuine_typo_source(), root)
     assert_true(state, "a genuine typo still fails to resolve",
       string.contains(typo, "Unknown variable: sealed.no_such_thing"))
     assert_true(state, "a genuine typo gets no note",
       string.contains(typo, "note:") == false)
+
+    wrong <- check(wrong_alias_source(), root)
+    assert_true(state, "a wrong alias still fails to resolve",
+      string.contains(wrong, "Unknown variable: sealed.trim"))
+    # Silence beats a confident wrong answer: `stdlib.string` is imported and does
+    # export `trim`, so the note would have contradicted itself.
+    assert_true(state, "a leaf found under an unrelated module gets no note",
+      string.contains(wrong, "note:") == false)
 
     summary(state)

@@ -121,9 +121,9 @@ for half in "construct:$ctor" "pattern:$pat"; do
     echo "$out" | tail -3
     fail=1
   fi
-  # The canonical name reaches the binding regardless of export (BACKLOG: "a canonical
-  # name bypasses module privacy"), so a diagnostic that printed it would hand the
-  # reader the bypass. Name the module and the symbol separately.
+  # A canonical name is not a spelling the reader may write (spec-v0 §3), so a
+  # diagnostic offering one would answer "how do I reach this?" with a rejected
+  # form. Name the module and the symbol separately.
   if echo "$out" | grep -qF 'demo.sealed.Sealed'; then
     echo "FAIL wrap opacity ($case_name): diagnostic leaks the canonical name"
     echo "$out" | tail -3

@@ -258,11 +258,17 @@ export fn strip_canonical_marker(name: String) -> String =
   then str_slice(name, str_len(canonical_marker()), str_len(name))
   else name
 
+# Both halves of the advice, because the message cannot know which module it is
+# read in: from outside, the alias is the answer; from inside the declaring
+# module, the bare name is. Naming only the import tells a module to import
+# itself, which is advice for a program that cannot exist.
 export fn canonical_name_message(marked: String) -> String =
-  "`" ++ bare ++ "` is a canonical name, not a way to reach a module — import `"
-    ++ str_slice(bare, 0, str_len(bare) - str_len(string.after_last_dot(bare)) - 1)
-    ++ "` and use its alias (spec-v0 §3)"
+  "`" ++ bare ++ "` is a canonical name, not a way to reach a module — reach `"
+    ++ leaf ++ "` through `" ++ declaring_module
+    ++ "`'s import alias, or unqualified inside it (spec-v0 §3)"
   where bare = strip_canonical_marker(marked)
+        leaf = string.after_last_dot(bare)
+        declaring_module = str_slice(bare, 0, str_len(bare) - str_len(leaf) - 1)
 
 # ── Header stripping ─────────────────────────────────────────────────────────
 #

@@ -1346,7 +1346,7 @@ fn discharge_against_record(
   in
     let Just field_scheme = dict_get("@rec:" ++ rec_name ++ ":" ++ field_name, env)
           else OneFailed(unifier.field_obligation_pos(o),
-                 "Unknown record type or field: " ++ rec_name ++ "." ++ field_name)
+                 record_name_error(rec_name, field_name))
     in
       do
         field_t <- record_field_access_type(state, field_scheme, type_args)
@@ -1503,24 +1503,46 @@ fn unresolved_name_message(kind: String, name: String, env: Dict types.Scheme) -
 # own code calls it. So the module CAN be named, and "Unknown variable: x.Y", which
 # reads as a typo, can point at the marker that is actually missing.
 #
-# The canonical name is deliberately not printed. Spelled verbatim it reaches the
-# binding whatever the exports say (BACKLOG: "a canonical name bypasses module
-# privacy"), so printing it would hand the reader the bypass for the rule it explains.
+# The canonical name is deliberately not printed. It is not a spelling the reader
+# may write (spec-v0 §3), so offering one would answer "how do I reach this?" with
+# a form the compiler rejects.
 fn unresolved_name_hint(name: String, env: Dict types.Scheme) -> String =
   match declaring_module(leaf, dict_keys(env), 0) with
   | Nothing -> ""
   | Just mod_name ->
-      "\n  note: `" ++ mod_name ++ "` declares `" ++ leaf
-        ++ "`, which is not in scope here: " ++ why
+      if names_that_module(name, mod_name)
+      then "\n  note: `" ++ mod_name ++ "` declares `" ++ leaf
+             ++ "`, which is not in scope here: " ++ why
+      else ""
   where leaf = string.after_last_dot(name)
         why = if is_constructor_ref(name)
               then "a constructor is exported only with `(..)` on its declaration (spec-v0 §5.6.1)"
               else "check that it is exported, and named by the import"
 
+# A record diagnostic is raised by field resolution rather than by the bundler's
+# type check, so a marked name reaches it without passing anything that renders
+# the marker. Rendered here, the rejection reads as the rule it is.
+fn record_name_error(type_name: String, field_name: String) -> String =
+  if source.is_canonical_marked(type_name) then source.canonical_name_message(type_name)
+  else "Unknown record type or field: " ++ type_name ++ "." ++ field_name
+
+# Does the reference's own alias name the module the search landed on? The search
+# matches on the last component alone, so `sealed.trim` finds `stdlib.string.trim`
+# — and reporting it tells the reader to check an import that is already correct,
+# pointing away from the real cause. A default alias IS the module's last segment,
+# so requiring that agreement keeps the note honest; an `as` alias that does not
+# match simply gets no note, which is a missed lead rather than a wrong one.
+fn names_that_module(name: String, mod_name: String) -> Bool =
+  match string.split_once(name, ".") with
+  | Nothing -> true
+  | Just (alias, _) ->
+      mod_name == alias || str_ends_with_suffix(mod_name, "." ++ alias)
+
 # The first environment key with the same last component, minus that component.
-# The value-side twin of `bundler.exporting_module`, and takes the first match for
-# the same reason: two modules declaring one name make either answer a guess, which
-# is why the note is worded as a lead rather than a verdict.
+# The value-side twin of `bundler.exporting_module`. Taking the first match is safe
+# only because `names_that_module` then checks the answer against the alias the
+# reference actually wrote — two modules declaring one name would otherwise make
+# either answer a guess, reported as a verdict.
 #
 # Linear in the environment, and reached only after a lookup has already failed —
 # an error path, not the hot one. A file with many broken functions pays it once
@@ -5527,7 +5549,7 @@ fn infer_record_fields(
             | InferErr pos e -> InferErr(pos, e)
             | InferOk typed_val s1 es1 val_eff ->
                 match dict_get(str_concat("@rec:", str_concat(type_name, str_concat(":", fname))), env) with
-                | Nothing -> InferErr(pos, "Unknown record type or field: " ++ type_name ++ "." ++ fname)
+                | Nothing -> InferErr(pos, record_name_error(type_name, fname))
                 | Just field_scheme ->
                     # Substitute the SHARED param vars into the field's declared type
                     # (not a per-field fresh instantiate) so all fields and the result
