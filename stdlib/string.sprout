@@ -61,7 +61,7 @@ export fn slice(raw: String, start: Int, count: Int) -> String =
 export fn rsplit_once(raw: String, sep: String) -> Maybe (String, String) =
   if sep == "" then Nothing
   else if idx == -1 then Nothing
-  else Just((slice(raw, 0, idx), slice(raw, idx + length(sep), length(raw) - idx - length(sep))))
+  else Just((slice(raw, 0, idx), drop(raw, idx + length(sep))))
   where idx = last_index_of(raw, sep)
 
 # Last codepoint index at which `sep` starts in `raw`, or -1 if absent.
@@ -69,7 +69,7 @@ fn last_index_of(raw: String, sep: String) -> Int =
   last_index_of_loop(raw, sep, 0, -1)
 
 fn last_index_of_loop(raw: String, sep: String, offset: Int, best: Int) -> Int =
-  match find(slice(raw, offset, length(raw) - offset), sep) with
+  match find(drop(raw, offset), sep) with
   | Nothing -> best
   | Just rel -> last_index_of_loop(raw, sep, offset + rel + 1, offset + rel)
 

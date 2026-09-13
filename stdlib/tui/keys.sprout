@@ -150,7 +150,7 @@ fn ascii(b: Bytes, start: Int, count: Int) -> String =
 
 fn csi_parsed(b: Bytes, n: Int, i: Int, fin: Int, params: String, f: Int) -> Step =
   if string.starts_with(params, "<") then mouse_step(params, f, fin + 1)
-  else if params == "200" && f == 126 then paste_step(b, n, fin + 1)
+  else if params == "200" && f == 126 then paste_step(b, fin + 1)
   else csi_key(params, f, fin + 1)
 
 # ── CSI: keys ───────────────────────────────────────────────────────────────
@@ -251,7 +251,7 @@ fn mouse_button(btn: Int) -> event.MouseButton =
 # that look like escape sequences — that is the whole point of the mode, and
 # decoding the body would re-open the injection it exists to prevent. Without
 # the terminator the paste is a prefix, not a short paste.
-fn paste_step(b: Bytes, n: Int, start: Int) -> Step =
+fn paste_step(b: Bytes, start: Int) -> Step =
   paste_at(b, start, bytes.find(bytes.drop(b, start), end_marker()))
 
 fn end_marker() -> Bytes =
