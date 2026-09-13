@@ -1700,7 +1700,12 @@ check-extern-signatures:
 # line can hold a paragraph and the entry limit measures editor width.
 [group('smoke')]
 backlog-shape:
+  #!/usr/bin/env bash
+  set -euo pipefail
   ./scripts/backlog_shape.sh
+  # The skill keeps its own backlog so it stays self-contained; it is held to the
+  # same shape rules, or "same discipline" is just a claim in its header.
+  ./scripts/backlog_shape.sh .claude/skills/sprout-review/BACKLOG.md
 
 # DoD #10 — example canary RUN.  The canary set must compile AND run to
 # completion without crashing.  `just compile-examples-stage1` only covers
