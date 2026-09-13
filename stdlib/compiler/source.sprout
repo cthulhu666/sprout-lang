@@ -255,7 +255,7 @@ export fn is_canonical_marked(name: String) -> Bool =
 
 export fn strip_canonical_marker(name: String) -> String =
   if is_canonical_marked(name)
-  then str_slice(name, str_len(canonical_marker()), str_len(name))
+  then string.drop(name, string.length(canonical_marker()))
   else name
 
 # Both halves of the advice, because the message cannot know which module it is

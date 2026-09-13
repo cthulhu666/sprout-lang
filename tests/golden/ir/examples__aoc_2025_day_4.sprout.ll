@@ -105,13 +105,12 @@ declare i64 @fs_make_dir(i64)
 declare i64 @fs_remove(i64)
 declare i64 @fs_rename(i64, i64)
 @.str.0 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
-@.str.1 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
-@.str.2 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\0D\00" }
-@.str.3 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
-@.str.4 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c".\00" }
-@.str.5 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
-@.str.6 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"-\00" }
-@.str.7 = private unnamed_addr constant { i64, [12 x i8] } { i64 180234, [12 x i8] c"read_file: \00" }
+@.str.1 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\0D\00" }
+@.str.2 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
+@.str.3 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c".\00" }
+@.str.4 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
+@.str.5 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"-\00" }
+@.str.6 = private unnamed_addr constant { i64, [12 x i8] } { i64 180234, [12 x i8] c"read_file: \00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -1097,38 +1096,23 @@ entry:
   %t$0 = add i64 0, 0
   %t$1 = icmp sle i64 %p$count, %t$0
   %t$2 = zext i1 %t$1 to i64
-  %t$16 = trunc i64 %t$2 to i1
-  br i1 %t$16, label %then_3, label %else_3
+  %t$10 = trunc i64 %t$2 to i1
+  br i1 %t$10, label %then_3, label %else_3
 then_3:
   %t$5 = getelementptr inbounds { i64, [1 x i8] }, ptr @.str.0, i64 0, i32 1, i64 0
   %t$6 = ptrtoint ptr %t$5 to i64
   br label %join_3
 else_3:
-  %t$17 = alloca i64
-  store i64 %p$raw, ptr %t$17
-  %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
+  %t$11 = alloca i64
+  store i64 %p$raw, ptr %t$11
+  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
   %t$7 = call i64 @stdlib.string.length(i64 %p$raw)
-  %t$8 = icmp sge i64 %p$count, %t$7
-  %t$9 = zext i1 %t$8 to i64
-  %t$15 = trunc i64 %t$9 to i1
-  %t$19 = call i64 @sprout_gc_pop_roots(i64 1)
-  br i1 %t$15, label %then_10, label %else_10
-then_10:
-  br label %join_10
-else_10:
-  %t$20 = alloca i64
-  store i64 %p$raw, ptr %t$20
-  %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
-  %t$12 = call i64 @stdlib.string.length(i64 %p$raw)
-  %t$13 = sub i64 %t$12, %p$count
-  %t$14 = call i64 @stdlib.string.slice(i64 %p$raw, i64 %t$13, i64 %p$count)
-  %t$22 = call i64 @sprout_gc_pop_roots(i64 1)
-  br label %join_10
-join_10:
-  %t$11 = phi i64 [%p$raw, %then_10], [%t$14, %else_10]
+  %t$8 = sub i64 %t$7, %p$count
+  %t$9 = call i64 @stdlib.string.slice(i64 %p$raw, i64 %t$8, i64 %p$count)
+  %t$13 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_3
 join_3:
-  %t$4 = phi i64 [%t$6, %then_3], [%t$11, %join_10]
+  %t$4 = phi i64 [%t$6, %then_3], [%t$9, %else_3]
   ret i64 %t$4
 }
 
@@ -1137,39 +1121,22 @@ entry:
   %t$0 = add i64 0, 0
   %t$1 = icmp sle i64 %p$count, %t$0
   %t$2 = zext i1 %t$1 to i64
-  %t$17 = trunc i64 %t$2 to i1
-  br i1 %t$17, label %then_3, label %else_3
+  %t$9 = trunc i64 %t$2 to i1
+  br i1 %t$9, label %then_3, label %else_3
 then_3:
   br label %join_3
 else_3:
-  %t$18 = alloca i64
-  store i64 %p$raw, ptr %t$18
-  %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
-  %t$5 = call i64 @stdlib.string.length(i64 %p$raw)
-  %t$6 = icmp sge i64 %p$count, %t$5
-  %t$7 = zext i1 %t$6 to i64
-  %t$16 = trunc i64 %t$7 to i1
-  %t$20 = call i64 @sprout_gc_pop_roots(i64 1)
-  br i1 %t$16, label %then_8, label %else_8
-then_8:
-  %t$10 = getelementptr inbounds { i64, [1 x i8] }, ptr @.str.1, i64 0, i32 1, i64 0
-  %t$11 = ptrtoint ptr %t$10 to i64
-  br label %join_8
-else_8:
-  %t$12 = add i64 0, 0
-  %t$21 = alloca i64
-  store i64 %p$raw, ptr %t$21
-  %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
-  %t$13 = call i64 @stdlib.string.length(i64 %p$raw)
-  %t$14 = sub i64 %t$13, %p$count
-  %t$15 = call i64 @stdlib.string.slice(i64 %p$raw, i64 %t$12, i64 %t$14)
-  %t$23 = call i64 @sprout_gc_pop_roots(i64 1)
-  br label %join_8
-join_8:
-  %t$9 = phi i64 [%t$11, %then_8], [%t$15, %else_8]
+  %t$5 = add i64 0, 0
+  %t$10 = alloca i64
+  store i64 %p$raw, ptr %t$10
+  %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
+  %t$6 = call i64 @stdlib.string.length(i64 %p$raw)
+  %t$7 = sub i64 %t$6, %p$count
+  %t$8 = call i64 @stdlib.string.slice(i64 %p$raw, i64 %t$5, i64 %t$7)
+  %t$12 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_3
 join_3:
-  %t$4 = phi i64 [%p$raw, %then_3], [%t$9, %join_8]
+  %t$4 = phi i64 [%p$raw, %then_3], [%t$8, %else_3]
   ret i64 %t$4
 }
 
@@ -1369,7 +1336,7 @@ entry:
 
 define i64 @stdlib.string.strip_trailing_cr(i64 %p$s) {
 entry:
-  %t$0 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.2, i64 0, i32 1, i64 0
+  %t$0 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.1, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
   %t$8 = alloca i64
   store i64 %p$s, ptr %t$8
@@ -1518,7 +1485,7 @@ entry:
 
 define i64 @examples.aoc_2025_day_4.line_at(i64 %p$grid, i64 %p$row) {
 entry:
-  %t$0 = getelementptr inbounds { i64, [1 x i8] }, ptr @.str.3, i64 0, i32 1, i64 0
+  %t$0 = getelementptr inbounds { i64, [1 x i8] }, ptr @.str.2, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
   %t$2 = call i64 @vec_get_or(i64 %p$row, i64 %t$1, i64 %p$grid)
   ret i64 %t$2
@@ -1790,7 +1757,7 @@ entry:
   %t$10 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$7, label %then_1, label %else_1
 then_1:
-  %t$3 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.4, i64 0, i32 1, i64 0
+  %t$3 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.3, i64 0, i32 1, i64 0
   %t$4 = ptrtoint ptr %t$3 to i64
   br label %join_1
 else_1:
@@ -1871,7 +1838,7 @@ entry:
 
 define i64 @examples.aoc_2025_day_4.cleared_row(i64 %p$grid, i64 %p$row) {
 entry:
-  %t$0 = getelementptr inbounds { i64, [1 x i8] }, ptr @.str.5, i64 0, i32 1, i64 0
+  %t$0 = getelementptr inbounds { i64, [1 x i8] }, ptr @.str.4, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
   %t$14 = alloca i64
   store i64 %p$grid, ptr %t$14
@@ -2107,7 +2074,7 @@ entry:
 
 define i64 @examples.aoc_2025_day_4.solve_stdin() {
 entry:
-  %t$0 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.6, i64 0, i32 1, i64 0
+  %t$0 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.5, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
   %t$16 = alloca i64
   store i64 %t$1, ptr %t$16
@@ -2138,7 +2105,7 @@ arm_1_4:
   %t$11 = icmp eq i64 %t$2, %t$10
   br i1 %t$11, label %body_1_4, label %arm_2_4
 body_1_4:
-  %t$12 = getelementptr inbounds { i64, [12 x i8] }, ptr @.str.7, i64 0, i32 1, i64 0
+  %t$12 = getelementptr inbounds { i64, [12 x i8] }, ptr @.str.6, i64 0, i32 1, i64 0
   %t$13 = ptrtoint ptr %t$12 to i64
   %t$25 = alloca i64
   store i64 %t$3, ptr %t$25

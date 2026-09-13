@@ -3,8 +3,8 @@ import stdlib.string as string
 import stdlib.terminal as terminal
 import stdlib.time as time
 
-# Pins the property that makes `string.slice` usable on large inputs: slicing a
-# PREFIX costs O(count), not O(|s|). A wrong cost is invisible to a correctness
+# Pins the property that makes `string.slice` and `string.take` usable on large
+# inputs: taking a PREFIX costs O(count), not O(|s|). A wrong cost is invisible to a correctness
 # test — the answers were always right — so the guard has to be a measurement.
 #
 # WHY THIS IS NOT A FLAKY TIMING TEST. The call count is fixed and only the string
@@ -13,6 +13,14 @@ import stdlib.time as time
 # order of magnitude either side. Both arms hold both strings live so heaps and
 # allocation counts match, and each takes the MINIMUM of several rounds so a
 # stalled shared runner cannot inflate a result. Measured 905x before the fix.
+#
+# `string.take` is the second arm. Its guard counted codepoints to decide whether
+# to return `raw` itself, putting O(|s|) in front of an O(count) slice to save a
+# copy; measured 874x before the guard was dropped as redundant with slice's clamp.
+#
+# This arm must stay free of `string.byte_length`. Under SPROUT_GC_HDRCHECK=1,
+# which CI sets for the whole test job, `str_byte_len` validates the header with a
+# `strlen` and is O(|s|) — a byte_length guard passes here and fails on CI at ~255x.
 #
 # Mid-string slicing is deliberately NOT asserted: it is still O(start) by
 # construction. See BACKLOG.md "Mid-string `str_slice` is O(start)".
@@ -32,6 +40,23 @@ fn grow(s: String, k: Int) -> String =
 fn probe_prefix(s: String, n: Int, acc: Int) -> Int =
   if n <= 0 then acc
   else probe_prefix(s, n - 1, acc + string.length(string.slice(s, 0, 2)))
+
+# The same shape for `string.take`, which reached `slice` only past a
+# `count >= length(raw)` guard — an O(|s|) codepoint count in front of an
+# O(count) slice, so the guard alone made every take linear in the input.
+fn probe_take(s: String, n: Int, acc: Int) -> Int =
+  if n <= 0 then acc
+  else probe_take(s, n - 1, acc + string.length(string.take(s, 2)))
+
+fn min_take_us(s: String, remaining: Int, best: Int) -> Int !{IO} =
+  if remaining <= 0 then best
+  else
+    do
+      t0 <- time.now_micros()
+      let total = probe_take(s, iterations, 0)
+      t1 <- time.now_micros()
+      let elapsed = if total == iterations * 2 then t1 - t0 else t1 - t0 + 1000000
+      min_take_us(s, remaining - 1, if elapsed < best then elapsed else best)
 
 # A probe that stopped doing work is penalised rather than reported as fast.
 fn min_prefix_us(s: String, remaining: Int, best: Int) -> Int !{IO} =
@@ -67,6 +92,12 @@ fn main() -> Unit !{IO} =
     _ <- report("string.slice prefix", short_us, long_us)
     assert_true(state, "prefix slice cost is independent of string length",
       long_us <= budget_us(short_us))
+
+    take_short_us <- min_take_us(short_s, rounds, 1000000000)
+    take_long_us <- min_take_us(long_s, rounds, 1000000000)
+    _ <- report("string.take", take_short_us, take_long_us)
+    assert_true(state, "take cost is independent of string length",
+      take_long_us <= budget_us(take_short_us))
 
     # Both strings still reachable here, so the two arms had identical heaps.
     assert_eq(state, "both strings still live",

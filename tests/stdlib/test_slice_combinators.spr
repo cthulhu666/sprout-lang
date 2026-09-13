@@ -59,6 +59,13 @@ fn main() -> Unit !{IO} =
       "<invalid utf-8>"),
     check_eq("bytes between on the ascii prefix", rendered(bytes.slice_between(from("Cześć"), 0, 3)),
       "Cze"),
+    # Same clamp as take/drop: 5 codepoints in 7 bytes, so a count of 6 drives the
+    # start offset negative and must still answer "the whole string".
+    check_eq("str take_last count between codepoints and bytes",
+      string.take_last("Cześć", 6), "Cześć"),
+    check_eq("str drop_last count between codepoints and bytes",
+      string.drop_last("Cześć", 6), ""),
+
     check_eq("str take_last counts codepoints", string.take_last("Cześć", 2), "ść"),
     check_eq("bytes take_last counts bytes", rendered(bytes.take_last(from("Cześć"), 2)), "ć")
   ])

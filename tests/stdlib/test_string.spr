@@ -22,6 +22,14 @@ fn main() -> Unit !{IO} =
     check_eq("drop zero", drop("hello", 0), "hello"),
     check_eq("drop all", drop("hello", 5), ""),
 
+    # Neither carries a "count covers everything" guard; both lean on slice
+    # clamping. "Cześć" is 5 codepoints in 7 bytes, so these counts land past the
+    # end in codepoints while still inside it in bytes.
+    check_eq("take count between codepoints and bytes", take("Cześć", 6), "Cześć"),
+    check_eq("drop count between codepoints and bytes", drop("Cześć", 6), ""),
+    check_eq("take count equals codepoints", take("Cześć", 5), "Cześć"),
+    check_eq("drop count equals codepoints", drop("Cześć", 5), ""),
+
     check_eq("slice mid", slice("hello", 1, 3), "ell"),
     check_eq("slice start", slice("hello", 0, 2), "he"),
 

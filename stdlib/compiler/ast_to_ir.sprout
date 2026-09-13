@@ -6031,8 +6031,7 @@ fn build_fn(name: String, params: List (String, sprout_ir.IRType), ret_ty: Strin
 # `<module>.main` when the entry file declares a `module`.  Mirrors direct
 # codegen's is_entry_fn_name (codegen.sprout:1906).  O(name length).
 fn is_entry_fn_name(name: String) -> Bool =
-  name == "main" || (n >= 5 && str_slice(name, n - 5, 5) == ".main")
-  where n = str_len(name)
+  name == "main" || string.ends_with(name, ".main")
 
 # The synthetic name a non-trivial `main` body is translated to.  An
 # `Int`-declared return type uses __sprout_user_main_int instead of

@@ -706,12 +706,6 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   `Dict` site plus the `Eq`/`ToString`/`dict_keys`/`dict_values`/`dict_entries` surface. Today's
   `Dict` forces callers to pre-stringify, which contradicts typeclass-based design. Unblocks
   `deriving (Hash)`.
-- [ ] `P3` **Six compiler modules hand-roll `ends_with` and a suffix drop.** `type_kind:27`,
-  `field_kinds:31`, `infer:3027`, `lowering:718` each spell it `str_slice(raw, str_len(raw) -
-  str_len(suffix), str_len(raw))` — an over-long count that only works because `str_slice` clamps —
-  and `dce:460`/`ast_to_ir:6034`/`infer:6795` repeat a `.main` suffix test. `stdlib.string` now has
-  `ends_with`/`take_last`/`drop_last`; the blocker is that these files reach for prelude externs by
-  bare name, so adopting them is a dependency change that needs a reseed.
 - [ ] `P2` **Prelude O(n²) audit.** Several helpers are quadratic via naive list-append recursion
   and mostly undocumented: `ToString` for `List`/`Vec`/`Dict`, `mconcat`, `list_dedup`,
   `Semigroup (Dict v)`, and several `vec_*` (`map`/`filter`/`filter_map`/`reverse`/`slice`).
@@ -733,9 +727,6 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   quadratic. Prefix slicing no longer is — `str_slice` walks to `start + count` and stops, making
   `slice(s, 0, k)` independent of `|s|`. Closing the rest needs a codepoint-to-byte cache on String
   values, or byte-indexed callers. Measured shapes: `tests/stdlib/test_slice_cost.spr`.
-- [ ] `P3` **`string.take` / `string.drop` still walk the whole string.** Their
-  `count >= length(raw)` guard calls `str_len`, so neither sees the now-O(count) `slice`. Bytes >=
-  codepoints, so `byte_length(raw) <= count` (an O(1) header read) is a conservative replacement.
 - [ ] `P2` **B4 — `list_length` is unreliable on complex element ADTs.**
   `examples/digit_recognizer/recognizer.sprout` hand-writes two monomorphic length helpers purely
   because of it. Root-cause and fix so those can be deleted; add a regression over a `List` of a
@@ -1926,8 +1917,8 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   Bool and Unit" (`:812`) ten lines above "Bool is ACCEPTED" / "Unit is ACCEPTED".
   `find_bool_capture` (`:2072`) has no caller left. ~15 lines to fix, but a compiler-source change,
   so it costs a full reseed plus the golden-IR gate.
-- [ ] `P3` **48 compiler comments cite `codegen.sprout`, deleted 2026-07-12 in `5f29b9da`.** Spread
-  over `ast_to_ir` (31), `ir_lowering` (7), `sprout_ir` (6), `type_kind` and `field_kinds` (2 each),
+- [ ] `P3` **46 compiler comments cite `codegen.sprout`, deleted 2026-07-12 in `5f29b9da`.** Spread
+  over `ast_to_ir` (31), `ir_lowering` (7), `sprout_ir` (6), `type_kind` and `field_kinds` (1 each),
   mostly as "mirrors codegen.sprout:<fn>" provenance notes whose target cannot be opened. They read
   as live cross-references and send a reader looking for a file that is two months gone. Either
   re-anchor each to the surviving definition or drop the citation; decide once and sweep.

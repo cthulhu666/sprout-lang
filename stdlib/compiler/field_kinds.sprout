@@ -20,18 +20,13 @@ import stdlib.compiler.ast as ast
 import stdlib.compiler.sprout_ir as sprout_ir
 import stdlib.string as string
 
-# --- Private leaf helpers (mirror codegen.sprout's same-named local fns;
-#     local copies kept so this module has no dep on codegen). ---
+# --- Private leaf helpers ---
 
 fn char_is_uppercase(ch: Char) -> Bool =
   str_find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", char_to_string(ch)) >= 0
 
-fn string_ends_with(raw: String, suffix: String) -> Bool =
-  str_len(raw) >= str_len(suffix) &&
-  str_slice(raw, str_len(raw) - str_len(suffix), str_len(raw)) == suffix
-
 fn type_name_leaf_is(name: String, leaf: String) -> Bool =
-  name == leaf || string_ends_with(name, "." ++ leaf)
+  name == leaf || string.ends_with(name, "." ++ leaf)
 
 # --- Encoder ---
 
