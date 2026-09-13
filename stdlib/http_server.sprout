@@ -300,13 +300,11 @@ fn content_length_result(m: Maybe Int) -> ServerResult Int =
 fn request_body_start(raw: String) -> Maybe Int =
   map(\pos -> pos + 4, find_headers_end(raw))
 
-# The header block spans from just past the request line to the blank-line
-# terminator. A header-less request (HTTP/1.0-style) has the terminator right after
-# the request line, so `headers_end <= header_start`; "" states that directly rather
-# than leaning on `slice` to clamp a negative count.
+# The header block spans from just past the request line to the blank-line terminator.
+# A header-less request (HTTP/1.0-style) has the terminator right after the request
+# line, inverting the window; `slice_between` answers "" for that by construction.
 fn header_block(raw: String, line_end: Int, headers_end: Int) -> String =
-  if headers_end <= header_start then ""
-  else string.slice(raw, header_start, headers_end - header_start)
+  string.slice_between(raw, header_start, headers_end)
 where
   header_start = line_end + 2
 
@@ -455,8 +453,7 @@ fn scan_for_terminator(conn: borrowing TcpConnection, acc: Builder, total: Int, 
 where
   probe = bytes.append(overlap, chunk)
   grown = bytes.builder_append(acc, bytes.builder_bytes(chunk))
-  keep = if bytes.length(probe) < 3 then bytes.length(probe) else 3
-  next_overlap = bytes.slice(probe, bytes.length(probe) - keep, keep)
+  next_overlap = bytes.take_last(probe, 3)
 
 # Every read path BORROWS the connection: a request is read over many syscalls,
 # and under strict consume-exactly-once the first read would take the socket and

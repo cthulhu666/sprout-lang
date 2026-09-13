@@ -702,9 +702,12 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   `Dict` site plus the `Eq`/`ToString`/`dict_keys`/`dict_values`/`dict_entries` surface. Today's
   `Dict` forces callers to pre-stringify, which contradicts typeclass-based design. Unblocks
   `deriving (Hash)`.
-- [ ] `P3` **`stdlib.tui.keys` and `stdlib.repl` spell `drop` as a subtraction.** Four sites pass
-  `string.slice(s, n, string.length(s) - n)` where `string.drop(s, n)` says it. Readability only —
-  the count can no longer go negative (`docs/nat-refinement-v0.md`).
+- [ ] `P3` **Six compiler modules hand-roll `ends_with` and a suffix drop.** `type_kind:27`,
+  `field_kinds:31`, `infer:3027`, `lowering:718` each spell it `str_slice(raw, str_len(raw) -
+  str_len(suffix), str_len(raw))` — an over-long count that only works because `str_slice` clamps —
+  and `dce:460`/`ast_to_ir:6034`/`infer:6795` repeat a `.main` suffix test. `stdlib.string` now has
+  `ends_with`/`take_last`/`drop_last`; the blocker is that these files reach for prelude externs by
+  bare name, so adopting them is a dependency change that needs a reseed.
 - [ ] `P2` **Prelude O(n²) audit.** Several helpers are quadratic via naive list-append recursion
   and mostly undocumented: `ToString` for `List`/`Vec`/`Dict`, `mconcat`, `list_dedup`,
   `Semigroup (Dict v)`, and several `vec_*` (`map`/`filter`/`filter_map`/`reverse`/`slice`).
@@ -1116,6 +1119,10 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
 - [ ] `P3` **`Alternative` class + generic `or_else`** — deferred until a *second* lawful instance
   exists (e.g. a parser combinator type); with only `Maybe` it is single-instance ceremony, and
   List's lawful instance (`++`) is already `Semigroup`.
+- [ ] `P3` **`Sliceable` class over `String`/`Bytes`** — declined, revisit if a generic *algorithm*
+  over sliceable input appears. Probed working; declined because the index unit diverges (5
+  codepoints vs 5 bytes, silently valid both ways), dispatch costs 3 GC root pushes and an indirect
+  call against 1 and a direct one, and data-last `vec_slice` bars `Vec` as a third instance.
 - [ ] `P3` **Monad-generic `do` + built-in `?` propagation** — wire `Monad` into `do`/`<-`
   (currently desugarer-special-cased for `Maybe`/`Result`) and add the Tier-2/3 propagate form. This
   is the rung that flattens the `staircase-of-doom` cascades.

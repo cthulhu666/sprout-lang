@@ -51,6 +51,26 @@ export fn drop(value: Bytes, count: Int) -> Bytes =
   else if count >= length(value) then empty()
   else slice(value, count, length(value) - count)
 
+# O(stop - start): the half-open window `[start, stop)` in BYTES — `string.slice_between`
+# counts codepoints at the same offsets. Prefer this to `slice(v, start, stop - start)`,
+# whose count goes negative when the two offsets arrive out of order.
+export fn slice_between(value: Bytes, start: Int, stop: Int) -> Bytes =
+  let from = if start < 0 then 0 else start
+  in slice(value, from, stop - from)
+
+# O(count): the trailing `count` bytes, or all of them when there are fewer.
+export fn take_last(value: Bytes, count: Int) -> Bytes =
+  if count <= 0 then empty()
+  else if count >= length(value) then value
+  else slice(value, length(value) - count, count)
+
+# O(|value| - count): everything but the trailing `count` bytes. Pair with `take_last`;
+# the two partition `value`.
+export fn drop_last(value: Bytes, count: Int) -> Bytes =
+  if count <= 0 then value
+  else if count >= length(value) then empty()
+  else slice(value, 0, length(value) - count)
+
 # O(|left| + |right|): allocates one output buffer and copies both inputs.
 export fn append(left: Bytes, right: Bytes) -> Bytes =
   bytes_append(left, right)

@@ -99,9 +99,6 @@ fn after_word(s: String) -> String =
 fn push_text(acc: Vec Node, text: String) -> Vec Node =
   if string.is_empty(text) then acc else vec_append(NodeText(text), acc)
 
-fn slice_between(src: String, start: Int, stop: Int) -> String =
-  string.slice(src, start, stop - start)
-
 # --- Parser ----------------------------------------------------------------
 fn parse_seq(src: String, pos: Int, total: Int, acc: Vec Node) -> Result TemplateError ParseSeq =
   match next_tag(src, pos) with
@@ -111,7 +108,7 @@ fn parse_seq(src: String, pos: Int, total: Int, acc: Vec Node) -> Result Templat
 fn parse_after_text(src: String, pos: Int, total: Int, acc: Vec Node, tagpos: Int, kind: Int) -> Result TemplateError ParseSeq =
   do
     step <- parse_tag(src, tagpos, kind, total)
-    dispatch_step(src, total, push_text(acc, slice_between(src, pos, tagpos)), step)
+    dispatch_step(src, total, push_text(acc, string.slice_between(src, pos, tagpos)), step)
 
 fn dispatch_step(src: String, total: Int, acc: Vec Node, step: Step) -> Result TemplateError ParseSeq =
   match step with
@@ -134,7 +131,7 @@ fn parse_interp_tag(src: String, tagpos: Int) -> Result TemplateError Step =
   | Nothing -> Err(TemplateParseError("unclosed interpolation {{"))
   | Just close ->
       do
-        node <- parse_interp(slice_between(src, tagpos + 2, close))
+        node <- parse_interp(string.slice_between(src, tagpos + 2, close))
         Ok(StepNode(node, close + 2))
 
 fn parse_interp(inner: String) -> Result TemplateError Node =
@@ -147,7 +144,7 @@ fn parse_interp(inner: String) -> Result TemplateError Node =
 fn parse_stmt_tag(src: String, tagpos: Int, total: Int) -> Result TemplateError Step =
   match find_from(src, "%}", tagpos + 2) with
   | Nothing -> Err(TemplateParseError("unclosed statement {%"))
-  | Just close -> parse_stmt(src, close + 2, total, string.trim(slice_between(src, tagpos + 2, close)))
+  | Just close -> parse_stmt(src, close + 2, total, string.trim(string.slice_between(src, tagpos + 2, close)))
 
 fn parse_stmt(src: String, body_pos: Int, total: Int, inner: String) -> Result TemplateError Step =
   if kw == "endif" || kw == "endfor" || kw == "else" then Ok(StepTerm(kw, body_pos))

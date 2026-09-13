@@ -56,13 +56,6 @@ fn drop_prefix(raw: String, prefix: String) -> String =
   | Just rest -> rest
   | Nothing -> raw
 
-fn drop_last(raw: String) -> String =
-  string.take(raw, string.length(raw) - 1)
-
-fn drop_last_count(raw: String, count: Int) -> String =
-  if count <= 0 then raw
-  else string.take(raw, string.length(raw) - count)
-
 fn slice_left(raw: String, count: Int) -> String =
   string.take(raw, count)
 
@@ -234,14 +227,13 @@ fn skip_to_space_or_delim(raw: String, index: Int) -> Int =
   else skip_to_space_or_delim(raw, index + 1)
 
 fn take_name_from(raw: String, index: Int) -> String =
-  if index >= string.length(raw) then ""
-  else string.slice(raw, index, skip_to_space_or_delim(raw, index) - index)
+  string.slice_between(raw, index, skip_to_space_or_delim(raw, index))
 
 fn module_leaf_name(raw: String) -> String =
   module_leaf_name_from(raw, 0, 0)
 
 fn module_leaf_name_from(raw: String, index: Int, start: Int) -> String =
-  if index >= string.length(raw) then string.slice(raw, start, string.length(raw) - start)
+  if index >= string.length(raw) then string.drop(raw, start)
   else if char_at(raw, index) == '.' then module_leaf_name_from(raw, index + 1, index + 1)
   else module_leaf_name_from(raw, index + 1, start)
 
@@ -522,7 +514,7 @@ fn completion_candidates_local(line_buffer: String, session: compiler.StatefulSe
 fn apply_completion(current: String, prefix: String, matches: Vec String) -> String =
   if prefix == "" then current
   else if vec_length(matches) != 1 then current
-  else drop_last_count(current, string.length(prefix)) ++ vec_get_or(0, prefix, matches)
+  else string.drop_last(current, string.length(prefix)) ++ vec_get_or(0, prefix, matches)
 
 fn complete_current_line(prompt: String, history: Vec String, session: compiler.StatefulSession, current: String, cursor: Int) -> Maybe String !{IO} =
   match completion_candidates_local(current, session) with

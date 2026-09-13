@@ -167,6 +167,37 @@ entry:
   ret i64 %t$0
 }
 
+define i64 @stdlib.bytes.slice_between(i64 %p$value, i64 %p$start, i64 %p$stop) {
+entry:
+  %t$0 = add i64 0, 0
+  %t$1 = icmp slt i64 %p$start, %t$0
+  %t$2 = zext i1 %t$1 to i64
+  %t$6 = trunc i64 %t$2 to i1
+  br i1 %t$6, label %then_3, label %else_3
+then_3:
+  %t$5 = add i64 0, 0
+  br label %join_3
+else_3:
+  br label %join_3
+join_3:
+  %t$4 = phi i64 [%t$5, %then_3], [%p$start, %else_3]
+  br label %arm_0_7
+arm_0_7:
+  %t$9 = sub i64 %p$stop, %t$4
+  %t$11 = alloca i64
+  store i64 %p$value, ptr %t$11
+  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
+  %t$10 = call i64 @stdlib.bytes.slice(i64 %p$value, i64 %t$4, i64 %t$9)
+  %t$13 = call i64 @sprout_gc_pop_roots(i64 1)
+  br label %join_7
+arm_1_7:
+  call void @sprout_abort_match()
+  unreachable
+join_7:
+  %t$8 = phi i64 [%t$10, %arm_0_7]
+  ret i64 %t$8
+}
+
 define i64 @stdlib.bytes.from_string(i64 %p$raw) {
 entry:
   %t$1 = alloca i64
@@ -351,40 +382,39 @@ join_3:
 
 define i64 @stdlib.string.byte_range_string(i64 %p$b, i64 %p$start, i64 %p$endx) {
 entry:
-  %t$0 = sub i64 %p$endx, %p$start
-  %t$12 = alloca i64
-  store i64 %p$b, ptr %t$12
-  %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
-  %t$1 = call i64 @stdlib.bytes.slice(i64 %p$b, i64 %p$start, i64 %t$0)
-  %t$14 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$15 = alloca i64
-  store i64 %t$1, ptr %t$15
-  %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
-  %t$2$st = call { i64, i64 } @stdlib.bytes.to_string_worker(i64 %t$1)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
-  %t$17 = call i64 @sprout_gc_pop_roots(i64 1)
-  br label %arm_0_4
-arm_0_4:
-  %t$6 = add i64 0, 7
-  %t$7 = icmp eq i64 %t$2, %t$6
-  br i1 %t$7, label %body_0_4, label %arm_1_4
-body_0_4:
-  br label %join_4
-arm_1_4:
-  %t$8 = add i64 0, 8
-  %t$9 = icmp eq i64 %t$2, %t$8
-  br i1 %t$9, label %body_1_4, label %arm_2_4
-body_1_4:
-  %t$10 = getelementptr inbounds { i64, [1 x i8] }, ptr @.str.0, i64 0, i32 1, i64 0
-  %t$11 = ptrtoint ptr %t$10 to i64
-  br label %join_4
-arm_2_4:
+  %t$11 = alloca i64
+  store i64 %p$b, ptr %t$11
+  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
+  %t$0 = call i64 @stdlib.bytes.slice_between(i64 %p$b, i64 %p$start, i64 %p$endx)
+  %t$13 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$14 = alloca i64
+  store i64 %t$0, ptr %t$14
+  %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
+  %t$1$st = call { i64, i64 } @stdlib.bytes.to_string_worker(i64 %t$0)
+  %t$1 = extractvalue { i64, i64 } %t$1$st, 0
+  %t$2 = extractvalue { i64, i64 } %t$1$st, 1
+  %t$16 = call i64 @sprout_gc_pop_roots(i64 1)
+  br label %arm_0_3
+arm_0_3:
+  %t$5 = add i64 0, 7
+  %t$6 = icmp eq i64 %t$1, %t$5
+  br i1 %t$6, label %body_0_3, label %arm_1_3
+body_0_3:
+  br label %join_3
+arm_1_3:
+  %t$7 = add i64 0, 8
+  %t$8 = icmp eq i64 %t$1, %t$7
+  br i1 %t$8, label %body_1_3, label %arm_2_3
+body_1_3:
+  %t$9 = getelementptr inbounds { i64, [1 x i8] }, ptr @.str.0, i64 0, i32 1, i64 0
+  %t$10 = ptrtoint ptr %t$9 to i64
+  br label %join_3
+arm_2_3:
   call void @sprout_abort_match()
   unreachable
-join_4:
-  %t$5 = phi i64 [%t$3, %body_0_4], [%t$11, %body_1_4]
-  ret i64 %t$5
+join_3:
+  %t$4 = phi i64 [%t$2, %body_0_3], [%t$10, %body_1_3]
+  ret i64 %t$4
 }
 
 define i64 @stdlib.string.trim(i64 %p$raw) {

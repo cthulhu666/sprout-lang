@@ -97,6 +97,26 @@ export fn drop(raw: String, count: Int) -> String =
   else if count >= length(raw) then ""
   else slice(raw, count, length(raw) - count)
 
+# O(stop): the half-open window `[start, stop)` in codepoints. Prefer this to
+# `slice(raw, start, stop - start)`, whose count goes negative when the two offsets
+# arrive out of order; here an inverted or empty window is just the empty string.
+export fn slice_between(raw: String, start: Int, stop: Int) -> String =
+  let from = if start < 0 then 0 else start
+  in slice(raw, from, stop - from)
+
+# O(|raw|): the trailing `count` codepoints, or all of them when there are fewer.
+export fn take_last(raw: String, count: Int) -> String =
+  if count <= 0 then ""
+  else if count >= length(raw) then raw
+  else slice(raw, length(raw) - count, count)
+
+# O(|raw|): everything but the trailing `count` codepoints. Pair with `take_last`;
+# the two partition `raw`.
+export fn drop_last(raw: String, count: Int) -> String =
+  if count <= 0 then raw
+  else if count >= length(raw) then ""
+  else slice(raw, 0, length(raw) - count)
+
 # O(|raw| * |needle|) in the worst case: delegates to the native substring search.
 export fn find(raw: String, needle: String) -> Maybe Int =
   if r < 0 then Nothing else Just(r)
@@ -109,10 +129,10 @@ export fn starts_with(raw: String, prefix: String) -> Bool =
 export fn contains(raw: String, needle: String) -> Bool =
   match find(raw, needle) with | Just _ -> true | Nothing -> false
 
-# O(|raw| + |suffix|): pays for repeated length checks plus the copied suffix slice.
+# O(|raw| + |suffix|): scans for the suffix window, then compares it. A suffix longer
+# than `raw` needs no guard — `take_last` yields `raw`, which cannot equal it.
 export fn ends_with(raw: String, suffix: String) -> Bool =
-  if length(suffix) > length(raw) then false
-  else slice(raw, length(raw) - length(suffix), length(suffix)) == suffix
+  take_last(raw, length(suffix)) == suffix
 
 # O(index): scans UTF-8 codepoints up to the requested position.
 export fn char_at(raw: String, index: Int) -> Maybe Char =
@@ -223,7 +243,7 @@ fn scan_ws_bwd(b: Bytes, i: Int) -> Int =
 # here (cuts fall at ASCII whitespace, or at ASCII A..Z for the lowercaser), so to_string is Ok;
 # the Err arm is an unreachable total fallback, never the observed path.
 fn byte_range_string(b: Bytes, start: Int, endx: Int) -> String =
-  match bytes.to_string(bytes.slice(b, start, endx - start)) with
+  match bytes.to_string(bytes.slice_between(b, start, endx)) with
   | Ok s -> s
   | Err _ -> ""
 
@@ -281,7 +301,7 @@ export fn strip_prefix(raw: String, prefix: String) -> Maybe String =
   else Nothing
 
 export fn strip_suffix(raw: String, suffix: String) -> Maybe String =
-  if ends_with(raw, suffix) then Just(take(raw, length(raw) - length(suffix)))
+  if ends_with(raw, suffix) then Just(drop_last(raw, length(suffix)))
   else Nothing
 
 export fn split_once(raw: String, sep: String) -> Maybe (String, String) =
@@ -344,7 +364,7 @@ export fn replace_all(from: String, to: String, s: String) -> String =
 
 # Strip a single trailing '\r' — for a CRLF line that str_split_lines split on the '\n'.
 fn strip_trailing_cr(s: String) -> String =
-  if ends_with(s, "\r") then take(s, length(s) - 1) else s
+  if ends_with(s, "\r") then drop_last(s, 1) else s
 
 # Restore string_lines' exact contract on top of str_split_lines (a C extern that splits on '\n' in
 # O(n) but keeps the '\r' and always emits a final segment, even an empty one): strip the CR from
