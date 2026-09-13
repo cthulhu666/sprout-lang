@@ -793,6 +793,16 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   `take`/`drop`/`zip` (List-shaped, not `Foldable`-derivable). (d) `Dict`/`Set` instances, gated on
   those types getting `Functor`/`Foldable`. (e) An effectful predicate (`a -> Bool !{e}`) needs
   `Filterable` to state `pred`'s call order, not B2 (`docs/effect-polymorphism-policy-v0.md`).
+- [ ] `P3` **No `NonEmpty a`, though `docs/guidelines.md` §3 names it as the illegal-states
+  exemplar.** Four in-tree sites pay for the gap: two panics in `infer.build_comp_level` and
+  `infer.comp_fold_name` (a comprehension always has ≥1 generator, so `ComprehensionExpr` should
+  carry one), and two dead arms in `tui.text.cluster_width`/`cluster_is`, whose own comment says
+  "each a non-empty list of codepoints". uncharted-suns pays two more panics (`game/sim.sprout:348`
+  and `:370`, the slot and zone rosters) plus `grimward.gear.slot_of`, pinned by `test_gear.spr`
+  rather than by the type. Scope it as `NE a (List a)` with total accessors — the cons shape
+  enforces itself, a `NonEmptyVec` would need the opacity Sprout lacks
+  (`docs/archive/collections-facade-soundness-analysis-2026-07-12.md` §3B), and without the total
+  `head`/`minimum` the arms go but the `Maybe`s stay. Ergonomics gate on `[a, b | tail]` above.
 
 ### 6) Modules and Packaging
 
