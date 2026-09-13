@@ -150,19 +150,49 @@ Ops that need decomposition (`parent`, `basename`, `extension`) parse on
 demand using `str_find` / `str_slice`. This is O(length) per call but the
 call sites are rare and the constant factor is small.
 
-### Construction: validated, and that is the only way in
+### Construction: total, because there is nothing left to validate
 
-**Decided 2026-09-12.** Neither wrap carries `(..)`, so both data
-constructors stay module-private (spec-v0 §5.6.1). The only entry is:
+**Decided 2026-09-12 as *validated*; reversed 2026-09-13 on evidence.** The
+reversal is not a change of mind about the principle — it is that the premise
+was false. "Validation has to happen somewhere, so make it construction" was
+never checked against the runtime, which had been doing it all along.
 
-- `file: String -> Result PathErr File`
-- `dir:  String -> Result PathErr Dir`
+Neither wrap carries `(..)`, so both data constructors stay module-private
+(spec-v0 §5.6.1). The only entry is:
 
-which reject an empty string and an embedded NUL byte. No validation for
-`..` or `.` segments — preserve exact spelling; `normalize` is opt-in (see
-below). Module-internal code constructs freely, so `dir_file(d, rel)` and the
-other ops that *derive* a path from an existing one stay total: the `Result`
-is paid once, where a `String` first becomes a path, and never again.
+- `file: String -> File`
+- `dir:  String -> Dir`
+
+Both total. The validated form proposed two rejections, and **neither is a
+real case**:
+
+- **Empty string.** Already rejected by `fs_path_rejected`
+  (`runtime/sprout_runtime.c:3113`), which returns
+  `FsInvalidPath("empty path")` before the syscall, and carries a comment
+  saying why it belongs there: a syscall on `""` reports `ENOENT`, which
+  classifies as "not found" — "true of nothing in particular and misleading
+  about the caller's actual mistake". A check in `path.file` would be a second
+  copy of that, and the runtime's is the one at the authoritative boundary.
+- **Embedded NUL byte.** Unrepresentable. A Sprout `String` *is* a C string —
+  an extern receives it as `const char* path = (const char*)(uintptr_t)path_i`
+  and `str_len` is a UTF-8 walk over the NUL-terminated buffer — so a NUL
+  terminates the string rather than sitting inside it. The case guards a state
+  that cannot exist.
+
+So `PathErr` has no constructors left and is **deleted**, which also closes the
+`PathErr`/`IoErr` seam below: there is nothing to map, and no composed
+`read_path` is needed.
+
+No validation for `..` or `.` segments either — preserve exact spelling;
+`normalize` is opt-in (see below). Every derived op (`dir_file(d, rel)` and the
+rest) is total, as before.
+
+**What the types buy, stated honestly.** Not "this is a file": nothing consults
+the filesystem, so `file("/tmp")` succeeds and names a directory. What they buy
+is the `guidelines.md` §7 distinction — a dir-path cannot be passed where a
+file-path is expected — plus intent in every signature. That is worth having,
+but it is weaker than "parse, don't validate", and this section should not be
+read as an instance of #4.
 
 An earlier revision of this draft kept the data constructors exported "for
 cheap construction at trusted internal sites" and added `file_checked` /
@@ -181,7 +211,16 @@ cheap construction at trusted internal sites" and added `file_checked` /
 The `_checked` suffix went with the escape hatch it existed to contrast with.
 `docs/guidelines.md` §2 is explicit that a suffix marking fallibility is not
 needed — the `Result` return type carries it — which is also how the landed
-`stdlib.fs.path` spells `extension` and `relative_to`.
+`stdlib.fs.path` spells `extension` and `relative_to`. With construction now
+total the question is moot, but the reasoning stands for any future fallible
+constructor here.
+
+Note what total construction costs and saves: `file` is now an exported
+infallible `String -> File`, which the first bullet above calls "the hidden
+constructor under another name" — and that is exactly right. It enforces
+nothing, and it is not meant to: with no invariant left to carry, `File` is a
+distinctness marker, not a proof. The saving is that no call site gains a
+`let Ok … else`, so migrating the ~90 sites is mechanical.
 
 **Prior art.** The design space is bimodal, and this draft sits at the typed
 end of it:
@@ -196,12 +235,6 @@ what it pays: four QuasiQuoters (`[absfile|/home/chris/foo.txt|]`) exist to
 construct paths from literals at compile time. Sprout has no equivalent, so a
 literal path here goes through the `Result` like any other string.
 
-```sprout
-export type PathErr (..) =
-  | PathErrEmpty
-  | PathErrNullByte
-```
-
 ### v1 API surface
 
 ```sprout
@@ -214,8 +247,8 @@ export wrap Dir  = String
 
 # The data ctors are NOT exported: no `(..)` on either wrap above, so these
 # two are the only way a String becomes a File or a Dir.
-export fn file(s: String) -> Result PathErr File
-export fn dir(s: String)  -> Result PathErr Dir
+export fn file(s: String) -> File
+export fn dir(s: String)  -> Dir
 
 # --- Inspection (lossless roundtrip) ---------------------------------
 
@@ -267,19 +300,22 @@ export fn dir_normalize (d: Dir)  -> Dir
 
 ### IO surface
 
-Filesystem IO stays in `stdlib.io` (or wherever `read_file` currently
-lives), but the signatures migrate to take `File` / `Dir`:
+Filesystem IO lives in `stdlib.fs` — this draft said `stdlib.io`, which never
+existed — and the signatures migrate to take `File` / `Dir`. The names below
+are the ones `stdlib.fs` actually exports:
 
 ```sprout
-# in stdlib.io
-export fn read_file(f: path.File) -> Result IoErr String !{IO}
-export fn write_file(f: path.File, contents: String) -> Result IoErr Unit !{IO}
-export fn file_exists(f: path.File) -> Bool !{IO}
-export fn dir_exists (d: path.Dir)  -> Bool !{IO}
-export fn dir_list   (d: path.Dir)  -> Result IoErr (List String) !{IO}
+# in stdlib.fs
+export fn read_text (f: path.File) -> Result FsError String !{IO}
+export fn write_text(f: path.File, content: String) -> Result FsError Unit !{IO}
+export fn is_file   (f: path.File) -> Bool !{IO}
+export fn is_dir    (d: path.Dir)  -> Bool !{IO}
+export fn list_dir  (d: path.Dir)  -> Result FsError (List String) !{IO}
 ```
 
-(The exact `IoErr` shape is out of scope for this draft.)
+`FsError` is the shipped error type, so its shape is no longer an open
+question. `read_text`/`write_text` return `Result String String` today — see
+Compatibility for that inconsistency, which this migration should settle.
 
 ### Compiler migration
 
@@ -326,18 +362,32 @@ implementation. Three tiers of test cover the v1 surface:
 
 ## Open questions
 
-1. **Module name** — `stdlib.path` vs `stdlib.fs` vs `stdlib.io.path`.
-   Leaning `stdlib.path` for parity with Go/OCaml/Haskell, leaving
-   `stdlib.io` for the effectful surface. Decide at implementation.
+1. ~~**Module name**~~ — **closed.** It shipped as `stdlib.fs.path`, the pure
+   half of `stdlib.fs`, not as a standalone `stdlib.path`. See the banner at
+   the top; the rest of this document still says `stdlib.path` in places and
+   should be read as naming that module.
 
 2. **`Path` umbrella type** — should there also be a tag-union
    `type Path = AsFile File | AsDir Dir` for code that needs to be
    agnostic? Lean: skip in v1; add only if a concrete use case appears.
 
 3. **Coexistence with current compiler code** — should the migration
-   happen in the same PR that introduces `stdlib.path`, or as a follow-up?
+   happen in the same PR that introduces the typed surface, or as a follow-up?
    Leaning: same PR — otherwise the test plan's tier 3 has nothing to
    verify against. But this raises the diff size for the introductory PR.
+   Measured 2026-09-13: ~90 call sites (62 in `tests/stdlib`, 20 in
+   `stdlib/compiler`, ~10 across `tools`/`repl`/`examples`/`ide`), plus 27
+   lines of golden IR that regenerate. Mechanical, since construction is
+   total — but it touches every example that reads a file.
+
+4. **Does the typed surface still earn ~90 edits?** Open, and sharper now that
+   `PathErr` is gone. "Parse, don't validate" pays when a parsed value is
+   threaded through many functions without re-checking; paths in this repo are
+   overwhelmingly parsed and used **once**. The one place that does thread a
+   path — the compiler — already has `source.FilePath`/`StdlibRoot`, so
+   retiring those into `path.File`/`path.Dir` is a rename, not new safety.
+   What remains is the §7 mixup-prevention argument, which is real but smaller
+   than the draft originally assumed.
 
 ## Compatibility
 
@@ -345,24 +395,37 @@ The current `source.FilePath` / `source.StdlibRoot` wraps are
 compiler-private; replacing them with `path.File` / `path.Dir` does not
 break any user-facing API.
 
-`read_file`'s signature changes from `String -> Result IoErr String !{IO}`
-to `File -> Result IoErr String !{IO}`. User code that calls
-`read_file("foo.txt")` directly breaks at that point and must parse the path
-first, which under the validated construction above is itself fallible:
+`read_text`'s signature changes from `String -> Result FsError String !{IO}`
+to `File -> Result FsError String !{IO}`. User code that calls
+`read_text("foo.txt")` breaks at that point and must name the path first — one
+mechanical edit, because construction is total:
 
 ```sprout
-let Ok f = path.file("foo.txt") else Err(io_err_bad_path)
-in read_file(f)
+read_text(path.file("foo.txt"))
 ```
 
-That `else` arm exposes a seam this draft does not close: `path.file` fails
-with `PathErr` and `read_file` with `IoErr`, so a caller threading the two must
-map one into the other. Either `IoErr` absorbs a `PathErr` case or the stdlib
-offers the composed `read_path : String -> Result IoErr String`. Decide with
-the `IoErr` shape, which is out of scope here.
+**The seam is closed** (2026-09-13). It read: `path.file` fails with `PathErr`
+and `read_file` with `IoErr`, so a caller threading the two must map one into
+the other — decide it with the `IoErr` shape, which was out of scope. Both
+halves have since resolved themselves:
+
+- `IoErr` is `stdlib.fs.FsError`, which landed with `stdlib.fs` — closed, eight
+  constructors, and already carrying `FsInvalidPath String`.
+- `PathErr` is deleted (see Construction), so there is nothing to map and no
+  composed `read_path` to add.
+
+The dependency direction would have decided it anyway: `stdlib/fs.sprout`
+imports `stdlib.fs.path`, and `bundler.sprout` rejects import cycles, so `path`
+cannot name `FsError`. "Absorb `PathErr` into the IO error" was never available
+without moving the type.
+
+**Still open, and unrelated to the seam:** `read_text` / `write_text` return
+`Result String String` while `read_bytes`, `list_dir` and `stat` return
+`Result FsError _`. Two error conventions in one module; whoever migrates these
+signatures should settle that at the same time.
 
 This is a breaking change to a public stdlib API, but it is deliberately the
-kind of change `stdlib.path` exists to force.
+kind of change the typed surface exists to force.
 
 ## Sequencing
 
