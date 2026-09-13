@@ -16,7 +16,7 @@ import stdlib.tui.widget as widget
 # in a row would swap silently, inverting which state looks focused; named
 # fields make that a compile error (guidelines §7). Here rather than in one
 # widget, because the pair exists for focus and every focusable widget wants it.
-export type FocusStyle = (normal: style.Style, focused: style.Style)
+export type FocusStyle (..) = (normal: style.Style, focused: style.Style)
 
 # Reverse video, the one attribute every terminal has.
 export fn focus_style_default() -> FocusStyle =

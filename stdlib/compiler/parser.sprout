@@ -2040,7 +2040,12 @@ fn parse_record_type_decl(tokens: Vec token.Token, i: Int) -> Result ParseError 
     # `collect_ident_list` already returns declaration order; reversing again put
     # a record's type params backwards, which is invisible at one param and
     # swaps the field types at two. `parse_type_decl` is the correct precedent.
-    Ok((ast.RecordDecl(token.token_text(name_tok), params, fields, deriving_classes, mult, cur_pos(tokens, i)), i9))
+    # Abstract is the parser's non-answer, not a reading of the `(..)` it just
+    # skipped: publishing a record's representation takes `export` AND `(..)`,
+    # and only the export pre-scan sees the first. `bundler.publish_marked_records`
+    # promotes. Deciding it here instead let an unexported `type R (..)` hand its
+    # fields to every module that could get hold of a value.
+    Ok((ast.RecordDecl(token.token_text(name_tok), params, fields, deriving_classes, mult, ast.Abstract, cur_pos(tokens, i)), i9))
 
 fn parse_class_method_sig(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.ClassMethodSig, Int) =
   do

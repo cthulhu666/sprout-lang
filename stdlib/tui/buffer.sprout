@@ -55,7 +55,7 @@ export fn buffer_lines(b: Buffer) -> List String = all_lines(fields(b))
 # A position in the document. A record rather than two adjacent `Int`s, which
 # swap silently — and because both axes clamp, a swapped pair would land a
 # plausible caret in the wrong place instead of failing (guidelines §3).
-export type Caret = (row: Int, col: Int) deriving (Eq, Ord, ToString)
+export type Caret (..) = (row: Int, col: Int) deriving (Eq, Ord, ToString)
 
 export fn buffer_caret(b: Buffer) -> Caret =
   Caret(row = buffer_row(b), col = buffer_col(b))

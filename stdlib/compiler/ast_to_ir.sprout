@@ -548,7 +548,7 @@ fn build_ctor_table_acc(decls: List typed_ast.TypedDecl, next_tag: Int,
       # plus declaration-order field names so codegen can resolve `.field` offsets
       # and reorder literal fields.  Not added to regs — GC tracing is header-driven
       # (arity in the object header), so no runtime ctor registration is needed.
-      | typed_ast.TPassThrough (ast.RecordDecl type_name _params fields _ _ _) ->
+      | typed_ast.TPassThrough (ast.RecordDecl type_name _params fields _ _ _ _) ->
           build_ctor_table_acc(rest, next_tag + 1,
             dict_set(type_name,
               sprout_ir.CtorInfo(next_tag, record_field_count(fields), record_field_count(fields),
@@ -7215,7 +7215,7 @@ fn eval_const_expr_ir(e: typed_ast.TypedExpr) -> Maybe String =
 # available in the same program — so the routers must decline it. Reading the
 # payload as a tag was silent wrong answers plus an out-of-bounds load; see
 # docs/bug-adt-through-generic-param-2026-08-12.md.
-export type FnInfo = (arity: Int, cpr_result: Bool)
+export type FnInfo (..) = (arity: Int, cpr_result: Bool)
 
 export fn fn_info(arity: Int, cpr_result: Bool) -> FnInfo =
   FnInfo(arity = arity, cpr_result = cpr_result)

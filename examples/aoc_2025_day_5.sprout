@@ -9,7 +9,7 @@ import stdlib.fs as fs
 export type Answers (..) =
   | Answers Int Int
 
-export type Database = (ranges: Vec IntRange, ids: Vec Int)
+export type Database (..) = (ranges: Vec IntRange, ids: Vec Int)
 
 # The input is the fresh ranges, a blank line, then the available IDs; `in_ids`
 # is which half the scan is in.

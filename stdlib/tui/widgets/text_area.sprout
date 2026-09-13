@@ -19,7 +19,7 @@ import stdlib.tui.widgets.viewport as viewport
 # adjacent same-typed parameters swap silently. Start from `text_area_opts()`
 # and override with `with`. Enter belongs to the document (§4.3), so unlike
 # `input` there is no submit handler to supply.
-export type TextAreaOpts m = (initial: String, look: focus.FocusStyle,
+export type TextAreaOpts m (..) = (initial: String, look: focus.FocusStyle,
                               on_content: Maybe (m -> Maybe(String,
                                                              Maybe buffer.Caret)))
 

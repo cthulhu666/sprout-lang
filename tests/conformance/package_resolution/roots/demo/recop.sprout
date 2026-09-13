@@ -1,0 +1,28 @@
+module demo.recop
+
+# Two records differing only in `(..)`, for the record-opacity tests.
+#
+# `Opaque` is the abstract one: the type is exported so callers can name it in a
+# signature, its constructor and fields are not, so `mk` and `magnitude` are the
+# only way in and out. `Open` is the transparent control — every rule that fires
+# on `Opaque` must stay silent on it, or the marker means "records are broken"
+# rather than "this record is abstract".
+
+export type Opaque = (x: Int, y: Int)
+
+export type Open (..) = (a: Int, b: Int)
+
+# The smart constructor an abstract record exists for, and the reason gating
+# construction alone would be useless: hand a caller one value and record update
+# rebuilds every other, so `with` has to be gated too.
+export fn mk(x: Int) -> Opaque = Opaque(x = x, y = x * 2)
+
+export fn magnitude(o: Opaque) -> Int = o.x + o.y
+
+# Marked `(..)` but NOT exported, and handed out anyway through the return type
+# of an exported function. The type is unnameable outside this module; the
+# question is whether a value of it carries its fields along, and it must not —
+# the marker publishes nothing on its own.
+type Escaped (..) = (x: Int, y: Int)
+
+export fn escaped() -> Escaped = Escaped(x = 1, y = 2)

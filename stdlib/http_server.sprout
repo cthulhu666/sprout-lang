@@ -115,7 +115,7 @@ type alias ServerResult a = Result HttpServerError a
 # under an idle deadline stays inside the cap and holds a handler forever — and a rate floor alone
 # does not either, since without a cap the bound has nothing to multiply. Together they give
 # `body_ms + max_body_bytes / min_rate_bps`, a number the operator can compute.
-export type ServerConfig = (header_ms: Int, body_ms: Int, max_header_bytes: Int, write_ms: Int,
+export type ServerConfig (..) = (header_ms: Int, body_ms: Int, max_header_bytes: Int, write_ms: Int,
                             max_body_bytes: Int, min_rate_bps: Int)
 
 # header 10 s total / body 30 s grace / 64 KiB of headers / response writes 30 s grace. Chosen well

@@ -22,7 +22,7 @@ export fn path_text(p: FilePath) -> String =
   | FilePath s -> s
 
 # `file` is a `Maybe` because a buffer can exist before it has anywhere to go.
-export type Document = (file: Maybe FilePath, dirty: Bool) deriving (Eq, ToString)
+export type Document (..) = (file: Maybe FilePath, dirty: Bool) deriving (Eq, ToString)
 
 export fn scratch() -> Document = Document(file = Nothing, dirty = false)
 

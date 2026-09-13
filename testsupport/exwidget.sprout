@@ -3,7 +3,7 @@ module testsupport.exwidget
 # Fixture for the cross-module existential: the box, its record and a class are
 # declared HERE, and constructed/unpacked from an importing module.
 
-export type View s = (state: s, step: s -> s, render: s -> String)
+export type View s (..) = (state: s, step: s -> s, render: s -> String)
 
 export type Widget (..) =
   | exists s. Widget (View s)

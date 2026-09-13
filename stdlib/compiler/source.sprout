@@ -25,7 +25,7 @@ import stdlib.bytes as bytes
 # enters a record into the same ctor table as an ADT ctor) while field access
 # skips the tag load, tag compare, and unreachable-arm branch that a
 # single-constructor `match` still emits.
-export type SourcePos = (index: Int, line: Int, column: Int)
+export type SourcePos (..) = (index: Int, line: Int, column: Int)
 
 # SourceCursor carries the raw source String (for byte slicing and prefix
 # matching), its UTF-8 Bytes (for safe, bounds-checked codepoint decoding), the

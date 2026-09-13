@@ -26,7 +26,7 @@ import stdlib.string as string
 # do-block is skipped rather than guessed at. The census therefore UNDERSTATES,
 # which is the safe direction for a number that decides whether to build a pass.
 
-export type Census = (
+export type Census (..) = (
   bodies: Int,
   pure_calls: Int,
   candidate_keys: Int,

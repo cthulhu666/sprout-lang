@@ -21,7 +21,7 @@ export type Pass (..) deriving (Eq, ToString) =
   | Cse
   | Licm
 
-export type OptConfig = (disabled: List Pass, unrecognised: List String, stats: Bool)
+export type OptConfig (..) = (disabled: List Pass, unrecognised: List String, stats: Bool)
 
 export fn pass_name(p: Pass) -> String =
   match p with

@@ -431,7 +431,7 @@ fn refs_instance_methods(ms: List typed_ast.TypedInstanceMethod, acc: Set) -> Se
 fn refs_passthrough(d: ast.Decl, acc: Set) -> Set =
   match d with
   | ast.TypeDecl _ _ _ _ _ _ -> acc
-  | ast.RecordDecl _ _ _ _ _ _ -> acc
+  | ast.RecordDecl _ _ _ _ _ _ _ -> acc
   | ast.ClassDecl _ _ _ _ _ -> acc
   | ast.AliasDecl _ _ _ _ -> acc
   | ast.WrapDecl _ _ _ _ -> acc

@@ -666,7 +666,7 @@ export fn expand_deriving_decls(decls: List ast.Decl) -> List ast.Decl =
           | _ -> Cons(d, list_append(
                           derive_instances_for_classes(name, type_params, ctors, pos, deriving_classes),
                           expand_deriving_decls(rest)))
-      | ast.RecordDecl name type_params fields deriving_classes _ pos ->
+      | ast.RecordDecl name type_params fields deriving_classes _ _ pos ->
           match deriving_classes with
           | Nil -> Cons(d, expand_deriving_decls(rest))
           | _ -> Cons(d, list_append(
@@ -704,7 +704,7 @@ fn validate_one_deriving_decl(d: ast.Decl) -> Maybe String =
   match d with
   | ast.TypeDecl name _ ctors deriving_classes _ _ ->
       validate_deriving_classes_list(name, ctors, deriving_classes)
-  | ast.RecordDecl name _ _ deriving_classes _ _ ->
+  | ast.RecordDecl name _ _ deriving_classes _ _ _ ->
       validate_record_deriving_classes_list(name, deriving_classes)
   | ast.WrapDecl name _ deriving_classes _ ->
       validate_wrap_deriving_classes_list(name, deriving_classes)

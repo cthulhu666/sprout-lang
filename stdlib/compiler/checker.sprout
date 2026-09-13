@@ -258,7 +258,7 @@ fn stored_effect_var_error(decls: List ast.Decl) -> Maybe(source.SourcePos, Stri
 #     `TypeName` and be invisible here.
 fn stored_effect_var_in_decl(d: ast.Decl) -> Maybe(source.SourcePos, String) =
   match d with
-  | ast.RecordDecl name _ fields _ _ pos -> stored_in_fields(name, fields, pos)
+  | ast.RecordDecl name _ fields _ _ _ pos -> stored_in_fields(name, fields, pos)
   | ast.TypeDecl name _ ctors _ _ pos -> stored_in_ctors(name, ctors, pos)
   | ast.WrapDecl name inner _ pos -> stored_in_wrap(name, inner, pos)
   | ast.FnDecl _ _ _ _ _ _ _ -> Nothing

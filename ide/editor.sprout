@@ -71,7 +71,7 @@ export type SaveWhen (..) deriving (Eq, ToString) =
 # The decoders are prisms over the application's own message type, the
 # vocabulary `docs/tui-content-update-v0.md` §4.10 leaves to opts rather than to
 # `Delivery` arms. A pane given none of them is a read-only viewer.
-export type EditorOpts m = (look: focus.FocusStyle,
+export type EditorOpts m (..) = (look: focus.FocusStyle,
                             # What starts a save nobody asked for.
                             save_when: SaveWhen,
                             # The label, when it changes. Never the document.

@@ -93,7 +93,7 @@ export type Grow (..) deriving (Eq, ToString) =
 # What `measure` answers: a natural size, plus how the widget grows on each
 # axis. A container turns `Greedy` into `layout.Fraction` and `Fixed` into
 # `layout.Auto`.
-export type Measured = (size: geometry.Size, cols: Grow, rows: Grow)
+export type Measured (..) = (size: geometry.Size, cols: Grow, rows: Grow)
 
 # The leaf spelling — a widget with a definite size and nothing to say about
 # growth, which is most of them.
@@ -115,7 +115,7 @@ export fn greedy_size(sz: geometry.Size) -> Measured =
 # distinction has to be in the reply — and as `Maybe` rather than a flag beside
 # the state, a decline cannot also carry a state, a message or a command that
 # the caller would have to be trusted to discard.
-export type View s m = (
+export type View s m (..) = (
   state: s,
   on_event: s -> event.Event -> (s, List m, List (Cmd m)),
   route: s -> WidgetId -> Delivery m -> Maybe(s, List m, List (Cmd m)),

@@ -219,15 +219,14 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
 
 **Modules and prelude**
 
-- [ ] `P2` **`export type` opacity is honoured on sums and silently ignored on records.** Verified
-  2026-09-09: `export type Sum = | A | B` without `(..)` hides `A` (`inner.A` → `Unknown
-  variable`), while a record is unconditionally transparent — both `r.x` and
-  `inner.Rec(x = 3, y = 4)` type-check across a module boundary whatever the declaration says.
-  So the marker that means "keep this abstract" does nothing on the one shape most likely to want
-  it, and silently: no diagnostic says the annotation was dropped. `stdlib/tui/buffer.sprout`
-  works around it by wrapping the record in a single-constructor ADT
-  (`docs/tui-text-area-v0.md` §4.9). Adjacent rulings: the `import M (T)` constructor question in
-  §7.5's neighbourhood, and `opaque type` under `wrap` ergonomics.
+- [ ] `P3` **An `instance` method is the one way past record opacity.** An instance introduces no
+  name, so `infer.group_module` cannot attribute it to a module and does not gate it: any method
+  body may read any abstract record's fields (declare a class, instance it for the type, read
+  them). Attributing to the head type was tried and reverted — a prelude-headed instance names no
+  module, so a module could not read its OWN record inside one — and closed nothing, since an
+  instance *for* an abstract record resolves to that record's module anyway. The fix is an
+  orphan-instance rule, or the writing module on `ast.InstanceDecl` (74 sites, 18 files).
+  Recorded in `spec-v0.md` §5.6.4.
 - [ ] `P3` **An unresolved name under a renamed alias gets no "declared here" note.** The note that
   names the module declaring an unexported symbol (`infer.unresolved_name_hint`) searches the
   environment by last component alone, so it cannot confirm the reference's alias names the module

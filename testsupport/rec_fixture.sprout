@@ -18,24 +18,24 @@ module testsupport.rec_fixture
 # Four same-typed fields — the shape where a field-offset mixup is invisible to
 # the typechecker, so the test reads each field into its own decimal place rather
 # than checking a sum that a swap would preserve.
-export type Cfg = (header_ms: Int, body_ms: Int, max_header_bytes: Int, write_ms: Int)
+export type Cfg (..) = (header_ms: Int, body_ms: Int, max_header_bytes: Int, write_ms: Int)
 
 # Derived instances must resolve at an importing use site, not just here.
-export type Point = (x: Int, y: Int) deriving (Eq, Ord, ToString)
+export type Point (..) = (x: Int, y: Int) deriving (Eq, Ord, ToString)
 
 # Parametric: the consumer instantiates this at two different type arguments.
-export type Box s = (val: s, label: String)
+export type Box s (..) = (val: s, label: String)
 
 # A record field whose type is another exported record, for nested access
 # (`l.from.x`) across the boundary.
-export type Line = (from: Point, to: Point)
+export type Line (..) = (from: Point, to: Point)
 
 # Function-typed fields, called inline at the use site (`o.double(21)`).
-export type Ops = (double: Int -> Int, greet: String -> String)
+export type Ops (..) = (double: Int -> Int, greet: String -> String)
 
 # `header_ms` again, at a different type in a different record. Field scoping is
 # per-record, so this must not collide with `Cfg`'s field of the same name.
-export type Other = (header_ms: String)
+export type Other (..) = (header_ms: String)
 
 # An imported record as an ADT constructor's field — the codegen `ctors`-dict
 # keying path, which is distinct from the record-marker path.
@@ -43,7 +43,7 @@ export type Holder (..) = | Holder Cfg | Empty
 
 # Reading one field of an owned linear record consumes it, so a two-field read is
 # a reuse. The rule must survive the module boundary.
-export type linear Tok = (id: Int, tag: String)
+export type linear Tok (..) = (id: Int, tag: String)
 
 export fn default_cfg() -> Cfg =
   Cfg(header_ms = 10, body_ms = 20, max_header_bytes = 30, write_ms = 40)

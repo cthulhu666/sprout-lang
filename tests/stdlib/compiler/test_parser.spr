@@ -172,7 +172,7 @@ fn first_typedecl_is_linear(src: String) -> Bool =
               | [d | _] ->
                   match d with
                   | ast.TypeDecl _ _ _ _ mult _ -> mult_is_linear(mult)
-                  | ast.RecordDecl _ _ _ _ mult _ -> mult_is_linear(mult)
+                  | ast.RecordDecl _ _ _ _ mult _ _ -> mult_is_linear(mult)
                   | _ -> false
 
 fn mult_is_linear(m: ast.Multiplicity) -> Bool =

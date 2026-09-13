@@ -131,6 +131,30 @@ for half in "construct:$ctor" "pattern:$pat"; do
   fi
 done
 
+# A record exported without `(..)` publishes its type and not its representation.
+# The two halves are settled by DIFFERENT components — construction by the bundler
+# (the name is never bound), field access by inference (the name resolved; the
+# type is what is private) — so one passing says nothing about the other.
+rcon="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_record_construct.spr" 2>&1)"
+if echo "$rcon" | grep -qF 'Unknown record type or field: recop.Opaque' &&
+   echo "$rcon" | grep -qF 'exported only with `(..)`'; then
+  echo "PASS record opacity: an abstract record cannot be constructed cross-module"
+else
+  echo "FAIL record opacity: expected recop.Opaque construction rejected, with the \`(..)\` note"
+  echo "$rcon" | tail -3
+  fail=1
+fi
+
+rfld="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_record_field.spr" 2>&1)"
+if echo "$rfld" | grep -qF 'is abstract here' &&
+   echo "$rfld" | grep -qF 'demo.recop'; then
+  echo "PASS record opacity: an abstract record's field is unreadable cross-module"
+else
+  echo "FAIL record opacity: expected a field read of demo.recop.Opaque to be refused"
+  echo "$rfld" | tail -3
+  fail=1
+fi
+
 # The batch CLI's half of the canonical-name rule. The env front end has its own
 # (tests/stdlib/compiler/test_canonical_name_rejected.spr); the two have diverged
 # before over package roots, which is why neither stands in for the other.

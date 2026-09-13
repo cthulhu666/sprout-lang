@@ -414,8 +414,10 @@ emit a duplicate instance; CI will reject).
 
 When using `deriving` on a `type` with no `(..)` constructor-export marker,
 the synthesized instance methods are still exported because instance methods
-are first-class names in the prelude/imports. The `(..)` only governs whether
-*constructors* are visible to other modules.
+are first-class names in the prelude/imports. The `(..)` governs only what the
+declaration itself publishes to other modules: a sum's or wrap's *constructors*,
+and — since 2026-09-13 — a record's *representation*, meaning its constructor,
+its field access and its `with` update together (spec §5.6.4).
 
 ## 13. Guidance for AI Agents
 
