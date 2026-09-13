@@ -51,8 +51,3 @@ Rationale and measurements live in `README.md`; the skill itself is `SKILL.md`.
   The `done` row already stores the head SHA; comparing it against the current tree would give a
   staleness marker (`rv:2*`). `review_gate.py` already computes a per-path tree digest that could
   be reused rather than reinvented.
-
-- [ ] `P2` **The skill assumes it runs from the repo root.**
-  `SKILL.md` invokes `bash scripts/review_ledger.sh`, which breaks in a session started in a
-  subdirectory. Resolve via `git rev-parse --show-toplevel` instead. Untested, and it would fail
-  quietly as a missing-record rather than a loud error — the worst shape for this bug.
