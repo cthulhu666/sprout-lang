@@ -56,6 +56,19 @@ check "the new branch counts its own"  "1"  "$(bash "$LEDGER" count)"
 git switch -q main
 check "the original branch is intact"  "2"  "$(bash "$LEDGER" count)"
 
+# A session can start anywhere in the tree, and a ledger that silently writes
+# nowhere reads exactly like a branch that was never reviewed — the one thing
+# this ledger exists to report. So it must resolve the same file from a
+# subdirectory, not just from the root.
+mkdir -p sub/deeper
+cd sub/deeper || exit 1
+check "counts from a subdirectory"     "2"  "$(bash "$LEDGER" count)"
+id4=$(bash "$LEDGER" open)
+bash "$LEDGER" done "$id4" 1 1
+check "a run recorded from a subdir"   "3"  "$(bash "$LEDGER" count)"
+cd "$R" || exit 1
+check "and the root sees that run too" "3"  "$(bash "$LEDGER" count)"
+
 # Outside a repository the ledger must stay quiet rather than erroring: the
 # status line calls `show` on every render, wherever the user happens to be.
 cd /tmp || exit 1

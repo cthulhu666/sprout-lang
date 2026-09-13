@@ -27,8 +27,12 @@ reproduced below.
 **1. Open the ledger row.** Before any review work:
 
 ```
-bash scripts/review_ledger.sh open
+bash "$(git rev-parse --show-toplevel)/scripts/review_ledger.sh" open
 ```
+
+Resolve the repo root rather than using a relative path: a session started in a subdirectory would
+otherwise fail to find the script, and the failure shows up as a *missing row* — indistinguishable
+from "never reviewed", which is the one thing this skill exists to report.
 
 Keep the run id it prints. If this fails, say so and continue — a review that cannot be recorded is
 still worth doing, but do not silently skip the recording.
@@ -43,7 +47,7 @@ the port finds less than the built-in does.
 **3. Close the ledger row** with the counts the workflow returned:
 
 ```
-bash scripts/review_ledger.sh done <run-id> <found> <confirmed>
+bash "$(git rev-parse --show-toplevel)/scripts/review_ledger.sh" done <run-id> <found> <confirmed>
 ```
 
 `found` is the deduplicated finding count before verification; `confirmed` is how many survived it.
