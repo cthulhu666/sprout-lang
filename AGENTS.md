@@ -61,6 +61,12 @@ refuses the turn and prints a path-aware checklist: idiomatic Sprout for `.sprou
 always. Generated artifacts (the seed, `tests/golden/ir/`, `build/`, `.claude/`) are invisible to it,
 so a reseed or a golden snapshot never trips it. Test with `just test-review-gate`.
 
+**`/sprout-review`** — `.claude/skills/sprout-review/SKILL.md`, a port of the built-in `/code-review`
+that also records the run. `/code-review` leaves nothing on disk, so nothing can say how many
+reviews a branch has had; this one opens and closes a row in `$GIT_DIR/claude-review/runs.tsv`
+(per-worktree, invisible to `git status`). `scripts/review_ledger.sh count` reads it; test with
+`just test-review-ledger`.
+
 **Seed gate** — `scripts/seed_gate.sh`, a PreToolUse Bash hook. Intercepts `git commit` and blocks if
 `stdlib/compiler/*.sprout` or `stdlib/*.sprout` is staged without a refreshed
 `bootstrap/compile_driver.ll`. Bypass when the IR is genuinely unchanged: `just

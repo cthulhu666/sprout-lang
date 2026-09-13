@@ -569,6 +569,13 @@ test-shell-hooks:
   D=$(mktemp -d /tmp/sprout_shell_hooks_XXXXXX); trap 'rm -rf "$D" "$D-wt"' EXIT
   python3 scripts/test_shell_hooks.py "$D"
 
+# Exercise the `/sprout-review` run ledger. Same rationale as the two above: only
+# the skill writes it and only the status line reads it, so nothing else notices
+# when the count stops being right — and a wrong count reads as authoritative.
+[group('test')]
+test-review-ledger:
+  bash scripts/test_review_ledger.sh
+
 # Run a single test file with stage-1.
 [group('test')]
 test-file file: (_test-file "build/compile_driver_bin_stage1" file)
@@ -3077,6 +3084,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "seed-dep-check|seed-dep-check"
     "review-gate|test-review-gate"
     "shell-hooks|test-shell-hooks"
+    "review-ledger|test-review-ledger"
     # Added when Assertion D landed: both had names that CLAIM verification while nothing
     # ran them. c-runtime-test's ten C-level assertions were unrunnable for however long it
     # took someone to try (the runtime split into sprout_scheduler.c/sprout_poll.c broke its
