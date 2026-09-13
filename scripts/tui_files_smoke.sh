@@ -56,13 +56,30 @@ printf 'hello\n' > "$FIX/ZFILE"
 
 # Outside the fixture: a file written into it would show up in the tree.
 out=$(mktemp /tmp/sprout_tui_files_out_XXXXXX)
-trap 'rm -rf "$FIX" "$out"' EXIT
-# The binary must be the LAST element of the pipeline and must not be wrapped
-# in a subshell that also waits for the writer: `$!` would then be that
-# subshell, which lives until the 12s sleep ends, and a prompt exit would read
-# as a hang. `exec` keeps the pid the shell reports the one that matters.
+keys=$(mktemp -u /tmp/sprout_tui_files_keys_XXXXXX)
+# Separate from $out, which the `want` assertions grep: a stray writer message
+# landing there could satisfy one of them.
+keyserr=$(mktemp /tmp/sprout_tui_files_keyserr_XXXXXX)
+trap 'rm -rf "$FIX" "$out" "$keys" "$keyserr"' EXIT
+
+# That stderr never reaches the terminal, so a failure starting in the writer
+# would otherwise be invisible.
+dump_writer_err() {
+  if [ -s "$keyserr" ]; then
+    echo "--- keystroke writer stderr ---" >&2
+    cat -v "$keyserr" >&2
+  fi
+}
+
+# The writer outlives the window on purpose — a stream that ENDS quits the app
+# whatever the keys were — but must not be WAITED ON: `wait` takes a pid and
+# waits for its whole job. Hence a FIFO, giving it its own pid to kill, and no
+# inherited stdin or stderr. docs/gates.md §Driven smokes.
+mkfifo "$keys"
 { printf '\x1b[C'; sleep 1; printf '\x1b'; sleep 12; } \
-  | ( cd "$FIX" && exec "$BIN" ) > "$out" 2>&1 &
+  < /dev/null > "$keys" 2>"$keyserr" &
+wpid=$!
+( cd "$FIX" && exec "$BIN" ) < "$keys" > "$out" 2>&1 &
 pid=$!
 # 5s: comfortably after the Esc at 1s plus one read deadline, and comfortably
 # before the writer's 12s, so an exit inside the window cannot be EOF.
@@ -71,11 +88,15 @@ for _ in $(seq 1 50); do
   if ! kill -0 $pid 2>/dev/null; then quit=1; break; fi
   sleep 0.1
 done
-kill -9 $pid 2>/dev/null
-wait $pid 2>/dev/null
+# The writer's own children first, while it still HAS children: killing the
+# subshell reparents its trailing `sleep` and `-P` can no longer find it.
+pkill -P $wpid 2>/dev/null
+kill -9 $pid $wpid 2>/dev/null
+wait $pid $wpid 2>/dev/null
 if [ "$quit" -ne 1 ]; then
   echo "FAIL: still running 5s after Esc, with stdin still open" >&2
   echo "      (the escape timeout in app.idled is what resolves a lone ESC)" >&2
+  dump_writer_err
   exit 1
 fi
 
@@ -105,6 +126,7 @@ want '1049l' 'the alternate screen being left'
 if [ "$fail" -ne 0 ]; then
   echo "--- captured output ---" >&2
   cat -v "$out" >&2
+  dump_writer_err
   exit 1
 fi
 echo "==> tui-files-smoke: app loop ran, tree filled and expanded, Esc quit"

@@ -288,6 +288,34 @@ program in the bench corpus (`bench/results-2026-09-11-opt.md`), so a realistic 
 nothing. Keep the dead binding pure and unread — making it effectful or reading it turns the gate
 into a tautology that passes for the wrong reason.
 
+## Driven smokes — `just ide-smoke`, `just tui-files-smoke`
+
+Both drive a real binary by writing keystrokes into its stdin, and both need the writer to **outlive**
+the window they watch: a key stream that ENDS quits the app whatever the keys were (`TermEof` closes
+the pump's channel), so only a writer still open makes the exit attributable to Escape. Hence the
+trailing `sleep` well past the timeout.
+
+### `wait` waits for the JOB, not the pid you hand it
+
+The writer must outlive the window; it must not be *waited on*. For a backgrounded pipeline `$!` names
+only the last process, but `wait $!` blocks until the whole job finishes — so waiting on the app also
+waited out the writer's remaining sleep. That was **19.5 of every 27 seconds** in `ide-smoke` (three
+runs: 81s of which 58.5s was a `wait` on a process with nothing left to say) and ~10s in
+`tui-files-smoke`.
+
+`kill -0 $pid` checks one process and `wait $pid` waits for one job, so the two lines disagree about
+what they track. `tui_files_smoke.sh` already carried a comment reasoning about this exact hazard and
+had fixed the *detection* loop with `exec`; `wait` two lines below re-coupled the teardown anyway.
+
+The fix is a FIFO instead of an anonymous pipe, giving the writer its own pid to kill once the app has
+gone. Two things to keep if you touch this again:
+
+- **Do not shorten the sleeps instead.** They are what makes an exit attributable to Escape. Verify by
+  deleting the `\x1b` from the key fragments — every run must then FAIL with "still running"; a pass
+  means stdin is closing early and the runs prove nothing.
+- **Give the writer neither stdin nor stderr.** Killing it orphans its trailing `sleep`, and an orphan
+  holding the script's stderr open makes a caller reading to EOF wait out the delay just removed.
+
 ## `just linux-smoke`
 
 Every other local gate runs the kqueue backend; CI runs epoll + timerfd, and the two diverge in ways
