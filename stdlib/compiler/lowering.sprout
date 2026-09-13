@@ -713,10 +713,6 @@ fn mangle_effects_suffix(effects_maybe: Maybe (List String)) -> String =
   | Nothing -> ""
   | Just effs -> "_eff_" ++ string.join("_", effs)
 
-fn str_ends_with_suffix(s: String, suffix: String) -> Bool =
-  if str_len(s) < str_len(suffix) then false
-  else str_slice(s, str_len(s) - str_len(suffix), str_len(s)) == suffix
-
 # ---------------------------------------------------------------------------
 # Eta-expansion of class methods in value position
 # ---------------------------------------------------------------------------
@@ -1025,7 +1021,7 @@ fn find_forwarded_method_for_tvar(method_name: String, tvar_name: String, entrie
   match entries with
   | Nil -> Nothing
   | Cons (key, method_map) rest ->
-      if str_ends_with_suffix(key, "_" ++ tvar_name) then
+      if string.ends_with(key, "_" ++ tvar_name) then
         match dict_get_method(method_name, method_map) with
         | Just impl_name -> Just(impl_name)
         | Nothing -> find_forwarded_method_for_tvar(method_name, tvar_name, rest)

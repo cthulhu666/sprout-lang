@@ -252,7 +252,7 @@ fn extern_names(pairs: List (String, types.Scheme)) -> List String =
   | Nil -> Nil
   | Cons (k, _) rest ->
       if str_starts_with(k, extern_marker_prefix())
-      then Cons(str_slice(k, str_len(extern_marker_prefix()), str_len(k)), extern_names(rest))
+      then Cons(string.drop(k, string.length(extern_marker_prefix())), extern_names(rest))
       else extern_names(rest)
 
 # @class: and @instance: markers are intentionally NOT prefixed — they are

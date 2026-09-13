@@ -1536,7 +1536,7 @@ fn names_that_module(name: String, mod_name: String) -> Bool =
   match string.split_once(name, ".") with
   | Nothing -> true
   | Just (alias, _) ->
-      mod_name == alias || str_ends_with_suffix(mod_name, "." ++ alias)
+      mod_name == alias || string.ends_with(mod_name, "." ++ alias)
 
 # The first environment key with the same last component, minus that component.
 # The value-side twin of `bundler.exporting_module`. Taking the first match is safe
@@ -2968,7 +2968,7 @@ fn arg_scan_head(head_token: String) -> Maybe String =
   else Nothing
 
 fn head_name_matches(resolved_head: String, want: String) -> Bool =
-  resolved_head == want || str_ends_with_suffix(resolved_head, "." ++ want)
+  resolved_head == want || string.ends_with(resolved_head, "." ++ want)
 
 # Discharge an argument-scanned constraint. With a known head (`where Sh (Box
 # a)`) the argument is chosen BY that head; a genuinely headless constraint
@@ -3093,11 +3093,7 @@ fn scan_fwd_marker_entries(
 # Check whether an env key is an @fwd marker for the given class.
 # Key format: "@fwd:" ++ tvar_name ++ ":" ++ class_name
 fn is_fwd_key_for_class(key: String, class_name: String) -> Bool =
-  str_starts_with(key, "@fwd:") && str_ends_with_suffix(key, ":" ++ class_name)
-
-fn str_ends_with_suffix(s: String, suffix: String) -> Bool =
-  if str_len(s) < str_len(suffix) then false
-  else str_slice(s, str_len(s) - str_len(suffix), str_len(s)) == suffix
+  str_starts_with(key, "@fwd:") && string.ends_with(key, ":" ++ class_name)
 
 # When a function has multiple constraints for the same class (e.g. Eq a, Eq b), there are
 # two @fwd:*:Eq markers in env — one per prog_var.  resolve_via_fwd_or_scan picks the first
@@ -3483,7 +3479,7 @@ fn seed_super_from_entries(class_name: String, fresh_name: String, prog_var: Str
       | (key, _) ->
           if str_starts_with(key, "@super:" ++ class_name ++ ":")
           then seed_super_from_entries(class_name, fresh_name, prog_var, rest,
-                 dict_set("@fwd:" ++ fresh_name ++ ":" ++ str_slice(key, str_len("@super:" ++ class_name ++ ":"), str_len(key)),
+                 dict_set("@fwd:" ++ fresh_name ++ ":" ++ string.drop(key, string.length("@super:" ++ class_name ++ ":")),
                           types.mono(types.TConst(types.type_id(prog_var))), env))
           else seed_super_from_entries(class_name, fresh_name, prog_var, rest, env)
 
@@ -3533,7 +3529,7 @@ fn add_eta_supers_from_entries(class_name: String, fresh_name: String, prog_var:
       | (key, _) ->
           if str_starts_with(key, "@super:" ++ class_name ++ ":")
           then add_eta_supers_from_entries(class_name, fresh_name, prog_var, rest,
-                 dict_set("@eta_fwd:" ++ fresh_name ++ ":" ++ str_slice(key, str_len("@super:" ++ class_name ++ ":"), str_len(key)),
+                 dict_set("@eta_fwd:" ++ fresh_name ++ ":" ++ string.drop(key, string.length("@super:" ++ class_name ++ ":")),
                           types.mono(types.TConst(types.type_id(prog_var))), markers))
           else add_eta_supers_from_entries(class_name, fresh_name, prog_var, rest, markers)
 
@@ -5361,7 +5357,7 @@ fn alias_decls_from_env(
         match scheme with
         | types.Scheme _ _ ty _ _ ->
             alias_decls_from_env(rest,
-              dict_set(str_slice(key, str_len(alias_marker_prefix()), str_len(key)), ty, acc))
+              dict_set(string.drop(key, string.length(alias_marker_prefix())), ty, acc))
       else alias_decls_from_env(rest, acc)
 
 # `pos` is the LAMBDA's position, threaded in so the error is constructed with a
@@ -6863,10 +6859,9 @@ fn validate_constraints_all(decls: List ast.Decl, classes: List String) -> Maybe
 # one edit fixes the signature outright instead of each rejected field
 # surfacing the next one.
 #
-# is_main_decl_name mirrors ast_to_ir.is_entry_fn_name / codegen.is_entry_fn_name.
+# is_main_decl_name mirrors ast_to_ir.is_entry_fn_name / dce.is_entry_name.
 fn is_main_decl_name(name: String) -> Bool =
-  name == "main" || (n >= 5 && str_slice(name, n - 5, 5) == ".main")
-  where n = str_len(name)
+  name == "main" || string.ends_with(name, ".main")
 
 fn main_return_ok(ret: Maybe ast.TypeExpr) -> Bool =
   match ret with
@@ -8626,7 +8621,7 @@ fn match_fwd_marker_by_subst(
 
 # The type-variable name embedded in an "@fwd:{tvar}:{class}" key.
 fn fwd_key_tyvar_name(key: String, class_name: String) -> String =
-  str_slice(key, str_len("@fwd:"), str_len(key) - str_len("@fwd:") - str_len(":" ++ class_name))
+  string.slice_between(key, string.length("@fwd:"), string.length(key) - string.length(":" ++ class_name))
 
 # Does this "@fwd:{tvar}:{class}" key name a variable that the substitution has
 # identified with `v`? Both sides are substituted before comparison.

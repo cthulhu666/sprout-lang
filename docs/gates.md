@@ -246,6 +246,14 @@ must not cost more than this" — has no second arm to normalise against, so it 
 does not vary with the machine. Ratios catch a wrong exponent; budgets catch a bad constant. This
 gate is the second kind, and today's bug was the second kind: correct complexity, 8× the constant.
 
+**A ratio arm must not time a header-reading builtin.** CI sets `SPROUT_GC_HDRCHECK=1` for the
+whole test job, and under it `str_byte_len` validates the header with a `strlen` — so the O(1)
+byte-length read that `string.byte_length` documents is O(n) exactly where the gate runs. A
+`string.take` guard built on it measured 1.0x locally and 164x on CI (255x locally once the flag
+was set); an earlier `sprout_cstr_byte_len` revision failed the same way at 389x. The comment on
+that helper in `runtime/sprout_runtime.c` is the primary record. Run a new ratio gate under the flag
+before trusting it — `SPROUT_GC_HDRCHECK=1 just test` reproduces CI.
+
 **`gc_swept` is the load-bearing counter, not `sprout_obj`.** Verified by building the probe against
 the pre-fix `grapheme`: objects came out *identical* at 18 per cell, swept at 106 against 42.
 `sprout_obj` does not count cstr allocations, and that bug was `str_slice` churn — an objects-only

@@ -87,14 +87,19 @@ export fn substring_after_last(raw: String, sep: String) -> String =
 export fn after_last_dot(name: String) -> String =
   substring_after_last(name, ".")
 
+# O(count): the leading `count` codepoints, or all of them when there are fewer.
+# There is no "count covers everything" guard because `slice` already clamps, and
+# asking would cost the O(|raw|) codepoint count this avoids — the guard only ever
+# bought returning `raw` itself instead of an equal copy.
 export fn take(raw: String, count: Int) -> String =
   if count <= 0 then ""
-  else if count >= length(raw) then raw
   else slice(raw, 0, count)
 
+# O(|raw|): everything but the leading `count` codepoints. The codepoint count is
+# irreducible here, so it is taken once and fed straight to `slice`, which clamps
+# a non-positive remainder to the empty string.
 export fn drop(raw: String, count: Int) -> String =
   if count <= 0 then raw
-  else if count >= length(raw) then ""
   else slice(raw, count, length(raw) - count)
 
 # O(stop): the half-open window `[start, stop)` in codepoints. Prefer this to
@@ -105,16 +110,17 @@ export fn slice_between(raw: String, start: Int, stop: Int) -> String =
   in slice(raw, from, stop - from)
 
 # O(|raw|): the trailing `count` codepoints, or all of them when there are fewer.
+# An offset counted from the end needs the codepoint length, so unlike `take` this
+# cannot be O(count); a `count` past the end just makes the start negative, which
+# `slice` clamps to zero.
 export fn take_last(raw: String, count: Int) -> String =
   if count <= 0 then ""
-  else if count >= length(raw) then raw
   else slice(raw, length(raw) - count, count)
 
 # O(|raw|): everything but the trailing `count` codepoints. Pair with `take_last`;
 # the two partition `raw`.
 export fn drop_last(raw: String, count: Int) -> String =
   if count <= 0 then raw
-  else if count >= length(raw) then ""
   else slice(raw, 0, length(raw) - count)
 
 # O(|raw| * |needle|) in the worst case: delegates to the native substring search.

@@ -181,10 +181,10 @@ Every opposite-meaning pair in the Sprout tree marks **both** sides:
 
 | pair | location |
 |---|---|
-| `starts_with` / `ends_with` | `stdlib/string.sprout:221,226` |
-| `trim_left` / `trim_right` | `stdlib/string.sprout:270,274` |
-| `strip_prefix` / `strip_suffix` | `stdlib/string.sprout:104,111` |
-| `vec_prepend` / `vec_append` | `stdlib/prelude.sprout:190,196` |
+| `starts_with` / `ends_with` | `stdlib/string.sprout` |
+| `trim_left` / `trim_right` | `stdlib/string.sprout` |
+| `strip_prefix` / `strip_suffix` | `stdlib/string.sprout` |
+| `vec_prepend` / `vec_append` | `stdlib/prelude.sprout` |
 
 There is no marked/unmarked pair anywhere in the prelude. So *if* a descending constructor is ever
 added, `range` + `range_down` would violate house convention and the pair must be
