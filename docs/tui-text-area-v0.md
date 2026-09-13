@@ -352,6 +352,7 @@ the U+2028 assertion.
 
 ## 10. Deferred, filed in `BACKLOG.md` §4
 
-Soft wrap; selection, clipboard and undo; word motion and the chord family; the
+Soft wrap; selection, clipboard and undo (designed in `docs/tui-undo-v0.md`, which puts the
+history on `buffer.Buffer` so this widget inherits it); word motion and the chord family; the
 control vocabulary's first real consumer; tab-stop expansion on paste; a
 `Delivery`-level or opts-level jump-to-line; peeking away from the caret.

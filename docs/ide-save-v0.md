@@ -218,7 +218,8 @@ Every editor in §3 has something under it. JetBrains has Local History, which c
 not. Emacs writes to `#foo#` and leaves the visited file alone. VS Code has Hot Exit, and local
 history in the Timeline view (`workbench.localHistory.enabled`, on by default).
 Sprout has the buffer and nothing else — which is why undo is the next piece of work, filed in
-`BACKLOG.md` §4.5. Anyone who wants the old floor back before it lands has `--save-when=manual`.
+`BACKLOG.md` §4.5 and designed in `docs/tui-undo-v0.md`, whose §3.2 surveys what those editors put
+underneath. Anyone who wants the old floor back before it lands has `--save-when=manual`.
 
 **A save is still whole-file.** Nothing here makes an autosave cheaper than an explicit one: the
 pane hands over `buffer.buffer_text`, which rebuilds the whole document. At one write per second per
