@@ -98,14 +98,18 @@ parses but is deprecated and reported by the linter as `deprecated-brace-body`.
 
 ## Quick start
 
-Requires [`mise`](https://mise.jdx.dev) (pins the toolchain) and `clang`.
+On macOS or Linux, clone the repository and run the development setup:
 
 ```
-mise install
-mise exec -- just bootstrap-from-seed                          # build the self-hosted compiler (stage-1)
+./scripts/setup-dev.sh
 mise exec -- just compile-native examples/fizzbuzz.sprout /tmp/fizzbuzz
 /tmp/fizzbuzz
 ```
+
+The setup installs the system and repository-managed toolchain, configures Git hooks, and
+bootstraps the self-hosted compiler. It supports Homebrew and the APT, DNF, Pacman, and Zypper
+Linux families; WSL follows the Linux path. Use `./scripts/setup-dev.sh --print-plan` to inspect
+what it would install.
 
 Full toolchain, tasks, driver CLI, and platform support live in
 [docs/development.md](./docs/development.md). Run the test suite with

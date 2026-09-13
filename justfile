@@ -1,5 +1,8 @@
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
+llvm_bindir := `bash scripts/llvm-toolchain-path.sh`
+export PATH := if llvm_bindir == "" { env_var("PATH") } else { llvm_bindir + ":" + env_var("PATH") }
+
 stdlib_root := justfile_directory() / "stdlib"
 driver      := stdlib_root / "compiler" / "compile_driver.sprout"
 clang_extra := if os() == "macos" { "-framework Security -framework CoreFoundation" } else { "" }
@@ -575,6 +578,12 @@ test-shell-hooks:
 [group('test')]
 test-review-ledger:
   bash scripts/test_review_ledger.sh
+
+# Exercise setup planning without changing the host. This also guards against
+# Ubuntu's unrelated package named `opt` being mistaken for LLVM's optimizer.
+[group('test')]
+test-setup-dev:
+  bash scripts/test_setup_dev.sh
 
 # Run a single test file with stage-1.
 [group('test')]
@@ -3090,6 +3099,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "review-gate|test-review-gate"
     "shell-hooks|test-shell-hooks"
     "review-ledger|test-review-ledger"
+    "setup-dev|test-setup-dev"
     # Added when Assertion D landed: both had names that CLAIM verification while nothing
     # ran them. c-runtime-test's ten C-level assertions were unrunnable for however long it
     # took someone to try (the runtime split into sprout_scheduler.c/sprout_poll.c broke its
@@ -3437,7 +3447,9 @@ gate-audit:
   #                           claimed behavior-preserving.  It fails BY DESIGN on any
   #                           intentional codegen change, so gating it would invert
   #                           its meaning.  Run it by hand to substantiate such a claim.
-  SCRIPTS_EXCLUDE="seed_gate.sh guidelines_reminder.sh memwatch.sh ir_byte_identical_check.sh"
+  #   setup-dev.sh          — manual installer; an automatic gate must never install host
+  #                           packages. test-setup-dev covers its dry-run and idempotent paths.
+  SCRIPTS_EXCLUDE="seed_gate.sh guidelines_reminder.sh memwatch.sh ir_byte_identical_check.sh setup-dev.sh"
   unreachable=""
   shopt -s nullglob
   for s in scripts/*.sh; do

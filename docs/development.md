@@ -6,25 +6,47 @@ builtin surface see [builtins-reference.md](./builtins-reference.md).
 
 ## Toolchain (mise + just)
 
-This repo uses [`mise`](https://mise.jdx.dev/) to pin the `just` toolchain and [`just`](https://github.com/casey/just) as task runner.
+This repo uses [`mise`](https://mise.jdx.dev/) to pin `just`, Python, and GitHub CLI. LLVM and
+Clang remain system packages because their distribution and platform SDK integration differ by
+host.
 
-Prerequisites:
+### One-command setup
 
-- `mise`, for repository-managed `just` and `python`.
-- `clang` and `opt` on `PATH` (system-installed, not managed by mise). `opt --passes=verify` runs between IR emission and clang in every build recipe; a missing `opt` fails loudly.
-  - macOS: `brew install llvm` then add `$(brew --prefix llvm)/bin` to `PATH` (brew LLVM is keg-only).
-  - Linux/Debian: `sudo apt-get install clang-16 llvm-16` then add `/usr/lib/llvm-16/bin` to `PATH`.
-- C standard library headers for the active platform. On macOS, install Xcode Command Line Tools or Xcode so `xcrun --show-sdk-path` works; on Linux, install the distro C development package such as `build-essential` or equivalent.
-- A pre-built `compile_driver_bin_stage1` binary (bootstrap from the committed seed with `just bootstrap-from-seed`, or build from a pre-existing stage-0 binary with `just build-stage1`).
+Supported macOS and Linux hosts can install the toolchain and bootstrap Sprout with:
 
-Setup:
+```
+./scripts/setup-dev.sh
+```
 
-1. Install repository-managed tools from `mise.toml`:
-   `mise install`
-2. Bootstrap the stage-1 compiler binary from the committed platform seed:
-   `mise exec -- just bootstrap-from-seed`
-3. Run the test suite:
-   `mise exec -- just test`
+The script is idempotent. It installs or verifies:
+
+- macOS: Xcode Command Line Tools are verified; Homebrew, LLVM, `mise`, and `ripgrep` are installed;
+- Debian/Ubuntu, Fedora/RHEL, Arch/Manjaro, and openSUSE: LLVM >= 16, Clang, C build tools,
+  `mise`, and `ripgrep` through the host package manager;
+- repository-managed tools, the tracked Git hooks, and the stage-1 compiler.
+
+WSL follows its Linux distribution path. Native Windows is not yet a supported host; see
+[windows-port-v0.md](./windows-port-v0.md). Run `./scripts/setup-dev.sh --print-plan` to inspect
+platform commands without changing the host.
+
+Build recipes discover matching versioned LLVM directories automatically, including
+`/usr/lib/llvm-N/bin` on Linux and Homebrew's keg-only LLVM directory on macOS. They reject the
+unrelated GNU package also named `opt`, so shell-profile PATH changes are unnecessary.
+
+GitHub CLI installation retries transient Aqua failures. If GitHub's attestation endpoint remains
+unavailable, setup retries once with that check disabled; Aqua's checksum verification remains
+active. Setup fails rather than leaving a configured-but-missing tool that would break every
+`mise exec` command.
+
+For manual installation, provide `mise`, LLVM >= 16 `opt`, Clang >= 16, `ripgrep`, and the host C
+SDK, then run:
+
+```
+mise trust mise.toml
+mise install python just
+mise install gh
+mise exec -- just install-hooks bootstrap-from-seed
+```
 
 Common tasks:
 
