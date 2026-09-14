@@ -15,7 +15,7 @@ merge. Four attempts to recover that from outside the review all failed:
 | approach | why it fails |
 |---|---|
 | parse the transcript | 53 MB, and the findings are prose — there are zero `ReportFindings` calls in it |
-| count `subagents/*.meta.json` named `code-review` | one invocation produced **15** of them |
+| count `subagents/*.meta.json` named `code-review` | counts forks, not reviews: a resumed review adds a marker, and the directory is per session, not per branch |
 | group agents by a shared invocation id | there isn't one; the marker file holds only `{"forkedSkill":true,"skillName":"code-review"}` |
 | a `TaskCompleted` hook | that event is tied to the `TaskCreate` tool, not to agents — it never fires for a review |
 
@@ -24,8 +24,9 @@ finished", and it is wrong. Wiring it and firing a task proved it silently never
 built on it would have read `0` forever, which is worse than absent, because `review:0` looks like an
 answer rather than a broken pipe.
 
-`SubagentStop` does fire, but 15 times per review, each with a partial report. Reconstructing "5
-findings" from 15 fragments is exactly the kind of inference that produces a confident wrong number.
+`SubagentStop` does fire, but it fires per agent with a partial report, and nothing in the event
+says which review it belongs to. Reconstructing "5 findings" from a stream of fragments is exactly
+the kind of inference that produces a confident wrong number.
 
 ## The fix: own the run
 
@@ -43,18 +44,35 @@ ours gets typed findings without needing that tool at all.
 
 ## What the original actually does
 
-Recovered from a review agent's own transcript rather than guessed: one invocation fans out to **15
-identical reviewers**, not 15 specialists. Every one receives the same prompt, labelled
-`` `minimal prompt → single careful diff pass → ≤15 findings` ``. The ensemble buys sampling
-diversity, and the results are aggregated afterwards.
+This section said, until 2026-09-14, that one invocation fans out to **15 identical reviewers**. That
+was wrong, and it was load-bearing — it is why `SKILL.md`'s eight reviewers read as thrift rather
+than as a number someone picked.
 
-`SKILL.md` reproduces that shape and embeds that prompt verbatim. It is a **faithful port** on
-purpose: the original is a working baseline, and a port you cannot A/B against it is just a rewrite
-you hope is equivalent. Sprout-specific review dimensions are deliberately absent until the port is
-known to match — see `BACKLOG.md`.
+What the evidence on this machine shows:
 
-The one deviation is **8 reviewers instead of 15**, for cost. It is a dial, and it is the first
-thing to change if ours finds less than the built-in.
+| measurement | result |
+|---|---|
+| `skillName == "code-review"` markers, all retained sessions | 60 across 29 sessions |
+| forks vs `/code-review` invocations, per session | tracks 1:1; worst ratio 7:4, the excess being resumes (one marker is named `code-review-2`) |
+| `spawnDepth` on every one of them | `1` — no nesting anywhere |
+| `Agent`/`Task` tool calls inside a review agent's own jsonl | **zero**; the two runs examined made 80 and 95 `Bash` calls |
+
+So it runs as **one agent doing the review itself**. The original claim came from counting markers in
+a session directory, which counts invocations rather than one invocation's fan-out — the same
+confusion the table above now records as a failed approach.
+
+The built-in's internals are not visible from here, so nothing stronger than "no fan-out is
+observable" is asserted. Retained sessions are also a bounded sample: sessions can be pruned, and the
+`ide/saving` review that prompted the original claim may no longer be on disk. The 15 does not appear
+anywhere that is.
+
+**What this means for the skill.** `SKILL.md` embeds the original's reviewer prompt verbatim, so the
+*prompt* is a faithful port and the A/B is still worth running. The ensemble around it is this
+skill's own design: N independent passes, proximity+overlap dedup, and an adversarial verify bounded
+to severe-or-corroborated findings. Its justification is the quality patterns in the `Workflow`
+tool's guidance, not fidelity to the original. `N = 8` is a cost dial with no baseline behind it —
+raise it if this finds less than the built-in does on the same diff. Sprout-specific review
+dimensions are still deliberately absent until the A/B runs — see `BACKLOG.md`.
 
 ## Why the ledger looks the way it does
 
@@ -76,10 +94,17 @@ not having had one.
 ## Reading it
 
 ```sh
-bash scripts/review_ledger.sh count   # completed runs on this branch
-bash scripts/review_ledger.sh show    # "review:2 9 found 3 real"
-just test-review-ledger               # the suite, also in ci-fast-gates
+bash scripts/review_ledger.sh count          # completed runs on this branch
+bash scripts/review_ledger.sh show           # "review:2 9 found 3 real"
+bash scripts/review_ledger.sh findings <id>  # path to that run's findings
+just test-review-ledger                      # the suite, also in ci-fast-gates
 ```
+
+`findings` returns `$GIT_DIR/claude-review/findings-<id>.md`, creating the directory. The skill writes
+every finding there — confirmed, unverified and refuted — before reporting, so a review can be
+pointed at afterwards instead of recalled. The counts say a review happened; the file says what it
+said. The path is absolute (`--absolute-git-dir`, not `--git-dir`, which answers `.git` at the root
+and an absolute path from a subdirectory).
 
 The status line renders `rv:N` after the branch — green when reviewed, red at `rv:0`, and silent in
 repositories that have no ledger at all.

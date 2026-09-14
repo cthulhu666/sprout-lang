@@ -10,6 +10,7 @@
 #
 #   review_ledger.sh open            record a run starting; prints the run id
 #   review_ledger.sh done <id> <found> <confirmed>
+#   review_ledger.sh findings <id>   print the path to write that run's findings to
 #   review_ledger.sh count           completed runs on this branch
 #   review_ledger.sh show            one-line summary, for the status line
 set -uo pipefail
@@ -56,6 +57,31 @@ cmd_done() {
              "$found" "$confirmed"
 }
 
+# Where a run's findings are written, as a sibling of the TSV rather than a column
+# in it: findings are multi-line prose, and the status line must keep parsing this
+# ledger with one `awk`. The counts say a review happened; this says what it found,
+# so a reader can be pointed at the list instead of at a number.
+#
+# The id arrives from a workflow result, so it is not trusted to be a bare token —
+# a `/` or `..` in it would resolve outside the ledger directory.
+cmd_findings() {
+  local dir id
+  id="${1:-}"
+  case "$id" in
+    "" | *[/\\]* | *..*)
+      echo "review_ledger.sh findings: a run id must be a bare token (got '${id}')" >&2
+      return 2 ;;
+  esac
+  # `--git-dir` answers `.git` at the root and an absolute path from a subdirectory,
+  # so it cannot be quoted back to a reader whose cwd is unknown. `--absolute-git-dir`
+  # is the same directory, spelled the same way from anywhere (git >= 2.13).
+  dir=$(git rev-parse --absolute-git-dir 2>/dev/null) \
+    || { echo "not a git repository" >&2; return 1; }
+  dir="$dir/claude-review"
+  mkdir -p "$dir" || return 1
+  printf '%s/findings-%s.md\n' "$dir" "$id"
+}
+
 # A run counts as complete only once, however many `done` rows name it: the id
 # column is what dedupes, so a retry cannot inflate the number.
 cmd_count() {
@@ -89,8 +115,9 @@ cmd_show() {
 case "${1:-show}" in
   open)  cmd_open ;;
   done)  shift; cmd_done "$@" ;;
+  findings) shift; cmd_findings "$@" ;;
   count) cmd_count ;;
   show)  cmd_show ;;
-  *) echo "usage: review_ledger.sh {open|done <id> <found> <confirmed>|count|show}" >&2
+  *) echo "usage: review_ledger.sh {open|done <id> <found> <confirmed>|findings <id>|count|show}" >&2
      exit 2 ;;
 esac

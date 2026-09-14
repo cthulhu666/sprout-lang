@@ -856,6 +856,17 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
 
 ### 7) Tooling and Developer UX
 
+**Gates**
+
+- [ ] `P2` **`just test-setup-dev` fails on every macOS host, so `ci-fast-gates` is red on arrival
+  there.** `scripts/test_setup_dev.sh:73` compares `$TMPD/llvm/bin` against what
+  `llvm-toolchain-path.sh` prints, and that script ends in `(cd "$bindir" && pwd -P)`. On macOS
+  `/var` is a symlink to `private/var`, so `mktemp -d` hands back `/var/folders/...` while `pwd -P`
+  resolves to `/private/var/folders/...` — the paths are the same directory and the string compare
+  still fails. CI is green because ubuntu's `mktemp -d` returns `/tmp/...` with no symlink. Fix in
+  the test, not the script: resolve `TMPD` the same way before comparing. A gate that is red for
+  every local run is one people learn to skip, which costs the other 32 gates in the aggregate.
+
 **Formatter and linter**
 
 - [ ] `P2` **`just fmt` inserts a space after every prefix `!`**, and a second before a call's

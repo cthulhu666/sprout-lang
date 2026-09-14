@@ -2,6 +2,11 @@
 python = "3.12"
 just = "1.39.0"
 gh = "2.97.0"
+# Only `just test-review-script` needs this: the /sprout-review workflow script is
+# JavaScript embedded in SKILL.md, and testing it needs an engine that runs it
+# rather than a reimplementation that tests a translation. Pinned here rather than
+# taken from the host so CI gets it from mise like everything else.
+node = "22"
 
 [env]
 _.path = ["/opt/homebrew/opt/llvm/bin"]

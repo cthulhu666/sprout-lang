@@ -8,29 +8,32 @@ Rationale and measurements live in `README.md`; the skill itself is `SKILL.md`.
 
 ## Backlog
 
-- [ ] `P1` **The port has never been A/B'd against the built-in, so "faithful" is untested.**
-  The whole reason for porting rather than rewriting was to keep a baseline to compare with. Run
-  both on one non-trivial diff and compare finding sets: anything the built-in catches and ours
-  misses is a port defect, not a tuning question. Until that runs, the claim in `README.md` that
-  this reproduces the original's shape rests on reading one agent's prompt, not on behaviour.
+- [ ] `P1` **The ensemble has never been A/B'd against the built-in, so it may cost 15 agents to
+  find less than one does.** Only the reviewer *prompt* is a port; the fan-out, dedup and verify
+  around it are this skill's own design (`README.md` §What the original actually does). Run both on
+  one non-trivial diff and compare finding sets. Anything the built-in catches and this misses is a
+  design defect, not a tuning question — and if a single careful agent matches eight plus a verify
+  phase, the ensemble is not worth its cost and should go.
 
-- [ ] `P1` **8 reviewers instead of 15 is an unmeasured cost/recall trade.**
-  The original fans out 15; `SKILL.md` uses 8 to halve the spend. Nobody has checked what the
-  missing 7 would have found. Depends on the A/B above: with both finding sets in hand, re-run ours
-  at 15 and see whether the extra passes add distinct confirmed findings or just repeat. If they
-  add nothing, write the number down in `README.md` so the dial stops looking arbitrary.
-
-- [ ] `P2` **Dedup keys on `file:line`, so a finding that moves one line reads as two.**
-  `SKILL.md`'s dedup uses `${f.file}:${f.line}`. Two reviewers describing the same bug at lines 104
-  and 106 produce two entries, each with one vote, and both get verified separately — wasted spend
-  and a `votes` count that understates agreement. Key on a normalised summary as well, or cluster
-  within a small line window.
+- [ ] `P1` **`N = 8` reviewers rests on nothing now that the "original uses 15" premise is gone.**
+  It was picked as a saving against a number that was never real. Nobody has checked what a 4th or
+  a 12th pass adds. Depends on the A/B above: with a baseline in hand, sweep N and count *distinct
+  confirmed* findings per agent spent, then write the number and its date into `README.md` so the
+  dial stops looking arbitrary.
 
 - [ ] `P2` **One verifier decides each finding; the documented pattern is a panel.**
   Verify spawns a single refuter per finding, so one bad call silently kills a real bug or keeps a
   false one. The adversarial pattern is N independent skeptics with a majority rule, and the
   perspective-diverse variant gives each a different lens (correctness, security, does-it-repro).
-  Cheap to add — the findings list is already small by then.
+  Now affordable: the severity/votes cap cut the verified set from 17 to 7 on the calibration run,
+  so a 3-judge panel costs about what one verifier per finding used to.
+
+- [ ] `P2` **The verify cap's thresholds rest on one run, so a real finding could be lost.**
+  `SKILL.md` verifies a finding only when `severity !== 'low' || votes >= 2`, and clusters within
+  6 lines at 0.5 summary overlap. Those numbers come from run `1789385000-27845` alone: 5 adjacent
+  pairs, scoring 0.60/0.67/0.67 against 0.33/0.29. The gap is wide, which is why 0.5 is not a knife
+  edge, but n=5 is not a calibration set. Re-measure over several runs once the findings files have
+  accumulated — they are on disk now, which is what makes this checkable.
 
 - [ ] `P2` **Sprout-specific review dimensions are absent, which was the point of owning this.**
   A generic reviewer cannot know GC rooting rules for `stdlib/compiler/` and `runtime/`, that a
@@ -40,11 +43,12 @@ Rationale and measurements live in `README.md`; the skill itself is `SKILL.md`.
   against a known baseline rather than mixed into it. See `docs/compiler-internals.md`,
   `docs/gates.md`, `docs/idiomatic-sprout.md`.
 
-- [ ] `P2` **The ledger records counts, not findings or what was done about them.**
-  The MVP stores `found`/`confirmed` per run. It cannot answer "which findings were fixed, which
-  were refuted, and by what commit" — the audit trail originally wanted, where the reviewer writes
-  the findings before anyone acts so the denominator cannot quietly shrink. Needs a second file
-  keyed by finding id, written by the skill, with dispositions appended as work lands.
+- [ ] `P2` **The findings file records what was found, not what was done about it.**
+  `review_ledger.sh findings <id>` gives the skill a path and it writes the list there before
+  reporting, so the denominator can no longer quietly shrink. What is still missing is the other
+  half: which findings were fixed, which were consciously declined, and by what commit. Needs a
+  disposition appended per finding as work lands, and something that notices a finding nobody ever
+  answered.
 
 - [ ] `P2` **Nothing says whether the code changed since the last review.**
   `rv:2` on a branch reviewed two commits ago reads exactly like `rv:2` on one reviewed just now.

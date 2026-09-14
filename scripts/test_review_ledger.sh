@@ -69,6 +69,38 @@ check "a run recorded from a subdir"   "3"  "$(bash "$LEDGER" count)"
 cd "$R" || exit 1
 check "and the root sees that run too" "3"  "$(bash "$LEDGER" count)"
 
+# The findings file is what makes step 4 checkable. A review whose findings live
+# only in a chat message cannot be shown to anyone later, and the skill's own
+# argument for a ledger — "a review you cannot point at did not happen" — applies
+# to the findings just as much as to the count.
+cd "$R" || exit 1
+fpath=$(bash "$LEDGER" findings "$id1")
+check "findings path names the run"    "1"  "$(printf '%s' "$fpath" | grep -c "findings-$id1.md$")"
+check "findings path is under GIT_DIR" "1"  "$(printf '%s' "$fpath" | grep -c '/claude-review/')"
+# `dirname ""` is `.`, which always exists — so assert the directory this command
+# is supposed to create, by name, or the check passes on a command that does not
+# exist yet.
+check "findings dir was created"       "1"  "$([ -n "$fpath" ] && [ -d "${fpath%/*}" ] && echo 1 || echo 0)"
+
+# Writing the file must not disturb the counts: the ledger is append-only TSV and
+# the findings are a sibling file, not a column.
+echo "# findings" > "$fpath"
+check "writing findings keeps count"   "3"  "$(bash "$LEDGER" count)"
+
+# A run id reaches this from a workflow result, so it is not trusted to be a bare
+# token. `../../etc/passwd` must not resolve to a path outside the ledger dir.
+check "a traversing id is rejected"     "1" \
+  "$(bash "$LEDGER" findings "../../escape" 2>&1 >/dev/null | grep -c 'run id')"
+check "a missing id is rejected"       "1" \
+  "$(bash "$LEDGER" findings 2>&1 >/dev/null | grep -c 'run id')"
+
+# Same subdirectory rule as the rest: a session can start anywhere.
+mkdir -p sub2
+cd sub2 || exit 1
+sub_path=$(bash "$LEDGER" findings "$id1")
+check "findings path from a subdir"    "1"  "$([ -n "$sub_path" ] && [ "$sub_path" = "$fpath" ] && echo 1 || echo 0)"
+cd "$R" || exit 1
+
 # Outside a repository the ledger must stay quiet rather than erroring: the
 # status line calls `show` on every render, wherever the user happens to be.
 cd /tmp || exit 1
