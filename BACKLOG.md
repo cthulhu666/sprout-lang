@@ -985,11 +985,6 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   qualified. Pre-existing, verified against builds either side of the `no_prelude` floor with
   byte-identical outcomes: the hazard is the bare namespace a `no_prelude` file already has, and it
   applies to any top-level name colliding with a runtime symbol.
-- [ ] `P3` **`docs/int-overflow-policy-decision.md` §2 cites
-  `stdlib/compiler/codegen.sprout:2106`**, deleted 2026-07-12. That doc is a live decision document
-  — spec §8.4 points readers at it — so its ground-truth section should re-verify against
-  `ir_lowering.sprout`. The finding (plain `add/sub/mul i64`, no `nsw`) is still correct; only the
-  citation rotted.
 - [ ] `P2` **REPL SIGSEGV on a tuple that nests let-bound tuple variables.**
   `let t1 = (1,3,"foo",true)` then `let t2 = (t1, t1)`, then evaluating `t2` gives
   `SIGSEGV (no current function set)`. Flat tuples are fine. **Not a codegen bug** — the
