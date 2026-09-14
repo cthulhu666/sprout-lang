@@ -20,13 +20,12 @@ garbage-but-defined value with no signal — the opposite of Sprout's stated ide
 ("strong safety with beginner-friendly ergonomics"). A beginner who writes `factorial(50)`
 should get a loud error, not a silently negative number.
 
-## 2. Ground truth (verified against source, 2026-07-06)
+## 2. Ground truth (verified against source, 2026-09-14)
 
 Current native behavior is **defined two's-complement wraparound, NOT undefined behavior**:
 
-- Typed path — `stdlib/compiler/ir_lowering.sprout:124-126` emits plain `add i64` /
-  `sub i64` / `mul i64` with **no `nsw`/`nuw` flags**.
-- Direct path — `stdlib/compiler/codegen.sprout:2106` emits plain `add`/`sub`/`mul`.
+- The native lowering in `stdlib/compiler/ir_lowering.sprout:135-137` emits plain `add i64` /
+  `sub i64` / `mul i64` with **no `nsw`/`nuw` flags**. There is no second codegen path.
 
 In LLVM, plain `add i64` has fully-defined wraparound; it is the `nsw` flag that makes
 signed overflow UB. So this is materially different from the div-by-zero case (which *was*
