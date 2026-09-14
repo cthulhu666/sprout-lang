@@ -522,8 +522,8 @@ through a `_` arm to `op_triggers_gc`.
 Three notes that mattered in practice:
 
 - **There is no second codegen path to update.** `stdlib/compiler/codegen.sprout` no
-  longer exists, so only the typed path needs touching — simpler than what the older
-  design docs (which reference `codegen.sprout:2106` for arithmetic) describe.
+  longer exists, so only the typed path needs touching — simpler than the older
+  arithmetic design assumed.
 - **Shift guards go in `ast_to_ir`, never `ir_lowering`,** where W7 built its
   divide-by-zero guard; block-splitting in the `ir_lowering` text layer breaks phi
   predecessors (`docs/int-overflow-policy-decision.md` §6). `finish_checked_shift` emits
