@@ -579,6 +579,14 @@ test-shell-hooks:
 test-review-ledger:
   bash scripts/test_review_ledger.sh
 
+# Exercise the workflow script inside .claude/skills/sprout-review/SKILL.md. Same
+# rationale as the three above, one level worse: that script is JS in a markdown
+# fence, so nothing runs it until a review is already eight agents in, and a slip
+# in its dedup or verify cap loses a finding without ever failing loudly.
+[group('test')]
+test-review-script:
+  python3 scripts/test_review_script.py
+
 # Exercise setup planning without changing the host. This also guards against
 # Ubuntu's unrelated package named `opt` being mistaken for LLVM's optimizer.
 [group('test')]
@@ -3099,6 +3107,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "review-gate|test-review-gate"
     "shell-hooks|test-shell-hooks"
     "review-ledger|test-review-ledger"
+    "review-script|test-review-script"
     "setup-dev|test-setup-dev"
     # Added when Assertion D landed: both had names that CLAIM verification while nothing
     # ran them. c-runtime-test's ten C-level assertions were unrunnable for however long it
