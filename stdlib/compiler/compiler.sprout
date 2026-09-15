@@ -17,7 +17,9 @@ import stdlib.compiler.opt_config as opt_config
 import stdlib.compiler.ir_pipeline as ir_pipeline
 import stdlib.compiler.source as source
 import stdlib.fs as fs
-import stdlib.env as env
+# Aliased `sys_env`, not `env`: a type environment is bound as `env` in this file,
+# and a local wins over a same-named module in head position (spec §field-access).
+import stdlib.env as sys_env
 import stdlib.string as string
 
 # ---------------------------------------------------------------------------
@@ -443,7 +445,7 @@ export type IrFullResult (..) =
 # `verified > 0` on real programs is the evidence that the verifier fires on actual
 # calls rather than skipping everything (a clean run vs. a silent no-op).
 fn report_verify_stats(prog: typed_ast.TypedProgram) -> Unit !{IO} =
-  match env.get("SPROUT_VERIFY_DISPATCH_STATS") with
+  match sys_env.get("SPROUT_VERIFY_DISPATCH_STATS") with
   | Nothing -> ()
   | Just _ ->
       match verify_dispatch.verify_stats(prog) with
@@ -559,7 +561,7 @@ fn check_bundled(prog: ast.Program, stdlib_root: source.StdlibRoot, load_env: bu
               match verify_dispatch.verify_program(resolved) with
               | Nothing -> typed_ast.TypedOk(resolved, env)
               | Just (vpos, vmsg) ->
-                  match env.get("SPROUT_VERIFY_DISPATCH_OFF") with
+                  match sys_env.get("SPROUT_VERIFY_DISPATCH_OFF") with
                   | Just _ ->
                       do
                         _ <- eprint("[verify-dispatch] (suppressed) " ++ vmsg)
@@ -634,7 +636,7 @@ fn compile_phase_check_with_cache(path: source.FilePath, stdlib_root: source.Std
                     match verify_dispatch.verify_program(resolved) with
                     | Nothing -> typed_ast.TypedOk(resolved, env)
                     | Just (vpos, vmsg) ->
-                        match env.get("SPROUT_VERIFY_DISPATCH_OFF") with
+                        match sys_env.get("SPROUT_VERIFY_DISPATCH_OFF") with
                         | Just _ ->
                             do
                               _ <- eprint("[verify-dispatch] (suppressed) " ++ vmsg)

@@ -1,0 +1,32 @@
+module main
+
+import stdlib.test (check_eq, run_suite)
+import testsupport.alias_shadow as origin
+
+# Regression: a binder shadows a module alias. `qualify_value_name` tested the
+# WHOLE dotted name against the enclosing scope, so a local named `origin` never
+# shadowed `origin.x`, and the alias table answered with the module's export for
+# what is plainly a field read — 99 where the record holds 3, compiling clean.
+#
+# The unshadowed cases are the other half: a fix that simply stopped qualifying
+# dotted names would pass the first two and fail these.
+
+type Point (..) = (x: Int, y: Int)
+
+fn param_field(origin: Point) -> Int = origin.x
+
+fn let_field() -> Int =
+  let origin = Point(x = 5, y = 6)
+  in origin.x
+
+fn unshadowed_value() -> Int = origin.x
+
+fn unshadowed_call() -> Int = origin.scale(4)
+
+fn main() -> Unit !{IO} =
+  run_suite("import alias shadowing", [
+    check_eq("a parameter shadows a module alias", param_field(Point(x = 3, y = 4)), 3),
+    check_eq("a let binder shadows a module alias", let_field(), 5),
+    check_eq("an unshadowed alias still reads a value", unshadowed_value(), 99),
+    check_eq("an unshadowed alias still reaches a function", unshadowed_call(), 40)
+  ])
