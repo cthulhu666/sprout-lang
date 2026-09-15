@@ -1,0 +1,8 @@
+module testsupport.alias_shadow
+
+# Exports deliberately named like ordinary fields and locals, so an importer that
+# binds a name equal to this module's alias creates the collision under test.
+
+export let x: Int = 99
+
+export fn scale(n: Int) -> Int = n * 10

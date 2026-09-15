@@ -1772,17 +1772,6 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   candidate syntax in the `import M (T)` entry below. Imports are parsed ONLY by a hand-rolled
   line scanner (`parse_import_line`, `:92`); the lexer never sees one, `ast.sprout` has no node.
 
-- [ ] `P1` **An import alias outranks a same-named parameter, silently changing the value read.**
-  A parameter `origin: Point` plus `import demo.shadow as origin` (which exports `x`) makes
-  `origin.x` read the module's `x`, not the field — the probe returns 99 where the field holds 3.
-  It compiles clean: a wrong value, not an error. Across a module boundary, adding an export named
-  `x` to a library changes what `v.x` means in every dependent whose local matches the import
-  alias. `qualify_value_name` (`bundler.sprout:1403`) tests the WHOLE dotted name against `scope`,
-  so a parameter named `origin` never shadows `origin.x` and `qualified_value_lookup` wins.
-  `dotted_value_field_access` bails at `:1483` (the alias does claim the name) and every `Nothing`
-  it returns falls through to `qualify_value_name` at `:1570` — so the fix is at `:1403`, testing
-  the head component; reordering the guards at `:1483`/`:1488` does not work. Comment at `:1466`.
-
 - [ ] `P2` **Decide whether `import M (T)` brings `T`'s constructors into scope.**
   `select_named_pairs` matches names exactly, so a selective import of a type does not import its
   constructors; the bundler, by inlining, behaves as if it does. Three stdlib modules were relying
