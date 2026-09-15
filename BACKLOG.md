@@ -796,8 +796,8 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   "each a non-empty list of codepoints". uncharted-suns pays two more panics (`game/sim.sprout:348`
   and `:370`, the slot and zone rosters) plus `grimward.gear.slot_of`, pinned by `test_gear.spr`
   rather than by the type. Scope it as `NE a (List a)` with total accessors — the cons shape
-  enforces itself, a `NonEmptyVec` would need the opacity Sprout lacks
-  (`docs/archive/collections-facade-soundness-analysis-2026-07-12.md` §3B), and without the total
+  enforces itself, a `NonEmptyVec` would need representation opacity — shipped for ordinary modules
+  (spec §5.6.4) but NOT for the prelude, where this type would live (§6), and without the total
   `head`/`minimum` the arms go but the `Maybe`s stay. Ergonomics gate on `[a, b | tail]` above.
 
 ### 6) Modules and Packaging
@@ -1740,6 +1740,27 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   it properly means moving every marker family to canonical keys, or stripping to short names at
   every lookup — a change to dispatch and linearity needing its own design doc and PR.
   `docs/repl-env-type-vocabulary-v0.md` §11.1a.
+- [ ] `P2` **Two types in one module cannot share a constructor name, and the workaround is
+  invisible.** 394 of 585 constructors (67%) carry a prefix or suffix shared by every sibling — a
+  namespace spelled by hand. `types.Type` is `TVar TConst TApp …`; `infer.sprout` has fourteen
+  result types each inventing its own `Ok` (`InferOk`, `CallOk`, `GroupOk`, …). Module
+  qualification cannot help: the collision is inside one module. Counting collisions finds 1.2%
+  and measures only that the constraint was obeyed. Motivation is name pressure AND IDE
+  discoverability, so the target is namespacing under the type — which makes leading-dot
+  inference blocking, not optional, or use sites get longer than today's.
+  `docs/constructor-namespacing-v0.md` has the prior-art survey and the cheaper fallback.
+
+- [ ] `P2` **`(..)` is unenforced for everything the prelude declares.** The prelude has no module
+  header, so `bundler.ParsedModule` carries `module_name = ""` and its names are injected
+  unqualified into every module — never passing through the `(..)`-filtered export maps. `Dict` is
+  declared without the marker and any file still destructures and forges it (`match d with | Dict
+  raw -> raw`, `Dict(map_set(…))` both check clean, from a headerless entry *and* a named module),
+  which is the `steal_raw`/`forge` program from
+  `docs/archive/collections-facade-soundness-analysis-2026-07-12.md` §3B, still reproducing. Not a
+  simple fix: the exemption is load-bearing for `Maybe`/`List`/`Result`, whose constructors every
+  file must be able to write. Only `Vec`/`Dict`/`Set` want sealing, so the prelude needs per-name
+  export filtering it does not have.
+
 - [ ] `P2` **Decide whether `import M (T)` brings `T`'s constructors into scope.**
   `select_named_pairs` matches names exactly, so a selective import of a type does not import its
   constructors; the bundler, by inlining, behaves as if it does. Three stdlib modules were relying
