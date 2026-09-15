@@ -1761,6 +1761,28 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   file must be able to write. Only `Vec`/`Dict`/`Set` want sealing, so the prelude needs per-name
   export filtering it does not have.
 
+- [ ] `P1` **The import scanner silently accepts non-syntax and drops names, so the call falls
+  through to the prelude.** `(..)` is declaration-side only (spec:83 lists bare names), yet
+  `import demo.cap (Tone(..), parse_int)` is accepted and binds only `Tone`: `skip_after_comma`
+  (`module_loader.sprout:59`) ends the whole scan at the first `)`, the one inside `(..)`. The
+  dropped name never reaches `first_unbound_name` (`bundler.sprout:1237`), so the bare call hits
+  the PRELUDE's homonym — the probe returns 7 where `demo.cap.parse_int` returns 42, while the
+  valid list returns 42. A different function runs than the import line names, with no diagnostic.
+  Needs invalid input, so no in-tree file is affected — but `T(..)` is the Haskell reflex and a
+  candidate syntax in the `import M (T)` entry below. Imports are parsed ONLY by a hand-rolled
+  line scanner (`parse_import_line`, `:92`); the lexer never sees one, `ast.sprout` has no node.
+
+- [ ] `P1` **An import alias outranks a same-named parameter, silently changing the value read.**
+  A parameter `origin: Point` plus `import demo.shadow as origin` (which exports `x`) makes
+  `origin.x` read the module's `x`, not the field — the probe returns 99 where the field holds 3.
+  It compiles clean: a wrong value, not an error. Across a module boundary, adding an export named
+  `x` to a library changes what `v.x` means in every dependent whose local matches the import
+  alias. `qualify_value_name` (`bundler.sprout:1403`) tests the WHOLE dotted name against `scope`,
+  so a parameter named `origin` never shadows `origin.x` and `qualified_value_lookup` wins.
+  `dotted_value_field_access` bails at `:1483` (the alias does claim the name) and every `Nothing`
+  it returns falls through to `qualify_value_name` at `:1570` — so the fix is at `:1403`, testing
+  the head component; reordering the guards at `:1483`/`:1488` does not work. Comment at `:1466`.
+
 - [ ] `P2` **Decide whether `import M (T)` brings `T`'s constructors into scope.**
   `select_named_pairs` matches names exactly, so a selective import of a type does not import its
   constructors; the bundler, by inlining, behaves as if it does. Three stdlib modules were relying
@@ -1768,7 +1790,8 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   completed, so this is a semantics ruling, not a live break. Options: require explicit constructor
   listing (status quo on the env path), make `T` imply its constructors, or add an explicit `T(..)`
   form — Haskell spells the permissive case that way precisely because `T` alone does not imply
-  it. The ruling belongs in spec §visibility/exports; the two front ends disagree until then.
+  it. The ruling belongs in spec §visibility/exports. The env path was RETIRED 2026-08-18, so
+  nothing enforces the strict reading now and the permissive one spreads until it is ruled on.
 - [ ] `P2` **`load_module` silently swallows a genuine `CheckErr`.** `module_loader.sprout:366`
   turns a module that fails to check into an empty pair list, so a broken `import` reports `ok` and
   every name from it reads as `Unknown variable` one command later — the swallow that turned a
