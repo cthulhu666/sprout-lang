@@ -190,18 +190,24 @@ any say, and that is a different question with a worse defect behind it.
 
 Verified 2026-09-17 against `54d96761`, probes in full below.
 
-A library publishes a sum type. A dependent imports it selectively, alongside
-some unrelated type that happens to publish a constructor named `Box`:
+**First, the part that is not the defect.** Adding a variant to a sum type
+already breaks any dependent that matches on it exhaustively, by exhaustiveness
+alone — `Non-exhaustive match on demo.lib.Shape — no branch matches Box` (`p9`,
+no second import in scope). That breakage is expected, loud, and **opt-out-able**:
+a dependent that does not want it writes a wildcard arm.
+
+The defect is what remains after a dependent has opted out. This one has a
+wildcard, so the library's growth cannot break its match:
 
 ```sprout
-# dependent — note it never writes `Box`
+# dependent — a wildcard arm, and it never writes `Box`
 import demo.boxsum (Holder)
 import demo.lib (Shape)
 
-fn area(s: Shape) -> Int =
+fn describe(s: Shape) -> Int =
   match s with
-  | Circle r -> 3 * r * r
-  | Square a -> a * a
+  | Circle _ -> 1
+  | _ -> 0
 ```
 
 The library then adds one variant. Nothing is removed or renamed:
@@ -221,11 +227,16 @@ ERROR: bundle: `Box` is imported twice in this file, from two different symbols
 last one. Import at most one, or import the modules whole and qualify.
 ```
 
-**Adding a variant to a published sum type is a breaking change**, for dependents
-that never mention the new variant and never mentioned the colliding name. The
-dependent cannot defend itself: no syntax imports a type without its
-constructors. Its only recourse is to stop importing one of the two modules
-selectively.
+Drop the first import line and the same file compiles (`p12`), which isolates the
+cause to the import, not the match.
+
+**The sharp claim, then, is about opt-out and not about breakage:**
+match-breakage is opt-out-able with a wildcard; import-breakage is not, because
+no syntax imports a type without its constructors. The dependent's only recourse
+is to stop importing one of the two modules selectively. The population at risk
+is every dependent that does *not* exhaustively match the growing type —
+constructor-only users, wildcard matches, and files that merely name the type in
+a signature.
 
 Two properties combine to produce this, and each is separately defensible:
 
@@ -242,11 +253,18 @@ Probe results, each compiled and run:
 | `p3` | `import demo.sealed (Shade)`, then `Dark` | **rejected**, diagnostic cites spec §5.6.1 |
 | `p6` | two `(..)` types imported; `Box` never written | **rejected** |
 | `p7` | same, but one module imported whole with `as` | compiles — the only escape hatch |
-| `p8` | library adds a variant; dependent untouched | compiles → **rejected** |
+| `p8` | library adds a variant; dependent matches exhaustively | compiles → **rejected** |
+| `p9` | same growth, **no** second import, exhaustive match | **rejected** — exhaustiveness, not the import |
+| `p11` | same growth, second import, **wildcard** arm | compiles → **rejected** — the defect, isolated |
+| `p12` | same as `p11` without the second import | compiles — proves the growth is survivable |
+| `p10` | `import demo.boxsum as Holder`, then `Holder.Box(2)` | compiles — see §7.4's ambiguity note |
 
 `p6` is the proof that the check is eager: the file names only the two types and
-uses neither constructor. `p3` is the control — constructor hiding still works
-and its diagnostic is good.
+uses neither constructor. `p11` versus `p12` is the proof that the import, not
+the match, is what breaks. `p3` is the control — constructor hiding still works,
+and its diagnostic carries the `(..)` hint even for a **bare** reference
+(`infer.unresolved_name_hint`; `names_that_module` returns true when the
+reference has no dot, `infer.sprout:1574-1578`).
 
 ### 7.3 Who controls publish, and who controls spelling
 
@@ -328,6 +346,39 @@ adds no import line to user code, because the prelude is injected rather than
 imported. The argument above is about import-side markers, so it survives either
 way.
 
+**What §7.4 does not yet specify.** It is a direction, not a proposal; each of
+these must be settled before it could be implemented.
+
+- **`Type.Ctor` is ambiguous with an uppercase module alias.** Module aliases may
+  be capitalised: `import demo.boxsum as Holder` then `Holder.Box(2)` and
+  `| Holder.Box n ->` compile *today* (`p10`). Types and module prefixes are
+  separate binding namespaces, so a file can hold a type `Holder` and an alias
+  `Holder` at once, and `Holder.Box` would then have two readings. §7.5 step 1 is
+  therefore not the free additive step it is sold as: it needs a precedence rule
+  and a spec §3 amendment, since spec §3 currently reads a dotted name as an alias
+  path. Type aliases (`type S = …`, then `S.Ctor`) need the same ruling.
+- **The import scanner mis-parses the proposed syntax, silently.** `import M
+  (T(..), f)` is accepted today and binds only `T`, dropping `f`, which then falls
+  through to a prelude homonym — a different function runs. Imports are parsed only
+  by a hand-rolled line scanner (`module_loader.parse_import_line:92`;
+  `skip_after_comma:59` ends the scan at the first `)`, the one inside `(..)`).
+  Filed in `BACKLOG.md`. §7.4 cannot land before that is fixed.
+- **The existing flat listing form is unaddressed.** `import M (T, Red, Green)` is
+  legal today (`p2`) and real files use it. Does it survive? If it does, "nothing
+  flat enters the namespace" has a second door — defensible, since those names are
+  listed. If it does not, §7.6's migration is undercounted. §7.7's rule 3 is built
+  on bare-listed constructor names, while §7.4's PureScript-style forms imply
+  constructors are listable only inside `T(...)`. The two must be reconciled.
+- **The default flip has a silent channel.** An un-migrated file is assumed to fail
+  loudly, but `78bd373f` records that "The prelude is not an import and its names
+  are not import bindings". A file importing `T` and writing its arrived
+  constructor `Cons` bare would, after the flip, silently rebind to the prelude's
+  `List` constructor rather than erroring. Any flip needs a transition diagnostic
+  aimed exactly at names the prelude also declares.
+- **Re-export is moot, for now.** Sprout has no type re-export syntax, so "import a
+  type and export it onward" cannot arise. Recorded as an assumption: a future
+  re-export feature must decide whether the marker travels with the type.
+
 **Rejected: a producer-side qualified-only marker** (`export type Shape
 (qualified)`, F#'s `[<RequireQualifiedAccess>]`). It was the first shape proposed
 here and it is wrong for Sprout. Once a constructor is public, how a consumer
@@ -348,8 +399,11 @@ constructors out of the module namespace. §7.4 relocates nothing — `Type.Ctor
 becomes *additionally* valid, the flat spelling stays legal, and only files that
 opt in at the import change. That suggests the affordable decomposition:
 
-1. `Type.Ctor` as additional syntax for any public constructor. Additive, no
-   migration, immediately useful to the IDE (`Shape.` completes).
+1. `Type.Ctor` as additional syntax for any public constructor. No migration —
+   the flat spelling stays legal — but **not free**: it needs the alias-precedence
+   rule and the spec §3 amendment in §7.4's hazard list, because `Holder.Box` can
+   already mean a module alias today (`p10`). Immediately useful to the IDE
+   (`Shape.` completes).
 2. Import-side `(..)` per §7.4. Migration bounded by §7.6.
 3. Type-directed resolution (§5-B) and leading-dot inference — the thing that
    makes both A and §7.4 short at the use site.
@@ -358,20 +412,39 @@ opt in at the import change. That suggests the affordable decomposition:
 ### 7.6 Migration
 
 Measured 2026-09-17 over `stdlib/`, `ide/`, `tests/`, `examples/`, `testsupport/`.
-179 types are declared `(..)`. 80 selective imports name one. Of those, **60 sites
-across 40 files** use the constructors bare and would need `(..)` added to their
-import line.
 
-The split matters more than the total:
+Method, to reproduce (§2 states its method; this one did not, and was wrong twice
+before it was right — once by missing `=`-on-a-later-line, once by missing every
+*parameterised* declaration, `export type Recv a (..)`):
 
-- **37 are records**, where the constructor name *is* the type name —
-  `import stdlib.http_server (Route)`, then `Route(path = …)`. Writing `Route(..)`
-  to obtain `Route` is ceremony that reads like a mistake, and `Route.Route` is no
-  better. Records likely want a rule of their own: a record's constructor is its
-  type, so naming the type should name it.
-- **23 are sums** with distinct constructor names —
-  `import stdlib.http (HttpError)`, then `HttpTimeout`. Here the marker informs
-  the reader, which is the case the design is for.
+1. A declaration publishes constructors when it is `export type T (..)` or
+   `export wrap T (..)`, allowing an optional `linear` modifier and any number of
+   type parameters before the marker. Its constructors are the `| Arm` names if
+   it is a sum, else the type's own name.
+2. A selective `import M (a, b, c)` *names* such a type when the type appears in
+   its list; lists may span lines.
+3. That site needs `(..)` added iff the importing file uses any of that type's
+   constructors as a bare word outside its own import header.
+
+**209 declarations** publish constructors. **97 selective imports** name one. Of
+those, **77 sites across 52 files** use the constructors bare and would need
+`(..)` added.
+
+The split is on whether the constructor is a **namesake** — spelled like its type
+— which is where records, `wrap`s and one-arm sums all land. It is not a
+records-versus-sums split; `HttpResponse` (`stdlib/http.sprout:22`) and `TestCase`
+(`stdlib/test.sprout:118`) are one-arm *sums* whose constructor is a namesake, and
+they behave like records at every use site.
+
+- **39 namesake** — `import stdlib.http_server (Route)`, then `Route(path = …)`.
+  Writing `Route(..)` to obtain `Route` is ceremony that reads like a mistake, and
+  `Route.Route` is no better. §7.9 Q1 is about these.
+- **38 distinct** — `import stdlib.http (HttpError)`, then `HttpTimeout`. Here the
+  marker informs the reader, which is the case the design is for.
+
+The split is roughly even, which is weaker than an earlier draft of this section
+claimed (it reported 37/23 on an undercount). "Most of the cost is namesakes" is
+not a supportable argument; "half of it is" is.
 
 An earlier claim in `BACKLOG.md` that no file relied on the permissive behaviour
 is dead: it was measured against the scheme-environment path, which was retired
@@ -384,8 +457,14 @@ narrowed on its own, today, with no syntax change and no migration.
 
 `78bd373f` added the eager check against a real silent failure, recorded in
 spec-v0 §3 *Imports*: "a name bound twice kept the last binding, so which symbol
-a bare name meant depended on import order". That failure is about names the
-programmer **wrote on an import line**. The check can stay exactly there:
+a bare name meant depended on import order".
+
+**That commit covered arrived constructors deliberately**, not incidentally — its
+message says "Constructors arriving through `(..)` on a type import are covered
+like any other name". Narrowing it is therefore a reversal of a considered
+decision, not the repair of an oversight, and the case for it has to be made on
+its merits: the covered-eagerly population is exactly the one the programmer did
+not write down, and §7.2 is the price of covering it. The narrowing:
 
 1. Two names a file **listed** collide → error at the import, as today.
 2. Two constructors that **arrived** implicitly collide → not an error until the
@@ -397,20 +476,73 @@ programmer **wrote on an import line**. The check can stay exactly there:
 Rule 3 is the load-bearing one: what the programmer wrote outranks what they did
 not, and that is stable under library growth, because a library can only ever add
 *arrived* constructors. It never resolves from how many candidates are in scope —
-the property that makes OCaml's last-defined rule fragile (§4).
+the property that makes OCaml's last-defined rule fragile (§4). **Prior art:** this
+is Rust's rule for `use` versus glob imports — an explicit `use` shadows a name a
+glob brought in.
 
-This fixes §7.2 for every type, including ones whose importers never adopt §7.4,
-and nothing becomes silent: every mention of a genuinely ambiguous name is still
-an error, now reported at the expression that is ambiguous rather than at two
-import lines that do not mention it.
+Rule 3 carries a residual hazard worth stating. With `import a (Box)` and an
+arrived `b.Box`, a reader who knows `b`'s type also has a `Box` may read `Box(3)`
+as b's where the compiler means a's. Nominal typing catches most such misreadings
+as type errors; a polymorphic sink (`print(Box(3))`) does not, and runs the wrong
+one. The alternative — erroring — reintroduces §7.2, so this is a trade, not a
+free win.
 
-### 7.8 Open questions
+**Scope, honestly stated.** This fixes §7.2 for dependents that never *mention*
+the colliding name. A dependent using bare `Circle` (arrived) still breaks when a
+second import's type grows a `Circle`: both are arrived, so the mention is
+ambiguous. Growth-stability for *mentioned* names requires listing them, which is
+§7.4's territory — the two proposals meet here and §7.9 Q4 asks how.
 
-1. Records. Should naming a record type in an import list bring its constructor,
-   given they share a name — a carve-out, or is `Route(..)` acceptable? 37 of the
-   60 migration sites turn on this.
-2. Is `hiding` wanted? It is the one consumer lever in §7.3 that does **not** fix
-   §7.2 — the dependent still breaks, it just repairs in one line. PureScript and
-   Scala manage on the positive forms alone. Recommend deferring.
-3. Ordering. §7.7 is free and independent; §7.5 step 1 is additive. Is there a
-   reason not to land both before deciding §7.4?
+**Not free, though cheap.** No syntax change and no migration, but deferring the
+check to mention means `ResolveCtx` must represent an ambiguous binding (today a
+name maps to one target, last write winning), and the mention check must cover
+expression, pattern *and* type positions. It is a resolver-representation change.
+
+### 7.8 Error messages
+
+The project's Design Change Process requires an error-message impact statement.
+Two are already known.
+
+**An existing diagnostic would start giving wrong advice.** When a bare name fails
+to resolve, `infer.unresolved_name_hint` (`infer.sprout:1527-1538`) searches for a
+module that declares it and, for a constructor, says: "a constructor is exported
+only with `(..)` on its declaration (spec-v0 §5.6.1)". That is right today (`p3`).
+Under §7.4 the same path fires for a constructor that *is* exported with `(..)` and
+merely was not listed on the import — sending the reader to edit the library
+instead of their own import line. The hint must learn the difference between "not
+published" and "published, not requested".
+
+**The flip needs a migration diagnostic**, per §7.4's silent-rebinding channel:
+a bare constructor that the prelude also declares must not quietly rebind.
+
+Neither is designed here. Drafting them is part of §7.4, not a follow-up.
+
+### 7.9 Open questions
+
+1. **Namesake constructors.** Should naming a type in an import list bring a
+   constructor *spelled like the type*? 39 of the 77 migration sites turn on this.
+   Keying the carve-out on declaration kind (record vs sum) strands the one-arm
+   namesake sums in §7.6. The unambiguous statement, which needs no kind test and
+   is §7.7's own principle: *importing name `N` also binds the value-namespace `N`
+   when the module publishes a constructor spelled `N`* — the namesake counts as
+   listed. That covers records, `wrap`s and one-arm sums alike, and leaves a mixed
+   sum (`type Foo = | Foo | Bar`) importing only `Foo`, which is defensible.
+2. **Evolvability is a third power, and §7.3 omits it.** The survey asks who
+   controls publish and who controls spelling; it does not ask who controls
+   *growth without breakage*. Rust puts that producer-side with
+   `#[non_exhaustive]`. Even with §7.4 and §7.7, adding a variant still breaks
+   every exhaustive matcher (§7.2, `p9`). Is that in scope for this document?
+3. **Is `hiding` wanted?** It is the one consumer lever in §7.3 that does **not**
+   fix §7.2 — the dependent still breaks, it just repairs in one line. PureScript
+   and Scala manage on the positive forms alone. Recommend deferring.
+4. **How do §7.4 and §7.7 meet?** §7.7 makes *arrived* names safe until mentioned;
+   §7.4 makes them not arrive. They overlap on listed names (§7.7 rule 3) and the
+   listing syntax must be one thing, not two (§7.4's hazard list).
+5. **Ordering, and one unevaluated alternative.** §7.7 is cheap and independent;
+   §7.5 step 1 is additive but not free (the alias ambiguity above). The
+   combination this document has *not* evaluated is **§7.7 + `Type.Ctor` + §5-B
+   type-directed resolution**: disambiguation settles two arrived `Box`es at the
+   use site, `Type.Ctor` covers the rest, and the import-side marker may become
+   redundant ceremony. That delivers everything except the "nothing flat ever
+   arrives" guarantee, at no migration. It should be costed before §7.4's
+   breaking default-flip is chosen.
