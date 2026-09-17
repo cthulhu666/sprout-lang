@@ -1772,16 +1772,16 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   candidate syntax in `docs/constructor-namespacing-v0.md` §7.4. Imports are parsed ONLY by a
   line scanner (`parse_import_line`, `:92`); the lexer never sees one, `ast.sprout` has no node.
 
-- [ ] `P1` **Adding a variant to a published sum type breaks dependents that never mention it.**
+- [ ] `P1` **A library adding a variant breaks dependents that opted out of exhaustiveness.**
   Naming a type in an import list imports its constructors (spec §3 *Imports*), and the clash
-  check is EAGER — it fires at the import line whether or not the name is used. So a library
-  adding `| Box Int` to a `(..)` type breaks any dependent that also selectively imports some
-  other type publishing a `Box`, even though the dependent never writes `Box`, never writes the
-  new variant, and did not change. Verified: a probe compiles, the library gains one variant,
-  the untouched probe is rejected. No syntax imports a type *without* its constructors, so the
-  dependent cannot defend itself; the only escape is to import one module whole with `as`.
-  `docs/constructor-namespacing-v0.md` §7.2 has the repro, §7.7 the cheap fix (narrow the eager
-  check to names actually LISTED, per Haskell 2010 §5.5.2), §7.4 the fuller import-side proposal.
+  check is EAGER — it fires at the import line whether the name is used or not. Adding `| Box Int`
+  to a `(..)` type then breaks any dependent that also selectively imports another type publishing
+  a `Box`, though it writes neither `Box` nor the new variant. Exhaustive matchers break anyway,
+  loudly; the point is that match-breakage is opt-out-able with a wildcard arm and import-breakage
+  is not, since no syntax imports a type without its constructors. Verified: a wildcard dependent
+  compiles, the library gains one arm, the untouched dependent is rejected, and deleting one
+  import line makes it compile again. `docs/constructor-namespacing-v0.md` §7.2 has the repro,
+  §7.7 the cheap fix (narrow the eager check to LISTED names, Haskell 2010 §5.5.2), §7.4 the rest.
 - [ ] `P2` **`load_module` silently swallows a genuine `CheckErr`.** `module_loader.sprout:366`
   turns a module that fails to check into an empty pair list, so a broken `import` reports `ok` and
   every name from it reads as `Unknown variable` one command later — the swallow that turned a
