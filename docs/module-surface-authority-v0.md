@@ -84,7 +84,8 @@ about what the fact *means*.
 - N2. Unifying the *export* axis. That is Part A (§6) and is a separate cause with a separate fix.
 - N3. Retiring the env path in favour of the bundler. Scoped as §7, after the authority exists.
 - N4. The `import M (T)` / constructor question left open by `repl-env-type-vocabulary-v0.md` §11.2.
-  It is the same bug class on the type axis and still needs a ruling; it is not resolved here.
+  Ruled 2026-08-29 in `spec-v0.md` §3 *Imports* (permissive), so it is no longer open; the defect
+  the ruling leaves is `docs/constructor-namespacing-v0.md` §7. Still not resolved *here*.
 
 ## 3. Prior art
 

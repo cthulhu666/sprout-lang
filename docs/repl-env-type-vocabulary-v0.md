@@ -456,9 +456,11 @@ not import its constructors; the bundler, by inlining, behaves as if it does. Tw
 were relying on the permissive behaviour. Prior art is clear that this is a real design axis
 (Haskell spells the permissive form `T(..)` explicitly, precisely because `T` alone does not imply
 it), so the options are to require explicit constructor listing, to make `T` imply `T`'s
-constructors, or to add a `T(..)` form. A ruling belongs in `docs/spec-v0.md` §visibility/exports.
-Until then the bundler and the env path disagree, and that disagreement is exactly the class of
-silent divergence this document is about.
+constructors, or to add a `T(..)` form. **Answered 2026-08-29** (`78bd373f`): `spec-v0.md` §3 *Imports* rules the
+permissive reading — a `(..)` type import brings the type's constructors. The disagreement this
+paragraph describes is also gone: the env path was retired 2026-08-18. What the ruling left behind
+is a defect — an additive library change breaks untouched dependents — recorded in `BACKLOG.md`
+and analysed in `docs/constructor-namespacing-v0.md` §7.
 
 ---
 
