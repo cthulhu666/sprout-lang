@@ -1,0 +1,45 @@
+module main
+
+import stdlib.test (check_eq, run_suite)
+import stdlib.compiler.module_loader as module_loader
+
+# THE SCANNER MUST REPORT THE TEXT IT CONSUMED.
+#
+# `(..)` is declaration-side syntax (spec §5.6.1); a selective import lists bare
+# names (spec §3 *Imports*). `import M (T(..), f)` is therefore not Sprout — but
+# it was ACCEPTED, and silently: `skip_after_comma` ends the list at the first
+# `)`, which here is the one inside `(..)`, so the scanner reported `["T"]` for a
+# line that also names `f`. `f` never became a listed name, so the rule that
+# every listed name must be exported never saw it, and a bare `f` in the body
+# reached whatever else was in scope — in practice the prelude's homonym. A
+# different function ran than the import line named, with no diagnostic.
+#
+# The rejection is pinned by tests/conformance/type_error/import_dotdot_in_list.
+# It cannot pin the SECOND half, because a rejected file stops before binding
+# anything: that the names after the group still arrive is only visible here, at
+# the scanner. It matters for the message — without it the reader gets a burst of
+# spurious `Unknown variable` reports instead of the one import error.
+
+fn names_of(line: String) -> List String =
+  match module_loader.parse_import_line(line) with
+  | Just (module_loader.ImportSelective _ names) -> names
+  | _ -> Nil
+
+fn main() -> Unit !{IO} =
+  run_suite("import list scan", [
+    check_eq("a plain list is unchanged",
+             names_of("import demo.m (Alpha, beta)"), ["Alpha", "beta"]),
+    check_eq("a group is kept with its name, and the name after it survives",
+             names_of("import demo.m (Alpha(..), beta)"), ["Alpha(..)", "beta"]),
+    check_eq("a group on the last entry does not swallow the list's own paren",
+             names_of("import demo.m (beta, Alpha(..))"), ["beta", "Alpha(..)"]),
+    # `T(C1)` is the PureScript spelling and the same reflex; it is not Sprout
+    # either, and must not be treated differently.
+    check_eq("a non-`(..)` group is kept the same way",
+             names_of("import demo.m (Alpha(Ctor), beta)"), ["Alpha(Ctor)", "beta"]),
+    # Unbalanced input has no right answer. What it must NOT do is drop names
+    # quietly: collapsing the rest into one bogus entry still reaches the export
+    # check, and still reports.
+    check_eq("an unbalanced group collapses the rest rather than dropping it",
+             names_of("import demo.m (Alpha(.., beta)"), ["Alpha(.., beta)"])
+  ])

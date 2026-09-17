@@ -1761,17 +1761,6 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   file must be able to write. Only `Vec`/`Dict`/`Set` want sealing, so the prelude needs per-name
   export filtering it does not have.
 
-- [ ] `P1` **The import scanner silently accepts non-syntax and drops names, so the call falls
-  through to the prelude.** `(..)` is declaration-side only (spec:83 lists bare names), yet
-  `import demo.cap (Tone(..), parse_int)` is accepted and binds only `Tone`: `skip_after_comma`
-  (`module_loader.sprout:59`) ends the whole scan at the first `)`, the one inside `(..)`. The
-  dropped name never reaches `first_unbound_name` (`bundler.sprout:1237`), so the bare call hits
-  the PRELUDE's homonym — the probe returns 7 where `demo.cap.parse_int` returns 42, while the
-  valid list returns 42. A different function runs than the import line names, with no diagnostic.
-  Needs invalid input, so no in-tree file is affected — but `T(..)` is the Haskell reflex and a
-  candidate syntax in `docs/constructor-namespacing-v0.md` §7.4. Imports are parsed ONLY by a
-  line scanner (`parse_import_line`, `:92`); the lexer never sees one, `ast.sprout` has no node.
-
 - [ ] `P1` **A library adding a variant breaks dependents that opted out of exhaustiveness.**
   Naming a type in an import list imports its constructors (spec §3 *Imports*), and the clash
   check is EAGER — it fires at the import line whether the name is used or not. Adding `| Box Int`

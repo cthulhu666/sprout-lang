@@ -1,0 +1,11 @@
+# `(..)` is DECLARATION-side syntax (spec §5.6.1); a selective import lists bare
+# names (spec §3 *Imports*). `Json(..)` is neither, and it used to be accepted:
+# the name scan stopped at the first `)`, which is the one inside `(..)`, so
+# `Json` bound and `json_parse` was silently DROPPED. A bare call to a dropped
+# name then reaches whatever else is in scope — the prelude's homonym — and a
+# different function runs than the import line names, with no diagnostic.
+module main
+
+import stdlib.json (Json(..), json_parse)
+
+fn main() -> Int !{IO} = 0
