@@ -1769,18 +1769,19 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   the PRELUDE's homonym — the probe returns 7 where `demo.cap.parse_int` returns 42, while the
   valid list returns 42. A different function runs than the import line names, with no diagnostic.
   Needs invalid input, so no in-tree file is affected — but `T(..)` is the Haskell reflex and a
-  candidate syntax in the `import M (T)` entry below. Imports are parsed ONLY by a hand-rolled
+  candidate syntax in `docs/constructor-namespacing-v0.md` §7.4. Imports are parsed ONLY by a
   line scanner (`parse_import_line`, `:92`); the lexer never sees one, `ast.sprout` has no node.
 
-- [ ] `P2` **Decide whether `import M (T)` brings `T`'s constructors into scope.**
-  `select_named_pairs` matches names exactly, so a selective import of a type does not import its
-  constructors; the bundler, by inlining, behaves as if it does. Three stdlib modules were relying
-  on the permissive behaviour and failed on the env path — their import lists have since been
-  completed, so this is a semantics ruling, not a live break. Options: require explicit constructor
-  listing (status quo on the env path), make `T` imply its constructors, or add an explicit `T(..)`
-  form — Haskell spells the permissive case that way precisely because `T` alone does not imply
-  it. The ruling belongs in spec §visibility/exports. The env path was RETIRED 2026-08-18, so
-  nothing enforces the strict reading now and the permissive one spreads until it is ruled on.
+- [ ] `P1` **Adding a variant to a published sum type breaks dependents that never mention it.**
+  Naming a type in an import list imports its constructors (spec §3 *Imports*), and the clash
+  check is EAGER — it fires at the import line whether or not the name is used. So a library
+  adding `| Box Int` to a `(..)` type breaks any dependent that also selectively imports some
+  other type publishing a `Box`, even though the dependent never writes `Box`, never writes the
+  new variant, and did not change. Verified: a probe compiles, the library gains one variant,
+  the untouched probe is rejected. No syntax imports a type *without* its constructors, so the
+  dependent cannot defend itself; the only escape is to import one module whole with `as`.
+  `docs/constructor-namespacing-v0.md` §7.2 has the repro, §7.7 the cheap fix (narrow the eager
+  check to names actually LISTED, per Haskell 2010 §5.5.2), §7.4 the fuller import-side proposal.
 - [ ] `P2` **`load_module` silently swallows a genuine `CheckErr`.** `module_loader.sprout:366`
   turns a module that fails to check into an empty pair list, so a broken `import` reports `ok` and
   every name from it reads as `Unknown variable` one command later — the swallow that turned a
