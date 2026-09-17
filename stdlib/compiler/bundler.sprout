@@ -1237,10 +1237,23 @@ fn first_unbound_name(names: List String, symbols: ModuleSymbols) -> Maybe Strin
       if import_name_binds(name, symbols) then first_unbound_name(rest, symbols)
       else Just(name)
 
+# A name carrying a parenthesised group reaches here because the import scanner
+# keeps the group rather than letting its `)` end the list
+# (module_loader.sprout:52). It can never be exported — no declaration is spelled
+# with one — so without this branch it would be reported as a missing export, and
+# the reader would go looking in the wrong file for a name they did not write.
+#
+# Worded for any group, not just `(..)`: `T(C1)` is the PureScript spelling and
+# the same reflex, and both fixes are the same word.
+fn malformed_import_message(path: String, mod_name: String, name: String) -> String =
+  `${path}: import ${mod_name} (${name}): a selective import lists bare names — \`(..)\` is not import syntax, it goes on the type's declaration in \`${mod_name}\`. Write \`${bare}\`; naming a type imports its constructors.`
+  where bare = str_slice(name, 0, str_find(name, "("))
+
 # Declared-but-unexported is worth its own wording: the fix is in the OTHER file,
 # and "exports no such name" would send the reader looking for a typo instead.
 fn unknown_import_message(path: String, mod_name: String, name: String, symbols: ModuleSymbols) -> String =
-  if module_declares_name(name, symbols) then
+  if str_find(name, "(") != -1 then malformed_import_message(path, mod_name, name)
+  else if module_declares_name(name, symbols) then
     `${path}: import ${mod_name} (${name}): \`${name}\` is declared in module \`${mod_name}\` but not exported — add \`export\` to its declaration, or \`(..)\` to its type's export if it is a constructor.`
   else
     `${path}: import ${mod_name} (${name}): module \`${mod_name}\` exports no \`${name}\`.`

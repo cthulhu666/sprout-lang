@@ -50,8 +50,46 @@ fn read_word_acc(s: String, i: Int, acc: String) -> (String, Int) =
 fn read_word(s: String, i: Int) -> (String, Int) =
   read_word_acc(s, skip_spaces(s, i), "")
 
-fn parse_selective_names_acc(s: String, i: Int, acc: List String) -> List String =
+# A parenthesised group after a name in a selective list is NOT import syntax:
+# spec §3 *Imports* lists bare names, and `(..)` is declaration-side (spec
+# §5.6.1). The scan consumes it anyway, keeping its text as part of the name.
+#
+# Consuming it is the point. `skip_after_comma` ends the whole list at the first
+# `)`, and in `import M (T(..), f)` that is the one inside `(..)` — so `f` was
+# dropped with no diagnostic, and a bare `f` then reached whatever else was in
+# scope, typically the prelude's homonym. A different function ran than the
+# import line named.
+#
+# Keeping the group makes `T(..)` a listed name no module exports, so the
+# existing "every listed name must be exported" rule (spec §3) rejects it at the
+# import line, and every name after it still binds. Depth is tracked so a nested
+# group cannot end the scan early; an unbalanced one collapses the rest of the
+# list into one bogus name, which is still an error rather than a silent drop.
+fn read_group_acc(s: String, i: Int, depth: Int, acc: String) -> (String, Int) =
+  if i >= str_len(s) then (acc, i)
+  else
+    match str_char_at(s, i) with
+    | Nothing -> (acc, i)
+    | Just ch ->
+        if ch == '(' then read_group_acc(s, i + 1, depth + 1, acc ++ char_to_string(ch))
+        else if ch == ')' && depth <= 1 then (acc ++ char_to_string(ch), i + 1)
+        else if ch == ')' then read_group_acc(s, i + 1, depth - 1, acc ++ char_to_string(ch))
+        else read_group_acc(s, i + 1, depth, acc ++ char_to_string(ch))
+
+fn read_list_entry(s: String, i: Int) -> (String, Int) =
   match read_word(s, i) with
+  | ("", i2) -> ("", i2)
+  | (name, i2) ->
+      match str_char_at(s, i2) with
+      | Nothing -> (name, i2)
+      | Just ch ->
+          if ch != '(' then (name, i2)
+          else
+            match read_group_acc(s, i2, 0, "") with
+            | (group, i3) -> (name ++ group, i3)
+
+fn parse_selective_names_acc(s: String, i: Int, acc: List String) -> List String =
+  match read_list_entry(s, i) with
   | ("", _) -> list_reverse(acc)
   | (name, i2) ->
       parse_selective_names_acc(s, skip_after_comma(s, i2), Cons(name, acc))

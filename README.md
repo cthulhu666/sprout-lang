@@ -200,6 +200,11 @@ the cut falls there.
 
 An **imported** file must declare a `module` header — only the entry may be headerless.
 
+**An import list takes bare names — no `(..)`.** `import demo.shapes (Shape(..))`
+is the Haskell reflex and is rejected; write `import demo.shapes (Shape)`. Naming a
+type already imports its constructors, and `(..)` belongs on the type's
+*declaration*, where it decides whether they are published at all.
+
 **A module path is not a name.** `demo.sealed.unseal(v)` is rejected even where
 `import demo.sealed as sealed` is in scope: import the module and use the alias
 (`sealed.unseal(v)`). Sprout follows Haskell and Go here, not Java or Rust — those

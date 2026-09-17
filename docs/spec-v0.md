@@ -105,6 +105,13 @@ that module does not export — including one it declares without `export` — i
 rejected, naming both. The two cases are worded differently because the fix
 differs: a declared-but-unexported name says so, and points at the declaration.
 
+**A listed name is a bare name.** A parenthesised group after one — `T(..)`,
+`T(C1)` — is rejected. `(..)` is declaration-side (§5.6.1), and naming a type
+already imports its constructors, so the group is both invalid and redundant.
+The rejection is stated because the alternative was silence: the list scan ended
+at the group's closing parenthesis, so every name after it was dropped, and a
+bare use of a dropped name resolved to whatever else was in scope.
+
 **One unqualified name is bound at most once per file.** Two imports that bind
 the same name to two different symbols are rejected; binding the *same* symbol
 twice is not an error, so listing a name twice, or reaching it by two routes,

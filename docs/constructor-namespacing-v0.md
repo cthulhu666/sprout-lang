@@ -357,12 +357,14 @@ these must be settled before it could be implemented.
   therefore not the free additive step it is sold as: it needs a precedence rule
   and a spec §3 amendment, since spec §3 currently reads a dotted name as an alias
   path. Type aliases (`type S = …`, then `S.Ctor`) need the same ruling.
-- **The import scanner mis-parses the proposed syntax, silently.** `import M
-  (T(..), f)` is accepted today and binds only `T`, dropping `f`, which then falls
-  through to a prelude homonym — a different function runs. Imports are parsed only
-  by a hand-rolled line scanner (`module_loader.parse_import_line:92`;
-  `skip_after_comma:59` ends the scan at the first `)`, the one inside `(..)`).
-  Filed in `BACKLOG.md`. §7.4 cannot land before that is fixed.
+- **The import scanner mis-parsed the proposed syntax, silently — fixed.** `import
+  M (T(..), f)` used to bind only `T` and drop `f`, which then fell through to a
+  prelude homonym, so a different function ran. The scan now keeps a parenthesised
+  group as part of the name, which makes `T(..)` a listed name no module exports
+  and so rejects it at the import line (spec §3). §7.4's blocker is therefore
+  cleared, but its cost is now explicit: §7.4 must *un*-reject what the scanner
+  rejects, giving `T(..)` a meaning in import position rather than adding syntax to
+  a place that ignored it.
 - **The existing flat listing form is unaddressed.** `import M (T, Red, Green)` is
   legal today (`p2`) and real files use it. Does it survive? If it does, "nothing
   flat enters the namespace" has a second door — defensible, since those names are
