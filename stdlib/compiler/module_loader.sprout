@@ -76,17 +76,29 @@ fn read_group_acc(s: String, i: Int, depth: Int, acc: String) -> (String, Int) =
         else if ch == ')' then read_group_acc(s, i + 1, depth - 1, acc ++ char_to_string(ch))
         else read_group_acc(s, i + 1, depth, acc ++ char_to_string(ch))
 
+# `at` has already skipped whitespace, and that is load-bearing rather than
+# tidiness. Every `(..)` in this tree is written with a space before it
+# (`export type Tone (..)`), so a reader copying a declaration's shape into an
+# import writes `Tone (..)`. Looking for the `(` at the byte straight after the
+# word missed that spelling and left the drop alive for the form people actually
+# write, while rejecting only the tight one. No legal entry is followed by a `(`
+# across whitespace, so skipping it cannot over-trigger.
+#
+# The separator is not kept, so `Tone (..)` and `Tone(..)` both report as
+# `Tone(..)` — one normalised spelling for the diagnostic to quote.
+fn group_after_name(s: String, name: String, at: Int) -> (String, Int) =
+  match str_char_at(s, at) with
+  | Nothing -> (name, at)
+  | Just ch ->
+      if ch != '(' then (name, at)
+      else
+        match read_group_acc(s, at, 0, "") with
+        | (group, i3) -> (name ++ group, i3)
+
 fn read_list_entry(s: String, i: Int) -> (String, Int) =
   match read_word(s, i) with
   | ("", i2) -> ("", i2)
-  | (name, i2) ->
-      match str_char_at(s, i2) with
-      | Nothing -> (name, i2)
-      | Just ch ->
-          if ch != '(' then (name, i2)
-          else
-            match read_group_acc(s, i2, 0, "") with
-            | (group, i3) -> (name ++ group, i3)
+  | (name, i2) -> group_after_name(s, name, skip_spaces(s, i2))
 
 fn parse_selective_names_acc(s: String, i: Int, acc: List String) -> List String =
   match read_list_entry(s, i) with

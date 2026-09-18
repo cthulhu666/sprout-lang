@@ -41,5 +41,21 @@ fn main() -> Unit !{IO} =
     # quietly: collapsing the rest into one bogus entry still reaches the export
     # check, and still reports.
     check_eq("an unbalanced group collapses the rest rather than dropping it",
-             names_of("import demo.m (Alpha(.., beta)"), ["Alpha(.., beta)"])
+             names_of("import demo.m (Alpha(.., beta)"), ["Alpha(.., beta)"]),
+    # THE SPACED SPELLING IS THE LIKELY ONE. Every `(..)` in this tree is written
+    # with a space before it (`export type Tone (..)`), so a reader copying the
+    # declaration's shape into an import writes `Tone (..)`. Reading the `(` at
+    # the byte after the word missed exactly that form, leaving the drop — and
+    # the silent prelude fall-through — alive for the spelling people write,
+    # while the tight form this file first tested was rejected.
+    check_eq("a space before the group does not re-open the drop",
+             names_of("import demo.m (Alpha (..), beta)"), ["Alpha(..)", "beta"]),
+    check_eq("more than one space is the same case",
+             names_of("import demo.m (Alpha   (Ctor), beta)"), ["Alpha(Ctor)", "beta"]),
+    check_eq("a space before a group on the last entry still closes the list",
+             names_of("import demo.m (beta, Alpha (..))"), ["beta", "Alpha(..)"]),
+    # The separator is dropped, so the name is reported in one normalised
+    # spelling however it was written — one shape for the diagnostic to quote.
+    check_eq("a tab is whitespace too",
+             names_of("import demo.m (Alpha\t(..), beta)"), ["Alpha(..)", "beta"])
   ])
