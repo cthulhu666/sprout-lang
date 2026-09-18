@@ -1761,6 +1761,17 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   file must be able to write. Only `Vec`/`Dict`/`Set` want sealing, so the prelude needs per-name
   export filtering it does not have.
 
+- [ ] `P2` **An import list entry starting with a non-word character silently empties the whole
+  list.** `read_word` returns "" on a leading `(`, and `parse_selective_names_acc`
+  (`module_loader.sprout:103`) reads that as end-of-list — one arm serves both "hit the closing
+  paren" and "hit junk". `import demo.cap ((..), parse_int)` scans to `[]`, so
+  `first_unbound_name(Nil)` is `Nothing`, no check fires anywhere, and the bare call reaches the
+  PRELUDE's homonym: the probe exits 7 where `demo.cap.parse_int` returns 42. Identical failure to
+  the `T(..)` drop fixed in #314, one step earlier in the same scan. Fix: at `("", i2)` branch on
+  what stopped it — `)`/end-of-string ends the list, `(` captures the group as a bogus name so the
+  export check reports it, `,` is an empty entry and wants its own ruling. Nothing in-tree is
+  affected; `(..)` read as "import everything" is the plausible way in.
+
 - [ ] `P1` **A library adding a variant breaks dependents that opted out of exhaustiveness.**
   Naming a type in an import list imports its constructors (spec §3 *Imports*), and the clash
   check is EAGER — it fires at the import line whether the name is used or not. Adding `| Box Int`
