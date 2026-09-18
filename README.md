@@ -201,7 +201,8 @@ the cut falls there.
 An **imported** file must declare a `module` header — only the entry may be headerless.
 
 **An import list takes bare names — no `(..)`.** `import demo.shapes (Shape(..))`
-is the Haskell reflex and is rejected; write `import demo.shapes (Shape)`. Naming a
+is the Haskell reflex and is rejected, spaced (`Shape (..)`) or not; write
+`import demo.shapes (Shape)`. Naming a
 type already imports its constructors, and `(..)` belongs on the type's
 *declaration*, where it decides whether they are published at all.
 

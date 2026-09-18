@@ -1,0 +1,14 @@
+# The SPACED spelling, which is the likely one: every `(..)` in this tree is
+# declaration-side and written with a space (`export type Json (..)`), so a
+# reader copying that shape into an import writes `Json (..)`.
+#
+# Its sibling fixture `import_dotdot_in_list` pins the tight form. Both are here
+# because the first fix pinned only the tight one — it read the `(` at the byte
+# after the name — so `Json (..)` still dropped `json_parse` and let a bare call
+# reach the prelude's homonym, silently, which is the whole defect. A fixture
+# that only ever tests the spelling nobody writes gates nothing.
+module main
+
+import stdlib.json (Json(..), json_parse)
+
+fn main() -> Int !{IO} = 0
