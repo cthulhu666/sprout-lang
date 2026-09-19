@@ -244,6 +244,11 @@ list-literal head.
 > `vec_from_list` to avoid designing a class prematurely; the coercion site
 > should be written so swapping the hardcoded call for a class-method dispatch
 > later is localized.
+>
+> **Superseded 2026-09-19** by `docs/overloaded-literals-v0.md`, which takes the
+> class route for *both* coercions — the observation being that neither ever
+> converts a value, so the unifying feature is overloaded literals, not
+> coercion — and identifies typeclass defaulting as the gating prerequisite.
 
 **B.** New (or relaxed) surface: `deriving (…)` on a `wrap` decl (B-opt-1).
 Semantics: generated `instance` decls, identical in status to hand-written ones;

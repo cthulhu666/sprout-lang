@@ -212,10 +212,14 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   scope), and is a normative spec change (`print(true)` flips `1` → `"true"`). Needs its own
   design doc. Decision: do it, or formally bless the intrinsic + surgical-rewrite split as
   permanent.
-- [ ] `P2` **Revisit string-interpolation type-directed dispatch (Mechanism A).** Phase 4 ships a
-  syntactic coercion (`template_to_string` inserted at `String`-expected contexts). Evaluate an
-  `IsTemplate` class once a third meaningful instance (`Bytes`, a logging frame, a tagged-template
-  processor) lands and forces generality.
+- [ ] `P2` **Overloaded literals: replace both hand-written coercions with one class + a defaulting
+  rule.** `StringTemplate → String` and `List`-literal → `Vec` are two hardcoded branches of a
+  pre-inference pass (`desugar_ctx.sprout`, 619 lines), so a third literal target (`Set`, `Bytes`,
+  a logging frame, a user container) needs a compiler edit rather than an instance. Both fire only
+  on literal *syntax*, so the general feature is `FromList`/`FromTemplate` classes picked by the
+  expected type — which needs typeclass defaulting Sprout does not have (`infer.sprout:9181`).
+  Gated on one open call: whether a default that changes asymptotics (`List` vs `Vec`) may be
+  silent. Design, prior art and decision gate: `docs/overloaded-literals-v0.md`.
 
 **Modules and prelude**
 
