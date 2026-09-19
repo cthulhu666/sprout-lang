@@ -24,8 +24,11 @@ should get a loud error, not a silently negative number.
 
 Current native behavior is **defined two's-complement wraparound, NOT undefined behavior**:
 
-- The native lowering in `stdlib/compiler/ir_lowering.sprout:135-137` emits plain `add i64` /
-  `sub i64` / `mul i64` with **no `nsw`/`nuw` flags**. There is no second codegen path.
+- The native lowering — the `IRIAdd` / `IRISub` / `IRIMul` arms of `lower_op` in
+  `stdlib/compiler/ir_lowering.sprout` — emits plain `add i64` / `sub i64` / `mul i64` with
+  **no `nsw`/`nuw` flags**. There is no second codegen path.
+- Unary negation is the same: the `IRINeg` arm emits `sub i64 0, x`, also flagless, so
+  `-INT_MIN` wraps instead of trapping.
 
 In LLVM, plain `add i64` has fully-defined wraparound; it is the `nsw` flag that makes
 signed overflow UB. So this is materially different from the div-by-zero case (which *was*
