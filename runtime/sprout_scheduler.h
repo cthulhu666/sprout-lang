@@ -2,7 +2,8 @@
  * green-thread scheduler (sprout_scheduler.c).
  *
  * Each green task runs with its OWN GC temp-root context (SproutRoots): a
- * non-moving pool plus a LIFO head. The collector's mark_roots scans EVERY
+ * non-moving pool whose live roots are pool[0..pool_top), pushed and popped as
+ * a LIFO by the task's generated code. The collector's mark_roots scans EVERY
  * registered context, so a suspended task keeps its roots alive while another
  * task allocates. The scheduler MUST call sprout_roots_switch(task->roots)
  * immediately before switching execution into a task, so push/pop from that
