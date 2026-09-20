@@ -45,8 +45,8 @@ ours gets typed findings without needing that tool at all.
 ## What the original actually does
 
 This section said, until 2026-09-14, that one invocation fans out to **15 identical reviewers**. That
-was wrong, and it was load-bearing — it is why `SKILL.md`'s eight reviewers read as thrift rather
-than as a number someone picked.
+was wrong, and it was load-bearing — it is why the original eight reviewers read as thrift rather
+than as a number someone picked. They are three now (§What it costs).
 
 What the evidence on this machine shows:
 
@@ -66,13 +66,36 @@ observable" is asserted. Retained sessions are also a bounded sample: sessions c
 `ide/saving` review that prompted the original claim may no longer be on disk. The 15 does not appear
 anywhere that is.
 
-**What this means for the skill.** `SKILL.md` embeds the original's reviewer prompt verbatim, so the
-*prompt* is a faithful port and the A/B is still worth running. The ensemble around it is this
-skill's own design: N independent passes, proximity+overlap dedup, and an adversarial verify bounded
-to severe-or-corroborated findings. Its justification is the quality patterns in the `Workflow`
-tool's guidance, not fidelity to the original. `N = 8` is a cost dial with no baseline behind it —
-raise it if this finds less than the built-in does on the same diff. Sprout-specific review
-dimensions are still deliberately absent until the A/B runs — see `BACKLOG.md`.
+**What this means for the skill.** `SKILL.md` embeds the original's reviewer prompt, so the *prompt*
+is close to a port and the A/B is still worth running. The ensemble around it is this skill's own
+design: N independent passes, proximity+overlap dedup, and an adversarial verify bounded to
+severe-or-corroborated findings. Its justification is the quality patterns in the `Workflow` tool's
+guidance, not fidelity to the original. Sprout-specific review dimensions are still deliberately
+absent until the A/B runs — see `BACKLOG.md`.
+
+## What it costs
+
+The first version cost `N + D` agents at `N = 8` — eight reviewers, then one verifier per finding
+that cleared the severity/votes cap. D is only known at runtime, so the bill was not knowable
+before the run and reached the mid-teens.
+
+It is now **`N + 1`, fixed**, at `N = 3`: four agents. Three changes got there, and only the first
+is a pure reduction:
+
+| change | why |
+|---|---|
+| `N` 8 → 3 | 8 was picked as a saving against a "the original uses 15" premise that turned out to be false (above). 3 is the smallest N where a `votes >= 2` cluster still means two passes agreed. |
+| one skeptic for all findings, not one each | Fixes the count at `N + 1`. Findings cluster in the same few files, so a shared context reads each file once where D agents each re-read it. |
+| the reviewer prompt bounds its search | Per-agent tokens, not agent count. The observed built-in review made 80–95 `Bash` calls; most of a pass's cost is exploration, so the prompt now says to stay inside the diff and what it touches. |
+
+The second change trades independence for cost: one skeptic judging ten findings can carry a
+prejudice across all ten, where ten separate ones cannot. The prompt says to judge each on its own
+evidence, which is mitigation, not a guarantee. A verdict the skeptic omits leaves its finding
+**unconfirmed** — a truncated reply must not be able to inflate the confirmed count.
+
+None of this is measured against finding quality. The agent counts are exact by construction; what
+four agents find relative to fifteen is unknown, and is the A/B in `BACKLOG.md`. If the cut costs
+real findings, `N` is the dial and the per-finding verifier is in git.
 
 ## Why the ledger looks the way it does
 
