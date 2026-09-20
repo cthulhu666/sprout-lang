@@ -2315,6 +2315,15 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   wired into `ci-fast-gates`; longer term generate the C prototypes from the declarations. That also
   closes the reverse hole: `check_approved_builtins.sh` greps `long long <name>(`, so a builtin
   returning anything else is invisible to `APPROVED_BUILTINS`.
+- [ ] `P2` **Both seed checks hang off a commit, so a rebase replays a stale seed unseen.**
+  `scripts/seed_gate.sh` matches the command text for a literal `git … commit`, and
+  `.githooks/pre-commit` is a git `pre-commit` hook — which `git rebase` does not run for replayed
+  commits (verified empirically 2026-09-20). Rebase is exactly when the seed goes stale: master's
+  compiler sources moved, and the replayed commit still carries the seed built against the old
+  base. Observed on PR #317 — a stale seed was pushed and only CI's
+  `just verify-bootstrap-fixed-point` caught it, one round-trip later. A `pre-push` hook is the fix:
+  it fires however the push is invoked, it is the moment the damage actually escapes, and
+  `core.hooksPath` already points at `.githooks/`. `docs/gates.md` §Bootstrap seed has the detail.
 - [ ] `P3` **Transactional bootstrap (never destroy the last-good stage-1).** A failed bootstrap can
   delete the only working stage-1 binary, leaving no way forward but the committed seed. Bootstrap
   should stage the new binary to a temp path, verify it (fixed point + a smoke) before swapping, and

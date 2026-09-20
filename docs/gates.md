@@ -131,6 +131,25 @@ full `just refresh-seed` (delete the stale stage-1 binary first), **not** the `s
 even though `stdlib/compiler/` was untouched. No 2-step bootstrap is needed (no
 parser/compiler-source change; the seed diff is purely the additive declare line).
 
+### Both seed checks hang off a commit, and a rebase makes no commit they can see
+
+Two things check the seed before it lands, and a rebase defeats both:
+
+| check | fires on | why a rebase misses it |
+|---|---|---|
+| `scripts/seed_gate.sh` (PreToolUse) | command text matching a literal `git … commit` | `rebase --continue`, `cherry-pick`, `revert`, `merge`, and any commit made inside a script are all different command text |
+| `.githooks/pre-commit` | git's `pre-commit` hook | git does **not** run `pre-commit` for commits replayed by a rebase (verified: three `git commit`s fired it three times, a rebase of one of them fired it zero more) |
+
+Rebase is the case that bites, because rebasing is exactly when the seed goes stale — `master`
+moved, its compiler sources moved with it, and your replayed commit still carries the seed you
+built against the old base. The gate had nothing to object to when that commit was first written,
+and there is no second commit event for it to fire on. Observed 2026-09-20 on PR #317: master's
+newer seed was overwritten by a rebase and the push went out stale.
+
+CI is the backstop — `just verify-bootstrap-fixed-point` runs there, so this costs a round-trip and
+a confusing red, not a bad merge. Until it is closed: **after any rebase of a branch touching
+`stdlib/compiler/`, reseed before pushing**; do not read a quiet hook as a clean seed.
+
 ## Review gate — `scripts/review_gate.py`
 
 Wired as a Stop hook in `.claude/settings.json`. Once per distinct working-tree state it refuses the
