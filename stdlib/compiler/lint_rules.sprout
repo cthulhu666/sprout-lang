@@ -425,7 +425,7 @@ fn find_list_shape_in_decl(d: ast.Decl) -> List source.SourcePos =
   | _ -> Nil
 
 fn find_list_shape_in_instance_methods(methods: List ast.InstanceMethodImpl) -> List source.SourcePos =
-  concat_map(\m -> match m with | ast.InstanceMethodImpl _ _ _ _ body -> find_list_shape_in_expr(body), methods)
+  concat_map(\m -> match m with | ast.InstanceMethodImpl _ _ _ _ _ body -> find_list_shape_in_expr(body), methods)
 
 # Reuses the SAME generic expr traversal shape as walk_expr above (a
 # separate, parallel walk — see walk_expr's own header comment on why every
@@ -565,7 +565,7 @@ fn find_prefix_pattern_in_decl(d: ast.Decl) -> List source.SourcePos =
   | _ -> Nil
 
 fn find_prefix_pattern_in_instance_methods(methods: List ast.InstanceMethodImpl) -> List source.SourcePos =
-  concat_map(\m -> match m with | ast.InstanceMethodImpl _ _ _ _ body -> find_prefix_pattern_in_expr(body), methods)
+  concat_map(\m -> match m with | ast.InstanceMethodImpl _ _ _ _ _ body -> find_prefix_pattern_in_expr(body), methods)
 
 fn find_prefix_pattern_in_expr(e: ast.Expr) -> List source.SourcePos =
   match e with
@@ -768,7 +768,7 @@ fn walk_instance_methods(methods: List ast.InstanceMethodImpl) -> List LintFindi
   | Nil -> Nil
   | Cons m rest ->
       match m with
-      | ast.InstanceMethodImpl _ _ _ _ body -> list_append(walk_expr(body), walk_instance_methods(rest))
+      | ast.InstanceMethodImpl _ _ _ _ _ body -> list_append(walk_expr(body), walk_instance_methods(rest))
 
 fn walk_decl(d: ast.Decl) -> List LintFinding =
   match d with

@@ -103,8 +103,8 @@ fn desugar_instance_methods_i(methods: List ast.InstanceMethodImpl, fn_idx: Dict
 
 fn desugar_instance_method_i(m: ast.InstanceMethodImpl, fn_idx: Dict (List (Maybe String))) -> ast.InstanceMethodImpl =
   match m with
-  | ast.InstanceMethodImpl name params ret effs body ->
-      ast.InstanceMethodImpl(name, params, ret, effs, desugar_expr_i(body, type_expr_bare_name(ret), fn_idx))
+  | ast.InstanceMethodImpl name params ret effs cs body ->
+      ast.InstanceMethodImpl(name, params, ret, effs, cs, desugar_expr_i(body, type_expr_bare_name(ret), fn_idx))
 
 # Context-aware indexed desugar.  Two expected-type-name contexts are "active"
 # and lower literals by AST shape: "StringTemplate" (template ADT vs String) and
@@ -456,7 +456,7 @@ fn find_redundant_instance_methods(methods: List ast.InstanceMethodImpl, fn_idx:
 
 fn find_redundant_instance_method(m: ast.InstanceMethodImpl, fn_idx: Dict (List (Maybe String))) -> List source.SourcePos =
   match m with
-  | ast.InstanceMethodImpl _ _ ret _ body -> find_redundant_expr(body, type_expr_bare_name(ret), fn_idx)
+  | ast.InstanceMethodImpl _ _ ret _ _ body -> find_redundant_expr(body, type_expr_bare_name(ret), fn_idx)
 
 fn find_redundant_expr(expr: ast.Expr, expected: Maybe String, fn_idx: Dict (List (Maybe String))) -> List source.SourcePos =
   match expected with

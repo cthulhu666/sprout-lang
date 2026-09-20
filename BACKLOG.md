@@ -1008,13 +1008,11 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
 
 ### 7.5) Type Classes
 
-- [~] `P0` **Dictionary-passing lowering.** Hidden-method-parameter lowering supports constrained
-  polymorphic helpers via forwarding and monomorphizes concrete call sites to specialized wrappers.
-  Confirmed working: a class method in value position at a concrete type, and a method value whose
-  dictionary comes from the caller's constraint. **The blocker is at the syntax layer before the
-  representation layer:** a method-level constraint inside a class is a parse error (`Expected }`)
-  and there is no `forall` surface at all. Same root cause as `traverse`/`sequence` below — one
-  surface change unblocks both; sequence them together.
+- [ ] `P2` **A restated instance constraint is not checked against the class declaration.** A
+  method-level `where` is restated on each instance over its own variable names
+  (`docs/method-level-constraints-v0.md` §4); nothing verifies the restatement names the same
+  classes the class declaration did, so a typo'd or invented constraint is accepted and silently
+  takes a hidden dict slot. Needs the positional class-sig-to-instance mapping §4 avoided.
 - [~] `P1` **`__unresolved_*` dictionary sentinel leak.** The user-facing symptom (a SIGSEGV when a
   nested constrained dictionary is unsatisfiable) is fixed at check time by `resolve.sprout`, which
   rejects such programs before codegen. The sentinel *mechanics* — a single resolution path that
@@ -1069,15 +1067,13 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
 - [ ] `P2` **`Validation` type + error-accumulating `Applicative`** — the killer app (form-style
   validation collecting *all* errors). Needs its own type (`Valid a | Invalid e`) because a type
   admits one `Applicative` and `Result`'s is fail-fast; the instance requires `Semigroup e`.
-- [ ] `P2` **`traverse` / `sequence`**, deferred with `Validation`. A `Traversable` *class* is
-  blocked — the parser rejects a method-level `where Applicative f` constraint. Ship them first as
-  free functions (`list_traverse`/`list_sequence`, `where Applicative f`, structure hardcoded —
-  the `concat_map` pattern, verified to compile and run); the class needs the parser surface above.
-  **Also the ergonomic home for effectful mapping.** `list_map` stays pure by design
+- [ ] `P2` **`Traversable` instances beyond `List`/`Maybe`, and the effectful-mapping ergonomics.**
+  The class, `traverse` and `sequence` landed (spec §8.5); `Vec` and `Result e` have no instance.
+  **The ergonomic gap is the reason to finish it:** `list_map` stays pure by design
   (`docs/effect-polymorphism-policy-v0.md` §5: order unpinned), so mapping an `!{IO}` function is
   spelled `list_reverse(list_fold(\ (acc, x) -> Cons(f(x), acc), Nil, xs))` — correct and ordered,
-  because `list_fold` pins both, but clumsy. A `list_traverse` whose contract states its order is
-  the admissible fix; widening `list_map` is not.
+  but clumsy. `traverse` pins its order by contract and is the admissible fix; widening `list_map`
+  is not. Still deferred with `Validation`.
 - [ ] `P2` **Nested return-type dispatch: `map2(g, pure(x), pure(y))` miscodegens when `f` is fixed
   only by context.** When an Applicative method's argument is itself return-type-dispatched and the
   concrete `f` comes only from the surrounding context, codegen emits an undefined `@map2` → link
@@ -1477,6 +1473,16 @@ deferral happened, not for current behaviour. Still open:
 ## Compiler Internals Follow-Ups
 
 ### Sprout-IR / Model-C codegen
+
+- [ ] `P1` **The golden corpus covers the compiler's FRONT END only — a typechecker edit moves no
+  golden.** `tests/smoke_shapes/11_compiler_bundle.spr` is the one entry bundling compiler source,
+  and its header claimed it pulls `stdlib.compiler.*` transitively. It does not: the golden holds
+  `ast`, `lexer`, `parser`, `source`, `token`, `types` and the session facade, and nothing from
+  `infer`, `lowering`, `resolve`, `ast_to_ir`, `ir_lowering`, `bundler`, `dce`, `deriving`,
+  `iface_codec` or `verify_dispatch`. Verified by refactoring `infer.sprout` and getting
+  `ir-golden-diff: 0 differences`. So DoD #12 gives no codegen coverage for the back half of the
+  pipeline — the largest and most delicate part. Fix: a shape that reaches the typed pipeline
+  (importing `stdlib.compiler.infer` directly), or a second bundle shape per phase.
 
 - [ ] `P2` **Tuple-return CPR does not fire on a SELF-RECURSIVE call**, so a recursive
   tuple-returning reduction boxes once per step. CPR fires on the outer call; on the function's own

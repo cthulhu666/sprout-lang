@@ -162,13 +162,18 @@ export type TypeConstructor (..) =
 export type RecordFieldDecl (..) =
   | RecordFieldDecl String TypeExpr
 
-# fn signature inside a class declaration
+# ClassMethodSig name params ret effects constraints
+# constraints: a `where` on the METHOD, over a variable the method quantifies
+# rather than the class variable. Its dictionary is a hidden parameter resolved
+# per call site; the class variable's comes from dispatch.
 export type ClassMethodSig (..) =
-  | ClassMethodSig String (List Param) TypeExpr (Maybe (List String))
+  | ClassMethodSig String (List Param) TypeExpr (Maybe (List String)) (List TypeConstraint)
 
-# fn implementation inside an instance declaration
+# InstanceMethodImpl name params ret effects constraints body
+# constraints: the method-level `where` restated over THIS implementation's
+# variables, which it may name differently from the class declaration.
 export type InstanceMethodImpl (..) =
-  | InstanceMethodImpl String (List Param) (Maybe TypeExpr) (Maybe (List String)) Expr
+  | InstanceMethodImpl String (List Param) (Maybe TypeExpr) (Maybe (List String)) (List TypeConstraint) Expr
 
 # --- Top-level declarations ---
 #
@@ -290,7 +295,7 @@ fn ctor_value_scopes(ctors: List TypeConstructor) -> List (String, NameScope) =
 fn method_value_scopes(methods: List ClassMethodSig) -> List (String, NameScope) =
   match methods with
   | Nil -> Nil
-  | Cons (ClassMethodSig name _ _ _) rest -> Cons((name, ScopeModule), method_value_scopes(rest))
+  | Cons (ClassMethodSig name _ _ _ _) rest -> Cons((name, ScopeModule), method_value_scopes(rest))
 
 # The TYPE axis the comment above sets aside: every type-level name a declaration
 # introduces. Together with decl_value_scopes this covers every name a declaration brings

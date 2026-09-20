@@ -1,0 +1,42 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.string (join)
+
+# A method-level `where` constrains a variable the METHOD quantifies, not the
+# class variable. `t` picks the instance by dispatch; `a` is method-quantified
+# and its dictionary is a hidden parameter resolved at each call site.
+
+export class Container t
+  fn show_all(xs: t a) -> String where ToString a
+
+# The instance restates the constraint, naming its OWN variable — as it already
+# restates params and return type. `Maybe`'s renaming to `z` is the point: the
+# binding is positional against the class signature, not by name.
+instance Container List
+  fn show_all(xs: List a) -> String where ToString a =
+    # DEVIATION: bare `to_string` is the idiomatic spelling and does not compile
+    # — a method value under a method-level constraint emits
+    # `__eta_unresolved_ToString_to_string` (BACKLOG.md §7.5).
+    join(", ", list_map(\x -> to_string(x), xs))
+
+instance Container Maybe
+  fn show_all(xs: Maybe z) -> String where ToString z =
+    match xs with
+    | Nothing -> "-"
+    | Just v -> to_string(v)
+
+# The constraint survives a caller that is itself generic: `show_twice` knows
+# nothing of `a` beyond ToString, so it must forward the dictionary it was given.
+fn show_twice(xs: t a) -> String where Container t, ToString a =
+  show_all(xs) ++ "|" ++ show_all(xs)
+
+fn main() -> Unit !{IO} =
+  run_suite("method-level constraint", [
+    check_eq("List Int", show_all(Cons(1, Cons(2, Nil))), "1, 2"),
+    check_eq("List String", show_all(Cons("a", Cons("b", Nil))), "a, b"),
+    check_eq("Maybe Int, Just", show_all(Just(7)), "7"),
+    check_eq("Maybe Int, Nothing", show_all(Nothing_int()), "-"),
+    check_eq("forwarded through a generic caller", show_twice(Cons(3, Nil)), "3|3")
+  ])
+
+# Nothing needs an anchor for `a`; a helper pins it without a local annotation.
+fn Nothing_int() -> Maybe Int = Nothing

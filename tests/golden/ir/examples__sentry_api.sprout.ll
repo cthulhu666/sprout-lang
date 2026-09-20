@@ -5990,6 +5990,64 @@ entry:
   ret i64 %t$0
 }
 
+define i64 @traverse(i64 %p$g, i64 %p$xs, i64 %p$__tc_Traversable_0_traverse_values, i64 %p$__tc_Applicative_1_pure, i64 %p$__tc_Applicative_1_map2, i64 %p$__tc_Functor_1_fmap) {
+entry:
+  %t$1 = alloca i64
+  store i64 %p$xs, ptr %t$1
+  %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
+  %t$3 = alloca i64
+  store i64 %p$g, ptr %t$3
+  %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
+  %t$5 = alloca i64
+  store i64 %p$__tc_Traversable_0_traverse_values, ptr %t$5
+  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
+  %t$7 = alloca i64
+  store i64 %p$__tc_Functor_1_fmap, ptr %t$7
+  %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
+  %t$9 = alloca i64
+  store i64 %p$__tc_Applicative_1_pure, ptr %t$9
+  %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
+  %t$11 = alloca i64
+  store i64 %p$__tc_Applicative_1_map2, ptr %t$11
+  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
+  %t$0 = call i64 @__cm_Traversable_traverse_values(i64 %p$g, i64 %p$xs, i64 %p$__tc_Traversable_0_traverse_values, i64 %p$__tc_Applicative_1_pure, i64 %p$__tc_Applicative_1_map2, i64 %p$__tc_Functor_1_fmap)
+  %t$13 = call i64 @sprout_gc_pop_roots(i64 6)
+  ret i64 %t$0
+}
+
+define i64 @__sprout_ir_lambda_11(i64 %p$env$, i64 %p$x) {
+entry:
+  ret i64 %p$x
+}
+
+define i64 @sequence(i64 %p$xs, i64 %p$__tc_Traversable_0_traverse_values, i64 %p$__tc_Applicative_1_pure, i64 %p$__tc_Applicative_1_map2, i64 %p$__tc_Functor_1_fmap) {
+entry:
+  %t$2 = alloca i64
+  store i64 %p$xs, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$4 = alloca i64
+  store i64 %p$__tc_Traversable_0_traverse_values, ptr %t$4
+  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
+  %t$6 = alloca i64
+  store i64 %p$__tc_Functor_1_fmap, ptr %t$6
+  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
+  %t$8 = alloca i64
+  store i64 %p$__tc_Applicative_1_pure, ptr %t$8
+  %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
+  %t$10 = alloca i64
+  store i64 %p$__tc_Applicative_1_map2, ptr %t$10
+  %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
+  %t$0 = call i64 @sprout_alloc_closure(i64 8, i64 1)
+  %t$0$raw = inttoptr i64 %t$0 to ptr
+  store ptr @__sprout_ir_lambda_11, ptr %t$0$raw
+  %t$12 = alloca i64
+  store i64 %t$0, ptr %t$12
+  %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
+  %t$1 = call i64 @__cm_Traversable_traverse_values(i64 %t$0, i64 %p$xs, i64 %p$__tc_Traversable_0_traverse_values, i64 %p$__tc_Applicative_1_pure, i64 %p$__tc_Applicative_1_map2, i64 %p$__tc_Functor_1_fmap)
+  %t$14 = call i64 @sprout_gc_pop_roots(i64 6)
+  ret i64 %t$1
+}
+
 define i64 @map(i64 %p$f, i64 %p$xs, i64 %p$__tc_Functor_0_fmap) {
 entry:
   %t$1 = alloca i64
@@ -6119,7 +6177,7 @@ entry:
   ret i64 %t$0
 }
 
-define i64 @__sprout_ir_lambda_11(i64 %p$env$, i64 %p$acc, i64 %p$x) {
+define i64 @__sprout_ir_lambda_12(i64 %p$env$, i64 %p$acc, i64 %p$x) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -6139,7 +6197,7 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_lambda_12(i64 %p$env$, i64 %p$acc) {
+define i64 @__sprout_ir_lambda_13(i64 %p$env$, i64 %p$acc) {
 entry:
   %t$0 = xor i64 %p$acc, 1
   ret i64 %t$0
@@ -6161,7 +6219,7 @@ entry:
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
   %t$0 = call i64 @sprout_alloc_closure(i64 16, i64 2)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_11, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_12, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$pred, ptr %t$0$raw$slot$1
   %t$12 = alloca i64
@@ -6169,7 +6227,7 @@ entry:
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
   %t$1 = call i64 @sprout_alloc_closure(i64 8, i64 1)
   %t$1$raw = inttoptr i64 %t$1 to ptr
-  store ptr @__sprout_ir_lambda_12, ptr %t$1$raw
+  store ptr @__sprout_ir_lambda_13, ptr %t$1$raw
   %t$2 = add i64 0, 0
   %t$14 = alloca i64
   store i64 %t$1, ptr %t$14
@@ -6179,7 +6237,7 @@ entry:
   ret i64 %t$3
 }
 
-define i64 @__sprout_ir_lambda_13(i64 %p$env$, i64 %p$acc, i64 %p$x) {
+define i64 @__sprout_ir_lambda_14(i64 %p$env$, i64 %p$acc, i64 %p$x) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -6199,7 +6257,7 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_lambda_14(i64 %p$env$, i64 %p$acc) {
+define i64 @__sprout_ir_lambda_15(i64 %p$env$, i64 %p$acc) {
 entry:
   ret i64 %p$acc
 }
@@ -6220,7 +6278,7 @@ entry:
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
   %t$0 = call i64 @sprout_alloc_closure(i64 16, i64 2)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_13, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_14, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$pred, ptr %t$0$raw$slot$1
   %t$12 = alloca i64
@@ -6228,7 +6286,7 @@ entry:
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
   %t$1 = call i64 @sprout_alloc_closure(i64 8, i64 1)
   %t$1$raw = inttoptr i64 %t$1 to ptr
-  store ptr @__sprout_ir_lambda_14, ptr %t$1$raw
+  store ptr @__sprout_ir_lambda_15, ptr %t$1$raw
   %t$2 = add i64 0, 1
   %t$14 = alloca i64
   store i64 %t$1, ptr %t$14
@@ -6238,7 +6296,7 @@ entry:
   ret i64 %t$3
 }
 
-define i64 @__sprout_ir_lambda_15(i64 %p$env$, i64 %p$acc, i64 %p$x) {
+define i64 @__sprout_ir_lambda_16(i64 %p$env$, i64 %p$acc, i64 %p$x) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -6273,7 +6331,7 @@ join_2:
   ret i64 %t$3
 }
 
-define i64 @__sprout_ir_lambda_16(i64 %p$env$, i64 %p$acc) {
+define i64 @__sprout_ir_lambda_17(i64 %p$env$, i64 %p$acc) {
 entry:
   %t$0 = call i64 @sprout_tag(i64 %p$acc)
   br label %arm_0_1
@@ -6315,7 +6373,7 @@ entry:
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
   %t$0 = call i64 @sprout_alloc_closure(i64 16, i64 2)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_15, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_16, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$pred, ptr %t$0$raw$slot$1
   %t$12 = alloca i64
@@ -6323,7 +6381,7 @@ entry:
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
   %t$1 = call i64 @sprout_alloc_closure(i64 8, i64 1)
   %t$1$raw = inttoptr i64 %t$1 to ptr
-  store ptr @__sprout_ir_lambda_16, ptr %t$1$raw
+  store ptr @__sprout_ir_lambda_17, ptr %t$1$raw
   %t$14 = alloca i64
   store i64 %t$1, ptr %t$14
   %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
@@ -6336,7 +6394,7 @@ entry:
   ret i64 %t$3
 }
 
-define i64 @__sprout_ir_lambda_17(i64 %p$env$, i64 %p$acc, i64 %p$x) {
+define i64 @__sprout_ir_lambda_18(i64 %p$env$, i64 %p$acc, i64 %p$x) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -6367,7 +6425,7 @@ join_2:
   ret i64 %t$3
 }
 
-define i64 @__sprout_ir_lambda_18(i64 %p$env$, i64 %p$acc) {
+define i64 @__sprout_ir_lambda_19(i64 %p$env$, i64 %p$acc) {
 entry:
   %t$0 = call i64 @sprout_tag(i64 %p$acc)
   br label %arm_0_1
@@ -6409,7 +6467,7 @@ entry:
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
   %t$0 = call i64 @sprout_alloc_closure(i64 16, i64 2)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_17, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_18, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$f, ptr %t$0$raw$slot$1
   %t$12 = alloca i64
@@ -6417,7 +6475,7 @@ entry:
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
   %t$1 = call i64 @sprout_alloc_closure(i64 8, i64 1)
   %t$1$raw = inttoptr i64 %t$1 to ptr
-  store ptr @__sprout_ir_lambda_18, ptr %t$1$raw
+  store ptr @__sprout_ir_lambda_19, ptr %t$1$raw
   %t$14 = alloca i64
   store i64 %t$1, ptr %t$14
   %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
@@ -6430,7 +6488,7 @@ entry:
   ret i64 %t$3
 }
 
-define i64 @__sprout_ir_lambda_19(i64 %p$env$, i64 %p$acc, i64 %p$x) {
+define i64 @__sprout_ir_lambda_20(i64 %p$env$, i64 %p$acc, i64 %p$x) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -6472,7 +6530,7 @@ entry:
   %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
   %t$0 = call i64 @sprout_alloc_closure(i64 16, i64 2)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_19, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_20, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$pred, ptr %t$0$raw$slot$1
   %t$1 = add i64 0, 0
@@ -6484,7 +6542,7 @@ entry:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_lambda_20(i64 %p$env$, i64 %p$y) {
+define i64 @__sprout_ir_lambda_21(i64 %p$env$, i64 %p$y) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -6525,7 +6583,7 @@ entry:
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
   %t$0 = call i64 @sprout_alloc_closure(i64 24, i64 1)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_20, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_21, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$__tc_Eq_1_eq, ptr %t$0$raw$slot$1
   %t$0$raw$slot$2 = getelementptr i64, ptr %t$0$raw, i64 2
@@ -6539,7 +6597,7 @@ entry:
   ret i64 %t$1
 }
 
-define i64 @__sprout_ir_lambda_21(i64 %p$env$, i64 %p$s, i64 %p$x) {
+define i64 @__sprout_ir_lambda_22(i64 %p$env$, i64 %p$s, i64 %p$x) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -6596,7 +6654,7 @@ entry:
   %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
   %t$0 = call i64 @sprout_alloc_closure(i64 16, i64 2)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_21, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_22, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$f, ptr %t$0$raw$slot$1
   %t$1 = add i64 0, 0
@@ -6937,7 +6995,7 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_lambda_22(i64 %p$env$, i64 %p$best, i64 %p$x) {
+define i64 @__sprout_ir_lambda_23(i64 %p$env$, i64 %p$best, i64 %p$x) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -6990,7 +7048,7 @@ entry:
   %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
   %t$0 = call i64 @sprout_alloc_closure(i64 32, i64 2)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_22, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_23, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$__tc_Eq_1_eq, ptr %t$0$raw$slot$1
   %t$0$raw$slot$2 = getelementptr i64, ptr %t$0$raw, i64 2
@@ -7015,7 +7073,7 @@ entry:
   ret i64 %t$3
 }
 
-define i64 @__sprout_ir_lambda_23(i64 %p$env$, i64 %p$best, i64 %p$x) {
+define i64 @__sprout_ir_lambda_24(i64 %p$env$, i64 %p$best, i64 %p$x) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -7068,7 +7126,7 @@ entry:
   %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
   %t$0 = call i64 @sprout_alloc_closure(i64 32, i64 2)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_23, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_24, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$__tc_Eq_1_eq, ptr %t$0$raw$slot$1
   %t$0$raw$slot$2 = getelementptr i64, ptr %t$0$raw, i64 2
@@ -7093,7 +7151,7 @@ entry:
   ret i64 %t$3
 }
 
-define i64 @__sprout_ir_lambda_24(i64 %p$env$, i64 %p$value) {
+define i64 @__sprout_ir_lambda_25(i64 %p$env$, i64 %p$value) {
 entry:
   ret i64 %p$value
 }
@@ -7117,7 +7175,7 @@ entry:
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
   %t$0 = call i64 @sprout_alloc_closure(i64 8, i64 1)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_24, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_25, ptr %t$0$raw
   %t$12 = alloca i64
   store i64 %t$0, ptr %t$12
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
@@ -7126,7 +7184,7 @@ entry:
   ret i64 %t$1
 }
 
-define i64 @__sprout_ir_lambda_25(i64 %p$env$, i64 %p$value) {
+define i64 @__sprout_ir_lambda_26(i64 %p$env$, i64 %p$value) {
 entry:
   ret i64 %p$value
 }
@@ -7150,7 +7208,7 @@ entry:
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
   %t$0 = call i64 @sprout_alloc_closure(i64 8, i64 1)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_25, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_26, ptr %t$0$raw
   %t$12 = alloca i64
   store i64 %t$0, ptr %t$12
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
@@ -7159,7 +7217,7 @@ entry:
   ret i64 %t$1
 }
 
-define i64 @__sprout_ir_lambda_26(i64 %p$env$, i64 %p$acc, i64 %p$x) {
+define i64 @__sprout_ir_lambda_27(i64 %p$env$, i64 %p$acc, i64 %p$x) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -7190,7 +7248,7 @@ entry:
   %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
   %t$0 = call i64 @sprout_alloc_closure(i64 16, i64 2)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_26, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_27, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$__tc_Semigroup_1_append, ptr %t$0$raw$slot$1
   %t$13 = alloca i64
@@ -7255,7 +7313,7 @@ entry:
   ret i64 %t$0
 }
 
-define i64 @__sprout_ir_lambda_27(i64 %p$env$, i64 %p$ab, i64 %p$c) {
+define i64 @__sprout_ir_lambda_28(i64 %p$env$, i64 %p$ab, i64 %p$c) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -7281,7 +7339,7 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_eta_ap_pair_28(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
+define i64 @__sprout_ir_eta_ap_pair_29(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
 entry:
   %t$0 = alloca i64
   store i64 %p$a1, ptr %t$0
@@ -7319,7 +7377,7 @@ entry:
   %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
   %t$0 = call i64 @sprout_alloc_closure(i64 16, i64 2)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_27, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_28, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$g, ptr %t$0$raw$slot$1
   %t$18 = alloca i64
@@ -7327,7 +7385,7 @@ entry:
   %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
   %t$1 = call i64 @sprout_alloc_closure(i64 8, i64 2)
   %t$1$raw = inttoptr i64 %t$1 to ptr
-  store ptr @__sprout_ir_eta_ap_pair_28, ptr %t$1$raw
+  store ptr @__sprout_ir_eta_ap_pair_29, ptr %t$1$raw
   %t$20 = alloca i64
   store i64 %t$1, ptr %t$20
   %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
@@ -7341,7 +7399,7 @@ entry:
   ret i64 %t$3
 }
 
-define i64 @__sprout_ir_lambda_29(i64 %p$env$, i64 %p$ab, i64 %p$cd) {
+define i64 @__sprout_ir_lambda_30(i64 %p$env$, i64 %p$ab, i64 %p$cd) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -7381,7 +7439,7 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_eta_ap_pair_30(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
+define i64 @__sprout_ir_eta_ap_pair_31(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
 entry:
   %t$0 = alloca i64
   store i64 %p$a1, ptr %t$0
@@ -7394,7 +7452,7 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta_ap_pair_31(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
+define i64 @__sprout_ir_eta_ap_pair_32(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
 entry:
   %t$0 = alloca i64
   store i64 %p$a1, ptr %t$0
@@ -7435,7 +7493,7 @@ entry:
   %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
   %t$0 = call i64 @sprout_alloc_closure(i64 16, i64 2)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_29, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_30, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$g, ptr %t$0$raw$slot$1
   %t$22 = alloca i64
@@ -7443,7 +7501,7 @@ entry:
   %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
   %t$1 = call i64 @sprout_alloc_closure(i64 8, i64 2)
   %t$1$raw = inttoptr i64 %t$1 to ptr
-  store ptr @__sprout_ir_eta_ap_pair_30, ptr %t$1$raw
+  store ptr @__sprout_ir_eta_ap_pair_31, ptr %t$1$raw
   %t$24 = alloca i64
   store i64 %t$1, ptr %t$24
   %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
@@ -7454,7 +7512,7 @@ entry:
   %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
   %t$3 = call i64 @sprout_alloc_closure(i64 8, i64 2)
   %t$3$raw = inttoptr i64 %t$3 to ptr
-  store ptr @__sprout_ir_eta_ap_pair_31, ptr %t$3$raw
+  store ptr @__sprout_ir_eta_ap_pair_32, ptr %t$3$raw
   %t$29 = alloca i64
   store i64 %t$3, ptr %t$29
   %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
@@ -7468,7 +7526,7 @@ entry:
   ret i64 %t$5
 }
 
-define i64 @__sprout_ir_lambda_32(i64 %p$env$, i64 %p$ab, i64 %p$cd, i64 %p$ev) {
+define i64 @__sprout_ir_lambda_33(i64 %p$env$, i64 %p$ab, i64 %p$cd, i64 %p$ev) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -7508,7 +7566,7 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_eta_ap_pair_33(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
+define i64 @__sprout_ir_eta_ap_pair_34(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
 entry:
   %t$0 = alloca i64
   store i64 %p$a1, ptr %t$0
@@ -7521,7 +7579,7 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta_ap_pair_34(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
+define i64 @__sprout_ir_eta_ap_pair_35(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
 entry:
   %t$0 = alloca i64
   store i64 %p$a1, ptr %t$0
@@ -7565,7 +7623,7 @@ entry:
   %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
   %t$0 = call i64 @sprout_alloc_closure(i64 16, i64 3)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_32, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_33, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$g, ptr %t$0$raw$slot$1
   %t$24 = alloca i64
@@ -7573,7 +7631,7 @@ entry:
   %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
   %t$1 = call i64 @sprout_alloc_closure(i64 8, i64 2)
   %t$1$raw = inttoptr i64 %t$1 to ptr
-  store ptr @__sprout_ir_eta_ap_pair_33, ptr %t$1$raw
+  store ptr @__sprout_ir_eta_ap_pair_34, ptr %t$1$raw
   %t$26 = alloca i64
   store i64 %t$1, ptr %t$26
   %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
@@ -7584,7 +7642,7 @@ entry:
   %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
   %t$3 = call i64 @sprout_alloc_closure(i64 8, i64 2)
   %t$3$raw = inttoptr i64 %t$3 to ptr
-  store ptr @__sprout_ir_eta_ap_pair_34, ptr %t$3$raw
+  store ptr @__sprout_ir_eta_ap_pair_35, ptr %t$3$raw
   %t$31 = alloca i64
   store i64 %t$3, ptr %t$31
   %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
@@ -8278,7 +8336,7 @@ join_2:
   ret i64 %t$3
 }
 
-define i64 @__sprout_ir_lambda_35(i64 %p$env$, i64 %p$y) {
+define i64 @__sprout_ir_lambda_36(i64 %p$env$, i64 %p$y) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -8325,7 +8383,7 @@ body_1_1:
   %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
   %t$10 = call i64 @sprout_alloc_closure(i64 24, i64 1)
   %t$10$raw = inttoptr i64 %t$10 to ptr
-  store ptr @__sprout_ir_lambda_35, ptr %t$10$raw
+  store ptr @__sprout_ir_lambda_36, ptr %t$10$raw
   %t$10$raw$slot$1 = getelementptr i64, ptr %t$10$raw, i64 1
   store i64 %p$g, ptr %t$10$raw$slot$1
   %t$10$raw$slot$2 = getelementptr i64, ptr %t$10$raw, i64 2
@@ -8350,6 +8408,102 @@ arm_2_1:
   unreachable
 join_1:
   %t$2 = phi i64 [%t$5, %body_0_1], [%t$13, %body_1_1]
+  ret i64 %t$2
+}
+
+define i64 @__sprout_ir_lambda_37(i64 %p$env$, i64 %p$y, i64 %p$ys) {
+entry:
+  %t$1 = alloca i64
+  store i64 %p$ys, ptr %t$1
+  %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
+  %t$3 = alloca i64
+  store i64 %p$y, ptr %t$3
+  %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
+  %t$0 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$0$ptr = inttoptr i64 %t$0 to ptr
+  %t$0$f0 = getelementptr i64, ptr %t$0$ptr, i64 0
+  store i64 %p$y, ptr %t$0$f0
+  %t$0$f1 = getelementptr i64, ptr %t$0$ptr, i64 1
+  store i64 %p$ys, ptr %t$0$f1
+  %t$5 = call i64 @sprout_gc_pop_roots(i64 2)
+  ret i64 %t$0
+}
+
+define i64 @list_traverse_go(i64 %p$g, i64 %p$xs, i64 %p$__tc_Applicative_0_pure, i64 %p$__tc_Applicative_0_map2, i64 %p$__tc_Functor_0_fmap) {
+entry:
+  %t$0 = call i64 @sprout_tag(i64 %p$xs)
+  br label %arm_0_1
+arm_0_1:
+  %t$3 = add i64 0, 5
+  %t$4 = icmp eq i64 %t$0, %t$3
+  br i1 %t$4, label %body_0_1, label %arm_1_1
+body_0_1:
+  %t$15 = alloca i64
+  store i64 %p$__tc_Functor_0_fmap, ptr %t$15
+  %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
+  %t$17 = alloca i64
+  store i64 %p$__tc_Applicative_0_pure, ptr %t$17
+  %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
+  %t$19 = alloca i64
+  store i64 %p$__tc_Applicative_0_map2, ptr %t$19
+  %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
+  %t$5 = call i64 @sprout_alloc_obj(i64 5, i64 0)
+  %t$21 = alloca i64
+  store i64 %t$5, ptr %t$21
+  %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
+  %t$6 = call i64 @__cm_Applicative_pure(i64 %t$5, i64 %p$__tc_Applicative_0_pure, i64 %p$__tc_Applicative_0_map2, i64 %p$__tc_Functor_0_fmap)
+  %t$23 = call i64 @sprout_gc_pop_roots(i64 4)
+  br label %join_1
+arm_1_1:
+  %t$7 = add i64 0, 6
+  %t$8 = icmp eq i64 %t$0, %t$7
+  br i1 %t$8, label %body_1_1, label %arm_2_1
+body_1_1:
+  %t$9 = call i64 @sprout_field(i64 %p$xs, i64 0)
+  %t$10 = call i64 @sprout_field(i64 %p$xs, i64 1)
+  %t$24 = alloca i64
+  store i64 %p$g, ptr %t$24
+  %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
+  %t$26 = alloca i64
+  store i64 %p$__tc_Functor_0_fmap, ptr %t$26
+  %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
+  %t$28 = alloca i64
+  store i64 %p$__tc_Applicative_0_pure, ptr %t$28
+  %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
+  %t$30 = alloca i64
+  store i64 %p$__tc_Applicative_0_map2, ptr %t$30
+  %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)
+  %t$32 = alloca i64
+  store i64 %t$9, ptr %t$32
+  %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
+  %t$34 = alloca i64
+  store i64 %t$10, ptr %t$34
+  %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
+  %t$11 = call i64 @sprout_alloc_closure(i64 8, i64 2)
+  %t$11$raw = inttoptr i64 %t$11 to ptr
+  store ptr @__sprout_ir_lambda_37, ptr %t$11$raw
+  %t$36 = alloca i64
+  store i64 %t$11, ptr %t$36
+  %t$37 = call i64 @sprout_gc_push_i64_root(ptr %t$36)
+  call void @sprout_closure_arity_check(i64 %p$g, i64 1)
+  %t$12$env_ptr = inttoptr i64 %p$g to ptr
+  %t$12$code = load ptr, ptr %t$12$env_ptr
+  %t$12 = call i64 (i64, i64) %t$12$code(i64 %p$g, i64 %t$9)
+  %t$38 = alloca i64
+  store i64 %t$12, ptr %t$38
+  %t$39 = call i64 @sprout_gc_push_i64_root(ptr %t$38)
+  %t$13 = call i64 @list_traverse_go(i64 %p$g, i64 %t$10, i64 %p$__tc_Applicative_0_pure, i64 %p$__tc_Applicative_0_map2, i64 %p$__tc_Functor_0_fmap)
+  %t$40 = alloca i64
+  store i64 %t$13, ptr %t$40
+  %t$41 = call i64 @sprout_gc_push_i64_root(ptr %t$40)
+  %t$14 = call i64 @__cm_Applicative_map2(i64 %t$11, i64 %t$12, i64 %t$13, i64 %p$__tc_Applicative_0_pure, i64 %p$__tc_Applicative_0_map2, i64 %p$__tc_Functor_0_fmap)
+  %t$42 = call i64 @sprout_gc_pop_roots(i64 9)
+  br label %join_1
+arm_2_1:
+  call void @sprout_abort_match()
+  unreachable
+join_1:
+  %t$2 = phi i64 [%t$6, %body_0_1], [%t$14, %body_1_1]
   ret i64 %t$2
 }
 
@@ -8460,7 +8614,7 @@ join_2:
   ret i64 %t$3
 }
 
-define i64 @__sprout_ir_lambda_36(i64 %p$env$, i64 %p$acc, i64 %p$x) {
+define i64 @__sprout_ir_lambda_38(i64 %p$env$, i64 %p$acc, i64 %p$x) {
 entry:
   %t$1 = alloca i64
   store i64 %p$x, ptr %t$1
@@ -8491,7 +8645,7 @@ entry:
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
   %t$0 = call i64 @sprout_alloc_closure(i64 8, i64 2)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_36, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_38, ptr %t$0$raw
   %t$12 = alloca i64
   store i64 %t$0, ptr %t$12
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
@@ -8605,7 +8759,7 @@ entry:
   ret i64 %t$0
 }
 
-define i64 @__sprout_ir_lambda_37(i64 %p$env$, i64 %p$x) {
+define i64 @__sprout_ir_lambda_39(i64 %p$env$, i64 %p$x) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -8638,7 +8792,7 @@ entry:
   %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
   %t$0 = call i64 @sprout_alloc_closure(i64 24, i64 1)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_37, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_39, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$f, ptr %t$0$raw$slot$1
   %t$0$raw$slot$2 = getelementptr i64, ptr %t$0$raw, i64 2
@@ -8647,7 +8801,7 @@ entry:
   ret i64 %t$0
 }
 
-define i64 @__sprout_ir_lambda_38(i64 %p$env$, i64 %p$x) {
+define i64 @__sprout_ir_lambda_40(i64 %p$env$, i64 %p$x) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -8680,7 +8834,7 @@ entry:
   %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
   %t$0 = call i64 @sprout_alloc_closure(i64 24, i64 1)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_38, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_40, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$f, ptr %t$0$raw$slot$1
   %t$0$raw$slot$2 = getelementptr i64, ptr %t$0$raw, i64 2
@@ -14503,7 +14657,7 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_lambda_39(i64 %p$env$, i64 %p$acc, i64 %p$s) {
+define i64 @__sprout_ir_lambda_41(i64 %p$env$, i64 %p$acc, i64 %p$s) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -14538,7 +14692,7 @@ entry:
   %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
   %t$0 = call i64 @sprout_alloc_closure(i64 16, i64 2)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_39, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_41, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$sep, ptr %t$0$raw$slot$1
   %t$13 = alloca i64
@@ -20865,6 +21019,15 @@ entry:
   ret i64 %t$0
 }
 
+define i64 @__cm_Traversable_traverse_values(i64 %p$g, i64 %p$xs, i64 %p$__tc_Traversable_0_traverse_values, i64 %p$__tc_Applicative_1_pure, i64 %p$__tc_Applicative_1_map2, i64 %p$__tc_Functor_1_fmap) {
+entry:
+  call void @sprout_closure_arity_check(i64 %p$__tc_Traversable_0_traverse_values, i64 5)
+  %t$0$env_ptr = inttoptr i64 %p$__tc_Traversable_0_traverse_values to ptr
+  %t$0$code = load ptr, ptr %t$0$env_ptr
+  %t$0 = call i64 (i64, i64, i64, i64, i64, i64) %t$0$code(i64 %p$__tc_Traversable_0_traverse_values, i64 %p$g, i64 %p$xs, i64 %p$__tc_Applicative_1_pure, i64 %p$__tc_Applicative_1_map2, i64 %p$__tc_Functor_1_fmap)
+  ret i64 %t$0
+}
+
 define i64 @__cm_JsonEncode_encode_json(i64 %p$value, i64 %p$__tc_stdlib.json.JsonEncode_0_encode_json) {
 entry:
   call void @sprout_closure_arity_check(i64 %p$__tc_stdlib.json.JsonEncode_0_encode_json, i64 1)
@@ -23323,6 +23486,105 @@ join_1:
   ret i64 %t$2
 }
 
+define i64 @__tc_Traversable_List_traverse_values(i64 %p$g, i64 %p$xs, i64 %p$__tc_Applicative_0_pure, i64 %p$__tc_Applicative_0_map2, i64 %p$__tc_Functor_0_fmap) {
+entry:
+  %t$1 = alloca i64
+  store i64 %p$xs, ptr %t$1
+  %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
+  %t$3 = alloca i64
+  store i64 %p$g, ptr %t$3
+  %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
+  %t$5 = alloca i64
+  store i64 %p$__tc_Functor_0_fmap, ptr %t$5
+  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
+  %t$7 = alloca i64
+  store i64 %p$__tc_Applicative_0_pure, ptr %t$7
+  %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
+  %t$9 = alloca i64
+  store i64 %p$__tc_Applicative_0_map2, ptr %t$9
+  %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
+  %t$0 = call i64 @list_traverse_go(i64 %p$g, i64 %p$xs, i64 %p$__tc_Applicative_0_pure, i64 %p$__tc_Applicative_0_map2, i64 %p$__tc_Functor_0_fmap)
+  %t$11 = call i64 @sprout_gc_pop_roots(i64 5)
+  ret i64 %t$0
+}
+
+define i64 @__sprout_ir_lambda_42(i64 %p$env$, i64 %p$y) {
+entry:
+  %t$1 = alloca i64
+  store i64 %p$y, ptr %t$1
+  %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
+  %t$0 = call i64 @sprout_alloc_obj(i64 1, i64 1)
+  %t$0$ptr = inttoptr i64 %t$0 to ptr
+  %t$0$f0 = getelementptr i64, ptr %t$0$ptr, i64 0
+  store i64 %p$y, ptr %t$0$f0
+  %t$3 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t$0
+}
+
+define i64 @__tc_Traversable_Maybe_traverse_values(i64 %p$g, i64 %p$xs, i64 %p$__tc_Applicative_0_pure, i64 %p$__tc_Applicative_0_map2, i64 %p$__tc_Functor_0_fmap) {
+entry:
+  %t$0 = call i64 @sprout_tag(i64 %p$xs)
+  br label %arm_0_1
+arm_0_1:
+  %t$3 = add i64 0, 0
+  %t$4 = icmp eq i64 %t$0, %t$3
+  br i1 %t$4, label %body_0_1, label %arm_1_1
+body_0_1:
+  %t$13 = alloca i64
+  store i64 %p$__tc_Functor_0_fmap, ptr %t$13
+  %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
+  %t$15 = alloca i64
+  store i64 %p$__tc_Applicative_0_pure, ptr %t$15
+  %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
+  %t$17 = alloca i64
+  store i64 %p$__tc_Applicative_0_map2, ptr %t$17
+  %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
+  %t$5 = call i64 @sprout_alloc_obj(i64 0, i64 0)
+  %t$19 = alloca i64
+  store i64 %t$5, ptr %t$19
+  %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
+  %t$6 = call i64 @__cm_Applicative_pure(i64 %t$5, i64 %p$__tc_Applicative_0_pure, i64 %p$__tc_Applicative_0_map2, i64 %p$__tc_Functor_0_fmap)
+  %t$21 = call i64 @sprout_gc_pop_roots(i64 4)
+  br label %join_1
+arm_1_1:
+  %t$7 = add i64 0, 1
+  %t$8 = icmp eq i64 %t$0, %t$7
+  br i1 %t$8, label %body_1_1, label %arm_2_1
+body_1_1:
+  %t$9 = call i64 @sprout_field(i64 %p$xs, i64 0)
+  %t$22 = alloca i64
+  store i64 %p$g, ptr %t$22
+  %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
+  %t$24 = alloca i64
+  store i64 %p$__tc_Functor_0_fmap, ptr %t$24
+  %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
+  %t$26 = alloca i64
+  store i64 %t$9, ptr %t$26
+  %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
+  %t$10 = call i64 @sprout_alloc_closure(i64 8, i64 1)
+  %t$10$raw = inttoptr i64 %t$10 to ptr
+  store ptr @__sprout_ir_lambda_42, ptr %t$10$raw
+  %t$28 = alloca i64
+  store i64 %t$10, ptr %t$28
+  %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
+  call void @sprout_closure_arity_check(i64 %p$g, i64 1)
+  %t$11$env_ptr = inttoptr i64 %p$g to ptr
+  %t$11$code = load ptr, ptr %t$11$env_ptr
+  %t$11 = call i64 (i64, i64) %t$11$code(i64 %p$g, i64 %t$9)
+  %t$30 = alloca i64
+  store i64 %t$11, ptr %t$30
+  %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)
+  %t$12 = call i64 @__cm_Functor_fmap(i64 %t$10, i64 %t$11, i64 %p$__tc_Functor_0_fmap)
+  %t$32 = call i64 @sprout_gc_pop_roots(i64 5)
+  br label %join_1
+arm_2_1:
+  call void @sprout_abort_match()
+  unreachable
+join_1:
+  %t$2 = phi i64 [%t$6, %body_0_1], [%t$12, %body_1_1]
+  ret i64 %t$2
+}
+
 define i64 @__tc_Applicative_Result_e_pure(i64 %p$x) {
 entry:
   %t$1 = alloca i64
@@ -23632,7 +23894,7 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_lambda_40(i64 %p$env$, i64 %p$v) {
+define i64 @__sprout_ir_lambda_43(i64 %p$env$, i64 %p$v) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -23663,7 +23925,7 @@ entry:
   %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
   %t$2 = call i64 @sprout_alloc_closure(i64 16, i64 1)
   %t$2$raw = inttoptr i64 %t$2 to ptr
-  store ptr @__sprout_ir_lambda_40, ptr %t$2$raw
+  store ptr @__sprout_ir_lambda_43, ptr %t$2$raw
   %t$2$raw$slot$1 = getelementptr i64, ptr %t$2$raw, i64 1
   store i64 %p$__tc_ToString_0_to_string, ptr %t$2$raw$slot$1
   %t$15 = alloca i64

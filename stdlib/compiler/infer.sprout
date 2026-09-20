@@ -2364,8 +2364,46 @@ fn check_call_constraint(
           | cs ->
               inject_constrained_fn_dicts_via_field(method_name, cs, prog_to_fresh, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
       | Just class_marker ->
-          check_instance_for_marker(class_marker, method_name, typed_callee, typed_args, subst, env, ret_t, s3, es3, call_eff, pos)
+          check_class_method_call(class_marker, method_name, typed_callee, typed_args, subst, env,
+            ret_t, s3, es3, call_eff, pos, prog_to_fresh)
   | _ -> InferOk(typed_ast.TCall(typed_callee, typed_args, ret_t, pos), s3, es3, call_eff)
+
+# A class method carrying its own `where` needs BOTH paths: dispatch selects the
+# instance from the class variable, and the method's own constraints take hidden
+# dicts like any constrained fn. The method's go in first so the class dict lands
+# ahead of them — lowering appends dicts after the user args and preserves this
+# order, the layout generate_one_class_wrapper documents.
+fn check_class_method_call(
+  class_marker: types.Scheme,
+  method_name: String,
+  typed_callee: typed_ast.TypedExpr,
+  typed_args: List typed_ast.TypedExpr,
+  subst: Dict types.Type,
+  env: Dict types.Scheme,
+  ret_t: types.Type,
+  s3: Dict types.Type,
+  es3: Dict types.Effect,
+  call_eff: types.Effect,
+  pos: source.SourcePos,
+  prog_to_fresh: Dict types.Type
+) -> InferResult !{IO} =
+  let [_ | _] = constrained_fn_field(method_name, env)
+        else check_instance_for_marker(class_marker, method_name, typed_callee, typed_args, subst, env, ret_t, s3, es3, call_eff, pos)
+      InferOk with_dicts s4 es4 eff4 =
+        inject_constrained_fn_dicts_via_field(method_name, constrained_fn_field(method_name, env),
+          prog_to_fresh, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
+        else InferErr p m -> InferErr(p, m)
+  in
+    check_instance_for_marker(class_marker, method_name, typed_callee,
+      tcall_arg_list(with_dicts, typed_args), subst, env, ret_t, s4, es4, eff4, pos)
+
+# The arg list of a TCall the injector just built, or `fallback` if it produced
+# anything else — the injector always returns a TCall, so the fallback is the
+# unreachable arm rather than a silent drop of the dicts.
+fn tcall_arg_list(e: typed_ast.TypedExpr, fallback: List typed_ast.TypedExpr) -> List typed_ast.TypedExpr =
+  match e with
+  | typed_ast.TCall _ args _ _ -> args
+  | _ -> fallback
 
 # The callee's Scheme constraint list, or Nil when it has no scheme (unknown /
 # non-fn) — the §13.3(B) S3 discriminator between the field and marker paths.
@@ -6730,7 +6768,7 @@ fn alias_uses_in_class_methods(methods: List ast.ClassMethodSig,
   | Nil -> Nothing
   | Cons m rest ->
       match m with
-      | ast.ClassMethodSig _ params ret _ ->
+      | ast.ClassMethodSig _ params ret _ _ ->
           match alias_uses_in_sig(params, Just(ret), arities) with
           | Just e -> Just(e)
           | Nothing -> alias_uses_in_class_methods(rest, arities)
@@ -6741,7 +6779,7 @@ fn alias_uses_in_instance_methods(methods: List ast.InstanceMethodImpl,
   | Nil -> Nothing
   | Cons m rest ->
       match m with
-      | ast.InstanceMethodImpl _ params ret _ _ ->
+      | ast.InstanceMethodImpl _ params ret _ _ _ ->
           match alias_uses_in_sig(params, ret, arities) with
           | Just e -> Just(e)
           | Nothing -> alias_uses_in_instance_methods(rest, arities)
@@ -9456,18 +9494,17 @@ fn instance_method_dict_coverage_msg(name: String, params: List ast.Param,
                                uncovered, typed_body, env) with
     | Just (v, cls) ->
         Just("`" ++ name ++ "` needs a " ++ cls ++ " instance for type variable `" ++ v
-               ++ "`, which this method generalizes and the instance head does not constrain"
-               ++ " — an instance method cannot carry its own `where` clause, so nothing can"
-               ++ " supply the instance per call; constrain the variable in the instance head,"
-               ++ " or give the method a concrete type")
+               ++ "`, which this method generalizes and nothing supplies; add `where " ++ cls
+               ++ " " ++ v ++ "` to the method (the class declaration must declare it too),"
+               ++ " constrain the variable in the instance head, or give the method a concrete type")
     | Nothing ->
         match uncovered_dict_subject(typed_body, s2, uncovered, env) with
         | Just cls ->
             Just("`" ++ name ++ "` needs a " ++ string.after_last_dot(cls) ++ " instance for a"
-                   ++ " type variable it generalizes, which appears in no parameter and which the"
-                   ++ " instance head does not constrain — an instance method cannot carry its own"
-                   ++ " `where` clause, so nothing can supply the instance per call; constrain the"
-                   ++ " variable in the instance head, or give the method a concrete type")
+                   ++ " type variable it generalizes, which appears in no parameter and which"
+                   ++ " nothing supplies; add a method-level `where` (the class declaration must"
+                   ++ " declare it too), constrain the variable in the instance head, or give the"
+                   ++ " method a concrete type")
         | Nothing -> Nothing
 
 # The internal type variables the declared `where` clause already supplies a dictionary for.
@@ -10013,7 +10050,7 @@ fn register_class_methods(type_params: List String, methods: List ast.ClassMetho
 fn register_class_method(type_params: List String, sig: ast.ClassMethodSig,
                          alias_env: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
   match sig with
-  | ast.ClassMethodSig name params ret_type effects_maybe ->
+  | ast.ClassMethodSig name params ret_type effects_maybe constraints ->
       # Extend the class type params with any additional lowercase type variables
       # appearing in the method signature (e.g. `a` and `b` in
       # `fmap(f: a -> b, xs: f a) -> f b`).  Without this, method-specific
@@ -10022,16 +10059,44 @@ fn register_class_method(type_params: List String, sig: ast.ClassMethodSig,
       #
       # Over `alias_env`, so a method's signature resolves aliases as its
       # implementations do — the call site reads THIS scheme.
-      dict_set(name, scheme_from_fn_parts_inner(
+      register_class_method_over(
         collect_ret_type_vars(Just(ret_type), collect_param_type_vars(params, type_params)),
-        name, params, Just(ret_type), effects_maybe, alias_env), env)
+        name, params, ret_type, effects_maybe, constraints, alias_env, env)
+
+# Split out so the binder list is computed once: it both quantifies the scheme
+# and positions the method's own constraint heads.
+fn register_class_method_over(binders: List String, name: String, params: List ast.Param,
+                              ret_type: ast.TypeExpr, effects_maybe: Maybe (List String),
+                              constraints: List ast.TypeConstraint,
+                              alias_env: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
+  dict_set(name,
+    types.scheme_with_constraints(
+      scheme_from_fn_parts_inner(binders, name, params, Just(ret_type), effects_maybe, alias_env),
+      constraint_pos_tokens(constraints, binders)),
+    env)
+
+# A method-level constraint's head keyed by POSITION in the method's generalized
+# binder list, so it survives the instantiate renaming that defeats name-keying
+# (the same reason constraint_var_token exists for a FnDecl).
+fn constraint_pos_tokens(constraints: List ast.TypeConstraint, binders: List String) -> List (String, String) =
+  match constraints with
+  | Nil -> Nil
+  | Cons c rest ->
+      match c with
+      | ast.TypeConstraint class_name type_args ->
+          match type_args with
+          | [ast.TypeName v | _] ->
+              Cons((constraint_var_token(v, binders), class_name), constraint_pos_tokens(rest, binders))
+          | [ast.TypeApply base _ | _] ->
+              Cons((compound_head_token(base), class_name), constraint_pos_tokens(rest, binders))
+          | _ -> Cons(("#none", class_name), constraint_pos_tokens(rest, binders))
 
 fn register_class_method_markers(class_name: String, type_params: List String, methods: List ast.ClassMethodSig, env: Dict types.Scheme) -> Dict types.Scheme =
   match methods with
   | Nil -> env
   | Cons sig rest ->
       match sig with
-      | ast.ClassMethodSig name _ _ _ ->
+      | ast.ClassMethodSig name _ _ _ _ ->
           register_class_method_markers(class_name, type_params, rest,
             dict_set("@class:" ++ name,
                      types.Scheme(type_params, Nil, types.TConst(types.type_id(class_name)), types.EffectPure, Nil),
@@ -10134,7 +10199,7 @@ fn first_class_method_row(class_name: String, methods: List ast.ClassMethodSig) 
   | Nil -> Nothing
   | Cons sig rest ->
       match sig with
-      | ast.ClassMethodSig name _ _ effects_maybe ->
+      | ast.ClassMethodSig name _ _ effects_maybe _ ->
           let eff = types.effect_from_labels(effects_maybe)
           in
             if types.effect_is_row(eff)
@@ -10173,7 +10238,7 @@ fn class_method_effects(class_name: String, methods: List ast.ClassMethodSig,
   | Nil -> acc
   | Cons sig rest ->
       match sig with
-      | ast.ClassMethodSig name _ _ effects_maybe ->
+      | ast.ClassMethodSig name _ _ effects_maybe _ ->
           let eff = types.effect_from_labels(effects_maybe)
           in
             class_method_effects(class_name, rest,
@@ -10214,7 +10279,7 @@ fn first_instance_method_effect_error(class_name: String, methods: List ast.Inst
 fn instance_method_effect_error(class_name: String, method: ast.InstanceMethodImpl,
                                 declared: Dict types.Effect) -> Maybe String =
   match method with
-  | ast.InstanceMethodImpl name _ _ eff_maybe _ ->
+  | ast.InstanceMethodImpl name _ _ eff_maybe _ _ ->
       # No entry means the class declares no such method: either the class is not in
       # scope, already diagnosed as an unknown instance head, or the instance defines
       # a method the class does not — accepted silently today (BACKLOG §Dispatch
@@ -10302,7 +10367,7 @@ fn check_instance_method(
   env_ftv: List String
 ) -> InstanceMethodResult !{IO} =
   match method with
-  | ast.InstanceMethodImpl name params ret_maybe eff_maybe body ->
+  | ast.InstanceMethodImpl name params ret_maybe eff_maybe method_constraints body ->
       do
         # Let-bound rather than inlined into instantiate_with_vars: rule 9 asks
         # about the DECLARATION, so the report needs the pre-instantiation scheme
@@ -10317,7 +10382,10 @@ fn check_instance_method(
         # this deep; the env's `@aliasty:` markers carry the same table.
         let decl_scheme = scheme_from_fn_parts("#inst/" ++ name, params, ret_maybe, eff_maybe, aliases_for_annotations(env))
         (inst_type, prog_to_fresh) <- unifier.instantiate_with_vars(state, decl_scheme)
-        let fwd_env = seed_forward_markers(inst_constraints, prog_to_fresh, env)
+        # The instance's own constraints and the method's restated ones seed the
+        # same marker table: both name variables of THIS method's signature, and
+        # both reach the body as hidden dictionaries.
+        let fwd_env = seed_forward_markers(list_append(inst_constraints, method_constraints), prog_to_fresh, env)
         let body_env = extend_env_with_params(params, ctor_param_types(inst_type), fwd_env)
         br <- typecheck_expr(state, body_env, subst, eff_subst, body)
         match br with
@@ -10337,7 +10405,7 @@ fn check_instance_method(
             # return-type unify — same ordering and same reasons as check_fn_body.
             instance_method_checked(state, name, params, ret_maybe, eff_maybe,
               body_env, s1, es1, inst_type, typed_body0, body_eff, env, decl_scheme,
-              inst_constraints, prog_to_fresh, env_ftv)
+              inst_constraints, method_constraints, prog_to_fresh, env_ftv)
 
 # Two instances of one class define the same method name, so the bare name would
 # collapse them into a single census entry. The instance HEAD is not in scope here
@@ -10365,6 +10433,7 @@ fn instance_method_checked(
   env: Dict types.Scheme,
   decl_scheme: types.Scheme,
   inst_constraints: List ast.TypeConstraint,
+  method_constraints: List ast.TypeConstraint,
   prog_to_fresh: Dict types.Type,
   env_ftv: List String
 ) -> InstanceMethodResult !{IO} =
@@ -10384,7 +10453,7 @@ fn instance_method_checked(
         | FinishErr fpos fmsg -> InstanceMethodErr(fpos, fmsg ++ " in instance method " ++ name)
         | FinishOk typed_body s2 ->
             finish_instance_method(name, params, ret_maybe, eff_maybe, body_env, s2, inst_type,
-              typed_body, env, inst_constraints, prog_to_fresh, env_ftv)
+              typed_body, env, inst_constraints, method_constraints, prog_to_fresh, env_ftv)
 
 fn instance_method_err(name: String, pos: source.SourcePos, msg: String) -> InstanceMethodResult =
   # Previously: lenient short-circuit that returned a `dummy_unit()`-bodied
@@ -10399,6 +10468,7 @@ fn finish_instance_method(name: String, params: List ast.Param, ret_maybe: Maybe
                           s2: Dict types.Type, inst_type: types.Type,
                           typed_body: typed_ast.TypedExpr, env: Dict types.Scheme,
                           inst_constraints: List ast.TypeConstraint,
+                          method_constraints: List ast.TypeConstraint,
                           prog_to_fresh: Dict types.Type,
                           env_ftv: List String) -> InstanceMethodResult =
   match class_method_mode_error(name, params, env) with
@@ -10407,11 +10477,16 @@ fn finish_instance_method(name: String, params: List ast.Param, ret_maybe: Maybe
   | Nothing ->
       # body_env, not env: a parameter shadowing a global constrained function resolves to its
       # own constraint-free scheme, so the walk attributes nothing to it.
-      match instance_method_dict_coverage_msg(name, params, inst_constraints, prog_to_fresh, s2,
+      # Both lists count as coverage: the instance head's dictionaries and the
+      # method's own each reach the body.
+      match instance_method_dict_coverage_msg(name, params,
+                                              list_append(inst_constraints, method_constraints),
+                                              prog_to_fresh, s2,
                                               inst_type, env_ftv, typed_body, body_env) with
       | Just msg -> InstanceMethodErr(typed_ast.typed_expr_pos(typed_body), msg)
       | Nothing ->
-          finish_instance_method_checked(name, params, ret_maybe, eff_maybe, body_env, s2, inst_type, typed_body, env)
+          finish_instance_method_checked(name, params, ret_maybe, eff_maybe, body_env, s2, inst_type,
+                                         typed_body, env, method_constraints)
 
 # M4.6: an instance method's ownership modifiers must agree with the class
 # declaration's, because a call dispatches through the CLASS signature — the
@@ -10436,9 +10511,11 @@ fn class_method_mode_error_at(name: String, params: List ast.Param,
 fn finish_instance_method_checked(name: String, params: List ast.Param, ret_maybe: Maybe ast.TypeExpr,
                                   eff_maybe: Maybe (List String), body_env: Dict types.Scheme,
                                   s2: Dict types.Type, inst_type: types.Type,
-                                  typed_body: typed_ast.TypedExpr, env: Dict types.Scheme) -> InstanceMethodResult =
+                                  typed_body: typed_ast.TypedExpr, env: Dict types.Scheme,
+                                  method_constraints: List ast.TypeConstraint) -> InstanceMethodResult =
   match fn_linear_gate(params, s2, inst_type, typed_body, typed_ast.typed_expr_pos(typed_body), env) with
   | linear_check.LinFail lp lm -> InstanceMethodErr(lp, lm)
   | linear_check.LinPass ->
       InstanceMethodOk(
-        typed_ast.TypedInstanceMethod(name, params, ret_maybe, eff_maybe, resolve_dispatch_typed_expr(body_env, s2, bind_params(params, set_empty()), typed_body)))
+        typed_ast.TypedInstanceMethod(name, params, ret_maybe, eff_maybe, method_constraints,
+          resolve_dispatch_typed_expr(body_env, s2, bind_params(params, set_empty()), typed_body)))

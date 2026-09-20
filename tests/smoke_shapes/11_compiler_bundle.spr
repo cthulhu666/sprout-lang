@@ -6,10 +6,18 @@ import stdlib.compiler.source as source
 # The one golden-corpus program that bundles the SELF-HOSTED COMPILER.
 #
 # Every other corpus entry is a user-level program, so its IR moves only when
-# codegen for user constructs moves. This one pulls `stdlib.compiler.*` in
+# codegen for user constructs moves. This one pulls compiler modules in
 # transitively through `stdlib.repl`, which makes its golden the only place a
-# change to the compiler's OWN internals shows up as an IR diff — ~80k lines of
-# it. That is load-bearing coverage, not incidental bulk: it is what noticed the
+# change to the compiler's OWN internals shows up as an IR diff.
+#
+# WHAT IT ACTUALLY REACHES is the front end plus the session facade: `ast`,
+# `lexer`, `parser`, `source`, `token`, `types`. NOT `infer`, `lowering`,
+# `resolve`, `ast_to_ir`, `ir_lowering`, `bundler`, `dce`, `deriving`,
+# `iface_codec` or `verify_dispatch` — a typechecker edit moves no golden at
+# all. Verify with `grep stdlib.compiler. <this shape's golden>` before relying
+# on it; BACKLOG.md §Sprout-IR tracks widening it.
+#
+# The coverage it does give is load-bearing, not incidental bulk: it noticed the
 # `SourcePos` ADT→record conversion (the tag dispatch a single-constructor match
 # was paying, and SourcePos's now-absent `sprout_register_ctor`), neither of which
 # any user-level example can see.

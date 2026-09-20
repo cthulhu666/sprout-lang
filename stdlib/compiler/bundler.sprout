@@ -934,7 +934,7 @@ fn extract_method_names(methods: List ast.ClassMethodSig) -> List String =
   | Nil -> Nil
   | Cons sig rest ->
       match sig with
-      | ast.ClassMethodSig name _ _ _ -> Cons(name, extract_method_names(rest))
+      | ast.ClassMethodSig name _ _ _ _ -> Cons(name, extract_method_names(rest))
 
 fn add_type_to_symbols(mod_name: String, type_name: String, ctors: List ast.TypeConstructor, exported: List String, ctor_types: List String, acc: ModuleSymbols) -> ModuleSymbols =
   match acc with
@@ -1654,8 +1654,9 @@ fn qualify_class_methods(ctx: ResolveCtx, methods: List ast.ClassMethodSig) -> L
   | Nil -> Nil
   | Cons m rest ->
       match m with
-      | ast.ClassMethodSig name params ret_type effects ->
-          Cons(ast.ClassMethodSig(name, qualify_params(ctx, params), qualify_type_expr(ctx, ret_type), effects),
+      | ast.ClassMethodSig name params ret_type effects constraints ->
+          Cons(ast.ClassMethodSig(name, qualify_params(ctx, params), qualify_type_expr(ctx, ret_type), effects,
+                                  qualify_constraints(ctx, constraints)),
                qualify_class_methods(ctx, rest))
 
 fn qualify_instance_methods(ctx: ResolveCtx, methods: List ast.InstanceMethodImpl) -> List ast.InstanceMethodImpl =
@@ -1663,11 +1664,12 @@ fn qualify_instance_methods(ctx: ResolveCtx, methods: List ast.InstanceMethodImp
   | Nil -> Nil
   | Cons m rest ->
       match m with
-      | ast.InstanceMethodImpl name params ret_type effects body ->
+      | ast.InstanceMethodImpl name params ret_type effects constraints body ->
           Cons(ast.InstanceMethodImpl(name,
                                       qualify_params(ctx, params),
                                       qualify_maybe_type(ctx, ret_type),
                                       effects,
+                                      qualify_constraints(ctx, constraints),
                                       qualify_expr(ctx, param_names(params), body)),
                qualify_instance_methods(ctx, rest))
 
@@ -2135,8 +2137,8 @@ fn unresolved_in_class_methods(ms: List ast.ClassMethodSig, declared: Dict Strin
   | Nil -> Nothing
   | Cons m rest ->
       match m with
-      | ast.ClassMethodSig _ params ret _ ->
-          match unresolved_in_signature(params, Just(ret), Nil, declared) with
+      | ast.ClassMethodSig _ params ret _ cs ->
+          match unresolved_in_signature(params, Just(ret), cs, declared) with
           | Just n -> Just(n)
           | Nothing -> unresolved_in_class_methods(rest, declared)
 
@@ -2145,7 +2147,7 @@ fn unresolved_in_instance_methods(ms: List ast.InstanceMethodImpl, declared: Dic
   | Nil -> Nothing
   | Cons m rest ->
       match m with
-      | ast.InstanceMethodImpl _ params ret _ body ->
+      | ast.InstanceMethodImpl _ params ret _ _ body ->
           match unresolved_in_signature(params, ret, Nil, declared) with
           | Just n -> Just(n)
           | Nothing ->

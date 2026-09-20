@@ -452,8 +452,8 @@ fn rewrite_decl(d: typed_ast.TypedDecl, tables: Tables) -> typed_ast.TypedDecl =
 
 fn rewrite_method(m: typed_ast.TypedInstanceMethod, fwd_keys: Dict Bool, tables: Tables) -> typed_ast.TypedInstanceMethod =
   match m with
-  | typed_ast.TypedInstanceMethod name params ret_ty effects body ->
-      typed_ast.TypedInstanceMethod(name, params, ret_ty, effects, rewrite_expr(body, fwd_keys, tables))
+  | typed_ast.TypedInstanceMethod name params ret_ty effects cs body ->
+      typed_ast.TypedInstanceMethod(name, params, ret_ty, effects, cs, rewrite_expr(body, fwd_keys, tables))
 
 # Structural rebuild that visits the same nodes as check_expr; at each TDict the
 # Evidence field is replaced.  Any node not walked keeps EvUnresolved, which
@@ -536,7 +536,7 @@ fn check_methods(
   | Nil -> Nothing
   | Cons m rest ->
       match m with
-      | typed_ast.TypedInstanceMethod _ _ _ _ body ->
+      | typed_ast.TypedInstanceMethod _ _ _ _ _ body ->
           match check_expr(body, tables) with
           | Just e -> Just(e)
           | Nothing -> check_methods(rest, tables)
