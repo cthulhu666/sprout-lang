@@ -26,12 +26,19 @@ runtime differs.
 | workload | old | new | change |
 |---|---:|---:|---:|
 | `bench/gc_roots` (game-tick shape, 6 pairs) | 2.19 s | 1.38 s | **−37%** |
+| N-queens (`examples/nqueens.sprout`, 5 pairs) | 2.49 s | 2.16 s | **−13%** |
 | stage-1 compiler, `--emit-ir stdlib/compiler/infer.sprout` (4 pairs) | 6.61 s | 5.92 s | **−10%** |
 
 Every pair agreed with the median; no pair crossed over. The compiler row reproduced
 in a second, much busier window at −8.7% (4.83 s → 4.41 s), so call it ~9–10%. Its
 emitted IR is **byte-identical** old vs new (136 141 lines) — for a change to rooting,
 the strongest cheap correctness signal there is.
+
+The three workloads sit where their rooting density puts them. `bench/gc_roots` allocates
+a record per fighter per tick and roots almost every local; N-queens roots list cells in a
+backtracking loop; the compiler spends much of its time in string and I/O work that roots
+nothing. The change cannot beat the fraction of a workload that is push/pop, which is the
+same ceiling the profile below names.
 
 ## Where the time went
 
