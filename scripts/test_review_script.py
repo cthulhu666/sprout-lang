@@ -67,6 +67,7 @@ def extract_script():
 HARNESS = """
 const REVIEWS = %s
 const VERDICTS = %s
+const INDEX_MODE = %s
 let reviewN = 0
 let verifyCalls = 0
 const agent = async (prompt, opts) => {
@@ -81,7 +82,15 @@ const agent = async (prompt, opts) => {
     for (const m of heads) {
       const hit = VERDICTS.find(v => v.at === m[2] + ':' + m[3])
       if (hit && hit.omit) continue   // answer nothing for this one
-      verdicts.push({ index: Number(m[1]), refuted: !!(hit && hit.refuted), reason: 'stub' })
+      // INDEX_MODE lets the stub number its reply DIFFERENTLY from the prompt.
+      // Echoing the parsed index can never disagree with the code under test,
+      // so the whole mis-numbering class was untestable while it was the only
+      // mode — which is how the join shipped unvalidated.
+      let idx = Number(m[1])
+      if (INDEX_MODE === 'one_based') idx += 1
+      else if (INDEX_MODE === 'out_of_range') idx += 100
+      else if (INDEX_MODE === 'duplicate') idx = 0
+      verdicts.push({ index: idx, refuted: !!(hit && hit.refuted), reason: 'stub' })
     }
     return { verdicts }
   }
@@ -98,9 +107,14 @@ __main().then(r => console.log(JSON.stringify({ ...r, LOGS, verifyCalls, reviewN
 """
 
 
-def run(reviews, verdicts=()):
-    """Run the extracted script with `reviews[i]` as pass i's findings."""
-    src = HARNESS % (json.dumps(reviews), json.dumps(list(verdicts)), extract_script())
+def run(reviews, verdicts=(), index_mode="prompt"):
+    """Run the extracted script with `reviews[i]` as pass i's findings.
+
+    `index_mode` controls how the stub verifier numbers its reply: "prompt"
+    echoes the indices it was given, "one_based"/"out_of_range"/"duplicate"
+    number it wrongly, which is what exercises the join's validation."""
+    src = HARNESS % (json.dumps(reviews), json.dumps(list(verdicts)),
+                     json.dumps(index_mode), extract_script())
     d = tempfile.mkdtemp(prefix="sprout_review_script_")
     try:
         path = os.path.join(d, "script.mjs")
@@ -186,19 +200,75 @@ check("a refuted finding is not confirmed", 0, out["confirmed"])
 check("a refuted finding is still reported", 1, len(field(out, "refuted")))
 check("a refuted finding still counts as found", 1, out["found"])
 
-# --- a finding the skeptic never answered is NOT confirmed -------------------
+# --- a finding the skeptic never answered is UNVERIFIED, not refuted ---------
 # One batched verifier can return a short list — truncation, a dropped index.
-# Treating a missing verdict as a pass would let that inflate `confirmed`.
+# Treating a missing verdict as a pass would inflate `confirmed`; filing it as
+# refuted is just as wrong the other way, because step 5 tells the reader to
+# skim the refuted list, and an unjudged high-severity bug would be in it.
 out, err = run([[LONE_HIGH]] + [[]] * 2, verdicts=[{"at": "h.ts:2", "omit": True}])
 check("an unanswered finding is not confirmed", 0, out["confirmed"])
-check("an unanswered finding is reported as refuted", 1, len(field(out, "refuted")))
+check("an unanswered finding is NOT called refuted", 0, len(field(out, "refuted")))
+check("an unanswered finding is reported unverified", 1, len(field(out, "unverified")))
+check("an unanswered finding says why", "no verdict returned",
+      field(out, "unverified")[0].get("unverifiedBecause") if field(out, "unverified") else None)
 
-# --- the cost model: N reviewers and exactly one verifier --------------------
+# --- the verdict-to-finding join --------------------------------------------
+# The riskiest thing batching introduced: verdicts arrive keyed by a number the
+# model chose. A stub that echoes the prompt's own indices can never disagree
+# with the code, so these use `index_mode` to number the reply wrongly.
+#
+# Numbered 1-based, the old join gave every finding its PREDECESSOR's verdict:
+# the refuted one came back confirmed. Nothing may be confirmed on a reply
+# whose numbering cannot be trusted.
+out, err = run([[LONE_HIGH], [LONE_MEDIUM]] + [[]] * 1,
+               verdicts=[{"at": "m.ts:5", "refuted": True}], index_mode="one_based")
+check("a 1-based reply confirms nothing", 0, out["confirmed"])
+check("a 1-based reply is reported unverified", 2, len(field(out, "unverified")))
+check("a discarded batch is logged", 1,
+      sum(1 for m in field(out, "LOGS") if "VERDICTS DISCARDED" in m))
+
+out, err = run([[LONE_HIGH], [LONE_MEDIUM]] + [[]] * 1, index_mode="out_of_range")
+check("an out-of-range index confirms nothing", 0, out["confirmed"])
+
+out, err = run([[LONE_HIGH], [LONE_MEDIUM]] + [[]] * 1, index_mode="duplicate")
+check("a duplicated index confirms nothing", 0, out["confirmed"])
+
+# A correctly-numbered reply must route each verdict to ITS OWN finding. This is
+# what kills the mutant that applies verdict[0] to everything: refute only the
+# medium, and the high must survive while the medium does not.
+out, err = run([[LONE_HIGH], [LONE_MEDIUM]] + [[]] * 1,
+               verdicts=[{"at": "m.ts:5", "refuted": True}])
+check("verdicts land on their own finding: one confirmed", 1, out["confirmed"])
+check("verdicts land on their own finding: the right one",
+      "h.ts", field(out, "findings")[0]["file"] if field(out, "findings") else None)
+check("verdicts land on their own finding: the other refuted",
+      "m.ts", field(out, "refuted")[0]["file"] if field(out, "refuted") else None)
+
+# --- the cap evicts by severity, not by votes -------------------------------
+# Votes-first sorting put corroborated lows ahead of a lone high and evicted the
+# high, reinstating through the cap the votes-only gate the severity test
+# rejects. VERIFY_CAP is 10, so eleven gate-clearing findings make it bind.
+CORROBORATED_LOWS = [{"file": "c%d.ts" % i, "line": 1, "severity": "low",
+                      "summary": "duplicated low finding number %d here" % i,
+                      "scenario": "s"} for i in range(10)]
+out, err = run([CORROBORATED_LOWS, CORROBORATED_LOWS, [LONE_HIGH]])
+check("eleven findings clear the gate", 11, out["found"])
+check("the lone high is verified, not evicted", "h.ts",
+      next((f["file"] for f in field(out, "findings") if f["file"] == "h.ts"), None))
+check("the cap evicts a low instead", "low",
+      field(out, "unverified")[0]["severity"] if field(out, "unverified") else None)
+
+# --- the cost model: N reviewers and at most one verifier -------------------
 # The agent count is the reason this shape was chosen, so it is pinned. Three
 # distinct findings used to mean three verify agents.
 out, err = run([[LONE_HIGH], [LONE_MEDIUM], [SAME_A]])
 check("one verify agent regardless of finding count", 1, out["verifyCalls"])
 check("N reviewer agents", 3, out["reviewN"])
+
+# No finding clears the gate, so the skeptic is skipped entirely and the run
+# costs N, not N+1. SKILL.md and README.md both claim this.
+out, err = run([[LONE_LOW]] + [[]] * 2)
+check("no verify agent when nothing clears the gate", 0, out["verifyCalls"])
 
 # --- the cap is announced, per the Workflow guidance on silent caps ----------
 out, err = run([[LONE_LOW]] + [[]] * 2)

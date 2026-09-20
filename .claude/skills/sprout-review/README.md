@@ -79,23 +79,36 @@ The first version cost `N + D` agents at `N = 8` — eight reviewers, then one v
 that cleared the severity/votes cap. D is only known at runtime, so the bill was not knowable
 before the run and reached the mid-teens.
 
-It is now **`N + 1`, fixed**, at `N = 3`: four agents. Three changes got there, and only the first
-is a pure reduction:
+It is now **at most `N + 1`**, at `N = 3`: four agents, or three when nothing clears the verify gate
+and the skeptic is skipped. Three changes got there, and only the first is a pure reduction:
 
 | change | why |
 |---|---|
-| `N` 8 → 3 | 8 was picked as a saving against a "the original uses 15" premise that turned out to be false (above). 3 is the smallest N where a `votes >= 2` cluster still means two passes agreed. |
-| one skeptic for all findings, not one each | Fixes the count at `N + 1`. Findings cluster in the same few files, so a shared context reads each file once where D agents each re-read it. |
+| `N` 8 → 3 | 8 was picked as a saving against a "the original uses 15" premise that turned out to be false (above). 3 has no measurement behind it either — it is a cost choice, and `BACKLOG.md` says so. |
+| one skeptic for all findings, not one each | Bounds the count at `N + 1`. Findings cluster in the same few files, so a shared context reads each file once where D agents each re-read it. |
 | the reviewer prompt bounds its search | Per-agent tokens, not agent count. The observed built-in review made 80–95 `Bash` calls; most of a pass's cost is exploration, so the prompt now says to stay inside the diff and what it touches. |
 
 The second change trades independence for cost: one skeptic judging ten findings can carry a
 prejudice across all ten, where ten separate ones cannot. The prompt says to judge each on its own
-evidence, which is mitigation, not a guarantee. A verdict the skeptic omits leaves its finding
-**unconfirmed** — a truncated reply must not be able to inflate the confirmed count.
+evidence, which is mitigation, not a guarantee.
+
+It also creates a join that per-agent dispatch did not need, and the first review of this change
+found three bugs in it. A verdict the skeptic omits leaves its finding **unverified** — not
+refuted, which would bury an unjudged high-severity finding in a list the reader is told to skim.
+Duplicate or out-of-range indices mean the numbering itself is untrustworthy, so the whole mapping
+is discarded and logged rather than applied: a 1-based reply would otherwise give every finding
+its predecessor's verdict and confirm exactly what was refuted. And the cap that decides who gets
+judged evicts by severity, because sorting it by votes reinstated the votes-only gate the severity
+test exists to avoid.
 
 None of this is measured against finding quality. The agent counts are exact by construction; what
 four agents find relative to fifteen is unknown, and is the A/B in `BACKLOG.md`. If the cut costs
 real findings, `N` is the dial and the per-finding verifier is in git.
+
+**`votes` is not agreement between passes.** Dedup pools every pass's findings before clustering,
+so the count is how many times a bug was reported, not by how many reviewers. One pass naming the
+same bug at two nearby lines scores 2. Nothing downstream depends on the distinction — the verify
+gate wants "reported more than once" — but the earlier wording claimed more than the code does.
 
 ## Why the ledger looks the way it does
 

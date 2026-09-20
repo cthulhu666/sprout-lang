@@ -8,7 +8,8 @@ description: Review the current diff for real bugs, as `/code-review` does, and 
 An ensemble diff review that **records that it ran**: N independent passes, dedup, one adversarial
 verify pass, and a ledger row plus a findings file on disk either side of it.
 
-It costs **N + 1 agents**, fixed. Default `N = 3`, so four.
+It costs at most **N + 1 agents**, known before the run. Default `N = 3`, so four — or three, when
+nothing clears the verify gate and the skeptic is skipped.
 
 Two things follow from that and govern the procedure below. The run is **owned** — the row is
 opened before reviewing and closed after, so the count is exact by construction rather than
@@ -39,8 +40,10 @@ still worth doing, but do not silently skip the recording.
 telling you to call it are the user's opt-in, so no further confirmation is needed.
 
 Use `N = 3` reviewers by default, or the number the user named. It is a dial: raise it if the
-review finds less than the built-in does on the same diff. Three is the smallest N where a
-`votes >= 2` cluster still means two passes agreed independently.
+review finds less than the built-in does on the same diff. Three is a cost choice with no
+measurement behind it — see `BACKLOG.md`. Note that `votes` does not measure how many *passes*
+agreed: dedup pools every pass's findings before clustering, so one pass reporting the same bug
+at two nearby lines produces a 2-vote cluster on its own.
 
 **3. Write the findings to disk** before reporting them, at the path the ledger names:
 
@@ -224,18 +227,26 @@ log(`${all.length} raw findings from ${passes.filter(Boolean).length} passes -> 
 //
 // VERIFY_CAP bounds what one skeptic is asked to hold at once. Past it the
 // findings are reported unverified rather than dropped.
+//
+// Eviction is severity-major, NOT `byVotes`: votes-first put ten corroborated
+// lows ahead of a lone high and evicted the high, reinstating through the cap
+// the votes-only gate the paragraph above rejects. Report order stays
+// votes-first — that is about reading order, not about what gets checked.
 const worthVerifying = f => f.severity !== 'low' || f.votes >= 2
-const ranked = deduped.filter(worthVerifying).sort(byVotes)
+const bySeverity = (a, b) => RANK[b.severity] - RANK[a.severity] || b.votes - a.votes
+const ranked = deduped.filter(worthVerifying).sort(bySeverity)
 const toVerify = ranked.slice(0, VERIFY_CAP)
-const unverified = deduped.filter(f => !worthVerifying(f)).concat(ranked.slice(VERIFY_CAP))
-log(`verifying ${toVerify.length} of ${deduped.length}; ${unverified.length} reported UNVERIFIED`)
+const belowGate = deduped.filter(f => !worthVerifying(f))
+  .map(f => ({ ...f, unverifiedBecause: 'below the verify gate' }))
+const pastCap = ranked.slice(VERIFY_CAP)
+  .map(f => ({ ...f, unverifiedBecause: `past VERIFY_CAP (${VERIFY_CAP})` }))
+log(`verifying ${toVerify.length} of ${deduped.length}; ${belowGate.length} below the gate, ${pastCap.length} past the cap reported UNVERIFIED`)
 
 phase('Verify')
 // ONE skeptic for the whole list, not one per finding. Two reasons. The agent
 // count becomes `N + 1` and known before the run instead of `N + D` discovered
 // during it. And findings cluster in the same few files, so a shared context
 // reads each file once where D separate agents each re-read it.
-const REFUTED_UNANSWERED = { refuted: true, reason: 'no verdict returned' }
 const listed = toVerify.map((f, i) =>
   `[${i}] ${f.file}:${f.line} (${f.severity}, ${f.votes} vote(s))\n` +
   `Claim: ${f.summary}\nScenario given: ${f.scenario}`).join('\n\n')
@@ -250,19 +261,39 @@ says nothing about the next. Return exactly one verdict per finding, keyed by it
 ${listed}`,
   { label: `verify:${toVerify.length}`, phase: 'Verify', schema: VERDICTS })
 
-// A finding the skeptic skipped has no evidence either way, so it is not
-// confirmed. Silently treating a missing verdict as a pass would let a
-// truncated reply inflate the confirmed count.
-const verdictBy = new Map((panel?.verdicts || []).map(v => [v.index, v]))
-const judged = toVerify.map((f, i) => ({ ...f, verdict: verdictBy.get(i) || REFUTED_UNANSWERED }))
+// The join is on a number the model chose, so it is checked before it is
+// trusted. Omission is survivable — those findings go back unverified. A
+// duplicate or out-of-range index is not: it means the numbering itself is
+// unreliable, and a 1-based reply would otherwise hand every finding its
+// PREDECESSOR's verdict, silently confirming what was refuted. So the whole
+// mapping is discarded and the batch is reported unverified.
+const raw = panel?.verdicts || []
+const inRange = v => Number.isInteger(v.index) && v.index >= 0 && v.index < toVerify.length
+const seen = new Set()
+const dupe = raw.some(v => seen.size === seen.add(v.index).size)
+const trustworthy = raw.every(inRange) && !dupe
+if (!trustworthy) {
+  log(`VERDICTS DISCARDED: ${raw.length} for ${toVerify.length} findings, ` +
+      `${dupe ? 'duplicate index' : 'index out of range'} — numbering is unreliable`)
+} else if (raw.length !== toVerify.length) {
+  log(`${toVerify.length - raw.length} of ${toVerify.length} findings got no verdict`)
+}
 
-const confirmed = judged.filter(f => !f.verdict.refuted)
+// A finding the skeptic skipped has no evidence either way, so it is neither
+// confirmed nor refuted — `refuted` means the skeptic killed it, and reporting
+// an unjudged finding that way buries it in a one-line list.
+const verdictBy = trustworthy ? new Map(raw.map(v => [v.index, v])) : new Map()
+const judged = toVerify.map((f, i) => ({ ...f, verdict: verdictBy.get(i) || null }))
+const unanswered = judged.filter(f => !f.verdict)
+  .map(f => ({ ...f, unverifiedBecause: trustworthy ? 'no verdict returned' : 'verdicts discarded' }))
+
+const confirmed = judged.filter(f => f.verdict && !f.verdict.refuted)
 return {
   found: deduped.length,
   confirmed: confirmed.length,
   findings: confirmed.sort(byVotes),
-  unverified: unverified.sort(byVotes),
-  refuted: judged.filter(f => f.verdict.refuted),
+  unverified: [...belowGate, ...pastCap, ...unanswered].sort(byVotes),
+  refuted: judged.filter(f => f.verdict && f.verdict.refuted),
 }
 ```
 
@@ -270,15 +301,24 @@ return {
 
 - **Report the refuted findings too**, briefly. A finding the verifier killed is information about
   the reviewers, and hiding it makes the confirmed count look better than it is.
-- **Report the unverified ones as unverified.** They were never put to a refuter, so "confirmed"
-  and "not confirmed" both misdescribe them. Silently dropping them would be the failure the
-  `Workflow` guidance names: a bounded pass that reads as full coverage.
+- **Report the unverified ones as unverified**, and say which kind each is — `unverifiedBecause`
+  distinguishes below-the-gate, past-the-cap, and the skeptic answered but not for this one.
+  No verdict means "confirmed" and "refuted" both misdescribe it; silently dropping them would be
+  the failure the `Workflow` guidance names, a bounded pass that reads as full coverage.
+- **A discarded batch is loud.** Duplicate or out-of-range indices in the skeptic's reply mean its
+  numbering cannot be trusted, so the whole mapping goes and every finding is reported unverified,
+  with `VERDICTS DISCARDED` in the log. Guessing at the offset would confirm what was refuted.
 - **`found` counts all distinct findings**, verified or not, so the ledger's denominator does not
   shrink when the cap is tightened. Only `confirmed` moves with the verifier.
-- **`votes` is agreement, not truth.** Several passes reaching the same conclusion makes a finding
-  worth reading first; it does not make it right. The verify phase is what decides that.
-- **The agent count is `N + 1`,** known before the run. It was `N + D` at `N = 8`, where eight
-  reviewers finding two apiece meant two dozen agents: nothing bounded the second phase.
-  A verifier that returns no verdict for a finding leaves it **unconfirmed**, not confirmed.
+- **`votes` is repetition, not truth, and not even agreement.** Dedup pools all passes before
+  clustering, so it counts how many times a bug was *reported*, not how many passes reported it —
+  one pass naming it twice scores 2. It makes a finding worth reading first and nothing more; the
+  verify phase is what decides whether it is right.
+- **The agent count is at most `N + 1`,** known before the run — `N` when nothing clears the verify
+  gate, since the skeptic is then skipped. It was `N + D` at `N = 8`, where eight reviewers finding
+  two apiece meant two dozen agents: nothing bounded the second phase.
+- **The cap evicts by severity, the report sorts by votes.** Two different questions — what is most
+  worth checking, and what is most worth reading first. Using one comparator for both is how a lone
+  `high` ended up evicted in favour of ten corroborated `low`s.
 - The ledger lives at `$GIT_DIR/claude-review/runs.tsv` — per-worktree, invisible to `git status`,
   append-only so two concurrent sessions cannot clobber each other. See `scripts/review_ledger.sh`.
