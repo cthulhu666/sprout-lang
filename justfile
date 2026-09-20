@@ -239,6 +239,8 @@ compile file out: bootstrap-from-seed
   "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" {{quote(file)}} > {{quote(out)}}
 
 # Compile {{file}} to a native binary at {{out}} using stage-1.
+# Whole-program linked (scripts/link_whole_program.sh): slower to link, ~38% faster
+# to run, because runtime calls can only be inlined when the two sides are one module.
 [group('dev')]
 compile-native file out: bootstrap-from-seed
   #!/usr/bin/env bash
@@ -246,7 +248,7 @@ compile-native file out: bootstrap-from-seed
   TMP_LL="/tmp/sprout_compile_$$.ll"
   trap 'rm -f "$TMP_LL"' EXIT
   "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" {{quote(file)}} > "$TMP_LL"
-  clang "$TMP_LL" {{runtime_src}} -O2 {{clang_extra}} -o {{quote(out)}}
+  bash scripts/link_whole_program.sh "$TMP_LL" {{quote(out)}} {{clang_extra}}
 
 # Compile {{file}} to a debug binary at {{out}} using stage-1 (DWARF, no optimisation).
 # Use: just build-debug path/to/prog.spr ./prog_dbg && lldb ./prog_dbg
@@ -3192,9 +3194,9 @@ build-sproutd: bootstrap-from-seed
   "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "{{stdlib_root}}/compiler/sproutd_driver.sprout" > "$TMP_LL"
   echo "==> Validating IR..."
   opt --passes=verify "$TMP_LL" -o /dev/null
-  echo "==> Linking with clang..."
+  echo "==> Linking whole-program (runtime inlined into emitted code)..."
   mkdir -p "{{build_dir}}"
-  clang "$TMP_LL" {{runtime_src}} -O2 {{clang_extra}} -o "{{build_dir}}/sproutd"
+  bash scripts/link_whole_program.sh "$TMP_LL" "{{build_dir}}/sproutd" {{clang_extra}}
   echo "==> Built {{build_dir}}/sproutd"
 
 # The standalone analysis-service binary is retired: sproutd subsumes it.

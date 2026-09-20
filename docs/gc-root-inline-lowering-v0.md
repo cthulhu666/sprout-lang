@@ -1,7 +1,8 @@
-# Lowering the GC root stack in `ir_lowering` (v0, proposal, 2026-09-20)
+# Lowering the GC root stack in `ir_lowering` (v0, built and rejected, 2026-09-20)
 
-**Status: proposal. Not approved, not implemented.** It needs a decision on one runtime surface
-change (4.2) before any code is written.
+**Status: implemented and measured — and it does not pay off. See 10 before reading 1.**
+The design below is what was built; 10 records what it actually delivered and why the estimate
+in 1 was wrong.
 
 ## 1. Problem
 
@@ -57,7 +58,7 @@ every root site instead of one function.
 ```llvm
 @sprout_current_roots = external global ptr
 
-define internal i64 @"sprout$push_i64_root"(ptr %slot) alwaysinline {
+define internal i64 @sprout_inl_push_i64_root(ptr %slot) alwaysinline {
 entry:
   %rc    = load ptr, ptr @sprout_current_roots
   %topp  = getelementptr inbounds i8, ptr %rc, i64 16
@@ -178,3 +179,40 @@ The one observable difference is a GC root pool exhaustion message arriving from
 Only one blocks a start: **may `g_current_roots` become exported runtime surface as
 `sprout_current_roots`?** Everything else in this document is ordinary implementation work inside
 `ir_lowering` and the runtime's own header.
+
+## 10. Outcome: measured, and the estimate in 1 was wrong
+
+Built as designed. Correct — `opt --passes=verify` clean, answers identical, the helper inlines
+(0 surviving `sprout_inl_*` call sites), and `tests/stdlib/test_gc_root_cross_task.spr` passes.
+
+`bench/gc_roots`, interleaved, min of 12, same source and runtime, compiler as the only variable:
+
+| build | time | vs today |
+|---|---:|---:|
+| today (call into C) | 1052.6 ms | — |
+| this design, per-TU link | 987.9 ms | **−6.1%** |
+| this design + whole-module merge | 988.2 ms | −6.1% |
+| this design + merge + `internalize` | **645.2 ms** | **−38.7%** |
+| route A alone, unmodified runtime | 652.5 ms | −38.7% |
+
+**The export in 4.2 is what costs the win.** `docs/cross-tu-inlining-v0.md` §3 measured the
+root stack at 71% of the available win by stripping four functions inside a merged module — but
+in that module the root-context pointer was `static`, so LLVM knew every writer and could prove
+the root-pool stores do not alias Sprout heap objects. This design requires the pointer to be
+exported, which destroys that analysis. The `internalize` row isolates it: identical code,
+identical merge, symbol visibility the only variable, −6.1% → −38.7%.
+
+So `static` on that global was load-bearing optimisation information, not an access-control
+preference, and 3's decomposition was measuring a benefit this design structurally cannot have.
+
+Two further hypotheses were tested and refuted before that one: an external global forcing a
+reload per push (merging fixes visibility and changed nothing, −6.1%), and the cold branch
+returning rather than aborting (rewriting it to `unreachable` gave −9.0%, not −27.5%).
+
+**Recommendation: do not land this.** The last row is the finding — route A alone reaches the
+same −38.7% with no lowering change, no exported global and no ABI coupling. Its cost is link
+time (818 ms per binary, `docs/cross-tu-inlining-v0.md` §5.1), which is why it belongs on
+long-lived binaries only and not on the 416-binary test path.
+
+The one artifact worth keeping either way is `tests/stdlib/test_gc_root_cross_task.spr`: heap
+values held across a task switch while another task allocates, an oracle the suite did not have.

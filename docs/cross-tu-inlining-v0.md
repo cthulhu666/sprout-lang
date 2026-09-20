@@ -146,6 +146,20 @@ because whole-module inlining means codegenning the whole runtime into every bin
 Stage breakdown of the slow path: `llvm-as` 24 ms, `llvm-link` 47 ms, `clang -O2` 771 ms. The
 771 ms is irreducible for this route.
 
+### 5.2 What landed
+
+`scripts/link_whole_program.sh`, wired into the two recipes that produce long-running binaries:
+`compile-native` (what users and `uncharted-suns` build with) and `build-sproutd`. The runtime
+bitcode is cached under `build/runtime-bc/` and rebuilt when any `runtime/*.c` or `*.h` is newer.
+
+Verified through the recipe, `bench/gc_roots`: 192 → **0** surviving push call sites, 1081.1 ms →
+669.4 ms (**−38.1%**), answers identical, binary 248 088 → 264 392 bytes (+6.6%).
+
+Deliberately not wired: the 416-binary test path (see above), the `-O0` debug recipes,
+`gc-profile` and `build-stage2-asan` (both change the C preprocessor or instrumentation, so they
+cannot share a bitcode cache), and the compiler's own bootstrap — measured a wash at −11.8% per
+invocation against +11.8 s of extra link per rebuild.
+
 `just test` links **416 binaries**, at 5 parallel jobs on the measurement host — `scripts/test_jobs.sh`
 derives the count from P-core count capped at 8, so a different machine scales this differently:
 about 10 s of link today against about 68 s, buying nothing, because a test binary runs once for
@@ -189,20 +203,20 @@ binary built by `just bootstrap-from-seed`, so `-mcpu=native` there would host-t
 artifact to the CI runner. Letting the driver decide leaves every platform with exactly the
 default it has today — generic x86-64 on the Linux release build.
 
-## 7. Route B — lower the root stack in `ir_lowering` (recommended)
+## 7. Route B — lower the root stack in `ir_lowering` (built, rejected)
 
-Emit the push and pop as Sprout's own IR instead of a call into C. Given 3, this collects ~71% of
-the available win, and it collects it:
+Emit the push and pop as Sprout's own IR instead of a call into C. Given 3 this looked like ~71%
+of the win at no build-time cost, on every binary and every platform. It was built and measured,
+and it delivers **−6.1%**, not −27.5%.
 
-- on every binary, including all 416 test binaries;
-- at zero build-time cost — no `llvm-link`, no whole-module re-optimisation, no ~700 ms per link;
-- on every platform, with no per-recipe wiring and nothing new for the release workflow.
+The reason is that 3's decomposition cannot be reproduced outside a merged module. Route B needs
+the root-context pointer exported so emitted IR can name it; exporting it is what destroys the
+alias analysis that made the decomposition fast. Same code, same merge, visibility as the only
+variable: −6.1% with the symbol external, −38.7% with it internalized.
 
-Route A's marginal contribution over route B is the remaining ~11 points, at the price of the
-whole build-pipeline change. That is not a good trade, so route A is **not** recommended and this
-document no longer proposes it.
-
-The design, its ABI cost and the open questions: `docs/gc-root-inline-lowering-v0.md`.
+So `static` on that global was load-bearing optimisation information, not an access-control
+preference. Full numbers, the two other hypotheses that were tested and refuted, and the
+implementation as built: `docs/gc-root-inline-lowering-v0.md` §10.
 
 ## 8. Prior art
 

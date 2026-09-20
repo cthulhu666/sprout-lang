@@ -1864,16 +1864,16 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
 > `region_find`/`sprout_heap_lookup` are `static` and fully inlined at `-O2`, so **no profiler can
 > attribute to them** — size them by sensitivity probes instead.
 
-- [ ] `P1` **Lower the GC root push/pop in `ir_lowering` instead of calling the C runtime.**
-  No runtime function can be inlined into Sprout code: emitted functions carry no
-  `target-cpu`/`target-features`, clang gives the runtime's the host set, and LLVM only inlines
-  when the callee's features are a subset of the caller's — so `-O2`, `-flto`, whole-module
-  merging and `always_inline` are all refused, the last two silently. Measured 2026-09-20: the
-  four root-stack entry points alone are **−27.5%** on `bench/gc_roots`, 71% of what inlining the
-  whole runtime would buy, and the emitted IR calls them 215 times against ~110 for everything
-  else. Fix it in codegen, not the build pipeline — merging modules costs ~700 ms of link per
-  binary and `just test` links 416. Design, ABI cost and the one approval needed:
-  `docs/gc-root-inline-lowering-v0.md`; the measurements: `docs/cross-tu-inlining-v0.md`.
+- [ ] `P2` **Whole-program linking is wired into two recipes only; the rest is unverified.**
+  `scripts/link_whole_program.sh` inlines the runtime into emitted code — **−38.1%** on
+  `bench/gc_roots` — and `compile-native` and `build-sproutd` use it. Open: it is measured on
+  macOS arm64 only, so Linux x86_64/aarch64 and the release workflow need their own run; binary
+  size grows 6.6% and is unmeasured elsewhere; and `uncharted-suns`, the workload that prompted
+  the GC work, has never been measured on it. Not a candidate for the 416-binary test path —
+  ~700 ms of extra link each, buying nothing for a binary that runs once. Lowering the root stack
+  in `ir_lowering` was built and rejected instead (−6.1%: the export it needs destroys the alias
+  analysis that makes the win) — `docs/gc-root-inline-lowering-v0.md` §10,
+  `docs/cross-tu-inlining-v0.md` §5.2.
 - [ ] `P2` **GC trigger is object-count-blind, not byte-aware.** `sprout_gc_maybe_collect_threshold`
   fires on `g_managed_heap_count >= g_gc_threshold`, and the count increments by 1 per managed
   object regardless of size — a `VectorVal`'s backing array is a plain `malloc`, invisible to the
