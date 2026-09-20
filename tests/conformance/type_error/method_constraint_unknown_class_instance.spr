@@ -1,0 +1,14 @@
+# An unknown class named in an INSTANCE method's `where`. The bundler's
+# unresolved-name check reads the instance method's constraints as it reads the
+# class signature's; skipping them lets the typo through to a runtime arity
+# abort, because the unknown class contributes no dictionary slot on the
+# instance side while the call site passes one.
+module main
+
+class Holder t
+  fn show_one(xs: t a) -> String where ToString a
+
+instance Holder Maybe
+  fn show_one(xs: Maybe a) -> String where ToStringg a = "x"
+
+fn main() -> Unit !{IO} = print(show_one(Just(1)))

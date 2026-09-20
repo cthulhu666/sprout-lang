@@ -1,0 +1,1 @@
+instance method `show_all` omits `where ToString`, which the class declaration declares

@@ -2485,6 +2485,24 @@ broken by the deprecation — but the linter reports every occurrence as
 annotation within the declaration head (`instance Boxer (a !{IO})`) is not a
 body brace and is not reported.
 
+The layout rule is the one already used by `do`, `let … in` and `match`.  The
+first member fixes the **block column**, and exactly one thing ends the body: a
+`fn` at or left of the `class`/`instance` keyword's own column.  A member
+indented past the keyword but *not* on the block column — in either direction —
+is rejected with **`Unexpected indentation in class body`** (resp. **`… in
+instance body`**).  A member's body may wrap onto further-indented lines without
+ending the block.  An empty body is legal — the class declares no methods.
+
+Under-indentation is an error rather than an end-of-body because an instance
+member `fn f(x) = e` is syntactically identical to a top-level `fn`.  Were a
+misaligned member handed back to the top-level parser it would be silently
+reinterpreted as an ordinary function, leaving the instance short a method and
+the program compiling with a different meaning and no diagnostic.  This is where
+the layout form is deliberately stricter than `do`, which ends its block on any
+dedent: a `do` block's enclosing context is an expression, so a dedented token
+there is a genuine continuation of an outer block, whereas nothing at all may
+appear between a body's members.
+
 **Method-level constraints.**  A class method may end with its own `where`
 clause, constraining a type variable the *method* quantifies rather than the
 class variable:
@@ -2508,28 +2526,14 @@ instance Traversable Maybe
 ```
 
 On an instance member the clause sits before the `=`, which is what separates it
-from the value-binding `where` that may follow the body.  An instance whose
-restated constraint disagrees with the class declaration is not currently
-rejected.  Rationale and the hidden-argument layout:
-`docs/method-level-constraints-v0.md`.
+from the value-binding `where` that may follow the body.
 
-The layout rule is the one already used by `do`, `let … in` and `match`.  The
-first member fixes the **block column**, and exactly one thing ends the body: a
-`fn` at or left of the `class`/`instance` keyword's own column.  A member
-indented past the keyword but *not* on the block column — in either direction —
-is rejected with **`Unexpected indentation in class body`** (resp. **`… in
-instance body`**).  A member's body may wrap onto further-indented lines without
-ending the block.  An empty body is legal — the class declares no methods.
-
-Under-indentation is an error rather than an end-of-body because an instance
-member `fn f(x) = e` is syntactically identical to a top-level `fn`.  Were a
-misaligned member handed back to the top-level parser it would be silently
-reinterpreted as an ordinary function, leaving the instance short a method and
-the program compiling with a different meaning and no diagnostic.  This is where
-the layout form is deliberately stricter than `do`, which ends its block on any
-dedent: a `do` block's enclosing context is an expression, so a dedented token
-there is a genuine continuation of an outer block, whereas nothing at all may
-appear between a body's members.
+The restatement must name **the same classes in the same order** as the class
+declaration; only the variable names are free.  Each constraint is one
+positional dictionary slot, so naming a different class, omitting or adding
+one, or listing the same classes in another order would dispatch through the
+wrong slot — each is rejected, naming the class and the position.  Rationale
+and the hidden-argument layout: `docs/method-level-constraints-v0.md`.
 
 **Constraint syntax.**  A `where` clause names the **class first, then the
 constrained type variable(s)**: `where ToString a`, `where Applicative f`,
@@ -2702,12 +2706,13 @@ becoming an error.  Coverage is judged per variable, so a variable a `where`
 clause constrains is exempt here even when the body needs a *different* class of
 it; that case is rejected by dispatch verification instead.
 
-**An instance method is held to the same rule, with one fewer remedy.**  A
-method that generalizes a type variable of its own and needs a dictionary for it
-is rejected, exactly as the equivalent `fn` would be.  The remedy differs: a
-method carries no `where` clause — neither the class signature nor the instance
-implementation accepts one — so the only place a constraint can go is the
-**instance head**, which does supply a dictionary to forward:
+**An instance method is held to the same rule, with two remedies.**  A method
+that generalizes a type variable of its own and needs a dictionary for it is
+rejected, exactly as the equivalent `fn` would be.  The remedies: constrain the
+variable in the **instance head**, or give the method its own method-level
+`where` clause (§8.5 *Method-level constraints*).  The `where` clause must also
+appear on the class declaration — an instance method restates a class-level
+constraint, it does not introduce one:
 
 ```sprout
 class Renderer f
@@ -2716,16 +2721,17 @@ class Renderer f
 instance Renderer Box
   fn render(r: Box, x: a) -> String = label(x)
 # `render` needs a ToString instance for type variable `a`, which this method
-# generalizes and the instance head does not constrain ... constrain the
-# variable in the instance head, or give the method a concrete type
+# generalizes and nothing supplies; add `where ToString a` to the method (the
+# class declaration must declare it too), constrain the variable in the
+# instance head, or give the method a concrete type
 
 instance Renderer (Pair a) where ToString a          # accepted: forwarded
   fn render(r: Pair a) -> String = label(r.l)
 ```
 
 A class method whose *own* signature needs a constraint separate from the class
-variable is therefore not expressible; that is a tracked gap in `BACKLOG.md`,
-not a deliberate restriction.
+variable is expressible with a method-level `where` clause — see §8.5
+*Method-level constraints*.
 
 ### `ToString` instances
 
@@ -3029,8 +3035,16 @@ Walks the structure left to right, running one `Applicative` effect per element
 and collecting a single effect over the rebuilt structure.  `t` selects the
 instance; `f` is a method-level constraint (§8.5 *Method-level constraints*), so
 one `Traversable` instance serves every applicative — `traverse` over a `List`
-yields `Maybe (List b)` under `Maybe` and `Result e (List b)` under `Result`,
-with the short-circuit each applicative defines.  Instances: `List`, `Maybe`.
+yields `Maybe (List b)` under `Maybe` and `Result e (List b)` under `Result`.
+Instances: `List`, `Maybe`.
+
+**The returned value short-circuits; the work does not.**  Sprout is strictly
+evaluated, and `list_traverse_go` is
+`map2(\ (y, ys) -> Cons(y, ys), g(h), list_traverse_go(g, t))`, strict in both
+of `map2`'s value arguments — so `g` is applied to every element, and the whole
+spine is built, before `map2` can discard any of it on an early `Err`/`Nothing`.
+A partial function reached later in the structure still runs, and can still
+panic, even though an earlier element already produced the failing case.
 
 `sequence` is `traverse` with the effects already in place.  No `Functor` or
 `Foldable` superclass: nothing here derives from either, and the constraint

@@ -405,6 +405,33 @@ fn main() -> Unit !{IO} =
         Nil,
         pos0())))
 
+    # Both new constraint fields carry a NON-empty list: an empty one round-trips
+    # through any encoding, including one that drops the field.
+    assert_true(state, "ClassDecl roundtrip with a method-level constraint",
+      rt_decl(ast.ClassDecl("Container",
+        Cons("t", Nil),
+        Cons(ast.ClassMethodSig("show_all",
+          Cons(ast.Param("xs", Just(ast.TypeApply(ast.TypeName("t"), ast.TypeName("a"))),
+                         ast.ModeDefault), Nil),
+          ast.TypeName("String"),
+          Nothing,
+          Cons(ast.TypeConstraint("ToString", Cons(ast.TypeName("a"), Nil)), Nil)), Nil),
+        Nil,
+        pos0())))
+
+    assert_true(state, "InstanceDecl roundtrip with a method-level constraint",
+      rt_decl(ast.InstanceDecl(
+        ast.TypeConstraint("Container", Cons(ast.TypeName("List"), Nil)),
+        Nil,
+        Cons(ast.InstanceMethodImpl("show_all",
+          Cons(ast.Param("xs", Nothing, ast.ModeDefault), Nil),
+          Nothing,
+          Nothing,
+          Cons(ast.TypeConstraint("ToString", Cons(ast.TypeName("a"), Nil)), Nil),
+          ast.VarExpr("xs", pos0())),
+          Nil),
+        pos0())))
+
     assert_true(state, "InstanceDecl roundtrip",
       rt_decl(ast.InstanceDecl(
         ast.TypeConstraint("Eq", Cons(ast.TypeName("Int"), Nil)),

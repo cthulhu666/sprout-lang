@@ -1,0 +1,12 @@
+# The instance omits the class's method-level `where` entirely. The dispatch
+# wrapper still passes the dictionary the class declared, so the instance
+# closure is called with one argument more than it takes.
+module main
+
+class Container t
+  fn show_all(xs: t a) -> String where ToString a
+
+instance Container Maybe
+  fn show_all(xs: Maybe a) -> String = "-"
+
+fn main() -> Unit !{IO} = print(show_all(Just(1)))

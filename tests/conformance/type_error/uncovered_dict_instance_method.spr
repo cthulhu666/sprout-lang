@@ -6,11 +6,10 @@
 # SIGSEGVd in `print_str` — the emitted method's arity includes a hidden dict slot its declared
 # type does not mention, so the argument was read as a dictionary pointer.
 #
-# Unlike the free-function twin there is NO `where` clause to add: a method cannot carry one on
-# either the class signature or the instance (both are parse errors). That does not make the
-# shape legitimate — the class promises `for all a` and a body needing `ToString a` cannot
-# honour it. The remedy is to constrain the variable in the INSTANCE HEAD, which does work and
-# stays accepted; see tests/stdlib/test_instance_method_dict_coverage.spr.
+# The class promises `for all a` and a body needing `ToString a` cannot honour it. Two remedies:
+# declare `where ToString a` on the CLASS signature and restate it on the instance, or constrain
+# the variable in the INSTANCE HEAD; see tests/stdlib/test_instance_method_dict_coverage.spr.
+# This fixture keeps neither, so it stays rejected.
 module main
 
 fn label(x: a) -> String where ToString a = to_string(x)

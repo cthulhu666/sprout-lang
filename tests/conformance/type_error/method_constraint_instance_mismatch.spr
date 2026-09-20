@@ -1,0 +1,28 @@
+# The instance restates the class's method-level `where` with a DIFFERENT class.
+# Both classes have one method, so the slot counts agree and nothing downstream
+# notices: the caller resolves a `Shower` dictionary and the body reads that slot
+# as `name_it`, printing the wrong answer with no diagnostic anywhere.
+module main
+
+class Shower a
+  fn show_it(x: a) -> String
+
+class Namer a
+  fn name_it(x: a) -> String
+
+instance Shower Int
+  fn show_it(x: Int) -> String = "S"
+
+instance Namer Int
+  fn name_it(x: Int) -> String = "N"
+
+class Container t
+  fn show_all(xs: t a) -> String where Shower a
+
+instance Container List
+  fn show_all(xs: List a) -> String where Namer a =
+    match xs with
+    | Nil -> "-"
+    | [h | _] -> name_it(h)
+
+fn main() -> Unit !{IO} = print(show_all(Cons(1, Nil)))

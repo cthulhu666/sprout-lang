@@ -451,7 +451,7 @@ fn add_class_methods(class_name: String, tv: String, methods: List ast.ClassMeth
   | Nil -> acc
   | Cons m rest ->
       match m with
-      | ast.ClassMethodSig name params ret_te _ _ ->
+      | ast.ClassMethodSig name params ret_te _ method_constraints ->
           match dict_get(name, fn_names) with
           | Just _ -> add_class_methods(class_name, tv, rest, fn_names, acc)
           | Nothing ->
@@ -460,7 +460,10 @@ fn add_class_methods(class_name: String, tv: String, methods: List ast.ClassMeth
               | Just tes ->
                   add_class_methods(class_name, tv, rest, fn_names,
                     dict_set(name,
-                      SigMethod(name, tes, Just(ret_te), [ast.TypeConstraint(class_name, [ast.TypeName(tv)])]),
+                      # The class constraint first, then the method's own, in the
+                      # dictionary order the call site injects.
+                      SigMethod(name, tes, Just(ret_te),
+                        Cons(ast.TypeConstraint(class_name, [ast.TypeName(tv)]), method_constraints)),
                       acc))
 
 # A verifiable signature: has a where-clause AND every param is annotated (which a

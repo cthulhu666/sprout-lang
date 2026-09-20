@@ -1,0 +1,1 @@
+instance method `show_all` names `Namer` where the class declares `Shower` (constraint 1)

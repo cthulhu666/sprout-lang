@@ -8,15 +8,16 @@ import stdlib.string (join)
 export class Container t
   fn show_all(xs: t a) -> String where ToString a
 
+# Passing `show_all` itself by name — e.g. `list_map(show_all, xss)` — fails at
+# codegen: "under-application of '__tc_Container_List_show_all' reached codegen
+# (arity 2, got 1)". Calling it applied, as below, works.
+
 # The instance restates the constraint, naming its OWN variable — as it already
 # restates params and return type. `Maybe`'s renaming to `z` is the point: the
 # binding is positional against the class signature, not by name.
 instance Container List
   fn show_all(xs: List a) -> String where ToString a =
-    # DEVIATION: bare `to_string` is the idiomatic spelling and does not compile
-    # — a method value under a method-level constraint emits
-    # `__eta_unresolved_ToString_to_string` (BACKLOG.md §7.5).
-    join(", ", list_map(\x -> to_string(x), xs))
+    join(", ", list_map(to_string, xs))
 
 instance Container Maybe
   fn show_all(xs: Maybe z) -> String where ToString z =

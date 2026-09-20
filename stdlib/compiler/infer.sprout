@@ -3479,8 +3479,14 @@ fn resolve_precise_head(
           (resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos), "precise_no_inst->fwd_or_scan")
   | Nothing ->
       # Resolved to a bare type variable, not a concrete head — forward/scan
-      # instead of a bogus @inst lookup.
-      (resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos), "precise_tyvar->fwd_or_scan")
+      # instead of a bogus @inst lookup. Try the marker for THIS constraint's own
+      # variable first: fwd_or_scan re-derives a variable from the arguments and
+      # picks the same one for every constraint, so `where Eq a, Eq b` would take
+      # a single dict twice.
+      match forwarded_tdict_for_tyvar(env, s3, class_name, unifier.apply_subst(s3, fresh_t), pos) with
+      | Just tdict -> (Just(tdict), "precise_tyvar_fwd")
+      | Nothing ->
+          (resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos), "precise_tyvar->fwd_or_scan")
 
 # Decode a positional constraint-var token ("#pos:<k>", written by
 # canonicalize_constrained_constraints) back to the callee's live generalized-scheme
@@ -10471,7 +10477,8 @@ fn finish_instance_method(name: String, params: List ast.Param, ret_maybe: Maybe
                           method_constraints: List ast.TypeConstraint,
                           prog_to_fresh: Dict types.Type,
                           env_ftv: List String) -> InstanceMethodResult =
-  match class_method_mode_error(name, params, env) with
+  match maybe_or_else(class_method_mode_error(name, params, env),
+                      class_method_constraints_error(name, method_constraints, env)) with
   | Just bad ->
       InstanceMethodErr(typed_ast.typed_expr_pos(typed_body), bad)
   | Nothing ->
@@ -10507,6 +10514,44 @@ fn class_method_mode_error_at(name: String, params: List ast.Param,
   | Just scheme ->
       match scheme with
       | types.Scheme _ _ body _ _ -> linear_check.method_mode_mismatch(params, body)
+
+# The instance must restate the class's method-level `where` class for class and
+# in order. Each constraint is one positional dictionary slot, so a different
+# class, a longer or shorter list, or the same classes reordered all dispatch
+# through the wrong slot rather than failing — the same reason the ownership
+# modifiers above must agree.
+fn class_method_constraints_error(name: String, method_constraints: List ast.TypeConstraint,
+                                  env: Dict types.Scheme) -> Maybe String =
+  match dict_get("@class:" ++ name, env) with
+  | Nothing -> Nothing
+  | Just _ ->
+      constraint_list_mismatch(name, 1,
+        list_map(constraint_field_class, constrained_fn_field(name, env)),
+        list_map(constraint_class_short, method_constraints))
+
+fn constraint_field_class(entry: (String, String)) -> String =
+  match entry with | (_, cls) -> string.after_last_dot(cls)
+
+fn constraint_class_short(c: ast.TypeConstraint) -> String =
+  match c with | ast.TypeConstraint cls _ -> string.after_last_dot(cls)
+
+fn constraint_list_mismatch(name: String, idx: Int, declared: List String,
+                            restated: List String) -> Maybe String =
+  match (declared, restated) with
+  | (Nil, Nil) -> Nothing
+  | (Nil, [extra | _]) ->
+      Just("instance method `" ++ name ++ "` adds `where " ++ extra
+           ++ "`, which the class declaration does not declare")
+  | ([missing | _], Nil) ->
+      Just("instance method `" ++ name ++ "` omits `where " ++ missing
+           ++ "`, which the class declaration declares; restate it on the instance")
+  | (Cons d drest, Cons r rrest) ->
+      if d == r
+      then constraint_list_mismatch(name, idx + 1, drest, rrest)
+      else
+        Just("instance method `" ++ name ++ "` names `" ++ r ++ "` where the class declares `"
+             ++ d ++ "` (constraint " ++ int_to_string(idx)
+             ++ "); the dictionaries are positional, so restate the class's `where` in order")
 
 fn finish_instance_method_checked(name: String, params: List ast.Param, ret_maybe: Maybe ast.TypeExpr,
                                   eff_maybe: Maybe (List String), body_env: Dict types.Scheme,

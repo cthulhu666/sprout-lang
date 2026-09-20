@@ -1008,11 +1008,23 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
 
 ### 7.5) Type Classes
 
-- [ ] `P2` **A restated instance constraint is not checked against the class declaration.** A
-  method-level `where` is restated on each instance over its own variable names
-  (`docs/method-level-constraints-v0.md` §4); nothing verifies the restatement names the same
-  classes the class declaration did, so a typo'd or invented constraint is accepted and silently
-  takes a hidden dict slot. Needs the positional class-sig-to-instance mapping §4 avoided.
+- [ ] `P1` **A constrained instance head picks the wrong context dictionary when the class
+  variable is partially applied.** With `class Container t` declaring `fn show_all(xs: t Int)`
+  and `instance Container (Tagged k) where ToString k`, calling it at `k = Bool` captures the
+  `ToString Int` witness and prints `1` for `true`. No method-level `where` is involved: the
+  shape predates that feature and reproduces on master's compiler. The same instance context
+  over a FIRST-ORDER class variable (`instance Pretty (Tagged k v) where ToString k`) resolves
+  correctly and is covered by `tests/stdlib/test_method_constraint_dispatch.spr`, so the trigger
+  is the partial application, in `resolve.produce_instance_evidence`'s substitution of the
+  instance context against the concrete head's type arguments.
+- [ ] `P2` **A class method's `.iface` scheme quantifies fewer binders than the live
+  registration.** `iface_codec.method_scheme` quantifies the CLASS parameters only, so a
+  method-level constraint head is keyed by source NAME, while `infer.register_class_method_over`
+  quantifies the method's own variables too and keys by position (`#pos:k`). A decoded ClassInfo
+  cannot resolve those dictionaries the way the locally-declared class does. Dead today —
+  `decode_iface_file` serves only `--check-iface` — and live as soon as precompiled modules load
+  interfaces into an env. The fix is one shared binder list and one shared token function across
+  the two modules, which is why it is not a two-line patch.
 - [~] `P1` **`__unresolved_*` dictionary sentinel leak.** The user-facing symptom (a SIGSEGV when a
   nested constrained dictionary is unsatisfiable) is fixed at check time by `resolve.sprout`, which
   rejects such programs before codegen. The sentinel *mechanics* — a single resolution path that
