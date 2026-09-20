@@ -2485,6 +2485,34 @@ broken by the deprecation — but the linter reports every occurrence as
 annotation within the declaration head (`instance Boxer (a !{IO})`) is not a
 body brace and is not reported.
 
+**Method-level constraints.**  A class method may end with its own `where`
+clause, constraining a type variable the *method* quantifies rather than the
+class variable:
+
+```sprout
+class Traversable t
+  fn traverse_values(g: a -> f b, xs: t a) -> f (t b) where Applicative f
+```
+
+`t` selects the instance by dispatch; `f` is chosen per call site and its
+dictionary is passed as a hidden argument, exactly as for a constrained `fn`.
+The clause is positioned after the return type and any effect annotation.
+
+An implementing method **restates** the constraint, over its own variable names,
+as it already restates parameters and return type:
+
+```sprout
+instance Traversable Maybe
+  fn traverse_values(g: a -> f b, xs: Maybe a) -> f (Maybe b) where Applicative f =
+    …
+```
+
+On an instance member the clause sits before the `=`, which is what separates it
+from the value-binding `where` that may follow the body.  An instance whose
+restated constraint disagrees with the class declaration is not currently
+rejected.  Rationale and the hidden-argument layout:
+`docs/method-level-constraints-v0.md`.
+
 The layout rule is the one already used by `do`, `let … in` and `match`.  The
 first member fixes the **block column**, and exactly one thing ends the body: a
 `fn` at or left of the `class`/`instance` keyword's own column.  A member
@@ -2986,6 +3014,32 @@ incumbent's key alongside it.  It is necessarily **pure** — `Foldable`'s
 > `Maybe`, `List`, `Result` and `Vec`.  `Int` and `Double` are the types in both,
 > and **on `Double` the two orderings differ at NaN** — see *`Eq` and `Ord` on
 > `Double`* above.
+
+### `Traversable` class, `traverse` and `sequence` (Experimental)
+
+```
+class Traversable t
+  fn traverse_values(g: a -> f b, xs: t a) -> f (t b) where Applicative f
+
+traverse(g: a -> f b, xs: t a) -> f (t b)   where Traversable t, Applicative f
+sequence(xs: t (f a))          -> f (t a)   where Traversable t, Applicative f
+```
+
+Walks the structure left to right, running one `Applicative` effect per element
+and collecting a single effect over the rebuilt structure.  `t` selects the
+instance; `f` is a method-level constraint (§8.5 *Method-level constraints*), so
+one `Traversable` instance serves every applicative — `traverse` over a `List`
+yields `Maybe (List b)` under `Maybe` and `Result e (List b)` under `Result`,
+with the short-circuit each applicative defines.  Instances: `List`, `Maybe`.
+
+`sequence` is `traverse` with the effects already in place.  No `Functor` or
+`Foldable` superclass: nothing here derives from either, and the constraint
+would add an unused slot to every dictionary — the same reasoning as
+`Filterable` below.
+
+Traversal order is left to right and is part of the contract, unlike `list_map`,
+whose order is deliberately unpinned (`docs/effect-polymorphism-policy-v0.md`
+§5).  O(n) in elements, plus the applicative's own per-step cost.
 
 ### `Filterable` class and generic `filter` (Experimental)
 

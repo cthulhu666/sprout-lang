@@ -451,7 +451,7 @@ fn add_class_methods(class_name: String, tv: String, methods: List ast.ClassMeth
   | Nil -> acc
   | Cons m rest ->
       match m with
-      | ast.ClassMethodSig name params ret_te _ ->
+      | ast.ClassMethodSig name params ret_te _ _ ->
           match dict_get(name, fn_names) with
           | Just _ -> add_class_methods(class_name, tv, rest, fn_names, acc)
           | Nothing ->
@@ -567,7 +567,7 @@ fn collect_methods(methods: List typed_ast.TypedInstanceMethod, sigs: Dict Calle
   | Nil -> Nil
   | Cons m rest ->
       match m with
-      | typed_ast.TypedInstanceMethod _ params _ _ body ->
+      | typed_ast.TypedInstanceMethod _ params _ _ _ body ->
           list_append(collect_expr(body, sigs, bind_params(params, dict_empty())),
                       collect_methods(rest, sigs))
 

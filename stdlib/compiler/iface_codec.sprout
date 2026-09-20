@@ -704,11 +704,28 @@ fn te_outermost_name(te: ast.TypeExpr) -> String =
 # Build a Scheme for a class method: forall type_params. params -> ret @ effect.
 # Effects come from the method's `effects` field (Nothing → EffectPure).
 # O(n) in number of params.
-fn method_scheme(type_params: List String, params: List ast.Param, ret: ast.TypeExpr, effects: Maybe (List String)) -> types.Scheme =
+fn method_scheme(type_params: List String, params: List ast.Param, ret: ast.TypeExpr, effects: Maybe (List String),
+                 constraints: List ast.TypeConstraint) -> types.Scheme =
   types.scheme_quantified(type_params,
     params_to_func_type(params, typeexpr_to_type_with_vars(ret, make_local_vars(type_params)),
       make_local_vars(type_params), effect_from_maybe_labels(effects)),
-    effect_from_maybe_labels(effects), Nil)
+    effect_from_maybe_labels(effects), method_constraint_tokens(constraints))
+
+# Method-level constraint heads keyed by NAME, not position: this scheme
+# quantifies the CLASS params only, so a method's own variable has no index to
+# record and the name is the stable key (constraint_var_token's own fallback).
+fn method_constraint_tokens(constraints: List ast.TypeConstraint) -> List (String, String) =
+  match constraints with
+  | Nil -> Nil
+  | Cons (ast.TypeConstraint class_name type_args) rest ->
+      match type_args with
+      | [ast.TypeName v | _] -> Cons((v, class_name), method_constraint_tokens(rest))
+      # A compound head (`where ToString (Box a)`) keys on its outermost name,
+      # matching infer.constraint_source_tokens; degrading it to "#none" would
+      # lose the head the call-site resolver looks the dictionary up by.
+      | [ast.TypeApply base _ | _] ->
+          Cons((te_outermost_name(base), class_name), method_constraint_tokens(rest))
+      | _ -> Cons(("#none", class_name), method_constraint_tokens(rest))
 
 fn effect_from_maybe_labels(labels: Maybe (List String)) -> types.Effect =
   types.effect_from_labels(labels)
@@ -847,9 +864,9 @@ fn extract_superclass_names(supers: List ast.TypeConstraint, acc: List String) -
 fn build_method_named_schemes(methods: List ast.ClassMethodSig, type_params: List String, acc: List NamedScheme) -> List NamedScheme =
   match methods with
   | Nil -> list_reverse(acc)
-  | Cons (ast.ClassMethodSig method_name params ret effects) rest ->
+  | Cons (ast.ClassMethodSig method_name params ret effects constraints) rest ->
       build_method_named_schemes(rest, type_params,
-        Cons(NamedScheme(method_name, method_scheme(type_params, params, ret, effects)), acc))
+        Cons(NamedScheme(method_name, method_scheme(type_params, params, ret, effects, constraints)), acc))
 
 # ---------------------------------------------------------------------------
 # InstanceInfo extraction
@@ -1362,8 +1379,8 @@ fn join_record_field_decls(xs: List ast.RecordFieldDecl) -> String =
 
 fn encode_ast_class_method_sig(m: ast.ClassMethodSig) -> String =
   match m with
-  | ast.ClassMethodSig name params ret effects ->
-      string_concat_many(["(ClassMethodSig ", encode_quoted_str(name), " ", encode_ast_param_list(params), " ", encode_ast_typeexpr(ret), " ", encode_maybe_str_list(effects), ")"])
+  | ast.ClassMethodSig name params ret effects constraints ->
+      string_concat_many(["(ClassMethodSig ", encode_quoted_str(name), " ", encode_ast_param_list(params), " ", encode_ast_typeexpr(ret), " ", encode_maybe_str_list(effects), " ", encode_ast_type_constraint_list(constraints), ")"])
 
 fn encode_ast_class_method_sig_list(xs: List ast.ClassMethodSig) -> String =
   string_concat_many(["(", join_class_method_sigs(xs), ")"])
@@ -1376,8 +1393,8 @@ fn join_class_method_sigs(xs: List ast.ClassMethodSig) -> String =
 
 fn encode_ast_instance_method_impl(m: ast.InstanceMethodImpl) -> String =
   match m with
-  | ast.InstanceMethodImpl name params ret effects body ->
-      string_concat_many(["(InstanceMethodImpl ", encode_quoted_str(name), " ", encode_ast_param_list(params), " ", encode_maybe_typeexpr(ret), " ", encode_maybe_str_list(effects), " ", encode_ast_expr(body), ")"])
+  | ast.InstanceMethodImpl name params ret effects constraints body ->
+      string_concat_many(["(InstanceMethodImpl ", encode_quoted_str(name), " ", encode_ast_param_list(params), " ", encode_maybe_typeexpr(ret), " ", encode_maybe_str_list(effects), " ", encode_ast_type_constraint_list(constraints), " ", encode_ast_expr(body), ")"])
 
 fn encode_ast_instance_method_impl_list(xs: List ast.InstanceMethodImpl) -> String =
   string_concat_many(["(", join_instance_method_impls(xs), ")"])
@@ -2196,8 +2213,9 @@ fn decode_class_method_sig_body(s: String, bytes: Bytes, i: Int, total: Int) -> 
       Just(params, k) = decode_ast_param_list_at(s, bytes, skip_ws(s, bytes, j, total), total) else Nothing
       Just(ret, m) = decode_ast_typeexpr_at(s, bytes, skip_ws(s, bytes, k, total), total) else Nothing
       Just(effects, n) = decode_maybe_str_list_at(s, bytes, skip_ws(s, bytes, m, total), total) else Nothing
-      Just end = expect_char(s, bytes, skip_ws(s, bytes, n, total), total, ')') else Nothing
-  in Just((ast.ClassMethodSig(name, params, ret, effects), end))
+      Just(constraints, p) = decode_ast_type_constraint_list_at(s, bytes, skip_ws(s, bytes, n, total), total) else Nothing
+      Just end = expect_char(s, bytes, skip_ws(s, bytes, p, total), total, ')') else Nothing
+  in Just((ast.ClassMethodSig(name, params, ret, effects, constraints), end))
 
 fn decode_ast_class_method_sig_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List ast.ClassMethodSig, Int) =
   match expect_char(s, bytes, i, total, '(') with
@@ -2224,9 +2242,10 @@ fn decode_instance_method_impl_body(s: String, bytes: Bytes, i: Int, total: Int)
       Just(params, k) = decode_ast_param_list_at(s, bytes, skip_ws(s, bytes, j, total), total) else Nothing
       Just(ret, m) = decode_maybe_typeexpr_at(s, bytes, skip_ws(s, bytes, k, total), total) else Nothing
       Just(effects, n) = decode_maybe_str_list_at(s, bytes, skip_ws(s, bytes, m, total), total) else Nothing
-      Just(body, p) = decode_ast_expr_at(s, bytes, skip_ws(s, bytes, n, total), total) else Nothing
-      Just end = expect_char(s, bytes, skip_ws(s, bytes, p, total), total, ')') else Nothing
-  in Just((ast.InstanceMethodImpl(name, params, ret, effects, body), end))
+      Just(constraints, p) = decode_ast_type_constraint_list_at(s, bytes, skip_ws(s, bytes, n, total), total) else Nothing
+      Just(body, q) = decode_ast_expr_at(s, bytes, skip_ws(s, bytes, p, total), total) else Nothing
+      Just end = expect_char(s, bytes, skip_ws(s, bytes, q, total), total, ')') else Nothing
+  in Just((ast.InstanceMethodImpl(name, params, ret, effects, constraints, body), end))
 
 fn decode_ast_instance_method_impl_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List ast.InstanceMethodImpl, Int) =
   match expect_char(s, bytes, i, total, '(') with

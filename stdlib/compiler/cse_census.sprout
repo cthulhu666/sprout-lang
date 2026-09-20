@@ -93,7 +93,7 @@ fn decl_bodies(d: typed_ast.TypedDecl) -> List typed_ast.TypedExpr =
 
 fn method_body(m: typed_ast.TypedInstanceMethod) -> typed_ast.TypedExpr =
   match m with
-  | typed_ast.TypedInstanceMethod _ _ _ _ body -> body
+  | typed_ast.TypedInstanceMethod _ _ _ _ _ body -> body
 
 fn body_keys(body: typed_ast.TypedExpr) -> Dict Int =
   collect(body, dict_empty())

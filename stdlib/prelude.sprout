@@ -807,8 +807,23 @@ export class Applicative f where Functor f
 export class Monad m where Applicative m
   fn flat_map(f: a -> m b, xs: m a) -> m b
 
+# `f` is constrained by the METHOD, not the class: `t` alone picks the instance,
+# and each call chooses its own Applicative. No Functor/Foldable superclass —
+# nothing here derives from either, and the constraint would add an unused slot
+# to every dictionary (the Filterable reasoning above).
+export class Traversable t
+  fn traverse_values(g: a -> f b, xs: t a) -> f(t b) where Applicative f
+
 export fn and_then(f: a -> m b, xs: m a) -> m b where Monad m =
   flat_map(f, xs)
+
+# Left to right, one effect per element, collected over the rebuilt structure.
+# O(n) in elements, plus whatever the Applicative costs per step.
+export fn traverse(g: a -> f b, xs: t a) -> f(t b) where Traversable t, Applicative f =
+  traverse_values(g, xs)
+
+export fn sequence(xs: t (f a)) -> f(t a) where Traversable t, Applicative f =
+  traverse_values(\x -> x, xs)
 
 export fn map(f: a -> b, xs: c a) -> c b where Functor c =
   fmap(f, xs)
@@ -1328,6 +1343,25 @@ instance Monad Maybe
     match mx with
     | Nothing -> Nothing
     | Just x -> f(x)
+
+# The instance restates `where Applicative f`: the class declares it, and the
+# implementation names its own variable (docs/method-level-constraints-v0.md §4).
+# Recursion lives in a free helper, as `instance Eq (List a)` does with list_eq:
+# an instance method cannot dispatch to its own class method.
+fn list_traverse_go(g: a -> f b, xs: List a) -> f(List b) where Applicative f =
+  match xs with
+  | Nil -> pure(Nil)
+  | Cons h t -> map2(\ (y, ys) -> Cons(y, ys), g(h), list_traverse_go(g, t))
+
+instance Traversable List
+  fn traverse_values(g: a -> f b, xs: List a) -> f(List b) where Applicative f =
+    list_traverse_go(g, xs)
+
+instance Traversable Maybe
+  fn traverse_values(g: a -> f b, xs: Maybe a) -> f(Maybe b) where Applicative f =
+    match xs with
+    | Nothing -> pure(Nothing)
+    | Just v -> fmap(\y -> Just(y), g(v))
 
 instance Applicative (Result e)
   fn pure(x: a) -> Result e a = Ok(x)

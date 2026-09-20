@@ -133,8 +133,10 @@ export fn typed_expr_pos(e: TypedExpr) -> source.SourcePos =
 # ---------------------------------------------------------------------------
 
 # A typed instance method: same shape as InstanceMethodImpl but body is TypedExpr.
+# The constraint list is carried through to lowering, which turns it into hidden
+# dictionary parameters exactly as it does for a constrained TFnDecl.
 export type TypedInstanceMethod (..) =
-  TypedInstanceMethod String (List ast.Param) (Maybe ast.TypeExpr) (Maybe (List String)) TypedExpr
+  TypedInstanceMethod String (List ast.Param) (Maybe ast.TypeExpr) (Maybe (List String)) (List ast.TypeConstraint) TypedExpr
 
 export type TypedDecl (..) =
   | TFnDecl String (List ast.Param) (Maybe ast.TypeExpr) (Maybe (List String)) (List ast.TypeConstraint) TypedExpr
@@ -213,7 +215,7 @@ fn count_methods(methods: List TypedInstanceMethod) -> Int =
 
 fn count_method(m: TypedInstanceMethod) -> Int =
   match m with
-  | TypedInstanceMethod _ _ _ _ body -> count_expr(body)
+  | TypedInstanceMethod _ _ _ _ _ body -> count_expr(body)
 
 fn count_exprs(es: List TypedExpr) -> Int =
   list_fold(\ (acc, e) -> acc + count_expr(e), 0, es)

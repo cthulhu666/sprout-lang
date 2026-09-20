@@ -498,7 +498,7 @@ fn ai_method_names(methods: List ast.ClassMethodSig, acc: List String) -> List S
   | Nil -> list_reverse(acc)
   | Cons sig rest ->
       match sig with
-      | ast.ClassMethodSig name _ _ _ -> ai_method_names(rest, Cons(name, acc))
+      | ast.ClassMethodSig name _ _ _ _ -> ai_method_names(rest, Cons(name, acc))
 
 fn ai_collect_super_map(decls: List typed_ast.TypedDecl, acc: Dict (List String)) -> Dict (List String) =
   match decls with
@@ -7057,7 +7057,7 @@ fn validate_instance_methods(methods: List typed_ast.TypedInstanceMethod) -> Res
   | Nil -> Ok(())
   | Cons m rest ->
       match m with
-      | typed_ast.TypedInstanceMethod mname _ _ _ _ ->
+      | typed_ast.TypedInstanceMethod mname _ _ _ _ _ ->
           if str_starts_with(mname, "__sprout_")
           then Err("ast_to_ir: instance method '" ++ mname ++ "' is reserved (cannot start with '__sprout_')")
           else validate_instance_methods(rest)
@@ -7791,7 +7791,7 @@ fn collect_wc_methods(methods: List typed_ast.TypedInstanceMethod, top_level: Se
   | Nil -> acc
   | Cons m rest ->
       match m with
-      | typed_ast.TypedInstanceMethod _ _ _ _ body ->
+      | typed_ast.TypedInstanceMethod _ _ _ _ _ body ->
           collect_wc_methods(rest, top_level, ctors, collect_wc_expr(body, top_level, ctors, acc))
 
 fn collect_wc_expr(e: typed_ast.TypedExpr, top_level: Set,

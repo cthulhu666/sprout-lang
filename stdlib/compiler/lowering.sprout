@@ -179,7 +179,7 @@ fn extract_method_names_acc(methods: List ast.ClassMethodSig, acc: List String) 
   | Nil -> list_reverse(acc)
   | Cons sig rest ->
       match sig with
-      | ast.ClassMethodSig name _ _ _ ->
+      | ast.ClassMethodSig name _ _ _ _ ->
           extract_method_names_acc(rest, Cons(name, acc))
 
 # class_param_map records the primary class type parameter for each class.
@@ -263,7 +263,7 @@ fn build_inst_method_map(
   | Nil -> acc
   | Cons m rest ->
       match m with
-      | typed_ast.TypedInstanceMethod method_name _ _ _ _ ->
+      | typed_ast.TypedInstanceMethod method_name _ _ _ _ _ ->
           build_inst_method_map(constraint, rest,
             dict_set(method_name, instance_fn_name(constraint, method_name), acc))
 
@@ -304,7 +304,7 @@ fn collect_method_arities(
   | Nil -> acc
   | Cons m rest ->
       match m with
-      | typed_ast.TypedInstanceMethod name params _ _ _ ->
+      | typed_ast.TypedInstanceMethod name params _ _ _ _ ->
           collect_method_arities(rest, dict_set(name, list_length(params), acc))
 
 # ---------------------------------------------------------------------------
@@ -389,20 +389,22 @@ fn generate_class_wrappers(
 ) -> List typed_ast.TypedDecl =
   generate_class_wrappers_acc(class_name, methods, hidden_params_for_classes(
                                                      types.class_with_transitive_supers(class_name, super_map),
-                                                     0, class_order, Nil), scheme_env, Nil)
+                                                     0, class_order, Nil), class_order, super_map, scheme_env, Nil)
 
 fn generate_class_wrappers_acc(
   class_name: String,
   methods: List ast.ClassMethodSig,
   hidden_params: List ast.Param,
+  class_order: Dict (List String),
+  super_map: Dict (List String),
   scheme_env: Dict types.Scheme,
   acc: List typed_ast.TypedDecl
 ) -> List typed_ast.TypedDecl =
   match methods with
   | Nil -> list_reverse(acc)
   | Cons sig rest ->
-      generate_class_wrappers_acc(class_name, rest, hidden_params, scheme_env,
-        Cons(generate_one_class_wrapper(class_name, sig, hidden_params, scheme_env), acc))
+      generate_class_wrappers_acc(class_name, rest, hidden_params, class_order, super_map, scheme_env,
+        Cons(generate_one_class_wrapper(class_name, sig, hidden_params, class_order, super_map, scheme_env), acc))
 
 # Build a list of hidden params __tc_<C>_<idx>_<method> for the ordered list of
 # class names (typically [Class, super1, super2, ...]) at the given index.
@@ -430,17 +432,63 @@ fn prepend_class_hidden_params(
       prepend_class_hidden_params(class_name, idx, rest,
         Cons(ast.Param(tc_slot_name(class_name, idx, m), Nothing, ast.ModeDefault), acc))
 
+# HIDDEN-ARGUMENT ORDER — one ABI, three sites; do not reorder without changing
+# all three together:
+#   <declared params> ++ <instance/class dictionaries> ++ <method-level dictionaries>
+# A. generate_one_class_wrapper (here) lays out the `__cm_` dispatch wrapper and
+#    forwards the method slots to the instance function.
+# B. lower_instance_method appends the same two groups to the `__tc_` instance fn.
+# C. the call site injects dictionaries in the matching order.
+# Method-level dictionaries come LAST so a method without a `where` keeps the
+# exact layout it had before the feature existed — that is what keeps the
+# bootstrap seed and the golden IR stable for every existing class. A mismatch
+# between A and B is not a compile error: it surfaces as an arity error at
+# codegen, or, if the counts happen to agree, as a dictionary dispatched through
+# the wrong slot.
 fn generate_one_class_wrapper(
   class_name: String,
   sig: ast.ClassMethodSig,
   hidden_params: List ast.Param,
+  class_order: Dict (List String),
+  super_map: Dict (List String),
   scheme_env: Dict types.Scheme
 ) -> typed_ast.TypedDecl =
   match sig with
-  | ast.ClassMethodSig method_name params ret_ty effects_maybe ->
+  | ast.ClassMethodSig method_name params ret_ty effects_maybe method_constraints ->
+      generate_class_wrapper_with(class_name, method_name, params, ret_ty, effects_maybe,
+        hidden_params, method_wrapper_slots(method_constraints, 1, class_order, super_map, Nil),
+        scheme_env)
+
+# One slot per METHOD of the constrained class and its transitive superclasses —
+# the same expansion build_hidden_for_constraints performs on the instance side.
+# A per-constraint single slot is wrong for any class with a superclass or more
+# than one method: `where Applicative f` is three slots (pure, map2, fmap), not
+# one. Index from 1 so these never collide with the class's own slots at 0.
+fn method_wrapper_slots(constraints: List ast.TypeConstraint, idx: Int,
+                        class_order: Dict (List String),
+                        super_map: Dict (List String),
+                        acc: List ast.Param) -> List ast.Param =
+  match constraints with
+  | Nil -> acc
+  | Cons (ast.TypeConstraint c _) rest ->
+      method_wrapper_slots(rest, idx + 1, class_order, super_map,
+        list_append(acc,
+          hidden_params_for_classes(types.class_with_transitive_supers(c, super_map),
+                                    idx, class_order, Nil)))
+
+fn generate_class_wrapper_with(
+  class_name: String,
+  method_name: String,
+  params: List ast.Param,
+  ret_ty: ast.TypeExpr,
+  effects_maybe: Maybe (List String),
+  hidden_params: List ast.Param,
+  method_slots: List ast.Param,
+  scheme_env: Dict types.Scheme
+) -> typed_ast.TypedDecl =
       typed_ast.TFnDecl(
         classmethod_dispatch_name(class_name, method_name),
-        list_append(params, hidden_params),
+        list_append(params, list_append(hidden_params, method_slots)),
         Just(ret_ty),
         effects_maybe,
         [],
@@ -453,12 +501,24 @@ fn generate_one_class_wrapper(
             tc_slot_name(class_name, 0, method_name),
             lookup_scheme_type(method_name, scheme_env),
             no_pos()),
-          generate_typed_param_vars(
-            params,
-            lookup_scheme_type(method_name, scheme_env),
-            no_pos()),
+          list_append(
+            generate_typed_param_vars(
+              params,
+              lookup_scheme_type(method_name, scheme_env),
+              no_pos()),
+            slot_param_vars(method_slots, lookup_scheme_type(method_name, scheme_env))),
           tfunc_result_type(lookup_scheme_type(method_name, scheme_env)),
           no_pos()))
+
+# The wrapper's method-constraint slots, forwarded positionally. A dictionary is
+# a heap value, so the slot carries the method's scheme type, never a scalar:
+# type-aware rooting reads this field and a non-heap type drops the root
+# (docs/compiler-internals.md §Type-aware GC rooting).
+fn slot_param_vars(slots: List ast.Param, slot_ty: types.Type) -> List typed_ast.TypedExpr =
+  match slots with
+  | Nil -> Nil
+  | Cons (ast.Param n _ _) rest ->
+      Cons(typed_ast.TVar(n, slot_ty, no_pos()), slot_param_vars(rest, slot_ty))
 
 # ---------------------------------------------------------------------------
 # Instance function generation
@@ -496,8 +556,11 @@ fn generate_one_instance_fn(
   env: LowerEnv
 ) -> typed_ast.TypedDecl =
   match method with
-  | typed_ast.TypedInstanceMethod method_name params ret_maybe effects_maybe body ->
-      match build_hidden_for_constraints(inst_constraints, env_class_order(env), env_super_map(env)) with
+  | typed_ast.TypedInstanceMethod method_name params ret_maybe effects_maybe method_constraints body ->
+      # Site B of the hidden-argument order documented at generate_one_class_wrapper:
+      # instance-head dictionaries first, then the method's own.
+      match build_hidden_for_constraints(list_append(inst_constraints, method_constraints),
+                                         env_class_order(env), env_super_map(env)) with
       | (hidden_params, fwd_map) ->
           typed_ast.TFnDecl(
             instance_fn_name(constraint, method_name),

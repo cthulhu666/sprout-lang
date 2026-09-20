@@ -1,0 +1,32 @@
+import stdlib.test (check_eq, run_suite)
+
+# Traversable: walk a structure left to right, running an Applicative effect per
+# element and collecting one effect over the rebuilt structure. The method's
+# `f` is constrained per call, not by the instance — `t` alone dispatches.
+
+fn positive(n: Int) -> Maybe Int =
+  if n > 0 then Just(n) else Nothing
+
+fn checked(n: Int) -> Result String Int =
+  if n >= 0 then Ok(n) else Err(`negative: ${n}`)
+
+fn main() -> Unit !{IO} =
+  run_suite("traversable", [
+    # List over Maybe: every element succeeds, so the whole walk does.
+    check_eq("list/maybe all Just", traverse(positive, [2, 4, 6]), Just([2, 4, 6])),
+    # One failure short-circuits the structure, not just its element.
+    check_eq("list/maybe one Nothing", traverse(positive, [2, 0, 6]), Nothing),
+    check_eq("list/maybe empty", traverse(positive, []), Just([])),
+
+    # List over Result: the error payload survives.
+    check_eq("list/result all Ok", traverse(checked, [1, 2]), Ok([1, 2])),
+    check_eq("list/result first Err", traverse(checked, [1, -2, 3]), Err("negative: -2")),
+
+    # Maybe as the traversed structure, not the effect.
+    check_eq("maybe/result Just", traverse(checked, Just(5)), Ok (Just(5))),
+    check_eq("maybe/result Nothing", traverse(checked, Nothing), Ok (Nothing)),
+
+    # sequence is traverse with the elements already in the effect.
+    check_eq("sequence all Just", sequence([Just(1), Just(2)]), Just([1, 2])),
+    check_eq("sequence one Nothing", sequence([Just(1), Nothing]), Nothing)
+  ])

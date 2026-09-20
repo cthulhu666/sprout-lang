@@ -288,8 +288,8 @@ fn elim_instance_methods(ms: List typed_ast.TypedInstanceMethod) -> List typed_a
   | Nil -> Nil
   | Cons m rest ->
       match m with
-      | typed_ast.TypedInstanceMethod name params ret_ann eff_ann body ->
-          Cons(typed_ast.TypedInstanceMethod(name, params, ret_ann, eff_ann, elim_expr(body)),
+      | typed_ast.TypedInstanceMethod name params ret_ann eff_ann cs body ->
+          Cons(typed_ast.TypedInstanceMethod(name, params, ret_ann, eff_ann, cs, elim_expr(body)),
                elim_instance_methods(rest))
 
 fn elim_decl(d: typed_ast.TypedDecl) -> typed_ast.TypedDecl =
@@ -420,7 +420,7 @@ fn refs_instance_methods(ms: List typed_ast.TypedInstanceMethod, acc: Set) -> Se
   | Nil -> acc
   | Cons m rest ->
       match m with
-      | typed_ast.TypedInstanceMethod _ params _ _ body ->
+      | typed_ast.TypedInstanceMethod _ params _ _ _ body ->
           refs_instance_methods(rest, refs_expr(body, bind_params(params, set_empty()), acc))
 
 # A pass-through carries a declaration the typed pipeline had no typed form for.

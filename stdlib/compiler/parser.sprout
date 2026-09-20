@@ -2056,18 +2056,26 @@ fn parse_class_method_sig(tokens: Vec token.Token, i: Int) -> Result ParseError 
     (_, i6) <- expected_symbol(")", tokens, i5)
     (_, i7) <- expected_symbol("->", tokens, i6)
     (ret_raw, i8) <- parse_type_expr(tokens, i7)
-    (sig, _) <- make_class_method_sig(token.token_text(name_tok), list_reverse(params), ret_raw, tokens, i8)
-    Ok((sig, i8))
+    (sig, i9) <- make_class_method_sig(token.token_text(name_tok), list_reverse(params), ret_raw, tokens, i8)
+    Ok((sig, i9))
 
+# A method signature ends with an optional `where` constraining the method's OWN
+# type variables. Unambiguous despite `where`'s other meanings: a signature has
+# no body, so the value-binding `where` cannot appear, and the class-level one is
+# consumed before the body opens.
 fn make_class_method_sig(name: String, params: List ast.Param, ret_raw: ast.TypeExpr,
                          tokens: Vec token.Token,
                          i: Int) -> Result ParseError (ast.ClassMethodSig, Int) =
   match ret_raw with
-  | ast.TypeEffect base effs -> Ok((ast.ClassMethodSig(name, params, base, Just(effs)), i))
+  | ast.TypeEffect base effs ->
+      do
+        (cons, i2) <- parse_optional_constraints(tokens, i)
+        Ok((ast.ClassMethodSig(name, params, base, Just(effs), cons), i2))
   | _ ->
       do
         (effs_maybe, i2) <- parse_effect_annotation(tokens, i)
-        Ok((ast.ClassMethodSig(name, params, ret_raw, effs_maybe), i2))
+        (cons, i3) <- parse_optional_constraints(tokens, i2)
+        Ok((ast.ClassMethodSig(name, params, ret_raw, effs_maybe, cons), i3))
 
 fn collect_class_method_sigs(tokens: Vec token.Token, i: Int, acc: List ast.ClassMethodSig) -> Result ParseError (List ast.ClassMethodSig, Int) =
   if tok_is_keyword(tok_at(tokens, i), "fn") then
@@ -2150,10 +2158,13 @@ fn parse_instance_method(tokens: Vec token.Token, i: Int) -> Result ParseError (
     (params, i5) <- collect_params(tokens, i4, Nil)
     (_, i6) <- expected_symbol(")", tokens, i5)
     (return_type, effects, i7) <- parse_optional_return_type(tokens, i6)
-    (_, i8) <- expected_symbol("=", tokens, i7)
+    # Position separates the two `where`s: constraints bind before `=`, value
+    # bindings after the body.
+    (constraints, i7b) <- parse_optional_constraints(tokens, i7)
+    (_, i8) <- expected_symbol("=", tokens, i7b)
     (body, i9) <- parse_expr(tokens, i8)
     (final_body, i10) <- parse_optional_where_body(tokens, i9, body)
-    Ok((ast.InstanceMethodImpl(token.token_text(name_tok), list_reverse(params), return_type, effects, final_body), i10))
+    Ok((ast.InstanceMethodImpl(token.token_text(name_tok), list_reverse(params), return_type, effects, constraints, final_body), i10))
 
 fn collect_instance_methods(tokens: Vec token.Token, i: Int, acc: List ast.InstanceMethodImpl) -> Result ParseError (List ast.InstanceMethodImpl, Int) =
   if tok_is_keyword(tok_at(tokens, i), "fn") then

@@ -401,7 +401,7 @@ fn main() -> Unit !{IO} =
           Cons(ast.Param("x", Just(ast.TypeName("a")), ast.ModeDefault),
             Cons(ast.Param("y", Just(ast.TypeName("a")), ast.ModeDefault), Nil)),
           ast.TypeName("Bool"),
-          Nothing), Nil),
+          Nothing, Nil), Nil),
         Nil,
         pos0())))
 
@@ -413,6 +413,7 @@ fn main() -> Unit !{IO} =
           Cons(ast.Param("x", Nothing, ast.ModeDefault), Cons(ast.Param("y", Nothing, ast.ModeDefault), Nil)),
           Nothing,
           Nothing,
+          Nil,
           ast.BinaryExpr("==", ast.VarExpr("x", pos0()), ast.VarExpr("y", pos0()), pos0())),
           Nil),
         pos0())))

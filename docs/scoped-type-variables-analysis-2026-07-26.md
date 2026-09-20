@@ -65,7 +65,7 @@ is whether scoping *adds* expressive power.
 | # | Use case | Genuine gain? | Sprout relevance |
 |---|----------|---------------|------------------|
 | 1 | Pin a **return-polymorphic** value that has no argument to drive inference (`mempty`/`minBound`/`read`/`Proxy`/`sizeOf (undefined :: a)`) | **Yes** — inference genuinely cannot solve it | HIGH *in principle* (Sprout has return-position dict resolution) |
-| 2 | Name an **existential/GADT** hidden type from a pattern match, to annotate in the branch | **Yes** — impossible otherwise | None (no GADTs/existentials) |
+| 2 | Name an **existential/GADT** hidden type from a pattern match, to annotate in the branch | **Yes** — impossible otherwise | LOW (existentials landed after this doc; still blocked on local annotations, so nothing can name the type yet) |
 | 3 | Give an explicit type to a local `where`/`let`/lambda binding that must agree with the outer variable (worker/wrapper, accumulators, polymorphic recursion) | Mostly ergonomic; load-bearing only for polymorphic recursion / forced monomorphism | MEDIUM (this is the spot Sprout's missing local annotations would first bite) |
 | 4 | Type-application / `Proxy` passing to select an instance | Same root as #1 | Low/hypothetical |
 
