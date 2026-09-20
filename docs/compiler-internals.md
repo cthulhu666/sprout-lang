@@ -407,6 +407,36 @@ before `export type ` or it read the marker word `linear` as the type's name.
 **When a fact is consumed by the parser and dropped, expect it to reappear as
 re-derivation somewhere with worse tools.** Both of these did.
 
+The same shape appears in dispatch. "Which type selects this dictionary?" is
+answered by `infer.dispatch_type_for_vars`, which projects the CLASS VARIABLE's
+binding out of the declared scheme, and `infer.concrete_dispatch_call` builds the
+`TDict` from it. The return-position path consumed that; the input-position path
+re-derived the answer as "the type of the argument the class variable appears in"
+and the two agree only while the class variable is unapplied. Under
+`fn label(xs: t Int)` the class variable `t` binds to `Tagged k` while the
+argument is `Tagged k Int`, so the recorded constraint carried one type argument
+too many, and `instance Boxed (Tagged k) where ToString k` printed a `String` key
+through `ToString Int` — type confusion, not a wrong string. Both dispatch paths
+now call `concrete_dispatch_call`.
+
+Recording the right type was necessary but not sufficient, because the CONSUMER
+had the mirror bug and two other recorders still over-apply. `unify_type_expr`
+(one copy in `resolve`, one in `lowering`) matched a curried spine pair-by-pair
+from the outside in, so a pattern of depth 1 against a concrete of depth 2 did
+not fail — it bound the pattern's variable to the concrete's LAST argument. It
+now peels the surplus off the concrete first, which fixes the constrained-`fn`
+compound-head recorders (`resolve_arg_scanned_tdict`) without touching them. A
+list-shaped representation would have raised an arity error here; the curried one
+quietly shifts every context variable by one, which is why this had to be found
+by execution rather than by reading.
+
+What is left when the depths cannot be reconciled — an instance head applying
+more arguments than the class variable's use leaves, so the head match binds no
+`k` at all — is a compile error from `resolve.check_context_subs`. An unbound
+context variable is indistinguishable from a forwarded one by shape; the test
+that separates them is whether the variable is in the head match's SUBSTITUTION,
+since genuine forwarding binds it to another variable rather than not at all.
+
 ## Env-path type names are SHORT, and the marker families depend on it
 
 On the env path a type is named by its short name — a module is checked with its

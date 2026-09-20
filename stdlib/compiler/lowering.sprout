@@ -1672,6 +1672,22 @@ fn is_type_var_name(name: String) -> Bool =
       c == 's' || c == 't' || c == 'u' || c == 'v' || c == 'w' || c == 'x' ||
       c == 'y' || c == 'z'
 
+# A partially applied instance head (`instance C (Tagged k)`) is matched against
+# a SATURATED type (`Tagged Bool Int`). Application is curried, so pairing the
+# two spines up as they stand binds `k` to the trailing argument; peel the
+# surplus off the concrete side first so both align at the base.
+fn te_app_depth(te: ast.TypeExpr) -> Int =
+  match te with
+  | ast.TypeApply base _ -> 1 + te_app_depth(base)
+  | _ -> 0
+
+fn drop_surplus_args(te: ast.TypeExpr, n: Int) -> ast.TypeExpr =
+  if n <= 0 then te
+  else
+    match te with
+    | ast.TypeApply base _ -> drop_surplus_args(base, n - 1)
+    | _ -> te
+
 # unify_type_expr: match a type pattern (from instance decl) against a concrete type
 # (from call site), accumulating type-variable bindings in acc.
 fn unify_type_expr(
@@ -1684,10 +1700,9 @@ fn unify_type_expr(
       if is_type_var_name(name) then dict_set(name, concrete, acc)
       else acc
   | ast.TypeApply pat_base pat_arg ->
-      match concrete with
+      match drop_surplus_args(concrete, te_app_depth(concrete) - te_app_depth(pattern)) with
       | ast.TypeApply con_base con_arg ->
-          unify_type_expr(pat_arg, con_arg,
-            unify_type_expr(pat_base, con_base, acc))
+          unify_type_expr(pat_arg, con_arg, unify_type_expr(pat_base, con_base, acc))
       | _ -> acc
   | ast.TupleType pat_items ->
       match concrete with

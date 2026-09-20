@@ -41,6 +41,31 @@ instance Pretty (Tagged k v) where ToString k
 fn forwarded_pretty(x: a, y: b) -> String where Pretty a, ToString b =
   pretty(x, y)
 
+# --- The class variable PARTIALLY APPLIED in the method's parameter ---------
+# `xs: t Int` binds the class variable to `Tagged k`, not to the argument type
+# `Tagged k Int`. The instance context is substituted against whatever the
+# constraint records, so recording the argument type binds `k` to the trailing
+# `Int` and the call captures `ToString Int`.
+
+class Boxed t
+  fn label(xs: t Int) -> String
+
+instance Boxed (Tagged k) where ToString k
+  fn label(xs: Tagged k Int) -> String =
+    match xs with
+    | Tagged k v -> to_string(k) ++ "=" ++ to_string(v)
+
+# The same instance reached from a POLYMORPHIC caller. `k` is caller-bound here,
+# so the instance context must forward the caller's dictionary rather than pick
+# one by the argument's type — three callers, three ways the constraint is
+# spelled, all of which used to bind `k` to the trailing `Int`.
+
+fn fwd_ts(x: Tagged k Int) -> String where ToString k = label(x)
+
+fn fwd_both(x: Tagged k Int) -> String where Boxed (Tagged k), ToString k = label(x)
+
+fn fwd_head(x: Tagged k Int) -> String where Boxed (Tagged k) = label(x)
+
 fn main() -> Unit !{IO} =
   run_suite("method-constraint dispatch", [
     check_eq("same class, direct call", show_pair(Cons(1, Cons(2, Nil)), "z"), "1,2/z"),
@@ -48,5 +73,19 @@ fn main() -> Unit !{IO} =
     check_eq("same class, forwarded the other way round",
       forwarded_pair(Cons("q", Nil), 9), "q/9"),
     check_eq("constrained head, direct call", pretty(Tagged(true, 5), "z"), "true/z"),
-    check_eq("constrained head, forwarded", forwarded_pretty(Tagged(1, "x"), false), "1/false")
+    check_eq("constrained head, forwarded", forwarded_pretty(Tagged(1, "x"), false), "1/false"),
+    check_eq("partially applied class variable", label(Tagged(true, 5)), "true=5"),
+    check_eq("partially applied, string key", label(Tagged("q", 7)), "q=7"),
+    # Value position resolves the same context through a different path
+    # (lowering's eta lookup, not the call-site injector); the two must agree.
+    check_eq("partially applied, value position",
+      join(",", list_map(label, [Tagged(true, 5), Tagged(false, 6)])), "true=5,false=6"),
+    check_eq("partially applied, forwarded context", fwd_ts(Tagged(true, 5)), "true=5"),
+    check_eq("partially applied, forwarded context at another key",
+      fwd_ts(Tagged("q", 7)), "q=7"),
+    check_eq("partially applied, head and context both forwarded",
+      fwd_both(Tagged(true, 5)), "true=5"),
+    check_eq("partially applied, compound head forwarded", fwd_head(Tagged(true, 5)), "true=5"),
+    check_eq("partially applied, compound head at another key",
+      fwd_head(Tagged("q", 7)), "q=7")
   ])
