@@ -17,7 +17,7 @@ Rationale and measurements live in `README.md`; the skill itself is `SKILL.md`.
 
 - [ ] `P1` **`N = 3` reviewers is a cost choice, not a measured one.** Nobody has checked what a
   4th or an 8th pass adds; 8 was itself picked against a premise that turned out false, and 3 is
-  just the smallest N where `votes >= 2` means agreement. Depends on the A/B above: with a baseline
+  purely a cost choice. Depends on the A/B above: with a baseline
   in hand, sweep N and count *distinct confirmed* findings per agent spent, then write the number
   and its date into `README.md` so the dial stops looking arbitrary.
 
@@ -32,8 +32,9 @@ Rationale and measurements live in `README.md`; the skill itself is `SKILL.md`.
   `SKILL.md` verifies a finding only when `severity !== 'low' || votes >= 2`, clusters within 6
   lines at 0.5 summary overlap, and now caps the batch at `VERIFY_CAP = 10`. The first two come
   from run `1789385000-27845` alone: 5 adjacent pairs scoring 0.60/0.67/0.67 against 0.33/0.29 — a
-  wide gap, but n=5 is not a calibration set. The cap comes from nothing; with 3 passes capped at 8
-  findings each it has never bound. Re-measure over the findings files as they accumulate.
+  wide gap, but n=5 is not a calibration set, and run `1789928144-93446` is evidence they
+  UNDER-merge: 13 raw findings deduped to 12, yet three of those twelve were pairs naming one bug.
+  The cap comes from nothing; 3 passes x 8 findings is 24 raw, so it can bind. Re-measure.
 
 - [ ] `P2` **Sprout-specific review dimensions are absent, which was the point of owning this.**
   A generic reviewer cannot know GC rooting rules for `stdlib/compiler/` and `runtime/`, that a
