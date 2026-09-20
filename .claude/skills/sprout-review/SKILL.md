@@ -5,8 +5,10 @@ description: Review the current diff for real bugs, as `/code-review` does, and 
 
 # sprout-review
 
-An ensemble diff review that **records that it ran**: N independent passes, dedup, an adversarial
-verify, and a ledger row plus a findings file on disk either side of it.
+An ensemble diff review that **records that it ran**: N independent passes, dedup, one adversarial
+verify pass, and a ledger row plus a findings file on disk either side of it.
+
+It costs **N + 1 agents**, fixed. Default `N = 3`, so four.
 
 Two things follow from that and govern the procedure below. The run is **owned** — the row is
 opened before reviewing and closed after, so the count is exact by construction rather than
@@ -36,8 +38,9 @@ still worth doing, but do not silently skip the recording.
 **2. Run the review.** Call the `Workflow` tool with the script below. The skill's instructions
 telling you to call it are the user's opt-in, so no further confirmation is needed.
 
-Use `N = 8` reviewers by default, or the number the user named. It is a dial: raise it if the
-review finds less than the built-in does on the same diff.
+Use `N = 3` reviewers by default, or the number the user named. It is a dial: raise it if the
+review finds less than the built-in does on the same diff. Three is the smallest N where a
+`votes >= 2` cluster still means two passes agreed independently.
 
 **3. Write the findings to disk** before reporting them, at the path the ledger names:
 
@@ -80,11 +83,12 @@ export const meta = {
   description: 'Ensemble diff review: N careful reviewers, dedup, adversarial verify',
   phases: [
     { title: 'Review', detail: 'N independent careful passes over the diff' },
-    { title: 'Verify', detail: 'try to refute each severe or corroborated finding' },
+    { title: 'Verify', detail: 'one skeptic refutes the severe or corroborated findings' },
   ],
 }
 
-const N = 8
+const N = 3
+const VERIFY_CAP = 10
 
 const FINDINGS = {
   type: 'object',
@@ -107,18 +111,29 @@ const FINDINGS = {
   required: ['findings'],
 }
 
-const VERDICT = {
+const VERDICTS = {
   type: 'object',
   properties: {
-    refuted: { type: 'boolean' },
-    reason: { type: 'string' },
+    verdicts: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          index: { type: 'number' },
+          refuted: { type: 'boolean' },
+          reason: { type: 'string' },
+        },
+        required: ['index', 'refuted', 'reason'],
+      },
+    },
   },
-  required: ['refuted', 'reason'],
+  required: ['verdicts'],
 }
 
-// Verbatim from the built-in reviewer, so the port stays comparable. The only
-// change: findings come back through the schema instead of ReportFindings,
-// which was not available to the original's agents in practice.
+// The built-in reviewer's prompt, with two changes: findings come back through
+// the schema instead of ReportFindings, which was not available to the
+// original's agents in practice, and the last paragraph bounds the search —
+// exploration is where a pass spends its tokens.
 const REVIEWER = `You are reviewing a pull request for real bugs. Run \`git diff @{upstream}...HEAD\` (or \`git diff main...HEAD\` / \`git diff HEAD~1\`
 if there's no upstream) to get the unified diff under review. If there are
 uncommitted changes, or the range diff is empty, also run \`git diff HEAD\` and
@@ -128,17 +143,20 @@ review that target instead. Treat this diff as the review scope.
 
 Review the diff as a careful senior engineer would: read every hunk, open the surrounding files for context as needed (Read, Grep, git log/blame/show), and hunt for correctness issues — wrong or inverted conditions, off-by-one, null/undefined dereference, missing \`await\`, dropped error handling, removed guards or validations, broken callers of changed functions, races. Prefer real failure modes over style; every finding needs a concrete scenario in which the code misbehaves.
 
-Report at most 15 findings. Quality over quantity: include everything you genuinely believe is a real issue, and nothing you don't.`
+Report at most 8 findings. Quality over quantity: include everything you genuinely believe is a real issue, and nothing you don't.
+
+Stay inside the diff and what it touches. Read the changed hunks, the files they are in, and the callers of anything whose signature or behaviour changed. That is the budget — do not survey the repository, re-read a file you have already read, or go looking for pre-existing bugs the diff did not introduce.`
 
 phase('Review')
 const passes = await parallel(
   Array.from({ length: N }, (_, i) => () =>
     agent(REVIEWER, { label: `review:${i + 1}`, phase: 'Review', schema: FINDINGS })))
 
-// A barrier is right here: dedup needs every pass at once, and verifying the
-// same finding eight times would cost eight times as much for one answer.
+// A barrier is right here: dedup needs every pass at once, and verifying one
+// bug once per pass that found it costs N times as much for one answer.
 const all = passes.filter(Boolean).flatMap(p => p.findings || [])
 const RANK = { low: 0, medium: 1, high: 2 }
+const byVotes = (a, b) => b.votes - a.votes || RANK[b.severity] - RANK[a.severity]
 
 // Two reviewers describing ONE bug rarely land on one line. Keying on
 // `file:line` split those into two entries with one vote each, and both were
@@ -195,40 +213,56 @@ for (const [, group] of byFile) {
 }
 log(`${all.length} raw findings from ${passes.filter(Boolean).length} passes -> ${deduped.length} distinct`)
 
-// One verifier per finding is what makes the agent count unbounded: it is
-// `N + D`, and D is only known at runtime. Verification earns its cost on a
-// finding that is severe or corroborated; on a lone low-severity doc nit it
-// spends a full agent to confirm a typo. Those are still REPORTED, just
-// unverified — visible and cheap, rather than invisible or expensive.
+// Verification earns its cost on a finding that is severe or corroborated; on a
+// lone low-severity doc nit it is a full agent spent confirming a typo. Those
+// are still REPORTED, just unverified — visible and cheap, rather than
+// invisible or expensive.
 //
 // The cut is deliberately NOT on votes alone. On the run that motivated it, the
 // most valuable finding — a real regression the author had just introduced —
 // was single-vote medium, and a `votes >= 2` gate would have dropped it.
+//
+// VERIFY_CAP bounds what one skeptic is asked to hold at once. Past it the
+// findings are reported unverified rather than dropped.
 const worthVerifying = f => f.severity !== 'low' || f.votes >= 2
-const toVerify = deduped.filter(worthVerifying)
-const unverified = deduped.filter(f => !worthVerifying(f))
-log(`verifying ${toVerify.length} of ${deduped.length}; ${unverified.length} single-vote low-severity reported UNVERIFIED`)
+const ranked = deduped.filter(worthVerifying).sort(byVotes)
+const toVerify = ranked.slice(0, VERIFY_CAP)
+const unverified = deduped.filter(f => !worthVerifying(f)).concat(ranked.slice(VERIFY_CAP))
+log(`verifying ${toVerify.length} of ${deduped.length}; ${unverified.length} reported UNVERIFIED`)
 
 phase('Verify')
-const judged = await parallel(toVerify.map(f => () =>
-  agent(`Try to REFUTE this finding. Default to refuted=true if you are unsure it is real.
+// ONE skeptic for the whole list, not one per finding. Two reasons. The agent
+// count becomes `N + 1` and known before the run instead of `N + D` discovered
+// during it. And findings cluster in the same few files, so a shared context
+// reads each file once where D separate agents each re-read it.
+const REFUTED_UNANSWERED = { refuted: true, reason: 'no verdict returned' }
+const listed = toVerify.map((f, i) =>
+  `[${i}] ${f.file}:${f.line} (${f.severity}, ${f.votes} vote(s))\n` +
+  `Claim: ${f.summary}\nScenario given: ${f.scenario}`).join('\n\n')
 
-File: ${f.file}:${f.line}
-Claim: ${f.summary}
-Scenario given: ${f.scenario}
+const panel = toVerify.length === 0 ? { verdicts: [] } : await agent(
+  `Try to REFUTE each finding below. Read the code around each one and decide whether the
+failure genuinely occurs. Default to refuted=true when you are unsure a finding is real.
 
-Read the code and decide whether the failure genuinely occurs.`,
-    { label: `verify:${f.file}:${f.line}`, phase: 'Verify', schema: VERDICT })
-    .then(v => ({ ...f, verdict: v }))))
+Judge each on its own evidence — they come from different reviewers and one being wrong
+says nothing about the next. Return exactly one verdict per finding, keyed by its [index].
 
-const confirmed = judged.filter(Boolean).filter(f => f.verdict && !f.verdict.refuted)
-const byVotes = (a, b) => b.votes - a.votes || RANK[b.severity] - RANK[a.severity]
+${listed}`,
+  { label: `verify:${toVerify.length}`, phase: 'Verify', schema: VERDICTS })
+
+// A finding the skeptic skipped has no evidence either way, so it is not
+// confirmed. Silently treating a missing verdict as a pass would let a
+// truncated reply inflate the confirmed count.
+const verdictBy = new Map((panel?.verdicts || []).map(v => [v.index, v]))
+const judged = toVerify.map((f, i) => ({ ...f, verdict: verdictBy.get(i) || REFUTED_UNANSWERED }))
+
+const confirmed = judged.filter(f => !f.verdict.refuted)
 return {
   found: deduped.length,
   confirmed: confirmed.length,
   findings: confirmed.sort(byVotes),
   unverified: unverified.sort(byVotes),
-  refuted: judged.filter(Boolean).filter(f => f.verdict && f.verdict.refuted),
+  refuted: judged.filter(f => f.verdict.refuted),
 }
 ```
 
@@ -243,7 +277,8 @@ return {
   shrink when the cap is tightened. Only `confirmed` moves with the verifier.
 - **`votes` is agreement, not truth.** Several passes reaching the same conclusion makes a finding
   worth reading first; it does not make it right. The verify phase is what decides that.
-- **The agent count is `N + D`,** where D is the findings that clear the cap — not a fixed number.
-  Eight reviewers finding two apiece is two dozen agents if nothing bounds the second phase.
+- **The agent count is `N + 1`,** known before the run. It was `N + D` at `N = 8`, where eight
+  reviewers finding two apiece meant two dozen agents: nothing bounded the second phase.
+  A verifier that returns no verdict for a finding leaves it **unconfirmed**, not confirmed.
 - The ledger lives at `$GIT_DIR/claude-review/runs.tsv` — per-worktree, invisible to `git status`,
   append-only so two concurrent sessions cannot clobber each other. See `scripts/review_ledger.sh`.

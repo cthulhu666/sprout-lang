@@ -8,32 +8,32 @@ Rationale and measurements live in `README.md`; the skill itself is `SKILL.md`.
 
 ## Backlog
 
-- [ ] `P1` **The ensemble has never been A/B'd against the built-in, so it may cost 15 agents to
-  find less than one does.** Only the reviewer *prompt* is a port; the fan-out, dedup and verify
-  around it are this skill's own design (`README.md` §What the original actually does). Run both on
-  one non-trivial diff and compare finding sets. Anything the built-in catches and this misses is a
-  design defect, not a tuning question — and if a single careful agent matches eight plus a verify
-  phase, the ensemble is not worth its cost and should go.
+- [ ] `P1` **The ensemble has never been A/B'd against the built-in, so 4 agents may find less than
+  one does.** Only the reviewer *prompt* is close to a port; the fan-out, dedup and verify around it
+  are this skill's own design (`README.md` §What the original actually does). Run both on one
+  non-trivial diff and compare finding sets. Anything the built-in catches and this misses is a
+  design defect, not a tuning question — and if a single careful agent matches three plus a verify
+  pass, the ensemble is not worth its cost and should go.
 
-- [ ] `P1` **`N = 8` reviewers rests on nothing now that the "original uses 15" premise is gone.**
-  It was picked as a saving against a number that was never real. Nobody has checked what a 4th or
-  a 12th pass adds. Depends on the A/B above: with a baseline in hand, sweep N and count *distinct
-  confirmed* findings per agent spent, then write the number and its date into `README.md` so the
-  dial stops looking arbitrary.
+- [ ] `P1` **`N = 3` reviewers is a cost choice, not a measured one.** Nobody has checked what a
+  4th or an 8th pass adds; 8 was itself picked against a premise that turned out false, and 3 is
+  just the smallest N where `votes >= 2` means agreement. Depends on the A/B above: with a baseline
+  in hand, sweep N and count *distinct confirmed* findings per agent spent, then write the number
+  and its date into `README.md` so the dial stops looking arbitrary.
 
-- [ ] `P2` **One verifier decides each finding; the documented pattern is a panel.**
-  Verify spawns a single refuter per finding, so one bad call silently kills a real bug or keeps a
-  false one. The adversarial pattern is N independent skeptics with a majority rule, and the
-  perspective-diverse variant gives each a different lens (correctness, security, does-it-repro).
-  Now affordable: the severity/votes cap cut the verified set from 17 to 7 on the calibration run,
-  so a 3-judge panel costs about what one verifier per finding used to.
+- [ ] `P2` **One skeptic now judges every finding, so a prejudice carries across all of them.**
+  Verify is a single agent holding the whole list — cheaper than one refuter each, and the shared
+  context is why, but a bad call no longer costs one finding. The documented adversarial pattern is
+  N independent skeptics with a majority rule, the perspective-diverse variant giving each a lens
+  (correctness, security, does-it-repro). A 3-judge panel over the batched list is `N + 3`, still
+  under the old cost. Do it after the A/B, so its effect is visible against a baseline.
 
-- [ ] `P2` **The verify cap's thresholds rest on one run, so a real finding could be lost.**
-  `SKILL.md` verifies a finding only when `severity !== 'low' || votes >= 2`, and clusters within
-  6 lines at 0.5 summary overlap. Those numbers come from run `1789385000-27845` alone: 5 adjacent
-  pairs, scoring 0.60/0.67/0.67 against 0.33/0.29. The gap is wide, which is why 0.5 is not a knife
-  edge, but n=5 is not a calibration set. Re-measure over several runs once the findings files have
-  accumulated — they are on disk now, which is what makes this checkable.
+- [ ] `P2` **Every threshold in the verify path rests on one run or on nothing.**
+  `SKILL.md` verifies a finding only when `severity !== 'low' || votes >= 2`, clusters within 6
+  lines at 0.5 summary overlap, and now caps the batch at `VERIFY_CAP = 10`. The first two come
+  from run `1789385000-27845` alone: 5 adjacent pairs scoring 0.60/0.67/0.67 against 0.33/0.29 — a
+  wide gap, but n=5 is not a calibration set. The cap comes from nothing; with 3 passes capped at 8
+  findings each it has never bound. Re-measure over the findings files as they accumulate.
 
 - [ ] `P2` **Sprout-specific review dimensions are absent, which was the point of owning this.**
   A generic reviewer cannot know GC rooting rules for `stdlib/compiler/` and `runtime/`, that a
