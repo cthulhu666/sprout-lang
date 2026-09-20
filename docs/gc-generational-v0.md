@@ -109,6 +109,7 @@ what a minor collection could skip.
 |---|---|---|---|---|---|---|---|---|
 | compiler (`ast_to_ir.sprout`) | 482 | 32,272,682 | **97%** | 32,243,577 | 97% | 15,746 | 2,051 | 1,855 |
 | digit_recognizer | 68 | 305,440 | **86%** | 309,856 | 86% | 10,584,110 | **0** | 0 |
+| `gc_roots` (game-tick shape) | 5,807 | 407,377 | **87%** | 23,375,910 | 99.8% | 0 | 0 | 0 |
 | http_log_middleware | 37,567 | 871,652 | 48% | 153,000,085 | 100% | 0 | 0 | 0 |
 | nqueens | 8,279 | 495,989 | 39% | 33,412,734 | 99% | 0 | 0 | 0 |
 | astar | 157 | 440,989 | 17% | 536,824 | 31% | 53,300 | 0 | 0 |
@@ -120,6 +121,17 @@ Read the `marks` column with the ratio, not instead of it. The compiler marks
 collection**. nqueens marks 60 per collection, http_log_middleware 23. **On every
 workload except the compiler, marking is already nearly free, so a high ratio would
 have bought nothing and the low ratios cost nothing.**
+
+`gc_roots` (2026-09-20) is the case that makes the distinction sharpest, and it was
+added because a game simulation tick was reported as GC-bound. Its ratio is high —
+87%, second only to the compiler — and its mark pool is **70 objects per collection**,
+the same order as nqueens. The 87% is one roster of ~61 long-lived records re-marked
+5,807 times; the 23.4M dead slots are never marked at all, because the collector is
+non-moving and sweeping them is not marking (§5.2). A nursery would skip those 61 and
+change nothing measurable. What the workload was actually spending on was the root
+stack — 47% of top-of-stack samples, now 37% faster at the same allocation rate
+(bench/results-2026-09-20-gc-root-stack.md). **A high `ge1%` is a licence to look, not
+a finding; multiply it by `marks/cycles` before believing it.**
 
 ### 5.1 GC is not the bottleneck outside the compiler
 

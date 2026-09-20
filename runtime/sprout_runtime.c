@@ -61,22 +61,28 @@ typedef enum {
   SPROUT_ROOT_SCAN = 3
 } SproutRootKind;
 
+/* One rooted slot. Temp roots live in a per-context array (see SproutRoots) and
+ * are addressed by index; only the permanent list below needs a link. */
 typedef struct RootNode {
   void* slot;
   SproutRootKind kind;
   size_t aux_words;
-  struct RootNode* next;
 } RootNode;
 
+/* Permanent (never-popped) roots: individually malloc'd, so these do chain. */
+typedef struct PermRoot {
+  RootNode root;
+  struct PermRoot* next;
+} PermRoot;
+
 /* Per-task GC temp-root context (opaque `SproutRoots` in sprout_scheduler.h).
- * Bundles what used to be three file-static globals (temp-root head, pool,
- * pool top) so each green task carries its own LIFO. `g_current_roots` selects
+ * Bundles what used to be file-static globals (temp-root pool and pool top) so
+ * each green task carries its own LIFO. `g_current_roots` selects
  * the active one; the collector walks the whole registry via `reg_next`. */
 struct SproutRoots {
   RootNode*         pool;      /* non-moving array of `pool_size` RootNodes */
   size_t            pool_size;
-  size_t            pool_top;  /* LIFO stack pointer into `pool` */
-  RootNode*         head;      /* newest pushed temp root (linked via ->next) */
+  size_t            pool_top;  /* LIFO stack pointer; pool[0..pool_top) is live */
   struct SproutRoots* reg_next;/* registry link over all live contexts */
 };
 
@@ -133,7 +139,7 @@ typedef struct {
 } HttpUrl;
 
 static InternBucket* g_intern_table[65537];
-static RootNode* g_root_nodes = NULL;   /* persistent (never-popped) roots, global */
+static PermRoot* g_root_nodes = NULL;   /* persistent (never-popped) roots, global */
 static void* g_nothing_singleton = NULL;
 /* IRType (stdlib.compiler.sprout_ir) nullary-ctor singletons.  Without this,
  * every IRType construction in the IR-codegen path allocates 16 bytes — and
@@ -1443,11 +1449,11 @@ static void* sprout_heap_lookup(void* p) {
 }
 
 static void register_root_slot(void* slot, SproutRootKind kind, size_t aux_words) {
-  RootNode* node = (RootNode*)malloc(sizeof(RootNode));
+  PermRoot* node = (PermRoot*)malloc(sizeof(PermRoot));
   if (node == NULL) tcp_fail("register_root_slot: out of memory");
-  node->slot = slot;
-  node->kind = kind;
-  node->aux_words = aux_words;
+  node->root.slot = slot;
+  node->root.kind = kind;
+  node->root.aux_words = aux_words;
   node->next = g_root_nodes;
   g_root_nodes = node;
 }
@@ -1589,10 +1595,11 @@ long long sprout_gc_register_scan_root(void* slot, long long size_bytes) {
 /* GC temp-root pool: push/pop is always LIFO (stack discipline enforced by
  * codegen), so a bump-index pool is sufficient and avoids malloc on every
  * sprout_gc_push_i64_root call in the lexer hot path. Task-0 (`main`) uses the
- * static 131072-slot pool below (4 MiB BSS; sized for deeply recursive compiler
+ * static 131072-slot pool below (3 MiB BSS; sized for deeply recursive compiler
  * passes). Green tasks get their own smaller pools via sprout_roots_new().
  * Cooperative switches only happen at yield points (never mid push/pop pair),
- * so head == &pool[pool_top-1] holds per context.
+ * so the live roots of a context are exactly pool[0..pool_top): push is a bump,
+ * pop is a decrement, and marking is a linear scan rather than a pointer chase.
  * NOTE: the real fix for depth is TCO in recursive Sprout functions
  * (scan_lines et al.); this is a safety margin for call chains that grow with
  * stdlib size. */
@@ -1602,7 +1609,7 @@ static RootNode g_root_pool[SPROUT_ROOT_POOL_SIZE];
 /* Task-0 root context, backed by the static pool. Registered as the sole live
  * context at startup; `main` runs on it. */
 static struct SproutRoots g_task0_roots = {
-  g_root_pool, SPROUT_ROOT_POOL_SIZE, 0, NULL, NULL
+  g_root_pool, SPROUT_ROOT_POOL_SIZE, 0, NULL
 };
 static struct SproutRoots* g_current_roots  = &g_task0_roots;
 static struct SproutRoots* g_roots_registry = &g_task0_roots;
@@ -1615,8 +1622,6 @@ static long long sprout_gc_push_root(void* slot, SproutRootKind kind, size_t aux
   node->slot = slot;
   node->kind = kind;
   node->aux_words = aux_words;
-  node->next = rc->head;
-  rc->head = node;
   return 0;
 }
 
@@ -1636,13 +1641,9 @@ long long sprout_gc_push_scan_root(void* slot, long long size_bytes) {
 long long sprout_gc_pop_roots(long long count) {
   if (count < 0) tcp_fail("sprout_gc_pop_roots: count must be >= 0");
   struct SproutRoots* rc = g_current_roots;
-  for (long long i = 0; i < count; i++) {
-    if (rc->head == NULL) tcp_fail("sprout_gc_pop_roots: root stack underflow");
-    if (rc->pool_top == 0) tcp_fail("sprout_gc_pop_roots: root pool underflow");
-    RootNode* next = rc->head->next;
-    rc->pool_top--;
-    rc->head = next;
-  }
+  if ((size_t)count > rc->pool_top)
+    tcp_fail("sprout_gc_pop_roots: root stack underflow");
+  rc->pool_top -= (size_t)count;
   return 0;
 }
 
@@ -1663,7 +1664,6 @@ SproutRoots* sprout_roots_new(size_t pool_slots) {
   if (rc->pool == NULL) tcp_fail("sprout_roots_new: out of memory (pool)");
   rc->pool_size = pool_slots;
   rc->pool_top  = 0;
-  rc->head      = NULL;
   /* Register so the collector scans this context from now on. */
   rc->reg_next    = g_roots_registry;
   g_roots_registry = rc;
@@ -1677,8 +1677,6 @@ void sprout_roots_push_ptr(SproutRoots* r, void* slot) {
   node->slot = slot;
   node->kind = SPROUT_ROOT_PTR;
   node->aux_words = 0;
-  node->next = r->head;
-  r->head = node;
 }
 
 void sprout_roots_free(SproutRoots* r) {
@@ -2035,36 +2033,36 @@ static void sprout_gc_drain_marks(void) {
 
 static long long sprout_gc_root_count(void) {
   long long count = 0;
-  for (RootNode* root = g_root_nodes; root != NULL; root = root->next) count++;
+  for (PermRoot* perm = g_root_nodes; perm != NULL; perm = perm->next) count++;
   /* Temp roots live per task; sum every registered context. */
   for (struct SproutRoots* rc = g_roots_registry; rc != NULL; rc = rc->reg_next)
-    for (RootNode* root = rc->head; root != NULL; root = root->next) count++;
+    count += (long long)rc->pool_top;
   return count;
 }
 
-static void sprout_gc_mark_root_list(RootNode* head) {
-  for (RootNode* root = head; root != NULL; root = root->next) {
-    if (root->kind == SPROUT_ROOT_I64) {
-      sprout_gc_mark_value(*(long long*)root->slot);
-    } else if (root->kind == SPROUT_ROOT_PTR) {
-      sprout_gc_mark_ptr(*(void**)root->slot);
-    } else {
-      for (size_t i = 0; i < root->aux_words; i++) {
-        uintptr_t word = 0;
-        memcpy(&word, (char*)root->slot + (i * sizeof(uintptr_t)), sizeof(uintptr_t));
-        sprout_gc_mark_ptr((void*)word);
-      }
+static void sprout_gc_mark_root(const RootNode* root) {
+  if (root->kind == SPROUT_ROOT_I64) {
+    sprout_gc_mark_value(*(long long*)root->slot);
+  } else if (root->kind == SPROUT_ROOT_PTR) {
+    sprout_gc_mark_ptr(*(void**)root->slot);
+  } else {
+    for (size_t i = 0; i < root->aux_words; i++) {
+      uintptr_t word = 0;
+      memcpy(&word, (char*)root->slot + (i * sizeof(uintptr_t)), sizeof(uintptr_t));
+      sprout_gc_mark_ptr((void*)word);
     }
   }
 }
 
 static void sprout_gc_mark_roots(void) {
-  sprout_gc_mark_root_list(g_root_nodes);
+  for (PermRoot* perm = g_root_nodes; perm != NULL; perm = perm->next)
+    sprout_gc_mark_root(&perm->root);
   /* Temp roots are per task: scan EVERY registered context, so a task suspended
    * at a yield point keeps its roots while another task allocates. Over-rooting
    * a suspended task is safe; under-rooting one frees live values. */
   for (struct SproutRoots* rc = g_roots_registry; rc != NULL; rc = rc->reg_next)
-    sprout_gc_mark_root_list(rc->head);
+    for (size_t i = 0; i < rc->pool_top; i++)
+      sprout_gc_mark_root(&rc->pool[i]);
   for (int i = 0; i < SPROUT_HANDLE_TABLE_SIZE; i++) {
     if (g_handle_table[i].in_use)
       sprout_gc_mark_value(g_handle_table[i].value);

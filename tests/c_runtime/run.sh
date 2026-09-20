@@ -195,4 +195,33 @@ test "$(grep -c 'errno == EINTR' "$ROOT/runtime/sprout_poll.c")" = "2" || {
   exit 1
 }
 
+echo "==> c runtime: the GC temp-root stack marks its whole live range"
+# The roots of a context are pool[0..pool_top). Marking only the newest, or only the
+# current context, frees a value something still holds — corruption that surfaces far
+# from the cause. Under GC stress each case collects on every allocation; see the file
+# header for what each selector pins.
+GRS="$TMP_DIR/gc_root_stack"
+if ! compile gc_root_stack.c "$GRS" -O1 -g -fsanitize=address,undefined; then
+  echo "  sanitizer build unavailable; using unsanitized fallback"
+  compile gc_root_stack.c "$GRS" -O0 -g
+fi
+for sel in survive other_context; do
+  ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$GRS" "$sel" > "$TMP_DIR/grs.out" 2> "$TMP_DIR/grs.err" || {
+    echo "  root-stack case '$sel' failed:" >&2
+    cat "$TMP_DIR/grs.out" "$TMP_DIR/grs.err" >&2
+    exit 1
+  }
+done
+# The bound: popping one past the live range must abort. Checked by message, not exit
+# status — the case reports "not-caught" with a failing status too.
+if ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$GRS" underflow > "$TMP_DIR/grs.out" 2> "$TMP_DIR/grs.err"; then
+  echo "  popping past the live range did not abort" >&2
+  exit 1
+fi
+grep -q "root stack underflow" "$TMP_DIR/grs.err" || {
+  echo "  popping past the live range aborted without the underflow guard:" >&2
+  cat "$TMP_DIR/grs.out" "$TMP_DIR/grs.err" >&2
+  exit 1
+}
+
 echo "==> c runtime tests passed"

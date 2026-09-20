@@ -1380,6 +1380,14 @@ deferral happened, not for current behaviour. Still open:
   recursive loop lowering, call/closure overhead, primitive boxing, string/vector iteration — and
   add stable benchmarks for `string_lines`, `trim` and AoC-style stdin parsing so wins are
   measurable. Target: `string_lines` over a `day5input`-style workload in low single-digit seconds.
+- [ ] `P2` **Non-escaping combinator closures allocate, and every apply re-checks arity.** In
+  `bench/gc_roots` — records in a list, nested `list_filter`/`list_fold`/`any`/`max_by` — the lambda
+  handed to each combinator is heap-allocated per call although it cannot escape the callee, and
+  `sprout_closure_arity_check` alone is ~10% of top-of-stack samples (`sprout_alloc_closure` a
+  further 3%). Two independent levers: escape analysis to stack-allocate or inline a closure whose
+  only use is the call it is passed to, and specialising an `IRApplyClosure` whose arity is
+  statically known so the check is dropped. The closure allocation also feeds the collection rate,
+  so it is upstream of the GC entries in §1. Profile: `bench/results-2026-09-20-gc-root-stack.md`.
 - [ ] `P2` **Stronger server-side runtime models — multi-reactor as the next target.** Native TCP
   handle-slot reuse and the `stdlib.http_server` helper layer are the groundwork. Keep-alive and
   chunked reads are filed in §2.
@@ -1867,15 +1875,16 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
 > `region_find`/`sprout_heap_lookup` are `static` and fully inlined at `-O2`, so **no profiler can
 > attribute to them** — size them by sensitivity probes instead.
 
-- [ ] `P1` **Inline GC root push/pop, or enable LTO.** After the type-aware rooting fix, root
-  push/pop is still ~44% of N-queens CPU. The remaining pushes are genuine heap pointers, so type
-  filtering cannot help further; the per-push cost is the **function-call boundary** between LLVM IR
-  and the C runtime (~50 cycles of caller-save spill + branch + writes). **(A) inline as IR** — a
-  slim i64-only root stack in the runtime, with codegen emitting the 3–4 instructions inline;
-  SCAN/PTR roots keep the current machinery. **(B) enable LTO** — `-flto` on both the runtime and
-  the emitted `.ll`, and hope LLVM inlines across the boundary. B is the cheaper test (a one-line
-  recipe change); A is the canonical fix. Verify B first. Expected 2–3× on top of the landed
-  rooting work.
+- [ ] `P1` **Inline the GC root push, or enable LTO.** After the type-aware rooting fix, and after
+  pop became O(1) in its count (2026-09-20), the push alone is ~32% of top-of-stack in
+  `bench/gc_roots` and root calls ~44% of N-queens CPU. The remaining pushes are genuine heap
+  pointers, so type filtering cannot help further; the per-push cost is the **function-call
+  boundary** between LLVM IR and the C runtime (~50 cycles of caller-save spill + branch + writes,
+  for three stores of work). **(A) inline as IR** — a slim i64-only root stack, codegen emitting
+  the 3–4 instructions inline; SCAN/PTR roots keep the current machinery. **(B) enable LTO** —
+  `-flto` on both the runtime and the emitted `.ll`, and hope LLVM inlines across the boundary. B
+  is the cheaper test (a one-line recipe change); A is the canonical fix. Verify B first. Expected
+  2–3× on top of the landed rooting work.
 - [ ] `P2` **GC trigger is object-count-blind, not byte-aware.** `sprout_gc_maybe_collect_threshold`
   fires on `g_managed_heap_count >= g_gc_threshold`, and the count increments by 1 per managed
   object regardless of size — a `VectorVal`'s backing array is a plain `malloc`, invisible to the
