@@ -32,32 +32,52 @@ Call sites of `sprout_gc_push_i64_root` surviving in the final binary:
 | `-O2` per TU (today) | 192 | 52 |
 | `-O2 -flto` | 149 | 50 |
 | `-O2 -flto -mcpu=generic -mtune=generic` | 149 | 50 |
+| `-O2 -flto` + `__attribute__((always_inline))` on the push | 151 | — |
 | `llvm-link` whole module + `opt -O2` | 192 | 52 |
 | whole module, **runtime attributes stripped** | **0** | **0** |
 | whole module, **Sprout functions given the runtime's group** | 9 | 0 |
 
-The last two rows are the same module and the same `opt -O2`; only the attributes differ. That
+Rows 5 and 6 are the same module and the same `opt -O2`; only the attributes differ. That
 isolates the cause: remove the mismatch in either direction and the calls disappear.
 
 `-mcpu=generic` looks like it should work and does not. On arm64-apple even generic carries
 `+ete,+fp-armv8,+neon,+trbe,+v8a` — non-empty, so still not a subset of zero.
 
-## 3. What it is worth
+**`always_inline` is inert, and silently so.** Marking `sprout_gc_push_root` and
+`sprout_gc_push_i64_root` `__attribute__((always_inline))` and building `-flto` produced 151 call
+sites either way, binaries byte-identical at 77 224 bytes, and identical run times (1063 ms vs
+1063 ms). LLVM declines rather than diagnosing. Rust, which has the same rule at a level where it
+can be diagnosed, makes the equivalent combination a compile error instead — see 8.
 
-Interleaved, each program's own internal timer, **min of 20 rounds** (the machine was shared with
-other sessions; the least-disturbed run is the fastest one, so min is the statistic to read):
+## 3. What it is worth, and how it decomposes
 
-| workload | call (today) | inlined | change |
+Interleaved, each program's own internal timer, **min of 12–20 rounds** (the machine is shared;
+the least-disturbed run is the fastest one, so min is the statistic to read):
+
+| workload | call (today) | fully inlined | change |
 |---|---:|---:|---:|
-| `bench/gc_roots` | 1069.5 ms | 663.5 ms | **−38%** |
+| `bench/gc_roots` | 1063.7 ms | 652.5 ms | **−38.7%** |
 | N-queens | 1728.5 ms | 1389.0 ms | **−20%** |
 
-Both produce answers identical to the baseline build. For scale: the root-stack array rewrite that
-landed the same day was −37% on `bench/gc_roots`, so this is a second win of the same size.
+Answers identical to the baseline build. For scale: the root-stack array rewrite that landed the
+same day was −37% on `bench/gc_roots`, so this is a second win of the same size.
 
-**This is whole-program optimisation, not the root push alone.** Unblocking the attribute mismatch
-unblocks inlining for *every* runtime call, and no attempt has been made to decompose the win. Do
-not quote it as the cost of the root push.
+**The win is concentrated in the root stack, not spread across the runtime.** Stripping the
+attributes from exactly four functions — `sprout_gc_push_i64_root`, `push_ptr`, `push_scan` and
+`sprout_gc_pop_roots`, which share attribute group `#4` — and leaving every other runtime
+function opaque:
+
+| `bench/gc_roots` | push sites | pop sites | time | vs today |
+|---|---:|---:|---:|---:|
+| today | 194 | 71 | 1063.7 ms | — |
+| **root stack alone inlinable** | 2 | 4 | **770.8 ms** | **−27.5%** |
+| whole runtime inlinable | 2 | 4 | 652.5 ms | −38.7% |
+
+**The root stack alone is 71% of the win.** That matches the call profile of the emitted IR: 156
+pushes and 59 pops against roughly 110 calls to every other runtime function combined.
+
+This decomposition is what decides between the two routes below. It was not available when this
+document first recommended route A.
 
 ## 4. Why the compiler must not emit host target attributes
 
@@ -68,69 +88,142 @@ x86_64, Linux aarch64 and Windows. Baking the build host's feature set into it w
 seed everywhere but the machine that refreshed it, and would make `just ir-golden-diff` report a
 diff per developer machine.
 
-## 5. Recommended fix: a build-pipeline change, no compiler change
+## 5. Route A — strip the runtime's attributes and merge the module
 
-Strip the attributes off the **runtime** side instead, and hand the CPU to the backend at codegen —
-a function with no `target-cpu` attribute inherits the target machine's, so host-specific codegen
-survives:
+Strip the attributes off the **runtime** side, and let the clang driver pick the CPU at codegen:
 
 ```
-clang -O2 -emit-llvm -S runtime/*.c            # once, cacheable
-sed -E 's/"target-(cpu|features)"="[^"]*"//g'  # strip on the runtime side only
-llvm-link <emitted>.ll runtime_*.ll -o merged.bc
-opt -O2 merged.bc -o opt.bc
-clang opt.bc -O2 -mcpu=<host> -o bin
+clang -O2 -emit-llvm -S runtime/*.c                      # once, cacheable
+sed -E 's/"target-(cpu|features|tune-cpu)"="[^"]*"//g'   # runtime side only
+llvm-link <emitted>.bc runtime.bc -o merged.bc
+clang merged.bc -O2 -o bin
 ```
 
 It keeps the emitted IR and the seed target-neutral, so it touches neither the bootstrap nor the
-golden corpus. The `-mcpu` on the last line is load-bearing, not decoration — see 6.
+golden corpus.
 
-**It is also faster to link than today**: 1.56 s vs 2.00 s per binary, because the runtime bitcode
-is built once instead of recompiling all three runtime TUs for every binary. `just test` links
-hundreds of binaries, so a slow link would have been the thing that killed this; it is an
-improvement instead.
+A separate `opt -O2` between `llvm-link` and `clang` is **not** needed — clang's own `-O2` over
+the merged module produces the same result. Measured on one test binary: with the extra `opt`
+step 1226 ms, without it 818 ms, both reaching 2 surviving push call sites, and on
+`bench/gc_roots` 660.5 ms against 655.8 ms. The shorter pipeline is the one above.
 
-## 6. The runtime's own codegen survives the strip — if `-mcpu` is passed
+### 5.1 Its real cost: the two link regimes
 
-The obvious objection to §5 is that stripping per-function features downgrades the runtime's own
-code. It does not, provided the CPU reaches the backend. Runtime compiled **alone** three ways, so
-that inlining differences cannot confound the comparison:
+An earlier draft of this document claimed the route "links faster than today, 1.56 s vs 2.00 s".
+That is true only against recipes that recompile all three runtime TUs per binary. But
+`_test-stdlib` — the recipe behind `just test` — **already caches the runtime as `.o` files**
+(`justfile:450-455`), and so do seven other recipes. Against that cache the route is far slower,
+because whole-module inlining means codegenning the whole runtime into every binary:
+
+| per-binary link (`tests/stdlib/test_let_else.spr`) | time |
+|---|---:|
+| cached `.o` link (today) | **119 ms** |
+| `llvm-link` + `clang -O2` | **818 ms** |
+
+Stage breakdown of the slow path: `llvm-as` 24 ms, `llvm-link` 47 ms, `clang -O2` 771 ms. The
+771 ms is irreducible for this route.
+
+`just test` links **416 binaries at 5 parallel jobs**: about 10 s of link today against about
+68 s, buying nothing, because a test binary runs once for milliseconds. The route therefore pays
+only for a binary whose total lifetime run time exceeds roughly 1.8 s — `(818−119) ms / 0.38`.
+
+The compiler itself does not clearly clear that bar. Linking the committed seed both ways:
+4.2 s against 16.0 s, for `--emit-ir stdlib/compiler/infer.sprout` 4238 ms against 3886 ms
+(−8.3%), emitted IR byte-identical. On four typical test files the mean is 385 ms against 340 ms
+(−11.8%), which over 416 files at 5 jobs is about 3.8 s of wall clock saved per suite run against
+11.8 s of extra link whenever the compiler is rebuilt.
+
+## 6. The runtime's own codegen survives the strip
+
+Stripping per-function features does not downgrade the runtime's own code. Runtime compiled
+**alone** three ways, so that inlining differences cannot confound the comparison:
 
 | build | LSE atomics | ll/sc atomics | SIMD ld/st |
 |---|---:|---:|---:|
 | A — today: `clang -O2 -c`, attributes present | 8 | 0 | 211 |
 | B — stripped, `llc -mcpu=apple-m1` | 8 | 0 | 235 |
-| C — stripped, **no `-mcpu`** (control) | **0** | **16** | 238 |
+| C — stripped, `llc` with **no `-mcpu`** (control) | **0** | **16** | 238 |
 
 LSE is the discriminating class: `+lse` sits above baseline `v8a`, so a backend that lost the
 feature set must fall back to `ldxr`/`stxr` retry loops. Row C is the proof the probe can see that
-happen — it is why rows A and B agreeing is evidence rather than a probe that measures nothing.
-The runtime's atomics are real, in the async DNS resolver (`stdatomic.h`, a genuine OS thread).
+happen. The runtime's atomics are real, in the async DNS resolver (`stdatomic.h`, a genuine OS
+thread).
 
-So the strip route's requirement is exact: **the final codegen step must carry `-mcpu`.** Today
-each TU carries its own features and cannot be silently downgraded; after the strip, dropping that
-flag turns eight lock-free atomics into sixteen retry-loop instructions with nothing to warn you.
-That belongs in the justfile recipe, not in a comment.
+**An earlier draft concluded from row C that the final codegen step must carry `-mcpu`. That was
+wrong.** Row C used `llc`, which takes the module's triple at face value; the actual pipeline ends
+in the clang **driver**, which performs target selection itself. Measured on the merged module:
 
-Total instruction count rises 35 877 → 36 847 (+2.7%) from A to B, which is `opt -O2` running a
-second time over already-optimised IR, not a regression in quality.
+| `bench/gc_roots` | LSE | ll/sc | push sites | time |
+|---|---:|---:|---:|---:|
+| today | 8 | 0 | 194 | 1067.9 ms |
+| merged, `clang -O2 -mcpu=apple-m1` | 8 | 0 | 2 | 661.2 ms |
+| merged, `clang -O2`, **no `-mcpu`** | 8 | 0 | 2 | **660.7 ms** |
 
-## 7. What is still not verified
+No explicit flag is needed, and adding one would be actively harmful: `release.yml` ships the
+binary built by `just bootstrap-from-seed`, so `-mcpu=native` there would host-tune a released
+artifact to the CI runner. Letting the driver decide leaves every platform with exactly the
+default it has today — generic x86-64 on the Linux release build.
 
-1. **Linux and Windows.** Measured on macOS arm64 only. The release workflow builds linux x86_64
-   and aarch64; each needs the same pipeline and its own measurement.
-2. **The `-O0` debug link path** and `just test`'s link path are untouched by these experiments.
-3. **Binary size.** The `-flto` build was 77 KB against 248 KB; the strip route is unmeasured.
-4. **Any workload that is not these two microbenchmarks.** The compiler itself is unmeasured here,
-   and so is `uncharted-suns`, which is the only real user and the workload that prompted the GC
-   work in the first place.
-5. **Observable behaviour under whole-module `opt -O2`.** Answers matched on two programs. That is
-   two programs, not a gate — the full suite has not been run against such a build.
+## 7. Route B — lower the root stack in `ir_lowering` (recommended)
 
-## 8. Relationship to the root-stack work
+Emit the push and pop as Sprout's own IR instead of a call into C. Given 3, this collects ~71% of
+the available win, and it collects it:
 
+- on every binary, including all 416 test binaries;
+- at zero build-time cost — no `llvm-link`, no whole-module re-optimisation, no ~700 ms per link;
+- on every platform, with no per-recipe wiring and nothing new for the release workflow.
+
+Route A's marginal contribution over route B is the remaining ~11 points, at the price of the
+whole build-pipeline change. That is not a good trade, so route A is **not** recommended and this
+document no longer proposes it.
+
+The design, its ABI cost and the open questions: `docs/gc-root-inline-lowering-v0.md`.
+
+## 8. Prior art
+
+How other implementations let runtime or stdlib code inline into generated code. Every row
+verified against a primary source.
+
+| implementation | what crosses the boundary | where it lives |
+|---|---|---|
+| GHC | Core "unfoldings" — the *inline* RHS, not the optimised one | `.hi` interface files; `INLINE`/`INLINABLE` persist it "regardless of the size of the RHS" |
+| Swift | serialized SIL for `@inlinable` functions | the `.swiftmodule` |
+| Rust | MIR for `#[inline]` and generic functions, codegened into the **caller's** codegen unit | rlib metadata |
+| Sprout today | nothing — the runtime is C, opaque to `ir_lowering` | — |
+
+The pattern is unanimous: all three export the body **at their own IR level, above LLVM**. None
+solves this by merging LLVM modules at link time. Route B is the analogue of that choice; route A
+is the thing nobody does.
+
+Rust independently hit the identical LLVM rule and surfaced it where it could be diagnosed: its
+Reference states that functions marked `target_feature` "are not inlined into a context that does
+not support the given features", and that "the `#[inline(always)]` attribute may not be used with
+a `target_feature` attribute". C cannot diagnose it, which is why 2's `always_inline` row is a
+silent no-op and why this sat undetected in Sprout for the project's whole life.
+
+Swift's SE-0193 names the cost the other three share and Sprout does not yet pay: an exported body
+becomes part of the binary interface, so a shipped inlined copy constrains future change.
+
+Sources: [rustc dev guide, monomorphization](https://rustc-dev-guide.rust-lang.org/backend/monomorph.html) ·
+[Rust Reference, codegen attributes](https://doc.rust-lang.org/reference/attributes/codegen.html) ·
+[GHC User's Guide, pragmas](https://downloads.haskell.org/ghc/latest/docs/users_guide/exts/pragmas.html) ·
+[Swift SE-0193](https://github.com/swiftlang/swift-evolution/blob/main/proposals/0193-cross-module-inlining-and-specialization.md)
+
+## 9. What is still not verified
+
+1. **Linux and Windows.** Measured on macOS arm64 only. The mechanism is target-independent, but
+   the numbers are not.
+2. **Binary size.** `bench/gc_roots`: 248 088 bytes today, 264 392 under route A, 77 224 under
+   plain `-flto`. Route B is unmeasured.
+3. **Any workload that is not these two microbenchmarks.** `uncharted-suns` is the only real user
+   and the workload that prompted the GC work; it is unmeasured here.
+4. **Observable behaviour under whole-module optimisation.** Answers matched on two programs and
+   the seed's emitted IR was byte-identical. That is not the full suite.
+
+## 10. Relationship to the root-stack work
 
 `bench/results-2026-09-20-gc-root-stack.md` records the array rewrite and notes that
 `sprout_gc_push_i64_root` held ~31% of top-of-stack afterwards, with the per-push cost identified
 as "the function-call boundary to the C runtime". This document explains why that boundary could
-never be optimised away, and shows that the fix is in the build pipeline rather than in codegen.
+never be optimised away by any build flag, and 3 shows the root stack is where almost all of the
+recoverable cost sits.

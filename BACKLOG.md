@@ -1864,16 +1864,16 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
 > `region_find`/`sprout_heap_lookup` are `static` and fully inlined at `-O2`, so **no profiler can
 > attribute to them** — size them by sensitivity probes instead.
 
-- [ ] `P1` **Unblock cross-TU inlining: no runtime function can be inlined into Sprout code.**
-  `ir_lowering` emits functions with no `target-cpu`/`target-features`; clang gives the runtime's
-  the full host set; LLVM only inlines when the callee's features are a subset of the caller's, so
-  every call is refused — at `-O2`, under `-flto`, and with the whole program in one module.
-  Measured 2026-09-20: unblocking it is **−38%** on `bench/gc_roots` and **−20%** on N-queens, as
-  large as the root-stack rewrite that landed the same day. The fix is a build-pipeline change, not
-  a codegen one (emitted IR must stay target-neutral — the seed is committed and cross-platform),
-  and it *links faster* than today. The runtime's own codegen survives it as long as the final step
-  carries `-mcpu`. `docs/cross-tu-inlining-v0.md` has the pipeline, the evidence, and §7 on what is
-  still unverified: Linux, binary size, the full suite. Supersedes the earlier LTO entry.
+- [ ] `P1` **Lower the GC root push/pop in `ir_lowering` instead of calling the C runtime.**
+  No runtime function can be inlined into Sprout code: emitted functions carry no
+  `target-cpu`/`target-features`, clang gives the runtime's the host set, and LLVM only inlines
+  when the callee's features are a subset of the caller's — so `-O2`, `-flto`, whole-module
+  merging and `always_inline` are all refused, the last two silently. Measured 2026-09-20: the
+  four root-stack entry points alone are **−27.5%** on `bench/gc_roots`, 71% of what inlining the
+  whole runtime would buy, and the emitted IR calls them 215 times against ~110 for everything
+  else. Fix it in codegen, not the build pipeline — merging modules costs ~700 ms of link per
+  binary and `just test` links 416. Design, ABI cost and the one approval needed:
+  `docs/gc-root-inline-lowering-v0.md`; the measurements: `docs/cross-tu-inlining-v0.md`.
 - [ ] `P2` **GC trigger is object-count-blind, not byte-aware.** `sprout_gc_maybe_collect_threshold`
   fires on `g_managed_heap_count >= g_gc_threshold`, and the count increments by 1 per managed
   object regardless of size — a `VectorVal`'s backing array is a plain `malloc`, invisible to the
