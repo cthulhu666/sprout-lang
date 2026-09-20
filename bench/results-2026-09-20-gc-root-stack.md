@@ -68,12 +68,17 @@ one-second windows, not a mechanism this profile can name.
 
 ## What this does not fix
 
-Push is still the single largest frame at ~31%, one call per rooted local. Calling that a
-codegen question was wrong: the call cannot be inlined at all, at any optimisation level,
-because Sprout emits functions with no `target-cpu`/`target-features` while the runtime's
-carry the host's, and LLVM only inlines when the callee's features are a subset of the
-caller's. Removing that mismatch is worth another −38% here, and it is a build-pipeline
-change rather than a codegen one — `docs/cross-tu-inlining-v0.md`.
+Push is still the single largest frame at ~31%, one call per rooted local, and the call cannot
+be inlined at all, at any optimisation level: Sprout emits functions with no
+`target-cpu`/`target-features` while the runtime's carry the host's, and LLVM only inlines when
+the callee's features are a subset of the caller's. Unblocking the root stack alone is worth
+another **−27.5%** here — 71% of what unblocking the whole runtime would buy.
+
+It **is** a codegen question after all. An earlier revision of this section said the fix was a
+build-pipeline change; merging modules at link time does collect the remaining 29%, but it costs
+~700 ms of link per binary and `just test` links 416 of them. Lowering the push and pop in
+`ir_lowering` costs no build change at all — `docs/gc-root-inline-lowering-v0.md`, with the
+measurements in `docs/cross-tu-inlining-v0.md`.
 
 The two leads beside this one — cheaper collection via a nursery, and escape analysis
 for non-escaping combinator closures — are untouched; `sprout_alloc_closure` and

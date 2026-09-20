@@ -32,7 +32,7 @@ Call sites of `sprout_gc_push_i64_root` surviving in the final binary:
 | `-O2` per TU (today) | 192 | 52 |
 | `-O2 -flto` | 149 | 50 |
 | `-O2 -flto -mcpu=generic -mtune=generic` | 149 | 50 |
-| `-O2 -flto` + `__attribute__((always_inline))` on the push | 151 | — |
+| `-O2 -flto` + `__attribute__((always_inline))` on the push | 149 | — |
 | `llvm-link` whole module + `opt -O2` | 192 | 52 |
 | whole module, **runtime attributes stripped** | **0** | **0** |
 | whole module, **Sprout functions given the runtime's group** | 9 | 0 |
@@ -44,10 +44,15 @@ isolates the cause: remove the mismatch in either direction and the calls disapp
 `+ete,+fp-armv8,+neon,+trbe,+v8a` — non-empty, so still not a subset of zero.
 
 **`always_inline` is inert, and silently so.** Marking `sprout_gc_push_root` and
-`sprout_gc_push_i64_root` `__attribute__((always_inline))` and building `-flto` produced 151 call
+`sprout_gc_push_i64_root` `__attribute__((always_inline))` and building `-flto` produced 149 call
 sites either way, binaries byte-identical at 77 224 bytes, and identical run times (1063 ms vs
 1063 ms). LLVM declines rather than diagnosing. Rust, which has the same rule at a level where it
 can be diagnosed, makes the equivalent combination a compile error instead — see 8.
+
+**Counting note.** Every call-site figure in this document counts branch-and-link sites
+(`bl … <sym>`), not lines of disassembly mentioning the symbol. The looser count reads two high in
+every build — the function's own label line and its stub — which is where an earlier draft's
+151-vs-149 and 194-vs-192 disagreements came from.
 
 ## 3. What it is worth, and how it decomposes
 
@@ -62,19 +67,28 @@ the least-disturbed run is the fastest one, so min is the statistic to read):
 Answers identical to the baseline build. For scale: the root-stack array rewrite that landed the
 same day was −37% on `bench/gc_roots`, so this is a second win of the same size.
 
-**The win is concentrated in the root stack, not spread across the runtime.** Stripping the
-attributes from exactly four functions — `sprout_gc_push_i64_root`, `push_ptr`, `push_scan` and
-`sprout_gc_pop_roots`, which share attribute group `#4` — and leaving every other runtime
-function opaque:
+**The win is concentrated in the root stack, not spread across the runtime.** The four root-stack
+entry points — `sprout_gc_push_i64_root`, `push_ptr`, `push_scan` and `sprout_gc_pop_roots` —
+share attribute group `#4` with about 50 other runtime functions, so the group itself must not be
+edited. Instead `#4` is **cloned** as a new group with the target attributes removed, and only
+those four `define`s are repointed at the clone; `#4` and its other members are left exactly as
+clang emitted them.
 
 | `bench/gc_roots` | push sites | pop sites | time | vs today |
 |---|---:|---:|---:|---:|
-| today | 194 | 71 | 1063.7 ms | — |
-| **root stack alone inlinable** | 2 | 4 | **770.8 ms** | **−27.5%** |
-| whole runtime inlinable | 2 | 4 | 652.5 ms | −38.7% |
+| today | 192 | 68 | 1063.7 ms | — |
+| **root stack alone inlinable** | 0 | 1 | **770.8 ms** | **−27.5%** |
+| whole runtime inlinable | 0 | 1 | 652.5 ms | −38.7% |
 
 **The root stack alone is 71% of the win.** That matches the call profile of the emitted IR: 156
 pushes and 59 pops against roughly 110 calls to every other runtime function combined.
+
+The isolation holds in the binary, which is what makes this a decomposition rather than a partial
+strip. Branch-and-link sites for the other `#4` members, today → root-stack-only → whole-runtime:
+`sprout_closure_arity_check` 18 → 14 → 0, `sprout_register_ctor` 14 → 14 → 0, `sprout_field`
+29 → 29 → 0, `sprout_alloc_closure` 16 → 16 → 0. None of them is inlined in the middle column;
+all of them are in the right-hand one. (The 18 → 14 is code motion after the pushes vanish, not
+inlining — an inlined callee goes to 0, as the right-hand column shows.)
 
 This decomposition is what decides between the two routes below. It was not available when this
 document first recommended route A.
@@ -92,10 +106,19 @@ diff per developer machine.
 
 Strip the attributes off the **runtime** side, and let the clang driver pick the CPU at codegen:
 
-```
-clang -O2 -emit-llvm -S runtime/*.c                      # once, cacheable
-sed -E 's/"target-(cpu|features|tune-cpu)"="[^"]*"//g'   # runtime side only
-llvm-link <emitted>.bc runtime.bc -o merged.bc
+```sh
+# once, cacheable: one .ll per runtime TU, attributes stripped, assembled and merged
+for rt in runtime/*.c; do
+  b=$(basename "$rt" .c)
+  clang -O2 -emit-llvm -S "$rt" -o "$b.ll"
+  sed -E 's/"target-(cpu|features|tune-cpu)"="[^"]*"//g' "$b.ll" > "$b.nf.ll"
+  llvm-as "$b.nf.ll" -o "$b.bc"
+done
+llvm-link sprout_*.bc -o runtime.bc
+
+# per binary
+llvm-as <emitted>.ll -o prog.bc
+llvm-link prog.bc runtime.bc -o merged.bc
 clang merged.bc -O2 -o bin
 ```
 
@@ -112,7 +135,7 @@ step 1226 ms, without it 818 ms, both reaching 2 surviving push call sites, and 
 An earlier draft of this document claimed the route "links faster than today, 1.56 s vs 2.00 s".
 That is true only against recipes that recompile all three runtime TUs per binary. But
 `_test-stdlib` — the recipe behind `just test` — **already caches the runtime as `.o` files**
-(`justfile:450-455`), and so do seven other recipes. Against that cache the route is far slower,
+(`justfile:450-455`), and so do eight other recipes. Against that cache the route is far slower,
 because whole-module inlining means codegenning the whole runtime into every binary:
 
 | per-binary link (`tests/stdlib/test_let_else.spr`) | time |
@@ -123,8 +146,10 @@ because whole-module inlining means codegenning the whole runtime into every bin
 Stage breakdown of the slow path: `llvm-as` 24 ms, `llvm-link` 47 ms, `clang -O2` 771 ms. The
 771 ms is irreducible for this route.
 
-`just test` links **416 binaries at 5 parallel jobs**: about 10 s of link today against about
-68 s, buying nothing, because a test binary runs once for milliseconds. The route therefore pays
+`just test` links **416 binaries**, at 5 parallel jobs on the measurement host — `scripts/test_jobs.sh`
+derives the count from P-core count capped at 8, so a different machine scales this differently:
+about 10 s of link today against about 68 s, buying nothing, because a test binary runs once for
+milliseconds. The route therefore pays
 only for a binary whose total lifetime run time exceeds roughly 1.8 s — `(818−119) ms / 0.38`.
 
 The compiler itself does not clearly clear that bar. Linking the committed seed both ways:
@@ -155,9 +180,9 @@ in the clang **driver**, which performs target selection itself. Measured on the
 
 | `bench/gc_roots` | LSE | ll/sc | push sites | time |
 |---|---:|---:|---:|---:|
-| today | 8 | 0 | 194 | 1067.9 ms |
-| merged, `clang -O2 -mcpu=apple-m1` | 8 | 0 | 2 | 661.2 ms |
-| merged, `clang -O2`, **no `-mcpu`** | 8 | 0 | 2 | **660.7 ms** |
+| today | 8 | 0 | 192 | 1067.9 ms |
+| merged, `clang -O2 -mcpu=apple-m1` | 8 | 0 | 0 | 661.2 ms |
+| merged, `clang -O2`, **no `-mcpu`** | 8 | 0 | 0 | **660.7 ms** |
 
 No explicit flag is needed, and adding one would be actively harmful: `release.yml` ships the
 binary built by `just bootstrap-from-seed`, so `-mcpu=native` there would host-tune a released
@@ -186,7 +211,7 @@ verified against a primary source.
 
 | implementation | what crosses the boundary | where it lives |
 |---|---|---|
-| GHC | Core "unfoldings" — the *inline* RHS, not the optimised one | `.hi` interface files; `INLINE`/`INLINABLE` persist it "regardless of the size of the RHS" |
+| GHC | Core "unfoldings" — the *inline* RHS, not the optimised one | `.hi` interface files; for `INLINE` "the inline-RHS (not the optimised RHS) is recorded in the interface file", and `INLINABLE` persists it "regardless of the size of the RHS" |
 | Swift | serialized SIL for `@inlinable` functions | the `.swiftmodule` |
 | Rust | MIR for `#[inline]` and generic functions, codegened into the **caller's** codegen unit | rlib metadata |
 | Sprout today | nothing — the runtime is C, opaque to `ir_lowering` | — |
