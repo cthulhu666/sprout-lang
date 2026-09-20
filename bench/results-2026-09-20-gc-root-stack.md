@@ -68,8 +68,13 @@ one-second windows, not a mechanism this profile can name.
 
 ## What this does not fix
 
-Push is still the single largest frame at ~31%, one call per rooted local. That is a
-codegen question (fewer roots, or a frame-at-a-time push) rather than a runtime one.
+Push is still the single largest frame at ~31%, one call per rooted local. Calling that a
+codegen question was wrong: the call cannot be inlined at all, at any optimisation level,
+because Sprout emits functions with no `target-cpu`/`target-features` while the runtime's
+carry the host's, and LLVM only inlines when the callee's features are a subset of the
+caller's. Removing that mismatch is worth another −38% here, and it is a build-pipeline
+change rather than a codegen one — `docs/cross-tu-inlining-v0.md`.
+
 The two leads beside this one — cheaper collection via a nursery, and escape analysis
 for non-escaping combinator closures — are untouched; `sprout_alloc_closure` and
 `sprout_closure_arity_check` still sit near the top.

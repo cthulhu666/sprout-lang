@@ -1864,15 +1864,16 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
 > `region_find`/`sprout_heap_lookup` are `static` and fully inlined at `-O2`, so **no profiler can
 > attribute to them** — size them by sensitivity probes instead.
 
-- [ ] `P1` **Inline the GC root push, or enable LTO.** After type-aware rooting and after pop became
-  O(1) (2026-09-20), push is what is left: ~31% of top-of-stack in `bench/gc_roots`, ~13% in
-  N-queens (measured 2026-09-20; supersedes a stale ~44% root-call figure that predated both fixes).
-  The remaining pushes are genuine heap pointers, so type filtering cannot help; the per-push cost
-  is the **function-call boundary** to the C runtime — ~50 cycles of caller-save spill + branch for
-  three stores of work. **(A) inline as IR**: a slim i64-only root stack, codegen emitting the 3–4
-  instructions inline, SCAN/PTR roots keeping the current machinery. **(B) LTO**: `-flto` on both
-  sides and hope LLVM inlines across the boundary — the cheaper test, so try it first; A is the
-  canonical fix. Amdahl ceiling is whatever push costs: ~1.4× on `gc_roots`, ~1.15× on N-queens.
+- [ ] `P1` **Unblock cross-TU inlining: no runtime function can be inlined into Sprout code.**
+  `ir_lowering` emits functions with no `target-cpu`/`target-features`; clang gives the runtime's
+  the full host set; LLVM only inlines when the callee's features are a subset of the caller's, so
+  every call is refused — at `-O2`, under `-flto`, and with the whole program in one module.
+  Measured 2026-09-20: unblocking it is **−38%** on `bench/gc_roots` and **−20%** on N-queens, as
+  large as the root-stack rewrite that landed the same day. The fix is a build-pipeline change, not
+  a codegen one — the emitted IR must stay target-neutral because the seed is committed and
+  cross-platform — and it *links faster* than today. Before adopting, check the runtime's hot loops
+  still vectorise. `docs/cross-tu-inlining-v0.md` has the evidence, the pipeline and §6's list of
+  what is still unverified. Supersedes the earlier "inline the GC root push, or enable LTO" entry.
 - [ ] `P2` **GC trigger is object-count-blind, not byte-aware.** `sprout_gc_maybe_collect_threshold`
   fires on `g_managed_heap_count >= g_gc_threshold`, and the count increments by 1 per managed
   object regardless of size — a `VectorVal`'s backing array is a plain `malloc`, invisible to the
