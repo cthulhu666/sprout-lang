@@ -2147,8 +2147,8 @@ fn unresolved_in_instance_methods(ms: List ast.InstanceMethodImpl, declared: Dic
   | Nil -> Nothing
   | Cons m rest ->
       match m with
-      | ast.InstanceMethodImpl _ params ret _ _ body ->
-          match unresolved_in_signature(params, ret, Nil, declared) with
+      | ast.InstanceMethodImpl _ params ret _ cs body ->
+          match unresolved_in_signature(params, ret, cs, declared) with
           | Just n -> Just(n)
           | Nothing ->
               match unresolved_in_expr(body, declared) with

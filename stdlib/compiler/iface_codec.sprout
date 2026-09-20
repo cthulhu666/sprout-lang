@@ -378,7 +378,7 @@ fn collect_types(s: String, bytes: Bytes, i: Int, total: Int, acc: List types.Ty
 #
 # `version` is encoded as a bare atom and checked by string equality. When
 # v2 lands, decoder gets an if-chain or a parsed-int conversion.
-# (Current version is 7 — see decode_iface_version for the change log.)
+# (Current version is 8 — see decode_iface_version for the change log.)
 
 export type NamedScheme (..) =
   | NamedScheme String types.Scheme
@@ -549,12 +549,14 @@ fn decode_iface_v2_tail(s: String, bytes: Bytes, i: Int, total: Int, version: In
 # form from (position, class) to (head_token, class); v4→v5 added the M4.6
 # parameter-ownership tag to TFunc; v5→v6 added the M4.4a `once` case to that tag
 # and to ParamMode; v6→v7 added the TypeThunk tag, so a nullary signature is
-# `() -> T` rather than bare `T`. Old ifaces are rejected loudly (the Scheme wire
-# format changed) — from v5 on that matters doubly, since an older iface decoded
-# leniently would silently read every `borrowing`/`once` parameter as consuming,
-# which is the exact silent erasure both milestones exist to remove.
+# `() -> T` rather than bare `T`; v7→v8 gave a class method's scheme a constraint
+# list of its own, so a v7 ClassInfo decodes with every method-level `where`
+# silently empty. Old ifaces are rejected loudly (the Scheme wire format changed)
+# — from v5 on that matters doubly, since an older iface decoded leniently would
+# silently read every `borrowing`/`once` parameter as consuming, which is the
+# exact silent erasure both milestones exist to remove.
 fn decode_iface_version(s: String) -> Maybe Int =
-  if s == "7" then Just(7) else Nothing
+  if s == "8" then Just(8) else Nothing
 
 fn decode_named_scheme_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List NamedScheme, Int) =
   match expect_char(s, bytes, i, total, '(') with
@@ -714,18 +716,32 @@ fn method_scheme(type_params: List String, params: List ast.Param, ret: ast.Type
 # Method-level constraint heads keyed by NAME, not position: this scheme
 # quantifies the CLASS params only, so a method's own variable has no index to
 # record and the name is the stable key (constraint_var_token's own fallback).
+# That differs from infer.constraint_pos_tokens, which does have an index to
+# use; BACKLOG.md §7.5 tracks aligning the two binder lists.
 fn method_constraint_tokens(constraints: List ast.TypeConstraint) -> List (String, String) =
   match constraints with
   | Nil -> Nil
   | Cons (ast.TypeConstraint class_name type_args) rest ->
       match type_args with
       | [ast.TypeName v | _] -> Cons((v, class_name), method_constraint_tokens(rest))
-      # A compound head (`where ToString (Box a)`) keys on its outermost name,
-      # matching infer.constraint_source_tokens; degrading it to "#none" would
-      # lose the head the call-site resolver looks the dictionary up by.
       | [ast.TypeApply base _ | _] ->
-          Cons((te_outermost_name(base), class_name), method_constraint_tokens(rest))
+          Cons((compound_head_token(base), class_name), method_constraint_tokens(rest))
       | _ -> Cons(("#none", class_name), method_constraint_tokens(rest))
+
+# A compound head (`where ToString (Box a)`) in the `#app:` form
+# infer.compound_head_token writes, qualifier included. The call-site resolver
+# branches on that prefix; a bare name decodes as a type VARIABLE instead and
+# resolves the dictionary by a different path entirely.
+fn compound_head_token(base: ast.TypeExpr) -> String =
+  match te_head_name(base) with
+  | Just h -> "#app:" ++ h
+  | Nothing -> "#none"
+
+fn te_head_name(te: ast.TypeExpr) -> Maybe String =
+  match te with
+  | ast.TypeName n -> Just(n)
+  | ast.TypeApply base _ -> te_head_name(base)
+  | _ -> Nothing
 
 fn effect_from_maybe_labels(labels: Maybe (List String)) -> types.Effect =
   types.effect_from_labels(labels)

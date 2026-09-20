@@ -1,0 +1,28 @@
+# The instance restates the class's two method-level constraints in the OPPOSITE
+# order. The slot count and both classes agree, so only the positions differ —
+# and the dictionaries are positional, so each call runs the other class's
+# method.
+module main
+
+class Shout a
+  fn shout(x: a) -> String
+
+class Whisper a
+  fn whisper(x: a) -> String
+
+instance Shout Int
+  fn shout(x: Int) -> String = "S"
+
+instance Whisper Bool
+  fn whisper(x: Bool) -> String = "W"
+
+class Container t
+  fn pair_up(xs: t a, y: b) -> String where Shout a, Whisper b
+
+instance Container List
+  fn pair_up(xs: List a, y: b) -> String where Whisper b, Shout a =
+    match xs with
+    | Nil -> whisper(y)
+    | [h | _] -> shout(h) ++ "/" ++ whisper(y)
+
+fn main() -> Unit !{IO} = print(pair_up(Cons(1, Nil), true))

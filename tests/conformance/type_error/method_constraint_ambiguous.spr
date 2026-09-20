@@ -1,0 +1,17 @@
+# A method-level constraint whose variable nothing determines. `Nil` fixes no
+# element type, so no `ToString` instance can be chosen and no dictionary can be
+# injected. The dispatch verifier is the backstop: without the method's own
+# constraints in its CalleeSig the call reaches codegen one dictionary short and
+# reports an internal arity error with no source position.
+module main
+
+import stdlib.string (join)
+
+class Container t
+  fn show_all(xs: t a) -> String where ToString a
+
+instance Container List
+  fn show_all(xs: List a) -> String where ToString a =
+    join(", ", list_map(to_string, xs))
+
+fn main() -> Unit !{IO} = print(show_all(Nil))

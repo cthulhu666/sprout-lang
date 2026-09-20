@@ -14,7 +14,8 @@ fn main() -> Unit !{IO} =
   run_suite("traversable", [
     # List over Maybe: every element succeeds, so the whole walk does.
     check_eq("list/maybe all Just", traverse(positive, [2, 4, 6]), Just([2, 4, 6])),
-    # One failure short-circuits the structure, not just its element.
+    # The RESULT short-circuits to Nothing on one failure, but every element is
+    # still evaluated — Sprout's List instance is strict in both `map2` args.
     check_eq("list/maybe one Nothing", traverse(positive, [2, 0, 6]), Nothing),
     check_eq("list/maybe empty", traverse(positive, []), Just([])),
 

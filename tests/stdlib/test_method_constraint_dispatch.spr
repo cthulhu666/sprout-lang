@@ -1,0 +1,52 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.string (join)
+
+# Dictionary selection for method-level constraints, in the two shapes a single
+# constraint on an unconstrained instance head does not reach.
+
+# --- Two constraints of the SAME class --------------------------------------
+# `a` and `b` each need their own ToString dictionary. Resolution is per
+# constraint variable, so a caller forwarding both must not hand one dictionary
+# to both slots.
+#
+# `to_string` is eta-wrapped here: a bare method value under two constraints of
+# its own class still reaches codegen as `__eta_unresolved_ToString_to_string`
+# (BACKLOG.md §7.5, ambiguous forwarded method references).
+
+class Pairer t
+  fn show_pair(xs: t a, y: b) -> String where ToString a, ToString b
+
+instance Pairer List
+  fn show_pair(xs: List a, y: b) -> String where ToString a, ToString b =
+    join(",", list_map(\x -> to_string(x), xs)) ++ "/" ++ to_string(y)
+
+fn forwarded_pair(xs: t a, y: b) -> String where Pairer t, ToString a, ToString b =
+  show_pair(xs, y)
+
+# --- A constrained instance HEAD plus a method-level `where` -----------------
+# The instance function takes both dictionary groups, the head's before the
+# method's, and the witness that wraps it closes over the first while staying
+# open in the second.
+
+type Tagged k a = | Tagged k a
+
+class Pretty a
+  fn pretty(x: a, y: b) -> String where ToString b
+
+instance Pretty (Tagged k v) where ToString k
+  fn pretty(x: Tagged k v, y: b) -> String where ToString b =
+    match x with
+    | Tagged k _ -> to_string(k) ++ "/" ++ to_string(y)
+
+fn forwarded_pretty(x: a, y: b) -> String where Pretty a, ToString b =
+  pretty(x, y)
+
+fn main() -> Unit !{IO} =
+  run_suite("method-constraint dispatch", [
+    check_eq("same class, direct call", show_pair(Cons(1, Cons(2, Nil)), "z"), "1,2/z"),
+    check_eq("same class, forwarded", forwarded_pair(Cons(3, Nil), true), "3/true"),
+    check_eq("same class, forwarded the other way round",
+      forwarded_pair(Cons("q", Nil), 9), "q/9"),
+    check_eq("constrained head, direct call", pretty(Tagged(true, 5), "z"), "true/z"),
+    check_eq("constrained head, forwarded", forwarded_pretty(Tagged(1, "x"), false), "1/false")
+  ])

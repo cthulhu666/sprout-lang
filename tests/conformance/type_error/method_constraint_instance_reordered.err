@@ -1,0 +1,1 @@
+instance method `pair_up` names `Whisper` where the class declares `Shout` (constraint 1)

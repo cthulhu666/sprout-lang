@@ -27,11 +27,14 @@ export fn lower_program(prog: typed_ast.TypedProgram, env: Dict types.Scheme) ->
   | typed_ast.TypedProgram decls -> lower_program_decls(decls, env)
 
 fn lower_program_decls(decls: List typed_ast.TypedDecl, scheme_env: Dict types.Scheme) -> typed_ast.TypedProgram =
+  let class_order = collect_class_order(decls, dict_empty())
+      super_map = collect_super_map(decls, dict_empty())
+  in
   match lower_decls(decls,
-                    LowerEnv(collect_class_order(decls, dict_empty()),
+                    LowerEnv(class_order,
                              collect_instance_table(decls, dict_empty()),
-                             collect_super_map(decls, dict_empty()),
-                             collect_inst_meta(decls, dict_empty()),
+                             super_map,
+                             collect_inst_meta(decls, class_order, super_map, dict_empty()),
                              scheme_env,
                              collect_class_param_map(decls, dict_empty())),
                     Nil, Nil, Nil) with
@@ -49,14 +52,15 @@ fn lower_program_decls(decls: List typed_ast.TypedDecl, scheme_env: Dict types.S
 #   class_order  – class_name → [method_names in declaration order]
 #   inst_table   – constraint_key → { method_name → instance_fn_name }
 #   super_map    – class_name → [direct superclass names in declaration order]
-#   inst_meta    – constraint_key → (instance_type_args, instance_constraints, method_arities)
+#   inst_meta    – constraint_key → (instance_type_args, instance_constraints,
+#                  method_name → (declared params, method-level dict slots))
 #                  Populated only for constrained instances (e.g. instance Eq (Maybe a) where Eq a).
 #                  Used to build lambda wrappers that capture inner dicts at call sites.
 #   scheme_env   – the full type scheme environment from the typechecker; used to
 #                  assign types to generated nodes so types survive lowering.
 #   class_params – class_name → primary class type parameter name
 type LowerEnv =
-  | LowerEnv (Dict (List String)) (Dict (Dict String)) (Dict (List String)) (Dict (List ast.TypeExpr, List ast.TypeConstraint, Dict Int)) (Dict types.Scheme) (Dict String)
+  | LowerEnv (Dict (List String)) (Dict (Dict String)) (Dict (List String)) (Dict (List ast.TypeExpr, List ast.TypeConstraint, Dict (Int, Int))) (Dict types.Scheme) (Dict String)
 
 # LowerCtx: per-function context passed during expression lowering.
 #   class_order  – inherited from LowerEnv
@@ -68,7 +72,7 @@ type LowerEnv =
 #   class_params – inherited from LowerEnv
 #   bound_vars   – locally bound names (fn params, lambda params) that must NOT be eta-expanded
 type LowerCtx =
-  | LowerCtx (Dict (List String)) (Dict (Dict String)) (Dict (Dict String)) (Dict (List String)) (Dict (List ast.TypeExpr, List ast.TypeConstraint, Dict Int)) (Dict types.Scheme) (Dict String) (List String)
+  | LowerCtx (Dict (List String)) (Dict (Dict String)) (Dict (Dict String)) (Dict (List String)) (Dict (List ast.TypeExpr, List ast.TypeConstraint, Dict (Int, Int))) (Dict types.Scheme) (Dict String) (List String)
 
 fn env_class_order(env: LowerEnv) -> Dict (List String) =
   match env with | LowerEnv co _ _ _ _ _ -> co
@@ -79,7 +83,7 @@ fn env_inst_table(env: LowerEnv) -> Dict (Dict String) =
 fn env_super_map(env: LowerEnv) -> Dict (List String) =
   match env with | LowerEnv _ _ sm _ _ _ -> sm
 
-fn env_inst_meta(env: LowerEnv) -> Dict (List ast.TypeExpr, List ast.TypeConstraint, Dict Int) =
+fn env_inst_meta(env: LowerEnv) -> Dict (List ast.TypeExpr, List ast.TypeConstraint, Dict (Int, Int)) =
   match env with | LowerEnv _ _ _ im _ _ -> im
 
 fn env_scheme_env(env: LowerEnv) -> Dict types.Scheme =
@@ -100,7 +104,7 @@ fn ctx_inst(ctx: LowerCtx) -> Dict (Dict String) =
 fn ctx_super_map(ctx: LowerCtx) -> Dict (List String) =
   match ctx with | LowerCtx _ _ _ sm _ _ _ _ -> sm
 
-fn ctx_inst_meta(ctx: LowerCtx) -> Dict (List ast.TypeExpr, List ast.TypeConstraint, Dict Int) =
+fn ctx_inst_meta(ctx: LowerCtx) -> Dict (List ast.TypeExpr, List ast.TypeConstraint, Dict (Int, Int)) =
   match ctx with | LowerCtx _ _ _ _ im _ _ _ -> im
 
 fn ctx_scheme_env(ctx: LowerCtx) -> Dict types.Scheme =
@@ -278,34 +282,47 @@ fn build_inst_method_map(
 
 fn collect_inst_meta(
   decls: List typed_ast.TypedDecl,
-  acc: Dict (List ast.TypeExpr, List ast.TypeConstraint, Dict Int)
-) -> Dict (List ast.TypeExpr, List ast.TypeConstraint, Dict Int) =
+  class_order: Dict (List String),
+  super_map: Dict (List String),
+  acc: Dict (List ast.TypeExpr, List ast.TypeConstraint, Dict (Int, Int))
+) -> Dict (List ast.TypeExpr, List ast.TypeConstraint, Dict (Int, Int)) =
   match decls with
   | Nil -> acc
   | Cons d rest ->
       match d with
       | typed_ast.TInstanceDecl constraint inst_constraints methods ->
           match inst_constraints with
-          | Nil -> collect_inst_meta(rest, acc)
+          | Nil -> collect_inst_meta(rest, class_order, super_map, acc)
           | _ ->
               match constraint with
               | ast.TypeConstraint _ type_args ->
-                  collect_inst_meta(rest,
+                  collect_inst_meta(rest, class_order, super_map,
                     dict_set(constraint_key_from_tc(constraint),
-                             (type_args, inst_constraints, collect_method_arities(methods, dict_empty())),
+                             (type_args, inst_constraints,
+                              collect_method_arities(methods, class_order, super_map, dict_empty())),
                              acc))
-      | _ -> collect_inst_meta(rest, acc)
+      | _ -> collect_inst_meta(rest, class_order, super_map, acc)
 
+# Per method: (declared params, method-level dictionary slots). Both halves are
+# needed because the instance fn's layout puts the instance-head dicts BETWEEN
+# them, so the witness lambda cannot express itself as a prefix application.
+# The slot count comes from build_hidden_for_constraints — the same function
+# that lays out site B — so the two cannot drift apart.
 fn collect_method_arities(
   methods: List typed_ast.TypedInstanceMethod,
-  acc: Dict Int
-) -> Dict Int =
+  class_order: Dict (List String),
+  super_map: Dict (List String),
+  acc: Dict (Int, Int)
+) -> Dict (Int, Int) =
   match methods with
   | Nil -> acc
   | Cons m rest ->
       match m with
-      | typed_ast.TypedInstanceMethod name params _ _ _ _ ->
-          collect_method_arities(rest, dict_set(name, list_length(params), acc))
+      | typed_ast.TypedInstanceMethod name params _ _ method_constraints _ ->
+          match build_hidden_for_constraints(method_constraints, class_order, super_map) with
+          | (method_slots, _) ->
+              collect_method_arities(rest, class_order, super_map,
+                dict_set(name, (list_length(params), list_length(method_slots)), acc))
 
 # ---------------------------------------------------------------------------
 # Pass 2 – lower typed declarations
@@ -432,17 +449,22 @@ fn prepend_class_hidden_params(
       prepend_class_hidden_params(class_name, idx, rest,
         Cons(ast.Param(tc_slot_name(class_name, idx, m), Nothing, ast.ModeDefault), acc))
 
-# HIDDEN-ARGUMENT ORDER — one ABI, three sites; do not reorder without changing
-# all three together:
+# HIDDEN-ARGUMENT ORDER — one ABI, four sites; do not reorder without changing
+# all four together:
 #   <declared params> ++ <instance/class dictionaries> ++ <method-level dictionaries>
 # A. generate_one_class_wrapper (here) lays out the `__cm_` dispatch wrapper and
 #    forwards the method slots to the instance function.
-# B. lower_instance_method appends the same two groups to the `__tc_` instance fn.
-# C. the call site injects dictionaries in the matching order.
+# B. generate_one_instance_fn appends the same two groups to the `__tc_` instance fn.
+# C. the call site injects dictionaries in the matching order
+#    (infer.inject_constrained_fn_dicts_via_field).
+# D. build_lambda_with_inner_dicts wraps a CONSTRAINED instance's method, closing
+#    over the head dicts while staying open in the method's — so the captured
+#    group sits between the two open ones and a prefix application cannot express
+#    it. collect_method_arities sizes both halves.
 # Method-level dictionaries come LAST so a method without a `where` keeps the
 # exact layout it had before the feature existed — that is what keeps the
 # bootstrap seed and the golden IR stable for every existing class. A mismatch
-# between A and B is not a compile error: it surfaces as an arity error at
+# between these sites is not a compile error: it surfaces as an arity error at
 # codegen, or, if the counts happen to agree, as a dictionary dispatched through
 # the wrong slot.
 fn generate_one_class_wrapper(
@@ -1424,7 +1446,7 @@ fn resolve_tdict_apply_inner_dicts(
   pos: source.SourcePos,
   method_map: Dict String,
   methods: List String,
-  method_arities: Dict Int,
+  method_arities: Dict (Int, Int),
   inner_dicts: List typed_ast.TypedExpr,
   scheme_env: Dict types.Scheme
 ) -> List typed_ast.TypedExpr =
@@ -1436,19 +1458,21 @@ fn resolve_method_with_lambda(
   method_name: String,
   key: String,
   method_map: Dict String,
-  method_arities: Dict Int,
+  method_arities: Dict (Int, Int),
   inner_dicts: List typed_ast.TypedExpr,
   pos: source.SourcePos
 ) -> typed_ast.TypedExpr =
   match dict_get(method_name, method_map) with
   | Nothing -> typed_ast.TVar("__unresolved_" ++ key ++ "_" ++ method_name, types.TVar(types.tyvar_id("?gen")), pos)
   | Just fn_name ->
-      build_lambda_with_inner_dicts(fn_name, get_method_arity(method_name, method_arities), inner_dicts, pos)
+      match get_method_arity(method_name, method_arities) with
+      | (n_params, n_method_dicts) ->
+          build_lambda_with_inner_dicts(fn_name, n_params, n_method_dicts, inner_dicts, pos)
 
-fn get_method_arity(method_name: String, method_arities: Dict Int) -> Int =
+fn get_method_arity(method_name: String, method_arities: Dict (Int, Int)) -> (Int, Int) =
   match dict_get(method_name, method_arities) with
   | Just n -> n
-  | Nothing -> 0
+  | Nothing -> (0, 0)
 
 fn resolve_method_var(
   method_name: String,
@@ -1572,7 +1596,7 @@ fn consume_block(ev: typed_ast.Evidence, pos: source.SourcePos, ctx: LowerCtx) -
                 " absent from ctx_inst — resolve/lowering table disagreement")
   | _ -> panic("lowering: consume_block expected EvForward/EvInstance (internal error)")
 
-fn evidence_inst_arities(key: String, ctx: LowerCtx) -> Dict Int =
+fn evidence_inst_arities(key: String, ctx: LowerCtx) -> Dict (Int, Int) =
   match dict_get(key, ctx_inst_meta(ctx)) with
   | Just (_, _, method_arities) -> method_arities
   | Nothing -> dict_empty()
@@ -1707,9 +1731,9 @@ fn substitute_constraint(tc: ast.TypeConstraint, subs: Dict ast.TypeExpr) -> ast
       ast.TypeConstraint(class_name, list_map(\te -> substitute_type_expr(te, subs), type_args))
 
 # build_lambda_with_inner_dicts: build a lambda that pre-applies inner dict args.
-# For an instance method fn_name with n_params explicit params and inner_dicts as
-# the resolved inner dicts, produces:
-#   \__lp_0 ... __lp_{n-1} -> fn_name(__lp_0, ..., __lp_{n-1}, inner_dict_0, ...)
+# For an instance method fn_name with n_params explicit params, n_method_dicts
+# method-level dict slots and inner_dicts as the resolved inner dicts, produces:
+#   \__lp_0 … __lp_{n-1} __lp_n … -> fn_name(__lp_0, …, inner_dict_0, …, __lp_n, …)
 # Lambda and inner call types use TVar "?lambda" — these are dict witnesses whose
 # LLVM representation is always a closure pointer (i64) regardless of Sprout type.
 # type_to_ll(TVar _) = "i64", so codegen emits correct i64 params/returns for these
@@ -1717,22 +1741,32 @@ fn substitute_constraint(tc: ast.TypeConstraint, subs: Dict ast.TypeExpr) -> ast
 fn build_lambda_with_inner_dicts(
   fn_name: String,
   n_params: Int,
+  n_method_dicts: Int,
   inner_dicts: List typed_ast.TypedExpr,
   pos: source.SourcePos
 ) -> typed_ast.TypedExpr =
-  build_lambda_helper(fn_name, make_lp_names(n_params, 0), inner_dicts, pos)
+  build_lambda_helper(fn_name, make_lp_names(n_params, 0),
+                      make_lp_names(n_params + n_method_dicts, n_params), inner_dicts, pos)
 
+# The witness closes over the instance-head dicts and stays open in the method's
+# own dicts, which the caller supplies. Those two groups sit on opposite sides of
+# the captured ones, so the lambda takes `params ++ method dicts` while the call
+# it wraps reassembles the ABI order `params ++ head dicts ++ method dicts`.
 fn build_lambda_helper(
   fn_name: String,
   lp_names: List String,
+  md_names: List String,
   inner_dicts: List typed_ast.TypedExpr,
   pos: source.SourcePos
 ) -> typed_ast.TypedExpr =
+  let as_var = \nm -> typed_ast.TVar(nm, types.TVar(types.tyvar_id("?lambda")), pos)
+  in
   typed_ast.TLambda(
-    list_map(\nm -> ast.Param(nm, Nothing, ast.ModeDefault), lp_names),
+    list_map(\nm -> ast.Param(nm, Nothing, ast.ModeDefault), list_append(lp_names, md_names)),
     typed_ast.TCall(
       typed_ast.TVar(fn_name, types.TVar(types.tyvar_id("?lambda")), pos),
-      list_append(list_map(\nm -> typed_ast.TVar(nm, types.TVar(types.tyvar_id("?lambda")), pos), lp_names), inner_dicts),
+      list_append(list_map(as_var, lp_names),
+                  list_append(inner_dicts, list_map(as_var, md_names))),
       types.TVar(types.tyvar_id("?lambda")),
       pos),
     types.TVar(types.tyvar_id("?lambda")),
