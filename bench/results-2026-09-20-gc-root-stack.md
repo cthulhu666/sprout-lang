@@ -48,9 +48,16 @@ each sample ran for one second while the run itself got shorter.
 Push holds its *share* while the run shrinks by 37%, so in absolute terms it fell from
 ~0.63 s to ~0.43 s: the two dropped stores were not free, but the bump was always the
 bulk of it. Pop fell from ~0.40 s to ~0.10 s — that is the win, and it is the loop that
-is now a subtraction. Those two account for ~0.51 s of the 0.81 s saved; the remainder
-is spread thinly over every other frame, which is what a `RootNode` that dropped from
-32 to 24 bytes buys the mark scan.
+is now a subtraction.
+
+Those two account for ~0.51 s of the 0.81 s saved. **The remaining ~0.30 s is not
+attributed.** The tempting story — that a `RootNode` 32 → 24 bytes made the mark scan
+cheaper — is refuted by this same table: marking happens inside
+`sprout_gc_collect_with_reason`, which is flat in absolute terms (~0.20 s both sides)
+and only *rises* as a share. The residual sits in frames the change does not touch
+(`sprout_closure_arity_check` is ~0.28 s → ~0.15 s, which no part of this rewrite
+explains), so the honest reading is second-order effects plus sampling error on
+one-second windows, not a mechanism this profile can name.
 
 ## What this does not fix
 

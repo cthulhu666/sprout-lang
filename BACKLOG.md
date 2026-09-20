@@ -1875,16 +1875,15 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
 > `region_find`/`sprout_heap_lookup` are `static` and fully inlined at `-O2`, so **no profiler can
 > attribute to them** — size them by sensitivity probes instead.
 
-- [ ] `P1` **Inline the GC root push, or enable LTO.** After the type-aware rooting fix, and after
-  pop became O(1) in its count (2026-09-20), the push alone is ~32% of top-of-stack in
-  `bench/gc_roots` and root calls ~44% of N-queens CPU. The remaining pushes are genuine heap
-  pointers, so type filtering cannot help further; the per-push cost is the **function-call
-  boundary** between LLVM IR and the C runtime (~50 cycles of caller-save spill + branch + writes,
-  for three stores of work). **(A) inline as IR** — a slim i64-only root stack, codegen emitting
-  the 3–4 instructions inline; SCAN/PTR roots keep the current machinery. **(B) enable LTO** —
-  `-flto` on both the runtime and the emitted `.ll`, and hope LLVM inlines across the boundary. B
-  is the cheaper test (a one-line recipe change); A is the canonical fix. Verify B first. Expected
-  2–3× on top of the landed rooting work.
+- [ ] `P1` **Inline the GC root push, or enable LTO.** After type-aware rooting and after pop became
+  O(1) (2026-09-20), push is what is left: ~31% of top-of-stack in `bench/gc_roots`, ~13% in
+  N-queens (measured 2026-09-20; supersedes a stale ~44% root-call figure that predated both fixes).
+  The remaining pushes are genuine heap pointers, so type filtering cannot help; the per-push cost
+  is the **function-call boundary** to the C runtime — ~50 cycles of caller-save spill + branch for
+  three stores of work. **(A) inline as IR**: a slim i64-only root stack, codegen emitting the 3–4
+  instructions inline, SCAN/PTR roots keeping the current machinery. **(B) LTO**: `-flto` on both
+  sides and hope LLVM inlines across the boundary — the cheaper test, so try it first; A is the
+  canonical fix. Amdahl ceiling is whatever push costs: ~1.4× on `gc_roots`, ~1.15× on N-queens.
 - [ ] `P2` **GC trigger is object-count-blind, not byte-aware.** `sprout_gc_maybe_collect_threshold`
   fires on `g_managed_heap_count >= g_gc_threshold`, and the count increments by 1 per managed
   object regardless of size — a `VectorVal`'s backing array is a plain `malloc`, invisible to the

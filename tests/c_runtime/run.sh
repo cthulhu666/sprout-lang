@@ -205,7 +205,7 @@ if ! compile gc_root_stack.c "$GRS" -O1 -g -fsanitize=address,undefined; then
   echo "  sanitizer build unavailable; using unsanitized fallback"
   compile gc_root_stack.c "$GRS" -O0 -g
 fi
-for sel in survive other_context; do
+for sel in survive other_context pop_frees; do
   ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$GRS" "$sel" > "$TMP_DIR/grs.out" 2> "$TMP_DIR/grs.err" || {
     echo "  root-stack case '$sel' failed:" >&2
     cat "$TMP_DIR/grs.out" "$TMP_DIR/grs.err" >&2

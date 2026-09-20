@@ -26,9 +26,9 @@ That is **75% of CPU**, caused by per-task fixed sizing in `runtime/sprout_sched
 | allocation | size | constant |
 |---|---|---|
 | green stack | 1 MiB | `SPROUT_TASK_STACK_BYTES` |
-| GC root pool | 512 KiB (16384 × 32-byte `RootNode`) | `SPROUT_TASK_ROOT_SLOTS` |
+| GC root pool | 384 KiB (16384 × 24-byte `RootNode`) | `SPROUT_TASK_ROOT_SLOTS` |
 
-Every accepted connection spawns one fire-and-forget task, so every request `malloc`s ~1.5 MiB
+Every accepted connection spawns one fire-and-forget task, so every request `malloc`s ~1.4 MiB
 and `free`s it. Both land in macOS malloc's *medium* class, which returns pages to the kernel via
 `madvise` on `free`, so the next request re-faults them. Separately,
 `getcontext`/`makecontext` **zeroes the whole stack** — measured linear in `ss_size`:
@@ -42,7 +42,7 @@ and `free`s it. Both land in macOS malloc's *medium* class, which returns pages 
 | 4 MiB | 25,086 |
 
 6 µs is a *floor*: 1 MiB in 6 µs is ~175 GB/s, faster than DRAM, so that microbenchmark measures
-L2 on one reused buffer. The real server rotates ~40 × 1.5 MiB and pays cold faults, which is why
+L2 on one reused buffer. The real server rotates ~40 × 1.4 MiB and pays cold faults, which is why
 the profile attributes ~44 µs/request.
 
 ### 1.1 Causal confirmation
@@ -137,8 +137,8 @@ every root pointing into it.
 
 That has a consequence beyond stack management. **`goroutine-per-connection` is a model that cheap
 tasks license.** Go can spawn one 2 KiB goroutine per connection and let concurrency be unbounded;
-`stdlib/http_server.sprout` copies that shape while paying 1.5 MiB per connection, which makes
-today's unbounded `serve` a memory-DoS: 1,000 concurrent connections is ~1.5 GB of stacks, driven
+`stdlib/http_server.sprout` copies that shape while paying 1.4 MiB per connection, which makes
+today's unbounded `serve` a memory-DoS: 1,000 concurrent connections is ~1.4 GB of stacks, driven
 by the client. Sprout has two coherent choices — make tasks cheap (impossible, above) or **stop
 pretending they are cheap** and bound concurrency, as languages with expensive threads do.
 
@@ -208,7 +208,7 @@ correctness into C invariants the checker cannot see (§6, G5/G10).
 > `header_ms`, so such a peer cannot hold a pooled worker. The live risk was the pair this section
 > does not separate out: the body and response phases were bounded only by IDLE deadlines, re-armed
 > by any byte that moved, so a peer crawling instead of stopping held a handler indefinitely. Under
-> unbounded concurrency that costs 1.5 MiB and blocks nobody; under N workers, N such peers wedge the
+> unbounded concurrency that costs 1.4 MiB and blocks nobody; under N workers, N such peers wedge the
 > whole server — bounded concurrency converts a memory cost into an availability one. Both phases are
 > now bounded by size-scaled totals (`body_ms + content_length / min_rate_bps`, and the same shape for
 > the response), with an over-large `Content-Length` refused 413, so worst-case occupancy is finite
@@ -226,7 +226,7 @@ Three sub-options, in preference order:
    handler can head-of-line-block. Requires choosing defaults for worker count and buffer depth.
 2. **Hybrid: workers for the common case, spawn on exhaustion.** Preserves unbounded concurrency
    exactly. Needs "all workers busy" to be observable from Sprout, which today it is not — would
-   need a counter in `stdlib`, and the fallback path keeps the full 1.5 MiB cost for overflow
+   need a counter in `stdlib`, and the fallback path keeps the full 1.4 MiB cost for overflow
    connections.
 3. **Keep `serve` unbounded and add `serve_pooled` alongside it.** No semantic change to existing
    code; the caller opts in. Weakest default — the memory exposure stays the out-of-the-box
@@ -349,7 +349,8 @@ whose frame is mid-`read_request`.
 
 **G4 — the two permanent roots.** `task_create` pushes `&t->work` and `&t->chan_pending`. A reset
 to `pool_top == 0` would unroot the work closure and the delivery slot. Correct reset:
-`pool_top = 0; head = NULL;` then re-push both.
+`pool_top = 0;` then re-push both. (The context is a bare array since 2026-09-20 — there is no
+`head` to clear.)
 
 **G5 — `t->work` must be zeroed while idle.** `&t->work` stays rooted for the worker's life, so a
 stale handle pins the last request's closure and everything it captured, forever. A slow leak
@@ -587,7 +588,7 @@ To be filed in `BACKLOG.md`:
    it is a soundness gap, not a performance question.
 2. **The over-strict do-bind edge** (§7.1, `BACKLOG:1059`) now has a concrete motivating consumer:
    it forces the worker-pool channel to be threaded as a parameter. Worth raising in priority.
-3. **`serve` is an unbounded-memory exposure** (§3.1): ~1.5 MiB per concurrent connection, client-
+3. **`serve` is an unbounded-memory exposure** (§3.1): ~1.4 MiB per concurrent connection, client-
    driven. Independent of which design lands, and arguably the most user-visible issue in this
    document.
 4. **`chan_select`'s per-call `malloc`** — `malloc(n * sizeof(Chan*))` on every call, plus
