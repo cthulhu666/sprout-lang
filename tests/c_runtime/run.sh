@@ -224,4 +224,24 @@ grep -q "root stack underflow" "$TMP_DIR/grs.err" || {
   exit 1
 }
 
+echo "==> c runtime: the documented per-task root-pool size matches the code"
+# One number, quoted in prose in four files, derived from two constants nothing
+# checked. When RootNode shrank 32 -> 24 bytes all four went stale together and
+# no test could see it. Derive it here and grep for it, so the next size change
+# names the files it invalidated.
+clang tests/c_runtime/root_pool_size.c "$ROOT/runtime/sprout_scheduler.c" "$ROOT/runtime/sprout_poll.c" \
+  "${CLANG_EXTRA[@]}" -O0 -g -o "$TMP_DIR/root_pool_size"
+node_bytes="$("$TMP_DIR/root_pool_size")"
+slots="$(sed -nE 's/^#define SPROUT_TASK_ROOT_SLOTS[[:space:]]+([0-9]+).*/\1/p' "$ROOT/runtime/sprout_scheduler.c")"
+[ -n "$slots" ] || { echo "  could not read SPROUT_TASK_ROOT_SLOTS from sprout_scheduler.c" >&2; exit 1; }
+pool_kib=$(( node_bytes * slots / 1024 ))
+for f in docs/green-task-pool-v0.md stdlib/http_server.sprout bench/http_worker_pool/spawn_server.sprout; do
+  grep -q "${pool_kib} KiB" "$ROOT/$f" || {
+    echo "  $f does not mention the actual root-pool size (${pool_kib} KiB" \
+         "= ${node_bytes}-byte RootNode x ${slots} slots); it has gone stale" >&2
+    exit 1
+  }
+done
+echo "  root pool is ${pool_kib} KiB (${node_bytes} x ${slots}); all three documents agree"
+
 echo "==> c runtime tests passed"

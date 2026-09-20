@@ -24,7 +24,7 @@ fn handle(conn: consuming TcpConnection) -> Unit !{IO} =
     write_all_utf8(conn, response)
     close(conn)
 
-# One fire-and-forget task per accepted connection: 1 MiB stack + 512 KiB root
+# One fire-and-forget task per accepted connection: 1 MiB stack + 384 KiB root
 # pool malloc'd and freed per request, plus makecontext zeroing the stack.
 fn serve_loop(scope: Scope, listener: consuming TcpListener) -> Unit !{IO} =
   match accept(listener) with

@@ -182,7 +182,7 @@ fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   | sprout_ir.IRINeg _ _ -> false
   | sprout_ir.IRLoadGlobal _ _ -> false
   | sprout_ir.IRStoreGlobal _ _ -> false
-  # register_root_slot mallocs a RootNode (C heap), never the Sprout GC heap,
+  # register_root_slot mallocs a PermRoot (C heap), never the Sprout GC heap,
   # and does not call sprout_gc_maybe_collect_threshold — NOT a GC trigger.
   | sprout_ir.IRRegisterGlobalRoot _ -> false
   | sprout_ir.IRGetTupleField _ _ _ _ -> false

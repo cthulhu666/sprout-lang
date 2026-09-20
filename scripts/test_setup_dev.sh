@@ -4,7 +4,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SETUP="$ROOT/scripts/setup-dev.sh"
 LLVM_PATH="$ROOT/scripts/llvm-toolchain-path.sh"
-TMPD="$(mktemp -d)"
+# Physical path: llvm-toolchain-path.sh reports its answer through `pwd -P`, and
+# on macOS `mktemp -d` hands back /var/... which is a symlink to /private/var/...,
+# so a logical TMPD makes the bindir comparison below fail everywhere but Linux.
+TMPD="$(cd "$(mktemp -d)" && pwd -P)"
 trap 'rm -rf "$TMPD"' EXIT
 
 fail() {
