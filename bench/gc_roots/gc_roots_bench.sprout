@@ -1,0 +1,56 @@
+module main
+
+# GC root-stack / allocation microbenchmark.
+#
+# Reproduces the shape of a game simulation tick: a ~30-element roster of
+# records, and per element several nested passes (`list_filter`, `list_fold`,
+# `any`, `max_by`) over the whole roster. Everything allocated dies at once, so
+# the live set stays tiny while the allocation rate is enormous — the profile
+# where root push/pop and collection dominate. Prints a checksum and the wall
+# time in microseconds.
+
+import stdlib.time as time
+
+type Fighter = (id: Int, hp: Int, atk: Int, lane: Int)
+
+# `math.int.mod` answers `Maybe`, and unwrapping one per field would put Maybe
+# allocation in a benchmark that is measuring something else. The index is always
+# positive here, so truncating division gives the remainder directly.
+fn cycle(i: Int, n: Int) -> Int =
+  i - (i / n) * n
+
+fn make_fighter(i: Int) -> Fighter =
+  Fighter(id = i, hp = 10 + cycle(i * 7, 23), atk = 1 + cycle(i, 5), lane = cycle(i, 4))
+
+fn roster(n: Int) -> List Fighter =
+  [make_fighter(i) for i in 1..n]
+
+# Enemies share a lane and are still standing. Takes the acting fighter first so
+# `can_reach(self_unit, _)` is the predicate one turn needs.
+fn can_reach(self_unit: Fighter, f: Fighter) -> Bool =
+  f.lane == self_unit.lane && f.id != self_unit.id && f.hp > 0
+
+# One fighter's turn: the enemies it can reach, their total threat, whether any
+# of them can finish it, and the one it targets.
+fn turn_score(all: List Fighter, self_unit: Fighter) -> Int =
+  match max_by(\f -> f.atk, reachable) with
+  | Nothing -> threat
+  | Just target -> if lethal then threat + target.id else threat - target.id
+where
+  reachable = list_filter(can_reach(self_unit, _), all)
+  threat = list_fold(\ (acc, f) -> acc + f.atk, 0, reachable)
+  lethal = any(\f -> f.atk >= self_unit.hp, reachable)
+
+fn tick(all: List Fighter) -> Int =
+  list_fold(\ (acc, f) -> acc + turn_score(all, f), 0, all)
+
+fn run(all: List Fighter, reps: Int, acc: Int) -> Int =
+  if reps <= 0 then acc
+  else run(all, reps - 1, acc + tick(all))
+
+fn main() -> Unit !{IO} =
+  do
+    t0 <- time.now_micros()
+    let total = run(roster(30), 30000, 0)
+    t1 <- time.now_micros()
+    print(`checksum=${total} time_us=${t1 - t0}\n`)

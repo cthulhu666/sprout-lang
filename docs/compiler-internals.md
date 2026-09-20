@@ -113,6 +113,14 @@ Type-aware rooting gave a measured **1.5–2.7× speedup** (N=12: ~1.5 s → 928
 
 **Invariant:** when no source-level type is available, root conservatively (treat the value as heap). A spurious extra root is harmless; a missing root corrupts the heap. Do not treat `TVar` as non-heap — it may resolve to a heap type in monomorphized code.
 
+**Cost shape of the emitted calls.** A context's live roots are the array slice
+`pool[0..pool_top)` (`SproutRoots` in `sprout_runtime.c`), so a push is a bump and
+`sprout_gc_pop_roots(n)` is one bounds check plus a subtraction — **O(1) in `n`**.
+Emitting one batched pop is therefore strictly cheaper than `n` single pops, and a
+deep live range costs nothing extra to pop. Only the *push* count is still linear in
+the roots, and it is the largest single frame in allocation-heavy code
+(bench/results-2026-09-20-gc-root-stack.md).
+
 **The same policy applies to top-level `let` globals.** A runtime-computed `let` gets its storage slot registered as a *permanent* root in `@__sprout_init_globals` (`IRRegisterGlobalRoot`), and `ast_to_ir.global_root_ops` gates that registration on `type_is_non_heap_scalar` of the initializer's type. This gate was added later than the SSA-value one: the global path previously registered **every** `let` unconditionally, so the invariant above held for SSA values and silently did not hold for globals — `stdlib/math.sprout` alone contributed 33 permanent roots, every one an arithmetic `Double`. A permanent root is worse than a transient one: it is walked on every collection for the life of the process, and it feeds raw arithmetic bit patterns to a conservative scan. Const-eligible lets (`eval_const_expr_ir`: `TInt`/`TBool`/`TUnit` literals) never had this problem — they become `private constant` and are never stored to.
 
 Regression tests: `tests/stdlib/compiler/test_scalar_global_no_root.spr` (globals — the four scalar types unrooted, a boxed ctor still rooted, and per-let discrimination in a mixed module); `tests/stdlib/compiler/test_ir_call_result_rooting.spr` and `test_ir_tuple_result_rooting.spr` (SSA values).
