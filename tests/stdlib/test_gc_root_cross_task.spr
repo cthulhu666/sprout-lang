@@ -1,0 +1,49 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.task (Scope, with_scope, task_spawn, task_yield)
+
+# Each green task owns a root context, and the scheduler swaps the active one at
+# every yield. A root pushed into the wrong context leaves the value unrooted, so
+# it is swept while live. Each holder keeps heap Strings across a yield while a
+# third task allocates hard enough to collect.
+
+fn repeat_str(s: String, n: Int) -> String =
+  if n <= 0 then ""
+  else s ++ repeat_str(s, n - 1)
+
+# Three locals live across the yield, so the frame pushes several roots and pops
+# them as a group — an off-by-one in the pop count shows up here as a wrong or
+# collected value.
+fn holder(log: Ref String, tag: String) -> Unit !{IO} =
+  do
+    a <- ref_new(repeat_str(tag, 3))
+    b <- ref_new(repeat_str(tag, 2))
+    c <- ref_new(repeat_str(tag, 1))
+    task_yield()
+    back_a <- ref_read(a)
+    back_b <- ref_read(b)
+    back_c <- ref_read(c)
+    ref_write(log, ref_read(log) ++ back_a ++ back_b ++ back_c)
+
+# Allocates hard between the holders' two halves so a mis-rooted value is swept
+# rather than merely left dangling.
+fn churner(sink: Ref String) -> Unit !{IO} =
+  do
+    ref_write(sink, repeat_str("z", 400))
+    task_yield()
+    ref_write(sink, repeat_str("w", 400))
+
+fn spawn_all(s: Scope, log: Ref String, sink: Ref String) -> Unit !{IO} =
+  do
+    task_spawn(s, \_ -> holder(log, "A"))
+    task_spawn(s, \_ -> churner(sink))
+    task_spawn(s, \_ -> holder(log, "B"))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    log <- ref_new("")
+    sink <- ref_new("")
+    with_scope(\s -> spawn_all(s, log, sink))
+    assert_eq(state, "heap roots survive a task switch", ref_read(log), "AAAAAABBBBBB")
+    assert_eq(state, "churning task's own value intact", ref_read(sink), repeat_str("w", 400))
+    summary(state)
