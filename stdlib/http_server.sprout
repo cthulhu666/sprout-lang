@@ -1012,8 +1012,8 @@ export fn serve_with(config: ServerConfig, port: Int, handler: HttpRequest -> Ht
 # fire-and-forget task per connection. `serve`/`serve_n` are untouched: this is additive, and the
 # caller opts in.
 #
-# Why it is worth a second entry point: a spawned task costs ~1.5 MiB — a 1 MiB green stack plus a
-# 512 KiB root pool — and `makecontext` ZEROES the whole stack, so every page of every per-request
+# Why it is worth a second entry point: a spawned task costs ~1.4 MiB — a 1 MiB green stack plus a
+# 384 KiB root pool — and `makecontext` ZEROES the whole stack, so every page of every per-request
 # task becomes resident. Task setup measured 75% of this server's CPU. A worker pays that once
 # instead of once per request, and touches only the few KB its handler uses. Measured on two servers
 # with byte-identical request handling (bench/http_worker_pool): 3.5-5.4x throughput, 202 MB -> 8 MB

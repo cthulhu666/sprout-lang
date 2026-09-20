@@ -25,7 +25,8 @@ echo "==> Compiling $SRC ..."
 (cd "$REPO" && mise exec -- just compile-native "$SRC" "$BIN") >/dev/null 2>&1 \
   || { echo "ERROR: compile failed" >&2; exit 1; }
 
-echo "==> Running (6 warm; first discarded) ..."
-for i in 1 2 3 4 5 6 7; do
-  "$BIN"
+echo "==> Running (1 warm-up, discarded; then 6 timed) ..."
+"$BIN" > /dev/null || { echo "ERROR: warm-up run failed" >&2; exit 1; }
+for i in 1 2 3 4 5 6; do
+  "$BIN" || { echo "ERROR: run $i failed" >&2; exit 1; }
 done
