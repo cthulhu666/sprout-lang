@@ -216,3 +216,9 @@ long-lived binaries only and not on the 416-binary test path.
 
 The one artifact worth keeping either way is `tests/stdlib/test_gc_root_cross_task.spr`: heap
 values held across a task switch while another task allocates, an oracle the suite did not have.
+
+As first written it was not one. It allocated 1245 objects against a 4096 threshold, so its only
+collection was the one at exit, after both assertions had passed — break `sprout_gc_mark_roots`
+to scan only the current root context and it still exited 0. The churn now allocates 5000 and
+asserts that it did; the same break then crashes it with a use-after-free. The lesson generalises
+past this file: a GC test that does not name the count it must exceed is passing on nothing.

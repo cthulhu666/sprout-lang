@@ -4,7 +4,8 @@ import stdlib.task (Scope, with_scope, task_spawn, task_yield)
 # Each green task owns a root context, and the scheduler swaps the active one at
 # every yield. A root pushed into the wrong context leaves the value unrooted, so
 # it is swept while live. Each holder keeps heap Strings across a yield while a
-# third task allocates hard enough to collect.
+# third task allocates past the collector's threshold, and the assertion below
+# pins that the churn really does outrun it.
 
 fn repeat_str(s: String, n: Int) -> String =
   if n <= 0 then ""
@@ -24,18 +25,27 @@ fn holder(log: Ref String, tag: String) -> Unit !{IO} =
     back_c <- ref_read(c)
     ref_write(log, ref_read(log) ++ back_a ++ back_b ++ back_c)
 
-# Allocates hard between the holders' two halves so a mis-rooted value is swept
-# rather than merely left dangling.
-fn churner(sink: Ref String) -> Unit !{IO} =
+# Allocation COUNT is what has to move, not byte count: the collector fires at
+# g_gc_threshold managed objects (4096 by default), and an earlier version of
+# this test allocated 1245 in total, so its only cycle was the one at exit —
+# after both assertions had already passed.
+fn churn(n: Int, acc: String) -> String =
+  if n == 0 then acc else churn(n - 1, acc ++ "x")
+
+# Runs between the holders' two halves, so the collection it triggers happens
+# while their roots are live and a mis-rooted value is swept rather than merely
+# left dangling.
+fn churner(sink: Ref String, burned: Ref Int) -> Unit !{IO} =
   do
+    ref_write(burned, str_len(churn(5000, "")))
     ref_write(sink, repeat_str("z", 400))
     task_yield()
     ref_write(sink, repeat_str("w", 400))
 
-fn spawn_all(s: Scope, log: Ref String, sink: Ref String) -> Unit !{IO} =
+fn spawn_all(s: Scope, log: Ref String, sink: Ref String, burned: Ref Int) -> Unit !{IO} =
   do
     task_spawn(s, \_ -> holder(log, "A"))
-    task_spawn(s, \_ -> churner(sink))
+    task_spawn(s, \_ -> churner(sink, burned))
     task_spawn(s, \_ -> holder(log, "B"))
 
 fn main() -> Unit !{IO} =
@@ -43,7 +53,11 @@ fn main() -> Unit !{IO} =
     state <- new_state()
     log <- ref_new("")
     sink <- ref_new("")
-    with_scope(\s -> spawn_all(s, log, sink))
+    burned <- ref_new(0)
+    with_scope(\s -> spawn_all(s, log, sink, burned))
+    # Asserted, not assumed: if the churn stops outrunning the threshold this
+    # fails loudly instead of the suite going quietly false-green.
+    assert_eq(state, "churn allocated past the GC threshold", ref_read(burned), 5000)
     assert_eq(state, "heap roots survive a task switch", ref_read(log), "AAAAAABBBBBB")
     assert_eq(state, "churning task's own value intact", ref_read(sink), repeat_str("w", 400))
     summary(state)
