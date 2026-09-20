@@ -2515,8 +2515,9 @@ fn check_instance_for_marker(
             # PARAMETER POSITION (the arg whose declared type mentions a class
             # variable), not by "first concrete arg" — otherwise a leading
             # concrete arg of an unrelated type (e.g. a String `tag`) hijacks the
-            # dict (fundamentals review W4 / probe sr_dispatch). head_str and the
-            # TDict TypeExpr are both derived from that one arg so they agree.
+            # dict (fundamentals review W4 / probe sr_dispatch). head_str comes
+            # from that arg; the TDict records the class VARIABLE's binding, which
+            # class_var_dispatch_type checks names the same head.
             # Resolve the dispatch arg's type with s3 — the substitution AFTER
             # argument inference and callee-param unification — not the stale
             # pre-argument `subst`. An inline parametric-record arg (`Box(val=5)`)
@@ -2550,12 +2551,10 @@ fn check_instance_for_marker(
                       else InferErr(pos, "No instance of " ++ types.type_id_name(class_name) ++ " for " ++ head_str)
                 in
                   InferOk(
-                    typed_ast.TCall(typed_callee,
-                      Cons(typed_ast.TDict(
-                        ast.TypeConstraint(types.type_id_name(class_name), Cons(type_to_typeexpr_with_prog_vars(unifier.apply_subst(s3, typed_ast.typed_expr_type(cv_arg)), types.type_id_name(class_name), env), Nil)),
-                        types.TConst(class_name), pos, typed_ast.EvUnresolved),
-                        typed_args),
-                      ret_t, pos),
+                    concrete_dispatch_call(env, typed_callee, typed_args, ret_t, pos,
+                      types.type_id_name(class_name),
+                      class_var_dispatch_type(method_name, class_vars, typed_args, ret_t, s3, env,
+                        unifier.apply_subst(s3, typed_ast.typed_expr_type(cv_arg)), head_str)),
                     s3, es3, call_eff)
           else
             # Return-position dispatch — first_concrete_typed_arg_str would pick
@@ -2760,6 +2759,27 @@ fn class_var_arg_or_fallback(
       | types.Scheme _ _ method_type _ _ -> class_var_arg(method_type, class_vars, typed_args, subst)
   | Nothing -> first_concrete_typed_arg(typed_args, subst)
 
+# The dictionary's type argument is the CLASS VARIABLE's binding, not the whole
+# argument type: `fn label(xs: t Int)` binds `t` to `Tagged k` while the argument
+# is `Tagged k Int`, and an instance context substituted against that extra
+# trailing argument binds the head's variable to it. Falling back unless the
+# projection names the same head leaves the instance head_str gated on unchanged.
+fn class_var_dispatch_type(
+  method_name: String,
+  class_vars: List String,
+  typed_args: List typed_ast.TypedExpr,
+  ret_t: types.Type,
+  subst: Dict types.Type,
+  env: Dict types.Scheme,
+  arg_t: types.Type,
+  head_str: String
+) -> types.Type =
+  let Just sch = dict_get(method_name, env) else arg_t
+      Just projected = dispatch_type_for_vars(types.scheme_type(sch), typed_args, ret_t, subst,
+                                              class_vars) else arg_t
+      Just h = concrete_type_str(projected) else arg_t
+  in if h == head_str then projected else arg_t
+
 # Like first_concrete_typed_arg_str, but returns the arg itself (used as the W4
 # fallback so head_str and TypeExpr derive from the same TypedExpr).
 fn first_concrete_typed_arg(typed_args: List typed_ast.TypedExpr, subst: Dict types.Type) -> Maybe typed_ast.TypedExpr =
@@ -2922,13 +2942,33 @@ fn type_to_typeexpr_with_prog_vars(t: types.Type, class_name: String, env: Dict 
                     type_to_typeexpr_with_prog_vars(arg, class_name, env))
   | types.TVar name ->
       match dict_get("@fwd:" ++ types.tyvar_identity(name) ++ ":" ++ class_name, env) with
-      | Just scheme ->
-          match scheme with
-          | types.Scheme _ _ (types.TConst prog_var) _ _ -> ast.TypeName(types.type_id_name(prog_var))
-          | _ -> ast.TypeName("_")
-      | Nothing -> ast.TypeName("_")
+      | Just scheme -> fwd_scheme_prog_var(scheme)
+      | Nothing -> fwd_prog_var_any_class(types.tyvar_identity(name), env)
   | types.TTuple items ->
       ast.TupleType(list_map(\item -> type_to_typeexpr_with_prog_vars(item, class_name, env), items))
+  | _ -> ast.TypeName("_")
+
+# The program name a forwarded type variable was written under. The @fwd marker
+# records it once per CLASS, but the name belongs to the VARIABLE, so a marker
+# any other constraint on it seeded answers just as well. `_` is the last resort
+# and a poor one: it reads downstream as a concrete type of that name, so the
+# constraint resolves to a missing instance instead of forwarding the caller's
+# dictionary. Only reached when the class-keyed lookup misses.
+fn fwd_prog_var_any_class(tyvar: String, env: Dict types.Scheme) -> ast.TypeExpr =
+  fwd_prog_var_in_entries("@fwd:" ++ tyvar ++ ":", vec_to_list(dict_entries(env)))
+
+fn fwd_prog_var_in_entries(prefix: String, entries: List (String, types.Scheme)) -> ast.TypeExpr =
+  match entries with
+  | Nil -> ast.TypeName("_")
+  | [entry | rest] ->
+      match entry with
+      | (key, scheme) ->
+          if str_starts_with(key, prefix) then fwd_scheme_prog_var(scheme)
+          else fwd_prog_var_in_entries(prefix, rest)
+
+fn fwd_scheme_prog_var(scheme: types.Scheme) -> ast.TypeExpr =
+  match scheme with
+  | types.Scheme _ _ (types.TConst prog_var) _ _ -> ast.TypeName(types.type_id_name(prog_var))
   | _ -> ast.TypeName("_")
 
 # Returns the outermost TVar name from the first arg whose head is a TVar after
@@ -8783,6 +8823,9 @@ fn find_inst_in_return_type_list(class_name: String, items: List types.Type, env
 # concrete both want the same node, and having one spelling of it keeps them from
 # drifting. Evidence stays `EvUnresolved` — resolve.sprout owns the instance
 # table and reports a missing instance against this position.
+# `args` is used as given. A caller REPLACING a dict it already emitted strips
+# first, at its own call site; dropping them in here would silently discard a
+# method-level dictionary the moment the injector stopped appending them.
 fn concrete_dispatch_call(
   env: Dict types.Scheme,
   fn_: typed_ast.TypedExpr,
@@ -8796,7 +8839,7 @@ fn concrete_dispatch_call(
     Cons(typed_ast.TDict(
       ast.TypeConstraint(class_name, Cons(type_to_typeexpr_with_prog_vars(resolved_t, class_name, env), Nil)),
       types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved),
-      strip_leading_tdicts(args)),
+      args),
     t, pos)
 
 fn try_rewrite_for_return_dispatch(
@@ -8824,7 +8867,7 @@ fn try_rewrite_for_return_dispatch(
       # position rather than letting it reach the linker.
       match concrete_type_str(resolved_t) with
       | Nothing -> keep_or_forward_dispatch(env, subst, fn_, args, t, pos, class_name, resolved_t)
-      | Just _ -> concrete_dispatch_call(env, fn_, args, t, pos, class_name, resolved_t)
+      | Just _ -> concrete_dispatch_call(env, fn_, strip_leading_tdicts(args), t, pos, class_name, resolved_t)
 
 # Input-position dispatch resolves eagerly during inference, so a call that
 # already carries a dict is left exactly as it is — re-deriving it here could only
@@ -8869,7 +8912,7 @@ fn maybe_forward_input_dispatch(
   in
     match concrete_type_str(resolved_t) with
     | Nothing -> keep_or_forward_dispatch(env, subst, fn_, args, t, pos, class_name, resolved_t)
-    | Just _ -> concrete_dispatch_call(env, fn_, args, t, pos, class_name, resolved_t)
+    | Just _ -> concrete_dispatch_call(env, fn_, strip_leading_tdicts(args), t, pos, class_name, resolved_t)
 
 # Inject a forwarded dict when the still-polymorphic dispatch variable is one the
 # enclosing declaration declared a constraint for; otherwise leave the call alone.

@@ -999,15 +999,15 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
 
 ### 7.5) Type Classes
 
-- [ ] `P1` **A constrained instance head picks the wrong context dictionary when the class
-  variable is partially applied.** With `class Container t` declaring `fn show_all(xs: t Int)`
-  and `instance Container (Tagged k) where ToString k`, calling it at `k = Bool` captures the
-  `ToString Int` witness and prints `1` for `true`. No method-level `where` is involved: the
-  shape predates that feature and reproduces on master's compiler. The same instance context
-  over a FIRST-ORDER class variable (`instance Pretty (Tagged k v) where ToString k`) resolves
-  correctly and is covered by `tests/stdlib/test_method_constraint_dispatch.spr`, so the trigger
-  is the partial application, in `resolve.produce_instance_evidence`'s substitution of the
-  instance context against the concrete head's type arguments.
+- [ ] `P2` **An instance head whose kind disagrees with the class variable's is caught at the
+  CALL SITE, not at the declaration.** `class Boxed t` used as `t Int` needs `t :: * -> *`, so
+  `instance Boxed (Tagged k v)` is ill-kinded; `resolve.check_context_subs` now rejects it, but
+  only where a call forces the head match, so an instance nobody calls compiles clean. The
+  diagnostic also points at the call rather than the offending `instance` line. A real check
+  wants the class variable's kind (from how the method signatures apply it) against the head's
+  residual kind (from the type constructor's declared arity) at instance registration.
+  `tests/conformance/type_error/instance_head_oversaturated.spr` covers the call-site case.
+
 - [ ] `P2` **A class method's `.iface` scheme quantifies fewer binders than the live
   registration.** `iface_codec.method_scheme` quantifies the CLASS parameters only, so a
   method-level constraint head is keyed by source NAME, while `infer.register_class_method_over`

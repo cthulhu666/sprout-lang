@@ -1,0 +1,17 @@
+# The class variable is used APPLIED (`t Int`), so it has kind `* -> *` and the
+# instance head must leave one argument off. This head saturates `Tagged`, so the
+# head match binds no `k` and the `where` clause constrains a variable that is not
+# there. Lowering would fill the slot with a thunk that only fires at run time.
+module main
+
+type Tagged k v = Tagged k v
+
+class Boxed t
+  fn label(xs: t Int) -> String
+
+instance Boxed (Tagged k v) where ToString k
+  fn label(xs: Tagged k Int) -> String =
+    match xs with
+    | Tagged k v -> to_string(k) ++ "=" ++ to_string(v)
+
+fn main() -> Unit !{IO} = print(label(Tagged(true, 5)))

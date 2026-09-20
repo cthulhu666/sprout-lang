@@ -84,7 +84,7 @@ free, which is what lets `Maybe`'s instance say `z`.
 
 ## 5. Hidden-argument ABI
 
-One order, three sites:
+One order, four sites:
 
 ```
 <declared params> ++ <instance/class dictionaries> ++ <method-level dictionaries>
