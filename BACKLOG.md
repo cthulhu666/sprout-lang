@@ -1870,10 +1870,10 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   every call is refused — at `-O2`, under `-flto`, and with the whole program in one module.
   Measured 2026-09-20: unblocking it is **−38%** on `bench/gc_roots` and **−20%** on N-queens, as
   large as the root-stack rewrite that landed the same day. The fix is a build-pipeline change, not
-  a codegen one — the emitted IR must stay target-neutral because the seed is committed and
-  cross-platform — and it *links faster* than today. Before adopting, check the runtime's hot loops
-  still vectorise. `docs/cross-tu-inlining-v0.md` has the evidence, the pipeline and §6's list of
-  what is still unverified. Supersedes the earlier "inline the GC root push, or enable LTO" entry.
+  a codegen one (emitted IR must stay target-neutral — the seed is committed and cross-platform),
+  and it *links faster* than today. The runtime's own codegen survives it as long as the final step
+  carries `-mcpu`. `docs/cross-tu-inlining-v0.md` has the pipeline, the evidence, and §7 on what is
+  still unverified: Linux, binary size, the full suite. Supersedes the earlier LTO entry.
 - [ ] `P2` **GC trigger is object-count-blind, not byte-aware.** `sprout_gc_maybe_collect_threshold`
   fires on `g_managed_heap_count >= g_gc_threshold`, and the count increments by 1 per managed
   object regardless of size — a `VectorVal`'s backing array is a plain `malloc`, invisible to the
