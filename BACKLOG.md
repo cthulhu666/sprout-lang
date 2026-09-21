@@ -1864,15 +1864,17 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
 > `region_find`/`sprout_heap_lookup` are `static` and fully inlined at `-O2`, so **no profiler can
 > attribute to them** — size them by sensitivity probes instead.
 
-- [ ] `P2` **Whole-program linking is wired into two recipes only; the rest is unverified.**
-  `scripts/link_whole_program.sh` inlines the runtime into emitted code — **−38.1%** on
-  `bench/gc_roots` — and `compile-native` and `build-sproutd` use it. Open: it is measured on
-  macOS arm64 only, so Linux x86_64/aarch64 and the release workflow need their own run; binary
-  size grows 6.6% and is unmeasured elsewhere; and `uncharted-suns`, the workload that prompted
-  the GC work, has never been measured on it. Not a candidate for the 416-binary test path —
-  ~700 ms of extra link each, buying nothing for a binary that runs once. Lowering the root stack
-  in `ir_lowering` was built and rejected instead (−6.1%: the export it needs destroys the alias
-  analysis that makes the win) — `docs/gc-root-inline-lowering-v0.md` §10,
+- [ ] `P2` **`uncharted-suns` does not use whole-program linking, and it is where the win is.**
+  Measured on its perft-4 suite: **−20.7%** (83.4 s → 66.1 s), 807 → 4 root-push branches,
+  answers identical. But it builds with its own `clang emitted.ll $runtime_src -O2` lines and
+  never calls `compile-native`, so #322 changed nothing for Sprout's only real user. Adopting it
+  is a change in THAT repo, against a script in this one — decide whether that coupling is wanted
+  before wiring it. `docs/cross-tu-inlining-v0.md` §5.3.
+
+- [ ] `P2` **Whole-program linking is measured on macOS arm64 only.** Linux x86_64/aarch64 and
+  the release workflow need their own run. Binary size grew 6.6% on `bench/gc_roots` and 21% on
+  perft, so it is workload-dependent and unmeasured elsewhere. Not a candidate for the
+  416-binary test path — a binary that runs once cannot repay any extra link.
   `docs/cross-tu-inlining-v0.md` §5.2.
 - [ ] `P2` **GC trigger is object-count-blind, not byte-aware.** `sprout_gc_maybe_collect_threshold`
   fires on `g_managed_heap_count >= g_gc_threshold`, and the count increments by 1 per managed

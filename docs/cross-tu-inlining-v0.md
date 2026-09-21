@@ -172,6 +172,32 @@ The compiler itself does not clearly clear that bar. Linking the committed seed 
 (−11.8%), which over 416 files at 5 jobs is about 3.8 s of wall clock saved per suite run against
 11.8 s of extra link whenever the compiler is rebuilt.
 
+### 5.3 On a real program: −20.7%, and it is not wired to one
+
+`bench/gc_roots` is a microbenchmark, so every figure above is measured where the runtime is most
+of the binary. Repeated on `uncharted-suns`, the only program anyone actually runs — its perft-4
+suite, 197281 leaf nodes over a copying board, headless and allocation-heavy:
+
+| | today | whole-program |
+|---|---:|---:|
+| `bl sprout_gc_push_i64_root` | 807 | **4** |
+| `bl sprout_gc_pop_roots` | 392 | **1** |
+| time (min of 3, interleaved) | 83.4 s | **66.1 s** (−20.7%) |
+| binary | 309,720 B | 375,608 B (+21%) |
+| build, warm cache | 1.06 s | 1.05 s |
+
+Answers byte-identical. Three of those rows disagree with 5.1 and 5.2, and the microbenchmark is
+the one that misleads: the speedup is roughly half, the size growth three times larger, and the
+extra link cost is **not** ~700 ms but nil — that figure is the runtime's codegen amortised over
+a tiny program, and it disappears once the program's own IR is the bulk of the module. The
+per-binary cost argument for keeping this off the test path still holds (those binaries are
+tiny); the argument that it costs ~700 ms *everywhere* does not.
+
+`uncharted-suns` cannot benefit as things stand. It builds with its own
+`clang emitted.ll $runtime_src -O2` lines (`justfile:130`, `chess/Justfile:179`) and never calls
+`compile-native`, so nothing that landed here reaches it. Wiring it up is a change in that repo
+depending on a script in this one; `BACKLOG.md` carries the decision.
+
 ## 6. The runtime's own codegen survives the strip
 
 Stripping per-function features does not downgrade the runtime's own code. Runtime compiled
@@ -253,9 +279,11 @@ Sources: [rustc dev guide, monomorphization](https://rustc-dev-guide.rust-lang.o
 1. **Linux and Windows.** Measured on macOS arm64 only. The mechanism is target-independent, but
    the numbers are not.
 2. **Binary size.** `bench/gc_roots`: 248 088 bytes today, 264 392 under route A, 77 224 under
-   plain `-flto`. Route B is unmeasured.
-3. **Any workload that is not these two microbenchmarks.** `uncharted-suns` is the only real user
-   and the workload that prompted the GC work; it is unmeasured here.
+   plain `-flto`. On perft the growth is 21%, not 6.6%, so it tracks the workload. Route B is
+   unmeasured.
+3. ~~Any workload that is not these two microbenchmarks.~~ Answered in 5.3: `uncharted-suns`
+   perft-4 gives −20.7%, about half the microbenchmark figure. What is still open is that it
+   does not use this path at all.
 4. **Observable behaviour under whole-module optimisation.** Answers matched on two programs and
    the seed's emitted IR was byte-identical. That is not the full suite.
 
