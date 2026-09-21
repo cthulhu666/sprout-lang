@@ -1864,12 +1864,15 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
 > `region_find`/`sprout_heap_lookup` are `static` and fully inlined at `-O2`, so **no profiler can
 > attribute to them** — size them by sensitivity probes instead.
 
-- [ ] `P2` **`uncharted-suns` does not use whole-program linking, and it is where the win is.**
-  Measured on its perft-4 suite: **−20.7%** (83.4 s → 66.1 s), 807 → 4 root-push branches,
-  answers identical. But it builds with its own `clang emitted.ll $runtime_src -O2` lines and
-  never calls `compile-native`, so #322 changed nothing for Sprout's only real user. Adopting it
-  is a change in THAT repo, against a script in this one — decide whether that coupling is wanted
-  before wiring it. `docs/cross-tu-inlining-v0.md` §5.3.
+- [ ] `P2` **DECISION: what consumers should depend on for whole-program linking.**
+  `uncharted-suns` now calls `$SPROUT_ROOT/scripts/link_whole_program.sh` directly (its PR #387,
+  −20.7% on perft-4). Provisional by agreement: it replaced a worse coupling, since those recipes
+  compiled `runtime/*.c` themselves. The permanent shape is undecided. (a) Publish
+  `build/runtime.bc` as a declared artifact and let consumers link it — Zig's cached-libc
+  pattern. (b) Give the driver a `--link` mode so it owns the link as `rustc` does; also ends the
+  `-framework` flags duplicated into every consumer, but puts clang-spawning inside the
+  self-hosted compiler. (c) Ship the runtime as a shared library — Swift's choice, and it
+  forecloses this optimisation entirely. `docs/cross-tu-inlining-v0.md` §5.3.
 
 - [ ] `P2` **Whole-program linking is measured on macOS arm64 only.** Linux x86_64/aarch64 and
   the release workflow need their own run. Binary size grew 6.6% on `bench/gc_roots` and 21% on

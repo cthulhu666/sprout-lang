@@ -187,16 +187,30 @@ suite, 197281 leaf nodes over a copying board, headless and allocation-heavy:
 | build, warm cache | 1.06 s | 1.05 s |
 
 Answers byte-identical. Three of those rows disagree with 5.1 and 5.2, and the microbenchmark is
-the one that misleads: the speedup is roughly half, the size growth three times larger, and the
-extra link cost is **not** ~700 ms but nil — that figure is the runtime's codegen amortised over
-a tiny program, and it disappears once the program's own IR is the bulk of the module. The
-per-binary cost argument for keeping this off the test path still holds (those binaries are
-tiny); the argument that it costs ~700 ms *everywhere* does not.
+the one that misleads: the speedup is roughly half and the size growth three times larger.
 
-`uncharted-suns` cannot benefit as things stand. It builds with its own
-`clang emitted.ll $runtime_src -O2` lines (`justfile:130`, `chess/Justfile:179`) and never calls
-`compile-native`, so nothing that landed here reaches it. Wiring it up is a change in that repo
-depending on a script in this one; `BACKLOG.md` carries the decision.
+### 5.4 The link cost is not a constant — it scales with module size
+
+The ~700 ms in 5.1 was read as a property of the technique. It is a property of
+`bench/gc_roots`. Warm-cache link of the same runtime into three programs:
+
+| program | emitted IR | link today | whole-program |
+|---|---:|---:|---:|
+| `bench/gc_roots` | small | ~119 ms | ~818 ms (+700 ms) |
+| perft-4 suite | 9 183 lines | 1.06 s | 1.05 s (nil) |
+| `uncharted-suns` `game/app.sprout` | 267 213 lines | **7 s** | **148 s (+141 s)** |
+
+Whole-module `-O2` re-optimises and codegens the runtime *alongside the program's own IR*, so
+the cost tracks the combined module, not the runtime. On a tiny program the runtime dominates
+and the overhead looks like a constant; on a large one it is 21× the whole build.
+
+The inlining still fires at that size — the game goes 39 139 → 883 root-push branches and
+8 119 → 15 pops — so this is a cost question, not a capability one. The binary grows 2.4 → 4.3 MB
+(+79%). `uncharted-suns` therefore takes it unconditionally on its perft gate and behind
+`UNSUNS_WHOLE_PROGRAM=1` on `run` and `run-gfx` (its PR #387).
+
+That also sharpens what a future default must not be: any `--link` mode (§`BACKLOG.md` decision)
+that turns this on unconditionally would make a large program's build unusable.
 
 ## 6. The runtime's own codegen survives the strip
 
