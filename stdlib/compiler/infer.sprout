@@ -2948,23 +2948,14 @@ fn type_to_typeexpr_with_prog_vars(t: types.Type, class_name: String, env: Dict 
       ast.TupleType(list_map(\item -> type_to_typeexpr_with_prog_vars(item, class_name, env), items))
   | _ -> ast.TypeName("_")
 
-# The program name a forwarded type variable was written under. The @fwd marker
-# records it once per CLASS, but the name belongs to the VARIABLE, so a marker
-# any other constraint on it seeded answers just as well. `_` is the last resort
-# and a poor one: it reads downstream as a concrete type of that name, so the
-# constraint resolves to a missing instance instead of forwarding the caller's
-# dictionary. Only reached when the class-keyed lookup misses.
+# The program name a forwarded type variable was written under. @fwd is keyed by
+# CLASS, but the name belongs to the VARIABLE, so @fwdvar answers for any class
+# that forwarded it. `_` is the last resort and a poor one: it reads downstream as
+# a concrete type of that name, so the slot is null-filled instead of forwarded.
 fn fwd_prog_var_any_class(tyvar: String, env: Dict types.Scheme) -> ast.TypeExpr =
-  fwd_prog_var_in_entries("@fwd:" ++ tyvar ++ ":", vec_to_list(dict_entries(env)))
-
-fn fwd_prog_var_in_entries(prefix: String, entries: List (String, types.Scheme)) -> ast.TypeExpr =
-  match entries with
-  | Nil -> ast.TypeName("_")
-  | [entry | rest] ->
-      match entry with
-      | (key, scheme) ->
-          if str_starts_with(key, prefix) then fwd_scheme_prog_var(scheme)
-          else fwd_prog_var_in_entries(prefix, rest)
+  match dict_get(fwdvar_key(tyvar), env) with
+  | Just scheme -> fwd_scheme_prog_var(scheme)
+  | Nothing -> ast.TypeName("_")
 
 fn fwd_scheme_prog_var(scheme: types.Scheme) -> ast.TypeExpr =
   match scheme with
@@ -3782,8 +3773,15 @@ fn seed_one_constraint_marker(c: ast.TypeConstraint, prog_to_fresh: Dict types.T
 # cascade resolution — the wrap makes the swap a compile error here.
 fn seed_fwd_with_supers(class_name: String, fresh_name: FreshTVarName, prog_var: ProgVarName, env: Dict types.Scheme) -> Dict types.Scheme =
   seed_superclass_fwd_markers(class_name, fresh_tvar_str(fresh_name), prog_var_str(prog_var),
-    dict_set("@fwd:" ++ fresh_tvar_str(fresh_name) ++ ":" ++ class_name,
-             types.mono(types.TConst(types.type_id(prog_var_str(prog_var)))), env))
+    dict_set(fwdvar_key(fresh_tvar_str(fresh_name)),
+             types.mono(types.TConst(types.type_id(prog_var_str(prog_var)))),
+      dict_set("@fwd:" ++ fresh_tvar_str(fresh_name) ++ ":" ++ class_name,
+               types.mono(types.TConst(types.type_id(prog_var_str(prog_var)))), env)))
+
+# Class-independent companion to @fwd: one entry per forwarded VARIABLE, so
+# recovering its program name is a lookup rather than a scan of the whole env.
+# Every site that writes an @fwd marker must write this too.
+fn fwdvar_key(tyvar: String) -> String = "@fwdvar:" ++ tyvar
 
 # Seed @fwd markers for all superclasses of class_name.
 # Scans env for "@super:{class_name}:{super_name}" entries and adds
@@ -5122,8 +5120,10 @@ fn seed_given_for_skolem(class_name: String, vname: String, sk: String, env: Dic
   # already qualified (bundler.qualify_ctor_args qualifies exist_constraints),
   # so it matches resolve_skolem_given's lookup off the class marker.
   seed_superclass_fwd_markers(class_name, sk, types.existential_fwd_head(vname),
-    dict_set("@fwd:" ++ sk ++ ":" ++ class_name,
-             types.mono(types.TConst(types.type_id(types.existential_fwd_head(vname)))), env))
+    dict_set(fwdvar_key(sk),
+             types.mono(types.TConst(types.type_id(types.existential_fwd_head(vname)))),
+      dict_set("@fwd:" ++ sk ++ ":" ++ class_name,
+               types.mono(types.TConst(types.type_id(types.existential_fwd_head(vname)))), env)))
 
 # Find the first field whose DECLARED type MENTIONS the existential var, returning
 # its pattern together with that declared type. Uses the shared `types.ftv`

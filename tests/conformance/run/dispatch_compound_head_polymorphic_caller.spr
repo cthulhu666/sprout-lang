@@ -1,0 +1,24 @@
+# A compound-head forwarding function called from a POLYMORPHIC caller. The
+# recorded dispatch type still has a free variable, so a recorder that renders it
+# as `_` loses the caller's dictionary and the slot is null-filled.
+module main
+
+type Tagged k v = Tagged k v
+
+class Boxed t
+  fn label(xs: t Int) -> String
+
+instance Boxed (Tagged k) where ToString k
+  fn label(xs: Tagged k Int) -> String =
+    match xs with
+    | Tagged k v -> to_string(k) ++ "=" ++ to_string(v)
+
+fn via_head(xs: Tagged k Int) -> String where Boxed (Tagged k) = label(xs)
+
+fn outer(xs: Tagged k Int) -> String where Boxed (Tagged k), ToString k =
+  via_head(xs)
+
+fn main() -> Unit !{IO} =
+  do
+    print(outer(Tagged(true, 5)))
+    print(outer(Tagged("q", 7)))
