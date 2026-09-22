@@ -119,6 +119,27 @@ fn plain_container(n: Int) -> Int =
   let xs = [n, n + 1]
   in list_length(xs)
 
+# --- the parameter carve-out (spec §5.8, gh#329) -----------------------------
+#
+# Containment reaches every binder EXCEPT a parameter, which is obliged only when
+# its type IS linear. So a parameter of a merely-containing type may be dropped or
+# used twice, and both must keep compiling. This is a hole, filed as the Deferred
+# "Containment virality" item: closing it waits on a linearity bound on type
+# parameters, without which `pool_worker(ch: Chan TcpConnection, ...)` in
+# stdlib.http_server stops compiling. These pin the accepted shapes so that when
+# virality lands, it lands loudly here instead of silently.
+
+fn param_dropped(m: Maybe File) -> Int = 1
+
+fn param_used_twice(m: Maybe File) -> Int = close_all(m) + close_all(m)
+
+# A LAMBDA parameter is the same carve-out: `first_linear_param` asks whether the
+# type IS linear, so `\m -> 1` at a `Maybe File` slot is not the deferred
+# higher-order rejection either — it simply compiles.
+fn apply_container(g: Maybe File -> Int, m: Maybe File) -> Int = g(m)
+
+fn lambda_param_dropped(n: Int) -> Int = apply_container(\m -> 1, Just (File(n)))
+
 fn main() -> Unit !{IO} =
   run_suite("linear_binders", [
     check_eq("let..in alias once", via_let(File(1)), 1),
@@ -134,5 +155,8 @@ fn main() -> Unit !{IO} =
     check_eq("a function returning a linear is not a resource", recipe_is_not_a_resource(11), 11),
     check_eq("a bare linear ctor as a value is not a resource", ctor_value_is_not_a_resource(12), 12),
     check_eq("a bare linear ctor applied once", ctor_value_applied_once(13), 13),
-    check_eq("container of a non-linear is untouched", plain_container(14), 2)
+    check_eq("container of a non-linear is untouched", plain_container(14), 2),
+    check_eq("a containing-typed PARAMETER may be dropped", param_dropped(Just (File(15))), 1),
+    check_eq("a containing-typed PARAMETER may be used twice", param_used_twice(Just (File(16))), 32),
+    check_eq("a containing-typed LAMBDA parameter may be dropped", lambda_param_dropped(17), 1)
   ])

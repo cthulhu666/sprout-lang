@@ -1443,14 +1443,23 @@ scrutinee; a constructor/tuple sub-pattern binds a linear field), and **`<-`
 do-bind** variables — in `fn`, top-level `let`, and instance-method bodies, and is
 checked on every control-flow path.
 
-A binder carries the obligation when its type **is** a linear type or **contains**
-one as a type argument or tuple component. `let m = Just(File(1))` is bound by the
-rules below even though `Maybe File` is not itself a linear type, and so is a
-user-declared container (`Box File`) — the test is structural, not a list of known
-containers. A **function type is not descended**: `Unit -> File` is a recipe for a
-resource rather than a resource, so binding one and never calling it leaks nothing.
-Containment does not make the containing type linear; it decides which *bindings*
-are tracked (see "Containment virality" under Deferred, below).
+A binder carries the obligation when its type **is** a linear type. For a
+**`let`**, a **pattern variable** and a **`<-` do-bind**, the test also covers
+**containment** — a type that holds a linear type as a type argument or tuple
+component. `let m = Just(File(1))` is bound by the rules below even though
+`Maybe File` is not itself a linear type, and so is a user-declared container
+(`Box File`) — the test is structural, not a list of known containers. A
+**function type is not descended**: `Unit -> File` is a recipe for a resource
+rather than a resource, so binding one and never calling it leaks nothing.
+
+A **parameter — of a `fn` or of a lambda — is the one binder containment
+does not reach**: it is obliged only when its type **is** linear. So
+`fn f(m: Maybe File) -> Int = 1` compiles, and a parameter of a containing
+type may be dropped or used twice. The asymmetry is deliberate but
+temporary: closing it waits on a linearity bound on type parameters,
+without which some correct concurrent code becomes unwritable — see
+"Containment virality" under Deferred, below. Containment never makes the
+containing type linear; it decides which *bindings* are tracked.
 
 The rules:
 
