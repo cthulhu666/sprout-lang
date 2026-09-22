@@ -154,6 +154,37 @@ fn boxed_phantom_tracked(n: Int) -> Int =
   let b = Boxed(Handle(n))
   in match b with | Boxed h -> match h with | Handle k -> k
 
+# The cases above leave `a` free — `Handle(n)` alone is `Handle a` — so they pass
+# with or without the phantom skip. These pin it concretely: each is rejected
+# without the skip, and each is a binder form that must agree with the others.
+
+fn make_handle(n: Int) -> Handle File = Handle(n)
+
+fn make_handle_io(n: Int) -> Handle File !{IO} = Handle(n)
+
+fn phantom_let_concrete(n: Int) -> Int =
+  let h = make_handle(n)
+  in n
+
+# A `<-` bind must not strip the position the declaration drops: `Handle File`
+# yields no File, so binding one obliges nothing — the same answer `let` and a
+# parameter give.
+fn phantom_dobind_dropped(n: Int) -> Int !{IO} =
+  do
+    h <- make_handle_io(n)
+    n
+
+# A comprehension BUILDING linear elements. The synthesized fold's accumulator is
+# `List File` on every step; searching it rejected this and named the generator,
+# which binds an Int.
+fn comprehension_builds_linears(n: Int) -> Int = close_list([File(k) for k in [1, 2, n]])
+
+# A record's phantom marker must be registered before any body is checked, so a
+# function may be written ABOVE the record declaration it depends on.
+fn record_phantom_before_decl(s: Slot File) -> Int = 1
+
+type Slot a = (id: Int)
+
 fn main() -> Unit !{IO} =
   run_suite("linear_binders", [
     check_eq("let..in alias once", via_let(File(1)), 1),
@@ -173,5 +204,9 @@ fn main() -> Unit !{IO} =
     check_eq("a phantom parameter stores nothing (let)", phantom_let_dropped(15), 15),
     check_eq("a phantom parameter stores nothing (param)", phantom_param_dropped(Handle(16)), 1),
     check_eq("a parameter behind an arrow is not stored", recipe_param_dropped(Recipe (File)), 1),
-    check_eq("a phantom nested one level deeper stays tracked", boxed_phantom_tracked(17), 17)
+    check_eq("a phantom nested one level deeper stays tracked", boxed_phantom_tracked(17), 17),
+    check_eq("a concretely-instantiated phantom let is dropped", phantom_let_concrete(18), 18),
+    check_eq("a phantom container bound with `<-` is dropped", phantom_dobind_dropped(19), 19),
+    check_eq("a comprehension may build linear elements", comprehension_builds_linears(20), 23),
+    check_eq("a record's phantom marker precedes its user", record_phantom_before_decl(Slot(id = 21)), 1)
   ])

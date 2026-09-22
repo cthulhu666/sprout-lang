@@ -377,6 +377,35 @@ Two deliberate limits:
   plain occurrence test instead of the declaration-level fixed point with a visited set that §6
   lists as a cost of going further.
 
+**Four corrections from the ensemble review of the first cut** (`/sprout-review high`,
+5 confirmed findings), all of them the same shape: the first cut changed one predicate and
+missed the places that ask the question differently.
+
+- **`<-` bypassed it entirely.** `do_bind_type` falls back to `payload_type`, which strips the
+  last type argument whether or not the declaration stores it — so `h <- mk(n)` at `Handle File`
+  retyped the binder as `File` and demanded a consume, while `let` and a parameter accepted the
+  same value. `chan_new`'s bind form was still rejected, so `http_server`'s thread-it-as-a-
+  parameter workaround was still load-bearing while the docs claimed otherwise. Fixed by giving
+  `do_bind_type` the phantom test.
+- **Comprehensions broke.** `first_linear_param` switched to containment also searches the
+  *synthesized* fold's accumulator, whose type is `List File` on every step while the
+  comprehension builds one — so `[File(n) for n in ns]` was rejected, blaming the generator,
+  which binds an `Int`. Fixed by dropping the accumulator before the search; a genuinely linear
+  generator binder is still rejected, which is what the M4.4 deferral means.
+- **Records were order-dependent.** An ADT's markers are registered in `pre_scan_fn_decls`;
+  a record's were only registered when `typecheck_decl` reached it, so a function written
+  *above* its record was checked with no marker and rejected. Fixed with a `RecordDecl` arm in
+  the pre-scan.
+- **The tests did not discriminate.** Every phantom case passed on the pre-change compiler:
+  `Handle(n)` alone is `Handle a` with `a` free, never the `Handle File` the comments described.
+  Replaced with concretely-instantiated cases, one per binder form, each verified to fail on the
+  commit before the fix.
+
+The first two were live regressions that `just test` and all 46 gates passed over, because no
+program in the corpus had the shape that breaks. That is the durable lesson: a green suite bounds
+the change by what the corpus happens to contain, and for a checking change the corpus is exactly
+what a reviewer should be asked to distrust.
+
 **What this does and does not settle.** The obligation now lands where the value actually
 materialises: `chan_recv(ch)` returns a `Recv a`, whose declaration *does* store its parameter, so
 the binder receiving it is tracked while the channel handle is not. `pool_worker` compiles

@@ -7569,6 +7569,16 @@ fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Di
           pre_scan_fn_decls(rest, register_type_decl_raw(decl, alias_env, env), alias_env)
       | ast.WrapDecl _ _ _ _ ->
           pre_scan_fn_decls(rest, register_type_decl_raw(decl, alias_env, env), alias_env)
+      # Only the phantom markers, and only because they must be in the env before
+      # any BODY is checked. An ADT gets them here already, through
+      # register_type_decl_raw; a record's other registration stays in
+      # typecheck_decl, so without this arm `fn f(h: Holder File)` written ABOVE
+      # `type Holder a = (n: Int)` was checked with no marker and rejected, while
+      # the same two declarations in the other order compiled.
+      | ast.RecordDecl rec_name type_params fields _ _ _ _ ->
+          pre_scan_fn_decls(rest,
+            mark_phantom_params(rec_name, type_params, record_field_type_exprs(fields), env),
+            alias_env)
       | _ -> pre_scan_fn_decls(rest, env, alias_env)
 
 # ---------------------------------------------------------------------------
