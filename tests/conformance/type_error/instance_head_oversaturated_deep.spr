@@ -1,0 +1,17 @@
+# The head saturates a three-parameter constructor while the class variable's use
+# (`t Int`) leaves one argument for it, so the recorded dispatch type is one
+# application shallower than the head. Nothing aligns the two spines, and the
+# `ToString b` slot is filled from the wrong position: this printed a raw pointer.
+module main
+
+type Tri a b c = Tri a b c
+
+class Boxed t
+  fn label(xs: t Int) -> String
+
+instance Boxed (Tri a b c) where ToString b
+  fn label(xs: Tri a b Int) -> String =
+    match xs with
+    | Tri a b c -> to_string(b) ++ "/" ++ to_string(c)
+
+fn main() -> Unit !{IO} = print(label(Tri(1, "hi", 5)))

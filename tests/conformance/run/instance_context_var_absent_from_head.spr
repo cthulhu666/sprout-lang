@@ -1,0 +1,21 @@
+# An instance context may name a variable the head does not bind. The head takes
+# no arguments at all, so there is no arity story to tell about it — the `Baz k`
+# slot is simply unresolvable and stays unfilled, as it did before the dictionary
+# was selected by the class variable. Rejecting this is a regression.
+module main
+
+type Bar = Bar
+
+class Baz k
+  fn bazzy(x: k) -> String
+
+class Foo t
+  fn fooey(x: t) -> String
+
+instance Baz Int
+  fn bazzy(x: Int) -> String = "int"
+
+instance Foo Bar where Baz k
+  fn fooey(x: Bar) -> String = "bar"
+
+fn main() -> Unit !{IO} = print(fooey(Bar))

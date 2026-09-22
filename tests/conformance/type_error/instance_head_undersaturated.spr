@@ -1,0 +1,14 @@
+# The class variable is used BARE (`x: t`), so it stands for a type and the
+# instance head must saturate its constructor. This head leaves one argument off,
+# so the head match binds a `Tagged k` that no method signature can accept.
+module main
+
+type Tagged k v = Tagged k v
+
+class Plain t
+  fn describe(x: t) -> String
+
+instance Plain (Tagged k)
+  fn describe(x: Tagged k Int) -> String = "tagged"
+
+fn main() -> Unit !{IO} = print(describe(Tagged(true, 5)))

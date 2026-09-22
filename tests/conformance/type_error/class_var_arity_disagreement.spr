@@ -1,0 +1,10 @@
+# One class variable cannot be both a type and a type constructor. `one` uses `t`
+# bare and `two` applies it, so no instance head can satisfy both methods. The
+# error belongs to the CLASS declaration, before any instance is written.
+module main
+
+class Mixed t
+  fn one(x: t) -> String
+  fn two(x: t Int) -> String
+
+fn main() -> Unit !{IO} = print("unreachable")

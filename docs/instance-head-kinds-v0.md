@@ -167,15 +167,27 @@ the accumulator is what turned that into a segfault.
    declared parameter count of every `TypeDecl` / `RecordDecl` / `WrapDecl`, same
    sentinel idiom as `@arity:` / `@linear:` / `@type:`. Plus the fixed table for
    `c_runtime_type_names` and 0 for `primitive_type_names`.
-2. **`classvar_arity`** derived from the method SCHEMES (`dict_get(method, env)`,
-   walking the `types.Type` spine for the class parameter) rather than from
-   `ClassMethodSig` TypeExprs, unified across methods and transitive superclasses.
-   The class parameter name comes from the `@class:` marker, whose `Scheme`
-   already carries `class_vars`. Schemes are the one source
-   available on both the bundled and the env path; a decls-only table is inert in
-   the REPL, where no prelude class has a decl. **Verify first:** that method
-   schemes are in `scanned_env` at the point the check runs. If they are not, the
-   check moves later in the chain rather than reverting to decls.
+2. **`classvar_arity` from two sources**, unified across a class's methods and its
+   transitive superclasses. The single-source plan this replaces rested on a
+   precondition that is false: `pre_scan_fn_decls` has no `ClassDecl` case, so
+   `register_class_methods` and `register_class_method_markers` run per-decl inside
+   `typecheck_decls_inner`, after the whole chain. A module's own method schemes are
+   therefore NOT in `scanned_env` where the check belongs. Moving the check later is
+   the wrong repair — it would report a body's type error ahead of the unsatisfiable
+   class declaration that caused it. Two sources is what the same function already
+   does one line above, for the same reason: `declared_types = own_type_names ++
+   type_names_from_env(...)`.
+   - Own classes: the `ClassMethodSig` TypeExprs through `type_from_ast(te,
+     qual_env)`. `qual_env` is the alias env `pre_scan_fn_decls` is already handed,
+     so a method's signature resolves aliases exactly as `register_class_method`
+     resolves them — both sources yield a `types.Type` spine and one walker serves
+     both.
+   - Imported classes: from env, with no new marker. `@class:<method>` keys the
+     method name, its body is `TConst(class)` and its `scheme_vars` are the class
+     parameters, so one pass over `dict_entries` builds class → (vars, methods) the
+     way `class_names_from_env` already builds the class set, and `dict_get(method,
+     env)` gives the spine. `encode_scheme` round-trips `scheme_vars`, so the marker
+     survives the interface codec.
 3. **Read arities verbatim on the bundled path.** The bundler qualifies both sides
    (`Tagged` becomes `main.Tagged`), so a lookup keyed on the head's spelling
    against short-keyed markers misses. Take decls verbatim here, exactly as
@@ -245,17 +257,28 @@ the downstream sweep against uncharted-suns (four instance heads, all arity 0).
 
 ## 9. Tests
 
-- Conformance `type_error`: oversaturated head (`Tagged k v` at `* -> *`);
-  undersaturated head; the `Tri a b c` shape, which today compiles and segfaults;
-  a wrong-kind fn `where` head (`where Pretty Tagged`); a class whose methods
-  disagree on arity.
-- Conformance `run`: `instance Foo Bar where Baz k`; `class Wrapper t where
-  Functor t` with no methods mentioning `t`; `instance Peek (Vector a)` and
-  `instance Peek (Ref a)`.
-- `tests/stdlib/test_method_constraint_dispatch.spr`: a polymorphic caller of the
-  compound-head forwarding function, which currently aborts; and the two-candidate
-  `helper(x: Tagged k Int, y: Tagged j Int) where Boxed (Tagged j)` shape that the
-  argument scan resolves to the wrong parameter.
+All of the fixtures below are in tree, and each was run against the pre-check
+compiler to record what it does today — the five `type_error` ones are accepted
+without complaint, and the `run` ones are stated per fixture.
+
+- Conformance `type_error`, all five accepted today: `instance_head_oversaturated`
+  (`Tagged k v` under a `t Int` method); `instance_head_oversaturated_deep` (the
+  `Tri a b c` shape, which prints a raw pointer rather than segfaulting);
+  `instance_head_undersaturated`; `constraint_head_bare_ctor_arity` (`where Pretty
+  Tagged`); `class_var_arity_disagreement` and
+  `class_superclass_var_arity_disagreement`, which separate the two ways a class can
+  contradict itself — between its own methods, and against a superclass.
+- Conformance `run`: `instance_context_var_absent_from_head`, rejected today and the
+  regression this branch must undo; `class_superclass_var_arity_agrees` and
+  `instance_head_c_runtime_arity` (heads over `Ref` and `Vector`, whose arity has no
+  decl and no marker), both passing today and guarding against a check that rejects
+  what it should accept.
+- `tests/conformance/run/dispatch_compound_head_polymorphic_caller.spr` covers a
+  polymorphic caller of the compound-head forwarding function. An earlier review
+  claimed this aborts; it does not, in either of two variants, so it is a green
+  guard rather than a reproduction. Still wanted: the two-candidate `helper(x: Tagged
+  k Int, y: Tagged j Int) where Boxed (Tagged j)` shape that the argument scan
+  resolves to the wrong parameter.
 - A mechanical sweep asserting all 64 prelude instances are accepted, so the claim
   is checked rather than eyeballed.
 - A REPL/env-path regression through `compile_source_with_cache`, since a

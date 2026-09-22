@@ -1,0 +1,10 @@
+# The disagreement is between a class and its SUPERCLASS, not between two of its
+# own methods. `Functor f` applies its variable once; `Wrapper` uses `t` bare. No
+# instance head can be both a type and a one-argument constructor, so the class
+# declaration itself is unsatisfiable.
+module main
+
+class Wrapper t where Functor t
+  fn unwrap(x: t) -> Int
+
+fn main() -> Unit !{IO} = print("unreachable")

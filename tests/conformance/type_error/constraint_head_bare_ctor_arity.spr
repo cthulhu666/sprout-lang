@@ -1,0 +1,17 @@
+# A constraint head must satisfy the same rule as an instance head. `Pretty`'s
+# class variable is used bare, so `where Pretty Tagged` names a constructor two
+# arguments short of a type. The dictionary such a constraint asks for does not
+# exist at any arity.
+module main
+
+type Tagged k v = Tagged k v
+
+class Pretty t
+  fn pretty(x: t) -> String
+
+instance Pretty Int
+  fn pretty(x: Int) -> String = "int"
+
+fn show_it(x: Int) -> String where Pretty Tagged = pretty(x)
+
+fn main() -> Unit !{IO} = print(show_it(5))
