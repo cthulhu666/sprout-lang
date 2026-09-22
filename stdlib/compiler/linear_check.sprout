@@ -285,7 +285,7 @@ fn first_linear_param(params: List ast.Param, lam_type: types.Type, env: Dict ty
   | Cons prm rest ->
       match lam_type with
       | types.TFunc a b _ _ ->
-          if type_is_linear(a, env) then Just(param_name(prm))
+          if type_mentions_linear(a, env) then Just(param_name(prm))
           else first_linear_param(rest, b, env)
       | _ -> Nothing
 
@@ -1089,12 +1089,52 @@ fn first_linear_in(t: types.Type, env: Dict types.Scheme) -> Maybe types.Type =
   if type_is_linear(t, env) then Just(t)
   else
     match t with
-    | types.TApp base arg ->
-        match first_linear_in(base, env) with
-        | Just found -> Just(found)
-        | Nothing -> first_linear_in(arg, env)
+    | types.TApp _ _ -> first_linear_in_args(head_type_name(t), 0, app_spine_args(t), env)
     | types.TTuple items -> first_linear_in_list(items, env)
-    | _ -> Nothing
+    # The four non-descending answers, spelled out rather than left to a
+    # catch-all (docs/guidelines.md §2a): each is a decision, and a type variant
+    # added later would silently inherit "holds no linear value" — the exact
+    # shape of the phantom bug this walk was just fixed for.
+    | types.TConst _ -> Nothing  # the head; already asked above
+    | types.TVar _ -> Nothing  # universe unknown; see §5.8 on type variables
+    | types.TFunc _ _ _ _ -> Nothing  # a recipe for a resource, not a resource
+    | types.TThunk _ _ -> Nothing  # likewise: nothing is held until it is forced
+
+# The arguments of a type application in DECLARATION order. `TApp` nests to the
+# left, so the spine is unwound and re-appended; the index is what lets the
+# phantom test below line an argument up with the parameter it was written for.
+fn app_spine_args(t: types.Type) -> List types.Type =
+  match t with
+  | types.TApp base arg -> list_append(app_spine_args(base), Cons(arg, Nil))
+  | _ -> Nil
+
+# Containment asks what the DECLARATION stores, not what the application
+# mentions: a position the declaration drops holds nothing to leak.
+# `type Chan a = | Chan Int` keeps an Int handle, so `Chan TcpConnection` is not
+# a container and `pool_worker(ch: Chan TcpConnection, ...)` owes nothing — while
+# `chan_recv(ch)`, whose `Recv a` does store its `a`, still hands back a binder
+# that does. Before this, every phantom position was descended blindly and the
+# leak diagnostic named a linear type the value provably does not hold.
+fn first_linear_in_args(tname: String, idx: Int, args: List types.Type,
+                        env: Dict types.Scheme) -> Maybe types.Type =
+  match args with
+  | Nil -> Nothing
+  | Cons a rest ->
+      if param_is_phantom(tname, idx, env) then first_linear_in_args(tname, idx + 1, rest, env)
+      else
+        match first_linear_in(a, env) with
+        | Just found -> Just(found)
+        | Nothing -> first_linear_in_args(tname, idx + 1, rest, env)
+
+# Mirrors infer.phantom_param_marker, respelled rather than imported for the same
+# reason type_is_linear is (the infer <-> linear_check cycle). The two spellings
+# must agree, and nothing but behaviour says so: a drift silently stops finding
+# the marker and every phantom position is descended again. That is what the
+# phantom cases in tests/stdlib/test_linear_binders.spr catch.
+fn param_is_phantom(tname: String, idx: Int, env: Dict types.Scheme) -> Bool =
+  match dict_get("@phantom:" ++ tname ++ ":" ++ int_to_string(idx), env) with
+  | Just _ -> true
+  | Nothing -> false
 
 fn first_linear_in_list(ts: List types.Type, env: Dict types.Scheme) -> Maybe types.Type =
   match ts with
@@ -1363,18 +1403,31 @@ fn type_is_func(t: types.Type) -> Bool =
   | _ -> false
 
 # The linear parameters that own their argument (no modifier, or `consuming`).
-fn owned_param_names(params: List ast.Param, fn_type: types.Type,
-                     env: Dict types.Scheme) -> List String =
+# Owned parameters carry their TYPE, not just their name: under containment the
+# obliged type is often not the linear one (`Maybe File`), and a leak reported as
+# "linear value 'm'" names a type the `type linear` rule never mentioned. The
+# binder path learned this first (leak_binder_msg); this is the same fix for
+# parameters, which is why both now end in the same message function.
+fn owned_param_binders(params: List ast.Param, fn_type: types.Type,
+                       env: Dict types.Scheme) -> List LinBinder =
   match params with
   | Nil -> Nil
   | Cons prm rest ->
       match fn_type with
       | types.TFunc a b _ _ ->
-          linear_param_cons(type_is_linear(a, env) && ! mode_is_borrowing (param_mode(prm)),
-                            param_name(prm), owned_param_names(rest, b, env))
+          linear_binder_cons(type_mentions_linear(a, env) && ! mode_is_borrowing (param_mode(prm)),
+                             LinBinder(param_name(prm), a), owned_param_binders(rest, b, env))
       | _ -> Nil
 
-# The linear parameters declared `borrowing`.
+fn linear_binder_cons(keep: Bool, b: LinBinder, tail: List LinBinder) -> List LinBinder =
+  if keep then Cons(b, tail) else tail
+
+# The linear parameters declared `borrowing`. Head-only ON PURPOSE, where the
+# owned list above is containment: an ownership MODE may only be written on a
+# type that IS linear (first_bad_modifier's BadNonLinear), so `borrowing m: Maybe
+# File` never reaches here to be classified. Containment in parameter modes is
+# the deferred Option 2, so matching the owned list here would be dead code that
+# reads like a decision.
 fn borrowed_param_names(params: List ast.Param, fn_type: types.Type,
                         env: Dict types.Scheme) -> List String =
   match params with
@@ -1405,7 +1458,7 @@ export fn check_fn_linear(params: List ast.Param, fn_type: types.Type,
   match first_bad_modifier(params, fn_type, env) with
   | Just bad -> LinFail(fn_pos, bad_modifier_message(bad))
   | Nothing ->
-      linear_result(owned_param_names(params, fn_type, env),
+      linear_result(owned_param_binders(params, fn_type, env),
                     borrowed_param_names(params, fn_type, env),
                     once_param_names(params), body, fn_pos, env)
 
@@ -1428,13 +1481,13 @@ export fn check_body_linear(body: typed_ast.TypedExpr, env: Dict types.Scheme) -
   | LinErr p m -> LinFail(p, m)
   | LinOk _ _ -> LinPass
 
-fn linear_result(owned: List String, borrowed: List String, once_names: List String,
+fn linear_result(owned: List LinBinder, borrowed: List String, once_names: List String,
                  body: typed_ast.TypedExpr, fn_pos: source.SourcePos,
                  env: Dict types.Scheme) -> LinCheck =
-  match lin_consumed(body, LinScope(owned, borrowed), env) with
+  match lin_consumed(body, LinScope(binder_names(owned), borrowed), env) with
   | LinErr p m -> LinFail(p, m)
   | LinOk consumed _ ->
-      once_honesty_after(param_obligations(owned, borrowed, consumed, fn_pos),
+      once_honesty_after(param_obligations(owned, borrowed, consumed, fn_pos, env),
                          once_names, body, env)
 
 # CALLEE-SIDE HONESTY (post-review). `once` is a promise the callee makes, and the
@@ -1474,21 +1527,22 @@ fn once_honesty(names: List String, body: typed_ast.TypedExpr,
 # set (else it leaked). A BORROWED one must NOT: consuming it spends a use that
 # belongs to the caller. Returning a borrowed parameter lands here too — a bare
 # reference in return position is a consume — so no separate escape rule is needed.
-fn param_obligations(owned: List String, borrowed: List String,
-                     consumed: List LinUse, fn_pos: source.SourcePos) -> LinCheck =
+fn param_obligations(owned: List LinBinder, borrowed: List String,
+                     consumed: List LinUse, fn_pos: source.SourcePos,
+                     env: Dict types.Scheme) -> LinCheck =
   match first_consumed_borrow(borrowed, consumed) with
   | Just u -> LinFail(luse_pos(u), consumed_borrow_msg(luse_name(u)))
-  | Nothing -> unused_linear_param(owned, consumed, fn_pos)
+  | Nothing -> unused_linear_param(owned, consumed, fn_pos, env)
 
 fn first_consumed_borrow(borrowed: List String, consumed: List LinUse) -> Maybe LinUse =
   match consumed with
   | Nil -> Nothing
   | Cons u rest -> if str_member(luse_name(u), borrowed) then Just(u) else first_consumed_borrow(borrowed, rest)
 
-fn unused_linear_param(owned: List String, consumed: List LinUse,
-                       fn_pos: source.SourcePos) -> LinCheck =
+fn unused_linear_param(owned: List LinBinder, consumed: List LinUse,
+                       fn_pos: source.SourcePos, env: Dict types.Scheme) -> LinCheck =
   match owned with
   | Nil -> LinPass
-  | Cons nm rest ->
-      if luse_member(nm, consumed) then unused_linear_param(rest, consumed, fn_pos)
-      else LinFail(fn_pos, leak_msg(nm))
+  | Cons b rest ->
+      if luse_member(lbind_name(b), consumed) then unused_linear_param(rest, consumed, fn_pos, env)
+      else LinFail(fn_pos, leak_binder_msg(b, env))
