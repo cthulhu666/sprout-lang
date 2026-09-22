@@ -225,7 +225,13 @@ the accumulator is what turned that into a segfault.
 Newly rejected, and each needs a conformance fixture:
 
 - An instance or constraint whose head kind disagrees with its class variable's.
-  On master these abort at run time or silently select the wrong dictionary.
+  Measured against a master-seed compiler, these do not uniformly misbehave today:
+  `instance Boxed (Tri a b c)` with `fn label(xs: Tri a b Int)` prints the CORRECT
+  `hi/5` on master and a raw pointer, `4364600296/5`, on this branch. So the rule
+  rejects a program that works today, and its working is accidental — the head
+  match happens to land on the right argument for this arity. That is the honest
+  cost of the check, and the reason to take it is that the same shape one argument
+  wider silently selects a different dictionary.
 - A class whose occurrences of its variable disagree on arity (`class Twice t`
   above). This compiles today. It is a genuine break, accepted because the class
   is ill-kinded and every instance of it is a coin flip.
