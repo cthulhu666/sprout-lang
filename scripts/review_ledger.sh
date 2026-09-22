@@ -9,7 +9,7 @@
 # review can never dirty a commit. Same place `review_gate.py` keeps its state.
 #
 #   review_ledger.sh open            record a run starting; prints the run id
-#   review_ledger.sh done <id> <found> <confirmed>
+#   review_ledger.sh done <id> <found> <confirmed> [effort]
 #   review_ledger.sh findings <id>   print the path to write that run's findings to
 #   review_ledger.sh count           completed runs on this branch
 #   review_ledger.sh show            one-line summary, for the status line
@@ -25,13 +25,17 @@ branch_name() {
   git rev-parse --abbrev-ref HEAD 2>/dev/null || printf 'DETACHED'
 }
 
-# Columns: when, state, branch, head, run-id, found, confirmed. A `start` row
-# writes "-" for the two counts it cannot know yet.
+# Columns: when, state, branch, head, run-id, found, confirmed, effort. A `start`
+# row writes "-" for the three it cannot know yet.
+#
+# `effort` was appended rather than inserted, and rows predating it have seven
+# fields. Every reader selects by number and stops at $7 or tests NF, so both
+# widths parse — which is the only reason this column could be added at all.
 append_row() {
   local file="$1"
   shift
   mkdir -p "$(dirname "$file")" || return 1
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$@" >> "$file"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$@" >> "$file"
 }
 
 cmd_open() {
@@ -41,20 +45,27 @@ cmd_open() {
   head=$(git rev-parse --short HEAD 2>/dev/null || printf 'unknown')
   # Seconds since epoch plus the pid: unique without coordinating with readers.
   id="$(date +%s)-$$"
-  append_row "$file" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" start "$branch" "$head" "$id" - -
+  append_row "$file" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" start "$branch" "$head" "$id" - - -
   printf '%s\n' "$id"
 }
 
 cmd_done() {
-  local file branch head id found confirmed
-  id="${1:?usage: review_ledger.sh done <id> <found> <confirmed>}"
+  local file branch head id found confirmed effort
+  id="${1:?usage: review_ledger.sh done <id> <found> <confirmed> [effort]}"
   found="${2:--}"
   confirmed="${3:--}"
+  # The level arrives from an argument the skill parsed, so only the known
+  # vocabulary is stored: a tab in it would split the row, and every reader here
+  # and in the status line addresses columns by number.
+  case "${4:-}" in
+    low | medium | high | xhigh | max) effort="$4" ;;
+    *) effort=- ;;
+  esac
   file=$(ledger_path) || { echo "not a git repository" >&2; return 1; }
   branch=$(branch_name)
   head=$(git rev-parse --short HEAD 2>/dev/null || printf 'unknown')
   append_row "$file" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" done "$branch" "$head" "$id" \
-             "$found" "$confirmed"
+             "$found" "$confirmed" "$effort"
 }
 
 # Where a run's findings are written, as a sibling of the TSV rather than a column
@@ -100,15 +111,23 @@ cmd_show() {
   [ -f "$file" ] || return 0
   # Sum only a run's FIRST `done` row. Counting distinct ids while summing every
   # row would let one re-reported run inflate the totals but not the run count.
+  #
+  # The level is the latest counted run's, not an aggregate — averaging or
+  # listing levels answers nothing, and "how hard was the last look" is the
+  # question a bare `review:3` leaves open. Assigned on every counted row, so a
+  # later run that recorded no level clears it rather than inheriting the
+  # previous one's.
   awk -F'\t' -v b="$branch" '
     $3==b && $2=="done" && !($5 in seen) {
                           seen[$5]=1
                           if ($6 != "-") found += $6
-                          if ($7 != "-") confirmed += $7 }
+                          if ($7 != "-") confirmed += $7
+                          level = (NF >= 8 && $8 != "-") ? $8 : "" }
     END { n = length(seen)
           if (n == 0) exit
           printf "review:%d", n
           if (confirmed != "") printf " %d found %d real", found, confirmed
+          if (level != "") printf " @%s", level
           printf "\n" }' "$file"
 }
 
@@ -118,6 +137,6 @@ case "${1:-show}" in
   findings) shift; cmd_findings "$@" ;;
   count) cmd_count ;;
   show)  cmd_show ;;
-  *) echo "usage: review_ledger.sh {open|done <id> <found> <confirmed>|findings <id>|count|show}" >&2
+  *) echo "usage: review_ledger.sh {open|done <id> <found> <confirmed> [effort]|findings <id>|count|show}" >&2
      exit 2 ;;
 esac

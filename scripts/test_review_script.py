@@ -7,7 +7,7 @@ before it surfaces, and a logic slip in the dedup or the verify cap costs a lost
 finding and never surfaces at all. This extracts the fence and runs it against
 stub agents, so both are caught by `just test-review-script`.
 
-Three behaviours are worth pinning beyond "it parses":
+Four behaviours are worth pinning beyond "it parses":
 
   1. Dedup must merge one bug reported at two nearby lines, and must NOT merge two
      different bugs that happen to sit nearby. Line-exact keying failed the first;
@@ -17,6 +17,10 @@ Three behaviours are worth pinning beyond "it parses":
      votes-only cap would have dropped it.
   3. One batched verifier judges every finding, so a verdict it omits must leave
      that finding unconfirmed. A short reply must not be able to pass a finding.
+  4. The effort ladder is a table in SKILL.md prose and a table in the script,
+     written in different files with nothing between them. These pin the two
+     together, and pin that a malformed level falls back rather than running
+     zero passes and then recording a review that never happened.
 """
 import json
 import os
@@ -68,10 +72,16 @@ HARNESS = """
 const REVIEWS = %s
 const VERDICTS = %s
 const INDEX_MODE = %s
+// `args` is a declared global in the Workflow runtime, holding the tool's `args`
+// input or `undefined`. Declared here for the same reason: left out, every
+// `args`-reading line is a ReferenceError rather than the fallback it models.
+const args = %s
 let reviewN = 0
 let verifyCalls = 0
+const EFFORTS = []
 const agent = async (prompt, opts) => {
   const label = (opts && opts.label) || ''
+  EFFORTS.push({ label, effort: (opts && opts.effort) || null, prompt })
   if (label.startsWith('verify:')) {
     // One skeptic gets the whole list, so the stub answers by reading each
     // entry's `[i] file:line` header back out of the prompt it was handed.
@@ -103,18 +113,20 @@ const log = m => LOGS.push(m)
 async function __main() {
 %s
 }
-__main().then(r => console.log(JSON.stringify({ ...r, LOGS, verifyCalls, reviewN })))
+__main().then(r => console.log(JSON.stringify({ ...r, LOGS, verifyCalls, reviewN, EFFORTS })))
 """
 
 
-def run(reviews, verdicts=(), index_mode="prompt"):
+def run(reviews, verdicts=(), index_mode="prompt", args=None):
     """Run the extracted script with `reviews[i]` as pass i's findings.
 
     `index_mode` controls how the stub verifier numbers its reply: "prompt"
     echoes the indices it was given, "one_based"/"out_of_range"/"duplicate"
-    number it wrongly, which is what exercises the join's validation."""
+    number it wrongly, which is what exercises the join's validation.
+
+    `args` is the Workflow `args` input — the effort level and review target."""
     src = HARNESS % (json.dumps(reviews), json.dumps(list(verdicts)),
-                     json.dumps(index_mode), extract_script())
+                     json.dumps(index_mode), json.dumps(args), extract_script())
     d = tempfile.mkdtemp(prefix="sprout_review_script_")
     try:
         path = os.path.join(d, "script.mjs")
@@ -269,6 +281,63 @@ check("N reviewer agents", 3, out["reviewN"])
 # costs N, not N+1. SKILL.md and README.md both claim this.
 out, err = run([[LONE_LOW]] + [[]] * 2)
 check("no verify agent when nothing clears the gate", 0, out["verifyCalls"])
+
+# --- the effort ladder -------------------------------------------------------
+# The level is the user's only dial, and it reaches the script as data. These
+# pin the table in SKILL.md §Arguments against the code that implements it —
+# the two are written in different files and nothing else compares them.
+LADDER = {"low": 1, "medium": 2, "high": 3, "xhigh": 5, "max": 8}
+for level, passes in LADDER.items():
+    out, err = run([[]] * passes, args={"effort": level, "target": ""})
+    check("%s runs %d reviewer(s)" % (level, passes), passes, out["reviewN"])
+    check("%s reports the level it ran at" % level, level, out["effort"])
+    check("%s reports its pass count" % level, passes, out["passes"])
+    check("%s sets the reviewers' effort" % level, [level] * passes,
+          [e["effort"] for e in field(out, "EFFORTS")])
+
+# A malformed `args` must not run zero passes and then close a ledger row saying
+# a review happened. The caller should have rejected the level; this is what
+# happens when it did not.
+for bad in (None, {}, {"effort": "higher"}, {"effort": None}, {"effort": 3}):
+    out, err = run([[]] * 3, args=bad)
+    check("%s falls back to high" % json.dumps(bad), "high", out["effort"])
+    check("%s still runs 3 passes" % json.dumps(bad), 3, out["reviewN"])
+out, err = run([[]] * 3, args={"effort": "higher"})
+check("a bad level is logged, not absorbed", 1,
+      sum(1 for m in field(out, "LOGS") if "defaulting to high" in m))
+
+# The skeptic never drops below medium. It is told to default to refuted=true
+# when unsure, so a cheaper skeptic is cheaper at KILLING real findings — the
+# one dial where saving tokens costs correctness rather than coverage.
+out, err = run([[LONE_HIGH]], args={"effort": "low", "target": ""})
+check("low reviewers still get a medium skeptic", "medium",
+      next((e["effort"] for e in field(out, "EFFORTS")
+            if e["label"].startswith("verify:")), None))
+out, err = run([[LONE_HIGH]] * 8, args={"effort": "max", "target": ""})
+check("above the floor the skeptic matches the level", "max",
+      next((e["effort"] for e in field(out, "EFFORTS")
+            if e["label"].startswith("verify:")), None))
+
+# The target reaches the reviewers. The prompt has described this branch since
+# it was ported, while nothing could pass one — so what is checked is that the
+# target is in the prompt the reviewer is actually handed, not just in the
+# result. A target that only reaches the return value reviews the wrong thing.
+out, err = run([[]], args={"effort": "low", "target": "  1234  "})
+check("the target is trimmed", "1234", out["target"])
+check("the target is in the reviewer's prompt", 1,
+      sum(1 for e in field(out, "EFFORTS")
+          if e["label"].startswith("review:") and "`1234`" in e["prompt"]))
+# ...and with no target, the reviewer is told to diff the branch instead. The
+# two prompts are exclusive: neither may leak the other's instruction.
+out, err = run([[]] * 3, args={"effort": "high"})
+check("no target reports null rather than empty", None, out["target"])
+check("without a target the reviewer diffs the branch", 3,
+      sum(1 for e in field(out, "EFFORTS")
+          if e["label"].startswith("review:") and "@{upstream}" in e["prompt"]))
+out, err = run([[]], args={"effort": "low", "target": "1234"})
+check("with a target the branch diff is not mentioned", 0,
+      sum(1 for e in field(out, "EFFORTS")
+          if e["label"].startswith("review:") and "@{upstream}" in e["prompt"]))
 
 # --- the cap is announced, per the Workflow guidance on silent caps ----------
 out, err = run([[LONE_LOW]] + [[]] * 2)

@@ -66,6 +66,9 @@ records the run. `/code-review` leaves nothing on disk, so nothing can say how m
 has had; this one opens and closes a row in `$GIT_DIR/claude-review/runs.tsv` (per-worktree,
 invisible to `git status`) and writes the findings beside it, at the path
 `review_ledger.sh findings <id>` names — a count says a review happened, the file says what it said.
+It takes an effort level like `/code-review` does — `/sprout-review [low|medium|high|xhigh|max]
+[<pr#>|<branch>|<path>]`, defaulting to `high` so runs on one branch stay comparable — which buys
+1/2/3/5/8 reviewer passes and is recorded in the ledger beside the counts.
 **It reports and stops**: fixing a finding in the same turn leaves the reader a changelog instead of
 a decision, and that has happened. `scripts/review_ledger.sh count` reads the ledger; test with
 `just test-review-ledger` and `just test-review-script`.

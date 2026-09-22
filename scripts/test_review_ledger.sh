@@ -101,6 +101,54 @@ sub_path=$(bash "$LEDGER" findings "$id1")
 check "findings path from a subdir"    "1"  "$([ -n "$sub_path" ] && [ "$sub_path" = "$fpath" ] && echo 1 || echo 0)"
 cd "$R" || exit 1
 
+# --- the effort column ---------------------------------------------------
+# `rv:3` cannot distinguish three `low` reviews from three `max` ones, so the
+# level a run was asked for is recorded as an eighth column. Everything below
+# pins that it is additive: every existing reader selects $2/$3/$5/$6/$7, and a
+# row written before the column existed has only seven fields.
+git switch -q -c effort-col
+check "effort branch starts at zero"   "0"  "$(bash "$LEDGER" count)"
+
+ide=$(bash "$LEDGER" open)
+bash "$LEDGER" done "$ide" 4 2 high
+check "show reports the level"         "review:1 4 found 2 real @high" "$(bash "$LEDGER" show)"
+
+# The level is the LATEST completed run's, not an aggregate: no question is
+# answered by summing levels across runs, and "how hard was the last look" is.
+ide2=$(bash "$LEDGER" open)
+bash "$LEDGER" done "$ide2" 9 1 max
+check "the latest run's level wins"    "review:2 13 found 3 real @max" "$(bash "$LEDGER" show)"
+
+# Re-reporting must not move anything, the level included: only a run's FIRST
+# `done` row counts, so a retry naming a different level is ignored.
+bash "$LEDGER" done "$ide2" 9 1 low
+check "a retry does not move the level" "review:2 13 found 3 real @max" "$(bash "$LEDGER" show)"
+check "a retry does not inflate count"  "2" "$(bash "$LEDGER" count)"
+
+# Omitting the level is how every pre-existing caller behaves, and must leave
+# `show` in its old shape rather than printing an empty marker.
+git switch -q -c effort-absent
+ida=$(bash "$LEDGER" open)
+bash "$LEDGER" done "$ida" 5 5
+check "an omitted level prints nothing" "review:1 5 found 5 real" "$(bash "$LEDGER" show)"
+
+# A seven-field row is what the ledger held before this column existed. Such a
+# row must keep counting and reporting, or the change silently erases history.
+runs="$(git rev-parse --absolute-git-dir)/claude-review/runs.tsv"
+printf '2020-01-01T00:00:00Z\tdone\teffort-absent\tdeadbee\t999-1\t3\t1\n' >> "$runs"
+check "a legacy 7-field row counts"    "2"  "$(bash "$LEDGER" count)"
+check "a legacy row keeps show intact" "review:2 8 found 6 real" "$(bash "$LEDGER" show)"
+
+# The level reaches this from a parsed argument, so an unknown token is dropped
+# rather than stored: a tab in it would split the row and corrupt every reader.
+git switch -q -c effort-bogus
+idb=$(bash "$LEDGER" open)
+bash "$LEDGER" done "$idb" 1 1 "$(printf 'hi\tgh')"
+check "a bogus level is not recorded"  "review:1 1 found 1 real" "$(bash "$LEDGER" show)"
+check "a bogus level keeps 8 columns"  "1" \
+  "$(awk -F'\t' '$2=="done" && $3=="effort-bogus" { print NF }' "$runs" | grep -c '^8$')"
+git switch -q main
+
 # Outside a repository the ledger must stay quiet rather than erroring: the
 # status line calls `show` on every render, wherever the user happens to be.
 cd /tmp || exit 1
