@@ -200,6 +200,13 @@ its own.
 A directory that cannot be read becomes an empty one rather than an error pane — a tree node has
 nowhere to put a message, and "opened, holding nothing" is something the user can act on.
 
+**The listing is sorted here, directories first and then by name.** `fs.read_dir` answers in the
+filesystem's order, which the builtin behind it documents as unspecified and tells the caller
+showing a list to a human to sort — this is that caller. Unsorted, the same project showed a
+different tree on one machine than on another; `tui-files-smoke` went red on a CI runner and the
+same commit passed on a re-run. Directories first because the expandable rows are the ones a reader
+navigates through. Pinned in `tests/ide/test_ide_filetree.spr`.
+
 ## 8. Verification
 
 - `tests/ide/*.spr`, run by `just test-ide` (in `just test`, and its own CI step). `_test-stdlib`

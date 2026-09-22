@@ -66,7 +66,18 @@ fn entry_node(e: (String, fs.Entry)) -> tr.Node =
                          else tr.NoChildren)
 
 fn nodes_of(es: List (String, fs.Entry)) -> List tr.Node =
-  list_map(entry_node, es)
+  list_map(entry_node, sorted(es))
+
+# `fs.read_dir` answers in the FILESYSTEM'S order, which its own builtin
+# documents as unspecified — "a caller that shows the list to a human sorts
+# it", and this is that caller. Directories first, then by name: the
+# expandable rows are the ones a reader navigates through.
+fn sorted(es: List (String, fs.Entry)) -> List (String, fs.Entry) =
+  vec_to_list(vec_sort_by(ranked, vec_from_list(es)))
+
+fn ranked(e: (String, fs.Entry)) -> (Int, String) =
+  match e with
+  | (name, info) -> (if fs.entry_is_dir(info) then 0 else 1, name)
 
 # The path the widget names is a path of LABELS; `path.join` turns it into one
 # the filesystem takes. Never `"/"` by hand — the separator is `fs.path`'s.
