@@ -1452,6 +1452,24 @@ resource rather than a resource, so binding one and never calling it leaks nothi
 Containment does not make the containing type linear; it decides which *bindings*
 are tracked (see "Containment virality" under Deferred, below).
 
+**Containment reads the declaration, not the type application.** A type argument
+counts only at a position the declaration actually **stores** — one where the
+parameter appears in some constructor field or record field type, outside an
+arrow. A *phantom* parameter holds nothing:
+
+```
+type Chan a = | Chan Int          # `a` is phantom: only an Int handle is stored
+
+fn worker(ch: Chan File) -> Int   # `ch` holds no File; no obligation attaches
+```
+
+This is what lets a handle to a shared queue of linear values be passed around
+freely while the values themselves stay tracked: `chan_recv(ch)` returns a
+`Recv File`, whose declaration *does* store its parameter, so the binder that
+receives it carries the obligation. The test reads one declaration deep, so a
+parameter stored inside another type that itself drops it (`type Outer a =
+| Outer (Chan a)`) is still counted — over-strict, never unsound.
+
 The rules:
 
 - **Reuse** — a linear binding referenced more than once along a path is rejected.
@@ -1672,13 +1690,13 @@ it inside the task instead.
   closure, and `stdlib.http_server` now runs on the linear socket API throughout.
 - Containment virality **as a property of types** — linearity is still
   *per-declaration*: a record that merely contains a linear field is not itself
-  linear (contrast Austral), so `Maybe File` is not a linear type and a *parameter*
-  of that type is not a linear parameter. What containment does decide is which
-  **bindings** carry the use-exactly-once obligation, which is checked (above).
-  Making it a type property would reach parameter modes, borrowing and field reads;
-  it is deferred until a linearity bound on type parameters exists to say "`Chan` is
-  non-linear in its argument", without which some correct concurrent code becomes
-  unwritable in its natural shape. See `docs/linearity-virality-v0.md`.
+  linear (contrast Austral), so `Maybe File` is not a linear type. What containment
+  decides is which **bindings** carry the use-exactly-once obligation — every
+  binder, parameters included (above). Making linearity itself containment-computed
+  would further reach parameter *modes*, `borrowing` filters and field reads, and
+  stays deferred. It no longer waits on a linearity bound for type parameters:
+  the case that motivated that (`Chan a`) is a phantom parameter, which containment
+  now declines to descend on its own. See `docs/linearity-virality-v0.md`.
 - `borrowing` inside an **arrow type**, and a modifier on a **type-variable**
   parameter. Both are described above; both need work this milestone deliberately
   did not take on (a parser change, and a linearity bound on type parameters).

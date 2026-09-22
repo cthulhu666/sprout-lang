@@ -1,0 +1,15 @@
+module main
+
+# The other half of the parameter hole: a containing-typed parameter could also
+# be consumed twice, releasing the same File on both paths.
+
+type linear File = File Int
+
+fn close_it(m: Maybe File) -> Int =
+  match m with
+  | Just f -> match f with | File n -> n
+  | Nothing -> 0
+
+fn twice(m: Maybe File) -> Int = close_it(m) + close_it(m)
+
+fn main() -> Unit !{IO} = print(to_string(twice(Just (File(1)))))

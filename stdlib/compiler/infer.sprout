@@ -917,8 +917,9 @@ fn register_type_decl_raw(decl: ast.Decl, alias_env: Dict types.Type,
                           env: Dict types.Scheme) -> Dict types.Scheme =
   match decl with
   | ast.TypeDecl name params ctors _ mult _ ->
-      mark_type_multiplicity(name, mult,
-        register_ctors_for_type(name, params, build_local_params(params, alias_env), ctors, env))
+      mark_phantom_params(name, params, ctor_field_type_exprs(ctors),
+        mark_type_multiplicity(name, mult,
+          register_ctors_for_type(name, params, build_local_params(params, alias_env), ctors, env)))
   # WrapDecl: synthesize a single-constructor type with the same name as the
   # wrap. The constructor's argument type is the wrap's inner type. This gives
   # the typechecker a scheme `inner -> Foo` for Foo(x), and a destructor entry
@@ -1949,6 +1950,72 @@ fn mark_type_multiplicity(name: String, mult: ast.Multiplicity, env: Dict types.
       dict_set("@any_linear", types.mono(types.TConst(types.type_id("linear"))),
         dict_set("@linear:" ++ name, types.mono(types.TConst(types.type_id("linear"))), env))
   | ast.Unrestricted -> env
+
+# Which type parameters a declaration actually STORES, recorded the other way
+# round: "@phantom:<TypeName>:<index>" marks a position the declaration does NOT
+# store, so an ordinary type adds nothing to the env. Read by linear_check's
+# containment test, which asks what a declaration holds rather than what a type
+# application mentions: `type Chan a = | Chan Int` keeps an Int handle, so a
+# `Chan TcpConnection` holds no connection and binding one obliges nothing.
+# Descending the application blindly made it a container, and the leak
+# diagnostic then named a linear type the value does not hold.
+#
+# A parameter reached only through an ARROW does not count as stored, mirroring
+# the carve-out in linear_check.first_linear_in: `| Cb (a -> Int)` holds a recipe
+# for an `a`, not an `a`.
+#
+# Occurrence is read ONE declaration deep. `| Outer (Chan a)` counts `a` as
+# stored even though `Chan` drops it, which is over-strict and never unsound —
+# and it is what keeps this a plain occurrence test rather than the
+# declaration-level fixed point (with its visited set) that
+# docs/linearity-virality-v0.md considered the cost of going further.
+fn mark_phantom_params(tname: String, params: List String, fields: List ast.TypeExpr,
+                       env: Dict types.Scheme) -> Dict types.Scheme =
+  mark_phantom_from(tname, 0, params, fields, env)
+
+fn mark_phantom_from(tname: String, idx: Int, params: List String,
+                     fields: List ast.TypeExpr, env: Dict types.Scheme) -> Dict types.Scheme =
+  match params with
+  | Nil -> env
+  | Cons p rest ->
+      mark_phantom_from(tname, idx + 1, rest, fields,
+        if type_exprs_store(p, fields) then env
+        else dict_set(phantom_param_marker(tname, idx),
+               types.mono(types.TConst(types.type_id("phantom"))), env))
+
+# The marker spelling. linear_check reads it back and cannot import this module
+# (the infer <-> linear_check cycle), so it respells this key rather than calling
+# in; the two must agree, and only behaviour says so.
+fn phantom_param_marker(tname: String, idx: Int) -> String =
+  "@phantom:" ++ tname ++ ":" ++ int_to_string(idx)
+
+# Deliberately NOT `te_type_names` above, nor analysis_service_driver's
+# `te_var_names`: both descend an arrow, and declining to is the whole point here.
+# Same exhaustive shape as those two, per docs/guidelines.md §2a.
+fn type_exprs_store(p: String, tes: List ast.TypeExpr) -> Bool =
+  match tes with
+  | Nil -> false
+  | Cons te rest -> if type_expr_stores(p, te) then true else type_exprs_store(p, rest)
+
+fn type_expr_stores(p: String, te: ast.TypeExpr) -> Bool =
+  match te with
+  | ast.TypeName n -> n == p
+  | ast.TypeApply f x -> type_expr_stores(p, f) || type_expr_stores(p, x)
+  | ast.TypeArrow _ _ _ -> false
+  | ast.TypeThunk _ _ -> false
+  | ast.TypeEffect inner _ -> type_expr_stores(p, inner)
+  | ast.TupleType items -> type_exprs_store(p, items)
+
+fn ctor_field_type_exprs(ctors: List ast.TypeConstructor) -> List ast.TypeExpr =
+  match ctors with
+  | Nil -> Nil
+  | Cons (ast.TypeConstructor _ fields _ _) rest ->
+      list_append(fields, ctor_field_type_exprs(rest))
+
+fn record_field_type_exprs(fields: List ast.RecordFieldDecl) -> List ast.TypeExpr =
+  match fields with
+  | Nil -> Nil
+  | Cons (ast.RecordFieldDecl _ te) rest -> Cons(te, record_field_type_exprs(rest))
 
 # Presence is the bit, as with @linear: above. Only the ABSTRACT case is marked:
 # a published record is the permissive one, and a marker for it would have to be
@@ -8319,9 +8386,10 @@ fn typecheck_decl(
         env_ftv, subst)
   | ast.RecordDecl rec_name type_params fields _ mult repr _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl),
-        GlobalEnv(mark_record_representation(rec_name, repr,
-          mark_type_multiplicity(rec_name, mult,
-            register_record_fields(rec_name, type_params, fields, alias_env, global_env_dict(env))))),
+        GlobalEnv(mark_phantom_params(rec_name, type_params, record_field_type_exprs(fields),
+          mark_record_representation(rec_name, repr,
+            mark_type_multiplicity(rec_name, mult,
+              register_record_fields(rec_name, type_params, fields, alias_env, global_env_dict(env)))))),
         env_ftv, subst)
   | ast.FnDecl name _ _ _ _ _ decl_pos ->
       # Unreachable. typecheck_group routes EVERY FnDecl through typecheck_fn_group,

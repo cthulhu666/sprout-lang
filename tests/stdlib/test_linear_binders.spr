@@ -119,6 +119,41 @@ fn plain_container(n: Int) -> Int =
   let xs = [n, n + 1]
   in list_length(xs)
 
+# --- phantom type parameters ------------------------------------------------
+#
+# Containment asks what a declaration STORES, not what its type application
+# mentions. `Handle a` keeps only an Int, so a `Handle File` holds no File and
+# binding one obliges nothing — the shape `stdlib.chan`'s `type Chan a = | Chan
+# Int` has, and the reason `pool_worker(ch: Chan TcpConnection, ...)` compiles.
+# Descending the application blindly made `Handle File` a container and had the
+# leak diagnostic name a File the value does not hold.
+
+type Handle a =
+  | Handle Int
+
+fn phantom_let_dropped(n: Int) -> Int =
+  let h = Handle(n)
+  in n
+
+fn phantom_param_dropped(h: Handle File) -> Int = 1
+
+# A parameter behind an ARROW is not stored either, matching the carve-out for a
+# function type: `Recipe File` holds a way to make a File, not a File.
+type Recipe a =
+  | Recipe (Int -> a)
+
+fn recipe_param_dropped(r: Recipe File) -> Int = 1
+
+# The nested case is deliberately conservative: `Boxed File` is tracked because
+# the occurrence test reads one declaration deep and sees `a` under `Handle a`,
+# without asking that `Handle` drops it. Sound, and over-strict only here.
+type Boxed a =
+  | Boxed (Handle a)
+
+fn boxed_phantom_tracked(n: Int) -> Int =
+  let b = Boxed(Handle(n))
+  in match b with | Boxed h -> match h with | Handle k -> k
+
 fn main() -> Unit !{IO} =
   run_suite("linear_binders", [
     check_eq("let..in alias once", via_let(File(1)), 1),
@@ -134,5 +169,9 @@ fn main() -> Unit !{IO} =
     check_eq("a function returning a linear is not a resource", recipe_is_not_a_resource(11), 11),
     check_eq("a bare linear ctor as a value is not a resource", ctor_value_is_not_a_resource(12), 12),
     check_eq("a bare linear ctor applied once", ctor_value_applied_once(13), 13),
-    check_eq("container of a non-linear is untouched", plain_container(14), 2)
+    check_eq("container of a non-linear is untouched", plain_container(14), 2),
+    check_eq("a phantom parameter stores nothing (let)", phantom_let_dropped(15), 15),
+    check_eq("a phantom parameter stores nothing (param)", phantom_param_dropped(Handle(16)), 1),
+    check_eq("a parameter behind an arrow is not stored", recipe_param_dropped(Recipe (File)), 1),
+    check_eq("a phantom nested one level deeper stays tracked", boxed_phantom_tracked(17), 17)
   ])

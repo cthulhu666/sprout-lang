@@ -1637,16 +1637,16 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   typechecks, `List Res` twice typechecks, and `borrowing Holder Res` is rejected as "only allowed
   on a parameter of a linear type". Fixing the fallback removes a real shape constraint from stdlib
   code.
-- [~] `P3` **Containment virality — binder half LANDED 2026-09-07; type half still open.**
+- [~] `P3` **Containment virality — binder half LANDED (parameters included); type half open.**
   Decision (Kuba): **Option 1** — containment decides which *bindings* carry the obligation, while
   linearity stays per-declaration as a property of *types*, so a record containing a linear field is
-  still not itself linear (contrast Austral) and a `Maybe File` *parameter* is still not a linear
-  parameter. **Still open — Option 2, full virality**, with linearity computed by containment
-  everywhere, reaching parameter modes, borrowing filters and field reads. Blocked on a linearity
-  bound for type parameters, and **to be decided jointly with the effect-bind item above, which
-  wants the opposite answer for parameters.** §6 of `docs/linearity-virality-v0.md` has the two
-  questions it opens (a type variable's universe; declaration-level recursion needing a visited set)
-  that the binder scope avoids.
+  still not itself linear (contrast Austral). Every binder is now covered, parameters and lambda
+  parameters included, and containment reads what a declaration **stores**, so a phantom position
+  (`type Chan a = | Chan Int`) is not descended. **Still open — Option 2, full virality**, with
+  linearity itself containment-computed, reaching parameter modes, `borrowing` filters and field
+  reads. No longer blocked on a linearity bound for type parameters; what is left is §6 of
+  `docs/linearity-virality-v0.md` — a type variable's universe, and declaration-level recursion
+  needing a visited set.
 - [ ] `P3` **Linearity bound on a type parameter (enabler for `borrowing a`).** A modifier on a
   type-variable parameter stays rejected, which also blocks the receiver-borrowing class shape
   `class Peekable a { fn peek(r: borrowing a) -> Int }`, so M4.6's method lift reaches only a

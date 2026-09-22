@@ -1,0 +1,11 @@
+module main
+
+# A `Maybe File` PARAMETER owns the File the caller moved in, so dropping it
+# leaks. Containment reached `let` and pattern binders but not parameters, which
+# made this the one place a linear value could be discarded in silence.
+
+type linear File = File Int
+
+fn drop_it(m: Maybe File) -> Int = 1
+
+fn main() -> Unit !{IO} = print(to_string(drop_it(Just (File(1)))))

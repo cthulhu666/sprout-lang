@@ -1,9 +1,11 @@
 # Containment virality for linear types — design note (v0)
 
-Status: **Option 1 DECIDED and LANDED 2026-09-07** (Kuba). A binder whose type *contains* a
-linear type carries the use-exactly-once obligation; linearity remains per-declaration as a
-property of *types*, so Option 2 (full virality) stays deferred behind a linearity bound on type
-parameters, per §7 and §11. Written 2026-08-26 as a pre-approval note asking that call.
+Status: **Option 1 DECIDED and LANDED 2026-09-07** (Kuba), **extended to parameters 2026-09-22**
+(§13). A binder whose type *contains* a linear type carries the use-exactly-once obligation;
+linearity remains per-declaration as a property of *types*, so Option 2 (full virality) stays
+deferred. §7's claim that the parameter half must wait on a linearity bound for type parameters
+turned out to be wrong, and §13 says why. Written 2026-08-26 as a pre-approval note asking that
+call.
 
 Two corrections to what shipped, against §4's "one predicate swap at `linear_check.sprout:190`":
 
@@ -323,3 +325,62 @@ parameters, not precede it, or it makes correct concurrent code unwritable in it
   question; merge them, and cross-reference the effect-bind `P2` as jointly decidable per §7.
 - This note gets a status header recording the decision, per the convention in
   `docs/linear-borrowing-v0.md`.
+
+## 13. Parameters landed (2026-09-22) — the blocker was a phantom parameter
+
+**What forced the question.** `docs/spec-v0.md` §5.8 listed *function parameters* among the
+binders containment covers, while the checker applied containment to `let`, pattern and `<-`
+binders only. `fn f(m: Maybe File) -> Int = 1` compiled and dropped the obligation; so did using
+such a parameter twice. §5.8's own Deferred section said the opposite of its enforcement
+paragraph, so the normative text contradicted itself either way. Reported as gh#329, found while
+migrating `sprout-pg` to a linear `TcpConnection`.
+
+**The measurement.** Swapping the three parameter call sites (`owned_param_names`,
+`borrowed_param_names`, and `first_linear_param` for lambdas) to `type_mentions_linear` broke
+**2 of 56 examples and 11 test suites — every one of them through a single function**,
+`pool_worker(ch: Chan TcpConnection, ...)` in `stdlib/http_server.sprout`. The suites included
+`test_repl_type_identity`, which fails only because it imports `stdlib.http_server`. §7 predicted
+this breakage and read it as "a linearity bound must land first". That reading was wrong.
+
+**The root cause is not sharing — it is a phantom parameter.** `stdlib/chan.sprout` declares
+`type Chan a = | Chan Int`: the parameter is decorative, and a `Chan TcpConnection` value stores
+no connection, only an Int handle into a runtime queue. But `first_linear_in` descended a type
+*application* syntactically — it saw `TApp Chan TcpConnection`, found a linear type in the
+argument, and declared containment, never asking whether the declaration holds one. The
+diagnostic then asserted something false, on the already-shipped `let` path:
+
+```
+type Handle a = | Handle Int
+let h = make()      # h : Handle File
+→ ERROR: 'h' is never used: its type `Handle File` contains the linear type `File`
+```
+
+`Handle File` contains no `File`. This was a live bug in Option 1 as landed; the parameter swap
+only made it load-bearing. It went unseen because the rule coincides with the truth for `Maybe`,
+`List`, tuples and ordinary ADTs — every type it was tested against. `Chan` is the first type in
+the tree whose parameter is phantom.
+
+**The fix.** Containment descends a type argument only at a position the declaration **stores**:
+one where the parameter occurs in some constructor or record field type. `infer` records the
+complement as `@phantom:<Type>:<index>` markers when the declaration is registered (so the common
+type adds nothing to the env, and the markers ride the existing `@`-prefix propagation
+cross-module); `linear_check.first_linear_in` walks the application spine with an index and skips
+phantom positions. No new syntax, and no linearity bound on type parameters.
+
+Two deliberate limits:
+
+- **An arrow does not store.** `| Cb (a -> Int)` holds a recipe for an `a`, not an `a` — the same
+  carve-out `first_linear_in` already applies to function types, now applied consistently at the
+  declaration.
+- **Occurrence is read one declaration deep.** `type Outer a = | Outer (Chan a)` counts `a` as
+  stored even though `Chan` drops it. Over-strict, never unsound — and it is what keeps this a
+  plain occurrence test instead of the declaration-level fixed point with a visited set that §6
+  lists as a cost of going further.
+
+**What this does and does not settle.** The obligation now lands where the value actually
+materialises: `chan_recv(ch)` returns a `Recv a`, whose declaration *does* store its parameter, so
+the binder receiving it is tracked while the channel handle is not. `pool_worker` compiles
+unchanged. It does **not** deliver Option 2 — linearity is still per-declaration, and parameter
+modes, `borrowing` filters and field reads are untouched. The linearity bound on type parameters
+is still wanted for `borrowing a` and for a `Box a` instantiated at a linear `a`; it simply was
+never what `Chan` needed.
