@@ -553,7 +553,10 @@ fn decode_iface_v2_tail(s: String, bytes: Bytes, i: Int, total: Int, version: In
 # list of its own, so a v7 ClassInfo decodes with every method-level `where`
 # silently empty; v8→v9 widened a compound-head token from "#app:<Head>" to
 # "#app:<Head>:<args>", so a v8 token reads as the head alone and dispatch falls
-# back to scanning arguments — the defect the arguments exist to fix.
+# back to scanning arguments — the defect the arguments exist to fix. An argument
+# position holds a variable's index, a type constructor's own name, or "#any"; the
+# name case is what lets a FIXED argument name its parameter instead of leaving the
+# choice to the scan.
 # Old ifaces are rejected loudly (the Scheme wire format changed)
 # — from v5 on that matters doubly, since an older iface decoded leniently would
 # silently read every `borrowing`/`once` parameter as consuming, which is the

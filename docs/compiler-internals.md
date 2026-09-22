@@ -452,6 +452,20 @@ arguments. Rationale: [docs/instance-head-kinds-v0.md](instance-head-kinds-v0.md
 An arity check alone was tried first and refuted by execution — the surplus is a
 property of the RECORDER, not of the class.
 
+### One hidden-dictionary slot per class and head constructor
+
+A constrained function's hidden dictionary parameters are keyed by class name plus the
+OUTERMOST constructor of each constraint argument — `lowering.constraint_key_str`,
+mirrored by `resolve`'s `EvForward` key and by the existential witness seeding. So
+`where Boxed (Tagged k), Boxed (Tagged j)` gives both constraints the key
+`Boxed_Tagged`, one slot for two obligations: the caller passes two dictionaries and
+the body reads one of them twice.
+
+`infer.check_indistinct_constraints` rejects that shape rather than letting it
+miscompile. Making it WORK means putting the arguments' identity into that key in all
+four places that build it — a change to the dictionary-passing key format, which is
+why it is a backlog entry and not part of this rule.
+
 ### The compound-head constraint token, and why it carries `#any`
 
 A constrained `fn`'s hidden dictionaries come from its Scheme's `(head_token, class)`
@@ -462,10 +476,12 @@ list. A compound head is stored as:
 #app:<Head>                   the head alone — a pre-v9 interface only
 ```
 
-Each `<ti>` is `#pos:<k>` against the callee's generalized binder list, a source name
-where there is no index, or **`#any`** where the argument is no variable at all.
-`#any` is the part worth understanding: it carries no identity, so why write it? For
-the COUNT. Two independent things read this token, and they fail differently:
+Each `<ti>` is one of three things: `#pos:<k>` against the callee's generalized binder
+list, a **type constructor's own name** where the constraint fixed that argument
+(`where Sh (Box String)` writes `String`), or **`#any`** where the argument is neither
+— a variable the body pinned to a type the scheme cannot name. `#any` is the part
+worth understanding: it carries no identity, so why write it? For the COUNT. Two
+independent things read this token, and they fail differently:
 
 - `resolve_compound_head_tdict` reads the *positions*, to rebuild the constraint's
   own head at this call — `where Boxed (Tagged j)` becomes `Tagged String`. This is
@@ -475,6 +491,13 @@ the COUNT. Two independent things read this token, and they fail differently:
   whole argument — the class variable APPLIED — and the count is how much of it is
   surplus. Dropping the arguments entirely when one was `#any` lost the count too,
   and `where Sh (Box String)` then bound the instance's `c` to `Int`.
+
+A fixed argument records its own name rather than `#any` for the first reader's sake,
+not the second's. `Box String` names which parameter to dispatch on just as precisely
+as a variable does, and recording `#any` there left the choice to the scan — which
+takes the first parameter the head constructor matches, so `via(a: Box Bool Int, b:
+Box String Int) where Sh (Box String)` read `b`'s String through `a`'s `ToString Bool`
+witness.
 
 So the token degrades in two stages rather than one: positions, then count, then
 nothing. Both stages are covered by `tests/conformance/run/dispatch_compound_head_*`.

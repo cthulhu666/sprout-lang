@@ -1,0 +1,18 @@
+module testsupport.held_class
+
+# A class whose variable is APPLIED once, deliberately named so an importer can
+# declare its own unrelated class by the same short name. The two are distinct
+# classes — `testsupport.held_class.Held` and the importer's — and the arity rule
+# has to judge each instance against its own.
+
+type Wrapper a = Wrapper a
+
+class Held t
+  fn held(x: t Int) -> Int
+
+instance Held Wrapper
+  fn held(x: Wrapper Int) -> Int =
+    match x with
+    | Wrapper n -> n
+
+export fn held_wrapped(n: Int) -> Int = held(Wrapper(n))

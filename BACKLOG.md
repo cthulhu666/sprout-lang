@@ -995,6 +995,16 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
 
 ### 7.5) Type Classes
 
+- [ ] `P2` **The hidden-dictionary key cannot tell two same-class constraints apart.** It is class
+  name plus the outermost constructor of each argument (`lowering.constraint_key_str`), so
+  `where Boxed (Tagged k), Boxed (Tagged j)` is one slot for two obligations — the caller passes two
+  dictionaries and the body reads one twice. `infer.check_indistinct_constraints` now rejects the
+  shape rather than miscompiling it (spec §"Two constraints of one class must not differ only in
+  their arguments"; `docs/instance-head-kinds-v0.md` §12). Making it work means putting the
+  arguments' identity into that key in all FOUR places that build it — lowering's `build_hidden`,
+  lowering's existential witness seeding, resolve's `fwd_keys` and `EvForward` — and the eta paths
+  build it from a `types.Type` where the others use an `ast.TypeExpr`, so the two spellings must
+  agree. Instance-table keys must NOT change with it: one instance per head constructor is correct.
 - [ ] `P2` **A class method's `.iface` scheme quantifies fewer binders than the live
   registration.** `iface_codec.method_scheme` quantifies the CLASS parameters only, so a
   method-level constraint head is keyed by source NAME, while `infer.register_class_method_over`

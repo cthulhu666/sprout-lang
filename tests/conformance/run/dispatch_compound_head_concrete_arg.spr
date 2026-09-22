@@ -1,8 +1,9 @@
-# A compound head whose written argument is a CONCRETE type, so the token has no
-# position to carry for it and the head-directed scan resolves the dictionary. The
-# scan sees the class variable APPLIED (`Box String Int`), one argument deeper than
-# the head, and the token's argument COUNT is what takes the surplus back off.
-# Without that the instance's `c` binds to `Int` and a String prints as a pointer.
+# A compound head whose written argument is a CONCRETE type. The token records the
+# constructor's own name, so the constraint's head rebuilds here without a scan. The
+# scan remains the fallback, and its own correctness still matters: it sees the class
+# variable APPLIED (`Box String Int`), one argument deeper than the head, and the
+# token's argument COUNT is what takes the surplus back off. Without that the
+# instance's `c` binds to `Int` and a String prints as a pointer.
 module main
 
 type Box a b = Box a b

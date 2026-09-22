@@ -1,0 +1,19 @@
+# A compound head whose written argument is CONCRETE, with two parameters headed by
+# the same constructor. `Box String` names which one, so the choice cannot be left
+# to whichever parameter the scan reaches first: `a` would supply a `ToString Bool`
+# witness and read `b`'s String payload through it.
+module main
+
+type Box a b = Box a b
+
+class Sh t
+  fn show1(x: t Int) -> String
+
+instance Sh (Box c) where ToString c
+  fn show1(x: Box c Int) -> String =
+    match x with
+    | Box c n -> to_string(c) ++ "#" ++ to_string(n)
+
+fn via(a: Box Bool Int, b: Box String Int) -> String where Sh (Box String) = show1(b)
+
+fn main() -> Unit !{IO} = print(via(Box(false, 1), Box("hi", 3)))

@@ -3328,13 +3328,15 @@ fn canonical_arg_tokens(args: List ast.TypeExpr, prog_to_fresh: Dict types.Type,
       let Just more = canonical_arg_tokens(rest, prog_to_fresh, s2, binders) else Nothing
       in Just(canonical_arg_token(a, prog_to_fresh, s2, binders) ++ "," ++ more)
 
-# "#any" for an argument that is not a variable still generalized here — a concrete
-# type, or one the body pinned. It has no index to record, but it still occupies a
-# position, and the position is what the recorder needs.
+# A variable generalized here records its position; a CONSTRUCTOR records its own
+# name, which is the type the constraint chose and needs no position. "#any" is left
+# for an argument that is neither — one the body pinned to a type this scheme cannot
+# name. It has no identity to record, but it still occupies a position, and the
+# position is what the recorder needs.
 fn canonical_arg_token(a: ast.TypeExpr, prog_to_fresh: Dict types.Type,
                        s2: Dict types.Type, binders: List String) -> String =
   let ast.TypeName v = a else "#any"
-      Just fresh_t = dict_get(v, prog_to_fresh) else "#any"
+      Just fresh_t = dict_get(v, prog_to_fresh) else v
       types.TVar canon = unifier.apply_subst(s2, fresh_t) else "#any"
   in constraint_var_token(types.tyvar_identity(canon), binders)
 
@@ -3482,10 +3484,31 @@ fn constraint_arg_typeexprs(
   | [] -> Just(Nil)
   | ["#any" | _] -> Nothing
   | [t | rest] ->
-      let Just fresh_t = dict_get(decode_constraint_var(t, callee, env), prog_to_fresh) else Nothing
-          Just te = concrete_typeexpr(unifier.apply_subst(subst, fresh_t)) else Nothing
+      let Just te = constraint_arg_typeexpr(t, callee, prog_to_fresh, subst, env) else Nothing
           Just more = constraint_arg_typeexprs(rest, callee, prog_to_fresh, subst, env) else Nothing
       in Just(Cons(te, more))
+
+# One token's argument. A variable resolves through this caller's substitution; a
+# token naming a type CONSTRUCTOR is already the type the constraint chose, and asking
+# the substitution about it finds nothing — that is what sent `where Sh (Box String)`
+# to the scan, which then took whichever parameter `Box` headed first.
+fn constraint_arg_typeexpr(
+  t: String,
+  callee: String,
+  prog_to_fresh: Dict types.Type,
+  subst: Dict types.Type,
+  env: Dict types.Scheme
+) -> Maybe ast.TypeExpr =
+  match dict_get(decode_constraint_var(t, callee, env), prog_to_fresh) with
+  | Just fresh_t -> concrete_typeexpr(unifier.apply_subst(subst, fresh_t))
+  | Nothing -> named_ctor_typeexpr(t)
+
+# A marker token names no type and a lowercase one is a variable the substitution did
+# not answer for; both forward rather than dispatching on a type this caller has not
+# chosen. Anything else is a constructor, spelled as the constraint spelled it.
+fn named_ctor_typeexpr(t: String) -> Maybe ast.TypeExpr =
+  if str_starts_with(t, "#") || is_lowercase_name(t) then Nothing
+  else Just(ast.TypeName(t))
 
 # Left-associating application: `Tagged` over [String] is `Tagged String`.
 fn apply_typeexprs(base: ast.TypeExpr, args: List ast.TypeExpr) -> ast.TypeExpr =
@@ -6881,6 +6904,9 @@ fn typecheck_decls_resolved(
             match check_instance_head_kinds(decls, env, qual_env) with
             | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
             | Nothing ->
+            match check_indistinct_constraints(decls) with
+            | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
+            | Nothing ->
             match check_overlapping_instances(decls, dict_empty()) with
             | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
             | Nothing ->
@@ -7727,7 +7753,12 @@ fn class_own_depths(methods: List ast.ClassMethodSig, v: String,
         var_app_depths(type_from_ast(ret, local_vars), v, 0,
           param_app_depths(params, v, local_vars, acc)))
 
-# class (short name) -> (its variable, the depths its methods apply it at).
+# class (name exactly as declared) -> (its variable, the depths its methods apply it
+# at). Keyed verbatim for the reason type_arities is: on the bundled path two modules
+# can each declare a class named `Held`, and one short key let the later declaration
+# decide both — rejecting one module's well-kinded instances, and silently admitting
+# the other's ill-kinded ones. Lookups fall back to the short name for the env path,
+# which has only that (compiler-internals.md §Env-path type names are SHORT).
 fn own_class_depths(decls: List ast.Decl, alias_env: Dict types.Type,
                     acc: Dict (String, List Int)) -> Dict (String, List Int) =
   match decls with
@@ -7739,7 +7770,7 @@ fn own_class_depth_add(decl: ast.Decl, alias_env: Dict types.Type,
                        acc: Dict (String, List Int)) -> Dict (String, List Int) =
   let ast.ClassDecl name type_params methods _ _ = decl else acc
       [v | _] = type_params else acc
-  in dict_set(string.after_last_dot(name),
+  in dict_set(name,
        (v, class_own_depths(methods, v, build_type_var_dict(type_params, alias_env), Nil)), acc)
 
 # The same table for classes that arrive as env schemes rather than decls — every
@@ -7810,9 +7841,19 @@ fn class_all_depths(cls: String, depths: Dict (String, List Int),
   append(class_own_part(cls, depths),
     super_depths(super_list_of(cls, supers), depths, supers, visited))
 
+# Verbatim first, then the short name: own classes are keyed as declared and imported
+# ones arrive short. Two classes sharing a short name have no short entry at all, so a
+# lookup that only has the short name finds nothing and the check is skipped — the
+# same answer as "nothing constrains this variable", and the safe direction.
 fn class_own_part(cls: String, depths: Dict (String, List Int)) -> List Int =
-  let Just(_, ds) = dict_get(cls, depths) else Nil
+  let Just(_, ds) = class_depths_entry(cls, depths) else Nil
   in ds
+
+fn class_depths_entry(cls: String,
+                      depths: Dict (String, List Int)) -> Maybe (String, List Int) =
+  match dict_get(cls, depths) with
+  | Just entry -> Just(entry)
+  | Nothing -> dict_get(string.after_last_dot(cls), depths)
 
 fn super_depths(names: List String, depths: Dict (String, List Int),
                 supers: Dict (List String), visited: List String) -> List Int =
@@ -7849,6 +7890,12 @@ fn first_differing(xs: List Int, n: Int) -> Maybe (Int, Int) =
 # Keyed on the name exactly as written, for the reason alias_arity_of gives: on the
 # bundled path both sides are qualified, and matching `main.Tagged` against a short
 # `Tagged` would report an arity the writer never declared. A wrap takes none.
+#
+# An ALIAS records nothing. Its parameter count is not its residual arity — `type
+# alias Half a = Tagged a` takes one parameter and leaves one more unapplied — and
+# an alias instance head is a non-goal (docs/instance-head-kinds-v0.md §2), so the
+# honest answer is no arity and a skipped check rather than a number the writer
+# never declared.
 fn type_arities(decls: List ast.Decl, acc: Dict Int) -> Dict Int =
   match decls with
   | [] -> acc
@@ -7857,8 +7904,6 @@ fn type_arities(decls: List ast.Decl, acc: Dict Int) -> Dict Int =
       | ast.TypeDecl name params _ _ _ _ ->
           type_arities(rest, dict_set(name, list_length(params), acc))
       | ast.RecordDecl name params _ _ _ _ _ ->
-          type_arities(rest, dict_set(name, list_length(params), acc))
-      | ast.AliasDecl name params _ _ ->
           type_arities(rest, dict_set(name, list_length(params), acc))
       | ast.WrapDecl name _ _ _ -> type_arities(rest, dict_set(name, 0, acc))
       | _ -> type_arities(rest, acc)
@@ -7953,8 +7998,7 @@ fn constraint_arity_error(kind: String, c: ast.TypeConstraint,
                           arities: Dict Int, env: Dict types.Scheme) -> Maybe String =
   let ast.TypeConstraint class_name type_args = c
       [head_te | _] = type_args else Nothing
-      Just want = class_var_arity(string.after_last_dot(class_name), depths, supers, Nil)
-        else Nothing
+      Just want = class_var_arity(class_name, depths, supers, Nil) else Nothing
   in head_arity_error(kind, string.after_last_dot(class_name), head_te, want, arities, env)
 
 # A class contradicting itself, reported at the class rather than at every instance
@@ -7964,13 +8008,13 @@ fn class_decl_arity_error(name: String, superclasses: List ast.TypeConstraint,
                           methods: List ast.ClassMethodSig,
                           depths: Dict (String, List Int), supers: Dict (List String),
                           arities: Dict Int, env: Dict types.Scheme) -> Maybe String =
-  match depth_conflict(class_own_part(string.after_last_dot(name), depths)) with
+  match depth_conflict(class_own_part(name, depths)) with
   | Just (a, b) ->
       Just("class `" ++ string.after_last_dot(name) ++ "` applies its variable to "
            ++ argument_count_text(a) ++ " in one method and " ++ int_to_string(b)
            ++ " in another; one class variable cannot be both")
   | Nothing ->
-      match class_super_arity_error(string.after_last_dot(name), superclasses, depths, supers) with
+      match class_super_arity_error(name, superclasses, depths, supers) with
       | Just msg -> Just(msg)
       | Nothing -> method_wheres_arity_error(methods, depths, supers, arities, env)
 
@@ -7978,7 +8022,7 @@ fn class_super_arity_error(cls: String, superclasses: List ast.TypeConstraint,
                            depths: Dict (String, List Int),
                            supers: Dict (List String)) -> Maybe String =
   let Just own = single_depth(class_own_part(cls, depths)) else Nothing
-  in super_arity_error(cls, own, super_names(superclasses), depths, supers)
+  in super_arity_error(cls, own, super_names_as_written(superclasses), depths, supers)
 
 fn super_arity_error(cls: String, own: Int, names: List String,
                      depths: Dict (String, List Int),
@@ -7989,9 +8033,9 @@ fn super_arity_error(cls: String, own: Int, names: List String,
       match class_var_arity(s, depths, supers, Cons(cls, Nil)) with
       | Just n ->
           if n == own then super_arity_error(cls, own, rest, depths, supers)
-          else Just("class `" ++ cls ++ "` applies its variable to " ++ argument_count_text(own)
-                    ++ ", but its superclass `" ++ s ++ "` applies its own to "
-                    ++ int_to_string(n))
+          else Just("class `" ++ string.after_last_dot(cls) ++ "` applies its variable to "
+                    ++ argument_count_text(own) ++ ", but its superclass `"
+                    ++ string.after_last_dot(s) ++ "` applies its own to " ++ int_to_string(n))
       | Nothing -> super_arity_error(cls, own, rest, depths, supers)
 
 fn method_wheres_arity_error(methods: List ast.ClassMethodSig,
@@ -8005,6 +8049,20 @@ fn method_wheres_arity_error(methods: List ast.ClassMethodSig,
       | Just msg -> Just(msg)
       | Nothing -> method_wheres_arity_error(rest, depths, supers, arities, env)
 
+# An instance method RESTATES the class method's `where` over its own variables, so
+# the restated heads are checked here — the class's copy is checked at the class, and
+# nothing else reaches an implementation's. Mirrors method_wheres_arity_error.
+fn impl_wheres_arity_error(methods: List ast.InstanceMethodImpl,
+                           depths: Dict (String, List Int), supers: Dict (List String),
+                           arities: Dict Int, env: Dict types.Scheme) -> Maybe String =
+  match methods with
+  | [] -> Nothing
+  | [ast.InstanceMethodImpl _ _ _ _ constraints _ | rest] ->
+      match constraints_arity_error("a constraint head", constraints, depths, supers,
+                                    arities, env) with
+      | Just msg -> Just(msg)
+      | Nothing -> impl_wheres_arity_error(rest, depths, supers, arities, env)
+
 # The catch-all matches every sibling check in this chain (check_tyvar_instance_heads,
 # check_overlapping_instances): a declaration with no class, instance head or `where`
 # has no head to be wrong about.
@@ -8014,12 +8072,14 @@ fn decl_arity_error(decl: ast.Decl, depths: Dict (String, List Int),
   match decl with
   | ast.ClassDecl name _ methods superclasses _ ->
       class_decl_arity_error(name, superclasses, methods, depths, supers, arities, env)
-  | ast.InstanceDecl constraint inst_constraints _ _ ->
+  | ast.InstanceDecl constraint inst_constraints methods _ ->
       match constraint_arity_error("an instance head", constraint, depths, supers, arities, env) with
       | Just msg -> Just(msg)
       | Nothing ->
-          constraints_arity_error("a constraint head", inst_constraints, depths, supers,
-            arities, env)
+          match constraints_arity_error("a constraint head", inst_constraints, depths, supers,
+                                        arities, env) with
+          | Just msg -> Just(msg)
+          | Nothing -> impl_wheres_arity_error(methods, depths, supers, arities, env)
   | ast.FnDecl _ _ _ _ constraints _ _ ->
       constraints_arity_error("a constraint head", constraints, depths, supers, arities, env)
   | _ -> Nothing
@@ -8032,7 +8092,8 @@ fn check_instance_head_kinds(decls: List ast.Decl, env: Dict types.Scheme,
   check_arity_decls(decls,
     env_class_depths(vec_to_list(dict_entries(env)), env,
       own_class_depths(decls, alias_env, dict_empty())),
-    env_class_supers(vec_to_list(dict_entries(env)), build_class_super_map(decls, dict_empty())),
+    env_class_supers(vec_to_list(dict_entries(env)),
+      build_class_super_map_as_written(decls, dict_empty())),
     type_arities(decls, dict_empty()), env)
 
 # The position is the declaration's, not the method's: ClassMethodSig carries no
@@ -8046,6 +8107,114 @@ fn check_arity_decls(decls: List ast.Decl, depths: Dict (String, List Int),
       match decl_arity_error(decl, depths, supers, arities, env) with
       | Just msg -> Just((ast.decl_pos(decl), msg))
       | Nothing -> check_arity_decls(rest, depths, supers, arities, env)
+
+
+# ---------------------------------------------------------------------------
+# Same-class constraints the forwarded-dictionary key cannot tell apart
+# ---------------------------------------------------------------------------
+#
+# A function's hidden dictionary parameters are keyed by class name and the
+# OUTERMOST constructor of each constraint argument (lowering.constraint_key_str,
+# mirrored by resolve's EvForward key). So `where Boxed (Tagged k), Boxed (Tagged j)`
+# gives both constraints the key `Boxed_Tagged`: the caller passes two different
+# dictionaries and the body reads one of them twice.
+#
+# Rejected rather than miscompiled. Nothing is lost that worked — the shape has
+# always produced the wrong dictionary, and since a compound head began dispatching
+# on the parameter it names the two dictionaries genuinely differ, so reading the
+# wrong one crashes instead of printing a wrong answer. Two constraints with the SAME
+# subject are fine: one dictionary is the right answer for both.
+#
+# Making the shape WORK means giving that key the arguments' identity, in all four
+# places that build it — a change to the dictionary-passing key format, not to this
+# rule (BACKLOG §7.5).
+# One pass, keyed by the slot the constraint would occupy: the first constraint to
+# claim a key records its subject, and a later one claiming the same key with a
+# different subject is the collision. Subjects are compared as written, which is exact
+# for the constructor- and variable-headed subjects an instance can exist for.
+fn indistinct_constraint_pair(cs: List ast.TypeConstraint) -> Maybe (String, String, String) =
+  indistinct_scan(cs, dict_empty())
+
+fn indistinct_scan(cs: List ast.TypeConstraint,
+                   seen: Dict String) -> Maybe (String, String, String) =
+  match cs with
+  | [] -> Nothing
+  | [c | rest] ->
+      let key = constraint_class_of(c) ++ "_" ++ constraint_fwd_key(c)
+          subject = constraint_subject_text(c)
+      in
+        match dict_get(key, seen) with
+        | Just prior ->
+            if prior == subject then indistinct_scan(rest, seen)
+            else Just((constraint_class_of(c), prior, subject))
+        | Nothing -> indistinct_scan(rest, dict_set(key, subject, seen))
+
+fn constraint_class_of(c: ast.TypeConstraint) -> String =
+  let ast.TypeConstraint class_name _ = c
+  in string.after_last_dot(class_name)
+
+# Mirrors lowering.constraint_key_str: the outermost constructor of each argument.
+fn constraint_fwd_key(c: ast.TypeConstraint) -> String =
+  let ast.TypeConstraint _ type_args = c
+  in string.join("_", list_map(\te -> head_name_or_blank(te), type_args))
+
+fn head_name_or_blank(te: ast.TypeExpr) -> String =
+  match type_expr_head_name(te) with
+  | Just n -> string.after_last_dot(n)
+  | Nothing -> ""
+
+# The subject as written, for the diagnostic and for telling two subjects apart.
+fn constraint_subject_text(c: ast.TypeConstraint) -> String =
+  let ast.TypeConstraint _ type_args = c
+  in string.join(" ", list_map(\te -> type_expr_text(te), type_args))
+
+fn type_expr_text(te: ast.TypeExpr) -> String =
+  match te with
+  | ast.TypeName n -> string.after_last_dot(n)
+  | ast.TypeApply base arg -> type_expr_text(base) ++ " " ++ type_expr_text(arg)
+  | ast.TypeArrow _ _ _ -> "_"
+  | ast.TypeThunk _ _ -> "_"
+  | ast.TypeEffect _ _ -> "_"
+  | ast.TupleType _ -> "_"
+
+fn indistinct_constraints_error(cs: List ast.TypeConstraint) -> Maybe String =
+  let Just(cls, a, b) = indistinct_constraint_pair(cs) else Nothing
+  in Just("two `" ++ cls ++ "` constraints have heads `" ++ a ++ "` and `" ++ b
+          ++ "`, which share one hidden-dictionary slot; the body would use a single "
+          ++ "dictionary for both. Constrain one variable, or use distinct classes")
+
+# Every constraint list a function body can read a forwarded dictionary from: a fn's
+# own `where`, a class method's, and an instance method's.
+fn decl_indistinct_error(decl: ast.Decl) -> Maybe String =
+  match decl with
+  | ast.FnDecl _ _ _ _ constraints _ _ -> indistinct_constraints_error(constraints)
+  | ast.ClassDecl _ _ methods _ _ -> class_method_indistinct_error(methods)
+  | ast.InstanceDecl _ _ methods _ -> impl_indistinct_error(methods)
+  | _ -> Nothing
+
+fn class_method_indistinct_error(methods: List ast.ClassMethodSig) -> Maybe String =
+  match methods with
+  | [] -> Nothing
+  | [ast.ClassMethodSig _ _ _ _ constraints | rest] ->
+      match indistinct_constraints_error(constraints) with
+      | Just msg -> Just(msg)
+      | Nothing -> class_method_indistinct_error(rest)
+
+fn impl_indistinct_error(methods: List ast.InstanceMethodImpl) -> Maybe String =
+  match methods with
+  | [] -> Nothing
+  | [ast.InstanceMethodImpl _ _ _ _ constraints _ | rest] ->
+      match indistinct_constraints_error(constraints) with
+      | Just msg -> Just(msg)
+      | Nothing -> impl_indistinct_error(rest)
+
+fn check_indistinct_constraints(decls: List ast.Decl) -> Maybe(source.SourcePos, String) =
+  match decls with
+  | [] -> Nothing
+  | [decl | rest] ->
+      match decl_indistinct_error(decl) with
+      | Just msg -> Just((ast.decl_pos(decl), msg))
+      | Nothing -> check_indistinct_constraints(rest)
 
 
 fn check_overlapping_instances(decls: List ast.Decl, seen: Dict Bool) -> Maybe(source.SourcePos, String) =
@@ -8127,10 +8296,16 @@ fn check_super_list(supers: List String, cls: String, head: String, inst_set: Di
       | Nothing -> Just("No instance of " ++ super_name ++ " for " ++ string.after_last_dot(head)
                         ++ ", required as a superclass of " ++ cls)
 
+# Verbatim first, then short, for class_depths_entry's reason: the arity path's map is
+# keyed as declared while the completeness path's and the env path's are short, and a
+# short-keyed lookup of a short-keyed map is unchanged by the first attempt.
 fn super_list_of(cls: String, super_map: Dict (List String)) -> List String =
   match dict_get(cls, super_map) with
   | Just supers -> supers
-  | Nothing -> Nil
+  | Nothing ->
+      match dict_get(string.after_last_dot(cls), super_map) with
+      | Just supers -> supers
+      | Nothing -> Nil
 
 # class (bare name) -> its superclass class names (bare), from decl ClassDecls.
 fn build_class_super_map(decls: List ast.Decl, acc: Dict (List String)) -> Dict (List String) =
@@ -8149,6 +8324,26 @@ fn super_names(supers: List ast.TypeConstraint) -> List String =
   | Cons c rest ->
       match c with
       | ast.TypeConstraint sname _ -> Cons(string.after_last_dot(sname), super_names(rest))
+
+# The same map and the same names, both kept as written, for the arity check: its
+# tables tell two same-named classes apart, so shortening a superclass reference here
+# would resolve it to whichever of them won the short key. The completeness check
+# above keys both halves short and is left alone.
+fn build_class_super_map_as_written(decls: List ast.Decl,
+                                    acc: Dict (List String)) -> Dict (List String) =
+  match decls with
+  | [] -> acc
+  | [decl | rest] ->
+      match decl with
+      | ast.ClassDecl name _ _ superclasses _ ->
+          build_class_super_map_as_written(rest,
+            dict_set(name, super_names_as_written(superclasses), acc))
+      | _ -> build_class_super_map_as_written(rest, acc)
+
+fn super_names_as_written(supers: List ast.TypeConstraint) -> List String =
+  match supers with
+  | [] -> Nil
+  | [ast.TypeConstraint sname _ | rest] -> Cons(sname, super_names_as_written(rest))
 
 # set of "{bare_class}:{head}" for every instance declared.
 fn build_inst_key_set(decls: List ast.Decl, acc: Dict Bool) -> Dict Bool =

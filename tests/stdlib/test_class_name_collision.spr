@@ -1,0 +1,24 @@
+import stdlib.test (check_eq, run_suite)
+import testsupport.held_class (held_wrapped)
+
+# Two modules in one bundle each declaring a class named `Held`, at DIFFERENT
+# arities: the imported one applies its variable once, this one not at all. A table
+# keyed on the short name let the later declaration decide both, so one module's
+# instances were judged against the other module's class — rejecting this program
+# one way round, and silently admitting an ill-kinded head the other.
+
+type Thing = Thing Int
+
+class Held t
+  fn held2(x: t) -> Int
+
+instance Held Thing
+  fn held2(x: Thing) -> Int =
+    match x with
+    | Thing n -> n
+
+fn main() -> Unit !{IO} =
+  run_suite("same-named classes in one bundle", [
+    check_eq("the imported class's instance dispatches", held_wrapped(3), 3),
+    check_eq("this module's own class dispatches", held2(Thing(4)), 4)
+  ])

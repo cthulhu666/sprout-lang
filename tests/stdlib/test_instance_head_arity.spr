@@ -49,6 +49,23 @@ instance Tagless Box
 instance Tagless Int
   fn describe() -> String = "int"
 
+# --- A head written through a type ALIAS ------------------------------------
+# `Half a` IS `Tagged a`, so it leaves one argument unapplied and satisfies a class
+# that applies its variable once. The alias's own parameter count says 1 and its
+# residual is also 1 only by coincidence here; what matters is that an alias head
+# is outside the rule's scope (docs/instance-head-kinds-v0.md §2) and must not be
+# judged by a number the writer never declared.
+
+type Tagged k v = Tagged k v
+
+type alias Half a = Tagged a
+
+class Boxed t
+  fn label(xs: t Int) -> String
+
+instance Boxed (Half k)
+  fn label(xs: Tagged k Int) -> String = "tagged"
+
 # The rule's DISPATCH consequences live in tests/conformance/run, where a golden
 # stdout can show which parameter's dictionary was used:
 # dispatch_two_candidates_second_constrained, dispatch_compound_head_two_args and

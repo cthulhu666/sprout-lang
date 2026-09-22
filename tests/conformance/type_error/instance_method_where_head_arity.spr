@@ -1,0 +1,22 @@
+# A method-level `where` RESTATED on an instance method is a constraint head like
+# any other. The class declares `where Pretty j` over the method's own variable;
+# this instance restates it as `where Pretty Tagged`, naming a constructor two
+# arguments short of a type. The identical head on the class signature is rejected,
+# and restating it on the implementation must not smuggle it past.
+module main
+
+type Tagged k v = Tagged k v
+
+class Pretty t
+  fn pretty(x: t) -> String
+
+instance Pretty Int
+  fn pretty(x: Int) -> String = "int"
+
+class Boxed t
+  fn label(xs: t Int, p: j) -> String where Pretty j
+
+instance Boxed (Tagged k)
+  fn label(xs: Tagged k Int, p: j) -> String where Pretty Tagged = "tagged"
+
+fn main() -> Unit !{IO} = print(label(Tagged(true, 3), 5))
