@@ -15,6 +15,8 @@ import stdlib.tui.event as event
 export type Command (..) deriving (Eq, ToString) =
   | Quit
   | Save
+  | Undo
+  | Redo
 
 export fn command_for(k: event.Key, mods: event.Mods) -> Maybe Command =
   if event.mods_has_ctrl(mods) then chorded(k)
@@ -26,8 +28,19 @@ fn chorded(k: event.Key) -> Maybe Command =
   | event.KChar c -> lettered(c)
   | _ -> Nothing
 
+# ctrl-z arrives as a KEY and not as SIGTSTP because the TUI clears `ISIG`
+# (runtime/sprout_runtime.c), the same line that makes ctrl-C bindable.
+#
+# Redo is ctrl-y rather than ctrl-shift-z: the legacy encoding sends one
+# control character for both ctrl-z and ctrl-shift-z, so `event.Mods` cannot
+# tell them apart — the kitty protocol is what would, and it is filed in
+# `BACKLOG.md` §4. ctrl-y is VS Code's own redo on Windows and Linux.
 fn lettered(c: Char) -> Maybe Command =
-  if c == 's' then Just(Save) else if c == 'q' then Just(Quit) else Nothing
+  if c == 's' then Just(Save)
+  else if c == 'q' then Just(Quit)
+  else if c == 'z' then Just(Undo)
+  else if c == 'y' then Just(Redo)
+  else Nothing
 
 fn unmodified(k: event.Key) -> Maybe Command =
   match k with

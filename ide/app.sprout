@@ -109,6 +109,14 @@ fn wrote_for(m: Msg) -> Maybe ed.Wrote =
   | Written wr -> Just(wr)
   | _ -> Nothing
 
+# The binding is the application's; the history is the pane's. So the key is
+# decoded here and the walk happens there, on the one `buffer.Buffer` there is.
+fn step_for(m: Msg) -> Maybe ed.Step =
+  match m with
+  | Bound keymap.Undo -> Just(ed.Backward)
+  | Bound keymap.Redo -> Just(ed.Forward)
+  | _ -> Nothing
+
 # `Saved` is named ONCE, standing rather than read out of the request, because
 # a tick or a blur starts a save with no message to read it from.
 fn editor(when: ed.SaveWhen) -> widget.Widget Msg =
@@ -120,7 +128,8 @@ fn editor(when: ed.SaveWhen) -> widget.Widget Msg =
                                         on_demand = Just(demand_for),
                                         on_saving = Just(Saved),
                                         on_wrote = Just(wrote_for),
-                                        on_note = Just(Noted)))
+                                        on_note = Just(Noted),
+                                        on_step = Just(step_for)))
 
 # ── the status line ─────────────────────────────────────────────────────────
 
@@ -222,9 +231,11 @@ fn update(m: Msg, w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow, Asks) =
   match m with
   | Bound keymap.Quit -> app.done(w, app.Quit)
   | Bound keymap.Save -> asked_to_save(w)
+  | Bound keymap.Undo -> sent_to_editor(w, m)
+  | Bound keymap.Redo -> sent_to_editor(w, m)
   | Expand segs ->
       (w, app.Continue, [widget.cmd_to(files_id(), \_ -> read_children(segs))])
-  | Choose _ -> asked_to_open(w, m)
+  | Choose _ -> sent_to_editor(w, m)
   | Reading op -> reading(w, op)
   | Saved sv -> saving(w, sv)
   | Labelled _ -> to_bar(w, m)
@@ -251,11 +262,13 @@ fn asked_to_save(w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow, Asks) =
                                else app.done(w, app.Continue)
   in answered(asked, app.apply(update, said, w2))
 
-# Opening goes through the pane the same way, and for the same reason: the
-# receipt the read must carry back is the pane's to mint. A pane that is not
-# there is nothing to open into, so the file is simply not read.
-fn asked_to_open(w: widget.Widget Msg,
-                 m: Msg) -> (widget.Widget Msg, app.Flow, Asks) =
+# Opening goes through the pane the same way, and for the same reason: what
+# the message asks for is the pane's to answer — the receipt a read carries
+# back is the pane's to mint, and the history an undo walks is the pane's to
+# hold. A pane that is not there is nothing to send to, so the file is simply
+# not read and the undo simply does not happen.
+fn sent_to_editor(w: widget.Widget Msg,
+                  m: Msg) -> (widget.Widget Msg, app.Flow, Asks) =
   let Just(w2, said, asked) = widget.deliver(w, editor_id(), widget.ToMsg(m))
                                else app.done(w, app.Continue)
   in answered(asked, app.apply(update, said, w2))

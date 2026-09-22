@@ -19,22 +19,129 @@ import stdlib.tui.line_zipper as lz
 type Fields = (above: List String, line: lz.Zipper, below: List String,
                goal: Maybe Int)
 
-# Opaque: a single-constructor ADT declared without `(..)`, so `Fields` can
-# grow a selection anchor later without breaking a caller (§4.9). A record
-# would be transparent whatever its declaration said.
-export type Buffer =
+# What every edit and motion inside this module works on: one document, no
+# history. Internal, so nothing here can record a step by accident or lose one
+# by forgetting — only the exported wrappers hold a `History` at all
+# (docs/tui-undo-v0.md §4). Opaque for `Fields`'s sake too: a
+# single-constructor ADT declared without `(..)`, so `Fields` can grow a
+# selection anchor later without breaking a caller (§4.9). A record would be
+# transparent whatever its declaration said.
+type Doc =
   | Buf Fields
 
-fn fields(b: Buffer) -> Fields =
+# What a caller holds: the document, and how it got here.
+export type Buffer =
+  | Hist Doc History
+
+# `past` is newest-first and each entry is the whole document BEFORE a step.
+# Snapshots rather than an invertible edit log: typing leaves `above` and
+# `below` untouched, and a persistent list shares them wholesale, so a step
+# costs the changed line rather than the document (docs/tui-undo-v0.md §4).
+#
+# `future` is what undo took off, and any new edit clears it — the redo stack
+# that stands in for an undo tree (§2).
+type History = (past: List Doc, future: List Doc, run: Run)
+
+# Whether an insertion continues the run being typed, and how long that run has
+# got. One keystroke is the wrong unit for an undo step and both references say
+# so; §5 follows Emacs and coalesces a run of them.
+type Run =
+  | Fresh
+  | Typing Int
+
+# Vim's `'undolevels'` default, in Vim's units: steps, not Emacs's bytes.
+# Sprout has no cheap way to size a `Fields`, and a step count is the number a
+# reader can reason about.
+fn step_cap() -> Int = 1000
+
+# Emacs's `amalgamating-undo-limit` default: how many typed characters go into
+# one step before the run closes on its own.
+fn run_cap() -> Int = 20
+
+fn doc(b: Buffer) -> Doc =
   match b with
+  | Hist d _ -> d
+
+fn history(b: Buffer) -> History =
+  match b with
+  | Hist _ h -> h
+
+fn fields(d: Doc) -> Fields =
+  match d with
   | Buf f -> f
+
+fn here(b: Buffer) -> Fields = fields(doc(b))
+
+# ── what records a step, and what does not ──────────────────────────────────
+
+fn empty_history() -> History =
+  History(past = Nil, future = Nil, run = Fresh)
+
+# A motion CLOSES the run and records NOTHING. Emacs records motion because its
+# undo list is a log of buffer modifications; this one is a stack of documents,
+# and walking a reader back through their own cursor movements is not what they
+# asked for (§5).
+fn moved_to(b: Buffer, d: Doc) -> Buffer =
+  Hist(d, (history(b) with (run = Fresh)))
+
+# An edit that is a step on its own: a newline, a backspace, a delete, a paste.
+fn recorded(b: Buffer, d: Doc) -> Buffer =
+  Hist(d, History(past = pushed(doc(b), history(b).past), future = Nil,
+                  run = Fresh))
+
+# A run of single characters is ONE step: the first pushes, the rest ride on
+# it. So the length walk in `pushed` is paid per recorded step and not per
+# keystroke.
+fn typed_to(b: Buffer, s: String, d: Doc) -> Buffer =
+  if continues(h.run, s) then Hist(d, (h with (run = grown(h.run))))
+  else with_run(opening(s), recorded(b, d))
+where
+  h = history(b)
+
+# An insert that did not continue a run still OPENS one when it is a
+# keystroke, so the next character rides on it. A newline or a paste opens
+# nothing: the step it just closed is finished, and what follows starts over.
+fn opening(s: String) -> Run =
+  if is_one_key(s) then Typing(1) else Fresh
+
+fn with_run(r: Run, b: Buffer) -> Buffer =
+  Hist(doc(b), (history(b) with (run = r)))
+
+fn continues(r: Run, s: String) -> Bool =
+  match r with
+  | Fresh -> false
+  | Typing n -> n < run_cap() && is_one_key(s)
+
+# What a keystroke looks like from here: both widgets hand a single character
+# in (`string_from_char`), and a paste arrives whole through `Paste`. A newline
+# closes the run whatever its length.
+fn is_one_key(s: String) -> Bool = string.length(s) == 1 && s != "\n"
+
+fn grown(r: Run) -> Run =
+  match r with
+  | Fresh -> Typing(1)
+  | Typing n -> Typing(n + 1)
+
+# The push that drops the oldest step once the stack is full. `list_length`
+# walks, and so does `capped`, but both run once per recorded step — never per
+# character typed.
+fn pushed(d: Doc, past: List Doc) -> List Doc =
+  if list_length(past) < step_cap() then Cons(d, past)
+  else Cons(d, capped(step_cap() - 1, past))
+
+fn capped(n: Int, ds: List Doc) -> List Doc =
+  match ds with
+  | Nil -> Nil
+  | [d | rest] -> if n <= 0 then Nil else Cons(d, capped(n - 1, rest))
 
 # ── opening and reading ─────────────────────────────────────────────────────
 
+# A buffer opens with no history, and the opened document is the floor: undo
+# stops there rather than emptying it.
 export fn buffer_open(s: String) -> Buffer =
-  opened_at(split_lines(s))
+  Hist(opened_at(split_lines(s)), empty_history())
 
-fn opened_at(ls: List String) -> Buffer =
+fn opened_at(ls: List String) -> Doc =
   match list_reverse(ls) with
   | Nil -> Buf (Fields(above = Nil, line = lz.zipper_empty(), below = Nil,
                       goal = Nothing))
@@ -50,7 +157,7 @@ fn split_lines(s: String) -> List String =
 fn normalized(s: String) -> String =
   string.replace_all("\r", "\n", string.replace_all("\r\n", "\n", s))
 
-export fn buffer_lines(b: Buffer) -> List String = all_lines(fields(b))
+export fn buffer_lines(b: Buffer) -> List String = all_lines(here(b))
 
 # A position in the document. A record rather than two adjacent `Int`s, which
 # swap silently — and because both axes clamp, a swapped pair would land a
@@ -65,9 +172,9 @@ export fn buffer_caret(b: Buffer) -> Caret =
 # point: a caret carried into a file being reopened
 # (docs/tui-content-update-v0.md §9.3).
 export fn buffer_goto(c: Caret, b: Buffer) -> Buffer =
-  walked(c.col, c.row, all_lines(fields(b)), Nil)
+  moved_to(b, walked(c.col, c.row, all_lines(here(b)), Nil))
 
-fn walked(col: Int, n: Int, rest: List String, above: List String) -> Buffer =
+fn walked(col: Int, n: Int, rest: List String, above: List String) -> Doc =
   match rest with
   # Past the last line: back onto it rather than inventing an empty one, which
   # would put a trailing newline in a document nobody edited.
@@ -76,13 +183,13 @@ fn walked(col: Int, n: Int, rest: List String, above: List String) -> Buffer =
       if n <= 0 then landed_at(col, here, above, below)
       else walked(col, n - 1, below, Cons(here, above))
 
-fn backed_onto(col: Int, above: List String) -> Buffer =
+fn backed_onto(col: Int, above: List String) -> Doc =
   match above with
   | Nil -> landed_at(col, "", Nil, Nil)
   | [last | rest] -> landed_at(col, last, rest, Nil)
 
 fn landed_at(col: Int, here: String, above: List String,
-             below: List String) -> Buffer =
+             below: List String) -> Doc =
   Buf(Fields(above = above, line = lz.zipper_at(col, lz.zipper_open(here)),
               below = below, goal = Nothing))
 
@@ -93,15 +200,15 @@ fn all_lines(f: Fields) -> List String =
 # empty. Every application mirrors this value, so an ambiguity here becomes N
 # incompatible mirrors.
 export fn buffer_text(b: Buffer) -> String =
-  string.join("\n", all_lines(b |> fields))
+  string.join("\n", all_lines(b |> here))
 
-export fn buffer_row(b: Buffer) -> Int = list_length(fields(b).above)
+export fn buffer_row(b: Buffer) -> Int = list_length(here(b).above)
 
-export fn buffer_col(b: Buffer) -> Int = lz.zipper_col(fields(b).line)
+export fn buffer_col(b: Buffer) -> Int = lz.zipper_col(here(b).line)
 
 # The line the caret is on, read directly rather than indexed out of
 # `buffer_lines`, which costs a walk of the whole document.
-export fn buffer_line(b: Buffer) -> String = lz.zipper_text(fields(b).line)
+export fn buffer_line(b: Buffer) -> String = lz.zipper_text(here(b).line)
 
 # ── editing ─────────────────────────────────────────────────────────────────
 
@@ -109,13 +216,13 @@ export fn buffer_line(b: Buffer) -> String = lz.zipper_text(fields(b).line)
 # the value stands" from "I changed the document".
 export fn buffer_insert(s: String, b: Buffer) -> Maybe Buffer =
   if string.is_empty(s) then Nothing
-  else Just(inserted(fields(b), split_lines(s)))
+  else Just(typed_to(b, s, inserted(here(b), split_lines(s))))
 
 # Several segments cannot be applied one at a time: the first would re-segment
 # against text the next break is about to move to another line, and the caret
 # would round back in front of it, splitting the line in the wrong place. The
 # caret's two halves are taken once, up front.
-fn inserted(f: Fields, segs: List String) -> Buffer =
+fn inserted(f: Fields, segs: List String) -> Doc =
   match segs with
   | Nil -> Buf((f with (goal = Nothing)))
   | [only] -> Buf(extended(f, only))
@@ -130,7 +237,7 @@ fn extended(f: Fields, seg: String) -> Fields =
 # `done` is a finished line. Every segment but the last completes one; the last
 # starts the line the caret ends on and keeps what followed the caret.
 fn broken_at(f: Fields, done: String, rest: List String,
-             tail: String) -> Buffer =
+             tail: String) -> Doc =
   match rest with
   | Nil -> Buf (Fields(above = f.above, line = restarted(done, tail),
                       below = f.below, goal = Nothing))
@@ -143,18 +250,18 @@ where
   fresh = lz.zipper_open(tail) |> lz.zipper_start
 
 export fn buffer_backspace(b: Buffer) -> Maybe Buffer =
-  backspaced(fields(b))
+  map(recorded(b, _), backspaced(here(b)))
 
-fn backspaced(f: Fields) -> Maybe Buffer =
+fn backspaced(f: Fields) -> Maybe Doc =
   if lz.zipper_is_at_start(f.line) then joined_above(f)
   else map(with_line(f, _), lz.zipper_backspace(f.line))
 
-fn with_line(f: Fields, z: lz.Zipper) -> Buffer =
+fn with_line(f: Fields, z: lz.Zipper) -> Doc =
   Buf(Fields(above = f.above, line = z, below = f.below, goal = Nothing))
 
 # The caret lands at the seam, which is the end of what used to be the line
 # above — so the join is visible without moving the eye.
-fn joined_above(f: Fields) -> Maybe Buffer =
+fn joined_above(f: Fields) -> Maybe Doc =
   match f.above with
   | Nil -> Nothing
   | [prev | rest] ->
@@ -167,13 +274,13 @@ fn seamed(head: String, tail: String) -> lz.Zipper =
                            lz.zipper_open(head ++ tail))
 
 export fn buffer_delete(b: Buffer) -> Maybe Buffer =
-  deleted(fields(b))
+  map(recorded(b, _), deleted(here(b)))
 
-fn deleted(f: Fields) -> Maybe Buffer =
+fn deleted(f: Fields) -> Maybe Doc =
   if lz.zipper_is_at_end(f.line) then pulled_up(f)
   else map(with_line(f, _), lz.zipper_delete(f.line))
 
-fn pulled_up(f: Fields) -> Maybe Buffer =
+fn pulled_up(f: Fields) -> Maybe Doc =
   match f.below with
   | Nil -> Nothing
   | [next | rest] ->
@@ -183,9 +290,10 @@ fn pulled_up(f: Fields) -> Maybe Buffer =
 
 # ── moving ──────────────────────────────────────────────────────────────────
 
-export fn buffer_left(b: Buffer) -> Buffer = stepped_left(fields(b))
+export fn buffer_left(b: Buffer) -> Buffer =
+  moved_to(b, stepped_left(here(b)))
 
-fn stepped_left(f: Fields) -> Buffer =
+fn stepped_left(f: Fields) -> Doc =
   if lz.zipper_is_at_start(f.line) then wrapped_up(f)
   else Buf(Fields(above = f.above, line = lz.zipper_left(f.line),
                   below = f.below, goal = Nothing))
@@ -193,7 +301,7 @@ fn stepped_left(f: Fields) -> Buffer =
 # A move with nowhere to go is still a horizontal move, so it still clears the
 # goal — leaving it set sends the next vertical move to a column the reader has
 # already left.
-fn wrapped_up(f: Fields) -> Buffer =
+fn wrapped_up(f: Fields) -> Doc =
   match f.above with
   | Nil -> Buf((f with (goal = Nothing)))
   | [prev | rest] ->
@@ -201,14 +309,15 @@ fn wrapped_up(f: Fields) -> Buffer =
                  below = Cons(lz.zipper_text(f.line), f.below),
                  goal = Nothing))
 
-export fn buffer_right(b: Buffer) -> Buffer = stepped_right(fields(b))
+export fn buffer_right(b: Buffer) -> Buffer =
+  moved_to(b, stepped_right(here(b)))
 
-fn stepped_right(f: Fields) -> Buffer =
+fn stepped_right(f: Fields) -> Doc =
   if lz.zipper_is_at_end(f.line) then wrapped_down(f)
   else Buf(Fields(above = f.above, line = lz.zipper_right(f.line),
                   below = f.below, goal = Nothing))
 
-fn wrapped_down(f: Fields) -> Buffer =
+fn wrapped_down(f: Fields) -> Doc =
   match f.below with
   | Nil -> Buf((f with (goal = Nothing)))
   | [next | rest] ->
@@ -216,25 +325,27 @@ fn wrapped_down(f: Fields) -> Buffer =
                  line = lz.zipper_open(next) |> lz.zipper_start, below = rest,
                  goal = Nothing))
 
-export fn buffer_home(b: Buffer) -> Buffer = anchored(fields(b), lz.zipper_start)
+export fn buffer_home(b: Buffer) -> Buffer =
+  moved_to(b, anchored(here(b), lz.zipper_start))
 
-export fn buffer_end(b: Buffer) -> Buffer = anchored(fields(b), lz.zipper_end)
+export fn buffer_end(b: Buffer) -> Buffer =
+  moved_to(b, anchored(here(b), lz.zipper_end))
 
-fn anchored(f: Fields, to: lz.Zipper -> lz.Zipper) -> Buffer =
+fn anchored(f: Fields, to: lz.Zipper -> lz.Zipper) -> Doc =
   Buf(Fields(above = f.above, line = to(f.line), below = f.below,
              goal = Nothing))
 
-export fn buffer_up(b: Buffer) -> Buffer = moved_up(fields(b))
+export fn buffer_up(b: Buffer) -> Buffer = moved_to(b, moved_up(here(b)))
 
-fn moved_up(f: Fields) -> Buffer =
+fn moved_up(f: Fields) -> Doc =
   match f.above with
   | Nil -> Buf(f)
   | [prev | rest] ->
       landed(prev, rest, Cons(lz.zipper_text(f.line), f.below), goal_of(f))
 
-export fn buffer_down(b: Buffer) -> Buffer = moved_down(fields(b))
+export fn buffer_down(b: Buffer) -> Buffer = moved_to(b, moved_down(here(b)))
 
-fn moved_down(f: Fields) -> Buffer =
+fn moved_down(f: Fields) -> Doc =
   match f.below with
   | Nil -> Buf(f)
   | [next | rest] ->
@@ -246,7 +357,36 @@ fn goal_of(f: Fields) -> Int =
   maybe_with_default(lz.zipper_display_col(f.line), f.goal)
 
 fn landed(target: String, above: List String, below: List String,
-          goal: Int) -> Buffer =
+          goal: Int) -> Doc =
   Buf(Fields(above = above,
              line = lz.zipper_to_display_col(goal, lz.zipper_open(target)),
              below = below, goal = Just(goal)))
+
+# ── history ─────────────────────────────────────────────────────────────────
+
+# `Nothing` for the same reason every edit answers it: nothing changed. Nothing
+# to undo, nothing to redo, and a buffer holding only its opening state all
+# answer it.
+#
+# The snapshot is the whole `Fields`, so the caret comes back with the text —
+# which is what lands an undo where the edit was rather than where the reader
+# last looked.
+export fn buffer_undo(b: Buffer) -> Maybe Buffer = back_one(b, history(b))
+
+fn back_one(b: Buffer, h: History) -> Maybe Buffer =
+  match h.past with
+  | Nil -> Nothing
+  | [prev | rest] ->
+      Just(Hist(prev, History(past = rest, future = Cons(doc(b), h.future),
+                              run = Fresh)))
+
+export fn buffer_redo(b: Buffer) -> Maybe Buffer = forward_one(b, history(b))
+
+# No cap check on the way back: redo only returns what undo took off, so the
+# stack cannot grow past what `pushed` already bounded.
+fn forward_one(b: Buffer, h: History) -> Maybe Buffer =
+  match h.future with
+  | Nil -> Nothing
+  | [next | rest] ->
+      Just(Hist(next, History(past = Cons(doc(b), h.past), future = rest,
+                              run = Fresh)))

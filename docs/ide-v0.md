@@ -25,8 +25,10 @@ there fails `just ir-golden-diff` with `MISSING GOLDEN` until snapshotted.
 **Goals.** Open a file from a project tree, edit it, write it back. Be driven end to end by a gate.
 Establish the module seams the later milestones fill in.
 
-**Non-goals.** Splits, tabs, a command palette, syntax highlighting, diagnostics, search, undo.
-Each is named in §9 or already in `BACKLOG.md`; none is started.
+**Non-goals.** Splits, tabs, a command palette, syntax highlighting, diagnostics, search.
+Each is named in §9 or already in `BACKLOG.md`; none is started. Undo *was* one of these and is not
+any more: autosave landed first and took away the floor an unsaved buffer had been, so it came back
+as `docs/tui-undo-v0.md`.
 
 ## 3. The shape, and the one constraint that fixes it
 
@@ -89,7 +91,7 @@ character typed, twice — once to build the message, once for the application t
 
 So the pane owns its document instead. What it puts on the loop is a short **label** when the label
 changes, and the text exactly once: when it is asked, on a save. The plan justified the sibling on
-highlighting grounds (the pane must own `render`, which it does — §5.3); the cost above is the
+highlighting grounds (the pane must own `render`, which it does — §5.4); the cost above is the
 stronger reason.
 
 The window itself is not duplicated. `stdlib.tui.widgets.viewport` is the extraction of
@@ -172,7 +174,18 @@ read out of the request, because a tick is not a message (`on_demand` is now a p
 `Unnamed` or `Busy` in the status line once a second is worse than saying nothing. The IDE defaults
 to `idle:1000` and takes `--save-when`. Design: `docs/ide-save-v0.md`.
 
-### 5.3 What it paints
+### 5.3 Undo is the pane's, and the key is the application's
+
+The pane owns the `buffer.Buffer`, so it owns the history in it. What the application owns is the
+binding — ctrl-z and ctrl-y, in `ide/keymap.sprout` with the rest — and the two meet at
+`EditorOpts.on_step`, a prism over the application's message type like every other decoder here.
+
+An undo goes through the same `edited` a keystroke does, which is what marks the pane dirty. That is
+not a detail: a stored pane is clean, and an undo that left it clean would leave the pre-undo text
+on disk with autosave on, which is the one state this feature exists to prevent. Design:
+`docs/tui-undo-v0.md` §7.
+
+### 5.4 What it paints
 
 A gutter of line numbers, right-aligned, one space clear of the text, as wide as the largest number
 in the document; the document beside it, through `viewport`. Past the last line there is no number —
@@ -186,9 +199,13 @@ focused pane swallows. So do Tab, Esc, the function keys and paging, exactly as 
 A table, not a `match` inside `update`: the bindings are then readable in one place and testable
 without a terminal, and it is the seam a configuration file plugs into later.
 
-Only chords and Esc are bound. A bare letter belongs to whichever pane holds the keyboard — binding
-one would make the editor unusable the moment it had focus. `ctrl` alone, not any modifier, so
-alt-chords stay free rather than being swallowed silently.
+Only chords and Esc are bound: ctrl-q and Esc quit, ctrl-s saves, ctrl-z undoes and ctrl-y redoes.
+A bare letter belongs to whichever pane holds the keyboard — binding one would make the editor
+unusable the moment it had focus. `ctrl` alone, not any modifier, so alt-chords stay free rather
+than being swallowed silently.
+
+Redo is ctrl-y because the legacy encoding cannot tell ctrl-shift-z from ctrl-z, which is one of the
+things the kitty protocol would fix (`BACKLOG.md` §4).
 
 ## 7. `ide.filetree`
 
@@ -245,3 +262,6 @@ navigates through. Pinned in `tests/ide/test_ide_filetree.spr`.
   resumes on the write's answer, and a failed one bars its own bytes so it cannot spin.
   `docs/ide-save-v0.md` §4.5.
 - **The window math lived inside one widget.** Extracted to `widgets.viewport` rather than copied.
+- **Autosave removed the only floor there was.** An unsaved buffer had been the undo stack; a
+  history went under `buffer.Buffer` rather than the pane, so `text_area` gets it too.
+  `docs/tui-undo-v0.md`.

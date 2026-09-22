@@ -1,3 +1,4 @@
+import stdlib.string as string
 import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
 import stdlib.tui.buffer as buf
 import stdlib.unicode.utf8 as utf8
@@ -251,6 +252,100 @@ fn caret_cases(state: TestState) -> Unit !{IO} = do
   assert_eq(state, "a caret renders with its axes named",
             to_string(buf.Caret(row = 4, col = 7)), "Caret(row = 4, col = 7)")
 
+# ── undo ────────────────────────────────────────────────────────────────────
+
+# Design: docs/tui-undo-v0.md. A step is a RUN of typing rather than a
+# keystroke (§5), and a snapshot carries the caret, which is what lands an undo
+# where the edit was instead of where the reader last looked.
+
+fn undone(b: buf.Buffer) -> buf.Buffer = or_same(b, buf.buffer_undo(b))
+
+fn redone(b: buf.Buffer) -> buf.Buffer = or_same(b, buf.buffer_redo(b))
+
+# Lines slash-separated, then the caret, so a multi-line expectation is one
+# readable literal.
+fn shown(b: buf.Buffer) -> String =
+  `${string.join("/", buf.buffer_lines(b))} @ ${at(b)}`
+
+fn typed_each(b: buf.Buffer, ss: List String) -> buf.Buffer =
+  list_fold(typed, b, ss)
+
+fn xs(n: Int) -> String = if n <= 0 then "" else "x" ++ xs(n - 1)
+
+fn typed_run(b: buf.Buffer, n: Int) -> buf.Buffer =
+  if n <= 0 then b else typed_run(typed(b, "x"), n - 1)
+
+# A newline is its own step, and each one leaves the lines short — which is
+# what makes a thousand of them cheap enough to drive the step cap with.
+fn broke(b: buf.Buffer, n: Int) -> buf.Buffer =
+  if n <= 0 then b else broke(typed(b, "\n"), n - 1)
+
+fn undos(b: buf.Buffer, n: Int) -> buf.Buffer =
+  if n <= 0 then b else undos(undone(b), n - 1)
+
+fn undo_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "a typed run undoes as one step, caret and all",
+            shown(undone(typed_each(opened("hi"), ["a", "b", "c"]))),
+            "hi @ 0:2")
+  # Each of the three run-closers, and the undo lands on the boundary rather
+  # than walking back to the empty document.
+  assert_eq(state, "a caret motion closes a run",
+            shown(undone(typed(buf.buffer_left(typed(opened("hi"), "a")), "b"))),
+            "hia @ 0:2")
+  assert_eq(state, "a newline closes a run",
+            shown(undone(typed_each(opened(""), ["a", "\n", "b"]))),
+            "a/ @ 1:0")
+  assert_eq(state, "a backspace closes a run",
+            shown(undone(typed(back(typed(opened("abc"), "x")), "y"))),
+            "abc @ 0:3")
+  assert_eq(state, "two undos reach two boundaries back",
+            shown(undos(typed_each(opened(""), ["a", "\n", "b"]), 2)),
+            "a @ 0:1")
+  # A backspace is a step of its own, so the third undo is the one that
+  # reaches the document as opened — and it stops there.
+  assert_eq(state, "a backspace is its own step",
+            shown(undos(typed(back(typed(opened("abc"), "x")), "y"), 2)),
+            "abcx @ 0:4")
+  assert_eq(state, "undo stops at the opened document",
+            shown(undos(typed(back(typed(opened("abc"), "x")), "y"), 3)),
+            "abc @ 0:3")
+  assert_true(state, "and answers Nothing rather than emptying it",
+              ! changed (buf.buffer_undo(undos(typed(back(typed(opened("abc"),
+                                                              "x")), "y"), 3))))
+  assert_true(state, "a freshly opened buffer has nothing to undo",
+              ! changed (buf.buffer_undo(opened("hi"))))
+  assert_true(state, "a caret move on its own records nothing",
+              ! changed (buf.buffer_undo(buf.buffer_left(opened("hi")))))
+  assert_true(state, "redo with nothing undone answers Nothing",
+              ! changed (buf.buffer_redo(typed(opened("hi"), "a"))))
+  assert_eq(state, "redo replays the step and its caret",
+            shown(redone(undone(typed_each(opened("hi"), ["a", "b"])))),
+            "hiab @ 0:4")
+  assert_true(state, "and a new edit clears the redo stack",
+              ! changed (buf.buffer_redo(typed(undone(typed_each(opened("hi"),
+                                                                ["a", "b"])),
+                                              "z"))))
+  # A split and a join each undo to the document they came from — the two
+  # edits that move text between lines.
+  assert_eq(state, "a line split undoes to the line it split",
+            shown(undone(typed(buf.buffer_right(buf.buffer_right(
+              buf.buffer_home(opened("abcd")))), "\n"))),
+            "abcd @ 0:2")
+  assert_eq(state, "a backspace join undoes to the two lines it joined",
+            shown(undone(back(buf.buffer_home(opened("ab\ncd"))))),
+            "ab/cd @ 1:0")
+  # The run cap, in Emacs's units: a run longer than it becomes two steps.
+  assert_eq(state, "a run longer than the cap breaks in two",
+            shown(undone(typed_run(opened(""), 25))),
+            `${xs(20)} @ 0:20`)
+  assert_eq(state, "and the second undo reaches the opening state",
+            shown(undos(typed_run(opened(""), 25), 2)), " @ 0:0")
+  # The step cap, in Vim's: 1001 steps, and the oldest is gone.
+  assert_eq(state, "the step cap drops the oldest step",
+            buf.buffer_row(undos(broke(opened(""), 1001), 1000)), 1)
+  assert_true(state, "and there is nothing under it",
+              ! changed (buf.buffer_undo(undos(broke(opened(""), 1001), 1000))))
+
 fn main() -> Unit !{IO} = do
   state <- new_state()
   goto_cases(state)
@@ -262,4 +357,5 @@ fn main() -> Unit !{IO} = do
   paste_cases(state)
   cluster_cases(state)
   nochange_cases(state)
+  undo_cases(state)
   summary(state)
