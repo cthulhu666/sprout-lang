@@ -611,7 +611,9 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   why wrapping `Caret`'s axes was tried and reverted — it guarded a value the app can never hold.
   Wants a caret readout; shape depends on whether `on_change` widens or a second handler appears.
 - [ ] `P2` **TUI `text_area` — what C3b left out.** Soft wrap (needs height-for-width, which
-  `Measured` cannot express); selection, clipboard and undo; word motion and the chord family;
+  `Measured` cannot express); selection and clipboard; a way to ASK for an undo — `buffer` holds
+  the history now (`docs/tui-undo-v0.md`), and the widget binds no chord and takes no prism for it,
+  so only the IDE pane can walk it; word motion and the chord family;
   tab-stop expansion on paste, which today blanks a tab to one space and loses the indentation of
   pasted code; a jump-to-line control, whose intended shape is an opts-supplied prism rather than
   a `Delivery` arm; and peeking away from the caret, which the derived window gives up. Each is
@@ -685,13 +687,13 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   nothing says why. `on_note` exists now and a failed write uses it, but `stamped.fresh` hides the
   payload of a reply it has judged stale, so the pane cannot name the file it dropped. Wants a note
   that does not need the payload, or `at_least`. Design: `docs/ide-v0.md` §5.2.
-- [ ] `P1` **IDE — no undo, and autosave is now on by default.** Nothing takes a keystroke back:
-  the pane holds one `buffer.Buffer` and no history, and §4's `text_area` entry has the same gap —
-  both hold the same type, so one fix serves both. Autosave removed the floor that made it
-  survivable (an unsaved buffer was its own escape hatch): a mistyped key now reaches disk a second
-  later with git as the only recovery, and `--save-when=manual` is the only mitigation.
-  Designed but not implemented, and §9 (local history in v0?) wants a call:
-  `docs/tui-undo-v0.md`.
+- [ ] `P3` **IDE — no local history under undo.** The history dies with the process, so a file
+  closed and reopened has nothing behind it — and autosave has already written the visited file.
+  Every editor surveyed keeps a second floor: Emacs autosaves to `#foo#` and leaves the visited
+  file alone, Vim has `'undofile'`, and VS Code and JetBrains both ship a local history ON by
+  default — the camp Sprout's autosave puts it in. Wants durable state, somewhere to put it, a
+  retention policy and a way to browse it, which is why it is a feature and not undo's second half.
+  Survey and the call: `docs/tui-undo-v0.md` §3.2, §9.
 - [ ] `P3` **`app.step_to` recurses forever when `update` re-sends the message it is given.**
   `delivered` (`app.sprout:126`) answers an unclaimed delivery with `apply(update, [msg], w)`, so
   an `update` arm whose handling of `msg` is `step_to(update, w, id, msg)` — the obvious spelling

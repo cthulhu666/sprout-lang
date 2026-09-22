@@ -1,6 +1,6 @@
 # Undo for `tui.buffer` — v0
 
-Status: proposed. Not implemented. Normative for `stdlib/tui/` once accepted, not for the language.
+Status: implemented 2026-09-22. Normative for `stdlib/tui/`, not for the language.
 
 ## 1. The problem
 
@@ -33,7 +33,7 @@ Non-goals for v0, each with a reason rather than a deferral:
 - **An undo *tree* (Vim's `g-`/`g+`).** Branches matter once undo-then-edit loses work. It only
   loses redo, and §5's redo stack is the standard answer. Revisit if a reader asks for it.
 - **Persistence across process restarts** (Vim's `'undofile'`). In-memory history restores the floor
-  autosave removed; a durable one is §9's question and a separate feature.
+  autosave removed; a durable one is §9's question, answered there, and now its own backlog entry.
 - **Undo of caret motion alone.** §5 explains why moving is not an edit.
 
 ## 3. Prior art
@@ -129,7 +129,9 @@ Following Emacs, because Sprout's editor is modeless and has no `i` to leave:
 
 - Consecutive single-character insertions **coalesce** into one run.
 - A run is closed by any of: a caret motion, a newline, a backspace or delete, a multi-character
-  insert (a paste is its own step), or reaching a cap on the run's length.
+  insert (a paste is its own step), or reaching a cap on the run's length — **20**, Emacs's own
+  `amalgamating-undo-limit` default. A closer that is itself a keystroke opens the next run; a
+  newline or a paste opens nothing, because what follows it starts over.
 - **Motion alone records nothing.** Moving the caret closes a run but does not push a step, so
   undoing never walks the reader back through their own cursor movements. This is the one place the
   design says "no" to something Emacs says yes to, and it is deliberate: Emacs records motion only
@@ -179,8 +181,22 @@ ctrl-z is available: the TUI clears `ISIG` (`runtime/sprout_runtime.c:3854`), so
 key rather than `SIGTSTP` — the same line that makes ctrl-C bindable, for the same stated reason
 ("an editor has to be able to bind it").
 
+**Redo is ctrl-y, not ctrl-shift-z.** The legacy encoding sends one control character for both, so
+`event.Mods` cannot tell them apart; the kitty protocol is what would, and it is filed. ctrl-y is
+VS Code's own redo on Windows and Linux
+([default keybindings](https://code.visualstudio.com/docs/reference/default-keybindings)).
+
+**The seam is a prism, not a `Delivery` arm**, following `tui-text-area-v0.md` §4.10: the pane takes
+`on_step: Maybe (m -> Maybe Step)` where `Step` is `Backward` or `Forward`, and `ide/app.sprout`
+decodes its own `Bound Undo` into one. The binding is the application's and the history is the
+pane's, so the key is decoded there and the walk happens here — on the one `buffer.Buffer` there is.
+
+`text_area` gets the history with the type and has no way to be asked for it: it binds no chord and
+takes no such prism. Filed in `BACKLOG.md` §4.
+
 **An undo must mark the pane dirty.** Otherwise autosave leaves the pre-undo text on disk and the
-feature fails at exactly the moment it was built for.
+feature fails at exactly the moment it was built for. It goes through `editor.edited`, which is what
+already marks a keystroke dirty, so the two cannot drift apart.
 
 ## 8. Impact
 
@@ -205,8 +221,8 @@ a retention policy, and a way to browse it — and none of that is on the path t
 keystroke. Shipping undo first is not a half-measure; it closes the regression `ide-save-v0.md` §8
 named, and leaves a gap that predates it.
 
-**Recommendation: not in v0.** File it as its own entry, with §3.2's table as the survey, and let
-undo land first.
+**Decided: not in v0.** Undo landed on its own, and the local history is filed as its own entry
+with §3.2's table as the survey (`BACKLOG.md` §4.5).
 
 ## 10. Verification
 
@@ -220,7 +236,9 @@ Pinned in `tests/stdlib/test_tui_buffer.spr`:
   and a caret move on its own;
 - redo replays the step and its caret, and a new edit clears the redo stack;
 - undo stops at the opened document rather than emptying it;
-- a line split and a backspace-join each undo to the document they came from.
+- a line split and a backspace-join each undo to the document they came from;
+- a run longer than the run cap becomes two steps;
+- 1001 steps leave 1000, and the oldest is gone.
 
 In `tests/ide/test_ide_editor.spr`: ctrl-z reaches the pane, and an undo marks it dirty so the next
 autosave writes the undone text — the §7 failure that would make the feature pointless.

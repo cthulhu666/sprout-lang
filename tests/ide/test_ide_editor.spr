@@ -32,6 +32,7 @@ type Msg (..) deriving (Eq, ToString) =
   | Saved ed.Saving
   | Written ed.Wrote
   | Noted String
+  | Walk ed.Step
 
 fn at(p: String) -> doc.FilePath = doc.FilePath(p)
 
@@ -62,13 +63,19 @@ fn wrote_for(m: Msg) -> Maybe ed.Wrote =
   | Written wr -> Just(wr)
   | _ -> Nothing
 
+fn step_for(m: Msg) -> Maybe ed.Step =
+  match m with
+  | Walk st -> Just(st)
+  | _ -> Nothing
+
 # `Saved` is named ONCE and stands: a tick or a blur starts a save with no
 # message for the pane to read a constructor out of.
 fn opts() -> ed.EditorOpts Msg =
   ed.editor_opts() with (on_label = Just(Labelled), on_open = Just(open_for),
                          on_content = Just(content_for),
                          on_demand = Just(demand_for), on_saving = Just(Saved),
-                         on_wrote = Just(wrote_for), on_note = Just(Noted))
+                         on_wrote = Just(wrote_for), on_note = Just(Noted),
+                         on_step = Just(step_for))
 
 # A neighbour, so a key the pane DECLINES is visible as a broadcast rather than
 # as silence.
@@ -556,6 +563,61 @@ fn key_cases(state: TestState) -> Unit !{IO} = do
   assert_eq(state, "an unfocused pane does not take keys",
             said(widget.feed(opened(unfocused(), at("a.txt"), "ab"), chars("x"))),
             "[Noted(bcast)]")
+  # ctrl-z is a chord like any other: the pane declines it, the application
+  # binds it, and what comes back is an addressed `Walk`.
+  assert_eq(state, "ctrl-z is declined so the binding can reach the pane",
+            said(widget.feed(loaded_tree(), [chord(event.KChar('z'))])),
+            "[Noted(bcast)]")
+
+# ── the history ─────────────────────────────────────────────────────────────
+
+# Design: docs/tui-undo-v0.md §7. The pane owns the `buffer.Buffer`, so the
+# walk happens here; the application only names the key.
+#
+# The text is never read directly — `Widget m` erases it — so every expectation
+# below asks for a save and reads the bytes out of the answer, which is the
+# same thing `ide-smoke` proves against the disk.
+fn walking(w: widget.Widget Msg, st: ed.Step) -> (widget.Widget Msg, Says, Asks) =
+  told(w, Walk(st))
+
+fn walked(w: widget.Widget Msg, st: ed.Step) -> widget.Widget Msg =
+  tree_of(walking(w, st))
+
+# Loaded, typed into, and written: clean, named, nothing in flight. What an
+# undo has to be able to dirty again.
+fn stored_when(w: ed.SaveWhen) -> widget.Widget Msg =
+  tree_of(told(tree_of(handed), Written(ed.WroteTo(st.stamp(rec, at("stdlib/a.txt"))))))
+where
+  handed = widget.feed(dirty_when(w), ticks(2))
+  rec = maybe_with_default(v.origin(), saved_receipt(says(handed)))
+
+fn undo_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "an undo takes the keystroke back",
+            said(told(walked(tree_of(widget.feed(loaded_tree(), chars("x"))),
+                             ed.Backward), Save)),
+            "[Saved(SaveTo(FilePath(stdlib/a.txt), ab, Version(3)))]")
+  assert_eq(state, "and a redo puts it back",
+            said(told(walked(walked(tree_of(widget.feed(loaded_tree(),
+                                                        chars("x"))),
+                                    ed.Backward), ed.Forward), Save)),
+            "[Saved(SaveTo(FilePath(stdlib/a.txt), xab, Version(4)))]")
+  # A claimed key that changed nothing, exactly as backspace at the document
+  # start is: the pane says nothing rather than announcing a label it has not
+  # changed.
+  assert_eq(state, "an undo with nothing under it says nothing",
+            said(told(loaded_tree(), Walk(ed.Backward))), "[]")
+  assert_eq(state, "a redo with nothing undone says nothing",
+            said(told(loaded_tree(), Walk(ed.Forward))), "[]")
+  # THE POINT OF THE FEATURE. A stored pane is clean, so an undo that did not
+  # dirty it would leave the pre-undo text on disk and the next autosave would
+  # never fire — the file would keep the keystroke the reader just took back.
+  assert_eq(state, "an undo dirties a stored pane",
+            said(walking(stored_when(ed.WhenIdle(2)), ed.Backward)),
+            "[Labelled(a.txt *)]")
+  assert_eq(state, "so the next autosave writes the undone text",
+            said(widget.feed(walked(stored_when(ed.WhenIdle(2)), ed.Backward),
+                             ticks(2))),
+            "[Saved(SaveTo(FilePath(stdlib/a.txt), ab, Version(4)))]")
 
 # ── what it paints ──────────────────────────────────────────────────────────
 
@@ -637,5 +699,6 @@ fn main() -> Unit !{IO} = do
   manual_cases(state)
   stale_cases(state)
   key_cases(state)
+  undo_cases(state)
   gutter_cases(state)
   summary(state)

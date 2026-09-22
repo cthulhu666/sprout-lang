@@ -21,6 +21,10 @@ fn main() -> Unit !{IO} =
     check_eq("Esc quits", plain(event.KEsc), Just(keymap.Quit)),
     check_eq("ctrl-q quits", ctrl(event.KChar('q')), Just(keymap.Quit)),
     check_eq("ctrl-s saves", ctrl(event.KChar('s')), Just(keymap.Save)),
+    # ctrl-z reaches us as a key because the TUI clears `ISIG`; redo is ctrl-y
+    # because the legacy encoding cannot tell ctrl-shift-z from ctrl-z.
+    check_eq("ctrl-z undoes", ctrl(event.KChar('z')), Just(keymap.Undo)),
+    check_eq("ctrl-y redoes", ctrl(event.KChar('y')), Just(keymap.Redo)),
     # A bare letter is text, and binding one would make the editor unusable the
     # moment it held the keyboard.
     check_eq("a bare letter is not a command", plain(event.KChar('s')), Nothing),
@@ -28,6 +32,8 @@ fn main() -> Unit !{IO} =
     # The chord is ctrl's alone: alt-s is free for a later binding, and reading
     # "any modifier" would take it silently.
     check_eq("alt-s is unbound", alt(event.KChar('s')), Nothing),
-    check_eq("an unbound chord is not a command", ctrl(event.KChar('z')), Nothing),
+    check_eq("alt-z is unbound too", alt(event.KChar('z')), Nothing),
+    check_eq("a bare z is not a command", plain(event.KChar('z')), Nothing),
+    check_eq("an unbound chord is not a command", ctrl(event.KChar('k')), Nothing),
     check_eq("an unbound key is not a command", plain(event.KF(1)), Nothing)
   ])

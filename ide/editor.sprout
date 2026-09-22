@@ -53,6 +53,13 @@ export type Wrote (..) deriving (Eq, ToString) =
   | WroteTo (stamped.Stamped version.Version document.FilePath)
   | WriteFailed String
 
+# Which way along the pane's own history a request moves it. The pane holds
+# the `buffer.Buffer`, so undo is its to perform; what the application supplies
+# is the key that asked for it (docs/tui-undo-v0.md §7).
+export type Step (..) deriving (Eq, ToString) =
+  | Backward
+  | Forward
+
 # When the pane saves without being asked. `Manually` is not "never saves" —
 # ctrl-s reaches the pane as an ordinary request under all three. One of, not a
 # set: in a terminal a blur IS a keystroke, so a pane with both triggers on
@@ -101,14 +108,18 @@ export type EditorOpts m (..) = (look: focus.FocusStyle,
                             on_wrote: Maybe (m -> Maybe Wrote),
                             # The pane's one way to speak plainly. Without it a
                             # failure it has claimed would vanish.
-                            on_note: Maybe (String -> m))
+                            on_note: Maybe (String -> m),
+                            # Undo and redo. Last in the chain because no other
+                            # link recognises a binding, and a pane given none
+                            # of this simply has no history to walk.
+                            on_step: Maybe (m -> Maybe Step))
 
 # `Manually` by default, so a pane nobody configured writes only when told to.
 export fn editor_opts() -> EditorOpts m =
   EditorOpts(look = focus.focus_style_default(), save_when = Manually,
              on_label = Nothing, on_open = Nothing, on_content = Nothing,
              on_demand = Nothing, on_saving = Nothing, on_wrote = Nothing,
-             on_note = Nothing)
+             on_note = Nothing, on_step = Nothing)
 
 # ── the widget ──────────────────────────────────────────────────────────────
 
@@ -173,10 +184,10 @@ fn leaving(p: Pane m) -> Bool =
 
 # ── what the application says ───────────────────────────────────────────────
 
-# DECODER CHAIN — `on_open`, `on_content`, `on_demand`, `on_wrote`, each
-# falling through to the next, declining when none claims the message. The
+# DECODER CHAIN — `on_open`, `on_content`, `on_demand`, `on_wrote`, `on_step`,
+# each falling through to the next, declining when none claims the message. The
 # order decides any message two links both recognise, and a reader editing one
-# cannot see the others: do not reorder without checking all four. `on_demand`
+# cannot see the others: do not reorder without checking all five. `on_demand`
 # is the odd link — a predicate, not a prism, because a save can start with no
 # message at all and the reply's name has to live in `on_saving` instead.
 #
@@ -283,8 +294,22 @@ fn saving(p: Pane m) -> Saving =
   in SaveTo(f, buffer.buffer_text(p.body), p.shown)
 
 fn restored(p: Pane m, msg: m) -> Reply m =
-  let Just wr = widget.decoded(p.opts.on_wrote, msg) else Nothing
+  let Just wr = widget.decoded(p.opts.on_wrote, msg) else walked(p, msg)
   in finished(p, wr)
+
+# Undo goes through `edited`, which is what MARKS THE PANE DIRTY. Anything else
+# would leave the pre-undo text on disk under an autosave strategy, and the
+# feature would fail at exactly the moment it was built for
+# (docs/tui-undo-v0.md §7). Nothing to undo answers as any other edit that
+# changed nothing does: claimed, and nothing said.
+fn walked(p: Pane m, msg: m) -> Reply m =
+  let Just st = widget.decoded(p.opts.on_step, msg) else Nothing
+  in edited(p, taken(st, p.body))
+
+fn taken(st: Step, b: buffer.Buffer) -> Maybe buffer.Buffer =
+  match st with
+  | Backward -> buffer.buffer_undo(b)
+  | Forward -> buffer.buffer_redo(b)
 
 fn finished(p: Pane m, wr: Wrote) -> Reply m =
   match wr with
