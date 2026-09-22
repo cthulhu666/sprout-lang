@@ -258,8 +258,22 @@ fn payload_type(t: types.Type) -> types.Type =
 # monad kind, so decide structurally: if the full type is itself linear it is an effect-bound
 # linear (use it whole); otherwise fall back to the payload (the monadic case, and the existing
 # conservative over-strict edge where a non-linear container holds a linear).
+#
+# A PHANTOM last position is not a payload. `Handle File` yields no File — the
+# declaration stores an Int — so stripping the argument invented an obligation
+# the same value escapes as a `let` binder or a parameter, and reported it under
+# a type the binder does not have. Bind the container whole instead; containment
+# then declines to descend the phantom position, as it does everywhere else.
 fn do_bind_type(t: types.Type, env: Dict types.Scheme) -> types.Type =
-  if type_is_linear(t, env) then t else payload_type(t)
+  if type_is_linear(t, env) then t
+  else if last_arg_is_phantom(t, env) then t
+  else payload_type(t)
+
+fn last_arg_is_phantom(t: types.Type, env: Dict types.Scheme) -> Bool =
+  match t with
+  | types.TApp _ _ ->
+      param_is_phantom(head_type_name(t), list_length(app_spine_args(t)) - 1, env)
+  | _ -> false
 
 fn app_names(a: List String, b: List String) -> List String =
   match a with
@@ -279,15 +293,53 @@ fn remove_all(names: List String, us: List LinUse) -> List LinUse =
   | Nil -> us
   | Cons n rest -> remove_all(rest, luse_remove(n, us))
 
-fn first_linear_param(params: List ast.Param, lam_type: types.Type, env: Dict types.Scheme) -> Maybe String =
+# Returns the binder, not just its name: under containment the obliged type is
+# often not the linear one, and "linear lambda parameter 'x'" for `x: Maybe File`
+# tells the reader a type is linear that §5.8 says is not. Same fix, and same
+# reason, as leak_binder_msg on the binder path.
+fn first_linear_param(params: List ast.Param, lam_type: types.Type,
+                      env: Dict types.Scheme) -> Maybe LinBinder =
   match params with
   | Nil -> Nothing
   | Cons prm rest ->
       match lam_type with
       | types.TFunc a b _ _ ->
-          if type_mentions_linear(a, env) then Just(param_name(prm))
+          if type_mentions_linear(a, env) then Just(LinBinder(param_name(prm), a))
           else first_linear_param(rest, b, env)
       | _ -> Nothing
+
+# The accumulator of a comprehension's synthesized fold, dropped before the
+# search. It is the fold's first parameter and is not a binder the user wrote;
+# under containment its type mentions the linear type on every step while the
+# comprehension builds a `List File`, so searching it rejected every such
+# comprehension and blamed the generator, which binds something else entirely.
+# What remains after the drop is the generator binder — the thing M4.4 defers.
+# POSITIONAL INVARIANT — the accumulator is the fold's FIRST parameter
+# (infer.build_comp_fold), and only the first. Keyed on that position rather than
+# on `is_comprehension_fold`, which answers the looser question "was this lambda
+# synthesized" by scanning every parameter: a destructuring generator binds a
+# generated name too, and dropping the head on the strength of a match further
+# down would silently drop a real binder. Do not swap one predicate for the other.
+fn drop_comp_acc_params(params: List ast.Param) -> List ast.Param =
+  if first_param_is_comp_acc(params) then params_tail(params) else params
+
+fn drop_comp_acc_type(params: List ast.Param, t: types.Type) -> types.Type =
+  if first_param_is_comp_acc(params) then fn_type_tail(t) else t
+
+fn first_param_is_comp_acc(params: List ast.Param) -> Bool =
+  match params with
+  | [] -> false
+  | [prm | _] -> str_starts_with(param_name(prm), ast.comp_binder_prefix)
+
+fn params_tail(ps: List ast.Param) -> List ast.Param =
+  match ps with
+  | Nil -> Nil
+  | Cons _ rest -> rest
+
+fn fn_type_tail(t: types.Type) -> types.Type =
+  match t with
+  | types.TFunc _ b _ _ -> b
+  | _ -> t
 
 # --- borrow-vs-consume composition (M4.5) ---
 
@@ -384,6 +436,22 @@ fn once_borrow_capture_msg(name: String) -> String =
 # is told which modifier says so, rather than being left at a dead end.
 fn linear_lambda_param_msg(name: String) -> String =
   "linear lambda parameter '" ++ name ++ "' is not yet supported (higher-order linearity is deferred; `once` bounds how often a closure RUNS, not what may be passed to it on each run)"
+
+# A parameter obliged by CONTAINMENT is not itself of a linear type, so the
+# wording above would assert what §5.8 denies. Name the type and the linear type
+# inside it, as contained_leak_msg does for a binder.
+fn lambda_param_binder_msg(b: LinBinder, env: Dict types.Scheme) -> String =
+  if type_is_linear(lbind_type(b), env) then linear_lambda_param_msg(lbind_name(b))
+  else contained_lambda_param_msg(lbind_name(b), lbind_type(b),
+                                  first_linear_in(lbind_type(b), env))
+
+fn contained_lambda_param_msg(name: String, t: types.Type, inner: Maybe types.Type) -> String =
+  match inner with
+  | Nothing -> linear_lambda_param_msg(name)
+  | Just lin ->
+      "lambda parameter '" ++ name ++ "' has type `" ++ types.type_to_string(t)
+        ++ "`, which contains the linear type `" ++ types.type_to_string(lin)
+        ++ "`; this is not yet supported (higher-order linearity is deferred; `once` bounds how often a closure RUNS, not what may be passed to it on each run)"
 
 fn lambda_capture_msg(name: String) -> String =
   "linear value '" ++ name ++ "' captured by a lambda is not yet supported (higher-order linearity is deferred; if the callee invokes this closure at most once, declare that parameter `once`)"
@@ -690,7 +758,7 @@ fn lin_once_arg(a: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) ->
 fn lin_once_lambda(params: List ast.Param, body: typed_ast.TypedExpr, lam_type: types.Type,
                    p: source.SourcePos, sc: LinScope, env: Dict types.Scheme) -> LinRes =
   match first_linear_param(params, lam_type, env) with
-  | Just pname -> LinErr(p, linear_lambda_param_msg(pname))
+  | Just b -> LinErr(p, lambda_param_binder_msg(b, env))
   | Nothing ->
       lin_once_captures(lin_consumed(body, scope_shadow(lambda_param_names(params), sc), env), p)
 
@@ -1219,15 +1287,17 @@ fn extend_scope(is_lin: Bool, name: String, sc: LinScope) -> LinScope =
 fn lin_lambda(params: List ast.Param, body: typed_ast.TypedExpr, lam_type: types.Type,
               p: source.SourcePos, sc: LinScope, env: Dict types.Scheme) -> LinRes =
   let from_comp = is_comprehension_fold(params)
-  in match first_linear_param(params, lam_type, env) with
-     | Just pname -> LinErr(p, linear_param_msg(from_comp, pname))
+  in match first_linear_param(drop_comp_acc_params(params),
+                              drop_comp_acc_type(params, lam_type), env) with
+     | Just b -> LinErr(p, linear_param_msg(from_comp, b, env))
      | Nothing ->
          lin_lambda_body(body, p, scope_shadow(lambda_param_names(params), sc), env, from_comp)
 
 # The rejection is identical either way; only the wording differs, so provenance
 # is carried as a flag rather than duplicating the analysis.
-fn linear_param_msg(from_comp: Bool, name: String) -> String =
-  if from_comp then comprehension_binder_msg(name) else linear_lambda_param_msg(name)
+fn linear_param_msg(from_comp: Bool, b: LinBinder, env: Dict types.Scheme) -> String =
+  if from_comp then comprehension_binder_msg(lbind_name(b))
+  else lambda_param_binder_msg(b, env)
 
 fn lambda_capture_msg_for(from_comp: Bool, name: String) -> String =
   if from_comp then comprehension_capture_msg(name) else lambda_capture_msg(name)

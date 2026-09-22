@@ -1455,20 +1455,33 @@ are tracked (see "Containment virality" under Deferred, below).
 **Containment reads the declaration, not the type application.** A type argument
 counts only at a position the declaration actually **stores** — one where the
 parameter appears in some constructor field or record field type, outside an
-arrow. A *phantom* parameter holds nothing:
+arrow. At a *phantom* position the declaration holds no value of that type:
 
 ```
 type Chan a = | Chan Int          # `a` is phantom: only an Int handle is stored
 
-fn worker(ch: Chan File) -> Int   # `ch` holds no File; no obligation attaches
+fn worker(ch: Chan File) -> Int   # `ch` stores no File; no obligation attaches
 ```
 
 This is what lets a handle to a shared queue of linear values be passed around
 freely while the values themselves stay tracked: `chan_recv(ch)` returns a
 `Recv File`, whose declaration *does* store its parameter, so the binder that
-receives it carries the obligation. The test reads one declaration deep, so a
-parameter stored inside another type that itself drops it (`type Outer a =
-| Outer (Chan a)`) is still counted — over-strict, never unsound.
+receives it carries the obligation. The rule applies to **every** binder
+uniformly — parameter, `let`, pattern variable and `<-` bind alike — so the
+same value does not change status with the form that binds it. The test reads
+one declaration deep, so a parameter stored inside another type that itself
+drops it (`type Outer a = | Outer (Chan a)`) is still counted — over-strict,
+never unsound.
+
+**The limit this draws.** "Stores" is a statement about the *declaration*, not
+about the program's runtime state. A `Chan File` is an Int handle into a queue
+that really does hold `File` values, and `chan_send` discharges the obligation
+of each value it moves in; after that, nothing relates the channel's own
+liveness to what is still queued inside it. Abandoning a channel holding
+unconsumed linear values is therefore **not** a diagnosed leak. Relating the
+two needs a notion of runtime ownership that linearity as specified here does
+not have, and the alternative — treating every phantom position as storing —
+reports leaks for values a declaration provably does not hold.
 
 The rules:
 
