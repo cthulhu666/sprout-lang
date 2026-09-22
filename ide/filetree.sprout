@@ -27,7 +27,23 @@ export fn children_of(segs: List String) -> List tr.Node !{IO} =
   | Err _ -> Nil
 
 export fn nodes_of(es: List (String, fs.Entry)) -> List tr.Node =
-  list_map(entry_node, es)
+  list_map(entry_node, sorted(es))
+
+# `fs.read_dir` answers in the FILESYSTEM'S order, which the builtin behind it
+# documents as unspecified — "a caller that shows the list to a human sorts
+# it", and this is that caller. Passed through, the same project shows a
+# different tree on one machine than on another, and a gate that presses a key
+# on a named row is then a coin flip: `tui-files-smoke` went red on a CI runner
+# and the same commit passed on a re-run.
+#
+# Directories first, then by name. The expandable rows are the ones a reader
+# navigates through, so grouping them is what makes Right and Left useful.
+fn sorted(es: List (String, fs.Entry)) -> List (String, fs.Entry) =
+  vec_to_list(vec_sort_by(ranked, vec_from_list(es)))
+
+fn ranked(e: (String, fs.Entry)) -> (Int, String) =
+  let (name, info) = e
+  in (if fs.entry_is_dir(info) then 0 else 1, name)
 
 # Every directory starts unread, so nothing touches the disk until the user
 # opens something — the property `Unread` exists for.

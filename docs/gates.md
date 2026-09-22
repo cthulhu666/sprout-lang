@@ -317,6 +317,20 @@ into a tautology that passes for the wrong reason.
 
 ## Driven smokes — `just ide-smoke`, `just tui-files-smoke`
 
+### A gate that pressed a key on an unspecified row
+
+`tui-files-smoke` presses Right on tree row 0 and asserts the expanded directory's child appears.
+Row 0 was whatever `fs.read_dir` answered first, and the builtin behind it documents that order as
+the filesystem's — unspecified. So the gate was a coin flip on Linux: it went red on a runner, and
+a re-run of the **same commit** went green. It had been green for months because the weighting is
+per-machine, which also means `just ci-fast-gates` on a Mac says nothing about it.
+
+Fixed at the root: `ide/filetree.sprout` and `examples/tui_files.sprout` now sort, directories
+first then by name, with a unit test under the property. The lesson generalises — **a driven smoke
+must not assert on anything the program leaves unspecified**; make the program specify it, rather
+than making the gate press more keys until something works, which hides the regression the gate
+exists to catch.
+
 Both drive a real binary by writing keystrokes into its stdin, and both need the writer to **outlive**
 the window they watch: a key stream that ENDS quits the app whatever the keys were (`TermEof` closes
 the pump's channel), so only a writer still open makes the exit attributable to Escape. Hence the

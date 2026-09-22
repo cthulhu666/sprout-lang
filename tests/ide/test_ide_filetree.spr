@@ -1,4 +1,7 @@
+import stdlib.fs as fs
+import stdlib.string as string
 import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import stdlib.tui.widgets.tree as tr
 import ide.document as doc
 import ide.filetree as filetree
 
@@ -28,8 +31,44 @@ fn reading_cases(state: TestState) -> Unit !{IO} = do
   gone <- filetree.children_of(["no", "such", "directory"])
   assert_eq(state, "an unreadable directory is empty", list_length(gone), 0)
 
+# ── the order the reader sees ───────────────────────────────────────────────
+
+# `fs.read_dir` answers in the FILESYSTEM'S order, which the builtin behind it
+# documents as unspecified — "a caller that shows the list to a human sorts
+# it". A browser that passes it through shows a different tree on one machine
+# than on another, and `tui-files-smoke` went red on a CI runner for exactly
+# that reason: the same commit passed on a re-run.
+#
+# Pinned here rather than through the terminal because `nodes_of` is pure, so
+# the order can be asserted exactly instead of grepped out of a frame.
+fn a_file(name: String) -> (String, fs.Entry) =
+  (name, fs.Entry(fs.FileEntry, 0, 0))
+
+fn a_dir(name: String) -> (String, fs.Entry) =
+  (name, fs.Entry(fs.DirEntry, 0, 0))
+
+fn labels(ns: List tr.Node) -> String =
+  string.join(",", list_map(\n -> n.label, ns))
+
+fn order_cases(state: TestState) -> Unit !{IO} = do
+  # A directory sorts ahead of a file it would follow by name: the expandable
+  # rows are the ones a reader is navigating through.
+  assert_eq(state, "directories come first, whatever the names",
+            labels(filetree.nodes_of([a_file("ZFILE"), a_dir("tree_dir")])),
+            "tree_dir,ZFILE")
+  assert_eq(state, "files sort by name among themselves",
+            labels(filetree.nodes_of([a_file("b.txt"), a_file("a.txt")])),
+            "a.txt,b.txt")
+  assert_eq(state, "and so do directories",
+            labels(filetree.nodes_of([a_dir("z"), a_dir("a"), a_file("m")])),
+            "a,z,m")
+  # Neither branch of the comparator is reached, and the fold still terminates.
+  assert_eq(state, "an empty listing stays empty",
+            labels(filetree.nodes_of(Nil)), "")
+
 fn main() -> Unit !{IO} = do
   state <- new_state()
   path_cases(state)
   reading_cases(state)
+  order_cases(state)
   summary(state)

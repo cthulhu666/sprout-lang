@@ -39,9 +39,18 @@ mkdir -p "$FIX/tree_dir"
 printf 'inner\n' > "$FIX/tree_dir/QQQQQQ"
 printf 'hello\n' > "$FIX/ZFILE"
 
-# Keys: Right expands whatever row 0 is, then Esc quits. Which entry that is
-# depends on readdir order, so the fixture holds exactly one directory — Right
-# on the file is inert and the child simply never appears, failing loudly.
+# Keys: Right expands row 0, then Esc quits. Row 0 is `tree_dir` because the
+# app SORTS — directories first, then by name — and that is the only reason
+# this is deterministic. It did not always: the app passed `fs.read_dir`
+# through, whose order the builtin documents as the filesystem's and
+# unspecified, so row 0 was the directory on one machine and the file on
+# another. The gate went red on a Linux runner and the SAME COMMIT passed on a
+# re-run. Right on a file is inert, so the child simply never appeared.
+#
+# So this gate now rests on a property with a unit test under it
+# (`tests/ide/test_ide_filetree.spr`), not on the filesystem's whim. Do not
+# "fix" a future failure here by pressing more keys until something expands —
+# that would hide the sort regressing.
 #
 # The writer SLEEPS after the Esc instead of closing, and that is the whole
 # point of the shape. `TermEof` closes the pump's channel, so a pipe that ends
