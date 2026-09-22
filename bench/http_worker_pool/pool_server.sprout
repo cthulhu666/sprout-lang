@@ -59,9 +59,10 @@ fn accept_loop(ch: Chan TcpConnection, listener: consuming TcpListener) -> Unit 
         chan_close(ch)
         close_listener(listener)
 
-fn run(s: Scope, ch: Chan TcpConnection) -> Unit !{IO} =
+fn run(s: Scope) -> Unit !{IO} =
   do
+    ch <- chan_new(s, 256)
     spawn_workers(s, ch, 64)
     accept_loop(ch, listen_local(8099))
 
-fn main() -> Unit !{IO} = with_scope(\s -> run(s, chan_new(s, 256)))
+fn main() -> Unit !{IO} = with_scope(\s -> run(s))
