@@ -1006,7 +1006,8 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   diagnostic also points at the call rather than the offending `instance` line. A real check
   wants the class variable's kind (from how the method signatures apply it) against the head's
   residual kind (from the type constructor's declared arity) at instance registration.
-  `tests/conformance/type_error/instance_head_oversaturated.spr` covers the call-site case.
+  Designed in `docs/instance-head-kinds-v0.md`; `check_context_subs` has three further defects
+  that the design deletes rather than patches.
 
 - [ ] `P2` **A class method's `.iface` scheme quantifies fewer binders than the live
   registration.** `iface_codec.method_scheme` quantifies the CLASS parameters only, so a
