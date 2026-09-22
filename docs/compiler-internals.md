@@ -424,18 +424,29 @@ had the mirror bug and two other recorders still over-apply. `unify_type_expr`
 (one copy in `resolve`, one in `lowering`) matched a curried spine pair-by-pair
 from the outside in, so a pattern of depth 1 against a concrete of depth 2 did
 not fail — it bound the pattern's variable to the concrete's LAST argument. It
-now peels the surplus off the concrete first, which fixes the constrained-`fn`
-compound-head recorders (`resolve_arg_scanned_tdict`) without touching them. A
-list-shaped representation would have raised an arity error here; the curried one
-quietly shifts every context variable by one, which is why this had to be found
-by execution rather than by reading.
+now peels the surplus off the concrete first. A list-shaped representation would
+have raised an arity error here; the curried one quietly shifts every context
+variable by one, which is why this had to be found by execution rather than by
+reading.
+
+The peel does NOT reach the constrained-`fn` compound-head recorders, as this
+once claimed. `resolve_arg_scanned_tdict` records through `type_to_typeexpr`,
+which renders a forwarded variable as `_`, so the peel binds the context variable
+to `_` and the poison dictionary still reaches run time from a polymorphic
+caller.
 
 What is left when the depths cannot be reconciled — an instance head applying
-more arguments than the class variable's use leaves, so the head match binds no
-`k` at all — is a compile error from `resolve.check_context_subs`. An unbound
-context variable is indistinguishable from a forwarded one by shape; the test
-that separates them is whether the variable is in the head match's SUBSTITUTION,
-since genuine forwarding binds it to another variable rather than not at all.
+more arguments than the class variable's use leaves — is caught by
+`resolve.check_context_subs`, which asks whether each context variable is in the
+head match's SUBSTITUTION. That test is wrong in three ways: a variable bound to
+`_` counts as bound, a head DEEPER than the recorded type is never peeled and
+binds the wrong argument silently, and `instance Foo Bar where Baz k` is rejected
+though it compiled before. The depth arithmetic stands in for two facts nobody
+establishes: the class variable's kind, and a common invariant for what the three
+recorders record — they currently record at three different depths, so no single
+peel can serve them. Replacing all of it with a declaration-site kind check plus
+that invariant is [docs/instance-head-kinds-v0.md](instance-head-kinds-v0.md); an
+arity check alone was tried and refuted by execution.
 
 ## Env-path type names are SHORT, and the marker families depend on it
 
