@@ -1,0 +1,21 @@
+# A superclass constrains the class variable's arity too. `Functor f` applies its
+# variable to one argument, so `Wrapper`'s own methods must apply `t` to one as
+# well — and an instance head must then leave exactly one argument off.
+module main
+
+type Box a = Box a
+
+class Wrapper t where Functor t
+  fn unwrap(xs: t Int) -> Int
+
+instance Functor Box
+  fn fmap(f: a -> b, xs: Box a) -> Box b =
+    match xs with
+    | Box a -> Box(f(a))
+
+instance Wrapper Box
+  fn unwrap(xs: Box Int) -> Int =
+    match xs with
+    | Box a -> a
+
+fn main() -> Unit !{IO} = print(unwrap(Box(9)))

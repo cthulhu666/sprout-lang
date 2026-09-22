@@ -1,0 +1,19 @@
+# `Ref` and `Vector` are C-runtime types with no declaration anywhere, so their
+# arity comes from a fixed table rather than from a decl or a marker. A head over
+# one of them must still be checked: an arity the table does not know would either
+# reject these instances or wave every ill-kinded head through.
+module main
+
+class Peek t
+  fn peek(r: t Int) -> String
+
+instance Peek Ref
+  fn peek(r: Ref Int) -> String = "ref"
+
+instance Peek Vector
+  fn peek(r: Vector Int) -> String = "vector"
+
+fn main() -> Unit !{IO} =
+  do
+    cell <- ref_new(7)
+    print(peek(cell))
