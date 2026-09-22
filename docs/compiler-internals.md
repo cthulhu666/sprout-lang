@@ -420,33 +420,77 @@ through `ToString Int` — type confusion, not a wrong string. Both dispatch pat
 now call `concrete_dispatch_call`.
 
 Recording the right type was necessary but not sufficient, because the CONSUMER
-had the mirror bug and two other recorders still over-apply. `unify_type_expr`
-(one copy in `resolve`, one in `lowering`) matched a curried spine pair-by-pair
-from the outside in, so a pattern of depth 1 against a concrete of depth 2 did
-not fail — it bound the pattern's variable to the concrete's LAST argument. It
-now peels the surplus off the concrete first. A list-shaped representation would
-have raised an arity error here; the curried one quietly shifts every context
-variable by one, which is why this had to be found by execution rather than by
-reading.
+had the mirror bug. `unify_type_expr` (one copy in `resolve`, one in `lowering`)
+matches a curried spine pair-by-pair from the outside in, so a pattern of depth 1
+against a concrete of depth 2 did not fail — it bound the pattern's variable to the
+concrete's LAST argument. A list-shaped representation would have raised an arity
+error here; the curried one quietly shifts every context variable by one, which is
+why this had to be found by execution rather than by reading.
 
-The peel does NOT reach the constrained-`fn` compound-head recorders, as this
-once claimed. `resolve_arg_scanned_tdict` records through `type_to_typeexpr`,
-which renders a forwarded variable as `_`, so the peel binds the context variable
-to `_` and the poison dictionary still reaches run time from a polymorphic
-caller.
+For a time the consumer peeled the surplus off the concrete side itself, computing
+it per call as a depth difference. That is right only when the concrete side is the
+deeper of the two, and it cannot be right in general: the surplus is a property of
+the RECORDER, not of the pair. **The peel now lives at the recorder**, which knows
+the depth because the constraint token tells it (below). Both copies of
+`unify_type_expr` pair the spines as they stand.
 
-What is left when the depths cannot be reconciled — an instance head applying
-more arguments than the class variable's use leaves — is caught by
-`resolve.check_context_subs`, which asks whether each context variable is in the
-head match's SUBSTITUTION. That test is wrong in three ways: a variable bound to
-`_` counts as bound, a head DEEPER than the recorded type is never peeled and
-binds the wrong argument silently, and `instance Foo Bar where Baz k` is rejected
-though it compiled before. The depth arithmetic stands in for two facts nobody
-establishes: the class variable's kind, and a common invariant for what the three
-recorders record — they currently record at three different depths, so no single
-peel can serve them. Replacing all of it with a declaration-site kind check plus
-that invariant is [docs/instance-head-kinds-v0.md](instance-head-kinds-v0.md); an
-arity check alone was tried and refuted by execution.
+A head whose depth cannot be reconciled with the recorded type is now rejected at
+the DECLARATION, by `infer.check_instance_head_kinds` — the class variable's use
+fixes an arity, and every instance head and constructor-headed constraint must
+leave exactly that many arguments unapplied (spec §"An instance head must leave
+exactly as many arguments unapplied"). Deriving the arity takes two sources, per
+§Whole-program passes above: a module's own classes from their `ClassMethodSig`
+TypeExprs, imported ones from the `@class:` marker, whose scheme already carries
+the class parameters in its `scheme_vars`.
+
+That replaced the unbound-variable test inside `resolve.check_context_subs`, which
+asked whether each context variable appeared in the head match's SUBSTITUTION —
+wrong in three ways: a variable bound to `_` counted as bound, a head DEEPER than the recorded type
+bound the wrong argument silently, and `instance Foo Bar where Baz k` was rejected
+though it compiled before and has no arity story at all, its head taking no
+arguments. Rationale: [docs/instance-head-kinds-v0.md](instance-head-kinds-v0.md).
+An arity check alone was tried first and refuted by execution — the surplus is a
+property of the RECORDER, not of the class.
+
+### The compound-head constraint token, and why it carries `#any`
+
+A constrained `fn`'s hidden dictionaries come from its Scheme's `(head_token, class)`
+list. A compound head is stored as:
+
+```
+#app:<Head>:<t1>,<t2>,...     one constraint-var token per WRITTEN argument
+#app:<Head>                   the head alone — a pre-v9 interface only
+```
+
+Each `<ti>` is `#pos:<k>` against the callee's generalized binder list, a source name
+where there is no index, or **`#any`** where the argument is no variable at all.
+`#any` is the part worth understanding: it carries no identity, so why write it? For
+the COUNT. Two independent things read this token, and they fail differently:
+
+- `resolve_compound_head_tdict` reads the *positions*, to rebuild the constraint's
+  own head at this call — `where Boxed (Tagged j)` becomes `Tagged String`. This is
+  what stops `second_only(x: Tagged k Int, y: Tagged j Int)` taking `x`'s dictionary
+  for `y`'s value. It needs every argument named, so one `#any` sends it to the scan.
+- `resolve_arg_scanned_tdict` reads the *count*, as `want_arity`. The scan matches a
+  whole argument — the class variable APPLIED — and the count is how much of it is
+  surplus. Dropping the arguments entirely when one was `#any` lost the count too,
+  and `where Sh (Box String)` then bound the instance's `c` to `Int`.
+
+So the token degrades in two stages rather than one: positions, then count, then
+nothing. Both stages are covered by `tests/conformance/run/dispatch_compound_head_*`.
+
+Three producers write head tokens and they must agree. `constraint_pos_tokens` is
+the one; `constraint_source_tokens` delegates to it with `Nil` binders, because
+`constraint_var_token` already falls back to the source name when the variable has
+no index — which is exactly what an ungeneralized provisional scheme wants.
+`canonicalize_constrained_constraints_acc` keeps its own writer only because its
+arguments must be canonicalized through `prog_to_fresh`/`s2`, as the head variable
+beside them is; a source name would not survive the generalize/instantiate renaming.
+`iface_codec.method_constraint_tokens` mirrors the format for class-method schemes,
+by name, since that scheme quantifies the class parameters only.
+
+Widening this token changed the `.iface` wire form, so it is v9. Earlier bumps did
+the same, one of them (v3→v4) to this very field.
 
 ## Env-path type names are SHORT, and the marker families depend on it
 
@@ -461,6 +505,7 @@ schemes. **Every `@`-marker family is keyed on that short name:**
 | `@phantom:<TypeName>:<index>` | short type name | `linear_check.param_is_phantom` |
 | `@inst:<Class>:<head>` | short type head | typeclass dispatch in `infer` |
 | `@class:`, `@type:` | short name (readers apply `after_last_dot`) | `infer` |
+| `@tyarity:<TypeName>` | short type name | `infer.type_arity_of` |
 
 `@phantom:` marks a type-parameter position the declaration does **not** store, so
 containment declines to descend it (`type Chan a = | Chan Int`). It is written in

@@ -5,7 +5,7 @@
 # expected failure. If a quarantined fixture starts PASSING again, the gate goes
 # RED ("UNEXPECTED PASS — remove from XFAIL") so quarantine is self-healing.
 #
-# EMPTY as of the unconditional prelude (docs/prelude-scope-v0.md). All 8 entries
+# EMPTIED by the unconditional prelude (docs/prelude-scope-v0.md). All 8 entries
 # shared one root cause — "a bare .spr file is self-contained and gets NO prelude"
 # — so making the prelude unconditional cleared the whole manifest at once. The
 # self-healing gate is what reported it: every one came back as UNEXPECTED PASS.
@@ -16,5 +16,10 @@
 # rewriting, not just an import". They did not: `Cons`/`Nil` are the prelude's
 # List constructors (stdlib/prelude.sprout:32-34) and always were. Nothing needed
 # rewriting; they needed the prelude.
+#
+# EMPTIED a second time by the widened compound-head constraint token
+# (docs/instance-head-kinds-v0.md §5-6): `dispatch_two_candidates_second_constrained`
+# was quarantined here for one afternoon, and the self-healing gate is what reported
+# it fixed — UNEXPECTED PASS, on the commit that widened the token.
 #
 # Format: one basename (no extension) per line; `#` comments and blank lines ignored.

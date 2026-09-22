@@ -2764,6 +2764,13 @@ fn class_var_arg_or_fallback(
 # is `Tagged k Int`, and an instance context substituted against that extra
 # trailing argument binds the head's variable to it. Falling back unless the
 # projection names the same head leaves the instance head_str gated on unchanged.
+#
+# Each fallback to `arg_t` records the whole argument, one application deeper than
+# the class variable, so it would break the recorder invariant that lets
+# unify_type_expr pair spines as they stand. Measured DEFENSIVE: instrumenting all
+# four with a panic fired on none of 462 corpus files nor on the compiler's own
+# source. Instrumenting again is the way to check that, not reading this line — and
+# resolve.spine_depth_mismatch reports it loudly on the instance-context path.
 fn class_var_dispatch_type(
   method_name: String,
   class_vars: List String,
@@ -3241,15 +3248,95 @@ fn scan_ptf_prog_var_entries(
 # --- Compound-head constraint tokens ---
 #
 # `where Sh (Box a)` has no head variable to canonicalize, so its entry used to
-# be the same "#none" as a genuinely headless constraint. These three keep the
-# head constructor instead. The token is the SOURCE name (`Box`); resolved types
-# carry the module-qualified one (`main.Box`), which is why head_name_matches
-# compares on the final dotted segment rather than by equality.
+# be the same "#none" as a genuinely headless constraint. These keep the head
+# constructor AND one token per written argument, so the call site can rebuild
+# `Box <a's binding>` instead of scanning for an argument that happens to be
+# headed by `Box` — which takes the wrong parameter when two share a head.
+#
+# Wire form: "#app:<Head>" carries the head alone, "#app:<Head>:<t1>,<t2>" adds
+# one constraint-var token per written argument. The head is the SOURCE name
+# (`Box`); resolved types carry the module-qualified one (`main.Box`), which is
+# why head_name_matches compares on the final dotted segment rather than by
+# equality.
 
-fn compound_head_token(base: ast.TypeExpr) -> String =
-  match type_expr_head_name(base) with
-  | Just h -> "#app:" ++ h
-  | Nothing -> "#none"
+# The head token for a constraint's subject. Every TypeExpr variant is spelled
+# out (guidelines.md §2a): an arrow, thunk, effect or tuple subject names no
+# constructor to dispatch on, and a variant that DID would need its own arm.
+fn head_token_for(te: ast.TypeExpr, binders: List String) -> String =
+  match te with
+  | ast.TypeName v -> constraint_var_token(v, binders)
+  | ast.TypeApply _ _ -> compound_head_token(te, binders)
+  | ast.TypeArrow _ _ _ -> "#none"
+  | ast.TypeThunk _ _ -> "#none"
+  | ast.TypeEffect _ _ -> "#none"
+  | ast.TupleType _ -> "#none"
+
+# `binders` positions each argument the way constraint_var_token positions a head
+# variable. Nil means there is no index to record, which yields source names —
+# the same fallback constraint_var_token takes for an ungeneralized scheme.
+fn compound_head_token(te: ast.TypeExpr, binders: List String) -> String =
+  let Just h = type_expr_head_name(te) else "#none"
+      Just toks = compound_arg_tokens(compound_head_args(te, Nil), binders) else "#app:" ++ h
+  in "#app:" ++ h ++ ":" ++ toks
+
+# The written arguments, outermost LAST: `Trip r s` gives [r, s].
+fn compound_head_args(te: ast.TypeExpr, acc: List ast.TypeExpr) -> List ast.TypeExpr =
+  match te with
+  | ast.TypeApply base arg -> compound_head_args(base, Cons(arg, acc))
+  | _ -> acc
+
+# One token per written argument, "*" where there is no token to give — a
+# structure rather than a variable. Recording the gap rather than dropping the
+# whole list is what keeps the COUNT, and the count alone is enough to record the
+# head at the right depth: see arg_scan_arity.
+fn compound_arg_tokens(args: List ast.TypeExpr, binders: List String) -> Maybe String =
+  match args with
+  | [] -> Nothing
+  | [a] -> Just(arg_token_or_wild(a, binders))
+  | [a | rest] ->
+      let Just more = compound_arg_tokens(rest, binders) else Nothing
+      in Just(arg_token_or_wild(a, binders) ++ "," ++ more)
+
+# Every variant spelled out (guidelines.md §2a): only a name can be a variable,
+# and a variant that could would need its own arm rather than this one's answer.
+fn arg_token_or_wild(a: ast.TypeExpr, binders: List String) -> String =
+  match a with
+  | ast.TypeName v -> constraint_var_token(v, binders)
+  | ast.TypeApply _ _ -> "#any"
+  | ast.TypeArrow _ _ _ -> "#any"
+  | ast.TypeThunk _ _ -> "#any"
+  | ast.TypeEffect _ _ -> "#any"
+  | ast.TupleType _ -> "#any"
+
+# The same token shape, but each argument canonicalized the way the head variable
+# beside it is — through prog_to_fresh and s2, then positioned. A source name does
+# not survive the generalize/instantiate renaming, which is the whole reason
+# positions exist; recording one here would decode to nothing at the call site.
+fn canonical_compound_head_token(te: ast.TypeExpr, prog_to_fresh: Dict types.Type,
+                                 s2: Dict types.Type, binders: List String) -> String =
+  let Just h = type_expr_head_name(te) else "#none"
+      Just toks = canonical_arg_tokens(compound_head_args(te, Nil), prog_to_fresh, s2, binders)
+        else "#app:" ++ h
+  in "#app:" ++ h ++ ":" ++ toks
+
+fn canonical_arg_tokens(args: List ast.TypeExpr, prog_to_fresh: Dict types.Type,
+                        s2: Dict types.Type, binders: List String) -> Maybe String =
+  match args with
+  | [] -> Nothing
+  | [a] -> Just(canonical_arg_token(a, prog_to_fresh, s2, binders))
+  | [a | rest] ->
+      let Just more = canonical_arg_tokens(rest, prog_to_fresh, s2, binders) else Nothing
+      in Just(canonical_arg_token(a, prog_to_fresh, s2, binders) ++ "," ++ more)
+
+# "#any" for an argument that is not a variable still generalized here — a concrete
+# type, or one the body pinned. It has no index to record, but it still occupies a
+# position, and the position is what the recorder needs.
+fn canonical_arg_token(a: ast.TypeExpr, prog_to_fresh: Dict types.Type,
+                       s2: Dict types.Type, binders: List String) -> String =
+  let ast.TypeName v = a else "#any"
+      Just fresh_t = dict_get(v, prog_to_fresh) else "#any"
+      types.TVar canon = unifier.apply_subst(s2, fresh_t) else "#any"
+  in constraint_var_token(types.tyvar_identity(canon), binders)
 
 fn type_expr_head_name(te: ast.TypeExpr) -> Maybe String =
   match te with
@@ -3269,19 +3356,156 @@ fn is_arg_scanned_token(head_token: String) -> Bool =
 # constraint — i.e. "may I direct the argument scan?".
 fn arg_scan_head(head_token: String) -> Maybe String =
   if str_starts_with(head_token, "#app:")
-  then Just(str_slice(head_token, 5, str_len(head_token)))
+  then Just(app_body_head(str_slice(head_token, 5, str_len(head_token))))
   else Nothing
+
+# The head is everything before the first colon; the rest, when present, is the
+# argument-token list. A "#pos:" token inside that list carries its own colon,
+# which is why the split is at the FIRST one and not the last.
+fn app_body_head(body: String) -> String =
+  match string.split_once(body, ":") with
+  | Just (h, _) -> h
+  | Nothing -> body
+
+# One constraint-var token per written argument, empty when the token carries the
+# head alone — an argument that is not a bare variable, so there was nothing to
+# record.
+fn arg_scan_arg_tokens(head_token: String) -> List String =
+  if str_starts_with(head_token, "#app:")
+  then app_body_arg_tokens(str_slice(head_token, 5, str_len(head_token)))
+  else Nil
+
+fn app_body_arg_tokens(body: String) -> List String =
+  match string.split_once(body, ":") with
+  | Just (_, toks) -> string.split(toks, ",")
+  | Nothing -> Nil
+
+# How many arguments the constraint writes on its head — the application depth its
+# dictionary's dispatch type must have, so a recorder that starts from a whole
+# argument type knows how much of it is surplus. -1 when the token does not say,
+# which only a pre-v9 interface can now produce.
+fn arg_scan_arity(head_token: String) -> Int =
+  arity_of_tokens(arg_scan_arg_tokens(head_token))
+
+fn arity_of_tokens(toks: List String) -> Int =
+  match toks with
+  | [] -> -1
+  | [_ | _] -> list_length(toks)
+
+fn te_app_depth(te: ast.TypeExpr) -> Int =
+  match te with
+  | ast.TypeApply base _ -> 1 + te_app_depth(base)
+  | _ -> 0
+
+# Drop trailing applications until `te` sits at `want`, the depth the constraint
+# wrote its head at. A negative `want` means the token did not say, so nothing is
+# dropped and the type is recorded as found. The depth is measured once and counted
+# down, rather than re-measured per step.
+fn truncate_to_depth(te: ast.TypeExpr, want: Int) -> ast.TypeExpr =
+  if want < 0 then te else drop_app_args(te, te_app_depth(te) - want)
+
+fn drop_app_args(te: ast.TypeExpr, n: Int) -> ast.TypeExpr =
+  if n <= 0 then te
+  else
+    match te with
+    | ast.TypeApply base _ -> drop_app_args(base, n - 1)
+    | _ -> te
 
 fn head_name_matches(resolved_head: String, want: String) -> Bool =
   resolved_head == want || string.ends_with(resolved_head, "." ++ want)
+
+# The token's own arguments first, the head-directed scan second. The scan stays
+# right for a token that carries no arguments and for one whose arguments this
+# call left polymorphic — the two cases the token cannot improve on.
+fn compound_head_or_scanned_tdict(
+  class_name: String,
+  head_token: String,
+  callee: String,
+  prog_to_fresh: Dict types.Type,
+  user_args: List typed_ast.TypedExpr,
+  subst: Dict types.Type,
+  env: Dict types.Scheme,
+  pos: source.SourcePos,
+  excluded: List String
+) -> Maybe typed_ast.TypedExpr =
+  match resolve_compound_head_tdict(class_name, head_token, callee, prog_to_fresh,
+                                    user_args, subst, env, pos) with
+  | Just tdict -> Just(tdict)
+  | Nothing ->
+      resolve_arg_scanned_tdict(class_name, arg_scan_head(head_token),
+                                arg_scan_arity(head_token), user_args, subst,
+                                env, pos, excluded)
+
+# The class variable's binding, rebuilt from the constraint's OWN head: the token
+# names each written argument, so `where Boxed (Tagged j)` yields `Tagged <j>` at
+# this call rather than whichever argument the scan reached first. That is the
+# recorder invariant (docs/instance-head-kinds-v0.md §5) — every recorder records
+# the class variable's binding, at the head's depth and no deeper.
+#
+# The head NAME still comes from a matching argument: the constraint spells it as
+# written (`Tagged`) while `@inst:` keys carry the qualified one (`main.Tagged`),
+# and every argument headed by it spells it the same way. Which argument that is
+# no longer matters — only the arguments come from the token.
+fn resolve_compound_head_tdict(
+  class_name: String,
+  head_token: String,
+  callee: String,
+  prog_to_fresh: Dict types.Type,
+  user_args: List typed_ast.TypedExpr,
+  subst: Dict types.Type,
+  env: Dict types.Scheme,
+  pos: source.SourcePos
+) -> Maybe typed_ast.TypedExpr =
+  let Just want = arg_scan_head(head_token) else Nothing
+      [_ | _] = toks else Nothing
+      Just args_te = constraint_arg_typeexprs(toks, callee, prog_to_fresh, subst, env) else Nothing
+      Just head_str = headed_typed_arg_str(user_args, subst, want) else Nothing
+      Just _ = dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) else Nothing
+  in
+    Just(typed_ast.TDict(
+      ast.TypeConstraint(class_name, Cons(apply_typeexprs(ast.TypeName(head_str), args_te), Nil)),
+      types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
+  where toks = arg_scan_arg_tokens(head_token)
+
+# Each token's argument as a concrete TypeExpr, in written order. Nothing if one
+# is "#any" (no variable to decode) or still polymorphic here: a dictionary built
+# from a partly-unknown head would dispatch on a type this caller has not chosen
+# yet, so the obligation forwards and the head-directed scan takes over.
+fn constraint_arg_typeexprs(
+  toks: List String,
+  callee: String,
+  prog_to_fresh: Dict types.Type,
+  subst: Dict types.Type,
+  env: Dict types.Scheme
+) -> Maybe (List ast.TypeExpr) =
+  match toks with
+  | [] -> Just(Nil)
+  | ["#any" | _] -> Nothing
+  | [t | rest] ->
+      let Just fresh_t = dict_get(decode_constraint_var(t, callee, env), prog_to_fresh) else Nothing
+          Just te = concrete_typeexpr(unifier.apply_subst(subst, fresh_t)) else Nothing
+          Just more = constraint_arg_typeexprs(rest, callee, prog_to_fresh, subst, env) else Nothing
+      in Just(Cons(te, more))
+
+# Left-associating application: `Tagged` over [String] is `Tagged String`.
+fn apply_typeexprs(base: ast.TypeExpr, args: List ast.TypeExpr) -> ast.TypeExpr =
+  match args with
+  | [] -> base
+  | [a | rest] -> apply_typeexprs(ast.TypeApply(base, a), rest)
 
 # Discharge an argument-scanned constraint. With a known head (`where Sh (Box
 # a)`) the argument is chosen BY that head; a genuinely headless constraint
 # keeps the positional scan. When the head matches no argument the obligation is
 # forwarded rather than filled from an unrelated type — filling it was the bug.
+#
+# `want_arity` is how many arguments the constraint wrote on its head. A matched
+# argument is the class variable APPLIED (`Box a Int` for `where Sh (Box a)`), so
+# the surplus comes off here: the recorder knows the constraint's own depth, and
+# the consumer that used to subtract it from the pattern never could.
 fn resolve_arg_scanned_tdict(
   class_name: String,
   head: Maybe String,
+  want_arity: Int,
   user_args: List typed_ast.TypedExpr,
   subst: Dict types.Type,
   env: Dict types.Scheme,
@@ -3296,17 +3520,18 @@ fn resolve_arg_scanned_tdict(
       in
         Just(typed_ast.TDict(
           ast.TypeConstraint(class_name,
-            Cons(headed_arg_typeexpr_or_name(head_str, user_args, subst, want), Nil)),
+            Cons(headed_arg_typeexpr_or_name(head_str, user_args, subst, want, want_arity), Nil)),
           types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
 
 fn headed_arg_typeexpr_or_name(
   head_str: String,
   user_args: List typed_ast.TypedExpr,
   subst: Dict types.Type,
-  want: String
+  want: String,
+  want_arity: Int
 ) -> ast.TypeExpr =
   match headed_typed_arg_typeexpr(user_args, subst, want) with
-  | Just te -> te
+  | Just te -> truncate_to_depth(te, want_arity)
   | Nothing -> ast.TypeName(head_str)
 
 fn resolve_one_constraint_tdict(
@@ -3638,10 +3863,10 @@ fn inject_constrained_fn_dicts_via_field(
             # finds its dict among the args; an inline parametric-record arg
             # carries its `a -> Int` binding only in s3, so the stale subst would
             # leave it `Box $free` and poison the dict (unresolved-thunk crash).
-            # Mirrors the check_instance_for_marker fix. arg_scan_head supplies
-            # the head when there is one, so the scan is directed rather than
-            # positional.
-            match resolve_arg_scanned_tdict(class_name, arg_scan_head(head_token), user_typed_args(typed_args), s3, env, pos, collect_injected_heads_for_class(class_name, typed_args)) with
+            # Mirrors the check_instance_for_marker fix. A compound head resolves
+            # from its own argument tokens when they are concrete here, and only
+            # otherwise falls back to the head-directed scan.
+            match compound_head_or_scanned_tdict(class_name, head_token, name, prog_to_fresh, user_typed_args(typed_args), s3, env, pos, collect_injected_heads_for_class(class_name, typed_args)) with
             | Nothing ->
                 inject_constrained_fn_dicts_via_field(name, rest, prog_to_fresh, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
             | Just tdict ->
@@ -6634,7 +6859,10 @@ fn typecheck_decls_resolved(
     let own_type_names = collect_declared_type_names(decls, Nil)
     let declared_types = own_type_names ++ type_names_from_env(env, builtin_type_names())
     # Export this module's own type names so its importers get the same treatment.
-    let scanned_env_with_types = mark_declared_types(own_type_names, scanned_env)
+    let named_env = mark_declared_types(own_type_names, scanned_env)
+    # And their declared parameter counts, which the instance-head arity check reads
+    # back on the env path where no decl carries them.
+    let scanned_env_with_types = mark_declared_type_arities(decls, named_env)
     match validate_all_decls(decls, declared_types) with
     | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
     | Nothing ->
@@ -6650,6 +6878,9 @@ fn typecheck_decls_resolved(
           match check_tyvar_instance_heads(decls) with
           | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
           | Nothing ->
+            match check_instance_head_kinds(decls, env, qual_env) with
+            | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
+            | Nothing ->
             match check_overlapping_instances(decls, dict_empty()) with
             | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
             | Nothing ->
@@ -7448,6 +7679,374 @@ fn check_tyvar_instance_heads(decls: List ast.Decl) -> Maybe(source.SourcePos, S
           | Just (cls, rule) ->
               Just((ast.decl_pos(decl), "Instance head for " ++ cls ++ " " ++ rule))
       | _ -> check_tyvar_instance_heads(rest)
+
+# ---------------------------------------------------------------------------
+# Instance-head arity — docs/instance-head-kinds-v0.md
+# ---------------------------------------------------------------------------
+#
+# With exactly one class parameter every kind is `*^n -> *`, which one integer
+# describes, so an arity check IS the kind check here. A class variable used as
+# `t Int` demands an instance head one argument short of saturation; used bare it
+# demands a saturated one.
+
+# Every application depth at which `v` occurs. `t` alone is 0 and `t Int` is 1:
+# the count is of arguments applied to the VARIABLE, not of the spine holding it,
+# so a TApp's argument restarts at 0 while its base sits one deeper.
+fn var_app_depths(t: types.Type, v: String, depth: Int, acc: List Int) -> List Int =
+  match t with
+  | types.TVar n -> if types.tyvar_identity(n) == v then Cons(depth, acc) else acc
+  | types.TConst _ -> acc
+  | types.TApp base arg -> var_app_depths(base, v, depth + 1, var_app_depths(arg, v, 0, acc))
+  | types.TFunc p r _ _ -> var_app_depths(r, v, 0, var_app_depths(p, v, 0, acc))
+  | types.TThunk r _ -> var_app_depths(r, v, 0, acc)
+  | types.TTuple items -> var_app_depths_list(items, v, acc)
+
+fn var_app_depths_list(items: List types.Type, v: String, acc: List Int) -> List Int =
+  match items with
+  | [] -> acc
+  | [h | t] -> var_app_depths_list(t, v, var_app_depths(h, v, 0, acc))
+
+fn param_app_depths(params: List ast.Param, v: String, local_vars: Dict types.Type,
+                    acc: List Int) -> List Int =
+  match params with
+  | [] -> acc
+  | [ast.Param _ maybe_te _ | rest] ->
+      let Just te = maybe_te else param_app_depths(rest, v, local_vars, acc)
+      in param_app_depths(rest, v, local_vars,
+           var_app_depths(type_from_ast(te, local_vars), v, 0, acc))
+
+# Read over the same local_vars register_class_method builds, so the class variable
+# is the same TVar here as in the scheme an importer reads back. The two sources
+# below must agree on that or their depths are not comparable.
+fn class_own_depths(methods: List ast.ClassMethodSig, v: String,
+                    local_vars: Dict types.Type, acc: List Int) -> List Int =
+  match methods with
+  | [] -> acc
+  | [ast.ClassMethodSig _ params ret _ _ | rest] ->
+      class_own_depths(rest, v, local_vars,
+        var_app_depths(type_from_ast(ret, local_vars), v, 0,
+          param_app_depths(params, v, local_vars, acc)))
+
+# class (short name) -> (its variable, the depths its methods apply it at).
+fn own_class_depths(decls: List ast.Decl, alias_env: Dict types.Type,
+                    acc: Dict (String, List Int)) -> Dict (String, List Int) =
+  match decls with
+  | [] -> acc
+  | [decl | rest] ->
+      own_class_depths(rest, alias_env, own_class_depth_add(decl, alias_env, acc))
+
+fn own_class_depth_add(decl: ast.Decl, alias_env: Dict types.Type,
+                       acc: Dict (String, List Int)) -> Dict (String, List Int) =
+  let ast.ClassDecl name type_params methods _ _ = decl else acc
+      [v | _] = type_params else acc
+  in dict_set(string.after_last_dot(name),
+       (v, class_own_depths(methods, v, build_type_var_dict(type_params, alias_env), Nil)), acc)
+
+# The same table for classes that arrive as env schemes rather than decls — every
+# imported class on the REPL / LSP / analysis path (compiler-internals.md §Whole-
+# program passes). `@class:<method>` already names the class in its body and the
+# class parameters in its scheme_vars, so no marker of its own is needed.
+fn env_class_depths(entries: List (String, types.Scheme), env: Dict types.Scheme,
+                    acc: Dict (String, List Int)) -> Dict (String, List Int) =
+  match entries with
+  | [] -> acc
+  | [(key, marker) | rest] ->
+      if str_starts_with(key, class_marker_prefix()) then
+        env_class_depths(rest, env, env_class_depth_add(key, marker, env, acc))
+      else env_class_depths(rest, env, acc)
+
+fn class_marker_prefix() -> String = "@class:"
+
+fn env_class_depth_add(key: String, marker: types.Scheme, env: Dict types.Scheme,
+                       acc: Dict (String, List Int)) -> Dict (String, List Int) =
+  let types.TConst id = types.scheme_type(marker) else acc
+      [v | _] = types.scheme_vars(marker) else acc
+  in merge_class_depths(string.after_last_dot(types.type_id_name(id)), v,
+       method_scheme_depths(string.drop(key, string.length(class_marker_prefix())), v, env),
+       acc)
+
+fn method_scheme_depths(method: String, v: String, env: Dict types.Scheme) -> List Int =
+  let Just scheme = dict_get(method, env) else Nil
+  in var_app_depths(types.scheme_type(scheme), v, 0, Nil)
+
+# One class has many methods and each contributes its own depths, so the entry
+# accumulates rather than being overwritten.
+fn merge_class_depths(cls: String, v: String, depths: List Int,
+                      acc: Dict (String, List Int)) -> Dict (String, List Int) =
+  let Just(v0, prior) = dict_get(cls, acc) else dict_set(cls, (v, depths), acc)
+  in dict_set(cls, (v0, append(depths, prior)), acc)
+
+# A superclass constrains the variable too: `class Wrapper t where Functor t` ties
+# `t` to whatever arity `Functor` uses. `@super:` records the pair and nothing about
+# the argument, because a superclass is always over the class variable —
+# register_superclass_markers discards the argument for that reason. Own classes
+# come from build_class_super_map; this is its env-path counterpart.
+fn env_class_supers(entries: List (String, types.Scheme),
+                    acc: Dict (List String)) -> Dict (List String) =
+  match entries with
+  | [] -> acc
+  | [(key, _) | rest] ->
+      if str_starts_with(key, "@super:") then
+        env_class_supers(rest, add_env_super(string.drop(key, string.length("@super:")), acc))
+      else env_class_supers(rest, acc)
+
+fn add_env_super(rest_of_key: String, acc: Dict (List String)) -> Dict (List String) =
+  let Just(cls, super_name) = string.split_once(rest_of_key, ":") else acc
+  in dict_set(string.after_last_dot(cls),
+       Cons(string.after_last_dot(super_name), super_list_of(string.after_last_dot(cls), acc)),
+       acc)
+
+# The arity every use of a class's variable must agree on. Nothing when nothing
+# constrains it: a class whose methods never mention its parameter and that has no
+# superclass admits a head at any arity, and inventing a rule for it would reject
+# working code. `visited` guards a superclass cycle, rejected elsewhere but not yet.
+fn class_var_arity(cls: String, depths: Dict (String, List Int),
+                   supers: Dict (List String), visited: List String) -> Maybe Int =
+  if list_member(cls, visited) then Nothing
+  else single_depth(class_all_depths(cls, depths, supers, Cons(cls, visited)))
+
+fn class_all_depths(cls: String, depths: Dict (String, List Int),
+                    supers: Dict (List String), visited: List String) -> List Int =
+  append(class_own_part(cls, depths),
+    super_depths(super_list_of(cls, supers), depths, supers, visited))
+
+fn class_own_part(cls: String, depths: Dict (String, List Int)) -> List Int =
+  let Just(_, ds) = dict_get(cls, depths) else Nil
+  in ds
+
+fn super_depths(names: List String, depths: Dict (String, List Int),
+                supers: Dict (List String), visited: List String) -> List Int =
+  match names with
+  | [] -> Nil
+  | [s | rest] ->
+      match class_var_arity(s, depths, supers, visited) with
+      | Nothing -> super_depths(rest, depths, supers, visited)
+      | Just n -> Cons(n, super_depths(rest, depths, supers, visited))
+
+# The one depth every occurrence agrees on. Nothing covers both "no occurrence" and
+# "they disagree", which is why disagreement is found separately: its message has to
+# name the two values, and a caller cannot recover them from here.
+fn single_depth(depths: List Int) -> Maybe Int =
+  match depths with
+  | [] -> Nothing
+  | [h | t] -> if all_eq_int(t, h) then Just(h) else Nothing
+
+fn all_eq_int(xs: List Int, n: Int) -> Bool =
+  match xs with
+  | [] -> true
+  | [h | t] -> if h == n then all_eq_int(t, n) else false
+
+fn depth_conflict(depths: List Int) -> Maybe (Int, Int) =
+  match depths with
+  | [] -> Nothing
+  | [h | t] -> first_differing(t, h)
+
+fn first_differing(xs: List Int, n: Int) -> Maybe (Int, Int) =
+  match xs with
+  | [] -> Nothing
+  | [h | t] -> if h == n then first_differing(t, n) else Just((n, h))
+
+# Keyed on the name exactly as written, for the reason alias_arity_of gives: on the
+# bundled path both sides are qualified, and matching `main.Tagged` against a short
+# `Tagged` would report an arity the writer never declared. A wrap takes none.
+fn type_arities(decls: List ast.Decl, acc: Dict Int) -> Dict Int =
+  match decls with
+  | [] -> acc
+  | [decl | rest] ->
+      match decl with
+      | ast.TypeDecl name params _ _ _ _ ->
+          type_arities(rest, dict_set(name, list_length(params), acc))
+      | ast.RecordDecl name params _ _ _ _ _ ->
+          type_arities(rest, dict_set(name, list_length(params), acc))
+      | ast.AliasDecl name params _ _ ->
+          type_arities(rest, dict_set(name, list_length(params), acc))
+      | ast.WrapDecl name _ _ _ -> type_arities(rest, dict_set(name, 0, acc))
+      | _ -> type_arities(rest, acc)
+
+# "@tyarity:<ShortName>" for the env path, where imported modules arrive as schemes
+# and no decl carries the count. Short-keyed like every other marker family
+# (compiler-internals.md §Env-path type names are SHORT).
+fn mark_declared_type_arities(decls: List ast.Decl, env: Dict types.Scheme) -> Dict types.Scheme =
+  mark_tyarity_pairs(vec_to_list(dict_entries(type_arities(decls, dict_empty()))), env)
+
+fn mark_tyarity_pairs(pairs: List (String, Int), env: Dict types.Scheme) -> Dict types.Scheme =
+  match pairs with
+  | [] -> env
+  | [(name, n) | rest] ->
+      mark_tyarity_pairs(rest,
+        dict_set("@tyarity:" ++ string.after_last_dot(name), arity_marker(n), env))
+
+# Vector, Map and Ref each back a one-parameter type and NativeSet a monomorphic
+# one. None of the four is declared anywhere, so without this table a head over one
+# reaches neither a decl nor a marker and the check goes blind to exactly those.
+fn builtin_type_arity(name: String) -> Maybe Int =
+  if name == "Vector" then Just(1)
+  else if name == "Map" then Just(1)
+  else if name == "Ref" then Just(1)
+  else if name == "NativeSet" then Just(0)
+  else if list_member(name, primitive_type_names()) then Just(0)
+  else Nothing
+
+fn type_arity_of(name: String, arities: Dict Int, env: Dict types.Scheme) -> Maybe Int =
+  match dict_get(name, arities) with
+  | Just n -> Just(n)
+  | Nothing ->
+      match builtin_type_arity(string.after_last_dot(name)) with
+      | Just n -> Just(n)
+      | Nothing -> tyarity_marker_int(string.after_last_dot(name), env)
+
+fn tyarity_marker_int(short: String, env: Dict types.Scheme) -> Maybe Int =
+  let Just scheme = dict_get("@tyarity:" ++ short, env) else Nothing
+      types.TConst id = types.scheme_type(scheme) else Nothing
+  in parse_int(types.type_id_name(id))
+
+# The name at the left end of a head and how many arguments it is applied to. Every
+# variant is spelled out (guidelines.md §2a): an arrow, thunk, effect or tuple head
+# applies no type arguments, and a future variant that DID would need its own arm
+# rather than this one's answer.
+fn head_spine(te: ast.TypeExpr, depth: Int) -> (String, Int) =
+  match te with
+  | ast.TypeName name -> (name, depth)
+  | ast.TypeApply base _ -> head_spine(base, depth + 1)
+  | ast.TypeArrow _ _ _ -> ("", depth)
+  | ast.TypeThunk _ _ -> ("", depth)
+  | ast.TypeEffect _ _ -> ("", depth)
+  | ast.TupleType _ -> ("", depth)
+
+# Arguments the head leaves unapplied. A tuple or arrow head has none to leave, so
+# `instance Eq (a, b)` and `instance Semigroup String` are both 0. Nothing means the
+# head says nothing about arity: a type-variable head, or a constructor whose count
+# is unavailable because an interface predates the marker.
+fn head_residual(te: ast.TypeExpr, arities: Dict Int, env: Dict types.Scheme) -> Maybe Int =
+  match head_spine(te, 0) with
+  | (name, applied) ->
+      if name == "" then Just(0)
+      else if is_lowercase_name(name) then Nothing
+      else
+        let Just declared = type_arity_of(name, arities, env) else Nothing
+        in Just(declared - applied)
+
+fn head_arity_error(kind: String, cls: String, head_te: ast.TypeExpr, want: Int,
+                    arities: Dict Int, env: Dict types.Scheme) -> Maybe String =
+  let Just residual = head_residual(head_te, arities, env) else Nothing
+  in if residual == want then Nothing
+     else Just("class `" ++ cls ++ "` applies its variable to " ++ argument_count_text(want)
+               ++ ", so " ++ kind ++ " must leave " ++ int_to_string(want)
+               ++ " unapplied; this head leaves " ++ int_to_string(residual))
+
+fn argument_count_text(n: Int) -> String =
+  if n == 1 then "1 argument" else int_to_string(n) ++ " arguments"
+
+# One constraint list — a fn's `where`, a method's, or an instance context.
+fn constraints_arity_error(kind: String, cs: List ast.TypeConstraint,
+                           depths: Dict (String, List Int), supers: Dict (List String),
+                           arities: Dict Int, env: Dict types.Scheme) -> Maybe String =
+  match cs with
+  | [] -> Nothing
+  | [c | rest] ->
+      match constraint_arity_error(kind, c, depths, supers, arities, env) with
+      | Just msg -> Just(msg)
+      | Nothing -> constraints_arity_error(kind, rest, depths, supers, arities, env)
+
+fn constraint_arity_error(kind: String, c: ast.TypeConstraint,
+                          depths: Dict (String, List Int), supers: Dict (List String),
+                          arities: Dict Int, env: Dict types.Scheme) -> Maybe String =
+  let ast.TypeConstraint class_name type_args = c
+      [head_te | _] = type_args else Nothing
+      Just want = class_var_arity(string.after_last_dot(class_name), depths, supers, Nil)
+        else Nothing
+  in head_arity_error(kind, string.after_last_dot(class_name), head_te, want, arities, env)
+
+# A class contradicting itself, reported at the class rather than at every instance
+# that cannot satisfy it. Two shapes: its own methods disagreeing, and its methods
+# disagreeing with a superclass.
+fn class_decl_arity_error(name: String, superclasses: List ast.TypeConstraint,
+                          methods: List ast.ClassMethodSig,
+                          depths: Dict (String, List Int), supers: Dict (List String),
+                          arities: Dict Int, env: Dict types.Scheme) -> Maybe String =
+  match depth_conflict(class_own_part(string.after_last_dot(name), depths)) with
+  | Just (a, b) ->
+      Just("class `" ++ string.after_last_dot(name) ++ "` applies its variable to "
+           ++ argument_count_text(a) ++ " in one method and " ++ int_to_string(b)
+           ++ " in another; one class variable cannot be both")
+  | Nothing ->
+      match class_super_arity_error(string.after_last_dot(name), superclasses, depths, supers) with
+      | Just msg -> Just(msg)
+      | Nothing -> method_wheres_arity_error(methods, depths, supers, arities, env)
+
+fn class_super_arity_error(cls: String, superclasses: List ast.TypeConstraint,
+                           depths: Dict (String, List Int),
+                           supers: Dict (List String)) -> Maybe String =
+  let Just own = single_depth(class_own_part(cls, depths)) else Nothing
+  in super_arity_error(cls, own, super_names(superclasses), depths, supers)
+
+fn super_arity_error(cls: String, own: Int, names: List String,
+                     depths: Dict (String, List Int),
+                     supers: Dict (List String)) -> Maybe String =
+  match names with
+  | [] -> Nothing
+  | [s | rest] ->
+      match class_var_arity(s, depths, supers, Cons(cls, Nil)) with
+      | Just n ->
+          if n == own then super_arity_error(cls, own, rest, depths, supers)
+          else Just("class `" ++ cls ++ "` applies its variable to " ++ argument_count_text(own)
+                    ++ ", but its superclass `" ++ s ++ "` applies its own to "
+                    ++ int_to_string(n))
+      | Nothing -> super_arity_error(cls, own, rest, depths, supers)
+
+fn method_wheres_arity_error(methods: List ast.ClassMethodSig,
+                             depths: Dict (String, List Int), supers: Dict (List String),
+                             arities: Dict Int, env: Dict types.Scheme) -> Maybe String =
+  match methods with
+  | [] -> Nothing
+  | [ast.ClassMethodSig _ _ _ _ constraints | rest] ->
+      match constraints_arity_error("a constraint head", constraints, depths, supers,
+                                    arities, env) with
+      | Just msg -> Just(msg)
+      | Nothing -> method_wheres_arity_error(rest, depths, supers, arities, env)
+
+# The catch-all matches every sibling check in this chain (check_tyvar_instance_heads,
+# check_overlapping_instances): a declaration with no class, instance head or `where`
+# has no head to be wrong about.
+fn decl_arity_error(decl: ast.Decl, depths: Dict (String, List Int),
+                    supers: Dict (List String), arities: Dict Int,
+                    env: Dict types.Scheme) -> Maybe String =
+  match decl with
+  | ast.ClassDecl name _ methods superclasses _ ->
+      class_decl_arity_error(name, superclasses, methods, depths, supers, arities, env)
+  | ast.InstanceDecl constraint inst_constraints _ _ ->
+      match constraint_arity_error("an instance head", constraint, depths, supers, arities, env) with
+      | Just msg -> Just(msg)
+      | Nothing ->
+          constraints_arity_error("a constraint head", inst_constraints, depths, supers,
+            arities, env)
+  | ast.FnDecl _ _ _ _ constraints _ _ ->
+      constraints_arity_error("a constraint head", constraints, depths, supers, arities, env)
+  | _ -> Nothing
+
+# Runs after check_tyvar_instance_heads, which has by then established that every
+# instance head is a constructor applied to distinct variables — so the only thing
+# left to check about a head is how many arguments it leaves.
+fn check_instance_head_kinds(decls: List ast.Decl, env: Dict types.Scheme,
+                             alias_env: Dict types.Type) -> Maybe(source.SourcePos, String) =
+  check_arity_decls(decls,
+    env_class_depths(vec_to_list(dict_entries(env)), env,
+      own_class_depths(decls, alias_env, dict_empty())),
+    env_class_supers(vec_to_list(dict_entries(env)), build_class_super_map(decls, dict_empty())),
+    type_arities(decls, dict_empty()), env)
+
+# The position is the declaration's, not the method's: ClassMethodSig carries no
+# SourcePos, so a method-level `where` reports at its enclosing class.
+fn check_arity_decls(decls: List ast.Decl, depths: Dict (String, List Int),
+                     supers: Dict (List String), arities: Dict Int,
+                     env: Dict types.Scheme) -> Maybe(source.SourcePos, String) =
+  match decls with
+  | [] -> Nothing
+  | [decl | rest] ->
+      match decl_arity_error(decl, depths, supers, arities, env) with
+      | Just msg -> Just((ast.decl_pos(decl), msg))
+      | Nothing -> check_arity_decls(rest, depths, supers, arities, env)
+
 
 fn check_overlapping_instances(decls: List ast.Decl, seen: Dict Bool) -> Maybe(source.SourcePos, String) =
   match decls with
@@ -10051,14 +10650,15 @@ fn canonicalize_constrained_constraints_acc(
                   # Concrete-ctor head (e.g. "List"): stable source name.
                   Cons((prog_var, class_name),
                        canonicalize_constrained_constraints_acc(rest, prog_to_fresh, s2, binders))
-          | [ast.TypeApply base _ | _] ->
-              # Compound head (`where Sh (Box a)`). There is no head VARIABLE, but
-              # there is a head CONSTRUCTOR, and it is the only thing that says
-              # which argument carries the dictionary. Collapsing it into "#none"
-              # left the injection site scanning arguments left to right and
-              # committing to the first concrete one, so the same constraint
-              # picked a different instance depending on parameter order.
-              Cons((compound_head_token(base), class_name),
+          | [ast.TypeApply cb ca | _] ->
+              # Compound head (`where Sh (Box a)`). The head CONSTRUCTOR says which
+              # argument carries the dictionary — collapsing it into "#none" left
+              # the injection site committing to the first concrete argument, so
+              # the same constraint picked a different instance depending on
+              # parameter order. The head alone is still not enough when two
+              # parameters share it, which is why the ARGUMENTS come too.
+              Cons((canonical_compound_head_token(ast.TypeApply(cb, ca), prog_to_fresh, s2, binders),
+                    class_name),
                    canonicalize_constrained_constraints_acc(rest, prog_to_fresh, s2, binders))
           | _ ->
               # Headless constraint (non-TypeName head): resolved without a head var.
@@ -10207,16 +10807,15 @@ fn register_class_method_over(binders: List String, name: String, params: List a
 # (the same reason constraint_var_token exists for a FnDecl).
 fn constraint_pos_tokens(constraints: List ast.TypeConstraint, binders: List String) -> List (String, String) =
   match constraints with
-  | Nil -> Nil
-  | Cons c rest ->
-      match c with
-      | ast.TypeConstraint class_name type_args ->
-          match type_args with
-          | [ast.TypeName v | _] ->
-              Cons((constraint_var_token(v, binders), class_name), constraint_pos_tokens(rest, binders))
-          | [ast.TypeApply base _ | _] ->
-              Cons((compound_head_token(base), class_name), constraint_pos_tokens(rest, binders))
-          | _ -> Cons(("#none", class_name), constraint_pos_tokens(rest, binders))
+  | [] -> Nil
+  | [ast.TypeConstraint class_name type_args | rest] ->
+      Cons((constraint_subject_token(type_args, binders), class_name),
+           constraint_pos_tokens(rest, binders))
+
+fn constraint_subject_token(type_args: List ast.TypeExpr, binders: List String) -> String =
+  match type_args with
+  | [] -> "#none"
+  | [te | _] -> head_token_for(te, binders)
 
 fn register_class_method_markers(class_name: String, type_params: List String, methods: List ast.ClassMethodSig, env: Dict types.Scheme) -> Dict types.Scheme =
   match methods with
@@ -10253,19 +10852,14 @@ fn register_superclass_markers(class_name: String, superclasses: List ast.TypeCo
 # through unchanged and resolve_field_constraint routes to the @fwd forwarding
 # path — exactly as the retired @constrained_N marker did. A concrete-ctor head
 # keeps its name (resolves via @inst directly); a compound head keeps its head
-# constructor ("#app:<Name>") so a self-recursive call directs its argument scan
-# the same way an external call does; any other head is headless ("#none").
+# and its arguments by source name, so a self-recursive call reads the same token
+# shape an external call does; any other head is headless ("#none").
+#
+# An EMPTY binder list is what makes those source names: constraint_var_token
+# already falls back to the name when the variable has no index, which is exactly
+# this case. One producer for both, so the two cannot drift apart.
 fn constraint_source_tokens(constraints: List ast.TypeConstraint) -> List (String, String) =
-  match constraints with
-  | Nil -> Nil
-  | Cons c rest ->
-      match c with
-      | ast.TypeConstraint class_name type_args ->
-          match type_args with
-          | [ast.TypeName prog_var | _] -> Cons((prog_var, class_name), constraint_source_tokens(rest))
-          | [ast.TypeApply base _ | _] ->
-              Cons((compound_head_token(base), class_name), constraint_source_tokens(rest))
-          | _ -> Cons(("#none", class_name), constraint_source_tokens(rest))
+  constraint_pos_tokens(constraints, Nil)
 
 # §13.3(B): pre-scan registration of a FnDecl's signature. A constrained fn's
 # scheme carries its constraint field directly (source-name tokens) — the single

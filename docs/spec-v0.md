@@ -2865,6 +2865,47 @@ instance Summable IntVec
   …
 ```
 
+**An instance head must leave exactly as many arguments unapplied as the class
+variable's use applies.**  A class variable used bare (`fn describe(x: t)`) stands
+for a type, so its instance heads must be saturated; used applied (`fn label(xs: t
+Int)`) it stands for a type constructor, so its heads must leave that many arguments
+off.  Every method of the class, and each of its superclasses, must agree on the
+count; a class whose own methods disagree is rejected at the *class* declaration,
+because no head could satisfy it.  Sprout has no kind syntax and no kind variables,
+so with one class parameter this single count is the whole of the kind.
+
+| declaration | rejected because |
+|---|---|
+| `class Boxed t` with `fn label(xs: t Int)`, then `instance Boxed (Tagged k v)` | the head leaves 0, the use applies 1 |
+| `class Plain t` with `fn describe(x: t)`, then `instance Plain (Tagged k)` | the head leaves 1, the use applies 0 |
+| `fn f(…) where Pretty Tagged`, `Pretty`'s variable used bare | the constraint head leaves 2 |
+| `class Mixed t` with `fn one(x: t)` and `fn two(x: t Int)` | its own methods disagree |
+| `class Wrapper t where Functor t` with `fn unwrap(x: t)` | it disagrees with its superclass |
+
+```
+class `Boxed` applies its variable to 1 argument, so an instance head must leave 1 unapplied; this head leaves 0
+class `Pretty` applies its variable to 0 arguments, so a constraint head must leave 0 unapplied; this head leaves 2
+class `Mixed` applies its variable to 1 argument in one method and 0 in another; one class variable cannot be both
+class `Wrapper` applies its variable to 0 arguments, but its superclass `Functor` applies its own to 1
+```
+
+The rule covers every constructor-headed constraint, not only instance heads: a
+`where` clause on a function, on a method, or in an instance context names a
+dictionary that must exist, and one at the wrong arity names none.  What a head
+leaves is its constructor's declared parameter count minus the arguments written,
+so `instance Semigroup String` leaves 0 because `String` takes none — while a bare
+`Tagged`, whose constructor takes two, leaves 2 and is rejected under a bare class
+variable.  A tuple or function head has no constructor to count and leaves 0.  A
+type-variable head is untouched: as an
+instance head the rule above rejects it, and as a constraint it is forwarded.  A
+class whose variable appears in no method signature and under no superclass is
+unconstrained, and admits a head at any arity.
+
+Type application is curried, so without this rule the head and the dispatch type
+disagree about depth and their spines misalign *silently*: `instance Boxed (Tri a b
+c) where ToString b` bound `b` to the wrong argument and printed a raw pointer.
+Rationale and the recorder invariant it rests on: `docs/instance-head-kinds-v0.md`.
+
 **Two instances may not share a head constructor.**  Instance selection keys on
 the head constructor, so `instance C (List a)` and `instance C (List b)` both name
 `C`-at-`List` and the second would silently shadow the first.  Sprout has no
@@ -2888,6 +2929,21 @@ matching* — selecting an instance by unifying the whole head rather than its
 constructor.  The two arrive together by necessity; Sprout has the
 head-constructor key only, and so takes the Haskell 2010 position.  Lifting the
 restriction requires widening the key first (see `BACKLOG.md`).
+
+**A constructor-headed constraint dispatches on the parameter it names.**  Given
+
+```
+fn second_only(x: Tagged k Int, y: Tagged j Int) -> String where Boxed (Tagged j) =
+  label(y)
+```
+
+the hidden dictionary is `Boxed` at `Tagged <whatever j is>`, chosen because the
+constraint writes `j` — not because some parameter happens to be headed by `Tagged`.
+Where the two readings differ, only this one is correct: the other supplies a witness
+for a type the constraint does not mention, and the method then interprets one type's
+value through another's dictionary.  When a constraint's arguments are not all fixed
+at a call site the obligation is forwarded rather than guessed, exactly as for a
+variable-headed constraint.
 
 ### `Applicative` class and `mapN` helpers
 

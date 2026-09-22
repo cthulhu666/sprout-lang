@@ -165,59 +165,50 @@ fn check_context(
   match dict_get(key, tables_ctx(tables)) with
   | Nothing -> Nothing
   | Just (inst_type_args, inst_constraints) ->
-      check_context_subs(key, inst_constraints,
-        unify_type_args_list(inst_type_args, type_args, dict_empty()), pos, tables)
+      match spine_depth_mismatch(key, inst_type_args, type_args) with
+      | Just msg -> Just((pos, msg))
+      | Nothing ->
+          check_context_subs(inst_constraints,
+            unify_type_args_list(inst_type_args, type_args, dict_empty()), pos, tables)
 
-# A context variable the head match left unbound is NOT a forwarded constraint,
-# though it looks like one: a variable bound to another variable still appears in
-# the substitution. Unbound means the head and the dispatch type disagree on how
-# many arguments the class variable takes, and lowering would fill the slot with
-# a poison thunk that only fires at run time.
+# The recorder invariant, reported where there is a position to report it with: the
+# instance head and the dispatch type must arrive at the same application depth,
+# since unify_type_expr pairs the spines as they stand. A mismatch means some
+# recorder recorded the wrong depth, and binding a context variable to whatever
+# lines up is how that used to become a wrong witness instead of a diagnostic.
+#
+# Only this one of the three unify_type_args_list callers can report: the other two
+# return an Evidence and a Maybe list, with no position between them.
+fn spine_depth_mismatch(key: String, patterns: List ast.TypeExpr,
+                        concretes: List ast.TypeExpr) -> Maybe String =
+  match (patterns, concretes) with
+  | ([p | rest_p], [c | rest_c]) ->
+      if te_app_depth(p) == te_app_depth(c)
+      then spine_depth_mismatch(key, rest_p, rest_c)
+      else Just("internal: instance " ++ key ++ " is written at depth "
+                  ++ int_to_string(te_app_depth(p)) ++ " but dispatches on a type at depth "
+                  ++ int_to_string(te_app_depth(c)))
+  | (_, _) -> Nothing
+
+fn te_app_depth(te: ast.TypeExpr) -> Int =
+  match te with
+  | ast.TypeApply base _ -> 1 + te_app_depth(base)
+  | _ -> 0
+
+# A context variable the head match leaves unbound used to be rejected here, on the
+# reasoning that the head and the dispatch type must then disagree about the class
+# variable's arity. They need not: `instance Foo Bar where Baz k` binds no `k` and
+# has no arity story at all. The arity disagreement is now caught at the
+# declaration (infer.check_instance_head_kinds), so an unbound variable reaching
+# here is simply a constraint no instance satisfies, reported as one.
 fn check_context_subs(
-  key: String,
   inst_constraints: List ast.TypeConstraint,
   subs: Dict ast.TypeExpr,
   pos: source.SourcePos,
   tables: Tables
 ) -> Maybe(source.SourcePos, String) =
-  match unbound_context_var(inst_constraints, subs) with
-  | Nothing ->
-      check_constraint_list(list_map(\c -> substitute_constraint(c, subs), inst_constraints),
-                            pos, tables)
-  | Just v ->
-      Just((pos, "instance " ++ key ++ ": `where` names `" ++ v
-                 ++ "`, which the instance head does not bind here — the head takes more"
-                 ++ " arguments than the class variable's use leaves for it"))
-
-fn unbound_context_var(cs: List ast.TypeConstraint, subs: Dict ast.TypeExpr) -> Maybe String =
-  match cs with
-  | Nil -> Nothing
-  | [c | rest] ->
-      match c with
-      | ast.TypeConstraint _ type_args ->
-          match unbound_var_in_list(type_args, subs) with
-          | Just v -> Just(v)
-          | Nothing -> unbound_context_var(rest, subs)
-
-fn unbound_var_in_list(tes: List ast.TypeExpr, subs: Dict ast.TypeExpr) -> Maybe String =
-  match tes with
-  | Nil -> Nothing
-  | [te | rest] ->
-      match unbound_var_in_te(te, subs) with
-      | Just v -> Just(v)
-      | Nothing -> unbound_var_in_list(rest, subs)
-
-fn unbound_var_in_te(te: ast.TypeExpr, subs: Dict ast.TypeExpr) -> Maybe String =
-  match te with
-  | ast.TypeName n ->
-      if is_type_var_name(n) == false then Nothing
-      else
-        match dict_get(n, subs) with
-        | Just _ -> Nothing
-        | Nothing -> Just(n)
-  | ast.TypeApply base arg -> unbound_var_in_list([base, arg], subs)
-  | ast.TupleType items -> unbound_var_in_list(items, subs)
-  | _ -> Nothing
+  check_constraint_list(list_map(\c -> substitute_constraint(c, subs), inst_constraints),
+                        pos, tables)
 
 fn check_constraint_list(
   cs: List ast.TypeConstraint,
@@ -697,22 +688,12 @@ fn type_expr_head_name(te: ast.TypeExpr) -> String =
   | ast.TypeEffect _ _ -> "Eff"
   | ast.TupleType items -> "Tuple" ++ int_to_string(list_length(items))
 
-# A partially applied instance head (`instance C (Tagged k)`) is matched against
-# a SATURATED type (`Tagged Bool Int`). Application is curried, so pairing the
-# two spines up as they stand binds `k` to the trailing argument; peel the
-# surplus off the concrete side first so both align at the base.
-fn te_app_depth(te: ast.TypeExpr) -> Int =
-  match te with
-  | ast.TypeApply base _ -> 1 + te_app_depth(base)
-  | _ -> 0
-
-fn drop_surplus_args(te: ast.TypeExpr, n: Int) -> ast.TypeExpr =
-  if n <= 0 then te
-  else
-    match te with
-    | ast.TypeApply base _ -> drop_surplus_args(base, n - 1)
-    | _ -> te
-
+# The instance head and the dispatch type arrive at the SAME application depth:
+# every recorder records the class variable's binding, and the head-arity check
+# (infer.check_instance_head_kinds) rejects a head that would not match it. So the
+# two spines pair up as they stand — this used to peel a surplus off the concrete
+# side, computed per call, which was only ever right when the concrete side was
+# the deeper of the two. docs/instance-head-kinds-v0.md §5.
 fn unify_type_expr(
   pattern: ast.TypeExpr,
   concrete: ast.TypeExpr,
@@ -723,7 +704,7 @@ fn unify_type_expr(
       if is_type_var_name(name) then dict_set(name, concrete, acc)
       else acc
   | ast.TypeApply pat_base pat_arg ->
-      match drop_surplus_args(concrete, te_app_depth(concrete) - te_app_depth(pattern)) with
+      match concrete with
       | ast.TypeApply con_base con_arg ->
           unify_type_expr(pat_arg, con_arg, unify_type_expr(pat_base, con_base, acc))
       | _ -> acc

@@ -1,0 +1,20 @@
+# A compound head whose written argument is a CONCRETE type, so the token has no
+# position to carry for it and the head-directed scan resolves the dictionary. The
+# scan sees the class variable APPLIED (`Box String Int`), one argument deeper than
+# the head, and the token's argument COUNT is what takes the surplus back off.
+# Without that the instance's `c` binds to `Int` and a String prints as a pointer.
+module main
+
+type Box a b = Box a b
+
+class Sh t
+  fn show1(x: t Int) -> String
+
+instance Sh (Box c) where ToString c
+  fn show1(x: Box c Int) -> String =
+    match x with
+    | Box c n -> to_string(c) ++ "#" ++ to_string(n)
+
+fn via(x: Box String Int) -> String where Sh (Box String) = show1(x)
+
+fn main() -> Unit !{IO} = print(via(Box("hi", 3)))
