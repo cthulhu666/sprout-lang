@@ -1,0 +1,21 @@
+# Two parameters of the same shape, and only the SECOND is constrained. The
+# dictionary must come from `y`, but the constraint token keeps only the head
+# (`#app:Tagged`) and drops `j`, so the resolver scans arguments and takes the
+# first whose head matches — rendering `y`'s value through `x`'s dictionary.
+# QUARANTINED in XFAIL: prints `false=7`. Clears when the token carries `j`.
+module main
+
+type Tagged k v = Tagged k v
+
+class Boxed t
+  fn label(xs: t Int) -> String
+
+instance Boxed (Tagged k) where ToString k
+  fn label(xs: Tagged k Int) -> String =
+    match xs with
+    | Tagged k v -> to_string(k) ++ "=" ++ to_string(v)
+
+fn second_only(x: Tagged k Int, y: Tagged j Int) -> String where Boxed (Tagged j) =
+  label(y)
+
+fn main() -> Unit !{IO} = print(second_only(Tagged(true, 1), Tagged("q", 7)))

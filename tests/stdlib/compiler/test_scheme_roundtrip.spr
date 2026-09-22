@@ -180,6 +180,21 @@ fn main() -> Unit !{IO} =
                 types.TFunc(types.TVar(types.tyvar_id("a")), types.TFunc(types.TVar(types.tyvar_id("b")), types.TConst(types.type_id("String")), types.EffectPure, types.OwnConsume), types.EffectPure, types.OwnConsume),
                 types.EffectPure,
                 Cons(("#pos:0", "Show"), Cons(("List", "Foldable"), Cons(("#none", "Default"), Nil))))))
+    # A widened compound-head token, `where Boxed (Tagged j)` with `j` at position 1.
+    # It carries a comma AND two colons inside one wire atom, which the constraint
+    # encoder writes unquoted — so this is the assertion that the atom stays readable
+    # back. A "#any" argument stands for one the constraint gives no name.
+    assert_eq(state, "compound-head token roundtrip",
+              roundtrip(types.Scheme(
+                Cons("k", Cons("j", Nil)), Nil,
+                types.TVar(types.tyvar_id("j")),
+                types.EffectPure,
+                Cons(("#app:Tagged:#pos:1", "Boxed"), Cons(("#app:Trip:#pos:0,#any", "Sh2"), Nil)))),
+              Just(types.Scheme(
+                Cons("k", Cons("j", Nil)), Nil,
+                types.TVar(types.tyvar_id("j")),
+                types.EffectPure,
+                Cons(("#app:Tagged:#pos:1", "Boxed"), Cons(("#app:Trip:#pos:0,#any", "Sh2"), Nil)))))
     # A wrong constraint must NOT compare equal (guards scheme_eq actually checks constraints).
     assert_eq(state, "constraint mismatch is not equal",
               (roundtrip(types.Scheme(Cons("a", Nil), Nil, types.TVar(types.tyvar_id("a")), types.EffectPure, Cons(("#pos:0", "Semigroup"), Nil)))

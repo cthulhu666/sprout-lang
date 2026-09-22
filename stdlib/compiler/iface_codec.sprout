@@ -378,7 +378,7 @@ fn collect_types(s: String, bytes: Bytes, i: Int, total: Int, acc: List types.Ty
 #
 # `version` is encoded as a bare atom and checked by string equality. When
 # v2 lands, decoder gets an if-chain or a parsed-int conversion.
-# (Current version is 8 — see decode_iface_version for the change log.)
+# (Current version is 9 — see decode_iface_version for the change log.)
 
 export type NamedScheme (..) =
   | NamedScheme String types.Scheme
@@ -551,12 +551,15 @@ fn decode_iface_v2_tail(s: String, bytes: Bytes, i: Int, total: Int, version: In
 # and to ParamMode; v6→v7 added the TypeThunk tag, so a nullary signature is
 # `() -> T` rather than bare `T`; v7→v8 gave a class method's scheme a constraint
 # list of its own, so a v7 ClassInfo decodes with every method-level `where`
-# silently empty. Old ifaces are rejected loudly (the Scheme wire format changed)
+# silently empty; v8→v9 widened a compound-head token from "#app:<Head>" to
+# "#app:<Head>:<args>", so a v8 token reads as the head alone and dispatch falls
+# back to scanning arguments — the defect the arguments exist to fix.
+# Old ifaces are rejected loudly (the Scheme wire format changed)
 # — from v5 on that matters doubly, since an older iface decoded leniently would
 # silently read every `borrowing`/`once` parameter as consuming, which is the
 # exact silent erasure both milestones exist to remove.
 fn decode_iface_version(s: String) -> Maybe Int =
-  if s == "8" then Just(8) else Nothing
+  if s == "9" then Just(9) else Nothing
 
 fn decode_named_scheme_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List NamedScheme, Int) =
   match expect_char(s, bytes, i, total, '(') with
@@ -724,18 +727,39 @@ fn method_constraint_tokens(constraints: List ast.TypeConstraint) -> List (Strin
   | Cons (ast.TypeConstraint class_name type_args) rest ->
       match type_args with
       | [ast.TypeName v | _] -> Cons((v, class_name), method_constraint_tokens(rest))
-      | [ast.TypeApply base _ | _] ->
-          Cons((compound_head_token(base), class_name), method_constraint_tokens(rest))
+      | [ast.TypeApply cb ca | _] ->
+          Cons((compound_head_token(ast.TypeApply(cb, ca)), class_name),
+               method_constraint_tokens(rest))
       | _ -> Cons(("#none", class_name), method_constraint_tokens(rest))
 
 # A compound head (`where ToString (Box a)`) in the `#app:` form
-# infer.compound_head_token writes, qualifier included. The call-site resolver
-# branches on that prefix; a bare name decodes as a type VARIABLE instead and
-# resolves the dictionary by a different path entirely.
-fn compound_head_token(base: ast.TypeExpr) -> String =
-  match te_head_name(base) with
-  | Just h -> "#app:" ++ h
+# infer.compound_head_token writes, qualifier included: the head, then one token
+# per written argument. The call-site resolver branches on that prefix; a bare name
+# decodes as a type VARIABLE instead and resolves the dictionary by a different
+# path entirely. Names, not positions, for the reason the caller above gives.
+fn compound_head_token(te: ast.TypeExpr) -> String =
+  match te_head_name(te) with
+  | Just h -> app_token_with_args(h, compound_head_arg_names(te, Nil))
   | Nothing -> "#none"
+
+fn app_token_with_args(h: String, names: Maybe (List String)) -> String =
+  match names with
+  | Nothing -> "#app:" ++ h
+  | Just ns -> "#app:" ++ h ++ ":" ++ string.join(",", ns)
+
+# The written arguments' names, outermost LAST, with "#any" where there is no name
+# to give. The gap is recorded rather than dropped so the COUNT survives — that is
+# what lets the recorder place the head at the right application depth.
+fn compound_head_arg_names(te: ast.TypeExpr, acc: List String) -> Maybe (List String) =
+  match te with
+  | ast.TypeApply base (ast.TypeName n) -> compound_head_arg_names(base, Cons(n, acc))
+  | ast.TypeApply base _ -> compound_head_arg_names(base, Cons("#any", acc))
+  | _ -> arg_names_done(acc)
+
+fn arg_names_done(acc: List String) -> Maybe (List String) =
+  match acc with
+  | [] -> Nothing
+  | [_ | _] -> Just(acc)
 
 fn te_head_name(te: ast.TypeExpr) -> Maybe String =
   match te with

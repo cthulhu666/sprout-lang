@@ -1,0 +1,19 @@
+# A compound head with TWO written arguments, and again only the second parameter
+# is constrained. One positional token per written argument is what lets the
+# resolver rebuild `Trip r s` at this call; a single head name could not.
+module main
+
+type Trip a b c = Trip a b c
+
+class Sh2 t
+  fn render(x: t Int) -> String
+
+instance Sh2 (Trip a b) where ToString a
+  fn render(x: Trip a b Int) -> String =
+    match x with
+    | Trip a _ n -> to_string(a) ++ "=" ++ to_string(n)
+
+fn second_trip(x: Trip p q Int, y: Trip r s Int) -> String where Sh2 (Trip r s) =
+  render(y)
+
+fn main() -> Unit !{IO} = print(second_trip(Trip(1, 'x', 2), Trip("ok", 'y', 9)))

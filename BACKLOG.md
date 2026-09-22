@@ -106,10 +106,6 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   `where Sh (Box a)` binds to another module's same-named type — two modules defining `Box` are
   indistinguishable and the scan takes whichever argument comes first. Fix: qualify the head at
   canonicalization time so the comparison is exact.
-- [ ] `P3` **`iface_codec` gained `#app:<Name>` with no iface version bump** (`:48`, `:533`) —
-  still emits and accepts v6, where the precedent is that v3→v4 was bumped for exactly this. No
-  live miscompile (`module_loader` does not consume ifaces), so it is a forward-compatibility gap.
-  Fix: bump to v7 both sides, add a `#app:` case to `test_scheme_roundtrip.spr`.
 - [ ] `P3` **Full Maranget usefulness matrix for product exhaustiveness.**
   `(true,true)|(false,false)` on `(Bool,Bool)` is not yet rejected; sound to over-accept per spec
   §5.5.
@@ -998,16 +994,6 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   against the retired reference, no golden).
 
 ### 7.5) Type Classes
-
-- [ ] `P2` **An instance head whose kind disagrees with the class variable's is caught at the
-  CALL SITE, not at the declaration.** `class Boxed t` used as `t Int` needs `t :: * -> *`, so
-  `instance Boxed (Tagged k v)` is ill-kinded; `resolve.check_context_subs` now rejects it, but
-  only where a call forces the head match, so an instance nobody calls compiles clean. The
-  diagnostic also points at the call rather than the offending `instance` line. A real check
-  wants the class variable's kind (from how the method signatures apply it) against the head's
-  residual kind (from the type constructor's declared arity) at instance registration.
-  Designed in `docs/instance-head-kinds-v0.md`; `check_context_subs` has three further defects
-  that the design deletes rather than patches.
 
 - [ ] `P2` **A class method's `.iface` scheme quantifies fewer binders than the live
   registration.** `iface_codec.method_scheme` quantifies the CLASS parameters only, so a

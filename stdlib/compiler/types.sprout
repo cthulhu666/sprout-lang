@@ -904,7 +904,9 @@ fn constraint_terms(renamed_vars: List String, rename: Dict String,
           | Just name -> Cons(class_name ++ " " ++ name, constraint_terms(renamed_vars, rename, rest))
           | Nothing -> constraint_terms(renamed_vars, rename, rest)
 
-# "#pos:<k>" → the k-th binder's display name; "#app:<Name>" → the constructor itself;
+# "#pos:<k>" → the k-th binder's display name; "#app:<Name>" or "#app:<Name>:<args>" →
+# the constructor itself, since a clause naming `Box` reads better than one naming the
+# argument tokens beside it;
 # "#none" and "" → a headless obligation, which names no type and so has nothing to print.
 # A position past the end of the binder list is skipped rather than guessed: naming the
 # wrong variable is worse than naming none.
@@ -919,11 +921,18 @@ fn constraint_head_name(renamed_vars: List String, rename: Dict String,
     match parse_int(str_slice(head, 5, str_len(head))) with
     | Nothing -> Nothing
     | Just k -> nth_string(renamed_vars, k)
-  else if str_starts_with(head, "#app:") then Just(str_slice(head, 5, str_len(head)))
+  else if str_starts_with(head, "#app:") then Just(app_token_ctor(str_slice(head, 5, str_len(head))))
   else
     match dict_get(head, rename) with
     | Just renamed -> Just(renamed)
     | Nothing -> Just(head)
+
+# Everything before the first colon of an "#app:" body. The argument tokens that
+# may follow carry their own colons, so the split is at the first one.
+fn app_token_ctor(body: String) -> String =
+  match string.split_once(body, ":") with
+  | Just (ctor, _) -> ctor
+  | Nothing -> body
 
 # Writer for the positional head token `constraint_head_name` reads. Position, not source
 # name: a generated binder still renames, so only its index survives the rendering.

@@ -1,0 +1,61 @@
+import stdlib.test (check_eq, run_suite)
+
+# The shapes the instance-head arity rule must ACCEPT. Each puts the class variable
+# somewhere a naive read of the method signatures does not look: only in a return
+# type, only under a superclass, or nowhere at all.
+
+type Box a = Box a
+
+fn unbox(b: Box Int) -> Int =
+  match b with
+  | Box a -> a
+
+# --- The class variable only in a RETURN type -------------------------------
+# Nothing in an argument says what `t` is, so its arity is readable only from the
+# return type. A rule that scanned arguments alone would find no occurrence and
+# admit a head at any arity.
+
+class Maker t
+  fn make(n: Int) -> t Int
+
+instance Maker Box
+  fn make(n: Int) -> Box Int = Box(n)
+
+fn made() -> Box Int = make(4)
+
+# --- The class variable only under a SUPERCLASS -----------------------------
+# `Marked` declares no method of its own, so its variable's arity comes entirely
+# from `Functor f`, which applies its own to one argument.
+
+class Marked t where Functor t
+
+instance Functor Box
+  fn fmap(f: a -> b, xs: Box a) -> Box b =
+    match xs with
+    | Box a -> Box(f(a))
+
+instance Marked Box
+
+# --- A class that constrains its variable nowhere ---------------------------
+# No method mentions `t` and there is no superclass, so nothing fixes its arity
+# and heads at either arity must be accepted.
+
+class Tagless t
+  fn describe() -> String
+
+instance Tagless Box
+  fn describe() -> String = "box"
+
+instance Tagless Int
+  fn describe() -> String = "int"
+
+# The rule's DISPATCH consequences live in tests/conformance/run, where a golden
+# stdout can show which parameter's dictionary was used:
+# dispatch_two_candidates_second_constrained, dispatch_compound_head_two_args and
+# dispatch_compound_head_concrete_arg. This file holds only what the rule accepts.
+
+fn main() -> Unit !{IO} =
+  run_suite("instance head arity", [
+    check_eq("class variable only in a return type", unbox(made()), 4),
+    check_eq("class variable only under a superclass", unbox(fmap(\n -> n + 1, Box(1))), 2)
+  ])

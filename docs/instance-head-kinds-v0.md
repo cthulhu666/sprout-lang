@@ -1,13 +1,17 @@
 # Instance head kinds v0
 
-Status: proposed, revision 2.
+Status: implemented, revision 3.
 
 Revision 1 proposed a declaration-site arity check plus a per-class constant peel
 in `unify_type_expr`. The placement survived review; the peel did not. It was
 refuted by building a compiler with it implemented literally: the branch's own
 `tests/stdlib/test_method_constraint_dispatch.spr` then fails to compile, where
-the unpatched branch passes 13/13. §5 explains why, and is the part of this
-document that carries the actual fix.
+the unpatched branch passes 13/13.
+
+Revision 2 diagnosed why — three recorders at three depths, §5 — but recorded the
+repair as unavailable, because the constraint token kept a compound head's
+constructor and dropped its arguments. Revision 3 widens that token and is what
+landed. §5 carries the fix; §6 lists the eight steps as built.
 
 ## 1. Problem
 
@@ -20,13 +24,15 @@ supplies an `H` of that kind. Three observed consequences:
   and the program aborts at run time with no diagnostic.
 - `instance Boxed (Tri a b c) where ToString b` records a dispatch type shallower
   than the head. The two spines pair outside-in, `b` binds to the wrong argument,
-  and the wrong witness reaches `str_concat` as a segfault.
-- The consumer side compensates, and cannot. `te_app_depth`/`drop_surplus_args`
-  peel a surplus computed per call as a depth difference, correct only when the
-  concrete type is the deeper of the two; `resolve.check_context_subs` then guards
-  the result by substitution membership, which misses a variable bound to `_`,
-  never fires when the head is the deeper side, and rejects
-  `instance Foo Bar where Baz k`, which compiled before.
+  and the wrong witness reaches `str_concat` — which prints a raw pointer rather
+  than crashing, so nothing marks it as wrong.
+- The consumer side compensated, and could not. `te_app_depth`/`drop_surplus_args`
+  peeled a surplus computed per call as a depth difference, correct only when the
+  concrete type is the deeper of the two; `resolve.check_context_subs` then guarded
+  the result by substitution membership, which missed a variable bound to `_`,
+  never fired when the head was the deeper side, and rejected
+  `instance Foo Bar where Baz k`, which compiled before. Both are gone: the guard
+  outright, the peel to the recorder that knows the depth (§5).
 
 Two distinct defects hide in that third bullet, and revision 1 conflated them.
 The kind of the instance head is never checked — that is §4. And the three places
@@ -41,7 +47,8 @@ unsuccessfully papering over.
 - Give the three recorders one invariant, so that spine matching needs no peel at
   all and a depth mismatch becomes a located failure rather than a silent
   mis-binding.
-- Delete `check_context_subs` without losing a program it correctly rejects.
+- Delete `check_context_subs`'s unbound-variable test without losing a program it
+  correctly rejects.
 - No new syntax, no new annotations.
 
 ### Non-goals
@@ -109,13 +116,16 @@ Four notes the first revision got wrong:
    — Vector 1, Map 1, Ref 1, NativeSet 0 — not the blanket 0 revision 1 gave every
    builtin. `primitive_type_names` are genuinely 0.
 4. **Constraints, not only instances.** `fn wrap_pp(x: Tagged Bool Int) -> String
-   where Pretty Tagged` is a wrong-kind head in a `where` clause. It is rejected
-   today by `check_context_subs`; an instance-only check would regress it to
-   master's runtime abort. §6 step 4 covers fn, method-level and instance-context
+   where Pretty Tagged` is a wrong-kind head in a `where` clause. An instance-only
+   check would regress it to master's runtime abort — and `check_context_subs` did
+   not in fact reject it either, as the fixture written for it showed: it compiled
+   clean before this change. §6 step 4 covers fn, method-level and instance-context
    constraints alongside instance heads.
 
-A head that is not an application has residual arity 0: a tuple
-(`instance Eq (a, b)`) and a primitive (`instance Semigroup String`). Every other
+Two shapes reach residual 0 by different routes, and conflating them would get a
+bare `Tagged` wrong: a tuple (`instance Eq (a, b)`) has no constructor to count,
+while a primitive (`instance Semigroup String`) is a constructor whose declared
+arity is 0. A bare `Tagged` is residual 2, which is the point. Every other
 prelude head is a `TypeDecl`, so `List`, `Maybe`, `Result`, `Vec`, `Dict`, `Set`
 and `IntRange` need no special case. `stdlib/prelude.sprout` has 64 top-level
 `instance` declarations; the acceptance sweep in §9 must cover all of them
@@ -146,22 +156,53 @@ too few and the head match binds nothing.
 
 **Invariant: every recorder records the class variable's binding.** That is
 already the branch's thesis for the primary path (`concrete_dispatch_call`); it
-simply was not carried to the other two. For the arg-scanned recorder the binding
-is obtainable without scanning arguments at all: the callee's own constraint
-(`where Boxed (Tagged k)`) already has the right shape, with program-level names,
-and needs only the call's instantiation substituted into it. That also removes a
-selection bug the argument scan has independently — with
+simply was not carried to the other two. The arg-scanned recorder also has a
+selection bug of its own: with
 `fn helper(x: Tagged k Int, y: Tagged j Int) where Boxed (Tagged j)`, the scan
 takes the first argument whose head matches, which is `x`.
 
-Once the invariant holds and §4 is enforced, pattern depth equals concrete depth
-by construction. `drop_surplus_args`, `te_app_depth` and the depth subtraction are
-deleted from both copies of `unify_type_expr`, and the `| _ -> acc` fallthrough
-in each becomes a located invariant
-failure: reaching it means a recorder broke the invariant, and silently returning
-the accumulator is what turned that into a segfault.
+**The fix is to substitute the callee's own constraint, and it needed a wider
+token first.** Substituting `where Boxed (Tagged j)` into the call's instantiation
+gives the binding directly, at the right depth — but the constraint the recorder
+could see was `#app:Tagged`, because the token kept the head and dropped `j`. The
+token now carries both:
+
+```
+#app:<Head>                      the head alone (a pre-v9 interface only)
+#app:<Head>:<t1>,<t2>,...        one constraint-var token per WRITTEN argument
+```
+
+Each `<ti>` is an ordinary constraint-var token — `#pos:<k>` against the callee's
+generalized binder list, a source name where there is no index, or `#any` for an
+argument that is no variable at all. Two things follow, and the second is what
+makes the peel removable:
+
+- **Which** argument the constraint meant is now stated, not guessed. The head NAME
+  still comes from a matching argument, because the constraint spells it as written
+  (`Tagged`) while `@inst:` keys carry the qualified one (`main.Tagged`); which
+  argument supplies that spelling no longer matters.
+- **How deep** the head is written is now known even when the arguments are not —
+  `#any` occupies a position, so the COUNT survives. A recorder that starts from a
+  whole argument type takes the surplus off itself (`resolve_arg_scanned_tdict`'s
+  `want_arity`), which is the peel moved from the consumer, which could not know the
+  depth, to the recorder, which does.
+
+This is a `.iface` wire-form change, so it is a version bump — v8→v9, and the second
+bump to change this exact field (v3→v4 changed the constraint pair's shape). Old
+interfaces are rejected loudly, as every earlier bump rejects its predecessor.
+
+With the invariant holding and §4 enforced, pattern depth equals concrete depth by
+construction, and `drop_surplus_args`, `te_app_depth` and the subtraction are gone
+from both copies of `unify_type_expr`. The `| _ -> acc` fallthrough stays: of the
+three `unify_type_args_list` callers only `resolve.check_context` has a position to
+report with, and it now checks the depths and reports a mismatch as
+`internal: instance <key> is written at depth N but dispatches on a type at depth
+M`. The other two return an `Evidence` and a `Maybe` list with no position between
+them, which is why the check lives at the caller rather than inside the unifier.
 
 ## 6. Implementation
+
+All eight steps are implemented.
 
 1. **`@tyarity:<TypeName>`** in `infer.sprout` beside `mark_declared_types`: the
    declared parameter count of every `TypeDecl` / `RecordDecl` / `WrapDecl`, same
@@ -202,15 +243,39 @@ the accumulator is what turned that into a segfault.
    contexts — skipping type-variable heads. On the bundled path an unknown
    constructor arity is a compiler bug, because `validate_all_decls` has already
    rejected unknown type names: fail loudly, do not skip.
-5. **Carry the recorder invariant** (§5): the arg-scanned recorder substitutes the
-   callee's constraint head instead of scanning arguments;
-   `class_var_dispatch_type`'s fallback and `resolve_concrete_head_tdict` record
-   the class variable's binding.
+5. **Carry the recorder invariant** (§5) by widening the compound-head token to
+   `#app:<Head>:<args>`, one entry per written argument, and bumping the `.iface`
+   format v8→v9. The arg-scanned recorder then rebuilds the constraint's own head
+   at this call (`resolve_compound_head_tdict`) and only falls back to scanning
+   when an argument is `#any` or still polymorphic — in which case the token's
+   argument COUNT truncates the scanned type to the head's depth.
+
+   The three producers collapse to one. `constraint_source_tokens` existed only to
+   key by NAME where the others key by POSITION, and `constraint_var_token` already
+   falls back to the name when the variable has no index — so passing `Nil` binders
+   IS the name-keyed behaviour, and it is now a one-line delegation. The generalized
+   producer keeps its own writer (`canonical_compound_head_token`) because its
+   arguments must be canonicalized through `prog_to_fresh`/`s2` exactly as the head
+   variable beside them is; a source name would not survive the renaming.
+
+   `resolve_concrete_head_tdict` needs no change, and §4 is why: a bare
+   constructor-headed constraint reaches it only with residual arity equal to
+   `classvar_arity`, so its depth-0 `TypeName(head)` already IS the class variable's
+   binding. `class_var_dispatch_type`'s four fallbacks to the whole argument type
+   would break the invariant, but are measured defensive — instrumented with a
+   panic, none fired on 462 corpus files or on the compiler's own source.
 6. **Delete the peel** — `drop_surplus_args`, `te_app_depth` and the subtraction —
-   from both copies of `unify_type_expr`, and make the fallthrough a located
-   failure.
-7. **Delete** `check_context_subs`, `unbound_context_var`, `unbound_var_in_list`
-   and `unbound_var_in_te`. Safe only once step 4 covers constraint heads.
+   from both copies of `unify_type_expr`. Done, and the peel's job did not vanish:
+   it moved to the recorder, which knows the constraint's written depth where the
+   consumer only knew a per-call difference between two spines. The fallthrough
+   stays a fallthrough; the located check lives in `resolve.check_context`, the one
+   caller with a position — see §5 for why the other two have none.
+7. **Delete the unbound-variable test** — `unbound_context_var`,
+   `unbound_var_in_list`, `unbound_var_in_te` and the branch that reports them.
+   Safe only once step 4 covers constraint heads. `check_context_subs` itself stays:
+   substituting an instance context at its concrete arguments and recursing is a
+   job that still needs doing, and its name is where the reason this test is gone
+   belongs.
 8. **`@fwdvar:<tyvar>`** beside `@fwd:<tyvar>:<class>`, replacing
    `fwd_prog_var_any_class`'s full-env scan — 3.3x on a 2400-site A/B, 81% of
    samples, for byte-identical IR. It must be written by BOTH seeders:
@@ -223,14 +288,22 @@ the accumulator is what turned that into a segfault.
 ## 7. Impact
 
 - **Syntax:** none.
-- **Semantics:** none for any program accepted both before and after.
+- **Semantics:** for a program accepted both before and after, one change, and it is
+  a fix: a compound-head constraint now takes its dictionary from the parameter it
+  names rather than the first argument sharing its head constructor. Where those
+  differ the old choice was a wrong witness, not a second valid reading.
+- **On-disk format:** `.iface` v8→v9. Old interfaces are rejected loudly, so a
+  stale cache fails rather than mis-decoding.
 - **Type system:** one new static restriction, on instance declarations and on
   constructor-headed constraints.
-- **Errors:** two new messages — an ill-kinded head at its own position, naming the
-  class, the head as written and both arities; and an inconsistent class at the
-  class declaration. They replace a call-site message that hard-coded one cause for
-  a condition with several and printed the internal key (`Boxed_main.Tagged`)
-  rather than the instance as written.
+- **Errors:** four new messages, all at the offending declaration — a head at the
+  wrong arity (instance and constraint wordings) and a class disagreeing with itself
+  (between its own methods, or with a superclass). They are normative in spec §"An
+  instance head must leave exactly as many arguments unapplied". They replace a
+  call-site message that hard-coded one cause for a condition with several and
+  printed the internal key (`Boxed_main.Tagged`) rather than the instance as
+  written. The position is the declaration's: `ClassMethodSig` carries no
+  `SourcePos`, so a method-level `where` reports at its enclosing class.
 
 ## 8. Compatibility
 
@@ -276,15 +349,39 @@ without complaint, and the `run` ones are stated per fixture.
 - `tests/conformance/run/dispatch_compound_head_polymorphic_caller.spr` covers a
   polymorphic caller of the compound-head forwarding function. An earlier review
   claimed this aborts; it does not, in either of two variants, so it is a green
-  guard rather than a reproduction. Still wanted: the two-candidate `helper(x: Tagged
-  k Int, y: Tagged j Int) where Boxed (Tagged j)` shape that the argument scan
-  resolves to the wrong parameter.
-- A mechanical sweep asserting all 64 prelude instances are accepted, so the claim
-  is checked rather than eyeballed.
-- A REPL/env-path regression through `compile_source_with_cache`, since a
-  decls-only table would leave the check silently inert there.
-- `classvar_arity` units: class parameter only in a return type; only under a
-  superclass; mentioned at two depths (must reject the class).
+  guard rather than a reproduction.
+- Three `run` fixtures pin what the widened token buys, each a golden stdout that
+  says which parameter's dictionary was used. All three were confirmed red first,
+  and the third was red only *after* the peel came out — it is the regression that
+  found the argument COUNT to be load-bearing, not just the positions:
+  - `dispatch_two_candidates_second_constrained` — `second_only(x: Tagged k Int, y:
+    Tagged j Int) where Boxed (Tagged j)`; printed `false=7`, now `q=7`. Quarantined
+    in `run/XFAIL` for one afternoon; the self-healing gate reported it fixed.
+  - `dispatch_compound_head_two_args` — the same with TWO written arguments, so one
+    token per argument is what rebuilds `Trip r s`; printed the raw pointer
+    `4333309080=9`, now `ok=9`.
+  - `dispatch_compound_head_concrete_arg` — `where Sh (Box String)`, whose argument
+    is no variable, so the token has only its count. Printed `4362308680#3` with the
+    peel removed and no count; now `hi#3`.
+- `tests/stdlib/compiler/test_scheme_roundtrip.spr` pins the widened token through
+  the wire codec — a comma and two colons inside one unquoted atom — and
+  `test_iface_file_roundtrip.spr` pins v8 as rejected, alongside v1–v7.
+- `tests/stdlib/test_instance_head_arity.spr` holds the shapes the rule must ACCEPT:
+  the class variable only in a return type, only under a superclass, and constrained
+  nowhere at all — the last one being why an unconstrained class admits any arity.
+- The 64-instance prelude sweep is mechanical rather than eyeballed, and needs no
+  fixture of its own: `--emit-ir` over `stdlib/compiler/compile_driver.sprout`
+  bundles the prelude and the whole compiler through the check, and every
+  conformance and stdlib test does the same for the prelude. An earlier eyeballed
+  count of this said 58.
+- `tests/stdlib/compiler/test_repl_instance_head_arity.spr` is the env-path
+  regression through `compile_source_with_cache`: a session instance over an
+  IMPORTED class (`Functor`) and over an IMPORTED type (`Result`, arity 2, rejected
+  at 2-where-1-is-wanted). Both rejections were confirmed to carry the arity
+  message rather than failing for an unrelated reason.
+- `classvar_arity` units are the fixtures above: only in a return type and only
+  under a superclass in `tests/stdlib/test_instance_head_arity.spr`, two depths in
+  `type_error/class_var_arity_disagreement`.
 
 ## 10. Risk
 
