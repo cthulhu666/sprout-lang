@@ -1,0 +1,22 @@
+# Two constraints of the same class whose heads differ only in their arguments. The
+# hidden dictionary parameters are keyed by class and outermost constructor, so both
+# get one slot: the caller passes two dictionaries and the body reads one of them
+# twice. Rejected at the declaration rather than compiled into a wrong witness — with
+# a compound head now dispatching on the parameter it names, the two dictionaries
+# genuinely differ and the second key would be read through the first's witness.
+module main
+
+type Tagged k v = Tagged k v
+
+class Boxed t
+  fn label(xs: t Int) -> String
+
+instance Boxed (Tagged k) where ToString k
+  fn label(xs: Tagged k Int) -> String =
+    match xs with
+    | Tagged k v -> to_string(k) ++ "=" ++ to_string(v)
+
+fn both(x: Tagged k Int, y: Tagged j Int) -> String where Boxed (Tagged k), Boxed (Tagged j) =
+  label(x) ++ "|" ++ label(y)
+
+fn main() -> Unit !{IO} = print(both(Tagged(true, 1), Tagged("q", 7)))

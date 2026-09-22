@@ -2941,9 +2941,19 @@ the hidden dictionary is `Boxed` at `Tagged <whatever j is>`, chosen because the
 constraint writes `j` — not because some parameter happens to be headed by `Tagged`.
 Where the two readings differ, only this one is correct: the other supplies a witness
 for a type the constraint does not mention, and the method then interprets one type's
-value through another's dictionary.  When a constraint's arguments are not all fixed
-at a call site the obligation is forwarded rather than guessed, exactly as for a
-variable-headed constraint.
+value through another's dictionary.  An argument the constraint fixes names its
+parameter just as a variable does: `where Sh (Box String)` dispatches on the `Box
+String` parameter even where a `Box Bool` one precedes it.  When a constraint's
+arguments are not all fixed at a call site the obligation is forwarded rather than
+guessed, exactly as for a variable-headed constraint.
+
+**Two constraints of one class must not differ only in their arguments.**  A `where`
+clause may not carry both `Boxed (Tagged k)` and `Boxed (Tagged j)`: one hidden
+dictionary parameter serves each class-and-head-constructor pair, so the two
+obligations would share a slot and the body would read one dictionary for both.  This
+is rejected at the declaration.  Two constraints with the same subject are not
+affected, and neither are two over different head constructors or different classes.
+Lifting the restriction requires widening the dictionary key (see `BACKLOG.md`).
 
 ### `Applicative` class and `mapN` helpers
 

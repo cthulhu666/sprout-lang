@@ -1,6 +1,6 @@
 # Instance head kinds v0
 
-Status: implemented, revision 3.
+Status: implemented, revision 4.
 
 Revision 1 proposed a declaration-site arity check plus a per-class constant peel
 in `unify_type_expr`. The placement survived review; the peel did not. It was
@@ -12,6 +12,10 @@ Revision 2 diagnosed why — three recorders at three depths, §5 — but record
 repair as unavailable, because the constraint token kept a compound head's
 constructor and dropped its arguments. Revision 3 widens that token and is what
 landed. §5 carries the fix; §6 lists the eight steps as built.
+
+Revision 4 is five fixes from an ensemble review of revision 3, each with a
+regression test that was confirmed red first. Two were defects revision 3
+introduced, three were holes it left. §12 lists them.
 
 ## 1. Problem
 
@@ -401,3 +405,64 @@ head, an existential and a devirtualized concrete call.
   head check runs per argument.
 - Kind checking of arbitrary type expressions, which would catch `fn f(x: Int Bool)`.
 - Type-alias instance heads, once they dispatch.
+- Two same-class constraints whose heads differ only in their arguments, which needs
+  the hidden-dictionary key to carry those arguments — see §12.
+
+## 12. Revision 4: what the review found
+
+An ensemble review of revision 3 confirmed five defects. Each fix below has a
+regression test that was run against a revision-3 compiler and seen to fail first.
+
+**Two that revision 3 introduced.**
+
+1. **Same-named classes in one bundle collided.** The class-depth table keyed on the
+   SHORT name, so two modules each declaring `class Held` let the later declaration
+   decide both arities — rejecting one module's well-kinded instances, and silently
+   admitting the other's ill-kinded ones, which is the runtime abort this rule exists
+   to prevent. The table now keys the name exactly as declared, as the sibling
+   `type_arities` already did for types and for the same reason; lookups fall back to
+   the short name for the env path, which has only that. The arity check also gets its
+   own superclass map keyed and named verbatim, since a shortened superclass reference
+   resolves to whichever class won the short key. Test:
+   `tests/stdlib/test_class_name_collision.spr`, with `testsupport/held_class.sprout`.
+
+2. **A fixed compound-head argument was still guessed.** `where Sh (Box String)` says
+   which parameter to dispatch on exactly as `where Sh (Box a)` does, but the
+   canonicalizer recorded a concrete argument as `#any` and the reader then abandoned
+   the whole token, leaving the choice to the scan — which takes the first parameter
+   the head constructor matches. With two such parameters the constraint read one's
+   payload through the other's witness, contradicting the spec paragraph this doc's
+   rule added. A constructor argument now records its own name. Test:
+   `tests/conformance/run/dispatch_compound_head_concrete_arg_two_candidates.spr`.
+
+**Three holes it left.**
+
+3. **Two same-class constraints can share one dictionary slot.** Hidden dictionary
+   parameters are keyed by class plus each argument's outermost constructor, so
+   `where Boxed (Tagged k), Boxed (Tagged j)` is one key for two obligations: the
+   caller passes two dictionaries and the body reads one twice. This miscompiled
+   before the rule too, printing a wrong answer; once a compound head dispatches on
+   the parameter it names the two dictionaries genuinely differ, and the wrong read
+   became a SIGSEGV. `check_indistinct_constraints` now rejects the shape at its
+   declaration. It is a rejection, not a repair: making it work means putting the
+   arguments' identity into that key in all four places that build it — the
+   dictionary-passing key format, deferred above and filed in `BACKLOG.md`. Test:
+   `tests/conformance/type_error/same_class_heads_share_dict_slot.spr`.
+
+4. **A type alias claimed an arity it does not have.** `type_arities` recorded an
+   `AliasDecl`'s own parameter count, which is not its residual arity — `type alias
+   Half a = Tagged a` takes one parameter and leaves one more unapplied — so a valid
+   instance was rejected with a number nobody declared. Alias heads are a §2 non-goal,
+   so the table now records nothing for them and the check skips. Test: the alias case
+   in `tests/stdlib/test_instance_head_arity.spr`.
+
+5. **An instance method's `where` was never checked.** `decl_arity_error` dropped the
+   `List InstanceMethodImpl`, so a head rejected on the class signature compiled clean
+   when restated on the implementation — a hole in exactly the surface §4 note 4 and
+   §6 step 4 claim to cover. Test:
+   `tests/conformance/type_error/instance_method_where_head_arity.spr`.
+
+One further finding was reported and refuted: `merge_class_depths` appending imported
+depths into the entry `class_own_part` reads. The merge is real, but no live entry
+point feeds imported `@class:` markers in as env schemes — every one bundles imports
+as decls, and the callers that would are marked RETIRED and unbuilt.
