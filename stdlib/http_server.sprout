@@ -1089,18 +1089,19 @@ fn pooled_accept_loop(ch: Chan TcpConnection, listener: consuming TcpListener, r
           close_listener(listener)
           accept_fatal(err)
 
-# The channel is threaded as a PARAMETER rather than bound with `ch <- chan_new(scope, depth)`.
-# That is not a style choice: a do-bind of a container holding a linear payload is rejected by the
-# known over-strict edge at BACKLOG:1059, so the bind form does not compile. Do not "simplify" this
-# into a bind until that edge is fixed.
-#
 # The listener arrives as an ALREADY-BOUND argument rather than being created in the body, and that
 # ordering is load-bearing: `spawn_pool` runs first, so binding inside the body would leave the
 # socket unbound across every worker spawn, and a client connecting in that window is refused. The
 # unpooled `serve_n_with` gets this for free by passing `listen_local(port)` as an argument, where
 # strict evaluation binds it before the loop begins; the pooled path has to do it deliberately.
-fn pooled_run(scope: Scope, ch: Chan TcpConnection, config: ServerConfig, listener: consuming TcpListener, workers: Int, remaining: Int, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
+#
+# The CHANNEL has no such constraint and is bound here, next to its only uses: nothing observes it
+# before `spawn_pool`. `Chan a` stores an Int handle and not an `a`, so binding one carries no
+# consume obligation even at `Chan TcpConnection` — spec §5.8, "Containment reads the declaration,
+# not the type application".
+fn pooled_run(scope: Scope, config: ServerConfig, listener: consuming TcpListener, workers: Int, queue_depth: Int, remaining: Int, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
   do
+    ch <- chan_new(scope, queue_depth)
     spawn_pool(scope, ch, config, handler, workers)
     pooled_accept_loop(ch, listener, remaining)
 
@@ -1113,10 +1114,10 @@ export fn serve_pooled(port: Int, handler: HttpRequest -> HttpServerResponse !{I
 
 # `serve_pooled` with explicit budgets, worker count and queue depth.
 export fn serve_pooled_with(config: ServerConfig, port: Int, workers: Int, queue_depth: Int, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
-  with_scope(\s -> pooled_run(s, chan_new(s, queue_depth), config, listen_local(port), workers, -1, handler))
+  with_scope(\s -> pooled_run(s, config, listen_local(port), workers, queue_depth, -1, handler))
 
 # Bounded counterpart, for tests and bounded runs: serves exactly `max_connections` and returns.
 # `max_connections` counts connections ACCEPTED, not fully served; the scope join waits for the
 # workers, which the channel close releases.
 export fn serve_pooled_n_with(config: ServerConfig, port: Int, workers: Int, queue_depth: Int, max_connections: Int, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
-  with_scope(\s -> pooled_run(s, chan_new(s, queue_depth), config, listen_local(port), workers, max_connections, handler))
+  with_scope(\s -> pooled_run(s, config, listen_local(port), workers, queue_depth, max_connections, handler))

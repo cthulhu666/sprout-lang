@@ -406,6 +406,14 @@ program in the corpus had the shape that breaks. That is the durable lesson: a g
 the change by what the corpus happens to contain, and for a checking change the corpus is exactly
 what a reviewer should be asked to distrust.
 
+**The workaround it retires (2026-09-22).** `stdlib/http_server.sprout` and
+`bench/http_worker_pool/pool_server.sprout` threaded the channel as a parameter because
+`ch <- chan_new(scope, depth)` did not compile, and said so in a comment telling readers not to
+"simplify" it. Both now bind it next to its uses. What is left of the old edge is a diagnostic
+split, not a rejection: an effect bind of a container that genuinely *stores* its parameter is
+still tracked as the payload, so leaking one names the payload where a parameter would name the
+container. `BACKLOG.md` carries that as `P3`.
+
 **What this does and does not settle.** The obligation now lands where the value actually
 materialises: `chan_recv(ch)` returns a `Recv a`, whose declaration *does* store its parameter, so
 the binder receiving it is tracked while the channel handle is not. `pool_worker` compiles

@@ -1626,14 +1626,14 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   plus formatter and TypeExpr-codec work — and mixing a parser change into a type-system change is
   what Collaboration Rule 2 warns against. Purely additive; it reuses M4.6's `types.Ownership`.
   Fixture: `tests/conformance/type_error/borrow_fn_as_value`.
-- [ ] `P2` **The over-strict effect-bind fallback now has a concrete consumer.** `x <- e` where
-  `e : Container Linear !{IO}` types `x` as the payload, so a non-linear container of a linear is
-  conservatively rejected — which forces `ch <- chan_new(s, cap)` to be written as a threaded
-  parameter in `bench/http_worker_pool/pool_server.sprout`. Verified that this, **not** linearity
-  propagating from a type argument, is the whole obstacle: `Chan Res` used twice as a parameter
-  typechecks, `List Res` twice typechecks, and `borrowing Holder Res` is rejected as "only allowed
-  on a parameter of a linear type". Fixing the fallback removes a real shape constraint from stdlib
-  code.
+- [ ] `P3` **The effect-bind fallback still types `x <- e` as the payload.** `do_bind_type` cannot
+  see the monad kind, so for `e : Container Linear !{IO}` it strips a type argument and tracks the
+  payload rather than the container. The shape that made this `P2` is gone: a phantom position is no
+  longer stripped, so `ch <- chan_new(s, cap)` compiles and `http_server`/`pool_server` are written
+  that way. What is left is a diagnostic split between binder forms — leaking `b <- mk()` at
+  `Box Res` reports "linear value 'b' is never used", while the same value as a parameter reports
+  "its type `Box Res` contains the linear type `Res`". Same accept/reject answer, worse message.
+  Fixing it needs the post-pass to tell a monadic bind from an effectful one.
 - [~] `P3` **Containment virality — binder half LANDED (parameters included); type half open.**
   Decision (Kuba): **Option 1** — containment decides which *bindings* carry the obligation, while
   linearity stays per-declaration as a property of *types*, so a record containing a linear field is

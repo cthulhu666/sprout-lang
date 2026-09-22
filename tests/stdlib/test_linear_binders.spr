@@ -174,6 +174,21 @@ fn phantom_dobind_dropped(n: Int) -> Int !{IO} =
     h <- make_handle_io(n)
     n
 
+# `read_handle` reads the Int a `Handle` really stores; the `File` in its type sits
+# at the phantom position.
+fn read_handle(h: Handle File) -> Int =
+  match h with
+  | Handle k -> k
+
+# The shape `stdlib.http_server`'s `pooled_run` is written in: a phantom container
+# bound with `<-` and then used MORE THAN ONCE — once to spawn the workers, once
+# to feed them. An obligation on `h` would report "used more than once" here, so
+# this is what makes the bind form writable rather than merely legal.
+fn phantom_dobind_used_twice(n: Int) -> Int !{IO} =
+  do
+    h <- make_handle_io(n)
+    read_handle(h) + read_handle(h)
+
 # A comprehension BUILDING linear elements. The synthesized fold's accumulator is
 # `List File` on every step; searching it rejected this and named the generator,
 # which binds an Int.
@@ -207,6 +222,7 @@ fn main() -> Unit !{IO} =
     check_eq("a phantom nested one level deeper stays tracked", boxed_phantom_tracked(17), 17),
     check_eq("a concretely-instantiated phantom let is dropped", phantom_let_concrete(18), 18),
     check_eq("a phantom container bound with `<-` is dropped", phantom_dobind_dropped(19), 19),
+    check_eq("a phantom container bound with `<-`, used twice", phantom_dobind_used_twice(22), 44),
     check_eq("a comprehension may build linear elements", comprehension_builds_linears(20), 23),
     check_eq("a record's phantom marker precedes its user", record_phantom_before_decl(Slot(id = 21)), 1)
   ])
