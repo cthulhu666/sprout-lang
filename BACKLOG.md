@@ -233,6 +233,17 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   contradicted itself. `import demo.dup_one as d` then `d.hidden_helper()` therefore gets the bare
   error. Fix: hand the bundler's per-module alias map down to inference, and key the search on it
   instead of on the last segment. Pinned by `test_unresolved_name_hint.spr`'s renamed-alias case.
+- [ ] `P2` **`--package-root` takes exactly one root, so a two-package app cannot be built.**
+  An app importing its OWN modules and a library's has no second root to name. First hit by
+  `repbit` (`app.*` plus `sprout-postgres`'s `postgres.*`); it symlinks the dependency into its own
+  root — resolves correctly, but puts a build dependency in the source tree. **The plumbing is
+  already there:** `extra_roots: List String` threads driver → `bundler` → `module_loader`. Only
+  two places are single-root: `main`'s arg pattern (a literal `"--package-root", dir` pair), and
+  `try_extra_roots`, which matches `[root | _]` and drops the tail. **The real work is the
+  existence check** — it returns `root ++ "/" ++ path` unconditionally, so first-match-wins has
+  nothing to fall through ON, and a wrong root still resolves silently. A name two roots both
+  provide should be reported, not picked. Stopgap ahead of `docs/packaging-v0.md`.
+
 - [ ] `P2` **Move `stdlib.compiler` to a dedicated tooling/compiler namespace** once the non-stdlib
   tooling-package model is settled.
 - [ ] `P3` **Reconsider the prelude-bundling default (polarity + trigger).** The prelude is bundled
