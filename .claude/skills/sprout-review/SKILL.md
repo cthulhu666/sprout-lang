@@ -1,6 +1,7 @@
 ---
 name: sprout-review
-description: Review the current diff for real bugs, as `/code-review` does, and record the run in the branch's review ledger so the status line can report how many reviews this PR has had. Invoke when the user asks for a code review of the working tree, the branch, or a PR.
+description: Review the current diff, or a PR number/branch/path target, for real bugs at a chosen effort level, as `/code-review` does, and record the run in the branch's review ledger so the status line can report how many reviews this PR has had. Invoke when the user asks for a code review of the working tree, the branch, or a PR.
+argument-hint: "[low|medium|high|xhigh|max] [<pr#>|<branch>|<path>]"
 ---
 
 # sprout-review
@@ -8,8 +9,9 @@ description: Review the current diff for real bugs, as `/code-review` does, and 
 An ensemble diff review that **records that it ran**: N independent passes, dedup, one adversarial
 verify pass, and a ledger row plus a findings file on disk either side of it.
 
-It costs at most **N + 1 agents**, known before the run. Default `N = 3`, so four — or three, when
-nothing clears the verify gate and the skeptic is skipped.
+It costs at most **N + 1 agents**, known before the run — four at the default level, or three when
+nothing clears the verify gate and the skeptic is skipped. The effort level moves `N`; §Arguments
+has the table.
 
 Two things follow from that and govern the procedure below. The run is **owned** — the row is
 opened before reviewing and closed after, so the count is exact by construction rather than
@@ -21,9 +23,58 @@ Repo-specific review dimensions (GC rooting, seed staleness, idiomatic Sprout) a
 Why any of this exists, what was measured to get here, and what is still open: `README.md` and
 `BACKLOG.md` beside this file.
 
+## Arguments
+
+```
+/sprout-review [low|medium|high|xhigh|max] [<pr#>|<branch>|<path>]
+```
+
+This invocation's arguments, verbatim (empty when none were given): `$ARGUMENTS`
+
+**The level.** The first token, if it names a level. `med` abbreviates `medium`, as in
+`/code-review`. Everything after it is the review target; with no level, everything is the target.
+
+A first token that *looks* like a level but is not one — `higher`, `mid`, `maximum` — is an error:
+**say so and stop**, rather than reviewing at the default or treating it as a branch name. Both
+silent readings are worse than the question, because the run is about to be recorded as having
+happened at a level nobody chose. `/code-review` makes the same distinction.
+
+**The default is `high`.** Not the session effort: a review's job is to be comparable to the last
+one on the same branch, and a level that drifts with whatever `/effort` happens to be set to makes
+`review:3` mean three different things. `high` is also what this skill already did (`N = 3`).
+
+**What the level moves — two dials, and only two:**
+
+| level | N passes | reviewer effort | agents (max) |
+|---|---|---|---|
+| `low` | 1 | `low` | 2 |
+| `medium` | 2 | `medium` | 3 |
+| **`high`** (default) | **3** | `high` | **4** |
+| `xhigh` | 5 | `xhigh` | 6 |
+| `max` | 8 | `max` | 9 |
+
+These five rows are a cost ladder, not a measurement — the same caveat `README.md` already records
+for `N = 3`, now multiplied by five. `BACKLOG.md` owns closing that.
+
+**What the level does NOT move**, deliberately: `VERIFY_CAP`, `LINE_WINDOW`, `OVERLAP_MIN` and the
+verify gate. Those are calibration constants with an open `BACKLOG.md` entry to measure them, and a
+constant that varies with a flag cannot be calibrated. One consequence is worth stating plainly:
+at `xhigh` and `max` the cap binds hard — 8 passes at up to 8 findings each is 64 raw against a cap
+of 10 — so most findings come back **unverified rather than unchecked-and-presented-as-checked**.
+The fix for that is more skeptics (the judge-panel entry in `BACKLOG.md`), not a bigger cap.
+
+**The target.** A PR number, branch name or path, passed through to the reviewers, which review it
+instead of the working diff. The reviewer prompt has always described this; until the arguments
+were parsed, nothing could ever pass one.
+
 ## Procedure
 
-**1. Open the ledger row.** Before any review work:
+**1. Resolve the level and target** from the arguments quoted above, per §Arguments. Do this first:
+a bad level must fail before a ledger row exists, or an abandoned run leaves a `start` row behind
+for a review that was never attempted. Tell the user the level and the agent count before spending
+them.
+
+**2. Open the ledger row.** Before any review work:
 
 ```
 bash "$(git rev-parse --show-toplevel)/scripts/review_ledger.sh" open
@@ -36,16 +87,26 @@ from "never reviewed", which is the one thing this skill exists to report.
 Keep the run id it prints. If this fails, say so and continue — a review that cannot be recorded is
 still worth doing, but do not silently skip the recording.
 
-**2. Run the review.** Call the `Workflow` tool with the script below. The skill's instructions
-telling you to call it are the user's opt-in, so no further confirmation is needed.
+**3. Run the review.** Call the `Workflow` tool with the script below **verbatim**, passing the
+resolved level and target as `args`:
 
-Use `N = 3` reviewers by default, or the number the user named. It is a dial: raise it if the
-review finds less than the built-in does on the same diff. Three is a cost choice with no
-measurement behind it — see `BACKLOG.md`. Note that `votes` does not measure how many *passes*
-agreed: dedup pools every pass's findings before clustering, so one pass reporting the same bug
-at two nearby lines produces a 2-vote cluster on its own.
+```
+args: { "effort": "<level>", "target": "<target, or empty>" }
+```
 
-**3. Write the findings to disk** before reporting them, at the path the ledger names:
+The skill's instructions telling you to call it are the user's opt-in, so no further confirmation
+is needed.
+
+The level travels as data, not as an edit to the script. The script holds the level→N table, so it
+is the one place `N` is decided and an unrecognised level cannot silently produce a broken one;
+hand-substituting three values into two hundred lines could. Editing the script also breaks
+`resumeFromRunId`, which caches on the exact `(prompt, opts)` pair.
+
+Note that `votes` does not measure how many *passes* agreed: dedup pools every pass's findings
+before clustering, so one pass reporting the same bug at two nearby lines produces a 2-vote cluster
+on its own.
+
+**4. Write the findings to disk** before reporting them, at the path the ledger names:
 
 ```
 bash "$(git rev-parse --show-toplevel)/scripts/review_ledger.sh" findings <run-id>
@@ -56,17 +117,23 @@ votes and scenario. This is the step that makes the next one checkable. Findings
 inside a chat message cannot be pointed at afterwards, which is the same failure the ledger exists
 to fix, one level down: a count without a list says a review happened but not what it said.
 
-**4. Close the ledger row** with the counts the workflow returned:
+**5. Close the ledger row** with the counts the workflow returned, and the level it ran at:
 
 ```
-bash "$(git rev-parse --show-toplevel)/scripts/review_ledger.sh" done <run-id> <found> <confirmed>
+bash "$(git rev-parse --show-toplevel)/scripts/review_ledger.sh" done <run-id> <found> <confirmed> <level>
 ```
 
 `found` is the deduplicated finding count before verification; `confirmed` is how many survived it.
+For `<level>` use the workflow's returned `effort`, not the token the user typed and not what you
+resolved in step 1 — the three differ precisely when something went wrong, and the returned one is
+the level the passes actually ran at. The ledger stores only the known vocabulary, so a level it
+does not recognise is dropped silently rather than corrupting the row: nothing downstream will
+complain about a wrong one.
+
 Close the row even when the count is zero — a review that found nothing still happened, and a
 missing row reads as "never reviewed".
 
-**5. Report the findings and STOP.** Most severe first, with the unverified ones marked as such and
+**6. Report the findings and STOP.** Most severe first, with the unverified ones marked as such and
 the refuted ones listed briefly. Then hand the decision over and wait.
 
 Do not fix anything in this turn, and do not commit, amend or push. The temptation is strong when a
@@ -78,7 +145,7 @@ pushed), which is why it is written here as a rule rather than left to judgement
 
 ## The workflow script
 
-Pass this to `Workflow` as `script`, substituting `N`:
+Pass this to `Workflow` as `script`, unmodified. Everything variable arrives through `args`.
 
 ```js
 export const meta = {
@@ -90,7 +157,25 @@ export const meta = {
   ],
 }
 
-const N = 3
+// The effort ladder, and the only place N is decided. An unrecognised level
+// falls back to the default rather than to `undefined` passes — the caller
+// should have rejected it already, but a review that silently runs zero passes
+// and closes a ledger row is the worst available failure.
+const LADDER = { low: 1, medium: 2, high: 3, xhigh: 5, max: 8 }
+const EFFORT = (args && LADDER[args.effort]) ? args.effort : 'high'
+const N = LADDER[EFFORT]
+const TARGET = (args && typeof args.target === 'string') ? args.target.trim() : ''
+if (!args || !LADDER[args.effort]) log(`no usable effort in args — defaulting to ${EFFORT}`)
+
+// The skeptic never drops below medium, however cheap the reviewers are. It is
+// prompted to default to refuted=true when unsure, so lowering its effort makes
+// it cheaper at KILLING real findings — the one direction in which saving
+// tokens costs correctness rather than coverage.
+const VERIFY_EFFORT = (EFFORT === 'low') ? 'medium' : EFFORT
+
+// Deliberately NOT a function of EFFORT: this is what one skeptic can hold at
+// once, which does not grow because more reviewers ran. At xhigh and max it
+// binds hard and the excess is reported unverified. See BACKLOG.md.
 const VERIFY_CAP = 10
 
 const FINDINGS = {
@@ -133,16 +218,24 @@ const VERDICTS = {
   required: ['verdicts'],
 }
 
+// The scope paragraph. The original said "if a target was passed as an argument,
+// review that instead" while nothing could ever pass one — a branch that read as
+// supported and was unreachable. The target now arrives in `args`, so the two
+// cases are separate prompts and neither mentions the other's.
+const SCOPE = TARGET ? `You are reviewing \`${TARGET}\` for real bugs. Resolve it as a PR number, a
+branch name, or a file path — in that order — and get the unified diff it names
+(\`gh pr diff <n>\`, \`git diff <branch>...HEAD\`, or the file's current contents).
+Treat that, and nothing else, as the review scope.` : `You are reviewing a pull request for real bugs. Run \`git diff @{upstream}...HEAD\` (or \`git diff main...HEAD\` / \`git diff HEAD~1\`
+if there's no upstream) to get the unified diff under review. If there are
+uncommitted changes, or the range diff is empty, also run \`git diff HEAD\` and
+include the working-tree changes in scope — the review often runs before the
+commit. Treat this diff as the review scope.`
+
 // The built-in reviewer's prompt, with two changes: findings come back through
 // the schema instead of ReportFindings, which was not available to the
 // original's agents in practice, and the last paragraph bounds the search —
 // exploration is where a pass spends its tokens.
-const REVIEWER = `You are reviewing a pull request for real bugs. Run \`git diff @{upstream}...HEAD\` (or \`git diff main...HEAD\` / \`git diff HEAD~1\`
-if there's no upstream) to get the unified diff under review. If there are
-uncommitted changes, or the range diff is empty, also run \`git diff HEAD\` and
-include the working-tree changes in scope — the review often runs before the
-commit. If a PR number, branch name, or file path was passed as an argument,
-review that target instead. Treat this diff as the review scope.
+const REVIEWER = `${SCOPE}
 
 Review the diff as a careful senior engineer would: read every hunk, open the surrounding files for context as needed (Read, Grep, git log/blame/show), and hunt for correctness issues — wrong or inverted conditions, off-by-one, null/undefined dereference, missing \`await\`, dropped error handling, removed guards or validations, broken callers of changed functions, races. Prefer real failure modes over style; every finding needs a concrete scenario in which the code misbehaves.
 
@@ -151,9 +244,13 @@ Report at most 8 findings. Quality over quantity: include everything you genuine
 Stay inside the diff and what it touches. Read the changed hunks, the files they are in, and the callers of anything whose signature or behaviour changed. That is the budget — do not survey the repository, re-read a file you have already read, or go looking for pre-existing bugs the diff did not introduce.`
 
 phase('Review')
+log(`${EFFORT}: ${N} pass(es) at ${EFFORT} effort, verify at ${VERIFY_EFFORT}` +
+    (TARGET ? `, target ${TARGET}` : ''))
 const passes = await parallel(
   Array.from({ length: N }, (_, i) => () =>
-    agent(REVIEWER, { label: `review:${i + 1}`, phase: 'Review', schema: FINDINGS })))
+    agent(REVIEWER, {
+      label: `review:${i + 1}`, phase: 'Review', schema: FINDINGS, effort: EFFORT,
+    })))
 
 // A barrier is right here: dedup needs every pass at once, and verifying one
 // bug once per pass that found it costs N times as much for one answer.
@@ -259,7 +356,8 @@ Judge each on its own evidence — they come from different reviewers and one be
 says nothing about the next. Return exactly one verdict per finding, keyed by its [index].
 
 ${listed}`,
-  { label: `verify:${toVerify.length}`, phase: 'Verify', schema: VERDICTS })
+  { label: `verify:${toVerify.length}`, phase: 'Verify', schema: VERDICTS,
+    effort: VERIFY_EFFORT })
 
 // The join is on a number the model chose, so it is checked before it is
 // trusted. Omission is survivable — those findings go back unverified. A
@@ -289,6 +387,12 @@ const unanswered = judged.filter(f => !f.verdict)
 
 const confirmed = judged.filter(f => f.verdict && !f.verdict.refuted)
 return {
+  // Returned so step 5 records the level the run ACTUALLY used, not the one the
+  // caller meant to send — they differ exactly when the args were malformed,
+  // which is the case where a wrong ledger row would be least noticed.
+  effort: EFFORT,
+  passes: N,
+  target: TARGET || null,
   found: deduped.length,
   confirmed: confirmed.length,
   findings: confirmed.sort(byVotes),
@@ -320,5 +424,12 @@ return {
 - **The cap evicts by severity, the report sorts by votes.** Two different questions — what is most
   worth checking, and what is most worth reading first. Using one comparator for both is how a lone
   `high` ended up evicted in favour of ten corroborated `low`s.
+- **Say the level in the report**, next to the counts. "3 findings" from one `low` pass and from
+  eight `max` ones are different claims about the diff, and only one of them is worth trusting when
+  it says nothing was found. The ledger records it for the same reason.
+- **A level is a cost ladder, not a quality ladder.** `max` buys more passes and more reasoning per
+  pass; it does not widen the verify cap, and nothing has measured what the extra passes find.
+  Do not describe a `max` run as "thorough" — describe it as eight passes.
 - The ledger lives at `$GIT_DIR/claude-review/runs.tsv` — per-worktree, invisible to `git status`,
-  append-only so two concurrent sessions cannot clobber each other. See `scripts/review_ledger.sh`.
+  append-only so two concurrent sessions cannot clobber each other, and eight columns wide since
+  the level joined it (older seven-field rows still parse). See `scripts/review_ledger.sh`.

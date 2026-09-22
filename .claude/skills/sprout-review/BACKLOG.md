@@ -15,18 +15,20 @@ Rationale and measurements live in `README.md`; the skill itself is `SKILL.md`.
   design defect, not a tuning question — and if a single careful agent matches three plus a verify
   pass, the ensemble is not worth its cost and should go.
 
-- [ ] `P1` **`N = 3` reviewers is a cost choice, not a measured one.** Nobody has checked what a
-  4th or an 8th pass adds; 8 was itself picked against a premise that turned out false, and 3 is
-  purely a cost choice. Depends on the A/B above: with a baseline
-  in hand, sweep N and count *distinct confirmed* findings per agent spent, then write the number
-  and its date into `README.md` so the dial stops looking arbitrary.
+- [ ] `P1` **The whole effort ladder is a cost choice, not a measured one.** `low|medium|high|xhigh
+  |max` buy 1/2/3/5/8 passes, and nobody has checked what the 4th or the 8th adds — the one
+  unmeasured number this entry used to name is now five of them. Depends on the A/B above: with a
+  baseline in hand, sweep N and count *distinct confirmed* findings per agent spent, then write
+  the numbers and their date into `README.md` so the ladder stops looking invented. Until then the
+  levels are honestly describable only as pass counts, never as "thorough".
 
 - [ ] `P2` **One skeptic now judges every finding, so a prejudice carries across all of them.**
   Verify is a single agent holding the whole list — cheaper than one refuter each, and the shared
   context is why, but a bad call no longer costs one finding. The documented adversarial pattern is
   N independent skeptics with a majority rule, the perspective-diverse variant giving each a lens
-  (correctness, security, does-it-repro). A 3-judge panel over the batched list is `N + 3`, still
-  under the old cost. Do it after the A/B, so its effect is visible against a baseline.
+  (correctness, security, does-it-repro). A 3-judge panel over the batched list is `N + 3` — under
+  the old cost at the default level, though not at `max`, where the panel would also be what makes
+  the verify cap survivable. Do it after the A/B, so its effect is visible against a baseline.
 
 - [ ] `P2` **Every threshold in the verify path rests on one run or on nothing.**
   `SKILL.md` verifies a finding only when `severity !== 'low' || votes >= 2`, clusters within 6
@@ -34,7 +36,9 @@ Rationale and measurements live in `README.md`; the skill itself is `SKILL.md`.
   from run `1789385000-27845` alone: 5 adjacent pairs scoring 0.60/0.67/0.67 against 0.33/0.29 — a
   wide gap, but n=5 is not a calibration set, and run `1789928144-93446` is evidence they
   UNDER-merge: 13 raw findings deduped to 12, yet three of those twelve were pairs naming one bug.
-  The cap comes from nothing; 3 passes x 8 findings is 24 raw, so it can bind. Re-measure.
+  The cap comes from nothing and now binds far harder: `max` is 8 passes x 8 findings = 64 raw
+  against a cap of 10, so most of a `max` run comes back unverified. Re-measure, and note that the
+  fix is more skeptics (the entry below), not a cap that grows to hide the overrun.
 
 - [ ] `P2` **Sprout-specific review dimensions are absent, which was the point of owning this.**
   A generic reviewer cannot know GC rooting rules for `stdlib/compiler/` and `runtime/`, that a

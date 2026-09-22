@@ -79,8 +79,9 @@ The first version cost `N + D` agents at `N = 8` — eight reviewers, then one v
 that cleared the severity/votes cap. D is only known at runtime, so the bill was not knowable
 before the run and reached the mid-teens.
 
-It is now **at most `N + 1`**, at `N = 3`: four agents, or three when nothing clears the verify gate
-and the skeptic is skipped. Three changes got there, and only the first is a pure reduction:
+It is now **at most `N + 1`**, at a default `N = 3`: four agents, or three when nothing clears the
+verify gate and the skeptic is skipped. Three changes got there, and only the first is a pure
+reduction:
 
 | change | why |
 |---|---|
@@ -105,6 +106,33 @@ None of this is measured against finding quality. The agent counts are exact by 
 four agents find relative to fifteen is unknown, and is the A/B in `BACKLOG.md`. If the cut costs
 real findings, `N` is the dial and the per-finding verifier is in git.
 
+## Why the level is a dial the user turns
+
+`N` was always a dial; until 2026-09-22 only the file could turn it, by being edited. `/code-review`
+takes an effort level as its first argument, so this takes the same one, with the same vocabulary
+(`low|medium|high|xhigh|max`, `med` abbreviating `medium`) and the same refusal to guess at a token
+that looks like a level and is not.
+
+Two decisions in it are worth recording, because both had a plausible alternative.
+
+**The default is `high`, not the session effort.** `${CLAUDE_EFFORT}` is substituted into a skill
+body, so inheriting was available and is what `/code-review` does when nothing was ever typed. It
+was rejected because it breaks the one thing this skill is for: `review:3` on a branch has to mean
+something, and it means less if each of those three ran at whatever `/effort` happened to be set to
+that afternoon. A fixed default makes the runs comparable, and `high` is what the skill already did.
+
+**The level moves `N` and the per-agent reasoning effort, and nothing else.** The thresholds it
+does *not* move — `VERIFY_CAP`, `LINE_WINDOW`, `OVERLAP_MIN`, the verify gate — are calibration
+constants that `BACKLOG.md` already has an open entry to measure. A constant that varies with a
+flag cannot be calibrated, so making them level-dependent would have quietly closed off the
+measurement. The visible cost is that `xhigh` and `max` overrun the verify cap and report most
+findings unverified; that is the honest reading of "eight passes and one skeptic", and the fix is
+the judge panel in `BACKLOG.md`, not a cap that grows to hide it.
+
+The ladder — 1/2/3/5/8 passes — is a cost ladder with no measurement behind it, exactly as `N = 3`
+was. It is now five unmeasured numbers instead of one, which makes the A/B below more valuable
+rather than less.
+
 **`votes` is not agreement between passes.** Dedup pools every pass's findings before clustering,
 so the count is how many times a bug was reported, not by how many reviewers. One pass naming the
 same bug at two nearby lines scores 2. Nothing downstream depends on the distinction — the verify
@@ -127,11 +155,18 @@ review read as `16 found 6 real`. `scripts/test_review_ledger.sh` pins both halv
 **A `start` row is not a review.** An opened-but-unclosed run shows `rv:0`. Beginning a review is
 not having had one.
 
+**The level is an eighth column, appended.** `rv:3` cannot tell three `low` reviews from three
+`max` ones, which is the question a reader asks next. It could be appended because every reader —
+`count`, `show`, and the status line's own inline `awk` — selects columns by number and stops at
+`$7`, so rows written before it exists still parse. `show` reports the *latest* completed run's
+level (`review:2 9 found 3 real @max`): averaging levels across runs answers nothing, and "how
+hard was the last look" is the question worth answering.
+
 ## Reading it
 
 ```sh
 bash scripts/review_ledger.sh count          # completed runs on this branch
-bash scripts/review_ledger.sh show           # "review:2 9 found 3 real"
+bash scripts/review_ledger.sh show           # "review:2 9 found 3 real @max"
 bash scripts/review_ledger.sh findings <id>  # path to that run's findings
 just test-review-ledger                      # the suite, also in ci-fast-gates
 ```
