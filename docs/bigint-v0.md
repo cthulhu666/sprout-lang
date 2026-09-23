@@ -469,7 +469,11 @@ Three points where the implementation settled something this section had only sk
 - **`to_bytes_be` answers `Maybe Bytes`**, not `Bytes`. A negative value has no unsigned
   big-endian encoding and a value wider than the requested width has no truncation that is not a
   silent lie, so both are `Nothing` — `docs/guidelines.md` #2. Callers already know their width
-  (32 for P-256), so the `Maybe` costs one `let..else`.
+  (32 for P-256), so the `Maybe` costs one `let..else`. A width **above 6,653 bytes** is
+  `Nothing` too: that is the 2047-limb ceiling expressed in bytes, the same bound `mul` refuses
+  past, so a wider field is already outside the range the module serves. Without an upper bound
+  the function was not total at all — it walked `0..width` for any width a caller passed, and
+  answered neither `Just` nor `Nothing` (see §9 Stage 2, review of PR #344).
 - **`cmp` answers `Int`**, because Sprout's `Ord` is `fn compare(left, right) -> Int`
   (`stdlib/prelude.sprout`) and the language has no `Ordering` ADT. `cmp` and `compare` are the
   same function.
@@ -621,6 +625,24 @@ Division costs **22x** the multiply, and that ratio is not algorithmic — the t
 (`runtime/sprout_runtime.c:vector_get`), and each intermediate magnitude is built as a `List`,
 reversed, converted and trimmed. A divmod at this width does roughly 1,100 heap allocations.
 
+**Two defects the ensemble review of PR #344 confirmed, both in `to_bytes_be`, both fixed
+before merge.** They are one defect seen from two sides. `bytes.builder_append` copies *both*
+operands' chunk arrays, so building the result by appending one byte at a time cost O(width²)
+pointer copies; and nothing bounded `width` from above, so the walk had no stopping point a
+caller could not exceed. Together they took **5.7 s and 6.7 GB of resident memory at width
+80,000** — for an 80 kB answer — and a **SIGTERM at width 200,000**, where the call returned
+neither `Just` nor `Nothing`. (The review reported 4.74 s and 13.7 GB for the same call; the
+figures here are re-measured on this branch against a pre-fix build of the module.) The fix is both halves: the byte range is
+built by halving rather than folding, which is O(width log width), and `width` above
+`byte_ceiling()` is `Nothing`. Measured after: **776 µs** at the ceiling width of 6,653 bytes,
+against **24.7 ms** for the removed left fold at that same width — 32x, and the gap widens
+quadratically above it. At P-256 width the call is 3.3 µs and neither shape was ever visible.
+
+The lesson is the one worth carrying into Stage 4: **this module was written and measured at
+P-256 width, and nothing examined its cost above that.** The allocation cost recorded above is a
+constant factor at ten limbs; it says nothing about asymptotics. Four more findings from the same
+review are unverified low-severity growth claims of exactly this shape, filed in `BACKLOG.md`.
+
 The consequence for Stage 4 is concrete: at ~6,000 field multiplications per verify, a
 `BigInt`-based P-256 verification lands near **200 ms**, not the "several times 15 ms" §9's Stage 4
 note projected. That does not change the plan — the escalation path there is unchanged and still
@@ -684,7 +706,7 @@ Rule 1 (`Maybe` for documented domain errors) and overflow (panics).
 
 **Stage 2.** Two suites, and they answer different questions.
 
-`tests/stdlib/test_bigint.spr` — 82 hand-written cases pinning the named edges: both i64
+`tests/stdlib/test_bigint.spr` — 89 hand-written cases pinning the named edges: both i64
 boundaries through `from_int`/`to_int` (INT_MIN is the one `from_int` cannot reach by negating),
 the four sign combinations of truncated `divmod`, normalisation (zero, negated zero, subtraction
 to zero, structural equality across construction paths), and the rendering edge a chunked decimal
@@ -702,6 +724,14 @@ Both were needed. The hand-written suite passed on its first run against a fresh
 which is evidence about the tests, not about the code: Knuth D's failure modes sit in the
 quotient-digit correction, and hand-picked cases do not reach it. The vendored vectors are a
 25-seed, 8,240-check sweep narrowed to one reproducible seed.
+
+Seven of the 89 are the regression tests for the `to_bytes_be` defects above, and they are worth
+naming because a cost bug does not usually have a test. Two are pure assertions — width 6,653 is
+accepted, width 6,654 is `Nothing` — and they fail cleanly on the unfixed code rather than
+hanging. One asks for width 200,000 and requires an *answer*, which on the unfixed code took the
+whole suite down with a SIGTERM before it printed a line. The other four pin big-endian byte order
+at an ODD width, where the halving split is uneven. Three of them read the bytes out by index
+rather than round-tripping, so a mis-split is located rather than merely detected.
 
 **Stage 3.** `mod_inv` against known inverses, including the non-coprime `Nothing` case; `mod_pow`
 against known vectors; Fermat cross-check (`mod_pow(a, p-1, p) == 1` for prime `p`).
