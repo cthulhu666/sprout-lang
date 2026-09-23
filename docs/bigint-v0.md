@@ -1,8 +1,8 @@
 # Arbitrary-precision integers (v0)
 
-Status: **normative. Stages 1 and 2 landed; Stages 3 and 4 open.** `Int` traps on overflow and
-`stdlib/math/bigint.sprout` exists; `stdlib/math/modular.sprout` and `stdlib/crypto/p256.sprout`
-do not yet.
+Status: **normative. Stages 1-3 landed; Stage 4 open.** `Int` traps on overflow,
+`stdlib/math/bigint.sprout` and `stdlib/math/modular.sprout` exist;
+`stdlib/crypto/p256.sprout` does not yet.
 
 Companion decision: `docs/int-overflow-policy-decision.md` (settled as Option A by this design).
 Driving requirement: GitHub issue #337, ECDSA P-256 (ES256) signature verification.
@@ -488,14 +488,41 @@ Three points where the implementation settled something this section had only sk
 
 ```sprout
 # stdlib/math/modular.sprout
-mod_add, mod_sub, mod_mul : BigInt -> BigInt -> BigInt -> BigInt   # modulus last
-mod_pow : BigInt -> BigInt -> BigInt -> BigInt
-mod_inv : BigInt -> BigInt -> Maybe BigInt                          # Nothing when not coprime
+wrap Modulus = BigInt                             # abstract: positive by construction
+modulus       : BigInt -> Maybe Modulus           # Nothing when <= 0
+modulus_value : Modulus -> BigInt
+reduce        : BigInt -> Modulus -> BigInt       # Euclidean, always in [0, m)
+mod_add, mod_sub, mod_mul : BigInt -> BigInt -> Modulus -> BigInt   # modulus last
+mod_pow : BigInt -> BigInt -> Modulus -> Maybe BigInt   # Nothing on a negative exponent
+mod_inv : BigInt -> Modulus -> Maybe BigInt             # Nothing when not coprime
 ```
 
 Modulus-last follows `docs/guidelines.md` #6, data-last argument order, so partial application
 against a fixed modulus reads naturally. This layer plus `from_bytes_be`, `cmp` and `test_bit` is
 the entire surface P-256 consumes.
+
+**The modulus is a type, not a `BigInt`, and that was a decision.** This section originally gave
+`mod_add` the total signature `BigInt -> BigInt -> BigInt -> BigInt`, which is not implementable:
+a zero or negative modulus has no answer, and `docs/guidelines.md` #2 makes "the stdlib must not
+export a partial function" a hard mandate for library code. Three shapes were on the table —
+
+- **`Maybe` on every operation.** Honest, and it needs no new type. It also makes Stage 4's point
+  arithmetic unwrap a `Maybe` at every field multiply — dozens of sites that can never fail, each
+  needing an `else` arm with nothing sensible to put in it.
+- **Panic on a bad modulus.** Keeps the sketch's signatures, and has repo precedent
+  (`stdlib.bits` panics on a negative shift count; `range_count` panics). Deviates from #2.
+- **An abstract `wrap` with a smart constructor** — chosen. `docs/guidelines.md` #7 documents
+  exactly this pattern ("a wrap can hide its constructor, so it can carry an invariant"), and #4
+  is the principle: parse at the boundary, once, and let interior code consume a type that cannot
+  be wrong. P-256 pays it twice, once per curve constant.
+
+`mod_pow` still answers `Maybe`, for the one failure the `Modulus` type cannot absorb: a negative
+exponent is an inverse that may not exist. That matches `stdlib.math.int.pow`, which is `Nothing`
+on a negative exponent for the same reason — Rule 1 of `docs/math-partiality-v0.md`.
+
+Residues are **Euclidean** — in `[0, m)` even for a negative input. `bigint.divmod` is truncated,
+so its remainder carries the dividend's sign; `reduce` is the single place that is corrected, and
+every entry point goes through it.
 
 ### 5.7 Module placement
 
@@ -651,11 +678,17 @@ upstream of this module and is filed in `BACKLOG.md`: an unboxed read for immuta
 the runtime already has as `vector_get_direct` but which only `stdlib.mutable` declares, and only
 as `!{IO}`.
 
-### Stage 3 — `stdlib/math/modular.sprout`
+### Stage 3 — `stdlib/math/modular.sprout` (landed)
 
-§5.6. `mod_pow` by square-and-multiply; `mod_inv` by the extended Euclidean algorithm. Neither is
-constant-time, and the module header must say so plainly next to the name of the one caller for
-which that is acceptable.
+§5.6. `mod_pow` by square-and-multiply, least-significant bit first; `mod_inv` by the extended
+Euclidean algorithm, carrying only the one Bézout coefficient it needs rather than both. Neither
+is constant-time, and the module header says so plainly next to the name of the one caller for
+which that is acceptable — and next to the three for which it is not (signing, key generation,
+ECDH, where every input is secret).
+
+`mod_add` and `mod_sub` finish with a conditional add or subtract rather than a second division:
+both operands are already in `[0, m)`, so the sum is below `2m` and the difference above `-m`.
+Only `mod_mul` pays a full `divmod`.
 
 ### Stage 4 — `stdlib/crypto/p256.sprout`
 
@@ -733,8 +766,16 @@ whole suite down with a SIGTERM before it printed a line. The other four pin big
 at an ODD width, where the halving split is uneven. Three of them read the bytes out by index
 rather than round-tripping, so a mis-split is located rather than merely detected.
 
-**Stage 3.** `mod_inv` against known inverses, including the non-coprime `Nothing` case; `mod_pow`
-against known vectors; Fermat cross-check (`mod_pow(a, p-1, p) == 1` for prime `p`).
+**Stage 3.** `tests/stdlib/test_modular.spr` — 38 cases, run against the two moduli Stage 4 will
+actually use (the P-256 field prime and group order) rather than toy values: `mod_inv` against
+known inverses including the non-coprime, zero and multiple-of-the-modulus `Nothing` cases;
+`mod_pow` against known vectors; the Fermat cross-check (`mod_pow(a, p-1, p) == 1` for prime `p`),
+which is worth more than the vector beside it because it does not depend on a transcribed answer
+being right; and the same for `mod_inv`, checked as `a * a⁻¹ == 1` rather than by its digits.
+
+`tests/stdlib/test_modular_vectors.spr` — 120 generated checks, `scripts/gen_modular_vectors.py`,
+same vendoring rule as Stage 2. The moduli there are arbitrary positives, NOT primes, deliberately:
+a suite of prime moduli never reaches `mod_inv`'s non-coprime arm.
 
 **Stage 4.** All **484** vectors of Wycheproof's `ecdsa_secp256r1_sha256_test.json`, which covers
 exactly the adversarial cases #337 requires: `r=0` and `s=0`, BER-encoded signature envelopes,

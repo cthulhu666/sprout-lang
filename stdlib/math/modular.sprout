@@ -1,0 +1,114 @@
+module stdlib.math.modular
+
+import stdlib.math.bigint as bigint
+
+# Modular arithmetic over `BigInt`. Design: docs/bigint-v0.md §5.6. Import qualified:
+#
+#   import stdlib.math.modular as modular
+#   let Just p = modular.modulus(prime) else ...
+#   in  modular.mod_mul(x, y, p)
+#
+# NOT CONSTANT-TIME, and nothing here will be. `mod_pow` is square-and-multiply, so
+# its work depends on the exponent's bit pattern; `mod_inv` is the extended Euclidean
+# algorithm, whose iteration count depends on its argument. The one caller for which
+# that is acceptable is ECDSA *verification* (`stdlib.crypto.p256`), which touches
+# only public inputs — a message, a signature and a public key. Do NOT reach for this
+# module for signing, key generation, or ECDH: every input there is secret, and a
+# timing side channel on a secret scalar is the whole attack.
+#
+# THE MODULUS IS VALIDATED ONCE, at the `modulus` boundary, and is positive by
+# construction thereafter. That is what lets `mod_add`, `mod_sub` and `mod_mul` be
+# total — a zero or negative modulus has no answer, and the alternative was a `Maybe`
+# at every field operation in caller code that can never fail. `docs/guidelines.md`
+# #3 and #4: make illegal states unrepresentable, and parse rather than validate.
+#
+# Residues are EUCLIDEAN — always in [0, modulus), including for a negative input.
+# `bigint.divmod` is truncated, so its remainder takes the dividend's sign; `reduce`
+# is where that is corrected, and every entry point below goes through it.
+
+# Positive by construction. The constructor is hidden, so `modulus` is the only way
+# in and no caller can present a zero.
+export wrap Modulus = bigint.BigInt
+
+export fn modulus(value: bigint.BigInt) -> Maybe Modulus =
+  if bigint.is_zero(value) || bigint.is_negative(value) then Nothing
+  else Just(Modulus(value))
+
+export fn modulus_value(m: Modulus) -> bigint.BigInt =
+  match m with
+  | Modulus value -> value
+
+fn zero() -> bigint.BigInt = bigint.from_int(0)
+
+fn one() -> bigint.BigInt = bigint.from_int(1)
+
+# The one unreachable arm in this module: `Modulus` is positive, so `divmod` cannot
+# answer `Nothing`. It panics rather than inventing a residue, per docs/guidelines.md
+# #2 — an unreachable arm must surface an error, not silent garbage.
+fn truncated_remainder(value: bigint.BigInt, m: bigint.BigInt) -> bigint.BigInt =
+  match bigint.divmod(value, m) with
+  | Just ((_, remainder)) -> remainder
+  | Nothing -> panic("modular: a Modulus was zero (internal error)")
+
+export fn reduce(value: bigint.BigInt, m: Modulus) -> bigint.BigInt =
+  let limit = modulus_value(m)
+      remainder = truncated_remainder(value, limit)
+  in if bigint.is_negative(remainder) then bigint.add(remainder, limit)
+     else remainder
+
+# Both operands are already in [0, m), so the sum is below 2m and one conditional
+# subtraction finishes it — cheaper than a second division.
+export fn mod_add(left: bigint.BigInt, right: bigint.BigInt, m: Modulus) -> bigint.BigInt =
+  let limit = modulus_value(m)
+      sum = bigint.add(reduce(left, m), reduce(right, m))
+  in if bigint.cmp(sum, limit) >= 0 then bigint.sub(sum, limit)
+     else sum
+
+export fn mod_sub(left: bigint.BigInt, right: bigint.BigInt, m: Modulus) -> bigint.BigInt =
+  let difference = bigint.sub(reduce(left, m), reduce(right, m))
+  in if bigint.is_negative(difference) then bigint.add(difference, modulus_value(m))
+     else difference
+
+export fn mod_mul(left: bigint.BigInt, right: bigint.BigInt, m: Modulus) -> bigint.BigInt =
+  reduce(bigint.mul(reduce(left, m), reduce(right, m)), m)
+
+# Square-and-multiply, least-significant bit first. `bigint.test_bit` reads the
+# magnitude, which is what is wanted here: the exponent is known non-negative.
+fn pow_loop(square: bigint.BigInt, exponent: bigint.BigInt, m: Modulus, index: Int,
+            total: Int, acc: bigint.BigInt) -> bigint.BigInt =
+  if index == total then acc
+  else
+    let next = if bigint.test_bit(exponent, index) then mod_mul(acc, square, m)
+               else acc
+    # The final squaring is skipped: at the top bit nothing consumes it.
+    in if index + 1 == total then next
+       else pow_loop(mod_mul(square, square, m), exponent, m, index + 1, total, next)
+
+# `Nothing` on a negative exponent, matching `stdlib.math.int.pow` — Rule 1 of
+# docs/math-partiality-v0.md. A negative exponent is an inverse that may not exist,
+# and conflating "no inverse" with "bad argument" would lose which one happened.
+export fn mod_pow(base: bigint.BigInt, exponent: bigint.BigInt,
+                  m: Modulus) -> Maybe bigint.BigInt =
+  if bigint.is_negative(exponent) then Nothing
+  else
+    Just(pow_loop(reduce(base, m), exponent, m, 0, bigint.bit_length(exponent),
+                  reduce(one(), m)))
+
+# Extended Euclid. Answers (gcd(left, right), x) with `left * x + right * y == gcd`
+# for some y this does not compute — only x is wanted, and dropping y halves the work.
+# Both remainders stay non-negative, so truncated division is floored division here.
+fn egcd(old_r: bigint.BigInt, r: bigint.BigInt, old_x: bigint.BigInt,
+        x: bigint.BigInt) -> (bigint.BigInt, bigint.BigInt) =
+  if bigint.is_zero(r) then (old_r, old_x)
+  else
+    match bigint.divmod(old_r, r) with
+    | Nothing -> panic("modular.egcd: a zero divisor passed the is_zero test (internal error)")
+    | Just ((quotient, remainder)) ->
+        egcd(r, remainder, x, bigint.sub(old_x, bigint.mul(quotient, x)))
+
+# `Nothing` when the argument is not coprime with the modulus — which includes zero,
+# and any multiple of the modulus, since both reduce to a gcd above one.
+export fn mod_inv(value: bigint.BigInt, m: Modulus) -> Maybe bigint.BigInt =
+  let (divisor, coefficient) = egcd(reduce(value, m), modulus_value(m), one(), zero())
+  in if bigint.cmp(divisor, one()) == 0 then Just(reduce(coefficient, m))
+     else Nothing
