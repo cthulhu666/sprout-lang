@@ -2438,3 +2438,10 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   substitution silently works for ADTs and breaks for records. Three sites hit this; the invariant
   is "resolve constraint/dispatch argument types via `apply_subst(s3, …)`, not `typed_expr_type`
   alone", and a written rule stops the next one at review time.
+- [ ] `P3` **Every stdlib `panic` renders as "runtime error: builtin `X`", naming Sprout code as a
+  builtin.** `tcp_fail` (`runtime/sprout_runtime.c:5628`) splits the message on its first colon and
+  labels the left half a builtin. The `name: detail` shape is the stdlib convention
+  (`mutmatrix_at:`, `dce.is_pure_expr:`, `http_server:`, `range_count:`), so every one of them lies
+  about where the failure came from, and a user grepping for a builtin of that name finds nothing.
+  The fix is to stop inferring "builtin" from punctuation — either a distinct entry point for
+  Sprout-level panics, or drop the word. Runtime-only; no Sprout source needs to change.

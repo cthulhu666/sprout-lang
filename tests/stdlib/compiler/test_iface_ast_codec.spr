@@ -132,6 +132,18 @@ fn main() -> Unit !{IO} =
     assert_true(state, "IntExpr negative roundtrip",
       rt_expr(ast.IntExpr(-7, pos1())))
 
+    # The boundary values, which no round-trip covered before. Stage 1 (§5.3) is
+    # what makes `-9223372036854775808` writable, so the encoder now emits the
+    # atom `-9223372036854775808` and the decoder must read it back. With
+    # the atom's magnitude accumulating positively this did not return Nothing —
+    # it ABORTED the process with "Int overflow in +", killing the compiler on
+    # its own output. See iface_codec.parse_neg_magnitude.
+    assert_true(state, "IntExpr INT_MAX roundtrip",
+      rt_expr(ast.IntExpr(9223372036854775807, pos0())))
+
+    assert_true(state, "IntExpr INT_MIN roundtrip",
+      rt_expr(ast.IntExpr(-9223372036854775808, pos1())))
+
     assert_true(state, "BoolExpr true roundtrip",
       rt_expr(ast.BoolExpr(true, pos0())))
 

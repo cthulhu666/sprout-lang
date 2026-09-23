@@ -1,0 +1,22 @@
+module main
+
+# `range_count` on a range whose element count exceeds Int. `range_up(0, INT_MAX)`
+# holds 2^63 elements, and 2^63 has no Int representation, so no return value is
+# correct and the call must panic.
+#
+# What this fixture gates is the MESSAGE, not the panic. Before the fix the
+# unrepresentable case surfaced as "Int overflow in +" pointing inside
+# prelude.sprout — the reader learns that prelude arithmetic overflowed, not that
+# they asked an exported query for a count that does not exist. §5.2's wrap audit
+# enumerated the IntRange walkers and cleared them (correctly: each is guarded by
+# `range_at_end` before any `current + step`) but never looked at `range_count`,
+# which has no such guard.
+#
+# `hi` is derived from argv so neither the Sprout compiler nor clang can fold the
+# call away: `list_length(args)` is 0 with no argv, so `hi` is INT_MAX at runtime
+# while staying opaque to constant folding.
+fn main() -> Unit !{IO} =
+  do
+    args <- argv_all()
+    let hi = 9223372036854775807 - list_length(args)
+    print(int_to_string(range_count(range_up(0, hi))))

@@ -21,6 +21,13 @@ fn is_nothing(m: Maybe Double) -> Bool =
   | Nothing -> true
   | Just _ -> false
 
+# Relative tolerance, for targets far outside the range where a fixed `eps` means
+# anything: at 1e20 the gap between adjacent Doubles is already ~16384.
+fn approx_rel(m: Maybe Double, target: Double, rel: Double) -> Bool =
+  match m with
+  | Nothing -> false
+  | Just x -> abs_d(x - target) <= rel * abs_d(target)
+
 # Built by arithmetic, not by parsing: -1.0 * 0.0 is -0.0 under IEEE 754, so this reference
 # is independent of both parse_double and the unary-minus lowering it is used to check.
 fn neg_zero() -> Double = (0.0 - 1.0) * 0.0
@@ -84,6 +91,23 @@ fn main() -> Unit !{IO} =
     check_true("positive zero stays positive", has_bits_of(parse_double("0.0"), 0.0)),
     check_true("a negative value is still negative",
                has_bits_of(parse_double("-2.5"), 0.0 - 2.5)),
+
+    # --- a digit run longer than Int can hold is still a valid Double ---
+    # A mantissa's digits are a Double's digits. Routing them through `parse_int`
+    # made the run's LENGTH the limit rather than the value's magnitude, so these
+    # returned Nothing once `parse_int` stopped wrapping (bigint-v0 Stage 1) —
+    # rejecting values Double represents exactly. Every target below is built from
+    # runs of at most 19 digits, so the targets themselves never take this path.
+    check_true("20-digit integer part",
+               approx_rel(parse_double("12345678901234567890"),
+                          1234567890123456789.0 * 10.0, 0.000001)),
+    check_true("25-digit fraction",
+               approx_rel(parse_double("0.1234567890123456789012345"),
+                          0.1234567890123456789, 0.000001)),
+    check_true("21-digit integer part with a fraction",
+               approx_rel(parse_double("100000000000000000000.5"), pow_ten(20), 0.000001)),
+    check_true("a long run is still rejected when it is not all digits",
+               is_nothing(parse_double("1234567890123456789012x"))),
 
     # --- malformed input returns Nothing, never crashes ---
     check_true("empty -> Nothing", is_nothing(parse_double(""))),

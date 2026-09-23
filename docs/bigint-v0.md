@@ -354,7 +354,9 @@ whose magnitude, `2^63`, does not itself fit in `[0, 2^63-1]`. A naive check rej
 
 **DECIDED: special-case it.** The range check applies to the value *after* a directly-applied
 unary minus: the admissible range is `[-2^63, 2^63-1]` for a decimal literal that is the
-immediate operand of unary `-` — no space, no parentheses, directly the next token — and
+immediate operand of unary `-` — no parentheses, and the next TOKEN, so intervening
+whitespace or a line break is invisible to the rule, as in Rust and Java (verified by
+compiling `- 9223372036854775808` under rustc 1.75 and javac 25) — and
 `[0, 2^63-1]` everywhere else. `-9223372036854775808` stays valid; `-(9223372036854775808)` does
 not, same as the bare positive form, because the carve-out is syntactic, not semantic.
 `0x8000000000000000` remains an equally valid spelling of the same value.

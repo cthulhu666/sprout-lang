@@ -123,9 +123,10 @@ export fn range_end(value: IntRange) -> Int =
 #
 # Honouring an arbitrary step would be worse than either. `range_at_end` stops on
 # exact equality with the end bound, so a step larger than 1 can step OVER the end
-# without ever matching it — and near MAX_INT that addition wraps negative, leaving
-# `range_past_end` false forever. Every walker seeing only +1 or -1 is precisely the
-# condition under which that guard is sound.
+# without ever matching it — and near MAX_INT that addition now traps (it wrapped
+# negative before bigint-v0 Stage 1, leaving `range_past_end` false forever). Every
+# walker seeing only +1 or -1 is precisely the condition under which that guard is
+# sound: it stops on the last element, before the increment that would overflow.
 export fn range_step(value: IntRange) -> Int =
   match value with
   | IntRange _ _ step -> if step < 0 then -1 else 1
@@ -157,12 +158,29 @@ export fn range_contains(value: IntRange, target: Int) -> Bool =
   else
     target <= range_start(value) && target >= range_end(value)
 
+# Counts up to 2^63 elements but must answer in an Int, so the widest ranges have
+# no representable count: `range_up(0, MAX_INT)` holds 2^63 of them. The walkers
+# above are safe because `range_at_end` stops them before the overflowing
+# increment; this one has no such guard and needs its own.
+#
+# Panicking is the only honest answer — there is no count to return — so what this
+# buys is the DIAGNOSTIC. Left to the arithmetic it read "Int overflow in +"
+# pointing inside the prelude, which tells the caller that prelude arithmetic
+# overflowed rather than that they asked for a count that does not exist.
 export fn range_count(value: IntRange) -> Int =
   if range_is_empty(value) then 0
   else if range_step(value) > 0 then
-    (range_end(value) - range_start(value)) + 1
+    count_span(range_start(value), range_end(value))
   else
-    (range_start(value) - range_end(value)) + 1
+    count_span(range_end(value), range_start(value))
+
+# `(hi - lo) + 1` for lo <= hi. `hi - lo` overflows only when lo is negative, and
+# the count is representable exactly when `hi <= (MAX_INT + lo) - 1` — evaluated
+# only under `lo <= 0`, where `MAX_INT + lo` cannot itself overflow.
+fn count_span(lo: Int, hi: Int) -> Int =
+  if (lo <= 0) && (hi > (9223372036854775807 + lo) - 1) then
+    panic("range_count: the range holds more elements than Int can count")
+  else (hi - lo) + 1
 
 fn range_to_list_go(current: Int, end_value: Int, step: Int) -> List Int =
   if range_past_end(current, end_value, step) then Nil
@@ -1687,8 +1705,8 @@ fn argv_collect(i: Int) -> List String !{IO} =
 # W8/P1 (D5): total signed-decimal integer parse. Returns Nothing for anything
 # that is not `-?[0-9]+` (previously the C `strtoll` extern silently returned 0
 # for junk). Pure Sprout — the digit value comes from `==` against char literals
-# (no per-digit String allocation). Overflow wraps at i64 (documented v0 Int
-# behavior; overflow *rejection* is the separate W9/X4 work).  # O(n)
+# (no per-digit String allocation). A digit run outside Int answers Nothing; it
+# used to wrap, and bigint-v0 Stage 1 §5.1 closed that.  # O(n)
 fn digit_value(c: Char) -> Int =
   if c == '0' then 0
   else if c == '1' then 1
@@ -1746,8 +1764,9 @@ export fn parse_int(s: String) -> Maybe Int =
       if c == '-' then accum_digits(s, 1, 0, false)
       else positive_from_neg_magnitude(accum_digits(s, 0, 0, false))
 
-# 10^k as a Double for any k (k < 0 divides). Places the fraction and applies a
-# scientific-notation exponent in parse_double.
+# 10^k as a Double for any k (k < 0 divides). Applies a scientific-notation
+# exponent in parse_double. The fraction places itself, digit by digit, in
+# frac_double_go — see the note there on why it cannot use this.
 fn pow10_pos(k: Int) -> Double = if k <= 0 then 1.0 else 10.0 * pow10_pos(k - 1)
 fn pow10(k: Int) -> Double = if k < 0 then 1.0 / pow10_pos(0 - k) else pow10_pos(k)
 
@@ -1760,13 +1779,46 @@ fn split_on_char(s: String, sep: String) -> Maybe (String, String) =
      else Just((str_slice(s, 0, i), str_slice(s, i + str_len(sep), str_len(s))))
 
 # A run of decimal digits as a non-negative Double; empty string -> 0.0 (so an absent int or
-# fraction part reads as zero). Nothing on any non-digit. Leading zeros are preserved by the
-# caller passing the substring's length to pow10.
+# fraction part reads as zero). Nothing on any non-digit.
+#
+# Accumulates in Double, NOT through parse_int. These are a Double's digits, so the
+# limit is the value's magnitude, not the run's length: "0.1234567890123456789012345"
+# is an ordinary Double with 25 fraction digits, and routing it through an Int made
+# the 20th digit the failure point. While parse_int wrapped, that was invisible (a
+# silently wrong mantissa); once it became total (bigint-v0 Stage 1) the same shape
+# started REJECTING valid JSON numbers, since stdlib.json sends every non-integer
+# token here.
+#
+# Precision loss past ~17 significant digits is inherent to Double. A run long
+# enough to exceed Double range yields infinity, which is what the exponent path
+# has always done for `1e400` — so the two routes to an out-of-range value agree.
+fn digits_double_go(s: String, i: Int, acc: Double) -> Maybe Double =
+  match str_char_at(s, i) with
+  | Nothing -> Just(acc)
+  | Just c ->
+      let d = digit_value(c)
+      in if d < 0 then Nothing else digits_double_go(s, i + 1, (acc * 10.0) + to_double(d))
+
 fn digits_double(s: String) -> Maybe Double =
-  if str_len(s) <= 0 then Just(0.0)
-  else match parse_int(s) with
-       | Nothing -> Nothing
-       | Just n -> if n < 0 then Nothing else Just(to_double(n))
+  if str_len(s) <= 0 then Just(0.0) else digits_double_go(s, 0, 0.0)
+
+# The fraction run as a Double in [0, 1); empty -> 0.0. Each digit is placed by its
+# own scale rather than accumulated whole and divided by 10^n at the end. Two things
+# break under the old shape once the run may be long: for ~309 digits both the
+# accumulated value and 10^n are infinity, and inf/inf is NaN; and truncating the run
+# to Double's ~17 significant digits would flush 0.<300 zeros>1 to zero, when it is
+# perfectly representable. `scale` underflowing to 0.0 is harmless — every later digit
+# then contributes 0.0, which is the correct contribution.
+fn frac_double_go(s: String, i: Int, scale: Double, acc: Double) -> Maybe Double =
+  match str_char_at(s, i) with
+  | Nothing -> Just(acc)
+  | Just c ->
+      let d = digit_value(c)
+          next = scale / 10.0
+      in if d < 0 then Nothing
+         else frac_double_go(s, i + 1, next, acc + (to_double(d) * next))
+
+fn frac_double(s: String) -> Maybe Double = frac_double_go(s, 0, 1.0, 0.0)
 
 # Non-negative mantissa "int[.frac]" -> Double. `int` or `frac` may be empty (".5", "5.");
 # a lone "." is rejected.
@@ -1775,8 +1827,8 @@ fn parse_mantissa(mant: String) -> Maybe Double =
   | Nothing -> if str_len(mant) <= 0 then Nothing else digits_double(mant)
   | Just (ip, fp) ->
       if (str_len(ip) <= 0) && (str_len(fp) <= 0) then Nothing
-      else match (digits_double(ip), digits_double(fp)) with
-           | (Just iv, Just fv) -> Just(iv + (fv / pow10(str_len(fp))))
+      else match (digits_double(ip), frac_double(fp)) with
+           | (Just iv, Just fv) -> Just(iv + fv)
            | _ -> Nothing
 
 # An exponent's digits, with the optional sign it is allowed to carry: `-` or an explicit `+`

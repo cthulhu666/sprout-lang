@@ -117,10 +117,11 @@ fn main() -> Unit !{IO} =
     # element instead, before the overflowing increment. These two cases HANG
     # rather than fail if that guard is removed, which is the point of them.
 
-    # Written this way because the lexer cannot represent the INT_MIN literal
-    # (see the note on `int_is_min`, prelude.sprout:46). The stdlib has no
-    # exported bound constants — `stdlib/math.sprout:595` keeps a private
-    # `min_int()` of exactly this shape — which is filed in BACKLOG.
+    # Built by arithmetic rather than written as `-9223372036854775808`, which
+    # bigint-v0 Stage 1 §5.3 does now make a valid literal: these bounds gate
+    # range behaviour, so they must not also depend on the literal-range rule.
+    # The stdlib still exports no bound constants — `stdlib/math.sprout` keeps a
+    # private `min_int()` of exactly this shape — which is filed in BACKLOG.
     let int_max = 9223372036854775807
     let int_min = 0 - int_max - 1
 
@@ -134,5 +135,17 @@ fn main() -> Unit !{IO} =
 
     assert_eq(state, "a descending range ending at MIN_INT terminates",
       range_count(range_down(int_min + 2, int_min)), 3)
+
+    # --- the widest range range_count can still answer for ----------------
+    # The count is `(hi - lo) + 1`, so it is representable up to MAX_INT and the
+    # boundary sits one element BELOW the widest range — `range_up(0, int_max)`
+    # holds 2^63 elements and has no Int count at all (gated separately by
+    # tests/overflow_smoke/range_count_span.spr, which pins the diagnostic).
+    # Both cases below cross zero, which is the only way `hi - lo` can overflow.
+    assert_eq(state, "the largest representable count, counting up from 0",
+      range_count(range_up(0, int_max - 1)), int_max)
+
+    assert_eq(state, "the largest representable count, starting at MIN_INT",
+      range_count(range_up(int_min, -2)), int_max)
 
     summary(state)
