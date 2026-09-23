@@ -401,9 +401,17 @@ export fn add(left: BigInt, right: BigInt) -> BigInt =
 export fn sub(left: BigInt, right: BigInt) -> BigInt =
   add(left, negate(right))
 
+# The largest `bit_length` at which `mul` is guaranteed not to panic. `mul` refuses
+# only when BOTH operands are above the ceiling, so one operand this wide is always
+# safe; a caller that cannot bound the smaller operand should test against this.
+# Exported because the bound belongs to this module but is a precondition for
+# callers — `stdlib.math.modular` needs it to keep its own `Modulus` honest, and
+# hardcoding 53,222 there would be a copy of a constant that lives here.
+export fn mul_bit_ceiling() -> Int = limb_ceiling() * limb_bits()
+
 # Panics above the 2047-limb ceiling rather than letting a column sum leave i64 —
-# see the radix invariant in the header. That is roughly 53,000 bits per operand,
-# so nothing this library was written for can reach it.
+# see the radix invariant in the header. That is `mul_bit_ceiling()` bits per
+# operand, so nothing this library was written for can reach it.
 export fn mul(left: BigInt, right: BigInt) -> BigInt =
   if lesser(vec_length(mag_of(left)), vec_length(mag_of(right))) > limb_ceiling() then
     panic("bigint.mul: both operands exceed the 2047-limb schoolbook ceiling")

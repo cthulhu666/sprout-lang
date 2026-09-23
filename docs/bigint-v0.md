@@ -448,6 +448,7 @@ is_zero, is_negative : BigInt -> Bool
 bit_length    : BigInt -> Int
 test_bit      : BigInt -> Int -> Bool
 shl, shr      : BigInt -> Int -> BigInt
+mul_bit_ceiling : Int                                # widest bit_length `mul` never panics on
 ```
 
 Instances: `Eq` (derived), `Ord` and `ToString` (hand-written). No `Numeric` instance until N1
@@ -488,14 +489,26 @@ Three points where the implementation settled something this section had only sk
 
 ```sprout
 # stdlib/math/modular.sprout
-wrap Modulus = BigInt                             # abstract: positive by construction
-modulus       : BigInt -> Maybe Modulus           # Nothing when <= 0
+wrap Modulus = BigInt                             # abstract: positive, and narrow enough to multiply
+modulus       : BigInt -> Maybe Modulus           # Nothing when <= 0 or past mul_bit_ceiling()
 modulus_value : Modulus -> BigInt
 reduce        : BigInt -> Modulus -> BigInt       # Euclidean, always in [0, m)
 mod_add, mod_sub, mod_mul : BigInt -> BigInt -> Modulus -> BigInt   # modulus last
 mod_pow : BigInt -> BigInt -> Modulus -> Maybe BigInt   # Nothing on a negative exponent
 mod_inv : BigInt -> Modulus -> Maybe BigInt             # Nothing when not coprime
 ```
+
+**The `Modulus` invariant is two conditions, not one**, and the second was missed on the first
+attempt — recorded here because the omission is the interesting part. A zero or negative modulus
+has no residues. A modulus above `bigint.mul_bit_ceiling()` (~53,222 bits) makes `mod_mul` panic:
+it multiplies two reduced operands, both of which inherit the modulus's width, and `bigint.mul`
+refuses above its schoolbook ceiling. Validating only the sign moved the partiality from the call
+site into the constructor rather than removing it, which defeats the §5.6 argument entirely —
+guidelines #2 is the reason the type exists, so a type that carries half the precondition is worse
+than an honest `Maybe` on every operation. `mul_bit_ceiling` is exported from `stdlib.math.bigint`
+for this: the constant belongs to the module that enforces it, and copying 53,222 into the modular
+layer would be a second place to forget. Found by the second `high` ensemble review of PR #345,
+reproduced as a process abort, and fixed before merge.
 
 Modulus-last follows `docs/guidelines.md` #6, data-last argument order, so partial application
 against a fixed modulus reads naturally. This layer plus `from_bytes_be`, `cmp` and `test_bit` is
@@ -686,9 +699,16 @@ is constant-time, and the module header says so plainly next to the name of the 
 which that is acceptable — and next to the three for which it is not (signing, key generation,
 ECDH, where every input is secret).
 
-`mod_add` and `mod_sub` finish with a conditional add or subtract rather than a second division:
-both operands are already in `[0, m)`, so the sum is below `2m` and the difference above `-m`.
-Only `mod_mul` pays a full `divmod`.
+`mod_add` and `mod_sub` finish with a conditional add or subtract rather than a division: once
+reduced, both operands are in `[0, m)`, so the sum is below `2m` and the difference above `-m`.
+
+That is a claim about the *tail*, not about the call. Both reduce their arguments first, and a
+`reduce` is a full Knuth division unless the argument is already in range, where it hits
+`divmod`'s `cmp_mag` fast path instead. So `mod_add` on two unreduced arguments pays **two**
+divisions where `reduce(bigint.add(left, right), m)` would pay one — the shape is a win only for
+callers that keep their values reduced, which is Stage 4 and is not enforced by the signature.
+`tests/stdlib/test_modular_vectors.spr` deliberately passes unreduced values, so the suite
+exercises the slower path.
 
 ### Stage 4 — `stdlib/crypto/p256.sprout`
 

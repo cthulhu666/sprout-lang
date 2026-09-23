@@ -16,22 +16,34 @@ import stdlib.math.bigint as bigint
 # module for signing, key generation, or ECDH: every input there is secret, and a
 # timing side channel on a secret scalar is the whole attack.
 #
-# THE MODULUS IS VALIDATED ONCE, at the `modulus` boundary, and is positive by
-# construction thereafter. That is what lets `mod_add`, `mod_sub` and `mod_mul` be
-# total — a zero or negative modulus has no answer, and the alternative was a `Maybe`
-# at every field operation in caller code that can never fail. `docs/guidelines.md`
-# #3 and #4: make illegal states unrepresentable, and parse rather than validate.
+# THE MODULUS IS VALIDATED ONCE, at the `modulus` boundary, and every operation below
+# is total for any `Modulus` that exists. That is the whole reason for the type — the
+# alternative was a `Maybe` at every field operation in caller code that can never
+# fail. `docs/guidelines.md` #3 and #4: make illegal states unrepresentable, and parse
+# rather than validate.
+#
+# TWO conditions make that true, and the second is easy to forget because it comes
+# from a layer down. A zero or negative modulus has no residues at all. AND a modulus
+# above `bigint.mul_bit_ceiling()` makes `mod_mul` panic: it multiplies two reduced
+# operands, both of which inherit the modulus's width, and `bigint.mul` refuses above
+# its schoolbook ceiling. `modulus` tests both. Enforcing only the first is what an
+# earlier version did, and it moved the partiality from the call site into the
+# constructor instead of removing it.
 #
 # Residues are EUCLIDEAN — always in [0, modulus), including for a negative input.
 # `bigint.divmod` is truncated, so its remainder takes the dividend's sign; `reduce`
 # is where that is corrected, and every entry point below goes through it.
 
-# Positive by construction. The constructor is hidden, so `modulus` is the only way
-# in and no caller can present a zero.
+# Positive AND narrow enough to multiply, by construction. The constructor is hidden,
+# so `modulus` is the only way in and no caller can present a value failing either.
 export wrap Modulus = bigint.BigInt
 
 export fn modulus(value: bigint.BigInt) -> Maybe Modulus =
   if bigint.is_zero(value) || bigint.is_negative(value) then Nothing
+  # `mod_mul` reduces both operands below this value and multiplies them, so a modulus
+  # wider than `bigint.mul` accepts would panic there. Rejecting it here is what keeps
+  # every operation below total. ~53,000 bits; P-256 uses 256.
+  else if bigint.bit_length(value) > bigint.mul_bit_ceiling() then Nothing
   else Just(Modulus(value))
 
 export fn modulus_value(m: Modulus) -> bigint.BigInt =
@@ -56,8 +68,13 @@ export fn reduce(value: bigint.BigInt, m: Modulus) -> bigint.BigInt =
   in if bigint.is_negative(remainder) then bigint.add(remainder, limit)
      else remainder
 
-# Both operands are already in [0, m), so the sum is below 2m and one conditional
-# subtraction finishes it — cheaper than a second division.
+# Once reduced, both operands are in [0, m), so the sum is below 2m and one conditional
+# subtraction finishes it — no division after the `reduce` calls. Note what that does
+# NOT say: the two `reduce`s are themselves full divisions unless the caller already
+# passed reduced values, in which case each hits `divmod`'s `cmp_mag` fast path. For
+# an unreduced argument this costs MORE than `reduce(bigint.add(left, right), m)`
+# would, not less. Stage 4 keeps its field elements reduced, which is the case the
+# shape is written for.
 export fn mod_add(left: bigint.BigInt, right: bigint.BigInt, m: Modulus) -> bigint.BigInt =
   let limit = modulus_value(m)
       sum = bigint.add(reduce(left, m), reduce(right, m))
@@ -103,11 +120,17 @@ fn egcd(old_r: bigint.BigInt, r: bigint.BigInt, old_x: bigint.BigInt,
   else
     match bigint.divmod(old_r, r) with
     | Nothing -> panic("modular.egcd: a zero divisor passed the is_zero test (internal error)")
+    # The other `bigint.mul` in this module, and it is inside the ceiling for the same
+    # reason `mod_mul` is: the quotient and the Bezout coefficient are both bounded by
+    # the modulus, which `modulus` has already capped at `mul_bit_ceiling()`.
     | Just ((quotient, remainder)) ->
         egcd(r, remainder, x, bigint.sub(old_x, bigint.mul(quotient, x)))
 
-# `Nothing` when the argument is not coprime with the modulus — which includes zero,
-# and any multiple of the modulus, since both reduce to a gcd above one.
+# `Nothing` when the argument is not coprime with the modulus, which for every modulus
+# above 1 includes zero and any multiple of the modulus. A `Modulus` of 1 is the one
+# exception and it is not an error: that ring has a single element, every argument
+# reduces to 0, and 0 is its own inverse — so the answer is `Just(0)`, matching
+# Python's `pow(0, -1, 1)`. `tests/stdlib/test_modular.spr` pins both readings.
 export fn mod_inv(value: bigint.BigInt, m: Modulus) -> Maybe bigint.BigInt =
   let (divisor, coefficient) = egcd(reduce(value, m), modulus_value(m), one(), zero())
   in if bigint.cmp(divisor, one()) == 0 then Just(reduce(coefficient, m))
