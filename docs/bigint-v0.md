@@ -1,7 +1,8 @@
 # Arbitrary-precision integers (v0)
 
-Status: **design, approved in shape 2026-09-22, unimplemented.** Normative once Stage 1 lands;
-until then `docs/spec-v0.md` §6.5 and §8.4 still describe the old behaviour.
+Status: **normative. Stages 1 and 2 landed; Stages 3 and 4 open.** `Int` traps on overflow and
+`stdlib/math/bigint.sprout` exists; `stdlib/math/modular.sprout` and `stdlib/crypto/p256.sprout`
+do not yet.
 
 Companion decision: `docs/int-overflow-policy-decision.md` (settled as Option A by this design).
 Driving requirement: GitHub issue #337, ECDSA P-256 (ES256) signature verification.
@@ -409,9 +410,11 @@ export type BigInt = BigInt Bool (Vec Int)   # sign (true = negative), limbs lit
   multiply-accumulate on a language with no carry flag.
 
   This is the one invariant a later optimisation can silently break, so it is stated in the
-  module header, `mul` rejects operands above the limb ceiling rather than overflowing, and a
-  test pins the boundary. Note the bound is a property of `n`, not of the radix alone: the
-  tempting larger radix 2^30 fails at **nine** limbs, which is exactly P-256 width.
+  module header, `mul` rejects operands above the limb ceiling rather than overflowing, and
+  `tests/overflow_smoke/bigint_mul_ceiling.spr` pins the boundary. Note the bound is a property of
+  the limb COUNT, not of the radix alone: the tempting larger radix 2^30 fails at **nine** limbs,
+  which is exactly P-256 width. As implemented the ceiling is tested against `min(n, m)`, since a
+  column holds at most that many products — so a wide-by-narrow multiply is unrestricted.
 
   P-256 values occupy 10 limbs at this radix (⌈256/26⌉), the same count radix 2^28 would give,
   so the extra headroom costs nothing at the size that motivated the work.
@@ -427,22 +430,55 @@ radix invariant — so `BigInt` is not an exception to §5.1 and needs no wrappi
 
 ### 5.5 API surface (v0)
 
+As shipped by Stage 2:
+
 ```sprout
-from_int, to_int : BigInt -> Maybe Int          # Nothing when out of i64 range
-from_bytes_be, to_bytes_be : Int -> BigInt -> Bytes   # fixed width, for crypto
-from_string : String -> Result ParseError BigInt      # decimal and 0x-prefixed hex
-to_string, to_hex
-add, sub, mul, negate, abs
-divmod : BigInt -> BigInt -> Maybe (BigInt, BigInt)   # Nothing on a zero divisor
-cmp, is_zero, is_negative, bit_length, test_bit, shl, shr
+from_int      : Int -> BigInt
+to_int        : BigInt -> Maybe Int                  # Nothing outside [INT_MIN, INT_MAX]
+from_bytes_be : Bytes -> BigInt                      # unsigned big-endian
+to_bytes_be   : BigInt -> Int -> Maybe Bytes         # fixed width, left-padded
+from_string   : String -> Result ParseError BigInt   # decimal or 0x hex, optional sign
+to_string     : BigInt -> String
+to_hex        : BigInt -> String                     # "0xff" / "-0xff"
+add, sub, mul : BigInt -> BigInt -> BigInt
+negate, abs   : BigInt -> BigInt
+divmod        : BigInt -> BigInt -> Maybe (BigInt, BigInt)   # Nothing on a zero divisor
+cmp           : BigInt -> BigInt -> Int              # -1 / 0 / 1
+is_zero, is_negative : BigInt -> Bool
+bit_length    : BigInt -> Int
+test_bit      : BigInt -> Int -> Bool
+shl, shr      : BigInt -> Int -> BigInt
 ```
 
-Instances: `Eq`, `Ord`, `ToString`. No `Numeric` instance until N1 lands the classes.
+Instances: `Eq` (derived), `Ord` and `ToString` (hand-written). No `Numeric` instance until N1
+lands the classes. `Ord` cannot be derived: it would order `BigInt Bool (Vec Int)`
+lexicographically on (sign, limbs), which is not numeric order.
+
+Receiver-FIRST, not data-last. `docs/guidelines.md` #6 exempts module-qualified modules, and
+`stdlib.math.int` (`clamp(value, lo, hi)`, `pow(base, exp)`) is the module this one sits beside;
+matching it beats matching a convention written for unqualified prelude globals.
 
 `divmod` returns `Maybe` rather than panicking, matching `stdlib.math.int`'s Rule 1
 (`docs/math-partiality-v0.md`): an `Int` out-of-domain argument answers `Maybe`. The tuple is
 returned as a pair because callers that need one almost always need the other, and computing them
-separately doubles the work.
+separately doubles the work. Division is TRUNCATED, matching `Int`'s `/`: the quotient rounds
+toward zero and the remainder takes the dividend's sign, so `q * divisor + r == dividend` holds.
+
+Three points where the implementation settled something this section had only sketched:
+
+- **`to_bytes_be` answers `Maybe Bytes`**, not `Bytes`. A negative value has no unsigned
+  big-endian encoding and a value wider than the requested width has no truncation that is not a
+  silent lie, so both are `Nothing` — `docs/guidelines.md` #2. Callers already know their width
+  (32 for P-256), so the `Maybe` costs one `let..else`.
+- **`cmp` answers `Int`**, because Sprout's `Ord` is `fn compare(left, right) -> Int`
+  (`stdlib/prelude.sprout`) and the language has no `Ordering` ADT. `cmp` and `compare` are the
+  same function.
+- **`bit_length`, `test_bit`, `shl` and `shr` describe the MAGNITUDE.** The sign rides along
+  untouched, so `shr` truncates toward zero rather than flooring and `test_bit` on a negative
+  value asks about `|value|`. This is the honest reading of a sign-magnitude representation and it
+  is uniform across all four, but it is NOT what `java.math.BigInteger` or Python's `int` answer
+  for negative values — both define those operations on an infinite two's-complement pattern. The
+  module header says so at the definition site, because the trap is porting a Java idiom.
 
 ### 5.6 The modular layer
 
@@ -551,11 +587,47 @@ Four stages, four PRs. Each is independently landable and independently revertib
   decided; `BACKLOG.md` entries for the overflow policy and for `INT_MIN / -1` deleted as part of
   landing, per Backlog Discipline.
 
-### Stage 2 — `stdlib/math/bigint.sprout`
+### Stage 2 — `stdlib/math/bigint.sprout` (landed)
 
 §5.4 and §5.5. Schoolbook multiplication only; no Karatsuba, no Barrett, no Montgomery — at
 P-256 widths (nine limbs) schoolbook wins anyway, and an unmeasured asymptotic improvement is the
 wrong thing to carry into a first implementation.
+
+Two implementation choices the design did not anticipate, both forced by the same fact — **there
+is no pure mutable array.** `MutVec` carries `!{IO}` (`stdlib/mutable.sprout`), and this API is
+pure, so every algorithm here had to be written without a mutable accumulator:
+
+- **Multiplication is product scanning (Comba), not operand scanning.** A whole column is summed
+  before anything is carried, which is exactly what the radix invariant was chosen to permit.
+  Operand scanning wants to accumulate into a mutable result; product scanning wants only
+  random READS, which an immutable `Vec` gives.
+- **Division is Knuth 4.3.1 Algorithm D in its bring-down form**, so the running remainder never
+  exceeds n+1 limbs and bringing a limb down is a prepend on a little-endian magnitude. The
+  quotient-digit correction decrements and re-compares instead of doing Knuth's add-back: at these
+  widths it is the same work, and it cannot get the add-back's carry cancellation wrong. Note
+  `vec_prepend` could NOT be used for the bring-down — it is O(n²), because `vector_append` copies
+  its input, so prepending one limb to an n-limb `Vec` costs n copies of a growing vector.
+
+**Measured, Apple Silicon, `-O2`, at P-256 width (10 limbs):**
+
+```
+10x10 multiply          1.4 µs
+20-by-10 divmod        31.4 µs
+modular multiply       ~33 µs   (one multiply + one reduction)
+```
+
+Division costs **22x** the multiply, and that ratio is not algorithmic — the two differ by about
+2x in limb operations. It is allocation: `vec_get_or` boxes every single limb read into a `Just`
+(`runtime/sprout_runtime.c:vector_get`), and each intermediate magnitude is built as a `List`,
+reversed, converted and trimmed. A divmod at this width does roughly 1,100 heap allocations.
+
+The consequence for Stage 4 is concrete: at ~6,000 field multiplications per verify, a
+`BigInt`-based P-256 verification lands near **200 ms**, not the "several times 15 ms" §9's Stage 4
+note projected. That does not change the plan — the escalation path there is unchanged and still
+changes no public API — but it means Stage 4 should measure before assuming. The cheaper fix is
+upstream of this module and is filed in `BACKLOG.md`: an unboxed read for immutable `Vec`, which
+the runtime already has as `vector_get_direct` but which only `stdlib.mutable` declares, and only
+as `!{IO}`.
 
 ### Stage 3 — `stdlib/math/modular.sprout`
 
@@ -610,11 +682,26 @@ the new public-API panics named in spec §8.4: `stdlib.math.int.abs(-92233720368
 `pow(2, 100)`) both panicking, per `docs/math-partiality-v0.md`'s division of labour between
 Rule 1 (`Maybe` for documented domain errors) and overflow (panics).
 
-**Stage 2.** Unit coverage per operation, and round-trips: `from_bytes_be`/`to_bytes_be`,
-`from_string`/`to_string`, `from_int`/`to_int` including the `Nothing` boundary. Property-style
-checks against `Int` for values inside i64 range, which is the cheapest oracle available.
-Normalisation edge cases — zero, negative zero, leading-zero limbs, subtraction to zero — because
-those are where a denormalised value would first appear and structural `Eq` would first lie.
+**Stage 2.** Two suites, and they answer different questions.
+
+`tests/stdlib/test_bigint.spr` — 82 hand-written cases pinning the named edges: both i64
+boundaries through `from_int`/`to_int` (INT_MIN is the one `from_int` cannot reach by negating),
+the four sign combinations of truncated `divmod`, normalisation (zero, negated zero, subtraction
+to zero, structural equality across construction paths), and the rendering edge a chunked decimal
+writer gets wrong — an interior run of zeros, which survives only if every chunk but the most
+significant is left-padded.
+
+`tests/stdlib/test_bigint_vectors.spr` — 330 generated checks against Python's `int` as the
+oracle, vendored (not generated at test time: `just test` must not need a Python interpreter) and
+regenerable via `scripts/gen_bigint_vectors.py`. Widths cluster on the boundaries where a
+limb-based bignum actually breaks rather than being uniform — either side of 26 bits and its
+multiples, top limbs at base/2 (the normalisation threshold Knuth's estimate is stated against),
+and all-ones / all-zeros limb runs, where carry and borrow chains run longest.
+
+Both were needed. The hand-written suite passed on its first run against a fresh Algorithm D,
+which is evidence about the tests, not about the code: Knuth D's failure modes sit in the
+quotient-digit correction, and hand-picked cases do not reach it. The vendored vectors are a
+25-seed, 8,240-check sweep narrowed to one reproducible seed.
 
 **Stage 3.** `mod_inv` against known inverses, including the non-coprime `Nothing` case; `mod_pow`
 against known vectors; Fermat cross-check (`mod_pow(a, p-1, p) == 1` for prime `p`).

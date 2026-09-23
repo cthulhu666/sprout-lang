@@ -2314,9 +2314,11 @@ Semantics:
   panics on a zero divisor and on `INT_MIN / -1`. This is the decided, long-term
   meaning of `Int` (`docs/bigint-v0.md` §4), not a placeholder for a future
   arbitrary-precision `Int`.
-- `BigInt` is the arbitrary-precision type. It is a separate type, not a wider `Int` —
-  see `docs/bigint-v0.md` for the representation, the API surface, and why the
-  alternative (making `Int` itself arbitrary-precision) lost.
+- `BigInt` is the arbitrary-precision type, in `stdlib.math.bigint`. It is a separate
+  type, not a wider `Int` — see `docs/bigint-v0.md` for the representation, the API
+  surface, and why the alternative (making `Int` itself arbitrary-precision) lost.
+  Sprout hardwires `+`/`-`/`*` to `Int`, so `BigInt` arithmetic is named functions
+  (`bigint.add(a, b)`) until the numeric classes land.
 - `abs`, `pow`, `gcd`, and `lcm` panic rather than return a silently wrong result once
   computation leaves the representable range, per the trapping rule above.
 - The presence of `pow` and `mod` in `stdlib.math.int` does not imply implicit

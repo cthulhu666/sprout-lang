@@ -1,0 +1,177 @@
+import stdlib.test (check_eq, check_true, check_false, run_suite)
+import stdlib.math.bigint as big
+
+# docs/bigint-v0.md Stage 2. The cheapest oracle for anything inside i64 range is
+# `Int` itself, so most cases below compare against it; the values that do not fit
+# are the ones the type exists for, and those are pinned literally.
+
+fn parse(raw: String) -> big.BigInt =
+  match big.from_string(raw) with
+  | Ok value -> value
+  | Err _ -> big.from_int(0)
+
+fn p256_prime() -> big.BigInt =
+  parse("115792089210356248762697446949407573530086143415290314195533631308867097853951")
+
+fn min_int() -> Int = -9223372036854775808
+
+fn max_int() -> Int = 9223372036854775807
+
+# `Bytes` has no `Eq` instance, so a refusal is checked as a Bool rather than
+# compared against `Nothing`.
+fn rejected(value: Maybe Bytes) -> Bool =
+  match value with
+  | Just _ -> false
+  | Nothing -> true
+
+fn roundtrip_bytes(value: big.BigInt, width: Int) -> Maybe big.BigInt =
+  match big.to_bytes_be(value, width) with
+  | Just raw -> Just(big.from_bytes_be(raw))
+  | Nothing -> Nothing
+
+fn main() -> Unit !{IO} =
+  run_suite("bigint", [
+    # --- from_int / to_int, including both i64 boundaries ---
+    check_eq("to_int of zero", big.to_int(big.from_int(0)), Just(0)),
+    check_eq("to_int of one", big.to_int(big.from_int(1)), Just(1)),
+    check_eq("to_int of minus one", big.to_int(big.from_int(-1)), Just(-1)),
+    check_eq("to_int of a mid value", big.to_int(big.from_int(-123456789)), Just(-123456789)),
+    check_eq("to_int of INT_MAX", big.to_int(big.from_int(max_int())), Just(max_int())),
+    # INT_MIN has no negatable magnitude in i64, so from_int must reach it without
+    # ever computing `0 - value`, which traps since Stage 1.
+    check_eq("to_int of INT_MIN", big.to_int(big.from_int(min_int())), Just(min_int())),
+    check_eq("to_string of INT_MIN", big.to_string(big.from_int(min_int())),
+             "-9223372036854775808"),
+    check_eq("to_int just past INT_MAX", big.to_int(parse("9223372036854775808")), Nothing),
+    check_eq("to_int just past INT_MIN", big.to_int(parse("-9223372036854775809")), Nothing),
+
+    # --- add / sub / mul against the Int oracle ---
+    check_eq("add", big.to_int(big.add(big.from_int(123456789), big.from_int(987654321))),
+             Just(1111111110)),
+    check_eq("add across zero", big.to_int(big.add(big.from_int(-9), big.from_int(4))), Just(-5)),
+    check_eq("sub", big.to_int(big.sub(big.from_int(4), big.from_int(9))), Just(-5)),
+    check_eq("sub of negatives", big.to_int(big.sub(big.from_int(-4), big.from_int(-9))),
+             Just(5)),
+    check_eq("mul signs", big.to_int(big.mul(big.from_int(-6), big.from_int(7))), Just(-42)),
+    check_eq("mul by zero", big.to_int(big.mul(big.from_int(0), big.from_int(-7))), Just(0)),
+    # The first product that leaves i64.
+    check_eq("mul past i64", big.to_string(big.mul(parse("4294967296"), parse("4294967296"))),
+             "18446744073709551616"),
+    check_eq("square of the P-256 prime",
+             big.to_string(big.mul(p256_prime(), p256_prime())),
+             "13407807923699100001122556707991011683559799356310572525877692089795444101264856492920909653436852883666100269727622878890045236257577588884142429726310401"),
+
+    # --- normalisation: a denormalised value is what would make derived Eq lie ---
+    check_true("sub to zero is zero", big.is_zero(big.sub(p256_prime(), p256_prime()))),
+    check_eq("sub to zero renders as zero", big.to_string(big.sub(big.from_int(7),
+             big.from_int(7))), "0"),
+    check_false("zero is not negative", big.is_negative(big.negate(big.from_int(0)))),
+    check_eq("negated zero renders as zero", big.to_string(big.negate(big.from_int(0))), "0"),
+    check_eq("zero times a big value is zero",
+             big.to_string(big.mul(big.from_int(0), p256_prime())), "0"),
+    check_true("structural equality after different construction paths",
+               parse("100") == big.add(parse("99"), big.from_int(1))),
+    check_true("zero from two paths is one value",
+               big.sub(big.from_int(5), big.from_int(5)) == big.from_int(0)),
+
+    # --- negate / abs ---
+    check_eq("abs of a negative", big.to_int(big.abs(big.from_int(-5))), Just(5)),
+    check_eq("negate of INT_MIN leaves i64", big.to_string(big.negate(big.from_int(min_int()))),
+             "9223372036854775808"),
+    check_eq("abs of INT_MIN leaves i64", big.to_int(big.abs(big.from_int(min_int()))), Nothing),
+
+    # --- cmp ---
+    check_eq("cmp less", big.cmp(big.from_int(-1), big.from_int(1)), -1),
+    check_eq("cmp equal", big.cmp(big.from_int(1), big.from_int(1)), 0),
+    check_eq("cmp greater", big.cmp(big.from_int(1), big.from_int(-1)), 1),
+    check_eq("cmp both negative", big.cmp(big.from_int(-5), big.from_int(-3)), -1),
+    check_eq("cmp by width", big.cmp(p256_prime(), big.from_int(max_int())), 1),
+    check_eq("cmp zero against negative", big.cmp(big.from_int(0), big.from_int(-1)), 1),
+
+    # --- divmod: truncated, so the remainder takes the dividend's sign ---
+    check_eq("divmod positive", big.divmod(big.from_int(17), big.from_int(5)),
+             Just((big.from_int(3), big.from_int(2)))),
+    check_eq("divmod negative dividend", big.divmod(big.from_int(-17), big.from_int(5)),
+             Just((big.from_int(-3), big.from_int(-2)))),
+    check_eq("divmod negative divisor", big.divmod(big.from_int(17), big.from_int(-5)),
+             Just((big.from_int(-3), big.from_int(2)))),
+    check_eq("divmod both negative", big.divmod(big.from_int(-17), big.from_int(-5)),
+             Just((big.from_int(3), big.from_int(-2)))),
+    check_eq("divmod by zero", big.divmod(big.from_int(17), big.from_int(0)), Nothing),
+    check_eq("divmod exact", big.divmod(big.from_int(20), big.from_int(5)),
+             Just((big.from_int(4), big.from_int(0)))),
+    check_eq("divmod smaller dividend", big.divmod(big.from_int(3), big.from_int(17)),
+             Just((big.from_int(0), big.from_int(3)))),
+    # Multi-limb long division, the case the single-limb fast path does not cover.
+    check_eq("divmod multi-limb quotient",
+             big.divmod(parse("13407807923699100001122556707991011683559799356310572525877692089795444101264856492920909653436852883666100269727622878890045236257577588884142429726322746"), p256_prime()),
+             Just((p256_prime(), big.from_int(12345)))),
+
+    # --- from_string / to_string / to_hex ---
+    check_eq("from_string rejects empty", big.from_string(""), Err(big.BigIntEmptyInput)),
+    check_eq("from_string rejects a bare sign", big.from_string("-"),
+             Err(big.BigIntNoDigits(1))),
+    check_eq("from_string rejects a bare radix prefix", big.from_string("0x"),
+             Err(big.BigIntNoDigits(2))),
+    check_eq("from_string rejects a trailing letter", big.from_string("12a"),
+             Err(big.BigIntBadDigit(2, "a"))),
+    check_eq("from_string accepts a leading plus", big.to_string(parse("+42")), "42"),
+    check_eq("from_string accepts hex", big.to_string(parse("0xff")), "255"),
+    check_eq("from_string accepts negative hex", big.to_string(parse("-0xFF")), "-255"),
+    check_eq("from_string ignores leading zeros", big.to_string(parse("000123")), "123"),
+    check_eq("decimal round trip past i64",
+             big.to_string(p256_prime()),
+             "115792089210356248762697446949407573530086143415290314195533631308867097853951"),
+    check_eq("hex round trip past i64", big.to_hex(p256_prime()),
+             "0xffffffff00000001000000000000000000000000ffffffffffffffffffffffff"),
+    check_eq("to_hex of zero", big.to_hex(big.from_int(0)), "0x0"),
+    check_eq("to_hex of a negative", big.to_hex(big.from_int(-255)), "-0xff"),
+    check_eq("to_string of zero", big.to_string(big.from_int(0)), "0"),
+    # A chunked decimal renderer drops interior zeros unless every chunk but the
+    # most significant one is left-padded.
+    check_eq("interior zero chunks survive rendering", big.to_string(parse("100000000000000001")),
+             "100000000000000001"),
+    check_eq("the ToString instance agrees with to_string", to_string(p256_prime()),
+             big.to_string(p256_prime())),
+
+    # --- bytes, fixed width ---
+    check_true("to_bytes_be rejects a negative", rejected(big.to_bytes_be(big.from_int(-1), 4))),
+    check_true("to_bytes_be rejects too narrow a width",
+               rejected(big.to_bytes_be(p256_prime(), 31))),
+    check_false("to_bytes_be accepts the exact width",
+                rejected(big.to_bytes_be(p256_prime(), 32))),
+    check_eq("byte round trip at P-256 width", roundtrip_bytes(p256_prime(), 32),
+             Just(p256_prime())),
+    check_eq("byte round trip left-pads", roundtrip_bytes(big.from_int(1), 32),
+             Just(big.from_int(1))),
+    check_eq("byte round trip of zero", roundtrip_bytes(big.from_int(0), 32),
+             Just(big.from_int(0))),
+    check_eq("to_bytes_be at exactly the needed width",
+             roundtrip_bytes(big.from_int(255), 1), Just(big.from_int(255))),
+    check_eq("to_bytes_be of zero at width zero", roundtrip_bytes(big.from_int(0), 0),
+             Just(big.from_int(0))),
+
+    # --- bit-level surface, which describes the MAGNITUDE (see the module header) ---
+    check_eq("bit_length of zero", big.bit_length(big.from_int(0)), 0),
+    check_eq("bit_length of one", big.bit_length(big.from_int(1)), 1),
+    check_eq("bit_length of 255", big.bit_length(big.from_int(255)), 8),
+    check_eq("bit_length of 256", big.bit_length(big.from_int(256)), 9),
+    check_eq("bit_length of the P-256 prime", big.bit_length(p256_prime()), 256),
+    check_eq("bit_length ignores the sign", big.bit_length(big.from_int(-255)), 8),
+    check_true("test_bit low", big.test_bit(big.from_int(5), 0)),
+    check_false("test_bit unset", big.test_bit(big.from_int(5), 1)),
+    check_true("test_bit high", big.test_bit(big.from_int(5), 2)),
+    check_false("test_bit past the top", big.test_bit(big.from_int(5), 99)),
+    check_true("test_bit across a limb boundary", big.test_bit(big.shl(big.from_int(1), 77), 77)),
+    check_eq("shl past i64", big.to_string(big.shl(big.from_int(1), 64)),
+             "18446744073709551616"),
+    check_eq("shl of zero", big.to_string(big.shl(big.from_int(0), 5)), "0"),
+    check_eq("shl then shr is identity", big.to_int(big.shr(big.shl(big.from_int(1), 100), 100)),
+             Just(1)),
+    # Truncation toward zero, not floor: the sign is carried, not shifted through.
+    check_eq("shr of a negative truncates toward zero", big.to_int(big.shr(big.from_int(-7), 1)),
+             Just(-3)),
+    check_eq("shr past the top is zero", big.to_string(big.shr(big.from_int(255), 99)), "0"),
+    check_eq("shl by zero", big.to_int(big.shl(big.from_int(7), 0)), Just(7)),
+    check_eq("shr by zero", big.to_int(big.shr(big.from_int(7), 0)), Just(7))
+  ])
