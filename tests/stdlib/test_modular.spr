@@ -55,6 +55,16 @@ fn main() -> Unit !{IO} =
     check_true("modulus rejects zero", rejected(mod.modulus(small(0)))),
     check_true("modulus rejects a negative", rejected(mod.modulus(small(-7)))),
     check_false("modulus accepts one", rejected(mod.modulus(small(1)))),
+    # `mod_mul` multiplies two reduced operands, so a modulus wide enough to push both
+    # past `bigint.mul`'s schoolbook ceiling turns a total-looking call into a panic.
+    # The boundary is a property of the MODULUS, so it belongs in the constructor with
+    # the sign test --- validating half an invariant is what let this through.
+    check_false("modulus accepts a value at the multiply ceiling",
+                rejected(mod.modulus(big.shl(small(1), big.mul_bit_ceiling() - 1)))),
+    check_true("modulus rejects one bit past the multiply ceiling",
+               rejected(mod.modulus(big.shl(small(1), big.mul_bit_ceiling())))),
+    check_true("modulus rejects the width that reproduced the mod_mul panic",
+               rejected(mod.modulus(big.add(big.shl(small(1), 60000), small(1))))),
     check_eq("modulus_value round trip", big.to_string(mod.modulus_value(known(p256_prime()))),
              big.to_string(p256_prime())),
 
@@ -140,5 +150,10 @@ fn main() -> Unit !{IO} =
              inverse_is_an_inverse(sample(), known(p256_prime())), "1"),
     check_eq("the group-order inverse really inverts",
              inverse_is_an_inverse(sample(), known(p256_order())), "1"),
-    check_eq("mod_inv modulo one", shown(mod.mod_inv(small(5), unit_modulus())), "0")
+    # A modulus of 1 collapses the ring: every element reduces to 0, `egcd(0, 1, ...)`
+    # answers a gcd of 1, and 0 is its own inverse. So "zero always yields Nothing" is
+    # true for every modulus EXCEPT this one, and the doc comment has to say so.
+    check_eq("mod_inv modulo one", shown(mod.mod_inv(small(5), unit_modulus())), "0"),
+    check_eq("mod_inv of zero modulo one is the carve-out, not Nothing",
+             shown(mod.mod_inv(small(0), unit_modulus())), "0")
   ])
