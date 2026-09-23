@@ -1,7 +1,11 @@
-# Int Overflow Policy — Design Decision (OPEN / DEFERRED)
+# Int Overflow Policy — Design Decision (DECIDED, UNIMPLEMENTED)
 
-**Status:** OPEN. Findings documented 2026-07-06; decision deferred by Kuba.
-**Owner decision required:** runtime overflow behavior for `+` / `-` / `*` (Option A vs B below).
+**Status:** DECIDED 2026-09-22 — **Option A** (trap on overflow). Findings documented
+2026-07-06; deferred until an escape hatch existed for programs that genuinely need values
+above i64. `BigInt` is that escape hatch, so the two land together: see
+`docs/bigint-v0.md`, which carries the decision and the staged implementation. Implementation
+is pending Stage 1 there; §4–§7 below are the pre-decision record and are rewritten when it
+lands.
 **Couples to:** W9/X4 (integer-literal overflow, `docs/fundamentals-code-review-handoff-2026-07-03.md`)
 and W7's deferred `INT_MIN / -1` operator guard.
 

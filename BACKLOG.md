@@ -72,13 +72,13 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
 
 **Types and inference**
 
-- [ ] `P1` **Int overflow policy (DEFERRED 2026-07-06).** `+`/`-`/`*` do silent two's-complement
-  wrap (plain `add/sub/mul i64`, no `nsw`), contradicting the spec's arbitrary-precision `Int`
-  intent. Option A (trap/panic, Swift/Rust-debug/Zig) vs Option B (Go: wrap, compile-error on
-  literals only); author recommends A. **X4 must rule on RADIX literals explicitly** —
-  `0xFFFFFFFFFFFFFFFF` is `-1` today, which is the useful reading for masks, so a uniform "must fit
-  in `Int`" rule would reject the all-ones mask idiom. `docs/int-overflow-policy-decision.md`;
-  `docs/bitwise-int-ops-v0.md` §5.6.
+- [ ] `P1` **Int overflow policy — DECIDED 2026-09-22, unimplemented.** `+`/`-`/`*` do silent
+  two's-complement wrap (plain `add/sub/mul i64`, no `nsw`). Option A (trap/panic) was chosen once
+  `BigInt` gave overflow an escape hatch; both land together as Stage 1 of `docs/bigint-v0.md`,
+  which also carries the wrap audit (`prelude.int_is_min` relies on wrap and breaks) and the X4
+  rule. **X4 must rule on RADIX literals explicitly** — `0xFFFFFFFFFFFFFFFF` is `-1` today, which
+  is the useful reading for masks, so a uniform "must fit in `Int`" rule would reject the all-ones
+  mask idiom. `docs/int-overflow-policy-decision.md`; `docs/bitwise-int-ops-v0.md` §5.6.
 - [ ] `P2` **Allow polymorphic recursion for a CONSTRAINED declaration.** A complete signature
   enables it only when the declaration has no constraints; `fn f(n: Nest a) -> Int where Eq a`
   reports the occurs check. This is a constraint-solver feature, not a different self-binding
