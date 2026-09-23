@@ -462,24 +462,36 @@ fn byte_of_mag(mag: Vec Int, position: Int) -> Int =
   in bit_and(bit_or(bit_shr(limb_at(mag, index), offset),
                     bit_shl(limb_at(mag, index + 1), limb_bits() - offset)), 255)
 
-fn to_bytes_go(mag: Vec Int, position: Int, total: Int, acc: List Int) -> List Int =
-  if position == total then acc
-  else to_bytes_go(mag, position + 1, total, Cons(byte_of_mag(mag, position), acc))
+# Big-endian over the half-open position range [low, high), split down the middle.
+# `bytes.builder_append` copies BOTH sides' chunk arrays (runtime/sprout_runtime.c),
+# so appending one byte at a time costs O(width^2) pointer copies — that shape took
+# 5.7 s and 6.7 GB of resident memory at width 80,000, for an 80 kB answer, and a
+# SIGTERM at 200,000. Halving makes it O(width log width) at depth log2(width).
+# Position 0 is the LEAST significant byte, so the high half is emitted first.
+fn builder_of_mag(mag: Vec Int, low: Int, high: Int) -> Builder =
+  if high <= low then bytes.builder_empty()
+  else if high - low == 1 then bytes.builder_byte(byte_of_mag(mag, low))
+  else
+    let middle = low + (high - low) / 2
+    in bytes.builder_append(builder_of_mag(mag, middle, high),
+                            builder_of_mag(mag, low, middle))
 
-fn append_byte(acc: Builder, value: Int) -> Builder =
-  bytes.builder_append(acc, bytes.builder_byte(value))
-
-fn bytes_of_list(values: List Int) -> Bytes =
-  bytes.builder_build(list_fold(append_byte, bytes.builder_empty(), values))
+# The widest field this module will build, in bytes: `mul` already refuses operands
+# above `limb_ceiling()` limbs, so a field wider than that many limbs hold is outside
+# the range the module serves. It is the upper bound that makes `to_bytes_be` total —
+# without one the walk is unbounded whatever the value is — and it is also what keeps
+# `byte_of_mag`'s `position * 8` far inside i64.
+fn byte_ceiling() -> Int = (limb_ceiling() * limb_bits() + 7) / 8
 
 # Fixed width, left-padded with zeros — the shape every crypto caller wants. `Nothing`
-# when the value is negative or does not fit, rather than a silently truncated field.
+# on a negative value, on a width outside [0, byte_ceiling()], or on a value too wide
+# for the field, rather than a silently truncated field or an unbounded walk.
 export fn to_bytes_be(value: BigInt, width: Int) -> Maybe Bytes =
-  if sign_of(value) || width < 0 then Nothing
-  # The fit test converts the VALUE to bytes rather than the width to bits: `width * 8`
-  # would trap for a width above 2^60, and this function must answer, not panic.
+  if sign_of(value) || width < 0 || width > byte_ceiling() then Nothing
+  # Converts the VALUE to bytes rather than the width to bits, so the two sides of the
+  # comparison are both byte counts and neither can be near an i64 edge.
   else if (mag_bit_length(mag_of(value)) + 7) / 8 > width then Nothing
-  else Just(bytes_of_list(to_bytes_go(mag_of(value), 0, width, Nil)))
+  else Just(bytes.builder_build(builder_of_mag(mag_of(value), 0, width)))
 
 # --- parsing and rendering ---
 

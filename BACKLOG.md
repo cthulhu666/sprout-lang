@@ -1332,6 +1332,16 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   (`docs/bigint-v0.md` §9 Stage 2). The fix is a pure `vec_get_direct` in the prelude with its own
   bounds behaviour decided — NOT re-declaring the existing extern with a second effect row, since
   externs sit outside the module system and two declarations of one name would conflict.
+- [ ] `P2` **`stdlib.math.bigint` grows super-linearly outside P-256 width.** Three low-severity
+  findings from the PR #344 ensemble review, unverified, same shape as the two `to_bytes_be`
+  defects fixed in it (`docs/bigint-v0.md` §9 Stage 2). `shl` bounds a negative count but not a
+  large one, so `shl(from_int(1), INT_MAX)` asks for 3.5e17 limbs and never returns — `shr_mag`
+  short-circuits the mirror case and `mul` refuses past 2047 limbs, so `shl` is the one entry
+  point with neither. `from_bytes_be` is O(n²): 0.1 / 0.4 / 1.3 s at 2000 / 4000 / 8000 bytes.
+  `from_string` is Θ(n²) in codepoint walks because `string.char_at_or` rescans from byte 0 — the
+  general case is the `str_slice` O(start) entry above, the local fix is the one
+  `stdlib/string.sprout` already applied to its trimming functions. None is reachable at the
+  32-byte widths Stage 4 uses, and a suite that tests only those widths cannot see any of them.
 
 ## Design Roadmap
 

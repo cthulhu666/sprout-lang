@@ -1,4 +1,5 @@
 import stdlib.test (check_eq, check_true, check_false, run_suite)
+import stdlib.bytes as bytes
 import stdlib.math.bigint as big
 
 # docs/bigint-v0.md Stage 2. The cheapest oracle for anything inside i64 range is
@@ -23,6 +24,21 @@ fn rejected(value: Maybe Bytes) -> Bool =
   match value with
   | Just _ -> false
   | Nothing -> true
+
+fn byte_at_or(raw: Bytes, index: Int) -> Int =
+  match bytes.get(raw, index) with
+  | Just value -> value
+  | Nothing -> -1
+
+fn byte_of(value: Maybe Bytes, index: Int) -> Int =
+  match value with
+  | Just raw -> byte_at_or(raw, index)
+  | Nothing -> -1
+
+fn width_of(value: Maybe Bytes) -> Int =
+  match value with
+  | Just raw -> bytes.length(raw)
+  | Nothing -> -1
 
 fn roundtrip_bytes(value: big.BigInt, width: Int) -> Maybe big.BigInt =
   match big.to_bytes_be(value, width) with
@@ -150,6 +166,27 @@ fn main() -> Unit !{IO} =
              roundtrip_bytes(big.from_int(255), 1), Just(big.from_int(255))),
     check_eq("to_bytes_be of zero at width zero", roundtrip_bytes(big.from_int(0), 0),
              Just(big.from_int(0))),
+    # The field is built by halving the position range rather than folding one byte at
+    # a time, so the split has to preserve big-endian order at an ODD width, where the
+    # halves are uneven. Read out by index, not round-tripped: a round trip says the
+    # order is wrong, an index says which byte moved.
+    check_eq("to_bytes_be is big-endian at an odd width",
+             byte_of(big.to_bytes_be(parse("66051"), 5), 4), 3),
+    check_eq("to_bytes_be pads on the left, not the right",
+             byte_of(big.to_bytes_be(parse("66051"), 5), 0), 0),
+    check_eq("to_bytes_be keeps the middle byte in place",
+             byte_of(big.to_bytes_be(parse("66051"), 5), 3), 2),
+    check_eq("byte round trip at an odd width", roundtrip_bytes(parse("66051"), 7),
+             Just(parse("66051"))),
+    # A width is a byte count, and nothing bounded it from above: the old code walked
+    # 0..width whatever the caller asked for, so width 200,000 died on a SIGTERM
+    # instead of answering. The ceiling is the module's own 2047-limb bound in bytes.
+    check_eq("to_bytes_be accepts the module's widest field",
+             width_of(big.to_bytes_be(big.from_int(1), 6653)), 6653),
+    check_true("to_bytes_be refuses one byte past the ceiling",
+               rejected(big.to_bytes_be(big.from_int(1), 6654))),
+    check_true("to_bytes_be answers rather than dying on an absurd width",
+               rejected(big.to_bytes_be(big.from_int(1), 200000))),
 
     # --- bit-level surface, which describes the MAGNITUDE (see the module header) ---
     check_eq("bit_length of zero", big.bit_length(big.from_int(0)), 0),
