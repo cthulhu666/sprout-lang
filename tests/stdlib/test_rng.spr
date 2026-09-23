@@ -21,6 +21,19 @@ fn main() -> Unit !{IO} =
       # single-LCG-step hash failed this (hash(x, z+5) ~= hash(x, z)), which rendered as tiled noise.
       h3_12 = rng_hash2(3, 12, 99)  # +5 in z
       h8_7 = rng_hash2(8, 7, 99)  # +5 in x
+
+      # The seed is an unconstrained Int — the contract constrains COORDINATE
+      # magnitude, never the seed — so every seed must produce a hash rather than
+      # abort. `seed + (ix * prime)` overflowed for a seed within ~73M of MAX_INT,
+      # which wrapped silently before bigint-v0 Stage 1 and trapped after it.
+      h_max_seed = rng_hash2(3, 7, 9223372036854775807)
+      h_min_seed = rng_hash2(3, 7, 0 - 9223372036854775807 - 1)
+
+      # Reducing the seed mod 2^31 cannot change the hash: the seed is only ever
+      # used inside a `rng_mod`, and reducing one addend before a sum leaves the
+      # sum's residue alone. This held before the fix too — it pins that the fix
+      # moved the reduction EARLIER without moving the values.
+      h_seed_99 = rng_hash2(3, 7, 99 + 2147483648)
   in run_suite("rng", [
     check_eq("rng_next(1)", s1, 1103527590),
     check_eq("rng_next(s1)", s2, 377401575),
@@ -41,5 +54,11 @@ fn main() -> Unit !{IO} =
     check_true("rng_hash2: +5 z-shift decorrelates (no affine resonance)",
                 (h37 - h3_12) > 100000000),
     check_true("rng_hash2: +5 x-shift decorrelates (no affine resonance)",
-                (h37 - h8_7) > 100000000)
+                (h37 - h8_7) > 100000000),
+
+    check_true("rng_hash2: MAX_INT seed is hashed, not trapped",
+                (h_max_seed >= 0) && (h_max_seed < 2147483648)),
+    check_true("rng_hash2: MIN_INT seed is hashed, not trapped",
+                (h_min_seed >= 0) && (h_min_seed < 2147483648)),
+    check_eq("rng_hash2: the seed is used mod 2^31", h_seed_99, 1269841102)
   ])

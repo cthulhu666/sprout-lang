@@ -391,8 +391,10 @@ fn build_load_env_ops_go(frees: List String, kinds: List sprout_ir.IRType, base_
 # Supports the scalar subset of Sprout used for the IR-codegen bring-up:
 #   - fn foo() -> Int = <intlit>            → IRConst + IRRet
 #   - fn id(x: Int) -> Int = x              → IRRet "%p$x" (parameter reference)
-#   - fn add1(x: Int) -> Int = x + 1        → IRConst, IRIAdd, IRRet
+#   - fn add1(x: Int) -> Int = x + 1        → IRConst, IRCheckedArith, IRRet
 #   - fn sub1, mul2 — likewise for Sub / Mul
+#     (IRIAdd/IRISub/IRIMul have no construction site: bigint-v0 Stage 1 routes
+#     every Int `+`/`-`/`*` through IRCheckedArith instead.)
 #   - fn is_zero(x: Int) -> Bool = x == 0   → IRConst, IRICmp, IRRet
 #     (all named SSA values at function boundaries are i64 per
 #     /code-review fix #2. IRICmp's lowering produces an i1 that LLVM

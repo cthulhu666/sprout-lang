@@ -270,7 +270,7 @@ decisive property — parses identically whether or not the §5.3 literal carve-
 the parser being used to build it. It is safe regardless of the order Stage 1's pieces land in;
 the new literal form is not.
 
-A second confirmed casualty: `accum_digits` (`stdlib/prelude.sprout:1699`), the digit-accumulation
+A second confirmed casualty: `accum_digits` (`stdlib/prelude.sprout`), the digit-accumulation
 loop under `parse_int`, does an unguarded `acc * 10 + digit`. Today it wraps silently on an
 over-range digit run. Under trapping this would PANIC — and `panic` in Sprout is `exit(1)`,
 uncatchable. `parse_int`'s callers include `stdlib/http_server.sprout:293`
@@ -279,9 +279,12 @@ uncatchable. `parse_int`'s callers include `stdlib/http_server.sprout:293`
 digit runs). Left unguarded, this is a remotely triggerable process abort.
 
 **DECIDED: guard it.** `parse_int` returns `Nothing` on an over-range digit run. All 19 call
-sites already match on `Maybe`, so no caller changes. `stdlib/compiler/iface_codec.sprout:1552`
-(`parse_unsigned_atom`) has the identical unguarded `acc * 10 + digit` shape, on
-compiler-internal input rather than network input, and is fixed the same way.
+sites already match on `Maybe`, so no caller changes. `stdlib/compiler/iface_codec.sprout` had
+the identical unguarded `acc * 10 + digit` shape, on compiler-internal input rather than
+network input; it is fixed the same way and its accumulator is now `parse_neg_magnitude`.
+That one was missed on the first pass and shipped broken — the decoder aborted on the
+encoder's own `IntExpr(INT_MIN)`, which §5.3 is what makes writable. Its round-trip test
+covered no boundary value, so nothing caught it.
 
 Prior art, verified 2026-09-22 — what a string-to-int parser does on an over-range digit run:
 
@@ -307,22 +310,31 @@ Two further sites, checked rather than assumed, and both cleared SAFE:
   calling it, so `hi <= 2^31 - 1` and `hi * 2^32 + lo <= 2^63 - 1` exactly. The split at `2^32`
   was designed to keep every intermediate in range; trapping changes nothing here.
 - The `IntRange` walkers in `stdlib/prelude.sprout` — **SAFE, guard confirmed to fire first**.
-  `range_to_list_go` (`prelude.sprout:159-162`) tests `range_past_end` and then `range_at_end`
+  `range_to_list_go` (`prelude.sprout`) tests `range_past_end` and then `range_at_end`
   before ever evaluating `current + step`; at `current == end_value == INT_MAX` the second test
   returns `Cons(current, Nil)` and the addition is never reached. Pinned by
-  `tests/stdlib/test_range_empty.spr:127`.
+  `tests/stdlib/test_range_empty.spr`.
+  The clearance covers the WALKERS only. `range_count` is not one — it computes
+  `(end - start) + 1` with no `range_at_end` ahead of it, and a range wider than `MAX_INT`
+  has no representable count, so it panics by design with a message naming itself
+  (`tests/overflow_smoke/range_count_span.spr`). Enumerating the functions that looked like
+  walkers, rather than every function doing range arithmetic, is what let it through.
 
-Cleared: `stdlib/rng.sprout` is safe. Its header (lines 11-12) states the LCG was chosen so that
-`A * (M - 1) < 2^61 < 2^63`, "so the multiply never overflows an i64 — the stream is identical
-regardless of a target's integer-overflow semantics." `rng_hash2` carries a documented
-precondition on coordinate magnitude, which under Option A becomes enforced rather than assumed.
-The safety conclusion holds, but the stated bound is off by a power of two: `A * (M - 1)` is
-2,369,780,942,852,698,515, which is above `2^61` (2,305,843,009,213,693,952) and below `2^62`
-(4,611,686,018,427,387,904). The multiply still never overflows an i64 — `2^62 < 2^63` — only the
-header comment's stated bound is wrong. Not fixed by this document — `rng.sprout` is `.sprout`
-source — but queued as a Stage 1 task item (§9): Stage 1 already edits `stdlib/prelude.sprout` and
-pays the reseed regardless, so the one-line comment correction rides along instead of sitting in
-`BACKLOG.md` as a fix that would need its own full reseed to land alone.
+**NOT cleared, and this entry was wrong.** `stdlib/rng.sprout`'s header states the LCG was chosen
+so that `A * (M - 1) < 2^61 < 2^63`, "so the multiply never overflows an i64 — the stream is
+identical regardless of a target's integer-overflow semantics." That covers `rng_next`. It does
+not cover `rng_hash2`, which this audit waved through on the strength of a documented precondition
+on COORDINATE magnitude — while the overflowing term was `seed + (ix * prime)`, and the seed
+carries no precondition at all, being an arbitrary `Int` from the caller. A seed within
+`rng_hash_px` of `MAX_INT` therefore aborted. Fixed by reducing the seed before it meets the
+coordinate term; `rng_mod(seed) + k` has the same residue as `seed + k`, so no hash value moved.
+The lesson is specific: reading the precondition a comment states, rather than the operands the
+expression actually has, is how an audit clears a site it never examined.
+Separately, the header's stated bound was off by a power of two: `A * (M - 1)` is
+2,369,780,942,852,698,515, above `2^61` (2,305,843,009,213,693,952) and below `2^62`
+(4,611,686,018,427,387,904). The `rng_next` conclusion was unaffected — `2^62 < 2^63` — and the
+comment now reads `2^62`. Worth recording that the audit caught the wrong number in a comment
+while missing the overflow in the code three lines below it.
 
 Detection for everything not listed here is the full test suite plus `just compile-examples-stage1`
 and `just run-example-canary`: an overflow that previously produced a wrong number now aborts.
@@ -348,7 +360,7 @@ Pinned today by `tests/stdlib/test_int_literals.spr`, which must be updated in t
 
 A decimal fits-in-`Int` check cannot be applied to the bare literal token without also rejecting
 `INT_MIN`. Sprout's parser treats a leading `-` as a separate unary operator
-(`parse_unary`, `stdlib/compiler/parser.sprout:1159`), not part of the literal token, so
+(`parse_unary`, `stdlib/compiler/parser.sprout`), not part of the literal token, so
 `-9223372036854775808` parses as unary minus applied to the literal `9223372036854775808` —
 whose magnitude, `2^63`, does not itself fit in `[0, 2^63-1]`. A naive check rejects it.
 
