@@ -8,6 +8,16 @@ Rationale and measurements live in `README.md`; the skill itself is `SKILL.md`.
 
 ## Backlog
 
+- [ ] `P1` **Dedup keys on the raw `file` string, so one bug reported at two path spellings scores
+  two 1-vote findings.** Agents return an absolute path or a repo-relative one depending on how
+  they navigated, and `byFile` never merges across the two — the line and overlap tests are never
+  reached. Run `1790183127-58366` (PR #345) returned 5 findings that were really 3: two pairs split
+  exactly this way. Not cosmetic, because votes drive the verify gate
+  (`severity !== 'low' || votes >= 2`) — both pairs would have cleared it at 2 votes; instead
+  nothing did and the skeptic was skipped. One line fixes it: normalise `f.file` against the repo
+  root before `byFile.set`. Land it before measuring the threshold entry below, whose under-merge
+  evidence (three pairs in run `1789928144-93446`) may be this bug rather than `OVERLAP_MIN`.
+
 - [ ] `P1` **The ensemble has never been A/B'd against the built-in, so 4 agents may find less than
   one does.** Only the reviewer *prompt* is close to a port; the fan-out, dedup and verify around it
   are this skill's own design (`README.md` §What the original actually does). Run both on one
