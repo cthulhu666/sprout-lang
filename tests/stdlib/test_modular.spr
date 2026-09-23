@@ -1,0 +1,144 @@
+import stdlib.test (check_eq, check_true, check_false, run_suite)
+import stdlib.math.bigint as big
+import stdlib.math.modular as mod
+
+# docs/bigint-v0.md Stage 3. The P-256 field prime and group order are the moduli
+# Stage 4 will actually use, so the interesting cases run against them rather than
+# against toy values.
+
+fn parse(raw: String) -> big.BigInt =
+  match big.from_string(raw) with
+  | Ok value -> value
+  | Err _ -> big.from_int(0)
+
+fn small(value: Int) -> big.BigInt = big.from_int(value)
+
+# Every call site below passes a positive literal, so the Nothing arm is unreachable
+# unless `modulus` itself is broken — which is what the first three cases check.
+fn known(value: big.BigInt) -> mod.Modulus =
+  match mod.modulus(value) with
+  | Just m -> m
+  | Nothing -> panic("test_modular: a positive modulus was rejected")
+
+fn unit_modulus() -> mod.Modulus =
+  known(big.from_int(1))
+
+fn p256_prime() -> big.BigInt =
+  parse("0xffffffff00000001000000000000000000000000ffffffffffffffffffffffff")
+
+fn p256_order() -> big.BigInt =
+  parse("0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551")
+
+fn sample() -> big.BigInt =
+  parse("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
+
+fn rejected(value: Maybe mod.Modulus) -> Bool =
+  match value with
+  | Just _ -> false
+  | Nothing -> true
+
+fn shown(value: Maybe big.BigInt) -> String =
+  match value with
+  | Just inner -> big.to_string(inner)
+  | Nothing -> "none"
+
+# a * mod_inv(a) must be 1 in the field; checking the product rather than the
+# inverse's digits is what makes this a property and not a transcription.
+fn inverse_is_an_inverse(value: big.BigInt, m: mod.Modulus) -> String =
+  match mod.mod_inv(value, m) with
+  | Just inverse -> big.to_string(mod.mod_mul(value, inverse, m))
+  | Nothing -> "none"
+
+fn main() -> Unit !{IO} =
+  run_suite("modular", [
+    # --- the Modulus boundary: validate once, stay total afterwards ---
+    check_true("modulus rejects zero", rejected(mod.modulus(small(0)))),
+    check_true("modulus rejects a negative", rejected(mod.modulus(small(-7)))),
+    check_false("modulus accepts one", rejected(mod.modulus(small(1)))),
+    check_eq("modulus_value round trip", big.to_string(mod.modulus_value(known(p256_prime()))),
+             big.to_string(p256_prime())),
+
+    # --- reduce: Euclidean, so the result is in [0, m) even for a negative input ---
+    check_eq("reduce inside the range", big.to_string(mod.reduce(small(3), known(small(7)))),
+             "3"),
+    check_eq("reduce at the modulus", big.to_string(mod.reduce(small(7), known(small(7)))), "0"),
+    check_eq("reduce above the modulus", big.to_string(mod.reduce(small(10), known(small(7)))),
+             "3"),
+    check_eq("reduce of a negative is non-negative",
+             big.to_string(mod.reduce(small(-1), known(small(7)))), "6"),
+    check_eq("reduce of a large negative",
+             big.to_string(mod.reduce(small(-100), known(small(7)))), "5"),
+    check_eq("reduce modulo one is always zero",
+             big.to_string(mod.reduce(small(42), unit_modulus())), "0"),
+    check_eq("reduce a wide value into the group order",
+             big.to_string(mod.reduce(big.shl(big.from_int(1), 300), known(p256_order()))),
+             "115792089210356223051688740374578415585970562774507440632467824062417765012817"),
+
+    # --- mod_add / mod_sub ---
+    check_eq("mod_add wraps", big.to_string(mod.mod_add(small(5), small(4), known(small(7)))),
+             "2"),
+    check_eq("mod_add does not wrap",
+             big.to_string(mod.mod_add(small(2), small(4), known(small(7)))), "6"),
+    # 100 -> 2 and -1 -> 6, so the sum is 8 and wraps to 1; 99 mod 7 is 1 as well, so
+    # reducing before or after the addition has to agree.
+    check_eq("mod_add reduces its inputs first",
+             big.to_string(mod.mod_add(small(100), small(-1), known(small(7)))), "1"),
+    check_eq("mod_sub goes negative and comes back",
+             big.to_string(mod.mod_sub(small(2), small(5), known(small(7)))), "4"),
+    check_eq("mod_sub to zero", big.to_string(mod.mod_sub(small(5), small(5), known(small(7)))),
+             "0"),
+    # The widest sum the field holds: (p-1) + (p-2) must not leave it.
+    check_eq("mod_add at the top of the P-256 field",
+             big.to_string(mod.mod_add(big.sub(p256_prime(), small(1)),
+                                       big.sub(p256_prime(), small(2)),
+                                       known(p256_prime()))),
+             "115792089210356248762697446949407573530086143415290314195533631308867097853948"),
+
+    # --- mod_mul ---
+    check_eq("mod_mul small", big.to_string(mod.mod_mul(small(3), small(5), known(small(7)))),
+             "1"),
+    check_eq("mod_mul by zero", big.to_string(mod.mod_mul(small(0), small(5), known(small(7)))),
+             "0"),
+    check_eq("mod_mul with a negative operand",
+             big.to_string(mod.mod_mul(small(-3), small(5), known(small(7)))), "6"),
+    check_eq("mod_mul squares a P-256 field element",
+             big.to_string(mod.mod_mul(sample(), sample(), known(p256_prime()))),
+             "52939356427205473100765124538768023705205028153866479812157717891194964717891"),
+
+    # --- mod_pow ---
+    check_eq("mod_pow small", shown(mod.mod_pow(small(3), small(100), known(small(7)))), "4"),
+    check_eq("mod_pow to the zeroth is one",
+             shown(mod.mod_pow(sample(), small(0), known(p256_prime()))), "1"),
+    check_eq("mod_pow of zero to the zeroth is one",
+             shown(mod.mod_pow(small(0), small(0), known(small(7)))), "1"),
+    check_eq("mod_pow to the zeroth modulo one is zero",
+             shown(mod.mod_pow(small(5), small(0), unit_modulus())), "0"),
+    check_eq("mod_pow rejects a negative exponent",
+             shown(mod.mod_pow(small(3), small(-1), known(small(7)))), "none"),
+    check_eq("mod_pow at P-256 width",
+             shown(mod.mod_pow(sample(), p256_order(), known(p256_prime()))),
+             "103388347819983794773114977238736397902581820214540568784342983125532502598636"),
+    # Fermat: a^(p-1) == 1 for prime p and a not divisible by p. Independent of the
+    # vector above, because it does not depend on a precomputed answer being right.
+    check_eq("Fermat holds in the P-256 field",
+             shown(mod.mod_pow(sample(), big.sub(p256_prime(), small(1)), known(p256_prime()))),
+             "1"),
+
+    # --- mod_inv ---
+    check_eq("mod_inv small", shown(mod.mod_inv(small(3), known(small(7)))), "5"),
+    check_eq("mod_inv of one", shown(mod.mod_inv(small(1), known(small(7)))), "1"),
+    check_eq("mod_inv rejects a non-coprime argument",
+             shown(mod.mod_inv(small(2), known(small(4)))), "none"),
+    check_eq("mod_inv rejects zero", shown(mod.mod_inv(small(0), known(small(7)))), "none"),
+    check_eq("mod_inv rejects a multiple of the modulus",
+             shown(mod.mod_inv(small(14), known(small(7)))), "none"),
+    check_eq("mod_inv of a negative", shown(mod.mod_inv(small(-3), known(small(7)))), "2"),
+    check_eq("mod_inv at P-256 width",
+             shown(mod.mod_inv(sample(), known(p256_prime()))),
+             "58049161471845242881694576815138584777540379063164824212087688631196565146484"),
+    check_eq("the P-256 inverse really inverts",
+             inverse_is_an_inverse(sample(), known(p256_prime())), "1"),
+    check_eq("the group-order inverse really inverts",
+             inverse_is_an_inverse(sample(), known(p256_order())), "1"),
+    check_eq("mod_inv modulo one", shown(mod.mod_inv(small(5), unit_modulus())), "0")
+  ])
