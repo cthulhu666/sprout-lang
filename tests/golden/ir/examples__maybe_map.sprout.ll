@@ -19,6 +19,9 @@ declare void @sprout_abort_match() noreturn
 declare i64 @panic(i64)
 declare ptr @llvm.stacksave()
 declare void @llvm.stackrestore(ptr)
+declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)
+declare { i64, i1 } @llvm.ssub.with.overflow.i64(i64, i64)
+declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)
 declare i64 @sprout_alloc_obj(i64, i64)
 declare { i64, i64 } @vector_get_unboxed(i64, i64)
 declare { i64, i64 } @map_get_unboxed(i64, i64)
@@ -75,6 +78,7 @@ declare i64 @native_set_size(i64)
 declare i64 @ref_new(i64)
 declare i64 @ref_read(i64)
 declare i64 @ref_write(i64, i64)
+@.str.0 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 10, column 27)\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -149,7 +153,16 @@ join_1:
 define i64 @$entry.inc(i64 %p$x) {
 entry:
   %t$0 = add i64 0, 1
-  %t$1 = add i64 %p$x, %t$0
+  %t$1$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %p$x, i64 %t$0)
+  %t$1 = extractvalue { i64, i1 } %t$1$agg, 0
+  %t$1$ovf = extractvalue { i64, i1 } %t$1$agg, 1
+  br i1 %t$1$ovf, label %ovfpanic_1, label %ovfok_1
+ovfpanic_1:
+  %t$2 = getelementptr inbounds { i64, [39 x i8] }, ptr @.str.0, i64 0, i32 1, i64 0
+  %t$3 = ptrtoint ptr %t$2 to i64
+  call i64 @panic(i64 %t$3)
+  unreachable
+ovfok_1:
   ret i64 %t$1
 }
 

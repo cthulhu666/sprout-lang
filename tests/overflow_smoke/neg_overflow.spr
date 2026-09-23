@@ -1,0 +1,20 @@
+module main
+
+# bigint-v0 Stage 1 smoke (docs/bigint-v0.md §5.1, Option A of
+# docs/int-overflow-policy-decision.md): negating INT_MIN must panic (it is the
+# one Int magnitude with no positive counterpart). INT_MIN is written as
+# `0 - 9223372036854775807 - 1` rather than the (also valid, per §5.3's
+# unary-minus carve-out) decimal literal `-9223372036854775808`, so this
+# runtime-overflow gate stays independent of the separate literal-range-check
+# rule. The trailing `+ list_length(args)` is 0 with no argv, but it is a
+# RUNTIME add, so `int_min` is not a compile-time constant and neither the
+# Sprout compiler nor clang can fold the subsequent negation away. Before the
+# fix unary `-` silently wraps INT_MIN back to itself and this prints it with
+# exit 0. After the fix it panics with a non-zero exit. Unlike its add/sub/mul
+# siblings the gate does not pin the message text here: whether negation reports
+# as `-` or names itself distinctly is the implementer's call.
+fn main() -> Unit !{IO} =
+  do
+    args <- argv_all()
+    let int_min = 0 - 9223372036854775807 - 1 + list_length(args)
+    print(int_to_string(-int_min))

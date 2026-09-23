@@ -19,6 +19,9 @@ declare void @sprout_abort_match() noreturn
 declare i64 @panic(i64)
 declare ptr @llvm.stacksave()
 declare void @llvm.stackrestore(ptr)
+declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)
+declare { i64, i1 } @llvm.ssub.with.overflow.i64(i64, i64)
+declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)
 declare i64 @sprout_alloc_obj(i64, i64)
 declare { i64, i64 } @vector_get_unboxed(i64, i64)
 declare { i64, i64 } @map_get_unboxed(i64, i64)
@@ -78,9 +81,42 @@ declare i64 @ref_write(i64, i64)
 declare i64 @double_to_bits(i64)
 declare i64 @double_from_bits(i64)
 @.str.0 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
-@.str.1 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
-@.str.2 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
-@.str.3 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
+@.str.1 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in / (line 193, column 21)\00" }
+@.str.2 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 199, column 23)\00" }
+@.str.3 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in * (line 199, column 35)\00" }
+@.str.4 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 226, column 36)\00" }
+@.str.5 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
+@.str.6 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in / (line 226, column 54)\00" }
+@.str.7 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 226, column 58)\00" }
+@.str.8 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 228, column 36)\00" }
+@.str.9 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
+@.str.10 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in / (line 228, column 54)\00" }
+@.str.11 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 228, column 58)\00" }
+@.str.12 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in * (line 243, column 42)\00" }
+@.str.13 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 243, column 38)\00" }
+@.str.14 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 377, column 50)\00" }
+@.str.15 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 408, column 64)\00" }
+@.str.16 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 417, column 25)\00" }
+@.str.17 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 417, column 36)\00" }
+@.str.18 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in * (line 419, column 28)\00" }
+@.str.19 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 419, column 32)\00" }
+@.str.20 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 571, column 29)\00" }
+@.str.21 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 574, column 21)\00" }
+@.str.22 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 663, column 52)\00" }
+@.str.23 = private unnamed_addr constant { i64, [46 x i8] } { i64 737290, [46 x i8] c"Int overflow in unary - (line 699, column 16)\00" }
+@.str.24 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 699, column 55)\00" }
+@.str.25 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
+@.str.26 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in / (line 782, column 14)\00" }
+@.str.27 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 783, column 24)\00" }
+@.str.28 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 784, column 36)\00" }
+@.str.29 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in * (line 784, column 48)\00" }
+@.str.30 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 784, column 26)\00" }
+@.str.31 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 848, column 74)\00" }
+@.str.32 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 868, column 64)\00" }
+@.str.33 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 874, column 25)\00" }
+@.str.34 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 874, column 36)\00" }
+@.str.35 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in * (line 876, column 28)\00" }
+@.str.36 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 876, column 32)\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -161,70 +197,175 @@ define i64 @stdlib.math.raw_biased_exp(i64 %p$x) {
 entry:
   %t$0 = load i64, ptr @stdlib.math.exp_field_unit
   %t$1 = icmp eq i64 %t$0, 0
-  br i1 %t$1, label %divpanic_1, label %divok_1
+  br i1 %t$1, label %divpanic_1, label %divchk2_1
 divpanic_1:
   %t$2 = getelementptr inbounds { i64, [17 x i8] }, ptr @.str.0, i64 0, i32 1, i64 0
   %t$3 = ptrtoint ptr %t$2 to i64
   call i64 @panic(i64 %t$3)
   unreachable
+divchk2_1:
+  %t$4 = icmp eq i64 %t$0, -1
+  br i1 %t$4, label %divovfchk_1, label %divok_1
+divovfchk_1:
+  %t$5 = icmp eq i64 %p$x, -9223372036854775808
+  br i1 %t$5, label %divovfpanic_1, label %divok_1
+divovfpanic_1:
+  %t$6 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.1, i64 0, i32 1, i64 0
+  %t$7 = ptrtoint ptr %t$6 to i64
+  call i64 @panic(i64 %t$7)
+  unreachable
 divok_1:
-  %t$4 = sdiv i64 %p$x, %t$0
-  ret i64 %t$4
+  %t$8 = sdiv i64 %p$x, %t$0
+  ret i64 %t$8
 }
 
 define i64 @stdlib.math.two_pow(i64 %p$n) {
 entry:
   %t$0 = load i64, ptr @stdlib.math.exp_bias
-  %t$1 = add i64 %p$n, %t$0
-  %t$2 = load i64, ptr @stdlib.math.exp_field_unit
-  %t$3 = mul i64 %t$1, %t$2
-  ret i64 %t$3
+  %t$1$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %p$n, i64 %t$0)
+  %t$1 = extractvalue { i64, i1 } %t$1$agg, 0
+  %t$1$ovf = extractvalue { i64, i1 } %t$1$agg, 1
+  br i1 %t$1$ovf, label %ovfpanic_1, label %ovfok_1
+ovfpanic_1:
+  %t$2 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.2, i64 0, i32 1, i64 0
+  %t$3 = ptrtoint ptr %t$2 to i64
+  call i64 @panic(i64 %t$3)
+  unreachable
+ovfok_1:
+  %t$4 = load i64, ptr @stdlib.math.exp_field_unit
+  %t$5$agg = call { i64, i1 } @llvm.smul.with.overflow.i64(i64 %t$1, i64 %t$4)
+  %t$5 = extractvalue { i64, i1 } %t$5$agg, 0
+  %t$5$ovf = extractvalue { i64, i1 } %t$5$agg, 1
+  br i1 %t$5$ovf, label %ovfpanic_5, label %ovfok_5
+ovfpanic_5:
+  %t$6 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.3, i64 0, i32 1, i64 0
+  %t$7 = ptrtoint ptr %t$6 to i64
+  call i64 @panic(i64 %t$7)
+  unreachable
+ovfok_5:
+  ret i64 %t$5
 }
 
 define i64 @stdlib.math.floor_div_2(i64 %p$e) {
 entry:
   %t$0 = load i64, ptr @stdlib.math.exp_floor_bias
-  %t$1 = add i64 %p$e, %t$0
-  %t$2 = add i64 0, 2
-  %t$3 = icmp eq i64 %t$2, 0
-  br i1 %t$3, label %divpanic_3, label %divok_3
-divpanic_3:
-  %t$4 = getelementptr inbounds { i64, [17 x i8] }, ptr @.str.1, i64 0, i32 1, i64 0
-  %t$5 = ptrtoint ptr %t$4 to i64
-  call i64 @panic(i64 %t$5)
+  %t$1$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %p$e, i64 %t$0)
+  %t$1 = extractvalue { i64, i1 } %t$1$agg, 0
+  %t$1$ovf = extractvalue { i64, i1 } %t$1$agg, 1
+  br i1 %t$1$ovf, label %ovfpanic_1, label %ovfok_1
+ovfpanic_1:
+  %t$2 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.4, i64 0, i32 1, i64 0
+  %t$3 = ptrtoint ptr %t$2 to i64
+  call i64 @panic(i64 %t$3)
   unreachable
-divok_3:
-  %t$6 = sdiv i64 %t$1, %t$2
-  %t$7 = add i64 0, 537
-  %t$8 = sub i64 %t$6, %t$7
-  ret i64 %t$8
+ovfok_1:
+  %t$4 = add i64 0, 2
+  %t$5 = icmp eq i64 %t$4, 0
+  br i1 %t$5, label %divpanic_5, label %divchk2_5
+divpanic_5:
+  %t$6 = getelementptr inbounds { i64, [17 x i8] }, ptr @.str.5, i64 0, i32 1, i64 0
+  %t$7 = ptrtoint ptr %t$6 to i64
+  call i64 @panic(i64 %t$7)
+  unreachable
+divchk2_5:
+  %t$8 = icmp eq i64 %t$4, -1
+  br i1 %t$8, label %divovfchk_5, label %divok_5
+divovfchk_5:
+  %t$9 = icmp eq i64 %t$1, -9223372036854775808
+  br i1 %t$9, label %divovfpanic_5, label %divok_5
+divovfpanic_5:
+  %t$10 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.6, i64 0, i32 1, i64 0
+  %t$11 = ptrtoint ptr %t$10 to i64
+  call i64 @panic(i64 %t$11)
+  unreachable
+divok_5:
+  %t$12 = sdiv i64 %t$1, %t$4
+  %t$13 = add i64 0, 537
+  %t$14$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %t$12, i64 %t$13)
+  %t$14 = extractvalue { i64, i1 } %t$14$agg, 0
+  %t$14$ovf = extractvalue { i64, i1 } %t$14$agg, 1
+  br i1 %t$14$ovf, label %ovfpanic_14, label %ovfok_14
+ovfpanic_14:
+  %t$15 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.7, i64 0, i32 1, i64 0
+  %t$16 = ptrtoint ptr %t$15 to i64
+  call i64 @panic(i64 %t$16)
+  unreachable
+ovfok_14:
+  ret i64 %t$14
 }
 
 define i64 @stdlib.math.floor_div_3(i64 %p$e) {
 entry:
   %t$0 = load i64, ptr @stdlib.math.exp_floor_bias
-  %t$1 = add i64 %p$e, %t$0
-  %t$2 = add i64 0, 3
-  %t$3 = icmp eq i64 %t$2, 0
-  br i1 %t$3, label %divpanic_3, label %divok_3
-divpanic_3:
-  %t$4 = getelementptr inbounds { i64, [17 x i8] }, ptr @.str.2, i64 0, i32 1, i64 0
-  %t$5 = ptrtoint ptr %t$4 to i64
-  call i64 @panic(i64 %t$5)
+  %t$1$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %p$e, i64 %t$0)
+  %t$1 = extractvalue { i64, i1 } %t$1$agg, 0
+  %t$1$ovf = extractvalue { i64, i1 } %t$1$agg, 1
+  br i1 %t$1$ovf, label %ovfpanic_1, label %ovfok_1
+ovfpanic_1:
+  %t$2 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.8, i64 0, i32 1, i64 0
+  %t$3 = ptrtoint ptr %t$2 to i64
+  call i64 @panic(i64 %t$3)
   unreachable
-divok_3:
-  %t$6 = sdiv i64 %t$1, %t$2
-  %t$7 = add i64 0, 358
-  %t$8 = sub i64 %t$6, %t$7
-  ret i64 %t$8
+ovfok_1:
+  %t$4 = add i64 0, 3
+  %t$5 = icmp eq i64 %t$4, 0
+  br i1 %t$5, label %divpanic_5, label %divchk2_5
+divpanic_5:
+  %t$6 = getelementptr inbounds { i64, [17 x i8] }, ptr @.str.9, i64 0, i32 1, i64 0
+  %t$7 = ptrtoint ptr %t$6 to i64
+  call i64 @panic(i64 %t$7)
+  unreachable
+divchk2_5:
+  %t$8 = icmp eq i64 %t$4, -1
+  br i1 %t$8, label %divovfchk_5, label %divok_5
+divovfchk_5:
+  %t$9 = icmp eq i64 %t$1, -9223372036854775808
+  br i1 %t$9, label %divovfpanic_5, label %divok_5
+divovfpanic_5:
+  %t$10 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.10, i64 0, i32 1, i64 0
+  %t$11 = ptrtoint ptr %t$10 to i64
+  call i64 @panic(i64 %t$11)
+  unreachable
+divok_5:
+  %t$12 = sdiv i64 %t$1, %t$4
+  %t$13 = add i64 0, 358
+  %t$14$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %t$12, i64 %t$13)
+  %t$14 = extractvalue { i64, i1 } %t$14$agg, 0
+  %t$14$ovf = extractvalue { i64, i1 } %t$14$agg, 1
+  br i1 %t$14$ovf, label %ovfpanic_14, label %ovfok_14
+ovfpanic_14:
+  %t$15 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.11, i64 0, i32 1, i64 0
+  %t$16 = ptrtoint ptr %t$15 to i64
+  call i64 @panic(i64 %t$16)
+  unreachable
+ovfok_14:
+  ret i64 %t$14
 }
 
 define i64 @stdlib.math.scale_down_pow2(i64 %p$x, i64 %p$n) {
 entry:
   %t$0 = load i64, ptr @stdlib.math.exp_field_unit
-  %t$1 = mul i64 %p$n, %t$0
-  %t$2 = sub i64 %p$x, %t$1
-  ret i64 %t$2
+  %t$1$agg = call { i64, i1 } @llvm.smul.with.overflow.i64(i64 %p$n, i64 %t$0)
+  %t$1 = extractvalue { i64, i1 } %t$1$agg, 0
+  %t$1$ovf = extractvalue { i64, i1 } %t$1$agg, 1
+  br i1 %t$1$ovf, label %ovfpanic_1, label %ovfok_1
+ovfpanic_1:
+  %t$2 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.12, i64 0, i32 1, i64 0
+  %t$3 = ptrtoint ptr %t$2 to i64
+  call i64 @panic(i64 %t$3)
+  unreachable
+ovfok_1:
+  %t$4$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %p$x, i64 %t$1)
+  %t$4 = extractvalue { i64, i1 } %t$4$agg, 0
+  %t$4$ovf = extractvalue { i64, i1 } %t$4$agg, 1
+  br i1 %t$4$ovf, label %ovfpanic_4, label %ovfok_4
+ovfpanic_4:
+  %t$5 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.13, i64 0, i32 1, i64 0
+  %t$6 = ptrtoint ptr %t$5 to i64
+  call i64 @panic(i64 %t$6)
+  unreachable
+ovfok_4:
+  ret i64 %t$4
 }
 
 define i64 @stdlib.math.is_nan(i64 %p$x) {
@@ -376,23 +517,23 @@ join_1:
 
 define i64 @stdlib.math.sqrt_iter(i64 %p$x$in, i64 %p$guess$in, i64 %p$i$in) {
 entry:
-  %t$13 = alloca i64
-  store i64 %p$x$in, ptr %t$13
-  %t$14 = alloca i64
-  store i64 %p$guess$in, ptr %t$14
   %t$15 = alloca i64
-  store i64 %p$i$in, ptr %t$15
-  %t$16 = call ptr @llvm.stacksave()
+  store i64 %p$x$in, ptr %t$15
+  %t$16 = alloca i64
+  store i64 %p$guess$in, ptr %t$16
+  %t$17 = alloca i64
+  store i64 %p$i$in, ptr %t$17
+  %t$18 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
-  %p$x = load i64, ptr %t$13
-  %p$guess = load i64, ptr %t$14
-  %p$i = load i64, ptr %t$15
+  %p$x = load i64, ptr %t$15
+  %p$guess = load i64, ptr %t$16
+  %p$i = load i64, ptr %t$17
   %t$0 = add i64 0, 6
   %t$1 = icmp sge i64 %p$i, %t$0
   %t$2 = zext i1 %t$1 to i64
-  %t$12 = trunc i64 %t$2 to i1
-  br i1 %t$12, label %then_3, label %else_3
+  %t$14 = trunc i64 %t$2 to i1
+  br i1 %t$14, label %then_3, label %else_3
 then_3:
   br label %join_3
 else_3:
@@ -410,11 +551,20 @@ else_3:
   %t$8$fr = fmul double %t$8$la, %t$8$lb
   %t$8 = bitcast double %t$8$fr to i64
   %t$9 = add i64 0, 1
-  %t$10 = add i64 %p$i, %t$9
-  store i64 %p$x, ptr %t$13
-  store i64 %t$8, ptr %t$14
-  store i64 %t$10, ptr %t$15
-  call void @llvm.stackrestore(ptr %t$16)
+  %t$10$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %p$i, i64 %t$9)
+  %t$10 = extractvalue { i64, i1 } %t$10$agg, 0
+  %t$10$ovf = extractvalue { i64, i1 } %t$10$agg, 1
+  br i1 %t$10$ovf, label %ovfpanic_10, label %ovfok_10
+ovfpanic_10:
+  %t$11 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.14, i64 0, i32 1, i64 0
+  %t$12 = ptrtoint ptr %t$11 to i64
+  call i64 @panic(i64 %t$12)
+  unreachable
+ovfok_10:
+  store i64 %p$x, ptr %t$15
+  store i64 %t$8, ptr %t$16
+  store i64 %t$10, ptr %t$17
+  call void @llvm.stackrestore(ptr %t$18)
   br label %tco_loop
 join_3:
   %t$4 = phi i64 [%p$guess, %then_3]
@@ -427,8 +577,8 @@ entry:
   %t$1 = add i64 0, 0
   %t$2 = icmp eq i64 %t$0, %t$1
   %t$3 = zext i1 %t$2 to i64
-  %t$14 = trunc i64 %t$3 to i1
-  br i1 %t$14, label %then_4, label %else_4
+  %t$16 = trunc i64 %t$3 to i1
+  br i1 %t$16, label %then_4, label %else_4
 then_4:
   %t$6 = load i64, ptr @stdlib.math.two54
   %t$7$la = bitcast i64 %p$x to double
@@ -437,15 +587,24 @@ then_4:
   %t$7 = bitcast double %t$7$fr to i64
   %t$8 = add i64 0, 0
   %t$9 = add i64 0, 54
-  %t$10 = sub i64 %t$8, %t$9
-  %t$11 = call i64 @stdlib.math.sqrt_reduce_norm(i64 %t$7, i64 %t$10)
+  %t$10$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %t$8, i64 %t$9)
+  %t$10 = extractvalue { i64, i1 } %t$10$agg, 0
+  %t$10$ovf = extractvalue { i64, i1 } %t$10$agg, 1
+  br i1 %t$10$ovf, label %ovfpanic_10, label %ovfok_10
+ovfpanic_10:
+  %t$11 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.15, i64 0, i32 1, i64 0
+  %t$12 = ptrtoint ptr %t$11 to i64
+  call i64 @panic(i64 %t$12)
+  unreachable
+ovfok_10:
+  %t$13 = call i64 @stdlib.math.sqrt_reduce_norm(i64 %t$7, i64 %t$10)
   br label %join_4
 else_4:
-  %t$12 = add i64 0, 0
-  %t$13 = call i64 @stdlib.math.sqrt_reduce_norm(i64 %p$x, i64 %t$12)
+  %t$14 = add i64 0, 0
+  %t$15 = call i64 @stdlib.math.sqrt_reduce_norm(i64 %p$x, i64 %t$14)
   br label %join_4
 join_4:
-  %t$5 = phi i64 [%t$11, %then_4], [%t$13, %else_4]
+  %t$5 = phi i64 [%t$13, %ovfok_10], [%t$15, %else_4]
   ret i64 %t$5
 }
 
@@ -453,45 +612,81 @@ define i64 @stdlib.math.sqrt_reduce_norm(i64 %p$x, i64 %p$adj) {
 entry:
   %t$0 = call i64 @stdlib.math.raw_biased_exp(i64 %p$x)
   %t$1 = load i64, ptr @stdlib.math.exp_bias
-  %t$2 = sub i64 %t$0, %t$1
-  %t$3 = add i64 %t$2, %p$adj
-  br label %arm_0_4
-arm_0_4:
-  %t$6 = call i64 @stdlib.math.floor_div_2(i64 %t$3)
-  br label %arm_0_7
-arm_0_7:
-  %t$9 = add i64 0, 2
-  %t$10 = mul i64 %t$9, %t$6
-  %t$11 = sub i64 %t$10, %p$adj
-  %t$12 = call i64 @stdlib.math.scale_down_pow2(i64 %p$x, i64 %t$11)
-  br label %arm_0_13
-arm_0_13:
-  %t$15 = call i64 @stdlib.math.two_pow(i64 %t$6)
-  %t$16 = add i64 0, 0
-  %t$17 = call i64 @stdlib.math.sqrt_iter(i64 %t$12, i64 %t$12, i64 %t$16)
-  %t$18$la = bitcast i64 %t$15 to double
-  %t$18$lb = bitcast i64 %t$17 to double
-  %t$18$fr = fmul double %t$18$la, %t$18$lb
-  %t$18 = bitcast double %t$18$fr to i64
-  br label %join_13
-arm_1_13:
+  %t$2$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %t$0, i64 %t$1)
+  %t$2 = extractvalue { i64, i1 } %t$2$agg, 0
+  %t$2$ovf = extractvalue { i64, i1 } %t$2$agg, 1
+  br i1 %t$2$ovf, label %ovfpanic_2, label %ovfok_2
+ovfpanic_2:
+  %t$3 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.16, i64 0, i32 1, i64 0
+  %t$4 = ptrtoint ptr %t$3 to i64
+  call i64 @panic(i64 %t$4)
+  unreachable
+ovfok_2:
+  %t$5$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %t$2, i64 %p$adj)
+  %t$5 = extractvalue { i64, i1 } %t$5$agg, 0
+  %t$5$ovf = extractvalue { i64, i1 } %t$5$agg, 1
+  br i1 %t$5$ovf, label %ovfpanic_5, label %ovfok_5
+ovfpanic_5:
+  %t$6 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.17, i64 0, i32 1, i64 0
+  %t$7 = ptrtoint ptr %t$6 to i64
+  call i64 @panic(i64 %t$7)
+  unreachable
+ovfok_5:
+  br label %arm_0_8
+arm_0_8:
+  %t$10 = call i64 @stdlib.math.floor_div_2(i64 %t$5)
+  br label %arm_0_11
+arm_0_11:
+  %t$13 = add i64 0, 2
+  %t$14$agg = call { i64, i1 } @llvm.smul.with.overflow.i64(i64 %t$13, i64 %t$10)
+  %t$14 = extractvalue { i64, i1 } %t$14$agg, 0
+  %t$14$ovf = extractvalue { i64, i1 } %t$14$agg, 1
+  br i1 %t$14$ovf, label %ovfpanic_14, label %ovfok_14
+ovfpanic_14:
+  %t$15 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.18, i64 0, i32 1, i64 0
+  %t$16 = ptrtoint ptr %t$15 to i64
+  call i64 @panic(i64 %t$16)
+  unreachable
+ovfok_14:
+  %t$17$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %t$14, i64 %p$adj)
+  %t$17 = extractvalue { i64, i1 } %t$17$agg, 0
+  %t$17$ovf = extractvalue { i64, i1 } %t$17$agg, 1
+  br i1 %t$17$ovf, label %ovfpanic_17, label %ovfok_17
+ovfpanic_17:
+  %t$18 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.19, i64 0, i32 1, i64 0
+  %t$19 = ptrtoint ptr %t$18 to i64
+  call i64 @panic(i64 %t$19)
+  unreachable
+ovfok_17:
+  %t$20 = call i64 @stdlib.math.scale_down_pow2(i64 %p$x, i64 %t$17)
+  br label %arm_0_21
+arm_0_21:
+  %t$23 = call i64 @stdlib.math.two_pow(i64 %t$10)
+  %t$24 = add i64 0, 0
+  %t$25 = call i64 @stdlib.math.sqrt_iter(i64 %t$20, i64 %t$20, i64 %t$24)
+  %t$26$la = bitcast i64 %t$23 to double
+  %t$26$lb = bitcast i64 %t$25 to double
+  %t$26$fr = fmul double %t$26$la, %t$26$lb
+  %t$26 = bitcast double %t$26$fr to i64
+  br label %join_21
+arm_1_21:
   call void @sprout_abort_match()
   unreachable
-join_13:
-  %t$14 = phi i64 [%t$18, %arm_0_13]
-  br label %join_7
-arm_1_7:
+join_21:
+  %t$22 = phi i64 [%t$26, %arm_0_21]
+  br label %join_11
+arm_1_11:
   call void @sprout_abort_match()
   unreachable
-join_7:
-  %t$8 = phi i64 [%t$14, %join_13]
-  br label %join_4
-arm_1_4:
+join_11:
+  %t$12 = phi i64 [%t$22, %join_21]
+  br label %join_8
+arm_1_8:
   call void @sprout_abort_match()
   unreachable
-join_4:
-  %t$5 = phi i64 [%t$8, %join_7]
-  ret i64 %t$5
+join_8:
+  %t$9 = phi i64 [%t$12, %join_11]
+  ret i64 %t$9
 }
 
 define i64 @stdlib.math.sqrt(i64 %p$x) {
@@ -780,7 +975,16 @@ entry:
   %t$1$fr = fadd double %t$1$la, %t$1$lb
   %t$1 = bitcast double %t$1$fr to i64
   %t$2 = load i64, ptr @stdlib.math.two52_bits
-  %t$3 = sub i64 %t$1, %t$2
+  %t$3$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %t$1, i64 %t$2)
+  %t$3 = extractvalue { i64, i1 } %t$3$agg, 0
+  %t$3$ovf = extractvalue { i64, i1 } %t$3$agg, 1
+  br i1 %t$3$ovf, label %ovfpanic_3, label %ovfok_3
+ovfpanic_3:
+  %t$4 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.20, i64 0, i32 1, i64 0
+  %t$5 = ptrtoint ptr %t$4 to i64
+  call i64 @panic(i64 %t$5)
+  unreachable
+ovfok_3:
   ret i64 %t$3
 }
 
@@ -791,8 +995,8 @@ entry:
   %t$1$fb = bitcast i64 %t$0 to double
   %t$1 = fcmp olt double %t$1$fa, %t$1$fb
   %t$2 = zext i1 %t$1 to i64
-  %t$11 = trunc i64 %t$2 to i1
-  br i1 %t$11, label %then_3, label %else_3
+  %t$13 = trunc i64 %t$2 to i1
+  br i1 %t$13, label %then_3, label %else_3
 then_3:
   %t$5 = add i64 0, 0
   %t$6 = bitcast double 0.0 to i64
@@ -801,13 +1005,22 @@ then_3:
   %t$7$fr = fsub double %t$7$la, %t$7$lb
   %t$7 = bitcast double %t$7$fr to i64
   %t$8 = call i64 @stdlib.math.round_to_int_pos(i64 %t$7)
-  %t$9 = sub i64 %t$5, %t$8
+  %t$9$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %t$5, i64 %t$8)
+  %t$9 = extractvalue { i64, i1 } %t$9$agg, 0
+  %t$9$ovf = extractvalue { i64, i1 } %t$9$agg, 1
+  br i1 %t$9$ovf, label %ovfpanic_9, label %ovfok_9
+ovfpanic_9:
+  %t$10 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.21, i64 0, i32 1, i64 0
+  %t$11 = ptrtoint ptr %t$10 to i64
+  call i64 @panic(i64 %t$11)
+  unreachable
+ovfok_9:
   br label %join_3
 else_3:
-  %t$10 = call i64 @stdlib.math.round_to_int_pos(i64 %p$v)
+  %t$12 = call i64 @stdlib.math.round_to_int_pos(i64 %p$v)
   br label %join_3
 join_3:
-  %t$4 = phi i64 [%t$9, %then_3], [%t$10, %else_3]
+  %t$4 = phi i64 [%t$9, %ovfok_9], [%t$12, %else_3]
   ret i64 %t$4
 }
 
@@ -816,8 +1029,8 @@ entry:
   %t$0 = add i64 0, 1023
   %t$1 = icmp sgt i64 %p$ki, %t$0
   %t$2 = zext i1 %t$1 to i64
-  %t$14 = trunc i64 %t$2 to i1
-  br i1 %t$14, label %then_3, label %else_3
+  %t$16 = trunc i64 %t$2 to i1
+  br i1 %t$16, label %then_3, label %else_3
 then_3:
   %t$5 = add i64 0, 1023
   %t$6 = call i64 @stdlib.math.two_pow(i64 %t$5)
@@ -826,22 +1039,31 @@ then_3:
   %t$7$fr = fmul double %t$7$la, %t$7$lb
   %t$7 = bitcast double %t$7$fr to i64
   %t$8 = add i64 0, 1023
-  %t$9 = sub i64 %p$ki, %t$8
-  %t$10 = call i64 @stdlib.math.two_pow(i64 %t$9)
-  %t$11$la = bitcast i64 %t$7 to double
-  %t$11$lb = bitcast i64 %t$10 to double
-  %t$11$fr = fmul double %t$11$la, %t$11$lb
-  %t$11 = bitcast double %t$11$fr to i64
-  br label %join_3
-else_3:
-  %t$12 = call i64 @stdlib.math.two_pow(i64 %p$ki)
-  %t$13$la = bitcast i64 %p$y to double
+  %t$9$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %p$ki, i64 %t$8)
+  %t$9 = extractvalue { i64, i1 } %t$9$agg, 0
+  %t$9$ovf = extractvalue { i64, i1 } %t$9$agg, 1
+  br i1 %t$9$ovf, label %ovfpanic_9, label %ovfok_9
+ovfpanic_9:
+  %t$10 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.22, i64 0, i32 1, i64 0
+  %t$11 = ptrtoint ptr %t$10 to i64
+  call i64 @panic(i64 %t$11)
+  unreachable
+ovfok_9:
+  %t$12 = call i64 @stdlib.math.two_pow(i64 %t$9)
+  %t$13$la = bitcast i64 %t$7 to double
   %t$13$lb = bitcast i64 %t$12 to double
   %t$13$fr = fmul double %t$13$la, %t$13$lb
   %t$13 = bitcast double %t$13$fr to i64
   br label %join_3
+else_3:
+  %t$14 = call i64 @stdlib.math.two_pow(i64 %p$ki)
+  %t$15$la = bitcast i64 %p$y to double
+  %t$15$lb = bitcast i64 %t$14 to double
+  %t$15$fr = fmul double %t$15$la, %t$15$lb
+  %t$15 = bitcast double %t$15$fr to i64
+  br label %join_3
 join_3:
-  %t$4 = phi i64 [%t$11, %then_3], [%t$13, %else_3]
+  %t$4 = phi i64 [%t$13, %ovfok_9], [%t$15, %else_3]
   ret i64 %t$4
 }
 
@@ -871,8 +1093,8 @@ arm_0_6:
   br label %arm_0_11
 arm_0_11:
   %t$13 = call i64 @stdlib.math.is_nan(i64 %p$x)
-  %t$46 = trunc i64 %t$13 to i1
-  br i1 %t$46, label %then_14, label %else_14
+  %t$50 = trunc i64 %t$13 to i1
+  br i1 %t$50, label %then_14, label %else_14
 then_14:
   br label %join_14
 else_14:
@@ -881,8 +1103,8 @@ else_14:
   %t$17$fb = bitcast i64 %t$16 to double
   %t$17 = fcmp ogt double %t$17$fa, %t$17$fb
   %t$18 = zext i1 %t$17 to i64
-  %t$45 = trunc i64 %t$18 to i1
-  br i1 %t$45, label %then_19, label %else_19
+  %t$49 = trunc i64 %t$18 to i1
+  br i1 %t$49, label %then_19, label %else_19
 then_19:
   %t$21 = load i64, ptr @stdlib.math.inf
   br label %join_19
@@ -895,38 +1117,56 @@ else_19:
   %t$24$fb = bitcast i64 %t$23 to double
   %t$24 = fcmp olt double %t$24$fa, %t$24$fb
   %t$25 = zext i1 %t$24 to i64
-  %t$44 = trunc i64 %t$25 to i1
-  br i1 %t$44, label %then_26, label %else_26
+  %t$48 = trunc i64 %t$25 to i1
+  br i1 %t$48, label %then_26, label %else_26
 then_26:
   %t$28 = bitcast double 0.0 to i64
   br label %join_26
 else_26:
   %t$29 = add i64 0, 1021
-  %t$30 = sub i64 0, %t$29
-  %t$31 = icmp slt i64 %t$2, %t$30
-  %t$32 = zext i1 %t$31 to i64
-  %t$43 = trunc i64 %t$32 to i1
-  br i1 %t$43, label %then_33, label %else_33
-then_33:
-  %t$35 = call i64 @stdlib.math.exp_series(i64 %t$10)
-  %t$36 = add i64 0, 54
-  %t$37 = add i64 %t$2, %t$36
-  %t$38 = call i64 @stdlib.math.exp_scale(i64 %t$35, i64 %t$37)
-  %t$39 = load i64, ptr @stdlib.math.two54
-  %t$40$la = bitcast i64 %t$38 to double
-  %t$40$lb = bitcast i64 %t$39 to double
-  %t$40$fr = fdiv double %t$40$la, %t$40$lb
-  %t$40 = bitcast double %t$40$fr to i64
-  br label %join_33
-else_33:
-  %t$41 = call i64 @stdlib.math.exp_series(i64 %t$10)
-  %t$42 = call i64 @stdlib.math.exp_scale(i64 %t$41, i64 %t$2)
-  br label %join_33
-join_33:
-  %t$34 = phi i64 [%t$40, %then_33], [%t$42, %else_33]
+  %t$30$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 0, i64 %t$29)
+  %t$30 = extractvalue { i64, i1 } %t$30$agg, 0
+  %t$30$ovf = extractvalue { i64, i1 } %t$30$agg, 1
+  br i1 %t$30$ovf, label %ovfpanic_30, label %ovfok_30
+ovfpanic_30:
+  %t$31 = getelementptr inbounds { i64, [46 x i8] }, ptr @.str.23, i64 0, i32 1, i64 0
+  %t$32 = ptrtoint ptr %t$31 to i64
+  call i64 @panic(i64 %t$32)
+  unreachable
+ovfok_30:
+  %t$33 = icmp slt i64 %t$2, %t$30
+  %t$34 = zext i1 %t$33 to i64
+  %t$47 = trunc i64 %t$34 to i1
+  br i1 %t$47, label %then_35, label %else_35
+then_35:
+  %t$37 = call i64 @stdlib.math.exp_series(i64 %t$10)
+  %t$38 = add i64 0, 54
+  %t$39$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %t$2, i64 %t$38)
+  %t$39 = extractvalue { i64, i1 } %t$39$agg, 0
+  %t$39$ovf = extractvalue { i64, i1 } %t$39$agg, 1
+  br i1 %t$39$ovf, label %ovfpanic_39, label %ovfok_39
+ovfpanic_39:
+  %t$40 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.24, i64 0, i32 1, i64 0
+  %t$41 = ptrtoint ptr %t$40 to i64
+  call i64 @panic(i64 %t$41)
+  unreachable
+ovfok_39:
+  %t$42 = call i64 @stdlib.math.exp_scale(i64 %t$37, i64 %t$39)
+  %t$43 = load i64, ptr @stdlib.math.two54
+  %t$44$la = bitcast i64 %t$42 to double
+  %t$44$lb = bitcast i64 %t$43 to double
+  %t$44$fr = fdiv double %t$44$la, %t$44$lb
+  %t$44 = bitcast double %t$44$fr to i64
+  br label %join_35
+else_35:
+  %t$45 = call i64 @stdlib.math.exp_series(i64 %t$10)
+  %t$46 = call i64 @stdlib.math.exp_scale(i64 %t$45, i64 %t$2)
+  br label %join_35
+join_35:
+  %t$36 = phi i64 [%t$44, %ovfok_39], [%t$46, %else_35]
   br label %join_26
 join_26:
-  %t$27 = phi i64 [%t$28, %then_26], [%t$34, %join_33]
+  %t$27 = phi i64 [%t$28, %then_26], [%t$36, %join_35]
   br label %join_19
 join_19:
   %t$20 = phi i64 [%t$21, %then_19], [%t$27, %join_26]
@@ -1138,104 +1378,151 @@ entry:
 arm_0_0:
   %t$2 = load i64, ptr @stdlib.math.exp_field_unit
   %t$3 = icmp eq i64 %t$2, 0
-  br i1 %t$3, label %divpanic_3, label %divok_3
+  br i1 %t$3, label %divpanic_3, label %divchk2_3
 divpanic_3:
-  %t$4 = getelementptr inbounds { i64, [17 x i8] }, ptr @.str.3, i64 0, i32 1, i64 0
+  %t$4 = getelementptr inbounds { i64, [17 x i8] }, ptr @.str.25, i64 0, i32 1, i64 0
   %t$5 = ptrtoint ptr %t$4 to i64
   call i64 @panic(i64 %t$5)
   unreachable
+divchk2_3:
+  %t$6 = icmp eq i64 %t$2, -1
+  br i1 %t$6, label %divovfchk_3, label %divok_3
+divovfchk_3:
+  %t$7 = icmp eq i64 %p$x, -9223372036854775808
+  br i1 %t$7, label %divovfpanic_3, label %divok_3
+divovfpanic_3:
+  %t$8 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.26, i64 0, i32 1, i64 0
+  %t$9 = ptrtoint ptr %t$8 to i64
+  call i64 @panic(i64 %t$9)
+  unreachable
 divok_3:
-  %t$6 = sdiv i64 %p$x, %t$2
-  br label %arm_0_7
-arm_0_7:
-  %t$9 = load i64, ptr @stdlib.math.exp_bias
-  %t$10 = sub i64 %t$6, %t$9
-  %t$11$fr = sitofp i64 %t$10 to double
-  %t$11 = bitcast double %t$11$fr to i64
-  br label %arm_0_12
-arm_0_12:
-  %t$14 = load i64, ptr @stdlib.math.exp_bias
-  %t$15 = sub i64 %t$6, %t$14
-  %t$16 = load i64, ptr @stdlib.math.exp_field_unit
-  %t$17 = mul i64 %t$15, %t$16
-  %t$18 = sub i64 %p$x, %t$17
-  br label %arm_0_19
-arm_0_19:
-  %t$21 = load i64, ptr @stdlib.math.sqrt2
-  %t$22$fa = bitcast i64 %t$18 to double
-  %t$22$fb = bitcast i64 %t$21 to double
-  %t$22 = fcmp oge double %t$22$fa, %t$22$fb
-  %t$23 = zext i1 %t$22 to i64
-  %t$40 = trunc i64 %t$23 to i1
-  br i1 %t$40, label %then_24, label %else_24
-then_24:
-  %t$26$la = bitcast i64 %t$11 to double
-  %t$26$lb = bitcast i64 %p$adj to double
-  %t$26$fr = fadd double %t$26$la, %t$26$lb
-  %t$26 = bitcast double %t$26$fr to i64
-  %t$27 = bitcast double 1.0 to i64
-  %t$28$la = bitcast i64 %t$26 to double
-  %t$28$lb = bitcast i64 %t$27 to double
-  %t$28$fr = fadd double %t$28$la, %t$28$lb
-  %t$28 = bitcast double %t$28$fr to i64
-  %t$29 = load i64, ptr @stdlib.math.ln2
-  %t$30$la = bitcast i64 %t$28 to double
-  %t$30$lb = bitcast i64 %t$29 to double
-  %t$30$fr = fmul double %t$30$la, %t$30$lb
-  %t$30 = bitcast double %t$30$fr to i64
-  %t$31 = bitcast double 0.5 to i64
-  %t$32$la = bitcast i64 %t$18 to double
-  %t$32$lb = bitcast i64 %t$31 to double
-  %t$32$fr = fmul double %t$32$la, %t$32$lb
-  %t$32 = bitcast double %t$32$fr to i64
-  %t$33 = call i64 @stdlib.math.ln_series(i64 %t$32)
-  %t$34$la = bitcast i64 %t$30 to double
-  %t$34$lb = bitcast i64 %t$33 to double
-  %t$34$fr = fadd double %t$34$la, %t$34$lb
-  %t$34 = bitcast double %t$34$fr to i64
-  br label %join_24
-else_24:
-  %t$35$la = bitcast i64 %t$11 to double
-  %t$35$lb = bitcast i64 %p$adj to double
-  %t$35$fr = fadd double %t$35$la, %t$35$lb
-  %t$35 = bitcast double %t$35$fr to i64
-  %t$36 = load i64, ptr @stdlib.math.ln2
-  %t$37$la = bitcast i64 %t$35 to double
-  %t$37$lb = bitcast i64 %t$36 to double
-  %t$37$fr = fmul double %t$37$la, %t$37$lb
-  %t$37 = bitcast double %t$37$fr to i64
-  %t$38 = call i64 @stdlib.math.ln_series(i64 %t$18)
-  %t$39$la = bitcast i64 %t$37 to double
-  %t$39$lb = bitcast i64 %t$38 to double
-  %t$39$fr = fadd double %t$39$la, %t$39$lb
-  %t$39 = bitcast double %t$39$fr to i64
-  br label %join_24
-join_24:
-  %t$25 = phi i64 [%t$34, %then_24], [%t$39, %else_24]
-  br label %join_19
-arm_1_19:
+  %t$10 = sdiv i64 %p$x, %t$2
+  br label %arm_0_11
+arm_0_11:
+  %t$13 = load i64, ptr @stdlib.math.exp_bias
+  %t$14$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %t$10, i64 %t$13)
+  %t$14 = extractvalue { i64, i1 } %t$14$agg, 0
+  %t$14$ovf = extractvalue { i64, i1 } %t$14$agg, 1
+  br i1 %t$14$ovf, label %ovfpanic_14, label %ovfok_14
+ovfpanic_14:
+  %t$15 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.27, i64 0, i32 1, i64 0
+  %t$16 = ptrtoint ptr %t$15 to i64
+  call i64 @panic(i64 %t$16)
+  unreachable
+ovfok_14:
+  %t$17$fr = sitofp i64 %t$14 to double
+  %t$17 = bitcast double %t$17$fr to i64
+  br label %arm_0_18
+arm_0_18:
+  %t$20 = load i64, ptr @stdlib.math.exp_bias
+  %t$21$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %t$10, i64 %t$20)
+  %t$21 = extractvalue { i64, i1 } %t$21$agg, 0
+  %t$21$ovf = extractvalue { i64, i1 } %t$21$agg, 1
+  br i1 %t$21$ovf, label %ovfpanic_21, label %ovfok_21
+ovfpanic_21:
+  %t$22 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.28, i64 0, i32 1, i64 0
+  %t$23 = ptrtoint ptr %t$22 to i64
+  call i64 @panic(i64 %t$23)
+  unreachable
+ovfok_21:
+  %t$24 = load i64, ptr @stdlib.math.exp_field_unit
+  %t$25$agg = call { i64, i1 } @llvm.smul.with.overflow.i64(i64 %t$21, i64 %t$24)
+  %t$25 = extractvalue { i64, i1 } %t$25$agg, 0
+  %t$25$ovf = extractvalue { i64, i1 } %t$25$agg, 1
+  br i1 %t$25$ovf, label %ovfpanic_25, label %ovfok_25
+ovfpanic_25:
+  %t$26 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.29, i64 0, i32 1, i64 0
+  %t$27 = ptrtoint ptr %t$26 to i64
+  call i64 @panic(i64 %t$27)
+  unreachable
+ovfok_25:
+  %t$28$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %p$x, i64 %t$25)
+  %t$28 = extractvalue { i64, i1 } %t$28$agg, 0
+  %t$28$ovf = extractvalue { i64, i1 } %t$28$agg, 1
+  br i1 %t$28$ovf, label %ovfpanic_28, label %ovfok_28
+ovfpanic_28:
+  %t$29 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.30, i64 0, i32 1, i64 0
+  %t$30 = ptrtoint ptr %t$29 to i64
+  call i64 @panic(i64 %t$30)
+  unreachable
+ovfok_28:
+  br label %arm_0_31
+arm_0_31:
+  %t$33 = load i64, ptr @stdlib.math.sqrt2
+  %t$34$fa = bitcast i64 %t$28 to double
+  %t$34$fb = bitcast i64 %t$33 to double
+  %t$34 = fcmp oge double %t$34$fa, %t$34$fb
+  %t$35 = zext i1 %t$34 to i64
+  %t$52 = trunc i64 %t$35 to i1
+  br i1 %t$52, label %then_36, label %else_36
+then_36:
+  %t$38$la = bitcast i64 %t$17 to double
+  %t$38$lb = bitcast i64 %p$adj to double
+  %t$38$fr = fadd double %t$38$la, %t$38$lb
+  %t$38 = bitcast double %t$38$fr to i64
+  %t$39 = bitcast double 1.0 to i64
+  %t$40$la = bitcast i64 %t$38 to double
+  %t$40$lb = bitcast i64 %t$39 to double
+  %t$40$fr = fadd double %t$40$la, %t$40$lb
+  %t$40 = bitcast double %t$40$fr to i64
+  %t$41 = load i64, ptr @stdlib.math.ln2
+  %t$42$la = bitcast i64 %t$40 to double
+  %t$42$lb = bitcast i64 %t$41 to double
+  %t$42$fr = fmul double %t$42$la, %t$42$lb
+  %t$42 = bitcast double %t$42$fr to i64
+  %t$43 = bitcast double 0.5 to i64
+  %t$44$la = bitcast i64 %t$28 to double
+  %t$44$lb = bitcast i64 %t$43 to double
+  %t$44$fr = fmul double %t$44$la, %t$44$lb
+  %t$44 = bitcast double %t$44$fr to i64
+  %t$45 = call i64 @stdlib.math.ln_series(i64 %t$44)
+  %t$46$la = bitcast i64 %t$42 to double
+  %t$46$lb = bitcast i64 %t$45 to double
+  %t$46$fr = fadd double %t$46$la, %t$46$lb
+  %t$46 = bitcast double %t$46$fr to i64
+  br label %join_36
+else_36:
+  %t$47$la = bitcast i64 %t$17 to double
+  %t$47$lb = bitcast i64 %p$adj to double
+  %t$47$fr = fadd double %t$47$la, %t$47$lb
+  %t$47 = bitcast double %t$47$fr to i64
+  %t$48 = load i64, ptr @stdlib.math.ln2
+  %t$49$la = bitcast i64 %t$47 to double
+  %t$49$lb = bitcast i64 %t$48 to double
+  %t$49$fr = fmul double %t$49$la, %t$49$lb
+  %t$49 = bitcast double %t$49$fr to i64
+  %t$50 = call i64 @stdlib.math.ln_series(i64 %t$28)
+  %t$51$la = bitcast i64 %t$49 to double
+  %t$51$lb = bitcast i64 %t$50 to double
+  %t$51$fr = fadd double %t$51$la, %t$51$lb
+  %t$51 = bitcast double %t$51$fr to i64
+  br label %join_36
+join_36:
+  %t$37 = phi i64 [%t$46, %then_36], [%t$51, %else_36]
+  br label %join_31
+arm_1_31:
   call void @sprout_abort_match()
   unreachable
-join_19:
-  %t$20 = phi i64 [%t$25, %join_24]
-  br label %join_12
-arm_1_12:
+join_31:
+  %t$32 = phi i64 [%t$37, %join_36]
+  br label %join_18
+arm_1_18:
   call void @sprout_abort_match()
   unreachable
-join_12:
-  %t$13 = phi i64 [%t$20, %join_19]
-  br label %join_7
-arm_1_7:
+join_18:
+  %t$19 = phi i64 [%t$32, %join_31]
+  br label %join_11
+arm_1_11:
   call void @sprout_abort_match()
   unreachable
-join_7:
-  %t$8 = phi i64 [%t$13, %join_12]
+join_11:
+  %t$12 = phi i64 [%t$19, %join_18]
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
   unreachable
 join_0:
-  %t$1 = phi i64 [%t$8, %join_7]
+  %t$1 = phi i64 [%t$12, %join_11]
   ret i64 %t$1
 }
 
@@ -1306,23 +1593,23 @@ join_1:
 
 define i64 @stdlib.math.cbrt_iter(i64 %p$x$in, i64 %p$guess$in, i64 %p$i$in) {
 entry:
-  %t$18 = alloca i64
-  store i64 %p$x$in, ptr %t$18
-  %t$19 = alloca i64
-  store i64 %p$guess$in, ptr %t$19
   %t$20 = alloca i64
-  store i64 %p$i$in, ptr %t$20
-  %t$21 = call ptr @llvm.stacksave()
+  store i64 %p$x$in, ptr %t$20
+  %t$21 = alloca i64
+  store i64 %p$guess$in, ptr %t$21
+  %t$22 = alloca i64
+  store i64 %p$i$in, ptr %t$22
+  %t$23 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
-  %p$x = load i64, ptr %t$18
-  %p$guess = load i64, ptr %t$19
-  %p$i = load i64, ptr %t$20
+  %p$x = load i64, ptr %t$20
+  %p$guess = load i64, ptr %t$21
+  %p$i = load i64, ptr %t$22
   %t$0 = add i64 0, 6
   %t$1 = icmp sge i64 %p$i, %t$0
   %t$2 = zext i1 %t$1 to i64
-  %t$17 = trunc i64 %t$2 to i1
-  br i1 %t$17, label %then_3, label %else_3
+  %t$19 = trunc i64 %t$2 to i1
+  br i1 %t$19, label %then_3, label %else_3
 then_3:
   br label %join_3
 else_3:
@@ -1354,11 +1641,20 @@ else_3:
   %t$13$fr = fmul double %t$13$la, %t$13$lb
   %t$13 = bitcast double %t$13$fr to i64
   %t$14 = add i64 0, 1
-  %t$15 = add i64 %p$i, %t$14
-  store i64 %p$x, ptr %t$18
-  store i64 %t$13, ptr %t$19
-  store i64 %t$15, ptr %t$20
-  call void @llvm.stackrestore(ptr %t$21)
+  %t$15$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %p$i, i64 %t$14)
+  %t$15 = extractvalue { i64, i1 } %t$15$agg, 0
+  %t$15$ovf = extractvalue { i64, i1 } %t$15$agg, 1
+  br i1 %t$15$ovf, label %ovfpanic_15, label %ovfok_15
+ovfpanic_15:
+  %t$16 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.31, i64 0, i32 1, i64 0
+  %t$17 = ptrtoint ptr %t$16 to i64
+  call i64 @panic(i64 %t$17)
+  unreachable
+ovfok_15:
+  store i64 %p$x, ptr %t$20
+  store i64 %t$13, ptr %t$21
+  store i64 %t$15, ptr %t$22
+  call void @llvm.stackrestore(ptr %t$23)
   br label %tco_loop
 join_3:
   %t$4 = phi i64 [%p$guess, %then_3]
@@ -1371,8 +1667,8 @@ entry:
   %t$1 = add i64 0, 0
   %t$2 = icmp eq i64 %t$0, %t$1
   %t$3 = zext i1 %t$2 to i64
-  %t$14 = trunc i64 %t$3 to i1
-  br i1 %t$14, label %then_4, label %else_4
+  %t$16 = trunc i64 %t$3 to i1
+  br i1 %t$16, label %then_4, label %else_4
 then_4:
   %t$6 = load i64, ptr @stdlib.math.two54
   %t$7$la = bitcast i64 %p$x to double
@@ -1381,15 +1677,24 @@ then_4:
   %t$7 = bitcast double %t$7$fr to i64
   %t$8 = add i64 0, 0
   %t$9 = add i64 0, 54
-  %t$10 = sub i64 %t$8, %t$9
-  %t$11 = call i64 @stdlib.math.cbrt_reduce_norm(i64 %t$7, i64 %t$10)
+  %t$10$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %t$8, i64 %t$9)
+  %t$10 = extractvalue { i64, i1 } %t$10$agg, 0
+  %t$10$ovf = extractvalue { i64, i1 } %t$10$agg, 1
+  br i1 %t$10$ovf, label %ovfpanic_10, label %ovfok_10
+ovfpanic_10:
+  %t$11 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.32, i64 0, i32 1, i64 0
+  %t$12 = ptrtoint ptr %t$11 to i64
+  call i64 @panic(i64 %t$12)
+  unreachable
+ovfok_10:
+  %t$13 = call i64 @stdlib.math.cbrt_reduce_norm(i64 %t$7, i64 %t$10)
   br label %join_4
 else_4:
-  %t$12 = add i64 0, 0
-  %t$13 = call i64 @stdlib.math.cbrt_reduce_norm(i64 %p$x, i64 %t$12)
+  %t$14 = add i64 0, 0
+  %t$15 = call i64 @stdlib.math.cbrt_reduce_norm(i64 %p$x, i64 %t$14)
   br label %join_4
 join_4:
-  %t$5 = phi i64 [%t$11, %then_4], [%t$13, %else_4]
+  %t$5 = phi i64 [%t$13, %ovfok_10], [%t$15, %else_4]
   ret i64 %t$5
 }
 
@@ -1397,46 +1702,82 @@ define i64 @stdlib.math.cbrt_reduce_norm(i64 %p$x, i64 %p$adj) {
 entry:
   %t$0 = call i64 @stdlib.math.raw_biased_exp(i64 %p$x)
   %t$1 = load i64, ptr @stdlib.math.exp_bias
-  %t$2 = sub i64 %t$0, %t$1
-  %t$3 = add i64 %t$2, %p$adj
-  br label %arm_0_4
-arm_0_4:
-  %t$6 = call i64 @stdlib.math.floor_div_3(i64 %t$3)
-  br label %arm_0_7
-arm_0_7:
-  %t$9 = add i64 0, 3
-  %t$10 = mul i64 %t$9, %t$6
-  %t$11 = sub i64 %t$10, %p$adj
-  %t$12 = call i64 @stdlib.math.scale_down_pow2(i64 %p$x, i64 %t$11)
-  br label %arm_0_13
-arm_0_13:
-  %t$15 = call i64 @stdlib.math.two_pow(i64 %t$6)
-  %t$16 = bitcast double 2.0 to i64
-  %t$17 = add i64 0, 0
-  %t$18 = call i64 @stdlib.math.cbrt_iter(i64 %t$12, i64 %t$16, i64 %t$17)
-  %t$19$la = bitcast i64 %t$15 to double
-  %t$19$lb = bitcast i64 %t$18 to double
-  %t$19$fr = fmul double %t$19$la, %t$19$lb
-  %t$19 = bitcast double %t$19$fr to i64
-  br label %join_13
-arm_1_13:
+  %t$2$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %t$0, i64 %t$1)
+  %t$2 = extractvalue { i64, i1 } %t$2$agg, 0
+  %t$2$ovf = extractvalue { i64, i1 } %t$2$agg, 1
+  br i1 %t$2$ovf, label %ovfpanic_2, label %ovfok_2
+ovfpanic_2:
+  %t$3 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.33, i64 0, i32 1, i64 0
+  %t$4 = ptrtoint ptr %t$3 to i64
+  call i64 @panic(i64 %t$4)
+  unreachable
+ovfok_2:
+  %t$5$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %t$2, i64 %p$adj)
+  %t$5 = extractvalue { i64, i1 } %t$5$agg, 0
+  %t$5$ovf = extractvalue { i64, i1 } %t$5$agg, 1
+  br i1 %t$5$ovf, label %ovfpanic_5, label %ovfok_5
+ovfpanic_5:
+  %t$6 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.34, i64 0, i32 1, i64 0
+  %t$7 = ptrtoint ptr %t$6 to i64
+  call i64 @panic(i64 %t$7)
+  unreachable
+ovfok_5:
+  br label %arm_0_8
+arm_0_8:
+  %t$10 = call i64 @stdlib.math.floor_div_3(i64 %t$5)
+  br label %arm_0_11
+arm_0_11:
+  %t$13 = add i64 0, 3
+  %t$14$agg = call { i64, i1 } @llvm.smul.with.overflow.i64(i64 %t$13, i64 %t$10)
+  %t$14 = extractvalue { i64, i1 } %t$14$agg, 0
+  %t$14$ovf = extractvalue { i64, i1 } %t$14$agg, 1
+  br i1 %t$14$ovf, label %ovfpanic_14, label %ovfok_14
+ovfpanic_14:
+  %t$15 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.35, i64 0, i32 1, i64 0
+  %t$16 = ptrtoint ptr %t$15 to i64
+  call i64 @panic(i64 %t$16)
+  unreachable
+ovfok_14:
+  %t$17$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %t$14, i64 %p$adj)
+  %t$17 = extractvalue { i64, i1 } %t$17$agg, 0
+  %t$17$ovf = extractvalue { i64, i1 } %t$17$agg, 1
+  br i1 %t$17$ovf, label %ovfpanic_17, label %ovfok_17
+ovfpanic_17:
+  %t$18 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.36, i64 0, i32 1, i64 0
+  %t$19 = ptrtoint ptr %t$18 to i64
+  call i64 @panic(i64 %t$19)
+  unreachable
+ovfok_17:
+  %t$20 = call i64 @stdlib.math.scale_down_pow2(i64 %p$x, i64 %t$17)
+  br label %arm_0_21
+arm_0_21:
+  %t$23 = call i64 @stdlib.math.two_pow(i64 %t$10)
+  %t$24 = bitcast double 2.0 to i64
+  %t$25 = add i64 0, 0
+  %t$26 = call i64 @stdlib.math.cbrt_iter(i64 %t$20, i64 %t$24, i64 %t$25)
+  %t$27$la = bitcast i64 %t$23 to double
+  %t$27$lb = bitcast i64 %t$26 to double
+  %t$27$fr = fmul double %t$27$la, %t$27$lb
+  %t$27 = bitcast double %t$27$fr to i64
+  br label %join_21
+arm_1_21:
   call void @sprout_abort_match()
   unreachable
-join_13:
-  %t$14 = phi i64 [%t$19, %arm_0_13]
-  br label %join_7
-arm_1_7:
+join_21:
+  %t$22 = phi i64 [%t$27, %arm_0_21]
+  br label %join_11
+arm_1_11:
   call void @sprout_abort_match()
   unreachable
-join_7:
-  %t$8 = phi i64 [%t$14, %join_13]
-  br label %join_4
-arm_1_4:
+join_11:
+  %t$12 = phi i64 [%t$22, %join_21]
+  br label %join_8
+arm_1_8:
   call void @sprout_abort_match()
   unreachable
-join_4:
-  %t$5 = phi i64 [%t$8, %join_7]
-  ret i64 %t$5
+join_8:
+  %t$9 = phi i64 [%t$12, %join_11]
+  ret i64 %t$9
 }
 
 define i64 @stdlib.math.cbrt(i64 %p$x) {

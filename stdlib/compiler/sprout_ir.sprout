@@ -100,6 +100,22 @@ export type IROp (..) =
   # IRRetVoid — `ret void`.  Used by the synthesized `@__sprout_init_globals`
   # function (M3 PR 5) and any future void-returning IRFunction.
   | IRRetVoid
+  # IRIAdd/IRISub/IRIMul <result> <lhs> <rhs>  — unchecked i64 `add`/`sub`/`mul`.
+  #
+  # INVARIANT (bigint-v0 Stage 1, docs/bigint-v0.md §5.1): nothing in the
+  # compiler constructs these today. Sprout-level `+`/`-`/`*` on Int lowers
+  # through IRCheckedArith (below), never these — that is a STRUCTURAL
+  # guarantee (no construction site exists), not "we audited every call
+  # site". Emitting one of these three is an explicit opt-out of the overflow
+  # policy and needs a justification comment at the emit site.
+  #
+  # They are kept, not deleted, for a named future consumer: Stage 2's BigInt
+  # schoolbook multiply (docs/bigint-v0.md §5.4) proves via its radix
+  # invariant that every intermediate limb product and column sum stays in
+  # range, which is exactly the case where paying a branch per limb op is
+  # unwanted and unchecked i64 arithmetic is provably safe. If you are
+  # tempted to reach for one of these for compiler-internal arithmetic
+  # outside that proof, use IRCheckedArith instead.
   | IRIAdd String String String
   | IRISub String String String
   | IRIMul String String String
@@ -108,6 +124,21 @@ export type IROp (..) =
   # zero matches LLVM's: undefined behaviour.  Source-level division-by-zero
   # guards must be inserted by the user (or by a later pass) before the IRIDiv.
   | IRIDiv String String String
+  # IRCheckedArith <result> <intrinsic> <lhs> <rhs>  — overflow-checked Int
+  # arithmetic (bigint-v0 Stage 1, docs/bigint-v0.md §5.1). <intrinsic> is one
+  # of "sadd" | "ssub" | "smul", selecting the matching LLVM
+  # @llvm.<intrinsic>.with.overflow.i64 intrinsic. Lowers to:
+  #   %r$agg = call { i64, i1 } @llvm.<intrinsic>.with.overflow.i64(i64 lhs, i64 rhs)
+  #   %r     = extractvalue { i64, i1 } %r$agg, 0
+  #   %r$ovf = extractvalue { i64, i1 } %r$agg, 1
+  # <result>$agg and <result>$ovf are DERIVED names (string-concatenated from
+  # <result>, per the `$`-namespacing convention — see
+  # docs/compiler-internals.md "Emitted SSA names"), not separate fresh-name
+  # slots. The op is safe to execute unconditionally (the intrinsic never
+  # traps); the CALLER (ast_to_ir.finish_checked_arith) is responsible for
+  # branching on <result>$ovf to a panic block. Sprout's `+`/`-`/`*` operators
+  # and unary `-` (as `ssub` with a literal "0" lhs) all route through this.
+  | IRCheckedArith String String String String
   # Bitwise ops on Int, backing stdlib.bits (docs/bitwise-int-ops-v0.md).  Each
   # lowers to exactly one LLVM instruction.  `bit_not` is absent on purpose — it
   # is IRIXor against -1, so it needs no constructor.
@@ -156,9 +187,17 @@ export type IROp (..) =
   # Sprout's `!` operator.  Both operand and result are the i64-uniform Bool
   # representation (0 = false, 1 = true).  Xor with 1 flips the low bit.
   | IRBoolNot String String
-  # IRINeg <result> <operand>  — integer arithmetic negation (lowers to
-  # `sub i64 0, %x`).  Sprout's unary `-` operator.  Distinct from IRISub
-  # because the LHS is the literal 0, not an SSA name.
+  # IRINeg <result> <operand>  — unchecked integer arithmetic negation
+  # (lowers to `sub i64 0, %x`).  Distinct from IRISub because the LHS is the
+  # literal 0, not an SSA name.
+  #
+  # INVARIANT (bigint-v0 Stage 1, docs/bigint-v0.md §5.1): nothing constructs
+  # this today. Sprout's unary `-` on Int lowers through IRCheckedArith
+  # ("ssub" with a literal "0" lhs — ast_to_ir.finish_checked_arith), never
+  # this — a structural guarantee, same as IRIAdd/IRISub/IRIMul above.
+  # Emitting it opts out of the overflow policy (INT_MIN negates to itself
+  # under a bare `sub`) and needs a justification at the emit site. Kept for
+  # the same future consumer as those three: see their doc comment.
   | IRINeg String String
   # IRLoadGlobal <result> <global-name>  — read a top-level let binding.
   # Lowers to `<result> = load i64, ptr @<global-name>`.  Used at every TVar
@@ -574,6 +613,8 @@ fn print_op(op: IROp) -> String =
   | IRISub r a b -> "    " ++ r ++ " = isub " ++ a ++ ", " ++ b
   | IRIMul r a b -> "    " ++ r ++ " = imul " ++ a ++ ", " ++ b
   | IRIDiv r a b -> "    " ++ r ++ " = idiv " ++ a ++ ", " ++ b
+  | IRCheckedArith r intrinsic a b ->
+      "    " ++ r ++ " = checked_" ++ intrinsic ++ " " ++ a ++ ", " ++ b
   | IRIAnd r a b -> "    " ++ r ++ " = iand " ++ a ++ ", " ++ b
   | IRIOr r a b -> "    " ++ r ++ " = ior " ++ a ++ ", " ++ b
   | IRIXor r a b -> "    " ++ r ++ " = ixor " ++ a ++ ", " ++ b

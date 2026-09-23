@@ -19,6 +19,9 @@ declare void @sprout_abort_match() noreturn
 declare i64 @panic(i64)
 declare ptr @llvm.stacksave()
 declare void @llvm.stackrestore(ptr)
+declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)
+declare { i64, i1 } @llvm.ssub.with.overflow.i64(i64, i64)
+declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)
 declare i64 @sprout_alloc_obj(i64, i64)
 declare { i64, i64 } @vector_get_unboxed(i64, i64)
 declare { i64, i64 } @map_get_unboxed(i64, i64)
@@ -75,10 +78,16 @@ declare i64 @native_set_size(i64)
 declare i64 @ref_new(i64)
 declare i64 @ref_read(i64)
 declare i64 @ref_write(i64, i64)
-@.str.0 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
-@.str.1 = private unnamed_addr constant { i64, [9 x i8] } { i64 131082, [9 x i8] c"FizzBuzz\00" }
-@.str.2 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"Fizz\00" }
-@.str.3 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"Buzz\00" }
+@.str.0 = private unnamed_addr constant { i64, [46 x i8] } { i64 737290, [46 x i8] c"Int overflow in unary - (line 131, column 43)\00" }
+@.str.1 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 181, column 29)\00" }
+@.str.2 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
+@.str.3 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in / (line 23, column 18)\00" }
+@.str.4 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in * (line 23, column 29)\00" }
+@.str.5 = private unnamed_addr constant { i64, [38 x i8] } { i64 606218, [38 x i8] c"Int overflow in - (line 23, column 9)\00" }
+@.str.6 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 26, column 19)\00" }
+@.str.7 = private unnamed_addr constant { i64, [9 x i8] } { i64 131082, [9 x i8] c"FizzBuzz\00" }
+@.str.8 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"Fizz\00" }
+@.str.9 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"Buzz\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -173,17 +182,26 @@ body_0_1:
   %t$6 = add i64 0, 0
   %t$7 = icmp slt i64 %t$5, %t$6
   %t$8 = zext i1 %t$7 to i64
-  %t$14 = trunc i64 %t$8 to i1
-  br i1 %t$14, label %then_9, label %else_9
+  %t$16 = trunc i64 %t$8 to i1
+  br i1 %t$16, label %then_9, label %else_9
 then_9:
   %t$11 = add i64 0, 1
-  %t$12 = sub i64 0, %t$11
+  %t$12$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 0, i64 %t$11)
+  %t$12 = extractvalue { i64, i1 } %t$12$agg, 0
+  %t$12$ovf = extractvalue { i64, i1 } %t$12$agg, 1
+  br i1 %t$12$ovf, label %ovfpanic_12, label %ovfok_12
+ovfpanic_12:
+  %t$13 = getelementptr inbounds { i64, [46 x i8] }, ptr @.str.0, i64 0, i32 1, i64 0
+  %t$14 = ptrtoint ptr %t$13 to i64
+  call i64 @panic(i64 %t$14)
+  unreachable
+ovfok_12:
   br label %join_9
 else_9:
-  %t$13 = add i64 0, 1
+  %t$15 = add i64 0, 1
   br label %join_9
 join_9:
-  %t$10 = phi i64 [%t$12, %then_9], [%t$13, %else_9]
+  %t$10 = phi i64 [%t$12, %ovfok_12], [%t$15, %else_9]
   br label %join_1
 arm_1_1:
   call void @sprout_abort_match()
@@ -222,33 +240,33 @@ entry:
 
 define i64 @range_fold_go(i64 %p$current$in, i64 %p$end_value$in, i64 %p$by$in, i64 %p$acc$in, i64 %p$step$in) {
 entry:
-  %t$12 = alloca i64
-  store i64 %p$current$in, ptr %t$12
-  %t$13 = alloca i64
-  store i64 %p$end_value$in, ptr %t$13
   %t$14 = alloca i64
-  store i64 %p$by$in, ptr %t$14
+  store i64 %p$current$in, ptr %t$14
   %t$15 = alloca i64
-  store i64 %p$acc$in, ptr %t$15
+  store i64 %p$end_value$in, ptr %t$15
   %t$16 = alloca i64
-  store i64 %p$step$in, ptr %t$16
-  %t$17 = call ptr @llvm.stacksave()
+  store i64 %p$by$in, ptr %t$16
+  %t$17 = alloca i64
+  store i64 %p$acc$in, ptr %t$17
+  %t$18 = alloca i64
+  store i64 %p$step$in, ptr %t$18
+  %t$19 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
-  %p$current = load i64, ptr %t$12
-  %p$end_value = load i64, ptr %t$13
-  %p$by = load i64, ptr %t$14
-  %p$acc = load i64, ptr %t$15
-  %p$step = load i64, ptr %t$16
+  %p$current = load i64, ptr %t$14
+  %p$end_value = load i64, ptr %t$15
+  %p$by = load i64, ptr %t$16
+  %p$acc = load i64, ptr %t$17
+  %p$step = load i64, ptr %t$18
   %t$0 = call i64 @range_past_end(i64 %p$current, i64 %p$end_value, i64 %p$by)
-  %t$11 = trunc i64 %t$0 to i1
-  br i1 %t$11, label %then_1, label %else_1
+  %t$13 = trunc i64 %t$0 to i1
+  br i1 %t$13, label %then_1, label %else_1
 then_1:
   br label %join_1
 else_1:
   %t$3 = call i64 @range_at_end(i64 %p$current, i64 %p$end_value)
-  %t$10 = trunc i64 %t$3 to i1
-  br i1 %t$10, label %then_4, label %else_4
+  %t$12 = trunc i64 %t$3 to i1
+  br i1 %t$12, label %then_4, label %else_4
 then_4:
   call void @sprout_closure_arity_check(i64 %p$step, i64 2)
   %t$6$env_ptr = inttoptr i64 %p$step to ptr
@@ -256,21 +274,30 @@ then_4:
   %t$6 = call i64 (i64, i64, i64) %t$6$code(i64 %p$step, i64 %p$acc, i64 %p$current)
   br label %join_4
 else_4:
-  %t$18 = alloca i64
-  store i64 %p$step, ptr %t$18
-  %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
+  %t$20 = alloca i64
+  store i64 %p$step, ptr %t$20
+  %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
   call void @sprout_closure_arity_check(i64 %p$step, i64 2)
   %t$7$env_ptr = inttoptr i64 %p$step to ptr
   %t$7$code = load ptr, ptr %t$7$env_ptr
   %t$7 = call i64 (i64, i64, i64) %t$7$code(i64 %p$step, i64 %p$acc, i64 %p$current)
-  %t$8 = add i64 %p$current, %p$by
-  %t$20 = call i64 @sprout_gc_pop_roots(i64 1)
-  store i64 %t$8, ptr %t$12
-  store i64 %p$end_value, ptr %t$13
-  store i64 %p$by, ptr %t$14
-  store i64 %t$7, ptr %t$15
-  store i64 %p$step, ptr %t$16
-  call void @llvm.stackrestore(ptr %t$17)
+  %t$8$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %p$current, i64 %p$by)
+  %t$8 = extractvalue { i64, i1 } %t$8$agg, 0
+  %t$8$ovf = extractvalue { i64, i1 } %t$8$agg, 1
+  %t$22 = call i64 @sprout_gc_pop_roots(i64 1)
+  br i1 %t$8$ovf, label %ovfpanic_8, label %ovfok_8
+ovfpanic_8:
+  %t$9 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.1, i64 0, i32 1, i64 0
+  %t$10 = ptrtoint ptr %t$9 to i64
+  call i64 @panic(i64 %t$10)
+  unreachable
+ovfok_8:
+  store i64 %t$8, ptr %t$14
+  store i64 %p$end_value, ptr %t$15
+  store i64 %p$by, ptr %t$16
+  store i64 %t$7, ptr %t$17
+  store i64 %p$step, ptr %t$18
+  call void @llvm.stackrestore(ptr %t$19)
   br label %tco_loop
 join_4:
   %t$5 = phi i64 [%t$6, %then_4]
@@ -430,17 +457,46 @@ entry:
 define i64 @stdlib.math.int.trunc_remainder(i64 %p$value, i64 %p$divisor) {
 entry:
   %t$0 = icmp eq i64 %p$divisor, 0
-  br i1 %t$0, label %divpanic_0, label %divok_0
+  br i1 %t$0, label %divpanic_0, label %divchk2_0
 divpanic_0:
-  %t$1 = getelementptr inbounds { i64, [17 x i8] }, ptr @.str.0, i64 0, i32 1, i64 0
+  %t$1 = getelementptr inbounds { i64, [17 x i8] }, ptr @.str.2, i64 0, i32 1, i64 0
   %t$2 = ptrtoint ptr %t$1 to i64
   call i64 @panic(i64 %t$2)
   unreachable
+divchk2_0:
+  %t$3 = icmp eq i64 %p$divisor, -1
+  br i1 %t$3, label %divovfchk_0, label %divok_0
+divovfchk_0:
+  %t$4 = icmp eq i64 %p$value, -9223372036854775808
+  br i1 %t$4, label %divovfpanic_0, label %divok_0
+divovfpanic_0:
+  %t$5 = getelementptr inbounds { i64, [39 x i8] }, ptr @.str.3, i64 0, i32 1, i64 0
+  %t$6 = ptrtoint ptr %t$5 to i64
+  call i64 @panic(i64 %t$6)
+  unreachable
 divok_0:
-  %t$3 = sdiv i64 %p$value, %p$divisor
-  %t$4 = mul i64 %t$3, %p$divisor
-  %t$5 = sub i64 %p$value, %t$4
-  ret i64 %t$5
+  %t$7 = sdiv i64 %p$value, %p$divisor
+  %t$8$agg = call { i64, i1 } @llvm.smul.with.overflow.i64(i64 %t$7, i64 %p$divisor)
+  %t$8 = extractvalue { i64, i1 } %t$8$agg, 0
+  %t$8$ovf = extractvalue { i64, i1 } %t$8$agg, 1
+  br i1 %t$8$ovf, label %ovfpanic_8, label %ovfok_8
+ovfpanic_8:
+  %t$9 = getelementptr inbounds { i64, [39 x i8] }, ptr @.str.4, i64 0, i32 1, i64 0
+  %t$10 = ptrtoint ptr %t$9 to i64
+  call i64 @panic(i64 %t$10)
+  unreachable
+ovfok_8:
+  %t$11$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %p$value, i64 %t$8)
+  %t$11 = extractvalue { i64, i1 } %t$11$agg, 0
+  %t$11$ovf = extractvalue { i64, i1 } %t$11$agg, 1
+  br i1 %t$11$ovf, label %ovfpanic_11, label %ovfok_11
+ovfpanic_11:
+  %t$12 = getelementptr inbounds { i64, [38 x i8] }, ptr @.str.5, i64 0, i32 1, i64 0
+  %t$13 = ptrtoint ptr %t$12 to i64
+  call i64 @panic(i64 %t$13)
+  unreachable
+ovfok_11:
+  ret i64 %t$11
 }
 
 define i64 @stdlib.math.int.euclidean_remainder(i64 %p$value, i64 %p$modulus) {
@@ -451,15 +507,24 @@ arm_0_1:
   %t$3 = add i64 0, 0
   %t$4 = icmp slt i64 %t$0, %t$3
   %t$5 = zext i1 %t$4 to i64
-  %t$9 = trunc i64 %t$5 to i1
-  br i1 %t$9, label %then_6, label %else_6
+  %t$11 = trunc i64 %t$5 to i1
+  br i1 %t$11, label %then_6, label %else_6
 then_6:
-  %t$8 = add i64 %t$0, %p$modulus
+  %t$8$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %t$0, i64 %p$modulus)
+  %t$8 = extractvalue { i64, i1 } %t$8$agg, 0
+  %t$8$ovf = extractvalue { i64, i1 } %t$8$agg, 1
+  br i1 %t$8$ovf, label %ovfpanic_8, label %ovfok_8
+ovfpanic_8:
+  %t$9 = getelementptr inbounds { i64, [39 x i8] }, ptr @.str.6, i64 0, i32 1, i64 0
+  %t$10 = ptrtoint ptr %t$9 to i64
+  call i64 @panic(i64 %t$10)
+  unreachable
+ovfok_8:
   br label %join_6
 else_6:
   br label %join_6
 join_6:
-  %t$7 = phi i64 [%t$8, %then_6], [%t$0, %else_6]
+  %t$7 = phi i64 [%t$8, %ovfok_8], [%t$0, %else_6]
   br label %join_1
 arm_1_1:
   call void @sprout_abort_match()
@@ -529,7 +594,7 @@ entry:
   %t$21 = trunc i64 %t$1 to i1
   br i1 %t$21, label %then_2, label %else_2
 then_2:
-  %t$4 = getelementptr inbounds { i64, [9 x i8] }, ptr @.str.1, i64 0, i32 1, i64 0
+  %t$4 = getelementptr inbounds { i64, [9 x i8] }, ptr @.str.7, i64 0, i32 1, i64 0
   %t$5 = ptrtoint ptr %t$4 to i64
   br label %join_2
 else_2:
@@ -538,7 +603,7 @@ else_2:
   %t$20 = trunc i64 %t$7 to i1
   br i1 %t$20, label %then_8, label %else_8
 then_8:
-  %t$10 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.2, i64 0, i32 1, i64 0
+  %t$10 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.8, i64 0, i32 1, i64 0
   %t$11 = ptrtoint ptr %t$10 to i64
   br label %join_8
 else_8:
@@ -547,7 +612,7 @@ else_8:
   %t$19 = trunc i64 %t$13 to i1
   br i1 %t$19, label %then_14, label %else_14
 then_14:
-  %t$16 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.3, i64 0, i32 1, i64 0
+  %t$16 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.9, i64 0, i32 1, i64 0
   %t$17 = ptrtoint ptr %t$16 to i64
   br label %join_14
 else_14:

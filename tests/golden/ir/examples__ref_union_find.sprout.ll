@@ -19,6 +19,9 @@ declare void @sprout_abort_match() noreturn
 declare i64 @panic(i64)
 declare ptr @llvm.stacksave()
 declare void @llvm.stackrestore(ptr)
+declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)
+declare { i64, i1 } @llvm.ssub.with.overflow.i64(i64, i64)
+declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)
 declare i64 @sprout_alloc_obj(i64, i64)
 declare { i64, i64 } @vector_get_unboxed(i64, i64)
 declare { i64, i64 } @map_get_unboxed(i64, i64)
@@ -75,6 +78,7 @@ declare i64 @native_set_size(i64)
 declare i64 @ref_new(i64)
 declare i64 @ref_read(i64)
 declare i64 @ref_write(i64, i64)
+@.str.0 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 22, column 25)\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -179,40 +183,53 @@ join_1:
 
 define i64 @examples.ref_union_find.make_parents(i64 %p$n$in, i64 %p$i$in, i64 %p$acc$in) {
 entry:
-  %t$10 = alloca i64
-  store i64 %p$n$in, ptr %t$10
-  %t$11 = alloca i64
-  store i64 %p$i$in, ptr %t$11
   %t$12 = alloca i64
-  store i64 %p$acc$in, ptr %t$12
-  %t$13 = call ptr @llvm.stacksave()
+  store i64 %p$n$in, ptr %t$12
+  %t$13 = alloca i64
+  store i64 %p$i$in, ptr %t$13
+  %t$14 = alloca i64
+  store i64 %p$acc$in, ptr %t$14
+  %t$15 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
-  %p$n = load i64, ptr %t$10
-  %p$i = load i64, ptr %t$11
-  %p$acc = load i64, ptr %t$12
+  %p$n = load i64, ptr %t$12
+  %p$i = load i64, ptr %t$13
+  %p$acc = load i64, ptr %t$14
   %t$0 = icmp sge i64 %p$i, %p$n
   %t$1 = zext i1 %t$0 to i64
-  %t$9 = trunc i64 %t$1 to i1
-  br i1 %t$9, label %then_2, label %else_2
+  %t$11 = trunc i64 %t$1 to i1
+  br i1 %t$11, label %then_2, label %else_2
 then_2:
   br label %join_2
 else_2:
-  %t$14 = alloca i64
-  store i64 %p$acc, ptr %t$14
-  %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
+  %t$16 = alloca i64
+  store i64 %p$acc, ptr %t$16
+  %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
   %t$4 = call i64 @ref_new(i64 %p$i)
   %t$5 = add i64 0, 1
-  %t$6 = add i64 %p$i, %t$5
-  %t$16 = alloca i64
-  store i64 %t$4, ptr %t$16
-  %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
-  %t$7 = call i64 @vec_append(i64 %t$4, i64 %p$acc)
-  %t$18 = call i64 @sprout_gc_pop_roots(i64 2)
-  store i64 %p$n, ptr %t$10
-  store i64 %t$6, ptr %t$11
-  store i64 %t$7, ptr %t$12
-  call void @llvm.stackrestore(ptr %t$13)
+  %t$6$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %p$i, i64 %t$5)
+  %t$6 = extractvalue { i64, i1 } %t$6$agg, 0
+  %t$6$ovf = extractvalue { i64, i1 } %t$6$agg, 1
+  %t$18 = call i64 @sprout_gc_pop_roots(i64 1)
+  br i1 %t$6$ovf, label %ovfpanic_6, label %ovfok_6
+ovfpanic_6:
+  %t$7 = getelementptr inbounds { i64, [39 x i8] }, ptr @.str.0, i64 0, i32 1, i64 0
+  %t$8 = ptrtoint ptr %t$7 to i64
+  call i64 @panic(i64 %t$8)
+  unreachable
+ovfok_6:
+  %t$19 = alloca i64
+  store i64 %t$4, ptr %t$19
+  %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
+  %t$21 = alloca i64
+  store i64 %p$acc, ptr %t$21
+  %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
+  %t$9 = call i64 @vec_append(i64 %t$4, i64 %p$acc)
+  %t$23 = call i64 @sprout_gc_pop_roots(i64 2)
+  store i64 %p$n, ptr %t$12
+  store i64 %t$6, ptr %t$13
+  store i64 %t$9, ptr %t$14
+  call void @llvm.stackrestore(ptr %t$15)
   br label %tco_loop
 join_2:
   %t$3 = phi i64 [%p$acc, %then_2]

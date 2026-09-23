@@ -1,0 +1,23 @@
+module main
+
+import stdlib.math.int (pow)
+
+# bigint-v0 Stage 1 smoke (docs/bigint-v0.md §5.1, Option A of
+# docs/int-overflow-policy-decision.md): `pow(2, 100)` must panic. `pow` answers
+# `Maybe` only for its DOMAIN error (a negative exponent); an out-of-RANGE
+# result is a different failure and traps, per docs/math-partiality-v0.md Rule 1
+# and the paragraph added beside it. So this must abort, not return `Nothing` —
+# a `Nothing` here would mean the two failure modes had been conflated.
+#
+# The base is `2 + list_length(args)`, 2 at RUNTIME with no argv but not a
+# compile-time constant, so pow_loop's `acc * base` cannot be folded away.
+fn describe(m: Maybe Int) -> String =
+  match m with
+  | Just n -> int_to_string(n)
+  | Nothing -> "Nothing"
+
+fn main() -> Unit !{IO} =
+  do
+    args <- argv_all()
+    let base = 2 + list_length(args)
+    print(describe(pow(base, 100)))

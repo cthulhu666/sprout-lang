@@ -53,14 +53,23 @@ fn inf() -> Double = 1.0 / 0.0
 # Powers of two walk the whole exponent range up to 2^62, crossing 2^32 (the
 # split) and 2^52 (where a Double's ULP reaches 1) on the way. Both signs, since
 # the negative path negates, converts and re-signs.
+# bigint-v0 Stage 1: the per-k check is a separate fn called only from the
+# `else` arm below, not a `where` clause spanning the whole body. A `where`
+# binding is evaluated unconditionally on EVERY call, including the
+# terminating one — where k is already 63, one past the last real sample
+# (62). `pow2_int(63, 1)` is 2^63, which does not fit in a signed Int and
+# genuinely overflows: before the Stage 1 guards this silently wrapped to a
+# value `bad` never read on that call; now it panics. An ordinary `if` arm,
+# unlike `where`, only evaluates what it calls, so this never runs for k = 63.
 fn pow2_roundtrip_bad(k: Int, acc: Int) -> Int =
   if k > 62 then acc
-  else pow2_roundtrip_bad(k + 1, acc + bad)
-where
-  i = pow2_int(k, 1)
-  ok_pos = just_eq(to_int(to_double(i)), i)
-  ok_neg = just_eq(to_int(to_double(0 - i)), 0 - i)
-  bad = if ok_pos && ok_neg then 0 else 1
+  else pow2_roundtrip_bad(k + 1, acc + pow2_roundtrip_step(k))
+
+fn pow2_roundtrip_step(k: Int) -> Int =
+  let i = pow2_int(k, 1)
+      ok_pos = just_eq(to_int(to_double(i)), i)
+      ok_neg = just_eq(to_int(to_double(0 - i)), 0 - i)
+  in if ok_pos && ok_neg then 0 else 1
 
 fn pow2_int(k: Int, acc: Int) -> Int =
   if k <= 0 then acc else pow2_int(k - 1, acc * 2)

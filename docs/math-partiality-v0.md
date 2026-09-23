@@ -34,6 +34,14 @@ A partial `math` function follows exactly one rule, chosen by its result type:
   `stdlib.math.int` (see §8). `Int` has no spare bottom value (every bit pattern is a
   valid integer), so an out-of-domain result must be surfaced explicitly. This is
   **interim**: see §5.
+
+  **Rule 1 governs domain errors, not overflow.** A documented out-of-domain argument
+  (`mod` with `n <= 0`, `pow` with `exp < 0`) answers `Maybe`; a result that leaves the
+  representable range of `Int` — `abs(INT_MIN)`, an overflowing `pow`, `gcd`, or `lcm` —
+  **panics**, per `docs/bigint-v0.md` Stage 1 and spec §8.4. These are the two halves of
+  the same split §5 already names: Rust's `/` panicking while `checked_div` returns
+  `Option`. `mod`/`pow`'s `Maybe` is the `checked_*` half; overflow is the panicking half.
+  A panicking `pow` is not a bug against this rule — it is the other half of it.
 - **Rule 2 — Double out-of-domain returns IEEE-style `NaN` / `±inf`.** `sqrt`,
   `tan`, and since 2026-08-06 also `ln`, `log2`, `log10`, `log` and `Double` `pow`
   (see §8). `Double` *has* a bottom value, and IEEE NaN self-propagates through

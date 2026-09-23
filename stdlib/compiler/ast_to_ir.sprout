@@ -997,10 +997,10 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
                                         closure_arity_any(), Nil), Nil)),
                                fresh_name(name_prefix, idx), idx + 1))
                       else Err("ast_to_ir: unbound variable '" ++ name ++ "'")
-  | typed_ast.TBinary op left right _ _ ->
+  | typed_ast.TBinary op left right _ pos ->
       translate_binary(op, left, right, params, ctors, idx, cur_label, cur_ops,
                        captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
-                       name_prefix)
+                       name_prefix, pos)
   | typed_ast.TIf cond t e ty _ ->
       translate_if(cond, t, e, ty, params, ctors, idx, cur_label, cur_ops,
                    captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
@@ -1054,12 +1054,16 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
       translate_lambda(lparams, body, lam_ty, params, ctors, idx, cur_label, cur_ops,
                        captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
                        name_prefix)
-  | typed_ast.TUnary op operand _ _ ->
+  | typed_ast.TUnary op operand _ pos ->
       # Parser produces TUnary "!" (boolean negation, parser.sprout:665) and
       # TUnary "-" (arithmetic negation, parser.sprout:661).  No other unary ops.
-      # !x lowers to IRBoolNot (`xor i64 %x, 1`).  -x lowers to IRINeg
-      # (`sub i64 0, %x`) for Int, or IRFNeg (`fneg double`) for Double: negating
-      # a double's i64 bit-pattern with `sub` corrupts it, so dispatch on type.
+      # !x lowers to IRBoolNot (`xor i64 %x, 1`).  -x lowers to IRFNeg (`fneg
+      # double`) for Double (negating a double's i64 bit-pattern with `sub`
+      # would corrupt it, so dispatch on type), or — bigint-v0 Stage 1,
+      # docs/bigint-v0.md §5.1 — an overflow-checked `0 - %x` for Int
+      # (IRCheckedArith "ssub" via finish_checked_arith, reusing the same
+      # guard as binary `-`; INT_MIN is the one Int with no positive
+      # counterpart, so plain IRINeg would silently wrap it back to itself).
       match translate_expr(operand, params, ctors, idx, cur_label, cur_ops,
                            captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
                            name_prefix) with
@@ -1073,12 +1077,14 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
                           Cons(sprout_ir.IRBoolNot(fresh_name(name_prefix, idx1), o_name), Nil)),
                         fresh_name(name_prefix, idx1), idx1 + 1))
               else if op == "-"
-              then Ok((oblocks, ocur_lbl,
-                        list_append(ocur_ops,
-                          Cons(if is_double_type(typed_ast.typed_expr_type(operand))
-                               then sprout_ir.IRFNeg(fresh_name(name_prefix, idx1), o_name)
-                               else sprout_ir.IRINeg(fresh_name(name_prefix, idx1), o_name), Nil)),
-                        fresh_name(name_prefix, idx1), idx1 + 1))
+              then
+                if is_double_type(typed_ast.typed_expr_type(operand))
+                then Ok((oblocks, ocur_lbl,
+                          list_append(ocur_ops,
+                            Cons(sprout_ir.IRFNeg(fresh_name(name_prefix, idx1), o_name), Nil)),
+                          fresh_name(name_prefix, idx1), idx1 + 1))
+                else finish_checked_arith("ssub", "unary -", pos, oblocks, Nil, ocur_lbl, ocur_ops,
+                                          "0", o_name, idx1, name_prefix)
               else Err("ast_to_ir: unary op '" ++ op ++ "' not yet supported")
   | typed_ast.TRange start end_ _ _ ->
       # call @range_up(start, end_) — the PRELUDE function, not a builtin.  It was
@@ -2276,7 +2282,7 @@ fn translate_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.Type
                 fn_arities: Dict FnInfo,
                     lambda_ctr_ref: Ref Int,
                     lifted_idx_ref: Ref (Dict Int),
-                    name_prefix: String) ->
+                    name_prefix: String, pos: source.SourcePos) ->
     Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
   # M3 PR 4: `&&` and `||` are short-circuit operators.  Desugar into the
   # equivalent TIf and reuse translate_if, which produces the canonical
@@ -2403,7 +2409,7 @@ fn translate_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.Type
                 match rr with
                 | (rblocks, rcur_lbl, rcur_ops, r_name, idx2) ->
                     finish_binary(op, lblocks, rblocks, rcur_lbl, rcur_ops,
-                                  l_name, r_name, idx2, false, name_prefix)
+                                  l_name, r_name, idx2, false, name_prefix, pos)
   else if ! ((is_int_or_char_type(typed_ast.typed_expr_type(left)) && is_int_or_char_type(typed_ast.typed_expr_type(right)))
              || (is_double_type(typed_ast.typed_expr_type(left)) && is_double_type(typed_ast.typed_expr_type(right))))
   then Err("ast_to_ir: binary op '" ++ op ++ "' requires Int or Double operands")
@@ -2423,38 +2429,40 @@ fn translate_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.Type
                 match rr with
                 | (rblocks, rcur_lbl, rcur_ops, r_name, idx2) ->
                     finish_binary(op, lblocks, rblocks, rcur_lbl, rcur_ops,
-                                  l_name, r_name, idx2, is_double_type(typed_ast.typed_expr_type(left)), name_prefix)
+                                  l_name, r_name, idx2, is_double_type(typed_ast.typed_expr_type(left)), name_prefix, pos)
 
 fn finish_binary(op: String,
                  lblocks: List sprout_ir.IRBlock, rblocks: List sprout_ir.IRBlock,
                  cur_lbl: String, cur_ops: List sprout_ir.IROp,
                  l_name: String, r_name: String,
-                 idx: Int, is_float: Bool, name_prefix: String) ->
+                 idx: Int, is_float: Bool, name_prefix: String, pos: source.SourcePos) ->
     Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) =
   if is_float then
     finish_binary_float(op, lblocks, rblocks, cur_lbl, cur_ops, l_name, r_name, idx, name_prefix)
   else if op == "/" then
-    finish_checked_div(lblocks, rblocks, cur_lbl, cur_ops, l_name, r_name, idx, name_prefix)
+    finish_checked_div(lblocks, rblocks, cur_lbl, cur_ops, l_name, r_name, idx, name_prefix, pos)
+  # bigint-v0 Stage 1 (docs/bigint-v0.md §5.1): `+`/`-`/`*` on Int are
+  # overflow-checked (finish_checked_arith), not plain IRIAdd/IRISub/IRIMul.
+  else if op == "+" then
+    finish_checked_arith("sadd", "+", pos, lblocks, rblocks, cur_lbl, cur_ops, l_name, r_name, idx, name_prefix)
+  else if op == "-" then
+    finish_checked_arith("ssub", "-", pos, lblocks, rblocks, cur_lbl, cur_ops, l_name, r_name, idx, name_prefix)
+  else if op == "*" then
+    finish_checked_arith("smul", "*", pos, lblocks, rblocks, cur_lbl, cur_ops, l_name, r_name, idx, name_prefix)
   else
-  match arith_op(op, result, l_name, r_name) with
-  | Just iop ->
-      Ok((list_append(lblocks, rblocks), cur_lbl,
-           list_append(cur_ops, Cons(iop, Nil)),
-           result, idx + 1))
-  | Nothing ->
-      match cmp_predicate(op) with
-      | Just pred ->
-          # /code-review-v2 fix #3: comparison op emits IRICmp (produces i1 by
-          # LLVM semantics) followed by IRZextI1ToI64 to widen the result to
-          # the i64-uniform Bool representation. Downstream consumers (phi,
-          # ret, ctor arg, IRMakeCtor arg, IRCondBr after narrow) all see
-          # i64. The "value" of the binary expression is the zext result.
-          Ok((list_append(lblocks, rblocks), cur_lbl,
-               list_append(cur_ops,
-                 Cons(sprout_ir.IRICmp(result, pred, l_name, r_name),
-                 Cons(sprout_ir.IRZextI1ToI64(zext_result, result), Nil))),
-               zext_result, idx + 2))
-      | Nothing -> Err("ast_to_ir: binary op '" ++ op ++ "' not yet supported")
+    match cmp_predicate(op) with
+    | Just pred ->
+        # /code-review-v2 fix #3: comparison op emits IRICmp (produces i1 by
+        # LLVM semantics) followed by IRZextI1ToI64 to widen the result to
+        # the i64-uniform Bool representation. Downstream consumers (phi,
+        # ret, ctor arg, IRMakeCtor arg, IRCondBr after narrow) all see
+        # i64. The "value" of the binary expression is the zext result.
+        Ok((list_append(lblocks, rblocks), cur_lbl,
+             list_append(cur_ops,
+               Cons(sprout_ir.IRICmp(result, pred, l_name, r_name),
+               Cons(sprout_ir.IRZextI1ToI64(zext_result, result), Nil))),
+             zext_result, idx + 2))
+    | Nothing -> Err("ast_to_ir: binary op '" ++ op ++ "' not yet supported")
   where result = fresh_name(name_prefix, idx)
         zext_result = fresh_name(name_prefix, idx + 1)
 
@@ -2503,50 +2511,126 @@ fn float_cmp_predicate(op: String) -> Maybe String =
   else if op == "!=" then Just("one")
   else Nothing
 
+# Renders a SourcePos as an overflow-panic message suffix. Matches the
+# "(line N, column N)" convention already used by intrinsic_not_a_value_msg
+# above.  Every panic message this function's callers build is unique per
+# call site once located; IRStrConst's interning pre-pass (ir_lowering) still
+# collapses any two call sites that land on the exact same line/column (e.g.
+# two structurally-identical inlined copies), so this costs one global per
+# distinct source location, not one per operation performed at runtime.
+fn overflow_loc(pos: source.SourcePos) -> String =
+  " (line " ++ int_to_string(pos.line) ++ ", column " ++ int_to_string(pos.column) ++ ")"
+
 # W7/F-DIV: `/` lowers to a guarded division. A bare `sdiv i64 _, 0` is LLVM
 # undefined behavior, so the current block is sealed with a check `divisor == 0`
 # that branches either to a panic block (build the message String, call @panic
-# via IRPanic, then `unreachable`) or to a continuation block holding the sdiv.
-# The continuation block becomes the new current block, so downstream phis name
-# it as their predecessor (block/label threading stays consistent — the reason
-# this cannot be done at the ir_lowering text layer). The INT_MIN / -1 overflow
-# (the other undefined case) is covered by the total `safe_div`; guarding it here
-# too is a follow-up. Consumes 4 fresh-name slots (icmp, msg-raw, msg, quotient).
+# via IRPanic, then `unreachable`) or to a chk2 block. The continuation block
+# becomes the new current block, so downstream phis name it as their
+# predecessor (block/label threading stays consistent — the reason this cannot
+# be done at the ir_lowering text layer).
+#
+# bigint-v0 Stage 1 adds a SECOND guard: INT_MIN / -1 is the other case LLVM
+# leaves undefined, and unlike `+`/`-`/`*` it cannot ride an
+# `llvm.*.with.overflow` intrinsic — LLVM provides sadd/ssub/smul/uadd/usub/umul
+# variants but no sdiv one (see finish_checked_arith below), so this needs its
+# own check. Two SEQUENTIAL blocks (divisor == -1?, then dividend == INT_MIN?)
+# rather than one compound test: this IR has no i1 `and` (IRIAnd is i64-only),
+# so a compound `(r == -1) && (l == MIN)` would need its own extra block
+# anyway — matching finish_checked_shift's precedent for a multi-condition
+# guard below. INT_MIN is spelled as the literal LLVM text
+# "-9223372036854775808" (IRICmp operands are inserted into the emitted
+# `icmp` verbatim, same as the existing "0"/"-1" literals here).
+#
+# Consumes 8 fresh-name slots (zero-icmp, div0-msg-raw, div0-msg, negone-icmp,
+# ismin-icmp, ovf-msg-raw, ovf-msg, quotient).
 fn finish_checked_div(lblocks: List sprout_ir.IRBlock, rblocks: List sprout_ir.IRBlock,
                       cur_lbl: String, cur_ops: List sprout_ir.IROp,
                       l_name: String, r_name: String,
-                      idx: Int, name_prefix: String) ->
+                      idx: Int, name_prefix: String, pos: source.SourcePos) ->
     Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) =
-  Ok((all_blocks, ok_lbl, Cons(div_op, Nil), div_result, idx + 4))
+  Ok((all_blocks, ok_lbl, Cons(div_op, Nil), div_result, idx + 8))
   where z_name = fresh_name(name_prefix, idx)
         msg_raw = fresh_name(name_prefix, idx + 1)
         msg_result = fresh_name(name_prefix, idx + 2)
-        div_result = fresh_name(name_prefix, idx + 3)
+        negone_name = fresh_name(name_prefix, idx + 3)
+        ismin_name = fresh_name(name_prefix, idx + 4)
+        ovf_msg_raw = fresh_name(name_prefix, idx + 5)
+        ovf_msg_result = fresh_name(name_prefix, idx + 6)
+        div_result = fresh_name(name_prefix, idx + 7)
         panic_lbl = "divpanic_" ++ int_to_string(idx)
+        chk2_lbl = "divchk2_" ++ int_to_string(idx)
+        ovfchk_lbl = "divovfchk_" ++ int_to_string(idx)
+        ovfpanic_lbl = "divovfpanic_" ++ int_to_string(idx)
         ok_lbl = "divok_" ++ int_to_string(idx)
-        # Seal the current block: divisor == 0 ? panic : ok. IRICmp yields i1,
+        # Seal the current block: divisor == 0 ? panic : chk2. IRICmp yields i1,
         # which IRCondBr consumes directly (no trunc needed).
         cond_block = sprout_ir.IRBlock(cur_lbl,
                        list_append(cur_ops,
                          [sprout_ir.IRICmp(z_name, "eq", r_name, "0"),
-                          sprout_ir.IRCondBr(z_name, panic_lbl, ok_lbl)]))
+                          sprout_ir.IRCondBr(z_name, panic_lbl, chk2_lbl)]))
         # Panic block: materialize the message String, then panic + unreachable.
         panic_block = sprout_ir.IRBlock(panic_lbl,
                         [sprout_ir.IRStrConst(msg_result, msg_raw, "division by zero"),
                          sprout_ir.IRPanic(msg_result)])
+        # Second guard: divisor == -1 ? ovfchk : ok. Only a divisor of -1 can
+        # ever overflow a division; every other divisor divides cleanly.
+        chk2_block = sprout_ir.IRBlock(chk2_lbl,
+                       [sprout_ir.IRICmp(negone_name, "eq", r_name, "-1"),
+                        sprout_ir.IRCondBr(negone_name, ovfchk_lbl, ok_lbl)])
+        # Third guard: dividend == INT_MIN ? overflow-panic : ok. Reached only
+        # when divisor == -1, so this is the exact INT_MIN / -1 case.
+        ovfchk_block = sprout_ir.IRBlock(ovfchk_lbl,
+                         [sprout_ir.IRICmp(ismin_name, "eq", l_name, "-9223372036854775808"),
+                          sprout_ir.IRCondBr(ismin_name, ovfpanic_lbl, ok_lbl)])
+        ovfpanic_block = sprout_ir.IRBlock(ovfpanic_lbl,
+                           [sprout_ir.IRStrConst(ovf_msg_result, ovf_msg_raw,
+                              "Int overflow in /" ++ overflow_loc(pos)),
+                            sprout_ir.IRPanic(ovf_msg_result)])
         # Continuation block: the sdiv runs here; it is the new current block.
         div_op = sprout_ir.IRIDiv(div_result, l_name, r_name)
         all_blocks = list_append(list_append(lblocks, rblocks),
-                       [cond_block, panic_block])
+                       [cond_block, panic_block, chk2_block, ovfchk_block, ovfpanic_block])
 
-# Map a TBinary op String to the matching arithmetic IR constructor.
-# Returns Nothing for non-arith ops; the caller falls back to cmp_predicate.
-fn arith_op(op: String, result: String, lhs: String, rhs: String) -> Maybe sprout_ir.IROp =
-  if op == "+" then Just(sprout_ir.IRIAdd(result, lhs, rhs))
-  else if op == "-" then Just(sprout_ir.IRISub(result, lhs, rhs))
-  else if op == "*" then Just(sprout_ir.IRIMul(result, lhs, rhs))
-  else if op == "/" then Just(sprout_ir.IRIDiv(result, lhs, rhs))
-  else Nothing
+# bigint-v0 Stage 1 (docs/bigint-v0.md §5.1): `+`/`-`/`*` on Int lower through
+# an LLVM overflow-checked intrinsic (IRCheckedArith; no `.with.overflow`
+# variant exists for sdiv — see finish_checked_div's INT_MIN/-1 guard above).
+# Unlike finish_checked_div, the arithmetic runs UNCONDITIONALLY in the SEALED
+# block, not the continuation: the intrinsic call never traps by itself — it
+# is what PRODUCES the overflow flag the branch tests — so there is no UB
+# window to protect by deferring it. This function then seals the current
+# block with a branch on that flag and returns a fresh `ovfok_N` block as the
+# new current block, exactly as finish_checked_div does for its own guard
+# (same reason this cannot be done at the ir_lowering text layer: splitting a
+# block there would leave downstream phis naming a predecessor that no longer
+# exists). Consumes 3 fresh-name slots (result, msg-raw, msg); `result`'s
+# `$agg`/`$ovf` derived names are NOT separate slots (see IRCheckedArith's doc
+# comment in sprout_ir.sprout).
+fn finish_checked_arith(intrinsic: String, sym: String, pos: source.SourcePos,
+                        lblocks: List sprout_ir.IRBlock, rblocks: List sprout_ir.IRBlock,
+                        cur_lbl: String, cur_ops: List sprout_ir.IROp,
+                        l_name: String, r_name: String,
+                        idx: Int, name_prefix: String) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) =
+  Ok((all_blocks, ok_lbl, Nil, result, idx + 3))
+  where result = fresh_name(name_prefix, idx)
+        msg_raw = fresh_name(name_prefix, idx + 1)
+        msg_result = fresh_name(name_prefix, idx + 2)
+        ovf_name = result ++ "$ovf"
+        panic_lbl = "ovfpanic_" ++ int_to_string(idx)
+        ok_lbl = "ovfok_" ++ int_to_string(idx)
+        # Seal the current block: compute + branch on the overflow flag.
+        cond_block = sprout_ir.IRBlock(cur_lbl,
+                       list_append(cur_ops,
+                         [sprout_ir.IRCheckedArith(result, intrinsic, l_name, r_name),
+                          sprout_ir.IRCondBr(ovf_name, panic_lbl, ok_lbl)]))
+        # Panic block: materialize the located message String, then panic +
+        # unreachable.
+        panic_block = sprout_ir.IRBlock(panic_lbl,
+                        [sprout_ir.IRStrConst(msg_result, msg_raw,
+                           "Int overflow in " ++ sym ++ overflow_loc(pos)),
+                         sprout_ir.IRPanic(msg_result)])
+        all_blocks = list_append(list_append(lblocks, rblocks),
+                       [cond_block, panic_block])
 
 # Translate an if-then-else.
 #

@@ -19,6 +19,9 @@ declare void @sprout_abort_match() noreturn
 declare i64 @panic(i64)
 declare ptr @llvm.stacksave()
 declare void @llvm.stackrestore(ptr)
+declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)
+declare { i64, i1 } @llvm.ssub.with.overflow.i64(i64, i64)
+declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)
 declare i64 @sprout_alloc_obj(i64, i64)
 declare { i64, i64 } @vector_get_unboxed(i64, i64)
 declare { i64, i64 } @map_get_unboxed(i64, i64)
@@ -75,6 +78,14 @@ declare i64 @native_set_size(i64)
 declare i64 @ref_new(i64)
 declare i64 @ref_read(i64)
 declare i64 @ref_write(i64, i64)
+@.str.0 = private unnamed_addr constant { i64, [38 x i8] } { i64 606218, [38 x i8] c"Int overflow in + (line 9, column 44)\00" }
+@.str.1 = private unnamed_addr constant { i64, [38 x i8] } { i64 606218, [38 x i8] c"Int overflow in + (line 9, column 51)\00" }
+@.str.2 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in * (line 13, column 21)\00" }
+@.str.3 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in * (line 13, column 33)\00" }
+@.str.4 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 13, column 28)\00" }
+@.str.5 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 13, column 39)\00" }
+@.str.6 = private unnamed_addr constant { i64, [38 x i8] } { i64 606218, [38 x i8] c"Int overflow in + (line 9, column 44)\00" }
+@.str.7 = private unnamed_addr constant { i64, [38 x i8] } { i64 606218, [38 x i8] c"Int overflow in + (line 9, column 51)\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -107,18 +118,36 @@ declare i64 @ref_write(i64, i64)
 define i64 @main.rgb3(i64 %p$k) {
 entry:
   %t$0 = add i64 0, 1
-  %t$1 = add i64 %p$k, %t$0
-  %t$2 = add i64 0, 2
-  %t$3 = add i64 %p$k, %t$2
-  %t$4 = call i64 @sprout_alloc_tuple_blob(i64 24)
-  %t$4$ptr = inttoptr i64 %t$4 to ptr
-  %t$4$s0 = getelementptr i64, ptr %t$4$ptr, i64 0
-  store i64 %p$k, ptr %t$4$s0
-  %t$4$s1 = getelementptr i64, ptr %t$4$ptr, i64 1
-  store i64 %t$1, ptr %t$4$s1
-  %t$4$s2 = getelementptr i64, ptr %t$4$ptr, i64 2
-  store i64 %t$3, ptr %t$4$s2
-  ret i64 %t$4
+  %t$1$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %p$k, i64 %t$0)
+  %t$1 = extractvalue { i64, i1 } %t$1$agg, 0
+  %t$1$ovf = extractvalue { i64, i1 } %t$1$agg, 1
+  br i1 %t$1$ovf, label %ovfpanic_1, label %ovfok_1
+ovfpanic_1:
+  %t$2 = getelementptr inbounds { i64, [38 x i8] }, ptr @.str.0, i64 0, i32 1, i64 0
+  %t$3 = ptrtoint ptr %t$2 to i64
+  call i64 @panic(i64 %t$3)
+  unreachable
+ovfok_1:
+  %t$4 = add i64 0, 2
+  %t$5$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %p$k, i64 %t$4)
+  %t$5 = extractvalue { i64, i1 } %t$5$agg, 0
+  %t$5$ovf = extractvalue { i64, i1 } %t$5$agg, 1
+  br i1 %t$5$ovf, label %ovfpanic_5, label %ovfok_5
+ovfpanic_5:
+  %t$6 = getelementptr inbounds { i64, [38 x i8] }, ptr @.str.1, i64 0, i32 1, i64 0
+  %t$7 = ptrtoint ptr %t$6 to i64
+  call i64 @panic(i64 %t$7)
+  unreachable
+ovfok_5:
+  %t$8 = call i64 @sprout_alloc_tuple_blob(i64 24)
+  %t$8$ptr = inttoptr i64 %t$8 to ptr
+  %t$8$s0 = getelementptr i64, ptr %t$8$ptr, i64 0
+  store i64 %p$k, ptr %t$8$s0
+  %t$8$s1 = getelementptr i64, ptr %t$8$ptr, i64 1
+  store i64 %t$1, ptr %t$8$s1
+  %t$8$s2 = getelementptr i64, ptr %t$8$ptr, i64 2
+  store i64 %t$5, ptr %t$8$s2
+  ret i64 %t$8
 }
 
 define i64 @main.use_rgb(i64 %p$k) {
@@ -128,12 +157,48 @@ entry:
   %t$1 = extractvalue { i64, i64, i64 } %t$0$st, 1
   %t$2 = extractvalue { i64, i64, i64 } %t$0$st, 2
   %t$3 = add i64 0, 100
-  %t$4 = mul i64 %t$0, %t$3
-  %t$5 = add i64 0, 10
-  %t$6 = mul i64 %t$1, %t$5
-  %t$7 = add i64 %t$4, %t$6
-  %t$8 = add i64 %t$7, %t$2
-  ret i64 %t$8
+  %t$4$agg = call { i64, i1 } @llvm.smul.with.overflow.i64(i64 %t$0, i64 %t$3)
+  %t$4 = extractvalue { i64, i1 } %t$4$agg, 0
+  %t$4$ovf = extractvalue { i64, i1 } %t$4$agg, 1
+  br i1 %t$4$ovf, label %ovfpanic_4, label %ovfok_4
+ovfpanic_4:
+  %t$5 = getelementptr inbounds { i64, [39 x i8] }, ptr @.str.2, i64 0, i32 1, i64 0
+  %t$6 = ptrtoint ptr %t$5 to i64
+  call i64 @panic(i64 %t$6)
+  unreachable
+ovfok_4:
+  %t$7 = add i64 0, 10
+  %t$8$agg = call { i64, i1 } @llvm.smul.with.overflow.i64(i64 %t$1, i64 %t$7)
+  %t$8 = extractvalue { i64, i1 } %t$8$agg, 0
+  %t$8$ovf = extractvalue { i64, i1 } %t$8$agg, 1
+  br i1 %t$8$ovf, label %ovfpanic_8, label %ovfok_8
+ovfpanic_8:
+  %t$9 = getelementptr inbounds { i64, [39 x i8] }, ptr @.str.3, i64 0, i32 1, i64 0
+  %t$10 = ptrtoint ptr %t$9 to i64
+  call i64 @panic(i64 %t$10)
+  unreachable
+ovfok_8:
+  %t$11$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %t$4, i64 %t$8)
+  %t$11 = extractvalue { i64, i1 } %t$11$agg, 0
+  %t$11$ovf = extractvalue { i64, i1 } %t$11$agg, 1
+  br i1 %t$11$ovf, label %ovfpanic_11, label %ovfok_11
+ovfpanic_11:
+  %t$12 = getelementptr inbounds { i64, [39 x i8] }, ptr @.str.4, i64 0, i32 1, i64 0
+  %t$13 = ptrtoint ptr %t$12 to i64
+  call i64 @panic(i64 %t$13)
+  unreachable
+ovfok_11:
+  %t$14$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %t$11, i64 %t$2)
+  %t$14 = extractvalue { i64, i1 } %t$14$agg, 0
+  %t$14$ovf = extractvalue { i64, i1 } %t$14$agg, 1
+  br i1 %t$14$ovf, label %ovfpanic_14, label %ovfok_14
+ovfpanic_14:
+  %t$15 = getelementptr inbounds { i64, [39 x i8] }, ptr @.str.5, i64 0, i32 1, i64 0
+  %t$16 = ptrtoint ptr %t$15 to i64
+  call i64 @panic(i64 %t$16)
+  unreachable
+ovfok_14:
+  ret i64 %t$14
 }
 
 define i64 @__sprout_user_main() {
@@ -147,13 +212,31 @@ entry:
 define { i64, i64, i64 } @main.rgb3_worker(i64 %p$k) {
 entry:
   %t$0 = add i64 0, 1
-  %t$1 = add i64 %p$k, %t$0
-  %t$2 = add i64 0, 2
-  %t$3 = add i64 %p$k, %t$2
-  %t$4$r0 = insertvalue { i64, i64, i64 } undef, i64 %p$k, 0
-  %t$4$r1 = insertvalue { i64, i64, i64 } %t$4$r0, i64 %t$1, 1
-  %t$4$r2 = insertvalue { i64, i64, i64 } %t$4$r1, i64 %t$3, 2
-  ret { i64, i64, i64 } %t$4$r2
+  %t$1$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %p$k, i64 %t$0)
+  %t$1 = extractvalue { i64, i1 } %t$1$agg, 0
+  %t$1$ovf = extractvalue { i64, i1 } %t$1$agg, 1
+  br i1 %t$1$ovf, label %ovfpanic_1, label %ovfok_1
+ovfpanic_1:
+  %t$2 = getelementptr inbounds { i64, [38 x i8] }, ptr @.str.6, i64 0, i32 1, i64 0
+  %t$3 = ptrtoint ptr %t$2 to i64
+  call i64 @panic(i64 %t$3)
+  unreachable
+ovfok_1:
+  %t$4 = add i64 0, 2
+  %t$5$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %p$k, i64 %t$4)
+  %t$5 = extractvalue { i64, i1 } %t$5$agg, 0
+  %t$5$ovf = extractvalue { i64, i1 } %t$5$agg, 1
+  br i1 %t$5$ovf, label %ovfpanic_5, label %ovfok_5
+ovfpanic_5:
+  %t$6 = getelementptr inbounds { i64, [38 x i8] }, ptr @.str.7, i64 0, i32 1, i64 0
+  %t$7 = ptrtoint ptr %t$6 to i64
+  call i64 @panic(i64 %t$7)
+  unreachable
+ovfok_5:
+  %t$8$r0 = insertvalue { i64, i64, i64 } undef, i64 %p$k, 0
+  %t$8$r1 = insertvalue { i64, i64, i64 } %t$8$r0, i64 %t$1, 1
+  %t$8$r2 = insertvalue { i64, i64, i64 } %t$8$r1, i64 %t$5, 2
+  ret { i64, i64, i64 } %t$8$r2
 }
 
 define i32 @main(i32 %argc, ptr %argv) {

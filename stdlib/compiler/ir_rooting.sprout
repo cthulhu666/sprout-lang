@@ -163,6 +163,9 @@ fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   | sprout_ir.IRISub _ _ _ -> false
   | sprout_ir.IRIMul _ _ _ -> false
   | sprout_ir.IRIDiv _ _ _ -> false
+  # bigint-v0 Stage 1: the intrinsic call + two extractvalues are pure register
+  # arithmetic (like IRIAdd/IRISub/IRIMul above) — no allocation, NOT a trigger.
+  | sprout_ir.IRCheckedArith _ _ _ _ -> false
   # stdlib.bits: register arithmetic on unboxed i64, allocates nothing.
   | sprout_ir.IRIAnd _ _ _ -> false
   | sprout_ir.IRIOr _ _ _ -> false
@@ -303,6 +306,13 @@ fn op_produces_simple_heap(op: sprout_ir.IROp) -> Maybe String =
   | sprout_ir.IRISub _ _ _ -> Nothing
   | sprout_ir.IRIMul _ _ _ -> Nothing
   | sprout_ir.IRIDiv _ _ _ -> Nothing
+  # bigint-v0 Stage 1: NOT the "no source-level type available" case the
+  # conservative-rooting invariant (docs/compiler-internals.md) warns about —
+  # the types here are KNOWN, not absent. <result> is a machine i64 (Sprout
+  # Int, same as IRIAdd's result above); the derived <result>$agg is
+  # { i64, i1 } and <result>$ovf is i1. None of the three can ever be a heap
+  # pointer, so reporting Nothing is a type-driven exclusion, not a guess.
+  | sprout_ir.IRCheckedArith _ _ _ _ -> Nothing
   # stdlib.bits: the result is an unboxed i64, never a heap pointer.
   | sprout_ir.IRIAnd _ _ _ -> Nothing
   | sprout_ir.IRIOr _ _ _ -> Nothing
@@ -408,6 +418,11 @@ fn op_uses(op: sprout_ir.IROp) -> List String =
   | sprout_ir.IRISub _ a b -> [a, b]
   | sprout_ir.IRIMul _ a b -> [a, b]
   | sprout_ir.IRIDiv _ a b -> [a, b]
+  # bigint-v0 Stage 1: uses its two source operands, matching IRIAdd/etc above.
+  # The derived $agg/$ovf names are not independent uses — $agg never escapes
+  # the op that defines it and $ovf is consumed only by the IRCondBr this op's
+  # caller emits immediately after it in the same block.
+  | sprout_ir.IRCheckedArith _ _ a b -> [a, b]
   | sprout_ir.IRIAnd _ a b -> [a, b]
   | sprout_ir.IRIOr _ a b -> [a, b]
   | sprout_ir.IRIXor _ a b -> [a, b]
@@ -490,6 +505,11 @@ fn op_def(op: sprout_ir.IROp) -> Maybe String =
   | sprout_ir.IRISub r _ _ -> Just(r)
   | sprout_ir.IRIMul r _ _ -> Just(r)
   | sprout_ir.IRIDiv r _ _ -> Just(r)
+  # bigint-v0 Stage 1: reports <result>, matching IRIAdd/etc above (explicit,
+  # not the `_` catch-all) — $ovf needs no entry: it is consumed by the
+  # IRCondBr in the very same block the op defines it in, never live across a
+  # block boundary, so liveness needs no kill-at-def for it.
+  | sprout_ir.IRCheckedArith r _ _ _ -> Just(r)
   | sprout_ir.IRIAnd r _ _ -> Just(r)
   | sprout_ir.IRIOr r _ _ -> Just(r)
   | sprout_ir.IRIXor r _ _ -> Just(r)
@@ -802,6 +822,14 @@ fn op_exposes_operands(op: sprout_ir.IROp) -> Bool =
   | sprout_ir.IRISub _ _ _ -> false
   | sprout_ir.IRIMul _ _ _ -> false
   | sprout_ir.IRIDiv _ _ _ -> false
+  # bigint-v0 Stage 1: like IRIAdd/etc above, does not trigger GC, so `false`
+  # is correct — and, like B1's raw loads/store below, this arm is also never
+  # actually REACHED: op_exposes_operands has exactly one call site
+  # (roots_across), itself called only from process_op's trigger branch, and
+  # op_triggers_gc already classifies IRCheckedArith non-trigger — so
+  # process_op short-circuits before this arm runs. Present only because the
+  # match is exhaustive.
+  | sprout_ir.IRCheckedArith _ _ _ _ -> false
   # stdlib.bits: operands are unboxed i64 and nothing allocates, so there is no
   # window in which a collection could see them.
   | sprout_ir.IRIAnd _ _ _ -> false

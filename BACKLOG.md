@@ -72,13 +72,6 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
 
 **Types and inference**
 
-- [ ] `P1` **Int overflow policy — DECIDED 2026-09-22, unimplemented.** `+`/`-`/`*` do silent
-  two's-complement wrap (plain `add/sub/mul i64`, no `nsw`). Option A (trap/panic) was chosen once
-  `BigInt` gave overflow an escape hatch; both land together as Stage 1 of `docs/bigint-v0.md`,
-  which also carries the wrap audit (`prelude.int_is_min` relies on wrap and breaks) and the X4
-  rule. **X4 must rule on RADIX literals explicitly** — `0xFFFFFFFFFFFFFFFF` is `-1` today, which
-  is the useful reading for masks, so a uniform "must fit in `Int`" rule would reject the all-ones
-  mask idiom. `docs/int-overflow-policy-decision.md`; `docs/bitwise-int-ops-v0.md` §5.6.
 - [ ] `P2` **Allow polymorphic recursion for a CONSTRAINED declaration.** A complete signature
   enables it only when the declaration has no constraints; `fn f(n: Nest a) -> Int where Eq a`
   reports the occurs check. This is a constraint-solver feature, not a different self-binding
@@ -137,6 +130,11 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   implement it as newline-equivalent or drop it from the docs; the newline form works today.
 - [ ] `P3` **`_` digit separator (`1_000_000`).** `_` is an identifier-start character, so `1_000`
   lexes as `1` then `_000`. A lexer decision of its own, deliberately excluded from radix literals.
+- [ ] `P3` **Spec has no normative statement that prefix `-` is a unary operator.** `parse_unary`
+  (`parser.sprout:1159`) implements it, and §6 describes overflow behaviour for "unary negation",
+  but no section defines the grammar or precedence of prefix `-`/`!`. Found while wiring the
+  §2 lexical carve-out (`docs/bigint-v0.md` §5.3) to a normative section and finding none to point
+  to. `docs/spec-v0.md` §5 (Declarations and Expressions) is the likely home.
 - [ ] `P3` **Sweep the driver staircases.** `analysis_service_driver.op_session_update` (Tier 1b
   pure-prefix) and `driver.run_file` (effectful head + pure tail). Neither is in the compiler's
   closure, so the self-host fixed point does not guard them — each needs its own behavioural test
@@ -1327,8 +1325,6 @@ findings and probe programs are in `docs/fundamentals-code-review-handoff-2026-0
 effect half is in `docs/effect-enforcement-v0.md`. Read the handoff doc's §2 for *why* the effect
 deferral happened, not for current behaviour. Still open:
 
-- [ ] `P2` **W7's `INT_MIN / -1` operator guard**, coupled to the int-overflow policy decision in
-  §1.
 - [ ] `P3` **W9 remainder**, and **T11**, which is gated on the iface arc.
 - [ ] `P3` **`resolve`/`lowering`'s `is_type_var_name` lacks the dot-guard `infer.is_lowercase_name`
   has** — a dotted name is never a type variable. Latent hardening left over from the

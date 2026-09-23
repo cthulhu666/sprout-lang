@@ -136,6 +136,14 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int), c
   | sprout_ir.IRISub r a b -> "  " ++ r ++ " = sub i64 " ++ a ++ ", " ++ b
   | sprout_ir.IRIMul r a b -> "  " ++ r ++ " = mul i64 " ++ a ++ ", " ++ b
   | sprout_ir.IRIDiv r a b -> "  " ++ r ++ " = sdiv i64 " ++ a ++ ", " ++ b
+  # bigint-v0 Stage 1: overflow-checked arithmetic. The intrinsic call and its
+  # two extractvalues are unconditional (never trap by themselves); the caller
+  # (ast_to_ir.finish_checked_arith) emits an IRCondBr on <r>$ovf afterward.
+  | sprout_ir.IRCheckedArith r intrinsic a b ->
+      "  " ++ r ++ "$agg = call { i64, i1 } @llvm." ++ intrinsic ++
+        ".with.overflow.i64(i64 " ++ a ++ ", i64 " ++ b ++ ")\n" ++
+      "  " ++ r ++ " = extractvalue { i64, i1 } " ++ r ++ "$agg, 0\n" ++
+      "  " ++ r ++ "$ovf = extractvalue { i64, i1 } " ++ r ++ "$agg, 1"
   # stdlib.bits. One instruction each, no flags: `and`/`or`/`xor` are total, and
   # the three shifts are poison-free only because ast_to_ir has already bounded
   # the count to 0..63 (see the precondition on the constructors). Emitting `shl
@@ -532,6 +540,14 @@ export fn ir_header() -> String =
   # Stack save/restore intrinsics for TCO loops (reset per-iteration root allocas).
   "declare ptr @llvm.stacksave()\n" ++
   "declare void @llvm.stackrestore(ptr)\n" ++
+  # bigint-v0 Stage 1 (docs/bigint-v0.md §5.1): overflow-checked Int
+  # arithmetic backing `+`/`-`/`*` and unary `-`. IRCheckedArith lowering
+  # calls these directly; LLVM provides sadd/ssub/smul.with.overflow but no
+  # sdiv variant (division overflow — INT_MIN / -1 — is its own check in
+  # ast_to_ir.finish_checked_div).
+  "declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)\n" ++
+  "declare { i64, i1 } @llvm.ssub.with.overflow.i64(i64, i64)\n" ++
+  "declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)\n" ++
   # Boxed-ADT constructors.  One arity-generic entry point replaces the former
   # sprout_make0..sprout_make10 set: IRMakeCtor lowers to a call plus one store
   # per field, so no arity needs its own declaration and the only remaining
