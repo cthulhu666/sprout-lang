@@ -375,6 +375,24 @@ wrapper to peel off — so binding and returning it unchanged adds nothing. (Thi
 reduction is exact when the returned value is a bare effectful type; when it is a
 `Maybe`/`Result`, check the intended short-circuit before collapsing.)
 
+## Bind a constant with a top-level `let`, not a nullary `fn`
+
+A top-level `let` is evaluated **once** for the process; a nullary `fn` re-runs its
+body at every call. LLVM folds a literal body either way, so `fn limb_bits() -> Int = 26`
+costs nothing — but a body it cannot fold is paid for per reference:
+
+```sprout
+# Re-parses 64 hex digits on every reference — 52 µs each:
+fn field_prime() -> bigint.BigInt = constant("0xffffffff000000010000...")
+
+# Evaluated once — 0.03 µs each:
+let field_prime = constant("0xffffffff000000010000...")
+```
+
+Top-level initializers must be pure, and may be `export`ed. Measured in
+`docs/bigint-v0.md` §9 Stage 4, where the function spelling was re-parsing the P-256
+group order twice on every signature verification.
+
 ## Build strings with `++` and backtick templates
 
 Append with `++`; interpolate with backtick templates, which evaluate real

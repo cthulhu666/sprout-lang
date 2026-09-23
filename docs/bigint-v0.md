@@ -1,8 +1,8 @@
 # Arbitrary-precision integers (v0)
 
-Status: **normative. Stages 1-3 landed; Stage 4 open.** `Int` traps on overflow,
-`stdlib/math/bigint.sprout` and `stdlib/math/modular.sprout` exist;
-`stdlib/crypto/p256.sprout` does not yet.
+Status: **normative. All four stages landed.** `Int` traps on overflow, and
+`stdlib/math/bigint.sprout`, `stdlib/math/modular.sprout` and `stdlib/crypto/p256.sprout`
+all exist. Issue #337 is answered: ES256 verification is ordinary stdlib code, no new builtin.
 
 Companion decision: `docs/int-overflow-policy-decision.md` (settled as Option A by this design).
 Driving requirement: GitHub issue #337, ECDSA P-256 (ES256) signature verification.
@@ -35,6 +35,12 @@ reps=100000  total_us=116323  ns_per_mul=1163
 about twice the probe's cost once reduction is included, a pure-Sprout P-256 verify lands near
 **15 ms**, with `MutVec` being the slow representation. So arbitrary precision is not a
 prerequisite for #337; it is a choice made on its merits, and this document records why.
+
+(The 15 ms projection was **wrong, and §9's Stage 4 note records the measurement that replaced
+it: 240 ms.** The error is in "about twice the probe's cost once reduction is included" — the
+probe never ran a division, and reduction turned out to be 71% of a field multiply, not 50% of
+one. The claim this paragraph exists to support survives it: 240 ms is still not a case for a
+builtin.)
 
 **The promise collides with the GC.** `stdlib/compiler/type_kind.sprout:48`
 (`type_is_non_heap_scalar`) classifies `Int`, `Bool`, `Char` and `Double` as scalars, which is
@@ -686,7 +692,8 @@ review are unverified low-severity growth claims of exactly this shape, filed in
 The consequence for Stage 4 is concrete: at ~6,000 field multiplications per verify, a
 `BigInt`-based P-256 verification lands near **200 ms**, not the "several times 15 ms" §9's Stage 4
 note projected. That does not change the plan — the escalation path there is unchanged and still
-changes no public API — but it means Stage 4 should measure before assuming. The cheaper fix is
+changes no public API — but it means Stage 4 should measure before assuming. It did: **240 ms**,
+so this projection was the accurate one. The cheaper fix is
 upstream of this module and is filed in `BACKLOG.md`: an unboxed read for immutable `Vec`, which
 the runtime already has as `vector_get_direct` but which only `stdlib.mutable` declares, and only
 as `!{IO}`.
@@ -710,20 +717,62 @@ callers that keep their values reduced, which is Stage 4 and is not enforced by 
 `tests/stdlib/test_modular_vectors.spr` deliberately passes unreduced values, so the suite
 exercises the slower path.
 
-### Stage 4 — `stdlib/crypto/p256.sprout`
+### Stage 4 — `stdlib/crypto/p256.sprout` (landed)
 
 Point arithmetic in Jacobian coordinates, DER signature parsing, public-key point decoding, and
 `verify`. The public entry point is total: every malformed input — a point not on the curve, `r`
 or `s` zero or out of range, a malformed DER envelope — answers `false` rather than panicking,
 because verification is the security boundary (#337 states this as a requirement).
 
-A general `BigInt` pays a reduction cost that a Solinas-specific field implementation avoids;
-expect several times §1's 15 ms. If that proves too slow for a real caller, the escalation is a
-dedicated field type *inside* `p256.sprout`, which changes no public API.
+The surface is one type and three functions, and nothing else is exported. `public_key` (SEC1
+`0x04 || X || Y`) and `public_key_xy` (the COSE/JWK shape WebAuthn hands over) are the only ways
+to build a `PublicKey`, and both validate the curve equation — the `Modulus` pattern of §5.6, one
+boundary check rather than a `Maybe` on every use. `verify` answers `Bool`. Argument order is
+data-first, context-last, matching `modular.mod_add(left, right, m)` rather than C's
+`(key, message, sig)`. DER decoding and a SEC1 re-encoder were both written and then withdrawn
+from the export list: #337 needs neither, and an exported function no test exercises is a
+promise nothing holds you to.
+
+**What the adversarial surface actually is.** Of Wycheproof's 310 invalid vectors, **173 are
+encoding, not arithmetic** — `InvalidEncoding` 92, `InvalidTypesInSignature` 63,
+`BerEncodedSignature` 7, `IntegerOverflow` 5, `ModifiedInteger` 5, `MissingZero` 1. Range checks
+on `r`/`s` are 112 more, and only 31 are curve or point cases. That inverts the expected shape of
+the work: strict DER is the bulk of the security value, and it is reached before a single field
+multiply. Long-form lengths are rejected outright — a P-256 body is at most 72 bytes, so DER's
+minimal-length rule requires the short form, and a long form is either non-minimal or too wide to
+hold an in-range `r` and `s`.
+
+**Cost, measured rather than projected.** One verify is **240 ms**, and the whole 484-vector
+suite is **70 s**. §9's Stage 2 note predicted ~200 ms from the field-multiply cost alone, so the
+prediction held; §1's "several times 15 ms" did not, and is retired. The breakdown, measured on
+this branch at P-256 width:
+
+| operation | per call | note |
+|---|---|---|
+| `modular.mod_mul` | 46.5 µs | one field multiply |
+| ├ `bigint.mul` (256×256) | ~2 µs | 4% |
+| └ `modular.reduce` (512-bit) | ~33 µs | **71%** |
+| `modular.mod_add` | 1.3 µs | |
+| `bigint.add` | 1.2 µs | |
+
+**The Knuth division is 71% of a field multiply, and it dominates everything.** That sets the
+escalation honestly: a Solinas reduction for P-256's prime replaces the division with ~9 additions
+(~10 µs), so a field multiply goes to ~13 µs and a verify to roughly 80 ms. That is **3.5x, not
+40x** — because `bigint.add` itself costs 1.2 µs allocating a fresh limb vector. The floor for a
+`BigInt`-backed field is allocation, not algorithm, and a dedicated field type inside
+`p256.sprout` is the only thing that moves it. Unchanged from the original plan: that escalation
+changes no public API. Shamir's trick on the two scalar multiplications is a further ~⅓ and is
+also not done.
+
+**Constants are top-level `let`, not nullary `fn`.** A `let` is evaluated once for the process; a
+nullary `fn` re-runs its body at every call. For a body LLVM can fold this is free — which is why
+`bigint`'s `fn limb_bits() -> Int = 26` is fine in an inner loop — but `from_string` on 64 hex
+digits is quadratic and folds into nothing: **0.03 µs against 52 µs per reference**. Written as
+functions, the curve constants were re-parsing the group order twice on every `verify`.
 
 ### 9.4 Prior art for the P-256 implementation itself
 
-Verified 2026-09-22, and relevant only once Stage 4 starts:
+Verified 2026-09-22:
 
 - **Java** (JDK ≥ 16) implements P-256 in pure Java; the native C ECC was removed (JDK-8241386).
 - **Go** implements it in Go, with field arithmetic generated by fiat-crypto
@@ -797,9 +846,33 @@ being right; and the same for `mod_inv`, checked as `a * a⁻¹ == 1` rather tha
 same vendoring rule as Stage 2. The moduli there are arbitrary positives, NOT primes, deliberately:
 a suite of prime moduli never reaches `mod_inv`'s non-coprime arm.
 
-**Stage 4.** All **484** vectors of Wycheproof's `ecdsa_secp256r1_sha256_test.json`, which covers
-exactly the adversarial cases #337 requires: `r=0` and `s=0`, BER-encoded signature envelopes,
-and points off the curve. Vectors are vendored, not fetched at test time.
+**Stage 4.** Two suites again, same split as Stage 2.
+
+`tests/stdlib/test_p256.spr` — 31 hand-written cases, each one quoted from the Wycheproof suite
+so the two files cannot disagree silently. They are chosen for what they prove rather than for
+coverage, and three are worth naming because they are the ones an implementation gets confidently
+wrong: a signature with **r=5, s=1 is valid** (tc355), so no size heuristic on the components is
+safe; the **high-s malleable form is valid** (tc5), so a verifier that rejects it breaks
+interoperability while fixing no attack; and tc7 against tc6 is the same 69-byte signature
+differing only in whether `s` carries its DER leading zero — valid and invalid respectively.
+
+`tests/stdlib/test_p256_vectors.spr` — all **484** vectors of Wycheproof's
+`ecdsa_secp256r1_sha256_test.json` (174 valid, 310 invalid), generated by
+`scripts/gen_p256_vectors.py` and vendored under the same rule as Stage 2: `just test` must not
+need a network or a Python interpreter. **The upstream path moved** — Wycheproof removed
+`testvectors/` and the suite now lives in `testvectors_v1/` under `ecdsa_verify_schema_v1.json`.
+The generator pins revision `878e5366` so a regeneration that changes the vector count reads as a
+deliberate bump rather than as upstream drift, and it asserts the group shape (secp256r1,
+SHA-256, 65-byte uncompressed key, no `acceptable` result tier) rather than assuming it.
+
+A rejected public key in that suite **panics** rather than answering `false`. Every one of the
+113 keys is on the curve, so a rejection is a bug in `public_key` — and reporting it as `false`
+would leave all 310 rejection cases passing while only the 174 accepting ones failed, which points
+the reader at the wrong function.
+
+This suite costs **70 s**, which is the single largest test file in the tree. Splitting it behind
+its own `just` gate was considered and not done: the rejections are the security argument, and a
+gate that is not part of `just test` is a gate that rots.
 
 ## 11. Spec/docs status
 

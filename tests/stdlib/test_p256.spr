@@ -1,0 +1,202 @@
+import stdlib.test (check_eq, check_true, check_false, run_suite)
+import stdlib.bytes as bytes
+import stdlib.string as string
+import stdlib.crypto.p256 as p256
+
+# docs/bigint-v0.md Stage 4. The readable half; `test_p256_vectors.spr` is the
+# generated 484-vector Wycheproof sweep. Every case below is quoted from it, so a
+# disagreement between the two files is a bug in this one.
+#
+# Chosen for what they prove: a small r and s can be VALID (tc355), the high-s
+# malleable form is VALID (tc5), and one DER leading zero decides tc7 against tc6.
+
+# Halved rather than appended a byte at a time: `bytes.builder_append` copies both
+# sides' chunk arrays, the defect Stage 2 fixed in `bigint.to_bytes_be`.
+fn nibble(raw: String, index: Int) -> Int =
+  match string.hex_digit_value(string.char_at_or(raw, index, 'x')) with
+  | Just value -> value
+  | Nothing -> panic("test_p256: a vector held a non-hex character")
+
+fn hex_span(raw: String, low: Int, high: Int) -> Builder =
+  if high <= low then bytes.builder_empty()
+  else if high - low == 1 then
+    bytes.builder_byte(nibble(raw, low * 2) * 16 + nibble(raw, low * 2 + 1))
+  else
+    let middle = low + (high - low) / 2
+    in bytes.builder_append(hex_span(raw, low, middle), hex_span(raw, middle, high))
+
+fn hex(raw: String) -> Bytes =
+  bytes.builder_build(hex_span(raw, 0, string.length(raw) / 2))
+
+# --- the four Wycheproof public keys these cases use ---
+
+fn key_of(raw: String) -> p256.PublicKey =
+  match p256.public_key(hex(raw)) with
+  | Just value -> value
+  | Nothing -> panic("test_p256: a Wycheproof public key was rejected")
+
+# Wycheproof group 0.
+let key_a =
+  key_of("0404aaec73635726f213fb8a9e64da3b8632e41495a944d0045b522eba7240fad5"
+      ++ "87d9315798aaa3a5ba01775787ced05eaaf7b4e09fc81d6d1aa546e8365d525d")
+
+# Wycheproof group 1 --- the key every DER-encoding case below is signed under.
+let key_b =
+  key_of("042927b10512bae3eddcfe467828128bad2903269919f7086069c8c4df6c732838"
+      ++ "c7787964eaac00e5921fb1498a60f4606766b3d9685001558d1a974e7341513e")
+
+# Wycheproof group 6, whose signature is r=5, s=1.
+let key_c =
+  key_of("04a71af64de5126a4a4e02b7922d66ce9415ce88a4c9d25514d91082c8725ac957"
+      ++ "5d47723c8fbe580bb369fec9c2665d8e30a435b9932645482e7c9f11e872296b")
+
+# Wycheproof group 41, whose signature drives the verify to the point at infinity.
+let key_d =
+  key_of("04b533d4695dd5b8c5e07757e55e6e516f7e2c88fa0239e23f60e8ec07dd70f287"
+      ++ "1b134ee58cc583278456863f33c3a85d881f7d4a39850143e29d4eaf009afe47")
+
+# "123400" --- the message under every group-1 signature.
+let msg_b = hex("313233343030")
+
+# The valid group-1 signature. Several cases below are this one, damaged.
+let sig_b =
+  "304502202ba3a8be6b94d5ec80a6d9d1190a436effe50d85a1eee859b8cc6af9bd5c2e18"
+    ++ "022100b329f479a2bbd0a5c384ee1493b1f5186a87139cac5df4087c134b49156847db"
+
+fn accepted(raw: String) -> Bool =
+  match p256.public_key(hex(raw)) with
+  | Just _ -> true
+  | Nothing -> false
+
+fn check_b(sig: String) -> Bool =
+  p256.verify(msg_b, hex(sig), key_b)
+
+fn main() -> Unit !{IO} =
+  run_suite("p256", [
+    # --- public_key: a value that exists is a point on the curve ---
+    check_true("public_key accepts an uncompressed point",
+               accepted("0404aaec73635726f213fb8a9e64da3b8632e41495a944d0045b522eba7240fad5"
+                     ++ "87d9315798aaa3a5ba01775787ced05eaaf7b4e09fc81d6d1aa546e8365d525d")),
+    check_false("public_key rejects empty input", accepted("")),
+    # The bare coordinates with no SEC1 tag: that shape is `public_key_xy`'s.
+    check_false("public_key rejects a missing 0x04 tag",
+                accepted("04aaec73635726f213fb8a9e64da3b8632e41495a944d0045b522eba7240fad5"
+                      ++ "87d9315798aaa3a5ba01775787ced05eaaf7b4e09fc81d6d1aa546e8365d525d")),
+    check_false("public_key rejects a compressed point",
+                accepted("0204aaec73635726f213fb8a9e64da3b8632e41495a944d0045b522eba7240fad5")),
+    check_false("public_key rejects a trailing byte",
+                accepted("0404aaec73635726f213fb8a9e64da3b8632e41495a944d0045b522eba7240fad5"
+                      ++ "87d9315798aaa3a5ba01775787ced05eaaf7b4e09fc81d6d1aa546e8365d525d00")),
+    # The last nibble of y is changed, so the point satisfies nothing.
+    check_false("public_key rejects a point off the curve",
+                accepted("0404aaec73635726f213fb8a9e64da3b8632e41495a944d0045b522eba7240fad5"
+                      ++ "87d9315798aaa3a5ba01775787ced05eaaf7b4e09fc81d6d1aa546e8365d525c")),
+    # x == p is not a field element; reducing it would re-encode x = 0.
+    check_false("public_key rejects a coordinate at the field prime",
+                accepted("04ffffffff00000001000000000000000000000000ffffffffffffffffffffffff"
+                      ++ "87d9315798aaa3a5ba01775787ced05eaaf7b4e09fc81d6d1aa546e8365d525d")),
+    # Infinity is not a public key: it has no discrete log.
+    check_false("public_key rejects all-zero coordinates",
+                accepted("04" ++ "00000000000000000000000000000000000000000000000000000000000000"
+                              ++ "0000000000000000000000000000000000000000000000000000000000000000"
+                              ++ "00")),
+
+    # --- public_key_xy: the COSE/JWK path must agree with the SEC1 path ---
+    check_true("public_key_xy accepts the same point",
+               match p256.public_key_xy(
+                       hex("04aaec73635726f213fb8a9e64da3b8632e41495a944d0045b522eba7240fad5"),
+                       hex("87d9315798aaa3a5ba01775787ced05eaaf7b4e09fc81d6d1aa546e8365d525d")) with
+               | Just _ -> true
+               | Nothing -> false),
+    check_false("public_key_xy rejects a short coordinate",
+                match p256.public_key_xy(hex("04aaec73"),
+                                         hex("87d9315798aaa3a5ba01775787ced05e"
+                                          ++ "aaf7b4e09fc81d6d1aa546e8365d525d")) with
+                | Just _ -> true
+                | Nothing -> false),
+
+    # --- verify: the four group-0 signatures, including one over an empty message ---
+    check_true("verify accepts a signature over the empty message",
+               p256.verify(hex(""),
+                           hex("3045022100b292a619339f6e567a305c951c0dcbcc42d16e47f219f9e98e76"
+                            ++ "e09d8770b34a02200177e60492c5a8242f76f07bfe3661bde59ec2a17ce5bd"
+                            ++ "2dab2abebdf89a62e2"),
+                           key_a)),
+    check_true("verify accepts a signature over three bytes",
+               p256.verify(hex("4d7367"),
+                           hex("30450220530bd6b0c9af2d69ba897f6b5fb59695cfbf33afe66dbadcf5b8d2"
+                            ++ "a2a6538e23022100d85e489cb7a161fd55ededcedbf4cc0c0987e3e3f0f242"
+                            ++ "cae934c72caa3f43e9"),
+                           key_a)),
+    check_true("verify accepts a signature over twenty zero bytes",
+               p256.verify(hex("0000000000000000000000000000000000000000"),
+                           hex("3045022100986e65933ef2ed4ee5aada139f52b70539aaf63f00a91f29c691"
+                            ++ "78490d57fb7102203dafedfb8da6189d372308cbf1489bbbdabf0c0217d1c0"
+                            ++ "ff0f701aaa7a694b9c"),
+                           key_a)),
+    check_true("verify accepts the group-1 baseline", check_b(sig_b)),
+
+    # Bound to its message --- the one case where nothing is malformed.
+    check_false("verify rejects a good signature over the wrong message",
+                p256.verify(hex("313233343031"), hex(sig_b), key_b)),
+    check_false("verify rejects a good signature under the wrong key",
+                p256.verify(msg_b, hex(sig_b), key_a)),
+
+    # --- verify: values that look wrong and are not ---
+    # r = 5, s = 1. No size heuristic is safe.
+    check_true("verify accepts a signature with small r and s",
+               p256.verify(msg_b, hex("3006020105020101"), key_c)),
+    # Both s and n-s verify. Rejecting the high-s form breaks interop, fixes nothing.
+    check_true("verify accepts the high-s malleable form",
+               check_b("304402202ba3a8be6b94d5ec80a6d9d1190a436effe50d85a1eee859b8cc6af9bd5c"
+                    ++ "2e1802204cd60b855d442f5b3c7b11eb6c4e0ae7525fe710fab9aa7c77a67f79e6fa"
+                    ++ "dd76")),
+
+    # --- verify: r and s out of [1, n-1] ---
+    check_false("verify rejects r = 0 and s = 0", check_b("3006020100020100")),
+    check_false("verify rejects r = 0", check_b("3006020100020101")),
+    check_false("verify rejects s = 0", check_b("3006020101020100")),
+    # A different integer reducing to r; accepting it makes the encoding non-unique.
+    check_false("verify rejects r shifted by the group order",
+                check_b("30460221012ba3a8bd6b94d5ed80a6d9d1190a436ebccc0833490686deac8635bcb9"
+                     ++ "bf5369022100b329f479a2bbd0a5c384ee1493b1f5186a87139cac5df4087c134b49"
+                     ++ "156847db")),
+    check_false("verify rejects r shifted by 2^256",
+                check_b("30460221012ba3a8be6b94d5ec80a6d9d1190a436effe50d85a1eee859b8cc6af9bd"
+                     ++ "5c2e18022100b329f479a2bbd0a5c384ee1493b1f5186a87139cac5df4087c134b49"
+                     ++ "156847db")),
+
+    # --- verify: strict DER, 173 of Wycheproof's 310 invalid cases ---
+    check_false("verify rejects an empty signature", check_b("")),
+    check_false("verify rejects a bare sequence tag", check_b("30")),
+    # s has its high bit set, so DER requires the 0x00 this omits. Signed reads it
+    # negative, unsigned makes it a second encoding of a valid signature.
+    check_false("verify rejects s without its DER leading zero",
+                check_b("304402202ba3a8be6b94d5ec80a6d9d1190a436effe50d85a1eee859b8cc6af9bd5c"
+                     ++ "2e180220b329f479a2bbd0a5c384ee1493b1f5186a87139cac5df4087c134b491568"
+                     ++ "47db")),
+    check_false("verify rejects a long-form sequence length",
+                check_b("30814502202ba3a8be6b94d5ec80a6d9d1190a436effe50d85a1eee859b8cc6af9bd"
+                     ++ "5c2e18022100b329f479a2bbd0a5c384ee1493b1f5186a87139cac5df4087c134b49"
+                     ++ "156847db")),
+    check_false("verify rejects a sequence length with a leading zero",
+                check_b("3082004502202ba3a8be6b94d5ec80a6d9d1190a436effe50d85a1eee859b8cc6af9"
+                     ++ "bd5c2e18022100b329f479a2bbd0a5c384ee1493b1f5186a87139cac5df4087c134b"
+                     ++ "49156847db")),
+    check_false("verify rejects a sequence length longer than its contents",
+                check_b("304602202ba3a8be6b94d5ec80a6d9d1190a436effe50d85a1eee859b8cc6af9bd5c"
+                     ++ "2e18022100b329f479a2bbd0a5c384ee1493b1f5186a87139cac5df4087c134b4915"
+                     ++ "6847db")),
+    # The parser must consume the whole input.
+    check_false("verify rejects a trailing byte after a valid signature",
+                check_b(sig_b ++ "00")),
+
+    # --- verify: the curve edge ---
+    # u1*G + u2*Q lands on infinity, which has no x. The formulas must not invent one.
+    check_false("verify rejects a signature that reaches the point at infinity",
+                p256.verify(msg_b,
+                            hex("304402207fffffff800000007fffffffffffffffde737d56d38bcf4279dc"
+                             ++ "e5617e3192a80220555555550000000055555555555555553ef7a8e48d07"
+                             ++ "df81a693439654210c70"),
+                            key_d))
+  ])
