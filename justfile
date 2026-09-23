@@ -2570,12 +2570,18 @@ div-by-zero-smoke: bootstrap-from-seed
 #     whether unary negation's message reads "Int overflow in -" (sharing binary
 #     `-`'s wording) or names negation distinctly is the implementer's call;
 #     pinning one would over-constrain it.
-#   int_min_div — EXIT-CODE-ONLY: LLVM has no `sdiv.with.overflow` intrinsic
-#     (only sadd/ssub/smul/uadd/usub/umul), so INT_MIN / -1 cannot ride the
-#     add/sub/mul guards — it needs its own check in
-#     `ast_to_ir.finish_checked_div`, a separate code path with its own
-#     message. The implementer may reuse "division by zero" or a distinct
-#     overflow message; both are correct, so this gate does not pin one.
+#   int_min_div — MESSAGE-EXACT, and it MUST be: LLVM has no `sdiv.with.overflow`
+#     intrinsic (only sadd/ssub/smul/uadd/usub/umul), so INT_MIN / -1 rides its
+#     own check in `ast_to_ir.finish_checked_div`. An exit-code-only assertion
+#     cannot gate that check where CI runs: on x86-64 an UNGUARDED build faults
+#     with SIGFPE and exits 136, which is non-zero, so the gate passed whether or
+#     not the guard existed. CI is ubuntu-latest. Pinning the message is what
+#     makes this architecture-independent — on arm64 the unguarded division
+#     quietly returns INT_MIN and exits 0, which is the case exit code alone
+#     does catch.
+#   range_count_span — MESSAGE-EXACT on "range_count": the panic must name the
+#     exported function whose answer does not exist, not the prelude arithmetic
+#     that noticed. Pins the diagnostic, not the fact of panicking.
 [group('smoke')]
 overflow-smoke: bootstrap-from-seed
   #!/usr/bin/env bash
@@ -2583,8 +2589,9 @@ overflow-smoke: bootstrap-from-seed
   TMPD=$(mktemp -d /tmp/sprout_ovf_XXXXXX)
   trap 'rm -rf "$TMPD"' EXIT
   FIXTURES=(add_overflow sub_overflow mul_overflow neg_overflow int_min_div
-            abs_int_min pow_overflow)
-  # Empty string = exit-code-only assertion (no message substring pinned).
+            abs_int_min pow_overflow range_count_span)
+  # Every case now pins a message substring; an empty string here would mean
+  # exit-code-only, which int_min_div showed is unfalsifiable on x86-64.
   # abs_int_min/pow_overflow pin only "overflow": they gate docs/spec-v0.md
   # §8.4's claim that the stdlib.math.int functions panic rather than answer a
   # silently wrong value, and WHICH operator inside `abs`/`pow_loop` overflows
@@ -2594,9 +2601,10 @@ overflow-smoke: bootstrap-from-seed
     [sub_overflow]="Int overflow in -"
     [mul_overflow]="Int overflow in *"
     [neg_overflow]="overflow"
-    [int_min_div]=""
+    [int_min_div]="Int overflow in /"
     [abs_int_min]="overflow"
     [pow_overflow]="overflow"
+    [range_count_span]="range_count"
   )
   for f in "${FIXTURES[@]}"; do
     FIXTURE="tests/overflow_smoke/$f.spr"

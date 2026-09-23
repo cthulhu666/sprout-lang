@@ -57,14 +57,18 @@ Out of scope for v0:
   makes every 64-bit pattern writable as a mask.
   A *decimal* literal denotes a mathematical value and is **rejected at compile
   time** if it does not fit in `Int`, naming `BigInt.from_string` as the
-  alternative. The one carve-out: a decimal literal written with **no space and
-  no parentheses** immediately after a `-` token is checked against
+  alternative. The one carve-out: a decimal literal that is **the next token
+  after** a `-` is checked against
   `[-2^63, 2^63-1]` rather than `[0, 2^63-1]`, so `-9223372036854775808`
   (`INT_MIN`) is a valid literal even though its bare magnitude,
   `9223372036854775808`, is not. The leading `-` is a separate unary operator,
   not part of the literal token, so the literal itself never carries the sign;
   the carve-out is purely syntactic and does not extend through parentheses —
   `-(9223372036854775808)` is rejected, same as the bare positive form.
+  It is a rule about **tokens**, not about source adjacency: whitespace and a
+  line break between the `-` and the literal are invisible to it, so
+  `- 9223372036854775808` is accepted. Rust and Java both behave this way, each
+  matching on the parsed operand of unary minus rather than on layout.
   Decided and rationale: `docs/bigint-v0.md` §5.3.
 - Comments: line comments start with `#` and continue to end of line
 

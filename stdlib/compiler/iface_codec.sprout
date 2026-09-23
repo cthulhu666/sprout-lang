@@ -1534,8 +1534,17 @@ fn decode_escape_seq(s: String, bytes: Bytes, i: Int, total: Int, acc: List Stri
         else if ch == 't' then collect_quoted_chars(s, bytes, i + 1, total, Cons("\t", acc))
         else Nothing
 
-# Decode a signed decimal integer atom.  atom_to_int returns Nothing if the
-# atom is not a valid integer (avoiding parse_int's panic-on-invalid behavior).
+# Decode a signed decimal integer atom.  atom_to_int is TOTAL: it answers Nothing
+# for anything that is not `-?[0-9]+` and for a digit run outside Int, never
+# panicking. That is the whole reason it exists rather than calling parse_int, and
+# under trapping arithmetic (bigint-v0 Stage 1) an unguarded accumulation would
+# break it by ABORTING the compiler rather than by returning a wrong value.
+#
+# The magnitude accumulates NEGATIVELY, exactly as prelude.accum_digits does and
+# for the same reason: the negative Int range is one wider than the positive one,
+# and INT_MIN's own magnitude fits only there. This codec must round-trip INT_MIN
+# because its own encoder emits it — §5.3's carve-out makes `-9223372036854775808`
+# a writable literal, so `IntExpr(INT_MIN)` reaches the encoder in ordinary source.
 fn atom_to_int(atom: String) -> Maybe Int =
   if str_byte_len(atom) == 0 then Nothing
   else
@@ -1543,20 +1552,32 @@ fn atom_to_int(atom: String) -> Maybe Int =
     in
       if ch == '-' then
         if str_byte_len(atom) < 2 then Nothing
-        else
-          let Just n = parse_unsigned_atom(atom, bytes, 1, str_byte_len(atom), 0) else Nothing
-          in Just(0 - n)
-      else parse_unsigned_atom(atom, bytes, 0, str_byte_len(atom), 0)
+        else parse_neg_magnitude(atom, bytes, 1, str_byte_len(atom), 0)
+      else
+        match parse_neg_magnitude(atom, bytes, 0, str_byte_len(atom), 0) with
+        | Nothing -> Nothing
+        # 2^63 has no positive representation, and `0 - min_int` would itself trap.
+        | Just n -> if n == atom_min_int() then Nothing else Just(0 - n)
   where bytes = bytes_from_utf8(atom)
 
-fn parse_unsigned_atom(atom: String, bytes: Bytes, i: Int, total: Int, acc: Int) -> Maybe Int =
+# Local copies of the bounds: the prelude's are private, and a decoder that
+# depends on nothing but literals cannot be broken by a prelude change.
+fn atom_min_int() -> Int = 0 - 9223372036854775807 - 1
+fn atom_min_int_div10() -> Int = atom_min_int() / 10
+
+# `acc` is always <= 0 and each step is `(acc * 10) - digit`. The two guards run
+# BEFORE the multiply, so the check itself cannot overflow.
+fn parse_neg_magnitude(atom: String, bytes: Bytes, i: Int, total: Int, acc: Int) -> Maybe Int =
   if i >= total then Just(acc)
   else
     match source.decode_char_at(bytes, i) with
     | Nothing -> Nothing
     | Just (ch, _) ->
         if ch >= '0' && ch <= '9' then
-          parse_unsigned_atom(atom, bytes, i + 1, total, acc * 10 + (char_digit_value(ch)))
+          let d = char_digit_value(ch)
+          in if acc < atom_min_int_div10() then Nothing
+             else if (acc == atom_min_int_div10()) && (d > 8) then Nothing
+             else parse_neg_magnitude(atom, bytes, i + 1, total, (acc * 10) - d)
         else Nothing
 
 # Returns the decimal digit value 0-9 for a digit char.

@@ -260,6 +260,15 @@ fn main() -> Unit !{IO} =
     check_true("+ exponent in an object field",
                field_float_approx("{\"au\": 1.5e+2}", "au", 150.0, 0.01)),
     check_true("+ exponent survives a stringify round trip", stringify_round_trip_ok("1e+17")),
+    # A mantissa longer than Int can hold is still conformant JSON. The reader
+    # sends every token containing `.`/`e`/`E` to parse_double, whose digit run
+    # used to go through parse_int — so once parse_int stopped wrapping
+    # (bigint-v0 Stage 1) one long number made the WHOLE document fail to parse.
+    check_true("a 20-digit mantissa parses", top_float_approx("12345678901234567890.5",
+               1234567890123456789.0 * 10.0, 100000.0)),
+    check_true("a long mantissa does not poison the document",
+               field_float_approx("{\"a\": 0.1234567890123456789012345}", "a", 0.1234567890123456789, 0.000001)),
+
     check_true("a mantissa may NOT carry a +", is_err(json.parse("+1.5"))),
     check_true("a dangling + exponent is rejected", is_err(json.parse("1e+"))),
     check_true("a double-signed exponent is rejected", is_err(json.parse("1e+-3"))),

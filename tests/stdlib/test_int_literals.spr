@@ -84,6 +84,21 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "the sign-bit mask agrees with the complement route",
       0x8000000000000000, bit_not(bit_shr_zf(bit_not(0), 1)))
 
+    # The carve-out matches the TOKEN after `-`, so layout between the two is
+    # invisible to it — the lexer has already dropped it. Rust and Java accept the
+    # spaced form for the same reason (each matches the parsed operand of unary
+    # minus, not source adjacency). Nothing pinned this before and the spec
+    # sentence claimed the opposite; docs/spec-v0.md §2 and docs/bigint-v0.md §5.3
+    # now say "the next token".
+    #
+    # A LINE BREAK, not a space: `just fmt` reprints `- 9223372036854775808`
+    # without the space, so a spaced assertion silently decays into a copy of the
+    # one above. That the formatter deletes the space is itself the point — it too
+    # treats the gap as insignificant.
+    assert_eq(state, "the carve-out sees through a line break after the minus",
+      -
+      9223372036854775808, 0 - 9223372036854775807 - 1)
+
     # --- a prefix with no digits is NOT a radix literal ---
     # `0x` alone falls back to the decimal 0 plus an identifier, which is a parse
     # error in any expression — so there is no silent misreading to test for here,
