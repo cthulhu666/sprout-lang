@@ -1,0 +1,578 @@
+module stdlib.math.bigint
+
+import stdlib.bits
+import stdlib.bytes as bytes
+import stdlib.string as string
+
+# Arbitrary-precision integers. Design: docs/bigint-v0.md (§5.4 representation,
+# §5.5 surface). `Int` is 64-bit and traps on overflow; this is the type that does
+# not. Import qualified, as the other `stdlib.math.*` layers are:
+#
+#   import stdlib.math.bigint as bigint
+#   bigint.from_int(42)
+#
+# REPRESENTATION — sign-magnitude, little-endian limbs of RADIX 2^26, normalised so
+# that no leading zero limb exists and zero is the empty limb vector with a positive
+# sign. Normalisation is what makes structural equality value equality, which is why
+# `Eq` can be derived; a denormalised value would make the derived instance lie. The
+# constructor is therefore not exported — `from_int`, `from_bytes_be` and
+# `from_string` are the only ways in.
+#
+# THE RADIX INVARIANT, and it is the one thing a later optimisation can silently
+# break. The radix is governed by the ACCUMULATOR, not by the limb. A limb product is
+# below 2^52, and a schoolbook column holds at most min(n, m) of them, so a column sum
+# stays inside a signed i64 while min(n, m) <= 2047 — about 53,000 bits, far above
+# anything v0 serves. Inside that bound no intermediate carry is needed at all, which
+# is what makes the inner loop a plain multiply-accumulate on a language with no carry
+# flag. `mul` rejects operands above the ceiling rather than overflowing, and
+# tests/overflow_smoke/bigint_mul_ceiling.spr pins it. The bound is a property of the
+# LIMB COUNT, not of the radix alone: the tempting radix 2^30 fails at nine limbs,
+# which is exactly P-256 width.
+#
+# Every intermediate here is bounded by that invariant, so this module stays inside
+# the trapping `Int` by construction and needs no wrapping primitives.
+#
+# BIT OPERATIONS DESCRIBE THE MAGNITUDE. `bit_length`, `test_bit`, `shl` and `shr` all
+# read |value|; the sign rides along untouched. So `shr` truncates toward zero rather
+# than flooring, and `test_bit` on a negative value asks about |value|, not about a
+# two's-complement pattern. This is the honest reading of a sign-magnitude type and it
+# is uniform across all four, but it is NOT what `java.math.BigInteger` or Python's
+# `int` answer for negative values — do not port an idiom from either that leans on
+# two's-complement bit semantics.
+#
+# Arithmetic is named functions, not operators: Sprout hardwires `+`/`*` to `Int`, and
+# the numeric classes that would fix that are milestone N1 of
+# docs/numeric-types-v1-draft.md.
+
+# The index of the offending character is the location, in the sense of
+# docs/guidelines.md #5 — a string is its own source text.
+export type ParseError (..) deriving (Eq, ToString) =
+  | BigIntEmptyInput
+  | BigIntNoDigits Int
+  | BigIntBadDigit Int String
+
+export type BigInt deriving (Eq) =
+  | BigInt Bool (Vec Int)
+
+# --- radix constants ---
+
+fn limb_bits() -> Int = 26
+
+fn limb_base() -> Int = 67108864
+
+fn limb_mask() -> Int = 67108863
+
+# min(n, m) above which a schoolbook column sum could leave i64. See the header.
+fn limb_ceiling() -> Int = 2047
+
+fn lesser(left: Int, right: Int) -> Int =
+  if left <= right then left
+  else right
+
+fn greater(left: Int, right: Int) -> Int =
+  if left >= right then left
+  else right
+
+# --- magnitude plumbing ---
+#
+# A magnitude is a trimmed little-endian `Vec Int`. Builders accumulate by prepending,
+# so a loop walking low-to-high produces a HIGH-first list and one walking high-to-low
+# produces a LOW-first list; the two `mag_of_*` entry points name which is which so a
+# caller never has to re-derive it.
+
+fn sign_of(value: BigInt) -> Bool =
+  match value with
+  | BigInt negative _ -> negative
+
+fn mag_of(value: BigInt) -> Vec Int =
+  match value with
+  | BigInt _ mag -> mag
+
+# Out-of-range indices read as zero, which is what lets every loop below run past the
+# end of the shorter operand without a length test.
+fn limb_at(mag: Vec Int, index: Int) -> Int =
+  vec_get_or(index, 0, mag)
+
+fn trimmed_length(mag: Vec Int, index: Int) -> Int =
+  if index == 0 then 0
+  else if limb_at(mag, index - 1) == 0 then trimmed_length(mag, index - 1)
+  else index
+
+fn trim(mag: Vec Int) -> Vec Int =
+  let kept = trimmed_length(mag, vec_length(mag))
+  in if kept == vec_length(mag) then mag
+     else vec_slice(0, kept, mag)
+
+fn mag_of_low_first(limbs: List Int) -> Vec Int =
+  trim(vec_from_list(limbs))
+
+fn mag_of_high_first(limbs: List Int) -> Vec Int =
+  mag_of_low_first(list_reverse(limbs))
+
+fn mag_is_zero(mag: Vec Int) -> Bool =
+  vec_length(mag) == 0
+
+fn small_mag(value: Int) -> Vec Int =
+  if value == 0 then vec_empty()
+  else [value]
+
+# Zero has exactly one representation, so the sign of an empty magnitude is forced.
+fn make(negative: Bool, mag: Vec Int) -> BigInt =
+  if mag_is_zero(mag) then BigInt(false, mag)
+  else BigInt(negative, mag)
+
+# --- magnitude comparison ---
+
+fn cmp_mag_from(left: Vec Int, right: Vec Int, index: Int) -> Int =
+  if index < 0 then 0
+  else if limb_at(left, index) < limb_at(right, index) then -1
+  else if limb_at(left, index) > limb_at(right, index) then 1
+  else cmp_mag_from(left, right, index - 1)
+
+fn cmp_mag(left: Vec Int, right: Vec Int) -> Int =
+  if vec_length(left) < vec_length(right) then -1
+  else if vec_length(left) > vec_length(right) then 1
+  else cmp_mag_from(left, right, vec_length(left) - 1)
+
+# --- magnitude addition and subtraction ---
+
+fn emit_carry(carry: Int, acc: List Int) -> List Int =
+  if carry == 0 then acc
+  else emit_carry(bit_shr(carry, limb_bits()), Cons(bit_and(carry, limb_mask()), acc))
+
+fn add_mag_go(left: Vec Int, right: Vec Int, index: Int, total: Int, carry: Int,
+              acc: List Int) -> List Int =
+  if index == total then emit_carry(carry, acc)
+  else
+    let sum = limb_at(left, index) + limb_at(right, index) + carry
+    in add_mag_go(left, right, index + 1, total, bit_shr(sum, limb_bits()),
+                  Cons(bit_and(sum, limb_mask()), acc))
+
+fn add_mag(left: Vec Int, right: Vec Int) -> Vec Int =
+  mag_of_high_first(
+    add_mag_go(left, right, 0, greater(vec_length(left), vec_length(right)), 0, Nil))
+
+# PRECONDITION: left >= right as magnitudes. Every caller establishes it with
+# `cmp_mag` first; a violation would silently drop the final borrow.
+fn sub_mag_go(left: Vec Int, right: Vec Int, index: Int, total: Int, borrow: Int,
+              acc: List Int) -> List Int =
+  if index == total then acc
+  else
+    let diff = limb_at(left, index) - limb_at(right, index) - borrow
+    in if diff < 0 then
+         sub_mag_go(left, right, index + 1, total, 1, Cons(diff + limb_base(), acc))
+       else sub_mag_go(left, right, index + 1, total, 0, Cons(diff, acc))
+
+fn sub_mag(left: Vec Int, right: Vec Int) -> Vec Int =
+  mag_of_high_first(sub_mag_go(left, right, 0, vec_length(left), 0, Nil))
+
+# --- magnitude multiplication ---
+#
+# Product scanning (Comba), not operand scanning: a whole column is summed before
+# anything is carried. That is what the radix invariant buys, and it is also what
+# keeps the loop pure — operand scanning wants a mutable accumulator, and `MutVec` is
+# `!{IO}`.
+
+fn column_sum(left: Vec Int, right: Vec Int, column: Int, index: Int, stop: Int,
+              acc: Int) -> Int =
+  if index > stop then acc
+  else column_sum(left, right, column, index + 1, stop,
+                  acc + limb_at(left, index) * limb_at(right, column - index))
+
+fn mul_mag_go(left: Vec Int, right: Vec Int, column: Int, columns: Int, carry: Int,
+              acc: List Int) -> List Int =
+  if column == columns then emit_carry(carry, acc)
+  else
+    let total = column_sum(left, right, column,
+                           greater(0, column - (vec_length(right) - 1)),
+                           lesser(column, vec_length(left) - 1), carry)
+    in mul_mag_go(left, right, column + 1, columns, bit_shr(total, limb_bits()),
+                  Cons(bit_and(total, limb_mask()), acc))
+
+fn mul_mag(left: Vec Int, right: Vec Int) -> Vec Int =
+  if mag_is_zero(left) || mag_is_zero(right) then vec_empty()
+  else
+    mag_of_high_first(
+      mul_mag_go(left, right, 0, vec_length(left) + vec_length(right) - 1, 0, Nil))
+
+# PRECONDITION: 0 <= factor < 2^26, so the product stays below 2^52.
+fn mul_small_go(mag: Vec Int, factor: Int, index: Int, total: Int, carry: Int,
+                acc: List Int) -> List Int =
+  if index == total then emit_carry(carry, acc)
+  else
+    let product = limb_at(mag, index) * factor + carry
+    in mul_small_go(mag, factor, index + 1, total, bit_shr(product, limb_bits()),
+                    Cons(bit_and(product, limb_mask()), acc))
+
+fn mul_small(mag: Vec Int, factor: Int) -> Vec Int =
+  if factor == 0 || mag_is_zero(mag) then vec_empty()
+  else mag_of_high_first(mul_small_go(mag, factor, 0, vec_length(mag), 0, Nil))
+
+# --- magnitude shifts ---
+
+fn shl_mag_go(mag: Vec Int, limb_shift: Int, bit_shift: Int, index: Int, total: Int,
+              acc: List Int) -> List Int =
+  if index == total then acc
+  else
+    let source = index - limb_shift
+        low = bit_shl(limb_at(mag, source), bit_shift)
+        high = bit_shr(limb_at(mag, source - 1), limb_bits() - bit_shift)
+    in shl_mag_go(mag, limb_shift, bit_shift, index + 1, total,
+                  Cons(bit_and(bit_or(low, high), limb_mask()), acc))
+
+fn shl_mag(mag: Vec Int, count: Int) -> Vec Int =
+  if mag_is_zero(mag) then mag
+  else
+    let limb_shift = count / limb_bits()
+    in mag_of_high_first(
+         shl_mag_go(mag, limb_shift, count - limb_shift * limb_bits(), 0,
+                    vec_length(mag) + limb_shift + 1, Nil))
+
+fn shr_mag_go(mag: Vec Int, limb_shift: Int, bit_shift: Int, index: Int, total: Int,
+              acc: List Int) -> List Int =
+  if index == total then acc
+  else
+    let source = index + limb_shift
+        low = bit_shr(limb_at(mag, source), bit_shift)
+        high = bit_shl(limb_at(mag, source + 1), limb_bits() - bit_shift)
+    in shr_mag_go(mag, limb_shift, bit_shift, index + 1, total,
+                  Cons(bit_and(bit_or(low, high), limb_mask()), acc))
+
+fn shr_mag(mag: Vec Int, count: Int) -> Vec Int =
+  let limb_shift = count / limb_bits()
+  in if limb_shift >= vec_length(mag) then vec_empty()
+     else
+       mag_of_high_first(
+         shr_mag_go(mag, limb_shift, count - limb_shift * limb_bits(), 0,
+                    vec_length(mag) - limb_shift, Nil))
+
+fn limb_bit_length(value: Int, acc: Int) -> Int =
+  if value == 0 then acc
+  else limb_bit_length(bit_shr(value, 1), acc + 1)
+
+fn mag_bit_length(mag: Vec Int) -> Int =
+  if mag_is_zero(mag) then 0
+  else
+    (vec_length(mag) - 1) * limb_bits()
+      + limb_bit_length(limb_at(mag, vec_length(mag) - 1), 0)
+
+fn mag_test_bit(mag: Vec Int, index: Int) -> Bool =
+  if index < 0 then false
+  else
+    let limb_index = index / limb_bits()
+    in bit_and(bit_shr(limb_at(mag, limb_index),
+                       index - limb_index * limb_bits()), 1) == 1
+
+# --- magnitude division ---
+#
+# Knuth 4.3.1 Algorithm D, in its bring-down form: the running remainder never exceeds
+# n+1 limbs, and bringing a limb down is a prepend on a little-endian magnitude, so the
+# whole loop is O(n) allocation per quotient digit with no mutation. The divisor is
+# normalised so its top limb is at least base/2, which is what caps the two-limb
+# estimate at two corrections (Knuth's Theorem B).
+
+fn divmod_small_go(mag: Vec Int, divisor: Int, index: Int, rem: Int,
+                   acc: List Int) -> (List Int, Int) =
+  if index < 0 then (acc, rem)
+  else
+    let current = rem * limb_base() + limb_at(mag, index)
+        digit = current / divisor
+    in divmod_small_go(mag, divisor, index - 1, current - digit * divisor,
+                       Cons(digit, acc))
+
+# PRECONDITION: 0 < divisor < 2^26, so `rem * base + limb` stays below 2^52.
+fn divmod_small(mag: Vec Int, divisor: Int) -> (Vec Int, Int) =
+  let (digits, rem) = divmod_small_go(mag, divisor, vec_length(mag) - 1, 0, Nil)
+  in (mag_of_low_first(digits), rem)
+
+# `rem * base + limb`, which on a little-endian magnitude is a prepend. Routed through
+# a list rather than `vec_prepend`, which is O(n^2) — `vector_append` copies its input,
+# so prepending one limb to an n-limb Vec costs n copies of a growing vector.
+fn bring_down(rem: Vec Int, limb: Int) -> Vec Int =
+  if mag_is_zero(rem) then small_mag(limb)
+  else mag_of_low_first(Cons(limb, vec_to_list(rem)))
+
+# The estimate overshoots by at most two under a normalised divisor, so this decrements
+# rather than doing Knuth's separate add-back step: a compare-and-retry is the same
+# work at these widths and cannot get the add-back's carry cancellation wrong. The
+# accepted product is returned with the digit because the caller needs exactly it, and
+# recomputing `divisor * digit` there doubled the cost of the whole loop.
+fn correct_digit(rem: Vec Int, divisor: Vec Int, guess: Int,
+                 product: Vec Int) -> (Int, Vec Int) =
+  if cmp_mag(product, rem) <= 0 then (guess, product)
+  else correct_digit(rem, divisor, guess - 1, mul_small(divisor, guess - 1))
+
+fn quotient_digit(rem: Vec Int, divisor: Vec Int) -> (Int, Vec Int) =
+  let top = vec_length(divisor)
+      numerator = limb_at(rem, top) * limb_base() + limb_at(rem, top - 1)
+      guess = lesser(numerator / limb_at(divisor, top - 1), limb_mask())
+  in correct_digit(rem, divisor, guess, mul_small(divisor, guess))
+
+fn divide_loop(dividend: Vec Int, divisor: Vec Int, index: Int, rem: Vec Int,
+               acc: List Int) -> (List Int, Vec Int) =
+  if index < 0 then (acc, rem)
+  else
+    let shifted = bring_down(rem, limb_at(dividend, index))
+        (digit, product) = quotient_digit(shifted, divisor)
+    in divide_loop(dividend, divisor, index - 1, sub_mag(shifted, product),
+                   Cons(digit, acc))
+
+# PRECONDITION: divisor is non-zero. Answers (quotient, remainder) on magnitudes.
+fn divmod_mag(dividend: Vec Int, divisor: Vec Int) -> (Vec Int, Vec Int) =
+  if cmp_mag(dividend, divisor) < 0 then (vec_empty(), dividend)
+  else if vec_length(divisor) == 1 then
+    let (quotient, rem) = divmod_small(dividend, limb_at(divisor, 0))
+    in (quotient, small_mag(rem))
+  else
+    let shift = limb_bits()
+                  -limb_bit_length(limb_at(divisor, vec_length(divisor) - 1), 0)
+        scaled_dividend = shl_mag(dividend, shift)
+        scaled_divisor = shl_mag(divisor, shift)
+        (digits, rem) = divide_loop(scaled_dividend, scaled_divisor,
+                                    vec_length(scaled_dividend) - 1, vec_empty(), Nil)
+    in (mag_of_low_first(digits), shr_mag(rem, shift))
+
+# --- construction and conversion ---
+
+# INT_MIN has no positive `Int` magnitude, and `0 - INT_MIN` traps since Stage 1. Its
+# two's-complement pattern READ AS UNSIGNED is exactly 2^63, though, so the unsigned
+# limb walk below reaches it without negating anything.
+fn negated_bits(value: Int) -> Int =
+  if value == -9223372036854775808 then value
+  else 0 - value
+
+fn unsigned_limbs(bits: Int, acc: List Int) -> List Int =
+  if bits == 0 then acc
+  else unsigned_limbs(bit_shr_zf(bits, limb_bits()),
+                      Cons(bit_and(bits, limb_mask()), acc))
+
+export fn from_int(value: Int) -> BigInt =
+  if value < 0 then
+    make(true, mag_of_high_first(unsigned_limbs(negated_bits(value), Nil)))
+  else make(false, mag_of_high_first(unsigned_limbs(value, Nil)))
+
+fn pack_u64(mag: Vec Int, index: Int, acc: Int) -> Int =
+  if index < 0 then acc
+  else pack_u64(mag, index - 1,
+                bit_or(bit_shl(acc, limb_bits()), limb_at(mag, index)))
+
+# `Nothing` outside [INT_MIN, INT_MAX]. Below 2^64 the packed word is the unsigned
+# pattern, so a negative word means the magnitude reached 2^63 — which is INT_MIN
+# exactly when the word is INT_MIN, and out of range otherwise.
+export fn to_int(value: BigInt) -> Maybe Int =
+  if mag_bit_length(mag_of(value)) > 64 then Nothing
+  else
+    let bits = pack_u64(mag_of(value), vec_length(mag_of(value)) - 1, 0)
+    in if ! sign_of (value) then
+         if bits < 0 then Nothing
+         else Just(bits)
+       else if bits == -9223372036854775808 then Just(bits)
+       else if bits < 0 then Nothing
+       else Just(0 - bits)
+
+# --- sign, comparison and arithmetic ---
+
+export fn is_zero(value: BigInt) -> Bool =
+  mag_is_zero(mag_of(value))
+
+export fn is_negative(value: BigInt) -> Bool =
+  sign_of(value)
+
+export fn negate(value: BigInt) -> BigInt =
+  make(! sign_of (value), mag_of(value))
+
+export fn abs(value: BigInt) -> BigInt =
+  make(false, mag_of(value))
+
+export fn cmp(left: BigInt, right: BigInt) -> Int =
+  if sign_of(left) == sign_of(right) then
+    if sign_of(left) then cmp_mag(mag_of(right), mag_of(left))
+    else cmp_mag(mag_of(left), mag_of(right))
+  else if sign_of(left) then -1
+  else 1
+
+export fn add(left: BigInt, right: BigInt) -> BigInt =
+  if sign_of(left) == sign_of(right) then
+    make(sign_of(left), add_mag(mag_of(left), mag_of(right)))
+  else if cmp_mag(mag_of(left), mag_of(right)) >= 0 then
+    make(sign_of(left), sub_mag(mag_of(left), mag_of(right)))
+  else make(sign_of(right), sub_mag(mag_of(right), mag_of(left)))
+
+export fn sub(left: BigInt, right: BigInt) -> BigInt =
+  add(left, negate(right))
+
+# Panics above the 2047-limb ceiling rather than letting a column sum leave i64 —
+# see the radix invariant in the header. That is roughly 53,000 bits per operand,
+# so nothing this library was written for can reach it.
+export fn mul(left: BigInt, right: BigInt) -> BigInt =
+  if lesser(vec_length(mag_of(left)), vec_length(mag_of(right))) > limb_ceiling() then
+    panic("bigint.mul: both operands exceed the 2047-limb schoolbook ceiling")
+  else
+    make(! (sign_of(left) == sign_of(right)), mul_mag(mag_of(left), mag_of(right)))
+
+# Truncated, matching `Int` division: the quotient rounds toward zero and the
+# remainder takes the DIVIDEND's sign, so `q * divisor + r == dividend` always.
+export fn divmod(dividend: BigInt, divisor: BigInt) -> Maybe (BigInt, BigInt) =
+  if is_zero(divisor) then Nothing
+  else
+    let (quotient, rem) = divmod_mag(mag_of(dividend), mag_of(divisor))
+    in Just((make(! (sign_of(dividend) == sign_of(divisor)), quotient),
+             make(sign_of(dividend), rem)))
+
+# --- bit surface (magnitude, per the header) ---
+
+export fn bit_length(value: BigInt) -> Int =
+  mag_bit_length(mag_of(value))
+
+export fn test_bit(value: BigInt, index: Int) -> Bool =
+  mag_test_bit(mag_of(value), index)
+
+# A negative count panics, matching `stdlib.bits` — the message names this module so
+# the report does not point at an intrinsic the caller never wrote.
+export fn shl(value: BigInt, count: Int) -> BigInt =
+  if count < 0 then panic("bigint.shl: negative shift count")
+  else make(sign_of(value), shl_mag(mag_of(value), count))
+
+export fn shr(value: BigInt, count: Int) -> BigInt =
+  if count < 0 then panic("bigint.shr: negative shift count")
+  else make(sign_of(value), shr_mag(mag_of(value), count))
+
+# --- bytes, fixed width ---
+
+fn byte_at(raw: Bytes, index: Int) -> Int =
+  match bytes.get(raw, index) with
+  | Just value -> value
+  | Nothing -> 0
+
+fn from_bytes_go(raw: Bytes, index: Int, total: Int, acc: Vec Int) -> Vec Int =
+  if index == total then acc
+  else
+    from_bytes_go(raw, index + 1, total,
+                  add_mag(shl_mag(acc, 8), small_mag(byte_at(raw, index))))
+
+# Unsigned big-endian, so an empty or all-zero input is zero. The sign is not encoded:
+# `to_bytes_be` refuses a negative value rather than inventing a convention for it.
+export fn from_bytes_be(raw: Bytes) -> BigInt =
+  make(false, from_bytes_go(raw, 0, bytes.length(raw), vec_empty()))
+
+fn byte_of_mag(mag: Vec Int, position: Int) -> Int =
+  let bit = position * 8
+      index = bit / limb_bits()
+      offset = bit - index * limb_bits()
+  in bit_and(bit_or(bit_shr(limb_at(mag, index), offset),
+                    bit_shl(limb_at(mag, index + 1), limb_bits() - offset)), 255)
+
+fn to_bytes_go(mag: Vec Int, position: Int, total: Int, acc: List Int) -> List Int =
+  if position == total then acc
+  else to_bytes_go(mag, position + 1, total, Cons(byte_of_mag(mag, position), acc))
+
+fn append_byte(acc: Builder, value: Int) -> Builder =
+  bytes.builder_append(acc, bytes.builder_byte(value))
+
+fn bytes_of_list(values: List Int) -> Bytes =
+  bytes.builder_build(list_fold(append_byte, bytes.builder_empty(), values))
+
+# Fixed width, left-padded with zeros — the shape every crypto caller wants. `Nothing`
+# when the value is negative or does not fit, rather than a silently truncated field.
+export fn to_bytes_be(value: BigInt, width: Int) -> Maybe Bytes =
+  if sign_of(value) || width < 0 then Nothing
+  # The fit test converts the VALUE to bytes rather than the width to bits: `width * 8`
+  # would trap for a width above 2^60, and this function must answer, not panic.
+  else if (mag_bit_length(mag_of(value)) + 7) / 8 > width then Nothing
+  else Just(bytes_of_list(to_bytes_go(mag_of(value), 0, width, Nil)))
+
+# --- parsing and rendering ---
+
+fn digit_of(ch: Char, radix: Int) -> Maybe Int =
+  match string.hex_digit_value(ch) with
+  | Nothing -> Nothing
+  | Just value -> if value < radix then Just(value) else Nothing
+
+fn accumulate(raw: String, index: Int, total: Int, radix: Int, negative: Bool,
+              acc: Vec Int) -> Result ParseError BigInt =
+  if index == total then Ok(make(negative, acc))
+  else
+    let ch = string.char_at_or(raw, index, ' ')
+    in match digit_of(ch, radix) with
+       | Nothing -> Err(BigIntBadDigit(index, string.string_from_char(ch)))
+       | Just value ->
+           accumulate(raw, index + 1, total, radix, negative,
+                      add_mag(mul_small(acc, radix), small_mag(value)))
+
+fn scan_digits(raw: String, start: Int, total: Int, radix: Int,
+               negative: Bool) -> Result ParseError BigInt =
+  if start == total then Err(BigIntNoDigits(start))
+  else accumulate(raw, start, total, radix, negative, vec_empty())
+
+fn has_hex_prefix(raw: String, start: Int) -> Bool =
+  string.char_at_or(raw, start, ' ') == '0'
+    && (string.char_at_or(raw, start + 1, ' ') == 'x'
+        || string.char_at_or(raw, start + 1, ' ') == 'X')
+
+# Decimal, or `0x`-prefixed hex, with an optional leading sign. No digit separators in
+# v0. Leading zeros are accepted and normalised away.
+export fn from_string(raw: String) -> Result ParseError BigInt =
+  let total = string.length(raw)
+  in if total == 0 then Err(BigIntEmptyInput)
+     else
+       let first = string.char_at_or(raw, 0, ' ')
+           start = if first == '-' || first == '+' then 1 else 0
+       in if has_hex_prefix(raw, start) then
+            scan_digits(raw, start + 2, total, 16, first == '-')
+          else scan_digits(raw, start, total, 10, first == '-')
+
+# 10^7 is the largest power of ten below the radix, so each step peels seven decimal
+# digits through the single-limb division path. Every chunk but the most significant
+# one must be left-padded, or an interior run of zeros disappears.
+fn pad_chunk(raw: String) -> String =
+  string.repeat("0", 7 - string.length(raw)) ++ raw
+
+fn decimal_chunks(mag: Vec Int, acc: List String) -> List String =
+  let (quotient, rem) = divmod_small(mag, 10000000)
+  in if mag_is_zero(quotient) then Cons(int_to_string(rem), acc)
+     else decimal_chunks(quotient, Cons(pad_chunk(int_to_string(rem)), acc))
+
+fn render_decimal(value: BigInt) -> String =
+  if mag_is_zero(mag_of(value)) then "0"
+  else
+    let digits = string.join("", decimal_chunks(mag_of(value), Nil))
+    in if sign_of(value) then "-" ++ digits
+       else digits
+
+export fn to_string(value: BigInt) -> String =
+  render_decimal(value)
+
+fn nibble_of_mag(mag: Vec Int, position: Int) -> Int =
+  let bit = position * 4
+      index = bit / limb_bits()
+      offset = bit - index * limb_bits()
+  in bit_and(bit_or(bit_shr(limb_at(mag, index), offset),
+                    bit_shl(limb_at(mag, index + 1), limb_bits() - offset)), 15)
+
+fn hex_digit_char(value: Int) -> String =
+  string.string_from_char(string.char_at_or("0123456789abcdef", value, '0'))
+
+fn hex_digits(mag: Vec Int, position: Int, total: Int,
+              acc: List String) -> List String =
+  if position == total then acc
+  else
+    hex_digits(mag, position + 1, total,
+               Cons(hex_digit_char(nibble_of_mag(mag, position)), acc))
+
+# `0x`-prefixed and lowercase, with the sign outside the prefix (`-0xff`), which is
+# what Python's `hex()` does and what `from_string` reads back.
+export fn to_hex(value: BigInt) -> String =
+  let mag = mag_of(value)
+      body = if mag_is_zero(mag) then "0"
+             else string.join("", hex_digits(mag, 0, (mag_bit_length(mag) + 3) / 4,
+                                             Nil))
+  in if sign_of(value) then "-0x" ++ body
+     else "0x" ++ body
+
+instance Ord BigInt
+  fn compare(left: BigInt, right: BigInt) -> Int =
+    cmp(left, right)
+
+instance ToString BigInt
+  fn to_string(value: BigInt) -> String =
+    render_decimal(value)

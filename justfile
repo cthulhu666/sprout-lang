@@ -2582,6 +2582,11 @@ div-by-zero-smoke: bootstrap-from-seed
 #   range_count_span — MESSAGE-EXACT on "range_count": the panic must name the
 #     exported function whose answer does not exist, not the prelude arithmetic
 #     that noticed. Pins the diagnostic, not the fact of panicking.
+#   bigint_mul_ceiling — MESSAGE-EXACT on "bigint.mul" (Stage 2). The only case
+#     here that is NOT an Int overflow: it pins the guard that PREVENTS one. A
+#     bigint column sum leaves i64 above 2047 limbs, so `mul` refuses instead,
+#     and the refusal must name the module — an unguarded build returns a wrong
+#     product with exit 0, which exit code alone cannot catch.
 [group('smoke')]
 overflow-smoke: bootstrap-from-seed
   #!/usr/bin/env bash
@@ -2589,7 +2594,7 @@ overflow-smoke: bootstrap-from-seed
   TMPD=$(mktemp -d /tmp/sprout_ovf_XXXXXX)
   trap 'rm -rf "$TMPD"' EXIT
   FIXTURES=(add_overflow sub_overflow mul_overflow neg_overflow int_min_div
-            abs_int_min pow_overflow range_count_span)
+            abs_int_min pow_overflow range_count_span bigint_mul_ceiling)
   # Every case now pins a message substring; an empty string here would mean
   # exit-code-only, which int_min_div showed is unfalsifiable on x86-64.
   # abs_int_min/pow_overflow pin only "overflow": they gate docs/spec-v0.md
@@ -2605,6 +2610,7 @@ overflow-smoke: bootstrap-from-seed
     [abs_int_min]="overflow"
     [pow_overflow]="overflow"
     [range_count_span]="range_count"
+    [bigint_mul_ceiling]="bigint.mul"
   )
   for f in "${FIXTURES[@]}"; do
     FIXTURE="tests/overflow_smoke/$f.spr"

@@ -462,8 +462,8 @@ N2–N7 are additive — each can ship independently once N1 is in place.
 
 **N6 is half-delivered ahead of schedule.** `docs/bigint-v0.md` decides `Int` stays 64-bit and
 traps on overflow, and lands `BigInt` as the separate arbitrary-precision type: its type (§5.4),
-API (§5.5 — named functions: `add`, `sub`, `mul`, ...), and `Eq`/`Ord`/`ToString` instances land
-independent of N1, in that design's Stage 2. What N6 still owes on top: the `Integer` class
+API (§5.5 — named functions: `add`, `sub`, `mul`, ...), and `Eq`/`Ord`/`ToString` instances landed
+independent of N1, in that design's Stage 2, as `stdlib/math/bigint.sprout`. What N6 still owes: the `Integer` class
 instance itself, which needs N1's class machinery — until N1 lands, `BigInt` arithmetic stays
 named functions (`bigint.add(a, b)`, not `a + b`). N6 in this table is therefore now scoped to
 that remaining half.

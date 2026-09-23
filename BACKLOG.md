@@ -1322,6 +1322,16 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   downstream of Milestone A — Sprout is self-hosted, so a Windows-native `sproutc` is itself a
   program whose runtime must already be ported. Also gates the `stdlib.path` V1 entry's Windows
   separator/drive-letter work.
+- [ ] `P2` **Reading an immutable `Vec` allocates a `Maybe` per element, and there is no pure way
+  out.** `vec_get`/`vec_get_or` route through `vector_get`, which boxes every read into a `Just`
+  (`runtime/sprout_runtime.c:8396`). The runtime already has the unboxed accessor —
+  `vector_get_direct` — but only `stdlib.mutable` declares it, and only as `!{IO}`, so pure
+  index-driven numeric code cannot reach it. Measured cost: `stdlib.math.bigint`'s 20-by-10
+  `divmod` runs 31 µs against 1.4 µs for the 10x10 multiply, a 22x gap on ~2x the limb operations,
+  and ~1,100 allocations per call; it is what puts a Stage-4 P-256 verify near 200 ms
+  (`docs/bigint-v0.md` §9 Stage 2). The fix is a pure `vec_get_direct` in the prelude with its own
+  bounds behaviour decided — NOT re-declaring the existing extern with a second effect row, since
+  externs sit outside the module system and two declarations of one name would conflict.
 
 ## Design Roadmap
 
@@ -2335,6 +2345,15 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   `just verify-bootstrap-fixed-point` caught it, one round-trip later. A `pre-push` hook is the fix:
   it fires however the push is invoked, it is the moment the damage actually escapes, and
   `core.hooksPath` already points at `.githooks/`. `docs/gates.md` §Bootstrap seed has the detail.
+- [ ] `P3` **The seed gate's path regex cannot see a nested stdlib module, and that is luck, not
+  design.** `scripts/seed_gate.sh:46` matches `^stdlib/[^/]+\.sprout$` and
+  `^stdlib/compiler/[^/]+\.sprout$`, so `stdlib/fs/path.sprout`, `stdlib/math/*.sprout` and
+  `stdlib/unicode/*.sprout` are invisible to it. Harmless TODAY only because no nested module
+  contributes code to `bootstrap/compile_driver.ll` — `stdlib.fs` imports `stdlib.fs.path` and the
+  compiler imports `stdlib.fs`, but nothing calls into it, so DCE drops it (verified: no
+  `fs.path` symbol in the seed). The moment the compiler uses one, edits to it stop being gated and
+  the staleness surfaces a round-trip later in CI. Widen to `^stdlib/.*\.sprout$`, or derive the
+  set from what the bundler actually pulls.
 - [ ] `P3` **Transactional bootstrap (never destroy the last-good stage-1).** A failed bootstrap can
   delete the only working stage-1 binary, leaving no way forward but the committed seed. Bootstrap
   should stage the new binary to a temp path, verify it (fixed point + a smoke) before swapping, and

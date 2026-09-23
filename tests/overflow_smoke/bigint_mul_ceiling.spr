@@ -1,0 +1,18 @@
+module main
+
+import stdlib.math.bigint as bigint
+
+# bigint-v0 Stage 2. `stdlib.math.bigint` sums a whole schoolbook column before
+# carrying, which stays inside i64 only while min(n, m) <= 2047 limbs — see the radix
+# invariant in the module header. Above it a column sum would leave i64, so `mul`
+# refuses instead. 53249 bits is 2049 limbs at radix 2^26, just over the ceiling.
+#
+# The shift count is `53249 + list_length(args)` and `args` is empty when the binary
+# runs with no arguments, so the width is 53249 at RUNTIME but neither the Sprout
+# compiler nor clang can fold it away. Without the guard this would silently produce a
+# wrong product rather than panicking.
+fn main() -> Unit !{IO} =
+  do
+    args <- argv_all()
+    let wide = bigint.shl(bigint.from_int(1), 53249 + list_length(args))
+    print(bigint.to_string(bigint.mul(wide, wide)))
