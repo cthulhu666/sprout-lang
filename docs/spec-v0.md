@@ -1840,8 +1840,8 @@ captured by, any user name.
      For a total, non-panicking division use `safe_div : Int -> Int -> Result
      DivByZero Int`, which returns `Err(DivByZero)` in exactly those two cases.
    - `Int` addition, subtraction, and multiplication **wrap** on overflow in the
-     native backend (two's-complement `i64`); see §8.4. This is a temporary v0
-     implementation constraint, not the intended long-term meaning of `Int`.
+     native backend (two's-complement `i64`); see §8.4. Wrapping is what ships;
+     trapping on overflow is decided and unimplemented (`docs/bigint-v0.md` Stage 1).
 6. Short-circuiting:
 - `a && b`: evaluate `b` only if `a` is `true`.
 - `a || b`: evaluate `b` only if `a` is `false`.
@@ -2300,11 +2300,14 @@ Semantics:
 - Wraparound is **defined** two's-complement behavior, not undefined behavior:
   codegen emits plain `add`/`sub`/`mul` with no `nsw`/`nuw` flags. Overflow-sensitive
   results for `abs`, `pow`, `gcd`, and `lcm` are therefore silently wrong, not
-  memory-unsafe, once computation leaves the representable range. Whether `+`/`-`/`*`
-  should instead trap is an open policy question
-  (`docs/int-overflow-policy-decision.md`).
-- This backend range limitation is a temporary implementation constraint in v0,
-  not the intended long-term meaning of `Int`.
+  memory-unsafe, once computation leaves the representable range. Trapping instead of
+  wrapping has been **decided and not yet implemented** — `docs/bigint-v0.md` Stage 1,
+  recorded in `docs/int-overflow-policy-decision.md`. This section describes the shipped
+  behaviour and is rewritten when that lands.
+- The 64-bit range was a temporary v0 constraint until 2026-09-22, when it became the
+  decided long-term meaning of `Int`: arbitrary precision moves to a separate `BigInt`
+  type rather than widening `Int` (`docs/bigint-v0.md` §4). Neither that type nor the
+  trapping rule above is implemented yet, so the bullets above still describe what ships.
 - The presence of `pow` and `mod` in `stdlib.math.int` does not imply implicit
   numeric coercions or fractional arithmetic for `Int`. A separate `Double`
   type with floating-point arithmetic has since landed as an experimental

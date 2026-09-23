@@ -417,7 +417,7 @@ Integer math semantics:
 - `pow(base, exp)` returns `Nothing` when `exp < 0`
 - `Int` is *specified* as a mathematical integer, but the only backend lowers it to machine `i64`, so arithmetic wraps (defined two's-complement, not UB)
 - overflow-sensitive results for `abs`, `pow`, `gcd`, and `lcm` are therefore silently wrong outside the representable range
-- this is a v0 implementation limitation, not the intended long-term meaning of `Int`; whether `+`/`-`/`*` should trap is open (`docs/int-overflow-policy-decision.md`)
+- this is a v0 implementation limitation; trapping on overflow is decided but not yet implemented (`docs/bigint-v0.md` Stage 1, recorded in `docs/int-overflow-policy-decision.md`)
 
 Double math (`stdlib.math`) — all pure Sprout, **no C builtins**; `Double` is an
 experimental extension rather than normative v0:
