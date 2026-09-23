@@ -51,12 +51,21 @@ Out of scope for v0:
   alone is not an integer literal. There is **no** digit separator — `1_000` is the
   literal `1` followed by the identifier `_000`. All three forms denote the same
   kind of value and are interchangeable in expressions and patterns.
-  A literal too large for `Int` currently **wraps to the low 64 bits** and is read
-  as signed, in every base (`0xFFFFFFFFFFFFFFFF` is `-1`; decimal
-  `9223372036854775808` is `INT_MIN`). This is what makes every 64-bit pattern
-  writable as a mask, and is slated for revisit together with the
-  literal-overflow decision (`docs/int-overflow-policy-decision.md`), which must
-  rule on radix literals explicitly rather than by a general fits-in-`Int` test.
+  A *hexadecimal or binary* literal denotes a 64-bit pattern, read as signed
+  two's-complement; every pattern is writable and none is rejected
+  (`0xFFFFFFFFFFFFFFFF` is `-1`, `0x8000000000000000` is `INT_MIN`). This is what
+  makes every 64-bit pattern writable as a mask.
+  A *decimal* literal denotes a mathematical value and is **rejected at compile
+  time** if it does not fit in `Int`, naming `BigInt.from_string` as the
+  alternative. The one carve-out: a decimal literal written with **no space and
+  no parentheses** immediately after a `-` token is checked against
+  `[-2^63, 2^63-1]` rather than `[0, 2^63-1]`, so `-9223372036854775808`
+  (`INT_MIN`) is a valid literal even though its bare magnitude,
+  `9223372036854775808`, is not. The leading `-` is a separate unary operator,
+  not part of the literal token, so the literal itself never carries the sign;
+  the carve-out is purely syntactic and does not extend through parentheses —
+  `-(9223372036854775808)` is rejected, same as the bare positive form.
+  Decided and rationale: `docs/bigint-v0.md` §5.3.
 - Comments: line comments start with `#` and continue to end of line
 
 ## 3. Program Structure
@@ -1836,12 +1845,14 @@ captured by, any user name.
 5. Binary operators: evaluate left operand, then right operand.
    - Integer division `/`: dividing by zero **panics** with a runtime error
      (`division by zero`) rather than producing an undefined result. `INT_MIN / -1`
-     is also undefined for a machine `Int` and is excluded on the same basis.
-     For a total, non-panicking division use `safe_div : Int -> Int -> Result
-     DivByZero Int`, which returns `Err(DivByZero)` in exactly those two cases.
-   - `Int` addition, subtraction, and multiplication **wrap** on overflow in the
-     native backend (two's-complement `i64`); see §8.4. Wrapping is what ships;
-     trapping on overflow is decided and unimplemented (`docs/bigint-v0.md` Stage 1).
+     also panics, for the same reason: it is the one input for which the mathematical
+     quotient does not fit in `Int`. For a total, non-panicking division use
+     `safe_div : Int -> Int -> Result DivByZero Int`, which returns `Err(DivByZero)`
+     in exactly those two cases.
+   - `Int` addition, subtraction, multiplication, and unary negation **panic** on
+     overflow, with a source-located message naming the operator; see §8.4. `Int`
+     never silently yields a wrong value. `BigInt` (`docs/bigint-v0.md`) is the
+     escape hatch for values that do not fit in 64 bits.
 6. Short-circuiting:
 - `a && b`: evaluate `b` only if `a` is `true`.
 - `a || b`: evaluate `b` only if `a` is `false`.
@@ -2294,20 +2305,16 @@ Semantics:
 - If `n <= 0`, `mod(x, n)` returns `Nothing`.
 - `pow(base, exp)` returns `Nothing` when `exp < 0`; otherwise it returns
   `Just` of the integer power.
-- `Int` is *specified* as a mathematical (arbitrary-precision) integer. No
-  implementation realizes that today: the only backend lowers `Int` to machine
-  `i64`, so arithmetic wraps.
-- Wraparound is **defined** two's-complement behavior, not undefined behavior:
-  codegen emits plain `add`/`sub`/`mul` with no `nsw`/`nuw` flags. Overflow-sensitive
-  results for `abs`, `pow`, `gcd`, and `lcm` are therefore silently wrong, not
-  memory-unsafe, once computation leaves the representable range. Trapping instead of
-  wrapping has been **decided and not yet implemented** — `docs/bigint-v0.md` Stage 1,
-  recorded in `docs/int-overflow-policy-decision.md`. This section describes the shipped
-  behaviour and is rewritten when that lands.
-- The 64-bit range was a temporary v0 constraint until 2026-09-22, when it became the
-  decided long-term meaning of `Int`: arbitrary precision moves to a separate `BigInt`
-  type rather than widening `Int` (`docs/bigint-v0.md` §4). Neither that type nor the
-  trapping rule above is implemented yet, so the bullets above still describe what ships.
+- `Int` is a 64-bit two's-complement integer that **traps on overflow**: `+`, `-`, `*`
+  and unary negation panic with a source-located message rather than wrapping, and `/`
+  panics on a zero divisor and on `INT_MIN / -1`. This is the decided, long-term
+  meaning of `Int` (`docs/bigint-v0.md` §4), not a placeholder for a future
+  arbitrary-precision `Int`.
+- `BigInt` is the arbitrary-precision type. It is a separate type, not a wider `Int` —
+  see `docs/bigint-v0.md` for the representation, the API surface, and why the
+  alternative (making `Int` itself arbitrary-precision) lost.
+- `abs`, `pow`, `gcd`, and `lcm` panic rather than return a silently wrong result once
+  computation leaves the representable range, per the trapping rule above.
 - The presence of `pow` and `mod` in `stdlib.math.int` does not imply implicit
   numeric coercions or fractional arithmetic for `Int`. A separate `Double`
   type with floating-point arithmetic has since landed as an experimental
@@ -2381,9 +2388,10 @@ within a 64-bit window, so `bit_shl(1, 63)` is `-9223372036854775808` and
 overflow policy for `*` (§6.5, §8.4).
 
 **Width.** `bit_and`, `bit_or`, `bit_xor`, `bit_not` and `bit_shr` are defined
-without reference to a width and are unaffected should `Int` become
-arbitrary-precision as §8.4 intends. `bit_shl` and `bit_shr_zf` are defined on the
-64-bit two's-complement representation and would have to be respecified.
+without reference to a width. `bit_shl` and `bit_shr_zf` are defined on the
+64-bit two's-complement representation and stay that way — `Int` is not becoming
+arbitrary-precision (§8.4; `docs/bigint-v0.md` §4). See
+`docs/bitwise-int-ops-v0.md` §5.1 for the per-function partition.
 
 `rotate`, `popcount` and similar are **not** provided: they are ordinary functions
 composed from the above.

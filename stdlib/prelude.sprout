@@ -43,11 +43,19 @@ export type Result e a =
 export type DivByZero =
   | DivByZero
 
+# INT_MIN, spelled without a decimal literal (the lexer/parser range-checks
+# decimal literals against [0, 2^63-1] outside unary minus; see
+# docs/bigint-v0.md §5.3). Same idiom as stdlib/math.sprout's min_int; that one
+# and stdlib/mutable.sprout's differently-shaped min_int are separate module-
+# local definitions that shadow this one within their own files (as prelude
+# names always do — see test_prelude_name_shadowing.spr), not the same binding.
+fn min_int() -> Int = 0 - 9223372036854775807 - 1
+
 # True iff a is the most-negative Int (INT_MIN), for which a / -1 overflows.
-# Detected without an INT_MIN literal (which the lexer cannot yet represent):
-# negating INT_MIN wraps back to a negative value.  # O(1)
+# Compared directly against INT_MIN. This used to detect INT_MIN via `0 - a`
+# wrapping back negative, which panics now that negation traps.  # O(1)
 fn int_is_min(a: Int) -> Bool =
-  a < 0 && (0 - a) < 0
+  a == min_int()
 
 # O(1)
 export fn safe_div(a: Int, b: Int) -> Result DivByZero Int =
@@ -1694,27 +1702,49 @@ fn digit_value(c: Char) -> Int =
   else if c == '9' then 9
   else 0 - 1
 
-# Accumulate digits from index i. Nothing if any char is a non-digit, or if no
-# digit was seen at all. `seen` guards against empty / lone-sign input.
+# INT_MIN / 10, truncated toward zero: -922337203685477580. `accum_digits`
+# checks a prospective `acc * 10` against this BEFORE multiplying, so the
+# check itself never overflows.
+fn min_int_div10() -> Int = min_int() / 10
+
+# Accumulate digits from index i toward INT_MIN, i.e. `acc` is always <= 0 and
+# each step is `(acc * 10) - digit`. Nothing if any char is a non-digit, if no
+# digit was seen at all (`seen` guards empty / lone-sign input), or if another
+# digit would push the magnitude past INT_MIN.
+#
+# Accumulating NEGATIVELY (rather than positively and negating at the end,
+# Go's strconv does the same) is what lets this hold 2^63 distinct magnitudes
+# instead of 2^63 - 1: the negative Int range is one wider than the positive
+# one, and INT_MIN's own magnitude only fits in that wider range. A caller
+# that wants the positive value must still separately reject the case where
+# the accumulated magnitude IS INT_MIN (see positive_from_neg_magnitude) since
+# 2^63 itself has no positive Int representation.
 fn accum_digits(s: String, i: Int, acc: Int, seen: Bool) -> Maybe Int =
   match str_char_at(s, i) with
   | Nothing -> if seen then Just(acc) else Nothing
   | Just c ->
-      if digit_value(c) < 0 then Nothing
-      else accum_digits(s, i + 1, (acc * 10) + digit_value(c), true)
+      let d = digit_value(c)
+      in if d < 0 then Nothing
+         else if acc < min_int_div10() then Nothing
+         else if (acc == min_int_div10()) && (d > 8) then Nothing
+         else accum_digits(s, i + 1, (acc * 10) - d, true)
 
-fn negate_maybe(m: Maybe Int) -> Maybe Int =
+# Turn a negative-accumulated magnitude (see accum_digits) into its positive
+# value. Nothing iff the magnitude is exactly INT_MIN: 2^63 has no positive
+# Int representation, and `0 - min_int()` would itself overflow.
+fn positive_from_neg_magnitude(m: Maybe Int) -> Maybe Int =
   match m with
   | Nothing -> Nothing
-  | Just n -> Just(0 - n)
+  | Just n -> if n == min_int() then Nothing else Just(0 - n)
 
-# O(n)
+# O(n). Total: an over-range digit run (more than [-2^63, 2^63-1] can hold)
+# answers Nothing rather than wrapping or panicking (bigint-v0 Stage 1 §5.1).
 export fn parse_int(s: String) -> Maybe Int =
   match str_char_at(s, 0) with
   | Nothing -> Nothing
   | Just c ->
-      if c == '-' then negate_maybe(accum_digits(s, 1, 0, false))
-      else accum_digits(s, 0, 0, false)
+      if c == '-' then accum_digits(s, 1, 0, false)
+      else positive_from_neg_magnitude(accum_digits(s, 0, 0, false))
 
 # 10^k as a Double for any k (k < 0 divides). Places the fraction and applies a
 # scientific-notation exponent in parse_double.
@@ -1757,7 +1787,9 @@ fn parse_mantissa(mant: String) -> Maybe Double =
 # Accumulating from index 1 skips the `+` and still rejects everything else, so "1e+-3" and a
 # bare "1e+" stay Nothing.
 fn parse_exponent(es: String) -> Maybe Int =
-  if str_starts_with(es, "+") then accum_digits(es, 1, 0, false) else parse_int(es)
+  if str_starts_with(es, "+")
+  then positive_from_neg_magnitude(accum_digits(es, 1, 0, false))
+  else parse_int(es)
 
 # Split off an optional 'e'/'E' exponent: returns (mantissa, exponent). No exponent -> 0;
 # a present-but-malformed exponent -> Nothing.

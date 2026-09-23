@@ -19,6 +19,9 @@ declare void @sprout_abort_match() noreturn
 declare i64 @panic(i64)
 declare ptr @llvm.stacksave()
 declare void @llvm.stackrestore(ptr)
+declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)
+declare { i64, i1 } @llvm.ssub.with.overflow.i64(i64, i64)
+declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)
 declare i64 @sprout_alloc_obj(i64, i64)
 declare { i64, i64 } @vector_get_unboxed(i64, i64)
 declare { i64, i64 } @map_get_unboxed(i64, i64)
@@ -76,17 +79,23 @@ declare i64 @ref_new(i64)
 declare i64 @ref_read(i64)
 declare i64 @ref_write(i64, i64)
 @.str.0 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
-@.str.1 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"0\00" }
-@.str.2 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"transfer \00" }
-@.str.3 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c" from \00" }
-@.str.4 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c" to \00" }
-@.str.5 = private unnamed_addr constant { i64, [23 x i8] } { i64 360458, [23 x i8] c"alice balance before: \00" }
-@.str.6 = private unnamed_addr constant { i64, [23 x i8] } { i64 360458, [23 x i8] c"alice balance after:  \00" }
-@.str.7 = private unnamed_addr constant { i64, [23 x i8] } { i64 360458, [23 x i8] c"bob receives:         \00" }
-@.str.8 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"#\00" }
-@.str.9 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"$\00" }
-@.str.10 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
-@.str.11 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c".\00" }
+@.str.1 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in / (line 29, column 18)\00" }
+@.str.2 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in * (line 29, column 25)\00" }
+@.str.3 = private unnamed_addr constant { i64, [38 x i8] } { i64 606218, [38 x i8] c"Int overflow in - (line 29, column 9)\00" }
+@.str.4 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"0\00" }
+@.str.5 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 39, column 28)\00" }
+@.str.6 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 45, column 28)\00" }
+@.str.7 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"transfer \00" }
+@.str.8 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c" from \00" }
+@.str.9 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c" to \00" }
+@.str.10 = private unnamed_addr constant { i64, [23 x i8] } { i64 360458, [23 x i8] c"alice balance before: \00" }
+@.str.11 = private unnamed_addr constant { i64, [23 x i8] } { i64 360458, [23 x i8] c"alice balance after:  \00" }
+@.str.12 = private unnamed_addr constant { i64, [23 x i8] } { i64 360458, [23 x i8] c"bob receives:         \00" }
+@.str.13 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"#\00" }
+@.str.14 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"$\00" }
+@.str.15 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
+@.str.16 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in / (line 24, column 45)\00" }
+@.str.17 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c".\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -120,18 +129,47 @@ define i64 @examples.wrap_typed_money.cents_fraction(i64 %p$total) {
 entry:
   %t$0 = add i64 0, 100
   %t$1 = icmp eq i64 %t$0, 0
-  br i1 %t$1, label %divpanic_1, label %divok_1
+  br i1 %t$1, label %divpanic_1, label %divchk2_1
 divpanic_1:
   %t$2 = getelementptr inbounds { i64, [17 x i8] }, ptr @.str.0, i64 0, i32 1, i64 0
   %t$3 = ptrtoint ptr %t$2 to i64
   call i64 @panic(i64 %t$3)
   unreachable
+divchk2_1:
+  %t$4 = icmp eq i64 %t$0, -1
+  br i1 %t$4, label %divovfchk_1, label %divok_1
+divovfchk_1:
+  %t$5 = icmp eq i64 %p$total, -9223372036854775808
+  br i1 %t$5, label %divovfpanic_1, label %divok_1
+divovfpanic_1:
+  %t$6 = getelementptr inbounds { i64, [39 x i8] }, ptr @.str.1, i64 0, i32 1, i64 0
+  %t$7 = ptrtoint ptr %t$6 to i64
+  call i64 @panic(i64 %t$7)
+  unreachable
 divok_1:
-  %t$4 = sdiv i64 %p$total, %t$0
-  %t$5 = add i64 0, 100
-  %t$6 = mul i64 %t$4, %t$5
-  %t$7 = sub i64 %p$total, %t$6
-  ret i64 %t$7
+  %t$8 = sdiv i64 %p$total, %t$0
+  %t$9 = add i64 0, 100
+  %t$10$agg = call { i64, i1 } @llvm.smul.with.overflow.i64(i64 %t$8, i64 %t$9)
+  %t$10 = extractvalue { i64, i1 } %t$10$agg, 0
+  %t$10$ovf = extractvalue { i64, i1 } %t$10$agg, 1
+  br i1 %t$10$ovf, label %ovfpanic_10, label %ovfok_10
+ovfpanic_10:
+  %t$11 = getelementptr inbounds { i64, [39 x i8] }, ptr @.str.2, i64 0, i32 1, i64 0
+  %t$12 = ptrtoint ptr %t$11 to i64
+  call i64 @panic(i64 %t$12)
+  unreachable
+ovfok_10:
+  %t$13$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %p$total, i64 %t$10)
+  %t$13 = extractvalue { i64, i1 } %t$13$agg, 0
+  %t$13$ovf = extractvalue { i64, i1 } %t$13$agg, 1
+  br i1 %t$13$ovf, label %ovfpanic_13, label %ovfok_13
+ovfpanic_13:
+  %t$14 = getelementptr inbounds { i64, [38 x i8] }, ptr @.str.3, i64 0, i32 1, i64 0
+  %t$15 = ptrtoint ptr %t$14 to i64
+  call i64 @panic(i64 %t$15)
+  unreachable
+ovfok_13:
+  ret i64 %t$13
 }
 
 define i64 @examples.wrap_typed_money.pad2(i64 %p$n) {
@@ -142,7 +180,7 @@ entry:
   %t$10 = trunc i64 %t$2 to i1
   br i1 %t$10, label %then_3, label %else_3
 then_3:
-  %t$5 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.1, i64 0, i32 1, i64 0
+  %t$5 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.4, i64 0, i32 1, i64 0
   %t$6 = ptrtoint ptr %t$5 to i64
   %t$11 = alloca i64
   store i64 %t$6, ptr %t$11
@@ -172,13 +210,22 @@ body_0_0:
 arm_0_2:
   br label %body_0_2
 body_0_2:
-  %t$4 = add i64 %p$a, %p$b
+  %t$4$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %p$a, i64 %p$b)
+  %t$4 = extractvalue { i64, i1 } %t$4$agg, 0
+  %t$4$ovf = extractvalue { i64, i1 } %t$4$agg, 1
+  br i1 %t$4$ovf, label %ovfpanic_4, label %ovfok_4
+ovfpanic_4:
+  %t$5 = getelementptr inbounds { i64, [39 x i8] }, ptr @.str.5, i64 0, i32 1, i64 0
+  %t$6 = ptrtoint ptr %t$5 to i64
+  call i64 @panic(i64 %t$6)
+  unreachable
+ovfok_4:
   br label %join_2
 arm_1_2:
   call void @sprout_abort_match()
   unreachable
 join_2:
-  %t$3 = phi i64 [%t$4, %body_0_2]
+  %t$3 = phi i64 [%t$4, %ovfok_4]
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
@@ -198,13 +245,22 @@ body_0_0:
 arm_0_2:
   br label %body_0_2
 body_0_2:
-  %t$4 = sub i64 %p$a, %p$b
+  %t$4$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %p$a, i64 %p$b)
+  %t$4 = extractvalue { i64, i1 } %t$4$agg, 0
+  %t$4$ovf = extractvalue { i64, i1 } %t$4$agg, 1
+  br i1 %t$4$ovf, label %ovfpanic_4, label %ovfok_4
+ovfpanic_4:
+  %t$5 = getelementptr inbounds { i64, [39 x i8] }, ptr @.str.6, i64 0, i32 1, i64 0
+  %t$6 = ptrtoint ptr %t$5 to i64
+  call i64 @panic(i64 %t$6)
+  unreachable
+ovfok_4:
   br label %join_2
 arm_1_2:
   call void @sprout_abort_match()
   unreachable
 join_2:
-  %t$3 = phi i64 [%t$4, %body_0_2]
+  %t$3 = phi i64 [%t$4, %ovfok_4]
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
@@ -216,7 +272,7 @@ join_0:
 
 define i64 @examples.wrap_typed_money.describe_transfer(i64 %p$from, i64 %p$to, i64 %p$amount) {
 entry:
-  %t$0 = getelementptr inbounds { i64, [10 x i8] }, ptr @.str.2, i64 0, i32 1, i64 0
+  %t$0 = getelementptr inbounds { i64, [10 x i8] }, ptr @.str.7, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
   %t$14 = alloca i64
   store i64 %p$to, ptr %t$14
@@ -236,7 +292,7 @@ entry:
   %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
   %t$3 = call i64 @__tc_Semigroup_String_append(i64 %t$1, i64 %t$2)
   %t$24 = call i64 @sprout_gc_pop_roots(i64 3)
-  %t$4 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.3, i64 0, i32 1, i64 0
+  %t$4 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.8, i64 0, i32 1, i64 0
   %t$5 = ptrtoint ptr %t$4 to i64
   %t$25 = alloca i64
   store i64 %t$3, ptr %t$25
@@ -255,7 +311,7 @@ entry:
   %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
   %t$8 = call i64 @__tc_Semigroup_String_append(i64 %t$6, i64 %t$7)
   %t$34 = call i64 @sprout_gc_pop_roots(i64 3)
-  %t$9 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.4, i64 0, i32 1, i64 0
+  %t$9 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.9, i64 0, i32 1, i64 0
   %t$10 = ptrtoint ptr %t$9 to i64
   %t$35 = alloca i64
   store i64 %t$8, ptr %t$35
@@ -286,7 +342,7 @@ entry:
   %t$4 = call i64 @examples.wrap_typed_money.describe_transfer(i64 %t$0, i64 %t$1, i64 %t$3)
   %t$5$ptr = inttoptr i64 %t$4 to ptr
   %t$5 = call i64 @print_str(ptr %t$5$ptr)
-  %t$6 = getelementptr inbounds { i64, [23 x i8] }, ptr @.str.5, i64 0, i32 1, i64 0
+  %t$6 = getelementptr inbounds { i64, [23 x i8] }, ptr @.str.10, i64 0, i32 1, i64 0
   %t$7 = ptrtoint ptr %t$6 to i64
   %t$24 = alloca i64
   store i64 %t$7, ptr %t$24
@@ -299,7 +355,7 @@ entry:
   %t$28 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$10$ptr = inttoptr i64 %t$9 to ptr
   %t$10 = call i64 @print_str(ptr %t$10$ptr)
-  %t$11 = getelementptr inbounds { i64, [23 x i8] }, ptr @.str.6, i64 0, i32 1, i64 0
+  %t$11 = getelementptr inbounds { i64, [23 x i8] }, ptr @.str.11, i64 0, i32 1, i64 0
   %t$12 = ptrtoint ptr %t$11 to i64
   %t$13 = call i64 @examples.wrap_typed_money.cents_sub(i64 %t$2, i64 %t$3)
   %t$29 = alloca i64
@@ -317,7 +373,7 @@ entry:
   %t$36 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$16$ptr = inttoptr i64 %t$15 to ptr
   %t$16 = call i64 @print_str(ptr %t$16$ptr)
-  %t$17 = getelementptr inbounds { i64, [23 x i8] }, ptr @.str.7, i64 0, i32 1, i64 0
+  %t$17 = getelementptr inbounds { i64, [23 x i8] }, ptr @.str.12, i64 0, i32 1, i64 0
   %t$18 = ptrtoint ptr %t$17 to i64
   %t$19 = add i64 0, 0
   %t$20 = call i64 @examples.wrap_typed_money.cents_add(i64 %t$19, i64 %t$3)
@@ -357,7 +413,7 @@ entry:
 arm_0_0:
   br label %body_0_0
 body_0_0:
-  %t$2 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.8, i64 0, i32 1, i64 0
+  %t$2 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.13, i64 0, i32 1, i64 0
   %t$3 = ptrtoint ptr %t$2 to i64
   %t$6 = alloca i64
   store i64 %p$id, ptr %t$6
@@ -386,56 +442,67 @@ entry:
 arm_0_0:
   br label %body_0_0
 body_0_0:
-  %t$2 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.9, i64 0, i32 1, i64 0
+  %t$2 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.14, i64 0, i32 1, i64 0
   %t$3 = ptrtoint ptr %t$2 to i64
   %t$4 = add i64 0, 100
   %t$5 = icmp eq i64 %t$4, 0
-  br i1 %t$5, label %divpanic_5, label %divok_5
+  br i1 %t$5, label %divpanic_5, label %divchk2_5
 divpanic_5:
-  %t$6 = getelementptr inbounds { i64, [17 x i8] }, ptr @.str.10, i64 0, i32 1, i64 0
+  %t$6 = getelementptr inbounds { i64, [17 x i8] }, ptr @.str.15, i64 0, i32 1, i64 0
   %t$7 = ptrtoint ptr %t$6 to i64
   call i64 @panic(i64 %t$7)
   unreachable
+divchk2_5:
+  %t$8 = icmp eq i64 %t$4, -1
+  br i1 %t$8, label %divovfchk_5, label %divok_5
+divovfchk_5:
+  %t$9 = icmp eq i64 %p$amount, -9223372036854775808
+  br i1 %t$9, label %divovfpanic_5, label %divok_5
+divovfpanic_5:
+  %t$10 = getelementptr inbounds { i64, [39 x i8] }, ptr @.str.16, i64 0, i32 1, i64 0
+  %t$11 = ptrtoint ptr %t$10 to i64
+  call i64 @panic(i64 %t$11)
+  unreachable
 divok_5:
-  %t$8 = sdiv i64 %p$amount, %t$4
-  %t$17 = alloca i64
-  store i64 %t$3, ptr %t$17
-  %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
-  %t$19 = alloca i64
-  store i64 %p$amount, ptr %t$19
-  %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
-  %t$9 = call i64 @__tc_ToString_Int_to_string(i64 %t$8)
+  %t$12 = sdiv i64 %p$amount, %t$4
   %t$21 = alloca i64
-  store i64 %t$9, ptr %t$21
+  store i64 %t$3, ptr %t$21
   %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
-  %t$10 = call i64 @__tc_Semigroup_String_append(i64 %t$3, i64 %t$9)
-  %t$23 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$11 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.11, i64 0, i32 1, i64 0
-  %t$12 = ptrtoint ptr %t$11 to i64
-  %t$24 = alloca i64
-  store i64 %t$10, ptr %t$24
-  %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
-  %t$26 = alloca i64
-  store i64 %t$12, ptr %t$26
-  %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
-  %t$13 = call i64 @__tc_Semigroup_String_append(i64 %t$10, i64 %t$12)
-  %t$28 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$14 = call i64 @examples.wrap_typed_money.cents_fraction(i64 %p$amount)
-  %t$29 = alloca i64
-  store i64 %t$13, ptr %t$29
-  %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
-  %t$15 = call i64 @examples.wrap_typed_money.pad2(i64 %t$14)
-  %t$31 = alloca i64
-  store i64 %t$15, ptr %t$31
-  %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
-  %t$16 = call i64 @__tc_Semigroup_String_append(i64 %t$13, i64 %t$15)
-  %t$33 = call i64 @sprout_gc_pop_roots(i64 4)
+  %t$23 = alloca i64
+  store i64 %p$amount, ptr %t$23
+  %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
+  %t$13 = call i64 @__tc_ToString_Int_to_string(i64 %t$12)
+  %t$25 = alloca i64
+  store i64 %t$13, ptr %t$25
+  %t$26 = call i64 @sprout_gc_push_i64_root(ptr %t$25)
+  %t$14 = call i64 @__tc_Semigroup_String_append(i64 %t$3, i64 %t$13)
+  %t$27 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$15 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.17, i64 0, i32 1, i64 0
+  %t$16 = ptrtoint ptr %t$15 to i64
+  %t$28 = alloca i64
+  store i64 %t$14, ptr %t$28
+  %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
+  %t$30 = alloca i64
+  store i64 %t$16, ptr %t$30
+  %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)
+  %t$17 = call i64 @__tc_Semigroup_String_append(i64 %t$14, i64 %t$16)
+  %t$32 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$18 = call i64 @examples.wrap_typed_money.cents_fraction(i64 %p$amount)
+  %t$33 = alloca i64
+  store i64 %t$17, ptr %t$33
+  %t$34 = call i64 @sprout_gc_push_i64_root(ptr %t$33)
+  %t$19 = call i64 @examples.wrap_typed_money.pad2(i64 %t$18)
+  %t$35 = alloca i64
+  store i64 %t$19, ptr %t$35
+  %t$36 = call i64 @sprout_gc_push_i64_root(ptr %t$35)
+  %t$20 = call i64 @__tc_Semigroup_String_append(i64 %t$17, i64 %t$19)
+  %t$37 = call i64 @sprout_gc_pop_roots(i64 4)
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
   unreachable
 join_0:
-  %t$1 = phi i64 [%t$16, %divok_5]
+  %t$1 = phi i64 [%t$20, %divok_5]
   ret i64 %t$1
 }
 

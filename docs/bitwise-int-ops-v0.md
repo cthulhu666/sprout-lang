@@ -209,6 +209,13 @@ documented breaking change against two named functions, rather than a silent out
 across all seven. Haskell's `bitSizeMaybe = Nothing` for `Integer` is the primary-source
 confirmation that this boundary is real rather than pedantry, and not a Sprout quirk.
 
+**Resolved, 2026-09-22: `Int` is not becoming arbitrary-precision.** `docs/bigint-v0.md` §4
+decides `Int` stays a normatively 64-bit, trapping type; arbitrary precision moves to a separate
+`BigInt` type instead of widening `Int`. `bit_shl` and `bit_shr_zf` therefore keep their current,
+64-bit-scoped definitions permanently — there is no future widening for them to be
+"respecify-or-restrict"ed against. The table above is kept as the rationale for why the
+partition is the right shape, not as an open question.
+
 ### 5.2 Value-overflow: `bit_shl` discards, and is not an error
 
 Two overflows have to be kept apart, and the verified Rust wording is what separates them:
@@ -390,36 +397,37 @@ A `_` digit separator (`1_000_000`) is **not** included: `_` is an identifier-st
 character, so `1_000` currently lexes as `1` followed by the identifier `_000`, and
 changing that is a lexer decision of its own rather than part of this one.
 
-### 5.6 Over-range literals wrap to the low 64 bits
+### 5.6 Over-range literals — hex and binary wrap, decimal is rejected (DECIDED)
 
-A literal too large for `Int` wraps, in **both** bases, and is read as a signed
-two's-complement value. Verified by running it:
+X4 (`docs/int-overflow-policy-decision.md` §7) is resolved, and it splits by base rather than
+treating hex and decimal alike as this section previously said:
 
-```
-0x7FFFFFFFFFFFFFFF   ==  9223372036854775807
-0x8000000000000000   == -9223372036854775808   # INT_MIN
-0xFFFFFFFFFFFFFFFF   == -1                     # all ones
-9223372036854775808  == -9223372036854775808   # decimal, identical treatment
-```
+- **Hex and binary keep wrapping.** A literal too large for `Int` in either radix wraps to the
+  low 64 bits and is read as a signed two's-complement value:
 
-Three things follow, and they are worth stating because the behaviour was previously an
-unexamined consequence of unchecked accumulation rather than a decision:
+  ```
+  0x7FFFFFFFFFFFFFFF   ==  9223372036854775807
+  0x8000000000000000   == -9223372036854775808   # INT_MIN
+  0xFFFFFFFFFFFFFFFF   == -1                     # all ones
+  ```
 
-- **Hex and decimal agree.** The decimal case is pre-existing (`parse_int` wraps rather
-  than failing), so radix literals introduce no new inconsistency. This was checked
-  precisely because a divergence here would have been a silent trap.
-- **For mask-writing this is the *useful* reading.** `0xFFFFFFFFFFFFFFFF` meaning `-1` is
-  what an author of an all-ones mask wants, and it is the only reading under which every
-  64-bit pattern is writable — a mask notation that rejected half the patterns would be
-  the wrong tool. It is also what makes the `INT_MIN` correction above true.
-- **It is nonetheless unfinished business, and coupled to a parked decision.**
-  `docs/int-overflow-policy-decision.md` §7 keeps W9/X4 (reject over-range integer
-  *literals* at compile time) parked behind the overflow question. Whenever X4 lands it
-  must decide radix literals **explicitly**: applying a naive "value must fit in `Int`"
-  rule to hex would reject `0xFFFFFFFFFFFFFFFF`, breaking exactly the mask idiom this
-  section endorses. Recorded on that item in `BACKLOG.md`.
+  This is unchanged, and deliberately so: `0xFFFFFFFFFFFFFFFF` meaning `-1` is the *useful*
+  reading for mask-writing, and the only one under which every 64-bit pattern is writable — a
+  mask notation that rejected half the patterns would be the wrong tool.
+- **Decimal is rejected at compile time.** A decimal literal that does not fit `[0, 2^63-1]` is
+  now a compile error naming `BigInt.from_string` as the alternative — it no longer wraps.
+  `9223372036854775808` (bare) is now an error, not `INT_MIN`.
+- **Carve-out: a directly-negated decimal literal.** `-9223372036854775808` stays valid.
+  Sprout's parser treats the leading `-` as a separate unary operator
+  (`parse_unary`, `parser.sprout:1159`), not part of the literal token, so this is unary minus
+  applied to the bare literal `9223372036854775808` — whose magnitude alone does not fit
+  `[0, 2^63-1]`. The range check is widened to `[-2^63, 2^63-1]` specifically for a decimal
+  literal that is the immediate operand of unary `-`, so `INT_MIN` remains writable in decimal.
 
-Pinned by `tests/stdlib/test_int_literals.spr`, so a later change cannot alter it quietly.
+Full rule, the range-check mechanism, and the nine-language prior-art survey that settled the
+carve-out: `docs/bigint-v0.md` §5.3.
+
+Pinned by `tests/stdlib/test_int_literals.spr`, updated in the same change.
 
 ## 6. Type-system impact
 

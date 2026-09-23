@@ -454,8 +454,16 @@ in integer-heavy inner loops. Measure before committing to N1.
 | N3 | Generic `sum`, `sum_by`, `mean`, `dot` in prelude; existing `vec_sum`/`vec_sum_by` become aliases | N1 + N2 |
 | N4 | `Float` (f32) + `Real` instance | N2; demand-driven |
 | N5 | `Decimal` type; revisit `Fractional`/`Real` split (§7.3) | Demand-driven (finance) |
-| N6 | `BigInt` + `Integer` instance | Demand-driven (crypto/finance) |
+| N6 | `BigInt` + `Integer` instance | Demand-driven (crypto/finance); half-delivered by `docs/bigint-v0.md` Stage 2 — see note below |
 | N7 | `Complex Double` + `Numeric` instance | Demand-driven (signal processing) |
 
 N1 is the only milestone where new infrastructure is load-bearing.
 N2–N7 are additive — each can ship independently once N1 is in place.
+
+**N6 is half-delivered ahead of schedule.** `docs/bigint-v0.md` decides `Int` stays 64-bit and
+traps on overflow, and lands `BigInt` as the separate arbitrary-precision type: its type (§5.4),
+API (§5.5 — named functions: `add`, `sub`, `mul`, ...), and `Eq`/`Ord`/`ToString` instances land
+independent of N1, in that design's Stage 2. What N6 still owes on top: the `Integer` class
+instance itself, which needs N1's class machinery — until N1 lands, `BigInt` arithmetic stays
+named functions (`bigint.add(a, b)`, not `a + b`). N6 in this table is therefore now scoped to
+that remaining half.

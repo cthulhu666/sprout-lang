@@ -1,0 +1,14 @@
+module main
+
+# bigint-v0 Stage 1 §5.3: the unary-minus carve-out widens the bound to
+# [-2^63, 2^63-1] — it does not remove it. 10^20 is past INT_MIN, so this is
+# still rejected, and the diagnostic names the bare magnitude.
+#
+# The three cases of the rule each need their own fixture, because they exit
+# the carve-out at different points: an in-range negative takes the ordinary
+# unary-minus path (tests/stdlib/test_int_literals.spr), exactly 2^63 is folded
+# to INT_MIN (same file), and this one declines the carve-out and falls through
+# to the ordinary decimal range error.
+fn over() -> Int = -99999999999999999999
+
+fn main() -> Unit !{IO} = print(int_to_string(over()))

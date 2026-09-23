@@ -1,0 +1,22 @@
+module main
+
+import stdlib.math.int (abs)
+
+# bigint-v0 Stage 1 smoke (docs/bigint-v0.md §5.1, Option A of
+# docs/int-overflow-policy-decision.md): `abs(INT_MIN)` must panic. INT_MIN is
+# the one Int with no positive counterpart, and `abs` is plain Sprout —
+# `if value < 0 then 0 - value else value` (stdlib/math/int.sprout) — so the
+# trapping negation is what makes it panic rather than return INT_MIN unchanged.
+#
+# docs/spec-v0.md §8.4 now asserts normatively that `abs`, `pow`, `gcd` and
+# `lcm` panic rather than return a silently wrong result; this fixture and
+# pow_overflow.spr are what hold that claim honest.
+#
+# `+ list_length(args)` is 0 with no argv but is a RUNTIME add, so INT_MIN is
+# not a compile-time constant and neither the Sprout compiler nor clang can
+# fold the call away.
+fn main() -> Unit !{IO} =
+  do
+    args <- argv_all()
+    let int_min = 0 - 9223372036854775807 - 1 + list_length(args)
+    print(int_to_string(abs(int_min)))

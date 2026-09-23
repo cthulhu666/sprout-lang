@@ -1,0 +1,11 @@
+module main
+
+# bigint-v0 Stage 1 §5.3: a DECIMAL literal that does not fit in Int (64-bit
+# signed) is a compile-time error naming BigInt.from_string as the escape
+# hatch. This literal is 2^63, one past INT_MAX, and is not the operand of a
+# unary minus (the one carve-out — see §5.3 and tests/stdlib/test_int_literals.spr),
+# so it must be rejected. Hex/binary literals are NEVER rejected (§5.3); that is
+# not this fixture's concern.
+fn over() -> Int = 9223372036854775808
+
+fn main() -> Unit !{IO} = print(int_to_string(over()))

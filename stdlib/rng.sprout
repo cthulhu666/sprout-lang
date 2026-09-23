@@ -8,7 +8,7 @@ module stdlib.rng
 #
 # State is an Int held in [0, M). One step is the classic recurrence
 #   state' = (A * state + C) mod M      M = 2^31, A = 1103515245, C = 12345
-# A * (M - 1) < 2^61 < 2^63, so the multiply never overflows an i64 — the stream
+# A * (M - 1) < 2^62 < 2^63, so the multiply never overflows an i64 — the stream
 # is identical regardless of a target's integer-overflow semantics.
 
 let rng_modulus = 2147483648  # 2^31

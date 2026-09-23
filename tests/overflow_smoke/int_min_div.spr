@@ -1,0 +1,21 @@
+module main
+
+# bigint-v0 Stage 1 smoke (docs/bigint-v0.md §5.1, Option A of
+# docs/int-overflow-policy-decision.md): INT_MIN / -1 must panic — the one
+# division that overflows rather than dividing by zero, and W7's deferred gap
+# (docs/bigint-v0.md §9 Stage 1 closes it "for free", on x86 this SIGFPEs at
+# the hardware level). INT_MIN is written as `0 - 9223372036854775807 - 1`
+# rather than the (also valid, per §5.3's unary-minus carve-out) decimal
+# literal `-9223372036854775808`, so this runtime-overflow gate stays
+# independent of the separate literal-range-check rule. `neg_one` is
+# `0 - 1 - list_length(args)`: `list_length(args)` is 0 with no argv, so
+# `neg_one` is -1 at RUNTIME but not a compile-time constant, so neither the
+# Sprout compiler nor clang can fold the division away. Before the fix this
+# returns INT_MIN silently (measured on this machine) and prints it with exit
+# 0. After the fix it panics cleanly.
+fn main() -> Unit !{IO} =
+  do
+    args <- argv_all()
+    let int_min = 0 - 9223372036854775807 - 1
+        neg_one = 0 - 1 - list_length(args)
+    print(int_to_string(int_min / neg_one))

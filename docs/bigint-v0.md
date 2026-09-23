@@ -199,7 +199,7 @@ wasted work.
 ### 5.1 `Int` becomes normatively 64-bit, and traps
 
 `Int` is a 64-bit two's-complement integer. `+`, `-`, `*` and unary negation **panic** on
-overflow with a located message; `/` already panics on a zero divisor and on `INT_MIN / -1`.
+overflow with a located message; `/` already panics on a zero divisor.
 `bit_shl` and `bit_shr_zf` keep their current definitions and stay exempt — `bits.sprout:63-67`
 makes the left shift's discarding "specified behaviour, not an overflow condition", deliberately
 independent of what `*` does.
@@ -209,6 +209,38 @@ The rationale for trapping rather than wrapping belongs to
 belongs here is the connection: Option A was deferred in 2026-07 partly because a trap had no
 escape hatch to point a user at. `BigInt` is that escape hatch, which is why the two land
 together.
+
+#### `INT_MIN / -1` is not yet guarded
+
+Only the zero-divisor case is guarded today, in `ast_to_ir.finish_checked_div`. The W7 commit
+that added that guard (`29c69b7c`) says so directly, in its own comment: "The `INT_MIN / -1`
+overflow (the other undefined case) ... guarding it here too is a follow-up." Measured on arm64:
+`INT_MIN / -1` returns `INT_MIN` and exits 0. On x86-64 the same expression traps, because the
+`idiv` instruction faults. So today this is an architecture-dependent silent wrong answer, not a
+closed case.
+
+**DECIDED: closed in Stage 1. `INT_MIN / -1` panics**, on every target, uniformly.
+
+Prior art, verified 2026-09-22:
+
+| Language | `INT_MIN / -1` | Source |
+|---|---|---|
+| **Rust** | traps | Reference, *Overflow*: "Using `/` or `%`, where the left-hand argument is the smallest integer of a signed integer type and the right-hand argument is `-1` ... These checks occur even when `-C overflow-checks` is disabled, for legacy reasons." `i64::strict_div`: "This function will always panic on overflow, regardless of whether overflow checks are enabled." |
+| **Swift** | traps | No `&/` wrapping-division operator exists; `/` is checked unconditionally. |
+| **Zig** | traps | `@divTrunc`'s documented precondition excludes this case. |
+| **C#** | traps | ECMA-334 §12.12.3; .NET throws even in an `unchecked` context. |
+| **Java** | wraps | JLS §15.17.2: "no exception is thrown in this case" (the result is the operand itself). |
+| **Go** | wraps | Go spec: "the quotient `q = x / -1` is equal to `x`." |
+| **C / C++** | undefined | No defined result specified. |
+
+Four of six memory-safe languages trap. The two that wrap, Java and Go, have no checked
+arithmetic mode at all — they wrap everything, so the div case is not a special exemption for
+them the way it would be for Sprout. **No surveyed language traps `+`/`-`/`*` while leaving `/`
+unchecked**, which is the position Sprout would otherwise be left in. Closing the gap in Stage 1
+keeps `/` consistent with the other four operators.
+
+Sprout has no `%` operator (`stdlib/math.sprout:211`), so the division/remainder divergence every
+surveyed language has to rule on separately does not arise here — one operator, one rule.
 
 ### 5.2 The wrap audit — code that relies on wraparound today
 
@@ -223,24 +255,74 @@ fn int_is_min(a: Int) -> Bool =
 ```
 
 `0 - INT_MIN` overflows. Under Option A `safe_div(INT_MIN, -1)` would panic — and `safe_div`
-exists precisely so that case does *not* panic. The fix is available and already sanctioned:
-`bit_shl(1, 63)` **is** `INT_MIN` (`docs/spec-v0.md` §on bitwise ops states this explicitly) and
-the shift is exempt from the overflow policy, so the literal the lexer cannot write becomes
-expressible exactly where it is needed.
+exists precisely so that case does *not* panic.
 
-Two further sites to check rather than assume, neither yet confirmed either way:
+**Fix: `fn int_is_min(a: Int) -> Bool = a == 0 - 9223372036854775807 - 1`.** The §5.3
+unary-minus carve-out now makes `-9223372036854775808` itself a legal literal, but that is
+*not* the fix to reach for here: `int_is_min` lives in `stdlib/prelude.sprout`, which declares
+its `extern fn`s directly rather than importing `stdlib.bits`, so pulling in a bitwise primitive
+(`bit_shl`) — or, equally, depending on a parser change that has not landed yet at the point this
+fix is written — would be new prelude surface for a one-line predicate. The
+`0 - 9223372036854775807 - 1` idiom is what `stdlib/math.sprout:595` and
+`tests/stdlib/test_math_to_int.spr:32` already use, is overflow-free under trapping (`0 - INT_MAX`
+stays in range, then `- 1` reaches `INT_MIN` exactly), needs no new extern, and — this is the
+decisive property — parses identically whether or not the §5.3 literal carve-out has landed yet in
+the parser being used to build it. It is safe regardless of the order Stage 1's pieces land in;
+the new literal form is not.
 
-- `stdlib/math.sprout:605`, `hi * 4294967296 + round_to_int_pos(lo)` — a large-magnitude
-  `Double` to `Int` conversion turns from a garbage result into a panic. Probably an improvement;
-  needs a decision and a test either way.
-- The `IntRange` walkers in `stdlib/prelude.sprout`, whose comments state they avoid computing
-  `current + step` at the extremes *because* that addition wraps. The guard already exists; it
-  needs confirming that it fires before the arithmetic, not after.
+A second confirmed casualty: `accum_digits` (`stdlib/prelude.sprout:1699`), the digit-accumulation
+loop under `parse_int`, does an unguarded `acc * 10 + digit`. Today it wraps silently on an
+over-range digit run. Under trapping this would PANIC — and `panic` in Sprout is `exit(1)`,
+uncatchable. `parse_int`'s callers include `stdlib/http_server.sprout:293`
+(`parse_content_length`, reading the attacker-controlled `Content-Length` header) and
+`stdlib/json.sprout:116` (`p_number`, parsing JSON numbers — RFC 8259 permits arbitrary-length
+digit runs). Left unguarded, this is a remotely triggerable process abort.
+
+**DECIDED: guard it.** `parse_int` returns `Nothing` on an over-range digit run. All 19 call
+sites already match on `Maybe`, so no caller changes. `stdlib/compiler/iface_codec.sprout:1552`
+(`parse_unsigned_atom`) has the identical unguarded `acc * 10 + digit` shape, on
+compiler-internal input rather than network input, and is fixed the same way.
+
+Prior art, verified 2026-09-22 — what a string-to-int parser does on an over-range digit run:
+
+| Language | Over-range parse | Source |
+|---|---|---|
+| **Rust** | `Err` | `from_str_radix` returns `IntErrorKind::PosOverflow`: "Integer is too large to store in target integer type." |
+| **Go** | error + clamped value | `strconv.ParseInt` returns `ErrRange` alongside a clamped result. |
+| **Swift** | `nil` | The failable integer initializer returns nil "if the value it denotes in the given radix is not representable". |
+| **Zig** | error | `std.fmt.parseInt` returns `error.Overflow`. |
+| **OCaml** | `None` | `int_of_string_opt` returns `None` "if the integer represented exceeds the range of representable integers." |
+| **Java** | throws | `Integer.parseInt` throws `NumberFormatException`. |
+| **C** | saturates + errno | `strtoll` saturates to `LLONG_MAX`/`MIN` and sets `errno = ERANGE`. |
+| **Haskell** | wraps | `Data.Int`'s `fromInteger` is modulo 2^n — a leak from a general conversion, not a parser design. |
+
+**No surveyed language aborts the process.** `Nothing` matches the shape every other surveyed
+language reaches for (an error value), and matches `parse_int`'s existing `Maybe` signature, so no
+caller's type changes.
+
+Two further sites, checked rather than assumed, and both cleared SAFE:
+
+- `stdlib/math.sprout:604`, `magnitude_to_int` (`hi * 4294967296 + round_to_int_pos(lo)`) —
+  **SAFE**. Its only caller is `to_int` (`math.sprout:620`), which guards `t >= two63` before
+  calling it, so `hi <= 2^31 - 1` and `hi * 2^32 + lo <= 2^63 - 1` exactly. The split at `2^32`
+  was designed to keep every intermediate in range; trapping changes nothing here.
+- The `IntRange` walkers in `stdlib/prelude.sprout` — **SAFE, guard confirmed to fire first**.
+  `range_to_list_go` (`prelude.sprout:159-162`) tests `range_past_end` and then `range_at_end`
+  before ever evaluating `current + step`; at `current == end_value == INT_MAX` the second test
+  returns `Cons(current, Nil)` and the addition is never reached. Pinned by
+  `tests/stdlib/test_range_empty.spr:127`.
 
 Cleared: `stdlib/rng.sprout` is safe. Its header (lines 11-12) states the LCG was chosen so that
 `A * (M - 1) < 2^61 < 2^63`, "so the multiply never overflows an i64 — the stream is identical
 regardless of a target's integer-overflow semantics." `rng_hash2` carries a documented
 precondition on coordinate magnitude, which under Option A becomes enforced rather than assumed.
+The safety conclusion holds, but the stated bound is off by a power of two: `A * (M - 1)` is
+2,369,780,942,852,698,515, which is above `2^61` (2,305,843,009,213,693,952) and below `2^62`
+(4,611,686,018,427,387,904). The multiply still never overflows an i64 — `2^62 < 2^63` — only the
+header comment's stated bound is wrong. Not fixed by this document — `rng.sprout` is `.sprout`
+source — but queued as a Stage 1 task item (§9): Stage 1 already edits `stdlib/prelude.sprout` and
+pays the reseed regardless, so the one-line comment correction rides along instead of sitting in
+`BACKLOG.md` as a fix that would need its own full reseed to land alone.
 
 Detection for everything not listed here is the full test suite plus `just compile-examples-stage1`
 and `just run-example-canary`: an overflow that previously produced a wrong number now aborts.
@@ -261,6 +343,40 @@ complement; any 64-bit pattern is writable, `0xFFFFFFFFFFFFFFFF` is `-1`, and no
 rejected. A *decimal* literal denotes a mathematical value and is **rejected at compile time**
 if it does not fit in `Int`, with the error naming `BigInt.from_string` as the alternative.
 Pinned today by `tests/stdlib/test_int_literals.spr`, which must be updated in the same change.
+
+#### The INT_MIN carve-out
+
+A decimal fits-in-`Int` check cannot be applied to the bare literal token without also rejecting
+`INT_MIN`. Sprout's parser treats a leading `-` as a separate unary operator
+(`parse_unary`, `stdlib/compiler/parser.sprout:1159`), not part of the literal token, so
+`-9223372036854775808` parses as unary minus applied to the literal `9223372036854775808` —
+whose magnitude, `2^63`, does not itself fit in `[0, 2^63-1]`. A naive check rejects it.
+
+**DECIDED: special-case it.** The range check applies to the value *after* a directly-applied
+unary minus: the admissible range is `[-2^63, 2^63-1]` for a decimal literal that is the
+immediate operand of unary `-` — no space, no parentheses, directly the next token — and
+`[0, 2^63-1]` everywhere else. `-9223372036854775808` stays valid; `-(9223372036854775808)` does
+not, same as the bare positive form, because the carve-out is syntactic, not semantic.
+`0x8000000000000000` remains an equally valid spelling of the same value.
+
+Prior art, verified 2026-09-22 — every one of nine languages surveyed accepts
+`-9223372036854775808`; they differ only in mechanism:
+
+| Language | Mechanism | Source |
+|---|---|---|
+| **Rust** | grammar identical to Sprout's — carve the range check, not the grammar | Reference, *Literal expressions*: "`-1i8`, for example, is an application of the negation operator to the literal expression `1i8`, not a single integer literal expression." *Overflow*: "The exception for literal expressions behind unary `-` means that forms such as `-128_i8` ... never cause a panic and have the expected value of -128 ... these most negative expressions are also ignored by the overflowing_literals lint check." |
+| **Java** | normative carve-out in the grammar | JLS SE21 §3.10.1: "The decimal literal `9223372036854775808L` may appear only as the operand of the unary minus operator `-`. It is a compile-time error if [it] appears anywhere other than as the operand of the unary minus operator." |
+| **C#** | same carve-out; bare positive magnitude retypes as `ulong` instead of erroring | ECMA-334 §6.4.5.3 |
+| **Swift, OCaml** | sign is inside the literal production; the question does not arise | — |
+| **Go, Zig, Haskell** | literals are arbitrary-precision; the range error happens at point of use | — |
+| **C** | the only language where the bare decimal form is genuinely inexpressible | glibc `limits.h`: `LLONG_MIN` is defined as `(-LLONG_MAX - 1LL)`, the workaround idiom |
+
+Rust is the decisive row: its grammar is the same shape as Sprout's, and it reached the identical
+fork — rescuing the literal in the range check, not the grammar.
+
+Sprout already uses C's workaround idiom in two places, `stdlib/math.sprout:595` and
+`tests/stdlib/test_math_to_int.spr:32`, both `0 - 9223372036854775807 - 1` with an explanatory
+comment. That idiom stays valid and overflow-free under the new rules; it needs no change.
 
 ### 5.4 `BigInt` representation
 
@@ -401,14 +517,22 @@ Four stages, four PRs. Each is independently landable and independently revertib
   Built in `ast_to_ir`, never in the `ir_lowering` text layer — block-splitting there breaks phi
   predecessors (`docs/compiler-internals.md`).
 - `ir_lowering.sprout`: `llvm.sadd.with.overflow.i64` and siblings, `extractvalue`, branch on the
-  overflow bit to an `IRPanic` block. This also closes the deferred `INT_MIN / -1` gap for free,
-  with no need to materialise an `INT_MIN` literal the lexer cannot represent.
+  overflow bit to an `IRPanic` block, for `+`/`-`/`*`/negate.
+- `ast_to_ir.finish_checked_div`: extend the existing zero-divisor guard to also check
+  `divisor == -1 && dividend == INT_MIN` (§5.1). This is a separate guard from the arithmetic
+  `.with.overflow` intrinsics above — `sdiv` has no LLVM overflow-intrinsic form, so this gap is
+  not closed "for free" by the add/sub/mul work; it needs its own check, on the same `IRPanic`
+  path.
 - `ir_rooting.sprout`: the new ops added to all four exhaustive classifications, as
   **non-triggering**. The panic block has no continuation, so nothing needs rooting across it and
   arithmetic stays off the GC-safe-point list. This is what keeps Stage 1 from costing what §4.2
   item 2 would have cost under C1.
-- The §5.2 wrap audit, including the `int_is_min` fix.
-- X4, with the §5.3 radix carve-out.
+- The §5.2 wrap audit: the `int_is_min` fix, guarding `parse_int`/`accum_digits` to return
+  `Nothing` on an over-range digit run, and the identical fix to
+  `iface_codec.parse_unsigned_atom`.
+- `stdlib/rng.sprout:11`'s header comment: correct the stated bound from `A * (M - 1) < 2^61` to
+  `< 2^62` (§5.2) — a one-line comment fix, riding along on the reseed Stage 1 already pays for.
+- X4, with the §5.3 radix carve-out and the unary-minus `INT_MIN` carve-out.
 - `docs/spec-v0.md` §6.5 and §8.4 rewritten; `docs/int-overflow-policy-decision.md` marked
   decided; `BACKLOG.md` entries for the overflow policy and for `INT_MIN / -1` deleted as part of
   landing, per Backlog Discipline.
@@ -459,10 +583,18 @@ already link it. Sprout is in the first group — it hand-rolls SHA-256 in
 Per AGENTS.md "Code and Testing", the failing tests come first in every stage.
 
 **Stage 1.** Conformance fixtures for overflow panics on `+`, `-`, `*` and negation at the
-boundary; `safe_div(INT_MIN, -1)` returning `Err` rather than panicking — the regression test for
-§5.2, which must be written *before* the `int_is_min` fix and confirmed to fail; parse-error
-fixtures for over-range decimal literals; and an update to `tests/stdlib/test_int_literals.spr`
-pinning that hex literals are still accepted and `0xFFFFFFFFFFFFFFFF` is still `-1`.
+boundary; `INT_MIN / -1` panicking (§5.1) and `safe_div(INT_MIN, -1)` returning `Err` rather than
+panicking — the regression test for §5.2, which must be written *before* the `int_is_min` fix and
+confirmed to fail; `parse_int` and `parse_unsigned_atom` returning `Nothing` on an over-range digit
+run (§5.2); parse-error fixtures for over-range decimal literals, including a passing fixture for
+`-9223372036854775808` (the unary-minus carve-out, §5.3) and a rejected-at-compile-time fixture for
+the parenthesised form `-(9223372036854775808)` (the carve-out is syntactic, not semantic — it
+does not reach through a paren); an update to `tests/stdlib/test_int_literals.spr` pinning that hex
+literals are still accepted and `0xFFFFFFFFFFFFFFFF` is still `-1`; and conformance coverage for
+the new public-API panics named in spec §8.4: `stdlib.math.int.abs(-9223372036854775808)`
+(`INT_MIN`, now a legal literal under §5.3's carve-out) and an overflowing `pow` (e.g.
+`pow(2, 100)`) both panicking, per `docs/math-partiality-v0.md`'s division of labour between
+Rule 1 (`Maybe` for documented domain errors) and overflow (panics).
 
 **Stage 2.** Unit coverage per operation, and round-trips: `from_bytes_be`/`to_bytes_be`,
 `from_string`/`to_string`, `from_int`/`to_int` including the `Nothing` boundary. Property-style

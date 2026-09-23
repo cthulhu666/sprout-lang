@@ -4,20 +4,24 @@
 2026-07-06; deferred until an escape hatch existed for programs that genuinely need values
 above i64. `BigInt` is that escape hatch, so the two land together: see
 `docs/bigint-v0.md`, which carries the decision and the staged implementation. Implementation
-is pending Stage 1 there; §4–§7 below are the pre-decision record and are rewritten when it
-lands.
-**Couples to:** W9/X4 (integer-literal overflow, `docs/fundamentals-code-review-handoff-2026-07-03.md`)
-and W7's deferred `INT_MIN / -1` operator guard.
+is pending Stage 1 there; §5–§7 below record the decision and the resolution of the items it
+was coupled to (rewritten from the pre-decision record now that both have landed).
+**Couples to:** W9/X4 (integer-literal overflow, `docs/fundamentals-code-review-handoff-2026-07-03.md`,
+resolved — §7) and W7's deferred `INT_MIN / -1` operator guard (resolved — `docs/bigint-v0.md` §5.1).
 
 ---
 
 ## 1. Problem
 
-Sprout's `Int` is *specified* as a mathematical (arbitrary-precision) integer — the
-interpreter uses host bignum arithmetic (spec §8.4, line 426). The native backend lowers
-`Int` to machine `i64`, and both spec §6.5 (line 349) and §8.4 (line 432) explicitly call
-this **"a temporary v0 implementation constraint, not the intended long-term meaning of
-`Int`."**
+Sprout's `Int` was *specified* as a mathematical (arbitrary-precision) integer, and both spec
+§6.5 and §8.4 explicitly called the native `i64` lowering **"a temporary v0 implementation
+constraint, not the intended long-term meaning of `Int`."** (Both sections are rewritten by this
+decision landing — see the header.)
+
+**Correction:** an earlier version of this section claimed "the interpreter uses host bignum
+arithmetic." False — there is no such path. `repl_eval_expr` in `runtime/sprout_runtime.c:5114`
+aborts with `"not supported in native backend"`; the i64 lowering described below is the only
+implementation that exists.
 
 The concern: the temporary divergence is **silent**. A program that overflows i64 gets a
 garbage-but-defined value with no signal — the opposite of Sprout's stated identity
@@ -79,7 +83,10 @@ Both A and B make the W9/X4 decision (reject over-range integer literals at comp
   being a uniform `i64` scalar, with blast radius on the uniform-i64 ABI and GC tagging.
   Out of scope for v0; recorded as the long-term target, not a live option here.
 
-## 5. Recommendation (author): Option A
+## 5. Decision: Option A
+
+Adopted 2026-09-22, alongside `docs/bigint-v0.md`, which supplies the escape hatch (`BigInt`)
+that this deferral was waiting on (§7).
 
 1. Go's *silent runtime wrap* (Option B) is exactly the footgun that prompted this review.
 2. **Forward-compatibility with the bignum end-state (Option C).** Under A, an overflowing
@@ -89,29 +96,47 @@ Both A and B make the W9/X4 decision (reject over-range integer literals at comp
 3. Go chose wrap for systems-level performance; Sprout is positioned safety-first +
    beginner-friendly, so Go's rationale does not transfer.
 4. Cheap to build: reuse W7's `IRPanic` terminator + LLVM `llvm.sadd/ssub/smul.with.overflow`
-   intrinsics (branch on the overflow bit to `IRPanic`). The `.with.overflow` intrinsics
-   also close W7's deferred `INT_MIN / -1` gap for free (no need to materialize the
-   `INT_MIN` literal the lexer can't yet represent).
+   intrinsics (branch on the overflow bit to `IRPanic`) for `+`/`-`/`*`/negate. `INT_MIN / -1`
+   is a separate case — `sdiv` has no LLVM overflow-intrinsic form, so it needs its own guard in
+   `finish_checked_div` rather than arriving for free from the intrinsics above
+   (`docs/bigint-v0.md` §5.1 corrects an earlier claim to the contrary).
 
 **Honest cost of A:** a branch per `+`/`-`/`*` (this is why Rust ships *release* with
 wrap). Branch-predictable and cheap, but a real tax in hot loops — mitigable later with
 explicit `wrapping_add`-style operators if a measured hot loop needs them.
 
-## 6. Implementation notes (for whoever picks this up, if A is chosen)
+## 6. Implementation notes
 
 - Reuse the W7 pattern: `IRPanic` op (`sprout_ir.sprout`), the guard-CFG built in
   `ast_to_ir.sprout` (not the `ir_lowering` text layer — block-splitting there breaks phi
   predecessors), and the four exhaustive `ir_rooting.sprout` classifications.
 - Emit `llvm.s{add,sub,mul}.with.overflow.i64`, `extractvalue` the `{result, i1}` pair,
   `br` on the overflow bit to a panic block (`IRStrConst` + `IRPanic`) vs an ok block that
-  carries the result forward.
-- Spec §6.5 / §8.4 updated in the same change; the literal-overflow half (X4) lands
+  carries the result forward. `INT_MIN / -1` gets its own compare-and-branch in
+  `finish_checked_div`, alongside the existing zero-divisor check.
+- Spec §6.5 / §8.4 updated in the same change; the literal-overflow half (X4, §7) lands
   together so the policy is uniform.
-- If B is chosen instead: no code change; document the deliberate asymmetry in §8.4 so it
-  reads as intentional (the Go model), and land X4 as the literal-only guard.
 
-## 7. Blocking
+## 7. Blocking — resolved
 
-W9 was requested to land "as one piece." X4 (integer-literal overflow) depends on this
-decision, so **W9 is parked behind this deferral.** X1/X2/X3/X5/X6 could proceed
-independently, but per the one-piece request they wait too.
+W9 was requested to land "as one piece." X4 (integer-literal overflow) depended on this
+decision, so W9 was parked behind this deferral until `BigInt` supplied the escape hatch.
+
+**X4 resolved, 2026-09-22 — rules on radix literals explicitly**, per `docs/bigint-v0.md` §5.3:
+
+- A *hex or binary* literal denotes a 64-bit pattern, read as signed two's-complement. Every
+  pattern is writable; nothing is rejected. This keeps the all-ones-mask idiom
+  (`0xFFFFFFFFFFFFFFFF` is `-1`) that `docs/bitwise-int-ops-v0.md` §5.6 documents.
+- A *decimal* literal denotes a mathematical value and is rejected at compile time if it does
+  not fit in `Int`, naming `BigInt.from_string` as the alternative.
+- **Unary-minus carve-out.** Sprout's parser treats a leading `-` as a separate unary operator
+  (`parse_unary`, `parser.sprout:1159`), not part of the literal token, so
+  `-9223372036854775808` is unary minus applied to the bare literal `9223372036854775808`,
+  whose magnitude does not fit `[0, 2^63-1]`. A decimal literal that is the immediate operand of
+  unary `-` is checked against `[-2^63, 2^63-1]` instead, so `INT_MIN` stays a valid literal.
+  Nine languages were surveyed; all accept `-9223372036854775808`, differing only in mechanism —
+  Rust is the decisive precedent, since its grammar has the same unary-minus shape as Sprout's
+  and it carved the same exception into the range check rather than the grammar. Full survey:
+  `docs/bigint-v0.md` §5.3.
+
+X1/X2/X3/X5/X6 were not gated on this and could have proceeded independently.

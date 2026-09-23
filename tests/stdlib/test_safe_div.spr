@@ -4,6 +4,17 @@ import stdlib.test (check_true, run_suite)
 # for the two cases where integer `/` is undefined: a zero divisor and the
 # INT_MIN / -1 overflow. The `/` operator itself panics on those; safe_div is the
 # non-panicking sibling.
+#
+# bigint-v0 Stage 1 regression guard: `int_is_min` (stdlib/prelude.sprout)
+# detects INT_MIN as `a < 0 && (0 - a) < 0` — relying on `0 - a` WRAPPING back
+# negative for a == INT_MIN. Once `-` traps on overflow, `0 - INT_MIN` panics
+# instead of wrapping, so int_is_min itself panics on this one input unless it
+# is fixed alongside the trapping change (docs/bigint-v0.md §5.2). That would
+# make safe_div — whose entire purpose is to answer Err instead of panicking —
+# panic on exactly the input it exists to handle. This assertion is what would
+# catch that: it must still return Err(DivByZero), not abort the process.
+fn min_int() -> Int = 0 - 9223372036854775807 - 1
+
 fn is_ok_5(r: Result DivByZero Int) -> Bool =
   match r with
   | Ok n -> n == 5
@@ -17,5 +28,7 @@ fn is_err(r: Result DivByZero Int) -> Bool =
 fn main() -> Unit !{IO} =
   run_suite("safe_div", [
     check_true("safe_div 10 2 = Ok 5", is_ok_5(safe_div(10, 2))),
-    check_true("safe_div 7 0 = Err DivByZero", is_err(safe_div(7, 0)))
+    check_true("safe_div 7 0 = Err DivByZero", is_err(safe_div(7, 0))),
+    check_true("safe_div INT_MIN -1 = Err DivByZero (must not panic)",
+      is_err(safe_div(min_int(), -1)))
   ])

@@ -2556,6 +2556,76 @@ div-by-zero-smoke: bootstrap-from-seed
   fi
   echo "==> div-by-zero-smoke ✓ (clean panic, exit $ec)"
 
+# Overflow-panic guard regression (CI gate, bigint-v0 Stage 1 — docs/bigint-v0.md
+# §5.1, Option A of docs/int-overflow-policy-decision.md). Same shape and reason
+# as div-by-zero-smoke above: each fixture makes the overflowing
+# operand a RUNTIME value (derived from `list_length(argv_all())`, which is 0
+# with no args), so neither the Sprout compiler nor clang can constant-fold the
+# operation away and hide a missing guard.
+#
+# Per-case assertion strength (see EXPECT below):
+#   add/sub/mul_overflow — MESSAGE-EXACT: `+`, `-`, `*` must each panic naming
+#     the operator ("Int overflow in <op>", docs/bigint-v0.md §7).
+#   neg_overflow — EXIT-CODE-ONLY (substring "overflow", not operator-exact):
+#     whether unary negation's message reads "Int overflow in -" (sharing binary
+#     `-`'s wording) or names negation distinctly is the implementer's call;
+#     pinning one would over-constrain it.
+#   int_min_div — EXIT-CODE-ONLY: LLVM has no `sdiv.with.overflow` intrinsic
+#     (only sadd/ssub/smul/uadd/usub/umul), so INT_MIN / -1 cannot ride the
+#     add/sub/mul guards — it needs its own check in
+#     `ast_to_ir.finish_checked_div`, a separate code path with its own
+#     message. The implementer may reuse "division by zero" or a distinct
+#     overflow message; both are correct, so this gate does not pin one.
+[group('smoke')]
+overflow-smoke: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_ovf_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  FIXTURES=(add_overflow sub_overflow mul_overflow neg_overflow int_min_div
+            abs_int_min pow_overflow)
+  # Empty string = exit-code-only assertion (no message substring pinned).
+  # abs_int_min/pow_overflow pin only "overflow": they gate docs/spec-v0.md
+  # §8.4's claim that the stdlib.math.int functions panic rather than answer a
+  # silently wrong value, and WHICH operator inside `abs`/`pow_loop` overflows
+  # is an implementation detail those fixtures must not freeze.
+  declare -A EXPECT=(
+    [add_overflow]="Int overflow in +"
+    [sub_overflow]="Int overflow in -"
+    [mul_overflow]="Int overflow in *"
+    [neg_overflow]="overflow"
+    [int_min_div]=""
+    [abs_int_min]="overflow"
+    [pow_overflow]="overflow"
+  )
+  for f in "${FIXTURES[@]}"; do
+    FIXTURE="tests/overflow_smoke/$f.spr"
+    if ! "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$FIXTURE" > "$TMPD/$f.ll" 2>"$TMPD/$f.emit.err"; then
+      echo "overflow-smoke: emit-IR failed for $f" >&2; cat "$TMPD/$f.emit.err" >&2; exit 1
+    fi
+    if ! clang "$TMPD/$f.ll" {{runtime_src}} -O2 {{clang_extra}} -o "$TMPD/$f.bin" 2>"$TMPD/$f.link.err"; then
+      echo "overflow-smoke: link failed for $f" >&2; cat "$TMPD/$f.link.err" >&2; exit 1
+    fi
+    set +e
+    "$TMPD/$f.bin" > "$TMPD/$f.out" 2>"$TMPD/$f.err"
+    ec=$?
+    set -e
+    if [ "$ec" -eq 0 ]; then
+      echo "overflow-smoke: $f did NOT panic (exit 0) — the overflow guard is missing or was optimized away" >&2
+      echo "  stdout was: $(cat "$TMPD/$f.out")" >&2
+      exit 1
+    fi
+    expect="${EXPECT[$f]}"
+    if [ -n "$expect" ]; then
+      if ! grep -qF "$expect" "$TMPD/$f.err"; then
+        echo "overflow-smoke: $f not reported cleanly (exit $ec); expected '$expect' on stderr" >&2
+        echo "--- stderr was ---" >&2; cat "$TMPD/$f.err" >&2
+        exit 1
+      fi
+    fi
+  done
+  echo "==> overflow-smoke ✓ (${#FIXTURES[@]} overflow cases panic cleanly)"
+
 # stdlib.bits shift-count guard regression (CI gate). Same shape and same reason as
 # div-by-zero-smoke above: the count is -1 at RUNTIME (`list_length(argv) - 1` with
 # no args), which neither the compiler nor clang can fold, and a LITERAL negative
@@ -3092,6 +3162,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "gc-arena|gc-arena-check"
     "argv-smoke|argv-smoke"
     "div-by-zero-smoke|div-by-zero-smoke"
+    "overflow-smoke|overflow-smoke"
     "negative-shift-smoke|negative-shift-smoke"
     "closure-arity-smoke|closure-arity-smoke"
     "stack-overflow-smoke|stack-overflow-smoke"

@@ -1,0 +1,13 @@
+module main
+
+# bigint-v0 Stage 1 §5.3: the unary-minus carve-out is SYNTACTIC and narrow —
+# it fires only when a decimal literal is the token immediately after `-`.
+# Parenthesised, the literal is an ordinary decimal literal again and 2^63 does
+# not fit, so this is rejected even though `-9223372036854775808` compiles.
+#
+# The narrowness is the point: a carve-out that saw through parentheses would
+# have to constant-fold arbitrary expressions to decide a literal's legality,
+# and the rule would stop being lexical. Rust and Java draw the line here too.
+fn over() -> Int = -(9223372036854775808)
+
+fn main() -> Unit !{IO} = print(int_to_string(over()))
