@@ -1,0 +1,308 @@
+module stdlib.crypto.p256
+
+import stdlib.bytes as bytes
+import stdlib.crypto as crypto
+import stdlib.math.bigint as bigint
+import stdlib.math.modular as modular
+
+# ECDSA verification over NIST P-256 with SHA-256 (ES256). Design: docs/bigint-v0.md
+# Stage 4. Driving requirement: issue #337.
+#
+#   import stdlib.crypto.p256 as p256
+#   let Just key = p256.public_key(sec1_bytes) else ...
+#   in  p256.verify(signed_bytes, der_signature, key)
+#
+# VERIFICATION ONLY, and nothing here is constant-time. Verification touches only
+# public inputs, so it must be correct, not hardened. Do not add signing or ECDH.
+#
+# `verify` IS TOTAL: every malformed input answers `false`. Verification is the
+# security boundary, so a panic there is a denial of service.
+#
+# Argument order is data-first, context-last (docs/guidelines.md #6), matching
+# `modular.mod_add(left, right, m)` --- not the (key, message, signature) of C
+# crypto libraries.
+
+# Affine (x, y), on the curve and in range by construction; the constructor is hidden.
+# An off-curve point admits the invalid-curve attack, so this is not cosmetic.
+export wrap PublicKey = (bigint.BigInt, bigint.BigInt)
+
+# Jacobian (X, Y, Z) is the affine point (X/Z^2, Y/Z^3); Z = 0 is infinity. Jacobian
+# buys one modular inverse per verify instead of one per point addition.
+type Point =
+  | Point bigint.BigInt bigint.BigInt bigint.BigInt
+
+# --- curve constants ---
+#
+# Top-level `let`, not a nullary `fn`: a `let` is evaluated once, a `fn` re-runs its
+# body per call --- 0.03 us against 52 us for a 64-digit `from_string`.
+
+fn constant(raw: String) -> bigint.BigInt =
+  match bigint.from_string(raw) with
+  | Ok value -> value
+  | Err _ -> panic("p256: a curve constant failed to parse (internal error)")
+
+let field_prime =
+  constant("0xffffffff00000001000000000000000000000000ffffffffffffffffffffffff")
+
+let group_order =
+  constant("0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551")
+
+let curve_b =
+  constant("0x5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b")
+
+let generator_x =
+  constant("0x6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296")
+
+let generator_y =
+  constant("0x4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5")
+
+fn checked_modulus(value: bigint.BigInt, name: String) -> modular.Modulus =
+  match modular.modulus(value) with
+  | Just m -> m
+  # Unreachable: both moduli are prime and far below `bigint.mul_bit_ceiling()`.
+  | Nothing -> panic("p256: a curve modulus was rejected: " ++ name)
+
+let field = checked_modulus(field_prime, "field prime")
+
+let scalar_field = checked_modulus(group_order, "group order")
+
+let zero = bigint.from_int(0)
+
+let one = bigint.from_int(1)
+
+# --- field helpers ---
+#
+# Every intermediate comes out of one of these, so it is already in [0, p) and the
+# `reduce` inside `mod_add`/`mod_mul` hits `divmod`'s fast path instead of dividing.
+
+fn fadd(left: bigint.BigInt, right: bigint.BigInt, m: modular.Modulus) -> bigint.BigInt =
+  modular.mod_add(left, right, m)
+
+fn fsub(left: bigint.BigInt, right: bigint.BigInt, m: modular.Modulus) -> bigint.BigInt =
+  modular.mod_sub(left, right, m)
+
+fn fmul(left: bigint.BigInt, right: bigint.BigInt, m: modular.Modulus) -> bigint.BigInt =
+  modular.mod_mul(left, right, m)
+
+fn fsqr(value: bigint.BigInt, m: modular.Modulus) -> bigint.BigInt =
+  modular.mod_mul(value, value, m)
+
+# Small multiples by repeated addition: 1.3 us a field add against 46 us a multiply.
+fn twice(value: bigint.BigInt, m: modular.Modulus) -> bigint.BigInt =
+  fadd(value, value, m)
+
+fn thrice(value: bigint.BigInt, m: modular.Modulus) -> bigint.BigInt =
+  fadd(value, twice(value, m), m)
+
+fn eight_times(value: bigint.BigInt, m: modular.Modulus) -> bigint.BigInt =
+  twice(twice(twice(value, m), m), m)
+
+# --- point arithmetic ---
+
+let infinity = Point(one, one, zero)
+
+fn is_infinity(point: Point) -> Bool =
+  match point with
+  | Point _ _ z -> bigint.is_zero(z)
+
+# EFD "dbl-2001-b", valid only for a = -3, which is P-256's case. Infinity needs no
+# special arm: at Z = 0 the z3 below is already 0.
+fn point_double(point: Point, m: modular.Modulus) -> Point =
+  match point with
+  | Point x y z ->
+      let delta = fsqr(z, m)
+          gamma = fsqr(y, m)
+          beta = fmul(x, gamma, m)
+          alpha = thrice(fmul(fsub(x, delta, m), fadd(x, delta, m), m), m)
+          x3 = fsub(fsqr(alpha, m), eight_times(beta, m), m)
+          z3 = fsub(fsub(fsqr(fadd(y, z, m), m), gamma, m), delta, m)
+          y3 = fsub(fmul(alpha, fsub(twice(twice(beta, m), m), x3, m), m),
+                    eight_times(fsqr(gamma, m), m), m)
+      in Point(x3, y3, z3)
+
+# EFD "add-2007-bl". The two degenerate arms are the ones that fail silently: equal
+# inputs compute 0/0 and must defer to doubling, inverse inputs sum to infinity.
+fn point_add(left: Point, right: Point, m: modular.Modulus) -> Point =
+  if is_infinity(left) then right
+  else if is_infinity(right) then left
+  else
+    match left with
+    | Point x1 y1 z1 ->
+        match right with
+        | Point x2 y2 z2 ->
+            let z1z1 = fsqr(z1, m)
+                z2z2 = fsqr(z2, m)
+                u1 = fmul(x1, z2z2, m)
+                u2 = fmul(x2, z1z1, m)
+                s1 = fmul(y1, fmul(z2, z2z2, m), m)
+                s2 = fmul(y2, fmul(z1, z1z1, m), m)
+                h = fsub(u2, u1, m)
+                r = twice(fsub(s2, s1, m), m)
+            in if bigint.is_zero(h) then
+                 if bigint.is_zero(r) then point_double(left, m)
+                 else infinity
+               else
+                 let i = fsqr(twice(h, m), m)
+                     j = fmul(h, i, m)
+                     v = fmul(u1, i, m)
+                     x3 = fsub(fsub(fsqr(r, m), j, m), twice(v, m), m)
+                     y3 = fsub(fmul(r, fsub(v, x3, m), m),
+                               twice(fmul(s1, j, m), m), m)
+                     z3 = fmul(fsub(fsub(fsqr(fadd(z1, z2, m), m), z1z1, m), z2z2, m), h, m)
+                 in Point(x3, y3, z3)
+
+# Double-and-add, MSB first. Not constant-time: the scalar is public here.
+fn multiply_loop(acc: Point, base: Point, scalar: bigint.BigInt, index: Int,
+                 m: modular.Modulus) -> Point =
+  if index < 0 then acc
+  else
+    let doubled = point_double(acc, m)
+        next = if bigint.test_bit(scalar, index) then point_add(doubled, base, m)
+               else doubled
+    in multiply_loop(next, base, scalar, index - 1, m)
+
+fn multiply(base: Point, scalar: bigint.BigInt, m: modular.Modulus) -> Point =
+  if bigint.is_zero(scalar) then infinity
+  else multiply_loop(infinity, base, scalar, bigint.bit_length(scalar) - 1, m)
+
+# The one modular inverse per verify. `Nothing` only at infinity, which has no x.
+fn affine_x(point: Point, m: modular.Modulus) -> Maybe bigint.BigInt =
+  match point with
+  | Point x _ z ->
+      if bigint.is_zero(z) then Nothing
+      else
+        match modular.mod_inv(fsqr(z, m), m) with
+        # Unreachable: z is in [1, p) and p is prime, so z^2 is a unit.
+        | Nothing -> Nothing
+        | Just inverse -> Just(fmul(x, inverse, m))
+
+# --- public keys ---
+
+# Rejected unless it is a field element: reducing instead would give x = 0 a second
+# encoding.
+fn coordinate(raw: Bytes) -> Maybe bigint.BigInt =
+  if bytes.length(raw) != 32 then Nothing
+  else
+    let value = bigint.from_bytes_be(raw)
+    in if bigint.cmp(value, field_prime) >= 0 then Nothing
+       else Just(value)
+
+# y^2 == x^3 - 3x + b. The check that makes `PublicKey` mean anything.
+fn on_curve(x: bigint.BigInt, y: bigint.BigInt, m: modular.Modulus) -> Bool =
+  let left = fsqr(y, m)
+      right = fadd(fsub(fmul(fsqr(x, m), x, m), thrice(x, m), m), curve_b, m)
+  in bigint.cmp(left, right) == 0
+
+fn checked_key(x: bigint.BigInt, y: bigint.BigInt) -> Maybe PublicKey =
+  if on_curve(x, y, field) then Just(PublicKey((x, y)))
+  else Nothing
+
+# The COSE/JWK shape, 32 bytes each --- the path a WebAuthn caller takes.
+export fn public_key_xy(x: Bytes, y: Bytes) -> Maybe PublicKey =
+  match coordinate(x) with
+  | Nothing -> Nothing
+  | Just left ->
+      match coordinate(y) with
+      | Nothing -> Nothing
+      | Just right -> checked_key(left, right)
+
+# SEC1 uncompressed: 0x04 || X || Y, 65 bytes. Compressed points are rejected rather
+# than decoded --- recovering y needs a modular square root no caller in scope wants.
+export fn public_key(sec1: Bytes) -> Maybe PublicKey =
+  if bytes.length(sec1) != 65 then Nothing
+  else if bytes.get(sec1, 0) != Just(4) then Nothing
+  else public_key_xy(bytes.slice(sec1, 1, 32), bytes.slice(sec1, 33, 32))
+
+# --- DER signature decoding ---
+#
+# SEQUENCE { INTEGER r, INTEGER s }, strictly. The largest adversarial surface here:
+# 173 of Wycheproof's 310 invalid vectors are encoding, not arithmetic. Every
+# relaxation gives one signature a second encoding.
+#
+# Long-form lengths are rejected outright. A P-256 body is at most 72 bytes, so DER's
+# minimal-length rule requires the short form; a long form is either non-minimal or
+# too wide for an in-range r and s.
+
+# Out-of-range reads answer -1, matching no tag or length, so a short input walks off
+# the end into a rejection rather than needing a bounds test per step.
+fn byte_at(raw: Bytes, index: Int) -> Int =
+  match bytes.get(raw, index) with
+  | Just value -> value
+  | Nothing -> -1
+
+# Answers the value and the offset just past it.
+fn der_integer(raw: Bytes, offset: Int) -> Maybe(bigint.BigInt, Int) =
+  let length = byte_at(raw, offset + 1)
+      first = byte_at(raw, offset + 2)
+      second = byte_at(raw, offset + 3)
+  in if byte_at(raw, offset) != 2 then Nothing
+     # Zero-length encodes nothing; 0 is one 0x00 byte.
+     else if length < 1 || length > 127 then Nothing
+     else if offset + 2 + length > bytes.length(raw) then Nothing
+     # The high bit makes a DER INTEGER negative, and neither r nor s may be.
+     else if first >= 128 then Nothing
+     # A leading zero may only clear that high bit; otherwise it is padding.
+     else if length > 1 && first == 0 && second < 128 then Nothing
+     else Just((bigint.from_bytes_be(bytes.slice(raw, offset + 2, length)),
+                offset + 2 + length))
+
+fn signature(der: Bytes) -> Maybe(bigint.BigInt, bigint.BigInt) =
+  let length = byte_at(der, 1)
+  in if byte_at(der, 0) != 48 then Nothing
+     else if length < 0 || length > 127 then Nothing
+     # The SEQUENCE must be the whole input, or anything may be appended to a
+     # signature that still verifies.
+     else if length + 2 != bytes.length(der) then Nothing
+     else
+       match der_integer(der, 2) with
+       | Nothing -> Nothing
+       | Just ((r, after_r)) ->
+           match der_integer(der, after_r) with
+           | Nothing -> Nothing
+           # And the two integers must be the whole SEQUENCE, same reason.
+           | Just ((s, after_s)) -> if after_s != length + 2 then Nothing
+                                    else Just((r, s))
+
+# --- verification ---
+
+fn in_group_range(value: bigint.BigInt) -> Bool =
+  bigint.cmp(value, one) >= 0 && bigint.cmp(value, group_order) < 0
+
+let generator = Point(generator_x, generator_y, one)
+
+fn key_point(key: PublicKey) -> Point =
+  match key with
+  | PublicKey pair ->
+      let (x, y) = pair
+      in Point(x, y, one)
+
+# u1*G + u2*Q, then compare its affine x against r mod n. Two separate scalar
+# multiplications; Shamir's trick would save about a third and is not done yet.
+fn verify_reduced(hash: bigint.BigInt, r: bigint.BigInt, s: bigint.BigInt,
+                  key: PublicKey) -> Bool =
+  let n = scalar_field
+      m = field
+  in match modular.mod_inv(s, n) with
+     # Unreachable: n is prime and s is in [1, n-1], so s is a unit.
+     | Nothing -> false
+     | Just w ->
+         let u1 = modular.mod_mul(hash, w, n)
+             u2 = modular.mod_mul(r, w, n)
+             point = point_add(multiply(generator, u1, m),
+                               multiply(key_point(key), u2, m), m)
+         in match affine_x(point, m) with
+            # Infinity has no x to compare; inventing one forges signatures.
+            | Nothing -> false
+            | Just x -> bigint.cmp(modular.reduce(x, n), r) == 0
+
+# `message` is the bytes that were signed, NOT their hash: ES256 hashes internally.
+# For WebAuthn that is `authenticatorData || sha256(clientDataJSON)`.
+#
+# Digest and group order are both 256 bits here, so ECDSA's leftmost-bits truncation
+# takes the whole digest. That is particular to this curve-hash pair.
+export fn verify(message: Bytes, der: Bytes, key: PublicKey) -> Bool =
+  match signature(der) with
+  | Nothing -> false
+  | Just ((r, s)) ->
+      if ! in_group_range (r) || ! in_group_range (s) then false
+      else verify_reduced(bigint.from_bytes_be(crypto.sha256(message)), r, s, key)

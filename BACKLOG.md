@@ -1328,8 +1328,8 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   `vector_get_direct` — but only `stdlib.mutable` declares it, and only as `!{IO}`, so pure
   index-driven numeric code cannot reach it. Measured cost: `stdlib.math.bigint`'s 20-by-10
   `divmod` runs 31 µs against 1.4 µs for the 10x10 multiply, a 22x gap on ~2x the limb operations,
-  and ~1,100 allocations per call; it is what puts a Stage-4 P-256 verify near 200 ms
-  (`docs/bigint-v0.md` §9 Stage 2). The fix is a pure `vec_get_direct` in the prelude with its own
+  and ~1,100 allocations per call; it is what puts a P-256 verify at its measured 240 ms
+  (`docs/bigint-v0.md` §9 Stage 4). The fix is a pure `vec_get_direct` in the prelude with its own
   bounds behaviour decided — NOT re-declaring the existing extern with a second effect row, since
   externs sit outside the module system and two declarations of one name would conflict.
 - [ ] `P2` **`stdlib.math.bigint` grows super-linearly outside P-256 width.** Three low-severity
@@ -1342,6 +1342,15 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   general case is the `str_slice` O(start) entry above, the local fix is the one
   `stdlib/string.sprout` already applied to its trimming functions. None is reachable at the
   32-byte widths Stage 4 uses, and a suite that tests only those widths cannot see any of them.
+- [ ] `P2` **An ECDSA P-256 verify costs 240 ms, and 71% of it is one division.**
+  `stdlib/crypto/p256.sprout` runs the field through `stdlib.math.modular`, so every one of its
+  ~6,000 field multiplies pays a Knuth division: 46.5 µs, of which the multiply is 2 µs and
+  `reduce` is 33 µs (`docs/bigint-v0.md` §9 Stage 4). P-256's prime is Solinas, so reduction can
+  be ~9 additions instead — but a `bigint.add` is itself 1.2 µs because it allocates a limb
+  vector, so the honest ceiling is **3.5x (240 ms to ~80 ms), not 40x**. Getting past that needs a
+  dedicated fixed-width field type inside `p256.sprout`, which changes no public API. Shamir's
+  trick on the two scalar multiplies is a further ~1/3, independent of this. Blocked on nothing;
+  the 484-vector Wycheproof suite is the regression net that makes it safe.
 
 ## Design Roadmap
 
