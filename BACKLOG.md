@@ -810,6 +810,16 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   identity is the spine — it generalizes module-qualified type identity and dissolves the "dotted
   non-`stdlib.` import resolves to `Nothing`" gap as its degenerate single-package case, subsuming
   the `examples.*` item below. Phased plan in §10, semantics before mechanics.
+- [ ] `P1` **An import resolving nowhere is silent; one whose file is missing panics.**
+  `module_loader.resolve_module_path` is pure and guesses a path with no existence check, so a name
+  it cannot place is dropped with no diagnostic (`module_loader.sprout:416`, `bundler.sprout:1036`
+  and `:1048`), while one it places on a missing file `panic`s the read
+  (`module_loader.sprout:419`) and kills the REPL's analysis session. `import math.intza` answers
+  `ok` and binds nothing; `import foobar` ends the session. The same guess caps the prefixless form
+  at depth 1: `import math` works end to end, `import math.int` cannot, a dotted name being read as
+  a package-root path. Fix: return candidate paths and probe them in the already-`!{IO}` loader.
+  Open: does the stdlib root outrank package roots? `docs/repl-env-type-vocabulary-v0.md` §4.2
+  calls the silent drop deliberate and must be revisited with it.
 - [ ] `P2` **Dedup `extern fn` declarations in the bundler.** The typed AST reaching
   `ast_to_ir.translate_program` holds the same `TExternFnDecl` once per importing module. The IR
   path defends with a `seen: Set` in `lower_extern_decls_loop`; the fix belongs in `bundler.sprout`
