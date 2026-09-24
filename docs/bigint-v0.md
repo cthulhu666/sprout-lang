@@ -955,12 +955,18 @@ bignum arithmetic" — which is false: `repl_eval_expr` in `runtime/sprout_runti
 with "not supported in native backend", and the i64 lowering is the only implementation. Corrected
 in the same pass.
 
-One stale reference is deliberately left for Stage 1 rather than fixed with this design:
-`stdlib/bits.sprout:64` says the overflow decision "is still open on that". Its substantive
-claim — that `bit_shl`'s discarding is exempt from whatever `*` does — is unchanged and still
-true, only the parenthetical is stale. Editing a comment in a `stdlib/*.sprout` file forces the
-`verify-bootstrap-fixed-point` + `seed-fp-ack` path at commit time for no behavioural gain, and
-Stage 1 edits that file anyway.
+`stdlib/bits.sprout:64` said the overflow decision "is still open on that". This design deferred
+the parenthetical to Stage 1 — its substantive claim, that `bit_shl`'s discarding is exempt from
+whatever `*` does, was unchanged and still true — and Stage 1 did not pick it up either. Fixed
+separately, a month later, once a review of the whole arc went looking for what still described
+the pre-Stage-1 world.
+
+The deferral's stated reason was wrong, which is worth recording because it is the kind of
+reason that deters the next person: editing a `stdlib/*.sprout` comment does **not** necessarily
+force a reseed. `bits.sprout` is entirely `extern` declarations, so it contributes no
+line-numbered IR and shifting its lines moves nothing — `verify-bootstrap-fixed-point` passes
+with the seed untouched and `just seed-fp-ack` is the whole cost. Weigh that per file, by
+checking, rather than assuming any `stdlib/` edit buys the full reseed.
 
 `docs/numeric-types-v1-draft.md` milestone N6 (`BigInt` + `Integer` instance) is half-delivered by
 Stage 2: the type lands, the class instance waits for N1. The draft is updated to say so rather
