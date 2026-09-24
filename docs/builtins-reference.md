@@ -668,6 +668,8 @@ Bytes helpers (in `stdlib/bytes.sprout`):
 
 - uses foundational prelude `Maybe` and `Result`
 - `Builder` opaque type for efficient packet construction
+- `instance Eq Bytes` — structural `==`, early-exiting and so not constant-time. It is declared
+  here, not in the prelude, so a program gets it only with `stdlib.bytes` in its import graph
 - `empty() -> Bytes`
 - `singleton(value) -> Bytes`
 - `length(value) -> Int`

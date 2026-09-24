@@ -219,7 +219,7 @@ declare i64 @http_request(i64, i64, i64, i64, i64)
 @.str.116 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 148, column 44)\00" }
 @.str.117 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 154, column 42)\00" }
 @.str.118 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 173, column 51)\00" }
-@.str.119 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 184, column 45)\00" }
+@.str.119 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 191, column 45)\00" }
 @.str.120 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.str.121 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 45, column 35)\00" }
 @.str.122 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"\0D\0A\00" }
@@ -27165,6 +27165,42 @@ arm_1_0:
 join_0:
   %t$1 = phi i64 [%t$33, %arm_0_0]
   ret i64 %t$1
+}
+
+define i64 @__tc_Eq_Bytes_eq(i64 %p$left, i64 %p$right) {
+entry:
+  %t$12 = alloca i64
+  store i64 %p$right, ptr %t$12
+  %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
+  %t$14 = alloca i64
+  store i64 %p$left, ptr %t$14
+  %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
+  %t$0 = call i64 @stdlib.bytes.length(i64 %p$left)
+  %t$1 = call i64 @stdlib.bytes.length(i64 %p$right)
+  %t$2 = icmp eq i64 %t$0, %t$1
+  %t$3 = zext i1 %t$2 to i64
+  %t$11 = trunc i64 %t$3 to i1
+  %t$16 = call i64 @sprout_gc_pop_roots(i64 2)
+  br i1 %t$11, label %then_4, label %else_4
+then_4:
+  %t$6 = add i64 0, 0
+  %t$7 = add i64 0, 0
+  %t$17 = alloca i64
+  store i64 %p$right, ptr %t$17
+  %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
+  %t$19 = alloca i64
+  store i64 %p$left, ptr %t$19
+  %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
+  %t$8 = call i64 @stdlib.bytes.length(i64 %p$left)
+  %t$9 = call i64 @stdlib.bytes.matches_at(i64 %p$left, i64 %p$right, i64 %t$6, i64 %t$7, i64 %t$8)
+  %t$21 = call i64 @sprout_gc_pop_roots(i64 2)
+  br label %join_4
+else_4:
+  %t$10 = add i64 0, 0
+  br label %join_4
+join_4:
+  %t$5 = phi i64 [%t$9, %then_4], [%t$10, %else_4]
+  ret i64 %t$5
 }
 
 define i64 @__tc_stdlib.json.JsonEncode_stdlib_json_Json_encode_json(i64 %p$value) {
