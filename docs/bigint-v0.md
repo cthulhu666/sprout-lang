@@ -742,10 +742,13 @@ multiply. Long-form lengths are rejected outright — a P-256 body is at most 72
 minimal-length rule requires the short form, and a long form is either non-minimal or too wide to
 hold an in-range `r` and `s`.
 
-**Cost, measured rather than projected.** One verify is **240 ms**, and the whole 484-vector
-suite is **70 s**. §9's Stage 2 note predicted ~200 ms from the field-multiply cost alone, so the
-prediction held; §1's "several times 15 ms" did not, and is retired. The breakdown, measured on
-this branch at P-256 width:
+**Cost: the first version was 252 ms, the field was replaced, and it is now 5.4 ms.** Both
+numbers matter, because the first one is what the design predicted and the second is what it took
+to beat it.
+
+The `BigInt`-backed version measured 252 ms per verify and 70 s for the 484-vector suite. §9's
+Stage 2 note predicted ~200 ms from the field-multiply cost alone, so that prediction held; §1's
+"several times 15 ms" did not, and is retired. The breakdown at P-256 width:
 
 | operation | per call | note |
 |---|---|---|
@@ -755,14 +758,48 @@ this branch at P-256 width:
 | `modular.mod_add` | 1.3 µs | |
 | `bigint.add` | 1.2 µs | |
 
-**The Knuth division is 71% of a field multiply, and it dominates everything.** That sets the
-escalation honestly: a Solinas reduction for P-256's prime replaces the division with ~9 additions
-(~10 µs), so a field multiply goes to ~13 µs and a verify to roughly 80 ms. That is **3.5x, not
-40x** — because `bigint.add` itself costs 1.2 µs allocating a fresh limb vector. The floor for a
-`BigInt`-backed field is allocation, not algorithm, and a dedicated field type inside
-`p256.sprout` is the only thing that moves it. Unchanged from the original plan: that escalation
-changes no public API. Shamir's trick on the two scalar multiplications is a further ~⅓ and is
-also not done.
+**The Knuth division was 71% of a field multiply — and replacing only that would have been worth
+3.5x, not 40x**, because `bigint.add` itself costs 1.2 µs allocating a fresh limb vector. The
+floor for a `BigInt`-backed field is allocation, not algorithm. Measuring the *representation*
+rather than the formula is what found the real number:
+
+| ten-limb operation | per call | |
+|---|---|---|
+| constructor with ten `Int` fields: read + rebuild | **19.7 ns** | |
+| `Vec Int` via `vec_get_or` | **250 ns** | **12.7x slower** |
+| multiply-accumulate column on constructor fields | 1.5 ns per limb product | |
+
+At 1.5 ns a limb product, a 10x10 schoolbook is ~150 ns against `bigint.mul`'s 2 µs for identical
+arithmetic — and against the **1.17 µs** `MutVec` probe in §1 that the whole feasibility argument
+was costed on. **§1 measured the third-fastest of three representations.** The 12.7x is the `Just`
+boxing of `BACKLOG`'s `vec_get` entry made visible: a ten-limb operation does ten heap allocations
+before it does any arithmetic, while a constructor of scalar fields does none.
+
+So the field is `Felem`: **ten 26-bit limbs in a constructor, with CIOS Montgomery
+multiplication**. The radix matches `bigint`'s, so limb products stay at 2^52 and a ten-term
+column at 2^55.3, well inside i64 — measured worst case across 30,000 random pairs is 2^52
+against i64's 2^63. `n0inv` is **1**, because p ≡ −1 mod 2^26, which deletes a multiply from every
+inner step. Montgomery was chosen over Solinas despite Solinas being slightly cheaper: P-256's
+prime aligns to 32-bit words, not 26-bit limbs, so Solinas needs a radix conversion plus signed
+correction, and both beat the target by more than 10x. Inversion is Fermat (`a^(p-2)`), which
+reuses `mont_mul` rather than needing a second algorithm on a second representation.
+
+Result, same machine, same vectors:
+
+| | `BigInt` field | `Felem` field | |
+|---|---|---|---|
+| one verify | 252 ms | **5.40 ms** | **46.7x** |
+| 484-vector suite | 69.5 s | **1.37 s** | 51x |
+| vs pure Python, same algorithm (2.66 ms) | 95x slower | **2.0x slower** | |
+
+**The next bottleneck is no longer the field.** `modular.mod_inv` mod *n* — the one scalar
+inversion a verify still does on `BigInt` — is **1.11 ms**, now 21% of the total. A second
+Montgomery field for `n` would remove most of it. Shamir's trick on the two scalar
+multiplications is a further ~⅓, independent of that. Neither is done.
+
+The public API did not change, exactly as this section originally predicted the escalation would
+not. `BigInt` survives at the boundary, where keys and signatures are parsed; scalars stay
+`BigInt` because they are not field elements.
 
 **Constants are top-level `let`, not nullary `fn`.** A `let` is evaluated once for the process; a
 nullary `fn` re-runs its body at every call. For a body LLVM can fold this is free — which is why
@@ -870,9 +907,14 @@ A rejected public key in that suite **panics** rather than answering `false`. Ev
 would leave all 310 rejection cases passing while only the 174 accepting ones failed, which points
 the reader at the wrong function.
 
-This suite costs **70 s**, which is the single largest test file in the tree. Splitting it behind
-its own `just` gate was considered and not done: the rejections are the security argument, and a
-gate that is not part of `just test` is a gate that rots.
+This suite cost **70 s** against the `BigInt` field and costs **1.37 s** against `Felem`.
+Splitting it behind its own `just` gate was considered when it was the slow version and rejected —
+the rejections are the security argument, and a gate that is not part of `just test` is a gate
+that rots. At 1.37 s the question no longer arises.
+
+It also did the job it was built for. The entire field arithmetic was replaced underneath it —
+representation, multiplication algorithm, and inversion — and the suite is what made that safe to
+attempt in one step.
 
 ## 11. Spec/docs status
 
