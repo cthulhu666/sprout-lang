@@ -753,7 +753,7 @@ fn type_expr_head_name(te: ast.TypeExpr) -> String =
   match te with
   | ast.TypeName name -> name
   | ast.TypeApply base _ -> type_expr_head_name(base)
-  | ast.TypeArrow _ _ _ -> "Fn"
+  | ast.TypeArrow _ _ _ _ -> "Fn"
   | ast.TypeThunk _ _ -> "Fn"
   | ast.TypeEffect _ _ -> "Eff"
   | ast.TupleType items -> "Tuple" ++ int_to_string(list_length(items))
@@ -784,8 +784,9 @@ fn mangle_type_expr(te: ast.TypeExpr) -> String =
   | ast.TypeName name -> qualified_head(name)
   | ast.TypeApply base arg ->
       mangle_type_expr(base) ++ "_" ++ mangle_type_expr(arg)
-  | ast.TypeArrow l r effects_maybe ->
+  | ast.TypeArrow l r effects_maybe mode ->
       "Fn_" ++ mangle_type_expr(l) ++ "_" ++ mangle_type_expr(r) ++ mangle_effects_suffix(effects_maybe)
+        ++ mangle_mode_suffix(mode)
   # `Fn0_`, not `Fn_Unit_`: `() -> T` and `Unit -> T` are different types and must
   # not collide in a mangled symbol.
   | ast.TypeThunk r effects_maybe ->
@@ -797,6 +798,15 @@ fn mangle_effects_suffix(effects_maybe: Maybe (List String)) -> String =
   match effects_maybe with
   | Nothing -> ""
   | Just effs -> "_eff_" ++ string.join("_", effs)
+
+# Keyed on OWNERSHIP, not on the written mode: an unmarked arrow and a
+# `consuming` one are the same type, so giving them different symbols would
+# rename every existing mangled name for no distinction. Only `borrowing` and
+# `once` are genuinely different types and earn a suffix.
+fn mangle_mode_suffix(mode: ast.ParamMode) -> String =
+  if ast.mode_is_borrowing(mode) then "_borrow"
+  else if ast.mode_is_once(mode) then "_once"
+  else ""
 
 # ---------------------------------------------------------------------------
 # Eta-expansion of class methods in value position
@@ -1017,8 +1027,9 @@ fn type_to_eta_typeexpr(t: types.Type) -> ast.TypeExpr =
   | types.TConst name -> ast.TypeName(types.type_id_name(name))
   | types.TVar name -> ast.TypeName(types.tyvar_identity(name))
   | types.TApp base arg -> ast.TypeApply(type_to_eta_typeexpr(base), type_to_eta_typeexpr(arg))
-  | types.TFunc param ret _ _ ->
-      ast.TypeArrow(type_to_eta_typeexpr(param), type_to_eta_typeexpr(ret), Nothing)
+  | types.TFunc param ret _ own ->
+      ast.TypeArrow(type_to_eta_typeexpr(param), type_to_eta_typeexpr(ret), Nothing,
+        ast.mode_of_flags(types.ownership_is_borrow(own), types.ownership_is_once(own)))
   | types.TThunk ret _ -> ast.TypeThunk(type_to_eta_typeexpr(ret), Nothing)
   | types.TTuple items -> ast.TupleType(list_map(\item -> type_to_eta_typeexpr(item), items))
 
@@ -1722,8 +1733,8 @@ fn substitute_type_expr(te: ast.TypeExpr, subs: Dict ast.TypeExpr) -> ast.TypeEx
       | Nothing -> te
   | ast.TypeApply base arg ->
       ast.TypeApply(substitute_type_expr(base, subs), substitute_type_expr(arg, subs))
-  | ast.TypeArrow from_ to_ effs ->
-      ast.TypeArrow(substitute_type_expr(from_, subs), substitute_type_expr(to_, subs), effs)
+  | ast.TypeArrow from_ to_ effs mode ->
+      ast.TypeArrow(substitute_type_expr(from_, subs), substitute_type_expr(to_, subs), effs, mode)
   | ast.TypeThunk to_ effs ->
       ast.TypeThunk(substitute_type_expr(to_, subs), effs)
   | ast.TupleType items ->

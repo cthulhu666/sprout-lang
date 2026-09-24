@@ -1,0 +1,18 @@
+module main
+
+# The guarantee a `(borrowing File) -> Int` annotation buys: the callee may not
+# consume. `release` eats its argument, so it cannot stand in for a borrowing
+# arrow — if it could, `with_file` would release a File the work function had
+# already destroyed.
+
+type linear File = File Int
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn with_file(n: Int, work: (borrowing File) -> Int) -> Int =
+  do
+    let f = File(n)
+    let r = work(f)
+    r + release(f)
+
+fn main() -> Unit !{IO} = print(to_string(with_file(1, release)))

@@ -43,7 +43,7 @@ export fn ctor_field_kind(te: ast.TypeExpr) -> String =
         match str_char_at(string.after_last_dot(name), 0) with
         | Nothing -> "_"
         | Just ch -> if char_is_uppercase(ch) then "p" else "_"
-  | ast.TypeArrow _ _ _ -> "p"
+  | ast.TypeArrow _ _ _ _ -> "p"
   | ast.TypeThunk _ _ -> "p"
   | ast.TypeApply _ _ -> "p"
   | ast.TypeEffect inner _ -> ctor_field_kind(inner)

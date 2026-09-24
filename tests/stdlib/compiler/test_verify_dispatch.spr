@@ -22,7 +22,7 @@ fn t_fst_fn() -> types.Type = types.TFunc(t_pair_ii(), t_int(), types.EffectPure
 fn t_vec_pair() -> types.Type = types.TApp(types.TConst(types.type_id("Vec")), t_pair_ii())
 
 # Declared params of vec_sort_by: `(a -> k)` and `Vec a`, in source names.
-fn te_proj() -> ast.TypeExpr = ast.TypeArrow(ast.TypeName("a"), ast.TypeName("k"), Nothing)
+fn te_proj() -> ast.TypeExpr = ast.TypeArrow(ast.TypeName("a"), ast.TypeName("k"), Nothing, ast.ModeDefault)
 fn te_vec_a() -> ast.TypeExpr = ast.TypeApply(ast.TypeName("Vec"), ast.TypeName("a"))
 
 fn ord_k() -> ast.TypeConstraint = ast.TypeConstraint("Ord", [ast.TypeName("k")])

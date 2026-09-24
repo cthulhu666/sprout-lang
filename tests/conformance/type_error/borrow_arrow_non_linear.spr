@@ -1,0 +1,13 @@
+module main
+
+# A modifier inside an arrow obeys the rule it obeys on a declared parameter:
+# `borrowing` is meaningless on a non-linear type, because Sprout erases the
+# modifiers before IR and the GC owns memory. Rejected where it is WRITTEN — an
+# arrow used to be the one position where such a modifier survived to surface as
+# an unrelated mismatch at some call site, if at all.
+
+type linear File = File Int
+
+fn apply(g: (borrowing Int) -> Int) -> Int = g(1)
+
+fn main() -> Unit !{IO} = print(to_string(apply(\n -> n)))

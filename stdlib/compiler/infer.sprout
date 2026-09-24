@@ -160,11 +160,12 @@ export fn type_from_ast(te: ast.TypeExpr, local_vars: Dict types.Type) -> types.
   match te with
   | ast.TypeName name -> lookup_type_var(name, local_vars)
   | ast.TypeApply base arg -> type_apply_from_ast(base, arg, local_vars)
-  | ast.TypeArrow param ret effs ->
-      # An ANNOTATED arrow type means consuming: arrow-type syntax cannot yet
-      # spell `borrowing` (deferred — see BACKLOG "modifiers in arrow types"), so
-      # there is nothing here to read. Passing a borrowing function to such an
-      # annotation is therefore a mode mismatch, and its message says so.
+  | ast.TypeArrow param ret effs mode ->
+      # An UNMARKED arrow means consuming, which is what every arrow meant before
+      # `(borrowing T) -> R` was spellable; `mode` is ModeDefault there and maps
+      # to OwnConsume. A marked one says how the callee takes its parameter, so
+      # passing a borrowing function to a consuming annotation stays a mode
+      # mismatch — it is now a mismatch the author can fix by writing the mode.
       #
       # `effs` was discarded here until 2026-08-16, which is why a parameter
       # written `f: a -> Unit !{e}` typed as a plain `a -> Unit`: the parser has
@@ -172,7 +173,8 @@ export fn type_from_ast(te: ast.TypeExpr, local_vars: Dict types.Type) -> types.
       # annotation onto the arrow it is building, so `a -> b -> C !{IO}` puts it
       # on the INNERMOST arrow), and inference threw it away one step later.
       types.TFunc(type_from_ast(param, local_vars), type_from_ast(ret, local_vars),
-        effect_from_maybe_labels(effs), types.OwnConsume)
+        effect_from_maybe_labels(effs),
+        types.ownership_of_mode(ast.mode_is_borrowing(mode), ast.mode_is_once(mode)))
   # No parameter, so no ownership to read — the two fields TFunc carries for one.
   | ast.TypeThunk ret effs ->
       types.TThunk(type_from_ast(ret, local_vars), effect_from_maybe_labels(effs))
@@ -496,7 +498,7 @@ export fn te_type_names(te: ast.TypeExpr, acc: List String) -> List String =
   match te with
   | ast.TypeName n -> Cons(n, acc)
   | ast.TypeApply l r -> te_type_names(l, te_type_names(r, acc))
-  | ast.TypeArrow p r _ -> te_type_names(p, te_type_names(r, acc))
+  | ast.TypeArrow p r _ _ -> te_type_names(p, te_type_names(r, acc))
   | ast.TypeThunk r _ -> te_type_names(r, acc)
   | ast.TypeEffect inner _ -> te_type_names(inner, acc)
   | ast.TupleType parts -> te_type_names_list(parts, acc)
@@ -603,7 +605,7 @@ fn collect_te_vars(te: ast.TypeExpr, acc: List String) -> List String =
       if is_lowercase_name(name) then list_add_unique(name, acc) else acc
   | ast.TypeApply base arg ->
       collect_te_vars(arg, collect_te_vars(base, acc))
-  | ast.TypeArrow param ret _ ->
+  | ast.TypeArrow param ret _ _ ->
       collect_te_vars(ret, collect_te_vars(param, acc))
   | ast.TypeThunk ret _ -> collect_te_vars(ret, acc)
   | ast.TypeEffect inner _ -> collect_te_vars(inner, acc)
@@ -2035,7 +2037,7 @@ fn type_expr_stores(p: String, te: ast.TypeExpr) -> Bool =
   match te with
   | ast.TypeName n -> n == p
   | ast.TypeApply f x -> type_expr_stores(p, f) || type_expr_stores(p, x)
-  | ast.TypeArrow _ _ _ -> false
+  | ast.TypeArrow _ _ _ _ -> false
   | ast.TypeThunk _ _ -> false
   | ast.TypeEffect inner _ -> type_expr_stores(p, inner)
   | ast.TupleType items -> type_exprs_store(p, items)
@@ -3300,7 +3302,7 @@ fn head_token_for(te: ast.TypeExpr, binders: List String) -> String =
   match te with
   | ast.TypeName v -> constraint_var_token(v, binders)
   | ast.TypeApply _ _ -> compound_head_token(te, binders)
-  | ast.TypeArrow _ _ _ -> "#none"
+  | ast.TypeArrow _ _ _ _ -> "#none"
   | ast.TypeThunk _ _ -> "#none"
   | ast.TypeEffect _ _ -> "#none"
   | ast.TupleType _ -> "#none"
@@ -3337,7 +3339,7 @@ fn arg_token_or_wild(a: ast.TypeExpr, binders: List String) -> String =
   match a with
   | ast.TypeName v -> constraint_var_token(v, binders)
   | ast.TypeApply _ _ -> "#any"
-  | ast.TypeArrow _ _ _ -> "#any"
+  | ast.TypeArrow _ _ _ _ -> "#any"
   | ast.TypeThunk _ _ -> "#any"
   | ast.TypeEffect _ _ -> "#any"
   | ast.TupleType _ -> "#any"
@@ -7039,7 +7041,7 @@ fn validate_te(te: ast.TypeExpr, decl_name: String, declared: List String) -> Ma
       match validate_te(left, decl_name, declared) with
       | Just e -> Just(e)
       | Nothing -> validate_te(right, decl_name, declared)
-  | ast.TypeArrow param ret _ ->
+  | ast.TypeArrow param ret _ _ ->
       match validate_te(param, decl_name, declared) with
       | Just e -> Just(e)
       | Nothing -> validate_te(ret, decl_name, declared)
@@ -7233,7 +7235,7 @@ fn alias_uses_in_te(te: ast.TypeExpr, arities: Dict Int) -> Maybe String =
   match te with
   | ast.TypeName name -> alias_arity_error(name, 0, arities)
   | ast.TypeApply _ _ -> alias_uses_in_apply(te, type_spine(te, Nil), arities)
-  | ast.TypeArrow p r _ ->
+  | ast.TypeArrow p r _ _ ->
       match alias_uses_in_te(p, arities) with
       | Just e -> Just(e)
       | Nothing -> alias_uses_in_te(r, arities)
@@ -7645,7 +7647,7 @@ fn instance_head_problem(te: ast.TypeExpr) -> Maybe String =
       if is_lowercase_name(n) then Just("the type variable `" ++ n ++ "`") else Nothing
   | ast.TypeApply base _ -> instance_head_problem(base)
   | ast.TypeEffect inner _ -> instance_head_problem(inner)
-  | ast.TypeArrow _ _ _ -> Just("a function type")
+  | ast.TypeArrow _ _ _ _ -> Just("a function type")
   | ast.TypeThunk _ _ -> Just("a function type")
   | ast.TupleType _ -> Nothing
 
@@ -7987,7 +7989,7 @@ fn head_spine(te: ast.TypeExpr, depth: Int) -> (String, Int) =
   match te with
   | ast.TypeName name -> (name, depth)
   | ast.TypeApply base _ -> head_spine(base, depth + 1)
-  | ast.TypeArrow _ _ _ -> ("", depth)
+  | ast.TypeArrow _ _ _ _ -> ("", depth)
   | ast.TypeThunk _ _ -> ("", depth)
   | ast.TypeEffect _ _ -> ("", depth)
   | ast.TupleType _ -> ("", depth)
@@ -8206,7 +8208,7 @@ fn type_expr_text(te: ast.TypeExpr) -> String =
   match te with
   | ast.TypeName n -> string.after_last_dot(n)
   | ast.TypeApply base arg -> type_expr_text(base) ++ " " ++ type_expr_text(arg)
-  | ast.TypeArrow _ _ _ -> "_"
+  | ast.TypeArrow _ _ _ _ -> "_"
   | ast.TypeThunk _ _ -> "_"
   | ast.TypeEffect _ _ -> "_"
   | ast.TupleType _ -> "_"
