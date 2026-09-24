@@ -1,0 +1,19 @@
+module main
+
+# A non-parametric declaration storing a linear type is a container too. Before
+# containment read a declaration's FIELDS, only a type ARGUMENT counted, so the
+# parametric spelling `Box Res` was tracked and this one was not — and the
+# untracked spelling is the one a resource wrapper is naturally written in
+# (`type PgConnection = | PgConnection TcpConnection`).
+
+type linear Res = | Res Int
+type Box = | Box Res
+
+fn release(r: consuming Res) -> Int = match r with | Res n -> n
+fn unbox(b: Box) -> Res = match b with | Box r -> r
+
+fn main() -> Unit !{IO} =
+  do
+    let b = Box(Res(1))
+    print(to_string(release(unbox(b))))
+    print(to_string(release(unbox(b))))

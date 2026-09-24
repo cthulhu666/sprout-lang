@@ -1,0 +1,13 @@
+module main
+
+# The leak half of the concrete-field gap: the wrapper is built and dropped, so
+# the Res inside it is never released. The diagnostic must name `Res`, not the
+# wrapper the author wrote.
+
+type linear Res = | Res Int
+type Box = | Box Res
+
+fn main() -> Unit !{IO} =
+  do
+    let b = Box(Res(1))
+    print("done")

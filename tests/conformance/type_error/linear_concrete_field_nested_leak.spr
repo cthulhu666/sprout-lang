@@ -1,0 +1,14 @@
+module main
+
+# Containment through TWO non-linear declarations. The happy-path counterpart in
+# tests/stdlib/test_linear_binders.spr compiles either way, so only this proves
+# the stored-field walk recurses rather than stopping one declaration deep.
+
+type linear Res = | Res Int
+type Mid = | Mid Res
+type Outer = | Outer Mid
+
+fn main() -> Unit !{IO} =
+  do
+    let o = Outer(Mid (Res(1)))
+    print("done")

@@ -1154,19 +1154,56 @@ fn discardable_type(t: types.Type, env: Dict types.Scheme) -> Bool =
 # Does NOT descend into a function type: `Unit -> File` is a recipe for a
 # resource, not a resource, and discarding one leaks nothing.
 fn first_linear_in(t: types.Type, env: Dict types.Scheme) -> Maybe types.Type =
+  first_linear_seen(t, env, dict_empty())
+
+# `seen` holds the declaration names already opened on this walk. A declaration
+# may store its own type (`type Nest = | Leaf | Nest2 Nest`) or a cycle of them,
+# and a stored-field walk without it does not terminate.
+fn first_linear_seen(t: types.Type, env: Dict types.Scheme,
+                     seen: Dict Bool) -> Maybe types.Type =
   if type_is_linear(t, env) then Just(t)
   else
     match t with
-    | types.TApp _ _ -> first_linear_in_args(head_type_name(t), 0, app_spine_args(t), env)
-    | types.TTuple items -> first_linear_in_list(items, env)
-    # The four non-descending answers, spelled out rather than left to a
+    # Both halves of containment, in the order that keeps the diagnostic useful:
+    # a type ARGUMENT names a linear type the author wrote at the application, so
+    # prefer it over one buried in the declaration's concrete fields.
+    | types.TApp _ _ ->
+        match first_linear_in_args(head_type_name(t), 0, app_spine_args(t), env, seen) with
+        | Just found -> Just(found)
+        | Nothing -> first_linear_in_stored(head_type_name(t), env, seen)
+    | types.TConst _ -> first_linear_in_stored(head_type_name(t), env, seen)
+    | types.TTuple items -> first_linear_in_list(items, env, seen)
+    # The three non-descending answers, spelled out rather than left to a
     # catch-all (docs/guidelines.md §2a): each is a decision, and a type variant
     # added later would silently inherit "holds no linear value" — the exact
-    # shape of the phantom bug this walk was just fixed for.
-    | types.TConst _ -> Nothing  # the head; already asked above
+    # shape of the phantom bug this walk was once fixed for.
     | types.TVar _ -> Nothing  # universe unknown; see §5.8 on type variables
     | types.TFunc _ _ _ _ -> Nothing  # a recipe for a resource, not a resource
     | types.TThunk _ _ -> Nothing  # likewise: nothing is held until it is forced
+
+# The concrete half of containment: what the DECLARATION stores, which a type
+# application never mentions. `type Box = | Box Res` has no argument to walk, so
+# before this a wrapper around a linear resource was not a container at all.
+fn first_linear_in_stored(tname: String, env: Dict types.Scheme,
+                          seen: Dict Bool) -> Maybe types.Type =
+  match dict_get(tname, seen) with
+  | Just _ -> Nothing
+  | Nothing ->
+      first_linear_in_list(stored_field_types(tname, env), env, dict_set(tname, true, seen))
+
+# Mirrors infer.stored_fields_marker, respelled for the same reason
+# param_is_phantom is (the infer <-> linear_check cycle); the two must agree and
+# only behaviour says so. A type with no marker stores nothing this walk can see
+# — an extern or C-runtime type, or a declaration with no fields.
+fn stored_field_types(tname: String, env: Dict types.Scheme) -> List types.Type =
+  match dict_get("@stores:" ++ tname, env) with
+  | Nothing -> Nil
+  | Just scheme ->
+      match scheme with
+      | types.Scheme _ _ body _ _ ->
+          match body with
+          | types.TTuple items -> items
+          | _ -> Nil
 
 # The arguments of a type application in DECLARATION order. `TApp` nests to the
 # left, so the spine is unwound and re-appended; the index is what lets the
@@ -1184,15 +1221,16 @@ fn app_spine_args(t: types.Type) -> List types.Type =
 # that does. Before this, every phantom position was descended blindly and the
 # leak diagnostic named a linear type the value provably does not hold.
 fn first_linear_in_args(tname: String, idx: Int, args: List types.Type,
-                        env: Dict types.Scheme) -> Maybe types.Type =
+                        env: Dict types.Scheme, seen: Dict Bool) -> Maybe types.Type =
   match args with
   | Nil -> Nothing
   | Cons a rest ->
-      if param_is_phantom(tname, idx, env) then first_linear_in_args(tname, idx + 1, rest, env)
+      if param_is_phantom(tname, idx, env) then
+        first_linear_in_args(tname, idx + 1, rest, env, seen)
       else
-        match first_linear_in(a, env) with
+        match first_linear_seen(a, env, seen) with
         | Just found -> Just(found)
-        | Nothing -> first_linear_in_args(tname, idx + 1, rest, env)
+        | Nothing -> first_linear_in_args(tname, idx + 1, rest, env, seen)
 
 # Mirrors infer.phantom_param_marker, respelled rather than imported for the same
 # reason type_is_linear is (the infer <-> linear_check cycle). The two spellings
@@ -1204,13 +1242,14 @@ fn param_is_phantom(tname: String, idx: Int, env: Dict types.Scheme) -> Bool =
   | Just _ -> true
   | Nothing -> false
 
-fn first_linear_in_list(ts: List types.Type, env: Dict types.Scheme) -> Maybe types.Type =
+fn first_linear_in_list(ts: List types.Type, env: Dict types.Scheme,
+                        seen: Dict Bool) -> Maybe types.Type =
   match ts with
   | Nil -> Nothing
   | Cons t rest ->
-      match first_linear_in(t, env) with
+      match first_linear_seen(t, env, seen) with
       | Just found -> Just(found)
-      | Nothing -> first_linear_in_list(rest, env)
+      | Nothing -> first_linear_in_list(rest, env, seen)
 
 fn type_mentions_linear(t: types.Type, env: Dict types.Scheme) -> Bool =
   match first_linear_in(t, env) with

@@ -89,6 +89,54 @@ fn boxed_used_once(n: Int) -> Int =
   let b = Box(File(n))
   in match b with | Box f -> use_file(f)
 
+# A NON-PARAMETRIC container: the field is concrete, so there is no type argument
+# to walk and containment has to read what the declaration stores. `Crate` is the
+# shape a resource wrapper is naturally written in, and the one that used to be
+# untracked — the leak and reuse counterparts are
+# tests/conformance/type_error/linear_concrete_field_*.
+type Crate =
+  | Crate File
+
+fn crate_used_once(n: Int) -> Int =
+  let c = Crate(File(n))
+  in match c with | Crate f -> use_file(f)
+
+# Two declarations deep, neither of them linear itself.
+type Inner =
+  | Inner File
+
+type Outer =
+  | Outer Inner
+
+fn nested_crate_used_once(n: Int) -> Int =
+  let o = Outer(Inner (File(n)))
+  in match o with | Outer i -> match i with | Inner f -> use_file(f)
+
+# A `wrap` over a linear type stores it just as a constructor field does.
+wrap Sealed = File
+
+fn sealed_used_once(n: Int) -> Int =
+  let s = Sealed(File(n))
+  in match s with | Sealed f -> use_file(f)
+
+# A declaration may store ITSELF, or cycle through a sibling. The stored-field
+# walk keeps a visited set so these terminate; before it there was nothing to
+# descend and the question never arose.
+type Chain =
+  | End Int
+  | Link Chain
+
+type Ping =
+  | Ping Pong
+
+type Pong =
+  | Pong Ping
+
+fn chain_depth(c: Chain) -> Int =
+  match c with
+  | End n -> n
+  | Link inner -> chain_depth(inner) + 1
+
 # The same shape through a do-block `let`, which is a separate binder path
 # (lin_do_let) from the pattern one.
 fn do_let_container_once(n: Int) -> Maybe Int =
@@ -211,6 +259,10 @@ fn main() -> Unit !{IO} =
     check_eq("Maybe of a linear, used once", container_used_once(7), 7),
     check_eq("tuple holding a linear, used once", tuple_used_once(8), 18),
     check_eq("user ADT holding a linear, used once", boxed_used_once(9), 9),
+    check_eq("concrete linear field, used once", crate_used_once(23), 23),
+    check_eq("concrete linear field two declarations deep", nested_crate_used_once(24), 24),
+    check_eq("a wrap over a linear, used once", sealed_used_once(25), 25),
+    check_eq("a self-recursive declaration terminates", chain_depth(Link (End(26))), 27),
     check_eq("do-let List of a linear, used once", do_let_container_once(10), Just(10)),
     check_eq("a function returning a linear is not a resource", recipe_is_not_a_resource(11), 11),
     check_eq("a bare linear ctor as a value is not a resource", ctor_value_is_not_a_resource(12), 12),
