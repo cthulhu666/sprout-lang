@@ -1013,6 +1013,15 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
 
 ### 7.5) Type Classes
 
+- [ ] `P3` **Adding a stdlib instance for a builtin type breaks downstream duplicates, unrecorded.**
+  A module with its own `instance Eq Bytes` stopped compiling at 2c3924f7 — `Overlapping instances
+  for Eq`, pointed at the user's declaration, not at the stdlib that now also supplies one. It
+  fires transitively, since `stdlib.net`/`http_client`/`http_server` all pull in `stdlib.bytes`.
+  `docs/eq-ord-double-v0.md` §Compatibility is the precedent: it names the duplicate-instance break
+  as the one way this lands and records the check against `uncharted-suns`. That check was run for
+  `Eq Bytes` (clean) but written down nowhere. Make it a step: every new instance on a builtin type
+  records the downstream check and its result, and the diagnostic should name the competing module.
+
 - [ ] `P2` **The hidden-dictionary key cannot tell two same-class constraints apart.** It is class
   name plus the outermost constructor of each argument (`lowering.constraint_key_str`), so
   `where Boxed (Tagged k), Boxed (Tagged j)` is one slot for two obligations — the caller passes two
