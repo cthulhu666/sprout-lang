@@ -903,7 +903,7 @@ deliberate bump rather than as upstream drift, and it asserts the group shape (s
 SHA-256, 65-byte uncompressed key, no `acceptable` result tier) rather than assuming it.
 
 A rejected public key in that suite **panics** rather than answering `false`. Every one of the
-113 keys is on the curve, so a rejection is a bug in `public_key` — and reporting it as `false`
+111 keys is on the curve, so a rejection is a bug in `public_key` — and reporting it as `false`
 would leave all 310 rejection cases passing while only the 174 accepting ones failed, which points
 the reader at the wrong function.
 

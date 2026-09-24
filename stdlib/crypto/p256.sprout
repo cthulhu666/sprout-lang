@@ -38,9 +38,9 @@ export wrap PublicKey = (bigint.BigInt, bigint.BigInt)
 type Felem =
   | Felem Int Int Int Int Int Int Int Int Int Int
 
-# The CIOS accumulator: ten limbs plus the one the inner pass carries into.
+# The CIOS accumulator: ten limbs like `Felem`, but below 2p rather than below p.
 type Acc =
-  | Acc Int Int Int Int Int Int Int Int Int Int Int
+  | Acc Int Int Int Int Int Int Int Int Int Int
 
 # --- field arithmetic ---
 #
@@ -56,7 +56,7 @@ type Acc =
 # random pairs against the Python reference.
 fn cios_step(t: Acc, a: Felem, bi: Int) -> Acc =
   match t with
-  | Acc t0 t1 t2 t3 t4 t5 t6 t7 t8 t9 t10 ->
+  | Acc t0 t1 t2 t3 t4 t5 t6 t7 t8 t9 ->
       match a with
       | Felem a0 a1 a2 a3 a4 a5 a6 a7 a8 a9 ->
           let v0 = t0 + a0 * bi
@@ -89,7 +89,6 @@ fn cios_step(t: Acc, a: Felem, bi: Int) -> Acc =
               v9 = t9 + a9 * bi + c8
               u9 = bit_and(v9, 67108863)
               c9 = bit_shr(v9, 26)
-              u10 = t10 + c9
               m = u0
               w0 = u0 + m * 67108863
               d0 = bit_shr(w0, 26)
@@ -120,8 +119,8 @@ fn cios_step(t: Acc, a: Felem, bi: Int) -> Acc =
               w9 = u9 + m * 4194303 + d8
               r8 = bit_and(w9, 67108863)
               d9 = bit_shr(w9, 26)
-              r9 = u10 + d9
-          in Acc(r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, 0)
+              r9 = c9 + d9
+          in Acc(r0, r1, r2, r3, r4, r5, r6, r7, r8, r9)
 
 # a - p when that does not go negative, a otherwise. The CIOS tail leaves a value
 # below 2p, so one of these normalises it --- verified, the worst case observed is 1.
@@ -197,7 +196,6 @@ fn felem_add(a: Felem, b: Felem) -> Felem =
               c8 = bit_shr(s8, 26)
               s9 = a9 + b9 + c8
               r9 = bit_and(s9, 67108863)
-              c9 = bit_shr(s9, 26)
           in sub_p_if_ge(Felem(r0, r1, r2, r3, r4, r5, r6, r7, r8, r9))
 
 # On a borrow out of the top limb the difference is negative, and adding p back lands
@@ -267,7 +265,6 @@ fn felem_sub(a: Felem, b: Felem) -> Felem =
               e8 = bit_shr(g8, 26)
               g9 = r9 + k9 * 4194303 + e8
               f9 = bit_and(g9, 67108863)
-              e9 = bit_shr(g9, 26)
           in Felem(f0, f1, f2, f3, f4, f5, f6, f7, f8, f9)
 
 fn felem_eq(a: Felem, b: Felem) -> Bool =
@@ -311,7 +308,7 @@ fn felem_limb(a: Felem, index: Int) -> Int =
 fn mont_mul(a: Felem, b: Felem) -> Felem =
   match b with
   | Felem b0 b1 b2 b3 b4 b5 b6 b7 b8 b9 ->
-      let z = Acc(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+      let z = Acc(0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
           s0 = cios_step(z, a, b0)
           s1 = cios_step(s0, a, b1)
           s2 = cios_step(s1, a, b2)
@@ -323,7 +320,7 @@ fn mont_mul(a: Felem, b: Felem) -> Felem =
           s8 = cios_step(s7, a, b8)
           s9 = cios_step(s8, a, b9)
       in match s9 with
-         | Acc q0 q1 q2 q3 q4 q5 q6 q7 q8 q9 q10 -> sub_p_if_ge(Felem(q0, q1, q2, q3, q4, q5, q6, q7, q8, q9))
+         | Acc q0 q1 q2 q3 q4 q5 q6 q7 q8 q9 -> sub_p_if_ge(Felem(q0, q1, q2, q3, q4, q5, q6, q7, q8, q9))
 
 let felem_zero = Felem(0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
@@ -380,7 +377,9 @@ fn bits26(raw: Bytes, offset: Int) -> Int =
 # anything at or above the prime, and every other source is already reduced.
 fn felem_of_bigint(value: bigint.BigInt) -> Felem =
   match bigint.to_bytes_be(value, 32) with
-  | Nothing -> felem_zero
+  # Unreachable, and a panic rather than a zero so it stays that way: a silent
+  # `felem_zero` would hand a caller a valid-looking key built from a rejected value.
+  | Nothing -> panic("p256: felem_of_bigint on a value outside [0, p)")
   | Just raw ->
       Felem(bits26(raw, 0), bits26(raw, 26), bits26(raw, 52), bits26(raw, 78),
             bits26(raw, 104), bits26(raw, 130), bits26(raw, 156), bits26(raw, 182),
