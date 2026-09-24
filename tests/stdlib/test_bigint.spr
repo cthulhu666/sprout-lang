@@ -14,6 +14,40 @@ fn parse(raw: String) -> big.BigInt =
 fn p256_prime() -> big.BigInt =
   parse("115792089210356248762697446949407573530086143415290314195533631308867097853951")
 
+# `width` bytes: `lead` zeros, then bytes counting up from `first`. Halved rather
+# than appended one at a time --- `bytes.builder_append` copies both sides.
+fn fill_go(low: Int, high: Int, lead: Int, first: Int) -> Builder =
+  if high <= low then bytes.builder_empty()
+  else if high - low == 1 then
+    bytes.builder_byte(if low < lead then 0 else first + low - lead)
+  else
+    let middle = low + (high - low) / 2
+    in bytes.builder_append(fill_go(low, middle, lead, first),
+                            fill_go(middle, high, lead, first))
+
+fn fill(width: Int, lead: Int, first: Int) -> Bytes =
+  bytes.builder_build(fill_go(0, width, lead, first))
+
+fn bytes_eq_go(a: Bytes, b: Bytes, index: Int, total: Int) -> Bool =
+  if index >= total then true
+  else if bytes.get(a, index) != bytes.get(b, index) then false
+  else bytes_eq_go(a, b, index + 1, total)
+
+fn bytes_eq(a: Bytes, b: Bytes) -> Bool =
+  bytes.length(a) == bytes.length(b) && bytes_eq_go(a, b, 0, bytes.length(a))
+
+# from_bytes_be then to_bytes_be at the same width must be the identity.
+fn roundtrips_at(width: Int) -> Bool =
+  let original = fill(width, 0, 1)
+  in match big.to_bytes_be(big.from_bytes_be(original), width) with
+     | Nothing -> false
+     | Just out -> bytes_eq(original, out)
+
+fn roundtrips_to(width: Int) -> Bool =
+  if width <= 0 then true
+  else if ! roundtrips_at (width) then false
+  else roundtrips_to(width - 1)
+
 fn min_int() -> Int = -9223372036854775808
 
 fn max_int() -> Int = 9223372036854775807
@@ -210,5 +244,28 @@ fn main() -> Unit !{IO} =
              Just(-3)),
     check_eq("shr past the top is zero", big.to_string(big.shr(big.from_int(255), 99)), "0"),
     check_eq("shl by zero", big.to_int(big.shl(big.from_int(7), 0)), Just(7)),
-    check_eq("shr by zero", big.to_int(big.shr(big.from_int(7), 0)), Just(7))
+    check_eq("shr by zero", big.to_int(big.shr(big.from_int(7), 0)), Just(7)),
+
+    # --- from_bytes_be ---
+    #
+    # Limbs are packed straight out of the bytes, so the width decides where each
+    # 26-bit window falls: its byte offset cycles 0, 2, 4, 6, and past four bytes
+    # the window overhangs the end of the input and must read zeros.
+    check_true("from_bytes_be round-trips at every width to 40",
+               roundtrips_to(40)),
+    check_eq("from_bytes_be ignores leading zero bytes",
+             big.to_string(big.from_bytes_be(fill(9, 8, 5))), "5"),
+    check_eq("from_bytes_be of all-zero input is zero",
+             big.to_string(big.from_bytes_be(fill(7, 7, 0))), "0"),
+    check_eq("from_bytes_be of empty input is zero",
+             big.to_string(big.from_bytes_be(bytes.builder_build(bytes.builder_empty()))),
+             "0"),
+
+    # --- from_string: the scan is over bytes, the error names the codepoint ---
+    check_eq("from_string reports a non-ASCII digit by codepoint, not byte",
+             big.from_string("12é"), Err(big.BigIntBadDigit(2, "é"))),
+    check_eq("from_string rejects a non-ASCII first character",
+             big.from_string("é"), Err(big.BigIntBadDigit(0, "é"))),
+    check_eq("from_string still rejects a hex digit in decimal",
+             big.from_string("1f"), Err(big.BigIntBadDigit(1, "f")))
   ])

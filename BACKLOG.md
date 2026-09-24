@@ -1322,26 +1322,21 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   downstream of Milestone A — Sprout is self-hosted, so a Windows-native `sproutc` is itself a
   program whose runtime must already be ported. Also gates the `stdlib.path` V1 entry's Windows
   separator/drive-letter work.
-- [ ] `P2` **Reading an immutable `Vec` allocates a `Maybe` per element, and there is no pure way
-  out.** `vec_get`/`vec_get_or` route through `vector_get`, which boxes every read into a `Just`
-  (`runtime/sprout_runtime.c:8396`). The runtime already has the unboxed accessor —
-  `vector_get_direct` — but only `stdlib.mutable` declares it, and only as `!{IO}`, so pure
-  index-driven numeric code cannot reach it. Measured directly: ten limbs read and rebuilt cost
-  **19.7 ns** in a constructor of `Int` fields against **250 ns** through `vec_get_or` — a
-  **12.7x** gap that is pure boxing (`docs/bigint-v0.md` §9 Stage 4), and the reason
-  `stdlib/crypto/p256.sprout` abandoned `Vec` for its field. Nothing else can. The fix is a pure
-  `vec_get_direct` with its bounds behaviour decided — NOT a second declaration of the existing
-  extern with another effect row, since externs sit outside the module system and would conflict.
-- [ ] `P2` **`stdlib.math.bigint` grows super-linearly outside P-256 width.** Three low-severity
-  findings from the PR #344 ensemble review, unverified, same shape as the two `to_bytes_be`
-  defects fixed in it (`docs/bigint-v0.md` §9 Stage 2). `shl` bounds a negative count but not a
-  large one, so `shl(from_int(1), INT_MAX)` asks for 3.5e17 limbs and never returns — `shr_mag`
-  short-circuits the mirror case and `mul` refuses past 2047 limbs, so `shl` is the one entry
-  point with neither. `from_bytes_be` is O(n²): 0.1 / 0.4 / 1.3 s at 2000 / 4000 / 8000 bytes.
-  `from_string` is Θ(n²) in codepoint walks because `string.char_at_or` rescans from byte 0 — the
-  general case is the `str_slice` O(start) entry above, the local fix is the one
-  `stdlib/string.sprout` already applied to its trimming functions. None is reachable at the
-  32-byte widths Stage 4 uses, and a suite that tests only those widths cannot see any of them.
+- [ ] `P3` **An indexed `Vec` is far slower than an unboxed constructor, and the accessor is not
+  why.** A ten-limb read+rebuild costs **19.7 ns** on a constructor of `Int` fields against
+  **250 ns** on `Vec` (`docs/bigint-v0.md` §9 Stage 4) — the reason `stdlib/crypto/p256.sprout`
+  abandoned `Vec`. This entry used to blame `vec_get`'s `Just` box and propose an unboxed
+  accessor. That was built and measured: no gain (5M reads on a 100k `Vec`, 2 ns/read either
+  way — the allocator is a bump pointer and the boxes die immediately), so it was dropped rather
+  than landed. The real gap is representation — a scalar constructor is unboxed outright
+  (`type_is_non_heap_scalar`) while a `Vec` is a heap object behind a call — and no accessor
+  closes it. Reopen only with a measurement that indicts something specific.
+- [ ] `P3` **`bigint.from_string` is still quadratic in the digit count.** The codepoint walk is
+  gone — the scan is over bytes — but `mul_small(acc, radix)` per digit is O(limbs), so the
+  parse stays Θ(n²): 39 / 99 / 422 ms at 2000 / 4000 / 8000 decimal digits. Peeling seven digits
+  at a time into an `Int` and folding them in with one `mul_small` by 10^7 would divide the
+  bigint operations by seven without changing the shape; subquadratic needs divide-and-conquer.
+  Nothing reaches this at the 64-hex-digit widths crypto callers use.
 - [ ] `P3` **An ECDSA P-256 verify spends 21% of itself in one scalar inversion.** The field is
   now `Felem` (Montgomery, 26-bit limbs) and a verify is 5.4 ms, but `modular.mod_inv` mod *n* is
   still `BigInt` at **1.11 ms** (`docs/bigint-v0.md` §9 Stage 4). A second Montgomery field for

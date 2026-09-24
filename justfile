@@ -2594,7 +2594,8 @@ overflow-smoke: bootstrap-from-seed
   TMPD=$(mktemp -d /tmp/sprout_ovf_XXXXXX)
   trap 'rm -rf "$TMPD"' EXIT
   FIXTURES=(add_overflow sub_overflow mul_overflow neg_overflow int_min_div
-            abs_int_min pow_overflow range_count_span bigint_mul_ceiling)
+            abs_int_min pow_overflow range_count_span bigint_mul_ceiling
+            bigint_shl_ceiling)
   # Every case now pins a message substring; an empty string here would mean
   # exit-code-only, which int_min_div showed is unfalsifiable on x86-64.
   # abs_int_min/pow_overflow pin only "overflow": they gate docs/spec-v0.md
@@ -2611,6 +2612,7 @@ overflow-smoke: bootstrap-from-seed
     [pow_overflow]="overflow"
     [range_count_span]="range_count"
     [bigint_mul_ceiling]="bigint.mul"
+    [bigint_shl_ceiling]="bigint.shl"
   )
   for f in "${FIXTURES[@]}"; do
     FIXTURE="tests/overflow_smoke/$f.spr"
