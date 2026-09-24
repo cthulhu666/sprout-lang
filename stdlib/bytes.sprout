@@ -19,9 +19,11 @@ extern fn bytes_builder_u32_be(val: Int) -> Builder
 extern fn bytes_builder_append(a: Builder, b: Builder) -> Builder
 extern fn bytes_builder_build(b: Builder) -> Bytes
 
+# O(1): allocates a header with no data buffer.
 export fn empty() -> Bytes =
   bytes_empty()
 
+# O(1): allocates a 1-byte buffer. Traps on a value outside 0..255 rather than wrapping.
 export fn singleton(value: Int) -> Bytes =
   bytes_singleton(value)
 
@@ -91,12 +93,15 @@ export fn builder_empty() -> Builder =
 export fn builder_bytes(value: Bytes) -> Builder =
   bytes_builder_bytes(value)
 
+# O(1): one 1-byte chunk. Traps outside 0..255, unlike the two builders below, which wrap.
 export fn builder_byte(value: Int) -> Builder =
   bytes_builder_byte(value)
 
+# O(1): one 2-byte big-endian chunk. Each byte is taken mod 256, so a wider value wraps.
 export fn builder_u16_be(value: Int) -> Builder =
   bytes_builder_u16_be(value)
 
+# O(1): one 4-byte big-endian chunk. Each byte is taken mod 256, so a wider value wraps.
 export fn builder_u32_be(value: Int) -> Builder =
   bytes_builder_u32_be(value)
 
@@ -111,9 +116,13 @@ export fn builder_build(value: Builder) -> Bytes =
 fn mod_256(value: Int) -> Int =
   value - (value / 256) * 256
 
+# O(1): two singletons joined by an append, so three allocations for two bytes.
+# `builder_u16_be` produces the same bytes as one chunk when a packet is being assembled.
 export fn u16_be(value: Int) -> Bytes =
   append(singleton(mod_256(value / 256)), singleton(mod_256(value)))
 
+# O(1), but seven allocations for four bytes — four singletons and three appends.
+# Prefer `builder_u32_be` inside a builder chain.
 export fn u32_be(value: Int) -> Bytes =
   append(
     singleton(mod_256(value / 16777216)),
@@ -123,12 +132,14 @@ export fn u32_be(value: Int) -> Bytes =
     )
   )
 
+# O(1): two indexed reads. Nothing when `value` holds fewer than 2 bytes.
 export fn read_u16_be(value: Bytes) -> Maybe Int =
   do
     b0 <- get(value, 0)
     b1 <- get(value, 1)
     Just(b0 * 256 + b1)
 
+# O(1): four indexed reads. Nothing when `value` holds fewer than 4 bytes.
 export fn read_u32_be(value: Bytes) -> Maybe Int =
   do
     b0 <- get(value, 0)
@@ -137,10 +148,15 @@ export fn read_u32_be(value: Bytes) -> Maybe Int =
     b3 <- get(value, 3)
     Just(b0 * 16777216 + b1 * 65536 + b2 * 256 + b3)
 
-# O(1) indexed read defaulting to -1, so a scan can compare Ints instead of `Maybe Int`s. -1 is
-# outside the 0..255 byte range, so an out-of-bounds read can never compare equal to a real byte.
+# O(1), and allocation-free: matched directly so `bytes_get` reaches its CPR peephole. Handing the
+# `Maybe Int` to a function instead — `maybe_with_default(-1, ...)` — boxes one per byte read, which
+# is ~15x on a whole-buffer scan. Pinned by tests/stdlib/test_bytes_byte_at_unboxed.spr.
+#
+# -1 is outside the 0..255 byte range, so an out-of-bounds read never compares equal to a real byte.
 fn byte_at(value: Bytes, index: Int) -> Int =
-  maybe_with_default(-1, get(value, index))
+  match get(value, index) with
+  | Just b -> b
+  | Nothing -> -1
 
 fn matches_at(haystack: Bytes, needle: Bytes, at: Int, index: Int, needle_len: Int) -> Bool =
   if index >= needle_len then true
@@ -174,9 +190,13 @@ export fn find(haystack: Bytes, needle: Bytes) -> Maybe Int =
 where
   needle_len = length(needle)
 
-# Structural equality: lengths, then byte-for-byte via `find`'s inner loop at offset 0. It early-
-# exits, so it is not a constant-time compare. It lives here rather than in the prelude because the
-# prelude deliberately declares no bytes externs.
+# Structural equality: lengths, then byte-for-byte via `find`'s inner loop at offset 0.
+#
+# O(1) on a length mismatch, else O(|left|), allocation-free. It early-exits on the first differing
+# byte, so it is not a constant-time compare — do not use it on a secret-derived tag.
+#
+# It lives here rather than in the prelude because the prelude deliberately declares no bytes
+# externs.
 instance Eq Bytes
   fn eq(left: Bytes, right: Bytes) -> Bool =
     length(left) == length(right) && matches_at(left, right, 0, 0, length(left))

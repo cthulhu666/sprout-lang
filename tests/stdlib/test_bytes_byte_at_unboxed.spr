@@ -1,0 +1,100 @@
+import stdlib.test (TestState, new_state, assert_true, assert_false, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.lowering as lowering
+import stdlib.compiler.ast_to_ir as ast_to_ir
+import stdlib.compiler.ir_rooting as ir_rooting
+import stdlib.compiler.ir_lowering as ir_lowering
+import stdlib.compiler.typed_ast as typed_ast
+
+# Why `stdlib.bytes.byte_at` is spelled as a `match` and must stay that way.
+#
+# `bytes_get` is on ast_to_ir.unboxed_maybe_extern_name, but the peephole only fires on a DIRECT
+# `match <extern>(..)` with simple arms. Hand the `Maybe Int` to any real function first — as
+# `maybe_with_default(-1, get(value, index))` did — and the call falls back to the boxed
+# `sprout_make1(find_ctor_tag_by_name("Just"), ..)`, one heap allocation per byte read.
+#
+# That cost was invisible while `matches_at` only ever scanned a 1-4 byte delimiter for `find`.
+# `instance Eq Bytes` reuses the same loop over whole buffers, which made it ~15x: 40 compares of
+# two equal 1 MiB values went 1.96s -> 0.13s user when byte_at stopped allocating.
+#
+# This file pins the RULE, in both directions. The real `byte_at` body is pinned separately by the
+# golden IR corpus (tests/golden/ir/), which carries its emitted call site.
+
+let maybe_decl = "type Maybe a =\n  | Nothing\n  | Just a\n\n"
+
+let bytes_get_decl = "extern fn bytes_get(b: Bytes, i: Int) -> Maybe Int\n\n"
+
+# The shape byte_at had: the Maybe reaches a real function, so the peephole cannot fire.
+# `with_default` stands in for the prelude's `maybe_with_default`, which is out of scope here —
+# checker.typecheck_typed runs with an EMPTY environment, so the fixture declares what it uses.
+fn probe_via_helper() -> String =
+  maybe_decl
+    ++ "fn with_default(fallback: Int, m: Maybe Int) -> Int =\n"
+    ++ "  match m with\n"
+    ++ "  | Just v -> v\n"
+    ++ "  | Nothing -> fallback\n\n"
+    ++ bytes_get_decl
+    ++ "fn probe(b: Bytes, i: Int) -> Int =\n"
+    ++ "  with_default(0 - 1, bytes_get(b, i))\n"
+
+# The shape byte_at has.
+fn probe_via_match() -> String =
+  maybe_decl
+    ++ bytes_get_decl
+    ++ "fn probe(b: Bytes, i: Int) -> Int =\n"
+    ++ "  match bytes_get(b, i) with\n"
+    ++ "  | Just v -> v\n"
+    ++ "  | Nothing -> 0 - 1\n"
+
+# Returns the emitted IR, or a string starting "ERR: ". Not a `Result`: folding a broken fixture to
+# `false` would make every assert_false below pass vacuously.
+fn translate_or_msg(src: String) -> String !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> "ERR: lex"
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> "ERR: parse"
+      | Ok prog ->
+          do
+            tc <- checker.typecheck_typed(prog, Nil)
+            match tc with
+            | typed_ast.TypedErr _ msg -> "ERR: check: " ++ msg
+            | typed_ast.TypedOk typed_prog env ->
+                match ast_to_ir.translate_program(lowering.lower_program(typed_prog, env)) with
+                | Err msg -> "ERR: ast_to_ir: " ++ msg
+                | Ok pair ->
+                    match pair with
+                    | (ir_prog, idx_map) ->
+                        ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map))
+
+fn translated(out: String) -> Bool =
+  if str_starts_with(out, "ERR: ") then false else true
+
+fn has(out: String, needle: String) -> Bool =
+  str_find(out, needle) != -1
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # The regression: consuming the Maybe through a helper loses the peephole.
+    helper <- translate_or_msg(probe_via_helper())
+    assert_true(state, "helper fixture translates", translated(helper))
+    assert_true(state, "a helper-consumed Maybe lowers to the BOXED call",
+                has(helper, "call i64 @bytes_get("))
+    # Asserted on the CALL, not on the bare name: ir_lowering emits the `declare` for all eight
+    # allow-listed names unconditionally, so `bytes_get_unboxed` is present either way.
+    assert_false(state, "a helper-consumed Maybe never reaches CPR",
+                 has(helper, "call { i64, i64 } @bytes_get_unboxed"))
+
+    # The fix: a direct match with simple arms reaches the unboxed read.
+    direct <- translate_or_msg(probe_via_match())
+    assert_true(state, "match fixture translates", translated(direct))
+    assert_true(state, "a directly-matched Maybe keeps CPR (no allocation per read)",
+                has(direct, "call { i64, i64 } @bytes_get_unboxed"))
+    assert_false(state, "a directly-matched Maybe emits no boxed call",
+                 has(direct, "call i64 @bytes_get("))
+
+    summary(state)

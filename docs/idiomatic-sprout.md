@@ -93,6 +93,13 @@ and_then(parse_int, dict_get("port", d))     # Maybe String -> Maybe Int
 on the shape instead of threading the payload onward (see "Match the producing
 call directly").
 
+**In a per-element loop, match directly instead.** A combinator is a real call,
+so the `Maybe` must be boxed to be passed to it; the CPR peephole unboxes only a
+`Maybe`-returning builtin that a `match` consumes *in place*. That is one
+allocation per read — invisible once, decisive per byte. `stdlib.bytes.byte_at`
+went 15x faster (1.96s to 0.13s over forty 1 MiB compares) moving off
+`maybe_with_default`, and it is why `mutvec_at` exists beside `mutvec_get`.
+
 ## Transform collections with combinators, not index loops
 
 Work on elements directly with the prelude's combinators. They pass you the
