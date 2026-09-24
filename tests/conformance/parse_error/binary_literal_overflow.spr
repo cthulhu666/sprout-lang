@@ -1,0 +1,8 @@
+module main
+
+# The binary counterpart of hex_literal_overflow: 65 significant bits. The width
+# limit counts SIGNIFICANT digits, so a 64-bit pattern padded with leading zeros
+# stays legal — only a run that cannot fit i64 at all is rejected.
+fn over() -> Int = 0b10000000000000000000000000000000000000000000000000000000000000000
+
+fn main() -> Unit !{IO} = print(int_to_string(over()))

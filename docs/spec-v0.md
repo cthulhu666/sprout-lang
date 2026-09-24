@@ -52,9 +52,12 @@ Out of scope for v0:
   literal `1` followed by the identifier `_000`. All three forms denote the same
   kind of value and are interchangeable in expressions and patterns.
   A *hexadecimal or binary* literal denotes a 64-bit pattern, read as signed
-  two's-complement; every pattern is writable and none is rejected
+  two's-complement; every pattern is writable and no pattern is rejected
   (`0xFFFFFFFFFFFFFFFF` is `-1`, `0x8000000000000000` is `INT_MIN`). This is what
-  makes every 64-bit pattern writable as a mask.
+  makes every 64-bit pattern writable as a mask. A run wider than 64 *significant*
+  bits denotes no pattern and is **rejected at compile time**, with the same
+  message the decimal case gives: `0x10000000000000000` is an error, not `0`.
+  Leading zeros are not significant, so `0x0000FFFFFFFFFFFFFFFF` is `-1`.
   A *decimal* literal denotes a mathematical value and is **rejected at compile
   time** if it does not fit in `Int`, naming `BigInt.from_string` as the
   alternative. The one carve-out: a decimal literal that is **the next token

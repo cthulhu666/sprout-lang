@@ -114,8 +114,14 @@ fn p_number(s: String, i: Int) -> Maybe (Json, Int) =
                | Nothing -> Nothing
                | Just x -> Just((JsonFloat(x), j))
           else match parse_int(tok) with
-               | Nothing -> Nothing
                | Just n -> Just((JsonInt(n), j))
+               # RFC 8259 bounds no digit run, so a token wider than Int is
+               # conformant and must not fail the DOCUMENT. It reads as a
+               # JsonFloat, the same fallback the '.'/'e' branch above already
+               # is, and the same choice JavaScript's JSON.parse makes. A
+               # structurally bad token still fails here, since parse_double
+               # rejects everything parse_int does bar the width.
+               | Nothing -> map(\x -> (JsonFloat(x), j), parse_double(tok))
 
 # --- string (with escapes, incl. \uXXXX and surrogate pairs) --------------------------------
 # The value of the hex digit at byte `i`, or -1 if that byte is not a hex digit. A non-ASCII byte

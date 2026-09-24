@@ -34,6 +34,16 @@ fn main() -> Unit !{IO} =
       # sum's residue alone. This held before the fix too — it pins that the fix
       # moved the reduction EARLIER without moving the values.
       h_seed_99 = rng_hash2(3, 7, 99 + 2147483648)
+
+      # The same reduction the seed got, for the coordinates. `ix * 73856093`
+      # left i64 once |ix| passed ~1.25e11 — a wrap before Stage 1, an abort
+      # after — and the coordinate magnitude is a documented assumption rather
+      # than an enforced one, so the failure is an abort on ordinary input.
+      # Reducing before the multiply is congruent mod 2^31, so the reference
+      # hashes above must not move.
+      h_big_x = rng_hash2(1000000000000000, 0, 42)
+      h_big_z = rng_hash2(0, 1000000000000000, 42)
+      h_big_neg = rng_hash2(0 - 1000000000000000, 0, 42)
   in run_suite("rng", [
     check_eq("rng_next(1)", s1, 1103527590),
     check_eq("rng_next(s1)", s2, 377401575),
@@ -60,5 +70,12 @@ fn main() -> Unit !{IO} =
                 (h_max_seed >= 0) && (h_max_seed < 2147483648)),
     check_true("rng_hash2: MIN_INT seed is hashed, not trapped",
                 (h_min_seed >= 0) && (h_min_seed < 2147483648)),
-    check_eq("rng_hash2: the seed is used mod 2^31", h_seed_99, 1269841102)
+    check_eq("rng_hash2: the seed is used mod 2^31", h_seed_99, 1269841102),
+
+    check_true("rng_hash2: a large x coordinate is hashed, not trapped",
+                (h_big_x >= 0) && (h_big_x < 2147483648)),
+    check_true("rng_hash2: a large z coordinate is hashed, not trapped",
+                (h_big_z >= 0) && (h_big_z < 2147483648)),
+    check_true("rng_hash2: a large negative coordinate is hashed, not trapped",
+                (h_big_neg >= 0) && (h_big_neg < 2147483648))
   ])

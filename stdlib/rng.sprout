@@ -57,16 +57,20 @@ let rng_hash_pz = 19349663
 # that is NONLINEAR in the coordinates, which breaks the resonance. Both factors are reduced
 # below rng_modulus first, so the product stays < 2^62 and never overflows i64.
 #
-# Coordinates may be any Int (negatives are handled), assumed within a magnitude where
-# `coord * prime` does not overflow i64 (true for any realistic map extent). O(1).
+# Coordinates may be any Int; negatives are handled. O(1).
 #
-# The SEED carries no such precondition — it is an arbitrary Int from the caller — so it is
-# reduced before it meets the coordinate term. `rng_mod(seed) + k` and `seed + k` have the
-# same residue, so no hash value moves; what changes is that the sum can no longer leave
-# i64. Reducing afterwards was enough while overflow wrapped, because the wrap was itself a
-# mod 2^64 and the residue survived it; under trapping arithmetic (bigint-v0 Stage 1) a seed
-# within `rng_hash_px` of MAX_INT aborted instead.
+# Every input is reduced mod 2^31 before it is multiplied or added, so nothing here can
+# leave i64. That is a pure guard, not a change of function: reducing a factor or an addend
+# before the operation leaves the result's residue alone, so no hash value moves —
+# `tests/stdlib/test_rng.spr` pins the same reference hashes across this change. The reduced
+# coordinate term is at most 2^31 * 73856093 < 2^58.
+#
+# Reducing afterwards was enough while overflow wrapped, because the wrap was itself a mod
+# 2^64 and the residue survived it. Under trapping arithmetic (bigint-v0 Stage 1) it is not:
+# a seed within `rng_hash_px` of MAX_INT, or a coordinate past ~1.25e11, aborted the process.
+# The coordinate magnitude had been a documented assumption rather than an enforced one,
+# which is the weakest form a precondition can take once breaking it is fatal.
 export fn rng_hash2(ix: Int, iz: Int, seed: Int) -> Int =
-  let s1 = rng_next(rng_mod(rng_mod(seed) + (ix * rng_hash_px)))
-      s2 = rng_next(rng_mod(s1 + (iz * rng_hash_pz)))
+  let s1 = rng_next(rng_mod(rng_mod(seed) + (rng_mod(ix) * rng_hash_px)))
+      s2 = rng_next(rng_mod(s1 + (rng_mod(iz) * rng_hash_pz)))
   in rng_next(rng_mod(s1 * rng_mod((2 * s2) + 1)))

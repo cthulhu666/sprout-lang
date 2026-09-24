@@ -895,6 +895,8 @@ declare i64 @fs_rename(i64, i64)
 @.cfkinds.101 = private unnamed_addr constant [4 x i8] c"iss\00"
 @.cname.102 = private unnamed_addr constant [31 x i8] c"examples.http_web_server.Store\00"
 @.cfkinds.102 = private unnamed_addr constant [3 x i8] c"pi\00"
+@pow10_clamp = private constant i64 400
+@frac_divide_max = private constant i64 308
 @stdlib.net.poll_write = private constant i64 2
 @stdlib.net.poll_read = private constant i64 1
 @stdlib.net.read_chunk = private constant i64 65536

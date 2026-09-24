@@ -67,6 +67,14 @@ fn field_string_is(input: String, key: String, want: String) -> Bool =
       Just s = json.json_get_string(fv) else false
   in s == want
 
+# `json_get_int` answers only for a JsonInt, so this asserts the CONSTRUCTOR as
+# well as the value — an in-range integer must not drift to the float fallback.
+fn field_int_is(input: String, key: String, want: Int) -> Bool =
+  let Ok v = json.parse(input) else false
+      Just fv = json.json_get_field(v, key) else false
+      Just n = json.json_get_int(fv) else false
+  in n == want
+
 # Built by arithmetic, not by parsing: -1.0 * 0.0 is -0.0 under IEEE 754.
 fn neg_zero() -> Double = (0.0 - 1.0) * 0.0
 
@@ -268,6 +276,24 @@ fn main() -> Unit !{IO} =
                1234567890123456789.0 * 10.0, 100000.0)),
     check_true("a long mantissa does not poison the document",
                field_float_approx("{\"a\": 0.1234567890123456789012345}", "a", 0.1234567890123456789, 0.000001)),
+
+    # The INTEGER branch of the same story. RFC 8259 bounds no digit run, so an
+    # id wider than Int is conformant, and rejecting it failed the whole document
+    # rather than the field. The float branch above was fixed for exactly this;
+    # the integer branch was not, leaving the asymmetry these three pin.
+    check_true("an over-range integer parses as a float, not an error",
+               top_float_approx("123456789012345678901",
+                                1234567890123456789.0 * 100.0, 100000000.0)),
+    check_true("an over-range integer does not poison the document",
+               field_float_approx("{\"id\": 123456789012345678901, \"ok\": 1.5}",
+                                  "ok", 1.5, 0.0001)),
+    check_true("an in-range integer is still a JsonInt",
+               field_int_is("{\"id\": 42}", "id", 42)),
+
+    # Scaling a zero mantissa by an overflowing power of ten gave `0.0 * inf`,
+    # i.e. NaN — and json_stringify refuses a non-finite Double, so a conformant
+    # document could be read and then not written back.
+    check_true("0e400 reads as zero, not NaN", top_float_has_bits("0e400", 0.0)),
 
     check_true("a mantissa may NOT carry a +", is_err(json.parse("+1.5"))),
     check_true("a dangling + exponent is rejected", is_err(json.parse("1e+"))),

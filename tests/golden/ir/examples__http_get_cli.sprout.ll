@@ -154,6 +154,8 @@ declare i64 @http_request(i64, i64, i64, i64, i64)
 @.cfkinds.22 = private unnamed_addr constant [3 x i8] c"sp\00"
 @.cname.23 = private unnamed_addr constant [27 x i8] c"stdlib.http.HttpStatusInfo\00"
 @.cfkinds.23 = private unnamed_addr constant [3 x i8] c"ss\00"
+@pow10_clamp = private constant i64 400
+@frac_divide_max = private constant i64 308
 
 define i64 @result_map_error(i64 %p$f, i64 %p$r) {
 entry:

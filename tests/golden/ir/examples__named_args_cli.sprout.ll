@@ -160,6 +160,8 @@ declare i64 @split_words(i64)
 @.cfkinds.15 = private unnamed_addr constant [3 x i8] c"pp\00"
 @.cname.16 = private unnamed_addr constant [35 x i8] c"examples.named_args_cli.BootConfig\00"
 @.cfkinds.16 = private unnamed_addr constant [5 x i8] c"isib\00"
+@pow10_clamp = private constant i64 400
+@frac_divide_max = private constant i64 308
 
 define i64 @min_int() {
 entry:

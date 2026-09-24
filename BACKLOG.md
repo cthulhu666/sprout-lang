@@ -530,13 +530,14 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   call between: reject as `Err`, keep the saturating `inf` and document it, or clamp to the largest
   finite Double — and whichever is chosen should settle the underflow-to-zero, the same question
   at the other end. No caller depends on today's behaviour.
-- [ ] `P3` **Sub-1.0 magnitudes lose the low bit in `parse_double`.** `parse_mantissa` computes
-  `iv + (fv / pow10(len(frac)))`, so a value is rounded twice and lands 1 ULP off: measured over 200
-  pseudo-random mantissas per decade, 1e-9 → 85/200 fail and 1e-3 → 26/200, while 1e0…1e16 are
-  0/200. The documented limit of a pure-Sprout reader. Closing it needs either a correctly-rounded
-  decimal→binary algorithm in Sprout or a `strtod`-backed builtin — the latter needs approval
-  under Builtin vs Stdlib rules 4–6, with the *correctness* argument doing the work, not
-  performance.
+- [ ] `P3` **A digit run too long for `Int` loses the low bit in `parse_double`.** A run within
+  `Int` is now exactly rounded (integer or fraction, verified by bit pattern in
+  `tests/stdlib/test_parse_double.spr`). Past 19 digits `digits_double_go` accumulates in Double
+  and rounds per digit, so a 17-significant-digit mantissa can land 1 ULP off — and `mag * 10^exp`
+  saturates to inf/0 when either side overflows, even where the product is finite. The documented
+  limit of a pure-Sprout reader. Closing it needs either a correctly-rounded decimal→binary
+  algorithm in Sprout or a `strtod`-backed builtin — the latter needs approval under Builtin vs
+  Stdlib rules 4–6, with the *correctness* argument doing the work, not performance.
 
 ### 4) Terminal UI Runtime
 
