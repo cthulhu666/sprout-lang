@@ -1326,12 +1326,12 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   out.** `vec_get`/`vec_get_or` route through `vector_get`, which boxes every read into a `Just`
   (`runtime/sprout_runtime.c:8396`). The runtime already has the unboxed accessor —
   `vector_get_direct` — but only `stdlib.mutable` declares it, and only as `!{IO}`, so pure
-  index-driven numeric code cannot reach it. Measured cost: `stdlib.math.bigint`'s 20-by-10
-  `divmod` runs 31 µs against 1.4 µs for the 10x10 multiply, a 22x gap on ~2x the limb operations,
-  and ~1,100 allocations per call; it is what puts a P-256 verify at its measured 240 ms
-  (`docs/bigint-v0.md` §9 Stage 4). The fix is a pure `vec_get_direct` in the prelude with its own
-  bounds behaviour decided — NOT re-declaring the existing extern with a second effect row, since
-  externs sit outside the module system and two declarations of one name would conflict.
+  index-driven numeric code cannot reach it. Measured directly: ten limbs read and rebuilt cost
+  **19.7 ns** in a constructor of `Int` fields against **250 ns** through `vec_get_or` — a
+  **12.7x** gap that is pure boxing (`docs/bigint-v0.md` §9 Stage 4), and the reason
+  `stdlib/crypto/p256.sprout` abandoned `Vec` for its field. Nothing else can. The fix is a pure
+  `vec_get_direct` with its bounds behaviour decided — NOT a second declaration of the existing
+  extern with another effect row, since externs sit outside the module system and would conflict.
 - [ ] `P2` **`stdlib.math.bigint` grows super-linearly outside P-256 width.** Three low-severity
   findings from the PR #344 ensemble review, unverified, same shape as the two `to_bytes_be`
   defects fixed in it (`docs/bigint-v0.md` §9 Stage 2). `shl` bounds a negative count but not a
@@ -1342,15 +1342,13 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   general case is the `str_slice` O(start) entry above, the local fix is the one
   `stdlib/string.sprout` already applied to its trimming functions. None is reachable at the
   32-byte widths Stage 4 uses, and a suite that tests only those widths cannot see any of them.
-- [ ] `P2` **An ECDSA P-256 verify costs 240 ms, and 71% of it is one division.**
-  `stdlib/crypto/p256.sprout` runs the field through `stdlib.math.modular`, so every one of its
-  ~6,000 field multiplies pays a Knuth division: 46.5 µs, of which the multiply is 2 µs and
-  `reduce` is 33 µs (`docs/bigint-v0.md` §9 Stage 4). P-256's prime is Solinas, so reduction can
-  be ~9 additions instead — but a `bigint.add` is itself 1.2 µs because it allocates a limb
-  vector, so the honest ceiling is **3.5x (240 ms to ~80 ms), not 40x**. Getting past that needs a
-  dedicated fixed-width field type inside `p256.sprout`, which changes no public API. Shamir's
-  trick on the two scalar multiplies is a further ~1/3, independent of this. Blocked on nothing;
-  the 484-vector Wycheproof suite is the regression net that makes it safe.
+- [ ] `P3` **An ECDSA P-256 verify spends 21% of itself in one scalar inversion.** The field is
+  now `Felem` (Montgomery, 26-bit limbs) and a verify is 5.4 ms, but `modular.mod_inv` mod *n* is
+  still `BigInt` at **1.11 ms** (`docs/bigint-v0.md` §9 Stage 4). A second Montgomery field for
+  the group order would remove most of it — `scripts/gen_p256_felem.py` already emits everything
+  but the constants, so it is largely a parameter change. Shamir's trick on the two scalar
+  multiplications is a further ~1/3 and is independent. P3 rather than P2: 5.4 ms is no longer a
+  deployment problem, and the 484-vector Wycheproof suite makes either change safe to attempt.
 
 ## Design Roadmap
 
