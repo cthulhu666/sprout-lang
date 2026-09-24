@@ -286,7 +286,18 @@ uncatchable. `parse_int`'s callers include `stdlib/http_server.sprout:293`
 digit runs). Left unguarded, this is a remotely triggerable process abort.
 
 **DECIDED: guard it.** `parse_int` returns `Nothing` on an over-range digit run. All 19 call
-sites already match on `Maybe`, so no caller changes. `stdlib/compiler/iface_codec.sprout` had
+sites already match on `Maybe`, so nothing failed to compile.
+
+> **That is not the same as "no caller changes", and reading it that way cost a bug.** A
+> `Nothing` that was previously unreachable now arrives, and each caller's existing `Nothing`
+> branch was written for a *different* situation — a malformed token, not an over-range one.
+> `json.sprout`'s `p_number` treated both as "reject the document", so a conformant JSON
+> integer wider than `Int` stopped parsing at all; the float branch beside it was fixed in
+> the same commit for exactly this reason, and the integer branch was not. Type-checking a
+> totality change tells you where it still compiles, not where it now means something else.
+> Fixed by falling back to `JsonFloat`, as the `.`/`e` branch already does.
+
+`stdlib/compiler/iface_codec.sprout` had
 the identical unguarded `acc * 10 + digit` shape, on compiler-internal input rather than
 network input; it is fixed the same way and its accumulator is now `parse_neg_magnitude`.
 That one was missed on the first pass and shipped broken — the decoder aborted on the
@@ -358,10 +369,13 @@ which is the only reading under which every 64-bit pattern is writable as a mask
 fits-in-`Int` rule rejects the all-ones mask idiom that both documents endorse.
 
 **Rule:** a *hex or binary* literal denotes a 64-bit pattern and is read as signed two's
-complement; any 64-bit pattern is writable, `0xFFFFFFFFFFFFFFFF` is `-1`, and nothing is
-rejected. A *decimal* literal denotes a mathematical value and is **rejected at compile time**
-if it does not fit in `Int`, with the error naming `BigInt.from_string` as the alternative.
-Pinned today by `tests/stdlib/test_int_literals.spr`, which must be updated in the same change.
+complement; any 64-bit pattern is writable and `0xFFFFFFFFFFFFFFFF` is `-1`. A run wider than
+64 *significant* bits denotes no pattern and is rejected like the decimal case
+(amended after Stage 1 — see `docs/bitwise-int-ops-v0.md` §5.6; leading zeros are not
+significant). A *decimal* literal denotes a mathematical value and is **rejected at compile
+time** if it does not fit in `Int`, with the error naming `BigInt.from_string` as the
+alternative. Pinned by `tests/stdlib/test_int_literals.spr` and
+`tests/conformance/parse_error/{hex,binary,int}_literal_overflow.spr`.
 
 #### The INT_MIN carve-out
 

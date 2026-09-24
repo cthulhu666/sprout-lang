@@ -1765,10 +1765,23 @@ export fn parse_int(s: String) -> Maybe Int =
       else positive_from_neg_magnitude(accum_digits(s, 0, 0, false))
 
 # 10^k as a Double for any k (k < 0 divides). Applies a scientific-notation
-# exponent in parse_double. The fraction places itself, digit by digit, in
-# frac_double_go — see the note there on why it cannot use this.
+# exponent in parse_double, and places a short fraction in frac_double.
+#
+# The exponent is clamped first. 10^k is already infinity past k = 308 and zero
+# past k = -324, so |k| > 400 saturates whatever the mantissa and the clamp
+# changes no result. It buys two things it is not obvious this function needs:
+# pow10_pos recurses once per unit of k, so an unclamped `1e999999` exhausted the
+# stack; and `0 - k` is checked arithmetic, so k = INT_MIN aborted the process
+# before pow10_pos was ever called — in `parse_double`, which promises not to.
+let pow10_clamp = 400
+fn clamp_exponent(k: Int) -> Int =
+  if k < -pow10_clamp then -pow10_clamp
+  else if k > pow10_clamp then pow10_clamp
+  else k
 fn pow10_pos(k: Int) -> Double = if k <= 0 then 1.0 else 10.0 * pow10_pos(k - 1)
-fn pow10(k: Int) -> Double = if k < 0 then 1.0 / pow10_pos(0 - k) else pow10_pos(k)
+fn pow10(k: Int) -> Double =
+  let c = clamp_exponent(k)
+  in if c < 0 then 1.0 / pow10_pos(-c) else pow10_pos(c)
 
 # Split `s` on the first occurrence of single-char `sep` into (before, after); Nothing if
 # absent. Prelude-native (str_find/str_slice) since split_once lives in stdlib.string, which
@@ -1799,16 +1812,30 @@ fn digits_double_go(s: String, i: Int, acc: Double) -> Maybe Double =
       let d = digit_value(c)
       in if d < 0 then Nothing else digits_double_go(s, i + 1, (acc * 10.0) + to_double(d))
 
+# A run that fits Int is converted in ONE rounding rather than accumulated a
+# digit at a time: `acc * 10.0 + d` rounds per digit once the running value
+# passes 2^53, so an 18-digit run landed 1 ULP off ("999999999999999999" read as
+# 1.0000000000000001e18). Int holds 19 digits, and Int -> Double is correctly
+# rounded, so every run that short is now exact. `accum_digits` rather than
+# `parse_int`: this is an unsigned digit run, and parse_int would accept a
+# leading '-', making parse_double("--5") read as 5.0.
 fn digits_double(s: String) -> Maybe Double =
-  if str_len(s) <= 0 then Just(0.0) else digits_double_go(s, 0, 0.0)
+  if str_len(s) <= 0 then Just(0.0)
+  else
+    let Just n = positive_from_neg_magnitude(accum_digits(s, 0, 0, false))
+          else digits_double_go(s, 0, 0.0)
+    in Just(to_double(n))
 
-# The fraction run as a Double in [0, 1); empty -> 0.0. Each digit is placed by its
-# own scale rather than accumulated whole and divided by 10^n at the end. Two things
-# break under the old shape once the run may be long: for ~309 digits both the
-# accumulated value and 10^n are infinity, and inf/inf is NaN; and truncating the run
-# to Double's ~17 significant digits would flush 0.<300 zeros>1 to zero, when it is
-# perfectly representable. `scale` underflowing to 0.0 is harmless — every later digit
-# then contributes 0.0, which is the correct contribution.
+# The fraction run with each digit placed by its own scale. Only for a run past
+# 309 digits, where the whole-then-divide shape below cannot be used: both the
+# accumulated value and 10^n are then infinity and inf/inf is NaN. `scale`
+# underflowing to 0.0 is harmless — every later digit then contributes 0.0,
+# which is the correct contribution.
+#
+# It is NOT the general path, because a scale is itself a rounded value (0.1/10
+# is 0.010000000000000002, not the nearest Double to 0.01) and the error
+# compounds per digit: applying this to every run made 3 of the 10 one-digit
+# fractions wrong, 42 of 100 two-digit, 510 of 1000 three-digit.
 fn frac_double_go(s: String, i: Int, scale: Double, acc: Double) -> Maybe Double =
   match str_char_at(s, i) with
   | Nothing -> Just(acc)
@@ -1818,7 +1845,19 @@ fn frac_double_go(s: String, i: Int, scale: Double, acc: Double) -> Maybe Double
       in if d < 0 then Nothing
          else frac_double_go(s, i + 1, next, acc + (to_double(d) * next))
 
-fn frac_double(s: String) -> Maybe Double = frac_double_go(s, 0, 1.0, 0.0)
+# The fraction run as a Double in [0, 1); empty -> 0.0. Accumulate the digits
+# whole and divide once: for a run Int can hold, that is one exactly-rounded
+# division of two exact operands, so "0.3" is the nearest Double to 0.3 rather
+# than the one above it. Past 308 digits the dividend and 10^n are both infinity
+# and the per-digit path takes over — the only place it is correct.
+#
+# 308, not 17: a long run is not truncated, so 0.<300 zeros>1 keeps its value
+# (dividend 1.0, divisor 1e301) instead of flushing to zero.
+let frac_divide_max = 308
+fn frac_double(s: String) -> Maybe Double =
+  let n = str_len(s)
+  in if n > frac_divide_max then frac_double_go(s, 0, 1.0, 0.0)
+     else map(\v -> v / pow10(n), digits_double(s))
 
 # Non-negative mantissa "int[.frac]" -> Double. `int` or `frac` may be empty (".5", "5.");
 # a lone "." is rejected.
@@ -1859,8 +1898,12 @@ fn split_exponent(body: String) -> Maybe (String, Int) =
 # '.' fraction, and an optional 'e'/'E' exponent (with optional sign, '+' included). Returns
 # Nothing on any malformed input, never crashes. Pure Sprout — no strtod builtin: the magnitude
 # is `intpart + frac/10^len(frac)`, then scaled by `10^exp`. Accurate to Double arithmetic
-# (fine for config/JSON data), NOT a bit-exact strtod round-trip: below 1.0 the two roundings
-# (forming the fraction, then dividing) can land 1 ULP off.
+# (fine for config/JSON data), NOT a bit-exact strtod round-trip: a value with both parts is
+# rounded twice (forming the fraction, then adding it) and can land 1 ULP off. A pure fraction
+# or a pure integer short enough for Int is exact — see digits_double and frac_double.
+#
+# A zero magnitude short-circuits the scaling, because `0.0 * inf` is NaN: without it a
+# conformant "0e400" produced a NaN, which json_stringify then refuses to write back.
 #
 # The sign is applied with unary `-`, which lowers to `fneg` — an IEEE sign flip. Subtracting
 # from zero instead would silently drop the sign of "-0", because 0.0 - 0.0 is +0.0 under
@@ -1873,7 +1916,7 @@ export fn parse_double(s: String) -> Maybe Double =
      | Just (mant, e) ->
          match parse_mantissa(mant) with
          | Nothing -> Nothing
-         | Just mag -> let magnitude = mag * pow10(e)
+         | Just mag -> let magnitude = if mag == 0.0 then mag else mag * pow10(e)
                        in Just(if neg then -magnitude else magnitude)
 extern fn int_to_string(n: Int) -> String
 extern fn double_to_string(x: Double) -> String

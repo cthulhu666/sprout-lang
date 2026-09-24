@@ -120,6 +120,8 @@ declare i64 @ref_write(i64, i64)
 @.cfkinds.14 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.15 = private unnamed_addr constant [30 x i8] c"examples.ref_tutorial.BoundTo\00"
 @.cfkinds.15 = private unnamed_addr constant [2 x i8] c"i\00"
+@pow10_clamp = private constant i64 400
+@frac_divide_max = private constant i64 308
 
 define i64 @vec_empty() {
 entry:

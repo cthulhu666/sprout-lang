@@ -137,6 +137,8 @@ declare i64 @wall_time_micros()
 @.cfkinds.12 = private unnamed_addr constant [2 x i8] c"p\00"
 @.cname.13 = private unnamed_addr constant [9 x i8] c"IntRange\00"
 @.cfkinds.13 = private unnamed_addr constant [4 x i8] c"iii\00"
+@pow10_clamp = private constant i64 400
+@frac_divide_max = private constant i64 308
 
 define i64 @vec_empty() {
 entry:

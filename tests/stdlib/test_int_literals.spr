@@ -75,6 +75,16 @@ fn main() -> Unit !{IO} =
       0xFFFFFFFFFFFFFFFF, -1)
     assert_eq(state, "an all-ones mask leaves a value unchanged",
       bit_and(48350, 0xFFFFFFFFFFFFFFFF), 48350)
+
+    # The width limit counts SIGNIFICANT digits, so padding a legal pattern with
+    # leading zeros stays legal however long the run gets. This is what makes
+    # rejecting a 17th significant digit cost no pattern — the boundary is the
+    # value, not the token's length. A run that does exceed 64 bits is rejected:
+    # tests/conformance/parse_error/{hex,binary}_literal_overflow.spr.
+    assert_eq(state, "leading zeros do not count toward the 64-bit width",
+      0x0000FFFFFFFFFFFFFFFF, -1)
+    assert_eq(state, "a 64-digit binary all-ones mask is writable",
+      0b1111111111111111111111111111111111111111111111111111111111111111, -1)
     # Compared against the arithmetic route, NOT against 0x8000000000000000:
     # the first assertion above already equates that hex literal with this
     # decimal one, so repeating the pair reversed would add no coverage.

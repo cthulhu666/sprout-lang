@@ -37,8 +37,13 @@ fn has_bits_of(m: Maybe Double, reference: Double) -> Bool =
   | Nothing -> false
   | Just x -> double_to_bits(x) == double_to_bits(reference)
 
-# 10^k as a Double, without a scientific-notation literal.
+# 10^k as a Double, without a scientific-notation literal. Exact for k <= 22
+# (10^k = 2^k * 5^k and 5^22 < 2^53), which covers every exactness claim below.
 fn pow_ten(k: Int) -> Double = if k <= 0 then 1.0 else 10.0 * pow_ten(k - 1)
+
+# +inf without a literal: Double `/` lowers to an unguarded fdiv, so this is a
+# genuine infinity. stdlib.math's own `inf` is module-private.
+fn pos_inf() -> Double = 1.0 / 0.0
 
 # The full writer -> reader round trip, at the magnitude where the writer switches to
 # exponential form. `double_to_string` renders 10^15 as "1e+15" (%.15g), which is exactly
@@ -91,6 +96,42 @@ fn main() -> Unit !{IO} =
     check_true("positive zero stays positive", has_bits_of(parse_double("0.0"), 0.0)),
     check_true("a negative value is still negative",
                has_bits_of(parse_double("-2.5"), 0.0 - 2.5)),
+
+    # --- correctly rounded below 1.0, checked by bits rather than tolerance ---
+    # Each reference is one IEEE division of two exactly-representable operands,
+    # so it IS the nearest Double to the decimal — independent of the parser.
+    # `approx` cannot see these: the values they reject are 1 ULP away, far
+    # inside every tolerance above. That is why a rounding regression survived
+    # the suite (bigint-v0 Stage 1 follow-up), so the guard has to be exact.
+    check_true("0.3 is correctly rounded", has_bits_of(parse_double("0.3"), 3.0 / 10.0)),
+    check_true("0.7 is correctly rounded", has_bits_of(parse_double("0.7"), 7.0 / 10.0)),
+    check_true("0.104 is correctly rounded",
+               has_bits_of(parse_double("0.104"), 104.0 / 1000.0)),
+    check_true("0.15 is correctly rounded",
+               has_bits_of(parse_double("0.15"), 15.0 / 100.0)),
+
+    # An integer run of 16-19 digits exceeds Double's exact range but still fits
+    # Int, so it rounds once on the Int -> Double conversion. Accumulating it in
+    # Double instead rounds per digit and lands 1 ULP high.
+    check_true("an 18-digit integer rounds once, not per digit",
+               has_bits_of(parse_double("999999999999999999"), pow_ten(18))),
+
+    # --- a zero mantissa stays zero at any exponent ---
+    # `0.0 * inf` is NaN, so scaling a zero by an overflowing power of ten used
+    # to manufacture a NaN out of conformant JSON — the one value json.stringify
+    # then refuses to write back.
+    check_true("0e400 is zero, not NaN", has_bits_of(parse_double("0e400"), 0.0)),
+    check_true("0.0e999999 is zero, not NaN",
+               has_bits_of(parse_double("0.0e999999"), 0.0)),
+
+    # --- an absurd exponent is total, not a trap and not a million recursions ---
+    # INT_MIN is reachable here: `parse_int` accumulates negatively, so the
+    # exponent's digit run legitimately yields it, and negating it to call
+    # pow10_pos then overflowed. parse_double promises never to crash.
+    check_true("INT_MIN exponent underflows to zero rather than trapping",
+               has_bits_of(parse_double("1e-9223372036854775808"), 0.0)),
+    check_true("INT_MAX exponent saturates to infinity rather than trapping",
+               has_bits_of(parse_double("1e9223372036854775807"), pos_inf())),
 
     # --- a digit run longer than Int can hold is still a valid Double ---
     # A mantissa's digits are a Double's digits. Routing them through `parse_int`

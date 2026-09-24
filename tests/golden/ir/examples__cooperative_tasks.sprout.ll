@@ -159,6 +159,8 @@ declare i64 @split_words(i64)
 @.cfkinds.20 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.21 = private unnamed_addr constant [29 x i8] c"stdlib.bytes.Utf8DecodeError\00"
 @.cfkinds.21 = private unnamed_addr constant [2 x i8] c"s\00"
+@pow10_clamp = private constant i64 400
+@frac_divide_max = private constant i64 308
 
 define i64 @stdlib.task.with_scope(i64 %p$body) {
 entry:

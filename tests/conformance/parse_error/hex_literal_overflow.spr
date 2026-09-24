@@ -1,0 +1,10 @@
+module main
+
+# A hex literal wider than 64 bits is a compile-time error, like its decimal
+# sibling. Every 64-bit PATTERN stays writable (0xFFFFFFFFFFFFFFFF is -1, pinned
+# in tests/stdlib/test_int_literals.spr); this literal is 65 bits, so it denotes
+# no pattern and silently truncating it to 0 would break the guarantee spec §6.5
+# makes — "Int never silently yields a wrong value".
+fn over() -> Int = 0x10000000000000000
+
+fn main() -> Unit !{IO} = print(int_to_string(over()))

@@ -128,6 +128,8 @@ declare i64 @ref_write(i64, i64)
 @.cfkinds.13 = private unnamed_addr constant [4 x i8] c"iii\00"
 @.cname.14 = private unnamed_addr constant [32 x i8] c"examples.aoc_2025_day_2.Answers\00"
 @.cfkinds.14 = private unnamed_addr constant [3 x i8] c"ii\00"
+@pow10_clamp = private constant i64 400
+@frac_divide_max = private constant i64 308
 
 define i64 @range_up(i64 %p$lo, i64 %p$hi) {
 entry:

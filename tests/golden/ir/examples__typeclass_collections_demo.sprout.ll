@@ -113,6 +113,8 @@ declare i64 @ref_write(i64, i64)
 @.cfkinds.14 = private unnamed_addr constant [2 x i8] c"p\00"
 @.cname.15 = private unnamed_addr constant [46 x i8] c"examples.typeclass_collections_demo.MkBoolVec\00"
 @.cfkinds.15 = private unnamed_addr constant [2 x i8] c"p\00"
+@pow10_clamp = private constant i64 400
+@frac_divide_max = private constant i64 308
 
 define i64 @vec_length(i64 %p$vec) {
 entry:

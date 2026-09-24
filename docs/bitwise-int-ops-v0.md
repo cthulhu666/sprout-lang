@@ -402,8 +402,8 @@ changing that is a lexer decision of its own rather than part of this one.
 X4 (`docs/int-overflow-policy-decision.md` §7) is resolved, and it splits by base rather than
 treating hex and decimal alike as this section previously said:
 
-- **Hex and binary keep wrapping.** A literal too large for `Int` in either radix wraps to the
-  low 64 bits and is read as a signed two's-complement value:
+- **Hex and binary read the full 64-bit pattern; a wider run is rejected.** Every 64-bit
+  pattern is writable and read as a signed two's-complement value:
 
   ```
   0x7FFFFFFFFFFFFFFF   ==  9223372036854775807
@@ -411,9 +411,22 @@ treating hex and decimal alike as this section previously said:
   0xFFFFFFFFFFFFFFFF   == -1                     # all ones
   ```
 
-  This is unchanged, and deliberately so: `0xFFFFFFFFFFFFFFFF` meaning `-1` is the *useful*
-  reading for mask-writing, and the only one under which every 64-bit pattern is writable — a
-  mask notation that rejected half the patterns would be the wrong tool.
+  `0xFFFFFFFFFFFFFFFF` meaning `-1` is the *useful* reading for mask-writing, and a mask
+  notation that rejected half the patterns would be the wrong tool.
+
+  **Amended.** This section previously said a wider literal "wraps to the low 64 bits", on
+  the grounds that wrapping was the only reading under which every pattern stays writable.
+  That was a false choice, and it left the one silent-wrong-value path in the language:
+  `0x10000000000000000` compiled to `0` with no diagnostic, contradicting spec §6.5's
+  "`Int` never silently yields a wrong value", which Stage 1 had just added. A run wider
+  than 64 *significant* bits denotes no pattern at all, so rejecting it costs nothing —
+  every 64-bit pattern is still writable, and leading zeros stay insignificant
+  (`0x0000FFFFFFFFFFFFFFFF` is `-1`). Verified prior art, by compiling the same literal:
+  Rust gives `literal out of range for i64`, Java `integer number too large`, C
+  `integer literal is too large to be represented in any integer type` — and all three
+  still accept the full-width mask. The width check is `radix_digit_fits`
+  (`parser.sprout`), because the `bit_shl`/`bit_or` accumulation this section's §5.5 chose
+  is structurally unable to notice the loss.
 - **Decimal is rejected at compile time.** A decimal literal that does not fit `[0, 2^63-1]` is
   now a compile error naming `BigInt.from_string` as the alternative — it no longer wraps.
   `9223372036854775808` (bare) is now an error, not `INT_MIN`.

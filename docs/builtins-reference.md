@@ -415,9 +415,9 @@ Integer math semantics:
 - when `n > 0`, `mod(x, n)` returns `Just r` with `0 <= r < n`
 - when `n <= 0`, `mod(x, n)` returns `Nothing`
 - `pow(base, exp)` returns `Nothing` when `exp < 0`
-- `Int` is *specified* as a mathematical integer, but the only backend lowers it to machine `i64`, so arithmetic wraps (defined two's-complement, not UB)
-- overflow-sensitive results for `abs`, `pow`, `gcd`, and `lcm` are therefore silently wrong outside the representable range
-- this is a v0 implementation limitation; trapping on overflow is decided but not yet implemented (`docs/bigint-v0.md` Stage 1, recorded in `docs/int-overflow-policy-decision.md`)
+- `Int` is *specified* as a mathematical integer, but the only backend lowers it to machine `i64`, so a value outside `[-2^63, 2^63-1]` cannot be produced
+- `+`, `-`, `*` and unary negation **panic** on overflow with a source-located message rather than wrapping (spec §8.4); `abs`, `pow`, `gcd` and `lcm` panic on the inputs whose results do not fit, rather than returning a silently wrong one
+- `BigInt` (`stdlib.math.bigint`, `docs/bigint-v0.md`) is the escape hatch for values that do not fit 64 bits
 
 Double math (`stdlib.math`) — all pure Sprout, **no C builtins**; `Double` is an
 experimental extension rather than normative v0:

@@ -41,6 +41,20 @@ fn tok_pos(t: token.Token) -> source.SourcePos =
 # literal at each call site (not threaded as a parameter) so it constant-folds
 # to a plain `shl` with no runtime guard (ast_to_ir.translate_folded_shift) —
 # see docs/compiler-internals.md on why only a literal argument folds.
+
+# Whether one more digit still fits. bit_shl/bit_or CANNOT overflow — that is
+# the point of using them (see above) — so nothing in the accumulation would
+# notice a 17th hex digit pushing the first one off the top, and
+# `0x10000000000000000` built 0 in silence. The guard has to be explicit.
+#
+# Rejecting once the top digit's worth of bits is already occupied keeps every
+# 64-bit PATTERN writable — 0xFFFFFFFFFFFFFFFF is 16 digits, and its final shift
+# is exact — while a run denoting no pattern becomes an error, as its decimal
+# sibling already is. Leading zeros cost nothing: `acc` stays 0 through them, so
+# this counts SIGNIFICANT digits, not the token's length.
+fn radix_digit_fits(acc: Int, radix: Int) -> Bool =
+  if radix == 16 then bit_shr_zf(acc, 60) == 0 else bit_shr_zf(acc, 63) == 0
+
 fn radix_digits_value(text: String, index: Int, radix: Int, acc: Int) -> Maybe Int =
   if index >= str_len(text) then Just(acc)
   else
@@ -51,6 +65,7 @@ fn radix_digits_value(text: String, index: Int, radix: Int, acc: Int) -> Maybe I
         | Nothing -> Nothing
         | Just v ->
             if v >= radix then Nothing
+            else if ! radix_digit_fits (acc, radix) then Nothing
             else if radix == 16
             then radix_digits_value(text, index + 1, radix, bit_or(bit_shl(acc, 4), v))
             else radix_digits_value(text, index + 1, radix, bit_or(bit_shl(acc, 1), v))
@@ -67,12 +82,13 @@ fn radix_from_lexed(text: String) -> Maybe Int =
     radix_digits_value(text, 2, 2, 0)
   else Nothing
 
-# Int value of an int-literal token's raw text. A radix (`0x`/`0b`) literal
-# denotes a 64-bit pattern and is never rejected (every pattern is writable).
-# A decimal literal is range-checked against [0, 2^63-1] (bigint-v0 Stage 1
-# §5.3) via the prelude's `parse_int`, which is now total: Nothing here means
-# the digit run overflows Int, the only way this can fail, since the lexer
-# already guarantees the text is all-digits (radix or decimal).
+# Int value of an int-literal token's raw text. Both bases are width-checked, by
+# different rules: a radix (`0x`/`0b`) literal denotes a 64-bit PATTERN, so every
+# pattern is writable and only a run wider than 64 significant bits is rejected;
+# a decimal literal denotes a mathematical VALUE and is range-checked against
+# [0, 2^63-1] (bigint-v0 Stage 1 §5.3) via the prelude's total `parse_int`.
+# Nothing here means the digit run does not fit Int, the only way this can fail,
+# since the lexer already guarantees the text is all-digits (radix or decimal).
 fn int_from_lexed(text: String) -> Maybe Int =
   match radix_from_lexed(text) with
   | Just n -> Just(n)
