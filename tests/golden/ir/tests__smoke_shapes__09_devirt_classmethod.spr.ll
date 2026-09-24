@@ -113,7 +113,6 @@ declare i64 @ref_write(i64, i64)
 @.cname.16 = private unnamed_addr constant [10 x i8] c"main.Blue\00"
 @.cfkinds.16 = private unnamed_addr constant [1 x i8] c"\00"
 @pow10_clamp = private constant i64 400
-@frac_divide_max = private constant i64 308
 
 define i64 @main.color_of(i64 %p$tag) {
 entry:

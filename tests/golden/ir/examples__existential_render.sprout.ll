@@ -115,7 +115,6 @@ declare i64 @ref_write(i64, i64)
 @.cname.15 = private unnamed_addr constant [36 x i8] c"examples.existential_render.Celsius\00"
 @.cfkinds.15 = private unnamed_addr constant [2 x i8] c"i\00"
 @pow10_clamp = private constant i64 400
-@frac_divide_max = private constant i64 308
 
 define i64 @list_each_go(i64 %p$f$in, i64 %p$xs$in) {
 entry:

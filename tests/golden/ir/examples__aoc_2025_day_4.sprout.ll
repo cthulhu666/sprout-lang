@@ -198,7 +198,6 @@ declare i64 @fs_rename(i64, i64)
 @.cname.28 = private unnamed_addr constant [32 x i8] c"examples.aoc_2025_day_4.Answers\00"
 @.cfkinds.28 = private unnamed_addr constant [3 x i8] c"ii\00"
 @pow10_clamp = private constant i64 400
-@frac_divide_max = private constant i64 308
 @examples.aoc_2025_day_4.neighbors = global i64 zeroinitializer
 
 define i64 @range_up(i64 %p$lo, i64 %p$hi) {

@@ -203,7 +203,6 @@ declare i64 @term_read_avail(i64, i64)
 @.cname.31 = private unnamed_addr constant [27 x i8] c"stdlib.terminal.TermFailed\00"
 @.cfkinds.31 = private unnamed_addr constant [2 x i8] c"s\00"
 @pow10_clamp = private constant i64 400
-@frac_divide_max = private constant i64 308
 @stdlib.net.poll_write = private constant i64 2
 @stdlib.net.poll_read = private constant i64 1
 @stdlib.net.read_chunk = private constant i64 65536

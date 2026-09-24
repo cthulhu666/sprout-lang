@@ -45,6 +45,24 @@ fn pow_ten(k: Int) -> Double = if k <= 0 then 1.0 else 10.0 * pow_ten(k - 1)
 # genuine infinity. stdlib.math's own `inf` is module-private.
 fn pos_inf() -> Double = 1.0 / 0.0
 
+# 2^63 built by multiplication, not parsed: 2^53 and 2^10 are both exact and so
+# is their product, which makes this an independent reference for the first
+# magnitude that does not fit Int.
+fn two_pow_63() -> Double = 9007199254740992.0 * 1024.0
+
+fn zeros(n: Int) -> String = if n <= 0 then "" else "0" ++ zeros(n - 1)
+
+fn same_bits(a: Maybe Double, b: Maybe Double) -> Bool =
+  match (a, b) with
+  | (Just x, Just y) -> double_to_bits(x) == double_to_bits(y)
+  | _ -> false
+
+# Neither NaN (x == x fails) nor an infinity (inf - inf is NaN).
+fn finite_result(m: Maybe Double) -> Bool =
+  match m with
+  | Nothing -> false
+  | Just x -> (x == x) && ((x - x) == 0.0)
+
 # The full writer -> reader round trip, at the magnitude where the writer switches to
 # exponential form. `double_to_string` renders 10^15 as "1e+15" (%.15g), which is exactly
 # the form the reader used to reject.
@@ -132,6 +150,48 @@ fn main() -> Unit !{IO} =
                has_bits_of(parse_double("1e-9223372036854775808"), 0.0)),
     check_true("INT_MAX exponent saturates to infinity rather than trapping",
                has_bits_of(parse_double("1e9223372036854775807"), pos_inf())),
+
+    # --- the exactness boundary, stated where it actually is ---
+    # A significand below 2^53 converts exactly and a scale of 10^n with n <= 22
+    # is exact, so the whole value is correctly rounded. Above 2^53 the Int ->
+    # Double conversion rounds and the result can be 1 ULP off — an earlier
+    # revision claimed exactness for anything fitting Int, which is four digits
+    # too generous.
+    check_true("a 15-digit fraction is exact",
+               has_bits_of(parse_double("0.123456789012345"),
+                           123456789012345.0 / 1000000000000000.0)),
+    check_true("a 25-digit fraction of trailing zeros is still exactly 0.5",
+               has_bits_of(parse_double("0.5000000000000000000000000"), 1.0 / 2.0)),
+    check_true("2^63, the first magnitude past Int, is exact",
+               has_bits_of(parse_double("9223372036854775808"), two_pow_63())),
+
+    # A run past the exact range must still land on the nearest Double. Both
+    # spellings denote the same one, and the 15-digit side is pinned exact by
+    # the assertion above, so this reads the long side against a known-good
+    # value. Whole-then-divide put it 2 ULP low.
+    check_true("a 21-digit fraction agrees with its correctly-rounded 15-digit twin",
+               same_bits(parse_double("0.846999434047632953572"),
+                         parse_double("0.846999434047633"))),
+
+    # --- an exponent run wider than Int saturates rather than rejecting ---
+    # RFC 8259 bounds no exponent run, and one that overflows Int is far outside
+    # the range where 10^k is finite, so the answer is the saturated one. Only a
+    # STRUCTURALLY bad exponent stays Nothing.
+    check_true("a 20-digit positive exponent saturates to infinity",
+               has_bits_of(parse_double("1e99999999999999999999"), pos_inf())),
+    check_true("a 20-digit negative exponent underflows to zero",
+               has_bits_of(parse_double("1e-99999999999999999999"), 0.0)),
+    check_true("a 20-digit exponent with an explicit + saturates too",
+               has_bits_of(parse_double("1e+99999999999999999999"), pos_inf())),
+    check_true("a double-signed exponent is still Nothing, however wide",
+               is_nothing(parse_double("1e+-99999999999999999999"))),
+
+    # --- a mantissa past Double range, scaled back into range ---
+    # 1e320 is an infinity on its own and 1e-400 is a zero, so multiplying them
+    # gave NaN for a value (1e-80) that is an ordinary Double. Folding the
+    # dropped digits into the exponent means neither operand is ever degenerate.
+    check_true("an overflowing mantissa with a rescuing exponent stays finite",
+               finite_result(parse_double("1" ++ zeros(320) ++ "e-400"))),
 
     # --- a digit run longer than Int can hold is still a valid Double ---
     # A mantissa's digits are a Double's digits. Routing them through `parse_int`

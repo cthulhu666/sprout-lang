@@ -134,7 +134,6 @@ declare i64 @vector_truncate(i64, i64)
 @.cname.15 = private unnamed_addr constant [25 x i8] c"stdlib.mutable.MutMatrix\00"
 @.cfkinds.15 = private unnamed_addr constant [4 x i8] c"iip\00"
 @pow10_clamp = private constant i64 400
-@frac_divide_max = private constant i64 308
 
 define i64 @stdlib.mutable.mutvec_raw(i64 %p$v) {
 entry:

@@ -149,7 +149,6 @@ declare i64 @split_words(i64)
 @.cname.18 = private unnamed_addr constant [37 x i8] c"stdlib.crypto.BytesXorLengthMismatch\00"
 @.cfkinds.18 = private unnamed_addr constant [3 x i8] c"ii\00"
 @pow10_clamp = private constant i64 400
-@frac_divide_max = private constant i64 308
 
 define i64 @stdlib.bytes.length(i64 %p$value) {
 entry:

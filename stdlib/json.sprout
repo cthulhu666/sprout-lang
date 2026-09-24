@@ -121,7 +121,19 @@ fn p_number(s: String, i: Int) -> Maybe (Json, Int) =
                # is, and the same choice JavaScript's JSON.parse makes. A
                # structurally bad token still fails here, since parse_double
                # rejects everything parse_int does bar the width.
-               | Nothing -> map(\x -> (JsonFloat(x), j), parse_double(tok))
+               # A finite result only: past ~309 digits there is no Double for
+               # the value, and a JsonFloat(inf) would parse and then be refused
+               # by the writer's non-finite check — a document that reads has to
+               # be writable. Before the fallback existed this was a parse
+               # error, and for that width it stays one.
+               # Written out rather than via `and_then`: that carries a
+               # `Monad m` constraint, and Monad's superclass chain drags an
+               # Applicative and a Functor dictionary into every consumer of
+               # this module for a two-arm decision.
+               | Nothing ->
+                   match parse_double(tok) with
+                   | Nothing -> Nothing
+                   | Just x -> if is_finite(x) then Just((JsonFloat(x), j)) else Nothing
 
 # --- string (with escapes, incl. \uXXXX and surrogate pairs) --------------------------------
 # The value of the hex digit at byte `i`, or -1 if that byte is not a hex digit. A non-ASCII byte

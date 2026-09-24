@@ -75,6 +75,8 @@ fn field_int_is(input: String, key: String, want: Int) -> Bool =
       Just n = json.json_get_int(fv) else false
   in n == want
 
+fn zeros(n: Int) -> String = if n <= 0 then "" else "0" ++ zeros(n - 1)
+
 # Built by arithmetic, not by parsing: -1.0 * 0.0 is -0.0 under IEEE 754.
 fn neg_zero() -> Double = (0.0 - 1.0) * 0.0
 
@@ -289,6 +291,21 @@ fn main() -> Unit !{IO} =
                                   "ok", 1.5, 0.0001)),
     check_true("an in-range integer is still a JsonInt",
                field_int_is("{\"id\": 42}", "id", 42)),
+
+    # The integer fallback must not hand the writer something it refuses. A run
+    # past ~309 digits has no finite Double, so it stays a parse error rather
+    # than becoming a JsonFloat(inf) that json_stringify then rejects — a
+    # document that parses has to be writable.
+    check_true("an integer with no finite Double is a parse error, not an inf",
+               is_err(json.parse("{\"id\": 1" ++ zeros(320) ++ "}"))),
+    check_true("a 308-digit integer still parses",
+               is_ok(json.parse("{\"id\": 1" ++ zeros(300) ++ "}"))),
+
+    # An exponent run wider than Int saturates in parse_double, so it can no
+    # longer fail the document the way an over-range mantissa used to.
+    check_true("a 20-digit exponent does not poison the document",
+               field_float_approx("{\"a\": 1e-99999999999999999999, \"b\": 2.5}",
+                                  "b", 2.5, 0.0001)),
 
     # Scaling a zero mantissa by an overflowing power of ten gave `0.0 * inf`,
     # i.e. NaN — and json_stringify refuses a non-finite Double, so a conformant
