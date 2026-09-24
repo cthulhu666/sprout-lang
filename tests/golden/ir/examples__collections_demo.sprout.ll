@@ -148,7 +148,6 @@ declare i64 @split_words(i64)
 @.cname.14 = private unnamed_addr constant [29 x i8] c"stdlib.bytes.Utf8DecodeError\00"
 @.cfkinds.14 = private unnamed_addr constant [2 x i8] c"s\00"
 @pow10_clamp = private constant i64 400
-@frac_divide_max = private constant i64 308
 
 define i64 @list_fold_go(i64 %p$step$in, i64 %p$init$in, i64 %p$xs$in) {
 entry:

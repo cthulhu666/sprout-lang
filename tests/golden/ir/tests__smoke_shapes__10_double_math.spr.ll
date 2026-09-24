@@ -146,7 +146,6 @@ declare i64 @double_from_bits(i64)
 @.cname.13 = private unnamed_addr constant [9 x i8] c"IntRange\00"
 @.cfkinds.13 = private unnamed_addr constant [4 x i8] c"iii\00"
 @pow10_clamp = private constant i64 400
-@frac_divide_max = private constant i64 308
 @stdlib.math.pi = global i64 zeroinitializer
 @stdlib.math.two_pi = global i64 zeroinitializer
 @stdlib.math.half_pi = global i64 zeroinitializer

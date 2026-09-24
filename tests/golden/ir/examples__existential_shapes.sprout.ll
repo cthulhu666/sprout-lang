@@ -119,7 +119,6 @@ declare i64 @ref_write(i64, i64)
 @.cname.17 = private unnamed_addr constant [37 x i8] c"examples.existential_shapes.Drawable\00"
 @.cfkinds.17 = private unnamed_addr constant [4 x i8] c"_pp\00"
 @pow10_clamp = private constant i64 400
-@frac_divide_max = private constant i64 308
 
 define i64 @list_each_go(i64 %p$f$in, i64 %p$xs$in) {
 entry:

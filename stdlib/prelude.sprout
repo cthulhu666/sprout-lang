@@ -1764,24 +1764,20 @@ export fn parse_int(s: String) -> Maybe Int =
       if c == '-' then accum_digits(s, 1, 0, false)
       else positive_from_neg_magnitude(accum_digits(s, 0, 0, false))
 
-# 10^k as a Double for any k (k < 0 divides). Applies a scientific-notation
-# exponent in parse_double, and places a short fraction in frac_double.
+# 10^k for k >= 0, and the clamp every caller applies first.
 #
-# The exponent is clamped first. 10^k is already infinity past k = 308 and zero
-# past k = -324, so |k| > 400 saturates whatever the mantissa and the clamp
-# changes no result. It buys two things it is not obvious this function needs:
-# pow10_pos recurses once per unit of k, so an unclamped `1e999999` exhausted the
-# stack; and `0 - k` is checked arithmetic, so k = INT_MIN aborted the process
-# before pow10_pos was ever called — in `parse_double`, which promises not to.
+# 10^k is already infinity past k = 308 and zero past k = -324, so a magnitude
+# beyond 400 saturates whatever the significand and the clamp changes no result.
+# It buys two things it is not obvious the exponent needs: pow10_pos recurses
+# once per unit of k, so an unclamped `1e999999` exhausted the stack; and
+# negating k is checked arithmetic, so k = INT_MIN aborted the process — in
+# `parse_double`, which promises not to.
 let pow10_clamp = 400
 fn clamp_exponent(k: Int) -> Int =
   if k < -pow10_clamp then -pow10_clamp
   else if k > pow10_clamp then pow10_clamp
   else k
 fn pow10_pos(k: Int) -> Double = if k <= 0 then 1.0 else 10.0 * pow10_pos(k - 1)
-fn pow10(k: Int) -> Double =
-  let c = clamp_exponent(k)
-  in if c < 0 then 1.0 / pow10_pos(-c) else pow10_pos(c)
 
 # Split `s` on the first occurrence of single-char `sep` into (before, after); Nothing if
 # absent. Prelude-native (str_find/str_slice) since split_once lives in stdlib.string, which
@@ -1791,96 +1787,115 @@ fn split_on_char(s: String, sep: String) -> Maybe (String, String) =
   in if i < 0 then Nothing
      else Just((str_slice(s, 0, i), str_slice(s, i + str_len(sep), str_len(s))))
 
-# A run of decimal digits as a non-negative Double; empty string -> 0.0 (so an absent int or
-# fraction part reads as zero). Nothing on any non-digit.
+# A mantissa is scanned into a SIGNIFICAND and an EXPONENT, both Ints: the value
+# is `sig * 10^exp`. Nothing in the scan rounds, and nothing in it can reach an
+# infinity, which is what makes the result both accurate and total.
 #
-# Accumulates in Double, NOT through parse_int. These are a Double's digits, so the
-# limit is the value's magnitude, not the run's length: "0.1234567890123456789012345"
-# is an ordinary Double with 25 fraction digits, and routing it through an Int made
-# the 20th digit the failure point. While parse_int wrapped, that was invisible (a
-# silently wrong mantissa); once it became total (bigint-v0 Stage 1) the same shape
-# started REJECTING valid JSON numbers, since stdlib.json sends every non-integer
-# token here.
+# Two simpler shapes were tried and measured against the correctly-rounded value
+# (1500 random runs per length). Placing each digit by its own scale
+# (`acc + d * scale`) rounds once per digit and the scale is itself rounded, so
+# it is wrong even for one digit: 466/1500 at length 1, up to 4 ULP throughout.
+# Accumulating the run whole and dividing by 10^n once is exact while both
+# operands are, but past ~15 digits neither is and the two errors compound:
+# 1217/1500 wrong at length 40 and 1415/1500 at length 300, up to 29 ULP.
+# Holding the leading digits in an Int and letting the rest move the exponent is
+# at most 1 ULP at every length measured, and exact below 2^53.
 #
-# Precision loss past ~17 significant digits is inherent to Double. A run long
-# enough to exceed Double range yields infinity, which is what the exponent path
-# has always done for `1e400` — so the two routes to an out-of-range value agree.
-fn digits_double_go(s: String, i: Int, acc: Double) -> Maybe Double =
+# The significand accumulates NEGATIVELY, as accum_digits does, so it reaches
+# 2^63 — the first magnitude past Int, and where every over-range JSON integer
+# id lands. Its own overflow guard decides how many digits fit, so there is no
+# separate digit budget to keep in step with Int's width.
+
+fn sig_fits(sig: Int, d: Int) -> Bool =
+  (sig > min_int_div10()) || ((sig == min_int_div10()) && (d <= 8))
+
+# Scan `s` into (significand, dropped). A leading zero is not significant and
+# costs nothing; a digit that no longer fits is dropped and counted, for the
+# caller to repay as a power of ten. Nothing on any non-digit.
+fn scan_sig(s: String, i: Int, sig: Int, dropped: Int) -> Maybe (Int, Int) =
   match str_char_at(s, i) with
-  | Nothing -> Just(acc)
+  | Nothing -> Just((sig, dropped))
   | Just c ->
       let d = digit_value(c)
-      in if d < 0 then Nothing else digits_double_go(s, i + 1, (acc * 10.0) + to_double(d))
-
-# A run that fits Int is converted in ONE rounding rather than accumulated a
-# digit at a time: `acc * 10.0 + d` rounds per digit once the running value
-# passes 2^53, so an 18-digit run landed 1 ULP off ("999999999999999999" read as
-# 1.0000000000000001e18). Int holds 19 digits, and Int -> Double is correctly
-# rounded, so every run that short is now exact. `accum_digits` rather than
-# `parse_int`: this is an unsigned digit run, and parse_int would accept a
-# leading '-', making parse_double("--5") read as 5.0.
-fn digits_double(s: String) -> Maybe Double =
-  if str_len(s) <= 0 then Just(0.0)
-  else
-    let Just n = positive_from_neg_magnitude(accum_digits(s, 0, 0, false))
-          else digits_double_go(s, 0, 0.0)
-    in Just(to_double(n))
-
-# The fraction run with each digit placed by its own scale. Only for a run past
-# 309 digits, where the whole-then-divide shape below cannot be used: both the
-# accumulated value and 10^n are then infinity and inf/inf is NaN. `scale`
-# underflowing to 0.0 is harmless — every later digit then contributes 0.0,
-# which is the correct contribution.
-#
-# It is NOT the general path, because a scale is itself a rounded value (0.1/10
-# is 0.010000000000000002, not the nearest Double to 0.01) and the error
-# compounds per digit: applying this to every run made 3 of the 10 one-digit
-# fractions wrong, 42 of 100 two-digit, 510 of 1000 three-digit.
-fn frac_double_go(s: String, i: Int, scale: Double, acc: Double) -> Maybe Double =
-  match str_char_at(s, i) with
-  | Nothing -> Just(acc)
-  | Just c ->
-      let d = digit_value(c)
-          next = scale / 10.0
       in if d < 0 then Nothing
-         else frac_double_go(s, i + 1, next, acc + (to_double(d) * next))
+         else if (sig == 0) && (d == 0) then scan_sig(s, i + 1, sig, dropped)
+         else if sig_fits(sig, d) then scan_sig(s, i + 1, (sig * 10) - d, dropped)
+         else scan_sig(s, i + 1, sig, dropped + 1)
 
-# The fraction run as a Double in [0, 1); empty -> 0.0. Accumulate the digits
-# whole and divide once: for a run Int can hold, that is one exactly-rounded
-# division of two exact operands, so "0.3" is the nearest Double to 0.3 rather
-# than the one above it. Past 308 digits the dividend and 10^n are both infinity
-# and the per-digit path takes over — the only place it is correct.
-#
-# 308, not 17: a long run is not truncated, so 0.<300 zeros>1 keeps its value
-# (dividend 1.0, divisor 1e301) instead of flushing to zero.
-let frac_divide_max = 308
-fn frac_double(s: String) -> Maybe Double =
-  let n = str_len(s)
-  in if n > frac_divide_max then frac_double_go(s, 0, 1.0, 0.0)
-     else map(\v -> v / pow10(n), digits_double(s))
-
-# Non-negative mantissa "int[.frac]" -> Double. `int` or `frac` may be empty (".5", "5.");
-# a lone "." is rejected.
-fn parse_mantissa(mant: String) -> Maybe Double =
+# Non-negative mantissa "int[.frac]" -> (significand, exponent). `int` or `frac`
+# may be empty (".5", "5."); a lone "." is rejected. The exponent repays the
+# digits dropped off the right and pays for the fraction's width, so the value
+# is `sig * 10^(dropped - len(frac))` — and the fraction's leading zeros are
+# paid for by that width rather than by being counted as significant.
+fn parse_mantissa(mant: String) -> Maybe (Int, Int) =
   match split_on_char(mant, ".") with
-  | Nothing -> if str_len(mant) <= 0 then Nothing else digits_double(mant)
+  | Nothing -> if str_len(mant) <= 0 then Nothing else scan_sig(mant, 0, 0, 0)
   | Just (ip, fp) ->
       if (str_len(ip) <= 0) && (str_len(fp) <= 0) then Nothing
-      else match (digits_double(ip), frac_double(fp)) with
-           | (Just iv, Just fv) -> Just(iv + fv)
-           | _ -> Nothing
+      else match scan_sig(ip, 0, 0, 0) with
+           | Nothing -> Nothing
+           | Just (isig, idropped) ->
+               match scan_sig(fp, 0, isig, idropped) with
+               | Nothing -> Nothing
+               | Just (sig, dropped) -> Just((sig, dropped - str_len(fp)))
+
+# `sig * 10^k` as a Double. `sig` is the negatively-accumulated significand, so
+# negating the converted value gives the magnitude — exact for every magnitude
+# the scan accepts, 2^63 included, since Int -> Double is correctly rounded and
+# a sign flip is exact.
+#
+# A zero significand is zero at every scale. Short-circuiting it is also what
+# keeps `0e400` away from `0.0 * inf`, which is NaN — the one value the JSON
+# writer refuses, reachable from a conformant document.
+#
+# DIVIDING for a negative scale rather than multiplying by 10^k: 10^-1 is not
+# representable, so `3.0 * 0.1` rounds twice and yields the Double above 0.3,
+# while `3.0 / 10.0` is one exactly-rounded division of two exact operands.
+fn scale_significand(sig: Int, k: Int) -> Double =
+  if sig == 0 then 0.0
+  else
+    let mag = -to_double(sig)
+        c = clamp_exponent(k)
+    in if c >= 0 then mag * pow10_pos(c) else mag / pow10_pos(-c)
+
+# Whether `s` from `i` is a non-empty run of nothing but digits.
+fn digits_only(s: String, i: Int, seen: Bool) -> Bool =
+  match str_char_at(s, i) with
+  | Nothing -> seen
+  | Just c -> if digit_value(c) < 0 then false else digits_only(s, i + 1, true)
 
 # An exponent's digits, with the optional sign it is allowed to carry: `-` or an explicit `+`
 # (RFC 8259's `exp` production and IEEE 754 both permit the `+`, and `%g` writers emit it —
 # `double_to_string(10.0^15)` is "1e+15"). `parse_int` cannot be used for the `+` case and must
 # not learn to: a `+` is legal ONLY here, never on the mantissa, so teaching `parse_int` about it
 # would make `parse_double("+1.5")` and the JSON reader accept a form the grammar forbids.
-# Accumulating from index 1 skips the `+` and still rejects everything else, so "1e+-3" and a
-# bare "1e+" stay Nothing.
+#
+# A run too WIDE for Int SATURATES rather than failing. RFC 8259 bounds no
+# exponent run, so rejecting one only failed a conformant document — and any run
+# that overflows Int is far outside the range where 10^k is finite, making the
+# saturated answer the correct one anyway. Rejecting it was also inconsistent
+# with itself: "1e9223372036854775807" saturated while one more digit did not.
+#
+# Only a WIDTH failure saturates. Structural garbage stays Nothing, which is why
+# saturation is gated on the run being non-empty and all digits: "1e+", "1e+-3"
+# and a bare "1e" all still fail.
+fn saturated_exponent(es: String, start: Int, neg: Bool) -> Maybe Int =
+  if digits_only(es, start, false)
+  then Just(if neg then -pow10_clamp else pow10_clamp)
+  else Nothing
+
 fn parse_exponent(es: String) -> Maybe Int =
-  if str_starts_with(es, "+")
-  then positive_from_neg_magnitude(accum_digits(es, 1, 0, false))
-  else parse_int(es)
+  let neg = str_starts_with(es, "-")
+      start = if neg || str_starts_with(es, "+") then 1 else 0
+  in match accum_digits(es, start, 0, false) with
+     | Nothing -> saturated_exponent(es, start, neg)
+     # `m` is the negative magnitude, so it IS the value when the sign is `-`.
+     # Only magnitude 2^63 has no positive counterpart, and 2^63 is far past the
+     # clamp, so saturating it loses nothing.
+     | Just m ->
+         if neg then Just(m)
+         else if m == min_int() then saturated_exponent(es, start, neg)
+         else Just(-m)
 
 # Split off an optional 'e'/'E' exponent: returns (mantissa, exponent). No exponent -> 0;
 # a present-but-malformed exponent -> Nothing.
@@ -1896,14 +1911,22 @@ fn split_exponent(body: String) -> Maybe (String, Int) =
 
 # Parse a decimal Double from text: optional leading '-', an integer part, an optional
 # '.' fraction, and an optional 'e'/'E' exponent (with optional sign, '+' included). Returns
-# Nothing on any malformed input, never crashes. Pure Sprout — no strtod builtin: the magnitude
-# is `intpart + frac/10^len(frac)`, then scaled by `10^exp`. Accurate to Double arithmetic
-# (fine for config/JSON data), NOT a bit-exact strtod round-trip: a value with both parts is
-# rounded twice (forming the fraction, then adding it) and can land 1 ULP off. A pure fraction
-# or a pure integer short enough for Int is exact — see digits_double and frac_double.
+# Nothing on any malformed input, never crashes. Pure Sprout — no strtod builtin: the mantissa
+# is scanned into a significand and an exponent (parse_mantissa), which are then combined by
+# scale_significand.
 #
-# A zero magnitude short-circuits the scaling, because `0.0 * inf` is NaN: without it a
-# conformant "0e400" produced a NaN, which json_stringify then refuses to write back.
+# ACCURACY, stated where the boundary actually is. The result is the correctly-rounded Double
+# when the significand is below 2^53 and the scale is a power of ten binary64 holds exactly
+# (|10^k| with k <= 22) — which covers every decimal of at most 15 significant digits. Past
+# that the Int -> Double conversion and 10^k each round, and the result can be 1 ULP off;
+# measured over 1500 random runs per length, at most 1 ULP at every length up to 320 digits.
+# It is NOT a bit-exact strtod round-trip, and closing that needs a correctly-rounded
+# decimal->binary algorithm (BACKLOG P3).
+#
+# TOTALITY. No intermediate can be an infinity meeting a zero, so no input yields NaN: the
+# significand is bounded by Int, the exponent is clamped before 10^k is formed, and a zero
+# significand short-circuits. "0e400" and a 321-digit mantissa scaled back by "e-400" both
+# used to produce NaN — the one value json_stringify refuses, reachable from conformant input.
 #
 # The sign is applied with unary `-`, which lowers to `fneg` — an IEEE sign flip. Subtracting
 # from zero instead would silently drop the sign of "-0", because 0.0 - 0.0 is +0.0 under
@@ -1916,8 +1939,11 @@ export fn parse_double(s: String) -> Maybe Double =
      | Just (mant, e) ->
          match parse_mantissa(mant) with
          | Nothing -> Nothing
-         | Just mag -> let magnitude = if mag == 0.0 then mag else mag * pow10(e)
-                       in Just(if neg then -magnitude else magnitude)
+         | Just (sig, k) ->
+             # `e` is clamped before it is added: it can be INT_MAX, and `k + e` is
+             # checked arithmetic.
+             let magnitude = scale_significand(sig, k + clamp_exponent(e))
+             in Just(if neg then -magnitude else magnitude)
 extern fn int_to_string(n: Int) -> String
 extern fn double_to_string(x: Double) -> String
 extern fn char_to_string(c: Char) -> String

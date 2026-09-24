@@ -5383,7 +5383,6 @@ declare i64 @fs_rename(i64, i64)
 @.cname.389 = private unnamed_addr constant [38 x i8] c"stdlib.compiler.iface_codec.IfaceFile\00"
 @.cfkinds.389 = private unnamed_addr constant [7 x i8] c"ispppp\00"
 @pow10_clamp = private constant i64 400
-@frac_divide_max = private constant i64 308
 @stdlib.compiler.source.entry_module_name = global i64 zeroinitializer
 @stdlib.compiler.source.entry_module_prefix = global i64 zeroinitializer
 @stdlib.compiler.source.no_prelude_directive = global i64 zeroinitializer

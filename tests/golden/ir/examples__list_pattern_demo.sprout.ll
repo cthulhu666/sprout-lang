@@ -146,7 +146,6 @@ declare i64 @ref_write(i64, i64)
 @.cname.18 = private unnamed_addr constant [35 x i8] c"examples.list_pattern_demo.Unknown\00"
 @.cfkinds.18 = private unnamed_addr constant [2 x i8] c"p\00"
 @pow10_clamp = private constant i64 400
-@frac_divide_max = private constant i64 308
 
 define i64 @examples.list_pattern_demo.parse_args(i64 %p$args) {
 entry:

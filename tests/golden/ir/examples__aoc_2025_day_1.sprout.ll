@@ -131,7 +131,6 @@ declare i64 @ref_write(i64, i64)
 @.cname.17 = private unnamed_addr constant [32 x i8] c"examples.aoc_2025_day_1.Answers\00"
 @.cfkinds.17 = private unnamed_addr constant [3 x i8] c"ii\00"
 @pow10_clamp = private constant i64 400
-@frac_divide_max = private constant i64 308
 
 define i64 @list_fold_go(i64 %p$step$in, i64 %p$init$in, i64 %p$xs$in) {
 entry:
