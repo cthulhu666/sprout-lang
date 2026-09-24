@@ -1,0 +1,16 @@
+module main
+
+import stdlib.math.bigint as bigint
+
+# `shl` bounds its count: without one, `shl(from_int(1), 2^62)` asks for 1.7e17 limbs
+# and never returns. It is the one bit entry point that needs an explicit bound —
+# `shr` short-circuits a large count to zero, and `mul` refuses past 2047 limbs.
+#
+# The count is `4611686018427387904 + list_length(args)` and `args` is empty when the
+# binary runs with no arguments, so it is 2^62 at RUNTIME but neither the Sprout
+# compiler nor clang can fold it away. Without the guard this hangs instead of failing.
+fn main() -> Unit !{IO} =
+  do
+    args <- argv_all()
+    let huge = bigint.shl(bigint.from_int(1), 4611686018427387904 + list_length(args))
+    print(bigint.to_string(huge))

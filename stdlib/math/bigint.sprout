@@ -437,8 +437,21 @@ export fn test_bit(value: BigInt, index: Int) -> Bool =
 
 # A negative count panics, matching `stdlib.bits` — the message names this module so
 # the report does not point at an intrinsic the caller never wrote.
+# The largest count `shl` will act on. NOT a representation limit --- a wider value is
+# legal and `shl` is linear --- but past this a count is a bug rather than a request.
+# Deliberately far above `mul_bit_ceiling()` rather than equal to it: building a value
+# beyond the multiply ceiling is a thing callers legitimately do, and
+# tests/overflow_smoke/bigint_mul_ceiling.spr shifts by 53,249 to do exactly that.
+fn shl_bit_ceiling() -> Int = 1048576
+
+# The COUNT is bounded too, and only the count: `shl(from_int(1), 2^62)` asks for
+# 1.7e17 limbs, which is not a slow answer but no answer at all. `shr` needs no such
+# guard --- a large count there short-circuits to zero.
 export fn shl(value: BigInt, count: Int) -> BigInt =
   if count < 0 then panic("bigint.shl: negative shift count")
+  else if count > shl_bit_ceiling() then
+    panic("bigint.shl: shift count above the " ++ int_to_string(shl_bit_ceiling())
+            ++ "-bit ceiling")
   else make(sign_of(value), shl_mag(mag_of(value), count))
 
 export fn shr(value: BigInt, count: Int) -> BigInt =
@@ -452,16 +465,39 @@ fn byte_at(raw: Bytes, index: Int) -> Int =
   | Just value -> value
   | Nothing -> 0
 
-fn from_bytes_go(raw: Bytes, index: Int, total: Int, acc: Vec Int) -> Vec Int =
-  if index == total then acc
+# Byte `index` counted from the LEAST significant end, zero past either edge, so a
+# limb window may overhang the top of the input.
+fn byte_at_le(raw: Bytes, total: Int, index: Int) -> Int =
+  if index < 0 || index >= total then 0
+  else byte_at(raw, total - 1 - index)
+
+# Bits [offset, offset + 26) of the big-endian input, as one limb. Four bytes always
+# cover the span: offset is a multiple of 26, so offset mod 8 is 0, 2, 4 or 6, and
+# 6 + 26 = 32.
+fn limb_from_bytes(raw: Bytes, total: Int, offset: Int) -> Int =
+  let index = offset / 8
+      shift = offset - index * 8
+      word = byte_at_le(raw, total, index) + byte_at_le(raw, total, index + 1) * 256 +
+             byte_at_le(raw, total, index + 2) * 65536 +
+             byte_at_le(raw, total, index + 3) * 16777216
+  in bit_and(bit_shr_zf(word, shift), limb_mask())
+
+# Limbs high-first, which is the order `mag_of_high_first` wants.
+fn from_bytes_go(raw: Bytes, total: Int, index: Int, count: Int,
+                 acc: List Int) -> List Int =
+  if index >= count then acc
   else
-    from_bytes_go(raw, index + 1, total,
-                  add_mag(shl_mag(acc, 8), small_mag(byte_at(raw, index))))
+    from_bytes_go(raw, total, index + 1, count,
+                  Cons(limb_from_bytes(raw, total, index * limb_bits()), acc))
 
 # Unsigned big-endian, so an empty or all-zero input is zero. The sign is not encoded:
 # `to_bytes_be` refuses a negative value rather than inventing a convention for it.
 export fn from_bytes_be(raw: Bytes) -> BigInt =
-  make(false, from_bytes_go(raw, 0, bytes.length(raw), vec_empty()))
+  let total = bytes.length(raw)
+  in make(false,
+          mag_of_high_first(
+            from_bytes_go(raw, total, 0,
+                          (total * 8 + limb_bits() - 1) / limb_bits(), Nil)))
 
 fn byte_of_mag(mag: Vec Int, position: Int) -> Int =
   let bit = position * 8
@@ -508,21 +544,32 @@ fn digit_of(ch: Char, radix: Int) -> Maybe Int =
   | Nothing -> Nothing
   | Just value -> if value < radix then Just(value) else Nothing
 
-fn accumulate(raw: String, index: Int, total: Int, radix: Int, negative: Bool,
-              acc: Vec Int) -> Result ParseError BigInt =
+# Digits are ASCII, so the byte IS the codepoint below 128 and the existing rule
+# applies unchanged. Above 128 nothing is a digit, whatever it decodes to.
+fn digit_of_byte(b: Int, radix: Int) -> Maybe Int =
+  if b >= 128 then Nothing
+  else digit_of(char_from_codepoint(b), radix)
+
+# Indexed over BYTES, not codepoints: `string.char_at_or` rescans from byte 0, so a
+# codepoint walk is quadratic in the digit count on its own. The index still reports
+# the same position --- every byte before a failure is an ASCII digit, so the byte and
+# codepoint offsets coincide there --- and the error path decodes the real character.
+fn accumulate(raw: String, digits: Bytes, index: Int, total: Int, radix: Int,
+              negative: Bool, acc: Vec Int) -> Result ParseError BigInt =
   if index == total then Ok(make(negative, acc))
   else
-    let ch = string.char_at_or(raw, index, ' ')
-    in match digit_of(ch, radix) with
-       | Nothing -> Err(BigIntBadDigit(index, string.string_from_char(ch)))
-       | Just value ->
-           accumulate(raw, index + 1, total, radix, negative,
-                      add_mag(mul_small(acc, radix), small_mag(value)))
+    match digit_of_byte(byte_at(digits, index), radix) with
+    | Nothing ->
+        Err(BigIntBadDigit(index,
+                           string.string_from_char(string.char_at_or(raw, index, ' '))))
+    | Just value ->
+        accumulate(raw, digits, index + 1, total, radix, negative,
+                   add_mag(mul_small(acc, radix), small_mag(value)))
 
-fn scan_digits(raw: String, start: Int, total: Int, radix: Int,
+fn scan_digits(raw: String, digits: Bytes, start: Int, total: Int, radix: Int,
                negative: Bool) -> Result ParseError BigInt =
   if start == total then Err(BigIntNoDigits(start))
-  else accumulate(raw, start, total, radix, negative, vec_empty())
+  else accumulate(raw, digits, start, total, radix, negative, vec_empty())
 
 fn has_hex_prefix(raw: String, start: Int) -> Bool =
   string.char_at_or(raw, start, ' ') == '0'
@@ -532,14 +579,15 @@ fn has_hex_prefix(raw: String, start: Int) -> Bool =
 # Decimal, or `0x`-prefixed hex, with an optional leading sign. No digit separators in
 # v0. Leading zeros are accepted and normalised away.
 export fn from_string(raw: String) -> Result ParseError BigInt =
-  let total = string.length(raw)
+  let digits = bytes.from_string(raw)
+      total = bytes.length(digits)
   in if total == 0 then Err(BigIntEmptyInput)
      else
        let first = string.char_at_or(raw, 0, ' ')
            start = if first == '-' || first == '+' then 1 else 0
        in if has_hex_prefix(raw, start) then
-            scan_digits(raw, start + 2, total, 16, first == '-')
-          else scan_digits(raw, start, total, 10, first == '-')
+            scan_digits(raw, digits, start + 2, total, 16, first == '-')
+          else scan_digits(raw, digits, start, total, 10, first == '-')
 
 # 10^7 is the largest power of ten below the radix, so each step peels seven decimal
 # digits through the single-limb division path. Every chunk but the most significant
