@@ -1,11 +1,12 @@
-# Int Overflow Policy — Design Decision (DECIDED, UNIMPLEMENTED)
+# Int Overflow Policy — Design Decision (DECIDED, IMPLEMENTED)
 
-**Status:** DECIDED 2026-09-22 — **Option A** (trap on overflow). Findings documented
-2026-07-06; deferred until an escape hatch existed for programs that genuinely need values
-above i64. `BigInt` is that escape hatch, so the two land together: see
-`docs/bigint-v0.md`, which carries the decision and the staged implementation. Implementation
-is pending Stage 1 there; §5–§7 below record the decision and the resolution of the items it
-was coupled to (rewritten from the pre-decision record now that both have landed).
+**Status:** DECIDED 2026-09-22, **implemented** by `docs/bigint-v0.md` Stage 1 — **Option A**
+(trap on overflow). Findings documented 2026-07-06; deferred until an escape hatch existed for
+programs that genuinely need values above i64. `BigInt` is that escape hatch, so the two landed
+together: see `docs/bigint-v0.md`, which carries the decision and the staged implementation.
+`+`, `-`, `*` and unary negation panic on overflow, `INT_MIN / -1` panics, and an over-range
+decimal or radix literal is a compile error; §5–§7 below record the decision and the resolution
+of the items it was coupled to.
 **Couples to:** W9/X4 (integer-literal overflow, `docs/fundamentals-code-review-handoff-2026-07-03.md`,
 resolved — §7) and W7's deferred `INT_MIN / -1` operator guard (resolved — `docs/bigint-v0.md` §5.1).
 

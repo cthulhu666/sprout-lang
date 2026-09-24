@@ -23,8 +23,8 @@ import stdlib.bits
 #         (0, or all sign bits for the arithmetic shift); a negative count
 #         PANICS. Unguarded, `shl i64 %x, 64` is LLVM poison.
 #   §5.2  bits shifted off the TOP are discarded and that is NOT an error.
-#         bit_shl(1, 63) is INT_MIN, total, and must stay total even if `*`
-#         later gains overflow trapping.
+#         bit_shl(1, 63) is INT_MIN and total. `*` gained overflow trapping in
+#         bigint-v0 Stage 1 and this did not move; it must not.
 #
 # THE ARGV COUNTS ARE LOAD-BEARING, NOT DECORATION. A literal shift count is
 # constant-folded at translate time, so a test written only with literals never
@@ -85,13 +85,26 @@ fn main() -> Unit !{IO} =
       bit_shr_zf(-1, 63), 1)
 
     # --- §5.2 value-overflow: high bits are DISCARDED, and it is not an error ---
-    # If a shared overflow guard is ever applied to `bit_shl` these turn into
+    # `*` now traps on overflow (bigint-v0 Stage 1). `bit_shl` is exempt and
+    # stayed total; if a shared guard is ever applied to it these turn into
     # panics rather than failures, which is exactly what must not happen.
     assert_eq(state, "shl to the sign bit is INT_MIN, not an overflow error",
       bit_shl(1, 63), -9223372036854775808)
     assert_eq(state, "shl discarding two bits is still total",
       bit_shl(3, 63), -9223372036854775808)
     assert_eq(state, "shl discarding every bit gives 0", bit_shl(2, 63), 0)
+
+    # The three above fold at translate time — both operands are literals — so
+    # they pin the CONSTANT path only, and the exemption they describe is a
+    # property of the emitted code. Repeated through `zero` so the value reaches
+    # the multiply's guard CFG at runtime: `dyn 1 << 63` is the shift that would
+    # trap if it were lowered as `1 * 2^63`.
+    assert_eq(state, "shl to the sign bit is total at RUNTIME too",
+      bit_shl(1 + zero, 63), -9223372036854775808)
+    assert_eq(state, "shl discarding every bit is total at RUNTIME too",
+      bit_shl(2 + zero, 63), 0)
+    assert_eq(state, "a runtime value shifted off the top discards, not traps",
+      bit_shl(-9223372036854775807 - 1 + zero, 1), 0)
 
     # --- §5.3 count boundary, CONSTANT counts (the folded path) ---
     assert_eq(state, "shl by 63 is in range", bit_shl(1, 63), -9223372036854775808)

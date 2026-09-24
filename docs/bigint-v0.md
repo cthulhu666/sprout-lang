@@ -625,7 +625,7 @@ snapshots (Definition of Done #12 covers files *added* to `examples/` or `tests/
 
 Four stages, four PRs. Each is independently landable and independently revertible.
 
-### Stage 1 — `Int` traps on overflow
+### Stage 1 — `Int` traps on overflow (landed)
 
 - `ast_to_ir.sprout`: guard CFG for `+`/`-`/`*`/negate, following W7's division-by-zero pattern.
   Built in `ast_to_ir`, never in the `ir_lowering` text layer — block-splitting there breaks phi
@@ -646,6 +646,8 @@ Four stages, four PRs. Each is independently landable and independently revertib
   `iface_codec.parse_unsigned_atom`.
 - `stdlib/rng.sprout:11`'s header comment: correct the stated bound from `A * (M - 1) < 2^61` to
   `< 2^62` (§5.2) — a one-line comment fix, riding along on the reseed Stage 1 already pays for.
+  (`rng_hash2` needed more than the comment: the *coordinates* had to be reduced before their
+  multiply too, not only the seed. Found by the ensemble review of the whole arc, PR #351.)
 - X4, with the §5.3 radix carve-out and the unary-minus `INT_MIN` carve-out.
 - `docs/spec-v0.md` §6.5 and §8.4 rewritten; `docs/int-overflow-policy-decision.md` marked
   decided; `BACKLOG.md` entries for the overflow policy and for `INT_MIN / -1` deleted as part of
