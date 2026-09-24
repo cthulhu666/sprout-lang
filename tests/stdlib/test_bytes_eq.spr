@@ -1,0 +1,65 @@
+import stdlib.test (check_true, check_false, run_suite)
+import stdlib.bytes as bytes
+
+# `instance Eq Bytes` is structural, so every case below builds its two sides by DIFFERENT routes.
+# A pointer-identity compare passes a test that reuses one value and fails these.
+
+fn of(raw: String) -> Bytes =
+  bytes.from_string(raw)
+
+# A Bytes field under `deriving (Eq)`: the derived body compares it through this instance, which is
+# the shape a parsed header record has.
+type Frame (..) deriving (Eq) =
+  | Frame Bytes Int
+
+# "ab" ++ "c", never the literal, so equality cannot be identity.
+fn abc_built() -> Bytes =
+  bytes.append(of("ab"), of("c"))
+
+# `a`, NUL, `b` — a byte sequence no String can hold. A compare that detoured through String would
+# stop at the NUL and call this equal to `a`, NUL, `x`.
+fn nul_ab() -> Bytes =
+  bytes.append(bytes.append(of("a"), bytes.singleton(0)), of("b"))
+
+fn nul_ax() -> Bytes =
+  bytes.append(bytes.append(of("a"), bytes.singleton(0)), of("x"))
+
+fn main() -> Unit !{IO} =
+  run_suite("bytes_eq", [
+    check_true("equal contents built by different routes", of("abc") == abc_built()),
+    check_false("differing last byte", of("abc") == of("abd")),
+    check_false("differing first byte", of("abc") == of("xbc")),
+
+    # Both length orders: a compare that checks only one side's length passes one and fails the other.
+    check_false("prefix is not equal to the longer value", of("ab") == of("abc")),
+    check_false("longer value is not equal to its prefix", of("abc") == of("ab")),
+
+    check_true("empty equals empty", bytes.empty() == bytes.empty()),
+    check_false("empty does not equal non-empty", bytes.empty() == of("a")),
+    check_false("non-empty does not equal empty", of("a") == bytes.empty()),
+
+    check_true("single byte equal", bytes.singleton(7) == bytes.singleton(7)),
+    check_false("single byte differing", bytes.singleton(7) == bytes.singleton(8)),
+
+    # Byte-exactness past a NUL, which is what a Bytes compare exists for.
+    check_true("equal across an embedded NUL", nul_ab() == nul_ab()),
+    check_false("differing only after an embedded NUL", nul_ab() == nul_ax()),
+
+    check_true("!= is the negation", of("abc") != of("abd")),
+    check_false("!= is false for equals", of("abc") != abc_built()),
+
+    # Through the CLASS, not the operator: `Eq (List a) where Eq a` forwards the dictionary, which
+    # the direct `==` above would devirtualize away.
+    check_true("List Bytes equality forwards the dictionary",
+      [of("ab"), of("cd")] == [bytes.take(abc_built(), 2), of("cd")]),
+    check_false("List Bytes inequality", [of("ab")] == [of("ac")]),
+    check_true("list_member finds a structurally equal element",
+      list_member(abc_built(), [of("x"), of("abc")])),
+    check_false("list_member rejects an absent element",
+      list_member(of("abd"), [of("x"), of("abc")])),
+
+    check_true("deriving (Eq) compares a Bytes field structurally",
+      Frame(of("abc"), 1) == Frame(abc_built(), 1)),
+    check_false("deriving (Eq) sees a differing Bytes field",
+      Frame(of("abc"), 1) == Frame(of("abd"), 1))
+  ])
