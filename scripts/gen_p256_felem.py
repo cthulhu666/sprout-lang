@@ -19,7 +19,7 @@ def felem_pat(prefix):
 
 
 def acc_pat(prefix):
-    return "Acc " + " ".join("%s%d" % (prefix, i) for i in range(N + 1))
+    return "Acc " + " ".join("%s%d" % (prefix, i) for i in range(N))
 
 
 # ---- cios_step ----
@@ -40,7 +40,6 @@ for i in range(N):
     lets.append("v%d = t%d + a%d * bi%s" % (i, i, i, carry))
     lets.append("u%d = bit_and(v%d, %d)" % (i, i, MASK))
     lets.append("c%d = bit_shr(v%d, %d)" % (i, i, BITS))
-lets.append("u10 = t10 + c9")
 lets.append("m = u0")
 for i in range(N):
     carry = "" if i == 0 else " + d%d" % (i - 1)
@@ -49,12 +48,12 @@ for i in range(N):
     if i > 0:
         lets.append("r%d = bit_and(w%d, %d)" % (i - 1, i, MASK))
     lets.append("d%d = bit_shr(w%d, %d)" % (i, i, BITS))
-lets.append("r9 = u10 + d9")
+lets.append("r9 = c9 + d9")
 first = True
 for line in lets:
     w(("          let " if first else "              ") + line)
     first = False
-w("          in Acc(%s, 0)" % ", ".join("r%d" % i for i in range(N)))
+w("          in Acc(%s)" % ", ".join("r%d" % i for i in range(N)))
 w("")
 
 # ---- conditional subtract of p ----
@@ -90,7 +89,9 @@ for i in range(N):
     carry = "" if i == 0 else " + c%d" % (i - 1)
     lets.append("s%d = a%d + b%d%s" % (i, i, i, carry))
     lets.append("r%d = bit_and(s%d, %d)" % (i, i, MASK))
-    lets.append("c%d = bit_shr(s%d, %d)" % (i, i, BITS))
+    # No carry out of the top limb: see the precondition above.
+    if i < N - 1:
+        lets.append("c%d = bit_shr(s%d, %d)" % (i, i, BITS))
 first = True
 for line in lets:
     w(("          let " if first else "              ") + line)
@@ -117,7 +118,9 @@ for i in range(N):
     carry = "" if i == 0 else " + e%d" % (i - 1)
     lets.append("g%d = r%d + k9 * %d%s" % (i, i, PL[i], carry))
     lets.append("f%d = bit_and(g%d, %d)" % (i, i, MASK))
-    lets.append("e%d = bit_shr(g%d, %d)" % (i, i, BITS))
+    # The carry out of the top limb is the 2^260 the borrow introduced; it is dropped.
+    if i < N - 1:
+        lets.append("e%d = bit_shr(g%d, %d)" % (i, i, BITS))
 first = True
 for line in lets:
     w(("          let " if first else "              ") + line)
@@ -155,7 +158,7 @@ w('''# Montgomery product: mont_mul(x*R, y*R) is (x*y)*R, so a chain of them sta
 w("fn mont_mul(a: Felem, b: Felem) -> Felem =")
 w("  match b with")
 w("  | %s ->" % felem_pat("b"))
-w("      let z = Acc(%s)" % ", ".join(["0"] * (N + 1)))
+w("      let z = Acc(%s)" % ", ".join(["0"] * N))
 for i in range(N):
     prev = "z" if i == 0 else "s%d" % (i - 1)
     w("          s%d = cios_step(%s, a, b%d)" % (i, prev, i))
