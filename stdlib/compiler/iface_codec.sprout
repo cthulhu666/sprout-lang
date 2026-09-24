@@ -561,8 +561,11 @@ fn decode_iface_v2_tail(s: String, bytes: Bytes, i: Int, total: Int, version: In
 # — from v5 on that matters doubly, since an older iface decoded leniently would
 # silently read every `borrowing`/`once` parameter as consuming, which is the
 # exact silent erasure both milestones exist to remove.
+# v10: `(TypeArrow …)` gained a ParamMode field, so an arrow TypeExpr on the wire
+# now says how its parameter is taken. A v9 iface has no such field and would
+# decode every arrow as consuming — the same silent erasure as above, one layer up.
 fn decode_iface_version(s: String) -> Maybe Int =
-  if s == "9" then Just(9) else Nothing
+  if s == "10" then Just(10) else Nothing
 
 fn decode_named_scheme_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List NamedScheme, Int) =
   match expect_char(s, bytes, i, total, '(') with
@@ -669,11 +672,11 @@ fn typeexpr_to_type_with_vars(te: ast.TypeExpr, local_vars: Dict types.Type) -> 
   # to discover the two walks disagree. Pinned by `just effect-report-smoke`,
   # which asserts on the ENCODED form, since that is the only place this walk's
   # output is visible.
-  | ast.TypeArrow param ret effs ->
+  | ast.TypeArrow param ret effs mode ->
       types.TFunc(typeexpr_to_type_with_vars(param, local_vars),
                   typeexpr_to_type_with_vars(ret, local_vars),
                   types.effect_from_labels(effs),
-                  types.OwnConsume)
+                  types.ownership_of_mode(ast.mode_is_borrowing(mode), ast.mode_is_once(mode)))
   | ast.TypeThunk ret effs ->
       types.TThunk(typeexpr_to_type_with_vars(ret, local_vars),
                    types.effect_from_labels(effs))
@@ -1148,8 +1151,9 @@ export fn encode_ast_typeexpr(te: ast.TypeExpr) -> String =
       string_concat_many(["(TypeName ", encode_quoted_str(name), ")"])
   | ast.TypeApply base arg ->
       string_concat_many(["(TypeApply ", encode_ast_typeexpr(base), " ", encode_ast_typeexpr(arg), ")"])
-  | ast.TypeArrow param ret effects ->
-      string_concat_many(["(TypeArrow ", encode_ast_typeexpr(param), " ", encode_ast_typeexpr(ret), " ", encode_maybe_str_list(effects), ")"])
+  | ast.TypeArrow param ret effects mode ->
+      string_concat_many(["(TypeArrow ", encode_ast_typeexpr(param), " ", encode_ast_typeexpr(ret), " ",
+                          encode_maybe_str_list(effects), " ", encode_param_mode(mode), ")"])
   | ast.TypeThunk ret effects ->
       string_concat_many(["(TypeThunk ", encode_ast_typeexpr(ret), " ", encode_maybe_str_list(effects), ")"])
   | ast.TypeEffect inner labels ->
@@ -1695,8 +1699,9 @@ fn decode_typearrow_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast
   let Just(param, j) = decode_ast_typeexpr_at(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing
       Just(ret, k) = decode_ast_typeexpr_at(s, bytes, skip_ws(s, bytes, j, total), total) else Nothing
       Just(effects, m) = decode_maybe_str_list_at(s, bytes, skip_ws(s, bytes, k, total), total) else Nothing
-      Just end = expect_char(s, bytes, skip_ws(s, bytes, m, total), total, ')') else Nothing
-  in Just((ast.TypeArrow(param, ret, effects), end))
+      Just(mode_tag, n) = decode_quoted_str_at(s, bytes, skip_ws(s, bytes, m, total), total) else Nothing
+      Just end = expect_char(s, bytes, skip_ws(s, bytes, n, total), total, ')') else Nothing
+  in Just((ast.TypeArrow(param, ret, effects, param_mode_from_str(mode_tag)), end))
 
 fn decode_typethunk_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.TypeExpr, Int) =
   let Just(ret, j) = decode_ast_typeexpr_at(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing

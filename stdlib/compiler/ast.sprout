@@ -7,10 +7,16 @@ import stdlib.compiler.source as source
 
 # TypeThunk is `() -> T`: an arrow with no parameter, NOT `Unit -> T`. The two
 # are different types and a `fn f()` declaration means the former.
+#
+# TypeArrow's ParamMode is how its parameter is taken, written `(borrowing T) -> R`.
+# It mirrors types.TFunc's Ownership, so a function-typed parameter over a linear
+# value can say whether calling it discharges the caller's obligation. The slot
+# is on the arrow rather than on a wrapper variant so a mode is unrepresentable
+# anywhere but a parameter position.
 export type TypeExpr (..) =
   | TypeName String
   | TypeApply TypeExpr TypeExpr
-  | TypeArrow TypeExpr TypeExpr (Maybe (List String))
+  | TypeArrow TypeExpr TypeExpr (Maybe (List String)) ParamMode
   | TypeThunk TypeExpr (Maybe (List String))
   | TypeEffect TypeExpr (List String)
   | TupleType (List TypeExpr)
@@ -81,6 +87,16 @@ export fn mode_is_once(m: ParamMode) -> Bool =
   match m with
   | ModeOnce -> true
   | _ -> false
+
+# The way back, for a TypeExpr rebuilt from a resolved type (an eta wrapper's
+# annotation, a constraint key). Takes the same Bool pair the predicates above
+# return — `types.ownership_is_borrow`/`ownership_is_once` supply them — so the
+# two modules still need not know each other. ModeConsuming, not ModeDefault:
+# the two are the same ownership and only one of them survives a round trip.
+export fn mode_of_flags(is_borrow: Bool, is_once: Bool) -> ParamMode =
+  if is_borrow then ModeBorrowing
+  else if is_once then ModeOnce
+  else ModeConsuming
 
 export fn param_mode_of(p: Param) -> ParamMode =
   match p with

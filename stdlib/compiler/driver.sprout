@@ -55,12 +55,21 @@ fn q_list(items: List String) -> List String =
 # ---------------------------------------------------------------------------
 # TypeExpr
 
-fn dump_type_arrow(left: ast.TypeExpr, right: ast.TypeExpr, maybe_effs: Maybe (List String)) -> String =
+# The mode is appended only when one was written, so an unmarked arrow dumps
+# exactly as it always has and existing diagnostic fixtures are untouched.
+fn dump_type_arrow(left: ast.TypeExpr, right: ast.TypeExpr, maybe_effs: Maybe (List String),
+                   mode: ast.ParamMode) -> String =
   match maybe_effs with
   | Nothing ->
-      sexp("type-arrow", [dump_type(left), dump_type(right)])
+      sexp("type-arrow", [dump_type(left), dump_type(right)] ++ dump_mode_items(mode))
   | Just effs ->
-      sexp("type-arrow", [dump_type(left), dump_type(right), dump_effects_list(effs)])
+      sexp("type-arrow",
+        [dump_type(left), dump_type(right), dump_effects_list(effs)] ++ dump_mode_items(mode))
+
+fn dump_mode_items(mode: ast.ParamMode) -> List String =
+  if ast.mode_is_borrowing(mode) then ["(param-mode borrowing)"]
+  else if ast.mode_is_once(mode) then ["(param-mode once)"]
+  else Nil
 
 fn dump_type_thunk(right: ast.TypeExpr, maybe_effs: Maybe (List String)) -> String =
   match maybe_effs with
@@ -75,8 +84,8 @@ fn dump_type(t: ast.TypeExpr) -> String =
       sexp("type-name", Cons(q(name), Nil))
   | ast.TypeApply base arg ->
       sexp("type-apply", [dump_type(base), dump_type(arg)])
-  | ast.TypeArrow left right maybe_effs ->
-      dump_type_arrow(left, right, maybe_effs)
+  | ast.TypeArrow left right maybe_effs mode ->
+      dump_type_arrow(left, right, maybe_effs, mode)
   | ast.TypeThunk right maybe_effs ->
       dump_type_thunk(right, maybe_effs)
   | ast.TypeEffect base effs ->

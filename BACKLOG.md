@@ -1676,14 +1676,6 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   patterns count. A's cost: `type linear Wrap = Wrap TcpConnection` plus `Wrap _` silently leaks an
   fd and looks deliberate. Survey Rust's `let _ =` vs `let _x =` and Austral's linear-field rules
   first.
-- [ ] `P2` **`borrowing` inside arrow-type syntax.** `fn apply(g: (borrowing File) -> Int, f: File)`
-  cannot be written — arrow types have no ownership slot, so an annotated arrow means *consuming*.
-  **Real and not blocked by M4.4:** a function-typed *parameter* over a linear value typechecks
-  today (an early M4.6 draft claimed otherwise and was wrong). Deferred for cost: a parser change
-  (hence the 2-step bootstrap), an ownership field on `ast.TypeExpr`'s arrow with its own fan-out,
-  plus formatter and TypeExpr-codec work — and mixing a parser change into a type-system change is
-  what Collaboration Rule 2 warns against. Purely additive; it reuses M4.6's `types.Ownership`.
-  Fixture: `tests/conformance/type_error/borrow_fn_as_value`.
 - [ ] `P3` **The effect-bind fallback still types `x <- e` as the payload.** `do_bind_type` cannot
   see the monad kind, so for `e : Container Linear !{IO}` it strips a type argument and tracks the
   payload rather than the container. The shape that made this `P2` is gone: a phantom position is no

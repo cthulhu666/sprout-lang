@@ -61,9 +61,41 @@ instance Closer Int
 
 fn via_consuming(f: File) -> Int = shut(5, f)
 
+# --- 4. `borrowing` inside an ARROW TYPE -----------------------------------
+# An annotated arrow used to mean CONSUMING with no way to say otherwise, so a
+# function-typed parameter over a linear value always ate it and the
+# with-resource combinator could not be written at all. `work` borrows, so
+# `with_file` still owns the File afterwards and is the one that releases it —
+# which is the whole point: the release cannot be forgotten by a caller.
+fn with_file(n: Int, work: (borrowing File) -> Int) -> Int =
+  do
+    let f = File(n)
+    let r = work(f)
+    r + release(f)
+
+fn via_with_resource(n: Int) -> Int = with_file(n, peek)
+
+# The combinator is worth having only if the caller may pass its own logic, not
+# just a named borrowing function.
+fn twice_peeked(f: borrowing File) -> Int = peek(f) + peek(f)
+
+fn via_with_resource_composed(n: Int) -> Int = with_file(n, twice_peeked)
+
+# A `consuming` arrow is spellable too, and is what an annotated arrow already
+# meant. Here `work` eats the File, so `with_file_consuming` must NOT release it.
+fn with_file_consuming(n: Int, work: (consuming File) -> Int) -> Int =
+  do
+    let f = File(n)
+    work(f)
+
+fn via_with_resource_consuming(n: Int) -> Int = with_file_consuming(n, release)
+
 fn main() -> Unit !{IO} =
   run_suite("linear_borrow_in_type", [
     check_eq("borrowing function used as a value", via_value(File(9)), 9),
     check_eq("borrowing parameter on a class method", via_class(File(4)), 11),
-    check_eq("consuming on an instance, default on the class", via_consuming(File(6)), 11)
+    check_eq("consuming on an instance, default on the class", via_consuming(File(6)), 11),
+    check_eq("a borrowing arrow type lets the callee keep the resource", via_with_resource(12), 12),
+    check_eq("a borrowing arrow accepts any borrowing function", via_with_resource_composed(13), 13),
+    check_eq("a consuming arrow type hands the resource over", via_with_resource_consuming(14), 14)
   ])

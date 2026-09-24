@@ -301,9 +301,59 @@ export fn parse_type_expr(tokens: Vec token.Token, i: Int) -> Result ParseError 
   match match_empty_params(tokens, i) with
   | Just i2 -> parse_thunk_type(tokens, i2)
   | Nothing ->
+      match arrow_param_mode_at(tokens, i) with
+      | Just (mode, i2) -> parse_moded_arrow(tokens, i2, mode)
+      | Nothing ->
+          do
+            (left, i2) <- parse_type_apply(tokens, i)
+            parse_type_expr_cont(tokens, i2, left)
+
+# An ownership modifier inside an arrow's PARAMETER: `(borrowing File) -> Int`.
+# The mode is written inside the parentheses because that is where the type it
+# applies to is, matching Swift's `(borrowing T) -> R`; the parens are then the
+# parameter's own, not a grouping the author could drop.
+#
+# Recognised only as `( <modifier> <type-atom>` and only when an `->` follows the
+# closing paren, so a parenthesised type whose head happens to be named
+# `borrowing` still parses as a type application — the same disambiguation
+# `param_mode_at` makes for a declared parameter, for the same reason: none of
+# these words is reserved.
+fn arrow_param_mode_at(tokens: Vec token.Token, i: Int) -> Maybe(ast.ParamMode, Int) =
+  match match_symbol(tokens, i, "(") with
+  | Nothing -> Nothing
+  | Just (_, i2) ->
+      match param_mode_at(tokens, i2) with
+      | ast.ModeDefault -> Nothing
+      | mode -> Just((mode, i2 + 1))
+
+# The parameter type, its closing paren and the `->` that must follow. Reaching
+# here means a modifier was read, so a missing arrow is a real error rather than
+# a reason to back out: nothing else can follow `(borrowing T)`.
+fn parse_moded_arrow(tokens: Vec token.Token, i: Int,
+                     mode: ast.ParamMode) -> Result ParseError (ast.TypeExpr, Int) =
+  do
+    (param, i2) <- parse_type_expr(tokens, i)
+    (_, i3) <- expected_symbol(")", tokens, i2)
+    (_, i4) <- expected_arrow_after_mode(tokens, i3)
+    (right_raw, i5) <- parse_type_expr(tokens, i4)
+    make_moded_type_arrow(param, right_raw, mode, tokens, i5)
+
+fn expected_arrow_after_mode(tokens: Vec token.Token, i: Int) -> Result ParseError (Int, Int) =
+  match match_symbol(tokens, i, "->") with
+  | Just (_, i2) -> Ok((i2, i2))
+  | Nothing ->
+      Err(ParseError("an ownership modifier describes a function parameter, so `"
+        ++ "(borrowing T)` must be followed by `->` at " ++ pos_str(cur_pos(tokens, i)),
+        cur_pos(tokens, i)))
+
+fn make_moded_type_arrow(param: ast.TypeExpr, right_raw: ast.TypeExpr, mode: ast.ParamMode,
+                         tokens: Vec token.Token, i: Int) -> Result ParseError (ast.TypeExpr, Int) =
+  match right_raw with
+  | ast.TypeEffect base effs -> Ok((ast.TypeArrow(param, base, Just(effs), mode), i))
+  | _ ->
       do
-        (left, i2) <- parse_type_apply(tokens, i)
-        parse_type_expr_cont(tokens, i2, left)
+        (effs_maybe, i2) <- parse_effect_annotation(tokens, i)
+        Ok((ast.TypeArrow(param, right_raw, effs_maybe, mode), i2))
 
 # `()` is an empty PARAMETER LIST, not a type, so it is only accepted directly
 # before `->`. Nothing is consumed unless both tokens match.
@@ -358,11 +408,11 @@ fn type_expr_with_effect(left: ast.TypeExpr, effs: Maybe (List String)) -> ast.T
 fn make_type_arrow(left: ast.TypeExpr, right_raw: ast.TypeExpr, tokens: Vec token.Token,
                    i: Int) -> Result ParseError (ast.TypeExpr, Int) =
   match right_raw with
-  | ast.TypeEffect base effs -> Ok((ast.TypeArrow(left, base, Just(effs)), i))
+  | ast.TypeEffect base effs -> Ok((ast.TypeArrow(left, base, Just(effs), ast.ModeDefault), i))
   | _ ->
       do
         (effs_maybe, i2) <- parse_effect_annotation(tokens, i)
-        Ok((ast.TypeArrow(left, right_raw, effs_maybe), i2))
+        Ok((ast.TypeArrow(left, right_raw, effs_maybe, ast.ModeDefault), i2))
 
 # THE one place a written `!{...}` is read, which is why spec-v0.md §7 rule 9's
 # label check lives here: every position that can carry an annotation — a return

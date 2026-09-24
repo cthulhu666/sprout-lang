@@ -1,0 +1,12 @@
+module main
+
+# An ownership modifier describes how a FUNCTION PARAMETER is taken, so
+# `(borrowing T)` is only a type when an `->` follows it. Without the arrow there
+# is no parameter for it to describe, and the parser says so rather than
+# accepting a parenthesised type whose meaning would be silently dropped.
+
+type linear File = File Int
+
+fn bad(x: (borrowing File)) -> Int = 0
+
+fn main() -> Unit !{IO} = print("unreachable")

@@ -1490,11 +1490,42 @@ fn first_bad_modifier(params: List ast.Param, fn_type: types.Type,
 
 fn bad_modifier_here(prm: ast.Param, a: types.Type, rest: List ast.Param,
                      b: types.Type, env: Dict types.Scheme) -> Maybe BadModifier =
-  if mode_is_once(param_mode(prm)) then bad_once_here(prm, a, rest, b, env)
-  else if ! mode_is_written (param_mode(prm)) then first_bad_modifier(rest, b, env)
-  else if type_is_tyvar(a) then Just(BadOnTyvar(param_name(prm)))
-  else if ! type_is_linear (a, env) then Just(BadNonLinear(param_name(prm)))
-  else first_bad_modifier(rest, b, env)
+  match nested_arrow_borrow_fault(param_name(prm), a, env) with
+  | Just bad -> Just(bad)
+  | Nothing ->
+      if mode_is_once(param_mode(prm)) then bad_once_here(prm, a, rest, b, env)
+      else if ! mode_is_written (param_mode(prm)) then first_bad_modifier(rest, b, env)
+      else if type_is_tyvar(a) then Just(BadOnTyvar(param_name(prm)))
+      else if ! type_is_linear (a, env) then Just(BadNonLinear(param_name(prm)))
+      else first_bad_modifier(rest, b, env)
+
+# The same rules, for a modifier written INSIDE a parameter's type rather than on
+# the parameter: `g: (borrowing Int) -> Int`. Without this an arrow was the one
+# place a meaningless modifier survived, to be reported as an unrelated mismatch
+# at the call site if at all. OwnConsume is skipped because it is what every
+# unmarked arrow already carries and so says nothing the author wrote.
+fn nested_arrow_borrow_fault(name: String, t: types.Type,
+                             env: Dict types.Scheme) -> Maybe BadModifier =
+  match t with
+  | types.TFunc a b _ own ->
+      match arrow_mode_fault(name, a, own, env) with
+      | Just bad -> Just(bad)
+      | Nothing ->
+          match nested_arrow_borrow_fault(name, a, env) with
+          | Just bad -> Just(bad)
+          | Nothing -> nested_arrow_borrow_fault(name, b, env)
+  | _ -> Nothing
+
+fn arrow_mode_fault(name: String, a: types.Type, own: types.Ownership,
+                    env: Dict types.Scheme) -> Maybe BadModifier =
+  if types.ownership_is_once(own) then
+    if type_is_tyvar(a) then Just(BadOnceOnTyvar(name))
+    else if ! type_is_func (a) then Just(BadOnceNonFunction(name))
+    else Nothing
+  else if ! types.ownership_is_borrow (own) then Nothing
+  else if type_is_tyvar(a) then Just(BadOnTyvar(name))
+  else if ! type_is_linear (a, env) then Just(BadNonLinear(name))
+  else Nothing
 
 # A type variable is REJECTED, like it is for `borrowing` — though for a different
 # reason, and post-review: an earlier version accepted it, reasoning that `once`

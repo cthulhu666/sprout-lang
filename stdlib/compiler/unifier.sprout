@@ -817,7 +817,7 @@ fn once_mismatch_reason() -> String =
   "these differ only in whether the parameter is `once`, and that must match exactly: `once` promises the callee invokes it at most once, which is what licenses a caller to move a linear value into the closure it passes — a function without the promise cannot stand in for one with it"
 
 fn borrow_mismatch_reason() -> String =
-  "these differ only in how the parameter is taken, and a `borrowing` parameter's convention must match exactly; note that an arrow type cannot yet be written with `borrowing`"
+  "these differ only in how the parameter is taken, and a `borrowing` parameter's convention must match exactly; write the annotation as `(borrowing T) -> R` if the callee only borrows"
 
 # A unification mismatch. If either side is (or mentions) a skolem, the real
 # fault is an existential type leaking out of its match branch — rephrase rather

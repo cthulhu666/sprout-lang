@@ -460,7 +460,7 @@ fn main() -> Unit !{IO} =
     assert_true(state, "AliasDecl roundtrip",
       rt_decl(ast.AliasDecl("Predicate",
         Cons("a", Nil),
-        ast.TypeArrow(ast.TypeName("a"), ast.TypeName("Bool"), Nothing),
+        ast.TypeArrow(ast.TypeName("a"), ast.TypeName("Bool"), Nothing, ast.ModeDefault),
         pos0())))
 
     # WrapDecl roundtrip — regression for the codec gap W5 exhaustiveness
@@ -484,7 +484,7 @@ fn main() -> Unit !{IO} =
 
     assert_true(state, "TypeArrow roundtrip (via FnDecl)",
       rt_decl(ast.FnDecl("f", Nil,
-        Just(ast.TypeArrow(ast.TypeName("Int"), ast.TypeName("Bool"), Just (Cons("IO", Nil)))),
+        Just(ast.TypeArrow(ast.TypeName("Int"), ast.TypeName("Bool"), Just (Cons("IO", Nil)), ast.ModeDefault)),
         Nothing, Nil, ast.UnitExpr(pos0()), pos0())))
 
     assert_true(state, "TypeEffect roundtrip (via FnDecl)",

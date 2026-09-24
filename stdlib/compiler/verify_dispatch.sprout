@@ -120,7 +120,7 @@ export fn match_te(pattern: ast.TypeExpr, concrete: types.Type, theta: Dict type
           | Nothing -> Nothing
           | Just theta1 -> match_te(pa, ca, theta1)
       | _ -> Nothing
-  | ast.TypeArrow pp pr _ ->
+  | ast.TypeArrow pp pr _ _ ->
       match concrete with
       | types.TFunc cp cr _ _ ->
           match match_te(pp, cp, theta) with

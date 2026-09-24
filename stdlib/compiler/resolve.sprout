@@ -683,7 +683,7 @@ fn type_expr_head_name(te: ast.TypeExpr) -> String =
   # are all raw dotted names; only the emitted __tc_ LLVM symbol is dot-sanitized.
   | ast.TypeName name -> name
   | ast.TypeApply base _ -> type_expr_head_name(base)
-  | ast.TypeArrow _ _ _ -> "Fn"
+  | ast.TypeArrow _ _ _ _ -> "Fn"
   | ast.TypeThunk _ _ -> "Fn"
   | ast.TypeEffect _ _ -> "Eff"
   | ast.TupleType items -> "Tuple" ++ int_to_string(list_length(items))
@@ -733,8 +733,8 @@ fn substitute_type_expr(te: ast.TypeExpr, subs: Dict ast.TypeExpr) -> ast.TypeEx
       | Nothing -> te
   | ast.TypeApply base arg ->
       ast.TypeApply(substitute_type_expr(base, subs), substitute_type_expr(arg, subs))
-  | ast.TypeArrow from_ to_ effs ->
-      ast.TypeArrow(substitute_type_expr(from_, subs), substitute_type_expr(to_, subs), effs)
+  | ast.TypeArrow from_ to_ effs mode ->
+      ast.TypeArrow(substitute_type_expr(from_, subs), substitute_type_expr(to_, subs), effs, mode)
   | ast.TypeThunk to_ effs ->
       ast.TypeThunk(substitute_type_expr(to_, subs), effs)
   | ast.TupleType items ->

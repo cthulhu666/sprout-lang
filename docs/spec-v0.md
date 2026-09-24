@@ -1640,10 +1640,23 @@ Two consequences follow:
   class consumes would leak. Compared as *ownership*, not as written text:
   `consuming` on the instance against an unmodified class parameter agrees, since
   both consume.
-- **An arrow type written in an annotation means consuming.** Arrow-type syntax
-  cannot yet spell `borrowing`, so passing a borrowing function to a parameter
-  annotated `(T) -> U` is an ownership mismatch. This is a syntax gap, not a
-  semantic one, and the diagnostic says so.
+- **An UNMARKED arrow type means consuming.** Passing a borrowing function to a
+  parameter annotated `(T) -> U` is an ownership mismatch. To accept one, mark
+  the arrow's parameter: `(borrowing T) -> U`. The modifier is written inside the
+  parentheses, which are then the parameter's own rather than a grouping, and an
+  `->` must follow — an ownership modifier describes a function parameter, so
+  `(borrowing T)` alone is a parse error. The same rules apply as on a declared
+  parameter: a modifier on a non-linear or type-variable parameter is rejected
+  where it is written.
+
+  This is what makes the with-resource combinator expressible:
+
+  ```
+  fn with_file(path: String, work: (borrowing File) -> Int) -> Int
+  ```
+
+  `work` borrows, so `with_file` still owns the `File` and is the one that closes
+  it — the release cannot be forgotten by a caller.
 
 **A modifier on a non-linear parameter is an error**, as is one on a
 type-variable parameter (reported distinctly). The type-variable case is not a
@@ -1738,9 +1751,9 @@ it inside the task instead.
   stays deferred. It no longer waits on a linearity bound for type parameters:
   the case that motivated that (`Chan a`) is a phantom parameter, which containment
   now declines to descend on its own. See `docs/linearity-virality-v0.md`.
-- `borrowing` inside an **arrow type**, and a modifier on a **type-variable**
-  parameter. Both are described above; both need work this milestone deliberately
-  did not take on (a parser change, and a linearity bound on type parameters).
+- A modifier on a **type-variable** parameter, described above: it needs a
+  linearity bound on type parameters, which this milestone deliberately did not
+  take on.
 
 ### 5.9 The fallible `<-` bind
 

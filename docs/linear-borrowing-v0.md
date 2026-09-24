@@ -523,7 +523,7 @@ Int` failed to unify with `File -> Int`.
 **Producers.** Every declaration form — top-level `fn`, `extern fn`, class method, instance method
 — reaches `TFunc` through `infer.scheme_from_fn_parts_inner`, so one new builder
 (`build_fn_type_modes`) puts `borrowing` into all four. Imported signatures get it from
-`iface_codec.params_to_func_type` and from the wire tag; annotated arrow types are `OwnConsume`.
+`iface_codec.params_to_func_type` and from the wire tag; an UNMARKED arrow type is `OwnConsume`.
 
 **Why call sites copy rather than default.** The arrow synthesized from the argument types at a
 call (`infer.build_fn_type_like`) takes its ownership from the *callee's own spine*. A fixed
@@ -555,12 +555,16 @@ the test was checked to actually motivate the fix.
 - A `borrowing` function may now be bound and called as a value (`let g = peek`).
 - Class and instance methods may carry modifiers, with the instance required to **match** the
   class — compared as ownership, so `consuming` against an unmodified class parameter agrees.
-- **Not lifted: `borrowing` in arrow-type syntax.** `fn apply(g: (File) -> Int, f: File) = g(f)`
-  typechecks today, so this gap is real — an earlier draft of the plan wrongly claimed M4.4 blocks
-  its only users; M4.4 blocks *lambdas*, not function-typed parameters. Deferred for cost: it needs
-  a parser change (and so the 2-step bootstrap), a mode field on `ast.TypeExpr`'s arrow, formatter
-  and codec work. Purely additive afterwards — it reuses this tag. The mismatch diagnostic says
-  explicitly that an arrow type cannot yet be written with `borrowing`.
+- **Lifted (M4.7): `borrowing` in arrow-type syntax.** `fn apply(g: (borrowing File) -> Int, f:
+  File) = g(f)` now parses and typechecks, so the with-resource combinator
+  (`with_file(path, work)`) is expressible and a library can guarantee the release runs. The mode
+  is written inside the parameter's own parentheses, recognised by lookahead on `(` rather than by
+  a new production, so a type genuinely named `borrowing` still parses as an application — the
+  same disambiguation `parser.param_mode_at` makes for a declared parameter. It reuses this tag:
+  `ast.TypeArrow` gained a `ParamMode` field that `infer.type_from_ast` maps to `Ownership`.
+  The rules that govern a declared parameter govern an arrow's too, and are enforced where the
+  modifier is WRITTEN (`linear_check.nested_arrow_borrow_fault`): non-linear and type-variable
+  parameters are rejected, and `(borrowing T)` not followed by `->` is a parse error.
 - **Not lifted: a modifier on a type-variable parameter.** Not a representation limit (ownership
   survives instantiation) but a universe one: without a linearity bound on `a`, `borrowing Int`
   would be an error while `borrowing a` at `Int` silently was not. That is polymorphism over linear
@@ -569,7 +573,9 @@ the test was checked to actually motivate the fix.
 
 **Interface format.** `IfaceFile` v4 → v5. A v4 iface decoded leniently would read every borrowing
 parameter as consuming — the very erasure this milestone removes — so the version gate rejects it,
-and `decode_tfunc_at` rejects a tagless `TFunc` independently.
+and `decode_tfunc_at` rejects a tagless `TFunc` independently. M4.7 repeats the step one layer up:
+v9 → v10, because `(TypeArrow …)` gained a mode field and a v9 iface would read every arrow
+TypeExpr as consuming.
 
 **Erasure held.** `just ir-golden-diff` across 58 files: **additions only, zero changed or removed
 lines**. The two added `define` blocks are the `ast.mode_is_borrowing` / `ast.param_mode_of`
