@@ -917,17 +917,19 @@ fn register_type_decl_raw(decl: ast.Decl, alias_env: Dict types.Type,
                           env: Dict types.Scheme) -> Dict types.Scheme =
   match decl with
   | ast.TypeDecl name params ctors _ mult _ ->
-      mark_phantom_params(name, params, ctor_field_type_exprs(ctors),
-        mark_type_multiplicity(name, mult,
-          register_ctors_for_type(name, params, build_local_params(params, alias_env), ctors, env)))
+      mark_stored_fields(name, ctor_field_type_exprs(ctors), build_local_params(params, alias_env),
+        mark_phantom_params(name, params, ctor_field_type_exprs(ctors),
+          mark_type_multiplicity(name, mult,
+            register_ctors_for_type(name, params, build_local_params(params, alias_env), ctors, env))))
   # WrapDecl: synthesize a single-constructor type with the same name as the
   # wrap. The constructor's argument type is the wrap's inner type. This gives
   # the typechecker a scheme `inner -> Foo` for Foo(x), and a destructor entry
   # for `match | Foo x ->`.  Zero type parameters by design (the inner type
   # may itself be polymorphic, but Foo always has the same representation).
   | ast.WrapDecl name inner _ _ ->
-      register_ctors_for_type(name, Nil, alias_env,
-        [ast.TypeConstructor(name, [inner], Nil, Nil)], env)
+      mark_stored_fields(name, [inner], alias_env,
+        register_ctors_for_type(name, Nil, alias_env,
+          [ast.TypeConstructor(name, [inner], Nil, Nil)], env))
   | _ -> env
 
 fn build_local_params(params: List String, acc: Dict types.Type) -> Dict types.Type =
@@ -1988,6 +1990,28 @@ fn mark_phantom_from(tname: String, idx: Int, params: List String,
 # in; the two must agree, and only behaviour says so.
 fn phantom_param_marker(tname: String, idx: Int) -> String =
   "@phantom:" ++ tname ++ ":" ++ int_to_string(idx)
+
+# What a declaration STORES, as resolved types: "@stores:<TypeName>" holds every
+# constructor's field types in one tuple. The phantom marker above answers the
+# same question for a type PARAMETER; this answers it for a concrete field, which
+# a type application does not mention at all. Without it `type Box = | Box Res`
+# was not a container — `Box Res` was tracked and `Box` was not, so a wrapper
+# around a linear resource silently erased both use-once and leak-freedom.
+#
+# Declaration tyvars are kept verbatim. Containment ignores them and reaches those
+# positions through the type-argument walk instead, which is where instantiation
+# is known; a field's concrete part needs no instantiation.
+fn mark_stored_fields(tname: String, fields: List ast.TypeExpr, local_vars: Dict types.Type,
+                      env: Dict types.Scheme) -> Dict types.Scheme =
+  match fields with
+  # A fieldless declaration (an enum-like ADT) stores nothing, and skipping the
+  # marker keeps one env entry per such type out of every compilation.
+  | Nil -> env
+  | _ ->
+      dict_set(stored_fields_marker(tname),
+        types.mono(types.TTuple(list_map(\f -> type_from_ast(f, local_vars), fields))), env)
+
+fn stored_fields_marker(tname: String) -> String = "@stores:" ++ tname
 
 # Deliberately NOT `te_type_names` above, nor analysis_service_driver's
 # `te_var_names`: both descend an arrow, and declining to is the whole point here.
@@ -8403,15 +8427,17 @@ fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Di
           pre_scan_fn_decls(rest, register_type_decl_raw(decl, alias_env, env), alias_env)
       | ast.WrapDecl _ _ _ _ ->
           pre_scan_fn_decls(rest, register_type_decl_raw(decl, alias_env, env), alias_env)
-      # Only the phantom markers, and only because they must be in the env before
-      # any BODY is checked. An ADT gets them here already, through
+      # Only the containment markers, and only because they must be in the env
+      # before any BODY is checked. An ADT gets them here already, through
       # register_type_decl_raw; a record's other registration stays in
       # typecheck_decl, so without this arm `fn f(h: Holder File)` written ABOVE
       # `type Holder a = (n: Int)` was checked with no marker and rejected, while
       # the same two declarations in the other order compiled.
       | ast.RecordDecl rec_name type_params fields _ _ _ _ ->
           pre_scan_fn_decls(rest,
-            mark_phantom_params(rec_name, type_params, record_field_type_exprs(fields), env),
+            mark_stored_fields(rec_name, record_field_type_exprs(fields),
+              build_local_params(type_params, alias_env),
+              mark_phantom_params(rec_name, type_params, record_field_type_exprs(fields), env)),
             alias_env)
       | _ -> pre_scan_fn_decls(rest, env, alias_env)
 
@@ -9230,10 +9256,12 @@ fn typecheck_decl(
         env_ftv, subst)
   | ast.RecordDecl rec_name type_params fields _ mult repr _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl),
-        GlobalEnv(mark_phantom_params(rec_name, type_params, record_field_type_exprs(fields),
-          mark_record_representation(rec_name, repr,
-            mark_type_multiplicity(rec_name, mult,
-              register_record_fields(rec_name, type_params, fields, alias_env, global_env_dict(env)))))),
+        GlobalEnv(mark_stored_fields(rec_name, record_field_type_exprs(fields),
+          build_local_params(type_params, alias_env),
+          mark_phantom_params(rec_name, type_params, record_field_type_exprs(fields),
+            mark_record_representation(rec_name, repr,
+              mark_type_multiplicity(rec_name, mult,
+                register_record_fields(rec_name, type_params, fields, alias_env, global_env_dict(env))))))),
         env_ftv, subst)
   | ast.FnDecl name _ _ _ _ _ decl_pos ->
       # Unreachable. typecheck_group routes EVERY FnDecl through typecheck_fn_group,

@@ -1,0 +1,13 @@
+module main
+
+import stdlib.net (TcpConnection)
+
+# The shape this gap was found in: a wrapper around an IMPORTED linear type,
+# `type PgConnection = | PgConnection net.TcpConnection`. Every `@`-marker family
+# is keyed on a type's SHORT name (docs/compiler-internals.md), so a wrapper
+# declared in one module over a linear type declared in another exercises the
+# lookup the local fixtures cannot.
+
+type Conn = | Conn TcpConnection
+
+fn drop_conn(c: Conn) -> Int = 1

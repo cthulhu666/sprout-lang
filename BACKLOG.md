@@ -1692,16 +1692,16 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   `Box Res` reports "linear value 'b' is never used", while the same value as a parameter reports
   "its type `Box Res` contains the linear type `Res`". Same accept/reject answer, worse message.
   Fixing it needs the post-pass to tell a monadic bind from an effectful one.
-- [~] `P3` **Containment virality — binder half LANDED (parameters included); type half open.**
+- [~] `P3` **Containment virality — binder half LANDED (concrete fields included); type half open.**
   Decision (Kuba): **Option 1** — containment decides which *bindings* carry the obligation, while
   linearity stays per-declaration as a property of *types*, so a record containing a linear field is
-  still not itself linear (contrast Austral). Every binder is now covered, parameters and lambda
-  parameters included, and containment reads what a declaration **stores**, so a phantom position
-  (`type Chan a = | Chan Int`) is not descended. **Still open — Option 2, full virality**, with
-  linearity itself containment-computed, reaching parameter modes, `borrowing` filters and field
-  reads. No longer blocked on a linearity bound for type parameters; what is left is §6 of
-  `docs/linearity-virality-v0.md` — a type variable's universe, and declaration-level recursion
-  needing a visited set.
+  still not itself linear (contrast Austral). Every binder is covered, and containment reads what a
+  declaration **stores**: a concrete field (`type Crate = | Crate File`) and a stored type argument
+  both count, a phantom position (`type Chan a = | Chan Int`) does not, and the walk is transitive
+  with a visited set. **Still open — Option 2, full virality**, with linearity itself
+  containment-computed, reaching parameter modes, `borrowing` filters and field reads; `consuming
+  Crate` is still an error. What is left is §6 of `docs/linearity-virality-v0.md` — a type
+  variable's universe.
 - [ ] `P3` **Linearity bound on a type parameter (enabler for `borrowing a`).** A modifier on a
   type-variable parameter stays rejected, which also blocks the receiver-borrowing class shape
   `class Peekable a { fn peek(r: borrowing a) -> Int }`, so M4.6's method lift reaches only a

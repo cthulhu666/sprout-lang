@@ -1460,18 +1460,30 @@ do-bind** variables — in `fn`, top-level `let`, and instance-method bodies, an
 checked on every control-flow path.
 
 A binder carries the obligation when its type **is** a linear type or **contains**
-one as a type argument or tuple component. `let m = Just(File(1))` is bound by the
-rules below even though `Maybe File` is not itself a linear type, and so is a
-user-declared container (`Box File`) — the test is structural, not a list of known
-containers. A **function type is not descended**: `Unit -> File` is a recipe for a
-resource rather than a resource, so binding one and never calling it leaks nothing.
-Containment does not make the containing type linear; it decides which *bindings*
-are tracked (see "Containment virality" under Deferred, below).
+one — as a type argument, as a tuple component, or as a type the declaration
+**stores in a field**. `let m = Just(File(1))` is bound by the rules below even
+though `Maybe File` is not itself a linear type, and so is a user-declared
+container (`Box File`), and so is a wrapper with no type parameter at all
+(`type Crate = | Crate File`) — the test is structural, not a list of known
+containers, and it does not depend on whether the linear type was written at the
+use site or fixed by the declaration. A **function type is not descended**:
+`Unit -> File` is a recipe for a resource rather than a resource, so binding one
+and never calling it leaks nothing. Containment does not make the containing type
+linear; it decides which *bindings* are tracked (see "Containment virality" under
+Deferred, below). In particular `Crate` above is still not a linear type, so
+`consuming Crate` remains an error while `let c = Crate(File(1))` must still be
+used exactly once.
 
-**Containment reads the declaration, not the type application.** A type argument
-counts only at a position the declaration actually **stores** — one where the
-parameter appears in some constructor field or record field type, outside an
-arrow. At a *phantom* position the declaration holds no value of that type:
+Field containment is transitive and terminates on a declaration that stores
+itself or cycles through a sibling: `type Mid = | Mid File` and
+`type Outer = | Outer Mid` both carry the obligation, naming `File`.
+
+**Containment reads the declaration, not the type application.** Both halves of
+the test ask what the declaration stores. A concrete field type counts because
+the declaration stores it outright; a type argument counts only at a position the
+declaration actually **stores** — one where the parameter appears in some
+constructor field or record field type, outside an arrow. At a *phantom* position
+the declaration holds no value of that type:
 
 ```
 type Chan a = | Chan Int          # `a` is phantom: only an Int handle is stored
