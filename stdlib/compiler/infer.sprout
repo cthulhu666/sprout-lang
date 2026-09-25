@@ -917,7 +917,7 @@ fn register_type_decl_raw(decl: ast.Decl, alias_env: Dict types.Type,
                           env: Dict types.Scheme) -> Dict types.Scheme =
   match decl with
   | ast.TypeDecl name params ctors _ mult _ ->
-      mark_stored_fields(name, ctor_field_type_exprs(ctors), build_local_params(params, alias_env),
+      mark_stored_fields(name, params, ctor_field_type_exprs(ctors), build_local_params(params, alias_env),
         mark_phantom_params(name, params, ctor_field_type_exprs(ctors),
           mark_type_multiplicity(name, mult,
             register_ctors_for_type(name, params, build_local_params(params, alias_env), ctors, env))))
@@ -927,7 +927,7 @@ fn register_type_decl_raw(decl: ast.Decl, alias_env: Dict types.Type,
   # for `match | Foo x ->`.  Zero type parameters by design (the inner type
   # may itself be polymorphic, but Foo always has the same representation).
   | ast.WrapDecl name inner _ _ ->
-      mark_stored_fields(name, [inner], alias_env,
+      mark_stored_fields(name, Nil, [inner], alias_env,
         register_ctors_for_type(name, Nil, alias_env,
           [ast.TypeConstructor(name, [inner], Nil, Nil)], env))
   | _ -> env
@@ -2001,7 +2001,15 @@ fn phantom_param_marker(tname: String, idx: Int) -> String =
 # Declaration tyvars are kept verbatim. Containment ignores them and reaches those
 # positions through the type-argument walk instead, which is where instantiation
 # is known; a field's concrete part needs no instantiation.
-fn mark_stored_fields(tname: String, fields: List ast.TypeExpr, local_vars: Dict types.Type,
+#
+# QUANTIFIED, not `types.mono`: a marker is an ordinary env entry, so `ftv_env`
+# unions its free variables into the set generalization subtracts. A `mono` body
+# holding `a`, `k`, `v` verbatim would publish one source-spelled tyvar per
+# declaration in the bundle as globally free. Nothing reads them — the walk
+# answers `TVar _ -> Nothing` — so binding them costs nothing and keeps the
+# marker families' invariant that a marker contributes no free variables.
+fn mark_stored_fields(tname: String, params: List String, fields: List ast.TypeExpr,
+                      local_vars: Dict types.Type,
                       env: Dict types.Scheme) -> Dict types.Scheme =
   match fields with
   # A fieldless declaration (an enum-like ADT) stores nothing, and skipping the
@@ -2009,7 +2017,9 @@ fn mark_stored_fields(tname: String, fields: List ast.TypeExpr, local_vars: Dict
   | Nil -> env
   | _ ->
       dict_set(stored_fields_marker(tname),
-        types.mono(types.TTuple(list_map(\f -> type_from_ast(f, local_vars), fields))), env)
+        types.scheme_quantified(params,
+          types.TTuple(list_map(\f -> type_from_ast(f, local_vars), fields)),
+          types.EffectPure, Nil), env)
 
 fn stored_fields_marker(tname: String) -> String = "@stores:" ++ tname
 
@@ -8435,7 +8445,7 @@ fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Di
       # the same two declarations in the other order compiled.
       | ast.RecordDecl rec_name type_params fields _ _ _ _ ->
           pre_scan_fn_decls(rest,
-            mark_stored_fields(rec_name, record_field_type_exprs(fields),
+            mark_stored_fields(rec_name, type_params, record_field_type_exprs(fields),
               build_local_params(type_params, alias_env),
               mark_phantom_params(rec_name, type_params, record_field_type_exprs(fields), env)),
             alias_env)
@@ -9256,7 +9266,7 @@ fn typecheck_decl(
         env_ftv, subst)
   | ast.RecordDecl rec_name type_params fields _ mult repr _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl),
-        GlobalEnv(mark_stored_fields(rec_name, record_field_type_exprs(fields),
+        GlobalEnv(mark_stored_fields(rec_name, type_params, record_field_type_exprs(fields),
           build_local_params(type_params, alias_env),
           mark_phantom_params(rec_name, type_params, record_field_type_exprs(fields),
             mark_record_representation(rec_name, repr,

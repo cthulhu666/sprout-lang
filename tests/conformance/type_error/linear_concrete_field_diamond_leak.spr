@@ -1,0 +1,19 @@
+module main
+
+# The containment walk memoizes by declaration name, so a name opened once is not
+# opened again. This is the shape that catches a memo which marks too eagerly:
+# `Shared` is reached first through `Left`, where it holds nothing, and the linear
+# field sits in `Right` BEHIND that second visit. A walk that stopped at the memo
+# hit instead of continuing to `Right`'s remaining fields would miss the File and
+# compile this leak clean.
+
+type linear File = File Int
+type Shared = | Shared Int
+type Left = | Left Shared
+type Right = | Right Shared File
+type Root = | Root Left Right
+
+fn main() -> Unit !{IO} =
+  do
+    let r = Root(Left (Shared(1)), Right (Shared(2), File(3)))
+    print("done")
