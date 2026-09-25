@@ -131,15 +131,31 @@ Each is filed in `BACKLOG.md`; this section is the rationale, not the tracker.
    dictionary wrappers in the golden IR report**, and **dropping unused superclass
    dictionary slots** — each motivated by a specific incident above, each independent.
 
-## 8. Process changes: proposed, not adopted
+## 8. Process changes
 
-These touch `AGENTS.md` and are therefore left as proposals. See §2 and §4 for the evidence.
+Four were proposed. Two were adopted into `AGENTS.md` in the same change; two were declined,
+and the reasons are recorded here so they are not re-proposed from the same evidence.
 
-- **A stage's implementation list is closed out explicitly at landing** — every §9 bullet
-  struck through or annotated with a `BACKLOG` link. Three dropped items, three later commits.
-- **A semantics-change checklist item:** for each caller, ask what its existing failure
-  branch *meant*, not whether it still compiles.
-- **Review before merge per stage**, rather than per arc. The reviews worked; they ran late.
-- **When closing a documented deferral, grep for citations of the deferral**, not only for
-  the stale text. #352 searched for symptoms and found them all; #353 existed because it
-  never searched for "who said this would be fixed later".
+**Adopted.** The test applied was: *did its absence cost something more than once?*
+
+- **A stage's implementation list is closed out at landing** — every bullet struck through or
+  annotated with the `BACKLOG` entry it became (Docs & Spec #2). Three dropped bullets, three
+  later commits, one of which shipped a reachable abort. Evidence in §4.
+- **A totality or trapping change states what each caller's failure branch meant** — not that
+  it still compiles (Design Change Process). Two bugs a month apart from one false inference.
+  Evidence in §2.
+
+**Declined.**
+
+- *Review before merge per stage.* The reviews already ran per PR (#340, #344, #347/#348) and
+  the rule would not have changed what happened. What the whole-arc pass added was
+  cross-stage reach — finding Stage 1's fallout in `json` needed Stage 1 and Stage 4 in one
+  view. The useful version is "a multi-stage design gets one final review over the completed
+  arc", which needs no rule to perform.
+- *When closing a documented deferral, grep for citations of the deferral, not only for the
+  stale text.* True, and it is why #353 was needed after #352 — but it is a search habit, not
+  a repo policy, and Docs & Spec #1 already implies it. Recorded here instead, where a reader
+  meets it in context.
+
+A rule in `AGENTS.md` costs every future contributor attention whether or not it applies to
+them, so a lesson that is true but happened once belongs in a dated doc like this one.
