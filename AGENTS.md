@@ -96,7 +96,7 @@ Both hooks scope to the worktree named by the session's `cwd`. Budgets, failure 
 ## Docs & Spec
 
 1. Keep `README.md`, `docs/spec-v0.md`, and relevant `docs/*.md` aligned with current behavior after every feature or semantics change.
-2. If a task listed in roadmap/TODO sections is completed, **remove** it in the same change — see "Backlog Discipline".
+2. If a task listed in roadmap/TODO sections is completed, **remove** it in the same change — see "Backlog Discipline". Same for a staged design's implementation list: on landing, strike each bullet through or point it at the `BACKLOG` entry it became. Three of bigint-v0 Stage 1's stayed in present tense and were silently dropped (`docs/bigint-arc-retro-2026-09-25.md` §4).
 3. If new follow-up work is discovered during implementation, add it to the appropriate roadmap/TODO section with concise scope, under the shape rule in "Backlog Discipline".
 4. `docs/spec-v0.md` is the normative source of truth for the stable Sprout core; supporting design docs explain rationale and tradeoffs but do not override it.
 5. If a change alters syntax, semantics, typing rules, evaluation order, visibility/export rules, or diagnostics expectations, update the relevant spec/docs before considering the task complete.
@@ -137,6 +137,12 @@ prior-art survey; a high-level implementation overview for approval **before edi
 and semantics impact, type-system impact and error-message impact; compatibility and migration
 notes; tests added or updated; and the spec/docs update, with normative vs experimental status made
 explicit.
+
+**Making a partial function total, or an operation trapping** — say what each caller's existing
+failure branch *meant*, not that it still compiles. A `Nothing` that was unreachable now arrives,
+and the branch waiting for it was written for a different case; the type checker cannot see that
+and will reassure you. "All 19 call sites already match on `Maybe`, so no caller changes"
+(bigint-v0 §5.2) was true of the types, false of the behaviour, and cost two bugs a month apart.
 
 **Prior-art survey** — when the decision is a choice among established alternatives that comparable
 languages have also faced, show briefly how a handful of state-of-the-art languages handle it and
