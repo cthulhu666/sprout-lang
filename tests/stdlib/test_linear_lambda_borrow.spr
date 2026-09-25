@@ -71,6 +71,35 @@ fn with_file_once(n: Int, work: once (borrowing File) -> Int) -> Int =
 
 fn via_once_slot(n: Int) -> Int = with_file_once(n, \c -> peek(c) + 2)
 
+# --- 7. the rewrites the rejection messages name -----------------------------
+# Each message at the wall names a way through it, so advice that stops working
+# fails a gate instead of rotting inside a string nobody re-checks. Same reason
+# as tests/stdlib/test_comprehension_linear_advice.spr.
+
+# 7a. A `_` hole takes no mode — `scaled(borrowing _, 5)` does not parse — so the
+# rewrite is the explicit lambda the hole desugars to.
+# Rejection: tests/conformance/type_error/lambda_hole_consuming_advice.
+fn hole_rewritten(n: Int) -> Int =
+  do
+    let f = File(n)
+    let r = (\ (c: borrowing File) -> scaled(c, 5))(f)
+    r + release(f)
+
+# 7b. A borrowed capture cannot be made legal by any modifier, so the rewrite is
+# to read the borrow BEFORE the lambda and capture the Int, which carries no
+# obligation. Rejections: tests/conformance/type_error/{borrow_capture_in_lambda,
+# lambda_borrow_param_captured_by_nested}.
+fn capture_rewritten(c: borrowing File, n: Int) -> Int =
+  do
+    let base = peek(c)
+    with_file(n, \d -> base + peek(d))
+
+fn capture_rewritten_entry(n: Int) -> Int =
+  do
+    let f = File(n)
+    let r = capture_rewritten(f, 3)
+    r + release(f)
+
 fn main() -> Unit !{IO} =
   run_suite("linear_lambda_borrow", [
     check_eq("`_` hole in the resource position", via_hole_first(10), 15),
@@ -80,5 +109,8 @@ fn main() -> Unit !{IO} =
     check_eq("a borrow may be repeated in the body", via_twice_borrowed(14), 14),
     check_eq("a lambda may capture a non-linear value", via_captured_scale(15, 4), 19),
     check_eq("a borrow need not be used at all", via_unused_borrow(16), 17),
-    check_eq("the same shape at a `once` slot", via_once_slot(17), 19)
+    check_eq("the same shape at a `once` slot", via_once_slot(17), 19),
+    check_eq("the `_`-hole rewrite the message names", hole_rewritten(20), 25),
+    check_eq("the borrowed-capture rewrite the message names",
+             capture_rewritten_entry(21), 24)
   ])

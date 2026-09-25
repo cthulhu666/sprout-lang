@@ -14,8 +14,9 @@ enforces.
 > narrowed: a linear value may be **moved** into a one-shot closure (M4.4a,
 > `docs/one-shot-closures-v0.md`), and a lambda may take a linear parameter when it takes it
 > **`borrowing`** (M4.4b, `docs/linear-borrowing-v0.md` §20). Where the text below says a linear
-> lambda parameter is rejected, read *consuming* linear lambda parameter. `docs/spec-v0.md` §5.8
-> is normative.
+> lambda parameter is rejected, read *consuming* linear lambda parameter. §7's capture diagnostic
+> is now two messages, split on whether the capture is owned or borrowed (§20.2); the one quoted
+> there is the owned half. `docs/spec-v0.md` §5.8 is normative.
 
 ## 1. Problem statement
 

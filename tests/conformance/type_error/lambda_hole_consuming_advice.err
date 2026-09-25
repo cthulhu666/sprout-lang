@@ -1,0 +1,1 @@
+a `_` hole takes no mode, so write it as an explicit lambda with a `borrowing` parameter

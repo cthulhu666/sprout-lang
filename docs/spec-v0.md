@@ -1673,10 +1673,13 @@ Two consequences follow:
   checking rule, so it reaches a lambda written *at* the argument; one bound by a
   `let` first must spell the mode.
 
-  Only `borrowing` is taken this way. **`once` is never inferred for a lambda**:
-  it is a promise about how often the parameter is invoked, checked against a
-  declaration's written mode, and a lambda has no declaration — so an unannotated
-  lambda at a `once` slot stays an ownership mismatch.
+  Only `borrowing` is taken this way. **`once` is never inferred for a lambda
+  parameter**: it is a promise about how often the parameter is invoked, checked
+  against a declaration's written mode, and a lambda has no declaration — so a
+  lambda whose own parameter sits at a `once` slot stays an ownership mismatch.
+  This is about the lambda's *own* parameter, not the slot the lambda itself
+  fills: passing an unannotated lambda **to** a `once` parameter is the one-shot
+  move below, and compiles.
 
   This is the one case in which a linear lambda parameter is accepted — **a
   lambda may take a linear parameter iff it borrows it.** A borrow carries no
