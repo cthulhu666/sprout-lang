@@ -1643,11 +1643,19 @@ Two consequences follow:
 - **An UNMARKED arrow type means consuming.** Passing a borrowing function to a
   parameter annotated `(T) -> U` is an ownership mismatch. To accept one, mark
   the arrow's parameter: `(borrowing T) -> U`. The modifier is written inside the
-  parentheses, which are then the parameter's own rather than a grouping, and an
-  `->` must follow — an ownership modifier describes a function parameter, so
-  `(borrowing T)` alone is a parse error. The same rules apply as on a declared
-  parameter: a modifier on a non-linear or type-variable parameter is rejected
-  where it is written.
+  parentheses, which are then the parameter's own rather than a grouping, and the
+  reading is taken only when an `->` follows the closing paren — `borrowing`,
+  `consuming` and `once` are ordinary identifiers everywhere else, so `(borrowing a)`
+  with no arrow after it is an ordinary type application, exactly as `x: borrowing`
+  is the type named `borrowing`.
+
+  The same rules apply as on a declared parameter, and are enforced where the
+  modifier is WRITTEN rather than at some later use: a modifier on a non-linear or
+  type-variable parameter is rejected, in a return type as well as a parameter
+  type, and at any depth — inside a type argument (`List ((borrowing a) -> Int)`)
+  or a tuple component, not only on the outermost arrow. `consuming` is checked
+  too, although it denotes the same ownership an unmarked arrow has: the rule is
+  about what the author wrote, not about what the type system kept.
 
   This is what makes the with-resource combinator expressible:
 

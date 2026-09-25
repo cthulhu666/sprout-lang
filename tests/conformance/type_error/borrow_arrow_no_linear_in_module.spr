@@ -1,0 +1,14 @@
+module main
+
+# The same rejection as borrow_arrow_non_linear, with NO linear type anywhere in
+# the module. That fixture declares one, which is realistic but was also what made
+# it pass: the whole linear pass is gated on a linear type being in scope OR a
+# declared parameter carrying a written modifier, and a mode written inside an
+# ARROW is neither. So the validation existed and nothing reached it.
+#
+# A meaningless modifier must be an error on its own terms, not only in the
+# company of a linear declaration.
+
+fn apply(g: (borrowing Int) -> Int) -> Int = g(1)
+
+fn main() -> Unit !{IO} = print(to_string(apply(\n -> n)))

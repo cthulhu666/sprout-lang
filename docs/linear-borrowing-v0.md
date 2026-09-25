@@ -562,9 +562,13 @@ the test was checked to actually motivate the fix.
   a new production, so a type genuinely named `borrowing` still parses as an application — the
   same disambiguation `parser.param_mode_at` makes for a declared parameter. It reuses this tag:
   `ast.TypeArrow` gained a `ParamMode` field that `infer.type_from_ast` maps to `Ownership`.
-  The rules that govern a declared parameter govern an arrow's too, and are enforced where the
-  modifier is WRITTEN (`linear_check.nested_arrow_borrow_fault`): non-linear and type-variable
-  parameters are rejected, and `(borrowing T)` not followed by `->` is a parse error.
+  The rules that govern a declared parameter govern an arrow's too, enforced where the modifier is
+  WRITTEN by `linear_check.written_mode_fault`, which walks the written TypeExpr in lockstep with
+  the resolved type. Both halves are needed: only the TypeExpr tells a written `consuming` from an
+  unmarked arrow (they are one `Ownership`), and only the type can answer "is this linear". It
+  descends type arguments and tuple components as well as the arrow spine, and covers the return
+  type. `(borrowing T)` NOT followed by `->` stays an ordinary type application — these three words
+  are not reserved, the same call `param_mode_at` makes.
 - **Not lifted: a modifier on a type-variable parameter.** Not a representation limit (ownership
   survives instantiation) but a universe one: without a linearity bound on `a`, `borrowing Int`
   would be an error while `borrowing a` at `Int` silently was not. That is polymorphism over linear

@@ -1,0 +1,13 @@
+module main
+
+# A WRITTEN `consuming` on a non-linear arrow parameter. `consuming` and an
+# unmarked parameter are the same OWNERSHIP, so a check that reads the resolved
+# type cannot tell them apart and this escaped — while the declared-parameter
+# twin `fn h(x: consuming Int)` was rejected. Reading the written TypeExpr, where
+# ModeConsuming and ModeDefault are still distinct, is what makes the two agree.
+
+type linear File = File Int
+
+fn apply(g: (consuming Int) -> Int) -> Int = g(1)
+
+fn main() -> Unit !{IO} = print(to_string(apply(\n -> n)))

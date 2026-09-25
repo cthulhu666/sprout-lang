@@ -313,38 +313,52 @@ export fn parse_type_expr(tokens: Vec token.Token, i: Int) -> Result ParseError 
 # applies to is, matching Swift's `(borrowing T) -> R`; the parens are then the
 # parameter's own, not a grouping the author could drop.
 #
-# Recognised only as `( <modifier> <type-atom>` and only when an `->` follows the
+# Recognised only as `( <modifier> <type-atom>` AND only when an `->` follows the
 # closing paren, so a parenthesised type whose head happens to be named
 # `borrowing` still parses as a type application — the same disambiguation
-# `param_mode_at` makes for a declared parameter, for the same reason: none of
-# these words is reserved.
+# `param_mode_at` makes for a declared parameter, for the reason it gives:
+# without the guard these would be "a reserved word in all but name".
+#
+# The lookahead really scans to the matching paren. A first version tested only
+# `( <word> <atom>` and committed there, which reserved all three words in
+# parenthesised type position: `(once a)` was a parse error while the identical
+# `(m a)` parsed, with nothing between them but the spelling of a type variable.
+# Pinned by tests/stdlib/test_borrow_words_not_reserved.spr.
 fn arrow_param_mode_at(tokens: Vec token.Token, i: Int) -> Maybe(ast.ParamMode, Int) =
   match match_symbol(tokens, i, "(") with
   | Nothing -> Nothing
   | Just (_, i2) ->
       match param_mode_at(tokens, i2) with
       | ast.ModeDefault -> Nothing
-      | mode -> Just((mode, i2 + 1))
+      | mode -> if arrow_follows_group(tokens, i) then Just((mode, i2 + 1)) else Nothing
 
-# The parameter type, its closing paren and the `->` that must follow. Reaching
-# here means a modifier was read, so a missing arrow is a real error rather than
-# a reason to back out: nothing else can follow `(borrowing T)`.
+# Whether the group opened by the `(` at `i` is followed by `->`. Counts nesting,
+# so a parenthesised type inside the group does not end the scan early.
+fn arrow_follows_group(tokens: Vec token.Token, i: Int) -> Bool =
+  match past_matching_paren(tokens, i + 1, 1) with
+  | Nothing -> false
+  | Just j -> tok_is_symbol(tok_at(tokens, j), "->")
+
+fn past_matching_paren(tokens: Vec token.Token, i: Int, depth: Int) -> Maybe Int =
+  if i >= vec_length(tokens) || tok_is_eof(tok_at(tokens, i)) then Nothing
+  else if tok_is_symbol(tok_at(tokens, i), "(") then past_matching_paren(tokens, i + 1, depth + 1)
+  else if ! tok_is_symbol (tok_at(tokens, i), ")") then past_matching_paren(tokens, i + 1, depth)
+  else if depth == 1 then Just(i + 1)
+  else past_matching_paren(tokens, i + 1, depth - 1)
+
+# The parameter type, its closing paren and the `->`. The lookahead has already
+# proved the arrow is there, so neither `expected_symbol` can fire on a
+# well-formed group — they stay as failures rather than assumptions because the
+# lookahead counts tokens while this parses them, and only the parse defines the
+# group's real extent.
 fn parse_moded_arrow(tokens: Vec token.Token, i: Int,
                      mode: ast.ParamMode) -> Result ParseError (ast.TypeExpr, Int) =
   do
     (param, i2) <- parse_type_expr(tokens, i)
     (_, i3) <- expected_symbol(")", tokens, i2)
-    (_, i4) <- expected_arrow_after_mode(tokens, i3)
+    (_, i4) <- expected_symbol("->", tokens, i3)
     (right_raw, i5) <- parse_type_expr(tokens, i4)
     make_moded_type_arrow(param, right_raw, mode, tokens, i5)
-
-fn expected_arrow_after_mode(tokens: Vec token.Token, i: Int) -> Result ParseError (Int, Int) =
-  match match_symbol(tokens, i, "->") with
-  | Just (_, i2) -> Ok((i2, i2))
-  | Nothing ->
-      Err(ParseError("an ownership modifier describes a function parameter, so `"
-        ++ "(borrowing T)` must be followed by `->` at " ++ pos_str(cur_pos(tokens, i)),
-        cur_pos(tokens, i)))
 
 fn make_moded_type_arrow(param: ast.TypeExpr, right_raw: ast.TypeExpr, mode: ast.ParamMode,
                          tokens: Vec token.Token, i: Int) -> Result ParseError (ast.TypeExpr, Int) =

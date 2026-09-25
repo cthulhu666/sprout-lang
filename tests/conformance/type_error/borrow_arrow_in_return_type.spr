@@ -1,0 +1,15 @@
+module main
+
+# A modifier written in a RETURN type. The validation walked the declared
+# parameter list only, so this position was never asked about.
+#
+# An EXTERN, because it is the only way to reach the check. A declared `fn` with
+# this return type is rejected earlier, by unification: no body can have a
+# borrowing arrow type, so the return-type MISMATCH fires before the linear pass
+# runs and the modifier itself is never judged. An extern has no body, so
+# `check_signature_modes` is what sees it — the same path that made
+# borrow_extern_non_linear a finding once already.
+
+extern fn make_reader() -> (borrowing Int) -> Int
+
+fn main() -> Unit !{IO} = print(to_string(make_reader()(1)))

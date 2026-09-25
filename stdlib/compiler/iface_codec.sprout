@@ -378,7 +378,7 @@ fn collect_types(s: String, bytes: Bytes, i: Int, total: Int, acc: List types.Ty
 #
 # `version` is encoded as a bare atom and checked by string equality. When
 # v2 lands, decoder gets an if-chain or a parsed-int conversion.
-# (Current version is 9 — see decode_iface_version for the change log.)
+# (Current version is 10 — see decode_iface_version for the change log.)
 
 export type NamedScheme (..) =
   | NamedScheme String types.Scheme
