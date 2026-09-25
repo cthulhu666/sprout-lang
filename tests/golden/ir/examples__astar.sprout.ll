@@ -161,6 +161,8 @@ declare i64 @wall_time_micros()
 @.cname.15 = private unnamed_addr constant [25 x i8] c"stdlib.mutable.MutMatrix\00"
 @.cfkinds.15 = private unnamed_addr constant [4 x i8] c"iip\00"
 @pow10_clamp = private constant i64 400
+@pow10_exact_max = private constant i64 22
+@pow10_finite_max = private constant i64 308
 
 define i64 @stdlib.math.int.int_abs(i64 %p$value) {
 entry:

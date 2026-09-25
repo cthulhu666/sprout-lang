@@ -479,6 +479,8 @@ declare i64 @__chan_select(i64)
 @.cname.56 = private unnamed_addr constant [25 x i8] c"stdlib.http_server.Route\00"
 @.cfkinds.56 = private unnamed_addr constant [4 x i8] c"ssp\00"
 @pow10_clamp = private constant i64 400
+@pow10_exact_max = private constant i64 22
+@pow10_finite_max = private constant i64 308
 @stdlib.net.poll_write = private constant i64 2
 @stdlib.net.poll_read = private constant i64 1
 @stdlib.net.read_chunk = private constant i64 65536

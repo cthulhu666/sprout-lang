@@ -146,6 +146,8 @@ declare i64 @env_get(i64)
 @.cname.14 = private unnamed_addr constant [29 x i8] c"stdlib.bytes.Utf8DecodeError\00"
 @.cfkinds.14 = private unnamed_addr constant [2 x i8] c"s\00"
 @pow10_clamp = private constant i64 400
+@pow10_exact_max = private constant i64 22
+@pow10_finite_max = private constant i64 308
 
 define i64 @stdlib.bytes.length(i64 %p$value) {
 entry:

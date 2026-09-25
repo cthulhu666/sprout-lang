@@ -167,6 +167,8 @@ declare i64 @json_stringify(i64)
 @.cname.29 = private unnamed_addr constant [27 x i8] c"stdlib.json.JsonObjectStep\00"
 @.cfkinds.29 = private unnamed_addr constant [4 x i8] c"spp\00"
 @pow10_clamp = private constant i64 400
+@pow10_exact_max = private constant i64 22
+@pow10_finite_max = private constant i64 308
 
 define i64 @stdlib.json.bool(i64 %p$value) {
 entry:

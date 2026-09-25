@@ -599,6 +599,23 @@ test-setup-dev:
 [group('test')]
 test-file file: (_test-file "build/compile_driver_bin_stage1" file)
 
+# The parse_double differential harness at sweep width. `just test` runs the same
+# file at its default 10 runs per digit length; this is what settles an algorithm
+# change, where a table of worst-ULP per length answers in one command what an
+# argument about rounding cannot.
+[group('test')]
+parse-double-sweep runs="1500" seed="20260925": bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  STAGE="{{build_dir}}/compile_driver_bin_stage1"
+  TMP_LL=$(mktemp /tmp/sprout_pdsweep_XXXXXX.ll)
+  TMP_BIN=$(mktemp /tmp/sprout_pdsweep_XXXXXX)
+  trap 'rm -f "$TMP_LL" "$TMP_BIN"' EXIT
+  "$STAGE" --emit-ir "{{stdlib_root}}" --package-root "{{justfile_directory()}}" \
+    tests/stdlib/test_parse_double_differential.spr > "$TMP_LL"
+  clang "$TMP_LL" {{runtime_src}} {{clang_extra}} -o "$TMP_BIN"
+  "$TMP_BIN" --runs={{runs}} --seed={{seed}}
+
 [private]
 _test-file stage file:
   #!/usr/bin/env bash

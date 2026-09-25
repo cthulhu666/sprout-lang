@@ -669,6 +669,8 @@ declare i64 @vector_truncate(i64, i64)
 @.cname.121 = private unnamed_addr constant [13 x i8] c"main.Stamped\00"
 @.cfkinds.121 = private unnamed_addr constant [2 x i8] c"i\00"
 @pow10_clamp = private constant i64 400
+@pow10_exact_max = private constant i64 22
+@pow10_finite_max = private constant i64 308
 @stdlib.terminal.esc = global i64 zeroinitializer
 
 define i64 @min_int() {
