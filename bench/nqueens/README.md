@@ -9,13 +9,37 @@ to compiled and interpreted alternatives.
 Place N queens on an N×N chess board so no two queens attack each other.
 Count all distinct solutions. No output of arrangements — pure counting.
 
-**Known answers:** N=8 → 92, N=10 → 724, N=12 → 14,200, N=13 → 73,712.
+**Known answers:** N=8 → 92, N=10 → 724, N=12 → 14,200, N=13 → 73,712,
+N=14 → 365,596, N=15 → 2,279,184, N=16 → 14,772,512, N=17 → 95,815,104.
+
+---
+
+## Three representations, measured separately
+
+This is the one thing to understand before reading any number below. The
+implementations fall into three groups by **how the constraint state is
+represented**, and the groups do materially different amounts of work per node.
+A bitmask implementation is ~50× faster than a persistent one *in the same
+language*, so a cross-group comparison measures the representation, not the
+language. `bench.sh` prints them in three separate sections for that reason,
+and the results below keep them apart.
+
+| Representation | State | Allocation per placement | Search tree |
+|---|---|---|---|
+| **1. persistent / copy-on-write** | 3 boolean arrays, copied | O(n) | tries every column, tests each |
+| **2. mutable in-place** | 3 boolean arrays, written and undone | none | tries every column, tests each |
+| **3. bitmask** | 3 `Int`s | none | visits only safe columns |
+
+Sprout appears in groups 1 and 3. Group 2 is expressible — `stdlib/mutable.sprout`
+has `MutVec` with `mutvec_new`/`mutvec_set`/`mutvec_at` — but every one of those
+is `!{IO}`, so a mutable variant would turn the whole search effectful. It is
+simply not written yet, not impossible.
 
 ---
 
 ## The Algorithm
 
-All implementations use the same backtracking recurrence:
+Groups 1 and 2 share this backtracking recurrence:
 
 ```
 queens(n, row, col, cols, pos_diag, neg_diag):
@@ -34,19 +58,15 @@ Three boolean constraint arrays give O(1) conflict checking:
 
 The **skip** branch is computed before any mutation so it always sees the
 original constraint arrays. The **place** branch either copies the arrays
-(pure variants) or mutates-and-undoes them (mutable variants).
+(group 1) or mutates-and-undoes them (group 2).
 
-### Variants
-
-| Variant | Description | Allocation per placement |
-|---|---|---|
-| **pure** | Copy all 3 constraint arrays on each queen placement | O(n) per step |
-| **mutable** | Write `true`, recurse to next row, write `false` to undo | O(1) per step |
-| **bitmask** (Go only) | Encode constraints as 3 integers; iterate only legal columns | 0 — no arrays |
-
-The bitmask variant uses the Richards encoding: `cols` is a permanent bitmask
-of occupied columns; `ld`/`rd` are diagonal masks that shift left/right by one
-bit on each row descent.
+Group 3 uses the Richards encoding instead. Each of the three `Int`s is a set of
+columns *in the current row*: `cols` is the permanently occupied columns, `ld`
+and `rd` are the columns attacked along each diagonal direction. Descending a
+row moves every diagonal threat sideways by exactly one column, so `ld` shifts
+left and `rd` shifts right on the recursive call — a diagonal is tracked without
+ever indexing `r+c`. `mask &^ (cols|ld|rd)` is then the set of safe columns, and
+the loop takes them one at a time with `x & -x`. Limited to N ≤ 63.
 
 ---
 
@@ -54,18 +74,19 @@ bit on each row descent.
 
 ```
 bench/nqueens/
-├── nqueens.hs          Haskell — pure, UArray Int Bool (bit-packed, unboxed)
-├── nqueens_boxed.hs    Haskell — pure, Array Int Bool  (boxed, pointer-per-element)
-├── nqueens_pure.rb     Ruby    — pure (Array#dup per placement)
-├── nqueens_mut.rb      Ruby    — mutable backtracking
-├── nqueens_pure.py     Python  — pure (list[:] slice copy per placement)
-├── nqueens_mut.py      Python  — mutable backtracking
-├── nqueens.go          Go      — pure + mutable + bitmask (one file, three variants)
-├── bench.sh            Compile all languages, then run and print results
+├── nqueens.hs          Haskell — group 1, UArray Int Bool (bit-packed, unboxed)
+├── nqueens_boxed.hs    Haskell — group 1, Array Int Bool  (boxed, pointer-per-element)
+├── nqueens_pure.rb     Ruby    — group 1 (Array#dup per placement)
+├── nqueens_mut.rb      Ruby    — group 2
+├── nqueens_pure.py     Python  — group 1 (list[:] slice copy per placement)
+├── nqueens_mut.py      Python  — group 2
+├── nqueens.go          Go      — all three groups in one file, selected by argument
+├── bench.sh            Compile everything, then run and print by representation
 └── .gitignore          Excludes bin/ from version control
 ```
 
-The Sprout source lives at `../../examples/nqueens.sprout`.
+The Sprout sources live at `../../examples/nqueens.sprout` (group 1) and
+`../../examples/nqueens_bitmask.sprout` (group 3).
 
 ---
 
@@ -84,116 +105,166 @@ The Sprout source lives at `../../examples/nqueens.sprout`.
 ## Running
 
 ```bash
-# From the repo root:
+# From the repo root — every section, ~2 minutes:
 bash bench/nqueens/bench.sh
+
+# One representation on a settled machine:
+bash bench/nqueens/bench.sh bitmask      # or: persistent, mutable
 ```
 
-The script compiles Haskell and Go (plus the Sprout binary via
-`just compile-native`) into `bench/nqueens/bin/`, then runs every variant and
-prints internal per-N timings. Compiled-language times are execution-only;
-Python and Ruby include interpreter startup (~50 ms).
+The script compiles Haskell and Go (plus both Sprout binaries via
+`just compile-native`) into `bench/nqueens/bin/`, then runs every variant
+grouped by representation.
 
-To time only the pre-built Sprout binary (excluding compilation):
+**A single full pass is indicative, not a measurement.** The sections run in
+order, so by the time the bitmask section starts, a minute of Ruby and Python
+has heated the machine — enough to make Sprout's bitmask read ~8.4 ms instead of
+~4.6 and invert its comparison with Go. Name a section to avoid this, and treat
+the tables below (interleaved medians) as the real numbers.
+
+The Go binary takes a variant and an optional explicit N ladder, which is how
+the scaling study below was run:
 
 ```bash
-/usr/bin/time -l bench/nqueens/bin/nqueens_sprout
+bench/nqueens/bin/nqueens_go bitmask 13 14 15 16 17
 ```
 
 ---
 
 ## Results
 
-Measured on Apple M1 (arm64-darwin). Sprout numbers updated 2026-05-28 post type-aware-rooting fix.
+Measured on Apple M1 (arm64-darwin), 2026-09-25, one machine and one session.
+Compiled languages are execution-only. **Every N=12 and N=13 figure is a median
+of interleaved runs** — 5 for the compiled group-1 and group-3 entries, 3 for
+the interpreted ones and group 2; the smaller-N progression is a single pass.
+Interleaving is not ceremony: running one implementation five times and then the
+next hands the second a differently-heated machine, which produced a spurious
+2× gap during this very refresh.
 
-### N=12 (14,200 solutions) — primary benchmark point
+### Representation 1 — persistent / copy-on-write
 
-| Implementation | Time (ms) | vs Sprout (post-P0) |
-|---|---:|---:|
-| Go bitmask | 4.6 | 202× |
-| Go mutable | 71 | 13× |
-| Go pure | 74 | 13× |
-| Haskell `UArray` (unboxed) | 108 | 8.6× |
-| Haskell `Array` (boxed) | 174 | 5.3× |
-| Ruby mutable | 984 | 1.06× |
-| Ruby pure | 1,192 | 1.28× |
-| Python mutable | 1,266 | 1.36× |
-| Python pure | 1,572 | 1.69× |
-| **Sprout** (clang -O2, exec only) — post-P0 type-aware rooting (2026-05-28) | **928** | **1×** |
-| Sprout — pre-P0 baseline (CPR-only, 2026-05-27) | ~1,500–2,600 | 1.6–2.8× slower than current |
-| Sprout — pre-CPR baseline (2026-05-26) | ~1,620 | 1.7× slower than current |
+| Implementation | N=12 (ms) | N=13 (ms) | vs fastest |
+|---|---:|---:|---:|
+| Go — `[]bool` + copy | 64 | 381 | 1.0× |
+| Haskell — `UArray Int Bool` (unboxed) | 96 | 556 | 1.5× |
+| Haskell — `Array Int Bool` (boxed) | 162 | 945 | 2.5× |
+| **Sprout — `Vec Bool`** | **240** | **1,423** | **3.7×** |
+| Ruby — `Array#dup` | 1,215 | 6,986 | 19× |
+| Python — `list[:]` | 1,612 | 8,574 | 25× |
 
-### Full progression across N
+### Representation 2 — mutable in-place
+
+| Implementation | N=12 (ms) | N=13 (ms) | vs fastest |
+|---|---:|---:|---:|
+| Go — `[]bool` mutate/undo | 68 | 403 | 1.0× |
+| Ruby — mutate/undo | 966 | 5,624 | 14× |
+| Python — mutate/undo | 1,214 | 8,975 | 18× |
+
+### Representation 3 — bitmask
+
+| Implementation | N=12 (ms) | N=13 (ms) | vs fastest |
+|---|---:|---:|---:|
+| **Sprout — `Int` masks** | **4.6** | **24.9** | **1.0×** |
+| Go — `int` masks | 4.5 | 24.7 | 1.0× |
+
+Sprout and Go are indistinguishable here — 2% apart at N=12, 1% at N=13, both
+inside the run-to-run spread.
+
+### Smaller N (single pass)
 
 ```
-N=8 (92 solutions):
-  Go bitmask     0.01 ms   Go mutable  0.12 ms   Go pure      0.15 ms
-  Haskell UArray 0.2  ms   Haskell Box 0.6  ms
-  Ruby mutable   1.6  ms   Ruby pure   3.2  ms
-  Python mutable 1.2  ms   Python pure 1.5  ms
+                          N=8      N=10
+group 1  Go pure          0.11 ms  2.2 ms
+         Haskell UArray   0.3      5.2
+         Haskell Array    0.4      7.6
+         Sprout Vec       0.5     11.1
+         Python list[:]   1.5     31.3
+         Ruby dup         3.3     45.4
 
-N=10 (724 solutions):
-  Go bitmask     0.18 ms   Go mutable  2.5  ms   Go pure      3.5  ms
-  Haskell UArray 4.6  ms   Haskell Box 11.8 ms
-  Ruby mutable   34   ms   Ruby pure   44   ms
-  Python mutable 26   ms   Python pure 32   ms
+group 2  Go mutable       0.16     2.2
+         Python mutate    1.2     25.9
+         Ruby mutate      2.0     42.2
 
-N=12 (14,200 solutions):
-  Go bitmask     4.6  ms   Go mutable  71   ms   Go pure      74   ms
-  Haskell UArray 108  ms   Haskell Box 174  ms
-  Ruby mutable   984  ms   Ruby pure   1192 ms
-  Python mutable 1266 ms   Python pure 1572 ms
-  Sprout (post-P0)  928 ms  (exec only; clang -O2)
-
-N=13 (73,712 solutions):
-  Go bitmask     25   ms   Go mutable  416  ms   Go pure      416  ms
-  Haskell UArray 559  ms   Haskell Box 913  ms
-  Sprout (post-P0) 5,700 ms  (Python/Ruby not measured at N=13 — too slow)
+group 3  Sprout masks     0.0      0.4
+         Go masks         0.01     0.20
 ```
 
-Optimization trajectory and next steps: see [`docs/archive/nqueens-optim-iteration-2026-05-28.md`](../../docs/archive/nqueens-optim-iteration-2026-05-28.md).
-Target: match Haskell UArray (~108 ms N=12). Remaining gap ~8.6× after P0; next iteration is P1 (inline GC root push/pop or enable LTO).
+### Bitmask scaling: does Go pull ahead at large N?
+
+No. Medians of 3 interleaved rounds, N=13 through N=17 (95.8M solutions):
+
+| N | Sprout (ms) | Go (ms) | Go / Sprout |
+|---:|---:|---:|---:|
+| 13 | 25.2 | 27.6 | 1.09 |
+| 14 | 149 | 160 | 1.07 |
+| 15 | 928 | 1,037 | 1.12 |
+| 16 | 6,337 | 6,849 | 1.08 |
+| 17 | 47,660 | 49,255 | 1.03 |
+
+The ratio is flat — no crossover, and no trend toward one. Sprout is marginally
+ahead at every point, by less than the gap between two consecutive rounds of the
+same binary, so the honest reading is parity that holds as the search tree grows
+four orders of magnitude.
 
 ---
 
 ## Analysis
 
-### Why Sprout still trails Haskell despite compiling to native code
+### The representation dominates the language
 
-**Updated 2026-05-28** — the prior framing (GC tracing dominates) turned out
-to be wrong; the actual bottleneck was the GC root push/pop function-call
-overhead. See [`docs/archive/nqueens-optim-iteration-2026-05-28.md`](../../docs/archive/nqueens-optim-iteration-2026-05-28.md) for the full profile-driven analysis.
+Sprout's bitmask variant at N=12 (4.6 ms) is **14× faster than Go's persistent
+variant** (65 ms), and 52× faster than Sprout's own persistent variant. The
+single largest performance fact in this benchmark is which of the three groups
+an implementation is in — not which language it is written in.
 
-Before any optimization (2026-05-26), the Sprout N=12 binary retired ~29
-billion instructions in 1.6 s. The first hypothesis blamed `vec_set` copying
-and GC sweep cost; that was partly correct but wasn't the dominant term.
+This is why the old single flat table here was misleading: it invited reading
+"Sprout 928 ms" against "Go bitmask 4.6 ms" as a 200× language gap, when most of
+that ratio was two different algorithms.
 
-After CPR unboxing (2026-05-27) the per-N=12 cost dropped ~10% and the
-instruction count fell modestly. The next assumption — that
-`register_managed_ptr` (per-allocation GC bookkeeping) was the residual
-bottleneck — was overturned by an actual CPU sample profile.
+### Why Sprout reaches Go's speed on the bitmask representation
 
-The real residual cost was **GC root push/pop** (`sprout_gc_push_i64_root`,
-`sprout_gc_pop_roots`) at **67% of CPU time** — every heap-valued temporary
-in codegen emitted an external call into the C runtime to register a root.
-Reading the emitted IR for `queens` showed that ~50% of those calls were
-pure waste: the codegen pushed roots for `Int` arguments because Sprout's
-`Int` is `i64` at the LLVM level, the same as boxed ADT handles, and the
-push helper used the LLVM type rather than the source-level Sprout type.
+Because the representation removes the thing Sprout is slower at. Counted with
+`SPROUT_DEBUG_ALLOC=1` over the full N=1..13 ladder:
 
-The N-queens P0 fix (2026-05-28) added type-aware rooting that skips push
-for `Int`/`Bool`/`Char` arguments. N=12 dropped from ~1,500 ms to **928 ms**;
-total instructions retired across the full run dropped from 159 B to 114 B
-(−28%). Post-P0 the push/pop CPU share is **~44%** — still dominant; the
-remaining pushes are for genuine heap pointers (Vec args) that type
-filtering can't eliminate. The next attack target is the function-call
-boundary itself (P1: inline push/pop as IR, or enable `-flto`).
+| Variant | Allocations | GC cycles |
+|---|---:|---:|
+| `nqueens.sprout` (persistent) | 50,118,983 | 8,279 |
+| `nqueens_bitmask.sprout` | 67 | 1 |
 
-GHC's generational GC collects short-lived heap objects in its nursery at
-near-zero marginal cost; once Sprout's per-push overhead is gone, the
-remaining gap will need attacking allocation cost too (P3 True/False/Nil
-singletons, P4 bump-allocated nursery — see backlog).
+The 67 are the result strings; the search itself allocates nothing. With no
+allocation there is no GC, no rooting and no write traffic, so what remains is
+integer ALU work in a tight recursion — and Sprout's LLVM backend emits that as
+well as Go's does.
 
-### Why unboxed (UArray) beats boxed (Array) by only 1.6× instead of ~58×
+### Why Sprout trails on the persistent representation
+
+3.7× behind Go and 2.5× behind Haskell's unboxed `UArray`, and the cost is
+allocation, not codegen. Each `vec_set` allocates **three** objects: the `Vec`
+constructor wrapper, the `VectorVal` header, and the `long long*` backing array.
+That is 16.7M placements × 3 = 50.1M allocations at N=1..13.
+
+A CPU profile of the whole-program-linked binary attributes ~41% of samples to
+the GC and allocator, and **~23% to `libsystem_malloc` plus `madvise` alone**.
+That share has a specific cause: `Vec` backing arrays are the one payload the GC
+does not slot-allocate. `sprout_alloc_vector_data` calls bare `malloc`
+(`runtime/sprout_runtime.c`) and the sweep calls `free(v->data)` in
+`sprout_release_payload_extras`, so every `vec_set` is a full round-trip to the
+system allocator, while every OBJ, CLOSURE, TUPLE and MAP is a freelist pop
+inside a region.
+
+Pooling those backing arrays in the runtime is therefore the next lever for this
+representation. Note it is new mutable runtime state, so it belongs in a
+per-heap struct rather than another file-scope global.
+
+Two claims that used to be in this section are now wrong and have been removed:
+that GC root push/pop is ~44% of CPU (whole-program linking inlines both
+entirely — they do not appear in the profile at all), and that enabling LTO is
+the next step (`just compile-native` already whole-program links). Both came
+from [`docs/archive/nqueens-optim-iteration-2026-05-28.md`](../../docs/archive/nqueens-optim-iteration-2026-05-28.md),
+which was accurate when written and has since been overtaken by the work it
+recommended.
+
+### Why unboxed (UArray) beats boxed (Array) by only 1.7×
 
 For N=12 the total state is 58 booleans. `UArray Int Bool` stores these as
 **58 bits = 8 bytes** (bit-packed `ByteArray#`). `Array Int Bool` stores 58
@@ -201,7 +272,7 @@ pointers (464 bytes) that all point to the two shared GHC singletons `True`
 and `False` — no per-Bool allocation. So `//` on the boxed version copies
 464 bytes of pointers; on the unboxed version it copies 8 bytes.
 
-Despite the 58× difference in copy size, the runtime gap is only 1.6× because:
+Despite the 58× difference in copy size, the runtime gap is only 1.7× because:
 
 1. **Recursive call overhead dominates** — each backtracking node pays for
    two Haskell function calls (closures, stack frames, argument evaluation).
@@ -209,31 +280,42 @@ Despite the 58× difference in copy size, the runtime gap is only 1.6× because:
 3. **GHC optimises Bool access well** — `not (arr ! i)` compiles to a branch
    on a known-small integer in both cases.
 
-The unboxed advantage grows with N (larger arrays, more copying) and in
-workloads that are bandwidth-limited rather than call-overhead-limited.
+The unboxed advantage grows with N and in workloads that are bandwidth-limited
+rather than call-overhead-limited.
 
-### Why mutable barely helps in Ruby/Python (~1.2–1.6×) but a lot in Go
+### Mutable helps the interpreters and does nothing for Go
 
-In Go, allocating and copying a `[]bool` slice (even 8–23 bytes) still
-invokes the allocator and GC write barriers. Removing that gives a measurable
-speedup at N=12 but the ratio narrows at small N because call overhead
-dominates.
+Comparing group 2 against group 1 within each language, at N=12:
 
-In Python and Ruby, the bottleneck is per-call overhead (Python frame
-creation, bytecode dispatch; Ruby method dispatch). Eliminating the list copy
-saves ~20–25% work — noticeable but the interpreter is the real floor.
+| Language | persistent | mutable | mutable gain |
+|---|---:|---:|---:|
+| Go | 64 ms | 68 ms | **0.94×** (slower) |
+| Ruby | 1,215 ms | 966 ms | 1.26× |
+| Python | 1,612 ms | 1,214 ms | 1.33× |
+
+In Python and Ruby the bottleneck is per-call overhead — frame creation and
+bytecode dispatch, method dispatch — but the copy is a whole extra O(n)
+interpreter-level operation per placement, so removing it is worth ~1.3×.
+
+In Go it is worth nothing. The arrays are 8–23 bytes, well inside one cache
+line, and Go's escape analysis keeps the copies off the heap; meanwhile the
+mutable version pays six writes per placement (three to set, three to undo) that
+the pure version does not. The two effects cancel, and the mutable variant came
+out *slightly* slower in all three rounds.
+
+This reverses what this file used to claim ("mutable barely helps in Ruby/Python
+but a lot in Go", from a 71-vs-74 ms pair). The direction was wrong in both
+halves.
 
 ### The bitmask ceiling
 
-The Go bitmask variant is 15–90× faster than the array variants depending on
-N. At N=12 it beats Go-mutable by 15×; at N=13 by 17×. The gap widens with N
-because:
+Group 3 beats group 1 by ~50× at N=12 in both Sprout and Go, and the gap holds
+as N grows. Three reasons:
 
 - No allocation: zero GC pressure regardless of tree size.
-- Only valid columns are iterated (the `while available` loop skips attacked
-  positions entirely, vs the array versions which try every column and
-  check).
+- A smaller tree: only safe columns are visited, where the array versions try
+  every column and reject most of them.
 - All state fits in three CPU registers.
 
-The bitmask approach is limited to N ≤ 63 (or 31 on 32-bit) because the
-column mask must fit in a machine word.
+The approach is limited to N ≤ 63 because the column mask must fit in a machine
+word — the one respect in which it is less general than the array versions.
