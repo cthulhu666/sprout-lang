@@ -120,13 +120,20 @@ fn sealed_used_once(n: Int) -> Int =
   in match s with | Sealed f -> use_file(f)
 
 # A declaration may store ITSELF, or cycle through a sibling. The stored-field
-# walk keeps a visited set so these terminate; before it there was nothing to
-# descend and the question never arose.
+# walk memoizes by name so both terminate; before it there was nothing to descend
+# and the question never arose.
+#
+# Each needs a BINDER to prove anything: containment is only ever entered from a
+# parameter, `let`, pattern variable or `<-`, so a declaration nobody binds is
+# never walked. The mutual pair first shipped with neither a binder nor a base
+# constructor, which made it decoration — `chain_depth` alone exercised the
+# self-recursive half and the sibling cycle went untested.
 type Chain =
   | End Int
   | Link Chain
 
 type Ping =
+  | PingEnd Int
   | Ping Pong
 
 type Pong =
@@ -136,6 +143,11 @@ fn chain_depth(c: Chain) -> Int =
   match c with
   | End n -> n
   | Link inner -> chain_depth(inner) + 1
+
+fn ping_depth(p: Ping) -> Int =
+  match p with
+  | PingEnd n -> n
+  | Ping q -> match q with | Pong inner -> ping_depth(inner) + 1
 
 # The same shape through a do-block `let`, which is a separate binder path
 # (lin_do_let) from the pattern one.
@@ -263,6 +275,8 @@ fn main() -> Unit !{IO} =
     check_eq("concrete linear field two declarations deep", nested_crate_used_once(24), 24),
     check_eq("a wrap over a linear, used once", sealed_used_once(25), 25),
     check_eq("a self-recursive declaration terminates", chain_depth(Link (End(26))), 27),
+    check_eq("a declaration cycling through a sibling terminates",
+      ping_depth(Ping (Pong (PingEnd(27)))), 28),
     check_eq("do-let List of a linear, used once", do_let_container_once(10), Just(10)),
     check_eq("a function returning a linear is not a resource", recipe_is_not_a_resource(11), 11),
     check_eq("a bare linear ctor as a value is not a resource", ctor_value_is_not_a_resource(12), 12),
