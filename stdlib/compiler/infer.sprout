@@ -10182,7 +10182,7 @@ fn extern_decl_result(name: String, params: List ast.Param, ret_type_maybe: Mayb
                       effects_maybe: Maybe (List String), ext_pos: source.SourcePos,
                       alias_env: Dict types.Type, env: GlobalEnv,
                       env_ftv: List String, subst: Dict types.Type) -> TypedDeclResult =
-  match linear_check.check_signature_modes(params,
+  match linear_check.check_signature_modes(params, ret_type_maybe,
           types.scheme_type(scheme_from_fn_parts(name, params, ret_type_maybe, effects_maybe, alias_env)),
           ext_pos, global_env_dict(env)) with
   | linear_check.LinFail lp lm -> TypedDeclErr(lp, lm)
@@ -10200,11 +10200,14 @@ fn extern_decl_ok(name: String, params: List ast.Param, ret_type_maybe: Maybe as
         GlobalEnv(dict_set(name, scheme_from_fn_parts(name, params, ret_type_maybe, effects_maybe, alias_env), global_env_dict(env))),
         env_ftv, subst)
 
-fn fn_linear_gate(params: List ast.Param, s2: Dict types.Type, inst_type: types.Type,
+fn fn_linear_gate(params: List ast.Param, ret_te: Maybe ast.TypeExpr, s2: Dict types.Type,
+                  inst_type: types.Type,
                   typed_body: typed_ast.TypedExpr, fn_pos: source.SourcePos,
                   env: Dict types.Scheme) -> linear_check.LinCheck =
-  if linear_check.program_has_linear(env) || linear_check.any_param_mode_written(params) then
-    linear_check.check_fn_linear(params, unifier.apply_subst(s2, inst_type),
+  if linear_check.program_has_linear(env)
+     || linear_check.any_param_mode_written(params)
+     || linear_check.type_expr_mode_written(ret_te) then
+    linear_check.check_fn_linear(params, ret_te, unifier.apply_subst(s2, inst_type),
       apply_subst_typed_expr(s2, typed_body), fn_pos, env)
   else linear_check.LinPass
 
@@ -10795,7 +10798,7 @@ fn check_fn_body(
             # fully-substituted body/type. A violation becomes a BodyErr, surfacing
             # through the same path as any type error. Gated so a linear-free
             # program skips the check and its substitution copy. See linear_check.
-            match fn_linear_gate(params, s2, inst_type, typed_body, fn_pos, env) with
+            match fn_linear_gate(params, ret_type_maybe, s2, inst_type, typed_body, fn_pos, env) with
             | linear_check.LinFail lp lm -> (typed_ast.BodyErr(lp, lm), dict_empty(), Nil, subst)
             | linear_check.LinPass ->
                 (typed_ast.BodyOk(resolve_dispatch_typed_expr(fwd_env, s2, bind_params(params, set_empty()), typed_body), unifier.apply_subst(s2, inst_type)),
@@ -11508,7 +11511,7 @@ fn finish_instance_method_checked(name: String, params: List ast.Param, ret_mayb
                                   s2: Dict types.Type, inst_type: types.Type,
                                   typed_body: typed_ast.TypedExpr, env: Dict types.Scheme,
                                   method_constraints: List ast.TypeConstraint) -> InstanceMethodResult =
-  match fn_linear_gate(params, s2, inst_type, typed_body, typed_ast.typed_expr_pos(typed_body), env) with
+  match fn_linear_gate(params, ret_maybe, s2, inst_type, typed_body, typed_ast.typed_expr_pos(typed_body), env) with
   | linear_check.LinFail lp lm -> InstanceMethodErr(lp, lm)
   | linear_check.LinPass ->
       InstanceMethodOk(

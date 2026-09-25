@@ -405,6 +405,8 @@ type BadModifier (..) =
   | BadNonLinear String
   | BadOnceNonFunction String
   | BadOnceOnTyvar String
+  # A modifier written in the RETURN type, which names no parameter to blame.
+  | BadInReturn
 
 fn bad_modifier_message(b: BadModifier) -> String =
   match b with
@@ -412,6 +414,14 @@ fn bad_modifier_message(b: BadModifier) -> String =
   | BadNonLinear name -> bad_modifier_msg(name)
   | BadOnceNonFunction name -> once_modifier_msg(name)
   | BadOnceOnTyvar name -> once_tyvar_msg(name)
+  | BadInReturn -> return_modifier_msg()
+
+# The return type is checked by the same walk as a parameter's, so the fault it
+# reports is already worded for a parameter. Re-word rather than re-derive: the
+# walk knows WHICH rule failed, and only the caller knows the position.
+fn return_modifier_msg() -> String =
+  "an ownership modifier in a return type is only meaningful on a parameter of a linear type"
+
 
 fn tyvar_modifier_msg(name: String) -> String =
   "`borrowing`/`consuming` cannot be used on a type variable (parameter '" ++ name ++ "'): linearity is per-declaration, so whether the argument is linear is not known here"
@@ -1422,7 +1432,38 @@ fn mode_ownership(m: ast.ParamMode) -> types.Ownership = ownership_of_param_mode
 export fn any_param_mode_written(params: List ast.Param) -> Bool =
   match params with
   | Nil -> false
-  | Cons prm rest -> if mode_is_written(param_mode(prm)) then true else any_param_mode_written(rest)
+  | Cons prm rest ->
+      if mode_is_written(param_mode(prm)) || type_expr_writes_mode(param_type_expr(prm)) then true
+      else any_param_mode_written(rest)
+
+# A mode written inside an ARROW counts too. The gate asked only about declared
+# parameters, so `fn apply(g: (borrowing Int) -> Int)` in a module with no linear
+# type of its own skipped the whole pass — the validation existed and nothing
+# reached it. The fixture that was supposed to pin it passed only because it
+# declared an unrelated `type linear File`, which made the gate fire for the
+# other reason.
+export fn type_expr_mode_written(te: Maybe ast.TypeExpr) -> Bool =
+  type_expr_writes_mode(te)
+
+fn type_expr_writes_mode(te: Maybe ast.TypeExpr) -> Bool =
+  match te with
+  | Nothing -> false
+  | Just written -> type_expr_writes_mode_at(written)
+
+fn type_expr_writes_mode_at(te: ast.TypeExpr) -> Bool =
+  match te with
+  | ast.TypeArrow p r _ mode ->
+      mode_is_written(mode) || type_expr_writes_mode_at(p) || type_expr_writes_mode_at(r)
+  | ast.TypeApply f x -> type_expr_writes_mode_at(f) || type_expr_writes_mode_at(x)
+  | ast.TupleType parts -> any_type_expr_writes_mode(parts)
+  | ast.TypeEffect inner _ -> type_expr_writes_mode_at(inner)
+  | ast.TypeThunk r _ -> type_expr_writes_mode_at(r)
+  | ast.TypeName _ -> false
+
+fn any_type_expr_writes_mode(tes: List ast.TypeExpr) -> Bool =
+  match tes with
+  | Nil -> false
+  | Cons te rest -> if type_expr_writes_mode_at(te) then true else any_type_expr_writes_mode(rest)
 
 # M4.6: an instance method MAY carry an ownership modifier — the mode is on the
 # method's type now, so a call site can see it — but it must AGREE with the class
@@ -1462,9 +1503,10 @@ fn method_mismatch_for(name: String, inst: types.Ownership, cls: types.Ownership
 
 # Validate modifiers against a signature ALONE, with no body to walk. Used for
 # `extern fn`, which has no body and so never reaches check_fn_linear.
-export fn check_signature_modes(params: List ast.Param, fn_type: types.Type,
+export fn check_signature_modes(params: List ast.Param, ret_te: Maybe ast.TypeExpr,
+                                fn_type: types.Type,
                                 pos: source.SourcePos, env: Dict types.Scheme) -> LinCheck =
-  match first_bad_modifier(params, fn_type, env) with
+  match first_bad_modifier(params, ret_te, fn_type, env) with
   | Just bad -> LinFail(pos, bad_modifier_message(bad))
   | Nothing -> LinPass
 
@@ -1479,50 +1521,101 @@ export fn check_signature_modes(params: List ast.Param, fn_type: types.Type,
 # parameter at most once, so the parameter must be a FUNCTION; its argument type is
 # irrelevant and typically non-linear (`Unit -> Unit`). Routing it through the
 # linear check would reject every legitimate use.
-fn first_bad_modifier(params: List ast.Param, fn_type: types.Type,
-                      env: Dict types.Scheme) -> Maybe BadModifier =
+# `ret_te` is the declaration's written RETURN annotation, validated once the
+# parameter spine runs out: `fn make() -> (borrowing Int) -> Int` writes a
+# modifier nowhere near a parameter, and the walk reached only parameters, so the
+# position went unchecked and surfaced as a return-type MISMATCH instead.
+fn first_bad_modifier(params: List ast.Param, ret_te: Maybe ast.TypeExpr,
+                      fn_type: types.Type, env: Dict types.Scheme) -> Maybe BadModifier =
   match params with
-  | Nil -> Nothing
+  | Nil ->
+      match written_mode_fault("the return type", ret_te, declared_result(fn_type), env) with
+      | Just _ -> Just(BadInReturn)
+      | Nothing -> Nothing
   | Cons prm rest ->
       match fn_type with
-      | types.TFunc a b _ _ -> bad_modifier_here(prm, a, rest, b, env)
+      | types.TFunc a b _ _ -> bad_modifier_here(prm, ret_te, a, rest, b, env)
       | _ -> Nothing
 
-fn bad_modifier_here(prm: ast.Param, a: types.Type, rest: List ast.Param,
-                     b: types.Type, env: Dict types.Scheme) -> Maybe BadModifier =
-  match nested_arrow_borrow_fault(param_name(prm), a, env) with
+fn bad_modifier_here(prm: ast.Param, ret_te: Maybe ast.TypeExpr, a: types.Type,
+                     rest: List ast.Param, b: types.Type,
+                     env: Dict types.Scheme) -> Maybe BadModifier =
+  match written_mode_fault(param_name(prm), param_type_expr(prm), a, env) with
   | Just bad -> Just(bad)
   | Nothing ->
-      if mode_is_once(param_mode(prm)) then bad_once_here(prm, a, rest, b, env)
-      else if ! mode_is_written (param_mode(prm)) then first_bad_modifier(rest, b, env)
+      if mode_is_once(param_mode(prm)) then bad_once_here(prm, ret_te, a, rest, b, env)
+      else if ! mode_is_written (param_mode(prm)) then first_bad_modifier(rest, ret_te, b, env)
       else if type_is_tyvar(a) then Just(BadOnTyvar(param_name(prm)))
       else if ! type_is_linear (a, env) then Just(BadNonLinear(param_name(prm)))
-      else first_bad_modifier(rest, b, env)
+      else first_bad_modifier(rest, ret_te, b, env)
 
-# The same rules, for a modifier written INSIDE a parameter's type rather than on
-# the parameter: `g: (borrowing Int) -> Int`. Without this an arrow was the one
-# place a meaningless modifier survived, to be reported as an unrelated mismatch
-# at the call site if at all. OwnConsume is skipped because it is what every
-# unmarked arrow already carries and so says nothing the author wrote.
-fn nested_arrow_borrow_fault(name: String, t: types.Type,
-                             env: Dict types.Scheme) -> Maybe BadModifier =
-  match t with
-  | types.TFunc a b _ own ->
-      match arrow_mode_fault(name, a, own, env) with
+# The same rules, for a modifier written INSIDE a type rather than on a declared
+# parameter: `g: (borrowing Int) -> Int`. Without this an arrow was the one place
+# a meaningless modifier survived, to be reported as an unrelated mismatch at some
+# call site if at all.
+#
+# It walks the written TypeExpr in lockstep with the RESOLVED type, because the
+# two answer different halves. Only the TypeExpr distinguishes a written
+# `consuming` from an unmarked arrow — they are one `Ownership`, so a walk over
+# the type alone let `(consuming Int) -> Int` through while rejecting the
+# identical `x: consuming Int`. Only the type can answer "is this linear", since
+# that is an env lookup on a resolved head.
+#
+# Both sides are descended, not just the arrow spine: an arrow inside a type
+# ARGUMENT or a tuple component is still an arrow someone wrote a modifier on.
+# `List ((borrowing a) -> Int)` was accepted while the same modifier one layer up
+# was rejected — and that is the type-variable case, the one whose entire point is
+# that `borrowing Int` must not be reachable by instantiating it.
+#
+# Where the two shapes DESYNC — an alias that expands to an arrow, say — the walk
+# stops. Failing open there keeps it from inventing a fault out of a mismatch
+# between two representations of the same type.
+fn written_mode_fault(name: String, te: Maybe ast.TypeExpr, t: types.Type,
+                      env: Dict types.Scheme) -> Maybe BadModifier =
+  match te with
+  | Nothing -> Nothing
+  | Just written -> written_mode_fault_at(name, written, t, env)
+
+fn written_mode_fault_at(name: String, te: ast.TypeExpr, t: types.Type,
+                         env: Dict types.Scheme) -> Maybe BadModifier =
+  match (te, t) with
+  # A trailing `!{...}` wraps the TypeExpr but never the resolved type, so it is
+  # unwrapped rather than treated as a desync.
+  | (ast.TypeEffect inner _, _) -> written_mode_fault_at(name, inner, t, env)
+  | (ast.TypeArrow p r _ mode, types.TFunc a b _ _) ->
+      match written_arrow_fault(name, mode, a, env) with
       | Just bad -> Just(bad)
       | Nothing ->
-          match nested_arrow_borrow_fault(name, a, env) with
+          match written_mode_fault_at(name, p, a, env) with
           | Just bad -> Just(bad)
-          | Nothing -> nested_arrow_borrow_fault(name, b, env)
+          | Nothing -> written_mode_fault_at(name, r, b, env)
+  | (ast.TypeApply f x, types.TApp tf tx) ->
+      match written_mode_fault_at(name, f, tf, env) with
+      | Just bad -> Just(bad)
+      | Nothing -> written_mode_fault_at(name, x, tx, env)
+  | (ast.TupleType parts, types.TTuple items) -> written_mode_fault_list(name, parts, items, env)
+  | (ast.TypeThunk r _, types.TThunk b _) -> written_mode_fault_at(name, r, b, env)
+  # Everything else is a leaf or a desync; both stop the walk.
   | _ -> Nothing
 
-fn arrow_mode_fault(name: String, a: types.Type, own: types.Ownership,
-                    env: Dict types.Scheme) -> Maybe BadModifier =
-  if types.ownership_is_once(own) then
+fn written_mode_fault_list(name: String, tes: List ast.TypeExpr, ts: List types.Type,
+                           env: Dict types.Scheme) -> Maybe BadModifier =
+  match (tes, ts) with
+  | (Cons te trest, Cons t rest) ->
+      match written_mode_fault_at(name, te, t, env) with
+      | Just bad -> Just(bad)
+      | Nothing -> written_mode_fault_list(name, trest, rest, env)
+  | _ -> Nothing
+
+# One arrow's written mode against its resolved parameter type. ModeDefault is the
+# only one that says nothing the author wrote, so it is the only one skipped.
+fn written_arrow_fault(name: String, mode: ast.ParamMode, a: types.Type,
+                       env: Dict types.Scheme) -> Maybe BadModifier =
+  if mode_is_once(mode) then
     if type_is_tyvar(a) then Just(BadOnceOnTyvar(name))
     else if ! type_is_func (a) then Just(BadOnceNonFunction(name))
     else Nothing
-  else if ! types.ownership_is_borrow (own) then Nothing
+  else if ! mode_is_written (mode) then Nothing
   else if type_is_tyvar(a) then Just(BadOnTyvar(name))
   else if ! type_is_linear (a, env) then Just(BadNonLinear(name))
   else Nothing
@@ -1540,10 +1633,11 @@ fn arrow_mode_fault(name: String, a: types.Type, own: types.Ownership,
 # invoke it at all (the type is not known to be a function), so the promise is
 # vacuous, while the value stays freely returnable and duplicable. `once a` is
 # therefore strictly worse than a dishonestly-annotated concrete parameter.
-fn bad_once_here(prm: ast.Param, a: types.Type, rest: List ast.Param,
-                 b: types.Type, env: Dict types.Scheme) -> Maybe BadModifier =
+fn bad_once_here(prm: ast.Param, ret_te: Maybe ast.TypeExpr, a: types.Type,
+                 rest: List ast.Param, b: types.Type,
+                 env: Dict types.Scheme) -> Maybe BadModifier =
   if type_is_tyvar(a) then Just(BadOnceOnTyvar(param_name(prm)))
-  else if type_is_func(a) then first_bad_modifier(rest, b, env)
+  else if type_is_func(a) then first_bad_modifier(rest, ret_te, b, env)
   else Just(BadOnceNonFunction(param_name(prm)))
 
 fn type_is_tyvar(t: types.Type) -> Bool =
@@ -1601,16 +1695,34 @@ fn param_name(p: ast.Param) -> String =
   match p with
   | ast.Param name _ _ -> name
 
+# The annotation as WRITTEN. `Nothing` for an unannotated parameter, which has no
+# written modifier to validate by construction.
+fn param_type_expr(p: ast.Param) -> Maybe ast.TypeExpr =
+  match p with
+  | ast.Param _ te _ -> te
+
+# What is left of a signature's type once its parameters are accounted for. A
+# NULLARY signature is `() -> T`, a TThunk, and its `()` appears in no return
+# annotation — so pairing the written return type against the thunk itself
+# desyncs the walk and it silently checks nothing. That is the shape an
+# `extern fn` returning a function has, which is the only way to reach the
+# return position at all (a declared `fn` is rejected earlier by unification).
+fn declared_result(fn_type: types.Type) -> types.Type =
+  match fn_type with
+  | types.TThunk b _ -> b
+  | _ -> fn_type
+
 # --- entry points ---
 
 # Check a function body for linear-use violations. `fn_type` is the function's
 # fully-substituted type (its param types drive linearity of the parameters);
 # `body` is the fully-substituted typed body; `env` carries the `@linear:` markers
 # and the `@parammode:` masks.
-export fn check_fn_linear(params: List ast.Param, fn_type: types.Type,
+export fn check_fn_linear(params: List ast.Param, ret_te: Maybe ast.TypeExpr,
+                          fn_type: types.Type,
                           body: typed_ast.TypedExpr, fn_pos: source.SourcePos,
                           env: Dict types.Scheme) -> LinCheck =
-  match first_bad_modifier(params, fn_type, env) with
+  match first_bad_modifier(params, ret_te, fn_type, env) with
   | Just bad -> LinFail(fn_pos, bad_modifier_message(bad))
   | Nothing ->
       linear_result(owned_param_binders(params, fn_type, env),

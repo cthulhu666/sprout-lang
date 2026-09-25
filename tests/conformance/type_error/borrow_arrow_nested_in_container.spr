@@ -1,0 +1,13 @@
+module main
+
+# A modifier written inside an arrow that is itself inside a type CONSTRUCTOR.
+# The validation walked only the arrow spine, so anything reached through a type
+# argument or a tuple component was never asked about — and `borrowing a` is
+# exactly the type-variable case spec §5.8 says is rejected, the one whose whole
+# point is that `borrowing Int` must not be reachable by instantiating it.
+
+type linear File = File Int
+
+fn apply(gs: List ((borrowing a) -> Int), x: a) -> Int = 0
+
+fn main() -> Unit !{IO} = print(to_string(apply(Nil, 1)))

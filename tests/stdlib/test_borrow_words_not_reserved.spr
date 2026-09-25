@@ -1,0 +1,36 @@
+import stdlib.test (check_eq, run_suite)
+
+# `borrowing`, `consuming` and `once` are ordinary identifiers. They are special
+# in exactly two positions — after a parameter's `:`, and as an arrow's
+# parenthesised parameter — and the arrow reading requires an `->` to follow the
+# closing paren, exactly as `parser.param_mode_at` requires a type atom to follow
+# the word. Without that guard they would be "a reserved word in all but name",
+# which the parameter rule's own comment gives as the reason it is written that
+# way.
+#
+# The first version of the arrow rule had no lookahead: it committed on seeing
+# `( <word> <atom>` and never looked past the `)`, so `(once a)` was a hard parse
+# error while the identical `(m a)` parsed. These are both type-variable
+# applications and nothing distinguishes them but the spelling of a name.
+
+type Pair a b =
+  | Pair a b
+
+# A parenthesised application whose head is a type VARIABLE — the shape the arrow
+# rule has to decline to claim. `m`, then the three words that are special
+# elsewhere.
+fn head_m(x: (m a)) -> Int = 1
+
+fn head_once(x: (once a)) -> Int = 2
+
+fn head_borrowing(x: (borrowing a)) -> Int = 3
+
+fn head_consuming(x: (consuming a)) -> Int = 4
+
+fn main() -> Unit !{IO} =
+  run_suite("borrow_words_not_reserved", [
+    check_eq("an ordinary tyvar heads a parenthesised application", head_m(Pair(1, 2)), 1),
+    check_eq("`once` heads one too", head_once(Pair(1, 2)), 2),
+    check_eq("`borrowing` heads one too", head_borrowing(Pair(1, 2)), 3),
+    check_eq("`consuming` heads one too", head_consuming(Pair(1, 2)), 4)
+  ])
