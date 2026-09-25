@@ -386,6 +386,27 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
 - [ ] `P3` **Euclidean `mod` vs C `fmod` naming across the two modules.** `stdlib.math.int.mod` is
   Euclidean; every mainstream float remainder is truncated. Either implement a Euclidean `Double`
   `mod` so the name means one thing, or name the truncated one distinctly and document why.
+- [ ] `P2` **No way to ask for wrapping arithmetic, so hash code has to fake it.** `rng_hash2`
+  genuinely wants mod-2^64 multiplication — it is a hash, and the residue is the answer. Since
+  Stage 1 made `*` trap, it was rewritten to reduce every input first, and the first attempt
+  reduced only the seed, leaving a coordinate past ~1.25e11 aborting the process
+  (`docs/bigint-arc-retro-2026-09-25.md` §7.3). `bit_shl` got a discarding exemption by fiat;
+  multiplication got none. `wrapping_mul`/`wrapping_add`, or a `Wrapping` wrap type, would let
+  such code say what it means. `docs/int-overflow-policy-decision.md` §5 already anticipates these
+  "if a measured hot loop needs them" — this is the correctness argument instead, which is the one
+  Builtin vs Stdlib rule 6 asks for.
+- [ ] `P3` **No hex float literal (`0x1p63`), so exact Double constants are written as products.**
+  `tests/stdlib/test_parse_double.spr` spells 2^63 as `9007199254740992.0 * 1024.0` with a comment
+  explaining why that is exact, because there is no way to write the bit pattern directly. C, Rust
+  and Java all have the form; it is a lexer addition with no type-system impact, and it makes
+  bit-exact float tests say what they mean. Motivated by the bigint arc's test code, where every
+  exactness assertion needed a hand-built reference.
+- [ ] `P3` **No wide multiply (`mul_hi`, or a 128-bit intermediate), which blocks two things.**
+  `stdlib/crypto/p256.sprout` uses ten 26-bit limbs *specifically* so products fit i64 — that
+  representation is a workaround for this gap, not a preference. It is also what stops a
+  correctly-rounded `parse_double` being written in Sprout, which is why that entry currently
+  reads "or a `strtod`-backed builtin". One primitive unblocks both. Prior art: Rust
+  `u64::widening_mul`, C `__int128`, Go `bits.Mul64`.
 
 ### 2) Networking and HTTP Client
 
@@ -989,6 +1010,34 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
 - [ ] `P3` **Wire `opt` optimization passes into the build pipeline** — add
   `opt --passes=mem2reg,instcombine,simplifycfg` before the clang step in `_build-stage`. Decouples
   Sprout's IR quality from clang's optimizer settings and makes it easier to inspect what survives.
+- [ ] `P1` **A differential harness for `parse_double`, which no gate can currently replace.** All
+  six of its defects across two review rounds were found by comparing against a correctly-rounded
+  reference, and none was visible to the suite: every fraction assertion used `approx` with a
+  tolerance, so a 1 ULP regression passed. ~40 lines: N random digit runs per length (1, 2, 3, 8,
+  15..22, 40, 100, 300, 320), each compared against an exact decimal→binary oracle, assert ≤1 ULP.
+  It also settles algorithm choices that argument could not — a 1500-runs-per-length table decided
+  the significand rewrite in one command (`docs/bigint-arc-retro-2026-09-25.md` §7.1). Same shape
+  would serve `double_to_string` round-tripping and `stdlib.math`'s elementary functions.
+- [ ] `P2` **No gate reads prose, so a doc can claim its own feature is unimplemented.** Three
+  places still said bigint-v0 Stage 1 had not shipped a month after it did — the policy doc's
+  title (`DECIDED, UNIMPLEMENTED`), a `stdlib/bits.sprout` comment, and the stage heading — and
+  nothing flagged any of them (`docs/bigint-arc-retro-2026-09-25.md` §4). A cheap 80%: fail when a
+  doc's title says `UNIMPLEMENTED`/`pending` while its own `**Status:**` line says `DECIDED`, and
+  list `stdlib/*.sprout` comments containing "still open"/"not yet" that cite a doc now marked
+  decided. Syntactic and false-positive-prone, so it wants an explicit ack path like `seed-fp-ack`
+  rather than a hard block.
+- [ ] `P3` **The review ledger is per-worktree, so it cannot answer its own question.** It lives
+  under `$GIT_DIR/claude-review/`, which for a worktree is `.git/worktrees/<name>/`, so a branch
+  reviewed from another worktree reads as never reviewed. The bigint arc's four earlier review
+  rounds are recorded nowhere machine-readable; only the two run from this worktree survive. Move
+  it to `$(git rev-parse --git-common-dir)/claude-review/` — one line in `scripts/review_ledger.sh`
+  — and keep the per-worktree column that already distinguishes rows.
+- [ ] `P3` **`ir-golden-diff` catches new typeclass dictionary wrappers but does not say so.**
+  Writing a two-arm `Maybe` decision with `and_then` pulled `Monad`'s whole superclass chain
+  (Applicative + Functor eta wrappers) into every consumer of `stdlib.json`; the IR diff showed it
+  and no test could. That is a second use for the gate beyond regression detection, currently
+  reachable only by reading 60 files of diff by hand. Have the report name added/removed
+  `__sprout_ir_eta___tc_*` definitions on their own line.
 
 **Modules, prelude and bootstrap edges**
 
@@ -1024,6 +1073,15 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
 
 ### 7.5) Type Classes
 
+- [ ] `P3` **A constraint materialises its whole superclass chain, so idiomatic combinators cost
+  more than the code they replace.** `and_then` carries `where Monad m`, and `Monad m where
+  Applicative m where Functor f`, so one call in `stdlib/json.sprout` emitted four eta wrappers
+  (`Monad.flat_map`, `Applicative.pure`/`map2`, `Functor.fmap`) into every consumer of the module,
+  where the `map` it replaced needed one. It was written back as a plain `match`, which is the
+  wrong trade to have to make — `docs/idiomatic-sprout.md` recommends the combinator. The prelude
+  already records the precedent that this bloat is real (an import adding 62 unused wrapper bodies
+  grew a consumer ~12%). Drop superclass slots no call site reaches, or devirtualise the chain
+  when the instance is statically known.
 - [ ] `P3` **Adding a stdlib instance for a builtin type breaks downstream duplicates, unrecorded.**
   A module with its own `instance Eq Bytes` stopped compiling at 2c3924f7 — `Overlapping instances
   for Eq`, pointed at the user's declaration, not at the stdlib that now also supplies one. It
