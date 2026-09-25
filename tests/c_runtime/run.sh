@@ -245,10 +245,16 @@ done
 echo "  root pool is ${pool_kib} KiB (${node_bytes} x ${slots}); all three documents agree"
 
 echo "==> c runtime: every nullary constructor is interned, keyed on its tag"
-# Interning used to be a strcmp allowlist of four names, so `Nil` and `True`/`False` —
-# the most-constructed nullary ctors there are — allocated every time. Run under GC
-# stress so the weak cache's invalidation is exercised; see the file header for why the
-# identity cases root their handles.
+# Interning used to be a strcmp allowlist of four names, so every other nullary ctor —
+# `Nil` among them, which terminates every list — allocated on each construction.
+#
+# LINEAGE is in the matrix, not just STRESS, and it is what makes case_weak bite: it
+# POISONS a reclaimed slot instead of letting the allocator reuse it, so a singleton
+# cache left pointing at freed memory aborts in sprout_tag rather than reading back
+# whatever the next occupant happens to hold. Verified by mutation — with
+# sprout_gc_invalidate_singleton stubbed to `return;`, `weak` fails in all four
+# combinations below (exit 1 on the tag readback, 134 on the poison abort), while the
+# real runtime passes all sixteen.
 NCI="$TMP_DIR/nullary_ctor_interning"
 if ! compile nullary_ctor_interning.c "$NCI" -O1 -g -fsanitize=address,undefined; then
   echo "  sanitizer build unavailable; using unsanitized fallback"
@@ -256,12 +262,15 @@ if ! compile nullary_ctor_interning.c "$NCI" -O1 -g -fsanitize=address,undefined
 fi
 for sel in intern distinct arity weak; do
   for stress in 0 1; do
-    SPROUT_GC_STRESS="$stress" ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" \
+   for lineage in 0 1; do
+    SPROUT_GC_STRESS="$stress" SPROUT_GC_LINEAGE="$lineage" \
+    ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" \
       "$NCI" "$sel" > "$TMP_DIR/nci.out" 2> "$TMP_DIR/nci.err" || {
-      echo "  interning case '$sel' failed (SPROUT_GC_STRESS=$stress):" >&2
+      echo "  interning case '$sel' failed (SPROUT_GC_STRESS=$stress SPROUT_GC_LINEAGE=$lineage):" >&2
       cat "$TMP_DIR/nci.out" "$TMP_DIR/nci.err" >&2
       exit 1
     }
+   done
   done
 done
 
