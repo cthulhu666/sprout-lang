@@ -91,6 +91,11 @@ typedef struct {
   const char* name;
   long long arity;
   const char* field_kinds; /* one char per field: i=Int b=Bool s=String/Char p=ADT/closure _=type-var */
+  /* Nullary ctors only: the shared object every construction of this tag
+   * returns, or NULL if none is cached.  WEAK — the object is an ordinary
+   * managed allocation, and sprout_gc_invalidate_singleton clears this slot
+   * when a sweep reclaims it, so nothing here needs rooting. */
+  void* singleton;
 } CtorMeta;
 
 typedef struct {
@@ -140,17 +145,15 @@ typedef struct {
 
 static InternBucket* g_intern_table[65537];
 static PermRoot* g_root_nodes = NULL;   /* persistent (never-popped) roots, global */
-static void* g_nothing_singleton = NULL;
-/* IRType (stdlib.compiler.sprout_ir) nullary-ctor singletons.  Without this,
- * every IRType construction in the IR-codegen path allocates 16 bytes — and
- * IRType values flow through every IRFunction param, every IRLoadEnvSlot,
- * every IRGetField.  Caching keeps the ADT as cheap as the string-based kind
- * convention it replaced. */
-static void* g_irtheap_singleton = NULL;
-static void* g_irtscalar_singleton = NULL;
-static void* g_irtunknown_singleton = NULL;
 static CtorMeta g_ctor_meta[2048];
 static long long g_ctor_meta_len = 0;
+/* tag -> g_ctor_meta index, stored as index+1 so a zeroed slot reads "unmapped"
+ * and no init pass is needed.  Tags are assigned densely from 0 in declaration
+ * order (ast_to_ir.build_ctor_table_acc), so this covers every compiled program;
+ * a tag outside the range falls back to the scan, which keeps hand-written C
+ * callers and any future sparse scheme correct rather than fast.  Sized FROM
+ * g_ctor_meta so the two cannot drift apart. */
+static int g_ctor_by_tag[sizeof(g_ctor_meta) / sizeof(g_ctor_meta[0])];
 static int g_listener_fd[2048];
 static int g_listener_used[2048];
 static int g_conn_fd[2048];
@@ -1494,10 +1497,9 @@ static void* sprout_alloc_obj_raw(int arity, const char* ctx) {
  * emits nothing but stores between this call and the last field write.  Do not
  * insert an allocating call into that window.
  *
- * nfields == 0 delegates to sprout_make0 to keep its nullary-ctor singleton
- * cache (Nothing and the IRType cluster, constructed constantly during IR
- * codegen); allocating a fresh object per nullary construction would regress
- * the self-hosted compiler's allocation rate. */
+ * nfields == 0 delegates to sprout_make0, which interns every nullary ctor by
+ * tag; allocating a fresh object per nullary construction would regress the
+ * allocation rate of anything that builds lists or Maybes in a loop. */
 long long sprout_alloc_obj(long long tag, long long nfields) {
   if (nfields < 0 || nfields > SPROUT_MAX_OBJ_ARITY) {
     fprintf(stderr, "[sprout] sprout_alloc_obj: arity %lld out of 0..%d range\n",
@@ -2092,12 +2094,20 @@ static void sprout_release_payload_extras(void* payload, SproutHeapKind kind) {
   }
 }
 
-/* Null out any singleton handles that point to a payload being reclaimed. */
-static void sprout_gc_invalidate_singletons(void* payload) {
-  if (payload == g_nothing_singleton)    g_nothing_singleton    = NULL;
-  if (payload == g_irtheap_singleton)    g_irtheap_singleton    = NULL;
-  if (payload == g_irtscalar_singleton)  g_irtscalar_singleton  = NULL;
-  if (payload == g_irtunknown_singleton) g_irtunknown_singleton = NULL;
+/* Clear the cached singleton of a payload being reclaimed, so the next
+ * construction allocates a fresh one instead of handing back freed memory.
+ *
+ * Keyed on the dying object's OWN tag, read from the header the caller already
+ * holds, so the cost is one lookup per reclaimed nullary object — and nothing at
+ * all for every other kind.  Scanning a list of singleton globals (what this did
+ * while there were four) is what stopped interning from generalising: it is
+ * O(singletons) on every reclaimed object of any kind. */
+static void sprout_gc_invalidate_singleton(uint64_t h, void* payload) {
+  if (sprout_hdr_kind(h) != SPROUT_HEAP_OBJ) return;
+  unsigned long long aux = sprout_hdr_aux(h);
+  if ((aux & SPROUT_OBJ_ARITY_MASK) != 0) return;   /* has fields: never interned */
+  CtorMeta* meta = find_ctor((long long)(aux >> SPROUT_OBJ_ARITY_BITS));
+  if (meta != NULL && meta->singleton == payload) meta->singleton = NULL;
 }
 
 /* Return the slot walk stride for a header word.
@@ -2388,7 +2398,7 @@ static void sprout_gc_sweep(void) {
           if (sprout_hdr_age(h) == 0) g_ap_freed_age0++;
         }
         SproutHeapKind kind = sprout_hdr_kind(h);
-        sprout_gc_invalidate_singletons(payload);
+        sprout_gc_invalidate_singleton(h, payload);
         if (g_gc_stress == 1 || lineage_on) sprout_gc_trace_free(payload);
         sprout_release_payload_extras(payload, kind);
         free(r->base);
@@ -2457,7 +2467,7 @@ static void sprout_gc_sweep(void) {
           g_ap_freed_total++;
           if (sprout_hdr_age(h) == 0) g_ap_freed_age0++;
         }
-        sprout_gc_invalidate_singletons(payload);
+        sprout_gc_invalidate_singleton(h, payload);
 
         if (sprout_gc_hdrcheck_on() && kind == SPROUT_HEAP_CSTR) {
           size_t actual_len = strlen((const char*)payload);
@@ -2651,7 +2661,13 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   g_gc_active = 0;
 }
 
+/* Hot: every nullary construction and every sweep of one goes through here. */
 static CtorMeta* find_ctor(long long tag) {
+  if (tag >= 0 && tag < (long long)(sizeof(g_ctor_by_tag) / sizeof(g_ctor_by_tag[0]))) {
+    int slot = g_ctor_by_tag[tag];
+    if (slot != 0) return &g_ctor_meta[slot - 1];
+    return NULL;   /* in range and unmapped: the scan would not find it either */
+  }
   for (long long i = 0; i < g_ctor_meta_len; i++) {
     if (g_ctor_meta[i].tag == tag) return &g_ctor_meta[i];
   }
@@ -2695,7 +2711,7 @@ static long long find_ctor_tag_by_name(const char* name) {
    tests/stdlib/compiler/test_ctor_display.spr, which pins both directions.
 
    Stripping happens HERE, at the render, and never at registration. CtorMeta.name
-   is a single field serving both display and lookup, and two lookups depend on
+   is a single field serving both display and lookup, and one lookup depends on
    the name being intact:
 
      - find_ctor_tag_by_name is a first-wins linear scan over g_ctor_meta. Register
@@ -2703,10 +2719,11 @@ static long long find_ctor_tag_by_name(const char* name) {
        with different tags — the runtime calls this itself (env_get, the
        stdlib.regex.Match construction), so it would silently take whichever came
        first.
-     - sprout_make0 keys its Nothing singleton on strcmp(name, "Nothing"). A
-       stripped entry-file `Nothing` would match and be handed a cached object
-       carrying the PRELUDE's tag. Left qualified it merely misses the fast path,
-       which is the right direction to fail in.
+
+   Nullary interning used to be a second reason: sprout_make0 matched
+   strcmp(name, "Nothing"), so a stripped entry-file `Nothing` would be handed a
+   cached object carrying the PRELUDE's tag. It is keyed on the tag now, so
+   distinct tags get distinct singletons whatever they are called.
 
    This supersedes the narrower rule that shipped with the unconditional prelude
    (docs/prelude-scope-v0.md §4.2 step 4), which stripped only the synthetic
@@ -2924,13 +2941,10 @@ long long sprout_set_argv(int argc, char** argv) {
   sprout_gc_maybe_register();
   return 0;
 }
+/* Delegates: it used to keep its own cache slot, which ignored `tag` once warm
+ * and so returned an object bearing the FIRST tag it was ever called with. */
 long long sprout_nothing(long long tag) {
-  if (g_nothing_singleton == NULL) {
-    void* obj = sprout_alloc_obj_raw(0, "sprout_nothing: out of memory");
-    sprout_obj_write_tag(obj, tag, 0);
-    g_nothing_singleton = obj;
-  }
-  return box_ptr(g_nothing_singleton);
+  return sprout_make0(tag);
 }
 long long argv_get(long long index) {
   if (index < 0) return sprout_make0(find_ctor_tag_by_name("Nothing"));
@@ -5436,6 +5450,12 @@ long long sprout_register_ctor(long long tag, const char* name, long long arity,
   g_ctor_meta[g_ctor_meta_len].name = name;
   g_ctor_meta[g_ctor_meta_len].arity = arity;
   g_ctor_meta[g_ctor_meta_len].field_kinds = field_kinds;
+  g_ctor_meta[g_ctor_meta_len].singleton = NULL;
+  /* First registration of a tag wins, matching the scan find_ctor used to do. */
+  if (tag >= 0 && tag < (long long)(sizeof(g_ctor_by_tag) / sizeof(g_ctor_by_tag[0])) &&
+      g_ctor_by_tag[tag] == 0) {
+    g_ctor_by_tag[tag] = (int)g_ctor_meta_len + 1;
+  }
   g_ctor_meta_len++;
   return 0;
 }
@@ -5514,27 +5534,19 @@ static long long get_or_make_singleton(void** slot, long long tag) {
   return box_ptr(*slot);
 }
 
+/* EVERY nullary ctor is interned, keyed on its tag.  A zero-arity ctor carries
+ * no fields, so two values with one tag are indistinguishable and neither can be
+ * mutated — sharing one object is observationally equivalent for all of them,
+ * not just the four names this used to match by strcmp.  `Nil` terminates every
+ * list and was not on that allowlist.  (`Bool` is NOT among them: it lowers to a
+ * native i1 and constructs no object at all.)
+ *
+ * Keying on the tag also removes the hazard the name-match carried: an entry
+ * file's own `Nothing` could strcmp-match and be handed a cached object bearing
+ * the PRELUDE's tag.  Distinct tags now get distinct singletons by construction. */
 static long long sprout_make0(long long tag) {
   CtorMeta* meta = find_ctor(tag);
-  if (meta != NULL) {
-    /* Singleton-eligible nullary ctors.  Each name-match avoids one
-     * allocation per construction site; the IRType cluster (IRTHeap,
-     * IRTScalar, IRTUnknown) is constructed *frequently* during IR-codegen
-     * (every IRFunction param, every IRLoadEnvSlot, every IRGetField). */
-    const char* name = meta->name;
-    /* meta->name carries the fully-qualified ctor name; the find here uses
-     * the bare suffix after the last '.' (sprout_register_ctor records the
-     * source-form name).  For "Nothing" the name is bare; IRType ctors are
-     * qualified under stdlib.compiler.sprout_ir. */
-    if (strcmp(name, "Nothing") == 0)
-      return get_or_make_singleton(&g_nothing_singleton, tag);
-    if (strcmp(name, "stdlib.compiler.sprout_ir.IRTHeap") == 0)
-      return get_or_make_singleton(&g_irtheap_singleton, tag);
-    if (strcmp(name, "stdlib.compiler.sprout_ir.IRTScalar") == 0)
-      return get_or_make_singleton(&g_irtscalar_singleton, tag);
-    if (strcmp(name, "stdlib.compiler.sprout_ir.IRTUnknown") == 0)
-      return get_or_make_singleton(&g_irtunknown_singleton, tag);
-  }
+  if (meta != NULL && meta->arity == 0) return get_or_make_singleton(&meta->singleton, tag);
   return sprout_make_registered_obj(0, tag, 0, 0, 0, "sprout_make0: out of memory");
 }
 static long long sprout_make1(long long tag, long long a0) {

@@ -244,4 +244,25 @@ for f in docs/green-task-pool-v0.md stdlib/http_server.sprout bench/http_worker_
 done
 echo "  root pool is ${pool_kib} KiB (${node_bytes} x ${slots}); all three documents agree"
 
+echo "==> c runtime: every nullary constructor is interned, keyed on its tag"
+# Interning used to be a strcmp allowlist of four names, so `Nil` and `True`/`False` —
+# the most-constructed nullary ctors there are — allocated every time. Run under GC
+# stress so the weak cache's invalidation is exercised; see the file header for why the
+# identity cases root their handles.
+NCI="$TMP_DIR/nullary_ctor_interning"
+if ! compile nullary_ctor_interning.c "$NCI" -O1 -g -fsanitize=address,undefined; then
+  echo "  sanitizer build unavailable; using unsanitized fallback"
+  compile nullary_ctor_interning.c "$NCI" -O0 -g
+fi
+for sel in intern distinct arity weak; do
+  for stress in 0 1; do
+    SPROUT_GC_STRESS="$stress" ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" \
+      "$NCI" "$sel" > "$TMP_DIR/nci.out" 2> "$TMP_DIR/nci.err" || {
+      echo "  interning case '$sel' failed (SPROUT_GC_STRESS=$stress):" >&2
+      cat "$TMP_DIR/nci.out" "$TMP_DIR/nci.err" >&2
+      exit 1
+    }
+  done
+done
+
 echo "==> c runtime tests passed"
