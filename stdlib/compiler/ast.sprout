@@ -361,6 +361,11 @@ export let list_ctor_cons = "Cons"
 # than the synthesized lambda, and must never print the binder itself.
 export let comp_binder_prefix = "__cmp_"
 
+# Prefix of the parameters the `_`-hole desugaring invents (parser.ph_param_name).
+# Shared for the same reason as the above: the user wrote `_`, not this name, so a
+# diagnostic about such a parameter must say `_` and never print the binder.
+export let placeholder_param_prefix = "__sprout_ph_"
+
 # Source-level names of the TemplatePart constructors, used by checker.sprout
 # when lowering a StringTemplateExpr into the StringTemplate ADT.
 export let template_ctor_lit = "TemplateLit"

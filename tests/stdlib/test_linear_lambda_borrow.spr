@@ -1,0 +1,84 @@
+import stdlib.test (check_eq, run_suite)
+
+# M4.4b: a lambda may take a linear parameter when that parameter is BORROWING.
+# A borrow carries no consume obligation, so the 0..n run count that defers the
+# rest of M4.4 says nothing about it — which is what makes this half separable.
+#
+# Two things had to change together. The mode reaches the lambda's TYPE by being
+# pushed down from the expected arrow (infer.seed_param_modes), because an
+# unannotated lambda parameter has no mode of its own to read; and the linear
+# checker walks the body with that parameter BORROWED rather than rejecting it.
+#
+# Rejection counterparts: tests/conformance/type_error/{lambda_borrow_param_consumed,
+# lambda_consuming_linear_param,lambda_borrow_param_captures_linear}.
+# See docs/linear-borrowing-v0.md §20.
+
+type linear File = File Int
+
+fn peek(f: borrowing File) -> Int = 0
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn with_file(n: Int, work: (borrowing File) -> Int) -> Int =
+  do
+    let f = File(n)
+    let r = work(f)
+    r + release(f)
+
+fn scaled(f: borrowing File, k: Int) -> Int = peek(f) + k
+fn scaled_rev(k: Int, f: borrowing File) -> Int = k + peek(f)
+
+# --- 1. `_`-hole partial application, both argument orders ------------------
+# The shape issue #364 reported. A hole desugars to a lambda at parse time
+# (parser.desugar_placeholder_call), so its parameter carries no written mode
+# and the synthesized arrow read CONSUMING — a mismatch against every borrowing
+# slot. The combinator could therefore be called only with a named function
+# taking the resource and nothing else, which is almost never a body's shape.
+fn via_hole_first(n: Int) -> Int = with_file(n, scaled(_, 5))
+
+fn via_hole_last(n: Int) -> Int = with_file(n, scaled_rev(7, _))
+
+# --- 2. an ordinary lambda ---------------------------------------------------
+# The same fault with no sugar involved: `\c -> peek(c)` failed identically,
+# which is what showed the hole was not the cause.
+fn via_lambda(n: Int) -> Int = with_file(n, \c -> peek(c))
+
+# The mode may also be WRITTEN, and then it is the push-down that must stand
+# aside: a written mode always wins, here agreeing with the slot.
+fn via_annotated_lambda(n: Int) -> Int = with_file(n, \ (c: borrowing File) -> peek(c))
+
+# --- 3. a borrow is not a use, so the body may repeat it ---------------------
+fn via_twice_borrowed(n: Int) -> Int = with_file(n, \c -> peek(c) + peek(c))
+
+# --- 4. capturing a NON-linear value stays fine ------------------------------
+# The capture rejection is about linear captures; `k` carries no obligation, so
+# a closure over it may run any number of times.
+fn via_captured_scale(n: Int, k: Int) -> Int = with_file(n, \c -> scaled(c, k))
+
+# --- 5. zero uses of the borrow ----------------------------------------------
+# A borrow has no obligation in EITHER direction: unlike an owned parameter,
+# ignoring it is not a leak, because the owner still releases it.
+fn via_unused_borrow(n: Int) -> Int = with_file(n, \c -> 1)
+
+# --- 6. the same lambda at a `once` slot -------------------------------------
+# `once` is the STRICTER promise — the callee may invoke the closure at most
+# once — so a shape legal at a plain slot cannot be illegal here. The two arms
+# share one rule rather than each carrying their own.
+fn with_file_once(n: Int, work: once (borrowing File) -> Int) -> Int =
+  do
+    let f = File(n)
+    let r = work(f)
+    r + release(f)
+
+fn via_once_slot(n: Int) -> Int = with_file_once(n, \c -> peek(c) + 2)
+
+fn main() -> Unit !{IO} =
+  run_suite("linear_lambda_borrow", [
+    check_eq("`_` hole in the resource position", via_hole_first(10), 15),
+    check_eq("`_` hole in the trailing position", via_hole_last(10), 17),
+    check_eq("an unannotated lambda adopts the slot's mode", via_lambda(12), 12),
+    check_eq("a written mode agreeing with the slot", via_annotated_lambda(13), 13),
+    check_eq("a borrow may be repeated in the body", via_twice_borrowed(14), 14),
+    check_eq("a lambda may capture a non-linear value", via_captured_scale(15, 4), 19),
+    check_eq("a borrow need not be used at all", via_unused_borrow(16), 17),
+    check_eq("the same shape at a `once` slot", via_once_slot(17), 19)
+  ])

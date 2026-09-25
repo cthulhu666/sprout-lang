@@ -1411,7 +1411,7 @@ fn any_arg_hole(args: List ast.Expr) -> Bool =
   | Nil -> false
   | Cons a rest -> if arg_is_hole(a) then true else any_arg_hole(rest)
 
-fn ph_param_name(index: Int) -> String = "__sprout_ph_" ++ int_to_string(index)
+fn ph_param_name(index: Int) -> String = ast.placeholder_param_prefix ++ int_to_string(index)
 
 # Replace each hole with a fresh VarExpr; `next` counts holes seen so far so the
 # names line up with hole_params.

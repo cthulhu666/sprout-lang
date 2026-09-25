@@ -9,6 +9,14 @@ Builds on M4.1 (`docs/linear-types-m4-scoping-2026-08-01.md`, merged PR #22): `t
 parses and records a `@linear:<TypeName>` sentinel in the scheme env. M4.1 records; M4.2
 enforces.
 
+> **Partly superseded.** This note records what M4.2 decided, and is left as written for that
+> reason — not because it still describes the language. Two of its deferrals have since been
+> narrowed: a linear value may be **moved** into a one-shot closure (M4.4a,
+> `docs/one-shot-closures-v0.md`), and a lambda may take a linear parameter when it takes it
+> **`borrowing`** (M4.4b, `docs/linear-borrowing-v0.md` §20). Where the text below says a linear
+> lambda parameter is rejected, read *consuming* linear lambda parameter. `docs/spec-v0.md` §5.8
+> is normative.
+
 ## 1. Problem statement
 
 A value of a `type linear` type must be **used exactly once** in a function body — not zero

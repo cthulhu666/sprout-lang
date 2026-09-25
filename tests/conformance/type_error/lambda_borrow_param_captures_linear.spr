@@ -1,0 +1,24 @@
+module main
+
+# M4.4b GUARD: admitting the lambda's own borrowing parameter must not admit
+# what it CAPTURES. `outer` is a linear value from the enclosing scope, and the
+# closure may run 0..n times, so crediting the capture as a consume here would
+# be a guess — that is the M4.4 case still deferred.
+
+type linear File = File Int
+
+fn peek(f: borrowing File) -> Int = 0
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn with_file(n: Int, work: (borrowing File) -> Int) -> Int =
+  do
+    let f = File(n)
+    let r = work(f)
+    r + release(f)
+
+fn leaky(n: Int) -> Int =
+  do
+    let outer = File(n)
+    with_file(n, \c -> peek(c) + release(outer))
+
+fn main() -> Unit !{IO} = print(to_string(leaky(1)))

@@ -1,0 +1,23 @@
+module main
+
+# M4.4b GUARD, and the reason the push-down is BORROW-ONLY. `once` is a promise
+# about invocation count, and what makes it real is the callee-side honesty walk
+# — which runs from check_fn_linear over a DECLARED parameter's written mode. A
+# lambda reaches neither, so a `once` taken from the slot would be a promise
+# nobody checks: here `w` is invoked twice, releasing the moved-in File twice.
+#
+# Caught while this landed: seeding every ownership rather than the borrow alone
+# compiled this and printed 10.
+
+type linear File = File Int
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn runner(g: (once(Unit -> Int)) -> Int, n: Int) -> Int =
+  do
+    let f = File(n)
+    g(\_ -> release(f))
+
+fn bad(n: Int) -> Int = runner(\w -> w(()) + w(()), n)
+
+fn main() -> Unit !{IO} = print(to_string(bad(5)))

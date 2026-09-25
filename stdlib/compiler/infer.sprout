@@ -5812,7 +5812,8 @@ fn infer_lambda_expected(
   do
     fresh_params <- make_fresh_param_types(state, params)
     let param_types = seed_param_types(fresh_params, expected)
-    infer_lambda_checked(state, env, params, param_types, body, pos,
+    infer_lambda_checked(state, env, params, param_types,
+      seed_param_modes(params, expected), body, pos,
       check_param_annotations(params, param_types, subst, eff_subst,
         aliases_for_annotations(env), pos))
 
@@ -5823,6 +5824,7 @@ fn infer_lambda_checked(
   env: Dict types.Scheme,
   params: List ast.Param,
   param_types: List types.Type,
+  modes: List ast.ParamMode,
   body: ast.Expr,
   pos: source.SourcePos,
   checked: AnnoCheck
@@ -5830,7 +5832,7 @@ fn infer_lambda_checked(
   match checked with
   | AnnoErr epos msg -> InferErr(epos, msg)
   | AnnoOk subst eff_subst ->
-      infer_lambda_body(state, env, subst, eff_subst, params, param_types, body, pos)
+      infer_lambda_body(state, env, subst, eff_subst, params, param_types, modes, body, pos)
 
 fn infer_lambda_body(
   state: unifier.InferState,
@@ -5839,6 +5841,7 @@ fn infer_lambda_body(
   eff_subst: Dict types.Effect,
   params: List ast.Param,
   param_types: List types.Type,
+  modes: List ast.ParamMode,
   body: ast.Expr,
   pos: source.SourcePos
 ) -> InferResult !{IO} =
@@ -5875,7 +5878,7 @@ fn infer_lambda_body(
         # over-approximation. Canaries: `apply_now` and `via_local`.
         InferOk(
           typed_ast.TLambda(params, typed_body,
-            build_fn_type_modes(param_types, param_modes(params),
+            build_fn_type_modes(param_types, modes,
               typed_ast.typed_expr_type(typed_body), body_eff), pos),
           s1, es1, types.EffectPure)
 
@@ -5894,6 +5897,47 @@ fn seed_from_arrow(fresh: List types.Type, expected: types.Type) -> List types.T
       match expected with
       | types.TFunc p r _ _ -> Cons(p, seed_from_arrow(rest, r))
       | _ -> Cons(f, rest)
+
+# M4.4b. Ownership is the fourth field of the expected arrow, and seeding the
+# parameter TYPES from it while reading the modes off the source text left it
+# behind: an unannotated lambda parameter has no mode to read, so every lambda
+# synthesized a CONSUMING arrow and no lambda could fill a `borrowing` slot.
+# `_`-hole partial application is the same case — parser.desugar_placeholder_call
+# builds an ordinary unannotated lambda, at a point where no callee type exists
+# to read a mode from.
+#
+# A WRITTEN mode is never overridden. `\(c: consuming File) -> …` at a borrowing
+# slot must still be the ownership mismatch it is, or the annotation would mean
+# nothing; only ModeDefault — "the author said nothing" — takes the slot's word.
+fn seed_param_modes(params: List ast.Param, expected: Maybe types.Type) -> List ast.ParamMode =
+  match expected with
+  | Nothing -> param_modes(params)
+  | Just t -> modes_from_arrow(params, t)
+
+fn modes_from_arrow(params: List ast.Param, expected: types.Type) -> List ast.ParamMode =
+  match params with
+  | Nil -> Nil
+  | Cons prm rest ->
+      match expected with
+      | types.TFunc _ r _ own ->
+          Cons(mode_or_slot(ast.param_mode_of(prm), own), modes_from_arrow(rest, r))
+      | _ -> param_modes(Cons(prm, rest))
+
+# `types` and `ast` do not import each other, so the slot's Ownership crosses back
+# to a ParamMode through the same flag pair that carried it the other way.
+#
+# THE BORROW FLAG ONLY, and the `false` is the point. `once` is a promise about
+# how often the parameter is INVOKED, and what makes it real is the callee-side
+# honesty walk — which runs from check_fn_linear, over a parameter's WRITTEN
+# mode. A lambda reaches neither, so a `once` taken from the slot would be a
+# promise nobody checks: `runner(\w -> w(()) + w(()), n)` at a `once` slot
+# compiled and released a moved-in linear value twice. Borrowing carries no such
+# obligation — it is a restriction on the body, and the body is walked.
+# Regression: tests/conformance/type_error/lambda_slot_once_not_pushed_down.
+fn mode_or_slot(written: ast.ParamMode, own: types.Ownership) -> ast.ParamMode =
+  match written with
+  | ast.ModeDefault -> ast.mode_of_flags(types.ownership_is_borrow(own), false)
+  | _ -> written
 
 fn make_fresh_param_types(state: unifier.InferState, params: List ast.Param) -> List types.Type !{IO} =
   match params with

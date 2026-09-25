@@ -365,5 +365,6 @@ TDD — each RED against the pre-change tree first.
   licence, the borrow exclusion, and §9's cancellation caveat. Normative.
 - This note — rationale, prior art, non-goals. Supporting, non-normative.
 - `BACKLOG.md` — narrow M4.4a recorded against the M4.4 entry (which stays open for the general
-  case: linear lambda parameters, captured borrows, call-count tracking); new entry for the
+  case: **consuming** linear lambda parameters, captured borrows, call-count tracking — the
+  borrowing ones landed as M4.4b, `docs/linear-borrowing-v0.md` §20); new entry for the
   cancellation-path leak.

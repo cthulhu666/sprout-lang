@@ -1,0 +1,20 @@
+module main
+
+# The `_`-hole form of lambda_borrow_param_consumed, and the reason it is a
+# separate fixture: the desugaring names the parameter `__sprout_ph_0`, which the
+# author never wrote. The diagnostic must say `_`. Same rule, and same reason, as
+# comprehension_binder_subject.
+
+type linear File = File Int
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn with_file(n: Int, work: (borrowing File) -> Int) -> Int =
+  do
+    let f = File(n)
+    let r = work(f)
+    r + release(f)
+
+fn hole_consumes(n: Int) -> Int = with_file(n, release(_))
+
+fn main() -> Unit !{IO} = print(to_string(hole_consumes(1)))

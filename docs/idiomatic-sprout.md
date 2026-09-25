@@ -539,6 +539,28 @@ borrows, leaving nothing consumed, and the compiler will say so. And an argument
 in a `borrowing` position must be a **variable**: `report(connect(…), …)` is
 rejected, because that connection would never be released.
 
+To stop the release being written out at every call site, wrap the session in a
+combinator whose work function takes the resource `borrowing`. The caller passes
+a lambda or a partially applied function; the combinator keeps the handle and
+releases it:
+
+```sprout
+fn with_conn(host: String, port: Int, work: (borrowing TcpConnection) -> a !{IO}) -> a !{IO} =
+  do
+    let c = connect_or_fail(host, port)
+    let r = work(c)
+    let _ = close(c)
+    r
+
+with_conn(host, 80, \c -> report(c, "response"))
+with_conn(host, 80, send_body(_, payload))     # `_` is the resource
+```
+
+The lambda's parameter takes its mode from the slot, so `borrowing` need not be
+repeated — except on a lambda bound by a `let` first, which must spell it. Inside,
+the work function may read the resource as often as it likes but may not release
+or return it; that stays the combinator's job, which is the point.
+
 Reach for this when a type has a release operation. For plain data with no
 release, `linear` only gets in the way — see
 [spec-v0.md §5.8](./spec-v0.md).

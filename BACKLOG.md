@@ -1716,15 +1716,29 @@ M4.1–M4.6 plus M4.4a (one-shot closures) have landed. Design and the full rule
 normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
 
 - [ ] `P2` **Higher-order linearity (M4.4) — the general case.** M4.2 loud-rejects a linear
-  binding captured by a lambda and any linear lambda parameter, because a closure may run 0..n times
-  and its call count is untracked; M4.5 borrowing did not lift this and extends the rejection to
-  borrowed values, since whether a captured borrow is sound depends on whether the closure escapes
-  and outlives the consume — a distinction Sprout does not have. Known-hard: Linear Haskell
-  shipped it incomplete. The move-into-a-one-shot-closure slice landed as M4.4a. Left: a linear
-  value captured at an UNANNOTATED parameter (the true 0..n case, including
-  `list_each(xs, \x -> write(conn, x))`, whose borrow half needs an escape notion); linear lambda
-  *parameters* (`\c -> close(c)`, needing the lambda's own parameter types to carry ownership); and
-  a linear `Scope`, which is both at once.
+  binding captured by a lambda, because a closure may run 0..n times and its call count is
+  untracked; M4.5 borrowing did not lift this and extends the rejection to borrowed values, since
+  whether a captured borrow is sound depends on whether the closure escapes and outlives the
+  consume — a distinction Sprout does not have. Known-hard: Linear Haskell shipped it incomplete.
+  Landed: the move-into-a-one-shot-closure slice (M4.4a), and borrowing lambda parameters (M4.4b,
+  `docs/linear-borrowing-v0.md` §20). Left: a linear value captured at an UNANNOTATED parameter
+  (the true 0..n case, `list_each(xs, \x -> write(conn, x))`, whose borrow half needs an escape
+  notion); CONSUMING linear lambda parameters (`\c -> close(c)`); a linear `Scope`, both at once.
+- [ ] `P1` **A lambda's `once` promise is never checked, so a moved-in linear value can be released
+  twice.** `once_honesty` is what makes `once` a promise rather than a decoration, and it runs from
+  `check_fn_linear` over a DECLARED parameter's written mode. A lambda reaches neither, so
+  `runner(\(w: once Unit -> Int) -> w(()) + w(()), n)` at a `once` slot compiles, and a value M4.4a
+  moved into the closure `runner` passes is released twice — verified running, on master and since.
+  M4.4b keeps the hole closed for the common shape by pushing only `borrowing` down, so an
+  unannotated lambda at a `once` slot is still a mismatch; the WRITTEN spelling above is the way in.
+  Fix: run `once_honesty` over lambda bodies, keyed on the parameter's ownership rather than its
+  written mode. Regression to flip: `type_error/lambda_slot_once_not_pushed_down` has the shape.
+- [ ] `P3` **A `let`-bound lambda gets no expected type, so it must spell its ownership mode.**
+  M4.4b pushes a slot's ownership onto an unwritten lambda parameter mode, but only where the
+  lambda is written at the call argument — `let work = \c -> peek(c) in with_file(n, work)` still
+  fails with an ownership mismatch, while the annotated `\(c: borrowing File) -> …` compiles. The
+  fix is to propagate an expected type into a `let` right-hand side generally, which is wider than
+  linearity. Limit recorded at `type_error/lambda_borrow_mode_needs_call_position`.
 - [ ] `P2` **Decide whether a wildcard pattern over a linear value is a consume or a leak.** A
   *semantics* question, not a bug. Three shapes are accepted today: a linear parameter dropped by a
   wildcard arm; the same over an unbound linear scrutinee; and `match w with | Wrap _ -> 0` dropping

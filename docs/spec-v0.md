@@ -1666,6 +1666,26 @@ Two consequences follow:
   `work` borrows, so `with_file` still owns the `File` and is the one that closes
   it — the release cannot be forgotten by a caller.
 
+  **A lambda may fill such a slot.** A lambda parameter whose mode is unwritten
+  takes the slot's **`borrowing`**, so `with_file(p, \c -> peek(c))` and the
+  `_`-hole spelling `with_file(p, scaled(_, 5))` both mean a borrowing parameter.
+  A **written** mode is never overridden and must match. The push-down is a
+  checking rule, so it reaches a lambda written *at* the argument; one bound by a
+  `let` first must spell the mode.
+
+  Only `borrowing` is taken this way. **`once` is never inferred for a lambda**:
+  it is a promise about how often the parameter is invoked, checked against a
+  declaration's written mode, and a lambda has no declaration — so an unannotated
+  lambda at a `once` slot stays an ownership mismatch.
+
+  This is the one case in which a linear lambda parameter is accepted — **a
+  lambda may take a linear parameter iff it borrows it.** A borrow carries no
+  consume obligation, so the 0..n run count that defers the rest of higher-order
+  linearity is silent about it. The body is held to the rule any `borrowing`
+  parameter is held to: it may read the value, not release it, and returning it
+  counts as releasing it. What the lambda **captures** is unaffected — a captured
+  linear value, owned or borrowed, is still rejected.
+
 **A modifier on a non-linear parameter is an error**, as is one on a
 type-variable parameter (reported distinctly). The type-variable case is not a
 representation limit — ownership sits in the type and would survive
@@ -1722,8 +1742,9 @@ task_spawn(scope, \_ -> handle(conn))   # conn is MOVED into the closure
   be captured, at a `once` parameter or anywhere else. The closure may run after
   the owner has consumed the value, and Sprout has no escaping/non-escaping or
   lifetime distinction to rule that out.
-- A **linear lambda parameter** is still rejected: `once` bounds how often the
-  closure runs, not what may be handed to it on each run.
+- A **consuming** linear lambda parameter is still rejected: `once` bounds how
+  often the closure runs, not what may be handed to it on each run. A
+  **borrowing** one is accepted, here as at any other position (§5.8).
 - `once` is **erased**, like the ownership modifiers, and is part of the function
   type, so it is compared invariantly at unification.
 
@@ -1745,11 +1766,13 @@ it inside the task instead.
 **Deferred (rejected with a diagnostic, never silently accepted):**
 
 - Higher-order linearity beyond the `once` case — a linear binding captured by a
-  lambda at an **unannotated** parameter, and linear lambda parameters, are not yet
-  supported, nor is capturing a **borrowed** value anywhere. This is why the
-  combinator form (`list_each(xs, \x -> write(conn, x))`) is still out of reach.
-  The spawn-a-handler server shape is no longer: it is a move into a one-shot
-  closure, and `stdlib.http_server` now runs on the linear socket API throughout.
+  lambda at an **unannotated** parameter, and **consuming** linear lambda
+  parameters, are not yet supported, nor is capturing a **borrowed** value
+  anywhere. This is why the combinator form (`list_each(xs, \x -> write(conn, x))`)
+  is still out of reach. Two shapes are no longer: the spawn-a-handler server, a
+  move into a one-shot closure, so `stdlib.http_server` runs on the linear socket
+  API throughout; and the with-resource combinator, whose work function takes the
+  resource `borrowing` (§5.8).
 - Containment virality **as a property of types** — linearity is still
   *per-declaration*: a record that merely contains a linear field is not itself
   linear (contrast Austral), so `Maybe File` is not a linear type. What containment
