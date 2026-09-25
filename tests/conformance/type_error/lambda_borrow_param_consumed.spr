@@ -1,0 +1,20 @@
+module main
+
+# M4.4b GUARD: the parameter is admitted because it BORROWS, so a body that
+# consumes it must still be refused — the caller keeps the obligation and
+# `with_file` releases the File itself.
+#
+# Delete this fixture and "a lambda may take a borrowing linear parameter"
+# stops being distinguishable from "a lambda may take a linear parameter".
+
+type linear File = File Int
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn with_file(n: Int, work: (borrowing File) -> Int) -> Int =
+  do
+    let f = File(n)
+    let r = work(f)
+    r + release(f)
+
+fn main() -> Unit !{IO} = print(to_string(with_file(1, \c -> release(c))))

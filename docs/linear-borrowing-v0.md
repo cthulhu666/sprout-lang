@@ -608,3 +608,95 @@ closure, `once` or not. Whether that is sound turns on whether the closure outli
 Sprout still has no escaping/non-escaping distinction — `with_scope` joins *after* its body, so a
 spawned closure really can run against a value the body already released. Rust draws the same line
 (`thread::spawn`'s `'static` bound). Linear lambda *parameters* are likewise still rejected.
+
+## 20. M4.4b — a lambda may take a *borrowing* linear parameter (2026-09-25)
+
+§19's closing sentence, "Linear lambda *parameters* are likewise still rejected", no longer holds
+for the borrowing half. Reported as sprout-lang#364, where the visible symptom was that `_`-hole
+partial application could not fill a `borrowing` slot — `with_file(n, scaled(_, 5))`. The hole was
+incidental: `parser.desugar_placeholder_call` emits an ordinary lambda, and `with_file(n, \c ->
+peek(c))` failed identically.
+
+**Why this half separates from the rest of M4.4.** What defers higher-order linearity is that a
+closure may run 0..n times, so nothing proves a captured value is consumed *exactly* once. A
+borrowing parameter carries no consume obligation at all, so the run count says nothing about it.
+The rule is therefore statable in one line: **a lambda may take a linear parameter iff it borrows
+it**, and the body is then held to the rule a declared `borrowing` parameter is already held to —
+it may read the value, not release it.
+
+Still deferred, unchanged: a linear value **captured** by a lambda (owned or borrowed), and a
+**consuming** linear lambda parameter.
+
+**Two changes, because there were two walls.**
+
+1. *The mode never reached the type.* `infer.infer_lambda_expected` already seeded a lambda's
+   parameter *types* from the expected slot; ownership was the one field of `types.TFunc` it
+   dropped, so every lambda synthesized a consuming arrow. `infer.seed_param_modes` now pushes it
+   down. A **written** mode is never overridden — `\(c: consuming File) -> …` at a borrowing slot
+   is still a mismatch, or the modifier would mean nothing on a lambda.
+2. *The linear checker rejected the parameter outright.* `linear_check.lin_lambda` now walks a
+   borrowing linear parameter as a BORROWED binding, exactly as `check_fn_linear` walks a declared
+   one, and `lin_once_lambda` shares that rule — `once` is the stricter promise, so a shape legal
+   at a plain slot cannot be illegal at a `once` one.
+
+**One limit, recorded in `tests/conformance/type_error/lambda_borrow_mode_needs_call_position`.**
+The push-down is bidirectional checking, so it reaches a lambda written *at* the call argument. A
+`let`-bound one has no expected type where it is written and still needs the mode spelled:
+`let work = \(c: borrowing File) -> peek(c)` compiles. Lifting this means propagating an expected
+type into a `let` right-hand side generally.
+
+**Escape needs no separate rule,** for the reason `param_obligations` gives for declared
+parameters: a bare reference in return position is a consume, so `\c -> c` is caught by the
+not-consumed rule rather than by a lifetime analysis Sprout does not have.
+
+Tests: `tests/stdlib/test_linear_lambda_borrow.spr`, and in `tests/conformance/type_error/`
+`lambda_borrow_param_consumed`, `lambda_consuming_linear_param`, `lambda_borrow_param_captures_linear`,
+`lambda_borrow_param_captured_by_nested`, `lambda_borrow_param_aliased`,
+`lambda_written_mode_not_overridden`, `lambda_borrow_mode_needs_call_position`.
+
+**Diagnostic fixed alongside.** `unifier.borrow_mismatch_reason` asserted a direction ("a function
+that borrows cannot stand in where one that consumes is expected") while the two sides arrive in
+either order depending on position — it printed that sentence verbatim over `borrowing File -> Int
+vs File -> Int`, which is the opposite case. It now names both directions, as `list_vec_hint`
+beside it already did for the same reason.
+
+### 20.1 What the push-down must NOT take from the slot (review, 2026-09-25)
+
+The first cut of `mode_or_slot` seeded **every** ownership from the slot, `once` included. That is
+unsound, and the reviewer's repro released a linear value twice while type-checking clean:
+
+```sprout
+fn runner(g: (once (Unit -> Int)) -> Int, n: Int) -> Int =
+  do
+    let f = File(n)
+    g(\_ -> release(f))                      # M4.4a move into a one-shot closure
+
+fn bad(n: Int) -> Int = runner(\w -> w(()) + w(()), n)   # invokes it TWICE
+```
+
+`borrowing` and `once` look alike — both are ownership on the arrow — but they are checked in
+opposite places. `borrowing` is a restriction on the **body**, and the body is walked wherever it
+appears, lambda or not. `once` is a promise about **invocation count**, and the walk that makes it
+real (`once_honesty`) runs from `check_fn_linear` over a *declared* parameter's written mode. A
+lambda has no declaration, so a `once` taken from the slot is a promise nobody checks. The seed is
+therefore `ast.mode_of_flags(ownership_is_borrow(own), false)` — the `false` is load-bearing.
+
+This narrows, but does not close, a hole that predates M4.4b: the same program with the mode
+**written** (`\(w: once Unit -> Int) -> …`) is accepted on master too. Filed `P1` in `BACKLOG.md`;
+the fix is to run `once_honesty` over lambda bodies, keyed on ownership rather than written mode.
+
+Three diagnostics were fixed in the same pass, all of them doors that no longer open.
+
+`linear_lambda_param_msg` still offered `once` as the way out when `borrowing` had become the
+answer. Its sibling `contained_lambda_param_msg` said the same thing and must **not** simply be
+switched to `borrowing`: a modifier is only allowed on a parameter whose own type is linear, so
+`\(g: borrowing (Maybe File)) -> …` is rejected too (verified). That message now says so and points
+at taking the container apart instead — a message offering a rejected modifier is worse than one
+offering none. Fixture: `type_error/linear_lambda_param_contained`.
+
+Both lambda messages also printed the desugaring's own `__sprout_ph_N` for a `_`-hole — the shape
+#364 actually reported. They now route through a subject helper over one shared predicate, as
+`comprehension_binder_subject` already did for the same reason. The prefix moved to
+`ast.placeholder_param_prefix` so the parser and the checker cannot drift on its spelling; that is
+the whole of the golden-IR change this landed with (one constant relocating, one registered global,
+and one fewer GC root push in `ph_param_name`).

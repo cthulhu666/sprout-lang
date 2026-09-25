@@ -1,0 +1,22 @@
+module main
+
+# M4.4b GUARD: the parameter is now a tracked BORROWED binding, so the v0 rule
+# that a borrowed value may not be captured (design note §7) must reach it. It
+# would otherwise be the one borrow in the language a closure could capture,
+# and soundness there turns on whether the inner closure outlives the consume —
+# a distinction Sprout does not have.
+
+type linear File = File Int
+
+fn peek(f: borrowing File) -> Int = 0
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn with_file(n: Int, work: (borrowing File) -> Int) -> Int =
+  do
+    let f = File(n)
+    let r = work(f)
+    r + release(f)
+
+fn nested(n: Int) -> Int = with_file(n, \c -> with_file(1, \d -> peek(c)))
+
+fn main() -> Unit !{IO} = print(to_string(nested(1)))

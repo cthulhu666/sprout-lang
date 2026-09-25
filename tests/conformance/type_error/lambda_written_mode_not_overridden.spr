@@ -1,0 +1,20 @@
+module main
+
+# M4.4b GUARD: the slot's ownership is pushed down onto a parameter whose mode
+# is UNWRITTEN. A written one wins and still mismatches — otherwise the modifier
+# would mean nothing on a lambda, silently becoming whatever the callee wanted.
+
+type linear File = File Int
+
+fn peek(f: borrowing File) -> Int = 0
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn with_file(n: Int, work: (borrowing File) -> Int) -> Int =
+  do
+    let f = File(n)
+    let r = work(f)
+    r + release(f)
+
+fn written_consuming(n: Int) -> Int = with_file(n, \ (c: consuming File) -> peek(c))
+
+fn main() -> Unit !{IO} = print(to_string(written_consuming(1)))

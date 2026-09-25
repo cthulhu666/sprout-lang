@@ -1,0 +1,19 @@
+module main
+
+# M4.4b GUARD: only the BORROWING half of the linear-lambda-parameter rejection
+# was lifted. A consuming one stays deferred — the closure may run 0..n times,
+# so nothing here proves the File is released exactly once, which is the part of
+# M4.4 that is still open (BACKLOG, "Higher-order linearity (M4.4)").
+#
+# The named function `release` is accepted at this same slot; a lambda is not.
+
+type linear File = File Int
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn with_file(n: Int, work: (consuming File) -> Int) -> Int =
+  do
+    let f = File(n)
+    work(f)
+
+fn main() -> Unit !{IO} = print(to_string(with_file(1, \c -> release(c))))

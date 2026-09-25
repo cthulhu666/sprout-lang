@@ -1,0 +1,22 @@
+module main
+
+# The containment wording for a lambda parameter: `Maybe File` is NOT itself a
+# linear type (§5.8), so the plain message would assert what the spec denies.
+#
+# It also may not point at `borrowing` the way the non-contained message does —
+# a modifier is only allowed on a parameter whose own type is linear, so the
+# advice that closes the other case is a dead end here. Pinned because a message
+# offering a rejected modifier is the failure this fixture exists to catch.
+
+type linear File = File Int
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn use_maybe(m: Maybe File) -> Int =
+  match m with
+  | Just f -> release(f)
+  | Nothing -> 0
+
+fn via() -> Int = (\g -> use_maybe(g)) (Just (File(7)))
+
+fn main() -> Unit !{IO} = print(to_string(via()))

@@ -293,20 +293,40 @@ fn remove_all(names: List String, us: List LinUse) -> List LinUse =
   | Nil -> us
   | Cons n rest -> remove_all(rest, luse_remove(n, us))
 
+# The lambda parameter that still defers the whole lambda: linear, and NOT taken
+# `borrowing` — a borrowing one is admissible (M4.4b), so only an owned one is a
+# rejection. Ownership is read off the TYPE, which is where it lives and the only
+# place it is found when the mode is unwritten and pushed down from the slot.
+#
 # Returns the binder, not just its name: under containment the obliged type is
 # often not the linear one, and "linear lambda parameter 'x'" for `x: Maybe File`
 # tells the reader a type is linear that §5.8 says is not. Same fix, and same
 # reason, as leak_binder_msg on the binder path.
-fn first_linear_param(params: List ast.Param, lam_type: types.Type,
-                      env: Dict types.Scheme) -> Maybe LinBinder =
+fn first_owned_linear_param(params: List ast.Param, lam_type: types.Type,
+                            env: Dict types.Scheme) -> Maybe LinBinder =
   match params with
   | Nil -> Nothing
   | Cons prm rest ->
       match lam_type with
-      | types.TFunc a b _ _ ->
-          if type_mentions_linear(a, env) then Just(LinBinder(param_name(prm), a))
-          else first_linear_param(rest, b, env)
+      | types.TFunc a b _ own ->
+          if type_mentions_linear(a, env) && ! types.ownership_is_borrow (own)
+          then Just(LinBinder(param_name(prm), a))
+          else first_owned_linear_param(rest, b, env)
       | _ -> Nothing
+
+# The complement: the names to track as borrowed while walking the body. Selected
+# by type AND ownership, so a non-linear parameter at a `borrowing` slot is not
+# tracked — nothing about it is checkable and the scope lists mean linearity.
+fn borrowed_linear_params(params: List ast.Param, lam_type: types.Type,
+                          env: Dict types.Scheme) -> List String =
+  match params with
+  | Nil -> Nil
+  | Cons prm rest ->
+      match lam_type with
+      | types.TFunc a b _ own ->
+          linear_param_cons(type_mentions_linear(a, env) && types.ownership_is_borrow(own),
+                            param_name(prm), borrowed_linear_params(rest, b, env))
+      | _ -> Nil
 
 # The accumulator of a comprehension's synthesized fold, dropped before the
 # search. It is the fold's first parameter and is not a binder the user wrote;
@@ -379,6 +399,26 @@ fn after_consume_msg(name: String) -> String =
 fn consumed_borrow_msg(name: String) -> String =
   "'" ++ name ++ "' is a borrowing parameter and cannot be consumed; take it `consuming` if this function should release it"
 
+# The lambda's own wording, because the declared parameter's advice does not
+# transfer: `consuming` on a linear lambda parameter is the rest of M4.4 and is
+# still rejected, so pointing at it would send the reader into a second error.
+# Goes through lambda_param_subject because the `_`-hole form reaches here more
+# than any other — `with_file(n, release(_))` is the shape issue #364 reported.
+fn lambda_consumed_borrow_msg(name: String) -> String =
+  lambda_borrow_subject(name) ++ " cannot be consumed; the caller that passes the value releases it itself, so only read it here"
+
+fn lambda_borrow_subject(name: String) -> String =
+  if is_placeholder_param(name)
+  then "the `_` placeholder in this partial application is borrowed and"
+  else "'" ++ name ++ "' is a borrowing parameter of this lambda and"
+
+# A `_`-hole lambda's parameter is named by the desugaring, not the author, who
+# wrote `_`. Never print it — the same rule, and the same reason, as
+# comprehension_binder_subject. Both lambda messages ask, so the test is one
+# place: a second copy is how one of them drifts.
+fn is_placeholder_param(name: String) -> Bool =
+  str_starts_with(name, ast.placeholder_param_prefix)
+
 fn method_once_mismatch_msg(name: String) -> String =
   "instance method parameter '" ++ name ++ "' must match the class declaration on `once`: a call dispatches through the CLASS signature, so callers move linear values into the closure they pass on the strength of the class's promise, and an instance free to invoke it repeatedly would consume those values more than once"
 
@@ -441,11 +481,18 @@ fn once_reuse_msg(name: String) -> String =
 fn once_borrow_capture_msg(name: String) -> String =
   "borrowed value '" ++ name ++ "' cannot be captured by a closure passed to a `once` parameter: the closure may run after the value is consumed. Move it instead — pass ownership in and consume it inside the closure"
 
-# The lambda restrictions M4.4a did NOT lift. Both name `once` so the wall has a
-# door in it: an author whose callee really does invoke the closure at most once
-# is told which modifier says so, rather than being left at a dead end.
+# The lambda restriction M4.4b did NOT lift — a CONSUMING linear parameter. It
+# names `borrowing` so the wall has a door in it: an author whose lambda only
+# reads the value is told which modifier says so, rather than being left at a
+# dead end. Before M4.4b the door was `once`, which was never the answer here —
+# `once` bounds how often a closure RUNS, not what may be handed to it per run.
 fn linear_lambda_param_msg(name: String) -> String =
-  "linear lambda parameter '" ++ name ++ "' is not yet supported (higher-order linearity is deferred; `once` bounds how often a closure RUNS, not what may be passed to it on each run)"
+  "consuming " ++ lambda_param_subject(name) ++ " is not yet supported (higher-order linearity is deferred: the closure may run 0..n times, so the value cannot be proved consumed exactly once); take it `borrowing` if this lambda only reads the value"
+
+fn lambda_param_subject(name: String) -> String =
+  if is_placeholder_param(name)
+  then "the `_` placeholder in this partial application"
+  else "linear lambda parameter '" ++ name ++ "'"
 
 # A parameter obliged by CONTAINMENT is not itself of a linear type, so the
 # wording above would assert what §5.8 denies. Name the type and the linear type
@@ -461,7 +508,7 @@ fn contained_lambda_param_msg(name: String, t: types.Type, inner: Maybe types.Ty
   | Just lin ->
       "lambda parameter '" ++ name ++ "' has type `" ++ types.type_to_string(t)
         ++ "`, which contains the linear type `" ++ types.type_to_string(lin)
-        ++ "`; this is not yet supported (higher-order linearity is deferred; `once` bounds how often a closure RUNS, not what may be passed to it on each run)"
+        ++ "`; this is not yet supported (higher-order linearity is deferred: the closure may run 0..n times, so the value cannot be proved consumed exactly once). `borrowing` is not a way out here — it is only allowed on a parameter whose own type is linear — so take the container apart before the lambda, or walk it in a named recursive function"
 
 fn lambda_capture_msg(name: String) -> String =
   "linear value '" ++ name ++ "' captured by a lambda is not yet supported (higher-order linearity is deferred; if the callee invokes this closure at most once, declare that parameter `once`)"
@@ -763,14 +810,43 @@ fn lin_once_arg(a: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) ->
 # by the body walk's own seq2, and one consumed on only some branches is caught by
 # M4.3 branch convergence (tests/conformance/type_error/once_capture_branch_leak).
 #
-# A linear PARAMETER stays rejected: `once` bounds how often the closure runs, and
-# says nothing about a value handed to it on each run. That is the rest of M4.4.
+# An OWNED linear parameter stays rejected: `once` bounds how often the closure
+# runs, and says nothing about a value handed to it on each run. That is the rest
+# of M4.4. A BORROWING one is admitted on M4.4b's terms, the same as at any other
+# position — `once` is the stricter promise, so a shape legal at a plain slot
+# cannot sensibly be illegal here.
 fn lin_once_lambda(params: List ast.Param, body: typed_ast.TypedExpr, lam_type: types.Type,
                    p: source.SourcePos, sc: LinScope, env: Dict types.Scheme) -> LinRes =
-  match first_linear_param(params, lam_type, env) with
+  match first_owned_linear_param(params, lam_type, env) with
   | Just b -> LinErr(p, lambda_param_binder_msg(b, env))
   | Nothing ->
-      lin_once_captures(lin_consumed(body, scope_shadow(lambda_param_names(params), sc), env), p)
+      lin_once_lambda_body(borrowed_linear_params(params, lam_type, env), params, body, p, sc, env)
+
+# The borrowing parameters are discharged first and on their own terms — not
+# consumed, then dropped from both sets — so what reaches lin_once_captures is
+# the captures alone, which is what its move rule is about.
+fn lin_once_lambda_body(borrowed: List String, params: List ast.Param,
+                        body: typed_ast.TypedExpr, p: source.SourcePos,
+                        sc: LinScope, env: Dict types.Scheme) -> LinRes =
+  lin_once_captures(
+    borrow_params_discharged(
+      lin_consumed(body,
+        scope_add_borrowed(borrowed, scope_shadow(lambda_param_names(params), sc)), env),
+      borrowed),
+    p)
+
+# Shared by both lambda arms: a borrowing parameter may not be consumed, and once
+# that holds it is invisible to whatever rule the caller applies next.
+fn borrow_params_discharged(res: LinRes, borrowed: List String) -> LinRes =
+  match res with
+  | LinErr ep m -> LinErr(ep, m)
+  | LinOk bc bb -> borrow_params_removed(first_consumed_borrow(borrowed, bc), bc, bb, borrowed)
+
+fn borrow_params_removed(bad: Maybe LinUse, bc: List LinUse, bb: List LinUse,
+                         borrowed: List String) -> LinRes =
+  match bad with
+  | Just u -> LinErr(luse_pos(u), lambda_consumed_borrow_msg(luse_name(u)))
+  | Nothing -> LinOk(remove_all(borrowed, bc), remove_all(borrowed, bb))
 
 # Consumed captures become the call's consumed set — the move. A capture that is
 # only BORROWED is refused: `with_scope` joins AFTER its body, so a spawned closure
@@ -1348,14 +1424,26 @@ fn extend_scope(is_lin: Bool, name: String, sc: LinScope) -> LinScope =
 # the ARGUMENT at a `once` parameter is routed to lin_once_lambda before it gets
 # here, so what remains is exactly the 0..n case this rejection was written for.
 # Regression: tests/conformance/type_error/lambda_capture_still_rejected.
+#
+# M4.4b narrows it again, on the PARAMETER half. A parameter the lambda's type
+# takes `borrowing` carries no consume obligation, so how often the closure runs
+# says nothing about it and the 0..n argument does not apply — which is what makes
+# this half separable from the captures, where it still does. The parameter is
+# walked BORROWED, exactly as check_fn_linear walks a declared borrowing one, and
+# the body is then held to the same rule: it may read the value, not release it.
+# Ownership is read off the lambda's TYPE, not its source text, because the mode
+# usually is not written — it is pushed down from the slot (infer.seed_param_modes).
 fn lin_lambda(params: List ast.Param, body: typed_ast.TypedExpr, lam_type: types.Type,
               p: source.SourcePos, sc: LinScope, env: Dict types.Scheme) -> LinRes =
   let from_comp = is_comprehension_fold(params)
-  in match first_linear_param(drop_comp_acc_params(params),
-                              drop_comp_acc_type(params, lam_type), env) with
+  in match first_owned_linear_param(drop_comp_acc_params(params),
+                                    drop_comp_acc_type(params, lam_type), env) with
      | Just b -> LinErr(p, linear_param_msg(from_comp, b, env))
      | Nothing ->
-         lin_lambda_body(body, p, scope_shadow(lambda_param_names(params), sc), env, from_comp)
+         lin_lambda_body(body, p, params,
+           borrowed_linear_params(drop_comp_acc_params(params),
+                                  drop_comp_acc_type(params, lam_type), env),
+           sc, env, from_comp)
 
 # The rejection is identical either way; only the wording differs, so provenance
 # is carried as a flag rather than duplicating the analysis.
@@ -1381,9 +1469,23 @@ fn lambda_param_names(params: List ast.Param) -> List String =
   | Nil -> Nil
   | Cons prm rest -> Cons(param_name(prm), lambda_param_names(rest))
 
+# Every parameter SHADOWS first, then the borrowing linear ones are tracked —
+# shadowing afterwards would drop what was just added. `borrowed` is empty for
+# every lambda without a linear parameter, and each step below is then the
+# identity, so this is the pre-M4.4b walk unchanged for them.
 fn lin_lambda_body(body: typed_ast.TypedExpr, p: source.SourcePos,
+                   params: List ast.Param, borrowed: List String,
                    sc: LinScope, env: Dict types.Scheme, from_comp: Bool) -> LinRes =
-  match lin_consumed(body, sc, env) with
+  match lin_consumed(body,
+          scope_add_borrowed(borrowed, scope_shadow(lambda_param_names(params), sc)),
+          env) with
+  | LinErr ep m -> LinErr(ep, m)
+  | LinOk bc bb -> lin_lambda_close(borrow_params_discharged(LinOk(bc, bb), borrowed), p, from_comp)
+
+# What is left once the lambda's own borrowing parameters are discharged is a
+# CAPTURE, and captures are still rejected outright.
+fn lin_lambda_close(res: LinRes, p: source.SourcePos, from_comp: Bool) -> LinRes =
+  match res with
   | LinErr ep m -> LinErr(ep, m)
   | LinOk bc bb -> lin_lambda_captures(app_uses(bc, bb), p, from_comp)
 
