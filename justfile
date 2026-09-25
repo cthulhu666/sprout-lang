@@ -608,9 +608,13 @@ parse-double-sweep runs="1500" seed="20260925": bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
   STAGE="{{build_dir}}/compile_driver_bin_stage1"
-  TMP_LL=$(mktemp /tmp/sprout_pdsweep_XXXXXX.ll)
-  TMP_BIN=$(mktemp /tmp/sprout_pdsweep_XXXXXX)
-  trap 'rm -f "$TMP_LL" "$TMP_BIN"' EXIT
+  # A directory, not two file templates: BSD mktemp only substitutes TRAILING
+  # X's, so `..._XXXXXX.ll` names one fixed path and the second run of the day
+  # dies on it. clang picks the language from the extension, so the name is kept.
+  TMPD=$(mktemp -d /tmp/sprout_pdsweep_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  TMP_LL="$TMPD/sweep.ll"
+  TMP_BIN="$TMPD/sweep"
   "$STAGE" --emit-ir "{{stdlib_root}}" --package-root "{{justfile_directory()}}" \
     tests/stdlib/test_parse_double_differential.spr > "$TMP_LL"
   clang "$TMP_LL" {{runtime_src}} {{clang_extra}} -o "$TMP_BIN"

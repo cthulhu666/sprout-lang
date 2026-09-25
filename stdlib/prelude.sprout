@@ -1827,7 +1827,9 @@ fn split_on_char(s: String, sep: String) -> Maybe (String, String) =
 # infinity, which is what makes the result both accurate and total.
 #
 # Two simpler shapes were tried and measured against the correctly-rounded value
-# (1500 random runs per length). Placing each digit by its own scale
+# (1500 random runs per length, NO exponent — this compares the three SHAPES at
+# the scale the digits themselves imply, and is not the end-to-end figure the
+# `parse_double` comment below states). Placing each digit by its own scale
 # (`acc + d * scale`) rounds once per digit and the scale is itself rounded, so
 # it is wrong even for one digit: 466/1500 at length 1, up to 4 ULP throughout.
 # Accumulating the run whole and dividing by 10^n once is exact while both
@@ -1965,10 +1967,14 @@ fn split_exponent(body: String) -> Maybe (String, Int) =
 # when the significand is below 2^53 and the scale is a power of ten binary64 holds exactly
 # (|10^k| with k <= 22) — which covers every decimal of at most 15 significant digits. Past
 # that the Int -> Double conversion and 10^k each round, and the result can be several ULP
-# off: at most 5, measured over 11M random inputs spanning 1..320 significant digits and the
-# whole representable range, subnormals included. It is NOT a bit-exact strtod round-trip,
-# and closing that needs a correctly-rounded decimal->binary algorithm (BACKLOG P3).
-# tests/stdlib/test_parse_double_differential.spr is what holds this claim to a number.
+# off: |parsed - exact| is at most 5 ULP of the parsed value, measured over inputs spanning
+# 1..320 significant digits and every decade from 10^-322 to 10^308, subnormals included.
+# It is NOT a bit-exact strtod round-trip, and closing that needs a correctly-rounded
+# decimal->binary algorithm (BACKLOG P3).
+# tests/stdlib/test_parse_double_differential.spr is what holds this claim to a number;
+# `just parse-double-sweep` re-measures it. At the two decades that straddle a threshold
+# the same one-bit error tips the result across it instead: just under DBL_MAX reads as an
+# infinity, and just over half the smallest subnormal reads as zero. Both are pinned there.
 #
 # TOTALITY. No intermediate can be an infinity meeting a zero, so no input yields NaN: the
 # significand is bounded by Int, the exponent is clamped before 10^k is formed, and a zero
