@@ -1078,7 +1078,11 @@ static size_t slot_bytes(SproutHeapKind kind, unsigned long long aux) {
       break;
     case SPROUT_HEAP_CLOSURE: /* n_caps+1 slots (slot0=code); arity shares aux */
       payload = ((size_t)sprout_closure_ncaps(aux) + 1) * 8;     break;
-    case SPROUT_HEAP_VECTOR:  payload = sizeof(VectorVal);       break;
+    /* aux = INLINE element capacity, fixed at allocation and 0 when the elements
+     * are out of line (see sprout_alloc_vector_sized). ->cap may exceed it; the
+     * slot never does. Bounded so the slot stays under SPROUT_LARGE_THRESHOLD,
+     * which also keeps aux far inside the header's 50-bit field. */
+    case SPROUT_HEAP_VECTOR:  payload = sizeof(VectorVal) + (size_t)aux * 8; break;
     case SPROUT_HEAP_MAP:     payload = sizeof(BSTNode);         break;
     case SPROUT_HEAP_BYTES:   payload = sizeof(BytesVal);        break;
     case SPROUT_HEAP_BUILDER: payload = sizeof(BuilderVal);      break;
@@ -1789,18 +1793,71 @@ long long sprout_alloc_tuple_blob(long long size_bytes) {
   return (long long)(uintptr_t)out;
 }
 
-static VectorVal* sprout_alloc_vector_val(const char* ctx) {
+/* A small vector's elements live in its own block, right after the VectorVal;
+ * a large or grown one keeps them in a separate malloc'd buffer, as they always
+ * were.  ->data distinguishes the two by where it points, and the header's aux
+ * is the INLINE capacity — the count for an inline vector, 0 otherwise — which
+ * is what the sweep sizes the slot from.  ->cap is the current capacity and may
+ * exceed aux after a growth; the slot never does. */
+static inline long long* vec_inline_data(VectorVal* v) {
+  return (long long*)((char*)v + sizeof(VectorVal));
+}
+
+static inline int vec_data_is_inline(VectorVal* v) {
+  return v->data != NULL && v->data == vec_inline_data(v);
+}
+
+/* Elements are inlined only while the whole block stays an ordinary slot.  Two
+ * reasons, both measured.  Past SPROUT_LARGE_THRESHOLD sprout_gc_alloc_block
+ * takes the large path, whose region_table_insert is O(live large regions) — so
+ * inlining big vectors made allocating many of them quadratic.  And capping the
+ * count here is what keeps aux small enough that slot_bytes can always reproduce
+ * it: an unbounded count would be truncated by the header's 50-bit field, and a
+ * slot size the sweep cannot reproduce desyncs its walk. */
+#define SPROUT_VEC_INLINE_MAX ((SPROUT_LARGE_THRESHOLD - 8 - sizeof(VectorVal)) / 8)
+
+static long long* sprout_alloc_vector_data(size_t count, const char* ctx);
+
+/* One block for the value and its elements whenever they fit, so the common
+ * vector costs one allocation rather than two.  It also removes the window the
+ * split version had, where a VectorVal was live with ->len set and ->data still
+ * holding whatever the recycled slot contained: ->len starts at 0 here, so a
+ * collection before the caller fills it traces nothing. */
+static VectorVal* sprout_alloc_vector_sized(size_t count, const char* ctx) {
+  size_t inline_count = count <= SPROUT_VEC_INLINE_MAX ? count : 0;
   sprout_gc_maybe_collect_threshold();
-  VectorVal* out = (VectorVal*)sprout_gc_alloc_block(SPROUT_HEAP_VECTOR, 0, sizeof(VectorVal), ctx);
+  VectorVal* out = (VectorVal*)sprout_gc_alloc_block(
+      SPROUT_HEAP_VECTOR, (unsigned long long)inline_count,
+      sizeof(VectorVal) + inline_count * sizeof(long long), ctx);
+  out->len = 0;
+  out->cap = (long long)count;
+  out->data = NULL;
+  if (count == 0) { /* nothing to point at */ }
+  else if (inline_count == count) out->data = vec_inline_data(out);
+  else out->data = sprout_alloc_vector_data(count, ctx);
   if (g_debug_alloc_enabled) g_debug_alloc_vector++;
   return out;
 }
 
+static VectorVal* sprout_alloc_vector_val(const char* ctx) {
+  return sprout_alloc_vector_sized(0, ctx);
+}
+
+/* Out-of-line element buffers stay plain malloc blocks owned by their VectorVal
+ * and released in sprout_release_payload_extras.  Keeping them off the GC heap is
+ * what lets a growing vector free its previous buffer immediately: a buffer left
+ * for the sweep is not reclaimed at all in a push-only loop, which allocates no
+ * managed objects and so never reaches the collection threshold. */
 static long long* sprout_alloc_vector_data(size_t count, const char* ctx) {
-  return count == 0 ? NULL : (long long*)sprout_alloc_counted(&g_debug_alloc_vector, count * sizeof(long long), ctx);
+  if (count == 0) return NULL;
+  /* Loudly, before the multiply wraps: a wrapped size yields a short block and a
+   * heap overflow on first write, where tcp_fail costs a clear message. */
+  if (count > SIZE_MAX / sizeof(long long)) tcp_fail(ctx);
+  return (long long*)sprout_alloc_counted(&g_debug_alloc_vector, count * sizeof(long long), ctx);
 }
 
 static long long* sprout_realloc_vector_data(long long* data, size_t count, const char* ctx) {
+  if (count > SIZE_MAX / sizeof(long long)) tcp_fail(ctx);
   return (long long*)sprout_realloc_counted(&g_debug_alloc_vector, data, count * sizeof(long long), ctx);
 }
 
@@ -2077,7 +2134,9 @@ static void sprout_release_payload_extras(void* payload, SproutHeapKind kind) {
   switch (kind) {
     case SPROUT_HEAP_VECTOR: {
       VectorVal* v = (VectorVal*)payload;
-      free(v->data);
+      /* Only an out-of-line buffer is ours to free; an inline one IS this slot,
+       * which the sweep's freelist push reclaims. */
+      if (!vec_data_is_inline(v)) free(v->data);
       break;
     }
     case SPROUT_HEAP_BYTES: {
@@ -4329,7 +4388,10 @@ static VectorVal* sprout_json_extract_string_array(const char* text, const char*
     item = register_cstr(item);
     if (out->len == out->cap) {
       long long new_cap = out->cap == 0 ? 4 : (out->cap * 2);
-      out->data = sprout_realloc_vector_data(out->data, (size_t)new_cap, "analysis service: out of memory");
+      /* Started at capacity 0 (sprout_alloc_vector_val), so ->data is never the
+       * inline area and realloc owns it. */
+      out->data = sprout_realloc_vector_data(out->data, (size_t)new_cap,
+                                             "analysis service: out of memory");
       out->cap = new_cap;
     }
     out->data[out->len++] = (long long)(uintptr_t)item;
@@ -4853,12 +4915,12 @@ static long long sprout_analysis_diagnostics_vec_or_fail(
     SPROUT_GC_POP_LOCALS(1);
     sprout_builtin_fail_detail(builtin_name, "analysis service: invalid response");
   }
-  VectorVal* out = sprout_alloc_vector_val("analysis service: out of memory");
+  VectorVal* out = sprout_alloc_vector_sized((size_t)messages->len, "analysis service: out of memory");
   long long rooted_out = (long long)(uintptr_t)out;
   SPROUT_GC_PUSH_I64_LOCAL(rooted_out);
-  out->len = messages->len;
-  out->cap = messages->len;
-  out->data = messages->len == 0 ? NULL : sprout_realloc_vector_data(NULL, (size_t)messages->len, "analysis service: out of memory");
+  /* ->len trails the fill because the tuple allocation below can collect, and a
+   * length covering not-yet-written slots would have the marker trace whatever
+   * the block held before. */
   for (long long i = 0; i < messages->len; i++) {
     void* tuple = (void*)(uintptr_t)sprout_alloc_tuple_blob((long long)(sizeof(uintptr_t) * 3));
     uintptr_t* words = (uintptr_t*)tuple;
@@ -4866,6 +4928,7 @@ static long long sprout_analysis_diagnostics_vec_or_fail(
     words[1] = (uintptr_t)lines[i];
     words[2] = (uintptr_t)columns[i];
     out->data[i] = (long long)(uintptr_t)tuple;
+    out->len = i + 1;
   }
   if (lines != NULL) free(lines);
   if (columns != NULL) free(columns);
@@ -4905,12 +4968,10 @@ static long long sprout_analysis_ok_symbol_locations_from_response(
     SPROUT_GC_POP_LOCALS(2);
     return sprout_err_string_result("analysis service: invalid response");
   }
-  VectorVal* out = sprout_alloc_vector_val("analysis service: out of memory");
+  VectorVal* out = sprout_alloc_vector_sized((size_t)categories->len, "analysis service: out of memory");
   long long rooted_out = (long long)(uintptr_t)out;
   SPROUT_GC_PUSH_I64_LOCAL(rooted_out);
-  out->len = categories->len;
-  out->cap = categories->len;
-  out->data = categories->len == 0 ? NULL : sprout_realloc_vector_data(NULL, (size_t)categories->len, "analysis service: out of memory");
+  /* ->len trails the fill, as above: the tuple allocation can collect. */
   for (long long i = 0; i < categories->len; i++) {
     void* tuple = (void*)(uintptr_t)sprout_alloc_tuple_blob((long long)(sizeof(uintptr_t) * 4));
     uintptr_t* words = (uintptr_t*)tuple;
@@ -4919,6 +4980,7 @@ static long long sprout_analysis_ok_symbol_locations_from_response(
     words[2] = (uintptr_t)lines[i];
     words[3] = (uintptr_t)columns[i];
     out->data[i] = (long long)(uintptr_t)tuple;
+    out->len = i + 1;
   }
   if (lines != NULL) free(lines);
   if (columns != NULL) free(columns);
@@ -5432,7 +5494,9 @@ long long read_int_lines(const char* path) {
     if (end == buf || *end != '\0') tcp_fail("read_int_lines: invalid integer line");
     if (v->len == v->cap) {
       long long new_cap = v->cap == 0 ? 8 : (v->cap * 2);
-      long long* new_data = sprout_realloc_vector_data(v->data, (size_t)new_cap, "read_int_lines: out of memory");
+      /* Same shape: this vector starts at capacity 0, so ->data is a malloc block. */
+      long long* new_data = sprout_realloc_vector_data(v->data, (size_t)new_cap,
+                                                       "read_int_lines: out of memory");
       v->data = new_data;
       v->cap = new_cap;
     }
@@ -8392,11 +8456,7 @@ long long http_request(const char* method, const char* url, const char* headers_
 }
 
 long long vector_empty(void) {
-  VectorVal* v = sprout_alloc_vector_val("vector_empty: out of memory");
-  v->len = 0;
-  v->cap = 0;
-  v->data = NULL;
-  return (long long)(uintptr_t)v;
+  return (long long)(uintptr_t)sprout_alloc_vector_sized(0, "vector_empty: out of memory");
 }
 
 long long vector_length(long long vec) {
@@ -8426,19 +8486,18 @@ long long vector_set(long long vec, long long index, long long value) {
   SPROUT_GC_PUSH_I64_LOCAL(rooted_value);
   VectorVal* src = (VectorVal*)(uintptr_t)vec;
   if (src == NULL) tcp_fail("vector_set: null vector");
-  VectorVal* out = sprout_alloc_vector_val("vector_set: out of memory");
-  out->len = src->len;
-  out->cap = src->len;
-  if (out->cap == 0) {
-    out->data = NULL;
+  VectorVal* out = sprout_alloc_vector_sized((size_t)src->len, "vector_set: out of memory");
+  if (src->len == 0) {
     SPROUT_GC_POP_LOCALS(2);
     return (long long)(uintptr_t)out;
   }
-  out->data = sprout_alloc_vector_data((size_t)out->cap, "vector_set: out of memory");
-  memcpy(out->data, src->data, (size_t)out->len * sizeof(long long));
-  if (index >= 0 && index < out->len) {
+  memcpy(out->data, src->data, (size_t)src->len * sizeof(long long));
+  if (index >= 0 && index < src->len) {
     out->data[index] = rooted_value;
   }
+  /* ->len trails the fill: the mark phase sizes a vector's children by it, and a
+   * fresh block is usually a recycled slot whose words are stale handles. */
+  out->len = src->len;
   SPROUT_GC_POP_LOCALS(2);
   return (long long)(uintptr_t)out;
 }
@@ -8450,14 +8509,12 @@ long long vector_append(long long vec, long long value) {
   SPROUT_GC_PUSH_I64_LOCAL(rooted_value);
   VectorVal* src = (VectorVal*)(uintptr_t)vec;
   if (src == NULL) tcp_fail("vector_append: null vector");
-  VectorVal* out = sprout_alloc_vector_val("vector_append: out of memory");
-  out->len = src->len + 1;
-  out->cap = out->len;
-  out->data = sprout_alloc_vector_data((size_t)out->cap, "vector_append: out of memory");
+  VectorVal* out = sprout_alloc_vector_sized((size_t)src->len + 1, "vector_append: out of memory");
   if (src->len > 0) {
     memcpy(out->data, src->data, (size_t)src->len * sizeof(long long));
   }
   out->data[src->len] = rooted_value;
+  out->len = src->len + 1;  /* trails the fill, as in vector_set */
   SPROUT_GC_POP_LOCALS(2);
   return (long long)(uintptr_t)out;
 }
@@ -8474,15 +8531,13 @@ long long vector_concat(long long a, long long b) {
   if (va == NULL || vb == NULL) tcp_fail("vector_concat: null vector");
   long long na = va->len;
   long long nb = vb->len;
-  VectorVal* out = sprout_alloc_vector_val("vector_concat: out of memory");
-  out->len = na + nb;
-  out->cap = out->len;
-  out->data = sprout_alloc_vector_data((size_t)out->cap, "vector_concat: out of memory");
-  /* Re-fetch: the two allocations above may have run the collector. */
+  VectorVal* out = sprout_alloc_vector_sized((size_t)(na + nb), "vector_concat: out of memory");
+  /* Re-fetch: the allocation above may have run the collector. */
   va = (VectorVal*)(uintptr_t)rooted_a;
   vb = (VectorVal*)(uintptr_t)rooted_b;
   if (na > 0) memcpy(out->data, va->data, (size_t)na * sizeof(long long));
   if (nb > 0) memcpy(out->data + na, vb->data, (size_t)nb * sizeof(long long));
+  out->len = na + nb;  /* trails the fill, as in vector_set */
   SPROUT_GC_POP_LOCALS(2);
   return (long long)(uintptr_t)out;
 }
@@ -8490,11 +8545,9 @@ long long vector_concat(long long a, long long b) {
 long long vec_make_filled(long long n, long long val) {
   long long rooted_val = val;
   SPROUT_GC_PUSH_I64_LOCAL(rooted_val);
-  VectorVal* out = sprout_alloc_vector_val("vec_make_filled: out of memory");
-  out->len = n;
-  out->cap = n;
-  out->data = sprout_alloc_vector_data((size_t)n, "vec_make_filled: out of memory");
+  VectorVal* out = sprout_alloc_vector_sized((size_t)n, "vec_make_filled: out of memory");
   for (long long i = 0; i < n; i++) out->data[i] = rooted_val;
+  out->len = n;  /* trails the fill, as in vector_set */
   SPROUT_GC_POP_LOCALS(1);
   return (long long)(uintptr_t)out;
 }
@@ -8503,9 +8556,10 @@ long long vector_mutset(long long vec, long long index, long long value) {
   VectorVal* v = (VectorVal*)(uintptr_t)vec;
   if (v == NULL) tcp_fail("vector_mutset: null vector");
   if (index < 0 || index >= v->len) tcp_fail("vector_mutset: index out of bounds");
-  /* The other candidate write-barrier site — see ref_write.  Note the store is
-   * into v->data, a plain malloc'd array owned by the VectorVal, so a real
-   * barrier here must record the OWNING object, which is what is priced. */
+  /* The other candidate write-barrier site — see ref_write.  The store lands
+   * either in the VectorVal's own slot or in a malloc buffer it owns; neither is
+   * a GC object in its own right, so a real barrier here must record the OWNING
+   * object, which is what is priced. */
   if (sprout_gc_ageprof_on()) sprout_ap_note_ptr_store(vec, value);
   v->data[index] = value;
   return 0;
@@ -8526,20 +8580,38 @@ long long vector_mutset(long long vec, long long index, long long value) {
  * (sprout_heap_child_count_payload), so a len bumped first would expose an
  * uninitialised capacity slot to the mark phase as if it were a heap pointer.
  *
- * No GC allocation happens here: sprout_realloc_vector_data is a plain realloc
- * (sprout_realloc_counted), which never calls sprout_gc_maybe_collect_threshold.
- * So the collector cannot run mid-call and neither argument needs rooting.  The
- * flip side is that pushes alone never trip the collection threshold — the
- * backing array is plain malloc and invisible to an object-count-based trigger
- * (BACKLOG "GC trigger is object-count-blind").  For a growing buffer that is the
- * right answer anyway: it is live, not garbage. */
+ * No GC allocation happens here: both growth paths are plain malloc/realloc,
+ * which never call sprout_gc_maybe_collect_threshold.  So the collector cannot
+ * run mid-call and neither argument needs rooting.
+ *
+ * Growth out of an INLINE buffer must copy, not realloc: that memory is part of
+ * the VectorVal's own slot and was never handed out by malloc.  The vacated area
+ * is then dead for the object's lifetime, because slot_bytes still sizes the slot
+ * from aux — up to ~4 KiB for a vector born at the inline ceiling.  `mutvec_new(n,
+ * v)` reaches that path: it fills through vec_make_filled, so it IS inline for any
+ * n <= SPROUT_VEC_INLINE_MAX, and only `mutvec_empty` starts at capacity 0.  The
+ * waste is bounded and needs the vector to be built at a fixed size and THEN
+ * pushed onto, so it is accepted rather than designed around; what it must not do
+ * is go unrecorded, since the same slot is re-walked by every later sweep. */
 long long vector_push(long long vec, long long value) {
   VectorVal* v = (VectorVal*)(uintptr_t)vec;
   if (v == NULL) tcp_fail("vector_push: null vector");
   if (v->len >= v->cap) {
     if (v->cap > (long long)(SIZE_MAX / sizeof(long long)) / 2) tcp_fail("vector_push: vector too large");
     long long new_cap = v->cap <= 0 ? 8 : v->cap * 2;
-    v->data = sprout_realloc_vector_data(v->data, (size_t)new_cap, "vector_push: out of memory");
+    if (vec_data_is_inline(v)) {
+      long long* moved = sprout_alloc_vector_data((size_t)new_cap, "vector_push: out of memory");
+      long long* vacated = v->data;
+      if (v->len > 0) memcpy(moved, vacated, (size_t)v->len * sizeof(long long));
+      v->data = moved;
+      /* Zero what we left behind, for the reason vector_truncate zeroes: the
+       * vacated words are inside a slot the sweep walks and the lineage tooling
+       * inspects, so copies of a handle outliving the object they name would be
+       * dangling pointers in scanned memory. */
+      if (v->len > 0) memset(vacated, 0, (size_t)v->len * sizeof(long long));
+    } else {
+      v->data = sprout_realloc_vector_data(v->data, (size_t)new_cap, "vector_push: out of memory");
+    }
     v->cap = new_cap;
   }
   /* The same candidate write-barrier site as vector_mutset: a push stores into an
@@ -8596,21 +8668,16 @@ long long vector_from_list(long long list_handle) {
   /* Root the list while we allocate. */
   long long rooted_list = list_handle;
   SPROUT_GC_PUSH_I64_LOCAL(rooted_list);
-  VectorVal* v = sprout_alloc_vector_val("vector_from_list: out of memory");
-  v->len = count;
-  v->cap = count;
-  if (count == 0) {
-    v->data = NULL;
-    SPROUT_GC_POP_LOCALS(1);
-    return (long long)(uintptr_t)v;
-  }
-  v->data = sprout_alloc_vector_data((size_t)count, "vector_from_list: out of memory");
-  /* Second pass: fill Vec front-to-back (list head → index 0). */
+  VectorVal* v = sprout_alloc_vector_sized((size_t)count, "vector_from_list: out of memory");
+  /* Second pass: fill Vec front-to-back (list head → index 0).  ->len stays 0
+   * until the elements are in place, so the marker never sees an inline slot
+   * still holding whatever the recycled block contained. */
   cur = rooted_list;
   for (long long i = 0; i < count; i++) {
     v->data[i] = sprout_field(cur, 0);
     cur = sprout_field(cur, 1);
   }
+  v->len = count;
   SPROUT_GC_POP_LOCALS(1);
   return (long long)(uintptr_t)v;
 }
