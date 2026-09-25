@@ -652,7 +652,8 @@ not-consumed rule rather than by a lifetime analysis Sprout does not have.
 Tests: `tests/stdlib/test_linear_lambda_borrow.spr`, and in `tests/conformance/type_error/`
 `lambda_borrow_param_consumed`, `lambda_consuming_linear_param`, `lambda_borrow_param_captures_linear`,
 `lambda_borrow_param_captured_by_nested`, `lambda_borrow_param_aliased`,
-`lambda_written_mode_not_overridden`, `lambda_borrow_mode_needs_call_position`.
+`lambda_written_mode_not_overridden`, `lambda_borrow_mode_needs_call_position`,
+`lambda_hole_consuming_advice`.
 
 **Diagnostic fixed alongside.** `unifier.borrow_mismatch_reason` asserted a direction ("a function
 that borrows cannot stand in where one that consumes is expected") while the two sides arrive in
@@ -700,3 +701,36 @@ Both lambda messages also printed the desugaring's own `__sprout_ph_N` for a `_`
 `ast.placeholder_param_prefix` so the parser and the checker cannot drift on its spelling; that is
 the whole of the golden-IR change this landed with (one constant relocating, one registered global,
 and one fewer GC root push in `ph_param_name`).
+
+### 20.2 Two more of them, one function short (review, 2026-09-25)
+
+A second ensemble review over the same diff found §20.1's sweep had stopped one function short,
+twice. Both are the same defect class: advice naming a door that does not open.
+
+**`lambda_capture_msg` pointed every captured linear value at `once`.** That is right for an
+**owned** capture — `once` licenses the M4.4a move — and a dead end for a **borrowed** one, which
+`lin_once_captures` rejects outright: changing only the slot to `once (borrowing File) -> Int`
+swaps one error for `once_borrow_capture_msg` (verified). M4.4b made the borrowed half common by
+admitting the borrowing parameter that produces it. The message now splits on which set the capture
+came from, and a name in **both** is classified owned — a borrow the body later consumes is the
+lambda's own value, the rule `lin_once_captures` already applies. The borrowed wording names no
+modifier at all, because none works; it names the rewrite, reading the borrow before the lambda.
+Fixtures: `borrow_capture_in_lambda` and `lambda_borrow_param_captured_by_nested`, both tightened
+from a substring that matched either wording, against `lambda_borrow_param_captures_linear` which
+consumes its capture and keeps the `once` advice.
+
+**`linear_lambda_param_msg`'s advice clause had the `_`-hole problem §20.1 fixed for its subject.**
+"take it `borrowing`" names a modifier a hole cannot carry: `scaled(borrowing _, 5)` is a parse
+error. It now names the rewrite the hole desugars to. Fixture:
+`type_error/lambda_hole_consuming_advice`, whose body only *reads* the value, so the advice's own
+precondition holds and the dead end is not incidental to that program.
+
+Both rewrites are compiled and run by `tests/stdlib/test_linear_lambda_borrow.spr` §7, for the
+reason `test_comprehension_linear_advice.spr` exists: advice that stops working should fail a gate
+rather than rot inside a string nobody re-checks.
+
+**And one spec sentence.** §5.8 read "an unannotated lambda at a `once` slot stays an ownership
+mismatch". Taken as the slot the lambda *fills*, that contradicts M4.4a 47 lines below it, where
+`task_spawn(scope, \_ -> handle(conn))` is exactly that shape and compiles
+(`test_once_closures.spr` case 1). The rule is about the lambda's **own parameter**; the sentence
+now says which.

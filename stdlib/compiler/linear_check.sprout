@@ -487,12 +487,20 @@ fn once_borrow_capture_msg(name: String) -> String =
 # dead end. Before M4.4b the door was `once`, which was never the answer here —
 # `once` bounds how often a closure RUNS, not what may be handed to it per run.
 fn linear_lambda_param_msg(name: String) -> String =
-  "consuming " ++ lambda_param_subject(name) ++ " is not yet supported (higher-order linearity is deferred: the closure may run 0..n times, so the value cannot be proved consumed exactly once); take it `borrowing` if this lambda only reads the value"
+  "consuming " ++ lambda_param_subject(name) ++ " is not yet supported (higher-order linearity is deferred: the closure may run 0..n times, so the value cannot be proved consumed exactly once); " ++ lambda_param_advice(name)
 
 fn lambda_param_subject(name: String) -> String =
   if is_placeholder_param(name)
   then "the `_` placeholder in this partial application"
   else "linear lambda parameter '" ++ name ++ "'"
+
+# A hole has nowhere to put a mode — `f(borrowing _, 5)` is a parse error — so
+# the door the message opens is shut for that spelling. Name the rewrite that
+# reaches it: the explicit lambda the hole desugars to.
+fn lambda_param_advice(name: String) -> String =
+  if is_placeholder_param(name)
+  then "a `_` hole takes no mode, so write it as an explicit lambda with a `borrowing` parameter if it only reads the value"
+  else "take it `borrowing` if this lambda only reads the value"
 
 # A parameter obliged by CONTAINMENT is not itself of a linear type, so the
 # wording above would assert what §5.8 denies. Name the type and the linear type
@@ -510,8 +518,17 @@ fn contained_lambda_param_msg(name: String, t: types.Type, inner: Maybe types.Ty
         ++ "`, which contains the linear type `" ++ types.type_to_string(lin)
         ++ "`; this is not yet supported (higher-order linearity is deferred: the closure may run 0..n times, so the value cannot be proved consumed exactly once). `borrowing` is not a way out here — it is only allowed on a parameter whose own type is linear — so take the container apart before the lambda, or walk it in a named recursive function"
 
-fn lambda_capture_msg(name: String) -> String =
+# Two captures, two ways out. `once` licenses a MOVE (M4.4a) — the answer for an
+# OWNED capture, and a dead end for a borrowed one, which lin_once_captures
+# rejects whatever the slot says. M4.4b made the borrowed half common.
+fn lambda_capture_msg(name: String, borrowed: Bool) -> String =
+  if borrowed then borrow_capture_msg(name) else owned_capture_msg(name)
+
+fn owned_capture_msg(name: String) -> String =
   "linear value '" ++ name ++ "' captured by a lambda is not yet supported (higher-order linearity is deferred; if the callee invokes this closure at most once, declare that parameter `once`)"
+
+fn borrow_capture_msg(name: String) -> String =
+  "borrowed value '" ++ name ++ "' captured by a lambda is not yet supported (higher-order linearity is deferred; the closure may run after the owner releases it, and `once` is not a way out — it bounds how often the closure RUNS, not how long the borrow lasts); read '" ++ name ++ "' before the lambda and capture the result instead"
 
 # A comprehension elaborates to a fold over lambdas the user never wrote
 # (infer.build_comp_fold), so the two messages above misdescribe it three ways:
@@ -1451,8 +1468,8 @@ fn linear_param_msg(from_comp: Bool, b: LinBinder, env: Dict types.Scheme) -> St
   if from_comp then comprehension_binder_msg(lbind_name(b))
   else lambda_param_binder_msg(b, env)
 
-fn lambda_capture_msg_for(from_comp: Bool, name: String) -> String =
-  if from_comp then comprehension_capture_msg(name) else lambda_capture_msg(name)
+fn lambda_capture_msg_for(from_comp: Bool, name: String, borrowed: Bool) -> String =
+  if from_comp then comprehension_capture_msg(name) else lambda_capture_msg(name, borrowed)
 
 # Every fold the comprehension elaboration builds takes the accumulator as its
 # first parameter, under a generated name; a lambda holding any such binder is
@@ -1483,16 +1500,25 @@ fn lin_lambda_body(body: typed_ast.TypedExpr, p: source.SourcePos,
   | LinOk bc bb -> lin_lambda_close(borrow_params_discharged(LinOk(bc, bb), borrowed), p, from_comp)
 
 # What is left once the lambda's own borrowing parameters are discharged is a
-# CAPTURE, and captures are still rejected outright.
+# CAPTURE, and captures are still rejected outright. Which set it came from picks
+# the wording; a name in BOTH is owned, because a borrow the body later consumes
+# is the lambda's own value — the rule lin_once_captures already applies.
 fn lin_lambda_close(res: LinRes, p: source.SourcePos, from_comp: Bool) -> LinRes =
   match res with
   | LinErr ep m -> LinErr(ep, m)
-  | LinOk bc bb -> lin_lambda_captures(app_uses(bc, bb), p, from_comp)
+  | LinOk bc bb -> lin_lambda_captures(bc, luse_remove_all(names_of(bc), bb), p, from_comp)
 
-fn lin_lambda_captures(uses: List LinUse, p: source.SourcePos, from_comp: Bool) -> LinRes =
-  match uses with
+fn lin_lambda_captures(consumed: List LinUse, borrowed: List LinUse,
+                       p: source.SourcePos, from_comp: Bool) -> LinRes =
+  match consumed with
+  | Nil -> lin_lambda_borrow_captures(borrowed, p, from_comp)
+  | [u | _] -> LinErr(p, lambda_capture_msg_for(from_comp, luse_name(u), false))
+
+fn lin_lambda_borrow_captures(borrowed: List LinUse, p: source.SourcePos,
+                              from_comp: Bool) -> LinRes =
+  match borrowed with
   | Nil -> LinOk(Nil, Nil)
-  | [u | _] -> LinErr(p, lambda_capture_msg_for(from_comp, luse_name(u)))
+  | [u | _] -> LinErr(p, lambda_capture_msg_for(from_comp, luse_name(u), true))
 
 # --- parameter modes ---
 

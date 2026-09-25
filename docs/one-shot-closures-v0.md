@@ -262,6 +262,10 @@ describes.
   `"`once` applies only to a function-typed parameter (parameter 'n'): it bounds how many times the callee may invoke it"`
 - The **existing** capture rejection gains a pointer, so the wall becomes a door with a sign on it:
   `"… captured by a lambda is not yet supported (higher-order linearity is deferred; if the callee invokes this closure at most once, declare that parameter `once`)"`
+  **Narrowed since (M4.4b review, `docs/linear-borrowing-v0.md` §20.2):** this pointer is emitted
+  only for an **owned** capture, the one `once` can license. A *borrowed* capture is rejected by
+  `lin_once_captures` whatever the slot says, so it gets its own wording naming a rewrite rather
+  than a modifier.
 
 ## 8. Compatibility and migration
 

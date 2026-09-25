@@ -1,0 +1,24 @@
+module main
+
+# The ADVICE half of lambda_hole_borrow_consumed_names_underscore, which covers
+# only the subject. A hole has nowhere to put a mode — `scaled(borrowing _, 5)`
+# is a parse error — so "take it `borrowing`" names a modifier the author cannot
+# write. The body here only READS the value, so the advice's own precondition
+# holds and the dead end is not incidental to this program.
+#
+# The rewrite it names instead is pinned by tests/stdlib/test_linear_lambda_borrow.spr.
+
+type linear File = File Int
+
+fn peek(f: borrowing File) -> Int = 0
+fn release(f: consuming File) -> Int = match f with | File n -> n
+fn scaled(f: borrowing File, k: Int) -> Int = peek(f) + k
+
+# Applied directly, so no slot pushes a mode down and the parameter reads owned.
+fn direct(n: Int) -> Int =
+  do
+    let f = File(n)
+    let r = (scaled(_, 5))(f)
+    r + release(f)
+
+fn main() -> Unit !{IO} = print(to_string(direct(1)))
