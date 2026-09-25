@@ -1,15 +1,33 @@
 #!/usr/bin/env bash
-# N-Queens benchmark: Sprout vs Haskell vs Go (pure/mutable/bitmask) vs Python vs Ruby
+# N-Queens benchmark, grouped by DATA REPRESENTATION.
+#
+# The three representations solve the same problem with different amounts of
+# work per node, so a number from one says nothing about a number from another:
+# the bitmask variants are ~50x faster than the persistent ones in every
+# language that has both. Only compare within a section.
+#
 # Compiled languages are pre-built so we time execution only, not compilation.
+#
+# usage: bench.sh [persistent|mutable|bitmask]
+#   With no argument every section runs, which takes ~2 minutes and puts the
+#   later sections on a machine the earlier ones have been heating for a minute.
+#   That is enough to cost the bitmask section ~2x. Name a section to measure
+#   one representation on a settled machine.
 set -euo pipefail
+
+ONLY="${1:-all}"
+case "$ONLY" in
+  all|persistent|mutable|bitmask) ;;
+  *) echo "usage: $0 [persistent|mutable|bitmask]" >&2; exit 2 ;;
+esac
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$DIR/../.." && pwd)"
 BIN="$DIR/bin"
 mkdir -p "$BIN"
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
-sep() { printf '%0.s─' {1..60}; echo; }
+RED='\033[0;31m'; CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; RESET='\033[0m'
+sep() { printf '%0.s─' {1..70}; echo; }
 
 # ── Compile phase ─────────────────────────────────────────────────────────────
 
@@ -27,13 +45,20 @@ echo -n "  [Go]       go build  ... "
 (cd "$DIR" && go build -o "$BIN/nqueens_go" "$DIR/nqueens.go") \
   && echo "done" || echo -e "${RED}FAILED${RESET}"
 
-echo -n "  [Sprout]   just compile-native ... "
-if [[ -x "$REPO/build/compile_driver_bin_stage1" ]]; then
-  (cd "$REPO" && just compile-native examples/nqueens.sprout "$BIN/nqueens_sprout") 2>/dev/null \
+# Both Sprout variants go through `just compile-native`, which whole-program
+# links (scripts/link_whole_program.sh) — the runtime is merged into the same
+# LLVM module, so GC root push/pop inline instead of becoming calls.
+build_sprout() { # <source> <output name> <label>
+  echo -n "  [Sprout $3] just compile-native ... "
+  if [[ ! -x "$REPO/build/compile_driver_bin_stage1" ]]; then
+    echo -e "${RED}compile_driver_bin_stage1 not found${RESET}"
+    return
+  fi
+  (cd "$REPO" && just compile-native "$1" "$BIN/$2") 2>/dev/null \
     && echo "done" || echo -e "${RED}FAILED${RESET}"
-else
-  echo -e "${RED}compile_driver_bin_stage1 not found${RESET}"
-fi
+}
+build_sprout examples/nqueens.sprout         nqueens_sprout         "array  "
+build_sprout examples/nqueens_bitmask.sprout nqueens_sprout_bitmask "bitmask"
 
 echo
 sep
@@ -41,57 +66,75 @@ sep
 # ── Run phase ─────────────────────────────────────────────────────────────────
 
 echo -e "${BOLD}=== Results ===${RESET}"
-echo
 
-run_section() {
+# Returns 1 when this section was filtered out, so the caller can skip its
+# entries wholesale: `section <key> ... || skip=1`.
+want() { [[ "$ONLY" == all || "$ONLY" == "$1" ]]; }
+
+section() { # <key> <title> <blurb>
+  want "$1" || return 1
+  echo
+  sep
+  echo -e "${BOLD}$2${RESET}"
+  echo -e "${DIM}$3${RESET}"
+  echo
+}
+
+# Skip silently when an implementation was not built or its interpreter is
+# absent — a partial run is still useful, and a missing ghc must not abort it.
+entry() { # <label> <command...>
   local label="$1"; shift
+  if [[ ! -x "$1" ]] && ! command -v "$1" >/dev/null 2>&1; then
+    return 0
+  fi
   echo -e "${CYAN}── $label${RESET}"
   "$@"
   echo
 }
 
-# Sprout: execution only (compiled binary, counts N=1,4,8,10,12)
-if [[ -x "$BIN/nqueens_sprout" ]]; then
-  echo -e "${CYAN}── Sprout (clang -O2, execution only)${RESET}"
-  "$BIN/nqueens_sprout"
-  echo
+if section persistent "REPRESENTATION 1: persistent / copy-on-write" \
+  "Three boolean constraint arrays, copied on every queen placement, so the
+caller still holds the unmodified arrays after the recursive call. O(n)
+allocation per step. This is the representation Sprout's Vec forces."
+then
+  entry "Sprout — Vec Bool (whole-program linked, execution only)" "$BIN/nqueens_sprout"
+  entry "Haskell — UArray Int Bool (bit-packed, unboxed)"          "$BIN/nqueens_hs"
+  entry "Haskell — Array Int Bool (boxed)"                         "$BIN/nqueens_hs_boxed"
+  entry "Go — []bool with copy per placement"                      "$BIN/nqueens_go" pure
+  entry "Ruby — Array#dup per placement"                           ruby "$DIR/nqueens_pure.rb"
+  entry "Python — list[:] per placement"                           python3 "$DIR/nqueens_pure.py"
 fi
 
-# Haskell: both variants
-if [[ -x "$BIN/nqueens_hs" ]]; then
-  run_section "Haskell unboxed UArray (ghc -O2, execution only)" "$BIN/nqueens_hs"
+if section mutable "REPRESENTATION 2: mutable in-place backtracking" \
+  "One set of arrays, written on the way down and unwritten on the way back up.
+Zero allocation per step. No Sprout entry yet — stdlib/mutable.sprout's MutVec
+could express it, at the cost of making the whole search !{IO}."
+then
+  entry "Go — []bool mutate/undo" "$BIN/nqueens_go" mutable
+  entry "Ruby — mutate/undo"      ruby    "$DIR/nqueens_mut.rb"
+  entry "Python — mutate/undo"    python3 "$DIR/nqueens_mut.py"
 fi
 
-if [[ -x "$BIN/nqueens_hs_boxed" ]]; then
-  run_section "Haskell boxed Array (ghc -O2, execution only)" "$BIN/nqueens_hs_boxed"
+if section bitmask "REPRESENTATION 3: bitmask" \
+  "Constraints packed into three Ints, iterating only the safe columns rather
+than testing every column. No arrays, no allocation, and a smaller search
+tree — hence ~50x faster than representation 1 in both languages below."
+then
+  entry "Sprout — Int masks (whole-program linked, execution only)" "$BIN/nqueens_sprout_bitmask"
+  entry "Go — int masks"                                            "$BIN/nqueens_go" bitmask
 fi
 
-# Go: all three variants with internal timing
-if [[ -x "$BIN/nqueens_go" ]]; then
-  run_section "Go" "$BIN/nqueens_go"
-fi
-
-# Python
-if command -v python3 &>/dev/null; then
-  echo -e "${CYAN}── Python 3 pure (list copy)${RESET}"
-  python3 "$DIR/nqueens_pure.py"
-  echo
-  echo -e "${CYAN}── Python 3 mutable (backtracking)${RESET}"
-  python3 "$DIR/nqueens_mut.py"
-  echo
-fi
-
-# Ruby
-if command -v ruby &>/dev/null; then
-  echo -e "${CYAN}── Ruby pure (array.dup)${RESET}"
-  ruby "$DIR/nqueens_pure.rb"
-  echo
-  echo -e "${CYAN}── Ruby mutable (backtracking)${RESET}"
-  ruby "$DIR/nqueens_mut.rb"
-  echo
-fi
-
+echo
 sep
-echo -e "${BOLD}Note:${RESET} Sprout times are execution-only (no compilation overhead)."
-echo       "      Python/Ruby times include interpreter startup (~50 ms)."
-echo       "      Haskell and Go times are execution-only."
+echo -e "${BOLD}Note:${RESET} compare WITHIN a section only — the sections do different work."
+echo       "      Compiled times are execution-only (no compilation overhead)."
+echo       "      Python/Ruby print their own internal timings, so interpreter"
+echo       "      startup (~50 ms) is excluded there too."
+if [[ "$ONLY" == all ]]; then
+  echo
+  echo -e "${BOLD}One sequential pass is indicative, not a measurement.${RESET}"
+  echo       "      Later sections run on a hotter machine: the bitmask section costs"
+  echo       "      ~2x more here than on a settled one. README.md's tables are medians"
+  echo       "      of interleaved runs. To compare one representation, run e.g."
+  echo       "      bash bench/nqueens/bench.sh bitmask"
+fi

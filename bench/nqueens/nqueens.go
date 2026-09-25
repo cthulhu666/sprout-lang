@@ -1,9 +1,18 @@
 // N-Queens in Go: three variants — pure (slice copy), mutable (backtracking), bitmask.
-// Run: go run nqueens.go
+// The three use different DATA REPRESENTATIONS, so they are not comparable to each
+// other; bench.sh runs one at a time and groups each with the other languages'
+// implementations of the same representation.
+//
+// Run: go run nqueens.go [pure|mutable|bitmask] [N...]
+// No argument runs all three variants over the shared ladder; naming a variant
+// and some Ns runs just that one, which is how the scaling study was measured:
+// "bitmask 14 15 16".
 package main
 
 import (
 	"fmt"
+	"os"
+	"strconv"
 	"time"
 )
 
@@ -68,8 +77,10 @@ func countMut(n int) int {
 // Uses the Richards encoding: cols = occupied columns (permanent);
 // ld/rd = diagonals projected onto the current row, shifted left/right each level.
 
-func queensBitmask(n, cols, ld, rd int) int {
-	mask := (1 << n) - 1
+// `mask` is carried rather than recomputed from n at each node: (1<<n)-1 is
+// loop-invariant but sits behind a recursive call, so the compiler cannot hoist
+// it. Sprout's version carries it too — this keeps the per-node work identical.
+func queensBitmask(mask, cols, ld, rd int) int {
 	if cols == mask {
 		return 1
 	}
@@ -77,14 +88,14 @@ func queensBitmask(n, cols, ld, rd int) int {
 	count := 0
 	for available != 0 {
 		bit := available & -available // isolate lowest set bit
-		available &= available - 1   // clear it
-		count += queensBitmask(n, cols|bit, (ld|bit)<<1, (rd|bit)>>1)
+		available &= available - 1    // clear it
+		count += queensBitmask(mask, cols|bit, (ld|bit)<<1, (rd|bit)>>1)
 	}
 	return count
 }
 
 func countBitmask(n int) int {
-	return queensBitmask(n, 0, 0, 0)
+	return queensBitmask((1<<n)-1, 0, 0, 0)
 }
 
 // ── Driver ────────────────────────────────────────────────────────────────────
@@ -100,7 +111,31 @@ func bench(label string, f func(int) int, ns []int) {
 
 func main() {
 	ns := []int{1, 4, 8, 10, 12, 13}
-	bench("pure", countPure, ns)
-	bench("mutable", countMut, ns)
-	bench("bitmask", countBitmask, ns)
+	variants := map[string]func(int) int{
+		"pure": countPure, "mutable": countMut, "bitmask": countBitmask,
+	}
+	if len(os.Args) > 1 {
+		f, ok := variants[os.Args[1]]
+		if !ok {
+			fmt.Fprintf(os.Stderr, "unknown variant %q: want pure, mutable or bitmask\n", os.Args[1])
+			os.Exit(2)
+		}
+		if len(os.Args) > 2 {
+			ns = nil
+			for _, a := range os.Args[2:] {
+				n, err := strconv.Atoi(a)
+				if err != nil || n < 1 || n > 63 {
+					fmt.Fprintf(os.Stderr, "bad N %q: want an integer in 1..63\n", a)
+					os.Exit(2)
+				}
+				ns = append(ns, n)
+			}
+		}
+		bench(os.Args[1], f, ns)
+		return
+	}
+	// Fixed order: ranging a map would shuffle the output between runs.
+	for _, name := range []string{"pure", "mutable", "bitmask"} {
+		bench(name, variants[name], ns)
+	}
 }
