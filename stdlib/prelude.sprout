@@ -1768,16 +1768,51 @@ export fn parse_int(s: String) -> Maybe Int =
 #
 # 10^k is already infinity past k = 308 and zero past k = -324, so a magnitude
 # beyond 400 saturates whatever the significand and the clamp changes no result.
-# It buys two things it is not obvious the exponent needs: pow10_pos recurses
-# once per unit of k, so an unclamped `1e999999` exhausted the stack; and
-# negating k is checked arithmetic, so k = INT_MIN aborted the process — in
-# `parse_double`, which promises not to.
+# It buys two things it is not obvious the exponent needs: pow10_pos recurses in
+# k, so an unclamped `1e999999` exhausted the stack; and negating k is checked
+# arithmetic, so k = INT_MIN aborted the process — in `parse_double`, which
+# promises not to.
+#
+# The clamp applies to the COMBINED scale only. Clamping the written exponent on
+# its own was wrong whenever the digits had already moved the scale the other
+# way: a 120-digit run at `e-430` is 1e-310, and saturating the -430 to -400
+# before adding the 101 places the digits contributed read it as 1e-282.
 let pow10_clamp = 400
 fn clamp_exponent(k: Int) -> Int =
   if k < -pow10_clamp then -pow10_clamp
   else if k > pow10_clamp then pow10_clamp
   else k
-fn pow10_pos(k: Int) -> Double = if k <= 0 then 1.0 else 10.0 * pow10_pos(k - 1)
+
+fn max_int() -> Int = 9223372036854775807
+
+# `a + b` saturated at Int's ends. The digit-derived scale and the written
+# exponent are combined before anything clamps them, and Int addition traps.
+fn add_saturating(a: Int, b: Int) -> Int =
+  if b > 0 then (if a > max_int() - b then max_int() else a + b)
+  else if a < min_int() - b then min_int()
+  else a + b
+
+# 10^0 .. 10^22 are the powers binary64 holds EXACTLY (10^k = 2^k * 5^k, and
+# 5^22 < 2^53), so each is one rounding-free factor.
+let pow10_exact_max = 22
+fn pow10_exact_unit() -> Double = 10000000000000000000000.0
+
+fn pow10_exact(k: Int) -> Double = if k <= 0 then 1.0 else 10.0 * pow10_exact(k - 1)
+
+fn pow10_units(acc: Double, units: Int) -> Double =
+  if units <= 0 then acc
+  else pow10_units(acc * pow10_exact_unit(), units - 1)
+
+# 10^k as one exact factor per 10^22, which is one rounding per 22 units of k
+# rather than one per unit. The old shape multiplied by 10.0 k times and was up
+# to 6 ULP off on its own before any significand met it — `1e105` came back 6 ULP
+# high, on an input with a single significant digit.
+fn pow10_pos(k: Int) -> Double =
+  let units = k / pow10_exact_max
+  in pow10_units(pow10_exact(k - (units * pow10_exact_max)), units)
+
+# 10^308 is the largest finite power of ten.
+let pow10_finite_max = 308
 
 # Split `s` on the first occurrence of single-char `sep` into (before, after); Nothing if
 # absent. Prelude-native (str_find/str_slice) since split_once lives in stdlib.string, which
@@ -1799,7 +1834,7 @@ fn split_on_char(s: String, sep: String) -> Maybe (String, String) =
 # operands are, but past ~15 digits neither is and the two errors compound:
 # 1217/1500 wrong at length 40 and 1415/1500 at length 300, up to 29 ULP.
 # Holding the leading digits in an Int and letting the rest move the exponent is
-# at most 1 ULP at every length measured, and exact below 2^53.
+# at most 2 ULP at every length measured, and exact below 2^53.
 #
 # The significand accumulates NEGATIVELY, as accum_digits does, so it reaches
 # 2^63 — the first magnitude past Int, and where every over-range JSON integer
@@ -1851,12 +1886,20 @@ fn parse_mantissa(mant: String) -> Maybe (Int, Int) =
 # DIVIDING for a negative scale rather than multiplying by 10^k: 10^-1 is not
 # representable, so `3.0 * 0.1` rounds twice and yields the Double above 0.3,
 # while `3.0 / 10.0` is one exactly-rounded division of two exact operands.
+#
+# The divisor is SPLIT past 10^308, where a single 10^n is already an infinity
+# and `mag / inf` is zero for every significand. That is how the smallest normal
+# Double, written "2.2250738585072014e-308", used to read as 0.0.
+fn divide_by_pow10(mag: Double, n: Int) -> Double =
+  if n <= pow10_finite_max then mag / pow10_pos(n)
+  else (mag / pow10_pos(pow10_finite_max)) / pow10_pos(n - pow10_finite_max)
+
 fn scale_significand(sig: Int, k: Int) -> Double =
   if sig == 0 then 0.0
   else
     let mag = -to_double(sig)
         c = clamp_exponent(k)
-    in if c >= 0 then mag * pow10_pos(c) else mag / pow10_pos(-c)
+    in if c >= 0 then mag * pow10_pos(c) else divide_by_pow10(mag, -c)
 
 # Whether `s` from `i` is a non-empty run of nothing but digits.
 fn digits_only(s: String, i: Int, seen: Bool) -> Bool =
@@ -1879,9 +1922,12 @@ fn digits_only(s: String, i: Int, seen: Bool) -> Bool =
 # Only a WIDTH failure saturates. Structural garbage stays Nothing, which is why
 # saturation is gated on the run being non-empty and all digits: "1e+", "1e+-3"
 # and a bare "1e" all still fail.
+# Saturating at Int's end rather than at the clamp: the digit-derived scale is
+# added to this before anything clamps, and a run that overflowed Int must stay
+# out of range afterwards.
 fn saturated_exponent(es: String, start: Int, neg: Bool) -> Maybe Int =
   if digits_only(es, start, false)
-  then Just(if neg then -pow10_clamp else pow10_clamp)
+  then Just(if neg then min_int() else max_int())
   else Nothing
 
 fn parse_exponent(es: String) -> Maybe Int =
@@ -1918,10 +1964,11 @@ fn split_exponent(body: String) -> Maybe (String, Int) =
 # ACCURACY, stated where the boundary actually is. The result is the correctly-rounded Double
 # when the significand is below 2^53 and the scale is a power of ten binary64 holds exactly
 # (|10^k| with k <= 22) — which covers every decimal of at most 15 significant digits. Past
-# that the Int -> Double conversion and 10^k each round, and the result can be 1 ULP off;
-# measured over 1500 random runs per length, at most 1 ULP at every length up to 320 digits.
-# It is NOT a bit-exact strtod round-trip, and closing that needs a correctly-rounded
-# decimal->binary algorithm (BACKLOG P3).
+# that the Int -> Double conversion and 10^k each round, and the result can be several ULP
+# off: at most 5, measured over 11M random inputs spanning 1..320 significant digits and the
+# whole representable range, subnormals included. It is NOT a bit-exact strtod round-trip,
+# and closing that needs a correctly-rounded decimal->binary algorithm (BACKLOG P3).
+# tests/stdlib/test_parse_double_differential.spr is what holds this claim to a number.
 #
 # TOTALITY. No intermediate can be an infinity meeting a zero, so no input yields NaN: the
 # significand is bounded by Int, the exponent is clamped before 10^k is formed, and a zero
@@ -1940,9 +1987,9 @@ export fn parse_double(s: String) -> Maybe Double =
          match parse_mantissa(mant) with
          | Nothing -> Nothing
          | Just (sig, k) ->
-             # `e` is clamped before it is added: it can be INT_MAX, and `k + e` is
-             # checked arithmetic.
-             let magnitude = scale_significand(sig, k + clamp_exponent(e))
+             # Combined first, clamped inside scale_significand: `e` can be INT_MAX
+             # and `k + e` is checked arithmetic, so the add saturates instead.
+             let magnitude = scale_significand(sig, add_saturating(k, e))
              in Just(if neg then -magnitude else magnitude)
 extern fn int_to_string(n: Int) -> String
 extern fn double_to_string(x: Double) -> String

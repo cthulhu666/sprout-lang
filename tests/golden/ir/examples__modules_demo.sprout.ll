@@ -236,6 +236,8 @@ declare i64 @bytes_builder_build(i64)
 @.cname.23 = private unnamed_addr constant [27 x i8] c"stdlib.http.HttpStatusInfo\00"
 @.cfkinds.23 = private unnamed_addr constant [3 x i8] c"ss\00"
 @pow10_clamp = private constant i64 400
+@pow10_exact_max = private constant i64 22
+@pow10_finite_max = private constant i64 308
 
 define i64 @stdlib.http.http_status_info(i64 %p$status) {
 entry:

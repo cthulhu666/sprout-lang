@@ -143,6 +143,8 @@ declare i64 @proc_run_stdin_vec(i64, i64)
 @.cname.15 = private unnamed_addr constant [26 x i8] c"stdlib.process.ProcResult\00"
 @.cfkinds.15 = private unnamed_addr constant [4 x i8] c"ipp\00"
 @pow10_clamp = private constant i64 400
+@pow10_exact_max = private constant i64 22
+@pow10_finite_max = private constant i64 308
 
 define i64 @vec_from_list(i64 %p$xs) {
 entry:

@@ -1,0 +1,206 @@
+import stdlib.test (TestCase, check_true, run_suite)
+import stdlib.math (double_to_bits)
+import stdlib.math.bigint as big
+import stdlib.rng (rng_next, rng_below)
+import stdlib.string as string
+import stdlib.args as args
+
+# Differential harness for `parse_double` (prelude). Random decimal inputs, each
+# compared against an EXACT oracle, asserting a ULP bound — the assertion the rest
+# of tests/stdlib/test_parse_double.spr cannot make, because `approx` with a
+# tolerance passes a result that is off by any number of ULPs.
+#
+# The oracle never builds the correctly-rounded Double, which is the part that
+# needs tie rules and a subnormal case. It decomposes the candidate `x` into the
+# exact integers `m * 2^e` and asks the question directly: for an exact value A/B,
+#
+#   |A/B - m*2^e| / 2^e  ==  |A*2^s - m*B*2^t| / (B*2^t)    s = max(0, -e), t = e + s
+#
+# Integer arithmetic throughout, so bigint answers it exactly, and a subnormal
+# needs no special case — there `e` is simply -1074.
+#
+# Knobs, for `just parse-double-sweep`: `--runs=N` per length, `--seed=N`. The
+# defaults keep the suite fast; the sweep is what settles an algorithm change.
+
+# The measured bound of the current reader, over 11M samples (integer runs with
+# an exponent, and the `0.<zeros><digits>` form). Exactness below is asserted
+# separately and is the stronger guard: this bound only has to hold.
+let ulp_bound = 5
+
+# Out of band: the parse failed, went non-finite, or missed by more than an Int
+# holds. A catastrophically wrong parse looks like this, not like a big number.
+let unmeasurable = 1000000000
+
+let exp_field_unit = 4503599627370496  # 2^52
+
+# `x` as the exact pair (m, e) with x == m * 2^e. Requires x positive and finite;
+# every caller checks. A zero exponent field means subnormal, where the implicit
+# leading bit is absent and the exponent is pinned rather than decoded.
+fn decompose(x: Double) -> (Int, Int) =
+  let bits = double_to_bits(x)
+      biased = bits / exp_field_unit
+      frac = bits - (biased * exp_field_unit)
+  in if biased == 0 then (frac, -1074)
+     else (frac + exp_field_unit, biased - 1075)
+
+fn big_of(digits: String) -> big.BigInt =
+  match big.from_string(digits) with
+  | Ok value -> value
+  | Err _ -> big.from_int(0)
+
+fn ten_pow(n: Int) -> big.BigInt = big_of("1" ++ string.repeat("0", n))
+
+# `digits * 10^exp10` as an exact fraction (numerator, denominator).
+fn exact_value(digits: String, exp10: Int) -> (big.BigInt, big.BigInt) =
+  if exp10 >= 0 then (big.mul(big_of(digits), ten_pow(exp10)), big.from_int(1))
+  else (big_of(digits), ten_pow(-exp10))
+
+# Distance from `x` to the exact value a/b, in ULPs of `x`, floored.
+fn ulp_distance(a: big.BigInt, b: big.BigInt, x: Double) -> Int =
+  let (m, e) = decompose(x)
+      s = if e < 0 then -e else 0
+      t = e + s
+      scaled = big.shl(big.mul(big.from_int(m), b), t)
+      diff = big.abs(big.sub(big.shl(a, s), scaled))
+  in match big.divmod(diff, big.shl(b, t)) with
+     | Nothing -> unmeasurable
+     | Just (quotient, _) ->
+         match big.to_int(quotient) with
+         | Nothing -> unmeasurable
+         | Just n -> n
+
+fn is_finite(x: Double) -> Bool = (x - x) == 0.0
+
+# Every generated sample is in range and non-zero, so a zero, an infinity or a
+# rejection is itself the failure rather than a case to skip.
+fn sample_error(text: String, digits: String, exp10: Int) -> Int =
+  match parse_double(text) with
+  | Nothing -> unmeasurable
+  | Just x ->
+      if ! is_finite (x) || (x <= 0.0) then unmeasurable
+      else
+        let (a, b) = exact_value(digits, exp10)
+        in ulp_distance(a, b, x)
+
+fn digit_char(d: Int) -> String = str_slice("0123456789", d, 1)
+
+# `n` digits, most significant non-zero. Digits are prepended, so the LAST one
+# drawn is the leading one — which is why `n == 1` is where zero is excluded.
+fn gen_run(state: Int, n: Int, acc: List String) -> (Int, String) =
+  if n <= 0 then (state, string.join("", acc))
+  else
+    let st = rng_next(state)
+        d = if n == 1 then 1 + rng_below(st, 9) else rng_below(st, 10)
+    in gen_run(st, n - 1, Cons(digit_char(d), acc))
+
+# Worst error seen so far, the input that produced it, and the generator state.
+type Sweep (..) =
+  | Sweep Int Int String
+
+fn worst_of(s: Sweep) -> Int =
+  match s with
+  | Sweep _ worst _ -> worst
+
+fn worst_input(s: Sweep) -> String =
+  match s with
+  | Sweep _ _ text -> text
+
+fn note(s: Sweep, state: Int, err: Int, text: String) -> Sweep =
+  match s with
+  | Sweep _ worst wtext ->
+      if err > worst then Sweep(state, err, text) else Sweep(state, worst, wtext)
+
+# An n-digit run placed so the value lands in [10^(v-1), 10^v). Keeping v inside
+# [-319, 300] keeps every sample representable and non-zero, which is what lets a
+# 0.0 result count as a failure rather than a legitimate underflow.
+fn sample_run(s: Sweep, n: Int) -> Sweep =
+  match s with
+  | Sweep state _ _ ->
+      let (st, digits) = gen_run(state, n, Nil)
+          st2 = rng_next(st)
+          v = -319 + rng_below(st2, 620)
+          e = v - n
+          text = `${digits}e${int_to_string(e)}`
+      in note(s, st2, sample_error(text, digits, e), text)
+
+# The `0.<zeros><digits>` form, which reaches `parse_mantissa`'s fraction path and
+# pays for the leading zeros with the fraction's width rather than by scanning them.
+fn sample_fraction(s: Sweep, n: Int) -> Sweep =
+  match s with
+  | Sweep state _ _ ->
+      let (st, digits) = gen_run(state, n, Nil)
+          st2 = rng_next(st)
+          zeros = rng_below(st2, 321 - n)
+          text = "0." ++ string.repeat("0", zeros) ++ digits
+      in note(s, st2, sample_error(text, digits, 0 - (zeros + n)), text)
+
+# At most 15 significant digits and a scale binary64 holds exactly: one exactly
+# rounded operation on two exact operands, so the result is the correctly rounded
+# Double and nothing below the bound is good enough. The length comes from the
+# generator rather than the sweep, so this runs `runs` samples per entry in
+# `lengths()` while ignoring which entry.
+fn sample_exact(s: Sweep, _n: Int) -> Sweep =
+  match s with
+  | Sweep state _ _ ->
+      let st0 = rng_next(state)
+          (st, digits) = gen_run(st0, 1 + rng_below(st0, 15), Nil)
+          st2 = rng_next(st)
+          e = rng_below(st2, 45) - 22
+          text = `${digits}e${int_to_string(e)}`
+      in note(s, st2, sample_error(text, digits, e), text)
+
+fn repeat_sample(step: Sweep -> Int -> Sweep, s: Sweep, n: Int, left: Int) -> Sweep =
+  if left <= 0 then s else repeat_sample(step, step(s, n), n, left - 1)
+
+fn sweep(step: Sweep -> Int -> Sweep, seed: Int, runs: Int, lengths: Vec Int) -> Sweep =
+  vec_fold(\ (s, n) -> repeat_sample(step, s, n, runs), Sweep(seed, 0, "none"), lengths)
+
+fn lengths() -> Vec Int = [1, 2, 3, 8, 15, 17, 19, 22, 40, 100, 300, 320]
+
+# Both ends, because neither alone reproduces: the exponent is at the tail and
+# `0.<zeros><digits>` is all zeros at the head.
+fn brief(text: String) -> String =
+  let n = str_len(text)
+  in if n <= 48 then text
+     else str_slice(text, 0, 20) ++ `..${int_to_string(n)}..` ++ str_slice(text, n - 20, 20)
+
+fn verdict(label: String, s: Sweep, bound: Int) -> TestCase =
+  check_true(`${label}: worst ${int_to_string(worst_of(s))} ULP <= ${int_to_string(bound)}`
+               ++ ` (${brief(worst_input(s))})`,
+             worst_of(s) <= bound)
+
+# The three defects this harness was written for, each pinned at the shape that
+# reproduced it: a divisor past 10^308 (the smallest normal read as 0.0), the
+# exponent clamped before it was combined with the digit-derived scale (a
+# 120-digit run at e-430 read 28 orders of magnitude high), and `10^k` built by
+# k sequential multiplications (1e105 off by 6 ULP).
+fn long_run(n: Int) -> String = "1" ++ string.repeat("0", n - 1)
+
+# Each pinned case carries the bound its own defect broke, not the suite-wide one:
+# `1e105` was 6 ULP high and passes `<= 5` unfixed, which would have made it a row
+# that reports rather than guards.
+fn pinned(label: String, text: String, digits: String, exp10: Int, bound: Int) -> TestCase =
+  let err = sample_error(text, digits, exp10)
+  in check_true(`${label} (${int_to_string(err)} ULP <= ${int_to_string(bound)})`,
+                err <= bound)
+
+fn main() -> Unit !{IO} =
+  do
+    let argv = args.parse_argv()
+    let runs = args.arg_int(argv, "runs", 10)
+    let seed = args.arg_int(argv, "seed", 20260925)
+    let runs_sweep = sweep(sample_run, seed, runs, lengths())
+    let frac_sweep = sweep(sample_fraction, seed + 1, runs, lengths())
+    let exact_sweep = sweep(sample_exact, seed + 2, runs, lengths())
+    run_suite("parse_double differential",
+              [pinned("smallest normal survives the divisor",
+                       "2.2250738585072014e-308", "22250738585072014", -324, 1),
+                pinned("19-digit run at e-320 is not zero",
+                       "1234567890123456789e-320", "1234567890123456789", -320, 1),
+                pinned("subnormal 1e-320", "1e-320", "1", -320, 1),
+                pinned("exponent past the clamp is combined, not saturated",
+                       long_run(120) ++ "e-430", long_run(120), -430, 1),
+                pinned("1e105 is not 6 ULP high", "1e105", "1", 105, 1),
+                verdict("integer run with exponent", runs_sweep, ulp_bound),
+                verdict("0.<zeros><digits>", frac_sweep, ulp_bound),
+                verdict("exact domain", exact_sweep, 0)])

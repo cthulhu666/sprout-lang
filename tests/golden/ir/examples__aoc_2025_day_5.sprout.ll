@@ -208,6 +208,8 @@ declare i64 @fs_rename(i64, i64)
 @.cname.28 = private unnamed_addr constant [32 x i8] c"examples.aoc_2025_day_5.Answers\00"
 @.cfkinds.28 = private unnamed_addr constant [3 x i8] c"ii\00"
 @pow10_clamp = private constant i64 400
+@pow10_exact_max = private constant i64 22
+@pow10_finite_max = private constant i64 308
 
 define i64 @min_int() {
 entry:

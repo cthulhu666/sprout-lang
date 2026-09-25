@@ -563,22 +563,23 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
 - [ ] `P2` **Reimplement `json_stringify` in Sprout** once string/escaping primitives make that
   practical, keeping host builtins for the impossible or efficiency-critical.
 - [ ] `P2` **An out-of-range literal reads as an infinity, so a conformant document can be READ but
-  not re-written.** `parse_double` builds `mag * pow10(e)` and `pow10` overflows, so
-  `parse("1e400")` gives `JsonFloat(+inf)` and `stringify` then refuses it. `1e-400` underflows
-  silently to `0.0`. RFC 8259 §6 names `1E400` as an interoperability hazard and explicitly allows
-  limiting range, so rejecting at parse is legitimate and has not been taken. This is the only way a
-  non-finite Double can enter from ordinary JSON input rather than arithmetic. Design Change Process
-  call between: reject as `Err`, keep the saturating `inf` and document it, or clamp to the largest
-  finite Double — and whichever is chosen should settle the underflow-to-zero, the same question
-  at the other end. No caller depends on today's behaviour.
-- [ ] `P3` **`parse_double` is 1 ULP off past 15 significant digits.** Exact at or below that
-  (significand under 2^53, scale exact); past it the `Int -> Double` conversion and `10^k` each
-  round. Measured at most 1 ULP over 1500 random runs per length up to 320 digits, so the gap to
-  a correctly-rounded reader is now one bit, not the 29 ULP the whole-then-divide shape reached.
-  The documented limit of a pure-Sprout reader. Closing it needs either a correctly-rounded
-  decimal→binary algorithm in Sprout or a `strtod`-backed builtin — the latter needs approval
-  under Builtin vs Stdlib rules 4–6, with the *correctness* argument doing the work, not
-  performance.
+  not re-written.** `parse_double` saturates rather than rejecting, so `parse("1e400")` gives
+  `JsonFloat(+inf)` and `stringify` then refuses it. `1e-400` underflows silently to `0.0` — a
+  genuine out-of-range value, since in-range ones no longer do. RFC 8259 §6 names `1E400` as an
+  interoperability hazard and explicitly allows limiting range, so rejecting at parse is legitimate
+  and has not been taken. This is the only way a non-finite Double can enter from ordinary JSON
+  input rather than arithmetic. Design Change Process call between: reject as `Err`, keep the
+  saturating `inf` and document it, or clamp to the largest finite Double — and whichever is chosen
+  should settle the underflow-to-zero, the same question at the other end. No caller depends on
+  today's behaviour.
+- [ ] `P3` **`parse_double` is up to 5 ULP off past 15 significant digits.** Exact at or below
+  that (significand under 2^53, scale exact); past it the `Int -> Double` conversion and `10^k`
+  each round, and a result landing subnormal rounds a second time on the split divisor. Bound
+  measured over 11M random inputs and held by `tests/stdlib/test_parse_double_differential.spr`
+  (`just parse-double-sweep` for the wide run). Closing the last bits needs a two-double (hi/lo)
+  power-of-ten table with Dekker products, a correctly-rounded decimal→binary algorithm, or a
+  `strtod`-backed builtin — the last needs approval under Builtin vs Stdlib rules 4–6, with the
+  *correctness* argument doing the work, not performance.
 
 ### 4) Terminal UI Runtime
 
@@ -1010,14 +1011,13 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
 - [ ] `P3` **Wire `opt` optimization passes into the build pipeline** — add
   `opt --passes=mem2reg,instcombine,simplifycfg` before the clang step in `_build-stage`. Decouples
   Sprout's IR quality from clang's optimizer settings and makes it easier to inspect what survives.
-- [ ] `P1` **A differential harness for `parse_double`, which no gate can currently replace.** All
-  six of its defects across two review rounds were found by comparing against a correctly-rounded
-  reference, and none was visible to the suite: every fraction assertion used `approx` with a
-  tolerance, so a 1 ULP regression passed. ~40 lines: N random digit runs per length (1, 2, 3, 8,
-  15..22, 40, 100, 300, 320), each compared against an exact decimal→binary oracle, assert ≤1 ULP.
-  It also settles algorithm choices that argument could not — a 1500-runs-per-length table decided
-  the significand rewrite in one command (`docs/bigint-arc-retro-2026-09-25.md` §7.1). Same shape
-  would serve `double_to_string` round-tripping and `stdlib.math`'s elementary functions.
+- [ ] `P2` **`double_to_string` and `stdlib.math` have no differential harness.**
+  `tests/stdlib/test_parse_double_differential.spr` is the shape — random inputs against an exact
+  bigint oracle, a ULP bound per case, `--runs`/`--seed` knobs and a `just` recipe for the sweep —
+  and it found three `parse_double` defects the suite had passed for months. `double_to_string`
+  wants the round-trip (`parse_double(double_to_string(x)) == x` over random bit patterns);
+  `stdlib.math`'s elementary functions want their documented ULP bounds held to a number, since
+  `docs/math-transcendental-v0.md` states them and nothing checks them.
 - [ ] `P2` **No gate reads prose, so a doc can claim its own feature is unimplemented.** Three
   places still said bigint-v0 Stage 1 had not shipped a month after it did — the policy doc's
   title (`DECIDED, UNIMPLEMENTED`), a `stdlib/bits.sprout` comment, and the stage heading — and

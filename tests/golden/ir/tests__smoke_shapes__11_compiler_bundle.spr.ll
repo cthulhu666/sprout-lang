@@ -1531,6 +1531,8 @@ declare i64 @fs_rename(i64, i64)
 @.cname.153 = private unnamed_addr constant [23 x i8] c"stdlib.repl.ReadNotice\00"
 @.cfkinds.153 = private unnamed_addr constant [2 x i8] c"s\00"
 @pow10_clamp = private constant i64 400
+@pow10_exact_max = private constant i64 22
+@pow10_finite_max = private constant i64 308
 @stdlib.compiler.source.entry_module_name = global i64 zeroinitializer
 @stdlib.compiler.source.entry_module_prefix = global i64 zeroinitializer
 @stdlib.compiler.source.no_prelude_directive = global i64 zeroinitializer

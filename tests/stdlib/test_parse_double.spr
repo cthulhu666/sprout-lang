@@ -151,6 +151,21 @@ fn main() -> Unit !{IO} =
     check_true("INT_MAX exponent saturates to infinity rather than trapping",
                has_bits_of(parse_double("1e9223372036854775807"), pos_inf())),
 
+    # The exponent is combined with the digit-derived scale BEFORE either is
+    # clamped, so the add is where an absurd exponent would trap. A 320-digit
+    # run contributes ~301 places of its own, and neither direction may cancel
+    # the saturation: an INT_MIN exponent is still zero, an INT_MAX one still
+    # infinite.
+    check_true("INT_MIN exponent still underflows under a 320-digit run",
+               has_bits_of(parse_double("1" ++ zeros(319) ++ "e-9223372036854775808"), 0.0)),
+    check_true("INT_MAX exponent still overflows under a 320-digit fraction",
+               has_bits_of(parse_double("0." ++ zeros(319) ++ "1e9223372036854775807"),
+                           pos_inf())),
+    # An exponent run too wide for Int saturates at Int's end, not at the
+    # clamp — saturating at the clamp let the digits pull it back into range.
+    check_true("an exponent run wider than Int is not cancelled by the digits",
+               has_bits_of(parse_double("1" ++ zeros(319) ++ "e-99999999999999999999"), 0.0)),
+
     # --- the exactness boundary, stated where it actually is ---
     # A significand below 2^53 converts exactly and a scale of 10^n with n <= 22
     # is exact, so the whole value is correctly rounded. Above 2^53 the Int ->
