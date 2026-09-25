@@ -136,6 +136,24 @@ missing row reads as "never reviewed".
 **6. Report the findings and STOP.** Most severe first, with the unverified ones marked as such and
 the refuted ones listed briefly. Then hand the decision over and wait.
 
+**Lead every finding with its severity chip**, at the very start of the line, before the file:line
+and before the summary:
+
+| severity | chip |
+|---|---|
+| `high` | 🔴 **HIGH** |
+| `medium` | 🟠 **MEDIUM** |
+| `low` | 🟡 **LOW** |
+
+First position is the whole point: a severity that arrives after a 90-character summary is read at
+prose speed, which is to say skipped. Keep both halves — the glyph is what the eye catches running
+down the left edge, the word is what survives a copy-paste somewhere that renders no colour.
+
+Severity and verification status are two axes, so never fold them into one chip. A confirmed
+`🟡 LOW` and an unverified `🔴 HIGH` are different things to do next, and a reader who cannot tell
+them apart has lost the distinction the verify phase was spent on. The status stays a word beside
+the chip: `CONFIRMED`, `UNVERIFIED — <reason>`, `REFUTED`.
+
 Do not fix anything in this turn, and do not commit, amend or push. The temptation is strong when a
 finding is obviously right and the fix is three lines — and it defeats the skill. A review whose
 findings arrive alongside "…and I have already fixed all of them, and force-pushed" gave the reader
@@ -403,6 +421,10 @@ return {
 
 ## Notes
 
+- **Severity leads, as a chip** — 🔴 HIGH / 🟠 MEDIUM / 🟡 LOW at the start of each finding's line,
+  per step 6. The whole report is scanned before any of it is read, and the first column is the
+  only one that survives that. Status stays a separate word: folding the two axes into one marker
+  hides an unverified `high` behind a confirmed `low`.
 - **Report the refuted findings too**, briefly. A finding the verifier killed is information about
   the reviewers, and hiding it makes the confirmed count look better than it is.
 - **Report the unverified ones as unverified**, and say which kind each is — `unverifiedBecause`
