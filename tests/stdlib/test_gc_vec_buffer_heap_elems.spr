@@ -1,0 +1,92 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.mutable (MutVec, mutvec_new, mutvec_empty, mutvec_push, mutvec_at, mutvec_len)
+
+# A Vec's elements may be heap values reachable ONLY through its element buffer,
+# so every element has to be traced wherever that buffer lives. It lives in two
+# places, and both are covered here:
+#
+#   inline       — small vectors carry their elements in their own GC block
+#   out of line  — a vector past the inline bound, or one grown by a push,
+#                  keeps them in a malloc'd buffer the VectorVal owns
+#
+# The transition between them is the part with no other coverage:
+# `test_mutvec_push.spr` grows a vector but from capacity 0 (never inline) and
+# with Int elements and no churn, so it cannot see a mis-traced heap element or a
+# buffer copied wrongly out of the inline area.
+#
+# The strings below have no referent other than the buffer word holding them, so
+# a tracing mistake is a use-after-free rather than a wrong answer.
+
+fn churn(n: Int, acc: Int) -> Int =
+  if n <= 0 then acc
+  else churn(n - 1, acc + vec_length(vec_from_list(["a" ++ int_to_string(n), "b"])))
+
+fn labels(n: Int, acc: List String) -> List String =
+  if n <= 0 then acc
+  else labels(n - 1, Cons("s" ++ int_to_string(n), acc))
+
+fn push_labels(v: MutVec String, i: Int, n: Int) -> Unit !{IO} =
+  if i >= n then ()
+  else
+    do
+      _ <- mutvec_push(v, `p-${int_to_string(i)}`)
+      push_labels(v, i + 1, n)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # ── Inline: small enough to live in the vector's own block ────────────────
+    let small = vec_from_list(["alpha", "beta", "gamma"])
+    let edited = vec_set(1, "BETA", small)
+
+    # ── Out of line at birth: past the inline bound (508 elements) ────────────
+    let big = vec_from_list(labels(900, Nil))
+
+    # ── Out of line by GROWTH, starting from an inline buffer. mutvec_new(4,..)
+    # is inline, so the first push past 4 copies the elements out of the block
+    # rather than realloc'ing memory malloc never handed out.
+    grown <- mutvec_new(4, "seed")
+    _ <- push_labels(grown, 0, 40)
+
+    # ── Out of line from the start: capacity 0 is never inline, so this is the
+    # plain realloc path.
+    from_empty <- mutvec_empty()
+    _ <- push_labels(from_empty, 0, 40)
+
+    # Force collections with everything above still live.
+    let churned = churn(3000, 0)
+    assert_eq(state, "churn ran", churned, 6000)
+
+    assert_eq(state, "inline: length", vec_length(small), 3)
+    assert_eq(state, "inline: first element traced", vec_get_or(0, "?", small), "alpha")
+    assert_eq(state, "inline: last element traced", vec_get_or(2, "?", small), "gamma")
+    assert_eq(state, "inline: copy-on-write buffer is independent",
+      vec_get_or(1, "?", edited), "BETA")
+    assert_eq(state, "inline: source buffer untouched", vec_get_or(1, "?", small), "beta")
+
+    assert_eq(state, "out-of-line at birth: length", vec_length(big), 900)
+    assert_eq(state, "out-of-line at birth: first element traced",
+      vec_get_or(0, "?", big), "s1")
+    assert_eq(state, "out-of-line at birth: interior element traced",
+      vec_get_or(450, "?", big), "s451")
+    assert_eq(state, "out-of-line at birth: last element traced",
+      vec_get_or(899, "?", big), "s900")
+
+    assert_eq(state, "grown from inline: length", mutvec_len(grown), 44)
+    g0 <- mutvec_at(grown, 0)
+    g3 <- mutvec_at(grown, 3)
+    g4 <- mutvec_at(grown, 4)
+    g43 <- mutvec_at(grown, 43)
+    assert_eq(state, "grown from inline: inline prefix copied out (0)", g0, "seed")
+    assert_eq(state, "grown from inline: inline prefix copied out (3)", g3, "seed")
+    assert_eq(state, "grown from inline: first element past the inline area", g4, "p-0")
+    assert_eq(state, "grown from inline: last pushed element traced", g43, "p-39")
+
+    assert_eq(state, "grown from empty: length", mutvec_len(from_empty), 40)
+    f0 <- mutvec_at(from_empty, 0)
+    f39 <- mutvec_at(from_empty, 39)
+    assert_eq(state, "grown from empty: first element traced", f0, "p-0")
+    assert_eq(state, "grown from empty: last element traced", f39, "p-39")
+
+    summary(state)
