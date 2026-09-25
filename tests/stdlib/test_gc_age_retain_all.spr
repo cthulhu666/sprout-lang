@@ -43,6 +43,14 @@ fn chain_head(c: Chain) -> Int =
 # The accumulator is an Int, so nothing heap-allocated accumulates here — every
 # collection this triggers finds only the retained chain plus a handful of young
 # nodes.
+#
+# THE ROUND COUNT IS CALIBRATED, NOT ARBITRARY. It exists to drive a fixed number
+# of collections, and the ratio this file measures is sensitive to that count —
+# one collection fewer leaves the retained chain's age-0 first mark as a larger
+# share of a smaller total, which looks like a regression and is not. Nullary
+# constructor interning made `End` shared rather than freshly allocated per
+# round, cutting 9 allocations per round to 8 and costing one cycle at 30000
+# rounds; the count was raised to keep the cycle count where it was.
 fn churn(n: Int, acc: Int) -> Int =
   if n <= 0 then acc
   else churn(n - 1, acc + chain_len(build(8, End), 0))
@@ -51,7 +59,7 @@ fn main() -> Unit !{IO} =
   let kept = build(150000, End)
       kept_len = chain_len(kept, 0)
       # Drives many collections while `kept` stays reachable.
-      churned = churn(30000, 0)
+      churned = churn(34000, 0)
       # Forces `kept` to stay live across all of the churn above.
       kept_len_after = chain_len(kept, 0)
   in
@@ -59,5 +67,5 @@ fn main() -> Unit !{IO} =
     check_eq("retained chain built", kept_len, 150000),
     check_eq("retained chain intact after churn", kept_len_after, 150000),
     check_eq("retained chain head intact", chain_head(kept), 1),
-    check_eq("churn walked every round", churned, 240000)
+    check_eq("churn walked every round", churned, 272000)
   ])
