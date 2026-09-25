@@ -2014,8 +2014,10 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
 - [ ] `P2` **Skip re-pushing already-rooted function parameters.** Codegen re-pushes arguments at
   every call site even when the argument is a `TVar` resolving to a parameter already rooted in the
   caller's frame — the recursive `queens(…)` re-roots three vectors it already holds. Pure
-  codegen fix in `emit_args_with_roots`. Expected 20–40% on top of the rooting work, and
-  multiplicative with the inlining item above.
+  codegen fix in `emit_args_with_roots`. **The 20–40% estimate assumed a build that CALLS the
+  push/pop helpers.** `just compile-native` whole-program links, which inlines both away — neither
+  symbol appears at all in a CPU profile of the nqueens binary (2026-09-25). The win is now confined
+  to paths that link the runtime separately, which includes `just test` at -O0.
 - [ ] `P2` **nqueens allocates one `Vec` wrapper per `vec_set` — 16.7M per N=12 run**, which is its
   whole object-allocation count. Measured while landing nullary interning, which moved nqueens by 7
   objects and so disproved this entry's predecessor: it blamed `true`/`false` literals, but `Bool`
@@ -2026,10 +2028,11 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   and distinct from the older split-the-node-list draft, which keeps per-object `ManagedNode` and so
   cannot reduce per-allocation cost. Objects are identified by address-range membership and
   allocation is `arena_top += size` (~5 cycles vs ~50 for malloc + register). Survivors are copied
-  to the old gen and gain full metadata on minor GC. **Only worth pursuing after the push/pop
-  inlining lands** — push/pop dominates today, while the bump allocator helps the malloc/free
-  family at ~10% of CPU. See also the generational-step entry in §1, whose measurements re-scope it
-  as compiler-only.
+  to the old gen and gain full metadata on minor GC. **Its gate is met and its payoff understated:**
+  whole-program linking landed, so push/pop no longer dominates, and the malloc/free family plus
+  `madvise` is 23% of nqueens CPU, not ~10% (2026-09-25). Much of that is `Vec` backing arrays — the
+  one payload `sprout_alloc_vector_data` hands to bare `malloc` instead of a region slot. See also
+  the generational-step entry in §1, whose measurements re-scope it as compiler-only.
 - [ ] `P3` **HAMT persistent vector for `vec_set`** — O(n) → O(log n). **Deferred:** at N≤14
   vectors are 12–27 elements (a single HAMT leaf), so path-copying is the same work as the current
   copy, and `vector_set` is 1.1% of CPU.
