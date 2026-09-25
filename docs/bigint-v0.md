@@ -6,6 +6,8 @@ all exist. Issue #337 is answered: ES256 verification is ordinary stdlib code, n
 
 Companion decision: `docs/int-overflow-policy-decision.md` (settled as Option A by this design).
 Driving requirement: GitHub issue #337, ECDSA P-256 (ES256) signature verification.
+Retro, once all four stages had landed: `docs/bigint-arc-retro-2026-09-25.md` — where the rework
+went, and why Stage 1 attracted four rounds of it while Stages 2–4 attracted one each.
 
 ## 1. Problem statement
 

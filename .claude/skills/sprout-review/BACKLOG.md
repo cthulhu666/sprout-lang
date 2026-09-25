@@ -40,15 +40,16 @@ Rationale and measurements live in `README.md`; the skill itself is `SKILL.md`.
   the old cost at the default level, though not at `max`, where the panel would also be what makes
   the verify cap survivable. Do it after the A/B, so its effect is visible against a baseline.
 
-- [ ] `P2` **Every threshold in the verify path rests on one run or on nothing.**
-  `SKILL.md` verifies a finding only when `severity !== 'low' || votes >= 2`, clusters within 6
-  lines at 0.5 summary overlap, and now caps the batch at `VERIFY_CAP = 10`. The first two come
-  from run `1789385000-27845` alone: 5 adjacent pairs scoring 0.60/0.67/0.67 against 0.33/0.29 — a
-  wide gap, but n=5 is not a calibration set, and run `1789928144-93446` is evidence they
-  UNDER-merge: 13 raw findings deduped to 12, yet three of those twelve were pairs naming one bug.
-  The cap comes from nothing and now binds far harder: `max` is 8 passes x 8 findings = 64 raw
-  against a cap of 10, so most of a `max` run comes back unverified. Re-measure, and note that the
-  fix is more skeptics (the entry below), not a cap that grows to hide the overrun.
+- [ ] `P2` **`OVERLAP_MIN` under-merges, now on same-path evidence the entry above cannot explain.**
+  `SKILL.md` clusters within 6 lines at 0.5 summary overlap, verifies only when
+  `severity !== 'low' || votes >= 2`, and caps the batch at `VERIFY_CAP = 10`. Run
+  `1790255333-48433` split ONE bug into three entries at `stdlib/prelude.sprout:1812` and another
+  into three at `parser.sprout:55` — identical paths, so the path-key `P1` is not the cause and
+  0.5 is. Reviewers wrote "per-digit scaling", "digit-by-digit accumulation" and "replaced the
+  single divide-at-the-end" for one defect: synonyms, ~0.3 overlap. Reported `found` overstated
+  distinct bugs roughly 2x, and votes understate agreement, which drives the verify gate. Prefer
+  a stem/synonym-tolerant similarity over raising 0.5 blindly. The cap comes from nothing and
+  binds hardest at `max` (8x8 = 64 raw against 10); fix that with more skeptics, not a bigger cap.
 
 - [ ] `P2` **Sprout-specific review dimensions are absent, which was the point of owning this.**
   A generic reviewer cannot know GC rooting rules for `stdlib/compiler/` and `runtime/`, that a
