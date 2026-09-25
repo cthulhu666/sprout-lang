@@ -19,12 +19,17 @@ import stdlib.args as args
 # Integer arithmetic throughout, so bigint answers it exactly, and a subnormal
 # needs no special case — there `e` is simply -1074.
 #
+# Distances are measured from the EXACT decimal, not from the correctly rounded
+# Double, and rounded UP. That is up to half an ULP more than the figure a
+# strtod comparison gives, and it is the conservative direction: the harness
+# never reports a miss as smaller than it is.
+#
 # Knobs, for `just parse-double-sweep`: `--runs=N` per length, `--seed=N`. The
 # defaults keep the suite fast; the sweep is what settles an algorithm change.
 
-# The measured bound of the current reader, over 11M samples (integer runs with
-# an exponent, and the `0.<zeros><digits>` form). Exactness below is asserted
-# separately and is the stronger guard: this bound only has to hold.
+# The measured bound, and a tight one — the sweep reaches 5 at 36k samples per
+# form, so this is the real edge rather than headroom. Correct rounding on the
+# exact domain is asserted separately and is the stronger guard.
 let ulp_bound = 5
 
 # Out of band: the parse failed, went non-finite, or missed by more than an Int
@@ -55,19 +60,33 @@ fn exact_value(digits: String, exp10: Int) -> (big.BigInt, big.BigInt) =
   if exp10 >= 0 then (big.mul(big_of(digits), ten_pow(exp10)), big.from_int(1))
   else (big_of(digits), ten_pow(-exp10))
 
-# Distance from `x` to the exact value a/b, in ULPs of `x`, floored.
-fn ulp_distance(a: big.BigInt, b: big.BigInt, x: Double) -> Int =
+# (|a/b - x|, ulp(x)) as exact integers in one common unit. Everything below is a
+# comparison or a division of these two, so the measurement itself never rounds.
+fn error_terms(a: big.BigInt, b: big.BigInt, x: Double) -> (big.BigInt, big.BigInt) =
   let (m, e) = decompose(x)
       s = if e < 0 then -e else 0
       t = e + s
       scaled = big.shl(big.mul(big.from_int(m), b), t)
-      diff = big.abs(big.sub(big.shl(a, s), scaled))
-  in match big.divmod(diff, big.shl(b, t)) with
-     | Nothing -> unmeasurable
-     | Just (quotient, _) ->
-         match big.to_int(quotient) with
-         | Nothing -> unmeasurable
-         | Just n -> n
+  in (big.abs(big.sub(big.shl(a, s), scaled)), big.shl(b, t))
+
+# Distance from `x` to the exact value, in ULPs of `x`, rounded UP: the smallest
+# k with |a/b - x| <= k * ulp(x). Rounding DOWN under-reported by up to one ULP,
+# because the exact value sits up to half an ULP beyond the Double on either
+# side — a result 5 ULP from the correctly rounded answer floored to 4.
+fn ulp_distance(diff: big.BigInt, unit: big.BigInt) -> Int =
+  match big.divmod(diff, unit) with
+  | Nothing -> unmeasurable
+  | Just (quotient, rem) ->
+      match big.to_int(quotient) with
+      | Nothing -> unmeasurable
+      | Just n -> if big.is_zero(rem) then n else n + 1
+
+# `x` IS the correctly rounded Double for a/b: within half an ULP of it. Asked as
+# `2 * diff <= ulp` rather than as a distance, because any rounded distance loses
+# exactly this boundary — `<= 1 ULP` admits an off-by-one whose exact value lies
+# on the near side, which is half of them.
+fn correctly_rounded(diff: big.BigInt, unit: big.BigInt) -> Bool =
+  big.cmp(big.shl(diff, 1), unit) <= 0
 
 fn is_finite(x: Double) -> Bool = (x - x) == 0.0
 
@@ -80,7 +99,23 @@ fn sample_error(text: String, digits: String, exp10: Int) -> Int =
       if ! is_finite (x) || (x <= 0.0) then unmeasurable
       else
         let (a, b) = exact_value(digits, exp10)
-        in ulp_distance(a, b, x)
+            (diff, unit) = error_terms(a, b, x)
+        in ulp_distance(diff, unit)
+
+# 0 when `x` is the correctly rounded Double, and the ULP distance otherwise, so
+# a bound of 0 on this reads as "every sample correctly rounded".
+fn misrounding(text: String, digits: String, exp10: Int) -> Int =
+  match parse_double(text) with
+  | Nothing -> unmeasurable
+  | Just x ->
+      if ! is_finite (x) || (x <= 0.0) then unmeasurable
+      else
+        let (a, b) = exact_value(digits, exp10)
+            (diff, unit) = error_terms(a, b, x)
+        in if correctly_rounded(diff, unit) then 0
+           else greater(1, ulp_distance(diff, unit))
+
+fn greater(a: Int, b: Int) -> Int = if a >= b then a else b
 
 fn digit_char(d: Int) -> String = str_slice("0123456789", d, 1)
 
@@ -93,33 +128,50 @@ fn gen_run(state: Int, n: Int, acc: List String) -> (Int, String) =
         d = if n == 1 then 1 + rng_below(st, 9) else rng_below(st, 10)
     in gen_run(st, n - 1, Cons(digit_char(d), acc))
 
-# Worst error seen so far, the input that produced it, and the generator state.
+# Samples drawn, worst error seen, the input that produced it, and the generator
+# state. The COUNT is carried because a sweep that drew nothing reports the same
+# `worst 0` as one whose worst case was zero — `--runs=0` passed every row.
 type Sweep (..) =
-  | Sweep Int Int String
+  | Sweep Int Int Int String
+
+fn drawn_by(s: Sweep) -> Int =
+  match s with
+  | Sweep _ drawn _ _ -> drawn
 
 fn worst_of(s: Sweep) -> Int =
   match s with
-  | Sweep _ worst _ -> worst
+  | Sweep _ _ worst _ -> worst
 
 fn worst_input(s: Sweep) -> String =
   match s with
-  | Sweep _ _ text -> text
+  | Sweep _ _ _ text -> text
 
 fn note(s: Sweep, state: Int, err: Int, text: String) -> Sweep =
   match s with
-  | Sweep _ worst wtext ->
-      if err > worst then Sweep(state, err, text) else Sweep(state, worst, wtext)
+  | Sweep _ drawn worst wtext ->
+      if err > worst then Sweep(state, drawn + 1, err, text)
+      else Sweep(state, drawn + 1, worst, wtext)
 
-# An n-digit run placed so the value lands in [10^(v-1), 10^v). Keeping v inside
-# [-319, 300] keeps every sample representable and non-zero, which is what lets a
-# 0.0 result count as a failure rather than a legitimate underflow.
+# The decimal exponent of the value: every decade whose whole span has a non-zero
+# finite nearest Double. The first version stopped at [-319, 300], which left the
+# eight decades where the error is densest outside the sweep that measured the
+# bound, along with most of the subnormals.
+#
+# The two decades past each end are excluded because they STRADDLE a threshold,
+# not because the reader struggles there: 10^-324..10^-323 spans the tie below
+# the smallest subnormal, where rounding to zero is the correct answer, and
+# 10^308..10^309 spans DBL_MAX, where rounding to an infinity is. A sweep that
+# treats zero and infinity as failures cannot draw from either. They are covered
+# instead by the two `characterised` rows, which say what happens at each tip.
+fn sample_v(state: Int) -> Int = -322 + rng_below(state, 631)
+
+# An n-digit run placed so the value lands in [10^(v-1), 10^v).
 fn sample_run(s: Sweep, n: Int) -> Sweep =
   match s with
-  | Sweep state _ _ ->
+  | Sweep state _ _ _ ->
       let (st, digits) = gen_run(state, n, Nil)
           st2 = rng_next(st)
-          v = -319 + rng_below(st2, 620)
-          e = v - n
+          e = sample_v(st2) - n
           text = `${digits}e${int_to_string(e)}`
       in note(s, st2, sample_error(text, digits, e), text)
 
@@ -127,33 +179,40 @@ fn sample_run(s: Sweep, n: Int) -> Sweep =
 # pays for the leading zeros with the fraction's width rather than by scanning them.
 fn sample_fraction(s: Sweep, n: Int) -> Sweep =
   match s with
-  | Sweep state _ _ ->
+  | Sweep state _ _ _ ->
       let (st, digits) = gen_run(state, n, Nil)
           st2 = rng_next(st)
-          zeros = rng_below(st2, 321 - n)
+          zeros = rng_below(st2, 323 - n)
           text = "0." ++ string.repeat("0", zeros) ++ digits
       in note(s, st2, sample_error(text, digits, 0 - (zeros + n)), text)
 
 # At most 15 significant digits and a scale binary64 holds exactly: one exactly
-# rounded operation on two exact operands, so the result is the correctly rounded
-# Double and nothing below the bound is good enough. The length comes from the
-# generator rather than the sweep, so this runs `runs` samples per entry in
-# `lengths()` while ignoring which entry.
+# rounded operation on two exact operands, so the result is THE correctly rounded
+# Double, which `misrounding` asks directly rather than through a rounded
+# distance. The length comes from the generator rather than the sweep, so this
+# runs `runs` samples per entry in `lengths()` while ignoring which entry.
 fn sample_exact(s: Sweep, _n: Int) -> Sweep =
   match s with
-  | Sweep state _ _ ->
+  | Sweep state _ _ _ ->
       let st0 = rng_next(state)
           (st, digits) = gen_run(st0, 1 + rng_below(st0, 15), Nil)
           st2 = rng_next(st)
           e = rng_below(st2, 45) - 22
           text = `${digits}e${int_to_string(e)}`
-      in note(s, st2, sample_error(text, digits, e), text)
+      in note(s, st2, misrounding(text, digits, e), text)
 
 fn repeat_sample(step: Sweep -> Int -> Sweep, s: Sweep, n: Int, left: Int) -> Sweep =
   if left <= 0 then s else repeat_sample(step, step(s, n), n, left - 1)
 
+# `rng_next` needs its state in [0, 2^31) — the multiply leaves i64 above ~8.4e9,
+# so an out-of-range `--seed` aborted the process with a raw Int-overflow panic.
+fn seed_state(seed: Int) -> Int =
+  let m = seed - ((seed / 2147483648) * 2147483648)
+  in if m < 0 then m + 2147483648 else m
+
 fn sweep(step: Sweep -> Int -> Sweep, seed: Int, runs: Int, lengths: Vec Int) -> Sweep =
-  vec_fold(\ (s, n) -> repeat_sample(step, s, n, runs), Sweep(seed, 0, "none"), lengths)
+  vec_fold(\ (s, n) -> repeat_sample(step, s, n, runs),
+           Sweep(seed_state(seed), 0, 0, "none"), lengths)
 
 fn lengths() -> Vec Int = [1, 2, 3, 8, 15, 17, 19, 22, 40, 100, 300, 320]
 
@@ -164,10 +223,15 @@ fn brief(text: String) -> String =
   in if n <= 48 then text
      else str_slice(text, 0, 20) ++ `..${int_to_string(n)}..` ++ str_slice(text, n - 20, 20)
 
+# The sample count is asserted, not just printed: `--runs=0` drew nothing and
+# every row reported `worst 0 ULP`, which is indistinguishable from a sweep whose
+# worst case was zero. A harness that passes having measured nothing is the one
+# failure it exists to prevent.
 fn verdict(label: String, s: Sweep, bound: Int) -> TestCase =
-  check_true(`${label}: worst ${int_to_string(worst_of(s))} ULP <= ${int_to_string(bound)}`
+  check_true(`${label}: ${int_to_string(drawn_by(s))} samples, worst `
+               ++ `${int_to_string(worst_of(s))} ULP <= ${int_to_string(bound)}`
                ++ ` (${brief(worst_input(s))})`,
-             worst_of(s) <= bound)
+             (drawn_by(s) > 0) && (worst_of(s) <= bound))
 
 # The three defects this harness was written for, each pinned at the shape that
 # reproduced it: a divisor past 10^308 (the smallest normal read as 0.0), the
@@ -176,31 +240,54 @@ fn verdict(label: String, s: Sweep, bound: Int) -> TestCase =
 # k sequential multiplications (1e105 off by 6 ULP).
 fn long_run(n: Int) -> String = "1" ++ string.repeat("0", n - 1)
 
-# Each pinned case carries the bound its own defect broke, not the suite-wide one:
-# `1e105` was 6 ULP high and passes `<= 5` unfixed, which would have made it a row
-# that reports rather than guards.
-fn pinned(label: String, text: String, digits: String, exp10: Int, bound: Int) -> TestCase =
+# The pinned cases share a bound tighter than the suite-wide one. Every defect
+# they pin reads far outside it unfixed — four are unmeasurable (zero, or an
+# infinity) and `1e105` is 6 — while `ulp_bound` would have passed `1e105`
+# unfixed, making it a row that reports rather than guards.
+let pinned_bound = 2
+
+fn pinned(label: String, text: String, digits: String, exp10: Int) -> TestCase =
   let err = sample_error(text, digits, exp10)
-  in check_true(`${label} (${int_to_string(err)} ULP <= ${int_to_string(bound)})`,
-                err <= bound)
+  in check_true(`${label} (${int_to_string(err)} ULP <= ${int_to_string(pinned_bound)})`,
+                err <= pinned_bound)
+
+# The two range ENDPOINTS, where the reader's last bit of error tips a value
+# across a threshold instead of landing one Double away: just under DBL_MAX reads
+# as an infinity, and just over half the smallest subnormal reads as zero. Both
+# are one ULP out — the same error as anywhere else — but the result is
+# non-finite or zero rather than a neighbouring Double, and json_stringify then
+# refuses what json_parse accepted. Characterised, not asserted correct: a fix
+# (BACKLOG P3, the hi/lo power table) must fail these rows and update them.
+fn characterised(label: String, text: String, holds: Double -> Bool) -> TestCase =
+  match parse_double(text) with
+  | Nothing -> check_true(`${label} -> Nothing`, false)
+  | Just x -> check_true(`${label} -> ${double_to_string(x)}`, holds(x))
+
+fn is_infinite(x: Double) -> Bool = ! is_finite (x)
+
+fn is_zero(x: Double) -> Bool = double_to_bits(x) == 0
 
 fn main() -> Unit !{IO} =
   do
     let argv = args.parse_argv()
-    let runs = args.arg_int(argv, "runs", 10)
-    let seed = args.arg_int(argv, "seed", 20260925)
+    let runs = args.arg_int(argv, "runs", 40)
+    let seed = seed_state(args.arg_int(argv, "seed", 20260925))
     let runs_sweep = sweep(sample_run, seed, runs, lengths())
     let frac_sweep = sweep(sample_fraction, seed + 1, runs, lengths())
     let exact_sweep = sweep(sample_exact, seed + 2, runs, lengths())
     run_suite("parse_double differential",
               [pinned("smallest normal survives the divisor",
-                       "2.2250738585072014e-308", "22250738585072014", -324, 1),
+                       "2.2250738585072014e-308", "22250738585072014", -324),
                 pinned("19-digit run at e-320 is not zero",
-                       "1234567890123456789e-320", "1234567890123456789", -320, 1),
-                pinned("subnormal 1e-320", "1e-320", "1", -320, 1),
+                       "1234567890123456789e-320", "1234567890123456789", -320),
+                pinned("subnormal 1e-320", "1e-320", "1", -320),
                 pinned("exponent past the clamp is combined, not saturated",
-                       long_run(120) ++ "e-430", long_run(120), -430, 1),
-                pinned("1e105 is not 6 ULP high", "1e105", "1", 105, 1),
+                       long_run(120) ++ "e-430", long_run(120), -430),
+                pinned("1e105 is not 6 ULP high", "1e105", "1", 105),
+                characterised("KNOWN: just under DBL_MAX overflows to an infinity",
+                              "1.7976931348623158e308", is_infinite),
+                characterised("KNOWN: just over half the smallest subnormal flushes to zero",
+                              "2.4703282292062328e-324", is_zero),
                 verdict("integer run with exponent", runs_sweep, ulp_bound),
                 verdict("0.<zeros><digits>", frac_sweep, ulp_bound),
                 verdict("exact domain", exact_sweep, 0)])

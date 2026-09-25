@@ -564,22 +564,23 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   practical, keeping host builtins for the impossible or efficiency-critical.
 - [ ] `P2` **An out-of-range literal reads as an infinity, so a conformant document can be READ but
   not re-written.** `parse_double` saturates rather than rejecting, so `parse("1e400")` gives
-  `JsonFloat(+inf)` and `stringify` then refuses it. `1e-400` underflows silently to `0.0` — a
-  genuine out-of-range value, since in-range ones no longer do. RFC 8259 §6 names `1E400` as an
+  `JsonFloat(+inf)` and `stringify` then refuses it. `1e-400` underflows silently to `0.0`. Not
+  confined to out-of-range literals: a value within a bit of either threshold goes the same way, and
+  `1.7976931348623158e308` rounds to DBL_MAX but reads as `+inf`. RFC 8259 §6 names `1E400` an
   interoperability hazard and explicitly allows limiting range, so rejecting at parse is legitimate
   and has not been taken. This is the only way a non-finite Double can enter from ordinary JSON
   input rather than arithmetic. Design Change Process call between: reject as `Err`, keep the
   saturating `inf` and document it, or clamp to the largest finite Double — and whichever is chosen
-  should settle the underflow-to-zero, the same question at the other end. No caller depends on
-  today's behaviour.
+  should settle the underflow-to-zero, the same question at the other end.
 - [ ] `P3` **`parse_double` is up to 5 ULP off past 15 significant digits.** Exact at or below
   that (significand under 2^53, scale exact); past it the `Int -> Double` conversion and `10^k`
-  each round, and a result landing subnormal rounds a second time on the split divisor. Bound
-  measured over 11M random inputs and held by `tests/stdlib/test_parse_double_differential.spr`
-  (`just parse-double-sweep` for the wide run). Closing the last bits needs a two-double (hi/lo)
-  power-of-ten table with Dekker products, a correctly-rounded decimal→binary algorithm, or a
-  `strtod`-backed builtin — the last needs approval under Builtin vs Stdlib rules 4–6, with the
-  *correctness* argument doing the work, not performance.
+  each round, and a result landing subnormal rounds a second time on the split divisor. Bound is
+  `|parsed - exact| <= 5 ULP` over 10^-322..10^308, held by
+  `tests/stdlib/test_parse_double_differential.spr` (`just parse-double-sweep` for the wide run),
+  and tight — the sweep reaches it. Closing the last bits needs a two-double (hi/lo) power-of-ten
+  table with Dekker products, a correctly-rounded decimal→binary algorithm, or a `strtod`-backed
+  builtin — the last needs approval under Builtin vs Stdlib rules 4–6, with the *correctness*
+  argument doing the work, not performance. It would also settle the two threshold tips above.
 
 ### 4) Terminal UI Runtime
 
