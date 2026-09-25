@@ -2016,10 +2016,12 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   caller's frame — the recursive `queens(…)` re-roots three vectors it already holds. Pure
   codegen fix in `emit_args_with_roots`. Expected 20–40% on top of the rooting work, and
   multiplicative with the inlining item above.
-- [ ] `P2` **True/False/Nil singletons.** Mirror the existing `Nothing` singleton in `sprout_make0`.
-  Each `vec_set(col, true, cols)` and `false` literal currently allocates a fresh ADT object;
-  singletons make each a constant pointer, eliminating ~16M of the 33M allocations per N=12 run.
-  Expected 10–15%; small runtime change.
+- [ ] `P2` **nqueens allocates one `Vec` wrapper per `vec_set` — 16.7M per N=12 run**, which is its
+  whole object-allocation count. Measured while landing nullary interning, which moved nqueens by 7
+  objects and so disproved this entry's predecessor: it blamed `true`/`false` literals, but `Bool`
+  lowers to a native `i1` (`br i1` in the emitted IR, no ctor), and tag 10 arity 1 is `Vec`. The
+  cost is the persistent vector's copy-on-write wrapper, so the lever is the HAMT entry below or
+  unboxing, not interning.
 - [ ] `P2` **Bump-allocated nursery with no per-object metadata** — the canonical generational GC,
   and distinct from the older split-the-node-list draft, which keeps per-object `ManagedNode` and so
   cannot reduce per-allocation cost. Objects are identified by address-range membership and

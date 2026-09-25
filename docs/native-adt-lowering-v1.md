@@ -49,26 +49,41 @@ short-lived ADTs disproportionately expensive.
 
 V1 is intentionally staged.
 
-### Step 1: Singleton `Nothing`
+### Step 1: Singleton `Nothing` — SUPERSEDED by general interning
 
-Scope:
-- Native runtime only
-- Constructor name `Nothing` only
+Shipped first as a name-based allowlist: `sprout_make0` matched `Nothing`, later
+the three `IRType` ctors, by `strcmp`, and every other nullary ctor allocated.
 
-Approach:
-- Reuse one shared `SproutObj` for `Nothing` in the generated native runtime.
-- Keep all other constructors on the existing heap-allocation path.
+That narrowness was the wrong call, and the "separate design question" it
+deferred turned out to have the same answer for every nullary ctor. Arity 0
+means no fields, so two values with one tag are indistinguishable and neither
+can be mutated: sharing one object is observationally equivalent universally,
+not as a property of `Nothing`. `sprout_make0` now interns on the **tag**, with
+the shared object held in `CtorMeta.singleton`.
 
-Rationale:
-- `Nothing` is common in the prelude and stdlib.
-- Zero-arity constructors do not carry payload state, so singleton reuse is
-  straightforward.
-- This is a small change that reduces allocation pressure even outside
-  immediate-match optimization.
+Keying on the tag also closed a hazard the allowlist carried — an entry file's
+own `Nothing` could `strcmp`-match and be handed the prelude's cached object,
+bearing the wrong tag.
 
-Tradeoff:
-- The optimization is name-based and intentionally narrow. General constructor
-  interning is a separate design question.
+Two supporting changes were load-bearing rather than incidental:
+- `find_ctor` was a linear scan of up to 2048 entries, run on **every** nullary
+  construction. A tag-indexed table makes it O(1); without that, generalising
+  would have cost more than it saved.
+- Invalidation was four pointer compares against singleton globals on every
+  reclaimed object *of any kind*. It now reads the dying object's own tag from
+  the header the sweep already holds, so it is O(1) and touches only nullary
+  objects. The cache stays weak, so no singleton needs rooting.
+
+Measured on the self-hosted compiler emitting IR for `stdlib/compiler/parser.sprout`:
+20,530,202 → 17,824,030 objects (**-13.2%**), wall clock 1.27 s → 1.155 s median
+of six interleaved pairs (**-9%**), peak RSS 67.1 → 62.9 MB (**-6.3%**). GC
+*cycles* rise (215 → 236) because the threshold is `live x adapt_factor` and
+interning shrinks the live set — each cycle sweeps a smaller heap, and total
+sweep work falls by exactly the allocation delta.
+
+The win scales with how many nullary constructions a workload makes, so it is
+not universal: nqueens moved by 7 objects, because it allocates `Vec` wrappers
+and its `Bool`s are native `i1`.
 
 ### Step 2: Immediate-match optimization for direct constructor-producing scrutinees
 
