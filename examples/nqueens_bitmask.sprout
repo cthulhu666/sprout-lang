@@ -1,0 +1,87 @@
+module examples.nqueens_bitmask
+import stdlib.time as time
+import stdlib.bits
+
+# N-Queens by bitmask: count all solutions for an N×N board with no arrays at all.
+#
+# The array version (examples/nqueens.sprout) keeps three `Vec Bool` constraint
+# arrays and tries every column in a row, testing each for conflicts. This one
+# packs the same three constraints into three integers and visits ONLY the safe
+# columns, so both the allocation and the rejected-column tests disappear.
+#
+# Richards encoding — each mask is read as a set of columns in the CURRENT row:
+#   cols  bit c set = column c already holds a queen (permanent, never shifts)
+#   ld    bit c set = a queen on a leftward diagonal attacks column c this row
+#   rd    bit c set = a queen on a rightward diagonal attacks column c this row
+#
+# Descending one row moves every diagonal threat sideways by one column, which
+# is why `ld` shifts left and `rd` shifts right on the recursive call. That
+# shift is the whole trick: a diagonal is tracked without ever indexing `r+c`.
+#
+# Limited to N <= 63, since the column mask must fit in an Int.
+#
+# Run:
+#   mise exec -- just run examples/nqueens_bitmask.sprout
+# Expected output (N= label, count, wall-clock time):
+#   N=1: 1  (0.0 ms)
+#   ...
+#   N=13: 73712  (...)
+
+# The lowest set bit of `x`, as a mask: 1101000 -> 0001000.
+# Two's complement makes this an identity rather than a search — `-x` is
+# `bit_not(x) + 1`, which flips every bit below the lowest set one back.
+fn lowest_bit(x: Int) -> Int = bit_and(x, -x)
+
+# `x` with its lowest set bit cleared: 1101000 -> 1100000.
+fn clear_lowest(x: Int) -> Int = bit_and(x, x - 1)
+
+# Columns in this row attacked by no queen placed so far.
+fn safe_columns(mask: Int, cols: Int, ld: Int, rd: Int) -> Int =
+  bit_and(mask, bit_not(bit_or(cols, bit_or(ld, rd))))
+
+# Try every safe column in one row, summing the solutions each leads to.
+# `available` shrinks by one bit per step, so this is the array version's
+# column loop with the unsafe columns already removed.
+fn scan(mask: Int, cols: Int, ld: Int, rd: Int, available: Int, acc: Int) -> Int =
+  if available == 0 then acc
+  else
+    let col = lowest_bit(available)
+        placed = queens(mask,
+          bit_or(cols, col),
+          bit_shl(bit_or(ld, col), 1),
+          bit_shr_zf(bit_or(rd, col), 1))
+    in scan(mask, cols, ld, rd, clear_lowest(available), acc + placed)
+
+# Returns the number of complete solutions reachable from this state.
+# Every column filled means every row was filled, so `cols == mask` is a
+# solution — there is no separate row counter to carry.
+fn queens(mask: Int, cols: Int, ld: Int, rd: Int) -> Int =
+  if cols == mask then 1
+  else scan(mask, cols, ld, rd, safe_columns(mask, cols, ld, rd), 0)
+
+fn count_solutions(n: Int) -> Int = queens(bit_shl(1, n) - 1, 0, 0, 0)
+
+fn format_ms_parts(ms: Int, micros: Int) -> String =
+  string_concat_many(["(", int_to_string(ms), ".", int_to_string((micros - ms * 1000) / 100), " ms)"])
+
+fn format_ms(micros: Int) -> String =
+  format_ms_parts(micros / 1000, micros)
+
+fn print_result(n: Int, c: Int, t0: Int) -> Unit !{IO} =
+  do
+    t1 <- time.now_micros()
+    print(string_concat_many(["N=", int_to_string(n), ": ", int_to_string(c), "  ", format_ms(t1 - t0)]))
+
+fn bench_n(n: Int) -> Unit !{IO} =
+  do
+    t0 <- time.now_micros()
+    print_result(n, count_solutions(n), t0)
+
+fn main() -> Unit !{IO} =
+  do
+    bench_n(1)
+    bench_n(4)
+    bench_n(8)
+    bench_n(10)
+    bench_n(12)
+    bench_n(13)
