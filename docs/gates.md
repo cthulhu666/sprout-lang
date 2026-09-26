@@ -273,6 +273,10 @@ was set); an earlier `sprout_cstr_byte_len` revision failed the same way at 389x
 that helper in `runtime/sprout_runtime.c` is the primary record. Run a new ratio gate under the flag
 before trusting it — `SPROUT_GC_HDRCHECK=1 just test` reproduces CI.
 
+The flag also makes the **sweep** costlier: it checks every slot boundary against the slotmap
+(2026-09-26), so a collection-heavy arm pays a constant factor on CI that it does not pay locally.
+Same rule, same reproduction command.
+
 **`gc_swept` is the load-bearing counter, not `sprout_obj`.** Verified by building the probe against
 the pre-fix `grapheme`: objects came out *identical* at 18 per cell, swept at 106 against 42.
 `sprout_obj` does not count cstr allocations, and that bug was `str_slice` churn — an objects-only

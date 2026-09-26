@@ -393,6 +393,13 @@ earlier gaps.
 
 ## String-invariant oracle (`SPROUT_GC_HDRCHECK`) — and why local green ≠ CI green
 
+`SPROUT_GC_HDRCHECK=1` also asserts the sweep's **slot walk** against the slotmap — a
+step that skips a recorded slot start, or lands on an offset that is not one, aborts with
+`HDRCHECK: slot walk desync at region … skipped_start=…`, and a VECTOR whose header aux
+disagrees with where `->data` points aborts with `VECTOR aux/data disagree`. Those are the
+failure mode every `aux` invariant exists to prevent and they otherwise corrupt in
+silence; see `docs/compiler-internals.md` for what each one pins.
+
 `SPROUT_GC_HDRCHECK=1` asserts, on every `str_byte_len` call, that a CSTR header's
 recorded byte length equals `strlen` of the payload (`runtime/sprout_runtime.c`
 `str_byte_len`). Since the header stores an explicit length, the two can only differ when

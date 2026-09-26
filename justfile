@@ -2908,7 +2908,13 @@ test-stress: bootstrap-from-seed
   # test_gc_freelist_reuse: drives the freelist cases that produce a wrong list
   # rather than a crash — slots free across a cycle boundary, and regions whose
   # staged entries must be kept or dropped depending on whether Pass 2 releases them.
-  STRESS_FILES="tests/stdlib/test_gc_freelist_reuse.spr tests/stdlib/test_ir_rooting.spr tests/stdlib/test_ir_codegen_ctors.spr tests/stdlib/test_ir_codegen_match.spr tests/stdlib/test_ir_codegen_closures.spr tests/stdlib/test_ir_codegen_char_rooting.spr tests/stdlib/test_stress_global_roots.spr tests/stdlib/test_stress_unboxed_maybe_heap_payload.spr tests/stdlib/test_stress_cpr_tier2_worker.spr tests/stdlib/test_stress_records_heap.spr tests/stdlib/test_task_cooperative.spr tests/stdlib/test_task_nested_scope.spr tests/stdlib/test_gc_root_cross_task.spr tests/stdlib/test_chan.spr tests/stdlib/test_chan_close.spr tests/stdlib/test_chan_rendezvous.spr tests/stdlib/test_chan_select.spr"
+  # test_gc_vec_buffer_heap_elems: a vector's elements live in its own slot while
+  # they fit, so every vector allocation now picks a size class by element count
+  # and a push out of the inline area SPLITS the slot, handing the tail back
+  # mid-mutator. Of four broken versions of that split, stress mode catches the
+  # missing slotmap bit (as a livelock; the file's header comment has the table) —
+  # SPROUT_GC_HDRCHECK=1, which CI sets suite-wide, is what catches all four.
+  STRESS_FILES="tests/stdlib/test_gc_vec_buffer_heap_elems.spr tests/stdlib/test_gc_freelist_reuse.spr tests/stdlib/test_ir_rooting.spr tests/stdlib/test_ir_codegen_ctors.spr tests/stdlib/test_ir_codegen_match.spr tests/stdlib/test_ir_codegen_closures.spr tests/stdlib/test_ir_codegen_char_rooting.spr tests/stdlib/test_stress_global_roots.spr tests/stdlib/test_stress_unboxed_maybe_heap_payload.spr tests/stdlib/test_stress_cpr_tier2_worker.spr tests/stdlib/test_stress_records_heap.spr tests/stdlib/test_task_cooperative.spr tests/stdlib/test_task_nested_scope.spr tests/stdlib/test_gc_root_cross_task.spr tests/stdlib/test_chan.spr tests/stdlib/test_chan_close.spr tests/stdlib/test_chan_rendezvous.spr tests/stdlib/test_chan_select.spr"
   # Known-failing under stress — false-green at the default threshold, FOUND BY
   # THIS PASS (residual typed-codegen rooting UAF, GC-confirmed via
   # SPROUT_GC_DISABLE).  Tracked in BACKLOG.md; warn-only here.  Promote to
@@ -3000,7 +3006,11 @@ test-freelist-verify: bootstrap-from-seed
     clang -c "$rtsrc" -O2 {{clang_extra}} -o "$TMPD/rtobj/$(basename "$rtsrc" .c).o" 2>"$TMPD/rt.err" \
       || { echo "test-freelist-verify: runtime compile failed ($rtsrc)" >&2; cat "$TMPD/rt.err" >&2; exit 1; }
   done
-  FILES="tests/stdlib/test_gc_region_release.spr tests/stdlib/test_gc_freelist_reuse.spr"
+  # test_gc_vec_buffer_heap_elems: the only file that allocates vectors of several
+  # element counts and grows one out of its inline area — i.e. the only one whose
+  # slots are sized by a payload count rather than a fixed struct, and the only one
+  # that hands a freed tail back mid-mutator. Nothing else here walks a vector slot.
+  FILES="tests/stdlib/test_gc_region_release.spr tests/stdlib/test_gc_freelist_reuse.spr tests/stdlib/test_gc_vec_buffer_heap_elems.spr"
   failed=0
   for f in $FILES; do
     [ -f "$f" ] || { echo "test-freelist-verify: missing $f" >&2; failed=$((failed + 1)); continue; }

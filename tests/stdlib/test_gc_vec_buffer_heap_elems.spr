@@ -16,6 +16,33 @@ import stdlib.mutable (MutVec, mutvec_new, mutvec_empty, mutvec_push, mutvec_at,
 #
 # The strings below have no referent other than the buffer word holding them, so
 # a tracing mistake is a use-after-free rather than a wrong answer.
+#
+# None of the element counts here is arbitrary. 508 is the inline ceiling: the
+# slot is 8 + 24 + 508*8 == 4096 bytes, at once the largest inline slot, the top
+# freelist class and one byte from the large-object path, which is taken on
+# `slot > 4096`. 509 is the first vector whose elements are out of line at birth.
+# 504 is the size whose slot (4064 bytes) is exactly the tail a grown ceiling
+# vector hands back, so allocating one re-uses that tail; 506 (4080 bytes) is the
+# class above it, which must NOT be satisfied from that tail.
+#
+# Like test_gc_freelist_reuse.spr, the heap-internal half of this file is DRIVEN
+# here and CHECKED by the runtime. The assertions below only confirm that elements
+# survive collections; what a malformed split of a grown vector's slot is caught
+# by, measured against four broken versions of it, is SPROUT_GC_HDRCHECK=1 — which
+# CI sets for the whole suite:
+#
+#   mutation                       HDRCHECK   FL_VERIFY   GC_STRESS
+#   tail header 16 bytes too long    abort       pass        pass
+#   slotmap bit not set              abort       abort       livelock
+#   freelist class one too high      abort       pass        pass
+#   live header never shrunk         abort       pass        pass
+#
+# The two allocations below that look redundant are what make rows 1 and 3 fail:
+# `neighbour` is the next allocation after the split and asks for the class above
+# the tail, and `churned_free` forces a sweep to WALK the tail while it is free.
+# Without them the corrupt state is overwritten before anything looks at it, and
+# all four mutations pass everything. `just test-freelist-verify` and
+# `just test-stress` also run this file, for the two rows they do cover.
 
 fn churn(n: Int, acc: Int) -> Int =
   if n <= 0 then acc
@@ -54,9 +81,33 @@ fn main() -> Unit !{IO} =
     from_empty <- mutvec_empty()
     _ <- push_labels(from_empty, 0, 40)
 
+    # ── Either side of the inline ceiling ─────────────────────────────────────
+    let ceiling = vec_from_list(labels(508, Nil))
+    let over_ceiling = vec_from_list(labels(509, Nil))
+
+    # ── The ceiling GROWN: the largest tail a push ever hands back (4064 bytes).
+    ceiling_grown <- mutvec_new(508, "c")
+    _ <- push_labels(ceiling_grown, 0, 2)
+
+    # The very next managed allocation after that split, deliberately: a
+    # 506-element vector's slot is 4080 bytes, the class ABOVE the 4064-byte tail
+    # just freed, so it must NOT be satisfied from it. Listing the tail one class
+    # too high would hand it over and overflow the neighbouring slot by 16 bytes.
+    neighbour <- mutvec_new(506, "n")
+
+    # Collect while that tail is still free, so the sweep has to WALK it: nothing
+    # below asks for its class (254), so it survives these cycles as a free slot
+    # and the walk steps over it by the size in its header.
+    let churned_free = churn(2000, 0)
+
+    # Now take the tail back — a 504-element vector's slot is exactly its 4064
+    # bytes — and make sure a vector allocated there works like any other.
+    let tail_reuse = vec_from_list(labels(504, Nil))
+
     # Force collections with everything above still live.
     let churned = churn(3000, 0)
     assert_eq(state, "churn ran", churned, 6000)
+    assert_eq(state, "churn over the free tail ran", churned_free, 4000)
 
     assert_eq(state, "inline: length", vec_length(small), 3)
     assert_eq(state, "inline: first element traced", vec_get_or(0, "?", small), "alpha")
@@ -82,6 +133,31 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "grown from inline: inline prefix copied out (3)", g3, "seed")
     assert_eq(state, "grown from inline: first element past the inline area", g4, "p-0")
     assert_eq(state, "grown from inline: last pushed element traced", g43, "p-39")
+
+    assert_eq(state, "at the inline ceiling: length", vec_length(ceiling), 508)
+    assert_eq(state, "at the inline ceiling: first element traced",
+      vec_get_or(0, "?", ceiling), "s1")
+    assert_eq(state, "at the inline ceiling: last element traced",
+      vec_get_or(507, "?", ceiling), "s508")
+    assert_eq(state, "one past the ceiling: length", vec_length(over_ceiling), 509)
+    assert_eq(state, "one past the ceiling: last element traced",
+      vec_get_or(508, "?", over_ceiling), "s509")
+
+    assert_eq(state, "ceiling grown: length", mutvec_len(ceiling_grown), 510)
+    cg0 <- mutvec_at(ceiling_grown, 0)
+    cg507 <- mutvec_at(ceiling_grown, 507)
+    cg509 <- mutvec_at(ceiling_grown, 509)
+    assert_eq(state, "ceiling grown: inline prefix copied out (0)", cg0, "c")
+    assert_eq(state, "ceiling grown: inline prefix copied out (507)", cg507, "c")
+    assert_eq(state, "ceiling grown: last pushed element traced", cg509, "p-1")
+    assert_eq(state, "class above the tail: length", mutvec_len(neighbour), 506)
+    n505 <- mutvec_at(neighbour, 505)
+    assert_eq(state, "class above the tail: last element intact", n505, "n")
+    assert_eq(state, "tail reuse: length", vec_length(tail_reuse), 504)
+    assert_eq(state, "tail reuse: first element traced",
+      vec_get_or(0, "?", tail_reuse), "s1")
+    assert_eq(state, "tail reuse: last element traced",
+      vec_get_or(503, "?", tail_reuse), "s504")
 
     assert_eq(state, "grown from empty: length", mutvec_len(from_empty), 40)
     f0 <- mutvec_at(from_empty, 0)

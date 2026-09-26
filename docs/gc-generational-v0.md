@@ -269,6 +269,16 @@ primitive)". Enumerated:
   > non-static function that writes into an existing object's payload
   > (`v->data[...] = `, `->value = `, and friends) and confirm each either carries
   > the barrier or is provably persistent.
+  >
+  > **`vector_push` gained a second thing to reason about on 2026-09-25.** Small
+  > vectors keep their elements inside the `VectorVal`'s own GC slot, so the first
+  > push past an inline capacity *moves the element storage out of the object* —
+  > copies it to a malloc block, repoints `->data`, and hands the vacated tail back
+  > to the arena as a free slot. For a card-marking design that is not a detail: a
+  > card covering the `VectorVal` covers its elements before the growth and not
+  > after, and the card that covered the vacated tail now covers a free slot. The
+  > store itself is still the barrier site; where the stored-into memory *lives* is
+  > no longer fixed for the object's lifetime.
 - **Writes into a live object, but not a barrier site: `vector_truncate`**
   (added 2026-09-09, backing `mutvec_remove`/`truncate`/`clear`). It stores into an
   already-allocated `VectorVal` — `data[i] = 0` over the vacated slots, then a lower
