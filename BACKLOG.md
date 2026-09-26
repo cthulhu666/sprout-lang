@@ -2021,6 +2021,15 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   does not contradict the "string concatenation was the wrong target" correction, and why fixing it
   hides the byte-blind GC trigger rather than closing it. Whether the fix collapses the curve is
   unmeasured.
+- [ ] `P2` **Vector element bytes moved from `malloc` to the arena's fixed size classes, and
+  nothing measures what that retains.** A small `Vec`'s elements now live in its own slot, so a
+  200-element vector holds a class-102 slot that only another ~200-element vector can reuse, where
+  before it was a `malloc` block libc could coalesce and hand back at any size. `sprout_gc_sweep`
+  returns memory to the OS only when a whole 1 MiB region has no live and no poison slot, so a
+  phase-structured workload (many 200-element vectors, then many 40-element ones) keeps the
+  class-102 slots for the rest of the run. Commit 4535204c measured peak RSS *down* on two shapes,
+  so this is a suspected counter-pressure, not a known regression — but no instrument reports
+  retained-by-class arena bytes, so neither direction can be checked today.
 - [ ] `P2` **The freelists are still wiped and rebuilt from *all* regions every sweep** — a
   prerequisite for the nursery, since a minor collection that marks only young objects but rebuilds
   the whole heap's freelist is not proportional to the young set. Making them generation-scoped

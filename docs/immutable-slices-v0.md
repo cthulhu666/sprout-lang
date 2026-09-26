@@ -143,11 +143,15 @@ Two runtime facts, verified, fix the shape of anything we build:
    builtin without copying. A `String` view therefore costs either a parallel `{ptr,len}` API across
    the whole string surface, or a change to `String`'s representation. **This is the dominant cost,
    and it is why `String` is not the first target.**
-2. **Backing stores are plain `malloc` and are freed at sweep.** `sprout_release_payload_extras`
-   does `free(v->data)` for both `SPROUT_HEAP_VECTOR` and `SPROUT_HEAP_BYTES`
-   (`runtime/sprout_runtime.c:2076`). A view holding a raw interior pointer would dangle. It must
-   hold the **backing handle** as a traced GC child, which is what keeps it alive — and is also
-   exactly the retention hazard Swift and Java document.
+2. **A backing store is reclaimed with its owner, and is not addressable on its own.** A `Bytes`
+   payload is a plain `malloc` block that `sprout_release_payload_extras` frees at sweep
+   (`runtime/sprout_runtime.c`, that function — a line number here went stale twice). A `Vec`'s
+   elements are that for a large or grown vector, and for a small one (since 2026-09-25) they are
+   the tail of the VectorVal's own GC slot, which the sweep reclaims as part of the object.
+   Either way a view holding a raw interior pointer would dangle — and for the inline case it
+   would not even resolve, since `sprout_heap_lookup` accepts only an offset the slotmap records
+   as a slot start. A view must hold the **backing handle** as a traced GC child, which is what
+   keeps it alive — and is also exactly the retention hazard Swift and Java document.
 
 `Bytes` is unencumbered by (1): `BytesVal` is `{len, data}` with no terminator contract. That makes
 `Bytes` the natural first and possibly only target.
