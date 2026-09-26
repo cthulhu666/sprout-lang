@@ -2909,11 +2909,12 @@ test-stress: bootstrap-from-seed
   # rather than a crash — slots free across a cycle boundary, and regions whose
   # staged entries must be kept or dropped depending on whether Pass 2 releases them.
   # test_gc_vec_buffer_heap_elems: a vector's elements live in its own slot while
-  # they fit, so every vector allocation now picks a size class by element count
-  # and a push out of the inline area SPLITS the slot, handing the tail back
-  # mid-mutator. Of four broken versions of that split, stress mode catches the
-  # missing slotmap bit (as a livelock; the file's header comment has the table) —
-  # SPROUT_GC_HDRCHECK=1, which CI sets suite-wide, is what catches all four.
+  # they fit, so every vector allocation picks a size class by element count and a
+  # push out of the inline area SPLITS the slot, handing the tail back mid-mutator
+  # — heap shapes no other stress file produces. It is cheap here (2.2s). What it
+  # is NOT is the oracle for that split: of four broken versions, stress catches
+  # one and only as a livelock, which is why the timeout above exists. The file's
+  # header comment has the measured table; HDRCHECK is what names all four.
   STRESS_FILES="tests/stdlib/test_gc_vec_buffer_heap_elems.spr tests/stdlib/test_gc_freelist_reuse.spr tests/stdlib/test_ir_rooting.spr tests/stdlib/test_ir_codegen_ctors.spr tests/stdlib/test_ir_codegen_match.spr tests/stdlib/test_ir_codegen_closures.spr tests/stdlib/test_ir_codegen_char_rooting.spr tests/stdlib/test_stress_global_roots.spr tests/stdlib/test_stress_unboxed_maybe_heap_payload.spr tests/stdlib/test_stress_cpr_tier2_worker.spr tests/stdlib/test_stress_records_heap.spr tests/stdlib/test_task_cooperative.spr tests/stdlib/test_task_nested_scope.spr tests/stdlib/test_gc_root_cross_task.spr tests/stdlib/test_chan.spr tests/stdlib/test_chan_close.spr tests/stdlib/test_chan_rendezvous.spr tests/stdlib/test_chan_select.spr"
   # Known-failing under stress — false-green at the default threshold, FOUND BY
   # THIS PASS (residual typed-codegen rooting UAF, GC-confirmed via
@@ -2931,18 +2932,30 @@ test-stress: bootstrap-from-seed
   FL_VERIFY_SKIP=" test_ir_codegen_ctors "
   failed=0
   JOBS=$(bash scripts/test_jobs.sh)
-  run_one() {  # prints "ok" or "fail"; never exits.  Per-file err file avoids the
-               # shared-$TMPD/err race when invoked concurrently.
-    local f="$1" name ll bin out err fv=1
+  # Per-file wall-clock bound.  Not every GC regression crashes: a slot the
+  # allocator hands out without a slotmap bit livelocks the collector (sweeps 0%
+  # forever, mutation-tested via tests/stdlib/test_gc_vec_buffer_heap_elems.spr),
+  # and this recipe prints nothing until the last file finishes — so without a
+  # bound that failure reads as a hung CI step rather than a red one.  900s is 5x
+  # the slowest file (test_ir_codegen_ctors, 180s under stress).
+  STRESS_TIMEOUT_SEC="${STRESS_TIMEOUT_SEC:-900}"
+  run_one() {  # prints "ok", "fail" or "timeout"; never exits.  Per-file err file
+               # avoids the shared-$TMPD/err race when invoked concurrently.
+    local f="$1" name ll bin err fv=1 pid rc waited=0
     name=$(basename "$f" .spr); ll="$TMPD/$name.ll"; bin="$TMPD/$name.bin"; err="$TMPD/$name.err"
     case "$FL_VERIFY_SKIP" in *" $name "*) fv=0 ;; esac
     "{{build_dir}}/compile_driver_bin_stage1" --use-ir-codegen "{{stdlib_root}}" --package-root "{{justfile_directory()}}" "$f" > "$ll" 2>"$err" || { echo fail; return; }
     clang "$ll" "$TMPD/rtobj"/*.o {{clang_extra}} -o "$bin" 2>"$err" || { echo fail; return; }
-    if out=$(SPROUT_GC_STRESS=1 SPROUT_FL_VERIFY=$fv "$bin" 2>&1); then
-      echo "$out" | grep -q "SUITE FAILED" && echo fail || echo ok
-    else
-      echo fail
-    fi
+    SPROUT_GC_STRESS=1 SPROUT_FL_VERIFY=$fv "$bin" > "$TMPD/$name.run" 2>&1 &
+    pid=$!
+    while kill -0 "$pid" 2>/dev/null; do
+      if (( waited >= STRESS_TIMEOUT_SEC )); then
+        kill -9 "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; echo timeout; return
+      fi
+      sleep 1; waited=$((waited + 1))
+    done
+    wait "$pid"; rc=$?
+    if (( rc == 0 )) && ! grep -q "SUITE FAILED" "$TMPD/$name.run"; then echo ok; else echo fail; fi
   }
   # Dispatch every file JOBS-wide; each writes its ok/fail verdict to <name>.result.
   # SPROUT_GC_STRESS (collect-on-every-alloc) makes each run slow and single-
@@ -2964,10 +2977,19 @@ test-stress: bootstrap-from-seed
   for f in $STRESS_FILES; do
     name=$(basename "$f" .spr)
     if [ ! -f "$f" ]; then echo "test-stress: missing $f" >&2; failed=$((failed + 1)); continue; fi
-    if [[ "$(cat "$TMPD/$name.result" 2>/dev/null)" == ok ]]; then
+    verdict="$(cat "$TMPD/$name.result" 2>/dev/null)"
+    if [[ "$verdict" == ok ]]; then
       echo "  PASS (stress): $f"
+    elif [[ "$verdict" == timeout ]]; then
+      echo "test-stress: $f TIMED OUT after ${STRESS_TIMEOUT_SEC}s under SPROUT_GC_STRESS=1 (livelock?)" >&2
+      failed=$((failed + 1))
     else
-      echo "test-stress: $f FAILED under SPROUT_GC_STRESS=1" >&2; failed=$((failed + 1))
+      echo "test-stress: $f FAILED under SPROUT_GC_STRESS=1" >&2
+      # The run's own output, which the old `out=$(...)` form discarded on
+      # failure: a stress failure is usually an abort message, and reading it
+      # here beats reproducing the run to see it.
+      tail -8 "$TMPD/$name.run" 2>/dev/null >&2
+      failed=$((failed + 1))
     fi
   done
   # Tally xfail files (tracked; an unexpected pass is informational, never fatal).
@@ -3006,10 +3028,12 @@ test-freelist-verify: bootstrap-from-seed
     clang -c "$rtsrc" -O2 {{clang_extra}} -o "$TMPD/rtobj/$(basename "$rtsrc" .c).o" 2>"$TMPD/rt.err" \
       || { echo "test-freelist-verify: runtime compile failed ($rtsrc)" >&2; cat "$TMPD/rt.err" >&2; exit 1; }
   done
-  # test_gc_vec_buffer_heap_elems: the only file that allocates vectors of several
-  # element counts and grows one out of its inline area — i.e. the only one whose
-  # slots are sized by a payload count rather than a fixed struct, and the only one
-  # that hands a freed tail back mid-mutator. Nothing else here walks a vector slot.
+  # test_gc_vec_buffer_heap_elems: the only file whose slots are sized by a payload
+  # count rather than a fixed struct (a vector's class follows its element count),
+  # and the only one that hands a freed tail back mid-mutator. It is here so those
+  # classes appear in the oracle's multiset at all — measured against four broken
+  # splits, this flag adds no detection the plain run does not already give, so do
+  # not read its presence as coverage of them.
   FILES="tests/stdlib/test_gc_region_release.spr tests/stdlib/test_gc_freelist_reuse.spr tests/stdlib/test_gc_vec_buffer_heap_elems.spr"
   failed=0
   for f in $FILES; do

@@ -343,10 +343,12 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   first, ships alone:** a CI/DoD checker for the irreducible leaf C-extern facts (each tagged
   extern's body invokes no `sprout_make*`/`sprout_alloc*`/`sprout_gc_maybe_collect_threshold`),
   which the inference bottoms out on. Rejected: `@noalloc` annotations, return-type shape, `!{IO}`.
-- [ ] `P3` **GC hardening follow-ups from the phase-2 review.** HDRCHECK region-walk validation (8
-  of 10 kinds have no layout check); `is_large` uniformization (~9 branch sites — do it before the
-  generational step multiplies them); single ownership of the "keep ≥ 1 normal region" invariant;
-  close the OBJ tag-write window by passing the tag into the alloc path.
+- [ ] `P3` **GC hardening follow-ups from the phase-2 review.** HDRCHECK per-kind layout checks —
+  the kind-independent region-walk validation landed 2026-09-26 (boundaries must agree with the
+  slotmap) and VECTOR got an aux-vs-`->data` check with it, leaving 7 of 10 kinds with none;
+  `is_large` uniformization (~9 branch sites — do it before the generational step multiplies them);
+  single ownership of the "keep ≥ 1 normal region" invariant; close the OBJ tag-write window by
+  passing the tag into the alloc path.
 - [ ] `P3` **Region allocator polish** — consider address-mask region lookup (1 MiB-aligned
   regions) to replace the binary search, if the profile shows it.
 - [ ] `P3` **Sweep pass fusion** — pass 3 re-walks every region calling `slot_bytes` per live
@@ -2030,6 +2032,15 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   class-102 slots for the rest of the run. Commit 4535204c measured peak RSS *down* on two shapes,
   so this is a suspected counter-pressure, not a known regression — but no instrument reports
   retained-by-class arena bytes, so neither direction can be checked today.
+- [ ] `P2` **The class freelists are exact-fit, so a reclaimed remainder usually goes unused.**
+  `g_freelist` is indexed by `slot_bytes/16` and `sprout_gc_alloc_block` pops only that class, so a
+  free 4064-byte slot is invisible to the 4080-byte request beside it and to every 32-byte one.
+  This is why `sprout_vec_release_inline_tail` mostly makes bytes *reclaimable* rather than reused:
+  each split mints a class only an identically-sized object can take, and pages return to the OS
+  only when a whole 1 MiB region empties. Two fixes, both reusing machinery that now exists: let a
+  class-k request take a larger free slot and re-carve the remainder (the split writes exactly that
+  header today), or coalesce adjacent FREE slots during the sweep walk that already visits both.
+  Unmeasured — needs the retained-by-class instrument the entry above also wants.
 - [ ] `P2` **The freelists are still wiped and rebuilt from *all* regions every sweep** — a
   prerequisite for the nursery, since a minor collection that marks only young objects but rebuilds
   the whole heap's freelist is not proportional to the young set. Making them generation-scoped

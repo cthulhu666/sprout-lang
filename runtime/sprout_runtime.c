@@ -708,6 +708,10 @@ static inline void sprout_obj_write_tag(void* payload, long long tag, int arity)
 #define SPROUT_SLOTS_PER_REGION (SPROUT_REGION_SIZE / SPROUT_SLOT_GRAN) /* 65536 */
 #define SPROUT_SLOTMAP_BYTES    (SPROUT_SLOTS_PER_REGION / 8)           /* 8192 */
 #define SPROUT_LARGE_THRESHOLD  4096                /* slot_bytes > this → large */
+/* The large/ordinary decision, in one place.  sprout_gc_alloc_block branches on
+ * it and the inline-vector ceiling asserts against it, so "normalising" the
+ * comparison cannot move one without the other. */
+#define SPROUT_SLOT_IS_LARGE(n) ((n) > SPROUT_LARGE_THRESHOLD)
 #define SPROUT_GC_COLOR_BIT     ((uint64_t)0x100)  /* bit 8 = mark color */
 #define SPROUT_FREELIST_CLASSES 257                 /* classes 1..256 + sentinel */
 
@@ -839,6 +843,16 @@ typedef struct {
   uint8_t*  slotmap;    /* 8192-byte bitmap (NULL for is_large) */
   int       is_large;   /* 1 = single large-object region */
 } SproutRegion;
+
+/* Slot index <-> slotmap bit.  One spelling: the sweep's HDRCHECK walk has to
+ * agree with the allocator exactly for the slotmap to be the independent record
+ * it is used as. */
+static inline void slotmap_set(SproutRegion* r, size_t slot_idx) {
+  r->slotmap[slot_idx / 8] |= (uint8_t)(1u << (slot_idx % 8));
+}
+static inline int slotmap_test(const SproutRegion* r, size_t slot_idx) {
+  return (r->slotmap[slot_idx / 8] >> (slot_idx % 8)) & 1;
+}
 
 static SproutRegion* g_regions = NULL;  /* sorted by base address */
 static size_t        g_region_count = 0;
@@ -1287,7 +1301,7 @@ __attribute__((destructor)) static void sprout_gc_profile_dump(void) {
 static void* sprout_gc_alloc_block(SproutHeapKind kind, unsigned long long aux,
                                    size_t payload_bytes, const char* ctx) {
   size_t needed_slot = round16(8 + payload_bytes);
-  if (needed_slot > SPROUT_LARGE_THRESHOLD) {
+  if (SPROUT_SLOT_IS_LARGE(needed_slot)) {
     /* Large object path: dedicated malloc block. */
     char* block = (char*)malloc(needed_slot);
     if (block == NULL) sprout_fail(ctx);
@@ -1346,8 +1360,7 @@ static void* sprout_gc_alloc_block(SproutHeapKind kind, unsigned long long aux,
   r->bump += needed_slot;
   char* slot_base = r->base + off;
   sprout_hdr_write(slot_base + 8, kind, aux);
-  size_t slot_idx = off / SPROUT_SLOT_GRAN;
-  r->slotmap[slot_idx / 8] |= (uint8_t)(1u << (slot_idx % 8));
+  slotmap_set(r, off / SPROUT_SLOT_GRAN);
   g_managed_heap_count++;
   g_managed_alloc_since_gc++;
   if (g_gc_stress == 1 || sprout_gc_lineage_on()) sprout_gc_trace_alloc(slot_base + 8);
@@ -1441,7 +1454,7 @@ static void* sprout_heap_lookup(void* p) {
     return NULL;
   }
   size_t slot = (off - 8) / SPROUT_SLOT_GRAN;  /* slot index of containing slot */
-  if (!(r->slotmap[slot / 8] & (1u << (slot % 8)))) {
+  if (!slotmap_test(r, slot)) {
     SPROUT_PROF_HOT(sprout_prof_note_probe(0));
     return NULL;
   }
@@ -1819,13 +1832,14 @@ static inline int vec_data_is_inline(VectorVal* v) {
 
 /* The ceiling slot is exactly SPROUT_LARGE_THRESHOLD, not under it: a 508-element
  * vector is at once the largest inline slot, the top freelist class (256) and one
- * byte of slack from the large path, which sprout_gc_alloc_block takes on
- * `needed_slot > SPROUT_LARGE_THRESHOLD`.  Normalising that comparison to `>=`,
- * or losing the `- 8` here, silently reroutes every ceiling vector through
- * region_table_insert — the O(live large regions) path this bound exists to
- * avoid, and one no test can see.  Pin it rather than describe it. */
-_Static_assert(((8 + sizeof(VectorVal) + SPROUT_VEC_INLINE_MAX * 8 + 15) & ~(size_t)15)
-                   <= SPROUT_LARGE_THRESHOLD,
+ * byte of slack from the large path.  Either half of that can be broken silently
+ * — losing the `- 8` here, or normalising SPROUT_SLOT_IS_LARGE to `>=` — and both
+ * reroute every ceiling vector through region_table_insert, the O(live large
+ * regions) path this bound exists to avoid.  So the assert runs the allocator's
+ * own predicate over the ceiling slot rather than restating the threshold. */
+#define SPROUT_VEC_CEILING_SLOT \
+  ((8 + sizeof(VectorVal) + SPROUT_VEC_INLINE_MAX * 8 + 15) & ~(size_t)15)
+_Static_assert(!SPROUT_SLOT_IS_LARGE(SPROUT_VEC_CEILING_SLOT),
                "inline vector ceiling must stay on the ordinary-slot path");
 
 static long long* sprout_alloc_vector_data(size_t count, const char* ctx);
@@ -1847,12 +1861,10 @@ static VectorVal* sprout_alloc_vector_sized(size_t count, const char* ctx) {
   if (count == 0) { /* nothing to point at */ }
   else if (inline_count == count) out->data = vec_inline_data(out);
   else out->data = sprout_alloc_vector_data(count, ctx);
-  /* g_debug_alloc_vector counts ALLOCATIONS, not vectors: an inline vector bumps
-   * it once here, an out-of-line one once here and once in
-   * sprout_alloc_vector_data.  It read 2-per-vector unconditionally until
-   * elements were inlined, so a `vector=` figure recorded before that (e.g.
-   * docs/archive/nqueens-optim-iteration-2026-05-28.md) is not comparable
-   * element-for-element with one recorded after. */
+  /* Counts ALLOCATIONS, not vectors: one for an inline vector, two for an
+   * out-of-line one (the second in sprout_alloc_vector_data).  It was 2 for
+   * every vector before inlining, so figures from either side of that do not
+   * compare. */
   if (g_debug_alloc_enabled) g_debug_alloc_vector++;
   return out;
 }
@@ -1880,48 +1892,44 @@ static long long* sprout_realloc_vector_data(long long* data, size_t count, cons
 }
 
 /* Hand the inline area back to the arena when a vector's elements move out of
- * line.  That area is exactly the tail of the slot — the VectorVal ends where it
- * begins — so dropping aux to 0 shrinks the live slot to the 32 bytes the value
- * itself needs, and the remainder becomes a slot in its own right: a FREE header
- * carrying its byte size in aux, with its slotmap bit set.  That is precisely
- * what the sweep leaves behind for any other dead slot, so nothing new has to
- * understand it — sprout_slot_step already walks a FREE slot by that aux, and
- * sprout_gc_sweep re-lists it from the walk like one freed in an earlier cycle.
+ * line.  That area is exactly the tail of the slot, so dropping aux to 0 shrinks
+ * the live slot to the 32 bytes the value needs and the remainder becomes a slot
+ * of its own: a FREE header carrying its byte size in aux, with its slotmap bit
+ * set.  That is what the sweep leaves behind for any dead slot, so nothing new
+ * has to understand it.  Left in place the tail would be dead for the object's
+ * lifetime — 4064 bytes of it for `mutvec_new(508, v)` followed by a push.
  *
- * Without this the vacated bytes stay inside the live vector's slot for the rest
- * of its life: up to 4064 of them for a vector born at the inline ceiling and
- * then pushed onto, which is what `mutvec_new(n, v)` followed by a push does.
- *
- * Listing it on the class freelist here rather than waiting for the sweep is
- * safe because sprout_gc_sweep memsets the lists and rebuilds them from the heap
- * walk, so this entry cannot be double-listed or outlive a released region.  It
- * must NOT go through fl_push_staged: that marks the class touched for the
- * sweep's per-region staging, and a touched flag set outside a region walk is
- * never cleared, which would disable the rollback the freelist depends on.
+ * Listing it now rather than at the next sweep is safe because sprout_gc_sweep
+ * memsets the lists and rebuilds them from the heap walk.  It must NOT go
+ * through fl_push_staged: that marks the class touched for the per-region
+ * staging, and a flag set outside a region walk is never cleared, which would
+ * disable the rollback the freelist depends on.
  *
  * The header is edited, not rewritten: sprout_hdr_write would reset the age and
- * clear the color bit, and this object is surviving, not being re-initialised. */
+ * clear the color bit, and this object is surviving, not being re-initialised.
+ *
+ * Precondition: v's elements are inline (vec_data_is_inline held on entry to the
+ * caller's growth branch), which by SPROUT_VEC_INLINE_MAX puts it in an ordinary
+ * slot of an ordinary region. */
 static void sprout_vec_release_inline_tail(VectorVal* v) {
   char* hdr_addr = (char*)v - 8;
   uint64_t h;
   memcpy(&h, hdr_addr, 8);
-  if (sprout_hdr_kind(h) != SPROUT_HEAP_VECTOR) return;
   size_t old_slot = slot_bytes(SPROUT_HEAP_VECTOR, sprout_hdr_aux(h));
   size_t new_slot = slot_bytes(SPROUT_HEAP_VECTOR, 0);
-  if (old_slot <= new_slot) return;              /* was never inline */
   SproutRegion* r = region_find(v);
-  /* An inline vector is always an ordinary slot (that is what the bound buys),
-   * so this holds; if it ever did not, leaving the slot over-sized is correct
-   * and only wasteful, while splitting a large block is not. */
-  if (r == NULL || r->is_large || r->slotmap == NULL) return;
+  /* Loud, not a fallback: returning here would leave aux non-zero over
+   * out-of-line data, and the next sweep under HDRCHECK aborts on exactly that,
+   * a mile from the cause.  Failing at the cause is the cheaper diagnosis. */
+  if (old_slot <= new_slot || r == NULL || r->is_large || r->slotmap == NULL)
+    sprout_fail("vector_push: inline vector is not in an ordinary slot");
   h &= ((uint64_t)1 << 14) - 1;                  /* aux := 0, keep kind/color/age */
   memcpy(hdr_addr, &h, 8);
   size_t rest = old_slot - new_slot;             /* a multiple of 16, >= 16 */
   char* tail = hdr_addr + new_slot;
   uint64_t free_hdr = (uint64_t)SPROUT_HEAP_FREE | ((uint64_t)rest << 14);
   memcpy(tail, &free_hdr, 8);
-  size_t slot_idx = (size_t)(tail - r->base) / SPROUT_SLOT_GRAN;
-  r->slotmap[slot_idx / 8] |= (uint8_t)(1u << (slot_idx % 8));
+  slotmap_set(r, (size_t)(tail - r->base) / SPROUT_SLOT_GRAN);
   size_t cls = rest / SPROUT_SLOT_GRAN;
   if (cls >= 1 && cls < SPROUT_FREELIST_CLASSES) {
     void* payload = tail + 8;
@@ -2254,6 +2262,24 @@ static inline size_t sprout_slot_step(uint64_t h) {
   return slot_bytes((SproutHeapKind)kind_bits, h >> 14);
 }
 
+/* Index of the first slot start in [from, to), or `to` if there is none.
+ * Word- then byte- then bit-wise: the HDRCHECK walk runs this over the interior
+ * of every slot it visits, which is 255 bit tests for a 4096-byte slot done
+ * naively, and one zero 64-bit word clears 64 slots. */
+static size_t slotmap_next_start(const SproutRegion* r, size_t from, size_t to) {
+  size_t k = from;
+  while (k < to && (k % 8) != 0) { if (slotmap_test(r, k)) return k; k++; }
+  while (k + 64 <= to) {
+    uint64_t w;
+    memcpy(&w, r->slotmap + k / 8, sizeof(w));
+    if (w != 0) break;
+    k += 64;
+  }
+  while (k + 8 <= to && r->slotmap[k / 8] == 0) k += 8;
+  while (k < to) { if (slotmap_test(r, k)) return k; k++; }
+  return to;
+}
+
 /* Is this header's kind byte one the walk knows how to size?  Only used by the
  * HDRCHECK assertion in the sweep: an unknown kind means the walk has stepped
  * into the middle of a slot and is reading a payload word as a header. */
@@ -2501,8 +2527,8 @@ static void sprout_fl_verify_against_full_walk(void) {
 }
 
 /* Region-walking mark-sweep collector.  Pass 1: process every slot in every
- * region (live → clear color; dead → release extras + write FREE header + clear
- * slotmap, OR poison in lineage mode) while staging that region's FREE slots
+ * region (live → clear color; dead → release extras + write FREE header, KEEPING
+ * the slotmap bit set, OR poison in lineage mode) while staging that region's FREE slots
  * onto the per-class freelists.  Pass 2: release every region with no live and
  * no poison, dropping its staged freelist entries.  There is no third pass —
  * the freelists are complete when Pass 1 ends. */
@@ -2567,29 +2593,21 @@ static void sprout_gc_sweep(void) {
       uint64_t h; memcpy(&h, r->base + off, 8);
       size_t ssize = sprout_slot_step(h);
       uint64_t kind_bits = h & 0xFF;
-      /* HDRCHECK: a walk that steps by a wrong size is what every aux invariant
-       * in this file exists to prevent, and it corrupts silently — the
+      /* HDRCHECK: a walk that steps by a wrong size corrupts silently — the
        * misaligned read lands in a payload word, and measured on this suite a
-       * 16-byte desync reads as a plausible run of small CSTRs and then ends on
-       * the bump, so neither the kind byte nor the bump bound catches it.
-       *
-       * The slotmap does, because it is an INDEPENDENT record of where slots
-       * start: set at allocation, kept through FREE and POISON, and never
-       * cleared or re-carved.  So the walk's boundaries must agree with it
-       * exactly — a bit at every offset the walk stops on (else the step was too
-       * short and we are inside a slot) and no bit strictly inside a step (else
-       * it was too long and a slot was skipped).  Both directions are needed:
-       * the mutation that skipped exactly one 16-byte slot passed every other
-       * check here.  Cost is one bit test per slot per sweep, HDRCHECK only. */
+       * 16-byte desync skips one small slot, reads as a plausible run of CSTRs
+       * and ends neatly on the bump, so neither the kind byte nor the bump bound
+       * sees it.  The slotmap does: it records where slots start, is never
+       * cleared or re-carved, and so must agree with the walk in BOTH directions
+       * — a bit where the walk stops, no bit strictly inside a step. */
       size_t walk_slot = off / SPROUT_SLOT_GRAN;
       if (hdrcheck_on) {
-        int start_ok = (r->slotmap[walk_slot / 8] >> (walk_slot % 8)) & 1;
-        size_t skipped = 0;
+        int start_ok = slotmap_test(r, walk_slot);
         size_t end_slot = (off + ssize) / SPROUT_SLOT_GRAN;
-        if (end_slot > r->bump / SPROUT_SLOT_GRAN) end_slot = r->bump / SPROUT_SLOT_GRAN;
-        for (size_t k = walk_slot + 1; k < end_slot; k++) {
-          if ((r->slotmap[k / 8] >> (k % 8)) & 1) { skipped = k * SPROUT_SLOT_GRAN; break; }
-        }
+        size_t bump_slot = r->bump / SPROUT_SLOT_GRAN;
+        if (end_slot > bump_slot) end_slot = bump_slot;
+        size_t next = slotmap_next_start(r, walk_slot + 1, end_slot);
+        size_t skipped = (next < end_slot) ? next * SPROUT_SLOT_GRAN : 0;
         if (!start_ok || skipped != 0 || !sprout_slot_kind_known(kind_bits) ||
             off + ssize > r->bump) {
           fprintf(stderr,
@@ -2622,13 +2640,12 @@ static void sprout_gc_sweep(void) {
        * tail be handed out while it still sits inside this slot. */
       if (hdrcheck_on && kind == SPROUT_HEAP_VECTOR) {
         VectorVal* hv = (VectorVal*)payload;
-        int inline_data = hv->data == (long long*)((char*)hv + sizeof(VectorVal));
+        int inline_data = vec_data_is_inline(hv);
         if ((aux != 0) != (inline_data != 0)) {
           fprintf(stderr,
                   "[sprout] HDRCHECK: VECTOR aux/data disagree at sweep: aux=%llu "
                   "data=%p inline=%p len=%lld cap=%lld\n",
-                  aux, (void*)hv->data, (void*)((char*)hv + sizeof(VectorVal)),
-                  hv->len, hv->cap);
+                  aux, (void*)hv->data, (void*)vec_inline_data(hv), hv->len, hv->cap);
           abort();
         }
       }
@@ -8720,11 +8737,14 @@ long long vector_push(long long vec, long long value) {
       long long* moved = sprout_alloc_vector_data((size_t)new_cap, "vector_push: out of memory");
       if (v->len > 0) memcpy(moved, v->data, (size_t)v->len * sizeof(long long));
       v->data = moved;
-      /* The words left behind are not zeroed, unlike vector_truncate's: they
-       * stop being part of this object entirely.  They become the payload of a
-       * FREE slot, and no scanner reads a FREE slot's payload — the sweep steps
-       * over it by its header, and sprout_heap_lookup rejects a pointer into it
-       * by kind, which is what makes every other freed slot safe to leave dirty. */
+      /* Not zeroed, unlike vector_truncate's vacated slots, and the difference
+       * is which object owns them.  Truncate's stay inside a LIVE vector as
+       * spare capacity, where a future scanner sizing by ->cap would read them;
+       * these leave the object entirely and become a FREE slot's payload, which
+       * every sweep in the heap already leaves dirty — the sweep steps over a
+       * FREE slot by its header and sprout_heap_lookup rejects it by kind.
+       * Zeroing here would buy nothing the rest of the heap does not already
+       * decline to buy. */
       sprout_vec_release_inline_tail(v);
     } else {
       v->data = sprout_realloc_vector_data(v->data, (size_t)new_cap, "vector_push: out of memory");
