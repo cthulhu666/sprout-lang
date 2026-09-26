@@ -42,6 +42,10 @@
  * box_ptr / unbox_ptr compiling without cascading pointer-cast changes. */
 typedef void SproutObj;
 
+/* Adding a kind means editing THREE places: this enum, slot_bytes (its slot
+ * size) and sprout_slot_kind_known (the HDRCHECK walk's "is this a header at
+ * all" test).  Miss the third and the sweep aborts on the first slot of the new
+ * kind — under a flag CI sets job-wide, so the first sign is every job red. */
 typedef enum {
   SPROUT_HEAP_FREE = 0,   /* slot on a class freelist; header aux = slot_bytes */
   SPROUT_HEAP_OBJ = 1,
@@ -1841,6 +1845,15 @@ static inline int vec_data_is_inline(VectorVal* v) {
   ((8 + sizeof(VectorVal) + SPROUT_VEC_INLINE_MAX * 8 + 15) & ~(size_t)15)
 _Static_assert(!SPROUT_SLOT_IS_LARGE(SPROUT_VEC_CEILING_SLOT),
                "inline vector ceiling must stay on the ordinary-slot path");
+/* The ceiling is also a magic number in a test: tests/stdlib/
+ * test_gc_vec_buffer_heap_elems.spr picks 508/509/506/504 by hand to sit at the
+ * boundary, one past it, one class above the largest tail and exactly on it.
+ * Widening VectorVal moves all four silently — the file would still pass 36
+ * assertions while testing none of the cases it names — so fail the build here
+ * and send the reader there. */
+_Static_assert(SPROUT_VEC_INLINE_MAX == 508,
+               "inline ceiling moved: update the element counts in "
+               "tests/stdlib/test_gc_vec_buffer_heap_elems.spr with it");
 
 static long long* sprout_alloc_vector_data(size_t count, const char* ctx);
 
@@ -1918,11 +1931,15 @@ static void sprout_vec_release_inline_tail(VectorVal* v) {
   size_t old_slot = slot_bytes(SPROUT_HEAP_VECTOR, sprout_hdr_aux(h));
   size_t new_slot = slot_bytes(SPROUT_HEAP_VECTOR, 0);
   SproutRegion* r = region_find(v);
-  /* Loud, not a fallback: returning here would leave aux non-zero over
-   * out-of-line data, and the next sweep under HDRCHECK aborts on exactly that,
-   * a mile from the cause.  Failing at the cause is the cheaper diagnosis. */
-  if (old_slot <= new_slot || r == NULL || r->is_large || r->slotmap == NULL)
-    sprout_fail("vector_push: inline vector is not in an ordinary slot");
+  /* Loud, not fallbacks: each of these would leave aux disagreeing with ->data,
+   * and the next sweep under HDRCHECK aborts on exactly that, a mile from the
+   * cause.  One message per cause, so the abort names which one. */
+  if (vec_data_is_inline(v))
+    sprout_fail("vector_push: inline tail released before the elements were moved out");
+  if (old_slot <= new_slot)
+    sprout_fail("vector_push: vector header records no inline elements to release");
+  if (r == NULL || r->is_large || r->slotmap == NULL)
+    sprout_fail("vector_push: inline vector is not in an ordinary region");
   h &= ((uint64_t)1 << 14) - 1;                  /* aux := 0, keep kind/color/age */
   memcpy(hdr_addr, &h, 8);
   size_t rest = old_slot - new_slot;             /* a multiple of 16, >= 16 */
@@ -1933,6 +1950,11 @@ static void sprout_vec_release_inline_tail(VectorVal* v) {
   size_t cls = rest / SPROUT_SLOT_GRAN;
   if (cls >= 1 && cls < SPROUT_FREELIST_CLASSES) {
     void* payload = tail + 8;
+    /* The lineage anchor every other freelist push has (the sweep calls it just
+     * before fl_push_staged).  Without it `just gc-trace` shows the next object
+     * allocated here as a first allocation, hiding that it aliases a vector's
+     * old inline area — the aliasing that tool exists to find. */
+    if (g_gc_stress == 1 || sprout_gc_lineage_on()) sprout_gc_trace_free(payload);
     memcpy(payload, &g_freelist[cls], sizeof(void*));  /* next-ptr in word 0 */
     g_freelist[cls] = payload;
   }
@@ -2606,15 +2628,21 @@ static void sprout_gc_sweep(void) {
         size_t end_slot = (off + ssize) / SPROUT_SLOT_GRAN;
         size_t bump_slot = r->bump / SPROUT_SLOT_GRAN;
         if (end_slot > bump_slot) end_slot = bump_slot;
-        size_t next = slotmap_next_start(r, walk_slot + 1, end_slot);
-        size_t skipped = (next < end_slot) ? next * SPROUT_SLOT_GRAN : 0;
-        if (!start_ok || skipped != 0 || !sprout_slot_kind_known(kind_bits) ||
+        /* A one-slot step has no interior, and 16- and 32-byte slots are most of
+         * the heap, so this skips the scan for the majority of slots. */
+        size_t interior = (ssize > SPROUT_SLOT_GRAN)
+                              ? slotmap_next_start(r, walk_slot + 1, end_slot)
+                              : end_slot;
+        int skipped_a_start = interior < end_slot;
+        if (!start_ok || skipped_a_start || !sprout_slot_kind_known(kind_bits) ||
             off + ssize > r->bump) {
           fprintf(stderr,
                   "[sprout] HDRCHECK: slot walk desync at region %p off=%zu: "
-                  "kind=%llu step=%zu bump=%zu start_bit=%d skipped_start=%zu\n",
+                  "kind=%llu step=%zu bump=%zu start_bit=%d skipped_a_start=%d "
+                  "skipped_start_off=%zu\n",
                   (void*)r->base, off, (unsigned long long)kind_bits, ssize, r->bump,
-                  start_ok, skipped);
+                  start_ok, skipped_a_start,
+                  skipped_a_start ? interior * SPROUT_SLOT_GRAN : (size_t)0);
           abort();
         }
       }
@@ -2684,7 +2712,7 @@ static void sprout_gc_sweep(void) {
         }
         sprout_gc_invalidate_singleton(h, payload);
 
-        if (sprout_gc_hdrcheck_on() && kind == SPROUT_HEAP_CSTR) {
+        if (hdrcheck_on && kind == SPROUT_HEAP_CSTR) {
           size_t actual_len = strlen((const char*)payload);
           if (aux != (unsigned long long)actual_len) {
             fprintf(stderr, "[sprout] HDRCHECK: CSTR aux mismatch at sweep: hdr_aux=%llu strlen=%zu\n",

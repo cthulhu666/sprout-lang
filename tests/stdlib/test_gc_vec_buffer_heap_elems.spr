@@ -27,6 +27,10 @@ import stdlib.mutable (MutVec, mutvec_new, mutvec_empty, mutvec_push, mutvec_at,
 # growing it frees 16 bytes, the smallest slot there is, whose payload is exactly
 # the 8 bytes the free-list next-pointer needs.
 #
+# A `_Static_assert` beside SPROUT_VEC_INLINE_MAX fails the build if that ceiling
+# ever moves, naming this file — widening VectorVal would otherwise slide all
+# five counts into ordinary interior cases with every assertion still green.
+#
 # Like test_gc_freelist_reuse.spr, the heap-internal half of this file is DRIVEN
 # here and CHECKED by the runtime. Measured against four broken versions of the
 # inline-tail release, each run four ways (2026-09-26):

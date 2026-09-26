@@ -275,9 +275,9 @@ before trusting it — `SPROUT_GC_HDRCHECK=1 just test` reproduces CI.
 
 The flag also makes the **sweep** costlier: since 2026-09-26 it checks every slot boundary against
 the slotmap. Measured on `--emit-ir stdlib/compiler/ast_to_ir.sprout`, interleaved, min of 5:
-2.27s with the flag off, 2.43s on without that check, 2.70s on with it — the check is +11% and the
-flag as a whole +19%. So a collection-heavy arm pays a constant factor on CI it does not pay
-locally. Same rule, same reproduction command.
+2.18s with the flag off, 2.44s on without that check, 2.60s on with it — the walk check is +6% and
+the flag as a whole +19%, most of it the older CSTR `strlen`. So a collection-heavy arm pays a
+constant factor on CI it does not pay locally. Same rule, same reproduction command.
 
 **`gc_swept` is the load-bearing counter, not `sprout_obj`.** Verified by building the probe against
 the pre-fix `grapheme`: objects came out *identical* at 18 per cell, swept at 106 against 42.
