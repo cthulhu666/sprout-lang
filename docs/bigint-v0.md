@@ -121,8 +121,8 @@ working program depends on.
 
 Rooting is the cost that gets named first. It is not the worst one.
 
-1. **The C runtime boxes raw `Int`s throughout.** `runtime/sprout_runtime.c:9010`,
-   `bytes_get`, is representative: `sprout_make1(find_ctor_tag_by_name("Just"), (long
+1. **The C runtime boxes raw `Int`s throughout.** `bytes_get` in
+   `runtime/sprout_runtime.c` is representative: `sprout_make1(find_ctor_tag_by_name("Just"), (long
    long)value->data[index])` — a raw C integer stored straight into a heap object. There are
    **170** exported `long long` functions and **73** stdlib `extern fn` signatures mentioning
    `Int`. The compiler can insert untagging at extern call sites, because it knows the
@@ -953,7 +953,7 @@ Normative once Stage 1 lands. The spec changes:
 
 `docs/int-overflow-policy-decision.md` moves from OPEN to decided, recording Option A and the
 escape hatch that unblocked it. Its §1 also carries a stale claim — "the interpreter uses host
-bignum arithmetic" — which is false: `repl_eval_expr` in `runtime/sprout_runtime.c:5114` aborts
+bignum arithmetic" — which is false: `repl_eval_expr` in `runtime/sprout_runtime.c` aborts
 with "not supported in native backend", and the i64 lowering is the only implementation. Corrected
 in the same pass.
 

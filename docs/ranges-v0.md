@@ -234,9 +234,9 @@ is needed for the fix.
 Requires direction in the value, which two fields cannot hold alongside emptiness. Everything in
 Package A, plus:
 
-- `IntRangeVal` gains `long long step` (`runtime/sprout_runtime.c:122`). The GC block size derives
-  from `sizeof` (`:1081`) and the type has zero pointer slots (`:1876`), so tracing stays at zero
-  traced children — no GC change.
+- `IntRangeVal` gains `long long step` (`runtime/sprout_runtime.c`). The GC block size derives
+  from `sizeof` (`slot_bytes`) and the type has zero pointer slots
+  (`sprout_heap_child_count_payload`), so tracing stays at zero traced children — no GC change.
 - `int_range` gains a step parameter, or a new 3-arg extern joins it. Either way
   `runtime/APPROVED_BUILTINS:80-82` is amended and **explicit approval is required** per AGENTS.md
   "Builtin vs Stdlib" rules 4-6.
@@ -643,7 +643,7 @@ symmetric constructors would need no new builtin and no approval.
 **The load-bearing assumption is false.** Records are never registered with the runtime:
 `ast_to_ir.sprout:551-558` passes `regs` through unchanged, commenting *"Not added to regs — GC
 tracing is header-driven (arity in the object header), so no runtime ctor registration is needed."*
-`find_ctor_tag_by_name` (`runtime/sprout_runtime.c:2678-2692`) therefore ends in
+`find_ctor_tag_by_name` (`runtime/sprout_runtime.c`) therefore ends in
 `sprout_fail("constructor metadata not registered")`. **C cannot construct a record by name.**
 
 That is survivable — `stdlib/regex.sprout:32` is the only consumer of `regex_find_range` and
@@ -651,8 +651,8 @@ converts to a `Match` ADT immediately, so the three externs could move under an 
 with zero C change. But three further costs are not:
 
 1. **GC tracing gets worse.** `SPROUT_HEAP_RANGE` traces **zero** children
-   (`sprout_runtime.c:1934`). An arity-3 record reports 3, so three `Int`s are pointer-tested on
-   every mark.
+   (`sprout_heap_child_count_payload`). An arity-3 record reports 3, so three `Int`s are
+   pointer-tested on every mark.
 2. **Ctor-tag renumbering.** A prelude record consumes a tag (`ast_to_ir.sprout:553`,
    `next_tag + 1`) and the prelude bundles first, so *every subsequent tag in every program* shifts
    by one — visible in every `sprout_register_ctor` and `sprout_alloc_obj`. All 60 goldens change

@@ -323,7 +323,7 @@ exactly-once, and the missing half comes from the runtime contract: `stdlib/task
 `with_scope` binds its body's result with `let` rather than `<-` specifically so `__scope_join` is
 unconditional, so every spawned task runs before the scope closes.
 
-**That contract has one hole, and it is pre-existing.** `runtime/sprout_scheduler.c:671` —
+**That contract has one hole, and it is pre-existing.** In `runtime/sprout_scheduler.c`,
 `__scope_cancel` walks parked tasks and force-drops them, freeing their roots, and a spawned task
 does not start until the current task yields. A cancelled task's closure can therefore run zero
 times, and a moved-in connection is never closed.

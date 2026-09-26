@@ -555,7 +555,7 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   `url.decode_bytes`. `bigint.builder_of_mag` and `net.read_exact_by` work around it by halving.
 
 - [ ] `P2` **`bytes.singleton` and `bytes.builder_byte` are partial**, trapping via `sprout_fail`
-  on a value outside 0..255 (`sprout_runtime.c:9129`, `:9285`). `docs/guidelines.md` §2 makes
+  on a value outside 0..255 (`bytes_singleton`, `bytes_builder_byte`). `docs/guidelines.md` §2 makes
   totality a hard mandate for [Library] code, so two stdlib exports currently break it. The sibling
   `builder_u16_be`/`builder_u32_be` take the other branch and wrap silently, so the module is also
   inconsistent with itself about an out-of-range byte. Decide one answer for all four — `Maybe
@@ -2238,13 +2238,13 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
 - [ ] `P2` **There is no `Char -> Int`.** The prelude declares `char_from_codepoint : Int -> Char`
   and nothing going the other way, so a `Char` can be compared and printed but never *measured* —
   any character-property API (width, category, grapheme class, `is_digit` on a non-ASCII digit) is
-  unwritable over `Char`. **The value is already there:** `sprout_runtime.c:6441` says outright that
-  a Char IS its codepoint as an immediate i64, so `char_codepoint : Char -> Int` is the same
-  identity function with the arrow reversed and needs no new runtime capability. Workaround in use:
-  `stdlib/unicode` decodes UTF-8 to `List Int` itself and keys every entry point on `Int`; where a
-  numeric value must come out of a character, the house idiom is an index into an alphabet string,
-  which works for 62 known characters and does not generalise. Blocks a `Char`-shaped public API for
-  `stdlib/unicode` and `stdlib/tui`'s per-cell width lookups.
+  unwritable over `Char`. **The value is already there:** `char_from_codepoint` (`sprout_runtime.c`)
+  says outright that a Char IS its codepoint as an immediate i64, so `char_codepoint : Char -> Int`
+  is the same identity function with the arrow reversed and needs no new runtime capability.
+  Workaround in use: `stdlib/unicode` decodes UTF-8 to `List Int` itself and keys every entry point
+  on `Int`; where a numeric value must come out of a character, the house idiom is an index into an
+  alphabet string, which works for 62 known characters and does not generalise. Blocks a
+  `Char`-shaped public API for `stdlib/unicode` and `stdlib/tui`'s per-cell width lookups.
 - [ ] `P2` **A String containing U+0000 is silently corrupt: the length header and the bytes
   disagree.** Sprout Strings are NUL-terminated C strings with a length in the heap header, and
   `string_from_char(char_from_codepoint(0))` writes a header saying 1 byte over content whose

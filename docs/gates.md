@@ -242,6 +242,27 @@ Added 2026-09-11 for a specific class: LLVM passes that break the `musttail` inv
 A fixture belongs here when its *shape* is what provokes the optimizer, not its output; assert
 nothing about what it prints, and keep it small enough that the IR is readable when it fires.
 
+## Runtime line refs — `just runtime-line-refs`
+
+Rejects `sprout_runtime.c:NNNN`-style citations of the C runtime anywhere but `docs/archive/`, which
+is exempt because a retrospective records what was believed when it was written. Cite the identifier;
+grep finds it wherever it moved.
+
+Added 2026-09-26 with the sweep that made it green. The runtime is append-mostly, so a line number
+drifts in one direction and never back: of the 47 refs then live, 25 named an identifier near the
+citation and **15 of those 25 pointed at the wrong place**, by 14 to 75 lines — `VectorVal` cited at
+`:91` and living at `:105`, `repl_eval_expr` cited at `:5114` and living at `:5189`. The other 22
+named no identifier at all, so they were unverifiable by a gate *and* by a reader: there was nothing
+to search for. Every wrong ref pointed earlier than the truth, which is the signature of a file that
+only grows.
+
+**Its blind spot is the bare continuation ref** — `:1052` a clause after a real citation. Same
+defect, but the pattern cannot be matched without also matching times, ports and version numbers.
+The sweep removed the ones sitting beside a named ref; thirteen survive in
+`docs/gc-header-rewrite-handoff-2026-07-03.md`, whose subject layout (`ManagedNode`, the heap index)
+was deleted, so there is no identifier left to name. `.sprout` line refs — several hundred — are out
+of scope.
+
 ## Render cost — `just render-cost-gate`
 
 Paints 20 frames of a 200×50 screen through the real stack (`tests/cost/render_frame.sprout`) under

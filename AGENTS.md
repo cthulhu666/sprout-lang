@@ -100,6 +100,11 @@ Both hooks scope to the worktree named by the session's `cwd`. Budgets, failure 
 3. If new follow-up work is discovered during implementation, add it to the appropriate roadmap/TODO section with concise scope, under the shape rule in "Backlog Discipline".
 4. `docs/spec-v0.md` is the normative source of truth for the stable Sprout core; supporting design docs explain rationale and tradeoffs but do not override it.
 5. If a change alters syntax, semantics, typing rules, evaluation order, visibility/export rules, or diagnostics expectations, update the relevant spec/docs before considering the task complete.
+6. **Cite C runtime code by identifier, never by line number.** `sprout_gc_alloc_block` in
+   `runtime/sprout_runtime.c`, not that file plus a line number. The runtime is append-mostly, so a line
+   number drifts one way and never back: 15 of the 25 checkable refs were wrong by 14–75 lines when
+   this rule landed, and 22 more named no identifier at all, leaving nothing to grep for.
+   `just runtime-line-refs` enforces it.
 
 ## Backlog Discipline
 

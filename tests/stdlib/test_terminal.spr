@@ -21,7 +21,7 @@ import stdlib.terminal as terminal
 #   term_read_key_once / term_read_line_once — these block on stdin.
 #
 # term_is_interactive_once's VALUE is deliberately not asserted: it is
-# `isatty(stdin) && isatty(stdout)` (sprout_runtime.c:3292), so it is false under
+# `isatty(stdin) && isatty(stdout)` (`term_is_interactive`), so it is false under
 # the piped harness but true if the binary is run by hand on a terminal. Pinning
 # it either way would make the suite environment-dependent.
 

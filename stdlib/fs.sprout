@@ -21,7 +21,7 @@ extern fn read_file(path: String) -> Result String String !{IO}
 extern fn write_file(path: String, content: String) -> Result String Unit !{IO}
 
 # The names say `text`, not `file`, because that is the real contract. `read_file` runs
-# `utf8_validate` over the whole buffer before it hands anything back (sprout_runtime.c:2984) and
+# `utf8_validate` over the whole buffer before it hands anything back (sprout_runtime.c) and
 # reports the decode failure as `Err` — so this pair genuinely cannot read a binary file, and the
 # name should say so rather than implying a general reader. It also leaves honest room for a
 # bytes-valued pair later; stdlib.process reached exactly that point with subprocess output (see

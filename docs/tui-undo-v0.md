@@ -177,8 +177,9 @@ fn area_key(a: Area m, k: event.Key, mods: event.Mods) -> Reply m =
 So binding is the application's job, and in the IDE that means `ide/keymap.sprout` gains `Undo` and
 `Redo` beside `Save`, routed to the pane the way `Save` is.
 
-ctrl-z is available: the TUI clears `ISIG` (`runtime/sprout_runtime.c:3854`), so ctrl-z arrives as a
-key rather than `SIGTSTP` — the same line that makes ctrl-C bindable, for the same stated reason
+ctrl-z is available: the TUI clears `ISIG` (`term_raw_enter` in
+`runtime/sprout_runtime.c`), so ctrl-z arrives as a key rather than `SIGTSTP` — the
+same line that makes ctrl-C bindable, for the same stated reason
 ("an editor has to be able to bind it").
 
 **Redo is ctrl-y, not ctrl-shift-z.** The legacy encoding sends one control character for both, so

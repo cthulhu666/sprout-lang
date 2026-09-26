@@ -16,7 +16,7 @@ the screen and re-writing every line, and decodes keys by string-matching the na
 Two consequences worth naming:
 
 - **Escape-sequence decoding still lives in C and is wrong.** `term_read_key`
-  (`runtime/sprout_runtime.c:3695`) recognises exactly `ESC [ A/B/C/D`. Given `ESC [ 1;5C`
+  (`runtime/sprout_runtime.c`) recognises exactly `ESC [ A/B/C/D`. Given `ESC [ 1;5C`
   (ctrl-right) it reads `ESC`, `[`, `1`, matches nothing, restores termios and falls through to
   the byte dispatch, which returns `"escape"` — leaving `;5C` in the tty buffer to surface as
   three fake keypresses. Nothing tests this, because a C function reading fd 0 is not reachable
