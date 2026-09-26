@@ -101,6 +101,11 @@ Two facts make the C safe, and both are load-bearing rather than incidental:
 - `sprout_realloc_vector_data` is a plain `realloc` and never calls
   `sprout_gc_maybe_collect_threshold`, so no collection can run mid-call and neither argument needs
   rooting.
+- Since 2026-09-25 a vector of up to 508 elements holds its elements **inside its own slot**, so
+  the first growth past that capacity cannot `realloc` — that memory was never handed out by
+  `malloc`. `vector_push` copies to a fresh buffer instead and zeroes what it vacates, because the
+  vacated words sit in a slot the sweep walks and stale handles there would outlive what they name.
+  `mutvec_new(n, v)` reaches this path for any `n <= 508`; only `mutvec_empty` starts out of line.
 
 The second fact has a consequence worth stating: pushes alone never trip the collection threshold,
 because the backing array is plain `malloc` and invisible to an object-count-based trigger (the

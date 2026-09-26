@@ -133,7 +133,10 @@ bench/nqueens/bin/nqueens_go bitmask 13 14 15 16 17
 
 ## Results
 
-Measured on Apple M1 (arm64-darwin), 2026-09-25, one machine and one session.
+Measured on Apple M1 (arm64-darwin), 2026-09-25, one machine and one session —
+except the group-1 Sprout row, re-measured 2026-09-26 after element inlining
+landed, interleaved against Go in that session (Go re-read 63.7 / 378.4 ms
+against its recorded 64 / 381, so the two sessions are comparable).
 Compiled languages are execution-only. **Every N=12 and N=13 figure is a median
 of interleaved runs** — 5 for the compiled group-1 and group-3 entries, 3 for
 the interpreted ones and group 2; the smaller-N progression is a single pass.
@@ -148,7 +151,7 @@ next hands the second a differently-heated machine, which produced a spurious
 | Go — `[]bool` + copy | 64 | 381 | 1.0× |
 | Haskell — `UArray Int Bool` (unboxed) | 96 | 556 | 1.5× |
 | Haskell — `Array Int Bool` (boxed) | 162 | 945 | 2.5× |
-| **Sprout — `Vec Bool`** | **240** | **1,423** | **3.7×** |
+| **Sprout — `Vec Bool`** | **196** | **1,157** | **3.1×** |
 | Ruby — `Array#dup` | 1,215 | 6,986 | 19× |
 | Python — `list[:]` | 1,612 | 8,574 | 25× |
 
@@ -238,23 +241,28 @@ well as Go's does.
 
 ### Why Sprout trails on the persistent representation
 
-3.7× behind Go and 2.5× behind Haskell's unboxed `UArray`, and the cost is
-allocation, not codegen. Each `vec_set` allocates **three** objects: the `Vec`
-constructor wrapper, the `VectorVal` header, and the `long long*` backing array.
-That is 16.7M placements × 3 = 50.1M allocations at N=1..13.
+3.1× behind Go and 2.0× behind Haskell's unboxed `UArray`, and the cost is
+allocation, not codegen. Each `vec_set` allocates **two** objects: the `Vec`
+constructor wrapper and the `VectorVal`, which since 2026-09-25 carries its
+elements inside its own slot. That is 16.7M placements × 2 = 33.4M allocations
+at N=1..13.
 
-A CPU profile of the whole-program-linked binary attributes ~41% of samples to
-the GC and allocator, and **~23% to `libsystem_malloc` plus `madvise` alone**.
-That share has a specific cause: `Vec` backing arrays are the one payload the GC
-does not slot-allocate. `sprout_alloc_vector_data` calls bare `malloc`
-(`runtime/sprout_runtime.c`) and the sweep calls `free(v->data)` in
-`sprout_release_payload_extras`, so every `vec_set` is a full round-trip to the
-system allocator, while every OBJ, CLOSURE, TUPLE and MAP is a freelist pop
-inside a region.
+It was three, and 50.1M. The third was the `long long*` element buffer, the one
+payload the GC did not slot-allocate: `sprout_alloc_vector_data` called bare
+`malloc` and the sweep called `free(v->data)`, so every `vec_set` made a full
+round-trip to the system allocator while every OBJ, CLOSURE, TUPLE and MAP was a
+freelist pop inside a region. That round-trip was ~23% of CPU
+(`libsystem_malloc` plus `madvise`). Inlining removed it for vectors up to 508
+elements — the largest that keeps the slot under `SPROUT_LARGE_THRESHOLD` — and
+this benchmark's are 12–27. Peak RSS fell too, since one allocation per vector
+retires the malloc heap's own bookkeeping.
 
-Pooling those backing arrays in the runtime is therefore the next lever for this
-representation. Note it is new mutable runtime state, so it belongs in a
-per-heap struct rather than another file-scope global.
+Two levers are left, and they are independent. The `Vec` constructor wrapper is
+still a separate one-field box around a `VectorVal` that already has a header —
+half of what remains, and a representation change rather than a runtime one. And
+GC rooting is ~20% of the whole-program-linked binary; the recursive `queens(…)`
+re-roots three vectors its caller already holds, which is a precision problem for
+the liveness pass in `stdlib/compiler/ir_rooting.sprout`.
 
 Two claims that used to be in this section are now wrong and have been removed:
 that GC root push/pop is ~44% of CPU (whole-program linking inlines both
