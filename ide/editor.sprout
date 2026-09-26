@@ -487,5 +487,5 @@ export fn editor_with(id: widget.WidgetId,
                       opts: EditorOpts m) -> widget.Widget m =
   pane_widget(Pane(id = id, opts = opts, doc = document.scratch(),
                    body = buffer.buffer_open(""), has_focus = false,
-                   wanted = version.origin(), shown = version.origin(),
+                   wanted = version.origin, shown = version.origin,
                    writing = false, quiet = 0, refused = false))

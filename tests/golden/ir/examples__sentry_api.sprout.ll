@@ -170,12 +170,12 @@ declare i64 @http_request(i64, i64, i64, i64, i64)
 @.str.67 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1756, column 58)\00" }
 @.str.68 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 1782, column 10)\00" }
 @.str.69 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 1782, column 28)\00" }
-@.str.70 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1791, column 35)\00" }
-@.str.71 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1791, column 61)\00" }
+@.str.70 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1791, column 33)\00" }
+@.str.71 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1791, column 57)\00" }
 @.str.72 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1792, column 25)\00" }
 @.str.73 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1793, column 10)\00" }
 @.str.74 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1800, column 81)\00" }
-@.str.75 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1804, column 52)\00" }
+@.str.75 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1804, column 50)\00" }
 @.str.76 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
 @.str.77 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in / (line 1811, column 17)\00" }
 @.str.78 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 1812, column 41)\00" }
@@ -710,8 +710,12 @@ declare i64 @http_request(i64, i64, i64, i64, i64)
 @.cname.44 = private unnamed_addr constant [32 x i8] c"examples.sentry_api.IssueDetail\00"
 @.cfkinds.44 = private unnamed_addr constant [4 x i8] c"ppp\00"
 @pow10_clamp = private constant i64 400
+@max_int = private constant i64 9223372036854775807
 @pow10_exact_max = private constant i64 22
+@pow10_exact_unit = global i64 zeroinitializer
 @pow10_finite_max = private constant i64 308
+@stdlib.json.null = global i64 zeroinitializer
+@examples.sentry_api.preview_limit = private constant i64 160
 
 define i64 @template_to_string(i64 %p$t) {
 entry:
@@ -10995,12 +10999,6 @@ join_6:
   ret i64 %t$7
 }
 
-define i64 @max_int() {
-entry:
-  %t$0 = add i64 0, 9223372036854775807
-  ret i64 %t$0
-}
-
 define i64 @add_saturating(i64 %p$a, i64 %p$b) {
 entry:
   %t$0 = add i64 0, 0
@@ -11009,7 +11007,7 @@ entry:
   %t$31 = trunc i64 %t$2 to i1
   br i1 %t$31, label %then_3, label %else_3
 then_3:
-  %t$5 = call i64 @max_int()
+  %t$5 = load i64, ptr @max_int
   %t$6$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %t$5, i64 %p$b)
   %t$6 = extractvalue { i64, i1 } %t$6$agg, 0
   %t$6$ovf = extractvalue { i64, i1 } %t$6$agg, 1
@@ -11025,7 +11023,7 @@ ovfok_6:
   %t$17 = trunc i64 %t$10 to i1
   br i1 %t$17, label %then_11, label %else_11
 then_11:
-  %t$13 = call i64 @max_int()
+  %t$13 = load i64, ptr @max_int
   br label %join_11
 else_11:
   %t$14$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %p$a, i64 %p$b)
@@ -11081,12 +11079,6 @@ join_3:
   ret i64 %t$4
 }
 
-define i64 @pow10_exact_unit() {
-entry:
-  %t$0 = bitcast double 10000000000000000000000.0 to i64
-  ret i64 %t$0
-}
-
 define i64 @pow10_exact(i64 %p$k) {
 entry:
   %t$0 = add i64 0, 0
@@ -11140,7 +11132,7 @@ tco_loop:
 then_3:
   br label %join_3
 else_3:
-  %t$5 = call i64 @pow10_exact_unit()
+  %t$5 = load i64, ptr @pow10_exact_unit
   %t$6$la = bitcast i64 %p$acc to double
   %t$6$lb = bitcast i64 %t$5 to double
   %t$6$fr = fmul double %t$6$la, %t$6$lb
@@ -11933,7 +11925,7 @@ then_4:
   %t$6 = call i64 @min_int()
   br label %join_4
 else_4:
-  %t$7 = call i64 @max_int()
+  %t$7 = load i64, ptr @max_int
   br label %join_4
 join_4:
   %t$5 = phi i64 [%t$6, %then_4], [%t$7, %else_4]
@@ -17376,12 +17368,6 @@ entry:
   ret i64 %t$3
 }
 
-define i64 @stdlib.json.null() {
-entry:
-  %t$0 = call i64 @sprout_alloc_obj(i64 26, i64 0)
-  ret i64 %t$0
-}
-
 define i64 @stdlib.json.bool(i64 %p$value) {
 entry:
   %t$0 = call i64 @sprout_alloc_obj(i64 27, i64 1)
@@ -22309,19 +22295,13 @@ entry:
   ret i64 %t$1
 }
 
-define i64 @examples.sentry_api.preview_limit() {
-entry:
-  %t$0 = add i64 0, 160
-  ret i64 %t$0
-}
-
 define i64 @examples.sentry_api.preview_body(i64 %p$body) {
 entry:
   %t$13 = alloca i64
   store i64 %p$body, ptr %t$13
   %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
   %t$0 = call i64 @stdlib.string.length(i64 %p$body)
-  %t$1 = call i64 @examples.sentry_api.preview_limit()
+  %t$1 = load i64, ptr @examples.sentry_api.preview_limit
   %t$2 = icmp sle i64 %t$0, %t$1
   %t$3 = zext i1 %t$2 to i64
   %t$12 = trunc i64 %t$3 to i1
@@ -22331,7 +22311,7 @@ then_4:
   br label %join_4
 else_4:
   %t$6 = add i64 0, 0
-  %t$7 = call i64 @examples.sentry_api.preview_limit()
+  %t$7 = load i64, ptr @examples.sentry_api.preview_limit
   %t$16 = alloca i64
   store i64 %p$body, ptr %t$16
   %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
@@ -29686,6 +29666,16 @@ entry:
   ret { i64, i64 } %t$3$r1
 }
 
+define void @__sprout_init_globals() {
+entry:
+  %t$0 = bitcast double 10000000000000000000000.0 to i64
+  store i64 %t$0, ptr @pow10_exact_unit
+  %t$1 = call i64 @sprout_alloc_obj(i64 26, i64 0)
+  store i64 %t$1, ptr @stdlib.json.null
+  call i64 @sprout_gc_register_i64_root(ptr @stdlib.json.null)
+  ret void
+}
+
 define i32 @main(i32 %argc, ptr %argv) {
 entry:
   %argv_set = call i64 @sprout_set_argv(i32 %argc, ptr %argv)
@@ -29824,6 +29814,7 @@ entry:
   %cname_ptr_44 = getelementptr inbounds [32 x i8], ptr @.cname.44, i64 0, i64 0
   %cfkinds_ptr_44 = getelementptr inbounds [4 x i8], ptr @.cfkinds.44, i64 0, i64 0
   %creg_44 = call i64 @sprout_register_ctor(i64 44, ptr %cname_ptr_44, i64 3, ptr %cfkinds_ptr_44)
+  call void @__sprout_init_globals()
   ret i32 0
 }
 

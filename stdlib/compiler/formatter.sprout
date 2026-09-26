@@ -396,7 +396,7 @@ fn format_code_step(toks: Vec token.Token, total: Int, state: CodeState, i: Int,
     code_state_prev(state),
     Just(tok))
 
-fn init_code_state() -> CodeState =
+let init_code_state =
   CodeState(Nil, Nothing, Nothing)
 
 fn run_format_fold_go(non_eof: Vec token.Token, total: Int, state: CodeState, i: Int) -> CodeState =
@@ -407,7 +407,7 @@ fn run_format_fold_go(non_eof: Vec token.Token, total: Int, state: CodeState, i:
     | Just tok -> run_format_fold_go(non_eof, total, format_code_step(non_eof, total, state, i, tok), i + 1)
 
 fn run_format_fold(non_eof: Vec token.Token, total: Int) -> CodeState =
-  run_format_fold_go(non_eof, total, init_code_state(), 0)
+  run_format_fold_go(non_eof, total, init_code_state, 0)
 
 fn lint_state_issues(state: LintState) -> List LintIssue =
   match state with

@@ -27,8 +27,8 @@ export fn codepoint_width(cp: Int) -> Int =
   else general_width(cp)
 
 fn general_width(cp: Int) -> Int =
-  if lookup.has_tag(tables.zerow_count(), zerow_chunk, cp) then 0
-  else if lookup.has_tag(tables.wide_count(), wide_chunk, cp) then 2
+  if lookup.has_tag(tables.zerow_count, zerow_chunk, cp) then 0
+  else if lookup.has_tag(tables.wide_count, wide_chunk, cp) then 2
   else 1
 
 export fn string_width(s: String) -> Int =

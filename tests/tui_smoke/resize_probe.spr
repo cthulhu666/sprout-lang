@@ -26,7 +26,7 @@ import stdlib.tui.widget as widget
 
 type Msg (..) = | Done
 
-fn marker() -> String = "RESIZE-PROBE-MARKER"
+let marker: String = "RESIZE-PROBE-MARKER"
 
 fn label_on_event(txt: String,
                   ev: event.Event) -> (String, List Msg, List(widget.Cmd Msg)) =
@@ -37,11 +37,11 @@ fn label_measure(txt: String, avail: g.Size) -> widget.Measured =
 
 fn label_render(txt: String, r: g.Region, s: scr.Screen) -> Unit !{IO} = do
   stop <- scr.screen_write(s, g.region_col(r), g.region_row(r),
-                           text.truncate(txt, g.region_cols(r)), sty.style_default())
+                           text.truncate(txt, g.region_cols(r)), sty.style_default)
   ()
 
 fn root() -> widget.Widget Msg =
-  widget.Widget(widget.View(state = marker(), on_event = label_on_event,
+  widget.Widget(widget.View(state = marker, on_event = label_on_event,
                             route = widget.no_route,
                             render = label_render, measure = label_measure))
 

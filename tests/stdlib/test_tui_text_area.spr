@@ -33,7 +33,7 @@ type alias Asks = List(widget.Cmd Msg)
 
 # ── the tree ────────────────────────────────────────────────────────────────
 
-fn area_id() -> widget.WidgetId = widget.WidgetId("ta")
+let area_id = widget.WidgetId("ta")
 
 fn note_on_event(n: Int, ev: event.Event) -> (Int, Says, Asks) =
   (n, [Noted("bcast")], Nil)
@@ -48,26 +48,26 @@ fn note() -> widget.Widget Msg =
                             route = widget.no_route, render = note_render,
                             measure = note_measure))
 
-fn area() -> widget.Widget Msg = ta.text_area(area_id(), Changed)
+fn area() -> widget.Widget Msg = ta.text_area(area_id, Changed)
 
 fn area_with(o: ta.TextAreaOpts Msg) -> widget.Widget Msg =
-  ta.text_area_with(area_id(), Changed, o)
+  ta.text_area_with(area_id, Changed, o)
 
 fn started(s: String) -> ta.TextAreaOpts Msg =
   ta.text_area_opts() with (initial = s)
 
 # Focus starts on the head of the ring, so the area is live without a Tab.
 fn ring_of(w: widget.Widget Msg) -> widget.Widget Msg =
-  focus.focus_ring([area_id()], w)
+  focus.focus_ring([area_id], w)
 
 fn beside(w: widget.Widget Msg) -> widget.Widget Msg =
   ring_of(ct.column([ct.fit(w), ct.fit(note())]))
 
 # ── observing ───────────────────────────────────────────────────────────────
 
-fn key(k: event.Key) -> event.Event = event.KeyPress(k, event.mods_none())
+fn key(k: event.Key) -> event.Event = event.KeyPress(k, event.mods_none)
 
-fn chord(k: event.Key) -> event.Event = event.KeyPress(k, event.mods_ctrl())
+fn chord(k: event.Key) -> event.Event = event.KeyPress(k, event.mods_ctrl)
 
 fn hit_of(r: Maybe (widget.Widget Msg, Says, Asks)) -> Bool =
   match r with
@@ -137,7 +137,7 @@ fn declining_cases(state: TestState) -> Unit !{IO} = do
   assert_eq(state, "a ctrl chord is not typing",
             typed([chord(event.KChar('a'))]), "[Noted(bcast)]")
   assert_eq(state, "nor is an alt chord",
-            typed([event.KeyPress(event.KChar('a'), event.mods_alt())]),
+            typed([event.KeyPress(event.KChar('a'), event.mods_alt)]),
             "[Noted(bcast)]")
   # §4.11: the ring reads Tab first, so this is what an area must NOT swallow.
   assert_eq(state, "Tab is the ring's", typed([key(event.KTab)]), "[]")
@@ -154,16 +154,16 @@ fn declining_cases(state: TestState) -> Unit !{IO} = do
                              chars("a"))),
             "[Noted(bcast)]")
   assert_eq(state, "and declines one addressed to it directly",
-            hit_of(widget.deliver(area(), area_id(),
+            hit_of(widget.deliver(area(), area_id,
                                   widget.ToEvent(key(event.KChar('a'))))),
             false)
   assert_eq(state, "but claims a focus notification",
-            hit_of(widget.deliver(area(), area_id(), widget.ToFocus(true))),
+            hit_of(widget.deliver(area(), area_id, widget.ToFocus(true))),
             true)
   # §4.10: no widget takes an application message today, and the vocabulary
   # that would is an opts-supplied prism rather than a `Delivery` arm.
   assert_eq(state, "and declines a message",
-            hit_of(widget.deliver(area(), area_id(),
+            hit_of(widget.deliver(area(), area_id,
                                   widget.ToMsg(Noted("x")))),
             false)
 
@@ -278,7 +278,7 @@ fn told_all(w: widget.Widget Msg, ds: List (widget.Delivery Msg),
             acc: Says) -> (widget.Widget Msg, Says) =
   match ds with
   | Nil -> (w, acc)
-  | Cons d rest -> told_step(w, d, rest, acc, widget.deliver(w, area_id(), d))
+  | Cons d rest -> told_step(w, d, rest, acc, widget.deliver(w, area_id, d))
 
 fn told_step(w: widget.Widget Msg, d: widget.Delivery Msg,
              rest: List (widget.Delivery Msg), acc: Says,
@@ -299,7 +299,7 @@ fn content_of(m: Msg) -> Maybe (String, Maybe buf.Caret) =
 fn contenting() -> ta.TextAreaOpts Msg =
   ta.text_area_opts() with (on_content = Just(content_of))
 
-fn focus_on() -> widget.Delivery Msg = widget.ToFocus(true)
+let focus_on = widget.ToFocus(true)
 
 fn opened_msg(s: String) -> widget.Delivery Msg =
   widget.ToMsg(Opened(s, Nothing))
@@ -314,24 +314,24 @@ fn content_cases(state: TestState) -> Unit !{IO} = do
   # Replacement is SILENT (§9.1), so the document is observed by typing after
   # it: one character reveals both the new text and where the caret sits.
   assert_eq(state, "a document arrives and the caret lands at its end",
-            says(contenting(), [focus_on(), opened_msg("ab\ncd"), typing('X')]),
+            says(contenting(), [focus_on, opened_msg("ab\ncd"), typing('X')]),
             "[Changed(ab\ncdX)]")
   assert_eq(state, "and the replacement itself says nothing",
-            says(contenting(), [focus_on(), opened_msg("ab\ncd")]), "[]")
+            says(contenting(), [focus_on, opened_msg("ab\ncd")]), "[]")
   # The case §6 names as the one that would otherwise force option B: a caret
   # restored into a file being reopened.
   assert_eq(state, "a named caret is restored",
             says(contenting(),
-                 [focus_on(), opened_at("ab\ncd", 0, 1), typing('X')]),
+                 [focus_on, opened_at("ab\ncd", 0, 1), typing('X')]),
             "[Changed(aXb\ncd)]")
   assert_eq(state, "and a caret past the end clamps into the document",
             says(contenting(),
-                 [focus_on(), opened_at("ab\ncd", 9, 9), typing('X')]),
+                 [focus_on, opened_at("ab\ncd", 9, 9), typing('X')]),
             "[Changed(ab\ncdX)]")
   # Replaces rather than appends, and drops what was typed before it.
   assert_eq(state, "content replaces what the user had typed",
             says(contenting(),
-                 [focus_on(), typing('z'), opened_msg("ab"), typing('X')]),
+                 [focus_on, typing('z'), opened_msg("ab"), typing('X')]),
             "[Changed(z), Changed(abX)]")
   # `buffer_open` normalises: control characters become spaces and CRLF folds
   # to LF, so the area ends up holding a document the application never sent.
@@ -339,18 +339,18 @@ fn content_cases(state: TestState) -> Unit !{IO} = do
   # cannot know its tabs became spaces — reopening a source file is exactly
   # where this bites.
   assert_eq(state, "a document that was normalised is announced",
-            says(contenting(), [focus_on(), opened_msg("a\tb")]),
+            says(contenting(), [focus_on, opened_msg("a\tb")]),
             "[Changed(a b)]")
   assert_eq(state, "and a CRLF document too",
-            says(contenting(), [focus_on(), opened_msg("a\r\nb")]),
+            says(contenting(), [focus_on, opened_msg("a\r\nb")]),
             "[Changed(a\nb)]")
   # The `Nothing` path: an area that claimed every message addressed to it
   # would swallow the application's own traffic.
   assert_eq(state, "an unrecognised message is declined",
-            says(contenting(), [focus_on(), widget.ToMsg(Noted("x"))]),
+            says(contenting(), [focus_on, widget.ToMsg(Noted("x"))]),
             "[Noted(declined)]")
   assert_eq(state, "and an area without a decoder declines every message",
-            says(ta.text_area_opts(), [focus_on(), opened_msg("ab")]),
+            says(ta.text_area_opts(), [focus_on, opened_msg("ab")]),
             "[Noted(declined)]")
 
 fn main() -> Unit !{IO} = do

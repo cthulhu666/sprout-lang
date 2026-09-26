@@ -504,7 +504,7 @@ fn op_symbol_locations_in_source(src: String) -> json.Json =
 # Bundle the session source (inlining prelude + transitive imports) so every
 # instance is in scope, then match against the query.  A fixed /tmp path is fine:
 # the REPL is interactive, one request at a time (same rationale as the eval path).
-fn instances_source_path() -> String = "/tmp/sprout_instances_repl.sprout"
+let instances_source_path: String = "/tmp/sprout_instances_repl.sprout"
 
 # The query is resolved in the *session's* naming context by appending a probe
 # signature `fn <probe>(__x: <query>) -> Int = 0` and reading back its parameter
@@ -512,10 +512,10 @@ fn instances_source_path() -> String = "/tmp/sprout_instances_repl.sprout"
 # qualifies instance heads (e.g. a session type `Color` → `app.session.Color`),
 # so a session-local `:i Color` matches its own instances.  Mirrors the
 # pre-self-hosting analysis backend's probe-based resolution.
-fn probe_name() -> String = "__sprout_instances_probe"
+let probe_name: String = "__sprout_instances_probe"
 
 fn augment_probe_source(src: String, query: String) -> String =
-  src ++ "\n\nfn " ++ probe_name() ++ "(__x: " ++ query ++ ") -> Int = 0"
+  src ++ "\n\nfn " ++ probe_name ++ "(__x: " ++ query ++ ") -> Int = 0"
 
 fn first_param_type(params: List ast.Param) -> Maybe ast.TypeExpr =
   match params with
@@ -528,7 +528,7 @@ fn find_probe_query_type(decls: List ast.Decl) -> Maybe ast.TypeExpr =
   | Cons d rest ->
       match d with
       | ast.FnDecl name params _ _ _ _ _ ->
-          if name == probe_name() || string.ends_with(name, "." ++ probe_name())
+          if name == probe_name || string.ends_with(name, "." ++ probe_name)
           then first_param_type(params)
           else find_probe_query_type(rest)
       | _ -> find_probe_query_type(rest)
@@ -556,17 +556,17 @@ fn resolve_instances_from_bundle(result: bundler.BundleResult, query_display: St
 # sorted matches.  query_display is the user's original (unqualified) query, so
 # the REPL never surfaces the synthetic `app.session.` prefix.
 export fn resolve_instances(src: String, query: String, stdlib_root: source.StdlibRoot) -> InstancesResult !{IO} =
-  if str_find(src, probe_name()) != -1 then
-    InstancesErr("source contains reserved name '" ++ probe_name() ++ "'; cannot list instances")
+  if str_find(src, probe_name) != -1 then
+    InstancesErr("source contains reserved name '" ++ probe_name ++ "'; cannot list instances")
   else
     match parse_query_type(query) with
     | Err msg -> InstancesErr(msg)
     | Ok query_display_te ->
-        match fs.write_text(instances_source_path(), augment_probe_source(src, query)) with
+        match fs.write_text(instances_source_path, augment_probe_source(src, query)) with
         | Err msg -> InstancesErr("instances_in_source: write_file: " ++ msg)
         | Ok _ ->
             do
-              result <- bundler.bundle_file(source.FilePath(instances_source_path()), stdlib_root)
+              result <- bundler.bundle_file(source.FilePath(instances_source_path), stdlib_root)
               resolve_instances_from_bundle(result, te_to_string(query_display_te))
 
 fn op_instances_in_source(src: String, query: String, state: StartupState) -> json.Json !{IO} =
@@ -592,7 +592,7 @@ fn op_instances_in_source(src: String, query: String, state: StartupState) -> js
 # make_eval_source below still builds the binding itself, because it appends a `main` as
 # well; the NAME is shared so the two cannot drift apart.
 
-fn sentinel_name() -> String = compiler.expr_sentinel_name()
+fn sentinel_name() -> String = compiler.expr_sentinel_name
 
 # First diagnostic's message, or a fallback when the list is empty. Three copies of this
 # rendering existed; the fallback string differs per operation, which is why it is a
@@ -629,9 +629,9 @@ fn op_type_of_in_source(src: String, expr: String, state: StartupState) -> json.
 # On macOS the -framework flags are added automatically (platform detected via
 # `uname`); SPROUT_DARWIN_FRAMEWORKS=1 forces them on regardless of platform.
 
-fn eval_source_path() -> String = "/tmp/sprout_eval_repl.sprout"
-fn eval_ir_path() -> String = "/tmp/sprout_eval_repl.ll"
-fn eval_bin_path() -> String = "/tmp/sprout_eval_repl_bin"
+let eval_source_path: String = "/tmp/sprout_eval_repl.sprout"
+let eval_ir_path: String = "/tmp/sprout_eval_repl.ll"
+let eval_bin_path: String = "/tmp/sprout_eval_repl_bin"
 
 # Directory holding every runtime .c (sprout_runtime.c, sprout_scheduler.c,
 # sprout_poll.c, …).  The whole directory is compiled and linked as a unit:
@@ -643,7 +643,7 @@ fn runtime_dir(stdlib_root: String) -> String =
   stdlib_root ++ "/../runtime"
 
 # Cache dir for the compiled runtime objects (one .o per runtime .c).
-fn runtime_objs_dir() -> String = "/tmp/sprout_runtime_daemon_objs"
+let runtime_objs_dir: String = "/tmp/sprout_runtime_daemon_objs"
 
 # ---------------------------------------------------------------------------
 # StartupState — pre-compiled runtime objects dir, stdlib_root, and persistent module cache
@@ -709,7 +709,7 @@ fn write_objs_and_ok(objs_dir: String, objs_ref: Ref String) -> Result String St
 
 fn compile_runtime_objs(rt_dir: String, objs_ref: Ref String) -> Result String String !{IO} =
   do
-    let objs_dir = runtime_objs_dir()
+    let objs_dir = runtime_objs_dir
     result <- process.proc_run(["sh", "-c", runtime_compile_cmd(rt_dir, objs_dir)])
     if process.proc_ok(result)
     then write_objs_and_ok(objs_dir, objs_ref)
@@ -765,7 +765,7 @@ fn collect_eval_output(run_result: process.ProcResult) -> json.Json !{IO} =
 
 fn run_eval_binary() -> json.Json !{IO} =
   do
-    run_result <- process.proc_run([eval_bin_path()])
+    run_result <- process.proc_run([eval_bin_path])
     collect_eval_output(run_result)
 
 fn env_forces_frameworks() -> Bool !{IO} =
@@ -798,23 +798,23 @@ fn link_and_run_eval(ir_result: compiler.IrFullResult, state: StartupState) -> j
   match ir_result with
   | compiler.IrFullFail diags -> first_diag_response(diags, "eval_expr_in_source: codegen failed")
   | compiler.IrFullOk ir_text ->
-      match fs.write_text(eval_ir_path(), ir_text) with
+      match fs.write_text(eval_ir_path, ir_text) with
       | Err msg -> panic("write_file: eval.ir: " ++ msg)
       | Ok _ ->
           do
             use_darwin <- use_darwin_frameworks()
             match compile_runtime_and_link_eval(
-              runtime_dir(state_stdlib_root(state)), eval_ir_path(), eval_bin_path(),
+              runtime_dir(state_stdlib_root(state)), eval_ir_path, eval_bin_path,
               state_runtime_obj_ref(state), use_darwin) with
             | Err msg -> error_response("eval_expr_in_source: " ++ msg)
             | Ok _ -> run_eval_binary()
 
 fn compile_and_run_eval(src: String, state: StartupState) -> json.Json !{IO} =
-  match fs.write_text(eval_source_path(), src) with
+  match fs.write_text(eval_source_path, src) with
   | Err msg -> panic("write_file: eval_source: " ++ msg)
   | Ok _ ->
       do
-        ir_result <- compiler.compile_full_ir_with_cache(source.FilePath(eval_source_path()), source.StdlibRoot(state_stdlib_root(state)), bundler.load_env_schemes(state_cache(state)))
+        ir_result <- compiler.compile_full_ir_with_cache(source.FilePath(eval_source_path), source.StdlibRoot(state_stdlib_root(state)), bundler.load_env_schemes(state_cache(state)))
         link_and_run_eval(ir_result, state)
 
 export fn is_function_scheme(s: types.Scheme) -> Bool =

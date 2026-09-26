@@ -1,3 +1,4 @@
+# sprout-ignore-all lint/nullary-const-fn: module fixture — the exported form is what resolution is tested against
 # DELIBERATELY has no `module` header — that is what this fixture is for.
 #
 # An imported file must declare one (docs/prelude-scope-v0.md §4.2 step 3).

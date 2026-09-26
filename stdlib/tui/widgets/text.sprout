@@ -37,14 +37,14 @@ fn block(st: style.Style, ls: List String) -> widget.Widget m =
 
 # Style is a separate function rather than a defaulted parameter, since Sprout
 # has no default arguments.
-export fn label(t: String) -> widget.Widget m = block(style.style_default(), [t])
+export fn label(t: String) -> widget.Widget m = block(style.style_default, [t])
 
 export fn label_styled(st: style.Style, t: String) -> widget.Widget m = block(st, [t])
 
-export fn static(ls: List String) -> widget.Widget m = block(style.style_default(), ls)
+export fn static(ls: List String) -> widget.Widget m = block(style.style_default, ls)
 
 export fn static_styled(st: style.Style, ls: List String) -> widget.Widget m = block(st, ls)
 
 # Paints nothing and measures zero. Needed the moment anyone centres a widget
 # by padding it with fractions on both sides — the padding has to be something.
-export fn spacer() -> widget.Widget m = block(style.style_default(), Nil)
+export fn spacer() -> widget.Widget m = block(style.style_default, Nil)

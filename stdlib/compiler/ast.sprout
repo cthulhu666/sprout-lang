@@ -1,5 +1,6 @@
 module stdlib.compiler.ast
 import stdlib.compiler.source as source
+import stdlib.string as string
 
 # --- Type Expressions ---
 # No source positions: type exprs are always sub-components of larger nodes
@@ -348,6 +349,58 @@ export fn scope_names_global(scoped: List (String, NameScope)) -> List String =
 
 export type Program (..) =
   | Program (List Decl) source.SourcePos
+
+# --- Name case, and the syntactic value restriction ---
+#
+# Both answer questions about the AST alone, and both have two readers: `infer`
+# decides what to generalize, `lint_rules` decides what could have been written
+# as a top-level `let`. They live here so the two cannot drift — a lint rule
+# that disagreed with the type checker about what a value is would recommend
+# rewrites the checker then refuses.
+
+export fn is_lowercase_name(name: String) -> Bool =
+  str_find(name, ".") == -1 &&
+  (c == "a" || c == "b" || c == "c" || c == "d" || c == "e" ||
+   c == "f" || c == "g" || c == "h" || c == "i" || c == "j" ||
+   c == "k" || c == "l" || c == "m" || c == "n" || c == "o" ||
+   c == "p" || c == "q" || c == "r" || c == "s" || c == "t" ||
+   c == "u" || c == "v" || c == "w" || c == "x" || c == "y" || c == "z")
+  where c = str_slice(name, 0, 1)
+
+# A call whose callee is a data constructor (uppercase head), not a function.
+# Constructor applications of values are syntactic values; function calls are not.
+export fn is_constructor_ref(name: String) -> Bool =
+  is_lowercase_name(string.after_last_dot(name)) == false
+
+# Syntactic value restriction (W3/F-VALRESTR): only generalize a top-level `let`
+# whose initializer is a syntactic value — a literal, variable, lambda, tuple of
+# values, or constructor applied to values. A function/if/match/do/... initializer
+# is monomorphic. Without this, `let cell = mutvec_new(1, Nil)` generalized to
+# `forall a. MutVec (List a)` and could be written at Int and read at String.
+#
+# A list literal needs no arm: `[a, b]` is already `Cons(a, Cons(b, Nil))` by the
+# time it arrives (parser.desugar_list_literal).
+export fn is_syntactic_value(expr: Expr) -> Bool =
+  match expr with
+  | IntExpr _ _ -> true
+  | FloatExpr _ _ -> true
+  | BoolExpr _ _ -> true
+  | StringExpr _ _ -> true
+  | CharExpr _ _ -> true
+  | UnitExpr _ -> true
+  | VarExpr _ _ -> true
+  | LambdaExpr _ _ _ -> true
+  | TupleExpr items _ -> all_syntactic_values(items)
+  | CallExpr callee args _ ->
+      match callee with
+      | VarExpr name _ -> is_constructor_ref(name) && all_syntactic_values(args)
+      | _ -> false
+  | _ -> false
+
+export fn all_syntactic_values(exprs: List Expr) -> Bool =
+  match exprs with
+  | Nil -> true
+  | Cons h t -> if is_syntactic_value(h) then all_syntactic_values(t) else false
 
 # --- Synthesized identifier names ---
 # Source-level names of the List constructors, used when the parser/checker

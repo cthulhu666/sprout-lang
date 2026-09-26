@@ -1,5 +1,9 @@
 module stdlib.version
 
+# Where a chain starts. Two chains are independent, so versions are comparable
+# only against others from the same holder.
+export let origin = Version(0)
+
 # A counter that only goes forward, for saying WHEN a piece of state was.
 #
 # What `stamped.fresh` rests on is that a chain never repeats a value: one that
@@ -18,9 +22,6 @@ module stdlib.version
 export type Version deriving (Eq, Ord, ToString) =
   | Version Int
 
-# Where a chain starts. Two chains are independent, so versions are comparable
-# only against others from the same holder.
-export fn origin() -> Version = Version(0)
 
 # The next version. O(1).
 export fn next(v: Version) -> Version =

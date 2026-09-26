@@ -551,7 +551,7 @@ export fn ir_header() -> String =
   # Boxed-ADT constructors.  One arity-generic entry point replaces the former
   # sprout_make0..sprout_make10 set: IRMakeCtor lowers to a call plus one store
   # per field, so no arity needs its own declaration and the only remaining
-  # limit is the runtime header's arity field (ast_to_ir's max_boxed_arity()).
+  # limit is the runtime header's arity field (ast_to_ir's max_boxed_arity).
   "declare i64 @sprout_alloc_obj(i64, i64)\n" ++
   # Tier-1 CPR peephole: unboxed { i64, i64 } (SproutUnboxed2) variants of the
   # Maybe-returning externs.  Emitted by IRCallUnboxed2 when a `match` scrutinizes

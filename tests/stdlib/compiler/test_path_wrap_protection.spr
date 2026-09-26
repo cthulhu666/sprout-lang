@@ -6,9 +6,9 @@ import stdlib.compiler.source as source
 # their inner accessors.  If either wrap is removed or renamed, this file
 # fails to compile.
 
-fn make_filepath() -> source.FilePath = source.FilePath("/tmp/foo.sprout")
+let make_filepath = source.FilePath("/tmp/foo.sprout")
 
-fn make_stdlib_root() -> source.StdlibRoot = source.StdlibRoot("/usr/lib/sprout")
+let make_stdlib_root = source.StdlibRoot("/usr/lib/sprout")
 
 fn filepath_inner(p: source.FilePath) -> String =
   match p with | source.FilePath s -> s
@@ -21,9 +21,9 @@ fn main() -> Unit !{IO} =
     state <- new_state()
 
     assert_true(state, "FilePath roundtrips through inner",
-      filepath_inner(make_filepath()) == "/tmp/foo.sprout")
+      filepath_inner(make_filepath) == "/tmp/foo.sprout")
 
     assert_true(state, "StdlibRoot roundtrips through inner",
-      stdlib_root_inner(make_stdlib_root()) == "/usr/lib/sprout")
+      stdlib_root_inner(make_stdlib_root) == "/usr/lib/sprout")
 
     summary(state)

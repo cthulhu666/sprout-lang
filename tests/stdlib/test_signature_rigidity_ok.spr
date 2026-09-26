@@ -1,3 +1,4 @@
+# sprout-ignore-all lint/nullary-const-fn: `empty_` is the value-built polymorphic result; W3/F-RIGID runs over FnDecl only
 import stdlib.test (check_eq, run_suite)
 
 # W3/F-RIGID positive guard: genuinely polymorphic signatures must STILL be

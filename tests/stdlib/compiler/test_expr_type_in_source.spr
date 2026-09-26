@@ -33,7 +33,7 @@ fn stdlib_root() -> String !{IO} =
   | Just root -> root
   | Nothing -> "stdlib"
 
-fn package_root() -> String = "tests/conformance/package_resolution/roots"
+let package_root: String = "tests/conformance/package_resolution/roots"
 
 fn plain_source() -> String =
   "let answer = 42\n"
@@ -280,7 +280,7 @@ fn main() -> Unit !{IO} =
     # fail for a reason that has nothing to do with the user's expression, so the
     # collision is reported as itself.
     collision <- compiler.scheme_of_expr_in_source(
-      "let " ++ compiler.expr_sentinel_name() ++ " = 1\n", "42", sr, Nil, cache)
+      "let " ++ compiler.expr_sentinel_name ++ " = 1\n", "42", sr, Nil, cache)
     assert_true(state, "a source already binding the sentinel is reported as a collision",
       match collision with
       | compiler.ExprSentinelCollision -> true
@@ -289,7 +289,7 @@ fn main() -> Unit !{IO} =
       | compiler.ExprNotInferable -> false)
 
     # --- package roots reach it: the property the builtin route cannot have ---
-    let roots = Cons(package_root(), Nil)
+    let roots = Cons(package_root, Nil)
     with_roots <- rendered_type(source_using_package(), "use_it", sr, roots, cache)
     assert_true(state, "an expression using a package-root import is typed when the root is given",
       string.contains(with_roots, "String"))

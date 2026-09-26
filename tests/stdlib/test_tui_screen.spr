@@ -21,7 +21,7 @@ fn cup(row: Int, col: Int) -> String =
 
 fn reset() -> String = `${esc()}[0m`
 
-fn plain() -> sty.Style = sty.style_default()
+fn plain() -> sty.Style = sty.style_default
 
 # `screen_write` reports the column it stopped at; most cases here do not care.
 fn w(s: scr.Screen, col: Int, row: Int, text: String, style: sty.Style) -> Unit !{IO} = do

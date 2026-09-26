@@ -12,7 +12,7 @@ fn r(source: String, ctx: Json) -> String =
   | Ok out -> out
   | Err _ -> "<<ERR>>"
 
-fn empty_ctx() -> Json =
+let empty_ctx =
   JsonObject(JsonObjectNil)
 
 # { user: { name: "Kuba" } }
@@ -56,11 +56,11 @@ fn main() -> Unit !{IO} =
     check_eq("int renders as digits",
       r("{{ n }}", JsonObject (JsonObjectCons("n", int(42), JsonObjectNil))), "42"),
     check_eq("undefined variable renders empty",
-      r("[{{ missing }}]", empty_ctx()), "[]"),
+      r("[{{ missing }}]", empty_ctx), "[]"),
 
     # --- comments ---
     check_eq("comment is stripped",
-      r("a{# note #}b", empty_ctx()), "ab"),
+      r("a{# note #}b", empty_ctx), "ab"),
 
     # --- if / else ---
     check_eq("if true branch (non-empty string is truthy)",
@@ -69,13 +69,13 @@ fn main() -> Unit !{IO} =
       r("{% if flag %}yes{% else %}no{% endif %}",
         JsonObject(JsonObjectCons("flag", string(""), JsonObjectNil))), "no"),
     check_eq("if false branch (missing var is falsy)",
-      r("{% if flag %}yes{% else %}no{% endif %}", empty_ctx()), "no"),
+      r("{% if flag %}yes{% else %}no{% endif %}", empty_ctx), "no"),
 
     # --- for ---
     check_eq("for iterates array elements",
       r("{% for x in items %}[{{ x }}]{% endfor %}", items_ctx()), "[a][b][c]"),
     check_eq("for over missing var yields nothing",
-      r("{% for x in nope %}X{% endfor %}", empty_ctx()), ""),
+      r("{% for x in nope %}X{% endfor %}", empty_ctx), ""),
 
     # --- nested for + if + interpolation (the list-of-items page) ---
     check_eq("nested for + if + interp",
@@ -111,13 +111,13 @@ fn main() -> Unit !{IO} =
 
     # --- parse errors -> clean Err ---
     check_eq("unclosed interpolation is an error",
-      r("{{ x", empty_ctx()), "<<ERR>>"),
+      r("{{ x", empty_ctx), "<<ERR>>"),
     check_eq("missing endfor is an error",
-      r("{% for x in xs %}a", empty_ctx()), "<<ERR>>"),
+      r("{% for x in xs %}a", empty_ctx), "<<ERR>>"),
     check_eq("missing endif is an error",
-      r("{% if x %}a", empty_ctx()), "<<ERR>>"),
+      r("{% if x %}a", empty_ctx), "<<ERR>>"),
     check_eq("unknown statement keyword is an error",
-      r("{% wat %}", empty_ctx()), "<<ERR>>"),
+      r("{% wat %}", empty_ctx), "<<ERR>>"),
 
     # --- non-ASCII in the DATA, not just the template ---
     # The one existing non-ASCII check puts é in the template source. The realistic case is

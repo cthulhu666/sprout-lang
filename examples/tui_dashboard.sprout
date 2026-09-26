@@ -38,9 +38,9 @@ type Msg (..) deriving (Eq, ToString) =
   | Picked Int
   | Stamped Int
 
-fn dim() -> sty.Style = sty.with_fg(sty.style_default(), sty.Ansi(8))
+fn dim() -> sty.Style = sty.with_fg(sty.style_default, sty.Ansi(8))
 
-fn bright() -> sty.Style = sty.with_bold(sty.style_default(), true)
+fn bright() -> sty.Style = sty.with_bold(sty.style_default, true)
 
 # What a widget hands back besides its new state: what it said, and what it
 # wants done. Named once, because every widget below repeats the pair.
@@ -49,29 +49,30 @@ type alias Asks = List(widget.Cmd Msg)
 
 # ── the two stdlib widgets that share the keyboard ──────────────────────────
 
-fn name_id() -> widget.WidgetId = widget.WidgetId("name")
+let name_id = widget.WidgetId("name")
 
-fn planets_id() -> widget.WidgetId = widget.WidgetId("planets")
-
-fn planets() -> List String =
+let planets: List String =
   ["Mercury", "Venus", "Earth", "Mars", "Jupiter", "Saturn"]
+
+let planets_id = widget.WidgetId("planets")
+
 
 # The field says its whole value on every edit, and its line on Enter: the
 # application cannot read a widget, so what it is told is all it knows.
 fn field() -> widget.Widget Msg =
-  inp.input_with(name_id(), Typed,
+  inp.input_with(name_id, Typed,
                  inp.input_opts() with (initial = "Ada",
                                         on_submit = Just(Filed)))
 
 # Highlighting and choosing are separate messages, as Textual's `Highlighted`
 # and `Selected` are: moving through a list is not picking from it.
 fn list_of_planets() -> widget.Widget Msg =
-  lv.list_view_with(planets_id(), planets(), Picked,
+  lv.list_view_with(planets_id, planets, Picked,
                     lv.list_opts() with (on_highlight = Just(Lit), page = 3))
 
 # ── a log: hidden state is List String ──────────────────────────────────────
 
-fn log_id() -> widget.WidgetId = widget.WidgetId("log")
+let log_id = widget.WidgetId("log")
 
 # Both channels in one widget. Messages arrive ADDRESSED, from `update`; the
 # keyboard arrives on the broadcast, and only for keys the focused widget
@@ -99,8 +100,8 @@ fn entry(m: Msg) -> String =
   match m with
   | Typed s -> `typed ${s}`
   | Filed s -> `filed ${s}`
-  | Lit i -> `over ${item_at(i, planets())}`
-  | Picked i -> `chose ${item_at(i, planets())}`
+  | Lit i -> `over ${item_at(i, planets)}`
+  | Picked i -> `chose ${item_at(i, planets)}`
   | _ -> "?"
 
 fn item_at(i: Int, xs: List String) -> String =
@@ -113,11 +114,11 @@ fn log_measure(ls: List String, avail: g.Size) -> widget.Measured =
 
 fn log_render(ls: List String, r: g.Region, s: scr.Screen) -> Unit !{IO} = do
   paint.line(s, r, 0, "log", dim())
-  paint.lines(s, r, 1, ls, sty.style_default())
+  paint.lines(s, r, 1, ls, sty.style_default)
 
 fn log() -> widget.Widget Msg =
   widget.Widget(widget.View(state = Nil, on_event = log_on_event,
-                            route = widget.route_if(log_id(), log_route, _, _, _),
+                            route = widget.route_if(log_id, log_route, _, _, _),
                             render = log_render, measure = log_measure))
 
 # ── a clock: hidden state counts ticks and holds a routed answer ────────────
@@ -127,7 +128,7 @@ fn log() -> widget.Widget Msg =
 # exists, because the answer is addressed to this widget and delivered here.
 type Ticks = (n: Int, first: Int, now: Int)
 
-fn ticks_id() -> widget.WidgetId = widget.WidgetId("ticks")
+let ticks_id = widget.WidgetId("ticks")
 
 fn read_clock(u: Unit) -> Msg !{IO} = do
   us <- time.wall_micros()
@@ -136,7 +137,7 @@ fn read_clock(u: Unit) -> Msg !{IO} = do
 fn ticks_on_event(t: Ticks, ev: event.Event) -> (Ticks, Says, Asks) =
   match ev with
   | event.TickEvent ->
-      (t with (n = t.n + 1), Nil, [widget.cmd_to(ticks_id(), read_clock(_))])
+      (t with (n = t.n + 1), Nil, [widget.cmd_to(ticks_id, read_clock(_))])
   | _ -> (t, Nil, Nil)
 
 # The other end of the round trip. Only messages addressed to `ticks` arrive.
@@ -168,21 +169,22 @@ fn uptime_s(t: Ticks) -> Int =
 fn ticks() -> widget.Widget Msg =
   widget.Widget(widget.View(state = Ticks(n = 0, first = 0, now = 0),
                             on_event = ticks_on_event,
-                            route = widget.route_if(ticks_id(), ticks_route, _, _, _),
+                            route = widget.route_if(ticks_id, ticks_route, _, _, _),
                             render = ticks_render, measure = ticks_measure))
 
 # ── the application ─────────────────────────────────────────────────────────
+
+let footer: String = "Tab moves, arrows select, Enter chooses, Esc quits"
 
 # The ring wraps the whole tree, so every widget keeps its addressed delivery
 # and exactly one of the two named widgets holds the keyboard. Focus starts on
 # the head of the list, so the field is live without a first Tab.
 fn root() -> widget.Widget Msg =
-  focus.focus_ring([name_id(), planets_id()],
+  focus.focus_ring([name_id, planets_id],
                    ct.column([ct.cells(1, txt.label_styled(bright(), "Sprout TUI")),
                               ct.fraction(1, body()),
-                              ct.cells(1, txt.label_styled(dim(), footer()))]))
+                              ct.cells(1, txt.label_styled(dim(), footer))]))
 
-fn footer() -> String = "Tab moves, arrows select, Enter chooses, Esc quits"
 
 # The list on the left, the field and what it all said on the right.
 fn body() -> widget.Widget Msg =
@@ -207,7 +209,7 @@ fn update(m: Msg, w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow, Asks) =
 # The log says nothing and asks for nothing, so its reply carries only the new
 # widget; a target that has gone leaves the tree as it was.
 fn told(w: widget.Widget Msg, m: Msg) -> widget.Widget Msg =
-  let Just(w2, _, _) = widget.deliver(w, log_id(), widget.ToMsg(m)) else w
+  let Just(w2, _, _) = widget.deliver(w, log_id, widget.ToMsg(m)) else w
   in w2
 
 fn main() -> Unit !{IO} =

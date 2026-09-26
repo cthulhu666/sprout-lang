@@ -18,7 +18,7 @@ fn char_as_string(c: Char) -> String =
   char_to_string(c)
 
 # 2. Char literal: produce the 'a' constant directly.
-fn get_a() -> Char = 'a'
+let get_a: Char = 'a'
 
 # 3. CharPattern in match: single-char dispatch.
 fn is_a(c: Char) -> Bool =

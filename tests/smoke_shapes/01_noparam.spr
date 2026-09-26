@@ -1,3 +1,4 @@
+# sprout-ignore-all lint/nullary-const-fn: `val` is the zero-parameter `define` this shape exists to emit
 no_prelude
 
 # `no_prelude` is here for GOLDEN SIZE, not semantics: two lines of source were

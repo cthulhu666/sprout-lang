@@ -370,7 +370,7 @@ fn picky(n: Int) -> widget.Widget Msg =
 
 fn key_to(w: widget.Widget Msg, name: String) -> Reply =
   widget.deliver(w, widget.WidgetId(name),
-                 widget.ToEvent(event.KeyPress(event.KEnter, event.mods_none())))
+                 widget.ToEvent(event.KeyPress(event.KEnter, event.mods_none)))
 
 fn decline_cases(state: TestState) -> Unit !{IO} = do
   assert_eq(state, "route_when claims a delivery its handler used",

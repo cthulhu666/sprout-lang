@@ -4,7 +4,7 @@ import stdlib.test (check_eq, run_suite)
 # Each test asserts that the new implementation produces the same output as the
 # expected result on sample data.  Covers P3, P4, P5, P6, and P10 algorithm changes.
 
-fn empty_int_list() -> List Int = []
+let empty_int_list: List Int = []
 fn empty_int_vec() -> Vec Int = vec_empty()
 
 fn main() -> Unit !{IO} =
@@ -81,7 +81,7 @@ fn main() -> Unit !{IO} =
 
     # --- P4: instance ToString (List a) ---
     check_eq("to_string list empty",
-      to_string(empty_int_list()),
+      to_string(empty_int_list),
       "[]"),
     check_eq("to_string list singleton",
       to_string([1]),

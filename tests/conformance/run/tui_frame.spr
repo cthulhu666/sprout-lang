@@ -44,10 +44,10 @@ fn main() -> Unit !{IO} = do
 
   # --- the screen ---
   s <- screen.screen_new(geometry.Size(12, 2))
-  first <- screen.screen_write(s, 0, 0, "ab", style.style_default())
-  second <- screen.screen_write(s, 3, 0, "日本", style.with_bold(style.style_default(), true))
+  first <- screen.screen_write(s, 0, 0, "ab", style.style_default)
+  second <- screen.screen_write(s, 3, 0, "日本", style.with_bold(style.style_default, true))
   third <- screen.screen_write(s, 8, 0, utf8.from_codepoints([101, 769]),
-                               style.style_default())
+                               style.style_default)
   print(`columns after each write: ${to_string(first)} ${to_string(second)} ${to_string(third)}`)
 
   frame <- screen.diff_to_ansi(s)

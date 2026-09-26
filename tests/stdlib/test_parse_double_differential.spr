@@ -175,6 +175,8 @@ fn sample_run(s: Sweep, n: Int) -> Sweep =
           text = `${digits}e${int_to_string(e)}`
       in note(s, st2, sample_error(text, digits, e), text)
 
+let lengths: Vec Int = [1, 2, 3, 8, 15, 17, 19, 22, 40, 100, 300, 320]
+
 # The `0.<zeros><digits>` form, which reaches `parse_mantissa`'s fraction path and
 # pays for the leading zeros with the fraction's width rather than by scanning them.
 fn sample_fraction(s: Sweep, n: Int) -> Sweep =
@@ -190,7 +192,7 @@ fn sample_fraction(s: Sweep, n: Int) -> Sweep =
 # rounded operation on two exact operands, so the result is THE correctly rounded
 # Double, which `misrounding` asks directly rather than through a rounded
 # distance. The length comes from the generator rather than the sweep, so this
-# runs `runs` samples per entry in `lengths()` while ignoring which entry.
+# runs `runs` samples per entry in `lengths` while ignoring which entry.
 fn sample_exact(s: Sweep, _n: Int) -> Sweep =
   match s with
   | Sweep state _ _ _ ->
@@ -214,7 +216,6 @@ fn sweep(step: Sweep -> Int -> Sweep, seed: Int, runs: Int, lengths: Vec Int) ->
   vec_fold(\ (s, n) -> repeat_sample(step, s, n, runs),
            Sweep(seed_state(seed), 0, 0, "none"), lengths)
 
-fn lengths() -> Vec Int = [1, 2, 3, 8, 15, 17, 19, 22, 40, 100, 300, 320]
 
 # Both ends, because neither alone reproduces: the exponent is at the tail and
 # `0.<zeros><digits>` is all zeros at the head.
@@ -272,9 +273,9 @@ fn main() -> Unit !{IO} =
     let argv = args.parse_argv()
     let runs = args.arg_int(argv, "runs", 40)
     let seed = seed_state(args.arg_int(argv, "seed", 20260925))
-    let runs_sweep = sweep(sample_run, seed, runs, lengths())
-    let frac_sweep = sweep(sample_fraction, seed + 1, runs, lengths())
-    let exact_sweep = sweep(sample_exact, seed + 2, runs, lengths())
+    let runs_sweep = sweep(sample_run, seed, runs, lengths)
+    let frac_sweep = sweep(sample_fraction, seed + 1, runs, lengths)
+    let exact_sweep = sweep(sample_exact, seed + 2, runs, lengths)
     run_suite("parse_double differential",
               [pinned("smallest normal survives the divisor",
                        "2.2250738585072014e-308", "22250738585072014", -324),

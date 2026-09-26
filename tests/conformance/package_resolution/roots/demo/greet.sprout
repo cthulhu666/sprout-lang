@@ -1,3 +1,4 @@
+# sprout-ignore-all lint/nullary-const-fn: module fixture — the exported form is what resolution is tested against
 module demo.greet
 
 # Fixture module that lives OUTSIDE stdlib_root, under an extra package root.

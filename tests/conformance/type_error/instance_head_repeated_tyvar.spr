@@ -1,3 +1,4 @@
+# sprout-ignore-all lint/nullary-const-fn: rejection fixture — the declaration form is what it asserts
 # The DISTINCTNESS half of the instance-head rule (Haskell 2010 §4.3.2: "a type
 # constructor T applied to simple type variables u1, … uk … the ui must all be
 # distinct").

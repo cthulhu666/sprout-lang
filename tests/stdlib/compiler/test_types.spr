@@ -16,8 +16,8 @@ fn main() -> Unit !{IO} =
     check_true("TApp eq", eq(types.TApp(types.TConst(types.type_id("List")), types.TConst(types.type_id("Int"))), types.TApp(types.TConst(types.type_id("List")), types.TConst(types.type_id("Int"))))),
     check_false("TApp neq", eq(types.TApp(types.TConst(types.type_id("List")), types.TConst(types.type_id("Int"))), types.TApp(types.TConst(types.type_id("List")), types.TConst(types.type_id("Bool"))))),
 
-    check_eq("effect_pure", types.effect_pure(), types.EffectPure),
-    check_eq("effect_io", types.effect_io(), types.EffectIO),
+    check_eq("effect_pure", types.effect_pure, types.EffectPure),
+    check_eq("effect_io", types.effect_io, types.EffectIO),
     check_true("EffectPure eq", eq(types.EffectPure, types.EffectPure)),
     check_true("EffectIO eq", eq(types.EffectIO, types.EffectIO)),
     check_false("effect neq pure/io", eq(types.EffectPure, types.EffectIO)),

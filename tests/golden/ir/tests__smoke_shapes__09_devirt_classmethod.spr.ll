@@ -113,7 +113,9 @@ declare i64 @ref_write(i64, i64)
 @.cname.16 = private unnamed_addr constant [10 x i8] c"main.Blue\00"
 @.cfkinds.16 = private unnamed_addr constant [1 x i8] c"\00"
 @pow10_clamp = private constant i64 400
+@max_int = private constant i64 9223372036854775807
 @pow10_exact_max = private constant i64 22
+@pow10_exact_unit = global i64 zeroinitializer
 @pow10_finite_max = private constant i64 308
 
 define i64 @main.color_of(i64 %p$tag) {
@@ -291,6 +293,13 @@ else_15:
   ret { i64, i64 } %t$18$r1
 }
 
+define void @__sprout_init_globals() {
+entry:
+  %t$0 = bitcast double 10000000000000000000000.0 to i64
+  store i64 %t$0, ptr @pow10_exact_unit
+  ret void
+}
+
 define i32 @main(i32 %argc, ptr %argv) {
 entry:
   %argv_set = call i64 @sprout_set_argv(i32 %argc, ptr %argv)
@@ -345,6 +354,7 @@ entry:
   %cname_ptr_16 = getelementptr inbounds [10 x i8], ptr @.cname.16, i64 0, i64 0
   %cfkinds_ptr_16 = getelementptr inbounds [1 x i8], ptr @.cfkinds.16, i64 0, i64 0
   %creg_16 = call i64 @sprout_register_ctor(i64 16, ptr %cname_ptr_16, i64 0, ptr %cfkinds_ptr_16)
+  call void @__sprout_init_globals()
   call i64 @__sprout_user_main()
   ret i32 0
 }

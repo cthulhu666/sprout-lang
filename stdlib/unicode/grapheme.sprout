@@ -43,18 +43,18 @@ export fn gcb(cp: Int) -> String =
     | Nothing -> gcb_tabled(cp)
 
 fn gcb_tabled(cp: Int) -> String =
-  match lookup.find_tag(tables.gcb_count(), gcb_chunk, cp) with
+  match lookup.find_tag(tables.gcb_count, gcb_chunk, cp) with
   | Just t -> t
   | Nothing -> "O"
 
 fn is_extpict(cp: Int) -> Bool =
   if is_ascii_printable(cp) then false
-  else lookup.has_tag(tables.extpict_count(), extpict_chunk, cp)
+  else lookup.has_tag(tables.extpict_count, extpict_chunk, cp)
 
 fn incb_class(cp: Int) -> String =
   if is_ascii_printable(cp) then "O"
   else
-    match lookup.find_tag(tables.incb_count(), incb_chunk, cp) with
+    match lookup.find_tag(tables.incb_count, incb_chunk, cp) with
     | Just t -> t
     | Nothing -> "O"
 

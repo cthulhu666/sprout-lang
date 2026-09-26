@@ -16,14 +16,14 @@ class Shape a
   fn area(s: a) -> Double
   fn name(s: a) -> String
 
-fn pi() -> Double = 3.14159265358979
+let pi: Double = 3.14159265358979
 
 type Circle = | Circle Int  # radius
 type Rect = | Rect Int Int  # width, height
 type Square = | Square Int  # side
 
 instance Shape Circle
-  fn area(s: Circle) -> Double = match s with | Circle r -> pi() * to_double(r) * to_double(r)
+  fn area(s: Circle) -> Double = match s with | Circle r -> pi * to_double(r) * to_double(r)
   fn name(s: Circle) -> String = "circle"
 
 instance Shape Rect
@@ -43,8 +43,8 @@ fn describe(d: Drawable) -> String =
   match d with
   | Drawable s -> `${name(s)}: ${to_string(area(s))}`
 
-fn scene() -> List Drawable =
+let scene =
   [Drawable (Circle(2)), Drawable (Rect(3, 4)), Drawable (Square(5))]
 
 fn main() -> Unit !{IO} =
-  list_each(\d -> print(describe(d)), scene())
+  list_each(\d -> print(describe(d)), scene)

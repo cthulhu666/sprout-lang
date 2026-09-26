@@ -1,3 +1,4 @@
+# sprout-ignore-all lint/nullary-const-fn: `wrapped_ctor`/`pair_ctor` put a bare constructor in RETURN position, which is the path under test
 import stdlib.test (check_eq, check_true, run_suite)
 import testsupport.rec_fixture (Cfg, Holder, Empty, default_cfg, cfg_sum)
 

@@ -17,15 +17,18 @@ fn result_chain(a: Result String Int, b: Result String Int) -> Result String Int
     y <- b
     Ok(x + y)
 
+let errx: Result String Int = Err("x")
+
+let no_int: Maybe Int = Nothing
+
+let ok3: Result String Int = Ok(3)
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
     assert_eq(state, "maybe do both just", maybe_chain(Just(1), Just(2)), Just(3))
-    assert_eq(state, "maybe do short-circuits", maybe_chain(Just(1), Nothing), no_int())
-    assert_eq(state, "result do both ok", result_chain(Ok(1), Ok(2)), ok3())
-    assert_eq(state, "result do short-circuits", result_chain(Ok(1), Err("x")), errx())
+    assert_eq(state, "maybe do short-circuits", maybe_chain(Just(1), Nothing), no_int)
+    assert_eq(state, "result do both ok", result_chain(Ok(1), Ok(2)), ok3)
+    assert_eq(state, "result do short-circuits", result_chain(Ok(1), Err("x")), errx)
     summary(state)
 
-fn no_int() -> Maybe Int = Nothing
-fn ok3() -> Result String Int = Ok(3)
-fn errx() -> Result String Int = Err("x")

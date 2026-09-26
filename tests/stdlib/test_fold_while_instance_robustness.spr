@@ -30,7 +30,7 @@ instance Foldable Two
 
 fn is_even(n: Int) -> Bool = n - (n / 2) * 2 == 0
 fn is_odd(n: Int) -> Bool = n - (n / 2) * 2 == 1
-fn no_int() -> Maybe Int = Nothing
+let no_int: Maybe Int = Nothing
 
 fn half_if_even(n: Int) -> Maybe Int = if is_even(n) then Just(n / 2) else Nothing
 
@@ -50,13 +50,13 @@ fn main() -> Unit !{IO} =
 
     # `find` already latched before this fix — pinned so it stays that way.
     check_eq("find survives an instance that over-steps", find(is_even, hit_first), Just(2)),
-    check_eq("find is still Nothing when nothing matches", find(is_even, miss_first), no_int()),
+    check_eq("find is still Nothing when nothing matches", find(is_even, miss_first), no_int),
 
     # `find_map`: the first `Just` must not be replaced by a later `Nothing`.
     check_eq("find_map survives an instance that over-steps",
       find_map(half_if_even, hit_first), Just(1)),
     check_eq("find_map is still Nothing when nothing matches",
-      find_map(half_if_even, miss_first), no_int()),
+      find_map(half_if_even, miss_first), no_int),
 
     # `member` derives from `any`, so it inherits the same exposure.
     check_true("member survives an instance that over-steps", member(2, hit_first)),

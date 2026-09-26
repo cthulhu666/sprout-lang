@@ -48,9 +48,9 @@ fn roundtrips_to(width: Int) -> Bool =
   else if ! roundtrips_at (width) then false
   else roundtrips_to(width - 1)
 
-fn min_int() -> Int = -9223372036854775808
+let min_int: Int = -9223372036854775808
 
-fn max_int() -> Int = 9223372036854775807
+let max_int: Int = 9223372036854775807
 
 # `Bytes` has no `Eq` instance, so a refusal is checked as a Bool rather than
 # compared against `Nothing`.
@@ -86,11 +86,11 @@ fn main() -> Unit !{IO} =
     check_eq("to_int of one", big.to_int(big.from_int(1)), Just(1)),
     check_eq("to_int of minus one", big.to_int(big.from_int(-1)), Just(-1)),
     check_eq("to_int of a mid value", big.to_int(big.from_int(-123456789)), Just(-123456789)),
-    check_eq("to_int of INT_MAX", big.to_int(big.from_int(max_int())), Just(max_int())),
+    check_eq("to_int of INT_MAX", big.to_int(big.from_int(max_int)), Just(max_int)),
     # INT_MIN has no negatable magnitude in i64, so from_int must reach it without
     # ever computing `0 - value`, which traps since Stage 1.
-    check_eq("to_int of INT_MIN", big.to_int(big.from_int(min_int())), Just(min_int())),
-    check_eq("to_string of INT_MIN", big.to_string(big.from_int(min_int())),
+    check_eq("to_int of INT_MIN", big.to_int(big.from_int(min_int)), Just(min_int)),
+    check_eq("to_string of INT_MIN", big.to_string(big.from_int(min_int)),
              "-9223372036854775808"),
     check_eq("to_int just past INT_MAX", big.to_int(parse("9223372036854775808")), Nothing),
     check_eq("to_int just past INT_MIN", big.to_int(parse("-9223372036854775809")), Nothing),
@@ -126,16 +126,16 @@ fn main() -> Unit !{IO} =
 
     # --- negate / abs ---
     check_eq("abs of a negative", big.to_int(big.abs(big.from_int(-5))), Just(5)),
-    check_eq("negate of INT_MIN leaves i64", big.to_string(big.negate(big.from_int(min_int()))),
+    check_eq("negate of INT_MIN leaves i64", big.to_string(big.negate(big.from_int(min_int))),
              "9223372036854775808"),
-    check_eq("abs of INT_MIN leaves i64", big.to_int(big.abs(big.from_int(min_int()))), Nothing),
+    check_eq("abs of INT_MIN leaves i64", big.to_int(big.abs(big.from_int(min_int))), Nothing),
 
     # --- cmp ---
     check_eq("cmp less", big.cmp(big.from_int(-1), big.from_int(1)), -1),
     check_eq("cmp equal", big.cmp(big.from_int(1), big.from_int(1)), 0),
     check_eq("cmp greater", big.cmp(big.from_int(1), big.from_int(-1)), 1),
     check_eq("cmp both negative", big.cmp(big.from_int(-5), big.from_int(-3)), -1),
-    check_eq("cmp by width", big.cmp(p256_prime(), big.from_int(max_int())), 1),
+    check_eq("cmp by width", big.cmp(p256_prime(), big.from_int(max_int)), 1),
     check_eq("cmp zero against negative", big.cmp(big.from_int(0), big.from_int(-1)), 1),
 
     # --- divmod: truncated, so the remainder takes the dividend's sign ---

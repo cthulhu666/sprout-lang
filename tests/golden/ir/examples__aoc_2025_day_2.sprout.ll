@@ -129,7 +129,9 @@ declare i64 @ref_write(i64, i64)
 @.cname.14 = private unnamed_addr constant [32 x i8] c"examples.aoc_2025_day_2.Answers\00"
 @.cfkinds.14 = private unnamed_addr constant [3 x i8] c"ii\00"
 @pow10_clamp = private constant i64 400
+@max_int = private constant i64 9223372036854775807
 @pow10_exact_max = private constant i64 22
+@pow10_exact_unit = global i64 zeroinitializer
 @pow10_finite_max = private constant i64 308
 
 define i64 @range_up(i64 %p$lo, i64 %p$hi) {
@@ -1499,6 +1501,13 @@ entry:
   ret i64 %t$0
 }
 
+define void @__sprout_init_globals() {
+entry:
+  %t$0 = bitcast double 10000000000000000000000.0 to i64
+  store i64 %t$0, ptr @pow10_exact_unit
+  ret void
+}
+
 define i32 @main(i32 %argc, ptr %argv) {
 entry:
   %argv_set = call i64 @sprout_set_argv(i32 %argc, ptr %argv)
@@ -1547,6 +1556,7 @@ entry:
   %cname_ptr_14 = getelementptr inbounds [32 x i8], ptr @.cname.14, i64 0, i64 0
   %cfkinds_ptr_14 = getelementptr inbounds [3 x i8], ptr @.cfkinds.14, i64 0, i64 0
   %creg_14 = call i64 @sprout_register_ctor(i64 14, ptr %cname_ptr_14, i64 2, ptr %cfkinds_ptr_14)
+  call void @__sprout_init_globals()
   call i64 @__sprout_user_main()
   ret i32 0
 }

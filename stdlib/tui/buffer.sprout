@@ -52,11 +52,11 @@ type Run =
 # Vim's `'undolevels'` default, in Vim's units: steps, not Emacs's bytes.
 # Sprout has no cheap way to size a `Fields`, and a step count is the number a
 # reader can reason about.
-fn step_cap() -> Int = 1000
+let step_cap: Int = 1000
 
 # Emacs's `amalgamating-undo-limit` default: how many typed characters go into
 # one step before the run closes on its own.
-fn run_cap() -> Int = 20
+let run_cap: Int = 20
 
 fn doc(b: Buffer) -> Doc =
   match b with
@@ -110,7 +110,7 @@ fn with_run(r: Run, b: Buffer) -> Buffer =
 fn continues(r: Run, s: String) -> Bool =
   match r with
   | Fresh -> false
-  | Typing n -> n < run_cap() && is_one_key(s)
+  | Typing n -> n < run_cap && is_one_key(s)
 
 # What a keystroke looks like from here: both widgets hand a single character
 # in (`string_from_char`), and a paste arrives whole through `Paste`. A newline
@@ -126,8 +126,8 @@ fn grown(r: Run) -> Run =
 # walks, and so does `capped`, but both run once per recorded step — never per
 # character typed.
 fn pushed(d: Doc, past: List Doc) -> List Doc =
-  if list_length(past) < step_cap() then Cons(d, past)
-  else Cons(d, capped(step_cap() - 1, past))
+  if list_length(past) < step_cap then Cons(d, past)
+  else Cons(d, capped(step_cap - 1, past))
 
 fn capped(n: Int, ds: List Doc) -> List Doc =
   match ds with

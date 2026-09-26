@@ -99,7 +99,7 @@ fn wide_record_source(n: Int) -> String =
   wide_field_inits(0, n) ++ ")"
 
 # T1: 0-arity boxed ctor (Nil-style) -> @sprout_alloc_obj with field count 0.
-fn t1_program() -> sprout_ir.IRProgram =
+let t1_program =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction("t1", Nil, "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
@@ -109,7 +109,7 @@ fn t1_program() -> sprout_ir.IRProgram =
     Nil), Nil, Nil, Nil)
 
 # T2: 2-arity boxed ctor with two scalar Int args, no rooting expected.
-fn t2_program() -> sprout_ir.IRProgram =
+let t2_program =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction("t2", Nil, "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
@@ -125,7 +125,7 @@ fn t2_program() -> sprout_ir.IRProgram =
 # allocates before storing its operands without handle-protecting them, so both
 # heap operands must be rooted across the make.  Verifies the heap-arg ctor
 # lowers cleanly and roots its operands.
-fn t3_program() -> sprout_ir.IRProgram =
+let t3_program =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction("t3", Nil, "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
@@ -138,7 +138,7 @@ fn t3_program() -> sprout_ir.IRProgram =
     Nil), Nil, Nil, Nil)
 
 # T4: Two boxed ctors back-to-back; first ctor result lives across second.
-fn t4_program() -> sprout_ir.IRProgram =
+let t4_program =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction("t4", Nil, "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
@@ -153,7 +153,7 @@ fn t4_program() -> sprout_ir.IRProgram =
     Nil), Nil, Nil, Nil)
 
 # T5: Ctor-of-ctor composition.  Inner ctor result feeds directly into outer.
-fn t5_program() -> sprout_ir.IRProgram =
+let t5_program =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction("t5", Nil, "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
@@ -188,55 +188,55 @@ fn main() -> Unit !{IO} =
 
     # Pretty printer covers the new op.
     assert_true(state, "pretty: make_ctor rendered",
-                contains(sprout_ir.print_ir_program(t1_program()), "make_ctor"))
+                contains(sprout_ir.print_ir_program(t1_program), "make_ctor"))
     assert_true(state, "pretty: tag literal appears in pretty output",
-                contains(sprout_ir.print_ir_program(t2_program()), "tag=7"))
+                contains(sprout_ir.print_ir_program(t2_program), "tag=7"))
 
     # Header declares one arity-generic boxed-ctor entry point; the former
     # per-arity @sprout_make0..@sprout_make10 declares are gone.
     assert_true(state, "header declares @sprout_alloc_obj",
-                contains(ir_lowering.lower_program(t1_program()),
+                contains(ir_lowering.lower_program(t1_program),
                          "declare i64 @sprout_alloc_obj(i64, i64)"))
     assert_false(state, "header declares no per-arity @sprout_makeN",
-                 contains(ir_lowering.lower_program(t1_program()),
+                 contains(ir_lowering.lower_program(t1_program),
                           "declare i64 @sprout_make"))
 
     # T1: a 0-arity boxed ctor needs no stores, so it lowers to the bare call.
     # The runtime routes field count 0 back to its nullary-ctor singleton cache.
     assert_true(state, "T1: emits @sprout_alloc_obj call with tag literal and count 0",
-                contains(lower_with_roots(t1_program()),
+                contains(lower_with_roots(t1_program),
                          "%t0 = call i64 @sprout_alloc_obj(i64 0, i64 0)"))
     assert_false(state, "T1: nullary ctor emits no field stores",
-                 contains(lower_with_roots(t1_program()), "%t0$ptr"))
+                 contains(lower_with_roots(t1_program), "%t0$ptr"))
 
     # T2: 2-arity ctor with Int args lowers without rooting.
     assert_true(state, "T2: emits @sprout_alloc_obj with tag and field count",
-                contains(lower_with_roots(t2_program()),
+                contains(lower_with_roots(t2_program),
                          "%t2 = call i64 @sprout_alloc_obj(i64 7, i64 2)"))
     assert_true(state, "T2: stores arg 0 at field offset 0",
-                contains(lower_with_roots(t2_program()),
+                contains(lower_with_roots(t2_program),
                          "store i64 %t0, ptr %t2$f0"))
     assert_true(state, "T2: stores arg 1 at field offset 1",
-                contains(lower_with_roots(t2_program()),
+                contains(lower_with_roots(t2_program),
                          "store i64 %t1, ptr %t2$f1"))
     assert_false(state, "T2: no push_i64_root call site",
-                 contains(lower_with_roots(t2_program()), "call i64 @sprout_gc_push_i64_root"))
+                 contains(lower_with_roots(t2_program), "call i64 @sprout_gc_push_i64_root"))
     assert_false(state, "T2: no pop_roots call site",
-                 contains(lower_with_roots(t2_program()), "call i64 @sprout_gc_pop_roots"))
+                 contains(lower_with_roots(t2_program), "call i64 @sprout_gc_pop_roots"))
 
     # T3: heap-arg ctor lowers cleanly.  @sprout_alloc_obj allocates before the
     # operands are stored and does not handle-protect them, so both heap args
     # (%sa, %sb) must be rooted across it even though they die right after.
     assert_true(state, "T3: emits @sprout_alloc_obj for the heap-arg ctor",
-                contains(lower_with_roots(t3_program()),
+                contains(lower_with_roots(t3_program),
                          "%r = call i64 @sprout_alloc_obj(i64 7, i64 2)"))
     assert_true(state, "T3: stores both heap args after the allocation",
-                contains(lower_with_roots(t3_program()), "store i64 %sa, ptr %r$f0") &&
-                contains(lower_with_roots(t3_program()), "store i64 %sb, ptr %r$f1"))
+                contains(lower_with_roots(t3_program), "store i64 %sa, ptr %r$f0") &&
+                contains(lower_with_roots(t3_program), "store i64 %sb, ptr %r$f1"))
     assert_eq(state, "T3: two push_i64_root for the two heap operands",
-              count(lower_with_roots(t3_program()), "call i64 @sprout_gc_push_i64_root"), 2)
+              count(lower_with_roots(t3_program), "call i64 @sprout_gc_push_i64_root"), 2)
     assert_eq(state, "T3: one pop_roots(i64 2) around the make",
-              count(lower_with_roots(t3_program()), "@sprout_gc_pop_roots(i64 2)"), 1)
+              count(lower_with_roots(t3_program), "@sprout_gc_pop_roots(i64 2)"), 1)
 
     # T4: two roots total under stack coalescing — %first is rooted ONCE across
     # %second's make and stays rooted (reused, not re-pushed) across WrapPair;
@@ -244,29 +244,29 @@ fn main() -> Unit !{IO} =
     # at WrapPair (no intermediate pop_roots(i64 1)).  The Int args %c0/%c1 are
     # scalars and are never rooted.
     assert_eq(state, "T4: two push_i64_root (coalesced: %first rooted once across both makes)",
-              count(lower_with_roots(t4_program()), "call i64 @sprout_gc_push_i64_root"), 2)
+              count(lower_with_roots(t4_program), "call i64 @sprout_gc_push_i64_root"), 2)
     assert_eq(state, "T4: no pop_roots(i64 1) (%first not popped between makes)",
-              count(lower_with_roots(t4_program()), "@sprout_gc_pop_roots(i64 1)"), 0)
+              count(lower_with_roots(t4_program), "@sprout_gc_pop_roots(i64 1)"), 0)
     assert_eq(state, "T4: one pop_roots(i64 2) (%first + %second at WrapPair)",
-              count(lower_with_roots(t4_program()), "@sprout_gc_pop_roots(i64 2)"), 1)
+              count(lower_with_roots(t4_program), "@sprout_gc_pop_roots(i64 2)"), 1)
     assert_eq(state, "T4: two 1-field @sprout_alloc_obj calls (SinglePtr)",
-              count(lower_with_roots(t4_program()), "call i64 @sprout_alloc_obj(i64 11, i64 1)"), 2)
+              count(lower_with_roots(t4_program), "call i64 @sprout_alloc_obj(i64 11, i64 1)"), 2)
     assert_true(state, "T4: WrapPair lowers with tag=12 and field count 2",
-                contains(lower_with_roots(t4_program()),
+                contains(lower_with_roots(t4_program),
                          "%r = call i64 @sprout_alloc_obj(i64 12, i64 2)"))
 
     # T5: three IRMakeCtor - InnerSingle then OuterPair - compose correctly.
     assert_true(state, "T5: InnerSingle lowers",
-                contains(lower_with_roots(t5_program()),
+                contains(lower_with_roots(t5_program),
                          "%i = call i64 @sprout_alloc_obj(i64 20, i64 1)"))
     assert_true(state, "T5: OuterPair lowers",
-                contains(lower_with_roots(t5_program()),
+                contains(lower_with_roots(t5_program),
                          "%o = call i64 @sprout_alloc_obj(i64 21, i64 2)"))
     # %sx rooted across InnerSingle (1); then %sy and %i rooted across OuterPair
     # (operand-exposure, 2) = 3 total.  Codegen stores operands after the
     # allocating GC point, so its heap operands must be rooted across the make.
     assert_eq(state, "T5: three push_i64_root for ctor operands",
-              count(lower_with_roots(t5_program()), "call i64 @sprout_gc_push_i64_root"), 3)
+              count(lower_with_roots(t5_program), "call i64 @sprout_gc_push_i64_root"), 3)
 
     # ---------------------------------------------------------------------------
     # End-to-end pipeline tests: AST -> IR via ast_to_ir.translate_program.
@@ -488,9 +488,9 @@ fn main() -> Unit !{IO} =
     # Whole-module verification: substring checks are blind to whole-module
     # malformation; verify representative rooted+lowered ctor programs
     # actually compile under clang.
-    t3_compiles <- clang_verifies_ir(lower_with_roots(t3_program()))
+    t3_compiles <- clang_verifies_ir(lower_with_roots(t3_program))
     assert_true(state, "T3 (heap-arg ctor) lowered IR compiles under clang", t3_compiles)
-    t5_compiles <- clang_verifies_ir(lower_with_roots(t5_program()))
+    t5_compiles <- clang_verifies_ir(lower_with_roots(t5_program))
     assert_true(state, "T5 (ctor-of-ctor composition) lowered IR compiles under clang", t5_compiles)
 
     summary(state)

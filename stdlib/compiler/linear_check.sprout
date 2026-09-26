@@ -425,13 +425,13 @@ fn method_once_mismatch_msg(name: String) -> String =
 fn method_mismatch_msg(name: String) -> String =
   "instance method parameter '" ++ name ++ "' must match the class declaration's ownership: a call dispatches through the CLASS signature, so an instance that only borrows where the class consumes discharges the caller's obligation and leaks the value"
 
-fn borrowed_field_read_msg() -> String =
+let borrowed_field_read_msg: String =
   "a linear field cannot be read out of a borrowed value (its owner will still release it); take the parameter `consuming` if this function should own it"
 
 fn borrowed_binder_msg(name: String) -> String =
   "linear value '" ++ name ++ "' is borrowed and cannot be consumed (it was destructured from a borrowed value, which its owner will still release)"
 
-fn nonvar_borrow_msg() -> String =
+let nonvar_borrow_msg: String =
   "a borrowing argument must be a variable reference (a freshly-built linear value here would never be consumed)"
 
 # Which of the three reasons a modifier was rejected. They need different
@@ -448,19 +448,20 @@ type BadModifier (..) =
   # A modifier written in the RETURN type, which names no parameter to blame.
   | BadInReturn
 
+# The return type is checked by the same walk as a parameter's, so the fault it
+# reports is already worded for a parameter. Re-word rather than re-derive: the
+# walk knows WHICH rule failed, and only the caller knows the position.
+let return_modifier_msg: String =
+  "an ownership modifier in a return type is only meaningful on a parameter of a linear type"
+
 fn bad_modifier_message(b: BadModifier) -> String =
   match b with
   | BadOnTyvar name -> tyvar_modifier_msg(name)
   | BadNonLinear name -> bad_modifier_msg(name)
   | BadOnceNonFunction name -> once_modifier_msg(name)
   | BadOnceOnTyvar name -> once_tyvar_msg(name)
-  | BadInReturn -> return_modifier_msg()
+  | BadInReturn -> return_modifier_msg
 
-# The return type is checked by the same walk as a parameter's, so the fault it
-# reports is already worded for a parameter. Re-word rather than re-derive: the
-# walk knows WHICH rule failed, and only the caller knows the position.
-fn return_modifier_msg() -> String =
-  "an ownership modifier in a return type is only meaningful on a parameter of a linear type"
 
 
 fn tyvar_modifier_msg(name: String) -> String =
@@ -718,7 +719,7 @@ fn lin_var(name: String, p: source.SourcePos, sc: LinScope) -> LinRes =
 fn lin_getfield(base: typed_ast.TypedExpr, field_ty: types.Type, p: source.SourcePos,
                 sc: LinScope, env: Dict types.Scheme) -> LinRes =
   if expr_is_borrowed_binding(base, sc) && type_is_linear(field_ty, env)
-  then LinErr(p, borrowed_field_read_msg())
+  then LinErr(p, borrowed_field_read_msg)
   else lin_read(base, sc, env)
 
 fn lin_read(e: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) -> LinRes =
@@ -922,7 +923,7 @@ fn lin_borrow_var(name: String, p: source.SourcePos, sc: LinScope,
 
 fn lin_nonvar_borrow(a: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) -> LinRes =
   if type_is_linear(typed_ast.typed_expr_type(a), env)
-  then LinErr(typed_ast.typed_expr_pos(a), nonvar_borrow_msg())
+  then LinErr(typed_ast.typed_expr_pos(a), nonvar_borrow_msg)
   else lin_consumed(a, sc, env)
 
 fn record_field_exprs(fields: List typed_ast.TypedRecordField) -> List typed_ast.TypedExpr =
@@ -1116,6 +1117,9 @@ fn lin_do_bind(pat: ast.Pattern, e: typed_ast.TypedExpr, rest: List typed_ast.Ty
   | LinOk ec eb -> lin_do_bind_checked(pat, do_bind_type(typed_ast.typed_expr_type(e), env),
                                        ec, eb, e, rest, sc, env)
 
+let wildcard_bind_msg: String =
+  "`_ <-` discards a linear value: a wildcard binds no name, so nothing can consume it (linear values must be used exactly once); bind a name and consume it"
+
 # `_ <- e` binds no name, so `pattern_linear_binders` yields nothing and the
 # binder-keyed rules attach no obligation — the payload is dropped exactly as a
 # bare step would drop it. Rejecting it is not optional politeness: the
@@ -1133,7 +1137,7 @@ fn lin_do_bind_checked(pat: ast.Pattern, bind_type: types.Type, ec: List LinUse,
                        rest: List typed_ast.TypedDoStep,
                        sc: LinScope, env: Dict types.Scheme) -> LinRes =
   if wildcard_discards_linear(pat, bind_type, env) then
-    LinErr(typed_ast.typed_expr_pos(e), wildcard_bind_msg())
+    LinErr(typed_ast.typed_expr_pos(e), wildcard_bind_msg)
   else
     lin_do_bind_rest(pattern_linear_binders(pat, bind_type, env),
                      ec, eb, e, rest, sc, env)
@@ -1143,8 +1147,6 @@ fn wildcard_discards_linear(pat: ast.Pattern, t: types.Type, env: Dict types.Sch
   | ast.WildcardPattern _ -> discardable_type(t, env)
   | _ -> false
 
-fn wildcard_bind_msg() -> String =
-  "`_ <-` discards a linear value: a wildcard binds no name, so nothing can consume it (linear values must be used exactly once); bind a name and consume it"
 
 fn lin_do_bind_rest(binders: List LinBinder, ec: List LinUse, eb: List LinUse,
                     e: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
