@@ -193,8 +193,8 @@ or (c) the declaration stands and the fallbacks get annotated.
 
 ### 6.1 The argument for keeping `!{IO}`, stated first because it is real
 
-`panic` **writes to stderr**. `runtime/sprout_runtime.c:3023` calls `tcp_fail`, which does
-`fprintf(stderr, "runtime error: %s\n", msg)` and then `exit(1)` (`:5037`). Sprout's own §6 rule says
+`panic` **writes to stderr**. `runtime/sprout_runtime.c:3394` calls `sprout_fail`, which does
+`fprintf(stderr, "runtime error: %s\n", msg)` and then `exit(1)` (`:5714`). Sprout's own §6 rule says
 a builtin takes `!{IO}` "when evaluating the call may interact with runtime or external state such as
 terminal IO". By the letter of that rule `panic` qualifies, and no amount of prior art overrides
 Sprout's own normative text.
@@ -203,7 +203,7 @@ What the survey settles is whether that rule should be read that literally — b
 language below aborts by printing a diagnostic too, and not one of them treats that as an effect.**
 
 **And neither, it turns out, does Sprout.** Checking the "only such builtin" claim while writing
-this up found the opposite of what was expected: every runtime abort goes through `tcp_fail` →
+this up found the opposite of what was expected: every runtime abort goes through `sprout_fail` →
 `fprintf(stderr, …)` → `exit(1)`, and there are **~187 such call sites** sitting behind builtins that
 are declared **pure**. `vector_length : Vector a -> Int` aborts on a null vector. So do
 `vector_get`, `str_len`, and most of the rest. Under the descriptor-touching reading of §6, all of

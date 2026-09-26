@@ -139,7 +139,7 @@ contract is amortised O(1), matching both rows above. Doubling is nonetheless st
 the final length; the escape hatch for those callers is `mutvec_new(n, fill)` plus indexed writes,
 which allocates exactly once.
 
-**Decision — allocation failure aborts via `tcp_fail`.** This matches Rust's default and keeps
+**Decision — allocation failure aborts via `sprout_fail`.** This matches Rust's default and keeps
 `push` from being the one operation in the `MutVec` API with a different failure discipline. The
 requirements doc noted the inconsistency honestly — `push` is the first operation that can fail for
 a reason the caller could have avoided — but Rust's answer to exactly that is a separate fallible
@@ -189,7 +189,7 @@ then with the measurement to justify it.
 first draft had `insert` panic, on the reasoning that it has no return value to report a miss in and
 that `mutvec_set` panics too. Both halves are wrong under guidelines.md §2, which is a *hard mandate*
 for `[Library]`: `panic` is for a violated internal invariant, explicitly "not for input the caller
-could plausibly supply", and an index is exactly that. That `mutvec_set` reaches a `tcp_fail` through
+could plausibly supply", and an index is exactly that. That `mutvec_set` reaches a `sprout_fail` through
 `vector_mutset` is a pre-existing deviation, not a licence. `Bool` rather than `Maybe Unit` because a
 `<-` bind on a `Maybe` is a *fallible* bind — it would short-circuit the caller's block rather than
 discard, which is the opposite of what a caller ignoring the result wants.

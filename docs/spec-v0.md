@@ -1951,7 +1951,7 @@ Effect note for v0:
   might abort — if it aborts, the caller does not run.
 
   This is not a new exemption; it is what the prelude has always done. Every
-  runtime abort goes through `tcp_fail`, which writes `runtime error: <msg>` to
+  runtime abort goes through `sprout_fail`, which writes `runtime error: <msg>` to
   stderr and calls `exit(1)`, and there are ~187 such call sites behind builtins
   that are overwhelmingly declared **pure**: `vector_length : Vector a -> Int`
   aborts on a null vector, as do `vector_get`, `str_len` and most of the rest.

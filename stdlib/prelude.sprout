@@ -116,7 +116,7 @@ export fn range_end(value: IntRange) -> Int =
 #
 # Normalized to the SIGN of the stored field, which is what upholds the "+1 or -1"
 # invariant now that the constructor is ordinary Sprout. It used to be a C builtin
-# that `tcp_fail`ed on any other step, and that check has no Sprout equivalent: a
+# that `sprout_fail`ed on any other step, and that check has no Sprout equivalent: a
 # prelude constructor is in scope in every file regardless of `(..)`, because the
 # prelude is inlined rather than imported, so `IntRange(1, 6, 4)` cannot be
 # prevented. Normalizing here makes it harmless instead of fatal.
@@ -1642,12 +1642,12 @@ extern fn eprint(val: String) -> Unit !{IO}
 # exception to it.
 #
 # It does perform terminal I/O: the runtime writes `runtime error: <msg>` to
-# stderr and calls exit(1) (sprout_runtime.c panic -> tcp_fail). By the letter of
+# stderr and calls exit(1) (sprout_runtime.c panic -> sprout_fail). By the letter of
 # spec §6 as it read before 2026-08-16 — "!{IO} when evaluating the call may
 # interact with runtime or external state such as terminal IO" — that would make
 # it effectful.
 #
-# But so would most of this file. EVERY runtime abort goes through tcp_fail, and
+# But so would most of this file. EVERY runtime abort goes through sprout_fail, and
 # there are ~187 such call sites behind builtins declared pure right here:
 # `vector_length : Vector a -> Int` aborts on a null vector, as do `vector_get`
 # and `str_len`. Aborting-is-not-an-effect was already the de facto rule; `panic`

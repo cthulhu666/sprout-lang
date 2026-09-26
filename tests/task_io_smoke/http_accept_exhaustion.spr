@@ -6,7 +6,7 @@ import stdlib.terminal as terminal
 
 # REGRESSION (concurrency review C3): descriptor exhaustion must shed LOAD, not the process.
 #
-# `tcp_accept` used to call `tcp_fail` on any errno that was not EAGAIN, so `accept` returning
+# `tcp_accept` used to call `sprout_fail` on any errno that was not EAGAIN, so `accept` returning
 # EMFILE — the per-process descriptor limit, which a busy server reaches — killed the whole server
 # along with every connection it was already handling. It now parks on the listener and retries, the
 # same treatment EAGAIN gets; the condition is transient by construction, because slots free as open
@@ -25,7 +25,7 @@ import stdlib.terminal as terminal
 # It asserts, robustly: a server under heavy descriptor pressure SURVIVES and still answers an
 # ordinary request afterwards. On the unfixed runtime `served-after-descriptor-pressure` is
 # unreachable whenever the pressure is enough to make `accept` fail — the process aborts inside
-# `tcp_fail`, so the fixture prints nothing and exits non-zero.
+# `sprout_fail`, so the fixture prints nothing and exits non-zero.
 #
 # It does NOT guarantee that `accept` returned EMFILE on this run, and the window is narrower than it
 # looks. Measured on macOS with the runtime instrumented to report the branch, flooding 64

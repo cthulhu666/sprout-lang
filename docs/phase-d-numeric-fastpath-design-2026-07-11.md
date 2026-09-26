@@ -266,7 +266,7 @@ recognizing a countable loop" is **not borne out** by current evidence; the indu
 trip count were identified. **Conclusion:** the checkpoint's blocker today is **B1, not B3.** A
 *definitive* B3 verdict is unobtainable until B1 removes the calls. **Caveat (do not overstate):**
 B1 does **not** leave the `stackrestore` as the *sole* barrier — inlining the reads replaces each
-`call` with a null/**bounds-check early exit** (a `noreturn` `tcp_fail` branch inside the loop), and
+`call` with a null/**bounds-check early exit** (a `noreturn` `sprout_fail` branch inside the loop), and
 the remarks already list "Cannot vectorize early exit loop" as a distinct refusal. So **post-B1 the
 row loop still has two barriers: (a) the bounds-check early exit and (b) the `stackrestore` loop
 shape.** B3 must handle **both** — hoisting/eliminating the bounds check *and* emitting a canonical

@@ -549,9 +549,9 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   and `builder_to_str` to skip the `Bytes` intermediary and the UTF-8 round-trip. These three
   unblock a pure-Sprout `string_join_suffix` over `list_fold` + builder (see §5).
 
-- [ ] `P2` **`bytes.singleton` and `bytes.builder_byte` are partial**, trapping via `tcp_fail` on a
-  value outside 0..255 (`sprout_runtime.c:9051`, `:9207`). `docs/guidelines.md` §2 makes totality a
-  hard mandate for [Library] code, so two stdlib exports currently break it. The sibling
+- [ ] `P2` **`bytes.singleton` and `bytes.builder_byte` are partial**, trapping via `sprout_fail`
+  on a value outside 0..255 (`sprout_runtime.c:9129`, `:9285`). `docs/guidelines.md` §2 makes
+  totality a hard mandate for [Library] code, so two stdlib exports currently break it. The sibling
   `builder_u16_be`/`builder_u32_be` take the other branch and wrap silently, so the module is also
   inconsistent with itself about an out-of-range byte. Decide one answer for all four — `Maybe
   Bytes`, a documented wrap, or a smart constructor over a `Byte` wrap — since changing the two
@@ -2582,8 +2582,8 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   is "resolve constraint/dispatch argument types via `apply_subst(s3, …)`, not `typed_expr_type`
   alone", and a written rule stops the next one at review time.
 - [ ] `P3` **Every stdlib `panic` renders as "runtime error: builtin `X`", naming Sprout code as a
-  builtin.** `tcp_fail` (`runtime/sprout_runtime.c:5628`) splits the message on its first colon and
-  labels the left half a builtin. The `name: detail` shape is the stdlib convention
+  builtin.** `sprout_fail` (`runtime/sprout_runtime.c:5706`) splits the message on its first colon
+  and labels the left half a builtin. The `name: detail` shape is the stdlib convention
   (`mutmatrix_at:`, `dce.is_pure_expr:`, `http_server:`, `range_count:`), so every one of them lies
   about where the failure came from, and a user grepping for a builtin of that name finds nothing.
   The fix is to stop inferring "builtin" from punctuation — either a distinct entry point for

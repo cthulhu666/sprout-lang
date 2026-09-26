@@ -94,7 +94,7 @@ and not on a big-endian one, which is a bug waiting rather than a portability fo
 changes ship together or neither does.
 
 **The overflow path needs no new runtime symbol.** It calls the existing
-`sprout_gc_push_i64_root`, which re-checks and reports through `tcp_fail` exactly as today. The
+`sprout_gc_push_i64_root`, which re-checks and reports through `sprout_fail` exactly as today. The
 declaration is already emitted (`ir_lowering.sprout:512`).
 
 ### 4.2 The one runtime surface change — needs approval
@@ -135,7 +135,7 @@ unchanged — this replaces the lowering of two existing IR nodes and adds no su
 program can observe. `docs/spec-v0.md` needs no edit.
 
 The one observable difference is a GC root pool exhaustion message arriving from the same
-`tcp_fail` call as today, via the cold path, so even the error text is unchanged.
+`sprout_fail` call as today, via the cold path, so even the error text is unchanged.
 
 ## 6. Compatibility and migration
 

@@ -382,7 +382,7 @@ fn main() -> Unit !{IO} =
     # --- non-ASCII input (regression: this ABORTED the process) ---
     # `byte1(s, i) = str_slice_bytes(s, i, 1)` sliced one byte for character dispatch. On the LEAD
     # byte of a multi-byte sequence the builtin's end-offset check saw a continuation byte and called
-    # `tcp_fail` — the process-fatal path — so ANY non-ASCII character anywhere in the input killed
+    # `sprout_fail` — the process-fatal path — so ANY non-ASCII character anywhere in the input killed
     # the program instead of parsing or returning Err. Reachable from the LSP server (a Sprout file
     # with a non-ASCII literal) and from any HTTP server parsing a JSON body, where it is an
     # unauthenticated remote process kill.

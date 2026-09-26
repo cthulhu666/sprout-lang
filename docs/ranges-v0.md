@@ -283,7 +283,7 @@ by all three, so the sign logic exists once rather than three times.
 **A step of `0` must be unconstructible.** `range_up` and `range_down` are the only constructors and
 they hardcode `+1`/`-1`; the `int_range` extern takes the step as a parameter, so nothing in Sprout
 can pass `0`, but the walkers would not terminate if anything did. Guard it at the runtime boundary
-(`tcp_fail` on `step == 0` in `int_range`) rather than trusting the callers, since the extern is
+(`sprout_fail` on `step == 0` in `int_range`) rather than trusting the callers, since the extern is
 reachable from any future stdlib code.
 
 ### 4.2 Ordering
@@ -644,7 +644,7 @@ symmetric constructors would need no new builtin and no approval.
 `ast_to_ir.sprout:551-558` passes `regs` through unchanged, commenting *"Not added to regs — GC
 tracing is header-driven (arity in the object header), so no runtime ctor registration is needed."*
 `find_ctor_tag_by_name` (`runtime/sprout_runtime.c:2678-2692`) therefore ends in
-`tcp_fail("constructor metadata not registered")`. **C cannot construct a record by name.**
+`sprout_fail("constructor metadata not registered")`. **C cannot construct a record by name.**
 
 That is survivable — `stdlib/regex.sprout:32` is the only consumer of `regex_find_range` and
 converts to a `Match` ADT immediately, so the three externs could move under an opaque carrier name
