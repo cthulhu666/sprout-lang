@@ -23,26 +23,32 @@ import stdlib.mutable (MutVec, mutvec_new, mutvec_empty, mutvec_push, mutvec_at,
 # `slot > 4096`. 509 is the first vector whose elements are out of line at birth.
 # 504 is the size whose slot (4064 bytes) is exactly the tail a grown ceiling
 # vector hands back, so allocating one re-uses that tail; 506 (4080 bytes) is the
-# class above it, which must NOT be satisfied from that tail.
+# class above it, which must NOT be satisfied from that tail. 2 is the other end:
+# growing it frees 16 bytes, the smallest slot there is, whose payload is exactly
+# the 8 bytes the free-list next-pointer needs.
 #
 # Like test_gc_freelist_reuse.spr, the heap-internal half of this file is DRIVEN
-# here and CHECKED by the runtime. The assertions below only confirm that elements
-# survive collections; what a malformed split of a grown vector's slot is caught
-# by, measured against four broken versions of it, is SPROUT_GC_HDRCHECK=1 — which
-# CI sets for the whole suite:
+# here and CHECKED by the runtime. Measured against four broken versions of the
+# inline-tail release, each run four ways (2026-09-26):
 #
-#   mutation                       HDRCHECK   FL_VERIFY   GC_STRESS
-#   tail header 16 bytes too long    abort       pass        pass
-#   slotmap bit not set              abort       abort       livelock
-#   freelist class one too high      abort       pass        pass
-#   live header never shrunk         abort       pass        pass
+#   mutation                        plain  HDRCHECK  FL_VERIFY  GC_STRESS
+#   tail header 16 bytes too long   pass   abort     pass       crash
+#   slotmap bit not set             crash  abort     crash      hang
+#   freelist class one too high     crash  abort     crash      pass
+#   live header never shrunk        crash  abort     crash      pass
 #
-# The two allocations below that look redundant are what make rows 1 and 3 fail:
-# `neighbour` is the next allocation after the split and asks for the class above
-# the tail, and `churned_free` forces a sweep to WALK the tail while it is free.
-# Without them the corrupt state is overwritten before anything looks at it, and
-# all four mutations pass everything. `just test-freelist-verify` and
-# `just test-stress` also run this file, for the two rows they do cover.
+# Read it as: SPROUT_GC_HDRCHECK=1 — which CI sets for the whole suite — is the
+# only column that NAMES the fault, and the only one that catches all four.
+# `crash` is this file dying mid-suite on a wrong answer, which locates nothing;
+# FL_VERIFY adds no row the plain run does not already give; and GC_STRESS is the
+# weakest column, with one row that hangs instead of failing (hence the per-file
+# timeout in the test-stress recipe).
+#
+# The allocations below that look redundant are what make rows 1 and 3 detectable
+# at all: `neighbour` asks for the class ABOVE the freed tail while that tail is
+# still listed, and `churned_free` forces a sweep to WALK the tail while it is
+# free. Without them the corrupt state is overwritten before anything reads it and
+# every column says pass.
 
 fn churn(n: Int, acc: Int) -> Int =
   if n <= 0 then acc
@@ -89,10 +95,18 @@ fn main() -> Unit !{IO} =
     ceiling_grown <- mutvec_new(508, "c")
     _ <- push_labels(ceiling_grown, 0, 2)
 
-    # The very next managed allocation after that split, deliberately: a
-    # 506-element vector's slot is 4080 bytes, the class ABOVE the 4064-byte tail
-    # just freed, so it must NOT be satisfied from it. Listing the tail one class
-    # too high would hand it over and overflow the neighbouring slot by 16 bytes.
+    # ── And the SMALLEST tail: 2 elements is a 48-byte slot, so growing it frees
+    # 16 bytes — one slot, freelist class 1, whose payload is exactly the 8 bytes
+    # the free-list next-pointer needs. Any off-by-one in the remainder writes
+    # that pointer past the tail and into the following slot.
+    tiny_grown <- mutvec_new(2, "t")
+    _ <- push_labels(tiny_grown, 0, 1)
+
+    # A 506-element vector's slot is 4080 bytes, the class ABOVE the 4064-byte
+    # tail just freed, so it must NOT be satisfied from that tail. What this
+    # depends on is only that nothing between the split and here asks for class
+    # 254 or 255 — not that it is the next allocation, which it is not:
+    # push_labels allocates its `p-1` string after the split.
     neighbour <- mutvec_new(506, "n")
 
     # Collect while that tail is still free, so the sweep has to WALK it: nothing
@@ -150,6 +164,11 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "ceiling grown: inline prefix copied out (0)", cg0, "c")
     assert_eq(state, "ceiling grown: inline prefix copied out (507)", cg507, "c")
     assert_eq(state, "ceiling grown: last pushed element traced", cg509, "p-1")
+    assert_eq(state, "smallest tail: length", mutvec_len(tiny_grown), 3)
+    t0 <- mutvec_at(tiny_grown, 0)
+    t2 <- mutvec_at(tiny_grown, 2)
+    assert_eq(state, "smallest tail: inline prefix copied out", t0, "t")
+    assert_eq(state, "smallest tail: pushed element traced", t2, "p-0")
     assert_eq(state, "class above the tail: length", mutvec_len(neighbour), 506)
     n505 <- mutvec_at(neighbour, 505)
     assert_eq(state, "class above the tail: last element intact", n505, "n")
