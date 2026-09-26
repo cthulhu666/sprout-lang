@@ -18,7 +18,7 @@ type Turn = (dial: Int, hits: Int, passes: Int)
 type Answers =
   | Answers Int Int
 
-fn sample_rotations() -> List Rot =
+let sample_rotations =
   [L(68), L(30), R(48), L(5), R(60), L(55), L(1), L(99), R(14), L(82)]
 
 # Dial positions are 0..99. `/` truncates toward zero, so the remainder of a
@@ -68,4 +68,4 @@ where
   done = list_fold(apply, Turn(dial = 50, hits = 0, passes = 0), rots)
 
 fn main() -> Unit !{IO} =
-  print(solve(sample_rotations()))
+  print(solve(sample_rotations))

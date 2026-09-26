@@ -75,7 +75,7 @@ fn count_step(s: Step) -> Int =
   | Do value -> count_expr(value)
   | Bind _ value -> count_expr(value)
 
-fn sample() -> Expr =
+let sample =
   Call(Name("f"), [
     Tuple([Lit(1), Lit(2)]),
     Match(Name("x"), [Arm("a", Lit(3))]),
@@ -85,4 +85,4 @@ fn sample() -> Expr =
   ])
 
 fn main() -> Unit !{IO} =
-  print(int_to_string(count_expr(sample())))
+  print(int_to_string(count_expr(sample)))

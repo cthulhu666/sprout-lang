@@ -11,7 +11,7 @@ fn contains(haystack: String, needle: String) -> Bool =
   str_find(haystack, needle) != -1
 
 # Build the IR equivalent of `fn answer() -> Int = 42`.
-fn answer_program() -> sprout_ir.IRProgram =
+let answer_program =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction("answer", Nil, "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
@@ -34,7 +34,7 @@ fn main() -> Unit !{IO} =
   do
     # Substring checks are blind to whole-module malformation; verify a
     # representative lowered program of each shape actually compiles.
-    answer_compiles <- clang_verifies_ir(ir_lowering.lower_program(answer_program()))
+    answer_compiles <- clang_verifies_ir(ir_lowering.lower_program(answer_program))
     identity_compiles <- clang_verifies_ir(ir_lowering.lower_program(identity_program()))
     run_suite("ir_codegen_basic", [
     # print_ir_program: pretty-printer marks a populated program with a
@@ -43,19 +43,19 @@ fn main() -> Unit !{IO} =
               sprout_ir.print_ir_program(sprout_ir.IRProgram(Nil, Nil, Nil, Nil)),
               "; sprout-ir: empty"),
     check_true("print_ir_program contains fn header",
-                contains(sprout_ir.print_ir_program(answer_program()), "fn answer")),
+                contains(sprout_ir.print_ir_program(answer_program), "fn answer")),
     check_true("print_ir_program contains const op",
-                contains(sprout_ir.print_ir_program(answer_program()), "const 42")),
+                contains(sprout_ir.print_ir_program(answer_program), "const 42")),
 
     # lower_program: produces valid LLVM for the answer() program.
     check_true("lower_program emits target triple",
-                contains(ir_lowering.lower_program(answer_program()), "target triple")),
+                contains(ir_lowering.lower_program(answer_program), "target triple")),
     check_true("lower_program defines answer as i64",
-                contains(ir_lowering.lower_program(answer_program()), "define i64 @answer()")),
+                contains(ir_lowering.lower_program(answer_program), "define i64 @answer()")),
     check_true("lower_program returns the literal 42",
-                contains(ir_lowering.lower_program(answer_program()), "ret i64 %t0")),
+                contains(ir_lowering.lower_program(answer_program), "ret i64 %t0")),
     check_true("lower_program binds %t0 = add i64 0, 42",
-                contains(ir_lowering.lower_program(answer_program()), "add i64 0, 42")),
+                contains(ir_lowering.lower_program(answer_program), "add i64 0, 42")),
 
     # Identity function: parameter typed as i64 and returned directly.
     # The `p$` prefix is pinned literally here: it is what keeps a parameter out
@@ -67,7 +67,7 @@ fn main() -> Unit !{IO} =
 
     # Synthetic C-ABI main shim is always present so the IR links cleanly.
     check_true("main shim is emitted",
-                contains(ir_lowering.lower_program(answer_program()), "define i32 @main(i32 %argc, ptr %argv)")),
+                contains(ir_lowering.lower_program(answer_program), "define i32 @main(i32 %argc, ptr %argv)")),
     check_true("answer lowered IR compiles under clang", answer_compiles),
     check_true("identity lowered IR compiles under clang", identity_compiles)
   ])

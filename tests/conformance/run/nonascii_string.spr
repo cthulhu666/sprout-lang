@@ -1,6 +1,6 @@
-fn greeting() -> String = "hello world"
+let greeting: String = "hello world"
 
 fn main() -> Unit !{IO} =
   do
-    print(greeting())
+    print(greeting)
     print("done")

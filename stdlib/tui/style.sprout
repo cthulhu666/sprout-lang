@@ -18,7 +18,7 @@ export type Color (..) deriving (Eq, ToString) =
 export type Style (..) deriving (Eq, ToString) =
   | Style Color Color Bool Bool Bool
 
-export fn style_default() -> Style =
+export let style_default =
   Style(DefaultColor, DefaultColor, false, false, false)
 
 export fn style_fg(s: Style) -> Color = match s with | Style fg _ _ _ _ -> fg

@@ -322,7 +322,7 @@ fn walk_match(scrut: ast.Expr, branches: List ast.MatchBranch, pos: source.Sourc
 # computation (same fn_idx, same if/match threading) so this rule can never
 # disagree with what the checker actually does.
 
-fn redundant_vec_wrap_message() -> String =
+let redundant_vec_wrap_message: String =
   "vec_from_list(...) here is redundant — this argument is already in Vec context and gets wrapped automatically"
 
 fn redundant_vec_wrap_findings(prog: ast.Program) -> List LintFinding =
@@ -332,7 +332,7 @@ fn positions_to_findings(positions: List source.SourcePos) -> List LintFinding =
   match positions with
   | Nil -> Nil
   | Cons pos rest ->
-      Cons(mk_finding(pos, "redundant-vec-from-list", redundant_vec_wrap_message()), positions_to_findings(rest))
+      Cons(mk_finding(pos, "redundant-vec-from-list", redundant_vec_wrap_message), positions_to_findings(rest))
 
 # ---------------------------------------------------------------------------
 # Rule: list-shape-pattern
@@ -355,7 +355,7 @@ fn positions_to_findings(positions: List source.SourcePos) -> List LintFinding =
 # the position of its own token. So the same source-text-sniffing trick as
 # is_written_as_match (below) tells them apart, applied as a post-filter.
 
-fn list_shape_message() -> String =
+let list_shape_message: String =
   "list matched with a fixed length via raw Cons/Nil constructors — [...] list-pattern sugar reads the length at a glance (docs/idiomatic-sprout.md)"
 
 # True when a Cons/Nil pattern chain terminates in a literal Nil — i.e. every
@@ -411,7 +411,7 @@ fn drop_desugared_list_patterns(src: String, positions: List source.SourcePos) -
 fn list_shape_findings(src: String, prog: ast.Program) -> List LintFinding =
   match prog with
   | ast.Program decls _ ->
-      map(\pos -> mk_finding(pos, "list-shape-pattern", list_shape_message()),
+      map(\pos -> mk_finding(pos, "list-shape-pattern", list_shape_message),
         drop_desugared_list_patterns(src, find_list_shape_in_decls(decls)))
 
 fn find_list_shape_in_decls(decls: List ast.Decl) -> List source.SourcePos =
@@ -509,7 +509,7 @@ fn find_list_shape_in_template_part(p: ast.TemplateExprPart) -> List source.Sour
 # sugar shares one position, the `[` token's; hand-written carries its own
 # token's position) — reuses list-shape-pattern's is_written_as_ctor filter.
 
-fn list_prefix_message() -> String =
+let list_prefix_message: String =
   "list matched with a discarded tail via raw Cons/Nil constructors — [...] list-pattern sugar reads the shape at a glance (docs/idiomatic-sprout.md)"
 
 # True when a Cons pattern chain's tail resolves to a literal wildcard —
@@ -551,7 +551,7 @@ fn find_prefix_pattern_in_patterns(pats: List ast.Pattern) -> List source.Source
 fn list_prefix_findings(src: String, prog: ast.Program) -> List LintFinding =
   match prog with
   | ast.Program decls _ ->
-      map(\pos -> mk_finding(pos, "list-prefix-pattern", list_prefix_message()),
+      map(\pos -> mk_finding(pos, "list-prefix-pattern", list_prefix_message),
         drop_desugared_list_patterns(src, find_prefix_pattern_in_decls(decls)))
 
 fn find_prefix_pattern_in_decls(decls: List ast.Decl) -> List source.SourcePos =
@@ -649,7 +649,7 @@ fn find_prefix_pattern_in_template_part(p: ast.TemplateExprPart) -> List source.
 # enclosing CALL, so a synthesized lambda's body is that call, never control
 # flow.
 
-fn multi_line_lambda_message() -> String =
+let multi_line_lambda_message: String =
   "multi-line lambda argument — lift the body into a named fn and pass the name, closing over locals with a `_` placeholder (docs/idiomatic-sprout.md)"
 
 # Control flow, as opposed to one expression wrapped for width.
@@ -756,9 +756,100 @@ fn multi_line_lambda_finding(arg: ast.Expr) -> List LintFinding =
   match arg with
   | ast.LambdaExpr _ body pos ->
       if is_block_body(body) && max_line(body) > pos.line
-      then Cons(mk_finding(pos, "multi-line-lambda-arg", multi_line_lambda_message()), Nil)
+      then Cons(mk_finding(pos, "multi-line-lambda-arg", multi_line_lambda_message), Nil)
       else Nil
   | _ -> Nil
+
+# ---------------------------------------------------------------------------
+# Rule: nullary-const-fn
+#
+# `fn bulk_size() -> Int = 65600` is a constant wearing a function's clothes: a
+# parameter is a function's reason to exist, and with none the body re-runs per
+# call. Every gate below is correctness, not taste — each one has a shape that
+# compiles after the rewrite and means something different.
+#
+#   PURE — a top-level `let` initializer must be pure (§5.2) and that is NOT
+#   enforced, so an effectful one would silently move its effect to startup.
+#   It also settles sharing: every allocator of a mutable value is `!{IO}`.
+#   NOT `main` — `let main` is not a program.
+#   NO `where` CONSTRAINT — a `fn` takes its dictionary per call, a binding
+#   makes the choice once, and an open one is rejected outright (§5.2).
+#   A SYNTACTIC VALUE, and not one typed by CONTEXT (see the two predicates
+#   below). Outside that set a `let` is monomorphic and can narrow a
+#   polymorphic helper, and a computed body would move its cost — and its
+#   trap — into startup, even when nothing reads the binding.
+#
+# The message names the ANNOTATION because dropping it changes the type:
+# `fn lengths() -> Vec Int = [1, 2, 3]` is a `Vec` only because the return type
+# says so (§5.5.1), and a bare `let lengths = [1, 2, 3]` is a `List`.
+
+# The entry point is a function by definition — `let main` is not a program, so
+# the rewrite is never right here however constant the body is. A real `main`
+# is `!{IO}` and the purity gate would catch it, but a pure one is legal and
+# three in-tree fixtures have exactly that shape.
+let entry_point_name: String = "main"
+
+fn nullary_const_message(name: String) -> String =
+  "`" ++ name ++ "` takes no parameters and its body is a constant — bind it with a top-level "
+  ++ "`let <name>: <type> = <body>`, which is evaluated once (docs/idiomatic-sprout.md). "
+  ++ "Carry the return type across: it selects the type, so dropping it turns `Vec` into `List`."
+
+# Prefix `-` is an operator, so `-1` arrives as a UnaryExpr and the checker's
+# predicate rejects it — to that predicate `-1` and `negate(x)` are one shape.
+# They are not one shape here, so the rule widens by exactly this much. The
+# widening stays local: putting it in `ast.is_syntactic_value` would change
+# what the compiler generalizes.
+fn is_negated_literal(e: ast.Expr) -> Bool =
+  match e with
+  | ast.UnaryExpr op operand _ ->
+      op == "-" &&
+      (match operand with
+       | ast.IntExpr _ _ -> true
+       | ast.FloatExpr _ _ -> true
+       | _ -> false)
+  | _ -> false
+
+# A body that takes its type from CONTEXT rather than from itself. The declared
+# return type is evidence (§5.2), and only a carried annotation preserves it —
+# which is not always writable. `fn pick_color() -> Color -> String = label` is
+# the live case: that return type is what selects `ToString Color`.
+#
+# A bare CONSTRUCTOR is not one of these. `Nothing` and `Nil` carry their own
+# type and need no dictionary; it is the lowercase head, a reference to a
+# function, that the return type was standing behind.
+fn takes_type_from_context(e: ast.Expr) -> Bool =
+  match e with
+  | ast.VarExpr name _ -> ! ast.is_constructor_ref (name)
+  | ast.LambdaExpr _ _ _ -> true
+  | _ -> false
+
+fn is_const_body(e: ast.Expr) -> Bool =
+  (ast.is_syntactic_value(e) || is_negated_literal(e)) && ! takes_type_from_context (e)
+
+# `Nothing` is an absent effect row, which the checker proves means pure.
+fn declared_pure(effects: Maybe (List String)) -> Bool =
+  match effects with
+  | Nothing -> true
+  | Just _ -> false
+
+fn nullary_const_findings(decls: List ast.Decl) -> List LintFinding =
+  match decls with
+  | Nil -> Nil
+  | Cons d rest -> list_append(nullary_const_finding(d), nullary_const_findings(rest))
+
+fn nullary_const_finding(d: ast.Decl) -> List LintFinding =
+  match d with
+  | ast.FnDecl name params _ effects constraints body pos ->
+      if name != entry_point_name && list_is_empty(params) && declared_pure(effects)
+         && list_is_empty(constraints) && is_const_body(body)
+      then [mk_finding(pos, "nullary-const-fn", nullary_const_message(name))]
+      else Nil
+  | _ -> Nil
+
+fn list_is_empty(xs: List a) -> Bool =
+  match xs with
+  | Nil -> true
+  | _ -> false
 
 # ---------------------------------------------------------------------------
 # Program-level entry points
@@ -784,7 +875,9 @@ fn walk_decls(decls: List ast.Decl) -> List LintFinding =
 
 fn lint_program(prog: ast.Program) -> List LintFinding =
   match prog with
-  | ast.Program decls _ -> list_append(walk_decls(decls), redundant_vec_wrap_findings(prog))
+  | ast.Program decls _ ->
+      list_append(walk_decls(decls),
+        list_append(nullary_const_findings(decls), redundant_vec_wrap_findings(prog)))
 
 # `let <pat> = e else fb` is pure sugar (parser.sprout: build_let_binding_match)
 # — it desugars to the SAME MatchExpr shape a hand-written nested match would,

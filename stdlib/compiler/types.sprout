@@ -311,8 +311,8 @@ export fn type_list(a: Type) -> Type = TApp(TConst(type_id("List")), a)
 export fn type_maybe(a: Type) -> Type = TApp(TConst(type_id("Maybe")), a)
 export fn type_result(e: Type, a: Type) -> Type = TApp(TApp (TConst(type_id("Result")), e), a)
 
-export fn effect_pure() -> Effect = EffectPure
-export fn effect_io() -> Effect = EffectIO
+export let effect_pure = EffectPure
+export let effect_io = EffectIO
 
 # Where a written `!{...}` lands on a type. It attaches to the INNERMOST arrow,
 # matching parser.make_type_arrow's hoist, so `(a -> b -> C) !{IO}` and

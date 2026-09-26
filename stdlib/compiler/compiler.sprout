@@ -153,7 +153,7 @@ export fn compile_source_with_root(src: String, stdlib_root: source.StdlibRoot) 
 # The path an in-memory buffer occupies while it is bundled. It need not exist: the
 # source is supplied through the overlay, so it is a key rather than a location. Callers
 # that DO have a real path should still prefer it, so load errors name something real.
-export fn source_entry_path() -> String = "<source>"
+export let source_entry_path: String = "<source>"
 
 # compile_source_with_cache_roots: typecheck raw source the way the batch compiler
 # typechecks a file — by bundling it — reusing a caller-owned LoadEnv so a session that
@@ -177,7 +177,7 @@ export fn source_entry_path() -> String = "<source>"
 # the call site, which is where the mistake is.
 export fn compile_source_with_cache_roots(src: String, stdlib_root: source.StdlibRoot, extra_roots: List String,
                                           cache: bundler.LoadEnv) -> CompileResult !{IO} =
-  compile_source_at_with_cache_roots(src, source_entry_path(), stdlib_root, extra_roots, cache)
+  compile_source_at_with_cache_roots(src, source_entry_path, stdlib_root, extra_roots, cache)
 
 # As above, but for a buffer that HAS a path on disk. Load errors then name the real file
 # instead of the placeholder, which is what an editor should report.
@@ -242,14 +242,14 @@ export type ExprSchemeResult (..) =
 # Unlikely to collide with user code, but double-underscore names ARE valid Sprout
 # identifiers (the lexer accepts _ as identifier-start), so the collision is checked.
 # Exported because a caller rendering the collision message needs to name it.
-export fn expr_sentinel_name() -> String = "__repl_source_value"
+export let expr_sentinel_name: String = "__repl_source_value"
 
 fn augment_with_sentinel(src: String, expr: String) -> String =
-  src ++ "\nlet " ++ expr_sentinel_name() ++ " = " ++ expr
+  src ++ "\nlet " ++ expr_sentinel_name ++ " = " ++ expr
 
 export fn scheme_of_expr_in_source(src: String, expr: String, stdlib_root: source.StdlibRoot,
                                    extra_roots: List String, cache: bundler.LoadEnv) -> ExprSchemeResult !{IO} =
-  if str_find(src, "let " ++ expr_sentinel_name()) != -1 then ExprSentinelCollision
+  if str_find(src, "let " ++ expr_sentinel_name) != -1 then ExprSentinelCollision
   else
     do
       result <- compile_source_with_cache_roots(
@@ -303,7 +303,7 @@ fn scheme_from_env(expr: String, env: Dict types.Scheme) -> ExprSchemeResult =
   match env_scheme(string.trim(expr), env) with
   | Just declared -> ExprSchemeOk(declared)
   | Nothing ->
-      match env_scheme(expr_sentinel_name(), env) with
+      match env_scheme(expr_sentinel_name, env) with
       | Nothing -> ExprNotInferable
       | Just scheme -> ExprSchemeOk(scheme)
 

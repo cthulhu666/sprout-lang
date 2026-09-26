@@ -155,7 +155,9 @@ declare i64 @http_request(i64, i64, i64, i64, i64)
 @.cname.23 = private unnamed_addr constant [27 x i8] c"stdlib.http.HttpStatusInfo\00"
 @.cfkinds.23 = private unnamed_addr constant [3 x i8] c"ss\00"
 @pow10_clamp = private constant i64 400
+@max_int = private constant i64 9223372036854775807
 @pow10_exact_max = private constant i64 22
+@pow10_exact_unit = global i64 zeroinitializer
 @pow10_finite_max = private constant i64 308
 
 define i64 @result_map_error(i64 %p$f, i64 %p$r) {
@@ -771,6 +773,13 @@ wrepack_next_17:
   unreachable
 }
 
+define void @__sprout_init_globals() {
+entry:
+  %t$0 = bitcast double 10000000000000000000000.0 to i64
+  store i64 %t$0, ptr @pow10_exact_unit
+  ret void
+}
+
 define i32 @main(i32 %argc, ptr %argv) {
 entry:
   %argv_set = call i64 @sprout_set_argv(i32 %argc, ptr %argv)
@@ -846,6 +855,7 @@ entry:
   %cname_ptr_23 = getelementptr inbounds [27 x i8], ptr @.cname.23, i64 0, i64 0
   %cfkinds_ptr_23 = getelementptr inbounds [3 x i8], ptr @.cfkinds.23, i64 0, i64 0
   %creg_23 = call i64 @sprout_register_ctor(i64 23, ptr %cname_ptr_23, i64 2, ptr %cfkinds_ptr_23)
+  call void @__sprout_init_globals()
   call i64 @__sprout_user_main()
   ret i32 0
 }

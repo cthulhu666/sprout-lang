@@ -31,7 +31,7 @@ type alias Asks = List(widget.Cmd Msg)
 
 # ── the tree ────────────────────────────────────────────────────────────────
 
-fn field_id() -> widget.WidgetId = widget.WidgetId("in")
+let field_id = widget.WidgetId("in")
 
 fn note_on_event(n: Int, ev: event.Event) -> (Int, Says, Asks) =
   (n, [Noted("bcast")], Nil)
@@ -48,23 +48,23 @@ fn note() -> widget.Widget Msg =
                             route = widget.no_route, render = note_render,
                             measure = note_measure))
 
-fn field() -> widget.Widget Msg = inp.input(field_id(), Changed)
+fn field() -> widget.Widget Msg = inp.input(field_id, Changed)
 
 fn field_with(o: inp.InputOpts Msg) -> widget.Widget Msg =
-  inp.input_with(field_id(), Changed, o)
+  inp.input_with(field_id, Changed, o)
 
 # Focus starts on the head of the ring, so the field is live without a Tab.
 fn ring_of(w: widget.Widget Msg) -> widget.Widget Msg =
-  focus.focus_ring([field_id()], w)
+  focus.focus_ring([field_id], w)
 
 fn beside(w: widget.Widget Msg) -> widget.Widget Msg =
   ring_of(ct.column([ct.fit(w), ct.fit(note())]))
 
 # ── observing ───────────────────────────────────────────────────────────────
 
-fn key(k: event.Key) -> event.Event = event.KeyPress(k, event.mods_none())
+fn key(k: event.Key) -> event.Event = event.KeyPress(k, event.mods_none)
 
-fn chord(k: event.Key) -> event.Event = event.KeyPress(k, event.mods_ctrl())
+fn chord(k: event.Key) -> event.Event = event.KeyPress(k, event.mods_ctrl)
 
 fn hit_of(r: Maybe (widget.Widget Msg, Says, Asks)) -> Bool =
   match r with
@@ -90,7 +90,7 @@ fn told_all(w: widget.Widget Msg, ds: List (widget.Delivery Msg),
             acc: Says) -> (widget.Widget Msg, Says) =
   match ds with
   | Nil -> (w, acc)
-  | Cons d rest -> told_step(w, d, rest, acc, widget.deliver(w, field_id(), d))
+  | Cons d rest -> told_step(w, d, rest, acc, widget.deliver(w, field_id, d))
 
 fn told_step(w: widget.Widget Msg, d: widget.Delivery Msg,
              rest: List (widget.Delivery Msg), acc: Says,
@@ -111,7 +111,7 @@ fn content_of(m: Msg) -> Maybe String =
 fn contenting() -> inp.InputOpts Msg =
   inp.input_opts() with (on_content = Just(content_of))
 
-fn focus_on() -> widget.Delivery Msg = widget.ToFocus(true)
+let focus_on = widget.ToFocus(true)
 
 fn set_to(s: String) -> widget.Delivery Msg = widget.ToMsg(SetTo(s))
 
@@ -202,7 +202,7 @@ fn declining_cases(state: TestState) -> Unit !{IO} = do
   assert_eq(state, "a ctrl chord is not typing",
             typed([chord(event.KChar('a'))]), "[Noted(bcast)]")
   assert_eq(state, "nor is an alt chord",
-            typed([event.KeyPress(event.KChar('a'), event.mods_alt())]),
+            typed([event.KeyPress(event.KChar('a'), event.mods_alt)]),
             "[Noted(bcast)]")
   # Enter is the application's unless the field was given something to say.
   assert_eq(state, "Enter falls through when nothing listens for it",
@@ -222,17 +222,17 @@ fn declining_cases(state: TestState) -> Unit !{IO} = do
   # And declines it even when addressed directly: the ring routes keys by
   # focus, so a key arriving at an unfocused field is the application's doing.
   assert_eq(state, "and declines one addressed to it directly",
-            hit_of(widget.deliver(field(), field_id(),
+            hit_of(widget.deliver(field(), field_id,
                                   widget.ToEvent(key(event.KChar('a'))))),
             false)
   # The other half of the same route: focus itself is always claimed.
   assert_eq(state, "but claims a focus notification",
-            hit_of(widget.deliver(field(), field_id(), widget.ToFocus(true))),
+            hit_of(widget.deliver(field(), field_id, widget.ToFocus(true))),
             true)
   # A field asks for no work, so an answer addressed to it is the
   # application's — declining is what gets it there.
   assert_eq(state, "and declines a message",
-            hit_of(widget.deliver(field(), field_id(),
+            hit_of(widget.deliver(field(), field_id,
                                   widget.ToMsg(Noted("x")))),
             false)
 
@@ -320,8 +320,8 @@ fn underline_at(s: scr.Screen, col: Int) -> Bool !{IO} = do
 # Underlined rather than reversed, so the assertion cannot pass on the default.
 fn underlined() -> inp.InputOpts Msg =
   inp.input_opts()
-  with (look = focus.FocusStyle(normal = sty.style_default(),
-                               focused = sty.with_underline(sty.style_default(),
+  with (look = focus.FocusStyle(normal = sty.style_default,
+                               focused = sty.with_underline(sty.style_default,
                                                             true)))
 
 fn render_cases(state: TestState) -> Unit !{IO} = do
@@ -385,20 +385,20 @@ fn content_cases(state: TestState) -> Unit !{IO} = do
   # Replacement is SILENT (§9.1), so the value is observed by typing after it:
   # one character reveals both the new text and where the caret sits.
   assert_eq(state, "content arrives and the caret lands at the end",
-            says(contenting(), [focus_on(), set_to("abc"), typing('X')]),
+            says(contenting(), [focus_on, set_to("abc"), typing('X')]),
             "[Changed(abcX)]")
   # The same transcript with nothing typed shows the silence on its own.
   assert_eq(state, "and the replacement itself says nothing",
-            says(contenting(), [focus_on(), set_to("abc")]), "[]")
+            says(contenting(), [focus_on, set_to("abc")]), "[]")
   # Backspace is the sharper caret probe: it can only take the LAST character
   # if the caret is behind it.
   assert_eq(state, "backspace after a replacement takes the last character",
             says(contenting(),
-                 [focus_on(), set_to("abc"), pressed(event.KBackspace)]),
+                 [focus_on, set_to("abc"), pressed(event.KBackspace)]),
             "[Changed(ab)]")
   # Replaces rather than appends, and drops what was typed before it.
   assert_eq(state, "content replaces what the user had typed",
-            says(contenting(), [focus_on(), typing('z'), set_to("abc"),
+            says(contenting(), [focus_on, typing('z'), set_to("abc"),
                                 typing('X')]),
             "[Changed(z), Changed(abcX)]")
   # `zipper_open` flattens control characters to spaces, so the field ends up
@@ -406,18 +406,18 @@ fn content_cases(state: TestState) -> Unit !{IO} = do
   # replacement must speak — §9.1's rule is "announce what the caller cannot
   # already know", and it cannot know its tab became a space.
   assert_eq(state, "a replacement that was flattened is announced",
-            says(contenting(), [focus_on(), set_to("a\tb")]),
+            says(contenting(), [focus_on, set_to("a\tb")]),
             "[Changed(a b)]")
   assert_eq(state, "and the flattened value is what the field then holds",
-            says(contenting(), [focus_on(), set_to("a\tb"), typing('X')]),
+            says(contenting(), [focus_on, set_to("a\tb"), typing('X')]),
             "[Changed(a b), Changed(a bX)]")
   # The `Nothing` path: a field that claimed every message addressed to it
   # would swallow the application's own traffic.
   assert_eq(state, "an unrecognised message is declined",
-            says(contenting(), [focus_on(), widget.ToMsg(Noted("x"))]),
+            says(contenting(), [focus_on, widget.ToMsg(Noted("x"))]),
             "[Noted(declined)]")
   assert_eq(state, "and a field without a decoder declines every message",
-            says(inp.input_opts(), [focus_on(), set_to("abc")]),
+            says(inp.input_opts(), [focus_on, set_to("abc")]),
             "[Noted(declined)]")
 
 fn main() -> Unit !{IO} = do

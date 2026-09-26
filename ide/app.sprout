@@ -68,11 +68,11 @@ type Msg (..) =
 type alias Says = List Msg
 type alias Asks = List(widget.Cmd Msg)
 
-fn files_id() -> widget.WidgetId = widget.WidgetId("files")
+let files_id = widget.WidgetId("files")
 
-fn editor_id() -> widget.WidgetId = widget.WidgetId("editor")
+let editor_id = widget.WidgetId("editor")
 
-fn bar_id() -> widget.WidgetId = widget.WidgetId("bar")
+let bar_id = widget.WidgetId("bar")
 
 # ── the panes ───────────────────────────────────────────────────────────────
 
@@ -82,7 +82,7 @@ fn listed_for(m: Msg) -> Maybe tr.Update =
   | _ -> Nothing
 
 fn files() -> widget.Widget Msg =
-  filetree.filetree(files_id(), Choose,
+  filetree.filetree(files_id, Choose,
                     tr.tree_opts() with (on_expand = Just(Expand),
                                          on_content = Just(listed_for),
                                          page = 10))
@@ -120,7 +120,7 @@ fn step_for(m: Msg) -> Maybe ed.Step =
 # `Saved` is named ONCE, standing rather than read out of the request, because
 # a tick or a blur starts a save with no message to read it from.
 fn editor(when: ed.SaveWhen) -> widget.Widget Msg =
-  ed.editor_with(editor_id(),
+  ed.editor_with(editor_id,
                  ed.editor_opts() with (save_when = when,
                                         on_label = Just(Labelled),
                                         on_open = Just(open_for),
@@ -155,7 +155,7 @@ fn refilled(b: Bar, t: Maybe String) -> Maybe (Bar, Says, Asks) =
   in Just((Bar(text = s), Nil, Nil))
 
 fn bar_render(b: Bar, r: g.Region, s: scr.Screen) -> Unit !{IO} =
-  paint.line(s, r, 0, b.text, sty.with_reverse(sty.style_default(), true))
+  paint.line(s, r, 0, b.text, sty.with_reverse(sty.style_default, true))
 
 fn bar_measure(b: Bar, avail: g.Size) -> widget.Measured =
   widget.fixed_size(g.Size(0, 1))
@@ -163,7 +163,7 @@ fn bar_measure(b: Bar, avail: g.Size) -> widget.Measured =
 fn bar() -> widget.Widget Msg =
   widget.Widget(widget.View(state = Bar(text = "untitled"),
                             on_event = bar_on_event,
-                            route = widget.route_when(bar_id(), bar_handler, _,
+                            route = widget.route_when(bar_id, bar_handler, _,
                                                       _, _),
                             render = bar_render, measure = bar_measure))
 
@@ -202,7 +202,7 @@ fn body(when: ed.SaveWhen) -> widget.Widget Msg =
   ct.row([ct.fraction(1, files()), ct.fraction(2, editor(when))])
 
 fn root(when: ed.SaveWhen) -> widget.Widget Msg =
-  focus.focus_ring([files_id(), editor_id()],
+  focus.focus_ring([files_id, editor_id],
                    ct.column([ct.fraction(1, body(when)), ct.fit(bar()),
                               ct.fit(hints(when)), ct.fit(keys())]))
 
@@ -234,7 +234,7 @@ fn update(m: Msg, w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow, Asks) =
   | Bound keymap.Undo -> sent_to_editor(w, m)
   | Bound keymap.Redo -> sent_to_editor(w, m)
   | Expand segs ->
-      (w, app.Continue, [widget.cmd_to(files_id(), \_ -> read_children(segs))])
+      (w, app.Continue, [widget.cmd_to(files_id, \_ -> read_children(segs))])
   | Choose _ -> sent_to_editor(w, m)
   | Reading op -> reading(w, op)
   | Saved sv -> saving(w, sv)
@@ -258,7 +258,7 @@ fn update(m: Msg, w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow, Asks) =
 # — and `update` would ask again, forever. Here a pane that is not there is
 # simply nothing to save.
 fn asked_to_save(w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow, Asks) =
-  let Just(w2, said, asked) = widget.deliver(w, editor_id(), widget.ToMsg(HandOver))
+  let Just(w2, said, asked) = widget.deliver(w, editor_id, widget.ToMsg(HandOver))
                                else app.done(w, app.Continue)
   in answered(asked, app.apply(update, said, w2))
 
@@ -269,7 +269,7 @@ fn asked_to_save(w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow, Asks) =
 # not read and the undo simply does not happen.
 fn sent_to_editor(w: widget.Widget Msg,
                   m: Msg) -> (widget.Widget Msg, app.Flow, Asks) =
-  let Just(w2, said, asked) = widget.deliver(w, editor_id(), widget.ToMsg(m))
+  let Just(w2, said, asked) = widget.deliver(w, editor_id, widget.ToMsg(m))
                                else app.done(w, app.Continue)
   in answered(asked, app.apply(update, said, w2))
 
@@ -277,7 +277,7 @@ fn reading(w: widget.Widget Msg,
            op: ed.Opening) -> (widget.Widget Msg, app.Flow, Asks) =
   match op with
   | ed.ReadFrom p r ->
-      (w, app.Continue, [widget.cmd_to(editor_id(), \_ -> read_at(p, r))])
+      (w, app.Continue, [widget.cmd_to(editor_id, \_ -> read_at(p, r))])
 
 fn answered(asked: Asks,
             r: (widget.Widget Msg, app.Flow, Asks)) -> (widget.Widget Msg, app.Flow, Asks) =
@@ -291,7 +291,7 @@ fn saving(w: widget.Widget Msg,
   match sv with
   | ed.SaveTo p body r ->
       (w, app.Continue,
-       [widget.cmd_to(editor_id(), \_ -> write_body(p, body, r))])
+       [widget.cmd_to(editor_id, \_ -> write_body(p, body, r))])
   | ed.Unnamed -> to_bar(w, Noted("nothing to save: this buffer has no file"))
   | ed.Busy -> to_bar(w, Noted("still saving: the last write has not answered"))
 
@@ -299,7 +299,7 @@ fn saving(w: widget.Widget Msg,
 # empty. Folding it back would risk the loop `asked_to_save` avoids: a bar that
 # echoed a `Noted` would be told it again forever.
 fn to_bar(w: widget.Widget Msg, m: Msg) -> (widget.Widget Msg, app.Flow, Asks) =
-  let Just(w2, _, asked) = widget.deliver(w, bar_id(), widget.ToMsg(m))
+  let Just(w2, _, asked) = widget.deliver(w, bar_id, widget.ToMsg(m))
                             else app.done(w, app.Continue)
   in (w2, app.Continue, asked)
 
@@ -307,9 +307,9 @@ fn to_bar(w: widget.Widget Msg, m: Msg) -> (widget.Widget Msg, app.Flow, Asks) =
 # the tree is never briefly empty.
 fn boot(scope: Scope, ch: Chan (app.Signal Msg)) -> Unit !{IO} = do
   m <- read_children(Nil)
-  chan_send(ch, app.SigTo(files_id(), m))
+  chan_send(ch, app.SigTo(files_id, m))
 
 export fn main() -> Unit !{IO} = do
   a <- args.parse_argv()
   app.run(app.App(root = root(saving.save_when(a)), update = update,
-                  tick_ms = saving.tick_ms(), boot = boot))
+                  tick_ms = saving.tick_ms, boot = boot))

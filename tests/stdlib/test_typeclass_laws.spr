@@ -31,23 +31,25 @@ fn rk_inc(x: Int) -> Result String Int = Ok(x + 1)
 fn rk_dbl(x: Int) -> Result String Int = Ok(x * 2)
 # Typed `pure` anchors for the right-identity law over each instance.
 fn r_pure(x: Int) -> Result String Int = pure(x)
-fn ok_7() -> Result String Int = Ok(7)
+# Typed helpers that anchor concrete element types for Eq resolution.
+let nil_int: List Int = Nil
+
+let no_int: Maybe Int = Nothing
+
+let ok_7: Result String Int = Ok(7)
 
 # Typed `pure` anchors: give `map2`'s arguments a concrete `f` so instance dispatch
-# resolves (same role as nil_int()/no_int() for Eq). `m_pure(3) == Just(3)` and
+# resolves (same role as nil_int/no_int for Eq). `m_pure(3) == Just(3)` and
 # `l_pure(3) == [3]` by definition, so these still exercise the pure/map2 laws.
 fn m_pure(x: Int) -> Maybe Int = pure(x)
 fn l_pure(x: Int) -> List Int = pure(x)
 
-# Typed helpers that anchor concrete element types for Eq resolution.
-fn nil_int() -> List Int = Nil
-fn no_int() -> Maybe Int = Nothing
 
 fn main() -> Unit !{IO} =
-  let li_empty = nil_int()
+  let li_empty = nil_int
       li_single = Cons(42, Nil)
       li_multi = Cons(1, Cons(2, Cons(3, Nil)))
-      m_nothing = no_int()
+      m_nothing = no_int
       m_just_1 = Just(7)
       m_just_2 = Just(100)
       la = Cons(1, Cons(2, Nil))
@@ -62,7 +64,7 @@ fn main() -> Unit !{IO} =
   in run_suite("typeclass_laws", [
     # -----------------------------------------------------------------------
     # Functor List — identity law
-    # nil_int() gives a concrete List Int so Eq (List Int) resolves.
+    # nil_int gives a concrete List Int so Eq (List Int) resolves.
     # -----------------------------------------------------------------------
 
     check_eq("functor list identity empty", map(\x -> x, li_empty), li_empty),
@@ -87,7 +89,7 @@ fn main() -> Unit !{IO} =
 
     # -----------------------------------------------------------------------
     # Functor Maybe — identity law
-    # no_int() gives a concrete Maybe Int so Eq (Maybe Int) resolves.
+    # no_int gives a concrete Maybe Int so Eq (Maybe Int) resolves.
     # -----------------------------------------------------------------------
 
     check_eq("functor maybe identity nothing", map(\x -> x, m_nothing), m_nothing),
@@ -119,12 +121,12 @@ fn main() -> Unit !{IO} =
       la ++ (lb ++ lc)),
 
     check_eq("semigroup list assoc left empty",
-      (nil_int() ++ lb) ++ lc,
-      nil_int() ++ (lb ++ lc)),
+      (nil_int ++ lb) ++ lc,
+      nil_int ++ (lb ++ lc)),
 
     check_eq("semigroup list assoc right empty",
-      (la ++ lb) ++ nil_int(),
-      la ++ (lb ++ nil_int())),
+      (la ++ lb) ++ nil_int,
+      la ++ (lb ++ nil_int)),
 
     # -----------------------------------------------------------------------
     # Semigroup String — associativity
@@ -144,16 +146,16 @@ fn main() -> Unit !{IO} =
 
     # -----------------------------------------------------------------------
     # Monoid List — left and right identity
-    # nil_int() is used so the empty side has a concrete type for Eq.
+    # nil_int is used so the empty side has a concrete type for Eq.
     # -----------------------------------------------------------------------
 
-    check_eq("monoid list left identity empty", nil_int() ++ li_empty, li_empty),
-    check_eq("monoid list left identity single", nil_int() ++ li_single, li_single),
-    check_eq("monoid list left identity multi", nil_int() ++ li_multi, li_multi),
+    check_eq("monoid list left identity empty", nil_int ++ li_empty, li_empty),
+    check_eq("monoid list left identity single", nil_int ++ li_single, li_single),
+    check_eq("monoid list left identity multi", nil_int ++ li_multi, li_multi),
 
-    check_eq("monoid list right identity empty", li_empty ++ nil_int(), li_empty),
-    check_eq("monoid list right identity single", li_single ++ nil_int(), li_single),
-    check_eq("monoid list right identity multi", li_multi ++ nil_int(), li_multi),
+    check_eq("monoid list right identity empty", li_empty ++ nil_int, li_empty),
+    check_eq("monoid list right identity single", li_single ++ nil_int, li_single),
+    check_eq("monoid list right identity multi", li_multi ++ nil_int, li_multi),
 
     # -----------------------------------------------------------------------
     # Monoid String — left and right identity
@@ -222,9 +224,9 @@ fn main() -> Unit !{IO} =
       result_with_default(-1, and_then(rk_inc, r_pure(5))),
       result_with_default(-1, rk_inc(5))),
     check_eq("monad result right identity",
-      result_with_default(-1, and_then(r_pure, ok_7())),
-      result_with_default(-1, ok_7())),
+      result_with_default(-1, and_then(r_pure, ok_7)),
+      result_with_default(-1, ok_7)),
     check_eq("monad result associativity",
-      result_with_default(-1, and_then(rk_dbl, and_then(rk_inc, ok_7()))),
-      result_with_default(-1, and_then(\x -> and_then(rk_dbl, rk_inc(x)), ok_7())))
+      result_with_default(-1, and_then(rk_dbl, and_then(rk_inc, ok_7))),
+      result_with_default(-1, and_then(\x -> and_then(rk_dbl, rk_inc(x)), ok_7)))
   ])

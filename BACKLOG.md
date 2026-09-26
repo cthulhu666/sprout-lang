@@ -120,6 +120,14 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   - [ ] `P2` **Anonymous `any C` introduction — `let row : List (any C) = …`.** Needs a
     type-directed rewrite boxing each element into a per-value dictionary, so it cannot ride the
     Phase-1 syntactic coercion. Belongs to the existentials arc (`docs/gadts-v0.md` §6).
+- [ ] `P1` **A top-level `let`'s type annotation resolves only PRELUDE types.** `let x: mod.T = …`
+  is rejected with "unknown type `mod.T` … add it to that module's import list" even where the
+  module imports `mod` and a `fn` signature two lines away resolves that same name; a type declared
+  in the SAME file fails identically, advising an import of itself. So spec §5.2's annotation cannot
+  be written for a user type, which is most of them. That blocks the `fn` → `let` rewrite
+  `lint/nullary-const-fn` recommends: carrying the return type across is what keeps a list-literal
+  `Vec` from silently becoming a `List` (§5.5.1). Repro: `let favourite: Colour = Red` beneath the
+  `type Colour` that declares it.
 - [ ] `P2` **Ref sugar in do-notation:** `:=` for `ref_write`, `<~` for a ref-read bind step,
   `var x = expr` for `x <- ref_new(expr)`.
 - [ ] `P2` **B1 — an inline multi-line `do`-block lambda as a call argument is a parse error.**
@@ -961,14 +969,18 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   Rust's `#[expect]` is the strictly better fit for the two deliberate files — it turns the
   suppression into a second assertion that the construct is still present — held back only to
   avoid shipping two mechanisms at once.
-- [~] `P2` **Formatter/linter beyond the baseline.** Four AST lint rules shipped
-  (`staircase-of-doom`, `redundant-vec-from-list`, `list-shape-pattern`, `list-prefix-pattern`) on
-  top of `formatter.sprout`'s text-based Style checks. **Remaining roadmap** from
+- [~] `P2` **Formatter/linter beyond the baseline.** Seven AST lint rules shipped
+  (`staircase-of-doom`, `redundant-vec-from-list`, `list-shape-pattern`, `list-prefix-pattern`,
+  `multi-line-lambda-arg`, `deprecated-brace-body`, `nullary-const-fn`) on top of
+  `formatter.sprout`'s text-based Style checks. **Remaining roadmap** from
   `docs/idiomatic-sprout.md`: "Match the producing call directly" (a `let`/do-bind immediately
   followed by a match on that single otherwise-unused variable) and "Collapse a trivial `do` block".
   The rest of that doc is design-level or too fuzzy for a reliable syntactic check. **Also open:** a
-  config file for per-rule enable/disable (not justified at four rules), and autocorrect (needs an
-  AST-aware rewriter; today's formatter is a line-based text transform).
+  config file for per-rule enable/disable, and autocorrect (needs an AST-aware rewriter; today's
+  formatter is a line-based text transform).
+- [ ] `P3` **A nested `match` on a `Cons`-bound tail is not linted.** `match xs with | Cons h t ->
+  match t with …` is what `[a, b | rest]` exists to flatten, and neither `list-shape-pattern` (which
+  needs a chain ending in a literal `Nil`) nor `list-prefix-pattern` (a wildcard tail) covers it.
 
 **Gates and diagnostics**
 

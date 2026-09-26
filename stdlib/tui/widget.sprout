@@ -321,16 +321,16 @@ export fn namespaced(prefix: String, w: Widget m) -> Widget m =
 
 # A prefix is a plain `String`, not a `WidgetId`: nothing is ever delivered to
 # "panel", only to "panel.something".
-fn namespace_sep() -> String = "."
+let namespace_sep: String = "."
 
 fn qualify(prefix: String, i: WidgetId) -> WidgetId =
-  WidgetId(prefix ++ namespace_sep() ++ id_text(i))
+  WidgetId(prefix ++ namespace_sep ++ id_text(i))
 
 # `Nothing` when the address belongs elsewhere, which the wrapper declines
 # rather than forwards — the inner widget must never see an address that was
 # not meant for it.
 fn unqualify(prefix: String, target: WidgetId) -> Maybe WidgetId =
-  map(WidgetId, string.strip_prefix(id_text(target), prefix ++ namespace_sep()))
+  map(WidgetId, string.strip_prefix(id_text(target), prefix ++ namespace_sep))
 
 fn namespaced_on_event(prefix: String,
                        inner: s -> event.Event -> (s, List m, List (Cmd m)),

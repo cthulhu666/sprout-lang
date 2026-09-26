@@ -13,7 +13,7 @@ import stdlib.unicode.tables as tables
 # Each scan returns the index of the first offending entry, or -1 for clean, so
 # a failure names the entry instead of just saying `false`.
 
-fn max_cp() -> Int = 1114111
+let max_cp: Int = 1114111
 
 # --- base-62 ---------------------------------------------------------------
 # The whole scheme rests on two properties of `b62_4`: it is injective over the
@@ -21,18 +21,18 @@ fn max_cp() -> Int = 1114111
 # search still runs, still terminates, and quietly returns wrong answers.
 
 fn roundtrip_bad(cp: Int, step: Int) -> Int =
-  if cp > max_cp() then -1
+  if cp > max_cp then -1
   else if lookup.b62_decode(lookup.b62_4(cp)) != cp then cp
   else roundtrip_bad(cp + step, step)
 
 fn order_bad(cp: Int, step: Int) -> Int =
-  if cp + 1 > max_cp() then -1
+  if cp + 1 > max_cp then -1
   else if compare(lookup.b62_4(cp), lookup.b62_4(cp + 1)) >= 0 then cp
   else order_bad(cp + step, step)
 
 # Every digit position carries at some point in this list, which is where an
 # order-preserving encoding is easiest to get wrong.
-fn carry_points() -> List Int =
+let carry_points: List Int =
   [0, 1, 61, 62, 63, 3842, 3843, 3844, 3845, 238327, 238328, 238329,
    65535, 65536, 1114110]
 
@@ -40,7 +40,7 @@ fn carry_order_bad(cps: List Int) -> Int =
   match cps with
   | Nil -> -1
   | Cons cp rest ->
-      if cp >= max_cp() then carry_order_bad(rest)
+      if cp >= max_cp then carry_order_bad(rest)
       else if compare(lookup.b62_4(cp), lookup.b62_4(cp + 1)) >= 0 then cp
       else carry_order_bad(rest)
 
@@ -67,7 +67,7 @@ fn scan_entry(count: Int, chunk: Int -> String, i: Int, prev_hi: Int,
               lo: Int, hi: Int) -> Int =
   if lo > hi then i
   else if lo <= prev_hi then i
-  else if hi > max_cp() then i
+  else if hi > max_cp then i
   else if string.length(entry_tag(chunk, i)) != 1 then i
   else scan(count, chunk, i + 1, hi)
 
@@ -97,7 +97,7 @@ fn tag_bad(count: Int, chunk: Int -> String, want: String, i: Int) -> Int =
   else tag_bad(count, chunk, want, i + 1)
 
 # `Nothing` on its own has nothing to pin its element type to.
-fn no_tag() -> Maybe String = Nothing
+let no_tag: Maybe String = Nothing
 
 fn main() -> Unit !{IO} =
   run_suite("unicode.tables", [
@@ -109,62 +109,62 @@ fn main() -> Unit !{IO} =
     check_eq("b62_4 of the last codepoint", lookup.b62_decode(lookup.b62_4(1114111)), 1114111),
     check_eq("round trip, swept across the range", roundtrip_bad(0, 61), -1),
     check_eq("order preserved, swept across the range", order_bad(0, 61), -1),
-    check_eq("order preserved at every carry point", carry_order_bad(carry_points()), -1),
+    check_eq("order preserved at every carry point", carry_order_bad(carry_points), -1),
 
     # --- each table is a well-formed sorted range list ---
     check_eq("zerow sorted and disjoint",
-             sorted(tables.zerow_count(), tables.zerow_chunk), -1),
+             sorted(tables.zerow_count, tables.zerow_chunk), -1),
     check_eq("wide sorted and disjoint",
-             sorted(tables.wide_count(), tables.wide_chunk), -1),
+             sorted(tables.wide_count, tables.wide_chunk), -1),
     check_eq("gcb sorted and disjoint",
-             sorted(tables.gcb_count(), tables.gcb_chunk), -1),
+             sorted(tables.gcb_count, tables.gcb_chunk), -1),
     check_eq("extpict sorted and disjoint",
-             sorted(tables.extpict_count(), tables.extpict_chunk), -1),
+             sorted(tables.extpict_count, tables.extpict_chunk), -1),
     check_eq("incb sorted and disjoint",
-             sorted(tables.incb_count(), tables.incb_chunk), -1),
+             sorted(tables.incb_count, tables.incb_chunk), -1),
 
     # --- the declared count matches the bytes actually shipped ---
     check_eq("zerow chunk bytes match the count",
-             total_chars(tables.zerow_chunks(), tables.zerow_chunk),
-             tables.zerow_count() * 9),
+             total_chars(tables.zerow_chunks, tables.zerow_chunk),
+             tables.zerow_count * 9),
     check_eq("wide chunk bytes match the count",
-             total_chars(tables.wide_chunks(), tables.wide_chunk),
-             tables.wide_count() * 9),
+             total_chars(tables.wide_chunks, tables.wide_chunk),
+             tables.wide_count * 9),
     check_eq("gcb chunk bytes match the count",
-             total_chars(tables.gcb_chunks(), tables.gcb_chunk),
-             tables.gcb_count() * 9),
+             total_chars(tables.gcb_chunks, tables.gcb_chunk),
+             tables.gcb_count * 9),
     check_eq("extpict chunk bytes match the count",
-             total_chars(tables.extpict_chunks(), tables.extpict_chunk),
-             tables.extpict_count() * 9),
+             total_chars(tables.extpict_chunks, tables.extpict_chunk),
+             tables.extpict_count * 9),
     check_eq("incb chunk bytes match the count",
-             total_chars(tables.incb_chunks(), tables.incb_chunk),
-             tables.incb_count() * 9),
+             total_chars(tables.incb_chunks, tables.incb_chunk),
+             tables.incb_count * 9),
 
     # --- byte indexing == codepoint indexing, which `entry_at` relies on ---
     check_eq("zerow chunks are ASCII",
-             non_ascii_chunk(tables.zerow_chunks(), tables.zerow_chunk, 0), -1),
+             non_ascii_chunk(tables.zerow_chunks, tables.zerow_chunk, 0), -1),
     check_eq("wide chunks are ASCII",
-             non_ascii_chunk(tables.wide_chunks(), tables.wide_chunk, 0), -1),
+             non_ascii_chunk(tables.wide_chunks, tables.wide_chunk, 0), -1),
     check_eq("gcb chunks are ASCII",
-             non_ascii_chunk(tables.gcb_chunks(), tables.gcb_chunk, 0), -1),
+             non_ascii_chunk(tables.gcb_chunks, tables.gcb_chunk, 0), -1),
     check_eq("extpict chunks are ASCII",
-             non_ascii_chunk(tables.extpict_chunks(), tables.extpict_chunk, 0), -1),
+             non_ascii_chunk(tables.extpict_chunks, tables.extpict_chunk, 0), -1),
     check_eq("incb chunks are ASCII",
-             non_ascii_chunk(tables.incb_chunks(), tables.incb_chunk, 0), -1),
+             non_ascii_chunk(tables.incb_chunks, tables.incb_chunk, 0), -1),
 
     # --- lookup agrees with the entry it lands on ---
     # U+4E00..9FFF is the CJK block; probing lo, hi and both neighbours checks
     # that the search is inclusive at both ends and exclusive just outside.
     check_eq("finds the low end of a range",
-             lookup.find_tag(tables.wide_count(), tables.wide_chunk, 19968), Just("2")),
+             lookup.find_tag(tables.wide_count, tables.wide_chunk, 19968), Just("2")),
     check_eq("finds the high end of the same range",
-             lookup.find_tag(tables.wide_count(), tables.wide_chunk, 40959), Just("2")),
+             lookup.find_tag(tables.wide_count, tables.wide_chunk, 40959), Just("2")),
     check_eq("misses a codepoint in no range",
-             lookup.find_tag(tables.wide_count(), tables.wide_chunk, 888), no_tag()),
+             lookup.find_tag(tables.wide_count, tables.wide_chunk, 888), no_tag),
 
     # --- the width tables carry one tag each ---
     check_eq("every zerow entry is tagged 0",
-             tag_bad(tables.zerow_count(), tables.zerow_chunk, "0", 0), -1),
+             tag_bad(tables.zerow_count, tables.zerow_chunk, "0", 0), -1),
     check_eq("every wide entry is tagged 2",
-             tag_bad(tables.wide_count(), tables.wide_chunk, "2", 0), -1)
+             tag_bad(tables.wide_count, tables.wide_chunk, "2", 0), -1)
   ])

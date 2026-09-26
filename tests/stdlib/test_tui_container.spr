@@ -56,7 +56,7 @@ fn rude_render(n: Int, r: g.Region, s: scr.Screen) -> Unit !{IO} = do
   # sibling — `screen_write` clips at the SCREEN edge, so without the region
   # clip this lands on top of the neighbour's text.
   end <- scr.screen_write(s, g.region_col(r), g.region_row(r) - 1, "rude",
-                          sty.style_default())
+                          sty.style_default)
   ()
 
 fn rude_measure(n: Int, avail: g.Size) -> widget.Measured =

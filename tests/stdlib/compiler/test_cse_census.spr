@@ -36,7 +36,7 @@ fn call(name: String, eff: types.Effect, arg: typed_ast.TypedExpr) -> typed_ast.
   typed_ast.TCall(typed_ast.TVar(name, fn_t(eff), pos()), [arg], int_t(), pos())
 
 fn pure_call(arg: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
-  call("f", types.effect_pure(), arg)
+  call("f", types.effect_pure, arg)
 
 fn add(left: typed_ast.TypedExpr, right: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
   typed_ast.TBinary("+", left, right, int_t(), pos())
@@ -90,10 +90,10 @@ fn main() -> Unit !{IO} =
              taken(repeated_scrutinee_and_arm()).region_dups, 1),
 
     check_eq("impure repetition is not an opportunity",
-             taken(add(call("io", types.effect_io(), var_("x")),
-                       call("io", types.effect_io(), var_("x")))).dup_occurrences, 0),
+             taken(add(call("io", types.effect_io, var_("x")),
+                       call("io", types.effect_io, var_("x")))).dup_occurrences, 0),
     check_eq("impure calls are not counted at all",
-             taken(call("io", types.effect_io(), var_("x"))).pure_calls, 0),
+             taken(call("io", types.effect_io, var_("x"))).pure_calls, 0),
 
     check_eq("different arguments are different keys",
              taken(add(pure_call(var_("x")), pure_call(var_("y")))).dup_occurrences, 0),

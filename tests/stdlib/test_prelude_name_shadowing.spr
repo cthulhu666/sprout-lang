@@ -18,7 +18,7 @@ import stdlib.test (check_eq, run_suite)
 
 type Item = (id: Int, label: String) deriving (Eq, ToString)
 
-fn no_item() -> Maybe Item = Nothing
+let no_item = Nothing
 
 # Same name as the prelude's, different arity AND different argument types.
 fn find(items: List Item, wanted: Int) -> Maybe Item =
@@ -50,7 +50,7 @@ fn main() -> Unit !{IO} =
     check_eq("a local `find` shadows the prelude's",
       find(items, 2), Just (Item(id = 2, label = "two"))),
     check_eq("the local `find` still reports a miss",
-      find(items, 9), no_item()),
+      find(items, 9), no_item),
     check_eq("a local `any` shadows the prelude's", any(items), true),
     check_eq("a local `count` shadows the prelude's", count(items), 3),
 

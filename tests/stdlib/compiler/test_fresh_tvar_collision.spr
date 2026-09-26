@@ -5,7 +5,7 @@ import stdlib.compiler.unifier as unifier
 # invariant.
 #
 # `unifier.fresh` / `fresh_effect` mint compiler-internal type/effect
-# variables. `infer.is_lowercase_name` only inspects the FIRST character of a
+# variables. `ast.is_lowercase_name` only inspects the FIRST character of a
 # TypeName, so a user type variable spelled like a bare fresh name (e.g. "t1")
 # is wrongly accepted as a scheme-quantified variable. If a minted name ever
 # equals a live user-written name in the same substitution, `apply_full_subst`'s

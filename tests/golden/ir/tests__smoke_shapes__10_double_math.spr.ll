@@ -146,7 +146,9 @@ declare i64 @double_from_bits(i64)
 @.cname.13 = private unnamed_addr constant [9 x i8] c"IntRange\00"
 @.cfkinds.13 = private unnamed_addr constant [4 x i8] c"iii\00"
 @pow10_clamp = private constant i64 400
+@max_int = private constant i64 9223372036854775807
 @pow10_exact_max = private constant i64 22
+@pow10_exact_unit = global i64 zeroinitializer
 @pow10_finite_max = private constant i64 308
 @stdlib.math.pi = global i64 zeroinitializer
 @stdlib.math.two_pi = global i64 zeroinitializer
@@ -2489,158 +2491,160 @@ entry:
 
 define void @__sprout_init_globals() {
 entry:
-  %t$0 = bitcast double 3.141592653589793 to i64
-  store i64 %t$0, ptr @stdlib.math.pi
-  %t$1 = bitcast double 6.283185307179586 to i64
-  store i64 %t$1, ptr @stdlib.math.two_pi
-  %t$2 = bitcast double 1.5707963267948966 to i64
-  store i64 %t$2, ptr @stdlib.math.half_pi
-  %t$3 = bitcast double 4503599627370496.0 to i64
-  store i64 %t$3, ptr @stdlib.math.two52
-  %t$4 = bitcast double 256.0 to i64
-  store i64 %t$4, ptr @stdlib.math.two8
-  %t$5 = bitcast double 4096.0 to i64
-  store i64 %t$5, ptr @stdlib.math.two12
-  %t$6 = load i64, ptr @stdlib.math.two8
-  %t$7 = call i64 @stdlib.math.sq(i64 %t$6)
-  store i64 %t$7, ptr @stdlib.math.two16
-  %t$8 = load i64, ptr @stdlib.math.two16
-  %t$9 = call i64 @stdlib.math.sq(i64 %t$8)
-  store i64 %t$9, ptr @stdlib.math.two32
-  %t$10 = load i64, ptr @stdlib.math.two32
-  %t$11 = load i64, ptr @stdlib.math.two16
-  %t$12$la = bitcast i64 %t$10 to double
-  %t$12$lb = bitcast i64 %t$11 to double
-  %t$12$fr = fmul double %t$12$la, %t$12$lb
-  %t$12 = bitcast double %t$12$fr to i64
-  store i64 %t$12, ptr @stdlib.math.two48
-  %t$13 = bitcast double 18014398509481984.0 to i64
-  store i64 %t$13, ptr @stdlib.math.two54
-  %t$14 = load i64, ptr @stdlib.math.two32
-  %t$15 = call i64 @stdlib.math.sq(i64 %t$14)
-  store i64 %t$15, ptr @stdlib.math.two64
-  %t$16 = load i64, ptr @stdlib.math.two64
-  %t$17 = call i64 @stdlib.math.sq(i64 %t$16)
-  store i64 %t$17, ptr @stdlib.math.two128
-  %t$18 = load i64, ptr @stdlib.math.two128
-  %t$19 = call i64 @stdlib.math.sq(i64 %t$18)
-  store i64 %t$19, ptr @stdlib.math.two256
-  %t$20 = load i64, ptr @stdlib.math.two256
-  %t$21 = load i64, ptr @stdlib.math.two128
-  %t$22$la = bitcast i64 %t$20 to double
-  %t$22$lb = bitcast i64 %t$21 to double
-  %t$22$fr = fmul double %t$22$la, %t$22$lb
-  %t$22 = bitcast double %t$22$fr to i64
-  store i64 %t$22, ptr @stdlib.math.two384
-  %t$23 = load i64, ptr @stdlib.math.two256
-  %t$24 = call i64 @stdlib.math.sq(i64 %t$23)
-  store i64 %t$24, ptr @stdlib.math.two512
-  %t$25 = bitcast double 1.0 to i64
-  %t$26 = load i64, ptr @stdlib.math.two8
-  %t$27$la = bitcast i64 %t$25 to double
-  %t$27$lb = bitcast i64 %t$26 to double
-  %t$27$fr = fdiv double %t$27$la, %t$27$lb
-  %t$27 = bitcast double %t$27$fr to i64
-  store i64 %t$27, ptr @stdlib.math.inv_two8
-  %t$28 = bitcast double 1.0 to i64
-  %t$29 = load i64, ptr @stdlib.math.two12
-  %t$30$la = bitcast i64 %t$28 to double
-  %t$30$lb = bitcast i64 %t$29 to double
-  %t$30$fr = fdiv double %t$30$la, %t$30$lb
-  %t$30 = bitcast double %t$30$fr to i64
-  store i64 %t$30, ptr @stdlib.math.inv_two12
-  %t$31 = bitcast double 1.0 to i64
-  %t$32 = load i64, ptr @stdlib.math.two16
-  %t$33$la = bitcast i64 %t$31 to double
-  %t$33$lb = bitcast i64 %t$32 to double
-  %t$33$fr = fdiv double %t$33$la, %t$33$lb
-  %t$33 = bitcast double %t$33$fr to i64
-  store i64 %t$33, ptr @stdlib.math.inv_two16
-  %t$34 = bitcast double 1.0 to i64
-  %t$35 = load i64, ptr @stdlib.math.two32
-  %t$36$la = bitcast i64 %t$34 to double
-  %t$36$lb = bitcast i64 %t$35 to double
-  %t$36$fr = fdiv double %t$36$la, %t$36$lb
-  %t$36 = bitcast double %t$36$fr to i64
-  store i64 %t$36, ptr @stdlib.math.inv_two32
-  %t$37 = bitcast double 1.0 to i64
-  %t$38 = load i64, ptr @stdlib.math.two48
-  %t$39$la = bitcast i64 %t$37 to double
-  %t$39$lb = bitcast i64 %t$38 to double
-  %t$39$fr = fdiv double %t$39$la, %t$39$lb
-  %t$39 = bitcast double %t$39$fr to i64
-  store i64 %t$39, ptr @stdlib.math.inv_two48
-  %t$40 = bitcast double 1.0 to i64
-  %t$41 = load i64, ptr @stdlib.math.two64
-  %t$42$la = bitcast i64 %t$40 to double
-  %t$42$lb = bitcast i64 %t$41 to double
-  %t$42$fr = fdiv double %t$42$la, %t$42$lb
-  %t$42 = bitcast double %t$42$fr to i64
-  store i64 %t$42, ptr @stdlib.math.inv_two64
-  %t$43 = bitcast double 1.0 to i64
-  %t$44 = load i64, ptr @stdlib.math.two128
-  %t$45$la = bitcast i64 %t$43 to double
-  %t$45$lb = bitcast i64 %t$44 to double
-  %t$45$fr = fdiv double %t$45$la, %t$45$lb
-  %t$45 = bitcast double %t$45$fr to i64
-  store i64 %t$45, ptr @stdlib.math.inv_two128
-  %t$46 = bitcast double 1.0 to i64
-  %t$47 = load i64, ptr @stdlib.math.two256
-  %t$48$la = bitcast i64 %t$46 to double
-  %t$48$lb = bitcast i64 %t$47 to double
-  %t$48$fr = fdiv double %t$48$la, %t$48$lb
-  %t$48 = bitcast double %t$48$fr to i64
-  store i64 %t$48, ptr @stdlib.math.inv_two256
-  %t$49 = bitcast double 1.0 to i64
-  %t$50 = load i64, ptr @stdlib.math.two384
-  %t$51$la = bitcast i64 %t$49 to double
-  %t$51$lb = bitcast i64 %t$50 to double
-  %t$51$fr = fdiv double %t$51$la, %t$51$lb
-  %t$51 = bitcast double %t$51$fr to i64
-  store i64 %t$51, ptr @stdlib.math.inv_two384
-  %t$52 = bitcast double 1.0 to i64
-  %t$53 = load i64, ptr @stdlib.math.two512
-  %t$54$la = bitcast i64 %t$52 to double
-  %t$54$lb = bitcast i64 %t$53 to double
-  %t$54$fr = fdiv double %t$54$la, %t$54$lb
-  %t$54 = bitcast double %t$54$fr to i64
-  store i64 %t$54, ptr @stdlib.math.inv_two512
-  %t$55 = bitcast double 0.0 to i64
+  %t$0 = bitcast double 10000000000000000000000.0 to i64
+  store i64 %t$0, ptr @pow10_exact_unit
+  %t$1 = bitcast double 3.141592653589793 to i64
+  store i64 %t$1, ptr @stdlib.math.pi
+  %t$2 = bitcast double 6.283185307179586 to i64
+  store i64 %t$2, ptr @stdlib.math.two_pi
+  %t$3 = bitcast double 1.5707963267948966 to i64
+  store i64 %t$3, ptr @stdlib.math.half_pi
+  %t$4 = bitcast double 4503599627370496.0 to i64
+  store i64 %t$4, ptr @stdlib.math.two52
+  %t$5 = bitcast double 256.0 to i64
+  store i64 %t$5, ptr @stdlib.math.two8
+  %t$6 = bitcast double 4096.0 to i64
+  store i64 %t$6, ptr @stdlib.math.two12
+  %t$7 = load i64, ptr @stdlib.math.two8
+  %t$8 = call i64 @stdlib.math.sq(i64 %t$7)
+  store i64 %t$8, ptr @stdlib.math.two16
+  %t$9 = load i64, ptr @stdlib.math.two16
+  %t$10 = call i64 @stdlib.math.sq(i64 %t$9)
+  store i64 %t$10, ptr @stdlib.math.two32
+  %t$11 = load i64, ptr @stdlib.math.two32
+  %t$12 = load i64, ptr @stdlib.math.two16
+  %t$13$la = bitcast i64 %t$11 to double
+  %t$13$lb = bitcast i64 %t$12 to double
+  %t$13$fr = fmul double %t$13$la, %t$13$lb
+  %t$13 = bitcast double %t$13$fr to i64
+  store i64 %t$13, ptr @stdlib.math.two48
+  %t$14 = bitcast double 18014398509481984.0 to i64
+  store i64 %t$14, ptr @stdlib.math.two54
+  %t$15 = load i64, ptr @stdlib.math.two32
+  %t$16 = call i64 @stdlib.math.sq(i64 %t$15)
+  store i64 %t$16, ptr @stdlib.math.two64
+  %t$17 = load i64, ptr @stdlib.math.two64
+  %t$18 = call i64 @stdlib.math.sq(i64 %t$17)
+  store i64 %t$18, ptr @stdlib.math.two128
+  %t$19 = load i64, ptr @stdlib.math.two128
+  %t$20 = call i64 @stdlib.math.sq(i64 %t$19)
+  store i64 %t$20, ptr @stdlib.math.two256
+  %t$21 = load i64, ptr @stdlib.math.two256
+  %t$22 = load i64, ptr @stdlib.math.two128
+  %t$23$la = bitcast i64 %t$21 to double
+  %t$23$lb = bitcast i64 %t$22 to double
+  %t$23$fr = fmul double %t$23$la, %t$23$lb
+  %t$23 = bitcast double %t$23$fr to i64
+  store i64 %t$23, ptr @stdlib.math.two384
+  %t$24 = load i64, ptr @stdlib.math.two256
+  %t$25 = call i64 @stdlib.math.sq(i64 %t$24)
+  store i64 %t$25, ptr @stdlib.math.two512
+  %t$26 = bitcast double 1.0 to i64
+  %t$27 = load i64, ptr @stdlib.math.two8
+  %t$28$la = bitcast i64 %t$26 to double
+  %t$28$lb = bitcast i64 %t$27 to double
+  %t$28$fr = fdiv double %t$28$la, %t$28$lb
+  %t$28 = bitcast double %t$28$fr to i64
+  store i64 %t$28, ptr @stdlib.math.inv_two8
+  %t$29 = bitcast double 1.0 to i64
+  %t$30 = load i64, ptr @stdlib.math.two12
+  %t$31$la = bitcast i64 %t$29 to double
+  %t$31$lb = bitcast i64 %t$30 to double
+  %t$31$fr = fdiv double %t$31$la, %t$31$lb
+  %t$31 = bitcast double %t$31$fr to i64
+  store i64 %t$31, ptr @stdlib.math.inv_two12
+  %t$32 = bitcast double 1.0 to i64
+  %t$33 = load i64, ptr @stdlib.math.two16
+  %t$34$la = bitcast i64 %t$32 to double
+  %t$34$lb = bitcast i64 %t$33 to double
+  %t$34$fr = fdiv double %t$34$la, %t$34$lb
+  %t$34 = bitcast double %t$34$fr to i64
+  store i64 %t$34, ptr @stdlib.math.inv_two16
+  %t$35 = bitcast double 1.0 to i64
+  %t$36 = load i64, ptr @stdlib.math.two32
+  %t$37$la = bitcast i64 %t$35 to double
+  %t$37$lb = bitcast i64 %t$36 to double
+  %t$37$fr = fdiv double %t$37$la, %t$37$lb
+  %t$37 = bitcast double %t$37$fr to i64
+  store i64 %t$37, ptr @stdlib.math.inv_two32
+  %t$38 = bitcast double 1.0 to i64
+  %t$39 = load i64, ptr @stdlib.math.two48
+  %t$40$la = bitcast i64 %t$38 to double
+  %t$40$lb = bitcast i64 %t$39 to double
+  %t$40$fr = fdiv double %t$40$la, %t$40$lb
+  %t$40 = bitcast double %t$40$fr to i64
+  store i64 %t$40, ptr @stdlib.math.inv_two48
+  %t$41 = bitcast double 1.0 to i64
+  %t$42 = load i64, ptr @stdlib.math.two64
+  %t$43$la = bitcast i64 %t$41 to double
+  %t$43$lb = bitcast i64 %t$42 to double
+  %t$43$fr = fdiv double %t$43$la, %t$43$lb
+  %t$43 = bitcast double %t$43$fr to i64
+  store i64 %t$43, ptr @stdlib.math.inv_two64
+  %t$44 = bitcast double 1.0 to i64
+  %t$45 = load i64, ptr @stdlib.math.two128
+  %t$46$la = bitcast i64 %t$44 to double
+  %t$46$lb = bitcast i64 %t$45 to double
+  %t$46$fr = fdiv double %t$46$la, %t$46$lb
+  %t$46 = bitcast double %t$46$fr to i64
+  store i64 %t$46, ptr @stdlib.math.inv_two128
+  %t$47 = bitcast double 1.0 to i64
+  %t$48 = load i64, ptr @stdlib.math.two256
+  %t$49$la = bitcast i64 %t$47 to double
+  %t$49$lb = bitcast i64 %t$48 to double
+  %t$49$fr = fdiv double %t$49$la, %t$49$lb
+  %t$49 = bitcast double %t$49$fr to i64
+  store i64 %t$49, ptr @stdlib.math.inv_two256
+  %t$50 = bitcast double 1.0 to i64
+  %t$51 = load i64, ptr @stdlib.math.two384
+  %t$52$la = bitcast i64 %t$50 to double
+  %t$52$lb = bitcast i64 %t$51 to double
+  %t$52$fr = fdiv double %t$52$la, %t$52$lb
+  %t$52 = bitcast double %t$52$fr to i64
+  store i64 %t$52, ptr @stdlib.math.inv_two384
+  %t$53 = bitcast double 1.0 to i64
+  %t$54 = load i64, ptr @stdlib.math.two512
+  %t$55$la = bitcast i64 %t$53 to double
+  %t$55$lb = bitcast i64 %t$54 to double
+  %t$55$fr = fdiv double %t$55$la, %t$55$lb
+  %t$55 = bitcast double %t$55$fr to i64
+  store i64 %t$55, ptr @stdlib.math.inv_two512
   %t$56 = bitcast double 0.0 to i64
-  %t$57$la = bitcast i64 %t$55 to double
-  %t$57$lb = bitcast i64 %t$56 to double
-  %t$57$fr = fdiv double %t$57$la, %t$57$lb
-  %t$57 = bitcast double %t$57$fr to i64
-  store i64 %t$57, ptr @stdlib.math.nan
-  %t$58 = bitcast double 0.6931471805599453 to i64
-  store i64 %t$58, ptr @stdlib.math.ln2
-  %t$59 = bitcast double 2.302585092994046 to i64
-  store i64 %t$59, ptr @stdlib.math.ln10
-  %t$60 = bitcast double 1.4426950408889634 to i64
-  store i64 %t$60, ptr @stdlib.math.inv_ln2
-  %t$61 = bitcast double 1.4142135623730951 to i64
-  store i64 %t$61, ptr @stdlib.math.sqrt2
-  %t$62 = bitcast double 0.7071067811865476 to i64
-  store i64 %t$62, ptr @stdlib.math.inv_sqrt2
-  %t$63 = bitcast double 1.0 to i64
-  %t$64 = bitcast double 0.0 to i64
-  %t$65$la = bitcast i64 %t$63 to double
-  %t$65$lb = bitcast i64 %t$64 to double
-  %t$65$fr = fdiv double %t$65$la, %t$65$lb
-  %t$65 = bitcast double %t$65$fr to i64
-  store i64 %t$65, ptr @stdlib.math.inf
-  %t$66 = bitcast double 0.0 to i64
-  %t$67$fa = bitcast i64 %t$66 to double
-  %t$67$fr = fneg double %t$67$fa
-  %t$67 = bitcast double %t$67$fr to i64
-  store i64 %t$67, ptr @stdlib.math.neg_zero
-  %t$68 = load i64, ptr @stdlib.math.two64
-  %t$69 = bitcast double 2.0 to i64
-  %t$70$la = bitcast i64 %t$68 to double
-  %t$70$lb = bitcast i64 %t$69 to double
-  %t$70$fr = fdiv double %t$70$la, %t$70$lb
-  %t$70 = bitcast double %t$70$fr to i64
-  store i64 %t$70, ptr @stdlib.math.two63
+  %t$57 = bitcast double 0.0 to i64
+  %t$58$la = bitcast i64 %t$56 to double
+  %t$58$lb = bitcast i64 %t$57 to double
+  %t$58$fr = fdiv double %t$58$la, %t$58$lb
+  %t$58 = bitcast double %t$58$fr to i64
+  store i64 %t$58, ptr @stdlib.math.nan
+  %t$59 = bitcast double 0.6931471805599453 to i64
+  store i64 %t$59, ptr @stdlib.math.ln2
+  %t$60 = bitcast double 2.302585092994046 to i64
+  store i64 %t$60, ptr @stdlib.math.ln10
+  %t$61 = bitcast double 1.4426950408889634 to i64
+  store i64 %t$61, ptr @stdlib.math.inv_ln2
+  %t$62 = bitcast double 1.4142135623730951 to i64
+  store i64 %t$62, ptr @stdlib.math.sqrt2
+  %t$63 = bitcast double 0.7071067811865476 to i64
+  store i64 %t$63, ptr @stdlib.math.inv_sqrt2
+  %t$64 = bitcast double 1.0 to i64
+  %t$65 = bitcast double 0.0 to i64
+  %t$66$la = bitcast i64 %t$64 to double
+  %t$66$lb = bitcast i64 %t$65 to double
+  %t$66$fr = fdiv double %t$66$la, %t$66$lb
+  %t$66 = bitcast double %t$66$fr to i64
+  store i64 %t$66, ptr @stdlib.math.inf
+  %t$67 = bitcast double 0.0 to i64
+  %t$68$fa = bitcast i64 %t$67 to double
+  %t$68$fr = fneg double %t$68$fa
+  %t$68 = bitcast double %t$68$fr to i64
+  store i64 %t$68, ptr @stdlib.math.neg_zero
+  %t$69 = load i64, ptr @stdlib.math.two64
+  %t$70 = bitcast double 2.0 to i64
+  %t$71$la = bitcast i64 %t$69 to double
+  %t$71$lb = bitcast i64 %t$70 to double
+  %t$71$fr = fdiv double %t$71$la, %t$71$lb
+  %t$71 = bitcast double %t$71$fr to i64
+  store i64 %t$71, ptr @stdlib.math.two63
   ret void
 }
 

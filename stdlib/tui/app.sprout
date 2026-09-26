@@ -166,7 +166,7 @@ fn current_size() -> geometry.Size !{IO} = do
   geometry.Size(terminal.size_cols(ts), terminal.size_rows(ts))
 
 fn paint(s: screen.Screen, w: widget.Widget m, size: geometry.Size) -> Unit !{IO} = do
-  screen.screen_clear(s, style.style_default())
+  screen.screen_clear(s, style.style_default)
   widget.render(w, geometry.region_at_origin(size), s)
   frame <- screen.diff_to_ansi(s)
   terminal.write(frame)
@@ -328,7 +328,7 @@ export fn escape_timed_out(held: Bytes) -> Bool =
 # The hold is cleared with the same send: carrying it would re-emit Escape on
 # every subsequent idle.
 fn send_esc(ch: Chan (Signal m), tick_ms: Int) -> Unit !{IO} = do
-  chan_send(ch, SigEvent(event.KeyPress(event.KEsc, event.mods_none())))
+  chan_send(ch, SigEvent(event.KeyPress(event.KEsc, event.mods_none)))
   input_loop(ch, tick_ms, bytes.empty())
 
 fn send_one(ch: Chan (Signal m), tick_ms: Int, held: Bytes,

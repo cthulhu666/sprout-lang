@@ -1,3 +1,4 @@
+# sprout-ignore-all lint/nullary-const-fn: each `use_it` is imported as a FUNCTION; that import is the diagnostic under test
 module main
 
 import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)

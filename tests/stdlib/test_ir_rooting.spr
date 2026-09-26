@@ -38,7 +38,7 @@ fn lower(prog: sprout_ir.IRProgram) -> String =
 # across" the concat at the IR level; concat's result has no downstream use).
 
 # fn one_concat() -> String = "a" ++ "b"
-fn test1_program() -> sprout_ir.IRProgram =
+let test1_program =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction("one_concat", Nil, "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
@@ -57,7 +57,7 @@ fn test1_program() -> sprout_ir.IRProgram =
 #   %ab = "a" ++ "b"
 #   %cd = "c" ++ "d"      ← root %ab across this
 #   %r  = %ab ++ %cd
-fn test2_program() -> sprout_ir.IRProgram =
+let test2_program =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction("one_live", Nil, "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
@@ -81,7 +81,7 @@ fn test2_program() -> sprout_ir.IRProgram =
 #   %ef = "e"++"f"   [live_across = %ab, %cd]
 #   %t1 = %ab ++ %cd [live_across = %ef]
 #   %r  = %t1 ++ %ef
-fn test3_program() -> sprout_ir.IRProgram =
+let test3_program =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction("three_concat", Nil, "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
@@ -170,7 +170,7 @@ fn test5_program() -> sprout_ir.IRProgram =
 # @sprout_alloc_obj allocates (a GC point) BEFORE its operands are stored,
 # and — unlike @str_concat — does NOT SPROUT_HANDLE them.  So %a must be rooted
 # across the make even though it is not live after it.  Expected: 1 root.
-fn test6_program() -> sprout_ir.IRProgram =
+let test6_program =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction("ctor_operand", Nil, "i64", Cons(
       sprout_ir.IRBlock("entry",
@@ -191,7 +191,7 @@ fn test6_program() -> sprout_ir.IRProgram =
 # @sprout_alloc_closure allocates the env (a GC point) before the capture
 # stores emitted by ir_lowering; the capture is not handle-protected, so %c
 # must be rooted across the mk-closure.  Expected: 1 root.
-fn test7_program() -> sprout_ir.IRProgram =
+let test7_program =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction("closure_cap", Nil, "i64", Cons(
       sprout_ir.IRBlock("entry",
@@ -212,7 +212,7 @@ fn test7_program() -> sprout_ir.IRProgram =
 # @sprout_alloc_tuple_blob calls sprout_gc_maybe_collect_threshold() then
 # allocates then stores the fields — so a tuple build is a GC trigger and its
 # operands are exposed, exactly like @sprout_alloc_obj.  %a must be rooted.
-fn test8_program() -> sprout_ir.IRProgram =
+let test8_program =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction("tuple_operand", Nil, "i64", Cons(
       sprout_ir.IRBlock("entry",
@@ -237,7 +237,7 @@ fn test8_program() -> sprout_ir.IRProgram =
 # op's operand, so it must be rooted there.  Pre-fix IRGetTupleField is not
 # heap-classified, so %x gets no root.  Expected post-fix: 2 pushes total
 # (%a at the tuple build, %x across the %cd concat).
-fn test9_program() -> sprout_ir.IRProgram =
+let test9_program =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction("tuple_extract_live", Nil, "i64", Cons(
       sprout_ir.IRBlock("entry",
@@ -259,7 +259,7 @@ fn test9_program() -> sprout_ir.IRProgram =
 # returns Nothing for it: %x does not enter heap_origin and gets no root across
 # the %cd concat.  Only %a (the heap tuple operand) is rooted at the tuple build.
 # Expected: exactly 1 push (vs Test 9's 2).  This locks the kind-honoring path.
-fn test14_program() -> sprout_ir.IRProgram =
+let test14_program =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction("tuple_extract_scalar_live", Nil, "i64", Cons(
       sprout_ir.IRBlock("entry",
@@ -281,7 +281,7 @@ fn test14_program() -> sprout_ir.IRProgram =
 # tuple element %n is a scalar, so it contributes no root.  Exactly 1 root.
 # Guards that IRMakeTuple stays in op_triggers_gc (the exhaustive classifier
 # turns any future omission into a compile error, not a silent UAF — P11-2e).
-fn test10_program() -> sprout_ir.IRProgram =
+let test10_program =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction("live_across_tuple", Nil, "i64", Cons(
       sprout_ir.IRBlock("entry",
@@ -309,7 +309,7 @@ fn test10_program() -> sprout_ir.IRProgram =
 # alone misses it; the operand must be rooted because IRCall exposes operands.
 # Pre-fix (IRCall not exposing operands): 0 roots → this test FAILS.
 # Post-fix: exactly 1 root.  Distinct from T5, where %s is live-AFTER the call.
-fn test11_program() -> sprout_ir.IRProgram =
+let test11_program =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction("call_operand", Nil, "i64", Cons(
       sprout_ir.IRBlock("entry",
@@ -333,7 +333,7 @@ fn test11_program() -> sprout_ir.IRProgram =
 # in-scope HEAP operands: %a gets a root, the scalar %n (an IRConst, never in
 # heap_origin) does not.  Complements T11 (single heap operand) by exercising
 # the scalar-filtering path in roots_across_loop.  Expected: exactly 1 root.
-fn test12_program() -> sprout_ir.IRProgram =
+let test12_program =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction("call_mixed_operands", Nil, "i64", Cons(
       sprout_ir.IRBlock("entry",
@@ -404,7 +404,7 @@ fn test15_program() -> sprout_ir.IRProgram =
 # so it is over-retained until %b dies, then both pop together.  This is the safe
 # degradation: %a pushed ONCE (not re-rooted), over-retained, never under-rooted.
 # Expected: 2 pushes (%a, %b), one pop_roots(i64 2) at the end.
-fn test16_program() -> sprout_ir.IRProgram =
+let test16_program =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction("interleaved", Nil, "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
@@ -654,7 +654,7 @@ fn main() -> Unit !{IO} =
   do
     # Substring checks are blind to whole-module malformation; verify a
     # representative rooted+lowered program of each shape actually compiles.
-    test2_compiles <- clang_verifies_ir(lower(test2_program()))
+    test2_compiles <- clang_verifies_ir(lower(test2_program))
     test23_compiles <- clang_verifies_ir(lower(test23_program()))
     run_suite("ir_rooting", [
     # --- Test 13: long-block live_after characterization (push count locked).
@@ -666,21 +666,21 @@ fn main() -> Unit !{IO} =
     # --- Test 1: no rooting emitted.  Search for the call site, not the
     # declare line (the header always declares the runtime functions).
     check_false("T1: no push_i64_root call site for single concat",
-                 contains(lower(test1_program()), "call i64 @sprout_gc_push_i64_root")),
+                 contains(lower(test1_program), "call i64 @sprout_gc_push_i64_root")),
     check_false("T1: no pop_roots call site for single concat",
-                 contains(lower(test1_program()), "call i64 @sprout_gc_pop_roots")),
+                 contains(lower(test1_program), "call i64 @sprout_gc_pop_roots")),
 
     # --- Test 2: exactly one root pushed and one pop(i64 1).
     check_eq("T2: exactly one push_i64_root call",
-              count(lower(test2_program()), "call i64 @sprout_gc_push_i64_root"), 1),
+              count(lower(test2_program), "call i64 @sprout_gc_push_i64_root"), 1),
     check_eq("T2: exactly one pop_roots(i64 1) call",
-              count(lower(test2_program()), "@sprout_gc_pop_roots(i64 1)"), 1),
+              count(lower(test2_program), "@sprout_gc_pop_roots(i64 1)"), 1),
 
     # --- Test 3: 4 total root pushes; at least one pop(2); at least two pop(1).
     check_eq("T3: three push_i64_root calls (coalesced)",
-              count(lower(test3_program()), "call i64 @sprout_gc_push_i64_root"), 3),
+              count(lower(test3_program), "call i64 @sprout_gc_push_i64_root"), 3),
     check_eq("T3: one pop_roots(i64 3) (deferred batch pop)",
-              count(lower(test3_program()), "@sprout_gc_pop_roots(i64 3)"), 1),
+              count(lower(test3_program), "@sprout_gc_pop_roots(i64 3)"), 1),
 
     # --- Test 4: phi-of-heap — exactly one push.  Neither arm pre-roots; the
     # root sits in the join block before the %zw concat.
@@ -703,56 +703,56 @@ fn main() -> Unit !{IO} =
     # %a is dead after the make but must be rooted because @sprout_alloc_obj
     # allocates before storing operands and does not handle-protect them.
     check_eq("T6: exactly one push_i64_root for IRMakeCtor operand",
-              count(lower(test6_program()), "call i64 @sprout_gc_push_i64_root"), 1),
+              count(lower(test6_program), "call i64 @sprout_gc_push_i64_root"), 1),
     check_eq("T6: exactly one pop_roots(i64 1) around the make",
-              count(lower(test6_program()), "@sprout_gc_pop_roots(i64 1)"), 1),
+              count(lower(test6_program), "@sprout_gc_pop_roots(i64 1)"), 1),
 
     # --- Test 7: IRMkClosure capture rooted across the mk-closure (PR-A regression).
     # %c is dead after the mk-closure but must be rooted because
     # @sprout_alloc_closure allocates before the capture stores.
     check_eq("T7: exactly one push_i64_root for IRMkClosure capture",
-              count(lower(test7_program()), "call i64 @sprout_gc_push_i64_root"), 1),
+              count(lower(test7_program), "call i64 @sprout_gc_push_i64_root"), 1),
     check_eq("T7: exactly one pop_roots(i64 1) around the mk-closure",
-              count(lower(test7_program()), "@sprout_gc_pop_roots(i64 1)"), 1),
+              count(lower(test7_program), "@sprout_gc_pop_roots(i64 1)"), 1),
 
     # --- Test 8: IRMakeTuple operand rooted across the tuple build.
     check_eq("T8: exactly one push_i64_root for IRMakeTuple operand",
-              count(lower(test8_program()), "call i64 @sprout_gc_push_i64_root"), 1),
+              count(lower(test8_program), "call i64 @sprout_gc_push_i64_root"), 1),
     check_eq("T8: exactly one pop_roots(i64 1) around the tuple build",
-              count(lower(test8_program()), "@sprout_gc_pop_roots(i64 1)"), 1),
+              count(lower(test8_program), "@sprout_gc_pop_roots(i64 1)"), 1),
 
     # --- Test 9: IRGetTupleField result rooted across a later trigger.
     # 2 pushes: %a at the tuple build, %x across the %cd concat.
     check_eq("T9: two push_i64_root (tuple operand + extracted value across trigger)",
-              count(lower(test9_program()), "call i64 @sprout_gc_push_i64_root"), 2),
+              count(lower(test9_program), "call i64 @sprout_gc_push_i64_root"), 2),
 
     # --- Test 14: scalar-kind IRGetTupleField result is NOT rooted (vs Test 9).
     # 1 push: only %a at the tuple build; the scalar %x needs no root.
     check_eq("T14: one push_i64_root (scalar tuple field skipped across trigger)",
-              count(lower(test14_program()), "call i64 @sprout_gc_push_i64_root"), 1),
+              count(lower(test14_program), "call i64 @sprout_gc_push_i64_root"), 1),
 
     # --- Test 10: value live across IRMakeTuple is rooted (IRMakeTuple is a trigger).
     check_eq("T10: one push_i64_root (heap value live across IRMakeTuple)",
-              count(lower(test10_program()), "call i64 @sprout_gc_push_i64_root"), 1),
+              count(lower(test10_program), "call i64 @sprout_gc_push_i64_root"), 1),
 
     # --- Test 11: IRCall operand rooted across the call (PR 11 item 4 regression).
     # %a is dead after the call but must be rooted because @ref_new (and any
     # runtime builtin) may collect before consuming its operand.
     check_eq("T11: exactly one push_i64_root for IRCall operand",
-              count(lower(test11_program()), "call i64 @sprout_gc_push_i64_root"), 1),
+              count(lower(test11_program), "call i64 @sprout_gc_push_i64_root"), 1),
     check_eq("T11: exactly one pop_roots(i64 1) around the call",
-              count(lower(test11_program()), "@sprout_gc_pop_roots(i64 1)"), 1),
+              count(lower(test11_program), "@sprout_gc_pop_roots(i64 1)"), 1),
 
     # --- Test 12: IRCall with mixed heap+scalar operands roots only the heap one.
     check_eq("T12: exactly one push_i64_root (heap operand only, scalar skipped)",
-              count(lower(test12_program()), "call i64 @sprout_gc_push_i64_root"), 1),
+              count(lower(test12_program), "call i64 @sprout_gc_push_i64_root"), 1),
 
     # --- Header declares the rooting runtime functions.
     check_true("header declares @sprout_gc_push_i64_root",
-                contains(lower(test1_program()),
+                contains(lower(test1_program),
                          "declare i64 @sprout_gc_push_i64_root(ptr)")),
     check_true("header declares @sprout_gc_pop_roots",
-                contains(lower(test1_program()),
+                contains(lower(test1_program),
                          "declare i64 @sprout_gc_pop_roots(i64)")),
 
     # --- Test 15: heap value rooted in entry, live across br, re-rooted in next.
@@ -765,9 +765,9 @@ fn main() -> Unit !{IO} =
     # --- Test 16: interleaved lifetimes — %a over-retained under live %b, popped
     # together.  Pushed once each (no re-rooting); safe over-retention.
     check_eq("T16: two push_i64_root (interleaved, each pushed once)",
-              count(lower(test16_program()), "call i64 @sprout_gc_push_i64_root"), 2),
+              count(lower(test16_program), "call i64 @sprout_gc_push_i64_root"), 2),
     check_eq("T16: one pop_roots(i64 2) (over-retained %a popped with %b)",
-              count(lower(test16_program()), "@sprout_gc_pop_roots(i64 2)"), 1),
+              count(lower(test16_program), "@sprout_gc_pop_roots(i64 2)"), 1),
 
     # --- Test 17 (B2): vector_get_direct is a NON-trigger — no root around it.
     check_false("T17: no push_i64_root across vector_get_direct (non-allocating read)",

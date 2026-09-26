@@ -60,12 +60,12 @@ fn dispatch(b: Bytes, n: Int, i: Int, b0: Int) -> Step =
   # 0x08 is what the key is defined to send; 0x7F is what terminals actually
   # send. Both are Backspace, and treating DEL as Delete is the classic bug.
   else if b0 == 8 || b0 == 127 then plain(event.KBackspace, i + 1)
-  else if b0 < 32 then Emit(event.KeyPress(ctrl_key(b0), event.mods_ctrl()), i + 1)
+  else if b0 < 32 then Emit(event.KeyPress(ctrl_key(b0), event.mods_ctrl), i + 1)
   else if b0 < 128 then plain(event.KChar(char_from_codepoint(b0)), i + 1)
   else utf8_step(b, n, i, b0)
 
 fn plain(k: event.Key, next: Int) -> Step =
-  Emit(event.KeyPress(k, event.mods_none()), next)
+  Emit(event.KeyPress(k, event.mods_none), next)
 
 # A control byte IS its letter with the top bits cleared, so ctrl-a is 1 and
 # ctrl-z is 26. Above the letters the chords run over punctuation — ctrl-@ is
@@ -172,7 +172,7 @@ fn list_nth(xs: List String, k: Int) -> Maybe String =
 # missing parameter reads as 0, which is not a valid encoding, so it maps to
 # no modifiers rather than to shift.
 fn mods_of(p: Int) -> event.Mods =
-  if p <= 0 then event.mods_none() else mods_bits(p - 1)
+  if p <= 0 then event.mods_none else mods_bits(p - 1)
 
 fn mods_bits(bits: Int) -> event.Mods =
   event.Mods(imod(bits / 4, 2) == 1, imod(bits / 2, 2) == 1, imod(bits, 2) == 1)

@@ -648,7 +648,7 @@ fn head_is_concrete(te: ast.TypeExpr) -> Bool =
 
 fn is_type_var_name(name: String) -> Bool =
   # A module-qualified name (dotted) is never a type variable — guard as
-  # infer.is_lowercase_name does (code-review finding 2, 2026-07-10).
+  # ast.is_lowercase_name does (code-review finding 2, 2026-07-10).
   if str_find(name, ".") != -1 then false
   else match str_char_at(name, 0) with
   | Nothing -> false

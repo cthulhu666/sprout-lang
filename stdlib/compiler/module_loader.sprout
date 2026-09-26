@@ -295,14 +295,14 @@ fn collect_marker_pairs(pairs: List (String, types.Scheme)) -> List (String, typ
 # Names infer marked "@extern:" — the ast.ScopeGlobal class. A global name is
 # spelled bare wherever its declaring module is in the build, so it is exempt from
 # aliasing and from selective filtering alike; both exemptions read this list.
-fn extern_marker_prefix() -> String = "@extern:"
+let extern_marker_prefix: String = "@extern:"
 
 fn extern_names(pairs: List (String, types.Scheme)) -> List String =
   match pairs with
   | Nil -> Nil
   | Cons (k, _) rest ->
-      if str_starts_with(k, extern_marker_prefix())
-      then Cons(string.drop(k, string.length(extern_marker_prefix())), extern_names(rest))
+      if str_starts_with(k, extern_marker_prefix)
+      then Cons(string.drop(k, string.length(extern_marker_prefix)), extern_names(rest))
       else extern_names(rest)
 
 # @class: and @instance: markers are intentionally NOT prefixed — they are

@@ -12,9 +12,9 @@ import stdlib.test (check_eq, check_true, run_suite)
 
 type Person = (name: String, age: Int) deriving (Eq, ToString)
 
-fn nil_int() -> List Int = Nil
+let nil_int: List Int = Nil
 fn empty_vec_int() -> Vec Int = vec_empty()
-fn no_int() -> Maybe Int = Nothing
+let no_int: Maybe Int = Nothing
 
 fn is_even(n: Int) -> Bool = n - (n / 2) * 2 == 0
 fn under_three(xs: List Int) -> Bool = list_length(xs) < 3
@@ -62,7 +62,7 @@ fn main() -> Unit !{IO} =
       fold_while(sum_step, under_ten, 0, ints), 10),
 
     # --- Edges ---------------------------------------------------------------
-    check_eq("fold_while of the empty list is init", fold_while(sum_step, under_ten, 7, nil_int()), 7),
+    check_eq("fold_while of the empty list is init", fold_while(sum_step, under_ten, 7, nil_int), 7),
     check_eq("fold_while of the empty vec is init",
       fold_while(sum_step, under_ten, 7, empty_vec_int()), 7),
 
@@ -82,13 +82,13 @@ fn main() -> Unit !{IO} =
     check_eq("find stops at the first match", find(is_even, long), Just(2)),
     check_eq("find over List is unchanged", find(\p -> p.age >= 18, people),
       Just(Person(name = "ada", age = 36))),
-    check_eq("find of no match is Nothing", find(\n -> n > 1000, long), no_int()),
+    check_eq("find of no match is Nothing", find(\n -> n > 1000, long), no_int),
     check_true("any stops at the first hit", any(is_even, long)),
     check_true("any of no match is false",! any (\n -> n > 1000, long)),
     check_true("all stops at the first miss",! all (is_even, long)),
     check_true("all of every match is true", all(\n -> n > 0, long)),
-    check_true("all of the empty list is vacuously true", all(is_even, nil_int())),
-    check_true("any of the empty list is false",! any (is_even, nil_int())),
+    check_true("all of the empty list is vacuously true", all(is_even, nil_int)),
+    check_true("any of the empty list is false",! any (is_even, nil_int)),
     check_eq("find_map stops at the first Just",
       find_map(\n -> if is_even(n) then Just(n * 10) else Nothing, long), Just(20)),
     check_true("member stops at the hit", member(2, long)),

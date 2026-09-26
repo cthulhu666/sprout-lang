@@ -25,7 +25,7 @@ import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set)
 fn idx_w1(j: Int, i: Int) -> Int = j * 2 + i
 fn idx_b1(j: Int) -> Int = 4 + j
 fn idx_w2(j: Int) -> Int = 6 + j
-fn idx_b2() -> Int = 8
+let idx_b2: Int = 8
 
 # --- Activation ---
 fn dabs(x: Double) -> Double = if x < 0.0 then -x else x
@@ -59,7 +59,7 @@ fn forward(w: MutVec Double, x1: Double, x2: Double) -> Double !{IO} =
     h1 <- hidden_out(w, 1, x1, x2)
     w2_0 <- mutvec_at(w, idx_w2(0))
     w2_1 <- mutvec_at(w, idx_w2(1))
-    b2 <- mutvec_at(w, idx_b2())
+    b2 <- mutvec_at(w, idx_b2)
     w2_0 * h0 + w2_1 * h1 + b2
 
 # --- Backprop: accumulate one sample's gradient into `g` ---
@@ -85,7 +85,7 @@ fn accum_sample_grad(w: MutVec Double, g: MutVec Double, x1: Double, x2: Double,
     let d = 2.0 * (out - target)  # dL/dout for L = (out - target)^2
     _ <- accum(g, idx_w2(0), d * h0)
     _ <- accum(g, idx_w2(1), d * h1)
-    _ <- accum(g, idx_b2(), d)
+    _ <- accum(g, idx_b2, d)
     w2_0 <- mutvec_at(w, idx_w2(0))
     w2_1 <- mutvec_at(w, idx_w2(1))
     _ <- accum_hidden(w, g, 0, w2_0, h0, d, x1, x2)

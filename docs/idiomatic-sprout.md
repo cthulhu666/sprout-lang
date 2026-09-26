@@ -400,6 +400,25 @@ Top-level initializers must be pure, and may be `export`ed. Measured in
 `docs/bigint-v0.md` §9 Stage 4, where the function spelling was re-parsing the P-256
 group order twice on every signature verification.
 
+`lint/nullary-const-fn` reports this shape. It fires only on a **pure** `fn` whose
+body is a syntactic value, because a top-level `let` initializer must be pure
+(spec §5.2, not yet enforced) and, outside that set, a `let` is monomorphic.
+
+**Carry the return type across** — `fn lengths() -> Vec Int = [1, 2, 3]` is a `Vec`
+*because* the return type says so (§5.5.1), and a bare `let lengths = [1, 2, 3]` is a
+`List`. The annotation only resolves prelude types today (`BACKLOG` §2.5), so where
+it cannot be written, leave the binding unannotated and check the inferred type.
+
+Two shapes stay functions, and the rule leaves them alone:
+
+- a `where` **constraint** — a `fn` receives its dictionary per call, a binding gets
+  one choice, and an open one is rejected (`ambiguous typeclass binding`);
+- a body that is a **bare name or a lambda** — those take their type from the
+  declared return type, so dropping it can un-determine them.
+
+Ordering also differs: a `fn` is visible throughout its module, a `let` only below
+itself. A constant used above where it was declared has to move up.
+
 ## Build strings with `++` and backtick templates
 
 Append with `++`; interpolate with backtick templates, which evaluate real

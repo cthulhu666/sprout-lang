@@ -1,3 +1,4 @@
+# sprout-ignore-all lint/nullary-const-fn: conformance fixture — the nullary form is the program under test
 module main
 
 # `() -> T` is a real type: a thunk can be named in a parameter, stored in a

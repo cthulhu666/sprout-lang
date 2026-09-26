@@ -136,6 +136,16 @@ fn field_program_heap() -> sprout_ir.IRProgram =
       Nil)),
     Nil), Nil, Nil, Nil)
 
+# abort_program: IRAbortMatch produces the abort+unreachable terminator pair.
+# Post /code-review fix #15: IRAbortMatch is field-less (declared void noreturn).
+let abort_program =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("abort_demo", Nil, "i64", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRAbortMatch, Nil)),
+      Nil)),
+    Nil), Nil, Nil, Nil)
+
 # field_program_scalar_across_trigger: IRGetField with "scalar" kind
 # (Int field) whose result lives across an allocation.  Rooter must NOT
 # push a root — scalars are not GC handles.  Negative control.
@@ -151,15 +161,6 @@ fn field_program_scalar_across_trigger() -> sprout_ir.IRProgram =
       Nil)),
     Nil), Nil, Nil, Nil)
 
-# abort_program: IRAbortMatch produces the abort+unreachable terminator pair.
-# Post /code-review fix #15: IRAbortMatch is field-less (declared void noreturn).
-fn abort_program() -> sprout_ir.IRProgram =
-  sprout_ir.IRProgram(Cons(
-    sprout_ir.IRFunction("abort_demo", Nil, "i64", Cons(
-      sprout_ir.IRBlock("entry", Cons(
-        sprout_ir.IRAbortMatch, Nil)),
-      Nil)),
-    Nil), Nil, Nil, Nil)
 
 fn main() -> Unit !{IO} =
   do
@@ -171,7 +172,7 @@ fn main() -> Unit !{IO} =
     assert_true(state, "pretty: get_field rendered",
                 contains(sprout_ir.print_ir_program(field_program_scalar()), "get_field"))
     assert_true(state, "pretty: abort_match rendered",
-                contains(sprout_ir.print_ir_program(abort_program()), "abort_match"))
+                contains(sprout_ir.print_ir_program(abort_program), "abort_match"))
     # --- Runtime decls appear in lowered output ---
     assert_true(state, "header declares @sprout_tag",
                 contains(ir_lowering.lower_program(tag_program()),
@@ -180,7 +181,7 @@ fn main() -> Unit !{IO} =
                 contains(ir_lowering.lower_program(field_program_scalar()),
                          "declare i64 @sprout_field(i64, i64)"))
     assert_true(state, "header declares @sprout_abort_match (void noreturn)",
-                contains(ir_lowering.lower_program(abort_program()),
+                contains(ir_lowering.lower_program(abort_program),
                          "declare void @sprout_abort_match() noreturn"))
 
     # --- IRGetTag lowers to call @sprout_tag ---
@@ -206,15 +207,15 @@ fn main() -> Unit !{IO} =
     # /code-review fix #15: @sprout_abort_match declared void noreturn;
     # the call no longer allocates a dead i64 result SSA register.
     assert_true(state, "IRAbortMatch lowers to call void @sprout_abort_match",
-                contains(ir_lowering.lower_program(abort_program()),
+                contains(ir_lowering.lower_program(abort_program),
                          "call void @sprout_abort_match()"))
     assert_true(state, "IRAbortMatch emits unreachable terminator",
-                contains(ir_lowering.lower_program(abort_program()), "unreachable"))
+                contains(ir_lowering.lower_program(abort_program), "unreachable"))
     assert_false(state, "IRAbortMatch must NOT emit a dead i64 result SSA",
-                 contains(ir_lowering.lower_program(abort_program()),
+                 contains(ir_lowering.lower_program(abort_program),
                           "= call i64 @sprout_abort_match"))
     assert_true(state, "@sprout_abort_match declared void noreturn",
-                contains(ir_lowering.lower_program(abort_program()),
+                contains(ir_lowering.lower_program(abort_program),
                          "declare void @sprout_abort_match() noreturn"))
 
     # IRConstBool / IRICmpBool removed in /code-review fix #2 — Bool flows

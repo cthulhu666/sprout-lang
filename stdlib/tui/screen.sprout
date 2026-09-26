@@ -41,11 +41,11 @@ export type Cell (..) deriving (Eq, ToString) =
 export type Screen (..) =
   | Screen (MutMatrix Cell) (MutMatrix Cell) (Ref geometry.Region)
 
-fn blank() -> Cell = Cell(32, Nil, style.style_default())
+let blank = Cell(32, Nil, style.style_default)
 
 export fn screen_new(size: geometry.Size) -> Screen !{IO} = do
-  front <- mutmatrix_new(geometry.size_rows(size), geometry.size_cols(size), blank())
-  back <- mutmatrix_new(geometry.size_rows(size), geometry.size_cols(size), blank())
+  front <- mutmatrix_new(geometry.size_rows(size), geometry.size_cols(size), blank)
+  back <- mutmatrix_new(geometry.size_rows(size), geometry.size_cols(size), blank)
   clip <- ref_new(geometry.region_at_origin(size))
   Screen(front, back, clip)
 
@@ -66,7 +66,7 @@ fn in_bounds(s: Screen, col: Int, row: Int) -> Bool =
   col >= 0 && row >= 0 && col < screen_cols(s) && row < screen_rows(s)
 
 export fn cell_at(s: Screen, col: Int, row: Int) -> Cell !{IO} =
-  if in_bounds(s, col, row) then mutmatrix_at(back_of(s), row, col) else blank()
+  if in_bounds(s, col, row) then mutmatrix_at(back_of(s), row, col) else blank
 
 # The text a cell renders as. A `Continuation` renders as nothing at all: the
 # wide cluster to its left already covered both columns.
@@ -77,7 +77,7 @@ export fn cell_text(c: Cell) -> String =
 
 export fn cell_style(c: Cell) -> style.Style =
   match c with
-  | Continuation -> style.style_default()
+  | Continuation -> style.style_default
   | Cell _ _ st -> st
 
 export fn is_continuation(c: Cell) -> Bool =
@@ -114,11 +114,11 @@ fn repair(s: Screen, col: Int, row: Int) -> Unit !{IO} = do
   repair_here(s, col, row, here)
 
 fn repair_here(s: Screen, col: Int, row: Int, here: Cell) -> Unit !{IO} =
-  if is_continuation(here) then set_raw(s, col - 1, row, blank())
+  if is_continuation(here) then set_raw(s, col - 1, row, blank)
   else repair_right(s, col, row, here)
 
 fn repair_right(s: Screen, col: Int, row: Int, here: Cell) -> Unit !{IO} =
-  if cell_columns(here) == 2 then set_raw(s, col + 1, row, blank()) else ()
+  if cell_columns(here) == 2 then set_raw(s, col + 1, row, blank) else ()
 
 fn cell_columns(c: Cell) -> Int =
   match c with
@@ -267,7 +267,7 @@ fn finish(s: Screen, parts: List String) -> String !{IO} =
   # buffer as the new front.
   | [_ | _] -> do
       commit_rows(s, 0)
-      string_concat_many(list_reverse(Cons(style.style_to_ansi(style.style_default()), parts)))
+      string_concat_many(list_reverse(Cons(style.style_to_ansi(style.style_default), parts)))
 
 fn diff_rows(s: Screen, row: Int, acc: List String) -> List String !{IO} =
   if row >= screen_rows(s) then acc
@@ -287,15 +287,16 @@ fn cell_changed(s: Screen, col: Int, row: Int) -> Bool !{IO} = do
   f <- mutmatrix_at(front_of(s), row, col)
   b != f
 
+# A style no real cell can equal, so the first cell of a run always emits one.
+let no_style = Nothing
+
 # A run opens with a cursor move, then emits cells until one is unchanged.
 # The style is re-emitted at the start of every run rather than tracked across
 # runs: `style_to_ansi` is absolute, so a run that assumes nothing is a run
 # that cannot be desynchronised by anything between it and the last one.
 fn start_run(s: Screen, row: Int, col: Int, acc: List String) -> List String !{IO} =
-  run_cells(s, row, col, Cons(cup(row, col), acc), no_style())
+  run_cells(s, row, col, Cons(cup(row, col), acc), no_style)
 
-# A style no real cell can equal, so the first cell of a run always emits one.
-fn no_style() -> Maybe style.Style = Nothing
 
 fn run_cells(s: Screen, row: Int, col: Int, acc: List String,
              last: Maybe style.Style) -> List String !{IO} =

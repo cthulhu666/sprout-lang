@@ -53,7 +53,7 @@ fn counter_measure(n: Int, avail: g.Size) -> widget.Measured =
 
 fn counter_render(n: Int, r: g.Region, s: scr.Screen) -> Unit !{IO} = do
   stop <- scr.screen_write(s, g.region_col(r), g.region_row(r), to_string(n),
-                           sty.style_default())
+                           sty.style_default)
   ()
 
 fn counter(n: Int) -> widget.Widget Msg =
@@ -72,7 +72,7 @@ fn label_measure(t: String, avail: g.Size) -> widget.Measured =
 
 fn label_render(t: String, r: g.Region, s: scr.Screen) -> Unit !{IO} = do
   stop <- scr.screen_write(s, g.region_col(r), g.region_row(r), t,
-                           sty.style_default())
+                           sty.style_default)
   ()
 
 fn label(t: String) -> widget.Widget Msg =
@@ -128,7 +128,7 @@ fn quit_at(n: Int,
            w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow, List(widget.Cmd Msg)) =
   if n >= 2 then app.done(w, app.Quit) else app.done(counter(n + 1), app.Continue)
 
-fn key() -> event.Event = event.KeyPress(event.KEnter, event.mods_none())
+let key = event.KeyPress(event.KEnter, event.mods_none)
 
 fn said(w: widget.Widget Msg, evs: List event.Event) -> String =
   match widget.feed(w, evs) with
@@ -142,15 +142,15 @@ fn main() -> Unit !{IO} = do
   # --- the box, pure ---
   # Three ticks then a key: the reported count is the state at the time, which
   # is what proves `feed` folds in order rather than broadcasting the original.
-  print(said(counter(0), [event.TickEvent, event.TickEvent, event.TickEvent, key()]))
+  print(said(counter(0), [event.TickEvent, event.TickEvent, event.TickEvent, key]))
   # Two widgets with DIFFERENT hidden state types, measured through one list.
   print(to_string(list_map(measured, [counter(3), label("hello")])))
   # A retargeted vocabulary.
-  print(said_outer(widget.map_msgs(to_outer, from_outer, counter(4)), key()))
+  print(said_outer(widget.map_msgs(to_outer, from_outer, counter(4)), key))
 
   # --- the pump, pure ---
-  print(flow_after(counter(0), key()))
-  print(flow_after(counter(2), key()))
+  print(flow_after(counter(0), key))
+  print(flow_after(counter(2), key))
   print(flow_after(counter(2), event.Paste("x")))
 
   # --- the tree, rendered ---

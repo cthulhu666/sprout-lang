@@ -133,13 +133,13 @@ fn json_get_int_fld(obj: json.Json, key: String) -> Maybe Int =
 # response leaves the client blocked on a reply that never arrives.
 # A fixed literal, not the error text: this string is hand-built JSON, so interpolating anything
 # into it would rest on that text never containing a quote or a backslash.
-fn unencodable_notice() -> String =
+let unencodable_notice: String =
   "{\"jsonrpc\":\"2.0\",\"method\":\"window/logMessage\",\"params\":{\"type\":1,\"message\":\"lsp: response held a value that cannot be encoded as JSON\"}}"
 
 fn send_message(msg: json.Json) -> Unit !{IO} =
   match json.stringify(msg) with
   | Ok text -> lsp_send(text)
-  | Err _ -> lsp_send(unencodable_notice())
+  | Err _ -> lsp_send(unencodable_notice)
 
 # ---------------------------------------------------------------------------
 # Diagnostics — public compiler.Diagnostic has (message, line, col)
@@ -294,16 +294,16 @@ export fn extract_hover_params(params: json.Json) -> Maybe HoverParams =
 # scripts/lsp_smoke.sh asserts the implication, so an advertisement without an answer
 # fails the gate.
 
-fn server_capabilities() -> json.Json =
+let server_capabilities =
   json.JsonObject(
     json.JsonObjectCons("textDocumentSync", json.JsonInt(1),
     json.JsonObjectCons("definitionProvider", json.JsonBool(true),
     json.JsonObjectCons("hoverProvider", json.JsonBool(true),
     json.JsonObjectNil))))
 
-fn initialize_result() -> json.Json =
+let initialize_result =
   json.JsonObject(
-    json.JsonObjectCons("capabilities", server_capabilities(),
+    json.JsonObjectCons("capabilities", server_capabilities,
     json.JsonObjectCons("serverInfo",
       json.JsonObject(
         json.JsonObjectCons("name", json.JsonString("sproutd"),
@@ -341,7 +341,7 @@ fn roots_summary(roots: List String) -> String =
 
 fn handle_initialize(id: json.Json, state: LspState) -> Unit !{IO} =
   do
-    send_message(make_result(id, initialize_result()))
+    send_message(make_result(id, initialize_result))
     log_message("sproutd LSP ready — stdlib: " ++ lsp_stdlib_root(state)
       ++ "; package roots: " ++ roots_summary(lsp_package_roots(state)))
 

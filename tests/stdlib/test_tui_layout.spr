@@ -31,7 +31,7 @@ fn reg(r: geometry.Region) -> String =
 fn regs(rs: List geometry.Region) -> String =
   string.join(" ", list_map(reg, rs))
 
-fn full() -> geometry.Region = geometry.Region(0, 0, 12, 6)
+let full = geometry.Region(0, 0, 12, 6)
 
 fn main() -> Unit !{IO} =
   run_suite("tui layout", [
@@ -90,49 +90,49 @@ fn main() -> Unit !{IO} =
 
     # ── row and column ──────────────────────────────────────────────────────
     check_eq("a row splits columns and keeps rows",
-      regs(layout.row(full(), [layout.Cells(4), layout.Fraction(1)])),
+      regs(layout.row(full, [layout.Cells(4), layout.Fraction(1)])),
       "0,0,4,6 4,0,8,6"),
     check_eq("a column splits rows and keeps columns",
-      regs(layout.column(full(), [layout.Cells(1), layout.Fraction(1)])),
+      regs(layout.column(full, [layout.Cells(1), layout.Fraction(1)])),
       "0,0,12,1 0,1,12,5"),
     check_eq("an empty region yields empty parts",
       regs(layout.row(geometry.Region(3, 3, 0, 0), [layout.Fraction(1)])), "3,3,0,0"),
 
     # ── dock ────────────────────────────────────────────────────────────────
     check_eq("dock top takes rows off the top",
-      reg(match layout.dock(full(), layout.Top, 1) with | (d, _) -> d), "0,0,12,1"),
+      reg(match layout.dock(full, layout.Top, 1) with | (d, _) -> d), "0,0,12,1"),
     check_eq("dock top leaves the rest below",
-      reg(match layout.dock(full(), layout.Top, 1) with | (_, r) -> r), "0,1,12,5"),
+      reg(match layout.dock(full, layout.Top, 1) with | (_, r) -> r), "0,1,12,5"),
     check_eq("dock bottom takes from the bottom",
-      reg(match layout.dock(full(), layout.Bottom, 2) with | (d, _) -> d), "0,4,12,2"),
+      reg(match layout.dock(full, layout.Bottom, 2) with | (d, _) -> d), "0,4,12,2"),
     check_eq("dock bottom leaves the rest above",
-      reg(match layout.dock(full(), layout.Bottom, 2) with | (_, r) -> r), "0,0,12,4"),
+      reg(match layout.dock(full, layout.Bottom, 2) with | (_, r) -> r), "0,0,12,4"),
     check_eq("dock left",
-      reg(match layout.dock(full(), layout.Left, 3) with | (d, _) -> d), "0,0,3,6"),
+      reg(match layout.dock(full, layout.Left, 3) with | (d, _) -> d), "0,0,3,6"),
     check_eq("dock right",
-      reg(match layout.dock(full(), layout.Right, 3) with | (d, _) -> d), "9,0,3,6"),
+      reg(match layout.dock(full, layout.Right, 3) with | (d, _) -> d), "9,0,3,6"),
     check_eq("dock right leaves the rest",
-      reg(match layout.dock(full(), layout.Right, 3) with | (_, r) -> r), "0,0,9,6"),
+      reg(match layout.dock(full, layout.Right, 3) with | (_, r) -> r), "0,0,9,6"),
     check_eq("docking more than there is takes all of it",
-      reg(match layout.dock(full(), layout.Top, 99) with | (d, _) -> d), "0,0,12,6"),
+      reg(match layout.dock(full, layout.Top, 99) with | (d, _) -> d), "0,0,12,6"),
     check_eq("and leaves nothing",
-      reg(match layout.dock(full(), layout.Top, 99) with | (_, r) -> r), "0,6,12,0"),
+      reg(match layout.dock(full, layout.Top, 99) with | (_, r) -> r), "0,6,12,0"),
 
     # A header, a footer and a sidebar, with the body falling out as the
     # remainder — the shape a real app wires up.
     check_eq("dock_all peels edges in order",
-      regs(match layout.dock_all(full(), [(layout.Top, 1), (layout.Bottom, 1), (layout.Left, 4)]) with
+      regs(match layout.dock_all(full, [(layout.Top, 1), (layout.Bottom, 1), (layout.Left, 4)]) with
            | (ds, _) -> ds),
       "0,0,12,1 0,5,12,1 0,1,4,4"),
     check_eq("dock_all leaves the body",
-      reg(match layout.dock_all(full(), [(layout.Top, 1), (layout.Bottom, 1), (layout.Left, 4)]) with
+      reg(match layout.dock_all(full, [(layout.Top, 1), (layout.Bottom, 1), (layout.Left, 4)]) with
           | (_, body) -> body),
       "4,1,8,4"),
 
     # ── grid ────────────────────────────────────────────────────────────────
     check_eq("a grid is rows of regions",
       string.join(" / ", list_map(regs,
-        layout.grid(full(), [layout.Fraction(1), layout.Fraction(1)],
+        layout.grid(full, [layout.Fraction(1), layout.Fraction(1)],
                              [layout.Cells(2), layout.Fraction(1)]))),
       "0,0,6,2 6,0,6,2 / 0,2,6,4 6,2,6,4")
   ])

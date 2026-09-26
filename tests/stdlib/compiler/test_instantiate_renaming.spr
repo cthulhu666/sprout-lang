@@ -18,7 +18,7 @@ import stdlib.compiler.unifier as unifier
 
 # Binders spelled the way an imported scheme's are. `$t2` freshens to `$t0`,
 # which this scheme ALSO binds, and `$t0` freshens to `$t1`.
-fn fused_vars() -> List String = Cons("$t2", Cons("$t0", Nil))
+let fused_vars: List String = Cons("$t2", Cons("$t0", Nil))
 
 fn tv(name: String) -> types.Type = types.TVar(types.tyvar_id(name))
 
@@ -48,7 +48,7 @@ fn nested_effects_distinct(t: types.Type) -> Bool =
   | _ -> false
 
 fn fused_var_scheme() -> types.Scheme =
-  scheme_of(fused_vars(), Nil, arrow(tv("$t2"), tv("$t0"), types.EffectPure))
+  scheme_of(fused_vars, Nil, arrow(tv("$t2"), tv("$t0"), types.EffectPure))
 
 fn source_binder_scheme() -> types.Scheme =
   scheme_of(Cons("a", Cons("b", Nil)), Nil, arrow(tv("a"), tv("b"), types.EffectPure))
@@ -63,7 +63,7 @@ fn fused_effect_scheme() -> types.Scheme =
 # A constructor scheme: both variables appear in the result, so both are ordinary
 # type params and neither is instantiated to a skolem.
 fn fused_ctor_scheme() -> types.Scheme =
-  scheme_of(fused_vars(), Nil,
+  scheme_of(fused_vars, Nil,
     arrow(tv("$t2"),
       arrow(tv("$t0"),
         types.TApp(types.TApp(types.TConst(types.type_id("Pair")), tv("$t2")), tv("$t0")),

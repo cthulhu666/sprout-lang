@@ -28,7 +28,7 @@ fn stdlib_root() -> String !{IO} =
   | Just root -> root
   | Nothing -> "stdlib"
 
-fn package_root() -> String = "tests/conformance/package_resolution/roots"
+let package_root: String = "tests/conformance/package_resolution/roots"
 
 # Exported, and the module IS imported. Still rejected: the rule is about the
 # spelling, not about visibility.
@@ -119,7 +119,7 @@ fn fail_message(result: compiler.CompileResult) -> String =
 fn check(src: String, root: String) -> String !{IO} =
   do
     result <- compiler.compile_source_with_roots(src, source.StdlibRoot(root),
-      Cons(package_root(), Nil))
+      Cons(package_root, Nil))
     fail_message(result)
 
 fn names_the_rule(msg: String) -> Bool =

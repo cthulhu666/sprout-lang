@@ -14,7 +14,7 @@ fn pair(x: Int) -> Result String (Int, Int) =
 fn scalar(x: Int) -> Result String Int =
   Ok(x * 10)
 
-fn fails() -> Result String Int =
+let fails: Result String Int =
   Err("boom")
 
 fn use_tuple(x: Int) -> Result String Int =
@@ -29,7 +29,7 @@ fn use_scalar(x: Int) -> Result String Int =
 
 fn use_short_circuit(x: Int) -> Result String Int =
   do
-    v <- fails()
+    v <- fails
     Ok(v + x)
 
 fn unwrap(r: Result String Int, dflt: Int) -> Int =

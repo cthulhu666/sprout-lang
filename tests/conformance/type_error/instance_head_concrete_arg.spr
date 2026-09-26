@@ -1,3 +1,4 @@
+# sprout-ignore-all lint/nullary-const-fn: rejection fixture — the declaration form is what it asserts
 # An instance head carrying a CONCRETE type argument. This is the shape that
 # made the head-granular `@inst:` key unsound, and it is why the Haskell 2010
 # §4.3.2 restriction exists.

@@ -39,40 +39,40 @@ fn fpairs(raw: String) -> String =
   with_req(raw, \r -> show_pairs(form_pairs(r)))
 
 # A urlencoded POST with a 7-byte body "a=1&b=2".
-fn urlencoded_post() -> String =
+let urlencoded_post: String =
   "POST /submit HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 7\r\n\r\na=1&b=2"
 
 # Same, with a '+'-encoded value; body "name=Ada+Lovelace" is 17 bytes.
-fn urlencoded_plus() -> String =
+let urlencoded_plus: String =
   "POST /submit HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 17\r\n\r\nname=Ada+Lovelace"
 
 # Content-Type carrying a charset parameter; body "a=1" is 3 bytes.
-fn urlencoded_charset() -> String =
+let urlencoded_charset: String =
   "POST /submit HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded; charset=utf-8\r\nContent-Length: 3\r\n\r\na=1"
 
 # A JSON body must NOT be parsed as form params; body "a=1" is 3 bytes.
-fn json_post() -> String =
+let json_post: String =
   "POST /submit HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: 3\r\n\r\na=1"
 
 # No Content-Type at all; body "a=1" is 3 bytes.
-fn no_content_type() -> String =
+let no_content_type: String =
   "POST /submit HTTP/1.1\r\nContent-Length: 3\r\n\r\na=1"
 
 fn main() -> Unit !{IO} =
   run_suite("form_params", [
     check_eq("form_param reads a urlencoded body value",
-      fparam(urlencoded_post(), "a"), "1"),
+      fparam(urlencoded_post, "a"), "1"),
     check_eq("form_pairs is the ordered decoded body pair list",
-      fpairs(urlencoded_post()), "a=1,b=2"),
+      fpairs(urlencoded_post), "a=1,b=2"),
     check_eq("form_param maps '+' to space",
-      fparam(urlencoded_plus(), "name"), "Ada Lovelace"),
+      fparam(urlencoded_plus, "name"), "Ada Lovelace"),
     check_eq("form params parse when Content-Type has a charset parameter",
-      fparam(urlencoded_charset(), "a"), "1"),
+      fparam(urlencoded_charset, "a"), "1"),
 
     check_eq("a non-form Content-Type yields no form params",
-      fpairs(json_post()), ""),
+      fpairs(json_post), ""),
     check_eq("form_param on a JSON body is Nothing",
-      fparam(json_post(), "a"), "<none>"),
+      fparam(json_post, "a"), "<none>"),
     check_eq("a missing Content-Type yields no form params",
-      fpairs(no_content_type()), "")
+      fpairs(no_content_type), "")
   ])

@@ -24,7 +24,7 @@ export fn error_message(err: ScramError) -> String =
   | ScramBase64Error msg -> msg
   | ScramBytesError msg -> msg
 
-export fn no_channel_binding() -> String =
+export let no_channel_binding: String =
   "biws"
 
 export fn random_nonce(count: Int) -> Result crypto.CryptoError String !{IO} =
