@@ -12,7 +12,7 @@
  * 4-byte lead followed immediately by the terminator — three continuation bytes
  * short. On the UNFIXED runtime, ASan reports a heap-buffer-overflow. On the
  * fixed runtime the walker detects the truncation and aborts cleanly via
- * tcp_fail *before* any out-of-bounds read, so ASan reports nothing and the
+ * sprout_fail *before* any out-of-bounds read, so ASan reports nothing and the
  * process exits non-zero with the panic message.
  *
  * argv[1] selects which walker to exercise (one per process, since the panic

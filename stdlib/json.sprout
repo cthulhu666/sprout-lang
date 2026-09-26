@@ -54,7 +54,7 @@ extern fn json_stringify(value: Json) -> String
 # Element loops (arrays/objects) recurse in tail position, so TCO keeps large inputs stack-safe;
 # only nesting depth uses the stack.
 
-# DISPATCH READS MUST NOT SLICE THE INPUT. `str_slice_bytes` calls `tcp_fail` — the process-fatal
+# DISPATCH READS MUST NOT SLICE THE INPUT. `str_slice_bytes` calls `sprout_fail` — the process-fatal
 # path — when a cut splits a UTF-8 codepoint, so the former `byte1(s, i) = str_slice_bytes(s, i, 1)`
 # aborted the whole program whenever the cursor reached the LEAD byte of a multi-byte character:
 # `json.parse("{\"a\":\"café\"}")` did not return `Err`, it killed the process. Reachable from the LSP

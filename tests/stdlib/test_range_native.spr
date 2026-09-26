@@ -8,7 +8,7 @@ import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
 #     constructor to match, so `match r with | IntRange s e st -> ...` does not
 #     compile at all.
 #  2. The constructor is directly constructible, and therefore constructible
-#     WRONG — the `tcp_fail` in `int_range_by` that rejected a step outside
+#     WRONG — the `sprout_fail` in `int_range_by` that rejected a step outside
 #     {+1, -1} has no Sprout equivalent, because prelude constructors are in
 #     scope everywhere regardless of `(..)` (the prelude is inlined, not
 #     imported). A malformed step must therefore be survivable rather than

@@ -330,7 +330,6 @@ long long sprout_set_current_fn(const char* fn_name) {
   return 0;
 }
 
-__attribute__((noreturn)) static void tcp_fail(const char* msg);
 /* A Sprout String is required to be valid UTF-8; raw bytes from external
  * sources (files, stdin, processes, network) are validated at ingestion. */
 static int utf8_validate(const unsigned char* data, size_t len, const char** reason);
@@ -426,7 +425,7 @@ static void sprout_gc_threshold_maybe_enable(void) {
   char* end = NULL;
   long long parsed = strtoll(raw, &end, 10);
   if (end == raw || *end != '\0' || parsed <= 0) {
-    tcp_fail("SPROUT_GC_THRESHOLD: expected positive integer");
+    sprout_fail("SPROUT_GC_THRESHOLD: expected positive integer");
   }
   g_gc_threshold = parsed;
   g_gc_threshold_base = parsed;
@@ -444,7 +443,7 @@ static void sprout_gc_adapt_maybe_enable(void) {
     char* end = NULL;
     double parsed = strtod(ratio_raw, &end);
     if (end == ratio_raw || *end != '\0' || parsed < 0.0 || parsed > 1.0)
-      tcp_fail("SPROUT_GC_ADAPT_RATIO: expected float in [0, 1]");
+      sprout_fail("SPROUT_GC_ADAPT_RATIO: expected float in [0, 1]");
     g_gc_adapt_ratio = parsed;
   }
   /* SPROUT_GC_ADAPT_FACTOR: multiplier on the live set that sets the next
@@ -454,7 +453,7 @@ static void sprout_gc_adapt_maybe_enable(void) {
     char* end = NULL;
     double parsed = strtod(factor_raw, &end);
     if (end == factor_raw || *end != '\0' || parsed <= 1.0)
-      tcp_fail("SPROUT_GC_ADAPT_FACTOR: expected float > 1");
+      sprout_fail("SPROUT_GC_ADAPT_FACTOR: expected float > 1");
     g_gc_adapt_factor = parsed;
   }
   /* SPROUT_GC_ADAPT_CAP: maximum value the threshold may grow to.
@@ -464,7 +463,7 @@ static void sprout_gc_adapt_maybe_enable(void) {
     char* end = NULL;
     long long parsed = strtoll(cap_raw, &end, 10);
     if (end == cap_raw || *end != '\0' || parsed < 0)
-      tcp_fail("SPROUT_GC_ADAPT_CAP: expected non-negative integer");
+      sprout_fail("SPROUT_GC_ADAPT_CAP: expected non-negative integer");
     g_gc_adapt_cap = parsed;
   }
 }
@@ -475,7 +474,7 @@ static void sprout_gc_livelock_maybe_enable(void) {
     char* end = NULL;
     double parsed = strtod(ratio_raw, &end);
     if (end == ratio_raw || *end != '\0' || parsed < 0.0 || parsed > 1.0)
-      tcp_fail("SPROUT_GC_LIVELOCK_RATIO: expected float in [0, 1]");
+      sprout_fail("SPROUT_GC_LIVELOCK_RATIO: expected float in [0, 1]");
     g_gc_livelock_ratio = parsed;
   }
   const char* cycles_raw = getenv("SPROUT_GC_LIVELOCK_CYCLES");
@@ -483,7 +482,7 @@ static void sprout_gc_livelock_maybe_enable(void) {
     char* end = NULL;
     long long parsed = strtoll(cycles_raw, &end, 10);
     if (end == cycles_raw || *end != '\0' || parsed < 0)
-      tcp_fail("SPROUT_GC_LIVELOCK_CYCLES: expected non-negative integer");
+      sprout_fail("SPROUT_GC_LIVELOCK_CYCLES: expected non-negative integer");
     g_gc_livelock_cycles = parsed;
   }
   const char* action_raw = getenv("SPROUT_GC_LIVELOCK_ACTION");
@@ -495,7 +494,7 @@ static void sprout_gc_livelock_maybe_enable(void) {
     else if (strcmp(action_raw, "abort") == 0)
       g_gc_livelock_action = 2;
     else
-      tcp_fail("SPROUT_GC_LIVELOCK_ACTION: expected off, warn, or abort");
+      sprout_fail("SPROUT_GC_LIVELOCK_ACTION: expected off, warn, or abort");
   }
 }
 
@@ -932,7 +931,7 @@ static void arena_init_once(void) {
     char* end = NULL;
     long long parsed = strtoll(raw, &end, 10);
     if (end == raw || *end != '\0' || parsed < 0)
-      tcp_fail("SPROUT_GC_ARENA_MB: expected non-negative integer (0 disables the arena)");
+      sprout_fail("SPROUT_GC_ARENA_MB: expected non-negative integer (0 disables the arena)");
     if (parsed == 0) return;   /* explicitly disabled */
     mb = (size_t)parsed;
   }
@@ -1100,7 +1099,7 @@ static void region_table_insert(SproutRegion r) {
   if (g_region_count >= g_region_cap) {
     size_t new_cap = g_region_cap < 16 ? 16 : g_region_cap * 2;
     SproutRegion* t = (SproutRegion*)realloc(g_regions, new_cap * sizeof(SproutRegion));
-    if (t == NULL) tcp_fail("region_table_insert: out of memory");
+    if (t == NULL) sprout_fail("region_table_insert: out of memory");
     g_regions = t;
     g_region_cap = new_cap;
   }
@@ -1142,12 +1141,12 @@ static SproutRegion* open_new_region(void) {
    * back to malloc when there is no arena or it is exhausted. */
   char* base = arena_chunk_alloc();
   if (base == NULL) base = (char*)malloc(SPROUT_REGION_SIZE);
-  if (base == NULL) tcp_fail("open_new_region: out of memory");
+  if (base == NULL) sprout_fail("open_new_region: out of memory");
   uint8_t* slotmap = (uint8_t*)calloc(SPROUT_SLOTMAP_BYTES, 1);
   /* base may be an arena chunk, which must NOT be passed to free(). */
   if (slotmap == NULL) {
     if (arena_contains(base)) arena_chunk_release(base); else free(base);
-    tcp_fail("open_new_region: out of memory for slotmap");
+    sprout_fail("open_new_region: out of memory for slotmap");
   }
   SproutRegion r;
   r.base = base;
@@ -1289,7 +1288,7 @@ static void* sprout_gc_alloc_block(SproutHeapKind kind, unsigned long long aux,
   if (needed_slot > SPROUT_LARGE_THRESHOLD) {
     /* Large object path: dedicated malloc block. */
     char* block = (char*)malloc(needed_slot);
-    if (block == NULL) tcp_fail(ctx);
+    if (block == NULL) sprout_fail(ctx);
     sprout_hdr_write(block + 8, kind, aux);
     SproutRegion r;
     r.base = block;
@@ -1357,7 +1356,7 @@ static void* sprout_gc_alloc_block(SproutHeapKind kind, unsigned long long aux,
  * Header aux = byte length (excluding NUL terminator).
  * The slot is already arena-registered by sprout_gc_alloc_block; the caller
  * only fills payload[0..len-1] and sets payload[len] = '\0'.
- * Never returns NULL (tcp_fail on OOM). */
+ * Never returns NULL (sprout_fail on OOM). */
 static char* sprout_gc_alloc_cstr(size_t len, const char* ctx) {
   return (char*)sprout_gc_alloc_block(SPROUT_HEAP_CSTR, (unsigned long long)len,
                                       len + 1, ctx);
@@ -1394,14 +1393,14 @@ static void sprout_gc_maybe_collect_threshold(void) {
 static void* sprout_alloc_counted(long long* counter, size_t size, const char* ctx) {
   if (g_debug_alloc_enabled) (*counter)++;
   void* out = malloc(size);
-  if (out == NULL) tcp_fail(ctx);
+  if (out == NULL) sprout_fail(ctx);
   return out;
 }
 
 static void* sprout_realloc_counted(long long* counter, void* ptr, size_t size, const char* ctx) {
   if (g_debug_alloc_enabled) (*counter)++;
   void* out = realloc(ptr, size);
-  if (out == NULL) tcp_fail(ctx);
+  if (out == NULL) sprout_fail(ctx);
   return out;
 }
 
@@ -1457,7 +1456,7 @@ static void* sprout_heap_lookup(void* p) {
 
 static void register_root_slot(void* slot, SproutRootKind kind, size_t aux_words) {
   PermRoot* node = (PermRoot*)malloc(sizeof(PermRoot));
-  if (node == NULL) tcp_fail("register_root_slot: out of memory");
+  if (node == NULL) sprout_fail("register_root_slot: out of memory");
   node->root.slot = slot;
   node->root.kind = kind;
   node->root.aux_words = aux_words;
@@ -1526,10 +1525,10 @@ static long long sprout_make_registered_obj(int arity, long long tag, long long 
 }
 
 long long sprout_alloc_closure(long long size, long long arity) {
-  if (size < 0) tcp_fail("sprout_alloc_closure: size must be >= 0");
-  if (arity < 0) tcp_fail("sprout_alloc_closure: arity must be >= 0");
+  if (size < 0) sprout_fail("sprout_alloc_closure: size must be >= 0");
+  if (arity < 0) sprout_fail("sprout_alloc_closure: arity must be >= 0");
   if ((unsigned long long)arity > SPROUT_CLOSURE_ARITY_MASK)
-    tcp_fail("sprout_alloc_closure: arity exceeds the header's arity field");
+    sprout_fail("sprout_alloc_closure: arity exceeds the header's arity field");
   sprout_gc_maybe_collect_threshold();
   /* SYNC WITH stdlib/compiler/ir_lowering.sprout IRMkClosure lowering (FIX R4#8):
    *   IR computes size = (n_caps + 1) * 8.
@@ -1563,11 +1562,11 @@ long long sprout_alloc_closure(long long size, long long arity) {
  *
  * The wording mirrors infer.sprout's compile-time arity error on purpose — the
  * same mistake should read the same way whichever side catches it.  It carries
- * no colon deliberately: tcp_fail treats the text before the first colon as a
+ * no colon deliberately: sprout_fail treats the text before the first colon as a
  * builtin name, and this failure belongs to the user's call, not to a builtin. */
 void sprout_closure_arity_check(long long handle, long long n_args) {
   void* payload = (void*)(uintptr_t)handle;
-  if (payload == NULL) tcp_fail("applied a null function value");
+  if (payload == NULL) sprout_fail("applied a null function value");
   unsigned long long aux = sprout_hdr_aux(sprout_hdr_of(payload));
   unsigned long long arity = sprout_closure_arity_of(aux);
   if (arity == SPROUT_CLOSURE_ARITY_ANY) return;
@@ -1578,7 +1577,7 @@ void sprout_closure_arity_check(long long handle, long long n_args) {
              "this function value expects %llu arguments, got %lld — if it "
              "returns a function, apply the rest in a separate call, as f(…)(…)",
              arity, n_args);
-    tcp_fail(msg);
+    sprout_fail(msg);
   }
 }
 
@@ -1593,7 +1592,7 @@ long long sprout_gc_register_ptr_root(void* slot) {
 }
 
 long long sprout_gc_register_scan_root(void* slot, long long size_bytes) {
-  if (size_bytes < 0) tcp_fail("sprout_gc_register_scan_root: size must be >= 0");
+  if (size_bytes < 0) sprout_fail("sprout_gc_register_scan_root: size must be >= 0");
   register_root_slot(slot, SPROUT_ROOT_SCAN, ((size_t)size_bytes) / sizeof(uintptr_t));
   return 0;
 }
@@ -1623,7 +1622,7 @@ static struct SproutRoots* g_roots_registry = &g_task0_roots;
 static long long sprout_gc_push_root(void* slot, SproutRootKind kind, size_t aux_words) {
   struct SproutRoots* rc = g_current_roots;
   if (rc->pool_top >= rc->pool_size)
-    tcp_fail("sprout_gc_push_root: GC root pool exhausted");
+    sprout_fail("sprout_gc_push_root: GC root pool exhausted");
   RootNode* node = &rc->pool[rc->pool_top++];
   node->slot = slot;
   node->kind = kind;
@@ -1640,15 +1639,15 @@ long long sprout_gc_push_ptr_root(void* slot) {
 }
 
 long long sprout_gc_push_scan_root(void* slot, long long size_bytes) {
-  if (size_bytes < 0) tcp_fail("sprout_gc_push_scan_root: size must be >= 0");
+  if (size_bytes < 0) sprout_fail("sprout_gc_push_scan_root: size must be >= 0");
   return sprout_gc_push_root(slot, SPROUT_ROOT_SCAN, ((size_t)size_bytes) / sizeof(uintptr_t));
 }
 
 long long sprout_gc_pop_roots(long long count) {
-  if (count < 0) tcp_fail("sprout_gc_pop_roots: count must be >= 0");
+  if (count < 0) sprout_fail("sprout_gc_pop_roots: count must be >= 0");
   struct SproutRoots* rc = g_current_roots;
   if ((size_t)count > rc->pool_top)
-    tcp_fail("sprout_gc_pop_roots: root stack underflow");
+    sprout_fail("sprout_gc_pop_roots: root stack underflow");
   rc->pool_top -= (size_t)count;
   return 0;
 }
@@ -1665,9 +1664,9 @@ void sprout_roots_switch(SproutRoots* r) { g_current_roots = r; }
 
 SproutRoots* sprout_roots_new(size_t pool_slots) {
   struct SproutRoots* rc = (struct SproutRoots*)malloc(sizeof(*rc));
-  if (rc == NULL) tcp_fail("sprout_roots_new: out of memory");
+  if (rc == NULL) sprout_fail("sprout_roots_new: out of memory");
   rc->pool = (RootNode*)malloc(pool_slots * sizeof(RootNode));
-  if (rc->pool == NULL) tcp_fail("sprout_roots_new: out of memory (pool)");
+  if (rc->pool == NULL) sprout_fail("sprout_roots_new: out of memory (pool)");
   rc->pool_size = pool_slots;
   rc->pool_top  = 0;
   /* Register so the collector scans this context from now on. */
@@ -1678,7 +1677,7 @@ SproutRoots* sprout_roots_new(size_t pool_slots) {
 
 void sprout_roots_push_ptr(SproutRoots* r, void* slot) {
   if (r->pool_top >= r->pool_size)
-    tcp_fail("sprout_roots_push_ptr: GC root pool exhausted");
+    sprout_fail("sprout_roots_push_ptr: GC root pool exhausted");
   RootNode* node = &r->pool[r->pool_top++];
   node->slot = slot;
   node->kind = SPROUT_ROOT_PTR;
@@ -1749,7 +1748,7 @@ static void sprout_ignore_sigpipe_ctor(void) { signal(SIGPIPE, SIG_IGN); }
 
 static SproutHandle sprout_handle_new(long long value) {
   if (g_handle_freelist_top == 0)
-    tcp_fail("sprout_handle_new: handle table exhausted");
+    sprout_fail("sprout_handle_new: handle table exhausted");
   SproutHandle h = g_handle_freelist[--g_handle_freelist_top];
   g_handle_table[h].value  = value;
   g_handle_table[h].in_use = 1;
@@ -1784,7 +1783,7 @@ static void sprout_handle_cleanup(SproutHandle* hp) {
 #define SPROUT_HANDLE_SET(h, val) sprout_handle_set((h), (val))
 
 long long sprout_alloc_tuple_blob(long long size_bytes) {
-  if (size_bytes < 0) tcp_fail("sprout_alloc_tuple_blob: size must be >= 0");
+  if (size_bytes < 0) sprout_fail("sprout_alloc_tuple_blob: size must be >= 0");
   sprout_gc_maybe_collect_threshold();
   size_t words = ((size_t)size_bytes) / sizeof(uintptr_t);
   void* out = sprout_gc_alloc_block(SPROUT_HEAP_TUPLE, (unsigned long long)words,
@@ -1851,13 +1850,13 @@ static VectorVal* sprout_alloc_vector_val(const char* ctx) {
 static long long* sprout_alloc_vector_data(size_t count, const char* ctx) {
   if (count == 0) return NULL;
   /* Loudly, before the multiply wraps: a wrapped size yields a short block and a
-   * heap overflow on first write, where tcp_fail costs a clear message. */
-  if (count > SIZE_MAX / sizeof(long long)) tcp_fail(ctx);
+   * heap overflow on first write, where sprout_fail costs a clear message. */
+  if (count > SIZE_MAX / sizeof(long long)) sprout_fail(ctx);
   return (long long*)sprout_alloc_counted(&g_debug_alloc_vector, count * sizeof(long long), ctx);
 }
 
 static long long* sprout_realloc_vector_data(long long* data, size_t count, const char* ctx) {
-  if (count > SIZE_MAX / sizeof(long long)) tcp_fail(ctx);
+  if (count > SIZE_MAX / sizeof(long long)) sprout_fail(ctx);
   return (long long*)sprout_realloc_counted(&g_debug_alloc_vector, data, count * sizeof(long long), ctx);
 }
 
@@ -1881,7 +1880,7 @@ static const char* intern_string(const char* s) {
   for (InternBucket* b = g_intern_table[bucket]; b != NULL; b = b->next)
     if (strcmp(b->str, s) == 0) return b->str;
   InternBucket* entry = (InternBucket*)malloc(sizeof(InternBucket));
-  if (!entry) tcp_fail("intern_string: out of memory");
+  if (!entry) sprout_fail("intern_string: out of memory");
   size_t len = strlen(s);
   /* Header-prefix the interned buffer so its payload is a valid CSTR block
    * (header at payload-8), matching arena strings. This is the single chokepoint
@@ -1891,7 +1890,7 @@ static const char* intern_string(const char* s) {
    * for them, so the collector skips them), and 16-byte-aligned by malloc, so the
    * payload is 8-aligned like arena payloads. */
   char* raw = (char*)malloc(8 + len + 1);
-  if (!raw) tcp_fail("intern_string: out of memory for string");
+  if (!raw) sprout_fail("intern_string: out of memory for string");
   uint64_t hdr = sprout_hdr_make(SPROUT_HEAP_CSTR, (unsigned long long)len);
   memcpy(raw, &hdr, 8);
   memcpy(raw + 8, s, len + 1);
@@ -1942,13 +1941,13 @@ static int sprout_heap_kind_at(void* p) {
 
 long long ref_read(long long ref) {
   if (sprout_heap_kind_at((void*)(uintptr_t)ref) != SPROUT_HEAP_REF)
-    tcp_fail("ref_read: not a Ref");
+    sprout_fail("ref_read: not a Ref");
   return ((RefVal*)(uintptr_t)ref)->value;
 }
 
 long long ref_write(long long ref, long long value) {
   if (sprout_heap_kind_at((void*)(uintptr_t)ref) != SPROUT_HEAP_REF)
-    tcp_fail("ref_write: not a Ref");
+    sprout_fail("ref_write: not a Ref");
   /* Candidate write-barrier site: a pointer store into an already-allocated
    * object.  Measured under SPROUT_GC_AGEPROF to price a barrier before one
    * exists (see sprout_ap_note_ptr_store). */
@@ -1983,7 +1982,7 @@ static size_t sprout_heap_child_count_payload(void* payload) {
 }
 
 static long long sprout_heap_child_value_payload(void* payload, size_t index) {
-  if (payload == NULL) tcp_fail("sprout_heap_child_value: null payload");
+  if (payload == NULL) sprout_fail("sprout_heap_child_value: null payload");
   uint64_t h = sprout_hdr_of(payload);
   SproutHeapKind kind = sprout_hdr_kind(h);
   switch (kind) {
@@ -2017,7 +2016,7 @@ static long long sprout_heap_child_value_payload(void* payload, size_t index) {
     case SPROUT_HEAP_CSTR: break;
     default: break;
   }
-  tcp_fail("sprout_heap_child_value: index out of range");
+  sprout_fail("sprout_heap_child_value: index out of range");
   return 0;
 }
 
@@ -2051,7 +2050,7 @@ static void gc_mark_enqueue(void* payload) {
   if (g_gc_mark_wl_len >= g_gc_mark_wl_cap) {
     size_t new_cap = g_gc_mark_wl_cap < 1024 ? 1024 : g_gc_mark_wl_cap * 2;
     void** new_wl = (void**)realloc(g_gc_mark_worklist, new_cap * sizeof(void*));
-    if (!new_wl) tcp_fail("GC mark: out of memory for worklist");
+    if (!new_wl) sprout_fail("GC mark: out of memory for worklist");
     g_gc_mark_worklist = new_wl;
     g_gc_mark_wl_cap = new_cap;
   }
@@ -2305,7 +2304,7 @@ static void sprout_fl_verify_against_full_walk(void) {
   if (g_fl_vb == NULL) {
     g_fl_vb_cap = 1024;
     g_fl_vb = (SproutFlEntry*)malloc(g_fl_vb_cap * sizeof(SproutFlEntry));
-    if (g_fl_vb == NULL) tcp_fail("SPROUT_FL_VERIFY: out of memory");
+    if (g_fl_vb == NULL) sprout_fail("SPROUT_FL_VERIFY: out of memory");
   }
   SproutFlEntry* B = g_fl_vb;
   size_t bcap = g_fl_vb_cap;
@@ -2323,7 +2322,7 @@ static void sprout_fl_verify_against_full_walk(void) {
           if (bn == bcap) {
             bcap *= 2;
             SproutFlEntry* t = (SproutFlEntry*)realloc(B, bcap * sizeof(SproutFlEntry));
-            if (t == NULL) tcp_fail("SPROUT_FL_VERIFY: out of memory");
+            if (t == NULL) sprout_fail("SPROUT_FL_VERIFY: out of memory");
             B = t;
           }
           B[bn].cls = (unsigned int)cls;
@@ -2349,7 +2348,7 @@ static void sprout_fl_verify_against_full_walk(void) {
   if (g_fl_va == NULL) {
     g_fl_va_cap = 1024;
     g_fl_va = (SproutFlEntry*)malloc(g_fl_va_cap * sizeof(SproutFlEntry));
-    if (g_fl_va == NULL) tcp_fail("SPROUT_FL_VERIFY: out of memory");
+    if (g_fl_va == NULL) sprout_fail("SPROUT_FL_VERIFY: out of memory");
   }
   SproutFlEntry* A = g_fl_va;
   size_t acap = g_fl_va_cap;
@@ -2375,7 +2374,7 @@ static void sprout_fl_verify_against_full_walk(void) {
       if (an == acap) {
         acap *= 2;
         SproutFlEntry* t = (SproutFlEntry*)realloc(A, acap * sizeof(SproutFlEntry));
-        if (t == NULL) tcp_fail("SPROUT_FL_VERIFY: out of memory");
+        if (t == NULL) sprout_fail("SPROUT_FL_VERIFY: out of memory");
         A = t;
       }
       A[an].cls = (unsigned int)cls;
@@ -2747,7 +2746,7 @@ static long long find_ctor_tag_by_name(const char* name) {
         strcmp(reg + reg_len - name_len, name) == 0)
       return g_ctor_meta[i].tag;
   }
-  tcp_fail("constructor metadata not registered");
+  sprout_fail("constructor metadata not registered");
   return -1;
 }
 
@@ -2893,7 +2892,7 @@ long long print_value(long long x) {
 long long int_to_string(long long value) {
   char buf[32];
   int written = snprintf(buf, sizeof(buf), "%lld", value);
-  if (written < 0) tcp_fail("int_to_string: formatting failed");
+  if (written < 0) sprout_fail("int_to_string: formatting failed");
   size_t content_len = (size_t)written;
   sprout_gc_maybe_collect_threshold();
   char* out = sprout_gc_alloc_cstr(content_len, "int_to_string: out of memory");
@@ -2957,8 +2956,8 @@ long long double_to_string(long long bits) {
   int written = -1;
   for (int prec = 15; prec <= 17; prec++) {
     written = snprintf(buf, sizeof(buf), "%.*g", prec, d);
-    if (written < 0) tcp_fail("double_to_string: formatting failed");
-    if (written >= (int)sizeof(buf)) tcp_fail("double_to_string: formatted value too long");
+    if (written < 0) sprout_fail("double_to_string: formatting failed");
+    if (written >= (int)sizeof(buf)) sprout_fail("double_to_string: formatted value too long");
     char* end = NULL;
     double back = strtod(buf, &end);
     if (end != buf && *end == '\0' && back == d) break;
@@ -2972,7 +2971,7 @@ long long double_to_string(long long bits) {
   return (long long)(uintptr_t)out;
 }
 long long env_get(const char* name) {
-  if (name == NULL) tcp_fail("env_get: null name");
+  if (name == NULL) sprout_fail("env_get: null name");
   const char* value = getenv(name);
   if (value == NULL) return sprout_make0(find_ctor_tag_by_name("Nothing"));
   /* getenv returns bare libc memory; intern to a headered Sprout String. */
@@ -3334,7 +3333,7 @@ long long fs_write_bytes(long long path_i, long long bytes_h) {
   if (fs_path_rejected(path, &rejected)) return rejected;
 
   BytesVal* payload = (BytesVal*)(uintptr_t)bytes_h;
-  if (payload == NULL) tcp_fail("fs_write_bytes: null payload");
+  if (payload == NULL) sprout_fail("fs_write_bytes: null payload");
 
   int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
   if (fd < 0) return fs_err(errno, path);
@@ -3394,7 +3393,7 @@ long long fs_rename(long long from_i, long long to_i) {
 
 long long panic(long long msg_i) {
   const char* msg = (const char*)(uintptr_t)msg_i;
-  tcp_fail(msg ? msg : "panic");
+  sprout_fail(msg ? msg : "panic");
   return 0LL; /* unreachable */
 }
 // ---- stdlib.process: proc_run / proc_run_stdin --------------------------------
@@ -3404,7 +3403,7 @@ typedef struct { char* data; size_t len; size_t cap; } GrowBuf;
 static GrowBuf sprout_growbuf_new(void) {
   GrowBuf b; b.cap = 4096; b.len = 0;
   b.data = (char*)malloc(b.cap);
-  if (b.data == NULL) tcp_fail("proc_run: out of memory");
+  if (b.data == NULL) sprout_fail("proc_run: out of memory");
   b.data[0] = '\0';
   return b;
 }
@@ -3412,15 +3411,15 @@ static GrowBuf sprout_growbuf_new(void) {
 static void sprout_growbuf_append(GrowBuf* b, const char* p, size_t n) {
   if (!n) return;
   if (b->len + n + 1 > b->cap) {
-    if (n > SIZE_MAX - b->len - 1) tcp_fail("proc_run: output too large");
+    if (n > SIZE_MAX - b->len - 1) sprout_fail("proc_run: output too large");
     size_t needed = b->len + n + 1;
     size_t new_cap = b->cap;
     while (needed > new_cap) {
-      if (new_cap > SIZE_MAX / 2) tcp_fail("proc_run: output too large");
+      if (new_cap > SIZE_MAX / 2) sprout_fail("proc_run: output too large");
       new_cap *= 2;
     }
     char* grown = (char*)realloc(b->data, new_cap);
-    if (grown == NULL) tcp_fail("proc_run: out of memory");
+    if (grown == NULL) sprout_fail("proc_run: out of memory");
     b->data = grown;
     b->cap = new_cap;
   }
@@ -3625,7 +3624,7 @@ long long term_read_line(void) {
   if (len < 0) {
     free(line);
     if (feof(stdin)) return sprout_make0(find_ctor_tag_by_name("Nothing"));
-    tcp_fail("term_read_line: read error");
+    sprout_fail("term_read_line: read error");
   }
   while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
     len -= 1;
@@ -3639,16 +3638,16 @@ long long term_read_line(void) {
  * Required because fread has no Sprout equivalent — getline reads to newline,
  * not to a fixed byte count as LSP/DAP Content-Length framing requires. */
 long long stdin_read_bytes(long long n_val) {
-  if (n_val < 0) tcp_fail("stdin_read_bytes: negative byte count");
+  if (n_val < 0) sprout_fail("stdin_read_bytes: negative byte count");
   char* buf = (char*)malloc((size_t)n_val + 1);
-  if (!buf) tcp_fail("stdin_read_bytes: out of memory");
+  if (!buf) sprout_fail("stdin_read_bytes: out of memory");
   size_t total = 0;
   while (total < (size_t)n_val) {
     size_t got = fread(buf + total, 1, (size_t)n_val - total, stdin);
     if (got == 0) {
       free(buf);
       if (feof(stdin)) return sprout_make0(find_ctor_tag_by_name("Nothing"));
-      tcp_fail("stdin_read_bytes: read error");
+      sprout_fail("stdin_read_bytes: read error");
     }
     total += got;
   }
@@ -3686,7 +3685,7 @@ long long term_show_cursor(void) {
 }
 /* ── term_read_key's UTF-8 assembly ──────────────────────────────────────────────
  * A single read() of a lead byte cannot form a complete character, so this used to
- * tcp_fail on any byte >= 0x80 — which meant every accented or non-Latin keypress
+ * sprout_fail on any byte >= 0x80 — which meant every accented or non-Latin keypress
  * killed the REPL and lost the session. The bytes are now assembled into a whole
  * character, and an ill-formed sequence yields U+FFFD instead of aborting.
  *
@@ -3866,7 +3865,7 @@ long long term_read_key(void) {
 }
 long long term_write(long long text_val) {
   const char* text = (const char*)text_val;
-  if (text == NULL) tcp_fail("term_write: null text");
+  if (text == NULL) sprout_fail("term_write: null text");
   fputs(text, stdout);
   fflush(stdout);
   return 0;
@@ -4088,7 +4087,7 @@ long long term_read_avail(long long max_val, long long ms_val) {
    * stop: the poller wakes the parked reader, the zero-timeout caller has already
    * taken the bytes, and the parked reader's read() then blocks the OS thread. */
   if (g_term_reader_parked)
-    tcp_fail("term_read_avail: stdin already has a parked reader "
+    sprout_fail("term_read_avail: stdin already has a parked reader "
              "(a TUI must drive input from exactly one task)");
 
   if (kind != TERM_STDIN_OTHER) {
@@ -4164,7 +4163,7 @@ long long term_read_avail(long long max_val, long long ms_val) {
   return out;
 }
 static char* sprout_json_escape(const char* text) {
-  if (text == NULL) tcp_fail("analysis service: null json text");
+  if (text == NULL) sprout_fail("analysis service: null json text");
   size_t extra = 0;
   for (const unsigned char* p = (const unsigned char*)text; *p != '\0'; ++p) {
     switch (*p) {
@@ -4438,7 +4437,7 @@ static long long* sprout_json_extract_int_array(const char* text, const char* ke
       long long* grown = realloc(out, sizeof(long long) * (size_t)new_cap);
       if (grown == NULL) {
         if (out != NULL) free(out);
-        tcp_fail("analysis service: out of memory");
+        sprout_fail("analysis service: out of memory");
       }
       out = grown;
       cap = new_cap;
@@ -4459,7 +4458,7 @@ __attribute__((noreturn)) static void sprout_builtin_fail_detail(const char* bui
   size_t len = strlen(builtin_name) + strlen(detail) + 2;
   char* msg = alloc_cstr(len, "analysis service: out of memory");
   snprintf(msg, len + 1, "%s: %s", builtin_name, detail);
-  tcp_fail(msg);
+  sprout_fail(msg);
 }
 static char* sprout_json_encode_string_array_from_vec_handle(const void* vec_handle_ptr, const char* builtin_name, const char* label) {
   long long vec_handle = (long long)(uintptr_t)vec_handle_ptr;
@@ -4482,7 +4481,7 @@ static char* sprout_json_encode_string_array_from_vec_handle(const void* vec_han
   VectorVal* raw = (VectorVal*)(uintptr_t)raw_handle;
   size_t count = raw->len < 0 ? 0 : (size_t)raw->len;
   char** escaped_items = count == 0 ? NULL : (char**)malloc(sizeof(char*) * count);
-  if (count != 0 && escaped_items == NULL) tcp_fail("analysis service: out of memory");
+  if (count != 0 && escaped_items == NULL) sprout_fail("analysis service: out of memory");
   size_t total_len = 2;
   for (size_t i = 0; i < count; i++) {
     const char* item = (const char*)(uintptr_t)raw->data[i];
@@ -5179,17 +5178,17 @@ static long long sprout_analysis_completion_result(const char* line_buffer, cons
 }
 long long repl_add_import(const char* source) {
   (void)source;
-  tcp_fail("repl_add_import: not supported in native backend");
+  sprout_fail("repl_add_import: not supported in native backend");
   return 0;
 }
 long long repl_add_declaration(const char* source) {
   (void)source;
-  tcp_fail("repl_add_declaration: not supported in native backend");
+  sprout_fail("repl_add_declaration: not supported in native backend");
   return 0;
 }
 long long repl_eval_expr(const char* source) {
   (void)source;
-  tcp_fail("repl_eval_expr: not supported in native backend");
+  sprout_fail("repl_eval_expr: not supported in native backend");
   return 0;
 }
 /* --- Session op request builders --- */
@@ -5437,7 +5436,7 @@ long long analysis_diagnostics_in_source(const char* module_source) {
 }
 long long repl_type_of(const char* source) {
   (void)source;
-  tcp_fail("repl_type_of: not supported in native backend");
+  sprout_fail("repl_type_of: not supported in native backend");
   return 0;
 }
 long long repl_type_of_in_source(const char* module_source, const char* expr) {
@@ -5448,7 +5447,7 @@ long long analysis_type_of_in_source(const char* module_source, const char* expr
 }
 long long repl_instances(const char* source) {
   (void)source;
-  tcp_fail("repl_instances: not supported in native backend");
+  sprout_fail("repl_instances: not supported in native backend");
   return 0;
 }
 long long repl_instances_in_source(const char* module_source, const char* type_expr_source) {
@@ -5459,7 +5458,7 @@ long long analysis_instances_in_source(const char* module_source, const char* ty
 }
 long long repl_complete(const char* source) {
   (void)source;
-  tcp_fail("repl_complete: not supported in native backend");
+  sprout_fail("repl_complete: not supported in native backend");
   return 0;
 }
 long long analysis_complete_in_state(const char* line_buffer, const void* imports_handle, const void* declarations_handle) {
@@ -5472,9 +5471,9 @@ long long repl_reset_session(void) {
   return 0;
 }
 long long read_int_lines(const char* path) {
-  if (path == NULL) tcp_fail("read_int_lines: null path");
+  if (path == NULL) sprout_fail("read_int_lines: null path");
   FILE* f = fopen(path, "r");
-  if (f == NULL) tcp_fail("read_int_lines: cannot open file");
+  if (f == NULL) sprout_fail("read_int_lines: cannot open file");
   VectorVal* v = sprout_alloc_vector_val("read_int_lines: out of memory");
   SPROUT_HANDLE(h_v, (long long)(uintptr_t)v);
   v->len = 0;
@@ -5491,7 +5490,7 @@ long long read_int_lines(const char* path) {
     if (n == 0) continue;
     char* end = NULL;
     long long value = strtoll(buf, &end, 10);
-    if (end == buf || *end != '\0') tcp_fail("read_int_lines: invalid integer line");
+    if (end == buf || *end != '\0') sprout_fail("read_int_lines: invalid integer line");
     if (v->len == v->cap) {
       long long new_cap = v->cap == 0 ? 8 : (v->cap * 2);
       /* Same shape: this vector starts at capacity 0, so ->data is a malloc block. */
@@ -5508,7 +5507,7 @@ long long read_int_lines(const char* path) {
 }
 long long sprout_register_ctor(long long tag, const char* name, long long arity, const char* field_kinds) {
   if (g_ctor_meta_len >= (long long)(sizeof(g_ctor_meta) / sizeof(g_ctor_meta[0]))) {
-    tcp_fail("sprout_register_ctor: constructor metadata table full");
+    sprout_fail("sprout_register_ctor: constructor metadata table full");
   }
   g_ctor_meta[g_ctor_meta_len].tag = tag;
   g_ctor_meta[g_ctor_meta_len].name = name;
@@ -5701,7 +5700,10 @@ __attribute__((noreturn)) void sprout_abort_match(void) {
   fprintf(stderr, "runtime error: non-exhaustive match\n");
   exit(1);
 }
-__attribute__((noreturn)) static void tcp_fail(const char* msg) {
+/* The general fatal path, shared with the poll and scheduler TUs via
+ * sprout_scheduler.h.  Text before the first colon is reported as the failing
+ * builtin's name; a message with no colon is printed verbatim. */
+__attribute__((noreturn)) void sprout_fail(const char* msg) {
   const char* colon = strchr(msg, ':');
   if (colon != NULL) {
     size_t name_len = (size_t)(colon - msg);
@@ -5714,13 +5716,10 @@ __attribute__((noreturn)) static void tcp_fail(const char* msg) {
   exit(1);
 }
 
-/* Non-static panic path for the scheduler TU (sprout_scheduler.h). */
-__attribute__((noreturn)) void sprout_fail(const char* msg) { tcp_fail(msg); }
-
 long long str_concat(long long left_i, long long right_i) {
   const char* left = (const char*)(uintptr_t)left_i;
   const char* right = (const char*)(uintptr_t)right_i;
-  if (left == NULL || right == NULL) tcp_fail("str_concat: null input");
+  if (left == NULL || right == NULL) sprout_fail("str_concat: null input");
   size_t left_len = strlen(left);
   size_t right_len = strlen(right);
   SPROUT_HANDLE(h_left, left_i);
@@ -5744,7 +5743,7 @@ int sprout_list_next(long long cur, long long* out_head, long long* out_tail) {
   long long cons_tag = find_ctor_tag_by_name("Cons");
   long long tag = sprout_tag(cur);
   if (tag == nil_tag) return 0;
-  if (tag != cons_tag) tcp_fail("sprout_list_next: malformed list (not Cons or Nil)");
+  if (tag != cons_tag) sprout_fail("sprout_list_next: malformed list (not Cons or Nil)");
   *out_head = sprout_field(cur, 0);
   *out_tail = sprout_field(cur, 1);
   return 1;
@@ -5758,9 +5757,9 @@ long long string_concat_many(long long list_handle) {
   size_t total = 0;
   long long cur = list_handle;
   while (sprout_tag(cur) != nil_tag) {
-    if (sprout_tag(cur) != cons_tag) tcp_fail("string_concat_many: malformed list");
+    if (sprout_tag(cur) != cons_tag) sprout_fail("string_concat_many: malformed list");
     const char* s = (const char*)(uintptr_t)sprout_field(cur, 0);
-    if (s == NULL) tcp_fail("string_concat_many: null string element");
+    if (s == NULL) sprout_fail("string_concat_many: null string element");
     total += strlen(s);
     cur = sprout_field(cur, 1);
   }
@@ -5788,9 +5787,9 @@ long long string_join_newlines(long long list_handle) {
   size_t total = 0;
   long long cur = list_handle;
   while (sprout_tag(cur) != nil_tag) {
-    if (sprout_tag(cur) != cons_tag) tcp_fail("string_join_newlines: malformed list");
+    if (sprout_tag(cur) != cons_tag) sprout_fail("string_join_newlines: malformed list");
     const char* s = (const char*)(uintptr_t)sprout_field(cur, 0);
-    if (s == NULL) tcp_fail("string_join_newlines: null string element");
+    if (s == NULL) sprout_fail("string_join_newlines: null string element");
     total += strlen(s) + 1;
     cur = sprout_field(cur, 1);
   }
@@ -5815,13 +5814,13 @@ static size_t sprout_utf8_char_width(unsigned char lead) {
   if ((lead & 0xE0) == 0xC0) return 2;
   if ((lead & 0xF0) == 0xE0) return 3;
   if ((lead & 0xF8) == 0xF0) return 4;
-  tcp_fail("str_utf8: invalid UTF-8 lead byte");
+  sprout_fail("str_utf8: invalid UTF-8 lead byte");
   return 1;
 }
 
 /* Validated forward step: the byte width of the UTF-8 char at s[i], having
  * verified every continuation byte s[i+1 .. i+width-1] is present (before the
- * NUL) and matches the 0b10xxxxxx pattern. Panics via tcp_fail on a truncated
+ * NUL) and matches the 0b10xxxxxx pattern. Panics via sprout_fail on a truncated
  * or malformed sequence.
  *
  * Safety: the scan stops at the first NUL — always inside the allocation, since
@@ -5835,7 +5834,7 @@ static size_t sprout_utf8_step(const char* s, size_t i) {
     /* A NUL (0x00) fails this test too, so a truncated tail is rejected here
      * before the width-byte advance could overshoot the terminator. */
     if (((unsigned char)s[i + k] & 0xC0) != 0x80)
-      tcp_fail("str_utf8: truncated or malformed UTF-8 sequence");
+      sprout_fail("str_utf8: truncated or malformed UTF-8 sequence");
   }
   return width;
 }
@@ -5868,12 +5867,12 @@ static size_t sprout_utf8_codepoint_count(const char* s) {
 
 long long str_len(long long s_val) {
   const char* s = (const char*)s_val;
-  if (s == NULL) tcp_fail("str_len: null input");
+  if (s == NULL) sprout_fail("str_len: null input");
   return (long long)sprout_utf8_codepoint_count(s);
 }
 
 _Bool str_eq(const char* left, const char* right) {
-  if (left == NULL || right == NULL) tcp_fail("str_eq: null input");
+  if (left == NULL || right == NULL) sprout_fail("str_eq: null input");
   /* Fast-reject: if both are managed CSTRs with differing byte lengths they
    * cannot be equal (strcmp is byte-wise, so length equality is necessary). */
   void* lhdr = sprout_heap_lookup((void*)left);
@@ -5892,10 +5891,10 @@ _Bool str_eq(const char* left, const char* right) {
 
 /* A negative start or count clamps to empty, matching vec_slice; only a null
    string aborts. An index is caller input, not a violated invariant, so it gets
-   a total answer rather than tcp_fail (docs/guidelines.md #2). */
+   a total answer rather than sprout_fail (docs/guidelines.md #2). */
 long long str_slice(long long s_i, long long start, long long count) {
   const char* s = (const char*)(uintptr_t)s_i;
-  if (s == NULL) tcp_fail("str_slice: null input");
+  if (s == NULL) sprout_fail("str_slice: null input");
   if (start < 0) start = 0;
   if (count < 0) count = 0;
   SPROUT_HANDLE(h_s, s_i);
@@ -5979,8 +5978,8 @@ static size_t sprout_cstr_byte_len(const char* s) {
  */
 long long str_slice_bytes(long long s_i, long long byte_start, long long byte_len) {
   const char* s = (const char*)(uintptr_t)s_i;
-  if (s == NULL) tcp_fail("str_slice_bytes: null input");
-  if (byte_start < 0 || byte_len < 0) tcp_fail("str_slice_bytes: byte_start/byte_len must be >= 0");
+  if (s == NULL) sprout_fail("str_slice_bytes: null input");
+  if (byte_start < 0 || byte_len < 0) sprout_fail("str_slice_bytes: byte_start/byte_len must be >= 0");
   SPROUT_HANDLE(h_s, s_i);
   size_t total = sprout_cstr_byte_len(s);
   size_t bs = (size_t)byte_start;
@@ -5991,9 +5990,9 @@ long long str_slice_bytes(long long s_i, long long byte_start, long long byte_le
    * 10xxxxxx, i.e. (byte & 0xC0) == 0x80. The start and end of any valid
    * codepoint sequence is never a continuation byte. */
   if (bs > 0 && bs < total && ((unsigned char)s[bs] & 0xC0) == 0x80)
-    tcp_fail("str_slice_bytes: byte_start splits a UTF-8 codepoint");
+    sprout_fail("str_slice_bytes: byte_start splits a UTF-8 codepoint");
   if (bs + bl < total && ((unsigned char)s[bs + bl] & 0xC0) == 0x80)
-    tcp_fail("str_slice_bytes: byte_start+byte_len splits a UTF-8 codepoint");
+    sprout_fail("str_slice_bytes: byte_start+byte_len splits a UTF-8 codepoint");
   sprout_gc_maybe_collect_threshold();
   const char* slice_now = (const char*)(uintptr_t)sprout_handle_get(h_s);
   char* out = sprout_gc_alloc_cstr(bl, "str_slice_bytes: out of memory");
@@ -6003,7 +6002,7 @@ long long str_slice_bytes(long long s_i, long long byte_start, long long byte_le
 
 long long str_char_at(long long s_val, long long index) {
   const char* s = (const char*)s_val;
-  if (s == NULL) tcp_fail("str_char_at: null input");
+  if (s == NULL) sprout_fail("str_char_at: null input");
   if (index < 0) return sprout_make0(find_ctor_tag_by_name("Nothing"));
   /* Scan forward to the index-th UTF-8 codepoint.  This avoids both the
    * separate sprout_utf8_codepoint_count() pass (O(N) just for bounds) and
@@ -6030,7 +6029,7 @@ long long str_char_at(long long s_val, long long index) {
  * Returns a Sprout List String; each line excludes the trailing newline. */
 long long str_split_lines(long long s_val) {
   const char* s = (const char*)s_val;
-  if (s == NULL) tcp_fail("str_split_lines: null input");
+  if (s == NULL) sprout_fail("str_split_lines: null input");
   size_t total = strlen(s);
 
   /* One forward pass to collect (start_byte, end_byte) spans. */
@@ -6043,7 +6042,7 @@ long long str_split_lines(long long s_val) {
       if (nspans >= cap) {
         cap = (cap < 64) ? 64 : cap * 2;
         Span* tmp = (Span*)realloc(spans, cap * sizeof(Span));
-        if (!tmp) { free(spans); tcp_fail("str_split_lines: out of memory"); }
+        if (!tmp) { free(spans); sprout_fail("str_split_lines: out of memory"); }
         spans = tmp;
       }
       spans[nspans++] = (Span){ line_start, i };
@@ -6073,7 +6072,7 @@ long long str_split_lines(long long s_val) {
 /* split_words: split a string on ASCII whitespace (space, tab, \n, \r),
  * returning a Sprout List String.  Runs in O(N) with one forward pass. */
 long long split_words(const char* s) {
-  if (s == NULL) tcp_fail("split_words: null input");
+  if (s == NULL) sprout_fail("split_words: null input");
   size_t total = strlen(s);
 
   typedef struct { size_t start; size_t end; } WSpan;
@@ -6088,7 +6087,7 @@ long long split_words(const char* s) {
     if (nspans >= cap) {
       cap = (cap < 64) ? 64 : cap * 2;
       WSpan* tmp = (WSpan*)realloc(spans, cap * sizeof(WSpan));
-      if (!tmp) { free(spans); tcp_fail("split_words: out of memory"); }
+      if (!tmp) { free(spans); sprout_fail("split_words: out of memory"); }
       spans = tmp;
     }
     spans[nspans++] = (WSpan){ wstart, i };
@@ -6170,7 +6169,7 @@ static BSTNode*  bst_nth_node(long long h, long long n);
  * this safe today. */
 
 SproutUnboxed2 env_get_unboxed(const char* name) {
-  if (name == NULL) tcp_fail("env_get_unboxed: null name");
+  if (name == NULL) sprout_fail("env_get_unboxed: null name");
   const char* value = getenv(name);
   if (value == NULL) return (SproutUnboxed2){ cached_tag_nothing(), 0 };
   /* getenv returns bare libc memory; intern to a headered Sprout String. */
@@ -6186,7 +6185,7 @@ SproutUnboxed2 argv_get_unboxed(long long index) {
 
 SproutUnboxed2 str_char_at_unboxed(long long s_val, long long index) {
   const char* s = (const char*)s_val;
-  if (s == NULL) tcp_fail("str_char_at_unboxed: null input");
+  if (s == NULL) sprout_fail("str_char_at_unboxed: null input");
   if (index < 0) return (SproutUnboxed2){ cached_tag_nothing(), 0 };
   size_t byte_pos = 0;
   long long cp_idx = 0;
@@ -6205,14 +6204,14 @@ SproutUnboxed2 str_char_at_unboxed(long long s_val, long long index) {
 
 SproutUnboxed2 vector_get_unboxed(long long vec, long long index) {
   VectorVal* v = (VectorVal*)(uintptr_t)vec;
-  if (v == NULL) tcp_fail("vector_get_unboxed: null vector");
+  if (v == NULL) sprout_fail("vector_get_unboxed: null vector");
   if (index < 0 || index >= v->len) return (SproutUnboxed2){ cached_tag_nothing(), 0 };
   return (SproutUnboxed2){ cached_tag_just(), v->data[index] };
 }
 
 SproutUnboxed2 map_get_unboxed(long long map_h, long long key_val) {
   const char* key = (const char*)key_val;
-  if (key == NULL) tcp_fail("map_get_unboxed: null key");
+  if (key == NULL) sprout_fail("map_get_unboxed: null key");
   long long found = bst_get(map_h, key);
   if (found == LLONG_MIN) return (SproutUnboxed2){ cached_tag_nothing(), 0 };
   return (SproutUnboxed2){ cached_tag_just(), found };
@@ -6232,7 +6231,7 @@ SproutUnboxed2 map_nth_value_unboxed(long long map_h, long long index) {
 
 SproutUnboxed2 bytes_get_unboxed(long long bytes_h, long long index) {
   BytesVal* value = (BytesVal*)(uintptr_t)bytes_h;
-  if (value == NULL) tcp_fail("bytes_get_unboxed: null bytes");
+  if (value == NULL) sprout_fail("bytes_get_unboxed: null bytes");
   if (index < 0 || (size_t)index >= value->len) return (SproutUnboxed2){ cached_tag_nothing(), 0 };
   return (SproutUnboxed2){ cached_tag_just(), (int64_t)value->data[index] };
 }
@@ -6255,7 +6254,7 @@ SproutUnboxed2 bytes_get_unboxed(long long bytes_h, long long index) {
  * covers arena, literal, and interned strings), so invariant coverage is unaffected. */
 long long str_byte_len(long long s_val) {
   const char* s = (const char*)s_val;
-  if (s == NULL) tcp_fail("str_byte_len: null input");
+  if (s == NULL) sprout_fail("str_byte_len: null input");
   if (sprout_gc_hdrcheck_on()) {
     uint64_t h;
     memcpy(&h, s - 8, 8);
@@ -6302,7 +6301,7 @@ long long str_byte_len(long long s_val) {
 long long str_starts_with_at_byte(long long s_val, long long byte_pos, long long prefix_val) {
   const char* s = (const char*)s_val;
   const char* prefix = (const char*)prefix_val;
-  if (s == NULL || prefix == NULL) tcp_fail("str_starts_with_at_byte: null input");
+  if (s == NULL || prefix == NULL) sprout_fail("str_starts_with_at_byte: null input");
   if (byte_pos < 0) return 0;
   size_t len = sprout_cstr_byte_len(s);
   size_t pos = (size_t)byte_pos;
@@ -6313,7 +6312,7 @@ long long str_starts_with_at_byte(long long s_val, long long byte_pos, long long
 long long str_find(long long haystack_val, long long needle_val) {
   const char* haystack = (const char*)haystack_val;
   const char* needle = (const char*)needle_val;
-  if (haystack == NULL || needle == NULL) tcp_fail("str_find: null input");
+  if (haystack == NULL || needle == NULL) sprout_fail("str_find: null input");
   const char* pos = strstr(haystack, needle);
   if (pos == NULL) return -1;
   size_t prefix_len = (size_t)(pos - haystack);
@@ -6330,7 +6329,7 @@ long long str_find(long long haystack_val, long long needle_val) {
 long long str_starts_with(long long s_val, long long prefix_val) {
   const char* s = (const char*)s_val;
   const char* prefix = (const char*)prefix_val;
-  if (s == NULL || prefix == NULL) tcp_fail("str_starts_with: null input");
+  if (s == NULL || prefix == NULL) sprout_fail("str_starts_with: null input");
   size_t prefix_len = sprout_cstr_byte_len(prefix);
   return strncmp(s, prefix, prefix_len) == 0 ? 1 : 0;
 }
@@ -6338,7 +6337,7 @@ long long str_starts_with(long long s_val, long long prefix_val) {
 long long str_compare(long long left_val, long long right_val) {
   const char* left = (const char*)left_val;
   const char* right = (const char*)right_val;
-  if (left == NULL || right == NULL) tcp_fail("str_compare: null input");
+  if (left == NULL || right == NULL) sprout_fail("str_compare: null input");
   int cmp = strcmp(left, right);
   if (cmp < 0) return -1;
   if (cmp > 0) return 1;
@@ -6346,7 +6345,7 @@ long long str_compare(long long left_val, long long right_val) {
 }
 
 long long regex_validate(const char* pattern) {
-  if (pattern == NULL) tcp_fail("regex_validate: null input");
+  if (pattern == NULL) sprout_fail("regex_validate: null input");
   regex_t compiled;
   char* error = NULL;
   if (!regex_compile_ere(pattern, &compiled, &error)) {
@@ -6360,7 +6359,7 @@ long long regex_validate(const char* pattern) {
 
 /* long long, not _Bool — see the ABI invariant near str_starts_with_at_byte. */
 long long regex_is_match(const char* pattern, const char* text) {
-  if (pattern == NULL || text == NULL) tcp_fail("regex_is_match: null input");
+  if (pattern == NULL || text == NULL) sprout_fail("regex_is_match: null input");
   regex_t compiled;
   char* error = NULL;
   if (!regex_compile_ere(pattern, &compiled, &error)) {
@@ -6373,7 +6372,7 @@ long long regex_is_match(const char* pattern, const char* text) {
 }
 
 long long regex_find_match(const char* pattern, const char* text) {
-  if (pattern == NULL || text == NULL) tcp_fail("regex_find_match: null input");
+  if (pattern == NULL || text == NULL) sprout_fail("regex_find_match: null input");
   regex_t compiled;
   char* error = NULL;
   if (!regex_compile_ere(pattern, &compiled, &error)) {
@@ -6386,7 +6385,7 @@ long long regex_find_match(const char* pattern, const char* text) {
     return sprout_make0(find_ctor_tag_by_name("Nothing"));
   }
   if (status != 0 || match.rm_so < 0 || match.rm_eo < 0) {
-    tcp_fail("regex_find_match: regexec failed");
+    sprout_fail("regex_find_match: regexec failed");
   }
   long long start = sprout_utf8_codepoint_prefix_count(text, (size_t)match.rm_so);
   long long end = sprout_utf8_codepoint_prefix_count(text, (size_t)match.rm_eo);
@@ -6409,7 +6408,7 @@ long long regex_replace_all_literal(long long pattern_i, long long replacement_i
   const char* replacement = (const char*)(uintptr_t)replacement_i;
   const char* text = (const char*)(uintptr_t)text_i;
   if (pattern == NULL || replacement == NULL || text == NULL) {
-    tcp_fail("regex_replace_all_literal: null input");
+    sprout_fail("regex_replace_all_literal: null input");
   }
   SPROUT_HANDLE(h_pattern, pattern_i);
   SPROUT_HANDLE(h_replacement, replacement_i);
@@ -6430,7 +6429,7 @@ long long regex_replace_all_literal(long long pattern_i, long long replacement_i
   while (regexec(&compiled, cursor, 1, &match, 0) == 0) {
     if (match.rm_so < 0 || match.rm_eo < 0) {
       regfree(&compiled);
-      tcp_fail("regex_replace_all_literal: regexec failed");
+      sprout_fail("regex_replace_all_literal: regexec failed");
     }
     size_t start = (size_t)match.rm_so;
     size_t end = (size_t)match.rm_eo;
@@ -6452,7 +6451,7 @@ long long regex_replace_all_literal(long long pattern_i, long long replacement_i
 
 long long regex_escape(long long raw_i) {
   const char* raw = (const char*)(uintptr_t)raw_i;
-  if (raw == NULL) tcp_fail("regex_escape: null input");
+  if (raw == NULL) sprout_fail("regex_escape: null input");
   SPROUT_HANDLE(h_raw, raw_i);
   sprout_gc_maybe_collect_threshold();
   const char* raw_now = (const char*)(uintptr_t)sprout_handle_get(h_raw);
@@ -6476,7 +6475,7 @@ long long regex_escape(long long raw_i) {
  * reject it with a clean panic (a Maybe-returning surface API is future work,
  * pending the ingestion-policy decision — review W2/D4). */
 static void sprout_validate_codepoint(long long cp, const char* who) {
-  if (cp < 0 || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) tcp_fail(who);
+  if (cp < 0 || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) sprout_fail(who);
 }
 
 long long char_to_str(long long codepoint) {
@@ -6532,7 +6531,7 @@ static void buf_reserve(ByteBuf* buf, size_t want) {
   size_t next = buf->cap == 0 ? 256 : buf->cap;
   while (next < want) next *= 2;
   char* grown = (char*)realloc(buf->data, next);
-  if (grown == NULL) tcp_fail("http_request: out of memory");
+  if (grown == NULL) sprout_fail("http_request: out of memory");
   buf->data = grown;
   buf->cap = next;
 }
@@ -6557,7 +6556,7 @@ static void buf_append_char(ByteBuf* buf, char ch) {
 
 static char* alloc_cstr(size_t len, const char* ctx) {
   char* out = (char*)malloc(len + 1);
-  if (out == NULL) tcp_fail(ctx);
+  if (out == NULL) sprout_fail(ctx);
   out[0] = '\0';
   return out;
 }
@@ -6626,7 +6625,7 @@ static void regex_builtin_fail(const char* builtin, const char* detail) {
   out[builtin_len + 1] = ' ';
   memcpy(out + builtin_len + 2, detail, detail_len);
   out[builtin_len + 2 + detail_len] = '\0';
-  tcp_fail(out);
+  sprout_fail(out);
 }
 
 static int regex_translate_pattern(const char* pattern, char** out_pattern, char** out_error) {
@@ -6818,7 +6817,7 @@ static void json_append_hex4(ByteBuf* out, unsigned char value) {
 }
 
 static void json_append_escaped_string(ByteBuf* out, const char* raw) {
-  if (raw == NULL) tcp_fail("json_stringify: null string");
+  if (raw == NULL) sprout_fail("json_stringify: null string");
   char quote = '"';
   buf_append_bytes(out, &quote, 1);
   for (const unsigned char* p = (const unsigned char*)raw; *p != '\0'; p++) {
@@ -6872,17 +6871,17 @@ static int json_ctor_is(const char* ctor_name, const char* leaf_name) {
 static void json_append_array(ByteBuf* out, long long value) {
   const char* ctor_name = json_ctor_name(value);
   if (!json_ctor_is(ctor_name, "JsonArray")) {
-    tcp_fail("json_stringify: expects JsonArray");
+    sprout_fail("json_stringify: expects JsonArray");
   }
   buf_append_cstr(out, "[");
   long long cursor = sprout_field(value, 0);
   int first = 1;
   while (1) {
     const char* cursor_name = json_ctor_name(cursor);
-    if (cursor_name == NULL) tcp_fail("json_stringify: expects JsonArray");
+    if (cursor_name == NULL) sprout_fail("json_stringify: expects JsonArray");
     if (json_ctor_is(cursor_name, "JsonArrayNil")) break;
     if (!json_ctor_is(cursor_name, "JsonArrayCons")) {
-      tcp_fail("json_stringify: expects JsonArray");
+      sprout_fail("json_stringify: expects JsonArray");
     }
     if (!first) buf_append_cstr(out, ",");
     json_append_value(out, sprout_field(cursor, 0));
@@ -6895,17 +6894,17 @@ static void json_append_array(ByteBuf* out, long long value) {
 static void json_append_object(ByteBuf* out, long long value) {
   const char* ctor_name = json_ctor_name(value);
   if (!json_ctor_is(ctor_name, "JsonObject")) {
-    tcp_fail("json_stringify: expects JsonObject");
+    sprout_fail("json_stringify: expects JsonObject");
   }
   buf_append_cstr(out, "{");
   long long cursor = sprout_field(value, 0);
   int first = 1;
   while (1) {
     const char* cursor_name = json_ctor_name(cursor);
-    if (cursor_name == NULL) tcp_fail("json_stringify: expects JsonObject");
+    if (cursor_name == NULL) sprout_fail("json_stringify: expects JsonObject");
     if (json_ctor_is(cursor_name, "JsonObjectNil")) break;
     if (!json_ctor_is(cursor_name, "JsonObjectCons")) {
-      tcp_fail("json_stringify: expects JsonObject");
+      sprout_fail("json_stringify: expects JsonObject");
     }
     if (!first) buf_append_cstr(out, ",");
     json_append_escaped_string(out, (const char*)(uintptr_t)sprout_field(cursor, 0));
@@ -6919,7 +6918,7 @@ static void json_append_object(ByteBuf* out, long long value) {
 
 static void json_append_value(ByteBuf* out, long long value) {
   const char* ctor_name = json_ctor_name(value);
-  if (ctor_name == NULL) tcp_fail("json_stringify: expects Json");
+  if (ctor_name == NULL) sprout_fail("json_stringify: expects Json");
   if (json_ctor_is(ctor_name, "JsonNull")) {
     buf_append_cstr(out, "null");
   } else if (json_ctor_is(ctor_name, "JsonBool")) {
@@ -6948,8 +6947,8 @@ static void json_append_value(ByteBuf* out, long long value) {
     memcpy(&d, &bits, sizeof(d));
     char flt_buf[64];
     int flt_written = snprintf(flt_buf, sizeof(flt_buf), "%.17g", d);
-    if (flt_written < 0) tcp_fail("json_stringify: formatting failed");
-    if (flt_written >= (int)sizeof(flt_buf)) tcp_fail("json_stringify: formatted value too long");
+    if (flt_written < 0) sprout_fail("json_stringify: formatting failed");
+    if (flt_written >= (int)sizeof(flt_buf)) sprout_fail("json_stringify: formatted value too long");
     append_dot_zero_if_bare_int(flt_buf, flt_written, sizeof(flt_buf));
     buf_append_cstr(out, flt_buf);
   } else if (json_ctor_is(ctor_name, "JsonString")) {
@@ -6959,7 +6958,7 @@ static void json_append_value(ByteBuf* out, long long value) {
   } else if (json_ctor_is(ctor_name, "JsonObject")) {
     json_append_object(out, value);
   } else {
-    tcp_fail("json_stringify: expects Json");
+    sprout_fail("json_stringify: expects Json");
   }
 }
 
@@ -7203,7 +7202,7 @@ long long json_stringify(long long value) {
  * break those. Tracked for removal in BACKLOG (extract the shared helpers, drop the rest). */
 long long json_parse(long long raw_val) {
   const char* raw = (const char*)raw_val;
-  if (raw == NULL) tcp_fail("json_parse expects String");
+  if (raw == NULL) sprout_fail("json_parse expects String");
   const char* pos = raw;
   char* err_msg = NULL;
   long long value = json_parse_value(&pos, &err_msg);
@@ -8303,8 +8302,8 @@ static void append_header_block(ByteBuf* out, const char* raw) {
           break;
         }
       }
-      if (colon == NULL) tcp_fail("http_request: headers must be 'Name: Value' lines");
-      if (colon == content_start) tcp_fail("http_request: header name cannot be empty");
+      if (colon == NULL) sprout_fail("http_request: headers must be 'Name: Value' lines");
+      if (colon == content_start) sprout_fail("http_request: header name cannot be empty");
       buf_append_bytes(out, content_start, (size_t)(content_end - content_start));
       buf_append_cstr(out, "\r\n");
     }
@@ -8314,11 +8313,11 @@ static void append_header_block(ByteBuf* out, const char* raw) {
 }
 
 long long http_request(const char* method, const char* url, const char* headers_raw, const char* body, long long timeout_ms) {
-  if (method == NULL) tcp_fail("http_request: null method");
-  if (url == NULL) tcp_fail("http_request: null url");
-  if (headers_raw == NULL) tcp_fail("http_request: null headers");
-  if (body == NULL) tcp_fail("http_request: null body");
-  if (timeout_ms < 1) tcp_fail("http_request: timeout_ms must be >= 1");
+  if (method == NULL) sprout_fail("http_request: null method");
+  if (url == NULL) sprout_fail("http_request: null url");
+  if (headers_raw == NULL) sprout_fail("http_request: null headers");
+  if (body == NULL) sprout_fail("http_request: null body");
+  if (timeout_ms < 1) sprout_fail("http_request: timeout_ms must be >= 1");
 
   HttpUrl parsed = {0};
   char* url_err = NULL;
@@ -8461,7 +8460,7 @@ long long vector_empty(void) {
 
 long long vector_length(long long vec) {
   VectorVal* v = (VectorVal*)(uintptr_t)vec;
-  if (v == NULL) tcp_fail("vector_length: null vector");
+  if (v == NULL) sprout_fail("vector_length: null vector");
   return v->len;
 }
 
@@ -8469,7 +8468,7 @@ long long vector_get(long long vec, long long index) {
   long long rooted_vec = vec;
   SPROUT_GC_PUSH_I64_LOCAL(rooted_vec);
   VectorVal* v = (VectorVal*)(uintptr_t)vec;
-  if (v == NULL) tcp_fail("vector_get: null vector");
+  if (v == NULL) sprout_fail("vector_get: null vector");
   if (index < 0 || index >= v->len) {
     SPROUT_GC_POP_LOCALS(1);
     return sprout_make0(find_ctor_tag_by_name("Nothing"));
@@ -8485,7 +8484,7 @@ long long vector_set(long long vec, long long index, long long value) {
   SPROUT_GC_PUSH_I64_LOCAL(rooted_vec);
   SPROUT_GC_PUSH_I64_LOCAL(rooted_value);
   VectorVal* src = (VectorVal*)(uintptr_t)vec;
-  if (src == NULL) tcp_fail("vector_set: null vector");
+  if (src == NULL) sprout_fail("vector_set: null vector");
   VectorVal* out = sprout_alloc_vector_sized((size_t)src->len, "vector_set: out of memory");
   if (src->len == 0) {
     SPROUT_GC_POP_LOCALS(2);
@@ -8508,7 +8507,7 @@ long long vector_append(long long vec, long long value) {
   SPROUT_GC_PUSH_I64_LOCAL(rooted_vec);
   SPROUT_GC_PUSH_I64_LOCAL(rooted_value);
   VectorVal* src = (VectorVal*)(uintptr_t)vec;
-  if (src == NULL) tcp_fail("vector_append: null vector");
+  if (src == NULL) sprout_fail("vector_append: null vector");
   VectorVal* out = sprout_alloc_vector_sized((size_t)src->len + 1, "vector_append: out of memory");
   if (src->len > 0) {
     memcpy(out->data, src->data, (size_t)src->len * sizeof(long long));
@@ -8528,7 +8527,7 @@ long long vector_concat(long long a, long long b) {
   SPROUT_GC_PUSH_I64_LOCAL(rooted_b);
   VectorVal* va = (VectorVal*)(uintptr_t)rooted_a;
   VectorVal* vb = (VectorVal*)(uintptr_t)rooted_b;
-  if (va == NULL || vb == NULL) tcp_fail("vector_concat: null vector");
+  if (va == NULL || vb == NULL) sprout_fail("vector_concat: null vector");
   long long na = va->len;
   long long nb = vb->len;
   VectorVal* out = sprout_alloc_vector_sized((size_t)(na + nb), "vector_concat: out of memory");
@@ -8554,8 +8553,8 @@ long long vec_make_filled(long long n, long long val) {
 
 long long vector_mutset(long long vec, long long index, long long value) {
   VectorVal* v = (VectorVal*)(uintptr_t)vec;
-  if (v == NULL) tcp_fail("vector_mutset: null vector");
-  if (index < 0 || index >= v->len) tcp_fail("vector_mutset: index out of bounds");
+  if (v == NULL) sprout_fail("vector_mutset: null vector");
+  if (index < 0 || index >= v->len) sprout_fail("vector_mutset: index out of bounds");
   /* The other candidate write-barrier site — see ref_write.  The store lands
    * either in the VectorVal's own slot or in a malloc buffer it owns; neither is
    * a GC object in its own right, so a real barrier here must record the OWNING
@@ -8595,9 +8594,9 @@ long long vector_mutset(long long vec, long long index, long long value) {
  * is go unrecorded, since the same slot is re-walked by every later sweep. */
 long long vector_push(long long vec, long long value) {
   VectorVal* v = (VectorVal*)(uintptr_t)vec;
-  if (v == NULL) tcp_fail("vector_push: null vector");
+  if (v == NULL) sprout_fail("vector_push: null vector");
   if (v->len >= v->cap) {
-    if (v->cap > (long long)(SIZE_MAX / sizeof(long long)) / 2) tcp_fail("vector_push: vector too large");
+    if (v->cap > (long long)(SIZE_MAX / sizeof(long long)) / 2) sprout_fail("vector_push: vector too large");
     long long new_cap = v->cap <= 0 ? 8 : v->cap * 2;
     if (vec_data_is_inline(v)) {
       long long* moved = sprout_alloc_vector_data((size_t)new_cap, "vector_push: out of memory");
@@ -8640,7 +8639,7 @@ long long vector_push(long long vec, long long value) {
  * nothing, so neither argument needs rooting. */
 long long vector_truncate(long long vec, long long n) {
   VectorVal* v = (VectorVal*)(uintptr_t)vec;
-  if (v == NULL) tcp_fail("vector_truncate: null vector");
+  if (v == NULL) sprout_fail("vector_truncate: null vector");
   if (n < 0) n = 0;
   if (n >= v->len) return 0;  /* no effect, matching Rust's Vec::truncate */
   for (long long i = n; i < v->len; i++) v->data[i] = 0;
@@ -8650,8 +8649,8 @@ long long vector_truncate(long long vec, long long n) {
 
 long long vector_get_direct(long long vec, long long index) {
   VectorVal* v = (VectorVal*)(uintptr_t)vec;
-  if (v == NULL) tcp_fail("vector_get_direct: null vector");
-  if (index < 0 || index >= v->len) tcp_fail("vector_get_direct: index out of bounds");
+  if (v == NULL) sprout_fail("vector_get_direct: null vector");
+  if (index < 0 || index >= v->len) sprout_fail("vector_get_direct: index out of bounds");
   return v->data[index];
 }
 
@@ -8956,7 +8955,7 @@ long long map_empty(void) {
 
 long long map_get(long long map_h, long long key_val) {
   const char* key = (const char*)key_val;
-  if (key == NULL) tcp_fail("map_get: null key");
+  if (key == NULL) sprout_fail("map_get: null key");
   long long rm = map_h;
   SPROUT_GC_PUSH_I64_LOCAL(rm);
   long long found = bst_get(rm, key);
@@ -8969,7 +8968,7 @@ long long map_get(long long map_h, long long key_val) {
 
 long long map_set(long long map_h, long long key_val, long long value) {
   const char* key = (const char*)key_val;
-  if (key == NULL) tcp_fail("map_set: null key");
+  if (key == NULL) sprout_fail("map_set: null key");
   const char* ikey = intern_string(key); /* intern before any GC-triggering alloc */
   long long rm = map_h, rv = value;
   SPROUT_GC_PUSH_I64_LOCAL(rm); SPROUT_GC_PUSH_I64_LOCAL(rv);
@@ -8980,7 +8979,7 @@ long long map_set(long long map_h, long long key_val, long long value) {
 
 long long map_remove(long long map_h, long long key_val) {
   const char* key = (const char*)key_val;
-  if (key == NULL) tcp_fail("map_remove: null key");
+  if (key == NULL) sprout_fail("map_remove: null key");
   const char* ikey = intern_string(key);
   long long rm = map_h;
   SPROUT_GC_PUSH_I64_LOCAL(rm);
@@ -9026,7 +9025,7 @@ long long native_set_empty(void) {
 
 long long native_set_insert(long long item_val, long long set_h) {
   const char* item = (const char*)item_val;
-  if (item == NULL) tcp_fail("native_set_insert: null item");
+  if (item == NULL) sprout_fail("native_set_insert: null item");
   const char* ikey = intern_string(item);
   long long rs = set_h;
   SPROUT_GC_PUSH_I64_LOCAL(rs);
@@ -9076,13 +9075,13 @@ long long bytes_empty(void) {
 
 long long bytes_length(long long bytes_h) {
   BytesVal* value = (BytesVal*)(uintptr_t)bytes_h;
-  if (value == NULL) tcp_fail("bytes_length: null bytes");
+  if (value == NULL) sprout_fail("bytes_length: null bytes");
   return (long long)value->len;
 }
 
 long long bytes_get(long long bytes_h, long long index) {
   BytesVal* value = (BytesVal*)(uintptr_t)bytes_h;
-  if (value == NULL) tcp_fail("bytes_get: null bytes");
+  if (value == NULL) sprout_fail("bytes_get: null bytes");
   if (index < 0 || (size_t)index >= value->len) {
     return sprout_make0(find_ctor_tag_by_name("Nothing"));
   }
@@ -9093,7 +9092,7 @@ long long bytes_slice(long long bytes_h, long long start, long long count) {
   long long rooted_bytes = bytes_h;
   SPROUT_GC_PUSH_I64_LOCAL(rooted_bytes);
   BytesVal* value = (BytesVal*)(uintptr_t)bytes_h;
-  if (value == NULL) tcp_fail("bytes_slice: null bytes");
+  if (value == NULL) sprout_fail("bytes_slice: null bytes");
   /* Clamped, not fatal — see str_slice. */
   if (start < 0) start = 0;
   if (count < 0) count = 0;
@@ -9116,7 +9115,7 @@ long long bytes_append(long long left_h, long long right_h) {
   SPROUT_GC_PUSH_I64_LOCAL(rooted_right);
   BytesVal* left = (BytesVal*)(uintptr_t)left_h;
   BytesVal* right = (BytesVal*)(uintptr_t)right_h;
-  if (left == NULL || right == NULL) tcp_fail("bytes_append: null bytes");
+  if (left == NULL || right == NULL) sprout_fail("bytes_append: null bytes");
   BytesVal* out = sprout_alloc_bytes_val("bytes_append: out of memory");
   out->len = left->len + right->len;
   out->data = sprout_alloc_bytes_data(out->len, "bytes_append: out of memory");
@@ -9127,7 +9126,7 @@ long long bytes_append(long long left_h, long long right_h) {
 }
 
 long long bytes_singleton(long long value) {
-  if (value < 0 || value > 255) tcp_fail("bytes_singleton: byte out of range");
+  if (value < 0 || value > 255) sprout_fail("bytes_singleton: byte out of range");
   BytesVal* out = sprout_alloc_bytes_val("bytes_singleton: out of memory");
   out->len = 1;
   out->data = sprout_alloc_bytes_data(1, "bytes_singleton: out of memory");
@@ -9158,7 +9157,7 @@ long long bytes_singleton(long long value) {
  * Safe universally because every String is headered — arena, literal and interned alike. */
 long long bytes_from_utf8(long long raw_val) {
   const char* raw = (const char*)raw_val;
-  if (raw == NULL) tcp_fail("bytes_from_utf8: null input");
+  if (raw == NULL) sprout_fail("bytes_from_utf8: null input");
   size_t len = sprout_cstr_byte_len(raw);
   BytesVal* out = sprout_alloc_bytes_val("bytes_from_utf8: out of memory");
   out->len = len;
@@ -9221,7 +9220,7 @@ long long bytes_to_utf8(long long bytes_h) {
   long long rooted_bytes = bytes_h;
   SPROUT_GC_PUSH_I64_LOCAL(rooted_bytes);
   BytesVal* value = (BytesVal*)(uintptr_t)bytes_h;
-  if (value == NULL) tcp_fail("bytes_to_utf8: null bytes");
+  if (value == NULL) sprout_fail("bytes_to_utf8: null bytes");
   const char* reason = NULL;
   if (!utf8_validate(value->data, value->len, &reason)) {
     char* message = dup_managed_cstr(reason, "bytes_to_utf8: out of memory");
@@ -9275,7 +9274,7 @@ long long bytes_builder_bytes(long long bytes_h) {
   long long rooted_bytes = bytes_h;
   SPROUT_GC_PUSH_I64_LOCAL(rooted_bytes);
   BytesVal* value = (BytesVal*)(uintptr_t)bytes_h;
-  if (value == NULL) tcp_fail("bytes_builder_bytes: null bytes");
+  if (value == NULL) sprout_fail("bytes_builder_bytes: null bytes");
   BuilderVal* out = builder_alloc(value->len, value->len == 0 ? 0 : 1);
   if (out->count == 1) out->chunks[0] = value;
   SPROUT_GC_POP_LOCALS(1);
@@ -9283,7 +9282,7 @@ long long bytes_builder_bytes(long long bytes_h) {
 }
 
 long long bytes_builder_byte(long long value) {
-  if (value < 0 || value > 255) tcp_fail("bytes_builder_byte: byte out of range");
+  if (value < 0 || value > 255) sprout_fail("bytes_builder_byte: byte out of range");
   unsigned char data[1] = {(unsigned char)value};
   BytesVal* chunk = bytes_from_chunk_bytes(data, 1, "bytes_builder_byte: out of memory");
   SPROUT_GC_PUSH_PTR_LOCAL(chunk);
@@ -9331,7 +9330,7 @@ long long bytes_builder_append(long long left_h, long long right_h) {
   SPROUT_GC_PUSH_I64_LOCAL(rooted_right);
   BuilderVal* left = (BuilderVal*)(uintptr_t)left_h;
   BuilderVal* right = (BuilderVal*)(uintptr_t)right_h;
-  if (left == NULL || right == NULL) tcp_fail("bytes_builder_append: null builder");
+  if (left == NULL || right == NULL) sprout_fail("bytes_builder_append: null builder");
   if (left->count == 0) {
     SPROUT_GC_POP_LOCALS(2);
     return right_h;
@@ -9351,14 +9350,14 @@ long long bytes_builder_build(long long builder_h) {
   long long rooted_builder = builder_h;
   SPROUT_GC_PUSH_I64_LOCAL(rooted_builder);
   BuilderVal* value = (BuilderVal*)(uintptr_t)builder_h;
-  if (value == NULL) tcp_fail("bytes_builder_build: null builder");
+  if (value == NULL) sprout_fail("bytes_builder_build: null builder");
   BytesVal* out = sprout_alloc_bytes_val("bytes_builder_build: out of memory");
   out->len = value->len;
   out->data = sprout_alloc_bytes_data(out->len, "bytes_builder_build: out of memory");
   size_t offset = 0;
   for (size_t i = 0; i < value->count; i++) {
     BytesVal* chunk = value->chunks[i];
-    if (chunk == NULL) tcp_fail("bytes_builder_build: null chunk");
+    if (chunk == NULL) sprout_fail("bytes_builder_build: null chunk");
     if (chunk->len > 0) memcpy(out->data + offset, chunk->data, chunk->len);
     offset += chunk->len;
   }
@@ -9684,7 +9683,7 @@ long long crypto_sha256(long long bytes_h) {
   long long rooted_bytes = bytes_h;
   SPROUT_GC_PUSH_I64_LOCAL(rooted_bytes);
   BytesVal* value = (BytesVal*)(uintptr_t)bytes_h;
-  if (value == NULL) tcp_fail("crypto_sha256: null bytes");
+  if (value == NULL) sprout_fail("crypto_sha256: null bytes");
   unsigned char digest[32];
   sha256_digest(value->data, value->len, digest);
   BytesVal* out = bytes_from_chunk_bytes(digest, 32, "crypto_sha256: out of memory");
@@ -9699,7 +9698,7 @@ long long crypto_hmac_sha256(long long key_h, long long msg_h) {
   SPROUT_GC_PUSH_I64_LOCAL(rooted_msg);
   BytesVal* key = (BytesVal*)(uintptr_t)key_h;
   BytesVal* msg = (BytesVal*)(uintptr_t)msg_h;
-  if (key == NULL || msg == NULL) tcp_fail("crypto_hmac_sha256: null bytes");
+  if (key == NULL || msg == NULL) sprout_fail("crypto_hmac_sha256: null bytes");
   unsigned char digest[32];
   hmac_sha256_digest(key->data, key->len, msg->data, msg->len, digest);
   BytesVal* out = bytes_from_chunk_bytes(digest, 32, "crypto_hmac_sha256: out of memory");
@@ -9711,17 +9710,17 @@ long long crypto_base64_encode(long long bytes_h) {
   long long rooted_bytes_h = bytes_h;
   SPROUT_GC_PUSH_I64_LOCAL(rooted_bytes_h);
   BytesVal* value = (BytesVal*)(uintptr_t)rooted_bytes_h;
-  if (value == NULL) tcp_fail("crypto_base64_encode: null bytes");
+  if (value == NULL) sprout_fail("crypto_base64_encode: null bytes");
   sprout_gc_maybe_collect_threshold();
   char* plain = base64_encode_bytes(value->data, value->len);
-  if (plain == NULL) tcp_fail("crypto_base64_encode: out of memory");
+  if (plain == NULL) sprout_fail("crypto_base64_encode: out of memory");
   size_t plain_len = strlen(plain);
   char* out = sprout_gc_adopt_cstr(plain, plain_len, "crypto_base64_encode: out of memory");  SPROUT_GC_POP_LOCALS(1);
   return (long long)(uintptr_t)out;
 }
 
 long long crypto_base64_decode(const char* raw) {
-  if (raw == NULL) tcp_fail("crypto_base64_decode: null input");
+  if (raw == NULL) sprout_fail("crypto_base64_decode: null input");
   unsigned char* data = NULL;
   size_t len = 0;
   const char* err = NULL;
@@ -9744,7 +9743,7 @@ long long crypto_bytes_xor(long long left_h, long long right_h) {
   SPROUT_GC_PUSH_I64_LOCAL(rooted_right);
   BytesVal* left = (BytesVal*)(uintptr_t)left_h;
   BytesVal* right = (BytesVal*)(uintptr_t)right_h;
-  if (left == NULL || right == NULL) tcp_fail("crypto_bytes_xor: null bytes");
+  if (left == NULL || right == NULL) sprout_fail("crypto_bytes_xor: null bytes");
   if (left->len != right->len) {
     SPROUT_GC_POP_LOCALS(2);
     return crypto_err2("stdlib.crypto.BytesXorLengthMismatch", (long long)left->len, (long long)right->len);
@@ -9799,18 +9798,18 @@ long long crypto_random_bytes(long long count) {
  * blocks in the poller — behaviorally identical to a blocking call. */
 static void tcp_set_nonblocking(int fd) {
   int flags = fcntl(fd, F_GETFL, 0);
-  if (flags < 0) tcp_fail("tcp: fcntl F_GETFL failed");
-  if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) tcp_fail("tcp: fcntl F_SETFL failed");
+  if (flags < 0) sprout_fail("tcp: fcntl F_GETFL failed");
+  if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) sprout_fail("tcp: fcntl F_SETFL failed");
 }
 
 long long tcp_listen(long long port) {
-  if (port < 1 || port > 65535) tcp_fail("tcp_listen: port out of range");
+  if (port < 1 || port > 65535) sprout_fail("tcp_listen: port out of range");
   int fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (fd < 0) tcp_fail("tcp_listen: socket failed");
+  if (fd < 0) sprout_fail("tcp_listen: socket failed");
   int one = 1;
   if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)) < 0) {
     close(fd);
-    tcp_fail("tcp_listen: setsockopt failed");
+    sprout_fail("tcp_listen: setsockopt failed");
   }
   struct sockaddr_in addr;
   memset(&addr, 0, sizeof(addr));
@@ -9819,11 +9818,11 @@ long long tcp_listen(long long port) {
   addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
   if (bind(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
     close(fd);
-    tcp_fail("tcp_listen: bind failed");
+    sprout_fail("tcp_listen: bind failed");
   }
   if (listen(fd, 16) < 0) {
     close(fd);
-    tcp_fail("tcp_listen: listen failed");
+    sprout_fail("tcp_listen: listen failed");
   }
   tcp_set_nonblocking(fd);   /* so tcp_accept parks on EAGAIN rather than blocking */
   /* Arm the EMFILE reserve now, while descriptors are plentiful — a no-op after the first listener. */
@@ -9831,7 +9830,7 @@ long long tcp_listen(long long port) {
   long long h = alloc_listener_handle();
   if (h < 0) {
     close(fd);
-    tcp_fail("tcp_listen: handle table full");
+    sprout_fail("tcp_listen: handle table full");
   }
   g_listener_fd[h] = fd;
   g_listener_used[h] = 1;
@@ -9865,7 +9864,7 @@ static long long tcp_net_err1(const char* ctor_name, long long payload) {
 }
 
 long long tcp_connect(const char* host, long long port) {
-  if (host == NULL) tcp_fail("tcp_connect: null host");
+  if (host == NULL) sprout_fail("tcp_connect: null host");
   if (port < 1 || port > 65535) {
     return tcp_net_err1(
       "stdlib.net.TcpInvalidArgument",
@@ -9960,7 +9959,7 @@ long long tcp_connect(const char* host, long long port) {
  * EPROTO, ENOPROTOOPT, EHOSTDOWN, ENONET, EHOSTUNREACH, EOPNOTSUPP, and ENETUNREACH."
  *
  * So on Linux a peer whose route disappeared between SYN and accept surfaces here — and before this
- * fix that was `tcp_fail`, i.e. an ordinary network condition killed the server. Note the platform
+ * fix that was `sprout_fail`, i.e. an ordinary network condition killed the server. Note the platform
  * asymmetry the man page calls out: this does not happen on BSD/macOS, which is where local gates run
  * and where the failure is therefore invisible. ENONET is Linux-only and needs the guard.
  *
@@ -10055,7 +10054,7 @@ int accept_shed_backlog(int listener_fd) {
   return shed;
 }
 
-/* RECOVERABLE accept (concurrency review C3). Two of the paths below used to be `tcp_fail`, so a
+/* RECOVERABLE accept (concurrency review C3). Two of the paths below used to be `sprout_fail`, so a
  * server died rather than shedding one connection — and one of them was reachable by ordinary
  * traffic: `ECONNABORTED` means a peer reset between SYN and accept, which any public listener sees.
  *
@@ -10240,18 +10239,18 @@ static TcpSendOutcome tcp_send_all(long long conn, const unsigned char* p, size_
 }
 
 long long tcp_write(long long conn, const char* payload) {
-  if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) tcp_fail("tcp_write: unknown connection handle");
-  if (payload == NULL) tcp_fail("tcp_write: null payload");
+  if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) sprout_fail("tcp_write: unknown connection handle");
+  if (payload == NULL) sprout_fail("tcp_write: null payload");
   int err = 0;
   if (tcp_send_all(conn, (const unsigned char*)payload, strlen(payload), TCP_WAIT_FOREVER, 0, &err) != TCP_SEND_OK)
-    tcp_fail("tcp_write: send failed");   /* TCP_WAIT_FOREVER never yields TCP_SEND_TIMEOUT */
+    sprout_fail("tcp_write: send failed");   /* TCP_WAIT_FOREVER never yields TCP_SEND_TIMEOUT */
   return 0;
 }
 
 long long tcp_write_all(long long conn, long long payload_h) {
   if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) return tcp_net_err0("stdlib.net.TcpInvalidHandle");
   BytesVal* payload = (BytesVal*)(uintptr_t)payload_h;
-  if (payload == NULL) tcp_fail("tcp_write_all: null payload");
+  if (payload == NULL) sprout_fail("tcp_write_all: null payload");
   int err = 0;
   if (tcp_send_all(conn, payload->data, payload->len, TCP_WAIT_FOREVER, 0, &err) != TCP_SEND_OK)
     return tcp_net_err1("stdlib.net.TcpWriteFailed", (long long)(uintptr_t)strerror(err));
@@ -10273,7 +10272,7 @@ long long tcp_write_all(long long conn, long long payload_h) {
 long long tcp_write_all_timeout(long long conn, long long payload_h, long long idle_ms) {
   if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) return tcp_net_err0("stdlib.net.TcpInvalidHandle");
   BytesVal* payload = (BytesVal*)(uintptr_t)payload_h;
-  if (payload == NULL) tcp_fail("tcp_write_all_timeout: null payload");
+  if (payload == NULL) sprout_fail("tcp_write_all_timeout: null payload");
   int err = 0;
   switch (tcp_send_all(conn, payload->data, payload->len, TCP_WAIT_DEADLINE, idle_ms, &err)) {
     case TCP_SEND_TIMEOUT:
@@ -10322,8 +10321,8 @@ long long tcp_wait(long long conn, long long interest, long long ms) {
 long long tcp_write_some(long long conn, long long payload_h, long long offset) {
   if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) return tcp_net_err0("stdlib.net.TcpInvalidHandle");
   BytesVal* payload = (BytesVal*)(uintptr_t)payload_h;
-  if (payload == NULL) tcp_fail("tcp_write_some: null payload");
-  if (offset < 0 || (size_t)offset > payload->len) tcp_fail("tcp_write_some: offset out of range");
+  if (payload == NULL) sprout_fail("tcp_write_some: null payload");
+  if (offset < 0 || (size_t)offset > payload->len) sprout_fail("tcp_write_some: offset out of range");
   size_t len = payload->len - (size_t)offset;
   if (len == 0) return tcp_net_ok(0);   /* nothing left to send: not would-block, not an error */
 
@@ -10383,7 +10382,7 @@ long long tcp_read_some(long long conn, long long max_bytes) {
 }
 
 long long tcp_close(long long conn) {
-  if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) tcp_fail("tcp_close: unknown connection handle");
+  if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) sprout_fail("tcp_close: unknown connection handle");
   close(g_conn_fd[conn]);
   g_conn_used[conn] = 0;
   g_conn_fd[conn] = -1;
@@ -10392,7 +10391,7 @@ long long tcp_close(long long conn) {
 
 long long tcp_close_listener(long long listener) {
   if (listener <= 0 || listener >= 2048 || !g_listener_used[listener]) {
-    tcp_fail("tcp_close_listener: unknown listener handle");
+    sprout_fail("tcp_close_listener: unknown listener handle");
   }
   close(g_listener_fd[listener]);
   g_listener_used[listener] = 0;

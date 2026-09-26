@@ -3,14 +3,14 @@ import stdlib.terminal as terminal
 
 # REGRESSION (concurrency review C3). `tcp_accept` must be RECOVERABLE, not fatal.
 #
-# It had two `tcp_fail` paths — any errno other than EAGAIN, and the connection table being full —
+# It had two `sprout_fail` paths — any errno other than EAGAIN, and the connection table being full —
 # and both `exit(1)` the whole server. The first bucket contained `ECONNABORTED`: a peer that resets
 # between SYN and accept, which is entirely ordinary traffic on a public listener. So one such client
 # killed every other connection the server was handling.
 #
 # This case is the deterministic half, and it needs no socket timing at all: accepting on a listener
 # handle that was never allocated must return `Err TcpInvalidHandle`. Reaching "done" is the proof —
-# on the unfixed runtime the process aborts inside tcp_fail and prints nothing.
+# on the unfixed runtime the process aborts inside sprout_fail and prints nothing.
 #
 # The EMFILE/ENFILE half (descriptor exhaustion, which must shed load rather than the process) needs
 # a constrained `ulimit -n` and lives in the justfile recipe, since the limit has to be imposed on the

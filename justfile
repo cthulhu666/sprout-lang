@@ -2174,7 +2174,7 @@ task-io-smoke: bootstrap-from-seed
   # cannot, which is why the fixtures above all missed it. Three paths, because they used different
   # length calls: the read loop (body in a second write), the already-buffered fast path (one write),
   # and a byte count cutting INSIDE a character. The last is a liveness check too — the obvious
-  # implementation (`str_slice_bytes`) calls tcp_fail on a split codepoint, so it would let that one
+  # implementation (`str_slice_bytes`) calls sprout_fail on a split codepoint, so it would let that one
   # request kill the server. RED as a 408 for the split client (a complete body looked one byte short,
   # so the loop waited for a byte already sent), a 500 for either (handler saw a mis-framed body), or
   # no output at all for the cut client (process aborted).

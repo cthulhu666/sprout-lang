@@ -71,9 +71,20 @@ compile sigpipe_ignored.c "$TMP_DIR/sigpipe_ignored" -O0 -g
 "$TMP_DIR/sigpipe_ignored" > "$TMP_DIR/sigpipe_ignored.out"
 test "$(cat "$TMP_DIR/sigpipe_ignored.out")" = "sigpipe-ignored"
 
-echo "==> c runtime: tcp_fail is declared noreturn (analyzer-signal guard)"
-if ! grep -Eq '__attribute__\(\(noreturn\)\)[[:space:]]+static void tcp_fail\(const char\* msg\);' "$ROOT/runtime/sprout_runtime.c"; then
-  echo "tcp_fail is not declared noreturn; static analysis will report phantom UAF/double-free" >&2
+echo "==> c runtime: sprout_fail is declared noreturn (analyzer-signal guard)"
+# Both sites must carry it: the definition, and the declaration in
+# sprout_scheduler.h that the poll and scheduler TUs compile against.
+if ! grep -Eq '__attribute__\(\(noreturn\)\) void sprout_fail\(const char\* msg\) \{' "$ROOT/runtime/sprout_runtime.c"; then
+  echo "sprout_fail's definition is not noreturn; static analysis will report phantom UAF/double-free" >&2
+  exit 1
+fi
+if ! grep -Eq '__attribute__\(\(noreturn\)\) void sprout_fail\(const char\* msg\);' "$ROOT/runtime/sprout_scheduler.h"; then
+  echo "sprout_fail's declaration in sprout_scheduler.h is not noreturn" >&2
+  exit 1
+fi
+# The old name was TCP-specific archaeology; it must not come back.
+if grep -q 'tcp_fail' "$ROOT"/runtime/*.c "$ROOT"/runtime/*.h; then
+  echo "tcp_fail reintroduced in runtime/; the fatal path is sprout_fail" >&2
   exit 1
 fi
 

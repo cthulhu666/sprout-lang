@@ -4,7 +4,7 @@
  * char_to_str / char_from_codepoint accepted negative, >0x10FFFF, and UTF-16
  * surrogate (D800..DFFF) codepoints, minting invalid-UTF-8 Strings / invalid
  * Chars from pure Sprout code (e.g. char_to_str(-1)). A Sprout String must be
- * valid UTF-8, so these now abort via tcp_fail.
+ * valid UTF-8, so these now abort via sprout_fail.
  *
  * argv[1] selects the case (one per process, since the panic exits):
  *   neg       -> char_to_str(-1)          must abort
