@@ -2003,14 +2003,13 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   `docs/cross-tu-inlining-v0.md` §5.2.
 - [ ] `P2` **GC trigger is object-count-blind, not byte-aware.** `sprout_gc_maybe_collect_threshold`
   fires on `g_managed_heap_count >= g_gc_threshold`, and the count increments by 1 per managed
-  object regardless of size — a `VectorVal`'s backing array is a plain `malloc`, invisible to the
-  trigger. Many-small over-collects, few-but-large under-collects, amplified by the `adapt_factor`
-  default of 3.0. First measured instance 2026-09-06 and the gap is ~100,000×: one function holding
-  a 1,600-element `Vec Int` literal peaks at 3,188 MB RSS to produce 767 KB of output.
-  `docs/gc-generational-v0.md` §11 has the measurements and two results worth not re-deriving —
-  `SPROUT_GC_THRESHOLD` cannot investigate this and its flat readings will mislead you, and a
-  count-based cap is not the fix because it trades the quadratic memory for a livelock (which is
-  also a ready-made reproducer).
+  object regardless of size, so many-small over-collects and few-but-large under-collects,
+  amplified by the `adapt_factor` default of 3.0. First measured instance 2026-09-06 and the gap is
+  ~100,000×: one function holding a 1,600-element `Vec Int` literal peaks at 3,188 MB RSS to produce
+  767 KB of output. Vectors up to 508 elements now carry their elements inline, so those bytes ARE
+  counted (2026-09-25); a longer or push-grown one's buffer is still an invisible `malloc`.
+  `docs/gc-generational-v0.md` §11 has the measurements and three approaches already measured and
+  rejected — do not re-derive them.
 - [ ] `P2` **`ir_lowering` assembles IR text with `++` in a recursion at all three nesting levels**
   (`lower_ops`, `lower_blocks`, `lower_fns`, and the same shape in `sprout_ir.print_*`). Each of n
   frames concatenates onto the entire remaining tail, so emitting a block of n ops copies O(n ×
@@ -2025,13 +2024,15 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   (stop wiping; remove/re-add only the swept regions' entries) is the natural next increment, and
   the per-region touched-class bookkeeping it needs already exists
   (`fl_region_commit`/`fl_region_rollback`).
-- [ ] `P2` **Skip re-pushing already-rooted function parameters.** Codegen re-pushes arguments at
-  every call site even when the argument is a `TVar` resolving to a parameter already rooted in the
-  caller's frame — the recursive `queens(…)` re-roots three vectors it already holds. Pure
-  codegen fix in `emit_args_with_roots`. **The 20–40% estimate assumed a build that CALLS the
-  push/pop helpers.** `just compile-native` whole-program links, which inlines both away — neither
-  symbol appears at all in a CPU profile of the nqueens binary (2026-09-25). The win is now confined
-  to paths that link the runtime separately, which includes `just test` at -O0.
+- [ ] `P2` **Skip re-pushing already-rooted function parameters.** The rooting pass roots every
+  heap-typed value live across a trigger, with no notion that one already owns a slot in the same
+  frame — the recursive `queens(…)` re-roots three vectors it already holds. The fix belongs in
+  `stdlib/compiler/ir_rooting.sprout`'s liveness dataflow; the `emit_args_with_roots` this entry
+  used to name died with `codegen.sprout` and survives only in `docs/archive/`. **Worth ~20% of the
+  whole-program-linked nqueens binary** — measured 2026-09-25 by neutralising all rooting (208 →
+  165 ms at N=12, GC off both sides). An earlier correction here claimed the win was confined to
+  separately-linked builds because the helpers inline away: wrong, inlining removes the call, not
+  the alloca, the store and the shadow-stack bump.
 - [ ] `P2` **nqueens allocates one `Vec` wrapper per `vec_set` — 16.7M per N=12 run**, which is its
   whole object-allocation count. Measured while landing nullary interning, which moved nqueens by 7
   objects and so disproved this entry's predecessor: it blamed `true`/`false` literals, but `Bool`
@@ -2044,9 +2045,10 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   allocation is `arena_top += size` (~5 cycles vs ~50 for malloc + register). Survivors are copied
   to the old gen and gain full metadata on minor GC. **Its gate is met and its payoff understated:**
   whole-program linking landed, so push/pop no longer dominates, and the malloc/free family plus
-  `madvise` is 23% of nqueens CPU, not ~10% (2026-09-25). Much of that is `Vec` backing arrays — the
-  one payload `sprout_alloc_vector_data` hands to bare `malloc` instead of a region slot. See also
-  the generational-step entry in §1, whose measurements re-scope it as compiler-only.
+  `madvise` was 23% of nqueens CPU, not ~10% (2026-09-25). Inlining small vectors' elements took
+  the largest single contributor out of that share — nqueens now allocates 33.4M objects, not 50.1M
+  — so re-measure before pricing this. See also the generational-step entry in §1, whose
+  measurements re-scope it as compiler-only.
 - [ ] `P3` **HAMT persistent vector for `vec_set`** — O(n) → O(log n). **Deferred:** at N≤14
   vectors are 12–27 elements (a single HAMT leaf), so path-copying is the same work as the current
   copy, and `vector_set` is 1.1% of CPU.

@@ -173,7 +173,8 @@ The predicted risk was that raising the factor would amplify the byte-blind trig
 to `g_managed_heap_count`. **It did not**: `digit_recognizer` pays +1.3 MB. Its 64→24→10 model
 routes 10.6M scalar stores through a *handful* of long-lived small matrices, so its 4,492 live
 objects are small ADT nodes, not big buffers. The amplifier needs many large *retained* vectors,
-which no current workload has — it remains a live concern for future large-buffer churn.
+which no current workload has — it remains a live concern for future large-buffer churn, though
+inlining shrank its surface to vectors past 508 elements or grown by a push (§11).
 
 The mechanism, isolated on `test_gc_age_retain_all` (150k-node live chain):
 
@@ -345,11 +346,15 @@ compose (Generational ZGC, G1). It is not throwaway work under any tier.
 ## 11. The trigger is object-count-blind — first measured instance (2026-09-06)
 
 `sprout_gc_maybe_collect_threshold` fires on `g_managed_heap_count >= g_gc_threshold`,
-and the count increments by exactly 1 per managed object regardless of size — a
-`VectorVal`'s backing array is a plain `malloc`, invisible to the trigger. Many-small
+and the count increments by exactly 1 per managed object regardless of size. Many-small
 allocations over-collect, few-but-large under-collect. The `adapt_factor` default of
 3.0 amplifies it: the garbage budget between collections is `(factor − 1) × live`
 *objects*, so a workload retaining large invisible payloads tolerates twice as many.
+
+**Scope narrowed 2026-09-25.** A vector of up to 508 elements now carries them inside its
+own slot, so those bytes are counted; only a longer or push-grown vector keeps an
+invisible `malloc` buffer. The size-blindness itself is untouched — a 508-element vector
+and a 1-element one still count 1 apiece.
 
 ### 11.1 The gap is ~100,000×
 
@@ -374,3 +379,15 @@ every allocation triggers a full mark — 363,713 cycles at ~980 µs, `alloc_sin
 `swept=0`, killed at 300 s. This is the concrete argument that the trigger must become
 byte-aware rather than merely tighter, and it is a ready-made reproducer. Note the
 livelock detector did not abort a textbook livelock.
+
+### 11.4 Compensating the floor for a known object-count change is NOT the fix either
+
+Measured 2026-09-25 while an intermediate design added one managed object per `vec_set`.
+That raised nqueens' collection count 8,279 → 12,495, which looked like the whole cost of
+the change. Raising `g_gc_threshold` 4096 → 6144 restored the cycle count to **exactly**
+8,279 and bought **0.4 ms of 204** (203.8 vs 204.2 at N=12).
+
+The lesson generalises past that design: collection *frequency* was not what the extra
+objects cost — sweep *volume* was, and the sweep is proportional to objects, which a
+threshold cannot change. Reach for the floor only with a measurement that separates the
+two, or the tuning looks principled and does nothing.
