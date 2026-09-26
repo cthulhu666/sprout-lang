@@ -94,9 +94,15 @@ jobs:
     # These are runtime-read env vars (see sprout_runtime.c), so a single job-level
     # declaration covers bootstrap, fixed-point verify, ci-fast-gates (incl. the
     # example canary), the stdlib/compiler test suites, compile-examples, and
-    # test-stress — no duplicated pass, near-zero added CI time.
-    #   SPROUT_GC_HDRCHECK=1 — strlen-checks every CSTR header's aux byte-length at
-    #     str_byte_len and at GC sweep, and abort()s on mismatch. This is the
+    # test-stress — no duplicated pass. Cost is ~19% on a GC-heavy emit-ir run,
+    # measured, not nil: docs/gates.md §ratio arms has the split and the reason a
+    # timing gate must be re-run under the flag before it is trusted.
+    #   SPROUT_GC_HDRCHECK=1 — two oracles. (a) The sweep's slot walk must agree
+    #     with the slotmap in both directions (a start bit where it stops, none
+    #     strictly inside a step), and a VECTOR's aux must be non-zero exactly
+    #     when its ->data points at the inline area; a desync abort()s rather
+    #     than mis-classifying slots in silence. (b) It strlen-checks every CSTR
+    #     header's aux byte-length at str_byte_len and at GC sweep. (b) is the
     #     enforcer for the "every Sprout String is headered" invariant that lets
     #     str_byte_len read payload-8 with no arena-membership check (see
     #     docs/runtime-invariant-confidence-v0.md). Off by default; a bare-string

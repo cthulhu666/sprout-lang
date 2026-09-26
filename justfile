@@ -2948,13 +2948,18 @@ test-stress: bootstrap-from-seed
     clang "$ll" "$TMPD/rtobj"/*.o {{clang_extra}} -o "$bin" 2>"$err" || { echo fail; return; }
     SPROUT_GC_STRESS=1 SPROUT_FL_VERIFY=$fv "$bin" > "$TMPD/$name.run" 2>&1 &
     pid=$!
+    # Both `wait`s carry `|| true` / `|| rc=$?` because this recipe runs under
+    # `set -euo pipefail`: a bare `wait` on a killed (137) or aborting (134)
+    # child exits the subshell before the verdict is echoed, which turns every
+    # interesting outcome into an empty .result.  Verified: a `kill -9; wait;
+    # echo` sequence under errexit never reaches the echo.
     while kill -0 "$pid" 2>/dev/null; do
       if (( waited >= STRESS_TIMEOUT_SEC )); then
-        kill -9 "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; echo timeout; return
+        kill -9 "$pid" 2>/dev/null; wait "$pid" 2>/dev/null || true; echo timeout; return
       fi
       sleep 1; waited=$((waited + 1))
     done
-    wait "$pid"; rc=$?
+    rc=0; wait "$pid" || rc=$?
     if (( rc == 0 )) && ! grep -q "SUITE FAILED" "$TMPD/$name.run"; then echo ok; else echo fail; fi
   }
   # Dispatch every file JOBS-wide; each writes its ok/fail verdict to <name>.result.

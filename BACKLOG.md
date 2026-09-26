@@ -2032,6 +2032,14 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   class-102 slots for the rest of the run. Commit 4535204c measured peak RSS *down* on two shapes,
   so this is a suspected counter-pressure, not a known regression — but no instrument reports
   retained-by-class arena bytes, so neither direction can be checked today.
+- [ ] `P3` **`opt --passes=verify` can abort in teardown, and `_test-stdlib` reports it as IR
+  INVALID.** Seen once on 2026-09-26, homebrew LLVM 23.1.1 on macOS arm64: verification succeeded,
+  then `Module::~Module` -> `BasicBlock::eraseFromParent` aborted in libsystem_malloc. The harness
+  appends the crash dump under "IR INVALID (opt --passes=verify)", so a tool flake reads as a
+  compiler bug. Not reproducible on demand — the same `.ll` verified clean three times and
+  `ir-golden-diff` showed 0 differences across 66 files. Worth distinguishing a verifier *finding*
+  (opt prints an error and exits 1) from a *crash* (signal, no finding) at the three call sites, so
+  the next one says "opt crashed" and, ideally, retries once.
 - [ ] `P2` **The class freelists are exact-fit, so a reclaimed remainder usually goes unused.**
   `g_freelist` is indexed by `slot_bytes/16` and `sprout_gc_alloc_block` pops only that class, so a
   free 4064-byte slot is invisible to the 4080-byte request beside it and to every 32-byte one.
@@ -2039,8 +2047,9 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   each split mints a class only an identically-sized object can take, and pages return to the OS
   only when a whole 1 MiB region empties. Two fixes, both reusing machinery that now exists: let a
   class-k request take a larger free slot and re-carve the remainder (the split writes exactly that
-  header today), or coalesce adjacent FREE slots during the sweep walk that already visits both.
-  Unmeasured — needs the retained-by-class instrument the entry above also wants.
+  header today), or coalesce adjacent FREE slots during the sweep walk that already visits both —
+  which needs a `slotmap_clear` for the absorbed slot's bit, or HDRCHECK's "no start bit inside a
+  step" assert fires on the merged slot. Unmeasured; needs the instrument the entry above wants.
 - [ ] `P2` **The freelists are still wiped and rebuilt from *all* regions every sweep** — a
   prerequisite for the nursery, since a minor collection that marks only young objects but rebuilds
   the whole heap's freelist is not proportional to the young set. Making them generation-scoped
