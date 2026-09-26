@@ -38,13 +38,13 @@ export type Key (..) deriving (Eq, ToString) =
 export type Mods (..) deriving (Eq, ToString) =
   | Mods Bool Bool Bool
 
-export fn mods_none() -> Mods = Mods(false, false, false)
+export let mods_none = Mods(false, false, false)
 
-export fn mods_ctrl() -> Mods = Mods(true, false, false)
+export let mods_ctrl = Mods(true, false, false)
 
-export fn mods_alt() -> Mods = Mods(false, true, false)
+export let mods_alt = Mods(false, true, false)
 
-export fn mods_shift() -> Mods = Mods(false, false, true)
+export let mods_shift = Mods(false, false, true)
 
 export fn mods_has_ctrl(m: Mods) -> Bool = match m with | Mods c _ _ -> c
 

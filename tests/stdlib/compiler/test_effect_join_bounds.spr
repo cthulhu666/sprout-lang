@@ -23,7 +23,7 @@ fn pure_arrow() -> types.Type = arrow(types.EffectPure, types.EffectPure)
 fn result_var() -> types.Type = types.TVar(types.tyvar_id("r"))
 
 # What a laundered join renders as: the slot took the IO callback.
-fn io_join_rendering() -> String = "(Int -> Int !{IO}) -> Int -> Int !{IO}"
+let io_join_rendering: String = "(Int -> Int !{IO}) -> Int -> Int !{IO}"
 
 # Both branches judged against one fresh result variable, the way `infer_if_join`
 # and `infer_branch_unify` do it. Renders the joined type, or the rejection.
@@ -74,11 +74,11 @@ fn main() -> Unit !{IO} =
     # the slot spelled differently — resolved pure, or a variable carrying a pure
     # ceiling — so what is asserted is that neither is IO.
     check_true("a joined callback slot does not take an IO callback",
-      join(pure_arrow(), io_arrow()) != io_join_rendering()),
+      join(pure_arrow(), io_arrow()) != io_join_rendering),
 
     # The mirror. A join has no first branch, so the two must not disagree.
     check_true("and not in the other order either",
-      join(io_arrow(), pure_arrow()) != io_join_rendering()),
+      join(io_arrow(), pure_arrow()) != io_join_rendering),
 
     # `!=` against the IO rendering is satisfied by a slot left as a BARE variable,
     # which is what one order produces — so it passes while holding nothing. These

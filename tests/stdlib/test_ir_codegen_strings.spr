@@ -20,7 +20,7 @@ fn contains(haystack: String, needle: String) -> Bool =
   str_find(haystack, needle) != -1
 
 # fn greeting() -> String = "hello"
-fn greeting_program() -> sprout_ir.IRProgram =
+let greeting_program =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction("greeting", Nil, "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
@@ -30,7 +30,7 @@ fn greeting_program() -> sprout_ir.IRProgram =
     Nil), Nil, Nil, Nil)
 
 # fn ab() -> String = str_concat("a", "b")
-fn concat_program() -> sprout_ir.IRProgram =
+let concat_program =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction("ab", Nil, "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
@@ -42,7 +42,7 @@ fn concat_program() -> sprout_ir.IRProgram =
     Nil), Nil, Nil, Nil)
 
 # fn take(s: Int) -> String = str_slice("hello", 0, s)
-fn slice_program() -> sprout_ir.IRProgram =
+let slice_program =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction("take", Cons(("s", sprout_ir.IRTHeap), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
@@ -54,7 +54,7 @@ fn slice_program() -> sprout_ir.IRProgram =
     Nil), Nil, Nil, Nil)
 
 # fn show(n: Int) -> String = int_to_string(n)
-fn from_int_program() -> sprout_ir.IRProgram =
+let from_int_program =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction("show", Cons(("n", sprout_ir.IRTHeap), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
@@ -65,7 +65,7 @@ fn from_int_program() -> sprout_ir.IRProgram =
 
 # Two functions that each use a "%t0" raw-ptr name — exercises the per-function
 # Dict keying so the second function's global index increments correctly.
-fn two_fns_program() -> sprout_ir.IRProgram =
+let two_fns_program =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction("g1", Nil, "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
@@ -83,73 +83,73 @@ fn main() -> Unit !{IO} =
   do
     # Substring checks are blind to whole-module malformation; verify a
     # representative lowered program of each shape actually compiles.
-    greeting_compiles <- clang_verifies_ir(ir_lowering.lower_program(greeting_program()))
-    concat_compiles <- clang_verifies_ir(ir_lowering.lower_program(concat_program()))
+    greeting_compiles <- clang_verifies_ir(ir_lowering.lower_program(greeting_program))
+    concat_compiles <- clang_verifies_ir(ir_lowering.lower_program(concat_program))
     run_suite("ir_codegen_strings", [
     # --- Pretty printer covers the new ops.
     check_true("pretty: strconst rendered",
-                contains(sprout_ir.print_ir_program(greeting_program()), "strconst")),
+                contains(sprout_ir.print_ir_program(greeting_program), "strconst")),
     check_true("pretty: strconcat rendered",
-                contains(sprout_ir.print_ir_program(concat_program()), "str_concat")),
+                contains(sprout_ir.print_ir_program(concat_program), "str_concat")),
     check_true("pretty: strslice rendered",
-                contains(sprout_ir.print_ir_program(slice_program()), "str_slice")),
+                contains(sprout_ir.print_ir_program(slice_program), "str_slice")),
     check_true("pretty: strfromint rendered",
-                contains(sprout_ir.print_ir_program(from_int_program()), "int_to_string")),
+                contains(sprout_ir.print_ir_program(from_int_program), "int_to_string")),
 
     # --- Header declares the three new runtime functions.
     check_true("header declares @str_concat",
-                contains(ir_lowering.lower_program(greeting_program()),
+                contains(ir_lowering.lower_program(greeting_program),
                          "declare i64 @str_concat(i64, i64)")),
     check_true("header declares @str_slice",
-                contains(ir_lowering.lower_program(greeting_program()),
+                contains(ir_lowering.lower_program(greeting_program),
                          "declare i64 @str_slice(i64, i64, i64)")),
     check_true("header declares @int_to_string",
-                contains(ir_lowering.lower_program(greeting_program()),
+                contains(ir_lowering.lower_program(greeting_program),
                          "declare i64 @int_to_string(i64)")),
 
     # --- IRStrConst: global, GEP, ptrtoint.
     check_true("strconst emits @.str.0 global",
-                contains(ir_lowering.lower_program(greeting_program()),
+                contains(ir_lowering.lower_program(greeting_program),
                          "@.str.0 = private unnamed_addr constant")),
     check_true("strconst emits literal body",
-                contains(ir_lowering.lower_program(greeting_program()),
+                contains(ir_lowering.lower_program(greeting_program),
                          "[6 x i8] c\"hello\\00\"")),
     # Literals are header-prefixed CSTR blocks: { i64 header, [N x i8] bytes }.
     # For "hello" (5 bytes) the header = sprout_hdr_make(CSTR=10, 5) = 10 + 5*16384.
     check_true("strconst emits headered CSTR struct global",
-                contains(ir_lowering.lower_program(greeting_program()),
+                contains(ir_lowering.lower_program(greeting_program),
                          "{ i64, [6 x i8] } { i64 81930,")),
     check_true("strconst emits getelementptr into the bytes field",
-                contains(ir_lowering.lower_program(greeting_program()),
+                contains(ir_lowering.lower_program(greeting_program),
                          "%t0 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.0, i64 0, i32 1, i64 0")),
     check_true("strconst emits ptrtoint",
-                contains(ir_lowering.lower_program(greeting_program()),
+                contains(ir_lowering.lower_program(greeting_program),
                          "%t1 = ptrtoint ptr %t0 to i64")),
 
     # --- IRStrConcat lowering.
     check_true("strconcat emits call @str_concat",
-                contains(ir_lowering.lower_program(concat_program()),
+                contains(ir_lowering.lower_program(concat_program),
                          "%t4 = call i64 @str_concat(i64 %t1, i64 %t3)")),
     check_true("two strconsts get distinct globals (.0 and .1)",
-                contains(ir_lowering.lower_program(concat_program()), "@.str.1 =")),
+                contains(ir_lowering.lower_program(concat_program), "@.str.1 =")),
 
     # --- IRStrSlice lowering.
     check_true("strslice emits call @str_slice with three i64 args",
-                contains(ir_lowering.lower_program(slice_program()),
+                contains(ir_lowering.lower_program(slice_program),
                          "%t3 = call i64 @str_slice(i64 %t1, i64 %t2, i64 %s)")),
 
     # --- IRStrFromInt lowering (op name diverges from runtime name).
     check_true("strfromint emits call @int_to_string",
-                contains(ir_lowering.lower_program(from_int_program()),
+                contains(ir_lowering.lower_program(from_int_program),
                          "%t0 = call i64 @int_to_string(i64 %n)")),
 
     # --- Multi-function globals: same raw-ptr name in two fns gets distinct globals.
     check_true("two-fn program emits @.str.0",
-                contains(ir_lowering.lower_program(two_fns_program()), "@.str.0")),
+                contains(ir_lowering.lower_program(two_fns_program), "@.str.0")),
     check_true("two-fn program emits @.str.1",
-                contains(ir_lowering.lower_program(two_fns_program()), "@.str.1")),
+                contains(ir_lowering.lower_program(two_fns_program), "@.str.1")),
     check_true("second fn's GEP references @.str.1, not @.str.0",
-                contains(ir_lowering.lower_program(two_fns_program()),
+                contains(ir_lowering.lower_program(two_fns_program),
                          "ptr @.str.1, i64 0, i32 1, i64 0")),
     check_true("greeting lowered IR compiles under clang", greeting_compiles),
     check_true("concat lowered IR compiles under clang", concat_compiles)

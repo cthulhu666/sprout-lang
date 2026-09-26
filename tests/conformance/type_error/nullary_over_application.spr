@@ -1,3 +1,4 @@
+# sprout-ignore-all lint/nullary-const-fn: rejection fixture — the declaration form is what it asserts
 module main
 
 # A nullary function over-applied. Its type is `() -> Int` — an arrow that takes

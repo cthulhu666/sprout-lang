@@ -52,9 +52,9 @@ type alias Asks = List(widget.Cmd Msg)
 
 # ── the panes ───────────────────────────────────────────────────────────────
 
-fn files_id() -> widget.WidgetId = widget.WidgetId("files")
+let files_id = widget.WidgetId("files")
 
-fn view_id() -> widget.WidgetId = widget.WidgetId("view")
+let view_id = widget.WidgetId("view")
 
 # Every directory starts unread, so nothing touches the disk until the user
 # opens something — the property `Unread` exists for.
@@ -110,17 +110,17 @@ fn shown_for(m: Msg) -> Maybe (String, Maybe buf.Caret) =
   | _ -> Nothing
 
 fn files() -> widget.Widget Msg =
-  tr.tree_with(files_id(), Nil, Open,
+  tr.tree_with(files_id, Nil, Open,
                tr.tree_opts() with (on_expand = Just(Expand),
                                     on_content = Just(listed_for), page = 10))
 
 fn viewer() -> widget.Widget Msg =
-  ta.text_area_with(view_id(), Edited,
+  ta.text_area_with(view_id, Edited,
                     ta.text_area_opts() with (on_content = Just(shown_for)))
 
 # ── the application's own widget ────────────────────────────────────────────
 
-fn keys_id() -> widget.WidgetId = widget.WidgetId("keys")
+let keys_id = widget.WidgetId("keys")
 
 # Esc reaches the broadcast only because the focused widget DECLINED it — the
 # tree and the area both let it through, which is what makes it the
@@ -154,7 +154,7 @@ fn body() -> widget.Widget Msg =
   ct.row([ct.fraction(1, files()), ct.fraction(2, viewer())])
 
 fn root() -> widget.Widget Msg =
-  focus.focus_ring([files_id(), view_id()],
+  focus.focus_ring([files_id, view_id],
                    ct.column([ct.fit(txt.label("Sprout files")),
                               ct.fraction(1, body()), ct.fit(footer()),
                               ct.fit(keys())]))
@@ -168,9 +168,9 @@ fn update(m: Msg, w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow, Asks) =
   match m with
   | Quit -> app.done(w, app.Quit)
   | Expand segs ->
-      (w, app.Continue, [widget.cmd_to(files_id(), \_ -> read_children(segs))])
+      (w, app.Continue, [widget.cmd_to(files_id, \_ -> read_children(segs))])
   | Open segs ->
-      (w, app.Continue, [widget.cmd_to(view_id(), \_ -> read_body(segs))])
+      (w, app.Continue, [widget.cmd_to(view_id, \_ -> read_body(segs))])
   | _ -> app.done(w, app.Continue)
 
 # The first read is the root directory, asked for before the first frame so the
@@ -178,7 +178,7 @@ fn update(m: Msg, w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow, Asks) =
 # answers on, which is what lets it address the tree directly.
 fn boot(scope: Scope, ch: Chan (app.Signal Msg)) -> Unit !{IO} = do
   m <- read_children(Nil)
-  chan_send(ch, app.SigTo(files_id(), m))
+  chan_send(ch, app.SigTo(files_id, m))
 
 fn main() -> Unit !{IO} =
   app.run(app.App(root = root(), update = update, tick_ms = 500, boot = boot))

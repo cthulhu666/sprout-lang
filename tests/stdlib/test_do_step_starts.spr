@@ -15,41 +15,41 @@ import stdlib.test (TestState, new_state, assert_true, summary)
 # is NOT the first — the only position where the scan can swallow it. A form
 # missing from the allow-list fails this file at PARSE time.
 
-fn pre() -> Int = 0
+let pre: Int = 0
 
 fn s_true() -> Bool =
   do
-    pre()
+    pre
     true
 
 fn s_false() -> Bool =
   do
-    pre()
+    pre
     false
 
 fn s_int() -> Int =
   do
-    pre()
+    pre
     42
 
 fn s_float() -> Double =
   do
-    pre()
+    pre
     3.5
 
 fn s_char() -> Char =
   do
-    pre()
+    pre
     'z'
 
 fn s_string() -> String =
   do
-    pre()
+    pre
     "hi"
 
 fn s_template() -> String =
   do
-    pre()
+    pre
     `v=${1 + 1}`
 
 # The lambda is a discarded middle step, not the block's value: returning it
@@ -58,63 +58,63 @@ fn s_template() -> String =
 # Step position is what this file tests, and a middle step tests it just as well.
 fn s_lambda() -> Int =
   do
-    pre()
+    pre
     \x -> x + 1
     5
 
 fn s_list() -> List Int =
   do
-    pre()
+    pre
     [1, 2, 3]
 
 fn s_dict() -> Dict Int =
   do
-    pre()
+    pre
     {alpha: 1, beta: 2}
 
 fn s_paren() -> Int =
   do
-    pre()
+    pre
     (1 + 2)
 
 fn s_ident() -> Int =
   do
-    pre()
-    pre() + 5
+    pre
+    pre + 5
 
 fn s_neg() -> Int =
   do
-    pre()
+    pre
     -5
 
 fn s_bang() -> Bool =
   do
-    pre()
+    pre
     ! false
 
 fn s_let() -> Int =
   do
-    pre()
+    pre
     let a = 4
     a + 1
 
 fn s_if() -> Int =
   do
-    pre()
+    pre
     if true then 6 else 0
 
 fn s_match() -> Int =
   do
-    pre()
+    pre
     match Just(7) with
     | Just n -> n
     | Nothing -> 0
 
 fn s_do() -> Int =
   do
-    pre()
+    pre
     do
-      pre()
+      pre
       9
 
 fn main() -> Unit !{IO} =

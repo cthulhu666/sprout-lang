@@ -51,7 +51,7 @@ fn counter_measure(n: Int, avail: g.Size) -> widget.Measured =
 
 fn counter_render(n: Int, r: g.Region, s: scr.Screen) -> Unit !{IO} = do
   stop <- scr.screen_write(s, g.region_col(r), g.region_row(r), to_string(n),
-                           sty.style_default())
+                           sty.style_default)
   ()
 
 fn counter(n: Int) -> widget.Widget Msg =
@@ -70,7 +70,7 @@ fn label_measure(s: String, avail: g.Size) -> widget.Measured =
 
 fn label_render(s: String, r: g.Region, sc: scr.Screen) -> Unit !{IO} = do
   stop <- scr.screen_write(sc, g.region_col(r), g.region_row(r), s,
-                           sty.style_default())
+                           sty.style_default)
   ()
 
 fn label(s: String) -> widget.Widget Msg =
@@ -105,7 +105,7 @@ fn said_outer(w: widget.Widget Outer, ev: event.Event) -> String =
   match widget.on_event(w, ev) with
   | (_, ms, _) -> to_string(ms)
 
-fn key() -> event.Event = event.KeyPress(event.KEnter, event.mods_none())
+let key = event.KeyPress(event.KEnter, event.mods_none)
 
 fn main() -> Unit !{IO} = do
   state <- new_state()
@@ -128,19 +128,19 @@ fn event_cases(state: TestState) -> Unit !{IO} = do
   assert_eq(state, "a tick emits no message", said(counter(0), event.TickEvent), "[]")
 
   assert_eq(state, "a keypress leaves the state alone",
-            width_of(stepped(counter(7), key())), 7)
+            width_of(stepped(counter(7), key)), 7)
   assert_eq(state, "a keypress emits the current count",
-            said(counter(7), key()), "[Bumped(7)]")
+            said(counter(7), key), "[Bumped(7)]")
 
   # `feed` folds a list in order: three ticks, then a key reporting 3. A fold in
   # the wrong order would report 0.
   assert_eq(state, "feed folds every event in order",
             width_of(fed(counter(0), [event.TickEvent, event.TickEvent, event.TickEvent])), 3)
   assert_eq(state, "feed reports messages from the state at the time",
-            said_all(counter(0), [event.TickEvent, event.TickEvent, event.TickEvent, key()]),
+            said_all(counter(0), [event.TickEvent, event.TickEvent, event.TickEvent, key]),
             "[Bumped(3)]")
   assert_eq(state, "feed concatenates across events",
-            said_all(counter(0), [key(), event.TickEvent, key()]),
+            said_all(counter(0), [key, event.TickEvent, key]),
             "[Bumped(0), Bumped(1)]")
 
   assert_eq(state, "feeding nothing changes nothing", width_of(fed(counter(4), Nil)), 4)
@@ -160,8 +160,8 @@ fn hidden_state_cases(state: TestState) -> Unit !{IO} = do
   assert_eq(state, "a heterogeneous list measures each widget",
             to_string(list_map(width_of, ws)), "[3, 5]")
 
-  assert_eq(state, "the counter speaks for itself", said(counter(9), key()), "[Bumped(9)]")
-  assert_eq(state, "the label speaks for itself", said(label("hi"), key()), "[Said(hi)]")
+  assert_eq(state, "the counter speaks for itself", said(counter(9), key), "[Bumped(9)]")
+  assert_eq(state, "the label speaks for itself", said(label("hi"), key), "[Said(hi)]")
 
   # Advancing every widget in the list touches only each one's own state: the
   # label ignores a tick, the counter does not.
@@ -176,7 +176,7 @@ fn tick_once(w: widget.Widget Msg) -> widget.Widget Msg =
 fn map_cases(state: TestState) -> Unit !{IO} = do
   let outer = widget.map_msgs(wrap_msg, unwrap_msg, counter(5))
   assert_eq(state, "map_msgs retargets the emitted messages",
-            said_outer(outer, key()), "[Wrapped(Bumped(5))]")
+            said_outer(outer, key), "[Wrapped(Bumped(5))]")
   assert_eq(state, "map_msgs leaves the hidden state alone", width_of(outer), 5)
 
   # The mapped box is still a working widget: it must keep stepping.

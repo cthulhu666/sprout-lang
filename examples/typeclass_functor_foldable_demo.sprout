@@ -12,11 +12,11 @@ fn map_and_sum_list(xs: List Int) -> Int where Functor List, Foldable List =
 fn map_and_sum_vec(xs: Vec Int) -> Int where Functor Vec, Foldable Vec =
   map_and_sum(xs)
 
-fn sample_list() -> List Int =
+let sample_list: List Int =
   [1, 2, 3]
 
-fn sample_vec() -> Vec Int =
+let sample_vec: Vec Int =
   [4, 5, 6]
 
 fn main() -> Unit !{IO} =
-  print(map_and_sum_list(sample_list()) + map_and_sum_vec(sample_vec()))
+  print(map_and_sum_list(sample_list) + map_and_sum_vec(sample_vec))

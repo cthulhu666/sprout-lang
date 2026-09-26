@@ -1,3 +1,4 @@
+# sprout-ignore-all lint/nullary-const-fn: rejection fixture — the declaration form is what it asserts
 # A NESTED type as an instance argument — the third route to a head the key
 # cannot represent. `List (Maybe a)` is neither a concrete argument nor a
 # repeated variable, but it still keys `@inst:Nested:List`, so it answers for

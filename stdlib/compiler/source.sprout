@@ -248,14 +248,14 @@ export fn display_ctor_name(name: String) -> String =
 # The marker and the message live here rather than in either of them: the bundler
 # renders it for types, `infer` for values and patterns, and one rule should not
 # grow three explanations.
-export fn canonical_marker() -> String = "@canonical:"
+export let canonical_marker: String = "@canonical:"
 
 export fn is_canonical_marked(name: String) -> Bool =
-  string.starts_with(name, canonical_marker())
+  string.starts_with(name, canonical_marker)
 
 export fn strip_canonical_marker(name: String) -> String =
   if is_canonical_marked(name)
-  then string.drop(name, string.length(canonical_marker()))
+  then string.drop(name, string.length(canonical_marker))
   else name
 
 # Both halves of the advice, because the message cannot know which module it is

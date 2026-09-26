@@ -1459,7 +1459,7 @@ fn guard_canonical(ctx: ResolveCtx, scope: List String, name: String) -> String 
   else
     match dict_get(name, ctx_canonical_names(ctx)) with
     | Nothing -> name
-    | Just _ -> source.canonical_marker() ++ name
+    | Just _ -> source.canonical_marker ++ name
 
 fn head_segment(name: String) -> String =
   match split_at_dot(name) with
@@ -1837,6 +1837,33 @@ fn publish_if_marked(ctor_types: List String, decl: ast.Decl) -> ast.Decl =
 # as a mismatch between two spellings that read identically (`T` vs `mod.T`),
 # arbitrarily far from the annotation that caused it.
 
+# ---------------------------------------------------------------------------
+# The `no_prelude` floor  (docs/no-prelude-core-v0.md)
+# ---------------------------------------------------------------------------
+#
+# `no_prelude` suppresses the standard LIBRARY, not the language's runtime
+# interface. The floor is the part of the prelude a file cannot opt out of: the
+# `extern fn` declarations whose signatures range only over scalar primitives.
+# Nothing else — no types, no classes, no instances, no Sprout functions.
+#
+# The floor is DERIVED, not listed. There is no roster of floor names anywhere:
+# an extern is in the floor iff every type it mentions is in floor_type_names
+# or is a type variable. Add a primitive-only extern to the prelude and it joins
+# the floor; give one a `Maybe` and it does not. That is deliberate — a hand-kept
+# roster is the second source of truth this whole change exists to avoid.
+#
+# WHY SCALARS AND NOT `undeclared_type_names` (:1402). That list — the builtin
+# type constants — also carries `Vector`, `Map`, `NativeSet`, `Ref`, `Bytes`,
+# `Builder`, which are runtime backing stores the prelude does NOT declare. Using
+# it here is a one-word change and would widen the floor from 15 externs to ~31,
+# admitting the `vector_*` / `map_* `/ `native_set_*` / `ref_*` families. It is a
+# coherent alternative and costs no extra code — see docs/no-prelude-core-v0.md
+# §4.3. The narrower cut was chosen because those families are data structures,
+# which is what a standard library is for, and because a smaller floor is a
+# smaller collision surface for a file that opted out (§11.1).
+let floor_type_names: List String =
+  ["Int", "Double", "Bool", "String", "Char", "Unit"]
+
 # Names that are legitimately used in a type position with no declaration to
 # find. The first row is the language's primitives; the second is opaque
 # C-runtime types that back stdlib declarations (`Vector` for Vec/MutVec, `Map`
@@ -1848,45 +1875,19 @@ fn publish_if_marked(ctor_types: List String, decl: ast.Decl) -> ast.Decl =
 # is here. `Builder` was the miss that made 234 of 656 corpus files fail — it
 # reaches a type position only through an extern, which is exactly the position
 # the pre-existing type-validation pass in infer does not cover.
-fn undeclared_type_names() -> List String =
+let undeclared_type_names: List String =
   ["Int", "Double", "Bool", "String", "Char", "Unit", "Bytes",
    "Vector", "Map", "NativeSet", "Ref", "Builder"]
 
-# ---------------------------------------------------------------------------
-# The `no_prelude` floor  (docs/no-prelude-core-v0.md)
-# ---------------------------------------------------------------------------
-#
-# `no_prelude` suppresses the standard LIBRARY, not the language's runtime
-# interface. The floor is the part of the prelude a file cannot opt out of: the
-# `extern fn` declarations whose signatures range only over scalar primitives.
-# Nothing else — no types, no classes, no instances, no Sprout functions.
-#
-# The floor is DERIVED, not listed. There is no roster of floor names anywhere:
-# an extern is in the floor iff every type it mentions is in floor_type_names()
-# or is a type variable. Add a primitive-only extern to the prelude and it joins
-# the floor; give one a `Maybe` and it does not. That is deliberate — a hand-kept
-# roster is the second source of truth this whole change exists to avoid.
-#
-# WHY SCALARS AND NOT `undeclared_type_names()` (:1402). That list — the builtin
-# type constants — also carries `Vector`, `Map`, `NativeSet`, `Ref`, `Bytes`,
-# `Builder`, which are runtime backing stores the prelude does NOT declare. Using
-# it here is a one-word change and would widen the floor from 15 externs to ~31,
-# admitting the `vector_*` / `map_* `/ `native_set_*` / `ref_*` families. It is a
-# coherent alternative and costs no extra code — see docs/no-prelude-core-v0.md
-# §4.3. The narrower cut was chosen because those families are data structures,
-# which is what a standard library is for, and because a smaller floor is a
-# smaller collision surface for a file that opted out (§11.1).
-fn floor_type_names() -> List String =
-  ["Int", "Double", "Bool", "String", "Char", "Unit"]
 
 # Deliberately NOT unresolved_in_type: that helper admits every name in
-# undeclared_type_names() before consulting its `declared` argument, so it cannot
+# undeclared_type_names before consulting its `declared` argument, so it cannot
 # express a set narrower than the builtins. This walk answers a different
 # question — "does this type range only over the floor?" — and says so.
 fn type_over_floor(t: ast.TypeExpr) -> Bool =
   match t with
   | ast.TypeName name ->
-      type_name_starts_lower(name) || str_list_member(name, floor_type_names())
+      type_name_starts_lower(name) || str_list_member(name, floor_type_names)
   | ast.TypeApply base arg -> type_over_floor(base) && type_over_floor(arg)
   | ast.TypeArrow left right _ _ -> type_over_floor(left) && type_over_floor(right)
   | ast.TypeThunk right _ -> type_over_floor(right)
@@ -1971,7 +1972,7 @@ fn declared_type_names(decls: List ast.Decl, acc: Dict String) -> Dict String =
 
 fn type_name_in_scope(name: String, declared: Dict String) -> Bool =
   if type_name_starts_lower(name) then true
-  else if str_list_member(name, undeclared_type_names()) then true
+  else if str_list_member(name, undeclared_type_names) then true
   else
     match dict_get(name, declared) with
     | Just _ -> true
@@ -2232,7 +2233,7 @@ fn exporting_module(name: String, declared_names: List String) -> Maybe String =
       else exporting_module(name, rest)
 
 fn unresolved_type_message(name: String, decl_name: String, declared: Dict String) -> String =
-  if str_starts_with(name, source.canonical_marker())
+  if str_starts_with(name, source.canonical_marker)
   then source.canonical_name_message(name)
   else
     match exporting_module(name, dict_keys_list(declared)) with

@@ -40,12 +40,12 @@ fn sentry_issue_detail_url(issue_id: String) -> String =
 fn json_error_to_http_error(err: JsonError) -> HttpError =
   HttpDecode(json_error_message(err))
 
-fn preview_limit() -> Int =
+let preview_limit: Int =
   160
 
 fn preview_body(body: String) -> String =
-  if strlib.length(body) <= preview_limit() then body
-  else strlib.concat(strlib.slice(body, 0, preview_limit()), "...")
+  if strlib.length(body) <= preview_limit then body
+  else strlib.concat(strlib.slice(body, 0, preview_limit), "...")
 
 # The body is Bytes now, so a JSON response is decoded ONCE here and both the parse and the error
 # preview work on that String. A body that is not text fails as an HttpDecode rather than reaching

@@ -54,7 +54,7 @@ fn payload() -> Bytes =
     )
   )
 
-fn expected_len() -> Int =
+let expected_len: Int =
   20
 
 # A Content-Length response: the direct-copy path.
@@ -66,7 +66,7 @@ fn framed_response() -> Bytes =
       bytes.builder_bytes(bytes.from_string(
         string.concat(
           "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: ",
-          string.concat(int_to_string(expected_len()), "\r\n\r\n")
+          string.concat(int_to_string(expected_len), "\r\n\r\n")
         )
       )),
       bytes.builder_bytes(payload())

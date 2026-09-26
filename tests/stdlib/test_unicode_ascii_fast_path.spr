@@ -16,11 +16,11 @@ fn absent(count: Int, chunk: Int -> String, cp: Int) -> Bool =
 
 fn checked(st: TestState, cp: Int) -> Unit !{IO} = do
   assert_true(st, `gcb table skips ${int_to_string(cp)}`,
-              absent(tables.gcb_count(), tables.gcb_chunk, cp))
+              absent(tables.gcb_count, tables.gcb_chunk, cp))
   assert_false(st, `extpict table skips ${int_to_string(cp)}`,
-               lookup.has_tag(tables.extpict_count(), tables.extpict_chunk, cp))
+               lookup.has_tag(tables.extpict_count, tables.extpict_chunk, cp))
   assert_true(st, `incb table skips ${int_to_string(cp)}`,
-              absent(tables.incb_count(), tables.incb_chunk, cp))
+              absent(tables.incb_count, tables.incb_chunk, cp))
   assert_eq(st, `gcb of ${int_to_string(cp)}`, grapheme.gcb(cp), "O")
 
 fn printable_go(st: TestState, cp: Int) -> Unit !{IO} =

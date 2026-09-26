@@ -809,20 +809,22 @@ fn ownership_mismatch_error(l: types.Type, r: types.Type,
   "ownership mismatch: " ++ types.type_to_string(l) ++ " vs " ++ types.type_to_string(r)
     ++ " — " ++ ownership_mismatch_reason(o1, o2)
 
-fn ownership_mismatch_reason(o1: types.Ownership, o2: types.Ownership) -> String =
-  if types.ownership_is_once(o1) || types.ownership_is_once(o2) then once_mismatch_reason()
-  else borrow_mismatch_reason()
-
-fn once_mismatch_reason() -> String =
-  "these differ only in whether the parameter is `once`, and that must match exactly: `once` promises the callee invokes it at most once, which is what licenses a caller to move a linear value into the closure it passes — a function without the promise cannot stand in for one with it"
-
 # DIRECTION-AGNOSTIC, for the reason list_vec_hint below is: the two sides arrive
 # in opposite orders depending on position, so naming one of them as the expected
 # one is wrong half the time. It read "a function that borrows cannot stand in
 # where one that consumes is expected" and was printed verbatim over
 # `borrowing File -> Int vs File -> Int`, which is the other case.
-fn borrow_mismatch_reason() -> String =
+let borrow_mismatch_reason: String =
   "these differ only in how the parameter is taken, and a `borrowing` parameter's convention must match exactly in either direction: a borrowing function standing in for a consuming one leaves the value unreleased, and a consuming one standing in for a borrowing one releases a value its caller still owns"
+
+let once_mismatch_reason: String =
+  "these differ only in whether the parameter is `once`, and that must match exactly: `once` promises the callee invokes it at most once, which is what licenses a caller to move a linear value into the closure it passes — a function without the promise cannot stand in for one with it"
+
+fn ownership_mismatch_reason(o1: types.Ownership, o2: types.Ownership) -> String =
+  if types.ownership_is_once(o1) || types.ownership_is_once(o2) then once_mismatch_reason
+  else borrow_mismatch_reason
+
+
 
 # A unification mismatch. If either side is (or mentions) a skolem, the real
 # fault is an existential type leaking out of its match branch — rephrase rather

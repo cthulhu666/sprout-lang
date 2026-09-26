@@ -41,7 +41,7 @@ fn expect_status(conn: borrowing TcpConnection, want: String, marker: String) ->
       else terminal.write(`MISMATCH: ${marker} got ${reply}\n`)
   | Err _ -> terminal.write(`MISMATCH: ${marker} read failed\n`)
 
-fn headers() -> String = "POST /bin HTTP/1.1\r\nHost: x\r\nContent-Length: 3\r\n\r\n"
+let headers: String = "POST /bin HTTP/1.1\r\nHost: x\r\nContent-Length: 3\r\n\r\n"
 
 # One write: headers and body arrive together, so continue_read_request satisfies the length from
 # what is already buffered and the read loop never runs.
@@ -49,7 +49,7 @@ fn inline_client(port: Int) -> Unit !{IO} =
   match connect("127.0.0.1", port) with
   | Ok conn ->
     do
-      match write_all(conn, bytes.append(bytes.from_string(headers()), payload())) with
+      match write_all(conn, bytes.append(bytes.from_string(headers), payload())) with
       | Ok _ -> expect_status(conn, "HTTP/1.1 200", "binary-inline-200")
       | Err _ -> terminal.write("MISMATCH: inline client could not send\n")
       close(conn)
@@ -61,7 +61,7 @@ fn split_client(port: Int) -> Unit !{IO} =
   match connect("127.0.0.1", port) with
   | Ok conn ->
     do
-      match write_all_utf8(conn, headers()) with
+      match write_all_utf8(conn, headers) with
       | Ok _ ->
           do
             task_sleep(100)

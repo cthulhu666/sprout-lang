@@ -1,3 +1,4 @@
+# sprout-ignore-all lint/nullary-const-fn: conformance fixture — the nullary form is the program under test
 # Tests that two constraints on the same class (ToString e, ToString a) work correctly.
 # Previously failing with "Ambiguous constraint forwarding" because the typechecker uses
 # internal TVar names (t1223) in resolved_constraint while lowering keyed on programmer

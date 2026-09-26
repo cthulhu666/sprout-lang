@@ -42,7 +42,7 @@ fn join_labels(xs: List a) -> String where Label a =
 
 fn concat_strings(xs: List String) -> String = list_fold(\ (acc, s) -> `${acc}|${s}`, "", xs)
 
-fn no_ints() -> List Int = []
+let no_ints: List Int = []
 
 fn main() -> Unit !{IO} =
   run_suite("lambda_arg_constrained_dispatch", [
@@ -64,5 +64,5 @@ fn main() -> Unit !{IO} =
 
     # Fold: seed and list fix different type variables of the same call.
     check_eq("forwarded dict through a fold", join_labels([5, 6]), "|i5|i6"),
-    check_true("forwarded dict survives an empty list", join_labels(no_ints()) == "")
+    check_true("forwarded dict survives an empty list", join_labels(no_ints) == "")
   ])

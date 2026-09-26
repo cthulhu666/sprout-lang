@@ -12,7 +12,7 @@ module examples.vec_basics
 
 # The class's exam scores. The body is a bare list literal; because the return
 # type is `Vec Int`, it denotes a `Vec` directly — no `vec_from_list` wrapper.
-fn scores() -> Vec Int =
+let scores: Vec Int =
   [88, 72, 95, 61, 88, 45, 79]
 
 # A flat +5 curve on every score, capped at 100.
@@ -35,7 +35,7 @@ fn combine(a: Vec Int, b: Vec Int) -> Vec Int =
 
 fn main() -> Unit !{IO} =
   do
-    let s = scores()
+    let s = scores
 
     # --- Basic queries -------------------------------------------------------
     print("scores:        " ++ to_string(s))

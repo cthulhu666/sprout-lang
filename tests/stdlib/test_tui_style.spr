@@ -11,7 +11,7 @@ fn esc() -> String = char_to_str(27)
 
 fn sgr(body: String) -> String = esc() ++ "[" ++ body ++ "m"
 
-fn plain() -> st.Style = st.style_default()
+fn plain() -> st.Style = st.style_default
 
 fn main() -> Unit !{IO} =
   run_suite("tui.style", [
@@ -64,5 +64,5 @@ fn main() -> Unit !{IO} =
 
     # --- Eq on Style is what the screen diff will compare cells with ---
     check_eq("styles built the same way are equal",
-             st.with_bold(plain(), true), st.with_bold(st.style_default(), true))
+             st.with_bold(plain(), true), st.with_bold(st.style_default, true))
   ])

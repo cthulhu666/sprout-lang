@@ -10,9 +10,9 @@ import stdlib.test (check_eq, run_suite)
 
 # --- 1. The forms `[` already had must keep working, unchanged. ---
 
-fn plain_literal() -> List Int = [1, 2, 3]
+let plain_literal: List Int = [1, 2, 3]
 
-fn empty_literal() -> List Int = []
+let empty_literal: List Int = []
 
 # The list TAIL PATTERN is why Haskell's `[e | x <- xs]` spelling was unavailable
 # (D1). `|` in pattern position must be untouched by the new expression form.
@@ -68,8 +68,8 @@ fn range_source_then_guard(n: Int) -> List Int =
 
 fn main() -> Unit !{IO} =
   run_suite("comprehension_parse", [
-    check_eq("plain list literal still parses", plain_literal(), [1, 2, 3]),
-    check_eq("empty list literal still parses", empty_literal(), []),
+    check_eq("plain list literal still parses", plain_literal, [1, 2, 3]),
+    check_eq("empty list literal still parses", empty_literal, []),
     check_eq("tail pattern still parses (two or more)", tail_pattern([7, 8, 9]), 15),
     check_eq("tail pattern still parses (exactly one)", tail_pattern([7]), 7),
     check_eq("tail pattern still parses (empty)", tail_pattern([]), 0),

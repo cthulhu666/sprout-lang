@@ -32,8 +32,8 @@ fn render(cell: Cell) -> String =
   match cell with
   | Cell x -> to_string(x)
 
-fn row() -> List Cell =
+let row =
   [Cell(42), Cell("ready"), Cell(true), Cell (Celsius(21))]
 
 fn main() -> Unit !{IO} =
-  list_each(\cell -> print(render(cell)), row())
+  list_each(\cell -> print(render(cell)), row)

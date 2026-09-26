@@ -434,7 +434,10 @@ let answer : Int = 42
 
 The initializer is checked against the written type: its inferred type must
 unify with the annotation, or it is a compile error
-(`type annotation mismatch for \`<name>\`: …`). The annotation is applied before
+(`type annotation mismatch for \`<name>\`: …`).
+**Known limitation:** the annotation currently resolves only prelude type names.
+A module-local or imported one is rejected as unknown, even where a `fn`
+signature in the same file resolves it (`BACKLOG.md`). The annotation is applied before
 generalization, so it narrows the binding's type — and, like a function
 parameter/return annotation, it drives the same expected-type-directed literal
 lowering, so `let xs : Vec Int = [1, 2, 3]` yields a `Vec` (§5.5.1) at the

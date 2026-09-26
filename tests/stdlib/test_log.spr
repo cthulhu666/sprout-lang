@@ -25,7 +25,7 @@ fn append_line(buf: Ref String, line: String) -> Unit !{IO} =
 fn capture_logger(buf: Ref String) -> Logger =
   logger_with_sink(Info, \line -> append_line(buf, line))
 
-fn two_fields() -> Vec (String, String) =
+let two_fields: Vec (String, String) =
   [("method", "GET"), ("status", "200")]
 
 fn main() -> Unit !{IO} =
@@ -48,7 +48,7 @@ fn main() -> Unit !{IO} =
 
     # --- Pure: line formatting (fixed timestamp in) ------------------------
     assert_eq(state, "formatted line: ts LEVEL msg then k=v fields in order",
-      format_line("2026-07-18T14:03:21Z", Info, "request", two_fields()),
+      format_line("2026-07-18T14:03:21Z", Info, "request", two_fields),
       "2026-07-18T14:03:21Z INFO request method=GET status=200")
     assert_eq(state, "no fields: no trailing space",
       format_line("2026-07-18T14:03:21Z", Error, "boom", vec_empty()),

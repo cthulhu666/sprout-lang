@@ -36,7 +36,7 @@ export fn pass_from_name(name: String) -> Maybe Pass =
   | "licm" -> Just(Licm)
   | _ -> Nothing
 
-export fn all_passes() -> List Pass =
+export let all_passes =
   [Dle, Cse, Licm]
 
 # Which of those the pipeline actually runs. `Cse`/`Licm` are named before they
@@ -109,4 +109,4 @@ fn warn_unrecognised(names: List String) -> Unit !{IO} =
   | [] -> ()
   | _ ->
       eprint("[opt] warning: SPROUT_OPT_OFF names no such pass: " ++ string.join(",", names)
-             ++ " (known: " ++ string.join(",", list_map(pass_name, all_passes())) ++ ")")
+             ++ " (known: " ++ string.join(",", list_map(pass_name, all_passes)) ++ ")")

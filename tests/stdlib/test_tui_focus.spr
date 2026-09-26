@@ -94,7 +94,7 @@ fn probe_c() -> widget.Widget Msg = probe("c", c_on_event, c_handler)
 
 # ── observing ───────────────────────────────────────────────────────────────
 
-fn key(k: event.Key) -> event.Event = event.KeyPress(k, event.mods_none())
+fn key(k: event.Key) -> event.Event = event.KeyPress(k, event.mods_none)
 
 fn said(r: (widget.Widget Msg, Says, Asks)) -> String =
   match r with
@@ -147,8 +147,8 @@ fn to_button(w: widget.Widget Msg, d: widget.Delivery Msg) -> Reply =
 # Underline rather than reverse, so the assertion cannot pass on the default.
 fn underlined_button() -> widget.Widget Msg =
   btn.button_styled(widget.WidgetId("b1"),
-                    focus.FocusStyle(normal = sty.style_default(),
-                                     focused = sty.with_underline(sty.style_default(),
+                    focus.FocusStyle(normal = sty.style_default,
+                                     focused = sty.with_underline(sty.style_default,
                                                                   true)),
                     "ok", Pressed(1))
 
@@ -290,7 +290,7 @@ fn button_cases(state: TestState) -> Unit !{IO} = do
   # either, so it falls through to the broadcast rather than pressing.
   assert_eq(state, "alt-Space is a chord, not a press",
             fed(button_ring(),
-                [event.KeyPress(event.KChar(' '), event.mods_alt())]), "[]")
+                [event.KeyPress(event.KChar(' '), event.mods_alt)]), "[]")
   # Only the focused one fires, which is the reason focus exists.
   assert_eq(state, "Tab moves which button Enter fires",
             fed(button_ring(), [key(event.KTab), key(event.KEnter)]),

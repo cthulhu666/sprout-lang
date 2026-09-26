@@ -33,13 +33,13 @@ import stdlib.tui.widgets.text as txt
 
 # The gate divides by these, so its budget is per painted cell rather than a
 # number that means nothing without this file open.
-fn cols() -> Int = 200
+let cols: Int = 200
+let rows: Int = 50
+let frames: Int = 20
 
-fn rows() -> Int = 50
 
-fn frames() -> Int = 20
 
-fn size() -> g.Size = g.Size(cols(), rows())
+let size = g.Size(cols, rows)
 
 # Sprout has no `%` (stdlib/math.sprout:211).
 fn third(i: Int) -> Int = i - (i / 3) * 3
@@ -74,8 +74,8 @@ fn painted(s: scr.Screen, n: Int) -> Unit !{IO} =
   if n <= 0 then () else frame(s, n)
 
 fn frame(s: scr.Screen, n: Int) -> Unit !{IO} = do
-  scr.screen_clear(s, sty.style_default())
-  widget.render(tree(n), g.region_at_origin(size()), s)
+  scr.screen_clear(s, sty.style_default)
+  widget.render(tree(n), g.region_at_origin(size), s)
   # The diff and its emission are part of the path a real frame takes, so they
   # are part of the price.
   scr.diff_to_ansi(s)
@@ -84,6 +84,6 @@ fn frame(s: scr.Screen, n: Int) -> Unit !{IO} = do
 # The denominator is printed rather than duplicated in the gate script, which
 # would drift the moment the workload changed size.
 fn main() -> Unit !{IO} = do
-  s <- scr.screen_new(size())
-  painted(s, frames())
-  print(`cost-probe cells=${int_to_string(cols() * rows() * frames())}`)
+  s <- scr.screen_new(size)
+  painted(s, frames)
+  print(`cost-probe cells=${int_to_string(cols * rows * frames)}`)

@@ -15,12 +15,12 @@ import ide.editor as ed
 # One constant, two consumers: `app.App.tick_ms` and the budget `WhenIdle`
 # counts in. A widget cannot convert between them — `TickEvent` carries no
 # payload and `tick_ms` is the application's field.
-export fn tick_ms() -> Int = 500
+export let tick_ms: Int = 500
 
 # Never zero, whatever the flag says: a delay shorter than one frame still has
 # to wait for a frame, and a budget of zero ticks would fire on the very tick
 # that carries the keystroke it is counting from.
-fn idle_ticks(ms: Int) -> Int = if ms < tick_ms() then 1 else ms / tick_ms()
+fn idle_ticks(ms: Int) -> Int = if ms < tick_ms then 1 else ms / tick_ms
 
 # `--save-when`. An absent flag reads as the empty spec, so "missing" and
 # "unrecognised" take one path and the default is named in one place.
@@ -30,9 +30,9 @@ export fn save_when(a: args.Args) -> ed.SaveWhen =
 # VS Code's `files.autoSaveDelay`. Autosave is ON by default because a terminal
 # has no frame deactivation and no tab to close, so the idle timer is the only
 # continuous trigger there is (docs/ide-save-v0.md §7).
-fn default_ms() -> Int = 1000
+let default_ms: Int = 1000
 
-fn default_when() -> ed.SaveWhen = ed.WhenIdle(idle_ticks(default_ms()))
+fn default_when() -> ed.SaveWhen = ed.WhenIdle(idle_ticks(default_ms))
 
 # `manual | idle:MS | unfocused`. Anything else falls back rather than exiting:
 # the IDE takes the terminal over on the next line, so a usage error would be

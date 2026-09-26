@@ -14,7 +14,7 @@ import stdlib.scram as scram
 # (`musttail`) it completes and returns true. RFC 5802 test vector (user/pencil).
 # Doubles as the first native coverage of the SCRAM proof path.
 
-fn server_first_raw() -> String =
+let server_first_raw: String =
   "r=fyko+d2lbbFgONRv9qkxdawL3rfcNHYJY1ZVvWVs7j,s=QSXCR+Q6sek8bf92,i=4096"
 
 fn client_bare() -> String =
@@ -23,10 +23,10 @@ fn client_bare() -> String =
 # Pure: runs the full PBKDF2 (4096 HMAC iterations) via client_proof. Returns
 # true iff a proof was produced (i.e. the loop completed without exhausting).
 fn compute_proof() -> Bool =
-  match scram.parse_server_first(server_first_raw()) with
+  match scram.parse_server_first(server_first_raw) with
   | Err _ -> false
   | Ok server ->
-      match scram.client_proof("pencil", client_bare(), server, scram.no_channel_binding()) with
+      match scram.client_proof("pencil", client_bare(), server, scram.no_channel_binding) with
       | Err _ -> false
       | Ok _ -> true
 

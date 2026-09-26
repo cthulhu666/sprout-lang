@@ -3,6 +3,9 @@ import stdlib.net (TcpConnection, connect, close)
 import stdlib.string as string
 import stdlib.terminal as terminal
 
+# Two-thirds of attempts must be genuine mid-resolve force-drops; the rest may be legitimate fallback.
+let floor: Int = 40
+
 # Cancelling a task mid-DNS-resolve must not hang, crash, or corrupt state — this is the first OS
 # thread in the runtime (finding 10), and cancellation is the delicate path: a force-drop closes the
 # pipe read end (Task.park_close_fd) and drops the task's refcount (dns_abandon park_cleanup) while a
@@ -29,10 +32,10 @@ import stdlib.terminal as terminal
 #
 # The connect target has nothing listening; the resolve is abandoned before the connect syscall is
 # reached. Hermetic — no peer, no network.
-fn port() -> Int = 28994
+let port: Int = 28994
 
 fn resolve_once() -> Bool !{IO} =
-  match connect("localhost", port()) with
+  match connect("localhost", port) with
   | Ok conn ->
       do
         close(conn)
@@ -47,10 +50,8 @@ fn run_attempt() -> Int !{IO} =
   | Expired -> 1
   | Completed _ -> 0
 
-fn attempts() -> Int = 60
+let attempts: Int = 60
 
-# Two-thirds of attempts must be genuine mid-resolve force-drops; the rest may be legitimate fallback.
-fn floor() -> Int = 40
 
 # Drain the detached resolver thread (task_sleep(50) > the 40 ms delay) before the next attempt, so at
 # most one thread is ever in flight.
@@ -63,15 +64,15 @@ fn drive(remaining: Int, expired: Int) -> Int !{IO} =
       drive(remaining - 1, expired + e)
 
 fn report(expired: Int) -> Unit !{IO} =
-  if expired >= floor() then terminal.write("dns-cancel-drop-ok\n")
+  if expired >= floor then terminal.write("dns-cancel-drop-ok\n")
   else
     terminal.write(
       string.concat(
         "dns-cancel-drop FAILED: only ",
-        string.concat(int_to_string(expired), string.concat(" of ", string.concat(int_to_string(attempts()), " attempts were force-dropped (async cancellation path may be broken)\n")))
+        string.concat(int_to_string(expired), string.concat(" of ", string.concat(int_to_string(attempts), " attempts were force-dropped (async cancellation path may be broken)\n")))
       )
     )
 
 fn main() -> Unit !{IO} =
   do
-    report(drive(attempts(), 0))
+    report(drive(attempts, 0))

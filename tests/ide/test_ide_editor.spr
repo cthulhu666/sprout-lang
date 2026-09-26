@@ -41,7 +41,7 @@ type alias Asks = List(widget.Cmd Msg)
 
 # ── the tree ────────────────────────────────────────────────────────────────
 
-fn pane_id() -> widget.WidgetId = widget.WidgetId("editor")
+let pane_id = widget.WidgetId("editor")
 
 fn open_for(m: Msg) -> Maybe(doc.FilePath, ed.Opening -> Msg) =
   match m with
@@ -92,25 +92,25 @@ fn note() -> widget.Widget Msg =
                             route = widget.no_route, render = note_render,
                             measure = note_measure))
 
-fn pane() -> widget.Widget Msg = ed.editor_with(pane_id(), opts())
+fn pane() -> widget.Widget Msg = ed.editor_with(pane_id, opts())
 
 # Focus starts on the head of the ring, so the pane is live without a Tab.
 fn tree() -> widget.Widget Msg =
-  focus.focus_ring([pane_id()],
+  focus.focus_ring([pane_id],
                    ct.column([ct.fit(pane()), ct.fit(note())]))
 
 # The same tree with focus parked on a name nothing answers to, which is how an
 # unfocused pane is reached without a widget to Tab to.
 fn unfocused() -> widget.Widget Msg =
-  focus.focus_ring_at([pane_id(), widget.WidgetId("elsewhere")],
+  focus.focus_ring_at([pane_id, widget.WidgetId("elsewhere")],
                       widget.WidgetId("elsewhere"),
                       ct.column([ct.fit(pane()), ct.fit(note())]))
 
 # ── observing ───────────────────────────────────────────────────────────────
 
-fn key(k: event.Key) -> event.Event = event.KeyPress(k, event.mods_none())
+fn key(k: event.Key) -> event.Event = event.KeyPress(k, event.mods_none)
 
-fn chord(k: event.Key) -> event.Event = event.KeyPress(k, event.mods_ctrl())
+fn chord(k: event.Key) -> event.Event = event.KeyPress(k, event.mods_ctrl)
 
 fn chars(s: String) -> List event.Event =
   list_map(\c -> key(event.KChar(c)), vec_to_list(string.string_chars(s)))
@@ -129,7 +129,7 @@ fn tree_of(r: (widget.Widget Msg, Says, Asks)) -> widget.Widget Msg =
 
 # One addressed message, exactly as `app.update` sends one.
 fn told(w: widget.Widget Msg, m: Msg) -> (widget.Widget Msg, Says, Asks) =
-  let Just t = widget.deliver(w, pane_id(), widget.ToMsg(m))
+  let Just t = widget.deliver(w, pane_id, widget.ToMsg(m))
                else (w, [Noted("declined")], Nil)
   in t
 
@@ -177,7 +177,7 @@ fn handover_step() -> (widget.Widget Msg, Says, Asks) =
 fn handed_over_tree() -> widget.Widget Msg = tree_of(handover_step())
 
 fn handover() -> v.Version =
-  maybe_with_default(v.origin(), saved_receipt(says(handover_step())))
+  maybe_with_default(v.origin, saved_receipt(says(handover_step())))
 
 # The receipt a save handed out, which its answer has to carry back.
 fn saved_receipt(msgs: Says) -> Maybe v.Version =
@@ -222,7 +222,7 @@ fn content_cases(state: TestState) -> Unit !{IO} = do
   # is the one the claim handed out, and this pane is past it.
   assert_eq(state, "a body stamped for an earlier pane is dropped",
             said(told(loaded_tree(),
-                      Loaded(st.stamp(v.origin(), (at("z.txt"), "zz"))))), "[]")
+                      Loaded(st.stamp(v.origin, (at("z.txt"), "zz"))))), "[]")
   # The caret sits at the START of a file being opened, so the first character
   # typed lands before the text rather than after it.
   assert_eq(state, "an opened file is read from the top",
@@ -253,7 +253,7 @@ fn saving_cases(state: TestState) -> Unit !{IO} = do
   # needs a save-as, which the skeleton has not got.
   assert_eq(state, "a write answering does not name a pathless pane",
             said(told(tree_of(told(tree(),
-                                   Written(ed.WroteTo(st.stamp(v.origin(), at("x/new.txt")))))),
+                                   Written(ed.WroteTo(st.stamp(v.origin, at("x/new.txt")))))),
                       Save)),
             "[Saved(Unnamed)]")
 
@@ -277,9 +277,9 @@ fn receipt_cases(state: TestState) -> Unit !{IO} = do
 # a shown; claim b; save a; a's write confirms; b's body lands.
 fn open_over_write() -> (widget.Widget Msg, Says, Asks) =
   let claimed = claiming(loaded_tree(), at("b.txt"))
-      rec = maybe_with_default(v.origin(), receipt(says(claimed)))
+      rec = maybe_with_default(v.origin, receipt(says(claimed)))
       saved = told(tree_of(claimed), Save)
-      sr = maybe_with_default(v.origin(), saved_receipt(says(saved)))
+      sr = maybe_with_default(v.origin, saved_receipt(says(saved)))
       done = told(tree_of(saved),
                   Written(ed.WroteTo(st.stamp(sr, at("stdlib/a.txt")))))
   in told(tree_of(done), Loaded(st.stamp(rec, (at("b.txt"), "bbb"))))
@@ -287,7 +287,7 @@ fn open_over_write() -> (widget.Widget Msg, Says, Asks) =
 # a edited and saved; Enter on a directory row; then the write confirms.
 fn write_over_claim() -> (widget.Widget Msg, Says, Asks) =
   let saved = told(tree_of(widget.feed(loaded_tree(), chars("x"))), Save)
-      sr = maybe_with_default(v.origin(), saved_receipt(says(saved)))
+      sr = maybe_with_default(v.origin, saved_receipt(says(saved)))
       dir = claiming(tree_of(saved), at("stdlib"))
   in told(tree_of(dir),
           Written(ed.WroteTo(st.stamp(sr, at("stdlib/a.txt")))))
@@ -352,7 +352,7 @@ fn stale_cases(state: TestState) -> Unit !{IO} = do
 # Load A, hand its text over, then load B. A's answer lands last.
 fn moved_on() -> widget.Widget Msg =
   let handed = told(opened(tree(), at("a.txt"), "aaa"), Save)
-      r = maybe_with_default(v.origin(), saved_receipt(says(handed)))
+      r = maybe_with_default(v.origin, saved_receipt(says(handed)))
       later = opened(tree_of(handed), at("b.txt"), "bbb")
   in tree_of(told(later, Written(ed.WroteTo(st.stamp(r, at("a.txt"))))))
 
@@ -363,7 +363,7 @@ fn edited_since() -> widget.Widget Msg =
 # Load A, load B, then A's body arrives — the read that lost the race.
 fn read_race() -> widget.Widget Msg =
   let first = claiming(tree(), at("a.txt"))
-      r = maybe_with_default(v.origin(), receipt(says(first)))
+      r = maybe_with_default(v.origin, receipt(says(first)))
       later = opened(tree_of(first), at("b.txt"), "bbb")
   in tree_of(told(later, Loaded(st.stamp(r, (at("a.txt"), "aaa")))))
 
@@ -380,17 +380,17 @@ fn ticks(n: Int) -> List event.Event =
 fn tab() -> event.Event = key(event.KTab)
 
 fn pane_when(w: ed.SaveWhen) -> widget.Widget Msg =
-  ed.editor_with(pane_id(), opts() with (save_when = w))
+  ed.editor_with(pane_id, opts() with (save_when = w))
 
 # WITHOUT the neighbour: it answers every broadcast, and a tick is a broadcast,
 # so it would put a `Noted(bcast)` beside every autosave.
 fn alone_when(w: ed.SaveWhen) -> widget.Widget Msg =
-  focus.focus_ring([pane_id()], pane_when(w))
+  focus.focus_ring([pane_id], pane_when(w))
 
 # A ring of TWO, because `stay_or_move` does nothing in a ring of one — a Tab
 # there is not a blur, and a blur is what has to be tested.
 fn paired_when(w: ed.SaveWhen) -> widget.Widget Msg =
-  focus.focus_ring([pane_id(), widget.WidgetId("elsewhere")], pane_when(w))
+  focus.focus_ring([pane_id, widget.WidgetId("elsewhere")], pane_when(w))
 
 # Loaded and typed into: dirty, named, with nothing in flight.
 fn dirty_when(w: ed.SaveWhen) -> widget.Widget Msg =
@@ -448,7 +448,7 @@ fn freed_busy_idle() -> (widget.Widget Msg, Says, Asks) =
        Written(ed.WroteTo(st.stamp(busy_receipt(), at("stdlib/a.txt")))))
 
 fn busy_receipt() -> v.Version =
-  maybe_with_default(v.origin(),
+  maybe_with_default(v.origin,
                      saved_receipt(says(told(dirty_when(ed.WhenIdle(2)), Save))))
 
 # A write that FAILED must not be retried against the same bytes. The pane is
@@ -517,7 +517,7 @@ fn after_blur_write() -> (widget.Widget Msg, Says, Asks) =
        Written(ed.WroteTo(st.stamp(unfocused_receipt(), at("stdlib/a.txt")))))
 
 fn unfocused_receipt() -> v.Version =
-  maybe_with_default(v.origin(), saved_receipt(says(saved_unfocused())))
+  maybe_with_default(v.origin, saved_receipt(says(saved_unfocused())))
 
 # Loaded into the two-name ring and typed into: dirty, focused, and with a real
 # neighbour to Tab to.
@@ -548,8 +548,8 @@ fn manual_cases(state: TestState) -> Unit !{IO} = do
             said(widget.feed(viewer(), ticks(4))), "[]")
 
 fn viewer() -> widget.Widget Msg =
-  tree_of(widget.feed(opened(focus.focus_ring([pane_id()],
-                                              ed.editor_with(pane_id(),
+  tree_of(widget.feed(opened(focus.focus_ring([pane_id],
+                                              ed.editor_with(pane_id,
                                                              opts() with (save_when = ed.WhenIdle(1),
                                                                           on_saving = Nothing))),
                              at("stdlib/a.txt"), "ab"), chars("x")))
@@ -589,7 +589,7 @@ fn stored_when(w: ed.SaveWhen) -> widget.Widget Msg =
   tree_of(told(tree_of(handed), Written(ed.WroteTo(st.stamp(rec, at("stdlib/a.txt"))))))
 where
   handed = widget.feed(dirty_when(w), ticks(2))
-  rec = maybe_with_default(v.origin(), saved_receipt(says(handed)))
+  rec = maybe_with_default(v.origin, saved_receipt(says(handed)))
 
 fn undo_cases(state: TestState) -> Unit !{IO} = do
   assert_eq(state, "an undo takes the keystroke back",
@@ -647,10 +647,10 @@ fn frame(w: widget.Widget Msg, cols: Int, rows: Int) -> String !{IO} = do
 
 # Without the neighbour: it exists to make a declined key visible, and a `fit`
 # row of it would take the region's last row away from the pane.
-fn alone() -> widget.Widget Msg = focus.focus_ring([pane_id()], pane())
+fn alone() -> widget.Widget Msg = focus.focus_ring([pane_id], pane())
 
 fn alone_unfocused() -> widget.Widget Msg =
-  focus.focus_ring_at([pane_id(), widget.WidgetId("elsewhere")],
+  focus.focus_ring_at([pane_id, widget.WidgetId("elsewhere")],
                       widget.WidgetId("elsewhere"), pane())
 
 fn showing(body: String) -> widget.Widget Msg =

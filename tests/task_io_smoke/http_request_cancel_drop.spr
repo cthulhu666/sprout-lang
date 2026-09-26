@@ -32,7 +32,7 @@ import stdlib.terminal as terminal
 # handshake itself and the client is left waiting for a response no task will ever write; the only
 # thing that ends the request is the `with_timeout` deadline. There is no peer process, no network,
 # and no dependence on how long anything takes.
-fn port() -> Int = 28983
+let port: Int = 28983
 
 # 20 ms deadline against a 60000 ms request budget. The gap is what makes the outcome unambiguous:
 # every one of these must end as `Expired` (the deadline force-dropped a parked task), and none can
@@ -48,10 +48,10 @@ fn request_once() -> Bool !{IO} =
   | Err _ -> true
 
 fn url() -> String =
-  string.concat("http://127.0.0.1:", string.concat(int_to_string(port()), "/"))
+  string.concat("http://127.0.0.1:", string.concat(int_to_string(port), "/"))
 
 # 80 iterations against a 64-descriptor cap: a one-per-cancellation leak cannot survive the count.
-fn expected() -> Int = 80
+let expected: Int = 80
 
 fn drive(remaining: Int, expired: Int) -> Int !{IO} =
   if remaining <= 0 then expired
@@ -59,17 +59,17 @@ fn drive(remaining: Int, expired: Int) -> Int !{IO} =
   else drive(remaining - 1, expired)
 
 fn report(expired: Int) -> Unit !{IO} =
-  if expired == expected() then terminal.write("http-cancel-drop-ok\n")
+  if expired == expected then terminal.write("http-cancel-drop-ok\n")
   else
     terminal.write(
       string.concat(
         "http-cancel-drop FAILED: only ",
-        string.concat(int_to_string(expired), string.concat(" of ", string.concat(int_to_string(expected()), " requests were force-dropped\n")))
+        string.concat(int_to_string(expired), string.concat(" of ", string.concat(int_to_string(expected), " requests were force-dropped\n")))
       )
     )
 
 fn main() -> Unit !{IO} =
   do
-    listener <- listen_local(port())
-    report(drive(expected(), 0))
+    listener <- listen_local(port)
+    report(drive(expected, 0))
     close_listener(listener)

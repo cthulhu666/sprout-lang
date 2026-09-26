@@ -56,14 +56,14 @@ export type BigInt deriving (Eq) =
 
 # --- radix constants ---
 
-fn limb_bits() -> Int = 26
+let limb_bits: Int = 26
 
-fn limb_base() -> Int = 67108864
+let limb_base: Int = 67108864
 
-fn limb_mask() -> Int = 67108863
+let limb_mask: Int = 67108863
 
 # min(n, m) above which a schoolbook column sum could leave i64. See the header.
-fn limb_ceiling() -> Int = 2047
+let limb_ceiling: Int = 2047
 
 fn lesser(left: Int, right: Int) -> Int =
   if left <= right then left
@@ -138,15 +138,15 @@ fn cmp_mag(left: Vec Int, right: Vec Int) -> Int =
 
 fn emit_carry(carry: Int, acc: List Int) -> List Int =
   if carry == 0 then acc
-  else emit_carry(bit_shr(carry, limb_bits()), Cons(bit_and(carry, limb_mask()), acc))
+  else emit_carry(bit_shr(carry, limb_bits), Cons(bit_and(carry, limb_mask), acc))
 
 fn add_mag_go(left: Vec Int, right: Vec Int, index: Int, total: Int, carry: Int,
               acc: List Int) -> List Int =
   if index == total then emit_carry(carry, acc)
   else
     let sum = limb_at(left, index) + limb_at(right, index) + carry
-    in add_mag_go(left, right, index + 1, total, bit_shr(sum, limb_bits()),
-                  Cons(bit_and(sum, limb_mask()), acc))
+    in add_mag_go(left, right, index + 1, total, bit_shr(sum, limb_bits),
+                  Cons(bit_and(sum, limb_mask), acc))
 
 fn add_mag(left: Vec Int, right: Vec Int) -> Vec Int =
   mag_of_high_first(
@@ -160,7 +160,7 @@ fn sub_mag_go(left: Vec Int, right: Vec Int, index: Int, total: Int, borrow: Int
   else
     let diff = limb_at(left, index) - limb_at(right, index) - borrow
     in if diff < 0 then
-         sub_mag_go(left, right, index + 1, total, 1, Cons(diff + limb_base(), acc))
+         sub_mag_go(left, right, index + 1, total, 1, Cons(diff + limb_base, acc))
        else sub_mag_go(left, right, index + 1, total, 0, Cons(diff, acc))
 
 fn sub_mag(left: Vec Int, right: Vec Int) -> Vec Int =
@@ -186,8 +186,8 @@ fn mul_mag_go(left: Vec Int, right: Vec Int, column: Int, columns: Int, carry: I
     let total = column_sum(left, right, column,
                            greater(0, column - (vec_length(right) - 1)),
                            lesser(column, vec_length(left) - 1), carry)
-    in mul_mag_go(left, right, column + 1, columns, bit_shr(total, limb_bits()),
-                  Cons(bit_and(total, limb_mask()), acc))
+    in mul_mag_go(left, right, column + 1, columns, bit_shr(total, limb_bits),
+                  Cons(bit_and(total, limb_mask), acc))
 
 fn mul_mag(left: Vec Int, right: Vec Int) -> Vec Int =
   if mag_is_zero(left) || mag_is_zero(right) then vec_empty()
@@ -201,8 +201,8 @@ fn mul_small_go(mag: Vec Int, factor: Int, index: Int, total: Int, carry: Int,
   if index == total then emit_carry(carry, acc)
   else
     let product = limb_at(mag, index) * factor + carry
-    in mul_small_go(mag, factor, index + 1, total, bit_shr(product, limb_bits()),
-                    Cons(bit_and(product, limb_mask()), acc))
+    in mul_small_go(mag, factor, index + 1, total, bit_shr(product, limb_bits),
+                    Cons(bit_and(product, limb_mask), acc))
 
 fn mul_small(mag: Vec Int, factor: Int) -> Vec Int =
   if factor == 0 || mag_is_zero(mag) then vec_empty()
@@ -216,16 +216,16 @@ fn shl_mag_go(mag: Vec Int, limb_shift: Int, bit_shift: Int, index: Int, total: 
   else
     let source = index - limb_shift
         low = bit_shl(limb_at(mag, source), bit_shift)
-        high = bit_shr(limb_at(mag, source - 1), limb_bits() - bit_shift)
+        high = bit_shr(limb_at(mag, source - 1), limb_bits - bit_shift)
     in shl_mag_go(mag, limb_shift, bit_shift, index + 1, total,
-                  Cons(bit_and(bit_or(low, high), limb_mask()), acc))
+                  Cons(bit_and(bit_or(low, high), limb_mask), acc))
 
 fn shl_mag(mag: Vec Int, count: Int) -> Vec Int =
   if mag_is_zero(mag) then mag
   else
-    let limb_shift = count / limb_bits()
+    let limb_shift = count / limb_bits
     in mag_of_high_first(
-         shl_mag_go(mag, limb_shift, count - limb_shift * limb_bits(), 0,
+         shl_mag_go(mag, limb_shift, count - limb_shift * limb_bits, 0,
                     vec_length(mag) + limb_shift + 1, Nil))
 
 fn shr_mag_go(mag: Vec Int, limb_shift: Int, bit_shift: Int, index: Int, total: Int,
@@ -234,16 +234,16 @@ fn shr_mag_go(mag: Vec Int, limb_shift: Int, bit_shift: Int, index: Int, total: 
   else
     let source = index + limb_shift
         low = bit_shr(limb_at(mag, source), bit_shift)
-        high = bit_shl(limb_at(mag, source + 1), limb_bits() - bit_shift)
+        high = bit_shl(limb_at(mag, source + 1), limb_bits - bit_shift)
     in shr_mag_go(mag, limb_shift, bit_shift, index + 1, total,
-                  Cons(bit_and(bit_or(low, high), limb_mask()), acc))
+                  Cons(bit_and(bit_or(low, high), limb_mask), acc))
 
 fn shr_mag(mag: Vec Int, count: Int) -> Vec Int =
-  let limb_shift = count / limb_bits()
+  let limb_shift = count / limb_bits
   in if limb_shift >= vec_length(mag) then vec_empty()
      else
        mag_of_high_first(
-         shr_mag_go(mag, limb_shift, count - limb_shift * limb_bits(), 0,
+         shr_mag_go(mag, limb_shift, count - limb_shift * limb_bits, 0,
                     vec_length(mag) - limb_shift, Nil))
 
 fn limb_bit_length(value: Int, acc: Int) -> Int =
@@ -253,15 +253,15 @@ fn limb_bit_length(value: Int, acc: Int) -> Int =
 fn mag_bit_length(mag: Vec Int) -> Int =
   if mag_is_zero(mag) then 0
   else
-    (vec_length(mag) - 1) * limb_bits()
+    (vec_length(mag) - 1) * limb_bits
       + limb_bit_length(limb_at(mag, vec_length(mag) - 1), 0)
 
 fn mag_test_bit(mag: Vec Int, index: Int) -> Bool =
   if index < 0 then false
   else
-    let limb_index = index / limb_bits()
+    let limb_index = index / limb_bits
     in bit_and(bit_shr(limb_at(mag, limb_index),
-                       index - limb_index * limb_bits()), 1) == 1
+                       index - limb_index * limb_bits), 1) == 1
 
 # --- magnitude division ---
 #
@@ -275,7 +275,7 @@ fn divmod_small_go(mag: Vec Int, divisor: Int, index: Int, rem: Int,
                    acc: List Int) -> (List Int, Int) =
   if index < 0 then (acc, rem)
   else
-    let current = rem * limb_base() + limb_at(mag, index)
+    let current = rem * limb_base + limb_at(mag, index)
         digit = current / divisor
     in divmod_small_go(mag, divisor, index - 1, current - digit * divisor,
                        Cons(digit, acc))
@@ -304,8 +304,8 @@ fn correct_digit(rem: Vec Int, divisor: Vec Int, guess: Int,
 
 fn quotient_digit(rem: Vec Int, divisor: Vec Int) -> (Int, Vec Int) =
   let top = vec_length(divisor)
-      numerator = limb_at(rem, top) * limb_base() + limb_at(rem, top - 1)
-      guess = lesser(numerator / limb_at(divisor, top - 1), limb_mask())
+      numerator = limb_at(rem, top) * limb_base + limb_at(rem, top - 1)
+      guess = lesser(numerator / limb_at(divisor, top - 1), limb_mask)
   in correct_digit(rem, divisor, guess, mul_small(divisor, guess))
 
 fn divide_loop(dividend: Vec Int, divisor: Vec Int, index: Int, rem: Vec Int,
@@ -324,7 +324,7 @@ fn divmod_mag(dividend: Vec Int, divisor: Vec Int) -> (Vec Int, Vec Int) =
     let (quotient, rem) = divmod_small(dividend, limb_at(divisor, 0))
     in (quotient, small_mag(rem))
   else
-    let shift = limb_bits()
+    let shift = limb_bits
                   -limb_bit_length(limb_at(divisor, vec_length(divisor) - 1), 0)
         scaled_dividend = shl_mag(dividend, shift)
         scaled_divisor = shl_mag(divisor, shift)
@@ -343,8 +343,8 @@ fn negated_bits(value: Int) -> Int =
 
 fn unsigned_limbs(bits: Int, acc: List Int) -> List Int =
   if bits == 0 then acc
-  else unsigned_limbs(bit_shr_zf(bits, limb_bits()),
-                      Cons(bit_and(bits, limb_mask()), acc))
+  else unsigned_limbs(bit_shr_zf(bits, limb_bits),
+                      Cons(bit_and(bits, limb_mask), acc))
 
 export fn from_int(value: Int) -> BigInt =
   if value < 0 then
@@ -354,7 +354,7 @@ export fn from_int(value: Int) -> BigInt =
 fn pack_u64(mag: Vec Int, index: Int, acc: Int) -> Int =
   if index < 0 then acc
   else pack_u64(mag, index - 1,
-                bit_or(bit_shl(acc, limb_bits()), limb_at(mag, index)))
+                bit_or(bit_shl(acc, limb_bits), limb_at(mag, index)))
 
 # `Nothing` outside [INT_MIN, INT_MAX]. Below 2^64 the packed word is the unsigned
 # pattern, so a negative word means the magnitude reached 2^63 — which is INT_MIN
@@ -407,13 +407,13 @@ export fn sub(left: BigInt, right: BigInt) -> BigInt =
 # Exported because the bound belongs to this module but is a precondition for
 # callers — `stdlib.math.modular` needs it to keep its own `Modulus` honest, and
 # hardcoding 53,222 there would be a copy of a constant that lives here.
-export fn mul_bit_ceiling() -> Int = limb_ceiling() * limb_bits()
+export fn mul_bit_ceiling() -> Int = limb_ceiling * limb_bits
 
 # Panics above the 2047-limb ceiling rather than letting a column sum leave i64 —
 # see the radix invariant in the header. That is `mul_bit_ceiling()` bits per
 # operand, so nothing this library was written for can reach it.
 export fn mul(left: BigInt, right: BigInt) -> BigInt =
-  if lesser(vec_length(mag_of(left)), vec_length(mag_of(right))) > limb_ceiling() then
+  if lesser(vec_length(mag_of(left)), vec_length(mag_of(right))) > limb_ceiling then
     panic("bigint.mul: both operands exceed the 2047-limb schoolbook ceiling")
   else
     make(! (sign_of(left) == sign_of(right)), mul_mag(mag_of(left), mag_of(right)))
@@ -442,15 +442,15 @@ export fn test_bit(value: BigInt, index: Int) -> Bool =
 # Deliberately far above `mul_bit_ceiling()` rather than equal to it: building a value
 # beyond the multiply ceiling is a thing callers legitimately do, and
 # tests/overflow_smoke/bigint_mul_ceiling.spr shifts by 53,249 to do exactly that.
-fn shl_bit_ceiling() -> Int = 1048576
+let shl_bit_ceiling: Int = 1048576
 
 # The COUNT is bounded too, and only the count: `shl(from_int(1), 2^62)` asks for
 # 1.7e17 limbs, which is not a slow answer but no answer at all. `shr` needs no such
 # guard --- a large count there short-circuits to zero.
 export fn shl(value: BigInt, count: Int) -> BigInt =
   if count < 0 then panic("bigint.shl: negative shift count")
-  else if count > shl_bit_ceiling() then
-    panic("bigint.shl: shift count above the " ++ int_to_string(shl_bit_ceiling())
+  else if count > shl_bit_ceiling then
+    panic("bigint.shl: shift count above the " ++ int_to_string(shl_bit_ceiling)
             ++ "-bit ceiling")
   else make(sign_of(value), shl_mag(mag_of(value), count))
 
@@ -480,7 +480,7 @@ fn limb_from_bytes(raw: Bytes, total: Int, offset: Int) -> Int =
       word = byte_at_le(raw, total, index) + byte_at_le(raw, total, index + 1) * 256 +
              byte_at_le(raw, total, index + 2) * 65536 +
              byte_at_le(raw, total, index + 3) * 16777216
-  in bit_and(bit_shr_zf(word, shift), limb_mask())
+  in bit_and(bit_shr_zf(word, shift), limb_mask)
 
 # Limbs high-first, which is the order `mag_of_high_first` wants.
 fn from_bytes_go(raw: Bytes, total: Int, index: Int, count: Int,
@@ -488,7 +488,7 @@ fn from_bytes_go(raw: Bytes, total: Int, index: Int, count: Int,
   if index >= count then acc
   else
     from_bytes_go(raw, total, index + 1, count,
-                  Cons(limb_from_bytes(raw, total, index * limb_bits()), acc))
+                  Cons(limb_from_bytes(raw, total, index * limb_bits), acc))
 
 # Unsigned big-endian, so an empty or all-zero input is zero. The sign is not encoded:
 # `to_bytes_be` refuses a negative value rather than inventing a convention for it.
@@ -497,14 +497,14 @@ export fn from_bytes_be(raw: Bytes) -> BigInt =
   in make(false,
           mag_of_high_first(
             from_bytes_go(raw, total, 0,
-                          (total * 8 + limb_bits() - 1) / limb_bits(), Nil)))
+                          (total * 8 + limb_bits - 1) / limb_bits, Nil)))
 
 fn byte_of_mag(mag: Vec Int, position: Int) -> Int =
   let bit = position * 8
-      index = bit / limb_bits()
-      offset = bit - index * limb_bits()
+      index = bit / limb_bits
+      offset = bit - index * limb_bits
   in bit_and(bit_or(bit_shr(limb_at(mag, index), offset),
-                    bit_shl(limb_at(mag, index + 1), limb_bits() - offset)), 255)
+                    bit_shl(limb_at(mag, index + 1), limb_bits - offset)), 255)
 
 # Big-endian over the half-open position range [low, high), split down the middle.
 # `bytes.builder_append` copies BOTH sides' chunk arrays (runtime/sprout_runtime.c),
@@ -521,11 +521,11 @@ fn builder_of_mag(mag: Vec Int, low: Int, high: Int) -> Builder =
                             builder_of_mag(mag, low, middle))
 
 # The widest field this module will build, in bytes: `mul` already refuses operands
-# above `limb_ceiling()` limbs, so a field wider than that many limbs hold is outside
+# above `limb_ceiling` limbs, so a field wider than that many limbs hold is outside
 # the range the module serves. It is the upper bound that makes `to_bytes_be` total —
 # without one the walk is unbounded whatever the value is — and it is also what keeps
 # `byte_of_mag`'s `position * 8` far inside i64.
-fn byte_ceiling() -> Int = (limb_ceiling() * limb_bits() + 7) / 8
+fn byte_ceiling() -> Int = (limb_ceiling * limb_bits + 7) / 8
 
 # Fixed width, left-padded with zeros — the shape every crypto caller wants. `Nothing`
 # on a negative value, on a width outside [0, byte_ceiling()], or on a value too wide
@@ -612,10 +612,10 @@ export fn to_string(value: BigInt) -> String =
 
 fn nibble_of_mag(mag: Vec Int, position: Int) -> Int =
   let bit = position * 4
-      index = bit / limb_bits()
-      offset = bit - index * limb_bits()
+      index = bit / limb_bits
+      offset = bit - index * limb_bits
   in bit_and(bit_or(bit_shr(limb_at(mag, index), offset),
-                    bit_shl(limb_at(mag, index + 1), limb_bits() - offset)), 15)
+                    bit_shl(limb_at(mag, index + 1), limb_bits - offset)), 15)
 
 fn hex_digit_char(value: Int) -> String =
   string.string_from_char(string.char_at_or("0123456789abcdef", value, '0'))

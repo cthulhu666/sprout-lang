@@ -1,3 +1,4 @@
+# sprout-ignore-all lint/nullary-const-fn: conformance fixture — the nullary form is the program under test
 module main
 
 # Order-independence for both pin directions. Every function below is legal: a

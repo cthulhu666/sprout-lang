@@ -15,7 +15,7 @@ import stdlib.test (check_eq, run_suite)
 # bounds passed directly to `range_up`/`range_down`, e.g. a bare `5..1`).
 fn mk_range(lo: Int, hi: Int) -> IntRange = range_up(lo, hi)
 
-fn int_nil() -> List Int = Nil
+let int_nil: List Int = Nil
 
 wrap Cents = Int
 
@@ -64,8 +64,8 @@ fn main() -> Unit !{IO} =
 
     # 8. Empty sources: an empty List, and an empty IntRange (`range_is_empty`
     # holds when the end lies past the start in the direction of travel).
-    check_eq("empty List source", [x for x in int_nil()], int_nil()),
-    check_eq("empty IntRange source", [i for i in mk_range(5, 1)], int_nil()),
+    check_eq("empty List source", [x for x in int_nil], int_nil),
+    check_eq("empty IntRange source", [i for i in mk_range(5, 1)], int_nil),
 
     # 9. A descending range source. `a..b` always lowers to `range_up(a, b)`
     # (prelude.sprout:1787-1788), so it is NEVER descending regardless of

@@ -13,7 +13,7 @@ fn swap_(p: (a, b)) -> (b, a) =
   | (x, y) -> (y, x)
 
 # Polymorphic result built from a value (Nil): a stays abstract.
-fn empty_() -> List a = Nil
+let empty_: List a = Nil
 
 fn main() -> Unit !{IO} =
   run_suite("signature_rigidity_ok", [

@@ -588,7 +588,7 @@ fn record_field_names_csv(fields: List ast.RecordFieldDecl) -> String =
 # reads it for object size and child count.  Lowering is arity-generic
 # (@sprout_alloc_obj + one store per field), so this header field is the only
 # remaining limit.  Raising it means widening that field, which narrows the tag.
-fn max_boxed_arity() -> Int = 255
+let max_boxed_arity: Int = 255
 
 # Nothing when `ar` fits the ceiling, Just an error message when it does not.
 # Every field-carrying IRMakeCtor site must consult this: a product wider than
@@ -596,15 +596,15 @@ fn max_boxed_arity() -> Int = 255
 # the GC would then size and scan it short — silent heap corruption rather than
 # a loud failure.  `what` names the construct ("constructor", "record").
 fn boxed_arity_error(what: String, name: String, ar: Int) -> Maybe String =
-  if ar > max_boxed_arity()
+  if ar > max_boxed_arity
   then Just("ast_to_ir: " ++ what ++ " '" ++ name ++ "' has " ++ int_to_string(ar) ++
-            " fields, exceeding the limit of " ++ int_to_string(max_boxed_arity()) ++
+            " fields, exceeding the limit of " ++ int_to_string(max_boxed_arity) ++
             "; the runtime object header stores a field count of at most " ++
-            int_to_string(max_boxed_arity()))
+            int_to_string(max_boxed_arity))
   else Nothing
 
 # Terminating IRMakeCtor for a boxed product, or Err when the field count
-# exceeds max_boxed_arity().  The single choke point the three field-carrying
+# exceeds max_boxed_arity.  The single choke point the three field-carrying
 # paths route through — ADT constructor application, record literal, record
 # functional update — so the arity check cannot be forgotten at a new call site.
 # translate_zero_arity_ctor builds its 0-field product directly; a nullary ctor
@@ -862,6 +862,15 @@ fn ret_irtype(t: types.Type) -> sprout_ir.IRType =
   then sprout_ir.IRTScalar
   else sprout_ir.IRTUnknown
 
+# Arity recorded for a closure the apply-site check must wave through.
+#
+# SYNC WITH runtime/sprout_runtime.c SPROUT_CLOSURE_ARITY_ANY (the arity field is
+# 18 bits; this is all of them set).  Only the poison thunk below uses it: that
+# thunk declares no user parameters yet is applied with the method's arguments,
+# so a real arity would make the check fire first and replace its located message
+# with a generic arity mismatch.
+let closure_arity_any: Int = 262143
+
 # Translate a TypedExpr in a multi-block-aware fashion.  See the contract
 # block at the top of this file for the full signature description.
 #
@@ -996,7 +1005,7 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
                           Ok((Nil, cur_label,
                                list_append(cur_ops,
                                  Cons(sprout_ir.IRMkClosure(fresh_name(name_prefix, idx), thunk_name,
-                                        closure_arity_any(), Nil), Nil)),
+                                        closure_arity_any, Nil), Nil)),
                                fresh_name(name_prefix, idx), idx + 1))
                       else Err("ast_to_ir: unbound variable '" ++ name ++ "'")
   | typed_ast.TBinary op left right _ pos ->
@@ -7485,14 +7494,6 @@ fn synthesize_eta_wrapper(fn_name: String, arity: Int, wrapper_name: String) -> 
                               Cons(sprout_ir.IRRet("%ret"), Nil))),
                         Nil))
 
-# Arity recorded for a closure the apply-site check must wave through.
-#
-# SYNC WITH runtime/sprout_runtime.c SPROUT_CLOSURE_ARITY_ANY (the arity field is
-# 18 bits; this is all of them set).  Only the poison thunk below uses it: that
-# thunk declares no user parameters yet is applied with the method's arguments,
-# so a real arity would make the check fire first and replace its located message
-# with a generic arity mismatch.
-fn closure_arity_any() -> Int = 262143
 
 # Poison thunk for an unresolved (free-tyvar) typeclass dict — see the
 # `__unresolved_` branch in translate_expr.  A closure whose slot-0 code pointer

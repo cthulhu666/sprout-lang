@@ -1,3 +1,4 @@
+# sprout-ignore-all lint/nullary-const-fn: module fixture — the exported form is what resolution is tested against
 module demo.dup_one
 
 # Fixture for tests/stdlib/compiler/test_import_diagnostics.spr.

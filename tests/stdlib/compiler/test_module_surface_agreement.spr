@@ -39,7 +39,7 @@ import stdlib.fs as fs
 # this by dropping externs from its symbol table entirely; the env path must reach
 # the same answer rather than re-deciding it.
 
-fn scratch_path() -> String = "/tmp/sprout_module_surface_agreement.sprout"
+let scratch_path: String = "/tmp/sprout_module_surface_agreement.sprout"
 
 fn session(imports: String, body: String) -> String =
   "module app.session\n\n" ++ imports ++ "\n\n" ++ body ++ "\n"
@@ -54,8 +54,8 @@ fn stdlib_root() -> String !{IO} =
   | Nothing -> "stdlib"
 
 fn write_scratch(src: String) -> Unit !{IO} =
-  match fs.write_text(scratch_path(), src) with
-  | Err msg -> panic("write_file: " ++ scratch_path() ++ ": " ++ msg)
+  match fs.write_text(scratch_path, src) with
+  | Err msg -> panic("write_file: " ++ scratch_path ++ ": " ++ msg)
   | Ok _ -> ()
 
 # The file/bundler front end. Needs a real path, so the source is staged on disk —
@@ -63,7 +63,7 @@ fn write_scratch(src: String) -> Unit !{IO} =
 fn bundler_accepts(src: String, root: String) -> Bool !{IO} =
   do
     write_scratch(src)
-    result <- compiler.compile_full(source.FilePath(scratch_path()), source.StdlibRoot(root))
+    result <- compiler.compile_full(source.FilePath(scratch_path), source.StdlibRoot(root))
     match result with
     | compiler.FullOk _ _ -> true
     | compiler.FullFail _ -> false

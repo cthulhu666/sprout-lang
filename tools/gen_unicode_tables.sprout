@@ -183,8 +183,10 @@ fn emit_table(name: String, sorted: Vec Range) -> String =
 # concatenate it without knowing the chunk size.
 fn emit_chunked(name: String, body: String, count: Int, vis: String) -> String =
   let chunks = chunk_lines(body, 3600, 0, Nil)
-      preamble = Cons(`${vis}fn ${name}_count() -> Int = ${to_string(count)}`,
-                 Cons(`${vis}fn ${name}_chunks() -> Int = ${to_string(list_length(chunks))}`,
+      # Constants, so `let` — a nullary `fn` would re-evaluate per call and
+      # trips lint/nullary-const-fn in the generated file.
+      preamble = Cons(`${vis}let ${name}_count: Int = ${to_string(count)}`,
+                 Cons(`${vis}let ${name}_chunks: Int = ${to_string(list_length(chunks))}`,
                  Cons("",
                  Cons(`${vis}fn ${name}_chunk(i: Int) -> String =`,
                  Cons("  match i with", Nil)))))
@@ -298,7 +300,7 @@ fn conformance_header() -> String =
 fn conformance_body() -> String =
   string.join("\n", [
     "fn all_data() -> String =",
-    "  string_concat_many(collect_chunks(0, gbt_chunks(), Nil))",
+    "  string_concat_many(collect_chunks(0, gbt_chunks, Nil))",
     "",
     "fn collect_chunks(i: Int, n: Int, acc: List String) -> List String =",
     "  if i >= n then list_reverse(acc)",

@@ -12,11 +12,11 @@ fn vlen(v: Vec Int) -> Int =
 
 # Vec-typed return position — the function body is a bare list literal, coerced
 # at the return-type context.
-fn make_vec() -> Vec Int =
+let make_vec: Vec Int =
   [10, 20, 30]
 
 # Empty list literal in Vec context exercises the Nil head-shape.
-fn empty_vec() -> Vec Int =
+let empty_vec: Vec Int =
   []
 
 # An explicit, hand-written vec_from_list(...) wrapping a bare list literal in
@@ -37,11 +37,11 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "vec literal arg", sum3([1, 2, 3]), 6)
 
     # Coercion at fn-return position.
-    assert_eq(state, "vec literal return len", vlen(make_vec()), 3)
-    assert_eq(state, "vec literal return elem", vec_get_or(1, -1, make_vec()), 20)
+    assert_eq(state, "vec literal return len", vlen(make_vec), 3)
+    assert_eq(state, "vec literal return elem", vec_get_or(1, -1, make_vec), 20)
 
     # Empty list literal -> empty Vec.
-    assert_eq(state, "empty vec literal len", vlen(empty_vec()), 0)
+    assert_eq(state, "empty vec literal len", vlen(empty_vec), 0)
 
     # Negative guard: a real Vec value passes through unwrapped (no double-wrap
     # into vec_from_list(vec), which would be a type error).

@@ -8,7 +8,7 @@ import stdlib.string as string
 # lower_fn_with_table(f, fn_table) must produce the same LLVM IR fragment as
 # lower_program would emit for a single-function program (minus header/globals).
 
-fn make_trivial_fn() -> sprout_ir.IRFunction =
+let make_trivial_fn =
   sprout_ir.IRFunction(
     "my_test_fn",
     Nil,
@@ -37,7 +37,7 @@ fn main() -> Unit !{IO} =
   do
     state <- new_state()
 
-    let f = make_trivial_fn()
+    let f = make_trivial_fn
     let fn_table = dict_empty()
     let ir = ir_lowering.lower_fn_with_table(f, fn_table)
 

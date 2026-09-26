@@ -24,13 +24,13 @@ export fn imod(n: Int, d: Int) -> Int = n - (n / d) * d
 # `Char -> Int`, only `char_from_codepoint` the other way, so this is also the
 # only way to get a numeric value out of a character; `string.hex_digit_value`
 # uses the same trick.
-export fn b62_alphabet() -> String =
+export let b62_alphabet: String =
   "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 
-export fn b62_digit(v: Int) -> String = string.slice(b62_alphabet(), v, 1)
+export fn b62_digit(v: Int) -> String = string.slice(b62_alphabet, v, 1)
 
 export fn b62_digit_value(ch: Char) -> Int =
-  match string.find(b62_alphabet(), string.string_from_char(ch)) with
+  match string.find(b62_alphabet, string.string_from_char(ch)) with
   | Just v -> v
   | Nothing -> 0
 
@@ -51,8 +51,8 @@ fn b62_decode_go(raw: String, i: Int, n: Int, acc: Int) -> Int =
 # One entry is lo(4) + hi(4) + tag(1); the generator writes 400 entries
 # (3600 characters) per chunk.
 
-export fn entry_width() -> Int = 9
-export fn entries_per_chunk() -> Int = 400
+export let entry_width: Int = 9
+export let entries_per_chunk: Int = 400
 
 # Byte-indexed, not codepoint-indexed: every entry is base-62 plus a one-character
 # tag, so a chunk is pure ASCII and the two indices coincide. That makes this O(1)

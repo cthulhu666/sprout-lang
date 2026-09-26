@@ -225,17 +225,17 @@ where
 # Templates are read and compiled ONCE up front; a missing file or malformed template is
 # a startup error, not a per-request failure. Paths are relative to the working
 # directory (the repo root under `just run`).
-fn list_template_path() -> String = "examples/templates/users_list.html"
-fn form_template_path() -> String = "examples/templates/user_form.html"
+let list_template_path: String = "examples/templates/users_list.html"
+let form_template_path: String = "examples/templates/user_form.html"
 
 # Startup diagnostics go through the logger (stderr) at Error level, not `print`
 # (stdout) — the same logger the request middleware uses.
 fn main() -> Unit !{IO} =
-  match fs.read_text(list_template_path()) with
-  | Err msg -> log.error(lg, `failed to read ${list_template_path()}: ${msg}`)
+  match fs.read_text(list_template_path) with
+  | Err msg -> log.error(lg, `failed to read ${list_template_path}: ${msg}`)
   | Ok list_src ->
-      match fs.read_text(form_template_path()) with
-      | Err msg -> log.error(lg, `failed to read ${form_template_path()}: ${msg}`)
+      match fs.read_text(form_template_path) with
+      | Err msg -> log.error(lg, `failed to read ${form_template_path}: ${msg}`)
       | Ok form_src -> compile_and_serve(lg, list_src, form_src)
 where
   lg = log.stderr_logger(log.Info)

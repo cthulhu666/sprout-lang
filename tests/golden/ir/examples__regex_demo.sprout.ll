@@ -159,7 +159,9 @@ declare i64 @split_words(i64)
 @.cname.18 = private unnamed_addr constant [29 x i8] c"stdlib.bytes.Utf8DecodeError\00"
 @.cfkinds.18 = private unnamed_addr constant [2 x i8] c"s\00"
 @pow10_clamp = private constant i64 400
+@max_int = private constant i64 9223372036854775807
 @pow10_exact_max = private constant i64 22
+@pow10_exact_unit = global i64 zeroinitializer
 @pow10_finite_max = private constant i64 308
 @stdlib.regex.unsupported_prefix = global i64 zeroinitializer
 
@@ -833,9 +835,11 @@ wrepack_next_17:
 
 define void @__sprout_init_globals() {
 entry:
-  %t$0 = getelementptr inbounds { i64, [28 x i8] }, ptr @.str.16, i64 0, i32 1, i64 0
-  %t$1 = ptrtoint ptr %t$0 to i64
-  store i64 %t$1, ptr @stdlib.regex.unsupported_prefix
+  %t$0 = bitcast double 10000000000000000000000.0 to i64
+  store i64 %t$0, ptr @pow10_exact_unit
+  %t$1 = getelementptr inbounds { i64, [28 x i8] }, ptr @.str.16, i64 0, i32 1, i64 0
+  %t$2 = ptrtoint ptr %t$1 to i64
+  store i64 %t$2, ptr @stdlib.regex.unsupported_prefix
   call i64 @sprout_gc_register_i64_root(ptr @stdlib.regex.unsupported_prefix)
   ret void
 }

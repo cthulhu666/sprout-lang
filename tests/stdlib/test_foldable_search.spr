@@ -18,10 +18,10 @@ type Person = (name: String, age: Int) deriving (Eq, ToString)
 
 # Type anchors. An empty container leaves the element type free on both sides
 # of the comparison, so each empty case needs a typed nullary fn.
-fn nil_int() -> List Int = Nil
-fn no_int() -> Maybe Int = Nothing
-fn no_string() -> Maybe String = Nothing
-fn no_person() -> Maybe Person = Nothing
+let nil_int: List Int = Nil
+let no_int: Maybe Int = Nothing
+let no_string: Maybe String = Nothing
+let no_person = Nothing
 fn empty_vec_int() -> Vec Int = vec_empty()
 
 fn is_even(n: Int) -> Bool = n - (n / 2) * 2 == 0
@@ -61,17 +61,17 @@ fn main() -> Unit !{IO} =
     check_eq("all over Vec: one counterexample is enough", all(is_even, ints_vec), false),
 
     # --- The vacuous cases: any of empty is false, all of empty is TRUE ------
-    check_eq("any of the empty list is false", any(is_positive, nil_int()), false),
-    check_eq("all of the empty list is true", all(is_negative, nil_int()), true),
+    check_eq("any of the empty list is false", any(is_positive, nil_int), false),
+    check_eq("all of the empty list is true", all(is_negative, nil_int), true),
     check_eq("any of the empty vec is false", any(is_positive, empty_vec_int()), false),
     check_eq("all of the empty vec is true", all(is_negative, empty_vec_int()), true),
 
     # --- find returns the FIRST match ----------------------------------------
     check_eq("find over List returns the first match", find(is_even, ints), Just(2)),
     check_eq("find over Vec returns the first match", find(is_even, ints_vec), Just(2)),
-    check_eq("find with no match is Nothing", find(is_negative, ints), no_int()),
-    check_eq("find of the empty list is Nothing", find(is_positive, nil_int()), no_int()),
-    check_eq("find of the empty vec is Nothing", find(is_positive, empty_vec_int()), no_int()),
+    check_eq("find with no match is Nothing", find(is_negative, ints), no_int),
+    check_eq("find of the empty list is Nothing", find(is_positive, nil_int), no_int),
+    check_eq("find of the empty vec is Nothing", find(is_positive, empty_vec_int()), no_int),
     check_eq("find on a record element",
       find(is_adult, people), Just (Person(name = "ada", age = 36))),
 
@@ -79,15 +79,15 @@ fn main() -> Unit !{IO} =
     check_eq("find_map returns the first mapped hit",
       find_map(adult_name, people), Just("ada")),
     check_eq("find_map with no hit is Nothing",
-      find_map(adult_name, Cons (Person(name = "kid", age = 9), Nil)), no_string()),
+      find_map(adult_name, Cons (Person(name = "kid", age = 9), Nil)), no_string),
     check_eq("find_map of the empty list is Nothing",
-      find_map(adult_name, Nil), no_string()),
+      find_map(adult_name, Nil), no_string),
 
     # --- count ---------------------------------------------------------------
     check_eq("count over List", count(is_even, ints), 2),
     check_eq("count over Vec", count(is_even, ints_vec), 2),
     check_eq("count with no matches is 0", count(is_negative, ints), 0),
-    check_eq("count of the empty list is 0", count(is_positive, nil_int()), 0),
+    check_eq("count of the empty list is 0", count(is_positive, nil_int), 0),
     check_eq("count matching everything is the length", count(is_positive, ints), 5),
 
     # --- member --------------------------------------------------------------
@@ -97,7 +97,7 @@ fn main() -> Unit !{IO} =
     check_eq("member over Vec: absent", member(9, ints_vec), false),
     check_eq("member at String, to show `a` is not pinned to Int",
       member("fig", strs), true),
-    check_eq("member of the empty list is false", member(1, nil_int()), false),
+    check_eq("member of the empty list is false", member(1, nil_int), false),
     check_eq("member agrees with list_member", member(3, ints), list_member(3, ints)),
 
     # --- Laws relating the family --------------------------------------------
@@ -106,7 +106,7 @@ fn main() -> Unit !{IO} =
       all(is_positive, ints),! any (\n -> ! is_positive (n), ints)),
     # any p == (find p != Nothing), i.e. find refines any rather than differing.
     check_eq("any agrees with find",
-      any(is_even, ints), find(is_even, ints) != no_int()),
+      any(is_even, ints), find(is_even, ints) != no_int),
     # count p == 0 exactly when nothing matches.
     check_eq("count is zero exactly when any is false",
       count(is_negative, ints) == 0,! any (is_negative, ints)),

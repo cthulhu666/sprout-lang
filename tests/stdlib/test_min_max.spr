@@ -18,10 +18,10 @@ type Person = (name: String, age: Int) deriving (Eq, ToString)
 
 # Type anchors. An empty collection leaves the element type free on both sides
 # of the comparison, so each empty case needs a typed nullary fn.
-fn nil_int() -> List Int = Nil
-fn no_int() -> Maybe Int = Nothing
-fn nil_person() -> List Person = Nil
-fn no_person() -> Maybe Person = Nothing
+let nil_int: List Int = Nil
+let no_int: Maybe Int = Nothing
+let nil_person = Nil
+let no_person = Nothing
 fn empty_vec_int() -> Vec Int = vec_empty()
 
 fn age_of(p: Person) -> Int = p.age
@@ -53,11 +53,11 @@ fn main() -> Unit !{IO} =
       sorted_by_age = vec_sort_by(age_of, vec_from_list(people))
   in run_suite("min_max", [
     # --- Empty: total, never a panic -----------------------------------------
-    check_eq("minimum of empty list", minimum(nil_int()), no_int()),
-    check_eq("maximum of empty list", maximum(nil_int()), no_int()),
-    check_eq("minimum of empty vec", minimum(empty_vec_int()), no_int()),
-    check_eq("min_by of empty list", min_by(age_of, nil_person()), no_person()),
-    check_eq("max_by of empty list", max_by(age_of, nil_person()), no_person()),
+    check_eq("minimum of empty list", minimum(nil_int), no_int),
+    check_eq("maximum of empty list", maximum(nil_int), no_int),
+    check_eq("minimum of empty vec", minimum(empty_vec_int()), no_int),
+    check_eq("min_by of empty list", min_by(age_of, nil_person), no_person),
+    check_eq("max_by of empty list", max_by(age_of, nil_person), no_person),
 
     # --- Singleton: the element is both extremes -----------------------------
     check_eq("minimum of singleton", minimum(Cons(42, Nil)), Just(42)),
@@ -102,5 +102,5 @@ fn main() -> Unit !{IO} =
     check_eq("forwarded maximum at Int", pick_largest(ints), Just(5)),
     check_eq("forwarded minimum at String", pick_smallest(strs), Just("apple")),
     check_eq("forwarded minimum over Vec", pick_smallest(ints_vec), Just(1)),
-    check_eq("forwarded minimum of empty", pick_smallest(nil_int()), no_int())
+    check_eq("forwarded minimum of empty", pick_smallest(nil_int), no_int)
   ])

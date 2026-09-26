@@ -14,7 +14,7 @@ import stdlib.string as string
 import stdlib.terminal as terminal
 import stdlib.fs as fs
 
-fn fixture_source() -> String =
+let fixture_source: String =
   "module main_int_exit_fixture\n\nfn main() -> Int !{IO} =\n  do\n    print(\"fixture running\")\n    7\n"
 
 fn clang_available() -> Bool !{IO} =
@@ -29,11 +29,11 @@ fn is_darwin() -> Bool !{IO} =
     # `uname` output is ASCII; a child that somehow emitted non-UTF-8 is simply not Darwin.
     string.trim(process.proc_stdout_or(r, "")) == "Darwin"
 
-fn runtime_sources() -> List String =
+let runtime_sources: List String =
   ["runtime/sprout_poll.c", "runtime/sprout_runtime.c", "runtime/sprout_scheduler.c"]
 
 fn link_argv(ll_path: String, bin_path: String, use_darwin: Bool) -> List String =
-  let base = [ll_path] ++ runtime_sources() ++ ["-o", bin_path]
+  let base = [ll_path] ++ runtime_sources ++ ["-o", bin_path]
       extra = if use_darwin then ["-framework", "Security", "-framework", "CoreFoundation"] else []
   in ["clang"] ++ base ++ extra
 
@@ -64,7 +64,7 @@ fn main() -> Unit !{IO} =
           let ll_path = "/tmp/sprout_main_int_exit_fixture.ll"
           let bin_path = "/tmp/sprout_main_int_exit_fixture_bin"
           use_darwin <- is_darwin()
-          match fs.write_text(src_path, fixture_source()) with
+          match fs.write_text(src_path, fixture_source) with
           | Err _ -> assert_true(state, "write fixture source", false)
           | Ok _ ->
               do

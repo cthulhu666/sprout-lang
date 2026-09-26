@@ -49,7 +49,7 @@ fn loader_measure(n: Int, avail: g.Size) -> widget.Measured =
 
 fn loader_render(n: Int, r: g.Region, s: scr.Screen) -> Unit !{IO} = do
   stop <- scr.screen_write(s, g.region_col(r), g.region_row(r), to_string(n),
-                           sty.style_default())
+                           sty.style_default)
   ()
 
 fn loader(n: Int) -> widget.Widget Msg =
@@ -57,7 +57,7 @@ fn loader(n: Int) -> widget.Widget Msg =
                             route = widget.no_route,
                             render = loader_render, measure = loader_measure))
 
-fn key() -> event.Event = event.KeyPress(event.KEnter, event.mods_none())
+let key = event.KeyPress(event.KEnter, event.mods_none)
 
 # ── reading results without unpacking the box ───────────────────────────────
 
@@ -104,7 +104,7 @@ fn ord_update(m: Msg, w: widget.Widget Msg) -> (widget.Widget Msg, app.Flow,
   (w, app.Continue, [widget.cmd(load("from-update", _))])
 
 fn order_cases(state: TestState) -> Unit !{IO} =
-  match app.step(ord_update, loader(0), key()) with
+  match app.step(ord_update, loader(0), key) with
   | (_, _, cs) -> order_run(state, cs)
 
 fn order_run(state: TestState, cs: List (widget.Cmd Msg)) -> Unit !{IO} = do
@@ -126,12 +126,12 @@ fn run_next(c: widget.Cmd Msg, rest: List (widget.Cmd Msg),
 # ── building a command runs nothing ─────────────────────────────────────────
 
 fn purity_cases(state: TestState) -> Unit !{IO} = do
-  assert_eq(state, "a key produces one command", cmds_of(loader(0), key()), 1)
+  assert_eq(state, "a key produces one command", cmds_of(loader(0), key), 1)
   assert_eq(state, "a tick produces none", cmds_of(loader(0), event.TickEvent), 0)
   # State still advances on the event that asked for work.
   assert_eq(state, "the asking event still updates state",
-            width_of(stepped(loader(4), key())), 5)
-  run_cases(state, first_cmd(loader(0), key()))
+            width_of(stepped(loader(4), key)), 5)
+  run_cases(state, first_cmd(loader(0), key))
 
 # Running is the app loop's job, and it is the ONLY place the IO happens.
 fn run_cases(state: TestState, c: Maybe (widget.Cmd Msg)) -> Unit !{IO} =
@@ -147,11 +147,11 @@ fn ran_case(state: TestState, c: widget.Cmd Msg) -> Unit !{IO} = do
 
 fn batching_cases(state: TestState) -> Unit !{IO} = do
   assert_eq(state, "feed collects a command per asking event",
-            fed_cmds(loader(0), [key(), key()]), 2)
+            fed_cmds(loader(0), [key, key]), 2)
   assert_eq(state, "feed collects none when nothing asks",
             fed_cmds(loader(0), [event.TickEvent, event.TickEvent]), 0)
   assert_eq(state, "feed mixes asking and non-asking events",
-            fed_cmds(loader(0), [key(), event.TickEvent, key()]), 2)
+            fed_cmds(loader(0), [key, event.TickEvent, key]), 2)
   assert_eq(state, "feeding nothing asks for nothing", fed_cmds(loader(0), Nil), 0)
 
 # ── map_msgs retargets commands too ─────────────────────────────────────────
@@ -162,8 +162,8 @@ fn batching_cases(state: TestState) -> Unit !{IO} = do
 
 fn map_cases(state: TestState) -> Unit !{IO} = do
   assert_eq(state, "a mapped widget still asks",
-            cmds_of(widget.map_msgs(wrap_msg, unwrap_msg, loader(0)), key()), 1)
-  mapped_run(state, first_cmd(widget.map_msgs(wrap_msg, unwrap_msg, loader(0)), key()))
+            cmds_of(widget.map_msgs(wrap_msg, unwrap_msg, loader(0)), key), 1)
+  mapped_run(state, first_cmd(widget.map_msgs(wrap_msg, unwrap_msg, loader(0)), key))
 
 fn mapped_run(state: TestState, c: Maybe (widget.Cmd Outer)) -> Unit !{IO} =
   match c with

@@ -1,3 +1,4 @@
+# sprout-ignore-all lint/nullary-const-fn: conformance fixture — the nullary form is the program under test
 fn main() -> Unit !{IO} =
   print(__sprout_where_0 + x)
 where

@@ -1,9 +1,9 @@
 module examples.foldable_demo
 
-fn list_sample() -> List Int =
+let list_sample: List Int =
   [1, 2, 3]
 
-fn vec_sample() -> Vec Int =
+let vec_sample: Vec Int =
   [4, 5]
 
 fn list_to_vec(xs: List Int) -> Vec Int where Foldable List =
@@ -14,6 +14,6 @@ fn vec_to_vec(xs: Vec Int) -> Vec Int where Foldable Vec =
 
 fn main() -> Unit !{IO} =
   print(
-    vec_length(list_to_vec(list_sample()))
-    + vec_length(vec_to_vec(vec_sample()))
+    vec_length(list_to_vec(list_sample))
+    + vec_length(vec_to_vec(vec_sample))
   )

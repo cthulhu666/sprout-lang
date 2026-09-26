@@ -20,8 +20,8 @@ export type FocusStyle (..) = (normal: style.Style, focused: style.Style)
 
 # Reverse video, the one attribute every terminal has.
 export fn focus_style_default() -> FocusStyle =
-  FocusStyle(normal = style.style_default(),
-             focused = style.with_reverse(style.style_default(), true))
+  FocusStyle(normal = style.style_default,
+             focused = style.with_reverse(style.style_default, true))
 
 # `at` is an id, not an index into `ids`: a name that matches no widget parks
 # focus rather than failing (§4.6), so the ring must be able to hold a position

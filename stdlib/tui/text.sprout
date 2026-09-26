@@ -19,9 +19,9 @@ import stdlib.unicode.width as uwidth
 
 fn imax(a: Int, b: Int) -> Int = if a > b then a else b
 
-fn space() -> Int = 32
+let space: Int = 32
 
-fn newline() -> Int = 10
+let newline: Int = 10
 
 # ── Segmentation ────────────────────────────────────────────────────────────
 
@@ -164,7 +164,7 @@ fn split_lines(cs: List (List Int), cur: List (List Int),
   match cs with
   | Nil -> (cur, acc)
   | Cons c rest ->
-      if cluster_is(c, newline())
+      if cluster_is(c, newline)
       then split_lines(rest, Nil, Cons(list_reverse(cur), acc))
       else split_lines(rest, Cons(c, cur), acc)
 
@@ -185,7 +185,7 @@ fn split_words(cs: List (List Int), cur: List (List Int),
   match cs with
   | Nil -> (cur, acc)
   | Cons c rest ->
-      if cluster_is(c, space())
+      if cluster_is(c, space)
       then split_words(rest, Nil, push_word(cur, acc))
       else split_words(rest, Cons(c, cur), acc)
 
@@ -222,7 +222,7 @@ fn place(w: List (List Int), rest: List (List (List Int)), cur: List (List Int),
   | Nil -> start(w, rest, acc, cols)
   | [_ | _] ->
       if cur_w + 1 + clusters_width(w) <= cols
-      then fill(rest, prepend_all_clusters(w, Cons([space()], cur)),
+      then fill(rest, prepend_all_clusters(w, Cons([space], cur)),
                 cur_w + 1 + clusters_width(w), acc, cols)
       # Does not fit beside what is there: close the line and retry on a fresh
       # one, where `start` decides whether it needs cutting.

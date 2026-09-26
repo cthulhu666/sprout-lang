@@ -23,7 +23,7 @@ fn stdlib_root() -> String !{IO} =
   | Just root -> root
   | Nothing -> "stdlib"
 
-fn package_root() -> String = "tests/conformance/package_resolution/roots"
+let package_root: String = "tests/conformance/package_resolution/roots"
 
 # `demo.sealed` exports the wrap WITHOUT `(..)`, so `Sealed` is the type only.
 fn hidden_ctor_source() -> String =
@@ -96,7 +96,7 @@ fn fail_message(result: compiler.CompileResult) -> String =
 fn check(src: String, root: String) -> String !{IO} =
   do
     result <- compiler.compile_source_with_roots(src, source.StdlibRoot(root),
-      Cons(package_root(), Nil))
+      Cons(package_root, Nil))
     fail_message(result)
 
 fn main() -> Unit !{IO} =

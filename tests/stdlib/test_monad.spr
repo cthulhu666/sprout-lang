@@ -7,10 +7,10 @@ import stdlib.test (check_eq, run_suite)
 # short-circuiting on the empty/error case. Dispatch is on `xs`.
 
 # Typed anchors so instance/Eq resolution has a concrete `m`.
-fn no_int() -> Maybe Int = Nothing
-fn nil_int() -> List Int = Nil
-fn ok3() -> Result String Int = Ok(3)
-fn err_boom() -> Result String Int = Err("boom")
+let no_int: Maybe Int = Nothing
+let nil_int: List Int = Nil
+let ok3: Result String Int = Ok(3)
+let err_boom: Result String Int = Err("boom")
 
 # Kleisli arrows for each instance.
 fn m_inc(x: Int) -> Maybe Int = Just(x + 1)
@@ -35,37 +35,37 @@ fn main() -> Unit !{IO} =
   run_suite("monad", [
     # --- Monad Maybe (this block is also the flat_map signature spike) --------
     check_eq("maybe and_then just", and_then(m_inc, Just(3)), Just(4)),
-    check_eq("maybe and_then nothing", and_then(m_inc, no_int()), no_int()),
-    check_eq("maybe and_then f-returns-nothing", and_then(m_none, Just(3)), no_int()),
+    check_eq("maybe and_then nothing", and_then(m_inc, no_int), no_int),
+    check_eq("maybe and_then f-returns-nothing", and_then(m_none, Just(3)), no_int),
 
     # --- Monad Result (reduced to Int via result_with_default to avoid Eq Result)
-    check_eq("result and_then ok", result_with_default(-1, and_then(r_inc, ok3())), 4),
+    check_eq("result and_then ok", result_with_default(-1, and_then(r_inc, ok3)), 4),
     check_eq("result and_then err short-circuits",
-      result_with_default(-1, and_then(r_inc, err_boom())), -1),
+      result_with_default(-1, and_then(r_inc, err_boom)), -1),
 
     # --- Monad List (flat_map = concat-map) ----------------------------------
     check_eq("list and_then flattens",
       and_then(l_dup, Cons(1, Cons(2, Nil))),
       Cons(1, Cons(10, Cons(2, Cons(20, Nil))))),
-    check_eq("list and_then empty", and_then(l_dup, nil_int()), nil_int()),
+    check_eq("list and_then empty", and_then(l_dup, nil_int), nil_int),
 
     # --- maybe_with_default --------------------------------------------------
     check_eq("maybe_with_default just", maybe_with_default(0, Just(5)), 5),
-    check_eq("maybe_with_default nothing", maybe_with_default(0, no_int()), 0),
+    check_eq("maybe_with_default nothing", maybe_with_default(0, no_int), 0),
 
     # --- maybe_or_else -------------------------------------------------------
     check_eq("maybe_or_else primary present", maybe_or_else(Just(5), Just(9)), Just(5)),
-    check_eq("maybe_or_else falls back", maybe_or_else(no_int(), Just(9)), Just(9)),
-    check_eq("maybe_or_else both nothing", maybe_or_else(no_int(), no_int()), no_int()),
+    check_eq("maybe_or_else falls back", maybe_or_else(no_int, Just(9)), Just(9)),
+    check_eq("maybe_or_else both nothing", maybe_or_else(no_int, no_int), no_int),
 
     # --- polymorphic-over-Monad (forwarded-dict / superclass-slot path) -------
     check_eq("bind_twice maybe", bind_twice(m_inc, Just(1)), Just(3)),
-    check_eq("bind_twice maybe nothing", bind_twice(m_inc, no_int()), no_int()),
+    check_eq("bind_twice maybe nothing", bind_twice(m_inc, no_int), no_int),
     # and_then(l_dup, and_then(l_dup, [1])) = and_then(l_dup, [1,10])
     #   = l_dup(1) ++ l_dup(10) = [1,10] ++ [10,100]
     check_eq("bind_twice list", bind_twice(l_dup, Cons(1, Nil)),
       Cons(1, Cons(10, Cons(10, Cons(100, Nil))))),
     check_eq("bind_lift maybe (superclass pure)", bind_lift(dbl, Just(5)), Just(10)),
-    check_eq("bind_lift maybe nothing", bind_lift(dbl, no_int()), no_int()),
+    check_eq("bind_lift maybe nothing", bind_lift(dbl, no_int), no_int),
     check_eq("bind_lift list", bind_lift(dbl, Cons(1, Cons(2, Nil))), Cons(2, Cons(4, Nil)))
   ])

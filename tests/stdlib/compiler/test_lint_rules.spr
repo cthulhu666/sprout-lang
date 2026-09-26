@@ -39,6 +39,9 @@ fn mentions_let_else(msg: String) -> Bool =
 fn mentions_one_binding(msg: String) -> Bool =
   str_find(msg, "one binding per line") != -1
 
+fn mentions_annotation(msg: String) -> Bool =
+  str_find(msg, "let <name>: <type>") != -1
+
 # Rule-scoped count — keeps an assertion about ONE rule from breaking when a
 # fixture also happens to trip a different rule (e.g. a Cons/Nil-recursion
 # fixture used for staircase-of-doom now also legitimately trips
@@ -460,6 +463,116 @@ let two_multiline_lambdas =
   "                           else Nothing,\n" ++
   "                     ys))\n"
 
+# --- nullary-const-fn fixtures -------------------------------------------
+#
+# A pure `fn` taking no parameters is a constant written as a function: the
+# body is re-evaluated at every call, and the name reads as a call at every
+# use. The gate is the type checker's own `is_syntactic_value`.
+
+let nullary_int_literal =
+  "fn bulk_size() -> Int = 65600\n"
+
+let nullary_string_literal =
+  "fn marker() -> String = \"@canonical:\"\n"
+
+# Brackets desugar to Cons/Nil at parse time (parser.desugar_list_literal), so
+# a list of literals arrives as a constructor applied to values and needs no
+# arm of its own — here or in the predicate.
+let nullary_list_literal =
+  "fn items() -> List String = [\"alpha\", \"beta\"]\n"
+
+let nullary_empty_list =
+  "fn none_yet() -> List Int = []\n"
+
+let nullary_ctor_app =
+  "fn origin() -> Version = Version(0)\n"
+
+let nullary_bare_ctor =
+  "fn no_style() -> Maybe Style = Nothing\n"
+
+let nullary_tuple =
+  "fn corner() -> (Int, Int) = (0, 0)\n"
+
+# Prefix `-` builds a UnaryExpr, which `is_syntactic_value` rejects: to the
+# type checker `-1` and `negate(x)` pose the same generalization question. They
+# are not the same question here, so the rule widens by exactly this shape.
+let nullary_negative_literal =
+  "fn sentinel() -> Int = -1\n"
+
+# Where the body's line break falls is irrelevant — the rule reads the AST.
+let nullary_wrapped_body =
+  "fn no_channel_binding() -> String =\n" ++
+  "  \"biws\"\n"
+
+# A `Vec` written in list syntax is a `Vec` because the RETURN TYPE says so
+# (spec §5.5.1). The suggested rewrite has to carry that annotation across or
+# the same brackets become a `List`, so the message names it.
+let nullary_vec_literal =
+  "fn lengths() -> Vec Int = [1, 2, 3]\n"
+
+# Effectful: a top-level `let` initializer must be pure (spec §5.2), and that
+# is NOT enforced today — so a finding here would yield code that compiles
+# and silently moves the effect to program startup.
+#
+# The body is a LITERAL on purpose. With an effectful body the value gate
+# rejects it first and the purity gate is never consulted, which is how the
+# first draft of this fixture left that gate entirely untested.
+let nullary_effectful =
+  "fn stamp() -> Int !{IO} = 65600\n"
+
+# The same fn with its effect row dropped — the one-token difference that has
+# to be what decides it.
+let nullary_effectful_twin =
+  "fn stamp() -> Int = 65600\n"
+
+# A lowercase callee is a function call, not a constructor: `bytes_empty()`
+# allocates per call, and no top-level `let` can stand in for that.
+let nullary_fn_call =
+  "fn empty() -> Bytes = bytes_empty()\n"
+
+let nullary_arithmetic =
+  "fn min_int() -> Int = 0 - 9223372036854775807 - 1\n"
+
+# One computed element disqualifies the whole list.
+let nullary_list_with_call =
+  "fn sizes() -> List Int = [width(), 2]\n"
+
+# A record literal is a RecordExpr, which the value restriction excludes.
+let nullary_record_literal =
+  "fn scratch() -> Document = Document(file = Nothing, dirty = false)\n"
+
+# Parameters are a function's reason to exist. The rule is only about a
+# function that has none.
+let unary_literal_fn =
+  "fn always(n: Int) -> Int = 65600\n"
+
+# A `where` constraint means the dictionary is chosen per CALL. A top-level
+# binding holds one value and one choice, and an open one is rejected as an
+# ambiguous typeclass binding — three in-tree suites failed exactly this way.
+let nullary_constrained =
+  "fn pick_where() -> a -> String where ToString a = label\n"
+
+# A bare name and a lambda are syntactic values, but they take their type from
+# CONTEXT — the declared return type is what selects the instance. The rewrite
+# can only preserve that by carrying an annotation, which is not always
+# writable, so the rule declines.
+let nullary_bare_var =
+  "fn pick_color() -> Color -> String = label\n"
+
+let nullary_lambda =
+  "fn pick_lambda() -> Int -> String = \\n -> label(n)\n"
+
+# The entry point stays a function whatever its body: `let main` is not a
+# program. A real `main` is `!{IO}` and the purity gate would stop it, so the
+# pure one is the case that needs its own guard.
+let nullary_main =
+  "fn main() -> Int = 0\n"
+
+let nullary_suppressed =
+  "# sprout-ignore-all lint/nullary-const-fn: generated table\n" ++
+  "\n" ++
+  "fn bulk_size() -> Int = 65600\n"
+
 # A file that does not PARSE cannot have any AST rule run against it, and the
 # honest answer is to say so. Reporting it as clean makes an unchecked file
 # indistinguishable from a checked one at the lint gate — and `just lint` over a
@@ -599,7 +712,10 @@ fn main() -> Unit !{IO} =
 
     assert_eq(state, "wrap at a call to an unresolved callee (no Vec context): no finding", count_list(lint_rules.lint_ast(wrap_outside_vec_context)), 0)
 
-    assert_eq(state, "wrap in a top-level let binding (no Vec context): no finding", count_list(lint_rules.lint_ast(wrap_in_let_binding_no_context)), 0)
+    # Rule-scoped: this fixture needs a second declaration to place the `let`
+    # after, and `fn g() -> Int = 1` is legitimately a nullary-const-fn.
+    assert_eq(state, "wrap in a top-level let binding (no Vec context): no finding",
+      count_by_rule(lint_rules.lint_ast(wrap_in_let_binding_no_context), "redundant-vec-from-list"), 0)
 
     assert_eq(state, "hand-written Cons h t head/tail recursion: no finding (var tail, not fixed-length)", count_list(lint_rules.lint_ast(list_recursion_hand_written)), 0)
 
@@ -696,5 +812,64 @@ fn main() -> Unit !{IO} =
 
     assert_eq(state, "two multi-line lambdas in one call: two findings",
       count_by_rule(lint_rules.lint_ast(two_multiline_lambdas), "multi-line-lambda-arg"), 2)
+
+    # --- nullary-const-fn ------------------------------------------------
+    assert_eq(state, "nullary fn with an Int literal body: one finding",
+      count_by_rule(lint_rules.lint_ast(nullary_int_literal), "nullary-const-fn"), 1)
+    assert_eq(state, "nullary fn with a String literal body: one finding",
+      count_by_rule(lint_rules.lint_ast(nullary_string_literal), "nullary-const-fn"), 1)
+    assert_eq(state, "nullary fn with a list-literal body: one finding",
+      count_by_rule(lint_rules.lint_ast(nullary_list_literal), "nullary-const-fn"), 1)
+    assert_eq(state, "nullary fn returning []: one finding",
+      count_by_rule(lint_rules.lint_ast(nullary_empty_list), "nullary-const-fn"), 1)
+    assert_eq(state, "nullary fn applying a constructor to values: one finding",
+      count_by_rule(lint_rules.lint_ast(nullary_ctor_app), "nullary-const-fn"), 1)
+    assert_eq(state, "nullary fn returning a bare constructor: one finding",
+      count_by_rule(lint_rules.lint_ast(nullary_bare_ctor), "nullary-const-fn"), 1)
+    assert_eq(state, "nullary fn returning a tuple of values: one finding",
+      count_by_rule(lint_rules.lint_ast(nullary_tuple), "nullary-const-fn"), 1)
+    assert_eq(state, "nullary fn returning a negated literal: one finding",
+      count_by_rule(lint_rules.lint_ast(nullary_negative_literal), "nullary-const-fn"), 1)
+    assert_eq(state, "nullary fn whose body wraps to the next line: one finding",
+      count_by_rule(lint_rules.lint_ast(nullary_wrapped_body), "nullary-const-fn"), 1)
+    assert_eq(state, "nullary fn returning a Vec written in list syntax: one finding",
+      count_by_rule(lint_rules.lint_ast(nullary_vec_literal), "nullary-const-fn"), 1)
+
+    # Anchored on the declaration, which is what gets rewritten.
+    assert_eq(state, "nullary const fn: anchored at the fn's line",
+      first_line(lint_rules.lint_ast(nullary_int_literal)), 1)
+    assert_eq(state, "nullary const fn: rule id",
+      first_rule(lint_rules.lint_ast(nullary_int_literal)), "nullary-const-fn")
+
+    # The rewrite is `let <name>: <T> = <body>`, never a bare `let <name> =`.
+    # Dropping the annotation turns `Vec Int` into `List Int` — they are
+    # distinct types, so the message has to say to carry it.
+    assert_eq(state, "nullary const fn: message names the type annotation",
+      mentions_annotation(first_message(lint_rules.lint_ast(nullary_vec_literal))), true)
+
+    assert_eq(state, "effectful nullary fn with a literal body: no finding",
+      count_by_rule(lint_rules.lint_ast(nullary_effectful), "nullary-const-fn"), 0)
+    assert_eq(state, "the same fn without the effect row: one finding",
+      count_by_rule(lint_rules.lint_ast(nullary_effectful_twin), "nullary-const-fn"), 1)
+    assert_eq(state, "nullary fn calling a function: no finding",
+      count_by_rule(lint_rules.lint_ast(nullary_fn_call), "nullary-const-fn"), 0)
+    assert_eq(state, "nullary fn computing arithmetic: no finding",
+      count_by_rule(lint_rules.lint_ast(nullary_arithmetic), "nullary-const-fn"), 0)
+    assert_eq(state, "nullary fn with one computed list element: no finding",
+      count_by_rule(lint_rules.lint_ast(nullary_list_with_call), "nullary-const-fn"), 0)
+    assert_eq(state, "nullary fn returning a record literal: no finding",
+      count_by_rule(lint_rules.lint_ast(nullary_record_literal), "nullary-const-fn"), 0)
+    assert_eq(state, "literal-bodied fn that takes a parameter: no finding",
+      count_by_rule(lint_rules.lint_ast(unary_literal_fn), "nullary-const-fn"), 0)
+    assert_eq(state, "nullary fn with a where constraint: no finding",
+      count_by_rule(lint_rules.lint_ast(nullary_constrained), "nullary-const-fn"), 0)
+    assert_eq(state, "nullary fn whose body is a bare name: no finding",
+      count_by_rule(lint_rules.lint_ast(nullary_bare_var), "nullary-const-fn"), 0)
+    assert_eq(state, "nullary fn whose body is a lambda: no finding",
+      count_by_rule(lint_rules.lint_ast(nullary_lambda), "nullary-const-fn"), 0)
+    assert_eq(state, "pure nullary main with a literal body: no finding",
+      count_by_rule(lint_rules.lint_ast(nullary_main), "nullary-const-fn"), 0)
+    assert_eq(state, "nullary const fn under a suppression directive: no finding",
+      count_by_rule(lint_rules.lint_ast(nullary_suppressed), "nullary-const-fn"), 0)
 
     summary(state)

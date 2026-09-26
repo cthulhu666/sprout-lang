@@ -248,10 +248,10 @@ fn type_list_from_ast(parts: List ast.TypeExpr, local_vars: Dict types.Type) -> 
 # are different aliases. `@` and `:` cannot appear in a type name, so no user
 # name collides with a key (the same guarantee `@qualalias:` relies on).
 
-fn alias_fn_prefix() -> String = "@aliasfn:"
+let alias_fn_prefix: String = "@aliasfn:"
 
 fn alias_fn_key(name: String, arity: Int) -> String =
-  alias_fn_prefix() ++ name ++ ":" ++ int_to_string(arity)
+  alias_fn_prefix ++ name ++ ":" ++ int_to_string(arity)
 
 # Keyed by alias as well as position, so that an alias body which expands
 # another alias cannot capture the inner one's parameters.
@@ -602,7 +602,7 @@ fn collect_param_type_vars(params: List ast.Param, acc: List String) -> List Str
 fn collect_te_vars(te: ast.TypeExpr, acc: List String) -> List String =
   match te with
   | ast.TypeName name ->
-      if is_lowercase_name(name) then list_add_unique(name, acc) else acc
+      if ast.is_lowercase_name(name) then list_add_unique(name, acc) else acc
   | ast.TypeApply base arg ->
       collect_te_vars(arg, collect_te_vars(base, acc))
   | ast.TypeArrow param ret _ _ ->
@@ -615,47 +615,6 @@ fn collect_te_vars_list(parts: List ast.TypeExpr, acc: List String) -> List Stri
   match parts with
   | Nil -> acc
   | Cons h t -> collect_te_vars_list(t, collect_te_vars(h, acc))
-
-fn is_lowercase_name(name: String) -> Bool =
-  str_find(name, ".") == -1 &&
-  (c == "a" || c == "b" || c == "c" || c == "d" || c == "e" ||
-   c == "f" || c == "g" || c == "h" || c == "i" || c == "j" ||
-   c == "k" || c == "l" || c == "m" || c == "n" || c == "o" ||
-   c == "p" || c == "q" || c == "r" || c == "s" || c == "t" ||
-   c == "u" || c == "v" || c == "w" || c == "x" || c == "y" || c == "z")
-  where c = str_slice(name, 0, 1)
-
-# A call whose callee is a data constructor (uppercase head), not a function.
-# Constructor applications of values are syntactic values; function calls are not.
-fn is_constructor_ref(name: String) -> Bool =
-  is_lowercase_name(string.after_last_dot(name)) == false
-
-# Syntactic value restriction (W3/F-VALRESTR): only generalize a top-level `let`
-# whose initializer is a syntactic value — a literal, variable, lambda, tuple of
-# values, or constructor applied to values. A function/if/match/do/... initializer
-# is monomorphic. Without this, `let cell = mutvec_new(1, Nil)` generalized to
-# `forall a. MutVec (List a)` and could be written at Int and read at String.
-fn is_syntactic_value(expr: ast.Expr) -> Bool =
-  match expr with
-  | ast.IntExpr _ _ -> true
-  | ast.FloatExpr _ _ -> true
-  | ast.BoolExpr _ _ -> true
-  | ast.StringExpr _ _ -> true
-  | ast.CharExpr _ _ -> true
-  | ast.UnitExpr _ -> true
-  | ast.VarExpr _ _ -> true
-  | ast.LambdaExpr _ _ _ -> true
-  | ast.TupleExpr items _ -> all_syntactic_values(items)
-  | ast.CallExpr callee args _ ->
-      match callee with
-      | ast.VarExpr name _ -> is_constructor_ref(name) && all_syntactic_values(args)
-      | _ -> false
-  | _ -> false
-
-fn all_syntactic_values(exprs: List ast.Expr) -> Bool =
-  match exprs with
-  | Nil -> true
-  | Cons h t -> if is_syntactic_value(h) then all_syntactic_values(t) else false
 
 fn collect_ret_type_vars(ret_type_maybe: Maybe ast.TypeExpr, acc: List String) -> List String =
   match ret_type_maybe with
@@ -1538,7 +1497,7 @@ fn unresolved_name_hint(name: String, env: Dict types.Scheme) -> String =
              ++ "`, which is not in scope here: " ++ why
       else ""
   where leaf = string.after_last_dot(name)
-        why = if is_constructor_ref(name)
+        why = if ast.is_constructor_ref(name)
               then "a constructor is exported only with `(..)` on its declaration (spec-v0 §5.6.1)"
               else "check that it is exported, and named by the import"
 
@@ -1647,20 +1606,20 @@ fn abstract_record_marker(name: String) -> String = "@abstract:" ++ name
 # The module whose declarations are currently being inferred. The one env marker
 # whose VALUE carries the name rather than its key: the check needs to READ the
 # name, and a key-encoded marker is only ever asked whether it is present.
-fn current_module_marker() -> String = "@in_module"
+let current_module_marker: String = "@in_module"
 
 fn enter_module(members: List (Int, ast.Decl), env: GlobalEnv) -> GlobalEnv =
   match members with
   | Nil -> env
   | [(_, decl) | _] ->
-      GlobalEnv(dict_set(current_module_marker(),
+      GlobalEnv(dict_set(current_module_marker,
         types.mono(types.TConst(types.type_id(group_module(decl)))),
         global_env_dict(env)))
 
 # A group whose module cannot be determined. Not a legal module name, so it can
 # never equal a record's owner, and record_is_abstract_here reads it as "do not
 # gate" rather than as "some other module".
-fn unattributed_module() -> String = "?"
+let unattributed_module: String = "?"
 
 # Every name a declaration introduces is canonical by the time inference sees it,
 # so any one of them names the module.
@@ -1680,15 +1639,15 @@ fn unattributed_module() -> String = "?"
 # BACKLOG: `An instance is the one way past record opacity`.
 fn group_module(decl: ast.Decl) -> String =
   match decl with
-  | ast.InstanceDecl _ _ _ _ -> unattributed_module()
+  | ast.InstanceDecl _ _ _ _ -> unattributed_module
   | _ ->
       match list_append(ast.decl_type_names(decl),
                         ast.scope_names_module(ast.decl_value_scopes(decl))) with
-      | [] -> unattributed_module()
+      | [] -> unattributed_module
       | [name | _] -> owning_module(name)
 
 fn current_module(env: Dict types.Scheme) -> String =
-  match dict_get(current_module_marker(), env) with
+  match dict_get(current_module_marker, env) with
   | Nothing -> ""
   | Just scheme ->
       match types.scheme_type(scheme) with
@@ -1708,7 +1667,7 @@ fn record_is_abstract_here(rec_name: String, env: Dict types.Scheme) -> Bool =
   match dict_get(abstract_record_marker(rec_name), env) with
   | Nothing -> false
   | Just _ ->
-      here != unattributed_module() && owning_module(rec_name) != here
+      here != unattributed_module && owning_module(rec_name) != here
       where here = current_module(env)
 
 # Says what is missing, not what the other module did: a record reaches this
@@ -3543,7 +3502,7 @@ fn constraint_arg_typeexpr(
 # not answer for; both forward rather than dispatching on a type this caller has not
 # chosen. Anything else is a constructor, spelled as the constraint spelled it.
 fn named_ctor_typeexpr(t: String) -> Maybe ast.TypeExpr =
-  if str_starts_with(t, "#") || is_lowercase_name(t) then Nothing
+  if str_starts_with(t, "#") || ast.is_lowercase_name(t) then Nothing
   else Just(ast.TypeName(t))
 
 # Left-associating application: `Tagged` over [String] is `Tagged String`.
@@ -5995,17 +5954,21 @@ fn annotation_tyvar(te: ast.TypeExpr) -> Maybe String =
 fn aliases_for_annotations(env: Dict types.Scheme) -> Dict types.Type =
   alias_decls_from_env(vec_to_list(dict_entries(env)), import_aliases_from_env(env))
 
+# Key prefix for a `type alias` mirrored into the value environment. Named rather
+# than spelled twice so the write and the read cannot drift.
+let alias_marker_prefix: String = "@aliasty:"
+
 fn alias_decls_from_env(
   entries: List (String, types.Scheme), acc: Dict types.Type
 ) -> Dict types.Type =
   match entries with
   | [] -> acc
   | [(key, scheme) | rest] ->
-      if str_starts_with(key, alias_marker_prefix()) then
+      if str_starts_with(key, alias_marker_prefix) then
         match scheme with
         | types.Scheme _ _ ty _ _ ->
             alias_decls_from_env(rest,
-              dict_set(string.drop(key, string.length(alias_marker_prefix())), ty, acc))
+              dict_set(string.drop(key, string.length(alias_marker_prefix)), ty, acc))
       else alias_decls_from_env(rest, acc)
 
 # `pos` is the LAMBDA's position, threaded in so the error is constructed with a
@@ -6935,6 +6898,12 @@ fn pure_typed_err(pos: source.SourcePos, msg: String) -> typed_ast.TypedResult !
   do
     typed_ast.TypedErr(pos, msg)
 
+let c_runtime_type_names: List String =
+  ["Vector", "Map", "NativeSet", "Ref"]
+
+let primitive_type_names: List String =
+  ["Int", "Double", "Bool", "String", "Char", "Unit", "Bytes"]
+
 fn typecheck_decls_resolved(
   state: unifier.InferState,
   decls: List ast.Decl,
@@ -7033,7 +7002,7 @@ fn typecheck_decls_resolved(
 # ClassDecl/InstanceDecl/FnDecl signature positions are not yet covered (follow-up).
 #
 # Type parameters (always lowercase in Sprout, e.g. `a`, `b`) are detected by
-# is_lowercase_name and skipped without consulting the declared set.
+# ast.is_lowercase_name and skipped without consulting the declared set.
 # Qualified names (e.g. `stdlib.compiler.ast.TypeExpr`) are stripped to their
 # short form before lookup, matching the after_last_dot convention used
 # throughout lookup_type_var.
@@ -7048,13 +7017,9 @@ fn typecheck_decls_resolved(
 #               lsp_driver.sprout LspState, analysis_service_driver.sprout StartupState,
 #               module_loader.sprout ModuleCache alias)
 fn builtin_type_names() -> List String =
-  append(primitive_type_names(), c_runtime_type_names())
+  append(primitive_type_names, c_runtime_type_names)
 
-fn primitive_type_names() -> List String =
-  ["Int", "Double", "Bool", "String", "Char", "Unit", "Bytes"]
 
-fn c_runtime_type_names() -> List String =
-  ["Vector", "Map", "NativeSet", "Ref"]
 
 # O(n decls): collect short names (prefix-stripped) of all declared types.
 fn collect_declared_type_names(decls: List ast.Decl, acc: List String) -> List String =
@@ -7076,7 +7041,7 @@ fn collect_declared_type_names(decls: List ast.Decl, acc: List String) -> List S
 fn validate_te(te: ast.TypeExpr, decl_name: String, declared: List String) -> Maybe String =
   match te with
   | ast.TypeName name ->
-      if is_lowercase_name(name) then Nothing
+      if ast.is_lowercase_name(name) then Nothing
       else
         if types.list_member(string.after_last_dot(name), declared) then Nothing
         else Just("type-validation: unknown type name `" ++ string.after_last_dot(name) ++
@@ -7491,6 +7456,12 @@ fn validate_fn_constraints(cs: List ast.TypeConstraint, decl_name: String, class
       | Just e -> Just(e)
       | Nothing -> validate_fn_constraints(rest, decl_name, classes, sig_tyvars)
 
+# Every entrypoint diagnostic ends with the full accepted signature, so the
+# author writes one correct annotation rather than fixing the return type only
+# to be told about the effect next.
+let main_signature_hint: String =
+  "; write `fn main() -> Unit !{IO}`, or `fn main() -> Int !{IO}` to set the process exit code"
+
 fn validate_constraints_all(decls: List ast.Decl, classes: List String) -> Maybe(source.SourcePos, String) =
   match decls with
   | Nil -> Nothing
@@ -7544,16 +7515,11 @@ fn main_return_ok(ret: Maybe ast.TypeExpr) -> Bool =
 fn any_effect_var(effs: List String) -> Bool =
   match effs with
   | Nil -> false
-  | Cons e rest -> if is_lowercase_name(e) then true else any_effect_var(rest)
+  | Cons e rest -> if ast.is_lowercase_name(e) then true else any_effect_var(rest)
 
-# Every entrypoint diagnostic ends with the full accepted signature, so the
-# author writes one correct annotation rather than fixing the return type only
-# to be told about the effect next.
-fn main_signature_hint() -> String =
-  "; write `fn main() -> Unit !{IO}`, or `fn main() -> Int !{IO}` to set the process exit code"
 
 fn main_error(what: String) -> Maybe String =
-  Just("Executable entrypoint `main` " ++ what ++ main_signature_hint())
+  Just("Executable entrypoint `main` " ++ what ++ main_signature_hint)
 
 fn main_effect_error(effects: Maybe (List String)) -> Maybe String =
   match effects with
@@ -7667,7 +7633,7 @@ fn check_duplicate_fn_decls(decls: List ast.Decl, seen: Dict Bool) -> Maybe(sour
 # Discriminates on the AST head, NOT on type_from_ast: that is called here with
 # an empty local_vars, so an unbound `a` resolves to TConst("a") — indistinguishable
 # from a genuine nullary constructor by the time types.Type is reached. The
-# lowercase-initial convention (is_lowercase_name) is the same discriminator
+# lowercase-initial convention (ast.is_lowercase_name) is the same discriminator
 # lowering.is_type_var_name and bundler.type_name_starts_lower use.
 #
 # The walk must mirror what type_from_ast does to the SAME TypeExpr, because the
@@ -7688,7 +7654,7 @@ fn check_duplicate_fn_decls(decls: List ast.Decl, seen: Dict Bool) -> Maybe(sour
 fn instance_head_problem(te: ast.TypeExpr) -> Maybe String =
   match te with
   | ast.TypeName n ->
-      if is_lowercase_name(n) then Just("the type variable `" ++ n ++ "`") else Nothing
+      if ast.is_lowercase_name(n) then Just("the type variable `" ++ n ++ "`") else Nothing
   | ast.TypeApply base _ -> instance_head_problem(base)
   | ast.TypeEffect inner _ -> instance_head_problem(inner)
   | ast.TypeArrow _ _ _ _ -> Just("a function type")
@@ -7736,7 +7702,7 @@ fn type_apply_spine_args(te: ast.TypeExpr, acc: List ast.TypeExpr) -> List ast.T
 # the widening item in BACKLOG.md. Until then a nested argument is rejected too.
 #
 # The raw name is the right thing to test here, NOT string.after_last_dot(name)
-# as is_constructor_ref does: is_lowercase_name already answers false for any
+# as ast.is_constructor_ref does: ast.is_lowercase_name already answers false for any
 # dotted name, so a module-qualified type can never be taken for a type variable
 # even though it may START lowercase. Verified — an aliased `instance Holder
 # (List json.Json)` arrives here as `stdlib.json.Json` and is correctly reported
@@ -7749,7 +7715,7 @@ fn head_arg_problem(args: List ast.TypeExpr, seen: List String) -> Maybe String 
   | Cons a rest ->
       match a with
       | ast.TypeName n ->
-          if is_lowercase_name(n) == false then Just("`" ++ n ++ "` is a concrete type")
+          if ast.is_lowercase_name(n) == false then Just("`" ++ n ++ "` is a concrete type")
           else if list_member(n, seen) then Just("`" ++ n ++ "` appears more than once")
           else head_arg_problem(rest, Cons(n, seen))
       | _ -> Just("one argument is not a type variable")
@@ -7853,6 +7819,8 @@ fn own_class_depth_add(decl: ast.Decl, alias_env: Dict types.Type,
   in dict_set(name,
        (v, class_own_depths(methods, v, build_type_var_dict(type_params, alias_env), Nil)), acc)
 
+let class_marker_prefix: String = "@class:"
+
 # The same table for classes that arrive as env schemes rather than decls — every
 # imported class on the REPL / LSP / analysis path (compiler-internals.md §Whole-
 # program passes). `@class:<method>` already names the class in its body and the
@@ -7862,18 +7830,17 @@ fn env_class_depths(entries: List (String, types.Scheme), env: Dict types.Scheme
   match entries with
   | [] -> acc
   | [(key, marker) | rest] ->
-      if str_starts_with(key, class_marker_prefix()) then
+      if str_starts_with(key, class_marker_prefix) then
         env_class_depths(rest, env, env_class_depth_add(key, marker, env, acc))
       else env_class_depths(rest, env, acc)
 
-fn class_marker_prefix() -> String = "@class:"
 
 fn env_class_depth_add(key: String, marker: types.Scheme, env: Dict types.Scheme,
                        acc: Dict (String, List Int)) -> Dict (String, List Int) =
   let types.TConst id = types.scheme_type(marker) else acc
       [v | _] = types.scheme_vars(marker) else acc
   in merge_class_depths(string.after_last_dot(types.type_id_name(id)), v,
-       method_scheme_depths(string.drop(key, string.length(class_marker_prefix())), v, env),
+       method_scheme_depths(string.drop(key, string.length(class_marker_prefix)), v, env),
        acc)
 
 fn method_scheme_depths(method: String, v: String, env: Dict types.Scheme) -> List Int =
@@ -8009,7 +7976,7 @@ fn builtin_type_arity(name: String) -> Maybe Int =
   else if name == "Map" then Just(1)
   else if name == "Ref" then Just(1)
   else if name == "NativeSet" then Just(0)
-  else if list_member(name, primitive_type_names()) then Just(0)
+  else if list_member(name, primitive_type_names) then Just(0)
   else Nothing
 
 fn type_arity_of(name: String, arities: Dict Int, env: Dict types.Scheme) -> Maybe Int =
@@ -8046,7 +8013,7 @@ fn head_residual(te: ast.TypeExpr, arities: Dict Int, env: Dict types.Scheme) ->
   match head_spine(te, 0) with
   | (name, applied) ->
       if name == "" then Just(0)
-      else if is_lowercase_name(name) then Nothing
+      else if ast.is_lowercase_name(name) then Nothing
       else
         let Just declared = type_arity_of(name, arities, env) else Nothing
         in Just(declared - applied)
@@ -9010,9 +8977,6 @@ fn typecheck_group(
           | [_ | _] ->
               GroupErr(no_pos(), "internal: a multi-member binding group must contain only FnDecls")
 
-# Key prefix for a `type alias` mirrored into the value environment. Named rather
-# than spelled twice so the write and the read cannot drift.
-fn alias_marker_prefix() -> String = "@aliasty:"
 
 # Commit an AliasDecl: the alias goes into `alias_env` as before AND is mirrored
 # into `env`, which is the only environment that reaches expression inference.
@@ -9041,7 +9005,7 @@ fn mirror_alias_entries(
   | [] -> acc
   | [(name, ty) | rest] ->
       mirror_alias_entries(rest,
-        dict_set(alias_marker_prefix() ++ name, types.mono(ty), acc))
+        dict_set(alias_marker_prefix ++ name, types.mono(ty), acc))
 
 fn all_fn_decls(members: List (Int, ast.Decl)) -> Bool =
   match members with
@@ -10754,7 +10718,7 @@ fn finish_let_decl(name: String, expr: ast.Expr, typed_expr: typed_ast.TypedExpr
       # (unsound: `mutvec_new(1, Nil)` written at Int and read at String) nor
       # pinnable to one type — so it is rejected, as SML rejects ungeneralizable
       # top-level type variables.
-      if is_syntactic_value(expr) then
+      if ast.is_syntactic_value(expr) then
         let resolved = unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_expr))
         in match let_dict_ambiguity_msg(name, types.list_diff(types.ftv(resolved), env_ftv),
                                         resolved, s1, typed_expr) with

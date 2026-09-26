@@ -161,7 +161,9 @@ declare i64 @wall_time_micros()
 @.cname.15 = private unnamed_addr constant [25 x i8] c"stdlib.mutable.MutMatrix\00"
 @.cfkinds.15 = private unnamed_addr constant [4 x i8] c"iip\00"
 @pow10_clamp = private constant i64 400
+@max_int = private constant i64 9223372036854775807
 @pow10_exact_max = private constant i64 22
+@pow10_exact_unit = global i64 zeroinitializer
 @pow10_finite_max = private constant i64 308
 
 define i64 @stdlib.math.int.int_abs(i64 %p$value) {
@@ -1596,6 +1598,13 @@ wrepack_next_24:
   unreachable
 }
 
+define void @__sprout_init_globals() {
+entry:
+  %t$0 = bitcast double 10000000000000000000000.0 to i64
+  store i64 %t$0, ptr @pow10_exact_unit
+  ret void
+}
+
 define i32 @main(i32 %argc, ptr %argv) {
 entry:
   %argv_set = call i64 @sprout_set_argv(i32 %argc, ptr %argv)
@@ -1647,6 +1656,7 @@ entry:
   %cname_ptr_15 = getelementptr inbounds [25 x i8], ptr @.cname.15, i64 0, i64 0
   %cfkinds_ptr_15 = getelementptr inbounds [4 x i8], ptr @.cfkinds.15, i64 0, i64 0
   %creg_15 = call i64 @sprout_register_ctor(i64 15, ptr %cname_ptr_15, i64 3, ptr %cfkinds_ptr_15)
+  call void @__sprout_init_globals()
   call i64 @__sprout_user_main()
   ret i32 0
 }

@@ -134,8 +134,11 @@ declare i64 @vector_truncate(i64, i64)
 @.cname.15 = private unnamed_addr constant [25 x i8] c"stdlib.mutable.MutMatrix\00"
 @.cfkinds.15 = private unnamed_addr constant [4 x i8] c"iip\00"
 @pow10_clamp = private constant i64 400
+@max_int = private constant i64 9223372036854775807
 @pow10_exact_max = private constant i64 22
+@pow10_exact_unit = global i64 zeroinitializer
 @pow10_finite_max = private constant i64 308
+@examples.neural_network_train_xor.idx_b2 = private constant i64 8
 
 define i64 @stdlib.mutable.mutvec_raw(i64 %p$v) {
 entry:
@@ -244,12 +247,6 @@ ovfpanic_1:
   unreachable
 ovfok_1:
   ret i64 %t$1
-}
-
-define i64 @examples.neural_network_train_xor.idx_b2() {
-entry:
-  %t$0 = add i64 0, 8
-  ret i64 %t$0
 }
 
 define i64 @examples.neural_network_train_xor.dabs(i64 %p$x) {
@@ -450,7 +447,7 @@ entry:
   %t$7 = add i64 0, 1
   %t$8 = call i64 @examples.neural_network_train_xor.idx_w2(i64 %t$7)
   %t$9 = call i64 @stdlib.mutable.mutvec_at(i64 %p$w, i64 %t$8)
-  %t$10 = call i64 @examples.neural_network_train_xor.idx_b2()
+  %t$10 = load i64, ptr @examples.neural_network_train_xor.idx_b2
   %t$11 = call i64 @stdlib.mutable.mutvec_at(i64 %p$w, i64 %t$10)
   %t$12$la = bitcast i64 %t$6 to double
   %t$12$lb = bitcast i64 %t$1 to double
@@ -544,7 +541,7 @@ entry:
   %t$14$fr = fmul double %t$14$la, %t$14$lb
   %t$14 = bitcast double %t$14$fr to i64
   %t$15 = call i64 @examples.neural_network_train_xor.accum(i64 %p$g, i64 %t$13, i64 %t$14)
-  %t$16 = call i64 @examples.neural_network_train_xor.idx_b2()
+  %t$16 = load i64, ptr @examples.neural_network_train_xor.idx_b2
   %t$17 = call i64 @examples.neural_network_train_xor.accum(i64 %p$g, i64 %t$16, i64 %t$7)
   %t$18 = add i64 0, 0
   %t$19 = call i64 @examples.neural_network_train_xor.idx_w2(i64 %t$18)
@@ -991,6 +988,13 @@ entry:
   ret i64 %t$0
 }
 
+define void @__sprout_init_globals() {
+entry:
+  %t$0 = bitcast double 10000000000000000000000.0 to i64
+  store i64 %t$0, ptr @pow10_exact_unit
+  ret void
+}
+
 define i32 @main(i32 %argc, ptr %argv) {
 entry:
   %argv_set = call i64 @sprout_set_argv(i32 %argc, ptr %argv)
@@ -1042,6 +1046,7 @@ entry:
   %cname_ptr_15 = getelementptr inbounds [25 x i8], ptr @.cname.15, i64 0, i64 0
   %cfkinds_ptr_15 = getelementptr inbounds [4 x i8], ptr @.cfkinds.15, i64 0, i64 0
   %creg_15 = call i64 @sprout_register_ctor(i64 15, ptr %cname_ptr_15, i64 3, ptr %cfkinds_ptr_15)
+  call void @__sprout_init_globals()
   call i64 @__sprout_user_main()
   ret i32 0
 }

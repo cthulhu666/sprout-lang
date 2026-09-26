@@ -204,7 +204,9 @@ declare i64 @term_read_avail(i64, i64)
 @.cname.31 = private unnamed_addr constant [27 x i8] c"stdlib.terminal.TermFailed\00"
 @.cfkinds.31 = private unnamed_addr constant [2 x i8] c"s\00"
 @pow10_clamp = private constant i64 400
+@max_int = private constant i64 9223372036854775807
 @pow10_exact_max = private constant i64 22
+@pow10_exact_unit = global i64 zeroinitializer
 @pow10_finite_max = private constant i64 308
 @stdlib.net.poll_write = private constant i64 2
 @stdlib.net.poll_read = private constant i64 1
@@ -1165,9 +1167,11 @@ wrepack_next_6:
 
 define void @__sprout_init_globals() {
 entry:
-  %t$0 = add i64 0, 27
-  %t$1 = call i64 @char_to_str(i64 %t$0)
-  store i64 %t$1, ptr @stdlib.terminal.esc
+  %t$0 = bitcast double 10000000000000000000000.0 to i64
+  store i64 %t$0, ptr @pow10_exact_unit
+  %t$1 = add i64 0, 27
+  %t$2 = call i64 @char_to_str(i64 %t$1)
+  store i64 %t$2, ptr @stdlib.terminal.esc
   call i64 @sprout_gc_register_i64_root(ptr @stdlib.terminal.esc)
   ret void
 }

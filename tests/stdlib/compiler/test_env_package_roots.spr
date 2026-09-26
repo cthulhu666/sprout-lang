@@ -34,7 +34,7 @@ fn stdlib_root() -> String !{IO} =
   | Just root -> root
   | Nothing -> "stdlib"
 
-fn package_root() -> String = "tests/conformance/package_resolution/roots"
+let package_root: String = "tests/conformance/package_resolution/roots"
 
 # A module that resolves ONLY under the extra root.
 fn source_using_package() -> String =
@@ -51,7 +51,7 @@ fn main() -> Unit !{IO} =
   do
     state <- new_state()
     root <- stdlib_root()
-    let roots = Cons(package_root(), Nil)
+    let roots = Cons(package_root, Nil)
 
     # --- the resolver itself already knew how; nothing called it this way ---
     assert_true(state, "resolve_module_path finds a module under an extra root",

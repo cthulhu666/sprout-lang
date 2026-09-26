@@ -1783,25 +1783,25 @@ fn clamp_exponent(k: Int) -> Int =
   else if k > pow10_clamp then pow10_clamp
   else k
 
-fn max_int() -> Int = 9223372036854775807
+let max_int: Int = 9223372036854775807
 
 # `a + b` saturated at Int's ends. The digit-derived scale and the written
 # exponent are combined before anything clamps them, and Int addition traps.
 fn add_saturating(a: Int, b: Int) -> Int =
-  if b > 0 then (if a > max_int() - b then max_int() else a + b)
+  if b > 0 then (if a > max_int - b then max_int else a + b)
   else if a < min_int() - b then min_int()
   else a + b
 
 # 10^0 .. 10^22 are the powers binary64 holds EXACTLY (10^k = 2^k * 5^k, and
 # 5^22 < 2^53), so each is one rounding-free factor.
 let pow10_exact_max = 22
-fn pow10_exact_unit() -> Double = 10000000000000000000000.0
+let pow10_exact_unit: Double = 10000000000000000000000.0
 
 fn pow10_exact(k: Int) -> Double = if k <= 0 then 1.0 else 10.0 * pow10_exact(k - 1)
 
 fn pow10_units(acc: Double, units: Int) -> Double =
   if units <= 0 then acc
-  else pow10_units(acc * pow10_exact_unit(), units - 1)
+  else pow10_units(acc * pow10_exact_unit, units - 1)
 
 # 10^k as one exact factor per 10^22, which is one rounding per 22 units of k
 # rather than one per unit. The old shape multiplied by 10.0 k times and was up
@@ -1929,7 +1929,7 @@ fn digits_only(s: String, i: Int, seen: Bool) -> Bool =
 # out of range afterwards.
 fn saturated_exponent(es: String, start: Int, neg: Bool) -> Maybe Int =
   if digits_only(es, start, false)
-  then Just(if neg then min_int() else max_int())
+  then Just(if neg then min_int() else max_int)
   else Nothing
 
 fn parse_exponent(es: String) -> Maybe Int =

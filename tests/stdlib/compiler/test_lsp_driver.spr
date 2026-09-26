@@ -10,7 +10,7 @@ fn hover_params_json(uri: json.Json, position: json.Json) -> json.Json =
     json.JsonObjectCons("position", position,
     json.JsonObjectNil)))
 
-fn well_formed_position() -> json.Json =
+let well_formed_position =
   json.JsonObject(
     json.JsonObjectCons("line", json.JsonInt(3),
     json.JsonObjectCons("character", json.JsonInt(7),
@@ -129,13 +129,13 @@ fn main() -> Unit !{IO} =
     # extract_hover_params — exercises every failure branch individually,
     # plus the well-formed happy path.
     check_eq("extract_hover_params: well-formed accepted",
-      lsp.extract_hover_params(hover_params_json(json.JsonString("file:///a.spr"), well_formed_position())),
+      lsp.extract_hover_params(hover_params_json(json.JsonString("file:///a.spr"), well_formed_position)),
       Just(lsp.HoverParams("file:///a.spr", 3, 7))),
     check_eq("extract_hover_params: missing textDocument rejected",
-      lsp.extract_hover_params(json.JsonObject(json.JsonObjectCons("position", well_formed_position(), json.JsonObjectNil))),
+      lsp.extract_hover_params(json.JsonObject(json.JsonObjectCons("position", well_formed_position, json.JsonObjectNil))),
       Nothing),
     check_eq("extract_hover_params: missing uri rejected",
-      lsp.extract_hover_params(hover_params_json(json.JsonInt(1), well_formed_position())),
+      lsp.extract_hover_params(hover_params_json(json.JsonInt(1), well_formed_position)),
       Nothing),
     check_eq("extract_hover_params: missing position rejected",
       lsp.extract_hover_params(json.JsonObject(json.JsonObjectCons("textDocument",

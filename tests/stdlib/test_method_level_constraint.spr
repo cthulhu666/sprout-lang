@@ -30,14 +30,15 @@ instance Container Maybe
 fn show_twice(xs: t a) -> String where Container t, ToString a =
   show_all(xs) ++ "|" ++ show_all(xs)
 
+# Nothing needs an anchor for `a`; a binding pins it without a local annotation.
+let Nothing_int: Maybe Int = Nothing
+
 fn main() -> Unit !{IO} =
   run_suite("method-level constraint", [
     check_eq("List Int", show_all(Cons(1, Cons(2, Nil))), "1, 2"),
     check_eq("List String", show_all(Cons("a", Cons("b", Nil))), "a, b"),
     check_eq("Maybe Int, Just", show_all(Just(7)), "7"),
-    check_eq("Maybe Int, Nothing", show_all(Nothing_int()), "-"),
+    check_eq("Maybe Int, Nothing", show_all(Nothing_int), "-"),
     check_eq("forwarded through a generic caller", show_twice(Cons(3, Nil)), "3|3")
   ])
 
-# Nothing needs an anchor for `a`; a helper pins it without a local annotation.
-fn Nothing_int() -> Maybe Int = Nothing

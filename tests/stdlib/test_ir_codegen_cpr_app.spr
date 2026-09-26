@@ -22,7 +22,7 @@ type Box a =
 # CPR-eligible ctor APPLICATION sites: Wrap(x) at line 27, Empty at line 28.
 # Both currently trip `ast_to_ir.sprout:1882` ("CPR ctor lowering deferred").
 fn make_wrap(x: Int) -> Box Int = Wrap(x)
-fn make_empty() -> Box Int = Empty
+let make_empty = Empty
 
 # Match destructuring on a CPR-eligible ADT — uses IRGetTag / IRGetField,
 # which the IR path already supports for boxed values.

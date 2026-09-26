@@ -11,8 +11,8 @@ import stdlib.string as string
 # Cases live in string chunks rather than a list literal because a literal
 # of this many elements costs O(n^2) compiler memory — see BACKLOG.md.
 
-fn gbt_count() -> Int = 766
-fn gbt_chunks() -> Int = 5
+let gbt_count: Int = 766
+let gbt_chunks: Int = 5
 
 fn gbt_chunk(i: Int) -> String =
   match i with
@@ -789,7 +789,7 @@ fn gbt_chunk(i: Int) -> String =
   | _ -> ""
 
 fn all_data() -> String =
-  string_concat_many(collect_chunks(0, gbt_chunks(), Nil))
+  string_concat_many(collect_chunks(0, gbt_chunks, Nil))
 
 fn collect_chunks(i: Int, n: Int, acc: List String) -> List String =
   if i >= n then list_reverse(acc)

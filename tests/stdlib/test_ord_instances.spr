@@ -8,6 +8,17 @@ import stdlib.test (check_true, run_suite)
 # reordering the Maybe/List declarations to Nothing|Just and Nil|Cons so that
 # declaration/tag order == semantic order == derived order.
 
+let err_str: Result String Int = Err("x")
+
+let nil_int: List Int = Nil
+
+# Concrete-typed helpers to anchor Ord resolution (avoid ambiguous literals).
+let no_int: Maybe Int = Nothing
+
+let ok2: Result String Int = Ok(2)
+
+let ok_int: Result String Int = Ok(1)
+
 fn main() -> Unit !{IO} =
   run_suite("ord_instances", [
     # Tuples: lexicographic.
@@ -21,27 +32,21 @@ fn main() -> Unit !{IO} =
     # Maybe: Nothing < Just (semantic).
     check_true("maybe nothing lt just", ord_lt(Nothing, Just(1))),
     check_true("maybe just gt nothing", ord_gt(Just(1), Nothing)),
-    check_true("maybe nothing eq", compare(Nothing, no_int()) == 0),
+    check_true("maybe nothing eq", compare(Nothing, no_int) == 0),
     check_true("maybe just lt just", ord_lt(Just(1), Just(2))),
 
     # List: [] < [x], lexicographic.
-    check_true("list empty lt nonempty", ord_lt(nil_int(), [1])),
+    check_true("list empty lt nonempty", ord_lt(nil_int, [1])),
     check_true("list lt lexicographic", ord_lt([1, 2], [1, 3])),
     check_true("list prefix lt longer", ord_lt([1], [1, 2])),
     check_true("list eq", compare([1, 2], [1, 2]) == 0),
 
     # Result: Ok < Err.
-    check_true("result ok lt err", ord_lt(ok_int(), err_str())),
-    check_true("result ok lt ok", ord_lt(Ok(1), ok2())),
+    check_true("result ok lt err", ord_lt(ok_int, err_str)),
+    check_true("result ok lt ok", ord_lt(Ok(1), ok2)),
 
     # Vec: lexicographic like List.
     check_true("vec lt lexicographic", ord_lt(vec_from_list([1, 2]), vec_from_list([1, 3]))),
     check_true("vec eq", compare(vec_from_list([1, 2]), vec_from_list([1, 2])) == 0)
   ])
 
-# Concrete-typed helpers to anchor Ord resolution (avoid ambiguous literals).
-fn no_int() -> Maybe Int = Nothing
-fn nil_int() -> List Int = Nil
-fn ok_int() -> Result String Int = Ok(1)
-fn ok2() -> Result String Int = Ok(2)
-fn err_str() -> Result String Int = Err("x")

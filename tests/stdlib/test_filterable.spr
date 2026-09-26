@@ -15,7 +15,7 @@ type Person = (name: String, age: Int) deriving (Eq, ToString)
 
 # Type anchors. An empty container leaves the element type free on both sides
 # of the comparison, so each empty case needs a typed nullary fn.
-fn nil_int() -> List Int = Nil
+let nil_int: List Int = Nil
 fn empty_vec_int() -> Vec Int = vec_empty()
 
 # No modulo operator in the core language; the fizzbuzz example spells `rem`
@@ -77,10 +77,10 @@ fn main() -> Unit !{IO} =
       vec_length(filter(always, ints_vec)), 5),
 
     # --- Edges: empty in, everything kept, everything dropped ----------------
-    check_eq("filter of the empty list", filter(is_even, nil_int()), nil_int()),
+    check_eq("filter of the empty list", filter(is_even, nil_int), nil_int),
     check_eq("filter of the empty vec", filter(is_even, empty_vec_int()), empty_vec_int()),
     check_eq("a predicate that always holds is the identity", filter(always, ints), ints),
-    check_eq("a predicate that never holds empties the list", filter(never, ints), nil_int()),
+    check_eq("a predicate that never holds empties the list", filter(never, ints), nil_int),
     check_eq("a predicate that never holds empties the vec",
       filter(never, ints_vec), empty_vec_int()),
 
@@ -96,7 +96,7 @@ fn main() -> Unit !{IO} =
     check_eq("forwarded filter over List", keep(is_even, ints), Cons(2, Cons(4, Nil))),
     check_eq("forwarded filter over Vec",
       keep(is_even, ints_vec), vec_from_list(Cons(2, Cons(4, Nil)))),
-    check_eq("forwarded filter of empty", keep(is_even, nil_int()), nil_int()),
+    check_eq("forwarded filter of empty", keep(is_even, nil_int), nil_int),
     check_eq("Filterable and Functor forwarded together over List",
       evens_doubled(ints), Cons(4, Cons(8, Nil))),
     check_eq("Filterable and Functor forwarded together over Vec",
@@ -109,10 +109,10 @@ fn main() -> Unit !{IO} =
     check_eq("filter_map over Vec agrees with vec_filter_map",
       filter_map(half_if_even, ints_vec), vec_filter_map(half_if_even, ints_vec)),
     check_eq("filter_map keeping nothing empties the list",
-      filter_map(nothing_int, ints), nil_int()),
+      filter_map(nothing_int, ints), nil_int),
     check_eq("filter_map keeping nothing empties the vec",
       filter_map(nothing_int, ints_vec), empty_vec_int()),
-    check_eq("filter_map of the empty list", filter_map(half_if_even, nil_int()), nil_int()),
+    check_eq("filter_map of the empty list", filter_map(half_if_even, nil_int), nil_int),
     check_eq("filter_map of the empty vec",
       filter_map(half_if_even, empty_vec_int()), empty_vec_int()),
     # An always-Just function makes filter_map exactly map, which is the law
@@ -131,13 +131,13 @@ fn main() -> Unit !{IO} =
     check_eq("partition over Vec preserves the container",
       partition(is_even, ints_vec),
       (vec_from_list(Cons(2, Cons(4, Nil))), vec_from_list(Cons(1, Cons(3, Cons(5, Nil)))))),
-    check_eq("partition of the empty list", partition(is_even, nil_int()), (nil_int(), nil_int())),
+    check_eq("partition of the empty list", partition(is_even, nil_int), (nil_int, nil_int)),
     check_eq("partition of the empty vec",
       partition(is_even, empty_vec_int()), (empty_vec_int(), empty_vec_int())),
     check_eq("a predicate that always holds puts everything left",
-      partition(always, ints), (ints, nil_int())),
+      partition(always, ints), (ints, nil_int)),
     check_eq("a predicate that never holds puts everything right",
-      partition(never, ints), (nil_int(), ints)),
+      partition(never, ints), (nil_int, ints)),
     # The law that makes partition worth having as a primitive: its two halves
     # are exactly the two filters, so a caller never needs both spellings.
     check_eq("partition's left half is filter p",

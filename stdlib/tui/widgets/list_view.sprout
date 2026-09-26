@@ -23,9 +23,9 @@ export type ListStyle (..) = (normal: style.Style, selected: style.Style,
 
 # Reverse video where the keyboard is, bold where it is not.
 export fn list_style_default() -> ListStyle =
-  ListStyle(normal = style.style_default(),
-            selected = style.with_bold(style.style_default(), true),
-            selected_focused = style.with_reverse(style.style_default(), true))
+  ListStyle(normal = style.style_default,
+            selected = style.with_bold(style.style_default, true),
+            selected_focused = style.with_reverse(style.style_default, true))
 
 # `page` is told rather than measured: `render` is pure in the state, so a
 # widget cannot write the height it was last drawn at back for a key handler
