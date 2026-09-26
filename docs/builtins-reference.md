@@ -857,9 +857,10 @@ Low-level runtime notes:
 - `Vector` and `vector_*` builtins exist as backend/runtime primitives.
 - For module code, `stdlib.collections` remains the stable compatibility import path for collection helpers.
 - CLI/module checks reject raw `Vector`/`Map` and `vector_*`/`map_*` usage outside `stdlib.*` modules.
-- Builtin failures now follow one convention:
-  `runtime error: builtin \`name\`: detail`
-- `sprout run` surfaces that as `error: runtime error: builtin ...`.
+- Runtime failures follow one convention: `runtime error: <message>`, printed verbatim.
+  A builtin's own message conventionally leads with its name (`vector_get: null vector`),
+  but the runtime adds no label of its own — so a message must not embed the prefix itself.
+- `sprout run` surfaces that as `error: runtime error: ...`.
 - Native binaries print the same runtime-error message to stderr and exit with status `1`.
 
 String module (in `stdlib/string.sprout`):

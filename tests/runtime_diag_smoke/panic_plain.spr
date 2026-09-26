@@ -1,0 +1,7 @@
+module main
+
+# The colon-free path, which the fix must leave alone: a message with no colon always printed
+# verbatim, and still does. Without this, dropping the colon branch could regress the format
+# in the other direction and nothing would say so.
+fn main() -> Unit !{IO} =
+  panic("deliberate failure with no prefix")

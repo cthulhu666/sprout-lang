@@ -6,8 +6,8 @@ import stdlib.bytes (Utf8Error, to_string)
 # NUL or any invalid UTF-8 sequence, and a Sprout String is normatively neither (docs/spec-v0.md
 # §strings). Holding it as `String` was W2 R2's `proc_run` site: `printf 'a\000b'` produced a value
 # reporting byte_length 3 and length 1 — silently truncated at the NUL — and `printf 'a\377b'` killed
-# the process with "builtin `str_utf8`: invalid UTF-8 lead byte" as soon as anything walked it, which
-# made binary subprocess output unusable outright. See tests/stdlib/test_process_bytes.spr.
+# the process with "runtime error: str_utf8: invalid UTF-8 lead byte" as soon as anything walked
+# it, which made binary subprocess output unusable outright. See tests/stdlib/test_process_bytes.spr.
 #
 # So the payloads are `Bytes` and decoding is an explicit step through `bytes.to_string` — decision
 # D4's single choke point, which rejects a NUL as well as bad UTF-8. Nothing validates at ingestion,

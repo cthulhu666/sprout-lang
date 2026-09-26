@@ -1950,11 +1950,11 @@ Effect note for v0:
   observe it, and no caller behaves differently for having called a function that
   might abort — if it aborts, the caller does not run.
 
-  This is not a new exemption; it is what the prelude has always done. Every
-  runtime abort goes through `sprout_fail`, which writes `runtime error: <msg>` to
-  stderr and calls `exit(1)`, and there are ~187 such call sites behind builtins
-  that are overwhelmingly declared **pure**: `vector_length : Vector a -> Int`
-  aborts on a null vector, as do `vector_get`, `str_len` and most of the rest.
+  This is not a new exemption; it is what the prelude has always done.
+  `sprout_fail` writes `runtime error: <msg>` to stderr and calls `exit(1)`, and
+  ~187 of its call sites sit behind builtins that are overwhelmingly declared
+  **pure**: `vector_length : Vector a -> Int` aborts on a null vector, as do
+  `vector_get`, `str_len` and most of the rest.
   Under the descriptor-touching reading every one of them would be `!{IO}`.
 
   `panic : String -> a` is the only builtin whose *sole purpose* is to abort, and

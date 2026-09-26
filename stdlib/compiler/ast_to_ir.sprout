@@ -7509,7 +7509,7 @@ fn synthesize_unresolved_poison_thunk(thunk_name: String) -> sprout_ir.IRFunctio
                         "i64",
                         Cons(sprout_ir.IRBlock("entry",
                               Cons(sprout_ir.IRStrConst("%__poison_msg", "%__poison_msg_raw",
-                                     "runtime error: dispatched through an unresolved typeclass dictionary — a required instance was missing at compile time (compiler-soundness backstop; please report)"),
+                                     "dispatched through an unresolved typeclass dictionary — a required instance was missing at compile time (compiler-soundness backstop; please report)"),
                               Cons(sprout_ir.IRPanic("%__poison_msg"), Nil))),
                         Nil))
 

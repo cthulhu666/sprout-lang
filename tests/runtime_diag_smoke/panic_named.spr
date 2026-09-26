@@ -1,0 +1,7 @@
+module main
+
+# A `name: detail` abort message must print verbatim. The runtime used to split on the first
+# colon and call the left half a builtin, so every stdlib panic — and 25+ runtime messages
+# prefixed with an env var or a subsystem — named a builtin that does not exist.
+fn main() -> Unit !{IO} =
+  panic("demo_helper: deliberate failure")

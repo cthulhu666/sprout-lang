@@ -434,7 +434,7 @@ looking for one and conclude the class is closed.
 - `env_get` / `argv_get` cannot carry a NUL at all — the OS delimits both with NUL, so the byte
   cannot reach the builtin. They can still mint a String from **invalid UTF-8**, which HDRCHECK
   does *not* catch: it compares the header's `aux` against `strlen`, and a bad lead byte leaves
-  those equal. That case surfaces later as `builtin str_utf8: invalid UTF-8 lead byte` from
+  those equal. That case surfaces later as `runtime error: str_utf8: invalid UTF-8 lead byte` from
   whichever walker touches the value first, arbitrarily far from the producer.
 - `term_read_line` truncates at the NUL when it reads (measured: input `a\0b\n` yields
   `byte_length 1`), so it loses data rather than producing an inconsistent header. Silent data
@@ -554,7 +554,7 @@ True
 
 Three details this line gets wrong if you shorten it. The root argument is the literal path
 `stdlib` — `stdlib_root` is the justfile *variable's* name, and passing it verbatim fails with
-``builtin `read_file`: prelude: No such file or directory``. The runtime is **three** `.c` files, so
+``runtime error: read_file: stdlib_root/prelude.sprout: No such file or directory``. The runtime is **three** `.c` files, so
 `runtime/*.c`; naming only `sprout_runtime.c` link-fails on `_http_park` / `_async_resolve`. On
 macOS the link also needs `-framework Security -framework CoreFoundation` (the justfile's
 `clang_extra`).
