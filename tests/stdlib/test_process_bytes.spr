@@ -14,7 +14,7 @@
 #   the same under SPROUT_GC_HDRCHECK=1                 -> [sprout] HDRCHECK: str_byte_len aux=3
 #     strlen=1, then SIGABRT. CI runs with HDRCHECK ON, so this was a latent CI abort waiting for
 #     the first test to exercise it.
-#   proc_run(["printf", "a\377b"])                      -> runtime error: builtin `str_utf8`:
+#   proc_run(["printf", "a\377b"])                      -> runtime error: str_utf8:
 #     invalid UTF-8 lead byte, exit 1 — note this fired when a WALKER touched the value, not at
 #     ingestion, so the process died at an arbitrary later point. Binary output from a subprocess
 #     was unusable outright.

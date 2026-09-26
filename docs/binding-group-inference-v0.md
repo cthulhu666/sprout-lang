@@ -81,7 +81,7 @@ Six probes, run before the change and again after it.
 | 2 | same, `summarize` moved above `report` | rejected | rejected |
 | 3 | `fwd()` used at `String` in one caller and `Int` in another, `fwd` returns `Bool` | all three accepted (`main.fwd : Bool`) | ``Return type mismatch in main.use_as_int: Type mismatch: String vs Int`` |
 | 4 | `is_even`/`is_odd`, unannotated, consistent | accepted | **accepted, inferred, no annotations** |
-| 5 | `a`/`b` cycle, first member commits second to the wrong type, second internally consistent | accepted → `runtime error: builtin str_concat: null input` | ``Return type mismatch in main.b: Type mismatch: Int vs String`` |
+| 5 | `a`/`b` cycle, first member commits second to the wrong type, second internally consistent | accepted → `runtime error: str_concat: null input` | ``Return type mismatch in main.b: Type mismatch: Int vs String`` |
 | 6 | unannotated **self**-recursion (`countdown`) | correct | unchanged |
 
 Probe 3 shows the placeholder was genuinely quantified, not one shared unknown.

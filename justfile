@@ -2378,7 +2378,7 @@ task-io-smoke: bootstrap-from-seed
 # PROVEN RED SIGNAL. This is not a decorative gate. At commit 4dcfad79, whose CI run
 # failed, it reproduces that failure verbatim:
 #     task-io-smoke [http-accept-exhaustion]: did not complete (exit 1) …
-#     runtime error: builtin `task_sleep`: could not arm a timer (descriptor exhaustion?)
+#     runtime error: task_sleep: could not arm a timer (descriptor exhaustion?)
 # and it is green at 681a9fe8, the commit that fixed it. Cost: ~14s to link stage-1 from
 # the seed plus ~1m45s for the 34 fixtures, against a ~13min CI round-trip.
 #
@@ -2599,6 +2599,58 @@ div-by-zero-smoke: bootstrap-from-seed
     exit 1
   fi
   echo "==> div-by-zero-smoke ✓ (clean panic, exit $ec)"
+
+# Runtime abort messages print verbatim (CI gate). `sprout_fail` used to split on the first
+# colon and label the left half a builtin, which lied for every stdlib `panic` and for 25+
+# runtime messages whose prefix is an env var, an internal helper or a subsystem. Nothing
+# asserted the format, which is how it drifted; this pins both halves — a `name: detail`
+# message keeps its prefix and gains no label, and a colon-free message is untouched.
+[group('smoke')]
+runtime-diag-smoke: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_rtdiag_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  run_fixture() {
+    local fixture="$1" name="$2"
+    if ! "{{ build_dir }}/compile_driver_bin_stage1" --emit-ir "{{ stdlib_root }}" "$fixture" \
+         > "$TMPD/$name.ll" 2>"$TMPD/$name.emit.err"; then
+      echo "runtime-diag-smoke: emit-IR failed for $fixture" >&2
+      cat "$TMPD/$name.emit.err" >&2; exit 1
+    fi
+    if ! clang "$TMPD/$name.ll" {{ runtime_src }} -O2 {{ clang_extra }} -o "$TMPD/$name" \
+         2>"$TMPD/$name.link.err"; then
+      echo "runtime-diag-smoke: link failed for $fixture" >&2
+      cat "$TMPD/$name.link.err" >&2; exit 1
+    fi
+    set +e
+    "$TMPD/$name" > "$TMPD/$name.out" 2>"$TMPD/$name.err"
+    local ec=$?
+    set -e
+    if [ "$ec" -eq 0 ]; then
+      echo "runtime-diag-smoke: $fixture did not abort (exit 0)" >&2; exit 1
+    fi
+  }
+
+  run_fixture tests/runtime_diag_smoke/panic_named.spr named
+  if ! grep -q "^runtime error: demo_helper: deliberate failure$" "$TMPD/named.err"; then
+    echo "runtime-diag-smoke: a 'name: detail' panic did not print verbatim" >&2
+    echo "--- stderr was ---" >&2; cat "$TMPD/named.err" >&2
+    exit 1
+  fi
+  if grep -q "builtin" "$TMPD/named.err"; then
+    echo "runtime-diag-smoke: the message was labelled a builtin; Sprout code is not a builtin" >&2
+    echo "--- stderr was ---" >&2; cat "$TMPD/named.err" >&2
+    exit 1
+  fi
+
+  run_fixture tests/runtime_diag_smoke/panic_plain.spr plain
+  if ! grep -q "^runtime error: deliberate failure with no prefix$" "$TMPD/plain.err"; then
+    echo "runtime-diag-smoke: a colon-free panic did not print verbatim" >&2
+    echo "--- stderr was ---" >&2; cat "$TMPD/plain.err" >&2
+    exit 1
+  fi
+  echo "==> runtime-diag-smoke ✓ (abort messages print verbatim)"
 
 # Overflow-panic guard regression (CI gate, bigint-v0 Stage 1 — docs/bigint-v0.md
 # §5.1, Option A of docs/int-overflow-policy-decision.md). Same shape and reason
@@ -3222,6 +3274,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "gc-arena|gc-arena-check"
     "argv-smoke|argv-smoke"
     "div-by-zero-smoke|div-by-zero-smoke"
+    "runtime-diag-smoke|runtime-diag-smoke"
     "overflow-smoke|overflow-smoke"
     "negative-shift-smoke|negative-shift-smoke"
     "closure-arity-smoke|closure-arity-smoke"

@@ -1562,8 +1562,8 @@ long long sprout_alloc_closure(long long size, long long arity) {
  *
  * The wording mirrors infer.sprout's compile-time arity error on purpose — the
  * same mistake should read the same way whichever side catches it.  It carries
- * no colon deliberately: sprout_fail treats the text before the first colon as a
- * builtin name, and this failure belongs to the user's call, not to a builtin. */
+ * no prefix because the failure belongs to the user's call, not to a named
+ * builtin whose bug it would otherwise read as. */
 void sprout_closure_arity_check(long long handle, long long n_args) {
   void* payload = (void*)(uintptr_t)handle;
   if (payload == NULL) sprout_fail("applied a null function value");
@@ -3441,8 +3441,8 @@ static void sprout_growbuf_append(GrowBuf* b, const char* p, size_t n) {
 //                                                    at the NUL, direction-dependent.
 //   the same under SPROUT_GC_HDRCHECK=1           -> abort in str_byte_len (aux=3 strlen=1),
 //                                                    and CI runs with HDRCHECK ON.
-//   proc_run(["printf", "a\377b"])                -> `runtime error: builtin str_utf8: invalid
-//                                                    UTF-8 lead byte`, exit 1, the moment any
+//   proc_run(["printf", "a\377b"])                -> `runtime error: str_utf8: invalid UTF-8
+//                                                    lead byte`, exit 1, the moment any
 //                                                    walker touches it. Binary output from a
 //                                                    subprocess was therefore unusable outright.
 // Bytes carries an explicit length and imposes no encoding, so no illegal value is constructed
@@ -5700,19 +5700,12 @@ __attribute__((noreturn)) void sprout_abort_match(void) {
   fprintf(stderr, "runtime error: non-exhaustive match\n");
   exit(1);
 }
-/* The general fatal path, shared with the poll and scheduler TUs via
- * sprout_scheduler.h.  Text before the first colon is reported as the failing
- * builtin's name; a message with no colon is printed verbatim. */
+/* The general fatal path, shared with the poll and scheduler TUs via sprout_scheduler.h.
+ * The message prints verbatim.  A `name: detail` prefix is a convention, not evidence of a
+ * builtin: inferring one from punctuation labelled env vars, internal helpers and whole
+ * subsystems as builtins no user could find. */
 __attribute__((noreturn)) void sprout_fail(const char* msg) {
-  const char* colon = strchr(msg, ':');
-  if (colon != NULL) {
-    size_t name_len = (size_t)(colon - msg);
-    const char* detail = colon + 1;
-    while (*detail == ' ') detail++;
-    fprintf(stderr, "runtime error: builtin `%.*s`: %s\n", (int)name_len, msg, detail);
-  } else {
-    fprintf(stderr, "runtime error: %s\n", msg);
-  }
+  fprintf(stderr, "runtime error: %s\n", msg);
   exit(1);
 }
 

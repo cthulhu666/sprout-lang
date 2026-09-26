@@ -1647,8 +1647,8 @@ extern fn eprint(val: String) -> Unit !{IO}
 # interact with runtime or external state such as terminal IO" — that would make
 # it effectful.
 #
-# But so would most of this file. EVERY runtime abort goes through sprout_fail, and
-# there are ~187 such call sites behind builtins declared pure right here:
+# But so would most of this file. sprout_fail writes to stderr and exits, and ~187 of
+# its call sites sit behind builtins declared pure right here:
 # `vector_length : Vector a -> Int` aborts on a null vector, as do `vector_get`
 # and `str_len`. Aborting-is-not-an-effect was already the de facto rule; `panic`
 # was simply the only builtin whose sole PURPOSE is to abort, and so the only one

@@ -944,7 +944,7 @@ fn render_response_or_fallback(resp: HttpServerResponse) -> String =
 # Sprout has no primitive that registers one. An earlier revision of this file DID back off here with
 # `task_sleep`, which is exactly wrong on Linux: task_sleep arms a timerfd, so under descriptor
 # exhaustion it cannot be armed, and its arming failure is deliberately process-fatal. CI caught it —
-# `runtime error: builtin task_sleep: could not arm a timer (descriptor exhaustion?)` — on a fixture
+# `runtime error: task_sleep: could not arm a timer (descriptor exhaustion?)` — on a fixture
 # that passed locally, because macOS arms kqueue timers on the existing kqueue and needs no descriptor.
 fn accept_fatal(err: TcpError) -> a !{IO} =
   panic(`http_server: accept failed on the listener: ${tcp_error_message(err)}`)
