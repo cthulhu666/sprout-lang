@@ -648,7 +648,7 @@ HTTP client convenience module (in `stdlib/http_client.sprout`):
 TCP client helper types (in `stdlib/net.sprout`):
 
 - uses foundational prelude `Result`
-- `TcpError` variants (`TcpInvalidArgument`, `TcpInvalidHandle`, `TcpConnectFailed`, `TcpReadFailed`, `TcpWriteFailed`, `TcpEndOfStream`)
+- `TcpError` variants (`TcpInvalidArgument`, `TcpInvalidHandle`, `TcpConnectFailed`, `TcpReadFailed`, `TcpWriteFailed`, `TcpEndOfStream`, `TcpTimeout`, `TcpWouldBlock`, `TcpAcceptFailed`)
 - `TcpConnection`
 - `TcpListener`
 - `connect(host, port) -> Result TcpError TcpConnection`
@@ -658,9 +658,31 @@ TCP client helper types (in `stdlib/net.sprout`):
 - `write_all_utf8(conn, payload) -> Result TcpError Int`
 - `close(conn) -> Unit !{IO}`
 - `listen_local(port) -> TcpListener`
-- `accept(listener) -> TcpConnection`
+- `accept(listener) -> Result TcpError TcpConnection`
 - `close_listener(listener) -> Unit !{IO}`
 - `tcp_error_message(err) -> String`
+
+Deadline-bounded forms. `*_by` take an ABSOLUTE deadline in monotonic microseconds (as from
+`time.now_micros`); `*_timeout` take a relative bound. An absolute deadline is what composes: a
+caller spending one budget across several calls passes the same figure to each, where a relative
+one silently restarts on every call.
+
+- `read_exact_by(conn, count, deadline_us) -> Result TcpError Bytes` — `Err TcpTimeout` discards the
+  bytes already read and leaves the stream mid-message, so the caller must close rather than reuse.
+  `Err TcpEndOfStream` when the peer closes before `count` arrives; a short message is not a timeout.
+  A negative `count` is `Err TcpInvalidArgument`, as in the `tcp_read_exact` builtin; zero is
+  `Ok(empty)`. The first recv always happens and the deadline governs between recvs, so a count one
+  recv can satisfy is delivered even past the deadline, and a longer one is cut off at it
+- `read_exact_utf8_by(conn, count, deadline_us) -> Result TcpError String` — `count` is BYTES, and the
+  decode runs after reassembly, so a multibyte character split across arrivals is handled. A decode
+  failure is `Err TcpReadFailed`, never `TcpTimeout`
+- `read_avail_timeout(conn, timeout_ms) -> Result TcpError Bytes` — whatever has arrived, for a
+  delimited protocol that cannot name a byte count. `timeout_ms <= 0` polls once without parking
+- `write_all_by(conn, payload, deadline_us) -> Result TcpError Int`
+- `write_all_utf8_by(conn, payload, deadline_us) -> Result TcpError Int`
+- `write_all_timeout(conn, payload, idle_ms) -> Result TcpError Int` — an IDLE bound re-armed on
+  every accepted byte, so it bounds a peer that stopped reading, not the total
+- `write_all_utf8_timeout(conn, payload, idle_ms) -> Result TcpError Int`
 
 `TcpConnection` and `TcpListener` are now exported as opaque handle types; application code can use the types but cannot forge the underlying constructors outside `stdlib.net`.
 

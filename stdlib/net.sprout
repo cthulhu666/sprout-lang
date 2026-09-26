@@ -1,6 +1,6 @@
 module stdlib.net
 
-import stdlib.bytes (Utf8Error, Utf8DecodeError, from_string, to_string, length)
+import stdlib.bytes (Utf8Error, Utf8DecodeError, builder_append, builder_build, builder_bytes, builder_empty, empty, from_string, to_string, length)
 import stdlib.time as time
 
 export extern fn tcp_listen(port: Int) -> Int !{IO}
@@ -255,6 +255,106 @@ export fn read_avail_timeout(conn: borrowing TcpConnection, timeout_ms: Int) -> 
   do
     now <- time.now_micros()
     read_avail_go(tcp_connection_handle(conn), now + timeout_ms * 1000)
+
+# `read_exact` bounded by an ABSOLUTE deadline, the read-side twin of write_all_by. A deadline
+# parameter rather than `with_timeout` around the call, which cannot wrap a read: that would capture
+# a connection the caller already owns, and higher-order linearity does not allow it yet.
+#
+# Each recv asks for exactly the shortfall, never read_chunk. Over-reading would swallow bytes
+# belonging to the NEXT message, and a length-prefixed protocol is the whole reason this exists.
+#
+# ATTEMPT, THEN WAIT — one recv always precedes any clock read, so `Err TcpTimeout` is never reported
+# over bytes that were already buffered. Do not reorder without verifying all three bodies:
+#   _go   recvs, builds the result and reports a socket error. Reads no clock at all.
+#   _step reads the clock AFTER progress, and must stay after the recv that produced that progress.
+#   _wait reads the clock when nothing arrived, and is the only body that parks.
+# It is NOT a promise the buffer is empty: bytes landing after _wait times out are missed, which is
+# what a deadline means. read_avail_go holds the same invariant across its own pair.
+#
+# `Err TcpTimeout` DISCARDS the bytes already taken and leaves the stream mid-message, so the caller
+# must close rather than reuse; a peer closing before `count` arrives is `Err TcpEndOfStream`.
+#
+# O(count) in bytes, plus O(k log k) pointer copies over the k chunks the peer sends — k is the
+# peer's choice, not the caller's, so see merge_chunk_pairs for why it is not a left fold.
+fn read_exact_by_go(handle: Int, count: Int, deadline_us: Int, acc: List Builder, have: Int) -> Result TcpError Bytes !{IO} =
+  if have >= count then Ok(build_chunks(acc))
+  else
+    match tcp_read_some(handle, count - have) with
+    # tcp_read_some never answers an empty Ok — recv's 0 is TcpEndOfStream, caught by the arm below —
+    # but an empty chunk would leave `have` unmoved and spin at full CPU without ever parking, so it
+    # waits instead. This is what declining to trust that promise costs.
+    | Ok chunk ->
+        if length(chunk) <= 0 then read_exact_by_wait(handle, count, deadline_us, acc, have)
+        else read_exact_by_step(handle, count, deadline_us, Cons(builder_bytes(chunk), acc),
+                                have + length(chunk))
+    | Err TcpWouldBlock -> read_exact_by_wait(handle, count, deadline_us, acc, have)
+    | Err err -> Err(err)
+
+# The clock is consulted after PROGRESS too, not only on a would-block. A peer that keeps the socket
+# continuously readable never reaches tcp_wait, and nothing preempts this loop — the scheduler is
+# cooperative — so without this a large `count` from a fast peer overruns its budget and holds the
+# worker for the whole transfer. read_avail_timeout documents that hole; this one closes it.
+#
+# A COMPLETE read is delivered even past the deadline: the bytes are in hand, and discarding them to
+# report a timeout would drop data the peer sent inside the budget.
+fn read_exact_by_step(handle: Int, count: Int, deadline_us: Int, acc: List Builder, have: Int) -> Result TcpError Bytes !{IO} =
+  do
+    now <- time.now_micros()
+    if have >= count || now < deadline_us then read_exact_by_go(handle, count, deadline_us, acc, have)
+    else Err(TcpTimeout)
+
+fn read_exact_by_wait(handle: Int, count: Int, deadline_us: Int, acc: List Builder, have: Int) -> Result TcpError Bytes !{IO} =
+  do
+    now <- time.now_micros()
+    # A non-positive remainder makes tcp_wait answer "not ready" without parking, and the recv
+    # above has already run, so buffered data still beats a spent budget.
+    ready <- tcp_wait(handle, poll_read, (deadline_us - now) / 1000)
+    if ready == 1 then read_exact_by_go(handle, count, deadline_us, acc, have)
+    else Err(TcpTimeout)
+
+# builder_append copies BOTH operands' chunk arrays, so folding k of them left to right costs O(k^2)
+# pointer copies. Merging adjacent PAIRS halves the list each pass instead: O(k log k) at depth
+# log2(k). bigint's builder_of_mag halves for the same reason (docs/bigint-v0.md).
+fn merge_chunk_pairs(parts: List Builder) -> List Builder =
+  match parts with
+  | [left, right | more] -> Cons(builder_append(left, right), merge_chunk_pairs(more))
+  # Fewer than two left: nothing to pair, so the list passes through unchanged. An odd tail chunk
+  # rides to the next pass rather than being dropped.
+  | _ -> parts
+
+fn merge_chunks(parts: List Builder) -> Builder =
+  match parts with
+  | [] -> builder_empty()
+  | [only] -> only
+  | _ -> merge_chunks(merge_chunk_pairs(parts))
+
+# `parts` arrives in REVERSE order because the loop prepends — the O(1) step that keeps the loop off
+# the quadratic shape. The O(k) reverse is paid once, here.
+fn build_chunks(parts: List Builder) -> Bytes =
+  builder_build(merge_chunks(list_reverse(parts)))
+
+export fn read_exact_by(conn: borrowing TcpConnection, count: Int, deadline_us: Int) -> Result TcpError Bytes !{IO} =
+  # A NEGATIVE count is refused, not silently satisfied: it means the caller's arithmetic went wrong —
+  # an underflowing `content_length - already_read`, or a corrupt length prefix — and `Ok(empty)` would
+  # let a length-prefixed reader take a desynchronised stream for a complete message. Same answer and
+  # same message as the tcp_read_exact builtin, which guards the same way.
+  if count < 0 then Err(TcpInvalidArgument("count must be >= 0"))
+  else if count == 0 then Ok(empty())
+  else read_exact_by_go(tcp_connection_handle(conn), count, deadline_us, [], 0)
+
+# `read_exact_utf8` under read_exact_by's deadline. `count` is BYTES, as everywhere on a socket, so a
+# multibyte character split across two arrivals is reassembled before anything decodes it — decoding
+# per chunk would reject a partial sequence that is merely incomplete.
+#
+# A decode failure is `Err TcpReadFailed`, never `TcpTimeout`: the bytes arrived inside the budget and
+# were not valid UTF-8, which is a different fault, and a caller retrying on a timeout must not retry
+# on this one.
+export fn read_exact_utf8_by(conn: borrowing TcpConnection, count: Int, deadline_us: Int) -> Result TcpError String !{IO} =
+  do
+    payload <- read_exact_by(conn, count, deadline_us)
+    match to_string(payload) with
+    | Ok text -> Ok(text)
+    | Err utf8_err -> Err(TcpReadFailed(utf8_error_message(utf8_err)))
 
 # O(count): reads bytes, then validates and copies the UTF-8 payload.
 export fn read_exact_utf8(conn: borrowing TcpConnection, count: Int) -> Result TcpError String !{IO} =

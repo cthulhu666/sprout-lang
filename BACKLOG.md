@@ -459,9 +459,9 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   separates *readiness* (`tcp_wait`, parks, moves no data) from *transfer* (`tcp_read_some`/
   `tcp_write_some`, never park, report `Err TcpWouldBlock`), with retry-and-deadline loops written
   once in `stdlib/net.sprout`. Both primitives exist; the read half landed 2026-08-11 (net −4
-  builtins). **Remaining:** rebuild `tcp_read_exact` over `tcp_wait` — it is not a soundness
-  violator but has *no deadline*, which is why the C5 body-framing fix could not use it, so adding
-  one is an API change and its own PR; migrate `tcp_write_all_timeout`, which re-arms its idle bound
+  builtins). **Remaining:** retire the `tcp_read_exact` builtin — `read_exact_by` now provides the
+  deadlined read in Sprout, so what is left is reimplementing the undeadlined `read_exact` over it
+  and deleting the builtin; migrate `tcp_write_all_timeout`, which re-arms its idle bound
   inside C so a caller can never impose a total bound (`write_all_by` shows the shape); and retire
   `tcp_write_string`, blocked on the full-duplex item below. Delete each twin's `APPROVED_BUILTINS`
   entry as it goes.
@@ -548,6 +548,9 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   append makes an internal node (O(1)) and `builder_build` traverses once. Also add `builder_str`
   and `builder_to_str` to skip the `Bytes` intermediary and the UTF-8 round-trip. These three
   unblock a pure-Sprout `string_join_suffix` over `list_fold` + builder (see §5).
+  Two live accumulation loops still fold left and are therefore quadratic in the chunk count, with
+  the count chosen by a network peer in both: `http_server.read_remaining_body` and
+  `url.decode_bytes`. `bigint.builder_of_mag` and `net.read_exact_by` work around it by halving.
 
 - [ ] `P2` **`bytes.singleton` and `bytes.builder_byte` are partial**, trapping via `sprout_fail`
   on a value outside 0..255 (`sprout_runtime.c:9129`, `:9285`). `docs/guidelines.md` §2 makes
