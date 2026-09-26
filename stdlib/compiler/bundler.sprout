@@ -1852,7 +1852,7 @@ fn publish_if_marked(ctor_types: List String, decl: ast.Decl) -> ast.Decl =
 # the floor; give one a `Maybe` and it does not. That is deliberate — a hand-kept
 # roster is the second source of truth this whole change exists to avoid.
 #
-# WHY SCALARS AND NOT `undeclared_type_names` (:1402). That list — the builtin
+# WHY SCALARS AND NOT `undeclared_type_names` (just below). That list — the builtin
 # type constants — also carries `Vector`, `Map`, `NativeSet`, `Ref`, `Bytes`,
 # `Builder`, which are runtime backing stores the prelude does NOT declare. Using
 # it here is a one-word change and would widen the floor from 15 externs to ~31,

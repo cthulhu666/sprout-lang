@@ -99,7 +99,7 @@ value, as Textual's `Submitted` does.
 
 ### 4.4 A chord is not typing
 
-`keys.sprout:63` decodes any byte below 32 as `KeyPress(KChar(b + 96), mods_ctrl())`.
+`keys.sprout:63` decodes any byte below 32 as `KeyPress(KChar(b + 96), mods_ctrl)`.
 **Ctrl-A arrives as `KChar 'a'`.** A field that inserted on any `KChar` would
 type "a" *and* swallow the application's chord. Insertion therefore requires
 ctrl and alt both clear; shift is excluded from that test, since shift is part

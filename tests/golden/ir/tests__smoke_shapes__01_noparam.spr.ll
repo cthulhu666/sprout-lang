@@ -54,11 +54,16 @@ declare i64 @to_double(i64)
 declare i64 @str_len(i64)
 declare i64 @str_find(i64, i64)
 declare i64 @str_starts_with(i64, i64)
-@val = private constant i64 42
+
+define i64 @val() {
+entry:
+  %t$0 = add i64 0, 42
+  ret i64 %t$0
+}
 
 define i64 @__sprout_user_main() {
 entry:
-  %t$0 = load i64, ptr @val
+  %t$0 = call i64 @val()
   %t$1 = call i64 @print_value(i64 %t$0)
   ret i64 %t$1
 }

@@ -1,4 +1,3 @@
-# sprout-ignore-all lint/nullary-const-fn: rejection fixture — the declaration form is what it asserts
 module main
 
 # An !{IO} arrow reaching a PURE element slot, with the pure element FIRST. Its

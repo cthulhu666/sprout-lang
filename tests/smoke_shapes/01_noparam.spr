@@ -1,3 +1,4 @@
+# sprout-ignore-all lint/nullary-const-fn: `val` is the zero-parameter `define` this shape exists to emit
 no_prelude
 
 # `no_prelude` is here for GOLDEN SIZE, not semantics: two lines of source were
@@ -6,5 +7,5 @@ no_prelude
 # directive was simply never added. `print` stays in scope via the floor
 # (`docs/no-prelude-core-v0.md`), which is the whole capability this fixture needs.
 
-let val: Int = 42
-fn main() -> Unit !{IO} = print(val)
+fn val() -> Int = 42
+fn main() -> Unit !{IO} = print(val())
