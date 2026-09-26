@@ -406,7 +406,7 @@ body is a syntactic value, because a top-level `let` initializer must be pure
 
 **Carry the return type across** — `fn lengths() -> Vec Int = [1, 2, 3]` is a `Vec`
 *because* the return type says so (§5.5.1), and a bare `let lengths = [1, 2, 3]` is a
-`List`. The annotation only resolves prelude types today (`BACKLOG` §2.5), so where
+`List`. The annotation only resolves prelude types today (`BACKLOG.md`, §1 Language Core and Safety), so where
 it cannot be written, leave the binding unannotated and check the inferred type.
 
 Two shapes stay functions, and the rule leaves them alone:
@@ -418,6 +418,27 @@ Two shapes stay functions, and the rule leaves them alone:
 
 Ordering also differs: a `fn` is visible throughout its module, a `let` only below
 itself. A constant used above where it was declared has to move up.
+
+**Migration — 28 exported names dropped their parentheses** when the rule landed, so
+`mod.name()` at a call site becomes `mod.name`:
+
+| module | names |
+| --- | --- |
+| `stdlib.tui.event` | `mods_none`, `mods_ctrl`, `mods_alt`, `mods_shift` |
+| `stdlib.tui.style` | `style_default` |
+| `stdlib.json` | `null` |
+| `stdlib.version` | `origin` |
+| `stdlib.scram` | `no_channel_binding` |
+| `stdlib.unicode.lookup` | `entry_width`, `entries_per_chunk`, `b62_alphabet` |
+| `stdlib.unicode.tables` | `{zerow,wide,gcb,extpict,incb}_{count,chunks}` |
+| `stdlib.compiler.types` | `effect_pure`, `effect_io` |
+| `stdlib.compiler.source` | `canonical_marker` |
+| `stdlib.compiler.compiler` | `source_entry_path`, `expr_sentinel_name` |
+| `stdlib.compiler.opt_config` | `all_passes` |
+| `ide.saving` | `tick_ms` |
+
+The compiler reports each stale call site, so the migration is mechanical: the old
+spelling is a type error, never a silent change of meaning.
 
 ## Build strings with `++` and backtick templates
 

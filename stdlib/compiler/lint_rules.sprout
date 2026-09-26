@@ -774,6 +774,11 @@ fn multi_line_lambda_finding(arg: ast.Expr) -> List LintFinding =
 #   NOT `main` — `let main` is not a program.
 #   NO `where` CONSTRAINT — a `fn` takes its dictionary per call, a binding
 #   makes the choice once, and an open one is rejected outright (§5.2).
+#   NOT LINEAR — a `fn` mints a fresh value per call, so its consume-once
+#   obligation is real; one shared binding makes it vanish, and nothing
+#   downstream reports the second consume (`letdecl_linear_gate` checks the
+#   INITIALIZER, not the uses). Read from this file's own declarations, so a
+#   linear type imported from elsewhere is still missed.
 #   A SYNTACTIC VALUE, and not one typed by CONTEXT (see the two predicates
 #   below). Outside that set a `let` is monomorphic and can narrow a
 #   polymorphic helper, and a computed body would move its cost — and its
@@ -792,7 +797,9 @@ let entry_point_name: String = "main"
 fn nullary_const_message(name: String) -> String =
   "`" ++ name ++ "` takes no parameters and its body is a constant — bind it with a top-level "
   ++ "`let <name>: <type> = <body>`, which is evaluated once (docs/idiomatic-sprout.md). "
-  ++ "Carry the return type across: it selects the type, so dropping it turns `Vec` into `List`."
+  ++ "Carry the return type across: it selects the type, so dropping it turns `Vec` into `List`. "
+  ++ "The annotation resolves only prelude types today, so for any other one leave it off and "
+  ++ "check the inferred type."
 
 # Prefix `-` is an operator, so `-1` arrives as a UnaryExpr and the checker's
 # predicate rejects it — to that predicate `-1` and `negate(x)` are one shape.
@@ -801,12 +808,13 @@ fn nullary_const_message(name: String) -> String =
 # what the compiler generalizes.
 fn is_negated_literal(e: ast.Expr) -> Bool =
   match e with
-  | ast.UnaryExpr op operand _ ->
-      op == "-" &&
-      (match operand with
-       | ast.IntExpr _ _ -> true
-       | ast.FloatExpr _ _ -> true
-       | _ -> false)
+  | ast.UnaryExpr op operand _ -> op == "-" && is_numeric_literal(operand)
+  | _ -> false
+
+fn is_numeric_literal(e: ast.Expr) -> Bool =
+  match e with
+  | ast.IntExpr _ _ -> true
+  | ast.FloatExpr _ _ -> true
   | _ -> false
 
 # A body that takes its type from CONTEXT rather than from itself. The declared
@@ -817,11 +825,63 @@ fn is_negated_literal(e: ast.Expr) -> Bool =
 # A bare CONSTRUCTOR is not one of these. `Nothing` and `Nil` carry their own
 # type and need no dictionary; it is the lowercase head, a reference to a
 # function, that the return type was standing behind.
+#
+# RECURSES for the same reason `all_syntactic_values` does: `Just(label)` and
+# `(label, 1)` hide the context-typed part one level down, and checking only the
+# top node reported them with no rewrite that compiles — the annotated form hits
+# the prelude-only limitation, the bare one an ambiguous typeclass binding.
 fn takes_type_from_context(e: ast.Expr) -> Bool =
   match e with
   | ast.VarExpr name _ -> ! ast.is_constructor_ref (name)
   | ast.LambdaExpr _ _ _ -> true
+  | ast.TupleExpr items _ -> any_takes_type_from_context(items)
+  | ast.CallExpr _ args _ -> any_takes_type_from_context(args)
   | _ -> false
+
+fn any_takes_type_from_context(exprs: List ast.Expr) -> Bool =
+  match exprs with
+  | [] -> false
+  | [h | t] -> takes_type_from_context(h) || any_takes_type_from_context(t)
+
+# The constructors of every LINEAR type declared in this file. A record's
+# constructor is its own name; a `type linear` lists its arms.
+fn linear_ctor_names(decls: List ast.Decl) -> List String =
+  match decls with
+  | [] -> Nil
+  | [d | rest] -> list_append(linear_ctors_of(d), linear_ctor_names(rest))
+
+fn linear_ctors_of(d: ast.Decl) -> List String =
+  match d with
+  | ast.TypeDecl _ _ ctors _ ast.Linear _ -> ctor_arm_names(ctors)
+  | ast.RecordDecl name _ _ _ ast.Linear _ _ -> [name]
+  | _ -> Nil
+
+fn ctor_arm_names(ctors: List ast.TypeConstructor) -> List String =
+  match ctors with
+  | [] -> Nil
+  | [c | rest] -> Cons(ctor_name(c), ctor_arm_names(rest))
+
+fn ctor_name(c: ast.TypeConstructor) -> String =
+  match c with
+  | ast.TypeConstructor name _ _ _ -> name
+
+# True when the body names one of them anywhere — a linear payload nested in an
+# unrestricted wrapper carries the same obligation as a bare one. Matching on the
+# last segment means another module's same-named constructor also matches, which
+# only ever withholds the suggestion.
+fn mentions_linear_ctor(names: List String, e: ast.Expr) -> Bool =
+  match e with
+  | ast.VarExpr name _ -> name_in_list(string.after_last_dot(name), names)
+  | ast.TupleExpr items _ -> any_mentions_linear_ctor(names, items)
+  | ast.CallExpr callee args _ ->
+      mentions_linear_ctor(names, callee) || any_mentions_linear_ctor(names, args)
+  | ast.LambdaExpr _ body _ -> mentions_linear_ctor(names, body)
+  | _ -> false
+
+fn any_mentions_linear_ctor(names: List String, exprs: List ast.Expr) -> Bool =
+  match exprs with
+  | [] -> false
+  | [h | t] -> mentions_linear_ctor(names, h) || any_mentions_linear_ctor(names, t)
 
 fn is_const_body(e: ast.Expr) -> Bool =
   (ast.is_syntactic_value(e) || is_negated_literal(e)) && ! takes_type_from_context (e)
@@ -833,15 +893,20 @@ fn declared_pure(effects: Maybe (List String)) -> Bool =
   | Just _ -> false
 
 fn nullary_const_findings(decls: List ast.Decl) -> List LintFinding =
-  match decls with
-  | Nil -> Nil
-  | Cons d rest -> list_append(nullary_const_finding(d), nullary_const_findings(rest))
+  nullary_const_go(decls, linear_ctor_names(decls))
 
-fn nullary_const_finding(d: ast.Decl) -> List LintFinding =
+fn nullary_const_go(decls: List ast.Decl, linear: List String) -> List LintFinding =
+  match decls with
+  | [] -> Nil
+  | [d | rest] ->
+      list_append(nullary_const_finding(d, linear), nullary_const_go(rest, linear))
+
+fn nullary_const_finding(d: ast.Decl, linear: List String) -> List LintFinding =
   match d with
   | ast.FnDecl name params _ effects constraints body pos ->
       if name != entry_point_name && list_is_empty(params) && declared_pure(effects)
          && list_is_empty(constraints) && is_const_body(body)
+         && ! mentions_linear_ctor (linear, body)
       then [mk_finding(pos, "nullary-const-fn", nullary_const_message(name))]
       else Nil
   | _ -> Nil

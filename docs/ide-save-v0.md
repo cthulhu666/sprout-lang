@@ -160,10 +160,10 @@ pane's tick budget are both in scope, and it is importable by a test, which `ide
 — a module exporting `main` collides with a test's own.
 
 ```sprout
-export fn tick_ms() -> Int = 500
+export let tick_ms: Int = 500
 
 # Never zero: a budget of zero ticks fires on the tick carrying the keystroke.
-fn idle_ticks(ms: Int) -> Int = if ms < tick_ms() then 1 else ms / tick_ms()
+fn idle_ticks(ms: Int) -> Int = if ms < tick_ms then 1 else ms / tick_ms
 ```
 
 A tick measures quiet at the TERMINAL, not quiet in the pane. `app.input_loop` restarts its read

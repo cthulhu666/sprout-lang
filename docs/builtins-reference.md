@@ -603,7 +603,7 @@ JSON stdlib helpers (in `stdlib/json.sprout`):
 - `JsonError` / `Json` / `JsonArray` / `JsonObject` ADTs
 - `JsonEncode a` plus `encode(value)` for directly encodable values (`Json`, `Int`, `Bool`, `String`)
 - `JsonArrayStep` / `JsonObjectStep` traversal ADTs
-- builder helpers: `null()`, `bool(value)`, `int(value)`, `string(value)`, `array_from_list(items)`, `object_from_pairs(items)`, `object_from_dict(items)`
+- builder helpers: `null`, `bool(value)`, `int(value)`, `string(value)`, `array_from_list(items)`, `object_from_pairs(items)`, `object_from_dict(items)`
 - `parse(raw) -> Result JsonError Json`
 - `stringify(value: Json) -> Result JsonError String` (compact JSON). Returns `Err(JsonNonFinite x)`
   when the tree contains a NaN or an infinity: RFC 8259 §6 has no syntax for either, so a writer
@@ -728,7 +728,7 @@ Crypto helpers (in `stdlib/crypto.sprout`):
 
 SCRAM helpers (in `stdlib/scram.sprout`):
 
-- `no_channel_binding() -> String`
+- `no_channel_binding: String`
 - `random_nonce(count: Int) -> Result CryptoError String`
 - `client_first_bare(username, nonce) -> String`
 - `client_first_message(username, nonce) -> String`

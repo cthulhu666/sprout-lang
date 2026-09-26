@@ -81,7 +81,7 @@ conversion loses.
 ```sprout
 # stdlib.version
 export type Version deriving (Eq, Ord, ToString)   -- constructor private
-export fn origin() -> Version
+export let origin: Version
 export fn next(v: Version) -> Version
 
 # stdlib.stamped

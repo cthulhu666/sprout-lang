@@ -641,7 +641,7 @@ corrected the design rather than silently conforming to it.
 
 4. **The floor needed its own type walk.** Reusing `unresolved_in_type` was the
    obvious move and does not work: it admits every name in
-   `undeclared_type_names()` before consulting its `declared` argument, so it
+   `undeclared_type_names` before consulting its `declared` argument, so it
    cannot express a set narrower than the builtins. `type_over_floor` answers a
    different question and is written separately, which also makes the criterion
    legible at the point it is applied.
@@ -656,8 +656,8 @@ corrected the design rather than silently conforming to it.
   exports this" from "nothing exports this". Deliberately deferred rather than
   bundled in: it is a diagnostics change with its own tests, and shipping it with
   a semantics change would make both harder to review.
-- **The wider floor (§4.3).** Switching `floor_type_names()` to
-  `undeclared_type_names()` widens the floor from 15 externs to ~31, admitting
+- **The wider floor (§4.3).** Switching `floor_type_names` to
+  `undeclared_type_names` widens the floor from 15 externs to ~31, admitting
   the `vector_*` / `map_*` / `native_set_*` / `ref_*` families. It is a one-word
   change, needs no new code, and is arguably the more principled criterion
   ("everything that needs nothing the prelude declares"). Not taken, for the

@@ -42,6 +42,9 @@ fn mentions_one_binding(msg: String) -> Bool =
 fn mentions_annotation(msg: String) -> Bool =
   str_find(msg, "let <name>: <type>") != -1
 
+fn mentions_prelude_only(msg: String) -> Bool =
+  str_find(msg, "only prelude types") != -1
+
 # Rule-scoped count — keeps an assertion about ONE rule from breaking when a
 # fixture also happens to trip a different rule (e.g. a Cons/Nil-recursion
 # fixture used for staircase-of-doom now also legitimately trips
@@ -546,6 +549,48 @@ let nullary_record_literal =
 let unary_literal_fn =
   "fn always(n: Int) -> Int = 65600\n"
 
+# A LINEAR value must be consumed exactly once. A `fn` mints a fresh one per
+# call, so that obligation is real; a single shared binding makes it vanish, and
+# nothing downstream catches the second consume — `letdecl_linear_gate` checks
+# the initializer, not the uses.
+let nullary_linear_ctor =
+  "type linear Token (..) =\n" ++
+  "  | Token Int\n" ++
+  "\n" ++
+  "fn make_token() -> Token = Token(0)\n"
+
+# A linear RECORD is already out of reach of the value gate — named-field
+# construction is a RecordExpr, which is not a syntactic value. Pinned so that
+# stays true if RecordExpr ever joins the predicate.
+let nullary_linear_record =
+  "record linear Handle (..) =\n" ++
+  "  fd: Int\n" ++
+  "\n" ++
+  "fn make_handle() -> Handle = Handle(fd = 1)\n"
+
+# The same shape at an UNRESTRICTED type still converts, so the gate keys on the
+# declaration's multiplicity and not merely on naming a local constructor.
+let nullary_unrestricted_ctor =
+  "type Token (..) =\n" ++
+  "  | Token Int\n" ++
+  "\n" ++
+  "fn make_token() -> Token = Token(0)\n"
+
+# A context-typed body one CONSTRUCTOR deep. `Just(label)` is a syntactic value
+# and `takes_type_from_context` saw only the top node, so this was reported with
+# no rewrite that compiles: annotated hits the non-prelude type limitation,
+# unannotated hits `ambiguous typeclass binding`.
+let nullary_ctor_wrapping_var =
+  "fn pick() -> Maybe (Colour -> String) = Just(label)\n"
+
+# The same, one TUPLE deep.
+let nullary_tuple_wrapping_var =
+  "fn pick2() -> (Colour -> String, Int) = (label, 1)\n"
+
+# And one constructor deep around a lambda.
+let nullary_ctor_wrapping_lambda =
+  "fn boxed() -> Box (Int -> String) = Box(\\n -> label(n))\n"
+
 # A `where` constraint means the dictionary is chosen per CALL. A top-level
 # binding holds one value and one choice, and an open one is rejected as an
 # ambiguous typeclass binding — three in-tree suites failed exactly this way.
@@ -861,6 +906,25 @@ fn main() -> Unit !{IO} =
       count_by_rule(lint_rules.lint_ast(nullary_record_literal), "nullary-const-fn"), 0)
     assert_eq(state, "literal-bodied fn that takes a parameter: no finding",
       count_by_rule(lint_rules.lint_ast(unary_literal_fn), "nullary-const-fn"), 0)
+    assert_eq(state, "nullary fn building a LINEAR value: no finding",
+      count_by_rule(lint_rules.lint_ast(nullary_linear_ctor), "nullary-const-fn"), 0)
+    assert_eq(state, "nullary fn building a linear RECORD: no finding",
+      count_by_rule(lint_rules.lint_ast(nullary_linear_record), "nullary-const-fn"), 0)
+    assert_eq(state, "the same shape at an unrestricted type: one finding",
+      count_by_rule(lint_rules.lint_ast(nullary_unrestricted_ctor), "nullary-const-fn"), 1)
+
+    assert_eq(state, "context-typed body one constructor deep: no finding",
+      count_by_rule(lint_rules.lint_ast(nullary_ctor_wrapping_var), "nullary-const-fn"), 0)
+    assert_eq(state, "context-typed body one tuple deep: no finding",
+      count_by_rule(lint_rules.lint_ast(nullary_tuple_wrapping_var), "nullary-const-fn"), 0)
+    assert_eq(state, "lambda one constructor deep: no finding",
+      count_by_rule(lint_rules.lint_ast(nullary_ctor_wrapping_lambda), "nullary-const-fn"), 0)
+
+    # The annotation resolves only prelude types, so the message must not send a
+    # reader at a `Version` or a `mod.T` without saying so.
+    assert_eq(state, "nullary const fn: message flags the prelude-only annotation",
+      mentions_prelude_only(first_message(lint_rules.lint_ast(nullary_ctor_app))), true)
+
     assert_eq(state, "nullary fn with a where constraint: no finding",
       count_by_rule(lint_rules.lint_ast(nullary_constrained), "nullary-const-fn"), 0)
     assert_eq(state, "nullary fn whose body is a bare name: no finding",
