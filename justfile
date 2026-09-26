@@ -2169,6 +2169,29 @@ task-io-smoke: bootstrap-from-seed
   # epoll/kqueue ready list, not a contract, and this is the assertion that would catch it changing.
   build tests/task_io_smoke/read_deadline_loses_to_data.spr
   run_once "read-deadline-loses-to-data" "reader got ping"
+  # (24c) read_exact_by: read_exact under an absolute deadline, the read-side twin of write_all_by.
+  # Seven assertions, each verified to fail alone under a targeted mutation — in-order reassembly
+  # across five stalled writes (a loop returning its first chunk mis-frames every length-prefixed
+  # protocol, and five chunks also drive the accumulator's merge past the two-chunk case),
+  # TcpTimeout on a count the peer never completes (the availability half: an unbounded read parks
+  # an http_server worker for good), buffered bytes beating an EXPIRED deadline (recv before
+  # clock), read_exact_utf8_by counting BYTES with the decode deferred until reassembly (a `é`
+  # split across two arrivals), a peer close before `count` answering TcpEndOfStream rather than
+  # TcpTimeout, a NEGATIVE count refused as TcpInvalidArgument while zero stays Ok(empty), and the
+  # deadline being enforced BETWEEN recvs — the bulk case is 65600 bytes, just past tcp_read_some's
+  # 64 KiB scratch cap, because that is the smallest count needing two data-returning recvs.
+  # The short case discriminates by VARIANT, not by hanging: a read ignoring its deadline reaches
+  # the server's close and answers TcpEndOfStream. One label per assertion, as everywhere in this
+  # recipe; for a timing fixture the repeat runs are also independent samples.
+  build tests/task_io_smoke/read_exact_deadline.spr
+  run_once "read-exact-by/chunked" "chunked-reassembled"
+  run_once "read-exact-by/buffered" "buffered-beats-deadline"
+  run_once "read-exact-by/timeout" "short-read-timed-out"
+  run_once "read-exact-by/utf8" "utf8-split-decoded"
+  run_once "read-exact-by/guards" "count-guards-hold"
+  run_once "read-exact-by/eof" "close-before-count-eof"
+  run_once "read-exact-by/bulk" "bulk-deadline-enforced"
+  SPROUT_GC_STRESS=1 run_once "read-exact-by/stress" "chunked-reassembled"
   # (25) Content-Length is denominated in BYTES while the body path measured and cut in CODEPOINTS
   # (concurrency review C5). `café` is 5 bytes / 4 codepoints and separates the two; an ASCII body
   # cannot, which is why the fixtures above all missed it. Three paths, because they used different
@@ -2330,7 +2353,7 @@ task-io-smoke: bootstrap-from-seed
   # happens. It needs a cancel or timeout ACROSS a park, which is what this adds.
   build tests/task_io_smoke/stdin_cancel_keeps_fd.spr
   run_stdin "stdin-cancel-keeps-fd" "stdin-survived-cancel" "silent:3"
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop, connect-park, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, read-deadline-loses-to-data, http-utf8-body, http-binary-body, tcp-accept-bad-handle, http-accept-exhaustion, tcp-nul-payload, http-request-parks, http-request-total-deadline, http-cancel-drop, http-header-lower-parks, dns-resolve-parks, dns-cancel-drop, stdin-park, stdin-two-readers, stdin-cancel-keeps-fd; interleaved; stress-clean)"
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop, connect-park, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, read-deadline-loses-to-data, read-exact-by, http-utf8-body, http-binary-body, tcp-accept-bad-handle, http-accept-exhaustion, tcp-nul-payload, http-request-parks, http-request-total-deadline, http-cancel-drop, http-header-lower-parks, dns-resolve-parks, dns-cancel-drop, stdin-park, stdin-two-readers, stdin-cancel-keeps-fd; interleaved; stress-clean)"
 
 # ── Linux gate (local, container-backed) ──────────────────────────────────────
 #

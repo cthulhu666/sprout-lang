@@ -1,0 +1,303 @@
+import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
+import stdlib.net (TcpConnection, TcpListener, TcpTimeout, TcpEndOfStream, TcpInvalidArgument, accept, close, close_listener, connect, listen_local, read_exact_by, read_exact_utf8_by, write_all, write_all_utf8)
+import stdlib.bytes as bytes
+import stdlib.time as time
+import stdlib.terminal as terminal
+
+# `read_exact_by` — read_exact under an ABSOLUTE deadline, the read-side twin of write_all_by.
+#
+# Seven properties, each one a plausible implementation getting it wrong:
+#  * `read_exact_utf8_by` counts BYTES and decodes only after reassembly. A `é` split across two
+#    arrivals is an incomplete sequence in between, so a per-chunk decode rejects it and a
+#    codepoint-counting read asks for one byte too many.
+#  * A count spanning five stalled writes must be REASSEMBLED, in order. A loop that returns its
+#    first chunk passes every timeout assertion and still mis-frames every length-prefixed
+#    protocol — the assertion read_avail_timeout cannot make, since returning a partial chunk is
+#    its whole contract. Five chunks rather than two also drive the accumulator's merge to three
+#    passes with an odd chunk left over, where a two-chunk read only ever takes one.
+#  * A count the peer never completes must answer `Err TcpTimeout` rather than park forever.
+#    That is the availability hole: an unbounded read parks an http_server worker permanently.
+#  * Bytes already buffered must beat an EXPIRED deadline, so the loop recvs before consulting
+#    the clock. Same ordering read_avail_timeout pins, and the reason it pins it.
+#  * The deadline is enforced BETWEEN recvs, not only when the socket would block. A loop that
+#    consults the clock only on a would-block runs a continuously readable peer to completion
+#    however far past the budget that goes, and holds the worker for all of it.
+#  * A peer that closes before `count` arrives is `Err TcpEndOfStream`, NOT `Err TcpTimeout`. The
+#    two say different things about the connection — one is dead, the other is retryable — and the
+#    close is only reachable as itself while a budget remains.
+#  * A NEGATIVE count is `Err TcpInvalidArgument`, matching the tcp_read_exact builtin. `Ok(empty)`
+#    there would let a length-prefixed reader take a desynchronised stream for a whole message.
+#    Zero stays `Ok(empty)`, which is the one case that is genuinely satisfiable.
+#
+# The timeout case gets its OWN connection: a timed-out read has already consumed part of the
+# count, so the stream is mid-message and nothing may reuse it. That is the contract, not an
+# artefact of the fixture. The end-of-stream case gets a third for the same reason.
+#
+# Marker discipline: every marker appears on its success path only, never inside a failure message
+# the recipe would match.
+
+fn send(conn: borrowing TcpConnection, text: String) -> Bool !{IO} =
+  match write_all_utf8(conn, text) with
+  | Ok _ -> true
+  | Err _ ->
+    do
+      terminal.write(`MISMATCH: server could not send ${text}\n`)
+      false
+
+# Raw bytes, because half of a UTF-8 sequence is not a String and cannot go through `send`.
+fn send_raw(conn: borrowing TcpConnection, payload: Bytes, label: String) -> Bool !{IO} =
+  match write_all(conn, payload) with
+  | Ok _ -> true
+  | Err _ ->
+    do
+      terminal.write(`MISMATCH: server could not send ${label}\n`)
+      false
+
+# FIVE single-byte writes, each stalled apart, spanning one 5-byte count. Five is chosen, not just
+# more than one: the accumulator merges adjacent pairs per pass, so 5 chunks take three passes and
+# leave an odd one over on the first — the arm a 2-chunk read never reaches. "xyz" is then left
+# buffered for the expired-deadline read, and `café` (5 BYTES, 4 codepoints) follows with the two
+# bytes of `é` split across a stall, incomplete between arrivals until a full reassembly decodes it.
+fn serve_chunked(conn: consuming TcpConnection) -> Unit !{IO} =
+  do
+    _ <- send(conn, "a")
+    task_sleep(130)
+    _ <- send(conn, "b")
+    task_sleep(130)
+    _ <- send(conn, "c")
+    task_sleep(130)
+    _ <- send(conn, "d")
+    task_sleep(130)
+    _ <- send(conn, "e")
+    _ <- send(conn, "xyz")
+    task_sleep(200)
+    _ <- send_raw(conn, bytes.append(bytes.from_string("caf"), bytes.singleton(195)), "caf+C3")
+    task_sleep(200)
+    _ <- send_raw(conn, bytes.singleton(169), "A9")
+    task_sleep(400)
+    close(conn)
+
+# One byte of a two-byte count, then silence until well past the client's budget. The byte leaves the
+# loop mid-message — accumulator non-empty, `have` short — which is the state the timeout arm has to
+# handle; it is NOT itself observable, because `Err TcpTimeout` says nothing about how far the read
+# got. The close at 1200ms is what makes the client's arm discriminating rather than a liveness
+# check: a read ignoring its 600ms deadline reaches EOF here and answers TcpEndOfStream, so the wrong
+# variant is the observable, not a hang.
+fn serve_short(conn: consuming TcpConnection) -> Unit !{IO} =
+  do
+    _ <- send(conn, "e")
+    task_sleep(1200)
+    close(conn)
+
+# One byte of a two-byte count, then an immediate close, with the client's budget left wide open. The
+# short case above cannot reach this: its deadline always expires first, so `Err TcpEndOfStream` has
+# no test there and a loop reporting TcpTimeout for a dead peer would pass it.
+fn serve_eof(conn: consuming TcpConnection) -> Unit !{IO} =
+  do
+    _ <- send(conn, "f")
+    close(conn)
+
+fn doubled(seed: Bytes, target: Int) -> Bytes =
+  if bytes.length(seed) >= target then seed
+  else doubled(bytes.append(seed, seed), target)
+
+# Just past tcp_read_some's 64 KiB scratch cap, which is the smallest count that forces read_exact_by
+# to make TWO data-returning recvs — the only way to reach the between-recvs clock check, since one
+# recv drains everything buffered up to the size it was asked for.
+let bulk_size = 65600
+
+let bulk_payload = bytes.slice(doubled(bytes.singleton(65), bulk_size), 0, bulk_size)
+
+# The whole payload in one write, then a stall: 65600 bytes fit the 128 KiB loopback buffers on both
+# backends, so it is all readable before the client looks and no part of the count is still in flight.
+fn serve_bulk(conn: consuming TcpConnection) -> Unit !{IO} =
+  do
+    _ <- send_raw(conn, bulk_payload, "bulk")
+    task_sleep(600)
+    close(conn)
+
+fn accept_failed(listener: consuming TcpListener, which: String) -> Unit !{IO} =
+  do
+    terminal.write(`MISMATCH: server could not accept ${which}\n`)
+    close_listener(listener)
+
+fn serve_fourth(listener: consuming TcpListener, conn: consuming TcpConnection) -> Unit !{IO} =
+  do
+    serve_bulk(conn)
+    close_listener(listener)
+
+fn serve_third(listener: consuming TcpListener, conn: consuming TcpConnection) -> Unit !{IO} =
+  do
+    serve_eof(conn)
+    match accept(listener) with
+    | Ok fourth -> serve_fourth(listener, fourth)
+    | Err _ -> accept_failed(listener, "fourth")
+
+fn serve_second(listener: consuming TcpListener, conn: consuming TcpConnection) -> Unit !{IO} =
+  do
+    serve_short(conn)
+    match accept(listener) with
+    | Ok third -> serve_third(listener, third)
+    | Err _ -> accept_failed(listener, "third")
+
+fn serve_first(listener: consuming TcpListener, conn: consuming TcpConnection) -> Unit !{IO} =
+  do
+    serve_chunked(conn)
+    match accept(listener) with
+    | Ok second -> serve_second(listener, second)
+    | Err _ -> accept_failed(listener, "second")
+
+fn serve(listener: consuming TcpListener) -> Unit !{IO} =
+  match accept(listener) with
+  | Ok first -> serve_first(listener, first)
+  | Err _ -> accept_failed(listener, "first")
+
+fn report_chunked(payload: Bytes) -> Unit !{IO} =
+  match bytes.to_string(payload) with
+  | Ok text ->
+      if text == "abcde" then
+        terminal.write("chunked-reassembled\n")
+      else
+        terminal.write(`MISMATCH: chunked read returned ${text}\n`)
+  | Err _ -> terminal.write("MISMATCH: chunked payload was not text\n")
+
+fn check_chunked(conn: borrowing TcpConnection) -> Unit !{IO} =
+  do
+    now <- time.now_micros()
+    match read_exact_by(conn, 5, now + 3000000) with
+    | Ok payload -> report_chunked(payload)
+    | Err _ -> terminal.write("MISMATCH: chunked read failed inside its budget\n")
+
+fn report_zero_count(payload: Bytes) -> Unit !{IO} =
+  if bytes.length(payload) == 0 then
+    terminal.write("count-guards-hold\n")
+  else
+    terminal.write("MISMATCH: zero count returned bytes\n")
+
+fn check_zero_count(conn: borrowing TcpConnection, deadline_us: Int) -> Unit !{IO} =
+  match read_exact_by(conn, 0, deadline_us) with
+  | Ok payload -> report_zero_count(payload)
+  | Err _ -> terminal.write("MISMATCH: zero count reported an error\n")
+
+# Both count guards, on a live connection with a live budget so neither can be mistaken for a socket
+# outcome. Running FIRST also proves they consume nothing: the reassembly assertion that follows
+# expects "abcde" from byte zero and would report the shortfall if a guard had taken a recv.
+fn check_counts(conn: borrowing TcpConnection) -> Unit !{IO} =
+  do
+    now <- time.now_micros()
+    match read_exact_by(conn, -1, now + 3000000) with
+    | Err (TcpInvalidArgument _) -> check_zero_count(conn, now + 3000000)
+    | Err _ -> terminal.write("MISMATCH: negative count reported the wrong error\n")
+    | Ok _ -> terminal.write("MISMATCH: negative count was satisfied\n")
+
+fn report_buffered(payload: Bytes) -> Unit !{IO} =
+  match bytes.to_string(payload) with
+  | Ok text ->
+      if text == "xyz" then
+        terminal.write("buffered-beats-deadline\n")
+      else
+        terminal.write(`MISMATCH: buffered read returned ${text}\n`)
+  | Err _ -> terminal.write("MISMATCH: buffered payload was not text\n")
+
+# The deadline is already in the past, so an implementation that consults the clock before the
+# socket answers TcpTimeout over three bytes that are sitting right there.
+fn check_buffered(conn: borrowing TcpConnection) -> Unit !{IO} =
+  do
+    task_sleep(150)
+    now <- time.now_micros()
+    match read_exact_by(conn, 3, now - 1000) with
+    | Ok payload -> report_buffered(payload)
+    | Err _ -> terminal.write("MISMATCH: expired deadline beat buffered data\n")
+
+# `count` is bytes, so 5 spans the split `é`. A per-chunk decode rejects the incomplete sequence and
+# a codepoint-counting read asks for one byte too many, so both answer something other than `café`.
+fn check_utf8(conn: borrowing TcpConnection) -> Unit !{IO} =
+  do
+    now <- time.now_micros()
+    match read_exact_utf8_by(conn, 5, now + 3000000) with
+    | Ok text ->
+        if text == "café" then
+          terminal.write("utf8-split-decoded\n")
+        else
+          terminal.write(`MISMATCH: utf8 read returned ${text}\n`)
+    | Err _ -> terminal.write("MISMATCH: utf8 read failed inside its budget\n")
+
+fn check_short(conn: borrowing TcpConnection) -> Unit !{IO} =
+  do
+    now <- time.now_micros()
+    match read_exact_by(conn, 2, now + 600000) with
+    | Err TcpTimeout -> terminal.write("short-read-timed-out\n")
+    | Err _ -> terminal.write("MISMATCH: short read reported a socket error\n")
+    | Ok payload -> terminal.write(`MISMATCH: short read returned ${int_to_string(bytes.length(payload))} bytes\n`)
+
+# Three seconds of budget against a peer that closes after one byte of two: the deadline cannot be
+# what ends this read, so TcpTimeout here means a dead peer was misreported as retryable.
+fn check_eof(conn: borrowing TcpConnection) -> Unit !{IO} =
+  do
+    now <- time.now_micros()
+    match read_exact_by(conn, 2, now + 3000000) with
+    | Err TcpEndOfStream -> terminal.write("close-before-count-eof\n")
+    | Err TcpTimeout -> terminal.write("MISMATCH: peer close reported as a timeout\n")
+    | Err _ -> terminal.write("MISMATCH: peer close reported a socket error\n")
+    | Ok payload -> terminal.write(`MISMATCH: eof read returned ${int_to_string(bytes.length(payload))} bytes\n`)
+
+# Every byte is already buffered and the budget is already spent, so the count can only be completed
+# by a loop that never looks at the clock while data keeps arriving. `check_buffered` pins the other
+# half of the same rule: the FIRST recv always happens, so a count one recv can satisfy still beats a
+# spent budget. The seam between them is exactly one recv wide, and both halves are asserted.
+fn check_bulk(conn: borrowing TcpConnection) -> Unit !{IO} =
+  do
+    task_sleep(200)
+    now <- time.now_micros()
+    match read_exact_by(conn, bulk_size, now - 1000) with
+    | Err TcpTimeout -> terminal.write("bulk-deadline-enforced\n")
+    | Err _ -> terminal.write("MISMATCH: bulk read reported a socket error\n")
+    | Ok payload -> terminal.write(`MISMATCH: bulk read returned ${int_to_string(bytes.length(payload))} bytes past its deadline\n`)
+
+fn client_bulk(port: Int) -> Unit !{IO} =
+  match connect("127.0.0.1", port) with
+  | Ok conn ->
+    do
+      check_bulk(conn)
+      close(conn)
+  | Err _ -> terminal.write("MISMATCH: client could not connect fourth\n")
+
+fn client_eof(port: Int) -> Unit !{IO} =
+  match connect("127.0.0.1", port) with
+  | Ok conn ->
+    do
+      check_eof(conn)
+      close(conn)
+      client_bulk(port)
+  | Err _ -> terminal.write("MISMATCH: client could not connect third\n")
+
+fn client_short(port: Int) -> Unit !{IO} =
+  match connect("127.0.0.1", port) with
+  | Ok conn ->
+    do
+      check_short(conn)
+      close(conn)
+      client_eof(port)
+  | Err _ -> terminal.write("MISMATCH: client could not connect second\n")
+
+fn client(port: Int) -> Unit !{IO} =
+  match connect("127.0.0.1", port) with
+  | Ok conn ->
+    do
+      check_counts(conn)
+      check_chunked(conn)
+      check_buffered(conn)
+      check_utf8(conn)
+      close(conn)
+      client_short(port)
+  | Err _ -> terminal.write("MISMATCH: client could not connect first\n")
+
+fn run(s: Scope, port: Int) -> Unit !{IO} =
+  do
+    task_spawn(s, \_ -> serve(listen_local(port)))
+    task_spawn(s, \_ -> client(port))
+
+fn main() -> Unit !{IO} =
+  do
+    with_scope(\s -> run(s, 28982))
+    terminal.write("done\n")
