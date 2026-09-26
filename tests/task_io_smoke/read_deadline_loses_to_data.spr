@@ -12,7 +12,7 @@ import stdlib.time as time
 # a recv first" — but the recv it refers to is the one that ran BEFORE the park. Once the task is
 # parked, `tcp_wait` reports "not ready" whenever `scheduler_park_on_fd_timeout` saw
 # `park_woke_by_timer == 1`, and `pump_loop` sets that flag from whichever event of a PARK_FD_TIMER
-# pair it happens to iterate FIRST (runtime/sprout_scheduler.c:422-423 — the second event of the pair
+# pair it happens to iterate FIRST (in runtime/sprout_scheduler.c — the second event of the pair
 # is skipped via `on_io_list`). Kernel event order within one `sprout_poll_wait` batch is not
 # specified, so a task whose fd went readable and whose deadline expired in the same batch could be
 # told "timed out" with its data in hand. The C reader this replaced could not do that: it carried

@@ -4307,8 +4307,8 @@ long long term_read_avail(long long max_val, long long ms_val) {
      * Read the two the right way round: `unowned` does not mean "an fd we may not
      * close", it means "no handle table owns this fd, so the parked frame is its
      * only reference and a force-drop must close it or leak it". That variant sets
-     * park_close_fd (sprout_scheduler.c:1046) and force_drop_task then does
-     * close(park_close_fd) (:709-711) — so using it here would make one
+     * park_close_fd (scheduler_park_on_unowned_fd) and force_drop_task then
+     * does close(park_close_fd) — so using it here would make one
      * with_timeout or scope_cancel over an input read close STDIN, permanently and
      * silently: fd 0 is then free, and the next open/socket/accept is handed it, so
      * a later read_avail reads an unrelated descriptor. The plain variant never

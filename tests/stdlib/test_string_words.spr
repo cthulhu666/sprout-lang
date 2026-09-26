@@ -7,7 +7,7 @@ import stdlib.string (words)
 # to eta-expand and asserts nothing about what it returns. This pins the contract
 # ahead of moving the declaration out of the prelude into stdlib.string.
 #
-# Contract (sprout_runtime.c:5405-5430): split on ASCII space, tab, CR or LF.
+# Contract (`split_words` in sprout_runtime.c): split on ASCII space, tab, CR or LF.
 # Runs of separators collapse, and leading/trailing ones are dropped, so no empty
 # word is ever produced — unlike `string_lines`, which preserves interior blanks.
 # That asymmetry between the two splitters is the thing most likely to be assumed

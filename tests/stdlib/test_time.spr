@@ -3,7 +3,7 @@
 #                   anything. For elapsed time, timeouts, benchmarks.
 #   wall_micros() — CLOCK_REALTIME. Microseconds since the Unix epoch. Steps under
 #                   NTP, so it must never be used to measure elapsed time.
-# (sprout_runtime.c:509-526 states both contracts.)
+# (`time_now_micros` and `wall_time_micros` in sprout_runtime.c state both contracts.)
 #
 # `wall_time_micros` previously had NO test anywhere; only the monotonic counter
 # was covered. That gap is closed below, which matters because the two builtins

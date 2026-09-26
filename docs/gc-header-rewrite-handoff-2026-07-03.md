@@ -88,10 +88,10 @@ moved. It dropped 3.2×. Chain length is causal. (This is why a *resize* would g
 ~2× speed — but it does nothing for memory, and the header rewrite subsumes it.)
 
 ### Memory accounting (the actual target)
-- `ManagedNode` = **48 B** per object (`runtime/sprout_runtime.c:60`): `ptr, kind,
+- `ManagedNode` = **48 B** per object (`runtime/sprout_runtime.c`): `ptr, kind,
   aux_slots, marked, next, hash_next`. `ptr` is redundant under an inline header;
   `hash_next` disappears with the table.
-- `SproutObj` = **80 B fixed** (`:34`): `tag + f0..f8`, regardless of arity. Max
+- `SproutObj` = **80 B fixed**: `tag + f0..f8`, regardless of arity. Max
   inline arity is 9.
 - `Just(42)` = 48 + 80 = **128 B** for 16 logical bytes → **8×**.
 - Fixed: `g_heap_index` = **1.0 MiB** static; `g_handle_table` = 16 KiB.

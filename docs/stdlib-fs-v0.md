@@ -15,7 +15,7 @@ measured, the measurement is what is recorded.
 - **list a directory** — there is no `readdir` anywhere in the tree;
 - **ask whether a path exists**, or whether it is a file or a directory;
 - **read a binary file** — `read_file` runs `utf8_validate` over the whole buffer
-  (`sprout_runtime.c:2984`) and returns `Err` on any non-UTF-8 byte, so the pair genuinely cannot
+  (`sprout_runtime.c`) and returns `Err` on any non-UTF-8 byte, so the pair genuinely cannot
   read an image, an object file, or a `.ll`;
 - **create, delete or rename** anything;
 - **manipulate a path** — every path helper in the tree is ad hoc and private
@@ -220,7 +220,7 @@ path — which would have put a second implementation of POSIX `basename(3)` in 
 police the duplicate.
 
 The runtime's arity cap is what forced the question rather than what decided it:
-`sprout_make_registered_obj` (`sprout_runtime.c:1506`) tops out at three fields, so a four-field
+`sprout_make_registered_obj` (`sprout_runtime.c`) tops out at three fields, so a four-field
 `Entry` would have needed either a `sprout_make4` on a helper the codegen paths share, or one field
 dropped. `name` is the right field to drop on its own merits — it is identity, not metadata, and
 the caller already has it.

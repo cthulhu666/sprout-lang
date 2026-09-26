@@ -99,7 +99,7 @@ declaration is already emitted (`ir_lowering.sprout:512`).
 
 ### 4.2 The one runtime surface change — needs approval
 
-`g_current_roots` is `static` (`runtime/sprout_runtime.c:1614`), so emitted IR cannot name it. It
+`g_current_roots` is `static` (`runtime/sprout_runtime.c`), so emitted IR cannot name it. It
 must lose `static` and be renamed `sprout_current_roots`.
 
 This is exported runtime surface, so it is a decision, not an implementation detail. Two things

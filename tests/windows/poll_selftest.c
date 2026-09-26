@@ -160,7 +160,7 @@ int main(void) {
 
     /* ── 7. A socket and a timer due together arrive in one batch ───────────────
      * PARK_FD_TIMER registers a task on both, and the pump is written to receive both in one
-     * wait (sprout_scheduler.c:418-423) — so the backend must harvest due timers on the
+     * wait (pump_loop in sprout_scheduler.c) — so the backend must harvest due timers on the
      * readiness return path too, not only when WSAPoll times out. */
     printf("7. socket and timer in one batch\n");
     /* Drain case 6's byte and send a fresh one, so this case does not silently depend on

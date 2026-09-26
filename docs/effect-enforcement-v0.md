@@ -193,8 +193,8 @@ or (c) the declaration stands and the fallbacks get annotated.
 
 ### 6.1 The argument for keeping `!{IO}`, stated first because it is real
 
-`panic` **writes to stderr**. `runtime/sprout_runtime.c:3394` calls `sprout_fail`, which does
-`fprintf(stderr, "runtime error: %s\n", msg)` and then `exit(1)` (`:5708`). Sprout's own §6 rule says
+`panic` **writes to stderr**. In `runtime/sprout_runtime.c` it calls `sprout_fail`, which does
+`fprintf(stderr, "runtime error: %s\n", msg)` and then `exit(1)`. Sprout's own §6 rule says
 a builtin takes `!{IO}` "when evaluating the call may interact with runtime or external state such as
 terminal IO". By the letter of that rule `panic` qualifies, and no amount of prior art overrides
 Sprout's own normative text.

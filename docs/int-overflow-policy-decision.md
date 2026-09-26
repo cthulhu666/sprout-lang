@@ -20,7 +20,7 @@ constraint, not the intended long-term meaning of `Int`."** (Both sections are r
 decision landing — see the header.)
 
 **Correction:** an earlier version of this section claimed "the interpreter uses host bignum
-arithmetic." False — there is no such path. `repl_eval_expr` in `runtime/sprout_runtime.c:5114`
+arithmetic." False — there is no such path. `repl_eval_expr` in `runtime/sprout_runtime.c`
 aborts with `"not supported in native backend"`; the i64 lowering described below is the only
 implementation that exists.
 

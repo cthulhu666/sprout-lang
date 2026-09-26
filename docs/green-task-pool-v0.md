@@ -273,9 +273,10 @@ rejected**:
 
 - *Not GC.* `SPROUT_DEBUG_GC` shows max pause 6.9 ms, 21 ms total across 6 s — an order of
   magnitude short of the tail.
-- *Not the listen backlog.* `runtime/sprout_runtime.c:8341` hardcodes `listen(fd, 16)`, which looked
-  like an obvious culprit at ~30k accepts/s. Raising it to `SOMAXCONN` (128 here) changed p99 **not
-  at all** (74–120 ms before and after, 3 interleaved rounds). Hypothesis discarded — recorded
+- *Not the listen backlog.* `tcp_listen` (`runtime/sprout_runtime.c`) hardcodes
+  `listen(fd, 16)`, which looked like an obvious culprit at ~30k accepts/s. Raising it to
+  `SOMAXCONN` (128 here) changed p99 **not at all** (74–120 ms before and after, 3
+  interleaved rounds). Hypothesis discarded — recorded
   because it is a plausible-looking diagnosis that measurement killed, and the backlog is not the
   thing to go fix.
 

@@ -167,7 +167,7 @@ Both total. The validated form proposed two rejections, and **neither is a
 real case**:
 
 - **Empty string.** Already rejected by `fs_path_rejected`
-  (`runtime/sprout_runtime.c:3113`), which returns
+  (`runtime/sprout_runtime.c`), which returns
   `FsInvalidPath("empty path")` before the syscall, and carries a comment
   saying why it belongs there: a syscall on `""` reports `ENOENT`, which
   classifies as "not found" — "true of nothing in particular and misleading

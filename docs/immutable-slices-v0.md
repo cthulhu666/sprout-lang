@@ -47,12 +47,12 @@ array" — Sprout already has two of those.
 ## 2. What Sprout has today
 
 - `List a` — cons list; no indexing, no windows.
-- `Vec a` — immutable flat array (`VectorVal {len, cap, data}`, `runtime/sprout_runtime.c:91`).
+- `Vec a` — immutable flat array (`VectorVal {len, cap, data}`, `runtime/sprout_runtime.c`).
 - `MutVec a` — the *same* `VectorVal`, mutated under `!{IO}`, growable (`vector_push`,
   `vector_truncate`). This is Rust's `Vec<T>` and Go's `[]T`-as-buffer. It already exists.
-- `Bytes` — immutable `BytesVal {len, data}` (`runtime/sprout_runtime.c:113`).
+- `Bytes` — immutable `BytesVal {len, data}` (`runtime/sprout_runtime.c`).
 - `String` — a GC block of kind `SPROUT_HEAP_CSTR`, allocated `len + 1` bytes and
-  **NUL-terminated** (`runtime/sprout_runtime.c:1348`).
+  **NUL-terminated** (`sprout_gc_alloc_cstr`).
 
 Sprout therefore already owns the *owner* half of both the Go and the Rust design. What is absent is
 the *view* half — and only the view half is worth discussing.
@@ -138,7 +138,7 @@ free — **as long as the backing store is immutable**, which is why §3's non-g
 Two runtime facts, verified, fix the shape of anything we build:
 
 1. **`String` is NUL-terminated.** `sprout_gc_alloc_cstr` allocates `len + 1` and every string
-   builtin receives a `const char*` (`runtime/sprout_runtime.c:1348`). A sub-range of a string is
+   builtin receives a `const char*` (`runtime/sprout_runtime.c`). A sub-range of a string is
    *not* NUL-terminated at its end, so a `String` view cannot be passed to a single existing string
    builtin without copying. A `String` view therefore costs either a parallel `{ptr,len}` API across
    the whole string surface, or a change to `String`'s representation. **This is the dominant cost,
@@ -241,16 +241,16 @@ the follow-up is to add a view-taking overload and leave the offset form in plac
 ## 9. Implementation overview
 
 **Runtime.** One new heap kind, `SPROUT_HEAP_SLICE`, whose payload is
-`{long long backing; size_t offset; size_t len;}`. Five switches over the kind must gain a case
-(`runtime/sprout_runtime.c:1074`, `:1919`, `:1949`, `:2083`, `:2443`):
+`{long long backing; size_t offset; size_t len;}`. Five switches over the kind must gain a case,
+all in `runtime/sprout_runtime.c`:
 
-| switch | new case |
-|---|---|
-| payload size | `sizeof(SliceVal)` |
-| child count | `1` — the backing handle |
-| child value | index 0 → `backing` |
-| release extras | nothing (no owned `malloc`) |
-| live-object census | its own counter |
+| switch | function | new case |
+|---|---|---|
+| payload size | `slot_bytes` | `sizeof(SliceVal)` |
+| child count | `sprout_heap_child_count_payload` | `1` — the backing handle |
+| child value | `sprout_heap_child_value_payload` | index 0 → `backing` |
+| release extras | `sprout_release_payload_extras` | nothing (no owned `malloc`) |
+| live-object census | `sprout_gc_sweep` | its own counter |
 
 Plus §7's five builtins (everything but `view_eq`). Each is O(1) except `view_to_bytes`, which is
 O(count). Note this is a **new

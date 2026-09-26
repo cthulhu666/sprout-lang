@@ -119,7 +119,7 @@ define i64 @main.launder(i64 %p$x) {
 ```
 
 The runtime guard does not help. `sprout_closure_arity_check`
-(`runtime/sprout_runtime.c:1556`) rejects `payload == NULL` and then reads a header off
+(`runtime/sprout_runtime.c`) rejects `payload == NULL` and then reads a header off
 the raw handle, so every non-null garbage value is dereferenced by the check itself.
 
 This is reachable from ordinary well-typed source. Sprout has no unsafe construct to blame.

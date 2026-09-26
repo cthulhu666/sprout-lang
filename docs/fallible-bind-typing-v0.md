@@ -319,7 +319,7 @@ Breaking for code that relies on the unsound behaviour. Measured blast radius, m
 collapses the migration to a rename plus one small addition:
 
 - **`mutvec_get` → `mutvec_at`.** Already exists and is exported (`mutable.sprout:37`). Routes through
-  `vector_get_direct`, which **is** bounds-checked (`sprout_runtime.c:7312`,
+  `vector_get_direct`, which **is** bounds-checked (`sprout_runtime.c`,
   `sprout_fail("vector_get_direct: index out of bounds")`) — so "unchecked read" in its doc comment means
   "no `Maybe` box", not "no bounds check", and that comment should be reworded. Migration is a
   one-identifier rename that also **removes a `Maybe` allocation per read** in hot numeric loops

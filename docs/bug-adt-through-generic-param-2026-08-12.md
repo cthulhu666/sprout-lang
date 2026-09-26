@@ -191,7 +191,7 @@ kinds of wrong depending only on the *payload value*, because the payload is bei
 | `v = 7` | matches no tag | `runtime error: non-exhaustive match` |
 | `ident(Empty)` (0-field) | two words read past the object | returns **`0`** instead of `999` — silently wrong |
 
-`sprout_obj_alloc_arity` (`runtime/sprout_runtime.c:1418`) returns the arity unchanged in normal
+`sprout_obj_alloc_arity` (`runtime/sprout_runtime.c`) returns the arity unchanged in normal
 builds, so a 1-field object owns exactly one word: the `obj[1]` load is a genuine read past the
 allocation, not in-bounds slack. That makes this a memory-safety defect as well as a wrong-answer one.
 

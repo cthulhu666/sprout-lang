@@ -480,7 +480,7 @@ fn test19_program() -> sprout_ir.IRProgram =
 #
 # Test 20: a heap value (%p) live across `vector_get_unboxed` (IRCallUnboxed2) is
 # NOT rooted.  vector_get_unboxed returns { tag, v->data[index] } by value — no
-# allocation (runtime/sprout_runtime.c:4410).  Pre-fix (blanket IRCallUnboxed2 ->
+# allocation (runtime/sprout_runtime.c).  Pre-fix (blanket IRCallUnboxed2 ->
 # trigger): %p IS rooted.  Post-fix: 0 pushes.  RED on current code.
 fn test20_program() -> sprout_ir.IRProgram =
   sprout_ir.IRProgram(Cons(

@@ -58,12 +58,12 @@ still does not compile for Windows at all. The `windows` CI job runs it on a rea
 
 ### 1.2 Two structural advantages that already exist
 
-- **GC rooting is an explicit shadow stack** (`sprout_gc_push_i64_root`,
-  `runtime/sprout_runtime.c:1628`; see the commentary at `:1713`), not conservative stack
+- **GC rooting is an explicit shadow stack** (`sprout_gc_push_i64_root` in
+  `runtime/sprout_runtime.c`; see the shadow-root-stack commentary in the same file), not conservative stack
   scanning. No code walks native stacks or spills registers, so the part of a GC port that is
   normally worst does not exist here.
 - **The poller is already an abstract interface** — six functions over an opaque per-registration
-  token (`runtime/sprout_scheduler.h:71-100`), with two backends already living behind it in
+  token (the `sprout_poll_*` declarations in `runtime/sprout_scheduler.h`), with two backends already living behind it in
   `runtime/sprout_poll.c` (193 lines total). Windows is a *third backend*, not a redesign.
 - The runtime uses no thread-local storage (`grep` for `__thread` / `_Thread_local` finds
   nothing), which removes the classic fiber hazard: a fiber accesses the TLS of whichever thread
@@ -100,7 +100,7 @@ model. It is an allocation-strategy change, gated by the full POSIX suite, and i
   and not a smaller version of it — Sprout is self-hosted, so a Windows-native `sproutc` is itself
   a program whose runtime must already be ported.
 - **HTTPS on Windows.** TLS is SecureTransport-only today; the non-Apple branch already returns
-  `"https unsupported on this platform"` (`runtime/sprout_runtime.c:7676`). Windows inherits an
+  `"https unsupported on this platform"` (`http_request` in `runtime/sprout_runtime.c`). Windows inherits an
   existing stub — this is not a new gap being opened.
 - **Steamworks integration and depot packaging.** Named in §9, designed later.
 - **32-bit and ARM64 Windows.** x86-64 only.
@@ -119,8 +119,8 @@ Windows has no `ucontext`. The field splits two ways:
 | **Win32 Fibers** | The OS-provided answer. `ConvertThreadToFiber` turns the calling thread into a fiber; `CreateFiber(stackSize, entry, data)` allocates a new one; `SwitchToFiber` switches; `DeleteFiber` frees. Documented state is *"its stack, a subset of its registers, and the fiber data"* — the same shape `ucontext` saves. |
 | **Go** | Does *not* use fibers; the goroutine switch is hand-written assembly per architecture, because Go needs growable stacks and its own preemption, neither of which fibers provide. |
 
-**Decision: Fibers.** Sprout's tasks have fixed-size stacks (`SPROUT_TASK_STACK_BYTES`,
-`sprout_scheduler.c:574`) and are cooperatively scheduled with explicit park points — exactly the
+**Decision: Fibers.** Sprout's tasks have fixed-size stacks (`SPROUT_TASK_STACK_BYTES` in
+`sprout_scheduler.c`) and are cooperatively scheduled with explicit park points — exactly the
 case fibers were built for, and exactly the case where Go's reasons for hand-rolled assembly do
 not apply. Microsoft's own framing: *"using fibers can make it easier to port applications that
 were designed to schedule their own threads."*
@@ -183,8 +183,8 @@ raylib publishes both variants, so the game side splits the same way: raylib 6.0
 
 **LLP64 is a non-issue.** Windows is LLP64 (`long` is 32-bit), but the runtime uses
 `long long`/`unsigned long long` throughout. A precise grep finds exactly two bare-`long` uses:
-`sprout_runtime.c:6958` (`atol` on a debug delay) and `:7241` (`ftell` for a file size — needs
-`_ftelli64` to exceed 2 GB).
+`dns_blocking_resolve` (`atol` on a debug delay) and `read_binary_file` (`ftell` for a file
+size — needs `_ftelli64` to exceed 2 GB), both in `sprout_runtime.c`.
 
 ### 4.2 Where Windows code lives
 
@@ -197,13 +197,14 @@ exist.
 **One exception — the context switch gets a real seam.** `ucontext_t` is embedded by value in the
 `Task` struct, and fibers have no equivalent type (a fiber is an opaque `LPVOID`), so this cannot
 be an `#ifdef` around call sites alone. Hence `runtime/sprout_context.h`, landed at W0b — the four operations and the decisions behind them are in §4.6. It covers every
-existing use: `sprout_scheduler.c:390`, `:437`, `:499` (switches), `:509` (task-0 adoption),
-`:539` (pump setup), `:603` (task setup), and all three stack frees — `:442` and `:445` (the pump
-reclaiming a finished task) and `:727` (`force_drop_task`).
+existing use, all in `sprout_scheduler.c`: the switches in `park_to_pump`, `pump_loop` and
+`task_trampoline`; task-0 adoption and pump setup in `sprout_scheduler_init`; task setup in
+`task_create`; and all three stack frees — two in `pump_loop` (the pump reclaiming a finished
+task) and one in `force_drop_task`.
 
 ### 4.3 W2 in detail: the poller, and why `WSAPoll` goes first
 
-The interface to implement is fixed and small (`sprout_scheduler.h:71-100`): `sprout_poll_init`,
+The interface to implement is fixed and small (`sprout_scheduler.h`): `sprout_poll_init`,
 `_add`, `_remove`, `_add_timer`, `_remove_timer`, `_wait`.
 
 **`WSAPoll` (first choice).** Verified against Microsoft Learn: `POLLIN` is
@@ -229,14 +230,15 @@ deadline as the `WSAPoll` timeout, synthesizing timer events on expiry — the t
 `sprout_poll_add_timer` contract permits this, since it only promises the token comes back from
 `sprout_poll_wait` with `out_is_timer` set. A useful consequence: the epoll backend spends one
 timerfd per registration and can therefore fail to arm under `ulimit -n` pressure, which is why
-`sprout_poll_add_timer` returns an int at all (`sprout_scheduler.h:77-89`). A heap has no such
+`sprout_poll_add_timer` returns an int at all (see its contract in `sprout_scheduler.h`). A heap has no such
 pressure, so **on Windows the "returns 0" path becomes unreachable**. Document it as
 unreachable-but-honoured rather than leaving the contract undefined.
 
 **Sockets only — the limitation that bites, and it is not `WSAPoll`-specific.** `WSAPoll` accepts
 only sockets, where epoll and kqueue accept any descriptor. Sprout depends on that generality in
 exactly one place: **async DNS parks a green task on a `pipe()` read end**
-(`sprout_runtime.c:7117`), used as the completion signal from the detached `getaddrinfo` thread.
+(`async_resolve` in `sprout_runtime.c`), used as the completion signal from the detached
+`getaddrinfo` thread.
 No readiness backend on Windows can poll a pipe.
 
 The fix is a **loopback socket pair** — the pipe carries a single completion byte, so a
@@ -248,7 +250,7 @@ blocking `accept` where libuv needs `AcceptEx`, because libuv requires overlappe
 and this pair is built once on one thread.
 
 **This landed in W3, not W2** — a scope correction made when W2 was implemented. The change is
-mechanical, but it sits in `async_resolve` (`sprout_runtime.c:7102`), a function that also calls
+mechanical, but it sits in `async_resolve` (`sprout_runtime.c`), a function that also calls
 `fcntl`, `read`, `close` and `pthread_create`, in a TU that does not compile for Windows at all
 until W3 clears `regex.h` at line 7. Writing the Windows arm at W2 would have produced code no
 gate could compile, in the one place a mistake breaks the POSIX DNS path — the same
@@ -277,7 +279,7 @@ So the only question AFD answers is scale, and three facts bound it:
 
 | bound | value |
 |---|---|
-| worst-case registered fds | **2048** — `g_conn_fd[2048]`, `sprout_runtime.c:153` |
+| worst-case registered fds | **2048** — `g_conn_fd[2048]` in `sprout_runtime.c` |
 | worst-case array copied per wait | ~16 KB of `WSAPOLLFD` |
 | what is actually in the array | tasks *currently parked*, since registration is one-shot — not all open connections |
 
@@ -285,7 +287,7 @@ and the motivating consumer, uncharted-suns (§12), is a single-player title who
 timers, not sockets. The C10k regime AFD exists for is not a workload Sprout has.
 
 **What makes this safe to decide now is that it is cheap to undo.** The poller is a 6-function
-interface with two backends behind it (`sprout_scheduler.h:71-100`); W2 is the act of adding a
+interface with two backends behind it (`sprout_scheduler.h`); W2 is the act of adding a
 third, and a fourth would be the same contained change to one file — no call-site churn, no
 protocol reshape. Choosing AFD today would pay undocumented NT interfaces, vendored third-party
 code, and permanent maintenance up front against a hypothetical. Choosing `WSAPoll` today pays a
@@ -312,10 +314,10 @@ if it ever appears.
 
 ### 4.4 W1 in detail: the one genuine risk
 
-`force_drop_task` (with_timeout expiry / scope_cancel, `sprout_scheduler.c:662`) frees a parked
-task's stack **without unwinding the C frame on it** (`:727`) — a deliberate design whose
+`force_drop_task` (with_timeout expiry / scope_cancel, `sprout_scheduler.c`) frees a parked
+task's stack **without unwinding the C frame on it** — a deliberate design whose
 consequences the codebase already handles via `scheduler_set_park_cleanup`
-(`sprout_scheduler.h:126-135`). Since W0b that free is `sprout_ctx_destroy` (§4.6); under fibers
+(`sprout_scheduler.h`). Since W0b that free is `sprout_ctx_destroy` (§4.6); under fibers
 its body becomes `DeleteFiber`.
 
 Microsoft documents exactly two dangerous cases, and Sprout is in neither:
@@ -334,7 +336,7 @@ the context it destroys.
 **Two further fiber facts that constrain the port:**
 
 - *"If your fiber function returns, the thread running the fiber exits."* Sprout's
-  `task_trampoline` already never returns — it swaps back to the pump (`sprout_scheduler.c:499`)
+  `task_trampoline` already never returns — it swaps back to the pump (`sprout_scheduler.c`)
   — so the existing structure is already correct. It must stay that way.
 - Fiber-local storage switches with the fiber, but plain TLS does **not**. The runtime uses no
   TLS today (§1.2); that must remain true, or any added TLS has to become FLS.
@@ -368,7 +370,8 @@ invisible — wrong arithmetic, no crash, no diagnostic. That asymmetry decides 
 ### 4.5 The loud-stub policy
 
 Any surface with no Windows implementation returns the established
-`"…unsupported on this platform"` error shape (precedent: `sprout_runtime.c:7676`) — **never a
+`"…unsupported on this platform"` error shape (precedent: `http_request` in
+`sprout_runtime.c`) — **never a
 silent success, and never a compile-time removal**. A stub that reports success is worse than one
 that fails, for the same reason `just test-file`'s silent skip is a worse outcome than a red test.
 
@@ -466,7 +469,8 @@ socket"*, and `WSAEINVAL` is returned *"if none of the sockets specified in the 
 any of the **WSAPOLLFD** structures pointed to by the fdarray parameter were valid."*
 
 The scheduler's pump blocks in `sprout_poll_wait` whenever anything at all is parked
-(`sprout_scheduler.c:401`), and that includes a parked set that is **entirely timers** — a single
+(`pump_loop` in `sprout_scheduler.c`), and that includes a parked set that is **entirely
+timers** — a single
 `task_sleep` produces one. On kqueue and epoll the question cannot arise, because each exposes a
 timer as a pollable object (`EVFILT_TIMER`, `timerfd`) sitting in the same wait set as the
 sockets. Windows has no timerfd equivalent, so the deadlines live in a heap here and the socket
@@ -489,7 +493,8 @@ Decisions worth recording:
   exists to prevent hangs. `-1` is passed only when no timer is registered at all.
 - **Due timers are harvested on both return paths**, not only when `WSAPoll` times out. A deadline
   and a ready socket can come due in the same wait, and the pump already handles a batch carrying
-  both, because a `PARK_FD_TIMER` task is registered on each (`sprout_scheduler.c:418-423`).
+  both, because a `PARK_FD_TIMER` task is registered on each (`pump_loop` in
+  `sprout_scheduler.c`).
 - **The registration array is kept compact rather than using negative-fd holes.** `WSAPoll` would
   let holes stay in place — negative entries are *"ignored and their revents will be set to
   POLLNVAL"* — but then the array length and the live-socket count diverge, and the empty-set test
@@ -598,14 +603,14 @@ language-or-product questions wearing porting clothes, which is why they were sp
 absorbed into W3's substitution list:
 
 1. **POSIX `<regex.h>` has no MSVC equivalent.** One use, `regex_compile_ere`
-   (`sprout_runtime.c:6039`). Vendor a small ERE implementation, or narrow a **language-visible**
+   (`sprout_runtime.c`). Vendor a small ERE implementation, or narrow a **language-visible**
    feature on Windows? Own BACKLOG entry.
 2. **`proc_run`'s `fork`/`execvp`/`pipe` → `CreateProcess`.** Needed by Milestone B and the game's
    offline bake, *not* by the shipped game — so a loud stub may be the right answer rather than a
    compromise.
 
 **Two items W2 explicitly handed to W3**, both recorded at their call sites so they cannot be lost:
-the DNS-pipe → loopback-pair swap (§4.3, comment at `sprout_runtime.c:7102`) and widening the
+the DNS-pipe → loopback-pair swap (§4.3, comment in `async_resolve`) and widening the
 poller interface's `int fd` to a `SOCKET` (§4.8).
 
 **The standing constraint governing everything above is §2**: this port changes no macOS or Linux

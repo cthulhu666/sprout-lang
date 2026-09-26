@@ -7,8 +7,8 @@ the code it replaced. Read §12 before changing anything here.
 ## 1. Problem
 
 `sprout_heap_lookup` answers *"is this arbitrary 64-bit word a live heap payload, and if so
-where is its header?"* It is the foundation of the rooting protocol — the arena comment at
-`runtime/sprout_runtime.c:642` calls this **"membership exactness"**, distinguishing a real
+where is its header?"* It is the foundation of the rooting protocol — the arena comment in
+`runtime/sprout_runtime.c` calls this **"membership exactness"**, distinguishing a real
 payload from an interior word. It is called on every traced edge, every scanned root slot,
 and from the mutation hooks.
 
@@ -166,8 +166,9 @@ implementation, not here.
 
 ### 4.4 Region release
 
-Today both release sites call `free(r->base)` (`runtime/sprout_runtime.c:2040` for a dead
-large object, `:2201` for an empty normal region). Under the arena, a released chunk returns
+Today both release sites call `free(r->base)` — both in `sprout_gc_sweep`
+(`runtime/sprout_runtime.c`), one for a dead large object and one for an empty
+normal region. Under the arena, a released chunk returns
 to a free-chunk list instead of being `free`d; physical pages may additionally be dropped
 with `madvise` (`MADV_DONTNEED` on linux, `MADV_FREE` on darwin) so that RSS still falls
 when the heap shrinks. Large objects keep `free()` unchanged.

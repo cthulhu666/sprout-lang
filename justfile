@@ -1747,6 +1747,14 @@ backlog-shape:
   # same shape rules, or "same discipline" is just a claim in its header.
   ./scripts/backlog_shape.sh .claude/skills/sprout-review/BACKLOG.md
 
+# AGENTS.md "Docs & Spec" #6: cite runtime C code by identifier, not line number.
+# The runtime only grows, so a line number decays in one direction; when this gate
+# landed 15 of the 25 checkable refs were already wrong by 14-75 lines. An
+# identifier survives every insertion above it and is greppable.
+[group('smoke')]
+runtime-line-refs:
+  ./scripts/runtime_line_refs.sh
+
 # DoD #10 — example canary RUN.  The canary set must compile AND run to
 # completion without crashing.  `just compile-examples-stage1` only covers
 # compile; this recipe adds the runtime check.
@@ -3349,6 +3357,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     # with no diagnostic. gate-audit caught it being unwired before it ever ran here.
     "extern-signatures|check-extern-signatures"
     "backlog-shape|backlog-shape"
+    "runtime-line-refs|runtime-line-refs"
   )
   declare -a pids=() labels=()
   idx=0; active=0

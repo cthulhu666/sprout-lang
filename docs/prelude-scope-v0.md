@@ -261,13 +261,13 @@ headerless files the prelude's own name.
    > `CtorMeta.name` is a **single field serving both display and lookup**, so
    > stripping it at registration is a wrong-tag bug, not a rendering choice:
    >
-   > - `find_ctor_tag_by_name` (`runtime/sprout_runtime.c:2660`) is a **first-wins
+   > - `find_ctor_tag_by_name` (`runtime/sprout_runtime.c`) is a **first-wins
    >   linear scan** over `g_ctor_meta`. Register the entry file's `Just` as bare
    >   `Just` and there are two entries under that name — the prelude's and the
    >   entry's, with different tags and possibly different arities. The runtime
-   >   calls this function *itself* (`env_get` at :2843, the `stdlib.regex.Match`
+   >   calls this function *itself* (`env_get`, the `stdlib.regex.Match`
    >   construction), so it would silently take whichever registered first.
-   > - `sprout_make0` (`:4887`) keys its `g_nothing_singleton` cache on
+   > - `sprout_make0` keys its `g_nothing_singleton` cache on
    >   `strcmp(name, "Nothing")`. A stripped entry-file `Nothing` would match and
    >   be handed the cached singleton **carrying the prelude's tag**. Left as
    >   `$entry.Nothing` it simply misses the fast path — a lost allocation

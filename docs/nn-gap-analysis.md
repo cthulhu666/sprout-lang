@@ -63,9 +63,10 @@ local change — **not** the numeric draft's full typeclass-dispatch milestone
 
 No `exp`, `log`, `sqrt`, `pow` (real), `tanh`, `sin`. `stdlib/math.sprout` is
 entirely **Int-valued** (`abs`, `min`, `max`, `clamp`, `sign`, integer `pow`,
-`gcd`, `lcm`). The runtime's `double` usages
-(`runtime/sprout_runtime.c:184-190, 410-443, 1704-1713`) are GC-heuristic
-internals, not exposed to Sprout. There is no `<math.h>` bridge for user code.
+`gcd`, `lcm`). The runtime's `double` usages (`g_gc_adapt_ratio`,
+`g_gc_adapt_factor`, `g_gc_livelock_ratio` and their env parsing in
+`runtime/sprout_runtime.c`) are GC-heuristic internals, not exposed to Sprout.
+There is no `<math.h>` bridge for user code.
 
 This is a **conditional** blocker — its severity depends entirely on the chosen
 activation function:
@@ -93,7 +94,8 @@ softmax are no longer blocked on anything. See `docs/math-transcendental-v0.md`.
 ### 3.1 Random number generation is raw-bytes only
 
 Only `crypto.random_bytes(count)` exists — cryptographic bytes from
-`/dev/urandom` (`runtime/sprout_runtime.c:7336`, `stdlib/crypto.sprout:35`).
+`/dev/urandom` (`crypto_random_bytes` in `runtime/sprout_runtime.c`,
+`stdlib/crypto.sprout`).
 There is **no seedable PRNG and no uniform-float generator**. Weight
 initialization would mean hand-deriving numbers from raw bytes, and — with no
 seed — **runs are not reproducible**, which is painful when debugging a learner.
