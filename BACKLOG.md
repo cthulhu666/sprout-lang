@@ -1048,8 +1048,9 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   under `$GIT_DIR/claude-review/`, which for a worktree is `.git/worktrees/<name>/`, so a branch
   reviewed from another worktree reads as never reviewed. The bigint arc's four earlier review
   rounds are recorded nowhere machine-readable; only the two run from this worktree survive. Move
-  it to `$(git rev-parse --git-common-dir)/claude-review/` — one line in `scripts/review_ledger.sh`
-  — and keep the per-worktree column that already distinguishes rows.
+  it to `$(git rev-parse --git-common-dir)/claude-review/` — two sites in
+  `scripts/review_ledger.sh`: `ledger_path` for the TSV, `ledger_sibling` for the findings and raw
+  files — and keep the per-worktree column that already distinguishes rows.
 - [ ] `P3` **`ir-golden-diff` catches new typeclass dictionary wrappers but does not say so.**
   Writing a two-arm `Maybe` decision with `and_then` pulled `Monad`'s whole superclass chain
   (Applicative + Functor eta wrappers) into every consumer of `stdlib.json`; the IR diff showed it

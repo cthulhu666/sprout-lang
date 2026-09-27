@@ -163,12 +163,37 @@ not having had one.
 level (`review:2 9 found 3 real @max`): averaging levels across runs answers nothing, and "how
 hard was the last look" is the question worth answering.
 
+## Why `OVERLAP_MIN` stayed wrong for three runs
+
+Worth recording because it generalises past this skill. The threshold's calibration note said *"if a
+real finding is ever swallowed, raise it and say so here"* — it planned for over-merging only. Both
+failures that actually happened went the other way, and that is not chance:
+
+| failure | what a reader sees |
+|---|---|
+| over-merge | one entry visibly describing two different things |
+| under-merge | two plausible entries, each looking like its own finding |
+
+**An under-merge is invisible, so nobody reports it.** A threshold whose two failure modes differ in
+how detectable they are will drift toward the detectable one, because that is the only side anyone
+files a complaint about. The note asked for exactly the report that could never arrive.
+
+Two consequences, both now in place. The gate no longer reads a similarity score at all — triage asks
+whether two reviewers pointed at the same `file:line`, which is not a matter of degree. And the raw
+pre-dedup findings are kept (`review_ledger.sh raw <id>`), so the invisible side is now **measurable
+on demand** rather than waiting to be noticed. The post-dedup report next to it can never answer the
+question: it is the output of the constant under test.
+
+The same shape is worth checking on any threshold here. `LINE_WINDOW = 6` and `VERIFY_CAP = 10` both
+fail silently in one direction and loudly in the other.
+
 ## Reading it
 
 ```sh
 bash scripts/review_ledger.sh count          # completed runs on this branch
 bash scripts/review_ledger.sh show           # "review:2 9 found 3 real @max"
 bash scripts/review_ledger.sh findings <id>  # path to that run's findings
+bash scripts/review_ledger.sh raw <id>       # path to that run's RAW pre-dedup findings
 just test-review-ledger                      # the suite, also in ci-fast-gates
 ```
 
