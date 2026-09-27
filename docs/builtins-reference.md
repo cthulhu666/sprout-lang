@@ -693,9 +693,9 @@ Bytes helpers (in `stdlib/bytes.sprout`):
 - uses foundational prelude `Maybe` and `Result`
 - `Builder` opaque type for efficient packet construction
 - `instance Eq Bytes` — structural `==`; O(1) on a length mismatch, else O(|left|) and
-  allocation-free. Early-exits on the first differing byte, so it is not constant-time. It is
-  declared here, not in the prelude, so a program gets it only with `stdlib.bytes` in its import
-  graph
+  allocation-free. Early-exits on the first differing byte, so it is not constant-time — for
+  anything key-derived use `stdlib.crypto.const_time_eq`. It is declared here, not in the
+  prelude, so a program gets it only with `stdlib.bytes` in its import graph
 - `empty() -> Bytes`
 - `singleton(value) -> Bytes`
 - `length(value) -> Int`
@@ -726,6 +726,11 @@ Crypto helpers (in `stdlib/crypto.sprout`):
 - `base64_encode(value: Bytes) -> String`
 - `base64_decode(raw: String) -> Result Base64Error Bytes`
 - `bytes_xor(left: Bytes, right: Bytes) -> Result BytesOpError Bytes`
+- `const_time_eq(left: Bytes, right: Bytes) -> Bool` — equality for key-derived values (an
+  HMAC tag, a session token, a challenge). Reads every byte whichever way the answer goes, so
+  the time taken depends on the length and not on where the values differ. Use it instead of
+  `==` wherever a secret is on either side. A length mismatch is `false`, decided before
+  anything is compared, so the length is not hidden
 - `random_bytes(count: Int) -> Result CryptoError Bytes` (effectful; reads runtime entropy)
 
 SCRAM helpers (in `stdlib/scram.sprout`):

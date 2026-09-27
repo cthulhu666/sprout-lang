@@ -222,4 +222,7 @@ export fn verify_server_final(password: String, client_first_bare_raw: String, s
   | Ok verifier ->
       match server_signature(password, client_first_bare_raw, server, channel_binding) with
       | Err err -> Err(err)
-      | Ok expected -> Ok(verifier == expected)
+      # Constant-time: the verifier arrives from the network and `expected` is derived
+      # from the password, so a compare that stops at the first difference tells a
+      # malicious server how much of the signature it guessed.
+      | Ok expected -> Ok(crypto.const_time_eq(bytes.from_string(verifier), bytes.from_string(expected)))

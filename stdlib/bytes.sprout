@@ -193,7 +193,8 @@ where
 # Structural equality: lengths, then byte-for-byte via `find`'s inner loop at offset 0.
 #
 # O(1) on a length mismatch, else O(|left|), allocation-free. It early-exits on the first differing
-# byte, so it is not a constant-time compare — do not use it on a secret-derived tag.
+# byte, so it is not a constant-time compare — on a secret-derived tag use
+# `stdlib.crypto.const_time_eq` instead.
 #
 # It lives here rather than in the prelude because the prelude deliberately declares no bytes
 # externs.
