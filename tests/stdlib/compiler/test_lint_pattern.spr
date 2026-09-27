@@ -1,0 +1,214 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.ast as ast
+import stdlib.compiler.lint_pattern as lint_pattern
+
+# A fixture that does not parse is a broken test, not a failing one.
+fn parse(src: String) -> ast.Expr =
+  match lexer.tokenize(src) with
+  | Err _ -> panic(`test_lint_pattern: tokenize failed: ${src}`)
+  | Ok toks ->
+      match parser.parse_expr(toks, 0) with
+      | Err _ -> panic(`test_lint_pattern: parse failed: ${src}`)
+      | Ok (e, _) -> e
+
+fn same(a: String, b: String) -> Bool =
+  lint_pattern.expr_alpha_equal(parse(a), parse(b))
+
+fn matches(pattern: String, subject: String, holes: List String) -> Bool =
+  match lint_pattern.match_expr(parse(pattern), parse(subject), holes) with
+  | Nothing -> false
+  | Just _ -> true
+
+# Did the hole `name` capture something alpha-equal to `expected`?
+fn captured(pattern: String, subject: String, holes: List String,
+            name: String, expected: String) -> Bool =
+  match lint_pattern.match_expr(parse(pattern), parse(subject), holes) with
+  | Nothing -> false
+  | Just caps ->
+      match lint_pattern.capture_of(name, caps) with
+      | Nothing -> false
+      | Just e -> lint_pattern.expr_alpha_equal(e, parse(expected))
+
+fn free(src: String, name: String) -> Bool =
+  set_member(name, lint_pattern.expr_free_vars(parse(src)))
+
+fn free_count(src: String) -> Int =
+  set_size(lint_pattern.expr_free_vars(parse(src)))
+
+# --- the derived `result_from_maybe` pattern (docs/lint-rules-v0.md §5) ---
+let rfm_pattern = "match value with | Nothing -> Err(err) | Just unwrapped -> Ok(unwrapped)"
+let rfm_holes = ["value", "err"]
+
+# --- the derived `result_with_default` pattern, whose fallback sits under a binder ---
+let rwd_pattern = "match r with | Ok x -> x | Err _ -> fallback"
+let rwd_holes = ["r", "fallback"]
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # ---------------------------------------------------------------
+    # Structural equality, one case per ast.Expr variant. A variant the
+    # traversal forgets answers `false` here even against itself.
+    # ---------------------------------------------------------------
+    assert_eq(state, "Var is equal to itself", same("x", "x"), true)
+    assert_eq(state, "Int is equal to itself", same("1", "1"), true)
+    assert_eq(state, "Float is equal to itself", same("1.5", "1.5"), true)
+    assert_eq(state, "Bool is equal to itself", same("true", "true"), true)
+    assert_eq(state, "String is equal to itself", same("\"s\"", "\"s\""), true)
+    assert_eq(state, "Template is equal to itself", same("`a${x}b`", "`a${x}b`"), true)
+    assert_eq(state, "Char is equal to itself", same("'c'", "'c'"), true)
+    assert_eq(state, "Unit is equal to itself", same("()", "()"), true)
+    assert_eq(state, "Tuple is equal to itself", same("(1, 2)", "(1, 2)"), true)
+    assert_eq(state, "If is equal to itself",
+      same("if c then 1 else 2", "if c then 1 else 2"), true)
+    assert_eq(state, "Match is equal to itself", same(rfm_pattern, rfm_pattern), true)
+    assert_eq(state, "Call is equal to itself", same("f(x)", "f(x)"), true)
+    assert_eq(state, "Lambda is equal to itself", same("\\ x -> x", "\\ x -> x"), true)
+    assert_eq(state, "Binary is equal to itself", same("1 + 2", "1 + 2"), true)
+    assert_eq(state, "Unary is equal to itself", same("!b", "!b"), true)
+    assert_eq(state, "IntRange is equal to itself", same("1..5", "1..5"), true)
+    assert_eq(state, "Do is equal to itself",
+      same("do\n  print(\"hi\")\n", "do\n  print(\"hi\")\n"), true)
+    assert_eq(state, "Record is equal to itself",
+      same("Point(x = 1, y = 2)", "Point(x = 1, y = 2)"), true)
+    assert_eq(state, "GetField is equal to itself", same("f(x).y", "f(x).y"), true)
+    assert_eq(state, "RecordUpdate is equal to itself",
+      same("p with (x = 1)", "p with (x = 1)"), true)
+    assert_eq(state, "Comprehension is equal to itself",
+      same("[y for y in ys]", "[y for y in ys]"), true)
+
+    # Distinctness, so the equality is not just `true`.
+    assert_eq(state, "a different argument is not equal", same("f(x)", "f(y)"), false)
+    assert_eq(state, "operand order matters", same("1 + 2", "2 + 1"), false)
+    assert_eq(state, "a different field is not equal", same("f(x).y", "f(x).z"), false)
+    assert_eq(state, "a different literal is not equal", same("1", "2"), false)
+
+    # A qualified name is one VarExpr carrying a dotted name, so `p` and `p.x`
+    # are different names rather than a name and a projection.
+    assert_eq(state, "a qualified name differs from its prefix", same("p", "p.x"), false)
+
+    # ---------------------------------------------------------------
+    # Alpha-equivalence: a binder's NAME is not part of the shape.
+    # ---------------------------------------------------------------
+    assert_eq(state, "lambda binders rename freely", same("\\ x -> x", "\\ y -> y"), true)
+    assert_eq(state, "match binders rename freely",
+      same("match v with | Just a -> a | Nothing -> z",
+           "match v with | Just b -> b | Nothing -> z"), true)
+    # Renaming is not licence to ignore which binder a body uses.
+    assert_eq(state, "a body using an outer name is not alpha-equal to one using the binder",
+      same("match v with | Just a -> z | Nothing -> z",
+           "match v with | Just b -> b | Nothing -> z"), false)
+    assert_eq(state, "a free name is not alpha-equivalent to a bound one",
+      same("\\ x -> y", "\\ x -> x"), false)
+
+    # ---------------------------------------------------------------
+    # Holes capture, and the reconstruction is what the rule reports.
+    # ---------------------------------------------------------------
+    assert_eq(state, "the derived pattern matches the hand-rolled shape",
+      matches(rfm_pattern,
+        "match env_get(name) with | Nothing -> Err(oops) | Just x -> Ok(x)",
+        rfm_holes), true)
+    assert_eq(state, "the scrutinee hole captures the whole scrutinee",
+      captured(rfm_pattern,
+        "match env_get(name) with | Nothing -> Err(oops) | Just x -> Ok(x)",
+        rfm_holes, "value", "env_get(name)"), true)
+    assert_eq(state, "the error hole captures the error expression",
+      captured(rfm_pattern,
+        "match env_get(name) with | Nothing -> Err(oops) | Just x -> Ok(x)",
+        rfm_holes, "err", "oops"), true)
+    # A hole is a whole subterm, not a prefix of one.
+    assert_eq(state, "the error hole captures a call as readily as a name",
+      captured(rfm_pattern,
+        "match env_get(name) with | Nothing -> Err(missing(name)) | Just x -> Ok(x)",
+        rfm_holes, "err", "missing(name)"), true)
+
+    # A non-hole subterm must match exactly: `Ok(unwrapped)` is not `Ok(f(unwrapped))`.
+    assert_eq(state, "an extra call around the payload is not the same shape",
+      matches(rfm_pattern,
+        "match env_get(name) with | Nothing -> Err(oops) | Just x -> Ok(f(x))",
+        rfm_holes), false)
+
+    # A name that is not declared a hole is a literal name to match.
+    assert_eq(state, "an undeclared hole is matched literally",
+      matches(rfm_pattern,
+        "match env_get(name) with | Nothing -> Err(oops) | Just x -> Ok(x)",
+        ["err"]), false)
+
+    # ---------------------------------------------------------------
+    # Non-linear holes: one name, one subterm.
+    # ---------------------------------------------------------------
+    assert_eq(state, "a repeated hole accepts equal subterms",
+      matches("pair(x, x)", "pair(a, a)", ["x"]), true)
+    assert_eq(state, "a repeated hole rejects differing subterms",
+      matches("pair(x, x)", "pair(a, b)", ["x"]), false)
+    assert_eq(state, "a repeated hole compares subterms structurally, not by spelling",
+      matches("pair(x, x)", "pair(f(1), f(1))", ["x"]), true)
+
+    # ---------------------------------------------------------------
+    # Branch permutation (§5.2b). The prelude disagrees with itself on
+    # branch order, so this is a requirement rather than a nicety.
+    # ---------------------------------------------------------------
+    assert_eq(state, "branches match in either order",
+      matches(rfm_pattern,
+        "match env_get(name) with | Just x -> Ok(x) | Nothing -> Err(oops)",
+        rfm_holes), true)
+    assert_eq(state, "a permuted match still captures correctly",
+      captured(rfm_pattern,
+        "match env_get(name) with | Just x -> Ok(x) | Nothing -> Err(oops)",
+        rfm_holes, "err", "oops"), true)
+
+    # ---------------------------------------------------------------
+    # Wildcard direction (§5.2b): a subject `_` stands in for a named
+    # constructor only in LAST position, where it is the catch-all.
+    # ---------------------------------------------------------------
+    assert_eq(state, "a trailing wildcard stands in for the remaining constructor",
+      matches("match m with | Just x -> x | Nothing -> fb",
+              "match q with | Just y -> y | _ -> 0", ["m", "fb"]), true)
+    assert_eq(state, "a leading wildcard does not stand in for a constructor",
+      matches("match m with | Nothing -> fb | Just x -> x",
+              "match q with | _ -> 0 | Just y -> y", ["m", "fb"]), false)
+
+    # ---------------------------------------------------------------
+    # Closedness (§5.2a). Reconstructing the call hoists the capture out
+    # of the match, so a capture may not mention what the branch bound.
+    # This is examples/json_demo.sprout:17-20.
+    # ---------------------------------------------------------------
+    assert_eq(state, "a fallback referring to the branch binding is refused",
+      matches(rwd_pattern,
+        "match json.stringify(v) with | Ok text -> text | Err err -> concat(\"refused: \", msg(err))",
+        rwd_holes), false)
+    assert_eq(state, "a closed fallback in the same position is accepted",
+      matches(rwd_pattern,
+        "match json.stringify(v) with | Ok text -> text | Err _ -> \"refused\"",
+        rwd_holes), true)
+    # The binder need not be named in the pattern for the capture to escape.
+    assert_eq(state, "a fallback using the bound name bare is refused",
+      matches(rwd_pattern,
+        "match load(p) with | Ok text -> text | Err e -> e",
+        rwd_holes), false)
+    assert_eq(state, "a fallback closed over an outer name is accepted",
+      matches(rwd_pattern,
+        "match load(p) with | Ok text -> text | Err _ -> dflt",
+        rwd_holes), true)
+
+    # ---------------------------------------------------------------
+    # Free variables — what closedness is computed from.
+    # ---------------------------------------------------------------
+    assert_eq(state, "a lambda binder is not free in its body",
+      free("\\ x -> f(x, y)", "x"), false)
+    assert_eq(state, "an outer name stays free under a lambda",
+      free("\\ x -> f(x, y)", "y"), true)
+    assert_eq(state, "the callee is free", free("\\ x -> f(x, y)", "f"), true)
+    assert_eq(state, "a lambda body has exactly its outer references free",
+      free_count("\\ x -> f(x, y)"), 2)
+    assert_eq(state, "a match binder is not free in its branch body",
+      free("match v with | Just a -> a | Nothing -> b", "a"), false)
+    assert_eq(state, "a scrutinee is free",
+      free("match v with | Just a -> a | Nothing -> b", "v"), true)
+    assert_eq(state, "an unbound branch body name is free",
+      free("match v with | Just a -> a | Nothing -> b", "b"), true)
+
+    summary(state)
