@@ -975,9 +975,10 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   `formatter.sprout`'s text-based Style checks. **Remaining roadmap** from
   `docs/idiomatic-sprout.md`: "Match the producing call directly" (a `let`/do-bind immediately
   followed by a match on that single otherwise-unused variable) and "Collapse a trivial `do` block".
-  The rest of that doc is design-level or too fuzzy for a reliable syntactic check. **Also open:** a
-  config file for per-rule enable/disable, and autocorrect (needs an AST-aware rewriter; today's
-  formatter is a line-based text transform).
+  The rest of that doc is design-level or too fuzzy for a reliable syntactic check. **Also open:**
+  autocorrect (needs an AST-aware rewriter; today's formatter is a line-based text transform). The
+  config file, rules as patterns derived from the prelude, and a `hand-rolled-combinator` rule are
+  designed in `docs/lint-rules-v0.md`.
 - [ ] `P3` **A nested `match` on a `Cons`-bound tail is not linted.** `match xs with | Cons h t ->
   match t with …` is what `[a, b | rest]` exists to flatten, and neither `list-shape-pattern` (which
   needs a chain ending in a literal `Nil`) nor `list-prefix-pattern` (a wildcard tail) covers it.
