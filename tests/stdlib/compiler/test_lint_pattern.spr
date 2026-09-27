@@ -2,6 +2,7 @@ import stdlib.test (TestState, new_state, assert_eq, summary)
 import stdlib.compiler.lexer as lexer
 import stdlib.compiler.parser as parser
 import stdlib.compiler.ast as ast
+import stdlib.compiler.source as source
 import stdlib.compiler.lint_pattern as lint_pattern
 
 # A fixture that does not parse is a broken test, not a failing one.
@@ -36,6 +37,12 @@ fn free(src: String, name: String) -> Bool =
 
 fn free_count(src: String) -> Int =
   set_size(lint_pattern.expr_free_vars(parse(src)))
+
+# `\ (borrowing x: Int) -> x` is a parse error — the surface syntax has no mode on
+# a lambda parameter — so the mode cases are the one place a node is built by hand.
+fn lam_mode(m: ast.ParamMode) -> ast.Expr =
+  let p = source.SourcePos(index = 0, line = 1, column = 1)
+  in ast.LambdaExpr([ast.Param("x", Just(ast.TypeName("Int")), m)], ast.VarExpr("x", p), p)
 
 # --- the derived `result_from_maybe` pattern (docs/lint-rules-v0.md §5) ---
 let rfm_pattern = "match value with | Nothing -> Err(err) | Just unwrapped -> Ok(unwrapped)"
@@ -86,6 +93,24 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "a different field is not equal", same("f(x).y", "f(x).z"), false)
     assert_eq(state, "a different literal is not equal", same("1", "2"), false)
 
+    # One discriminating case per payload the reflexive cases above cannot see:
+    # a variant that ignored its own payload is equal to itself either way.
+    assert_eq(state, "Float discriminates on its value", same("1.5", "2.5"), false)
+    assert_eq(state, "Bool discriminates on its value", same("true", "false"), false)
+    assert_eq(state, "String discriminates on its value", same("\"s\"", "\"t\""), false)
+    assert_eq(state, "Char discriminates on its value", same("'c'", "'d'"), false)
+    assert_eq(state, "Binary discriminates on its operator", same("1 + 2", "1 - 2"), false)
+    assert_eq(state, "Unary discriminates on its operator", same("!b", "-b"), false)
+    assert_eq(state, "Record discriminates on its constructor",
+      same("Point(x = 1)", "Vec(x = 1)"), false)
+    assert_eq(state, "Record discriminates on its field name",
+      same("Point(x = 1)", "Point(y = 1)"), false)
+    assert_eq(state, "IntRange discriminates on its endpoints", same("1..5", "1..6"), false)
+    assert_eq(state, "a template discriminates on its literal text",
+      same("`a${x}b`", "`a${x}c`"), false)
+    assert_eq(state, "a template discriminates on its interpolated expression",
+      same("`a${x}b`", "`a${y}b`"), false)
+
     # A qualified name is one VarExpr carrying a dotted name, so `p` and `p.x`
     # are different names rather than a name and a projection.
     assert_eq(state, "a qualified name differs from its prefix", same("p", "p.x"), false)
@@ -103,6 +128,33 @@ fn main() -> Unit !{IO} =
            "match v with | Just b -> b | Nothing -> z"), false)
     assert_eq(state, "a free name is not alpha-equivalent to a bound one",
       same("\\ x -> y", "\\ x -> x"), false)
+
+    # A parameter's ANNOTATION and mode are shape, not binder name: substituting
+    # one lambda for the other would substitute one annotation for the other.
+    assert_eq(state, "lambdas differing only in a parameter annotation are not equal",
+      same("\\ (x: Int) -> x", "\\ (x: String) -> x"), false)
+    assert_eq(state, "an annotation is compared structurally, not by head name",
+      same("\\ (x: List Int) -> x", "\\ (x: List String) -> x"), false)
+    assert_eq(state, "an annotated lambda differs from an unannotated one",
+      same("\\ (x: Int) -> x", "\\ x -> x"), false)
+    assert_eq(state, "the same annotation still renames freely",
+      same("\\ (x: Int) -> x", "\\ (y: Int) -> y"), true)
+    assert_eq(state, "lambdas differing only in a parameter mode are not equal",
+      lint_pattern.expr_alpha_equal(lam_mode(ast.ModeDefault),
+                                    lam_mode(ast.ModeBorrowing)), false)
+    # ModeDefault and ModeConsuming are one ownership, so they must compare equal
+    # or a round-tripped annotation would stop matching its source (ast.mode_of_flags).
+    assert_eq(state, "consuming is the same mode as the default",
+      lint_pattern.expr_alpha_equal(lam_mode(ast.ModeDefault),
+                                    lam_mode(ast.ModeConsuming)), true)
+    # `once` bounds how often the callee may invoke the parameter, so it is a
+    # distinction of its own and not a spelling of borrowing.
+    assert_eq(state, "once is not the same mode as the default",
+      lint_pattern.expr_alpha_equal(lam_mode(ast.ModeDefault),
+                                    lam_mode(ast.ModeOnce)), false)
+    assert_eq(state, "once is not the same mode as borrowing",
+      lint_pattern.expr_alpha_equal(lam_mode(ast.ModeBorrowing),
+                                    lam_mode(ast.ModeOnce)), false)
 
     # ---------------------------------------------------------------
     # Holes capture, and the reconstruction is what the rule reports.
@@ -146,6 +198,12 @@ fn main() -> Unit !{IO} =
       matches("pair(x, x)", "pair(a, b)", ["x"]), false)
     assert_eq(state, "a repeated hole compares subterms structurally, not by spelling",
       matches("pair(x, x)", "pair(f(1), f(1))", ["x"]), true)
+    # The structural comparison is `expr_alpha_equal`, so it inherits every
+    # distinction that makes: two lambdas alike only in binder name are not one subterm.
+    assert_eq(state, "a repeated hole rejects two differently annotated lambdas",
+      matches("pair(x, x)", "pair(\\ (a: Int) -> a, \\ (a: String) -> a)", ["x"]), false)
+    assert_eq(state, "a repeated hole accepts two alpha-equal lambdas",
+      matches("pair(x, x)", "pair(\\ (a: Int) -> a, \\ (b: Int) -> b)", ["x"]), true)
 
     # ---------------------------------------------------------------
     # Branch permutation (§5.2b). The prelude disagrees with itself on
@@ -171,6 +229,21 @@ fn main() -> Unit !{IO} =
       matches("match m with | Nothing -> fb | Just x -> x",
               "match q with | _ -> 0 | Just y -> y", ["m", "fb"]), false)
 
+    # The rule is about refutability, not about which Pattern variant spells it: a
+    # tuple pattern is refutable when a sub-pattern is, and binds when one binds.
+    assert_eq(state, "a leading wildcard does not stand in for a tuple pattern",
+      matches("match m with | 1 -> a | (Just _, 3) -> b",
+              "match q with | _ -> y | 1 -> x", ["m", "a", "b"]), false)
+    assert_eq(state, "a trailing wildcard stands in for a tuple that binds nothing",
+      matches("match m with | 1 -> a | (Just _, 3) -> b",
+              "match q with | 1 -> x | _ -> y", ["m", "a", "b"]), true)
+    assert_eq(state, "a trailing wildcard does not stand in for a tuple that binds",
+      matches("match m with | 1 -> a | (v, 3) -> b",
+              "match q with | 1 -> x | _ -> y", ["m", "a", "b"]), false)
+    assert_eq(state, "a trailing wildcard does not stand in for a variable pattern",
+      matches("match m with | 1 -> a | v -> b",
+              "match q with | 1 -> x | _ -> y", ["m", "a", "b"]), false)
+
     # ---------------------------------------------------------------
     # Closedness (§5.2a). Reconstructing the call hoists the capture out
     # of the match, so a capture may not mention what the branch bound.
@@ -193,6 +266,29 @@ fn main() -> Unit !{IO} =
       matches(rwd_pattern,
         "match load(p) with | Ok text -> text | Err _ -> dflt",
         rwd_holes), true)
+
+    # ---------------------------------------------------------------
+    # Templates, do blocks and comprehensions (§5.3). A derived pattern is a
+    # single expression over `match` and `if`, so these three carry no hole and
+    # are compared literally. A hole inside one is an authoring error and panics;
+    # what is testable is that the literal comparison discriminates, and that a
+    # hole OUTSIDE one still captures it whole.
+    # ---------------------------------------------------------------
+    assert_eq(state, "an identical template matches", matches("`a${v}b`", "`a${v}b`", []), true)
+    assert_eq(state, "a template differing in its text does not match",
+      matches("`a${v}b`", "`a${v}c`", []), false)
+    assert_eq(state, "a do block differing in a step does not match",
+      matches("do\n  print(\"hi\")\n", "do\n  print(\"bye\")\n", []), false)
+    assert_eq(state, "a comprehension renames its generator binder freely",
+      matches("[y for y in ys]", "[z for z in ys]", []), true)
+    assert_eq(state, "a hole captures a template whole",
+      captured("f(v)", "f(`a${x}b`)", ["v"], "v", "`a${x}b`"), true)
+    assert_eq(state, "a hole captures a comprehension whole",
+      captured("f(v)", "f([y for y in ys])", ["v"], "v", "[y for y in ys]"), true)
+    # A declared hole name that an enclosing binder shadows is that binder's, so it
+    # is not a hole and must not trip the §5.3 assertion.
+    assert_eq(state, "a hole name shadowed above a template is not a hole",
+      matches("\\ v -> `a${v}b`", "\\ w -> `a${w}b`", ["v"]), true)
 
     # ---------------------------------------------------------------
     # Free variables — what closedness is computed from.

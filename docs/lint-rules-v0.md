@@ -5,6 +5,14 @@ Status: **piece A (§4A, the matcher) implemented; B and C are design.** Experim
 enable/disable" line in `BACKLOG.md`'s `Formatter/linter beyond the baseline` entry — that entry
 points here.
 
+Revision 4. A review of §4A's implementation found the (c) rule stated for constructors only, which
+is not where it lives — refutability is, so a tuple pattern needed the same two conditions and a
+variable pattern needed to fail them (§5.2c). §5.3's "never carries a hole" is now asserted rather
+than assumed, and §4A records that a parameter's annotation and mode are part of a lambda's shape.
+Line-number citations into `ast.sprout` and `lint_rules.sprout` became identifiers: consolidating
+`pattern_names` moved every one of them, and a number drifts one way and never back
+(`AGENTS.md` §Docs & Spec 6 already says this for `runtime/`).
+
 Revision 3. Building §4A corrected §5.2c: a subject wildcard standing in for a pattern constructor
 needs the constructor to *bind nothing*, which revision 2 left out, and stating only the position
 rule admits `| Just u -> Ok(u)` against `| _ -> 0`. §12's matcher list is now
@@ -18,14 +26,14 @@ Revision 2. An adversarial review of revision 1 found the matching half of the d
 
 The ask: make the linter catch a reinvented prelude combinator, and make adding the next one cost
 one list entry instead of a new AST walk. Today's seven rules are each hand-written procedural code
-in a 1179-line module, with no config and no way to add a rule as data.
+in a 1166-line module, with no config and no way to add a rule as data.
 
 ## 1. Problem
 
 Two problems, and only the second is about `result_from_maybe`.
 
 **1a. Rules cost too much to add.** Every rule in `stdlib/compiler/lint_rules.sprout` is a bespoke
-matcher plus a hook into `walk_expr`. Parameters are hardcoded (`min_staircase_depth`, line 260).
+matcher plus a hook into `walk_expr`. Parameters are hardcoded (`min_staircase_depth`).
 There is no enable/disable, no severity, no per-path scoping. A rule is a code change to the
 compiler, which means the seed gate, `just test`, and a PR — for what is often one shape.
 
@@ -114,10 +122,14 @@ Three separable pieces. Each is useful alone, and they land in this order.
 hole bindings. It must also provide, because nothing else in the compiler does:
 
 - structural equality over `ast.Expr` (the zero-hole case). `ast.sprout` has none; the nearest
-  existing thing is `cse_census.expr_key` (`cse_census.sprout:254`), which keys over `typed_ast`
-  rather than `ast` and so cannot be reused;
+  existing thing is `cse_census.expr_key`, which keys over `typed_ast`
+  rather than `ast` and so cannot be reused. "Up to binder names" does **not** extend to a
+  parameter's type annotation or its mode: those are shape, because substituting one lambda for
+  another substitutes one annotation for the other. Mode compares by *ownership*, since
+  `ModeDefault` and `ModeConsuming` are one mode and only one survives a round trip
+  (`ast.mode_of_flags`). An effect row compares as a set;
 - **free variables of an `ast.Expr`**, which §5.2's closedness check needs. Also absent over `ast`,
-  but `dce.is_free` (`dce.sprout:144`) and `ast_to_ir.compute_free_vars` (`ast_to_ir.sprout:36`) are
+  but `dce.is_free` and `ast_to_ir.compute_free_vars` are
   close structural templates — both over `typed_ast`, and `dce`'s binder half already works on
   `ast.Pattern`.
 
@@ -180,7 +192,7 @@ suggest one.
 - **Every `ast.Expr` variant.** A missed variant is a silent false negative, the worst failure for a
   coverage tool. `walk_expr` in `lint_rules.sprout` is modelled on `desugar_expr_no_ctx_i`
   (`desugar_ctx.sprout:180`) for exactly this reason; the matcher needs the same discipline. Note
-  that `lint_rules.sprout:180-182`'s own comment misattributes that function to `checker.sprout`.
+  that the comment above `lint_rules.walk_expr` misattributes that function to `checker.sprout`.
 
 ### 5.2 The substitution side: when a match may be reported at all
 
@@ -217,17 +229,25 @@ wildcard is unsound together: `| _ -> Err(e) | Just v -> Ok(v)` would match `res
 pattern while always taking the `Err` branch. So: **a subject wildcard may stand in for a pattern
 constructor only in last position.** The compiler rejects that inverted subject anyway
 (`unreachable_check`, `infer.sprout:4990`), but lint runs on a parse alone
-(`lint_rules.sprout:1160-1170`), so the engine cannot rely on that.
+(`lint_rules.ast_findings`), so the engine cannot rely on that.
 
 **(c) Wildcard direction.** Both directions need stating, and they are not symmetric.
 
-A *pattern* constructor matching a *subject* `_` carries **two** conditions, not one. It must be in
-last position, per (b) — and the constructor must **bind nothing**. `Nothing` qualifies. `Just u`
+A *pattern* branch matching a *subject* `_` carries **two** conditions, not one. It must be in
+last position, per (b) — and it must **bind nothing**. `Nothing` qualifies. `Just u`
 does not: `u` would have no counterpart on the subject side, while the pattern's body references it,
 so there is nothing for that body to match against. Stating only the position rule admits
 `| Just u -> Ok(u)` against `| _ -> 0`, which is not the same expression at all. Together the two
 conditions are what catches the `let..else` spelling, whose desugaring puts a wildcard in the second
 branch (`parser.sprout:1032-1037`).
+
+**The conditions are about refutability, not about which `Pattern` variant spells it.** A tuple
+pattern is refutable when a sub-pattern is and binds when a sub-pattern binds, so `| (Just _, 3) -> b`
+needs the same two conditions `| Nothing -> b` does, and a variable pattern — which always binds —
+never satisfies them. Stating the rule for constructors alone is what let the first implementation
+admit `| (Just _, 3) -> ?b` against a *leading* `| _ -> y`, reporting the body of a branch the
+subject can never reach. Literal patterns (`1`, `true`, `'c'`, `()`) admit no subject `_` at all;
+that is conservative rather than inconsistent, because refusing a pairing is always sound.
 
 A *pattern* `_` matching a *subject* variable pattern is admissible **unconditionally** at the
 pairing step, because a pattern wildcard binds nothing and so cannot leave a binder unpaired.
@@ -237,7 +257,7 @@ for the stated reason* rather than silently failing to match.
 
 ### 5.3 Which bodies are derivable
 
-"Single-expression function" is vacuous: every `ast.FnDecl` body is one `Expr` (`ast.sprout:250`).
+"Single-expression function" is vacuous: every `ast.FnDecl` body is one `Expr`.
 The real precondition must be stated and enforced, because `where` and `let..in` **also** desugar to
 a `MatchExpr` (`parser.sprout:1032-1040`, and the comment at `:1833-1836` records that `where` and
 `let` deliberately share the node). A `let`-bodied combinator would derive to `match ?v with | x -> …`
@@ -248,6 +268,12 @@ Everything else — a `do` block, a single-arm match from a `where`/`let` body, 
 parameter name (making the hole ambiguous) — must be **rejected loudly at derivation**, naming the
 function. Today's four candidates pass; the prelude has six `let`-bodied exports that would not, so
 this is not hypothetical.
+
+Until that derivation check exists, the matcher enforces the half it can see: a hole occurring inside
+a pattern's template, `do` block or comprehension **panics** rather than comparing literally. The
+alternative is a rule that silently never fires, and "never fires" is the failure a coverage tool
+cannot report on itself. Only the pattern is checked, and a pattern is ours, so this can only ever
+name an authoring bug — never a user's file.
 
 ## 6. When the rewrite is invalid, not merely eager
 
@@ -277,7 +303,7 @@ for a `panic` callee catches it for free, which is the whole reason to state the
 than defer it.
 
 **Note: the fallback is evaluable but not a value.** Anything that is not
-`ast.is_syntactic_value` (`ast.sprout:383`) — a call, a template, a concatenation — now runs on the
+`ast.is_syntactic_value` — a call, a template, a concatenation — now runs on the
 success path too. Word the note as a **behaviour change**, not a cost:
 
 ```
@@ -304,13 +330,13 @@ checker before relying on it.
    (`import m (result_from_maybe)`) shadows just as effectively and must be covered too.
 3. **Prelude-less files**, where the suggested call would not compile.
 4. **Guards 2 and 3 cannot be done on the AST.** `ast_findings` parses
-   `source.strip_headers(src)` (`lint_rules.sprout:1160`), so the imports are gone before the AST
-   exists. Both guards must read `header_lines` (`lint_rules.sprout:1070`), the same text-level view
+   `source.strip_headers(src)`, so the imports are gone before the AST
+   exists. Both guards must read `header_lines`, the same text-level view
    the suppression directives use.
-5. **Not `drop_desugared_matches`.** That filter (`lint_rules.sprout:964`) drops findings whose
+5. **Not `drop_desugared_matches`.** That filter (`lint_rules.drop_desugared_matches`) drops findings whose
    source line does not literally begin with `match`, because `staircase-of-doom` was firing on
    already-flat `let..else` code. For *this* rule the desugared form is a **true** positive. The
-   filter is keyed on `"staircase-of-doom"` (`:970`) so the new rule is outside it by default — but
+   filter is keyed on the `"staircase-of-doom"` rule id, so the new rule is outside it by default — but
    that needs a comment, or someone will later generalise the filter and blind the rule to half its
    cases.
 
@@ -328,7 +354,7 @@ of decision.
 
 Suppression today is **file-level and header-only**: one directive, `sprout-ignore-all`, spelled
 `sprout-ignore-all lint/<rule>: <reason>` with both the rule id and the reason mandatory
-(`lint_rules.sprout:1057`, `:1089`, `:1096`). Header-only is deliberate — the header is read as text
+(`lint_rules.parse_ignore_all`, with `needs_rule_msg` and `needs_reason_msg`). Header-only is deliberate — the header is read as text
 before `tokenize` runs, which is what lets a file that never lexes suppress `unparsed`. Per-*line*
 suppression does not exist; `BACKLOG.md` fixes its future spelling as `# lint: allow(<rule>)` and
 calls it "bigger than it looks". **Path scoping in the config file sidesteps that dependency** for
@@ -341,8 +367,8 @@ Revision 1 claimed three of the seven could become patterns. Reading them, none 
 | rule | why not |
 |---|---|
 | `redundant-vec-from-list` | delegates to `desugar_ctx.find_redundant_vec_wraps` (`desugar_ctx.sprout:436`), which threads a function-signature index to compute Vec *context*. A syntactic `vec_from_list([…])` pattern fires on every wrap, redundant or not — the opposite of what the rule means. |
-| `list-shape-pattern` | matches on `ast.Pattern`, not `Expr` (`lint_rules.sprout:337-420`); walks Cons chains of unbounded length; needs a source-text post-filter because `[a, b]` sugar produces identical nodes. |
-| `list-prefix-pattern` | same family, same three reasons (`:497-570`). |
+| `list-shape-pattern` | matches on `ast.Pattern`, not `Expr` (`lint_rules.find_list_shape_in_pattern`); walks Cons chains of unbounded length; needs a source-text post-filter because `[a, b]` sugar produces identical nodes. |
+| `list-prefix-pattern` | same family, same three reasons (`find_prefix_pattern_in_pattern`). |
 | `staircase-of-doom` | counts chain depth and checks whether a terminal branch uses its own payload. |
 | `multi-line-lambda-arg` | layout, not shape. |
 | `nullary-const-fn` | a predicate over the body, not a shape. |
@@ -409,16 +435,22 @@ This makes the prelude a build input to `fmt_bin`, which the justfile already tr
 
 Definition of Ready wants these failing first.
 
-**Matcher** — **done**, `tests/stdlib/compiler/test_lint_pattern.spr`, 54 cases: hole binding;
+**Matcher** — **done**, `tests/stdlib/compiler/test_lint_pattern.spr`, 86 cases: hole binding;
 non-linear holes rejected when the subterms differ; alpha-equivalence over a branch-bound name;
 branch permutation accepted for disjoint constructor patterns; a pattern `Nothing` matching a subject
-`_` in last position, and **rejected** in first position (§5.2b); `Ok(f(v))` not matching `Ok(v)`;
-one case per `ast.Expr` variant so a missed variant fails loudly.
+`_` in last position, and **rejected** in first position (§5.2b); the same two conditions on a tuple
+pattern and a variable pattern (§5.2c); a lambda's parameter annotation and mode; `Ok(f(v))` not
+matching `Ok(v)`; one case per `ast.Expr` variant, and one *discriminating* case per payload those
+reflexive cases cannot see — a variant ignoring its own field is equal to itself either way.
 
-Three of those were checked by mutation rather than trusted for being green: disabling closedness
-fails exactly its two cases, ignoring the last-position rule exactly one, and accepting any repeated
-hole exactly one, with no collateral failures. A suite that passes on its first run has not yet shown
-it can fail.
+Every load-bearing check was mutated rather than trusted for being green. Disabling closedness fails
+exactly its two cases; dropping the last-position condition exactly two; dropping the binds-nothing
+condition exactly two; leaving the tuple arm unguarded exactly two; ignoring a parameter annotation
+exactly four, its mode exactly one, and a `TypeApply` argument exactly one. No collateral failures in
+any. Two mutations paid for themselves immediately: ignoring the `once` half of the mode comparison
+failed **nothing**, which is how the two `once` cases got written, and forcing the other branch of
+`sets_intersect`'s size test failed nothing, which is the proof that branch is a performance choice
+and not a second answer. A suite that passes on its first run has not yet shown it can fail.
 
 **Closedness** (§5.2a): `examples/json_demo.sprout:19`'s shape reported clean; `repl.sprout:665`'s
 shape reported clean; a closed fallback in the same position still reported.
