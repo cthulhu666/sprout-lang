@@ -7,7 +7,7 @@ before it surfaces, and a logic slip in the dedup or the verify cap costs a lost
 finding and never surfaces at all. This extracts the fence and runs it against
 stub agents, so both are caught by `just test-review-script`.
 
-Four behaviours are worth pinning beyond "it parses":
+Seven behaviours are worth pinning beyond "it parses":
 
   1. Dedup must merge one bug reported at two nearby lines, and must NOT merge two
      different bugs that happen to sit nearby. Line-exact keying failed the first;
@@ -21,6 +21,15 @@ Four behaviours are worth pinning beyond "it parses":
      written in different files with nothing between them. These pin the two
      together, and pin that a malformed level falls back rather than running
      zero passes and then recording a review that never happened.
+  5. The verify gate must read CO-LOCATION, not wording. Two lows at one line
+     phrased differently used to score 1 vote each and neither was checked, which
+     is how a real regression reached a reader unverified.
+  6. One file reported at two path spellings is one finding. Keying on the raw
+     path string never merged them, so the line and overlap tests never ran.
+  7. A merge must keep the summary it did not carry. Dropping it made a wrong
+     merge delete a finding, which is what forced OVERLAP_MIN high in the first
+     place — and the raw pre-dedup findings must come back, or no future
+     threshold claim can be checked against anything.
 """
 import json
 import os
@@ -205,6 +214,72 @@ check("an unverified finding still counts as found", 1, out["found"])
 
 out, err = run([[LONE_LOW], [LONE_LOW]] + [[]] * 1)
 check("a corroborated low IS verified", 1, out["confirmed"])
+
+# --- corroboration is counted by LOCATION, not by wording -------------------
+# The gate used to read `votes`, which comes out of the clustering and therefore
+# measures whether two reviewers PHRASED a thing alike. Two lows at one line
+# whose summaries score under OVERLAP_MIN stayed two 1-vote lows and neither was
+# verified — run 1790417756-48747 lost a real regression at
+# ast_to_ir.sprout:7512 exactly that way, and the skeptic was skipped entirely.
+SAME_LINE_A = {"file": "stdlib/compiler/ast_to_ir.sprout", "line": 7512,
+               "severity": "low",
+               "summary": "poison literal embeds a duplicate runtime error prefix",
+               "scenario": "s"}
+SAME_LINE_B = {"file": "stdlib/compiler/ast_to_ir.sprout", "line": 7512,
+               "severity": "low",
+               "summary": "unresolved dictionary thunk message printed twice",
+               "scenario": "s"}
+out, err = run([[SAME_LINE_A], [SAME_LINE_B], []])
+# They stay TWO findings — the wording really is different and merging would
+# discard one — and both are now checked. Only the triage decision changed.
+check("unlike wording still reports separately", 2, out["found"])
+check("both same-line lows are verified", 2, out["confirmed"])
+check("a same-line low pair spawns the skeptic", 1, out["verifyCalls"])
+check("neither is left below the gate", 0, len(field(out, "unverified")))
+
+# --- one file, two path spellings, one finding -------------------------------
+# An agent returns an absolute or a repo-relative path depending on how it
+# navigated. Keying dedup on the raw string never merged the two, so the line and
+# overlap tests were never reached: run 1790183127-58366 returned 5 findings that
+# were really 3. The suffix rule collapses them without needing a repo root.
+ABS_SPELLING = {"file": "/Users/x/repo/stdlib/prelude.sprout", "line": 1812,
+                "severity": "medium",
+                "summary": "builder append copies the chunk pointer array per call",
+                "scenario": "s"}
+REL_SPELLING = dict(ABS_SPELLING, file="stdlib/prelude.sprout")
+out, err = run([[ABS_SPELLING], [REL_SPELLING], []])
+check("two spellings of one file are one finding", 1, out["found"])
+check("merging across spellings sums the votes", 2,
+      field(out, "findings")[0]["votes"] if field(out, "findings") else None)
+check("the canonical relative path is reported", "stdlib/prelude.sprout",
+      field(out, "findings")[0]["file"] if field(out, "findings") else None)
+
+# The suffix rule must not merge two genuinely different files. A shared
+# basename is not a shared path, so these stay apart.
+TWIN_A = {"file": "src/a/mod.rs", "line": 10, "severity": "medium",
+          "summary": "identical wording in two different files here", "scenario": "s"}
+TWIN_B = dict(TWIN_A, file="src/b/mod.rs")
+out, err = run([[TWIN_A], [TWIN_B], []])
+check("a shared basename does not merge different files", 2, out["found"])
+
+# --- merging keeps the wording it does not carry ----------------------------
+# The loser's summary used to be dropped, which made a wrong merge delete a
+# finding outright — the real reason OVERLAP_MIN had to sit high.
+MERGE_LOW = {"file": "runtime/sprout_runtime.c", "line": 100, "severity": "low",
+             "summary": "bounds check missing before the vector element load",
+             "scenario": "s"}
+MERGE_HIGH = dict(MERGE_LOW, severity="high",
+                  summary="bounds check missing before the vector element load here")
+out, err = run([[MERGE_LOW], [MERGE_HIGH], []])
+check("a merge keeps the wording it did not carry", 1,
+      len(field(out, "findings")[0].get("alsoReported", []))
+      if field(out, "findings") else None)
+
+# --- the raw pre-dedup findings come back for the ledger --------------------
+# Post-dedup output cannot say whether a clustering constant is set right, which
+# is why OVERLAP_MIN was carried for three runs on adjectives.
+out, err = run([[SAME_LINE_A], [SAME_LINE_B], []])
+check("every pre-dedup finding is returned as raw", 2, len(field(out, "raw")))
 
 # --- refuted findings are separated, not dropped ----------------------------
 out, err = run([[LONE_HIGH]] + [[]] * 2, verdicts=[{"at": "h.ts:2", "refuted": True}])

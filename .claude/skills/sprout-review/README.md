@@ -80,8 +80,9 @@ that cleared the severity/votes cap. D is only known at runtime, so the bill was
 before the run and reached the mid-teens.
 
 It is now **at most `N + 1`**, at a default `N = 3`: four agents, or three when nothing clears the
-verify gate and the skeptic is skipped. Three changes got there, and only the first is a pure
-reduction:
+verify gate and the skeptic is skipped. That second case is why the gate still exists — a cap cannot
+produce it, because a cap only bounds a batch it has already decided to send. Three changes got
+there, and only the first is a pure reduction:
 
 | change | why |
 |---|---|
@@ -122,7 +123,7 @@ something, and it means less if each of those three ran at whatever `/effort` ha
 that afternoon. A fixed default makes the runs comparable, and `high` is what the skill already did.
 
 **The level moves `N` and the per-agent reasoning effort, and nothing else.** The thresholds it
-does *not* move — `VERIFY_CAP`, `LINE_WINDOW`, `OVERLAP_MIN`, the verify gate — are calibration
+does *not* move — `VERIFY_CAP`, `LINE_WINDOW`, `OVERLAP_MIN` — are calibration
 constants that `BACKLOG.md` already has an open entry to measure. A constant that varies with a
 flag cannot be calibrated, so making them level-dependent would have quietly closed off the
 measurement. The visible cost is that `xhigh` and `max` overrun the verify cap and report most

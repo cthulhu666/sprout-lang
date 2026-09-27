@@ -66,6 +66,9 @@ records the run. `/code-review` leaves nothing on disk, so nothing can say how m
 has had; this one opens and closes a row in `$GIT_DIR/claude-review/runs.tsv` (per-worktree,
 invisible to `git status`) and writes the findings beside it, at the path
 `review_ledger.sh findings <id>` names — a count says a review happened, the file says what it said.
+The raw pre-dedup findings go to `review_ledger.sh raw <id>`: the report is post-dedup, so it cannot
+say whether a clustering constant is set right, and `OVERLAP_MIN` was carried for three runs on
+recollection because the summaries it scored were discarded as soon as they were merged.
 It takes an effort level like `/code-review` does — `/sprout-review [low|medium|high|xhigh|max]
 [<pr#>|<branch>|<path>]`, defaulting to `high` so runs on one branch stay comparable — which buys
 1/2/3/5/8 reviewer passes and is recorded in the ledger beside the counts.

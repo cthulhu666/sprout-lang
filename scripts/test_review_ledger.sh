@@ -94,11 +94,27 @@ check "a traversing id is rejected"     "1" \
 check "a missing id is rejected"       "1" \
   "$(bash "$LEDGER" findings 2>&1 >/dev/null | grep -c 'run id')"
 
+# The RAW pre-dedup findings are a second sibling, and the only record of what the
+# passes said BEFORE clustering. Without it no threshold claim about OVERLAP_MIN can
+# be checked afterwards, which is how 0.5 survived three runs on adjectives.
+rpath=$(bash "$LEDGER" raw "$id1")
+check "raw path names the run"         "1"  "$(printf '%s' "$rpath" | grep -c "raw-$id1.json$")"
+check "raw path is under GIT_DIR"      "1"  "$(printf '%s' "$rpath" | grep -c '/claude-review/')"
+check "raw is not the findings file"   "1"  "$([ "$rpath" != "$fpath" ] && echo 1 || echo 0)"
+echo '[]' > "$rpath"
+check "writing raw keeps count"        "3"  "$(bash "$LEDGER" count)"
+check "a traversing raw id is rejected" "1" \
+  "$(bash "$LEDGER" raw "../../escape" 2>&1 >/dev/null | grep -c 'run id')"
+check "a missing raw id is rejected"   "1" \
+  "$(bash "$LEDGER" raw 2>&1 >/dev/null | grep -c 'run id')"
+
 # Same subdirectory rule as the rest: a session can start anywhere.
 mkdir -p sub2
 cd sub2 || exit 1
 sub_path=$(bash "$LEDGER" findings "$id1")
 check "findings path from a subdir"    "1"  "$([ -n "$sub_path" ] && [ "$sub_path" = "$fpath" ] && echo 1 || echo 0)"
+sub_raw=$(bash "$LEDGER" raw "$id1")
+check "raw path from a subdir"         "1"  "$([ -n "$sub_raw" ] && [ "$sub_raw" = "$rpath" ] && echo 1 || echo 0)"
 cd "$R" || exit 1
 
 # --- the effort column ---------------------------------------------------

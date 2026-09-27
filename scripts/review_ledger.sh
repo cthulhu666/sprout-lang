@@ -11,6 +11,7 @@
 #   review_ledger.sh open            record a run starting; prints the run id
 #   review_ledger.sh done <id> <found> <confirmed> [effort]
 #   review_ledger.sh findings <id>   print the path to write that run's findings to
+#   review_ledger.sh raw <id>        path for that run's RAW pre-dedup findings (JSON)
 #   review_ledger.sh count           completed runs on this branch
 #   review_ledger.sh show            one-line summary, for the status line
 set -uo pipefail
@@ -75,12 +76,12 @@ cmd_done() {
 #
 # The id arrives from a workflow result, so it is not trusted to be a bare token —
 # a `/` or `..` in it would resolve outside the ledger directory.
-cmd_findings() {
-  local dir id
-  id="${1:-}"
+ledger_sibling() {
+  local dir id kind ext what
+  what="${1:?}" ; kind="${2:?}" ; ext="${3:?}" ; id="${4:-}"
   case "$id" in
     "" | *[/\\]* | *..*)
-      echo "review_ledger.sh findings: a run id must be a bare token (got '${id}')" >&2
+      echo "review_ledger.sh ${what}: a run id must be a bare token (got '${id}')" >&2
       return 2 ;;
   esac
   # `--git-dir` answers `.git` at the root and an absolute path from a subdirectory,
@@ -90,8 +91,18 @@ cmd_findings() {
     || { echo "not a git repository" >&2; return 1; }
   dir="$dir/claude-review"
   mkdir -p "$dir" || return 1
-  printf '%s/findings-%s.md\n' "$dir" "$id"
+  printf '%s/%s-%s.%s\n' "$dir" "$kind" "$id" "$ext"
 }
+
+cmd_findings() { ledger_sibling findings findings md "${1:-}"; }
+
+# The RAW per-pass findings, before dedup. The report next to it is post-dedup, so
+# it cannot answer whether a clustering constant is set right: `OVERLAP_MIN` sat at
+# 0.5 for three runs on adjectives ("synonyms, ~0.3 overlap") because the summaries
+# it scored were never written down. Keeping them makes the next threshold claim a
+# measurement instead of a recollection. JSON, not prose — this one is for replaying
+# the clustering, not for reading.
+cmd_raw() { ledger_sibling raw raw json "${1:-}"; }
 
 # A run counts as complete only once, however many `done` rows name it: the id
 # column is what dedupes, so a retry cannot inflate the number.
@@ -135,8 +146,9 @@ case "${1:-show}" in
   open)  cmd_open ;;
   done)  shift; cmd_done "$@" ;;
   findings) shift; cmd_findings "$@" ;;
+  raw) shift; cmd_raw "$@" ;;
   count) cmd_count ;;
   show)  cmd_show ;;
-  *) echo "usage: review_ledger.sh {open|done <id> <found> <confirmed> [effort]|findings <id>|count|show}" >&2
+  *) echo "usage: review_ledger.sh {open|done <id> <found> <confirmed> [effort]|findings <id>|raw <id>|count|show}" >&2
      exit 2 ;;
 esac
