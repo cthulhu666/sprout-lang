@@ -401,3 +401,72 @@ The lesson generalises past that design: collection *frequency* was not what the
 objects cost — sweep *volume* was, and the sweep is proportional to objects, which a
 threshold cannot change. Reach for the floor only with a measurement that separates the
 two, or the tuning looks principled and does nothing.
+
+## 12. Why not a switchable copying / non-moving collector (asked 2026-09-27)
+
+The question: Sprout's intended workloads are a webapp over Postgres, a 3D game, TUI
+apps, a chess engine, and compute-heavy programs with some ML — is it worth offering a
+copying collector and a non-moving one, chosen per workload? **No**, for two independent
+reasons. This section exists so the question does not have to be re-derived.
+
+### 12.1 Those are the workloads §5 already measured
+
+| intended workload | proxy in §5 | cycles | marks | marks/cycle |
+|---|---|---|---|---|
+| webapp + Postgres | http server (real sockets, `wrk`) | 308 | 11,791 | **38** |
+| 3D game | `gc_roots` (game-tick shape) | 5,807 | 407,377 | **70** |
+| chess engine | nqueens (search) | 8,279 | 495,989 | **60** |
+| compute / ML | digit_recognizer | 68 | 305,440 | 4,491 |
+| " | math_transcendental | 1 | 0 | — |
+
+Three of the five mark under a hundred objects per collection, and §5.1 closes it from
+the other side: raising the threshold 64× changes nothing (nqueens 2.60s → 2.65s), and
+*disabling* the collector makes nqueens **slower** (2.50s → 2.72s, RSS 6 MB → 970 MB).
+Where GC's total contribution is at or below zero, no choice of collector improves it.
+A copying nursery would make cost proportional to survivors rather than garbage (§5.2)
+— real, and worth nothing at 38 marks per cycle. The one workload where GC is 59% is the
+self-hosted compiler, which is not on that list, and §5.3 already took roughly half of
+its prize with a one-line default change.
+
+### 12.2 The switch costs more than the replacement, because of the rooting ABI
+
+[compiler-internals.md §Non-moving GC](compiler-internals.md) states the constraint:
+codegen pushes an `i64` into an alloca and never reloads it, so making the GC moving
+requires pairing every root push with a reload after its trigger op — "a sweeping
+rewrite affecting `ast_to_ir.sprout`, `ir_lowering.sprout`, and `ir_rooting.sprout`".
+
+A **runtime** flag cannot straddle that. If the collector *might* move, emitted code must
+reload unconditionally, so every program pays the moving-GC codegen tax — extra loads, no
+holding a heap pointer in a register across an allocation — including the workloads that
+would never enable it. The flag is not free for the side that does not use it.
+
+A **build-time** switch with two codegen modes avoids the tax and duplicates everything
+downstream: golden IR, the smoke shapes, and `bootstrap/compile_driver.ll`, a committed
+seed that would become mode-specific with `just verify-bootstrap-fixed-point` required to
+hold in both. Two compilers, to serve workloads that measure GC at zero.
+
+### 12.3 GHC can offer the flag because its default runs the other way
+
+GHC's default is `--copying-gc` ("uses the generational copying garbage collector for all
+generations"); `--nonmoving-gc` is the opt-in addition, sold on latency rather than
+throughput — copying "can cause long pauses in execution during major garbage
+collections", so the non-moving mode lets oldest-generation collection "proceed
+concurrently with mutation". GHC pays the moving-collector codegen cost unconditionally,
+which is what makes the non-moving mode cheap to bolt on. Sprout would have to adopt
+GHC's baseline to earn GHC's flag: the switch runs downhill there and uphill here.
+
+Note also what GHC's axis is not. It is throughput versus pause time, not
+workload-shaped collector selection.
+
+### 12.4 The axis that would matter is pause, and the mechanism to watch is the sweep
+
+For a game the risk is the worst pause inside a frame, not throughput. The mechanism to
+watch is not that the collector does not move — it is that **sweep pass 1 walks every
+slot in every region**, which §5.3 measured directly (raising the adapt factor gives
+sublinear wins because "fewer collections, but each sweeps a larger heap"). At a large
+heap that is pause proportional to heap size on every collection, independent of how
+little is live, and a copying nursery does not fix it either: the old generation is still
+swept.
+
+This is measurable today with no new instrument — `SPROUT_DEBUG_GC=1` logs `elapsed_us`
+per cycle. §13 does it.
