@@ -135,6 +135,13 @@ data-last is what keeps `vec_get(i, v)` pipeable; a call already carrying its na
 either way. Change one of these to data-last and the module becomes internally inconsistent to match
 a convention it was never under — so match the module you are in.
 
+**A justified deviation is not an exemption.** The two carve-outs above are about *scope* —
+cases the rule never reached. A deviation is different: the rule applies and is knowingly broken,
+which §Process allows against a justification in the PR description. The prelude's
+`guard(condition, err)` is one, argued at its definition in `stdlib/prelude.sprout`. Do not move
+such a function up into the carve-outs to make it look clean — that turns a recorded exception
+into a silent licence, and the next reader cannot tell which they are looking at.
+
 **Pipe-style with `|>` is permitted, not required.** Use it for linear sequences of pure transforms where it reads top-to-bottom better than nested calls:
 
 ```sprout

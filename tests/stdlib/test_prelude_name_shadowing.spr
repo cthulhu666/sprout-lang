@@ -1,8 +1,8 @@
 import stdlib.test (check_eq, run_suite)
 
-# A module defining its own top-level `find`, `any` or `count` must keep
-# working after the prelude gained generic ones — the user's definition wins
-# and the rest of the prelude still resolves.
+# A module defining its own top-level `find`, `any`, `count`, `guard` or
+# `result_from_maybe` must keep working after the prelude gained generic ones —
+# the user's definition wins and the rest of the prelude still resolves.
 #
 # This is not hypothetical. `grimward/combat.sprout` in the one downstream
 # consumer defines `fn find(cs: List Combatant, id: Int) -> Maybe Combatant`,
@@ -39,6 +39,18 @@ fn count(items: List Item) -> Int =
   | Nil -> 0
   | Cons _ rest -> 1 + count(rest)
 
+# `guard` and `result_from_maybe` joined the prelude later. Neither has a known
+# downstream collision: repbit names the Bool half `refuse_unless`, and writes the
+# Maybe half out inline rather than naming it. So unlike the three above, these two
+# are insurance rather than a reproduction — `guard` earns it by being an ordinary
+# English word a request handler is likely to reach for.
+fn guard(level: Int) -> Bool = level > 0
+
+fn result_from_maybe(m: Maybe Item) -> Int =
+  match m with
+  | Nothing -> 0
+  | Just x -> x.id
+
 fn is_odd_id(x: Item) -> Bool = x.id - (x.id / 2) * 2 == 1
 
 fn main() -> Unit !{IO} =
@@ -53,6 +65,13 @@ fn main() -> Unit !{IO} =
       find(items, 9), no_item),
     check_eq("a local `any` shadows the prelude's", any(items), true),
     check_eq("a local `count` shadows the prelude's", count(items), 3),
+    # Both take ONE argument where the prelude's take two, so a resolver that fell
+    # back to the prelude export would fail on arity rather than silently differ.
+    check_eq("a local `guard` shadows the prelude's", guard(1), true),
+    check_eq("the local `guard` on its false branch", guard(0), false),
+    check_eq("a local `result_from_maybe` shadows the prelude's",
+      result_from_maybe(Just (Item(id = 7, label = "seven"))), 7),
+    check_eq("the local `result_from_maybe` on Nothing", result_from_maybe(no_item), 0),
 
     # The unshadowed prelude combinators are unaffected in the same module.
     check_eq("prelude `filter` still resolves here",

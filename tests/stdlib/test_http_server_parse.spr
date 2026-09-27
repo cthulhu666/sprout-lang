@@ -49,6 +49,12 @@ fn main() -> Unit !{IO} =
     # A structurally invalid request (no header terminator) is still a clean Err.
     check_eq("missing terminator is a clean Err",
       describe(parse("GET / HTTP/1.1\r\n")), "Err missing header terminator"),
+    # The two Maybe->Result branches, which route through the prelude's `result_from_maybe`
+    # rather than a private copy. Both were unasserted, so inverting either shipped green.
+    check_eq("a request line that is not three tokens is a clean Err",
+      describe(parse("BOGUSLINE\r\nHost: x\r\n\r\n")), "Err invalid request line"),
+    check_eq("a header line with no colon is a clean Err",
+      describe(parse("GET / HTTP/1.1\r\nnocolonhere\r\n\r\n")), "Err invalid header line"),
 
     # Regression (concurrency review C5): `Content-Length` is denominated in BYTES, but the body
     # was framed with string.length / string.take / string.drop, which are all denominated in
