@@ -553,11 +553,10 @@ fixed: you cannot tune below the live set.
 
 **What that means for a frame budget.** At ~35 ns per live object, a 2 ms slice of a
 16 ms frame is spent at roughly **57,000 live objects**, and the whole frame at roughly
-**460,000**. A game holding a level's geometry and entities resident is in that range,
-and it would be the first Sprout workload that is. Three caveats before acting on it:
-the coefficient is shape-dependent and must be re-measured on the real heap; a copying
-nursery does not help, because the old generation is still swept (§12.4); and the lever
-that does apply is making the sweep proportional to something other than total slots.
+**460,000**. A game holding a level's geometry and entities resident is in that range.
+Two caveats: a copying nursery does not help, because the old generation is still swept
+(§12.4); and the coefficient is shape-dependent and must be re-measured on the real
+heap. **§13.6 did that, and the real heap is 2.3× worse.**
 
 ### 13.4 The tail is not attributable, and this instrument cannot fix that
 
@@ -587,14 +586,72 @@ instrument** — including a reassuring one.
 
 ### 13.5 Verdict on the question that prompted §12
 
-On the workload shapes measured here the collector is not a pause problem: tens of
-microseconds on the game, web and search shapes. The exposure is a single mechanism —
-pause ∝ total slots, floored by the live set — and it arrives with heap size, not with
-workload kind. That is an argument for making the sweep cheaper. It is not an argument
-for a second collector.
+On the **benchmark** shapes in §13.1 the collector is not a pause problem: tens of
+microseconds. The exposure is a single mechanism — pause ∝ total slots, floored by the
+live set — and it arrives with heap size, not with workload kind. That is an argument
+for making the sweep cheaper. It is not an argument for a second collector.
 
-What this does **not** license is "GC pauses are fine". Every number above is a
-minimum-of-five on an idle machine, the median is not the thing a frame misses, and
-§13.4's one real-server datapoint is 6.9 ms. The honest summary is that the median is
-cheap, the mechanism that would make it expensive is known and not yet triggered by any
-Sprout program, and the tail is unmeasured.
+**It is triggered today.** §13.6 measures a real Sprout game at 76,648 live objects and
+a 6.1 ms median collection against a 17.1 ms frame. §13.1's `gc_roots` row is not that
+game — it holds 70 objects live, and reading it as "the game shape" is what made an
+earlier draft of this section conclude the mechanism was untriggered.
+
+### 13.6 The real games, and what they do to §13.1
+
+Everything above is benchmarks. `bench/gc_roots` is described in its own header as "the
+shape of a game simulation tick", and it holds **70 objects live**. The galaxy game in
+the `uncharted-suns` repo holds **77,653**. Measuring the real programs changes this
+section's conclusion, so it is recorded rather than folded in.
+
+**Method.** Each program run under `SPROUT_DEBUG_GC=1`, which the runtime already
+supports; no change to the game repo. The client is
+`just run-gfx game/app.sprout <catalog>` with `SPROUT_GFX_MAX_FRAMES=1200` — what a
+player runs, and what that repo's `perf/baseline.json` measures at 58.45 fps, a
+**17.1 ms frame**. Steady state excludes world seeding and the `atexit` cycle.
+
+| program | live | heap slots | regions | p50 | p90 | min | ns/live |
+|---|---|---|---|---|---|---|---|
+| **galaxy client** (`game/app.sprout`) | **77,653** | 232,990 | 33 | **7,746 µs** | 9,475 | 5,614 | 100 |
+| galaxy server (`game/serve_main.sprout`) | 76,648 | 229,944 | 28 | 6,097 µs | 10,720 | 5,365 | 80 |
+| chess perft (`tests/slow/test_perft_deep.spr`) | 480 | 4,096 | 1 | 34 µs | 78 | 25 | 71 |
+| grimward balance sweep | — | — | — | — | — | — | — |
+
+The client collects roughly once every 17 frames over the run, so about three times a
+second a frame carries an extra 7.7 ms on a 17.1 ms budget. Chess is the opposite and
+confirms the model from the other end: a compute load with a 480-object live set pays
+34 µs, and its per-object cost (71 ns) is in the same band as the game's.
+
+Grimward has no row because `tools/balance_main.sprout` does not compile — `ast_to_ir:
+record 'grimward.ward.Ward' has no field 'depths'`. Its `balance` recipe is disabled in
+that repo for an unrelated reason, so the breakage is pre-existing and not ours to fix;
+it is recorded so the gap in this table is not read as "measured and fine".
+
+**The live set is one data structure.** The per-type census in the same log is flat
+across every steady-state cycle:
+
+```
+types: obj=1804 closure=3 vec=118 map=75640 ref=0 cstr=111(9.2KB) bytes=1 tuple=58
+```
+
+**75,640 of 77,653 live objects — 97.3% — are `map`.** Not churn: the count is identical
+cycle to cycle. So the game's GC pause is not diffuse pressure from a big program, it is
+one resident map, and §13.3's floor is that map's mark-and-walk cost. That narrows the
+fix a long way before any collector work: a structure that large and that static is a
+candidate for being held outside the managed heap, or for a representation with fewer
+objects in it, and either would move the floor further than anything in §13.5's list.
+
+**§13.3's model held; its coefficient did not.** The predicted 2 ms at ~57,000 live came
+from 35 ns/object on `test_gc_age_retain_all`. The real heaps cost 71–100 ns/object, so
+77,653 objects produce 7.7 ms — which is what they measure. The form (pause ∝ live, with
+a floor no knob lowers) transferred across three independent programs; the constant is
+2–3× worse on a real heap, exactly the caveat §13.3 states and an earlier draft of §13.5
+then ignored.
+
+**Two traps worth naming.** First, the captured log holds **two processes**: the build
+step runs the self-hosted compiler, itself a Sprout program with its own collector, so
+the log is the compiler's cycles followed by the program's. Split on the cycle counter
+resetting — a first pass at this did not, and reported the compiler's distribution as the
+game's. Second, the **server is not the client**. They happen to land within 1,000 live
+objects of each other here, which makes the mistake invisible if you only measure one;
+the client is the one with the frame budget, and it is also the one whose log carries the
+type census above.

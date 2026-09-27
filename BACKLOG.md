@@ -2070,15 +2070,16 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   (stop wiping; remove/re-add only the swept regions' entries) is the natural next increment, and
   the per-region touched-class bookkeeping it needs already exists
   (`fl_region_commit`/`fl_region_rollback`).
-- [ ] `P2` **GC pause is proportional to total heap slots and floored by the live set — a
-  game-scale heap would miss frames.** Measured 2026-09-27, `docs/gc-generational-v0.md` §13: 10×
-  the heap gives 10× the pause with the live set flat (~5 ns/slot over three decades), because
-  sweep pass 1 walks every slot. Turning `SPROUT_GC_ADAPT_FACTOR` down 4× leaves a 65k-live
-  workload's p99 flat, so the live set is a floor no knob lowers — ~35 ns per live object on a
-  pointer-chasing shape, spending 2 ms of a 16 ms frame at ~57k live objects. No
-  current workload is close (game, web and search shapes collect in tens of µs), so this is
-  exposure, not a regression. The fix is a sweep proportional to something other than total slots;
-  generation-scoped freelists are the filed prerequisite, and a copying nursery does not help.
+- [ ] `P1` **The galaxy game spends 7.7 ms of a 17.1 ms frame in GC, and 97% of its live set is
+  one map.** Measured 2026-09-27, `docs/gc-generational-v0.md` §13.6: `game/app.sprout` in the
+  uncharted-suns repo holds 77,653 live objects, of which `map=75,640` and is flat cycle to cycle,
+  and it collects about every 17 frames at p50 7,746 µs against that repo's 58 fps baseline. Pause
+  is proportional to total slots and floored by the live set (§13.2–3), so no GC knob lowers it —
+  the floor *is* that map's mark-and-walk cost, 100 ns per live object. Two routes, the first
+  cheaper and outside the collector: shrink the map or move it off the managed heap, or make the
+  sweep proportional to something other than total slots (generation-scoped freelists are the
+  filed prerequisite). A copying nursery does not help; the old generation is still swept. Chess
+  perft is the control that fits the same model from the other end: 480 live, 34 µs.
 - [ ] `P3` **The GC pause tail is unattributable — `SPROUT_DEBUG_GC` cannot separate collector
   work from machine noise.** `docs/gc-generational-v0.md` §13.4: http_log_middleware's slowest
   collections ran 3.1–8.5 ms against a 33 µs median with identical `live`, `swept`, `marked` and
