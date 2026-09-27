@@ -1,5 +1,9 @@
 module stdlib.crypto
 
+# `bit_or` is an extern, so it is callable by bare name only — `bits.bit_or` does not exist.
+import stdlib.bits
+import stdlib.bytes as bytes
+
 export type CryptoError (..) =
   | CryptoInvalidArgument String
   | CryptoUnavailable String
@@ -31,6 +35,28 @@ export fn base64_decode(raw: String) -> Result Base64Error Bytes =
 
 export fn bytes_xor(left: Bytes, right: Bytes) -> Result BytesOpError Bytes =
   crypto_bytes_xor(left, right)
+
+# Equality for key-derived values — an HMAC tag, a session token, a challenge. Reads every
+# byte whichever way the answer goes, so the time taken depends on the length and not on
+# where the values differ. `==` on Bytes (instance Eq Bytes) stops at the first difference
+# and leaks it; use this one wherever a secret is on either side. O(|left|), one temporary.
+#
+# A length mismatch is false, decided before anything is compared, so the length is not
+# hidden — as in Go's subtle.ConstantTimeCompare. Node and Ruby refuse the case outright.
+export fn const_time_eq(left: Bytes, right: Bytes) -> Bool =
+  match crypto_bytes_xor(left, right) with
+  | Err _ -> false
+  | Ok difference -> or_all(difference, 0, bytes.length(difference), 0) == 0
+
+# OR of every byte, so the result is zero only if all of them are, with no branch on any
+# byte's value. `bytes.get` is matched directly to keep the Maybe unboxed (see `byte_at` in
+# stdlib/bytes.sprout). The unreachable arm answers -1, which never compares equal to 0.
+fn or_all(value: Bytes, index: Int, total: Int, acc: Int) -> Int =
+  if index >= total then acc
+  else
+    match bytes.get(value, index) with
+    | Just b -> or_all(value, index + 1, total, bit_or(acc, b))
+    | Nothing -> -1
 
 export fn random_bytes(count: Int) -> Result CryptoError Bytes !{IO} =
   crypto_random_bytes(count)

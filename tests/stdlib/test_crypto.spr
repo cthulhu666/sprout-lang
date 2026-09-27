@@ -1,4 +1,4 @@
-import stdlib.test (check_eq, check_true, run_suite)
+import stdlib.test (check_eq, check_true, check_false, run_suite)
 import stdlib.crypto as crypto
 import stdlib.bytes as bytes
 
@@ -53,6 +53,20 @@ fn xor_length_mismatch_errs() -> Bool =
   | Ok _ -> false
   | Err _ -> true
 
+fn ct_eq(left: String, right: String) -> Bool =
+  crypto.const_time_eq(bytes.from_string(left), bytes.from_string(right))
+
+# A real 32-byte tag against itself: the shape the function exists for, and the one
+# where an off-by-one in the fold would still pass every short-string case above.
+fn tag_matches_itself() -> Bool =
+  let tag = crypto.hmac_sha256(bytes.from_string("key"), bytes.from_string("message"))
+  in crypto.const_time_eq(tag, tag)
+
+fn tag_rejects_one_flipped_bit() -> Bool =
+  let tag = crypto.hmac_sha256(bytes.from_string("key"), bytes.from_string("message"))
+  in let other = crypto.hmac_sha256(bytes.from_string("key"), bytes.from_string("messagf"))
+  in crypto.const_time_eq(tag, other)
+
 fn main() -> Unit !{IO} =
   run_suite("crypto", [
     # --- SHA-256 (RFC 6234 vectors) ---
@@ -81,7 +95,21 @@ fn main() -> Unit !{IO} =
     # --- bytes_xor ---
     # Self-XOR is all zeros, which needs no external vector to be obviously right.
     check_eq("xor of a value with itself is zero", xor_b64("abc", "abc"), "AAAA"),
-    check_true("xor rejects mismatched lengths", xor_length_mismatch_errs())
+    check_true("xor rejects mismatched lengths", xor_length_mismatch_errs()),
+
+    # --- const_time_eq ---
+    # Both ends of the buffer, because a fold that stops early passes the first case
+    # and a fold that starts late passes the second.
+    check_true("const_time_eq accepts identical values", ct_eq("abc", "abc")),
+    check_false("const_time_eq rejects a difference in the first byte", ct_eq("abc", "xbc")),
+    check_false("const_time_eq rejects a difference in the last byte", ct_eq("abc", "abx")),
+    check_true("const_time_eq accepts two empty values", ct_eq("", "")),
+    # A length mismatch is false, not an error: the caller wants "not ours". The length
+    # itself is not hidden, which is what every comparable library also accepts.
+    check_false("const_time_eq rejects a length mismatch", ct_eq("abc", "abcd")),
+    check_false("const_time_eq rejects a prefix", ct_eq("abc", "ab")),
+    check_true("const_time_eq accepts an hmac tag against itself", tag_matches_itself()),
+    check_false("const_time_eq rejects a tag from a different message", tag_rejects_one_flipped_bit())
   ])
 
 # Not covered here: crypto.random_bytes, which is !{IO} and so cannot appear in the
