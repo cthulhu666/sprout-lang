@@ -1,0 +1,85 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.scram as scram
+
+# `verify_server_final` is the client's check of the SERVER's proof — the mutual-auth
+# half of SCRAM — and had no test. A verifier that always answered true would let a
+# client accept a forged server, and nothing here would have noticed.
+#
+# The anchor is the SCRAM-SHA-256 exchange in RFC 7677 §3 (user "user", password
+# "pencil"), so the expected proof and signature are quoted, not computed by the code
+# under test. `client_proof` was already exercised by test_scram_pbkdf2_green.spr, but
+# only for "did not return Err" — its VALUE is asserted here for the first time, which
+# is what pins the mechanism to SHA-256 rather than to whatever it currently computes.
+
+let server_first_raw: String =
+  "r=rOprNGfwEbeRWgbNEkqO%hvYDpWUa2RaTCAfuxFIlj)hNlF$k0,s=W22ZaJ0SNY7soEsUEjb6gQ==,i=4096"
+
+# RFC 7677 §3, the base64 fields of the last two lines of the exchange.
+let rfc_client_proof: String = "dHzbZapWIk4jUhN+Ute9ytag9zjfMHgsqmmiz7AndVQ="
+let rfc_server_signature: String = "6rriTRBi23WpRR/wtup+mMhUZUn/dB5nLTJRsjl95G4="
+
+let client_bare: String =
+  scram.client_first_bare("user", "rOprNGfwEbeRWgbNEkqO")
+
+fn rendered_text(r: Result scram.ScramError String) -> String =
+  match r with
+  | Ok value -> value
+  | Err err -> `err:${scram.error_message(err)}`
+
+fn rendered_bool(r: Result scram.ScramError Bool) -> String =
+  match r with
+  | Ok value -> to_string(value)
+  | Err err -> `err:${scram.error_message(err)}`
+
+fn with_server(f: (scram.ScramServerFirst) -> String) -> String =
+  match scram.parse_server_first(server_first_raw) with
+  | Err err -> `err:${scram.error_message(err)}`
+  | Ok server -> f(server)
+
+fn proof() -> String =
+  with_server(\server -> rendered_text(scram.client_proof("pencil", client_bare, server, scram.no_channel_binding)))
+
+fn signature() -> String =
+  with_server(\server -> rendered_text(scram.server_signature("pencil", client_bare, server, scram.no_channel_binding)))
+
+# The `raw` argument is a whole server-final message, as it arrives on the wire.
+fn verify(raw: String) -> String =
+  with_server(\server -> rendered_bool(scram.verify_server_final("pencil", client_bare, server, scram.no_channel_binding, raw)))
+
+# A client-first-bare with no `r=` attribute: the signature cannot be computed at all,
+# so the failure must surface instead of being read as a mismatched verifier.
+fn verify_without_client_nonce(raw: String) -> String =
+  with_server(\server -> rendered_bool(scram.verify_server_final("pencil", "n=user", server, scram.no_channel_binding, raw)))
+
+fn main() -> Unit !{IO} =
+  run_suite("scram server-final verification", [
+    # --- the RFC vector, so the expectations below are not self-referential ---
+    check_eq("client proof matches RFC 7677 §3", proof(), rfc_client_proof),
+    check_eq("server signature matches RFC 7677 §3", signature(), rfc_server_signature),
+    # The two must differ: they are keyed by "Client Key" and "Server Key" respectively,
+    # and a mix-up would make a client accept its own proof echoed back at it.
+    check_eq("server signature is not the client proof", signature() == proof(), false),
+
+    # --- verify_server_final: the mutual-auth decision ---
+    check_eq("genuine server signature verifies", verify(`v=${rfc_server_signature}`), "true"),
+    # The one case a broken check would get wrong silently.
+    check_eq("forged server signature is rejected", verify("v=6rriTRBi23WpRR/wtup+mMhUZUn/dB5nLTJRsjl95G5="), "false"),
+    check_eq("truncated server signature is rejected", verify("v=6rriTRBi23WpRR"), "false"),
+    check_eq("empty verifier is rejected", verify("v="), "false"),
+    # The client's own proof is not a valid server signature, however well-formed.
+    check_eq("client proof is not accepted as a server signature", verify(`v=${rfc_client_proof}`), "false"),
+
+    # --- the message is malformed or is itself an error, before any crypto runs ---
+    check_eq("server error attribute surfaces", verify("e=other-error"),
+      "err:SCRAM server-final error: other-error"),
+    # An `e=` wins over a `v=` in the same message: never verify against an error reply.
+    check_eq("error attribute beats a verifier", verify(`e=unknown-user,v=${rfc_server_signature}`),
+      "err:SCRAM server-final error: unknown-user"),
+    check_eq("message with neither v nor e is an error", verify("r=abc,s=def"),
+      "err:SCRAM server-final message missing verifier"),
+
+    # --- a failure computing the expected signature must not read as "forged" ---
+    check_eq("unusable client-first-bare is an error, not a mismatch",
+      verify_without_client_nonce(`v=${rfc_server_signature}`),
+      "err:SCRAM client-first-bare message missing nonce")
+  ])

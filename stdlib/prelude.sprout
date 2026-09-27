@@ -1511,8 +1511,8 @@ export fn result_pipe_error(f: e -> f_err, r: Result e a) -> Result f_err a =
 
 # The two ways into a Result the family above could not spell. `result_with_default` unwraps
 # a Result to a value; these go the other way, from a Maybe or a Bool, so a `do` block can
-# bind a step whose only content is which error to name. Both O(1). `result_from_maybe`
-# matches Elm's `Result.fromMaybe` in name, argument order and body.
+# bind a step whose only content is which error to name. Both O(1), and both build `err`
+# even on success, so keep it cheap. `result_from_maybe` mirrors Elm's `Result.fromMaybe`.
 export fn result_from_maybe(err: e, value: Maybe a) -> Result e a =
   match value with
   | Nothing -> Err(err)
