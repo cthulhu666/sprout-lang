@@ -2080,6 +2080,15 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   sweep proportional to something other than total slots (generation-scoped freelists are the
   filed prerequisite). A copying nursery does not help; the old generation is still swept. Chess
   perft is the control that fits the same model from the other end: 480 live, 34 µs.
+- [ ] `P3` **A program cannot place a collection in its own frame — `sprout_gc_collect` is
+  `static`.** A game with a 17.1 ms budget and a 7.7 ms pause would rather take it after present
+  than wherever the allocation threshold lands, and OCaml exposes exactly this as
+  `Gc.major_slice n`. Useful before any incremental work, since it costs nothing and needs no
+  barrier. **Requires approval and is NOT approved**: exposing it is a new builtin (AGENTS.md
+  "Builtin vs Stdlib" 4–6), justified on the impossible-in-Sprout ground rather than performance.
+  Design, prior art and the reason incremental collection is *not* recommended yet:
+  `docs/gc-frame-budget-v0.md`, which also splits the game's pause ~65% mark / ~35% sweep and
+  notes that a resumable sweep needs the generation-scoped freelists entry above.
 - [ ] `P3` **The GC pause tail is unattributable — `SPROUT_DEBUG_GC` cannot separate collector
   work from machine noise.** `docs/gc-generational-v0.md` §13.4: http_log_middleware's slowest
   collections ran 3.1–8.5 ms against a 33 µs median with identical `live`, `swept`, `marked` and

@@ -8,7 +8,9 @@ change is proposed here. Normative GC behaviour remains
 separate question — why the collector is not switchable per workload — and §13 measures
 pause rather than throughput**, which is the axis §12 identifies and the only one where
 the intended workloads have any exposure. Size-class reuse and coalescing are a third
-question, in [gc-size-classes-v0.md](gc-size-classes-v0.md).
+question, in [gc-size-classes-v0.md](gc-size-classes-v0.md). **Whether the pause §13
+measures can be spread across frames instead of removed** is a fourth, in
+[gc-frame-budget-v0.md](gc-frame-budget-v0.md).
 
 ## 1. Problem statement
 
@@ -646,6 +648,11 @@ from 35 ns/object on `test_gc_age_retain_all`. The real heaps cost 71–100 ns/o
 a floor no knob lowers) transferred across three independent programs; the constant is
 2–3× worse on a real heap, exactly the caveat §13.3 states and an earlier draft of §13.5
 then ignored.
+
+**The other reading of this number** — spread the pause across frames rather than remove
+it — is worked through in [gc-frame-budget-v0.md](gc-frame-budget-v0.md), which also
+decomposes the 7.7 ms into roughly 65% mark and 35% sweep using the adapt factor. Its
+recommendation is the same as this section's: shrink the map first.
 
 **Two traps worth naming.** First, the captured log holds **two processes**: the build
 step runs the self-hosted compiler, itself a Sprout program with its own collector, so
