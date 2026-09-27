@@ -1,8 +1,15 @@
 # Lint rules as patterns (v0)
 
-Status: **DESIGN, nothing implemented.** Experimental; no change to `docs/spec-v0.md`, which does
-not describe the linter. Supersedes the "config file for per-rule enable/disable" line in
-`BACKLOG.md`'s `Formatter/linter beyond the baseline` entry — that entry points here.
+Status: **piece A (§4A, the matcher) implemented; B and C are design.** Experimental; no change to
+`docs/spec-v0.md`, which does not describe the linter. Supersedes the "config file for per-rule
+enable/disable" line in `BACKLOG.md`'s `Formatter/linter beyond the baseline` entry — that entry
+points here.
+
+Revision 3. Building §4A corrected §5.2c: a subject wildcard standing in for a pattern constructor
+needs the constructor to *bind nothing*, which revision 2 left out, and stating only the position
+rule admits `| Just u -> Ok(u)` against `| _ -> 0`. §12's matcher list is now
+`tests/stdlib/compiler/test_lint_pattern.spr`, which also turned §5.2a's four corpus
+counterexamples from prose into assertions.
 
 Revision 2. An adversarial review of revision 1 found the matching half of the design sound and the
 **substitution** half missing, which is where the two defects that would have shipped both live
@@ -109,7 +116,10 @@ hole bindings. It must also provide, because nothing else in the compiler does:
 - structural equality over `ast.Expr` (the zero-hole case). `ast.sprout` has none; the nearest
   existing thing is `cse_census.expr_key` (`cse_census.sprout:254`), which keys over `typed_ast`
   rather than `ast` and so cannot be reused;
-- **free variables of an `ast.Expr`**, which §5.2's closedness check needs.
+- **free variables of an `ast.Expr`**, which §5.2's closedness check needs. Also absent over `ast`,
+  but `dce.is_free` (`dce.sprout:144`) and `ast_to_ir.compute_free_vars` (`ast_to_ir.sprout:36`) are
+  close structural templates — both over `typed_ast`, and `dce`'s binder half already works on
+  `ast.Pattern`.
 
 **B. The combinator rule** — a list of prelude function names, with patterns derived at build time
 (§10).
@@ -209,11 +219,21 @@ constructor only in last position.** The compiler rejects that inverted subject 
 (`unreachable_check`, `infer.sprout:4990`), but lint runs on a parse alone
 (`lint_rules.sprout:1160-1170`), so the engine cannot rely on that.
 
-**(c) Wildcard direction.** Both directions need stating, and they are not symmetric. A *pattern*
-`Nothing` matching a *subject* `_` is admissible (in an exhaustive two-branch match whose other arm
-is `Just`, `_` is `Nothing`) and is what catches the `let..else` spelling. A *pattern* `_` matching a
-*subject* variable pattern is admissible only under (a) — that is exactly the `Err _` vs `Err err`
-case above.
+**(c) Wildcard direction.** Both directions need stating, and they are not symmetric.
+
+A *pattern* constructor matching a *subject* `_` carries **two** conditions, not one. It must be in
+last position, per (b) — and the constructor must **bind nothing**. `Nothing` qualifies. `Just u`
+does not: `u` would have no counterpart on the subject side, while the pattern's body references it,
+so there is nothing for that body to match against. Stating only the position rule admits
+`| Just u -> Ok(u)` against `| _ -> 0`, which is not the same expression at all. Together the two
+conditions are what catches the `let..else` spelling, whose desugaring puts a wildcard in the second
+branch (`parser.sprout:1032-1037`).
+
+A *pattern* `_` matching a *subject* variable pattern is admissible **unconditionally** at the
+pairing step, because a pattern wildcard binds nothing and so cannot leave a binder unpaired.
+Whatever the subject binds is caught by (a) instead — that is exactly the `Err _` vs `Err err` case
+above, and keeping the two checks separate is what lets that case be *matched* and then *rejected
+for the stated reason* rather than silently failing to match.
 
 ### 5.3 Which bodies are derivable
 
@@ -389,11 +409,16 @@ This makes the prelude a build input to `fmt_bin`, which the justfile already tr
 
 Definition of Ready wants these failing first.
 
-**Matcher** (`tests/stdlib/compiler/test_lint_pattern.spr`, new): hole binding; non-linear holes
-rejected when the subterms differ; alpha-equivalence over a branch-bound name; branch permutation
-accepted for disjoint constructor patterns; a pattern `Nothing` matching a subject `_` in last
-position, and **rejected** in first position (§5.2b); `Ok(f(v))` not matching `Ok(v)`; one case per
-`ast.Expr` variant so a missed variant fails loudly.
+**Matcher** — **done**, `tests/stdlib/compiler/test_lint_pattern.spr`, 54 cases: hole binding;
+non-linear holes rejected when the subterms differ; alpha-equivalence over a branch-bound name;
+branch permutation accepted for disjoint constructor patterns; a pattern `Nothing` matching a subject
+`_` in last position, and **rejected** in first position (§5.2b); `Ok(f(v))` not matching `Ok(v)`;
+one case per `ast.Expr` variant so a missed variant fails loudly.
+
+Three of those were checked by mutation rather than trusted for being green: disabling closedness
+fails exactly its two cases, ignoring the last-position rule exactly one, and accepting any repeated
+hole exactly one, with no collateral failures. A suite that passes on its first run has not yet shown
+it can fail.
 
 **Closedness** (§5.2a): `examples/json_demo.sprout:19`'s shape reported clean; `repl.sprout:665`'s
 shape reported clean; a closed fallback in the same position still reported.
