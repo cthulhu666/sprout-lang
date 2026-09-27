@@ -88,6 +88,7 @@ parses but is deprecated and reported by the linter as `deprecated-brace-body`.
 
 - **[Language spec (v0, normative)](./docs/spec-v0.md)** — the stable core.
 - **[Idiomatic Sprout](./docs/idiomatic-sprout.md)** — how to write clean, flat, idiomatic code.
+- [Parameterized `wrap`](./docs/wrap-type-params-v0.md) — units, typed handles, protocol state, and when a parameter is the wrong choice.
 - [Language design](./docs/language-design-v0.md) · [design best practices](./docs/language-design-best-practices.md)
 - [Style guide](./docs/style-guide-v0.md) · [stdlib/compiler guidelines](./docs/guidelines.md)
 - [HM typechecker guide](./docs/hm-typechecker.md) · [effect enforcement](./docs/effect-enforcement-v0.md) · [records](./docs/records-v0.md)

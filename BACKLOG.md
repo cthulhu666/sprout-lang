@@ -1380,6 +1380,17 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   Same mechanism as the numeric-defaulting item in §1. **Suggested rule:** reject or warn on a
   lowercase annotation matching a declared type case-insensitively; a blanket "type variables must
   be declared" rule is the Rust answer, and much larger.
+- [ ] `P2` **An UPPERCASE name in a type declaration's parameter list becomes a type VARIABLE and
+  shadows the type it names.** `wrap Metres Int = Int` means `wrap Metres a = a` and compiles — a
+  value built that way holds a String, confirmed by running it. `wrap W String = List String` makes
+  `W Int` a `List Int`, the real `String` unreachable inside the declaration. Spec §5.6 is explicit
+  that a parameter is "a lowercase type variable", so this is an implementation divergence, not a
+  design choice. One shared helper is responsible — `collect_ident_list` in `parser.sprout` matches
+  any identifier — so `type`, record, `class`, `wrap` and `type alias` all inherit it and one case
+  test fixes all five. Narrower than the lowercase-annotation item above: rejecting a leading
+  uppercase in a parameter list needs no name resolution. Zero occurrences in `stdlib/`, `ide/`,
+  `examples/` or `tests/` over every form and parameter position, so this breaks nothing here.
+
 - [ ] `P2` **A `wrap` type in a user-defined function's annotation does not canonicalize across
   modules.** `fn f(v: linalg.Vec3)` in user code sees `linalg.Vec3` as distinct from the value's
   `stdlib.linalg.Vec3` (Call type mismatch). Values flow fine into the defining module's own

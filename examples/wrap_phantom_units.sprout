@@ -1,0 +1,81 @@
+module examples.wrap_phantom_units
+
+# A `wrap` parameter the right-hand side NEVER mentions is *phantom*: erased, so it
+# indexes nothing stored and costs nothing (spec §5.6.1). `Angle Deg` and
+# `Angle Rad` are both a bare `Double` in the emitted IR, and the typechecker still
+# refuses to mix them.
+#
+# Reach for this whenever one number circulates in several units. The usual
+# alternative is to put the unit in the parameter name — `fovy_deg`, `radius_km` —
+# which works exactly as long as every caller reads the name.
+
+import stdlib.math as math
+import stdlib.terminal (term_write)
+
+wrap Angle u = Double
+
+type Deg = | Deg
+type Rad = | Rad
+
+# The bare `Angle` constructor is polymorphic in `u`, so it fits either unit. These
+# smart constructors are what pin it, and in a library they would be the only way
+# in: `export wrap Angle u = Double`, without `(..)`.
+fn degrees(d: Double) -> Angle Deg = Angle(d)
+
+fn radians(r: Double) -> Angle Rad = Angle(r)
+
+fn to_radians(a: Angle Deg) -> Angle Rad =
+  match a with
+  | Angle d -> Angle(math.radians(d))
+
+# Trigonometry is defined on radians only, and now says so in its type.
+fn sine(a: Angle Rad) -> Double =
+  match a with
+  | Angle r -> math.sin(r)
+
+# Generic over the unit. One `u` in both parameters is what permits degrees plus
+# degrees while rejecting degrees plus radians.
+fn add(left: Angle u, right: Angle u) -> Angle u =
+  let Angle a = left
+      Angle b = right
+  in Angle(a + b)
+
+fn angle_value(a: Angle u) -> Double =
+  match a with
+  | Angle v -> v
+
+# The same treatment for distance, where a unit ladder is where the bookkeeping
+# stops fitting in a reader's head.
+wrap Length u = Double
+
+type Km = | Km
+type Au = | Au
+
+let km_per_au: Double = 149597870.7
+
+fn km(v: Double) -> Length Km = Length(v)
+
+fn au(v: Double) -> Length Au = Length(v)
+
+fn to_km(l: Length Au) -> Length Km =
+  match l with
+  | Length a -> Length(a * km_per_au)
+
+fn length_value(l: Length u) -> Double =
+  match l with
+  | Length v -> v
+
+fn main() -> Unit !{IO} =
+  do
+    let latitude = degrees(60.0)
+    let tilt = degrees(23.44)
+
+    term_write(`sin 60deg        : ${to_string(sine(to_radians(latitude)))}\n`)
+    term_write(`60deg + 23.44deg : ${to_string(angle_value(add(latitude, tilt)))}\n`)
+    term_write(`1 AU in km       : ${to_string(length_value(to_km(au(1.0))))}\n`)
+
+    # Each of these is rejected at compile time, and each is a real bug class:
+    #   sine(latitude)              -- Type mismatch: Rad vs Deg
+    #   add(latitude, radians(1.0)) -- Type mismatch: Deg vs Rad
+    #   to_km(km(1.0))              -- Type mismatch: Au vs Km
+    term_write("all three mistakes above are rejected at compile time\n")

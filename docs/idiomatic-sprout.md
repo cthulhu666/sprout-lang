@@ -537,8 +537,8 @@ representation and costs nothing at runtime:
 
 ```sprout
 wrap Tagged u = Int                                     # both are an Int underneath
-type Metres = | MetresTag
-type Feet = | FeetTag
+type Metres = | Metres
+type Feet = | Feet
 
 fn metres(n: Int) -> Tagged Metres = Tagged(n)          # lowers to `ret i64`
 fn feet(n: Int) -> Tagged Feet = Tagged(n)              # passing one for the other
@@ -546,9 +546,22 @@ fn feet(n: Int) -> Tagged Feet = Tagged(n)              # passing one for the ot
 ```
 
 Reach for this when the distinction is an *index* — units, which resource a
-handle names, which state a protocol is in — rather than a payload. Note that
-`deriving` constrains every parameter including a phantom one, so an index over
-a type with no `Eq` needs an explicit `instance`.
+handle names, which state a protocol is in — rather than a payload. Reach for it
+early: an index costs nothing at runtime, and retrofitting one onto code that has
+been passing bare `Double`s around means visiting every call site.
+
+The rule that makes it work: `Tagged` is `forall u. Int -> Tagged u`, so the bare
+constructor fits *any* index and `Tagged(5)` proves nothing. Smart constructors
+being the only way in is the guarantee — which means leaving `(..)` off the export,
+as with `Port` above. With `(..)`, the index is a label again.
+
+A parameter the right-hand side *does* mention is stored, and makes the wrap
+generic: `wrap Sorted a = Vec a`, built only by a sorting function, is how "this
+vector is ascending" stops being a comment. Four worked patterns — invariants,
+units, typed handles, protocol state — are in `examples/wrap_*.sprout`, and
+`docs/wrap-type-params-v0.md` covers when a parameterized wrap is the wrong choice
+(a closed set of kinds is better served by separate wraps) and the limits, including
+`deriving` constraining phantom parameters.
 
 ## Hide a type behind an interface with existentials
 

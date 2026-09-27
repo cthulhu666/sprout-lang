@@ -1,0 +1,84 @@
+module examples.wrap_sorted_vec
+
+# A `wrap` parameter that the right-hand side MENTIONS is *stored*: it makes the
+# wrap generic (spec §5.6.1). `Sorted a` is a distinct type over `Vec a`, so a
+# sorted vector is no longer interchangeable with an arbitrary one — and because
+# only `sort_of` and `merge` build one, and both produce ascending output, "is
+# ascending" becomes an invariant the type carries rather than a comment every
+# caller has to honour.
+#
+# The payoff is `smallest` / `largest` / `position_of`: on an arbitrary `Vec` the
+# first two need a scan and the third is wrong, and here all three are correct by
+# construction. A library would export this wrap without `(..)` so callers cannot
+# forge one out of unsorted input; inside one module the constructor is in scope,
+# so the discipline is that only `sort_of` and `merge` use it.
+
+import stdlib.terminal (term_write)
+
+wrap Sorted a = Vec a
+
+# One of the two entry points; `merge` is the other.
+fn sort_of(xs: Vec a) -> Sorted a where Ord a = Sorted(vec_sort(xs))
+
+fn as_vec(s: Sorted a) -> Vec a =
+  match s with
+  | Sorted v -> v
+
+# Two index reads rather than a scan, and sound only because of the argument type.
+fn smallest(s: Sorted a) -> Maybe a = vec_get(0, as_vec(s))
+
+fn largest(s: Sorted a) -> Maybe a =
+  vec_get(vec_length(v) - 1, v)
+where
+  v = as_vec(s)
+
+# Merging two ascending runs yields an ascending run, so this may rewrap directly
+# instead of sorting again.
+fn merge(left: Sorted a, right: Sorted a) -> Sorted a where Ord a =
+  Sorted(vec_from_list(merge_lists(xs, ys)))
+where
+  xs = vec_to_list(as_vec(left))
+  ys = vec_to_list(as_vec(right))
+
+fn merge_lists(xs: List a, ys: List a) -> List a where Ord a =
+  match xs with
+  | [] -> ys
+  | [xh | xt] ->
+    match ys with
+    | [] -> xs
+    | [yh | yt] ->
+      if ord_lte(xh, yh) then Cons(xh, merge_lists(xt, ys))
+      else Cons(yh, merge_lists(xs, yt))
+
+fn position_of(s: Sorted a, target: a) -> Maybe Int where Ord a, Eq a =
+  let v = as_vec(s)
+  in bsearch(v, target, 0, vec_length(v) - 1)
+
+fn bsearch(v: Vec a, target: a, lo: Int, hi: Int) -> Maybe Int where Ord a, Eq a =
+  if lo > hi then Nothing
+  else
+    let mid = lo + (hi - lo) / 2
+    in match vec_get(mid, v) with
+       | Nothing -> Nothing
+       | Just x ->
+         if x == target then Just(mid)
+         else if ord_lt(x, target) then bsearch(v, target, mid + 1, hi)
+         else bsearch(v, target, lo, mid - 1)
+
+fn show_pos(m: Maybe Int) -> String =
+  match m with
+  | Just n -> to_string(n)
+  | Nothing -> "absent"
+
+fn main() -> Unit !{IO} =
+  do
+    let primes = sort_of([7, 2, 5, 3])
+    let evens = sort_of([8, 4, 6])
+    let both = merge(primes, evens)
+
+    term_write(`primes    : ${to_string(vec_to_list(as_vec(primes)))}\n`)
+    term_write(`merged    : ${to_string(vec_to_list(as_vec(both)))}\n`)
+    term_write(`smallest  : ${to_string(smallest(both))}\n`)
+    term_write(`largest   : ${to_string(largest(both))}\n`)
+    term_write(`index of 6: ${show_pos(position_of(both, 6))}\n`)
+    term_write(`index of 9: ${show_pos(position_of(both, 9))}\n`)

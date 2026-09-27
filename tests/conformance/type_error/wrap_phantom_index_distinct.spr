@@ -7,9 +7,9 @@ import stdlib.terminal as terminal
 
 wrap Tagged u = Int
 
-type Metres = | MetresTag
+type Metres = | Metres
 
-type Feet = | FeetTag
+type Feet = | Feet
 
 fn metres(n: Int) -> Tagged Metres = Tagged(n)
 

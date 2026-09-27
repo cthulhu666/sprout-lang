@@ -1,0 +1,58 @@
+module examples.wrap_session_states
+
+# A phantom parameter can carry a resource's STATE, which turns a misuse of
+# ordering into a compile error. `Session LoggedOut` and `Session LoggedIn` are the
+# same `Int` at runtime (spec §5.6.1) — the state exists only in the type, and every
+# transition is an ordinary function whose signature names the states it joins.
+#
+# It is a BOUNDARY guarantee, so a library writes `export wrap Session s = Int`
+# WITHOUT `(..)`: in here `Session(0)` is a `Session LoggedIn` like any other index.
+# Nor does it stop a caller reusing a stale value after a transition — for that add
+# a `linear` type (spec §5.8), which makes the old handle unusable where the index
+# makes the wrong OPERATION unusable.
+
+import stdlib.terminal (term_write)
+
+wrap Session s = Int
+
+type LoggedOut = | LoggedOut
+type LoggedIn = | LoggedIn
+
+fn open_session(id: Int) -> Session LoggedOut = Session(id)
+
+fn session_id(s: Session state) -> Int =
+  match s with
+  | Session id -> id
+
+# A transition that can fail returns `Maybe`: a wrong password leaves the session
+# where it was, so a caller OUTSIDE this module has no other way to reach a
+# `Session LoggedIn` than through the `Just`.
+fn log_in(s: Session LoggedOut, password: String) -> Maybe (Session LoggedIn) =
+  if password == "hunter2" then Just(Session(session_id(s))) else Nothing
+
+fn log_out(s: Session LoggedIn) -> Session LoggedOut = Session(session_id(s))
+
+# Only reachable with a logged-in session, enforced by the typechecker rather than
+# by a runtime check that returns an error nobody handles.
+fn read_secret(s: Session LoggedIn) -> String = `secret for session ${to_string(session_id(s))}`
+
+fn describe(s: Session LoggedOut) -> String = `session ${to_string(session_id(s))} is logged out`
+
+fn main() -> Unit !{IO} =
+  do
+    let fresh = open_session(42)
+    term_write(describe(fresh) ++ "\n")
+
+    let after = log_in(fresh, "hunter2")
+    term_write(attempt(after) ++ "\n")
+
+    term_write(attempt(log_in(open_session(7), "wrong")) ++ "\n")
+
+    # Rejected at compile time, which is the whole point:
+    #   read_secret(fresh)  -- Type mismatch: LoggedIn vs LoggedOut
+    term_write("a logged-out session cannot reach read_secret\n")
+
+fn attempt(s: Maybe (Session LoggedIn)) -> String =
+  match s with
+  | Just live -> read_secret(live) ++ ", then " ++ describe(log_out(live))
+  | Nothing -> "login refused"

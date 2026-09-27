@@ -19,8 +19,8 @@ wrap Tagged u = Int
 # Two parameters, only the second stored.
 wrap Pair k v = List v
 
-type Meters = | MetersTag
-type Feet = | FeetTag
+type Meters = | Meters
+type Feet = | Feet
 
 fn unbox(b: Boxed a) -> List a =
   match b with | Boxed xs -> xs
