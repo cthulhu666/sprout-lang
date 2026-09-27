@@ -34,12 +34,6 @@ fn ren_bind(lname: String, rname: String, r: Ren) -> Ren =
       right = dict_set(rname, r.next, r.right),
       next = r.next + 1)
 
-# A binder present on the left with no counterpart on the right. Any later use of
-# `lname` then fails `ren_same`, which is what should happen when the pattern
-# binds a name the subject does not.
-fn ren_bind_left(lname: String, r: Ren) -> Ren =
-  Ren(left = dict_set(lname, r.next, r.left), right = r.right, next = r.next + 1)
-
 fn ren_bind_right(rname: String, r: Ren) -> Ren =
   Ren(left = r.left, right = dict_set(rname, r.next, r.right), next = r.next + 1)
 
@@ -108,6 +102,79 @@ fn param_names(params: List ast.Param) -> List String =
   match params with
   | [] -> []
   | [ast.Param n _ _ | rest] -> Cons(n, param_names(rest))
+
+# Pair two parameter lists, or refuse. A parameter's name is a binder and renames
+# freely; its ANNOTATION and its mode are shape, because substituting one lambda
+# for the other would substitute one annotation for the other.
+fn bind_params(ps: List ast.Param, ss: List ast.Param, r: Ren) -> Maybe Ren =
+  match ps with
+  | [] -> (match ss with | [] -> Just(r) | _ -> Nothing)
+  | [ast.Param pn pa pm | prest] ->
+      match ss with
+      | [] -> Nothing
+      | [ast.Param sn sa sm | srest] ->
+          if ! annotation_equal (pa, sa) || ! mode_equal (pm, sm) then Nothing
+          else bind_params(prest, srest, ren_bind(pn, sn, r))
+
+# Compared by OWNERSHIP, not by constructor: ModeDefault and ModeConsuming are one
+# mode, and only one of them survives a round trip (ast.mode_of_flags), so reading
+# them as different would stop a rebuilt annotation matching its own source.
+fn mode_equal(a: ast.ParamMode, b: ast.ParamMode) -> Bool =
+  ast.mode_is_borrowing(a) == ast.mode_is_borrowing(b) &&
+  ast.mode_is_once(a) == ast.mode_is_once(b)
+
+fn annotation_equal(a: Maybe ast.TypeExpr, b: Maybe ast.TypeExpr) -> Bool =
+  match a with
+  | Nothing -> (match b with | Nothing -> true | _ -> false)
+  | Just at -> (match b with | Just bt -> type_expr_equal(at, bt) | Nothing -> false)
+
+# Structural equality on a surface type expression. `iface_codec.encode_ast_typeexpr`
+# could answer this by comparing wire strings, but that is a versioned format (v10
+# reshaped TypeArrow) and it allocates a string pair to return a Bool.
+# O(n) in type-expression node count.
+fn type_expr_equal(a: ast.TypeExpr, b: ast.TypeExpr) -> Bool =
+  match a with
+  | ast.TypeName an -> (match b with | ast.TypeName bn -> an == bn | _ -> false)
+  | ast.TypeApply ab aa ->
+      (match b with
+       | ast.TypeApply bb ba -> type_expr_equal(ab, bb) && type_expr_equal(aa, ba)
+       | _ -> false)
+  | ast.TypeArrow ap ar aeff am ->
+      (match b with
+       | ast.TypeArrow bp br beff bm ->
+           type_expr_equal(ap, bp) && type_expr_equal(ar, br) &&
+           effects_equal(aeff, beff) && mode_equal(am, bm)
+       | _ -> false)
+  | ast.TypeThunk ar aeff ->
+      (match b with
+       | ast.TypeThunk br beff -> type_expr_equal(ar, br) && effects_equal(aeff, beff)
+       | _ -> false)
+  | ast.TypeEffect ai al ->
+      (match b with
+       | ast.TypeEffect bi bl -> type_expr_equal(ai, bi) && labels_equal(al, bl)
+       | _ -> false)
+  | ast.TupleType aps ->
+      (match b with | ast.TupleType bps -> type_exprs_equal(aps, bps) | _ -> false)
+
+fn type_exprs_equal(as_: List ast.TypeExpr, bs: List ast.TypeExpr) -> Bool =
+  match as_ with
+  | [] -> (match bs with | [] -> true | _ -> false)
+  | [a | arest] ->
+      match bs with
+      | [] -> false
+      | [b | brest] -> type_expr_equal(a, b) && type_exprs_equal(arest, brest)
+
+fn effects_equal(a: Maybe (List String), b: Maybe (List String)) -> Bool =
+  match a with
+  | Nothing -> (match b with | Nothing -> true | _ -> false)
+  | Just al -> (match b with | Just bl -> labels_equal(al, bl) | Nothing -> false)
+
+# An effect row is a SET, so `!{IO, State}` and `!{State, IO}` are one row.
+fn labels_equal(a: List String, b: List String) -> Bool =
+  same_members(names_to_set(a), names_to_set(b))
+
+fn same_members(a: Set, b: Set) -> Bool =
+  set_size(a) == set_size(b) && set_size(set_diff(a, b)) == 0
 
 fn free_vars_list(es: List ast.Expr, bound: Set) -> Set =
   match es with
@@ -205,7 +272,7 @@ fn alpha_eq(a: ast.Expr, b: ast.Expr, r: Ren) -> Bool =
   | ast.LambdaExpr aps ab _ ->
       (match b with
        | ast.LambdaExpr bps bb _ ->
-           (match bind_names(param_names(aps), param_names(bps), r) with
+           (match bind_params(aps, bps, r) with
             | Nothing -> false
             | Just r2 -> alpha_eq(ab, bb, r2))
        | _ -> false)
@@ -395,7 +462,18 @@ fn list_contains_name(name: String, names: List String) -> Bool =
   | [] -> false
   | [n | rest] -> if n == name then true else list_contains_name(name, rest)
 
-fn sets_intersect(a: Set, b: Set) -> Bool = set_size(set_diff(a, set_diff(a, b))) > 0
+# Walks the smaller side and stops at the first hit. `set_diff` twice would answer
+# the same question by building two trees, and this sits under every hole occurrence
+# and re-runs on every backtrack.
+# O(k log n) where k = elements walked before the first hit, n = the larger side.
+fn sets_intersect(a: Set, b: Set) -> Bool =
+  if set_size(a) <= set_size(b) then any_member(set_to_list(a), b)
+  else any_member(set_to_list(b), a)
+
+fn any_member(names: List String, s: Set) -> Bool =
+  match names with
+  | [] -> false
+  | [n | rest] -> if set_member(n, s) then true else any_member(rest, s)
 
 # Record a capture, or check it against the one already recorded for this hole.
 fn capture(name: String, subject: ast.Expr, st: MState) -> Maybe MState =
@@ -482,20 +560,35 @@ fn go(p: ast.Expr, s: ast.Expr, holes: List String, st: MState) -> Maybe MState 
   | ast.LambdaExpr pps pb _ ->
       (match s with
        | ast.LambdaExpr sps sb _ ->
-           (match bind_names(param_names(pps), param_names(sps), st.ren) with
+           (match bind_params(pps, sps, st.ren) with
             | Nothing -> Nothing
             | Just r2 ->
                 scoped(pb, sb, holes, st, r2,
                        set_union(st.bound, names_to_set(param_names(sps)))))
        | _ -> Nothing)
   # A pattern derived from a combinator is a single expression over `match` and
-  # `if` (§5.3), so these three never carry a hole. Requiring alpha-equality is
-  # honest about that: it will not silently skip a hole nested inside one.
-  | ast.StringTemplateExpr _ _ -> keep(alpha_eq(p, s, st.ren), st)
-  | ast.DoExpr _ _ -> keep(alpha_eq(p, s, st.ren), st)
-  | ast.ComprehensionExpr _ _ _ -> keep(alpha_eq(p, s, st.ren), st)
+  # `if` (§5.3), so these three never carry a hole and are compared literally.
+  | ast.StringTemplateExpr _ _ -> keep(holeless_alpha_eq(p, s, holes, st.ren), st)
+  | ast.DoExpr _ _ -> keep(holeless_alpha_eq(p, s, holes, st.ren), st)
+  | ast.ComprehensionExpr _ _ _ -> keep(holeless_alpha_eq(p, s, holes, st.ren), st)
 
 fn keep(ok: Bool, st: MState) -> Maybe MState = if ok then Just(st) else Nothing
+
+# Enforce §5.3 rather than assume it. A hole under a template, do block or
+# comprehension would compare literally and just fail to match — a rule that
+# never fires and says nothing. Only the PATTERN is checked, and a pattern is
+# derived at build time, so this reports a rule-authoring bug, never user input.
+# The test goes through `is_hole`, so a name an enclosing binder shadows is that
+# binder's and does not trip this.
+fn holeless_alpha_eq(p: ast.Expr, s: ast.Expr, holes: List String, r: Ren) -> Bool =
+  if any_hole(set_to_list(expr_free_vars(p)), holes, r) then
+    panic("lint_pattern: a hole inside a template, do block or comprehension (§5.3)")
+  else alpha_eq(p, s, r)
+
+fn any_hole(names: List String, holes: List String, r: Ren) -> Bool =
+  match names with
+  | [] -> false
+  | [n | rest] -> if is_hole(n, holes, r) then true else any_hole(rest, holes, r)
 
 fn go_all3(p1: ast.Expr, s1: ast.Expr, p2: ast.Expr, s2: ast.Expr,
            p3: ast.Expr, s3: ast.Expr, holes: List String, st: MState) -> Maybe MState =
@@ -597,10 +690,12 @@ fn go_branch(pb: ast.MatchBranch, sb: ast.MatchBranch, s_is_last: Bool,
 #
 # The asymmetry is deliberate. A pattern-side wildcard admits anything, because
 # it binds nothing and whatever the subject binds is caught by the closedness
-# check instead. A subject-side wildcard standing in for a named constructor is
-# only sound in LAST position, where it is the catch-all — and only for a
-# constructor that binds nothing, since there would be no counterpart for a
-# binder. This is the `let Just v = e else fb` spelling, whose desugaring puts a
+# check instead. A subject-side wildcard is the other direction, and every arm
+# that admits one goes through `wildcard_stand_in` — the rule is about
+# refutability, not about which variant spells it, so a tuple needs the same two
+# conditions a constructor does. The literal arms admit none at all, which is
+# conservative rather than inconsistent: refusing a pairing is always sound.
+# This is the `let Just v = e else fb` spelling, whose desugaring puts a
 # wildcard in the second branch (parser.sprout: build_let_binding_match).
 fn pair_pattern(ppat: ast.Pattern, spat: ast.Pattern, s_is_last: Bool, r: Ren) -> Maybe Ren =
   match ppat with
@@ -608,7 +703,7 @@ fn pair_pattern(ppat: ast.Pattern, spat: ast.Pattern, s_is_last: Bool, r: Ren) -
   | ast.VarPattern pn _ ->
       (match spat with
        | ast.VarPattern sn _ -> Just(ren_bind(pn, sn, r))
-       | ast.WildcardPattern _ -> Just(ren_bind_left(pn, r))
+       | ast.WildcardPattern _ -> wildcard_stand_in(ppat, s_is_last, r)
        | _ -> Nothing)
   | ast.ConstructorPattern pn pargs _ ->
       (match spat with
@@ -623,7 +718,7 @@ fn pair_pattern(ppat: ast.Pattern, spat: ast.Pattern, s_is_last: Bool, r: Ren) -
   | ast.TuplePattern pis _ ->
       (match spat with
        | ast.TuplePattern sis _ -> pair_patterns(pis, sis, r)
-       | ast.WildcardPattern _ -> Just(bind_left_names(ast.pattern_names(ppat), r))
+       | ast.WildcardPattern _ -> wildcard_stand_in(ppat, s_is_last, r)
        | _ -> Nothing)
   | ast.IntPattern pv _ -> (match spat with | ast.IntPattern sv _ -> ren_if(pv == sv, r) | _ -> Nothing)
   | ast.BoolPattern pv _ -> (match spat with | ast.BoolPattern sv _ -> ren_if(pv == sv, r) | _ -> Nothing)
@@ -633,15 +728,14 @@ fn pair_pattern(ppat: ast.Pattern, spat: ast.Pattern, s_is_last: Bool, r: Ren) -
 
 fn ren_if(ok: Bool, r: Ren) -> Maybe Ren = if ok then Just(r) else Nothing
 
+# The single gate for "a subject-side `_` stands in for `ppat`". Both conditions
+# are needed: last position, because only there does exhaustiveness make the two
+# branches catch the same complement of the branches already paired; and binding
+# nothing, because a binder on the pattern side would have no counterpart.
 fn wildcard_stand_in(ppat: ast.Pattern, s_is_last: Bool, r: Ren) -> Maybe Ren =
   match ast.pattern_names(ppat) with
   | [] -> if s_is_last then Just(r) else Nothing
   | _ -> Nothing
-
-fn bind_left_names(names: List String, r: Ren) -> Ren =
-  match names with
-  | [] -> r
-  | [n | rest] -> bind_left_names(rest, ren_bind_left(n, r))
 
 fn bind_right_names(names: List String, r: Ren) -> Ren =
   match names with
