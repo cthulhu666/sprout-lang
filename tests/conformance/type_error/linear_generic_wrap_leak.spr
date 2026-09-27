@@ -1,0 +1,15 @@
+# A generic `wrap` stores its type parameter, so a linear value put into one
+# still carries the use-once obligation. The passing counterparts are
+# `crated_used_once` and the two phantom cases in tests/stdlib/test_linear_binders.spr;
+# a regression that dropped the wrap's params would make this file compile.
+import stdlib.terminal as terminal
+
+type linear Res =
+  | Res Int
+
+wrap Crate a = a
+
+fn main() -> Unit !{IO} =
+  do
+    let c = Crate(Res(1))
+    terminal.write("unreachable")

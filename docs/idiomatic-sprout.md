@@ -531,6 +531,25 @@ export fn port_number(p: Port) -> Int =                 # the pattern is private
   match p with | Port n -> n                            # so export an accessor
 ```
 
+A wrap may take type parameters. One the right-hand side never mentions is
+*phantom* — it exists only in the type, so it separates values that share a
+representation and costs nothing at runtime:
+
+```sprout
+wrap Tagged u = Int                                     # both are an Int underneath
+type Metres = | MetresTag
+type Feet = | FeetTag
+
+fn metres(n: Int) -> Tagged Metres = Tagged(n)          # lowers to `ret i64`
+fn feet(n: Int) -> Tagged Feet = Tagged(n)              # passing one for the other
+                                                        # is a type error
+```
+
+Reach for this when the distinction is an *index* — units, which resource a
+handle names, which state a protocol is in — rather than a payload. Note that
+`deriving` constrains every parameter including a phantom one, so an index over
+a type with no `Eq` needs an explicit `instance`.
+
 ## Hide a type behind an interface with existentials
 
 When a collection must hold values of *different* types touched only through a

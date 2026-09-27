@@ -1051,6 +1051,8 @@ Design and staging: `docs/gadts-v0.md`.
 wrap Age = Int
 wrap UserId = Int
 wrap BodyEnv = Dict types.Scheme
+wrap Boxed a = List a
+wrap Tagged u = Int
 ```
 
 A `wrap` declaration introduces a **zero-cost distinct type**. `wrap Foo = T`
@@ -1071,19 +1073,35 @@ heap-typed at the same SSA register.
 Restrictions:
 
 - The right-hand side is a single type expression (no `|` alternatives).
-- No type parameters on the wrap itself in v0; the inner type may be an
-  *applied* parameterized type (`wrap BodyEnv = Dict types.Scheme`), but the
-  wrap is monomorphic. `wrap MyDict a = Dict a` binds `a` on the wrap and does
-  not parse — the name is followed by `=`, or by the `(..)` marker below.
 - The constructor name and type name are identical and cannot be set separately.
 - A `wrap` may derive `Eq`, `Ord` and `ToString` (§8.6); `Enum` is rejected.
   Any other class membership needs an explicit `instance` declaration.
 
+**Type parameters.** `wrap Name p1 p2 ... = T` binds type parameters on the wrap
+itself, in the slot and with the arity rules an ADT uses (§5.6): parameters
+precede the `(..)` marker, and every use of the type must supply them all.
+
+```sprout
+wrap Boxed a = List a           # a generic distinct type over List
+wrap Tagged u = Int             # `u` is phantom: erased, indexes nothing stored
+```
+
+A parameter the right-hand side never mentions is a **phantom parameter**. It
+exists only in the type, so `Tagged Metres` and `Tagged Feet` are distinct types
+over one representation and neither costs anything at runtime — both lower to a
+bare `i64`. This is the mechanism behind compile-time units, typed handles and
+state-indexed resources; §5.8's rules for phantom positions apply unchanged.
+
+`deriving` on a parameterized wrap goes through the ADT path (§8.6), so the
+generated context constrains **every** parameter, phantom ones included:
+`wrap Tagged u = Int deriving (Eq)` yields `Eq u => Eq (Tagged u)` and so cannot
+be used at a `u` lacking an `Eq` instance. An explicit `instance` avoids this.
+
 **Export.** Because the type and its constructor share one name, `export` alone
 publishes the **type only**: the constructor, and with it the destructor
 pattern, stay module-private. `export wrap Foo (..) = T` publishes both. The
-marker sits between the name and the `=` — the same slot an ADT carries it in
-(§8.6), and so ahead of any trailing `deriving` clause.
+marker sits between the type parameters and the `=` — the same slot an ADT
+carries it in (§5.6), and so ahead of any trailing `deriving` clause.
 
 ```sprout
 export wrap Age (..) = Int deriving (Eq, Ord)   # callers may write Age(30)
@@ -1216,7 +1234,7 @@ unnameable outside, but a value of it is not. This is how the marker already
 behaves on a sum, whose constructors are collected only from `export`ed
 declarations.
 
-This is the same marker, in the same slot, that an ADT (§8.6) and a `wrap`
+This is the same marker, in the same slot, that an ADT (§5.6) and a `wrap`
 (§5.6.1) carry; a record simply has fields where those have constructors. Inside
 the declaring module an abstract record is ordinary — opacity is a property of
 the boundary, not of the declaration.
@@ -3498,8 +3516,9 @@ unimplemented work tracked in `BACKLOG.md`.
 
 `Enum` cannot be derived for a `wrap`: `from_ordinal` must construct a value, and
 a wrap's payload cannot be rebuilt from an `Int` alone.  `deriving (Enum)` on a
-wrap is an eager error at the deriving site.  A `wrap` takes no type parameters
-in v0 (§5.6.1), so no instance constraints are synthesized.
+wrap is an eager error at the deriving site.  A `wrap`'s type parameters (§5.6.1)
+go through this same path, so one constraint per parameter is synthesized —
+including for a phantom parameter the RHS never mentions, exactly as for an ADT.
 
 Serialization (`Serialize`/`Deserialize`) and hashing (`Hash`) are intentionally
 **not** in v1.  Both require design decisions the language hasn't made yet —

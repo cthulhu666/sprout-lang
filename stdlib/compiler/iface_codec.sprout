@@ -564,6 +564,8 @@ fn decode_iface_v2_tail(s: String, bytes: Bytes, i: Int, total: Int, version: In
 # v10: `(TypeArrow …)` gained a ParamMode field, so an arrow TypeExpr on the wire
 # now says how its parameter is taken. A v9 iface has no such field and would
 # decode every arrow as consuming — the same silent erasure as above, one layer up.
+# `WrapDecl` gaining a type-parameter list did NOT bump this: an IfaceFile carries
+# schemes, ctors, classes and instances, never decls, so no on-disk iface holds one.
 fn decode_iface_version(s: String) -> Maybe Int =
   if s == "10" then Just(10) else Nothing
 
@@ -1474,8 +1476,8 @@ export fn encode_ast_decl(d: ast.Decl) -> String =
       string_concat_many(["(InstanceDecl ", encode_ast_type_constraint(constraint), " ", encode_ast_type_constraint_list(inst_constraints), " ", encode_ast_instance_method_impl_list(methods), " ", encode_ast_pos(p), ")"])
   | ast.AliasDecl name type_params rhs p ->
       string_concat_many(["(AliasDecl ", encode_quoted_str(name), " ", encode_str_list(type_params), " ", encode_ast_typeexpr(rhs), " ", encode_ast_pos(p), ")"])
-  | ast.WrapDecl name inner deriving_classes p ->
-      string_concat_many(["(WrapDecl ", encode_quoted_str(name), " ", encode_ast_typeexpr(inner), " ", encode_str_list(deriving_classes), " ", encode_ast_pos(p), ")"])
+  | ast.WrapDecl name type_params inner deriving_classes p ->
+      string_concat_many(["(WrapDecl ", encode_quoted_str(name), " ", encode_str_list(type_params), " ", encode_ast_typeexpr(inner), " ", encode_str_list(deriving_classes), " ", encode_ast_pos(p), ")"])
 
 fn encode_ast_decl_list(xs: List ast.Decl) -> String =
   string_concat_many(["(", join_ast_decls(xs), ")"])
@@ -2443,17 +2445,18 @@ fn decode_alias_decl_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(
       Just end = expect_char(s, bytes, skip_ws(s, bytes, n, total), total, ')') else Nothing
   in Just((ast.AliasDecl(name, type_params, rhs, pos), end))
 
-# WrapDecl body: name (quoted str), inner type-expr, deriving classes, pos.
+# WrapDecl body: name (quoted str), type params, inner type-expr, deriving classes, pos.
 # Mirrors the encoder arm in encode_ast_decl.  Added when W5 exhaustiveness
 # surfaced that the codec never handled WrapDecl (added with the `wrap` keyword);
 # the deriving-class list arrived when `wrap` became derivable.
 fn decode_wrap_decl_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Decl, Int) =
   let Just(name, j) = decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing
-      Just(inner, k) = decode_ast_typeexpr_at(s, bytes, skip_ws(s, bytes, j, total), total) else Nothing
+      Just(type_params, ja) = decode_str_list_at(s, bytes, skip_ws(s, bytes, j, total), total) else Nothing
+      Just(inner, k) = decode_ast_typeexpr_at(s, bytes, skip_ws(s, bytes, ja, total), total) else Nothing
       Just(deriving_classes, m) = decode_str_list_at(s, bytes, skip_ws(s, bytes, k, total), total) else Nothing
       Just(pos, n) = decode_pos_at(s, bytes, skip_ws(s, bytes, m, total), total) else Nothing
       Just end = expect_char(s, bytes, skip_ws(s, bytes, n, total), total, ')') else Nothing
-  in Just((ast.WrapDecl(name, inner, deriving_classes, pos), end))
+  in Just((ast.WrapDecl(name, type_params, inner, deriving_classes, pos), end))
 
 fn decode_ast_decl_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List ast.Decl, Int) =
   match expect_char(s, bytes, i, total, '(') with

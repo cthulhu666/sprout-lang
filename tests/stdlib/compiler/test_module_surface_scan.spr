@@ -69,6 +69,13 @@ fn sample_source() -> String =
     ++ "\n"
     ++ "export wrap WrappedOpen (..) = Int\n"
     ++ "\n"
+    ++ "export wrap WrappedParam a (..) = List a\n"
+    ++ "\n"
+    ++ "export wrap WrappedParamClosed a = List a\n"
+    ++ "\n"
+    ++ "export type Parm a (..) =\n"
+    ++ "  | ParmOne a\n"
+    ++ "\n"
     ++ "extern fn plain_extern(a: Int) -> Int\n"
     ++ "\n"
     ++ "export extern fn exported_extern(a: Int) -> Int\n"
@@ -98,6 +105,8 @@ fn main() -> Unit !{IO} =
     assert_true(state, "export type alias is exported", has("Aliased", exported))
     assert_true(state, "export wrap is exported", has("Wrapped", exported))
     assert_true(state, "export wrap (..) is exported too", has("WrappedOpen", exported))
+    assert_true(state, "a parameterized export wrap is exported",
+      has("WrappedParam", exported))
 
     # The scar case: a contextual `linear` marker must not be mistaken for the name.
     assert_true(state, "export type linear exports the TYPE, not the word linear",
@@ -117,6 +126,22 @@ fn main() -> Unit !{IO} =
       has("Wrapped", ctor_types) == false)
     assert_true(state, "a wrap with (..) publishes its synthetic constructor",
       has("WrappedOpen", ctor_types))
+    # Type parameters sit between the name and `(..)`, so the scan must step over
+    # them to find the marker; the same offset bug shipped once for ADTs
+    # (docs/concurrency-deadlines-design-2026-07-15.md, the line-scanner era).
+    #
+    # Only the FIRST of these catches a missing skip — measured by deleting it:
+    # the scan then reads the marker as absent, which is already the right answer
+    # for the marker-less case. That one is here for the mirror, so a skip that
+    # over-reaches and publishes an abstract wrap's constructor also fails.
+    assert_true(state, "a parameterized wrap with (..) publishes its constructor",
+      has("WrappedParam", ctor_types))
+    assert_true(state, "a parameterized wrap without (..) publishes no constructor",
+      has("WrappedParamClosed", ctor_types) == false)
+    assert_true(state, "a parameterized ADT with (..) publishes its constructors",
+      has("Parm", ctor_types))
+    assert_true(state, "a wrap type parameter is never itself exported",
+      has("a", exported) == false)
     assert_true(state, "an alias exports no constructors", has("Aliased", ctor_types) == false)
 
     # --- globals: the reason this scan exists ---

@@ -475,8 +475,8 @@ fn derive_instances_for_classes(name: String, type_params: List String, ctors: L
 # distinction `wrap` exists to draw. Lifting instances through to the inner type
 # (`Num`, operators) is separate, unimplemented work — see BACKLOG.md.
 #
-# A wrap has no type parameters in v0, so the ADT path's per-type-param
-# constraint machinery is passed Nil and contributes nothing.
+# Type parameters go through that same ADT path, so a generic wrap gets one
+# constraint per parameter — including a phantom one, exactly as an ADT does.
 fn wrap_synthetic_ctor(name: String, inner: ast.TypeExpr) -> ast.TypeConstructor =
   ast.TypeConstructor(name, [inner], Nil, Nil)
 
@@ -680,13 +680,13 @@ export fn expand_deriving_decls(decls: List ast.Decl) -> List ast.Decl =
           | _ -> Cons(d, list_append(
                           derive_record_instances_for_classes(name, type_params, fields, pos, deriving_classes),
                           expand_deriving_decls(rest)))
-      # A wrap reuses the ADT emitters over its synthetic constructor; no type
-      # parameters in v0, hence Nil.
-      | ast.WrapDecl name inner deriving_classes pos ->
+      # A wrap reuses the ADT emitters over its synthetic constructor, with its
+      # own type parameters.
+      | ast.WrapDecl name params inner deriving_classes pos ->
           match deriving_classes with
           | Nil -> Cons(d, expand_deriving_decls(rest))
           | _ -> Cons(d, list_append(
-                          derive_instances_for_classes(name, Nil, [wrap_synthetic_ctor(name, inner)], pos, deriving_classes),
+                          derive_instances_for_classes(name, params, [wrap_synthetic_ctor(name, inner)], pos, deriving_classes),
                           expand_deriving_decls(rest)))
       | _ -> Cons(d, expand_deriving_decls(rest))
 
@@ -714,7 +714,7 @@ fn validate_one_deriving_decl(d: ast.Decl) -> Maybe String =
       validate_deriving_classes_list(name, ctors, deriving_classes)
   | ast.RecordDecl name _ _ deriving_classes _ _ _ ->
       validate_record_deriving_classes_list(name, deriving_classes)
-  | ast.WrapDecl name _ deriving_classes _ ->
+  | ast.WrapDecl name _ _ deriving_classes _ ->
       validate_wrap_deriving_classes_list(name, deriving_classes)
   | _ -> Nothing
 

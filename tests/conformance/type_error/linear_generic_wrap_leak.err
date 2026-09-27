@@ -1,0 +1,1 @@
+linear value 'c' is never used: its type `Crate Res` contains the linear type `Res`
