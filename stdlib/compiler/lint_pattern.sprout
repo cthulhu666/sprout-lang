@@ -1,0 +1,661 @@
+module stdlib.compiler.lint_pattern
+import stdlib.compiler.ast as ast
+
+# Second-order matching of one `ast.Expr` against another, with named holes
+# (docs/lint-rules-v0.md §4A). A lint rule derives its pattern from a real
+# definition, so the pattern is ordinary parsed Sprout and its parameter names
+# are the holes.
+#
+# Three things a caller needs and nothing else in the compiler provides:
+# alpha-equivalence over `ast.Expr`, its free variables, and the match itself.
+
+# What a hole captured. The list a match returns holds one per distinct hole, in
+# the order the holes were first met.
+export type Capture (..) =
+  | Capture String ast.Expr
+
+export fn capture_of(name: String, caps: List Capture) -> Maybe ast.Expr =
+  match caps with
+  | [] -> Nothing
+  | [Capture n e | rest] -> if n == name then Just(e) else capture_of(name, rest)
+
+# Binder correspondence between the two sides. Both sides of a binder pair get
+# the SAME fresh id at once, so two names correspond when their ids agree.
+# Keeping both directions is what makes the asymmetric cases wrong-by-default: a
+# name bound on one side and free on the other never agrees, and neither do two
+# distinct binders that happen to share a spelling with each other's partner.
+type Ren (..) =
+  (left: Dict Int, right: Dict Int, next: Int)
+
+fn ren_empty() -> Ren = Ren(left = dict_empty(), right = dict_empty(), next = 0)
+
+fn ren_bind(lname: String, rname: String, r: Ren) -> Ren =
+  Ren(left = dict_set(lname, r.next, r.left),
+      right = dict_set(rname, r.next, r.right),
+      next = r.next + 1)
+
+# A binder present on the left with no counterpart on the right. Any later use of
+# `lname` then fails `ren_same`, which is what should happen when the pattern
+# binds a name the subject does not.
+fn ren_bind_left(lname: String, r: Ren) -> Ren =
+  Ren(left = dict_set(lname, r.next, r.left), right = r.right, next = r.next + 1)
+
+fn ren_bind_right(rname: String, r: Ren) -> Ren =
+  Ren(left = r.left, right = dict_set(rname, r.next, r.right), next = r.next + 1)
+
+fn ren_same(lname: String, rname: String, r: Ren) -> Bool =
+  match dict_get(lname, r.left) with
+  | Just li ->
+      match dict_get(rname, r.right) with
+      | Just ri -> li == ri
+      | Nothing -> false
+  | Nothing ->
+      match dict_get(rname, r.right) with
+      | Just _ -> false
+      # Both free: a free name matches only itself. A qualified name is one
+      # `VarExpr` carrying a dotted name, so `p` and `p.x` compare unequal here
+      # rather than one being a projection of the other.
+      | Nothing -> lname == rname
+
+fn is_bound_left(name: String, r: Ren) -> Bool =
+  match dict_get(name, r.left) with
+  | Just _ -> true
+  | Nothing -> false
+
+# ---------------------------------------------------------------------------
+# Free variables
+# ---------------------------------------------------------------------------
+
+fn names_to_set(names: List String) -> Set =
+  list_fold(\ (s, n) -> set_insert(n, s), set_empty(), names)
+
+# Every name used in `e` and not bound inside it. The closedness check in §5.2a
+# is this set against the binders standing between the pattern root and a hole.
+export fn expr_free_vars(e: ast.Expr) -> Set = free_vars(e, set_empty())
+
+# `bound` is the names a binder has brought into scope at this point.
+fn free_vars(e: ast.Expr, bound: Set) -> Set =
+  match e with
+  | ast.VarExpr name _ -> if set_member(name, bound) then set_empty() else set_insert(name, set_empty())
+  | ast.IntExpr _ _ -> set_empty()
+  | ast.FloatExpr _ _ -> set_empty()
+  | ast.BoolExpr _ _ -> set_empty()
+  | ast.StringExpr _ _ -> set_empty()
+  | ast.CharExpr _ _ -> set_empty()
+  | ast.UnitExpr _ -> set_empty()
+  | ast.StringTemplateExpr parts _ -> free_vars_parts(parts, bound)
+  | ast.TupleExpr items _ -> free_vars_list(items, bound)
+  | ast.IfExpr cond thn els _ ->
+      set_union(free_vars(cond, bound),
+                set_union(free_vars(thn, bound), free_vars(els, bound)))
+  | ast.MatchExpr scrut branches _ ->
+      set_union(free_vars(scrut, bound), free_vars_branches(branches, bound))
+  | ast.CallExpr callee args _ ->
+      set_union(free_vars(callee, bound), free_vars_list(args, bound))
+  | ast.LambdaExpr params body _ ->
+      free_vars(body, set_union(bound, names_to_set(param_names(params))))
+  | ast.BinaryExpr _ l r _ -> set_union(free_vars(l, bound), free_vars(r, bound))
+  | ast.UnaryExpr _ operand _ -> free_vars(operand, bound)
+  | ast.IntRangeExpr lo hi _ -> set_union(free_vars(lo, bound), free_vars(hi, bound))
+  | ast.DoExpr steps _ -> free_vars_steps(steps, bound)
+  | ast.RecordExpr _ fields _ -> free_vars_fields(fields, bound)
+  | ast.GetFieldExpr obj _ _ -> free_vars(obj, bound)
+  | ast.RecordUpdateExpr base fields _ ->
+      set_union(free_vars(base, bound), free_vars_fields(fields, bound))
+  | ast.ComprehensionExpr elem gens _ -> free_vars_gens(gens, elem, bound)
+
+fn param_names(params: List ast.Param) -> List String =
+  match params with
+  | [] -> []
+  | [ast.Param n _ _ | rest] -> Cons(n, param_names(rest))
+
+fn free_vars_list(es: List ast.Expr, bound: Set) -> Set =
+  match es with
+  | [] -> set_empty()
+  | [e | rest] -> set_union(free_vars(e, bound), free_vars_list(rest, bound))
+
+fn free_vars_parts(parts: List ast.TemplateExprPart, bound: Set) -> Set =
+  match parts with
+  | [] -> set_empty()
+  | [p | rest] ->
+      set_union(
+        (match p with
+         | ast.LitPart _ -> set_empty()
+         | ast.InterpPart e -> free_vars(e, bound)),
+        free_vars_parts(rest, bound))
+
+fn free_vars_branches(branches: List ast.MatchBranch, bound: Set) -> Set =
+  match branches with
+  | [] -> set_empty()
+  | [ast.MatchBranch pat body | rest] ->
+      set_union(free_vars(body, set_union(bound, names_to_set(ast.pattern_names(pat)))),
+                free_vars_branches(rest, bound))
+
+fn free_vars_fields(fields: List ast.RecordField, bound: Set) -> Set =
+  match fields with
+  | [] -> set_empty()
+  | [ast.RecordField _ v | rest] ->
+      set_union(free_vars(v, bound), free_vars_fields(rest, bound))
+
+# Do steps bind sequentially: a step's binder is in scope for the steps below it
+# but not for its own right-hand side.
+fn free_vars_steps(steps: List ast.DoStep, bound: Set) -> Set =
+  match steps with
+  | [] -> set_empty()
+  | [step | rest] ->
+      match step with
+      | ast.DoBindStep pat e ->
+          set_union(free_vars(e, bound),
+                    free_vars_steps(rest, set_union(bound, names_to_set(ast.pattern_names(pat)))))
+      | ast.DoLetStep name e ->
+          set_union(free_vars(e, bound),
+                    free_vars_steps(rest, set_insert(name, bound)))
+      | ast.DoExprStep e -> set_union(free_vars(e, bound), free_vars_steps(rest, bound))
+
+# Generators scope left to right, and a guard belongs to the generator it
+# follows, so it sees that generator's binders.
+fn free_vars_gens(gens: List ast.ComprehensionGen, elem: ast.Expr, bound: Set) -> Set =
+  match gens with
+  | [] -> free_vars(elem, bound)
+  | [ast.ComprehensionGen pat src guards | rest] ->
+      let inner = set_union(bound, names_to_set(ast.pattern_names(pat)))
+      in set_union(free_vars(src, bound),
+                   set_union(free_vars_list(guards, inner),
+                             free_vars_gens(rest, elem, inner)))
+
+# ---------------------------------------------------------------------------
+# Alpha-equivalence
+# ---------------------------------------------------------------------------
+
+# Equal up to the names of bound variables. Used for the zero-hole case and to
+# decide whether a repeated hole captured the same subterm twice.
+export fn expr_alpha_equal(a: ast.Expr, b: ast.Expr) -> Bool =
+  alpha_eq(a, b, ren_empty())
+
+fn alpha_eq(a: ast.Expr, b: ast.Expr, r: Ren) -> Bool =
+  match a with
+  | ast.VarExpr an _ ->
+      (match b with
+       | ast.VarExpr bn _ -> ren_same(an, bn, r)
+       | _ -> false)
+  | ast.IntExpr av _ -> (match b with | ast.IntExpr bv _ -> av == bv | _ -> false)
+  | ast.FloatExpr av _ -> (match b with | ast.FloatExpr bv _ -> av == bv | _ -> false)
+  | ast.BoolExpr av _ -> (match b with | ast.BoolExpr bv _ -> av == bv | _ -> false)
+  | ast.StringExpr av _ -> (match b with | ast.StringExpr bv _ -> av == bv | _ -> false)
+  | ast.CharExpr av _ -> (match b with | ast.CharExpr bv _ -> av == bv | _ -> false)
+  | ast.UnitExpr _ -> (match b with | ast.UnitExpr _ -> true | _ -> false)
+  | ast.StringTemplateExpr aps _ ->
+      (match b with | ast.StringTemplateExpr bps _ -> alpha_eq_parts(aps, bps, r) | _ -> false)
+  | ast.TupleExpr ais _ ->
+      (match b with | ast.TupleExpr bis _ -> alpha_eq_list(ais, bis, r) | _ -> false)
+  | ast.IfExpr ac at ae _ ->
+      (match b with
+       | ast.IfExpr bc bt be _ ->
+           alpha_eq(ac, bc, r) && alpha_eq(at, bt, r) && alpha_eq(ae, be, r)
+       | _ -> false)
+  | ast.MatchExpr asc abr _ ->
+      (match b with
+       | ast.MatchExpr bsc bbr _ ->
+           alpha_eq(asc, bsc, r) && alpha_eq_branches(abr, bbr, r)
+       | _ -> false)
+  | ast.CallExpr ac aargs _ ->
+      (match b with
+       | ast.CallExpr bc bargs _ -> alpha_eq(ac, bc, r) && alpha_eq_list(aargs, bargs, r)
+       | _ -> false)
+  | ast.LambdaExpr aps ab _ ->
+      (match b with
+       | ast.LambdaExpr bps bb _ ->
+           (match bind_names(param_names(aps), param_names(bps), r) with
+            | Nothing -> false
+            | Just r2 -> alpha_eq(ab, bb, r2))
+       | _ -> false)
+  | ast.BinaryExpr aop al ar _ ->
+      (match b with
+       | ast.BinaryExpr bop bl br _ ->
+           aop == bop && alpha_eq(al, bl, r) && alpha_eq(ar, br, r)
+       | _ -> false)
+  | ast.UnaryExpr aop ao _ ->
+      (match b with
+       | ast.UnaryExpr bop bo _ -> aop == bop && alpha_eq(ao, bo, r)
+       | _ -> false)
+  | ast.IntRangeExpr alo ahi _ ->
+      (match b with
+       | ast.IntRangeExpr blo bhi _ -> alpha_eq(alo, blo, r) && alpha_eq(ahi, bhi, r)
+       | _ -> false)
+  | ast.DoExpr asteps _ ->
+      (match b with | ast.DoExpr bsteps _ -> alpha_eq_steps(asteps, bsteps, r) | _ -> false)
+  | ast.RecordExpr an afs _ ->
+      (match b with
+       | ast.RecordExpr bn bfs _ -> an == bn && alpha_eq_fields(afs, bfs, r)
+       | _ -> false)
+  | ast.GetFieldExpr ao af _ ->
+      (match b with
+       | ast.GetFieldExpr bo bf _ -> af == bf && alpha_eq(ao, bo, r)
+       | _ -> false)
+  | ast.RecordUpdateExpr ab2 afs _ ->
+      (match b with
+       | ast.RecordUpdateExpr bb2 bfs _ ->
+           alpha_eq(ab2, bb2, r) && alpha_eq_fields(afs, bfs, r)
+       | _ -> false)
+  | ast.ComprehensionExpr ae2 ags _ ->
+      (match b with
+       | ast.ComprehensionExpr be2 bgs _ -> alpha_eq_gens(ags, bgs, ae2, be2, r)
+       | _ -> false)
+
+# Pair two binder lists positionally. Differing lengths are not alpha-equivalent.
+fn bind_names(ls: List String, rs: List String, r: Ren) -> Maybe Ren =
+  match ls with
+  | [] -> (match rs with | [] -> Just(r) | _ -> Nothing)
+  | [l | lrest] ->
+      match rs with
+      | [] -> Nothing
+      | [rn | rrest] -> bind_names(lrest, rrest, ren_bind(l, rn, r))
+
+fn alpha_eq_list(as_: List ast.Expr, bs: List ast.Expr, r: Ren) -> Bool =
+  match as_ with
+  | [] -> (match bs with | [] -> true | _ -> false)
+  | [a | arest] ->
+      match bs with
+      | [] -> false
+      | [b | brest] -> alpha_eq(a, b, r) && alpha_eq_list(arest, brest, r)
+
+fn alpha_eq_parts(as_: List ast.TemplateExprPart, bs: List ast.TemplateExprPart, r: Ren) -> Bool =
+  match as_ with
+  | [] -> (match bs with | [] -> true | _ -> false)
+  | [a | arest] ->
+      match bs with
+      | [] -> false
+      | [b | brest] ->
+          (match a with
+           | ast.LitPart at -> (match b with | ast.LitPart bt -> at == bt | _ -> false)
+           | ast.InterpPart ae -> (match b with | ast.InterpPart be -> alpha_eq(ae, be, r) | _ -> false))
+          && alpha_eq_parts(arest, brest, r)
+
+# Branch order is part of the shape here. Permutation is a matching concession
+# (§5.2b), not an equivalence: two matches that test constructors in a different
+# order are different expressions.
+fn alpha_eq_branches(as_: List ast.MatchBranch, bs: List ast.MatchBranch, r: Ren) -> Bool =
+  match as_ with
+  | [] -> (match bs with | [] -> true | _ -> false)
+  | [ast.MatchBranch apat abody | arest] ->
+      match bs with
+      | [] -> false
+      | [ast.MatchBranch bpat bbody | brest] ->
+          pattern_shape_equal(apat, bpat) &&
+          (match bind_names(ast.pattern_names(apat), ast.pattern_names(bpat), r) with
+           | Nothing -> false
+           | Just r2 -> alpha_eq(abody, bbody, r2)) &&
+          alpha_eq_branches(arest, brest, r)
+
+fn alpha_eq_fields(as_: List ast.RecordField, bs: List ast.RecordField, r: Ren) -> Bool =
+  match as_ with
+  | [] -> (match bs with | [] -> true | _ -> false)
+  | [ast.RecordField an av | arest] ->
+      match bs with
+      | [] -> false
+      | [ast.RecordField bn bv | brest] ->
+          an == bn && alpha_eq(av, bv, r) && alpha_eq_fields(arest, brest, r)
+
+fn alpha_eq_steps(as_: List ast.DoStep, bs: List ast.DoStep, r: Ren) -> Bool =
+  match as_ with
+  | [] -> (match bs with | [] -> true | _ -> false)
+  | [a | arest] ->
+      match bs with
+      | [] -> false
+      | [b | brest] ->
+          match a with
+          | ast.DoBindStep apat ae ->
+              (match b with
+               | ast.DoBindStep bpat be ->
+                   pattern_shape_equal(apat, bpat) && alpha_eq(ae, be, r) &&
+                   (match bind_names(ast.pattern_names(apat), ast.pattern_names(bpat), r) with
+                    | Nothing -> false
+                    | Just r2 -> alpha_eq_steps(arest, brest, r2))
+               | _ -> false)
+          | ast.DoLetStep an ae ->
+              (match b with
+               | ast.DoLetStep bn be ->
+                   alpha_eq(ae, be, r) &&
+                   alpha_eq_steps(arest, brest, ren_bind(an, bn, r))
+               | _ -> false)
+          | ast.DoExprStep ae ->
+              (match b with
+               | ast.DoExprStep be -> alpha_eq(ae, be, r) && alpha_eq_steps(arest, brest, r)
+               | _ -> false)
+
+fn alpha_eq_gens(as_: List ast.ComprehensionGen, bs: List ast.ComprehensionGen,
+                 aelem: ast.Expr, belem: ast.Expr, r: Ren) -> Bool =
+  match as_ with
+  | [] -> (match bs with | [] -> alpha_eq(aelem, belem, r) | _ -> false)
+  | [ast.ComprehensionGen apat asrc aguards | arest] ->
+      match bs with
+      | [] -> false
+      | [ast.ComprehensionGen bpat bsrc bguards | brest] ->
+          pattern_shape_equal(apat, bpat) && alpha_eq(asrc, bsrc, r) &&
+          (match bind_names(ast.pattern_names(apat), ast.pattern_names(bpat), r) with
+           | Nothing -> false
+           | Just r2 ->
+               alpha_eq_list(aguards, bguards, r2) &&
+               alpha_eq_gens(arest, brest, aelem, belem, r2))
+
+# Two patterns test the same thing, ignoring binder names. Names are handled
+# separately by `bind_names` over `ast.pattern_names`, which visits them in the
+# same source order on both sides.
+fn pattern_shape_equal(a: ast.Pattern, b: ast.Pattern) -> Bool =
+  match a with
+  | ast.WildcardPattern _ -> (match b with | ast.WildcardPattern _ -> true | _ -> false)
+  | ast.VarPattern _ _ -> (match b with | ast.VarPattern _ _ -> true | _ -> false)
+  | ast.IntPattern av _ -> (match b with | ast.IntPattern bv _ -> av == bv | _ -> false)
+  | ast.BoolPattern av _ -> (match b with | ast.BoolPattern bv _ -> av == bv | _ -> false)
+  | ast.StringPattern av _ -> (match b with | ast.StringPattern bv _ -> av == bv | _ -> false)
+  | ast.CharPattern av _ -> (match b with | ast.CharPattern bv _ -> av == bv | _ -> false)
+  | ast.UnitPattern _ -> (match b with | ast.UnitPattern _ -> true | _ -> false)
+  | ast.TuplePattern ais _ ->
+      (match b with | ast.TuplePattern bis _ -> pattern_shapes_equal(ais, bis) | _ -> false)
+  | ast.ConstructorPattern an aargs _ ->
+      (match b with
+       | ast.ConstructorPattern bn bargs _ -> an == bn && pattern_shapes_equal(aargs, bargs)
+       | _ -> false)
+
+fn pattern_shapes_equal(as_: List ast.Pattern, bs: List ast.Pattern) -> Bool =
+  match as_ with
+  | [] -> (match bs with | [] -> true | _ -> false)
+  | [a | arest] ->
+      match bs with
+      | [] -> false
+      | [b | brest] -> pattern_shape_equal(a, b) && pattern_shapes_equal(arest, brest)
+
+# ---------------------------------------------------------------------------
+# Matching with holes
+# ---------------------------------------------------------------------------
+
+# `caps` accumulates across the whole match; `ren` and `bound` are scoped to the
+# construct being matched and are restored by whoever extended them.
+type MState (..) =
+  (caps: List Capture, ren: Ren, bound: Set)
+
+# Match `pattern` against `subject`, treating each name in `holes` as a hole that
+# captures whatever subterm sits in its place. `Nothing` means no match, which
+# includes a match rejected because a capture would not be closed (§5.2a).
+#
+# Holes are matched by exact name, so a hole `v` never captures the qualified name
+# `v.field` — the latter is one `VarExpr` whose name is the whole dotted string.
+export fn match_expr(pattern: ast.Expr, subject: ast.Expr, holes: List String)
+    -> Maybe (List Capture) =
+  match go(pattern, subject, holes, MState(caps = [], ren = ren_empty(), bound = set_empty())) with
+  | Nothing -> Nothing
+  | Just st -> Just(list_reverse(st.caps))
+
+fn is_hole(name: String, holes: List String, r: Ren) -> Bool =
+  # A name shadowed by an enclosing binder is that binder's, not a hole.
+  if is_bound_left(name, r) then false else list_contains_name(name, holes)
+
+fn list_contains_name(name: String, names: List String) -> Bool =
+  match names with
+  | [] -> false
+  | [n | rest] -> if n == name then true else list_contains_name(name, rest)
+
+fn sets_intersect(a: Set, b: Set) -> Bool = set_size(set_diff(a, set_diff(a, b))) > 0
+
+# Record a capture, or check it against the one already recorded for this hole.
+fn capture(name: String, subject: ast.Expr, st: MState) -> Maybe MState =
+  # Reconstructing the call lifts the capture out of every binder it sits under,
+  # so a capture mentioning one of those binders cannot be hoisted (§5.2a).
+  if sets_intersect(expr_free_vars(subject), st.bound) then Nothing
+  else
+    match capture_of(name, st.caps) with
+    | Nothing ->
+        Just(MState(caps = Cons(Capture(name, subject), st.caps), ren = st.ren, bound = st.bound))
+    # A repeated hole must stand for one subterm, not two that merely look alike.
+    | Just prev -> if expr_alpha_equal(prev, subject) then Just(st) else Nothing
+
+fn go(p: ast.Expr, s: ast.Expr, holes: List String, st: MState) -> Maybe MState =
+  match p with
+  | ast.VarExpr pn _ ->
+      if is_hole(pn, holes, st.ren) then capture(pn, s, st)
+      else
+        (match s with
+         | ast.VarExpr sn _ -> if ren_same(pn, sn, st.ren) then Just(st) else Nothing
+         | _ -> Nothing)
+  | ast.IntExpr pv _ -> (match s with | ast.IntExpr sv _ -> keep(pv == sv, st) | _ -> Nothing)
+  | ast.FloatExpr pv _ -> (match s with | ast.FloatExpr sv _ -> keep(pv == sv, st) | _ -> Nothing)
+  | ast.BoolExpr pv _ -> (match s with | ast.BoolExpr sv _ -> keep(pv == sv, st) | _ -> Nothing)
+  | ast.StringExpr pv _ -> (match s with | ast.StringExpr sv _ -> keep(pv == sv, st) | _ -> Nothing)
+  | ast.CharExpr pv _ -> (match s with | ast.CharExpr sv _ -> keep(pv == sv, st) | _ -> Nothing)
+  | ast.UnitExpr _ -> (match s with | ast.UnitExpr _ -> Just(st) | _ -> Nothing)
+  | ast.TupleExpr pis _ ->
+      (match s with | ast.TupleExpr sis _ -> go_list(pis, sis, holes, st) | _ -> Nothing)
+  | ast.IfExpr pc pt pe _ ->
+      (match s with
+       | ast.IfExpr sc st2 se _ ->
+           go_all3(pc, sc, pt, st2, pe, se, holes, st)
+       | _ -> Nothing)
+  | ast.MatchExpr psc pbr _ ->
+      (match s with
+       | ast.MatchExpr ssc sbr _ ->
+           (match go(psc, ssc, holes, st) with
+            | Nothing -> Nothing
+            | Just st2 -> go_branches(pbr, index_branches(sbr, 0), last_index(sbr), holes, st2))
+       | _ -> Nothing)
+  | ast.CallExpr pc pargs _ ->
+      (match s with
+       | ast.CallExpr sc sargs _ ->
+           (match go(pc, sc, holes, st) with
+            | Nothing -> Nothing
+            | Just st2 -> go_list(pargs, sargs, holes, st2))
+       | _ -> Nothing)
+  | ast.BinaryExpr pop pl pr _ ->
+      (match s with
+       | ast.BinaryExpr sop sl sr _ ->
+           if pop != sop then Nothing
+           else (match go(pl, sl, holes, st) with
+                 | Nothing -> Nothing
+                 | Just st2 -> go(pr, sr, holes, st2))
+       | _ -> Nothing)
+  | ast.UnaryExpr pop po _ ->
+      (match s with
+       | ast.UnaryExpr sop so _ -> if pop != sop then Nothing else go(po, so, holes, st)
+       | _ -> Nothing)
+  | ast.IntRangeExpr plo phi _ ->
+      (match s with
+       | ast.IntRangeExpr slo shi _ ->
+           (match go(plo, slo, holes, st) with
+            | Nothing -> Nothing
+            | Just st2 -> go(phi, shi, holes, st2))
+       | _ -> Nothing)
+  | ast.GetFieldExpr po pf _ ->
+      (match s with
+       | ast.GetFieldExpr so sf _ -> if pf != sf then Nothing else go(po, so, holes, st)
+       | _ -> Nothing)
+  | ast.RecordExpr pn pfs _ ->
+      (match s with
+       | ast.RecordExpr sn sfs _ ->
+           if pn != sn then Nothing else go_fields(pfs, sfs, holes, st)
+       | _ -> Nothing)
+  | ast.RecordUpdateExpr pb pfs _ ->
+      (match s with
+       | ast.RecordUpdateExpr sb sfs _ ->
+           (match go(pb, sb, holes, st) with
+            | Nothing -> Nothing
+            | Just st2 -> go_fields(pfs, sfs, holes, st2))
+       | _ -> Nothing)
+  | ast.LambdaExpr pps pb _ ->
+      (match s with
+       | ast.LambdaExpr sps sb _ ->
+           (match bind_names(param_names(pps), param_names(sps), st.ren) with
+            | Nothing -> Nothing
+            | Just r2 ->
+                scoped(pb, sb, holes, st, r2,
+                       set_union(st.bound, names_to_set(param_names(sps)))))
+       | _ -> Nothing)
+  # A pattern derived from a combinator is a single expression over `match` and
+  # `if` (§5.3), so these three never carry a hole. Requiring alpha-equality is
+  # honest about that: it will not silently skip a hole nested inside one.
+  | ast.StringTemplateExpr _ _ -> keep(alpha_eq(p, s, st.ren), st)
+  | ast.DoExpr _ _ -> keep(alpha_eq(p, s, st.ren), st)
+  | ast.ComprehensionExpr _ _ _ -> keep(alpha_eq(p, s, st.ren), st)
+
+fn keep(ok: Bool, st: MState) -> Maybe MState = if ok then Just(st) else Nothing
+
+fn go_all3(p1: ast.Expr, s1: ast.Expr, p2: ast.Expr, s2: ast.Expr,
+           p3: ast.Expr, s3: ast.Expr, holes: List String, st: MState) -> Maybe MState =
+  match go(p1, s1, holes, st) with
+  | Nothing -> Nothing
+  | Just a ->
+      match go(p2, s2, holes, a) with
+      | Nothing -> Nothing
+      | Just b -> go(p3, s3, holes, b)
+
+fn go_list(ps: List ast.Expr, ss: List ast.Expr, holes: List String, st: MState) -> Maybe MState =
+  match ps with
+  | [] -> (match ss with | [] -> Just(st) | _ -> Nothing)
+  | [p | prest] ->
+      match ss with
+      | [] -> Nothing
+      | [s | srest] ->
+          match go(p, s, holes, st) with
+          | Nothing -> Nothing
+          | Just st2 -> go_list(prest, srest, holes, st2)
+
+fn go_fields(ps: List ast.RecordField, ss: List ast.RecordField,
+             holes: List String, st: MState) -> Maybe MState =
+  match ps with
+  | [] -> (match ss with | [] -> Just(st) | _ -> Nothing)
+  | [ast.RecordField pn pv | prest] ->
+      match ss with
+      | [] -> Nothing
+      | [ast.RecordField sn sv | srest] ->
+          if pn != sn then Nothing
+          else
+            match go(pv, sv, holes, st) with
+            | Nothing -> Nothing
+            | Just st2 -> go_fields(prest, srest, holes, st2)
+
+# Run a sub-match under an extended renaming and binder set, then restore both.
+# Only `caps` survives a scope, because only `caps` is about the whole match.
+fn scoped(p: ast.Expr, s: ast.Expr, holes: List String, st: MState,
+          r: Ren, bound: Set) -> Maybe MState =
+  match go(p, s, holes, MState(caps = st.caps, ren = r, bound = bound)) with
+  | Nothing -> Nothing
+  | Just inner -> Just (MState(caps = inner.caps, ren = st.ren, bound = st.bound))
+
+# ---------------------------------------------------------------------------
+# Branches, which may be permuted
+# ---------------------------------------------------------------------------
+
+fn index_branches(brs: List ast.MatchBranch, i: Int) -> List (Int, ast.MatchBranch) =
+  match brs with
+  | [] -> []
+  | [b | rest] -> Cons((i, b), index_branches(rest, i + 1))
+
+fn last_index(brs: List ast.MatchBranch) -> Int = branch_count(brs) - 1
+
+fn branch_count(brs: List ast.MatchBranch) -> Int =
+  match brs with
+  | [] -> 0
+  | [_ | rest] -> 1 + branch_count(rest)
+
+# The prelude is not internally consistent about branch order — `result_from_maybe`
+# tests `Nothing` first, `maybe_with_default` tests `Just` first — so a derived
+# pattern must match a subject that orders its branches the other way (§5.2b).
+# Candidates are tried in turn and a failed continuation backtracks, so a pattern
+# whose branches are not distinguishable by constructor alone still matches.
+fn go_branches(pbrs: List ast.MatchBranch, sbrs: List (Int, ast.MatchBranch),
+               last_idx: Int, holes: List String, st: MState) -> Maybe MState =
+  match pbrs with
+  | [] -> (match sbrs with | [] -> Just(st) | _ -> Nothing)
+  | [pb | prest] -> try_candidates(pb, [], sbrs, prest, last_idx, holes, st)
+
+fn try_candidates(pb: ast.MatchBranch, seen: List (Int, ast.MatchBranch),
+                  todo: List (Int, ast.MatchBranch), prest: List ast.MatchBranch,
+                  last_idx: Int, holes: List String, st: MState) -> Maybe MState =
+  match todo with
+  | [] -> Nothing
+  | [(j, sb) | rest] ->
+      match go_branch(pb, sb, j == last_idx, holes, st) with
+      | Just st2 ->
+          (match go_branches(prest, list_append(list_reverse(seen), rest), last_idx, holes, st2) with
+           | Just done -> Just(done)
+           | Nothing -> try_candidates(pb, Cons((j, sb), seen), rest, prest, last_idx, holes, st))
+      | Nothing -> try_candidates(pb, Cons((j, sb), seen), rest, prest, last_idx, holes, st)
+
+fn go_branch(pb: ast.MatchBranch, sb: ast.MatchBranch, s_is_last: Bool,
+             holes: List String, st: MState) -> Maybe MState =
+  match pb with
+  | ast.MatchBranch ppat pbody ->
+      match sb with
+      | ast.MatchBranch spat sbody ->
+          match pair_pattern(ppat, spat, s_is_last, st.ren) with
+          | Nothing -> Nothing
+          | Just r2 ->
+              # Whatever the subject's branch binds is in scope in its body, so a
+              # hole in the pattern's body must not capture it.
+              scoped(pbody, sbody, holes, st, r2,
+                     set_union(st.bound, names_to_set(ast.pattern_names(spat))))
+
+# Associate the binders of two branch patterns, or refuse the pairing.
+#
+# The asymmetry is deliberate. A pattern-side wildcard admits anything, because
+# it binds nothing and whatever the subject binds is caught by the closedness
+# check instead. A subject-side wildcard standing in for a named constructor is
+# only sound in LAST position, where it is the catch-all — and only for a
+# constructor that binds nothing, since there would be no counterpart for a
+# binder. This is the `let Just v = e else fb` spelling, whose desugaring puts a
+# wildcard in the second branch (parser.sprout: build_let_binding_match).
+fn pair_pattern(ppat: ast.Pattern, spat: ast.Pattern, s_is_last: Bool, r: Ren) -> Maybe Ren =
+  match ppat with
+  | ast.WildcardPattern _ -> Just(bind_right_names(ast.pattern_names(spat), r))
+  | ast.VarPattern pn _ ->
+      (match spat with
+       | ast.VarPattern sn _ -> Just(ren_bind(pn, sn, r))
+       | ast.WildcardPattern _ -> Just(ren_bind_left(pn, r))
+       | _ -> Nothing)
+  | ast.ConstructorPattern pn pargs _ ->
+      (match spat with
+       | ast.ConstructorPattern sn sargs _ ->
+           if pn != sn then Nothing else pair_patterns(pargs, sargs, r)
+       | ast.WildcardPattern _ -> wildcard_stand_in(ppat, s_is_last, r)
+       | ast.VarPattern sn _ ->
+           (match wildcard_stand_in(ppat, s_is_last, r) with
+            | Nothing -> Nothing
+            | Just r2 -> Just(ren_bind_right(sn, r2)))
+       | _ -> Nothing)
+  | ast.TuplePattern pis _ ->
+      (match spat with
+       | ast.TuplePattern sis _ -> pair_patterns(pis, sis, r)
+       | ast.WildcardPattern _ -> Just(bind_left_names(ast.pattern_names(ppat), r))
+       | _ -> Nothing)
+  | ast.IntPattern pv _ -> (match spat with | ast.IntPattern sv _ -> ren_if(pv == sv, r) | _ -> Nothing)
+  | ast.BoolPattern pv _ -> (match spat with | ast.BoolPattern sv _ -> ren_if(pv == sv, r) | _ -> Nothing)
+  | ast.StringPattern pv _ -> (match spat with | ast.StringPattern sv _ -> ren_if(pv == sv, r) | _ -> Nothing)
+  | ast.CharPattern pv _ -> (match spat with | ast.CharPattern sv _ -> ren_if(pv == sv, r) | _ -> Nothing)
+  | ast.UnitPattern _ -> (match spat with | ast.UnitPattern _ -> Just(r) | _ -> Nothing)
+
+fn ren_if(ok: Bool, r: Ren) -> Maybe Ren = if ok then Just(r) else Nothing
+
+fn wildcard_stand_in(ppat: ast.Pattern, s_is_last: Bool, r: Ren) -> Maybe Ren =
+  match ast.pattern_names(ppat) with
+  | [] -> if s_is_last then Just(r) else Nothing
+  | _ -> Nothing
+
+fn bind_left_names(names: List String, r: Ren) -> Ren =
+  match names with
+  | [] -> r
+  | [n | rest] -> bind_left_names(rest, ren_bind_left(n, r))
+
+fn bind_right_names(names: List String, r: Ren) -> Ren =
+  match names with
+  | [] -> r
+  | [n | rest] -> bind_right_names(rest, ren_bind_right(n, r))
+
+fn pair_patterns(ps: List ast.Pattern, ss: List ast.Pattern, r: Ren) -> Maybe Ren =
+  match ps with
+  | [] -> (match ss with | [] -> Just(r) | _ -> Nothing)
+  | [p | prest] ->
+      match ss with
+      | [] -> Nothing
+      | [s | srest] ->
+          # A sub-pattern is never in "last branch" position; only a whole branch is.
+          match pair_pattern(p, s, false, r) with
+          | Nothing -> Nothing
+          | Just r2 -> pair_patterns(prest, srest, r2)
