@@ -213,9 +213,8 @@ fn server_final_verifier(raw: String) -> ScramResult String =
   match attr_value(raw, "e") with
   | Just err_msg -> Err(ScramInvalidMessage(string.concat("SCRAM server-final error: ", err_msg)))
   | Nothing ->
-      match attr_value(raw, "v") with
-      | Just verifier -> Ok(verifier)
-      | Nothing -> Err(ScramInvalidMessage("SCRAM server-final message missing verifier"))
+      result_from_maybe(ScramInvalidMessage("SCRAM server-final message missing verifier"),
+        attr_value(raw, "v"))
 
 export fn verify_server_final(password: String, client_first_bare_raw: String, server: ScramServerFirst, channel_binding: String, raw: String) -> ScramResult Bool =
   match server_final_verifier(raw) with

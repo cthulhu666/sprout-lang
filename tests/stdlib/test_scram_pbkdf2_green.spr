@@ -11,7 +11,8 @@ import stdlib.scram as scram
 #
 # On the pre-mutual-TCO compiler this ABORTS the process with
 # "GC root pool exhausted" (SUITE never reaches `summary`); with mutual TCO
-# (`musttail`) it completes and returns true. RFC 5802 test vector (user/pencil).
+# (`musttail`) it completes and returns true. The mechanism is SCRAM-SHA-256, so the
+# proof VALUE is asserted against RFC 7677 §3 in test_scram_server_final.spr, not here.
 # Doubles as the first native coverage of the SCRAM proof path.
 
 let server_first_raw: String =
