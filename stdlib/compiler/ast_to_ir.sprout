@@ -112,41 +112,6 @@ fn bind_params(names: List String, ssas: List String, captures: Dict String) -> 
       | Nil -> captures
       | Cons s srest -> bind_params(nrest, srest, dict_set(n, s, captures))
 
-# Collect all variable names bound by a pattern.
-# Explicit on every constructor so adding a new Pattern variant surfaces here
-# at compile time (no silent wildcard fallthrough).
-# O(n) where n = pattern node count.
-fn pattern_names(pat: ast.Pattern) -> List String =
-  match pat with
-  | ast.VarPattern name _ -> Cons(name, Nil)
-  | ast.TuplePattern items _ -> pattern_names_list(items)
-  | ast.ConstructorPattern _ args _ -> pattern_names_list(args)
-  | ast.WildcardPattern _ -> Nil
-  | ast.IntPattern _ _ -> Nil
-  | ast.BoolPattern _ _ -> Nil
-  | ast.StringPattern _ _ -> Nil
-  | ast.CharPattern _ _ -> Nil
-  | ast.UnitPattern _ -> Nil
-
-# O(n) — accumulator + prepend-each avoids the O(n²) cost of list_append
-# in a recursive call. Order is unimportant: all callers wrap the result
-# in set_from_list for membership tests.
-fn pattern_names_list(pats: List ast.Pattern) -> List String =
-  pattern_names_list_go(pats, Nil)
-
-fn pattern_names_list_go(pats: List ast.Pattern, acc: List String) -> List String =
-  match pats with
-  | Nil -> acc
-  | Cons p rest -> pattern_names_list_go(rest, list_prepend_all(pattern_names(p), acc))
-
-# Prepend every element of xs onto acc (in xs-order, reversed relative to acc).
-# Order within a single pattern's names does not matter for set membership.
-# O(n) where n = length of xs.
-fn list_prepend_all(xs: List String, acc: List String) -> List String =
-  match xs with
-  | Nil -> acc
-  | Cons x rest -> list_prepend_all(rest, Cons(x, acc))
-
 # Free vars in a TDo step list, threading bound names left-to-right.
 # Unreachable today (translate_expr rejects TDo); kept for when that
 # translation lands — closure capture will then be correct without further
@@ -161,7 +126,7 @@ fn compute_free_vars_do_steps(steps: List typed_ast.TypedDoStep,
       | typed_ast.TDoBindStep pat e ->
           set_union(compute_free_vars(e, bound, top_level),
                     compute_free_vars_do_steps(rest,
-                      set_union(bound, set_from_list(pattern_names(pat))), top_level))
+                      set_union(bound, set_from_list(ast.pattern_names(pat))), top_level))
       | typed_ast.TDoLetStep name e ->
           set_union(compute_free_vars(e, bound, top_level),
                     compute_free_vars_do_steps(rest,
@@ -182,7 +147,7 @@ fn compute_free_vars_match_arms(arms: List typed_ast.TypedMatchBranch,
       | typed_ast.TypedMatchBranch pat body ->
           set_union(
             compute_free_vars(body,
-              set_union(bound, set_from_list(pattern_names(pat))), top_level),
+              set_union(bound, set_from_list(ast.pattern_names(pat))), top_level),
             compute_free_vars_match_arms(rest, bound, top_level))
 
 # Free vars in a TRecord field list — a record literal captured inside a lambda
@@ -2047,7 +2012,7 @@ fn find_capture_type_match_arms(arms: List typed_ast.TypedMatchBranch, name: Str
   | Cons arm rest ->
       match arm with
       | typed_ast.TypedMatchBranch pat body ->
-          if param_known(name, pattern_names(pat))
+          if param_known(name, ast.pattern_names(pat))
           then find_capture_type_match_arms(rest, name)
           else
             match find_capture_type(body, name) with
@@ -2068,7 +2033,7 @@ fn find_capture_type_do_steps(steps: List typed_ast.TypedDoStep, name: String) -
           match find_capture_type(e, name) with
           | Just t -> Just(t)
           | Nothing ->
-              if param_known(name, pattern_names(pat))
+              if param_known(name, ast.pattern_names(pat))
               then Nothing
               else find_capture_type_do_steps(rest, name)
       | typed_ast.TDoLetStep lname e ->
@@ -3887,7 +3852,7 @@ fn sra_escape_ok_go(name: String, rest: List typed_ast.TypedDoStep, width: Int, 
            else if set_member(name, compute_free_vars(e, set_empty(), top_level)) then false
            else sra_escape_ok_go(name, more, width, top_level, consumed)
        | typed_ast.TDoBindStep pat e ->
-           if set_member(name, set_from_list(pattern_names(pat))) then false
+           if set_member(name, set_from_list(ast.pattern_names(pat))) then false
            else if set_member(name, compute_free_vars(e, set_empty(), top_level)) then false
            else sra_escape_ok_go(name, more, width, top_level, consumed)
        | typed_ast.TDoExprStep e ->
@@ -6781,14 +6746,14 @@ fn pb_tail_callees_arms(arms: List typed_ast.TypedMatchBranch, bound: Set) -> Se
   | Cons b rest ->
       match b with
       | typed_ast.TypedMatchBranch pat body ->
-          set_union(pb_tail_callees_sc(body, set_union(bound, set_from_list(pattern_names(pat)))),
+          set_union(pb_tail_callees_sc(body, set_union(bound, set_from_list(ast.pattern_names(pat)))),
                     pb_tail_callees_arms(rest, bound))
 
 # Names a do-step binds into scope for the steps that follow it.
 fn pb_do_step_extend_bound(step: typed_ast.TypedDoStep, bound: Set) -> Set =
   match step with
   | typed_ast.TDoLetStep name _ -> set_insert(name, bound)
-  | typed_ast.TDoBindStep pat _ -> set_union(bound, set_from_list(pattern_names(pat)))
+  | typed_ast.TDoBindStep pat _ -> set_union(bound, set_from_list(ast.pattern_names(pat)))
   | typed_ast.TDoExprStep _ -> bound
 
 # Only the LAST do-step is in tail position, and only if it is a plain expression
@@ -7049,7 +7014,7 @@ fn pb_retarget_arms(arms: List typed_ast.TypedMatchBranch, mset: Set, m: Int, bo
       match b with
       | typed_ast.TypedMatchBranch pat body ->
           Cons(typed_ast.TypedMatchBranch(pat,
-                 pb_retarget_tail(body, mset, m, set_union(bound, set_from_list(pattern_names(pat))))),
+                 pb_retarget_tail(body, mset, m, set_union(bound, set_from_list(ast.pattern_names(pat))))),
                pb_retarget_arms(rest, mset, m, bound))
 
 fn pb_retarget_do(steps: List typed_ast.TypedDoStep, mset: Set, m: Int, bound: Set) -> List typed_ast.TypedDoStep =

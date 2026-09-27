@@ -49,6 +49,31 @@ export fn pattern_pos(p: Pattern) -> source.SourcePos =
   | TuplePattern _ pos -> pos
   | ConstructorPattern _ _ pos -> pos
 
+# Every variable name a pattern binds, in source order. A constructor's NAME is not
+# a binder — only its sub-patterns bind. Exhaustive on every variant so a new one
+# surfaces here at compile time instead of being silently dropped.
+# O(n) in pattern node count.
+export fn pattern_names(pat: Pattern) -> List String =
+  list_reverse(pattern_names_go(pat, Nil))
+
+# Prepend-and-reverse-once: `list_append` per node would make this O(n²).
+fn pattern_names_go(pat: Pattern, acc: List String) -> List String =
+  match pat with
+  | VarPattern name _ -> Cons(name, acc)
+  | WildcardPattern _ -> acc
+  | IntPattern _ _ -> acc
+  | BoolPattern _ _ -> acc
+  | StringPattern _ _ -> acc
+  | CharPattern _ _ -> acc
+  | UnitPattern _ -> acc
+  | TuplePattern pats _ -> pattern_names_list_go(pats, acc)
+  | ConstructorPattern _ pats _ -> pattern_names_list_go(pats, acc)
+
+fn pattern_names_list_go(pats: List Pattern, acc: List String) -> List String =
+  match pats with
+  | Nil -> acc
+  | Cons p rest -> pattern_names_list_go(rest, pattern_names_go(p, acc))
+
 # --- Function parameters ---
 
 # How a parameter takes ownership of a LINEAR argument (M4.5 borrowing). An enum

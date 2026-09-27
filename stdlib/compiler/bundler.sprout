@@ -1316,18 +1316,6 @@ fn param_names(params: List ast.Param) -> List String =
       match p with
       | ast.Param name _ _ -> Cons(name, param_names(rest))
 
-fn pattern_bindings(p: ast.Pattern) -> List String =
-  match p with
-  | ast.VarPattern name _ -> Cons(name, Nil)
-  | ast.TuplePattern items _ -> collect_pattern_bindings(items)
-  | ast.ConstructorPattern _ args _ -> collect_pattern_bindings(args)
-  | _ -> Nil
-
-fn collect_pattern_bindings(pats: List ast.Pattern) -> List String =
-  match pats with
-  | Nil -> Nil
-  | Cons p rest -> list_append(pattern_bindings(p), collect_pattern_bindings(rest))
-
 fn qualify_params(ctx: ResolveCtx, params: List ast.Param) -> List ast.Param =
   match params with
   | Nil -> Nil
@@ -1555,7 +1543,7 @@ fn qualify_match_branches(ctx: ResolveCtx, scope: List String, branches: List as
       match b with
       | ast.MatchBranch pat body ->
           Cons(ast.MatchBranch(qualify_pattern(ctx, pat),
-                               qualify_expr(ctx, list_append(scope, pattern_bindings(pat)), body)),
+                               qualify_expr(ctx, list_append(scope, ast.pattern_names(pat)), body)),
                qualify_match_branches(ctx, scope, rest))
 
 fn qualify_do_steps(ctx: ResolveCtx, scope: List String, steps: List ast.DoStep) -> List ast.DoStep =
@@ -1565,7 +1553,7 @@ fn qualify_do_steps(ctx: ResolveCtx, scope: List String, steps: List ast.DoStep)
       match step with
       | ast.DoBindStep pat expr ->
           Cons(ast.DoBindStep(qualify_pattern(ctx, pat), qualify_expr(ctx, scope, expr)),
-               qualify_do_steps(ctx, list_append(scope, pattern_bindings(pat)), rest))
+               qualify_do_steps(ctx, list_append(scope, ast.pattern_names(pat)), rest))
       | ast.DoLetStep name expr ->
           Cons(ast.DoLetStep(name, qualify_expr(ctx, scope, expr)),
                qualify_do_steps(ctx, Cons(name, scope), rest))
@@ -1635,7 +1623,7 @@ fn qualify_comprehension_gens(ctx: ResolveCtx, scope: List String, gens: List as
       | ast.ComprehensionGen pat src guards ->
           let qsrc = qualify_expr(ctx, scope, src)
           in let qpat = qualify_pattern(ctx, pat)
-          in let inner_scope = list_append(scope, pattern_bindings(pat))
+          in let inner_scope = list_append(scope, ast.pattern_names(pat))
           in let qguards = qualify_expr_list(ctx, inner_scope, guards)
           in let (qrest, final_scope) = qualify_comprehension_gens(ctx, inner_scope, rest)
           in (Cons(ast.ComprehensionGen(qpat, qsrc, qguards), qrest), final_scope)

@@ -1802,26 +1802,9 @@ fn lower_expr_list(exprs: List typed_ast.TypedExpr, ctx: LowerCtx) -> List typed
   | Nil -> Nil
   | Cons e rest -> Cons(lower_expr(e, ctx), lower_expr_list(rest, ctx))
 
-fn pat_bound_names(pat: ast.Pattern) -> List String =
-  match pat with
-  | ast.WildcardPattern _ -> Nil
-  | ast.VarPattern name _ -> Cons(name, Nil)
-  | ast.IntPattern _ _ -> Nil
-  | ast.BoolPattern _ _ -> Nil
-  | ast.StringPattern _ _ -> Nil
-  | ast.CharPattern _ _ -> Nil
-  | ast.UnitPattern _ -> Nil
-  | ast.TuplePattern pats _ -> pat_list_bound_names(pats)
-  | ast.ConstructorPattern _ pats _ -> pat_list_bound_names(pats)
-
-fn pat_list_bound_names(pats: List ast.Pattern) -> List String =
-  match pats with
-  | Nil -> Nil
-  | Cons p rest -> list_append(pat_bound_names(p), pat_list_bound_names(rest))
-
 fn do_step_bound_names(step: typed_ast.TypedDoStep) -> List String =
   match step with
-  | typed_ast.TDoBindStep pat _ -> pat_bound_names(pat)
+  | typed_ast.TDoBindStep pat _ -> ast.pattern_names(pat)
   | typed_ast.TDoLetStep name _ -> Cons(name, Nil)
   | typed_ast.TDoExprStep _ -> Nil
 
@@ -1833,7 +1816,7 @@ fn lower_branches(branches: List typed_ast.TypedMatchBranch, ctx: LowerCtx) -> L
       | typed_ast.TypedMatchBranch pat body ->
           match enrich_existential_branch(pat, ctx) with
           | (ext_pat, bctx) ->
-              Cons(typed_ast.TypedMatchBranch(ext_pat, lower_expr(body, ctx_with_bound(pat_bound_names(ext_pat), bctx))),
+              Cons(typed_ast.TypedMatchBranch(ext_pat, lower_expr(body, ctx_with_bound(ast.pattern_names(ext_pat), bctx))),
                    lower_branches(rest, ctx))
 
 # Stage 0b: prepare a match branch to unpack a constrained existential

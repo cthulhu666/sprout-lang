@@ -79,23 +79,6 @@ fn classify(b1: ast.MatchBranch, b2: ast.MatchBranch) -> Maybe(ast.Pattern, ast.
              else if c2 && ! c1 then Just((p1, body1, body2))
              else Nothing
 
-# The variable names a pattern binds — used to check whether a terminal
-# branch's body depends on its own (failing) match, which `let <pat> = e
-# else fb` cannot express: `fb` is matched against a bare wildcard
-# (parser.sprout: build_let_binding_match), so it has no access to whatever
-# the failing pattern would have bound (e.g. the `msg` in `Err msg -> ...`).
-fn pattern_bound_names(pat: ast.Pattern) -> List String =
-  match pat with
-  | ast.VarPattern name _ -> Cons(name, Nil)
-  | ast.ConstructorPattern _ subpats _ -> pattern_list_bound_names(subpats)
-  | ast.TuplePattern subpats _ -> pattern_list_bound_names(subpats)
-  | _ -> Nil
-
-fn pattern_list_bound_names(pats: List ast.Pattern) -> List String =
-  match pats with
-  | Nil -> Nil
-  | Cons p rest -> list_append(pattern_bound_names(p), pattern_list_bound_names(rest))
-
 fn name_in_list(name: String, names: List String) -> Bool =
   match names with
   | Nil -> false
@@ -173,8 +156,12 @@ fn template_parts_use_any(names: List String, parts: List ast.TemplateExprPart) 
        | ast.InterpPart e -> expr_uses_any(names, e))
       || template_parts_use_any(names, rest)
 
+# Does a terminal branch's body depend on its own (failing) match? `let <pat> = e
+# else fb` cannot express that: `fb` is matched against a bare wildcard
+# (parser.sprout: build_let_binding_match), so it has no access to whatever the
+# failing pattern would have bound (e.g. the `msg` in `Err msg -> ...`).
 fn terminal_needs_own_payload(pat: ast.Pattern, body: ast.Expr) -> Bool =
-  expr_uses_any(pattern_bound_names(pat), body)
+  expr_uses_any(ast.pattern_names(pat), body)
 
 # ---------------------------------------------------------------------------
 # Generic ast.Expr traversal — every variant, modeled on checker.sprout's

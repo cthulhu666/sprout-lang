@@ -2426,14 +2426,14 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   can be freely mixed), Scala 3 keeps optional braces, PureScript documents layout only.
   **Prerequisite before deleting:** the lint rule is currently the only thing pointing users at the
   fix, so removal must land the parse error's message carrying the same guidance.
-- [ ] `P3` **Five implementations of "which names does this pattern bind?"** —
-  `ast_to_ir.pattern_names`, `dce.pat_binds`, `linear_check.pattern_all_binders`,
-  `linear_check.pattern_linear_binders`, `verify_dispatch.pattern_bound_names`. All five are
-  exhaustive, so a new variant is a compile error at every one rather than a silent wrong answer —
-  but that is five sites to update in lockstep, and the return shapes differ (`List String`, `Bool`,
-  and a type-directed variant consulting `types.Type`), so a shared helper is not a mechanical
-  extraction. Worth doing when a pattern variant is next added, which is when the cost is actually
-  paid. Not urgent: exhaustiveness makes divergence loud, which is the property that matters.
+- [ ] `P3` **Three answers to "which names does this pattern bind?" remain** —
+  `ast.pattern_names` is the exported one and six copies now delegate to it, but `dce.bind_pat`
+  and `infer.bind_pattern` fold into an accumulator `Set` rather than returning a list, and
+  `linear_check.pattern_linear_binders` is type-directed: it consults `types.Type` to report only
+  the binders carrying obligations. The two `Set` ones want `ast.pattern_names_into(pat, acc)`,
+  to drop the intermediate list `set_from_list(ast.pattern_names(p))` allocates per match arm in
+  free-var computation; the type-directed one asks a different question and stays. All three
+  are exhaustive, so a new `Pattern` variant is a compile error at each — hence P3.
 - [ ] `P3` **`looks_like_do_step_start` duplicates `parse_expr`'s notion of "starts an expression",
   by hand** — eighteen `tok_is_*` disjuncts maintained in parallel with what `parse_expr` accepts,
   with nothing to detect divergence. Each divergence has cost a PR (a float literal and a prefix `!`
