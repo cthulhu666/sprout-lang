@@ -2450,9 +2450,11 @@ fn parse_decl_dispatch(tokens: Vec token.Token, i: Int) -> Result ParseError (as
       cur_pos(tokens, i)
     ))
 
-# wrap Name = TypeExpr [deriving (Class, ...)]
+# wrap Name <params> = TypeExpr [deriving (Class, ...)]
 # Zero-cost distinct type: single-constructor, single-field. The constructor
 # is named after the type and is implicit in the declaration syntax.
+# Params sit before `(..)`, as on an ADT; a param the RHS never uses is a
+# phantom index and is erased.
 # `deriving` is trailing, as on records: the `= T` RHS is self-contained, unlike
 # an ADT's `=` which opens a multi-line constructor list. `deriving` is a hard
 # keyword, so it cannot be mistaken for a further type argument in `= Dict Int`.
@@ -2460,13 +2462,14 @@ fn parse_wrap_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.De
   do
     (_, i2) <- expected_keyword("wrap", tokens, i)
     (name_tok, i3) <- expected_ident("wrap name", tokens, i2)
+    (params, i3b) <- collect_ident_list(tokens, i3, Nil)
     # The optional `(..)` constructor-export marker, in the same slot an ADT
     # carries it and discarded the same way: it never reaches the AST, and the
     # module surface recovers it by token scan (scan_exported_decl).
-    (_, i4) <- expected_symbol("=", tokens, skip_visibility(tokens, i3))
+    (_, i4) <- expected_symbol("=", tokens, skip_visibility(tokens, i3b))
     (inner, i5) <- parse_type_expr(tokens, i4)
     (deriving_classes, i6) <- parse_deriving_clause(tokens, i5)
-    Ok((ast.WrapDecl(token.token_text(name_tok), inner, deriving_classes, cur_pos(tokens, i)), i6))
+    Ok((ast.WrapDecl(token.token_text(name_tok), params, inner, deriving_classes, cur_pos(tokens, i)), i6))
 
 fn parse_type_decl_or_record(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
   if is_alias_type_decl(tokens, i) then parse_alias_decl(tokens, i)
@@ -2600,11 +2603,11 @@ fn scan_exported_decl(
     scan_surface_from(tokens, j + 1, name_at(tokens, j + 1, exported), ctor_types, globals)
   # A wrap's synthetic constructor shares the type's name, so `(..)` is the only
   # way to say which of the two is published — without it the type is exported
-  # and the constructor stays module-private (spec-v0 §5.6.1). A wrap takes no
-  # type parameters, so the marker sits directly after the name.
+  # and the constructor stays module-private (spec-v0 §5.6.1). Type parameters
+  # are skipped before looking for the marker, as on an ADT.
   else if tok_is_keyword(tok_at(tokens, j), "wrap") then
     scan_surface_from(tokens, j + 1, name_at(tokens, j + 1, exported),
-      if exports_ctors(tokens, j + 2) then name_at(tokens, j + 1, ctor_types) else ctor_types,
+      if exports_ctors(tokens, skip_type_param_idents(tokens, j + 2)) then name_at(tokens, j + 1, ctor_types) else ctor_types,
       globals)
   else if tok_is_keyword(tok_at(tokens, j), "type") then
     scan_exported_type(tokens, j, exported, ctor_types, globals)

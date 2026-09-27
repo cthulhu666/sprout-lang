@@ -191,7 +191,14 @@ The middle bullet of "do not use" is doing the real work — it's a *cost-benefi
 **Constraints (v1):**
 
 - Single-field only. Multi-field semantic structs use records or ADTs.
-- No type parameters on the wrap itself.
+
+**Type parameters are allowed** — `wrap Boxed a = List a` for a generic distinct
+type, and `wrap Tagged u = Int`, where `u` is *phantom*: it appears only in the
+type, so `Tagged Metres` and `Tagged Feet` stay distinct while both lower to a
+bare `i64`. That is the form to reach for when the distinction is an index
+(units, a handle's resource kind, a protocol state) rather than a payload.
+Note that `deriving` constrains every parameter, phantom ones included, so an
+index over a type with no `Eq` instance needs an explicit `instance`.
 
 **A wrap can hide its constructor, so it can carry an invariant.** `export wrap Foo = T` publishes the type alone; the constructor and the destructor pattern stay module-private, and `export wrap Foo (..) = T` publishes both. Outside the module the only way in is then a function the module exports — a smart constructor — which is what lets the type mean "validated" rather than "annotated". Use the abstract form when the wrap exists to enforce something (`path.File` rejecting an empty string, an unforgeable resource handle); use `(..)` when it exists only to keep two same-typed values apart, which is the common case and every current use in this repo. An abstract wrap needs an exported accessor, since the pattern is hidden too.
 

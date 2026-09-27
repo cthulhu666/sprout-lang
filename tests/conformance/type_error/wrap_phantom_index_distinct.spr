@@ -1,0 +1,23 @@
+# A phantom type parameter on a `wrap` separates two values that share one
+# representation. Both are an Int underneath, so only the index rejects this.
+#
+# No passing test can pin it: the rejected expression cannot appear in a file
+# that compiles (same reason as wrap_distinct_representations.spr).
+import stdlib.terminal as terminal
+
+wrap Tagged u = Int
+
+type Metres = | MetresTag
+
+type Feet = | FeetTag
+
+fn metres(n: Int) -> Tagged Metres = Tagged(n)
+
+fn takes_feet(t: Tagged Feet) -> Int =
+  match t with
+  | Tagged n -> n
+
+fn main() -> Unit !{IO} =
+  do
+    let wrong = takes_feet(metres(5))
+    terminal.write("unreachable")

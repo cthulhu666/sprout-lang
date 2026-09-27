@@ -226,7 +226,7 @@ export type InstanceMethodImpl (..) =
 # ClassDecl name type_params methods superclasses pos
 # InstanceDecl constraint instance_constraints methods pos
 # AliasDecl name type_params rhs pos
-# WrapDecl  name inner_type deriving_classes pos
+# WrapDecl  name type_params inner_type deriving_classes pos
 #
 # TypeDecl, RecordDecl and WrapDecl all carry deriving_classes: the (possibly
 # empty) list of class names from a `deriving (...)` clause; an empty list means
@@ -248,6 +248,9 @@ export type InstanceMethodImpl (..) =
 # single constructor Foo(x: T) -> Foo. Construction Foo(x) and destruction
 # `match | Foo x ->` are identity at the LLVM IR level (no alloc, no field
 # read).
+#
+# type_params are erased: `wrap Tagged u = Int` gives every `Tagged u` the same
+# representation as Int, so a parameter the RHS never mentions costs nothing.
 
 # Usage discipline for a declared type. A multiplicity, not a boolean: the concept
 # is inherently non-binary (cf. Idris 2 QTT 0/1/ω, Linear Haskell One/Many). M4.1
@@ -280,7 +283,7 @@ export type Decl (..) =
   | ClassDecl String (List String) (List ClassMethodSig) (List TypeConstraint) source.SourcePos
   | InstanceDecl TypeConstraint (List TypeConstraint) (List InstanceMethodImpl) source.SourcePos
   | AliasDecl String (List String) TypeExpr source.SourcePos
-  | WrapDecl String TypeExpr (List String) source.SourcePos
+  | WrapDecl String (List String) TypeExpr (List String) source.SourcePos
 
 # Position of a declaration — every Decl variant carries a SourcePos in its last
 # field. Used at diagnostic-construction seams so bundle-time errors report the
@@ -295,7 +298,7 @@ export fn decl_pos(d: Decl) -> source.SourcePos =
   | ClassDecl _ _ _ _ p -> p
   | InstanceDecl _ _ _ p -> p
   | AliasDecl _ _ _ p -> p
-  | WrapDecl _ _ _ p -> p
+  | WrapDecl _ _ _ _ p -> p
 
 # --- Name scope: how an importer spells a declared value ---
 #
@@ -326,7 +329,7 @@ export fn decl_value_scopes(d: Decl) -> List (String, NameScope) =
   | TypeDecl _ _ ctors _ _ _ -> ctor_value_scopes(ctors)
   | ClassDecl _ _ methods _ _ -> method_value_scopes(methods)
   # WrapDecl: the synthetic constructor is a value sharing the type's name.
-  | WrapDecl name _ _ _ -> [(name, ScopeModule)]
+  | WrapDecl name _ _ _ _ -> [(name, ScopeModule)]
   | _ -> Nil
 
 fn ctor_value_scopes(ctors: List TypeConstructor) -> List (String, NameScope) =

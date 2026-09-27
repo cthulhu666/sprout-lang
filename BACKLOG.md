@@ -1225,6 +1225,14 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   peephole. Out of scope: mixed `age + 1` with a bare literal (needs numeric-literal polymorphism);
   `Eq`/`Ord`/`ToString`, which now derive **structurally** (`docs/deriving-wrap-v0.md`) — lifting
   must not silently re-render them. `docs/coercions-and-literals-v1-draft.md` Case B.
+- [ ] `P2` **`deriving` constrains phantom type parameters, so an erased index cannot derive.**
+  `wrap Tagged u = Int deriving (Eq)` generates `Eq u => Eq (Tagged u)`, so `eq(metres(1),
+  metres(1))` fails with `No instance of Eq for Metres` even though the derived body only compares
+  the inner `Int`. Same for a phantom-param ADT — `instance_constraints_for` in `deriving.sprout`
+  emits one constraint per parameter without asking which are stored, and its own comment names the
+  fix ("walk fields to detect used vs. phantom"). `mark_phantom_params` already computes exactly
+  that answer for `linear_check`. It bites hardest on the units/typed-handle form that spec §5.6.1
+  and `docs/idiomatic-sprout.md` promote, where the index is a bare tag type with no instances.
 - [ ] `P2` **Investigate qualified imported-constructor access** (low confidence).
   `import stdlib.foo as f` then `f.MkCtor(x)` gave `Unknown variable: f.MkCtor` for a parametric
   ADT, while the *type* `f.Box` and functions `f.mk_box` resolved fine and a non-parametric ADT's

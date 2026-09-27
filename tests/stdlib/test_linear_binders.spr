@@ -119,6 +119,22 @@ fn sealed_used_once(n: Int) -> Int =
   let s = Sealed(File(n))
   in match s with | Sealed f -> use_file(f)
 
+# A wrap's own type parameters obey the same two rules as an ADT's: one the RHS
+# stores carries the obligation, one it never mentions is phantom and drops it.
+wrap Crate a = a
+
+wrap Tagged u = Int
+
+fn crated_used_once(n: Int) -> Int =
+  let c = Crate(File(n))
+  in match c with | Crate f -> use_file(f)
+
+fn wrap_phantom_dropped(n: Int) -> Int =
+  let t = Tagged(n)
+  in n
+
+fn wrap_phantom_param_dropped(t: Tagged File) -> Int = 1
+
 # A declaration may store ITSELF, or cycle through a sibling. The stored-field
 # walk memoizes by name so both terminate; before it there was nothing to descend
 # and the question never arose.
@@ -274,6 +290,10 @@ fn main() -> Unit !{IO} =
     check_eq("concrete linear field, used once", crate_used_once(23), 23),
     check_eq("concrete linear field two declarations deep", nested_crate_used_once(24), 24),
     check_eq("a wrap over a linear, used once", sealed_used_once(25), 25),
+    check_eq("a generic wrap storing its param, used once", crated_used_once(29), 29),
+    check_eq("a wrap's phantom parameter stores nothing (let)", wrap_phantom_dropped(30), 30),
+    check_eq("a wrap's phantom parameter stores nothing (param)",
+      wrap_phantom_param_dropped(Tagged(31)), 1),
     check_eq("a self-recursive declaration terminates", chain_depth(Link (End(26))), 27),
     check_eq("a declaration cycling through a sibling terminates",
       ping_depth(Ping (Pong (PingEnd(27)))), 28),

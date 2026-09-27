@@ -151,7 +151,27 @@ fn first_wrapdecl_deriving(src: String) -> List String =
               | [] -> Nil
               | [d | _] ->
                   match d with
-                  | ast.WrapDecl _ _ deriving_classes _ -> deriving_classes
+                  | ast.WrapDecl _ _ _ deriving_classes _ -> deriving_classes
+                  | _ -> Nil
+
+# The type parameters the parser stored on the first WrapDecl. Asserting the
+# list, not just that the source parsed: a parser that consumed the idents and
+# dropped them would still parse, and the erased-index feature rests on them
+# reaching the AST.
+fn first_wrapdecl_params(src: String) -> List String =
+  match lexer.tokenize(src) with
+  | Err _ -> Nil
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> Nil
+      | Ok prog ->
+          match prog with
+          | ast.Program decls _ ->
+              match decls with
+              | [] -> Nil
+              | [d | _] ->
+                  match d with
+                  | ast.WrapDecl _ params _ _ _ -> params
                   | _ -> Nil
 
 # True when the first decl is a `type linear ...` (multiplicity recorded as Linear).
@@ -350,6 +370,28 @@ fn main() -> Unit !{IO} =
       parse_fails("wrap Line = Int deriving ()"))
     assert_true(state, "wrap deriving without parens rejected (bare ClassName)",
       parse_fails("wrap Line = Int deriving Eq"))
+    # Type parameters on a wrap. Order is `wrap Name <params> (..) = T deriving
+    # (...)`, matching an ADT: params bind before the export marker.
+    #
+    # These assert the LIST, not its length: a reversal keeps the length and
+    # changes the meaning. Order is load-bearing — register_type_decl_raw
+    # left-folds params, mark_phantom_params indexes phantoms by position — and
+    # reversing a record's params here was a real bug (parse_record_type_decl),
+    # invisible at one parameter, which is why two and three are pinned too.
+    assert_eq(state, "wrap with one type param records it",
+      first_wrapdecl_params("wrap Boxed a = List a"), ["a"])
+    assert_eq(state, "wrap with two type params records both, in order",
+      first_wrapdecl_params("wrap Pair k v = List v"), ["k", "v"])
+    assert_eq(state, "wrap with three type params keeps declaration order",
+      first_wrapdecl_params("wrap Triple x y z = List z"), ["x", "y", "z"])
+    assert_eq(state, "wrap without params yields empty list",
+      first_wrapdecl_params("wrap Line = Int"), Nil)
+    assert_eq(state, "wrap params survive a trailing deriving clause",
+      first_wrapdecl_params("wrap Boxed a = List a deriving (Eq)"), ["a"])
+    assert_eq(state, "wrap params precede the (..) marker",
+      first_wrapdecl_params("wrap Pair k v (..) = List v"), ["k", "v"])
+    assert_eq(state, "wrap with params and (..) still records deriving",
+      list_length(first_wrapdecl_deriving("wrap Boxed a (..) = List a deriving (Eq, Ord)")), 2)
     # The `(..)` constructor-export marker sits between the name and the `=`,
     # the same slot an ADT uses, and so ahead of any trailing deriving clause.
     # A wrap's type and constructor share one name, so this is the only way to

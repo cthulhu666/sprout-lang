@@ -89,9 +89,15 @@ wrap Line = Int deriving (Eq, Ord, ToString)
 
 No new emitters. `expand_deriving_decls` reconstructs the wrap's implicit
 constructor as `ast.TypeConstructor(name, [inner], Nil, Nil)` and hands it to the
-existing ADT path (`derive_instances_for_classes`) with `Nil` type parameters — a
-wrap takes none in v0. `Eq`/`Ord` compare the single inner value; `ToString`
-renders `Line(3)`, positional rather than a record's `Line(v = 3)`.
+existing ADT path (`derive_instances_for_classes`), passing the wrap's own type
+parameters. `Eq`/`Ord` compare the single inner value; `ToString` renders
+`Line(3)`, positional rather than a record's `Line(v = 3)`.
+
+Because that path constrains one parameter per position, a phantom parameter is
+constrained too: `wrap Tagged u = Int deriving (Eq)` yields `Eq u => Eq (Tagged u)`.
+That is the ADT behaviour, not a wrap-specific one (`deriving.sprout`,
+`instance_constraints_for`); an index over a type with no `Eq` needs an explicit
+`instance`.
 
 Validation gets its own arm rather than reusing the ADT validator, for one
 reason: the ADT `Enum` rejection reads "constructor `Line` has fields", naming a

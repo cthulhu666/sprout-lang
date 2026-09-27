@@ -1,0 +1,61 @@
+module main
+import stdlib.test (check_eq, run_suite)
+
+# Behavioral tests for type parameters on `wrap`.
+#
+# `wrap Name p1 .. = T` declares a zero-cost distinct type over a *generic*
+# representation. Two capabilities that a monomorphic `wrap` cannot express:
+#   - a generic newtype (`Boxed a` usable at Int and String in one program)
+#   - an erased compile-time index (`Tagged u`, where `u` is phantom)
+#
+# The rejection side lives in tests/conformance/type_error/, which is the only
+# place it can: a mismatch cannot appear in a file that compiles.
+
+wrap Boxed a = List a deriving (Eq, ToString)
+
+# `u` never appears on the right: an erased index, not a stored field.
+wrap Tagged u = Int
+
+# Two parameters, only the second stored.
+wrap Pair k v = List v
+
+type Meters = | MetersTag
+type Feet = | FeetTag
+
+fn unbox(b: Boxed a) -> List a =
+  match b with | Boxed xs -> xs
+
+fn tagged_value(t: Tagged u) -> Int =
+  match t with | Tagged n -> n
+
+fn meters(n: Int) -> Tagged Meters = Tagged(n)
+
+fn feet(n: Int) -> Tagged Feet = Tagged(n)
+
+fn pair_size(p: Pair k v) -> Int =
+  match p with | Pair vs -> list_length(vs)
+
+fn main() -> Unit !{IO} =
+  let ints = Boxed(Cons(1, Cons(2, Nil)))
+      strs = Boxed(Cons("a", Nil))
+      keyed = Pair(Cons("x", Cons("y", Cons("z", Nil))))
+  in run_suite("wrap_type_params", [
+    # One generic wrap, two element types in the same program. The monomorphic
+    # form cannot do this: its inner `a` would be a single shared variable.
+    check_eq("generic wrap at Int", list_length(unbox(ints)), 2),
+    check_eq("generic wrap at String", list_length(unbox(strs)), 1),
+
+    # A phantom parameter distinguishes the types without costing anything at
+    # runtime: both are an Int underneath, and `meters` lowers to `ret i64`.
+    check_eq("phantom index carries no payload",
+      tagged_value(meters(5)) + tagged_value(feet(3)), 8),
+
+    # A param the RHS never mentions sits beside one it does.
+    check_eq("mixed stored and phantom params", pair_size(keyed), 3),
+
+    # deriving goes through the ADT path, so the generated context is
+    # `Eq a => Eq (Boxed a)` and rendering stays structural.
+    check_eq("derived Eq on a generic wrap", eq(ints, Boxed (Cons(1, Cons(2, Nil)))), true),
+    check_eq("derived Eq separates values", eq(ints, Boxed (Cons(9, Nil))), false),
+    check_eq("derived ToString stays structural", to_string(strs), "Boxed([a])")
+  ])

@@ -506,7 +506,7 @@ fn build_ctor_table_acc(decls: List typed_ast.TypedDecl, next_tag: Int,
       # Wrap types: synthetic ctor with tag sentinel -1 (mirrors codegen.sprout wrap_tag() = -1).
       # Not added to regs — wrap types have no runtime allocation or tag.
       # next_tag is not incremented: wrap consumes no numeric tag slot.
-      | typed_ast.TPassThrough (ast.WrapDecl type_name inner _ _) ->
+      | typed_ast.TPassThrough (ast.WrapDecl type_name _ inner _ _) ->
           build_ctor_table_acc(rest, next_tag,
             dict_set(type_name, sprout_ir.CtorInfo(-1, 1, 1, fk.ctor_field_kinds_string(Cons(inner, Nil)), ""), acc),
             regs, cenv)
