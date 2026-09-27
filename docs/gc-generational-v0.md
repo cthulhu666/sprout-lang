@@ -4,6 +4,12 @@
 change is proposed here. Normative GC behaviour remains
 [docs/compiler-internals.md §Non-moving GC](compiler-internals.md).
 
+§1–§11 are about the nursery: whether to build one, and for what. **§12 answers a
+separate question — why the collector is not switchable per workload — and §13 measures
+pause rather than throughput**, which is the axis §12 identifies and the only one where
+the intended workloads have any exposure. Size-class reuse and coalescing are a third
+question, in [gc-size-classes-v0.md](gc-size-classes-v0.md).
+
 ## 1. Problem statement
 
 GC is ~59% of self-hosted compile time (mark 42% / sweep pass 1 32% / pass 2 0.1%,
@@ -470,3 +476,125 @@ swept.
 
 This is measurable today with no new instrument — `SPROUT_DEBUG_GC=1` logs `elapsed_us`
 per cycle. §13 does it.
+
+## 13. Measured — pause, not throughput (2026-09-27)
+
+§12.4 said the axis worth measuring is pause and that no new instrument is needed. This
+is that measurement. Harness: `bench/gc_pause/bench.sh`, which runs the workloads under
+`SPROUT_DEBUG_GC=1` and summarises the `elapsed_us` the runtime already logs per cycle.
+macOS arm64.
+
+**Every cell is the minimum of that statistic over five runs**, and the reason is
+§13.4: a single run measures the machine's load as much as the collector. Two earlier
+drafts of this section were discarded for that — the first written from single runs,
+where re-running the same binaries moved `gc_roots`'s p99 from 28 µs to 514 µs with
+every GC counter identical, and the second from three runs, which still had one
+configuration reported twice at 250 µs and 67 µs. Load can only add time, so the
+minimum over repetitions is the statistic that converges; at five the two tables below
+that measure `gc_roots` at the default threshold agree to within 1 µs. This answers
+"how cheap does this configuration get", which is what a cost model needs, and it is
+**not** a worst-case pause — §13.4 says why that is not available here at all.
+
+### 13.1 Where the workloads sit today
+
+| workload | cycles | p50 µs | p95 µs | p99 µs | live | swept |
+|---|---|---|---|---|---|---|
+| `gc_roots` (game tick) | 5,591 | 21 | 25 | 28 | 76 | 4,019 |
+| http_log_middleware | 30,947 | 25 | 29 | 32 | 23 | 4,070 |
+| nqueens (search) | 8,279 | 39 | 47 | 151 | 59 | 4,035 |
+| digit_recognizer (ML) | 39 | 383 | 458 | 495 | 4,485 | 8,994 |
+| `test_gc_age_retain_all` | 6 | 742 | 2,178 | 2,384 | 52,308 | 70,340 |
+
+Nothing here threatens a 16 ms frame. The three small-live-set shapes collect in tens of
+microseconds; only the 150k-node chain crosses a millisecond, and it is a synthetic
+worst case rather than a program.
+
+### 13.2 Pause tracks heap slots, not the live set
+
+`gc_roots` holds ~70 objects live regardless of settings, so raising the GC floor grows
+the heap the sweep walks while leaving the mark work alone. Over three decades:
+
+| `SPROUT_GC_THRESHOLD` | cycles | p50 µs | p99 µs | live | swept | ns per slot (p50) |
+|---|---|---|---|---|---|---|
+| 4,096 | 5,591 | 22 | 29 | 76 | 4,019 | 5.5 |
+| 40,960 | 550 | 203 | 225 | 63 | 40,855 | 5.0 |
+| 409,600 | 55 | 1,936 | 2,051 | 69 | 408,548 | 4.7 |
+| 4,096,000 | 6 | 20,500 | 21,407 | 59 | 3,745,017 | 5.5 |
+
+Ten times the heap, ten times the pause, with the live set flat — **~5 ns per slot**,
+constant to ±8% over a 1,000× range. This is the direct confirmation of §5.3's aside:
+sweep pass 1 walks every slot, so pause is a function of heap size.
+
+nqueens agrees on the proportionality and not on the coefficient: p50 38 → 7,300 →
+79,775 µs at 4,096 / 409,600 / 4,096,000 for a flat ~58 live, which is 9.4 → 17.9 →
+21.5 ns per swept slot. The top decade is clean (10× heap, 10.9× pause); the jump is
+between the floor and 409,600, where the heap outgrows cache. That reading is
+unestablished — what is established is that ~5 ns/slot is a `gc_roots` number and the
+proportionality is the general one.
+
+### 13.3 But the live set sets a floor the knobs cannot lower
+
+If pause were only about heap size, shrinking the heap would fix any pause. It does not,
+because the live set must still be marked and its slots still walked. Turning the adapt
+factor down 4× on the 150k-node chain:
+
+| `SPROUT_GC_ADAPT_FACTOR` | cycles | p50 µs | p99 µs | live | swept |
+|---|---|---|---|---|---|
+| 1.5 | 14 | 692 | 2,261 | 64,768 | 30,145 |
+| 2 | 9 | 694 | 2,381 | 62,007 | 46,893 |
+| 3 (default) | 6 | 716 | 2,254 | 52,308 | 70,340 |
+| 6 | 4 | 1,030 | 1,818 | 44,032 | 105,510 |
+
+Four times the factor leaves p99 flat — 1.8–2.4 ms across the whole range, with no
+trend, while the heap it sweeps grows 3.5×. **The floor is ~35 ns per live object** at
+p99 on this pointer-chasing shape (2,261 µs / 64,768), or ~11 ns at p50. Cheaper shapes
+do better, so the coefficient depends on object layout and locality, but the form is
+fixed: you cannot tune below the live set.
+
+**What that means for a frame budget.** At ~35 ns per live object, a 2 ms slice of a
+16 ms frame is spent at roughly **57,000 live objects**, and the whole frame at roughly
+**460,000**. A game holding a level's geometry and entities resident is in that range,
+and it would be the first Sprout workload that is. Three caveats before acting on it:
+the coefficient is shape-dependent and must be re-measured on the real heap; a copying
+nursery does not help, because the old generation is still swept (§12.4); and the lever
+that does apply is making the sweep proportional to something other than total slots.
+
+### 13.4 The tail is not attributable, and this instrument cannot fix that
+
+`http_log_middleware`'s slowest five collections in one run took 3,105–8,516 µs against
+a 33 µs median **with identical `live`, `swept`, `marked` and region counts**. nqueens'
+slowest five were 837–1,224 µs against 39 µs, likewise identical. No logged quantity
+separates them from the median, and the tail does not reproduce: the same http binary
+gave max = 182 µs in one run and 8,516 µs in the next.
+
+On a laptop that is machine noise, page behaviour or preemption rather than collector
+work — and it cannot be told apart from a real pause tail, which is why the tables above
+stop at p99 and take a minimum across runs. It matters anyway: an 8.5 ms stall is a
+dropped frame whatever caused it.
+
+**And there is one independent sighting on real hardware doing real work.**
+[green-task-pool-v0.md](green-task-pool-v0.md) measured an HTTP server under load and
+recorded "max pause 6.9 ms, 21 ms total across 6 s", correctly dismissing GC as the
+cause of an 18–120 ms client-side tail: "an order of magnitude short". That conclusion
+stands for the question it answered. But 6.9 ms is *not* short of a 16 ms frame — the
+same number that exonerates the collector for a throughput benchmark disqualifies it for
+a frame budget, and unlike §13.4's outliers it was not measured on an idle laptop. Two
+readings of one measurement, and which one applies depends entirely on the deadline.
+
+Resolving this needs a per-phase timer inside `sprout_gc_collect` and a quiet machine,
+filed in `BACKLOG`. **Until then no pause claim past p99 is available from this
+instrument** — including a reassuring one.
+
+### 13.5 Verdict on the question that prompted §12
+
+On the workload shapes measured here the collector is not a pause problem: tens of
+microseconds on the game, web and search shapes. The exposure is a single mechanism —
+pause ∝ total slots, floored by the live set — and it arrives with heap size, not with
+workload kind. That is an argument for making the sweep cheaper. It is not an argument
+for a second collector.
+
+What this does **not** license is "GC pauses are fine". Every number above is a
+minimum-of-five on an idle machine, the median is not the thing a frame misses, and
+§13.4's one real-server datapoint is 6.9 ms. The honest summary is that the median is
+cheap, the mechanism that would make it expensive is known and not yet triggered by any
+Sprout program, and the tail is unmeasured.

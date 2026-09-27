@@ -2070,6 +2070,23 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   (stop wiping; remove/re-add only the swept regions' entries) is the natural next increment, and
   the per-region touched-class bookkeeping it needs already exists
   (`fl_region_commit`/`fl_region_rollback`).
+- [ ] `P2` **GC pause is proportional to total heap slots and floored by the live set — a
+  game-scale heap would miss frames.** Measured 2026-09-27, `docs/gc-generational-v0.md` §13: 10×
+  the heap gives 10× the pause with the live set flat (~5 ns/slot over three decades), because
+  sweep pass 1 walks every slot. Turning `SPROUT_GC_ADAPT_FACTOR` down 4× leaves a 65k-live
+  workload's p99 flat, so the live set is a floor no knob lowers — ~35 ns per live object on a
+  pointer-chasing shape, spending 2 ms of a 16 ms frame at ~57k live objects. No
+  current workload is close (game, web and search shapes collect in tens of µs), so this is
+  exposure, not a regression. The fix is a sweep proportional to something other than total slots;
+  generation-scoped freelists are the filed prerequisite, and a copying nursery does not help.
+- [ ] `P3` **The GC pause tail is unattributable — `SPROUT_DEBUG_GC` cannot separate collector
+  work from machine noise.** `docs/gc-generational-v0.md` §13.4: http_log_middleware's slowest
+  collections ran 3.1–8.5 ms against a 33 µs median with identical `live`, `swept`, `marked` and
+  region counts, and the same binary showed max 182 µs in one run and 8,516 µs in another. So no
+  pause claim past p99 can be made from this instrument, which matters the moment anyone asks
+  whether a frame was dropped. Needs a per-phase timer inside `sprout_gc_collect` (mark / sweep
+  pass 1 / pass 2 / region release) and a quiet machine; the per-cycle `elapsed_us` already logged
+  is the aggregate and cannot be decomposed after the fact.
 - [ ] `P2` **Skip re-pushing already-rooted function parameters.** The rooting pass roots every
   heap-typed value live across a trigger, with no notion that one already owns a slot in the same
   frame — the recursive `queens(…)` re-roots three vectors it already holds. The fix belongs in
