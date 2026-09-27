@@ -10,7 +10,7 @@ An ensemble diff review that **records that it ran**: N independent passes, dedu
 verify pass, and a ledger row plus a findings file on disk either side of it.
 
 It costs at most **N + 1 agents**, known before the run — four at the default level, or three when
-nothing clears the verify gate and the skeptic is skipped. The effort level moves `N`; §Arguments
+the passes found nothing and the skeptic is skipped. The effort level moves `N`; §Arguments
 has the table.
 
 Two things follow from that and govern the procedure below. The run is **owned** — the row is
@@ -56,12 +56,16 @@ one on the same branch, and a level that drifts with whatever `/effort` happens 
 These five rows are a cost ladder, not a measurement — the same caveat `README.md` already records
 for `N = 3`, now multiplied by five. `BACKLOG.md` owns closing that.
 
-**What the level does NOT move**, deliberately: `VERIFY_CAP`, `LINE_WINDOW`, `OVERLAP_MIN` and the
-verify gate. Those are calibration constants with an open `BACKLOG.md` entry to measure them, and a
-constant that varies with a flag cannot be calibrated. One consequence is worth stating plainly:
-at `xhigh` and `max` the cap binds hard — 8 passes at up to 8 findings each is 64 raw against a cap
-of 10 — so most findings come back **unverified rather than unchecked-and-presented-as-checked**.
-The fix for that is more skeptics (the judge-panel entry in `BACKLOG.md`), not a bigger cap.
+**What the level does NOT move**, deliberately: `VERIFY_CAP`, `LINE_WINDOW` and `OVERLAP_MIN`. Those
+are calibration constants with an open `BACKLOG.md` entry to measure them, and a constant that varies
+with a flag cannot be calibrated. One consequence is worth stating plainly: at `xhigh` and `max` the
+cap binds hard — 8 passes at up to 8 findings each is 64 raw against a cap of 10 — so most findings
+come back **unverified rather than unchecked-and-presented-as-checked**. The fix for that is more
+skeptics (the judge-panel entry in `BACKLOG.md`), not a bigger cap.
+
+The verify gate keeps its shape — a low is checked only when corroborated — but corroboration is now
+counted by **location**, not by wording similarity. Two reviewers pointing at the same `file:line`
+corroborate each other however differently they phrased it. See §Notes for what that cost.
 
 **The target.** A PR number, branch name or path, passed through to the reviewers, which review it
 instead of the working diff. The reviewer prompt has always described this; until the arguments
@@ -106,6 +110,12 @@ Note that `votes` does not measure how many *passes* agreed: dedup pools every p
 before clustering, so one pass reporting the same bug at two nearby lines produces a 2-vote cluster
 on its own.
 
+`votes` also answers a narrower question than it looks like it does. It counts reviewers who worded
+a finding alike, because that is what clustering can see — so it is the right input for *presentation*
+(is this one finding or two?) and the wrong one for *triage* (did anyone else point here?). Triage
+reads `corroboration`, which counts reports at the same `file:line` whatever words they used. Keying
+the gate on `votes` is what let a real regression through unverified.
+
 **4. Write the findings to disk** before reporting them, at the path the ledger names:
 
 ```
@@ -113,9 +123,16 @@ bash "$(git rev-parse --show-toplevel)/scripts/review_ledger.sh" findings <run-i
 ```
 
 Write every finding there — confirmed, unverified and refuted, each with its file:line, severity,
-votes and scenario. This is the step that makes the next one checkable. Findings that exist only
-inside a chat message cannot be pointed at afterwards, which is the same failure the ledger exists
-to fix, one level down: a count without a list says a review happened but not what it said.
+corroboration count and scenario. This is the step that makes the next one checkable. Findings that
+exist only inside a chat message cannot be pointed at afterwards, which is the same failure the
+ledger exists to fix, one level down: a count without a list says a review happened but not what it
+said.
+
+**Also write the workflow's `raw` array**, verbatim JSON, to the path `review_ledger.sh raw <id>`
+names. That file is the only record of what the passes actually said *before* clustering, and it is
+what makes `OVERLAP_MIN`, `LINE_WINDOW` and the cap measurable later. They were carried for three
+runs on recollection alone — "synonyms, ~0.3 overlap" — because the summaries the threshold scored
+were thrown away as soon as they were merged. Nobody will reconstruct them afterwards.
 
 **5. Close the ledger row** with the counts the workflow returned, and the level it ran at:
 
@@ -274,7 +291,6 @@ const passes = await parallel(
 // bug once per pass that found it costs N times as much for one answer.
 const all = passes.filter(Boolean).flatMap(p => p.findings || [])
 const RANK = { low: 0, medium: 1, high: 2 }
-const byVotes = (a, b) => b.votes - a.votes || RANK[b.severity] - RANK[a.severity]
 
 // Two reviewers describing ONE bug rarely land on one line. Keying on
 // `file:line` split those into two entries with one vote each, and both were
@@ -300,13 +316,37 @@ const overlap = (a, b) => {
 const LINE_WINDOW = 6
 const OVERLAP_MIN = 0.5
 
+// One file, two spellings. An agent returns an absolute path or a repo-relative
+// one depending on how it navigated, and keying on the raw string never merges
+// the two — the line and overlap tests below are never even reached. Run
+// 1790183127-58366 returned 5 findings that were really 3, split exactly this way.
+//
+// No repo root is available in here, so canonicalise by SUFFIX instead: the
+// relative spelling is always a tail of the absolute one, so each path collapses
+// to the shortest path in this run that it ends with on a segment boundary. That
+// cannot merge two genuinely different files, because the whole relative path has
+// to match — only a reviewer reporting a bare basename could collide, and that
+// path was ambiguous before it got here.
+const paths = [...new Set(all.map(f => f.file))]
+const canon = new Map()
+for (const p of paths) {
+  let best = p
+  for (const q of paths) {
+    if (q.length < best.length && p.endsWith(`/${q}`)) best = q
+  }
+  canon.set(p, best)
+}
+const pathOf = f => canon.get(f.file) || f.file
+const keyOf = f => `${pathOf(f)}:${f.line}`
+
 const byFile = new Map()
 for (const f of all) {
-  if (!byFile.has(f.file)) byFile.set(f.file, [])
-  byFile.get(f.file).push(f)
+  const k = pathOf(f)
+  if (!byFile.has(k)) byFile.set(k, [])
+  byFile.get(k).push(f)
 }
 const deduped = []
-for (const [, group] of byFile) {
+for (const [path, group] of byFile) {
   group.sort((a, b) => a.line - b.line)
   const clusters = []
   for (const f of group) {
@@ -315,40 +355,83 @@ for (const [, group] of byFile) {
     // the chain outruns the window.
     const hit = clusters.find(c => f.line - c.lastLine <= LINE_WINDOW &&
                                    overlap(f.summary, c.summary) >= OVERLAP_MIN)
-    if (!hit) { clusters.push({ ...f, votes: 1, lastLine: f.line }); continue }
+    // `file: path` reports the canonical spelling, not whichever the first
+    // reviewer in the group happened to use.
+    if (!hit) {
+      clusters.push({ ...f, file: path, votes: 1, lastLine: f.line, alsoReported: [] })
+      continue
+    }
     hit.votes += 1
     hit.lastLine = f.line
     // Carry the more severe wording, not the lower-numbered line's: the summary
     // is what the reader acts on, and the harsher reading is the one to answer.
+    // The wording NOT carried is kept in `alsoReported` rather than dropped. It
+    // used to be discarded, which made a wrong merge delete a finding outright
+    // and is the real reason OVERLAP_MIN had to sit high — the threshold was
+    // protecting against data loss, not mismeasurement. Keeping both costs a
+    // noisier entry and nothing else.
     if (RANK[f.severity] > RANK[hit.severity]) {
+      hit.alsoReported.push(hit.summary)
       hit.severity = f.severity
       hit.summary = f.summary
       hit.scenario = f.scenario
       hit.line = f.line
+    } else {
+      hit.alsoReported.push(f.summary)
     }
   }
   for (const c of clusters) { delete c.lastLine; deduped.push(c) }
 }
 log(`${all.length} raw findings from ${passes.filter(Boolean).length} passes -> ${deduped.length} distinct`)
 
-// Verification earns its cost on a finding that is severe or corroborated; on a
-// lone low-severity doc nit it is a full agent spent confirming a typo. Those
-// are still REPORTED, just unverified — visible and cheap, rather than
-// invisible or expensive.
+// What gets verified is decided by severity, then corroboration, then the cap —
+// in that order, and by nothing else. A finding past the cap is still REPORTED,
+// just unverified: visible and cheap, rather than invisible or expensive.
 //
-// The cut is deliberately NOT on votes alone. On the run that motivated it, the
-// most valuable finding — a real regression the author had just introduced —
-// was single-vote medium, and a `votes >= 2` gate would have dropped it.
+// Ordering must not be votes-first. On the run that motivated the rule, the most
+// valuable finding — a real regression the author had just introduced — was
+// single-vote medium, so anything that ranked corroboration above severity would
+// have dropped it.
 //
 // VERIFY_CAP bounds what one skeptic is asked to hold at once. Past it the
 // findings are reported unverified rather than dropped.
 //
-// Eviction is severity-major, NOT `byVotes`: votes-first put ten corroborated
+// Eviction is severity-major, NOT agreement-major: votes-first put ten corroborated
 // lows ahead of a lone high and evicted the high, reinstating through the cap
 // the votes-only gate the paragraph above rejects. Report order stays
 // votes-first — that is about reading order, not about what gets checked.
-const worthVerifying = f => f.severity !== 'low' || f.votes >= 2
-const bySeverity = (a, b) => RANK[b.severity] - RANK[a.severity] || b.votes - a.votes
+//
+// CORROBORATION IS COUNTED BY LOCATION, not by wording. `votes` comes out of the
+// clustering above, so it measures whether two reviewers PHRASED a thing alike —
+// a presentation question. What triage needs is whether two reviewers pointed at
+// the same PLACE, and those are not the same measurement. Keying the gate on
+// `votes` cost a real regression: run 1790417756-48747 reported one at
+// ast_to_ir.sprout:7512 twice, the pair scored ~0.46, and both halves fell
+// through as 1-vote lows. Run 1790255333-48433 split one bug three ways at an
+// identical path, where one summary ("replaced the single divide-at-the-end")
+// shares no content word with another ("per-digit scaling") — no lexical
+// measure merges those, and no threshold would have. Location does.
+const locVotes = new Map()
+for (const f of all) {
+  const k = keyOf(f)
+  locVotes.set(k, (locVotes.get(k) || 0) + 1)
+}
+const corroboration = f => Math.max(f.votes, locVotes.get(keyOf(f)) || 1)
+
+// Reading order for the report: most-corroborated first, severity breaking ties.
+// Deliberately the mirror image of the eviction order below — what to CHECK is
+// severity-major, what to READ FIRST is agreement-major.
+const byCorroboration = (a, b) =>
+  corroboration(b) - corroboration(a) || RANK[b.severity] - RANK[a.severity]
+
+// The gate still stands, and only its INPUT changed: `votes` → `corroboration`.
+// Removing it outright was tried and is wrong. When every finding is an
+// uncorroborated low the gate leaves `toVerify` empty and no skeptic is spawned at
+// all — that is the "or three agents" case in the header, and a cap cannot
+// reproduce it, because a cap only bounds a batch it has already decided to send.
+const worthVerifying = f => f.severity !== 'low' || corroboration(f) >= 2
+const bySeverity = (a, b) =>
+  RANK[b.severity] - RANK[a.severity] || corroboration(b) - corroboration(a)
 const ranked = deduped.filter(worthVerifying).sort(bySeverity)
 const toVerify = ranked.slice(0, VERIFY_CAP)
 const belowGate = deduped.filter(f => !worthVerifying(f))
@@ -413,8 +496,12 @@ return {
   target: TARGET || null,
   found: deduped.length,
   confirmed: confirmed.length,
-  findings: confirmed.sort(byVotes),
-  unverified: [...belowGate, ...pastCap, ...unanswered].sort(byVotes),
+  // Every pass's findings as reported, before clustering. Step 4 writes these to
+  // the ledger so a later threshold change can be measured against real runs
+  // rather than argued from memory of one.
+  raw: all,
+  findings: confirmed.sort(byCorroboration),
+  unverified: [...belowGate, ...pastCap, ...unanswered].sort(byCorroboration),
   refuted: judged.filter(f => f.verdict && f.verdict.refuted),
 }
 ```

@@ -8,16 +8,6 @@ Rationale and measurements live in `README.md`; the skill itself is `SKILL.md`.
 
 ## Backlog
 
-- [ ] `P1` **Dedup keys on the raw `file` string, so one bug reported at two path spellings scores
-  two 1-vote findings.** Agents return an absolute path or a repo-relative one depending on how
-  they navigated, and `byFile` never merges across the two — the line and overlap tests are never
-  reached. Run `1790183127-58366` (PR #345) returned 5 findings that were really 3: two pairs split
-  exactly this way. Not cosmetic, because votes drive the verify gate
-  (`severity !== 'low' || votes >= 2`) — both pairs would have cleared it at 2 votes; instead
-  nothing did and the skeptic was skipped. One line fixes it: normalise `f.file` against the repo
-  root before `byFile.set`. Land it before measuring the threshold entry below, whose under-merge
-  evidence (three pairs in run `1789928144-93446`) may be this bug rather than `OVERLAP_MIN`.
-
 - [ ] `P1` **The ensemble has never been A/B'd against the built-in, so 4 agents may find less than
   one does.** Only the reviewer *prompt* is close to a port; the fan-out, dedup and verify around it
   are this skill's own design (`README.md` §What the original actually does). Run both on one
@@ -40,16 +30,21 @@ Rationale and measurements live in `README.md`; the skill itself is `SKILL.md`.
   the old cost at the default level, though not at `max`, where the panel would also be what makes
   the verify cap survivable. Do it after the A/B, so its effect is visible against a baseline.
 
-- [ ] `P2` **`OVERLAP_MIN` under-merges, now on same-path evidence the entry above cannot explain.**
-  `SKILL.md` clusters within 6 lines at 0.5 summary overlap, verifies only when
-  `severity !== 'low' || votes >= 2`, and caps the batch at `VERIFY_CAP = 10`. Run
-  `1790255333-48433` split ONE bug into three entries at `stdlib/prelude.sprout:1812` and another
-  into three at `parser.sprout:55` — identical paths, so the path-key `P1` is not the cause and
-  0.5 is. Reviewers wrote "per-digit scaling", "digit-by-digit accumulation" and "replaced the
-  single divide-at-the-end" for one defect: synonyms, ~0.3 overlap. Reported `found` overstated
-  distinct bugs roughly 2x, and votes understate agreement, which drives the verify gate. Prefer
-  a stem/synonym-tolerant similarity over raising 0.5 blindly. The cap comes from nothing and
-  binds hardest at `max` (8x8 = 64 raw against 10); fix that with more skeptics, not a bigger cap.
+- [ ] `P2` **`OVERLAP_MIN` still under-merges, so the reported `found` overstates distinct bugs.**
+  Triage no longer depends on it — the verify gate reads co-location, and merging keeps both
+  summaries — so what is left is a *counting* error, not a lost finding. Run `1790255333-48433`
+  reported one defect as three at `stdlib/prelude.sprout:1812`: "per-digit scaling",
+  "digit-by-digit accumulation", "replaced the single divide-at-the-end". No lexical measure
+  merges the third with the first, so stem/synonym tolerance will not close this; the fix is
+  probably a similarity that is not word-set overlap at all. Two known weaknesses to fix first:
+  `Math.min(|A|,|B|)` penalises a verbose reviewer, and `STOP` is 24 words, so filler inflates
+  both sets. **Measure before tuning** — the raw pre-dedup findings are now kept at
+  `review_ledger.sh raw <id>`, which is what 0.5 never had.
+
+- [ ] `P2` **`VERIFY_CAP = 10` comes from nothing and binds hardest where it matters least.**
+  At `max`, 8 passes at up to 8 findings each is 64 raw against a cap of 10, so most findings come
+  back unverified. Fix with more skeptics (the judge-panel entry above), not a bigger cap: one
+  skeptic holding 64 findings judges none of them well.
 
 - [ ] `P2` **Sprout-specific review dimensions are absent, which was the point of owning this.**
   A generic reviewer cannot know GC rooting rules for `stdlib/compiler/` and `runtime/`, that a
