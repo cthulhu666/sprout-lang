@@ -1868,7 +1868,8 @@ pattern — tuple, `wrap`, record, one-variant ADT — is accepted and `Just x` 
 not. To drop elements, say so with `list_filter_map`.
 
 **Guards** must have type `Bool`. A guard is evaluated only when every guard to
-its left, on the same generator, has passed.
+its left, on the same generator, has passed. A comprehension guard is this `if`
+syntax, not the prelude's `guard` function (§8.5), which builds a `Result`.
 
 **Evaluation order and multiplicity.** Generators nest left-to-right, the
 leftmost being outermost, and results are produced depth-first: for two
@@ -3371,6 +3372,8 @@ provides per-type combinators covering the axes no class does:
 |---|---|
 | `maybe_with_default(fallback, m)` | `m`'s value, or `fallback` when `Nothing` |
 | `maybe_or_else(primary, fallback)` | `primary` when `Just`, else `fallback` (left-biased choice) |
+| `result_from_maybe(err, m)` | `Ok` of `m`'s value, or `Err(err)` when `Nothing` |
+| `guard(condition, err)` | `Ok(())` when `condition`, else `Err(err)` — a precondition a `do` can bind. Unrelated to a comprehension guard (§5.10), which is syntax |
 | `result_map`, `result_map_error`, `result_and_then`, `result_with_default`, `result_pipe*` | the `Result` family (see prelude) |
 
 ## 8.6 Automatic Instance Derivation (`deriving`) (Experimental)

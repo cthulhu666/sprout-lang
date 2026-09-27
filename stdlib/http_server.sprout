@@ -209,11 +209,6 @@ fn parse_header_pair(pair: (String, String)) -> Maybe (String, String) =
 fn parse_header_line(raw: String) -> Maybe (String, String) =
   and_then(parse_header_pair, string.split_once(raw, ":"))
 
-fn result_from_maybe(err: e, value: Maybe a) -> Result e a =
-  match value with
-  | Nothing -> Err(err)
-  | Just unwrapped -> Ok(unwrapped)
-
 fn parse_header_lines(lines: Vec String, index: Int, total: Int, headers: Dict String) -> ServerResult (Dict String) =
   if index >= total then Ok(headers)
   else

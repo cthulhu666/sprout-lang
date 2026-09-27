@@ -85,6 +85,12 @@ map(trim, dict_get(key, d))                  # Maybe String -> Maybe String
 
 # chain another fallible step (Monad `and_then`):
 and_then(parse_int, dict_get("port", d))     # Maybe String -> Maybe Int
+
+# cross from Maybe into Result by naming the error:
+result_from_maybe(NoPort, dict_get("port", d))   # -> Result ConfigError String
+
+# state a precondition as a Result, so a `do` block can bind it:
+guard(port > 0, BadPort)                     # Bool -> Result ConfigError Unit
 ```
 
 `map` and `and_then` work over any `Functor`/`Monad` — `Maybe`, `Result`, and
@@ -92,6 +98,15 @@ and_then(parse_int, dict_get("port", d))     # Maybe String -> Maybe Int
 `result_map_error`/`result_with_default`. Still `match` directly when you branch
 on the shape instead of threading the payload onward (see "Match the producing
 call directly").
+
+`result_from_maybe` and `guard` are what let a whole parse be one `do` block:
+every step answers `Result`, so the binds thread and the first failure names
+itself, instead of a `match` per field whose only content is which error to give.
+
+`guard` is for a predicate no type can carry — a range, an ordering between two
+fields. It is not the easy way out of "parse, don't validate"
+([guidelines.md](./guidelines.md) #4): when the check is "this is a valid X",
+return an `X` that cannot exist otherwise and let its absence be the error.
 
 **In a per-element loop, match directly instead.** A combinator is a real call,
 so the `Maybe` must be boxed to be passed to it; the CPR peephole unboxes only a

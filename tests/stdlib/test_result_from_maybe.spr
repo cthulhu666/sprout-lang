@@ -1,0 +1,60 @@
+import stdlib.test (check_eq, run_suite)
+
+# `result_from_maybe` is unwrap-or-fail and `guard` is a predicate that answers in
+# `Result`, so a `do` block can bind it. Both were written out privately first:
+# `stdlib/http_server.sprout` and `examples/http_get_cli.sprout` each carried a copy of
+# the former, and an application carried both at about ten sites.
+#
+# Each function alone is a two-line match. The cases that earn their keep are the
+# composed ones at the bottom, where a wrong short-circuit is the failure to catch.
+
+type DecodeError = Missing | Negative
+
+fn reason(err: DecodeError) -> String =
+  match err with
+  | Missing -> "missing"
+  | Negative -> "negative"
+
+fn rendered(r: Result DecodeError Int) -> String =
+  match r with
+  | Ok value -> `ok:${to_string(value)}`
+  | Err err -> `err:${reason(err)}`
+
+fn rendered_unit(r: Result DecodeError Unit) -> String =
+  match r with
+  | Ok _ -> "ok"
+  | Err err -> `err:${reason(err)}`
+
+fn rendered_text(r: Result String Int) -> String =
+  match r with
+  | Ok value -> `ok:${to_string(value)}`
+  | Err err -> `err:${err}`
+
+# The motivating shape: unwrap a Maybe into a Result, then gate the value on a predicate.
+fn decode(raw: Maybe Int) -> Result DecodeError Int =
+  do
+    value <- result_from_maybe(Missing, raw)
+    _ <- guard(value >= 0, Negative)
+    Ok(value * 2)
+
+fn main() -> Unit !{IO} =
+  run_suite("result_from_maybe / guard", [
+    # --- result_from_maybe: the Maybe -> Result direction ---
+    check_eq("just becomes ok", rendered(result_from_maybe(Missing, Just(7))), "ok:7"),
+    check_eq("nothing becomes err", rendered(result_from_maybe(Missing, Nothing)), "err:missing"),
+    # A zero payload is still a Just, so it must not be read as an absence.
+    check_eq("zero payload survives", rendered(result_from_maybe(Missing, Just(0))), "ok:0"),
+    # The error is whatever the caller named; `e` is polymorphic, not fixed to one type.
+    check_eq("error type is polymorphic", rendered_text(result_from_maybe("gone", Nothing)), "err:gone"),
+
+    # --- guard: the Bool -> Result direction ---
+    check_eq("true is ok", rendered_unit(guard(true, Negative)), "ok"),
+    check_eq("false carries the error", rendered_unit(guard(false, Negative)), "err:negative"),
+
+    # --- composed in a `do` over Result, which is the reason both exist ---
+    check_eq("both gates pass", rendered(decode(Just(21))), "ok:42"),
+    check_eq("stops at the missing value", rendered(decode(Nothing)), "err:missing"),
+    # The predicate must short-circuit before the multiply rather than doubling a negative.
+    check_eq("stops at the predicate", rendered(decode(Just(-3))), "err:negative"),
+    check_eq("predicate boundary is inclusive", rendered(decode(Just(0))), "ok:0")
+  ])
