@@ -338,6 +338,8 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
   - `result_map_error(f, r)`
   - `result_and_then(f, r)`
   - `result_with_default(fallback, r)`
+  - `result_from_maybe(err, m)` turns `Nothing` into `Err(err)`
+  - `guard(condition, err)` is `Ok(())` or `Err(err)`, for a check inside `do`
   - `result_pipe(f, r)` aliases `result_and_then` in pipeline style
   - `result_pipe_ok(f, r)` aliases `result_map` in pipeline style
   - `result_pipe_error(f, r)` aliases `result_map_error` in pipeline style
