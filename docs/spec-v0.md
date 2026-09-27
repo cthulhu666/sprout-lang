@@ -1092,6 +1092,10 @@ over one representation and neither costs anything at runtime — both lower to 
 bare `i64`. This is the mechanism behind compile-time units, typed handles and
 state-indexed resources; §5.8's rules for phantom positions apply unchanged.
 
+Choosing between a parameterized wrap and a family of monomorphic ones, and the
+four patterns this enables: `docs/wrap-type-params-v0.md`, with a runnable file
+per pattern in `examples/wrap_*.sprout`.
+
 `deriving` on a parameterized wrap goes through the ADT path (§8.6), so the
 generated context constrains **every** parameter, phantom ones included:
 `wrap Tagged u = Int deriving (Eq)` yields `Eq u => Eq (Tagged u)` and so cannot

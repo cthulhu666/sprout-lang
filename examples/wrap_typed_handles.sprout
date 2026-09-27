@@ -1,0 +1,55 @@
+module examples.wrap_typed_handles
+
+# One parameterized `wrap` in place of a family of newtypes. An external system —
+# a graphics shim, a driver, a C library — hands back a bare slot index per kind of
+# resource it loaded; `Handle k` makes each kind a distinct type over that one `Int`
+# (spec §5.6.1), so binding a texture where a shader belongs stops compiling.
+#
+# One parameter earns its keep here because `slot_of` is written once for every
+# kind, and because a downstream module can name `Handle` at a tag this file never
+# heard of — though BUILDING one there needs `(..)` on the export. Separate
+# `wrap Texture = Int` declarations would be stronger where neither applies;
+# `docs/wrap-type-params-v0.md` has that comparison.
+
+import stdlib.terminal (term_write)
+
+wrap Handle k = Int
+
+type Texture = | Texture
+type Shader = | Shader
+type Sound = | Sound
+
+# Loaders pin the kind. Registry lookup is faked with the slot number itself.
+fn load_texture(slot: Int) -> Handle Texture = Handle(slot)
+
+fn load_shader(slot: Int) -> Handle Shader = Handle(slot)
+
+fn load_sound(slot: Int) -> Handle Sound = Handle(slot)
+
+# Written once, for every kind. Call it only where a handle meets the foreign
+# boundary that consumes it; everywhere else pass the handle through.
+fn slot_of(h: Handle k) -> Int =
+  match h with
+  | Handle i -> i
+
+# Kind-specific operations name the kind they accept.
+fn bind_shader(h: Handle Shader) -> String = `glUseProgram(${to_string(slot_of(h))})`
+
+fn bind_texture(h: Handle Texture) -> String = `glBindTexture(${to_string(slot_of(h))})`
+
+fn play(h: Handle Sound, gain: Double) -> String =
+  `play(slot=${to_string(slot_of(h))}, gain=${to_string(gain)})`
+
+fn main() -> Unit !{IO} =
+  do
+    let diffuse = load_texture(3)
+    let lit = load_shader(11)
+    let thruster = load_sound(2)
+
+    term_write(bind_texture(diffuse) ++ "\n")
+    term_write(bind_shader(lit) ++ "\n")
+    term_write(play(thruster, 0.8) ++ "\n")
+
+    # Rejected at compile time — the mistake this file exists to stop:
+    #   bind_shader(diffuse)  -- Type mismatch: Shader vs Texture
+    term_write(`slots: ${to_string(slot_of(diffuse) + slot_of(lit) + slot_of(thruster))}\n`)
