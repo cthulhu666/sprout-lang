@@ -71,7 +71,7 @@ ERROR: check: Non-exhaustive match on stdlib.compiler.ast.Pattern — no branch 
 
 This is not a licence to sweep wildcards out of the codebase. Most of the ~500 catch-alls under `stdlib/compiler/` are legitimate defaults, and a nested match on a *different* type inside a variant's arm is a common and correct one (`pattern_linear_binders` matches `types.Type` inside its tuple arm).
 
-**Before writing a classifier, look for an existing one.** "Which names does this pattern bind?" is answered in five places — `ast_to_ir.pattern_names`, `dce.pat_binds`, `linear_check.pattern_all_binders`, `linear_check.pattern_linear_binders`, `verify_dispatch.pattern_bound_names`. Reuse beats a sixth copy; if the copy is unavoidable (different return shape, module layering), match the exhaustive form the others use.
+**Before writing a classifier, look for an existing one.** "Which names does this pattern bind?" is `ast.pattern_names` — exported, exhaustive, source-order. Call it. Three siblings answer a *different* question and stay: `dce.bind_pat` and `infer.bind_pattern` fold into an accumulator `Set`, and `linear_check.pattern_linear_binders` is type-directed. This paragraph used to list the copies instead, and undercounted them — prefer a name you can call to a census someone must maintain.
 
 Recorded because the cost is measured, not hypothetical: on 2026-08-14 a name-keyed dispatch check handled the top-level shadowing case and missed every local binder, making `fn f(append: …)` a hard compile error for seven hours. The fix for it was then written with a catch-all of its own, in a file whose four sibling functions were all exhaustive.
 

@@ -1002,33 +1002,16 @@ fn arm_sets_rest(rest: List typed_ast.TypedMatchBranch, ac: List LinUse, ab: Lis
   | LinErr p m -> LinErr(p, m)
   | LinOk bc bb -> alt_converge(ac, ab, bc, bb, at)
 
+# `pattern_linear_binders` reports only the binders carrying obligations;
+# `scope_shadow` gets EVERY binder, because a non-linear pattern variable must still
+# shadow a linear binding of the same name.
 fn arm_consumed(br: typed_ast.TypedMatchBranch, sc: LinScope, scrut_type: types.Type,
                 from_borrow: Bool, env: Dict types.Scheme) -> LinRes =
   match br with
   | typed_ast.TypedMatchBranch pat body ->
       scope_consumed(pattern_linear_binders(pat, scrut_type, env), from_borrow, body,
                      typed_ast.typed_expr_pos(body),
-                     scope_shadow(pattern_all_binders(pat), sc), env)
-
-# EVERY name a pattern binds, linear or not. `pattern_linear_binders` reports only
-# the linear ones (they carry obligations); this reports all of them, because a
-# NON-linear pattern variable must still shadow a linear binding of the same name.
-fn pattern_all_binders(pat: ast.Pattern) -> List String =
-  match pat with
-  | ast.VarPattern name _ -> Cons(name, Nil)
-  | ast.WildcardPattern _ -> Nil
-  | ast.IntPattern _ _ -> Nil
-  | ast.BoolPattern _ _ -> Nil
-  | ast.StringPattern _ _ -> Nil
-  | ast.CharPattern _ _ -> Nil
-  | ast.UnitPattern _ -> Nil
-  | ast.TuplePattern pats _ -> pattern_all_binders_list(pats)
-  | ast.ConstructorPattern _ subpats _ -> pattern_all_binders_list(subpats)
-
-fn pattern_all_binders_list(pats: List ast.Pattern) -> List String =
-  match pats with
-  | Nil -> Nil
-  | Cons p rest -> app_names(pattern_all_binders(p), pattern_all_binders_list(rest))
+                     scope_shadow(ast.pattern_names(pat), sc), env)
 
 # Check `body` with `binders` in scope. Owned binders must each be consumed
 # exactly once inside (reuse is caught by seq2; a leftover binder is a leak);

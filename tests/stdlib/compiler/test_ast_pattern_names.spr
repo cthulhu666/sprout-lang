@@ -1,0 +1,56 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.compiler.ast as ast
+import stdlib.compiler.source as source
+
+fn p() -> source.SourcePos = source.SourcePos(index = 0, line = 0, column = 0)
+
+fn commas(xs: List String) -> String =
+  match xs with
+  | [] -> ""
+  | [x] -> x
+  | [x | rest] -> x ++ "," ++ commas(rest)
+
+fn names(pat: ast.Pattern) -> String = commas(ast.pattern_names(pat))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    assert_eq(state, "a variable pattern binds its name",
+      names(ast.VarPattern("x", p())), "x")
+
+    # The eight non-binding variants. Each is listed because `pattern_names` is
+    # exhaustive on purpose: a new Pattern variant must break compilation there,
+    # and these pin what the existing ones answer.
+    assert_eq(state, "wildcard binds nothing", names(ast.WildcardPattern(p())), "")
+    assert_eq(state, "int literal binds nothing", names(ast.IntPattern(3, p())), "")
+    assert_eq(state, "bool literal binds nothing", names(ast.BoolPattern(true, p())), "")
+    assert_eq(state, "string literal binds nothing", names(ast.StringPattern("s", p())), "")
+    assert_eq(state, "char literal binds nothing", names(ast.CharPattern(97, p())), "")
+    assert_eq(state, "unit binds nothing", names(ast.UnitPattern(p())), "")
+
+    # A constructor's own name is not a binder — `Nothing` binds nothing at all.
+    assert_eq(state, "a nullary constructor binds nothing",
+      names(ast.ConstructorPattern("Nothing", [], p())), "")
+    assert_eq(state, "a constructor binds its sub-patterns, not its name",
+      names(ast.ConstructorPattern("Just", [ast.VarPattern("v", p())], p())), "v")
+
+    # Source order is the contract: bundler.qualify_expr appends the result to a
+    # scope list, so a reversed answer would be a silently different scope.
+    assert_eq(state, "a tuple binds left to right, skipping wildcards",
+      names(ast.TuplePattern([ast.VarPattern("a", p()),
+                              ast.WildcardPattern(p()),
+                              ast.VarPattern("b", p())], p())), "a,b")
+
+    assert_eq(state, "nesting is flattened in source order",
+      names(ast.ConstructorPattern("Pair",
+        [ast.TuplePattern([ast.VarPattern("l", p()), ast.VarPattern("r", p())], p()),
+         ast.VarPattern("t", p())], p())), "l,r,t")
+
+    assert_eq(state, "a right-nested constructor keeps source order",
+      names(ast.ConstructorPattern("Cons",
+        [ast.VarPattern("h", p()),
+         ast.ConstructorPattern("Cons",
+           [ast.VarPattern("h2", p()), ast.VarPattern("t", p())], p())], p())), "h,h2,t")
+
+    summary(state)
