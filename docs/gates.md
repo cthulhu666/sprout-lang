@@ -244,19 +244,36 @@ nothing about what it prints, and keep it small enough that the IR is readable w
 
 ## fmt/lint batching — `just fmt-batch-smoke`
 
-Asserts the three properties the `fmt`, `fmt-check` and `lint` loops rely on: every path in a batch
-is processed, an unreadable path reports on **stderr** and exits nonzero **without abandoning the
-rest of the batch**, and a flag outside its recognised position is refused.
+Asserts what the `fmt`, `fmt-check` and `lint` loops rely on: every path in a batch is processed, an
+unreadable *and* an unwritable path each report on **stderr** and exit nonzero **without abandoning
+the rest of the batch**, and a flag outside its recognised position is refused **without writing the
+file**.
 
-`just test` cannot reach any of them. They live in argv handling and the exit-status fold, not in a
-pure function, and `tests/stdlib/compiler/test_fmt_cli.spr` covers only the parse — `fmt_cli` exists
-as a separate module precisely because a module with `fn main` cannot be imported by a test (the
-imported `main` becomes the entry point, so the suite silently runs the driver instead).
+`just test` cannot reach the IO ones — they live in the exit-status fold, and a `.spr` suite has no
+way to make a path unreadable or to observe which stream a line went to. It *does* reach the flag
+case, because that half is the pure `fmt_cli.check_paths`, and
+`tests/stdlib/compiler/test_fmt_cli.spr` asserts it directly. That overlap is deliberate: the unit
+test gives the fast red signal on the parse, and the gate is the only thing that can check the
+consequence — that the file on disk was left alone. Keep both; neither subsumes the other.
+
+`fmt_cli` is a separate module because a module with `fn main` cannot be imported by a test at all —
+the imported `main` becomes the entry point, so the suite silently runs the driver instead.
+
+It runs against fixtures it writes into `$TMPD`, never against tracked sources. Both earlier versions
+of this gate asserted on `stdlib/bytes.sprout` and `stdlib/string.sprout`, which is wrong twice over:
+a new lint rule firing on either would fail this gate with a message about batching, and the flag
+regression it guards would have had it **rewrite a tracked file** — while `ci-fast-gates` runs
+`fmt-check` over the same file in parallel.
 
 Added 2026-09-28 with `-n 100` batching. Before it, `run_lint_file` **panicked** on an unreadable
 path: harmless at one file per process, but a batch would lose every later path in it. The flag case
 guards a bug that was live — `fmt <path> --check` matched `["fmt", path | _]` and **wrote** the file
 the caller asked to only check, because the trailing `| _` discarded the flag.
+
+The no-write assertion is mutation-checked, not assumed: restoring the swallow (`is_flag` never
+matching) makes the gate print the rewrite it caught, `fn  add_one( n: Int )` → `fn add_one(n: Int)`.
+Its fixture is deliberately *unformatted*, since "the file is unchanged" holds trivially for a file
+that was already formatted — which is what made the tracked-source version of this check vacuous.
 
 Wired into `just ci-fast-gates` and `just gate`. It was briefly left standalone, on the reasoning
 that `just lint` is not in CI (`.github/workflows/ci.yml`) so only `fmt-check` runs batched there —
