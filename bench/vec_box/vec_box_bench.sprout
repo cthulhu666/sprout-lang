@@ -1,0 +1,152 @@
+module main
+
+# What does the `Maybe` on an indexed read actually cost, and when is there one?
+#
+# `BACKLOG.md`'s "indexed `Vec` is far slower than an unboxed constructor" entry
+# records an unboxed accessor that was built, measured at no gain, and dropped.
+# `stdlib/mutable.sprout` says the opposite on `mutvec_at`: "in a hot loop the
+# per-read Just dominates via GC pressure". The two cannot both hold, and the
+# reason they appear to is that "boxed" is not a property of the ACCESSOR — it is
+# a property of what the caller does with the result.
+#
+# Four read shapes over one `MutVec Int`, plus immutable `Vec` beside them:
+#
+#   escaped   maybe_with_default(0, vec_get(i, vec))   Maybe crosses a call
+#   in_place  match vec_get(i, vec) with ...           same accessor, consumed here
+#   mut_get   match mutvec_get(v, i) with ...          MutVec, consumed in place
+#   mut_at    mutvec_at(v, i)                          no Maybe at all
+#
+# The CPR peephole rewrites a `Maybe`-returning call that a `match` consumes in
+# place into a two-word worker return, so only `escaped` reaches the allocator.
+# The emitted IR names which arm is which: `in_place` calls `@vec_get_worker`
+# (returning `{ i64, i64 }`), `escaped` calls `@vec_get` and `@maybe_with_default`.
+# Do not look for `sprout_gc_alloc` — the `Just` is built inside the C builtin,
+# so it never appears in the IR at all.
+#
+# The first two share one accessor and differ only in whether the Maybe escapes,
+# so their gap is the price of one `Just`. Total reads are held constant, so a
+# column compares down it as well as across.
+
+import stdlib.math as math
+import stdlib.mutable (MutVec, mutvec_at, mutvec_get, mutvec_new, mutvec_set)
+import stdlib.terminal (term_write)
+import stdlib.time as time
+
+let total_reads = 12000000
+
+fn fill(v: MutVec Int, i: Int, n: Int) -> Unit !{IO} =
+  if i >= n then ()
+  else
+    do
+      mutvec_set(v, i, i)
+      fill(v, i + 1, n)
+
+# The Maybe is an argument to a real call, so it must exist as a heap value.
+# Pure `vec_get`, because a do-bind would strip the Maybe before it could escape.
+fn sum_escaped(vec: Vec Int, i: Int, n: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else sum_escaped(vec, i + 1, n, acc + maybe_with_default(0, vec_get(i, vec)))
+
+# Consumed in place: the peephole turns this into an unboxed worker return.
+fn sum_matched(v: MutVec Int, i: Int, n: Int, acc: Int) -> Int !{IO} =
+  if i >= n then acc
+  else
+    do
+      let next = match mutvec_get(v, i) with
+                 | Just x -> acc + x
+                 | Nothing -> acc
+      sum_matched(v, i + 1, n, next)
+
+# No Maybe in the first place: `vector_get_direct`, bounds-checked, one word.
+fn sum_direct(v: MutVec Int, i: Int, n: Int, acc: Int) -> Int !{IO} =
+  if i >= n then acc
+  else
+    do
+      x <- mutvec_at(v, i)
+      sum_direct(v, i + 1, n, acc + x)
+
+# Immutable `Vec`, also consumed in place, for the pure-call comparison.
+fn sum_vec(vec: Vec Int, i: Int, n: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else
+    let next = match vec_get(i, vec) with
+               | Just x -> acc + x
+               | Nothing -> acc
+    in sum_vec(vec, i + 1, n, next)
+
+fn repeat_escaped(vec: Vec Int, n: Int, reps: Int, acc: Int) -> Int =
+  if reps <= 0 then acc
+  else repeat_escaped(vec, n, reps - 1, sum_escaped(vec, 0, n, acc))
+
+fn repeat_matched(v: MutVec Int, n: Int, reps: Int, acc: Int) -> Int !{IO} =
+  if reps <= 0 then acc
+  else
+    do
+      s <- sum_matched(v, 0, n, acc)
+      repeat_matched(v, n, reps - 1, s)
+
+fn repeat_direct(v: MutVec Int, n: Int, reps: Int, acc: Int) -> Int !{IO} =
+  if reps <= 0 then acc
+  else
+    do
+      s <- sum_direct(v, 0, n, acc)
+      repeat_direct(v, n, reps - 1, s)
+
+fn repeat_vec(vec: Vec Int, n: Int, reps: Int, acc: Int) -> Int =
+  if reps <= 0 then acc
+  else repeat_vec(vec, n, reps - 1, sum_vec(vec, 0, n, acc))
+
+# Elapsed microseconds over `total_reads` reads, as nanoseconds per read.
+fn ns_per_read(elapsed_micros: Int) -> Double =
+  to_double(elapsed_micros) * 1000.0 / to_double(total_reads)
+
+# Two decimals is the resolution this harness has; more digits invite a reader
+# to believe run-to-run noise.
+fn round_2(value: Double) -> Double =
+  math.truncate(value * 100.0 + 0.5) / 100.0
+
+fn pad(text: String, width: Int) -> String =
+  if str_len(text) >= width then text
+  else pad(text ++ " ", width)
+
+fn cell(value: Double) -> String = pad(to_string(round_2(value)), 11)
+
+fn measure(size: Int) -> Unit !{IO} =
+  do
+    let reps = total_reads / size
+    v <- mutvec_new(size, 0)
+    fill(v, 0, size)
+    let vec = vec_from_list(range_to_list(0, size))
+
+    let t0 = time.now_micros()
+    let escaped_sum = repeat_escaped(vec, size, reps, 0)
+    let t1 = time.now_micros()
+    matched_sum <- repeat_matched(v, size, reps, 0)
+    let t2 = time.now_micros()
+    direct_sum <- repeat_direct(v, size, reps, 0)
+    let t3 = time.now_micros()
+    let vec_sum = repeat_vec(vec, size, reps, 0)
+    let t4 = time.now_micros()
+
+    # `escaped` and `vec_in_place` share one accessor, so their gap is the Just.
+    let escaped = ns_per_read(t1 - t0)
+    let vec_in_place = ns_per_read(t4 - t3)
+
+    # Checksums must agree, or the arms are not doing the same work.
+    if (escaped_sum != matched_sum) || (matched_sum != direct_sum) || (direct_sum != vec_sum) then
+      term_write(`MISMATCH at size ${to_string(size)}\n`)
+    else
+      term_write(`${pad(to_string(size), 9)}${cell(escaped)}${cell(vec_in_place)}`
+        ++ `${cell(ns_per_read(t2 - t1))}${cell(ns_per_read(t3 - t2))}`
+        ++ `${to_string(round_2(escaped - vec_in_place))}\n`)
+
+fn range_to_list(i: Int, n: Int) -> List Int =
+  if i >= n then Nil
+  else Cons(i, range_to_list(i + 1, n))
+
+fn main() -> Unit !{IO} =
+  do
+    term_write(`${to_string(total_reads)} reads per cell, ns/read\n`)
+    term_write(`${pad("size", 9)}${pad("escaped", 11)}${pad("in_place", 11)}`
+      ++ `${pad("mut_get", 11)}${pad("mut_at", 11)}Just cost\n`)
+    list_each(measure, [3, 10, 100, 1000, 100000])
