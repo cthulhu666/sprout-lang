@@ -15,14 +15,15 @@ import stdlib.compiler.sprout_ir as sprout_ir
 #        CFG is a DAG through M2 (no loops); single reverse-topo pass.
 #        Phi successors contribute only the operand from the right predecessor.
 #     3. Forward rewrite per block:
-#        - For each op, compute live_after on-the-fly by walking remaining
-#          ops backward from block's live_out.
+#        - Index the block once (BlockLive: live_out + last-use per name), then
+#          ASK whether a name is live after op i.  Never a set per op.
 #        - For trigger ops, compute live_across (heap-typed values defined
 #          earlier that remain live), emit IRRoot before / IRUnroot after.
 #
-# Representation: liveness/heap sets are `Set`; `in_scope_ord` stays a
-# `List String` because the order of definitions is observable — IRRoot
-# emission order is deterministic in definition order.
+# Representation: liveness/heap sets are `Set`, per-op liveness a `Dict Int` of
+# last-use indices; `in_scope_ord` stays a `List String` because the order of
+# definitions is observable — IRRoot emission order is deterministic in
+# definition order.
 
 # ---------------------------------------------------------------------------
 # Trigger / heap predicates
@@ -681,35 +682,34 @@ fn compute_liveness(blocks: List sprout_ir.IRBlock) -> Dict Set =
   compute_liveness_loop(list_reverse(blocks), blocks, dict_empty())
 
 # ---------------------------------------------------------------------------
-# Per-op live_after, computed on-the-fly.
+# Per-op live_after, as a QUERY on one per-block index rather than a set per op.
+#
+# ONLY VALID for a name defined at or before op i — the one case where this
+# differs from the live_after recurrence is a name whose def is still ahead.
+# Every caller asks about in_scope_ord or rooted, which hold nothing else.
+# Under that precondition "in live_out, or used later" is exact.
+type BlockLive = (last_use: Dict Int, out: Set)
 
-fn after_minus_def(d: Maybe String, after_set: Set) -> Set =
-  match d with
-  | Nothing -> after_set
-  | Just name -> set_remove(name, after_set)
+fn last_use_of(name: String, last_use: Dict Int) -> Int =
+  match dict_get(name, last_use) with
+  | Just i -> i
+  | Nothing -> -1
 
-fn op_live_before(op: sprout_ir.IROp, live_after_op: Set) -> Set =
-  list_fold(\ (acc, u) -> set_insert(u, acc),
-            after_minus_def(op_def(op), live_after_op),
-            op_uses(op))
+fn live_after_at(name: String, i: Int, bl: BlockLive) -> Bool =
+  if set_member(name, bl.out) then true
+  else last_use_of(name, bl.last_use) > i
 
-# Per-op live_after for a whole block in ONE backward pass.  Returns, in op
-# order, the set live immediately AFTER each op.  O(block) total — replaces the
-# old per-op recompute that re-walked the suffix each time (O(block^2) per block
-# with a Set allocated at every step, the dominant codegen allocation churn).
-# `live_after(op_i) = live_before(op_{i+1})`, threaded backward from block_live_out.
-# Behaviour-identical to the former live_after_head(ops_suffix, block_live_out).
-fn block_live_afters_go(ops: List sprout_ir.IROp, block_live_out: Set) -> (List Set, Set) =
+# One forward pass; dict_set overwrites, so the surviving index is the greatest.
+# `i` counts positions in the same op list rewrite_ops walks, so the two agree.
+fn block_last_uses_loop(ops: List sprout_ir.IROp, i: Int, acc: Dict Int) -> Dict Int =
   match ops with
-  | Nil -> (Nil, block_live_out)
+  | Nil -> acc
   | Cons op rest ->
-      match block_live_afters_go(rest, block_live_out) with
-      | (rest_afters, after_op) ->
-          (Cons(after_op, rest_afters), op_live_before(op, after_op))
+      block_last_uses_loop(rest, i + 1,
+        list_fold(\ (d, u) -> dict_set(u, i, d), acc, op_uses(op)))
 
-fn block_live_afters(ops: List sprout_ir.IROp, block_live_out: Set) -> List Set =
-  match block_live_afters_go(ops, block_live_out) with
-  | (afters, _) -> afters
+fn block_live_of(ops: List sprout_ir.IROp, block_live_out: Set) -> BlockLive =
+  BlockLive(last_use = block_last_uses_loop(ops, 0, dict_empty()), out = block_live_out)
 
 # ---------------------------------------------------------------------------
 # heap_origin propagation
@@ -757,20 +757,25 @@ fn compute_heap_origin(blocks: List sprout_ir.IRBlock) -> Set =
 # observable: roots are emitted in definition order so identical input IR
 # produces byte-identical LLVM output.
 
-# Filter in_scope_ord (in reverse-def order) to those still live, returning in
-# DEFINITION order so emitted IRRoots are deterministic.
+# Filter in_scope_ord (in reverse-def order) to those still live AND not already
+# rooted, returning in DEFINITION order so emitted IRRoots are deterministic.
+# Skipping the rooted ones here rather than subtracting them afterwards is what
+# keeps this O(delta) in allocation: the delta is nearly always tiny while the
+# live set is O(block), so materialising the latter per trigger was quadratic.
 fn live_across_loop(in_scope_ord_rev: List String,
-                    live_after_op: Set,
+                    i: Int, bl: BlockLive, rooted: List String,
                     acc: List String) -> List String =
   match in_scope_ord_rev with
   | Nil -> acc
   | Cons v rest ->
-      if set_member(v, live_after_op)
-      then live_across_loop(rest, live_after_op, Cons(v, acc))
-      else live_across_loop(rest, live_after_op, acc)
+      if list_member(v, rooted) then live_across_loop(rest, i, bl, rooted, acc)
+      else if live_after_at(v, i, bl)
+      then live_across_loop(rest, i, bl, rooted, Cons(v, acc))
+      else live_across_loop(rest, i, bl, rooted, acc)
 
-fn live_across(in_scope_ord_rev: List String, live_after_op: Set) -> List String =
-  live_across_loop(in_scope_ord_rev, live_after_op, Nil)
+fn live_across(in_scope_ord_rev: List String, i: Int, bl: BlockLive,
+               rooted: List String) -> List String =
+  live_across_loop(in_scope_ord_rev, i, bl, rooted, Nil)
 
 # Some allocating triggers store their operand registers only AFTER the
 # allocation that can fire GC, and (unlike @str_concat, which SPROUT_HANDLEs
@@ -896,23 +901,25 @@ fn op_operand_set(op: sprout_ir.IROp) -> Set =
 # Like live_across, but also keeps any in-scope value that is an operand of
 # this op (def order preserved, deduped by the single traversal).
 fn roots_across_loop(in_scope_ord_rev: List String,
-                     live_after_op: Set,
+                     i: Int, bl: BlockLive, rooted: List String,
                      operands: Set,
                      acc: List String) -> List String =
   match in_scope_ord_rev with
   | Nil -> acc
   | Cons v rest ->
-      if set_member(v, live_after_op) || set_member(v, operands)
-      then roots_across_loop(rest, live_after_op, operands, Cons(v, acc))
-      else roots_across_loop(rest, live_after_op, operands, acc)
+      if list_member(v, rooted) then roots_across_loop(rest, i, bl, rooted, operands, acc)
+      else if live_after_at(v, i, bl) || set_member(v, operands)
+      then roots_across_loop(rest, i, bl, rooted, operands, Cons(v, acc))
+      else roots_across_loop(rest, i, bl, rooted, operands, acc)
 
-# Values to root across `op`: those live after it, plus — for operand-exposing
-# allocating ops — its own heap operands.  O(in_scope * uses).
-fn roots_across(in_scope_ord_rev: List String, live_after_op: Set,
-                op: sprout_ir.IROp) -> List String =
+# Values to root across `op` that are NOT already rooted: those live after it,
+# plus — for operand-exposing allocating ops — its own heap operands.
+# O(in_scope * uses).
+fn roots_across(in_scope_ord_rev: List String, i: Int, bl: BlockLive,
+                rooted: List String, op: sprout_ir.IROp) -> List String =
   if op_exposes_operands(op)
-  then roots_across_loop(in_scope_ord_rev, live_after_op, op_operand_set(op), Nil)
-  else live_across(in_scope_ord_rev, live_after_op)
+  then roots_across_loop(in_scope_ord_rev, i, bl, rooted, op_operand_set(op), Nil)
+  else live_across(in_scope_ord_rev, i, bl, rooted)
 
 # Emit one IRRoot per value (def order).  Each IRRoot consumes two fresh idx
 # slots (slot-name and discard-reg).  Result is prepended to acc (reverse).
@@ -941,15 +948,10 @@ fn unroot_op(n: Int, idx: Int, prefix: String) -> (sprout_ir.IROp, Int) =
 # per-trigger scheme's, so safety follows from that scheme's.  The stack is emptied
 # before each block terminator (empty-at-boundary), so cross-block rooting is
 # unchanged.  See docs/archive/root-once-rooting-design-2026-06-30.md.
-
-# `need` (def order) minus values already rooted; preserves def order.
-fn delta_to_push(need: List String, rooted: List String) -> List String =
-  match need with
-  | Nil -> Nil
-  | Cons v rest ->
-      if list_member(v, rooted)
-      then delta_to_push(rest, rooted)
-      else Cons(v, delta_to_push(rest, rooted))
+#
+# `roots_across` returns that delta directly, in def order.  It used to return
+# the whole live set for a separate subtraction step to filter down, which cost
+# a list cell per live value per trigger.
 
 # Emit IRRoots for to_push in def order; the new stack head is the last pushed
 # (= top), matching the runtime shadow-stack order.
@@ -960,42 +962,42 @@ fn push_phase(to_push: List String, rooted: List String, idx: Int, prefix: Strin
 
 # Pop consecutive dead values from the top (head); stop at the first still-live
 # value.  Returns the remaining stack and the pop count.
-fn pop_dead_top(rooted: List String, live_after: Set, n: Int) -> (List String, Int) =
+fn pop_dead_top(rooted: List String, i: Int, bl: BlockLive, n: Int) -> (List String, Int) =
   match rooted with
   | Nil -> (Nil, n)
   | Cons v rest ->
-      if set_member(v, live_after)
+      if live_after_at(v, i, bl)
       then (rooted, n)
-      else pop_dead_top(rest, live_after, n + 1)
+      else pop_dead_top(rest, i, bl, n + 1)
 
 fn emit_unroot_after(npop: Int, rooted2: List String, idx: Int, prefix: String,
                      acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, List String, Int) =
   match unroot_op(npop, idx, prefix) with
   | (op_unroot, idx2) -> (Cons(op_unroot, acc), rooted2, idx2)
 
-fn finish_trigger(live_after_op: Set, rooted1: List String, idx1: Int, prefix: String,
+fn finish_trigger(i: Int, bl: BlockLive, rooted1: List String, idx1: Int, prefix: String,
                   acc2: List sprout_ir.IROp) -> (List sprout_ir.IROp, List String, Int) =
-  match pop_dead_top(rooted1, live_after_op, 0) with
+  match pop_dead_top(rooted1, i, bl, 0) with
   | (rooted2, npop) ->
       if npop == 0
       then (acc2, rooted1, idx1)
       else emit_unroot_after(npop, rooted2, idx1, prefix, acc2)
 
-fn push_pop_trigger(op: sprout_ir.IROp, need: List String, live_after_op: Set,
+fn push_pop_trigger(op: sprout_ir.IROp, to_push: List String, i: Int, bl: BlockLive,
                     rooted: List String, idx: Int, prefix: String,
                     acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, List String, Int) =
-  match push_phase(delta_to_push(need, rooted), rooted, idx, prefix, acc) with
+  match push_phase(to_push, rooted, idx, prefix, acc) with
   | (acc1, rooted1, idx1) ->
-      finish_trigger(live_after_op, rooted1, idx1, prefix, Cons(op, acc1))
+      finish_trigger(i, bl, rooted1, idx1, prefix, Cons(op, acc1))
 
 # Per-op: a trigger pushes its need-delta, emits the op, then pops dead top values;
 # a non-trigger is emitted unchanged with the stack untouched.
-fn process_op(op: sprout_ir.IROp, live_after_op: Set, in_scope_ord: List String,
+fn process_op(op: sprout_ir.IROp, i: Int, bl: BlockLive, in_scope_ord: List String,
               rooted: List String, idx: Int, prefix: String, summary: Dict Bool,
               acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, List String, Int) =
   if op_triggers_gc_summary(op, summary)
-  then push_pop_trigger(op, roots_across(in_scope_ord, live_after_op, op),
-                        live_after_op, rooted, idx, prefix, acc)
+  then push_pop_trigger(op, roots_across(in_scope_ord, i, bl, rooted, op),
+                        i, bl, rooted, idx, prefix, acc)
   else (Cons(op, acc), rooted, idx)
 
 # Pop all remaining roots BEFORE the terminator — emitting them after a terminator
@@ -1029,12 +1031,12 @@ fn update_scope(op: sprout_ir.IROp, heap_origin: Set,
           else ord
       | _ -> ord
 
-# `live_afters` is the precomputed per-op live_after list (parallel to `ops`),
-# from block_live_afters — so the per-op live set is read, not recomputed.
+# `i` is the op's position in the block, the index `bl.last_use` is keyed on.
 # `rooted` is the persistent root stack (head = top), empty at block entry.  The
 # last op in a block is its terminator: pop all remaining roots before it.
 fn rewrite_ops(ops: List sprout_ir.IROp,
-               live_afters: List Set,
+               i: Int,
+               bl: BlockLive,
                heap_origin: Set,
                in_scope_ord: List String,
                rooted: List String,
@@ -1045,17 +1047,14 @@ fn rewrite_ops(ops: List sprout_ir.IROp,
   match ops with
   | Nil -> (list_reverse(acc), idx)
   | Cons op rest ->
-      match live_afters with
-      | Nil -> (list_reverse(acc), idx)
-      | Cons live_after_op la_rest ->
-          match rest with
-          | Nil -> finish_block(op, rooted, idx, prefix, acc)
-          | _ ->
-              match process_op(op, live_after_op, in_scope_ord, rooted, idx, prefix, summary, acc) with
-              | (acc1, rooted1, idx1) ->
-                  rewrite_ops(rest, la_rest, heap_origin,
-                              update_scope(op, heap_origin, in_scope_ord),
-                              rooted1, idx1, prefix, summary, acc1)
+      match rest with
+      | Nil -> finish_block(op, rooted, idx, prefix, acc)
+      | _ ->
+          match process_op(op, i, bl, in_scope_ord, rooted, idx, prefix, summary, acc) with
+          | (acc1, rooted1, idx1) ->
+              rewrite_ops(rest, i + 1, bl, heap_origin,
+                          update_scope(op, heap_origin, in_scope_ord),
+                          rooted1, idx1, prefix, summary, acc1)
 
 fn seed_in_scope_loop(names: List String, ord: List String) -> List String =
   match names with
@@ -1081,7 +1080,8 @@ fn rewrite_block_full(b: sprout_ir.IRBlock,
   match b with
   | sprout_ir.IRBlock lbl ops ->
       match rewrite_ops(ops,
-                        block_live_afters(ops, compute_live_out(b, all_blocks, live_in_map)),
+                        0,
+                        block_live_of(ops, compute_live_out(b, all_blocks, live_in_map)),
                         heap_origin,
                         seed_in_scope(intersect_to_list(lookup_live(lbl, live_in_map), heap_origin)),
                         Nil,

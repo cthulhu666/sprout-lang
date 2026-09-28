@@ -775,6 +775,9 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   `Semigroup (Dict v)`, and several `vec_*` (`map`/`filter`/`filter_map`/`reverse`/`slice`).
   `vec_sort_by`'s doc comment claims O(n log n) and rebuilds O(n²). Document true complexity inline
   or fix to linear. Findings and probes: `docs/fundamentals-code-review-handoff-2026-07-03.md`.
+  Also `set_remove`: it reinserts every element into a fresh set where an AVL delete is already
+  available — `NativeSet` IS the `Map` BST with value 0, and `map_remove` calls `bst_remove_node`.
+  O(n) allocations instead of O(log n), and it needs a `native_set_remove` extern, so ASK FIRST.
 - [ ] `P2` **`unicode.lookup` allocates a closure per table search.** `find_tag(count, chunk, cp)`
   takes its chunk accessor as a `Int -> String` parameter, and passing `gcb_chunk` allocates a
   closure at every call. Measured with `SPROUT_DEBUG_ALLOC` over a segmentation probe: 82,000
@@ -782,11 +785,15 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   fast path skipped the searches. The fast path hid it for ASCII; non-Latin text still pays. Options
   are a non-higher-order entry point per table, or making a static function argument not allocate.
   `sample` never showed this — it flattened into `str_slice`; only the per-kind counters named it.
-- [ ] `P3` **Cost gates cover one workload.** `just render-cost-gate` budgets a TUI frame and
-  `tests/stdlib/test_byte_offset_cost.spr` pins one complexity claim; nothing prices a compile, a
-  parse or a stdlib hot path, so the same class of bug is still unguarded everywhere else. Worth a
-  `cost-golden` over 4–5 fixed workloads on the same counters before writing more one-off probes.
-  Shapes and when to use which: `docs/gates.md` §Render cost.
+- [ ] `P3` **Cost gates cover three workloads, and none prices BYTES.** `render-cost-gate` budgets a
+  TUI frame, `test_byte_offset_cost.spr` pins one complexity claim, `rooting-cost-gate` prices a
+  compile; a parse and the stdlib hot paths are still unguarded. The sharper gap: every one of them
+  counts allocations, and no counter reports bytes — right-nested `++` versus `string_concat_many`
+  allocate the same NUMBER of objects, so a regression worth 22× in peak RSS shows up as 1.7× in
+  `gc_swept` and 16% in `sprout_obj`. That is why `rooting-cost-gate` caps `map` but not `gc_swept`:
+  1.5× separation against ~13% build-to-build noise. A bytes-allocated counter, or a portable
+  peak-RSS arm, would close it and re-enable that budget. Worth a `cost-golden` over 4–5 fixed
+  workloads on shared counters first. Shapes and when to use which: `docs/gates.md` §Render cost.
 - [ ] `P3` **Mid-string `str_slice` is O(start)**, so a scanner whose offset advances is still
   quadratic. Prefix slicing no longer is — `str_slice` walks to `start + count` and stops, making
   `slice(s, 0, k)` independent of `|s|`. Closing the rest needs a codepoint-to-byte cache on String
@@ -2327,16 +2334,15 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   panic, or make the header the sole authority on length and stop calling `strlen` — wider than
   this warrants until something needs embedded NULs. Consequence: `unicode.cluster_sizes` is the
   primary API and `graphemes` is documented lossy for U+0000.
-- [ ] `P2` **A large list/`Vec` literal is not a usable way to ship a data table.** A literal of N
-  `Int`s lowers to ~11 IR lines per element and costs O(N²) compiler memory: 800 → 825 MB, 2,000
-  → 4,631 MB. Past that it stops compiling at all — N=6,000 fails immediately with
-  `GC root pool exhausted` (a fixed `RootNode g_root_pool[131072]`). The ceiling's location between
-  2,000 and 6,000 is established; the ~22-roots-per-element accounting is inferred, not verified.
-  **Workaround that works today: ship the table as a STRING literal and decode it at startup** —
-  the same 2,000 entries cost 49 MB and 218 IR lines, emitted IR being constant-size whatever the
-  table. Lexing is still superlinear in literal length (80 KB source → 1.9 GB), so chunk across
-  several few-KB literals with a compact encoding. Fixing the `ir_lowering` quadratic moves the
-  memory curve but not the root-pool ceiling — a separate fixed limit, and both must go.
+- [ ] `P2` **A large list/`Vec` literal hits a fixed root-pool ceiling.** N=6,000 `Int`s in one
+  literal fails with `GC root pool exhausted` (a fixed `RootNode g_root_pool[131072]`) — in
+  `--phase check`, so this is the COMPILER's own root stack recursing over the literal, not emitted
+  roots, and 22 × 6,000 ≈ 132,000 matches the pool exactly. The O(N²) compiler memory that used to
+  dominate is fixed (800 → 48 MB, 2,000 → 179 MB, from 825 MB / 4,631 MB): see
+  `docs/gates.md` §Compiling one long block. Lexing is reported superlinear in literal length
+  (80 KB → 1.9 GB) on a string-literal source; unverified since, and untestable this way while the
+  pool dies first. Shipping the table as a STRING literal decoded at startup remains the
+  smaller-IR option: emitted IR is constant-size whatever the table.
 - [ ] `P2` **Allow a layout `do` block inside call parentheses** — an inline multi-statement
   effectful lambda as a call argument. `range_fold(\ (s, k) -> do <newline> stmt1 …, seed, r)`
   fails with "Expected )"; today the lambda must be `let`-bound and passed by name. A probe shows it

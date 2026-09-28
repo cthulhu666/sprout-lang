@@ -1,0 +1,77 @@
+# Cost fixture for `just rooting-cost-gate` -- see scripts/rooting_cost_gate.sh.
+#
+# One function, one basic block, one list literal.  Every element is a freshly
+# allocated String that stays live until the list is built, so the block's
+# live set grows with the literal and the rooting pass sees a long live range
+# at every op.  This is the shape of the generated vector suites
+# (tests/stdlib/test_bigint_vectors.spr), reduced to what the gate needs.
+#
+# The gate subtracts this file's counts from its larger twin, so the two MUST
+# differ only in the number of elements.  Change one, change both.
+
+fn rows() -> List String =
+  [
+    int_to_string(0) ++ "-row",
+    int_to_string(1) ++ "-row",
+    int_to_string(2) ++ "-row",
+    int_to_string(3) ++ "-row",
+    int_to_string(4) ++ "-row",
+    int_to_string(5) ++ "-row",
+    int_to_string(6) ++ "-row",
+    int_to_string(7) ++ "-row",
+    int_to_string(8) ++ "-row",
+    int_to_string(9) ++ "-row",
+    int_to_string(10) ++ "-row",
+    int_to_string(11) ++ "-row",
+    int_to_string(12) ++ "-row",
+    int_to_string(13) ++ "-row",
+    int_to_string(14) ++ "-row",
+    int_to_string(15) ++ "-row",
+    int_to_string(16) ++ "-row",
+    int_to_string(17) ++ "-row",
+    int_to_string(18) ++ "-row",
+    int_to_string(19) ++ "-row",
+    int_to_string(20) ++ "-row",
+    int_to_string(21) ++ "-row",
+    int_to_string(22) ++ "-row",
+    int_to_string(23) ++ "-row",
+    int_to_string(24) ++ "-row",
+    int_to_string(25) ++ "-row",
+    int_to_string(26) ++ "-row",
+    int_to_string(27) ++ "-row",
+    int_to_string(28) ++ "-row",
+    int_to_string(29) ++ "-row",
+    int_to_string(30) ++ "-row",
+    int_to_string(31) ++ "-row",
+    int_to_string(32) ++ "-row",
+    int_to_string(33) ++ "-row",
+    int_to_string(34) ++ "-row",
+    int_to_string(35) ++ "-row",
+    int_to_string(36) ++ "-row",
+    int_to_string(37) ++ "-row",
+    int_to_string(38) ++ "-row",
+    int_to_string(39) ++ "-row",
+    int_to_string(40) ++ "-row",
+    int_to_string(41) ++ "-row",
+    int_to_string(42) ++ "-row",
+    int_to_string(43) ++ "-row",
+    int_to_string(44) ++ "-row",
+    int_to_string(45) ++ "-row",
+    int_to_string(46) ++ "-row",
+    int_to_string(47) ++ "-row",
+    int_to_string(48) ++ "-row",
+    int_to_string(49) ++ "-row",
+    int_to_string(50) ++ "-row",
+    int_to_string(51) ++ "-row",
+    int_to_string(52) ++ "-row",
+    int_to_string(53) ++ "-row",
+    int_to_string(54) ++ "-row",
+    int_to_string(55) ++ "-row",
+    int_to_string(56) ++ "-row",
+    int_to_string(57) ++ "-row",
+    int_to_string(58) ++ "-row",
+    int_to_string(59) ++ "-row"
+  ]
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(list_length(rows())))

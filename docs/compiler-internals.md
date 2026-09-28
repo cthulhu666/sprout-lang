@@ -40,6 +40,18 @@ bits 14–63  aux    (OBJ: (tag<<8)|arity; CSTR: byte length; CLOSURE: n_caps; T
 
 **CSTR byte length is the only length a byte-offset builtin may consult — never `strlen`.** Because every Sprout String is a headered CSTR block (arena strings, header-prefixed static literals from `ir_lowering.emit_str_global`, and interned strings all carry it), its byte length is an O(1) header read: `sprout_cstr_byte_len` in `runtime/sprout_runtime.c`, exposed to Sprout as `str_byte_len`. Any runtime function that indexes or scans from a **caller-supplied byte offset** must get the length from there. A single `strlen` — even just to bounds-check the offset — makes that call O(|s|), and a scanner that calls it once per position O(|s|²). This is not hypothetical: `str_slice_bytes` and `str_starts_with_at_byte` both opened with `strlen`, which made the lexer quadratic in file size (`lexer.try_ops` probes 13 operators at every token position, each one re-scanning the whole source) and cost ~37% of the test suite's CPU. The byte-offset API exists *specifically* to avoid whole-string walks; a `strlen` inside one silently cancels its reason to exist. Guarded by `tests/stdlib/test_byte_offset_cost.spr`, which pins cost as independent of string length rather than checking a wall-clock budget.
 
+**Render IR text by collecting parts, never by right-nested `++`.** `lower_ops`,
+`lower_blocks` and `lower_fns` accumulate a reversed `List String` and call
+`string_concat_many` once. Written the obvious way — `lower_op(op) ++ "\n" ++
+lower_ops(rest)` — each step allocates a string as long as the whole remaining
+text, so rendering one block costs O(ops × text) *bytes*. One function per source
+function hides this; a single 13k-op function (one long list literal, which is what
+a generated vector suite is) reached ~2 GB of transient string churn that the
+allocator never returns to the OS, and CI SIGKILLed it as `COMPILE FAILED` with
+empty stderr. **No allocation counter can see this** — the two forms allocate the
+same *number* of string objects and differ only in bytes copied, which is why
+`just rooting-cost-gate` moved under 20% while peak RSS fell 22×.
+
 **OBJ arity is an ABI invariant.** The low 8 bits of an OBJ's aux (`SPROUT_OBJ_ARITY_MASK`, max `SPROUT_MAX_OBJ_ARITY` = 255) are the GC's *only* record of that object's payload size: `slot_bytes` sizes the slot from it and `sprout_heap_child_count_payload` scans exactly that many words. A wrong value there desyncs the sweep's slot walk instead of failing loudly, so every OBJ allocation must write its true field count. The split is single-sourced through `SPROUT_OBJ_ARITY_BITS`/`_MASK`/`SPROUT_MAX_OBJ_ARITY`; widening the arity field narrows the tag (aux is 50 bits, so 8 arity bits leave 42 for the tag). `ast_to_ir.max_boxed_arity` mirrors the ceiling and rejects wider products at compile time.
 
 **A VECTOR's aux is its INLINE element capacity, and sizes the slot the same way.** A vector whose elements fit in an ordinary slot carries them in its own block, right after the `VectorVal`; `slot_bytes` then returns `round16(8 + sizeof(VectorVal) + aux*8)`, so aux is the sweep's only record of how far to step. Every vector allocation must therefore pass the capacity it actually inlined — `sprout_alloc_vector_sized` is the single place that decides, and a new allocation site must go through it rather than calling `sprout_gc_alloc_block(SPROUT_HEAP_VECTOR, …)` directly. Passing 0 beside an inline payload desyncs the slot walk silently, exactly as a wrong OBJ arity does. Above `SPROUT_VEC_INLINE_MAX` aux is 0 and the elements live in a `malloc` buffer the `VectorVal` owns and `sprout_release_payload_extras` frees. `->cap` is the current capacity and may exceed aux after a growth; the slot never does.
@@ -118,7 +130,16 @@ from classifying which SSA values are heap:
 
 - `op_triggers_gc` — which ops are GC-safe points (allocations, calls, etc.).
 - `op_produces_simple_heap` — which op *results* are heap values that must be tracked. Scalars (`Int`/`Bool`/`Char`, via `type_kind.type_is_non_heap_scalar`) are excluded; an `IRCall` result is rooted unless its carried return `IRType` is `IRTScalar`.
-- `compute_heap_origin` / `roots_across` — track the heap-origin set and compute, for each op, the values that must be rooted across it (live-after ∪ heap operands the op exposes).
+- `compute_heap_origin` / `roots_across` — track the heap-origin set and compute, for each op, the values that must be rooted across it (live-after ∪ heap operands the op exposes) and are not already rooted.
+
+**Per-op liveness is a query, not a set.** `BlockLive` indexes a block once — its
+live-out plus the last op index using each name — and `live_after_at` answers "live
+after op *i*?" from that. It is exact only for a name defined at or before *i*, which
+is all `in_scope_ord` and `rooted` ever contain; a name whose definition is still
+ahead is the one case the index would answer differently. Materialising a set per op
+instead cost one persistent tree per op, all alive at once, and `roots_across`
+returning the whole live set for a later subtraction cost a list cell per live value
+per trigger. On a 13k-op function both were quadratic.
 
 **Why it matters:** rooting every `Int`-returning expression emits pointless
 `alloca i64; store; sprout_gc_push_i64_root; …; sprout_gc_pop_roots(1)`. Profiling
