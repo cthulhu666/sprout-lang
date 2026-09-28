@@ -85,16 +85,22 @@ repl:
 # broke PR #19's CI (2026-06-10): test files formatted with no-space
 # `deriving(...)` locally vs CI's fresh `deriving (...)`.
 #
-# `-n 100` is a measured optimum, not a round number — do not raise it to
-# "batch everything" or drop it back to 1. Both directions cost time, for
-# opposite reasons. Per file (-n 1) pays ~4.3ms of process startup 1153 times;
-# unbounded pays GC, because a process that lints one file usually exits before
-# collecting while one that lints them all collects repeatedly (peak RSS stays
-# flat at ~60MB, so this is collection cost, not a leak). Medians of 3 over 1153
-# files: -n 1 = 21s, -n 10 = 16s, -n 100 = 20s, unbounded = 26s.
-# 100 wins on the cost that will dominate once the linter parses the prelude
-# once per process (docs/lint-rules-v0.md §10): that is ~0.19s × processes, so
-# 12 processes pay ~2s where 1153 would pay ~220s.
+# `-n 100` is NOT the fastest value today — `-n 10` is, and by ~20%. State that
+# plainly, because the number otherwise reads as today's optimum and someone will
+# "correct" it in the wrong direction. Medians of 3 over 1153 files:
+# -n 1 = 21s, -n 10 = 16s, -n 100 = 20s, unbounded = 26s.
+#
+# Cost rises in BOTH directions from a middle, for opposite reasons: per file
+# (-n 1) pays ~4.3ms of process startup 1153 times, while unbounded pays GC,
+# because a process that lints one file usually exits before collecting and one
+# that lints them all collects repeatedly (peak RSS stays flat near 60MB, so that
+# is collection cost, not a leak).
+#
+# 100 is chosen for the cost that dominates once the linter derives its patterns
+# from the prelude per process (docs/lint-rules-v0.md §10) — ~0.19s × processes,
+# so 12 pay ~2s where 116 would pay ~22s and 1153 would pay ~220s. That trades
+# ~4s of wall time now against ~20s later. If that derivation is abandoned, -n 10
+# is the better value and this comment is the reason to change it.
 
 [group('fmt')]
 fmt: build-fmt-from-seed
@@ -120,19 +126,30 @@ lint: build-fmt-from-seed
 lint-file file: build-fmt-from-seed
   "{{build_dir}}/fmt_bin" lint {{quote(file)}}
 
-# The batch contract the fmt/lint loops above depend on. `just test` cannot reach
-# it: it lives in argv handling and the exit-status fold, not in a pure function.
+# The batch behaviour the fmt/lint loops above depend on: which paths get processed,
+# and where a failure goes. `just test` reaches the argv parsing (fmt_cli is pure, and
+# tests/stdlib/compiler/test_fmt_cli.spr covers it) but not these, which live in the
+# IO fold. The flag case is deliberately covered both places — see the note there.
+#
+# Runs against fixtures in $TMPD, never the repo. Asserting on tracked sources would
+# make a new lint rule firing on stdlib/string.sprout fail this gate with a message
+# about batching, and would have this gate write to a tracked file when it regresses.
 [group('fmt')]
 fmt-batch-smoke: build-fmt-from-seed
   #!/usr/bin/env bash
   set -uo pipefail
   BIN="{{build_dir}}/fmt_bin"
   TMPD=$(mktemp -d /tmp/sprout_fmtbatch_XXXXXX)
-  trap 'rm -rf "$TMPD"' EXIT
+  trap 'chmod -R u+w "$TMPD" 2>/dev/null; rm -rf "$TMPD"' EXIT
   fail=0
 
+  # Two lint-clean, fmt-clean fixtures, and one that needs reformatting.
+  printf 'module fixture\n\nfn add_one(n: Int) -> Int =\n  n + 1\n' > "$TMPD/a.sprout"
+  printf 'module fixture\n\nfn add_two(n: Int) -> Int =\n  n + 2\n' > "$TMPD/b.sprout"
+  printf 'module fixture\n\nfn  add_one( n: Int )  -> Int =\n      n + 1\n' > "$TMPD/ugly.sprout"
+
   # Every path in the batch is linted, not just the first.
-  "$BIN" lint stdlib/bytes.sprout stdlib/string.sprout > "$TMPD/multi.out" 2>&1
+  "$BIN" lint "$TMPD/a.sprout" "$TMPD/b.sprout" > "$TMPD/multi.out" 2>&1
   if [[ $(grep -c '^ok: ' "$TMPD/multi.out") -ne 2 ]]; then
     echo "fmt-batch-smoke: expected 2 'ok:' lines, got:" >&2; cat "$TMPD/multi.out" >&2; fail=1
   fi
@@ -140,13 +157,13 @@ fmt-batch-smoke: build-fmt-from-seed
   # An unreadable path reports on stderr, fails the run, and does NOT abandon the
   # rest of the batch — it used to panic, taking every later path with it.
   status=0
-  "$BIN" lint stdlib/bytes.sprout "$TMPD/absent.spr" stdlib/string.sprout \
+  "$BIN" lint "$TMPD/a.sprout" "$TMPD/absent.sprout" "$TMPD/b.sprout" \
     > "$TMPD/bad.out" 2>"$TMPD/bad.err" || status=$?
   if [[ "$status" -eq 0 ]]; then
     echo "fmt-batch-smoke: an unreadable path must exit nonzero" >&2; fail=1
   fi
   if ! grep -qs 'read_file:' "$TMPD/bad.err"; then
-    echo "fmt-batch-smoke: the failure must reach stderr, not stdout" >&2
+    echo "fmt-batch-smoke: the read failure must reach stderr, not stdout" >&2
     echo "  --- stdout ---" >&2; cat "$TMPD/bad.out" >&2
     echo "  --- stderr ---" >&2; cat "$TMPD/bad.err" >&2
     fail=1
@@ -156,17 +173,43 @@ fmt-batch-smoke: build-fmt-from-seed
     cat "$TMPD/bad.out" >&2; fail=1
   fi
 
-  # A flag after a path is refused, never treated as a path or silently dropped:
-  # `fmt <path> --check` used to WRITE the file the caller asked to only check.
+  # An UNWRITABLE path is the other half of the same conversion, and the one whose
+  # regression is silent: `just fmt` exiting 0 having skipped a file stages
+  # unformatted source under a green signal (Definition of Done #4).
+  chmod 444 "$TMPD/ugly.sprout"
   status=0
-  "$BIN" fmt stdlib/bytes.sprout --check > "$TMPD/flag.out" 2>"$TMPD/flag.err" || status=$?
+  "$BIN" fmt "$TMPD/ugly.sprout" "$TMPD/a.sprout" \
+    > "$TMPD/ro.out" 2>"$TMPD/ro.err" || status=$?
+  if [[ "$status" -eq 0 ]]; then
+    echo "fmt-batch-smoke: an unwritable path must exit nonzero" >&2; fail=1
+  fi
+  if ! grep -qs 'write_file:' "$TMPD/ro.err"; then
+    echo "fmt-batch-smoke: the write failure must reach stderr, not stdout" >&2
+    cat "$TMPD/ro.out" "$TMPD/ro.err" >&2; fail=1
+  fi
+  if ! grep -qs '^ok: ' "$TMPD/ro.out"; then
+    echo "fmt-batch-smoke: the batch stopped at the unwritable path" >&2
+    cat "$TMPD/ro.out" >&2; fail=1
+  fi
+  chmod 644 "$TMPD/ugly.sprout"
+
+  # A flag after a path is refused. Asserting the exit status is not enough: the bug
+  # this guards WROTE the file, so the gate has to check the file too. The fixture is
+  # deliberately unformatted, or "unchanged" would hold however broken the parse is.
+  cp "$TMPD/ugly.sprout" "$TMPD/ugly.before"
+  status=0
+  "$BIN" fmt "$TMPD/ugly.sprout" --check > "$TMPD/flag.out" 2>"$TMPD/flag.err" || status=$?
   if [[ "$status" -eq 0 ]] || ! grep -qs 'unknown flag: --check' "$TMPD/flag.err"; then
     echo "fmt-batch-smoke: 'fmt <path> --check' must be refused on stderr" >&2
     cat "$TMPD/flag.out" "$TMPD/flag.err" >&2; fail=1
   fi
+  if ! cmp -s "$TMPD/ugly.before" "$TMPD/ugly.sprout"; then
+    echo "fmt-batch-smoke: a refused 'fmt <path> --check' REWROTE the file" >&2
+    diff "$TMPD/ugly.before" "$TMPD/ugly.sprout" >&2; fail=1
+  fi
 
   [[ "$fail" -eq 0 ]] || exit 1
-  echo "==> fmt-batch-smoke ✓ (multi-path · bad path isolated to stderr · flag position)"
+  echo "==> fmt-batch-smoke ✓ (multi-path · read/write failures isolated to stderr · flag refused without writing)"
 
 # Build fmt_bin via stage-1 (which is built from the IR seed).  fmt_bin chains
 # off compile_driver_bin_stage1 — no platform-specific binary required.
