@@ -114,6 +114,15 @@ fn main() -> Unit !{IO} =
     # A qualified name is one VarExpr carrying a dotted name, so `p` and `p.x`
     # are different names rather than a name and a projection.
     assert_eq(state, "a qualified name differs from its prefix", same("p", "p.x"), false)
+    # The head renames with its binder; the field path after it does not.
+    assert_eq(state, "a projection off a binder renames with the binder",
+      same("\\ p -> p.x", "\\ q -> q.x"), true)
+    assert_eq(state, "a different field is not equal even under renaming",
+      same("\\ p -> p.x", "\\ q -> q.y"), false)
+    assert_eq(state, "a free qualified name still matches only itself",
+      same("json.empty", "yaml.empty"), false)
+    assert_eq(state, "a bound head does not match a free one",
+      same("\\ p -> p.x", "\\ q -> p.x"), false)
 
     # ---------------------------------------------------------------
     # Alpha-equivalence: a binder's NAME is not part of the shape.
@@ -204,6 +213,11 @@ fn main() -> Unit !{IO} =
       matches("pair(x, x)", "pair(\\ (a: Int) -> a, \\ (a: String) -> a)", ["x"]), false)
     assert_eq(state, "a repeated hole accepts two alpha-equal lambdas",
       matches("pair(x, x)", "pair(\\ (a: Int) -> a, \\ (b: Int) -> b)", ["x"]), true)
+    # The same equality, reached through a field projection off each binder.
+    assert_eq(state, "a repeated hole accepts two projections alike up to binder name",
+      matches("pair(x, x)", "pair(\\ a -> a.f, \\ b -> b.f)", ["x"]), true)
+    assert_eq(state, "a repeated hole rejects projections of different fields",
+      matches("pair(x, x)", "pair(\\ a -> a.f, \\ b -> b.g)", ["x"]), false)
 
     # ---------------------------------------------------------------
     # Branch permutation (§5.2b). The prelude disagrees with itself on
@@ -243,6 +257,35 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "a trailing wildcard does not stand in for a variable pattern",
       matches("match m with | 1 -> a | v -> b",
               "match q with | 1 -> x | _ -> y", ["m", "a", "b"]), false)
+    # Symmetry with the constructor arm: a subject VARIABLE pattern is a catch-all
+    # too, so a tuple that binds nothing may pair with it in last position.
+    assert_eq(state, "a trailing variable pattern stands in for a tuple that binds nothing",
+      matches("match m with | 1 -> a | (Just _, 3) -> b",
+              "match q with | 1 -> x | v -> y", ["m", "a", "b"]), true)
+
+    # ---------------------------------------------------------------
+    # The MIRROR direction (§5.2c): a PATTERN-side `_` is the catch-all for
+    # whatever the earlier branches missed, so the subject branch it pairs with
+    # has to cover the same complement — irrefutable, or last under exhaustiveness.
+    # ---------------------------------------------------------------
+    assert_eq(state, "a pattern wildcard does not pair with a narrower leading branch",
+      matches("match m with | A -> a | _ -> b",
+              "match q with | B -> y | _ -> x", ["m", "a", "b"]), false)
+    assert_eq(state, "a pattern wildcard pairs with a trailing subject branch",
+      matches("match m with | A -> a | _ -> b",
+              "match q with | A -> x | _ -> y", ["m", "a", "b"]), true)
+    # Irrefutable rather than last: this is the `Err _` vs `Err err` sub-pattern
+    # case the closedness check is built around, and it must keep working.
+    assert_eq(state, "a pattern wildcard pairs with a binder in any position",
+      matches(rwd_pattern,
+        "match load(p) with | Ok text -> text | Err e -> dflt",
+        rwd_holes), true)
+    # A pattern `_` sub-pattern against a REFUTABLE subject sub-pattern is narrower
+    # on the subject side, so the two branches are not the same branch.
+    assert_eq(state, "a pattern wildcard does not pair with a refutable sub-pattern",
+      matches(rwd_pattern,
+        "match load(p) with | Ok text -> text | Err (NotFound n) -> dflt",
+        rwd_holes), false)
 
     # ---------------------------------------------------------------
     # Closedness (§5.2a). Reconstructing the call hoists the capture out
@@ -265,6 +308,27 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "a fallback closed over an outer name is accepted",
       matches(rwd_pattern,
         "match load(p) with | Ok text -> text | Err _ -> dflt",
+        rwd_holes), true)
+
+    # A qualified name is ONE VarExpr carrying the whole dotted string, so the
+    # escape hides behind a field access unless closedness reads the head.
+    assert_eq(state, "a fallback projecting a field off the branch binding is refused",
+      matches(rwd_pattern,
+        "match load(p) with | Ok text -> text | Err e -> e.message",
+        rwd_holes), false)
+    assert_eq(state, "a projection nested inside a call is refused too",
+      matches(rwd_pattern,
+        "match load(p) with | Ok text -> text | Err e -> msg(e.detail)",
+        rwd_holes), false)
+    # The head is the reference; the rest are field labels.
+    assert_eq(state, "the branch binder is free in a projection off it",
+      free("e.message", "e"), true)
+    assert_eq(state, "a projection contributes its head and nothing else",
+      free_count("e.message"), 1)
+    # …and a module alias head is a genuine outer reference, so this must still pass.
+    assert_eq(state, "a fallback qualified by a module alias stays accepted",
+      matches(rwd_pattern,
+        "match load(p) with | Ok text -> text | Err e -> json.empty",
         rwd_holes), true)
 
     # ---------------------------------------------------------------
