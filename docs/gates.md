@@ -369,6 +369,16 @@ the **difference per added element**, so the several hundred thousand allocation
 the prelude cancel instead of entering the budget. An absolute number would drift as the compiler
 grows until it guarded nothing.
 
+**It measures stage-2, not stage-1, and that is the whole gate.** §Reseed before you diff applies to
+every `bootstrap-from-seed` gate, but it bites hardest here: for the others the subject is a compiled
+*program*, so a stale seed degrades the measurement; here the compiler **is** the subject, so stage-1
+would price the pre-edit pass and report "within budget" for a reintroduced quadratic — total vacuity,
+not partial. `just gate` also runs this gate *before* `verify-bootstrap-fixed-point`, so a stale seed
+would be caught only after it had reported green. Depending on `build-stage2` removes the trap instead
+of documenting it: `_build-stage` has no no-op guard, so stage-2 is always relinked from the working
+tree. Verified by reintroducing the quadratic without reseeding and confirming the rebuilt stage-2
+carried it (RSS 88 MB → 1907 MB).
+
 Added 2026-09-28, after two independent quadratics in the same shape — per-op cost in a single basic
 block — made `tests/stdlib/test_bigint_vectors.spr` (330 assertions in one `run_suite` list) cost
 1.5 GB to compile. `ir_rooting` materialised a live-set per op and asked `roots_across` for the whole
@@ -384,15 +394,19 @@ element before the rooting fix against 300–301 after, reproducing to ±0.3% ac
 with every element added*, so a return of that quadratic overshoots by 6.3× here and more at any
 larger fixture.
 
-`gc_swept` is floored but deliberately **not** capped, and the reasoning generalises. It is the best
-counter for string churn — `sprout_obj` ignores cstr allocations, per the render-cost entry above — so
-a ceiling is tempting. But right-nested `++` scored 11707 against 6752–7650 for the fixed compiler,
-and that spread is two builds of the *same source*: ~13% noise against a 1.5× separation from the bug.
-A budget inside its own noise either flakes or fails to fire, and one that fires unreliably is worse
-than a documented gap. **The real obstacle is that bytes are unobservable here**: the two
-concatenation forms allocate the same *number* of objects, so a regression worth 22× in peak RSS moves
-`gc_swept` 1.7× and `sprout_obj` 16%. Closing it needs a bytes-allocated counter or a portable
-peak-RSS arm — tracked in `BACKLOG.md`.
+`gc_swept` is floored, but that floor is a **fixture check, not a churn detector**, and the reason is
+worth reading before trusting any counter here. Reintroducing right-nested `++` in
+`ir_lowering.lower_ops` and rebuilding moves peak RSS from 88 MB to 1907 MB on a 400-element literal —
+and moves `gc_swept` from 7650 to **7628**, `map` from 300 to **300**. No signal in either.
+
+An earlier revision of this entry claimed `gc_swept` separated the two by 1.7×. That was wrong, and
+the error is instructive: the 11707 figure it compared against came from *master's* binary, which
+carried **both** quadratics, so all the movement was the rooting fix. A counter that shifts when you
+fix two things at once has not been shown to see either — reintroduce the one regression alone and
+re-measure. Bytes are the obstacle: the two concatenation forms allocate the same *number* of objects
+and differ only in bytes copied, and nothing in the alloc report measures bytes. `ulimit -v` is not
+settable on macOS, so a portable peak-RSS arm is not available either. So the `ir_lowering` half is
+guarded by nothing, tracked in `BACKLOG.md`.
 
 Floors are asserted as well as ceilings, for the reason the render-cost entry gives: if an edit leaves
 the two fixtures the same size, the delta collapses and the ceilings stay green over nothing.
