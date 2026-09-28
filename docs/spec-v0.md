@@ -1097,9 +1097,11 @@ four patterns this enables: `docs/wrap-type-params-v0.md`, with a runnable file
 per pattern in `examples/wrap_*.sprout`.
 
 `deriving` on a parameterized wrap goes through the ADT path (§8.6), so the
-generated context constrains **every** parameter, phantom ones included:
-`wrap Tagged u = Int deriving (Eq)` yields `Eq u => Eq (Tagged u)` and so cannot
-be used at a `u` lacking an `Eq` instance. An explicit `instance` avoids this.
+generated context constrains the parameters the right-hand side **stores** (§5.8).
+The RHS is the one field there is: `wrap Boxed a = List a deriving (Eq)`
+yields `Eq a => Eq (Boxed a)`, while the phantom `wrap Tagged u = Int deriving
+(Eq)` yields an unconstrained `Eq (Tagged u)` and so may be used at any `u`,
+including a bare tag type with no instances of its own.
 
 **Export.** Because the type and its constructor share one name, `export` alone
 publishes the **type only**: the constructor, and with it the destructor
@@ -3452,9 +3454,19 @@ consumed through a concrete-typed wrapper (e.g. `fn tile_of(n) -> Maybe Tile =
 from_ordinal(n)`), which satisfies this requirement.
 
 For parametric types (e.g. `type Box a = | Hold a`), the synthesized instance
-carries one instance constraint per type parameter, e.g. `instance Eq (Box a)
-where Eq a { ... }`.  This is conservative — phantom type parameters get a
-constraint they don't need; refining this is a future improvement.
+carries one instance constraint per type parameter the declaration **stores** —
+§5.8's phantom-position test, unchanged: the parameter appears in some
+constructor or record field type, outside an arrow.  So `type Box a = | Hold a
+deriving (Eq)` yields `instance Eq (Box a) where Eq a`, while the phantom
+`type Handle u = | Handle Int deriving (Eq)` yields an unconstrained
+`Eq (Handle u)`, usable at an index type with no instances of its own — the
+derived body never touches a value of that type.  The instance *head* still
+carries every parameter; only the context is filtered.
+
+The test is **syntactic**, as in §5.8: a parameter appearing as a type argument of
+a stored field counts as stored, even where that type discards it.  So
+`type Outer u = | Outer (Tagged u) deriving (Eq)` is constrained on `u` although
+`wrap Tagged u = Int` stores nothing of it.
 
 **Records** support `deriving (Eq, Ord, ToString)`.  The clause is **trailing**,
 after the field list (a record's `= (fields)` right-hand side is a self-contained
@@ -3521,8 +3533,8 @@ unimplemented work tracked in `BACKLOG.md`.
 `Enum` cannot be derived for a `wrap`: `from_ordinal` must construct a value, and
 a wrap's payload cannot be rebuilt from an `Int` alone.  `deriving (Enum)` on a
 wrap is an eager error at the deriving site.  A `wrap`'s type parameters (§5.6.1)
-go through this same path, so one constraint per parameter is synthesized —
-including for a phantom parameter the RHS never mentions, exactly as for an ADT.
+go through this same path, so a constraint is synthesized for each parameter the
+right-hand side stores and none for a phantom one, exactly as for an ADT.
 
 Serialization (`Serialize`/`Deserialize`) and hashing (`Hash`) are intentionally
 **not** in v1.  Both require design decisions the language hasn't made yet —

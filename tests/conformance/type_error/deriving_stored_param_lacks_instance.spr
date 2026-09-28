@@ -1,0 +1,16 @@
+module main
+
+# `deriving` constrains only the parameters a field MENTIONS, so a phantom index
+# needs no instance. This guards the other side of that rule: `a` IS stored by
+# `Hold`, so its `Eq` obligation must survive the filtering, and an index type
+# with no instance must still be rejected. Without this, a fix that dropped every
+# constraint rather than only the phantom ones would look correct.
+
+type Tag (..) =
+  | Tag
+
+type Box a (..) deriving (Eq) =
+  | Hold a
+
+fn main() -> Unit !{IO} =
+  print(to_string(eq(Hold (Tag), Hold (Tag))))

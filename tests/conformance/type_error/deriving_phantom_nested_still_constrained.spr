@@ -1,0 +1,23 @@
+module main
+
+# The phantom filter is SYNTACTIC and one declaration deep (spec §5.8): `u`
+# inside a field of type `Tagged u` counts as stored, even though `Tagged`
+# discards it. So an index threaded through one more declaration is still
+# constrained, and a tag with no instances is still rejected here.
+#
+# This pins the LIMIT, not a goal. Following the parameter through would mean
+# resolving `Tagged`, which the bundler pass has no types for. If that ever
+# changes, this fixture is the one that says so.
+
+type Metres (..) =
+  | Metres
+
+wrap Tagged u = Int deriving (Eq)
+
+type Outer u (..) deriving (Eq) =
+  | Outer (Tagged u)
+
+fn mk(n: Int) -> Outer Metres = Outer(Tagged(n))
+
+fn main() -> Unit !{IO} =
+  print(to_string(eq(mk(1), mk(1))))

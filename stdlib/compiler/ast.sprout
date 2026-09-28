@@ -373,6 +373,53 @@ export fn scope_names_global(scoped: List (String, NameScope)) -> List String =
   | Cons (name, ScopeGlobal) rest -> Cons(name, scope_names_global(rest))
   | Cons _ rest -> scope_names_global(rest)
 
+# --- What a declaration stores ---
+#
+# "Does this declaration store a value of type parameter `p`?" — spec §5.8's
+# phantom-position test: `p` appears in some field type, OUTSIDE an arrow.
+#
+# ONE definition, because two consumers must give the same answer. `infer`
+# writes the `@phantom:` marker that `linear_check` reads; `deriving` decides
+# which parameters an instance context constrains. A parameter that is phantom
+# to one and stored to the other is incoherent, and these were separate copies
+# held in step by a comment.
+#
+# The test is SYNTACTIC and one declaration deep: `u` in a field of type
+# `Tagged u` counts as stored even where `Tagged` discards it. Following it
+# through would mean resolving `Tagged`, which the bundler has no types for, so
+# both consumers are conservative rather than exact
+# (tests/conformance/type_error/deriving_phantom_nested_still_constrained).
+
+export fn type_exprs_store(p: String, tes: List TypeExpr) -> Bool =
+  match tes with
+  | [] -> false
+  | [te | rest] -> type_expr_stores(p, te) || type_exprs_store(p, rest)
+
+# Every variant spelled out: a future TypeExpr carrying a parameter must not
+# default to "not stored", which silently drops a constraint or a marker.
+#
+# Not `infer.te_type_names`, nor `analysis_service_driver.te_var_names`: both
+# descend an arrow, and declining to is the whole point here.
+export fn type_expr_stores(p: String, te: TypeExpr) -> Bool =
+  match te with
+  | TypeName n -> n == p
+  | TypeApply f x -> type_expr_stores(p, f) || type_expr_stores(p, x)
+  | TypeArrow _ _ _ _ -> false
+  | TypeThunk _ _ -> false
+  | TypeEffect inner _ -> type_expr_stores(p, inner)
+  | TupleType items -> type_exprs_store(p, items)
+
+export fn ctor_field_type_exprs(ctors: List TypeConstructor) -> List TypeExpr =
+  match ctors with
+  | [] -> []
+  | [TypeConstructor _ fields _ _ | rest] ->
+      list_append(fields, ctor_field_type_exprs(rest))
+
+export fn record_field_type_exprs(fields: List RecordFieldDecl) -> List TypeExpr =
+  match fields with
+  | [] -> []
+  | [RecordFieldDecl _ te | rest] -> Cons(te, record_field_type_exprs(rest))
+
 # --- Program ---
 
 export type Program (..) =

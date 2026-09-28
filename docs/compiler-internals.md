@@ -549,6 +549,14 @@ containment declines to descend it (`type Chan a = | Chan Int`). It is written i
 `infer.mark_phantom_params` from the declaration's own name and read through the
 same `head_type_name` as `@linear:`, so the two stand or fall together.
 
+**The predicate behind it is shared, and changing it moves two consumers.**
+`ast.type_expr_stores` decides "stored", and `deriving` uses the same answer to
+pick which type parameters an instance context constrains (spec §8.6) — a
+parameter phantom to one and stored to the other is incoherent, so widening it for
+linearity silently widens derived contexts too. It is syntactic and one
+declaration deep: `u` in a field of type `Tagged u` counts as stored even where
+`Tagged` discards it, which both consumers are conservative about on purpose.
+
 So **introducing module-qualified type names on this path breaks marker lookups
 rather than failing loudly.** A canonical-naming attempt made an imported linear
 type read as `stdlib.net.TcpConnection`, missing `@linear:` and reporting the

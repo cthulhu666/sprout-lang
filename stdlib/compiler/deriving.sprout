@@ -127,10 +127,8 @@ fn apply_type_params(base: ast.TypeExpr, params: List String) -> ast.TypeExpr =
   | Nil -> base
   | Cons p rest -> apply_type_params(ast.TypeApply(base, ast.TypeName(p)), rest)
 
-# For each type parameter referenced in any field, emit `Eq <param>` as an
-# instance constraint. Conservative: just emits one constraint per type
-# parameter (Haskell's StandaloneDeriving with all params constrained).
-# A fancier implementation would walk fields to detect used vs. phantom params.
+# Emit `<Class> <param>` per parameter given. Callers pass the STORED parameters
+# only — see adt_instance_constraints below.
 fn instance_constraints_for(class_name: String, type_params: List String) -> List ast.TypeConstraint =
   match type_params with
   | Nil -> Nil
@@ -138,13 +136,41 @@ fn instance_constraints_for(class_name: String, type_params: List String) -> Lis
       Cons(ast.TypeConstraint(class_name, [ast.TypeName(p)]),
            instance_constraints_for(class_name, rest))
 
+# THE HEAD AND THE CONTEXT TAKE DIFFERENT PARAMETER LISTS — do not pass one list
+# to both. `instance_head_typeexpr` keeps every parameter, so the head stays
+# `Eq (Tagged u)`; the context gets only the parameters some field stores. A
+# phantom parameter (spec §5.6.1) is never touched by the derived body, and
+# constraining it would demand an instance for an erased index — which the bare
+# tag types the units and typed-handle forms use do not have.
+fn adt_instance_constraints(class_name: String, type_params: List String,
+                            ctors: List ast.TypeConstructor) -> List ast.TypeConstraint =
+  instance_constraints_for(class_name,
+    stored_params(type_params, ast.ctor_field_type_exprs(ctors)))
+
+fn record_instance_constraints(class_name: String, type_params: List String,
+                               fields: List ast.RecordFieldDecl) -> List ast.TypeConstraint =
+  instance_constraints_for(class_name,
+    stored_params(type_params, ast.record_field_type_exprs(fields)))
+
+# `ast.type_exprs_store` is spec §5.8's phantom-position test, shared with the
+# `@phantom:` marker `infer` writes — see its header for what the test does and
+# does not reach. An arrow is not a storing position and could not derive anyway:
+# the body would need `Eq (a -> b)`
+# (tests/conformance/type_error/deriving_eq_function_field).
+fn stored_params(type_params: List String, fields: List ast.TypeExpr) -> List String =
+  match type_params with
+  | [] -> []
+  | [p | rest] ->
+      if ast.type_exprs_store(p, fields) then Cons(p, stored_params(rest, fields))
+      else stored_params(rest, fields)
+
 # Emit `instance Eq <T> [where Eq a, ...] { fn eq(left, right) -> Bool = ... }`.
 # Returns the InstanceDecl as an ast.Decl (since InstanceDecl is a constructor
 # of ast.Decl, not a separate type).
 fn emit_eq_instance(name: String, type_params: List String, ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Decl =
   ast.InstanceDecl(
     ast.TypeConstraint("Eq", [instance_head_typeexpr(name, type_params)]),
-    instance_constraints_for("Eq", type_params),
+    adt_instance_constraints("Eq", type_params, ctors),
     [ast.InstanceMethodImpl(
        "eq",
        [ast.Param("left", Just(instance_head_typeexpr(name, type_params)), ast.ModeDefault),
@@ -228,7 +254,7 @@ fn build_to_string_match_body(ctors: List ast.TypeConstructor, pos: source.Sourc
 fn emit_to_string_instance(name: String, type_params: List String, ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Decl =
   ast.InstanceDecl(
     ast.TypeConstraint("ToString", [instance_head_typeexpr(name, type_params)]),
-    instance_constraints_for("ToString", type_params),
+    adt_instance_constraints("ToString", type_params, ctors),
     [ast.InstanceMethodImpl(
        "to_string",
        [ast.Param("value", Just(instance_head_typeexpr(name, type_params)), ast.ModeDefault)],
@@ -334,7 +360,7 @@ fn build_ord_match_body(ctors: List ast.TypeConstructor, pos: source.SourcePos) 
 fn emit_ord_instance(name: String, type_params: List String, ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Decl =
   ast.InstanceDecl(
     ast.TypeConstraint("Ord", [instance_head_typeexpr(name, type_params)]),
-    instance_constraints_for("Ord", type_params),
+    adt_instance_constraints("Ord", type_params, ctors),
     [ast.InstanceMethodImpl(
        "compare",
        [ast.Param("left", Just(instance_head_typeexpr(name, type_params)), ast.ModeDefault),
@@ -475,8 +501,9 @@ fn derive_instances_for_classes(name: String, type_params: List String, ctors: L
 # distinction `wrap` exists to draw. Lifting instances through to the inner type
 # (`Num`, operators) is separate, unimplemented work — see BACKLOG.md.
 #
-# Type parameters go through that same ADT path, so a generic wrap gets one
-# constraint per parameter — including a phantom one, exactly as an ADT does.
+# Type parameters go through that same ADT path, so `wrap Boxed a = List a` gets
+# `Eq a` from its stored parameter and `wrap Tagged u = Int` gets nothing from its
+# phantom one — the inner type is the only field there is to mention them.
 fn wrap_synthetic_ctor(name: String, inner: ast.TypeExpr) -> ast.TypeConstructor =
   ast.TypeConstructor(name, [inner], Nil, Nil)
 
@@ -509,8 +536,9 @@ fn validate_one_wrap_deriving_class(name: String, class_name: String) -> Maybe S
 # by NAME via GetFieldExpr (`value.field`) rather than binding positional
 # pattern variables. Eq/Ord fold over the fields in declaration order; ToString
 # renders `Name(f0 = v0, f1 = v1, ...)`, mirroring record construction syntax.
-# The instance scaffolding (head, per-type-param constraints) is shared with the
-# ADT path via instance_head_typeexpr / instance_constraints_for.
+# The instance head is shared with the ADT path via instance_head_typeexpr and
+# carries every type parameter; the context comes from
+# record_instance_constraints, which constrains the stored ones only.
 
 fn record_field_name(f: ast.RecordFieldDecl) -> String =
   match f with
@@ -541,7 +569,7 @@ fn build_record_eq_acc(fields: List ast.RecordFieldDecl, acc: ast.Expr, pos: sou
 fn emit_record_eq_instance(name: String, type_params: List String, fields: List ast.RecordFieldDecl, pos: source.SourcePos) -> ast.Decl =
   ast.InstanceDecl(
     ast.TypeConstraint("Eq", [instance_head_typeexpr(name, type_params)]),
-    instance_constraints_for("Eq", type_params),
+    record_instance_constraints("Eq", type_params, fields),
     [ast.InstanceMethodImpl(
        "eq",
        [ast.Param("left", Just(instance_head_typeexpr(name, type_params)), ast.ModeDefault),
@@ -588,7 +616,7 @@ fn build_record_to_string_body(name: String, fields: List ast.RecordFieldDecl, p
 fn emit_record_to_string_instance(name: String, type_params: List String, fields: List ast.RecordFieldDecl, pos: source.SourcePos) -> ast.Decl =
   ast.InstanceDecl(
     ast.TypeConstraint("ToString", [instance_head_typeexpr(name, type_params)]),
-    instance_constraints_for("ToString", type_params),
+    record_instance_constraints("ToString", type_params, fields),
     [ast.InstanceMethodImpl(
        "to_string",
        [ast.Param("value", Just(instance_head_typeexpr(name, type_params)), ast.ModeDefault)],
@@ -623,7 +651,7 @@ fn build_record_ord_chain(fields: List ast.RecordFieldDecl, i: Int, pos: source.
 fn emit_record_ord_instance(name: String, type_params: List String, fields: List ast.RecordFieldDecl, pos: source.SourcePos) -> ast.Decl =
   ast.InstanceDecl(
     ast.TypeConstraint("Ord", [instance_head_typeexpr(name, type_params)]),
-    instance_constraints_for("Ord", type_params),
+    record_instance_constraints("Ord", type_params, fields),
     [ast.InstanceMethodImpl(
        "compare",
        [ast.Param("left", Just(instance_head_typeexpr(name, type_params)), ast.ModeDefault),

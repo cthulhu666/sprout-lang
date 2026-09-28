@@ -560,8 +560,10 @@ generic: `wrap Sorted a = Vec a`, built only by a sorting function, is how "this
 vector is ascending" stops being a comment. Four worked patterns — invariants,
 units, typed handles, protocol state — are in `examples/wrap_*.sprout`, and
 `docs/wrap-type-params-v0.md` covers when a parameterized wrap is the wrong choice
-(a closed set of kinds is better served by separate wraps) and the limits, including
-`deriving` constraining phantom parameters.
+(a closed set of kinds is better served by separate wraps) and the limits. `deriving`
+constrains only the parameters the right-hand side stores, so a tag needs no instances
+of its own — on that declaration; an index threaded through another indexed type is
+still constrained.
 
 ## Hide a type behind an interface with existentials
 
