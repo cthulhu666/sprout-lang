@@ -93,11 +93,12 @@ existing ADT path (`derive_instances_for_classes`), passing the wrap's own type
 parameters. `Eq`/`Ord` compare the single inner value; `ToString` renders
 `Line(3)`, positional rather than a record's `Line(v = 3)`.
 
-Because that path constrains one parameter per position, a phantom parameter is
-constrained too: `wrap Tagged u = Int deriving (Eq)` yields `Eq u => Eq (Tagged u)`.
+That path constrains only the parameters a field stores (§5.8), and a wrap's one field
+is its right-hand side. So `wrap Boxed a = List a deriving (Eq)` yields
+`Eq a => Eq (Boxed a)`, while the phantom `wrap Tagged u = Int deriving (Eq)`
+yields an unconstrained `Eq (Tagged u)` — usable at an index with no instances.
 That is the ADT behaviour, not a wrap-specific one (`deriving.sprout`,
-`instance_constraints_for`); an index over a type with no `Eq` needs an explicit
-`instance`.
+`adt_instance_constraints`).
 
 Validation gets its own arm rather than reusing the ADT validator, for one
 reason: the ADT `Enum` rejection reads "constructor `Line` has fields", naming a

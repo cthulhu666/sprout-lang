@@ -40,6 +40,11 @@ The tag values are free, since nothing ever constructs one, but the declaration 
 not quite nothing: each tag emits one `@sprout_register_ctor` call at startup and
 its name in rodata. Negligible, and worth knowing before indexing by fifty tags.
 
+A tag needs no instances of its own on the declaration that derives. `deriving`
+constrains only the parameters the right-hand side stores, so `wrap Angle u = Double
+deriving (Eq, Ord)` gives `Angle Deg` a working `eq` and `compare` while `Deg` derives
+nothing (spec §5.6.1). One level up is a different matter — see Limits.
+
 ## The four patterns
 
 **An invariant the type carries** — `examples/wrap_sorted_vec.sprout`.
@@ -116,10 +121,13 @@ shifts it.
 
 ## Limits
 
-- **`deriving` constrains phantom parameters.** `wrap Angle u = Double deriving (Eq)`
-  yields `Eq u => Eq (Angle u)`, so comparing two `Angle Deg` fails with `No instance
-  of Eq for main.Deg` — the common case, since index tags exist only to be named.
-  Write an explicit `instance` until this is fixed (`BACKLOG.md`).
+- **`deriving` still constrains an index threaded through another indexed type.**
+  The stored test is syntactic and one declaration deep (spec §5.8), so `u` inside a
+  field of type `Tagged u` counts as stored even where `Tagged` discards it:
+  `type Outer u (..) deriving (Eq) = | Outer (Tagged u)` fails with `No instance of Eq
+  for main.Metres`. Derive on the inner type and write the outer `instance` by hand,
+  or give the tag the instance. Pinned by
+  `tests/conformance/type_error/deriving_phantom_nested_still_constrained.spr`.
 - **An uppercase parameter name is accepted and shadows the type it names.**
   `wrap Metres Int = Int` means `wrap Metres a = a`, and compiles. Use lowercase
   parameter names (`BACKLOG.md`).

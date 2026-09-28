@@ -71,7 +71,7 @@ ERROR: check: Non-exhaustive match on stdlib.compiler.ast.Pattern — no branch 
 
 This is not a licence to sweep wildcards out of the codebase. Most of the ~500 catch-alls under `stdlib/compiler/` are legitimate defaults, and a nested match on a *different* type inside a variant's arm is a common and correct one (`pattern_linear_binders` matches `types.Type` inside its tuple arm).
 
-**Before writing a classifier, look for an existing one.** "Which names does this pattern bind?" is `ast.pattern_names` — exported, exhaustive, source-order. Call it. Three siblings answer a *different* question and stay: `dce.bind_pat` and `infer.bind_pattern` fold into an accumulator `Set`, and `linear_check.pattern_linear_binders` is type-directed. This paragraph used to list the copies instead, and undercounted them — prefer a name you can call to a census someone must maintain.
+**Before writing a classifier, look for an existing one.** "Which names does this pattern bind?" is `ast.pattern_names` — exported, exhaustive, source-order. Call it. Three siblings answer a *different* question and stay: `dce.bind_pat` and `infer.bind_pattern` fold into an accumulator `Set`, and `linear_check.pattern_linear_binders` is type-directed. This paragraph used to list the copies instead, and undercounted them — prefer a name you can call to a census someone must maintain. The second such name is `ast.type_expr_stores`: "does this declaration store a value of type parameter `p`?", spec §5.8's phantom-position test, shared by `infer`'s `@phantom:` marker and `deriving`'s instance contexts after a second copy was written for `deriving` and kept in step by a comment.
 
 Recorded because the cost is measured, not hypothetical: on 2026-08-14 a name-keyed dispatch check handled the top-level shadowing case and missed every local binder, making `fn f(append: …)` a hard compile error for seven hours. The fix for it was then written with a catch-all of its own, in a file whose four sibling functions were all exhaustive.
 
@@ -197,8 +197,10 @@ type, and `wrap Tagged u = Int`, where `u` is *phantom*: it appears only in the
 type, so `Tagged Metres` and `Tagged Feet` stay distinct while both lower to a
 bare `i64`. That is the form to reach for when the distinction is an index
 (units, a handle's resource kind, a protocol state) rather than a payload.
-Note that `deriving` constrains every parameter, phantom ones included, so an
-index over a type with no `Eq` instance needs an explicit `instance`.
+`deriving` constrains only the parameters the right-hand side stores, so an index
+type carrying no instances of its own costs nothing on that declaration. The test
+is one declaration deep, so an index threaded through another indexed type is still
+constrained — `docs/wrap-type-params-v0.md` §Limits.
 
 **A wrap can hide its constructor, so it can carry an invariant.** `export wrap Foo = T` publishes the type alone; the constructor and the destructor pattern stay module-private, and `export wrap Foo (..) = T` publishes both. Outside the module the only way in is then a function the module exports — a smart constructor — which is what lets the type mean "validated" rather than "annotated". Use the abstract form when the wrap exists to enforce something (`path.File` rejecting an empty string, an unforgeable resource handle); use `(..)` when it exists only to keep two same-typed values apart, which is the common case and every current use in this repo. An abstract wrap needs an exported accessor, since the pattern is hidden too.
 

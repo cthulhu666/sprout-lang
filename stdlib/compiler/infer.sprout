@@ -878,8 +878,8 @@ fn register_type_decl_raw(decl: ast.Decl, alias_env: Dict types.Type,
                           env: Dict types.Scheme) -> Dict types.Scheme =
   match decl with
   | ast.TypeDecl name params ctors _ mult _ ->
-      mark_stored_fields(name, params, ctor_field_type_exprs(ctors), build_local_params(params, alias_env),
-        mark_phantom_params(name, params, ctor_field_type_exprs(ctors),
+      mark_stored_fields(name, params, ast.ctor_field_type_exprs(ctors), build_local_params(params, alias_env),
+        mark_phantom_params(name, params, ast.ctor_field_type_exprs(ctors),
           mark_type_multiplicity(name, mult,
             register_ctors_for_type(name, params, build_local_params(params, alias_env), ctors, env))))
   # WrapDecl: synthesize a single-constructor type with the same name as the
@@ -1944,7 +1944,7 @@ fn mark_phantom_from(tname: String, idx: Int, params: List String,
   | Nil -> env
   | Cons p rest ->
       mark_phantom_from(tname, idx + 1, rest, fields,
-        if type_exprs_store(p, fields) then env
+        if ast.type_exprs_store(p, fields) then env
         else dict_set(phantom_param_marker(tname, idx),
                types.mono(types.TConst(types.type_id("phantom"))), env))
 
@@ -1985,34 +1985,6 @@ fn mark_stored_fields(tname: String, params: List String, fields: List ast.TypeE
           types.EffectPure, Nil), env)
 
 fn stored_fields_marker(tname: String) -> String = "@stores:" ++ tname
-
-# Deliberately NOT `te_type_names` above, nor analysis_service_driver's
-# `te_var_names`: both descend an arrow, and declining to is the whole point here.
-# Same exhaustive shape as those two, per docs/guidelines.md §2a.
-fn type_exprs_store(p: String, tes: List ast.TypeExpr) -> Bool =
-  match tes with
-  | Nil -> false
-  | Cons te rest -> if type_expr_stores(p, te) then true else type_exprs_store(p, rest)
-
-fn type_expr_stores(p: String, te: ast.TypeExpr) -> Bool =
-  match te with
-  | ast.TypeName n -> n == p
-  | ast.TypeApply f x -> type_expr_stores(p, f) || type_expr_stores(p, x)
-  | ast.TypeArrow _ _ _ _ -> false
-  | ast.TypeThunk _ _ -> false
-  | ast.TypeEffect inner _ -> type_expr_stores(p, inner)
-  | ast.TupleType items -> type_exprs_store(p, items)
-
-fn ctor_field_type_exprs(ctors: List ast.TypeConstructor) -> List ast.TypeExpr =
-  match ctors with
-  | Nil -> Nil
-  | Cons (ast.TypeConstructor _ fields _ _) rest ->
-      list_append(fields, ctor_field_type_exprs(rest))
-
-fn record_field_type_exprs(fields: List ast.RecordFieldDecl) -> List ast.TypeExpr =
-  match fields with
-  | Nil -> Nil
-  | Cons (ast.RecordFieldDecl _ te) rest -> Cons(te, record_field_type_exprs(rest))
 
 # Presence is the bit, as with @linear: above. Only the ABSTRACT case is marked:
 # a published record is the permissive one, and a marker for it would have to be
@@ -8461,9 +8433,9 @@ fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Di
       # the same two declarations in the other order compiled.
       | ast.RecordDecl rec_name type_params fields _ _ _ _ ->
           pre_scan_fn_decls(rest,
-            mark_stored_fields(rec_name, type_params, record_field_type_exprs(fields),
+            mark_stored_fields(rec_name, type_params, ast.record_field_type_exprs(fields),
               build_local_params(type_params, alias_env),
-              mark_phantom_params(rec_name, type_params, record_field_type_exprs(fields), env)),
+              mark_phantom_params(rec_name, type_params, ast.record_field_type_exprs(fields), env)),
             alias_env)
       | _ -> pre_scan_fn_decls(rest, env, alias_env)
 
@@ -9279,9 +9251,9 @@ fn typecheck_decl(
         env_ftv, subst)
   | ast.RecordDecl rec_name type_params fields _ mult repr _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl),
-        GlobalEnv(mark_stored_fields(rec_name, type_params, record_field_type_exprs(fields),
+        GlobalEnv(mark_stored_fields(rec_name, type_params, ast.record_field_type_exprs(fields),
           build_local_params(type_params, alias_env),
-          mark_phantom_params(rec_name, type_params, record_field_type_exprs(fields),
+          mark_phantom_params(rec_name, type_params, ast.record_field_type_exprs(fields),
             mark_record_representation(rec_name, repr,
               mark_type_multiplicity(rec_name, mult,
                 register_record_fields(rec_name, type_params, fields, alias_env, global_env_dict(env))))))),

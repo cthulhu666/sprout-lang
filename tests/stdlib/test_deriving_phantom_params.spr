@@ -1,0 +1,57 @@
+import stdlib.test (check_eq, check_false, check_true, run_suite)
+
+# `deriving` must not constrain a PHANTOM type parameter — one the RHS never
+# mentions. The derived body only touches stored fields, so a constraint on an
+# erased index is unsatisfiable for exactly the bare tag types the units and
+# typed-handle forms use, which carry no instances at all.
+
+# The units spelling from docs/idiomatic-sprout.md, now with a deriving clause.
+type Metres = | Metres
+type Feet = | Feet
+
+wrap Tagged u = Int deriving (Eq, Ord, ToString)
+
+fn metres(n: Int) -> Tagged Metres = Tagged(n)
+fn feet(n: Int) -> Tagged Feet = Tagged(n)
+
+# The same question on the ADT path.
+type Handle u (..) deriving (Eq, ToString) =
+  | Handle Int
+
+fn mesh_handle(n: Int) -> Handle Metres = Handle(n)
+
+# `a` is stored and `u` is phantom in one declaration: the stored one must KEEP
+# its constraint, or the fix has simply dropped every constraint.
+type Mixed a u (..) deriving (Eq) =
+  | Mixed a Int
+
+fn mixed(value: Int) -> Mixed Int Metres = Mixed(value, 0)
+
+# Records reach the filter through their own emitters, so they need their own
+# case: `u` phantom alone, then `a` stored beside it.
+type Slot u = (index: Int) deriving (Eq, Ord, ToString)
+
+fn slot(index: Int) -> Slot Metres = Slot(index = index)
+
+type Cell a u = (value: a, index: Int) deriving (Eq)
+
+fn cell(value: Int) -> Cell Int Metres = Cell(value = value, index = 0)
+
+fn main() -> Unit !{IO} =
+  run_suite("deriving_phantom_params", [
+    check_true("wrap eq at a tag index", eq(metres(1), metres(1))),
+    check_false("wrap neq at a tag index", eq(metres(1), metres(2))),
+    check_true("wrap eq at a second index", eq(feet(3), feet(3))),
+    check_true("wrap compare", compare(metres(1), metres(2)) < 0),
+    check_eq("wrap to_string", to_string(metres(7)), "Tagged(7)"),
+    check_true("adt eq with a phantom param", eq(mesh_handle(4), mesh_handle(4))),
+    check_eq("adt to_string with a phantom param", to_string(mesh_handle(4)), "Handle(4)"),
+    check_true("stored param still compares", eq(mixed(5), mixed(5))),
+    check_false("stored param still discriminates", eq(mixed(5), mixed(6))),
+    check_true("record eq with a phantom param", eq(slot(2), slot(2))),
+    check_false("record neq with a phantom param", eq(slot(2), slot(3))),
+    check_true("record compare with a phantom param", compare(slot(1), slot(2)) < 0),
+    check_eq("record to_string with a phantom param", to_string(slot(9)), "Slot(index = 9)"),
+    check_true("record stored param still compares", eq(cell(5), cell(5))),
+    check_false("record stored param still discriminates", eq(cell(5), cell(6)))
+  ])
