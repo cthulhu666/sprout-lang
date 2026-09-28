@@ -176,6 +176,18 @@ fmt-batch-smoke: build-fmt-from-seed
   # An UNWRITABLE path is the other half of the same conversion, and the one whose
   # regression is silent: `just fmt` exiting 0 having skipped a file stages
   # unformatted source under a green signal (Definition of Done #4).
+  #
+  # SKIPPED AS ROOT, and it cannot be fixed instead: mode 444 does not stop uid 0
+  # from opening for write, so as root fmt succeeds and the two assertions below
+  # fire with messages about the read/write conversion when nothing is wrong. The
+  # arm needs "read succeeds, write fails", and every root-proof shape (a
+  # directory at the path, a non-directory parent) breaks the READ instead, which
+  # is the half the bad-path arm above already covers. CI is unaffected — the
+  # workflows use bare runners as `runner` — but `just linux-run fmt-batch-smoke`
+  # does `docker run` with no `--user` and would hit it.
+  if [[ $(id -u) -eq 0 ]]; then
+    echo "fmt-batch-smoke: skipping the unwritable-path arm (running as root; mode 444 does not bind uid 0)"
+  else
   chmod 444 "$TMPD/ugly.sprout"
   status=0
   "$BIN" fmt "$TMPD/ugly.sprout" "$TMPD/a.sprout" \
@@ -192,6 +204,7 @@ fmt-batch-smoke: build-fmt-from-seed
     cat "$TMPD/ro.out" >&2; fail=1
   fi
   chmod 644 "$TMPD/ugly.sprout"
+  fi
 
   # A flag after a path is refused. Asserting the exit status is not enough: the bug
   # this guards WROTE the file, so the gate has to check the file too. The fixture is
@@ -3642,10 +3655,17 @@ render-cost-gate: bootstrap-from-seed
 # Prices the COMPILER, not a compiled program: what one more op in a single
 # basic block costs the rooting pass. A per-op cost that grows with block size
 # OOMs on a generated vector suite and reports it as a compile error.
-rooting-cost-gate: bootstrap-from-seed
+#
+# Measures STAGE-2, and that is load-bearing. Every other bootstrap-from-seed gate
+# prices a compiled program, so a stale seed degrades it partially; here the
+# compiler IS the subject, so stage-1 — linked from the committed seed, which
+# `bootstrap-from-seed` skips rebuilding when it is newer — would price the
+# PRE-EDIT pass and report "within budget" for a reintroduced quadratic.
+# `_build-stage` has no no-op guard, so stage-2 always reflects the working tree.
+rooting-cost-gate: bootstrap-from-seed build-stage2
   #!/usr/bin/env bash
   set -euo pipefail
-  SPROUT_ROOTING_COST_BIN="{{build_dir}}/compile_driver_bin_stage1" \
+  SPROUT_ROOTING_COST_BIN="{{build_dir}}/compile_driver_bin_stage2" \
   SPROUT_ROOTING_COST_STDLIB="{{stdlib_root}}" bash scripts/rooting_cost_gate.sh
 
 # ── Aggregate Gates ───────────────────────────────────────────────────────────

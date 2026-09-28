@@ -788,12 +788,12 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
 - [ ] `P3` **Cost gates cover three workloads, and none prices BYTES.** `render-cost-gate` budgets a
   TUI frame, `test_byte_offset_cost.spr` pins one complexity claim, `rooting-cost-gate` prices a
   compile; a parse and the stdlib hot paths are still unguarded. The sharper gap: every one of them
-  counts allocations, and no counter reports bytes — right-nested `++` versus `string_concat_many`
-  allocate the same NUMBER of objects, so a regression worth 22× in peak RSS shows up as 1.7× in
-  `gc_swept` and 16% in `sprout_obj`. That is why `rooting-cost-gate` caps `map` but not `gc_swept`:
-  1.5× separation against ~13% build-to-build noise. A bytes-allocated counter, or a portable
-  peak-RSS arm, would close it and re-enable that budget. Worth a `cost-golden` over 4–5 fixed
-  workloads on shared counters first. Shapes and when to use which: `docs/gates.md` §Render cost.
+  counts allocations, and none reports bytes — right-nested `++` and `string_concat_many` allocate
+  the same NUMBER of objects. Measured: reintroducing `++` moves peak RSS 88 MB → 1907 MB while
+  `gc_swept` moves 7650 → 7628 and `map` 300 → 300, so no counter sees it and `rooting-cost-gate`
+  guards only the rooting half. `ulimit -v` is unsettable on macOS, ruling out the cheap portable
+  RSS arm; a bytes-allocated counter in the runtime report would close it. A `cost-golden` over
+  4–5 fixed workloads on shared counters comes first. Shapes: `docs/gates.md` §Render cost.
 - [ ] `P3` **Mid-string `str_slice` is O(start)**, so a scanner whose offset advances is still
   quadratic. Prefix slicing no longer is — `str_slice` walks to `start + count` and stops, making
   `slice(s, 0, k)` independent of `|s|`. Closing the rest needs a codepoint-to-byte cache on String

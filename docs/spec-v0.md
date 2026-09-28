@@ -3456,16 +3456,16 @@ from_ordinal(n)`), which satisfies this requirement.
 For parametric types (e.g. `type Box a = | Hold a`), the synthesized instance
 carries one instance constraint per type parameter the declaration **stores** —
 §5.8's phantom-position test, unchanged: the parameter appears in some
-constructor or record field type, outside an arrow.  So `type Box a = | Hold a
-deriving (Eq)` yields `instance Eq (Box a) where Eq a`, while the phantom
-`type Handle u = | Handle Int deriving (Eq)` yields an unconstrained
+constructor or record field type, outside an arrow.  So `type Box a deriving (Eq)
+= | Hold a` yields `instance Eq (Box a) where Eq a`, while the phantom
+`type Handle u deriving (Eq) = | Handle Int` yields an unconstrained
 `Eq (Handle u)`, usable at an index type with no instances of its own — the
 derived body never touches a value of that type.  The instance *head* still
 carries every parameter; only the context is filtered.
 
 The test is **syntactic**, as in §5.8: a parameter appearing as a type argument of
 a stored field counts as stored, even where that type discards it.  So
-`type Outer u = | Outer (Tagged u) deriving (Eq)` is constrained on `u` although
+`type Outer u deriving (Eq) = | Outer (Tagged u)` is constrained on `u` although
 `wrap Tagged u = Int` stores nothing of it.
 
 **Records** support `deriving (Eq, Ord, ToString)`.  The clause is **trailing**,

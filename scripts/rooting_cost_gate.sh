@@ -7,7 +7,8 @@
 # golden snapshots matched, every test passed. It surfaced as a generated vector
 # suite taking 1.8 GB to compile and being SIGKILLed under CI's parallelism,
 # which reads as `COMPILE FAILED` with empty stderr — a compile error, not a
-# cost. That is the failure this gate exists to make loud.
+# cost. That is the failure this gate exists to make loud — for the ROOTING pass
+# only; see the gc_swept note below for the half it cannot see.
 #
 # It counts ALLOCATION COUNTS, not time or peak RSS. `SPROUT_DEBUG_ALLOC=1` makes the
 # runtime report totals at exit, and compiling a fixed file repeats them
@@ -29,28 +30,32 @@ SMALL_N=60
 LARGE_N=120
 DELTA_N=$((LARGE_N - SMALL_N))
 
-# Per element added to the literal. Observed 301 map / 6752 swept on 2026-09-28,
-# with per-op live sets replaced by one per-block last-use index and IR text
-# rendered through string_concat_many.
+# Per element added to the literal. Observed 300 map / 7650 swept on 2026-09-28
+# against a stage-2 build, with per-op live sets replaced by one per-block
+# last-use index. Stage-1 scored 6752 swept on the same source — ~13%
+# build-to-build spread, which is why nothing tight is budgeted on it.
 #
 # MAP is the sharp one: it was 4076 per element and rising with every element
 # added, so a return of that quadratic overshoots this ceiling by ~6x at this
 # fixture size and by more at any larger one.
 MAX_MAP_PER_ELEM=650
 
-# SWEPT IS DELIBERATELY NOT CAPPED, only floored. It is the counter that best
-# sees string churn (sprout_obj ignores cstr allocations, per docs/gates.md), so
-# a ceiling here is tempting — and it would be dishonest. Right-nested `++`
-# scored 11707 per element against 6752..7650 for the fixed compiler, where that
-# spread is two builds of the SAME source: ~13% build-to-build noise against a
-# 1.5x separation from the bug. A budget inside that noise either flakes or
-# fails to fire.
+# SWEPT IS FLOORED, NOT CAPPED, and the floor is a fixture check — NOT a churn
+# detector. Measured by reintroducing right-nested `++` in ir_lowering.lower_ops
+# and rebuilding: peak RSS went 88 MB -> 1907 MB on a 400-element literal, while
+# gc_swept moved 7650 -> 7628 and map 300 -> 300. NO SIGNAL AT ALL, in either.
 #
-# So the string half of this file's subject is UNGUARDED, and bytes are the
-# reason: the two concatenation forms allocate the same NUMBER of objects and
-# differ only in bytes copied, which no counter here reports. A 22x peak-RSS
-# regression moves gc_swept 1.7x and sprout_obj 16%. This is a cost gate, not a
-# memory gate; closing that needs a bytes counter or a portable peak-RSS arm.
+# An earlier revision of this comment claimed gc_swept separated the two by 1.7x.
+# That was wrong, and the mistake is worth naming: the 11707 figure it compared
+# against came from master's binary, which carried BOTH quadratics, so the
+# movement was entirely the ROOTING fix. Measure the regression alone before
+# claiming a counter guards it.
+#
+# So the ir_lowering half is guarded by NOTHING here, and bytes are why: the two
+# concatenation forms allocate the same NUMBER of objects and differ only in
+# bytes copied, which no counter in this report measures. `ulimit -v` is not
+# settable on macOS, so a portable RSS arm is not available either. This is a
+# cost gate, not a memory gate.
 
 # A FLOOR, for the reason render_cost_gate.sh documents: "cheap" and "compiled
 # nothing" are the same number to a budget. If an edit leaves the two fixtures
@@ -68,8 +73,29 @@ err_small=$(mktemp /tmp/sprout_rooting_cost_s_XXXXXX)
 err_large=$(mktemp /tmp/sprout_rooting_cost_l_XXXXXX)
 trap 'rm -f "$err_small" "$err_large"' EXIT
 
-# Read a counter out of the runtime's exit report.
-counter() { sed -n "s/.*$2=\([0-9]*\).*/\1/p" <<< "$(grep '^\[sprout alloc\]' "$1" | tail -1)"; }
+alloc_line() { grep '^\[sprout alloc\]' "$1" | tail -1; }
+
+# Read a counter out of the runtime's exit report. Anchored on the separating
+# space: `.*` is greedy, so an UNanchored `map=` binds to the last match, and the
+# report is append-mostly — a later counter whose name ends in one we read
+# (`slotmap=`, `bitmap=`) would be returned instead.
+counter() { sed -n "s/.*[[:space:]]$2=\([0-9]*\).*/\1/p" <<< "$(alloc_line "$1")"; }
+
+# The anchor alone is not enough, because the failure it prevents returns a
+# plausible NUMBER rather than nothing — so it sails past the empty-check below,
+# and the gate then budgets an unrelated counter and passes whatever the rooting
+# pass costs. That is the exact vacuous green this gate exists to prevent, so the
+# name is required to occur exactly once.
+require_unique() {
+  local n
+  n=$(grep -o "[[:space:]]$2=" <<< "$(alloc_line "$1")" | wc -l | tr -d ' ')
+  [ "$n" -eq 1 ] && return 0
+  echo "FAIL: '$2=' occurs $n time(s) in the alloc report; expected exactly 1." >&2
+  echo "      A counter whose name ends in '$2' was probably added to" >&2
+  echo "      sprout_gc_report_alloc_stats. This read is ambiguous, so it is not" >&2
+  echo "      a budget — name the counters apart or anchor this read further." >&2
+  exit 1
+}
 
 compile_one() {
   SPROUT_DEBUG_ALLOC=1 "$BIN" --emit-ir "$STDLIB" "$1" > /dev/null 2> "$2"
@@ -83,6 +109,11 @@ compile_one() {
 
 compile_one "$SMALL" "$err_small"
 compile_one "$LARGE" "$err_large"
+
+for f in "$err_small" "$err_large"; do
+  require_unique "$f" map
+  require_unique "$f" gc_swept
+done
 
 map_s=$(counter "$err_small" map);        map_l=$(counter "$err_large" map)
 swept_s=$(counter "$err_small" gc_swept); swept_l=$(counter "$err_large" gc_swept)
