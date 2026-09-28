@@ -778,6 +778,16 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   Also `set_remove`: it reinserts every element into a fresh set where an AVL delete is already
   available — `NativeSet` IS the `Map` BST with value 0, and `map_remove` calls `bst_remove_node`.
   O(n) allocations instead of O(log n), and it needs a `native_set_remove` extern, so ASK FIRST.
+- [ ] `P2` **A `Dict` key is interned permanently, so computed keys leak for the process's life.**
+  `map_set` routes every key through `intern_string`, which mallocs outside the arena and never
+  frees; `sprout_heap_lookup` returns NULL for those buffers so the collector skips them. That is
+  deliberate — it makes `BSTNode.key` a raw `const char*` the GC need not trace, and gives every
+  String an O(1) header length — but it means a server keyed on request ids grows the table without
+  bound. Now VISIBLE, not fixed: the report carries `intern=`/`intern_bytes=` and the census an
+  `offheap:` line (`tests/c_runtime/intern_table_report.c` pins that it counts distinct keys).
+  Bounding it means making the key a traced handle, which is a runtime representation change and
+  needs a design round. Measure a long-running server first — the galaxy client's 75,640 keys are
+  boot-loaded and bounded, which is the easy case.
 - [ ] `P2` **`unicode.lookup` allocates a closure per table search.** `find_tag(count, chunk, cp)`
   takes its chunk accessor as a `Int -> String` parameter, and passing `gcb_chunk` allocates a
   closure at every call. Measured with `SPROUT_DEBUG_ALLOC` over a segmentation probe: 82,000
@@ -785,15 +795,13 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   fast path skipped the searches. The fast path hid it for ASCII; non-Latin text still pays. Options
   are a non-higher-order entry point per table, or making a static function argument not allocate.
   `sample` never showed this — it flattened into `str_slice`; only the per-kind counters named it.
-- [ ] `P3` **Cost gates cover three workloads, and none prices BYTES.** `render-cost-gate` budgets a
-  TUI frame, `test_byte_offset_cost.spr` pins one complexity claim, `rooting-cost-gate` prices a
-  compile; a parse and the stdlib hot paths are still unguarded. The sharper gap: every one of them
-  counts allocations, and none reports bytes — right-nested `++` and `string_concat_many` allocate
-  the same NUMBER of objects. Measured: reintroducing `++` moves peak RSS 88 MB → 1907 MB while
-  `gc_swept` moves 7650 → 7628 and `map` 300 → 300, so no counter sees it and `rooting-cost-gate`
-  guards only the rooting half. `ulimit -v` is unsettable on macOS, ruling out the cheap portable
-  RSS arm; a bytes-allocated counter in the runtime report would close it. A `cost-golden` over
-  4–5 fixed workloads on shared counters comes first. Shapes: `docs/gates.md` §Render cost.
+- [ ] `P3` **Cost gates cover three workloads; a parse and the stdlib hot paths are unguarded.**
+  `render-cost-gate` budgets a TUI frame, `test_byte_offset_cost.spr` pins one complexity claim,
+  `rooting-cost-gate` prices a compile. The bytes half is CLOSED: the report carries `slot_bytes=`
+  and `rooting-cost-gate` budgets it, which separates the two concatenation forms 5.9× where every
+  count gives nothing. `render-cost-gate` does not budget it yet — a TUI frame's byte cost has never
+  been measured, so there is no number to set. A `cost-golden` over 4–5 fixed workloads on shared
+  counters is the shape that would cover all of them at once. Shapes: `docs/gates.md` §Render cost.
 - [ ] `P3` **Mid-string `str_slice` is O(start)**, so a scanner whose offset advances is still
   quadratic. Prefix slicing no longer is — `str_slice` walks to `start + count` and stops, making
   `slice(s, 0, k)` independent of `|s|`. Closing the rest needs a codepoint-to-byte cache on String

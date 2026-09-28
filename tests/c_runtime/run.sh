@@ -285,4 +285,44 @@ for sel in intern distinct arity weak; do
   done
 done
 
+echo "==> c runtime: the intern table is reported, and counts DISTINCT keys"
+# The only account of a permanent, off-arena allocation. See the file header for
+# why the assertion is a DIFFERENCE between two runs rather than an absolute.
+compile intern_table_report.c "$TMP_DIR/intern_table_report" -O0 -g
+intern_of() {
+  SPROUT_DEBUG_ALLOC=1 "$TMP_DIR/intern_table_report" "$1" \
+    > "$TMP_DIR/intern_$1.out" 2> "$TMP_DIR/intern_$1.err"
+  grep -q "^intern-probe-$1$" "$TMP_DIR/intern_$1.out" || {
+    echo "  the '$1' probe did not run to completion:" >&2
+    cat "$TMP_DIR/intern_$1.out" "$TMP_DIR/intern_$1.err" >&2
+    exit 1
+  }
+  # Anchored on the separating space, so `intern_bytes=` cannot answer for `intern=`.
+  sed -n 's/.*[[:space:]]intern=\([0-9]*\).*/\1/p' "$TMP_DIR/intern_$1.err"
+}
+d=$(intern_of distinct)
+r=$(intern_of repeated)
+[ -n "$d" ] && [ -n "$r" ] || {
+  echo "  could not read intern= from the alloc report (distinct='$d' repeated='$r')." >&2
+  echo "  The runtime stopped reporting the intern table, so nothing accounts for it." >&2
+  cat "$TMP_DIR/intern_distinct.err" >&2
+  exit 1
+}
+# 2000 computed keys against one reused key: the gap is the 1999 the repeated run
+# does not add. Bounded both ways — a count of INSERTIONS would put the gap at 0.
+gap=$(( d - r ))
+if [ "$gap" -lt 1900 ] || [ "$gap" -gt 2100 ]; then
+  echo "  intern= grew by $gap between 2000 distinct keys and one repeated key" >&2
+  echo "  (distinct=$d repeated=$r); expected ~1999. It is not counting distinct keys." >&2
+  exit 1
+fi
+# The census reports the table too, on its own line and labelled off-heap, so a
+# reader cannot add it to the live set.
+SPROUT_DEBUG_GC=1 "$TMP_DIR/intern_table_report" repeated > /dev/null 2> "$TMP_DIR/intern_gc.err"
+grep -q "offheap: intern=" "$TMP_DIR/intern_gc.err" || {
+  echo "  the GC census does not report the intern table on an offheap line" >&2
+  exit 1
+}
+echo "  intern= grew by $gap (distinct=$d repeated=$r)"
+
 echo "==> c runtime tests passed"

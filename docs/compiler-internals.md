@@ -48,13 +48,15 @@ text, so rendering one block costs O(ops × text) *bytes*. One function per sour
 function hides this; a single 13k-op function (one long list literal, which is what
 a generated vector suite is) reached ~2 GB of transient string churn that the
 allocator never returns to the OS, and CI SIGKILLed it as `COMPILE FAILED` with
-empty stderr. **No allocation counter sees this at all**, because the two forms allocate the same
-*number* of string objects and differ only in bytes copied. Measured by
-reintroducing the `++` form and rebuilding: peak RSS 88 MB → 1907 MB, while
-`gc_swept` moved 7650 → 7628 and `map` 300 → 300. So `just rooting-cost-gate`
-does **not** guard this — it guards the rooting pass — and no gate does.
-`docs/gates.md` §Compiling one long block records why, including the wrong
-intermediate conclusion that `gc_swept` covered it.
+empty stderr. **No allocation COUNT sees this**, because the two forms allocate the
+same *number* of string objects and differ only in bytes copied: reintroducing the
+`++` form moved peak RSS 88 MB → 1907 MB while `gc_swept` moved 7650 → 7628 and
+`map` 300 → 300. The report's `slot_bytes=` is what does see it — 249,472 bytes per
+element against 1,475,716, a 5.9× separation that grows with block size — and
+`just rooting-cost-gate` budgets it, so this is guarded now. `docs/gates.md`
+§Compiling one long block records the wrong intermediate conclusion that `gc_swept`
+covered it, which is the reason the byte arm was red-verified against the
+reintroduced quadratic alone rather than against master.
 
 **OBJ arity is an ABI invariant.** The low 8 bits of an OBJ's aux (`SPROUT_OBJ_ARITY_MASK`, max `SPROUT_MAX_OBJ_ARITY` = 255) are the GC's *only* record of that object's payload size: `slot_bytes` sizes the slot from it and `sprout_heap_child_count_payload` scans exactly that many words. A wrong value there desyncs the sweep's slot walk instead of failing loudly, so every OBJ allocation must write its true field count. The split is single-sourced through `SPROUT_OBJ_ARITY_BITS`/`_MASK`/`SPROUT_MAX_OBJ_ARITY`; widening the arity field narrows the tag (aux is 50 bits, so 8 arity bits leave 42 for the tag). `ast_to_ir.max_boxed_arity` mirrors the ceiling and rejects wider products at compile time.
 

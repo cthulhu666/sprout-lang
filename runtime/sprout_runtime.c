@@ -196,7 +196,17 @@ static long long g_debug_alloc_vector = 0;
 static long long g_debug_alloc_map = 0;
 static long long g_debug_alloc_bytes = 0;
 static long long g_debug_alloc_builder = 0;
+/* Slot bytes, not payload: what the allocator consumes, 16-byte rounding and
+   header included. A COUNT is blind to a string-shape bug, because right-nested
+   concatenation and one-pass joining allocate the same number of objects. */
+static long long g_debug_alloc_slot_bytes = 0;
 static long long g_debug_gc_swept = 0;
+/* The intern table is malloc'd outside the arena and never freed, so neither the
+   alloc counters nor the live census can see it. Reported so a program whose keys
+   are COMPUTED shows its growth instead of hiding it. Unguarded, unlike the
+   counters above: the census reports these with SPROUT_DEBUG_GC alone. */
+static long long g_intern_entries = 0;
+static long long g_intern_bytes = 0;
 static long long g_gc_cycle_count = 0;
 static long long g_managed_heap_count = 0;
 static long long g_managed_alloc_since_gc = 0;
@@ -391,13 +401,16 @@ static void sprout_debug_alloc_report(void) {
   if (!g_debug_alloc_enabled) return;
   fprintf(
     stderr,
-    "[sprout alloc] sprout_obj=%lld closure=%lld vector=%lld map=%lld bytes=%lld builder=%lld gc_swept=%lld gc_cycles=%lld\n",
+    "[sprout alloc] sprout_obj=%lld closure=%lld vector=%lld map=%lld bytes=%lld builder=%lld slot_bytes=%lld intern=%lld intern_bytes=%lld gc_swept=%lld gc_cycles=%lld\n",
     g_debug_alloc_sprout_obj,
     g_debug_alloc_closure,
     g_debug_alloc_vector,
     g_debug_alloc_map,
     g_debug_alloc_bytes,
     g_debug_alloc_builder,
+    g_debug_alloc_slot_bytes,
+    g_intern_entries,
+    g_intern_bytes,
     g_debug_gc_swept,
     g_gc_cycle_count
   );
@@ -573,6 +586,14 @@ static void sprout_gc_log_cycle(
     g_gc_live_obj, g_gc_live_closure, g_gc_live_vec, g_gc_live_map,
     g_gc_live_ref, g_gc_live_cstr, (double)g_gc_live_cstr_bytes / 1024.0,
     g_gc_live_bytes, g_gc_live_builder, g_gc_live_tuple
+  );
+  /* Separate line, and labelled: this memory is NOT in the census above, so a
+     reader must not add it to the live set. Growing across cycles is the tell
+     that a program is interning keys it computes. */
+  fprintf(
+    stderr,
+    "[sprout gc]   offheap: intern=%lld(%.1fKB)\n",
+    g_intern_entries, (double)g_intern_bytes / 1024.0
   );
 }
 
@@ -1305,6 +1326,7 @@ __attribute__((destructor)) static void sprout_gc_profile_dump(void) {
 static void* sprout_gc_alloc_block(SproutHeapKind kind, unsigned long long aux,
                                    size_t payload_bytes, const char* ctx) {
   size_t needed_slot = round16(8 + payload_bytes);
+  if (g_debug_alloc_enabled) g_debug_alloc_slot_bytes += (long long)needed_slot;
   if (SPROUT_SLOT_IS_LARGE(needed_slot)) {
     /* Large object path: dedicated malloc block. */
     char* block = (char*)malloc(needed_slot);
@@ -2001,6 +2023,8 @@ static const char* intern_string(const char* s) {
   entry->str = raw + 8;
   entry->next = g_intern_table[bucket];
   g_intern_table[bucket] = entry;
+  g_intern_entries++;
+  g_intern_bytes += (long long)(sizeof(InternBucket) + 8 + len + 1);
   return entry->str;
 }
 

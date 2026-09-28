@@ -63,8 +63,31 @@ fi
 
 cells=$(sed -n 's/.*cost-probe cells=\([0-9]*\).*/\1/p' "$out")
 line=$(grep '^\[sprout alloc\]' "$err" | tail -1)
-obj=$(printf '%s\n' "$line" | sed -n 's/.*sprout_obj=\([0-9]*\).*/\1/p')
-swept=$(printf '%s\n' "$line" | sed -n 's/.*gc_swept=\([0-9]*\).*/\1/p')
+
+# Anchored on the separating space, and required to be unique. `.*` is greedy, so
+# an unanchored `sprout_obj=` binds to the LAST match — and the report is
+# append-mostly, so a later counter whose name ends in one of these would be
+# returned instead. That failure hands back a plausible NUMBER rather than
+# nothing, so it sails past the empty-check below and the gate then budgets an
+# unrelated counter. Same read as scripts/rooting_cost_gate.sh.
+counter() { printf '%s\n' "$line" | sed -n "s/.*[[:space:]]$1=\([0-9]*\).*/\1/p"; }
+require_unique() {
+  local n
+  n=$(printf '%s\n' "$line" | grep -o "[[:space:]]$1=" | wc -l | tr -d ' ')
+  [ "$n" -eq 1 ] && return 0
+  echo "FAIL: '$1=' occurs $n time(s) in the alloc report; expected exactly 1." >&2
+  if [ "$n" -eq 0 ]; then
+    echo "      The counter is GONE, so this budget is measuring nothing." >&2
+  else
+    echo "      A counter whose name ends in '$1' was added to the report; this" >&2
+    echo "      read is ambiguous, so it is not a budget." >&2
+  fi
+  exit 1
+}
+require_unique sprout_obj
+require_unique gc_swept
+obj=$(counter sprout_obj)
+swept=$(counter gc_swept)
 
 # A missing count means the report did not appear — the runtime lost
 # SPROUT_DEBUG_ALLOC, or the probe stopped printing its denominator. Either way

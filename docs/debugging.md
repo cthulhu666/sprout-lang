@@ -131,6 +131,39 @@ the same `if` do not count. `cse-keys` lists what is behind it, most useful sort
 Do not read a large number as a speed-up waiting to happen — it is a **static** count, and
 `bench/results-2026-09-11-cse-census.md` records what happened when one was cashed in.
 
+## What did a program allocate? (`SPROUT_DEBUG_ALLOC=1`, `SPROUT_DEBUG_GC=1`)
+
+`SPROUT_DEBUG_ALLOC=1` prints one line at exit: totals for the run. `SPROUT_DEBUG_GC=1` prints two
+per collection — the cycle, then a live census by heap kind and an `offheap:` line.
+
+One compile of `tests/cost/rooting_block_small.sprout` — a late cycle, then the exit totals:
+
+```
+[sprout gc]   types: obj=47199 closure=0 vec=1 map=2784 ref=8 cstr=6126(23.5KB) bytes=0 tuple=902
+[sprout gc]   offheap: intern=4354(143.8KB)
+[sprout alloc] sprout_obj=4908866 closure=56014 vector=1871 map=161183 bytes=40 builder=0 \
+  slot_bytes=166643856 intern=5608 intern_bytes=188997 gc_swept=5627634 gc_cycles=150
+```
+
+**Read `slot_bytes` before concluding anything from the counts.** Every other field on that line is
+a COUNT, and a count cannot see a string-shape bug: right-nested `++` and `string_concat_many`
+allocate the same number of objects and differ only in bytes copied. That is not hypothetical — it
+cost 1.8 GB of compile memory while `sprout_obj`, `map` and `gc_swept` all stayed flat
+([compiler-internals.md](compiler-internals.md) §Render IR text). `slot_bytes` is what the allocator
+consumed, header and 16-byte rounding included.
+
+**`map=N` in the census is N Dict/Set ENTRIES, one `BSTNode` each** — there is no branching factor,
+so a resident dictionary's mark cost is its entry count at ~100 ns apiece. A census dominated by
+`map` that is *flat cycle to cycle* is resident data, not churn; one that climbs and resets is a
+shape bug. Same field, opposite diagnosis.
+
+**`intern` is not in the census's universe, which is why it has its own line.** Dict keys are
+interned into a permanent malloc'd table outside the arena, so they are invisible to every count
+above — to `cstr` in particular. Before this line existed, the galaxy client's census read
+`cstr=111(9.2KB)` while the program held 75,640 Dict keys
+([gc-generational-v0.md](gc-generational-v0.md) §13.6). Growth across cycles is the tell that a
+program is interning keys it *computes* (see `BACKLOG.md`); a flat number is a boot-time load.
+
 ## `just llvm-where <ll_file> <line>` — map an error line to its Sprout function
 
 When `opt --passes=verify` (or clang) reports a malformed-IR error at line N of a large `.ll` file, this tool walks the file up from line N to the nearest enclosing `define` and prints the Sprout qualified name.
