@@ -2,8 +2,16 @@ module stdlib.compiler.fmt_driver
 
 import stdlib.compiler.formatter as formatter
 import stdlib.compiler.lint_rules as lint_rules
+import stdlib.compiler.fmt_cli as fmt_cli
 import stdlib.string as string
 import stdlib.fs as fs
+
+# What to do with each path. Separate from fmt_cli.Command so the fold below has
+# no unreachable usage case.
+type Mode =
+  | ModeFmtWrite
+  | ModeFmtCheck
+  | ModeLint
 
 fn print_issues(path: String, issues: List formatter.LintIssue) -> Unit !{IO} =
   match issues with
@@ -26,16 +34,29 @@ fn print_findings(path: String, findings: List lint_rules.LintFinding) -> Unit !
               ": [" ++ rule_id ++ "] " ++ msg)
             print_findings(path, t)
 
+# A failure reports on stderr and fails the run, leaving stdout to carry only the
+# report (docs/compiler-internals.md §Driver diagnostic contract). One unreadable
+# path must not abandon the rest of the batch, so neither of these panics.
+fn read_failed(path: String, msg: String) -> Int !{IO} =
+  do
+    eprint("read_file: " ++ path ++ ": " ++ msg)
+    1
+
+fn write_failed(path: String, msg: String) -> Int !{IO} =
+  do
+    eprint("write_file: " ++ path ++ ": " ++ msg)
+    1
+
 fn run_fmt_check(path: String) -> Int !{IO} =
   match fs.read_text(path) with
-  | Err msg -> panic("read_file: " ++ path ++ ": " ++ msg)
+  | Err msg -> read_failed(path, msg)
   | Ok src ->
       do
         let formatted = formatter.format_source(src)
         let current = if string.ends_with(src, "\n") then src else src ++ "\n"
         if formatted == current
         then do
-          print("ok")
+          print("ok: " ++ path)
           0
         else do
           print("needs formatting: " ++ path)
@@ -43,7 +64,7 @@ fn run_fmt_check(path: String) -> Int !{IO} =
 
 fn run_fmt_write(path: String) -> Int !{IO} =
   match fs.read_text(path) with
-  | Err msg -> panic("read_file: " ++ path ++ ": " ++ msg)
+  | Err msg -> read_failed(path, msg)
   | Ok src ->
       do
         let formatted = formatter.format_source(src)
@@ -54,7 +75,7 @@ fn run_fmt_write(path: String) -> Int !{IO} =
           0
         else
           match fs.write_text(path, formatted) with
-          | Err msg -> panic("write_file: " ++ path ++ ": " ++ msg)
+          | Err msg -> write_failed(path, msg)
           | Ok _ ->
               do
                 print("formatted " ++ path)
@@ -62,7 +83,7 @@ fn run_fmt_write(path: String) -> Int !{IO} =
 
 fn run_lint_file(path: String) -> Int !{IO} =
   match fs.read_text(path) with
-  | Err msg -> panic("read_file: " ++ path ++ ": " ++ msg)
+  | Err msg -> read_failed(path, msg)
   | Ok src ->
       do
         let issues = formatter.lint_source(src)
@@ -72,34 +93,33 @@ fn run_lint_file(path: String) -> Int !{IO} =
         match (issues, findings) with
         | (Nil, Nil) ->
             do
-              print("ok")
+              print("ok: " ++ path)
               0
         | _ -> 1
+
+fn run_one(mode: Mode, path: String) -> Int !{IO} =
+  match mode with
+  | ModeFmtWrite -> run_fmt_write(path)
+  | ModeFmtCheck -> run_fmt_check(path)
+  | ModeLint -> run_lint_file(path)
+
+# Worst exit code wins, so a batch reports every bad file and still fails.
+fn keep_worst(mode: Mode, worst: Int, path: String) -> Int !{IO} =
+  do
+    code <- run_one(mode, path)
+    if code > worst then code else worst
+
+fn run_all(mode: Mode, paths: List String) -> Int !{IO} =
+  list_fold(\ (worst, path) -> keep_worst(mode, worst, path), 0, paths)
 
 fn main() -> Int !{IO} =
   do
     args <- argv_all()
-    match args with
-    | ["fmt", "--check", path | _] -> run_fmt_check(path)
-    | ["fmt", "--check" | _] ->
+    match fmt_cli.parse_command(args) with
+    | fmt_cli.CmdFmt paths -> run_all(ModeFmtWrite, paths)
+    | fmt_cli.CmdFmtCheck paths -> run_all(ModeFmtCheck, paths)
+    | fmt_cli.CmdLint paths -> run_all(ModeLint, paths)
+    | fmt_cli.CmdUsage msg ->
         do
-          print("fmt --check: missing path")
-          1
-    | ["fmt", path | _] -> run_fmt_write(path)
-    | ["fmt" | _] ->
-        do
-          print("fmt: missing path")
-          1
-    | ["lint", path | _] -> run_lint_file(path)
-    | ["lint" | _] ->
-        do
-          print("lint: missing path")
-          1
-    | [cmd | _] ->
-        do
-          print("unknown subcommand: " ++ cmd)
-          1
-    | _ ->
-        do
-          print("usage: fmt_bin [fmt|lint] <path>")
+          eprint(msg)
           1

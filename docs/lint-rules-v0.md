@@ -5,6 +5,15 @@ Status: **piece A (§4A, the matcher) implemented; B and C are design.** Experim
 enable/disable" line in `BACKLOG.md`'s `Formatter/linter beyond the baseline` entry — that entry
 points here.
 
+Revision 6. §10's cost argument was wrong a third time, and in a way no more careful measurement
+would have caught: its per-file numbers were right, but it multiplied them by 1145 without asking
+where 1145 came from. It came from `xargs -0 -n 1`, because `fmt_bin lint` took one path and ignored
+the rest. Bounding the batch (`-n 100`) removes the derivation cost that §10's generated module
+existed to avoid, so §14 Q1 is closed without one. Two measured corrections came with it: process
+startup is **not** negligible (~4.3ms × 1153 ≈ 5s), and batching *without* a bound is slower than
+per-file, because killing the process was also keeping the heap young. §14 Q3 is closed too — an
+`!{IO}` fallback typechecks and fires on the success path.
+
 Revision 5. An ensemble review (`high`, 3 passes) found the matcher reading a **qualified name as one
 atom**. `e.message` is a single `VarExpr`, so `free_vars` yielded `{"e.message"}`, which never
 intersects `{"e"}` — a capture projecting a field off a branch binder passed §5.2a's closedness check
@@ -337,11 +346,15 @@ lint/hand-rolled-combinator: this is `result_from_maybe(…)`
 **Silent: the fallback is a syntactic value.** A literal, a variable, a constructor of those. No
 note; the rewrite is equivalent.
 
-One claim deliberately not made: whether an `!{IO}` expression can appear in such a fallback at all.
-The reviewer reported a probe showing `maybe_with_default(side(), …)` typechecking and running the
-effect on the success path; that is not independently confirmed here, and the `panic` case settles
-the design without it. Effect-system facts in this repo go stale quickly — confirm against the
-checker before relying on it.
+An `!{IO}` expression **can** appear in such a fallback, confirmed against the checker: it typechecks
+in an `!{IO}` caller, runs the effect on the success path where the fallback goes unused, and is
+rejected in a pure one. It needs no rule of its own — it is not `ast.is_syntactic_value`, so the
+*Note* case above already covers it — and §14 records why the shape does not arise in the corpus.
+
+Worth keeping straight, because the two cases are caught by opposite means: the effect row sees an
+`!{IO}` fallback perfectly and reports nothing wrong, since in an `!{IO}` caller the rewrite really
+is type-correct and only the *behaviour* changes. `panic` is the reverse — pure in its signature, so
+only a syntactic check for the callee finds it.
 
 ## 7. Guards against false positives
 
@@ -408,12 +421,15 @@ Measured in this worktree:
 
 | what | time |
 |---|---|
-| the `just lint` loop over 1145 files (`justfile:106`) | **~17s** |
+| the `just lint` loop over 1145 files (the `lint` recipe in `justfile`) | **~17s** |
 | `just lint` including building stage-1 and `fmt_bin` from the seed | 26.2s |
 | lint `stdlib/prelude.sprout` (2126 lines, parse + all 7 rules) | 0.20s |
 | lint `stdlib/bytes.sprout` | 0.02s |
 
-Cost is roughly linear in lines, ~0.09ms/line; process startup is negligible.
+Cost is roughly linear in lines, ~0.09ms/line.
+
+**Process startup is not negligible**, which revision 5 asserted without measuring it: 1153 bare
+`fmt_bin` startups cost 5s, or ~4.3ms each — a quarter of `lint` and nearly half of `fmt-check`.
 
 Revision 1 said the baseline was "roughly a minute" and the penalty therefore about 4×. **Both were
 wrong**: parsing the prelude in each of 1145 processes adds ~1145 × 0.19s ≈ 3.6 min to a ~17s
@@ -422,13 +438,30 @@ file contains `match` — which **contradicts §5**: `stdlib/args.sprout:50-51` 
 `let Just value = arg_get(a, key) else dflt in value`, has no `match` token, and is exactly the
 `let..else` spelling §5 insists is a true positive. 121 sites are of that form.
 
-**Derive the pattern set at build time** instead, into a generated module `fmt_bin` links. The
-patterns change only when the prelude changes, so per-process derivation was always the wrong place.
-A cheaper runtime fallback, if the build step proves awkward: slice the prelude to the named
-`export fn` declarations and parse only those (~1ms). Either removes the pre-filter entirely.
+**Bound the batch instead.** The 1145 was never a property of the problem — it was `xargs -0 -n 1`
+in `justfile`, forced by a `lint` subcommand that took one path and ignored the rest. `fmt_cli`
+parses a path *list*, so the multiplier is now a choice, and derivation can stay at startup where it
+belongs. No generated module, no freshness gate, no staleness class.
 
-This makes the prelude a build input to `fmt_bin`, which the justfile already tracks for
-`lint_rules.sprout` (`justfile:127-137`); the generated module joins that freshness check.
+The batch size is a measured optimum, and both directions from it cost time for opposite reasons —
+per-file pays startup, unbounded pays GC, since a process that lints one file usually exits before
+collecting while one that lints all of them collects repeatedly. Peak RSS stays flat near 60MB
+throughout, so that is collection cost and not retention. Medians of 3 over 1153 files:
+
+| batch | lint | processes | derivation (~0.19s × processes) | total once derivation lands |
+|---|---|---|---|---|
+| 1 | 21s | 1153 | 219s | ~240s |
+| 10 | **16s** | 116 | 22s | ~38s |
+| 25 | 23s | 47 | 9s | ~32s |
+| **100** | 20s | 12 | 2.3s | **~22s** |
+| unbounded | 26s | 1 | 0.2s | ~26s |
+
+`-n 100` is the minimum of the last column, and neutral against the per-file baseline today. `-n 10`
+is the fastest *now* and among the worst once the prelude is parsed per process — which is why the
+number lives next to a comment in `justfile` explaining it, not as a bare literal.
+
+Startup derivation also keeps the property the generated module would have had to gate for: the
+pattern set cannot be stale, because it is rebuilt from `prelude.sprout` on every run.
 
 ## 11. Impact
 
@@ -516,11 +549,21 @@ rebinding a parameter name rejected.
 
 ## 14. Open questions
 
-1. Does the build-time derivation step belong in the justfile's `fmt_bin` recipe, or should
-   `fmt_driver` read a checked-in generated module? The second is greppable and reviewable; the
-   first cannot go stale.
-2. Does the eager-evaluation note (§6, middle case) read as useful or as noise across the corpus?
+1. Does the eager-evaluation note (§6, middle case) read as useful or as noise across the corpus?
    Only visible once the rule runs.
-3. Can an `!{IO}` expression occupy a fallback position at all (§6)? Unconfirmed here.
-4. Should `Pattern` holes be in v0 after all? §9's first two rows say the matcher will eventually
+2. Should `Pattern` holes be in v0 after all? §9's first two rows say the matcher will eventually
    want them; nothing in the combinator rule does.
+
+Closed:
+
+- **Where the derivation step lives.** Neither: §10 bounds the batch instead, so derivation stays at
+  startup and no generated artifact exists to keep fresh.
+- **Whether an `!{IO}` expression can occupy a fallback position.** Yes. `maybe_with_default(side(),
+  Just(42))` typechecks in an `!{IO}` caller and runs the effect **on the success path**, where the
+  fallback is never used; a pure caller is rejected (`performs IO but is declared pure`, spec §7 rule
+  8). This changes no rule — an effectful fallback is not `ast.is_syntactic_value`, so §6 already
+  routes it to the *Note* case — and the shape does not occur: of 20 corpus sites with an effectful
+  `Nothing`/`Err` arm, none pairs it with the bare `| Just x -> x` the rule requires (the arms either
+  ignore the payload, as `stdlib/repl.sprout:28`, or consume without returning it, as
+  `stdlib/compiler/checker.sprout:423`). That count is from single-line arms on adjacent lines, so
+  the rule running over the corpus is what makes it exact.

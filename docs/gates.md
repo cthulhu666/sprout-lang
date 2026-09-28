@@ -242,6 +242,27 @@ Added 2026-09-11 for a specific class: LLVM passes that break the `musttail` inv
 A fixture belongs here when its *shape* is what provokes the optimizer, not its output; assert
 nothing about what it prints, and keep it small enough that the IR is readable when it fires.
 
+## fmt/lint batching — `just fmt-batch-smoke`
+
+Asserts the three properties the `fmt`, `fmt-check` and `lint` loops rely on: every path in a batch
+is processed, an unreadable path reports on **stderr** and exits nonzero **without abandoning the
+rest of the batch**, and a flag outside its recognised position is refused.
+
+`just test` cannot reach any of them. They live in argv handling and the exit-status fold, not in a
+pure function, and `tests/stdlib/compiler/test_fmt_cli.spr` covers only the parse — `fmt_cli` exists
+as a separate module precisely because a module with `fn main` cannot be imported by a test (the
+imported `main` becomes the entry point, so the suite silently runs the driver instead).
+
+Added 2026-09-28 with `-n 100` batching. Before it, `run_lint_file` **panicked** on an unreadable
+path: harmless at one file per process, but a batch would lose every later path in it. The flag case
+guards a bug that was live — `fmt <path> --check` matched `["fmt", path | _]` and **wrote** the file
+the caller asked to only check, because the trailing `| _` discarded the flag.
+
+Wired into `just ci-fast-gates` and `just gate`. It was briefly left standalone, on the reasoning
+that `just lint` is not in CI (`.github/workflows/ci.yml`) so only `fmt-check` runs batched there —
+and `just gate-audit` rejected that immediately, which is the right answer: `fmt-check` batching is
+exactly what CI depends on, and a gate nobody runs reads as coverage it does not provide.
+
 ## Runtime line refs — `just runtime-line-refs`
 
 Rejects `sprout_runtime.c:NNNN`-style citations of the C runtime anywhere but `docs/archive/`, which
