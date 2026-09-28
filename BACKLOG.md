@@ -280,6 +280,14 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   through `translate_do_bind_*` instead of resetting it); **heap-field tuples**
   (`IRCallUnboxed{2,3}` slots holding heap values must be rooted at the call site, and `op_heap_def`
   must report multiple slots).
+- [ ] `P2` **The CPR peephole does not reach through a combinator, so an escaping `Maybe` costs
+  12–90x.** `match vec_get(i, v) with` lowers to a two-word `@vec_get_worker` and allocates
+  nothing; `maybe_with_default(0, vec_get(i, v))` builds the `Just` and costs **+17.5 ns/read** at
+  every size and **+110–135 ns/read** with 100k live — the size dependence is collection cost, not
+  allocation (`bench/results-2026-09-28-vec-box-tax.md`, harness `bench/vec_box/`). Extending the
+  peephole through a known non-escaping combinator, of which `maybe_with_default` is essentially
+  the whole population, removes the gap without callers having to know the rule
+  `docs/idiomatic-sprout.md` currently teaches by hand.
 - [ ] `P3` **Phase B mutual-TCO: a member that is both self-tail-recursive and in a heterogeneous
   mutual cycle keeps its mutual edge as a plain call.** `mutual_tco_rewrite_fn` skips any fn
   carrying an `IRTcoEntry`. No miscompile — only the mutual edge builds a native frame per
@@ -1453,9 +1461,10 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   why.** A ten-limb read+rebuild costs **19.7 ns** on a constructor of `Int` fields against
   **250 ns** on `Vec` (`docs/bigint-v0.md` §9 Stage 4) — the reason `stdlib/crypto/p256.sprout`
   abandoned `Vec`. This entry used to blame `vec_get`'s `Just` box and propose an unboxed
-  accessor. That was built and measured: no gain (5M reads on a 100k `Vec`, 2 ns/read either
-  way — the allocator is a bump pointer and the boxes die immediately), so it was dropped rather
-  than landed. The real gap is representation — a scalar constructor is unboxed outright
+  accessor; that was built, measured at no gain (2 ns/read either way) and dropped. Correctly, but
+  not for the recorded reason: both arms were already CPR-unboxed, so neither had a box to remove
+  (`bench/results-2026-09-28-vec-box-tax.md`). The real gap is representation — a scalar
+  constructor is unboxed outright
   (`type_is_non_heap_scalar`) while a `Vec` is a heap object behind a call — and no accessor
   closes it. Reopen only with a measurement that indicts something specific.
 - [ ] `P3` **`bigint.from_string` is still quadratic in the digit count.** The codepoint walk is
