@@ -3413,6 +3413,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "tui-files-smoke|tui-files-smoke"
     "ide-smoke|ide-smoke"
     "render-cost|render-cost-gate"
+    "rooting-cost|rooting-cost-gate"
     "type-errors|test-type-errors"
     "parse-errors|test-parse-errors"
     "executable-errors|test-executable-errors"
@@ -3638,6 +3639,15 @@ render-cost-gate: bootstrap-from-seed
   clang "{{build_dir}}/render_cost.ll" {{runtime_src}} -O2 {{clang_extra}} -o "{{build_dir}}/render_cost"
   SPROUT_RENDER_COST_BIN="{{build_dir}}/render_cost" bash scripts/render_cost_gate.sh
 
+# Prices the COMPILER, not a compiled program: what one more op in a single
+# basic block costs the rooting pass. A per-op cost that grows with block size
+# OOMs on a generated vector suite and reports it as a compile error.
+rooting-cost-gate: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  SPROUT_ROOTING_COST_BIN="{{build_dir}}/compile_driver_bin_stage1" \
+  SPROUT_ROOTING_COST_STDLIB="{{stdlib_root}}" bash scripts/rooting_cost_gate.sh
+
 # ── Aggregate Gates ───────────────────────────────────────────────────────────
 #
 # One-shot verification batteries so the pre-commit ritual is a single command
@@ -3665,7 +3675,7 @@ gate-quick: fmt-check test compile-examples-stage1 smoke-shapes bundle-smoke
 # advisory), so it runs in the body rather than as an arg-less dependency.
 # Full CI-parity battery (slow, ~15-25m); a green run means CI will not surprise you.
 [group('gate')]
-gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate check-approved-builtins check-extern-signatures backlog-shape verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test lsp-smoke task-io-smoke http-client-binary-gate http-tls-gate test-stress
+gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate rooting-cost-gate loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate check-approved-builtins check-extern-signatures backlog-shape verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test lsp-smoke task-io-smoke http-client-binary-gate http-tls-gate test-stress
   #!/usr/bin/env bash
   set -euo pipefail
   echo "==> gate: gc-safety-check --strict..."

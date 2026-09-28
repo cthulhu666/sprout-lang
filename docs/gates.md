@@ -361,6 +361,42 @@ that crosses it moves the ceiling in the same commit, with the new number in the
 discipline as a golden, for the same reason. Exact values are deliberately **not** pinned: the gate
 must also pass on CI's Linux x86_64.
 
+## Compiling one long block — `just rooting-cost-gate`
+
+Prices the **compiler**, not a compiled program. Compiles two fixtures that differ only in the length
+of one list literal (`tests/cost/rooting_block_{small,large}.sprout`, 60 and 120 elements) and bounds
+the **difference per added element**, so the several hundred thousand allocations it takes to compile
+the prelude cancel instead of entering the budget. An absolute number would drift as the compiler
+grows until it guarded nothing.
+
+Added 2026-09-28, after two independent quadratics in the same shape — per-op cost in a single basic
+block — made `tests/stdlib/test_bigint_vectors.spr` (330 assertions in one `run_suite` list) cost
+1.5 GB to compile. `ir_rooting` materialised a live-set per op and asked `roots_across` for the whole
+live set at every trigger; `ir_lowering` rendered IR text with right-nested `++`. A generated vector
+suite is one 13k-instruction function, so both scaled with the literal while the emitted IR stayed
+linear. **Every output-checking gate passed throughout** — golden IR was byte-identical before and
+after the fix. It surfaced only as the OOM backstop SIGKILLing a parallel test worker, which reads as
+`COMPILE FAILED` with empty stderr: indistinguishable from a real compile error, and nearly filed as
+a regression in an unrelated PR.
+
+**It bounds `map` only, and the `ir_lowering` half is UNGUARDED.** `map` is sharp and stable: 4076 per
+element before the rooting fix against 300–301 after, reproducing to ±0.3% across builds, and it *rose
+with every element added*, so a return of that quadratic overshoots by 6.3× here and more at any
+larger fixture.
+
+`gc_swept` is floored but deliberately **not** capped, and the reasoning generalises. It is the best
+counter for string churn — `sprout_obj` ignores cstr allocations, per the render-cost entry above — so
+a ceiling is tempting. But right-nested `++` scored 11707 against 6752–7650 for the fixed compiler,
+and that spread is two builds of the *same source*: ~13% noise against a 1.5× separation from the bug.
+A budget inside its own noise either flakes or fails to fire, and one that fires unreliably is worse
+than a documented gap. **The real obstacle is that bytes are unobservable here**: the two
+concatenation forms allocate the same *number* of objects, so a regression worth 22× in peak RSS moves
+`gc_swept` 1.7× and `sprout_obj` 16%. Closing it needs a bytes-allocated counter or a portable
+peak-RSS arm — tracked in `BACKLOG.md`.
+
+Floors are asserted as well as ceilings, for the reason the render-cost entry gives: if an edit leaves
+the two fixtures the same size, the delta collapses and the ceilings stay green over nothing.
+
 ## Optimisation-pass harness — `just opt-harness-check`
 
 Compiles `tests/opt_harness/dead_let.spr` twice, once with every pass on and once with

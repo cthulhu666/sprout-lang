@@ -390,19 +390,35 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int), c
         ++ call_attr ++ "\n" ++
       "  ret i64 " ++ result
 
-fn lower_ops(ops: List sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int), call_attr: String) -> String =
+# Parts accumulate reversed and join in ONE pass.  Right-nested `++` allocates a
+# string as long as the whole remaining text at every step, so emitting one block
+# cost O(ops * text) bytes: a 13k-op function (one long list literal) reached 2 GB
+# of transient string churn, which the allocator never returns to the OS.
+fn lower_ops_parts(ops: List sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int),
+                   call_attr: String, acc: List String) -> List String =
   match ops with
-  | Nil -> ""
-  | Cons op rest -> lower_op(op, ret_ty, str_table, call_attr) ++ "\n" ++ lower_ops(rest, ret_ty, str_table, call_attr)
+  | Nil -> acc
+  | Cons op rest ->
+      lower_ops_parts(rest, ret_ty, str_table, call_attr,
+                      Cons("\n", Cons(lower_op(op, ret_ty, str_table, call_attr), acc)))
+
+fn lower_ops(ops: List sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int), call_attr: String) -> String =
+  string_concat_many(list_reverse(lower_ops_parts(ops, ret_ty, str_table, call_attr, Nil)))
 
 fn lower_block(b: sprout_ir.IRBlock, ret_ty: String, str_table: Dict (String, Int), call_attr: String) -> String =
   match b with
   | sprout_ir.IRBlock label ops -> label ++ ":\n" ++ lower_ops(ops, ret_ty, str_table, call_attr)
 
-fn lower_blocks(bs: List sprout_ir.IRBlock, ret_ty: String, str_table: Dict (String, Int), call_attr: String) -> String =
+fn lower_blocks_parts(bs: List sprout_ir.IRBlock, ret_ty: String, str_table: Dict (String, Int),
+                      call_attr: String, acc: List String) -> List String =
   match bs with
-  | Nil -> ""
-  | Cons b rest -> lower_block(b, ret_ty, str_table, call_attr) ++ lower_blocks(rest, ret_ty, str_table, call_attr)
+  | Nil -> acc
+  | Cons b rest ->
+      lower_blocks_parts(rest, ret_ty, str_table, call_attr,
+                         Cons(lower_block(b, ret_ty, str_table, call_attr), acc))
+
+fn lower_blocks(bs: List sprout_ir.IRBlock, ret_ty: String, str_table: Dict (String, Int), call_attr: String) -> String =
+  string_concat_many(list_reverse(lower_blocks_parts(bs, ret_ty, str_table, call_attr, Nil)))
 
 # Emit `alloca` + `store` for each TCO param slot.  Each line ends in '\n' so the
 # trailing `stacksave` (appended by the caller) starts on its own line.
@@ -491,10 +507,15 @@ fn fn_table_for(name: String, fn_tables: Dict (Dict (String, Int))) -> Dict (Str
   | Just t -> t
   | Nothing -> dict_empty()
 
-fn lower_fns(fns: List sprout_ir.IRFunction, fn_tables: Dict (Dict (String, Int))) -> String =
+fn lower_fns_parts(fns: List sprout_ir.IRFunction, fn_tables: Dict (Dict (String, Int)),
+                   acc: List String) -> List String =
   match fns with
-  | Nil -> ""
-  | Cons f rest -> lower_fn(f, fn_tables) ++ "\n" ++ lower_fns(rest, fn_tables)
+  | Nil -> acc
+  | Cons f rest ->
+      lower_fns_parts(rest, fn_tables, Cons("\n", Cons(lower_fn(f, fn_tables), acc)))
+
+fn lower_fns(fns: List sprout_ir.IRFunction, fn_tables: Dict (Dict (String, Int))) -> String =
+  string_concat_many(list_reverse(lower_fns_parts(fns, fn_tables, Nil)))
 
 # Header: the minimum prelude clang/opt accept.  Uses the
 # "unknown-unknown-unknown" target triple; the runtime `declare`s below
