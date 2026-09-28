@@ -84,14 +84,25 @@ repl:
 # fmt_bin silently produces obsolete formatting — exactly the bug that
 # broke PR #19's CI (2026-06-10): test files formatted with no-space
 # `deriving(...)` locally vs CI's fresh `deriving (...)`.
+#
+# `-n 100` is a measured optimum, not a round number — do not raise it to
+# "batch everything" or drop it back to 1. Both directions cost time, for
+# opposite reasons. Per file (-n 1) pays ~4.3ms of process startup 1153 times;
+# unbounded pays GC, because a process that lints one file usually exits before
+# collecting while one that lints them all collects repeatedly (peak RSS stays
+# flat at ~60MB, so this is collection cost, not a leak). Medians of 3 over 1153
+# files: -n 1 = 21s, -n 10 = 16s, -n 100 = 20s, unbounded = 26s.
+# 100 wins on the cost that will dominate once the linter parses the prelude
+# once per process (docs/lint-rules-v0.md §10): that is ~0.19s × processes, so
+# 12 processes pay ~2s where 1153 would pay ~220s.
 
 [group('fmt')]
 fmt: build-fmt-from-seed
-  rg --files -0 -g '*.sprout' -g '*.spr' | xargs -0 -n 1 "{{build_dir}}/fmt_bin" fmt
+  rg --files -0 -g '*.sprout' -g '*.spr' | xargs -0 -n 100 "{{build_dir}}/fmt_bin" fmt
 
 [group('fmt')]
 fmt-check: build-fmt-from-seed
-  rg --files -0 -g '*.sprout' -g '*.spr' | xargs -0 -n 1 "{{build_dir}}/fmt_bin" fmt --check
+  rg --files -0 -g '*.sprout' -g '*.spr' | xargs -0 -n 100 "{{build_dir}}/fmt_bin" fmt --check
 
 [group('fmt')]
 fmt-file file: build-fmt-from-seed
@@ -103,11 +114,59 @@ fmt-check-file file: build-fmt-from-seed
 
 [group('fmt')]
 lint: build-fmt-from-seed
-  rg --files -0 -g '*.sprout' -g '*.spr' | xargs -0 -n 1 "{{build_dir}}/fmt_bin" lint
+  rg --files -0 -g '*.sprout' -g '*.spr' | xargs -0 -n 100 "{{build_dir}}/fmt_bin" lint
 
 [group('fmt')]
 lint-file file: build-fmt-from-seed
   "{{build_dir}}/fmt_bin" lint {{quote(file)}}
+
+# The batch contract the fmt/lint loops above depend on. `just test` cannot reach
+# it: it lives in argv handling and the exit-status fold, not in a pure function.
+[group('fmt')]
+fmt-batch-smoke: build-fmt-from-seed
+  #!/usr/bin/env bash
+  set -uo pipefail
+  BIN="{{build_dir}}/fmt_bin"
+  TMPD=$(mktemp -d /tmp/sprout_fmtbatch_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  fail=0
+
+  # Every path in the batch is linted, not just the first.
+  "$BIN" lint stdlib/bytes.sprout stdlib/string.sprout > "$TMPD/multi.out" 2>&1
+  if [[ $(grep -c '^ok: ' "$TMPD/multi.out") -ne 2 ]]; then
+    echo "fmt-batch-smoke: expected 2 'ok:' lines, got:" >&2; cat "$TMPD/multi.out" >&2; fail=1
+  fi
+
+  # An unreadable path reports on stderr, fails the run, and does NOT abandon the
+  # rest of the batch — it used to panic, taking every later path with it.
+  status=0
+  "$BIN" lint stdlib/bytes.sprout "$TMPD/absent.spr" stdlib/string.sprout \
+    > "$TMPD/bad.out" 2>"$TMPD/bad.err" || status=$?
+  if [[ "$status" -eq 0 ]]; then
+    echo "fmt-batch-smoke: an unreadable path must exit nonzero" >&2; fail=1
+  fi
+  if ! grep -qs 'read_file:' "$TMPD/bad.err"; then
+    echo "fmt-batch-smoke: the failure must reach stderr, not stdout" >&2
+    echo "  --- stdout ---" >&2; cat "$TMPD/bad.out" >&2
+    echo "  --- stderr ---" >&2; cat "$TMPD/bad.err" >&2
+    fail=1
+  fi
+  if [[ $(grep -c '^ok: ' "$TMPD/bad.out") -ne 2 ]]; then
+    echo "fmt-batch-smoke: the batch stopped at the bad path; both good paths must still lint" >&2
+    cat "$TMPD/bad.out" >&2; fail=1
+  fi
+
+  # A flag after a path is refused, never treated as a path or silently dropped:
+  # `fmt <path> --check` used to WRITE the file the caller asked to only check.
+  status=0
+  "$BIN" fmt stdlib/bytes.sprout --check > "$TMPD/flag.out" 2>"$TMPD/flag.err" || status=$?
+  if [[ "$status" -eq 0 ]] || ! grep -qs 'unknown flag: --check' "$TMPD/flag.err"; then
+    echo "fmt-batch-smoke: 'fmt <path> --check' must be refused on stderr" >&2
+    cat "$TMPD/flag.out" "$TMPD/flag.err" >&2; fail=1
+  fi
+
+  [[ "$fail" -eq 0 ]] || exit 1
+  echo "==> fmt-batch-smoke ✓ (multi-path · bad path isolated to stderr · flag position)"
 
 # Build fmt_bin via stage-1 (which is built from the IR seed).  fmt_bin chains
 # off compile_driver_bin_stage1 — no platform-specific binary required.
@@ -125,15 +184,17 @@ build-fmt-from-seed: bootstrap-from-seed
   FMT_DRIVER="{{stdlib_root}}/compiler/fmt_driver.sprout"
   FORMATTER="{{stdlib_root}}/compiler/formatter.sprout"
   LINT_RULES="{{stdlib_root}}/compiler/lint_rules.sprout"
+  FMT_CLI="{{stdlib_root}}/compiler/fmt_cli.sprout"
   # Freshness check: skip rebuild if fmt_bin is newer than every input it
-  # transitively depends on. The five checks cover: compiler changes
+  # transitively depends on. The six checks cover: compiler changes
   # (STAGE1, SEED), formatter rule changes (FORMATTER), lint rule changes
   # (LINT_RULES — fmt_bin's `lint` subcommand is built on it, so a new or
   # edited rule would otherwise never reach `just lint` or the pre-commit
-  # hook), driver wiring (FMT_DRIVER). Misses subtle prelude.sprout changes
-  # affecting fmt; force a rebuild with
+  # hook), driver wiring (FMT_DRIVER) and argv parsing (FMT_CLI, where a
+  # mis-parse would send every path to the wrong subcommand). Misses subtle
+  # prelude.sprout changes affecting fmt; force a rebuild with
   # `rm build/fmt_bin && just build-fmt-from-seed`.
-  if [[ -x "$OUT" && "$OUT" -nt "$STAGE1" && "$OUT" -nt "$SEED" && "$OUT" -nt "$FMT_DRIVER" && "$OUT" -nt "$FORMATTER" && "$OUT" -nt "$LINT_RULES" ]]; then
+  if [[ -x "$OUT" && "$OUT" -nt "$STAGE1" && "$OUT" -nt "$SEED" && "$OUT" -nt "$FMT_DRIVER" && "$OUT" -nt "$FORMATTER" && "$OUT" -nt "$LINT_RULES" && "$OUT" -nt "$FMT_CLI" ]]; then
     echo "==> fmt_bin is up-to-date with stage-1 + seed + formatter/lint sources; skipping rebuild."
     exit 0
   fi
@@ -3305,6 +3366,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "bundle-smoke|bundle-smoke"
     "effect-report-smoke|effect-report-smoke"
     "fmt-check|fmt-check"
+    "fmt-batch-smoke|fmt-batch-smoke"
     "tui-files-smoke|tui-files-smoke"
     "ide-smoke|ide-smoke"
     "render-cost|render-cost-gate"
@@ -3560,7 +3622,7 @@ gate-quick: fmt-check test compile-examples-stage1 smoke-shapes bundle-smoke
 # advisory), so it runs in the body rather than as an arg-less dependency.
 # Full CI-parity battery (slow, ~15-25m); a green run means CI will not surprise you.
 [group('gate')]
-gate: seed-dep-check fmt-check smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate check-approved-builtins check-extern-signatures backlog-shape verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test lsp-smoke task-io-smoke http-client-binary-gate http-tls-gate test-stress
+gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate check-approved-builtins check-extern-signatures backlog-shape verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test lsp-smoke task-io-smoke http-client-binary-gate http-tls-gate test-stress
   #!/usr/bin/env bash
   set -euo pipefail
   echo "==> gate: gc-safety-check --strict..."

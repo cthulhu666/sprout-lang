@@ -174,11 +174,17 @@ jobs:
 
       - name: CI fast gates (parallel)
         if: needs.changes.outputs.docs_only != 'true'
-        # 16 single-threaded gates fanned out JOBS-wide by `just ci-fast-gates`.
+        # Single-threaded gates fanned out JOBS-wide by `just ci-fast-gates`; the
+        # GATES array in the justfile is the list, and the gate-audit recipe fails if
+        # a verifying recipe has no caller. No count here — it said 16 while the array
+        # held 50. Do not write a recipe name here preceded by "just": gate-audit
+        # scrapes this file for `just <task>` INCLUDING comments, and would read it as
+        # a CI task that `just gate` must cover.
         # Covers: APPROVED_BUILTINS guard, smoke shapes, bundle smoke, fmt-check,
-        # negative type/parse conformance, golden-stdout conformance, example canary,
-        # GC safety (--strict), and the regression smokes (argv / div-by-zero /
-        # stack-overflow / task-io / tco-runtime / trace-dispatch / verify-dispatch).
+        # fmt/lint batching, negative type/parse conformance, golden-stdout
+        # conformance, example canary, GC safety (--strict), and the regression
+        # smokes (argv / div-by-zero / stack-overflow / task-io / tco-runtime /
+        # trace-dispatch / verify-dispatch).
         run: just ci-fast-gates
 
       - name: Run stdlib core tests (stage-1)

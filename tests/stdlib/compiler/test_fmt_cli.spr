@@ -1,0 +1,88 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.compiler.fmt_cli as fmt_cli
+import stdlib.string as string
+
+fn tag(c: fmt_cli.Command) -> String =
+  match c with
+  | fmt_cli.CmdFmt _ -> "fmt"
+  | fmt_cli.CmdFmtCheck _ -> "fmt-check"
+  | fmt_cli.CmdLint _ -> "lint"
+  | fmt_cli.CmdUsage _ -> "usage"
+
+fn paths(c: fmt_cli.Command) -> String =
+  match c with
+  | fmt_cli.CmdFmt ps -> string.join(",", ps)
+  | fmt_cli.CmdFmtCheck ps -> string.join(",", ps)
+  | fmt_cli.CmdLint ps -> string.join(",", ps)
+  | fmt_cli.CmdUsage _ -> ""
+
+fn message(c: fmt_cli.Command) -> String =
+  match c with
+  | fmt_cli.CmdUsage msg -> msg
+  | fmt_cli.CmdFmt _ -> ""
+  | fmt_cli.CmdFmtCheck _ -> ""
+  | fmt_cli.CmdLint _ -> ""
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # One path per subcommand: the shape that worked before batching.
+    assert_eq(state, "lint one path: tag", tag(fmt_cli.parse_command(["lint", "a.spr"])), "lint")
+    assert_eq(state, "lint one path: paths",
+      paths(fmt_cli.parse_command(["lint", "a.spr"])), "a.spr")
+    assert_eq(state, "fmt one path: tag", tag(fmt_cli.parse_command(["fmt", "a.spr"])), "fmt")
+    assert_eq(state, "fmt --check one path: tag",
+      tag(fmt_cli.parse_command(["fmt", "--check", "a.spr"])), "fmt-check")
+
+    # Many paths: the point of the change. Every path is kept, in order.
+    assert_eq(state, "lint three paths: tag",
+      tag(fmt_cli.parse_command(["lint", "a.spr", "b.spr", "c.spr"])), "lint")
+    assert_eq(state, "lint three paths: all kept in order",
+      paths(fmt_cli.parse_command(["lint", "a.spr", "b.spr", "c.spr"])), "a.spr,b.spr,c.spr")
+    assert_eq(state, "fmt two paths: all kept",
+      paths(fmt_cli.parse_command(["fmt", "a.spr", "b.spr"])), "a.spr,b.spr")
+    assert_eq(state, "fmt --check two paths: all kept",
+      paths(fmt_cli.parse_command(["fmt", "--check", "a.spr", "b.spr"])), "a.spr,b.spr")
+
+    # A missing path list is a usage error, per subcommand.
+    assert_eq(state, "lint with no path: usage",
+      tag(fmt_cli.parse_command(["lint"])), "usage")
+    assert_eq(state, "lint with no path: message",
+      message(fmt_cli.parse_command(["lint"])), "lint: missing path")
+    assert_eq(state, "fmt with no path: message",
+      message(fmt_cli.parse_command(["fmt"])), "fmt: missing path")
+    assert_eq(state, "fmt --check with no path: message",
+      message(fmt_cli.parse_command(["fmt", "--check"])), "fmt --check: missing path")
+
+    # No arguments at all.
+    assert_eq(state, "no args: usage", tag(fmt_cli.parse_command([])), "usage")
+    assert_eq(state, "no args: message",
+      message(fmt_cli.parse_command([])), "usage: fmt_bin [fmt|lint] <path>...")
+
+    # An unknown subcommand names itself.
+    assert_eq(state, "unknown subcommand: usage",
+      tag(fmt_cli.parse_command(["frobnicate", "a.spr"])), "usage")
+    assert_eq(state, "unknown subcommand: message",
+      message(fmt_cli.parse_command(["frobnicate", "a.spr"])),
+      "unknown subcommand: frobnicate")
+
+    # A flag outside its recognised position is refused, never taken as a path.
+    # `fmt a.spr --check` used to silently WRITE a.spr, ignoring --check.
+    assert_eq(state, "fmt with --check after a path: usage",
+      tag(fmt_cli.parse_command(["fmt", "a.spr", "--check"])), "usage")
+    assert_eq(state, "fmt with --check after a path: message",
+      message(fmt_cli.parse_command(["fmt", "a.spr", "--check"])), "unknown flag: --check")
+    assert_eq(state, "lint with a flag: usage",
+      tag(fmt_cli.parse_command(["lint", "--check", "a.spr"])), "usage")
+    assert_eq(state, "lint with a flag: message",
+      message(fmt_cli.parse_command(["lint", "--check", "a.spr"])), "unknown flag: --check")
+    assert_eq(state, "fmt --check with a second flag: message",
+      message(fmt_cli.parse_command(["fmt", "--check", "a.spr", "--write"])),
+      "unknown flag: --write")
+
+    # A path merely containing dashes is a path, not a flag.
+    assert_eq(state, "path with dashes is a path",
+      paths(fmt_cli.parse_command(["lint", "a-b.spr", "c-d.spr"])), "a-b.spr,c-d.spr")
+
+    summary(state)

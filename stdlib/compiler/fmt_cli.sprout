@@ -1,0 +1,39 @@
+module stdlib.compiler.fmt_cli
+
+import stdlib.string as string
+
+# fmt_bin's command line, parsed once so the driver only dispatches. Lives apart
+# from fmt_driver because a module with `fn main` cannot be imported by a test —
+# the imported main becomes the entry point.
+export type Command (..) =
+  | CmdFmt (List String)
+  | CmdFmtCheck (List String)
+  | CmdLint (List String)
+  | CmdUsage String
+
+export fn parse_command(args: List String) -> Command =
+  match args with
+  | [] -> CmdUsage("usage: fmt_bin [fmt|lint] <path>...")
+  | ["fmt", "--check" | rest] ->
+      let Ok ps = check_paths(rest, "fmt --check") else Err msg -> CmdUsage(msg)
+      in CmdFmtCheck(ps)
+  | ["fmt" | rest] ->
+      let Ok ps = check_paths(rest, "fmt") else Err msg -> CmdUsage(msg)
+      in CmdFmt(ps)
+  | ["lint" | rest] ->
+      let Ok ps = check_paths(rest, "lint") else Err msg -> CmdUsage(msg)
+      in CmdLint(ps)
+  | [cmd | _] -> CmdUsage("unknown subcommand: " ++ cmd)
+
+# Every remaining argument is a path. A flag here is refused rather than taken as
+# one: `fmt a.spr --check` used to write the file the caller asked to only check.
+fn check_paths(rest: List String, label: String) -> Result String (List String) =
+  match find(is_flag, rest) with
+  | Just flag -> Err("unknown flag: " ++ flag)
+  | Nothing ->
+      match rest with
+      | [] -> Err(label ++ ": missing path")
+      | _ -> Ok(rest)
+
+fn is_flag(arg: String) -> Bool =
+  string.starts_with(arg, "--")
