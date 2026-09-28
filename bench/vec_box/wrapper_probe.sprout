@@ -1,0 +1,41 @@
+module main
+
+# An IR-SHAPE probe, not a timing run: does the CPR peephole survive a user-defined
+# `Maybe`-returning wrapper, or does only a builtin-backed accessor unbox?
+#
+# It does survive, and the workers compose. Compile with `--emit-ir` and the `_worker`
+# defines show the chain: sum_wrapped -> my_get_worker -> mutvec_get_worker ->
+# @vector_get_unboxed, with no allocation at any level. `sum_plain` is the control.
+# Read alongside bench/results-2026-09-28-vec-box-tax.md.
+
+import stdlib.mutable (MutVec, mutvec_get, mutvec_new, mutvec_set)
+import stdlib.terminal (term_write)
+
+# Returns the Maybe rather than matching it — the shape of `stdlib.mutable.mutmatrix_get`.
+fn my_get(v: MutVec Int, i: Int) -> Maybe Int !{IO} = mutvec_get(v, i)
+
+fn sum_wrapped(v: MutVec Int, i: Int, n: Int, acc: Int) -> Int !{IO} =
+  if i >= n then acc
+  else
+    do
+      let next = match my_get(v, i) with
+                 | Just x -> acc + x
+                 | Nothing -> acc
+      sum_wrapped(v, i + 1, n, next)
+
+fn sum_plain(v: MutVec Int, i: Int, n: Int, acc: Int) -> Int !{IO} =
+  if i >= n then acc
+  else
+    do
+      let next = match mutvec_get(v, i) with
+                 | Just x -> acc + x
+                 | Nothing -> acc
+      sum_plain(v, i + 1, n, next)
+
+fn main() -> Unit !{IO} =
+  do
+    v <- mutvec_new(4, 0)
+    mutvec_set(v, 0, 7)
+    wrapped <- sum_wrapped(v, 0, 4, 0)
+    plain <- sum_plain(v, 0, 4, 0)
+    term_write(`wrapped ${to_string(wrapped)}, plain ${to_string(plain)}\n`)
