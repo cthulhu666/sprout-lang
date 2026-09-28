@@ -280,14 +280,15 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   through `translate_do_bind_*` instead of resetting it); **heap-field tuples**
   (`IRCallUnboxed{2,3}` slots holding heap values must be rooted at the call site, and `op_heap_def`
   must report multiple slots).
-- [ ] `P2` **The CPR peephole does not reach through a combinator, so an escaping `Maybe` costs
-  12–90x.** `match vec_get(i, v) with` lowers to a two-word `@vec_get_worker` and allocates
-  nothing; `maybe_with_default(0, vec_get(i, v))` builds the `Just` and costs **+17.5 ns/read** at
-  every size and **+110–135 ns/read** with 100k live — the size dependence is collection cost, not
-  allocation (`bench/results-2026-09-28-vec-box-tax.md`, harness `bench/vec_box/`). Extending the
-  peephole through a known non-escaping combinator, of which `maybe_with_default` is essentially
-  the whole population, removes the gap without callers having to know the rule
-  `docs/idiomatic-sprout.md` currently teaches by hand.
+- [ ] `P2` **The CPR peephole unboxes a `Maybe` that a `match` consumes, and any wrapper that
+  returns one, but not one passed as an argument — so an escaping `Maybe` costs 12–90x.**
+  `match vec_get(i, v) with` lowers to a two-word `@vec_get_worker` and allocates nothing, and
+  the workers compose through a user-defined wrapper; `maybe_with_default(0, vec_get(i, v))`
+  builds the `Just` and costs **+17.5 ns/read** at every size and **+110–135 ns/read** with 100k
+  live — the size dependence is collection cost, not allocation
+  (`bench/results-2026-09-28-vec-box-tax.md`, harness `bench/vec_box/`). Extending it through a
+  known non-escaping combinator, of which `maybe_with_default` is essentially the whole
+  population, removes the gap and the hand-taught rule in `docs/idiomatic-sprout.md`.
 - [ ] `P3` **Phase B mutual-TCO: a member that is both self-tail-recursive and in a heterogeneous
   mutual cycle keeps its mutual edge as a plain call.** `mutual_tco_rewrite_fn` skips any fn
   carrying an `IRTcoEntry`. No miscompile — only the mutual edge builds a native frame per

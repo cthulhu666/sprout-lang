@@ -23,10 +23,26 @@ two-word worker return — no heap value is ever built. The emitted IR names the
 | `match vec_get(i, v) with …` | `call { i64, i64 } @vec_get_worker` |
 | `maybe_with_default(0, vec_get(i, v))` | `call @vec_get` then `call @maybe_with_default` |
 
-The peephole does not reach through a call, so handing the `Maybe` to any combinator
-materialises it. (Do not grep the IR for `sprout_gc_alloc` to tell these apart — the
-`Just` is built inside the C builtin and never appears in emitted IR. The two symbols
-above are the discriminator.)
+What decides it is **argument position**, not distance from the accessor. A `Maybe`
+handed to a call is materialised; a `Maybe` *returned* by one is not, because the callee
+gets a worker of its own and the workers compose. Wrap the accessor in as many layers as
+you like and the chain stays unboxed all the way down — `bench/vec_box/wrapper_probe.sprout`
+is that shape, and emits:
+
+```
+@main.sum_wrapped     -> call { i64, i64 } @main.my_get_worker
+@main.my_get_worker   -> call { i64, i64 } @stdlib.mutable.mutvec_get_worker
+@mutvec_get_worker    -> call { i64, i64 } @vector_get_unboxed
+```
+
+So `match mutmatrix_get(m, r, c) with` allocates nothing, though `mutmatrix_get` is an
+ordinary Sprout function returning `Maybe a` and the accessor is two calls away. This is
+what makes the cheap spelling usable: it survives your own abstraction boundaries, and
+only an argument puts the box back.
+
+(Do not grep the IR for `sprout_gc_alloc` to tell these apart — the `Just` is built
+inside the C builtin and never appears in emitted IR. The worker symbols are the
+discriminator.)
 
 ## Results
 
