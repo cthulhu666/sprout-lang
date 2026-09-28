@@ -51,11 +51,11 @@ MAX_MAP_PER_ELEM=650
 # movement was entirely the ROOTING fix. Measure the regression alone before
 # claiming a counter guards it.
 #
-# So the ir_lowering half is guarded by NOTHING here, and bytes are why: the two
-# concatenation forms allocate the same NUMBER of objects and differ only in
-# bytes copied, which no counter in this report measures. `ulimit -v` is not
-# settable on macOS, so a portable RSS arm is not available either. This is a
-# cost gate, not a memory gate.
+# The ir_lowering half is guarded by SLOT_BYTES, which the two concatenation
+# forms DO separate: they allocate the same number of objects and differ only in
+# bytes, so a count cannot see them and a byte total can. Right-nested `++`
+# allocates a string as long as the whole remaining text at every step, so the
+# per-element byte cost rises with block size where one-pass joining is flat.
 
 # A FLOOR, for the reason render_cost_gate.sh documents: "cheap" and "compiled
 # nothing" are the same number to a budget. If an edit leaves the two fixtures
@@ -63,6 +63,14 @@ MAX_MAP_PER_ELEM=650
 # the ceilings above guard nothing while staying green.
 MIN_MAP_PER_ELEM=60
 MIN_SWEPT_PER_ELEM=1500
+
+# BYTES, which is the only arm here that sees ir_lowering. Observed 249472 per
+# element on 2026-09-28 (stage-2); reintroducing right-nested `++` in lower_ops
+# moved it to 1475716, a 5.9x separation that GROWS with block size. The same run
+# moved sprout_obj by 0.8%, map by 0, gc_swept by -0.3% — so this arm, and only
+# this arm, guards the string-building half.
+MAX_SLOT_BYTES_PER_ELEM=550000
+MIN_SLOT_BYTES_PER_ELEM=50000
 
 if [ ! -x "$BIN" ]; then
   echo "ERROR: $BIN not found; run: just rooting-cost-gate" >&2
@@ -91,9 +99,14 @@ require_unique() {
   n=$(grep -o "[[:space:]]$2=" <<< "$(alloc_line "$1")" | wc -l | tr -d ' ')
   [ "$n" -eq 1 ] && return 0
   echo "FAIL: '$2=' occurs $n time(s) in the alloc report; expected exactly 1." >&2
-  echo "      A counter whose name ends in '$2' was probably added to" >&2
-  echo "      sprout_gc_report_alloc_stats. This read is ambiguous, so it is not" >&2
-  echo "      a budget — name the counters apart or anchor this read further." >&2
+  if [ "$n" -eq 0 ]; then
+    echo "      The counter is GONE, so this arm is measuring nothing. Either the" >&2
+    echo "      runtime stopped reporting it, or the report was not produced at all." >&2
+  else
+    echo "      A counter whose name ends in '$2' was probably added to the report." >&2
+    echo "      This read is ambiguous, so it is not a budget — name the counters" >&2
+    echo "      apart or anchor this read further." >&2
+  fi
   exit 1
 }
 
@@ -113,15 +126,19 @@ compile_one "$LARGE" "$err_large"
 for f in "$err_small" "$err_large"; do
   require_unique "$f" map
   require_unique "$f" gc_swept
+  require_unique "$f" slot_bytes
 done
 
 map_s=$(counter "$err_small" map);        map_l=$(counter "$err_large" map)
 swept_s=$(counter "$err_small" gc_swept); swept_l=$(counter "$err_large" gc_swept)
+sb_s=$(counter "$err_small" slot_bytes);  sb_l=$(counter "$err_large" slot_bytes)
 
 # A missing counter means the report did not appear — the runtime lost
 # SPROUT_DEBUG_ALLOC, or its format changed. A blind gate must fail, not pass.
-if [ -z "$map_s" ] || [ -z "$map_l" ] || [ -z "$swept_s" ] || [ -z "$swept_l" ]; then
-  echo "FAIL: could not read the counters (map='$map_s'/'$map_l' swept='$swept_s'/'$swept_l')" >&2
+if [ -z "$map_s" ] || [ -z "$map_l" ] || [ -z "$swept_s" ] || [ -z "$swept_l" ] \
+   || [ -z "$sb_s" ] || [ -z "$sb_l" ]; then
+  echo "FAIL: could not read the counters (map='$map_s'/'$map_l' swept='$swept_s'/'$swept_l'" >&2
+  echo "      slot_bytes='$sb_s'/'$sb_l')" >&2
   echo "--- small ---" >&2; cat "$err_small" >&2
   echo "--- large ---" >&2; cat "$err_large" >&2
   exit 1
@@ -131,12 +148,20 @@ fi
 # larger fixture compiled less, so the pair is no longer a clean difference.
 map_per=$(( (map_l - map_s) / DELTA_N ))
 swept_per=$(( (swept_l - swept_s) / DELTA_N ))
-echo "==> rooting cost: ${map_per} map and ${swept_per} swept per element" \
-     "($((map_l - map_s)) / $((swept_l - swept_s)) over $DELTA_N added elements)"
+sb_per=$(( (sb_l - sb_s) / DELTA_N ))
+echo "==> rooting cost: ${map_per} map, ${swept_per} swept and ${sb_per} slot bytes per element" \
+     "($((map_l - map_s)) / $((swept_l - swept_s)) / $((sb_l - sb_s)) over $DELTA_N added elements)"
 
 over=0
 if [ "$map_per" -gt "$MAX_MAP_PER_ELEM" ]; then
   echo "FAIL: $map_per map allocations per element exceeds the budget of $MAX_MAP_PER_ELEM" >&2
+  over=1
+fi
+if [ "$sb_per" -gt "$MAX_SLOT_BYTES_PER_ELEM" ]; then
+  echo "FAIL: $sb_per slot bytes per element exceeds the budget of $MAX_SLOT_BYTES_PER_ELEM" >&2
+  echo "      Bytes, not counts, so suspect string building before rooting: a" >&2
+  echo "      right-nested \`++\` over one block's ops copies the whole remaining" >&2
+  echo "      text per op. Collect parts and join once (see lower_ops_parts)." >&2
   over=1
 fi
 if [ "$over" -ne 0 ]; then
@@ -146,9 +171,10 @@ if [ "$over" -ne 0 ]; then
   exit 1
 fi
 
-if [ "$map_per" -lt "$MIN_MAP_PER_ELEM" ] || [ "$swept_per" -lt "$MIN_SWEPT_PER_ELEM" ]; then
-  echo "FAIL: $map_per map / $swept_per swept per element is below the floor of" >&2
-  echo "      $MIN_MAP_PER_ELEM / $MIN_SWEPT_PER_ELEM. The two fixtures have stopped differing by" >&2
+if [ "$map_per" -lt "$MIN_MAP_PER_ELEM" ] || [ "$swept_per" -lt "$MIN_SWEPT_PER_ELEM" ] \
+   || [ "$sb_per" -lt "$MIN_SLOT_BYTES_PER_ELEM" ]; then
+  echo "FAIL: $map_per map / $swept_per swept / $sb_per slot bytes per element is below the floor of" >&2
+  echo "      $MIN_MAP_PER_ELEM / $MIN_SWEPT_PER_ELEM / $MIN_SLOT_BYTES_PER_ELEM. The two fixtures have stopped differing by" >&2
   echo "      $DELTA_N elements of one list literal, so the ceiling is guarding nothing." >&2
   echo "      Check what they contain before lowering the floor." >&2
   exit 1

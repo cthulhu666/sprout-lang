@@ -389,24 +389,26 @@ after the fix. It surfaced only as the OOM backstop SIGKILLing a parallel test w
 `COMPILE FAILED` with empty stderr: indistinguishable from a real compile error, and nearly filed as
 a regression in an unrelated PR.
 
-**It bounds `map` only, and the `ir_lowering` half is UNGUARDED.** `map` is sharp and stable: 4076 per
+**Three arms, one per failure mode.** `map` covers the rooting pass and is sharp and stable: 4076 per
 element before the rooting fix against 300–301 after, reproducing to ±0.3% across builds, and it *rose
 with every element added*, so a return of that quadratic overshoots by 6.3× here and more at any
 larger fixture.
 
-`gc_swept` is floored, but that floor is a **fixture check, not a churn detector**, and the reason is
-worth reading before trusting any counter here. Reintroducing right-nested `++` in
-`ir_lowering.lower_ops` and rebuilding moves peak RSS from 88 MB to 1907 MB on a 400-element literal —
-and moves `gc_swept` from 7650 to **7628**, `map` from 300 to **300**. No signal in either.
+`slot_bytes` covers `ir_lowering`, and it is the only arm that can. The two concatenation forms
+allocate the same *number* of objects and differ only in bytes copied, so no count separates them:
+reintroducing right-nested `++` in `ir_lowering.lower_ops` moves peak RSS from 88 MB to 1907 MB while
+`gc_swept` moves 7650 → **7628** and `map` 300 → **300**. `slot_bytes` moves 249,472 per element →
+**1,475,716**, a 5.9× separation that grows with block size. Red-verified by reintroducing that
+quadratic alone and confirming the gate fails on the byte arm while `map` and `gc_swept` stay inside
+their budgets.
 
-An earlier revision of this entry claimed `gc_swept` separated the two by 1.7×. That was wrong, and
-the error is instructive: the 11707 figure it compared against came from *master's* binary, which
-carried **both** quadratics, so all the movement was the rooting fix. A counter that shifts when you
-fix two things at once has not been shown to see either — reintroduce the one regression alone and
-re-measure. Bytes are the obstacle: the two concatenation forms allocate the same *number* of objects
-and differ only in bytes copied, and nothing in the alloc report measures bytes. `ulimit -v` is not
-settable on macOS, so a portable peak-RSS arm is not available either. So the `ir_lowering` half is
-guarded by nothing, tracked in `BACKLOG.md`.
+`gc_swept` is floored only, and that floor is a **fixture check, not a churn detector**. An earlier
+revision of this entry claimed it separated the two by 1.7×. That was wrong, and the error is why the
+byte arm above was verified the way it was: the 11707 figure it compared against came from *master's*
+binary, which carried **both** quadratics, so all the movement was the rooting fix. A counter that
+shifts when you fix two things at once has not been shown to see either — reintroduce the one
+regression alone and re-measure. (`ulimit -v` is not settable on macOS, so a peak-RSS arm was never
+available; the byte counter is what closed this, not a memory limit.)
 
 Floors are asserted as well as ceilings, for the reason the render-cost entry gives: if an edit leaves
 the two fixtures the same size, the delta collapses and the ceilings stay green over nothing.
