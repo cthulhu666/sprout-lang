@@ -1,5 +1,6 @@
 module stdlib.compiler.lint_pattern
 import stdlib.compiler.ast as ast
+import stdlib.string as string
 
 # Second-order matching of one `ast.Expr` against another, with named holes
 # (docs/lint-rules-v0.md §4A). A lint rule derives its pattern from a real
@@ -37,7 +38,14 @@ fn ren_bind(lname: String, rname: String, r: Ren) -> Ren =
 fn ren_bind_right(rname: String, r: Ren) -> Ren =
   Ren(left = r.left, right = dict_set(rname, r.next, r.right), next = r.next + 1)
 
+# Two names agree when their field paths are identical and their HEADS correspond.
+# `p.x` and `q.x` are the same expression under `p`↔`q`; `p.x` and `q.y` are not,
+# and neither are `p` and `p.x`, whose paths differ.
 fn ren_same(lname: String, rname: String, r: Ren) -> Bool =
+  if name_path(lname) != name_path(rname) then false
+  else head_same(name_head(lname), name_head(rname), r)
+
+fn head_same(lname: String, rname: String, r: Ren) -> Bool =
   match dict_get(lname, r.left) with
   | Just li ->
       match dict_get(rname, r.right) with
@@ -46,15 +54,32 @@ fn ren_same(lname: String, rname: String, r: Ren) -> Bool =
   | Nothing ->
       match dict_get(rname, r.right) with
       | Just _ -> false
-      # Both free: a free name matches only itself. A qualified name is one
-      # `VarExpr` carrying a dotted name, so `p` and `p.x` compare unequal here
-      # rather than one being a projection of the other.
+      # Both free: a free name matches only itself. A module alias is a free head
+      # like any other, so `json.empty` and `yaml.empty` compare unequal.
       | Nothing -> lname == rname
 
 fn is_bound_left(name: String, r: Ren) -> Bool =
   match dict_get(name, r.left) with
   | Just _ -> true
   | Nothing -> false
+
+# A qualified name arrives as ONE `VarExpr` holding the whole dotted string
+# (`lexer.scan_ident_dotted`), and `infer.infer_var_or_field` splits it on the
+# first `.`: the head is the only part that must be in scope, the rest are field
+# labels. So every question about *which binder a name references* is asked of the
+# head — closedness, renaming and holes alike. Reading the whole string instead is
+# what let `e.message` escape the branch that bound `e`.
+fn name_head(name: String) -> String =
+  match string.split_once(name, ".") with
+  | Nothing -> name
+  | Just (head, _) -> head
+
+# The field path after the head, "" when there is none. Compared literally: a
+# field label is not a binder and never renames.
+fn name_path(name: String) -> String =
+  match string.split_once(name, ".") with
+  | Nothing -> ""
+  | Just (_, rest) -> rest
 
 # ---------------------------------------------------------------------------
 # Free variables
@@ -65,12 +90,22 @@ fn names_to_set(names: List String) -> Set =
 
 # Every name used in `e` and not bound inside it. The closedness check in §5.2a
 # is this set against the binders standing between the pattern root and a hole.
+#
+# A qualified name contributes its HEAD only: `e.message` yields `{e}`, because `e`
+# is the reference and `message` is a field label. A module-qualified call yields
+# the alias for the same reason, which over-reports nothing that matters — an alias
+# is never a branch binder, so it never collides with the set this is tested against.
 export fn expr_free_vars(e: ast.Expr) -> Set = free_vars(e, set_empty())
 
 # `bound` is the names a binder has brought into scope at this point.
 fn free_vars(e: ast.Expr, bound: Set) -> Set =
   match e with
-  | ast.VarExpr name _ -> if set_member(name, bound) then set_empty() else set_insert(name, set_empty())
+  # The HEAD is the reference — `e.message` mentions `e`, and nothing else in it is
+  # a name. Inserting the whole dotted string here is what made a capture
+  # projecting a field off a branch binder look closed (§5.2a).
+  | ast.VarExpr name _ ->
+      let head = name_head(name)
+      in if set_member(head, bound) then set_empty() else set_insert(head, set_empty())
   | ast.IntExpr _ _ -> set_empty()
   | ast.FloatExpr _ _ -> set_empty()
   | ast.BoolExpr _ _ -> set_empty()
@@ -453,19 +488,31 @@ export fn match_expr(pattern: ast.Expr, subject: ast.Expr, holes: List String)
   | Nothing -> Nothing
   | Just st -> Just(list_reverse(st.caps))
 
+# A hole is a whole name. `?v` reached through a field path (`v.a`) would have to
+# capture "the object this field was read off", which no `Capture` can express, so
+# it is refused loudly rather than compared literally and silently never matching.
+# Only a PATTERN reaches here, and patterns are derived at build time, so this
+# names a rule-authoring bug. §13 keeps the door open to supporting it.
+#
+# A name shadowed by an enclosing binder is that binder's, not a hole.
 fn is_hole(name: String, holes: List String, r: Ren) -> Bool =
-  # A name shadowed by an enclosing binder is that binder's, not a hole.
-  if is_bound_left(name, r) then false else list_contains_name(name, holes)
+  let head = name_head(name)
+  in if is_bound_left(head, r) then false
+     else if ! list_contains_name (head, holes) then false
+     else if name_path(name) != "" then
+       panic(`lint_pattern: hole \`${head}\` used through a field path \`${name}\` (§5.3)`)
+     else true
 
 fn list_contains_name(name: String, names: List String) -> Bool =
   match names with
   | [] -> false
   | [n | rest] -> if n == name then true else list_contains_name(name, rest)
 
-# Walks the smaller side and stops at the first hit. `set_diff` twice would answer
-# the same question by building two trees, and this sits under every hole occurrence
-# and re-runs on every backtrack.
-# O(k log n) where k = elements walked before the first hit, n = the larger side.
+# Probes the smaller side against the larger. Better than `set_diff` twice, which
+# built two whole trees to answer a Bool under every hole occurrence and again on
+# every backtrack — but NOT because it short-circuits: `set_to_list` materialises
+# the smaller side first, so the walk is entered in full either way.
+# O(n + k log m), n = smaller side, k = probes before the first hit, m = larger.
 fn sets_intersect(a: Set, b: Set) -> Bool =
   if set_size(a) <= set_size(b) then any_member(set_to_list(a), b)
   else any_member(set_to_list(b), a)
@@ -653,6 +700,14 @@ fn branch_count(brs: List ast.MatchBranch) -> Int =
 # pattern must match a subject that orders its branches the other way (§5.2b).
 # Candidates are tried in turn and a failed continuation backtracks, so a pattern
 # whose branches are not distinguishable by constructor alone still matches.
+#
+# §5.2b permits permutation only for PAIRWISE DISJOINT branches, and nothing here
+# tests disjointness — deliberately. Two branches that overlap mean one shadows the
+# other, which `infer`'s unreachable-branch check rejects, so an overlapping subject
+# is a program that does not compile. The two wildcard gates cover the remaining
+# overlap, between a catch-all and a named pattern. A file that fails to typecheck
+# can still be linted, so this is a bound on the damage rather than an impossibility:
+# a broken file may draw a wrong finding, having already drawn a type error.
 fn go_branches(pbrs: List ast.MatchBranch, sbrs: List (Int, ast.MatchBranch),
                last_idx: Int, holes: List String, st: MState) -> Maybe MState =
   match pbrs with
@@ -688,18 +743,19 @@ fn go_branch(pb: ast.MatchBranch, sb: ast.MatchBranch, s_is_last: Bool,
 
 # Associate the binders of two branch patterns, or refuse the pairing.
 #
-# The asymmetry is deliberate. A pattern-side wildcard admits anything, because
-# it binds nothing and whatever the subject binds is caught by the closedness
-# check instead. A subject-side wildcard is the other direction, and every arm
-# that admits one goes through `wildcard_stand_in` — the rule is about
-# refutability, not about which variant spells it, so a tuple needs the same two
-# conditions a constructor does. The literal arms admit none at all, which is
-# conservative rather than inconsistent: refusing a pairing is always sound.
+# Each direction has its own gate, and neither is unconditional. A subject-side
+# wildcard goes through `wildcard_stand_in`; a pattern-side one through
+# `pattern_wildcard_over`. Both are about refutability rather than about which
+# variant spells it, so a tuple needs what a constructor needs. They differ in one
+# condition only: the pattern side does not require the subject to bind nothing,
+# because a pattern `_` leaves no binder unpaired and closedness catches the rest.
+# The literal arms admit no subject wildcard at all, which is conservative rather
+# than inconsistent: refusing a pairing is always sound.
 # This is the `let Just v = e else fb` spelling, whose desugaring puts a
 # wildcard in the second branch (parser.sprout: build_let_binding_match).
 fn pair_pattern(ppat: ast.Pattern, spat: ast.Pattern, s_is_last: Bool, r: Ren) -> Maybe Ren =
   match ppat with
-  | ast.WildcardPattern _ -> Just(bind_right_names(ast.pattern_names(spat), r))
+  | ast.WildcardPattern _ -> pattern_wildcard_over(spat, s_is_last, r)
   | ast.VarPattern pn _ ->
       (match spat with
        | ast.VarPattern sn _ -> Just(ren_bind(pn, sn, r))
@@ -719,6 +775,10 @@ fn pair_pattern(ppat: ast.Pattern, spat: ast.Pattern, s_is_last: Bool, r: Ren) -
       (match spat with
        | ast.TuplePattern sis _ -> pair_patterns(pis, sis, r)
        | ast.WildcardPattern _ -> wildcard_stand_in(ppat, s_is_last, r)
+       | ast.VarPattern sn _ ->
+           (match wildcard_stand_in(ppat, s_is_last, r) with
+            | Nothing -> Nothing
+            | Just r2 -> Just(ren_bind_right(sn, r2)))
        | _ -> Nothing)
   | ast.IntPattern pv _ -> (match spat with | ast.IntPattern sv _ -> ren_if(pv == sv, r) | _ -> Nothing)
   | ast.BoolPattern pv _ -> (match spat with | ast.BoolPattern sv _ -> ren_if(pv == sv, r) | _ -> Nothing)
@@ -736,6 +796,39 @@ fn wildcard_stand_in(ppat: ast.Pattern, s_is_last: Bool, r: Ren) -> Maybe Ren =
   match ast.pattern_names(ppat) with
   | [] -> if s_is_last then Just(r) else Nothing
   | _ -> Nothing
+
+# The MIRROR of `wildcard_stand_in`, and it needs its own condition rather than
+# none. A pattern `_` catches whatever the earlier pattern branches missed, so the
+# subject branch it pairs with must catch the same complement: either it is
+# irrefutable, or it is last and exhaustiveness makes it the catch-all. Admitting
+# any subject pattern let `| A -> ?x | _ -> ?y` pair against `| B -> y | _ -> x`,
+# whose third constructor goes the other way. Binding nothing is NOT required here:
+# a pattern `_` leaves no binder unpaired, and what the subject binds is caught by
+# closedness instead — that is the `Err _` vs `Err err` case §5.2a is built on.
+fn pattern_wildcard_over(spat: ast.Pattern, s_is_last: Bool, r: Ren) -> Maybe Ren =
+  if pattern_irrefutable(spat) || s_is_last
+  then Just(bind_right_names(ast.pattern_names(spat), r))
+  else Nothing
+
+# Refutable means "can fail to match a value of its type". Conservative without
+# type information: a constructor is refutable even for a single-constructor type,
+# and a literal always is. `()` is the sole value of `Unit`, so it is not.
+fn pattern_irrefutable(p: ast.Pattern) -> Bool =
+  match p with
+  | ast.WildcardPattern _ -> true
+  | ast.VarPattern _ _ -> true
+  | ast.UnitPattern _ -> true
+  | ast.TuplePattern items _ -> patterns_irrefutable(items)
+  | ast.ConstructorPattern _ _ _ -> false
+  | ast.IntPattern _ _ -> false
+  | ast.BoolPattern _ _ -> false
+  | ast.StringPattern _ _ -> false
+  | ast.CharPattern _ _ -> false
+
+fn patterns_irrefutable(ps: List ast.Pattern) -> Bool =
+  match ps with
+  | [] -> true
+  | [p | rest] -> pattern_irrefutable(p) && patterns_irrefutable(rest)
 
 fn bind_right_names(names: List String, r: Ren) -> Ren =
   match names with

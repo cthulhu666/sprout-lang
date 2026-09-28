@@ -5,6 +5,14 @@ Status: **piece A (§4A, the matcher) implemented; B and C are design.** Experim
 enable/disable" line in `BACKLOG.md`'s `Formatter/linter beyond the baseline` entry — that entry
 points here.
 
+Revision 5. An ensemble review (`high`, 3 passes) found the matcher reading a **qualified name as one
+atom**. `e.message` is a single `VarExpr`, so `free_vars` yielded `{"e.message"}`, which never
+intersects `{"e"}` — a capture projecting a field off a branch binder passed §5.2a's closedness check
+and would have been reported as a rewrite that does not compile. The head is the reference and the
+rest are field labels (`infer.infer_var_or_field` splits the same way), so §4A now asks every
+name question of the head. The same review found §5.2c's *other* direction still overstated: a
+pattern-side `_` is not unconditional either.
+
 Revision 4. A review of §4A's implementation found the (c) rule stated for constructors only, which
 is not where it lives — refutability is, so a tuple pattern needed the same two conditions and a
 variable pattern needed to fail them (§5.2c). §5.3's "never carries a hole" is now asserted rather
@@ -131,7 +139,10 @@ hole bindings. It must also provide, because nothing else in the compiler does:
 - **free variables of an `ast.Expr`**, which §5.2's closedness check needs. Also absent over `ast`,
   but `dce.is_free` and `ast_to_ir.compute_free_vars` are
   close structural templates — both over `typed_ast`, and `dce`'s binder half already works on
-  `ast.Pattern`.
+  `ast.Pattern`. Both templates run *after* inference, where a field access is already a
+  `GetFieldExpr` on a resolved binder. Over `ast` it is still one dotted `VarExpr`, so the free-vars
+  walk must split it: the **head** is the name in scope, and reading the whole string instead is a
+  silent hole in closedness rather than an approximation of it.
 
 **B. The combinator rule** — a list of prelude function names, with patterns derived at build time
 (§10).
@@ -249,11 +260,20 @@ admit `| (Just _, 3) -> ?b` against a *leading* `| _ -> y`, reporting the body o
 subject can never reach. Literal patterns (`1`, `true`, `'c'`, `()`) admit no subject `_` at all;
 that is conservative rather than inconsistent, because refusing a pairing is always sound.
 
-A *pattern* `_` matching a *subject* variable pattern is admissible **unconditionally** at the
-pairing step, because a pattern wildcard binds nothing and so cannot leave a binder unpaired.
-Whatever the subject binds is caught by (a) instead — that is exactly the `Err _` vs `Err err` case
-above, and keeping the two checks separate is what lets that case be *matched* and then *rejected
-for the stated reason* rather than silently failing to match.
+A *pattern* `_` matching a *subject* pattern carries **one** condition, not none and not two. The
+pattern's `_` catches whatever the earlier pattern branches missed, so the subject branch it pairs
+with must catch the same complement: either that branch is **irrefutable**, or it is **last** and
+exhaustiveness makes it the catch-all. Calling this direction unconditional — which revision 4 did —
+admits `| A -> ?x | _ -> ?y` against `| B -> y | _ -> x`, two branches whose *third* constructor goes
+opposite ways; both matches are exhaustive and neither has an unreachable branch, so nothing
+downstream catches it.
+
+What it does **not** require is that the subject bind nothing, and that asymmetry against (b) is the
+point. A pattern `_` leaves no binder unpaired, so whatever the subject binds is caught by (a)
+instead — exactly the `Err _` vs `Err err` case above. Keeping the two checks separate is what lets
+that case be *matched* and then *rejected for the stated reason* rather than silently failing to
+match; requiring "binds nothing" here instead would refuse it outright and take §5.2a's diagnostic
+with it.
 
 ### 5.3 Which bodies are derivable
 
@@ -269,11 +289,14 @@ parameter name (making the hole ambiguous) — must be **rejected loudly at deri
 function. Today's four candidates pass; the prelude has six `let`-bodied exports that would not, so
 this is not hypothetical.
 
-Until that derivation check exists, the matcher enforces the half it can see: a hole occurring inside
-a pattern's template, `do` block or comprehension **panics** rather than comparing literally. The
-alternative is a rule that silently never fires, and "never fires" is the failure a coverage tool
-cannot report on itself. Only the pattern is checked, and a pattern is ours, so this can only ever
-name an authoring bug — never a user's file.
+Until that derivation check exists, the matcher enforces the half it can see. A hole occurring inside
+a pattern's template, `do` block or comprehension **panics** rather than comparing literally, and so
+does a hole reached through a field path (`?v.a`), which would have to capture "the object this field
+was read off" — something no binding can express. The alternative in both cases is a rule that
+silently never fires, and "never fires" is the failure a coverage tool cannot report on itself. Only
+the pattern is checked, and a pattern is ours, so this can only ever name an authoring bug — never a
+user's file. A prelude body that *does* project a field off a parameter (`fn f(r) = r.count`) is a
+real and derivable shape; supporting it is §13's business, and until then it is refused loudly.
 
 ## 6. When the rewrite is invalid, not merely eager
 
@@ -435,13 +458,15 @@ This makes the prelude a build input to `fmt_bin`, which the justfile already tr
 
 Definition of Ready wants these failing first.
 
-**Matcher** — **done**, `tests/stdlib/compiler/test_lint_pattern.spr`, 86 cases: hole binding;
+**Matcher** — **done**, `tests/stdlib/compiler/test_lint_pattern.spr`, 102 cases: hole binding;
 non-linear holes rejected when the subterms differ; alpha-equivalence over a branch-bound name;
 branch permutation accepted for disjoint constructor patterns; a pattern `Nothing` matching a subject
 `_` in last position, and **rejected** in first position (§5.2b); the same two conditions on a tuple
-pattern and a variable pattern (§5.2c); a lambda's parameter annotation and mode; `Ok(f(v))` not
-matching `Ok(v)`; one case per `ast.Expr` variant, and one *discriminating* case per payload those
-reflexive cases cannot see — a variant ignoring its own field is equal to itself either way.
+pattern and a variable pattern, and the mirror direction's one condition (§5.2c); a lambda's
+parameter annotation and mode; a field path off a branch binder refused by closedness and one off a
+*renamed* binder still alpha-equal; `Ok(f(v))` not matching `Ok(v)`; one case per `ast.Expr` variant,
+and one *discriminating* case per payload those reflexive cases cannot see — a variant ignoring its
+own field is equal to itself either way.
 
 Every load-bearing check was mutated rather than trusted for being green. Disabling closedness fails
 exactly its two cases; dropping the last-position condition exactly two; dropping the binds-nothing
@@ -451,6 +476,13 @@ any. Two mutations paid for themselves immediately: ignoring the `once` half of 
 failed **nothing**, which is how the two `once` cases got written, and forcing the other branch of
 `sets_intersect`'s size test failed nothing, which is the proof that branch is a performance choice
 and not a second answer. A suite that passes on its first run has not yet shown it can fail.
+
+Revision 5's fixes were mutated back out the same way: reading a whole dotted name in `free_vars`
+fails exactly three, in `ren_same` exactly three, admitting any subject under a pattern `_` exactly
+two, and dropping the tuple arm's variable case exactly one. One of those is the useful kind —
+narrowing the pattern-`_` guard to *last position only*, dropping the irrefutable half, fails four
+cases including three of §5.2a's own, which is the evidence that the asymmetry between (b) and (c) is
+load-bearing and not an oversight.
 
 **Closedness** (§5.2a): `examples/json_demo.sprout:19`'s shape reported clean; `repl.sprout:665`'s
 shape reported clean; a closed fallback in the same position still reported.
