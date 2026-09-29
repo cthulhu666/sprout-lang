@@ -1,0 +1,17 @@
+module main
+
+# `Vec` is the shape a fallible decode arrives in, so `traverse` over it must be a
+# `traverse` and not a hand-rolled index recursion. `Vec` had Functor, Foldable and
+# Filterable; Traversable was the one missing, and the call below failed with
+# "No instance of Traversable for Vec".
+#
+# The workaround this replaces was `result_map(vec_from_list, traverse(f,
+# vec_to_list(xs)))`, which costs two extra O(n) passes and an intermediate list.
+
+fn dec(x: Int) -> Result String Int =
+  if x > 0 then Ok(x) else Err(`no: ${x}`)
+
+fn main() -> Unit !{IO} =
+  match traverse(dec, vec_from_list([1, 2, 3])) with
+  | Ok out -> print(to_string(out))
+  | Err e -> print(e)
