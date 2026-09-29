@@ -420,6 +420,134 @@ export fn record_field_type_exprs(fields: List RecordFieldDecl) -> List TypeExpr
   | [] -> []
   | [RecordFieldDecl _ te | rest] -> Cons(te, record_field_type_exprs(rest))
 
+# --- Alias expansion in instance heads ---
+#
+# A `type alias` is transparent (spec §5.6.2), so `instance C Name` where
+# `type alias Name = String` is an instance at `String`. Instance keys are built
+# from the head by four separate paths — `infer`'s two writers, `resolve`'s
+# `type_expr_head_name` and `lowering`'s `constraint_key_from_tc` — and only the
+# LOOKUP side starts from an inferred type, where the alias is already gone.
+# Expanding the head once, here, is what keeps those four agreeing; fixing each
+# path separately leaves four normalizations to keep in step.
+#
+# `wrap` is deliberately NOT expanded: it declares a distinct nominal type, so
+# merging it with its representation would turn two instances into one.
+
+type AliasHead =
+  | AliasHead (List String) TypeExpr
+
+# An alias cycle (`type alias A = B` with `type alias B = A`) would loop here.
+# `infer.register_all_aliases` reports the cycle with a position; this pass only
+# has to stop, leaving the head unexpanded so that diagnostic is the one to fire.
+let alias_expand_fuel: Int = 100
+
+export fn expand_alias_instance_heads(decls: List Decl) -> List Decl =
+  expand_instance_heads(decls, alias_head_table(decls, dict_empty()))
+
+# A declaration that is not an alias contributes no alias, which stays the right
+# answer for a variant that does not exist yet — so the catch-all belongs here.
+fn alias_head_table(decls: List Decl, acc: Dict AliasHead) -> Dict AliasHead =
+  match decls with
+  | [] -> acc
+  | [AliasDecl name params rhs _ | rest] ->
+      alias_head_table(rest, dict_set(name, AliasHead(params, rhs), acc))
+  | [_ | rest] -> alias_head_table(rest, acc)
+
+fn expand_instance_heads(decls: List Decl, table: Dict AliasHead) -> List Decl =
+  match decls with
+  | [] -> []
+  | [InstanceDecl head ctx methods pos | rest] ->
+      Cons(InstanceDecl(expand_constraint(table, head),
+                        expand_constraints(table, ctx), methods, pos),
+           expand_instance_heads(rest, table))
+  | [d | rest] -> Cons(d, expand_instance_heads(rest, table))
+
+fn expand_constraints(table: Dict AliasHead, cs: List TypeConstraint) -> List TypeConstraint =
+  match cs with
+  | [] -> []
+  | [c | rest] -> Cons(expand_constraint(table, c), expand_constraints(table, rest))
+
+fn expand_constraint(table: Dict AliasHead, c: TypeConstraint) -> TypeConstraint =
+  match c with
+  | TypeConstraint name args -> TypeConstraint(name, expand_type_exprs(table, args))
+
+fn expand_type_exprs(table: Dict AliasHead, tes: List TypeExpr) -> List TypeExpr =
+  match tes with
+  | [] -> []
+  | [te | rest] ->
+      Cons(expand_head(table, te, alias_expand_fuel), expand_type_exprs(table, rest))
+
+fn expand_head(table: Dict AliasHead, te: TypeExpr, fuel: Int) -> TypeExpr =
+  if fuel <= 0 then te
+  else
+    match alias_expansion(table, te) with
+    | Nothing -> te
+    | Just next -> expand_head(table, next, fuel - 1)
+
+# Rebuilds the head from the alias RHS with the alias's parameters bound to the
+# arguments it was applied to, re-applying any extra arguments outside: under
+# `type alias Half a = Tagged a`, the head `Half k` becomes `Tagged k`. An
+# UNDER-applied alias yields Nothing — there is nothing to substitute, and the
+# existing instance-head arity diagnostic is the right one to fire.
+fn alias_expansion(table: Dict AliasHead, te: TypeExpr) -> Maybe TypeExpr =
+  match type_expr_spine(te, []) with
+  | (TypeName name, args) ->
+      match dict_get(name, table) with
+      | Nothing -> Nothing
+      | Just (AliasHead params rhs) ->
+          match bind_alias_params(params, args, dict_empty()) with
+          | Nothing -> Nothing
+          | Just (sub, extra) ->
+              Just(apply_type_exprs(subst_type_expr(sub, rhs), extra))
+  | _ -> Nothing
+
+# Nothing when the alias is applied to fewer arguments than it declares.
+fn bind_alias_params(params: List String, args: List TypeExpr, acc: Dict TypeExpr)
+    -> Maybe (Dict TypeExpr, List TypeExpr) =
+  match params with
+  | [] -> Just((acc, args))
+  | [p | prest] ->
+      match args with
+      | [] -> Nothing
+      | [a | arest] -> bind_alias_params(prest, arest, dict_set(p, a, acc))
+
+fn apply_type_exprs(base: TypeExpr, args: List TypeExpr) -> TypeExpr =
+  match args with
+  | [] -> base
+  | [a | rest] -> apply_type_exprs(TypeApply(base, a), rest)
+
+# Every variant spelled out: a future TypeExpr carrying a nested type must not
+# default to "no substitution", which would leave an alias parameter unbound
+# inside it.
+fn subst_type_expr(sub: Dict TypeExpr, te: TypeExpr) -> TypeExpr =
+  match te with
+  | TypeName n ->
+      match dict_get(n, sub) with
+      | Just bound -> bound
+      | Nothing -> te
+  | TypeApply f x -> TypeApply(subst_type_expr(sub, f), subst_type_expr(sub, x))
+  | TypeArrow p r vs mode ->
+      TypeArrow(subst_type_expr(sub, p), subst_type_expr(sub, r), vs, mode)
+  | TypeThunk r vs -> TypeThunk(subst_type_expr(sub, r), vs)
+  | TypeEffect inner es -> TypeEffect(subst_type_expr(sub, inner), es)
+  | TupleType items -> TupleType(subst_type_exprs(sub, items))
+
+fn subst_type_exprs(sub: Dict TypeExpr, tes: List TypeExpr) -> List TypeExpr =
+  match tes with
+  | [] -> []
+  | [te | rest] -> Cons(subst_type_expr(sub, te), subst_type_exprs(sub, rest))
+
+# A head's application spine: its base and the arguments applied to it, in source
+# order. Only TypeApply continues a spine; anything else IS the base.
+fn type_expr_spine(te: TypeExpr, acc: List TypeExpr) -> (TypeExpr, List TypeExpr) =
+  match te with
+  | TypeApply f x -> type_expr_spine(f, Cons(x, acc))
+  | TypeName _ -> (te, acc)
+  | TypeArrow _ _ _ _ -> (te, acc)
+  | TypeThunk _ _ -> (te, acc)
+  | TypeEffect _ _ -> (te, acc)
+  | TupleType _ -> (te, acc)
+
 # --- Program ---
 
 export type Program (..) =

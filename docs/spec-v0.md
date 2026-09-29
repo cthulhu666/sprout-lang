@@ -3039,6 +3039,16 @@ variables, two instances sharing a head constructor are alpha-equivalent, so the
 overlap rule above is the Report's own prohibition on duplicate instances rather
 than an extra Sprout restriction.
 
+**An instance head is its type-alias expansion.**  A `type alias` is transparent
+(§5.6.2), so `instance C Name` where `type alias Name = String` *is* the instance
+`instance C String`: it dispatches at `String`, and declaring both is an overlap.
+The head is expanded before selection, arity checking and the overlap check all
+read it, so a local alias of a foreign type is not a distinct head.  `wrap` is
+**not** an alias — it declares a distinct nominal type, and `instance C Tag` on
+`wrap Tag = String` stays separate from `instance C String`.  An alias applied to
+fewer arguments than it declares is left unexpanded and rejected by the head-arity
+rule above.  Rationale: `docs/alias-instance-heads-v0.md`.
+
 Admitting concrete type arguments (`instance C (List Int)`) is GHC's
 `FlexibleInstances` extension, which pairs the relaxation with *full-head
 matching* — selecting an instance by unifying the whole head rather than its

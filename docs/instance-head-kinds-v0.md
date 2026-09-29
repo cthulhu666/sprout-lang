@@ -62,9 +62,11 @@ unsuccessfully papering over.
 - Multi-parameter type classes — Sprout has none, and the check keys on one class
   parameter exactly as `check_missing_superclass_instances` already does.
 - Kind checking of type expressions generally (`fn f(x: Int Bool)`).
-- Type-alias instance heads. They do not dispatch today (an instance is registered
+- ~~Type-alias instance heads. They do not dispatch today (an instance is registered
   under the alias name, `register_instance_marker`), so their arity is moot until
-  that changes.
+  that changes.~~ **Resolved**: heads are now expanded before this check runs
+  (`ast.expand_alias_instance_heads`), so an alias head is checked as its expansion —
+  whose residual arity is the real one. See `docs/alias-instance-heads-v0.md`.
 
 ## 3. Prior art
 
@@ -404,7 +406,8 @@ head, an existential and a devirtualized concrete call.
 - Multi-parameter type classes: `classvar_arity` becomes per-parameter and the
   head check runs per argument.
 - Kind checking of arbitrary type expressions, which would catch `fn f(x: Int Bool)`.
-- Type-alias instance heads, once they dispatch.
+- ~~Type-alias instance heads, once they dispatch.~~ Done — they dispatch, and the
+  check reads the expansion (`docs/alias-instance-heads-v0.md`).
 - Two same-class constraints whose heads differ only in their arguments, which needs
   the hidden-dictionary key to carry those arguments — see §12.
 
