@@ -10361,7 +10361,8 @@ fn let_dict_ambiguity_msg(name: String, quantified: List String, t: types.Type,
                           subst: Dict types.Type, typed_expr: typed_ast.TypedExpr) -> Maybe String =
   let [_ | _] = quantified else Nothing
       Just class_name = first_ambiguous_dict_class(typed_expr, subst, quantified) else Nothing
-  in Just("ambiguous typeclass binding: `" ++ name ++ "` needs a " ++ class_name
+  in Just("ambiguous typeclass binding: `" ++ name ++ "` needs " ++ a_or_an(class_name) ++ " "
+            ++ class_name
             ++ " instance, but its type " ++ types.type_to_string_renamed(quantified, t)
             ++ " leaves that choice open; a top-level binding holds a single value, so the instance"
             ++ " cannot be picked per use — add a type annotation that fixes it")
@@ -10404,18 +10405,21 @@ fn fn_dict_coverage_msg(name: String, params: List ast.Param,
                         env: Dict types.Scheme) -> Maybe String =
   let uncovered = uncovered_generalized_vars(constraints, prog_to_fresh, s2, inst_type, env_ftv)
       [_ | _] = uncovered else Nothing
+      param_vars = collect_param_type_vars(params, Nil)
   in
-    match named_uncovered_dict(collect_param_type_vars(params, Nil), prog_to_fresh, s2,
-                               uncovered, typed_body, env) with
-    | Just (v, cls) ->
-        Just("`" ++ name ++ "` needs a " ++ cls ++ " instance for type variable `" ++ v
-               ++ "`, but declares no `where` constraint for it, so one instance was chosen at"
-               ++ " definition instead of per call — add `where " ++ cls ++ " " ++ v
-               ++ "` to its signature")
+    match named_uncovered_dict(param_vars, prog_to_fresh, s2, uncovered, typed_body, env) with
+    | Just (v, cls, subject) ->
+        match constraint_advice(v, cls, subject, param_vars, prog_to_fresh, s2) with
+        | (subj, where_text) ->
+            Just("`" ++ name ++ "` needs " ++ a_or_an(cls) ++ " " ++ cls ++ " instance for "
+                   ++ subj ++ ", but declares no `where` constraint for it, so one instance was"
+                   ++ " chosen at definition instead of per call — add `where " ++ where_text
+                   ++ "` to its signature")
     | Nothing ->
         match uncovered_dict_subject(typed_body, s2, uncovered, env) with
-        | Just cls ->
-            Just("`" ++ name ++ "` needs a " ++ string.after_last_dot(cls) ++ " instance for a"
+        | Just (cls, _) ->
+            Just("`" ++ name ++ "` needs " ++ a_or_an(string.after_last_dot(cls)) ++ " "
+                   ++ string.after_last_dot(cls) ++ " instance for a"
                    ++ " type variable it generalizes, and that variable appears in no parameter,"
                    ++ " so no call site can supply the instance — declare a return type naming the"
                    ++ " variable and constrain it with a `where` clause, or annotate with the"
@@ -10436,18 +10440,22 @@ fn instance_method_dict_coverage_msg(name: String, params: List ast.Param,
                                      env: Dict types.Scheme) -> Maybe String =
   let uncovered = uncovered_generalized_vars(constraints, prog_to_fresh, s2, inst_type, env_ftv)
       [_ | _] = uncovered else Nothing
+      param_vars = collect_param_type_vars(params, Nil)
   in
-    match named_uncovered_dict(collect_param_type_vars(params, Nil), prog_to_fresh, s2,
-                               uncovered, typed_body, env) with
-    | Just (v, cls) ->
-        Just("`" ++ name ++ "` needs a " ++ cls ++ " instance for type variable `" ++ v
-               ++ "`, which this method generalizes and nothing supplies; add `where " ++ cls
-               ++ " " ++ v ++ "` to the method (the class declaration must declare it too),"
-               ++ " constrain the variable in the instance head, or give the method a concrete type")
+    match named_uncovered_dict(param_vars, prog_to_fresh, s2, uncovered, typed_body, env) with
+    | Just (v, cls, subject) ->
+        match constraint_advice(v, cls, subject, param_vars, prog_to_fresh, s2) with
+        | (subj, where_text) ->
+            Just("`" ++ name ++ "` needs " ++ a_or_an(cls) ++ " " ++ cls ++ " instance for "
+                   ++ subj ++ ", which this method generalizes and nothing supplies; add `where "
+                   ++ where_text ++ "` to the method (the class declaration must declare it too),"
+                   ++ " constrain the variable in the instance head, or give the method a concrete"
+                   ++ " type")
     | Nothing ->
         match uncovered_dict_subject(typed_body, s2, uncovered, env) with
-        | Just cls ->
-            Just("`" ++ name ++ "` needs a " ++ string.after_last_dot(cls) ++ " instance for a"
+        | Just (cls, _) ->
+            Just("`" ++ name ++ "` needs " ++ a_or_an(string.after_last_dot(cls)) ++ " "
+                   ++ string.after_last_dot(cls) ++ " instance for a"
                    ++ " type variable it generalizes, which appears in no parameter and which"
                    ++ " nothing supplies; add a method-level `where` (the class declaration must"
                    ++ " declare it too), constrain the variable in the instance head, or give the"
@@ -10485,6 +10493,61 @@ fn source_var_ftv(v: String, prog_to_fresh: Dict types.Type, s2: Dict types.Type
   let Just t = dict_get(v, prog_to_fresh) else Nil
   in types.ftv(unifier.apply_subst(s2, t))
 
+# The inverse of source_var_ftv over every parameter-mentioned variable: internal
+# identity back to the source name. A subject type has to print with the names the
+# reader wrote, since the point of printing it is that they retype it.
+fn source_name_rename(vs: List String, prog_to_fresh: Dict types.Type, s2: Dict types.Type,
+                      acc: Dict String) -> Dict String =
+  match vs with
+  | Nil -> acc
+  | Cons v rest ->
+      source_name_rename(rest, prog_to_fresh, s2,
+                         rename_each(source_var_ftv(v, prog_to_fresh, s2), v, acc))
+
+fn rename_each(ivs: List String, name: String, acc: Dict String) -> Dict String =
+  match ivs with
+  | Nil -> acc
+  | Cons iv rest -> rename_each(rest, name, dict_set(iv, name, acc))
+
+# Every diagnostic below interpolates a class name after an article, and `a Applicative`
+# shipped.
+fn a_or_an(word: String) -> String =
+  if list_member(string.take(word, 1), ["A", "E", "I", "O", "U"]) then "an" else "a"
+
+# How to name the subject in prose, and how to spell it inside a `where` clause. An
+# applied constructor needs both: `Result e` rather than the bare variable `e` — which
+# is the error type, not the applicative — and parentheses the variable does not take.
+#
+# The TVar arm's wording is load-bearing: four `type_error` fixtures and spec §8.5's
+# worked examples match it as a substring, so it must stay byte-identical. Rendering
+# every subject through the second arm instead would print "for `a`" and break all of
+# them to say the same thing.
+fn constraint_advice(v: String, cls: String, subject: types.Type, param_vars: List String,
+                     prog_to_fresh: Dict types.Type, s2: Dict types.Type) -> (String, String) =
+  let bare = ("type variable `" ++ v ++ "`", cls ++ " " ++ v)
+      applied = unifier.apply_subst(s2, subject)
+      rename = source_name_rename(param_vars, prog_to_fresh, s2, dict_empty())
+  in
+    match applied with
+    | types.TVar _ -> bare
+    # Only name the constructor while every variable in it has a source name to print.
+    # apply_rename_type leaves an unmapped variable as its internal `$t2150`, and a
+    # diagnostic naming that reads as a compiler leak; the bare form is always sayable.
+    | _ -> if all_source_named(types.ftv(applied), rename) then named_advice(cls, rename, applied)
+           else bare
+
+fn named_advice(cls: String, rename: Dict String, applied: types.Type) -> (String, String) =
+  let shown = types.type_to_string_named(rename, applied)
+  in ("`" ++ shown ++ "`", cls ++ " (" ++ shown ++ ")")
+
+fn all_source_named(ivs: List String, rename: Dict String) -> Bool =
+  match ivs with
+  | Nil -> true
+  | Cons iv rest ->
+      match dict_get(iv, rename) with
+      | Nothing -> false
+      | Just _ -> all_source_named(rest, rename)
+
 # The first parameter-mentioned source variable whose dictionary is uncovered, with the class that
 # needs it. Reported separately from the unnamed case because a source name is what makes
 # `where C a` printable advice; a variable inference introduced with no source name
@@ -10492,14 +10555,14 @@ fn source_var_ftv(v: String, prog_to_fresh: Dict types.Type, s2: Dict types.Type
 fn named_uncovered_dict(param_vars: List String, prog_to_fresh: Dict types.Type,
                         s2: Dict types.Type, uncovered: List String,
                         body: typed_ast.TypedExpr,
-                        env: Dict types.Scheme) -> Maybe (String, String) =
+                        env: Dict types.Scheme) -> Maybe (String, String, types.Type) =
   match param_vars with
   | Nil -> Nothing
   | Cons v rest ->
       let ivs = list_common(source_var_ftv(v, prog_to_fresh, s2), uncovered)
       in
         match uncovered_dict_subject(body, s2, ivs, env) with
-        | Just cls -> Just((v, string.after_last_dot(cls)))
+        | Just (cls, subject) -> Just((v, string.after_last_dot(cls), subject))
         | Nothing -> named_uncovered_dict(rest, prog_to_fresh, s2, uncovered, body, env)
 
 fn list_common(xs: List String, ys: List String) -> List String =
@@ -10527,19 +10590,20 @@ fn list_common(xs: List String, ys: List String) -> List String =
 # TO. Only class-constrained user functions are reachable this way; a class METHOD is
 # verify_dispatch's jurisdiction and is already rejected there.
 fn uncovered_dict_subject(e: typed_ast.TypedExpr, subst: Dict types.Type,
-                          uncovered: List String, env: Dict types.Scheme) -> Maybe String =
+                          uncovered: List String,
+                          env: Dict types.Scheme) -> Maybe (String, types.Type) =
   let [_ | _] = uncovered else Nothing
   in
     match e with
     | typed_ast.TCall callee args _ _ ->
         match call_uncovered_class(callee, subst, uncovered, env) with
-        | Just cls -> Just(cls)
+        | Just found -> Just(found)
         | Nothing -> uncovered_dict_in_list(Cons(callee, args), subst, uncovered, env)
     | typed_ast.TLambda _ body _ _ -> uncovered_dict_subject(body, subst, uncovered, env)
     | typed_ast.TIf c th el _ _ -> uncovered_dict_in_list([c, th, el], subst, uncovered, env)
     | typed_ast.TMatch scrut arms _ _ ->
         match uncovered_dict_subject(scrut, subst, uncovered, env) with
-        | Just cls -> Just(cls)
+        | Just found -> Just(found)
         | Nothing -> uncovered_dict_in_arms(arms, subst, uncovered, env)
     | typed_ast.TDo steps _ _ -> uncovered_dict_in_steps(steps, subst, uncovered, env)
     | typed_ast.TTuple items _ _ -> uncovered_dict_in_list(items, subst, uncovered, env)
@@ -10549,7 +10613,7 @@ fn uncovered_dict_subject(e: typed_ast.TypedExpr, subst: Dict types.Type,
     | typed_ast.TRecord _ fields _ _ -> uncovered_dict_in_fields(fields, subst, uncovered, env)
     | typed_ast.TRecordUpdate base fields _ _ ->
         match uncovered_dict_subject(base, subst, uncovered, env) with
-        | Just cls -> Just(cls)
+        | Just found -> Just(found)
         | Nothing -> uncovered_dict_in_fields(fields, subst, uncovered, env)
     | typed_ast.TGetField obj _ _ _ -> uncovered_dict_subject(obj, subst, uncovered, env)
     # Leaves, listed rather than left to a wildcard: a new TypedExpr constructor should fail to
@@ -10564,9 +10628,11 @@ fn uncovered_dict_subject(e: typed_ast.TypedExpr, subst: Dict types.Type,
     | typed_ast.TChar _ _ _ -> Nothing
     | typed_ast.TUnit _ _ -> Nothing
 
-# The class of the callee's first constraint whose subject falls in `uncovered`.
+# The class of the callee's first constraint whose subject falls in `uncovered`, with the
+# subject itself: the instance is missing for that type, which is not always a variable.
 fn call_uncovered_class(callee: typed_ast.TypedExpr, subst: Dict types.Type,
-                        uncovered: List String, env: Dict types.Scheme) -> Maybe String =
+                        uncovered: List String,
+                        env: Dict types.Scheme) -> Maybe (String, types.Type) =
   let typed_ast.TVar name _ _ = callee else Nothing
       Just sch = dict_get(name, env) else Nothing
       theta = match_scheme_body(types.scheme_type(sch), types.scheme_vars(sch),
@@ -10576,7 +10642,8 @@ fn call_uncovered_class(callee: typed_ast.TypedExpr, subst: Dict types.Type,
 
 fn constraint_subject_in(constraints: List (String, String), callee: String,
                          env: Dict types.Scheme, theta: Dict types.Type,
-                         subst: Dict types.Type, uncovered: List String) -> Maybe String =
+                         subst: Dict types.Type,
+                         uncovered: List String) -> Maybe (String, types.Type) =
   match constraints with
   | Nil -> Nothing
   | Cons (token, cls) rest ->
@@ -10585,7 +10652,7 @@ fn constraint_subject_in(constraints: List (String, String), callee: String,
       in
         match list_common(types.ftv(unifier.apply_subst(subst, subject)), uncovered) with
         | [] -> constraint_subject_in(rest, callee, env, theta, subst, uncovered)
-        | [_ | _] -> Just(cls)
+        | [_ | _] -> Just((cls, subject))
 
 # Bind a scheme's own type variables to what this occurrence instantiated them to. Only names the
 # scheme quantifies are bound; a structural mismatch simply stops descending, leaving the affected
@@ -10625,47 +10692,52 @@ fn match_scheme_body_list(ps: List types.Type, vars: List String, as_: List type
       | Cons a arest -> match_scheme_body_list(prest, vars, arest, match_scheme_body(p, vars, a, theta))
 
 fn uncovered_dict_in_list(es: List typed_ast.TypedExpr, subst: Dict types.Type,
-                          uncovered: List String, env: Dict types.Scheme) -> Maybe String =
+                          uncovered: List String,
+                          env: Dict types.Scheme) -> Maybe (String, types.Type) =
   match es with
   | Nil -> Nothing
   | Cons e rest ->
       match uncovered_dict_subject(e, subst, uncovered, env) with
-      | Just cls -> Just(cls)
+      | Just found -> Just(found)
       | Nothing -> uncovered_dict_in_list(rest, subst, uncovered, env)
 
 fn uncovered_dict_in_arms(arms: List typed_ast.TypedMatchBranch, subst: Dict types.Type,
-                          uncovered: List String, env: Dict types.Scheme) -> Maybe String =
+                          uncovered: List String,
+                          env: Dict types.Scheme) -> Maybe (String, types.Type) =
   match arms with
   | Nil -> Nothing
   | Cons arm rest ->
       match arm with
       | typed_ast.TypedMatchBranch _ body ->
           match uncovered_dict_subject(body, subst, uncovered, env) with
-          | Just cls -> Just(cls)
+          | Just found -> Just(found)
           | Nothing -> uncovered_dict_in_arms(rest, subst, uncovered, env)
 
 fn uncovered_dict_in_fields(fields: List typed_ast.TypedRecordField, subst: Dict types.Type,
-                            uncovered: List String, env: Dict types.Scheme) -> Maybe String =
+                            uncovered: List String,
+                            env: Dict types.Scheme) -> Maybe (String, types.Type) =
   match fields with
   | Nil -> Nothing
   | Cons f rest ->
       match f with
       | typed_ast.TypedRecordField _ v ->
           match uncovered_dict_subject(v, subst, uncovered, env) with
-          | Just cls -> Just(cls)
+          | Just found -> Just(found)
           | Nothing -> uncovered_dict_in_fields(rest, subst, uncovered, env)
 
 fn uncovered_dict_in_steps(steps: List typed_ast.TypedDoStep, subst: Dict types.Type,
-                           uncovered: List String, env: Dict types.Scheme) -> Maybe String =
+                           uncovered: List String,
+                           env: Dict types.Scheme) -> Maybe (String, types.Type) =
   match steps with
   | Nil -> Nothing
   | Cons step rest ->
       match uncovered_dict_in_step(step, subst, uncovered, env) with
-      | Just cls -> Just(cls)
+      | Just found -> Just(found)
       | Nothing -> uncovered_dict_in_steps(rest, subst, uncovered, env)
 
 fn uncovered_dict_in_step(step: typed_ast.TypedDoStep, subst: Dict types.Type,
-                          uncovered: List String, env: Dict types.Scheme) -> Maybe String =
+                          uncovered: List String,
+                          env: Dict types.Scheme) -> Maybe (String, types.Type) =
   match step with
   | typed_ast.TDoBindStep _ e -> uncovered_dict_subject(e, subst, uncovered, env)
   | typed_ast.TDoLetStep _ e -> uncovered_dict_subject(e, subst, uncovered, env)
