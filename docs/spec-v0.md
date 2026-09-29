@@ -2847,7 +2847,10 @@ The rule is not confined to *mentions*.  **Applying** a constrained function
 inside a function that generalizes the constrained variable is rejected on the
 same grounds: with no `where` clause there is no dictionary parameter to forward,
 so the instance would be chosen once at definition and every caller would receive
-that choice.  Adding the clause is what makes it legal.  When the variable appears
+that choice.  Adding the clause is what makes it legal.  The diagnostic names the
+type the instance is missing for, which need not be a bare variable: a constraint
+on a partially applied constructor is reported and suggested as one, since `where
+Applicative e` over an error type `e` would not compile.  When the variable appears
 in no parameter, a `where` clause has nothing to *attach* to until the signature
 names the variable somewhere, so the diagnostic asks for a declared return type
 carrying the constraint, or a concrete annotation:
@@ -2858,6 +2861,13 @@ fn relabel(x: a) = label(x)
 # `where` constraint for it ... add `where ToString a` to its signature
 
 fn relabel(x: a) where ToString a = label(x)   # accepted: the dictionary forwards
+
+fn try_map(f: a -> Result e b, xs: List a) -> Result e (List b) = traverse(f, xs)
+# `try_map` needs an Applicative instance for `Result e`, but declares no `where`
+# constraint for it ... add `where Applicative (Result e)` to its signature
+
+fn try_map(f: a -> Result e b, xs: List a) -> Result e (List b)
+    where Applicative (Result e) = traverse(f, xs)   # accepted: names the constructor
 
 fn pick() = label
 # `pick` needs a ToString instance for a type variable it generalizes, and that
