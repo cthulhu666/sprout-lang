@@ -64,13 +64,15 @@ MAX_MAP_PER_ELEM=650
 MIN_MAP_PER_ELEM=60
 MIN_SWEPT_PER_ELEM=1500
 
-# BYTES, which is the only arm here that sees ir_lowering. Observed 249472 per
+# ARENA BYTES, the only arm here that sees ir_lowering. Named for the
+# allocator it covers: off-arena payloads are counted separately
+# (offarena_bytes) and are NOT budgeted here. Observed 249472 per
 # element on 2026-09-28 (stage-2); reintroducing right-nested `++` in lower_ops
 # moved it to 1475716, a 5.9x separation that GROWS with block size. The same run
 # moved sprout_obj by 0.8%, map by 0, gc_swept by -0.3% — so this arm, and only
 # this arm, guards the string-building half.
-MAX_SLOT_BYTES_PER_ELEM=550000
-MIN_SLOT_BYTES_PER_ELEM=50000
+MAX_ARENA_BYTES_PER_ELEM=550000
+MIN_ARENA_BYTES_PER_ELEM=50000
 
 if [ ! -x "$BIN" ]; then
   echo "ERROR: $BIN not found; run: just rooting-cost-gate" >&2
@@ -107,6 +109,9 @@ require_unique() {
     echo "      This read is ambiguous, so it is not a budget — name the counters" >&2
     echo "      apart or anchor this read further." >&2
   fi
+  # The earliest failure point, so it dumps the compile's own output here. The
+  # later empty-counter branch exists to do that and is never reached from here.
+  echo "--- $1 ---" >&2; cat "$1" >&2
   exit 1
 }
 
@@ -126,19 +131,19 @@ compile_one "$LARGE" "$err_large"
 for f in "$err_small" "$err_large"; do
   require_unique "$f" map
   require_unique "$f" gc_swept
-  require_unique "$f" slot_bytes
+  require_unique "$f" arena_bytes
 done
 
 map_s=$(counter "$err_small" map);        map_l=$(counter "$err_large" map)
 swept_s=$(counter "$err_small" gc_swept); swept_l=$(counter "$err_large" gc_swept)
-sb_s=$(counter "$err_small" slot_bytes);  sb_l=$(counter "$err_large" slot_bytes)
+sb_s=$(counter "$err_small" arena_bytes);  sb_l=$(counter "$err_large" arena_bytes)
 
 # A missing counter means the report did not appear — the runtime lost
 # SPROUT_DEBUG_ALLOC, or its format changed. A blind gate must fail, not pass.
 if [ -z "$map_s" ] || [ -z "$map_l" ] || [ -z "$swept_s" ] || [ -z "$swept_l" ] \
    || [ -z "$sb_s" ] || [ -z "$sb_l" ]; then
   echo "FAIL: could not read the counters (map='$map_s'/'$map_l' swept='$swept_s'/'$swept_l'" >&2
-  echo "      slot_bytes='$sb_s'/'$sb_l')" >&2
+  echo "      arena_bytes='$sb_s'/'$sb_l')" >&2
   echo "--- small ---" >&2; cat "$err_small" >&2
   echo "--- large ---" >&2; cat "$err_large" >&2
   exit 1
@@ -149,7 +154,7 @@ fi
 map_per=$(( (map_l - map_s) / DELTA_N ))
 swept_per=$(( (swept_l - swept_s) / DELTA_N ))
 sb_per=$(( (sb_l - sb_s) / DELTA_N ))
-echo "==> rooting cost: ${map_per} map, ${swept_per} swept and ${sb_per} slot bytes per element" \
+echo "==> rooting cost: ${map_per} map, ${swept_per} swept and ${sb_per} arena bytes per element" \
      "($((map_l - map_s)) / $((swept_l - swept_s)) / $((sb_l - sb_s)) over $DELTA_N added elements)"
 
 over=0
@@ -157,8 +162,8 @@ if [ "$map_per" -gt "$MAX_MAP_PER_ELEM" ]; then
   echo "FAIL: $map_per map allocations per element exceeds the budget of $MAX_MAP_PER_ELEM" >&2
   over=1
 fi
-if [ "$sb_per" -gt "$MAX_SLOT_BYTES_PER_ELEM" ]; then
-  echo "FAIL: $sb_per slot bytes per element exceeds the budget of $MAX_SLOT_BYTES_PER_ELEM" >&2
+if [ "$sb_per" -gt "$MAX_ARENA_BYTES_PER_ELEM" ]; then
+  echo "FAIL: $sb_per arena bytes per element exceeds the budget of $MAX_ARENA_BYTES_PER_ELEM" >&2
   echo "      Bytes, not counts, so suspect string building before rooting: a" >&2
   echo "      right-nested \`++\` over one block's ops copies the whole remaining" >&2
   echo "      text per op. Collect parts and join once (see lower_ops_parts)." >&2
@@ -172,9 +177,9 @@ if [ "$over" -ne 0 ]; then
 fi
 
 if [ "$map_per" -lt "$MIN_MAP_PER_ELEM" ] || [ "$swept_per" -lt "$MIN_SWEPT_PER_ELEM" ] \
-   || [ "$sb_per" -lt "$MIN_SLOT_BYTES_PER_ELEM" ]; then
-  echo "FAIL: $map_per map / $swept_per swept / $sb_per slot bytes per element is below the floor of" >&2
-  echo "      $MIN_MAP_PER_ELEM / $MIN_SWEPT_PER_ELEM / $MIN_SLOT_BYTES_PER_ELEM. The two fixtures have stopped differing by" >&2
+   || [ "$sb_per" -lt "$MIN_ARENA_BYTES_PER_ELEM" ]; then
+  echo "FAIL: $map_per map / $swept_per swept / $sb_per arena bytes per element is below the floor of" >&2
+  echo "      $MIN_MAP_PER_ELEM / $MIN_SWEPT_PER_ELEM / $MIN_ARENA_BYTES_PER_ELEM. The two fixtures have stopped differing by" >&2
   echo "      $DELTA_N elements of one list literal, so the ceiling is guarding nothing." >&2
   echo "      Check what they contain before lowering the floor." >&2
   exit 1

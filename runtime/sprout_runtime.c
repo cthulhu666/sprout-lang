@@ -196,10 +196,12 @@ static long long g_debug_alloc_vector = 0;
 static long long g_debug_alloc_map = 0;
 static long long g_debug_alloc_bytes = 0;
 static long long g_debug_alloc_builder = 0;
-/* Slot bytes, not payload: what the allocator consumes, 16-byte rounding and
-   header included. A COUNT is blind to a string-shape bug, because right-nested
-   concatenation and one-pass joining allocate the same number of objects. */
-static long long g_debug_alloc_slot_bytes = 0;
+/* Bytes, because a COUNT is blind to a shape bug: right-nested concatenation and
+   one-pass joining allocate the same number of objects. Split by allocator, since
+   they are two different mallocs -- ARENA slot bytes (16-byte rounding and header
+   included) and the off-arena payloads sprout_alloc_counted hands out. */
+static long long g_debug_alloc_arena_bytes = 0;
+static long long g_debug_alloc_offarena_bytes = 0;
 static long long g_debug_gc_swept = 0;
 /* The intern table is malloc'd outside the arena and never freed, so neither the
    alloc counters nor the live census can see it. Reported so a program whose keys
@@ -401,14 +403,15 @@ static void sprout_debug_alloc_report(void) {
   if (!g_debug_alloc_enabled) return;
   fprintf(
     stderr,
-    "[sprout alloc] sprout_obj=%lld closure=%lld vector=%lld map=%lld bytes=%lld builder=%lld slot_bytes=%lld intern=%lld intern_bytes=%lld gc_swept=%lld gc_cycles=%lld\n",
+    "[sprout alloc] sprout_obj=%lld closure=%lld vector=%lld map=%lld bytes=%lld builder=%lld arena_bytes=%lld offarena_bytes=%lld intern=%lld intern_bytes=%lld gc_swept=%lld gc_cycles=%lld\n",
     g_debug_alloc_sprout_obj,
     g_debug_alloc_closure,
     g_debug_alloc_vector,
     g_debug_alloc_map,
     g_debug_alloc_bytes,
     g_debug_alloc_builder,
-    g_debug_alloc_slot_bytes,
+    g_debug_alloc_arena_bytes,
+    g_debug_alloc_offarena_bytes,
     g_intern_entries,
     g_intern_bytes,
     g_debug_gc_swept,
@@ -1326,7 +1329,7 @@ __attribute__((destructor)) static void sprout_gc_profile_dump(void) {
 static void* sprout_gc_alloc_block(SproutHeapKind kind, unsigned long long aux,
                                    size_t payload_bytes, const char* ctx) {
   size_t needed_slot = round16(8 + payload_bytes);
-  if (g_debug_alloc_enabled) g_debug_alloc_slot_bytes += (long long)needed_slot;
+  if (g_debug_alloc_enabled) g_debug_alloc_arena_bytes += (long long)needed_slot;
   if (SPROUT_SLOT_IS_LARGE(needed_slot)) {
     /* Large object path: dedicated malloc block. */
     char* block = (char*)malloc(needed_slot);
@@ -1432,14 +1435,17 @@ static void sprout_gc_maybe_collect_threshold(void) {
 }
 
 static void* sprout_alloc_counted(long long* counter, size_t size, const char* ctx) {
-  if (g_debug_alloc_enabled) (*counter)++;
+  if (g_debug_alloc_enabled) { (*counter)++; g_debug_alloc_offarena_bytes += (long long)size; }
   void* out = malloc(size);
   if (out == NULL) sprout_fail(ctx);
   return out;
 }
 
+/* Adds the REQUESTED size, so a buffer regrown n times scores the sum of its
+   sizes rather than its final one. That is the churn a quadratic regrowth causes,
+   and the number that separates it from doubling. */
 static void* sprout_realloc_counted(long long* counter, void* ptr, size_t size, const char* ctx) {
-  if (g_debug_alloc_enabled) (*counter)++;
+  if (g_debug_alloc_enabled) { (*counter)++; g_debug_alloc_offarena_bytes += (long long)size; }
   void* out = realloc(ptr, size);
   if (out == NULL) sprout_fail(ctx);
   return out;
