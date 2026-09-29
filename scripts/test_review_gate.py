@@ -42,7 +42,40 @@ write("preexisting.md", "dirt\n")
 TURN = itertools.count()
 
 
-def run(label, expect, absent=None, present=None, session="sess1", prompt=None, cwd=None, chain=False):
+def transcript(rel, *entries):
+    """Write a JSONL transcript and return its path.
+
+    Shorthand: a str entry is a user prompt, a list is one assistant message's
+    tool_use names, and ("result",) is a tool_result coming back.
+    """
+    lines = []
+    for e in entries:
+        if isinstance(e, str):
+            lines.append({"type": "user", "message": {"role": "user", "content": e}})
+        elif e == ("result",):
+            lines.append(
+                {
+                    "type": "user",
+                    "message": {"role": "user", "content": [{"type": "tool_result"}]},
+                }
+            )
+        else:
+            lines.append(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "tool_use", "name": n} for n in e],
+                    },
+                }
+            )
+    p = S / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("\n".join(json.dumps(x) for x in lines) + "\n")
+    return str(p)
+
+
+def run(label, expect, absent=None, present=None, session="sess1", prompt=None, cwd=None, chain=False, tpath=None):
     # CLAUDE_PROJECT_DIR is the MAIN checkout even for a session working in a linked
     # worktree, so `cwd` is the only field that tells the two apart. Each call gets its
     # own prompt_id (= its own user turn) unless a case pins one to spend the budget.
@@ -55,6 +88,8 @@ def run(label, expect, absent=None, present=None, session="sess1", prompt=None, 
     }
     if prompt is not False:
         payload["prompt_id"] = prompt or f"auto-{next(TURN)}"
+    if tpath is not None:
+        payload["transcript_path"] = tpath
     p = subprocess.run(
         [sys.executable, str(HOOK)],
         input=json.dumps(payload),
@@ -206,6 +241,129 @@ results.append(
         session="sess5",
         present=["docs/after-landing.md"],
         absent=["landed.sprout"],
+    )
+)
+
+# A turn that stopped to ASK the user is not a finished change, and the agent cannot
+# review-and-fix while blocked on an answer. It must pass through — and must record
+# nothing, or answering the question would let the change past the gate for good.
+results.append(run("16a. fresh session baselines", 0, session="sess6"))
+write("stdlib/asked.sprout", "s\n")
+results.append(
+    run(
+        "16b. last tool call is AskUserQuestion -> pass through",
+        0,
+        session="sess6",
+        tpath=transcript("t_ask.jsonl", "do the thing", ["Read", "Grep"], ("result",), ["AskUserQuestion"]),
+    )
+)
+results.append(
+    run(
+        "16c. SAME tree still unreviewed: nothing was recorded",
+        2,
+        session="sess6",
+        present=["stdlib/asked.sprout", "idiomatic-sprout.md"],
+        tpath=transcript("t_done.jsonl", "do the thing", ["Edit"]),
+    )
+)
+
+# A real transcript interleaves entry types that are neither user nor assistant, and
+# some carry a `message` — so keying off `type` first is what keeps `last-prompt` from
+# reading as a turn boundary. Types observed in a live 2.4 MB transcript.
+NOISE = [
+    {"type": t, "message": {"role": "user", "content": "not a prompt"}}
+    for t in ("last-prompt", "file-history-delta", "attachment", "queue-operation", "mode")
+]
+write("stdlib/noisy_transcript.sprout", "s\n")
+results.append(run("16d. fresh session baselines", 0, session="sess8"))
+write("stdlib/noisy_transcript.sprout", "s\nt\n")
+tp = S / "t_noise.jsonl"
+tp.write_text(
+    "\n".join(
+        json.dumps(x)
+        for x in [
+            {"type": "user", "message": {"role": "user", "content": "go"}},
+            {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "name": "Read"}]}},
+            *NOISE,
+            {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "name": "AskUserQuestion", "id": "x", "input": {}, "caller": None}]}},
+            {"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "content": "declined"}]}},
+            *NOISE,
+            {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "what would you like to clarify?"}]}},
+        ]
+    )
+    + "\n"
+)
+results.append(
+    run("16e. real-shaped transcript, noise types ignored -> pass through", 0, session="sess8", tpath=str(tp))
+)
+
+# The three ways this must NOT fire, since a hook that stops gating is worse than a
+# hook that nags: ordinary work, work resumed after an answer, and an unreadable file.
+results.append(run("17a. fresh session baselines", 0, session="sess7"))
+write("stdlib/worked.sprout", "s\n")
+results.append(
+    run(
+        "17b. question ANSWERED then edited -> still blocks",
+        2,
+        session="sess7",
+        present=["stdlib/worked.sprout"],
+        tpath=transcript(
+            "t_resumed.jsonl", "go", ["AskUserQuestion"], ("result",), ["Edit", "Bash"]
+        ),
+    )
+)
+write("stdlib/worked.sprout", "s\nt\n")
+results.append(
+    run(
+        "17c. a NEW user message after the question -> still blocks",
+        2,
+        session="sess7",
+        tpath=transcript("t_superseded.jsonl", "go", ["AskUserQuestion"], "actually, do this instead"),
+    )
+)
+write("stdlib/worked.sprout", "s\nt\nu\n")
+results.append(
+    run("17d. unreadable transcript -> fails safe and blocks", 2, session="sess7", tpath=str(S / "nope.jsonl"))
+)
+write("stdlib/worked.sprout", "s\nt\nu\nv\n")
+(S / "garbage.jsonl").write_text("not json\n{\n")
+results.append(
+    run("17e. garbage transcript -> fails safe and blocks", 2, session="sess7", tpath=str(S / "garbage.jsonl"))
+)
+
+# Well-formed JSON of the wrong SHAPE must not raise: a hook that crashes on a
+# malformed line stops gating. A bare list, a string, and a non-dict `message` or
+# content block all reach the same .get() calls.
+#
+# ORDER MATTERS, and getting it wrong makes this test vacuous: the scan runs
+# BACKWARDS, so malformed entries placed before the question are never reached and the
+# case passes with or without the guards. They go at the END, after the last tool call.
+# Verified by running the unguarded version against this file: AttributeError, exit 1.
+write("stdlib/worked.sprout", "s\nt\nu\nv\nw\n")
+(S / "wrongshape.jsonl").write_text(
+    "\n".join(
+        [
+            json.dumps({"type": "user", "message": {"role": "user", "content": "go"}}),
+            json.dumps(
+                {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "name": "AskUserQuestion"}]}}
+            ),
+            json.dumps({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result"}]}}),
+            "[1, 2]",
+            '"just a string"',
+            "null",
+            json.dumps({"type": "assistant", "message": "not a dict"}),
+            json.dumps({"type": "assistant", "message": {"content": ["a bare string block"]}}),
+        ]
+    )
+    + "\n"
+)
+results.append(
+    run(
+        "17f. wrong-shaped entries do not crash, question still seen",
+        0,
+        session="sess7",
+        absent=["Traceback"],
+        tpath=str(S / "wrongshape.jsonl"),
     )
 )
 
