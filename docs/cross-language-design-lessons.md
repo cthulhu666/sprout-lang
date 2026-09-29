@@ -26,16 +26,16 @@ Verified against the current spec, compiler, prelude, and tests (2026-07). Verdi
 |---|------|---------|----------|
 | 1 | Laziness by default | ✅ | Strict; `spec-v0.md` §6; no thunk primitive |
 | 2 | `String = [Char]` | ✅ | UTF-8 buffer, trap avoided. `byte_length` is **O(1)** for *every* String — arena, literal, and interned all carry a CSTR header at `payload-8` (`runtime/sprout_runtime.c` `str_byte_len`, `HDRCHECK`-enforced); `length` (codepoints) is O(n) by design, as in Rust/Go/Swift |
-| 3 | No effect tracking | ⚠️ | Only `!{IO}`+`!{e}` in contract; `!{FileIO,Net}` "future use"; pure→IO **not enforced on fn bodies** (`infer.sprout:4584`, `unifier.sprout:245-248`) |
-| 4 | Orphan instances | ✅ | Overlaps *unconditionally rejected* `infer.sprout:3677-3684` (ahead of the doc's "pending") |
+| 3 | No effect tracking | ⚠️ | Only `!{IO}`+`!{e}` in contract; `!{FileIO,Net}` "future use"; pure→IO **not enforced on fn bodies** (`unifier.sprout` `unify_effects`) |
+| 4 | Orphan instances | 🕗 | Overlaps *unconditionally rejected* (`infer.sprout` `check_overlapping_instances`) — but that is **not** an orphan rule, and there is none: `spec-v0.md` §5.6.4. Proposal: `typeclass-policy-v0.md` §5.1 |
 | 5 | Partial functions | ✅ | No head/tail; `Maybe` accessors; exhaustiveness sound (nested-product gap deferred) |
-| 6 | `return` vs `pure` | ✅ | `pure` only, no `return`; `prelude.sprout:646` |
-| 7 | `do` hard-wired to Monad | ✅ | Structural over IO/Maybe/Result, not a Monad dictionary; `spec-v0.md:779-782` |
+| 6 | `return` vs `pure` | ✅ | `pure` only, no `return`; `prelude.sprout` `class Applicative` |
+| 7 | `do` hard-wired to Monad | ✅ | Structural over IO/Maybe/Result, not a Monad dictionary; `spec-v0.md` §5.2, §8.5 |
 | 8 | Record namespace pollution | ✅ | Per-record field scoping; `spec-v0.md` §5.6, `records-v0.md:186` |
-| 9 | Monomorphism restriction | ⚠️ | Avoids Haskell's MR, but *does* use the ML value restriction — a special case; `infer.sprout:209-234` |
+| 9 | Monomorphism restriction | ⚠️ | Avoids Haskell's MR, but *does* use the ML value restriction — a special case; `infer.sprout` `is_syntactic_value` (W3/F-VALRESTR) |
 | 10 | Extension proliferation | ✅ | One spec, no pragmas; soft "experimental extension" split only |
 | 11 | Numeric hierarchy | 🕗 | Zero classes today; `numeric-types-v1-draft.md` is a sound draft |
-| 12 | Invisible dispatch | 🕗 | No call-site selection syntax; annotation-driven; `spec-v0.md:720-723` |
+| 12 | Invisible dispatch | 🕗 | No call-site selection syntax; annotation-driven; `spec-v0.md` §8.5 (ambiguity rule). Proposal: `typeclass-policy-v0.md` §5.2 |
 | 13 | First-class modules | 🕗 | Namespace-only; functors deferred; `module-qualified-type-identity-design-2026-07-10.md:164-168` |
 
 **The #2/#3/#9 accuracy fixes were made in `haskell-lessons-learned.md` in the same change that added
@@ -180,9 +180,11 @@ gives both the enforcement template and the policy choices.
   > "in PureScript, they are forbidden. Any attempt to define an orphan instance … will mean that your
   > program does not pass type checking." / "Without global uniqueness, you risk operating on data with
   > incompatible instances … keys disappear from your map."
-- **Sprout implication:** Sprout's compiler already hard-rejects overlaps (audit #4) — this validates
-  being ahead of the Haskell doc's "pending." Forbidding orphans as a *type error* (not a warning) is
-  the primary-validated strong stance.
+- **Sprout implication:** Forbidding orphans as a *type error* (not a warning) is the
+  primary-validated strong stance, and Sprout does **not** yet take it. This implication previously
+  read that Sprout was "ahead of the Haskell doc's pending" on the strength of its overlap check —
+  a different check, which says nothing about orphans (audit #4). The rule is proposed in
+  `typeclass-policy-v0.md` §5.1.
 
 ### B3. Idris — the other coherent philosophy: named, explicitly-selected implementations
 - **Primary source:** https://idris2.readthedocs.io/en/latest/tutorial/interfaces.html

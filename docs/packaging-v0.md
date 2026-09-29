@@ -224,10 +224,15 @@ resolver from day one.**
 
 ### 5.1 Coherence: enforce at compile time (strict orphan rule)
 
-Keep and formalize the strict orphan rule (an `instance (C, T)` is legal only in the
-package defining `C` or the package defining `T`), extended to hold **across** packages.
-Rust is the success case; Haskell/Scala are the cautionary permissive ones. This is the
-cross-version generalization of the stance already in `docs/haskell-lessons-learned.md` §4.
+Adopt the strict orphan rule (an `instance (C, T)` is legal only in the package defining
+`C` or the package defining `T`), extended to hold **across** packages.  Rust is the
+success case; Haskell/Scala are the cautionary permissive ones. This is the cross-version
+generalization of the stance already in `docs/haskell-lessons-learned.md` §4.
+
+**"Adopt", not "keep": there is no orphan rule today**, at package *or* module level
+(`spec-v0.md` §5.6.4). What exists is the unrelated overlap check. The module-level
+precursor this section presumes is proposed in `docs/typeclass-policy-v0.md` §5.1, and
+must land before the cross-package extension means anything.
 
 ### 5.2 Versioning: single-version selection
 
