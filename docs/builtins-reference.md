@@ -556,6 +556,16 @@ Request params (low-level, lossless — derived on demand from the parsed reques
 - `form_param(name, req) -> Maybe String`
 - `form_param_all(name, req) -> Vec String`
 
+Request cookies follow the same shape but **not** the same decoding — RFC 6265 gives a cookie
+value no percent- or `+`-encoding, so applying the query decoder would corrupt the base64url a
+session token usually is. Only a surrounding pair of double quotes comes off, which §4.1.1 makes
+syntax (`cookie-octet` excludes `"`). A segment with no `=` is dropped rather than read as a bare
+name, the opposite of the query layer's choice, where `?flag` is a real shape. Cookie names are
+case-sensitive even though the header name is not:
+
+- `cookie_pairs(req) -> Vec (String, String)` — every cookie, in order, duplicates kept
+- `request_cookie(name, req) -> Maybe String` — the first value for `name`
+
 Current experimental scope:
 
 - HTTP/1.1 request line parsing plus header parsing into a `Dict String`

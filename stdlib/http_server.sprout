@@ -837,6 +837,56 @@ export fn form_param_all(name: String, req: HttpRequest) -> Vec String =
 where
   pairs = form_pairs(req)
 
+# --- Request cookies -----------------------------------------------------------
+# `name=value` pairs separated by `; ` (RFC 6265 §4.2.1). Deliberately NOT the query
+# parser: a cookie value carries no percent- or `+`-encoding, so decoding it would
+# corrupt the base64url a session token usually is. Only a surrounding pair of double
+# quotes comes off, which §4.1.1 makes syntax --- `cookie-octet` excludes DQUOTE.
+#
+# The last-wins header fold cannot lose a cookie: §5.4 forbids a user agent sending
+# more than one Cookie header, and RFC 9113 §8.2.3 requires the HTTP/2 split to be
+# re-joined with `; ` before it reaches a generic server.
+
+# `"abc"` -> `abc`, and anything else unchanged.
+fn unquoted(value: String) -> String =
+  if string.length(value) >= 2
+     && string.starts_with(value, "\"") && string.ends_with(value, "\"") then
+    string.slice_between(value, 1, string.length(value) - 1)
+  else value
+
+# A segment with no `=`, or with an empty name, is not a cookie-pair and is dropped
+# rather than read as a name with an empty value --- the query layer's opposite
+# choice, where `?flag` is a real and common shape.
+fn cookie_segments(segs: List String, acc: Vec (String, String)) -> Vec (String, String) =
+  match segs with
+  | [] -> acc
+  | [seg | rest] ->
+      match string.split_once(string.trim(seg), "=") with
+      | Nothing -> cookie_segments(rest, acc)
+      | Just parts ->
+          match parts with
+          | (raw_name, value) ->
+              let name = string.trim(raw_name)
+              in if string.is_empty(name) then cookie_segments(rest, acc)
+                 else cookie_segments(rest,
+                        vec_append((name, unquoted(string.trim(value))), acc))
+
+# Every cookie as an ordered (name, value) list, duplicates and order preserved (the
+# source of truth; `request_cookie` derives from it). O(n^2) in the cookie count for
+# the same reason `parse_query` is --- `vec_append` copies --- and a Cookie header
+# holds tens of pairs, not thousands.
+export fn cookie_pairs(req: HttpRequest) -> Vec (String, String) =
+  match request_header("cookie", req) with
+  | Nothing -> vec_empty()
+  | Just raw -> cookie_segments(string.split(raw, ";"), vec_empty())
+
+# First value for `name`, or Nothing. A cookie's own name is case-SENSITIVE, unlike
+# the header it rides in.
+export fn request_cookie(name: String, req: HttpRequest) -> Maybe String =
+  first_value(pairs, 0, vec_length(pairs), name)
+where
+  pairs = cookie_pairs(req)
+
 # Render a response to the wire. The header block is assembled from the response's
 # header dict (not http_response's fixed base), so the content type is caller-
 # controlled and appears once, and every response carries a byte-accurate

@@ -510,9 +510,11 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   the whole body is read; streaming makes them concurrent and changes that math.
 - [ ] `P2` **List-valued request headers.** `parse_header_lines` folds repeats last-wins into a
   `Dict String`. The two *framing* hazards are refused outright (differing `content-length`,
-  repeated `host`), but `Cookie` legitimately arrives as several field lines (RFC 6265) and
-  collapses to the last. Needs an all-values accessor beside `request_header` (Go
-  `map[string][]string`; Rust `HeaderMap` multi-map).
+  repeated `host`), but a comma-list header (`accept`, `forwarded`, `via`) collapses to the last.
+  **Not `Cookie`:** RFC 6265 §5.4 forbids a user agent sending more than one, and the HTTP/2
+  split that RFC 9113 §8.2.3 permits MUST be re-joined with `"; "` before reaching a generic
+  server — so `cookie_pairs` is already correct. Needs an all-values accessor beside
+  `request_header` (Go `map[string][]string`; Rust `HeaderMap` multi-map).
 - [ ] `P2` **Request-param convenience layer.** A merged `param`/`param_all` bag over query+form
   (query-first, matching Werkzeug's `CombinedMultiDict([args, form])`), plus first-wins
   `Dict String` projections `query_params`/`form_params`/`params`. All over the existing `_pairs`

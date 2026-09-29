@@ -1,0 +1,73 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.http_server (HttpRequest, parse, cookie_pairs, request_cookie)
+import stdlib.string as string
+
+# Request cookies derived from an already-parsed request (no sockets), mirroring
+# `test_query_params.spr`: parse(raw) -> accessor -> inspect. `cookie_pairs` is the
+# ordered, duplicate-preserving truth; `request_cookie` returns the FIRST value.
+#
+# The cases that matter most are the ones separating this from the query layer: a
+# cookie value is NOT percent- or `+`-decoded, because RFC 6265 gives it no such
+# encoding and a session token is routinely base64url.
+
+fn show_pairs_from(ps: Vec (String, String), index: Int, total: Int, acc: String) -> String =
+  if index >= total then acc
+  else
+    match vec_get(index, ps) with
+    | Nothing -> acc
+    | Just pair ->
+        match pair with
+        | (k, v) ->
+            show_pairs_from(ps, index + 1, total,
+              if string.is_empty(acc) then `${k}=${v}` else `${acc},${k}=${v}`)
+
+fn show_pairs(ps: Vec (String, String)) -> String =
+  show_pairs_from(ps, 0, vec_length(ps), "")
+
+fn with_req(raw: String, f: HttpRequest -> String) -> String =
+  match parse(raw) with
+  | Err _ -> "<PARSE_ERR>"
+  | Ok req -> f(req)
+
+# `raw` is the Cookie header's value; the rest of the request is fixed.
+fn request_with(raw: String) -> String =
+  "GET / HTTP/1.1\r\ncookie: " ++ raw ++ "\r\n\r\n"
+
+fn pairs_of(raw: String) -> String =
+  with_req(request_with(raw), \r -> show_pairs(cookie_pairs(r)))
+
+fn cookie_of(raw: String, name: String) -> String =
+  with_req(request_with(raw), \r -> maybe_with_default("<none>", request_cookie(name, r)))
+
+fn main() -> Unit !{IO} =
+  run_suite("request_cookies", [
+    check_eq("a request with no Cookie header has no pairs",
+      with_req("GET / HTTP/1.1\r\n\r\n", \r -> show_pairs(cookie_pairs(r))), ""),
+    check_eq("one pair", pairs_of("sid=abc"), "sid=abc"),
+    check_eq("pairs keep their order", pairs_of("a=1; b=2; c=3"), "a=1,b=2,c=3"),
+    # RFC 6265 4.2.1 makes the separator "; ", but the space is not worth refusing over.
+    check_eq("the separating space is optional", pairs_of("a=1;b=2"), "a=1,b=2"),
+    check_eq("surrounding whitespace is trimmed", pairs_of("  a = 1 ;  b=2  "), "a=1,b=2"),
+    # base64 padding lands inside the value; only the first '=' separates.
+    check_eq("only the first '=' splits a pair", pairs_of("t=YWJj=="), "t=YWJj=="),
+    # The whole point of not reusing the query parser: '%2F' and '+' are data here.
+    check_eq("a value is not percent-decoded", pairs_of("t=a%2Fb"), "t=a%2Fb"),
+    check_eq("a '+' is not a space", pairs_of("t=YWJj+ZGVm"), "t=YWJj+ZGVm"),
+    # cookie-octet excludes DQUOTE, so the quotes are syntax and never data.
+    check_eq("a quoted value loses its quotes", pairs_of(`t="abc"`), "t=abc"),
+    check_eq("an unbalanced quote is left alone", pairs_of(`t="abc`), `t="abc`),
+    # cookie-pair is `name "=" value`; a bare token is not one. Go keeps this as a
+    # name with an empty value, which is the one place this parser is stricter.
+    check_eq("a segment with no '=' is dropped", pairs_of("a=1; junk; b=2"), "a=1,b=2"),
+    # cookie-name is a token, and a token is at least one character.
+    check_eq("a pair with an empty name is dropped", pairs_of("a=1; =orphan; b=2"), "a=1,b=2"),
+    check_eq("an empty header yields no pairs", pairs_of(""), ""),
+    check_eq("duplicates are both kept", pairs_of("a=1; a=2"), "a=1,a=2"),
+    check_eq("request_cookie takes the first of a duplicate", cookie_of("a=1; a=2", "a"), "1"),
+    check_eq("request_cookie finds a later pair", cookie_of("a=1; sid=xyz", "sid"), "xyz"),
+    check_eq("request_cookie answers Nothing for an absent name",
+      cookie_of("a=1", "sid"), "<none>"),
+    # Cookie names are case-sensitive even though the header name is not.
+    check_eq("request_cookie does not fold the cookie's own name",
+      cookie_of("Sid=1", "sid"), "<none>")
+  ])

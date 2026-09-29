@@ -125,3 +125,50 @@ decoder ever needs it.
   the convenient whole-bag view, built on top of `_pairs`.
 - **Path / route params** (`/users/:id`) — requires changing `Route` from exact match
   to pattern match, a segment-capturing matcher, and threading captures into dispatch.
+
+## 8. Request cookies (issue #373, request half)
+
+`cookie_pairs` / `request_cookie` mirror §5's shape — derived on demand, ordered,
+duplicate-preserving, first-wins — over `request_header("cookie", req)`. They reuse
+`first_value` and share no parser with the query side, which is the whole point.
+
+**What differs, and why it is not an oversight.** §2's "correct decoding: `%XX` and
+`+` → space" is a property of `application/x-www-form-urlencoded`, not of cookies.
+RFC 6265 defines no encoding for a cookie value — §4.1.1 only *suggests* a server
+base64 arbitrary data — so running the query decoder over one would turn a `+` in a
+base64 session token into a space, and `decode_kv` would drop the pair outright on a
+`%` that is not a valid escape. Reusing `parse_query` would have been three lines and
+a silent corruption of exactly the value cookies usually carry.
+
+**Prior art, read rather than recalled** (`net/http/cookie.go`, `readCookies` and
+`parseCookieValue`): Go strips a surrounding pair of double quotes, does not
+percent-decode, and trims each segment. This layer agrees on all three.
+
+Two divergences, in opposite directions:
+
+- **Stricter:** Go keeps a segment with no `=` as a name with an empty value —
+  `strings.Cut` returns the whole segment as the name and `isToken` passes it — where
+  this layer drops it, along with an empty name. The grammar is the tiebreak
+  (`cookie-pair` is `cookie-name "=" cookie-value`, with no bare form), and it lines
+  up with this server's framing rules, strict on the argument that a parser
+  disagreeing with the proxy in front of it is a smuggling primitive. The query layer
+  makes the opposite call for `?flag`, which *is* a real shape.
+- **Looser:** Go rejects a name that is not an RFC 2616 `token`; this layer checks
+  only that it is non-empty. A name no client would send costs a caller nothing,
+  because `request_cookie` can only find what it is asked for, and the character
+  class is not worth carrying until something needs it.
+
+**One Cookie header is all there is to read.** RFC 6265 §5.4 forbids a user agent
+sending more than one, and RFC 9113 §8.2.3 requires the HTTP/2 split to be re-joined
+with `"; "` before it reaches a generic server. So the last-wins header fold cannot
+lose a cookie, and `BACKLOG.md`'s list-valued-headers entry — which cited `Cookie` as
+its motivating case — was corrected in the same change.
+
+**No `request_cookie_all`.** Duplicate cookie names do occur (the same name at two
+`Path` scopes), but what a handler wants then is almost never "merge them" — it is to
+see both, which `cookie_pairs` already gives. Adding it later breaks nothing.
+
+**Not here: `Set-Cookie`.** Issue #373's response half needs `HttpServerResponse` to
+hold repeatable headers first — it carries one `Dict String`, so a second
+`with_cookie` would silently overwrite the first — and that prerequisite is filed
+nowhere yet.
