@@ -420,6 +420,34 @@ available; the byte counter is what closed this, not a memory limit.)
 Floors are asserted as well as ceilings, for the reason the render-cost entry gives: if an edit leaves
 the two fixtures the same size, the delta collapses and the ceilings stay green over nothing.
 
+## Object-age instrument — `just gc-ageprof-check`
+
+Calibrates `SPROUT_GC_AGEPROF=1` against two workloads with known answers. Details and the
+current bounds: [gc-generational-v0.md](gc-generational-v0.md) §4.
+
+### An absolute ratio tracked the number of rooted globals, not what the gate measured
+
+`retain_none` asserted `marked_age_ge1/marked_total ≤ 15%`. That workload keeps only ~6 objects
+live per collection, so a single permanently rooted global — re-marked every cycle, one age≥1
+mark per cycle — is worth ~12pp of it. The bound read **0%** when it was set, 12% once
+`pow10_exact_unit` became a rooted global, and 24% when `list_builder_empty` was added, where it
+failed. Nothing had regressed: same cycle count, same `freed_total`, 99% of the churn still dying
+young, separation 49pp against a 40pp floor. The failure message said "objects are surviving
+cycles that should not" about an object whose whole job is to survive.
+
+The fix is to subtract the steady state rather than to raise the bound: a rooted object is marked
+once at each age, so buckets 1..30 of `marked_by_age` each hold exactly the root count, and
+`marked_age_ge1 - roots × (cycles-1)` is the churn that actually outlived a collection (0% on
+both sides of this change, where the raw ratio read 12% and 24%). Raising 15% to 35% would have
+worked for exactly one more root.
+
+**Subtracting a floor needs the floor bounded, or a leak hides inside it.** The histogram cannot
+tell a rooted global from an object retained for the whole run — both are flat steady state — so
+a 500-object leak old enough to fill buckets 1..30 would be read as a 502-root floor and
+subtracted away. Hence `roots ≤ 8` beside the flatness check: the count is small, known, and
+changes only when someone adds a global, so bounding it costs nothing and is what keeps the
+correction from absorbing the thing it exists to detect.
+
 ## Optimisation-pass harness — `just opt-harness-check`
 
 Compiles `tests/opt_harness/dead_let.spr` twice, once with every pass on and once with

@@ -101,11 +101,25 @@ not measure this" are different conclusions. §6 turns on that distinction.
 
 **Validation.** Two synthetic workloads with known answers,
 `tests/stdlib/test_gc_age_retain_{all,none}.spr`, gated by `just gc-ageprof-check`:
-retain-all must report a HIGH re-mark ratio and retain-none a LOW one (measured 73% vs
-0%; the gate requires ≥70%, ≤15%, and ≥40pp separation). A stuck, inverted, or
-live-vs-marked-confused counter fails. The runtime additionally aborts if
-`live_by_age` disagrees with `g_managed_heap_count`, which is computed by different
-code from different state.
+retain-all must report a HIGH re-mark ratio (≥70%, measured 73%) and retain-none a LOW
+one, with ≥40pp separation. A stuck, inverted, or live-vs-marked-confused counter fails.
+The runtime additionally aborts if `live_by_age` disagrees with `g_managed_heap_count`,
+which is computed by different code from different state.
+
+**The retain-none bound is a floor-corrected count, not the raw ratio.** A permanently
+rooted global is re-marked every cycle, so it contributes one age≥1 mark per cycle to a
+workload that retains nothing — and this fixture marks only ~6 objects per collection, so
+each root moves the raw ratio by ~12pp. It read **0%** when the ≤15% bound was set, 12%
+once `pow10_exact_unit` became a rooted global, and 24% at `list_builder_empty`, failing a
+bound that nothing had regressed against: same cycle count, same `freed_total`, 99% still
+dying young. The gate now reads the root count off age bucket 30 — a rooted object is
+marked once at every age, so buckets 1..30 each hold exactly that count — subtracts
+`roots × (cycles-1)` from `marked_age_ge1`, and bounds the remainder (≤5%) and the
+separation. Three checks keep the subtraction honest: buckets 1..30 must really be flat
+(a churn object that starts surviving breaks flatness instead of hiding in it), the floor
+itself is bounded (≤8, so a steady-state leak cannot be absorbed into it — the histogram
+alone cannot tell one from a rooted global), and retain-none must run >31 cycles for
+bucket 30 to be reachable at all.
 
 ## 5. Measured — the nursery's ceiling is a compiler fact, not a general one
 
@@ -129,6 +143,11 @@ Read the `marks` column with the ratio, not instead of it. The compiler marks
 collection**. nqueens marks 60 per collection, http_log_middleware 23. **On every
 workload except the compiler, marking is already nearly free, so a high ratio would
 have bought nothing and the low ratios cost nothing.**
+
+At 38 marks per collection the permanently rooted globals are themselves a few points of
+the server's ratio — one root contributes one age≥1 mark per cycle whatever else runs — so
+the low figures here are ceilings on a churn ceiling, and the conclusion holds with room to
+spare. §4's retain-none note has the mechanism.
 
 `gc_roots` (2026-09-20) is the case that makes the distinction sharpest, and it was
 added because a game simulation tick was reported as GC-bound. Its ratio is high —
