@@ -1,0 +1,20 @@
+module main
+
+# An instance whose head is a type ALIAS must dispatch. `type alias Name = String`
+# makes `Name` and `String` one type (spec §5.6.2), so `instance Label Name` is an
+# instance at `String` and `label("hi")` must find it.
+#
+# It did not: the instance key was built from the head as WRITTEN, while every
+# lookup built it from the INFERRED type, where the alias is already expanded. The
+# declaration was accepted and unreachable, and the call failed naming `String` —
+# a type this file never writes.
+
+type alias Name = String
+
+class Label a
+  fn label(x: a) -> String
+
+instance Label Name
+  fn label(x: Name) -> String = "alias-head-dispatched"
+
+fn main() -> Unit !{IO} = print(label("hi"))
