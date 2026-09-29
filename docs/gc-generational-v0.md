@@ -429,6 +429,11 @@ objects cost — sweep *volume* was, and the sweep is proportional to objects, w
 threshold cannot change. Reach for the floor only with a measurement that separates the
 two, or the tuning looks principled and does nothing.
 
+**One case has since cleared this bar**, and the guard stands unchanged rather than being softened
+for it: issue #407 moved only the floor on a fixed workload and took it from 1,310 collections to
+14. [gc-trigger-v0.md](gc-trigger-v0.md) §4 is that argument, together with the reason it does
+*not* generalise — §13.2 below ran the same experiment on dense heaps and came out flat to worse.
+
 ## 12. Why not a switchable copying / non-moving collector (asked 2026-09-27)
 
 The question: Sprout's intended workloads are a webapp over Postgres, a 3D game, TUI
