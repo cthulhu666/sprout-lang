@@ -1,0 +1,1 @@
+needs an Applicative instance for `Result e`, but declares no `where` constraint for it, so one instance was chosen at definition instead of per call — add `where Applicative (Result e)` to its signature

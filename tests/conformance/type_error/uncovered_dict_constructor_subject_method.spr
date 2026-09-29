@@ -1,0 +1,22 @@
+# The instance-method twin of uncovered_dict_constructor_subject.spr.
+#
+# Both messages are built from the same named_uncovered_dict result, so both named
+# the bare variable `e` and suggested `where Applicative e`. The remedies differ —
+# a method's constraint must also be declared on the class — but the subject does
+# not, and it is the subject that was wrong.
+#
+# Kept separate from the free-function fixture because the two messages are
+# distinct strings in distinct branches; one can be fixed while the other still
+# misnames the subject.
+module main
+
+type Box = (v: Int)
+
+class Mapper f
+  fn map_all(r: f, g: a -> Result e b, xs: List a) -> Result e (List b)
+
+instance Mapper Box
+  fn map_all(r: Box, g: a -> Result e b, xs: List a) -> Result e (List b) =
+    traverse(g, xs)
+
+fn main() -> Unit !{IO} = print("x")

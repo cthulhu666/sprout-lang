@@ -1,0 +1,1 @@
+needs an Applicative instance for `Result e`, which this method generalizes and nothing supplies; add `where Applicative (Result e)` to the method
