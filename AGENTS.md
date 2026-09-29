@@ -60,7 +60,10 @@ Use commit messages that explain intent:
 refuses the turn and prints a path-aware checklist: idiomatic Sprout for `.sprout`/`.spr`,
 `docs/guidelines.md` for `stdlib/`, GC/rooting for `stdlib/compiler/` and `runtime/`, docs+spec sync
 always. Generated artifacts (the seed, `tests/golden/ir/`, `build/`, `.claude/`) are invisible to it,
-so a reseed or a golden snapshot never trips it. Test with `just test-review-gate`.
+so a reseed or a golden snapshot never trips it. A turn whose last tool call is
+`AskUserQuestion` passes through, because an agent blocked on an answer cannot review-and-fix —
+and it records nothing, so the change is still gated once you reply. Test with
+`just test-review-gate`.
 
 **`/sprout-review`** — `.claude/skills/sprout-review/SKILL.md`, an ensemble diff review that also
 records the run. `/code-review` leaves nothing on disk, so nothing can say how many reviews a branch

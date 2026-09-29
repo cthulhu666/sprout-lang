@@ -6,6 +6,11 @@
 # gate "the change is finished". PostToolUse fires mid-edit and cannot block;
 # TaskCompleted is opt-in by the model (no TaskCreate call, no hook).
 #
+# The cost of that is that Stop cannot tell "finished" from "blocked on a question",
+# and an agent waiting on the user cannot review-and-fix. A turn whose last tool call
+# is AskUserQuestion therefore passes through — recording NOTHING, so the change is
+# still unreviewed and still gated once the answer arrives (see ended_on_question).
+#
 # Loop safety, three ways: the first Stop of a session records the tree as the
 # BASELINE (pre-existing dirt never fires), a state already shown is never shown
 # twice, and MAX_BLOCKS_PER_TURN caps any single user turn.
@@ -28,6 +33,10 @@ from pathlib import Path
 # blocking Stops. This only has to sit under that, so a runaway is released quietly here
 # instead of by the platform's warning — and the budget refills every turn.
 MAX_BLOCKS_PER_TURN = 3
+
+# Enough transcript to hold the current turn. One entry can be large, so this is a
+# byte budget rather than a line count, and the leading partial line is dropped.
+TAIL_BYTES = 512 * 1024
 
 # Generated artifacts, not reviewed prose or code. Excluding them also keeps a
 # post-`refresh-seed` Stop cheap: the seed is 13 MB and its diff runs to hundreds
@@ -119,6 +128,80 @@ def tree_state(root, paths):
     return state
 
 
+def tail_entries(path):
+    """The transcript's trailing JSONL entries, newest last. [] on any problem."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - TAIL_BYTES))
+            raw = f.read()
+        lines = raw.split(b"\n")
+        if size > TAIL_BYTES:
+            lines = lines[1:]  # the seek landed mid-entry
+        out = []
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(entry, dict):  # a bare list or string parses fine
+                out.append(entry)
+        return out
+    except OSError:
+        return []
+
+
+def content_of(entry):
+    """An entry's message content — a str, or a list of block dicts, or None."""
+    msg = entry.get("message")
+    return msg.get("content") if isinstance(msg, dict) else None
+
+
+def blocks_of(entry):
+    content = content_of(entry)
+    if not isinstance(content, list):
+        return []
+    return [b for b in content if isinstance(b, dict)]
+
+
+def ended_on_question(path):
+    """Did this turn stop because the agent asked the USER something?
+
+    True when the most recent tool call of the current turn is AskUserQuestion. A
+    question is not a finished change: the agent cannot review-and-fix while it is
+    blocked on an answer, and Stop cannot tell the two apart on its own (Stop is the
+    only unconditional turn exit, so it fires either way — see the module header).
+
+    Scoped to the current turn, whose start is the last real user prompt; a
+    tool_result is the agent's own work coming back, not a prompt. Question ->
+    answer -> more edits -> Stop therefore still blocks, because the edit's tool
+    call is the most recent one.
+    """
+    if not path:
+        return False
+    for entry in reversed(tail_entries(path)):
+        # `type` first, and only then the message's role: a real transcript carries
+        # entries (`last-prompt`, `attachment`, …) whose message says "user" but which
+        # are not prompts, and reading those as a turn boundary would end the scan early.
+        msg = entry.get("message")
+        role = entry.get("type") or (msg.get("role") if isinstance(msg, dict) else None)
+        if role == "user":
+            content = content_of(entry)
+            if isinstance(content, str) or any(
+                b.get("type") == "text" for b in blocks_of(entry)
+            ):
+                return False  # reached the prompt, no tool call since
+        elif role == "assistant":
+            for b in reversed(blocks_of(entry)):
+                if b.get("type") == "tool_use":
+                    return b.get("name") == "AskUserQuestion"
+    return False
+
+
 def new_turn(d, state):
     """(is this Stop the start of a new user turn, turn id to store).
 
@@ -193,6 +276,13 @@ def main():
         state_path.write_text(json.dumps(state))
         return 0
 
+    if ended_on_question(d.get("transcript_path")):
+        # Deliberately records NOTHING — not `seen`, not the baseline, not a block.
+        # Marking this state reviewed would let the change escape review entirely the
+        # moment the question is answered, which is worse than the annoyance it fixes.
+        log("turn ended on a question — pass through, still unreviewed")
+        return 0
+
     fresh, turn = new_turn(d, state)
     if fresh:
         state["turn"], state["blocks"] = turn, 0
@@ -228,4 +318,5 @@ def main():
     return 2
 
 
-sys.exit(main())
+if __name__ == "__main__":
+    sys.exit(main())
