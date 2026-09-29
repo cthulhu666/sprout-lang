@@ -297,8 +297,12 @@ intern_of() {
     cat "$TMP_DIR/intern_$1.out" "$TMP_DIR/intern_$1.err" >&2
     exit 1
   }
-  # Anchored on the separating space, so `intern_bytes=` cannot answer for `intern=`.
-  sed -n 's/.*[[:space:]]intern=\([0-9]*\).*/\1/p' "$TMP_DIR/intern_$1.err"
+  # Anchored TWICE: on the report line, then on the separating space. The line
+  # anchor is not optional -- SPROUT_DEBUG_GC=1 in the environment adds an
+  # `offheap: intern=` census line per cycle, and without it this returns one
+  # number per cycle plus the total, which `$(( ))` then dies on.
+  grep '^\[sprout alloc\]' "$TMP_DIR/intern_$1.err" | tail -1 \
+    | sed -n 's/.*[[:space:]]intern=\([0-9]*\).*/\1/p'
 }
 d=$(intern_of distinct)
 r=$(intern_of repeated)

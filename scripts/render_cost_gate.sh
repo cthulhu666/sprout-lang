@@ -71,17 +71,27 @@ line=$(grep '^\[sprout alloc\]' "$err" | tail -1)
 # nothing, so it sails past the empty-check below and the gate then budgets an
 # unrelated counter. Same read as scripts/rooting_cost_gate.sh.
 counter() { printf '%s\n' "$line" | sed -n "s/.*[[:space:]]$1=\([0-9]*\).*/\1/p"; }
+# Every failure below dumps the probe's own output. This is the EARLIEST place
+# the gate can fail, so without it a probe that dies before printing the report
+# exits on a one-line "counter is GONE" and the crash that caused it is thrown
+# away -- the later empty-counter branch, which exists to cat these, is never
+# reached.
+dump_probe() {
+  echo "--- stdout ---" >&2; cat "$out" >&2
+  echo "--- stderr ---" >&2; cat "$err" >&2
+}
 require_unique() {
   local n
   n=$(printf '%s\n' "$line" | grep -o "[[:space:]]$1=" | wc -l | tr -d ' ')
   [ "$n" -eq 1 ] && return 0
   echo "FAIL: '$1=' occurs $n time(s) in the alloc report; expected exactly 1." >&2
   if [ "$n" -eq 0 ]; then
-    echo "      The counter is GONE, so this budget is measuring nothing." >&2
+    echo "      The counter is GONE, or the probe never printed the report at all." >&2
   else
     echo "      A counter whose name ends in '$1' was added to the report; this" >&2
     echo "      read is ambiguous, so it is not a budget." >&2
   fi
+  dump_probe
   exit 1
 }
 require_unique sprout_obj
@@ -96,8 +106,7 @@ swept=$(counter gc_swept)
 # quotient, blaming this script for a probe edited down to no frames.
 if [ -z "$cells" ] || [ "$cells" -eq 0 ] || [ -z "$obj" ] || [ -z "$swept" ]; then
   echo "FAIL: could not read the counters (cells='$cells' obj='$obj' swept='$swept')" >&2
-  echo "--- stdout ---" >&2; cat "$out" >&2
-  echo "--- stderr ---" >&2; cat "$err" >&2
+  dump_probe
   exit 1
 fi
 

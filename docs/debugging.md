@@ -133,24 +133,33 @@ Do not read a large number as a speed-up waiting to happen — it is a **static*
 
 ## What did a program allocate? (`SPROUT_DEBUG_ALLOC=1`, `SPROUT_DEBUG_GC=1`)
 
-`SPROUT_DEBUG_ALLOC=1` prints one line at exit: totals for the run. `SPROUT_DEBUG_GC=1` prints two
-per collection — the cycle, then a live census by heap kind and an `offheap:` line.
+`SPROUT_DEBUG_ALLOC=1` prints one line at exit: totals for the run. `SPROUT_DEBUG_GC=1` prints
+**three** lines per collection — the cycle, a live census by heap kind, and an `offheap:` line.
 
-One compile of `tests/cost/rooting_block_small.sprout` — a late cycle, then the exit totals:
+One compile of `tests/cost/rooting_block_small.sprout`: one cycle, then the exit totals. Every line
+but the first is verbatim — the cycle line is elided at the `...`, since its timings never repeat.
 
 ```
-[sprout gc]   types: obj=47199 closure=0 vec=1 map=2784 ref=8 cstr=6126(23.5KB) bytes=0 tuple=902
+[sprout gc] cycle=144 reason=threshold threshold=161937 ... elapsed_us=3815 arena_regions=7 overflow_regions=0
+[sprout gc]   types: obj=47199 closure=0 vec=1 map=2784 ref=8 cstr=6126(23.5KB) bytes=0 builder=0 tuple=902
 [sprout gc]   offheap: intern=4354(143.8KB)
-[sprout alloc] sprout_obj=4908866 closure=56014 vector=1871 map=161183 bytes=40 builder=0 \
-  slot_bytes=166643856 intern=5608 intern_bytes=188997 gc_swept=5627634 gc_cycles=150
+[sprout alloc] sprout_obj=4908866 closure=56014 vector=1871 map=161183 bytes=40 builder=0 arena_bytes=166643856 offarena_bytes=3504153 intern=5608 intern_bytes=188997 gc_swept=5627634 gc_cycles=150
 ```
 
-**Read `slot_bytes` before concluding anything from the counts.** Every other field on that line is
-a COUNT, and a count cannot see a string-shape bug: right-nested `++` and `string_concat_many`
+**Read the two byte totals before concluding anything from the counts.** Every other field on that
+line is a COUNT, and a count cannot see a shape bug: right-nested `++` and `string_concat_many`
 allocate the same number of objects and differ only in bytes copied. That is not hypothetical — it
 cost 1.8 GB of compile memory while `sprout_obj`, `map` and `gc_swept` all stayed flat
-([compiler-internals.md](compiler-internals.md) §Render IR text). `slot_bytes` is what the allocator
-consumed, header and 16-byte rounding included.
+([compiler-internals.md](compiler-internals.md) §Render IR text).
+
+**The two are different allocators, and each sees only its own.** `arena_bytes` is the GC arena:
+every block `sprout_gc_alloc_block` hands out, 16-byte rounding and header included. `offarena_bytes`
+is the plain `malloc` behind `sprout_alloc_counted` — Vector element arrays, `Bytes` payloads and
+Builder chunk arrays, whose *headers* live in the arena but whose payloads do not. A blowup in a
+`Bytes` or `Builder` workload moves `offarena_bytes` and leaves `arena_bytes` flat, so reading one
+and not the other reproduces the same blind spot one allocation class over. On a realloc,
+`offarena_bytes` adds the requested size, so a buffer regrown n times scores the sum of its sizes:
+doubling stays near 2n, a quadratic regrowth does not.
 
 **`map=N` in the census is N Dict/Set ENTRIES, one `BSTNode` each** — there is no branching factor,
 so a resident dictionary's mark cost is its entry count at ~100 ns apiece. A census dominated by

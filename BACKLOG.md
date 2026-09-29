@@ -797,11 +797,12 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   `sample` never showed this — it flattened into `str_slice`; only the per-kind counters named it.
 - [ ] `P3` **Cost gates cover three workloads; a parse and the stdlib hot paths are unguarded.**
   `render-cost-gate` budgets a TUI frame, `test_byte_offset_cost.spr` pins one complexity claim,
-  `rooting-cost-gate` prices a compile. The bytes half is CLOSED: the report carries `slot_bytes=`
-  and `rooting-cost-gate` budgets it, which separates the two concatenation forms 5.9× where every
-  count gives nothing. `render-cost-gate` does not budget it yet — a TUI frame's byte cost has never
-  been measured, so there is no number to set. A `cost-golden` over 4–5 fixed workloads on shared
-  counters is the shape that would cover all of them at once. Shapes: `docs/gates.md` §Render cost.
+  `rooting-cost-gate` prices a compile. Bytes are now REPORTED but barely budgeted: `arena_bytes=`
+  and `offarena_bytes=` split the two allocators, and only `arena_bytes` has a ceiling, only in
+  `rooting-cost-gate` — where it separates the two concatenation forms 5.9× against no signal from
+  any count. Nothing budgets `offarena_bytes` (no `Bytes`/`Builder` fixture exists to set one from)
+  and `render-cost-gate` budgets neither. A `cost-golden` over 4–5 fixed workloads on shared
+  counters is the shape that covers all of them at once. Shapes: `docs/gates.md` §Render cost.
 - [ ] `P3` **Mid-string `str_slice` is O(start)**, so a scanner whose offset advances is still
   quadratic. Prefix slicing no longer is — `str_slice` walks to `start + count` and stops, making
   `slice(s, 0, k)` independent of `|s|`. Closing the rest needs a codepoint-to-byte cache on String

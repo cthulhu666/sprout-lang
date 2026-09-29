@@ -51,7 +51,7 @@ allocator never returns to the OS, and CI SIGKILLed it as `COMPILE FAILED` with
 empty stderr. **No allocation COUNT sees this**, because the two forms allocate the
 same *number* of string objects and differ only in bytes copied: reintroducing the
 `++` form moved peak RSS 88 MB → 1907 MB while `gc_swept` moved 7650 → 7628 and
-`map` 300 → 300. The report's `slot_bytes=` is what does see it — 249,472 bytes per
+`map` 300 → 300. The report's `arena_bytes=` is what does see it — 249,472 bytes per
 element against 1,475,716, a 5.9× separation that grows with block size — and
 `just rooting-cost-gate` budgets it, so this is guarded now. `docs/gates.md`
 §Compiling one long block records the wrong intermediate conclusion that `gc_swept`

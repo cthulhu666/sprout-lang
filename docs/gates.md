@@ -394,13 +394,20 @@ element before the rooting fix against 300–301 after, reproducing to ±0.3% ac
 with every element added*, so a return of that quadratic overshoots by 6.3× here and more at any
 larger fixture.
 
-`slot_bytes` covers `ir_lowering`, and it is the only arm that can. The two concatenation forms
+`arena_bytes` covers `ir_lowering`, and it is the only arm that can. The two concatenation forms
 allocate the same *number* of objects and differ only in bytes copied, so no count separates them:
 reintroducing right-nested `++` in `ir_lowering.lower_ops` moves peak RSS from 88 MB to 1907 MB while
-`gc_swept` moves 7650 → **7628** and `map` 300 → **300**. `slot_bytes` moves 249,472 per element →
+`gc_swept` moves 7650 → **7628** and `map` 300 → **300**. `arena_bytes` moves 249,472 per element →
 **1,475,716**, a 5.9× separation that grows with block size. Red-verified by reintroducing that
 quadratic alone and confirming the gate fails on the byte arm while `map` and `gc_swept` stay inside
 their budgets.
+
+It is named for the allocator it covers, and the name is load-bearing. `arena_bytes` is what
+`sprout_gc_alloc_block` hands out; Vector element arrays, `Bytes` payloads and Builder chunk arrays
+are plain `malloc` behind `sprout_alloc_counted` and land in `offarena_bytes`, which this gate
+REPORTS nothing about and does not budget — the compiler barely touches those paths (3.5 MB against
+166 MB here), so there is no measured number to set a ceiling from. A `Bytes`/`Builder` workload
+needs its own fixture before that arm means anything.
 
 `gc_swept` is floored only, and that floor is a **fixture check, not a churn detector**. An earlier
 revision of this entry claimed it separated the two by 1.7×. That was wrong, and the error is why the
