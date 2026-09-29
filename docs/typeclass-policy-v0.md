@@ -116,8 +116,9 @@ author never wrote ("No instance of `Label` for `String`").
 outside the rule's scope … and must not be judged by a number the writer never declared".
 `instance-head-kinds-v0.md` §2 lists alias heads as a non-goal *of the arity check*, notes they "do
 not dispatch today", and §11 defers their arity check "once they dispatch" — anticipating that they
-will. So the recorded direction is to make alias heads *work*, not to reject them, which makes the
-type-synonym item in §5.3 an open question rather than a freeze (open question #4).
+will. So the recorded direction was to make alias heads *work*, not to reject them — and that is
+what landed (`docs/alias-instance-heads-v0.md`). §5.1's expansion clause is the rule this doc needed
+anyway, and the type-synonym item in §5.3 is resolved rather than frozen.
 
 ---
 
@@ -298,11 +299,12 @@ lowering's parallel instance table, plus the seed and golden IR. The condition i
 specificity ordering.** That entry's own "most-specific-wins" phrasing is what smuggles the overlap
 rung in, and is the wording to fix. §8 no longer deletes the entry.
 
-- **Type-synonym instances — NOT frozen; this is open question #4.** An earlier draft listed them as
-  "out". That is wrong: `tests/stdlib/test_instance_head_arity.spr` deliberately *accepts* an
-  alias-headed instance, and `instance-head-kinds-v0.md` §11 anticipates making them dispatch (§3).
-  Freezing them would break that test and reverse a recorded decision. The live problem is not that
-  they are admitted — it is that they are admitted and unreachable with no diagnostic.
+- **Type-synonym instances — not frozen, and now resolved.** An earlier draft listed them as "out".
+  That was wrong: `tests/stdlib/test_instance_head_arity.spr` deliberately *accepts* an alias-headed
+  instance, so freezing them would have broken that test and reversed a recorded decision. The
+  problem was never that they are admitted — it was that they were admitted and unreachable. They
+  dispatch now, and an alias head is its expansion (`spec-v0.md` §8.5,
+  `docs/alias-instance-heads-v0.md`).
 
 **The one conditional door, aimed at the case the repo actually has.** An earlier draft opened it
 only for "generic containers", which is the wrong domain: the recorded in-repo demand is **numeric**
@@ -436,7 +438,7 @@ reader inherits it:
 3. **Scope** — land all three, or land P1 + P3 now and hold P2 until something concrete needs a
    second instance. P1 + P3 is a coherent smaller change: the freeze is defensible without P2, it
    just leaves `wrap` as the only escape hatch.
-4. **Alias-headed instances** (§3) — make them dispatch by expanding the alias in the instance key
-   (the direction `instance-head-kinds-v0.md` §11 anticipates; breaks no existing test), or diagnose
-   the dead declaration at its site (cheap and loud, but contradicts
-   `tests/stdlib/test_instance_head_arity.spr`), or leave it and file it. Independent of P1–P3.
+4. ~~**Alias-headed instances** (§3).~~ **Answered and landed**: they dispatch. The alias is
+   expanded in the head before any key is built, by `ast.expand_alias_instance_heads` from
+   `desugar_ctx.desugar_program`. Design and the four key paths it reconciles:
+   `docs/alias-instance-heads-v0.md`; normative rule in `spec-v0.md` §8.5.
