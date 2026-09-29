@@ -363,11 +363,12 @@ must also pass on CI's Linux x86_64.
 
 ## Compiling one long block — `just rooting-cost-gate`
 
-Prices the **compiler**, not a compiled program. Compiles two fixtures that differ only in the length
-of one list literal (`tests/cost/rooting_block_{small,large}.sprout`, 60 and 120 elements) and bounds
-the **difference per added element**, so the several hundred thousand allocations it takes to compile
-the prelude cancel instead of entering the budget. An absolute number would drift as the compiler
-grows until it guarded nothing.
+Prices the **compiler**, not a compiled program. Compiles three fixtures that differ only in the length
+of one list literal (`tests/cost/rooting_block_{small,large,huge}.sprout`, 60, 120 and 240 elements) and
+bounds the **difference per added element**, so the several hundred thousand allocations it takes to
+compile the prelude cancel instead of entering the budget. An absolute number would drift as the
+compiler grows until it guarded nothing. The third fixture exists so the per-element figure can be
+computed twice and compared — see §A third quadratic below for what one measurement cannot see.
 
 **It measures stage-2, not stage-1, and that is the whole gate.** §Reseed before you diff applies to
 every `bootstrap-from-seed` gate, but it bites hardest here: for the others the subject is a compiled
@@ -389,12 +390,13 @@ after the fix. It surfaced only as the OOM backstop SIGKILLing a parallel test w
 `COMPILE FAILED` with empty stderr: indistinguishable from a real compile error, and nearly filed as
 a regression in an unrelated PR.
 
-**Three arms, one per failure mode.** `map` covers the rooting pass and is sharp and stable: 4076 per
+**Four arms and a growth check.** `map` covers the rooting pass and is sharp and stable: 4076 per
 element before the rooting fix against 300–301 after, reproducing to ±0.3% across builds, and it *rose
 with every element added*, so a return of that quadratic overshoots by 6.3× here and more at any
 larger fixture.
 
-`arena_bytes` covers `ir_lowering`, and it is the only arm that can. The two concatenation forms
+`arena_bytes` is the only arm that can **separate** `ir_lowering`'s two concatenation forms — though not
+the only pass it sees, which §A third quadratic below corrects. The two concatenation forms
 allocate the same *number* of objects and differ only in bytes copied, so no count separates them:
 reintroducing right-nested `++` in `ir_lowering.lower_ops` moves peak RSS from 88 MB to 1907 MB while
 `gc_swept` moves 7650 → **7628** and `map` 300 → **300**. `arena_bytes` moves 249,472 per element →
@@ -419,6 +421,58 @@ available; the byte counter is what closed this, not a memory limit.)
 
 Floors are asserted as well as ceilings, for the reason the render-cost entry gives: if an edit leaves
 the two fixtures the same size, the delta collapses and the ceilings stay green over nothing.
+
+### A third quadratic sat inside a green ceiling for as long as the ceiling existed
+
+The three arms above each name a pass, and between them they missed one. `ast_to_ir` threaded the open
+block's ops as a `List IROp` and appended one op at a time — `list_append(cur_ops, [op])` at 94 sites —
+so every op copied the block emitted so far. Per-element `sprout_obj` measured **10454 / 19643 / 38002**
+at block sizes 120 / 240 / 480: doubling as the block doubles, which is the signature of a quadratic
+whatever the absolute figure is. `map` never moved (303 → 343, flat), because the rooting pass was
+innocent. `arena_bytes` *did* move, and was inside a ceiling of 550,000 the whole time at 397,637.
+
+Two lessons, and the second is the one that cost the time.
+
+**A ceiling measured at one size cannot tell a big constant from a growing one.** 397,637 against
+550,000 reads as 28% of headroom used. It was really a number proportional to block length, so the
+same gate would have gone red on a fixture twice as long and green again on half — a property of the
+fixture, not of the compiler. This is why there is now a **third fixture**
+(`tests/cost/rooting_block_huge.sprout`, 240 elements) and a **growth arm**: the per-element figure is
+computed twice, over 60→120 and over 120→240, and their ratio is bounded at 15/10. Flat is 10/10 and
+quadratic is 20/10. Red-verified at **18/10** on the pre-conversion compiler for both objects and
+bytes, green at 11/10 and 13/10 after.
+
+A shape arm can go vacuous the same way a ceiling can, and the first version of this one did: it only
+tested `-gt`, so a truncated `huge` fixture collapsed its delta to zero, read as *perfectly* flat, and
+passed. Review caught it. Three things close it, and they are the same three every other arm here
+already had. The element counts are **counted from the fixtures** rather than declared in the script,
+so the coupling is not a comment saying "change one, change all three". The doubling is **asserted**
+before any compile, because the ratio only means "cost of doubling the block" while the sizes double.
+And the second delta is **floored** like the first, since a ratio is only as meaningful as its
+numerator. The floors also now run *before* the growth arm: the arm divides by the first-delta figure,
+and a collapsed fixture pair used to reach it as a sentinel that reported the collapse as a quadratic —
+the wrong cause, in the gate whose own entry is about wrong causes.
+
+**An arm attributed to one pass can be driven by another.** This entry said `arena_bytes` "covers
+`ir_lowering`, and it is the only arm that can", which was true of what it *separates* and false of
+what it *sees*: moving the accumulator to `ListBuilder`, with `lower_ops` untouched, took it
+397,637 → 108,996 per element. Objects and bytes both fall for an accumulator fix and only bytes fall
+for a string fix, so the two arms read together are the diagnosis; the failure messages now say so,
+because the byte arm's old advice pointed exclusively at string building and would have misdirected
+anyone who hit it this way.
+
+`sprout_obj` is now budgeted (3000 per element against 1434 observed), and `arena_bytes` retightened to
+250,000 — the old 550,000 was set around a quadratic. The residual growth in the ratio is the compiler's
+FRONT end, which is mildly superlinear on its own (1188 → 1376 → 1736 per element through
+`--phase recheck`); that is a `BACKLOG` entry, and it is what consumes the 15/10 headroom, so find it
+before tightening this arm further.
+
+The fix is `ListBuilder IROp` rather than a hand-kept reversed list, because the file was *already*
+carrying both conventions under one type: `translate_expr` held `cur_ops` in source order while
+`bind_ctor_field_args` held it reversed with the difference recorded only in a comment, and the boundary
+between them reversed the list back and forth. A `wrap` makes the compiler enforce what the comment
+asked for — and the whole conversion is verified by emitting byte-identical IR for all 73 compilable
+fixtures under `examples/`, `tests/smoke_shapes/` and `tests/cost/`.
 
 ## Object-age instrument — `just gc-ageprof-check`
 
