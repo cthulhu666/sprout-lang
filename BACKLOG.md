@@ -1238,8 +1238,8 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
 - [ ] `P2` **`Validation` type + error-accumulating `Applicative`** — the killer app (form-style
   validation collecting *all* errors). Needs its own type (`Valid a | Invalid e`) because a type
   admits one `Applicative` and `Result`'s is fail-fast; the instance requires `Semigroup e`.
-- [ ] `P2` **`Traversable` instances beyond `List`/`Maybe`, and the effectful-mapping ergonomics.**
-  The class, `traverse` and `sequence` landed (spec §8.5); `Vec` and `Result e` have no instance.
+- [ ] `P2` **`Traversable` for `Result e`, and the effectful-mapping ergonomics.**
+  The class, `traverse`, `sequence` and the `Vec` instance landed (spec §8.5); `Result e` has none.
   **The ergonomic gap is the reason to finish it:** `list_map` stays pure by design
   (`docs/effect-polymorphism-policy-v0.md` §5: order unpinned), so mapping an `!{IO}` function is
   spelled `list_reverse(list_fold(\ (acc, x) -> Cons(f(x), acc), Nil, xs))` — correct and ordered,

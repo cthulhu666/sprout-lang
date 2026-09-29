@@ -3259,7 +3259,7 @@ and collecting a single effect over the rebuilt structure.  `t` selects the
 instance; `f` is a method-level constraint (§8.5 *Method-level constraints*), so
 one `Traversable` instance serves every applicative — `traverse` over a `List`
 yields `Maybe (List b)` under `Maybe` and `Result e (List b)` under `Result`.
-Instances: `List`, `Maybe`.
+Instances: `List`, `Maybe`, `Vec`.
 
 **The returned value short-circuits; the work does not.**  Sprout is strictly
 evaluated, and `list_traverse_go` threads an accumulator —
