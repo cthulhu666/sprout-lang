@@ -128,7 +128,10 @@ type module (orphan instances) breaks global coherence and creates dependency-or
   should have been guaranteed.
 
 **Sprout implication:** Coherence decisions are pending, but the Haskell evidence argues for strict
-orphan prohibition.
+orphan prohibition. Sprout rejects overlapping instances unconditionally, which is a *different*
+check — it has no orphan rule at all (`spec-v0.md` §5.6.4). A rule, plus the named-instance escape
+hatch that makes forced global uniqueness liveable and a written freeze on the extension ladder, is
+proposed in `docs/typeclass-policy-v0.md` (non-normative, pending approval).
 
 ---
 
