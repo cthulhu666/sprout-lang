@@ -742,10 +742,19 @@ Point arithmetic in Jacobian coordinates, DER signature parsing, public-key poin
 or `s` zero or out of range, a malformed DER envelope — answers `false` rather than panicking,
 because verification is the security boundary (#337 states this as a requirement).
 
-The surface is one type and three functions, and nothing else is exported. `public_key` (SEC1
-`0x04 || X || Y`) and `public_key_xy` (the COSE/JWK shape WebAuthn hands over) are the only ways
-to build a `PublicKey`, and both validate the curve equation — the `Modulus` pattern of §5.6, one
-boundary check rather than a `Maybe` on every use. `verify` answers `Bool`. Argument order is
+The surface is one type and four functions, and nothing else is exported. `public_key` (SEC1
+`0x04 || X || Y`), `public_key_xy` (the COSE/JWK shape WebAuthn hands over) and `public_key_spki`
+(X.509 SubjectPublicKeyInfo, what `getPublicKey()` and `openssl ec -pubout` emit) are the only
+ways to build a `PublicKey`, and all validate the curve equation — the `Modulus` pattern of §5.6,
+one boundary check rather than a `Maybe` on every use. `verify` answers `Bool`.
+
+`public_key_spki` compares the fixed 26-byte header against a table instead of parsing the
+AlgorithmIdentifier, because nothing in it varies and reading the OIDs would only ever compare
+them to these. It carries no length check of its own: the table's `BIT STRING 66` and
+`public_key`'s 65 pin the total at 91 between them, which mutation testing confirmed by deleting
+the check and watching all 41 cases stay green. Added for #376 — every app that loads a WebAuthn
+credential was writing that header table itself, one chance to get it right and a silent failure
+if it did not. Argument order is
 data-first, context-last, matching `modular.mod_add(left, right, m)` rather than C's
 `(key, message, sig)`. DER decoding and a SEC1 re-encoder were both written and then withdrawn
 from the export list: #337 needs neither, and an exported function no test exercises is a

@@ -41,9 +41,13 @@ let key_a =
       ++ "87d9315798aaa3a5ba01775787ced05eaaf7b4e09fc81d6d1aa546e8365d525d")
 
 # Wycheproof group 1 --- the key every DER-encoding case below is signed under.
-let key_b =
-  key_of("042927b10512bae3eddcfe467828128bad2903269919f7086069c8c4df6c732838"
-      ++ "c7787964eaac00e5921fb1498a60f4606766b3d9685001558d1a974e7341513e")
+# The point is named because the SPKI cases re-wrap it, and a key that verifies
+# group 1's signatures is the only evidence that both paths reach the same key.
+let point_b =
+  "042927b10512bae3eddcfe467828128bad2903269919f7086069c8c4df6c732838"
+    ++ "c7787964eaac00e5921fb1498a60f4606766b3d9685001558d1a974e7341513e"
+
+let key_b = key_of(point_b)
 
 # Wycheproof group 6, whose signature is r=5, s=1.
 let key_c =
@@ -65,6 +69,16 @@ let sig_b =
 
 fn accepted(raw: String) -> Bool =
   match p256.public_key(hex(raw)) with
+  | Just _ -> true
+  | Nothing -> false
+
+# The 26-byte header every P-256 SPKI carries: SEQUENCE { SEQUENCE { id-ecPublicKey,
+# prime256v1 }, BIT STRING 66 bytes, 0 unused }. Taken from `openssl ec -pubout
+# -outform DER` rather than assembled from the ASN.1 by hand.
+let spki_prefix = "3059301306072a8648ce3d020106082a8648ce3d030107034200"
+
+fn spki_accepted(raw: String) -> Bool =
+  match p256.public_key_spki(hex(raw)) with
   | Just _ -> true
   | Nothing -> false
 
@@ -122,6 +136,42 @@ fn main() -> Unit !{IO} =
                         hex("ffffffff00000001000000000000000000000000ffffffffffffffffffffffff")) with
                 | Just _ -> true
                 | Nothing -> false),
+
+    # --- public_key_spki: the X.509 wrapper a browser hands back ---
+    # Not `Just _`: a key that verifies group 1's signatures is what says the SPKI
+    # path reached the same key the SEC1 path does.
+    check_true("public_key_spki yields the key its signatures verify under",
+               match p256.public_key_spki(hex(spki_prefix ++ point_b)) with
+               | Nothing -> false
+               | Just key -> p256.verify(msg_b, hex(sig_b), key)),
+    check_false("public_key_spki rejects empty input", spki_accepted("")),
+    # The bare point with no header: that shape is `public_key`'s.
+    check_false("public_key_spki rejects a bare SEC1 point", spki_accepted(point_b)),
+    # A real `openssl ec -pubout` P-384 key, and a real compressed one below. Both are
+    # refused on size once the header is dropped, so neither pins the header check ---
+    # they are here because they are what a caller actually passes by mistake.
+    check_false("public_key_spki rejects another curve",
+                spki_accepted("3076301006072a8648ce3d020106052b8104002203620004ace2e6b726d9"
+                           ++ "32d7460d3c2976306a5c4a552738961feede805836d9d0f94552b67346d6"
+                           ++ "b8cea5946ac869e42b1bfcea30ace804c9c1f00a3008d75d144292180cd8"
+                           ++ "2180e0ced6c386ecbd911925f5140fbb24a5648656a9d9399bf188aad577")),
+    check_false("public_key_spki rejects a compressed point",
+                spki_accepted("3039301306072a8648ce3d020106082a8648ce3d03010703220003"
+                           ++ "10bac0c90ca11faf654d1ef1e89f24665ab3c5e941214454fcc55fad254956c4")),
+    check_false("public_key_spki rejects a trailing byte",
+                spki_accepted(spki_prefix ++ point_b ++ "00")),
+    # 0x2a -> 0x2b inside id-ecPublicKey: right length, wrong algorithm. Without this
+    # case the length check alone would pass every one of the rejections above.
+    check_false("public_key_spki rejects a changed algorithm OID",
+                spki_accepted("3059301306072b8648ce3d020106082a8648ce3d030107034200" ++ point_b)),
+    # The BIT STRING holds whole octets, so any unused-bits count but 0 is a lie.
+    check_false("public_key_spki rejects a non-zero unused-bits byte",
+                spki_accepted("3059301306072a8648ce3d020106082a8648ce3d030107034201" ++ point_b)),
+    # The header is intact and the last nibble of y is not: the curve check must still run.
+    check_false("public_key_spki rejects an off-curve point",
+                spki_accepted(spki_prefix
+                           ++ "042927b10512bae3eddcfe467828128bad2903269919f7086069c8c4df6c732838"
+                           ++ "c7787964eaac00e5921fb1498a60f4606766b3d9685001558d1a974e7341513f")),
 
     # --- verify: the four group-0 signatures, including one over an empty message ---
     check_true("verify accepts a signature over the empty message",
