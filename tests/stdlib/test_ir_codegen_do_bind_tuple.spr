@@ -9,6 +9,15 @@
 #   T2: nested tuple bind  ((a, b), c) <- nested_io()
 #   T3: wildcard element  (_, b) <- pair_io()
 #   T4: multiple consecutive tuple binds
+#
+# The results are ASSERTED, not just computed. Until 2026-09-29 `main` bound each
+# one and returned (), so the file proved these shapes compile and nothing about
+# what they evaluate to. T2 is the case that needs it: the nested branch of
+# do_bind_tuple_items is the only place where the ops for an inner pattern are
+# spliced into an outer accumulator, so a wrong splice reorders IRGetTupleField
+# against its uses — which changes the answer here and trips nothing else.
+
+import stdlib.test (check_eq, run_suite)
 
 fn pair_io() -> (Int, Int) !{IO} = (3, 7)
 
@@ -49,4 +58,9 @@ fn main() -> Unit !{IO} =
     r2 <- do_bind_tuple_nested()
     r3 <- do_bind_tuple_wildcard()
     r4 <- do_bind_tuple_chain()
-    ()
+    run_suite("ir codegen: do-bind tuple patterns", [
+      check_eq("T1 flat (a, b) <- (3, 7)", r1, 10),
+      check_eq("T2 nested ((a, b), c) <- ((2, 4), 6)", r2, 12),
+      check_eq("T3 wildcard (_, b) <- (3, 7)", r3, 7),
+      check_eq("T4 two consecutive tuple binds", r4, 20)
+    ])

@@ -26,14 +26,40 @@ BIN="${SPROUT_ROOTING_COST_BIN:-$ROOT/build/compile_driver_bin_stage1}"
 STDLIB="${SPROUT_ROOTING_COST_STDLIB:-$ROOT/stdlib}"
 SMALL="$ROOT/tests/cost/rooting_block_small.sprout"
 LARGE="$ROOT/tests/cost/rooting_block_large.sprout"
-SMALL_N=60
-LARGE_N=120
+HUGE="$ROOT/tests/cost/rooting_block_huge.sprout"
+# COUNTED from the fixtures, not declared here. Hardcoding them left the growth arm
+# coupled to the files by nothing but a comment in them ("Change one, change all
+# three"), and a truncated `huge` would have collapsed its delta to zero and read as
+# perfectly flat — the vacuous green that arm exists to prevent, reintroduced by it.
+fixture_n() { grep -c 'int_to_string([0-9]*) ++ "-row"' "$1"; }
+SMALL_N=$(fixture_n "$SMALL")
+LARGE_N=$(fixture_n "$LARGE")
+HUGE_N=$(fixture_n "$HUGE")
 DELTA_N=$((LARGE_N - SMALL_N))
+DELTA2_N=$((HUGE_N - LARGE_N))
+
+# The growth arm divides one per-element figure by the other and calls the result a
+# ratio "at 2x block length", which is only true while the sizes really do double.
+# Asserted rather than assumed, and before any compile, so a resized fixture fails
+# here with its own message instead of somewhere downstream as a strange number.
+if [ "$LARGE_N" -ne $((2 * SMALL_N)) ] || [ "$HUGE_N" -ne $((2 * LARGE_N)) ]; then
+  echo "FAIL: the three cost fixtures must double: got $SMALL_N / $LARGE_N / $HUGE_N" >&2
+  echo "      elements in rooting_block_{small,large,huge}.sprout." >&2
+  echo "      The growth arm reports the ratio of two per-element figures as the cost" >&2
+  echo "      of doubling the block; at other spacings that number means nothing, and" >&2
+  echo "      a shrunken \`huge\` would read as perfectly flat. Resize all three." >&2
+  exit 1
+fi
 
 # Per element added to the literal. Observed 300 map / 7650 swept on 2026-09-28
 # against a stage-2 build, with per-op live sets replaced by one per-block
 # last-use index. Stage-1 scored 6752 swept on the same source — ~13%
 # build-to-build spread, which is why nothing tight is budgeted on it.
+#
+# SWEPT has since fallen to 3259 (2026-09-29, stage-2), and by this gate's own
+# subject rather than by drift: putting ast_to_ir's op accumulator on ListBuilder
+# removed most of the objects, so most of the sweeping went with them. Read the
+# floor against 3259, not 7650 — it is 2.2x below the observation now, not 5.1x.
 #
 # MAP is the sharp one: it was 4076 per element and rising with every element
 # added, so a return of that quadratic overshoots this ceiling by ~6x at this
@@ -71,8 +97,31 @@ MIN_SWEPT_PER_ELEM=1500
 # moved it to 1475716, a 5.9x separation that GROWS with block size. The same run
 # moved sprout_obj by 0.8%, map by 0, gc_swept by -0.3% — so this arm, and only
 # this arm, guards the string-building half.
-MAX_ARENA_BYTES_PER_ELEM=550000
+# It is not ir_lowering's ALONE, though, which the 2026-09-28 note could not know:
+# putting ast_to_ir's op accumulator on ListBuilder moved this arm 397637 -> 108996
+# per element with lower_ops untouched. Objects and bytes both fall for an
+# accumulator fix and only bytes fall for a string fix, so read the two together.
+# Retightened to 250000 against the 108996 now observed; 550000 was set when a
+# quadratic was already inside it.
+MAX_ARENA_BYTES_PER_ELEM=250000
 MIN_ARENA_BYTES_PER_ELEM=50000
+
+# OBJECT COUNT. `map` prices the rooting pass and never moved for ast_to_ir's op
+# accumulator (303 -> 343, flat); `arena_bytes` did move, so the accumulator was
+# never invisible to this gate -- it was invisible to every CEILING, sitting at
+# 397637 inside a budget of 550000. This arm is the one that measures it directly.
+# It was quadratic in block length the whole time the gate was green: per-element
+# sprout_obj measured 10454 / 19643 / 38002 at block sizes 120 / 240 / 480 --
+# doubling with n, which is the signature, not the size.
+#
+# Observed 1434 per element on 2026-09-29 (stage-2) with the accumulator on
+# ListBuilder. The back half is FLAT at 245 per element across those three sizes;
+# the rest is the front end, which is mildly superlinear for unrelated reasons
+# (BACKLOG). A return of the quadratic overshoots this ceiling by 3.5x at THIS
+# fixture size (10454 against 3000) and by more at any larger one -- ceiling-
+# relative, the same convention as the map arm above.
+MAX_SPROUT_OBJ_PER_ELEM=3000
+MIN_SPROUT_OBJ_PER_ELEM=400
 
 if [ ! -x "$BIN" ]; then
   echo "ERROR: $BIN not found; run: just rooting-cost-gate" >&2
@@ -81,7 +130,8 @@ fi
 
 err_small=$(mktemp /tmp/sprout_rooting_cost_s_XXXXXX)
 err_large=$(mktemp /tmp/sprout_rooting_cost_l_XXXXXX)
-trap 'rm -f "$err_small" "$err_large"' EXIT
+err_huge=$(mktemp /tmp/sprout_rooting_cost_h_XXXXXX)
+trap 'rm -f "$err_small" "$err_large" "$err_huge"' EXIT
 
 alloc_line() { grep '^\[sprout alloc\]' "$1" | tail -1; }
 
@@ -127,23 +177,28 @@ compile_one() {
 
 compile_one "$SMALL" "$err_small"
 compile_one "$LARGE" "$err_large"
+compile_one "$HUGE" "$err_huge"
 
-for f in "$err_small" "$err_large"; do
+for f in "$err_small" "$err_large" "$err_huge"; do
   require_unique "$f" map
   require_unique "$f" gc_swept
   require_unique "$f" arena_bytes
+  require_unique "$f" sprout_obj
 done
 
 map_s=$(counter "$err_small" map);        map_l=$(counter "$err_large" map)
 swept_s=$(counter "$err_small" gc_swept); swept_l=$(counter "$err_large" gc_swept)
 sb_s=$(counter "$err_small" arena_bytes);  sb_l=$(counter "$err_large" arena_bytes)
+obj_s=$(counter "$err_small" sprout_obj); obj_l=$(counter "$err_large" sprout_obj)
+obj_h=$(counter "$err_huge" sprout_obj);  sb_h=$(counter "$err_huge" arena_bytes)
 
 # A missing counter means the report did not appear — the runtime lost
 # SPROUT_DEBUG_ALLOC, or its format changed. A blind gate must fail, not pass.
 if [ -z "$map_s" ] || [ -z "$map_l" ] || [ -z "$swept_s" ] || [ -z "$swept_l" ] \
-   || [ -z "$sb_s" ] || [ -z "$sb_l" ]; then
+   || [ -z "$sb_s" ] || [ -z "$sb_l" ] || [ -z "$obj_s" ] || [ -z "$obj_l" ] \
+   || [ -z "$obj_h" ] || [ -z "$sb_h" ]; then
   echo "FAIL: could not read the counters (map='$map_s'/'$map_l' swept='$swept_s'/'$swept_l'" >&2
-  echo "      arena_bytes='$sb_s'/'$sb_l')" >&2
+  echo "      arena_bytes='$sb_s'/'$sb_l' sprout_obj='$obj_s'/'$obj_l')" >&2
   echo "--- small ---" >&2; cat "$err_small" >&2
   echo "--- large ---" >&2; cat "$err_large" >&2
   exit 1
@@ -154,8 +209,18 @@ fi
 map_per=$(( (map_l - map_s) / DELTA_N ))
 swept_per=$(( (swept_l - swept_s) / DELTA_N ))
 sb_per=$(( (sb_l - sb_s) / DELTA_N ))
-echo "==> rooting cost: ${map_per} map, ${swept_per} swept and ${sb_per} arena bytes per element" \
-     "($((map_l - map_s)) / $((swept_l - swept_s)) / $((sb_l - sb_s)) over $DELTA_N added elements)"
+obj_per=$(( (obj_l - obj_s) / DELTA_N ))
+echo "==> rooting cost: ${map_per} map, ${swept_per} swept, ${sb_per} arena bytes and ${obj_per} objects per element" \
+     "($((map_l - map_s)) / $((swept_l - swept_s)) / $((sb_l - sb_s)) / $((obj_l - obj_s)) over $DELTA_N added elements)"
+
+if [ "$map_per" -lt "$MIN_MAP_PER_ELEM" ] || [ "$swept_per" -lt "$MIN_SWEPT_PER_ELEM" ] \
+   || [ "$sb_per" -lt "$MIN_ARENA_BYTES_PER_ELEM" ] || [ "$obj_per" -lt "$MIN_SPROUT_OBJ_PER_ELEM" ]; then
+  echo "FAIL: $map_per map / $swept_per swept / $sb_per arena bytes / $obj_per objects per element is below the floor of" >&2
+  echo "      $MIN_MAP_PER_ELEM / $MIN_SWEPT_PER_ELEM / $MIN_ARENA_BYTES_PER_ELEM / $MIN_SPROUT_OBJ_PER_ELEM. The two fixtures have stopped differing by" >&2
+  echo "      $DELTA_N elements of one list literal, so the ceiling is guarding nothing." >&2
+  echo "      Check what they contain before lowering the floor." >&2
+  exit 1
+fi
 
 over=0
 if [ "$map_per" -gt "$MAX_MAP_PER_ELEM" ]; then
@@ -164,11 +229,73 @@ if [ "$map_per" -gt "$MAX_MAP_PER_ELEM" ]; then
 fi
 if [ "$sb_per" -gt "$MAX_ARENA_BYTES_PER_ELEM" ]; then
   echo "FAIL: $sb_per arena bytes per element exceeds the budget of $MAX_ARENA_BYTES_PER_ELEM" >&2
-  echo "      Bytes, not counts, so suspect string building before rooting: a" >&2
+  echo "      Two causes reach this arm, and the objects arm below tells them apart:" >&2
+  echo "      if objects moved too, it is an op accumulator copying itself (see that" >&2
+  echo "      arm). If objects held FLAT, it is string building before rooting: a" >&2
   echo "      right-nested \`++\` over one block's ops copies the whole remaining" >&2
   echo "      text per op. Collect parts and join once (see lower_ops_parts)." >&2
   over=1
 fi
+if [ "$obj_per" -gt "$MAX_SPROUT_OBJ_PER_ELEM" ]; then
+  echo "FAIL: $obj_per objects per element exceeds the budget of $MAX_SPROUT_OBJ_PER_ELEM" >&2
+  echo "      Counts, not bytes, and not the rooting pass: suspect an op accumulator" >&2
+  echo "      appending to itself. \`list_append(ops, [op])\` per op copies the whole" >&2
+  echo "      block; accumulate into a ListBuilder and build once where the block is" >&2
+  echo "      sealed (see ast_to_ir's cur_ops)." >&2
+  over=1
+fi
+# SHAPE, not level: the same per-element figure measured again over a block twice
+# as long. Quadratic cost per element is proportional to block length, so it
+# DOUBLES between the two measurements; linear cost holds flat. A ceiling cannot
+# make this distinction, which is the whole reason a 550000-byte ceiling sat green
+# over a per-element cost of 397637 that grew with every element added.
+#
+# Measured 2026-09-29 (stage-2): objects 11/10, bytes 13/10. Neither is 10/10
+# because the FRONT end is mildly superlinear for reasons this change does not
+# touch (BACKLOG); measured through --phase recheck, the back half is flat at 245
+# objects per element across 120 / 240 / 480. The same run on the pre-conversion
+# compiler: 18/10 and 18/10.
+#
+# Expressed in tenths to stay in integer arithmetic. 15 sits in the gap between
+# 13 and 18 -- narrower than this gate's other bounds, so if the front end drifts
+# further this arm is the one to re-measure, NOT to relax on sight.
+MAX_GROWTH_TENTHS=15
+
+obj_per2=$(( (obj_h - obj_l) / DELTA2_N ))
+sb_per2=$(( (sb_h - sb_l) / DELTA2_N ))
+
+# FLOOR THE SECOND DELTA, for the reason the first one is floored. A ratio is only
+# as meaningful as its numerator: a `huge` fixture that compiles but does almost no
+# extra work drives obj_per2 toward zero, and a ceiling-only arm reads that as
+# "flat" and passes. Checked here, ahead of the ratio, so the failure names the
+# fixtures rather than appearing as a suspiciously good number.
+if [ "$obj_per2" -lt "$MIN_SPROUT_OBJ_PER_ELEM" ] || [ "$sb_per2" -lt "$MIN_ARENA_BYTES_PER_ELEM" ]; then
+  echo "FAIL: over the SECOND delta ($LARGE_N -> $HUGE_N elements) the cost is" >&2
+  echo "      $obj_per2 objects / $sb_per2 arena bytes per element, below the floor of" >&2
+  echo "      $MIN_SPROUT_OBJ_PER_ELEM / $MIN_ARENA_BYTES_PER_ELEM. The huge fixture has stopped costing more than the large" >&2
+  echo "      one, so the growth ratio below divides by a numerator that is not there" >&2
+  echo "      and would read as perfectly flat. Check the fixture, not the budget." >&2
+  exit 1
+fi
+
+obj_growth=$(( (10 * obj_per2) / obj_per ))
+sb_growth=$(( (10 * sb_per2) / sb_per ))
+echo "==> growth at 2x block length: objects ${obj_per} -> ${obj_per2} (${obj_growth}/10)," \
+     "arena bytes ${sb_per} -> ${sb_per2} (${sb_growth}/10); flat is 10/10, quadratic is 20/10"
+
+if [ "$obj_growth" -gt "$MAX_GROWTH_TENTHS" ] || [ "$sb_growth" -gt "$MAX_GROWTH_TENTHS" ]; then
+  echo "FAIL: per-element cost GREW with block length (objects ${obj_growth}/10, bytes ${sb_growth}/10;" >&2
+  echo "      budget ${MAX_GROWTH_TENTHS}/10). Cost per element that rises with the number of elements is" >&2
+  echo "      quadratic in block length, whatever the absolute figures are -- the" >&2
+  echo "      ceilings above can be green while this is broken, and have been." >&2
+  echo "      Objects grew: an accumulator is being copied per element. Bytes only:" >&2
+  echo "      a string is. Both: the same accumulator, since copying it costs both." >&2
+  echo "      Neither pass looks guilty? Check the FRONT end before the budget --" >&2
+  echo "      --phase recheck splits it out, it is superlinear on its own (BACKLOG)," >&2
+  echo "      and it is what consumes this arm's headroom." >&2
+  over=1
+fi
+
 if [ "$over" -ne 0 ]; then
   echo "      Per-op cost in a single block grew. If it now rises with block size," >&2
   echo "      compiling a generated vector suite will OOM rather than fail visibly." >&2
@@ -176,13 +303,6 @@ if [ "$over" -ne 0 ]; then
   exit 1
 fi
 
-if [ "$map_per" -lt "$MIN_MAP_PER_ELEM" ] || [ "$swept_per" -lt "$MIN_SWEPT_PER_ELEM" ] \
-   || [ "$sb_per" -lt "$MIN_ARENA_BYTES_PER_ELEM" ]; then
-  echo "FAIL: $map_per map / $swept_per swept / $sb_per arena bytes per element is below the floor of" >&2
-  echo "      $MIN_MAP_PER_ELEM / $MIN_SWEPT_PER_ELEM / $MIN_ARENA_BYTES_PER_ELEM. The two fixtures have stopped differing by" >&2
-  echo "      $DELTA_N elements of one list literal, so the ceiling is guarding nothing." >&2
-  echo "      Check what they contain before lowering the floor." >&2
-  exit 1
-fi
+
 
 echo "==> rooting-cost-gate: within budget"
