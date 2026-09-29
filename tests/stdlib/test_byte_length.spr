@@ -64,6 +64,4 @@ fn main() -> Unit !{IO} =
   ])
 
 fn decoded(r: Result bytes.Utf8Error String) -> String =
-  match r with
-  | Ok text -> text
-  | Err _ -> "<not-utf8>"
+  result_with_default("<not-utf8>", r)

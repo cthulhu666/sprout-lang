@@ -1,3 +1,4 @@
+# sprout-ignore-all lint/hand-rolled-combinator: matching through a parameterized type alias is the subject
 # A parameterized type alias expands structurally: the parameter may sit
 # anywhere in the body, the body may be a tuple or an arrow, and an alias may
 # stand on another alias. Before this was fixed only one shape worked — the

@@ -33,9 +33,7 @@ fn use_short_circuit(x: Int) -> Result String Int =
     Ok(v + x)
 
 fn unwrap(r: Result String Int, dflt: Int) -> Int =
-  match r with
-  | Ok n -> n
-  | Err _ -> dflt
+  result_with_default(dflt, r)
 
 fn main() -> Unit !{IO} =
   do

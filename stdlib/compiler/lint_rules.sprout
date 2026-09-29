@@ -7,6 +7,7 @@ import stdlib.compiler.token as token
 import stdlib.compiler.source as source
 import stdlib.string as string
 import stdlib.compiler.desugar_ctx as desugar_ctx
+import stdlib.compiler.lint_pattern as lint_pattern
 
 # AST-based lint findings — line, col, rule id, message. A sibling to
 # formatter.LintIssue's line-based Style checks; this is the "Lint" category,
@@ -63,21 +64,24 @@ fn continues(pat: ast.Pattern, body: ast.Expr) -> Bool =
   is_binding_pattern(pat) && ! is_list_cons_pattern (pat) && is_two_branch_match(body)
 
 # classify: given a match's two branches, decide whether exactly one of them
-# continues the staircase. Returns (terminal_pattern, terminal_body,
-# continuing_body) — the other's body is guaranteed to itself be a 2-branch
-# MatchExpr by `continues`. The terminal pattern is returned too so callers
-# can tell whether that branch's body depends on its own (failing) binding —
-# `let..else` can't express that (see terminal_needs_own_payload below).
-fn classify(b1: ast.MatchBranch, b2: ast.MatchBranch) -> Maybe(ast.Pattern, ast.Expr, ast.Expr) =
+# continues the staircase. Returns both patterns and both bodies — the terminal
+# pattern so callers can tell whether its body needs its own failing binding
+# (terminal_needs_own_payload), the continuing one because it binds the name the
+# nested match's scrutinee reads.
+fn classify(b1: ast.MatchBranch,
+            b2: ast.MatchBranch) -> Maybe(ast.Pattern, ast.Expr, ast.Pattern, ast.Expr) =
   match b1 with
   | ast.MatchBranch p1 body1 ->
       match b2 with
       | ast.MatchBranch p2 body2 ->
           let c1 = continues(p1, body1)
               c2 = continues(p2, body2)
-          in if c1 && ! c2 then Just((p2, body2, body1))
-             else if c2 && ! c1 then Just((p1, body1, body2))
+          in if c1 && ! c2 then Just((p2, body2, p1, body1))
+             else if c2 && ! c1 then Just((p1, body1, p2, body2))
              else Nothing
+
+fn param_names(params: List ast.Param) -> List String =
+  list_map(param_name, params)
 
 fn name_in_list(name: String, names: List String) -> Bool =
   match names with
@@ -168,77 +172,91 @@ fn terminal_needs_own_payload(pat: ast.Pattern, body: ast.Expr) -> Bool =
 # desugar_expr_no_ctx_i so no shape is silently skipped (a missed variant here
 # is a silent false negative, the worst failure mode for a coverage tool).
 
-fn walk_expr(e: ast.Expr) -> List LintFinding =
+fn walk_expr(bound: List String, e: ast.Expr) -> List LintFinding =
   match e with
-  | ast.MatchExpr scrut branches pos -> walk_match(scrut, branches, pos)
-  | ast.IfExpr cond then_ else_ _ ->
-      list_append(walk_expr(cond), list_append(walk_expr(then_), walk_expr(else_)))
+  | ast.MatchExpr scrut branches pos ->
+      list_append(combinator_findings(bound, e, pos), walk_match(bound, scrut, branches, pos))
+  | ast.IfExpr cond then_ else_ pos ->
+      list_append(combinator_findings(bound, e, pos),
+        list_append(walk_expr(bound, cond),
+                    list_append(walk_expr(bound, then_), walk_expr(bound, else_))))
   | ast.CallExpr callee args _ ->
       list_append(multi_line_lambda_findings(args),
-                  list_append(walk_expr(callee), walk_exprs(args)))
-  | ast.TupleExpr elems _ -> walk_exprs(elems)
+                  list_append(walk_expr(bound, callee), walk_exprs(bound, args)))
+  | ast.TupleExpr elems _ -> walk_exprs(bound, elems)
   | ast.BinaryExpr _ left right _ ->
-      list_append(walk_expr(left), walk_expr(right))
-  | ast.UnaryExpr _ operand _ -> walk_expr(operand)
-  | ast.LambdaExpr _ body _ -> walk_expr(body)
-  | ast.DoExpr steps _ -> walk_do_steps(steps)
-  | ast.RecordExpr _ fields _ -> walk_record_fields(fields)
-  | ast.GetFieldExpr rec_expr _ _ -> walk_expr(rec_expr)
-  | ast.RecordUpdateExpr base fields _ -> list_append(walk_expr(base), walk_record_fields(fields))
+      list_append(walk_expr(bound, left), walk_expr(bound, right))
+  | ast.UnaryExpr _ operand _ -> walk_expr(bound, operand)
+  | ast.LambdaExpr params body _ -> walk_expr(list_append(param_names(params), bound), body)
+  | ast.DoExpr steps _ -> walk_do_steps(bound, steps)
+  | ast.RecordExpr _ fields _ -> walk_record_fields(bound, fields)
+  | ast.GetFieldExpr rec_expr _ _ -> walk_expr(bound, rec_expr)
+  | ast.RecordUpdateExpr base fields _ ->
+      list_append(walk_expr(bound, base), walk_record_fields(bound, fields))
   | ast.IntRangeExpr lo hi _ ->
-      list_append(walk_expr(lo), walk_expr(hi))
-  | ast.StringTemplateExpr parts _ -> walk_template_parts(parts)
-  | ast.ComprehensionExpr elem gens _ -> list_append(walk_expr(elem), walk_comprehension_gens(gens))
+      list_append(walk_expr(bound, lo), walk_expr(bound, hi))
+  | ast.StringTemplateExpr parts _ -> walk_template_parts(bound, parts)
+  | ast.ComprehensionExpr elem gens _ -> walk_comprehension(bound, elem, gens)
   | _ -> Nil  # leaves: Var/Int/Float/Bool/String/Char/Unit — no sub-expressions
 
-fn walk_comprehension_gens(gens: List ast.ComprehensionGen) -> List LintFinding =
+# A generator's pattern scopes over its own guards, the generators after it and
+# the element expression, so the environment grows left to right.
+fn walk_comprehension(bound: List String, elem: ast.Expr,
+                      gens: List ast.ComprehensionGen) -> List LintFinding =
   match gens with
-  | Nil -> Nil
-  | Cons g rest -> list_append(walk_comprehension_gen(g), walk_comprehension_gens(rest))
+  | Nil -> walk_expr(bound, elem)
+  | Cons g rest ->
+      match g with
+      | ast.ComprehensionGen pat src guards ->
+          let inner = list_append(ast.pattern_names(pat), bound)
+          in list_append(walk_expr(bound, src),
+               list_append(walk_exprs(inner, guards), walk_comprehension(inner, elem, rest)))
 
-fn walk_comprehension_gen(g: ast.ComprehensionGen) -> List LintFinding =
-  match g with
-  | ast.ComprehensionGen _ src guards -> list_append(walk_expr(src), walk_exprs(guards))
-
-fn walk_exprs(exprs: List ast.Expr) -> List LintFinding =
+fn walk_exprs(bound: List String, exprs: List ast.Expr) -> List LintFinding =
   match exprs with
   | Nil -> Nil
-  | Cons e rest -> list_append(walk_expr(e), walk_exprs(rest))
+  | Cons e rest -> list_append(walk_expr(bound, e), walk_exprs(bound, rest))
 
-fn walk_do_step(s: ast.DoStep) -> List LintFinding =
-  match s with
-  | ast.DoBindStep _ value -> walk_expr(value)
-  | ast.DoLetStep _ value -> walk_expr(value)
-  | ast.DoExprStep value -> walk_expr(value)
-
-fn walk_do_steps(steps: List ast.DoStep) -> List LintFinding =
+# A step's binder scopes over the steps after it, never over its own value.
+fn walk_do_steps(bound: List String, steps: List ast.DoStep) -> List LintFinding =
   match steps with
   | Nil -> Nil
-  | Cons s rest -> list_append(walk_do_step(s), walk_do_steps(rest))
+  | Cons s rest ->
+      match s with
+      | ast.DoBindStep pat value ->
+          list_append(walk_expr(bound, value),
+                      walk_do_steps(list_append(ast.pattern_names(pat), bound), rest))
+      | ast.DoLetStep n value ->
+          list_append(walk_expr(bound, value), walk_do_steps(Cons(n, bound), rest))
+      | ast.DoExprStep value ->
+          list_append(walk_expr(bound, value), walk_do_steps(bound, rest))
 
-fn walk_record_fields(fields: List ast.RecordField) -> List LintFinding =
+fn walk_record_fields(bound: List String, fields: List ast.RecordField) -> List LintFinding =
   match fields with
   | Nil -> Nil
   | Cons f rest ->
       match f with
-      | ast.RecordField _ value -> list_append(walk_expr(value), walk_record_fields(rest))
+      | ast.RecordField _ value ->
+          list_append(walk_expr(bound, value), walk_record_fields(bound, rest))
 
-fn walk_template_parts(parts: List ast.TemplateExprPart) -> List LintFinding =
+fn walk_template_parts(bound: List String,
+                       parts: List ast.TemplateExprPart) -> List LintFinding =
   match parts with
   | Nil -> Nil
   | Cons p rest ->
       match p with
-      | ast.LitPart _ -> walk_template_parts(rest)
-      | ast.InterpPart e -> list_append(walk_expr(e), walk_template_parts(rest))
+      | ast.LitPart _ -> walk_template_parts(bound, rest)
+      | ast.InterpPart e ->
+          list_append(walk_expr(bound, e), walk_template_parts(bound, rest))
 
-fn walk_branch(b: ast.MatchBranch) -> List LintFinding =
+fn walk_branch(bound: List String, b: ast.MatchBranch) -> List LintFinding =
   match b with
-  | ast.MatchBranch _ body -> walk_expr(body)
+  | ast.MatchBranch pat body -> walk_expr(list_append(ast.pattern_names(pat), bound), body)
 
-fn walk_branches(branches: List ast.MatchBranch) -> List LintFinding =
+fn walk_branches(bound: List String, branches: List ast.MatchBranch) -> List LintFinding =
   match branches with
   | Nil -> Nil
-  | Cons b rest -> list_append(walk_branch(b), walk_branches(rest))
+  | Cons b rest -> list_append(walk_branch(bound, b), walk_branches(bound, rest))
 
 # Minimum chain length (number of nested matches, including the root) before
 # a chain is reported. The docs/idiomatic-sprout.md example is itself only
@@ -254,33 +272,43 @@ let min_staircase_depth = 3
 # non-chain subexpression along the way (the scrutinee at each link, each
 # link's terminal body) but never a finding for THIS node — the caller
 # decides that once it knows the total depth and blocked status.
-fn walk_chain(branches: List ast.MatchBranch, scrut: ast.Expr) -> (Int, Bool, List LintFinding) =
+fn walk_chain(bound: List String, branches: List ast.MatchBranch,
+              scrut: ast.Expr) -> (Int, Bool, List LintFinding) =
   match branches with
   | [b1, b2] ->
       (match classify(b1, b2) with
-       | Just (terminal_pat, terminal_body, continuing_match) ->
-           (match walk_chain_expr(continuing_match) with
+       | Just (terminal_pat, terminal_body, continuing_pat, continuing_match) ->
+           (match walk_chain_expr(list_append(ast.pattern_names(continuing_pat), bound),
+                                  continuing_match) with
             | (inner_depth, inner_blocked, inner_findings) ->
                 (1 + inner_depth,
                   inner_blocked || terminal_needs_own_payload(terminal_pat, terminal_body),
-                  list_append(walk_expr(scrut), list_append(walk_expr(terminal_body), inner_findings))))
+                  list_append(walk_expr(bound, scrut),
+                    list_append(walk_expr(list_append(ast.pattern_names(terminal_pat), bound),
+                                          terminal_body),
+                                inner_findings))))
        | Nothing ->
            # Neither branch continues, so this match is the chain's own
            # trailing leaf, not a link that gets rewritten into an else-
            # fallback. Its arms stay ordinary match arms either way, free to
            # use their own bindings — hence `blocked = false` here even if
            # b1/b2 reference their own payload.
-           (1, false, list_append(walk_expr(scrut), list_append(walk_branch(b1), walk_branch(b2)))))
-  | _ -> (1, false, list_append(walk_expr(scrut), walk_branches(branches)))
+           (1, false, list_append(walk_expr(bound, scrut),
+                        list_append(walk_branch(bound, b1), walk_branch(bound, b2)))))
+  | _ -> (1, false, list_append(walk_expr(bound, scrut), walk_branches(bound, branches)))
 
 # walk_chain_expr: like walk_chain, but for an expression that may or may not
-# itself be a match — a chain link's continuing body is always a MatchExpr
-# (guaranteed by `continues`), but this is also the fallback used when the
-# generic walker isn't already inside a chain.
-fn walk_chain_expr(e: ast.Expr) -> (Int, Bool, List LintFinding) =
+# itself be a match. It is also where a chain link's OWN combinator finding is
+# collected: `walk_chain` recurses through here rather than `walk_expr`, so until
+# this arm offered the node to the rule, no combinator nested in a 2-branch chain
+# was ever checked.
+fn walk_chain_expr(bound: List String, e: ast.Expr) -> (Int, Bool, List LintFinding) =
   match e with
-  | ast.MatchExpr scrut branches _ -> walk_chain(branches, scrut)
-  | _ -> (1, false, walk_expr(e))
+  | ast.MatchExpr scrut branches pos ->
+      (match walk_chain(bound, branches, scrut) with
+       | (depth, blocked, findings) ->
+           (depth, blocked, list_append(combinator_findings(bound, e, pos), findings)))
+  | _ -> (1, false, walk_expr(bound, e))
 
 # Both shapes have a concrete fix in let..else, so both name it. A chain whose
 # terminal recovers using the *failing* pattern's payload needs the binding-else
@@ -291,8 +319,9 @@ fn staircase_message(blocked: Bool) -> String =
   then "nested match can be flattened with let..else — the failing case carries a payload, so use a binding-else `else <pat> -> ...` (docs/idiomatic-sprout.md)"
   else "nested match can be flattened with let..else (docs/idiomatic-sprout.md)"
 
-fn walk_match(scrut: ast.Expr, branches: List ast.MatchBranch, pos: source.SourcePos) -> List LintFinding =
-  match walk_chain(branches, scrut) with
+fn walk_match(bound: List String, scrut: ast.Expr, branches: List ast.MatchBranch,
+              pos: source.SourcePos) -> List LintFinding =
+  match walk_chain(bound, branches, scrut) with
   | (depth, blocked, findings) ->
       if depth >= min_staircase_depth
       then Cons(mk_finding(pos, "staircase-of-doom", staircase_message(blocked)), findings)
@@ -911,12 +940,13 @@ fn walk_instance_methods(methods: List ast.InstanceMethodImpl) -> List LintFindi
   | Nil -> Nil
   | Cons m rest ->
       match m with
-      | ast.InstanceMethodImpl _ _ _ _ _ body -> list_append(walk_expr(body), walk_instance_methods(rest))
+      | ast.InstanceMethodImpl _ params _ _ _ body ->
+          list_append(walk_expr(param_names(params), body), walk_instance_methods(rest))
 
 fn walk_decl(d: ast.Decl) -> List LintFinding =
   match d with
-  | ast.FnDecl _ _ _ _ _ body _ -> walk_expr(body)
-  | ast.LetDecl _ body _ _ -> walk_expr(body)
+  | ast.FnDecl _ params _ _ _ body _ -> walk_expr(param_names(params), body)
+  | ast.LetDecl _ body _ _ -> walk_expr(Nil, body)
   | ast.InstanceDecl _ _ methods _ -> walk_instance_methods(methods)
   | _ -> Nil  # ExternFnDecl/TypeDecl/RecordDecl/ClassDecl/AliasDecl/WrapDecl: no expr body
 
@@ -1023,6 +1053,408 @@ fn brace_body_scan(tokens: Vec token.Token, i: Int, n: Int, acc: List LintFindin
 
 fn brace_body_findings(tokens: Vec token.Token) -> List LintFinding =
   brace_body_scan(tokens, 0, vec_length(tokens), Nil)
+
+# ---------------------------------------------------------------------------
+# Combinator patterns
+#
+# A rule whose pattern is a real definition cannot suggest a shape the function
+# no longer has (docs/lint-rules-v0.md §5). The definitions are carried here as
+# TEXT rather than read from `stdlib/prelude.sprout`, because the linter has to
+# work in repos that have no prelude on disk; reading it would make this rule
+# fire only inside sprout-lang.
+#
+# That is a second copy, so the property §5 got from having one copy is now a
+# test's job: `tests/stdlib/compiler/test_lint_combinators.spr` derives from the
+# real prelude and requires the two to be alpha-equal. Keep them in sync there,
+# not by eye.
+
+# Name, holes, pattern. The holes are in DECLARATION order and a reconstructed
+# call fills its arguments from them positionally, so permuting them still
+# matches and still typechecks while swapping the caller's arguments. Do not
+# reorder without changing what reads `combinator_holes`.
+export type Combinator (..) =
+  | Combinator String (List String) ast.Expr
+
+export fn combinator_name(c: Combinator) -> String =
+  match c with
+  | Combinator n _ _ -> n
+
+export fn combinator_holes(c: Combinator) -> List String =
+  match c with
+  | Combinator _ hs _ -> hs
+
+export fn combinator_pattern(c: Combinator) -> ast.Expr =
+  match c with
+  | Combinator _ _ e -> e
+
+export let combinator_names: List String =
+  ["result_with_default", "result_from_maybe", "guard", "maybe_with_default"]
+
+# Verbatim from `stdlib/prelude.sprout`. Bodies only — the doc comments are left
+# off because nothing derives from them.
+let combinator_source: String = `export fn result_with_default(fallback: a, r: Result e a) -> a =
+  match r with
+  | Ok x -> x
+  | Err _ -> fallback
+
+export fn result_from_maybe(err: e, value: Maybe a) -> Result e a =
+  match value with
+  | Nothing -> Err(err)
+  | Just unwrapped -> Ok(unwrapped)
+
+export fn guard(condition: Bool, err: e) -> Result e Unit =
+  if condition then Ok(()) else Err(err)
+
+export fn maybe_with_default(fallback: a, m: Maybe a) -> a =
+  match m with
+  | Just x -> x
+  | Nothing -> fallback
+`
+
+fn param_name(p: ast.Param) -> String =
+  match p with
+  | ast.Param n _ _ -> n
+
+fn decl_is_fn_named(name: String, d: ast.Decl) -> Bool =
+  match d with
+  | ast.FnDecl n _ _ _ _ _ _ -> n == name
+  | _ -> false
+
+# §5.3: "one expression" is vacuous, since every body is one. `where` and
+# `let..in` desugar to a MatchExpr too (parser.sprout: build_let_binding_match),
+# so the branch patterns are what tells them apart — a let body binds with a
+# variable pattern where a real combinator dispatches on a constructor.
+fn constructor_headed(branches: List ast.MatchBranch) -> Bool =
+  match branches with
+  | [] -> false
+  | [ast.MatchBranch pat _ | rest] ->
+      match pat with
+      | ast.ConstructorPattern _ _ _ -> if list_is_empty(rest) then true else constructor_headed(rest)
+      | _ -> false
+
+# Binders the branch patterns introduce. Patterns are small and closed, so this
+# walk is complete over them — unlike the branch BODIES, which v0 does not
+# inspect (§5.3): a hole shadowed by a lambda inside a body is not reported here.
+# The matcher still treats such an occurrence as the binder's, not the hole's
+# (`lint_pattern.is_hole`), so the gap costs a missed authoring warning and not
+# a wrong match.
+# Every variant is named rather than defaulted: a pattern variant added later
+# would silently report no binders, and a missed binder is a missed authoring
+# warning, not a compile error (guidelines.md §2a).
+fn pattern_binders(pat: ast.Pattern) -> List String =
+  match pat with
+  | ast.VarPattern n _ -> [n]
+  | ast.TuplePattern subs _ -> pattern_binders_all(subs)
+  | ast.ConstructorPattern _ subs _ -> pattern_binders_all(subs)
+  | ast.WildcardPattern _ -> []
+  | ast.IntPattern _ _ -> []
+  | ast.BoolPattern _ _ -> []
+  | ast.StringPattern _ _ -> []
+  | ast.CharPattern _ _ -> []
+  | ast.UnitPattern _ -> []
+
+fn pattern_binders_all(pats: List ast.Pattern) -> List String =
+  list_flat_map(pattern_binders, pats)
+
+fn branch_binders(branches: List ast.MatchBranch) -> List String =
+  list_flat_map(branch_binders_one, branches)
+
+fn branch_binders_one(b: ast.MatchBranch) -> List String =
+  match b with
+  | ast.MatchBranch pat _ -> pattern_binders(pat)
+
+fn admissible_body(name: String, body: ast.Expr) -> Result String (List String) =
+  match body with
+  | ast.IfExpr _ _ _ _ -> Ok([])
+  | ast.MatchExpr _ branches _ ->
+      if constructor_headed(branches) then Ok(branch_binders(branches))
+      else Err(name ++ ": every match branch must be constructor-headed; a `let`, `where` or "
+               ++ "single-arm body derives to a pattern that matches only itself")
+  | _ -> Err(name ++ ": body must be one `match` or one `if` — a `do` block is not derivable")
+
+# A hole shadowed by a branch binder would name two different subterms.
+fn shadowed_hole(holes: List String, binders: List String) -> Maybe String =
+  find(\ (h: String) -> name_in_list(h, binders), holes)
+
+fn derive_one(name: String, decls: List ast.Decl) -> Result String Combinator =
+  match find(\ (d: ast.Decl) -> decl_is_fn_named(name, d), decls) with
+  | Nothing -> Err(name ++ ": not defined in the combinator source")
+  | Just (ast.FnDecl _ params _ _ _ body _) ->
+      let holes = list_map(param_name, params)
+          Ok binders = admissible_body(name, body) else Err msg -> Err(msg)
+      in match shadowed_hole(holes, binders) with
+         | Just h -> Err(name ++ ": parameter `" ++ h ++ "` is rebound by a branch pattern, "
+                         ++ "so the hole names two different subterms")
+         | Nothing -> Ok(Combinator(name, holes, body))
+  | Just _ -> Err(name ++ ": is not a function declaration")
+
+fn derive_each(names: List String, decls: List ast.Decl) -> Result String (List Combinator) =
+  match names with
+  | [] -> Ok([])
+  | [n | rest] ->
+      let Ok c = derive_one(n, decls) else Err msg -> Err(msg)
+          Ok cs = derive_each(rest, decls) else Err msg -> Err(msg)
+      in Ok(Cons(c, cs))
+
+# Total, so a caller can test a rejection without taking the process down; the
+# startup binding below is what turns a rejection into a panic.
+export fn derive_combinators(names: List String, src: String)
+    -> Result String (List Combinator) =
+  let Ok toks = lexer.tokenize(src)
+        else Err(token.TokenizeError msg _) -> Err("combinator source does not lex: " ++ msg)
+      Ok(ast.Program decls _) = parser.parse_program(toks)
+        else Err(parser.ParseError msg _) -> Err("combinator source does not parse: " ++ msg)
+  in derive_each(names, decls)
+
+# `List Combinator`, derived once per process at module init — the reason
+# `just lint` can batch paths instead of paying this per file (§10). It becomes
+# a permanent GC root, and unlike this file's other globals it is an object
+# graph rather than a flat string, so collection marks it whole.
+# Unannotated because a top-level `let` annotation resolves only prelude types;
+# docs/idiomatic-sprout.md says to leave it off and check the inferred type,
+# which the test does by consuming it as `List Combinator`.
+# The `panic` reports an authoring bug in the text above and nothing else — and
+# is itself the shape §6 refuses to rewrite: hoisted, it would fire always.
+export let combinator_patterns =
+  match derive_combinators(combinator_names, combinator_source) with
+  | Ok cs -> cs
+  | Err msg -> panic("lint_rules: " ++ msg)
+
+# ---------------------------------------------------------------------------
+# Rule: hand-rolled-combinator
+#
+# A `match` that reimplements one of the combinators above. `let..else` desugars
+# to the same MatchExpr (parser.sprout: build_let_binding_match), so one rule
+# covers both spellings — and for THIS rule the desugared form is a true
+# positive, which is why `drop_desugared_matches` must stay keyed on
+# `staircase-of-doom` and not be generalised over rule ids.
+
+let combinator_rule_id: String = "hand-rolled-combinator"
+
+fn captured_exprs(holes: List String, caps: List lint_pattern.Capture) -> List ast.Expr =
+  list_filter_map(\ (h: String) -> lint_pattern.capture_of(h, caps), holes)
+
+# A match evaluates its scrutinee and an `if` its condition in BOTH spellings, so
+# a hole there cannot make the rewrite eager however expensive it is; only a hole
+# in a branch body can. Holding a scrutinee to the same test as a fallback once
+# mis-scored 139 of 165 corpus findings (docs/lint-rules-v0.md §12).
+fn conditional_holes(pattern: ast.Expr, holes: List String) -> List String =
+  list_filter(\ (h: String) -> ! name_in_list (h, unconditional_holes(pattern, holes)), holes)
+
+# Only the two shapes `admissible_body` lets through can arrive. A third would
+# otherwise default to "nothing is unconditional" and quietly put the note back
+# on every scrutinee, so it fails loudly instead (guidelines.md §2a).
+fn unconditional_holes(pattern: ast.Expr, holes: List String) -> List String =
+  match pattern with
+  | ast.MatchExpr scrut _ _ -> holes_used_in(scrut, holes)
+  | ast.IfExpr cond _ _ _ -> holes_used_in(cond, holes)
+  | _ -> panic("lint_rules: derived a pattern that is neither a match nor an if (internal error)")
+
+fn holes_used_in(e: ast.Expr, holes: List String) -> List String =
+  list_filter(\ (h: String) -> expr_uses_any([h], e), holes)
+
+# §6 and §7.4 as one test: report only a rewrite that costs nothing. Sprout is
+# strict, so a call builds every argument while the match builds only the branch
+# it takes; and a wrapper handed to a call is boxed, while a match on the call
+# that produced it takes an unboxed worker. A rewrite failing either is not a
+# tidier equivalent, so it is not advice.
+fn rewrite_is_free(bound: List String, c: Combinator, subject: ast.Expr,
+                   caps: List lint_pattern.Capture) -> Bool =
+  all(\ (e: ast.Expr) -> free_to_hoist(bound, e),
+      captured_exprs(conditional_holes(combinator_pattern(c), combinator_holes(c)), caps))
+  && scrutinee_is_in_hand(bound, combinator_pattern(c), subject)
+
+# Cost-free to evaluate early: no work and no allocation. A `VarExpr` is free only
+# when it names a LOCAL binding — a top-level function read as a value costs a
+# closure and a nullary constructor an interned-ctor call, both spelled like a
+# variable. Every variant is named so a new one cannot silently join the list.
+fn free_to_hoist(bound: List String, e: ast.Expr) -> Bool =
+  match e with
+  | ast.VarExpr n _ -> name_in_list(root_segment(n), bound)
+  | ast.IntExpr _ _ -> true
+  | ast.FloatExpr _ _ -> true
+  | ast.BoolExpr _ _ -> true
+  | ast.StringExpr _ _ -> true
+  | ast.CharExpr _ _ -> true
+  | ast.UnitExpr _ -> true
+  | ast.StringTemplateExpr _ _ -> false
+  | ast.TupleExpr _ _ -> false
+  | ast.IfExpr _ _ _ _ -> false
+  | ast.MatchExpr _ _ _ -> false
+  | ast.CallExpr _ _ _ -> false
+  | ast.LambdaExpr _ _ _ -> false
+  | ast.BinaryExpr _ _ _ _ -> false
+  | ast.UnaryExpr _ _ _ -> false
+  | ast.IntRangeExpr _ _ _ -> false
+  | ast.DoExpr _ _ -> false
+  | ast.RecordExpr _ _ _ -> false
+  | ast.GetFieldExpr _ _ _ -> false
+  | ast.RecordUpdateExpr _ _ _ -> false
+  | ast.ComprehensionExpr _ _ _ -> false
+
+# A `guard`-shaped pattern consumes a Bool, which is an immediate — passing it to
+# the call boxes nothing, so a computed condition is free (checked in IR). Only a
+# `match` consumes a wrapper, and there the subject's scrutinee must already hold
+# one: a call scrutinee would lose the callee's worker.
+fn scrutinee_is_in_hand(bound: List String, pattern: ast.Expr, subject: ast.Expr) -> Bool =
+  match pattern with
+  | ast.IfExpr _ _ _ _ -> true
+  | ast.MatchExpr _ _ _ ->
+      let ast.MatchExpr scrut _ _ = subject else false
+      in free_to_hoist(bound, scrut)
+  | _ -> panic("lint_rules: derived a pattern that is neither a match nor an if (internal error)")
+
+# `cfg.cached` and `string.trim` are both one dotted `VarExpr` (§4A). The root
+# segment separates them: a field read on a local binding is free, a module-
+# qualified function is a closure the rewrite would build on every call.
+fn root_segment(name: String) -> String =
+  let Just(root, _) = string.split_once(name, ".") else name
+  in root
+
+# A combinator name bound locally — a parameter, a `let`, a lambda argument —
+# resolves to the shadow rather than the prelude, so the rewrite would not
+# typecheck. The file-level guards cannot see this; only the walk's scope can.
+fn combinator_finding(bound: List String, c: Combinator, e: ast.Expr,
+                      pos: source.SourcePos) -> Maybe LintFinding =
+  if name_in_list(combinator_name(c), bound) then Nothing
+  else
+    let Just caps = lint_pattern.match_expr(combinator_pattern(c), e, combinator_holes(c))
+          else Nothing
+    in if rewrite_is_free(bound, c, e, caps)
+       then Just(mk_finding(pos, combinator_rule_id,
+                            "this is `" ++ combinator_name(c) ++ "(...)`"))
+       else Nothing
+
+# At most one combinator can match a given node — they are structurally
+# distinct — but nothing depends on that, so two would simply both report.
+fn combinator_findings(bound: List String, e: ast.Expr,
+                       pos: source.SourcePos) -> List LintFinding =
+  list_filter_map(\ (c: Combinator) -> combinator_finding(bound, c, e, pos), combinator_patterns)
+
+# §7 guards 2 and 3, both file-level and neither visible from the AST:
+# `ast_findings` parses `source.strip_headers(src)`, so the imports and the
+# `no_prelude` directive are gone before the AST exists.
+#
+# A file that shadows ANY combinator loses the whole rule, not just that one.
+# Conservative on purpose, and it subsumes guard 1 for free: `prelude.sprout`
+# defines all four, so the rule never fires on the definitions themselves.
+fn combinator_rule_applies(src: String, decls: List ast.Decl) -> Bool =
+  if opts_out_of_prelude(src) then false
+  else if defines_a_combinator(decls) then false
+  else if defines_a_wrapper_type(decls) then false
+  else if redefines_a_matched_ctor(decls) then false
+  else ! imports_a_combinator (src)
+
+# Shadowing the combinator is not the only way to break the suggestion: a file
+# redefining `Maybe` or `Result` shadows the type the combinators are declared
+# over, so the rewrite does not typecheck ("Maybe vs Maybe"). 10 corpus files do
+# this, and `test_ir_codegen_unary_arith.spr` carries a matching shape too.
+# The types the four combinators in `combinator_source` are declared over. NOT
+# derived from it, so a fifth combinator over a new wrapper needs an entry here as
+# well as in `combinator_names` — the one place this rule's "one list entry" goal
+# leaks (docs/lint-rules-v0.md §14 Q4).
+let wrapper_type_names: List String = ["Maybe", "Result"]
+
+fn defines_a_wrapper_type(decls: List ast.Decl) -> Bool =
+  any(\ (d: ast.Decl) -> name_in_list(decl_declared_type_name(d), wrapper_type_names), decls)
+
+fn all_pattern_ctor_names(cs: List Combinator) -> List String =
+  match cs with
+  | Nil -> Nil
+  | Cons c rest -> list_append(pattern_ctor_names(c), all_pattern_ctor_names(rest))
+
+fn pattern_ctor_names(c: Combinator) -> List String =
+  match combinator_pattern(c) with
+  | ast.MatchExpr _ branches _ -> list_filter_map(branch_ctor_name, branches)
+  | _ -> Nil  # the `guard` shape is an `if`: it dispatches on no constructor
+
+fn branch_ctor_name(b: ast.MatchBranch) -> Maybe String =
+  match b with
+  | ast.MatchBranch p _ -> pattern_ctor_name(p)
+
+# Every variant is named (guidelines.md §2a): a catch-all here answers "names no
+# constructor", which a future pattern form that DOES name one would need to
+# override — and getting it wrong drops a name from the guard silently.
+fn pattern_ctor_name(p: ast.Pattern) -> Maybe String =
+  match p with
+  | ast.ConstructorPattern n _ _ -> Just(n)
+  | ast.WildcardPattern _ -> Nothing
+  | ast.VarPattern _ _ -> Nothing
+  | ast.IntPattern _ _ -> Nothing
+  | ast.BoolPattern _ _ -> Nothing
+  | ast.StringPattern _ _ -> Nothing
+  | ast.CharPattern _ _ -> Nothing
+  | ast.UnitPattern _ -> Nothing
+  | ast.TuplePattern _ _ -> Nothing
+
+# The constructor names the derived patterns dispatch on. Derived rather than
+# listed again, so a fifth combinator over a new wrapper needs no entry here —
+# half of the coupling §14 Q4 records.
+let matched_ctor_names: List String = all_pattern_ctor_names(combinator_patterns)
+
+# The other half of the wrapper guard, and the one that matters: `lint_pattern`
+# dispatches on CONSTRUCTOR names, so a type reusing `Just`/`Ok` is matched
+# however its own name is spelled, and `defines_a_wrapper_type` never sees it.
+fn redefines_a_matched_ctor(decls: List ast.Decl) -> Bool =
+  any(\ (d: ast.Decl) -> any_name_in(decl_value_names(d), matched_ctor_names), decls)
+
+fn decl_value_names(d: ast.Decl) -> List String =
+  list_map(scope_name, ast.decl_value_scopes(d))
+
+fn scope_name(ns: (String, ast.NameScope)) -> String =
+  match ns with
+  | (n, _) -> n
+
+fn any_name_in(names: List String, allowed: List String) -> Bool =
+  any(\ (n: String) -> name_in_list(n, allowed), names)
+
+# Four of the nine declaration forms introduce a type name. Every variant is named
+# rather than defaulted: here the default runs the WRONG way — an unrecognised
+# declaration would report no type, leaving the rule enabled and free to suggest a
+# rewrite that does not typecheck, which is the bug this guard exists to stop.
+fn decl_declared_type_name(d: ast.Decl) -> String =
+  match d with
+  | ast.TypeDecl n _ _ _ _ _ -> n
+  | ast.RecordDecl n _ _ _ _ _ _ -> n
+  | ast.AliasDecl n _ _ _ -> n
+  | ast.WrapDecl n _ _ _ _ -> n
+  | ast.FnDecl _ _ _ _ _ _ _ -> ""
+  | ast.ExternFnDecl _ _ _ _ _ -> ""
+  | ast.LetDecl _ _ _ _ -> ""
+  | ast.ClassDecl _ _ _ _ _ -> ""
+  | ast.InstanceDecl _ _ _ _ -> ""
+
+fn header_line_text(numbered: (Int, String)) -> String =
+  match numbered with
+  | (_, line) -> line
+
+fn opts_out_of_prelude(src: String) -> Bool =
+  any(\ (l: (Int, String)) -> string.trim(header_line_text(l)) == source.no_prelude_directive,
+      header_lines(src))
+
+# Every value name a declaration binds, not just `fn` and `let`: a class method
+# and a constructor shadow just as well, and `ast.decl_value_scopes` is the
+# enumeration that already knows all of them.
+fn defines_a_combinator(decls: List ast.Decl) -> Bool =
+  any(\ (d: ast.Decl) -> any_name_in(decl_value_names(d), combinator_names), decls)
+
+# A selective import shadows as effectively as a local definition. Names are
+# compared as whole words, so a `guard_rail` import does not disable the rule, and
+# the header is read as words rather than parsed, so a wrapped list, a comment
+# inside one and a `T(..)` group all read alike (docs/lint-rules-v0.md §7 guard 2).
+fn imports_a_combinator(src: String) -> Bool =
+  any(\ (l: (Int, String)) -> any_name_is_combinator(header_names(header_line_text(l))),
+      header_lines(src))
+
+fn header_names(line: String) -> List String =
+  source.strip_line_comment(line)
+  |> string.replace_all("(", " ")
+  |> string.replace_all(")", " ")
+  |> string.replace_all(",", " ")
+  |> string.words
+
+fn any_name_is_combinator(names: List String) -> Bool =
+  any(\ (n: String) -> name_in_list(string.trim(n), combinator_names), names)
 
 # ---------------------------------------------------------------------------
 # Suppression directives
@@ -1154,9 +1586,19 @@ fn ast_findings(src: String) -> List LintFinding =
       match parser.parse_program(toks) with
       | Err (parser.ParseError msg pos) -> [unparsed_finding(pos, msg)]
       | Ok prog ->
-          list_append(drop_desugared_matches(src, lint_program(prog)),
+          list_append(drop_desugared_matches(src, guarded_program_findings(src, prog)),
             list_append(list_shape_findings(src, prog),
               list_append(list_prefix_findings(src, prog), brace_body_findings(toks))))
+
+# The combinator rule is collected during the walk and dropped here, because its
+# §7 guards are facts about the FILE that the walk cannot see. Filtering by rule
+# id keeps that decision out of the shared walkers, which three other rules use.
+fn guarded_program_findings(src: String, prog: ast.Program) -> List LintFinding =
+  match prog with
+  | ast.Program decls _ ->
+      let found = lint_program(prog)
+      in if combinator_rule_applies(src, decls) then found
+         else list_filter(\ (f: LintFinding) -> finding_rule_id(f) != combinator_rule_id, found)
 
 export fn lint_ast(src: String) -> List LintFinding =
   list_append(list_filter_map(directive_malformed, ds), list_filter(kept, ast_findings(src)))

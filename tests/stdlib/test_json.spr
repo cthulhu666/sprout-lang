@@ -160,9 +160,7 @@ fn bool_of(input: String) -> Maybe Bool =
   | Ok v -> json.json_get_bool(v)
 
 fn is_just_true(m: Maybe Bool) -> Bool =
-  match m with
-  | Just b -> b
-  | Nothing -> false
+  maybe_with_default(false, m)
 
 fn is_nothing_bool(m: Maybe Bool) -> Bool =
   match m with

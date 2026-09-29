@@ -43,7 +43,7 @@ fn is_just_int_42(m: Maybe Int) -> Bool =
   match m with | Just 42 -> true | _ -> false
 
 fn is_just_true(m: Maybe Bool) -> Bool =
-  match m with | Just b -> b | _ -> false
+  maybe_with_default(false, m)
 
 fn main() -> Unit !{IO} =
   run_suite("constrained_fn_return_type_dispatch", [

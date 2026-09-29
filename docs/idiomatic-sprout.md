@@ -77,8 +77,8 @@ apart by the `->`. The RHS must still be pure, but the body after `in` may be a
 prelude combinators are shorter than a two-arm `match`:
 
 ```sprout
-# unwrap-or-default — the value, or a fallback:
-maybe_with_default(dflt, dict_get(key, d))   # vs. match … | Just v -> v | Nothing -> dflt
+# unwrap-or-default, on a wrapper you already hold — NOT on a call, see below:
+maybe_with_default(dflt, cached)             # vs. match … | Just v -> v | Nothing -> dflt
 
 # transform the payload (Functor `map`):
 map(trim, dict_get(key, d))                  # Maybe String -> Maybe String
@@ -96,8 +96,8 @@ guard(port > 0, BadPort)                     # Bool -> Result ConfigError Unit
 `map` and `and_then` work over any `Functor`/`Monad` — `Maybe`, `Result`, and
 `List` — so the same two names cover every container; `Result` adds
 `result_map_error`/`result_with_default`. Still `match` directly when you branch
-on the shape instead of threading the payload onward (see "Match the producing
-call directly").
+on the shape instead of threading the payload onward, and whenever the wrapper
+came straight from a call (see "Match the producing call directly").
 
 `result_from_maybe` and `guard` are what let a whole parse be one `do` block:
 every step answers `Result`, so the binds thread and the first failure names
@@ -108,12 +108,30 @@ fields. It is not the easy way out of "parse, don't validate"
 ([guidelines.md](./guidelines.md) #4): when the check is "this is a valid X",
 return an `X` that cannot exist otherwise and let its absence be the error.
 
-**In a per-element loop, match directly instead.** A combinator is a real call,
-so the `Maybe` must be boxed to be passed to it; the CPR peephole unboxes only a
-`Maybe`-returning builtin that a `match` consumes *in place*. That is one
-allocation per read — invisible once, decisive per byte. `stdlib.bytes.byte_at`
-went 15x faster (1.96s to 0.13s over forty 1 MiB compares) moving off
-`maybe_with_default`, and it is why `mutvec_at` exists beside `mutvec_get`.
+**Eliminating a wrapper a call just produced? Match the call instead.**
+`maybe_with_default`/`result_with_default` are real calls, so the wrapper must be
+boxed to reach them, whereas a `match` on the call *in place* takes the callee's
+unboxed `{ tag, field }` worker and allocates nothing. One `Just` costs
+**+17.5 ns/read, rising to 110–135 ns with 100k live — 70–90x** — because
+per-read allocation is flat but collection cost scales with the live set
+(`bench/results-2026-09-28-vec-box-tax.md`). `stdlib.bytes.byte_at` went 15x
+faster moving off `maybe_with_default`, and it is why `mutvec_at` exists beside
+`mutvec_get`.
+
+What decides it is **argument position**, not how hot the code is and not how far
+the call is from the accessor. Returning a wrapper keeps it unboxed however many
+layers you wrap it in — the workers compose — and only handing it to a call puts
+the box back. Nor is this builtins-only: the worker exists for **any top-level
+function** whose result is a concrete ADT, user-defined ones included
+(`ast_to_ir.cpr_result_known`). It declines a polymorphic `Maybe a` result, and a
+call through a closure or a parameter has no worker to take.
+
+Nor is it limited to the eliminators. `map`, `and_then` and `result_from_maybe`
+must box their input to receive it as well, so matching the producing call beats
+them too: `result_from_maybe("missing", dict_get(k, d))` emits a boxed
+`@dict_get` and four GC roots where the `match` takes `@dict_get_worker` and one.
+`map` adds two `sprout_alloc_closure` on top, being a class method. The
+eliminators are only the starkest case, going from one allocation to none.
 
 ## Transform collections with combinators, not index loops
 
@@ -312,6 +330,10 @@ match find(key) with
 | Just v  -> use(v)
 | Nothing -> fallback()
 ```
+
+This is also the cheaper shape, not merely the tidier one: matching the call in
+place takes its unboxed worker, while passing it to `maybe_with_default` boxes
+the wrapper first. See "Reach for a combinator on a single `Maybe`/`Result`".
 
 ## Pick the accessor that matches what you know
 

@@ -979,10 +979,10 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   ESLint/clang-tidy/golangci-lint permit a blanket form that would silently swallow unrelated
   findings. Implement it as a post-parse filter in `lint_rules.lint_ast`, **not** `fmt_driver`, so a
   future editor surface cannot disagree with the gate; `formatter.lint_source` issues carry no rule
-  id, so the contract covers AST rules only. **(b)** `just lint` is permanently red — 10 findings
-  across 4 files, two violating deliberately because the raw form *is* the test subject. **(c)** Put
-  `lint` in `ci-fast-gates`; it is pre-commit only today, which is why the red set drifted
-  unwatched. Needs a `## Lint` section in `docs/style-guide-v0.md`.
+  id, so the contract covers AST rules only. **(b)** `just lint` is down to **12** findings, all
+  `unparsed` on `parse_error/*.spr` fixtures that exist not to parse — the combinator sites were
+  swept (`docs/lint-rules-v0.md` §8), so those 12 are the only thing left between `lint` and a gate.
+  **(c)** Put `lint` in `ci-fast-gates`; pre-commit only. Needs a style-guide `## Lint`.
 - [ ] `P2` **Per-line lint suppression is the follow-on that is bigger than it looks.** It must scan
   every line, not just the header, so a `#` inside a multi-line backtick template can false-match
   — the hazard `formatter.lint_spans` exists to handle, and the class of bug fixed in `7d1171f`.
@@ -994,16 +994,24 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   Rust's `#[expect]` is the strictly better fit for the two deliberate files — it turns the
   suppression into a second assertion that the construct is still present — held back only to
   avoid shipping two mechanisms at once.
-- [~] `P2` **Formatter/linter beyond the baseline.** Seven AST lint rules shipped
+- [~] `P2` **Formatter/linter beyond the baseline.** Eight AST lint rules shipped
   (`staircase-of-doom`, `redundant-vec-from-list`, `list-shape-pattern`, `list-prefix-pattern`,
-  `multi-line-lambda-arg`, `deprecated-brace-body`, `nullary-const-fn`) on top of
-  `formatter.sprout`'s text-based Style checks. **Remaining roadmap** from
+  `multi-line-lambda-arg`, `deprecated-brace-body`, `nullary-const-fn`, `hand-rolled-combinator`) on
+  top of `formatter.sprout`'s text-based Style checks. **Remaining roadmap** from
   `docs/idiomatic-sprout.md`: "Match the producing call directly" (a `let`/do-bind immediately
   followed by a match on that single otherwise-unused variable) and "Collapse a trivial `do` block".
   The rest of that doc is design-level or too fuzzy for a reliable syntactic check. **Also open:**
-  autocorrect (needs an AST-aware rewriter; today's formatter is a line-based text transform). The
-  config file, rules as patterns derived from the prelude, and a `hand-rolled-combinator` rule are
-  designed in `docs/lint-rules-v0.md`.
+  autocorrect (needs an AST-aware rewriter; today's formatter is a line-based text transform) and
+  the config file, designed in `docs/lint-rules-v0.md` §8.
+- [ ] `P3` **Nothing lints the pessimised spelling: an eliminator applied to a call.**
+  `maybe_with_default(0, dict_get(k, d))` boxes a wrapper the `match` form keeps unboxed — 70–90x at
+  100k live (`bench/results-2026-09-28-vec-box-tax.md`). `hand-rolled-combinator` stopped suggesting
+  it (`docs/lint-rules-v0.md` §7.4), but nothing flags the sites already written that way: 35
+  single-line `maybe_with_default`/`result_with_default` calls over a call argument, 12 outside
+  `tests/` (`cse_census.sprout:115`, `tui/buffer.sprout:234`/`:248`, `tui/text.sprout:97`,
+  `ide/document.sprout:42`, `examples/aoc_2025_day_5.sprout:20`, 4 more). Two caveats: a syntactic
+  check cannot tell a top-level callee from a closure call, and `bench/vec_box/` uses the shape on
+  purpose, so suppression ships first. Moot if the CPR-reach `P2` above lands — decide that first.
 - [ ] `P3` **A nested `match` on a `Cons`-bound tail is not linted.** `match xs with | Cons h t ->
   match t with …` is what `[a, b | rest]` exists to flatten, and neither `list-shape-pattern` (which
   needs a chain ending in a literal `Nil`) nor `list-prefix-pattern` (a wildcard tail) covers it.

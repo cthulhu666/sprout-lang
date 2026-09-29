@@ -25,9 +25,7 @@ fn checksum(v: MutVec Int) -> Int !{IO} =
 # `do` block, `m <- mutvec_get(..)` would fallible-bind and unwrap the Maybe, which
 # is precisely the Nothing case these assertions need to observe.
 fn or_else(m: Maybe Int, dflt: Int) -> Int =
-  match m with
-  | Just x -> x
-  | Nothing -> dflt
+  maybe_with_default(dflt, m)
 
 fn main() -> Unit !{IO} =
   do

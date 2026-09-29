@@ -85,10 +85,8 @@ repl:
 # broke PR #19's CI (2026-06-10): test files formatted with no-space
 # `deriving(...)` locally vs CI's fresh `deriving (...)`.
 #
-# `-n 100` is NOT the fastest value today — `-n 10` is, and by ~20%. State that
-# plainly, because the number otherwise reads as today's optimum and someone will
-# "correct" it in the wrong direction. Medians of 3 over 1153 files:
-# -n 1 = 21s, -n 10 = 16s, -n 100 = 20s, unbounded = 26s.
+# `-n 10` is the measured optimum. Best of 3 over 1165 files: -n 1 = 21.1s,
+# -n 10 = 19.6s, -n 25 = 21.4s, -n 100 = 24.7s.
 #
 # Cost rises in BOTH directions from a middle, for opposite reasons: per file
 # (-n 1) pays ~4.3ms of process startup 1153 times, while unbounded pays GC,
@@ -96,19 +94,18 @@ repl:
 # that lints them all collects repeatedly (peak RSS stays flat near 60MB, so that
 # is collection cost, not a leak).
 #
-# 100 is chosen for the cost that dominates once the linter derives its patterns
-# from the prelude per process (docs/lint-rules-v0.md §10) — ~0.19s × processes,
-# so 12 pay ~2s where 116 would pay ~22s and 1153 would pay ~220s. That trades
-# ~4s of wall time now against ~20s later. If that derivation is abandoned, -n 10
-# is the better value and this comment is the reason to change it.
+# It was 100 while each process re-derived its patterns from the prelude, a cost
+# that fell on every process and so argued for few of them. Revision 7 embedded
+# the definitions (docs/lint-rules-v0.md §10), that cost went, and 100 went from
+# the best of these four values to the worst.
 
 [group('fmt')]
 fmt: build-fmt-from-seed
-  rg --files -0 -g '*.sprout' -g '*.spr' | xargs -0 -n 100 "{{build_dir}}/fmt_bin" fmt
+  rg --files -0 -g '*.sprout' -g '*.spr' | xargs -0 -n 10 "{{build_dir}}/fmt_bin" fmt
 
 [group('fmt')]
 fmt-check: build-fmt-from-seed
-  rg --files -0 -g '*.sprout' -g '*.spr' | xargs -0 -n 100 "{{build_dir}}/fmt_bin" fmt --check
+  rg --files -0 -g '*.sprout' -g '*.spr' | xargs -0 -n 10 "{{build_dir}}/fmt_bin" fmt --check
 
 [group('fmt')]
 fmt-file file: build-fmt-from-seed
@@ -120,7 +117,7 @@ fmt-check-file file: build-fmt-from-seed
 
 [group('fmt')]
 lint: build-fmt-from-seed
-  rg --files -0 -g '*.sprout' -g '*.spr' | xargs -0 -n 100 "{{build_dir}}/fmt_bin" lint
+  rg --files -0 -g '*.sprout' -g '*.spr' | xargs -0 -n 10 "{{build_dir}}/fmt_bin" lint
 
 [group('fmt')]
 lint-file file: build-fmt-from-seed

@@ -45,9 +45,7 @@ fn holder_sum(h: Holder) -> Int =
   | Empty -> 0
 
 fn maybe_or(d: Int, m: Maybe Int) -> Int =
-  match m with
-  | Just n -> n
-  | Nothing -> d
+  maybe_with_default(d, m)
 
 # Value position that is NOT a call argument: a return value. This reaches
 # `infer_var`, whereas every `list_map(C, …)` below reaches

@@ -103,7 +103,7 @@ declare i64 @ref_write(i64, i64)
 @.str.22 = private unnamed_addr constant { i64, [20 x i8] } { i64 311306, [20 x i8] c"concat equivalent: \00" }
 @.str.23 = private unnamed_addr constant { i64, [31 x i8] } { i64 491530, [31 x i8] c"buffered line: %tmp = add i64 \00" }
 @.str.24 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
-@.str.25 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 52, column 70)\00" }
+@.str.25 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 50, column 70)\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -275,6 +275,31 @@ ovfpanic_6:
   unreachable
 ovfok_6:
   ret i64 %t$6
+}
+
+define i64 @maybe_with_default(i64 %p$fallback, i64 %p$m) {
+entry:
+  %t$0 = call i64 @sprout_tag(i64 %p$m)
+  br label %arm_0_1
+arm_0_1:
+  %t$3 = add i64 0, 1
+  %t$4 = icmp eq i64 %t$0, %t$3
+  br i1 %t$4, label %body_0_1, label %arm_1_1
+body_0_1:
+  %t$5 = call i64 @sprout_field(i64 %p$m, i64 0)
+  br label %join_1
+arm_1_1:
+  %t$6 = add i64 0, 0
+  %t$7 = icmp eq i64 %t$0, %t$6
+  br i1 %t$7, label %body_1_1, label %arm_2_1
+body_1_1:
+  br label %join_1
+arm_2_1:
+  call void @sprout_abort_match()
+  unreachable
+join_1:
+  %t$2 = phi i64 [%t$5, %body_0_1], [%p$fallback, %body_1_1]
+  ret i64 %t$2
 }
 
 define i64 @digit_value(i64 %p$c) {
@@ -926,28 +951,9 @@ entry:
 
 define i64 @examples.string_templates.int_or_zero(i64 %p$m) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %p$m)
-  br label %arm_0_1
-arm_0_1:
-  %t$3 = add i64 0, 1
-  %t$4 = icmp eq i64 %t$0, %t$3
-  br i1 %t$4, label %body_0_1, label %arm_1_1
-body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %p$m, i64 0)
-  br label %join_1
-arm_1_1:
-  %t$6 = add i64 0, 0
-  %t$7 = icmp eq i64 %t$0, %t$6
-  br i1 %t$7, label %body_1_1, label %arm_2_1
-body_1_1:
-  %t$8 = add i64 0, 0
-  br label %join_1
-arm_2_1:
-  call void @sprout_abort_match()
-  unreachable
-join_1:
-  %t$2 = phi i64 [%t$5, %body_0_1], [%t$8, %body_1_1]
-  ret i64 %t$2
+  %t$0 = add i64 0, 0
+  %t$1 = call i64 @maybe_with_default(i64 %t$0, i64 %p$m)
+  ret i64 %t$1
 }
 
 define i64 @__sprout_user_main() {
