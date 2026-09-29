@@ -73,10 +73,10 @@ fn inner_multiplicity(counter: MutVec Int, xs: List Int, ys: List Int) -> List (
 # `stdlib/prelude.sprout`), so it must run in O(1) stack. 100_000 is the size
 # `tests/stdlib/test_vec_sort_stacksafe.spr` uses for the same reason: the
 # runtime's GC root pool is a fixed 131072 slots, and a non-tail-recursive
-# O(n)-deep implementation (the shape `list_filter`/`list_map_go` have today,
-# per docs/list-comprehensions-v0.md §1 item 3) exhausts it well before 100k,
-# aborting with `sprout_gc_push_root: GC root pool exhausted` before any
-# assertion runs. A tail-recursive fold completes regardless of size.
+# O(n)-deep implementation exhausts it well before 100k, aborting with
+# `sprout_gc_push_root: GC root pool exhausted` before any assertion runs. A
+# tail-recursive fold completes regardless of size. The prelude's own List
+# builders are pinned to the same property by tests/stdlib/test_list_depth.spr.
 fn large_range_comprehension() -> List Int =
   [i for i in 1..100000]
 

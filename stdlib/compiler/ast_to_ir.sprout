@@ -7303,7 +7303,7 @@ fn cpr_result_known(name: String, fn_arities: Dict FnInfo) -> Bool =
 # M3 PR 6: build a Dict mapping every top-level fn name (user fns +
 # externs) to its FnInfo.  `arity` is used in translate_expr's TVar
 # fallthrough to synthesize an eta wrapper closure when a fn is passed as a
-# value (e.g. `list_map_go(parse_int, xs)`).  Top-level fns referenced by name
+# value (e.g. `list_map(parse_int, xs)`).  Top-level fns referenced by name
 # but not called need a wrapper because Sprout's closure ABI requires the
 # code-ptr fn to take `i64 %env` as its first argument — the original
 # fn has no such param.

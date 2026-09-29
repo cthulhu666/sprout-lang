@@ -1,0 +1,169 @@
+import stdlib.test (check_eq, run_suite)
+
+# Regression: no List builder in the prelude may have a recursion-depth ceiling.
+# Thirteen of them recursed in an argument position, so depth equalled the list
+# length and anything past ~30k aborted BEFORE reaching an assertion — a C stack
+# overflow unoptimised, or `sprout_gc_push_root: GC root pool exhausted` under -O2,
+# since the root pool is a fixed 131072-slot array with no growth path. The Vec
+# combinators were already accumulator-based; this file pins the List half to the
+# same shape at 100k, well past the old wall.
+#
+# Eleven were `Cons(x, recurse(...))`. The last two hid the same shape inside
+# another call — `list_append(…, map2_list(…))` and `map2(…, list_traverse_go(…))`
+# — so grep for the `Cons` form and they are missed while the property still
+# fails. Add a case here per builder, not per syntactic shape.
+#
+# list_union/list_diff/list_dedup are O(n*m) through list_member, so they get a
+# small `ys` — a shape that is O(n) in time and so reaches the depth wall first,
+# rather than one that would time out before proving anything about depth.
+
+# [0, 1, ..., v] in O(v) and tail-recursive, so the FIXTURE is never what
+# overflows.
+fn asc_list(v: Int, acc: List Int) -> List Int =
+  if v < 0 then acc
+  else asc_list(v - 1, Cons(v, acc))
+
+# Probes must be tail-recursive too: a body-recursive length or last would
+# reintroduce the very ceiling under test and pass for the wrong reason.
+fn len(xs: List Int) -> Int = list_fold(\ (acc, x) -> acc + 1, 0, xs)
+
+fn last_or(d: Int, xs: List Int) -> Int = list_fold(\ (acc, x) -> x, d, xs)
+
+fn first_or(d: Int, xs: List Int) -> Int =
+  match xs with
+  | Nil -> d
+  | Cons h rest -> h
+
+# No modulo operator in the core language; `rem` is spelled out here as it is in
+# the fizzbuzz example.
+fn is_even(n: Int) -> Bool = n - (n / 2) * 2 == 0
+
+fn half_if_even(n: Int) -> Maybe Int = if is_even(n) then Just(n / 2) else Nothing
+
+fn twice(n: Int) -> List Int = [n, n]
+
+fn bump(n: Int) -> Int = n + 1
+
+fn drop_all(n: Int) -> List Int = Nil
+
+fn never(n: Int) -> Bool = false
+
+# Keeps `seen` at three entries, so list_dedup stays O(n) in time while its
+# recursion is still 100k deep — depth is then the only thing under test.
+fn mod3(n: Int) -> Int = n - (n / 3) * 3
+
+# Shape witnesses for partition, whose result is a pair: length and head of each
+# half, so order is checked at depth and not only on the small fixtures below.
+fn partition_lens(xs: List Int) -> (Int, Int) =
+  match list_partition(is_even, xs) with
+  | (yes, no) -> (len(yes), len(no))
+
+fn partition_heads(xs: List Int) -> (Int, Int) =
+  match list_partition(is_even, xs) with
+  | (yes, no) -> (first_or(-1, yes), first_or(-1, no))
+
+fn add2(x: Int, y: Int) -> Int = x + y
+
+fn just_bump(n: Int) -> Maybe Int = Just(n + 1)
+
+# traverse/sequence hand back the list inside the Applicative, so the probes
+# unwrap first. -1 cannot collide with a real answer on `big`.
+fn len_in(m: Maybe (List Int)) -> Int =
+  match m with
+  | Nothing -> -1
+  | Just xs -> len(xs)
+
+fn first_in(m: Maybe (List Int)) -> Int =
+  match m with
+  | Nothing -> -1
+  | Just xs -> first_or(-1, xs)
+
+fn last_in(m: Maybe (List Int)) -> Int =
+  match m with
+  | Nothing -> -1
+  | Just xs -> last_or(-1, xs)
+
+fn main() -> Unit !{IO} =
+  let big = asc_list(99999, Nil)
+  in run_suite("list_depth", [
+    # --- depth: every one of these crashes on the body-recursive shapes -------
+    check_eq("list_map 100k length", len(list_map(bump, big)), 100000),
+    check_eq("list_map 100k head", first_or(-1, list_map(bump, big)), 1),
+    check_eq("list_map 100k last", last_or(-1, list_map(bump, big)), 100000),
+
+    check_eq("list_filter 100k length", len(list_filter(is_even, big)), 50000),
+    check_eq("list_filter 100k head", first_or(-1, list_filter(is_even, big)), 0),
+    check_eq("list_filter 100k last", last_or(-1, list_filter(is_even, big)), 99998),
+
+    check_eq("list_filter_map 100k length", len(list_filter_map(half_if_even, big)), 50000),
+    check_eq("list_filter_map 100k head", first_or(-1, list_filter_map(half_if_even, big)), 0),
+    check_eq("list_filter_map 100k last", last_or(-1, list_filter_map(half_if_even, big)), 49999),
+
+    check_eq("list_partition 100k halves", partition_lens(big), (50000, 50000)),
+    check_eq("list_partition 100k heads", partition_heads(big), (0, 1)),
+
+    check_eq("list_append 100k+100k length", len(list_append(big, big)), 200000),
+    check_eq("list_append 100k+100k head", first_or(-1, list_append(big, big)), 0),
+    check_eq("list_append 100k+100k last", last_or(-1, list_append(big, big)), 99999),
+
+    check_eq("list_flat_map 100k length", len(list_flat_map(twice, big)), 200000),
+    check_eq("list_flat_map 100k head", first_or(-1, list_flat_map(twice, big)), 0),
+    check_eq("list_flat_map 100k last", last_or(-1, list_flat_map(twice, big)), 99999),
+
+    check_eq("range_to_list 100k length", len(range_to_list(1..100000)), 100000),
+    check_eq("range_to_list 100k head", first_or(-1, range_to_list(1..100000)), 1),
+    check_eq("range_to_list 100k last", last_or(-1, range_to_list(1..100000)), 100000),
+
+    check_eq("list_union 100k length", len(list_union(big, [0])), 100000),
+    check_eq("list_union 100k head", first_or(-1, list_union(big, [0])), 1),
+    check_eq("list_union 100k last is the right operand", last_or(-1, list_union(big, [0])), 0),
+
+    check_eq("list_diff 100k length", len(list_diff(big, [0])), 99999),
+    check_eq("list_diff 100k head", first_or(-1, list_diff(big, [0])), 1),
+    check_eq("list_diff 100k last", last_or(-1, list_diff(big, [0])), 99999),
+
+    check_eq("list_dedup 100k down to three", list_dedup(list_map(mod3, big)), [0, 1, 2]),
+
+    # map2 on List is the cartesian product, so a singleton right operand makes it
+    # O(n) in time and leaves depth as the only thing under test. traverse and
+    # sequence go through it for `f = List` and through Maybe's map2 here.
+    check_eq("map2 100k length", len(map2(add2, big, [0])), 100000),
+    check_eq("map2 100k head", first_or(-1, map2(add2, big, [0])), 0),
+    check_eq("map2 100k last", last_or(-1, map2(add2, big, [0])), 99999),
+
+    check_eq("traverse 100k length", len_in(traverse(just_bump, big)), 100000),
+    check_eq("traverse 100k head", first_in(traverse(just_bump, big)), 1),
+    check_eq("traverse 100k last", last_in(traverse(just_bump, big)), 100000),
+
+    check_eq("sequence 100k length", len_in(sequence(list_map(just_bump, big))), 100000),
+    check_eq("sequence 100k last", last_in(sequence(list_map(just_bump, big))), 100000),
+
+    # --- order: an accumulator rewrite that forgets its reverse still passes
+    # --- every length assertion above, so each one is pinned on a small input.
+    check_eq("list_map keeps order", list_map(bump, [1, 2, 3]), [2, 3, 4]),
+    check_eq("list_filter keeps order", list_filter(is_even, [1, 2, 3, 4, 5]), [2, 4]),
+    check_eq("list_filter_map keeps order",
+      list_filter_map(half_if_even, [1, 2, 3, 4]), [1, 2]),
+    check_eq("list_partition keeps order in both halves",
+      list_partition(is_even, [1, 2, 3, 4, 5]), ([2, 4], [1, 3, 5])),
+    check_eq("list_append keeps order", list_append([1, 2, 3], [4, 5]), [1, 2, 3, 4, 5]),
+    check_eq("list_flat_map keeps order", list_flat_map(twice, [1, 2]), [1, 1, 2, 2]),
+    check_eq("list_union keeps order, left operand first",
+      list_union([3, 1, 2], [2, 9]), [3, 1, 2, 9]),
+    check_eq("list_diff keeps order", list_diff([3, 1, 2, 4], [1, 4]), [3, 2]),
+    check_eq("list_dedup keeps first occurrences in order",
+      list_dedup([3, 1, 3, 2, 1]), [3, 1, 2]),
+    check_eq("map2 pairs every left with every right, left outermost",
+      map2(add2, [1, 2], [10, 20]), [11, 21, 12, 22]),
+    check_eq("traverse keeps order", traverse(just_bump, [1, 2, 3]), Just([2, 3, 4])),
+    check_eq("sequence keeps order", sequence([Just(1), Just(2)]), Just([1, 2])),
+    check_eq("template_parts_to_strings keeps order",
+      template_parts_to_strings([TemplateLit("a"), TemplateInterp("b"), TemplateLit("c")]),
+      ["a", "b", "c"]),
+
+    # --- edges ---------------------------------------------------------------
+    check_eq("list_append onto an empty left", list_append(Nil, [1, 2]), [1, 2]),
+    check_eq("list_append with an empty right", list_append([1, 2], Nil), [1, 2]),
+    check_eq("list_flat_map dropping every element", list_flat_map(drop_all, [1, 2, 3]), Nil),
+    check_eq("list_filter keeping nothing", list_filter(never, [1, 2]), Nil)
+  ])

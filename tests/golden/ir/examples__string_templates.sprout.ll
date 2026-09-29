@@ -78,15 +78,15 @@ declare i64 @native_set_size(i64)
 declare i64 @ref_new(i64)
 declare i64 @ref_read(i64)
 declare i64 @ref_write(i64, i64)
-@.str.0 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 52, column 25)\00" }
-@.str.1 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 52, column 47)\00" }
-@.str.2 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1736, column 10)\00" }
+@.str.0 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 55, column 25)\00" }
+@.str.1 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 55, column 47)\00" }
+@.str.2 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1804, column 10)\00" }
 @.str.3 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
-@.str.4 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in / (line 1741, column 39)\00" }
-@.str.5 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1763, column 33)\00" }
-@.str.6 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 1763, column 43)\00" }
-@.str.7 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1763, column 49)\00" }
-@.str.8 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1771, column 58)\00" }
+@.str.4 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in / (line 1809, column 39)\00" }
+@.str.5 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1831, column 33)\00" }
+@.str.6 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 1831, column 43)\00" }
+@.str.7 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1831, column 49)\00" }
+@.str.8 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1839, column 58)\00" }
 @.str.9 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"user=\00" }
 @.str.10 = private unnamed_addr constant { i64, [9 x i8] } { i64 131082, [9 x i8] c" unread=\00" }
 @.str.11 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c" next=\00" }
@@ -132,6 +132,7 @@ declare i64 @ref_write(i64, i64)
 @.cfkinds.12 = private unnamed_addr constant [2 x i8] c"p\00"
 @.cname.13 = private unnamed_addr constant [9 x i8] c"IntRange\00"
 @.cfkinds.13 = private unnamed_addr constant [4 x i8] c"iii\00"
+@list_builder_empty = global i64 zeroinitializer
 @pow10_clamp = private constant i64 400
 @max_int = private constant i64 9223372036854775807
 @pow10_exact_max = private constant i64 22
@@ -167,8 +168,17 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @template_parts_to_strings(i64 %p$parts) {
+define i64 @template_parts_to_strings_go(i64 %p$parts$in, i64 %p$acc$in) {
 entry:
+  %t$24 = alloca i64
+  store i64 %p$parts$in, ptr %t$24
+  %t$25 = alloca i64
+  store i64 %p$acc$in, ptr %t$25
+  %t$26 = call ptr @llvm.stacksave()
+  br label %tco_loop
+tco_loop:
+  %p$parts = load i64, ptr %t$24
+  %p$acc = load i64, ptr %t$25
   %t$0 = call i64 @sprout_tag(i64 %p$parts)
   br label %arm_0_1
 arm_0_1:
@@ -176,77 +186,102 @@ arm_0_1:
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
+  %t$27 = alloca i64
+  store i64 %p$acc, ptr %t$27
+  %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
   %t$5 = call i64 @sprout_alloc_obj(i64 5, i64 0)
+  %t$29 = alloca i64
+  store i64 %t$5, ptr %t$29
+  %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
+  %t$6 = call i64 @list_reverse_go(i64 %p$acc, i64 %t$5)
+  %t$31 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %join_1
 arm_1_1:
-  %t$6 = add i64 0, 6
-  %t$7 = icmp eq i64 %t$0, %t$6
-  br i1 %t$7, label %body_1_1, label %arm_2_1
+  %t$7 = add i64 0, 6
+  %t$8 = icmp eq i64 %t$0, %t$7
+  br i1 %t$8, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t$8 = call i64 @sprout_field(i64 %p$parts, i64 0)
-  %t$9 = call i64 @sprout_field(i64 %p$parts, i64 1)
-  %t$10 = call i64 @sprout_tag(i64 %t$8)
-  br label %arm_0_11
-arm_0_11:
-  %t$13 = add i64 0, 2
-  %t$14 = icmp eq i64 %t$10, %t$13
-  br i1 %t$14, label %body_0_11, label %arm_1_11
-body_0_11:
-  %t$15 = call i64 @sprout_field(i64 %t$8, i64 0)
-  %t$23 = alloca i64
-  store i64 %t$9, ptr %t$23
-  %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
-  %t$25 = alloca i64
-  store i64 %t$15, ptr %t$25
-  %t$26 = call i64 @sprout_gc_push_i64_root(ptr %t$25)
-  %t$16 = call i64 @template_parts_to_strings(i64 %t$9)
-  %t$27 = alloca i64
-  store i64 %t$16, ptr %t$27
-  %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
+  %t$9 = call i64 @sprout_field(i64 %p$parts, i64 0)
+  %t$10 = call i64 @sprout_field(i64 %p$parts, i64 1)
+  %t$11 = call i64 @sprout_tag(i64 %t$9)
+  br label %arm_0_12
+arm_0_12:
+  %t$14 = add i64 0, 2
+  %t$15 = icmp eq i64 %t$11, %t$14
+  br i1 %t$15, label %body_0_12, label %arm_1_12
+body_0_12:
+  %t$16 = call i64 @sprout_field(i64 %t$9, i64 0)
+  %t$32 = alloca i64
+  store i64 %t$10, ptr %t$32
+  %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
+  %t$34 = alloca i64
+  store i64 %p$acc, ptr %t$34
+  %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
+  %t$36 = alloca i64
+  store i64 %t$16, ptr %t$36
+  %t$37 = call i64 @sprout_gc_push_i64_root(ptr %t$36)
   %t$17 = call i64 @sprout_alloc_obj(i64 6, i64 2)
   %t$17$ptr = inttoptr i64 %t$17 to ptr
   %t$17$f0 = getelementptr i64, ptr %t$17$ptr, i64 0
-  store i64 %t$15, ptr %t$17$f0
+  store i64 %t$16, ptr %t$17$f0
   %t$17$f1 = getelementptr i64, ptr %t$17$ptr, i64 1
-  store i64 %t$16, ptr %t$17$f1
-  %t$29 = call i64 @sprout_gc_pop_roots(i64 3)
-  br label %join_11
-arm_1_11:
-  %t$18 = add i64 0, 3
-  %t$19 = icmp eq i64 %t$10, %t$18
-  br i1 %t$19, label %body_1_11, label %arm_2_11
-body_1_11:
-  %t$20 = call i64 @sprout_field(i64 %t$8, i64 0)
-  %t$30 = alloca i64
-  store i64 %t$9, ptr %t$30
-  %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)
-  %t$32 = alloca i64
-  store i64 %t$20, ptr %t$32
-  %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
-  %t$21 = call i64 @template_parts_to_strings(i64 %t$9)
-  %t$34 = alloca i64
-  store i64 %t$21, ptr %t$34
-  %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
+  store i64 %p$acc, ptr %t$17$f1
+  %t$38 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$39 = call i64 @sprout_gc_pop_roots(i64 1)
+  store i64 %t$10, ptr %t$24
+  store i64 %t$17, ptr %t$25
+  call void @llvm.stackrestore(ptr %t$26)
+  br label %tco_loop
+arm_1_12:
+  %t$19 = add i64 0, 3
+  %t$20 = icmp eq i64 %t$11, %t$19
+  br i1 %t$20, label %body_1_12, label %arm_2_12
+body_1_12:
+  %t$21 = call i64 @sprout_field(i64 %t$9, i64 0)
+  %t$40 = alloca i64
+  store i64 %t$10, ptr %t$40
+  %t$41 = call i64 @sprout_gc_push_i64_root(ptr %t$40)
+  %t$42 = alloca i64
+  store i64 %p$acc, ptr %t$42
+  %t$43 = call i64 @sprout_gc_push_i64_root(ptr %t$42)
+  %t$44 = alloca i64
+  store i64 %t$21, ptr %t$44
+  %t$45 = call i64 @sprout_gc_push_i64_root(ptr %t$44)
   %t$22 = call i64 @sprout_alloc_obj(i64 6, i64 2)
   %t$22$ptr = inttoptr i64 %t$22 to ptr
   %t$22$f0 = getelementptr i64, ptr %t$22$ptr, i64 0
-  store i64 %t$20, ptr %t$22$f0
+  store i64 %t$21, ptr %t$22$f0
   %t$22$f1 = getelementptr i64, ptr %t$22$ptr, i64 1
-  store i64 %t$21, ptr %t$22$f1
-  %t$36 = call i64 @sprout_gc_pop_roots(i64 3)
-  br label %join_11
-arm_2_11:
+  store i64 %p$acc, ptr %t$22$f1
+  %t$46 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$47 = call i64 @sprout_gc_pop_roots(i64 1)
+  store i64 %t$10, ptr %t$24
+  store i64 %t$22, ptr %t$25
+  call void @llvm.stackrestore(ptr %t$26)
+  br label %tco_loop
+arm_2_12:
   call void @sprout_abort_match()
   unreachable
-join_11:
-  %t$12 = phi i64 [%t$17, %body_0_11], [%t$22, %body_1_11]
-  br label %join_1
 arm_2_1:
   call void @sprout_abort_match()
   unreachable
 join_1:
-  %t$2 = phi i64 [%t$5, %body_0_1], [%t$12, %join_11]
+  %t$2 = phi i64 [%t$6, %body_0_1]
   ret i64 %t$2
+}
+
+define i64 @template_parts_to_strings(i64 %p$parts) {
+entry:
+  %t$2 = alloca i64
+  store i64 %p$parts, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$0 = call i64 @sprout_alloc_obj(i64 5, i64 0)
+  %t$4 = alloca i64
+  store i64 %t$0, ptr %t$4
+  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
+  %t$1 = call i64 @template_parts_to_strings_go(i64 %p$parts, i64 %t$0)
+  %t$6 = call i64 @sprout_gc_pop_roots(i64 2)
+  ret i64 %t$1
 }
 
 define i64 @min_int() {
@@ -275,6 +310,60 @@ ovfpanic_6:
   unreachable
 ovfok_6:
   ret i64 %t$6
+}
+
+define i64 @list_reverse_go(i64 %p$xs$in, i64 %p$acc$in) {
+entry:
+  %t$11 = alloca i64
+  store i64 %p$xs$in, ptr %t$11
+  %t$12 = alloca i64
+  store i64 %p$acc$in, ptr %t$12
+  %t$13 = call ptr @llvm.stacksave()
+  br label %tco_loop
+tco_loop:
+  %p$xs = load i64, ptr %t$11
+  %p$acc = load i64, ptr %t$12
+  %t$0 = call i64 @sprout_tag(i64 %p$xs)
+  br label %arm_0_1
+arm_0_1:
+  %t$3 = add i64 0, 5
+  %t$4 = icmp eq i64 %t$0, %t$3
+  br i1 %t$4, label %body_0_1, label %arm_1_1
+body_0_1:
+  br label %join_1
+arm_1_1:
+  %t$5 = add i64 0, 6
+  %t$6 = icmp eq i64 %t$0, %t$5
+  br i1 %t$6, label %body_1_1, label %arm_2_1
+body_1_1:
+  %t$7 = call i64 @sprout_field(i64 %p$xs, i64 0)
+  %t$8 = call i64 @sprout_field(i64 %p$xs, i64 1)
+  %t$14 = alloca i64
+  store i64 %p$acc, ptr %t$14
+  %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
+  %t$16 = alloca i64
+  store i64 %t$7, ptr %t$16
+  %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
+  %t$18 = alloca i64
+  store i64 %t$8, ptr %t$18
+  %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
+  %t$9 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$9$ptr = inttoptr i64 %t$9 to ptr
+  %t$9$f0 = getelementptr i64, ptr %t$9$ptr, i64 0
+  store i64 %t$7, ptr %t$9$f0
+  %t$9$f1 = getelementptr i64, ptr %t$9$ptr, i64 1
+  store i64 %p$acc, ptr %t$9$f1
+  %t$20 = call i64 @sprout_gc_pop_roots(i64 3)
+  store i64 %t$8, ptr %t$11
+  store i64 %t$9, ptr %t$12
+  call void @llvm.stackrestore(ptr %t$13)
+  br label %tco_loop
+arm_2_1:
+  call void @sprout_abort_match()
+  unreachable
+join_1:
+  %t$2 = phi i64 [%p$acc, %body_0_1]
+  ret i64 %t$2
 }
 
 define i64 @maybe_with_default(i64 %p$fallback, i64 %p$m) {
@@ -1253,8 +1342,11 @@ entry:
 
 define void @__sprout_init_globals() {
 entry:
-  %t$0 = bitcast double 10000000000000000000000.0 to i64
-  store i64 %t$0, ptr @pow10_exact_unit
+  %t$0 = call i64 @sprout_alloc_obj(i64 5, i64 0)
+  store i64 %t$0, ptr @list_builder_empty
+  call i64 @sprout_gc_register_i64_root(ptr @list_builder_empty)
+  %t$1 = bitcast double 10000000000000000000000.0 to i64
+  store i64 %t$1, ptr @pow10_exact_unit
   ret void
 }
 

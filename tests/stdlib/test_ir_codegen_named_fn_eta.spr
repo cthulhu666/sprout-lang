@@ -11,10 +11,11 @@ import stdlib.string as string
 # (passed as HOF arguments, not called) hit the catch-all "unbound"
 # branch in ast_to_ir.sprout's TVar resolution.
 #
-# Real-world example from prelude.sprout:107:
-#   list_map_go(parse_int, split_words(s))
-# where parse_int is `extern fn parse_int(s: String) -> Int` — an extern
-# fn passed by name as the first argument to list_map_go.
+# Real-world example of the shape:
+#   list_map(parse_int, string.split_words(s))
+# where `parse_int` is a prelude fn (`String -> Maybe Int`) and `split_words` an
+# extern in stdlib.string — a named fn passed by name as list_map's first
+# argument, never called at that site.
 #
 # Implementation: M3 PR 6 mirrors direct codegen's emit_named_fn_wrapper_lines
 # (codegen.sprout:1434-1444).  At TVar resolution, if the name is a top-

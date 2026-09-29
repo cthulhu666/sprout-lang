@@ -10,6 +10,13 @@ fn positive(n: Int) -> Maybe Int =
 fn checked(n: Int) -> Result String Int =
   if n >= 0 then Ok(n) else Err(`negative: ${n}`)
 
+# Two choices per element, so List-as-the-effect pins the product's ORDER and not
+# only its size. list_traverse_go threads its accumulator as map2's first
+# argument, which is what makes the leftmost element vary slowest.
+fn far_pair(n: Int) -> List Int = [n, n + 100]
+
+let no_ints: List Int = Nil
+
 fn main() -> Unit !{IO} =
   run_suite("traversable", [
     # List over Maybe: every element succeeds, so the whole walk does.
@@ -26,6 +33,13 @@ fn main() -> Unit !{IO} =
     # Maybe as the traversed structure, not the effect.
     check_eq("maybe/result Just", traverse(checked, Just(5)), Ok (Just(5))),
     check_eq("maybe/result Nothing", traverse(checked, Nothing), Ok (Nothing)),
+
+    # List as the EFFECT, not the structure: every combination, leftmost element
+    # varying slowest.
+    check_eq("list/list product order",
+      traverse(far_pair, [1, 2]), [[1, 2], [1, 102], [101, 2], [101, 102]]),
+    check_eq("list/list no elements is one empty choice",
+      traverse(far_pair, no_ints), [no_ints]),
 
     # sequence is traverse with the elements already in the effect.
     check_eq("sequence all Just", sequence([Just(1), Just(2)]), Just([1, 2])),

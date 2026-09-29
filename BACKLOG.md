@@ -775,6 +775,7 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   `Semigroup (Dict v)`, and several `vec_*` (`map`/`filter`/`filter_map`/`reverse`/`slice`).
   `vec_sort_by`'s doc comment claims O(n log n) and rebuilds O(n²). Document true complexity inline
   or fix to linear. Findings and probes: `docs/fundamentals-code-review-handoff-2026-07-03.md`.
+  `list_builder_*` fixes the list-append half: O(1) per add, one reverse at the end.
   Also `set_remove`: it reinserts every element into a fresh set where an AVL delete is already
   available — `NativeSet` IS the `Map` BST with value 0, and `map_remove` calls `bst_remove_node`.
   O(n) allocations instead of O(log n), and it needs a `native_set_remove` extern, so ASK FIRST.

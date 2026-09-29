@@ -21,13 +21,16 @@ export fn template_to_string(t: StringTemplate) -> String =
   match t with
   | StringTemplate parts -> string_concat_many(template_parts_to_strings(parts))
 
-export fn template_parts_to_strings(parts: List TemplatePart) -> List String =
+fn template_parts_to_strings_go(parts: List TemplatePart, acc: List String) -> List String =
   match parts with
-  | Nil -> Nil
+  | Nil -> list_reverse_go(acc, Nil)
   | Cons p rest ->
       match p with
-      | TemplateLit s -> Cons(s, template_parts_to_strings(rest))
-      | TemplateInterp s -> Cons(s, template_parts_to_strings(rest))
+      | TemplateLit s -> template_parts_to_strings_go(rest, Cons(s, acc))
+      | TemplateInterp s -> template_parts_to_strings_go(rest, Cons(s, acc))
+
+export fn template_parts_to_strings(parts: List TemplatePart) -> List String =
+  template_parts_to_strings_go(parts, Nil)
 
 export type List a =
   | Nil
@@ -182,13 +185,14 @@ fn count_span(lo: Int, hi: Int) -> Int =
     panic("range_count: the range holds more elements than Int can count")
   else (hi - lo) + 1
 
-fn range_to_list_go(current: Int, end_value: Int, step: Int) -> List Int =
-  if range_past_end(current, end_value, step) then Nil
-  else if range_at_end(current, end_value) then Cons(current, Nil)
-  else Cons(current, range_to_list_go(current + step, end_value, step))
+fn range_to_list_go(current: Int, end_value: Int, step: Int, acc: List Int) -> List Int =
+  if range_past_end(current, end_value, step) then list_reverse_go(acc, Nil)
+  else if range_at_end(current, end_value) then list_reverse_go(Cons(current, acc), Nil)
+  else range_to_list_go(current + step, end_value, step, Cons(current, acc))
 
+# O(n): the range materialised in order, empty when the range is.
 export fn range_to_list(value: IntRange) -> List Int =
-  range_to_list_go(range_start(value), range_end(value), range_step(value))
+  range_to_list_go(range_start(value), range_end(value), range_step(value), Nil)
 
 fn range_fold_go(current: Int, end_value: Int, by: Int, acc: b, step: b -> Int -> b !{e}) -> b !{e} =
   if range_past_end(current, end_value, by) then acc
@@ -218,10 +222,14 @@ fn range_each_go(f: Int -> Unit !{e}, current: Int, end_value: Int, by: Int) -> 
 export fn range_each(f: Int -> Unit !{e}, r: IntRange) -> Unit !{e} =
   range_each_go(f, range_start(r), range_end(r), range_step(r))
 
-fn list_map_go(f: a -> b, xs: List a) -> List b =
+# The accumulator family below (map, filter, filter_map, partition, flat_map, union,
+# diff) all build reversed and reverse once at the end. Depth is O(1) in the input;
+# the cost is 2k cells for k results — the accumulator's, then the reversed copy that
+# becomes the result. `Cons(x, recurse(...))` allocated k but recursed k deep.
+fn list_map_go(f: a -> b, xs: List a, acc: List b) -> List b =
   match xs with
-  | Nil -> Nil
-  | Cons x rest -> Cons(f(x), list_map_go(f, rest))
+  | Nil -> list_reverse_go(acc, Nil)
+  | Cons x rest -> list_map_go(f, rest, Cons(f(x), acc))
 
 fn list_fold_go(step: b -> a -> b !{e}, init: b, xs: List a) -> b !{e} =
   match xs with
@@ -239,38 +247,45 @@ fn list_each_go(f: a -> Unit !{e}, xs: List a) -> Unit !{e} =
         _ <- f(x)
         list_each_go(f, rest)
 
+fn list_filter_go(pred: a -> Bool, xs: List a, acc: List a) -> List a =
+  match xs with
+  | Nil -> list_reverse_go(acc, Nil)
+  | Cons x rest ->
+      if pred(x) then list_filter_go(pred, rest, Cons(x, acc))
+      else list_filter_go(pred, rest, acc)
+
 # O(n): keep the elements satisfying `pred`, in order. The concrete List form
 # behind `Filterable List`; generic code wants `filter`.
 export fn list_filter(pred: a -> Bool, xs: List a) -> List a =
+  list_filter_go(pred, xs, Nil)
+
+fn list_filter_map_go(f: a -> Maybe b, xs: List a, acc: List b) -> List b =
   match xs with
-  | Nil -> Nil
+  | Nil -> list_reverse_go(acc, Nil)
   | Cons x rest ->
-      if pred(x) then Cons(x, list_filter(pred, rest))
-      else list_filter(pred, rest)
+      match f(x) with
+      | Nothing -> list_filter_map_go(f, rest, acc)
+      | Just mapped -> list_filter_map_go(f, rest, Cons(mapped, acc))
 
 # O(n): drop and transform in one pass — `Nothing` discards the element, `Just`
 # keeps the mapped value. The concrete List form behind `Filterable List`.
 export fn list_filter_map(f: a -> Maybe b, xs: List a) -> List b =
-  match xs with
-  | Nil -> Nil
-  | Cons x rest ->
-      match f(x) with
-      | Nothing -> list_filter_map(f, rest)
-      | Just mapped -> Cons(mapped, list_filter_map(f, rest))
+  list_filter_map_go(f, xs, Nil)
 
-# O(n), one pass, `pred` applied exactly once per element: the elements
-# satisfying `pred` and those not, each in original order.
-export fn list_partition(pred: a -> Bool, xs: List a) -> (List a, List a) =
+fn list_partition_go(pred: a -> Bool, xs: List a, yes: List a, no: List a) -> (List a, List a) =
   match xs with
-  | Nil -> (Nil, Nil)
+  | Nil -> (list_reverse_go(yes, Nil), list_reverse_go(no, Nil))
   | Cons x rest ->
-      match list_partition(pred, rest) with
-      | (yes, no) ->
-          if pred(x) then (Cons(x, yes), no)
-          else (yes, Cons(x, no))
+      if pred(x) then list_partition_go(pred, rest, Cons(x, yes), no)
+      else list_partition_go(pred, rest, yes, Cons(x, no))
+
+# O(n), `pred` applied exactly once per element: the elements satisfying `pred` and
+# those not, each in original order.
+export fn list_partition(pred: a -> Bool, xs: List a) -> (List a, List a) =
+  list_partition_go(pred, xs, Nil, Nil)
 
 export fn list_map(f: a -> b, xs: List a) -> List b =
-  list_map_go(f, xs)
+  list_map_go(f, xs, Nil)
 
 # O(n): left fold; `step`'s effect row is polymorphic, so this serves both pure folds and
 # effectful accumulation (reading/writing mutable state inside `step`). Data-last.
@@ -293,17 +308,55 @@ export fn list_fold_while(step: b -> a -> b, cond: b -> Bool, init: b, xs: List 
 export fn list_each(f: a -> Unit !{e}, xs: List a) -> Unit !{e} =
   list_each_go(f, xs)
 
+# O(|left|), two passes: `left` is reversed, then unreversed onto `right`, which is
+# shared. That allocates 2|left| cells — the dead intermediate plus the result —
+# where the body-recursive version allocated |left|. Backs `Semigroup List`.
 export fn list_append(left: List a, right: List a) -> List a =
-  match left with
-  | Nil -> right
-  | Cons x rest -> Cons(x, list_append(rest, right))
+  list_reverse_go(list_reverse_go(left, Nil), right)
 
-# O(sum of |f(x)|) with repeated append cost: bind for the List monad — apply f
-# to each element and concatenate the results (flatten-map). Backs `Monad List`.
-export fn list_flat_map(f: a -> List b, xs: List a) -> List b =
+# Each chunk is prepended REVERSED onto acc, never appended to it: appending
+# would cost O(|acc|) per chunk and make the whole thing quadratic.
+fn list_flat_map_go(f: a -> List b, xs: List a, acc: List b) -> List b =
   match xs with
-  | Nil -> Nil
-  | Cons x rest -> list_append(f(x), list_flat_map(f, rest))
+  | Nil -> list_reverse_go(acc, Nil)
+  | Cons x rest -> list_flat_map_go(f, rest, list_reverse_go(f(x), acc))
+
+# O(sum of |f(x)|): bind for the List monad — apply f to each element and
+# concatenate the results (flatten-map). Backs `Monad List`.
+export fn list_flat_map(f: a -> List b, xs: List a) -> List b =
+  list_flat_map_go(f, xs, Nil)
+
+# Builds a list left-to-right at O(1) per element, for code that ADDS rather than
+# folds — `list_append(acc, [x])` in a loop is O(n) per step and quadratic overall.
+# `bytes.builder_*` is the same pattern for `Bytes`.
+#
+# The elements are held REVERSED, and `(..)` cannot hide that: a prelude declaration
+# puts its constructor in scope everywhere regardless (as `Cons` and `Vec` are), so
+# `ListBuilder(xs)` type-checks anywhere and yields a builder that builds `xs`
+# backwards. Go through these four functions; nothing enforces it.
+export wrap ListBuilder a = List a
+
+# One `Nil` for the whole process (plus one permanent GC root), where a nullary
+# `fn` would allocate one per call. Polymorphic because the initializer is a
+# syntactic value, so the value restriction does not bite — the annotation pins the
+# type, it does not generalise.
+export let list_builder_empty: ListBuilder a = ListBuilder(Nil)
+
+# O(1): `item` becomes the LAST element of the list this builds.
+export fn list_builder_add(item: a, b: ListBuilder a) -> ListBuilder a =
+  match b with
+  | ListBuilder held -> ListBuilder(Cons(item, held))
+
+# O(|items|): `items` keep their order, following everything already added.
+export fn list_builder_extend(items: List a, b: ListBuilder a) -> ListBuilder a =
+  match b with
+  | ListBuilder held -> ListBuilder(list_reverse_go(items, held))
+
+# O(n): one reversing pass. A builder is an ordinary value, so building does not
+# consume it and the same builder may be built more than once.
+export fn list_builder_build(b: ListBuilder a) -> List a =
+  match b with
+  | ListBuilder held -> list_reverse_go(held, Nil)
 
 export fn vec_empty() -> Vec a =
   Vec(vector_empty())
@@ -567,26 +620,37 @@ export fn list_member(x: a, xs: List a) -> Bool where Eq a =
 export fn list_add_unique(x: a, xs: List a) -> List a where Eq a =
   if list_member(x, xs) then xs else list_append(xs, Cons(x, Nil))
 
+fn list_union_go(xs: List a, ys: List a, acc: List a) -> List a where Eq a =
+  match xs with
+  | Nil -> list_reverse_go(acc, ys)
+  | Cons h t ->
+      if list_member(h, ys) then list_union_go(t, ys, acc)
+      else list_union_go(t, ys, Cons(h, acc))
+
+# O(|xs| * |ys|): list_member on `ys` per element. `xs`'s elements not already in
+# `ys`, in order, followed by all of `ys`.
 export fn list_union(xs: List a, ys: List a) -> List a where Eq a =
-  match xs with
-  | Nil -> ys
-  | Cons h t ->
-      if list_member(h, ys) then list_union(t, ys)
-      else Cons(h, list_union(t, ys))
+  list_union_go(xs, ys, Nil)
 
+fn list_diff_go(xs: List a, ys: List a, acc: List a) -> List a where Eq a =
+  match xs with
+  | Nil -> list_reverse_go(acc, Nil)
+  | Cons h t ->
+      if list_member(h, ys) then list_diff_go(t, ys, acc)
+      else list_diff_go(t, ys, Cons(h, acc))
+
+# O(|xs| * |ys|): list_member on `ys` per element. `xs`'s elements absent from
+# `ys`, in order.
 export fn list_diff(xs: List a, ys: List a) -> List a where Eq a =
-  match xs with
-  | Nil -> Nil
-  | Cons h t ->
-      if list_member(h, ys) then list_diff(t, ys)
-      else Cons(h, list_diff(t, ys))
+  list_diff_go(xs, ys, Nil)
 
+# `seen` doubles as the result: it holds exactly the kept elements, reversed.
 fn list_dedup_acc(xs: List a, seen: List a) -> List a where Eq a =
   match xs with
-  | Nil -> Nil
+  | Nil -> list_reverse_go(seen, Nil)
   | Cons h t ->
       if list_member(h, seen) then list_dedup_acc(t, seen)
-      else Cons(h, list_dedup_acc(t, Cons(h, seen)))
+      else list_dedup_acc(t, Cons(h, seen))
 
 # O(n²): list_member on 'seen' is O(n); called once per element.
 # A sub-quadratic algorithm needs Ord or Hash — neither is available as a constraint here.
@@ -1337,11 +1401,11 @@ instance Filterable List
 
 # O(n·m): the cartesian ("list monad") product — for each x in xs, combine it with
 # every y in ys. This is the instance consistent with a List monad; the pairwise
-# ("zip") behaviour is a separate ZipList newtype, deferred.
+# ("zip") behaviour is a separate ZipList newtype, deferred. Delegates to
+# list_flat_map, which carries the accumulator: recursing here put the call in an
+# argument to list_append, so depth equalled |xs|.
 fn map2_list(g: a -> b -> c, xs: List a, ys: List b) -> List c =
-  match xs with
-  | Nil -> Nil
-  | Cons x rest -> list_append(list_map(\y -> g(x, y), ys), map2_list(g, rest, ys))
+  list_flat_map(\x -> list_map(\y -> g(x, y), ys), xs)
 
 instance Applicative List
   # pure produces a singleton — the unit of the cartesian product.
@@ -1374,14 +1438,20 @@ instance Monad Maybe
 # implementation names its own variable (docs/method-level-constraints-v0.md §4).
 # Recursion lives in a free helper, as `instance Eq (List a)` does with list_eq:
 # an instance method cannot dispatch to its own class method.
-fn list_traverse_go(g: a -> f b, xs: List a) -> f(List b) where Applicative f =
+#
+# `acc` holds the results reversed inside `f` and is map2's FIRST argument, which
+# is what keeps the earliest element's effect dominant: Maybe and Result are
+# left-biased, so swapping the pair would report the last failure, and the List
+# instance would yield the product in a different order.
+fn list_traverse_go(g: a -> f b, xs: List a, acc: f (List b)) -> f(List b)
+    where Applicative f =
   match xs with
-  | Nil -> pure(Nil)
-  | Cons h t -> map2(\ (y, ys) -> Cons(y, ys), g(h), list_traverse_go(g, t))
+  | Nil -> fmap(\ys -> list_reverse_go(ys, Nil), acc)
+  | Cons h t -> list_traverse_go(g, t, map2(\ (ys, y) -> Cons(y, ys), acc, g(h)))
 
 instance Traversable List
   fn traverse_values(g: a -> f b, xs: List a) -> f(List b) where Applicative f =
-    list_traverse_go(g, xs)
+    list_traverse_go(g, xs, pure(Nil))
 
 instance Traversable Maybe
   fn traverse_values(g: a -> f b, xs: Maybe a) -> f(Maybe b) where Applicative f =
@@ -1694,14 +1764,12 @@ extern fn panic(msg: String) -> a
 extern fn argv_get(idx: Int) -> Maybe String !{IO}
 
 export fn argv_all() -> List String !{IO} =
-  argv_collect(0)
+  argv_collect(0, Nil)
 
-fn argv_collect(i: Int) -> List String !{IO} =
+fn argv_collect(i: Int, acc: List String) -> List String !{IO} =
   match argv_get(i) with
-  | Nothing -> Nil
-  | Just s -> do
-      rest <- argv_collect(i + 1)
-      Cons(s, rest)
+  | Nothing -> list_reverse_go(acc, Nil)
+  | Just s -> argv_collect(i + 1, Cons(s, acc))
 
 # The process environment is NOT declared here. `env_get` lives in stdlib.env; callers use
 # `env.get`. It is a leaf module rather than part of stdlib.process — where the environment would
