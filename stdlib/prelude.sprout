@@ -1459,6 +1459,25 @@ instance Traversable Maybe
     | Nothing -> pure(Nothing)
     | Just v -> fmap(\y -> Just(y), g(v))
 
+# Vec's counterpart to list_traverse_go, with the same accumulator order. O(n): it
+# walks by index and builds once at the end, because vector_append copies —
+# appending inside the walk would make the traverse O(n^2).
+fn vec_traverse_done(acc: f (List b)) -> f(Vec b) where Applicative f =
+  fmap(\ys -> vec_from_list(list_reverse_go(ys, Nil)), acc)
+
+fn vec_traverse_go(g: a -> f b, xs: Vec a, index: Int, total: Int, acc: f (List b)) -> f(Vec b)
+    where Applicative f =
+  if index >= total then vec_traverse_done(acc)
+  else
+    match vec_get(index, xs) with
+    | Nothing -> vec_traverse_done(acc)
+    | Just value ->
+        vec_traverse_go(g, xs, index + 1, total, map2(\ (ys, y) -> Cons(y, ys), acc, g(value)))
+
+instance Traversable Vec
+  fn traverse_values(g: a -> f b, xs: Vec a) -> f(Vec b) where Applicative f =
+    vec_traverse_go(g, xs, 0, vec_length(xs), pure(Nil))
+
 instance Applicative (Result e)
   fn pure(x: a) -> Result e a = Ok(x)
   # Fail-fast: the first Err short-circuits (left-biased); `do` carries the Err
