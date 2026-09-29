@@ -50,11 +50,10 @@ instance Tagless Int
   fn describe() -> String = "int"
 
 # --- A head written through a type ALIAS ------------------------------------
-# `Half a` IS `Tagged a`, so it leaves one argument unapplied and satisfies a class
-# that applies its variable once. The alias's own parameter count says 1 and its
-# residual is also 1 only by coincidence here; what matters is that an alias head
-# is outside the rule's scope (docs/instance-head-kinds-v0.md §2) and must not be
-# judged by a number the writer never declared.
+# `Half a` IS `Tagged a`, so the head leaves one argument unapplied and satisfies a
+# class that applies its variable once. The head is expanded before this check reads
+# it, so the arity judged is the expansion's residual — never the alias's own
+# parameter count, which is a different number (docs/alias-instance-heads-v0.md).
 
 type Tagged k v = Tagged k v
 
