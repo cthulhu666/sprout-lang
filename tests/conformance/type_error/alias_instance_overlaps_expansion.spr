@@ -1,0 +1,19 @@
+module main
+
+# A type alias is transparent, so `instance Label Name` and `instance Label String`
+# are two instances for ONE type and must overlap. The overlap check keyed on the
+# head as written, so the two lived under different keys and both were accepted —
+# only the `String` one was ever reachable.
+
+type alias Name = String
+
+class Label a
+  fn label(x: a) -> String
+
+instance Label Name
+  fn label(x: Name) -> String = "via-alias"
+
+instance Label String
+  fn label(x: String) -> String = "via-String"
+
+fn main() -> Unit !{IO} = print(label("hi"))

@@ -1,0 +1,22 @@
+module main
+
+# The other side of the alias rule: `wrap` is NOT an alias. It makes a distinct
+# nominal type, so a `wrap` head and the wrapped type's head are two different
+# instances that must NOT collide, and each must dispatch to its own.
+#
+# This passes before and after the alias-expansion change. It is here to catch that
+# change over-reaching: expanding a `wrap` head would both merge these keys and make
+# the pair an overlap error.
+
+wrap Tag = String
+
+class Label a
+  fn label(x: a) -> String
+
+instance Label Tag
+  fn label(x: Tag) -> String = "via-wrap"
+
+instance Label String
+  fn label(x: String) -> String = "via-String"
+
+fn main() -> Unit !{IO} = print(label(Tag("hi")) ++ "|" ++ label("hi"))
