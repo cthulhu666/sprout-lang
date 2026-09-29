@@ -16,6 +16,13 @@ fn checked(n: Int) -> Result String Int =
 fn far_pair(n: Int) -> List Int = [n, n + 100]
 
 let no_ints: List Int = Nil
+let no_int_vec: Vec Int = vec_empty()
+
+# `traverse` reached through a `where Traversable t` parameter. The direct calls
+# below devirtualize the dictionary at the call site, so only this shape exercises
+# forwarding one as a hidden argument.
+fn traverse_maybe(g: a -> Maybe b, xs: t a) -> Maybe(t b) where Traversable t =
+  traverse(g, xs)
 
 fn main() -> Unit !{IO} =
   run_suite("traversable", [
@@ -43,5 +50,36 @@ fn main() -> Unit !{IO} =
 
     # sequence is traverse with the elements already in the effect.
     check_eq("sequence all Just", sequence([Just(1), Just(2)]), Just([1, 2])),
-    check_eq("sequence one Nothing", sequence([Just(1), Nothing]), Nothing)
+    check_eq("sequence one Nothing", sequence([Just(1), Nothing]), Nothing),
+
+    # Vec as the traversed structure: the same contract as List over a different
+    # backing, since vector_append copies and the instance must build once.
+    check_eq("vec/maybe all Just",
+      traverse(positive, vec_from_list([2, 4, 6])), Just(vec_from_list([2, 4, 6]))),
+    check_eq("vec/maybe one Nothing",
+      traverse(positive, vec_from_list([2, 0, 6])), Nothing),
+    check_eq("vec/maybe empty", traverse(positive, no_int_vec), Just(no_int_vec)),
+
+    # The EARLIEST failure wins, which is what pins the accumulator as map2's
+    # first argument: the other order reports -4.
+    check_eq("vec/result all Ok",
+      traverse(checked, vec_from_list([1, 2])), Ok(vec_from_list([1, 2]))),
+    check_eq("vec/result first Err",
+      traverse(checked, vec_from_list([1, -2, -4])), Err("negative: -2")),
+
+    # Vec as structure with List as the effect, pinning the REBUILT order rather
+    # than only the element count.
+    check_eq("vec/list product order",
+      traverse(far_pair, vec_from_list([1, 2])),
+      [vec_from_list([1, 2]), vec_from_list([1, 102]),
+       vec_from_list([101, 2]), vec_from_list([101, 102])]),
+
+    check_eq("sequence over vec",
+      sequence(vec_from_list([Just(1), Just(2)])), Just(vec_from_list([1, 2]))),
+    check_eq("sequence over vec one Nothing",
+      sequence(vec_from_list([Just(1), Nothing])), Nothing),
+
+    # Forwarded through a `where Traversable t` caller, not devirtualized.
+    check_eq("vec via constrained caller",
+      traverse_maybe(positive, vec_from_list([3, 5])), Just(vec_from_list([3, 5])))
   ])
