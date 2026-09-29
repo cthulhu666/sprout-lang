@@ -36,6 +36,10 @@ fn request_with(raw: String) -> String =
 fn pairs_of(raw: String) -> String =
   with_req(request_with(raw), \r -> show_pairs(cookie_pairs(r)))
 
+# For the cases that are about the header LINES rather than one header's value.
+fn pairs_of_request(raw: String) -> String =
+  with_req(raw, \r -> show_pairs(cookie_pairs(r)))
+
 fn cookie_of(raw: String, name: String) -> String =
   with_req(request_with(raw), \r -> maybe_with_default("<none>", request_cookie(name, r)))
 
@@ -55,7 +59,9 @@ fn main() -> Unit !{IO} =
     check_eq("a '+' is not a space", pairs_of("t=YWJj+ZGVm"), "t=YWJj+ZGVm"),
     # cookie-octet excludes DQUOTE, so the quotes are syntax and never data.
     check_eq("a quoted value loses its quotes", pairs_of(`t="abc"`), "t=abc"),
-    check_eq("an unbalanced quote is left alone", pairs_of(`t="abc`), `t="abc`),
+    # Stripping needs BOTH ends, so this keeps its quote --- and a DQUOTE is not a
+    # valid value byte, so the pair goes. Go reaches the same answer the same way.
+    check_eq("an unbalanced quote makes the pair invalid", pairs_of(`t="abc`), ""),
     # cookie-pair is `name "=" value`; a bare token is not one. Go keeps this as a
     # name with an empty value, which is the one place this parser is stricter.
     check_eq("a segment with no '=' is dropped", pairs_of("a=1; junk; b=2"), "a=1,b=2"),
@@ -69,5 +75,28 @@ fn main() -> Unit !{IO} =
       cookie_of("a=1", "sid"), "<none>"),
     # Cookie names are case-sensitive even though the header name is not.
     check_eq("request_cookie does not fold the cookie's own name",
-      cookie_of("Sid=1", "sid"), "<none>")
+      cookie_of("Sid=1", "sid"), "<none>"),
+    # ... and the header name IS folded, which no case pinned while every request
+    # above was built with a lowercase field name no browser sends.
+    check_eq("a capitalised field name is found",
+      pairs_of_request("GET / HTTP/1.1\r\nCookie: sid=x\r\n\r\n"), "sid=x"),
+
+    # --- repeated Cookie header lines (RFC 9113 8.2.3) ---
+    # Last-wins dropped `a` outright. Joined, both survive.
+    check_eq("two Cookie lines are joined, not collapsed",
+      pairs_of_request("GET / HTTP/1.1\r\ncookie: a=1\r\ncookie: b=2\r\n\r\n"), "a=1,b=2"),
+    # The direction matters: an appended line must not replace what came before it.
+    check_eq("the earlier line wins a name repeated across lines",
+      with_req("GET / HTTP/1.1\r\ncookie: sid=first\r\ncookie: sid=second\r\n\r\n",
+               \r -> maybe_with_default("<none>", request_cookie("sid", r))), "first"),
+
+    # --- cookie-octet (RFC 6265 4.1.1) ---
+    # A control byte must not reach a handler that may echo it into a response header.
+    check_eq("a value holding a control byte is dropped",
+      pairs_of("a=1; t=x\ty; b=2"), "a=1,b=2"),
+    check_eq("a value holding a backslash is dropped", pairs_of("t=a\\b"), ""),
+    # Space and comma are NOT cookie-octets, and every browser sends them anyway;
+    # rejecting them would drop real cookies, which is the worse failure.
+    check_eq("an interior space is kept", pairs_of("t=a b"), "t=a b"),
+    check_eq("an interior comma is kept", pairs_of("t=a,b"), "t=a,b")
   ])
