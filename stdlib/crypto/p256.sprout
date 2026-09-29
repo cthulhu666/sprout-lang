@@ -564,6 +564,30 @@ export fn public_key(sec1: Bytes) -> Maybe PublicKey =
   else if bytes.get(sec1, 0) != Just(4) then Nothing
   else public_key_xy(bytes.slice(sec1, 1, 32), bytes.slice(sec1, 33, 32))
 
+# The 26 bytes an uncompressed P-256 key is always wrapped in, decimal because there
+# are no hex literals: SEQUENCE 89 { SEQUENCE 19 { id-ecPublicKey, prime256v1 },
+# BIT STRING 66, 0 unused bits }. A table rather than a parser --- nothing in it
+# varies, and reading the OIDs would only ever compare them to these.
+let spki_header =
+  [48, 89, 48, 19, 6, 7, 42, 134, 72, 206, 61, 2, 1,
+   6, 8, 42, 134, 72, 206, 61, 3, 1, 7, 3, 66, 0]
+
+fn header_matches(der: Bytes, index: Int, expected: List Int) -> Bool =
+  match expected with
+  | [] -> true
+  | [want | rest] -> byte_at(der, index) == want && header_matches(der, index + 1, rest)
+
+# X.509 SubjectPublicKeyInfo, which is how a key arrives: WebAuthn's
+# `getPublicKey()`, `openssl ec -pubout`, the inside of a PEM block.
+#
+# The header is checked, not skipped, so another curve's key is refused rather than
+# read from an offset that means nothing on it. There is deliberately no length test:
+# the table's `BIT STRING 66` and `public_key`'s 65 pin the total at 91 between them,
+# and a third check on the same number could never fire.
+export fn public_key_spki(der: Bytes) -> Maybe PublicKey =
+  if header_matches(der, 0, spki_header) then public_key(bytes.drop(der, 26))
+  else Nothing
+
 # --- DER signature decoding ---
 #
 # SEQUENCE { INTEGER r, INTEGER s }, strictly. The largest adversarial surface here:
