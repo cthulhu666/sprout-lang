@@ -141,10 +141,15 @@ base64 session token into a space, and `decode_kv` would drop the pair outright 
 a silent corruption of exactly the value cookies usually carry.
 
 **Prior art, read rather than recalled** (`net/http/cookie.go`, `readCookies` and
-`parseCookieValue`): Go strips a surrounding pair of double quotes, does not
-percent-decode, and trims each segment. This layer agrees on all three.
+`parseCookieValue`): Go trims each *segment* and the name, strips a surrounding pair
+of double quotes from the value, does not percent-decode, and rejects a value
+carrying a byte outside `0x20..0x7e` minus `"`, `;` and `\`. This layer agrees on
+segment trimming, quote stripping, no decoding, and the value-byte class — including
+Go's two deliberate departures from `cookie-octet`, which admits neither space nor
+comma while every browser sends both. Rejecting those would silently drop real
+cookies, and a cookie that vanishes with no error is the hardest failure to debug.
 
-Two divergences, in opposite directions:
+Three divergences:
 
 - **Stricter:** Go keeps a segment with no `=` as a name with an empty value —
   `strings.Cut` returns the whole segment as the name and `isToken` passes it — where
@@ -157,18 +162,35 @@ Two divergences, in opposite directions:
   only that it is non-empty. A name no client would send costs a caller nothing,
   because `request_cookie` can only find what it is asked for, and the character
   class is not worth carrying until something needs it.
+- **Looser:** Go does not trim the *value* — `parseCookieValue` only strips quotes —
+  so `a = 1 ` gives Go `" 1"` and gives this layer `"1"`. Surrounding whitespace is
+  not a `cookie-octet` under any reading, so trimming it recovers a malformed segment
+  rather than altering a well-formed one.
 
-**One Cookie header is all there is to read.** RFC 6265 §5.4 forbids a user agent
-sending more than one, and RFC 9113 §8.2.3 requires the HTTP/2 split to be re-joined
-with `"; "` before it reaches a generic server. So the last-wins header fold cannot
-lose a cookie, and `BACKLOG.md`'s list-valued-headers entry — which cited `Cookie` as
-its motivating case — was corrected in the same change.
+**Repeated `Cookie` lines are joined, not folded.** RFC 6265 §5.4 forbids a user
+agent sending more than one and RFC 9113 §8.2.3 requires an HTTP/2 split to be
+re-joined with `"; "` before reaching a generic server — but a server is not talking
+to a proof, and a gateway that forwards the pieces unjoined is a real
+misconfiguration. `fold_repeat` therefore performs that concatenation itself, which
+is the same rule §8.2.3 states, applied where it can be relied on. The first version
+of this section cited those two RFCs to argue the *last-wins* fold was safe; it was
+not. Last-wins dropped the earlier line, so one appended `Cookie:` header replaced a
+victim's entire jar, and first-wins lookup over the joined value now prefers the
+earlier one instead.
 
 **No `request_cookie_all`.** Duplicate cookie names do occur (the same name at two
 `Path` scopes), but what a handler wants then is almost never "merge them" — it is to
 see both, which `cookie_pairs` already gives. Adding it later breaks nothing.
 
+**Cost.** `cookie_pairs` is O(n) in the pair count: the accumulator is a
+`ListBuilder`, frozen once with `vec_from_list`. A copying `vec_append` made it
+quadratic, which matters because a Cookie header is attacker-controlled up to
+`max_header_bytes` (65536 by default, over the whole header block) — 8192 pairs cost
+392 MB of churn before the fix and 7.8 MB after. `request_cookie` re-derives the
+pairs per call, like every accessor in §5; that is linear per call and deliberate.
+
 **Not here: `Set-Cookie`.** Issue #373's response half needs `HttpServerResponse` to
 hold repeatable headers first — it carries one `Dict String`, so a second
-`with_cookie` would silently overwrite the first — and that prerequisite is filed
-nowhere yet.
+`with_cookie` would silently overwrite the first. Filed as its own `BACKLOG.md` §2
+entry, because a prerequisite recorded only in a design doc is invisible to anyone
+scanning for open work.

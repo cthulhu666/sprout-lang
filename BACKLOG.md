@@ -509,12 +509,17 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   also offers. **Design constraint:** the occupancy bound currently assumes the handler runs after
   the whole body is read; streaming makes them concurrent and changes that math.
 - [ ] `P2` **List-valued request headers.** `parse_header_lines` folds repeats last-wins into a
-  `Dict String`. The two *framing* hazards are refused outright (differing `content-length`,
-  repeated `host`), but a comma-list header (`accept`, `forwarded`, `via`) collapses to the last.
-  **Not `Cookie`:** RFC 6265 §5.4 forbids a user agent sending more than one, and the HTTP/2
-  split that RFC 9113 §8.2.3 permits MUST be re-joined with `"; "` before reaching a generic
-  server — so `cookie_pairs` is already correct. Needs an all-values accessor beside
-  `request_header` (Go `map[string][]string`; Rust `HeaderMap` multi-map).
+  `Dict String`, so a comma-list header (`accept`, `forwarded`, `via`) collapses to the last.
+  Three fields are already handled by name in `fold_repeat`: `host` and a differing
+  `content-length` are refused as framing hazards, and `cookie` is joined with `"; "` per RFC 9113
+  §8.2.3. That is three special cases where a general all-values accessor would be one rule —
+  which is the argument for this entry, not against it. Needs an accessor beside `request_header`
+  (Go `map[string][]string`; Rust `HeaderMap` multi-map).
+- [ ] `P2` **Repeatable response headers.** `HttpServerResponse` carries one `Dict String`, so a
+  response can emit at most one `Set-Cookie` — a second `with_header("set-cookie", …)` silently
+  overwrites the first, and RFC 6265 §3 gives each cookie its own field line. Setting a session
+  cookie while clearing another is ordinary, so this blocks a `with_cookie` builder (issue #373's
+  response half) entirely. `docs/http-request-params-v0.md` §8.
 - [ ] `P2` **Request-param convenience layer.** A merged `param`/`param_all` bag over query+form
   (query-first, matching Werkzeug's `CombinedMultiDict([args, form])`), plus first-wins
   `Dict String` projections `query_params`/`form_params`/`params`. All over the existing `_pairs`
