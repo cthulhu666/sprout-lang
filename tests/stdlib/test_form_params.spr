@@ -8,9 +8,7 @@ import stdlib.string as string
 # content type yields no params rather than misparsing an arbitrary body.
 
 fn maybe_str(m: Maybe String) -> String =
-  match m with
-  | Nothing -> "<none>"
-  | Just v -> v
+  maybe_with_default("<none>", m)
 
 fn show_pairs_from(ps: Vec (String, String), index: Int, total: Int, acc: String) -> String =
   if index >= total then acc

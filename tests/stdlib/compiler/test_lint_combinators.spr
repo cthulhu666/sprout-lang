@@ -1,0 +1,503 @@
+module main
+
+import stdlib.test (TestState, new_state, assert_true, assert_false, assert_eq, summary)
+import stdlib.compiler.lint_rules as lint_rules
+import stdlib.compiler.lint_pattern as lint_pattern
+import stdlib.fs as fs
+import stdlib.env as env
+import stdlib.string as string
+
+# THE EMBEDDED COMBINATOR SOURCE MUST NOT DRIFT FROM THE PRELUDE.
+#
+# `lint_rules` carries the four combinator definitions as source text so the rule
+# fires in any repo, not only one sitting at the sprout-lang root
+# (docs/lint-rules-v0.md §10). That buys portability at the cost of a second copy,
+# so the single-copy guarantee §5 relied on becomes this test's job: derive from
+# the real prelude, derive from the embedded text, and require the two to be
+# alpha-equal. Reading the prelude here is safe where doing it in the linter was
+# not — the suite runs from the repo root and downstream repos never run it.
+
+fn stdlib_root() -> String !{IO} =
+  maybe_with_default("stdlib", env.get("SPROUT_STDLIB_ROOT"))
+
+fn read_prelude(root: String) -> String !{IO} =
+  match fs.read_text(root ++ "/prelude.sprout") with
+  | Err msg -> panic("read_file: prelude.sprout: " ++ msg)
+  | Ok content -> content
+
+fn named(name: String, cs: List lint_rules.Combinator) -> Maybe lint_rules.Combinator =
+  find(\ (c: lint_rules.Combinator) -> lint_rules.combinator_name(c) == name, cs)
+
+# Alpha-equality of the pattern plus identical holes, in order: a hole list that
+# permuted would still match structurally but reconstruct the call's arguments
+# the wrong way round.
+fn agrees(name: String, mine: List lint_rules.Combinator,
+          theirs: List lint_rules.Combinator) -> Bool =
+  let Just a = named(name, mine) else false
+      Just b = named(name, theirs) else false
+  in lint_pattern.expr_alpha_equal(lint_rules.combinator_pattern(a),
+                                   lint_rules.combinator_pattern(b))
+     && string.join(",", lint_rules.combinator_holes(a))
+        == string.join(",", lint_rules.combinator_holes(b))
+
+fn derived_or_panic(src: String) -> List lint_rules.Combinator =
+  match lint_rules.derive_combinators(lint_rules.combinator_names, src) with
+  | Err msg -> panic("derive_combinators: " ++ msg)
+  | Ok cs -> cs
+
+fn count_list(xs: List a) -> Int =
+  match xs with
+  | Nil -> 0
+  | Cons _ rest -> 1 + count_list(rest)
+
+fn err_message(r: Result String (List lint_rules.Combinator)) -> String =
+  match r with
+  | Err msg -> msg
+  | Ok _ -> ""
+
+# §5.3: `where` and `let..in` desugar to a MatchExpr too, so "one MatchExpr" does
+# not distinguish them. A let-bodied combinator would derive to `match ?v with
+# | x -> …` and silently match only subjects also spelled with a binding.
+let let_bodied: String =
+  "export fn result_from_maybe(err: e, value: Maybe a) -> Result e a =\n"
+  ++ "  let unwrapped = value\n"
+  ++ "  in Ok(unwrapped)\n"
+
+let do_bodied: String =
+  "export fn guard(condition: Bool, err: e) -> Result e Unit =\n"
+  ++ "  do\n"
+  ++ "    print(\"x\")\n"
+  ++ "    Ok(())\n"
+
+# A body rebinding a parameter name makes the hole ambiguous: two different
+# subterms would both answer to `?err`. Kept constructor-headed on purpose — an
+# `if`- or literal-headed body would be refused by admissibility first, and the
+# assertion would pass without the shadowing check existing at all.
+let rebinds_param: String =
+  "export fn result_from_maybe(err: e, value: Maybe a) -> Result e a =\n"
+  ++ "  match value with\n"
+  ++ "  | Nothing -> Err(err)\n"
+  ++ "  | Just err -> Ok(err)\n"
+
+let rule_id: String = "hand-rolled-combinator"
+
+fn count_by_rule(findings: List lint_rules.LintFinding, id: String) -> Int =
+  match findings with
+  | Nil -> 0
+  | Cons f rest -> (if finding_rule(f) == id then 1 else 0) + count_by_rule(rest, id)
+
+fn finding_rule(f: lint_rules.LintFinding) -> String =
+  match f with
+  | lint_rules.LintFinding _ _ id _ -> id
+
+fn hits(src: String) -> Int =
+  count_by_rule(lint_rules.lint_ast(src), rule_id)
+
+# §5.2a. `?fallback` sits under `Err _`, so binding it to an expression that
+# reads the subject's own `err` would hoist a reference out of its binder —
+# `examples/json_demo.sprout:19`'s exact shape, which must not be reported.
+let fallback_reads_branch_binder: String =
+  "fn f(r: Result String String) -> String =\n"
+  ++ "  match r with\n"
+  ++ "  | Ok text -> text\n"
+  ++ "  | Err err -> \"refused: \" ++ err\n"
+
+let fallback_is_closed: String =
+  "fn f(r: Result String String, dflt: String) -> String =\n"
+  ++ "  match r with\n"
+  ++ "  | Ok text -> text\n"
+  ++ "  | Err _ -> dflt\n"
+
+# `parser.sprout:1028`'s shape. `ast.is_syntactic_value` admits a constructor
+# application, but hoisting one into an argument allocates on every call, `Just`
+# or not — so "syntactic value" is too broad for §7.4's free-rewrite test.
+let fallback_builds_a_value: String =
+  "fn f(m: Maybe Int, pos: Int) -> Int =\n"
+  ++ "  match m with\n"
+  ++ "  | Just v -> v\n"
+  ++ "  | Nothing -> Wrapped(pos)\n"
+
+# A dotted name is one `VarExpr`, not a base plus a field (§4A, revision 5), so a
+# field read needs no arm in `free_to_hoist` — it is already a variable. Pinned
+# because the alternative reading would make `GetFieldExpr` the load-bearing case.
+let scrutinee_is_a_field_read: String =
+  "fn f(cfg: Config) -> Int =\n"
+  ++ "  match cfg.cached with\n"
+  ++ "  | Just v -> v\n"
+  ++ "  | Nothing -> 0\n"
+
+# `guard`'s subject is a Bool, which is an immediate — so unlike a `match`
+# scrutinee a computed condition boxes nothing, and the rewrite stays free.
+let guard_condition_is_a_call: String =
+  "fn f(n: Int, e: String) -> Result String Unit =\n"
+  ++ "  if positive(n) then Ok(()) else Err(e)\n"
+
+# §6. `stdlib/crypto/p256.sprout:521`'s shape: the rewrite would panic at every
+# call rather than only when the Maybe is Nothing.
+let fallback_panics: String =
+  "fn f(m: Maybe Int) -> Int =\n"
+  ++ "  match m with\n"
+  ++ "  | Just v -> v\n"
+  ++ "  | Nothing -> panic(\"internal error\")\n"
+
+let fallback_is_a_call: String =
+  "fn f(m: Maybe Int, a: Int) -> Int =\n"
+  ++ "  match m with\n"
+  ++ "  | Just v -> v\n"
+  ++ "  | Nothing -> compute(a)\n"
+
+# `stdlib/compiler/types.sprout:196`'s shape. The SCRUTINEE is a call, but a
+# match evaluates it too, so hoisting it changes nothing and the note must stay
+# off. Only a hole in a branch body can make the rewrite eager.
+let scrutinee_is_a_call: String =
+  "fn f(k: String, d: Dict (List String)) -> List String =\n"
+  ++ "  match dict_get(k, d) with\n"
+  ++ "  | Nothing -> Nil\n"
+  ++ "  | Just ms -> ms\n"
+
+let fallback_is_a_literal: String =
+  "fn f(m: Maybe Int) -> Int =\n"
+  ++ "  match m with\n"
+  ++ "  | Just v -> v\n"
+  ++ "  | Nothing -> 0\n"
+
+# §5.1 rewrap-only. `stdlib/http_server.sprout`'s content_length_result is the
+# live near-miss: the Just branch does work, so it is not the combinator.
+let just_branch_transforms: String =
+  "fn f(m: Maybe Int) -> Maybe Int =\n"
+  ++ "  match m with\n"
+  ++ "  | Just v -> Just(v + 1)\n"
+  ++ "  | Nothing -> Nothing\n"
+
+# §5's second property: `let..else` desugars to the same MatchExpr, and there is
+# no `match` token in the source at all (`stdlib/args.sprout:50`'s form).
+let let_else_spelling: String =
+  "fn f(m: Maybe Int, dflt: Int) -> Int =\n"
+  ++ "  let Just value = m else dflt\n"
+  ++ "  in value\n"
+
+# The `if`-bodied combinator, so derivation's IfExpr arm is exercised end to end.
+let guard_shape: String =
+  "fn f(n: Int, e: String) -> Result String Unit =\n"
+  ++ "  if n > 0 then Ok(()) else Err(e)\n"
+
+# §7 guard 2, both halves.
+let shadows_locally: String =
+  "fn maybe_with_default(fallback: Int, m: Maybe Int) -> Int =\n"
+  ++ "  match m with\n"
+  ++ "  | Just x -> x\n"
+  ++ "  | Nothing -> fallback\n"
+
+let shadows_by_import: String =
+  "import other.mod (maybe_with_default)\n"
+  ++ "\n"
+  ++ "fn f(m: Maybe Int) -> Int =\n"
+  ++ "  match m with\n"
+  ++ "  | Just v -> v\n"
+  ++ "  | Nothing -> 0\n"
+
+# A near-miss on the import guard: `guard_rail` must not disable the rule.
+let imports_a_similar_name: String =
+  "import other.mod (guard_rail)\n"
+  ++ "\n"
+  ++ "fn f(m: Maybe Int) -> Int =\n"
+  ++ "  match m with\n"
+  ++ "  | Just v -> v\n"
+  ++ "  | Nothing -> 0\n"
+
+# A selective list may wrap. `header_lines` spans the continuation, but neither
+# line alone is an import declaration, so testing them independently saw neither
+# half and the rule suggested the very name the file had shadowed.
+let shadows_by_wrapped_import: String =
+  "import other.mod (guard_rail,\n"
+  ++ "  maybe_with_default)\n"
+  ++ "\n"
+  ++ "fn f(m: Maybe Int) -> Int =\n"
+  ++ "  match m with\n"
+  ++ "  | Just v -> v\n"
+  ++ "  | Nothing -> 0\n"
+
+# A comment inside the list must not hide the names below it;
+# `module_loader.join_wrapped_import` records that same bug on the load path.
+let shadows_by_commented_import: String =
+  "import other.mod (guard_rail,  # keep this one\n"
+  ++ "  maybe_with_default)\n"
+  ++ "\n"
+  ++ "fn f(m: Maybe Int) -> Int =\n"
+  ++ "  match m with\n"
+  ++ "  | Just v -> v\n"
+  ++ "  | Nothing -> 0\n"
+
+# A `(..)` group closes a paren before the list does. Scanning for the list's
+# closing `)` stopped inside it and dropped every name after — the same bug
+# `module_loader.parse_import_after_module` records on the load path.
+let shadows_past_a_ctor_group: String =
+  "import other.mod (Thing(..), maybe_with_default)\n"
+  ++ "\n"
+  ++ "fn f(m: Maybe Int) -> Int =\n"
+  ++ "  match m with\n"
+  ++ "  | Just v -> v\n"
+  ++ "  | Nothing -> 0\n"
+
+# The mirror: joining the header must not degrade the guard into "a combinator
+# name appears somewhere in it".
+let wrapped_import_of_similar_names: String =
+  "import other.mod (guard_rail,\n"
+  ++ "  maybe_with_defaults)\n"
+  ++ "\n"
+  ++ "fn f(m: Maybe Int) -> Int =\n"
+  ++ "  match m with\n"
+  ++ "  | Just v -> v\n"
+  ++ "  | Nothing -> 0\n"
+
+# Redefining `Maybe` shadows the type the combinators are declared over, so
+# `maybe_with_default` cannot take this value and the suggestion would not
+# typecheck. 10 corpus files do this; `test_ir_codegen_unary_arith.spr` is the one
+# that also carries a matching shape.
+let redefines_the_wrapper_type: String =
+  "type Maybe a =\n"
+  ++ "  | Just a\n"
+  ++ "  | Nothing\n"
+  ++ "\n"
+  ++ "fn f(m: Maybe Int) -> Int =\n"
+  ++ "  match m with\n"
+  ++ "  | Just v -> v\n"
+  ++ "  | Nothing -> 0\n"
+
+# The near-miss: an unrelated local type must not disable the rule.
+let declares_an_unrelated_type: String =
+  "type Holder a =\n"
+  ++ "  | Holder a\n"
+  ++ "\n"
+  ++ "fn f(m: Maybe Int) -> Int =\n"
+  ++ "  match m with\n"
+  ++ "  | Just v -> v\n"
+  ++ "  | Nothing -> 0\n"
+
+# The guard must key on what the MATCHER reads. `lint_pattern` dispatches on
+# constructor names, so a type reusing `Just`/`Nothing` under another name is
+# matched however its type is spelled, and the rewrite fails "Maybe vs Box".
+let reuses_wrapper_ctors: String =
+  "type Box a (..) =\n"
+  ++ "  | Just a\n"
+  ++ "  | Nothing\n"
+  ++ "\n"
+  ++ "fn f(m: Box Int) -> Int =\n"
+  ++ "  match m with\n"
+  ++ "  | Just v -> v\n"
+  ++ "  | Nothing -> 0\n"
+
+# The same hole on the Result side, and through a wildcard arm rather than a
+# named one: `Ok` is reused by a type that is not a Result at all.
+let reuses_result_ctors: String =
+  "type Tri (..) =\n"
+  ++ "  | Ok Int\n"
+  ++ "  | Warn Int\n"
+  ++ "  | Bad\n"
+  ++ "\n"
+  ++ "fn f(t: Tri, d: Int) -> Int =\n"
+  ++ "  match t with\n"
+  ++ "  | Ok x -> x\n"
+  ++ "  | _ -> d\n"
+
+# A bare top-level function name is a `VarExpr`, but reading it as a value
+# eta-expands to a `sprout_alloc_closure` — the match allocates only on the
+# Nothing branch, the rewrite on every call.
+let fallback_is_a_function_name: String =
+  "fn bump(n: Int) -> Int = n + 1\n"
+  ++ "\n"
+  ++ "fn f(m: Maybe (Int -> Int)) -> (Int -> Int) =\n"
+  ++ "  match m with\n"
+  ++ "  | Just g -> g\n"
+  ++ "  | Nothing -> bump\n"
+
+# A nullary constructor is a `VarExpr` too, and costs an interned-constructor
+# call. `checker.arrow_labels` is the live shape.
+let fallback_is_a_nullary_ctor: String =
+  "fn f(m: Maybe (List String)) -> List String =\n"
+  ++ "  match m with\n"
+  ++ "  | Just xs -> xs\n"
+  ++ "  | Nothing -> Nil\n"
+
+# A module-qualified function is one dotted `VarExpr`, exactly as a field read
+# is — the root segment is what tells them apart: `cfg` is bound here, `string`
+# is not.
+let fallback_is_a_qualified_name: String =
+  "fn f(m: Maybe (String -> String)) -> (String -> String) =\n"
+  ++ "  match m with\n"
+  ++ "  | Just g -> g\n"
+  ++ "  | Nothing -> string.trim\n"
+
+# §7 guard 2 reaches only top level, so a parameter — `guard` is an ordinary
+# name for one — left the rule live and it suggested `guard(guard, e)`.
+let shadowed_by_a_parameter: String =
+  "fn check(guard: Bool, e: String) -> Result String Unit =\n"
+  ++ "  if guard then Ok(()) else Err(e)\n"
+
+# The same hole one level in: a local binding shadows just as effectively.
+let shadowed_by_a_local_let: String =
+  "fn f(m: Maybe Int) -> Int =\n"
+  ++ "  let maybe_with_default = 5\n"
+  ++ "  in match m with\n"
+  ++ "     | Just v -> v\n"
+  ++ "     | Nothing -> 0\n"
+
+# A class method is a value name too, and `decl_bound_name` reported none for a
+# `ClassDecl` — `ast.decl_value_scopes` is the enumeration that does not miss.
+let shadowed_by_a_class_method: String =
+  "class Defaulting a\n"
+  ++ "  fn maybe_with_default(d: Int, m: Maybe Int) -> Int\n"
+  ++ "\n"
+  ++ "fn f(m: Maybe Int) -> Int =\n"
+  ++ "  match m with\n"
+  ++ "  | Just v -> v\n"
+  ++ "  | Nothing -> 0\n"
+
+# The walker reaches a nested match through `walk_chain`, which recursed into
+# the continuing branch without going back through `walk_expr` — so no combinator
+# inside a 2-branch chain was ever checked. A 3-branch outer match took the other
+# path and reported, which is what made the hole look like correct behaviour.
+let nested_in_a_two_branch_chain: String =
+  "fn f(a: Maybe (Maybe Int), d: Int) -> Int =\n"
+  ++ "  match a with\n"
+  ++ "  | Nothing -> d\n"
+  ++ "  | Just b ->\n"
+  ++ "      match b with\n"
+  ++ "      | Just v -> v\n"
+  ++ "      | Nothing -> d\n"
+
+# The near-miss for the class-method half. Without it, the fixture above passes
+# on any file whose `class` block merely fails to parse — which is the gate it
+# would then be testing instead of the guard.
+let declares_an_unrelated_class: String =
+  "class Showable a\n"
+  ++ "  fn render(v: a) -> String\n"
+  ++ "\n"
+  ++ "fn f(m: Maybe Int) -> Int =\n"
+  ++ "  match m with\n"
+  ++ "  | Just v -> v\n"
+  ++ "  | Nothing -> 0\n"
+
+# §7 guard 3, in its post-2026-08-20 spelling.
+let opts_out_of_prelude: String =
+  "no_prelude\n"
+  ++ "\n"
+  ++ "fn f(m: Maybe Int) -> Int =\n"
+  ++ "  match m with\n"
+  ++ "  | Just v -> v\n"
+  ++ "  | Nothing -> 0\n"
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    root <- stdlib_root()
+    prelude_src <- read_prelude(root)
+
+    let from_prelude = derived_or_panic(prelude_src)
+    let embedded = lint_rules.combinator_patterns
+
+    assert_eq(state, "all four combinators derive from the prelude",
+      count_list(from_prelude), 4)
+    assert_eq(state, "the embedded set has the same four",
+      count_list(embedded), 4)
+
+    assert_true(state, "result_from_maybe: embedded matches the prelude",
+      agrees("result_from_maybe", embedded, from_prelude))
+    assert_true(state, "maybe_with_default: embedded matches the prelude",
+      agrees("maybe_with_default", embedded, from_prelude))
+    assert_true(state, "result_with_default: embedded matches the prelude",
+      agrees("result_with_default", embedded, from_prelude))
+    assert_true(state, "guard: embedded matches the prelude",
+      agrees("guard", embedded, from_prelude))
+
+    # §5.3's loud rejections. Each must name the function, or the authoring bug
+    # it reports is unactionable.
+    assert_true(state, "a let-bodied combinator is rejected, by name",
+      string.contains(err_message(
+        lint_rules.derive_combinators(["result_from_maybe"], let_bodied)),
+        "result_from_maybe"))
+    assert_true(state, "a do-bodied combinator is rejected, by name",
+      string.contains(err_message(
+        lint_rules.derive_combinators(["guard"], do_bodied)), "guard"))
+    assert_true(state, "a body rebinding a parameter is rejected, naming the parameter",
+      string.contains(err_message(
+        lint_rules.derive_combinators(["result_from_maybe"], rebinds_param)), "`err`"))
+
+    # A name the source does not define is an authoring bug in the same class.
+    assert_true(state, "an absent combinator name is rejected, by name",
+      string.contains(err_message(
+        lint_rules.derive_combinators(["maybe_from_result"], let_bodied)),
+        "maybe_from_result"))
+
+    # §5.2a closedness — the reason the matcher needs free variables and not
+    # merely a renaming map.
+    assert_eq(state, "fallback reading a branch binder: not reported",
+      hits(fallback_reads_branch_binder), 0)
+    assert_eq(state, "closed fallback in the same position: reported",
+      hits(fallback_is_closed), 1)
+
+    # §6 + §7.4 — only a rewrite free of cost and of behaviour change is reported.
+    # The three ways of failing that are silent, each for its own reason.
+    assert_eq(state, "panicking fallback: not reported", hits(fallback_panics), 0)
+    assert_eq(state, "computed fallback: not reported — the call would evaluate it always",
+      hits(fallback_is_a_call), 0)
+    assert_eq(state, "constructor-application fallback: not reported — hoisting allocates",
+      hits(fallback_builds_a_value), 0)
+    assert_eq(state, "computed scrutinee: not reported — the match takes an unboxed worker",
+      hits(scrutinee_is_a_call), 0)
+    assert_eq(state, "literal fallback over a variable scrutinee: reported",
+      hits(fallback_is_a_literal), 1)
+    assert_eq(state, "a computed `guard` condition is still reported — a Bool is immediate",
+      hits(guard_condition_is_a_call), 1)
+    assert_eq(state, "a dotted scrutinee is reported — it parses as one VarExpr, not a field read",
+      hits(scrutinee_is_a_field_read), 1)
+
+    assert_eq(state, "Just branch that transforms: not reported",
+      hits(just_branch_transforms), 0)
+    assert_eq(state, "let..else spelling: reported", hits(let_else_spelling), 1)
+    assert_eq(state, "if-bodied guard shape: reported", hits(guard_shape), 1)
+
+    # §7 guard 2 — a file that redefines a combinator gets no suggestion.
+    assert_eq(state, "local definition shadows: not reported", hits(shadows_locally), 0)
+    assert_eq(state, "selective import shadows: not reported", hits(shadows_by_import), 0)
+    assert_eq(state, "an import of a merely similar name does not disable the rule",
+      hits(imports_a_similar_name), 1)
+    assert_eq(state, "a wrapped selective import shadows too",
+      hits(shadows_by_wrapped_import), 0)
+    assert_eq(state, "a comment in a wrapped list does not hide the names below it",
+      hits(shadows_by_commented_import), 0)
+    assert_eq(state, "a name after a (..) group still shadows",
+      hits(shadows_past_a_ctor_group), 0)
+    assert_eq(state, "a wrapped import of merely similar names does not disable the rule",
+      hits(wrapped_import_of_similar_names), 1)
+
+    assert_eq(state, "a file redefining `Maybe`: not reported",
+      hits(redefines_the_wrapper_type), 0)
+    assert_eq(state, "an unrelated local type does not disable the rule",
+      hits(declares_an_unrelated_type), 1)
+
+    # §7 guard 3 — `no_prelude`, not "has no imports" (that category is gone).
+    assert_eq(state, "no_prelude file: not reported", hits(opts_out_of_prelude), 0)
+
+    assert_eq(state, "a type reusing `Just`/`Nothing`: not reported — the matcher reads ctor names",
+      hits(reuses_wrapper_ctors), 0)
+    assert_eq(state, "a non-Result type reusing `Ok`: not reported",
+      hits(reuses_result_ctors), 0)
+
+    assert_eq(state, "function-name fallback: not reported — reading it allocates a closure",
+      hits(fallback_is_a_function_name), 0)
+    assert_eq(state, "nullary-constructor fallback: not reported — it is an interned-ctor call",
+      hits(fallback_is_a_nullary_ctor), 0)
+    assert_eq(state, "module-qualified fallback: not reported — its root segment is not bound here",
+      hits(fallback_is_a_qualified_name), 0)
+
+    assert_eq(state, "a parameter shadows: not reported", hits(shadowed_by_a_parameter), 0)
+    assert_eq(state, "a local let shadows: not reported", hits(shadowed_by_a_local_let), 0)
+    assert_eq(state, "a class method shadows: not reported", hits(shadowed_by_a_class_method), 0)
+    assert_eq(state, "an unrelated class method does not disable the rule",
+      hits(declares_an_unrelated_class), 1)
+
+    assert_eq(state, "a combinator nested in a 2-branch chain is reached",
+      hits(nested_in_a_two_branch_chain), 1)
+
+    summary(state)

@@ -126,6 +126,15 @@ let ambiguous_both_continue =
   "  | Left x -> (match lookup(x) with | Nothing -> 0 | Just y -> y)\n" ++
   "  | Right x -> (match lookup(x) with | Nothing -> 0 | Just y -> y)\n"
 
+# The same two-arm shape with the wrapper already in hand, so the combinator rule
+# still applies to it. Keeps "one finding per branch" pinned now that
+# `ambiguous_both_continue`'s call scrutinees put it outside the rule (§7.4).
+let ambiguous_both_continue_in_hand =
+  "fn ambiguous(a: Wrap Int, m: Maybe Int) -> Int =\n" ++
+  "  match a with\n" ++
+  "  | Left x -> (match m with | Nothing -> 0 | Just y -> y)\n" ++
+  "  | Right x -> (match m with | Nothing -> 0 | Just y -> y)\n"
+
 let list_recursion =
   "fn join_list(sep: String, xs: List String) -> String =\n" ++
   "  match xs with\n" ++
@@ -710,10 +719,27 @@ fn main() -> Unit !{IO} =
 
     assert_eq(state, "docs example (depth 2): below min_staircase_depth=3, no finding", count_list(lint_rules.lint_ast(docs_example)), 0)
 
-    assert_eq(state, "3-branch outer: no finding", count_list(lint_rules.lint_ast(three_branch_outer)), 0)
+    # These two count by rule, not in total: their inner `| Nothing -> 0 | Just v -> v`
+    # is `maybe_with_default(0, y)` and hand-rolled-combinator reports it correctly.
+    # Asserting a total of 0 was standing in for "staircase did not fire".
+    assert_eq(state, "3-branch outer: no staircase finding",
+      count_by_rule(lint_rules.lint_ast(three_branch_outer), "staircase-of-doom"), 0)
     assert_eq(state, "flat match: no finding", count_list(lint_rules.lint_ast(flat_match)), 0)
     assert_eq(state, "boolean-pattern nesting: no finding", count_list(lint_rules.lint_ast(boolean_nested)), 0)
-    assert_eq(state, "both branches continue: no finding", count_list(lint_rules.lint_ast(ambiguous_both_continue)), 0)
+    assert_eq(state, "both branches continue: no staircase finding",
+      count_by_rule(lint_rules.lint_ast(ambiguous_both_continue), "staircase-of-doom"), 0)
+
+    # The other half of the same two fixtures, so converting the assertions above
+    # records what changed instead of discarding it.
+    assert_eq(state, "3-branch outer: the inner match IS a combinator",
+      count_by_rule(lint_rules.lint_ast(three_branch_outer), "hand-rolled-combinator"), 1)
+    assert_eq(state, "both branches continue: one combinator finding per branch",
+      count_by_rule(lint_rules.lint_ast(ambiguous_both_continue_in_hand),
+                    "hand-rolled-combinator"), 2)
+    # Same shape over a call scrutinee is outside the rule: the match takes the
+    # callee's unboxed worker and the combinator form would box (§7.4).
+    assert_eq(state, "both branches continue over a call: no combinator finding",
+      count_by_rule(lint_rules.lint_ast(ambiguous_both_continue), "hand-rolled-combinator"), 0)
 
     assert_eq(state, "3-deep chain: exactly one finding (meets threshold)", count_list(lint_rules.lint_ast(three_deep_chain)), 1)
     assert_eq(state, "3-deep chain: anchored at outermost match", first_line(lint_rules.lint_ast(three_deep_chain)), 2)
@@ -773,7 +799,12 @@ fn main() -> Unit !{IO} =
 
     assert_eq(state, "fixed-length pattern nested in a head position (outer chain stays var-tailed): one finding (the inner [a, b])", count_list(lint_rules.lint_ast(nested_fixed_length_in_head)), 1)
 
-    assert_eq(state, "non-list ADT pattern (Maybe): no finding", count_list(lint_rules.lint_ast(non_list_pattern_unaffected)), 0)
+    # Counted by rule: the fixture is `maybe_with_default(0, x)` spelled out, so
+    # hand-rolled-combinator reports it. The claim here is about list-shape only.
+    assert_eq(state, "non-list ADT pattern (Maybe): no list-shape finding",
+      count_by_rule(lint_rules.lint_ast(non_list_pattern_unaffected), "list-shape-pattern"), 0)
+    assert_eq(state, "non-list ADT pattern (Maybe): is a combinator",
+      count_by_rule(lint_rules.lint_ast(non_list_pattern_unaffected), "hand-rolled-combinator"), 1)
 
     assert_eq(state, "hand-written Cons h t pattern in a do-bind: no finding (var tail, not fixed-length)", count_list(lint_rules.lint_ast(do_bind_hand_written_var_tail)), 0)
 

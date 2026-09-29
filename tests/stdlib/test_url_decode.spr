@@ -11,9 +11,7 @@ import stdlib.string as string
 # order, and drops segments whose key or value fails to decode.
 
 fn decoded(r: Result Utf8Error String) -> String =
-  match r with
-  | Ok s -> s
-  | Err _ -> "<ERR>"
+  result_with_default("<ERR>", r)
 
 fn is_err(r: Result Utf8Error String) -> Bool =
   match r with

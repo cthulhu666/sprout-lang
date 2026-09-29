@@ -1,3 +1,4 @@
+# sprout-ignore-all lint/hand-rolled-combinator: a `match` in element position is the subject (arm-`|` greediness, docs/list-comprehensions-v0.md D1)
 import stdlib.test (check_eq, run_suite)
 
 # Parser disambiguation for list comprehensions (docs/list-comprehensions-v0.md

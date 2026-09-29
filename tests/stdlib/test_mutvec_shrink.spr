@@ -36,9 +36,7 @@ fn joined_str(v: MutVec String) -> String !{IO} =
 # Taken as an already-computed Maybe: inside a `do` block `x <- mutvec_remove(..)`
 # would fallible-bind and unwrap it, which is the case these assertions observe.
 fn or_else(m: Maybe Int, dflt: Int) -> Int =
-  match m with
-  | Just x -> x
-  | Nothing -> dflt
+  maybe_with_default(dflt, m)
 
 # A remove whose result is not wanted. `_ <- mutvec_remove(..)` will not do: a
 # `<-` bind on a Maybe is a fallible bind, so it would return early from a Unit
@@ -46,9 +44,7 @@ fn or_else(m: Maybe Int, dflt: Int) -> Int =
 fn discard(m: Maybe a) -> Unit = ()
 
 fn or_else_str(m: Maybe String, dflt: String) -> String =
-  match m with
-  | Just x -> x
-  | Nothing -> dflt
+  maybe_with_default(dflt, m)
 
 fn main() -> Unit !{IO} =
   do

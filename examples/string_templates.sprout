@@ -35,9 +35,7 @@ fn emit_buffered(line: StringTemplate) -> Unit !{IO} =
 
 # W8/P1: parse_int is total now; fall back to 0 for a non-numeric argument.
 fn int_or_zero(m: Maybe Int) -> Int =
-  match m with
-  | Just n -> n
-  | Nothing -> 0
+  maybe_with_default(0, m)
 
 fn main() -> Unit !{IO} =
   do

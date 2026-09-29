@@ -21,9 +21,7 @@ fn round_via_hof(n: Int, probe: a) -> Int !{} where Enum a =
   in apply_fn(ordinal, first_or(from_ordinal(n), probe))
 
 fn first_or(m: Maybe a, dflt: a) -> a =
-  match m with
-  | Just v -> v
-  | Nothing -> dflt
+  maybe_with_default(dflt, m)
 
 fn main() -> Unit !{IO} =
   run_suite("eta_forwarding", [

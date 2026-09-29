@@ -1,3 +1,4 @@
+# sprout-ignore-all lint/hand-rolled-combinator: the `let..else` spellings ARE the subject; rewriting them would delete the test
 import stdlib.test (check_eq, run_suite)
 
 # `let … in` block: layout-aligned bindings under one `let`, `in` dedented to the

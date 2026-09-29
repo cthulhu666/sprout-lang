@@ -1,9 +1,53 @@
 # Lint rules as patterns (v0)
 
-Status: **piece A (§4A, the matcher) implemented; B and C are design.** Experimental; no change to
-`docs/spec-v0.md`, which does not describe the linter. Supersedes the "config file for per-rule
-enable/disable" line in `BACKLOG.md`'s `Formatter/linter beyond the baseline` entry — that entry
-points here.
+Status: **pieces A (§4A, the matcher) and B (the `hand-rolled-combinator` rule) implemented; C, the
+config file, is design.** The rule is live in `just lint` and pre-commit, and is **not** in CI —
+`lint` never was, and at 12 findings it cannot be until suppression ships (`BACKLOG.md`).
+Experimental; no change to `docs/spec-v0.md`, which does not describe the linter.
+Supersedes the "config file for per-rule enable/disable" line in `BACKLOG.md`'s `Formatter/linter
+beyond the baseline` entry — that entry points here.
+
+Revision 9. An ensemble review (`high`, 3 passes) of revision 8 found four defects, all of the same
+shape: a guard written against the symptom that had been seen rather than the mechanism that
+produces it. The wrapper guard keyed on the TYPE name while the matcher dispatches on CONSTRUCTOR
+names, so `type Box a = | Just a | Nothing` sailed through (§7 guard 2). `free_to_hoist` admitted
+every `VarExpr`, though a top-level function read as a value eta-expands to a closure and a nullary
+constructor is an interned-constructor call — so the "costs nothing" test passed two things that
+cost an allocation each (§6). The shadowing guard stopped at top level, leaving a `guard` PARAMETER
+to collect a suggestion that resolves to itself. And `walk_chain` recursed into a nested match
+without going back through `walk_expr`, so no combinator inside a 2-branch chain was ever offered to
+the rule at all — which means revision 8's "corpus at 0" was partly a measurement of where the
+walker declined to look. The fix for the first is to derive the guard from the patterns; for the
+next two, a local-binding environment threaded through the walk, which answers "is this name a local
+or a top-level function" once and settles both. Two of revision 8's own 20 rewrites turn out to be
+pessimisations under the corrected test (`checker.arrow_labels` over `Nil`, `test_fs.names_of` over
+`[]`) and are reverted, and a fifth `sprout-ignore-all` that suppressed nothing is removed.
+
+Revision 8. Revision 7 shipped the rule and measured it, and the measurement condemned it: of 165
+findings, ~140 suggested a rewrite that is **slower**, because a combinator takes its wrapper as an
+argument and an argument is boxed while a `match` on the producing call takes an unboxed worker
+(`bench/results-2026-09-28-vec-box-tax.md`, 70–90x at 100k live). Revision 7 knew of a "hot loop"
+carve-out and called it unguardable; the real criterion is not heat but **argument position**, and
+that *is* syntactic. §6 and §7.4 now form one test — report only a rewrite that costs nothing —
+which takes the rule from 165 findings over 98 files to **25 over 23**, 2 outside `tests/`. Those 25
+are then swept — 20 helpers rewritten, 4 files suppressed with a reason — leaving `just lint` at
+**12**, all of them `unparsed` fixtures, which is what it was before the rule existed. Applying the
+21st suggestion broke the build and exposed a third shadowing case the guards missed: a file that
+redefines `Maybe` (§7 guard 2). Nothing short of *applying* a suggestion would have found it.
+Two corrections fell out: `ast.is_syntactic_value` is too broad for the fallback test (it admits a
+constructor application, which allocates once hoisted), and `docs/idiomatic-sprout.md`'s headline
+combinator example was itself the pessimised shape while its mechanism sentence said the peephole
+was builtin-only. Both fixed here; the second is why the corpus had 165 sites to begin with.
+
+Revision 7. Revision 6 closed §14 Q1 with "derivation stays at startup" and never asked what it
+derives *from*. `fmt_bin` reads only its argv paths, so reading `prelude.sprout` would have tied the
+rule to this repo — working for `just lint` and the pre-commit hook, absent everywhere else, and
+with no good failure mode there. The definitions are now embedded in `lint_rules.sprout` and a test
+pins them to the prelude by alpha-equality (§10). Two consequences: `lint_ast` keeps its signature,
+and `-n 100` in `justfile` loses its rationale — `-n 10` is the measured optimum again. §7's guard 3
+was also stale: it guarded "prelude-less files", a category `docs/prelude-scope-v0.md` abolished on
+2026-08-20, so as written it tested a condition that is never true. The real opt-out is the
+`no_prelude` directive.
 
 Revision 6. §10's cost argument was wrong a third time, and in a way no more careful measurement
 would have caught: its per-file numbers were right, but it multiplied them by 1145 without asking
@@ -312,7 +356,8 @@ real and derivable shape; supporting it is §13's business, and until then it is
 Sprout is strict, so `result_from_maybe(err, value)` builds `err` always while the hand-rolled match
 builds it only on failure. The rewrite moves work from conditional to unconditional. Revision 1
 adopted hlint's answer — always fire, attach a note — after rejecting the opposite. **Both were
-wrong.** There are three cases, not one.
+wrong**, and so was revision 7's middle course of three outcomes: see below, and §7.4 for the cost
+half. The rule reports one case, the free rewrite, and is silent on every other.
 
 **Refuse: the fallback cannot be evaluated eagerly at all.** `stdlib/crypto/p256.sprout:521-525`:
 
@@ -334,22 +379,41 @@ deferred "decide safety from effect rows" alternative could never have caught th
 for a `panic` callee catches it for free, which is the whole reason to state the rule here rather
 than defer it.
 
-**Note: the fallback is evaluable but not a value.** Anything that is not
-`ast.is_syntactic_value` — a call, a template, a concatenation — now runs on the
-success path too. Word the note as a **behaviour change**, not a cost:
+**The syntactic check is one hop deep, and that is a known gap.** A fallback that calls a helper
+whose *body* is a panic — `lowering.eta_inner_dict_unreachable`, reached at `lowering.sprout:1064` —
+reads as an ordinary call, so the rule reports it as merely eager when the rewrite would in fact
+panic on every call. Closing it needs a call graph; the stdlib has 2–3 such helpers, so v0 does not
+build one. Worth revisiting if autocorrect (§9) ever lands, because *suggesting* a bad rewrite and
+*applying* one are not the same risk.
 
-```
-lint/hand-rolled-combinator: this is `result_from_maybe(…)`
-  note: the call evaluates its error argument on every path; this match builds it only on failure
-```
+**Silent: the fallback is evaluable but not free.** Revision 8 removed the *note* case this section
+used to describe. Reporting an eager rewrite advisorily produced 51 findings nobody should act on,
+and a rule whose advice is mostly wrong teaches readers to skip it. A capture is now reportable only
+when hoisting it is free — a literal, or a variable **that names a local binding** (`free_to_hoist`).
+The scope qualifier is revision 9's, and it is what makes the predicate mean what it says: a nullary
+constructor, `[]`, and a bare top-level function name are all spelled exactly like a variable, and
+each costs an allocation when evaluated eagerly (an interned-constructor call for the first two, a
+`sprout_alloc_closure` for the third). Reading every `VarExpr` as free let all three through. The
+walk now carries the names bound at each point — parameters, `let`, lambda arguments, match and
+comprehension patterns, do-binds — so the test is "is this name local", which is exactly the
+question. It also settles `cfg.cached` against `string.trim`: both are one dotted `VarExpr` (§4A),
+and only the root segment tells a field read on a local from a module-qualified function.
 
-**Silent: the fallback is a syntactic value.** A literal, a variable, a constructor of those. No
-note; the rewrite is equivalent.
+`ast.is_syntactic_value` is the wrong test and was the one used: it admits a lambda, a tuple and a
+**constructor application**, each of which allocates once hoisted. `parser.sprout:1028`'s
+`Nothing -> ast.WildcardPattern(pos)` was reported as exactly equivalent while the rewrite would
+allocate on every call. So the predicate is local and narrower, and `panic(…)` needs no case
+own — it is a `CallExpr`.
+
+A dotted field read is free and needs no case of its own: `cfg.cached` is a single `VarExpr`, not a
+base plus a field (§4A revision 5), so `GetFieldExpr` covers only a non-variable base like
+`f(x).field`, which is not free. Admitting `GetFieldExpr` recursively was measured: zero extra
+corpus sites.
 
 An `!{IO}` expression **can** appear in such a fallback, confirmed against the checker: it typechecks
 in an `!{IO}` caller, runs the effect on the success path where the fallback goes unused, and is
-rejected in a pure one. It needs no rule of its own — it is not `ast.is_syntactic_value`, so the
-*Note* case above already covers it — and §14 records why the shape does not arise in the corpus.
+rejected in a pure one. It needs no rule of its own — it is not free to hoist — and §14 says why
+the shape does not arise in the corpus.
 
 Worth keeping straight, because the two cases are caught by opposite means: the effect row sees an
 `!{IO}` fallback perfectly and reports nothing wrong, since in an `!{IO}` caller the rewrite really
@@ -363,13 +427,66 @@ only a syntactic check for the callee finds it.
 2. **Shadowing, local and imported.** A module defining its own top-level `result_from_maybe` must
    get no suggestion — `tests/stdlib/test_prelude_name_shadowing.spr:47,49` deliberately defines
    both a local `guard` and a local `result_from_maybe`. A selective import
-   (`import m (result_from_maybe)`) shadows just as effectively and must be covered too.
-3. **Prelude-less files**, where the suggested call would not compile.
-4. **Guards 2 and 3 cannot be done on the AST.** `ast_findings` parses
+   (`import m (result_from_maybe)`) shadows just as effectively and must be covered too. Three
+   shapes each defeated a structural scan of the line, and each made the rule suggest the very
+   name the file had shadowed: a list that **wraps** (neither half of `import m (a,\n b)` is a
+   declaration on its own), a **comment inside** one, and a **`T(..)` group**, whose `)` ends the
+   list early — the same bug `module_loader.parse_import_after_module` records on the load path.
+   So `imports_a_combinator` does not parse a declaration at all: it strips comments, blanks
+   `(`, `)` and `,`, and compares words. The header block holds only `module`, `import`,
+   `no_prelude`, comments and blanks, and a module path keeps its dots, so the only bare word
+   that can match is an imported name or an `as` alias — both genuine shadows.
+
+   **Shadowing the TYPE is the other half, and revision 8 missed it until the sweep.** A file
+   declaring its own `Maybe` or `Result` shadows the type the combinators are declared over, so the
+   suggested call does not typecheck — the checker says `Type mismatch: Maybe vs Maybe`, naming the
+   same word twice. **10 corpus files** redefine one (`examples/maybe_map.sprout`,
+   `tests/conformance/run/instance_constraints.spr`, the three `test_type_name_collision_*.spr`, …),
+   and `tests/stdlib/test_ir_codegen_unary_arith.spr` both redefines `Maybe` and carries a matching
+   shape, so it was reported and the rewrite broke the build. `defines_a_wrapper_type` refuses a
+   file declaring any of `wrapper_type_names` as a `type`, `record`, `alias` or `wrap`. Found only by
+   *applying* a suggestion: the rule, its 30 tests and the corpus count were all green with it wrong.
+   **Revision 9 adds the half that matters.** The type name is not what the matcher reads —
+   `lint_pattern` dispatches on CONSTRUCTOR names, so `type Box a = | Just a | Nothing` is matched
+   however its own head is spelled, and `type Tri = | Ok Int | Warn Int | Bad` collects a
+   `result_with_default` suggestion while being no `Result` at all. `redefines_a_matched_ctor` keys
+   on the constructor names taken FROM the derived patterns, so the guard and the matcher cannot
+   disagree, and it reads them through `ast.decl_value_scopes` rather than a private enumeration.
+   The same change fixes guard 2's shadowing half twice over: `decl_value_scopes` reports class
+   methods, which the old `decl_bound_name` scored as `""`, and the walk's local-binding environment
+   catches the parameter and local-`let` cases that no file-level guard can see.
+3. **`no_prelude` files**, where the suggested call would not compile. Revision 6 said
+   "prelude-less files" and meant a file with no named module in its import closure — a rule
+   `docs/prelude-scope-v0.md` **deleted on 2026-08-20**, because it inferred the language available
+   in a file from its import graph. The prelude is now unconditional and the opt-out is an explicit
+   whole-file directive: a line that is exactly `no_prelude` (`source.no_prelude_directive`). So the
+   guard survives, but a check written against the old rule would have tested a condition that is
+   never true — protection in name only. There is no selective hiding, so the guard is whole-file.
+4. **Not guardable: the escaping `Maybe`.** A combinator is a real call, so the wrapper is boxed to
+   reach it, while a `match` on the producing call takes its unboxed worker. What decides it is
+   **argument position**, not heat and not whether the callee is a builtin: the worker exists for
+   any top-level fn with a concrete ADT result and composes through user-defined wrappers
+   (`ast_to_ir.cpr_result_known`; it declines a polymorphic `Maybe a`). Measured at
+   **+17.5 ns/read, rising to 110–135 ns with 100k live — 70–90x**
+   (`bench/results-2026-09-28-vec-box-tax.md`). The carve-out is far wider than the "hot loop"
+   `docs/idiomatic-sprout.md` used to describe: **every** combinator over a call scrutinee is a
+   pessimisation, converters included — `result_from_maybe` over a call boxes its input and takes 4
+   GC roots where the `match` takes a worker and 1. The eliminators are merely the starkest case,
+   one allocation against none.
+
+   **Revision 8 makes it guardable after all, and guards it.** "Is this hot" is not syntactic, but
+   "did a call produce this wrapper" is: `scrutinee_is_in_hand` requires a `match` subject's
+   scrutinee to be free to hoist. A `guard`-shaped pattern is exempt, because it consumes a Bool —
+   an immediate, never boxed, so a computed condition costs nothing (checked in IR). Measured
+   effect: 165 findings to 25, 99 files to 23. For a wrapper already in hand the two spellings are
+   cost-equivalent — `sprout_tag`+`sprout_field` against one call, neither allocating nor rooting,
+   and `-O2` inlines the call away entirely. `BACKLOG.md`'s P2 to extend the peephole through a
+   known non-escaping combinator would retire the restriction and let the rule widen again.
+5. **Guards 2 and 3 cannot be done on the AST.** `ast_findings` parses
    `source.strip_headers(src)`, so the imports are gone before the AST
    exists. Both guards must read `header_lines`, the same text-level view
    the suppression directives use.
-5. **Not `drop_desugared_matches`.** That filter (`lint_rules.drop_desugared_matches`) drops findings whose
+6. **Not `drop_desugared_matches`.** That filter (`lint_rules.drop_desugared_matches`) drops findings whose
    source line does not literally begin with `match`, because `staircase-of-doom` was firing on
    already-flat `let..else` code. For *this* rule the desugared form is a **true** positive. The
    filter is keyed on the `"staircase-of-doom"` rule id, so the new rule is outside it by default — but
@@ -381,8 +498,13 @@ only a syntactic check for the callee finds it.
 Clippy's shape: a `sprout-lint.toml` with enable/disable, severity override, per-rule parameters
 (`min_staircase_depth` stops being a hardcoded `let`), and **path scoping**.
 
-Path scoping is what makes the corpus tractable. Of the 139 measured sites, 69 are in `tests/`, and
-they split two ways. Some are deliberate — the raw form *is* the test subject. The rest are
+Revision 8's narrowing did most of what path scoping was for, and the sweep did the rest: 165 sites
+became 25, then 0. Config is no longer what stands between this rule and a green gate. What the
+sweep confirmed is that the `tests/` split is real and needs no config to act on, because the two
+halves want opposite treatment and both are cheap. Some are deliberate — the raw form *is* the test
+subject, and four files say so in a `sprout-ignore-all` reason: `test_let_else.spr` (the `let..else`
+spellings), `test_comprehension_parse.spr` (a `match` in element position), and the two type-alias
+conformance fixtures. The rest are
 incidental helpers — `first_or` in `test_eta_forwarding.spr:23` is called by the test, not tested by
 it — where a rewrite is possible but risks perturbing the codegen shape the test exists to pin. A
 lint rule cannot tell the two apart, and neither case wants a finding, so the tree is the right unit
@@ -456,12 +578,32 @@ throughout, so that is collection cost and not retention. Medians of 3 over 1153
 | **100** | 20s | 12 | 2.3s | **~22s** |
 | unbounded | 26s | 1 | 0.2s | ~26s |
 
-`-n 100` is the minimum of the last column, and neutral against the per-file baseline today. `-n 10`
-is the fastest *now* and among the worst once the prelude is parsed per process — which is why the
-number lives next to a comment in `justfile` explaining it, not as a bare literal.
+`-n 100` was the minimum of the last column, and that column is now hypothetical: the derivation it
+priced never landed, because §10 embedded the definitions instead. **Revision 9 re-measured on the
+shipped binary** — best of 3 over 1165 files: `-n 1` 21.1s, `-n 10` **19.6s**, `-n 25` 21.4s,
+`-n 100` 24.7s. So `-n 10` is the optimum with nothing hypothetical left in the comparison, and
+`justfile` uses it. The bowl is shallow — 5.1s between best and worst — which is why the number
+lives beside a comment saying what it was measured against rather than as a bare literal.
 
-Startup derivation also keeps the property the generated module would have had to gate for: the
-pattern set cannot be stale, because it is rebuilt from `prelude.sprout` on every run.
+**Where the pattern source comes from — settled against the wrong question.** Revision 6 closed this
+as "rebuilt from `prelude.sprout` on every run" without asking how `fmt_bin` *finds* that file. It
+reads only the paths in argv; nothing in it locates a repo file. Both callers today happen to run
+from the repo root (`just lint`, and `.githooks/pre-commit`, which hardcodes `./build/fmt_bin`), so
+a relative path would work — **for this repo only**. In any other repo the file is absent, and each
+way of handling that is bad: failing hard breaks downstream users, and skipping silently leaves the
+rule permanently unfired there, which is §5.3's "never fires" failure applied to a whole repo.
+
+So the four definitions are **carried in `lint_rules.sprout` as source text** and parsed at module
+init. The rule then works anywhere, and derivation costs a ~20-line parse rather than a 2126-line
+one — which also means `-n 100` in `justfile` bought nothing. Revision 9 measured that and set it to
+`-n 10`; the table above carries both sets of numbers.
+
+The cost is a second copy, so the anti-drift property §5 got structurally now has to be *enforced*:
+`tests/stdlib/compiler/test_lint_combinators.spr` derives the four from the real prelude and
+requires them alpha-equal to the embedded ones. Alpha-equality means a rename in the prelude does
+not trip it — that is deliberate, since a rename changes no pattern — so the test catches semantic
+drift, not cosmetic drift. Reading the prelude is safe *there* for the reason it was not safe in the
+linter: the suite runs from the repo root, and no downstream repo runs it.
 
 ## 11. Impact
 
@@ -470,16 +612,23 @@ pattern set cannot be stale, because it is rebuilt from `prelude.sprout` on ever
 - **Semantics, type system:** none. Lint only; no type information consulted.
 - **Error messages:** one new rule id, `hand-rolled-combinator`, plus an optional `note:` line
   (§6) — new output shape for `print_findings` in `fmt_driver.sprout`.
-- **Compatibility:** `lint_ast(src: String)` gains the derived pattern set. Its callers are
+- **Compatibility:** `lint_ast(src: String)` keeps its signature — the embedded pattern set (§10) is
+  a module-level `let`, so nothing is threaded through it. Its callers are
   `fmt_driver.sprout:69` and `tests/stdlib/compiler/test_lint_rules.spr:692-703`; there is no
   IDE or LSP caller today (checked `ide/`, `lsp_driver`, `sproutd_driver`). The existing
   `sprout-ignore-all` directive is unchanged. The config file is optional and its defaults must
   reproduce today's behaviour exactly.
-- **`just lint`'s current state:** 12 findings, all `[unparsed]`, one each in 12
-  `tests/conformance/parse_error/*.spr` — files that deliberately fail to parse — and **zero**
-  AST-rule findings. `BACKLOG.md`'s "10 findings across 4 files, two violating deliberately" is
-  stale, and so is anything derived from it. `lint` is not in `.github/workflows/ci.yml`; wiring it
-  in is a separate `BACKLOG.md` entry that this design does not move.
+- **`just lint`'s state, after revision 8's narrowing AND the sweep: 12** findings, all `[unparsed]`,
+  one each in 12 `tests/conformance/parse_error/*.spr` (files that deliberately fail to parse).
+  **Zero `hand-rolled-combinator`** — the rule is green on the corpus it was written against, which
+  is the state a gate needs. The path there: 177 findings / 165 combinator over 98 files before
+  narrowing (115 `maybe_with_default` / 44 `result_with_default` / 5 `result_from_maybe` / 1 `guard`,
+  51 of them eager), then 37 / 25 over 23 files after it, then 12 / 0 after 20 helper rewrites and 4
+  file-level suppressions. Count through `just lint`, not `lint_ast`: the latter skips
+  `sprout-ignore-all`, so it totals higher.
+  Before the rule the count was also 12, so this is what makes suppression a
+  prerequisite rather than a nicety for putting `lint` in `.github/workflows/ci.yml` — still a
+  separate `BACKLOG.md` entry, now with a real number in it.
 - **Gates:** adding `stdlib/compiler/lint_pattern.sprout` and editing `lint_rules.sprout` are
   compiler-source changes, so AGENTS.md Definition of Done #7–#9 and #12 apply (smoke shapes, bundle
   smoke, seed, golden IR) **even though `fmt_bin` is outside `compile_driver`'s import closure** —
@@ -520,14 +669,39 @@ load-bearing and not an oversight.
 **Closedness** (§5.2a): `examples/json_demo.sprout:19`'s shape reported clean; `repl.sprout:665`'s
 shape reported clean; a closed fallback in the same position still reported.
 
-**Evaluation** (§6): `p256.sprout:521`'s shape **not** suggested (panic); a call fallback suggested
-*with* the note; a literal fallback suggested *without* it.
+**Evaluation** (§6, §7.4) — **done**: not suggested for a panicking fallback (`p256.sprout:521`), a
+call fallback, or a constructor-application fallback (`parser.sprout:1028`); not suggested over a
+call scrutinee; suggested for a literal fallback over a variable scrutinee, and for a `guard` whose
+*condition* is a call, since a Bool is never boxed. Revision 9 adds the three `VarExpr` shapes that
+are not variables: a bare top-level function name (a closure), a nullary constructor (an interned-
+constructor call), and a module-qualified name, which is spelled exactly like the field read beside
+it and separated from it only by whether the root segment is bound.
+
+**Scope** (revision 9): a parameter, a local `let` and a class method each shadow a combinator and
+suppress the suggestion; an unrelated class method does not, which is the control that proves the
+first is testing the guard and not a parse failure — it was not, when first written. A combinator
+nested inside a 2-branch chain is reached at all, which it was not: `walk_chain` recursed past
+`walk_expr`, and the 3-branch case took the other path and reported, so the hole looked like
+behaviour. Two constructor-reuse cases (`Just`/`Nothing` under another type name, `Ok` on a
+non-`Result`) cover the guard the matcher's own dispatch requires.
+
+**A case this list missed twice, both times found only by running the rule over the corpus.** First
+the note landed on a computed *scrutinee*, which a match evaluates too — 139 of 165 findings wrong,
+while every fixture held the scrutinee fixed as a plain variable. Then the scrutinee turned out to
+matter for a second, opposite reason: a call there is the pessimisation, so those findings should not
+exist at all. Both times the suite covered the axis it was designed around and was blind along the
+one it never varied, and both times the corpus was the only thing that noticed.
 
 **Derivation** (§5.3): a `let`-bodied prelude function rejected at derivation, by name; a body
 rebinding a parameter name rejected.
 
-**Rule**: each of the three combinators in both the `match` and `let..else` spellings, including
-`args.sprout:50`'s form; all five §7 guards; `content_length_result` reported clean.
+**Rule** — **done**, `tests/stdlib/compiler/test_lint_combinators.spr`, 42 cases covering the
+`match` and `let..else` spellings, the `if`-bodied `guard`, §5.2a closedness in both directions,
+§6's and §7.4's free-rewrite cases and the §7 guards — including all three shapes that defeated the
+line-structural import scan (wrapped list, comment inside the list, name after a `T(..)` group),
+each of which must disable the rule, plus two near-misses that must NOT disable it
+(`import m (guard_rail)`, and `maybe_with_defaults` on a continuation line), so the word scan
+cannot decay into "a combinator name appears somewhere in the header".
 
 **Config**: defaults reproduce today's 12 findings; disable silences; a parameter override changes
 `staircase-of-doom`'s depth; path scoping excludes a tree.
@@ -549,15 +723,30 @@ rebinding a parameter name rejected.
 
 ## 14. Open questions
 
-1. Does the eager-evaluation note (§6, middle case) read as useful or as noise across the corpus?
-   Only visible once the rule runs.
-2. Should `Pattern` holes be in v0 after all? §9's first two rows say the matcher will eventually
+1. Should `Pattern` holes be in v0 after all? §9's first two rows say the matcher will eventually
    want them; nothing in the combinator rule does.
+2. **Q4. Should `wrapper_type_names` be derived?** Half-closed by revision 9, and the half it closed
+   is the one that was load-bearing. The guard's *constructor* names are now derived from the
+   patterns themselves (`matched_ctor_names`), so the names the matcher dispatches on and the names
+   the guard refuses cannot drift apart — which was not a hypothetical, it was the defect. The
+   *type* half is still a hand-written `wrapper_type_names`, and deriving it needs `Combinator` to
+   keep each parameter's `ast.TypeExpr` (`Param String (Maybe TypeExpr) ParamMode`) plus a 6-variant
+   walk collecting uppercase `TypeName` heads. Lower stakes now: a fifth combinator that forgot the
+   type entry would still be caught by the constructor guard unless its wrapper shares no
+   constructor name with `Maybe` or `Result`. Deferred on that basis.
+
+Closed by measurement:
+
+- **Does the eager-evaluation note read as useful or as noise?** Noise: 51 of 165 findings carried
+  it and none was worth acting on. Revision 8 removed the note and stopped reporting the case (§6).
 
 Closed:
 
 - **Where the derivation step lives.** Neither: §10 bounds the batch instead, so derivation stays at
-  startup and no generated artifact exists to keep fresh.
+  startup and no generated artifact exists to keep fresh. Revision 7 then found the closure was
+  incomplete — "at startup" did not say *from what*, and reading `prelude.sprout` only works in this
+  repo. The definitions are embedded in `lint_rules.sprout` and a test pins them to the prelude
+  (§10).
 - **Whether an `!{IO}` expression can occupy a fallback position.** Yes. `maybe_with_default(side(),
   Just(42))` typechecks in an `!{IO}` caller and runs the effect **on the success path**, where the
   fallback is never used; a pure caller is rejected (`performs IO but is declared pure`, spec §7 rule

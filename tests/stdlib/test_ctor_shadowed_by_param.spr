@@ -36,9 +36,7 @@ fn still_a_function_value(xs: List Int) -> Int =
   sum_list(list_map(\m -> maybe_or(0, m), list_map(Just, xs)))
 
 fn maybe_or(d: Int, m: Maybe Int) -> Int =
-  match m with
-  | Just n -> n
-  | Nothing -> d
+  maybe_with_default(d, m)
 
 fn main() -> Unit !{IO} =
   run_suite("ctor_shadowed_by_param", [

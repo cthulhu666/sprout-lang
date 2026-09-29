@@ -1,3 +1,4 @@
+# sprout-ignore-all lint/hand-rolled-combinator: the fixture exists to fail typechecking on the alias arity
 # An alias applied to the wrong number of arguments is reported where it is
 # written. Under-application used to leave the alias name standing as an opaque
 # type, so the error surfaced later as a mismatch between `Pairing` and whatever

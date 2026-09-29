@@ -78,6 +78,4 @@ fn main() -> Unit !{IO} =
   with_scope(\s -> run(s, url_or(argv_get(0))))
 
 fn url_or(raw: Maybe String) -> String =
-  match raw with
-  | Nothing -> "https://localhost:28444/"
-  | Just text -> text
+  maybe_with_default("https://localhost:28444/", raw)

@@ -165,9 +165,7 @@ fn main() -> Unit !{IO} =
     dispatch(mode, port_text)
 
 fn arg_or(raw: Maybe String, fallback: String) -> String =
-  match raw with
-  | Nothing -> fallback
-  | Just text -> text
+  maybe_with_default(fallback, raw)
 
 fn dispatch(mode: String, port_text: String) -> Unit !{IO} =
   if mode == "serve" then run_server(port_or(port_text, 28771))
