@@ -42,22 +42,27 @@ missing, and none are addressed by a single-generator form:
    which uses it to build a fixture.)
 2. **The cartesian shape is nested and allocates per outer element.**
    `[(r, c) for r in rows, c in cols]` is
-   `list_flat_map(\r -> list_map(\c -> (r, c), cols), rows)`, which builds and
-   then concatenates one intermediate list *per element of `rows`*.
+   `list_flat_map(\r -> list_map(\c -> (r, c), cols), rows)`, which builds one
+   intermediate list *per element of `rows`* and copies each into the result —
+   4|cols| cells per outer element, since `list_map` allocates its accumulator and
+   its reversed result before `list_flat_map` reverses that onto its own.
    `list_flat_map` currently has **zero call sites outside the prelude**, which
    is honest evidence in both directions: either the shape is not needed here,
    or it is painful enough that callers restructure around it. This proposal
    does not claim a measured pain point in this repository.
-3. **The combinator chain is O(n) stack, twice.** `list_filter`
-   (`prelude.sprout:218`) and `list_map_go` (`:195`) are both non-tail-recursive
-   — each builds `Cons(…, recurse(…))`. The elaboration in §5 is tail-recursive
-   throughout.
+3. ~~**The combinator chain is O(n) stack, twice.**~~ No longer true, and it was
+   the strongest of these three: `list_filter` and `list_map_go` each built
+   `Cons(…, recurse(…))` when this was written. The thirteen List builders that
+   recursed in an argument position now thread an accumulator, so `filter |> map`
+   and the §5 elaboration have the same O(1) stack.
 
 **What §5 does *not* buy**, stated plainly because the first draft overclaimed
-it: against `filter |> map` the elaboration is a wash on both traversal count
-(2 either way) and allocation (2k cells either way, since the fold's
-accumulator is reversed into a fresh list). The wins are the O(1) stack, and
-the absence of per-outer-element concatenation in the multi-generator case.
+it: against `filter |> map` the elaboration is a wash on traversal count (2
+either way) and — since the prelude's List builders became accumulator-based — on
+stack depth as well. It does now buy allocation: each stage of a combinator chain
+allocates 2k cells, so `filter |> map` pays 4k against the elaboration's 2k (§5
+costs table). The other win is the absence of a per-outer-element intermediate
+list in the multi-generator case.
 
 ### Downstream survey (2026-09-05)
 
@@ -398,9 +403,9 @@ Three alternatives for the *dispatch* (as opposed to its timing) were rejected:
   Cheap, but it works only in the literal shape: `let r = 1..n in [i * i for i
   in r]` and `[i * i for i in bounds()]` would both fail with an error
   mentioning `List`.
-- **Always materialise** via `range_to_list`. Inherits the syntactic limit above
-  *and* adds a defect: `range_to_list_go` (`prelude.sprout:159-162`) is
-  non-tail-recursive, so a large range would exhaust the stack.
+- **Always materialise** via `range_to_list`. Inherits the syntactic limit above,
+  which is what rules it out. It also had a stack-depth defect when this was
+  written — `range_to_list_go` was non-tail-recursive — since fixed.
 
 A closed, enumerated set is consistent with existing Sprout precedent rather than
 ad hoc: spec §5.9 enumerates `Maybe`/`Result` as the only short-circuiting
@@ -681,15 +686,18 @@ pattern cannot occupy a parameter position (D2).
 
 | | traversals | cons cells |
 |---|---|---|
-| `filter \|> map` | 2 | 2k (intermediate + result) |
+| `filter \|> map` | 2 | 4k — 2k per stage (accumulator, then reversed result) |
 | this elaboration | 2 (source, then reverse) | 2k (accumulator + reversed result) |
-| `flat_map`-nested, m generators | — | 2k **plus** one intermediate list per outer element |
+| `flat_map`-nested, m generators | — | 4k **plus** one intermediate list per outer element |
 
-So against the single-generator chain it is a wash on both counts; the wins are
-the **O(1) stack** (`list_fold_go` `:200`, `range_fold_go` `:167`,
-`list_reverse_go` `:528` are all tail-recursive, against `list_filter` `:218`
-and `list_map_go` `:195` which are not) and the **absence of per-outer-element
-concatenation** in the multi-generator case.
+So against the single-generator chain it is a wash on traversal count, and on
+stack depth now that every List builder in the prelude threads an accumulator
+(`list_filter` and `list_map_go` were the exceptions when this was written) — but
+it **halves allocation**. Each accumulator-based combinator allocates 2k, so a
+two-stage chain pays 4k where the elaboration pays 2k once. That is the reverse of
+what this section claimed before the builders were rewritten, when the chain
+allocated k per stage. The multi-generator case adds the **absence of a
+per-outer-element intermediate list** on top.
 
 A guard on an outer generator skips the entire inner loop, which is both the
 correct reading of "nesting from left to right" and the efficient one.

@@ -302,6 +302,53 @@ Three places to *not* reach for one:
 list_filter_map(\m -> m, maybes)                      # the idiom — drops Nothing
 ```
 
+## Accumulate with `ListBuilder` only when a fold cannot say it
+
+A fold or a comprehension is the default for building a list, and neither needs a
+builder. Reach for `ListBuilder` in the one shape they cannot express: a list added
+to from several places in the code, where there is no single traversal to fold over.
+
+The reason is cost, not taste. `list_append(acc, [x])` in a loop copies `acc` every
+time — O(n) per step, quadratic overall — while `list_builder_add` is O(1) and
+`list_builder_build` pays one reversing pass at the end:
+
+```sprout
+# Avoid — quadratic, and the shape is easy to reach for without noticing:
+fn collect(xs: List Int, acc: List Int) -> List Int =
+  match xs with
+  | Nil -> acc
+  | Cons x rest -> collect(rest, list_append(acc, [x]))
+
+# A fold already says this, so prefer it when there IS one traversal:
+list_fold(\ (acc, x) -> Cons(x, acc), Nil, xs) |> list_reverse
+
+# The builder is for when there is not — emitting from several branches, threading
+# one builder through all of them. Builder last, as `list_builder_add` takes it:
+fn emit(node: Node, b: ListBuilder Op) -> ListBuilder Op =
+  match node with
+  | Leaf v   -> list_builder_add(Push(v), b)
+  | Pair l r -> list_builder_add(Join, emit(r, emit(l, b)))
+
+let ops = list_builder_build(emit(tree, list_builder_empty))
+```
+
+`list_builder_empty` takes **no parentheses** — it is a top-level `let`, evaluated once
+for the process. It is polymorphic because its initializer is a *syntactic value*,
+which exempts it from the value restriction; the annotation pins the type, it does not
+generalise (see "Bind a constant with a top-level `let`" below). `vec_empty()` keeps
+its parentheses because its body is a call rather than a value, so a `let` there could
+not be generalised.
+
+`list_builder_build` gives the elements back in the order they were added. The type
+holds them reversed, so build it with these functions and never with the bare
+`ListBuilder(…)` constructor — a prelude declaration cannot hide its constructor
+(spec §3.1), so nothing stops you, and the list comes out backwards.
+
+`bytes.builder_*` is the same pattern for `Bytes`, and `string.join` /
+`string_concat_many` are what to use for strings — see "Build strings with `++` and
+backtick templates" below, where accumulating in a loop is quadratic for the same
+reason.
+
 ## Chain transforms with `|>`
 
 The prelude is data-last — the collection is always the final argument — so a
@@ -541,7 +588,9 @@ Exported, the type and its constructor share one name, so `(..)` says which of
 the two callers get. `export wrap Foo (..) = T` gives them both — the usual case,
 and what every wrap above wants. Leave it off and the constructor stays private,
 which makes an exported function the only way in and so lets the type mean
-*validated* rather than *labelled*:
+*validated* rather than *labelled* — **in a module**; a prelude declaration has no
+import boundary for `(..)` to filter, so there its constructor is public regardless
+(spec §3.1):
 
 ```sprout
 export wrap Port = Int                                  # no (..): callers cannot write Port(-1)

@@ -204,6 +204,8 @@ constrained — `docs/wrap-type-params-v0.md` §Limits.
 
 **A wrap can hide its constructor, so it can carry an invariant.** `export wrap Foo = T` publishes the type alone; the constructor and the destructor pattern stay module-private, and `export wrap Foo (..) = T` publishes both. Outside the module the only way in is then a function the module exports — a smart constructor — which is what lets the type mean "validated" rather than "annotated". Use the abstract form when the wrap exists to enforce something (`path.File` rejecting an empty string, an unforgeable resource handle); use `(..)` when it exists only to keep two same-typed values apart, which is the common case and every current use in this repo. An abstract wrap needs an exported accessor, since the pattern is hidden too.
 
+**The prelude is the one place this does not work.** Its declarations are prepended to every bundle rather than imported, so there is no boundary for `(..)` to filter and the constructor is in scope everywhere either way (spec §3.1) — which is why `Cons` and `Just` are usable though neither declaration carries the marker. A prelude `wrap` is therefore always a label, never a validated type: `ListBuilder`, whose elements are held reversed, documents that in its header comment because nothing can enforce it. Put an invariant-carrying wrap in its own module.
+
 See `docs/spec-v0.md` §5.6.1 for the normative wrap declaration semantics.
 
 ## Documenting load-bearing invariants

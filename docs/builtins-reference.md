@@ -968,7 +968,7 @@ Quick reference for the main collection types in the prelude and `stdlib`, with 
 | Type | Append operator | Complexity | Notes |
 |------|-----------------|------------|-------|
 | `String` | `++` (lowers to `str_concat`) | O(\|left\| + \|right\|) | Allocates a fresh buffer and copies both inputs. Best avoided in hot loops; prefer `string_concat_many(List String)` (one allocation regardless of part count) or a `bytes.Builder` for chunked assembly. |
-| `List a` | `++` (lowers to `list_append`) | O(\|left\|) | Right side is shared structurally; only the left spine is copied. Best for prepend-heavy work via `Cons`. Avoid right-folded concatenation (O(n²)); accumulate with `Cons` and reverse once instead. |
+| `List a` | `++` (lowers to `list_append`) | O(\|left\|) | Right side is shared structurally; the left spine is copied twice (reversed, then unreversed onto `right`), so 2\|left\| cells. Best for prepend-heavy work via `Cons`. Avoid right-folded concatenation (O(n²)); accumulate with `Cons` and reverse once instead. |
 | `Vec a` | `++` (Semigroup instance) | O(\|left\| + \|right\|) | Lowers to the `vector_concat` builtin: one fresh `n+m` backing array, both element blocks copied in a single pass (no intermediate cons cells). |
 | `Bytes` | `bytes.append` (`bytes_append`) | O(\|left\| + \|right\|) | Allocates a fresh contiguous buffer and copies both inputs. |
 | `bytes.Builder` | `bytes.builder_append` | O(chunks\_left + chunks\_right) | Concatenates chunk tables without flattening the bytes themselves; the final `bytes.builder_build` is O(total\_bytes). The right tool for protocol packet assembly and other "many small fragments, one final blob" patterns. |

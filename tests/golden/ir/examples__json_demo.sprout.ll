@@ -166,6 +166,7 @@ declare i64 @json_stringify(i64)
 @.cfkinds.28 = private unnamed_addr constant [3 x i8] c"pp\00"
 @.cname.29 = private unnamed_addr constant [27 x i8] c"stdlib.json.JsonObjectStep\00"
 @.cfkinds.29 = private unnamed_addr constant [4 x i8] c"spp\00"
+@list_builder_empty = global i64 zeroinitializer
 @pow10_clamp = private constant i64 400
 @max_int = private constant i64 9223372036854775807
 @pow10_exact_max = private constant i64 22
@@ -1152,10 +1153,13 @@ wrepack_next_17:
 
 define void @__sprout_init_globals() {
 entry:
-  %t$0 = bitcast double 10000000000000000000000.0 to i64
-  store i64 %t$0, ptr @pow10_exact_unit
-  %t$1 = call i64 @sprout_alloc_obj(i64 17, i64 0)
-  store i64 %t$1, ptr @stdlib.json.null
+  %t$0 = call i64 @sprout_alloc_obj(i64 5, i64 0)
+  store i64 %t$0, ptr @list_builder_empty
+  call i64 @sprout_gc_register_i64_root(ptr @list_builder_empty)
+  %t$1 = bitcast double 10000000000000000000000.0 to i64
+  store i64 %t$1, ptr @pow10_exact_unit
+  %t$2 = call i64 @sprout_alloc_obj(i64 17, i64 0)
+  store i64 %t$2, ptr @stdlib.json.null
   call i64 @sprout_gc_register_i64_root(ptr @stdlib.json.null)
   ret void
 }

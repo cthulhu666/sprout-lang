@@ -1,0 +1,73 @@
+import stdlib.test (check_eq, check_true, run_suite)
+
+# `ListBuilder` accumulates in O(1) per element and materialises once, for the
+# shape a fold cannot use: a list built left-to-right by code that only ever
+# adds. The elements are held reversed, so the ONE thing every case here pins is
+# that `list_builder_build` hands them back in the order they were added.
+#
+# The constructor is NOT hidden, and cannot be: `(..)` filters an import boundary and
+# a prelude declaration is prepended rather than imported (spec §3.1). So the reversed
+# representation is a documented convention, not an enforced invariant — pinned below,
+# since a comment saying so proves nothing. The module case, where a `(..)`-less wrap
+# really is sealed, lives in tests/stdlib/compiler/test_unresolved_name_hint.spr.
+
+fn add_n(i: Int, n: Int, b: ListBuilder Int) -> ListBuilder Int =
+  if i > n then b
+  else add_n(i + 1, n, list_builder_add(i, b))
+
+fn len(xs: List Int) -> Int = list_fold(\ (acc, x) -> acc + 1, 0, xs)
+
+fn last_or(d: Int, xs: List Int) -> Int = list_fold(\ (acc, x) -> x, d, xs)
+
+fn first_or(d: Int, xs: List Int) -> Int =
+  match xs with
+  | Nil -> d
+  | Cons h rest -> h
+
+let empty_ints: List Int = Nil
+
+# Reached only by writing the constructor from outside the prelude, which the spec
+# permits (§3.1) and which builds backwards — the cost of the type being a label.
+let forged: ListBuilder Int = ListBuilder([1, 2, 3])
+
+fn main() -> Unit !{IO} =
+  run_suite("list_builder", [
+    # --- order, which is the whole contract -----------------------------------
+    check_eq("an empty builder builds an empty list",
+      list_builder_build(list_builder_empty), empty_ints),
+    check_eq("adds come back in the order they were made",
+      list_builder_build(add_n(1, 3, list_builder_empty)), [1, 2, 3]),
+    check_eq("a single add",
+      list_builder_build(list_builder_add(7, list_builder_empty)), [7]),
+
+    # --- extend ---------------------------------------------------------------
+    check_eq("extend appends its items in order",
+      list_builder_build(list_builder_extend([2, 3], list_builder_add(1, list_builder_empty))),
+      [1, 2, 3]),
+    check_eq("extend onto an empty builder",
+      list_builder_build(list_builder_extend([1, 2], list_builder_empty)), [1, 2]),
+    check_eq("extend with nothing changes nothing",
+      list_builder_build(list_builder_extend(Nil, list_builder_add(1, list_builder_empty))),
+      [1]),
+    check_eq("add after extend keeps going at the end",
+      list_builder_build(
+        list_builder_add(4, list_builder_extend([2, 3], list_builder_add(1, list_builder_empty)))),
+      [1, 2, 3, 4]),
+
+    # --- a builder is a value: building twice must not consume it -------------
+    check_true("building twice gives the same list",
+      list_builder_build(add_n(1, 3, list_builder_empty))
+        == list_builder_build(add_n(1, 3, list_builder_empty))),
+
+    # --- the representation is a convention, not an invariant (spec §3.1) -----
+    check_eq("a prelude wrap's ctor is in scope outside it, and forging reverses",
+      list_builder_build(forged), [3, 2, 1]),
+
+    # --- depth: the reason the type exists ------------------------------------
+    check_eq("100k adds survive", len(list_builder_build(add_n(1, 100000, list_builder_empty))),
+      100000),
+    check_eq("100k adds keep the first element first",
+      first_or(-1, list_builder_build(add_n(1, 100000, list_builder_empty))), 1),
+    check_eq("100k adds keep the last element last",
+      last_or(-1, list_builder_build(add_n(1, 100000, list_builder_empty))), 100000)
+  ])

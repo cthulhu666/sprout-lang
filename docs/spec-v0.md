@@ -171,6 +171,15 @@ a canonical name is untouched, so field-access chains (`opts.look.normal`,
 **The prelude is available in every file, unconditionally.** Its declarations are
 prepended to every bundle. Rationale and migration: `docs/prelude-scope-v0.md`.
 
+Being prepended rather than imported, they are **locally declared** in every bundle
+(§5.6), so there is no import boundary for the `(..)` constructor-export marker to
+filter: a prelude declaration's constructors are in scope everywhere whether or not it
+carries `(..)`. None of `Maybe`, `List`, `Vec`, `Dict` or `Set` carries the marker, and
+`Just`, `Cons` and `Vec` are nevertheless usable unqualified in any file. The
+consequence for a library author is that an **abstract, invariant-carrying `wrap`
+(§5.6.1) cannot live in the prelude** — hiding a constructor requires an import
+boundary, so it requires its own module.
+
 **A `module` header is required on any imported file; only the entry file may omit
 it.** An imported file without one is rejected at bundle time, naming the file.
 
@@ -3243,12 +3252,16 @@ yields `Maybe (List b)` under `Maybe` and `Result e (List b)` under `Result`.
 Instances: `List`, `Maybe`.
 
 **The returned value short-circuits; the work does not.**  Sprout is strictly
-evaluated, and `list_traverse_go` is
-`map2(\ (y, ys) -> Cons(y, ys), g(h), list_traverse_go(g, t))`, strict in both
-of `map2`'s value arguments — so `g` is applied to every element, and the whole
-spine is built, before `map2` can discard any of it on an early `Err`/`Nothing`.
-A partial function reached later in the structure still runs, and can still
-panic, even though an earlier element already produced the failing case.
+evaluated, and `list_traverse_go` threads an accumulator —
+`list_traverse_go(g, t, map2(\ (ys, y) -> Cons(y, ys), acc, g(h)))`, strict in
+both of `map2`'s value arguments — so `g` is applied to every element, and the
+whole spine is built, before the closing `fmap` can discard any of it on an early
+`Err`/`Nothing`.  A partial function reached later in the structure still runs,
+and can still panic, even though an earlier element already produced the failing
+case.
+
+The accumulator is `map2`'s **first** argument, so for a left-biased `f` the
+failure reported is the **earliest** element's, matching `map2`'s own table above.
 
 `sequence` is `traverse` with the effects already in place.  No `Functor` or
 `Foldable` superclass: nothing here derives from either, and the constraint
@@ -3257,7 +3270,8 @@ would add an unused slot to every dictionary — the same reasoning as
 
 Traversal order is left to right and is part of the contract, unlike `list_map`,
 whose order is deliberately unpinned (`docs/effect-polymorphism-policy-v0.md`
-§5).  O(n) in elements, plus the applicative's own per-step cost.
+§5).  O(n) in elements, plus the applicative's own per-step cost, at O(1)
+recursion depth for the `List` instance.
 
 ### `Filterable` class and generic `filter` (Experimental)
 
