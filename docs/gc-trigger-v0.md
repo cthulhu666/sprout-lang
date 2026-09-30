@@ -14,16 +14,25 @@ doc's §11.4 — see §4.
 `sprout_gc_collect_with_reason` re-bases the collection threshold after every cycle:
 
 ```c
-long long target = (long long)((double)g_managed_heap_count * g_gc_adapt_factor);
-if (target < g_gc_threshold_base) target = g_gc_threshold_base;
-if (g_gc_adapt_cap > 0 && target > g_gc_adapt_cap) target = g_gc_adapt_cap;
-g_gc_threshold = target;
+if (g_gc_adapt_ratio > 0.0) {
+  long long target = (long long)((double)g_managed_heap_count * g_gc_adapt_factor);
+  if (target < g_gc_threshold_base) target = g_gc_threshold_base;
+  if (g_gc_adapt_cap > 0 && target > g_gc_adapt_cap) target = g_gc_adapt_cap;
+  g_gc_threshold = target;
+}
 ```
 
 `g_managed_heap_count` post-sweep is the live set; `g_gc_adapt_factor` is 3.0. Read as a *space*
 policy this is right, and it was a deliberate fix — the comment above it records the ratchet it
 replaced, where an allocation-heavy program drove the threshold up without bound (multi-GB RSS to
 emit a few MB of IR).
+
+The enclosing guard matters for every option below. `g_gc_adapt_ratio` defaults to 0.2 and is
+settable via `SPROUT_GC_ADAPT_RATIO`; at 0 the threshold is never re-based and freezes at its
+initial value, so the runtime has a third mode — a fixed threshold — that is not the adaptive
+policy. Option A must therefore change `g_gc_threshold`'s initialiser as well as
+`g_gc_threshold_base`'s, or the first cycle of a frozen run fires at 4096; Options B and D have to
+say what they do when the adaptive arm is switched off.
 
 The defect is that this is the *only* thing deciding when to collect.
 `sprout_gc_maybe_collect_threshold` fires on `g_managed_heap_count >= g_gc_threshold` and consults
@@ -116,15 +125,25 @@ The regression is the middle row: the collector walks an order of magnitude more
 garbage than in either other configuration. Raising the floor does not make collections cheaper —
 it makes each one *productive*, by letting enough garbage accumulate to be worth the fixed walk.
 
-**Three caveats, because this table is weaker than it looks.** The footprint column is a *residual*
-(`measured − 100 ns × live`) from the fit in #407, divided by an assumed 10 ns/slot, so it is not an
-independent measurement; `gc-frame-budget-v0.md` §4 fits the same game at 44–55 ns per live object
-and 14.5 ns per dead slot, which moves these numbers by about 2×. The units are mixed — slots
-walked against objects reclaimed — so the ratio is a work-per-garbage index, not a dimensionless
-efficiency. And the mechanism behind the middle row is **not established**: "survivors scattered
-across sparse regions" is the natural reading, but 9 full 1 MiB regions would be ~260k slots, not
-50k, so those regions must be mostly low-bump for some other reason. §9 measures this directly
-rather than inferring it.
+**Four caveats, because this table is weaker than it looks.**
+
+1. The footprint column is a *residual* (`measured − 100 ns × live`) from the fit in #407, divided
+   by an assumed 10 ns/slot, so it is not an independent measurement. `gc-frame-budget-v0.md` §4
+   fits the same game at 44–55 ns per live object and 14.5 ns per dead slot, which moves these
+   numbers by about 2×.
+2. The units are mixed — slots walked against objects reclaimed — so the ratio is a work-per-garbage
+   index, not a dimensionless efficiency.
+3. Row three is **impossible as printed**: every object present at a trigger occupies a slot, so the
+   footprint cannot be ~222,000 when the threshold is 232,000. The residual under-reads by at least
+   4%, which is the size of the error in the model, not in the heap.
+4. The mechanism behind the middle row is **not established**. "Survivors scattered across sparse
+   regions" is the natural reading; 9 regions at the pinned run's ~36 bytes per slot is ~262,000
+   slots against a measured ~50,000, so those regions must be mostly low-bump for some other
+   reason. (A *slot* is one header-delimited cell of ≥ 16 bytes, not the 16-byte granule —
+   `SPROUT_SLOTS_PER_REGION` = 65,536 counts granules, and reading it as slots inflates this figure
+   to ~590,000.)
+
+§9 item 1 measures all of this directly rather than inferring it.
 
 Use the table for its order of magnitude and its ordering, which are what the argument needs.
 
@@ -137,8 +156,10 @@ Use the table for its order of magnitude and its ordering, which are what the ar
 > from sweep volume], or the tuning looks principled and does nothing.
 
 That guard stands and should not be softened; this doc is an exception to it, not a repeal of it.
-#407 supplies the separation it demands, for one workload: same binary, same live set, only the
-floor moved, 1,310 → 14 collections and 888 → 26 µs/frame.
+#407 supplies the separation it demands, for one workload: same binary, same program, only the
+floor moved, 1,310 → 14 collections and 888 → 26 µs/frame. (Not quite the same live set — §1's
+arithmetic implies ~668 against ~1,623 — but a swing of ~1,000 objects cannot account for
+888 → 26 µs/frame, so the separation holds on a margin of three orders of magnitude.)
 
 **But §13.2 of the same doc ran the floor experiment on other workloads, and it comes out flat or
 worse.** `gc_roots` holds ~70 live objects across a 1,000× threshold sweep:
@@ -184,8 +205,8 @@ surveys young generations. Quotes verified against each implementation's own ref
 **The honest headline is about the floor's unit and magnitude, not its absence.** Sprout is not
 alone in having only a space term — Go's default configuration is also live-proportional plus a
 floor, which is structurally what Sprout has. What differs is that Go's floor is **4 MiB of bytes**
-and Sprout's is **4096 objects**, a quantity that can correspond to anywhere from ~64 KB to
-hundreds of MB depending on object size (§6.3).
+and Sprout's is **4096 objects**, a quantity that spans ~64 KB to ~16 MB across the non-large size
+range, and more again once the large-object path is involved (§6.3).
 
 Two rows still carry a lesson Sprout's design does not have:
 
@@ -230,15 +251,23 @@ quantity directly: it drives work-per-garbage toward ~1 by construction, whateve
 - **For:** no guessed constant. RSS-neutral in principle — those slots are already committed, so
   the bound it sets is one the process is paying for regardless. Needs no clock. On #407's middle
   row it yields roughly the pinned configuration automatically.
-- **Against — three real problems, none fatal but none free.** *Units*: footprint is in slots and
-  the threshold is in objects, so the comparison above is a type error as written and needs an
-  explicit conversion whose error term must be bounded. *Cost*: no unconditional slot counter
-  exists — `g_debug_gc_swept` counts freed objects and `g_prof_sweep_visits` is compile-time gated
-  — so this adds one increment per slot to the sweep's hot loop. *Ratchet*: `g_freelist` is
-  exact-fit (`BACKLOG.md` **"The class freelists are exact-fit"**), so slots in size classes the
-  program has stopped allocating stay in the footprint without being reusable; the budget then
-  grows, the bump advances into fresh regions, and the footprint grows again. That feedback loop
-  must be shown to terminate before this is buildable.
+- **Against — and the schematic above is not buildable as written.** *Cost*: no unconditional slot
+  counter exists — `g_debug_gc_swept` counts freed objects and `g_prof_sweep_visits` is
+  compile-time gated — so this adds one increment per slot to the sweep's hot loop. *Ratchet*: the
+  loop **demonstrably diverges**, which is stronger than the "needs a termination proof" an earlier
+  draft claimed. `g_freelist` is exact-fit (`BACKLOG.md` **"The class freelists are exact-fit"**),
+  so with `U` free slots in size classes the program has stopped allocating, the budget admits `U`
+  excess allocations that cannot reuse them; those bump into fresh slots, die, and join the
+  unreusable pool. The footprint then grows by `U` every cycle, without bound.
+- **The repair, which is what makes B a design rather than a schematic.** Floor on `live` plus the
+  free slots in classes that saw allocation demand *last cycle*, rather than on the whole walked
+  footprint. That needs 257 counters and one flag store per allocation, and it terminates because
+  a class with no demand stops contributing. It still delivers the reporting workload's win, whose
+  ~48,000-slot base is churn-class. Showing that a phase-structured program cannot defeat it the
+  same way is §12 Q1.
+- **Units are not a problem**, contrary to an earlier draft: slots walked and `g_managed_heap_count`
+  are the same count — one cell per object whatever its size, and a large object is one region
+  walked as one.
 
 ### 6.3 Option C — express the floor in bytes
 
@@ -281,27 +310,30 @@ HotSpot's `GCTimeRatio`, Go's limiter.
 
 ### 6.5 Recommendation
 
-**Measure §9 item 1 first — it is cheap and it decides between B and nothing.** The doc cannot
-honestly rank the options while the quantity they all target (§3.1) has never been measured
-directly, and the one number that would settle it is a counter in a loop that already exists.
+**Measure §9 items 1 and 2 first.** Item 1 is the quantity every option targets and that nothing
+reports; item 2 is the dense-heap cost, which §4 predicts is flat-to-harmful and which has never
+been measured at a candidate floor. Neither is expensive, and the second is what gates A.
 
 Given that, the ordering the evidence supports:
 
-1. **Option B is the design to pursue**, conditional on its ratchet terminating. It is the only
-   option that targets the measured condition rather than a proxy for it, and it introduces no
-   constant. Its three problems (§6.2) are engineering, not open research.
+1. **Option A at ~100,000 is a defensible interim**, conditional on §9 item 2 coming back clean.
+   §8.1 measures `gc-adapt-check` green there and well clear of the ~138,000 pocket, §8.2's
+   collision is dissolved by pinning that gate's own probes, and §8.3 shows the compiler is not
+   harmed. It buys the reporting workload most of the win — roughly 15–20× by the fitted model in
+   §3.1 — at the price of a guessed constant and a raised minimum heap.
 2. **Option C should be folded into whatever lands.** The unit question is decidable now and the
    answer is bytes.
-3. **Option A is not recommended.** It is flat-to-harmful outside the high-waste regime (§4), and
-   the constant #407 needs breaks an existing gate (§8). It remains available as a *documented
-   workaround* — which is what `SPROUT_GC_THRESHOLD` already is, and uncharted-suns can set it
-   today without any change to this repo.
+3. **Option B remains the design**, but §6.2's schematic does not terminate and needs the per-class
+   repair first. It is A's successor, not a reason to skip A.
 4. **Option D stays the end state**, gated on the ceiling and the CPU clock, neither of which is
    large.
 
-This reverses an earlier draft of this doc, which recommended A. The reversal is caused by §4
-(§13.2's counter-evidence, which that draft did not engage) and §8 (the gate collision, which it
-asserted did not exist).
+**What is a judgement call rather than an evidence call:** whether to ship an interim constant at
+all. A is a guessed number that helps one workload class and costs pause and RSS on another; B is
+principled and further away. The measurements bound that trade; they do not settle it.
+
+This section has now reversed twice — away from A on a gate collision that measurement shows does
+not exist, then back toward it. §8's preamble names the error both reversals shared.
 
 ## 7. Impact
 
@@ -322,37 +354,74 @@ floor, not the floor times the factor. Programs setting `SPROUT_GC_THRESHOLD` ke
 under Option A, since it writes both the threshold and its base; under B the interaction has to be
 specified rather than inherited.
 
-## 8. Blast radius — and the gate collision that rules out A's constant
+## 8. Blast radius — measured, not modelled
 
 The symmetry with the last default change is the thing to hold onto. `gc-generational-v0.md` §5.3
 justified the factor 2.0 → 3.0 on the workloads *above* the floor, and recorded that the
 floor-pinned four — nqueens, http ×2, math — were *"unchanged by construction."* **A floor change
 has the inverse blast radius**: it moves precisely those four. None of §5.3's evidence transfers.
 
-**`just gc-adapt-check` Property 1 fails at the constant #407 needs.** Property 1 runs
-`test_gc_age_retain_all` at the default, F=2 and F=3, and asserts `def_cyc < f2_cyc` and
-`f3_marked × 100 < f2_marked × 70`. §13.3 gives that fixture's live set as 62,007 at F=2 and 52,308
-at F=3, so the factor stops having any effect once the floor exceeds `62,007 × 2 ≈ 124,000`: all
-three probes pin to the floor, the cycle counts equalise, and both assertions go red.
+Everything below was measured by exporting `SPROUT_GC_THRESHOLD`, which writes both
+`g_gc_threshold` and `g_gc_threshold_base` and so stands in exactly for a raised compiled-in
+default. Neither gate's probes set that variable, so simulating one needs no source edit.
 
-Putting numbers on the window:
+**Read this before deriving any floor boundary from `gc-generational-v0.md` §13.3.** That table's
+`live` column is a **mean over cycles** — `bench/gc_pause/pause_stats.py` computes
+`sum(live) // len(live)` across every logged cycle, including the geometric build phase and the
+`atexit` cycle where almost nothing is live. It is not a live set: `test_gc_age_retain_all` retains
+150,000 objects (`build(150000, End)`). Four separate derivations of a "floor above which the gate
+breaks" multiplied that mean by a factor and produced four different wrong answers. The measured
+result is not even the same *shape* of claim.
 
-| floor | Property 1 | compiler (66,955 live × 3 ≈ 201k) | delivers #407's win? |
+### 8.1 `gc-adapt-check` — a narrow red pocket, not a threshold
+
+| floor | F=2 | F=3 / default | Property 1 |
 |---|---|---|---|
-| 4,096 (today) | green | unpinned | no |
-| < ~124,000 | green | unpinned | no — far below the ~230k the game reclaims per cycle |
-| ~124,000–201,000 | **red** | unpinned | no |
-| ≥ ~201,000 | **red** | **pinned** | at 232,000, yes |
+| 4,096 (today) | 9 cycles / 558,065 marked | 6 / 313,849 | **green** |
+| 100,000 | 4 / 400,017 | 3 / 250,009 | **green** (ratio 0.63) |
+| ~138,000 | 3 / 288,009 | 3 / 288,009 | **RED** — both assertions |
+| 232,000 | 3 / 300,017 | 2 / 150,009 | **green** (ratio 0.50) |
 
-**There is no floor that both delivers #407's result and leaves the existing gate and the compiler
-alone.** That is the concrete reason Option A is not recommended, and it also corrects this doc's
-earlier claim that a floor change "leaves the compiler-class workloads alone" — at 232,000 the
-compiler is inside the blast radius, not outside it.
+**The gate is green at 232,000.** The red region is a pocket where F=2 loses a churn cycle before
+F=3 loses its only one, so all three probes collapse to the same cycle count and the factor appears
+inert; it is green on both sides. Every boundary here is an integer cycle comparison, so it moves
+with any change to the fixture's allocation volume — the gate is *fragile* at a raised floor rather
+than broken by one, which is what §10's re-expression advice is for.
+
+Property 2 (floor-pinned inertness on `retain_none`) passes at every floor tested.
+
+### 8.2 `gc-ageprof-check` — the real collision, five figures lower
+
+| floor | `retain_all marked_age_ge1` (needs ≥ 70%) | `retain_none` cycles | verdict |
+|---|---|---|---|
+| 4,096 | 73% | 118 | green |
+| 12,000 | 68% | — | **red** |
+| 100,000 | 62% | 5 | **red** |
+| 232,000 | 49% | 3 | **red**, four ways |
+
+The 3-point margin at today's default comes entirely from build-phase cycles re-marking the chain
+built so far, so it erodes as soon as a floor removes those cycles. At 232,000 the gate also
+reports `separation 32pp < 40pp — the counter does not discriminate`: the instrument stops telling
+the retain-all fixture from retain-none at all, because `retain_none` no longer runs enough cycles
+to count.
+
+**This is a calibration artifact, not an argument against a floor.** That gate's own comment says it
+*"validates the age COUNTER; `gc-adapt-check` covers the threshold POLICY"*, so pinning
+`SPROUT_GC_THRESHOLD=4096` inside its probes is what it should already be doing. Any floor change
+carries that pin.
+
+### 8.3 The compiler is not in the blast radius
+
+Contrary to an earlier draft of this section. A floor pins only the cycles where
+`live × factor < floor`, which for a compile is the early phase while the live set is still
+growing — and fewer early cycles is a time win. The emit run's late-phase target stays above any
+candidate floor, so peak RSS is unchanged. The cost falls on *small* compiles instead: a
+test-suite file's peak heap becomes `floor × slot bytes`, roughly 4 MB at 100,000.
 
 | gate | effect |
 |---|---|
-| `just gc-adapt-check` | **Property 1 red above ~124k** (above). Property 2, which asserts floor-pinned inertness on `test_gc_age_retain_none`, still passes |
-| `just gc-ageprof-check` | `test_gc_age_retain_none` allocates 480,000 objects total; a six-figure floor gives it a handful of cycles instead of ~118, so its ratio guards go degenerate, not merely recalibrated. Commit `88fcd286` retuned this fixture once already, and §5.3 warns *"re-mark ratios are only comparable at equal collection frequency"* |
+| `just gc-adapt-check` | green at 100,000 and at 232,000; red only in the ~138,000 pocket (§8.1). Property 2 passes throughout |
+| `just gc-ageprof-check` | **red above ~10,000** (§8.2) — `retain_none`'s cycles collapse 118 → 5 → 3 and the counter stops discriminating. Needs the threshold pin. Commit `88fcd286` retuned this fixture once already, and §5.3 warns *"re-mark ratios are only comparable at equal collection frequency"* |
 | `just test` | full suite (Definition of Done #5) for any implementation |
 | `just run-example-canary` | required — runtime edit (Definition of Done #11) |
 | `just linux-smoke` | recommended before pushing; heap sizing is exactly what diverges by allocator |
@@ -383,9 +452,17 @@ compiler is inside the blast radius, not outside it.
 - **Regression test, written first and confirmed RED** (Definition of Ready #3): a fixture that
   holds allocation volume fixed and asserts a bound on work-per-garbage or cycle count. Today's
   runtime fails it; a correct fix passes.
-- **`gc-adapt-check`**: whatever lands, §8's window means the gate needs revisiting rather than
-  re-running. If a floor rises past ~124k, Property 1 must be re-expressed — for example by pinning
-  `SPROUT_GC_THRESHOLD` inside the probe so the factor is exercised independently of the default.
+- **`gc-ageprof-check` must pin `SPROUT_GC_THRESHOLD=4096` in its probes**, as part of any floor
+  change. §8.2 measures it red at any floor above roughly 10,000, and its own comment says it
+  validates the age counter rather than the threshold policy — so the pin restores what it is for
+  rather than weakening it.
+- **`gc-adapt-check`** is green at the candidate, but §8.1's boundaries are integer cycle
+  comparisons, so it is fragile rather than safe. Property 1 should be re-expressed to exercise the
+  factor over many cycles instead of two or three. Note it has **three** assertions, not two:
+  `def_cyc == f3_cyc && def_marked == f3_marked`, then `def_cyc < f2_cyc`, then
+  `f3_marked × 100 < f2_marked × 70`. A naive threshold pin satisfies the first while destroying
+  the other two, so the remedy is not simply to copy `gc-ageprof-check`'s. Add a Property 3
+  asserting the floor's compiled-in default, so a revert is caught.
 - **Coverage gap closed** (Definition of Ready #4): no existing test asserts anything about
   collection frequency or sweep productivity as a function of heap shape; every GC gate today keys
   on cycles, marked and freed at one configuration.
@@ -409,15 +486,16 @@ call site. Scope it honestly: it removes NTP and clock-change artifacts from `SP
 
 ## 12. Open questions
 
-1. **Does Option B's ratchet terminate?** The exact-fit-freelist feedback loop in §6.2 is the one
-   question that decides whether B is buildable, and it is analysable without writing it.
-2. **What conversion does B use between slots and objects**, and what is that estimate's error
-   under a mixed-size heap?
-3. **Is §3.1's sparse-region mechanism real?** The arithmetic does not currently fit (§3.1's third
-   caveat). §9 item 1 answers it.
-4. **Does anything below the floor deserve the old behaviour?** A genuinely tiny program now pays a
-   six-figure minimum heap under any of these. Go's answer is that 4 MiB is small enough not to
-   matter; Sprout's floor is in objects, so the equivalent claim is not automatically true (§6.3).
+1. **Does §6.2's repair hold?** The schematic diverges; flooring on `live` plus the free slots in
+   classes with demand last cycle is the candidate fix. It needs showing that a phase-structured
+   program cannot defeat it the same way the exact-fit freelists defeat the naive form.
+2. **What constant, if A ships?** ~100,000 is where §8.1 measures green with margin on both sides
+   of the pocket, but it stays a guess until §9 item 2 prices the dense-heap side.
+3. **Is §3.1's sparse-region mechanism real?** The arithmetic does not fit (§3.1's fourth caveat),
+   and it is sensitive to what a "slot" is. §9 item 1 answers it.
+4. **Does anything below the floor deserve the old behaviour?** A genuinely tiny program pays a
+   six-figure minimum heap under A. Go's answer is that 4 MiB is small enough not to matter;
+   Sprout's floor is in objects, so the equivalent claim is not automatically true (§6.3).
 
 ## 13. Sources
 

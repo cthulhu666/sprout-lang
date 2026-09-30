@@ -2170,12 +2170,12 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
 - [ ] `P1` **The galaxy game spends 7.7 ms of a 17.1 ms frame in GC, and 97% of its live set is
   one map.** Measured 2026-09-27, `docs/gc-generational-v0.md` §13.6: `game/app.sprout` in the
   uncharted-suns repo holds 77,653 live objects, of which `map=75,640`, collecting about every 17
-  frames at p50 7,746 µs against that repo's 58 fps baseline. Pause is proportional to total slots
-  and floored by the live set (§13.2–3), so no GC knob lowers it. **The "shrink the map" route was
-  taken and backfired:** #407 reports p50 7,713 → 797 µs but *total* GC 207 → 888 µs/frame — the
-  trigger re-based onto the smaller live set while the swept footprint did not follow. This entry
-  named only pause; the two are traded. Remaining route: make the sweep proportional to something
-  other than total slots (generation-scoped freelists are the filed prerequisite).
+  frames at p50 7,746 µs against that repo's 58 fps baseline. Pause tracks total slots and is
+  floored by the live set (§13.2–3). **The "shrink the map" route was taken and backfired:** #407
+  reports p50 7,713 → 797 µs but *total* GC 207 → 888 µs/frame — the trigger re-based onto the
+  smaller live set while the swept footprint did not follow. This entry named only pause; the two
+  are traded. Untried: move the map off the managed heap. Open: make the sweep proportional to
+  something other than total slots (generation-scoped freelists are the prerequisite).
   `docs/gc-trigger-v0.md` owns the trigger half.
 - [ ] `P1` **The GC trigger is a pure space policy, so shrinking a live set can raise total GC
   time.** `threshold = max(live × factor, base)` bounds RSS and is also the only thing scheduling
@@ -2184,8 +2184,9 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   is narrower than "small live set": it bites only when retained footprint greatly exceeds
   per-cycle garbage, and `gc-generational-v0.md` §13.2 shows a raised floor is flat-to-worse on
   dense heaps. **Nothing measures that ratio today** — one counter in the sweep's existing slot
-  walk, which is the first step and decides between the options. Those options, the blast radius
-  and the `gc-adapt-check` collision that rules out the obvious constant: `docs/gc-trigger-v0.md`.
+  walk, which is the first step and decides between the options. A raised floor is measured green
+  on `gc-adapt-check` and red on `gc-ageprof-check` above ~10k, which that gate's threshold pin
+  dissolves. Options, measured blast radius and the open questions: `docs/gc-trigger-v0.md`.
 - [ ] `P3` **The GC cycle timer measures elapsed time with a non-monotonic clock.**
   `sprout_gc_collect_with_reason` brackets the collection with `sprout_now_micros`
   (`gettimeofday`/`CLOCK_REALTIME`), while that function's neighbour documents the rule it breaks:
