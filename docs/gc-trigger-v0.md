@@ -310,19 +310,26 @@ HotSpot's `GCTimeRatio`, Go's limiter.
 
 ### 6.5 Recommendation
 
-**Measure §9 items 1 and 2 first.** Item 1 is the quantity every option targets and that nothing
-reports; item 2 is the dense-heap cost, which §4 predicts is flat-to-harmful and which has never
-been measured at a candidate floor. Neither is expensive, and the second is what gates A.
+**§9 item 2 is now measured** (`bench/results-2026-09-30-gc-floor.md`) and A's price is no longer
+a guess: 3.2× peak RSS and +5.3% wall on nqueens, 1.9× RSS at no wall cost on http_log_middleware,
+nothing on math, no resolvable effect on the socket server, and a ~20× rise in per-collection
+pause wherever a workload was floor-pinned. **Measure §9 item 1 next** — it is the quantity every
+option targets and that nothing reports, and it is what decides between B and nothing.
 
 Given that, the ordering the evidence supports:
 
-1. **Option A at ~100,000 is a defensible interim**, conditional on §9 item 2 coming back clean.
-   §8.1 measures `gc-adapt-check` green there and well clear of the ~138,000 pocket, §8.2's
-   collision is dissolved by pinning that gate's own probes, and §8.3 shows the compiler is not
-   harmed. It buys the reporting workload most of the win — roughly 15–20× by the fitted model in
-   §3.1 — at the price of a guessed constant and a raised minimum heap.
-2. **Option C should be folded into whatever lands.** The unit question is decidable now and the
-   answer is bytes.
+1. **Option A at ~100,000 is a defensible interim**, and §9 item 2 came back as §4 predicted:
+   flat-to-worse, nothing improved, the cost above. §8.1 measures `gc-adapt-check` green there and
+   well clear of the ~138,000 pocket, §8.2's collision is dissolved by pinning that gate's own
+   probes, and §8.3 shows the compiler is not harmed. It buys the reporting workload most of the
+   win — roughly 15–20× by §3.1's fitted model — at the price of a guessed constant, a raised
+   minimum heap, and one workload made measurably worse on both axes to help another.
+2. **Option C should be folded into whatever lands**, and item 2 strengthened its case from an
+   unexpected direction. nqueens' collector got *cheaper* at the raised floor (total GC 315 → 274
+   ms) while the program got slower: what it paid was cache, at 17.4 MB. http_log_middleware saw
+   the same GC saving at 8.5 MB and came out flat. The variable separating them is whether the
+   raised heap outgrows cache — a threshold in **bytes**, invisible to a trigger that counts
+   objects. That argument does not route through work-per-garbage, so C no longer depends on B.
 3. **Option B remains the design**, but §6.2's schematic does not terminate and needs the per-class
    repair first. It is A's successor, not a reason to skip A.
 4. **Option D stays the end state**, gated on the ceiling and the CPU clock, neither of which is
@@ -330,7 +337,8 @@ Given that, the ordering the evidence supports:
 
 **What is a judgement call rather than an evidence call:** whether to ship an interim constant at
 all. A is a guessed number that helps one workload class and costs pause and RSS on another; B is
-principled and further away. The measurements bound that trade; they do not settle it.
+principled and further away. The measurements bound that trade — and now price it — but they do
+not settle it.
 
 This section has now reversed twice — away from A on a gate collision that measurement shows does
 not exist, then back toward it. §8's preamble names the error both reversals shared.
@@ -353,6 +361,13 @@ live set is under `floor / factor`. The bound is `floor × average slot bytes` �
 floor, not the floor times the factor. Programs setting `SPROUT_GC_THRESHOLD` keep full control
 under Option A, since it writes both the threshold and its base; under B the interaction has to be
 specified rather than inherited.
+
+**The pause side, measured.** A floor-pinned workload's per-collection pause scales with the floor:
+at 100,000, nqueens goes 38 → 818 µs p50 and http_log_middleware 25 → 509 µs, both ~20×,
+while collecting ~25× less often. Total GC time falls in both cases; jitter rises. For #407's own
+constituency — a program holding a frame budget — 818 µs is 5% of a 16.7 ms frame, so this is
+affordable by a factor of 20 rather than by orders of magnitude, and a floor much above 100,000
+spends that margin (`bench/results-2026-09-30-gc-floor.md` §2).
 
 ## 8. Blast radius — measured, not modelled
 
@@ -437,9 +452,11 @@ test-suite file's peak heap becomes `floor × slot bytes`, roughly 4 MB at 100,0
    it for the compiler, the floor-pinned four, `retain_all`/`retain_none`, and the game. **This is
    the cheap experiment that decides between B and nothing**, and it also falsifies §3.1's
    unestablished sparse-region mechanism: check the ratio against region occupancy.
-2. **Falsify the floor prediction on dense heaps.** §4 predicts nqueens, http ×2 and math are
-   flat-to-worse under any raised floor. Predictions written down *before* measuring; if they are
-   wrong, §4's condition is wrong and B's rationale weakens with it.
+2. ~~**Falsify the floor prediction on dense heaps.**~~ **DONE** —
+   `bench/results-2026-09-30-gc-floor.md`. §4 held on all four: nothing improved beyond noise, and
+   the cost is §6.5's. Two things the run is worth reading for beyond its table — the cache
+   crossing that makes the byte case (§6.5 item 2), and a −5.0% reading at 5 reps that became
+   +0.5% at 11, which is why the rep count is in the record.
 3. **The compiler** (`ast_to_ir.sprout` emit, 3 reps interleaved), in `gc-generational-v0.md`
    §5.3's table format so the two changes stay comparable. The RSS side is the risk: −19% wall for
    +18% RSS was accepted once; nothing here should spend that budget again.

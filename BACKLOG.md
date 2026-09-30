@@ -2182,11 +2182,11 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   collector work, while a cycle's cost tracks the footprint `sprout_gc_sweep` walks — which the
   trigger never reads. uncharted-suns cut a live set 45× and total GC rose 4× (#407). The condition
   is narrower than "small live set": it bites only when retained footprint greatly exceeds
-  per-cycle garbage, and `gc-generational-v0.md` §13.2 shows a raised floor is flat-to-worse on
-  dense heaps. **Nothing measures that ratio today** — one counter in the sweep's existing slot
-  walk, which is the first step and decides between the options. A raised floor is measured green
-  on `gc-adapt-check` and red on `gc-ageprof-check` above ~10k, which that gate's threshold pin
-  dissolves. Options, measured blast radius and the open questions: `docs/gc-trigger-v0.md`.
+  per-cycle garbage. **Nothing measures that ratio today** — one counter in the sweep's existing
+  slot walk, which is the first step and decides between the options. A 100,000 floor is measured
+  green on `gc-adapt-check`, red on `gc-ageprof-check` above ~10k (which that gate's threshold pin
+  dissolves), and flat-to-worse on the dense four at up to 3.2× RSS and a 20× pause rise
+  (`bench/results-2026-09-30-gc-floor.md`). Options and open questions: `docs/gc-trigger-v0.md`.
 - [ ] `P3` **The GC cycle timer measures elapsed time with a non-monotonic clock.**
   `sprout_gc_collect_with_reason` brackets the collection with `sprout_now_micros`
   (`gettimeofday`/`CLOCK_REALTIME`), while that function's neighbour documents the rule it breaks:
