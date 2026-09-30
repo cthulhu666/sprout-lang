@@ -786,16 +786,20 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   Also `set_remove`: it reinserts every element into a fresh set where an AVL delete is already
   available — `NativeSet` IS the `Map` BST with value 0, and `map_remove` calls `bst_remove_node`.
   O(n) allocations instead of O(log n), and it needs a `native_set_remove` extern, so ASK FIRST.
-- [ ] `P3` **The compiler FRONT end costs more per element as a block grows.** Per-element
-  `sprout_obj` over one list literal measures 1188 / 1376 / 1736 at block sizes 120 / 240 / 480
-  (`--phase recheck`, stage-2, so parse+lower+typecheck only). Mildly superlinear — a 1.46x rise
-  over a 4x size increase, not the doubling a copied accumulator gives. The back half is flat at 245
-  per element since `ast_to_ir`'s accumulator moved to `ListBuilder`, so this is all that is left
-  and it now dominates. `just rooting-cost-gate` bounds total growth at 15/10 per doubling and this
-  is what consumes the headroom; it must be found before that bound can be tightened. Suspects, in
-  order: the lexer (the root-pool entry below reports 80 KB -> 1.9 GB on a string literal,
-  previously unverified — this is the same shape at a measurable size), and `Set`/`Dict` rebuilds
-  in `compute_free_vars`. Reproduce with three fixtures at 2x spacing; one size cannot see a shape.
+- [ ] `P1` **The rooting pass takes cubic time on one long block.** `--emit-ir` over one list
+  literal: 0.9 s / 4.9 s / 37 s at 240 / 480 / 960 elements, ~7.5x per doubling. At every trigger
+  `ir_rooting.roots_across_loop` walks all of `in_scope_ord` and runs `list_member` against the
+  root stack for each value: O(n) x O(n) per op. It allocates nothing, so every arm of
+  `just rooting-cost-gate` stays flat. Only values defined since the last trigger can need a push,
+  so tracking those alone should make it linear with byte-identical IR. The gate needs a counter
+  that sees it too, e.g. `str_eq` calls in the `SPROUT_DEBUG_ALLOC` report. Also `add_def`, which
+  dedups with `list_member` per def. See `docs/gates.md` §Compiling one long block.
+- [ ] `P3` **The back half's BYTES per element grow with block length.** `just rooting-cost-gate`
+  reads arena bytes at 130/100 per doubling while objects are flat at 107/100. The front end adds
+  ~8 KB/element and barely grows; the rest (~29 KB) is after `--phase recheck`. Bytes growing with
+  flat objects means something copies a string or buffer per element. It is what bounds the byte
+  growth arm at 150; find it before tightening that.
+
 - [ ] `P2` **A `Dict` key is interned permanently, so computed keys leak for the process's life.**
   `map_set` routes every key through `intern_string`, which mallocs outside the arena and never
   frees; `sprout_heap_lookup` returns NULL for those buffers so the collector skips them. That is
@@ -2375,8 +2379,8 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   roots, and 22 × 6,000 ≈ 132,000 matches the pool exactly. The O(N²) compiler memory that used to
   dominate is fixed (800 → 48 MB, 2,000 → 179 MB, from 825 MB / 4,631 MB): see
   `docs/gates.md` §Compiling one long block. Lexing is reported superlinear in literal length
-  (80 KB → 1.9 GB) on a string-literal source; still unverified at that scale, but the front-end
-  entry above now measures the same shape at a size the pool survives. Shipping the table as a
+  (80 KB → 1.9 GB) on a string-literal source; still unverified. It is not the list-literal
+  growth once blamed on it: `--phase bundle` is flat to 1,920 elements. Shipping the table as a
   STRING literal decoded at startup remains the smaller-IR option: emitted IR is constant-size
   whatever the table.
 - [ ] `P2` **Allow a layout `do` block inside call parentheses** — an inline multi-statement
