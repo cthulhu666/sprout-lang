@@ -1,0 +1,19 @@
+# An uncovered dictionary whose subject is an APPLIED CONSTRUCTOR, not a bare
+# type variable.
+#
+# `try_map` generalizes `e` and its body needs `Applicative (Result e)`. The
+# diagnostic used to name the bare variable — "for type variable `e`" — and suggest
+# `where Applicative e`, which cannot be right: `e` is the error type (String,
+# PgError), not the applicative. Following that suggestion moved the error to the
+# CALL site as "No instance of Applicative for String", a worse place to work the
+# answer out from.
+#
+# The constraint the reader must write is on the partially applied constructor, and
+# the checker has always accepted it; only the advice was wrong. See
+# tests/stdlib/test_uncovered_dict_constraint.spr for the accepted sibling.
+module main
+
+fn try_map(f: a -> Result e b, xs: List a) -> Result e (List b) =
+  traverse(f, xs)
+
+fn main() -> Unit !{IO} = print("x")
