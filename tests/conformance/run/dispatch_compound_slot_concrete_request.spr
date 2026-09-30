@@ -1,0 +1,16 @@
+# A body that declares `ToString (List a)` and also needs `ToString (List String)` or
+# `ToString (List (List a))`. The hidden slot was keyed by class and head alone, so
+# both concrete requests read the `List a` dictionary: pointers and wrong values.
+module main
+
+fn label(x: t) -> String where ToString t = to_string(x)
+
+fn f(x: a) -> String where ToString (List a) = label([x])
+
+fn each(xs: List a) -> String where ToString (List a) = label(list_map(\y -> f(y), xs))
+
+fn nested(xs: List a) -> String where ToString (List a) = to_string([xs])
+
+fn main() -> Unit !{IO} = do
+  print(each([1, 2]))
+  print(nested([true]))

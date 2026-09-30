@@ -1,0 +1,12 @@
+module main
+
+# `f` needs `ToString ((c, d))`, and `p` is the first argument that is a pair, so its
+# dictionary was taken — `outer`'s `ToString ((a, b))` — and `(x, y)` was read through
+# it. The constraint's own variables decide, not the first argument with its head.
+fn label(x: t) -> String where ToString t = to_string(x)
+
+fn f(p: (a, b), x: c, y: d) -> String where ToString ((c, d)) = label((x, y))
+
+fn outer(p: (a, b), x: c, y: d) -> String where ToString ((a, b)) = f(p, x, y) ++ label(p)
+
+fn main() -> Unit !{IO} = print(outer((1, 2), "s", true))

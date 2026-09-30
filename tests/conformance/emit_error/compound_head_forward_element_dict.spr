@@ -1,0 +1,11 @@
+module main
+
+# `outer` has `ToString a` but not `ToString (List a)`. Handing over its `ToString a`
+# dictionary for the list read an Int through the List instance and printed a pointer.
+fn label(x: t) -> String where ToString t = to_string(x)
+
+fn f(x: a) -> String where ToString (List a) = label([x])
+
+fn outer(x: a) -> String where ToString a = f(x) ++ " " ++ label(x)
+
+fn main() -> Unit !{IO} = print(outer(3))

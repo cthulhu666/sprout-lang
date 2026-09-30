@@ -1,0 +1,16 @@
+# An instance method that restates its class method's compound constraint forwards
+# it. Lowering gives the method a slot for it; resolve did not count it as forwarded,
+# built the dictionary from the instance instead, and left its inner one unfilled.
+module main
+
+type Tag = Tag String
+
+class Lister t
+  fn listed(self: t, x: a) -> String where ToString (List a)
+
+fn g(x: a) -> String where ToString (List a) = to_string([x])
+
+instance Lister Tag
+  fn listed(self: Tag, x: a) -> String where ToString (List a) = g(x)
+
+fn main() -> Unit !{IO} = print(listed(Tag("t"), 3))
