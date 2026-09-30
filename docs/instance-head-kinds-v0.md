@@ -450,7 +450,9 @@ regression test that was run against a revision-3 compiler and seen to fail firs
    declaration. It is a rejection, not a repair: making it work means putting the
    arguments' identity into that key in all four places that build it — the
    dictionary-passing key format, deferred above and filed in `BACKLOG.md`. Test:
-   `tests/conformance/type_error/same_class_heads_share_dict_slot.spr`.
+   `tests/conformance/type_error/same_class_heads_share_dict_slot.spr`. The key now
+   carries the arguments (`ast.dict_slot_key`); the rule stays until forwarding tells
+   the two apart too (`BACKLOG.md`).
 
 4. **A type alias claimed an arity it does not have.** `type_arities` recorded an
    `AliasDecl`'s own parameter count, which is not its residual arity — `type alias

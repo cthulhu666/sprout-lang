@@ -671,7 +671,7 @@ fn build_hidden_for_constraint_with_supers(
       | (new_params, method_map) ->
           build_hidden_for_constraint_with_supers(direct_class, type_args, idx, rest, class_order,
             prepend_params(new_params, param_rev),
-            dict_set(constraint_key_str(string.after_last_dot(eff_class), type_args), method_map, map_acc))
+            dict_set(ast.dict_slot_key(string.after_last_dot(eff_class), type_args), method_map, map_acc))
 
 fn build_hidden_for_one(
   class_name: String,
@@ -908,14 +908,34 @@ fn dict_get_method(method_name: String, method_map: Dict String) -> Maybe String
   | Just value -> Just(value)
   | Nothing -> dict_get(string.after_last_dot(method_name), method_map)
 
-# Exact-head lookup: returns the forwarded slot for ClassName_head if the current
-# function received that constraint as a hidden dict parameter.  Used to prefer the
-# forwarded slot over the concrete instance when both share the same key (e.g.
-# "MyEq_Box"), avoiding an unresolvable inner-dict reference at eta-expansion time.
-fn find_fwd_method_for_head(class_name: String, method_name: String, head: String, ctx: LowerCtx) -> Maybe String =
-  match dict_get(string.after_last_dot(class_name) ++ "_" ++ head, ctx_fwd(ctx)) with
+# The forwarded slot's method under an exact slot key (ast.dict_slot_key), if the
+# current function received that constraint as a hidden dict parameter. Used to
+# prefer the forwarded slot over the concrete instance, avoiding an unresolvable
+# inner-dict reference at eta-expansion time.
+fn find_fwd_method_for_key(method_name: String, key: String, ctx: LowerCtx) -> Maybe String =
+  match dict_get(key, ctx_fwd(ctx)) with
   | Nothing -> Nothing
   | Just method_map -> dict_get_method(method_name, method_map)
+
+# The slot key for a value-position method at `class_type`, its variables named by
+# the `@eta_fwdvar` markers infer threads into scheme_env. A variable without one
+# renders `_`, which no slot declares.
+fn eta_slot_key(class_name: String, class_type: types.Type, ctx: LowerCtx) -> String =
+  ast.dict_slot_key(string.after_last_dot(class_name), [eta_named_typeexpr(class_type, ctx)])
+
+fn eta_named_typeexpr(t: types.Type, ctx: LowerCtx) -> ast.TypeExpr =
+  match t with
+  | types.TConst name -> ast.TypeName(types.type_id_name(name))
+  | types.TApp base arg -> ast.TypeApply(eta_named_typeexpr(base, ctx), eta_named_typeexpr(arg, ctx))
+  | types.TTuple items -> ast.TupleType(list_map(\i -> eta_named_typeexpr(i, ctx), items))
+  | types.TVar v ->
+      match dict_get("@eta_fwdvar:" ++ types.tyvar_identity(v), ctx_scheme_env(ctx)) with
+      | Just scheme ->
+          match types.scheme_type(scheme) with
+          | types.TConst prog_var -> ast.TypeName(types.type_id_name(prog_var))
+          | _ -> ast.TypeName("_")
+      | Nothing -> ast.TypeName("_")
+  | _ -> ast.TypeName("_")
 
 # Returns true if any dict in the list is the __unresolved_* sentinel emitted by
 # resolve_tdict_with_key when a key is absent from both ctx_fwd and ctx_inst.
@@ -1182,7 +1202,7 @@ fn eta_in_class_by_head(class_name: String, name: String, t: types.Type, class_t
 fn eta_in_class_concrete(class_name: String, name: String, t: types.Type, head: String, class_type: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
   match find_concrete_method_impl(class_name, name, head, ctx) with
   | Just impl_name -> eta_in_class_with_impl(class_name, name, t, head, class_type, impl_name, ctx)
-  | Nothing -> eta_fwd_slot_lambda(class_name, name, head, t, ctx)
+  | Nothing -> eta_fwd_slot_lambda(class_name, name, class_type, t, ctx)
 
 fn eta_in_class_with_impl(class_name: String, name: String, t: types.Type, head: String, class_type: types.Type, impl_name: String, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
   match lookup_eta_inner_dicts_general(string.after_last_dot(class_name), head, class_type, ctx) with
@@ -1192,12 +1212,12 @@ fn eta_in_class_with_impl(class_name: String, name: String, t: types.Type, head:
       # (e.g. MyEq a) is not in scope — the caller only forwarded the outer one
       # (MyEq (Box a)).  Prefer the forwarded slot so we emit a well-formed 2-arg lambda
       # instead of a dangling ref.
-      if has_unresolved_dict(inner_dicts) then eta_fwd_slot_lambda(class_name, name, head, t, ctx)
+      if has_unresolved_dict(inner_dicts) then eta_fwd_slot_lambda(class_name, name, class_type, t, ctx)
       else Just(make_eta_lambda_with_dicts(impl_name, t, inner_dicts, no_pos()))
 
-# Emit an eta-lambda over the forwarded hidden-dict slot for (class, method, head), or Nothing.
-fn eta_fwd_slot_lambda(class_name: String, name: String, head: String, t: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
-  match find_fwd_method_for_head(class_name, name, head, ctx) with
+# Emit an eta-lambda over the forwarded hidden-dict slot for (class, method, class_type), or Nothing.
+fn eta_fwd_slot_lambda(class_name: String, name: String, class_type: types.Type, t: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
+  match find_fwd_method_for_key(name, eta_slot_key(class_name, class_type, ctx), ctx) with
   | Just fwd_slot -> Just(make_eta_lambda(fwd_slot, t, no_pos()))
   | Nothing -> Nothing
 
@@ -1223,7 +1243,8 @@ fn eta_forwarded_method(method_name: String, class_name: String, tvar_name: Stri
       | Nothing -> Nothing
 
 fn eta_forwarded_method_for_prog_var(method_name: String, class_name: String, prog_var: String, method_type: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
-  match find_fwd_method_for_head(class_name, method_name, prog_var, ctx) with
+  match find_fwd_method_for_key(method_name,
+          ast.dict_slot_key(string.after_last_dot(class_name), [ast.TypeName(prog_var)]), ctx) with
   | Just impl_name -> Just(make_eta_lambda(impl_name, method_type, no_pos()))
   | Nothing -> Nothing
 
@@ -1641,7 +1662,7 @@ fn eta_from_evidence(method: String, t: types.Type, pos: source.SourcePos, ev: t
       else Nothing
   # M3b-5 (PR-A): value-position reroute to a forwarded hidden-dict slot — the eta
   # analog of consume_block's EvForward arm.  Mirrors the fallback's
-  # find_fwd_method_for_head -> make_eta_lambda(fwd_slot): look up the forwarded
+  # find_fwd_method_for_key -> make_eta_lambda(fwd_slot): look up the forwarded
   # method_map by the same key consume_block uses, then the method's slot within it.
   # A ctx_fwd miss (a phantom fresh tyvar resolve emitted EvForward for
   # optimistically) returns Nothing, so lower_value_var null-fills exactly as today.
@@ -1909,8 +1930,8 @@ fn seed_eff_fwd_blocks(effs: List String, vname: String, class_order: Dict (List
   | Nil -> fwd
   | Cons eff rest ->
       seed_eff_fwd_blocks(rest, vname, class_order,
-        dict_set(constraint_key_str(string.after_last_dot(eff),
-                                    Cons(ast.TypeName(types.existential_fwd_head(vname)), Nil)),
+        dict_set(ast.dict_slot_key(string.after_last_dot(eff),
+                                   Cons(ast.TypeName(types.existential_fwd_head(vname)), Nil)),
                  eff_method_witness_map(eff, types.class_methods_for(eff, class_order), vname, dict_empty()),
                  fwd))
 

@@ -1166,16 +1166,14 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   `Eq Bytes` (clean) but written down nowhere. Make it a step: every new instance on a builtin type
   records the downstream check and its result, and the diagnostic should name the competing module.
 
-- [ ] `P2` **The hidden-dictionary key cannot tell two same-class constraints apart.** It is class
-  name plus the outermost constructor of each argument (`lowering.constraint_key_str`), so
-  `where Boxed (Tagged k), Boxed (Tagged j)` is one slot for two obligations — the caller passes two
-  dictionaries and the body reads one twice. `infer.check_indistinct_constraints` now rejects the
-  shape rather than miscompiling it (spec §"Two constraints of one class must not differ only in
-  their arguments"; `docs/instance-head-kinds-v0.md` §12). Making it work means putting the
-  arguments' identity into that key in all FOUR places that build it — lowering's `build_hidden`,
-  lowering's existential witness seeding, resolve's `fwd_keys` and `EvForward` — and the eta paths
-  build it from a `types.Type` where the others use an `ast.TypeExpr`, so the two spellings must
-  agree. Instance-table keys must NOT change with it: one instance per head constructor is correct.
+- [ ] `P2` **Two same-class constraints differing only in their arguments are still rejected.**
+  `where Boxed (Tagged k), Boxed (Tagged j)` gets two hidden slots now — `ast.dict_slot_key` names
+  the arguments — but `infer.check_indistinct_constraints` still rejects it (spec "Two constraints
+  of one class must not differ only in their arguments"). What is left: `@fwdhead` markers hold one
+  declaration per class and head (key them by the whole constraint), and the eta fallback that
+  takes the only slot carrying a method must pick by key. Then drop the rule and its spec
+  paragraph, and turn `type_error/same_class_heads_share_dict_slot` and
+  `tuple_heads_share_dict_slot` into run fixtures.
 - [ ] `P2` **A class method's `.iface` scheme quantifies fewer binders than the live
   registration.** `iface_codec.method_scheme` quantifies the CLASS parameters only, so a
   method-level constraint head is keyed by source NAME, while `infer.register_class_method_over`
@@ -2642,6 +2640,13 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   the first possibly a nested token (`.iface` bump). Neither may be forwarded as an open head, which
   compiles into a wrong or unfilled dictionary: `emit_error/compound_head_nested_arg_concrete` and
   `emit_error/compound_head_forward_*` pin that they fail at compile time until then.
+
+- [ ] `P3` **A compound obligation is not built from the caller's element constraint.** A caller
+  with `where ToString a` calling `f` that needs `ToString (List a)` could build that dictionary
+  from the `List` instance and its own `ToString a`, as a concrete call does. Forwarding only
+  passes on a declared compound constraint, so this fails at codegen
+  (`emit_error/compound_head_forward_element_dict`). It needs infer to emit the instance dictionary
+  only when every context constraint is one the caller forwards, or the child null-fills.
 
 - [~] `P1` **A `where`-constrained function used as a first-class VALUE.** Fixed everywhere the
   dictionary is readable at the mention, by rewriting a bare mention into the eta-lambda the

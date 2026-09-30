@@ -626,3 +626,29 @@ export let placeholder_param_prefix = "__sprout_ph_"
 # when lowering a StringTemplateExpr into the StringTemplate ADT.
 export let template_ctor_lit = "TemplateLit"
 export let template_ctor_interp = "TemplateInterp"
+
+# The key a function's hidden dictionary slot is found under: the class, then each
+# argument in full, variables by source name — `ToString_a`, `ToString_List(a)`,
+# `ToString_(a,b)`. Instance keys name the head constructor only; a slot key must
+# name the variables too, or a `ToString (List String)` request inside a body reads
+# the slot declared for `List a`.
+export fn dict_slot_key(class_name: String, args: List TypeExpr) -> String =
+  string.join("_", Cons(class_name, list_map(slot_key_arg, args)))
+
+fn slot_key_arg(te: TypeExpr) -> String =
+  match te with
+  | TypeName n -> n
+  | TypeApply _ _ -> slot_key_applied(te, Nil)
+  | TupleType items -> "(" ++ string.join(",", list_map(slot_key_arg, items)) ++ ")"
+  | TypeArrow _ _ _ _ -> "Fn"
+  | TypeThunk _ _ -> "Fn"
+  | TypeEffect _ _ -> "Eff"
+
+fn slot_key_applied(te: TypeExpr, args: List TypeExpr) -> String =
+  match te with
+  | TypeApply base arg -> slot_key_applied(base, Cons(arg, args))
+  | TypeName _ -> slot_key_arg(te) ++ "(" ++ string.join(",", list_map(slot_key_arg, args)) ++ ")"
+  | TupleType _ -> slot_key_arg(te) ++ "(" ++ string.join(",", list_map(slot_key_arg, args)) ++ ")"
+  | TypeArrow _ _ _ _ -> slot_key_arg(te)
+  | TypeThunk _ _ -> slot_key_arg(te)
+  | TypeEffect _ _ -> slot_key_arg(te)

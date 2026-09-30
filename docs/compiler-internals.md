@@ -493,19 +493,32 @@ arguments. Rationale: [docs/instance-head-kinds-v0.md](instance-head-kinds-v0.md
 An arity check alone was tried first and refuted by execution — the surplus is a
 property of the RECORDER, not of the class.
 
-### One hidden-dictionary slot per class and head constructor
+### A hidden-dictionary slot is keyed by its whole constraint
 
-A constrained function's hidden dictionary parameters are keyed by class name plus the
-OUTERMOST constructor of each constraint argument — `lowering.constraint_key_str`,
-mirrored by `resolve`'s `EvForward` key and by the existential witness seeding. So
-`where Boxed (Tagged k), Boxed (Tagged j)` gives both constraints the key
-`Boxed_Tagged`, one slot for two obligations: the caller passes two dictionaries and
-the body reads one of them twice.
+A constrained function's hidden dictionary parameters are found under
+`ast.dict_slot_key`: the class, then each argument in full, variables by source name —
+`ToString_a`, `ToString_List(a)`, `ToString_(a,b)`. `lowering.build_hidden_for_constraints`
+keys `ctx_fwd` with it, `resolve`'s `fwd_keys` and `EvForward` use it, and so do the
+existential witness seeding and the value-position (eta) lookups. Instance keys are a
+different function, `constraint_key_str`, and name the head constructor only: one
+instance per head is correct.
 
-`infer.check_indistinct_constraints` rejects that shape rather than letting it
-miscompile. Making it WORK means putting the arguments' identity into that key in all
-four places that build it — a change to the dictionary-passing key format, which is
-why it is a backlog entry and not part of this rule.
+It was head-only once (`ToString_List`), and then a body declaring `ToString (List a)`
+answered every `ToString (List …)` request from that slot — a concrete `List String`
+included — and a caller's `ToString (List b)` served a callee's `List a`.
+
+A request finds a slot only if it spells the variables as the where clause does, so
+every producer names them: `type_to_typeexpr_with_prog_vars` in `infer` (through
+`@fwd`/`@fwdvar`, then `@fwdvars` matched through the substitution — a list literal or
+a pattern rebinds a seeded variable), and `@eta_fwdvar` markers for the value-position
+paths in `resolve.method_ref_evidence` and `lowering.eta_slot_key`, written after the
+body is inferred under both the seeded and the final variable. A variable nothing names
+renders `_`, which no slot declares.
+
+`where Boxed (Tagged k), Boxed (Tagged j)` would now get two slots, but
+`infer.check_indistinct_constraints` still rejects it (spec-v0 "Two constraints of one
+class must not differ only in their arguments"): the `@fwdhead` markers below hold one
+declaration per class and head.
 
 ### The compound-head constraint token, and why it carries `#any`
 
@@ -562,27 +575,30 @@ write `#none`, so the call site took the first concrete argument's dictionary �
 Int` for `x` — and read the tuple through it. That changed what a v10 token means, so
 it is v11.
 
-**The head's name need not come from an argument.** `resolve_compound_head_tdict` takes
-the `@inst:` key's spelling of the head from an argument headed by it, but none need
-exist: `Result e` heads no argument of `try_map(f: a -> Result e b, xs: List a)`, and
-`List a` none of `f(x: a)`. Then the constraint's own spelling is looked up directly: a
-`where` clause and an instance head are spelled alike on either path — qualified when
-bundled (`main.Pair`), short on the env path (below). Without
-it the dictionaries were dropped and the call was under-applied at codegen.
+**The head's name need not come from an argument.** A constraint whose arguments are
+concrete at the call is rebuilt from its token (`resolve_compound_head_tdict`), and the
+`@inst:` key is looked up under the constraint's own spelling of the head: a `where`
+clause and an instance head are spelled alike on either path — qualified when bundled
+(`main.Pair`), short on the env path (below). No argument need carry the head: `Result
+e` heads none of `try_map(f: a -> Result e b, xs: List a)`.
 
-**Forwarding a compound obligation.** When the arguments are still open, the caller is
-polymorphic, and `forwarded_compound_tdict` passes on its own dictionary under an open
-head (`Result _`). Lowering keys that slot by class and head ALONE, so the head is not
-enough: the caller must declare the same class and head over the same variables.
-`seed_compound_marker` records each such declaration as `@fwdhead:<Class>:<head>`,
-holding the variables, and the call compares them after substitution. Anything else
-stays a codegen failure, because the checker does not reject it: the uncovered-dictionary
-check covers a variable with any constraint that mentions it, and ignores compound
-constraints on the callee's side (BACKLOG §Dispatch Soundness).
+**Forwarding a compound obligation.** When every argument token is a variable, the
+constraint's own variables decide, never the first argument with the head: beside
+`p: (a, b)`, a `ToString ((c, d))` is not `p`'s. `forwarded_compound_tdict` forwards only
+when the caller declares the same class and head over the same variables, in order —
+`seed_compound_marker` records each declaration, and each superclass of it, as
+`@fwdhead:<Class>:<head>` holding the source names, and `call_arg_names` maps this call's
+arguments to the caller's names through the substitution (a self-call's tokens are those
+names already). The dictionary is then written with those names, so it finds the
+caller's slot. Anything else is Nothing and a codegen failure, because the checker does
+not reject it: the uncovered-dictionary check ignores compound constraints on the
+callee's side (BACKLOG §Dispatch Soundness). A token that cannot decide — none recorded,
+or a structured argument (`#any`) — falls back to the argument headed by the constructor
+(`resolve_headed_arg_tdict`).
 
-All three are pinned by `tests/conformance/run/dispatch_compound_head_{partial_ctor,
-no_headed_arg,tuple}`, each with a forwarding caller; the callers that must not forward by
-`emit_error/compound_head_forward_{undeclared,other_var,swapped_tuple}`.
+Pinned by `tests/conformance/run/dispatch_compound_head_*` and `dispatch_compound_slot_*`;
+the callers that must not forward by `emit_error/compound_head_forward_*` and
+`compound_head_headed_*`.
 
 ## Env-path type names are SHORT, and the marker families depend on it
 

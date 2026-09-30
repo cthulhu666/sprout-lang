@@ -3074,12 +3074,11 @@ arguments are not all fixed at a call site the obligation is forwarded rather th
 guessed, exactly as for a variable-headed constraint.
 
 **Two constraints of one class must not differ only in their arguments.**  A `where`
-clause may not carry both `Boxed (Tagged k)` and `Boxed (Tagged j)`: one hidden
-dictionary parameter serves each class-and-head-constructor pair, so the two
-obligations would share a slot and the body would read one dictionary for both.  This
-is rejected at the declaration.  Two constraints with the same subject are not
-affected, and neither are two over different head constructors or different classes.
-Lifting the restriction requires widening the dictionary key (see `BACKLOG.md`).
+clause may not carry both `Boxed (Tagged k)` and `Boxed (Tagged j)`: the compiler does
+not yet tell two such obligations apart when a caller forwards them, so it could pass
+one dictionary for both.  This is rejected at the declaration.  Two constraints with
+the same subject are not affected, and neither are two over different head
+constructors or different classes.  Lifting the restriction is tracked in `BACKLOG.md`.
 
 ### `Applicative` class and `mapN` helpers
 
