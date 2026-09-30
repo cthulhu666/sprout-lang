@@ -2630,20 +2630,10 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
 > (core verifier, dispatch trace, loud heuristic, canonical identity) are landed; what follows is
 > the residue, ordered by leverage.
 
-- [ ] `P2` **An undischargeable compound constraint fails at codegen, not in the checker.** A
-  polymorphic caller that does not declare the callee's compound constraint (or a subclass of it)
-  over the same arguments type-checks, then dies with `under-application ... reached codegen`: the
-  uncovered-dictionary check ignores compound constraints and covers a variable with any constraint
-  mentioning it. It needs a real diagnostic. It must not be forwarded as another dictionary, which
-  runs: `emit_error/compound_head_forward_*`, `compound_head_headed_*` and
-  `compound_head_nested_forward_other_var` pin that it fails at compile time until then.
-
-- [ ] `P3` **A compound obligation is not built from the caller's element constraint.** A caller
-  with `where ToString a` calling `f` that needs `ToString (List a)` could build that dictionary
-  from the `List` instance and its own `ToString a`, as a concrete call does. Forwarding only
-  passes on a declared compound constraint, so this fails at codegen
-  (`emit_error/compound_head_forward_element_dict`). It needs infer to emit the instance dictionary
-  only when every context constraint is one the caller forwards, or the child null-fills.
+- [ ] `P3` **A compound constraint with no instance for its head fails at codegen.** A caller
+  that neither declares `where C (T a)` nor can build it (the class has no `T` instance) gets
+  `under-application ... reached codegen` instead of a diagnostic: `infer.compound_head_tdict`
+  returns Nothing. A method call on such a constraint is already rejected, so this is rare.
 
 - [~] `P1` **A `where`-constrained function used as a first-class VALUE.** Fixed everywhere the
   dictionary is readable at the mention, by rewriting a bare mention into the eta-lambda the

@@ -534,24 +534,29 @@ Each `<ti>` is `#pos:<k>` against the callee's generalized binder list (a source
 in a monomorphic or `.iface` scheme), a **type constructor's own name** where the
 constraint fixed that argument (`where Sh (Box String)` writes `String`), a **nested**
 `[<head>;<arg>;…]` for a structured argument (`where ToString (List (Maybe b))` writes
-`[Maybe;#pos:1]`; `types.nested_arg_token` — no comma, so the top-level split on `,`
-holds, and no space or parenthesis, so the token stays one `.iface` atom), or `#any` for an arrow, thunk or effect, which names no head.
+`[Maybe;#pos:1]`, and a variable head is a token too, so `List (f a)` writes
+`[#pos:0;#pos:1]`; `types.nested_arg_token` — no comma, so the top-level split on `,`
+holds, and no space or parenthesis, so the token stays one `.iface` atom), or `#any` for
+an arrow, thunk or effect, which names no head.
 
 `compound_head_tdict` decodes every argument at the call — a variable to what the
-substitution made of it, named as the enclosing declaration wrote it
-(`declared_name_by_subst`) — and rebuilds the constraint's own head over them: `where
-Boxed (Tagged j)` becomes `Tagged String`, whichever parameter is headed by `Tagged`.
-Nothing is taken from "the first argument headed by the constructor", the scan this
-replaced: beside `p: (a, b)`, `ToString ((c, d))` is not `p`'s, and in `xs: List (List
-(Box a))` the `List (Box a)` is not `xs`'s type. A ground result takes the instance,
-looked up under the constraint's own spelling of the head — a `where` clause and an
-instance head are spelled alike on either path, qualified when bundled (`main.Pair`),
-short on the env path (below). One with variables is a forward: `seed_compound_marker`
-records each compound constraint a body declares, and each transitive superclass of it,
-as `@fwdhead:` plus its slot key (`ast.dict_slot_key`), and only a marked one forwards. A
-self-call's tokens are the caller's own source names already. Anything else is Nothing
-and fails at codegen, because the checker does not reject it: the uncovered-dictionary
-check ignores compound constraints on the callee's side (BACKLOG §Dispatch Soundness).
+substitution made of it, named as the enclosing declaration wrote it (by its constraints,
+`@fwdvars`, then its signature, `@sigvars`), or `_` when it is still open — and rebuilds
+the constraint's own head over them: `where Boxed (Tagged j)` becomes `Tagged String`,
+whichever parameter is headed by `Tagged`. Nothing is taken from "the first argument
+headed by the constructor", the scan this replaced: beside `p: (a, b)`, `ToString ((c,
+d))` is not `p`'s, and in `xs: List (List (Box a))` the `List (Box a)` is not `xs`'s type.
+The result is taken when the caller declares exactly it — `seed_compound_marker` records each compound
+constraint a body declares, and each transitive superclass of it, as `@fwdhead:` plus its
+slot key (`ast.dict_slot_key`) — or when the class has an instance for the head, looked up
+under the constraint's own spelling of it (qualified when bundled, `main.Pair`; short on
+the env path, below). `resolve` then forwards the exact slot, or builds the instance from
+its context: a context constraint on a variable the call named must be one the body
+forwards (`check_context_constraint` rejects it otherwise), and one on `_` is never read. A
+self-call's tokens are the caller's own source names already. With neither, the result is
+Nothing and the call fails at codegen (BACKLOG: "A compound constraint with no instance for
+its head"). Type aliases are expanded in every `where` clause before any of this
+(`ast.expand_alias_constraints`), so a slot key and a rebuilt type spell one type alike.
 
 Four producers write the token and they must agree: `constraint_pos_tokens` (and
 `constraint_source_tokens`, with `Nil` binders, for the provisional scheme);
@@ -565,9 +570,9 @@ a compound head (`#app:Tuple2:…`, rebuilt as the tuple itself — it was `#non
 first concrete argument's dictionary read the whole tuple) and nested a structured
 argument where `#any` stood.
 
-Pinned by `tests/conformance/run/dispatch_compound_head_*`, `dispatch_compound_slot_*`,
-`dispatch_compound_nested_arg` and `dispatch_compound_mixed_arg`; the callers that must
-not forward by `emit_error/compound_head_forward_*`, `compound_head_headed_*` and
+Pinned by `tests/conformance/run/dispatch_compound_*`, with `dispatch_compound_shapes`
+covering every shape at once; the callers that must be rejected by
+`type_error/compound_head_forward_*`, `compound_head_headed_*` and
 `compound_head_nested_forward_other_var`.
 
 ## Env-path type names are SHORT, and the marker families depend on it

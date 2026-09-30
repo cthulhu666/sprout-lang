@@ -3247,9 +3247,11 @@ fn arg_token_or_wild(a: ast.TypeExpr, binders: List String) -> String =
   | ast.TypeEffect _ _ -> "#any"
   | ast.TupleType _ -> nested_or_wild(a, \x -> arg_token_or_wild(x, binders))
 
+# A variable head (`List (f a)`) is itself a token, decoded at the call like an argument.
 fn nested_or_wild(a: ast.TypeExpr, token: ast.TypeExpr -> String) -> String =
   let Just h = type_expr_head_name(a) else "#any"
-  in types.nested_arg_token(h, list_map(token, compound_head_args(a, Nil)))
+      head = if ast.is_lowercase_name(h) then token(ast.TypeName(h)) else h
+  in types.nested_arg_token(head, list_map(token, compound_head_args(a, Nil)))
 
 # The same token shape, but each argument canonicalized the way the head variable
 # beside it is — through prog_to_fresh and s2, then positioned. A source name does
@@ -3340,13 +3342,11 @@ fn app_body_arg_tokens(body: String) -> List String =
   | Nothing -> Nil
 
 # A compound-head constraint at a call. Each written argument decodes to the type this
-# call gives it, variables named as the caller declared them, and the dictionary type
-# is the head rebuilt over those (docs/instance-head-kinds-v0.md §5: the class
-# variable's binding, at the head's depth). A concrete type takes the instance; one
-# with variables is a forward, taken only when the caller declares exactly that
-# constraint or a subclass of it. Anything else is Nothing — the call then fails at
-# codegen, where any other dictionary would run. A token with no head is headless and
-# keeps the positional scan.
+# call gives it and the head is rebuilt over them (docs/instance-head-kinds-v0.md §5).
+# It is taken when the caller declares exactly that constraint, or when the class has an
+# instance for the head; resolve then forwards the slot, or builds the instance from the
+# caller's own dictionaries and rejects one the caller does not have. Anything else is
+# Nothing, and the call fails at codegen. A token with no head keeps the positional scan.
 fn compound_head_tdict(
   class_name: String,
   head_token: String,
@@ -3361,30 +3361,21 @@ fn compound_head_tdict(
   let Just want = arg_scan_head(head_token)
         else resolve_one_constraint_tdict(class_name, user_args, subst, env, pos, excluded)
       [_ | _] = toks else Nothing
-      Just args = call_arg_typeexprs(toks, callee, prog_to_fresh, subst, env) else Nothing
-      te = rebuild_head(want, args)
+      te = rebuild_head(want, list_map(\t -> call_arg_typeexpr(t, callee, prog_to_fresh, subst, env), toks))
   in
-    if typeexpr_is_ground(te) then
-      let Just _ = dict_get("@inst:" ++ class_name ++ ":" ++ want, env) else Nothing
-      in Just(compound_tdict(class_name, te, pos))
-    else
-      let Just _ = dict_get(compound_fwd_key(class_name, te), env) else Nothing
-      in Just(compound_tdict(class_name, te, pos))
+    if env_has(compound_fwd_key(class_name, te), env) || env_has("@inst:" ++ class_name ++ ":" ++ want, env)
+    then Just(compound_tdict(class_name, te, pos))
+    else Nothing
   where toks = arg_scan_arg_tokens(head_token)
+
+fn env_has(key: String, env: Dict types.Scheme) -> Bool =
+  match dict_get(key, env) with
+  | Just _ -> true
+  | Nothing -> false
 
 fn compound_tdict(class_name: String, te: ast.TypeExpr, pos: source.SourcePos) -> typed_ast.TypedExpr =
   typed_ast.TDict(ast.TypeConstraint(class_name, Cons(te, Nil)),
                   types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved)
-
-# No variable anywhere in it: a type the caller has chosen.
-fn typeexpr_is_ground(te: ast.TypeExpr) -> Bool =
-  match te with
-  | ast.TypeName n -> ! ast.is_lowercase_name (n)
-  | ast.TypeApply base arg -> typeexpr_is_ground(base) && typeexpr_is_ground(arg)
-  | ast.TupleType items -> all(typeexpr_is_ground, items)
-  | ast.TypeArrow _ _ _ _ -> false
-  | ast.TypeThunk _ _ -> false
-  | ast.TypeEffect _ _ -> false
 
 # A tuple's dictionary type is the tuple itself; every other head is applied to its
 # arguments.
@@ -3392,60 +3383,49 @@ fn rebuild_head(head_str: String, args: List ast.TypeExpr) -> ast.TypeExpr =
   if types.tuple_head_arity(head_str) == Just(list_length(args)) then ast.TupleType(args)
   else apply_typeexprs(ast.TypeName(head_str), args)
 
-fn call_arg_typeexprs(toks: List String, callee: String, prog_to_fresh: Dict types.Type,
-                      subst: Dict types.Type, env: Dict types.Scheme) -> Maybe (List ast.TypeExpr) =
-  match toks with
-  | [] -> Just(Nil)
-  | [t | rest] ->
-      let Just te = call_arg_typeexpr(t, callee, prog_to_fresh, subst, env) else Nothing
-          Just more = call_arg_typeexprs(rest, callee, prog_to_fresh, subst, env) else Nothing
-      in Just(Cons(te, more))
-
-# One argument token at this call. A nested one (`[List;#pos:0]`) rebuilds its own
-# head over its arguments; a constructor names itself; `#any` names nothing. A
+# One argument token at this call. A nested one (`[List;#pos:0]`) rebuilds its head,
+# itself a token when it is a variable (`[#pos:1;#pos:0]`), over its arguments. A
 # variable is what this call made of it: a self-call's tokens are the caller's own
-# source names (its binding is monomorphic), and any other callee's decode through
-# its instantiation and this substitution.
+# source names (its binding is monomorphic), any other callee's decode through its
+# instantiation and this substitution. `#any`, and a token that decodes to nothing,
+# is `_`.
 fn call_arg_typeexpr(t: String, callee: String, prog_to_fresh: Dict types.Type,
-                     subst: Dict types.Type, env: Dict types.Scheme) -> Maybe ast.TypeExpr =
+                     subst: Dict types.Type, env: Dict types.Scheme) -> ast.TypeExpr =
   match types.nested_arg_parts(t) with
   | Just (head, subtoks) ->
-      let Just args = call_arg_typeexprs(subtoks, callee, prog_to_fresh, subst, env) else Nothing
-      in Just(rebuild_head(head, args))
+      apply_head(call_arg_typeexpr(head, callee, prog_to_fresh, subst, env),
+                 list_map(\s -> call_arg_typeexpr(s, callee, prog_to_fresh, subst, env), subtoks))
   | Nothing ->
-      if t == "#any" then Nothing
-      else if is_self_binding(callee, env) then Just(ast.TypeName(t))
+      if t == "#any" then ast.TypeName("_")
+      else if is_self_binding(callee, env) then ast.TypeName(t)
       else
         match dict_get(decode_constraint_var(t, callee, env), prog_to_fresh) with
         | Just fresh_t -> named_typeexpr(unifier.apply_subst(subst, fresh_t), subst, env)
-        | Nothing -> if str_starts_with(t, "#") || ast.is_lowercase_name(t) then Nothing else Just(ast.TypeName(t))
+        | Nothing -> if str_starts_with(t, "#") || ast.is_lowercase_name(t) then ast.TypeName("_") else ast.TypeName(t)
 
-# The type with each variable named as the enclosing declaration's constraints wrote
-# it (declared_name_by_subst). Nothing if one has no such name: it is no variable this
-# caller can pass a dictionary for.
-fn named_typeexpr(t: types.Type, subst: Dict types.Type, env: Dict types.Scheme) -> Maybe ast.TypeExpr =
+fn apply_head(head: ast.TypeExpr, args: List ast.TypeExpr) -> ast.TypeExpr =
+  match head with
+  | ast.TypeName h -> rebuild_head(h, args)
+  | _ -> apply_typeexprs(head, args)
+
+# The type with each variable named as the enclosing declaration wrote it: first by its
+# constraints (declared_name_by_subst), then by its signature (sig_name_by_subst). A
+# variable neither names is still open at this call and is `_`, as is an arrow; a
+# dictionary for either is never read.
+fn named_typeexpr(t: types.Type, subst: Dict types.Type, env: Dict types.Scheme) -> ast.TypeExpr =
   match t with
-  | types.TConst name -> Just(ast.TypeName(types.type_id_name(name)))
-  | types.TApp base arg ->
-      let Just b = named_typeexpr(base, subst, env) else Nothing
-          Just a = named_typeexpr(arg, subst, env) else Nothing
-      in Just(ast.TypeApply(b, a))
-  | types.TTuple items ->
-      let Just tes = named_typeexprs(items, subst, env) else Nothing
-      in Just(ast.TupleType(tes))
+  | types.TConst name -> ast.TypeName(types.type_id_name(name))
+  | types.TApp base arg -> ast.TypeApply(named_typeexpr(base, subst, env), named_typeexpr(arg, subst, env))
+  | types.TTuple items -> ast.TupleType(list_map(\i -> named_typeexpr(i, subst, env), items))
   | types.TVar v ->
-      let Just n = declared_name_by_subst(v, subst, env) else Nothing
-      in Just(ast.TypeName(n))
-  | types.TFunc _ _ _ _ -> Nothing
-  | types.TThunk _ _ -> Nothing
-
-fn named_typeexprs(ts: List types.Type, subst: Dict types.Type, env: Dict types.Scheme) -> Maybe (List ast.TypeExpr) =
-  match ts with
-  | [] -> Just(Nil)
-  | [t | rest] ->
-      let Just te = named_typeexpr(t, subst, env) else Nothing
-          Just more = named_typeexprs(rest, subst, env) else Nothing
-      in Just(Cons(te, more))
+      match declared_name_by_subst(v, subst, env) with
+      | Just n -> ast.TypeName(n)
+      | Nothing ->
+          match sig_name_by_subst(v, subst, env) with
+          | Just n -> ast.TypeName(n)
+          | Nothing -> ast.TypeName("_")
+  | types.TFunc _ _ _ _ -> ast.TypeName("_")
+  | types.TThunk _ _ -> ast.TypeName("_")
 
 # Left-associating application: `Tagged` over [String] is `Tagged String`.
 fn apply_typeexprs(base: ast.TypeExpr, args: List ast.TypeExpr) -> ast.TypeExpr =
@@ -3908,13 +3888,21 @@ fn resolve_concrete_head_tdict(class_name: String, head_name: String, env: Dict 
 # `@fwd`/`@fwdvar` markers; this list is matched through the substitution instead.
 let fwd_vars_key: String = "@fwdvars"
 
+# The same pairs for every variable the body's signature names, constrained or not. A
+# compound constraint's instance is built over them, and resolve rejects one whose
+# context needs a dictionary the body was not given.
+let sig_vars_key: String = "@sigvars"
+
 fn seed_forward_markers(constraints: List ast.TypeConstraint, prog_to_fresh: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
-  match constraints with
-  | [] -> env
-  | [_ | _] ->
-      seed_each_constraint_marker(constraints, prog_to_fresh,
-        dict_set(fwd_vars_key, types.mono(types.TTuple(declared_var_pairs(
-          collect_te_vars_list(constraint_args(constraints), Nil), prog_to_fresh))), env))
+  let with_sig = dict_set(sig_vars_key, types.mono(types.TTuple(declared_var_pairs(
+                   vec_to_list(dict_keys(prog_to_fresh)), prog_to_fresh))), env)
+  in
+    match constraints with
+    | [] -> with_sig
+    | [_ | _] ->
+        seed_each_constraint_marker(constraints, prog_to_fresh,
+          dict_set(fwd_vars_key, types.mono(types.TTuple(declared_var_pairs(
+            collect_te_vars_list(constraint_args(constraints), Nil), prog_to_fresh))), with_sig))
 
 fn seed_each_constraint_marker(constraints: List ast.TypeConstraint, prog_to_fresh: Dict types.Type,
                                env: Dict types.Scheme) -> Dict types.Scheme =
@@ -3941,7 +3929,14 @@ fn declared_var_pair(name: String, prog_to_fresh: Dict types.Type) -> Maybe type
 # The source name of `v`, read through `subst`: the declared variable it now is.
 fn declared_name_by_subst(v: types.TyVarId, subst: Dict types.Type,
                           env: Dict types.Scheme) -> Maybe String =
-  let Just scheme = dict_get(fwd_vars_key, env) else Nothing
+  name_in_pairs(fwd_vars_key, v, subst, env)
+
+fn sig_name_by_subst(v: types.TyVarId, subst: Dict types.Type, env: Dict types.Scheme) -> Maybe String =
+  name_in_pairs(sig_vars_key, v, subst, env)
+
+fn name_in_pairs(key: String, v: types.TyVarId, subst: Dict types.Type,
+                 env: Dict types.Scheme) -> Maybe String =
+  let Just scheme = dict_get(key, env) else Nothing
       types.Scheme _ _ (types.TTuple pairs) _ _ = scheme else Nothing
   in find_map(\pr -> pair_name_if(pr, v, subst), pairs)
 
@@ -8240,8 +8235,8 @@ fn type_arg_text(te: ast.TypeExpr) -> String =
 fn indistinct_constraints_error(cs: List ast.TypeConstraint) -> Maybe String =
   let Just(cls, a, b) = indistinct_constraint_pair(cs) else Nothing
   in Just("two `" ++ cls ++ "` constraints have heads `" ++ a ++ "` and `" ++ b
-          ++ "`, which share one hidden-dictionary slot; the body would use a single "
-          ++ "dictionary for both. Constrain one variable, or use distinct classes")
+          ++ "`; a method used as a value in the body cannot yet tell their dictionaries "
+          ++ "apart. Constrain one variable, or use distinct classes")
 
 # Every constraint list a function body can read a forwarded dictionary from: a fn's
 # own `where`, a class method's, and an instance method's.

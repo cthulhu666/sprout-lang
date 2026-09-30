@@ -430,6 +430,10 @@ export fn record_field_type_exprs(fields: List RecordFieldDecl) -> List TypeExpr
 # Expanding the head once, here, is what keeps those four agreeing; fixing each
 # path separately leaves four normalizations to keep in step.
 #
+# Every `where` clause is expanded too, at every depth: a hidden dictionary's slot
+# key spells its whole constraint (dict_slot_key), and a call rebuilds it from the
+# inferred type, where `List (Pr a)` is already `List ((a, Int))`.
+#
 # `wrap` is deliberately NOT expanded: it declares a distinct nominal type, so
 # merging it with its representation would turn two instances into one.
 
@@ -441,8 +445,9 @@ type AliasHead =
 # has to stop, leaving the head unexpanded so that diagnostic is the one to fire.
 let alias_expand_fuel: Int = 100
 
-export fn expand_alias_instance_heads(decls: List Decl) -> List Decl =
-  expand_instance_heads(decls, alias_head_table(decls, dict_empty()))
+export fn expand_alias_constraints(decls: List Decl) -> List Decl =
+  let table = alias_head_table(decls, dict_empty())
+  in list_map(\d -> expand_decl(table, d), decls)
 
 # A declaration that is not an alias contributes no alias, which stays the right
 # answer for a variant that does not exist yet — so the catch-all belongs here.
@@ -453,29 +458,51 @@ fn alias_head_table(decls: List Decl, acc: Dict AliasHead) -> Dict AliasHead =
       alias_head_table(rest, dict_set(name, AliasHead(params, rhs), acc))
   | [_ | rest] -> alias_head_table(rest, acc)
 
-fn expand_instance_heads(decls: List Decl, table: Dict AliasHead) -> List Decl =
-  match decls with
-  | [] -> []
-  | [InstanceDecl head ctx methods pos | rest] ->
-      Cons(InstanceDecl(expand_constraint(table, head),
-                        expand_constraints(table, ctx), methods, pos),
-           expand_instance_heads(rest, table))
-  | [d | rest] -> Cons(d, expand_instance_heads(rest, table))
+# Only the variants that carry a `where` change.
+fn expand_decl(table: Dict AliasHead, d: Decl) -> Decl =
+  match d with
+  | FnDecl name params ret effs cs body pos ->
+      FnDecl(name, params, ret, effs, expand_constraints(table, cs), body, pos)
+  | ClassDecl name params sigs supers pos ->
+      ClassDecl(name, params, list_map(\s -> expand_sig(table, s), sigs), supers, pos)
+  | InstanceDecl head ctx methods pos ->
+      InstanceDecl(expand_constraint(table, head), expand_constraints(table, ctx),
+                   list_map(\m -> expand_impl(table, m), methods), pos)
+  | ExternFnDecl _ _ _ _ _ -> d
+  | TypeDecl _ _ _ _ _ _ -> d
+  | RecordDecl _ _ _ _ _ _ _ -> d
+  | LetDecl _ _ _ _ -> d
+  | AliasDecl _ _ _ _ -> d
+  | WrapDecl _ _ _ _ _ -> d
+
+fn expand_sig(table: Dict AliasHead, s: ClassMethodSig) -> ClassMethodSig =
+  let ClassMethodSig name params ret effs cs = s
+  in ClassMethodSig(name, params, ret, effs, expand_constraints(table, cs))
+
+fn expand_impl(table: Dict AliasHead, m: InstanceMethodImpl) -> InstanceMethodImpl =
+  let InstanceMethodImpl name params ret effs cs body = m
+  in InstanceMethodImpl(name, params, ret, effs, expand_constraints(table, cs), body)
 
 fn expand_constraints(table: Dict AliasHead, cs: List TypeConstraint) -> List TypeConstraint =
-  match cs with
-  | [] -> []
-  | [c | rest] -> Cons(expand_constraint(table, c), expand_constraints(table, rest))
+  list_map(\c -> expand_constraint(table, c), cs)
 
 fn expand_constraint(table: Dict AliasHead, c: TypeConstraint) -> TypeConstraint =
-  match c with
-  | TypeConstraint name args -> TypeConstraint(name, expand_type_exprs(table, args))
+  let TypeConstraint name args = c
+  in TypeConstraint(name, list_map(\te -> expand_deep(table, te, alias_expand_fuel), args))
 
-fn expand_type_exprs(table: Dict AliasHead, tes: List TypeExpr) -> List TypeExpr =
-  match tes with
-  | [] -> []
-  | [te | rest] ->
-      Cons(expand_head(table, te, alias_expand_fuel), expand_type_exprs(table, rest))
+# The head, then everything under it. `fuel` bounds depth as well as each head's
+# chain, so a cyclic alias stops here and infer reports it.
+fn expand_deep(table: Dict AliasHead, te: TypeExpr, fuel: Int) -> TypeExpr =
+  if fuel <= 0 then te
+  else
+    match expand_head(table, te, fuel) with
+    | TypeApply f x -> TypeApply(expand_deep(table, f, fuel - 1), expand_deep(table, x, fuel - 1))
+    | TupleType items -> TupleType(list_map(\i -> expand_deep(table, i, fuel - 1), items))
+    | TypeName n -> TypeName(n)
+    | TypeArrow p r vs mode ->
+        TypeArrow(expand_deep(table, p, fuel - 1), expand_deep(table, r, fuel - 1), vs, mode)
+    | TypeThunk r vs -> TypeThunk(expand_deep(table, r, fuel - 1), vs)
+    | TypeEffect inner es -> TypeEffect(expand_deep(table, inner, fuel - 1), es)
 
 fn expand_head(table: Dict AliasHead, te: TypeExpr, fuel: Int) -> TypeExpr =
   if fuel <= 0 then te

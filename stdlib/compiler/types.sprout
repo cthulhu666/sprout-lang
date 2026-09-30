@@ -953,8 +953,13 @@ fn nested_text(renamed_vars: List String, rename: Dict String, head: String,
   match tuple_head_arity(head) with
   | Just _ -> "(" ++ join_list(", ", list_map(\a -> arg_token_text(renamed_vars, rename, a), args)) ++ ")"
   | Nothing ->
-      join_list(" ", Cons(string.after_last_dot(head),
+      join_list(" ", Cons(nested_head_text(renamed_vars, rename, head),
                           list_map(\a -> app_arg_text(renamed_vars, rename, a), args)))
+
+# A variable head is a token (`#pos:1`); a constructor is its own name.
+fn nested_head_text(renamed_vars: List String, rename: Dict String, head: String) -> String =
+  if str_starts_with(head, "#") then arg_token_text(renamed_vars, rename, head)
+  else string.after_last_dot(head)
 
 fn app_arg_text(renamed_vars: List String, rename: Dict String, t: String) -> String =
   match nested_arg_parts(t) with

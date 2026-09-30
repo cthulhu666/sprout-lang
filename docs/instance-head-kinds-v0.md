@@ -65,7 +65,7 @@ unsuccessfully papering over.
 - ~~Type-alias instance heads. They do not dispatch today (an instance is registered
   under the alias name, `register_instance_marker`), so their arity is moot until
   that changes.~~ **Resolved**: heads are now expanded before this check runs
-  (`ast.expand_alias_instance_heads`), so an alias head is checked as its expansion —
+  (`ast.expand_alias_constraints`), so an alias head is checked as its expansion —
   whose residual arity is the real one. See `docs/alias-instance-heads-v0.md`.
 
 ## 3. Prior art
