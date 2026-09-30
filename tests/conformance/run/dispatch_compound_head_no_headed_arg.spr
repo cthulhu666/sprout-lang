@@ -17,6 +17,10 @@ fn label(x: t) -> String where ToString t = to_string(x)
 fn f(x: a) -> String where ToString (List a), ToString (Pair a) =
   label([x]) ++ " " ++ label(Pair(x, x))
 
+# Forwarded by a caller polymorphic in `a`, for both heads at once.
+fn outer(x: a) -> String where ToString (List a), ToString (Pair a) = f(x)
+
 fn main() -> Unit !{IO} = do
   print(f(7))
   print(f("s"))
+  print(outer(true))

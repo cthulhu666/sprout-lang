@@ -10,6 +10,10 @@ fn half(x: Int) -> Result String Int = if x > 0 then Ok(x / 2) else Err("neg: " 
 fn try_map(f: a -> Result e b, xs: List a) -> Result e (List b)
     where Applicative (Result e) = traverse(f, xs)
 
+# The same obligation forwarded by a caller that is itself polymorphic in `e`.
+fn outer(f: a -> Result e b, xs: List a) -> Result e (List b)
+    where Applicative (Result e) = try_map(f, xs)
+
 fn show(r: Result String (List Int)) -> String =
   match r with
   | Err e -> "Err " ++ e
@@ -18,3 +22,4 @@ fn show(r: Result String (List Int)) -> String =
 fn main() -> Unit !{IO} = do
   print(show(try_map(half, [2, 4, 6])))
   print(show(try_map(half, [2, -4, -6])))
+  print(show(outer(half, [8, 10])))

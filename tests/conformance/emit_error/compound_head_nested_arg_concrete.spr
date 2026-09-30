@@ -1,0 +1,12 @@
+module main
+
+# A compound constraint whose argument is itself a structure: `List (List a)`. Its
+# token records the argument as `#any`, so at this CONCRETE call the dictionary's type
+# cannot be rebuilt from the token, and no argument is headed by `List` to borrow it
+# from. It must stay a compile-time failure. Forwarding an open `List _` instead
+# compiles into a dictionary nothing fills, and the program aborts at run time.
+fn label(x: t) -> String where ToString t = to_string(x)
+
+fn g(x: a) -> String where ToString (List (List a)) = label([[x]])
+
+fn main() -> Unit !{IO} = print(g(7))

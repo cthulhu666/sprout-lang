@@ -3238,7 +3238,7 @@ fn head_token_for(te: ast.TypeExpr, binders: List String) -> String =
   | ast.TypeArrow _ _ _ _ -> "#none"
   | ast.TypeThunk _ _ -> "#none"
   | ast.TypeEffect _ _ -> "#none"
-  | ast.TupleType _ -> "#none"
+  | ast.TupleType _ -> compound_head_token(te, binders)
 
 # `binders` positions each argument the way constraint_var_token positions a head
 # variable. Nil means there is no index to record, which yields source names —
@@ -3248,11 +3248,16 @@ fn compound_head_token(te: ast.TypeExpr, binders: List String) -> String =
       Just toks = compound_arg_tokens(compound_head_args(te, Nil), binders) else "#app:" ++ h
   in "#app:" ++ h ++ ":" ++ toks
 
-# The written arguments, outermost LAST: `Trip r s` gives [r, s].
+# The written arguments, outermost LAST: `Trip r s` gives [r, s], and a tuple's are
+# its elements.
 fn compound_head_args(te: ast.TypeExpr, acc: List ast.TypeExpr) -> List ast.TypeExpr =
   match te with
   | ast.TypeApply base arg -> compound_head_args(base, Cons(arg, acc))
-  | _ -> acc
+  | ast.TupleType items -> list_append(items, acc)
+  | ast.TypeName _ -> acc
+  | ast.TypeArrow _ _ _ _ -> acc
+  | ast.TypeThunk _ _ -> acc
+  | ast.TypeEffect _ _ -> acc
 
 # One token per written argument, "*" where there is no token to give — a
 # structure rather than a variable. Recording the gap rather than dropping the
@@ -3309,11 +3314,16 @@ fn canonical_arg_token(a: ast.TypeExpr, prog_to_fresh: Dict types.Type,
       types.TVar canon = unifier.apply_subst(s2, fresh_t) else "#any"
   in constraint_var_token(types.tyvar_identity(canon), binders)
 
+# A tuple is named with its arity, as lowering.type_expr_head_name and the `@inst:`
+# keys name it; constraint_fwd_key reads this too, and must agree with lowering.
 fn type_expr_head_name(te: ast.TypeExpr) -> Maybe String =
   match te with
   | ast.TypeName n -> Just(n)
   | ast.TypeApply base _ -> type_expr_head_name(base)
-  | _ -> Nothing
+  | ast.TupleType items -> Just("Tuple" ++ int_to_string(list_length(items)))
+  | ast.TypeArrow _ _ _ _ -> Nothing
+  | ast.TypeThunk _ _ -> Nothing
+  | ast.TypeEffect _ _ -> Nothing
 
 # Both token forms are discharged by scanning the ARGUMENTS, as opposed to a
 # variable head (decoded via scheme_vars) or a concrete-ctor head (looked up
@@ -3404,8 +3414,8 @@ fn compound_head_or_scanned_tdict(
   | Just tdict -> Just(tdict)
   | Nothing ->
       resolve_arg_scanned_tdict(class_name, arg_scan_head(head_token),
-                                arg_scan_arity(head_token), user_args, subst,
-                                env, pos, excluded)
+                                arg_scan_arity(head_token), arg_scan_arg_tokens(head_token),
+                                user_args, subst, env, pos, excluded)
 
 # The class variable's binding, rebuilt from the constraint's OWN head: the token
 # names each written argument, so `where Boxed (Tagged j)` yields `Tagged <j>` at
@@ -3430,13 +3440,39 @@ fn resolve_compound_head_tdict(
   let Just want = arg_scan_head(head_token) else Nothing
       [_ | _] = toks else Nothing
       Just args_te = constraint_arg_typeexprs(toks, callee, prog_to_fresh, subst, env) else Nothing
-      Just head_str = headed_typed_arg_str(user_args, subst, want) else Nothing
+      Just head_str = compound_head_key(class_name, want, user_args, subst, env) else Nothing
       Just _ = dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) else Nothing
   in
     Just(typed_ast.TDict(
-      ast.TypeConstraint(class_name, Cons(apply_typeexprs(ast.TypeName(head_str), args_te), Nil)),
+      ast.TypeConstraint(class_name, Cons(rebuild_head(head_str, args_te), Nil)),
       types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
   where toks = arg_scan_arg_tokens(head_token)
+
+# The head as the `@inst:` keys spell it. An argument headed by it gives that
+# spelling, but none need exist: `Result e` heads no argument of `try_map(f: a ->
+# Result e b, xs: List a)`. Then the keys are asked, and only an unambiguous answer
+# is taken — two types sharing a short name must not resolve to either.
+fn compound_head_key(class_name: String, want: String, user_args: List typed_ast.TypedExpr,
+                     subst: Dict types.Type, env: Dict types.Scheme) -> Maybe String =
+  match headed_typed_arg_str(user_args, subst, want) with
+  | Just s -> Just(s)
+  | Nothing -> inst_head_key(class_name, want, env)
+
+fn inst_head_key(class_name: String, want: String, env: Dict types.Scheme) -> Maybe String =
+  match list_filter_map(inst_head_matching(class_name, want, _), vec_to_list(dict_keys(env))) with
+  | [only] -> Just(only)
+  | _ -> Nothing
+
+fn inst_head_matching(class_name: String, want: String, key: String) -> Maybe String =
+  let prefix = "@inst:" ++ class_name ++ ":"
+      Just head = string.strip_prefix(key, prefix) else Nothing
+  in if head_name_matches(head, want) then Just(head) else Nothing
+
+# A tuple's dictionary type is the tuple itself; every other head is applied to its
+# arguments.
+fn rebuild_head(head_str: String, args: List ast.TypeExpr) -> ast.TypeExpr =
+  if head_str == "Tuple" ++ int_to_string(list_length(args)) then ast.TupleType(args)
+  else apply_typeexprs(ast.TypeName(head_str), args)
 
 # Each token's argument as a concrete TypeExpr, in written order. Nothing if one
 # is "#any" (no variable to decode) or still polymorphic here: a dictionary built
@@ -3498,6 +3534,7 @@ fn resolve_arg_scanned_tdict(
   class_name: String,
   head: Maybe String,
   want_arity: Int,
+  toks: List String,
   user_args: List typed_ast.TypedExpr,
   subst: Dict types.Type,
   env: Dict types.Scheme,
@@ -3506,7 +3543,8 @@ fn resolve_arg_scanned_tdict(
 ) -> Maybe typed_ast.TypedExpr =
   let Just want = head else resolve_one_constraint_tdict(class_name, user_args, subst, env, pos, excluded)
   in
-    let Just head_str = headed_typed_arg_str(user_args, subst, want) else resolve_via_fwd_or_scan(class_name, user_args, subst, env, pos)
+    let Just head_str = headed_typed_arg_str(user_args, subst, want)
+          else forwarded_compound_tdict(class_name, want, want_arity, toks, user_args, subst, env, pos)
     in
       let Just _ = dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) else resolve_via_fwd_or_scan(class_name, user_args, subst, env, pos)
       in
@@ -3514,6 +3552,36 @@ fn resolve_arg_scanned_tdict(
           ast.TypeConstraint(class_name,
             Cons(headed_arg_typeexpr_or_name(head_str, user_args, subst, want, want_arity), Nil)),
           types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
+
+# No argument carries the head and the arguments are still open: a polymorphic caller
+# passing on a constraint it declares. An open head (`Result _`) lets lowering forward
+# the caller's own dictionary. Not for an `#any` argument: that call is concrete, and an
+# open head there compiles into a dictionary nothing fills.
+fn forwarded_compound_tdict(
+  class_name: String,
+  want: String,
+  want_arity: Int,
+  toks: List String,
+  user_args: List typed_ast.TypedExpr,
+  subst: Dict types.Type,
+  env: Dict types.Scheme,
+  pos: source.SourcePos
+) -> Maybe typed_ast.TypedExpr =
+  let Just head_str = forwardable_head(class_name, want, toks, env)
+        else resolve_via_fwd_or_scan(class_name, user_args, subst, env, pos)
+  in
+    Just(typed_ast.TDict(
+      ast.TypeConstraint(class_name, Cons(rebuild_head(head_str, open_args(want_arity)), Nil)),
+      types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
+
+fn forwardable_head(class_name: String, want: String, toks: List String,
+                    env: Dict types.Scheme) -> Maybe String =
+  match toks with
+  | [] -> Nothing
+  | [_ | _] -> if list_member("#any", toks) then Nothing else inst_head_key(class_name, want, env)
+
+fn open_args(n: Int) -> List ast.TypeExpr =
+  if n <= 0 then Nil else Cons(ast.TypeName("_"), open_args(n - 1))
 
 fn headed_arg_typeexpr_or_name(
   head_str: String,
@@ -10879,6 +10947,13 @@ fn canonicalize_constrained_constraints_acc(
               # parameter order. The head alone is still not enough when two
               # parameters share it, which is why the ARGUMENTS come too.
               Cons((canonical_compound_head_token(ast.TypeApply(cb, ca), prog_to_fresh, s2, binders),
+                    class_name),
+                   canonicalize_constrained_constraints_acc(rest, prog_to_fresh, s2, binders))
+          | [ast.TupleType items | _] ->
+              # A tuple is a compound head too (`Tuple2` over its elements), for the
+              # reason above: treated as headless, it took the first concrete
+              # argument's dictionary.
+              Cons((canonical_compound_head_token(ast.TupleType(items), prog_to_fresh, s2, binders),
                     class_name),
                    canonicalize_constrained_constraints_acc(rest, prog_to_fresh, s2, binders))
           | _ ->
