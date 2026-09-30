@@ -3,33 +3,28 @@
 
 That script is JavaScript inside a markdown fence. Nothing executes it until a
 review is already running, so a typo in it costs a round of reviewer agents
-before it surfaces, and a logic slip in the dedup or the verify cap costs a lost
-finding and never surfaces at all. This extracts the fence and runs it against
-stub agents, so both are caught by `just test-review-script`.
+before it surfaces. This extracts the fence and runs it against stub agents, so
+`just test-review-script` catches both that and a logic slip in the verify path.
 
-Seven behaviours are worth pinning beyond "it parses":
+The script reports every finding its passes returned and judges every one of
+them. It does not group, rank by agreement, or gate — the caller reads the list
+and decides what it means. Six behaviours are worth pinning beyond "it parses":
 
-  1. Dedup must merge one bug reported at two nearby lines, and must NOT merge two
-     different bugs that happen to sit nearby. Line-exact keying failed the first;
-     proximity alone fails the second.
-  2. The verify cap must keep a single-vote MEDIUM finding. On the run it was
-     calibrated against, the most valuable finding was exactly that, and a
-     votes-only cap would have dropped it.
+  1. Every finding reaches the skeptic. A lone low is judged like anything else:
+     run 1790751683-30359 had eight findings, all low, and the gate sent the two
+     that were already conceded dead while withholding the six that were not.
+  2. Nothing is merged. Two reports of one bug stay two findings and both are
+     judged, so `found` counts REPORTS and means one fixed thing across runs.
   3. One batched verifier judges every finding, so a verdict it omits must leave
      that finding unconfirmed. A short reply must not be able to pass a finding.
   4. The effort ladder is a table in SKILL.md prose and a table in the script,
      written in different files with nothing between them. These pin the two
      together, and pin that a malformed level falls back rather than running
      zero passes and then recording a review that never happened.
-  5. The verify gate must read CO-LOCATION, not wording. Two lows at one line
-     phrased differently used to score 1 vote each and neither was checked, which
-     is how a real regression reached a reader unverified.
-  6. One file reported at two path spellings is one finding. Keying on the raw
-     path string never merged them, so the line and overlap tests never ran.
-  7. A merge must keep the summary it did not carry. Dropping it made a wrong
-     merge delete a finding, which is what forced OVERLAP_MIN high in the first
-     place — and the raw pre-dedup findings must come back, or no future
-     threshold claim can be checked against anything.
+  5. The cap evicts by severity, and announces what it withheld. It is the only
+     reason a finding can come back unjudged.
+  6. One file reported at two path spellings is reported at one canonical path,
+     so the durable findings file does not mix the two spellings.
 """
 import json
 import os
@@ -169,8 +164,16 @@ if out is None:
 print("  ok   the script parses and runs")
 check("an empty review returns zero found", 0, out["found"])
 check("an empty review returns zero confirmed", 0, out["confirmed"])
+# The one case that still costs N rather than N+1: nothing to judge, no skeptic.
+check("an empty review spawns no skeptic", 0, out["verifyCalls"])
 
-# --- dedup: merge the same bug, keep different ones apart --------------------
+# --- nothing is merged, and nothing is lost to a merge ----------------------
+# Clustering by proximity-plus-wording was removed rather than retuned. It
+# reported 8 distinct for 4 real issues on run 1790751683-30359, split two
+# reports at an IDENTICAL line (overlap 0.40 against a 0.5 floor), and cost a
+# verify slot on the duplicate. Measured duplicates score 0.36/0.40/0.45/0.46/
+# 0.53 across three runs — they straddle the floor, so no cutoff separates them.
+# A reader resolves "same bug?" natively; the script no longer guesses.
 SAME_A = {"file": "a.ts", "line": 100, "severity": "low",
           "summary": "the retry loop drops the last error silently", "scenario": "s1"}
 SAME_B = {"file": "a.ts", "line": 103, "severity": "medium",
@@ -180,12 +183,12 @@ NEARBY_OTHER = {"file": "a.ts", "line": 101, "severity": "low",
                 "scenario": "s3"}
 
 out, err = run([[SAME_A], [SAME_B]] + [[]] * 1)
-check("one bug at two nearby lines is one finding", 1, out["found"])
-check("merging sums the votes", 2, out["findings"][0]["votes"])
-# The reader acts on the summary, so the merged entry must carry the harsher
-# reading, not whichever line sorted first.
-check("the merged entry keeps the severe wording", "medium", out["findings"][0]["severity"])
-check("the merged entry keeps the severe line", 103, out["findings"][0]["line"])
+check("one bug reported twice stays two findings", 2, out["found"])
+check("both reports of one bug are judged", 2, out["confirmed"])
+check("both reports cost one skeptic, not two", 1, out["verifyCalls"])
+# `found` counts REPORTS, so the column means one thing across every run. The
+# judged grouping is the caller's, and belongs in the findings file.
+check("no finding is dropped to a merge", 2, len(field(out, "raw")))
 
 out, err = run([[SAME_A], [NEARBY_OTHER]] + [[]] * 1)
 check("two different bugs one line apart stay two", 2, out["found"])
@@ -205,22 +208,27 @@ check("a single-vote medium is not left unverified", 0, len(field(out, "unverifi
 out, err = run([[LONE_HIGH]] + [[]] * 2)
 check("a single-vote high IS verified", 1, out["confirmed"])
 
+# THE REGRESSION. A lone low used to fall below the verify gate, and on run
+# 1790751683-30359 every one of eight findings was a lone low: the skeptic was
+# handed the only two that shared a line — both already conceded dead — and
+# never saw the two that contradicted a claim in the PR body. Severity and
+# corroboration were both degenerate, so the ranking they fed was arbitrary.
 out, err = run([[LONE_LOW]] + [[]] * 2)
-check("a single-vote low is NOT verified", 0, out["confirmed"])
-check("a single-vote low is reported unverified", 1, len(field(out, "unverified")))
+check("a lone low IS verified", 1, out["confirmed"])
+check("a lone low is not left unverified", 0, len(field(out, "unverified")))
+check("a lone low spawns the skeptic", 1, out["verifyCalls"])
 # The denominator must not shrink when the cap tightens, or the ledger's `found`
 # column silently starts meaning something else.
-check("an unverified finding still counts as found", 1, out["found"])
+check("a judged finding still counts as found", 1, out["found"])
 
 out, err = run([[LONE_LOW], [LONE_LOW]] + [[]] * 1)
-check("a corroborated low IS verified", 1, out["confirmed"])
+check("two reports of one low are both verified", 2, out["confirmed"])
 
-# --- corroboration is counted by LOCATION, not by wording -------------------
-# The gate used to read `votes`, which comes out of the clustering and therefore
-# measures whether two reviewers PHRASED a thing alike. Two lows at one line
-# whose summaries score under OVERLAP_MIN stayed two 1-vote lows and neither was
-# verified — run 1790417756-48747 lost a real regression at
-# ast_to_ir.sprout:7512 exactly that way, and the skeptic was skipped entirely.
+# --- two reports at one line stay two, and both are judged ------------------
+# Run 1790417756-48747 lost a real regression at ast_to_ir.sprout:7512 this way:
+# two lows at one line, phrased differently, scored 1 vote each, cleared no gate
+# and were never checked. Location-based corroboration was the first fix; judging
+# everything makes the question moot.
 SAME_LINE_A = {"file": "stdlib/compiler/ast_to_ir.sprout", "line": 7512,
                "severity": "low",
                "summary": "poison literal embeds a duplicate runtime error prefix",
@@ -230,29 +238,27 @@ SAME_LINE_B = {"file": "stdlib/compiler/ast_to_ir.sprout", "line": 7512,
                "summary": "unresolved dictionary thunk message printed twice",
                "scenario": "s"}
 out, err = run([[SAME_LINE_A], [SAME_LINE_B], []])
-# They stay TWO findings — the wording really is different and merging would
-# discard one — and both are now checked. Only the triage decision changed.
 check("unlike wording still reports separately", 2, out["found"])
 check("both same-line lows are verified", 2, out["confirmed"])
 check("a same-line low pair spawns the skeptic", 1, out["verifyCalls"])
-check("neither is left below the gate", 0, len(field(out, "unverified")))
+check("neither is withheld from the skeptic", 0, len(field(out, "unverified")))
 
-# --- one file, two path spellings, one finding -------------------------------
+# --- one file, two path spellings, one canonical path -----------------------
 # An agent returns an absolute or a repo-relative path depending on how it
-# navigated. Keying dedup on the raw string never merged the two, so the line and
-# overlap tests were never reached: run 1790183127-58366 returned 5 findings that
-# were really 3. The suffix rule collapses them without needing a repo root.
+# navigated (run 1790183127-58366). Nothing is merged on it any more, but the
+# findings file is durable and must not mix the two spellings, so the suffix rule
+# stays: each path collapses to the shortest path in the run it ends with on a
+# segment boundary, which needs no repo root.
 ABS_SPELLING = {"file": "/Users/x/repo/stdlib/prelude.sprout", "line": 1812,
                 "severity": "medium",
                 "summary": "builder append copies the chunk pointer array per call",
                 "scenario": "s"}
 REL_SPELLING = dict(ABS_SPELLING, file="stdlib/prelude.sprout")
 out, err = run([[ABS_SPELLING], [REL_SPELLING], []])
-check("two spellings of one file are one finding", 1, out["found"])
-check("merging across spellings sums the votes", 2,
-      field(out, "findings")[0]["votes"] if field(out, "findings") else None)
-check("the canonical relative path is reported", "stdlib/prelude.sprout",
-      field(out, "findings")[0]["file"] if field(out, "findings") else None)
+check("two spellings stay two findings", 2, out["found"])
+check("every spelling is reported at the canonical path",
+      ["stdlib/prelude.sprout", "stdlib/prelude.sprout"],
+      sorted(f["file"] for f in field(out, "findings")))
 
 # The suffix rule must not merge two genuinely different files. A shared
 # basename is not a shared path, so these stay apart.
@@ -260,26 +266,20 @@ TWIN_A = {"file": "src/a/mod.rs", "line": 10, "severity": "medium",
           "summary": "identical wording in two different files here", "scenario": "s"}
 TWIN_B = dict(TWIN_A, file="src/b/mod.rs")
 out, err = run([[TWIN_A], [TWIN_B], []])
-check("a shared basename does not merge different files", 2, out["found"])
+check("a shared basename does not rewrite a different file", 2,
+      len({f["file"] for f in field(out, "findings")}))
 
-# --- merging keeps the wording it does not carry ----------------------------
-# The loser's summary used to be dropped, which made a wrong merge delete a
-# finding outright — the real reason OVERLAP_MIN had to sit high.
-MERGE_LOW = {"file": "runtime/sprout_runtime.c", "line": 100, "severity": "low",
-             "summary": "bounds check missing before the vector element load",
-             "scenario": "s"}
-MERGE_HIGH = dict(MERGE_LOW, severity="high",
-                  summary="bounds check missing before the vector element load here")
-out, err = run([[MERGE_LOW], [MERGE_HIGH], []])
-check("a merge keeps the wording it did not carry", 1,
-      len(field(out, "findings")[0].get("alsoReported", []))
-      if field(out, "findings") else None)
-
-# --- the raw pre-dedup findings come back for the ledger --------------------
-# Post-dedup output cannot say whether a clustering constant is set right, which
-# is why OVERLAP_MIN was carried for three runs on adjectives.
+# --- every finding as its pass reported it comes back -----------------------
+# `raw` is what the ledger stores beside the report. It was added because a
+# post-dedup report cannot say whether a clustering constant was set right; it
+# stays because the report is judged and the ledger should hold the unjudged
+# claims too, in the reviewer's own words.
 out, err = run([[SAME_LINE_A], [SAME_LINE_B], []])
-check("every pre-dedup finding is returned as raw", 2, len(field(out, "raw")))
+check("every finding as reported is returned as raw", 2, len(field(out, "raw")))
+check("raw keeps the reviewer's own summary",
+      sorted(["poison literal embeds a duplicate runtime error prefix",
+              "unresolved dictionary thunk message printed twice"]),
+      sorted(f["summary"] for f in field(out, "raw")))
 
 # --- refuted findings are separated, not dropped ----------------------------
 out, err = run([[LONE_HIGH]] + [[]] * 2, verdicts=[{"at": "h.ts:2", "refuted": True}])
@@ -331,19 +331,28 @@ check("verdicts land on their own finding: the right one",
 check("verdicts land on their own finding: the other refuted",
       "m.ts", field(out, "refuted")[0]["file"] if field(out, "refuted") else None)
 
-# --- the cap evicts by severity, not by votes -------------------------------
-# Votes-first sorting put corroborated lows ahead of a lone high and evicted the
-# high, reinstating through the cap the votes-only gate the severity test
-# rejects. VERIFY_CAP is 10, so eleven gate-clearing findings make it bind.
-CORROBORATED_LOWS = [{"file": "c%d.ts" % i, "line": 1, "severity": "low",
-                      "summary": "duplicated low finding number %d here" % i,
-                      "scenario": "s"} for i in range(10)]
-out, err = run([CORROBORATED_LOWS, CORROBORATED_LOWS, [LONE_HIGH]])
-check("eleven findings clear the gate", 11, out["found"])
+# --- the cap evicts by severity, and is the only way to go unjudged ---------
+# With no gate, VERIFY_CAP is the sole reason a finding comes back unverified.
+# Eviction is severity-major: sorting it by agreement once put ten corroborated
+# lows ahead of a lone high and evicted the high. VERIFY_CAP is 10, so eleven
+# findings make it bind.
+TEN_LOWS = [{"file": "c%d.ts" % i, "line": 1, "severity": "low",
+             "summary": "low finding number %d here" % i,
+             "scenario": "s"} for i in range(10)]
+out, err = run([TEN_LOWS, [LONE_HIGH], []])
+check("eleven findings are all found", 11, out["found"])
 check("the lone high is verified, not evicted", "h.ts",
       next((f["file"] for f in field(out, "findings") if f["file"] == "h.ts"), None))
 check("the cap evicts a low instead", "low",
       field(out, "unverified")[0]["severity"] if field(out, "unverified") else None)
+check("exactly one finding is past the cap", 1, len(field(out, "unverified")))
+check("the evicted finding says why", True,
+      "VERIFY_CAP" in field(out, "unverified")[0].get("unverifiedBecause", "")
+      if field(out, "unverified") else None)
+# Per the Workflow guidance on silent caps: a bounded pass must not read as full
+# coverage. This is the one log line a reader needs.
+check("the withheld count is logged", 1,
+      sum(1 for m in field(out, "LOGS") if "UNVERIFIED" in m))
 
 # --- the cost model: N reviewers and at most one verifier -------------------
 # The agent count is the reason this shape was chosen, so it is pinned. Three
@@ -351,11 +360,7 @@ check("the cap evicts a low instead", "low",
 out, err = run([[LONE_HIGH], [LONE_MEDIUM], [SAME_A]])
 check("one verify agent regardless of finding count", 1, out["verifyCalls"])
 check("N reviewer agents", 3, out["reviewN"])
-
-# No finding clears the gate, so the skeptic is skipped entirely and the run
-# costs N, not N+1. SKILL.md and README.md both claim this.
-out, err = run([[LONE_LOW]] + [[]] * 2)
-check("no verify agent when nothing clears the gate", 0, out["verifyCalls"])
+check("three findings are all judged", 3, out["confirmed"])
 
 # --- the effort ladder -------------------------------------------------------
 # The level is the user's only dial, and it reaches the script as data. These
@@ -413,11 +418,6 @@ out, err = run([[]], args={"effort": "low", "target": "1234"})
 check("with a target the branch diff is not mentioned", 0,
       sum(1 for e in field(out, "EFFORTS")
           if e["label"].startswith("review:") and "@{upstream}" in e["prompt"]))
-
-# --- the cap is announced, per the Workflow guidance on silent caps ----------
-out, err = run([[LONE_LOW]] + [[]] * 2)
-check("the skipped count is logged", 1,
-      sum(1 for m in field(out, "LOGS") if "UNVERIFIED" in m))
 
 if failures:
     print("==> sprout-review script tests FAILED (%d)" % len(failures), file=sys.stderr)
