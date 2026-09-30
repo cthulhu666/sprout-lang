@@ -11,7 +11,7 @@
 #   review_ledger.sh open            record a run starting; prints the run id
 #   review_ledger.sh done <id> <found> <confirmed> [effort]
 #   review_ledger.sh findings <id>   print the path to write that run's findings to
-#   review_ledger.sh raw <id>        path for that run's RAW pre-dedup findings (JSON)
+#   review_ledger.sh raw <id>        path for that run's findings as each pass worded them
 #   review_ledger.sh count           completed runs on this branch
 #   review_ledger.sh show            one-line summary, for the status line
 set -uo pipefail
@@ -96,12 +96,12 @@ ledger_sibling() {
 
 cmd_findings() { ledger_sibling findings findings md "${1:-}"; }
 
-# The RAW per-pass findings, before dedup. The report next to it is post-dedup, so
-# it cannot answer whether a clustering constant is set right: `OVERLAP_MIN` sat at
-# 0.5 for three runs on adjectives ("synonyms, ~0.3 overlap") because the summaries
-# it scored were never written down. Keeping them makes the next threshold claim a
-# measurement instead of a recollection. JSON, not prose — this one is for replaying
-# the clustering, not for reading.
+# The findings as each pass worded them. The report next to it is judged and grouped
+# by a reader, so it cannot answer what the passes actually said: `OVERLAP_MIN` sat
+# at 0.5 for three runs on adjectives ("synonyms, ~0.3 overlap") because the
+# summaries it scored were never written down. Writing them down is what let the
+# threshold be measured, and measuring it is what removed it. JSON, not prose — this
+# one is for replaying a decision over the raw claims, not for reading.
 cmd_raw() { ledger_sibling raw raw json "${1:-}"; }
 
 # A run counts as complete only once, however many `done` rows name it: the id

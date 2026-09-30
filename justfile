@@ -698,7 +698,7 @@ test-review-ledger:
 # Exercise the workflow script inside .claude/skills/sprout-review/SKILL.md. Same
 # rationale as the three above, one level worse: that script is JS in a markdown
 # fence, so nothing runs it until a review is already several agents in, and a slip
-# in its dedup or verify cap loses a finding without ever failing loudly.
+# in its verify path or its cap loses a finding without ever failing loudly.
 [group('test')]
 test-review-script:
   python3 scripts/test_review_script.py
