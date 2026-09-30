@@ -462,10 +462,25 @@ because the byte arm's old advice pointed exclusively at string building and wou
 anyone who hit it this way.
 
 `sprout_obj` is now budgeted (3000 per element against 1434 observed), and `arena_bytes` retightened to
-250,000 — the old 550,000 was set around a quadratic. The residual growth in the ratio is the compiler's
-FRONT end, which is mildly superlinear on its own (1188 → 1376 → 1736 per element through
-`--phase recheck`); that is a `BACKLOG` entry, and it is what consumes the 15/10 headroom, so find it
-before tightening this arm further.
+250,000 — the old 550,000 was set around a quadratic.
+
+**The residual was the front end, and not where it was looked for.** The objects ratio stayed at 11/10
+after the fix. Split by phase, `bundle` (lexing included) was flat to 1920 elements, and `check` was
+quadratic. Varying the element showed it was only elements holding a `++`, which carries a
+`Semigroup` dictionary. `verify_dispatch` gathered its per-call outcomes as
+`list_append(collect_expr(h), collect_exprs(t))`, and `list_append` copies its left side. So each
+nested `Cons` of a list literal copied every outcome below it. Threading one `ListBuilder` through
+the walk took `check` to a flat 976 objects per element, and the ratio to 107/100.
+
+That is also why the arm moved to **hundredths**: tenths floored 119 and 107 to 11 and 10, too close
+to set a bound between. Objects are bounded at 112 and bytes at 150. The last 7 in the objects figure
+comes from the fixtures, not a pass: they number elements `1..n`, so each doubling adds elements one
+digit longer to lex. Bytes still grow at 130, in the back half (`BACKLOG`).
+
+**Counting allocations cannot see a scan that allocates nothing.** The rooting pass itself takes cubic
+time on one long block — 4.9 s at 480 elements, 37 s at 960 — while every arm here stays flat:
+`roots_across` runs `list_member` over the root stack for every in-scope value at every trigger, and
+`list_member` allocates nothing. `BACKLOG` has the entry.
 
 The fix is `ListBuilder IROp` rather than a hand-kept reversed list, because the file was *already*
 carrying both conventions under one type: `translate_expr` held `cur_ops` in source order while

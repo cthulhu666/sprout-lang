@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
 import stdlib.compiler.verify_dispatch as vd
 import stdlib.compiler.ast as ast
 import stdlib.compiler.types as types
@@ -221,4 +221,77 @@ fn main() -> Unit !{IO} =
     assert_true(state, "return-position class-method dispatch with its post-pass dict verifies clean",
       match vd.verify_program(ret_prog) with | Just _ -> false | Nothing -> true)
 
+    # --- ORDER: the error reported is the FIRST mismatch in source order. The
+    # walker's outcome list is what fixes that order; building it any other way
+    # reports a later call's error for an earlier one. Three shapes: sequential do
+    # steps, sibling call args, and the two arms of an `if`.
+    let do_body = typed_ast.TDo([typed_ast.TDoLetStep("x", bad_call_at(2)), typed_ast.TDoExprStep(bad_call_at(3))],
+      t_vec_pair(), dpos())
+    assert_eq(state, "the earlier of two do-step mismatches is reported",
+      mismatch_line(prog_of(do_body)), Just(2))
+    let args_body = typed_ast.TCall(typed_ast.TVar("wrap", t_int(), dpos()), [bad_call_at(5), bad_call_at(6)],
+      t_int(), dpos())
+    assert_eq(state, "the earlier of two sibling-arg mismatches is reported",
+      mismatch_line(prog_of(args_body)), Just(5))
+    let if_body = typed_ast.TIf(typed_ast.TVar("c", types.type_bool(), dpos()), bad_call_at(7), bad_call_at(8),
+      t_vec_pair(), dpos())
+    assert_eq(state, "a mismatch in `then` is reported before one in `else`",
+      mismatch_line(prog_of(if_body)), Just(7))
+
+    # --- DEPTH: every call in a deep right-nested chain is counted exactly once.
+    # This is the shape of a desugared list literal, `Cons(e1, Cons(e2, ...))`, where
+    # each level used to copy every outcome found below it.
+    assert_eq(state, "a 40-deep chain of verified calls tallies 40 ok, 0 skip, 0 mismatch",
+      vd.verify_stats(prog_of(nested_good(40))), (40, 0, 0))
+
+    # --- REACH: a mismatch under each expression form the walker descends into.
+    let reach = [
+      ("match branch", typed_ast.TMatch(typed_ast.TInt(0, t_int(), dpos()),
+         [typed_ast.TypedMatchBranch(ast.WildcardPattern(dpos()), bad_call_at(1))], t_vec_pair(), dpos())),
+      ("lambda body", typed_ast.TLambda([], bad_call_at(1), t_vec_pair(), dpos())),
+      ("record field", typed_ast.TRecord("R", [typed_ast.TypedRecordField("f", bad_call_at(1))], t_int(), dpos())),
+      ("tuple item", typed_ast.TTuple([typed_ast.TInt(0, t_int(), dpos()), bad_call_at(1)], t_int(), dpos())),
+      ("binary operand", typed_ast.TBinary("==", typed_ast.TInt(0, t_int(), dpos()), bad_call_at(1), t_int(), dpos())),
+      ("field access base", typed_ast.TGetField(bad_call_at(1), "f", t_int(), dpos()))]
+    list_each(\case -> assert_reached(state, case), reach)
+
     summary(state)
+
+fn assert_reached(state: TestState, case: (String, typed_ast.TypedExpr)) -> Unit !{IO} =
+  let (label, body) = case
+  in assert_eq(state, "a mismatch under a " ++ label ++ " is flagged", mismatch_line(prog_of(body)), Just(1))
+
+fn pos_at(line: Int) -> source.SourcePos = source.SourcePos(index = line, line = line, column = 1)
+
+# The walker section's two fixtures, rebuilt as functions so a helper can place
+# them at a chosen position.
+fn sort_decl() -> typed_ast.TypedDecl =
+  typed_ast.TFnDecl("vec_sort_by",
+    [ast.Param("f", Just(te_proj), ast.ModeDefault), ast.Param("v", Just(te_vec_a), ast.ModeDefault)],
+    Nothing, Nothing, [ord_k], typed_ast.TUnit(t_int(), dpos()))
+
+fn sort_call_at(head: String, line: Int) -> typed_ast.TypedExpr =
+  typed_ast.TCall(typed_ast.TVar("vec_sort_by", t_vec_pair(), dpos()),
+    [typed_ast.TVar("f", t_fst_fn(), dpos()), typed_ast.TVar("v", t_vec_pair(), dpos()),
+     typed_ast.TDict(ast.TypeConstraint("Ord", [ast.TypeName(head)]),
+       types.TConst(types.type_id("Ord")), dpos(), typed_ast.EvUnresolved)],
+    t_vec_pair(), pos_at(line))
+
+# `Ord Tuple2` where k = Int: a mismatch reported at `line`.
+fn bad_call_at(line: Int) -> typed_ast.TypedExpr = sort_call_at("Tuple2", line)
+
+# `wrap(<verified call>, wrap(<verified call>, ... wrap(0)))`: `wrap` has no
+# signature, so only the `vec_sort_by` calls produce outcomes.
+fn nested_good(depth: Int) -> typed_ast.TypedExpr =
+  if depth == 0 then typed_ast.TInt(0, t_int(), dpos())
+  else typed_ast.TCall(typed_ast.TVar("wrap", t_int(), dpos()), [sort_call_at("Int", depth), nested_good(depth - 1)],
+    t_int(), dpos())
+
+fn prog_of(body: typed_ast.TypedExpr) -> typed_ast.TypedProgram =
+  typed_ast.TypedProgram([sort_decl(), typed_ast.TFnDecl("caller", [], Nothing, Nothing, [], body)])
+
+# The line of the reported mismatch; Nothing for a clean program.
+fn mismatch_line(prog: typed_ast.TypedProgram) -> Maybe Int =
+  match vd.verify_program(prog) with
+  | Just (p, _) -> Just(p.line)
+  | Nothing -> Nothing

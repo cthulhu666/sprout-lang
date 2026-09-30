@@ -388,7 +388,7 @@ export fn verify_stats(prog: typed_ast.TypedProgram) -> (Int, Int, Int) =
 fn collect_program(prog: typed_ast.TypedProgram) -> List VerifyOutcome =
   match prog with
   | typed_ast.TypedProgram decls ->
-      collect_decls(decls, build_sig_table(decls, dict_empty()))
+      list_builder_build(collect_decls(decls, build_sig_table(decls, dict_empty()), list_builder_empty))
 
 fn tally(os: List VerifyOutcome, ok: Int, sk: Int, mm: Int) -> (Int, Int, Int) =
   match os with
@@ -518,78 +518,81 @@ fn bind_params(params: List ast.Param, locals: Dict Bool) -> Dict Bool =
       match p with
       | ast.Param name _ _ -> bind_params(rest, dict_set(name, true, locals))
 
-fn collect_decls(decls: List typed_ast.TypedDecl, sigs: Dict CalleeSig) -> List VerifyOutcome =
-  match decls with
-  | Nil -> Nil
-  | Cons d rest -> list_append(collect_decl(d, sigs), collect_decls(rest, sigs))
+# The collectors thread one builder through the walk in source order. Joining each
+# node's own list with `list_append` instead copied every outcome once per
+# enclosing node: quadratic in nesting depth, and a desugared list literal
+# `Cons(e1, Cons(e2, ...))` nests one level per element.
+fn collect_decls(decls: List typed_ast.TypedDecl, sigs: Dict CalleeSig, out: ListBuilder VerifyOutcome) -> ListBuilder VerifyOutcome =
+  list_fold(\ (b, d) -> collect_decl(d, sigs, b), out, decls)
 
-fn collect_decl(d: typed_ast.TypedDecl, sigs: Dict CalleeSig) -> List VerifyOutcome =
+fn collect_decl(d: typed_ast.TypedDecl, sigs: Dict CalleeSig, out: ListBuilder VerifyOutcome) -> ListBuilder VerifyOutcome =
   match d with
-  | typed_ast.TFnDecl _ params _ _ _ body -> collect_expr(body, sigs, bind_params(params, dict_empty()))
-  | typed_ast.TInstanceDecl _ _ methods -> collect_methods(methods, sigs)
+  | typed_ast.TFnDecl _ params _ _ _ body -> collect_expr(body, sigs, bind_params(params, dict_empty()), out)
+  | typed_ast.TInstanceDecl _ _ methods -> list_fold(\ (b, m) -> collect_method(m, sigs, b), out, methods)
   # A top-level `let` initializer is a body like any other and is walked like one:
   # an ambiguous class-method chain in one is rejected here rather than left to
   # surface at the linker. It binds no parameters, so nothing shadows a callee name.
-  | typed_ast.TLetDecl _ body -> collect_expr(body, sigs, dict_empty())
+  | typed_ast.TLetDecl _ body -> collect_expr(body, sigs, dict_empty(), out)
   # Bodyless. Every declaration is listed rather than left to a wildcard, so a
   # TypedDecl carrying an expression fails to compile here instead of silently
   # skipping verification.
-  | typed_ast.TExternFnDecl _ _ _ _ -> Nil
-  | typed_ast.TPassThrough _ -> Nil
+  | typed_ast.TExternFnDecl _ _ _ _ -> out
+  | typed_ast.TPassThrough _ -> out
 
-fn collect_methods(methods: List typed_ast.TypedInstanceMethod, sigs: Dict CalleeSig) -> List VerifyOutcome =
-  match methods with
-  | Nil -> Nil
-  | Cons m rest ->
-      match m with
-      | typed_ast.TypedInstanceMethod _ params _ _ _ body ->
-          list_append(collect_expr(body, sigs, bind_params(params, dict_empty())),
-                      collect_methods(rest, sigs))
+fn collect_method(m: typed_ast.TypedInstanceMethod, sigs: Dict CalleeSig, out: ListBuilder VerifyOutcome) -> ListBuilder VerifyOutcome =
+  match m with
+  | typed_ast.TypedInstanceMethod _ params _ _ _ body ->
+      collect_expr(body, sigs, bind_params(params, dict_empty()), out)
 
 # Walk an expression, checking every TCall and recursing into all subexpressions.
 # `locals` grows at each binding form and is discarded on the way out, so a shadow
 # suppresses verification only within its own scope.
-fn collect_expr(e: typed_ast.TypedExpr, sigs: Dict CalleeSig, locals: Dict Bool) -> List VerifyOutcome =
+fn collect_expr(e: typed_ast.TypedExpr, sigs: Dict CalleeSig, locals: Dict Bool, out: ListBuilder VerifyOutcome) -> ListBuilder VerifyOutcome =
   match e with
   | typed_ast.TCall callee args ret_ty pos ->
-      list_append(check_call(callee, args, ret_ty, pos, sigs, locals),
-                  collect_exprs(Cons(callee, args), sigs, locals))
-  | typed_ast.TIf c th el _ _ -> collect_exprs([c, th, el], sigs, locals)
+      collect_exprs(Cons(callee, args), sigs, locals,
+        list_builder_extend(check_call(callee, args, ret_ty, pos, sigs, locals), out))
+  | typed_ast.TIf c th el _ _ -> collect_exprs([c, th, el], sigs, locals, out)
   | typed_ast.TMatch scrut branches _ _ ->
-      list_append(collect_expr(scrut, sigs, locals), collect_branches(branches, sigs, locals))
-  | typed_ast.TLambda params body _ _ -> collect_expr(body, sigs, bind_params(params, locals))
-  | typed_ast.TBinary _ l r _ _ -> collect_exprs([l, r], sigs, locals)
-  | typed_ast.TUnary _ x _ _ -> collect_expr(x, sigs, locals)
-  | typed_ast.TRange lo hi _ _ -> collect_exprs([lo, hi], sigs, locals)
-  | typed_ast.TTuple items _ _ -> collect_exprs(items, sigs, locals)
-  | typed_ast.TDo steps _ _ -> collect_do_steps(steps, sigs, locals)
-  | typed_ast.TRecord _ fields _ _ -> collect_record_fields(fields, sigs, locals)
-  | typed_ast.TGetField x _ _ _ -> collect_expr(x, sigs, locals)
+      collect_branches(branches, sigs, locals, collect_expr(scrut, sigs, locals, out))
+  | typed_ast.TLambda params body _ _ -> collect_expr(body, sigs, bind_params(params, locals), out)
+  | typed_ast.TBinary _ l r _ _ -> collect_exprs([l, r], sigs, locals, out)
+  | typed_ast.TUnary _ x _ _ -> collect_expr(x, sigs, locals, out)
+  | typed_ast.TRange lo hi _ _ -> collect_exprs([lo, hi], sigs, locals, out)
+  | typed_ast.TTuple items _ _ -> collect_exprs(items, sigs, locals, out)
+  | typed_ast.TDo steps _ _ -> collect_do_steps(steps, sigs, locals, out)
+  | typed_ast.TRecord _ fields _ _ -> collect_record_fields(fields, sigs, locals, out)
+  | typed_ast.TGetField x _ _ _ -> collect_expr(x, sigs, locals, out)
   | typed_ast.TRecordUpdate base fields _ _ ->
-      list_append(collect_expr(base, sigs, locals), collect_record_fields(fields, sigs, locals))
-  | _ -> Nil
+      collect_record_fields(fields, sigs, locals, collect_expr(base, sigs, locals, out))
+  # Leaves, listed rather than left to a wildcard for collect_decl's reason: a new
+  # variant with subexpressions must not compile until the walk descends into it.
+  | typed_ast.TVar _ _ _ -> out
+  | typed_ast.TInt _ _ _ -> out
+  | typed_ast.TFloat _ _ _ -> out
+  | typed_ast.TBool _ _ _ -> out
+  | typed_ast.TString _ _ _ -> out
+  | typed_ast.TChar _ _ _ -> out
+  | typed_ast.TUnit _ _ -> out
+  | typed_ast.TDict _ _ _ _ -> out
+  | typed_ast.TMethodRef _ _ _ _ _ -> out
 
-fn collect_exprs(es: List typed_ast.TypedExpr, sigs: Dict CalleeSig, locals: Dict Bool) -> List VerifyOutcome =
-  match es with
-  | Nil -> Nil
-  | Cons h t -> list_append(collect_expr(h, sigs, locals), collect_exprs(t, sigs, locals))
+fn collect_exprs(es: List typed_ast.TypedExpr, sigs: Dict CalleeSig, locals: Dict Bool, out: ListBuilder VerifyOutcome) -> ListBuilder VerifyOutcome =
+  list_fold(\ (b, e) -> collect_expr(e, sigs, locals, b), out, es)
 
-fn collect_branches(branches: List typed_ast.TypedMatchBranch, sigs: Dict CalleeSig, locals: Dict Bool) -> List VerifyOutcome =
-  match branches with
-  | Nil -> Nil
-  | Cons b rest ->
-      match b with
-      | typed_ast.TypedMatchBranch pat body ->
-          list_append(collect_expr(body, sigs, bind_names(ast.pattern_names(pat), locals)),
-                      collect_branches(rest, sigs, locals))
+fn collect_branches(branches: List typed_ast.TypedMatchBranch, sigs: Dict CalleeSig, locals: Dict Bool, out: ListBuilder VerifyOutcome) -> ListBuilder VerifyOutcome =
+  list_fold(\ (b, br) -> collect_branch(br, sigs, locals, b), out, branches)
+
+fn collect_branch(br: typed_ast.TypedMatchBranch, sigs: Dict CalleeSig, locals: Dict Bool, out: ListBuilder VerifyOutcome) -> ListBuilder VerifyOutcome =
+  match br with
+  | typed_ast.TypedMatchBranch pat body -> collect_expr(body, sigs, bind_names(ast.pattern_names(pat), locals), out)
 
 # Do steps bind SEQUENTIALLY: a name bound by one step is in scope for the steps
 # below it, but not for its own right-hand side.
-fn collect_do_steps(steps: List typed_ast.TypedDoStep, sigs: Dict CalleeSig, locals: Dict Bool) -> List VerifyOutcome =
+fn collect_do_steps(steps: List typed_ast.TypedDoStep, sigs: Dict CalleeSig, locals: Dict Bool, out: ListBuilder VerifyOutcome) -> ListBuilder VerifyOutcome =
   match steps with
-  | Nil -> Nil
-  | Cons s rest ->
-      list_append(collect_step(s, sigs, locals), collect_do_steps(rest, sigs, step_binds(s, locals)))
+  | Nil -> out
+  | Cons s rest -> collect_do_steps(rest, sigs, step_binds(s, locals), collect_step(s, sigs, locals, out))
 
 fn step_binds(s: typed_ast.TypedDoStep, locals: Dict Bool) -> Dict Bool =
   match s with
@@ -597,19 +600,18 @@ fn step_binds(s: typed_ast.TypedDoStep, locals: Dict Bool) -> Dict Bool =
   | typed_ast.TDoLetStep name _ -> dict_set(name, true, locals)
   | typed_ast.TDoExprStep _ -> locals
 
-fn collect_step(s: typed_ast.TypedDoStep, sigs: Dict CalleeSig, locals: Dict Bool) -> List VerifyOutcome =
+fn collect_step(s: typed_ast.TypedDoStep, sigs: Dict CalleeSig, locals: Dict Bool, out: ListBuilder VerifyOutcome) -> ListBuilder VerifyOutcome =
   match s with
-  | typed_ast.TDoBindStep _ expr -> collect_expr(expr, sigs, locals)
-  | typed_ast.TDoLetStep _ expr -> collect_expr(expr, sigs, locals)
-  | typed_ast.TDoExprStep expr -> collect_expr(expr, sigs, locals)
+  | typed_ast.TDoBindStep _ expr -> collect_expr(expr, sigs, locals, out)
+  | typed_ast.TDoLetStep _ expr -> collect_expr(expr, sigs, locals, out)
+  | typed_ast.TDoExprStep expr -> collect_expr(expr, sigs, locals, out)
 
-fn collect_record_fields(fields: List typed_ast.TypedRecordField, sigs: Dict CalleeSig, locals: Dict Bool) -> List VerifyOutcome =
-  match fields with
-  | Nil -> Nil
-  | Cons f rest ->
-      match f with
-      | typed_ast.TypedRecordField _ expr ->
-          list_append(collect_expr(expr, sigs, locals), collect_record_fields(rest, sigs, locals))
+fn collect_record_fields(fields: List typed_ast.TypedRecordField, sigs: Dict CalleeSig, locals: Dict Bool, out: ListBuilder VerifyOutcome) -> ListBuilder VerifyOutcome =
+  list_fold(\ (b, f) -> collect_record_field(f, sigs, locals, b), out, fields)
+
+fn collect_record_field(f: typed_ast.TypedRecordField, sigs: Dict CalleeSig, locals: Dict Bool, out: ListBuilder VerifyOutcome) -> ListBuilder VerifyOutcome =
+  match f with
+  | typed_ast.TypedRecordField _ expr -> collect_expr(expr, sigs, locals, out)
 
 # Check one call: look up the callee's signature, split args into value-args and
 # injected dicts (by variant — prepend and append both yield dicts in order), and

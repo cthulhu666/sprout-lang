@@ -60,6 +60,7 @@ fi
 # subject rather than by drift: putting ast_to_ir's op accumulator on ListBuilder
 # removed most of the objects, so most of the sweeping went with them. Read the
 # floor against 3259, not 7650 — it is 2.2x below the observation now, not 5.1x.
+# 3076 on 2026-09-30, after verify_dispatch's walk stopped copying its outcomes.
 #
 # MAP is the sharp one: it was 4076 per element and rising with every element
 # added, so a return of that quadratic overshoots this ceiling by ~6x at this
@@ -114,10 +115,10 @@ MIN_ARENA_BYTES_PER_ELEM=50000
 # sprout_obj measured 10454 / 19643 / 38002 at block sizes 120 / 240 / 480 --
 # doubling with n, which is the signature, not the size.
 #
-# Observed 1434 per element on 2026-09-29 (stage-2) with the accumulator on
-# ListBuilder. The back half is FLAT at 245 per element across those three sizes;
-# the rest is the front end, which is mildly superlinear for unrelated reasons
-# (BACKLOG). A return of the quadratic overshoots this ceiling by 3.5x at THIS
+# Observed 1251 per element on 2026-09-30 (stage-2): 1434 with the accumulator on
+# ListBuilder, less verify_dispatch's walk no longer copying its outcome list. The
+# back half is FLAT at 245 per element across those three sizes, and so is the
+# front end now. A return of the quadratic overshoots this ceiling by 3.5x at THIS
 # fixture size (10454 against 3000) and by more at any larger one -- ceiling-
 # relative, the same convention as the map arm above.
 MAX_SPROUT_OBJ_PER_ELEM=3000
@@ -250,16 +251,19 @@ fi
 # make this distinction, which is the whole reason a 550000-byte ceiling sat green
 # over a per-element cost of 397637 that grew with every element added.
 #
-# Measured 2026-09-29 (stage-2): objects 11/10, bytes 13/10. Neither is 10/10
-# because the FRONT end is mildly superlinear for reasons this change does not
-# touch (BACKLOG); measured through --phase recheck, the back half is flat at 245
-# objects per element across 120 / 240 / 480. The same run on the pre-conversion
-# compiler: 18/10 and 18/10.
+# Measured 2026-09-30 (stage-2): objects 107/100, bytes 130/100. Objects are flat
+# in every phase but lexing, and the lexer is linear -- the fixtures are not: they
+# number their elements 1..n, so each doubling adds elements one digit longer.
+# That is the whole 7. Bytes are NOT flat, and the growth is in the back half
+# (BACKLOG). Before verify_dispatch's walk stopped copying its outcome list the
+# objects read 119/100; before ast_to_ir's op accumulator moved to ListBuilder,
+# 180/100 on both.
 #
-# Expressed in tenths to stay in integer arithmetic. 15 sits in the gap between
-# 13 and 18 -- narrower than this gate's other bounds, so if the front end drifts
-# further this arm is the one to re-measure, NOT to relax on sight.
-MAX_GROWTH_TENTHS=15
+# Hundredths, to stay in integer arithmetic: tenths floored 107 and 119 to 10 and
+# 11, too close to set a bound between. 112 splits them; 150 sits between the
+# bytes' 130 and the 180 of a copied accumulator. Re-measure before relaxing either.
+MAX_OBJ_GROWTH_PCT=112
+MAX_BYTES_GROWTH_PCT=150
 
 obj_per2=$(( (obj_h - obj_l) / DELTA2_N ))
 sb_per2=$(( (sb_h - sb_l) / DELTA2_N ))
@@ -278,21 +282,22 @@ if [ "$obj_per2" -lt "$MIN_SPROUT_OBJ_PER_ELEM" ] || [ "$sb_per2" -lt "$MIN_AREN
   exit 1
 fi
 
-obj_growth=$(( (10 * obj_per2) / obj_per ))
-sb_growth=$(( (10 * sb_per2) / sb_per ))
-echo "==> growth at 2x block length: objects ${obj_per} -> ${obj_per2} (${obj_growth}/10)," \
-     "arena bytes ${sb_per} -> ${sb_per2} (${sb_growth}/10); flat is 10/10, quadratic is 20/10"
+obj_growth=$(( (100 * obj_per2) / obj_per ))
+sb_growth=$(( (100 * sb_per2) / sb_per ))
+echo "==> growth at 2x block length: objects ${obj_per} -> ${obj_per2} (${obj_growth}/100)," \
+     "arena bytes ${sb_per} -> ${sb_per2} (${sb_growth}/100); flat is 100/100, quadratic is 200/100"
 
-if [ "$obj_growth" -gt "$MAX_GROWTH_TENTHS" ] || [ "$sb_growth" -gt "$MAX_GROWTH_TENTHS" ]; then
-  echo "FAIL: per-element cost GREW with block length (objects ${obj_growth}/10, bytes ${sb_growth}/10;" >&2
-  echo "      budget ${MAX_GROWTH_TENTHS}/10). Cost per element that rises with the number of elements is" >&2
+if [ "$obj_growth" -gt "$MAX_OBJ_GROWTH_PCT" ] || [ "$sb_growth" -gt "$MAX_BYTES_GROWTH_PCT" ]; then
+  echo "FAIL: per-element cost GREW with block length (objects ${obj_growth}/100, bytes ${sb_growth}/100;" >&2
+  echo "      budget ${MAX_OBJ_GROWTH_PCT}/100 and ${MAX_BYTES_GROWTH_PCT}/100). Cost per element that rises with the number of elements is" >&2
   echo "      quadratic in block length, whatever the absolute figures are -- the" >&2
   echo "      ceilings above can be green while this is broken, and have been." >&2
   echo "      Objects grew: an accumulator is being copied per element. Bytes only:" >&2
   echo "      a string is. Both: the same accumulator, since copying it costs both." >&2
-  echo "      Neither pass looks guilty? Check the FRONT end before the budget --" >&2
-  echo "      --phase recheck splits it out, it is superlinear on its own (BACKLOG)," >&2
-  echo "      and it is what consumes this arm's headroom." >&2
+  echo "      Split it by phase first: \`--phase bundle\`, \`--phase check\` and" >&2
+  echo "      \`--phase recheck\` each stop earlier, and the phase whose own" >&2
+  echo "      per-element cost rises is the one to read. The front end has done" >&2
+  echo "      this too (verify_dispatch's outcome list), not only lowering." >&2
   over=1
 fi
 
