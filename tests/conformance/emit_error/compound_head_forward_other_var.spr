@@ -1,0 +1,12 @@
+module main
+
+# `outer` declares `ToString (List b)` but `f` needs `ToString (List a)`. The slot is
+# keyed by head alone, so forwarding it would pass `b`'s dictionary for `a` — here a
+# String dictionary read on an Int, which crashes.
+fn label(x: t) -> String where ToString t = to_string(x)
+
+fn f(x: a) -> String where ToString (List a) = label([x])
+
+fn outer(x: a, y: b) -> String where ToString (List b) = f(x) ++ label([y])
+
+fn main() -> Unit !{IO} = print(outer(3, "s"))
