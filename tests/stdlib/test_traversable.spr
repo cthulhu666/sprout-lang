@@ -18,9 +18,9 @@ fn far_pair(n: Int) -> List Int = [n, n + 100]
 let no_ints: List Int = Nil
 let no_int_vec: Vec Int = vec_empty()
 
-# `traverse` reached through a `where Traversable t` parameter. The direct calls
-# below devirtualize the dictionary at the call site, so only this shape exercises
-# forwarding one as a hidden argument.
+# `traverse` reached through a `where Traversable t` parameter. Every call passes
+# the dictionary as a hidden argument, but the direct calls below build it from the
+# known instance; only this shape forwards one it was handed.
 fn traverse_maybe(g: a -> Maybe b, xs: t a) -> Maybe(t b) where Traversable t =
   traverse(g, xs)
 
