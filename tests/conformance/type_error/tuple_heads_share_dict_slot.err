@@ -1,1 +1,1 @@
-heads `(a, b)` and `(c, d)`, which share one hidden-dictionary slot
+heads `(a, b)` and `(c, d)`; a method used as a value in the body cannot yet tell

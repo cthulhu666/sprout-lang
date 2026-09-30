@@ -1,0 +1,1 @@
+No instance of ToString for b: the enclosing declaration needs `where ToString b`

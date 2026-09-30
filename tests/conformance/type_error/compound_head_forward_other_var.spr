@@ -1,8 +1,8 @@
 module main
 
-# `outer` declares `ToString (List b)` but `f` needs `ToString (List a)`. The slot is
-# keyed by head alone, so forwarding it would pass `b`'s dictionary for `a` — here a
-# String dictionary read on an Int, which crashes.
+# `outer` declares `ToString (List b)` but `f` needs `ToString (List a)`. Forwarding
+# would pass `b`'s dictionary for `a`, and the List instance needs `ToString a`, which
+# `outer` does not have.
 fn label(x: t) -> String where ToString t = to_string(x)
 
 fn f(x: a) -> String where ToString (List a) = label([x])

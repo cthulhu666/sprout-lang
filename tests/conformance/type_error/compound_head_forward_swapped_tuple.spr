@@ -2,7 +2,7 @@ module main
 
 # `outer` declares `ToString ((b, a))` but `f` needs `ToString ((a, b))`: same head,
 # same variables, other order. Forwarding would render each element with the other's
-# dictionary.
+# dictionary, and the tuple instance needs `ToString a` and `ToString b` on their own.
 fn label(x: t) -> String where ToString t = to_string(x)
 
 fn f(x: a, y: b) -> String where ToString ((a, b)) = label((x, y))

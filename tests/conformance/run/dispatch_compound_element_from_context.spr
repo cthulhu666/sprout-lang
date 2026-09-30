@@ -1,7 +1,8 @@
 module main
 
-# `outer` has `ToString a` but not `ToString (List a)`. Handing over its `ToString a`
-# dictionary for the list read an Int through the List instance and printed a pointer.
+# `outer` has `ToString a` but not `ToString (List a)`, so the list dictionary is
+# built from the List instance over `outer`'s own `ToString a`. Handing over the
+# element dictionary itself read an Int through the List instance.
 fn label(x: t) -> String where ToString t = to_string(x)
 
 fn f(x: a) -> String where ToString (List a) = label([x])
