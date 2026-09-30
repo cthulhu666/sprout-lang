@@ -438,9 +438,10 @@ Two lessons, and the second is the one that cost the time.
 same gate would have gone red on a fixture twice as long and green again on half — a property of the
 fixture, not of the compiler. This is why there is now a **third fixture**
 (`tests/cost/rooting_block_huge.sprout`, 240 elements) and a **growth arm**: the per-element figure is
-computed twice, over 60→120 and over 120→240, and their ratio is bounded at 15/10. Flat is 10/10 and
-quadratic is 20/10. Red-verified at **18/10** on the pre-conversion compiler for both objects and
-bytes, green at 11/10 and 13/10 after.
+computed twice, over 60→120 and over 120→240, and their ratio is bounded. Flat is 1.0 and quadratic
+2.0. The first bound was 15/10 on both counters, red-verified at **18/10** on the pre-conversion
+compiler for both objects and bytes, green at 11/10 and 13/10 after. It is now in hundredths, with
+objects at 112 and bytes at 150 — see the front-end paragraph below for why.
 
 A shape arm can go vacuous the same way a ceiling can, and the first version of this one did: it only
 tested `-gt`, so a truncated `huge` fixture collapsed its delta to zero, read as *perfectly* flat, and
