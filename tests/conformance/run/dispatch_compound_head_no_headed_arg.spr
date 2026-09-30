@@ -1,8 +1,8 @@
 # A compound subject that no parameter carries: `f` takes an `a`, but needs
 # `ToString (List a)` and `ToString (Pair a)`. The constraint's arguments rebuild from
-# the token (`a` is Int here); the head's name has to come from the instance keys,
+# the token (`a` is Int here); the head's name comes from the constraint itself,
 # because no argument's type is headed by `List` or `Pair`. `Pair` is declared in
-# this module, so its key is spelled differently from the one the constraint writes.
+# this module, so both it and its instance key are spelled `main.Pair`.
 module main
 
 type Pair a = Pair a a

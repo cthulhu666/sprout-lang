@@ -565,21 +565,24 @@ it is v11.
 **The head's name need not come from an argument.** `resolve_compound_head_tdict` takes
 the `@inst:` key's spelling of the head from an argument headed by it, but none need
 exist: `Result e` heads no argument of `try_map(f: a -> Result e b, xs: List a)`, and
-`List a` none of `f(x: a)`. Then `inst_head_key` asks the keys themselves and takes
-only a UNIQUE match on the final dotted segment — two types sharing a short name must
-not resolve to either. Without it the dictionaries were dropped and the call was
-under-applied at codegen.
+`List a` none of `f(x: a)`. Then the constraint's own spelling is looked up directly: a
+`where` clause and an instance head are spelled alike on either path — qualified when
+bundled (`main.Pair`), short on the env path (below). Without
+it the dictionaries were dropped and the call was under-applied at codegen.
 
-**Forwarding a compound obligation.** When the arguments are still open — a
-polymorphic caller passing on a constraint it declares, which the uncovered-dictionary
-check makes it do — `forwarded_compound_tdict` builds the head with open arguments
-(`Result _`), the shape the argument-headed path already builds (`Tagged _`). Lowering
-keys a hidden dictionary by class and head, finds the caller's own parameter under it,
-and forwards it. `@fwd:` markers are seeded for bare-variable constraints only, so the
-old fallback through them could never find a compound one.
+**Forwarding a compound obligation.** When the arguments are still open, the caller is
+polymorphic, and `forwarded_compound_tdict` passes on its own dictionary under an open
+head (`Result _`). Lowering keys that slot by class and head ALONE, so the head is not
+enough: the caller must declare the same class and head over the same variables.
+`seed_compound_marker` records each such declaration as `@fwdhead:<Class>:<head>`,
+holding the variables, and the call compares them after substitution. Anything else
+stays a codegen failure, because the checker does not reject it: the uncovered-dictionary
+check covers a variable with any constraint that mentions it, and ignores compound
+constraints on the callee's side (BACKLOG §Dispatch Soundness).
 
 All three are pinned by `tests/conformance/run/dispatch_compound_head_{partial_ctor,
-no_headed_arg,tuple}`, each with a forwarding caller.
+no_headed_arg,tuple}`, each with a forwarding caller; the callers that must not forward by
+`emit_error/compound_head_forward_{undeclared,other_var,swapped_tuple}`.
 
 ## Env-path type names are SHORT, and the marker families depend on it
 

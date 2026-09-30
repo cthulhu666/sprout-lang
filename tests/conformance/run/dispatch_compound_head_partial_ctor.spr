@@ -1,7 +1,7 @@
 # A constraint on a PARTIALLY APPLIED constructor: `Result e` is the applicative, `e`
 # its error type. No argument's type is headed by `Result` — `f` is an arrow and `xs`
 # a List — so the head's name cannot be borrowed from an argument. It comes from the
-# instance keys instead; before that, the dictionaries were dropped and the call was
+# constraint itself; before that, the dictionaries were dropped and the call was
 # under-applied at codegen.
 module main
 

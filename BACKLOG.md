@@ -2633,14 +2633,15 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
 > (core verifier, dispatch trace, loud heuristic, canonical identity) are landed; what follows is
 > the residue, ordered by leverage.
 
-- [ ] `P2` **A compound constraint with a structured argument fails at codegen at a concrete call.**
-  `where ToString (List (List a))` records the inner argument as `#any`, so a concrete call cannot
-  rebuild the dictionary's type from the token, and with no argument headed by `List` there is
-  nothing to borrow it from: `internal error: under-application ... reached codegen`. The checker
-  accepts the program, so this should either work or be a real diagnostic. Making it work needs
-  the token to carry nested structure — a `.iface` bump. It must NOT be forwarded as an open head,
-  which compiles into an unfilled dictionary: `emit_error/compound_head_nested_arg_concrete` pins
-  that it stays a compile-time failure until then.
+- [ ] `P2` **An undischargeable compound constraint fails at codegen, not in the checker.** Two
+  shapes type-check and then die with `under-application ... reached codegen`: a concrete call to
+  `where ToString (List (List a))` (the token records the inner argument as `#any`, so the
+  dictionary's type cannot be rebuilt), and a polymorphic caller that does not declare the callee's
+  compound constraint over the same variables (the uncovered-dictionary check ignores compound
+  constraints and covers a variable with any constraint mentioning it). Both need a real diagnostic,
+  the first possibly a nested token (`.iface` bump). Neither may be forwarded as an open head, which
+  compiles into a wrong or unfilled dictionary: `emit_error/compound_head_nested_arg_concrete` and
+  `emit_error/compound_head_forward_*` pin that they fail at compile time until then.
 
 - [~] `P1` **A `where`-constrained function used as a first-class VALUE.** Fixed everywhere the
   dictionary is readable at the mention, by rewriting a bare mention into the eta-lambda the

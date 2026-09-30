@@ -686,7 +686,7 @@ fn type_expr_head_name(te: ast.TypeExpr) -> String =
   | ast.TypeArrow _ _ _ _ -> "Fn"
   | ast.TypeThunk _ _ -> "Fn"
   | ast.TypeEffect _ _ -> "Eff"
-  | ast.TupleType items -> "Tuple" ++ int_to_string(list_length(items))
+  | ast.TupleType items -> types.tuple_head(list_length(items))
 
 # The instance head and the dispatch type arrive at the SAME application depth:
 # every recorder records the class variable's binding, and the head-arity check

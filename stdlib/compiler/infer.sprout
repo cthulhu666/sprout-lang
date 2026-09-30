@@ -2967,7 +2967,7 @@ fn type_head_str(t: types.Type) -> String =
   | types.TConst name -> types.type_id_name(name)
   | types.TApp base _ -> type_head_str(base)
   | types.TVar name -> types.tyvar_identity(name)
-  | types.TTuple items -> "Tuple" ++ int_to_string(list_length(items))
+  | types.TTuple items -> types.tuple_head(list_length(items))
   | _ -> types.type_to_string(t)
 
 # Returns the concrete constructor name (TConst head) of a type, or Nothing if
@@ -2982,7 +2982,7 @@ fn concrete_type_str(t: types.Type) -> Maybe String =
   match t with
   | types.TConst name -> Just(types.type_id_name(name))
   | types.TApp base _ -> concrete_type_str(base)
-  | types.TTuple items -> Just("Tuple" ++ int_to_string(list_length(items)))
+  | types.TTuple items -> Just(types.tuple_head(list_length(items)))
   | _ -> Nothing
 
 # Walk a class-method's original scheme type alongside the call-site's
@@ -3314,13 +3314,12 @@ fn canonical_arg_token(a: ast.TypeExpr, prog_to_fresh: Dict types.Type,
       types.TVar canon = unifier.apply_subst(s2, fresh_t) else "#any"
   in constraint_var_token(types.tyvar_identity(canon), binders)
 
-# A tuple is named with its arity, as lowering.type_expr_head_name and the `@inst:`
-# keys name it; constraint_fwd_key reads this too, and must agree with lowering.
+# A tuple is named by types.tuple_head, as every dispatch key names it.
 fn type_expr_head_name(te: ast.TypeExpr) -> Maybe String =
   match te with
   | ast.TypeName n -> Just(n)
   | ast.TypeApply base _ -> type_expr_head_name(base)
-  | ast.TupleType items -> Just("Tuple" ++ int_to_string(list_length(items)))
+  | ast.TupleType items -> Just(types.tuple_head(list_length(items)))
   | ast.TypeArrow _ _ _ _ -> Nothing
   | ast.TypeThunk _ _ -> Nothing
   | ast.TypeEffect _ _ -> Nothing
@@ -3415,7 +3414,7 @@ fn compound_head_or_scanned_tdict(
   | Nothing ->
       resolve_arg_scanned_tdict(class_name, arg_scan_head(head_token),
                                 arg_scan_arity(head_token), arg_scan_arg_tokens(head_token),
-                                user_args, subst, env, pos, excluded)
+                                callee, prog_to_fresh, user_args, subst, env, pos, excluded)
 
 # The class variable's binding, rebuilt from the constraint's OWN head: the token
 # names each written argument, so `where Boxed (Tagged j)` yields `Tagged <j>` at
@@ -3423,10 +3422,7 @@ fn compound_head_or_scanned_tdict(
 # recorder invariant (docs/instance-head-kinds-v0.md §5) — every recorder records
 # the class variable's binding, at the head's depth and no deeper.
 #
-# The head NAME still comes from a matching argument: the constraint spells it as
-# written (`Tagged`) while `@inst:` keys carry the qualified one (`main.Tagged`),
-# and every argument headed by it spells it the same way. Which argument that is
-# no longer matters — only the arguments come from the token.
+# The head NAME comes from compound_head_key; only the arguments come from the token.
 fn resolve_compound_head_tdict(
   class_name: String,
   head_token: String,
@@ -3441,37 +3437,26 @@ fn resolve_compound_head_tdict(
       [_ | _] = toks else Nothing
       Just args_te = constraint_arg_typeexprs(toks, callee, prog_to_fresh, subst, env) else Nothing
       Just head_str = compound_head_key(class_name, want, user_args, subst, env) else Nothing
-      Just _ = dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) else Nothing
   in
     Just(typed_ast.TDict(
       ast.TypeConstraint(class_name, Cons(rebuild_head(head_str, args_te), Nil)),
       types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
   where toks = arg_scan_arg_tokens(head_token)
 
-# The head as the `@inst:` keys spell it. An argument headed by it gives that
-# spelling, but none need exist: `Result e` heads no argument of `try_map(f: a ->
-# Result e b, xs: List a)`. Then the keys are asked, and only an unambiguous answer
-# is taken — two types sharing a short name must not resolve to either.
+# The head as the `@inst:` keys spell it, when an instance exists. An argument headed
+# by it gives that spelling, but none need exist: `Result e` heads no argument of
+# `try_map(f: a -> Result e b, xs: List a)`. The constraint's own spelling is then
+# the key's: both are qualified when bundled and short on the env path.
 fn compound_head_key(class_name: String, want: String, user_args: List typed_ast.TypedExpr,
                      subst: Dict types.Type, env: Dict types.Scheme) -> Maybe String =
-  match headed_typed_arg_str(user_args, subst, want) with
-  | Just s -> Just(s)
-  | Nothing -> inst_head_key(class_name, want, env)
-
-fn inst_head_key(class_name: String, want: String, env: Dict types.Scheme) -> Maybe String =
-  match list_filter_map(inst_head_matching(class_name, want, _), vec_to_list(dict_keys(env))) with
-  | [only] -> Just(only)
-  | _ -> Nothing
-
-fn inst_head_matching(class_name: String, want: String, key: String) -> Maybe String =
-  let prefix = "@inst:" ++ class_name ++ ":"
-      Just head = string.strip_prefix(key, prefix) else Nothing
-  in if head_name_matches(head, want) then Just(head) else Nothing
+  let head_str = maybe_with_default(want, headed_typed_arg_str(user_args, subst, want))
+      Just _ = dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) else Nothing
+  in Just(head_str)
 
 # A tuple's dictionary type is the tuple itself; every other head is applied to its
 # arguments.
 fn rebuild_head(head_str: String, args: List ast.TypeExpr) -> ast.TypeExpr =
-  if head_str == "Tuple" ++ int_to_string(list_length(args)) then ast.TupleType(args)
+  if types.tuple_head_arity(head_str) == Just(list_length(args)) then ast.TupleType(args)
   else apply_typeexprs(ast.TypeName(head_str), args)
 
 # Each token's argument as a concrete TypeExpr, in written order. Nothing if one
@@ -3535,6 +3520,8 @@ fn resolve_arg_scanned_tdict(
   head: Maybe String,
   want_arity: Int,
   toks: List String,
+  callee: String,
+  prog_to_fresh: Dict types.Type,
   user_args: List typed_ast.TypedExpr,
   subst: Dict types.Type,
   env: Dict types.Scheme,
@@ -3544,7 +3531,8 @@ fn resolve_arg_scanned_tdict(
   let Just want = head else resolve_one_constraint_tdict(class_name, user_args, subst, env, pos, excluded)
   in
     let Just head_str = headed_typed_arg_str(user_args, subst, want)
-          else forwarded_compound_tdict(class_name, want, want_arity, toks, user_args, subst, env, pos)
+          else forwarded_compound_tdict(class_name, want, want_arity, toks, callee, prog_to_fresh,
+                                        user_args, subst, env, pos)
     in
       let Just _ = dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) else resolve_via_fwd_or_scan(class_name, user_args, subst, env, pos)
       in
@@ -3554,31 +3542,69 @@ fn resolve_arg_scanned_tdict(
           types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
 
 # No argument carries the head and the arguments are still open: a polymorphic caller
-# passing on a constraint it declares. An open head (`Result _`) lets lowering forward
-# the caller's own dictionary. Not for an `#any` argument: that call is concrete, and an
-# open head there compiles into a dictionary nothing fills.
+# passing on a constraint. Forwarded only when the caller declares the same head over
+# the same variables — the dictionary slot is keyed by head alone, so any other caller
+# would hand over a dictionary for a different type, or one nothing fills.
 fn forwarded_compound_tdict(
   class_name: String,
   want: String,
   want_arity: Int,
   toks: List String,
+  callee: String,
+  prog_to_fresh: Dict types.Type,
   user_args: List typed_ast.TypedExpr,
   subst: Dict types.Type,
   env: Dict types.Scheme,
   pos: source.SourcePos
 ) -> Maybe typed_ast.TypedExpr =
-  let Just head_str = forwardable_head(class_name, want, toks, env)
+  let Just ids = call_arg_var_ids(toks, callee, prog_to_fresh, subst, env)
+        else resolve_via_fwd_or_scan(class_name, user_args, subst, env, pos)
+      Just declared = dict_get(compound_fwd_key(class_name, want), env)
         else resolve_via_fwd_or_scan(class_name, user_args, subst, env, pos)
   in
-    Just(typed_ast.TDict(
-      ast.TypeConstraint(class_name, Cons(rebuild_head(head_str, open_args(want_arity)), Nil)),
-      types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
+    if declared_var_ids_now(declared, subst) == Just(ids) then
+      Just(typed_ast.TDict(
+        ast.TypeConstraint(class_name, Cons(rebuild_head(want, open_args(want_arity)), Nil)),
+        types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
+    else resolve_via_fwd_or_scan(class_name, user_args, subst, env, pos)
 
-fn forwardable_head(class_name: String, want: String, toks: List String,
-                    env: Dict types.Scheme) -> Maybe String =
+# The type variable each argument token stands for at this call. Nothing unless every
+# one is still a variable: a structured or concrete argument names no caller constraint.
+fn call_arg_var_ids(toks: List String, callee: String, prog_to_fresh: Dict types.Type,
+                    subst: Dict types.Type, env: Dict types.Scheme) -> Maybe (List String) =
   match toks with
-  | [] -> Nothing
-  | [_ | _] -> if list_member("#any", toks) then Nothing else inst_head_key(class_name, want, env)
+  | [] -> Just(Nil)
+  | [t | rest] ->
+      let Just v = call_arg_var_id(t, callee, prog_to_fresh, subst, env) else Nothing
+          Just more = call_arg_var_ids(rest, callee, prog_to_fresh, subst, env) else Nothing
+      in Just(Cons(v, more))
+
+fn call_arg_var_id(t: String, callee: String, prog_to_fresh: Dict types.Type,
+                   subst: Dict types.Type, env: Dict types.Scheme) -> Maybe String =
+  let Just fresh_t = dict_get(decode_constraint_var(t, callee, env), prog_to_fresh) else Nothing
+      types.TVar v = unifier.apply_subst(subst, fresh_t) else Nothing
+  in Just(types.tyvar_identity(v))
+
+# The marker a function body carries for each compound constraint it declares, keyed
+# by class and head; its value holds the variables under the head. One per key: two
+# subjects sharing a slot are rejected (indistinct_constraint_pair).
+fn compound_fwd_key(class_name: String, head: String) -> String =
+  "@fwdhead:" ++ class_name ++ ":" ++ head
+
+# The declared variables as this call's substitution sees them, so both sides of the
+# comparison are read through the same unification.
+fn declared_var_ids_now(declared: types.Scheme, subst: Dict types.Type) -> Maybe (List String) =
+  let types.Scheme _ _ t _ _ = declared
+      types.TTuple items = unifier.apply_subst(subst, t) else Nothing
+  in tvar_ids(items)
+
+fn tvar_ids(ts: List types.Type) -> Maybe (List String) =
+  match ts with
+  | [] -> Just(Nil)
+  | [t | rest] ->
+      let types.TVar v = t else Nothing
+          Just more = tvar_ids(rest) else Nothing
+      in Just(Cons(types.tyvar_identity(v), more))
 
 fn open_args(n: Int) -> List ast.TypeExpr =
   if n <= 0 then Nil else Cons(ast.TypeName("_"), open_args(n - 1))
@@ -3737,7 +3763,7 @@ fn dispatch_head_str(te: ast.TypeExpr) -> String =
   match te with
   | ast.TypeName n -> n
   | ast.TypeApply base _ -> dispatch_head_str(base)
-  | ast.TupleType items -> "Tuple" ++ int_to_string(list_length(items))
+  | ast.TupleType items -> types.tuple_head(list_length(items))
   | _ -> "?"
 
 # The resolved dict's head type, read out of the TDict's constraint TypeExpr
@@ -4039,7 +4065,7 @@ fn seed_one_constraint_marker(c: ast.TypeConstraint, prog_to_fresh: Dict types.T
       match type_args with
       | Nil -> env
       | [head_te | _] ->
-          let ast.TypeName prog_var = head_te else env
+          let ast.TypeName prog_var = head_te else seed_compound_marker(class_name, head_te, prog_to_fresh, env)
               Just fresh_t = dict_get(prog_var, prog_to_fresh) else env
               types.TVar fresh_name = fresh_t else env
           in
@@ -4049,6 +4075,24 @@ fn seed_one_constraint_marker(c: ast.TypeConstraint, prog_to_fresh: Dict types.T
             # Store prog_var name in the scheme value for retrieval in check_instance_for_marker.
             # Also seed @fwd markers for any superclasses registered under @super:class_name:*.
             seed_fwd_with_supers(class_name, FreshTVarName(types.tyvar_identity(fresh_name)), ProgVarName(prog_var), env)
+
+# A compound constraint over variables only (`where ToString (List a)`); any other
+# subject has nothing a call could match, so it seeds nothing.
+fn seed_compound_marker(class_name: String, te: ast.TypeExpr, prog_to_fresh: Dict types.Type,
+                        env: Dict types.Scheme) -> Dict types.Scheme =
+  let Just head = type_expr_head_name(te) else env
+      Just vars = declared_vars(compound_head_args(te, Nil), prog_to_fresh) else env
+  in dict_set(compound_fwd_key(class_name, head), types.mono(types.TTuple(vars)), env)
+
+fn declared_vars(args: List ast.TypeExpr, prog_to_fresh: Dict types.Type) -> Maybe (List types.Type) =
+  match args with
+  | [] -> Just(Nil)
+  | [a | rest] ->
+      let ast.TypeName v = a else Nothing
+          Just fresh = dict_get(v, prog_to_fresh) else Nothing
+          types.TVar _ = fresh else Nothing
+          Just more = declared_vars(rest, prog_to_fresh) else Nothing
+      in Just(Cons(fresh, more))
 
 # Seed the direct @fwd marker and then transitively seed all superclass markers.
 # fresh_name and prog_var are wrapped at the boundary: the @fwd:* key is built
@@ -8261,11 +8305,21 @@ fn constraint_subject_text(c: ast.TypeConstraint) -> String =
 fn type_expr_text(te: ast.TypeExpr) -> String =
   match te with
   | ast.TypeName n -> string.after_last_dot(n)
-  | ast.TypeApply base arg -> type_expr_text(base) ++ " " ++ type_expr_text(arg)
+  | ast.TypeApply base arg -> type_expr_text(base) ++ " " ++ type_arg_text(arg)
   | ast.TypeArrow _ _ _ _ -> "_"
   | ast.TypeThunk _ _ -> "_"
   | ast.TypeEffect _ _ -> "_"
-  | ast.TupleType _ -> "_"
+  | ast.TupleType items -> "(" ++ string.join(", ", list_map(type_expr_text, items)) ++ ")"
+
+# An applied argument is parenthesized, so `List (List a)` and `List List a` differ.
+fn type_arg_text(te: ast.TypeExpr) -> String =
+  match te with
+  | ast.TypeApply _ _ -> "(" ++ type_expr_text(te) ++ ")"
+  | ast.TypeName _ -> type_expr_text(te)
+  | ast.TypeArrow _ _ _ _ -> type_expr_text(te)
+  | ast.TypeThunk _ _ -> type_expr_text(te)
+  | ast.TypeEffect _ _ -> type_expr_text(te)
+  | ast.TupleType _ -> type_expr_text(te)
 
 fn indistinct_constraints_error(cs: List ast.TypeConstraint) -> Maybe String =
   let Just(cls, a, b) = indistinct_constraint_pair(cs) else Nothing
@@ -10956,8 +11010,16 @@ fn canonicalize_constrained_constraints_acc(
               Cons((canonical_compound_head_token(ast.TupleType(items), prog_to_fresh, s2, binders),
                     class_name),
                    canonicalize_constrained_constraints_acc(rest, prog_to_fresh, s2, binders))
-          | _ ->
-              # Headless constraint (non-TypeName head): resolved without a head var.
+          | [] -> Cons(("#none", class_name),
+                       canonicalize_constrained_constraints_acc(rest, prog_to_fresh, s2, binders))
+          | [ast.TypeArrow _ _ _ _ | _] ->
+              # Headless: an arrow, thunk or effect subject names no constructor.
+              Cons(("#none", class_name),
+                   canonicalize_constrained_constraints_acc(rest, prog_to_fresh, s2, binders))
+          | [ast.TypeThunk _ _ | _] ->
+              Cons(("#none", class_name),
+                   canonicalize_constrained_constraints_acc(rest, prog_to_fresh, s2, binders))
+          | [ast.TypeEffect _ _ | _] ->
               Cons(("#none", class_name),
                    canonicalize_constrained_constraints_acc(rest, prog_to_fresh, s2, binders))
 

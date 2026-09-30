@@ -744,7 +744,10 @@ fn method_constraint_tokens(constraints: List ast.TypeConstraint) -> List (Strin
       | [ast.TupleType items | _] ->
           Cons((compound_head_token(ast.TupleType(items)), class_name),
                method_constraint_tokens(rest))
-      | _ -> Cons(("#none", class_name), method_constraint_tokens(rest))
+      | [] -> Cons(("#none", class_name), method_constraint_tokens(rest))
+      | [ast.TypeArrow _ _ _ _ | _] -> Cons(("#none", class_name), method_constraint_tokens(rest))
+      | [ast.TypeThunk _ _ | _] -> Cons(("#none", class_name), method_constraint_tokens(rest))
+      | [ast.TypeEffect _ _ | _] -> Cons(("#none", class_name), method_constraint_tokens(rest))
 
 # A compound head (`where ToString (Box a)`) in the `#app:` form
 # infer.compound_head_token writes, qualifier included: the head, then one token
@@ -769,7 +772,10 @@ fn compound_head_arg_names(te: ast.TypeExpr, acc: List String) -> Maybe (List St
   | ast.TypeApply base (ast.TypeName n) -> compound_head_arg_names(base, Cons(n, acc))
   | ast.TypeApply base _ -> compound_head_arg_names(base, Cons("#any", acc))
   | ast.TupleType items -> arg_names_done(list_append(list_map(element_name, items), acc))
-  | _ -> arg_names_done(acc)
+  | ast.TypeName _ -> arg_names_done(acc)
+  | ast.TypeArrow _ _ _ _ -> arg_names_done(acc)
+  | ast.TypeThunk _ _ -> arg_names_done(acc)
+  | ast.TypeEffect _ _ -> arg_names_done(acc)
 
 fn element_name(te: ast.TypeExpr) -> String =
   match te with
@@ -790,7 +796,7 @@ fn te_head_name(te: ast.TypeExpr) -> Maybe String =
   match te with
   | ast.TypeName n -> Just(n)
   | ast.TypeApply base _ -> te_head_name(base)
-  | ast.TupleType items -> Just("Tuple" ++ int_to_string(list_length(items)))
+  | ast.TupleType items -> Just(types.tuple_head(list_length(items)))
   | ast.TypeArrow _ _ _ _ -> Nothing
   | ast.TypeThunk _ _ -> Nothing
   | ast.TypeEffect _ _ -> Nothing
