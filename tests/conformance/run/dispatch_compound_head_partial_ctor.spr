@@ -1,0 +1,20 @@
+# A constraint on a PARTIALLY APPLIED constructor: `Result e` is the applicative, `e`
+# its error type. No argument's type is headed by `Result` — `f` is an arrow and `xs`
+# a List — so the head's name cannot be borrowed from an argument. It comes from the
+# instance keys instead; before that, the dictionaries were dropped and the call was
+# under-applied at codegen.
+module main
+
+fn half(x: Int) -> Result String Int = if x > 0 then Ok(x / 2) else Err("neg: " ++ to_string(x))
+
+fn try_map(f: a -> Result e b, xs: List a) -> Result e (List b)
+    where Applicative (Result e) = traverse(f, xs)
+
+fn show(r: Result String (List Int)) -> String =
+  match r with
+  | Err e -> "Err " ++ e
+  | Ok xs -> "Ok " ++ to_string(xs)
+
+fn main() -> Unit !{IO} = do
+  print(show(try_map(half, [2, 4, 6])))
+  print(show(try_map(half, [2, -4, -6])))
