@@ -6945,57 +6945,61 @@ fn pb_pad_to(args: List typed_ast.TypedExpr, m: Int, pos: source.SourcePos) -> L
 # even when it collides with a member name, or the indirect closure call becomes a
 # direct global call (finding #1). Detection already drops such edges; this keeps
 # rewrite consistent when a legit SCC formed via other edges.
-fn pb_retarget_tail(body: typed_ast.TypedExpr, mset: Set, m: Int, bound: Set) -> typed_ast.TypedExpr =
+# Only a call at the member's own arity is retargeted: padding an under-applied one
+# (a dictionary inference could not supply) would pass a null in its place, where
+# the plain call is rejected by translate_general_call.
+fn pb_retarget_tail(body: typed_ast.TypedExpr, mset: Set, arities: Dict Int, m: Int, bound: Set) -> typed_ast.TypedExpr =
   match body with
   | typed_ast.TCall callee args ty pos ->
       match callee with
       | typed_ast.TVar name vty vpos ->
           if set_member(name, mset) && ! set_member (name, bound)
+             && dict_get(name, arities) == Just(list_length(args))
           then typed_ast.TCall(typed_ast.TVar(name ++ "$u", vty, vpos), pb_pad_to(args, m, pos), ty, pos)
           else body
       | typed_ast.TLambda lparams lbody lty lpos ->
           if list_length(lparams) == list_length(args)
           then typed_ast.TCall(typed_ast.TLambda(lparams,
-                 pb_retarget_tail(lbody, mset, m, set_union(bound, set_from_list(param_names(lparams)))),
+                 pb_retarget_tail(lbody, mset, arities, m, set_union(bound, set_from_list(param_names(lparams)))),
                  lty, lpos), args, ty, pos)
           else body
       | _ -> body
   | typed_ast.TIf c t e ty pos ->
-      typed_ast.TIf(c, pb_retarget_tail(t, mset, m, bound), pb_retarget_tail(e, mset, m, bound), ty, pos)
+      typed_ast.TIf(c, pb_retarget_tail(t, mset, arities, m, bound), pb_retarget_tail(e, mset, arities, m, bound), ty, pos)
   | typed_ast.TMatch scrut arms ty pos ->
-      typed_ast.TMatch(scrut, pb_retarget_arms(arms, mset, m, bound), ty, pos)
+      typed_ast.TMatch(scrut, pb_retarget_arms(arms, mset, arities, m, bound), ty, pos)
   | typed_ast.TDo steps ty pos ->
-      typed_ast.TDo(pb_retarget_do(steps, mset, m, bound), ty, pos)
+      typed_ast.TDo(pb_retarget_do(steps, mset, arities, m, bound), ty, pos)
   | _ -> body
 
-fn pb_retarget_arms(arms: List typed_ast.TypedMatchBranch, mset: Set, m: Int, bound: Set) -> List typed_ast.TypedMatchBranch =
+fn pb_retarget_arms(arms: List typed_ast.TypedMatchBranch, mset: Set, arities: Dict Int, m: Int, bound: Set) -> List typed_ast.TypedMatchBranch =
   match arms with
   | Nil -> Nil
   | Cons b rest ->
       match b with
       | typed_ast.TypedMatchBranch pat body ->
           Cons(typed_ast.TypedMatchBranch(pat,
-                 pb_retarget_tail(body, mset, m, set_union(bound, set_from_list(ast.pattern_names(pat))))),
-               pb_retarget_arms(rest, mset, m, bound))
+                 pb_retarget_tail(body, mset, arities, m, set_union(bound, set_from_list(ast.pattern_names(pat))))),
+               pb_retarget_arms(rest, mset, arities, m, bound))
 
-fn pb_retarget_do(steps: List typed_ast.TypedDoStep, mset: Set, m: Int, bound: Set) -> List typed_ast.TypedDoStep =
+fn pb_retarget_do(steps: List typed_ast.TypedDoStep, mset: Set, arities: Dict Int, m: Int, bound: Set) -> List typed_ast.TypedDoStep =
   match steps with
   | Nil -> Nil
   | Cons step rest ->
       match rest with
       | Nil ->
           match step with
-          | typed_ast.TDoExprStep e -> Cons(typed_ast.TDoExprStep(pb_retarget_tail(e, mset, m, bound)), Nil)
+          | typed_ast.TDoExprStep e -> Cons(typed_ast.TDoExprStep(pb_retarget_tail(e, mset, arities, m, bound)), Nil)
           | _ -> Cons(step, Nil)
-      | _ -> Cons(step, pb_retarget_do(rest, mset, m, pb_do_step_extend_bound(step, bound)))
+      | _ -> Cons(step, pb_retarget_do(rest, mset, arities, m, pb_do_step_extend_bound(step, bound)))
 
 # For an SCC member, emit [trampoline (original name/arity), `<name>$u` (arity m)].
 fn pb_gen_pair(name: String, params: List ast.Param, ret: Maybe ast.TypeExpr,
                eff: Maybe (List String), constraints: List ast.TypeConstraint,
-               body: typed_ast.TypedExpr, m: Int, mset: Set) -> List typed_ast.TypedDecl =
+               body: typed_ast.TypedExpr, m: Int, mset: Set, arities: Dict Int) -> List typed_ast.TypedDecl =
   Cons(typed_ast.TFnDecl(name, params, ret, eff, constraints, tramp_body),
     Cons(typed_ast.TFnDecl(name ++ "$u", list_append(params, pb_pad_params(list_length(params), m - list_length(params))),
-                           ret, eff, constraints, pb_retarget_tail(body, mset, m, set_from_list(param_names(params)))),
+                           ret, eff, constraints, pb_retarget_tail(body, mset, arities, m, set_from_list(param_names(params)))),
       Nil))
 where
   pos = typed_ast.typed_expr_pos(body)
@@ -7012,14 +7016,26 @@ where
 # trampoline + `$u` variant; pass everything else through.  No-op when there are no
 # such SCCs (the common case), so its overhead is one detection pass.
 export fn phase_b_unify(decls: List typed_ast.TypedDecl) -> List typed_ast.TypedDecl =
-  pb_unify_with(decls, pb_build_index(pb_hetero_sccs(decls)))
+  pb_unify_with(decls, pb_build_index(pb_hetero_sccs(decls)), pb_fn_arities(decls))
+
+fn pb_fn_arities(decls: List typed_ast.TypedDecl) -> Dict Int =
+  list_fold(\ (acc, d) -> pb_add_arity(d, acc), dict_empty(), decls)
+
+fn pb_add_arity(d: typed_ast.TypedDecl, acc: Dict Int) -> Dict Int =
+  match d with
+  | typed_ast.TFnDecl name params _ _ _ _ -> dict_set(name, list_length(params), acc)
+  | typed_ast.TLetDecl _ _ -> acc
+  | typed_ast.TInstanceDecl _ _ _ -> acc
+  | typed_ast.TExternFnDecl _ _ _ _ -> acc
+  | typed_ast.TPassThrough _ -> acc
 
 # Program-level wrapper (used at the pipeline seam, before detection).
 export fn phase_b_program(prog: typed_ast.TypedProgram) -> typed_ast.TypedProgram =
   match prog with
   | typed_ast.TypedProgram decls -> typed_ast.TypedProgram(phase_b_unify(decls))
 
-fn pb_unify_with(decls: List typed_ast.TypedDecl, index: Dict (Int, Set)) -> List typed_ast.TypedDecl =
+fn pb_unify_with(decls: List typed_ast.TypedDecl, index: Dict (Int, Set),
+                 arities: Dict Int) -> List typed_ast.TypedDecl =
   match decls with
   | Nil -> Nil
   | Cons d rest ->
@@ -7027,10 +7043,10 @@ fn pb_unify_with(decls: List typed_ast.TypedDecl, index: Dict (Int, Set)) -> Lis
       | typed_ast.TFnDecl name params ret eff constraints body ->
           match dict_get(name, index) with
           | Just (m, mset) ->
-              list_append(pb_gen_pair(name, params, ret, eff, constraints, body, m, mset),
-                          pb_unify_with(rest, index))
-          | Nothing -> Cons(d, pb_unify_with(rest, index))
-      | _ -> Cons(d, pb_unify_with(rest, index))
+              list_append(pb_gen_pair(name, params, ret, eff, constraints, body, m, mset, arities),
+                          pb_unify_with(rest, index, arities))
+          | Nothing -> Cons(d, pb_unify_with(rest, index, arities))
+      | _ -> Cons(d, pb_unify_with(rest, index, arities))
 
 # translate_user_fn: returns (IRFunction, next-free-temp-index, lifted-lambdas).
 # The next-free index is the smallest idx never used as %tN/then_N/else_N/join_N

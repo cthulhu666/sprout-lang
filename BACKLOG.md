@@ -1169,11 +1169,10 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
 - [ ] `P2` **Two same-class constraints differing only in their arguments are still rejected.**
   `where Boxed (Tagged k), Boxed (Tagged j)` gets two hidden slots now — `ast.dict_slot_key` names
   the arguments — but `infer.check_indistinct_constraints` still rejects it (spec "Two constraints
-  of one class must not differ only in their arguments"). What is left: `@fwdhead` markers hold one
-  declaration per class and head (key them by the whole constraint), and the eta fallback that
-  takes the only slot carrying a method must pick by key. Then drop the rule and its spec
-  paragraph, and turn `type_error/same_class_heads_share_dict_slot` and
-  `tuple_heads_share_dict_slot` into run fixtures.
+  of one class must not differ only in their arguments"). What is left: the eta fallback that
+  takes the only slot carrying a method (`lowering.find_forwarded_method_any`) must pick by key.
+  Then drop the rule and its spec paragraph, and turn `type_error/same_class_heads_share_dict_slot`
+  and `tuple_heads_share_dict_slot` into run fixtures.
 - [ ] `P2` **A class method's `.iface` scheme quantifies fewer binders than the live
   registration.** `iface_codec.method_scheme` quantifies the CLASS parameters only, so a
   method-level constraint head is keyed by source NAME, while `infer.register_class_method_over`
@@ -2631,15 +2630,13 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
 > (core verifier, dispatch trace, loud heuristic, canonical identity) are landed; what follows is
 > the residue, ordered by leverage.
 
-- [ ] `P2` **An undischargeable compound constraint fails at codegen, not in the checker.** Two
-  shapes type-check and then die with `under-application ... reached codegen`: a concrete call to
-  `where ToString (List (List a))` (the token records the inner argument as `#any`, so the
-  dictionary's type cannot be rebuilt), and a polymorphic caller that does not declare the callee's
-  compound constraint over the same variables (the uncovered-dictionary check ignores compound
-  constraints and covers a variable with any constraint mentioning it). Both need a real diagnostic,
-  the first possibly a nested token (`.iface` bump). Neither may be forwarded as an open head, which
-  compiles into a wrong or unfilled dictionary: `emit_error/compound_head_nested_arg_concrete` and
-  `emit_error/compound_head_forward_*` pin that they fail at compile time until then.
+- [ ] `P2` **An undischargeable compound constraint fails at codegen, not in the checker.** A
+  polymorphic caller that does not declare the callee's compound constraint (or a subclass of it)
+  over the same arguments type-checks, then dies with `under-application ... reached codegen`: the
+  uncovered-dictionary check ignores compound constraints and covers a variable with any constraint
+  mentioning it. It needs a real diagnostic. It must not be forwarded as another dictionary, which
+  runs: `emit_error/compound_head_forward_*`, `compound_head_headed_*` and
+  `compound_head_nested_forward_other_var` pin that it fails at compile time until then.
 
 - [ ] `P3` **A compound obligation is not built from the caller's element constraint.** A caller
   with `where ToString a` calling `f` that needs `ToString (List a)` could build that dictionary

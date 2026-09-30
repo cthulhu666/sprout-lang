@@ -565,8 +565,9 @@ fn decode_iface_v2_tail(s: String, bytes: Bytes, i: Int, total: Int, version: In
 # now says how its parameter is taken. A v9 iface has no such field and would
 # decode every arrow as consuming — the same silent erasure as above, one layer up.
 # v11: a tuple constraint subject writes a compound-head token (`#app:Tuple2:…`)
-# where v10 wrote `#none`. A v10 `#none` decodes into the headless scan, which
-# hands the whole tuple the first argument's dictionary — wrong-instance dispatch.
+# where v10 wrote `#none`, and a structured argument writes a nested token
+# (`[Maybe;b]`) where v10 wrote `#any`. A v10 file read back would dispatch a tuple
+# through its first element's dictionary, and a nested argument not at all.
 # `WrapDecl` gaining a type-parameter list did NOT bump this: an IfaceFile carries
 # schemes, ctors, classes and instances, never decls, so no on-disk iface holds one.
 fn decode_iface_version(s: String) -> Maybe Int =
@@ -764,27 +765,32 @@ fn app_token_with_args(h: String, names: Maybe (List String)) -> String =
   | Nothing -> "#app:" ++ h
   | Just ns -> "#app:" ++ h ++ ":" ++ string.join(",", ns)
 
-# The written arguments' names, outermost LAST, with "#any" where there is no name
-# to give. The gap is recorded rather than dropped so the COUNT survives — that is
-# what lets the recorder place the head at the right application depth.
+# The written arguments' names, outermost LAST: a structured one nested, `#any` where
+# there is no head to give. The gap is recorded rather than dropped so the COUNT
+# survives — that is what lets the recorder place the head at the right depth.
 fn compound_head_arg_names(te: ast.TypeExpr, acc: List String) -> Maybe (List String) =
   match te with
-  | ast.TypeApply base (ast.TypeName n) -> compound_head_arg_names(base, Cons(n, acc))
-  | ast.TypeApply base _ -> compound_head_arg_names(base, Cons("#any", acc))
+  | ast.TypeApply base arg -> compound_head_arg_names(base, Cons(element_name(arg), acc))
   | ast.TupleType items -> arg_names_done(list_append(list_map(element_name, items), acc))
   | ast.TypeName _ -> arg_names_done(acc)
   | ast.TypeArrow _ _ _ _ -> arg_names_done(acc)
   | ast.TypeThunk _ _ -> arg_names_done(acc)
   | ast.TypeEffect _ _ -> arg_names_done(acc)
 
+# A structured argument is written nested (types.nested_arg_token), as infer writes it.
 fn element_name(te: ast.TypeExpr) -> String =
   match te with
   | ast.TypeName n -> n
-  | ast.TypeApply _ _ -> "#any"
+  | ast.TypeApply _ _ -> nested_element(te)
   | ast.TypeArrow _ _ _ _ -> "#any"
   | ast.TypeThunk _ _ -> "#any"
   | ast.TypeEffect _ _ -> "#any"
-  | ast.TupleType _ -> "#any"
+  | ast.TupleType _ -> nested_element(te)
+
+fn nested_element(te: ast.TypeExpr) -> String =
+  let Just h = te_head_name(te) else "#any"
+      Just names = compound_head_arg_names(te, Nil) else "#any"
+  in types.nested_arg_token(h, names)
 
 fn arg_names_done(acc: List String) -> Maybe (List String) =
   match acc with

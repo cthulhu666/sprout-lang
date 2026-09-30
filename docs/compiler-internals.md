@@ -517,88 +517,58 @@ renders `_`, which no slot declares.
 
 `where Boxed (Tagged k), Boxed (Tagged j)` would now get two slots, but
 `infer.check_indistinct_constraints` still rejects it (spec-v0 "Two constraints of one
-class must not differ only in their arguments"): the `@fwdhead` markers below hold one
-declaration per class and head.
+class must not differ only in their arguments"): the value-position fallback that takes
+the only slot carrying a method (`lowering.find_forwarded_method_any`) cannot pick
+between two.
 
-### The compound-head constraint token, and why it carries `#any`
+### The compound-head constraint token
 
 A constrained `fn`'s hidden dictionaries come from its Scheme's `(head_token, class)`
 list. A compound head is stored as:
 
 ```
-#app:<Head>:<t1>,<t2>,...     one constraint-var token per WRITTEN argument
-#app:<Head>                   the head alone — a pre-v9 interface only
+#app:<Head>:<t1>,<t2>,...     one token per WRITTEN argument
 ```
 
-Each `<ti>` is one of three things: `#pos:<k>` against the callee's generalized binder
-list, a **type constructor's own name** where the constraint fixed that argument
-(`where Sh (Box String)` writes `String`), or **`#any`** where the argument is neither
-— a variable the body pinned to a type the scheme cannot name. `#any` is the part
-worth understanding: it carries no identity, so why write it? For the COUNT. Two
-independent things read this token, and they fail differently:
+Each `<ti>` is `#pos:<k>` against the callee's generalized binder list (a source name
+in a monomorphic or `.iface` scheme), a **type constructor's own name** where the
+constraint fixed that argument (`where Sh (Box String)` writes `String`), a **nested**
+`[<head>;<arg>;…]` for a structured argument (`where ToString (List (Maybe b))` writes
+`[Maybe;#pos:1]`; `types.nested_arg_token` — no comma, so the top-level split on `,`
+holds, and no space or parenthesis, so the token stays one `.iface` atom), or `#any` for an arrow, thunk or effect, which names no head.
 
-- `resolve_compound_head_tdict` reads the *positions*, to rebuild the constraint's
-  own head at this call — `where Boxed (Tagged j)` becomes `Tagged String`. This is
-  what stops `second_only(x: Tagged k Int, y: Tagged j Int)` taking `x`'s dictionary
-  for `y`'s value. It needs every argument named, so one `#any` sends it to the scan.
-- `resolve_arg_scanned_tdict` reads the *count*, as `want_arity`. The scan matches a
-  whole argument — the class variable APPLIED — and the count is how much of it is
-  surplus. Dropping the arguments entirely when one was `#any` lost the count too,
-  and `where Sh (Box String)` then bound the instance's `c` to `Int`.
+`compound_head_tdict` decodes every argument at the call — a variable to what the
+substitution made of it, named as the enclosing declaration wrote it
+(`declared_name_by_subst`) — and rebuilds the constraint's own head over them: `where
+Boxed (Tagged j)` becomes `Tagged String`, whichever parameter is headed by `Tagged`.
+Nothing is taken from "the first argument headed by the constructor", the scan this
+replaced: beside `p: (a, b)`, `ToString ((c, d))` is not `p`'s, and in `xs: List (List
+(Box a))` the `List (Box a)` is not `xs`'s type. A ground result takes the instance,
+looked up under the constraint's own spelling of the head — a `where` clause and an
+instance head are spelled alike on either path, qualified when bundled (`main.Pair`),
+short on the env path (below). One with variables is a forward: `seed_compound_marker`
+records each compound constraint a body declares, and each transitive superclass of it,
+as `@fwdhead:` plus its slot key (`ast.dict_slot_key`), and only a marked one forwards. A
+self-call's tokens are the caller's own source names already. Anything else is Nothing
+and fails at codegen, because the checker does not reject it: the uncovered-dictionary
+check ignores compound constraints on the callee's side (BACKLOG §Dispatch Soundness).
 
-A fixed argument records its own name rather than `#any` for the first reader's sake,
-not the second's. `Box String` names which parameter to dispatch on just as precisely
-as a variable does, and recording `#any` there left the choice to the scan — which
-takes the first parameter the head constructor matches, so `via(a: Box Bool Int, b:
-Box String Int) where Sh (Box String)` read `b`'s String through `a`'s `ToString Bool`
-witness.
+Four producers write the token and they must agree: `constraint_pos_tokens` (and
+`constraint_source_tokens`, with `Nil` binders, for the provisional scheme);
+`canonicalize_constrained_constraints_acc`, whose arguments must go through
+`prog_to_fresh`/`s2` as the head variable beside them does; and
+`iface_codec.method_constraint_tokens` for class-method schemes, by name, since that
+scheme quantifies the class parameters only.
 
-So the token degrades in two stages rather than one: positions, then count, then
-nothing. Both stages are covered by `tests/conformance/run/dispatch_compound_head_*`.
+The `.iface` wire form moved with this token: v9 added the arguments; v11 made a tuple
+a compound head (`#app:Tuple2:…`, rebuilt as the tuple itself — it was `#none`, so the
+first concrete argument's dictionary read the whole tuple) and nested a structured
+argument where `#any` stood.
 
-Three producers write head tokens and they must agree. `constraint_pos_tokens` is
-the one; `constraint_source_tokens` delegates to it with `Nil` binders, because
-`constraint_var_token` already falls back to the source name when the variable has
-no index — which is exactly what an ungeneralized provisional scheme wants.
-`canonicalize_constrained_constraints_acc` keeps its own writer only because its
-arguments must be canonicalized through `prog_to_fresh`/`s2`, as the head variable
-beside them is; a source name would not survive the generalize/instantiate renaming.
-`iface_codec.method_constraint_tokens` mirrors the format for class-method schemes,
-by name, since that scheme quantifies the class parameters only.
-
-Widening this token changed the `.iface` wire form, so it is v9. Earlier bumps did
-the same, one of them (v3→v4) to this very field.
-
-**A tuple is a compound head.** `where ToString ((a, b))` writes `#app:Tuple2:…`, one
-token per element, and its dictionary type is rebuilt as the tuple itself. It used to
-write `#none`, so the call site took the first concrete argument's dictionary — `ToString
-Int` for `x` — and read the tuple through it. That changed what a v10 token means, so
-it is v11.
-
-**The head's name need not come from an argument.** A constraint whose arguments are
-concrete at the call is rebuilt from its token (`resolve_compound_head_tdict`), and the
-`@inst:` key is looked up under the constraint's own spelling of the head: a `where`
-clause and an instance head are spelled alike on either path — qualified when bundled
-(`main.Pair`), short on the env path (below). No argument need carry the head: `Result
-e` heads none of `try_map(f: a -> Result e b, xs: List a)`.
-
-**Forwarding a compound obligation.** When every argument token is a variable, the
-constraint's own variables decide, never the first argument with the head: beside
-`p: (a, b)`, a `ToString ((c, d))` is not `p`'s. `forwarded_compound_tdict` forwards only
-when the caller declares the same class and head over the same variables, in order —
-`seed_compound_marker` records each declaration, and each superclass of it, as
-`@fwdhead:<Class>:<head>` holding the source names, and `call_arg_names` maps this call's
-arguments to the caller's names through the substitution (a self-call's tokens are those
-names already). The dictionary is then written with those names, so it finds the
-caller's slot. Anything else is Nothing and a codegen failure, because the checker does
-not reject it: the uncovered-dictionary check ignores compound constraints on the
-callee's side (BACKLOG §Dispatch Soundness). A token that cannot decide — none recorded,
-or a structured argument (`#any`) — falls back to the argument headed by the constructor
-(`resolve_headed_arg_tdict`).
-
-Pinned by `tests/conformance/run/dispatch_compound_head_*` and `dispatch_compound_slot_*`;
-the callers that must not forward by `emit_error/compound_head_forward_*` and
-`compound_head_headed_*`.
+Pinned by `tests/conformance/run/dispatch_compound_head_*`, `dispatch_compound_slot_*`,
+`dispatch_compound_nested_arg` and `dispatch_compound_mixed_arg`; the callers that must
+not forward by `emit_error/compound_head_forward_*`, `compound_head_headed_*` and
+`compound_head_nested_forward_other_var`.
 
 ## Env-path type names are SHORT, and the marker families depend on it
 
