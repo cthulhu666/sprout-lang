@@ -3262,11 +3262,11 @@ yields `Maybe (List b)` under `Maybe` and `Result e (List b)` under `Result`.
 Instances: `List`, `Maybe`, `Vec`.
 
 **The returned value short-circuits; the work does not.**  Sprout is strictly
-evaluated, and `list_traverse_go` threads an accumulator —
-`list_traverse_go(g, t, map2(\ (ys, y) -> Cons(y, ys), acc, g(h)))`, strict in
-both of `map2`'s value arguments — so `g` is applied to every element, and the
-whole spine is built, before the closing `fmap` can discard any of it on an early
-`Err`/`Nothing`.  A partial function reached later in the structure still runs,
+evaluated, and the `List` and `Vec` instances both thread an accumulator —
+`list_traverse_go(g, t, map2(\ (ys, y) -> Cons(y, ys), acc, g(h)))`, and
+`vec_traverse_go` the same by index — strict in both of `map2`'s value arguments,
+so `g` is applied to every element, and the whole spine is built, before the
+closing `fmap` can discard any of it on an early `Err`/`Nothing`.  A partial function reached later in the structure still runs,
 and can still panic, even though an earlier element already produced the failing
 case.
 
@@ -3281,7 +3281,7 @@ would add an unused slot to every dictionary — the same reasoning as
 Traversal order is left to right and is part of the contract, unlike `list_map`,
 whose order is deliberately unpinned (`docs/effect-polymorphism-policy-v0.md`
 §5).  O(n) in elements, plus the applicative's own per-step cost, at O(1)
-recursion depth for the `List` instance.
+recursion depth for every instance.
 
 ### `Filterable` class and generic `filter` (Experimental)
 

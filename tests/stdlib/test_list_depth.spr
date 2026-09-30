@@ -83,8 +83,21 @@ fn last_in(m: Maybe (List Int)) -> Int =
   | Nothing -> -1
   | Just xs -> last_or(-1, xs)
 
+# Vec's traverse accumulates into a reversed List and builds once, the shape this
+# file pins, so its depth is checked here too.
+fn vec_len_in(m: Maybe (Vec Int)) -> Int =
+  match m with
+  | Nothing -> -1
+  | Just xs -> vec_length(xs)
+
+fn vec_last_in(m: Maybe (Vec Int)) -> Int =
+  match m with
+  | Nothing -> -1
+  | Just xs -> vec_get_or(vec_length(xs) - 1, -1, xs)
+
 fn main() -> Unit !{IO} =
   let big = asc_list(99999, Nil)
+      big_vec = vec_from_list(big)
   in run_suite("list_depth", [
     # --- depth: every one of these crashes on the body-recursive shapes -------
     check_eq("list_map 100k length", len(list_map(bump, big)), 100000),
@@ -137,6 +150,11 @@ fn main() -> Unit !{IO} =
 
     check_eq("sequence 100k length", len_in(sequence(list_map(just_bump, big))), 100000),
     check_eq("sequence 100k last", last_in(sequence(list_map(just_bump, big))), 100000),
+
+    check_eq("vec traverse 100k length", vec_len_in(traverse(just_bump, big_vec)), 100000),
+    check_eq("vec traverse 100k last", vec_last_in(traverse(just_bump, big_vec)), 100000),
+    check_eq("vec sequence 100k length",
+      vec_len_in(sequence(vec_map(just_bump, big_vec))), 100000),
 
     # --- order: an accumulator rewrite that forgets its reverse still passes
     # --- every length assertion above, so each one is pinned on a small input.
