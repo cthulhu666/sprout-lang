@@ -85,7 +85,8 @@ let sample_instance_decl_other =
     Nil,
     Nil)
 
-# A class method with a tuple constraint, `where ToString ((a, b))`, in "tup.mod".
+# A class method with a tuple constraint over a structured element,
+# `where ToString ((Maybe a, b))`, in "tup.mod".
 fn sample_tuple_constraint_class() -> ast.Decl =
   ast.ClassDecl("tup.mod.PairShow",
     Cons("c", Nil),
@@ -95,7 +96,8 @@ fn sample_tuple_constraint_class() -> ast.Decl =
       ast.TypeName("String"),
       Nothing,
       Cons(ast.TypeConstraint("ToString",
-        Cons(ast.TupleType(Cons(ast.TypeName("a"), Cons(ast.TypeName("b"), Nil))), Nil)), Nil)), Nil),
+        Cons(ast.TupleType(Cons(ast.TypeApply(ast.TypeName("Maybe"), ast.TypeName("a")),
+                                Cons(ast.TypeName("b"), Nil))), Nil)), Nil)), Nil),
     Nil,
     source.SourcePos(index = 0, line = 0, column = 0))
 
@@ -208,6 +210,6 @@ fn main() -> Unit !{IO} =
     let tuple_prog = make_typed_prog(Cons(typed_ast.TPassThrough(sample_tuple_constraint_class()), Nil))
     assert_true(state, "a tuple method constraint round-trips as a compound head",
       round_tripped_method_constraints(iface_codec.extract_class_infos(tuple_prog, "tup.mod"))
-        == Cons(("#app:Tuple2:a,b", "ToString"), Nil))
+        == Cons(("#app:Tuple2:[Maybe;a],b", "ToString"), Nil))
 
     summary(state)

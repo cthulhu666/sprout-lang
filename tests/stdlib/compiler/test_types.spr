@@ -68,6 +68,14 @@ fn main() -> Unit !{IO} =
         types.EffectPure, Cons(("#app:Tuple2:#pos:0,#pos:1", "ToString"), Nil))),
       "forall a b. a -> b where ToString (a, b)"),
 
+    # A structured tuple element renders as written, with no extra parentheses.
+    check_eq("a nested element renders inside the tuple",
+      types.scheme_to_string(types.scheme_quantified(Cons("$t0", Cons("$t1", Nil)),
+        types.TFunc(types.TVar(types.tyvar_id("$t0")), types.TVar(types.tyvar_id("$t1")),
+                    types.EffectPure, types.OwnConsume),
+        types.EffectPure, Cons(("#app:Tuple2:[List;[Maybe;#pos:0]],#pos:1", "ToString"), Nil))),
+      "forall a b. a -> b where ToString (List (Maybe a), b)"),
+
     # The clause follows the effect, matching how a signature is written.
     check_eq("the where clause follows the effect suffix",
       types.scheme_to_string(types.scheme_quantified(Cons("$t0", Nil),

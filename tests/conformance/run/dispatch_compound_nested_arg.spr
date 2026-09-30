@@ -1,0 +1,29 @@
+# Compound constraints whose argument is itself structured. The token records the
+# structure (`[Maybe;#pos:1]`), so the dictionary's type is rebuilt from the constraint:
+# taking the first argument headed by `List` read `xs`'s dictionary for `ys`, and took
+# the container `List (List (Box a))` for `List (Box a)`.
+module main
+
+import stdlib.string as string
+
+type Box a = Box a
+
+instance ToString (Box a) where ToString a
+  fn to_string(b: Box a) -> String =
+    match b with
+    | Box x -> "B" ++ to_string(x)
+
+fn label(x: t) -> String where ToString t = to_string(x)
+
+fn second(xs: List (Maybe a), ys: List (Maybe b)) -> String where ToString (List (Maybe b)) =
+  label(ys)
+
+fn rows(xs: List (List (Box a))) -> String where ToString (List (Box a)) =
+  string.join(";", list_map(to_string, xs))
+
+fn deep(x: a) -> String where ToString (List (List a)) = label([[x]])
+
+fn main() -> Unit !{IO} = do
+  print(second([Just(1)], [Just("s")]))
+  print(rows([[Box(1)], [Box(2)]]))
+  print(deep(7))

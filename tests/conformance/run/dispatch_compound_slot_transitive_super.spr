@@ -1,0 +1,15 @@
+# A compound constraint supplied through a superclass two levels up: `Monad (Result e)`
+# gives `Functor (Result e)` by way of `Applicative`. Forwarding records only the
+# direct superclass sent this to codegen as an under-application.
+module main
+
+fn bump(r: Result String Int) -> Result String Int = bump_any(r)
+
+fn bump_any(r: Result e Int) -> Result e Int where Functor (Result e) = fmap(\x -> x + 1, r)
+
+fn go(r: Result e Int) -> Result e Int where Monad (Result e) = bump_any(r)
+
+fn main() -> Unit !{IO} =
+  match go(bump(Ok(1))) with
+  | Ok v -> print(to_string(v))
+  | Err e -> print(e)

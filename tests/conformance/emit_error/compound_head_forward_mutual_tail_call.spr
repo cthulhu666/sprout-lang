@@ -1,0 +1,13 @@
+module main
+
+# `pong` needs `ToString (List a)` for `z`, but `ping` calls it with `y`, whose list
+# dictionary it does not have. The call is a mutual tail call, and that path padded
+# the missing dictionary with a null, so the program ran and aborted instead of
+# failing at compile time as the same call in any other position does.
+fn ping(x: a, y: b, n: Int) -> String where ToString (List a) =
+  if n <= 0 then to_string([x]) else pong(y, n - 1)
+
+fn pong(z: a, n: Int) -> String where ToString (List a) =
+  if n <= 0 then "pong" ++ to_string([z]) else ping(z, z, n - 1)
+
+fn main() -> Unit !{IO} = print(ping(1, "s", 3))
