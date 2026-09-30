@@ -94,9 +94,9 @@ check "a traversing id is rejected"     "1" \
 check "a missing id is rejected"       "1" \
   "$(bash "$LEDGER" findings 2>&1 >/dev/null | grep -c 'run id')"
 
-# The RAW pre-dedup findings are a second sibling, and the only record of what the
-# passes said BEFORE clustering. Without it no threshold claim about OVERLAP_MIN can
-# be checked afterwards, which is how 0.5 survived three runs on adjectives.
+# The RAW findings are a second sibling, and the only record of what each pass said
+# in its own words. Keeping them is what made OVERLAP_MIN measurable, and measuring
+# it is what retired it — 0.5 had survived three runs on adjectives until then.
 rpath=$(bash "$LEDGER" raw "$id1")
 check "raw path names the run"         "1"  "$(printf '%s' "$rpath" | grep -c "raw-$id1.json$")"
 check "raw path is under GIT_DIR"      "1"  "$(printf '%s' "$rpath" | grep -c '/claude-review/')"

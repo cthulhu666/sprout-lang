@@ -9,8 +9,8 @@ Rationale and measurements live in `README.md`; the skill itself is `SKILL.md`.
 ## Backlog
 
 - [ ] `P1` **The ensemble has never been A/B'd against the built-in, so 4 agents may find less than
-  one does.** Only the reviewer *prompt* is close to a port; the fan-out, dedup and verify around it
-  are this skill's own design (`README.md` §What the original actually does). Run both on one
+  one does.** Only the reviewer *prompt* is close to a port; the fan-out and the verify pass around
+  it are this skill's own design (`README.md` §What the original actually does). Run both on one
   non-trivial diff and compare finding sets. Anything the built-in catches and this misses is a
   design defect, not a tuning question — and if a single careful agent matches three plus a verify
   pass, the ensemble is not worth its cost and should go.
@@ -24,22 +24,13 @@ Rationale and measurements live in `README.md`; the skill itself is `SKILL.md`.
 
 - [ ] `P2` **One skeptic now judges every finding, so a prejudice carries across all of them.**
   Verify is a single agent holding the whole list — cheaper than one refuter each, and the shared
-  context is why, but a bad call no longer costs one finding. The documented adversarial pattern is
-  N independent skeptics with a majority rule, the perspective-diverse variant giving each a lens
-  (correctness, security, does-it-repro). A 3-judge panel over the batched list is `N + 3` — under
-  the old cost at the default level, though not at `max`, where the panel would also be what makes
-  the verify cap survivable. Do it after the A/B, so its effect is visible against a baseline.
-
-- [ ] `P2` **`OVERLAP_MIN` still under-merges, so the reported `found` overstates distinct bugs.**
-  Triage no longer depends on it — the verify gate reads co-location, and merging keeps both
-  summaries — so what is left is a *counting* error, not a lost finding. Run `1790255333-48433`
-  reported one defect as three at `stdlib/prelude.sprout:1812`: "per-digit scaling",
-  "digit-by-digit accumulation", "replaced the single divide-at-the-end". No lexical measure
-  merges the third with the first, so stem/synonym tolerance will not close this; the fix is
-  probably a similarity that is not word-set overlap at all. Two known weaknesses to fix first:
-  `Math.min(|A|,|B|)` penalises a verbose reviewer, and `STOP` is 24 words, so filler inflates
-  both sets. **Measure before tuning** — the raw pre-dedup findings are now kept at
-  `review_ledger.sh raw <id>`, which is what 0.5 never had.
+  context is why, but a bad call no longer costs one finding. Removing the verify gate widened its
+  reach: every finding reaches it now, not just the severe or corroborated ones. The documented
+  adversarial pattern is N independent skeptics with a majority rule, the perspective-diverse
+  variant giving each a lens (correctness, security, does-it-repro). A 3-judge panel over the
+  batched list is `N + 3` — under the old cost at the default level, though not at `max`, where the
+  panel is also what would make the verify cap survivable. Do it after the A/B, so its effect is
+  visible against a baseline.
 
 - [ ] `P2` **`VERIFY_CAP = 10` comes from nothing and binds hardest where it matters least.**
   At `max`, 8 passes at up to 8 findings each is 64 raw against a cap of 10, so most findings come

@@ -68,9 +68,10 @@ anywhere that is.
 
 **What this means for the skill.** `SKILL.md` embeds the original's reviewer prompt, so the *prompt*
 is close to a port and the A/B is still worth running. The ensemble around it is this skill's own
-design: N independent passes, proximity+overlap dedup, and an adversarial verify bounded to
-severe-or-corroborated findings. Its justification is the quality patterns in the `Workflow` tool's
-guidance, not fidelity to the original. Sprout-specific review dimensions are still deliberately
+design: N independent passes and one adversarial verify pass over every finding they returned. It
+grouped and ranked them too until 2026-09-30, when that was removed rather than retuned (§Why the
+clustering went). Its justification is the quality patterns in the `Workflow` tool's guidance, not
+fidelity to the original. Sprout-specific review dimensions are still deliberately
 absent until the A/B runs — see `BACKLOG.md`.
 
 ## What it costs
@@ -79,10 +80,9 @@ The first version cost `N + D` agents at `N = 8` — eight reviewers, then one v
 that cleared the severity/votes cap. D is only known at runtime, so the bill was not knowable
 before the run and reached the mid-teens.
 
-It is now **at most `N + 1`**, at a default `N = 3`: four agents, or three when nothing clears the
-verify gate and the skeptic is skipped. That second case is why the gate still exists — a cap cannot
-produce it, because a cap only bounds a batch it has already decided to send. Three changes got
-there, and only the first is a pure reduction:
+It is now **at most `N + 1`**, at a default `N = 3`: four agents, or three when the passes found
+nothing at all, since there is then nothing to judge. Three changes got there, and only the first is
+a pure reduction:
 
 | change | why |
 |---|---|
@@ -100,8 +100,8 @@ refuted, which would bury an unjudged high-severity finding in a list the reader
 Duplicate or out-of-range indices mean the numbering itself is untrustworthy, so the whole mapping
 is discarded and logged rather than applied: a 1-based reply would otherwise give every finding
 its predecessor's verdict and confirm exactly what was refuted. And the cap that decides who gets
-judged evicts by severity, because sorting it by votes reinstated the votes-only gate the severity
-test exists to avoid.
+judged evicts by severity, because sorting it by agreement once evicted a lone `high` in favour of
+ten corroborated `low`s.
 
 None of this is measured against finding quality. The agent counts are exact by construction; what
 four agents find relative to fifteen is unknown, and is the A/B in `BACKLOG.md`. If the cut costs
@@ -122,22 +122,16 @@ was rejected because it breaks the one thing this skill is for: `review:3` on a 
 something, and it means less if each of those three ran at whatever `/effort` happened to be set to
 that afternoon. A fixed default makes the runs comparable, and `high` is what the skill already did.
 
-**The level moves `N` and the per-agent reasoning effort, and nothing else.** The thresholds it
-does *not* move — `VERIFY_CAP`, `LINE_WINDOW`, `OVERLAP_MIN` — are calibration
-constants that `BACKLOG.md` already has an open entry to measure. A constant that varies with a
-flag cannot be calibrated, so making them level-dependent would have quietly closed off the
-measurement. The visible cost is that `xhigh` and `max` overrun the verify cap and report most
+**The level moves `N` and the per-agent reasoning effort, and nothing else.** The one threshold it
+does *not* move — `VERIFY_CAP` — is a calibration constant that `BACKLOG.md` has an open entry to
+measure. A constant that varies with a flag cannot be calibrated, so making it level-dependent would
+have quietly closed off the measurement. The visible cost is that `xhigh` and `max` overrun the verify cap and report most
 findings unverified; that is the honest reading of "eight passes and one skeptic", and the fix is
 the judge panel in `BACKLOG.md`, not a cap that grows to hide it.
 
 The ladder — 1/2/3/5/8 passes — is a cost ladder with no measurement behind it, exactly as `N = 3`
 was. It is now five unmeasured numbers instead of one, which makes the A/B below more valuable
 rather than less.
-
-**`votes` is not agreement between passes.** Dedup pools every pass's findings before clustering,
-so the count is how many times a bug was reported, not by how many reviewers. One pass naming the
-same bug at two nearby lines scores 2. Nothing downstream depends on the distinction — the verify
-gate wants "reported more than once" — but the earlier wording claimed more than the code does.
 
 ## Why the ledger looks the way it does
 
@@ -163,11 +157,35 @@ not having had one.
 level (`review:2 9 found 3 real @max`): averaging levels across runs answers nothing, and "how
 hard was the last look" is the question worth answering.
 
-## Why `OVERLAP_MIN` stayed wrong for three runs
+## Why the clustering went
 
-Worth recording because it generalises past this skill. The threshold's calibration note said *"if a
-real finding is ever swallowed, raise it and say so here"* — it planned for over-merging only. Both
-failures that actually happened went the other way, and that is not chance:
+It grouped findings by line proximity plus word-set overlap, and it was **removed rather than
+retuned** on 2026-09-30. Two reasons, in order of weight.
+
+**The measure has no separable classes.** `OVERLAP_MIN = 0.5` was calibrated on one run of five
+adjacent pairs — duplicates at 0.60/0.67/0.67, non-duplicates at 0.33/0.29 — and its note called
+that "a wide gap rather than a knife edge". Real duplicates measured since, across three runs, score
+**0.36, 0.40, 0.45, 0.46, 0.53**: they straddle the cutoff and overlap the old non-duplicate band. No
+threshold separates these, because two reviewers describing one bug share a *referent*, not
+vocabulary — "silently successful truncated result" against "turns a bounds violation into a
+truncated Vec" scores 0.40. A model reading the findings resolves referents natively, which is why
+the caller does this well and a word-set score cannot.
+
+**Its justification had already been retired.** The threshold sat high because a wrong merge used to
+*delete* a finding; once `alsoReported` kept the wording it did not carry, a wrong merge cost a
+noisier entry and nothing else. Nobody lowered it afterwards — it guarded a risk that no longer
+existed for months.
+
+Run `1790751683-30359` is the one that ended it: 8 reports called 8 distinct issues when there were
+4, two reports at an *identical* line split into two entries, a verify slot spent on the duplicate,
+and — through the gate the votes fed — the six substantive findings withheld from the skeptic while
+the two already-conceded-dead ones were checked.
+
+### Why nobody noticed for three runs
+
+Worth recording separately, because it generalises past this skill. The threshold's calibration note
+said *"if a real finding is ever swallowed, raise it and say so here"* — it planned for over-merging
+only. Both failures that actually happened went the other way, and that is not chance:
 
 | failure | what a reader sees |
 |---|---|
@@ -178,14 +196,13 @@ failures that actually happened went the other way, and that is not chance:
 how detectable they are will drift toward the detectable one, because that is the only side anyone
 files a complaint about. The note asked for exactly the report that could never arrive.
 
-Two consequences, both now in place. The gate no longer reads a similarity score at all — triage asks
-whether two reviewers pointed at the same `file:line`, which is not a matter of degree. And the raw
-pre-dedup findings are kept (`review_ledger.sh raw <id>`), so the invisible side is now **measurable
-on demand** rather than waiting to be noticed. The post-dedup report next to it can never answer the
-question: it is the output of the constant under test.
+What broke the loop was keeping the raw findings (`review_ledger.sh raw <id>`), which made the
+invisible side **measurable on demand** rather than waiting to be noticed. The report beside it never
+could: it is the output of the constant under test. The five scores above came from those files, and
+they are the whole argument for the removal — the constant was retired by measurement, not by taste.
 
-The same shape is worth checking on any threshold here. `LINE_WINDOW = 6` and `VERIFY_CAP = 10` both
-fail silently in one direction and loudly in the other.
+`VERIFY_CAP = 10` is the last threshold here with that asymmetry: overrunning it is announced in the
+log, while a cap set too low just means fewer things were checked. `BACKLOG.md` owns it.
 
 ## Reading it
 
@@ -193,14 +210,15 @@ fail silently in one direction and loudly in the other.
 bash scripts/review_ledger.sh count          # completed runs on this branch
 bash scripts/review_ledger.sh show           # "review:2 9 found 3 real @max"
 bash scripts/review_ledger.sh findings <id>  # path to that run's findings
-bash scripts/review_ledger.sh raw <id>       # path to that run's RAW pre-dedup findings
+bash scripts/review_ledger.sh raw <id>       # path to that run's findings as each pass worded them
 just test-review-ledger                      # the suite, also in ci-fast-gates
 ```
 
 `findings` returns `$GIT_DIR/claude-review/findings-<id>.md`, creating the directory. The skill writes
 every finding there — confirmed, unverified and refuted — before reporting, so a review can be
 pointed at afterwards instead of recalled. The counts say a review happened; the file says what it
-said. The path is absolute (`--absolute-git-dir`, not `--git-dir`, which answers `.git` at the root
+said, and it is where the reports are grouped into issues, since `found` deliberately counts the
+former. The path is absolute (`--absolute-git-dir`, not `--git-dir`, which answers `.git` at the root
 and an absolute path from a subdirectory).
 
 The status line renders `rv:N` after the branch — green when reviewed, red at `rv:0`, and silent in
