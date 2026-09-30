@@ -1,0 +1,11 @@
+# Two tuple constraints of one class: both are keyed `Tuple2`, so they share one
+# hidden-dictionary slot, and the body would read one dictionary for both tuples.
+# Their subjects must compare as different for the rule to fire.
+module main
+
+fn label(x: t) -> String where ToString t = to_string(x)
+
+fn f(x: a, y: b, z: c, w: d) -> String where ToString ((a, b)), ToString((c, d)) =
+  label((x, y)) ++ " " ++ label((z, w))
+
+fn main() -> Unit !{IO} = print(f(1, 2, "s", true))

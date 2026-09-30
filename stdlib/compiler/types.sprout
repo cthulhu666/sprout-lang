@@ -906,7 +906,7 @@ fn constraint_terms(renamed_vars: List String, rename: Dict String,
 
 # "#pos:<k>" → the k-th binder's display name; "#app:<Name>" or "#app:<Name>:<args>" →
 # the constructor itself, since a clause naming `Box` reads better than one naming the
-# argument tokens beside it;
+# argument tokens beside it — except a tuple, whose head name is internal (`(a, b)`);
 # "#none" and "" → a headless obligation, which names no type and so has nothing to print.
 # A position past the end of the binder list is skipped rather than guessed: naming the
 # wrong variable is worse than naming none.
@@ -921,11 +921,89 @@ fn constraint_head_name(renamed_vars: List String, rename: Dict String,
     match parse_int(str_slice(head, 5, str_len(head))) with
     | Nothing -> Nothing
     | Just k -> nth_string(renamed_vars, k)
-  else if str_starts_with(head, "#app:") then Just(app_token_ctor(str_slice(head, 5, str_len(head))))
+  else if str_starts_with(head, "#app:") then Just(app_token_text(renamed_vars, rename, str_slice(head, 5, str_len(head))))
   else
     match dict_get(head, rename) with
     | Just renamed -> Just(renamed)
     | Nothing -> Just(head)
+
+# A tuple renders as one, `(a, b)`, since its head name is internal; any other head
+# renders as its constructor alone.
+fn app_token_text(renamed_vars: List String, rename: Dict String, body: String) -> String =
+  let ctor = app_token_ctor(body)
+      Just _ = tuple_head_arity(ctor) else ctor
+      Just(_, toks) = string.split_once(body, ":") else ctor
+  in "(" ++ join_list(", ", list_map(\t -> arg_token_text(renamed_vars, rename, t),
+                                      string.split(toks, ","))) ++ ")"
+
+fn arg_token_text(renamed_vars: List String, rename: Dict String, t: String) -> String =
+  if t == "#any" then "_"
+  else
+    match nested_arg_parts(t) with
+    | Just (head, args) -> nested_text(renamed_vars, rename, head, args)
+    | Nothing ->
+        match constraint_head_name(renamed_vars, rename, t) with
+        | Just n -> n
+        | Nothing -> "_"
+
+# `(a, b)` for a tuple, `List a` for an application — parenthesized where it is itself
+# an application's argument (app_arg_text).
+fn nested_text(renamed_vars: List String, rename: Dict String, head: String,
+               args: List String) -> String =
+  match tuple_head_arity(head) with
+  | Just _ -> "(" ++ join_list(", ", list_map(\a -> arg_token_text(renamed_vars, rename, a), args)) ++ ")"
+  | Nothing ->
+      join_list(" ", Cons(nested_head_text(renamed_vars, rename, head),
+                          list_map(\a -> app_arg_text(renamed_vars, rename, a), args)))
+
+# A variable head is a token (`#pos:1`); a constructor is its own name.
+fn nested_head_text(renamed_vars: List String, rename: Dict String, head: String) -> String =
+  if str_starts_with(head, "#") then arg_token_text(renamed_vars, rename, head)
+  else string.after_last_dot(head)
+
+fn app_arg_text(renamed_vars: List String, rename: Dict String, t: String) -> String =
+  match nested_arg_parts(t) with
+  | Just (head, _) ->
+      match tuple_head_arity(head) with
+      | Just _ -> arg_token_text(renamed_vars, rename, t)
+      | Nothing -> "(" ++ arg_token_text(renamed_vars, rename, t) ++ ")"
+  | Nothing -> arg_token_text(renamed_vars, rename, t)
+
+# A structured argument inside a compound-head token: `[<head>;<arg>;…]`, each
+# argument a token itself. No comma, so the top-level split of an `#app:` token on
+# "," still finds the written arguments; no space or parenthesis, so the whole token
+# stays one `.iface` atom.
+export fn nested_arg_token(head: String, args: List String) -> String =
+  "[" ++ join_list(";", Cons(head, args)) ++ "]"
+
+export fn nested_arg_parts(t: String) -> Maybe (String, List String) =
+  if str_starts_with(t, "[") && string.ends_with(t, "]") then
+    match split_top_level(str_slice(t, 1, str_len(t) - 2), 0, 0, 0, Nil) with
+    | [head | args] -> Just((head, args))
+    | [] -> Nothing
+  else Nothing
+
+fn split_top_level(s: String, i: Int, start: Int, depth: Int, acc: List String) -> List String =
+  if i >= str_len(s) then list_reverse(Cons(str_slice(s, start, i - start), acc))
+  else
+    match str_char_at(s, i) with
+    | Just c ->
+        if c == '[' then split_top_level(s, i + 1, start, depth + 1, acc)
+        else if c == ']' then split_top_level(s, i + 1, start, depth - 1, acc)
+        else if c == ';' && depth == 0 then
+          split_top_level(s, i + 1, i + 1, depth, Cons(str_slice(s, start, i - start), acc))
+        else split_top_level(s, i + 1, start, depth, acc)
+    | Nothing -> list_reverse(Cons(str_slice(s, start, i - start), acc))
+
+# The head name a tuple of `n` elements dispatches under — its `@inst:` key and its
+# dictionary slot. Declared types are module-qualified, so no declared type is spelled
+# this way unless the prelude declares one.
+export fn tuple_head(n: Int) -> String = "Tuple" ++ int_to_string(n)
+
+export fn tuple_head_arity(name: String) -> Maybe Int =
+  let Just digits = string.strip_prefix(name, "Tuple") else Nothing
+      Just n = parse_int(digits) else Nothing
+  in if tuple_head(n) == name then Just(n) else Nothing
 
 # Everything before the first colon of an "#app:" body. The argument tokens that
 # may follow carry their own colons, so the split is at the first one.

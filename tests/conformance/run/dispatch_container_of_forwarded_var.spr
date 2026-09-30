@@ -1,0 +1,27 @@
+# A container built around a forwarded variable: `[x]` needs `ToString (List a)`, whose
+# instance takes `ToString a` from the caller's slot. The list literal and each pattern
+# give `a` a fresh variable, and the slot's name was looked up by the stale one, so the
+# inner dictionary was left unfilled and the program aborted.
+module main
+
+type Box a = Box a
+
+fn label(x: t) -> String where ToString t = to_string(x)
+
+fn direct(x: a) -> String where ToString a = to_string([x])
+
+fn via_label(x: a) -> String where ToString a = label([x])
+
+fn from_tuple(p: (a, Int)) -> String where ToString a =
+  match p with
+  | (x, _) -> to_string([x])
+
+fn from_box(b: Box a) -> String where ToString a =
+  match b with
+  | Box x -> to_string([x])
+
+fn main() -> Unit !{IO} = do
+  print(direct("s"))
+  print(via_label(1))
+  print(from_tuple((true, 1)))
+  print(from_box(Box(2.5)))

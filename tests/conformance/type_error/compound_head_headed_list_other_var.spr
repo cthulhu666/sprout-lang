@@ -1,0 +1,11 @@
+module main
+
+# The `List` form of the same mix-up: `xs` is the first argument headed by `List`, but
+# `f` needs `ToString (List b)` for `y`.
+fn label(x: t) -> String where ToString t = to_string(x)
+
+fn f(xs: List a, y: b) -> String where ToString (List b) = label([y])
+
+fn outer(xs: List a, y: b) -> String where ToString (List a) = f(xs, y) ++ label(xs)
+
+fn main() -> Unit !{IO} = print(outer([1], "s"))

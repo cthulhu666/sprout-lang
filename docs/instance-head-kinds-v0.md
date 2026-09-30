@@ -65,7 +65,7 @@ unsuccessfully papering over.
 - ~~Type-alias instance heads. They do not dispatch today (an instance is registered
   under the alias name, `register_instance_marker`), so their arity is moot until
   that changes.~~ **Resolved**: heads are now expanded before this check runs
-  (`ast.expand_alias_instance_heads`), so an alias head is checked as its expansion —
+  (`ast.expand_alias_constraints`), so an alias head is checked as its expansion —
   whose residual arity is the real one. See `docs/alias-instance-heads-v0.md`.
 
 ## 3. Prior art
@@ -450,7 +450,9 @@ regression test that was run against a revision-3 compiler and seen to fail firs
    declaration. It is a rejection, not a repair: making it work means putting the
    arguments' identity into that key in all four places that build it — the
    dictionary-passing key format, deferred above and filed in `BACKLOG.md`. Test:
-   `tests/conformance/type_error/same_class_heads_share_dict_slot.spr`.
+   `tests/conformance/type_error/same_class_heads_share_dict_slot.spr`. The key now
+   carries the arguments (`ast.dict_slot_key`); the rule stays until forwarding tells
+   the two apart too (`BACKLOG.md`).
 
 4. **A type alias claimed an arity it does not have.** `type_arities` recorded an
    `AliasDecl`'s own parameter count, which is not its residual arity — `type alias

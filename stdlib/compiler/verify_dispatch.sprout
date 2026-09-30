@@ -161,7 +161,7 @@ export fn type_head_str(t: types.Type) -> Maybe String =
       if is_reserved_head(types.type_id_display(id)) then Nothing
       else Just(types.type_id_display(id))
   | types.TApp base _ -> type_head_str(base)
-  | types.TTuple items -> Just("Tuple" ++ int_to_string(list_length(items)))
+  | types.TTuple items -> Just(types.tuple_head(list_length(items)))
   | types.TVar _ -> Nothing
   | types.TFunc _ _ _ _ -> Nothing
   | types.TThunk _ _ -> Nothing
@@ -667,7 +667,7 @@ fn dict_head_te(te: ast.TypeExpr) -> Maybe String =
   match te with
   | ast.TypeName n -> if starts_lower(n) || is_reserved_head(n) then Nothing else Just(short(n))
   | ast.TypeApply base _ -> dict_head_te(base)
-  | ast.TupleType items -> Just("Tuple" ++ int_to_string(list_length(items)))
+  | ast.TupleType items -> Just(types.tuple_head(list_length(items)))
   | _ -> Nothing
 
 fn first_mismatch(outcomes: List VerifyOutcome) -> Maybe(source.SourcePos, String) =
