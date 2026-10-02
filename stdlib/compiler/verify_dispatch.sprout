@@ -270,15 +270,28 @@ fn constraint_var(c: ast.TypeConstraint) -> Maybe String =
 fn constraint_class(c: ast.TypeConstraint) -> String =
   match c with | ast.TypeConstraint cls _ -> cls
 
+# The head of a dictionary inference left for its post-pass to decide
+# (infer.hole_tdict). One still here was never filled.
+let hole_head: String = "_"
+
 fn check_constraints(constraints: List ast.TypeConstraint, dict_heads: List (String, Maybe String), theta: Dict types.Type, pos: source.SourcePos, policy: MissingPolicy) -> List VerifyOutcome =
   match constraints with
   | Nil -> Nil
   | Cons c crest ->
       match take_by_class(constraint_class(c), dict_heads) with
       | Just (dh, remaining) ->
-          Cons(check_one(c, dh, theta, pos), check_constraints(crest, remaining, theta, pos, policy))
+          Cons(check_taken(c, dh, theta, pos, policy), check_constraints(crest, remaining, theta, pos, policy))
       | Nothing ->
           Cons(check_missing(c, theta, pos, policy), check_constraints(crest, dict_heads, theta, pos, policy))
+
+# An unfilled hole holds its constraint's slot, so it is taken — dropping it would
+# shift the next same-class dict onto this constraint — but it supplies nothing, so it
+# is checked as missing.
+fn check_taken(c: ast.TypeConstraint, dh: (String, Maybe String), theta: Dict types.Type,
+               pos: source.SourcePos, policy: MissingPolicy) -> VerifyOutcome =
+  match dh with
+  | (_, Just head) -> if head == hole_head then check_missing(c, theta, pos, policy) else check_one(c, dh, theta, pos)
+  | (_, Nothing) -> check_one(c, dh, theta, pos)
 
 # Remove and return the first (class, head) entry in dict_heads whose class
 # matches class_name (short name), preserving order of the remainder — mirrors
@@ -665,7 +678,10 @@ fn dict_head_from_args(head_args: List ast.TypeExpr) -> Maybe String =
 # the head is a type variable (a forwarded/polymorphic dict — legitimately skipped).
 fn dict_head_te(te: ast.TypeExpr) -> Maybe String =
   match te with
-  | ast.TypeName n -> if starts_lower(n) || is_reserved_head(n) then Nothing else Just(short(n))
+  | ast.TypeName n ->
+      if n == hole_head then Just(hole_head)
+      else if starts_lower(n) || is_reserved_head(n) then Nothing
+      else Just(short(n))
   | ast.TypeApply base _ -> dict_head_te(base)
   | ast.TupleType items -> Just("Tuple" ++ int_to_string(list_length(items)))
   | _ -> Nothing

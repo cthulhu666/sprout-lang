@@ -1,0 +1,114 @@
+import stdlib.test (check_eq, run_suite)
+
+# A dictionary inference cannot pick yet — its variable is a lambda parameter linked
+# only when the lambda is applied, or one a generic call bound away — is settled after
+# inference. Each case once compiled to another variable's dictionary or was rejected.
+# `Never`'s always-false and `Loose`'s always-true `eq` make a wrong one change the
+# answer. No `module` header, on purpose: user types are then `$entry.<T>`.
+
+type Never = Never Int
+
+instance Eq Never
+  fn eq(a: Never, b: Never) -> Bool = false
+
+type Loose = Loose Int
+
+instance Eq Loose
+  fn eq(a: Loose, b: Loose) -> Bool = true
+
+instance ToString Loose
+  fn to_string(x: Loose) -> String = "loose"
+
+fn ident(v: s) -> s = v
+
+# Two constraints of one class: the deferred one keeps its own slot.
+fn two(x: a, y: b) -> String where ToString a, ToString b = to_string(x) ++ "|" ++ to_string(y)
+
+fn two_let(p: c, q: d) -> String where ToString c, ToString d =
+  let k = \z -> two(z, q)
+  in k(p)
+
+fn two_lam(p: c, q: d) -> String where ToString c, ToString d = (\z -> two(z, q))(p)
+
+fn pair_eq(x: a, y: b) -> Bool where Eq a, Eq b = x == x && y == y
+
+fn pair_late(w: c) -> Bool where Eq c = (\z -> pair_eq(z, 1))(w)
+
+class SameM t
+  fn same_m(x: t, y: t) -> Bool
+
+instance SameM (Maybe a) where Eq a
+  fn same_m(x: Maybe a, y: Maybe a) -> Bool = (\p -> \q -> pair_eq(p, 1) && p == q)(x)(y)
+
+type Shown2 = | exists a b. Shown2 a b where ToString a, ToString b
+
+fn shown2(s: Shown2) -> String =
+  match s with
+  | Shown2 u v -> to_string(u) ++ "/" ++ to_string(v)
+
+fn pack_late(p: c) -> String where ToString c = shown2((\z -> Shown2(z, 7))(p))
+
+# A class method with a `where` of its own: its class dict is still added after inference.
+type Tag = Tag Int
+
+class Pretty a
+  fn pretty(x: a, y: b) -> String where ToString b
+
+instance Pretty Tag
+  fn pretty(x: Tag, y: b) -> String where ToString b =
+    match x with
+    | Tag n -> to_string(n) ++ "/" ++ to_string(y)
+
+fn pretty_list(xs: List a, y: Int) -> List String where Pretty a = list_map(\e -> pretty(e, y), xs)
+
+fn pretty_id(x: a, y: Int) -> String where Pretty a =
+  let w = ident(x)
+  in pretty(w, y)
+
+fn pretty_lam(p: a) -> String where Pretty a = (\z -> pretty(z, true))(p)
+
+# A callback beside an unlinked dispatch value is not a dispatch on a function.
+class Apply a
+  fn app(x: a, f: Int -> Int) -> Int
+
+instance Apply Tag
+  fn app(x: Tag, f: Int -> Int) -> Int =
+    match x with
+    | Tag n -> f(n)
+
+fn app_list(xs: List a) -> List Int where Apply a = list_map(\e -> app(e, \n -> n * 2), xs)
+
+fn app_id(x: a) -> Int where Apply a =
+  let w = ident(x)
+  in app(w, \n -> n + 1)
+
+# A method's own dict deferred while its class dict is known.
+class Render f
+  fn render(r: f, x: a) -> String where ToString a
+
+instance Render Tag
+  fn render(r: Tag, x: a) -> String where ToString a =
+    match r with
+    | Tag n -> to_string(n) ++ ":" ++ to_string(x)
+
+fn render_late(p: c, q: d) -> String where Render c, ToString d = (\z -> render(p, z))(q)
+
+# `Maybe Never` is not `Maybe a`, whatever module prefix `Never` carries.
+fn never_lit(m: Maybe a) -> Bool where Eq (Maybe a) = Just(Never(1)) == Just (Never(1))
+
+fn main() -> Unit !{IO} =
+  run_suite("deferred_dict_slots", [
+    check_eq("deferred slot, let-bound lambda", two_let(1, Loose(2)), "1|loose"),
+    check_eq("deferred slot, applied lambda", two_lam(Loose(1), 7), "loose|7"),
+    check_eq("deferred slot, Bool then Int", two_let(true, 42), "true|42"),
+    check_eq("deferred slot, Eq", pair_late(Never(1)), false),
+    check_eq("deferred slot, instance method", same_m(Just (Loose(1)), Just (Loose(2))), true),
+    check_eq("deferred slot, existential pack", pack_late(Loose(1)), "loose/7"),
+    check_eq("class dict beside method dicts, lambda", pretty_list([Tag(1), Tag(2)], 5), ["1/5", "2/5"]),
+    check_eq("class dict beside method dicts, generic call", pretty_id(Tag(3), 4), "3/4"),
+    check_eq("class dict beside method dicts, applied lambda", pretty_lam(Tag(6)), "6/true"),
+    check_eq("callback beside an unlinked value, lambda", app_list([Tag(1), Tag(2)]), [2, 4]),
+    check_eq("callback beside an unlinked value, generic call", app_id(Tag(3)), 4),
+    check_eq("deferred method dict", render_late(Tag(1), true), "1:true"),
+    check_eq("headerless type is not a hole", never_lit(Just (Loose(1))), false)
+  ])

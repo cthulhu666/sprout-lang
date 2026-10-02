@@ -523,8 +523,8 @@ The key format is unchanged, so lowering's `ctx_fwd` needs no change. Two detail
 keep the comparison honest: the written arguments are stored with type aliases
 expanded (`resolve.expand_aliases`, reading the `@aliasty:` markers), since use
 sites arrive expanded; and only `_` and `$t…` inference variables count as unknown —
-an existential (`$ex_…`, a `$sk…` skolem) or an unannotated slot's placeholder is a
-type of its own. A superclass can also put two arguments on one key (`where
+an existential (`$ex_…`, a `$sk…` skolem), an unannotated slot's placeholder or a
+headerless file's own type (`$entry.Never`) is a type of its own. A superclass can also put two arguments on one key (`where
 Ord (Maybe a), Eq (Maybe b)`); `resolve.fwd_slot_clash` rejects that, the expanded
 twin of `check_indistinct_constraints`.
 
@@ -548,6 +548,19 @@ argument's dictionary; a hole lowers to the poison thunk, which fails loudly
 (`tests/stdlib/compiler/test_guessed_dict_stays_hole.spr`). The post-pass never
 rebuilds from a scan: a token with no head or no arguments keeps its hole
 (`rebuilt_constrained_dict`).
+
+**A deferred dictionary keeps its slot.** Both the post-pass
+(`take_dict_for_class`) and `verify_dispatch` (`take_by_class`) pair a call's
+dictionaries with the callee's constraints by class, not by position. So a
+constraint inference cannot decide yet — its variable is a lambda parameter linked
+only when the lambda is applied — gets `infer.hole_tdict` (every argument `_`)
+rather than nothing. Nothing in its place shifted the next same-class dictionary
+onto it: under `where ToString a, ToString b`, `a` took `b`'s. `verify_dispatch`
+checks an unfilled hole as missing, so an ambiguous one is still reported. A class
+method's own dictionary is decided this way, but its CLASS dictionary is not: a miss
+there emits no dictionary. That one is placed by position, at the head of the
+arguments, so `maybe_forward_input_dispatch` reads it from there — not from "the
+call carries some dictionary", which a method-level `where` makes true without it.
 
 ### The compound-head constraint token, and why it carries `#any`
 
