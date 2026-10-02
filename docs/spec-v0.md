@@ -3073,7 +3073,8 @@ String` parameter even where a `Box Bool` one precedes it.  When a constraint's
 arguments are not all fixed at a call site, the caller's own identical constraint is
 forwarded; failing that, the dictionary is built from the instance for the head, using the
 caller's dictionaries for its context.  A context constraint on one of the caller's type
-variables that the caller does not declare is a compile-time error.
+variables that the caller does not declare is a compile-time error, even when the instance
+never reads that dictionary: the check goes by the declared context.
 
 **Two constraints of one class must not differ only in their arguments.**  A `where`
 clause may not carry both `Boxed (Tagged k)` and `Boxed (Tagged j)`: each gets its own

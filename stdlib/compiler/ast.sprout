@@ -488,21 +488,48 @@ fn expand_constraints(table: Dict AliasHead, cs: List TypeConstraint) -> List Ty
 
 fn expand_constraint(table: Dict AliasHead, c: TypeConstraint) -> TypeConstraint =
   let TypeConstraint name args = c
-  in TypeConstraint(name, list_map(\te -> expand_deep(table, te, alias_expand_fuel), args))
+  in TypeConstraint(name, list_map(\te -> expand_within_budget(table, te), args))
 
-# The head, then everything under it. `fuel` bounds depth as well as each head's
-# chain, so a cyclic alias stops here and infer reports it.
-fn expand_deep(table: Dict AliasHead, te: TypeExpr, fuel: Int) -> TypeExpr =
-  if fuel <= 0 then te
+# Nodes one `where` argument may visit. A branching cyclic alias (`type alias T = (T, T)`)
+# doubles at each level, so depth alone does not bound it; past this the rest is left
+# unexpanded and infer reports the cycle.
+let alias_expand_budget: Int = 1000
+
+fn expand_within_budget(table: Dict AliasHead, te: TypeExpr) -> TypeExpr =
+  let (done, _) = expand_deep(table, te, alias_expand_budget)
+  in done
+
+# The head, then everything under it, spending one unit of `budget` per node.
+fn expand_deep(table: Dict AliasHead, te: TypeExpr, budget: Int) -> (TypeExpr, Int) =
+  if budget <= 0 then (te, 0)
   else
-    match expand_head(table, te, fuel) with
-    | TypeApply f x -> TypeApply(expand_deep(table, f, fuel - 1), expand_deep(table, x, fuel - 1))
-    | TupleType items -> TupleType(list_map(\i -> expand_deep(table, i, fuel - 1), items))
-    | TypeName n -> TypeName(n)
+    match expand_head(table, te, alias_expand_fuel) with
+    | TypeApply f x ->
+        let (f2, b1) = expand_deep(table, f, budget - 1)
+            (x2, b2) = expand_deep(table, x, b1)
+        in (TypeApply(f2, x2), b2)
+    | TupleType items ->
+        let (done, b) = expand_deep_list(table, items, budget - 1)
+        in (TupleType(done), b)
+    | TypeName n -> (TypeName(n), budget - 1)
     | TypeArrow p r vs mode ->
-        TypeArrow(expand_deep(table, p, fuel - 1), expand_deep(table, r, fuel - 1), vs, mode)
-    | TypeThunk r vs -> TypeThunk(expand_deep(table, r, fuel - 1), vs)
-    | TypeEffect inner es -> TypeEffect(expand_deep(table, inner, fuel - 1), es)
+        let (p2, b1) = expand_deep(table, p, budget - 1)
+            (r2, b2) = expand_deep(table, r, b1)
+        in (TypeArrow(p2, r2, vs, mode), b2)
+    | TypeThunk r vs ->
+        let (r2, b) = expand_deep(table, r, budget - 1)
+        in (TypeThunk(r2, vs), b)
+    | TypeEffect inner es ->
+        let (i2, b) = expand_deep(table, inner, budget - 1)
+        in (TypeEffect(i2, es), b)
+
+fn expand_deep_list(table: Dict AliasHead, tes: List TypeExpr, budget: Int) -> (List TypeExpr, Int) =
+  match tes with
+  | [] -> (Nil, budget)
+  | [te | rest] ->
+      let (t2, b1) = expand_deep(table, te, budget)
+          (more, b2) = expand_deep_list(table, rest, b1)
+      in (Cons(t2, more), b2)
 
 fn expand_head(table: Dict AliasHead, te: TypeExpr, fuel: Int) -> TypeExpr =
   if fuel <= 0 then te

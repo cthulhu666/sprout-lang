@@ -541,13 +541,16 @@ an arrow, thunk or effect, which names no head.
 
 `compound_head_tdict` decodes every argument at the call — a variable to what the
 substitution made of it, named as the enclosing declaration wrote it (by its constraints,
-`@fwdvars`, then its signature, `@sigvars`), or `_` when it is still open — and rebuilds
-the constraint's own head over them: `where Boxed (Tagged j)` becomes `Tagged String`,
+`@fwdvars`, then its signature, `@sigvars`; an existential's skolem by its witness)
+— and rebuilds the constraint's own head over them: `where Boxed (Tagged j)` becomes `Tagged String`,
 whichever parameter is headed by `Tagged`. Nothing is taken from "the first argument
 headed by the constructor", the scan this replaced: beside `p: (a, b)`, `ToString ((c,
 d))` is not `p`'s, and in `xs: List (List (Box a))` the `List (Box a)` is not `xs`'s type.
-The result is taken when the caller declares exactly it — `seed_compound_marker` records each compound
-constraint a body declares, and each transitive superclass of it, as `@fwdhead:` plus its
+A variable still open at the call is written `?<id>`, and `name_open_dicts` renames it once
+the body is inferred: a later unification (a lambda parameter, say) can still make it a
+declared variable, and one never bound becomes `_`, whose dictionary nothing reads.
+The result is taken when the caller declares exactly it — `seed_compound_marker` records
+each compound constraint a body declares, and each transitive superclass of it, as `@fwdhead:` plus its
 slot key (`ast.dict_slot_key`) — or when the class has an instance for the head, looked up
 under the constraint's own spelling of it (qualified when bundled, `main.Pair`; short on
 the env path, below). `resolve` then forwards the exact slot, or builds the instance from

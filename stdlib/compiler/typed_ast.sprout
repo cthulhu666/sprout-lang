@@ -272,3 +272,88 @@ fn count_field(f: TypedRecordField) -> Int =
   match f with
   | TypedRecordField _ value -> 1 + count_expr(value)
 
+
+# --- Dictionary-request rewriting ---
+#
+# infer names a dictionary request's open variables only once its body is fully
+# inferred; these find and rewrite every TDict's constraint, nothing else.
+
+export fn any_dict_constraint(p: ast.TypeConstraint -> Bool, e: TypedExpr) -> Bool =
+  match e with
+  | TVar _ _ _ -> false
+  | TInt _ _ _ -> false
+  | TFloat _ _ _ -> false
+  | TBool _ _ _ -> false
+  | TString _ _ _ -> false
+  | TChar _ _ _ -> false
+  | TUnit _ _ -> false
+  | TTuple items _ _ -> any(\i -> any_dict_constraint(p, i), items)
+  | TIf c t f _ _ -> any(\i -> any_dict_constraint(p, i), [c, t, f])
+  | TMatch s bs _ _ -> any_dict_constraint(p, s) || any(\b -> any_dict_constraint(p, branch_body(b)), bs)
+  | TCall f args _ _ -> any(\i -> any_dict_constraint(p, i), Cons(f, args))
+  | TDict c _ _ _ -> p(c)
+  | TMethodRef _ _ _ _ _ -> false
+  | TLambda _ body _ _ -> any_dict_constraint(p, body)
+  | TBinary _ l r _ _ -> any_dict_constraint(p, l) || any_dict_constraint(p, r)
+  | TUnary _ x _ _ -> any_dict_constraint(p, x)
+  | TRange lo hi _ _ -> any_dict_constraint(p, lo) || any_dict_constraint(p, hi)
+  | TDo steps _ _ -> any(\s -> any_dict_constraint(p, step_expr(s)), steps)
+  | TRecord _ fields _ _ -> any(\fl -> any_dict_constraint(p, field_expr(fl)), fields)
+  | TGetField x _ _ _ -> any_dict_constraint(p, x)
+  | TRecordUpdate base fields _ _ ->
+      any_dict_constraint(p, base) || any(\fl -> any_dict_constraint(p, field_expr(fl)), fields)
+
+export fn map_dict_constraints(f: ast.TypeConstraint -> ast.TypeConstraint, e: TypedExpr) -> TypedExpr =
+  match e with
+  | TVar _ _ _ -> e
+  | TInt _ _ _ -> e
+  | TFloat _ _ _ -> e
+  | TBool _ _ _ -> e
+  | TString _ _ _ -> e
+  | TChar _ _ _ -> e
+  | TUnit _ _ -> e
+  | TTuple items t pos -> TTuple(list_map(\i -> map_dict_constraints(f, i), items), t, pos)
+  | TIf c th el t pos -> TIf(map_dict_constraints(f, c), map_dict_constraints(f, th), map_dict_constraints(f, el), t, pos)
+  | TMatch s bs t pos ->
+      TMatch(map_dict_constraints(f, s),
+             list_map(\b -> TypedMatchBranch(branch_pattern(b), map_dict_constraints(f, branch_body(b))), bs), t, pos)
+  | TCall fn_ args t pos -> TCall(map_dict_constraints(f, fn_), list_map(\i -> map_dict_constraints(f, i), args), t, pos)
+  | TDict c t pos ev -> TDict(f(c), t, pos, ev)
+  | TMethodRef _ _ _ _ _ -> e
+  | TLambda params body t pos -> TLambda(params, map_dict_constraints(f, body), t, pos)
+  | TBinary op l r t pos -> TBinary(op, map_dict_constraints(f, l), map_dict_constraints(f, r), t, pos)
+  | TUnary op x t pos -> TUnary(op, map_dict_constraints(f, x), t, pos)
+  | TRange lo hi t pos -> TRange(map_dict_constraints(f, lo), map_dict_constraints(f, hi), t, pos)
+  | TDo steps t pos -> TDo(list_map(\s -> map_step_dicts(f, s), steps), t, pos)
+  | TRecord name fields t pos -> TRecord(name, list_map(\fl -> map_field_dicts(f, fl), fields), t, pos)
+  | TGetField x name t pos -> TGetField(map_dict_constraints(f, x), name, t, pos)
+  | TRecordUpdate base fields t pos ->
+      TRecordUpdate(map_dict_constraints(f, base), list_map(\fl -> map_field_dicts(f, fl), fields), t, pos)
+
+fn branch_pattern(b: TypedMatchBranch) -> ast.Pattern =
+  let TypedMatchBranch pat _ = b
+  in pat
+
+fn branch_body(b: TypedMatchBranch) -> TypedExpr =
+  let TypedMatchBranch _ body = b
+  in body
+
+fn step_expr(s: TypedDoStep) -> TypedExpr =
+  match s with
+  | TDoBindStep _ x -> x
+  | TDoLetStep _ x -> x
+  | TDoExprStep x -> x
+
+fn field_expr(fl: TypedRecordField) -> TypedExpr =
+  let TypedRecordField _ x = fl
+  in x
+
+fn map_step_dicts(f: ast.TypeConstraint -> ast.TypeConstraint, s: TypedDoStep) -> TypedDoStep =
+  match s with
+  | TDoBindStep pat x -> TDoBindStep(pat, map_dict_constraints(f, x))
+  | TDoLetStep name x -> TDoLetStep(name, map_dict_constraints(f, x))
+  | TDoExprStep x -> TDoExprStep(map_dict_constraints(f, x))
+
+fn map_field_dicts(f: ast.TypeConstraint -> ast.TypeConstraint, fl: TypedRecordField) -> TypedRecordField =
+  let TypedRecordField name x = fl
+  in TypedRecordField(name, map_dict_constraints(f, x))

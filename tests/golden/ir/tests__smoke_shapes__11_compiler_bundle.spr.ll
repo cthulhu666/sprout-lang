@@ -1544,6 +1544,7 @@ declare i64 @fs_rename(i64, i64)
 @stdlib.compiler.source.canonical_marker = global i64 zeroinitializer
 @stdlib.compiler.source.no_prelude_directive = global i64 zeroinitializer
 @stdlib.compiler.ast.alias_expand_fuel = private constant i64 100
+@stdlib.compiler.ast.alias_expand_budget = private constant i64 1000
 @stdlib.compiler.ast.list_ctor_nil = global i64 zeroinitializer
 @stdlib.compiler.ast.list_ctor_cons = global i64 zeroinitializer
 @stdlib.compiler.ast.comp_binder_prefix = global i64 zeroinitializer

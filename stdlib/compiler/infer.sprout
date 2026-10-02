@@ -3361,7 +3361,7 @@ fn compound_head_tdict(
   let Just want = arg_scan_head(head_token)
         else resolve_one_constraint_tdict(class_name, user_args, subst, env, pos, excluded)
       [_ | _] = toks else Nothing
-      te = rebuild_head(want, list_map(\t -> call_arg_typeexpr(t, callee, prog_to_fresh, subst, env), toks))
+      te = rebuild_head(want, list_map(\t -> call_arg_typeexpr(t, class_name, callee, prog_to_fresh, subst, env), toks))
   in
     if env_has(compound_fwd_key(class_name, te), env) || env_has("@inst:" ++ class_name ++ ":" ++ want, env)
     then Just(compound_tdict(class_name, te, pos))
@@ -3389,18 +3389,18 @@ fn rebuild_head(head_str: String, args: List ast.TypeExpr) -> ast.TypeExpr =
 # source names (its binding is monomorphic), any other callee's decode through its
 # instantiation and this substitution. `#any`, and a token that decodes to nothing,
 # is `_`.
-fn call_arg_typeexpr(t: String, callee: String, prog_to_fresh: Dict types.Type,
+fn call_arg_typeexpr(t: String, class_name: String, callee: String, prog_to_fresh: Dict types.Type,
                      subst: Dict types.Type, env: Dict types.Scheme) -> ast.TypeExpr =
   match types.nested_arg_parts(t) with
   | Just (head, subtoks) ->
-      apply_head(call_arg_typeexpr(head, callee, prog_to_fresh, subst, env),
-                 list_map(\s -> call_arg_typeexpr(s, callee, prog_to_fresh, subst, env), subtoks))
+      apply_head(call_arg_typeexpr(head, class_name, callee, prog_to_fresh, subst, env),
+                 list_map(\s -> call_arg_typeexpr(s, class_name, callee, prog_to_fresh, subst, env), subtoks))
   | Nothing ->
       if t == "#any" then ast.TypeName("_")
       else if is_self_binding(callee, env) then ast.TypeName(t)
       else
         match dict_get(decode_constraint_var(t, callee, env), prog_to_fresh) with
-        | Just fresh_t -> named_typeexpr(unifier.apply_subst(subst, fresh_t), subst, env)
+        | Just fresh_t -> named_typeexpr(unifier.apply_subst(subst, fresh_t), class_name, subst, env, open_var_typeexpr)
         | Nothing -> if str_starts_with(t, "#") || ast.is_lowercase_name(t) then ast.TypeName("_") else ast.TypeName(t)
 
 fn apply_head(head: ast.TypeExpr, args: List ast.TypeExpr) -> ast.TypeExpr =
@@ -3408,24 +3408,103 @@ fn apply_head(head: ast.TypeExpr, args: List ast.TypeExpr) -> ast.TypeExpr =
   | ast.TypeName h -> rebuild_head(h, args)
   | _ -> apply_typeexprs(head, args)
 
-# The type with each variable named as the enclosing declaration wrote it: first by its
-# constraints (declared_name_by_subst), then by its signature (sig_name_by_subst). A
-# variable neither names is still open at this call and is `_`, as is an arrow; a
-# dictionary for either is never read.
-fn named_typeexpr(t: types.Type, subst: Dict types.Type, env: Dict types.Scheme) -> ast.TypeExpr =
+# The spelling of a variable left open at a call (open_var_typeexpr).
+let open_var_prefix: String = "?"
+
+# The type with each variable named as the enclosing declaration wrote it: by a
+# forward marker for this class (an existential's witness has one), by its constraints
+# (declared_name_by_subst), then by its signature (sig_name_by_subst). A variable none
+# of these names is `open(v)`, and an arrow is `_`: no dictionary for it is read.
+fn named_typeexpr(t: types.Type, class_name: String, subst: Dict types.Type, env: Dict types.Scheme,
+                  open: types.TyVarId -> ast.TypeExpr) -> ast.TypeExpr =
   match t with
-  | types.TConst name -> ast.TypeName(types.type_id_name(name))
-  | types.TApp base arg -> ast.TypeApply(named_typeexpr(base, subst, env), named_typeexpr(arg, subst, env))
-  | types.TTuple items -> ast.TupleType(list_map(\i -> named_typeexpr(i, subst, env), items))
+  | types.TConst name -> ast.TypeName(skolem_witness_or(types.type_id_name(name), class_name, env))
+  | types.TApp base arg ->
+      ast.TypeApply(named_typeexpr(base, class_name, subst, env, open),
+                    named_typeexpr(arg, class_name, subst, env, open))
+  | types.TTuple items -> ast.TupleType(list_map(\i -> named_typeexpr(i, class_name, subst, env, open), items))
   | types.TVar v ->
-      match declared_name_by_subst(v, subst, env) with
+      match var_name_in_body(v, class_name, subst, env) with
       | Just n -> ast.TypeName(n)
-      | Nothing ->
-          match sig_name_by_subst(v, subst, env) with
-          | Just n -> ast.TypeName(n)
-          | Nothing -> ast.TypeName("_")
+      | Nothing -> open(v)
   | types.TFunc _ _ _ _ -> ast.TypeName("_")
   | types.TThunk _ _ -> ast.TypeName("_")
+
+# An existential's skolem is a constant, named by the witness its pattern forwards.
+fn skolem_witness_or(name: String, class_name: String, env: Dict types.Scheme) -> String =
+  if types.is_skolem_name(name) then
+    match dict_get("@fwd:" ++ name ++ ":" ++ class_name, env) with
+    | Just scheme -> types.type_id_name(witness_of(scheme, name))
+    | Nothing -> name
+  else name
+
+fn witness_of(scheme: types.Scheme, fallback: String) -> types.TypeId =
+  match scheme with
+  | types.Scheme _ _ (types.TConst w) _ _ -> w
+  | _ -> types.type_id(fallback)
+
+fn var_name_in_body(v: types.TyVarId, class_name: String, subst: Dict types.Type,
+                    env: Dict types.Scheme) -> Maybe String =
+  match dict_get("@fwd:" ++ types.tyvar_identity(v) ++ ":" ++ class_name, env) with
+  | Just scheme -> fwd_scheme_name(scheme)
+  | Nothing ->
+      match declared_name_by_subst(v, subst, env) with
+      | Just n -> Just(n)
+      | Nothing -> sig_name_by_subst(v, subst, env)
+
+fn fwd_scheme_name(scheme: types.Scheme) -> Maybe String =
+  match scheme with
+  | types.Scheme _ _ (types.TConst prog_var) _ _ -> Just(types.type_id_name(prog_var))
+  | _ -> Nothing
+
+# At the call, a variable inference has not bound yet keeps its identity (`?<id>`): a
+# later unification can still make it one the body declared. name_open_dicts settles
+# it once the body is inferred.
+fn open_var_typeexpr(v: types.TyVarId) -> ast.TypeExpr =
+  ast.TypeName(open_var_prefix ++ types.tyvar_identity(v))
+
+fn still_open_typeexpr(v: types.TyVarId) -> ast.TypeExpr =
+  ast.TypeName("_")
+
+# Every `?<id>` in the body's dictionary requests, named through the final substitution;
+# one still unbound is `_`, a variable no value of which exists, so nothing reads it.
+fn name_open_dicts(e: typed_ast.TypedExpr, subst: Dict types.Type, env: Dict types.Scheme) -> typed_ast.TypedExpr =
+  if typed_ast.any_dict_constraint(constraint_has_open_var, e)
+  then typed_ast.map_dict_constraints(\c -> name_open_constraint(c, subst, env), e)
+  else e
+
+fn constraint_has_open_var(c: ast.TypeConstraint) -> Bool =
+  let ast.TypeConstraint _ args = c
+  in any(typeexpr_has_open_var, args)
+
+fn typeexpr_has_open_var(te: ast.TypeExpr) -> Bool =
+  match te with
+  | ast.TypeName n -> str_starts_with(n, open_var_prefix)
+  | ast.TypeApply f x -> typeexpr_has_open_var(f) || typeexpr_has_open_var(x)
+  | ast.TupleType items -> any(typeexpr_has_open_var, items)
+  | ast.TypeArrow _ _ _ _ -> false
+  | ast.TypeThunk _ _ -> false
+  | ast.TypeEffect _ _ -> false
+
+fn name_open_constraint(c: ast.TypeConstraint, subst: Dict types.Type, env: Dict types.Scheme) -> ast.TypeConstraint =
+  let ast.TypeConstraint class_name args = c
+  in ast.TypeConstraint(class_name, list_map(\a -> name_open_typeexpr(a, class_name, subst, env), args))
+
+fn name_open_typeexpr(te: ast.TypeExpr, class_name: String, subst: Dict types.Type,
+                      env: Dict types.Scheme) -> ast.TypeExpr =
+  match te with
+  | ast.TypeName n ->
+      match string.strip_prefix(n, open_var_prefix) with
+      | Just id ->
+          named_typeexpr(unifier.apply_subst(subst, types.TVar(types.tyvar_id(id))), class_name, subst, env,
+                         still_open_typeexpr)
+      | Nothing -> te
+  | ast.TypeApply f x ->
+      ast.TypeApply(name_open_typeexpr(f, class_name, subst, env), name_open_typeexpr(x, class_name, subst, env))
+  | ast.TupleType items -> ast.TupleType(list_map(\i -> name_open_typeexpr(i, class_name, subst, env), items))
+  | ast.TypeArrow _ _ _ _ -> te
+  | ast.TypeThunk _ _ -> te
+  | ast.TypeEffect _ _ -> te
 
 # Left-associating application: `Tagged` over [String] is `Tagged String`.
 fn apply_typeexprs(base: ast.TypeExpr, args: List ast.TypeExpr) -> ast.TypeExpr =
@@ -10818,7 +10897,8 @@ fn check_fn_body(
             match fn_linear_gate(params, ret_type_maybe, s2, inst_type, typed_body, fn_pos, env) with
             | linear_check.LinFail lp lm -> (typed_ast.BodyErr(lp, lm), dict_empty(), Nil, subst)
             | linear_check.LinPass ->
-                (typed_ast.BodyOk(resolve_dispatch_typed_expr(fwd_env, s2, bind_params(params, set_empty()), typed_body), unifier.apply_subst(s2, inst_type)),
+                (typed_ast.BodyOk(name_open_dicts(resolve_dispatch_typed_expr(fwd_env, s2, bind_params(params, set_empty()), typed_body), s2, fwd_env),
+                              unifier.apply_subst(s2, inst_type)),
                  eta_fwdvar_markers(constraints, prog_to_fresh, s2, fwd_markers),
                  canonicalize_constrained_constraints(constraints, prog_to_fresh, s2, inst_type, env_ftv),
                  s2)
@@ -11549,4 +11629,4 @@ fn finish_instance_method_checked(name: String, params: List ast.Param, ret_mayb
   | linear_check.LinPass ->
       InstanceMethodOk(
         typed_ast.TypedInstanceMethod(name, params, ret_maybe, eff_maybe, method_constraints,
-          resolve_dispatch_typed_expr(body_env, s2, bind_params(params, set_empty()), typed_body)))
+          name_open_dicts(resolve_dispatch_typed_expr(body_env, s2, bind_params(params, set_empty()), typed_body), s2, body_env)))

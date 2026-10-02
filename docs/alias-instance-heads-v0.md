@@ -40,7 +40,8 @@ strings for one type, and because the key is a string a mismatch can only be a s
 `ast.expand_alias_constraints` rewrites each `InstanceDecl`'s head and `where` context, and every
 function's and method's `where` clause at every depth (a slot key spells the whole constraint), substituting
 an alias's parameters into its RHS and re-applying any extra arguments, iterating for alias-of-alias
-under a fuel bound. It is called from `desugar_ctx.desugar_program`, which **both** checker entry points
+under a fuel bound, and the whole of one `where` argument under a node budget, so a
+branching cyclic alias stops in time for the cycle error. It is called from `desugar_ctx.desugar_program`, which **both** checker entry points
 (`check_program_with_env`, `typecheck_typed_with_effects`) reach before any later phase — so all four
 paths above see the expansion and cannot drift. A per-path fix would leave four normalizations to keep
 in step.

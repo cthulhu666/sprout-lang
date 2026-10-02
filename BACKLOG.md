@@ -2634,6 +2634,11 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   that neither declares `where C (T a)` nor can build it (the class has no `T` instance) gets
   `under-application ... reached codegen` instead of a diagnostic: `infer.compound_head_tdict`
   returns Nothing. A method call on such a constraint is already rejected, so this is rare.
+- [ ] `P3` **A direct method call does not check an instance's context against the caller.**
+  `to_string(x)` on `x: Tagged k Int`, where the instance needs `ToString k` and the caller has
+  none, compiles with `k`'s dictionary empty; it aborts if the instance reads it. The same call
+  through a `where ToString (Tagged k v)` function is rejected (`resolve.check_context_constraint`
+  sees a named `k`; the direct path writes `_`). The two should agree.
 
 - [~] `P1` **A `where`-constrained function used as a first-class VALUE.** Fixed everywhere the
   dictionary is readable at the mention, by rewriting a bare mention into the eta-lambda the
