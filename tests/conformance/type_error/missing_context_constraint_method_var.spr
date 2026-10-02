@@ -1,0 +1,14 @@
+# `b` is the method's own variable; the instance head `Mk Box` does not bind it, so a
+# `where Eq b` on the head can never be filled by a caller. Only a method-level `where`
+# (declared on the class too) supplies it.
+type Box = Box
+
+class Mk t
+  fn mk(x: t, g: Int -> b) -> b
+
+instance Mk Box where Eq b
+  fn mk(x: Box, g: Int -> b) -> b =
+    let r = g(1)
+    in if Just(r) == Just(r) then r else r
+
+fn main() -> Unit !{IO} = print(to_string(mk(Box, \n -> n + 1)))

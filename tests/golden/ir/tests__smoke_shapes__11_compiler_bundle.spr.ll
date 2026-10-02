@@ -231,7 +231,7 @@ declare i64 @fs_rename(i64, i64)
 @.str.96 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.str.97 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"IO\00" }
 @.str.98 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c".\00" }
-@.str.99 = private unnamed_addr constant { i64, [46 x i8] } { i64 737290, [46 x i8] c"Int overflow in unary - (line 383, column 29)\00" }
+@.str.99 = private unnamed_addr constant { i64, [46 x i8] } { i64 737290, [46 x i8] c"Int overflow in unary - (line 398, column 29)\00" }
 @.str.100 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 70, column 49)\00" }
 @.str.101 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 71, column 49)\00" }
 @.str.102 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"0x\00" }
@@ -1225,7 +1225,12 @@ declare i64 @fs_rename(i64, i64)
 @.str.1090 = private unnamed_addr constant { i64, [13 x i8] } { i64 196618, [13 x i8] c"__sprout_ph_\00" }
 @.str.1091 = private unnamed_addr constant { i64, [12 x i8] } { i64 180234, [12 x i8] c"TemplateLit\00" }
 @.str.1092 = private unnamed_addr constant { i64, [15 x i8] } { i64 229386, [15 x i8] c"TemplateInterp\00" }
-@.str.1093 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c"_unann@\00" }
+@.str.1093 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"$ex_\00" }
+@.str.1094 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"@aliasty:\00" }
+@.str.1095 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"@aliasfn:\00" }
+@.str.1096 = private unnamed_addr constant { i64, [15 x i8] } { i64 229386, [15 x i8] c"__aliasparam__\00" }
+@.str.1097 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c"_unann@\00" }
+@.str.1098 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"#inst/\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -1551,9 +1556,14 @@ declare i64 @fs_rename(i64, i64)
 @stdlib.compiler.ast.placeholder_param_prefix = global i64 zeroinitializer
 @stdlib.compiler.ast.template_ctor_lit = global i64 zeroinitializer
 @stdlib.compiler.ast.template_ctor_interp = global i64 zeroinitializer
+@stdlib.compiler.types.existential_head_prefix = global i64 zeroinitializer
+@stdlib.compiler.types.alias_marker_prefix = global i64 zeroinitializer
+@stdlib.compiler.types.alias_fn_prefix = global i64 zeroinitializer
+@stdlib.compiler.types.alias_param_prefix = global i64 zeroinitializer
 @stdlib.compiler.types.effect_pure = global i64 zeroinitializer
 @stdlib.compiler.types.effect_io = global i64 zeroinitializer
 @stdlib.compiler.types.unann_prefix = global i64 zeroinitializer
+@stdlib.compiler.types.inst_owner_prefix = global i64 zeroinitializer
 @stdlib.terminal.esc = global i64 zeroinitializer
 @stdlib.repl.esc = global i64 zeroinitializer
 
@@ -74292,23 +74302,43 @@ entry:
   %t$21 = ptrtoint ptr %t$20 to i64
   store i64 %t$21, ptr @stdlib.compiler.ast.template_ctor_interp
   call i64 @sprout_gc_register_i64_root(ptr @stdlib.compiler.ast.template_ctor_interp)
-  %t$22 = call i64 @sprout_alloc_obj(i64 110, i64 0)
-  store i64 %t$22, ptr @stdlib.compiler.types.effect_pure
-  call i64 @sprout_gc_register_i64_root(ptr @stdlib.compiler.types.effect_pure)
-  %t$23 = call i64 @sprout_alloc_obj(i64 111, i64 0)
-  store i64 %t$23, ptr @stdlib.compiler.types.effect_io
-  call i64 @sprout_gc_register_i64_root(ptr @stdlib.compiler.types.effect_io)
-  %t$24 = getelementptr inbounds { i64, [8 x i8] }, ptr @.str.1093, i64 0, i32 1, i64 0
+  %t$22 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.1093, i64 0, i32 1, i64 0
+  %t$23 = ptrtoint ptr %t$22 to i64
+  store i64 %t$23, ptr @stdlib.compiler.types.existential_head_prefix
+  call i64 @sprout_gc_register_i64_root(ptr @stdlib.compiler.types.existential_head_prefix)
+  %t$24 = getelementptr inbounds { i64, [10 x i8] }, ptr @.str.1094, i64 0, i32 1, i64 0
   %t$25 = ptrtoint ptr %t$24 to i64
-  store i64 %t$25, ptr @stdlib.compiler.types.unann_prefix
+  store i64 %t$25, ptr @stdlib.compiler.types.alias_marker_prefix
+  call i64 @sprout_gc_register_i64_root(ptr @stdlib.compiler.types.alias_marker_prefix)
+  %t$26 = getelementptr inbounds { i64, [10 x i8] }, ptr @.str.1095, i64 0, i32 1, i64 0
+  %t$27 = ptrtoint ptr %t$26 to i64
+  store i64 %t$27, ptr @stdlib.compiler.types.alias_fn_prefix
+  call i64 @sprout_gc_register_i64_root(ptr @stdlib.compiler.types.alias_fn_prefix)
+  %t$28 = getelementptr inbounds { i64, [15 x i8] }, ptr @.str.1096, i64 0, i32 1, i64 0
+  %t$29 = ptrtoint ptr %t$28 to i64
+  store i64 %t$29, ptr @stdlib.compiler.types.alias_param_prefix
+  call i64 @sprout_gc_register_i64_root(ptr @stdlib.compiler.types.alias_param_prefix)
+  %t$30 = call i64 @sprout_alloc_obj(i64 110, i64 0)
+  store i64 %t$30, ptr @stdlib.compiler.types.effect_pure
+  call i64 @sprout_gc_register_i64_root(ptr @stdlib.compiler.types.effect_pure)
+  %t$31 = call i64 @sprout_alloc_obj(i64 111, i64 0)
+  store i64 %t$31, ptr @stdlib.compiler.types.effect_io
+  call i64 @sprout_gc_register_i64_root(ptr @stdlib.compiler.types.effect_io)
+  %t$32 = getelementptr inbounds { i64, [8 x i8] }, ptr @.str.1097, i64 0, i32 1, i64 0
+  %t$33 = ptrtoint ptr %t$32 to i64
+  store i64 %t$33, ptr @stdlib.compiler.types.unann_prefix
   call i64 @sprout_gc_register_i64_root(ptr @stdlib.compiler.types.unann_prefix)
-  %t$26 = add i64 0, 27
-  %t$27 = call i64 @char_to_str(i64 %t$26)
-  store i64 %t$27, ptr @stdlib.terminal.esc
+  %t$34 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.1098, i64 0, i32 1, i64 0
+  %t$35 = ptrtoint ptr %t$34 to i64
+  store i64 %t$35, ptr @stdlib.compiler.types.inst_owner_prefix
+  call i64 @sprout_gc_register_i64_root(ptr @stdlib.compiler.types.inst_owner_prefix)
+  %t$36 = add i64 0, 27
+  %t$37 = call i64 @char_to_str(i64 %t$36)
+  store i64 %t$37, ptr @stdlib.terminal.esc
   call i64 @sprout_gc_register_i64_root(ptr @stdlib.terminal.esc)
-  %t$28 = add i64 0, 27
-  %t$29 = call i64 @char_to_str(i64 %t$28)
-  store i64 %t$29, ptr @stdlib.repl.esc
+  %t$38 = add i64 0, 27
+  %t$39 = call i64 @char_to_str(i64 %t$38)
+  store i64 %t$39, ptr @stdlib.repl.esc
   call i64 @sprout_gc_register_i64_root(ptr @stdlib.repl.esc)
   ret void
 }

@@ -1,0 +1,5 @@
+# `where Eq (Maybe a)` supplies `Maybe a` only. The unannotated parameters' type is a
+# different variable, so its `Eq` is still missing — this used to run String's `eq` on Ints.
+fn f(y: Maybe a, z, w) -> Bool where Eq (Maybe a) = Just(z) == Just(w)
+
+fn main() -> Unit !{IO} = print(to_string(f(Just("s"), 3, 4)))

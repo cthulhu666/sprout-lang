@@ -1,0 +1,11 @@
+# An instance method's unannotated return type: its placeholder's owner is `#inst/mk`,
+# and the message must name the return type, not a parameter called `mk`.
+class Mk t
+  fn mk(x: t) -> r
+
+instance Mk Int
+  fn mk(x: Int) =
+    let v = panic("never")
+    in if Just(v) == Just(v) then v else v
+
+fn main() -> Unit !{IO} = print(to_string(mk(1) == 1))
