@@ -1144,6 +1144,11 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   compiles, and `json.JsonEncode` in an expression then means this local constructor, not a member
   of the `json` import. The #422 check rejects it only when the name resolves to a type. Reject a
   dotted name in `parse_type_constructor_def`.
+- [ ] `P3` **An unknown type in an imported module is reported at that module's line:col.** The
+  file is not named, so the CLI and the LSP read the position against the entry: `fn unk(x: Nope)`
+  on line 4 of `demo.unkdep` gives `4:8: ERROR: bundle: unknown type …` for a 3-line entry.
+  `bundler.validate_type_names` runs on qualified decls, which carry no path, so it cannot apply
+  `pos_for_entry` the way `find_one_ctor_clash` does (#425). Found while fixing #422.
 - [ ] `P2` **REPL SIGSEGV on a tuple that nests let-bound tuple variables.**
   `let t1 = (1,3,"foo",true)` then `let t2 = (t1, t1)`, then evaluating `t2` gives
   `SIGSEGV (no current function set)`. Flat tuples are fine. **Not a codegen bug** — the
