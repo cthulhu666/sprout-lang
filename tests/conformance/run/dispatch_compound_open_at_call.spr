@@ -1,6 +1,7 @@
 # A compound constraint whose argument is still open when the call is checked, and
-# bound only later in the body: inside a lambda, and through an existential's witness.
-# Naming it `_` at the call left the element dictionary empty, so these aborted.
+# bound only later: inside a lambda, through an existential's witness, both at once,
+# and in a top-level `let`. Naming it `_` at the call left the element dictionary
+# empty, so these aborted.
 module main
 
 type Showy = | Showy (any ToString)
@@ -19,7 +20,25 @@ fn show_s(d: Showy) -> String =
   match d with
   | Showy s -> f(s)
 
+fn show_via_lambda(d: Showy) -> String =
+  match d with
+  | Showy s -> (\z -> f(z))(s)
+
+fn show_via_let(d: Showy) -> String =
+  match d with
+  | Showy s ->
+      let g = \z -> f(z)
+      in g(s)
+
+fn show_all(ds: List Showy) -> List String = [(\z -> f(z))(s) for Showy s in ds]
+
+let shown: String = (\z -> f(z))(7)
+
 fn main() -> Unit !{IO} = do
   print(outer(1))
   print(from_element("s"))
   print(show_s(Showy(5)))
+  print(show_via_lambda(Showy(6)))
+  print(show_via_let(Showy(8)))
+  print(to_string(show_all([Showy(1), Showy("x")])))
+  print(shown)
