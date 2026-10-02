@@ -803,12 +803,19 @@ fn nth_var_name(n: Int) -> String =
   if n == 6 then "g" else if n == 7 then "h" else if n == 8 then "i" else
   if n == 9 then "j" else "t" ++ int_to_string(n)
 
+# The placeholder an unannotated slot is typed with (infer.unann_param_var builds it from
+# this). No source program can write it, so resolve can read it back off a constraint and
+# name the parameter in a diagnostic.
+export let unann_prefix: String = "_unann@"
+
+export fn is_unann_placeholder(name: String) -> Bool = str_starts_with(name, unann_prefix)
+
 # The three families the compiler mints, each matched at its own spelling. `$` opens every
 # unifier-minted variable and `_unann@` every unannotated-slot placeholder — neither is a
 # name source can write, so those two are exact. The parser's existential variable is the
 # odd one out: `existv0` is writeable, so it is matched only with a numeric tail.
 fn is_generated_var(name: String) -> Bool =
-  str_starts_with(name, "$") || str_starts_with(name, "_unann@") || is_exist_var(name)
+  str_starts_with(name, "$") || is_unann_placeholder(name) || is_exist_var(name)
 
 fn is_exist_var(name: String) -> Bool =
   if str_starts_with(name, "existv") then

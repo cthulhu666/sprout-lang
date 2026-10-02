@@ -1,0 +1,5 @@
+# An unannotated parameter's type is generalized like a written variable, but there is no
+# name to constrain until the parameter is annotated.
+fn f(x, y) = Just(x) == y
+
+fn main() -> Unit !{IO} = print(to_string(f(3, Just(3))))

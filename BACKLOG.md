@@ -986,7 +986,8 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   `Widget s (s -> s) (s -> String)` becomes `… (s -> s)(s -> String)`, which reads as application
   rather than two fields. Same family as the landed `[` fix: `needs_space_word_or_op` has no case
   for `)` followed by `(`, so the `is_word_like` fallback returns false. Confirm no legitimate
-  no-space case exists in a *type* position, then add a formatter regression.
+  no-space case exists in a *type* position, then add a formatter regression. A word before one
+  loses it too: `type alias Forwarded = Dict (List T)` becomes `Dict(List T)` (resolve.sprout).
 - [ ] `P3` **`fmt` inserts a space into chained application when the argument starts with an
   uppercase identifier.** `pick_color()(Red)` becomes `pick_color() (Red)` while `pick_int()(4)` and
   `labeller_for(1)(2)` are untouched — discriminated by probe, so the trigger is the leading
@@ -2710,6 +2711,13 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   wrong. Fix: when the subject variable carries the `_unann_` prefix, strip it and advise annotating
   *parameter `n`*. Needs its own `type_error` fixture whose message substring differs from both
   existing `uncovered_dict_*` fixtures, since `_test-reject` matches by substring.
+- [ ] `P3` **A `where` constraint on an applied type variable does not work.**
+  `fn g(x: f a, y: f a) -> Bool where Eq (f a) = Just(x) == Just(y)` stops at codegen with
+  "internal error: under-application of 'g' reached codegen (arity 3, got 2)", and `= x == y`
+  under the same `where` is rejected as an ambiguous `eq`. So a context needed at `f a` has no
+  remedy but a concrete type, which is what the #423 context check now tells the user. Fix:
+  support `where C (f a)` end to end (hidden slot, call-site injection, dispatch), or reject it
+  at the declaration with a located message instead of an internal error.
 - [ ] `P2` **Wire in the dead `assert_resolved_typed_expr` soundness pass.** `infer.sprout` has a
   pass flagging free TVars in the final typed AST that is **never called**. **Investigate first
   whether it catches this class:** the record dispatch bugs poisoned the *injected dict evidence*

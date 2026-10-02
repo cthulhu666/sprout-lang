@@ -55,13 +55,56 @@ fn tables_super(t: Tables) -> Dict (List String) =
 fn tables_class_params(t: Tables) -> Dict String =
   match t with | Tables _ _ _ _ p -> p
 
+# The constraints a declaration forwards as hidden dictionaries: constraint key →
+# the type arguments it was WRITTEN with. Keys hold only class and head constructor
+# (one hidden slot per pair — docs/compiler-internals.md), so the arguments are
+# what tell `Eq (Maybe a)` from `Eq (Maybe b)`; see forwards.
+type alias Forwarded = Dict(List ast.TypeExpr)
+
 # What an instance context's type-variable constraint is checked against. In a
-# declaration body it must be one the declaration forwards (CoverFrom its keys).
-# Inside a dictionary the declaration itself forwards, nothing is checked: the
-# caller built that dictionary whole, context included (CoverByCaller).
+# declaration body it must be one the declaration forwards (CoverFrom its table),
+# and the remedy depends on the declaration (DeclKind). Inside a dictionary the
+# declaration itself forwards, nothing is checked: the caller built that dictionary
+# whole, context included (CoverByCaller).
 type VarCover =
-  | CoverFrom (Dict Bool)
+  | CoverFrom DeclKind Forwarded
   | CoverByCaller
+
+type DeclKind =
+  | InFn
+  | InInstanceMethod
+
+# The declaration forwards THIS constraint, not just one sharing its key. A written
+# variable or a concrete type that differs from what the `where` wrote is a
+# different constraint; `where Eq (Maybe a)` used to serve `Maybe b` and `Maybe Int`
+# with `a`'s dictionary. An unnamed use-site position (`_`, a `$`-prefixed inference
+# variable, an unannotated slot) is not evidence of a difference.
+fn forwards(key: String, type_args: List ast.TypeExpr, fwd: Forwarded) -> Bool =
+  let Just written = dict_get(key, fwd) else false
+  in args_conflict(type_args, written) == false
+
+fn args_conflict(uses: List ast.TypeExpr, written: List ast.TypeExpr) -> Bool =
+  match (uses, written) with
+  | ([], []) -> false
+  | ([u | us], [w | ws]) -> te_conflicts(u, w) || args_conflict(us, ws)
+  | (_, _) -> true
+
+fn te_conflicts(use: ast.TypeExpr, written: ast.TypeExpr) -> Bool =
+  match (use, written) with
+  # Compared without module prefixes: a `where` clause and an inferred type may
+  # spell one type `Box` and `main.Box`, and a false conflict here is a rejection.
+  | (ast.TypeName u, ast.TypeName w) ->
+      string.substring_after_last(u, ".") != string.substring_after_last(w, ".") && is_unnamed(u) == false
+  | (ast.TypeName u, _) -> is_unnamed(u) == false
+  | (ast.TypeApply ub ua, ast.TypeApply wb wa) -> te_conflicts(ub, wb) || te_conflicts(ua, wa)
+  | (ast.TupleType us, ast.TupleType ws) -> args_conflict(us, ws)
+  # Any other pair, arrows included: the key-level answer, by head constructor. It is
+  # what forwarding meant before arguments were compared, so it stays right for any shape.
+  | (_, _) -> type_expr_head_name(use) != type_expr_head_name(written)
+
+# A position no program name or type fills.
+fn is_unnamed(name: String) -> Bool =
+  name == "_" || str_starts_with(name, "$") || types.is_unann_placeholder(name)
 
 # ---------------------------------------------------------------------------
 # Entry point
@@ -145,17 +188,18 @@ fn check_constraint(
             if instance_exists(string.substring_after_last(class_name, "."), type_args, head_arg, tables)
             then check_context(constraint_key_str(string.substring_after_last(class_name, "."), type_args),
                                class_name, head_arg, type_args, pos,
-                               cover_below(constraint_key_str(string.substring_after_last(class_name, "."), type_args), cover),
+                               cover_below(constraint_key_str(string.substring_after_last(class_name, "."), type_args),
+                                           type_args, cover),
                                tables)
             else Just((pos,
               "No instance of " ++ string.substring_after_last(class_name, ".") ++ " for " ++ type_expr_head_name(head_arg)))
 
 # A dictionary the declaration forwards arrives whole, so its context is not this
-# body's to supply. Keyed the way produce_one_class decides EvForward.
-fn cover_below(key: String, cover: VarCover) -> VarCover =
+# body's to supply. Decided as produce_one_class decides EvForward.
+fn cover_below(key: String, type_args: List ast.TypeExpr, cover: VarCover) -> VarCover =
   match cover with
   | CoverByCaller -> CoverByCaller
-  | CoverFrom fwd_keys -> if dict_has(key, fwd_keys) then CoverByCaller else cover
+  | CoverFrom _ fwd_keys -> if forwards(key, type_args, fwd_keys) then CoverByCaller else cover
 
 # An instance exists if a bundled decl provides it OR the checker env carries an
 # @inst: marker for it (instances from imported modules whose decls are not
@@ -223,7 +267,7 @@ fn te_app_depth(te: ast.TypeExpr) -> Int =
 # variable's arity. They need not: `instance Foo Bar where Baz k` binds no `k` and
 # has no arity story at all. The arity disagreement is now caught at the
 # declaration (infer.check_instance_head_kinds), so an unbound variable reaching
-# here is simply a constraint no instance satisfies, reported as one.
+# here is exempt — see check_context_constraint.
 fn check_context_subs(
   outer_class: String,
   outer_head: ast.TypeExpr,
@@ -267,9 +311,11 @@ fn context_head_bound(ic: ast.TypeConstraint, subs: Dict ast.TypeExpr) -> Bool =
       [ast.TypeName v | _] = type_args else false
   in dict_has(v, subs)
 
-# Only a variable the program WROTE is checked. `_` is one no signature named — a
-# free variable whose dictionary is never invoked (`to_string(Empty)`) — and `$ex_`
-# heads are existential givens, forwarded per match arm rather than per declaration.
+# Only a variable the declaration's signature names is checked: one the program
+# wrote, or an unannotated parameter's placeholder (`_unann@<fn>/<param>`, named by
+# infer.seed_unann_names). `_` is a free variable no signature named, whose
+# dictionary is never invoked (`to_string(Empty)`), and `$ex_` heads are existential
+# givens, forwarded per match arm rather than per declaration.
 fn unsupplied_context_var(
   outer_class: String,
   outer_head: ast.TypeExpr,
@@ -278,19 +324,61 @@ fn unsupplied_context_var(
   pos: source.SourcePos,
   cover: VarCover
 ) -> Maybe(source.SourcePos, String) =
-  let CoverFrom fwd_keys = cover else Nothing
+  let CoverFrom kind fwd_keys = cover else Nothing
       [head_arg | _] = type_args else Nothing
   in
-    if is_type_var_name(type_expr_head_name(head_arg)) == false then Nothing
-    else if dict_has(constraint_key_str(string.substring_after_last(class_name, "."), type_args), fwd_keys) then Nothing
-    else Just((pos, unsupplied_context_msg(string.substring_after_last(outer_class, "."),
-                      string.substring_after_last(type_expr_head_name(outer_head), "."),
-                      string.substring_after_last(class_name, "."),
-                      type_expr_head_name(head_arg))))
+    if is_checked_var(type_expr_head_name(head_arg)) == false then Nothing
+    else if forwards(constraint_key_str(string.substring_after_last(class_name, "."), type_args), type_args, fwd_keys) then Nothing
+    else Just((pos, "the `" ++ string.substring_after_last(outer_class, ".") ++ "` instance for `"
+                      ++ te_display(outer_head) ++ "` "
+                      ++ unsupplied_remedy(kind, string.substring_after_last(class_name, "."), head_arg)))
 
-fn unsupplied_context_msg(outer_class: String, outer_head: String, cls: String, v: String) -> String =
-  "the `" ++ outer_class ++ "` instance for `" ++ outer_head ++ "` needs `" ++ cls ++ " " ++ v
-    ++ "`, which nothing in scope supplies — add `where " ++ cls ++ " " ++ v ++ "`"
+fn is_checked_var(name: String) -> Bool =
+  is_type_var_name(name) || types.is_unann_placeholder(name)
+
+# What the message asks for depends on what can supply the dictionary. An
+# unannotated slot has no variable to constrain until it is annotated; a `where` on
+# an applied variable (`Eq (f a)`) is not supported; an instance method takes its
+# context from the instance head, under the head's own variable names.
+fn unsupplied_remedy(kind: DeclKind, cls: String, arg: ast.TypeExpr) -> String =
+  if types.is_unann_placeholder(type_expr_head_name(arg)) then
+    "needs `" ++ cls ++ "` on the type of " ++ unann_subject(type_expr_head_name(arg))
+      ++ ", which has no annotation — annotate it with a type variable and add a `where "
+      ++ cls ++ "` constraint on that variable"
+  else
+    "needs `" ++ cls ++ " " ++ te_display_atom(arg) ++ "`, which nothing in scope supplies — "
+      ++ supply_hint(kind, cls, arg)
+
+fn supply_hint(kind: DeclKind, cls: String, arg: ast.TypeExpr) -> String =
+  match (arg, kind) with
+  | (ast.TypeApply _ _, _) ->
+      "a `where` constraint on an applied type variable is not supported; use a concrete type"
+  | (_, InInstanceMethod) ->
+      "add it to the instance head's `where`, spelling the variable as the head does"
+  | (_, InFn) -> "add `where " ++ cls ++ " " ++ te_display_atom(arg) ++ "`"
+
+# `_unann@f/x` is parameter `x` of `f`; `_unann@f`, with no slash, is f's return type.
+fn unann_subject(placeholder: String) -> String =
+  if str_find(placeholder, "/") == -1 then "the return type"
+  else "parameter `" ++ string.substring_after_last(placeholder, "/") ++ "`"
+
+# A type as the program would write it. Module prefixes are dropped, a tuple is
+# `(a, Int)` rather than its internal head `Tuple2`, and a variable no signature
+# named prints as `_`.
+fn te_display(te: ast.TypeExpr) -> String =
+  match te with
+  | ast.TypeName n -> if is_unnamed(n) then "_" else string.substring_after_last(n, ".")
+  | ast.TypeApply base arg -> te_display(base) ++ " " ++ te_display_atom(arg)
+  | ast.TupleType items -> "(" ++ string.join(", ", list_map(te_display, items)) ++ ")"
+  | ast.TypeArrow param ret _ _ -> te_display_atom(param) ++ " -> " ++ te_display(ret)
+  # A thunk or effect type in a context position: its head (`Fn`, `Eff`) still names it.
+  | _ -> type_expr_head_name(te)
+
+fn te_display_atom(te: ast.TypeExpr) -> String =
+  match te with
+  | ast.TypeApply _ _ -> "(" ++ te_display(te) ++ ")"
+  | ast.TypeArrow _ _ _ _ -> "(" ++ te_display(te) ++ ")"
+  | _ -> te_display(te)
 
 fn dict_has(key: String, d: Dict v) -> Bool =
   match dict_get(key, d) with
@@ -324,7 +412,7 @@ fn dict_has(key: String, d: Dict v) -> Bool =
 # fwd_keys is the set of constraint_keys the enclosing function forwards (its
 # where-clause constraints, super-expanded) — built exactly as lowering's
 # build_hidden_for_constraints keys ctx_fwd, so the two agree.
-fn produce_evidence(c: ast.TypeConstraint, fwd_keys: Dict Bool, tables: Tables) -> typed_ast.Evidence =
+fn produce_evidence(c: ast.TypeConstraint, fwd_keys: Forwarded, tables: Tables) -> typed_ast.Evidence =
   match c with
   | ast.TypeConstraint class_name type_args ->
       match type_args with
@@ -342,10 +430,10 @@ fn produce_one_class(
   eff_class: String,
   head_arg: ast.TypeExpr,
   type_args: List ast.TypeExpr,
-  fwd_keys: Dict Bool,
+  fwd_keys: Forwarded,
   tables: Tables
 ) -> typed_ast.Evidence =
-  if dict_has(constraint_key_str(string.substring_after_last(eff_class, "."), type_args), fwd_keys) then
+  if forwards(constraint_key_str(string.substring_after_last(eff_class, "."), type_args), type_args, fwd_keys) then
     typed_ast.EvForward(eff_class, constraint_key_str(string.substring_after_last(eff_class, "."), type_args))
   else if head_is_concrete(head_arg) == false then
     typed_ast.EvForward(eff_class, constraint_key_str(string.substring_after_last(eff_class, "."), type_args))
@@ -357,7 +445,7 @@ fn produce_concrete_evidence(
   class_bare: String,
   type_args: List ast.TypeExpr,
   head_arg: ast.TypeExpr,
-  fwd_keys: Dict Bool,
+  fwd_keys: Forwarded,
   tables: Tables
 ) -> typed_ast.Evidence =
   if dict_has(constraint_key_str(class_bare, type_args), tables_exists(tables)) then
@@ -377,7 +465,7 @@ fn produce_instance_evidence(
   eff_class: String,
   key: String,
   type_args: List ast.TypeExpr,
-  fwd_keys: Dict Bool,
+  fwd_keys: Forwarded,
   tables: Tables
 ) -> typed_ast.Evidence =
   match dict_get(key, tables_ctx(tables)) with
@@ -391,10 +479,10 @@ fn produce_instance_evidence(
 # The forwarded-key set for a function/method body: one key per (constraint, super)
 # in its where-clause, computed exactly as lowering's build_hidden_for_constraints
 # keys ctx_fwd (constraint_key_str(after_last_dot(eff_class), type_args)).
-fn build_fwd_keys(constraints: List ast.TypeConstraint, super_map: Dict (List String)) -> Dict Bool =
+fn build_fwd_keys(constraints: List ast.TypeConstraint, super_map: Dict (List String)) -> Forwarded =
   add_fwd_keys(constraints, super_map, dict_empty())
 
-fn add_fwd_keys(constraints: List ast.TypeConstraint, super_map: Dict (List String), acc: Dict Bool) -> Dict Bool =
+fn add_fwd_keys(constraints: List ast.TypeConstraint, super_map: Dict (List String), acc: Forwarded) -> Forwarded =
   match constraints with
   | Nil -> acc
   | Cons c rest ->
@@ -403,12 +491,12 @@ fn add_fwd_keys(constraints: List ast.TypeConstraint, super_map: Dict (List Stri
           add_fwd_keys(rest, super_map,
             add_eff_keys(types.class_with_transitive_supers(class_name, super_map), type_args, acc))
 
-fn add_eff_keys(effs: List String, type_args: List ast.TypeExpr, acc: Dict Bool) -> Dict Bool =
+fn add_eff_keys(effs: List String, type_args: List ast.TypeExpr, acc: Forwarded) -> Forwarded =
   match effs with
   | Nil -> acc
   | Cons eff rest ->
       add_eff_keys(rest, type_args,
-        dict_set(constraint_key_str(string.substring_after_last(eff, "."), type_args), true, acc))
+        dict_set(constraint_key_str(string.substring_after_last(eff, "."), type_args), type_args, acc))
 
 # ---------------------------------------------------------------------------
 # Superclass expansion (ported verbatim from lowering.sprout so the effective-
@@ -527,7 +615,7 @@ fn match_type_var_lists(patterns: List types.Type, actuals: List types.Type, acc
 # method's (substituted) type via the class-method scheme, then reuse
 # produce_one_class for that single class. Non-derivable / non-concrete head →
 # EvUnresolved (lowering falls back to its own eta reconstruction).
-fn method_ref_evidence(method: String, class_name: String, t: types.Type, fwd_keys: Dict Bool, tables: Tables) -> typed_ast.Evidence =
+fn method_ref_evidence(method: String, class_name: String, t: types.Type, fwd_keys: Forwarded, tables: Tables) -> typed_ast.Evidence =
   match mr_eta_class_type(class_name, method, t, t, tables_class_params(tables), tables_env(tables)) with
   | class_type ->
       match mr_first_concrete_head_str(class_type) with
@@ -570,14 +658,14 @@ fn rewrite_method(m: typed_ast.TypedInstanceMethod, inst_constraints: List ast.T
 # lowering's generate_one_instance_fn passes the instance head's dicts, then the
 # method's own.
 fn method_fwd_keys(inst_constraints: List ast.TypeConstraint, method_constraints: List ast.TypeConstraint,
-                   tables: Tables) -> Dict Bool =
+                   tables: Tables) -> Forwarded =
   build_fwd_keys(list_append(inst_constraints, method_constraints), tables_super(tables))
 
 # Structural rebuild that visits the same nodes as check_expr; at each TDict the
 # Evidence field is replaced.  Any node not walked keeps EvUnresolved, which
 # lowering resolves itself — so a missed site degrades to today's behavior, never
 # to a wrong witness. fwd_keys is constant within a body (lambdas add no constraints).
-fn rewrite_expr(e: typed_ast.TypedExpr, fwd_keys: Dict Bool, tables: Tables) -> typed_ast.TypedExpr =
+fn rewrite_expr(e: typed_ast.TypedExpr, fwd_keys: Forwarded, tables: Tables) -> typed_ast.TypedExpr =
   match e with
   | typed_ast.TDict c t pos _ -> typed_ast.TDict(c, t, pos, produce_evidence(c, fwd_keys, tables))
   | typed_ast.TCall callee args t pos ->
@@ -609,17 +697,17 @@ fn rewrite_expr(e: typed_ast.TypedExpr, fwd_keys: Dict Bool, tables: Tables) -> 
       typed_ast.TMethodRef(method, class_name, t, pos, method_ref_evidence(method, class_name, t, fwd_keys, tables))
   | _ -> e
 
-fn rewrite_branch(b: typed_ast.TypedMatchBranch, fwd_keys: Dict Bool, tables: Tables) -> typed_ast.TypedMatchBranch =
+fn rewrite_branch(b: typed_ast.TypedMatchBranch, fwd_keys: Forwarded, tables: Tables) -> typed_ast.TypedMatchBranch =
   match b with
   | typed_ast.TypedMatchBranch pat body -> typed_ast.TypedMatchBranch(pat, rewrite_expr(body, fwd_keys, tables))
 
-fn rewrite_step(s: typed_ast.TypedDoStep, fwd_keys: Dict Bool, tables: Tables) -> typed_ast.TypedDoStep =
+fn rewrite_step(s: typed_ast.TypedDoStep, fwd_keys: Forwarded, tables: Tables) -> typed_ast.TypedDoStep =
   match s with
   | typed_ast.TDoBindStep pat ex -> typed_ast.TDoBindStep(pat, rewrite_expr(ex, fwd_keys, tables))
   | typed_ast.TDoLetStep name ex -> typed_ast.TDoLetStep(name, rewrite_expr(ex, fwd_keys, tables))
   | typed_ast.TDoExprStep ex -> typed_ast.TDoExprStep(rewrite_expr(ex, fwd_keys, tables))
 
-fn rewrite_field(f: typed_ast.TypedRecordField, fwd_keys: Dict Bool, tables: Tables) -> typed_ast.TypedRecordField =
+fn rewrite_field(f: typed_ast.TypedRecordField, fwd_keys: Forwarded, tables: Tables) -> typed_ast.TypedRecordField =
   match f with
   | typed_ast.TypedRecordField name ex -> typed_ast.TypedRecordField(name, rewrite_expr(ex, fwd_keys, tables))
 
@@ -643,8 +731,8 @@ fn check_decls(
 fn check_decl(d: typed_ast.TypedDecl, tables: Tables) -> Maybe(source.SourcePos, String) =
   match d with
   | typed_ast.TFnDecl _ _ _ _ constraints body ->
-      check_expr(body, CoverFrom(build_fwd_keys(constraints, tables_super(tables))), tables)
-  | typed_ast.TLetDecl _ body -> check_expr(body, CoverFrom(dict_empty()), tables)
+      check_expr(body, CoverFrom (InFn, build_fwd_keys(constraints, tables_super(tables))), tables)
+  | typed_ast.TLetDecl _ body -> check_expr(body, CoverFrom (InFn, dict_empty()), tables)
   | typed_ast.TInstanceDecl _ inst_constraints methods -> check_methods(inst_constraints, methods, tables)
   | typed_ast.TExternFnDecl _ _ _ _ -> Nothing
   | typed_ast.TPassThrough _ -> Nothing
@@ -659,7 +747,7 @@ fn check_methods(
   | Cons m rest ->
       match m with
       | typed_ast.TypedInstanceMethod _ _ _ _ method_constraints body ->
-          match check_expr(body, CoverFrom(method_fwd_keys(inst_constraints, method_constraints, tables)), tables) with
+          match check_expr(body, CoverFrom (InInstanceMethod, method_fwd_keys(inst_constraints, method_constraints, tables)), tables) with
           | Just e -> Just(e)
           | Nothing -> check_methods(inst_constraints, rest, tables)
 

@@ -1,0 +1,1 @@
+the `Eq` instance for `Maybe b` needs `Eq b`, which nothing in scope supplies

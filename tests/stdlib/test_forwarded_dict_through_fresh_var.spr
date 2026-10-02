@@ -53,6 +53,51 @@ fn two_vars(x: a, ya: Maybe a, z: b, yb: Maybe b) -> (Bool, Bool) where Eq a, Eq
 # A forwarded compound constraint carries its own inner dict.
 fn compound(y: Maybe a, z: Maybe a) -> Bool where Eq (Maybe a) = y == z
 
+# Linked to `a` only when the lambda is applied, after its `==` was checked: the
+# dictionary has to be named from the declaration's final substitution.
+fn applied_later(x: a, z: a) -> Bool where Eq a = (\y -> \w -> Just(y) == Just(w))(x)(z)
+
+fn let_lambda(x: a) -> Bool where Eq a =
+  let g = \z -> Just(z) == Just(z)
+  in g(x)
+
+fn let_curried(x: a, z: a) -> Bool where Eq a =
+  let f = \m -> \w -> m == Just(w)
+  in f(Just(x))(z)
+
+fn tuple_lambda(x: a, z: a) -> Bool where Eq a =
+  let cmp = \ (l, r) -> Just(l) == Just(r)
+  in cmp(x, z)
+
+fn count_same(pairs: List (a, a)) -> Int where Eq a =
+  let same = \p -> match p with | (l, r) -> Just(l) == Just(r)
+  in list_length(list_filter(same, pairs))
+
+# The same late link in a function that generalizes nothing.
+fn mono_late() -> Bool =
+  let g = \z -> Just(z) == Just(z)
+  in g(3)
+
+# An unannotated parameter pinned later in the body.
+fn pinned_later(x) = (Just(x) == Just(x)) && x == 3
+
+# A callee whose own constraint is compound.
+fn same_maybe(m: Maybe t, n: Maybe t) -> Bool where Eq (Maybe t) = m == n
+
+fn via_compound_ctor(x: a, y: a) -> Bool where Eq a = same_maybe(Just(x), Just(y))
+
+fn via_compound_param(x: Maybe a, y: Maybe a) -> Bool where Eq a = same_maybe(x, y)
+
+# `where Eq (Maybe a)` supplies `Eq (Maybe a)` only — not `Maybe b`, not `Maybe Int`.
+fn other_var(y: Maybe a, p: Maybe b, q: Maybe b) -> Bool where Eq (Maybe a), Eq b = p == q
+
+fn concrete_beside(y: Maybe a, n: Int) -> Bool where Eq (Maybe a) = Just(n) == Just(n + 1)
+
+# A compound `where` on a type this module declares still forwards whole.
+type Wrapped a deriving (Eq) = Wrapped a
+
+fn wrapped_eq(x: Wrapped a, y: Wrapped a) -> Bool where Eq (Wrapped a) = x == y
+
 fn main() -> Unit !{IO} =
   run_suite("forwarded_dict_through_fresh_var", [
     check_eq("issue repro: found", carried(kit, Red), true),
@@ -73,5 +118,20 @@ fn main() -> Unit !{IO} =
     check_eq("ToString through Just, inner dict used", shown(Loose(1)), "Just(loose)"),
     check_eq("two variables keep their own dicts", two_vars(Loose(1), Just (Loose(2)), 3, Just(4)),
       (true, false)),
-    check_eq("forwarded compound constraint", compound(Just(3), Just(3)), true)
+    check_eq("forwarded compound constraint", compound(Just(3), Just(3)), true),
+    check_eq("lambda applied later", applied_later(3, 4), false),
+    check_eq("lambda applied later, inner dict used", applied_later(Loose(1), Loose(2)), true),
+    check_eq("let-bound lambda", let_lambda(Loose(1)), true),
+    check_eq("let-bound curried lambda", let_curried(3, 4), false),
+    check_eq("let-bound curried lambda, inner dict used", let_curried(Loose(1), Loose(2)), true),
+    check_eq("two-parameter lambda", tuple_lambda(Loose(1), Loose(2)), true),
+    check_eq("lambda passed to a filter", count_same([(1, 1), (2, 3)]), 1),
+    check_eq("late link, nothing generalized", mono_late(), true),
+    check_eq("unannotated parameter pinned later", pinned_later(3), true),
+    check_eq("compound callee, ctor args", via_compound_ctor(3, 4), false),
+    check_eq("compound callee, inner dict used", via_compound_ctor(Loose(1), Loose(2)), true),
+    check_eq("compound callee, params passed through", via_compound_param(Just (Loose(1)), Just (Loose(2))), true),
+    check_eq("compound where does not cover another variable", other_var(Just (Loose(1)), Just(1), Just(2)), false),
+    check_eq("compound where does not cover a concrete type", concrete_beside(Just (Loose(1)), 3), false),
+    check_eq("compound where on a module type forwards", wrapped_eq(Wrapped (Loose(1)), Wrapped (Loose(2))), true)
   ])

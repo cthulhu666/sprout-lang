@@ -1,1 +1,1 @@
-the `ToString` instance for `Maybe` needs `ToString a`, which nothing in scope supplies
+the `ToString` instance for `Maybe a` needs `ToString a`, which nothing in scope supplies — add it to the instance head's `where`

@@ -2201,7 +2201,8 @@ Effect note for v0:
     and general pattern bindings are not part of v0. A tuple pattern binds the
     right-hand side's element types positionally; the elements are not unified with
     one another, so `(a, n) = (x * 1.5, 4)` binds `a : Double` and `n : Int`.
-15. **Signature rigidity.** A type variable *written* in a function's signature is
+15. **Signature rigidity.** A type variable *written* in a function's or an instance
+    method's signature is
     universally quantified: the caller, not the body, chooses what it stands for.
     The body must therefore leave it abstract, and a body that constrains it is a
     compile error — "Signature too general for its body". A written variable is
@@ -2919,17 +2920,27 @@ Without one, the call is rejected where it is written:
 
 ```sprout
 fn same(y: Maybe a, x: a) -> Bool = y == Just(x)
-# the `Eq` instance for `Maybe` needs `Eq a`, which nothing in scope supplies
+# the `Eq` instance for `Maybe a` needs `Eq a`, which nothing in scope supplies
 # — add `where Eq a`
 
 fn same(y: Maybe a, x: a) -> Bool where Eq a = y == Just(x)   # accepted
 ```
 
-This holds even when the inner comparison can never run, as in `m == Nothing`:
-the instance is chosen when the program is checked, not when the comparison
-runs.  A forwarded compound constraint arrives whole — `where Eq (Maybe a)`
-supplies `Eq (Maybe a)`, context included.  As above, a variable the declaration
-does not generalize is unaffected.
+This holds however the variable reaches the call — through a lambda parameter
+applied later, or through a function whose own constraint is compound (`where
+Eq (Maybe t)`) — and even when the inner comparison can never run, as in
+`m == Nothing`: the instance is chosen when the program is checked, not when the
+comparison runs.
+
+A forwarded compound constraint arrives whole: `where Eq (Maybe a)` supplies
+`Eq (Maybe a)`, context included — and only that.  It does not supply
+`Eq (Maybe b)` or `Eq (Maybe Int)`; those take the instance and need their own
+context.  In an instance method the context comes from the instance head, under
+the head's own variable names.  An unannotated parameter has no variable to
+constrain until it is annotated, and a context at an applied variable
+(`Eq (f a)`) cannot be supplied by a `where` clause today; both are rejected, and
+the message says what to do instead.  As above, a variable the declaration does
+not generalize is unaffected.
 
 ### `ToString` instances
 

@@ -1,0 +1,4 @@
+# A tuple instance is named as the type is written, not by its internal head `Tuple2`.
+fn f(y: (a, Int), x: a) -> Bool = y == (x, 1)
+
+fn main() -> Unit !{IO} = print(to_string(f((3, 1), 3)))
