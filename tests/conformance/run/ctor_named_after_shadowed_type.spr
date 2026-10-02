@@ -1,0 +1,10 @@
+# A local class named `Result` hides the prelude type: bare `Result` is the class
+# here, so a constructor named `Result` names no type in scope (issue #422).
+class Result a
+  fn res(x: a) -> Int
+
+type Foo = Result Int
+
+fn main() -> Unit !{IO} =
+  match Result(3) with
+  | Result n -> print(to_string(n))

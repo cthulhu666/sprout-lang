@@ -179,5 +179,16 @@ else
   fail=1
 fi
 
+# A clash inside an IMPORTED module is still reported, but without its position: a
+# line:col from demo.clashdep would be read against the entry file.
+dep="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_dep_ctor_clash.spr" 2>&1)"
+if echo "$dep" | grep -q '^ERROR: bundle: type `demo.clashdep.Bad` has one constructor'; then
+  echo "PASS dependency clash: reported by module, with no position from the other file"
+else
+  echo "FAIL dependency clash: expected a position-less error naming demo.clashdep.Bad"
+  errors "$dep" | head -3
+  fail=1
+fi
+
 [ "$fail" -eq 0 ] && echo "==> package-resolution gate: OK" || echo "==> package-resolution gate: FAILED"
 exit $fail

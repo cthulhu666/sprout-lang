@@ -1,7 +1,8 @@
 module demo.tokbar
 
 # One constructor named like a type of a `no_prelude` entry that imports this
-# module. That type is not in scope here, so this does not clash (issue #422).
+# module. This module neither declares nor imports that type, so this does not
+# clash (issue #422), though the name leaks in bare (BACKLOG).
 export type Bar = Token Int
 
 export let bar_value: Int = 2

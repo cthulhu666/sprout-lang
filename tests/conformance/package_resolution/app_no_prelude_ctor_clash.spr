@@ -2,7 +2,7 @@ import demo.tokbar (bar_value)
 no_prelude
 
 # A `no_prelude` entry keeps the empty module name the prelude has. Its `Token` is
-# in scope here, not in demo.tokbar, so demo.tokbar's constructor `Token` is legal.
+# declared here, not in demo.tokbar, so demo.tokbar's constructor `Token` is legal.
 # The import comes first: one after `no_prelude` is dropped (BACKLOG).
 type Token = | Tok Int
 
