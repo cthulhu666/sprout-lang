@@ -1,0 +1,25 @@
+# A compound constraint whose argument is still open when the call is checked, and
+# bound only later in the body: inside a lambda, and through an existential's witness.
+# Naming it `_` at the call left the element dictionary empty, so these aborted.
+module main
+
+type Showy = | Showy (any ToString)
+
+fn f(x: a) -> String where ToString (List a) = to_string([x])
+
+fn outer(x: a) -> String where ToString (List a) =
+  let g = \z -> f(z)
+  in g(x)
+
+fn from_element(x: a) -> String where ToString a =
+  let g = \z -> f(z)
+  in g(x)
+
+fn show_s(d: Showy) -> String =
+  match d with
+  | Showy s -> f(s)
+
+fn main() -> Unit !{IO} = do
+  print(outer(1))
+  print(from_element("s"))
+  print(show_s(Showy(5)))
