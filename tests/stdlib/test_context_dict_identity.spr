@@ -105,6 +105,29 @@ fn bag_late_list(b: Bag) -> Bool =
   match b with
   | Bag p q -> (\z -> \w -> [z] == [w])(p)(q)
 
+# The same, with a later pattern binding the arm's names again.
+type Side = | LeftSide (any ToString) | RightSide (any ToString)
+
+fn side_late(t: Side) -> String =
+  match t with
+  | LeftSide v -> (\z -> to_string(Just(z)))(v)
+  | RightSide v -> to_string(v)
+
+fn bag_then_maybe(b: Bag, m: Maybe Int) -> Bool =
+  let late = (match b with | Bag p q -> (\z -> \w -> Just(z) == Just(w))(p)(q))
+  in
+    match m with
+    | Just p -> late && p > 0
+    | Nothing -> late
+
+fn side_nested(a: Side, b: Side) -> String =
+  match a with
+  | LeftSide v -> (\u -> to_string(Just(u)))(v) ++ "/" ++ side_late(b)
+  | RightSide v ->
+      match b with
+      | LeftSide v -> to_string(Just(v))
+      | RightSide v -> to_string(v)
+
 # A compound instance context reaches the method under the head's variable. A method
 # that renames it is rejected (type_error/instance_method_renamed_head_var).
 class Same t
@@ -139,6 +162,10 @@ fn main() -> Unit !{IO} =
     check_eq("existential through a late lambda", bag_late(Bag(3, 3)), true),
     check_eq("existential through a late lambda, inner dict used", bag_late(Bag (Never(1), Never(1))), false),
     check_eq("existential through a late lambda, list", bag_late_list(Bag("a", "a")), true),
+    check_eq("late existential, name reused by the next arm", side_late(LeftSide(5)), "Just(5)"),
+    check_eq("late existential, name reused by a later match", bag_then_maybe(Bag (Never(1), Never(1)), Just(1)), false),
+    check_eq("late existential, name reused by a later match, equal", bag_then_maybe(Bag(3, 3), Just(1)), true),
+    check_eq("late existential, name reused by an inner arm", side_nested(LeftSide(1), RightSide("s")), "Just(1)/s"),
     check_eq("compound instance context", same(Box(1), Box(1)), true),
     check_eq("compound instance context, inner dict used", same(Box (Never(1)), Box (Never(1))), false)
   ])

@@ -11,6 +11,8 @@ import stdlib.fs as fs
 # dictionary on these values — Int's `to_string` on a String pointer. As a hole it is
 # the poison thunk, which fails loudly if reached. Making these exact needs the
 # constraint's written argument at the call (BACKLOG); this pins the loud failure.
+# Not covered, because it does not hold: a caller whose own `where` has the guess's
+# head (`where ToString (c, Int)`) gets the guess forwarded to that `where`.
 
 let nested_src: String =
   `type Box a deriving (ToString) = Box a

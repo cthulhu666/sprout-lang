@@ -2933,7 +2933,8 @@ Eq (Maybe t)`) — and even when the inner comparison can never run, as in
 comparison runs.  Not yet for a callee constraint nested past one constructor or over
 a tuple (`where ToString (Box (List b))`, `where ToString (b, Int)`): when the
 argument's type holds a variable, the call compiles to a dictionary that panics if
-used (BACKLOG).
+used — or, when the caller's own `where` has the same head, to that `where`'s
+dictionary, which is wrong if it belongs to another variable (BACKLOG).
 
 A forwarded compound constraint arrives whole: `where Eq (Maybe a)` supplies
 `Eq (Maybe a)`, context included — and only that.  It does not supply

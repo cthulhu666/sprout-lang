@@ -547,7 +547,19 @@ variables stay `_`. A named guess passed `resolve` as forwarded and ran the othe
 argument's dictionary; a hole lowers to the poison thunk, which fails loudly
 (`tests/stdlib/compiler/test_guessed_dict_stays_hole.spr`). The post-pass never
 rebuilds from a scan: a token with no head or no arguments keeps its hole
-(`rebuilt_constrained_dict`).
+(`rebuilt_constrained_dict`). One gap remains: `resolve.forwards` reads a `_` as
+no conflict, so when the caller's own `where` has the guess's head (`where ToString
+(c, Int)` against a guessed `ToString (_, Int)`) the guess is forwarded to it. That
+is right when the caller has one such variable and silently wrong when the guess
+came from another; refusing it would break the first to fix the second. The fix is
+an exact dict (BACKLOG, nested or tuple callee constraint).
+
+**An unpacked existential is found by position.** `infer_pattern` keeps a pattern
+variable's type under its name and under its position (`bind_pattern_var`). The
+post-pass re-seeds an arm's existential givens from the final substitution, where a
+later pattern binding the same name has overwritten the name; the position is still
+this arm's. A dictionary rebuilt for the skolem then takes the arm's given
+(`skolem_given_tdict`): a skolem has no instance.
 
 **A deferred dictionary keeps its slot.** Both the post-pass
 (`take_dict_for_class`) and `verify_dispatch` (`take_by_class`) pair a call's
