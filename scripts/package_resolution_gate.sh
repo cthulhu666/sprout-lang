@@ -167,5 +167,17 @@ else
   fail=1
 fi
 
+# The one-constructor clash (#422) reads the prelude's types as in scope everywhere.
+# A `no_prelude` entry has the prelude's empty module name, so its own types must
+# not count for a module it imports. Needs a second module, hence here.
+npc="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_no_prelude_ctor_clash.spr" 2>&1)"
+if echo "$npc" | grep -q '^OK$' && ! errors "$npc" >/dev/null; then
+  echo "PASS no_prelude: an entry's own type does not clash with an imported constructor"
+else
+  echo "FAIL no_prelude: demo.tokbar's constructor \`Token\` was judged against the entry's types"
+  errors "$npc" | head -3
+  fail=1
+fi
+
 [ "$fail" -eq 0 ] && echo "==> package-resolution gate: OK" || echo "==> package-resolution gate: FAILED"
 exit $fail

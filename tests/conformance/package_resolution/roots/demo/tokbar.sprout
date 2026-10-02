@@ -1,0 +1,7 @@
+module demo.tokbar
+
+# One constructor named like a type of a `no_prelude` entry that imports this
+# module. That type is not in scope here, so this does not clash (issue #422).
+export type Bar = Token Int
+
+export let bar_value: Int = 2

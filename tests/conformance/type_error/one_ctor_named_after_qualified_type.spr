@@ -1,0 +1,6 @@
+# Spelled through an import alias, the misread alias clashes the same way.
+import stdlib.json as json
+
+type Doc = json.Json
+
+fn main() -> Unit !{IO} = print("unreachable")

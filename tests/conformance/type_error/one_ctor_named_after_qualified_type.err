@@ -1,0 +1,1 @@
+type `Doc` has one constructor, `json.Json`, which is also the name of a type in scope

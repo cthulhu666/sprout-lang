@@ -1,0 +1,5 @@
+# The suggested fix keeps the type's parameters: `type alias Box = List a` would
+# leave `a` unbound.
+type Box a = List a
+
+fn main() -> Unit !{IO} = print("unreachable")
