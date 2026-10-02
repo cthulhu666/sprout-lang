@@ -1,0 +1,1 @@
+type `Opt` has one constructor, `Maybe`, which is also the name of a type in scope

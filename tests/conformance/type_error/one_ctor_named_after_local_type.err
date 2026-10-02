@@ -1,0 +1,1 @@
+type `Owner` has one constructor, `UserId`, which is also the name of a type in scope

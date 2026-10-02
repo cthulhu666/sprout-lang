@@ -1,0 +1,1 @@
+type `Pairs` has one constructor, `List`, which is also the name of a type in scope: this declares a new sum type, not an alias

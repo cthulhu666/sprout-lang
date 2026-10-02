@@ -1,0 +1,6 @@
+# The clashing type is this module's own, not a prelude one.
+type UserId = | MkUserId Int
+
+type Owner = UserId Int
+
+fn main() -> Unit !{IO} = print("unreachable")

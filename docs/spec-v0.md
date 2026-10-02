@@ -943,6 +943,23 @@ Forward references between mutually recursive ADTs within the same module are
 allowed — validation runs after all type names in the module have been
 registered.
 
+**A one-constructor type may not name its constructor after another type in
+scope.** Without `alias`, `type Pairs = List (String, Int)` declares a new type
+with one constructor named `List` taking a tuple. It reads as an alias (§5.6.2)
+and is not one, so it is a compile error when the type has **exactly one**
+constructor whose name differs from the type's own and is a type usable
+unqualified in that module: a built-in type, a prelude type, a type of the same
+module, or one imported by name:
+
+```
+type `Pairs` has one constructor, `List`, which is also the name of a type in scope: this declares a new sum type, not an alias. Write `type alias Pairs = …` for an alias or `wrap Pairs = …` for a distinct type; to keep the sum type, rename the constructor
+```
+
+A leading `|` does not exempt it. A constructor named after its own type
+(`type Box = | Box Int`), a type with several constructors (`| JsonArray
+JsonArray` in `stdlib/json.sprout`), and a type another module declares but this
+one does not import by name are all unaffected.
+
 **Positions validated in this version:** `TypeDecl` constructor fields,
 `RecordDecl` field types, `AliasDecl` RHS, `WrapDecl` inner type.  `ClassDecl`
 method signatures, `InstanceDecl` constraint types, and `FnDecl` param/return
@@ -1157,6 +1174,9 @@ A `type alias` introduces a **transparent name for a type**. It declares no new
 type: every use is replaced by the right-hand side, so an alias and the type it
 names are the same type in every position — a signature, a record or
 constructor field, an annotation inside a body.
+
+The `alias` keyword is what makes it one. `type Names = List String` declares an
+ADT with a constructor named `List`, which is rejected (§5.6).
 
 An alias may take parameters. `type alias F a b = T` is applied as `F X Y`, and
 the use expands to `T` with `a` and `b` replaced by `X` and `Y`. The body may be

@@ -1,0 +1,4 @@
+# The bundler's scope check reaches a `wrap`'s inner type, not only signatures.
+wrap Age = Nope
+
+fn main() -> Unit !{IO} = print("unreachable")

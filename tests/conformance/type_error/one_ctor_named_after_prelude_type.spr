@@ -1,0 +1,8 @@
+# Issue #422. Without `alias` this declares a sum type whose one constructor is
+# named `List`, and the mistake surfaced only as `Pairs vs List (String, Int)` at
+# the call. A one-constructor type named after a type in scope is rejected here.
+type Pairs = List(String, Int)
+
+fn total(ps: Pairs) -> Int = 0
+
+fn main() -> Unit !{IO} = print(to_string(total([("a", 1)])))

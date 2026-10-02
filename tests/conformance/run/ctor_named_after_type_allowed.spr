@@ -1,0 +1,33 @@
+# Constructors that share a type's name and stay legal (issue #422 rejects only a
+# ONE-constructor type whose constructor names a type in scope).
+import stdlib.json as json
+
+# More than one constructor: the shape stdlib/json.sprout uses (`| JsonArray JsonArray`).
+type Shape =
+  | List (List Int)
+  | Empty
+
+# A constructor named after its own type.
+type Box = | Box Int
+
+# `JsonArray` is a type of stdlib.json, but it is not in scope bare here.
+type Holder = | JsonArray Int
+
+fn shape_size(s: Shape) -> Int =
+  match s with
+  | List xs -> list_length(xs)
+  | Empty -> 0
+
+fn unbox(b: Box) -> Int =
+  match b with
+  | Box n -> n
+
+fn held(h: Holder) -> Int =
+  match h with
+  | JsonArray n -> n
+
+fn main() -> Unit !{IO} =
+  do
+    print(to_string(shape_size(List([1, 2, 3]))))
+    print(to_string(unbox(Box(4))))
+    print(to_string(held(JsonArray(5))))

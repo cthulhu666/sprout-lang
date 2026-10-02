@@ -2731,3 +2731,9 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   substitution silently works for ADTs and breaks for records. Three sites hit this; the invariant
   is "resolve constraint/dispatch argument types via `apply_subst(s3, …)`, not `typed_expr_type`
   alone", and a written rule stops the next one at review time.
+- [ ] `P3` **`docs/compiler-internals.md` still says the REPL / LSP skip the bundler.**
+  §"Whole-program passes" says `compile_source_with_cache` checks against an env of schemes. It
+  bundles now
+  (`compile_source_at_with_cache_roots`), so a reader puts a scope check in `infer`, where names are
+  short, instead of the bundler. Only `type_driver` and `module_loader.load_module` still take the
+  env path. Found while fixing #422.

@@ -1,0 +1,5 @@
+# A leading `|` does not opt out. The parser drops it, and the name misleads a
+# reader either way: rename the constructor.
+type Opt = | Maybe Int
+
+fn main() -> Unit !{IO} = print("unreachable")
