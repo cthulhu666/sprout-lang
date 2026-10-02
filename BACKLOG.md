@@ -2725,13 +2725,43 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   NAME. Master too. Fix: in `check_instance_method`, unify the method's declared type with the
   class method's scheme at the head, head variables rigid; that also makes a renamed head
   variable (`type_error/instance_method_renamed_head_var`) a declaration-site error.
-- [ ] `P3` **A nested or tuple callee constraint gets a guessed dictionary, not the exact one.**
-  `where ToString (Box (List b))` or `where ToString (b, Int)` carries no variable a call can
-  read, so `infer`'s scan takes the first argument with that head. When the argument's type holds
-  a variable the guess stays a hole and lowers to the poison thunk
-  (`tests/stdlib/compiler/test_guessed_dict_stays_hole.spr`): a wrong pick fails loudly, but so
-  does a right one. Fix: keep the constraint's written arguments on the callee's scheme and
-  match them against the call's argument types.
+- [ ] `P2` **A nested or tuple callee constraint gets a guessed dictionary, not the exact one.**
+  `where ToString (Box (List b))` or `where ToString (b, Int)` leaves `#any` in the token, so
+  `infer`'s scan takes the first argument with that head and writes its variables as `_`. Under a
+  caller `where` with another head the guess stays a hole and panics if used, right pick or not
+  (`tests/stdlib/compiler/test_guessed_dict_stays_hole.spr`). Under one with the same head,
+  `resolve.forwards` forwards it: right with one such variable, silently wrong with two
+  (`pt((p, 1), (q, 2))` under `where ToString (c, Int), ToString d` prints a pointer). Refusing
+  the forward breaks the first case. Fix: encode the written arguments in the token
+  (`iface_codec` too) and build the dict from them, as one-level heads already are.
+- [ ] `P2` **A tuple-headed `where` passes the wrong dictionary.** `fn direct(p: c) -> String
+  where ToString (c, Int) = to_string((p, 1))` prints a pointer for `direct(1)`; master too.
+  `where ToString (Box (List c))` works, so it is tuple-specific. Not yet located. No test or
+  corpus code has a tuple-headed `where`.
+- [ ] `P3` **A deferred constraint at an applied variable (`$f Int`) gets no slot.**
+  `resolve_precise_head` gives a bare variable a hole (`hole_tdict`) but nothing to an applied
+  one, so the next same-class dict shifts into its slot: `let g = \z -> both(ident(z), 5) in
+  g(xs)`, with `ident(x: f a) -> f a` and `both where ToString a, ToString b`, is rejected
+  ("`ToString a` resolved to `ToString Int`"). Master too. Fix: a hole there as well.
+- [ ] `P3` **A deferred constraint whose variable becomes a function type panics at run time.**
+  `(\z -> same(z, z))(\n -> n + 1)` with `same where Eq a` compiles to the poison thunk; spec
+  §8.5 says it is rejected with "No instance of C for a function type". Neither
+  `constraint_var_dict` nor the forward fills the hole, and `resolve` skips a `_` head. Master
+  printed `true`. Fix: report a hole whose variable resolved to a function type.
+- [ ] `P3` **In a recursive group, a parameter another member pins is called generic.** In
+  `fn a_fn(n: Int, x) = … Just(x) == Just(x) … b_fn(n - 1, x)`, `b_fn`'s `y == 3` makes `x` an
+  `Int`, yet `resolve` asks for an annotation and a `where`. Each member's post-pass and
+  placeholder naming read its own substitution (`infer.sprout`, per-member `s2`), not the
+  group's. Declaring `b_fn` first compiles. Master compiled it to the poison thunk.
+- [ ] `P3` **An instance method's unannotated parameter gets the `fn` remedy.** In `instance
+  ToString (Box a) where ToString a`, `fn to_string(b) = … to_string(Just(v))` is told to name
+  the variable and add a `where`; the fix that works is `b: Box a`. `resolve.unsupplied_remedy`
+  checks the placeholder before the `DeclKind`. Fix: in an instance method, name the head.
+- [ ] `P3` **A `where` headed by a type alias is keyed by the alias.** `type alias M a = Maybe
+  a` with `fn f(y: M a, z: M a) -> Bool where Eq (M a) = y == z` is rejected ("add `where Eq
+  a`"): `resolve.add_eff_keys` keys it `Eq_M` from the written head while the use site looks up
+  `Eq_Maybe`. An alias below the head (`Eq (List (Opt a))`) works. Master failed with an
+  internal under-application error. Fix: expand the head before building the key.
 - [ ] `P2` **Wire in the dead `assert_resolved_typed_expr` soundness pass.** `infer.sprout` has a
   pass flagging free TVars in the final typed AST that is **never called**. **Investigate first
   whether it catches this class:** the record dispatch bugs poisoned the *injected dict evidence*

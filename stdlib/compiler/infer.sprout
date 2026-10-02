@@ -3940,15 +3940,15 @@ fn resolve_precise_head(
       # nothing instead shifted the next same-class dict into this slot, because the
       # post-pass pairs dicts with constraints by class (take_dict_for_class).
       #
-      # Anything else — a function type, a variable applied to arguments — is no
-      # forward: nothing is injected, and the caller rejects a function type
-      # (concrete_unsatisfiable_head).
+      # Anything else gets nothing. The caller rejects a function type
+      # (concrete_unsatisfiable_head); a variable applied to arguments is not rejected,
+      # and the next same-class dict still shifts into its slot (BACKLOG).
       let resolved = unifier.apply_subst(s3, fresh_t)
       in
         match (forwarded_tdict_for_tyvar(env, s3, class_name, resolved, pos), resolved) with
         | (Just tdict, _) -> (Just(tdict), "precise_tyvar_fwd")
         | (Nothing, types.TVar _) -> (Just(hole_tdict(class_name, pos)), "precise_tyvar_deferred")
-        | (Nothing, _) -> (Nothing, "precise_unsatisfiable")
+        | (Nothing, _) -> (Nothing, "precise_not_a_variable")
 
 # A dictionary the post-pass must still decide: a slot of its own, every argument `_`.
 # Never filled, it lowers to the poison thunk, which fails loudly if reached.
@@ -5318,8 +5318,8 @@ export fn infer_pattern(
   match pat with
   | ast.WildcardPattern _ ->
       InferOk(typed_ast.TUnit(expected, no_pos()), subst, eff_subst, types.EffectPure)
-  | ast.VarPattern name _ ->
-      InferOk(typed_ast.TUnit(expected, no_pos()), dict_set(name, expected, subst), eff_subst, types.EffectPure)
+  | ast.VarPattern name pos ->
+      InferOk(typed_ast.TUnit(expected, no_pos()), bind_pattern_var(name, pos, expected, subst), eff_subst, types.EffectPure)
   | ast.IntPattern _ pos ->
       check_pattern_type(pos, subst, eff_subst, expected, types.type_int(), "Int")
   | ast.BoolPattern _ pos ->
@@ -5334,6 +5334,23 @@ export fn infer_pattern(
       infer_tuple_pattern(pos, state, env, subst, eff_subst, expected, pats)
   | ast.ConstructorPattern name fields pos ->
       infer_ctor_pattern(pos, state, env, subst, eff_subst, expected, name, fields)
+
+# A pattern variable's type is kept under its name, which the next pattern binding that
+# name overwrites, and under its position, which stays this binding's. The post-pass
+# sees only the final substitution, so it reads the position (pattern_var_type). No
+# type variable's name starts with `@`, and nothing walks the substitution's keys, so
+# the `@pat:` key binds nothing a type can mention.
+fn bind_pattern_var(name: String, pos: source.SourcePos, t: types.Type,
+                    subst: Dict types.Type) -> Dict types.Type =
+  dict_set(pattern_var_key(name, pos), t, dict_set(name, t, subst))
+
+fn pattern_var_key(name: String, pos: source.SourcePos) -> String =
+  "@pat:" ++ name ++ ":" ++ int_to_string(pos.index)
+
+fn pattern_var_type(name: String, pos: source.SourcePos, subst: Dict types.Type) -> types.Type =
+  match dict_get(pattern_var_key(name, pos), subst) with
+  | Just t -> unifier.apply_subst(subst, t)
+  | Nothing -> unifier.apply_subst(subst, types.TVar(types.tyvar_id(name)))
 
 fn check_pattern_type(
   pos: source.SourcePos,
@@ -5539,8 +5556,8 @@ fn seed_existential_givens(
 
 fn seed_one_given(var: String, class_name: String, param_types: List types.Type, fields: List ast.Pattern, subst: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
   match field_and_declared_for_var(param_types, fields, var) with
-  | Just (ast.VarPattern vname _, declared_pt) ->
-      match skolem_for_var_in(declared_pt, unifier.apply_subst(subst, types.TVar(types.tyvar_id(vname))), var) with
+  | Just (ast.VarPattern vname vpos, declared_pt) ->
+      match skolem_for_var_in(declared_pt, pattern_var_type(vname, vpos, subst), var) with
       | Just sk -> seed_given_for_skolem(class_name, vname, sk, env)
       | Nothing -> env
   | _ -> env
@@ -9947,11 +9964,19 @@ fn constraint_var_dict(class_name: String, head_token: String, fn_name: String,
                         decode_constraint_var(head_token, fn_name, env)) else Nothing
   in
     match concrete_type_str(concrete) with
-    | Just head_str -> instance_dict_for(class_name, head_str, concrete, subst, env, pos)
+    # An unpacked existential has no instance; its arm's given supplies the dict.
+    | Just head_str ->
+        if types.is_skolem_name(head_str) then skolem_given_tdict(class_name, head_str, env, pos)
+        else instance_dict_for(class_name, head_str, concrete, subst, env, pos)
     # Still a variable once the call's type is final: a forward, to whichever declared
     # constraint the substitution identifies it with — never the first marker of the
     # class, which is another variable's whenever two constraints share one.
     | Nothing -> forwarded_tdict_for_tyvar(env, subst, class_name, unifier.apply_subst(subst, concrete), pos)
+
+fn skolem_given_tdict(class_name: String, skolem: String, env: Dict types.Scheme,
+                      pos: source.SourcePos) -> Maybe typed_ast.TypedExpr =
+  let Just fwd_scheme = dict_get("@fwd:" ++ skolem ++ ":" ++ class_name, env) else Nothing
+  in fwd_scheme_to_tdict(fwd_scheme, class_name, pos)
 
 fn instance_dict_for(class_name: String, head_str: String, t: types.Type, subst: Dict types.Type,
                      env: Dict types.Scheme, pos: source.SourcePos) -> Maybe typed_ast.TypedExpr =
@@ -10418,7 +10443,8 @@ fn resolve_dispatch_typed_branches(env: Dict types.Scheme, subst: Dict types.Typ
   | Cons h t ->
       match h with
       # The arm's existential givens are seeded again from the final substitution, which
-      # still binds the pattern's variables to their skolems: a dictionary rebuilt in the
+      # still binds each pattern variable to its skolem by position (bind_pattern_var),
+      # even after a later pattern reuses the name: a dictionary rebuilt in the
       # arm then names the skolem `$ex_<var>`, the slot lowering forwards per arm. The
       # declaration-level env does not carry the givens inference saw inside the arm.
       | typed_ast.TypedMatchBranch pat body ->
