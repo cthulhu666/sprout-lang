@@ -542,10 +542,10 @@ fn scheme_from_fn_parts(
 # part that matters — it is NOT added to the scheme's quantified list, so
 # `instantiate` leaves it alone and every use of the declaration sees the SAME
 # variable. Pinning it is therefore a commitment, not a per-call guess.
-fn unann_ret_var(owner: String) -> String = "_unann@" ++ owner
+fn unann_ret_var(owner: String) -> String = types.unann_prefix ++ owner
 
 fn unann_param_var(owner: String, param: String) -> String =
-  "_unann@" ++ owner ++ "/" ++ param
+  types.unann_prefix ++ owner ++ "/" ++ param
 
 # A declaration's OWN placeholders, subtracted from env_ftv at its generalization
 # boundary.
@@ -2790,6 +2790,7 @@ fn headed_typed_arg_str(
 fn headed_typed_arg_typeexpr(
   typed_args: List typed_ast.TypedExpr,
   subst: Dict types.Type,
+  env: Dict types.Scheme,
   want: String
 ) -> Maybe ast.TypeExpr =
   match typed_args with
@@ -2800,9 +2801,9 @@ fn headed_typed_arg_typeexpr(
         match concrete_type_str(arg_t) with
         | Just s ->
             if head_name_matches(s, want)
-            then concrete_typeexpr(arg_t)
-            else headed_typed_arg_typeexpr(rest, subst, want)
-        | Nothing -> headed_typed_arg_typeexpr(rest, subst, want)
+            then concrete_typeexpr(arg_t, subst, env)
+            else headed_typed_arg_typeexpr(rest, subst, env, want)
+        | Nothing -> headed_typed_arg_typeexpr(rest, subst, env, want)
 
 fn first_concrete_typed_arg_str_excluding(
   typed_args: List typed_ast.TypedExpr,
@@ -2825,49 +2826,53 @@ fn str_list_contains(xs: List String, target: String) -> Bool =
   | Nil -> false
   | Cons h rest -> if h == target then true else str_list_contains(rest, target)
 
-# Convert a concrete types.Type to an ast.TypeExpr.
-# Only TConst, TApp, and TTuple are meaningful here; anything else falls back to "_".
-fn type_to_typeexpr(t: types.Type) -> ast.TypeExpr =
+# Convert a types.Type to the ast.TypeExpr an injected TDict records. A type
+# variable is written under its program name (fwd_prog_var_any_class), so resolve
+# can check an instance context at it; `_` only when no signature wrote it.
+fn type_to_typeexpr(t: types.Type, subst: Dict types.Type, env: Dict types.Scheme) -> ast.TypeExpr =
   match t with
   # Dispatch TDict head — keep the full canonical name (matches
   # type_to_typeexpr_with_prog_vars), so the head can't desync from full-name @inst /
   # ctx_inst keys for a module-qualified type. (code-review finding 1, 2026-07-10)
   | types.TConst name -> ast.TypeName(types.type_id_name(name))
-  | types.TApp base arg -> ast.TypeApply(type_to_typeexpr(base), type_to_typeexpr(arg))
-  | types.TTuple items -> ast.TupleType(list_map(\item -> type_to_typeexpr(item), items))
+  | types.TApp base arg -> ast.TypeApply(type_to_typeexpr(base, subst, env), type_to_typeexpr(arg, subst, env))
+  | types.TTuple items -> ast.TupleType(list_map(\item -> type_to_typeexpr(item, subst, env), items))
+  | types.TVar name -> fwd_prog_var_any_class(types.tyvar_identity(name), subst, env)
   | _ -> ast.TypeName("_")
 
 # Returns Just(te) if t has a concrete (TConst) head; Nothing if the head is a TVar.
 # TTuple is always concrete (its head is a known arity, never a variable).
-fn concrete_typeexpr(t: types.Type) -> Maybe ast.TypeExpr =
+fn concrete_typeexpr(t: types.Type, subst: Dict types.Type, env: Dict types.Scheme) -> Maybe ast.TypeExpr =
   match t with
   | types.TConst name -> Just(ast.TypeName(types.type_id_name(name)))
   | types.TApp base _ ->
-      match concrete_typeexpr(base) with
+      match concrete_typeexpr(base, subst, env) with
       | Nothing -> Nothing
-      | Just _ -> Just(type_to_typeexpr(t))
-  | types.TTuple items -> Just(ast.TupleType(list_map(\item -> type_to_typeexpr(item), items)))
+      | Just _ -> Just(type_to_typeexpr(t, subst, env))
+  | types.TTuple items -> Just(ast.TupleType(list_map(\item -> type_to_typeexpr(item, subst, env), items)))
   | _ -> Nothing
 
 # Returns the full concrete ast.TypeExpr for the first concrete arg, or Nothing.
 fn first_concrete_typed_arg_typeexpr(
   typed_args: List typed_ast.TypedExpr,
-  subst: Dict types.Type
+  subst: Dict types.Type,
+  env: Dict types.Scheme
 ) -> Maybe ast.TypeExpr =
   match typed_args with
   | Nil -> Nothing
   | Cons first_arg rest ->
-      match concrete_typeexpr(unifier.apply_subst(subst, typed_ast.typed_expr_type(first_arg))) with
-      | Nothing -> first_concrete_typed_arg_typeexpr(rest, subst)
+      match concrete_typeexpr(unifier.apply_subst(subst, typed_ast.typed_expr_type(first_arg)), subst, env) with
+      | Nothing -> first_concrete_typed_arg_typeexpr(rest, subst, env)
       | Just te -> Just(te)
 
 # Return the full concrete typeexpr for the first typed arg, falling back to TypeName(head_str).
 fn first_concrete_arg_typeexpr_or_name(
   head_str: String,
   typed_args: List typed_ast.TypedExpr,
-  subst: Dict types.Type
+  subst: Dict types.Type,
+  env: Dict types.Scheme
 ) -> ast.TypeExpr =
-  match first_concrete_typed_arg_typeexpr(typed_args, subst) with
+  match first_concrete_typed_arg_typeexpr(typed_args, subst, env) with
   | Just te -> te
   | Nothing -> ast.TypeName(head_str)
 
@@ -2878,25 +2883,27 @@ fn first_concrete_arg_typeexpr_or_name_excluding(
   head_str: String,
   typed_args: List typed_ast.TypedExpr,
   subst: Dict types.Type,
+  env: Dict types.Scheme,
   excluded: List String
 ) -> ast.TypeExpr =
-  match first_concrete_typed_arg_typeexpr_excluding(typed_args, subst, excluded) with
+  match first_concrete_typed_arg_typeexpr_excluding(typed_args, subst, env, excluded) with
   | Just te -> te
   | Nothing -> ast.TypeName(head_str)
 
 fn first_concrete_typed_arg_typeexpr_excluding(
   typed_args: List typed_ast.TypedExpr,
   subst: Dict types.Type,
+  env: Dict types.Scheme,
   excluded: List String
 ) -> Maybe ast.TypeExpr =
   match typed_args with
   | Nil -> Nothing
   | Cons first_arg rest ->
-      match concrete_typeexpr(unifier.apply_subst(subst, typed_ast.typed_expr_type(first_arg))) with
-      | Nothing -> first_concrete_typed_arg_typeexpr_excluding(rest, subst, excluded)
+      match concrete_typeexpr(unifier.apply_subst(subst, typed_ast.typed_expr_type(first_arg)), subst, env) with
+      | Nothing -> first_concrete_typed_arg_typeexpr_excluding(rest, subst, env, excluded)
       | Just te ->
           if str_list_contains(excluded, te_outermost_name(te)) then
-            first_concrete_typed_arg_typeexpr_excluding(rest, subst, excluded)
+            first_concrete_typed_arg_typeexpr_excluding(rest, subst, env, excluded)
           else
             Just(te)
 
@@ -2951,22 +2958,39 @@ let sig_vars_key: String = "@sigvars"
 # substitution which signature variable resolves to the same one is orientation-proof,
 # as forwarded_tdict_for_tyvar is for a bare dispatch variable. Missing it named the
 # inner dictionary of `Just(x) == y` as `Eq _`, which lowered to the poison thunk (#423).
+#
+# Exactly one WRITTEN variable may resolve there. Two is a body that merged them —
+# a merge the rigidity check reports — and naming either would hand the dictionary
+# of whichever came first to values of the other type. An unannotated slot's
+# placeholder is not rigid, so meeting a written variable or another placeholder
+# only says which type it has; it names the variable only when nothing written does.
 fn sig_var_now_named(tyvar: String, subst: Dict types.Type, env: Dict types.Scheme) -> Maybe types.Scheme =
   let Just sch = dict_get(sig_vars_key, env) else Nothing
       types.TTuple vars = types.scheme_type(sch) else Nothing
       types.TVar rep = unifier.apply_subst(subst, types.TVar(types.tyvar_id(tyvar))) else Nothing
-      Just named = first_var_resolving_to(rep, vars, subst) else Nothing
+      Just named = sole_name(vars_resolving_to(rep, vars, subst)) else Nothing
   in dict_get(fwdvar_key(named), env)
 
-fn first_var_resolving_to(rep: types.TyVarId, vars: List types.Type, subst: Dict types.Type) -> Maybe String =
-  match vars with
+fn sole_name(matches: List String) -> Maybe String =
+  match list_filter(\m -> types.is_unann_placeholder(m) == false, matches) with
+  | [written] -> Just(written)
+  | [] -> first_name(matches)
+  | _ -> Nothing
+
+fn first_name(names: List String) -> Maybe String =
+  match names with
+  | [n | _] -> Just(n)
   | [] -> Nothing
+
+fn vars_resolving_to(rep: types.TyVarId, vars: List types.Type, subst: Dict types.Type) -> List String =
+  match vars with
+  | [] -> []
   | [v | rest] ->
       match (v, unifier.apply_subst(subst, v)) with
       | (types.TVar name, types.TVar now) ->
-          if types.tyvar_eq(now, rep) then Just(types.tyvar_identity(name))
-          else first_var_resolving_to(rep, rest, subst)
-      | _ -> first_var_resolving_to(rep, rest, subst)
+          if types.tyvar_eq(now, rep) then Cons(types.tyvar_identity(name), vars_resolving_to(rep, rest, subst))
+          else vars_resolving_to(rep, rest, subst)
+      | _ -> vars_resolving_to(rep, rest, subst)
 
 fn fwd_scheme_prog_var(scheme: types.Scheme) -> ast.TypeExpr =
   match scheme with
@@ -3504,7 +3528,7 @@ fn constraint_arg_typeexpr(
   env: Dict types.Scheme
 ) -> Maybe ast.TypeExpr =
   match dict_get(decode_constraint_var(t, callee, env), prog_to_fresh) with
-  | Just fresh_t -> concrete_typeexpr(unifier.apply_subst(subst, fresh_t))
+  | Just fresh_t -> concrete_typeexpr(unifier.apply_subst(subst, fresh_t), subst, env)
   | Nothing -> named_ctor_typeexpr(t)
 
 # A marker token names no type and a lowercase one is a variable the substitution did
@@ -3547,17 +3571,18 @@ fn resolve_arg_scanned_tdict(
       in
         Just(typed_ast.TDict(
           ast.TypeConstraint(class_name,
-            Cons(headed_arg_typeexpr_or_name(head_str, user_args, subst, want, want_arity), Nil)),
+            Cons(headed_arg_typeexpr_or_name(head_str, user_args, subst, env, want, want_arity), Nil)),
           types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
 
 fn headed_arg_typeexpr_or_name(
   head_str: String,
   user_args: List typed_ast.TypedExpr,
   subst: Dict types.Type,
+  env: Dict types.Scheme,
   want: String,
   want_arity: Int
 ) -> ast.TypeExpr =
-  match headed_typed_arg_typeexpr(user_args, subst, want) with
+  match headed_typed_arg_typeexpr(user_args, subst, env, want) with
   | Just te -> truncate_to_depth(te, want_arity)
   | Nothing -> ast.TypeName(head_str)
 
@@ -3574,7 +3599,7 @@ fn resolve_one_constraint_tdict(
       match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
       | Just _ ->
           Just(typed_ast.TDict(
-            ast.TypeConstraint(class_name, Cons(first_concrete_arg_typeexpr_or_name_excluding(head_str, user_args, subst, excluded), Nil)),
+            ast.TypeConstraint(class_name, Cons(first_concrete_arg_typeexpr_or_name_excluding(head_str, user_args, subst, env, excluded), Nil)),
             types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
       | Nothing ->
           resolve_via_fwd_or_scan(class_name, user_args, subst, env, pos)
@@ -3588,7 +3613,7 @@ fn resolve_one_constraint_tdict(
           match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
           | Just _ ->
               Just(typed_ast.TDict(
-                ast.TypeConstraint(class_name, Cons(first_concrete_arg_typeexpr_or_name(head_str, user_args, subst), Nil)),
+                ast.TypeConstraint(class_name, Cons(first_concrete_arg_typeexpr_or_name(head_str, user_args, subst, env), Nil)),
                 types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
           | Nothing ->
               resolve_via_fwd_or_scan(class_name, user_args, subst, env, pos)
@@ -4041,6 +4066,14 @@ fn fwdvar_key(tyvar: String) -> String = "@fwdvar:" ++ tyvar
 # than letting it lower to the poison thunk.
 fn seed_sig_var_names(prog_to_fresh: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
   seed_sig_var_entries(vec_to_list(dict_entries(prog_to_fresh)), env)
+
+# An unannotated slot is generalized like a written variable but is not in
+# prog_to_fresh: its placeholder is used as is (unann_param_var). Naming it after
+# itself lets resolve report the parameter rather than skip an unnamed `_`.
+fn seed_unann_names(placeholders: List String, env: Dict types.Scheme) -> Dict types.Scheme =
+  match placeholders with
+  | [] -> env
+  | [p | rest] -> seed_unann_names(rest, add_sig_var(ProgVarName(p), FreshTVarName(p), env))
 
 fn seed_sig_var_entries(entries: List (String, types.Type), env: Dict types.Scheme) -> Dict types.Scheme =
   match entries with
@@ -9624,10 +9657,10 @@ fn maybe_rewrite_constrained_fn_call(
       typed_ast.TCall(fn_,
         list_append(
           user_typed_args(args),
-          build_constrained_fn_dicts_via_field(cs, env, fn_name,
+          build_constrained_fn_dicts_via_field(cs, env, subst, fn_name,
             unifier.apply_subst(subst, typed_ast.typed_expr_type(fn_)),
             unifier.apply_subst(subst, t),
-            pos, collect_all_tdicts(args))),
+            user_typed_args(args), pos, collect_all_tdicts(args))),
         t, pos)
 
 # The class a TDict provides evidence for — its TypeConstraint's class, on the
@@ -9673,9 +9706,11 @@ fn maybe_str_eq(m: Maybe String, s: String) -> Bool =
 fn build_constrained_fn_dicts_via_field(
   constraints: List (String, String),
   env: Dict types.Scheme,
+  subst: Dict types.Type,
   fn_name: String,
   callee_ty: types.Type,
   concrete_ret: types.Type,
+  user_args: List typed_ast.TypedExpr,
   pos: source.SourcePos,
   existing_dicts: List typed_ast.TypedExpr
 ) -> List typed_ast.TypedExpr =
@@ -9686,27 +9721,52 @@ fn build_constrained_fn_dicts_via_field(
       | (head_token, class_name) ->
           match take_dict_for_class(class_name, existing_dicts) with
           | Just (existing_d, remaining) ->
-              Cons(existing_d,
-                   build_constrained_fn_dicts_via_field(rest, env, fn_name, callee_ty, concrete_ret, pos, remaining))
+              Cons(settled_constrained_dict(existing_d, head_token, class_name, fn_name, env, subst,
+                                            callee_ty, user_args, pos),
+                   build_constrained_fn_dicts_via_field(rest, env, subst, fn_name, callee_ty, concrete_ret,
+                                                        user_args, pos, remaining))
           | Nothing ->
               # An argument-scanned token (headless OR compound-head) emits
               # nothing here: this site scans the RETURN type, and a `where
               # ToString (Box a)` obligation is not discharged by the return type
               # merely because the return type happens to have an instance.
               if is_arg_scanned_token(head_token)
-              then build_constrained_fn_dicts_via_field(rest, env, fn_name, callee_ty, concrete_ret, pos, existing_dicts)
+              then build_constrained_fn_dicts_via_field(rest, env, subst, fn_name, callee_ty, concrete_ret, user_args, pos, existing_dicts)
               else
-                match constraint_var_dict(class_name, head_token, fn_name, env, callee_ty, pos) with
+                match constraint_var_dict(class_name, head_token, fn_name, env, subst, callee_ty, pos) with
                 | Just new_dict ->
                     Cons(new_dict,
-                         build_constrained_fn_dicts_via_field(rest, env, fn_name, callee_ty, concrete_ret, pos, existing_dicts))
+                         build_constrained_fn_dicts_via_field(rest, env, subst, fn_name, callee_ty, concrete_ret, user_args, pos, existing_dicts))
                 | Nothing ->
-                    match find_inst_in_return_type(class_name, concrete_ret, env, pos) with
+                    match find_inst_in_return_type(class_name, concrete_ret, subst, env, pos) with
                     | Just new_dict ->
                         Cons(new_dict,
-                             build_constrained_fn_dicts_via_field(rest, env, fn_name, callee_ty, concrete_ret, pos, existing_dicts))
+                             build_constrained_fn_dicts_via_field(rest, env, subst, fn_name, callee_ty, concrete_ret, user_args, pos, existing_dicts))
                     | Nothing ->
-                        build_constrained_fn_dicts_via_field(rest, env, fn_name, callee_ty, concrete_ret, pos, existing_dicts)
+                        build_constrained_fn_dicts_via_field(rest, env, subst, fn_name, callee_ty, concrete_ret, user_args, pos, existing_dicts)
+
+# An inference-time dict that recorded a hole — a variable tied to a written one only
+# later, as a lambda parameter is when the lambda is applied — is rebuilt from the
+# declaration's final substitution, the way it was first built. The rebuild is kept
+# only if it names the same instance: it may fill a hole, never pick another dict.
+fn settled_constrained_dict(existing_d: typed_ast.TypedExpr, head_token: String, class_name: String,
+                            fn_name: String, env: Dict types.Scheme, subst: Dict types.Type,
+                            callee_ty: types.Type, user_args: List typed_ast.TypedExpr,
+                            pos: source.SourcePos) -> typed_ast.TypedExpr =
+  if tdict_has_hole(existing_d) == false then existing_d
+  else
+    let Just rebuilt = rebuilt_constrained_dict(head_token, class_name, fn_name, env, subst,
+                                                callee_ty, user_args, pos) else existing_d
+    in if same_instance_head(existing_d, rebuilt) then rebuilt else existing_d
+
+fn rebuilt_constrained_dict(head_token: String, class_name: String, fn_name: String,
+                            env: Dict types.Scheme, subst: Dict types.Type, callee_ty: types.Type,
+                            user_args: List typed_ast.TypedExpr,
+                            pos: source.SourcePos) -> Maybe typed_ast.TypedExpr =
+  if is_arg_scanned_token(head_token)
+  then resolve_arg_scanned_tdict(class_name, arg_scan_head(head_token), arg_scan_arity(head_token),
+                                 user_args, subst, env, pos, Nil)
+  else constraint_var_dict(class_name, head_token, fn_name, env, subst, callee_ty, pos)
 
 # Locate the constraint's own variable in the callee's DECLARED type, walked alongside the type
 # this call instantiated it to, and take the instance for what it was instantiated to.
@@ -9726,7 +9786,7 @@ fn build_constrained_fn_dicts_via_field(
 # instantiated to is still polymorphic, or no instance is registered for it — each leaves the
 # caller's existing return-type scan to try, so no resolution that worked before changes.
 fn constraint_var_dict(class_name: String, head_token: String, fn_name: String,
-                       env: Dict types.Scheme, callee_ty: types.Type,
+                       env: Dict types.Scheme, subst: Dict types.Type, callee_ty: types.Type,
                        pos: source.SourcePos) -> Maybe typed_ast.TypedExpr =
   let Just sch = dict_get(fn_name, env) else Nothing
       Just concrete = find_class_var_in_type(types.scheme_type(sch), callee_ty,
@@ -9735,7 +9795,7 @@ fn constraint_var_dict(class_name: String, head_token: String, fn_name: String,
       Just _ = dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) else Nothing
   in
     Just(typed_ast.TDict(
-      ast.TypeConstraint(class_name, Cons(type_to_typeexpr(concrete), Nil)),
+      ast.TypeConstraint(class_name, Cons(type_to_typeexpr(concrete, subst, env), Nil)),
       types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
 
 # Scan a concrete return type for an inner component that has an @inst marker
@@ -9743,20 +9803,22 @@ fn constraint_var_dict(class_name: String, head_token: String, fn_name: String,
 # position directly), then recurses into TApp arguments and TTuple elements.
 # Returns the first matching TDict, or Nothing if the return type is still
 # polymorphic (contains only TVars with no matching @inst entry).
-fn find_inst_in_return_type(class_name: String, t: types.Type, env: Dict types.Scheme, pos: source.SourcePos) -> Maybe typed_ast.TypedExpr =
+fn find_inst_in_return_type(class_name: String, t: types.Type, subst: Dict types.Type,
+                            env: Dict types.Scheme, pos: source.SourcePos) -> Maybe typed_ast.TypedExpr =
   match concrete_type_str(t) with
   | Just head_str ->
       match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
       | Just _ ->
           Just(typed_ast.TDict(
-            ast.TypeConstraint(class_name, Cons(type_to_typeexpr(t), Nil)),
+            ast.TypeConstraint(class_name, Cons(type_to_typeexpr(t, subst, env), Nil)),
             types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
       | Nothing ->
-          find_inst_in_return_type_children(class_name, t, env, pos)
+          find_inst_in_return_type_children(class_name, t, subst, env, pos)
   | Nothing ->
       Nothing
 
-fn find_inst_in_return_type_children(class_name: String, t: types.Type, env: Dict types.Scheme, pos: source.SourcePos) -> Maybe typed_ast.TypedExpr =
+fn find_inst_in_return_type_children(class_name: String, t: types.Type, subst: Dict types.Type,
+                                     env: Dict types.Scheme, pos: source.SourcePos) -> Maybe typed_ast.TypedExpr =
   match t with
   | types.TApp base arg ->
       # Recurse into BOTH children: a multi-parameter application like
@@ -9764,19 +9826,20 @@ fn find_inst_in_return_type_children(class_name: String, t: types.Type, env: Dic
       # `e` in `base`, so scanning only `arg` misses an instance needed on an
       # inner type parameter (return-type dispatch would then fall back to
       # @fwd and fail late — see test_constrained_fn_return_type_nested_tapp).
-      match find_inst_in_return_type(class_name, arg, env, pos) with
+      match find_inst_in_return_type(class_name, arg, subst, env, pos) with
       | Just d -> Just(d)
-      | Nothing -> find_inst_in_return_type(class_name, base, env, pos)
-  | types.TTuple items -> find_inst_in_return_type_list(class_name, items, env, pos)
+      | Nothing -> find_inst_in_return_type(class_name, base, subst, env, pos)
+  | types.TTuple items -> find_inst_in_return_type_list(class_name, items, subst, env, pos)
   | _ -> Nothing
 
-fn find_inst_in_return_type_list(class_name: String, items: List types.Type, env: Dict types.Scheme, pos: source.SourcePos) -> Maybe typed_ast.TypedExpr =
+fn find_inst_in_return_type_list(class_name: String, items: List types.Type, subst: Dict types.Type,
+                                 env: Dict types.Scheme, pos: source.SourcePos) -> Maybe typed_ast.TypedExpr =
   match items with
   | Nil -> Nothing
   | Cons h rest ->
-      match find_inst_in_return_type(class_name, h, env, pos) with
+      match find_inst_in_return_type(class_name, h, subst, env, pos) with
       | Just d -> Just(d)
-      | Nothing -> find_inst_in_return_type_list(class_name, rest, env, pos)
+      | Nothing -> find_inst_in_return_type_list(class_name, rest, subst, env, pos)
 
 # Prepend the instance dict for a dispatch head the final substitution has made
 # concrete. Shared by the return- and input-position paths: once the head is
@@ -9867,13 +9930,73 @@ fn maybe_forward_input_dispatch(
   class_vars: List String,
   method_type: types.Type
 ) -> typed_ast.TypedExpr =
-  let Nil = collect_all_tdicts(args) else typed_ast.TCall(fn_, args, t, pos)
+  let Nil = collect_all_tdicts(args)
+        else settled_dispatch_call(env, subst, fn_, args, t, pos, class_name, class_vars, method_type)
       Just resolved_t = dispatch_type_for_vars(method_type, args, t, subst, class_vars)
         else typed_ast.TCall(fn_, args, t, pos)
   in
     match concrete_type_str(resolved_t) with
     | Nothing -> keep_or_forward_dispatch(env, subst, fn_, args, t, pos, class_name, resolved_t)
     | Just _ -> concrete_dispatch_call(env, subst, fn_, strip_leading_tdicts(args), t, pos, class_name, resolved_t)
+
+# The class-method twin of settled_constrained_dict. Input dispatch is resolved during
+# inference, so a lambda parameter tied to a written variable only when the lambda is
+# applied was still a hole there: `Just(z) == Just(z)` in `\z -> …` recorded
+# `Eq (Maybe _)`, which lowered to the poison thunk even under `where Eq a`.
+fn settled_dispatch_call(
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  fn_: typed_ast.TypedExpr,
+  args: List typed_ast.TypedExpr,
+  t: types.Type,
+  pos: source.SourcePos,
+  class_name: String,
+  class_vars: List String,
+  method_type: types.Type
+) -> typed_ast.TypedExpr =
+  let [lead | rest] = args else typed_ast.TCall(fn_, args, t, pos)
+      Just rebuilt = rebuilt_dispatch_dict(env, subst, lead, strip_leading_tdicts(args), t, class_name,
+                                           class_vars, method_type) else typed_ast.TCall(fn_, args, t, pos)
+  in typed_ast.TCall(fn_, Cons(rebuilt, rest), t, pos)
+
+# The class dict leads the arguments (check_class_method_call), so `lead` is the one to
+# rebuild; same_instance_head rejects anything else.
+fn rebuilt_dispatch_dict(env: Dict types.Scheme, subst: Dict types.Type, lead: typed_ast.TypedExpr,
+                         user_args: List typed_ast.TypedExpr, t: types.Type, class_name: String,
+                         class_vars: List String, method_type: types.Type) -> Maybe typed_ast.TypedExpr =
+  if tdict_has_hole(lead) == false then Nothing
+  else
+    let typed_ast.TDict(ast.TypeConstraint lead_class _) dict_t dict_pos ev = lead else Nothing
+        Just resolved_t = dispatch_type_for_vars(method_type, user_args, t, subst, class_vars) else Nothing
+        Just _ = concrete_type_str(resolved_t) else Nothing
+        rebuilt = typed_ast.TDict(
+                    ast.TypeConstraint(lead_class,
+                      [type_to_typeexpr_with_prog_vars(resolved_t, class_name, subst, env)]),
+                    dict_t, dict_pos, ev)
+    in if same_instance_head(lead, rebuilt) then Just(rebuilt) else Nothing
+
+# A recorded constraint argument the naming could not fill: `_`, or an unannotated
+# slot's placeholder, which the final substitution may still pin to a type.
+fn te_has_hole(te: ast.TypeExpr) -> Bool =
+  match te with
+  | ast.TypeName n -> n == "_" || types.is_unann_placeholder(n)
+  | ast.TypeApply base arg -> te_has_hole(base) || te_has_hole(arg)
+  | ast.TupleType items -> any(te_has_hole, items)
+  | ast.TypeArrow param ret _ _ -> te_has_hole(param) || te_has_hole(ret)
+  | ast.TypeThunk ret _ -> te_has_hole(ret)
+  | ast.TypeEffect inner _ -> te_has_hole(inner)
+
+fn tdict_has_hole(d: typed_ast.TypedExpr) -> Bool =
+  match d with
+  | typed_ast.TDict (ast.TypeConstraint _ type_args) _ _ _ -> any(te_has_hole, type_args)
+  | _ -> false
+
+# Same class, same head constructor: a rebuild may name a hole, not change the instance.
+fn same_instance_head(a: typed_ast.TypedExpr, b: typed_ast.TypedExpr) -> Bool =
+  match (a, b) with
+  | (typed_ast.TDict(ast.TypeConstraint ca args_a) _ _ _, typed_ast.TDict(ast.TypeConstraint cb args_b) _ _ _) ->
+      string.after_last_dot(ca) == string.after_last_dot(cb) && te_head_str(args_a) == te_head_str(args_b)
+  | _ -> false
 
 # Inject a forwarded dict when the still-polymorphic dispatch variable is one the
 # enclosing declaration declared a constraint for; otherwise leave the call alone.
@@ -10876,7 +10999,8 @@ fn check_fn_body(
       do
         let decl_scheme = scheme_from_fn_parts(name, params, ret_type_maybe, effects_maybe, alias_env)
         (inst_type, prog_to_fresh) <- unifier.instantiate_with_vars(state, decl_scheme)
-        let fwd_env = seed_sig_var_names(prog_to_fresh, seed_forward_markers(constraints, prog_to_fresh, env))
+        let fwd_env = seed_unann_names(own_unann_vars(name, params, ret_type_maybe),
+                        seed_sig_var_names(prog_to_fresh, seed_forward_markers(constraints, prog_to_fresh, env)))
         # Compute @eta_fwd:* markers in parallel without walking fwd_env post-hoc.
         # Constraint-free decls return dict_empty() instantly.
         let fwd_markers = compute_eta_fwd_markers(constraints, prog_to_fresh, env)
@@ -11471,8 +11595,9 @@ fn check_instance_method(
         # The instance's own constraints and the method's restated ones seed the
         # same marker table: both name variables of THIS method's signature, and
         # both reach the body as hidden dictionaries.
-        let fwd_env = seed_sig_var_names(prog_to_fresh,
-                        seed_forward_markers(list_append(inst_constraints, method_constraints), prog_to_fresh, env))
+        let fwd_env = seed_unann_names(own_unann_vars("#inst/" ++ name, params, ret_maybe),
+                        seed_sig_var_names(prog_to_fresh,
+                          seed_forward_markers(list_append(inst_constraints, method_constraints), prog_to_fresh, env)))
         let body_env = extend_env_with_params(params, ctor_param_types(inst_type), fwd_env)
         br <- typecheck_expr(state, body_env, subst, eff_subst, body)
         match br with
@@ -11540,7 +11665,8 @@ fn instance_method_checked(
         | FinishErr fpos fmsg -> InstanceMethodErr(fpos, fmsg ++ " in instance method " ++ name)
         | FinishOk typed_body s2 ->
             finish_instance_method(name, params, ret_maybe, eff_maybe, body_env, s2, inst_type,
-              typed_body, env, inst_constraints, method_constraints, prog_to_fresh, env_ftv)
+              typed_body, env, inst_constraints, method_constraints, prog_to_fresh,
+              types.scheme_vars(decl_scheme), env_ftv)
 
 fn instance_method_err(name: String, pos: source.SourcePos, msg: String) -> InstanceMethodResult =
   # Previously: lenient short-circuit that returned a `dummy_unit()`-bodied
@@ -11557,9 +11683,11 @@ fn finish_instance_method(name: String, params: List ast.Param, ret_maybe: Maybe
                           inst_constraints: List ast.TypeConstraint,
                           method_constraints: List ast.TypeConstraint,
                           prog_to_fresh: Dict types.Type,
+                          sig_vars: List String,
                           env_ftv: List String) -> InstanceMethodResult =
-  match maybe_or_else(class_method_mode_error(name, params, env),
-                      class_method_constraints_error(name, method_constraints, env)) with
+  match maybe_or_else(maybe_or_else(class_method_mode_error(name, params, env),
+                                    class_method_constraints_error(name, method_constraints, env)),
+                      instance_method_rigidity_error(name, prog_to_fresh, s2, sig_vars)) with
   | Just bad ->
       InstanceMethodErr(typed_ast.typed_expr_pos(typed_body), bad)
   | Nothing ->
@@ -11575,6 +11703,14 @@ fn finish_instance_method(name: String, params: List ast.Param, ret_maybe: Maybe
       | Nothing ->
           finish_instance_method_checked(name, params, ret_maybe, eff_maybe, body_env, s2, inst_type,
                                          typed_body, env, method_constraints)
+
+# check_fn_body's rigidity check, for an instance method. Without it a body could
+# merge two written variables, and a context dictionary forwarded for one of them
+# served values of the other (`Just(u) == Just(v)` ran String's `eq` on an Int).
+fn instance_method_rigidity_error(name: String, prog_to_fresh: Dict types.Type, s2: Dict types.Type,
+                                  sig_vars: List String) -> Maybe String =
+  map(\bad -> "Signature too general for its body in instance method " ++ name ++ ": type variable " ++ bad,
+      rigidity_violation(prog_to_fresh, s2, sig_vars))
 
 # M4.6: an instance method's ownership modifiers must agree with the class
 # declaration's, because a call dispatches through the CLASS signature — the

@@ -1,0 +1,7 @@
+# `z` is tied to `a` only when `g` is applied, after `==` was checked, so the inner
+# dictionary is named from the declaration's final substitution — and `Eq a` is missing.
+fn later(x: a) -> Bool =
+  let g = \z -> Just(z) == Just(z)
+  in g(x)
+
+fn main() -> Unit !{IO} = print(to_string(later(3)))

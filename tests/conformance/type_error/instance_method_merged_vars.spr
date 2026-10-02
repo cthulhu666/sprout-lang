@@ -1,0 +1,14 @@
+# An instance method may not merge two variables its signature keeps apart, any more than
+# a function may. Unchecked, `Just(u) == Just(v)` made `a` and `b` one variable, and its
+# dictionary came from whichever of the two was found first: String's `eq` ran on an Int.
+type P a b = P a b
+
+class Same t
+  fn same(x: t) -> Bool
+
+instance Same (P a b) where Eq a, Eq b
+  fn same(x: P a b) -> Bool =
+    match x with
+    | P u v -> Just(u) == Just(v)
+
+fn main() -> Unit !{IO} = print(to_string(same(P(1, "x"))))

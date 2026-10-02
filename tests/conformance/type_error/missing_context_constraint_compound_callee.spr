@@ -1,0 +1,7 @@
+# The callee's own constraint is compound, so the dictionary built at the call is
+# `Eq (Maybe a)`, and its context needs `Eq a`. `ToString a` does not supply it.
+fn same_maybe(m: Maybe t, n: Maybe t) -> Bool where Eq (Maybe t) = m == n
+
+fn g(x: a, y: a) -> Bool where ToString a = same_maybe(Just(x), Just(y))
+
+fn main() -> Unit !{IO} = print(to_string(g(3, 4)))

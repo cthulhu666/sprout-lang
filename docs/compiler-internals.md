@@ -513,6 +513,14 @@ miscompile. Making it WORK means putting the arguments' identity into that key i
 four places that build it — a change to the dictionary-passing key format, which is
 why it is a backlog entry and not part of this rule.
 
+The same coarseness let ONE forwarded constraint serve a different use: with
+`where Eq (Maybe a)`, a `p == q` on `Maybe b` (or `Maybe Int`) found the key
+`Eq_Maybe` and took `a`'s dictionary. `resolve` therefore keeps each forwarded
+constraint's WRITTEN arguments beside its key (`Forwarded`) and forwards only when
+the use does not conflict with them (`resolve.forwards`); otherwise the use takes the
+instance and its own context, which the context check then requires to be supplied.
+The key format is unchanged, so lowering's `ctx_fwd` needs no change.
+
 ### The compound-head constraint token, and why it carries `#any`
 
 A constrained `fn`'s hidden dictionaries come from its Scheme's `(head_token, class)`

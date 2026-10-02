@@ -1,0 +1,6 @@
+# The context is needed at `f a`, an applied type variable. `where Eq (f a)` is not
+# supported, so the diagnostic must not advise it — nor the `where Eq f` a head-only
+# rendering would suggest.
+fn g(x: f a, y: f a) -> Bool = Just(x) == Just(y)
+
+fn main() -> Unit !{IO} = print(to_string(g([1], [1])))

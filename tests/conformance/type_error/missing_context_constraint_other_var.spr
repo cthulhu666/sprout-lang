@@ -1,0 +1,6 @@
+# `where Eq (Maybe a)` supplies the dictionary for `Maybe a` only. Hidden dictionaries are
+# keyed by class and head constructor, so `Maybe b` shares its key — and used to take it,
+# comparing `b` values with `a`'s equality.
+fn f(y: Maybe a, p: Maybe b, q: Maybe b) -> Bool where Eq (Maybe a) = p == q
+
+fn main() -> Unit !{IO} = print(to_string(f(Just(true), Just(1), Just(2))))

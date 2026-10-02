@@ -1225,6 +1225,7 @@ declare i64 @fs_rename(i64, i64)
 @.str.1090 = private unnamed_addr constant { i64, [13 x i8] } { i64 196618, [13 x i8] c"__sprout_ph_\00" }
 @.str.1091 = private unnamed_addr constant { i64, [12 x i8] } { i64 180234, [12 x i8] c"TemplateLit\00" }
 @.str.1092 = private unnamed_addr constant { i64, [15 x i8] } { i64 229386, [15 x i8] c"TemplateInterp\00" }
+@.str.1093 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c"_unann@\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -1552,6 +1553,7 @@ declare i64 @fs_rename(i64, i64)
 @stdlib.compiler.ast.template_ctor_interp = global i64 zeroinitializer
 @stdlib.compiler.types.effect_pure = global i64 zeroinitializer
 @stdlib.compiler.types.effect_io = global i64 zeroinitializer
+@stdlib.compiler.types.unann_prefix = global i64 zeroinitializer
 @stdlib.terminal.esc = global i64 zeroinitializer
 @stdlib.repl.esc = global i64 zeroinitializer
 
@@ -74296,13 +74298,17 @@ entry:
   %t$23 = call i64 @sprout_alloc_obj(i64 111, i64 0)
   store i64 %t$23, ptr @stdlib.compiler.types.effect_io
   call i64 @sprout_gc_register_i64_root(ptr @stdlib.compiler.types.effect_io)
-  %t$24 = add i64 0, 27
-  %t$25 = call i64 @char_to_str(i64 %t$24)
-  store i64 %t$25, ptr @stdlib.terminal.esc
-  call i64 @sprout_gc_register_i64_root(ptr @stdlib.terminal.esc)
+  %t$24 = getelementptr inbounds { i64, [8 x i8] }, ptr @.str.1093, i64 0, i32 1, i64 0
+  %t$25 = ptrtoint ptr %t$24 to i64
+  store i64 %t$25, ptr @stdlib.compiler.types.unann_prefix
+  call i64 @sprout_gc_register_i64_root(ptr @stdlib.compiler.types.unann_prefix)
   %t$26 = add i64 0, 27
   %t$27 = call i64 @char_to_str(i64 %t$26)
-  store i64 %t$27, ptr @stdlib.repl.esc
+  store i64 %t$27, ptr @stdlib.terminal.esc
+  call i64 @sprout_gc_register_i64_root(ptr @stdlib.terminal.esc)
+  %t$28 = add i64 0, 27
+  %t$29 = call i64 @char_to_str(i64 %t$28)
+  store i64 %t$29, ptr @stdlib.repl.esc
   call i64 @sprout_gc_register_i64_root(ptr @stdlib.repl.esc)
   ret void
 }

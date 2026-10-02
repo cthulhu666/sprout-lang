@@ -1,0 +1,1 @@
+needs `Eq (f a)`, which nothing in scope supplies — a `where` constraint on an applied type variable is not supported

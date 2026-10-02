@@ -1,1 +1,1 @@
-the `Eq` instance for `Maybe` needs `Eq a`, which nothing in scope supplies
+the `Eq` instance for `Maybe a` needs `Eq a`, which nothing in scope supplies
