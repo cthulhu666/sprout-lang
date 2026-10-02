@@ -2930,7 +2930,10 @@ This holds however the variable reaches the call — through a lambda parameter
 applied later, or through a function whose own constraint is compound (`where
 Eq (Maybe t)`) — and even when the inner comparison can never run, as in
 `m == Nothing`: the instance is chosen when the program is checked, not when the
-comparison runs.
+comparison runs.  Not yet for a callee constraint nested past one constructor or over
+a tuple (`where ToString (Box (List b))`, `where ToString (b, Int)`): when the
+argument's type holds a variable, the call compiles to a dictionary that panics if
+used (BACKLOG).
 
 A forwarded compound constraint arrives whole: `where Eq (Maybe a)` supplies
 `Eq (Maybe a)`, context included — and only that.  It does not supply
@@ -2944,7 +2947,9 @@ written pair is.
 
 In an instance method the context comes from the instance head, under the head's
 own variable names, and reaches only the variables the head binds; a variable of
-the method's own needs a method-level `where`.  An unannotated parameter — or a
+the method's own needs a method-level `where`.  A method that writes `Box t` for the
+head's `Box a` has a variable of its own, so `where Eq (Maybe a)` on the head does
+not reach `Maybe t`.  An unannotated parameter — or a
 type variable inside one's inferred type — has no variable to constrain until it
 is annotated, and a context at an applied variable (`Eq (f a)`) cannot be supplied
 by a `where` clause today; each is rejected, and the message says what to do

@@ -1,0 +1,10 @@
+# The context is needed at a variable inside the unannotated RETURN type
+# (`(String, List t)`); the remedy is to declare that type naming `t`, not to declare
+# the whole return type as one variable.
+fn g() =
+  let e = []
+  in (to_string(Just(e)), e)
+
+fn main() -> Unit !{IO} =
+  match g() with
+  | (s, _) -> print(s)

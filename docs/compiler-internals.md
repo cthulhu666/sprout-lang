@@ -538,6 +538,17 @@ always built from the callee's own variable (prog_to_fresh during inference,
 `find_class_var_in_type` over the call's type afterwards), never from the first
 argument the head-directed scan finds.
 
+**Only an exact path names a variable.** A dict built from the callee's own variable
+renders its type with `named_typeexpr`, so a variable reads as the program name
+`resolve` checks (`Eq a`). A head-directed scan (`first_concrete_typed_arg_typeexpr`
+and kin) guesses — a nested `where ToString (Box (List b))` or a tuple constraint has
+no variable to read — and renders with the unnamed `type_to_typeexpr`, so its
+variables stay `_`. A named guess passed `resolve` as forwarded and ran the other
+argument's dictionary; a hole lowers to the poison thunk, which fails loudly
+(`tests/stdlib/compiler/test_guessed_dict_stays_hole.spr`). The post-pass never
+rebuilds from a scan: a token with no head or no arguments keeps its hole
+(`rebuilt_constrained_dict`).
+
 ### The compound-head constraint token, and why it carries `#any`
 
 A constrained `fn`'s hidden dictionaries come from its Scheme's `(head_token, class)`

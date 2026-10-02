@@ -1,0 +1,15 @@
+# An instance's context names the head's variables. A method that writes `Box t` for
+# the head's `Box a` has a variable of its own, which the context does not reach.
+# Matching contexts to methods by position instead needs the method's signature
+# checked against the class's at the head, which nothing does yet (BACKLOG).
+type Box a = Box a
+
+class Same t
+  fn same(x: t, y: t) -> Bool
+
+instance Same (Box a) where Eq (Maybe a)
+  fn same(x: Box t, y: Box t) -> Bool =
+    match (x, y) with
+    | (Box p, Box q) -> Just(p) == Just(q)
+
+fn main() -> Unit !{IO} = print(to_string(same(Box(1), Box(1))))

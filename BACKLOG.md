@@ -2718,6 +2718,20 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   remedy but a concrete type, which is what the #423 context check now tells the user. Fix:
   support `where C (f a)` end to end (hidden slot, call-site injection, dispatch), or reject it
   at the declaration with a located message instead of an internal error.
+- [ ] `P1` **An instance method's signature is never checked against the class's at the head.**
+  `instance Same (Box a)` with `fn same(x: Int, y: Int)` compiles and compares `Box` pointers as
+  `Int`s. Swapped names segfault: `instance Same (Pair a b) where Eq a, Eq b` with method
+  params `Pair b a` runs String's `eq` on an Int, because a context reaches a method by variable
+  NAME. Master too. Fix: in `check_instance_method`, unify the method's declared type with the
+  class method's scheme at the head, head variables rigid; that also makes a renamed head
+  variable (`type_error/instance_method_renamed_head_var`) a declaration-site error.
+- [ ] `P3` **A nested or tuple callee constraint gets a guessed dictionary, not the exact one.**
+  `where ToString (Box (List b))` or `where ToString (b, Int)` carries no variable a call can
+  read, so `infer`'s scan takes the first argument with that head. When the argument's type holds
+  a variable the guess stays a hole and lowers to the poison thunk
+  (`tests/stdlib/compiler/test_guessed_dict_stays_hole.spr`): a wrong pick fails loudly, but so
+  does a right one. Fix: keep the constraint's written arguments on the callee's scheme and
+  match them against the call's argument types.
 - [ ] `P2` **Wire in the dead `assert_resolved_typed_expr` soundness pass.** `infer.sprout` has a
   pass flagging free TVars in the final typed AST that is **never called**. **Investigate first
   whether it catches this class:** the record dispatch bugs poisoned the *injected dict evidence*

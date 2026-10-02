@@ -485,10 +485,7 @@ fn is_checked_var(name: String) -> Bool =
 # an applied variable (`Eq (f a)`) is not supported; an instance method takes its
 # context from the instance head, under the head's own variable names.
 fn unsupplied_remedy(kind: DeclKind, cls: String, arg: ast.TypeExpr) -> String =
-  if types.is_unann_placeholder(type_expr_head_name(arg)) then
-    "needs `" ++ cls ++ "` on " ++ unann_subject(type_expr_head_name(arg))
-      ++ ", which has no annotation — annotate it with a type variable and add a `where "
-      ++ cls ++ "` constraint on that variable"
+  if types.is_unann_placeholder(type_expr_head_name(arg)) then unann_remedy(cls, type_expr_head_name(arg))
   else
     "needs `" ++ cls ++ " " ++ te_display_atom(arg) ++ "`, which nothing in scope supplies — "
       ++ supply_hint(kind, cls, arg)
@@ -507,12 +504,39 @@ fn supply_hint(kind: DeclKind, cls: String, arg: ast.TypeExpr) -> String =
           ++ "must declare it too) — or, if it is the instance head's variable, spell it as the head does"
   | (_, InFn) -> "add `where " ++ cls ++ " " ++ te_display_atom(arg) ++ "`"
 
-# `_unann@f/x` is parameter `x` of `f`, `_unann@f` f's return type. An instance method's
-# owner is `#inst/<method>`, whose own `/` is not a parameter's.
-fn unann_subject(placeholder: String) -> String =
-  if str_find(unann_slot(string.drop(placeholder, string.length(types.unann_prefix))), "/") == -1
-  then "the return type"
-  else "the type of parameter `" ++ string.substring_after_last(placeholder, "/") ++ "`"
+# A slot's own type takes a type variable; a variable INSIDE its type
+# (types.is_unann_inner) cannot — `b: t` where `b: Box p` was inferred forces `t` to
+# `Box p` — so the remedy is to write the type out, naming the variable.
+fn unann_remedy(cls: String, placeholder: String) -> String =
+  if types.is_unann_inner(placeholder) then
+    "needs `" ++ cls ++ "` on a type variable inside " ++ unann_owner(unann_param(placeholder))
+      ++ ", which has no annotation — write that type out, naming the variable, and add a `where "
+      ++ cls ++ "` constraint on it"
+  else
+    "needs `" ++ cls ++ "` on " ++ unann_subject(unann_param(placeholder))
+      ++ ", which has no annotation — annotate it with a type variable and add a `where "
+      ++ cls ++ "` constraint on that variable"
+
+fn unann_subject(param: Maybe String) -> String =
+  match param with
+  | Just p -> "the type of parameter `" ++ p ++ "`"
+  | Nothing -> "the return type"
+
+fn unann_owner(param: Maybe String) -> String =
+  match param with
+  | Just p -> "parameter `" ++ p ++ "`'s type"
+  | Nothing -> "the return type"
+
+# `_unann@f/x` is parameter `x` of `f`, `_unann@f` f's return type (Nothing). An
+# instance method's owner is `#inst/<method>`, whose own `/` is not a parameter's.
+fn unann_param(placeholder: String) -> Maybe String =
+  let slot = unann_slot(string.drop(without_inner_suffix(placeholder), string.length(types.unann_prefix)))
+  in if str_find(slot, "/") == -1 then Nothing else Just(string.substring_after_last(slot, "/"))
+
+fn without_inner_suffix(placeholder: String) -> String =
+  if types.is_unann_inner(placeholder)
+  then string.take(placeholder, string.length(placeholder) - string.length(types.unann_inner_suffix))
+  else placeholder
 
 fn unann_slot(owner_and_param: String) -> String =
   if str_starts_with(owner_and_param, types.inst_owner_prefix)
