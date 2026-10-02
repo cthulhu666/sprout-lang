@@ -1,0 +1,4 @@
+# A nullary constructor named `Int`: `Age` has one value, and it is not a number.
+type Age = Int
+
+fn main() -> Unit !{IO} = print("unreachable")

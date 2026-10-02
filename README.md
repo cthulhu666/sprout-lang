@@ -162,6 +162,15 @@ type IntVec =                            # the idiom for a specific element type
 instance Summable IntVec                 # ok — `IntVec` is its own head
 ```
 
+**An alias needs `alias`**
+Without it, `type T = …` declares a new type and the first word is a constructor name.
+When that type has one constructor named after a type in scope, it is rejected (spec §5.6).
+```sprout
+type Pairs = List (String, Int)          # rejected: a constructor named `List`
+type alias Pairs = List (String, Int)    # ok — the same type as List (String, Int)
+wrap Pairs = List (String, Int)          # ok — a distinct type over it
+```
+
 **A dotted import outside `stdlib/` needs `--package-root`, and fails silently without it**
 The default search path resolves only `stdlib.<name>` imports and single-segment
 dotless names. Any *other* dotted import (e.g. `import myapp.util`) resolves under an

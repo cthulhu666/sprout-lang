@@ -1,0 +1,1 @@
+type `Age` has one constructor, `Int`, which is also the name of a type in scope

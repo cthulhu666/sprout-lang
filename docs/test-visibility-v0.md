@@ -91,8 +91,8 @@ resolved by name-qualification in the bundler, before typechecking. Verified
    importer's `ResolveCtx`. A private name is never rejected — it is simply
    never bound, so a reference to it fails as an unknown variable.
 
-4. **Privates still land in the bundle.** `qualify_all_modules`
-   (`bundler.sprout:1059`) qualifies **all** `decls` of every visited module,
+4. **Privates still land in the bundle.** `qualify_all_modules_with`
+   (`bundler.sprout`) qualifies **all** `decls` of every visited module,
    unfiltered by `exported`. A private function is renamed with its module
    prefix, typechecked, and lowered into the importer's IR even when nothing
    calls it.

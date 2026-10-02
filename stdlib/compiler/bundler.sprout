@@ -1761,12 +1761,6 @@ fn qualify_decls(ctx: ResolveCtx, decls: List ast.Decl) -> List ast.Decl =
 # Main pipeline
 # ---------------------------------------------------------------------------
 
-# The canonical-name table is bundle-wide, so it is built ONCE here rather than
-# per module inside build_resolve_ctx — which would make it quadratic in modules.
-fn qualify_all_modules(modules: List ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String, extra_roots: List String) -> List ast.Decl =
-  qualify_all_modules_with(modules, all_symbols, stdlib_root, extra_roots,
-                           all_canonical_names(all_symbols))
-
 fn qualify_all_modules_with(modules: List ParsedModule, all_symbols: Dict ModuleSymbols,
                             stdlib_root: String, extra_roots: List String,
                             canonical: Dict String) -> List ast.Decl =
@@ -2249,6 +2243,81 @@ fn validate_type_names(decls: List ast.Decl) -> Maybe(source.SourcePos, String) 
   find_unresolved_type(decls, declared_type_names(decls, dict_empty()))
 
 # ---------------------------------------------------------------------------
+# A one-constructor type whose constructor is named after a type in scope
+# ---------------------------------------------------------------------------
+#
+# `type Pairs = List (String, Int)` reads as an alias and is not one: it declares a
+# constructor named `List` (spec §5.6). Only the one-constructor shape is rejected,
+# since that is the shape an alias has; `| JsonArray JsonArray` among other
+# constructors stays legal (stdlib/json.sprout).
+#
+# "In scope" is what qualify_type_name resolves a bare name to, read off the same
+# ResolveCtx: the module's own types, the ones it imports by name, and by
+# fall-through the bare-named ones, which are the prelude's.
+
+# The types a bare name falls through to: those of a module spelled bare (the prelude).
+fn bare_type_names(modules: List ParsedModule, all_symbols: Dict ModuleSymbols,
+                   acc: Dict String) -> Dict String =
+  match modules with
+  | Nil -> acc
+  | Cons mod rest ->
+      match mod with
+      | ParsedModule mod_name path _ _ _ _ ->
+          if mod_name != "" then bare_type_names(rest, all_symbols, acc)
+          else
+            match dict_get(path, all_symbols) with
+            | Nothing -> bare_type_names(rest, all_symbols, acc)
+            | Just syms -> bare_type_names(rest, all_symbols, dict_merge(acc, sym_type_locals(syms)))
+
+# (type, constructor, position) of a one-constructor type not named like its constructor.
+fn one_ctor_named_apart(decl: ast.Decl) -> Maybe (String, String, source.SourcePos) =
+  match decl with
+  | ast.TypeDecl name _ [ast.TypeConstructor ctor _ _ _] _ _ pos ->
+      if ctor == name then Nothing else Just((name, ctor, pos))
+  | _ -> Nothing
+
+fn names_type_in_scope(ctx: ResolveCtx, bare_types: Dict String, name: String) -> Bool =
+  str_list_member(name, undeclared_type_names)
+    || has_key(name, ctx_type_locals(ctx))
+    || has_key(name, ctx_unqual_types(ctx))
+    || has_key(name, bare_types)
+
+# `shown` is the qualified name, so the message names the module; the fix is
+# spelled with the name as written.
+fn one_ctor_clash_message(shown: String, name: String, ctor: String) -> String =
+  "type `" ++ shown ++ "` has one constructor, `" ++ ctor
+    ++ "`, which is also the name of a type in scope: this declares a new sum type, not an alias. Write `type alias "
+    ++ name ++ " = …` for an alias or `wrap " ++ name
+    ++ " = …` for a distinct type; to keep the sum type, rename the constructor"
+
+fn first_one_ctor_clash(ctx: ResolveCtx, bare_types: Dict String,
+                        candidates: List (String, String, source.SourcePos)) -> Maybe(source.SourcePos, String) =
+  match candidates with
+  | [] -> Nothing
+  | [(name, ctor, pos) | rest] ->
+      if names_type_in_scope(ctx, bare_types, ctor)
+      then Just((pos, one_ctor_clash_message(dict_get_or(name, ctx_type_locals(ctx), name), name, ctor)))
+      else first_one_ctor_clash(ctx, bare_types, rest)
+
+# Runs on the modules as written, before qualification renames their constructors.
+# A module's ResolveCtx is built only when it has a candidate, which most do not.
+fn find_one_ctor_clash(modules: List ParsedModule, all_symbols: Dict ModuleSymbols,
+                       stdlib_root: String, extra_roots: List String, canonical: Dict String,
+                       bare_types: Dict String) -> Maybe(source.SourcePos, String) =
+  match modules with
+  | Nil -> Nothing
+  | Cons mod rest ->
+      match mod with
+      | ParsedModule _ _ _ _ _ decls ->
+          match list_filter_map(one_ctor_named_apart, decls) with
+          | [] -> find_one_ctor_clash(rest, all_symbols, stdlib_root, extra_roots, canonical, bare_types)
+          | candidates ->
+              match first_one_ctor_clash(build_resolve_ctx(mod, all_symbols, stdlib_root, extra_roots, canonical),
+                                         bare_types, candidates) with
+              | Just e -> Just(e)
+              | Nothing -> find_one_ctor_clash(rest, all_symbols, stdlib_root, extra_roots, canonical, bare_types)
+
+# ---------------------------------------------------------------------------
 # Post-qualification assertion: no qualified name may start with '.'
 # An empty module prefix + dot (e.g. ".fn_name") is always a bug in
 # scan_source_info or build_resolve_ctx returning an empty module name.
@@ -2294,11 +2363,18 @@ fn make_bundle_or_err(modules: List ParsedModule, stdlib_root: String, extra_roo
           match validate_type_names(qualified) with
           | Just (pos, err_msg) -> BundleErr(pos, err_msg)
           | Nothing ->
+            match find_one_ctor_clash(modules, all_symbols, stdlib_root, extra_roots, canonical,
+                                      bare_type_names(modules, all_symbols, dict_empty())) with
+            | Just (pos, err_msg) -> BundleErr(pos, err_msg)
+            | Nothing ->
             match deriving.validate_deriving_decls(qualified) with
             | Just (pos, err_msg) -> BundleErr(pos, "deriving: " ++ err_msg)
             | Nothing -> BundleOk(ast.Program(deriving.expand_deriving_decls(qualified), no_pos()))
   where all_symbols = build_all_symbols(modules)
-        qualified = qualify_all_modules(modules, all_symbols, stdlib_root, extra_roots)
+        # Bundle-wide, so built once here rather than per module in build_resolve_ctx,
+        # which would make it quadratic in modules.
+        canonical = all_canonical_names(all_symbols)
+        qualified = qualify_all_modules_with(modules, all_symbols, stdlib_root, extra_roots, canonical)
 
 export fn bundle_file(path: source.FilePath, stdlib_root: source.StdlibRoot) -> BundleResult !{IO} =
   bundle_file_with_roots(path, stdlib_root, Nil)
@@ -2384,7 +2460,7 @@ fn dump_qualify_module(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdli
         build_resolve_ctx(mod, all_symbols, stdlib_root, Nil, canonical),
         decls, Nil)))
 
-# Same once-per-bundle rule as `qualify_all_modules`: build the canonical table
+# Same once-per-bundle rule as `make_bundle_or_err`: build the canonical table
 # here, not inside the per-module function, or the debug dump is quadratic.
 fn dump_qualify_modules_acc(modules: List ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String) -> List String =
   dump_qualify_modules_with(modules, all_symbols, stdlib_root, all_canonical_names(all_symbols))

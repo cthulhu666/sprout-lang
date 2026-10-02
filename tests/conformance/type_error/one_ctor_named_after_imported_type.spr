@@ -1,0 +1,6 @@
+# A type brought in by name is in scope bare, so it clashes like a local one.
+import stdlib.json (JsonError)
+
+type Holder = JsonError Int
+
+fn main() -> Unit !{IO} = print("unreachable")
