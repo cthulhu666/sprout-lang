@@ -1,0 +1,6 @@
+module demo.clashdep
+
+# A one-constructor type named after a prelude type, in a module the entry imports.
+export type Bad = Maybe Int
+
+export let clash_value: Int = 1

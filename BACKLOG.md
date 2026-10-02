@@ -1134,6 +1134,11 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   `module_loader.collect_imports_from_lines` stops at the first line that is not `module`, `import`,
   blank or a comment, so `no_prelude` ends the import scan. Spec §3.1 calls `no_prelude` a header
   line like `import`, with no order among them. Found while fixing #422.
+- [ ] `P3` **A module sees a `no_prelude` entry's types bare, unimported.** A module imported by a
+  `no_prelude` entry that declares `type Token` can write `fn tok_value(t: Token)` with no import,
+  and `Token` resolves to the entry's type. The entry keeps the empty module name, so its types are
+  canonical-bare, and `bundler.qualify_type_name` falls through to the bare name. A library then
+  compiles or not depending on who imports it. Found while fixing #422.
 - [ ] `P3` **A constructor name may contain a dot.** The lexer reads `json.JsonEncode` as one ident
   and the parser accepts it as a constructor name, so `type Doc = | json.JsonEncode | Other`
   compiles, and `json.JsonEncode` in an expression then means this local constructor, not a member

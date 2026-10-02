@@ -561,10 +561,13 @@ fn issue_message(issue: LoadIssue) -> String =
 # A position is only reportable when the failure is in the file the caller asked about.
 # An error inside an IMPORTED module has a position in THAT file, and handing it back
 # would land the squiggle on an unrelated line of the document being edited. The message
-# still names the offending path, so nothing is lost but a misplaced marker.
+# still names the offending path or module, so nothing is lost but a misplaced marker.
+fn pos_for_entry(path: String, pos: source.SourcePos, entry_path: String) -> source.SourcePos =
+  if path == entry_path then pos else no_pos()
+
 fn issue_pos_for_entry(issue: LoadIssue, entry_path: String) -> source.SourcePos =
   match issue with
-  | LoadIssue path pos _ -> if path == entry_path then pos else no_pos()
+  | LoadIssue path pos _ -> pos_for_entry(path, pos, entry_path)
 
 fn process_wi_leave(path: String, visiting: Ref (List String)) -> List LoadIssue !{IO} =
   do
@@ -2281,16 +2284,20 @@ fn one_ctor_named_apart(decl: ast.Decl) -> Maybe (String, List String, String, s
       if ctor == name then Nothing else Just((name, params, ctor, pos))
   | _ -> Nothing
 
+fn alias_names_type(ctx: ResolveCtx, vocab: TypeVocab, name: String) -> Bool =
+  match qualified_type_lookup(ctx, name) with
+  | Nothing -> false
+  | Just canonical -> has_key(canonical, vocab.type_canonicals)
+
+# A bare name is tried in qualify_type_name's order, so a class the module declares
+# or imports hides a prelude or builtin type of its name.
 fn names_type_in_scope(ctx: ResolveCtx, vocab: TypeVocab, name: String) -> Bool =
-  if str_find(name, ".") != -1 then
-    match qualified_type_lookup(ctx, name) with
-    | Nothing -> false
-    | Just canonical -> has_key(canonical, vocab.type_canonicals)
-  else
-    str_list_member(name, undeclared_type_names)
-      || has_key(name, ctx_type_locals(ctx))
-      || has_key(name, ctx_unqual_types(ctx))
-      || has_key(name, vocab.prelude_types)
+  if str_find(name, ".") != -1 then alias_names_type(ctx, vocab, name)
+  else if has_key(name, ctx_type_locals(ctx)) then true
+  else if has_key(name, ctx_class_locals(ctx)) then false
+  else if has_key(name, ctx_unqual_types(ctx)) then true
+  else if has_key(name, ctx_unqual_classes(ctx)) then false
+  else str_list_member(name, undeclared_type_names) || has_key(name, vocab.prelude_types)
 
 # `shown` is the qualified name, so the message names the module; `head` is the
 # type as written, with its parameters, which the suggested fix needs.
@@ -2312,20 +2319,21 @@ fn first_one_ctor_clash(ctx: ResolveCtx, vocab: TypeVocab,
 
 # Runs on the modules as written, before qualification renames their constructors.
 # A module's ResolveCtx is built only when it has a candidate, which most do not.
+# Returns the module's path with the clash, since its position is in THAT file.
 fn find_one_ctor_clash(modules: List ParsedModule, all_symbols: Dict ModuleSymbols,
                        stdlib_root: String, extra_roots: List String, canonical: Dict String,
-                       vocab: TypeVocab) -> Maybe(source.SourcePos, String) =
+                       vocab: TypeVocab) -> Maybe (String, source.SourcePos, String) =
   match modules with
   | Nil -> Nothing
   | Cons mod rest ->
       match mod with
-      | ParsedModule _ _ _ _ _ decls ->
+      | ParsedModule _ path _ _ _ decls ->
           match list_filter_map(one_ctor_named_apart, decls) with
           | [] -> find_one_ctor_clash(rest, all_symbols, stdlib_root, extra_roots, canonical, vocab)
           | candidates ->
               match first_one_ctor_clash(build_resolve_ctx(mod, all_symbols, stdlib_root, extra_roots, canonical),
                                          vocab, candidates) with
-              | Just e -> Just(e)
+              | Just (pos, msg) -> Just((path, pos, msg))
               | Nothing -> find_one_ctor_clash(rest, all_symbols, stdlib_root, extra_roots, canonical, vocab)
 
 # ---------------------------------------------------------------------------
@@ -2364,7 +2372,8 @@ fn validate_qualified_decls(decls: List ast.Decl) -> Maybe(source.SourcePos, Str
 # Imports are validated FIRST. A bad import makes the names it should have bound
 # resolve to something else or to nothing, so every later check reports a symptom
 # of it — under its own name, somewhere the import is not mentioned.
-fn make_bundle_or_err(modules: List ParsedModule, stdlib_root: String, extra_roots: List String) -> BundleResult =
+fn make_bundle_or_err(modules: List ParsedModule, entry_path: String, stdlib_root: String,
+                      extra_roots: List String) -> BundleResult =
   match validate_imports(modules, all_symbols, stdlib_root, extra_roots) with
   | Just err_msg -> BundleErr(no_pos(), err_msg)
   | Nothing ->
@@ -2376,7 +2385,7 @@ fn make_bundle_or_err(modules: List ParsedModule, stdlib_root: String, extra_roo
           | Nothing ->
             match find_one_ctor_clash(modules, all_symbols, stdlib_root, extra_roots, canonical,
                                       type_vocab(all_symbols, stdlib_root)) with
-            | Just (pos, err_msg) -> BundleErr(pos, err_msg)
+            | Just (path, pos, err_msg) -> BundleErr(pos_for_entry(path, pos, entry_path), err_msg)
             | Nothing ->
             match deriving.validate_deriving_decls(qualified) with
             | Just (pos, err_msg) -> BundleErr(pos, "deriving: " ++ err_msg)
@@ -2423,7 +2432,7 @@ fn bundle_entry(entry_path: String, stdlib_root: source.StdlibRoot, extra_roots:
     (err, modules) <- collect_modules(entry_path, source.stdlib_root_str(stdlib_root), extra_roots, load_env)
     match err with
     | Just issue -> BundleErr(issue_pos_for_entry(issue, entry_path), issue_message(issue))
-    | Nothing -> make_bundle_or_err(modules, source.stdlib_root_str(stdlib_root), extra_roots)
+    | Nothing -> make_bundle_or_err(modules, entry_path, source.stdlib_root_str(stdlib_root), extra_roots)
 
 # ---------------------------------------------------------------------------
 # Phase: dump-qualify — show original→qualified name mapping per module

@@ -957,7 +957,8 @@ resolves to a type in that module:
 
 - written bare: a primitive type, a runtime type (`Vector`, `Map`, `NativeSet`,
   `Ref`, `Builder`), a prelude type, a type of the same module, or one imported
-  by name;
+  by name — unless a class the module declares or imports has that name, which
+  hides the primitive, runtime or prelude type;
 - written qualified: a type an import alias exports (`json.Json` after
   `import stdlib.json as json`).
 
