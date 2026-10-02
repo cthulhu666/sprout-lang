@@ -493,6 +493,12 @@ arguments. Rationale: [docs/instance-head-kinds-v0.md](instance-head-kinds-v0.md
 An arity check alone was tried first and refuted by execution — the surplus is a
 property of the RECORDER, not of the class.
 
+`check_context_subs` asks the substitution one question again, in the other
+direction: a context variable the head left unbound is EXEMPT from the forwarding
+check (`check_context_constraint`, #423), never rejected. The three faults above
+stay closed — `_` is skipped as unnamed, a depth mismatch is reported first, and
+`Baz k` is the exempt case.
+
 ### One hidden-dictionary slot per class and head constructor
 
 A constrained function's hidden dictionary parameters are keyed by class name plus the

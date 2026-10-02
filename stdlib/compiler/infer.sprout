@@ -2520,7 +2520,7 @@ fn check_instance_for_marker(
                       else InferErr(pos, "No instance of " ++ types.type_id_name(class_name) ++ " for " ++ head_str)
                 in
                   InferOk(
-                    concrete_dispatch_call(env, typed_callee, typed_args, ret_t, pos,
+                    concrete_dispatch_call(env, s3, typed_callee, typed_args, ret_t, pos,
                       types.type_id_name(class_name),
                       class_var_dispatch_type(method_name, class_vars, typed_args, ret_t, s3, env,
                         unifier.apply_subst(s3, typed_ast.typed_expr_type(cv_arg)), head_str)),
@@ -2906,7 +2906,11 @@ fn first_concrete_typed_arg_typeexpr_excluding(
 # without it, TVar args become TypeName("_") and the lowering's fwd-dict lookup fails.
 # Like type_to_typeexpr, but for each TVar looks up @fwd:name:class_name in env
 # to recover the programmer-visible variable name (e.g. "a") rather than emitting "_".
-fn type_to_typeexpr_with_prog_vars(t: types.Type, class_name: String, env: Dict types.Scheme) -> ast.TypeExpr =
+#
+# `subst` is the substitution `t` was resolved with; it is what lets a variable that
+# unification bound AWAY still be named (see sig_var_now_named).
+fn type_to_typeexpr_with_prog_vars(t: types.Type, class_name: String, subst: Dict types.Type,
+                                   env: Dict types.Scheme) -> ast.TypeExpr =
   match t with
   # Module-qualified type identity (T7): keep the canonical (dotted) name. This
   # TypeExpr becomes the injected TDict's constraint head, which resolve.sprout turns
@@ -2914,24 +2918,55 @@ fn type_to_typeexpr_with_prog_vars(t: types.Type, class_name: String, env: Dict 
   # ("ToString_Maybe") and mis-resolved a shadowed type to the prelude instance.
   | types.TConst name -> ast.TypeName(types.type_id_name(name))
   | types.TApp base arg ->
-      ast.TypeApply(type_to_typeexpr_with_prog_vars(base, class_name, env),
-                    type_to_typeexpr_with_prog_vars(arg, class_name, env))
+      ast.TypeApply(type_to_typeexpr_with_prog_vars(base, class_name, subst, env),
+                    type_to_typeexpr_with_prog_vars(arg, class_name, subst, env))
   | types.TVar name ->
       match dict_get("@fwd:" ++ types.tyvar_identity(name) ++ ":" ++ class_name, env) with
       | Just scheme -> fwd_scheme_prog_var(scheme)
-      | Nothing -> fwd_prog_var_any_class(types.tyvar_identity(name), env)
+      | Nothing -> fwd_prog_var_any_class(types.tyvar_identity(name), subst, env)
   | types.TTuple items ->
-      ast.TupleType(list_map(\item -> type_to_typeexpr_with_prog_vars(item, class_name, env), items))
+      ast.TupleType(list_map(\item -> type_to_typeexpr_with_prog_vars(item, class_name, subst, env), items))
   | _ -> ast.TypeName("_")
 
-# The program name a forwarded type variable was written under. @fwd is keyed by
-# CLASS, but the name belongs to the VARIABLE, so @fwdvar answers for any class
-# that forwarded it. `_` is the last resort and a poor one: it reads downstream as
-# a concrete type of that name, so the slot is null-filled instead of forwarded.
-fn fwd_prog_var_any_class(tyvar: String, env: Dict types.Scheme) -> ast.TypeExpr =
+# The program name a type variable was written under. @fwd is keyed by CLASS, but
+# the name belongs to the VARIABLE, so @fwdvar answers for any class. `_` is the
+# last resort: a variable no signature wrote, whose dictionary nothing can supply.
+fn fwd_prog_var_any_class(tyvar: String, subst: Dict types.Type, env: Dict types.Scheme) -> ast.TypeExpr =
   match dict_get(fwdvar_key(tyvar), env) with
   | Just scheme -> fwd_scheme_prog_var(scheme)
-  | Nothing -> ast.TypeName("_")
+  | Nothing ->
+      match sig_var_now_named(tyvar, subst, env) with
+      | Just scheme -> fwd_scheme_prog_var(scheme)
+      | Nothing -> ast.TypeName("_")
+
+# The declaration's signature variables, as one TTuple of their fresh TVars, for
+# sig_var_now_named to search when unification has bound one of them away.
+let sig_vars_key: String = "@sigvars"
+
+# The @fwdvar entry of the signature variable that `tyvar` now stands for, if any.
+#
+# Unification orients a variable-variable binding either way, and at a call it binds
+# the argument's variable to the callee's fresh one: `x: a` passed to `Just` records
+# `a -> $t`, so `Just(x)` reads `Maybe $t` and `$t` has no entry of its own. Asking the
+# substitution which signature variable resolves to the same one is orientation-proof,
+# as forwarded_tdict_for_tyvar is for a bare dispatch variable. Missing it named the
+# inner dictionary of `Just(x) == y` as `Eq _`, which lowered to the poison thunk (#423).
+fn sig_var_now_named(tyvar: String, subst: Dict types.Type, env: Dict types.Scheme) -> Maybe types.Scheme =
+  let Just sch = dict_get(sig_vars_key, env) else Nothing
+      types.TTuple vars = types.scheme_type(sch) else Nothing
+      types.TVar rep = unifier.apply_subst(subst, types.TVar(types.tyvar_id(tyvar))) else Nothing
+      Just named = first_var_resolving_to(rep, vars, subst) else Nothing
+  in dict_get(fwdvar_key(named), env)
+
+fn first_var_resolving_to(rep: types.TyVarId, vars: List types.Type, subst: Dict types.Type) -> Maybe String =
+  match vars with
+  | [] -> Nothing
+  | [v | rest] ->
+      match (v, unifier.apply_subst(subst, v)) with
+      | (types.TVar name, types.TVar now) ->
+          if types.tyvar_eq(now, rep) then Just(types.tyvar_identity(name))
+          else first_var_resolving_to(rep, rest, subst)
+      | _ -> first_var_resolving_to(rep, rest, subst)
 
 fn fwd_scheme_prog_var(scheme: types.Scheme) -> ast.TypeExpr =
   match scheme with
@@ -3207,7 +3242,7 @@ fn scan_ptf_prog_var_entries(
                 match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
                 | Just _ ->
                     Just(typed_ast.TDict(
-                      ast.TypeConstraint(class_name, Cons(type_to_typeexpr_with_prog_vars(unifier.apply_subst(s3, fresh_t), class_name, env), Nil)),
+                      ast.TypeConstraint(class_name, Cons(type_to_typeexpr_with_prog_vars(unifier.apply_subst(s3, fresh_t), class_name, s3, env), Nil)),
                       types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
                 | Nothing ->
                     scan_ptf_prog_var_entries(class_name, prog_var, rest, s3, env, pos, excluded)
@@ -3788,7 +3823,7 @@ fn resolve_precise_head(
       match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
       | Just _ ->
           (Just(typed_ast.TDict(
-            ast.TypeConstraint(class_name, Cons(type_to_typeexpr_with_prog_vars(unifier.apply_subst(s3, fresh_t), class_name, env), Nil)),
+            ast.TypeConstraint(class_name, Cons(type_to_typeexpr_with_prog_vars(unifier.apply_subst(s3, fresh_t), class_name, s3, env), Nil)),
             types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved)), "precise-just")
       | Nothing ->
           (resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos), "precise_no_inst->fwd_or_scan")
@@ -3999,6 +4034,42 @@ fn seed_fwd_with_supers(class_name: String, fresh_name: FreshTVarName, prog_var:
 # recovering its program name is a lookup rather than a scan of the whole env.
 # Every site that writes an @fwd marker must write this too.
 fn fwdvar_key(tyvar: String) -> String = "@fwdvar:" ++ tyvar
+
+# Name EVERY signature variable, constrained or not. Unnamed, a dictionary an
+# unconstrained `a` needs reads `Eq _`, indistinguishable from a free variable's
+# inert one; named, it reads `Eq a`, which resolve rejects as unsupplied rather
+# than letting it lower to the poison thunk.
+fn seed_sig_var_names(prog_to_fresh: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
+  seed_sig_var_entries(vec_to_list(dict_entries(prog_to_fresh)), env)
+
+fn seed_sig_var_entries(entries: List (String, types.Type), env: Dict types.Scheme) -> Dict types.Scheme =
+  match entries with
+  | [] -> env
+  | [entry | rest] ->
+      match entry with
+      | (prog_var, types.TVar fresh) ->
+          seed_sig_var_entries(rest,
+            add_sig_var(ProgVarName(prog_var), FreshTVarName(types.tyvar_identity(fresh)), env))
+      | _ -> seed_sig_var_entries(rest, env)
+
+# A constrained variable already has its @fwdvar from seed_fwd_with_supers, under the
+# same name; keep it.
+fn add_sig_var(prog_var: ProgVarName, fresh: FreshTVarName, env: Dict types.Scheme) -> Dict types.Scheme =
+  dict_set(sig_vars_key,
+    types.mono(types.TTuple(Cons(types.TVar(types.tyvar_id(fresh_tvar_str(fresh))), seeded_sig_vars(env)))),
+    name_unless_named(prog_var, fresh, env))
+
+fn name_unless_named(prog_var: ProgVarName, fresh: FreshTVarName, env: Dict types.Scheme) -> Dict types.Scheme =
+  match dict_get(fwdvar_key(fresh_tvar_str(fresh)), env) with
+  | Just _ -> env
+  | Nothing ->
+      dict_set(fwdvar_key(fresh_tvar_str(fresh)),
+               types.mono(types.TConst(types.type_id(prog_var_str(prog_var)))), env)
+
+fn seeded_sig_vars(env: Dict types.Scheme) -> List types.Type =
+  let Just sch = dict_get(sig_vars_key, env) else Nil
+      types.TTuple vars = types.scheme_type(sch) else Nil
+  in vars
 
 # Seed @fwd markers for all superclasses of class_name.
 # Scans env for "@super:{class_name}:{super_name}" entries and adds
@@ -4359,7 +4430,7 @@ fn append_via_semigroup_at(
           InferOk(
             typed_ast.TCall(typed_ast.TVar("append", t, pos),
               Cons(typed_ast.TDict(
-                     ast.TypeConstraint("Semigroup", Cons(type_to_typeexpr_with_prog_vars(t, "Semigroup", env), Nil)),
+                     ast.TypeConstraint("Semigroup", Cons(type_to_typeexpr_with_prog_vars(t, "Semigroup", s1, env), Nil)),
                      types.TConst(types.type_id("Semigroup")), pos, typed_ast.EvUnresolved),
                    [typed_left, typed_right]),
               t, pos),
@@ -9717,6 +9788,7 @@ fn find_inst_in_return_type_list(class_name: String, items: List types.Type, env
 # method-level dictionary the moment the injector stopped appending them.
 fn concrete_dispatch_call(
   env: Dict types.Scheme,
+  subst: Dict types.Type,
   fn_: typed_ast.TypedExpr,
   args: List typed_ast.TypedExpr,
   t: types.Type,
@@ -9726,7 +9798,7 @@ fn concrete_dispatch_call(
 ) -> typed_ast.TypedExpr =
   typed_ast.TCall(fn_,
     Cons(typed_ast.TDict(
-      ast.TypeConstraint(class_name, Cons(type_to_typeexpr_with_prog_vars(resolved_t, class_name, env), Nil)),
+      ast.TypeConstraint(class_name, Cons(type_to_typeexpr_with_prog_vars(resolved_t, class_name, subst, env), Nil)),
       types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved),
       args),
     t, pos)
@@ -9756,7 +9828,7 @@ fn try_rewrite_for_return_dispatch(
       # position rather than letting it reach the linker.
       match concrete_type_str(resolved_t) with
       | Nothing -> keep_or_forward_dispatch(env, subst, fn_, args, t, pos, class_name, resolved_t)
-      | Just _ -> concrete_dispatch_call(env, fn_, strip_leading_tdicts(args), t, pos, class_name, resolved_t)
+      | Just _ -> concrete_dispatch_call(env, subst, fn_, strip_leading_tdicts(args), t, pos, class_name, resolved_t)
 
 # Input-position dispatch resolves eagerly during inference, so a call that
 # already carries a dict is left exactly as it is — re-deriving it here could only
@@ -9801,7 +9873,7 @@ fn maybe_forward_input_dispatch(
   in
     match concrete_type_str(resolved_t) with
     | Nothing -> keep_or_forward_dispatch(env, subst, fn_, args, t, pos, class_name, resolved_t)
-    | Just _ -> concrete_dispatch_call(env, fn_, strip_leading_tdicts(args), t, pos, class_name, resolved_t)
+    | Just _ -> concrete_dispatch_call(env, subst, fn_, strip_leading_tdicts(args), t, pos, class_name, resolved_t)
 
 # Inject a forwarded dict when the still-polymorphic dispatch variable is one the
 # enclosing declaration declared a constraint for; otherwise leave the call alone.
@@ -10804,7 +10876,7 @@ fn check_fn_body(
       do
         let decl_scheme = scheme_from_fn_parts(name, params, ret_type_maybe, effects_maybe, alias_env)
         (inst_type, prog_to_fresh) <- unifier.instantiate_with_vars(state, decl_scheme)
-        let fwd_env = seed_forward_markers(constraints, prog_to_fresh, env)
+        let fwd_env = seed_sig_var_names(prog_to_fresh, seed_forward_markers(constraints, prog_to_fresh, env))
         # Compute @eta_fwd:* markers in parallel without walking fwd_env post-hoc.
         # Constraint-free decls return dict_empty() instantly.
         let fwd_markers = compute_eta_fwd_markers(constraints, prog_to_fresh, env)
@@ -11399,7 +11471,8 @@ fn check_instance_method(
         # The instance's own constraints and the method's restated ones seed the
         # same marker table: both name variables of THIS method's signature, and
         # both reach the body as hidden dictionaries.
-        let fwd_env = seed_forward_markers(list_append(inst_constraints, method_constraints), prog_to_fresh, env)
+        let fwd_env = seed_sig_var_names(prog_to_fresh,
+                        seed_forward_markers(list_append(inst_constraints, method_constraints), prog_to_fresh, env))
         let body_env = extend_env_with_params(params, ctor_param_types(inst_type), fwd_env)
         br <- typecheck_expr(state, body_env, subst, eff_subst, body)
         match br with

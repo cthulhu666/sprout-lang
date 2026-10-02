@@ -17,11 +17,12 @@ import stdlib.string as string
 # previously skipped, letting an unsatisfiable nested dictionary (e.g.
 # `to_string([()])` needing `ToString ()`) reach codegen and segfault.
 #
-# Conservative by design: a constraint whose head is a type *variable* is
-# forwarded/polymorphic (lowering threads it as a hidden parameter), so it is
-# left alone here.  This mirrors lowering's own resolution order — concrete head
-# uses the instance table, variable head is forwarded — without needing the
-# per-function forwarding table that only exists during lowering.
+# A constraint whose head is a type *variable* is forwarded (lowering threads it as
+# a hidden parameter), mirroring lowering's own resolution order — concrete head
+# uses the instance table, variable head is forwarded. One case is checked anyway:
+# an instance's context at a NAMED variable (`Eq (Maybe a)` needing `Eq a`) that
+# the enclosing declaration does not forward, which lowering could only fill with
+# the poison thunk (#423). See VarCover.
 #
 # Owns its instance tables (built from the typed decls, exactly like lowering's
 # collect_instance_table / collect_inst_meta).  This is the first brick of the
@@ -53,6 +54,14 @@ fn tables_super(t: Tables) -> Dict (List String) =
 
 fn tables_class_params(t: Tables) -> Dict String =
   match t with | Tables _ _ _ _ p -> p
+
+# What an instance context's type-variable constraint is checked against. In a
+# declaration body it must be one the declaration forwards (CoverFrom its keys).
+# Inside a dictionary the declaration itself forwards, nothing is checked: the
+# caller built that dictionary whole, context included (CoverByCaller).
+type VarCover =
+  | CoverFrom (Dict Bool)
+  | CoverByCaller
 
 # ---------------------------------------------------------------------------
 # Entry point
@@ -120,6 +129,7 @@ fn add_ctx(
 fn check_constraint(
   c: ast.TypeConstraint,
   pos: source.SourcePos,
+  cover: VarCover,
   tables: Tables
 ) -> Maybe(source.SourcePos, String) =
   match c with
@@ -133,9 +143,19 @@ fn check_constraint(
           if head_is_concrete(head_arg) == false then Nothing
           else
             if instance_exists(string.substring_after_last(class_name, "."), type_args, head_arg, tables)
-            then check_context(constraint_key_str(string.substring_after_last(class_name, "."), type_args), type_args, pos, tables)
+            then check_context(constraint_key_str(string.substring_after_last(class_name, "."), type_args),
+                               class_name, head_arg, type_args, pos,
+                               cover_below(constraint_key_str(string.substring_after_last(class_name, "."), type_args), cover),
+                               tables)
             else Just((pos,
               "No instance of " ++ string.substring_after_last(class_name, ".") ++ " for " ++ type_expr_head_name(head_arg)))
+
+# A dictionary the declaration forwards arrives whole, so its context is not this
+# body's to supply. Keyed the way produce_one_class decides EvForward.
+fn cover_below(key: String, cover: VarCover) -> VarCover =
+  match cover with
+  | CoverByCaller -> CoverByCaller
+  | CoverFrom fwd_keys -> if dict_has(key, fwd_keys) then CoverByCaller else cover
 
 # An instance exists if a bundled decl provides it OR the checker env carries an
 # @inst: marker for it (instances from imported modules whose decls are not
@@ -158,8 +178,11 @@ fn env_has_inst(key: String, env: Dict types.Scheme) -> Bool =
 # concrete type args).  A context-free instance has no entry → Nothing.
 fn check_context(
   key: String,
+  class_name: String,
+  head_arg: ast.TypeExpr,
   type_args: List ast.TypeExpr,
   pos: source.SourcePos,
+  cover: VarCover,
   tables: Tables
 ) -> Maybe(source.SourcePos, String) =
   match dict_get(key, tables_ctx(tables)) with
@@ -168,8 +191,8 @@ fn check_context(
       match spine_depth_mismatch(key, inst_type_args, type_args) with
       | Just msg -> Just((pos, msg))
       | Nothing ->
-          check_context_subs(inst_constraints,
-            unify_type_args_list(inst_type_args, type_args, dict_empty()), pos, tables)
+          check_context_subs(class_name, head_arg, inst_constraints,
+            unify_type_args_list(inst_type_args, type_args, dict_empty()), pos, cover, tables)
 
 # The recorder invariant, reported where there is a position to report it with: the
 # instance head and the dispatch type must arrive at the same application depth,
@@ -202,27 +225,74 @@ fn te_app_depth(te: ast.TypeExpr) -> Int =
 # declaration (infer.check_instance_head_kinds), so an unbound variable reaching
 # here is simply a constraint no instance satisfies, reported as one.
 fn check_context_subs(
+  outer_class: String,
+  outer_head: ast.TypeExpr,
   inst_constraints: List ast.TypeConstraint,
   subs: Dict ast.TypeExpr,
   pos: source.SourcePos,
+  cover: VarCover,
   tables: Tables
 ) -> Maybe(source.SourcePos, String) =
-  check_constraint_list(list_map(\c -> substitute_constraint(c, subs), inst_constraints),
-                        pos, tables)
-
-fn check_constraint_list(
-  cs: List ast.TypeConstraint,
-  pos: source.SourcePos,
-  tables: Tables
-) -> Maybe(source.SourcePos, String) =
-  match cs with
+  match inst_constraints with
   | Nil -> Nothing
-  | Cons c rest ->
-      match check_constraint(c, pos, tables) with
+  | Cons ic rest ->
+      match check_context_constraint(outer_class, outer_head, ic, subs, pos, cover, tables) with
       | Just e -> Just(e)
-      | Nothing -> check_constraint_list(rest, pos, tables)
+      | Nothing -> check_context_subs(outer_class, outer_head, rest, subs, pos, cover, tables)
 
-fn dict_has(key: String, d: Dict Bool) -> Bool =
+# One context constraint at the dispatch type. A concrete head is checked like any
+# constraint. A variable head is a variable of the enclosing declaration, and must
+# be one it forwards — unless the instance head never bound it (`instance Foo Bar
+# where Baz k`): no caller can name that slot, and it stays unfilled
+# (tests/conformance/run/instance_context_var_absent_from_head.spr).
+fn check_context_constraint(
+  outer_class: String,
+  outer_head: ast.TypeExpr,
+  ic: ast.TypeConstraint,
+  subs: Dict ast.TypeExpr,
+  pos: source.SourcePos,
+  cover: VarCover,
+  tables: Tables
+) -> Maybe(source.SourcePos, String) =
+  let ast.TypeConstraint class_name type_args = substitute_constraint(ic, subs)
+      [head_arg | _] = type_args else Nothing
+  in
+    if head_is_concrete(head_arg) then check_constraint(ast.TypeConstraint(class_name, type_args), pos, cover, tables)
+    else if context_head_bound(ic, subs) then
+      unsupplied_context_var(outer_class, outer_head, class_name, type_args, pos, cover)
+    else Nothing
+
+fn context_head_bound(ic: ast.TypeConstraint, subs: Dict ast.TypeExpr) -> Bool =
+  let ast.TypeConstraint _ type_args = ic
+      [ast.TypeName v | _] = type_args else false
+  in dict_has(v, subs)
+
+# Only a variable the program WROTE is checked. `_` is one no signature named — a
+# free variable whose dictionary is never invoked (`to_string(Empty)`) — and `$ex_`
+# heads are existential givens, forwarded per match arm rather than per declaration.
+fn unsupplied_context_var(
+  outer_class: String,
+  outer_head: ast.TypeExpr,
+  class_name: String,
+  type_args: List ast.TypeExpr,
+  pos: source.SourcePos,
+  cover: VarCover
+) -> Maybe(source.SourcePos, String) =
+  let CoverFrom fwd_keys = cover else Nothing
+      [head_arg | _] = type_args else Nothing
+  in
+    if is_type_var_name(type_expr_head_name(head_arg)) == false then Nothing
+    else if dict_has(constraint_key_str(string.substring_after_last(class_name, "."), type_args), fwd_keys) then Nothing
+    else Just((pos, unsupplied_context_msg(string.substring_after_last(outer_class, "."),
+                      string.substring_after_last(type_expr_head_name(outer_head), "."),
+                      string.substring_after_last(class_name, "."),
+                      type_expr_head_name(head_arg))))
+
+fn unsupplied_context_msg(outer_class: String, outer_head: String, cls: String, v: String) -> String =
+  "the `" ++ outer_class ++ "` instance for `" ++ outer_head ++ "` needs `" ++ cls ++ " " ++ v
+    ++ "`, which nothing in scope supplies — add `where " ++ cls ++ " " ++ v ++ "`"
+
+fn dict_has(key: String, d: Dict v) -> Bool =
   match dict_get(key, d) with
   | Just _ -> true
   | Nothing -> false
@@ -475,8 +545,8 @@ fn rewrite_decls(decls: List typed_ast.TypedDecl, tables: Tables) -> List typed_
 
 # Each decl body is rewritten under its own forwarded-key set: a function forwards
 # its where-clause constraints; an instance method forwards the instance's context
-# constraints (matching lowering's build_hidden_for_constraints call sites). A
-# top-level let forwards nothing.
+# constraints and then its own (matching lowering's build_hidden_for_constraints
+# call sites). A top-level let forwards nothing.
 fn rewrite_decl(d: typed_ast.TypedDecl, tables: Tables) -> typed_ast.TypedDecl =
   match d with
   | typed_ast.TFnDecl name params ret_ty effects constraints body ->
@@ -486,14 +556,22 @@ fn rewrite_decl(d: typed_ast.TypedDecl, tables: Tables) -> typed_ast.TypedDecl =
       typed_ast.TLetDecl(name, rewrite_expr(body, dict_empty(), tables))
   | typed_ast.TInstanceDecl constraint inst_constraints methods ->
       typed_ast.TInstanceDecl(constraint, inst_constraints,
-        list_map(\m -> rewrite_method(m, build_fwd_keys(inst_constraints, tables_super(tables)), tables), methods))
+        list_map(\m -> rewrite_method(m, inst_constraints, tables), methods))
   | typed_ast.TExternFnDecl _ _ _ _ -> d
   | typed_ast.TPassThrough _ -> d
 
-fn rewrite_method(m: typed_ast.TypedInstanceMethod, fwd_keys: Dict Bool, tables: Tables) -> typed_ast.TypedInstanceMethod =
+fn rewrite_method(m: typed_ast.TypedInstanceMethod, inst_constraints: List ast.TypeConstraint,
+                  tables: Tables) -> typed_ast.TypedInstanceMethod =
   match m with
   | typed_ast.TypedInstanceMethod name params ret_ty effects cs body ->
-      typed_ast.TypedInstanceMethod(name, params, ret_ty, effects, cs, rewrite_expr(body, fwd_keys, tables))
+      typed_ast.TypedInstanceMethod(name, params, ret_ty, effects, cs,
+        rewrite_expr(body, method_fwd_keys(inst_constraints, cs, tables), tables))
+
+# lowering's generate_one_instance_fn passes the instance head's dicts, then the
+# method's own.
+fn method_fwd_keys(inst_constraints: List ast.TypeConstraint, method_constraints: List ast.TypeConstraint,
+                   tables: Tables) -> Dict Bool =
+  build_fwd_keys(list_append(inst_constraints, method_constraints), tables_super(tables))
 
 # Structural rebuild that visits the same nodes as check_expr; at each TDict the
 # Evidence field is replaced.  Any node not walked keeps EvUnresolved, which
@@ -560,15 +638,19 @@ fn check_decls(
       | Just e -> Just(e)
       | Nothing -> check_decls(rest, tables)
 
+# Each body is checked under the keys it forwards — the same sets rewrite_decl
+# resolves Evidence with.
 fn check_decl(d: typed_ast.TypedDecl, tables: Tables) -> Maybe(source.SourcePos, String) =
   match d with
-  | typed_ast.TFnDecl _ _ _ _ _ body -> check_expr(body, tables)
-  | typed_ast.TLetDecl _ body -> check_expr(body, tables)
-  | typed_ast.TInstanceDecl _ _ methods -> check_methods(methods, tables)
+  | typed_ast.TFnDecl _ _ _ _ constraints body ->
+      check_expr(body, CoverFrom(build_fwd_keys(constraints, tables_super(tables))), tables)
+  | typed_ast.TLetDecl _ body -> check_expr(body, CoverFrom(dict_empty()), tables)
+  | typed_ast.TInstanceDecl _ inst_constraints methods -> check_methods(inst_constraints, methods, tables)
   | typed_ast.TExternFnDecl _ _ _ _ -> Nothing
   | typed_ast.TPassThrough _ -> Nothing
 
 fn check_methods(
+  inst_constraints: List ast.TypeConstraint,
   methods: List typed_ast.TypedInstanceMethod,
   tables: Tables
 ) -> Maybe(source.SourcePos, String) =
@@ -576,38 +658,39 @@ fn check_methods(
   | Nil -> Nothing
   | Cons m rest ->
       match m with
-      | typed_ast.TypedInstanceMethod _ _ _ _ _ body ->
-          match check_expr(body, tables) with
+      | typed_ast.TypedInstanceMethod _ _ _ _ method_constraints body ->
+          match check_expr(body, CoverFrom(method_fwd_keys(inst_constraints, method_constraints, tables)), tables) with
           | Just e -> Just(e)
-          | Nothing -> check_methods(rest, tables)
+          | Nothing -> check_methods(inst_constraints, rest, tables)
 
-fn check_expr(e: typed_ast.TypedExpr, tables: Tables) -> Maybe(source.SourcePos, String) =
+fn check_expr(e: typed_ast.TypedExpr, cover: VarCover, tables: Tables) -> Maybe(source.SourcePos, String) =
   match e with
-  | typed_ast.TDict c _ pos _ -> check_constraint(c, pos, tables)
-  | typed_ast.TCall callee args _ _ -> check_expr_list(Cons(callee, args), tables)
-  | typed_ast.TIf cnd thn els _ _ -> check_expr_list([cnd, thn, els], tables)
-  | typed_ast.TMatch scrut branches _ _ -> check_expr_list(Cons(scrut, branch_bodies(branches)), tables)
-  | typed_ast.TLambda _ body _ _ -> check_expr(body, tables)
-  | typed_ast.TTuple items _ _ -> check_expr_list(items, tables)
-  | typed_ast.TBinary _ l r _ _ -> check_expr_list([l, r], tables)
-  | typed_ast.TUnary _ x _ _ -> check_expr(x, tables)
-  | typed_ast.TRange lo hi _ _ -> check_expr_list([lo, hi], tables)
-  | typed_ast.TDo steps _ _ -> check_expr_list(do_step_exprs(steps), tables)
-  | typed_ast.TRecord _ fields _ _ -> check_expr_list(record_field_exprs(fields), tables)
-  | typed_ast.TGetField obj _ _ _ -> check_expr(obj, tables)
-  | typed_ast.TRecordUpdate base fields _ _ -> check_expr_list(Cons(base, record_field_exprs(fields)), tables)
+  | typed_ast.TDict c _ pos _ -> check_constraint(c, pos, cover, tables)
+  | typed_ast.TCall callee args _ _ -> check_expr_list(Cons(callee, args), cover, tables)
+  | typed_ast.TIf cnd thn els _ _ -> check_expr_list([cnd, thn, els], cover, tables)
+  | typed_ast.TMatch scrut branches _ _ -> check_expr_list(Cons(scrut, branch_bodies(branches)), cover, tables)
+  | typed_ast.TLambda _ body _ _ -> check_expr(body, cover, tables)
+  | typed_ast.TTuple items _ _ -> check_expr_list(items, cover, tables)
+  | typed_ast.TBinary _ l r _ _ -> check_expr_list([l, r], cover, tables)
+  | typed_ast.TUnary _ x _ _ -> check_expr(x, cover, tables)
+  | typed_ast.TRange lo hi _ _ -> check_expr_list([lo, hi], cover, tables)
+  | typed_ast.TDo steps _ _ -> check_expr_list(do_step_exprs(steps), cover, tables)
+  | typed_ast.TRecord _ fields _ _ -> check_expr_list(record_field_exprs(fields), cover, tables)
+  | typed_ast.TGetField obj _ _ _ -> check_expr(obj, cover, tables)
+  | typed_ast.TRecordUpdate base fields _ _ -> check_expr_list(Cons(base, record_field_exprs(fields)), cover, tables)
   | _ -> Nothing
 
 fn check_expr_list(
   es: List typed_ast.TypedExpr,
+  cover: VarCover,
   tables: Tables
 ) -> Maybe(source.SourcePos, String) =
   match es with
   | Nil -> Nothing
   | Cons e rest ->
-      match check_expr(e, tables) with
+      match check_expr(e, cover, tables) with
       | Just x -> Just(x)
-      | Nothing -> check_expr_list(rest, tables)
+      | Nothing -> check_expr_list(rest, cover, tables)
 
 fn branch_bodies(branches: List typed_ast.TypedMatchBranch) -> List typed_ast.TypedExpr =
   match branches with

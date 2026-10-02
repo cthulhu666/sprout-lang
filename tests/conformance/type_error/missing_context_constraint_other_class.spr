@@ -1,0 +1,6 @@
+# A constraint on the right variable but of the wrong class does not supply `Eq a`. The variable
+# has a name here only because `ToString a` gave it one, so this is the shape that must be checked
+# per (class, variable) pair rather than per variable.
+fn same(y: Maybe a, x: a) -> Bool where ToString a = y == Just(x)
+
+fn main() -> Unit !{IO} = print(to_string(same(Just(3), 3)))

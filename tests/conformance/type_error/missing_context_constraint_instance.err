@@ -1,0 +1,1 @@
+the `ToString` instance for `Maybe` needs `ToString a`, which nothing in scope supplies

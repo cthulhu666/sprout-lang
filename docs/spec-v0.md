@@ -2908,6 +2908,29 @@ A class method whose *own* signature needs a constraint separate from the class
 variable is expressible with a method-level `where` clause — see §8.5
 *Method-level constraints*.
 
+**An instance's context is needed too.**  A class method on a type that wraps a
+type variable needs the instance for the wrapper *and* whatever that instance's
+context needs at the variable.  `y == Just(x)` with `y: Maybe a` uses
+`instance Eq (Maybe a) where Eq a`, so it needs `Eq a`, and the enclosing
+declaration must supply it: a `where` clause naming it (or a class that has it as
+a superclass, such as `Ord a`), the instance head, or a method-level `where`.  A
+constraint of a different class on the same variable does not supply it.
+Without one, the call is rejected where it is written:
+
+```sprout
+fn same(y: Maybe a, x: a) -> Bool = y == Just(x)
+# the `Eq` instance for `Maybe` needs `Eq a`, which nothing in scope supplies
+# — add `where Eq a`
+
+fn same(y: Maybe a, x: a) -> Bool where Eq a = y == Just(x)   # accepted
+```
+
+This holds even when the inner comparison can never run, as in `m == Nothing`:
+the instance is chosen when the program is checked, not when the comparison
+runs.  A forwarded compound constraint arrives whole — `where Eq (Maybe a)`
+supplies `Eq (Maybe a)`, context included.  As above, a variable the declaration
+does not generalize is unaffected.
+
 ### `ToString` instances
 
 `to_string` is defined for the following types:

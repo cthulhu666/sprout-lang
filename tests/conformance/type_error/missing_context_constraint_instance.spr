@@ -1,0 +1,10 @@
+# An instance method needs the same cover as a function: rendering `Just(inner)` needs
+# `ToString a`, and this instance head declares no context to supply it.
+type Box a = Box a
+
+instance ToString (Box a)
+  fn to_string(b: Box a) -> String =
+    match b with
+    | Box inner -> to_string(Just(inner))
+
+fn main() -> Unit !{IO} = print(to_string(Box(3)))
