@@ -1,0 +1,12 @@
+# GitHub #423: `==` on `Maybe a` needs `Eq (Maybe a)`, whose instance needs `Eq a`, and nothing
+# here declares it. This used to compile and then panic in the poison thunk on the first call
+# that reached the inner comparison. A missing instance must not reach run time.
+type Color deriving (Eq) =
+  | Red
+  | Blue
+
+fn kit(n: Int) -> Maybe Color = if n > 0 then Just(Red) else Nothing
+
+fn carried(f: Int -> Maybe a, x: a) -> Bool = any(\n -> f(n) == Just(x), [0, 1])
+
+fn main() -> Unit !{IO} = print(to_string(carried(kit, Red)))

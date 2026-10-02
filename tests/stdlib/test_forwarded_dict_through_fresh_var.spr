@@ -1,0 +1,77 @@
+import stdlib.test (check_eq, run_suite)
+
+# Regression for GitHub #423: a class method on `T a`, inside a function generic in `a`,
+# where the `T a` value came out of a generic call (`Just(x)`, `[x]`, a user fn).
+#
+# Unifying `x: a` with the callee's fresh parameter binds `a` AWAY, onto the fresh
+# variable, so the dispatch type reads `Maybe $t` and `$t` owns no forward marker. The
+# inner `Eq a` dictionary was recorded as `Eq _`, lowered to the poison thunk, and the
+# program compiled and then panicked. Each case below compares against a value built
+# that way, and `Loose` (an Eq that is always true) makes a wrong inner dict change
+# the answer rather than pass silently.
+
+type Color deriving (Eq) =
+  | Red
+  | Blue
+
+type Loose = Loose Int
+
+instance Eq Loose
+  fn eq(a: Loose, b: Loose) -> Bool = true
+
+instance ToString Loose
+  fn to_string(x: Loose) -> String = "loose"
+
+fn kit(n: Int) -> Maybe Color = if n > 0 then Just(Red) else Nothing
+
+# The reported shape: the comparison sits in a lambda and the left side is a call result.
+fn carried(f: Int -> Maybe a, x: a) -> Bool where Eq a = any(\n -> f(n) == Just(x), [0, 1])
+
+fn ctor_rhs(y: Maybe a, x: a) -> Bool where Eq a = y == Just(x)
+
+fn ctor_lhs(y: Maybe a, x: a) -> Bool where Eq a = Just(x) == y
+
+fn ctor_both(x: a, z: a) -> Bool where Eq a = Just(x) == Just(z)
+
+fn ctor_ne(y: Maybe a, x: a) -> Bool where Eq a = y != Just(x)
+
+fn list_lit(ys: List a, x: a) -> Bool where Eq a = ys == [x]
+
+fn wrap1(x: a) -> Maybe a = Just(x)
+
+fn via_user_fn(y: Maybe a, x: a) -> Bool where Eq a = y == wrap1(x)
+
+# The Eq dict comes from the Ord constraint's superclass.
+fn via_super(y: Maybe a, x: a) -> Bool where Ord a = y == Just(x)
+
+fn shown(x: a) -> String where ToString a = to_string(Just(x))
+
+# Two variables of one class: each comparison must use its own variable's dict.
+fn two_vars(x: a, ya: Maybe a, z: b, yb: Maybe b) -> (Bool, Bool) where Eq a, Eq b =
+  (ya == Just(x), yb == Just(z))
+
+# A forwarded compound constraint carries its own inner dict.
+fn compound(y: Maybe a, z: Maybe a) -> Bool where Eq (Maybe a) = y == z
+
+fn main() -> Unit !{IO} =
+  run_suite("forwarded_dict_through_fresh_var", [
+    check_eq("issue repro: found", carried(kit, Red), true),
+    check_eq("issue repro: not found", carried(kit, Blue), false),
+    check_eq("ctor on the right", ctor_rhs(Just(3), 3), true),
+    check_eq("ctor on the right, unequal", ctor_rhs(Just(3), 4), false),
+    check_eq("ctor on the right, inner dict used", ctor_rhs(Just (Loose(1)), Loose(2)), true),
+    check_eq("ctor on the left", ctor_lhs(Just(3), 3), true),
+    check_eq("ctor on both sides", ctor_both(3, 4), false),
+    check_eq("ctor on both sides, inner dict used", ctor_both(Loose(1), Loose(2)), true),
+    check_eq("!= with a ctor", ctor_ne(Just(3), 4), true),
+    check_eq("list literal", list_lit([3], 3), true),
+    check_eq("list literal, inner dict used", list_lit([Loose(1)], Loose(2)), true),
+    check_eq("user fn result", via_user_fn(Just (Red), Red), true),
+    check_eq("user fn result, unequal", via_user_fn(Just (Red), Blue), false),
+    check_eq("Eq from the Ord superclass", via_super(Just(3), 3), true),
+    check_eq("ToString through Just", shown(3), "Just(3)"),
+    check_eq("ToString through Just, inner dict used", shown(Loose(1)), "Just(loose)"),
+    check_eq("two variables keep their own dicts", two_vars(Loose(1), Just (Loose(2)), 3, Just(4)),
+      (true, false)),
+    check_eq("forwarded compound constraint", compound(Just(3), Just(3)), true)
+  ])
