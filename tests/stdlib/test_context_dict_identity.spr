@@ -73,6 +73,48 @@ fn holds_later(x: a) -> Bool where Eq a =
   let g = \z -> holds(Just(z), [Just(z)])
   in g(x)
 
+# A recursive call through a compound `where` forwards the function's own dictionary.
+fn rec_maybe(p: Maybe a, q: Maybe b, n: Int) -> Bool where Eq a, Eq (Maybe b) =
+  if n == 0 then q == q else rec_maybe(p, q, n - 1)
+
+# A bare variable linked only when the lambda is applied takes its OWN variable's
+# dictionary, not the first marker of its class.
+fn shown_second(x: a, y: b) -> String where ToString a, ToString b = (\z -> to_string(z))(y)
+
+fn eq_second(x: a, y: b) -> Bool where Eq a, Eq b = (\z -> z == z)(y)
+
+fn self_eq(x: t) -> Bool where Eq t = x == x
+
+fn eq_second_via_fn(x: a, y: b) -> Bool where Eq a, Eq b = (\z -> self_eq(z))(y)
+
+# A class method dispatched on its RESULT, with a `where` of its own, under a late lambda.
+class Make f
+  fn make(x: a) -> f a where Eq a
+
+instance Make List
+  fn make(x: a) -> List a where Eq a = if x == x then [x] else []
+
+fn make_later(x: b) -> List (Maybe b) where Eq b = (\z -> make(Just(z)))(x)
+
+# An existential reaching the comparison through a lambda applied later.
+fn bag_late(b: Bag) -> Bool =
+  match b with
+  | Bag p q -> (\z -> \w -> Just(z) == Just(w))(p)(q)
+
+fn bag_late_list(b: Bag) -> Bool =
+  match b with
+  | Bag p q -> (\z -> \w -> [z] == [w])(p)(q)
+
+# A compound instance context reaches the method under the head's variable. A method
+# that renames it is rejected (type_error/instance_method_renamed_head_var).
+class Same t
+  fn same(x: t, y: t) -> Bool
+
+instance Same (Box a) where Eq (Maybe a)
+  fn same(x: Box a, y: Box a) -> Bool =
+    match (x, y) with
+    | (Box p, Box q) -> Just(p) == Just(q)
+
 fn main() -> Unit !{IO} =
   run_suite("context_dict_identity", [
     check_eq("compound callee takes its own variable", two_from(Never(1), 1), (false, true)),
@@ -86,5 +128,17 @@ fn main() -> Unit !{IO} =
     check_eq("compound where through a nested alias", maybe_pairs(Just([(1, 1)]), Just([(1, 1)])), true),
     check_eq("placeholder standing for a written variable", tuple_flip(3, 3), true),
     check_eq("method-level dict, lambda applied later", holds_later(1), true),
-    check_eq("method-level dict, inner dict used", holds_later(Never(1)), false)
+    check_eq("method-level dict, inner dict used", holds_later(Never(1)), false),
+    check_eq("recursive call, compound where", rec_maybe(Just (Never(1)), Just(2), 1), true),
+    check_eq("recursive call, compound where, inner dict used", rec_maybe(Just(1), Just (Never(2)), 1), false),
+    check_eq("late bare variable, ToString", shown_second(1, "s"), "s"),
+    check_eq("late bare variable, Eq", eq_second(Loose(1), Never(1)), false),
+    check_eq("late bare variable, constrained fn", eq_second_via_fn(Loose(1), Never(1)), false),
+    check_eq("result-dispatched method's own dict, late", list_length(make_later(1)), 1),
+    check_eq("result-dispatched method's own dict, inner dict used", list_length(make_later(Never(1))), 0),
+    check_eq("existential through a late lambda", bag_late(Bag(3, 3)), true),
+    check_eq("existential through a late lambda, inner dict used", bag_late(Bag (Never(1), Never(1))), false),
+    check_eq("existential through a late lambda, list", bag_late_list(Bag("a", "a")), true),
+    check_eq("compound instance context", same(Box(1), Box(1)), true),
+    check_eq("compound instance context, inner dict used", same(Box (Never(1)), Box (Never(1))), false)
   ])

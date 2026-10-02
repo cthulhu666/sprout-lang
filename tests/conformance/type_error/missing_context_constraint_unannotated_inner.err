@@ -1,1 +1,1 @@
-needs `Eq` on the type of parameter `b`, which has no annotation
+needs `Eq` on a type variable inside parameter `b`'s type, which has no annotation

@@ -7,7 +7,8 @@
 # `witness`, no dependence on the call site. Its value must not vary. Before the
 # fix `describe(1)` printed `int:7` and `describe(true)` printed `bool` — the
 # same expression denoting different values in different contexts. That is
-# incoherence, not merely a missing diagnostic.
+# incoherence, not merely a missing diagnostic. Until #423's PR `to_str` still took
+# `b`'s dictionary that way and only `from_int` was reported; now `to_str` is too.
 module main
 
 class Codec a

@@ -1230,7 +1230,8 @@ declare i64 @fs_rename(i64, i64)
 @.str.1095 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"@aliasfn:\00" }
 @.str.1096 = private unnamed_addr constant { i64, [15 x i8] } { i64 229386, [15 x i8] c"__aliasparam__\00" }
 @.str.1097 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c"_unann@\00" }
-@.str.1098 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"#inst/\00" }
+@.str.1098 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"~\00" }
+@.str.1099 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"#inst/\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -1563,6 +1564,7 @@ declare i64 @fs_rename(i64, i64)
 @stdlib.compiler.types.effect_pure = global i64 zeroinitializer
 @stdlib.compiler.types.effect_io = global i64 zeroinitializer
 @stdlib.compiler.types.unann_prefix = global i64 zeroinitializer
+@stdlib.compiler.types.unann_inner_suffix = global i64 zeroinitializer
 @stdlib.compiler.types.inst_owner_prefix = global i64 zeroinitializer
 @stdlib.terminal.esc = global i64 zeroinitializer
 @stdlib.repl.esc = global i64 zeroinitializer
@@ -74328,17 +74330,21 @@ entry:
   %t$33 = ptrtoint ptr %t$32 to i64
   store i64 %t$33, ptr @stdlib.compiler.types.unann_prefix
   call i64 @sprout_gc_register_i64_root(ptr @stdlib.compiler.types.unann_prefix)
-  %t$34 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.1098, i64 0, i32 1, i64 0
+  %t$34 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.1098, i64 0, i32 1, i64 0
   %t$35 = ptrtoint ptr %t$34 to i64
-  store i64 %t$35, ptr @stdlib.compiler.types.inst_owner_prefix
+  store i64 %t$35, ptr @stdlib.compiler.types.unann_inner_suffix
+  call i64 @sprout_gc_register_i64_root(ptr @stdlib.compiler.types.unann_inner_suffix)
+  %t$36 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.1099, i64 0, i32 1, i64 0
+  %t$37 = ptrtoint ptr %t$36 to i64
+  store i64 %t$37, ptr @stdlib.compiler.types.inst_owner_prefix
   call i64 @sprout_gc_register_i64_root(ptr @stdlib.compiler.types.inst_owner_prefix)
-  %t$36 = add i64 0, 27
-  %t$37 = call i64 @char_to_str(i64 %t$36)
-  store i64 %t$37, ptr @stdlib.terminal.esc
-  call i64 @sprout_gc_register_i64_root(ptr @stdlib.terminal.esc)
   %t$38 = add i64 0, 27
   %t$39 = call i64 @char_to_str(i64 %t$38)
-  store i64 %t$39, ptr @stdlib.repl.esc
+  store i64 %t$39, ptr @stdlib.terminal.esc
+  call i64 @sprout_gc_register_i64_root(ptr @stdlib.terminal.esc)
+  %t$40 = add i64 0, 27
+  %t$41 = call i64 @char_to_str(i64 %t$40)
+  store i64 %t$41, ptr @stdlib.repl.esc
   call i64 @sprout_gc_register_i64_root(ptr @stdlib.repl.esc)
   ret void
 }
