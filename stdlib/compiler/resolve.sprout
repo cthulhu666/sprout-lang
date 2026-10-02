@@ -229,7 +229,9 @@ fn check_context_constraint(
       [ast.TypeName v | _] = args else check_constraint(sc, pos, fwd_keys, tables)
       bare = string.substring_after_last(class_name, ".")
   in
-    if head_var_bound(ic, subs) && is_type_var_name(v) && dict_has(ast.dict_slot_key(bare, args), fwd_keys) == false
+    if str_starts_with(v, "?")
+    then Just((pos, "internal: a dictionary request reached resolve with " ++ v ++ " unnamed (infer.name_open_dicts); please report"))
+    else if head_var_bound(ic, subs) && is_type_var_name(v) && dict_has(ast.dict_slot_key(bare, args), fwd_keys) == false
     then Just((pos, "No instance of " ++ bare ++ " for " ++ v ++ ": the enclosing declaration needs `where " ++ bare ++ " " ++ v ++ "`"))
     else check_constraint(sc, pos, fwd_keys, tables)
 

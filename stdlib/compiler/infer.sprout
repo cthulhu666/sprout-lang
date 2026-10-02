@@ -3469,8 +3469,14 @@ fn still_open_typeexpr(v: types.TyVarId) -> ast.TypeExpr =
 # Every `?<id>` in the body's dictionary requests, named through the final substitution;
 # one still unbound is `_`, a variable no value of which exists, so nothing reads it.
 fn name_open_dicts(e: typed_ast.TypedExpr, subst: Dict types.Type, env: Dict types.Scheme) -> typed_ast.TypedExpr =
+  name_dicts_with(e, subst, env, still_open_typeexpr)
+
+# `open` is what a variable still unnamed becomes: `_` at the end of a body, and still
+# `?<id>` at the end of a match arm, whose body is not done yet.
+fn name_dicts_with(e: typed_ast.TypedExpr, subst: Dict types.Type, env: Dict types.Scheme,
+                   open: types.TyVarId -> ast.TypeExpr) -> typed_ast.TypedExpr =
   if typed_ast.any_dict_constraint(constraint_has_open_var, e)
-  then typed_ast.map_dict_constraints(\c -> name_open_constraint(c, subst, env), e)
+  then typed_ast.map_dict_constraints(\c -> name_open_constraint(c, subst, env, open), e)
   else e
 
 fn constraint_has_open_var(c: ast.TypeConstraint) -> Bool =
@@ -3486,22 +3492,23 @@ fn typeexpr_has_open_var(te: ast.TypeExpr) -> Bool =
   | ast.TypeThunk _ _ -> false
   | ast.TypeEffect _ _ -> false
 
-fn name_open_constraint(c: ast.TypeConstraint, subst: Dict types.Type, env: Dict types.Scheme) -> ast.TypeConstraint =
+fn name_open_constraint(c: ast.TypeConstraint, subst: Dict types.Type, env: Dict types.Scheme,
+                        open: types.TyVarId -> ast.TypeExpr) -> ast.TypeConstraint =
   let ast.TypeConstraint class_name args = c
-  in ast.TypeConstraint(class_name, list_map(\a -> name_open_typeexpr(a, class_name, subst, env), args))
+  in ast.TypeConstraint(class_name, list_map(\a -> name_open_typeexpr(a, class_name, subst, env, open), args))
 
 fn name_open_typeexpr(te: ast.TypeExpr, class_name: String, subst: Dict types.Type,
-                      env: Dict types.Scheme) -> ast.TypeExpr =
+                      env: Dict types.Scheme, open: types.TyVarId -> ast.TypeExpr) -> ast.TypeExpr =
   match te with
   | ast.TypeName n ->
       match string.strip_prefix(n, open_var_prefix) with
       | Just id ->
-          named_typeexpr(unifier.apply_subst(subst, types.TVar(types.tyvar_id(id))), class_name, subst, env,
-                         still_open_typeexpr)
+          named_typeexpr(unifier.apply_subst(subst, types.TVar(types.tyvar_id(id))), class_name, subst, env, open)
       | Nothing -> te
   | ast.TypeApply f x ->
-      ast.TypeApply(name_open_typeexpr(f, class_name, subst, env), name_open_typeexpr(x, class_name, subst, env))
-  | ast.TupleType items -> ast.TupleType(list_map(\i -> name_open_typeexpr(i, class_name, subst, env), items))
+      ast.TypeApply(name_open_typeexpr(f, class_name, subst, env, open),
+                    name_open_typeexpr(x, class_name, subst, env, open))
+  | ast.TupleType items -> ast.TupleType(list_map(\i -> name_open_typeexpr(i, class_name, subst, env, open), items))
   | ast.TypeArrow _ _ _ _ -> te
   | ast.TypeThunk _ _ -> te
   | ast.TypeEffect _ _ -> te
@@ -5152,8 +5159,10 @@ fn infer_branch(
             # than searching global instances (which have none for a skolem).
             infer_branch_body(state,
               extend_env_with_existential_givens(pat, s1, extend_env_from_pattern(pat, s1, env)),
-              s1, es1, ret_type, body)
+              s1, es1, ret_type, body, pattern_unpacks_existential(pat, env))
 
+# An arm that unpacks an existential names its dictionary requests before its witness
+# markers go out of scope: a variable bound to the skolem is bound inside the arm.
 fn infer_branch_body(
   state: unifier.InferState,
   env: Dict types.Scheme,
@@ -5161,13 +5170,17 @@ fn infer_branch_body(
   eff_subst: Dict types.Effect,
   ret_type: types.Type,
   body: ast.Expr
+,
+  unpacks: Bool
 ) -> InferResult !{IO} =
   do
     br <- infer_expr(state, env, subst, eff_subst, body)
     match br with
     | InferErr pos e -> InferErr(pos, e)
     | InferOk typed_body s2 es2 body_eff ->
-        infer_branch_unify(s2, es2, typed_body, ret_type, body_eff)
+        infer_branch_unify(s2, es2,
+          if unpacks then name_dicts_with(typed_body, s2, env, open_var_typeexpr) else typed_body,
+          ret_type, body_eff)
 
 fn infer_branch_unify(
   subst: Dict types.Type,
@@ -5384,6 +5397,30 @@ fn extend_env_with_existential_givens(pat: ast.Pattern, subst: Dict types.Type, 
       extend_env_givens_list(fields, subst, seed_ctor_givens(name, fields, subst, env))
   | ast.TuplePattern pats _ -> extend_env_givens_list(pats, subst, env)
   | _ -> env
+
+# Whether the pattern unpacks a constrained existential anywhere, so the arm has
+# witness markers to name its dictionary requests by. The same walk as
+# extend_env_with_existential_givens.
+fn pattern_unpacks_existential(pat: ast.Pattern, env: Dict types.Scheme) -> Bool =
+  match pat with
+  | ast.ConstructorPattern name fields _ ->
+      ctor_is_existential(name, env) || any(\p -> pattern_unpacks_existential(p, env), fields)
+  | ast.TuplePattern pats _ -> any(\p -> pattern_unpacks_existential(p, env), pats)
+  | ast.WildcardPattern _ -> false
+  | ast.VarPattern _ _ -> false
+  | ast.IntPattern _ _ -> false
+  | ast.BoolPattern _ _ -> false
+  | ast.StringPattern _ _ -> false
+  | ast.CharPattern _ _ -> false
+  | ast.UnitPattern _ -> false
+
+fn ctor_is_existential(name: String, env: Dict types.Scheme) -> Bool =
+  match dict_get(name, env) with
+  | Just scheme ->
+      match types.scheme_constraints(scheme) with
+      | [] -> false
+      | [_ | _] -> true
+  | Nothing -> false
 
 fn extend_env_givens_list(pats: List ast.Pattern, subst: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
   match pats with
@@ -9414,7 +9451,8 @@ fn typecheck_decl(
                       # Without this the slot stayed open and the call reached codegen an argument
                       # short of the arity its dictionary parameters imply.
                       finish_let_decl(name, expr,
-                        resolve_dispatch_typed_expr(global_env_dict(env), s1, set_empty(), typed_expr),
+                        name_open_dicts(resolve_dispatch_typed_expr(global_env_dict(env), s1, set_empty(), typed_expr),
+                                        s1, global_env_dict(env)),
                         s1, let_pos, env, env_ftv, es1a)
   | ast.AliasDecl _ _ _ _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl), env, env_ftv, subst)

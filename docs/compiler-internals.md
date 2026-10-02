@@ -547,8 +547,11 @@ whichever parameter is headed by `Tagged`. Nothing is taken from "the first argu
 headed by the constructor", the scan this replaced: beside `p: (a, b)`, `ToString ((c,
 d))` is not `p`'s, and in `xs: List (List (Box a))` the `List (Box a)` is not `xs`'s type.
 A variable still open at the call is written `?<id>`, and `name_open_dicts` renames it once
-the body is inferred: a later unification (a lambda parameter, say) can still make it a
-declared variable, and one never bound becomes `_`, whose dictionary nothing reads.
+the body (a function, an instance method or a top-level `let`) is inferred: a later
+unification (a lambda parameter, say) can still make it a declared variable, and one never
+bound becomes `_`, whose dictionary nothing reads. An arm that unpacks an existential is
+renamed at its end too, while its witness markers are in scope. A `?<id>` that still reaches
+`resolve` is an internal error, not an empty dictionary.
 The result is taken when the caller declares exactly it — `seed_compound_marker` records
 each compound constraint a body declares, and each transitive superclass of it, as `@fwdhead:` plus its
 slot key (`ast.dict_slot_key`) — or when the class has an instance for the head, looked up
