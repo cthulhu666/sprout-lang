@@ -2569,14 +2569,31 @@ fn check_instance_fwd(
           InferOk(typed_ast.TCall(typed_callee, Cons(tdict, typed_args), ret_t, pos), s3, es3, call_eff)
       | Nothing ->
           # No @fwd marker resolved this class method, so it is not a legitimate
-          # polymorphic forward. If a dispatch argument is function-typed, the
-          # obligation is `C (a -> b)` — unsatisfiable (no function instance) — so
-          # reject rather than emit a dict-less call (`to_string(f)` would lower to an
-          # undefined `@to_string`). A genuine tyvar-headed forward found its marker
-          # above; only a rigid function head reaches here unresolved.
-          if any_function_typed_arg(typed_args, s3)
+          # polymorphic forward. If the dispatch type is a function, the obligation is
+          # `C (a -> b)` — unsatisfiable (no function instance) — so reject rather than
+          # emit a dict-less call (`to_string(f)` would lower to an undefined
+          # `@to_string`). A dispatch type still a variable is left for the post-pass:
+          # a callback beside it (`app(e, \n -> n * 2)`) is not what dispatch is on.
+          if dispatches_on_function(dispatch_t, typed_args, s3)
           then InferErr(pos, "No instance of " ++ class_name ++ " for a function type")
           else InferOk(typed_ast.TCall(typed_callee, typed_args, ret_t, pos), s3, es3, call_eff)
+
+# With no dispatch type in hand (the class variable sits inside a container), any
+# function-typed argument is the best evidence there is, as before.
+fn dispatches_on_function(dispatch_t: Maybe types.Type, typed_args: List typed_ast.TypedExpr,
+                          s3: Dict types.Type) -> Bool =
+  match dispatch_t with
+  | Just t -> is_function_type(unifier.apply_subst(s3, t))
+  | Nothing -> any_function_typed_arg(typed_args, s3)
+
+fn is_function_type(t: types.Type) -> Bool =
+  match t with
+  | types.TFunc _ _ _ _ -> true
+  | types.TThunk _ _ -> true
+  | types.TApp _ _ -> false
+  | types.TTuple _ -> false
+  | types.TVar _ -> false
+  | types.TConst _ -> false
 
 # The class-only fallback scan, gated on the type actually being dispatched.
 #
@@ -2652,13 +2669,7 @@ fn resolve_skolem_given(
 # function-typed argument can never host a typeclass instance, so its presence at
 # the unresolved dispatch sink means the obligation is unsatisfiable.
 fn any_function_typed_arg(args: List typed_ast.TypedExpr, subst: Dict types.Type) -> Bool =
-  match args with
-  | Nil -> false
-  | Cons a rest ->
-      match unifier.apply_subst(subst, typed_ast.typed_expr_type(a)) with
-      | types.TFunc _ _ _ _ -> true
-      | types.TThunk _ _ -> true
-      | _ -> any_function_typed_arg(rest, subst)
+  any(\a -> is_function_type(unifier.apply_subst(subst, typed_ast.typed_expr_type(a))), args)
 
 # Walk each arg looking for one whose raw TVar head maps to a @fwd marker.
 fn find_fwd_tdict_in_args(class_name: String, args: List typed_ast.TypedExpr, env: Dict types.Scheme, pos: source.SourcePos) -> Maybe typed_ast.TypedExpr =
@@ -3923,12 +3934,27 @@ fn resolve_precise_head(
       # a single dict twice.
       #
       # No marker matches yet when the variable is a lambda parameter linked only when
-      # the lambda is applied. Then nothing is injected: the post-pass
-      # (constraint_var_dict) forwards it by the final substitution. fwd_or_scan here
-      # took the class's FIRST marker — another variable's under `where Eq a, Eq b`.
-      match forwarded_tdict_for_tyvar(env, s3, class_name, unifier.apply_subst(s3, fresh_t), pos) with
-      | Just tdict -> (Just(tdict), "precise_tyvar_fwd")
-      | Nothing -> (Nothing, "precise_tyvar_deferred")
+      # the lambda is applied. Then the slot gets a hole, which the post-pass
+      # (constraint_var_dict) fills by the final substitution. fwd_or_scan here took the
+      # class's FIRST marker — another variable's under `where Eq a, Eq b`. Injecting
+      # nothing instead shifted the next same-class dict into this slot, because the
+      # post-pass pairs dicts with constraints by class (take_dict_for_class).
+      #
+      # Anything else — a function type, a variable applied to arguments — is no
+      # forward: nothing is injected, and the caller rejects a function type
+      # (concrete_unsatisfiable_head).
+      let resolved = unifier.apply_subst(s3, fresh_t)
+      in
+        match (forwarded_tdict_for_tyvar(env, s3, class_name, resolved, pos), resolved) with
+        | (Just tdict, _) -> (Just(tdict), "precise_tyvar_fwd")
+        | (Nothing, types.TVar _) -> (Just(hole_tdict(class_name, pos)), "precise_tyvar_deferred")
+        | (Nothing, _) -> (Nothing, "precise_unsatisfiable")
+
+# A dictionary the post-pass must still decide: a slot of its own, every argument `_`.
+# Never filled, it lowers to the poison thunk, which fails loudly if reached.
+fn hole_tdict(class_name: String, pos: source.SourcePos) -> typed_ast.TypedExpr =
+  typed_ast.TDict(ast.TypeConstraint(class_name, [ast.TypeName("_")]),
+    types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved)
 
 # Decode a positional constraint-var token ("#pos:<k>", written by
 # canonicalize_constrained_constraints) back to the callee's live generalized-scheme
@@ -10051,7 +10077,7 @@ fn return_dispatch_with(
 # already carries a dict is left exactly as it is — re-deriving it here could only
 # disagree with a decision made on better information.
 #
-# What arrives here dict-less resolves one of two ways, and BOTH are repaired
+# What arrives here without its class dict resolves one of two ways, and BOTH are repaired
 # here rather than only the first.
 #
 # A FORWARD is a variable that was not yet identified with its constraint's
@@ -10084,14 +10110,30 @@ fn maybe_forward_input_dispatch(
   class_vars: List String,
   method_type: types.Type
 ) -> typed_ast.TypedExpr =
-  let Nil = collect_all_tdicts(args)
-        else settled_dispatch_call(env, subst, fn_, args, t, pos, class_name, class_vars, method_type)
-      Just resolved_t = dispatch_type_for_vars(method_type, args, t, subst, class_vars)
+  # The class dict LEADS the arguments when inference emitted one; a method's own
+  # `where` dicts trail them (check_class_method_call), so a dict elsewhere in the call
+  # does not mean the class dict is there.
+  match args with
+  | [typed_ast.TDict _ _ _ _ | _] -> settled_dispatch_call(env, subst, fn_, args, t, pos, class_name, class_vars, method_type)
+  | _ -> call_with_class_dict(env, subst, fn_, settled_method_dicts(env, subst, fn_, args, t, pos), t, pos, class_name, class_vars, method_type)
+
+fn call_with_class_dict(
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  fn_: typed_ast.TypedExpr,
+  args: List typed_ast.TypedExpr,
+  t: types.Type,
+  pos: source.SourcePos,
+  class_name: String,
+  class_vars: List String,
+  method_type: types.Type
+) -> typed_ast.TypedExpr =
+  let Just resolved_t = dispatch_type_for_vars(method_type, args, t, subst, class_vars)
         else typed_ast.TCall(fn_, args, t, pos)
   in
     match concrete_type_str(resolved_t) with
     | Nothing -> keep_or_forward_dispatch(env, subst, fn_, args, t, pos, class_name, resolved_t)
-    | Just _ -> concrete_dispatch_call(env, subst, fn_, strip_leading_tdicts(args), t, pos, class_name, resolved_t)
+    | Just _ -> concrete_dispatch_call(env, subst, fn_, args, t, pos, class_name, resolved_t)
 
 # The class-method twin of settled_constrained_dict. Input dispatch is resolved during
 # inference, so a lambda parameter tied to a written variable only when the lambda is

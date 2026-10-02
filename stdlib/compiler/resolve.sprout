@@ -107,10 +107,13 @@ fn te_conflicts(use: ast.TypeExpr, written: ast.TypeExpr) -> Bool =
 
 # A position nothing names: `_`, or an inference variable (`$t<n>`, as
 # typed_ast.type_to_type_expr writes one). An existential (`$ex_<var>`, a `$sk<n>`
-# skolem) and an unannotated slot's placeholder are types of their own; reading them
-# as unknown let `where Eq (Maybe a)` serve them with `a`'s dictionary.
+# skolem), an unannotated slot's placeholder and a headerless file's own type
+# (`$entry.Never`, source.entry_module_prefix) are types of their own; reading them as
+# unknown let `where Eq (Maybe a)` serve them with `a`'s dictionary.
 fn is_unnamed(name: String) -> Bool =
-  name == "_" || (str_starts_with(name, "$") && is_existential_name(name) == false)
+  name == "_"
+    || (str_starts_with(name, "$") && is_existential_name(name) == false
+          && str_starts_with(name, source.entry_module_prefix) == false)
 
 fn is_existential_name(name: String) -> Bool =
   types.is_existential_head(name) || types.is_skolem_name(name)

@@ -255,6 +255,23 @@ fn main() -> Unit !{IO} =
       ("field access base", typed_ast.TGetField(bad_call_at(1), "f", t_int(), dpos()))]
     list_each(\case -> assert_reached(state, case), reach)
 
+    # --- HOLE: a `_` dict is one inference left for its post-pass (infer.hole_tdict).
+    # Unfilled, it supplies nothing: for a class method's own constraint that is the
+    # ambiguity diagnostic, exactly as an absent dict is.
+    let tostring_a = ast.TypeConstraint("ToString", [ast.TypeName("a")])
+    let tostring_b = ast.TypeConstraint("ToString", [ast.TypeName("b")])
+    assert_true(state, "an unfilled hole for a class method's constraint is reported as missing",
+      is_mismatch(first_or_skip(vd.verify_class_method_call("show_all", [], Nothing, [tostring_a], [], t_int(),
+        [("ToString", Just("_"))], dpos()))))
+    # It still holds its slot: `ToString Int` pairs with `b`, not with the hole's `a`.
+    # Dropped instead, the Int dict reaches `a` and `b` reads as missing at Int.
+    let slots = vd.verify_call([ast.TypeName("b")], Nothing, [tostring_a, tostring_b], [t_int()], t_int(),
+      [("ToString", Just("_")), ("ToString", Just("Int"))], dpos())
+    assert_true(state, "a hole keeps its slot among same-class dicts",
+      match slots with
+      | [first, second] -> is_skip(first) && is_ok(second)
+      | _ -> false)
+
     summary(state)
 
 fn assert_reached(state: TestState, case: (String, typed_ast.TypedExpr)) -> Unit !{IO} =

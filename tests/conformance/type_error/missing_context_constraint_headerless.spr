@@ -1,0 +1,7 @@
+# No `module` header: `Box` is `$entry.Box` internally, a user type, and the message
+# names it as written rather than as a hole.
+type Box a deriving (Eq) = Box a
+
+fn same(x: Box a, y: Box a) -> Bool = x == y
+
+fn main() -> Unit !{IO} = print(to_string(same(Box(1), Box(1))))

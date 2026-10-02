@@ -2998,7 +2998,9 @@ function value is therefore unsatisfiable and is rejected at the call site with
 `No instance of C for a function type`.  This covers both a direct class-method
 call on a function (`to_string(f)`) and a constrained regular function whose
 argument forces a function-typed head — e.g. `describe(describe)` where
-`describe : a -> String where ToString a` demands `ToString (b -> String)`.  The
+`describe : a -> String where ToString a` demands `ToString (b -> String)`.  A
+function passed beside the value dispatched on — the callback in `app(x, \n -> n * 2)`
+— demands nothing of the class and is not rejected.  The
 rejection is a type error, consistent with the constraint well-formedness rules
 above: it prevents the obligation from being silently dropped (a codegen
 under-application) or resolved to a wrong default dictionary (a silent
