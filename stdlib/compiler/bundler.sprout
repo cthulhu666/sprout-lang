@@ -2251,71 +2251,82 @@ fn validate_type_names(decls: List ast.Decl) -> Maybe(source.SourcePos, String) 
 # since that is the shape an alias has; `| JsonArray JsonArray` among other
 # constructors stays legal (stdlib/json.sprout).
 #
-# "In scope" is what qualify_type_name resolves a bare name to, read off the same
-# ResolveCtx: the module's own types, the ones it imports by name, and by
-# fall-through the bare-named ones, which are the prelude's.
+# "In scope" is what qualify_type_name resolves the name to, read off the same
+# ResolveCtx: the module's own types, the ones it imports by name, the prelude's
+# (by fall-through), and for `alias.T` the alias's exported types.
 
-# The types a bare name falls through to: those of a module spelled bare (the prelude).
-fn bare_type_names(modules: List ParsedModule, all_symbols: Dict ModuleSymbols,
-                   acc: Dict String) -> Dict String =
-  match modules with
-  | Nil -> acc
-  | Cons mod rest ->
-      match mod with
-      | ParsedModule mod_name path _ _ _ _ ->
-          if mod_name != "" then bare_type_names(rest, all_symbols, acc)
-          else
-            match dict_get(path, all_symbols) with
-            | Nothing -> bare_type_names(rest, all_symbols, acc)
-            | Just syms -> bare_type_names(rest, all_symbols, dict_merge(acc, sym_type_locals(syms)))
+# The bundle-wide half of the answer. The prelude's types are found by PATH, not by
+# the empty module name, which a `no_prelude` entry has too: its types are in scope
+# only in itself. The canonical type names keep an alias lookup to types: its table
+# holds the alias's classes too.
+type TypeVocab = (prelude_types: Dict String, type_canonicals: Dict String)
 
-# (type, constructor, position) of a one-constructor type not named like its constructor.
-fn one_ctor_named_apart(decl: ast.Decl) -> Maybe (String, String, source.SourcePos) =
+fn prelude_type_names(all_symbols: Dict ModuleSymbols, stdlib_root: String) -> Dict String =
+  match dict_get(prelude_path(stdlib_root), all_symbols) with
+  | Nothing -> dict_empty()
+  | Just syms -> sym_type_locals(syms)
+
+fn add_type_canonicals(acc: Dict String, syms: ModuleSymbols) -> Dict String =
+  vec_fold(\ (a, canonical) -> dict_set(canonical, canonical, a), acc, dict_values(sym_type_locals(syms)))
+
+fn type_vocab(all_symbols: Dict ModuleSymbols, stdlib_root: String) -> TypeVocab =
+  TypeVocab(prelude_types = prelude_type_names(all_symbols, stdlib_root),
+            type_canonicals = vec_fold(add_type_canonicals, dict_empty(), dict_values(all_symbols)))
+
+# (type, its parameters, constructor, position) of a one-constructor type not named
+# like its constructor.
+fn one_ctor_named_apart(decl: ast.Decl) -> Maybe (String, List String, String, source.SourcePos) =
   match decl with
-  | ast.TypeDecl name _ [ast.TypeConstructor ctor _ _ _] _ _ pos ->
-      if ctor == name then Nothing else Just((name, ctor, pos))
+  | ast.TypeDecl name params [ast.TypeConstructor ctor _ _ _] _ _ pos ->
+      if ctor == name then Nothing else Just((name, params, ctor, pos))
   | _ -> Nothing
 
-fn names_type_in_scope(ctx: ResolveCtx, bare_types: Dict String, name: String) -> Bool =
-  str_list_member(name, undeclared_type_names)
-    || has_key(name, ctx_type_locals(ctx))
-    || has_key(name, ctx_unqual_types(ctx))
-    || has_key(name, bare_types)
+fn names_type_in_scope(ctx: ResolveCtx, vocab: TypeVocab, name: String) -> Bool =
+  if str_find(name, ".") != -1 then
+    match qualified_type_lookup(ctx, name) with
+    | Nothing -> false
+    | Just canonical -> has_key(canonical, vocab.type_canonicals)
+  else
+    str_list_member(name, undeclared_type_names)
+      || has_key(name, ctx_type_locals(ctx))
+      || has_key(name, ctx_unqual_types(ctx))
+      || has_key(name, vocab.prelude_types)
 
-# `shown` is the qualified name, so the message names the module; the fix is
-# spelled with the name as written.
-fn one_ctor_clash_message(shown: String, name: String, ctor: String) -> String =
+# `shown` is the qualified name, so the message names the module; `head` is the
+# type as written, with its parameters, which the suggested fix needs.
+fn one_ctor_clash_message(shown: String, head: String, ctor: String) -> String =
   "type `" ++ shown ++ "` has one constructor, `" ++ ctor
     ++ "`, which is also the name of a type in scope: this declares a new sum type, not an alias. Write `type alias "
-    ++ name ++ " = …` for an alias or `wrap " ++ name
+    ++ head ++ " = …` for an alias or `wrap " ++ head
     ++ " = …` for a distinct type; to keep the sum type, rename the constructor"
 
-fn first_one_ctor_clash(ctx: ResolveCtx, bare_types: Dict String,
-                        candidates: List (String, String, source.SourcePos)) -> Maybe(source.SourcePos, String) =
+fn first_one_ctor_clash(ctx: ResolveCtx, vocab: TypeVocab,
+                        candidates: List (String, List String, String, source.SourcePos)) -> Maybe(source.SourcePos, String) =
   match candidates with
   | [] -> Nothing
-  | [(name, ctor, pos) | rest] ->
-      if names_type_in_scope(ctx, bare_types, ctor)
-      then Just((pos, one_ctor_clash_message(dict_get_or(name, ctx_type_locals(ctx), name), name, ctor)))
-      else first_one_ctor_clash(ctx, bare_types, rest)
+  | [(name, params, ctor, pos) | rest] ->
+      if names_type_in_scope(ctx, vocab, ctor)
+      then Just((pos, one_ctor_clash_message(dict_get_or(name, ctx_type_locals(ctx), name),
+                                             string.join(" ", Cons(name, params)), ctor)))
+      else first_one_ctor_clash(ctx, vocab, rest)
 
 # Runs on the modules as written, before qualification renames their constructors.
 # A module's ResolveCtx is built only when it has a candidate, which most do not.
 fn find_one_ctor_clash(modules: List ParsedModule, all_symbols: Dict ModuleSymbols,
                        stdlib_root: String, extra_roots: List String, canonical: Dict String,
-                       bare_types: Dict String) -> Maybe(source.SourcePos, String) =
+                       vocab: TypeVocab) -> Maybe(source.SourcePos, String) =
   match modules with
   | Nil -> Nothing
   | Cons mod rest ->
       match mod with
       | ParsedModule _ _ _ _ _ decls ->
           match list_filter_map(one_ctor_named_apart, decls) with
-          | [] -> find_one_ctor_clash(rest, all_symbols, stdlib_root, extra_roots, canonical, bare_types)
+          | [] -> find_one_ctor_clash(rest, all_symbols, stdlib_root, extra_roots, canonical, vocab)
           | candidates ->
               match first_one_ctor_clash(build_resolve_ctx(mod, all_symbols, stdlib_root, extra_roots, canonical),
-                                         bare_types, candidates) with
+                                         vocab, candidates) with
               | Just e -> Just(e)
-              | Nothing -> find_one_ctor_clash(rest, all_symbols, stdlib_root, extra_roots, canonical, bare_types)
+              | Nothing -> find_one_ctor_clash(rest, all_symbols, stdlib_root, extra_roots, canonical, vocab)
 
 # ---------------------------------------------------------------------------
 # Post-qualification assertion: no qualified name may start with '.'
@@ -2364,7 +2375,7 @@ fn make_bundle_or_err(modules: List ParsedModule, stdlib_root: String, extra_roo
           | Just (pos, err_msg) -> BundleErr(pos, err_msg)
           | Nothing ->
             match find_one_ctor_clash(modules, all_symbols, stdlib_root, extra_roots, canonical,
-                                      bare_type_names(modules, all_symbols, dict_empty())) with
+                                      type_vocab(all_symbols, stdlib_root)) with
             | Just (pos, err_msg) -> BundleErr(pos, err_msg)
             | Nothing ->
             match deriving.validate_deriving_decls(qualified) with

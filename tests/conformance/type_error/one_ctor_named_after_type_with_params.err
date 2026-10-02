@@ -1,0 +1,1 @@
+Write `type alias Box a = …` for an alias or `wrap Box a = …` for a distinct type

@@ -943,27 +943,34 @@ Forward references between mutually recursive ADTs within the same module are
 allowed — validation runs after all type names in the module have been
 registered.
 
+**Positions validated in this version:** `TypeDecl` constructor fields,
+`RecordDecl` field types, `AliasDecl` RHS, `WrapDecl` inner type.  `ClassDecl`
+method signatures, `InstanceDecl` constraint types, and `FnDecl` param/return
+type annotations are not yet validated (tracked in BACKLOG.md).
+
 **A one-constructor type may not name its constructor after another type in
 scope.** Without `alias`, `type Pairs = List (String, Int)` declares a new type
 with one constructor named `List` taking a tuple. It reads as an alias (§5.6.2)
-and is not one, so it is a compile error when the type has **exactly one**
-constructor whose name differs from the type's own and is a type usable
-unqualified in that module: a built-in type, a prelude type, a type of the same
-module, or one imported by name:
+and is not one. So it is a compile error when a type has **exactly one**
+constructor, that constructor's name differs from the type's own, and the name
+resolves to a type in that module:
+
+- written bare: a primitive type, a runtime type (`Vector`, `Map`, `NativeSet`,
+  `Ref`, `Builder`), a prelude type, a type of the same module, or one imported
+  by name;
+- written qualified: a type an import alias exports (`json.Json` after
+  `import stdlib.json as json`).
 
 ```
 type `Pairs` has one constructor, `List`, which is also the name of a type in scope: this declares a new sum type, not an alias. Write `type alias Pairs = …` for an alias or `wrap Pairs = …` for a distinct type; to keep the sum type, rename the constructor
 ```
 
-A leading `|` does not exempt it. A constructor named after its own type
-(`type Box = | Box Int`), a type with several constructors (`| JsonArray
-JsonArray` in `stdlib/json.sprout`), and a type another module declares but this
-one does not import by name are all unaffected.
-
-**Positions validated in this version:** `TypeDecl` constructor fields,
-`RecordDecl` field types, `AliasDecl` RHS, `WrapDecl` inner type.  `ClassDecl`
-method signatures, `InstanceDecl` constraint types, and `FnDecl` param/return
-type annotations are not yet validated (tracked in BACKLOG.md).
+The suggested fix keeps the type's parameters: `type Box a = List a` is told
+`type alias Box a = …`. A leading `|` does not exempt it. A constructor named
+after its own type (`type Box = | Box Int`), a type with several constructors
+(`| JsonArray JsonArray` in `stdlib/json.sprout`), and a bare name that is a type
+only in another module (`JsonArray` after `import stdlib.json as json`) are all
+unaffected.
 
 #### Existential constructors (experimental — Stage 0a)
 

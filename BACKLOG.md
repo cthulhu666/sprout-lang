@@ -1129,6 +1129,16 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   qualified. Pre-existing, verified against builds either side of the `no_prelude` floor with
   byte-identical outcomes: the hazard is the bare namespace a `no_prelude` file already has, and it
   applies to any top-level name colliding with a runtime symbol.
+- [ ] `P2` **An `import` after `no_prelude` is silently dropped.** `no_prelude` then
+  `import demo.tokbar (bar_value)` fails as `Unknown variable: bar_value`; the reverse order works.
+  `module_loader.collect_imports_from_lines` stops at the first line that is not `module`, `import`,
+  blank or a comment, so `no_prelude` ends the import scan. Spec §3.1 calls `no_prelude` a header
+  line like `import`, with no order among them. Found while fixing #422.
+- [ ] `P3` **A constructor name may contain a dot.** The lexer reads `json.JsonEncode` as one ident
+  and the parser accepts it as a constructor name, so `type Doc = | json.JsonEncode | Other`
+  compiles, and `json.JsonEncode` in an expression then means this local constructor, not a member
+  of the `json` import. The #422 check rejects it only when the name resolves to a type. Reject a
+  dotted name in `parse_type_constructor_def`.
 - [ ] `P2` **REPL SIGSEGV on a tuple that nests let-bound tuple variables.**
   `let t1 = (1,3,"foo",true)` then `let t2 = (t1, t1)`, then evaluating `t2` gives
   `SIGSEGV (no current function set)`. Flat tuples are fine. **Not a codegen bug** — the

@@ -1,0 +1,5 @@
+# The runtime types (`Ref`, `Vector`, `Map`, ...) are usable bare like the
+# primitives, so they clash like them.
+type Cell = Ref Int
+
+fn main() -> Unit !{IO} = print("unreachable")
