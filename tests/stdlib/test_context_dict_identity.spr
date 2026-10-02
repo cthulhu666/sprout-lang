@@ -1,0 +1,90 @@
+import stdlib.test (check_eq, run_suite)
+
+# An instance context's dictionary must be the one for the type that needs it. Each case
+# here once compiled to a call through ANOTHER type's dictionary (or through none), and
+# `Never`'s always-false and `Loose`'s always-true `eq` make a wrong one change the answer.
+
+type Never = Never Int
+
+instance Eq Never
+  fn eq(a: Never, b: Never) -> Bool = false
+
+type Loose = Loose Int
+
+instance Eq Loose
+  fn eq(a: Loose, b: Loose) -> Bool = true
+
+type Box a deriving (Eq, ToString) = Box a
+
+# A callee's compound constraint is built from ITS variable, not from the first argument
+# that happens to share the head constructor.
+fn two(x: a, m: Maybe b) -> (Bool, Bool) where Eq a, Eq (Maybe b) = (x == x, m == m)
+
+fn two_from(p: c, q: d) -> (Bool, Bool) where Eq c, Eq d = two(Just(p), Just(q))
+
+fn first_box(x: Box Int, y: Box b, z: Box b) -> Bool where Eq (Box b) = y == z
+
+fn box_later(w: c) -> Bool where Eq c =
+  let h = \v -> first_box(Box(1), Box (Just(v)), Box (Just(v)))
+  in h(w)
+
+fn via(p: Box Int, q: Box t) -> String where ToString (Box t) = to_string(q)
+
+fn shown_later(x: a) -> String where ToString a = (\z -> via(Box(1), Box (Just(z))))(x)
+
+# An existential is a type of its own: `where Eq (Maybe a)` does not supply its context.
+type Bag = | exists t. Bag t t where Eq t
+
+fn bag_same(y: Maybe a, b: Bag) -> Bool where Eq (Maybe a) =
+  match b with
+  | Bag p q -> Just(p) == Just(q)
+
+# With no `where` at all, the existential's own packed `Eq` supplies the context.
+fn bag_alone(b: Bag) -> Bool =
+  match b with
+  | Bag p q -> Just(p) == Just(q)
+
+type EqBox = | EqBox (any Eq)
+
+fn eq_box_same(m: Maybe a, b: EqBox) -> Bool where Eq (Maybe a) =
+  match b with
+  | EqBox v -> Just(v) == Just(v)
+
+# A compound `where` written through an alias still forwards.
+type alias Opt a = Maybe a
+
+type alias Pairs a = List(a, a)
+
+fn opt_lists(x: List (Opt a), y: List (Opt a)) -> Bool where Eq (List (Opt a)) = x == y
+
+fn maybe_pairs(x: Maybe (Pairs a), y: Maybe (Pairs a)) -> Bool where Eq (Maybe (Pairs a)) = x == y
+
+# An unannotated parameter that unification made the written variable's stand-in.
+fn tuple_flip(x: a, y) -> Bool where Eq a = (y, 1) == (x, 1)
+
+# A class method's own `where` dictionary, needed by a lambda applied later.
+class Holder f
+  fn holds(x: a, c: f a) -> Bool where Eq a
+
+instance Holder List
+  fn holds(x: a, c: List a) -> Bool where Eq a = any(\y -> y == x, c)
+
+fn holds_later(x: a) -> Bool where Eq a =
+  let g = \z -> holds(Just(z), [Just(z)])
+  in g(x)
+
+fn main() -> Unit !{IO} =
+  run_suite("context_dict_identity", [
+    check_eq("compound callee takes its own variable", two_from(Never(1), 1), (false, true)),
+    check_eq("compound callee, lambda applied later", box_later("s"), true),
+    check_eq("compound callee, ToString", shown_later("hello"), "Box(Just(hello))"),
+    check_eq("existential under a compound where", bag_same(Just (Loose(1)), Bag(3, 4)), false),
+    check_eq("any-boxed value under a compound where", eq_box_same(Just (Never(1)), EqBox("x")), true),
+    check_eq("existential in a Maybe, no where", bag_alone(Bag (Never(1), Never(1))), false),
+    check_eq("existential in a Maybe, no where, equal", bag_alone(Bag("a", "a")), true),
+    check_eq("compound where through an alias", opt_lists([Just(1)], [Just(1)]), true),
+    check_eq("compound where through a nested alias", maybe_pairs(Just([(1, 1)]), Just([(1, 1)])), true),
+    check_eq("placeholder standing for a written variable", tuple_flip(3, 3), true),
+    check_eq("method-level dict, lambda applied later", holds_later(1), true),
+    check_eq("method-level dict, inner dict used", holds_later(Never(1)), false)
+  ])

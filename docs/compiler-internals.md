@@ -519,7 +519,24 @@ The same coarseness let ONE forwarded constraint serve a different use: with
 constraint's WRITTEN arguments beside its key (`Forwarded`) and forwards only when
 the use does not conflict with them (`resolve.forwards`); otherwise the use takes the
 instance and its own context, which the context check then requires to be supplied.
-The key format is unchanged, so lowering's `ctx_fwd` needs no change.
+The key format is unchanged, so lowering's `ctx_fwd` needs no change. Two details
+keep the comparison honest: the written arguments are stored with type aliases
+expanded (`resolve.expand_aliases`, reading the `@aliasty:` markers), since use
+sites arrive expanded; and only `_` and `$t…` inference variables count as unknown —
+an existential (`$ex_…`, a `$sk…` skolem) or an unannotated slot's placeholder is a
+type of its own. A superclass can also put two arguments on one key (`where
+Ord (Maybe a), Eq (Maybe b)`); `resolve.fwd_slot_clash` rejects that, the expanded
+twin of `check_indistinct_constraints`.
+
+**A dictionary rebuilt after inference may only fill holes.** The post-pass
+(`settled_constrained_dict`, `settled_dispatch_call`) rebuilds a dict whose recorded
+type still has a `_` once the final substitution can name it, and keeps the rebuild
+only if `dict_refines` it — same structure, differing only where the old had holes.
+Comparing the head constructor alone once accepted a dictionary taken from another
+argument with the same head. For the same reason a compound constraint's argument is
+always built from the callee's own variable (prog_to_fresh during inference,
+`find_class_var_in_type` over the call's type afterwards), never from the first
+argument the head-directed scan finds.
 
 ### The compound-head constraint token, and why it carries `#any`
 

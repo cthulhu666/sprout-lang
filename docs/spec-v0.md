@@ -2934,13 +2934,21 @@ comparison runs.
 
 A forwarded compound constraint arrives whole: `where Eq (Maybe a)` supplies
 `Eq (Maybe a)`, context included — and only that.  It does not supply
-`Eq (Maybe b)` or `Eq (Maybe Int)`; those take the instance and need their own
-context.  In an instance method the context comes from the instance head, under
-the head's own variable names.  An unannotated parameter has no variable to
-constrain until it is annotated, and a context at an applied variable
-(`Eq (f a)`) cannot be supplied by a `where` clause today; both are rejected, and
-the message says what to do instead.  As above, a variable the declaration does
-not generalize is unaffected.
+`Eq (Maybe b)`, `Eq (Maybe Int)`, or `Eq (Maybe t)` for an existential `t`
+unpacked in the body; those take the instance and need their own context.  A
+type alias in the `where` is compared expanded, so `where Eq (List (Opt a))` with
+`type alias Opt a = Maybe a` supplies `Eq (List (Maybe a))`.  Two constraints may
+not need one class at two types that share a head constructor, even when one comes
+from a superclass (`where Ord (Maybe a), Eq (Maybe b)`); this is rejected, as the
+written pair is.
+
+In an instance method the context comes from the instance head, under the head's
+own variable names, and reaches only the variables the head binds; a variable of
+the method's own needs a method-level `where`.  An unannotated parameter — or a
+type variable inside one's inferred type — has no variable to constrain until it
+is annotated, and a context at an applied variable (`Eq (f a)`) cannot be supplied
+by a `where` clause today; each is rejected, and the message says what to do
+instead.  As above, a variable the declaration does not generalize is unaffected.
 
 ### `ToString` instances
 

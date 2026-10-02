@@ -246,17 +246,16 @@ fn type_list_from_ast(parts: List ast.TypeExpr, local_vars: Dict types.Type) -> 
 # The arity rides in the key because `alias_env` is a `Dict types.Type` shared
 # with the type-variable dict: one name holds one type, and `F a` and `F a b`
 # are different aliases. `@` and `:` cannot appear in a type name, so no user
-# name collides with a key (the same guarantee `@qualalias:` relies on).
-
-let alias_fn_prefix: String = "@aliasfn:"
-
+# name collides with a key (the same guarantee `@qualalias:` relies on). The
+# prefixes live in types (alias_fn_prefix, alias_param_prefix) because resolve reads
+# the same keys back.
 fn alias_fn_key(name: String, arity: Int) -> String =
-  alias_fn_prefix ++ name ++ ":" ++ int_to_string(arity)
+  types.alias_fn_prefix ++ name ++ ":" ++ int_to_string(arity)
 
 # Keyed by alias as well as position, so that an alias body which expands
 # another alias cannot capture the inner one's parameters.
 fn alias_param_sentinel(name: String, index: Int) -> String =
-  "__aliasparam__" ++ name ++ ":" ++ int_to_string(index)
+  types.alias_param_prefix ++ name ++ ":" ++ int_to_string(index)
 
 # The head and arguments of `F a b`, which parses left-nested as
 # `TypeApply (TypeApply F a) b`. Nothing when the head is not a plain name.
@@ -2834,7 +2833,7 @@ fn type_to_typeexpr(t: types.Type, subst: Dict types.Type, env: Dict types.Schem
   # Dispatch TDict head — keep the full canonical name (matches
   # type_to_typeexpr_with_prog_vars), so the head can't desync from full-name @inst /
   # ctx_inst keys for a module-qualified type. (code-review finding 1, 2026-07-10)
-  | types.TConst name -> ast.TypeName(types.type_id_name(name))
+  | types.TConst name -> skolem_or_name(types.type_id_name(name), env)
   | types.TApp base arg -> ast.TypeApply(type_to_typeexpr(base, subst, env), type_to_typeexpr(arg, subst, env))
   | types.TTuple items -> ast.TupleType(list_map(\item -> type_to_typeexpr(item, subst, env), items))
   | types.TVar name -> fwd_prog_var_any_class(types.tyvar_identity(name), subst, env)
@@ -2923,7 +2922,7 @@ fn type_to_typeexpr_with_prog_vars(t: types.Type, class_name: String, subst: Dic
   # TypeExpr becomes the injected TDict's constraint head, which resolve.sprout turns
   # into the instance-dispatch Evidence key — stripping here made the key bare
   # ("ToString_Maybe") and mis-resolved a shadowed type to the prelude instance.
-  | types.TConst name -> ast.TypeName(types.type_id_name(name))
+  | types.TConst name -> skolem_or_name(types.type_id_name(name), env)
   | types.TApp base arg ->
       ast.TypeApply(type_to_typeexpr_with_prog_vars(base, class_name, subst, env),
                     type_to_typeexpr_with_prog_vars(arg, class_name, subst, env))
@@ -2940,11 +2939,35 @@ fn type_to_typeexpr_with_prog_vars(t: types.Type, class_name: String, subst: Dic
 # last resort: a variable no signature wrote, whose dictionary nothing can supply.
 fn fwd_prog_var_any_class(tyvar: String, subst: Dict types.Type, env: Dict types.Scheme) -> ast.TypeExpr =
   match dict_get(fwdvar_key(tyvar), env) with
-  | Just scheme -> fwd_scheme_prog_var(scheme)
+  | Just scheme -> written_over_placeholder(fwd_scheme_prog_var(scheme), tyvar, subst, env)
   | Nothing ->
       match sig_var_now_named(tyvar, subst, env) with
       | Just scheme -> fwd_scheme_prog_var(scheme)
       | Nothing -> ast.TypeName("_")
+
+# Unification may make an unannotated slot's placeholder the representative of a written
+# variable (`(y, 1) == (x, 1)` binds `a` to `y`'s placeholder). The written name is the
+# one a `where` can supply, so it wins over the placeholder's own entry.
+fn written_over_placeholder(direct: ast.TypeExpr, tyvar: String, subst: Dict types.Type,
+                            env: Dict types.Scheme) -> ast.TypeExpr =
+  let ast.TypeName n = direct else direct
+  in
+    if types.is_unann_placeholder(n) == false then direct
+    else
+      match sig_var_now_named(tyvar, subst, env) with
+      | Just scheme -> fwd_scheme_prog_var(scheme)
+      | Nothing -> direct
+
+# An unpacked existential is a rigid TConst skolem; inside its match arm the given seeded
+# for it (seed_given_for_skolem) names it `$ex_<var>`, the identity lowering forwards per
+# arm. Without the name, `Maybe <existential>` read as an unknown and borrowed whatever
+# compound `where` shared its key.
+fn skolem_or_name(name: String, env: Dict types.Scheme) -> ast.TypeExpr =
+  if types.is_skolem_name(name) == false then ast.TypeName(name)
+  else
+    match dict_get(fwdvar_key(name), env) with
+    | Just scheme -> fwd_scheme_prog_var(scheme)
+    | Nothing -> ast.TypeName(name)
 
 # The declaration's signature variables, as one TTuple of their fresh TVars, for
 # sig_var_now_named to search when unification has bound one of them away.
@@ -3497,10 +3520,12 @@ fn resolve_compound_head_tdict(
       types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
   where toks = arg_scan_arg_tokens(head_token)
 
-# Each token's argument as a concrete TypeExpr, in written order. Nothing if one
-# is "#any" (no variable to decode) or still polymorphic here: a dictionary built
-# from a partly-unknown head would dispatch on a type this caller has not chosen
-# yet, so the obligation forwards and the head-directed scan takes over.
+# Each token's argument as a TypeExpr, in written order. Nothing only if one is
+# "#any" (no variable to decode). A variable this call left polymorphic is written
+# under its program name, or as `_` for the post-pass to fill: the head-directed
+# scan that used to take over picks the FIRST argument sharing the head, which for
+# `two(x: a, m: Maybe b) where Eq (Maybe b)` called as `two(Just(p), Just(q))`
+# built `Eq (Maybe c)` for `m` — once named, a silent wrong dictionary.
 fn constraint_arg_typeexprs(
   toks: List String,
   callee: String,
@@ -3528,7 +3553,7 @@ fn constraint_arg_typeexpr(
   env: Dict types.Scheme
 ) -> Maybe ast.TypeExpr =
   match dict_get(decode_constraint_var(t, callee, env), prog_to_fresh) with
-  | Just fresh_t -> concrete_typeexpr(unifier.apply_subst(subst, fresh_t), subst, env)
+  | Just fresh_t -> Just(type_to_typeexpr(unifier.apply_subst(subst, fresh_t), subst, env))
   | Nothing -> named_ctor_typeexpr(t)
 
 # A marker token names no type and a lowercase one is a variable the substitution did
@@ -4074,6 +4099,24 @@ fn seed_unann_names(placeholders: List String, env: Dict types.Scheme) -> Dict t
   match placeholders with
   | [] -> env
   | [p | rest] -> seed_unann_names(rest, add_sig_var(ProgVarName(p), FreshTVarName(p), env))
+
+# Once the body's substitution is final, a variable INSIDE an unannotated slot's
+# inferred type (`p` in `b: Box p`) is generalized as well, and gets the slot's name,
+# so a dictionary it needs points at that parameter rather than reading as `_`. Only
+# for the post-pass: during inference the slot's type is not known yet.
+fn seed_unann_inner_names(placeholders: List String, s2: Dict types.Type,
+                          env: Dict types.Scheme) -> Dict types.Scheme =
+  match placeholders with
+  | [] -> env
+  | [p | rest] ->
+      seed_unann_inner_names(rest, s2,
+        name_vars_after(p, types.ftv(unifier.apply_subst(s2, types.TVar(types.tyvar_id(p)))), env))
+
+fn name_vars_after(placeholder: String, vars: List String, env: Dict types.Scheme) -> Dict types.Scheme =
+  match vars with
+  | [] -> env
+  | [v | rest] ->
+      name_vars_after(placeholder, rest, name_unless_named(ProgVarName(placeholder), FreshTVarName(v), env))
 
 fn seed_sig_var_entries(entries: List (String, types.Type), env: Dict types.Scheme) -> Dict types.Scheme =
   match entries with
@@ -6032,21 +6075,20 @@ fn annotation_tyvar(te: ast.TypeExpr) -> Maybe String =
 fn aliases_for_annotations(env: Dict types.Scheme) -> Dict types.Type =
   alias_decls_from_env(vec_to_list(dict_entries(env)), import_aliases_from_env(env))
 
-# Key prefix for a `type alias` mirrored into the value environment. Named rather
-# than spelled twice so the write and the read cannot drift.
-let alias_marker_prefix: String = "@aliasty:"
-
+# A `type alias` is mirrored into the value environment under
+# types.alias_marker_prefix — one spelling for the write and every reader, resolve's
+# included, so they cannot drift.
 fn alias_decls_from_env(
   entries: List (String, types.Scheme), acc: Dict types.Type
 ) -> Dict types.Type =
   match entries with
   | [] -> acc
   | [(key, scheme) | rest] ->
-      if str_starts_with(key, alias_marker_prefix) then
+      if str_starts_with(key, types.alias_marker_prefix) then
         match scheme with
         | types.Scheme _ _ ty _ _ ->
             alias_decls_from_env(rest,
-              dict_set(string.drop(key, string.length(alias_marker_prefix)), ty, acc))
+              dict_set(string.drop(key, string.length(types.alias_marker_prefix)), ty, acc))
       else alias_decls_from_env(rest, acc)
 
 # `pos` is the LAMBDA's position, threaded in so the error is constructed with a
@@ -9156,7 +9198,7 @@ fn mirror_alias_entries(
   | [] -> acc
   | [(name, ty) | rest] ->
       mirror_alias_entries(rest,
-        dict_set(alias_marker_prefix ++ name, types.mono(ty), acc))
+        dict_set(types.alias_marker_prefix ++ name, types.mono(ty), acc))
 
 fn all_fn_decls(members: List (Int, ast.Decl)) -> Bool =
   match members with
@@ -9747,26 +9789,63 @@ fn build_constrained_fn_dicts_via_field(
 
 # An inference-time dict that recorded a hole — a variable tied to a written one only
 # later, as a lambda parameter is when the lambda is applied — is rebuilt from the
-# declaration's final substitution, the way it was first built. The rebuild is kept
-# only if it names the same instance: it may fill a hole, never pick another dict.
+# declaration's final substitution, from the constraint's own variable. The rebuild is
+# kept only if it refines the old one: it may fill a hole, never pick another dict.
 fn settled_constrained_dict(existing_d: typed_ast.TypedExpr, head_token: String, class_name: String,
                             fn_name: String, env: Dict types.Scheme, subst: Dict types.Type,
                             callee_ty: types.Type, user_args: List typed_ast.TypedExpr,
                             pos: source.SourcePos) -> typed_ast.TypedExpr =
   if tdict_has_hole(existing_d) == false then existing_d
   else
-    let Just rebuilt = rebuilt_constrained_dict(head_token, class_name, fn_name, env, subst,
-                                                callee_ty, user_args, pos) else existing_d
-    in if same_instance_head(existing_d, rebuilt) then rebuilt else existing_d
+    let Just rebuilt = rebuilt_constrained_dict(existing_d, head_token, class_name, fn_name, env,
+                                                subst, callee_ty, user_args, pos) else existing_d
+    in if dict_refines(rebuilt, existing_d) then rebuilt else existing_d
 
-fn rebuilt_constrained_dict(head_token: String, class_name: String, fn_name: String,
-                            env: Dict types.Scheme, subst: Dict types.Type, callee_ty: types.Type,
-                            user_args: List typed_ast.TypedExpr,
+# A compound token with written arguments (`#app:Box:t`) is rebuilt from where the
+# callee's declared type put `t`, as resolve_compound_head_tdict builds it from
+# prog_to_fresh. The head-directed scan is left for a token that names no argument.
+fn rebuilt_constrained_dict(existing_d: typed_ast.TypedExpr, head_token: String, class_name: String,
+                            fn_name: String, env: Dict types.Scheme, subst: Dict types.Type,
+                            callee_ty: types.Type, user_args: List typed_ast.TypedExpr,
                             pos: source.SourcePos) -> Maybe typed_ast.TypedExpr =
-  if is_arg_scanned_token(head_token)
-  then resolve_arg_scanned_tdict(class_name, arg_scan_head(head_token), arg_scan_arity(head_token),
-                                 user_args, subst, env, pos, Nil)
-  else constraint_var_dict(class_name, head_token, fn_name, env, subst, callee_ty, pos)
+  match (is_arg_scanned_token(head_token), arg_scan_arg_tokens(head_token)) with
+  | (true, [_ | _]) -> compound_from_callee(existing_d, arg_scan_arg_tokens(head_token), fn_name, env,
+                                             subst, callee_ty)
+  | (true, []) -> resolve_arg_scanned_tdict(class_name, arg_scan_head(head_token),
+                                            arg_scan_arity(head_token), user_args, subst, env, pos, Nil)
+  | (false, _) -> constraint_var_dict(class_name, head_token, fn_name, env, subst, callee_ty, pos)
+
+fn compound_from_callee(existing_d: typed_ast.TypedExpr, toks: List String, fn_name: String,
+                        env: Dict types.Scheme, subst: Dict types.Type,
+                        callee_ty: types.Type) -> Maybe typed_ast.TypedExpr =
+  let typed_ast.TDict(ast.TypeConstraint dict_class [old_te]) dict_t dict_pos ev = existing_d else Nothing
+      Just sch = dict_get(fn_name, env) else Nothing
+      Just args_te = callee_arg_typeexprs(toks, types.scheme_type(sch), callee_ty, fn_name, env, subst)
+        else Nothing
+  in Just(typed_ast.TDict(ast.TypeConstraint(dict_class, [apply_typeexprs(te_spine_head(old_te), args_te)]),
+                          dict_t, dict_pos, ev))
+
+fn callee_arg_typeexprs(toks: List String, declared: types.Type, callee_ty: types.Type, fn_name: String,
+                        env: Dict types.Scheme, subst: Dict types.Type) -> Maybe (List ast.TypeExpr) =
+  match toks with
+  | [] -> Just(Nil)
+  | ["#any" | _] -> Nothing
+  | [tok | rest] ->
+      let Just te = callee_arg_typeexpr(tok, declared, callee_ty, fn_name, env, subst) else Nothing
+          Just more = callee_arg_typeexprs(rest, declared, callee_ty, fn_name, env, subst) else Nothing
+      in Just(Cons(te, more))
+
+fn callee_arg_typeexpr(tok: String, declared: types.Type, callee_ty: types.Type, fn_name: String,
+                       env: Dict types.Scheme, subst: Dict types.Type) -> Maybe ast.TypeExpr =
+  match find_class_var_in_type(declared, callee_ty, decode_constraint_var(tok, fn_name, env)) with
+  | Just t -> Just(type_to_typeexpr(t, subst, env))
+  | Nothing -> named_ctor_typeexpr(tok)
+
+# The constructor a type application is built on: `Box` in `Box (Maybe a)`.
+fn te_spine_head(te: ast.TypeExpr) -> ast.TypeExpr =
+  match te with
+  | ast.TypeApply base _ -> te_spine_head(base)
+  | _ -> te
 
 # Locate the constraint's own variable in the callee's DECLARED type, walked alongside the type
 # this call instantiated it to, and take the instance for what it was instantiated to.
@@ -9955,12 +10034,37 @@ fn settled_dispatch_call(
   method_type: types.Type
 ) -> typed_ast.TypedExpr =
   let [lead | rest] = args else typed_ast.TCall(fn_, args, t, pos)
-      Just rebuilt = rebuilt_dispatch_dict(env, subst, lead, strip_leading_tdicts(args), t, class_name,
-                                           class_vars, method_type) else typed_ast.TCall(fn_, args, t, pos)
-  in typed_ast.TCall(fn_, Cons(rebuilt, rest), t, pos)
+  in typed_ast.TCall(fn_,
+       Cons(settled_class_dict(env, subst, lead, strip_leading_tdicts(args), t, class_name, class_vars,
+                               method_type),
+            settled_method_dicts(env, subst, fn_, rest, t, pos)),
+       t, pos)
+
+fn settled_class_dict(env: Dict types.Scheme, subst: Dict types.Type, lead: typed_ast.TypedExpr,
+                      user_args: List typed_ast.TypedExpr, t: types.Type, class_name: String,
+                      class_vars: List String, method_type: types.Type) -> typed_ast.TypedExpr =
+  match rebuilt_dispatch_dict(env, subst, lead, user_args, t, class_name, class_vars, method_type) with
+  | Just rebuilt -> rebuilt
+  | Nothing -> lead
+
+# A method's own `where` dicts follow the user arguments (check_class_method_call) and
+# take the constrained-fn post-pass, which settles a holed one; only when one has a hole,
+# so a call that needs nothing keeps its arguments untouched.
+fn settled_method_dicts(env: Dict types.Scheme, subst: Dict types.Type, fn_: typed_ast.TypedExpr,
+                        rest: List typed_ast.TypedExpr, t: types.Type,
+                        pos: source.SourcePos) -> List typed_ast.TypedExpr =
+  let typed_ast.TVar method_name _ _ = fn_ else rest
+      [_ | _] = constrained_fn_field(method_name, env) else rest
+  in
+    if any(tdict_has_hole, collect_all_tdicts(rest)) == false then rest
+    else
+      list_append(user_typed_args(rest),
+        build_constrained_fn_dicts_via_field(constrained_fn_field(method_name, env), env, subst, method_name,
+          unifier.apply_subst(subst, typed_ast.typed_expr_type(fn_)), unifier.apply_subst(subst, t),
+          user_typed_args(rest), pos, collect_all_tdicts(rest)))
 
 # The class dict leads the arguments (check_class_method_call), so `lead` is the one to
-# rebuild; same_instance_head rejects anything else.
+# rebuild; dict_refines rejects anything else.
 fn rebuilt_dispatch_dict(env: Dict types.Scheme, subst: Dict types.Type, lead: typed_ast.TypedExpr,
                          user_args: List typed_ast.TypedExpr, t: types.Type, class_name: String,
                          class_vars: List String, method_type: types.Type) -> Maybe typed_ast.TypedExpr =
@@ -9973,13 +10077,13 @@ fn rebuilt_dispatch_dict(env: Dict types.Scheme, subst: Dict types.Type, lead: t
                     ast.TypeConstraint(lead_class,
                       [type_to_typeexpr_with_prog_vars(resolved_t, class_name, subst, env)]),
                     dict_t, dict_pos, ev)
-    in if same_instance_head(lead, rebuilt) then Just(rebuilt) else Nothing
+    in if dict_refines(rebuilt, lead) then Just(rebuilt) else Nothing
 
 # A recorded constraint argument the naming could not fill: `_`, or an unannotated
 # slot's placeholder, which the final substitution may still pin to a type.
 fn te_has_hole(te: ast.TypeExpr) -> Bool =
   match te with
-  | ast.TypeName n -> n == "_" || types.is_unann_placeholder(n)
+  | ast.TypeName n -> te_hole_name(n)
   | ast.TypeApply base arg -> te_has_hole(base) || te_has_hole(arg)
   | ast.TupleType items -> any(te_has_hole, items)
   | ast.TypeArrow param ret _ _ -> te_has_hole(param) || te_has_hole(ret)
@@ -9991,11 +10095,36 @@ fn tdict_has_hole(d: typed_ast.TypedExpr) -> Bool =
   | typed_ast.TDict (ast.TypeConstraint _ type_args) _ _ _ -> any(te_has_hole, type_args)
   | _ -> false
 
-# Same class, same head constructor: a rebuild may name a hole, not change the instance.
-fn same_instance_head(a: typed_ast.TypedExpr, b: typed_ast.TypedExpr) -> Bool =
-  match (a, b) with
-  | (typed_ast.TDict(ast.TypeConstraint ca args_a) _ _ _, typed_ast.TDict(ast.TypeConstraint cb args_b) _ _ _) ->
-      string.after_last_dot(ca) == string.after_last_dot(cb) && te_head_str(args_a) == te_head_str(args_b)
+# A rebuild may only fill holes: same class, and every position the old dict named — a
+# constructor, a written variable — named alike in the new one. Comparing the head
+# constructor alone accepted `Eq (Box Int)`, from another argument, for `Eq (Box (Maybe _))`.
+fn dict_refines(new: typed_ast.TypedExpr, old: typed_ast.TypedExpr) -> Bool =
+  match (new, old) with
+  | (typed_ast.TDict(ast.TypeConstraint cn args_n) _ _ _, typed_ast.TDict(ast.TypeConstraint co args_o) _ _ _) ->
+      string.after_last_dot(cn) == string.after_last_dot(co) && te_list_refines(args_n, args_o)
+  | _ -> false
+
+fn te_list_refines(news: List ast.TypeExpr, olds: List ast.TypeExpr) -> Bool =
+  match (news, olds) with
+  | ([], []) -> true
+  | ([n | ns], [o | os]) -> te_refines(n, o) && te_list_refines(ns, os)
+  | (_, _) -> false
+
+fn te_refines(new: ast.TypeExpr, old: ast.TypeExpr) -> Bool =
+  match (new, old) with
+  | (_, ast.TypeName o) -> te_hole_name(o) || te_same_name(new, o)
+  | (ast.TypeApply nb na, ast.TypeApply ob oa) -> te_refines(nb, ob) && te_refines(na, oa)
+  | (ast.TupleType ns, ast.TupleType os) -> te_list_refines(ns, os)
+  | (ast.TypeArrow np nr _ _, ast.TypeArrow op o_ret _ _) -> te_refines(np, op) && te_refines(nr, o_ret)
+  | (ast.TypeThunk nr _, ast.TypeThunk o_ret _) -> te_refines(nr, o_ret)
+  | (ast.TypeEffect ni _, ast.TypeEffect oi _) -> te_refines(ni, oi)
+  | (_, _) -> false
+
+fn te_hole_name(n: String) -> Bool = n == "_" || types.is_unann_placeholder(n)
+
+fn te_same_name(te: ast.TypeExpr, name: String) -> Bool =
+  match te with
+  | ast.TypeName n -> string.after_last_dot(n) == string.after_last_dot(name)
   | _ -> false
 
 # Inject a forwarded dict when the still-polymorphic dispatch variable is one the
@@ -11052,7 +11181,7 @@ fn check_fn_body(
             match fn_linear_gate(params, ret_type_maybe, s2, inst_type, typed_body, fn_pos, env) with
             | linear_check.LinFail lp lm -> (typed_ast.BodyErr(lp, lm), dict_empty(), Nil, subst)
             | linear_check.LinPass ->
-                (typed_ast.BodyOk(resolve_dispatch_typed_expr(fwd_env, s2, bind_params(params, set_empty()), typed_body), unifier.apply_subst(s2, inst_type)),
+                (typed_ast.BodyOk(resolve_dispatch_typed_expr(seed_unann_inner_names(own_unann_vars(name, params, ret_type_maybe), s2, fwd_env), s2, bind_params(params, set_empty()), typed_body), unifier.apply_subst(s2, inst_type)),
                  fwd_markers, canonicalize_constrained_constraints(constraints, prog_to_fresh, s2, inst_type, env_ftv),
                  s2)
   | _ -> (typed_ast.BodyOk(dummy_unit(), types.TConst(types.type_id("Unit"))), dict_empty(), Nil, subst)
@@ -11590,12 +11719,12 @@ fn check_instance_method(
         # The class's own method declaration resolves aliases, so this must too
         # or the two sides of one method disagree. `alias_env` does not reach
         # this deep; the env's `@aliasty:` markers carry the same table.
-        let decl_scheme = scheme_from_fn_parts("#inst/" ++ name, params, ret_maybe, eff_maybe, aliases_for_annotations(env))
+        let decl_scheme = scheme_from_fn_parts(types.inst_owner_prefix ++ name, params, ret_maybe, eff_maybe, aliases_for_annotations(env))
         (inst_type, prog_to_fresh) <- unifier.instantiate_with_vars(state, decl_scheme)
         # The instance's own constraints and the method's restated ones seed the
         # same marker table: both name variables of THIS method's signature, and
         # both reach the body as hidden dictionaries.
-        let fwd_env = seed_unann_names(own_unann_vars("#inst/" ++ name, params, ret_maybe),
+        let fwd_env = seed_unann_names(own_unann_vars(types.inst_owner_prefix ++ name, params, ret_maybe),
                         seed_sig_var_names(prog_to_fresh,
                           seed_forward_markers(list_append(inst_constraints, method_constraints), prog_to_fresh, env)))
         let body_env = extend_env_with_params(params, ctor_param_types(inst_type), fwd_env)
@@ -11780,4 +11909,5 @@ fn finish_instance_method_checked(name: String, params: List ast.Param, ret_mayb
   | linear_check.LinPass ->
       InstanceMethodOk(
         typed_ast.TypedInstanceMethod(name, params, ret_maybe, eff_maybe, method_constraints,
-          resolve_dispatch_typed_expr(body_env, s2, bind_params(params, set_empty()), typed_body)))
+          resolve_dispatch_typed_expr(seed_unann_inner_names(own_unann_vars(types.inst_owner_prefix ++ name, params, ret_maybe), s2, body_env),
+            s2, bind_params(params, set_empty()), typed_body)))

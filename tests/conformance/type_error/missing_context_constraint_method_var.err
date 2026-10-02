@@ -1,0 +1,1 @@
+needs `Eq b`, which nothing in scope supplies — constrain `b` with a method-level `where`

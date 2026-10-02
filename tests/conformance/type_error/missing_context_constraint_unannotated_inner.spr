@@ -1,0 +1,7 @@
+# The context is needed at a variable INSIDE an unannotated parameter's type (`b: Box p`),
+# not at the parameter's own placeholder.
+type Box a = Box a
+
+fn f(b) = match b with | Box p -> Just(p) == Just(p)
+
+fn main() -> Unit !{IO} = print(to_string(f(Box(1))))

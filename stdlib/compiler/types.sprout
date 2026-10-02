@@ -144,8 +144,23 @@ export fn is_skolem_name(name: String) -> Bool =
 # BOTH infer (seeds the @fwd marker's value) and lowering (seeds ctx_fwd) can see —
 # so the two ends agree by construction. The `$` prefix makes resolve treat it as a
 # non-concrete head (→ EvForward), and marks it reserved (no source-name collision).
+export let existential_head_prefix: String = "$ex_"
+
 export fn existential_fwd_head(var_name: String) -> String =
-  "$ex_" ++ var_name
+  existential_head_prefix ++ var_name
+
+export fn is_existential_head(name: String) -> Bool = string.starts_with(name, existential_head_prefix)
+
+# How a `type alias` reaches every pass that holds only the checker env: the env key
+# `alias_marker_prefix ++ <alias key>` (infer.mirror_alias_env); a parameterized alias's
+# key is `alias_fn_prefix ++ <name>:<arity>`, and its parameters in the stored body are
+# variables `alias_param_prefix ++ <name>:<index>` (infer.register_alias). resolve reads
+# them back to expand an alias in a `where` clause.
+export let alias_marker_prefix: String = "@aliasty:"
+
+export let alias_fn_prefix: String = "@aliasfn:"
+
+export let alias_param_prefix: String = "__aliasparam__"
 
 export fn type_mentions_skolem(t: Type) -> Bool =
   match t with
@@ -809,6 +824,11 @@ fn nth_var_name(n: Int) -> String =
 export let unann_prefix: String = "_unann@"
 
 export fn is_unann_placeholder(name: String) -> Bool = str_starts_with(name, unann_prefix)
+
+# The owner an instance method's placeholders are named under, `#inst/<method>`
+# (infer.check_instance_method). Its own `/` is not a parameter's, which resolve has
+# to know to tell `_unann@#inst/m/x` (parameter `x`) from `_unann@#inst/m` (the return).
+export let inst_owner_prefix: String = "#inst/"
 
 # The three families the compiler mints, each matched at its own spelling. `$` opens every
 # unifier-minted variable and `_unann@` every unannotated-slot placeholder — neither is a
