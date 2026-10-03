@@ -41,15 +41,15 @@ wall for a change that buys it nothing.
 
 ## 2. Why nqueens gets slower while its collector gets cheaper
 
-Total GC time actually **falls** at the raised floor: 8,279 × 38 µs = 315 ms becomes
-335 × 818 µs = 274 ms. The collector did less work and the program still took 5.3%
-longer.
+By cycles × p50 pause, GC time **falls** at the raised floor: 8,279 × 38 µs = 315 ms
+becomes 335 × 818 µs = 274 ms. That is a proxy, not a measured total — the pause tail is
+heavy (`gc-generational-v0.md` §13.4) and not in it. On that proxy the collector did
+less work and the program still took 5.3% longer.
 
-That is `gc-trigger-v0.md` §4's cache mechanism, observed directly rather than inferred
-from a ns-per-slot trend: peak RSS goes 5.4 → 17.4 MB and the **mutator** pays for a
-working set that no longer fits. http_log_middleware shows the same saving on the GC
-side (774 → 642 ms) against a heap that only reaches 8.5 MB, stays in cache, and comes
-out flat rather than worse.
+That fits `gc-trigger-v0.md` §4's cache mechanism, though it is still inferred: peak RSS
+goes 5.4 → 17.4 MB and the **mutator** plausibly pays for a working set that no longer
+fits. http_log_middleware shows the same proxy saving (774 → 642 ms) against a heap that
+only reaches 8.5 MB, and comes out flat rather than worse.
 
 **So the variable separating the two is not "dense heap". It is whether the raised heap
 outgrows cache** — a threshold in *bytes*, which the trigger cannot see because it
@@ -58,7 +58,7 @@ independent of the work-per-garbage argument for Option B.
 
 **The pause column is the other half, and it is the half a frame budget reads.** p50
 per-collection pause rises ~20× on both non-trivial workloads: 38 → 818 µs and
-25 → 509 µs. Total GC time is down, per-collection jitter is up 20×. For #407's own
+25 → 509 µs. GC time is down on the proxy, per-collection jitter is up 20×. For #407's own
 constituency — a game holding a frame budget — that trade needs stating, not assuming:
 818 µs is 5% of a 16.7 ms frame, so it is affordable here, but it is affordable by a
 factor of 20, not by orders of magnitude.
@@ -94,12 +94,12 @@ Written before any run, from `gc-generational-v0.md` §5.1's sweep at ×8 (32,76
 | http_log_middleware | +1.4% | +0.5% | ~20 MB (5×) | 8.5 MB (1.9×) |
 | math_transcendental | identical | identical | identical | identical |
 
-**The RSS interpolation was wrong by 3×, in the conservative direction.** §5.1 measured
-nqueens at 17 MB for a 32,768 floor; this run measures 17.4 MB at 100,000. RSS did not
-grow at all across that range, so treating it as log-linear in the threshold — which is
-what produced the 50 MB figure — is not how it behaves. A floor sets a *minimum* heap;
-what the process actually peaks at is set by the region high-water mark, and on nqueens
-that had already saturated by 32,768.
+**The RSS interpolation was wrong by 3×, in the conservative direction, and the cause is
+not established.** §5.1 measured nqueens at 6 → 17 → 125 MB at 4,096 / 32,768 / 262,144;
+this run measures 17.4 MB at 100,000. That does not show a plateau: §5.1's 125 MB rules
+one out, and its readings come from a runtime twice as slow on nqueens (2.60 s against
+1.32 s today), so the two sets do not share a curve. A floor above 100,000 should be
+expected to cost more RSS, and measured, not read off this row.
 
 **One falsification criterion fired and then retracted, which is the reason to record
 rep counts.** At 5 reps http_log_middleware read **−5.0%** — past the stated 3% line for

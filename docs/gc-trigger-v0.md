@@ -47,7 +47,7 @@ live set 45× and total GC time went **up 4×** (207 → 888 µs/frame).
 simply allocated more, the extra collections would be unremarkable. Allocation volume is
 `cycles × (threshold − live)`: `Dict` ≈ 43 × 154,672 ≈ 6.7M, bitset ≈ 1,310 × 3,428 ≈ 4.5M, pinned
 ≈ 14 × 230,377 ≈ 3.2M. The regressing configuration allocates *less*. (The three are not exactly
-the same workload — they disagree by 25–40%, which is worth remembering before treating any single
+the same workload — they disagree by up to 2×, which is worth remembering before treating any single
 ratio as exact.)
 
 ## 2. Goals / non-goals
@@ -157,9 +157,9 @@ Use the table for its order of magnitude and its ordering, which are what the ar
 
 That guard stands and should not be softened; this doc is an exception to it, not a repeal of it.
 #407 supplies the separation it demands, for one workload: same binary, same program, only the
-floor moved, 1,310 → 14 collections and 888 → 26 µs/frame. (Not quite the same live set — §1's
-arithmetic implies ~668 against ~1,623 — but a swing of ~1,000 objects cannot account for
-888 → 26 µs/frame, so the separation holds on a margin of three orders of magnitude.)
+floor moved, 1,310 → 14 collections and 888 → 26 µs/frame. (Not quite the same live set — #407
+reports medians of 1,714 against 1,623 — but ~90 objects cannot account for 888 → 26 µs/frame.
+Nor was the unpinned run at the floor: its 5,142 heap slots are 1,714 × 3, set by the factor.)
 
 **But §13.2 of the same doc ran the floor experiment on other workloads, and it comes out flat or
 worse.** `gc_roots` holds ~70 live objects across a 1,000× threshold sweep:
@@ -192,7 +192,7 @@ that".
 ## 5. Prior-art survey (primary-sourced)
 
 Scope: **what decides when a collection starts** — distinct from `gc-generational-v0.md` §3, which
-surveys young generations. Quotes verified against each implementation's own reference; URLs in §12.
+surveys young generations. Quotes verified against each implementation's own reference; URLs in §13.
 
 | Runtime | Space term | Floor | Frequency bound independent of live set |
 |---|---|---|---|
@@ -301,8 +301,9 @@ HotSpot's `GCTimeRatio`, Go's limiter.
   with `getrusage(RUSAGE_SELF)` as the POSIX fallback. *Not* the per-phase timer filed as
   `BACKLOG.md` **"The GC pause tail is unattributable"** (`P3`), which asks for phase attribution
   and a quiet machine — the right requirement for diagnosing a pause tail, the wrong one for a duty
-  cycle. A CPU-time clock makes §13.4's noise structurally irrelevant, since descheduled time is
-  not counted. Go specifies its own limiter in CPU-seconds for this reason. Portability: both are
+  cycle. A CPU-time clock makes `gc-generational-v0.md` §13.4's noise structurally irrelevant,
+  since descheduled time is not counted. Go specifies its own limiter in CPU-seconds for this
+  reason. Portability: both are
   POSIX and Windows is a live target (`windows-port-v0.md`, a `windows-latest` CI job), though not
   a blocker today — that job's comment says *"the runtime is POSIX-only — all three C translation
   units still fail to compile for Windows"*. The Windows equivalent is `GetProcessTimes`, and
@@ -325,11 +326,12 @@ Given that, the ordering the evidence supports:
    win — roughly 15–20× by §3.1's fitted model — at the price of a guessed constant, a raised
    minimum heap, and one workload made measurably worse on both axes to help another.
 2. **Option C should be folded into whatever lands**, and item 2 strengthened its case from an
-   unexpected direction. nqueens' collector got *cheaper* at the raised floor (total GC 315 → 274
-   ms) while the program got slower: what it paid was cache, at 17.4 MB. http_log_middleware saw
-   the same GC saving at 8.5 MB and came out flat. The variable separating them is whether the
-   raised heap outgrows cache — a threshold in **bytes**, invisible to a trigger that counts
-   objects. That argument does not route through work-per-garbage, so C no longer depends on B.
+   unexpected direction. By cycles × p50 pause, nqueens' collector got *cheaper* at the raised
+   floor (315 → 274 ms, a proxy that leaves out the tail) while the program got slower; the likely
+   cost is cache, at 17.4 MB. http_log_middleware saw the same proxy saving at 8.5 MB and came out
+   flat. The variable separating them is whether the raised heap outgrows cache — a threshold in
+   **bytes**, invisible to a trigger that counts objects. That argument does not route through
+   work-per-garbage, so C no longer depends on B.
 3. **Option B remains the design**, but §6.2's schematic does not terminate and needs the per-class
    repair first. It is A's successor, not a reason to skip A.
 4. **Option D stays the end state**, gated on the ceiling and the CPU clock, neither of which is
@@ -477,9 +479,10 @@ test-suite file's peak heap becomes `floor × slot bytes`, roughly 4 MB at 100,0
   comparisons, so it is fragile rather than safe. Property 1 should be re-expressed to exercise the
   factor over many cycles instead of two or three. Note it has **three** assertions, not two:
   `def_cyc == f3_cyc && def_marked == f3_marked`, then `def_cyc < f2_cyc`, then
-  `f3_marked × 100 < f2_marked × 70`. A naive threshold pin satisfies the first while destroying
-  the other two, so the remedy is not simply to copy `gc-ageprof-check`'s. Add a Property 3
-  asserting the floor's compiled-in default, so a revert is caught.
+  `f3_marked × 100 < f2_marked × 70`. Pinning `SPROUT_GC_THRESHOLD=4096` as `gc-ageprof-check`
+  does keeps all three green — it sets the threshold and its base and leaves the factor on, so it
+  reproduces §8.1's 4,096 row. What a pin costs is that the gate stops exercising the shipped
+  floor. Add a Property 3 asserting the floor's compiled-in default, so a revert is caught.
 - **Coverage gap closed** (Definition of Ready #4): no existing test asserts anything about
   collection frequency or sweep productivity as a function of heap shape; every GC gate today keys
   on cycles, marked and freed at one configuration.
@@ -499,7 +502,8 @@ clock: `sprout_gc_collect_with_reason` brackets the collection with `sprout_now_
 it breaks — *"NOT monotonic […] must not be used for elapsed-time measurement (use
 `time_now_micros` for that)"*. Those two calls are its only elapsed-time uses, so the fix is one
 call site. Scope it honestly: it removes NTP and clock-change artifacts from `SPROUT_DEBUG_GC`'s
-`elapsed_us` and does **not** explain §13.4's pause tail, since both clocks count descheduled time.
+`elapsed_us` and does **not** explain `gc-generational-v0.md` §13.4's pause tail, since both
+clocks count descheduled time.
 
 ## 12. Open questions
 
