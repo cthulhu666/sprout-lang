@@ -164,6 +164,11 @@ a few survivors and full of a slot class nothing allocates any more — #407's s
 `test_gc_walk_sparse.spr` in miniature
 ([bench/results-2026-10-03-gc-walk.md](../bench/results-2026-10-03-gc-walk.md)).
 
+**Not under `SPROUT_GC_LINEAGE=1`.** Lineage keeps each dead OBJ as a POISON corpse, which counts
+in `swept` only in the cycle it dies and is walked in every cycle after. There
+`walked - live - swept` is FREE slots *plus every corpse so far*, and grows for that reason alone.
+`walked` itself stays exact; only the three-way split stops holding.
+
 **Read the two byte totals before concluding anything from the counts.** Every other field on that
 line is a COUNT, and a count cannot see a shape bug: right-nested `++` and `string_concat_many`
 allocate the same number of objects and differ only in bytes copied. That is not hypothetical — it

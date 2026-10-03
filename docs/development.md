@@ -135,7 +135,7 @@ All variables are read at program startup; invalid values abort with a message.
 | Variable | Default | Description |
 |---|---|---|
 | `SPROUT_GC_THRESHOLD` | `4096` | Managed heap node count that triggers a mid-execution collection. Positive integer to override; `off` or `0` to collect only at exit. |
-| `SPROUT_DEBUG_GC` | off | Set to `1` / `true` / `yes` to log each GC cycle to stderr: `[sprout gc] cycle=N reason=X threshold=N heap_before=N heap_after=N live=N roots=N marked=N alloc_since_gc=N swept=N elapsed_us=N arena_regions=N overflow_regions=N walked=N`. `arena_regions`/`overflow_regions` report how many live regions sit inside the reserved arena versus outside it (see below). `walked` counts the slots the sweep stepped over, so `walked - live - swept` is the FREE slots it walked and reclaimed nothing from — sweep cost the trigger cannot see ([debugging.md](debugging.md)). |
+| `SPROUT_DEBUG_GC` | off | Set to `1` / `true` / `yes` to log each GC cycle to stderr: `[sprout gc] cycle=N reason=X threshold=N heap_before=N heap_after=N live=N roots=N marked=N alloc_since_gc=N swept=N elapsed_us=N arena_regions=N overflow_regions=N walked=N`. `arena_regions`/`overflow_regions` report how many live regions sit inside the reserved arena versus outside it (see below). `walked` counts the slots the sweep stepped over, so `walked - live - swept` is the FREE slots it walked and reclaimed nothing from — sweep cost the trigger cannot see. Under `SPROUT_GC_LINEAGE=1` it also includes every POISON corpse ([debugging.md](debugging.md)). |
 
 **Region arena** — 1-MiB regions are carved from a contiguous `mmap(PROT_NONE)` *reservation* of
 address space (not memory; pages are committed per chunk with `mprotect` on first use). This makes

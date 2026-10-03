@@ -7,7 +7,9 @@ three are now on the `SPROUT_DEBUG_GC` cycle line, so
 
     FREE = walked − live − swept
 
-needs no counter of its own. **FREE/swept is the number that matters**: it is sweep work spent
+needs no counter of its own — with `SPROUT_GC_LINEAGE` off, as in every row below. Lineage keeps
+dead OBJs as POISON corpses that are walked every cycle after the one they die in, and the formula
+counts them as FREE. **FREE/swept is the number that matters**: it is sweep work spent
 on neither keeping nor reclaiming anything, and no trigger reads it. walked/swept alone mixes it
 with live/swept, which the trigger already tracks — `threshold = live × factor` is built on it.
 
