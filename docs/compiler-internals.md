@@ -559,7 +559,10 @@ variable's type under its name and under its position (`bind_pattern_var`). The
 post-pass re-seeds an arm's existential givens from the final substitution, where a
 later pattern binding the same name has overwritten the name; the position is still
 this arm's. A dictionary rebuilt for the skolem then takes the arm's given
-(`skolem_given_tdict`): a skolem has no instance.
+(`skolem_given_tdict`): a skolem has no instance. The forwarding identity both passes
+derive from the arm (`$ex_<binder>`, and lowering's `$wtns_<binder>_…` slots) is
+positional too (`types.existential_binder`): keyed by the name alone, a nested arm
+rebinding it handed the outer value the inner value's dictionary.
 
 **A deferred dictionary keeps its slot.** Both the post-pass
 (`take_dict_for_class`) and `verify_dispatch` (`take_by_class`) pair a call's

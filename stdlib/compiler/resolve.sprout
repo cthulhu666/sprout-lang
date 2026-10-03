@@ -106,7 +106,7 @@ fn te_conflicts(use: ast.TypeExpr, written: ast.TypeExpr) -> Bool =
   | (_, _) -> type_expr_head_name(use) != type_expr_head_name(written)
 
 # A position nothing names: `_`, or an inference variable (`$t<n>`, as
-# typed_ast.type_to_type_expr writes one). An existential (`$ex_<var>`, a `$sk<n>`
+# typed_ast.type_to_type_expr writes one). An existential (`$ex_<binder>`, a `$sk<n>`
 # skolem), an unannotated slot's placeholder and a headerless file's own type
 # (`$entry.Never`, source.entry_module_prefix) are types of their own; reading them as
 # unknown let `where Eq (Maybe a)` serve them with `a`'s dictionary.
