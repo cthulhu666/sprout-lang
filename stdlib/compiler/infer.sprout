@@ -6936,6 +6936,9 @@ fn typecheck_decls_resolved(
               match check_missing_superclass_instances(decls) with
               | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
               | Nothing ->
+              match check_missing_instance_methods(decls, env) with
+              | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
+              | Nothing ->
               match check_instance_class_effects(decls) with
               | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
               | Nothing ->
@@ -8383,6 +8386,107 @@ fn build_inst_key_set(decls: List ast.Decl, acc: Dict Bool) -> Dict Bool =
                     dict_set(string.after_last_dot(class_name) ++ ":"
                              ++ type_head_str(type_from_ast(head_te, dict_empty())), true, acc))
       | _ -> build_inst_key_set(rest, acc)
+
+# ---------------------------------------------------------------------------
+# An instance defines every method its class declares
+# ---------------------------------------------------------------------------
+#
+# Classes have no default method bodies (spec-v0.md §8.5), so a missing method has
+# nothing to dispatch to. Unchecked, lowering found the dictionary but not the
+# method and emitted a poison thunk that panicked at run time.
+#
+# Classes come from this module's decls, keyed as declared, and from the env's
+# `@class:<method>` markers, keyed short — the REPL / LSP path, as for
+# check_instance_head_kinds. Each entry keeps its class's full name beside its
+# methods: two env classes sharing a short name leave that name with no methods, so
+# neither is checked rather than both checked against the union (class_own_part's
+# rule). A class found nowhere is skipped. Method names are compared short.
+fn check_missing_instance_methods(decls: List ast.Decl,
+                                  env: Dict types.Scheme) -> Maybe(source.SourcePos, String) =
+  first_missing_method(decls,
+    own_class_methods(decls, env_class_methods(vec_to_list(dict_entries(env)), dict_empty())))
+
+fn own_class_methods(decls: List ast.Decl,
+                     acc: Dict (String, List String)) -> Dict (String, List String) =
+  match decls with
+  | [] -> acc
+  | [ast.ClassDecl name _ methods _ _ | rest] ->
+      own_class_methods(rest, dict_set(name, (name, list_map(class_method_name, methods)), acc))
+  | [_ | rest] -> own_class_methods(rest, acc)
+
+fn class_method_name(method: ast.ClassMethodSig) -> String =
+  match method with
+  | ast.ClassMethodSig name _ _ _ _ -> string.after_last_dot(name)
+
+fn env_class_methods(entries: List (String, types.Scheme),
+                     acc: Dict (String, List String)) -> Dict (String, List String) =
+  match entries with
+  | [] -> acc
+  | [(key, marker) | rest] -> env_class_methods(rest, env_class_method_add(key, marker, acc))
+
+fn env_class_method_add(key: String, marker: types.Scheme,
+                        acc: Dict (String, List String)) -> Dict (String, List String) =
+  let Just method = string.strip_prefix(key, class_marker_prefix) else acc
+      types.TConst id = types.scheme_type(marker) else acc
+  in add_class_method(types.type_id_name(id), string.after_last_dot(method), acc)
+
+# Never a class name: it has no letters.
+let ambiguous_class: String = "#"
+
+fn add_class_method(cls: String, method: String,
+                    acc: Dict (String, List String)) -> Dict (String, List String) =
+  let short = string.after_last_dot(cls)
+  in
+    match dict_get(short, acc) with
+    | Nothing -> dict_set(short, (cls, [method]), acc)
+    | Just (seen, methods) ->
+        if seen == cls then dict_set(short, (cls, Cons(method, methods)), acc)
+        else dict_set(short, (ambiguous_class, Nil), acc)
+
+# Verbatim first, then short: own classes are keyed as declared, env ones short.
+fn class_methods_of(cls: String, class_methods: Dict (String, List String)) -> List String =
+  match dict_get(cls, class_methods) with
+  | Just (_, methods) -> methods
+  | Nothing ->
+      match dict_get(string.after_last_dot(cls), class_methods) with
+      | Just (_, methods) -> methods
+      | Nothing -> Nil
+
+fn first_missing_method(decls: List ast.Decl,
+                        class_methods: Dict (String, List String)) -> Maybe(source.SourcePos, String) =
+  match decls with
+  | [] -> Nothing
+  | [ast.InstanceDecl constraint _ methods pos | rest] ->
+      match instance_missing_method(constraint, methods, class_methods) with
+      | Just msg -> Just((pos, msg))
+      | Nothing -> first_missing_method(rest, class_methods)
+  | [_ | rest] -> first_missing_method(rest, class_methods)
+
+fn instance_missing_method(constraint: ast.TypeConstraint, methods: List ast.InstanceMethodImpl,
+                           class_methods: Dict (String, List String)) -> Maybe String =
+  match constraint with
+  | ast.TypeConstraint cls type_args ->
+      let defined = list_map(instance_method_name, methods)
+      in
+        match find(\m -> ! list_member (m, defined), class_methods_of(cls, class_methods)) with
+        | Just missing -> Just(missing_method_msg(cls, type_args, missing))
+        | Nothing -> Nothing
+
+fn instance_method_name(method: ast.InstanceMethodImpl) -> String =
+  match method with
+  | ast.InstanceMethodImpl name _ _ _ _ _ -> string.after_last_dot(name)
+
+fn missing_method_msg(cls: String, type_args: List ast.TypeExpr, method: String) -> String =
+  let short_cls = string.after_last_dot(cls)
+  in "instance " ++ short_cls ++ instance_head_label(type_args) ++ " does not define method `"
+     ++ method ++ "`, declared by class " ++ short_cls
+     ++ ". Classes have no default method bodies, so an instance defines every method"
+     ++ " (spec-v0.md §8.5)."
+
+fn instance_head_label(type_args: List ast.TypeExpr) -> String =
+  match type_args with
+  | [] -> ""
+  | [head_te | _] -> " " ++ string.after_last_dot(type_head_str(type_from_ast(head_te, dict_empty())))
 
 # An extern is always marked global, but its signature is bound only when the name
 # is free: a module re-declaring an extern already in scope must not shadow the

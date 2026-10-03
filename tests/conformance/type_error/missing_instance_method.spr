@@ -1,0 +1,20 @@
+module main
+
+# instance Two Box defines `one` but not `two`. Sprout classes have no default
+# method bodies, so the compiler must reject this. It used to compile, and a call
+# to `two` reached the unresolved-dict poison thunk at run time.
+
+class Two a
+  fn one(x: a) -> Int
+  fn two(x: a) -> Int
+
+type Box = Box Int
+
+instance Two Box
+  fn one(x: Box) -> Int = 1
+
+fn use_two(v: a) -> Int where Two a = two(v)
+
+# Use the instance so it survives to typecheck (an unused instance is pruned).
+fn main() -> Unit !{IO} =
+  print(int_to_string(use_two(Box(1))))

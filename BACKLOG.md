@@ -2676,10 +2676,10 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   remaining value positions then closed with a single resolver fix. **Residual: the reporter's
   original failure has never been reproduced.** They reported the unresolved-dict poison thunk's
   "please report" message; ten probe shapes here reached the arity panic or ran correctly and none
-  emitted a poison, `Double` included. That matters because the poison-sink entry records that no
-  source-level RED INVOKES a poison — a real one falsifies that and is the more severe bug. **Get
-  the triggering expression from the reporter first** — the message now names its line and
-  column; a poison-reaching shape needs a producer guard.
+  emitted a poison, `Double` included. One source shape did reach a poison — an instance missing a
+  class method — and is now rejected at the instance (`type_error/missing_instance_method`);
+  whether it was the reporter's is unknown. **Get the triggering expression from the reporter
+  first** (the message now names its line and column); any other shape needs a producer guard.
 - [~] `P1` **Core verifier for dictionary passing — phase 2b (IR-level) pending.** Phases 1 and 2a
   are landed: `verify_dispatch.sprout` re-derives each constraint variable's type from the callee's
   SOURCE signature, genuinely independent of the resolver, and rejects a call whose injected `TDict`
