@@ -7425,8 +7425,8 @@ fn synthesize_eta_wrapper(fn_name: String, arity: Int, wrapper_name: String) -> 
 # `__unresolved_` branch in translate_expr.  A closure whose slot-0 code pointer
 # is this thunk lowers exactly like any other closure (IRMkClosure), so applying
 # it via the closure ABI (ir_lowering IRApplyClosure: `load code; call code(...)`)
-# runs the thunk, which PANICS with a message naming the sentinel's key (the
-# constraint, e.g. `ToString_Box`) and its source position.  Takes only the implicit
+# runs the thunk, which PANICS with a message naming the sentinel's key (see
+# unresolved_key) and its source position.  Takes only the implicit
 # `env$` handle; the apply site may pass extra method args, which a `noreturn`
 # panic ignores.  Reuses the existing `@panic` builtin (IRPanic) — no runtime
 # change.  The message is pinned by tests/stdlib/test_unresolved_dict_poison.spr.
@@ -7443,7 +7443,9 @@ fn synthesize_unresolved_poison_thunk(thunk_name: String, sentinel: String,
                               Cons(sprout_ir.IRPanic("%__poison_msg"), Nil))),
                         Nil))
 
-# The constraint key a `__unresolved_<key>` sentinel carries (`ToString_Box`).
+# The key a `__unresolved_<key>` sentinel carries: class and head (`ToString_Box`),
+# plus the missing method when lowering found the dictionary but not the method
+# (`Two_Box_two`, from lowering.resolve_method_var / resolve_method_with_lambda).
 fn unresolved_key(sentinel: String) -> String =
   match string.strip_prefix(sentinel, "__unresolved_") with
   | Just key -> key

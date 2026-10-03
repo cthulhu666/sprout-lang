@@ -59,9 +59,13 @@ spared (its guess is the legitimate concrete-constructor case). Escape hatch: se
 positive.
 
 **A runtime panic `dispatched through an unresolved typeclass dictionary for
-ToString__ (line 24, column 42)`** names the dictionary's key (class, then head; `_`
-is a head nobody resolved) and the call site that left it unresolved. It is a
-compiler bug: a dictionary the compiler judged never used was used.
+ToString__ (line 24, column 42)`** names the dictionary's key and the call site that
+left it unresolved. The key is the class, then the head (`_` is a head nobody
+resolved, and a head can be module-qualified), and sometimes then the method
+a found dictionary lacks: `Two_$entry.Box_two` is class `Two`, head `$entry.Box`,
+method `two`. Either way it is a compiler bug: a dictionary
+the compiler judged never used was used, or an instance lacked a method and nothing
+rejected it.
 
 **Automated guard.** The dict-passing verifier (`verify_dispatch.sprout`, run in
 the check phase, `compiler.sprout`) turns this class of bug into a **compile
