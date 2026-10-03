@@ -3365,7 +3365,9 @@ gc-adapt-check: bootstrap-from-seed
 #      allocation can refill, so walked/swept is high; test_gc_age_retain_none churns
 #      on dense regions, so it is ~1. A counter that cannot separate them measures
 #      nothing.
-# The ratio depends on the trigger policy, so the probe clears the GC tuning env.
+# The ratio depends on the trigger policy, so the probe clears the GC tuning env —
+# and LINEAGE/STRESS, which keep POISON corpses the walk counts and change how often
+# it collects, so an inherited shell setting cannot move the bounds.
 [group('test')]
 gc-walk-check: bootstrap-from-seed
   #!/usr/bin/env bash
@@ -3386,7 +3388,7 @@ gc-walk-check: bootstrap-from-seed
     clang "$TMPD/$name.ll" "$TMPD/rtobj"/*.o {{clang_extra}} -o "$TMPD/$name.bin" 2>"$TMPD/$name.err" \
       || { echo "gc-walk-check: link failed: $f" >&2; cat "$TMPD/$name.err" >&2; return 1; }
     env -u SPROUT_GC_THRESHOLD -u SPROUT_GC_ADAPT_FACTOR -u SPROUT_GC_ADAPT_RATIO -u SPROUT_GC_ADAPT_CAP \
-      SPROUT_DEBUG_GC=1 "$TMPD/$name.bin" > "$TMPD/$name.out" 2>"$TMPD/$name.log" \
+      -u SPROUT_GC_LINEAGE -u SPROUT_GC_STRESS SPROUT_DEBUG_GC=1 "$TMPD/$name.bin" > "$TMPD/$name.out" 2>"$TMPD/$name.log" \
       || { echo "gc-walk-check: $name failed" >&2; tail -5 "$TMPD/$name.log" >&2; return 1; }
     grep -q "SUITE PASSED" "$TMPD/$name.out" \
       || { echo "gc-walk-check: $name did not pass" >&2; tail -5 "$TMPD/$name.out" >&2; return 1; }

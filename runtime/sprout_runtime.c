@@ -205,7 +205,8 @@ static long long g_debug_alloc_offarena_bytes = 0;
 static long long g_debug_gc_swept = 0;
 /* Slots the sweep stepped over. walked - live - swept is the FREE slots it walked
    and reclaimed nothing from: high when regions pinned by a few survivors hold a
-   slot class nothing allocates, and invisible to a trigger that reads `live`. */
+   slot class nothing allocates, and invisible to a trigger that reads `live`.
+   Under SPROUT_GC_LINEAGE it also counts every POISON corpse kept so far. */
 static long long g_debug_gc_walked = 0;
 /* The intern table is malloc'd outside the arena and never freed, so neither the
    alloc counters nor the live census can see it. Reported so a program whose keys
