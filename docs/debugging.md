@@ -147,14 +147,22 @@ Do not read a large number as a speed-up waiting to happen — it is a **static*
 **three** lines per collection — the cycle, a live census by heap kind, and an `offheap:` line.
 
 One compile of `tests/cost/rooting_block_small.sprout`: one cycle, then the exit totals. Every line
-but the first is verbatim — the cycle line is elided at the `...`, since its timings never repeat.
+but the first is verbatim — the cycle line is elided at each `...`, since its timings never repeat.
 
 ```
-[sprout gc] cycle=144 reason=threshold threshold=161937 ... elapsed_us=3815 arena_regions=7 overflow_regions=0
-[sprout gc]   types: obj=47199 closure=0 vec=1 map=2784 ref=8 cstr=6126(23.5KB) bytes=0 builder=0 tuple=902
-[sprout gc]   offheap: intern=4354(143.8KB)
-[sprout alloc] sprout_obj=4908866 closure=56014 vector=1871 map=161183 bytes=40 builder=0 arena_bytes=166643856 offarena_bytes=3504153 intern=5608 intern_bytes=188997 gc_swept=5627634 gc_cycles=150
+[sprout gc] cycle=140 reason=threshold threshold=136698 ... live=38413 ... swept=98285 elapsed_us=4347 arena_regions=8 overflow_regions=0 walked=253364
+[sprout gc]   types: obj=31029 closure=0 vec=0 map=697 ref=5 cstr=6640(34.5KB) bytes=0 builder=0 tuple=42
+[sprout gc]   offheap: intern=5770(190.4KB)
+[sprout alloc] sprout_obj=5149588 closure=59263 vector=1983 map=168070 bytes=40 builder=0 arena_bytes=175114064 offarena_bytes=3834302 intern=5830 intern_bytes=196822 gc_swept=5914965 gc_cycles=141 gc_walked=15776682
 ```
+
+**`walked` is what the sweep cost, `swept` is what it bought.** Every slot walked was kept, freed
+this cycle, or already FREE, so `walked - live - swept` is the FREE slots stepped over for nothing:
+116,666 above, 1.19 per object freed. The trigger reads `live` and nothing else, so this part of a
+collection's cost is invisible to it. A FREE count that dwarfs `swept` means regions are pinned by
+a few survivors and full of a slot class nothing allocates any more — #407's shape, and
+`test_gc_walk_sparse.spr` in miniature
+([bench/results-2026-10-03-gc-walk.md](../bench/results-2026-10-03-gc-walk.md)).
 
 **Read the two byte totals before concluding anything from the counts.** Every other field on that
 line is a COUNT, and a count cannot see a shape bug: right-nested `++` and `string_concat_many`

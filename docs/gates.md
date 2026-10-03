@@ -518,6 +518,20 @@ subtracted away. Hence `roots ≤ 8` beside the flatness check: the count is sma
 changes only when someone adds a global, so bounding it costs nothing and is what keeps the
 correction from absorbing the thing it exists to detect.
 
+## Sweep-walk counter — `just gc-walk-check`
+
+Calibrates `walked=` on the `SPROUT_DEBUG_GC` cycle line: slots the sweep stepped over, FREE
+included. Over `swept` it is the work spent per object reclaimed, the quantity
+[gc-trigger-v0.md](gc-trigger-v0.md) §3.1 says the trigger cannot see. Two known answers —
+`test_gc_walk_sparse` (regions pinned full of FREE slots no allocation can refill) must read
+≥10 slots per object swept, and `test_gc_age_retain_none` (dense churn) ≤2 — plus, on every cycle
+of every probe, `walked ≥ live + swept`. At introduction they read 25 and 1.007.
+
+**The invariant only covers the branches its workloads reach.** Neither calibration workload
+allocates an object large enough for its own region, so deleting the `is_large` branch's count
+left both green. `test_gc_large_object_arena` is probed for the invariant alone, and fails the
+same deletion on its first cycle (walked 4,076 < 10 + 4,086).
+
 ## Optimisation-pass harness — `just opt-harness-check`
 
 Compiles `tests/opt_harness/dead_let.spr` twice, once with every pass on and once with

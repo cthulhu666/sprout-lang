@@ -203,6 +203,10 @@ static long long g_debug_alloc_builder = 0;
 static long long g_debug_alloc_arena_bytes = 0;
 static long long g_debug_alloc_offarena_bytes = 0;
 static long long g_debug_gc_swept = 0;
+/* Slots the sweep stepped over. walked - live - swept is the FREE slots it walked
+   and reclaimed nothing from: high when regions pinned by a few survivors hold a
+   slot class nothing allocates, and invisible to a trigger that reads `live`. */
+static long long g_debug_gc_walked = 0;
 /* The intern table is malloc'd outside the arena and never freed, so neither the
    alloc counters nor the live census can see it. Reported so a program whose keys
    are COMPUTED shows its growth instead of hiding it. Unguarded, unlike the
@@ -403,7 +407,7 @@ static void sprout_debug_alloc_report(void) {
   if (!g_debug_alloc_enabled) return;
   fprintf(
     stderr,
-    "[sprout alloc] sprout_obj=%lld closure=%lld vector=%lld map=%lld bytes=%lld builder=%lld arena_bytes=%lld offarena_bytes=%lld intern=%lld intern_bytes=%lld gc_swept=%lld gc_cycles=%lld\n",
+    "[sprout alloc] sprout_obj=%lld closure=%lld vector=%lld map=%lld bytes=%lld builder=%lld arena_bytes=%lld offarena_bytes=%lld intern=%lld intern_bytes=%lld gc_swept=%lld gc_cycles=%lld gc_walked=%lld\n",
     g_debug_alloc_sprout_obj,
     g_debug_alloc_closure,
     g_debug_alloc_vector,
@@ -415,7 +419,8 @@ static void sprout_debug_alloc_report(void) {
     g_intern_entries,
     g_intern_bytes,
     g_debug_gc_swept,
-    g_gc_cycle_count
+    g_gc_cycle_count,
+    g_debug_gc_walked
   );
 }
 
@@ -563,12 +568,15 @@ static void sprout_gc_log_cycle(
   long long marked_count,
   long long alloc_since_gc,
   long long swept_delta,
-  long long elapsed_us
+  long long elapsed_us,
+  long long walked_delta
 ) {
   if (!g_debug_gc_enabled) return;
+  /* walked= is last: bench/gc_pause/pause_stats.py reads swept= and elapsed_us= as
+     adjacent fields. */
   fprintf(
     stderr,
-    "[sprout gc] cycle=%lld reason=%s threshold=%lld heap_before=%lld heap_after=%lld live=%lld roots=%lld marked=%lld alloc_since_gc=%lld swept=%lld elapsed_us=%lld arena_regions=%lld overflow_regions=%lld\n",
+    "[sprout gc] cycle=%lld reason=%s threshold=%lld heap_before=%lld heap_after=%lld live=%lld roots=%lld marked=%lld alloc_since_gc=%lld swept=%lld elapsed_us=%lld arena_regions=%lld overflow_regions=%lld walked=%lld\n",
     g_gc_cycle_count,
     reason,
     g_gc_threshold,
@@ -581,7 +589,8 @@ static void sprout_gc_log_cycle(
     swept_delta,
     elapsed_us,
     g_arena_region_count,
-    g_overflow_region_count
+    g_overflow_region_count,
+    walked_delta
   );
   fprintf(
     stderr,
@@ -2608,6 +2617,7 @@ static void sprout_gc_sweep(void) {
   for (size_t ri = 0; ri < g_region_count; ri++) {
     SproutRegion* r = &g_regions[ri];
     if (r->is_large) {
+      g_debug_gc_walked++;  /* a large region is one slot */
       /* OBJ (the only poisoned kind) is never large — max OBJ slot is 96 bytes
        * — so large entries need no poison handling. */
       void* payload = r->base + 8;
@@ -2639,9 +2649,11 @@ static void sprout_gc_sweep(void) {
     /* Normal region: walk slots. */
     long long region_live = 0;
     long long region_poison = 0;
+    long long region_walked = 0;
     size_t off = 0;
     fl_region_begin();
     while (off < r->bump) {
+      region_walked++;
       uint64_t h; memcpy(&h, r->base + off, 8);
       size_t ssize = sprout_slot_step(h);
       uint64_t kind_bits = h & 0xFF;
@@ -2787,6 +2799,7 @@ static void sprout_gc_sweep(void) {
               off, (void*)r->base, r->bump);
       abort();
     }
+    g_debug_gc_walked += region_walked;
     r->live_count = region_live;
     r->poison_count = region_poison;
     /* Pass 2 releases a region exactly when it has no live and no poison, so
@@ -2878,6 +2891,7 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   long long root_count = sprout_gc_root_count();
   long long alloc_since_gc = g_managed_alloc_since_gc;
   long long swept_before = g_debug_gc_swept;
+  long long walked_before = g_debug_gc_walked;
   g_gc_cycle_count++;
   SPROUT_PROF_COLD(g_prof_cycles++);
   SPROUT_PROF_COLD(g_prof_mark_slots += (unsigned long long)root_count);
@@ -2891,7 +2905,7 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   SPROUT_PROF_COLD(g_prof_gc_us += (unsigned long long)elapsed_us);
   /* O(regions); only pay for it when the line is actually printed. */
   if (g_debug_gc_enabled) arena_recount_regions();
-  sprout_gc_log_cycle(reason, heap_before, g_managed_heap_count, root_count, g_gc_marked_count, alloc_since_gc, g_debug_gc_swept - swept_before, elapsed_us);
+  sprout_gc_log_cycle(reason, heap_before, g_managed_heap_count, root_count, g_gc_marked_count, alloc_since_gc, g_debug_gc_swept - swept_before, elapsed_us, g_debug_gc_walked - walked_before);
   /* Adaptive threshold: re-base on the LIVE set after each collection so the heap
      (hence RSS) stays proportional to live data instead of ratcheting upward
      without bound.  The previous policy only ever GREW the threshold (x
