@@ -507,7 +507,8 @@ call site. Scope it honestly: it removes NTP and clock-change artifacts from `SP
    classes with demand last cycle is the candidate fix. It needs showing that a phase-structured
    program cannot defeat it the same way the exact-fit freelists defeat the naive form.
 2. **What constant, if A ships?** ~100,000 is where §8.1 measures green with margin on both sides
-   of the pocket, but it stays a guess until §9 item 2 prices the dense-heap side.
+   of the pocket. §9 item 2 has priced it (§6.5): the number is still a guess, now with a known
+   cost.
 3. **Is §3.1's sparse-region mechanism real?** The arithmetic does not fit (§3.1's fourth caveat),
    and it is sensitive to what a "slot" is. §9 item 1 answers it.
 4. **Does anything below the floor deserve the old behaviour?** A genuinely tiny program pays a
