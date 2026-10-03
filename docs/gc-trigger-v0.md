@@ -136,16 +136,18 @@ it makes each one *productive*, by letting enough garbage accumulate to be worth
 3. Row three is **impossible as printed**: every object present at a trigger occupies a slot, so the
    footprint cannot be ~222,000 when the threshold is 232,000. The residual under-reads by at least
    4%, which is the size of the error in the model, not in the heap.
-4. The mechanism behind the middle row is **not established**. "Survivors scattered across sparse
-   regions" is the natural reading; 9 regions at the pinned run's ~36 bytes per slot is ~262,000
-   slots against a measured ~50,000, so those regions must be mostly low-bump for some other
-   reason. (A *slot* is one header-delimited cell of ≥ 16 bytes, not the 16-byte granule —
-   `SPROUT_SLOTS_PER_REGION` = 65,536 counts granules, and reading it as slots inflates this figure
-   to ~590,000.)
+4. The mechanism behind the middle row was **not established**: 9 regions at ~36 bytes per slot is
+   ~262,000 slots against the ~50,000 above. (A *slot* is one header-delimited cell of ≥ 16 bytes,
+   not the 16-byte granule — `SPROUT_SLOTS_PER_REGION` = 65,536 counts granules.)
 
-§9 item 1 measures all of this directly rather than inferring it.
+**Measured since** (§9 item 1, `bench/results-2026-10-03-gc-walk.md`): the middle row's sweep
+walks **251,306 slots** per cycle to free 3,235 — ~78 per object reclaimed, 5× the table's ~15.
+The pinned row walks 289,178 to free 230,240, ~1.3. So the ordering stands and the middle row's
+footprint was under-read 5×; caveat 4's region arithmetic was the right one. The mechanism is the
+sparse-region one: 8 regions stay alive under ~1,600 live objects, and their 246,450 free slots are
+identical every cycle — walked, never refilled.
 
-Use the table for its order of magnitude and its ordering, which are what the argument needs.
+Use the table for its ordering; the bench note has the measured magnitudes.
 
 ## 4. What the repo already knows, including the part that argues the other way
 
@@ -181,8 +183,8 @@ already at ~1 slot walked per object reclaimed, the same regime as #407's first 
 There is no waste for a floor to remove, so raising it buys nothing and eventually costs cache.
 
 **The condition under which a floor helps is therefore narrow and statable:** the heap must be
-walking substantially more footprint than it reclaims. That is a measurable property, it is not
-implied by a small live set, and **no current gate or benchmark reports it.**
+walking substantially more footprint than it reclaims. That is a measurable property, and it is not
+implied by a small live set. `SPROUT_DEBUG_GC`'s `walked=` now reports it (§9 item 1).
 
 This is the single most important correction to make to anyone's intuition about #407, including
 the author's of this doc: the finding is not "the default floor is too low". It is "a program whose
@@ -251,9 +253,11 @@ quantity directly: it drives work-per-garbage toward ~1 by construction, whateve
 - **For:** no guessed constant. RSS-neutral in principle — those slots are already committed, so
   the bound it sets is one the process is paying for regardless. Needs no clock. On #407's middle
   row it yields roughly the pinned configuration automatically.
-- **Against — and the schematic above is not buildable as written.** *Cost*: no unconditional slot
-  counter exists — `g_debug_gc_swept` counts freed objects and `g_prof_sweep_visits` is
-  compile-time gated — so this adds one increment per slot to the sweep's hot loop. *Ratchet*: the
+- **The signal separates.** Free slots walked per object freed (FREE/swept) is 0.00–1.46 on every
+  ordinary workload measured and **76** on the game; pinning the game's threshold drops it to 0.25
+  (§3.1, `bench/results-2026-10-03-gc-walk.md`). The counter is `g_debug_gc_walked`, one increment
+  per slot already in the sweep loop.
+- **Against — and the schematic above is not buildable as written.** *Ratchet*: the
   loop **demonstrably diverges**, which is stronger than the "needs a termination proof" an earlier
   draft claimed. `g_freelist` is exact-fit (`BACKLOG.md` **"The class freelists are exact-fit"**),
   so with `U` free slots in size classes the program has stopped allocating, the budget admits `U`
@@ -314,8 +318,10 @@ HotSpot's `GCTimeRatio`, Go's limiter.
 **§9 item 2 is now measured** (`bench/results-2026-09-30-gc-floor.md`) and A's price is no longer
 a guess: 3.2× peak RSS and +5.3% wall on nqueens, 1.9× RSS at no wall cost on http_log_middleware,
 nothing on math, no resolvable effect on the socket server, and a ~20× rise in per-collection
-pause wherever a workload was floor-pinned. **Measure §9 item 1 next** — it is the quantity every
-option targets and that nothing reports, and it is what decides between B and nothing.
+pause wherever a workload was floor-pinned. **§9 item 1 is measured too**, and it keeps B alive:
+the game reads 76 free slots walked per object freed, against at most 1.46 elsewhere (§6.2). What
+it cannot say is whether §6.2's *repair* still catches the game — that depends on which size
+classes those free slots are in (§12 Q1).
 
 Given that, the ordering the evidence supports:
 
@@ -366,7 +372,8 @@ specified rather than inherited.
 
 **The pause side, measured.** A floor-pinned workload's per-collection pause scales with the floor:
 at 100,000, nqueens goes 38 → 818 µs p50 and http_log_middleware 25 → 509 µs, both ~20×,
-while collecting ~25× less often. Total GC time falls in both cases; jitter rises. For #407's own
+while collecting ~25× less often. GC time falls in both cases on a cycles × p50 proxy; jitter
+rises. For #407's own
 constituency — a program holding a frame budget — 818 µs is 5% of a 16.7 ms frame, so this is
 affordable by a factor of 20 rather than by orders of magnitude, and a floor much above 100,000
 spends that margin (`bench/results-2026-09-30-gc-floor.md` §2).
@@ -449,12 +456,11 @@ test-suite file's peak heap becomes `floor × slot bytes`, roughly 4 MB at 100,0
 
 **This precedes choosing an option, not implementing one.**
 
-1. **Measure work-per-garbage directly** (§3.1), because every option targets it and nothing reports
-   it. One unconditional counter in the sweep's existing slot walk, logged beside `swept`. Report
-   it for the compiler, the floor-pinned four, `retain_all`/`retain_none`, and the game. **This is
-   the cheap experiment that decides between B and nothing**, and it also falsifies §3.1's
-   unestablished sparse-region mechanism: check the ratio against region occupancy.
-2. ~~**Falsify the floor prediction on dense heaps.**~~ **DONE** —
+1. ~~**Measure work-per-garbage directly.**~~ **DONE** — `walked=` on `SPROUT_DEBUG_GC`'s cycle
+   line, gated by `just gc-walk-check`; readings in `bench/results-2026-10-03-gc-walk.md`. B
+   survives (§6.2) and §3.1's sparse-region mechanism is confirmed. Not read: `spawn_server` and
+   the game's in-system scene.
+2. ~~**Falsify the floor prediction on the floor-pinned four.**~~ **DONE** —
    `bench/results-2026-09-30-gc-floor.md`. §4 held on all four: nothing improved beyond noise, and
    the cost is §6.5's. Two things the run is worth reading for beyond its table — the cache
    crossing that makes the byte case (§6.5 item 2), and a −5.0% reading at 5 reps that became
@@ -509,12 +515,14 @@ clocks count descheduled time.
 
 1. **Does §6.2's repair hold?** The schematic diverges; flooring on `live` plus the free slots in
    classes with demand last cycle is the candidate fix. It needs showing that a phase-structured
-   program cannot defeat it the same way the exact-fit freelists defeat the naive form.
+   program cannot defeat it the same way the exact-fit freelists defeat the naive form — and that
+   it still catches the game. The game's 246,450 free slots are never refilled, which fits
+   classes with no demand; if they all are, the repaired floor is `live` plus a few thousand and
+   changes nothing there. Settling it needs FREE per size class, which nothing reports yet.
 2. **What constant, if A ships?** ~100,000 is where §8.1 measures green with margin on both sides
    of the pocket. §9 item 2 has priced it (§6.5): the number is still a guess, now with a known
    cost.
-3. **Is §3.1's sparse-region mechanism real?** The arithmetic does not fit (§3.1's fourth caveat),
-   and it is sensitive to what a "slot" is. §9 item 1 answers it.
+3. ~~**Is §3.1's sparse-region mechanism real?**~~ Yes — measured (§3.1).
 4. **Does anything below the floor deserve the old behaviour?** A genuinely tiny program pays a
    six-figure minimum heap under A. Go's answer is that 4 MiB is small enough not to matter;
    Sprout's floor is in objects, so the equivalent claim is not automatically true (§6.3).
