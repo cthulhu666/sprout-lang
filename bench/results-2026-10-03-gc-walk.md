@@ -29,7 +29,12 @@ summed over cycles that swept anything.
 | compiler (`ast_to_ir.sprout` emit) | 251 | 0.50 | **0.74** | 128,726 |
 | nqueens | 8,279 | 0.01 | **1.46** | 5,900 |
 | `test_gc_walk_sparse` (constructed) | 85 | 0.35 | **23.81** | 104,649 |
-| uncharted-suns `game/app.sprout` | — | — | **not measured** | — |
+| uncharted-suns `game/app.sprout`, steady state | 513 | 0.50 | **76.1** | 246,450 |
+| — same, `SPROUT_GC_THRESHOLD=232000` | 43 | 0.01 | **0.25** | 57,178 |
+
+The game rows are #407's scene (one host, 1,200 frames, audio muted), one run each, with the
+first quarter of cycles — the catalog load, peak live 158,637 — left out. The three remaining
+quarters agree to three figures. All 683 cycles together read 49.0.
 
 ## What it says
 
@@ -47,26 +52,31 @@ nqueens wall and RSS — but "dense" was the wrong word for it.
 of a slot per object freed. It is the workload §5.3 tuned the adapt factor on, so a trigger that
 reacted to FREE would move it — which makes it the regression check for any such trigger.
 
-**The constructed fixture shows the mechanism exists; it does not show it is #407's.** ~105k
-FREE slots of a dead size class, pinned by 1,562 survivors in 7 regions, cost a sweep that frees
-~3,100 per cycle about 450 µs — against ~25 µs for http_log_middleware sweeping ~4,000 on a
-dense heap. That is the separation #407 reported, built on purpose. Whether the game's regions
-look like this is the open question: #407 estimates "roughly 50,000 slots to reclaim ~3,900"
-with 1,714 live, a FREE/swept of about 11. That is an estimate, not a reading; the game row is
-the measurement that replaces it.
+**The constructed fixture shows the mechanism exists; the game shows it is #407's, worse.** The
+fixture holds ~105k FREE slots of a dead size class under 1,562 survivors in 7 regions, and a
+sweep freeing ~3,100 costs ~450 µs, against ~25 µs for http_log_middleware sweeping ~4,000. The
+game holds 246,450 FREE slots under ~1,600 survivors in 8 regions, and frees ~3,200 for ~840 µs.
+#407 estimated "roughly 50,000 slots to reclaim ~3,900", a FREE/swept of about 11; the walk is
+5× that. Its FREE count is identical every cycle, so those slots are walked and never refilled.
 
-**For Option B, the gap is the finding.** A trigger keyed on FREE/swept needs ordinary programs
-on one side and #407 on the other. Measured, ordinary programs span 0.00–1.46. If the game reads
-near its estimate, a bound around 4 separates them with margin both ways; if it reads under 2,
-B has nothing to key on and the case for it falls.
+**For Option B, the gap is the finding.** Ordinary programs span 0.00–1.46 and the game reads
+76, so any bound between ~2 and ~70 separates them. Raising the game's threshold drops it to
+0.25: the signal switches off once the floor is high enough, which is what a feedback loop needs
+to settle. Where B's *repaired* form would settle is a separate question — it counts only free
+slots in classes with recent demand, and this table cannot say which classes the game's are in
+(`docs/gc-trigger-v0.md` §12 Q1).
 
 ## Reproducing
 
 `SPROUT_DEBUG_GC=1 <binary> 2>log`, then over the `[sprout gc] cycle=` lines with `swept > 0`
-sum `walked - live - swept` and `swept`. The game row needs a window:
+sum `walked - live - swept` and `swept`. The game rows need a window:
 
 ```
-SPROUT_DEBUG_GC=1 SPROUT_GFX_MAX_FRAMES=1200 just run-gfx game/app.sprout <catalog>
+SPROUT_AUDIO_MUTE=1 SPROUT_DEBUG_GC=1 SPROUT_GFX_MAX_FRAMES=1200 \
+  just run-gfx game/app.sprout <catalog>
 ```
 
-in uncharted-suns, with `SPROUT_ROOT` pointing at a checkout that has the counter.
+in uncharted-suns, with `SPROUT_ROOT` pointing at a checkout that has the counter. Check the log
+has `walked=` on every cycle line: an environment that sets `SPROUT_ROOT` itself overrides an
+exported one, and the build then silently uses another runtime. The log holds two processes —
+the compiler, then the game — split where `cycle=` resets to 1.
