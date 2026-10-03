@@ -2500,12 +2500,12 @@ fn check_instance_for_marker(
             # of any argument (it may be hidden inside a container), so there is no
             # dispatch type to gate on — Nothing keeps the ungated scan.
             let Just cv_arg = class_var_arg_or_fallback(method_name, class_vars, typed_args, s3, env)
-                  else check_instance_fwd(types.type_id_name(class_name), typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos, Nothing)
+                  else check_instance_fwd(types.type_id_name(class_name), typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos, NoDispatchType)
                 # The arg was found but its type is not concrete — that type IS the
                 # dispatch type, so the scan can be gated on it.
                 Just head_str = concrete_type_str(unifier.apply_subst(s3, typed_ast.typed_expr_type(cv_arg)))
                   else check_instance_fwd(types.type_id_name(class_name), typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos,
-                         Just(unifier.apply_subst(s3, typed_ast.typed_expr_type(cv_arg))))
+                         ByArg(unifier.apply_subst(s3, typed_ast.typed_expr_type(cv_arg))))
             in
               if types.is_skolem_name(head_str) then
                 # Stage 0b: the dispatch value is an unpacked existential (a rigid
@@ -2531,7 +2531,7 @@ fn check_instance_for_marker(
             # (resolve_dispatch_typed_expr) rewrites the TDict once the outer
             # unification has made ret_t concrete. The instance is selected by the
             # return type, so that is what gates the fallback scan.
-            check_instance_fwd(types.type_id_name(class_name), typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos, Just(ret_t))
+            check_instance_fwd(types.type_id_name(class_name), typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos, ByReturn(ret_t))
       | _ -> InferOk(typed_ast.TCall(typed_callee, typed_args, ret_t, pos), s3, es3, call_eff)
 
 # Resolve a polymorphic class-method call by scanning args for a @fwd marker.
@@ -2544,9 +2544,19 @@ fn check_instance_for_marker(
 # `dispatch_t` is the type the instance is selected BY, when the caller knows it:
 # the resolved argument type for input-position dispatch, `ret_t` for
 # return-position. It gates the class-only fallback scan — see gated_fwd_scan.
-# `Nothing` means the caller genuinely has no dispatch type in hand (the
+# `NoDispatchType` means the caller genuinely has no dispatch type in hand (the
 # constraint var is hidden inside a container arg), which is the case the
 # ungated scan exists to serve.
+type DispatchType =
+  | ByArg types.Type
+  | ByReturn types.Type
+  | NoDispatchType
+
+fn dispatch_type_of(dispatch_t: DispatchType) -> Maybe types.Type =
+  match dispatch_t with
+  | ByArg t -> Just(t)
+  | ByReturn t -> Just(t)
+  | NoDispatchType -> Nothing
 
 fn check_instance_fwd(
   class_name: String,
@@ -2558,7 +2568,7 @@ fn check_instance_fwd(
   es3: Dict types.Effect,
   call_eff: types.Effect,
   pos: source.SourcePos,
-  dispatch_t: Maybe types.Type
+  dispatch_t: DispatchType
 ) -> InferResult =
   match find_fwd_tdict_in_args(class_name, typed_args, env, pos) with
   | Just tdict ->
@@ -2578,13 +2588,16 @@ fn check_instance_fwd(
           then InferErr(pos, "No instance of " ++ class_name ++ " for a function type")
           else InferOk(typed_ast.TCall(typed_callee, typed_args, ret_t, pos), s3, es3, call_eff)
 
-# With no dispatch type in hand (the class variable sits inside a container), any
-# function-typed argument is the best evidence there is, as before.
-fn dispatches_on_function(dispatch_t: Maybe types.Type, typed_args: List typed_ast.TypedExpr,
+# Only an argument's type is judged directly. A return type that is a function
+# (`fn parser() -> String -> a`) dispatches on a variable inside it, so it and a
+# missing dispatch type (the class variable sits inside a container) fall back to
+# any function-typed argument, as before.
+fn dispatches_on_function(dispatch_t: DispatchType, typed_args: List typed_ast.TypedExpr,
                           s3: Dict types.Type) -> Bool =
   match dispatch_t with
-  | Just t -> is_function_type(unifier.apply_subst(s3, t))
-  | Nothing -> any_function_typed_arg(typed_args, s3)
+  | ByArg t -> is_function_type(unifier.apply_subst(s3, t))
+  | ByReturn _ -> any_function_typed_arg(typed_args, s3)
+  | NoDispatchType -> any_function_typed_arg(typed_args, s3)
 
 fn is_function_type(t: types.Type) -> Bool =
   match t with
@@ -2622,13 +2635,13 @@ fn gated_fwd_scan(
   env: Dict types.Scheme,
   s3: Dict types.Type,
   pos: source.SourcePos,
-  dispatch_t: Maybe types.Type
+  dispatch_t: DispatchType
 ) -> Maybe typed_ast.TypedExpr =
   # Resolve through s3 first: the dispatch type reaching here may still be an
   # alias for the constraint var rather than the var itself, and the marker is
   # keyed by the var's own identity. A dispatch type the caller does not have, or
   # one that is not a bare variable, keeps the ungated scan.
-  let Just t = dispatch_t else scan_fwd_markers(class_name, env, pos)
+  let Just t = dispatch_type_of(dispatch_t) else scan_fwd_markers(class_name, env, pos)
       types.TVar v = unifier.apply_subst(s3, t) else scan_fwd_markers(class_name, env, pos)
       # A variable owning no marker for this class is tied to no declared
       # constraint: resolve nothing rather than adopting an unrelated marker.
@@ -3009,7 +3022,7 @@ fn written_over_placeholder(direct: ast.TypeExpr, tyvar: String, subst: Dict typ
       | Nothing -> direct
 
 # An unpacked existential is a rigid TConst skolem; inside its match arm the given seeded
-# for it (seed_given_for_skolem) names it `$ex_<var>`, the identity lowering forwards per
+# for it (seed_given_for_skolem) names it `$ex_<binder>`, the identity lowering forwards per
 # arm. Without the name, `Maybe <existential>` read as an unknown and borrowed whatever
 # compound `where` shared its key.
 fn skolem_or_name(name: String, env: Dict types.Scheme) -> ast.TypeExpr =
@@ -4599,7 +4612,7 @@ fn append_via_semigroup_at(
       # maybe_forward_input_dispatch repairs the lambda-parameter forwards that
       # the gate would otherwise leave dictionary-less.
       check_instance_fwd("Semigroup", typed_ast.TVar("append", t, pos),
-                         [typed_left, typed_right], env, t, s1, eff_subst, eff, pos, Just(t))
+                         [typed_left, typed_right], env, t, s1, eff_subst, eff, pos, ByArg(t))
 
 fn check_arith(
   subst: Dict types.Type,
@@ -5558,34 +5571,34 @@ fn seed_one_given(var: String, class_name: String, param_types: List types.Type,
   match field_and_declared_for_var(param_types, fields, var) with
   | Just (ast.VarPattern vname vpos, declared_pt) ->
       match skolem_for_var_in(declared_pt, pattern_var_type(vname, vpos, subst), var) with
-      | Just sk -> seed_given_for_skolem(class_name, vname, sk, env)
+      | Just sk -> seed_given_for_skolem(class_name, types.existential_binder(vname, vpos.index), sk, env)
       | Nothing -> env
   | _ -> env
 
 # Key the given marker by the SKOLEM (so a method call on the unpacked value, whose
 # arg type IS the skolem, finds it) but store the STABLE forwarding identity
-# `$ex_<var>` as the value — that becomes the emitted TDict's head, and lowering
+# `$ex_<binder>` as the value — that becomes the emitted TDict's head, and lowering
 # re-derives the identical name from the pattern var to seed ctx_fwd. See
 # types.existential_fwd_head.
-fn seed_given_for_skolem(class_name: String, vname: String, sk: String, env: Dict types.Scheme) -> Dict types.Scheme =
+fn seed_given_for_skolem(class_name: String, binder: String, sk: String, env: Dict types.Scheme) -> Dict types.Scheme =
   # Seed the direct `@fwd:sk:class` given, then layer superclass givens
   # (`@fwd:sk:super` for each `@super:class:*`) — a multi-method/superclass
   # existential must forward its inherited methods too, exactly as a
   # `where C a` function does via seed_fwd_with_supers. The stable
-  # `$ex_<var>` head is passed as the marker value so lowering's ctx_fwd,
+  # `$ex_<binder>` head is passed as the marker value so lowering's ctx_fwd,
   # keyed by the same head, agrees for every effective class. class_name is
   # already qualified (bundler.qualify_ctor_args qualifies exist_constraints),
   # so it matches resolve_skolem_given's lookup off the class marker.
-  seed_superclass_fwd_markers(class_name, sk, types.existential_fwd_head(vname),
+  seed_superclass_fwd_markers(class_name, sk, types.existential_fwd_head(binder),
     dict_set(fwdvar_key(sk),
-             types.mono(types.TConst(types.type_id(types.existential_fwd_head(vname)))),
+             types.mono(types.TConst(types.type_id(types.existential_fwd_head(binder)))),
       dict_set("@fwd:" ++ sk ++ ":" ++ class_name,
-               types.mono(types.TConst(types.type_id(types.existential_fwd_head(vname)))), env)))
+               types.mono(types.TConst(types.type_id(types.existential_fwd_head(binder)))), env)))
 
 # Find the first field whose DECLARED type MENTIONS the existential var, returning
 # its pattern together with that declared type. Uses the shared `types.ftv`
 # predicate so this and lowering's field_var_for_constraint select the identical
-# field — the `$ex_<vname>` forwarding head must agree across the two passes. A
+# field — the `$ex_<binder>` forwarding head must agree across the two passes. A
 # constrained var may sit bare (`Shown a`), in a function (`s -> String`), or
 # nested in a compound field (`Bag (List a)`); all three mention the var.
 fn field_and_declared_for_var(param_types: List types.Type, fields: List ast.Pattern, var: String) -> Maybe(ast.Pattern, types.Type) =
@@ -10445,7 +10458,7 @@ fn resolve_dispatch_typed_branches(env: Dict types.Scheme, subst: Dict types.Typ
       # The arm's existential givens are seeded again from the final substitution, which
       # still binds each pattern variable to its skolem by position (bind_pattern_var),
       # even after a later pattern reuses the name: a dictionary rebuilt in the
-      # arm then names the skolem `$ex_<var>`, the slot lowering forwards per arm. The
+      # arm then names the skolem `$ex_<binder>`, the slot lowering forwards per arm. The
       # declaration-level env does not carry the givens inference saw inside the arm.
       | typed_ast.TypedMatchBranch pat body ->
           Cons(typed_ast.TypedMatchBranch(pat,

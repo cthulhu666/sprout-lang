@@ -1822,10 +1822,10 @@ fn lower_branches(branches: List typed_ast.TypedMatchBranch, ctx: LowerCtx) -> L
 # Stage 0b: prepare a match branch to unpack a constrained existential
 # (docs/gadts-v0.md §5b/§7). A ctor with existential constraints packs one hidden
 # dictionary field per constraint AFTER its user fields. Two jobs here: (1) extend
-# the pattern to bind each witness field to a synthetic `$wtns_<var>` variable so
+# the pattern to bind each witness field to a synthetic `$wtns_<binder>` variable so
 # ast_to_ir emits the IRGetField, and (2) seed ctx_fwd so a class method on the
 # unpacked value forwards that witness. The forwarding key uses the STABLE
-# `$ex_<var>` identity infer stored as the @fwd marker value — re-derived here from
+# `$ex_<binder>` identity infer stored as the @fwd marker value — re-derived here from
 # the same pattern var, so resolve's EvForward key and this seeding agree.
 fn enrich_existential_branch(pat: ast.Pattern, ctx: LowerCtx) -> (ast.Pattern, LowerCtx) =
   match pat with
@@ -1848,7 +1848,7 @@ fn existential_branch_build(name: String, fields: List ast.Pattern, ppos: source
 # One appended witness pattern PER SLOT — per method across the constraint's class
 # and its transitive superclasses, in types.witness_slots_for_class order, which
 # equals the physical field order construction packs and register_ctor_one counts.
-# A var-bound existential field gets `$wtns_<var>_<class>_<method>` binders (one per
+# A var-bound existential field gets `$wtns_<binder>_<class>_<method>` binders (one per
 # slot); a wildcard field gets wildcards (witnesses packed but unused).
 fn witness_patterns_for(cons: List (String, String), param_types: List types.Type, fields: List ast.Pattern, ppos: source.SourcePos, class_order: Dict (List String), super_map: Dict (List String)) -> List ast.Pattern =
   match cons with
@@ -1892,7 +1892,7 @@ fn seed_fwd_for_cons(cons: List (String, String), param_types: List types.Type, 
 # transitive superclasses) so a superclass method call on the unpacked value —
 # which resolve emits as EvForward under the SUPER's key — finds its packed
 # witness. Each block maps that class's methods to their per-slot binders, keyed
-# by constraint_key_str(<eff>, [$ex_<var>]) so it matches resolve's EvForward key
+# by constraint_key_str(<eff>, [$ex_<binder>]) so it matches resolve's EvForward key
 # and consume_block's lookup.
 fn seed_one_fwd(existv: String, class_name: String, param_types: List types.Type, fields: List ast.Pattern, fwd: Dict (Dict String), class_order: Dict (List String), super_map: Dict (List String)) -> Dict (Dict String) =
   match field_var_for_constraint(existv, param_types, fields) with
@@ -1922,19 +1922,20 @@ fn eff_method_witness_map(eff: String, methods: List String, vname: String, acc:
 # The pattern variable bound to the first field whose scheme type MENTIONS the
 # existential var `existv`, or Nothing when that field is a wildcard (or absent).
 # Uses the shared `types.ftv` predicate so this and infer's field_and_declared_for_var
-# select the identical field — the `$ex_<vname>` forwarding head (and thus the
+# select the identical field — the `$ex_<binder>` forwarding head (and thus the
 # witness binders below) must agree across the two passes. A constrained var may sit
 # bare, function-typed, or nested in a compound field (`Bag (List a)`).
 fn field_var_for_constraint(existv: String, param_types: List types.Type, fields: List ast.Pattern) -> Maybe String =
   match (param_types, fields) with
   | (Cons pt pts, Cons f fs) ->
-      if list_member(existv, types.ftv(pt)) then pattern_var_name(f)
+      if list_member(existv, types.ftv(pt)) then existential_binder_of(f)
       else field_var_for_constraint(existv, pts, fs)
   | _ -> Nothing
 
-fn pattern_var_name(p: ast.Pattern) -> Maybe String =
+# The binder identity infer's seed_one_given derives from the same pattern.
+fn existential_binder_of(p: ast.Pattern) -> Maybe String =
   match p with
-  | ast.VarPattern v _ -> Just(v)
+  | ast.VarPattern v vpos -> Just(types.existential_binder(v, vpos.index))
   | _ -> Nothing
 
 fn scheme_param_types(t: types.Type) -> List types.Type =

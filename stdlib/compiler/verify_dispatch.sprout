@@ -81,12 +81,12 @@ fn starts_lower(s: String) -> Bool =
   | Just c -> c >= 'a' && c <= 'z'
 
 # A `$`-prefixed name is resolver-internal and never a user type constructor:
-# `$sk<n>` is the skolem minted by unpacking an existential, and `$ex_<var>` is
+# `$sk<n>` is the skolem minted by unpacking an existential, and `$ex_<binder>` is
 # that skolem's STABLE forwarding identity (types.existential_fwd_head). The
 # compiler's own convention is that `$` marks a NON-CONCRETE head — resolve routes
 # it to EvForward (types.sprout:141) — but `starts_lower` is false for `$`, which
 # would otherwise classify both as constructors and compare them as if they were.
-# They deliberately denote the SAME rigid type through different passes: `$ex_<var>`
+# They deliberately denote the SAME rigid type through different passes: `$ex_<binder>`
 # exists precisely because `$sk<n>` is fresh-per-instantiation and unstable. So a
 # correct existential dispatch reads as `ToString $ex_x` against a truth of
 # `$sk2416` and would be reported as a mismatch.

@@ -231,7 +231,7 @@ declare i64 @fs_rename(i64, i64)
 @.str.96 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.str.97 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"IO\00" }
 @.str.98 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c".\00" }
-@.str.99 = private unnamed_addr constant { i64, [46 x i8] } { i64 737290, [46 x i8] c"Int overflow in unary - (line 398, column 29)\00" }
+@.str.99 = private unnamed_addr constant { i64, [46 x i8] } { i64 737290, [46 x i8] c"Int overflow in unary - (line 404, column 29)\00" }
 @.str.100 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 70, column 49)\00" }
 @.str.101 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 71, column 49)\00" }
 @.str.102 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"0x\00" }

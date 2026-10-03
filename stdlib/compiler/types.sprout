@@ -146,8 +146,14 @@ export fn is_skolem_name(name: String) -> Bool =
 # non-concrete head (→ EvForward), and marks it reserved (no source-name collision).
 export let existential_head_prefix: String = "$ex_"
 
-export fn existential_fwd_head(var_name: String) -> String =
-  existential_head_prefix ++ var_name
+export fn existential_fwd_head(binder: String) -> String =
+  existential_head_prefix ++ binder
+
+# The pattern variable's name alone is not an identity: a nested arm rebinding it took
+# the outer existential's forwarding and witness slots. Its source index is unique in
+# the file both arms share; the digits after the last `_` keep two binders apart.
+export fn existential_binder(var_name: String, index: Int) -> String =
+  var_name ++ "_" ++ int_to_string(index)
 
 export fn is_existential_head(name: String) -> Bool = string.starts_with(name, existential_head_prefix)
 

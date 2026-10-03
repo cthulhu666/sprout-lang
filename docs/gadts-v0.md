@@ -198,7 +198,7 @@ strictly smaller, self-contained feature. So:
   fix: unpack given-seeding now co-walks the declared field type against the
   unpacked skolem type to recover the skolem even when the var only appears nested
   (infer `skolem_for_var_in`), and both infer and lowering select the forwarding
-  field via the shared `types.ftv` "mentions" predicate so their `$ex_<var>` heads
+  field via the shared `types.ftv` "mentions" predicate so their `$ex_<binder>` heads
   agree. Missing-instance construction (`Shown(NoShow)`) is rejected at the
   construction site with the standard "No instance" diagnostic (§8). **Known gap:**
   an *ambiguous* existential construction whose element type is undetermined
@@ -388,7 +388,7 @@ deprecated DatatypeContexts).
 | Scope | Size | Rationale |
 |---|---|---|
 | Stage 0a (unconstrained) | **M** | Parser/AST + pack + unpack + **escape check** (the one new mechanism); no runtime change. |
-| Stage 0b (constrained, `any C`) | **M** (actual) | Estimated L for a "reified dictionary that doesn't exist"; in practice **no struct was needed** — the per-method hidden-param pointers are the dictionary, redirected into a ctor field. Real work was the pack obligation (reused the `where C a` dict-injection path), the unpack forwarding contract (skolem-keyed given marker + a stable `$ex_<var>` forwarding identity shared by infer and lowering), and the ctor arity/fks bookkeeping. Generalized 2026-07-31 to multi-method and superclass classes via the shared witness-slot enumerator (`types.witness_slots_for_class`). |
+| Stage 0b (constrained, `any C`) | **M** (actual) | Estimated L for a "reified dictionary that doesn't exist"; in practice **no struct was needed** — the per-method hidden-param pointers are the dictionary, redirected into a ctor field. Real work was the pack obligation (reused the `where C a` dict-injection path), the unpack forwarding contract (skolem-keyed given marker + a stable `$ex_<binder>` forwarding identity shared by infer and lowering), and the ctor arity/fks bookkeeping. Generalized 2026-07-31 to multi-method and superclass classes via the shared witness-slot enumerator (`types.witness_slots_for_class`). |
 | Stage 1 (index refinement) | **XL** | Local-equality solver + bidirectional checking + mandatory signatures + constraint-aware exhaustiveness; blocked on the local-annotations gate. Out of scope. |
 
 **Recommended path:** ship **0a as a spike** to validate the skolem-escape

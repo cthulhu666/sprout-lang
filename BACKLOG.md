@@ -2747,7 +2747,15 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   `(\z -> same(z, z))(\n -> n + 1)` with `same where Eq a` compiles to the poison thunk; spec
   §8.5 says it is rejected with "No instance of C for a function type". Neither
   `constraint_var_dict` nor the forward fills the hole, and `resolve` skips a `_` head. Master
-  printed `true`. Fix: report a hole whose variable resolved to a function type.
+  printed `true`. A class method's dispatch variable (`(\g -> to_string(g))(\n -> n + 1)`) is
+  rejected, but as "ambiguous type variable … Annotate the expression"; master said "No instance
+  of C for a function type" or printed garbage. Fix: report a hole whose variable resolved to a
+  function type.
+- [ ] `P2` **A lambda let-bound outside an arm, applied to its existential, panics at run time.**
+  `let g = \z -> two(z, 9) in match s with | Shown v -> g(v)` compiles to the poison thunk: the
+  post-pass settles `g`'s body under the declaration's env, and the arm's given
+  (`@fwd:<skolem>`) is seeded per branch only. Master printed a wrong answer. The skolem escapes
+  its arm through `g`'s type, so this should be a compile error. Defining `g` inside the arm works.
 - [ ] `P3` **In a recursive group, a parameter another member pins is called generic.** In
   `fn a_fn(n: Int, x) = … Just(x) == Just(x) … b_fn(n - 1, x)`, `b_fn`'s `y == 3` makes `x` an
   `Int`, yet `resolve` asks for an annotation and a `where`. Each member's post-pass and
