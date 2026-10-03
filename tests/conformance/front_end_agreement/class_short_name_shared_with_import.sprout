@@ -1,0 +1,27 @@
+module fixtures.class_short_name_shared_with_import
+
+# A local class shares its short name with an imported one, and each has a complete
+# instance. Both front ends must ACCEPT: the missing-method check matches an instance
+# to its class by exact name, so neither instance is checked against the other
+# class's methods. A short-name match would report `render_local` missing from the
+# `json.JsonEncode` instance.
+
+import stdlib.json as json
+
+class JsonEncode a
+  fn render_local(value: a) -> String
+
+type Point = Point Int
+
+instance json.JsonEncode Point
+  fn encode_json(value: Point) -> json.Json =
+    match value with
+    | Point n -> json.int(n)
+
+instance JsonEncode Point
+  fn render_local(value: Point) -> String =
+    match value with
+    | Point n -> int_to_string(n)
+
+fn main() -> Unit !{IO} =
+  print(render_local(Point(2)))
