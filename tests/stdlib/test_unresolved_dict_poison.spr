@@ -29,16 +29,21 @@ import stdlib.compiler.source as source
 fn contains(haystack: String, needle: String) -> Bool =
   str_find(haystack, needle) != -1
 
-# One function whose body is exactly the `__unresolved_<Class>_<head>` TVar that
-# `lowering` hands `ast_to_ir` for an unresolvable free-tyvar dict. It reaches
-# translate_expr's unbound-name branch and takes the null-fill / poison path.
+# Two functions whose bodies are exactly the sentinels `lowering` hands `ast_to_ir`:
+# `__unresolved_<Class>_<head>` for an unresolvable free-tyvar dict, and
+# `__unresolved_<Class>_<head>_<method>` for a found dict lacking a method
+# (resolve_method_var). Each reaches translate_expr's unbound-name branch and takes
+# the poison path.
 fn probe_program() -> typed_ast.TypedProgram =
-  typed_ast.TypedProgram(
-    Cons(typed_ast.TFnDecl("poison_probe", Nil, Nothing, Nothing, Nil,
-           typed_ast.TVar("__unresolved_ToString_Box",
-                          types.TConst(types.type_id("Int")),
-                          source.SourcePos(index = 0, line = 12, column = 5))),
-    Nil))
+  typed_ast.TypedProgram([
+    probe_fn("poison_probe", "__unresolved_ToString_Box", 12, 5),
+    probe_fn("poison_probe_method", "__unresolved_Two_Box_two", 15, 12)
+  ])
+
+fn probe_fn(name: String, sentinel: String, line: Int, column: Int) -> typed_ast.TypedDecl =
+  typed_ast.TFnDecl(name, Nil, Nothing, Nothing, Nil,
+    typed_ast.TVar(sentinel, types.TConst(types.type_id("Int")),
+                   source.SourcePos(index = 0, line = line, column = column)))
 
 # Lower the probe to LLVM text. This used to `<-`-bind translate_program's
 # `Result String (IRProgram, Dict Int)` and return a plain `String`, on the
@@ -66,6 +71,9 @@ fn main() -> Unit !{IO} =
     # fixed message served every site.
     assert_true(state, "poison message names the dictionary and its position",
                 contains(ll, "dictionary for ToString_Box (line 12, column 5)"))
+    # A missing method keeps its name after the key (docs/debugging.md).
+    assert_true(state, "poison message keeps a missing method's name",
+                contains(ll, "dictionary for Two_Box_two (line 15, column 12)"))
     # `sprout_fail` prepends `runtime error: ` to every message, so a literal that embeds it
     # prints the prefix twice. RED before the fix, which dropped it from the literal.
     assert_true(state, "poison message does not embed the runtime's own prefix",
