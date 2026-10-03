@@ -34,10 +34,15 @@ summed over cycles that swept anything.
 
 Rows marked steady state leave out a one-off phase. The fixture's is the cycle where all 100,000
 Wides die (swept 109,027, FREE 0); with it, the row reads 23.81. The game rows are #407's scene
-(one host, 1,200 frames, audio muted), one run each, leaving out the first quarter of cycles —
-the catalog load, peak live 158,637. The other three quarters agree to three figures, and all
-cycles together read 49.0. GC time over the whole run is 489 µs/frame at the default trigger and
-79 at 232,000.
+(one host, 1,200 frames, audio muted), leaving out the first quarter of cycles — the catalog
+load, peak live 158,637. Within a run the other three quarters agree to three figures.
+
+**Across runs the game is not repeatable**, and the table shows one run of each. Four default runs
+allocated 3.4M–14.2M objects in the same 1,200 frames and collected 685–3,153 times; steady-state
+FREE/swept read 76.1, 69.7, 72.3 and 52.2, with FREE steady at 246k–253k and live varying
+1,617–2,381. Three pinned runs collected 14–67 times. Per-frame GC time therefore compares runs,
+not configurations; per 1,000 allocations it is 161–217 µs at the default and 7.2–9.6 at 232,000.
+Why the allocation volume moves is not established.
 
 ## What it says
 
@@ -56,21 +61,36 @@ three-quarters of a slot per object freed. It is the workload `gc-generational-v
 the adapt factor on, so a trigger that
 reacted to FREE would move it — which makes it the regression check for any such trigger.
 
-**The constructed fixture shows the mechanism exists; the game shows it is #407's, worse.** The
-fixture holds ~105k FREE slots of a dead size class under 1,562 survivors in 7 regions, and a
-sweep freeing ~3,100 costs ~450 µs, against ~25 µs for http_log_middleware sweeping ~4,000. The
-game holds 246,450 FREE slots under ~1,600 survivors in 8 regions, and frees ~3,200 for ~840 µs.
-#407 estimated "roughly 50,000 slots to reclaim ~3,900", a FREE/swept of about 11; the walk is
-5× that footprint, and FREE/swept 7× the estimate. The FREE count is identical every cycle. That
-does not show the slots are never reused: the sweep rebuilds the freelists each cycle, so a
-surplus in a class that *is* allocated from also reads as a constant count.
+**The constructed fixture and the game reach the same walk by different routes.** The fixture
+holds ~105k FREE slots of a dead size class under 1,562 survivors in 7 regions, and a sweep
+freeing ~3,100 costs ~450 µs, against ~25 µs for http_log_middleware sweeping ~4,000. The game
+holds ~246k FREE slots under ~1,600–2,400 survivors in 8–9 regions, and frees ~3,200–4,800 for
+~800–1,000 µs. #407 estimated "roughly 50,000 slots to reclaim ~3,900", a FREE/swept of about 11;
+the walk is 5× that footprint, and FREE/swept 5–7× the estimate.
+
+**The game's free slots are not a dead class.** A throwaway probe — per-class counters in
+`sprout_gc_alloc_block` and the sweep, printed beside each cycle line and never committed — split
+FREE by size class on the 1,297-cycle run, over its last three quarters:
+
+| class | FREE per cycle | allocations per cycle |
+|---|---|---|
+| 16 B | 109,351 | 723 |
+| 32 B | 106,544 | 2,616 |
+| 48, 80, 96, 112, 128 B | 30,815 | 3–88 each |
+| other classes with allocations | 37 | — |
+| classes with no allocations | 82 | 0 |
+
+246,747 of 246,829 FREE slots are in classes the game allocates from every cycle: a usable
+surplus, not an unreusable one, and every collection walks it ~3,500 allocations after the last.
+Run on `test_gc_walk_sparse` first, the probe put its 100,000-slot pool in the one class with no
+allocations and summed to the cycle line's `walked − live − swept` exactly.
 
 **For Option B, the gap is the finding.** Ordinary programs span 0.00–1.46 and the game reads
-76, so any bound between ~2 and ~70 separates them. Raising the game's threshold drops it to
+52–76, so any bound between ~2 and ~50 separates them. Raising the game's threshold drops it to
 0.25: the signal switches off once the floor is high enough, which is what a feedback loop needs
-to settle. Where B's *repaired* form would settle is a separate question — it counts only free
-slots in classes with recent demand, and this table cannot say which classes the game's are in
-(`docs/gc-trigger-v0.md` §12 Q1).
+to settle. B's *repaired* form counts only free slots in classes with recent demand; on the
+split above that is all but 82 of them, so it would set the floor near 248,500, close to the
+pinned 232,000 (`docs/gc-trigger-v0.md` §12 Q1).
 
 ## Reproducing
 

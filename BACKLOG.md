@@ -2183,7 +2183,7 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   collector work, while a cycle's cost tracks the footprint `sprout_gc_sweep` walks — which the
   trigger never reads. uncharted-suns cut a live set 45× and total GC rose 4× (#407). The condition
   is narrower than "small live set": it bites only when retained footprint greatly exceeds
-  per-cycle garbage. `walked=` measures it: the game walks 76 free slots per object freed, other
+  per-cycle garbage. `walked=` measures it: the game walks 52–76 free slots per object freed, other
   programs ≤1.46 (`bench/results-2026-10-03-gc-walk.md`). A 100,000 floor is measured green on
   `gc-adapt-check`, red on `gc-ageprof-check` above ~10k (which that gate's threshold pin
   dissolves), and flat-to-worse on the floor-pinned four at up to 3.2× RSS and a 20× pause rise
