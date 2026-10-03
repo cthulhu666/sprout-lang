@@ -58,6 +58,11 @@ spared (its guess is the legitimate concrete-constructor case). Escape hatch: se
 `SPROUT_DISPATCH_STRICT_OFF=1` to revert to the legacy guess if you hit a false
 positive.
 
+**A runtime panic `dispatched through an unresolved typeclass dictionary for
+ToString__ (line 24, column 42)`** names the dictionary's key (class, then head; `_`
+is a head nobody resolved) and the call site that left it unresolved. It is a
+compiler bug: a dictionary the compiler judged never used was used.
+
 **Automated guard.** The dict-passing verifier (`verify_dispatch.sprout`, run in
 the check phase, `compiler.sprout`) turns this class of bug into a **compile
 error**: it re-derives each constraint var's type from the callee's SOURCE

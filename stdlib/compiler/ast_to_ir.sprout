@@ -972,15 +972,17 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
                         # been violated before (the missing-superclass SIGSEGV,
                         # PR #268); a bare `i64 0` turns any future violation into
                         # a SILENT crash when the null dict is applied.  Emit a
-                        # closure whose code pointer PANICS on apply — loud and
-                        # located — mirroring the eta-wrapper synthesis above.
+                        # closure whose code pointer PANICS on apply, naming the
+                        # dictionary and its call site — mirroring the eta-wrapper
+                        # synthesis above.
                         # Reuses @panic (IRPanic); no runtime change, no builtin.
                         do
                           ctr <- ref_read(lambda_ctr_ref)
                           ref_write(lambda_ctr_ref, ctr + 1)
                           let thunk_name = "__sprout_ir_unresolved_thunk_" ++ int_to_string(ctr)
                           existing_lifted <- ref_read(lifted_ref)
-                          ref_write(lifted_ref, Cons(synthesize_unresolved_poison_thunk(thunk_name), existing_lifted))
+                          ref_write(lifted_ref, Cons(synthesize_unresolved_poison_thunk(thunk_name, name, var_pos),
+                                                     existing_lifted))
                           Ok((Nil, cur_label,
                                list_builder_add(sprout_ir.IRMkClosure(fresh_name(name_prefix, idx), thunk_name,
                                         closure_arity_any, Nil), cur_ops),
@@ -2479,14 +2481,13 @@ fn float_cmp_predicate(op: String) -> Maybe String =
   else if op == "!=" then Just("one")
   else Nothing
 
-# Renders a SourcePos as an overflow-panic message suffix. Matches the
-# "(line N, column N)" convention already used by intrinsic_not_a_value_msg
-# above.  Every panic message this function's callers build is unique per
-# call site once located; IRStrConst's interning pre-pass (ir_lowering) still
-# collapses any two call sites that land on the exact same line/column (e.g.
-# two structurally-identical inlined copies), so this costs one global per
-# distinct source location, not one per operation performed at runtime.
-fn overflow_loc(pos: source.SourcePos) -> String =
+# Renders a SourcePos as a panic message suffix (Int overflow, the unresolved-dict
+# poison thunk). Matches the "(line N, column N)" convention already used by
+# intrinsic_not_a_value_msg above.  Each IRStrConst gets its own global
+# (ir_lowering.collect_str_consts does not deduplicate), so a located message
+# costs one global per panic site in the IR, as the unlocated one did — not one
+# per operation performed at runtime.
+fn panic_loc(pos: source.SourcePos) -> String =
   " (line " ++ int_to_string(pos.line) ++ ", column " ++ int_to_string(pos.column) ++ ")"
 
 # W7/F-DIV: `/` lowers to a guarded division. A bare `sdiv i64 _, 0` is LLVM
@@ -2551,7 +2552,7 @@ fn finish_checked_div(lblocks: List sprout_ir.IRBlock, rblocks: List sprout_ir.I
                           sprout_ir.IRCondBr(ismin_name, ovfpanic_lbl, ok_lbl)])
         ovfpanic_block = sprout_ir.IRBlock(ovfpanic_lbl,
                            [sprout_ir.IRStrConst(ovf_msg_result, ovf_msg_raw,
-                              "Int overflow in /" ++ overflow_loc(pos)),
+                              "Int overflow in /" ++ panic_loc(pos)),
                             sprout_ir.IRPanic(ovf_msg_result)])
         # Continuation block: the sdiv runs here; it is the new current block.
         div_op = sprout_ir.IRIDiv(div_result, l_name, r_name)
@@ -2593,7 +2594,7 @@ fn finish_checked_arith(intrinsic: String, sym: String, pos: source.SourcePos,
         # unreachable.
         panic_block = sprout_ir.IRBlock(panic_lbl,
                         [sprout_ir.IRStrConst(msg_result, msg_raw,
-                           "Int overflow in " ++ sym ++ overflow_loc(pos)),
+                           "Int overflow in " ++ sym ++ panic_loc(pos)),
                          sprout_ir.IRPanic(msg_result)])
         all_blocks = list_append(list_append(lblocks, rblocks),
                        [cond_block, panic_block])
@@ -7424,20 +7425,29 @@ fn synthesize_eta_wrapper(fn_name: String, arity: Int, wrapper_name: String) -> 
 # `__unresolved_` branch in translate_expr.  A closure whose slot-0 code pointer
 # is this thunk lowers exactly like any other closure (IRMkClosure), so applying
 # it via the closure ABI (ir_lowering IRApplyClosure: `load code; call code(...)`)
-# runs the thunk, which PANICS with a located message.  Takes only the implicit
+# runs the thunk, which PANICS with a message naming the sentinel's key (the
+# constraint, e.g. `ToString_Box`) and its source position.  Takes only the implicit
 # `env$` handle; the apply site may pass extra method args, which a `noreturn`
 # panic ignores.  Reuses the existing `@panic` builtin (IRPanic) — no runtime
-# change.  The message substring "unresolved typeclass dictionary" is pinned by
-# tests/stdlib/test_unresolved_dict_poison.spr.
-fn synthesize_unresolved_poison_thunk(thunk_name: String) -> sprout_ir.IRFunction =
+# change.  The message is pinned by tests/stdlib/test_unresolved_dict_poison.spr.
+fn synthesize_unresolved_poison_thunk(thunk_name: String, sentinel: String,
+                                      pos: source.SourcePos) -> sprout_ir.IRFunction =
   sprout_ir.IRFunction(thunk_name,
                         Cons(("env$", sprout_ir.IRTHeap), Nil),
                         "i64",
                         Cons(sprout_ir.IRBlock("entry",
                               Cons(sprout_ir.IRStrConst("%__poison_msg", "%__poison_msg_raw",
-                                     "dispatched through an unresolved typeclass dictionary — a required instance was missing at compile time (compiler-soundness backstop; please report)"),
+                                     "dispatched through an unresolved typeclass dictionary for "
+                                     ++ unresolved_key(sentinel) ++ panic_loc(pos)
+                                     ++ " — a required instance was missing at compile time (compiler-soundness backstop; please report)"),
                               Cons(sprout_ir.IRPanic("%__poison_msg"), Nil))),
                         Nil))
+
+# The constraint key a `__unresolved_<key>` sentinel carries (`ToString_Box`).
+fn unresolved_key(sentinel: String) -> String =
+  match string.strip_prefix(sentinel, "__unresolved_") with
+  | Just key -> key
+  | Nothing -> sentinel
 
 fn build_wrapper_arg_params(idx: Int, arity: Int) -> List (String, sprout_ir.IRType) =
   if idx >= arity then Nil
