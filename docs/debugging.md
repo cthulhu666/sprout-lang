@@ -63,9 +63,10 @@ ToString__ (line 24, column 42)`** names the dictionary's key and the call site 
 left it unresolved. The key is the class, then the head (`_` is a head nobody
 resolved, and a head can be module-qualified), and sometimes then the method
 a found dictionary lacks: `Two_$entry.Box_two` is class `Two`, head `$entry.Box`,
-method `two`. Either way it is a compiler bug: a dictionary
-the compiler judged never used was used, or an instance lacked a method and nothing
-rejected it.
+method `two`. Either way it is a compiler bug: a dictionary the compiler judged never
+used was used, or a dictionary lacked a method. An instance missing a method is
+rejected at the instance (spec §8.5), so the second form means something else built
+an incomplete dictionary.
 
 **Automated guard.** The dict-passing verifier (`verify_dispatch.sprout`, run in
 the check phase, `compiler.sprout`) turns this class of bug into a **compile

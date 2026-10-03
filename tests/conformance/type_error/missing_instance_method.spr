@@ -15,6 +15,6 @@ instance Two Box
 
 fn use_two(v: a) -> Int where Two a = two(v)
 
-# Use the instance so it survives to typecheck (an unused instance is pruned).
+# The call shows what the check prevents; an unused instance is rejected too.
 fn main() -> Unit !{IO} =
   print(int_to_string(use_two(Box(1))))

@@ -6936,7 +6936,7 @@ fn typecheck_decls_resolved(
               match check_missing_superclass_instances(decls) with
               | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
               | Nothing ->
-              match check_missing_instance_methods(decls, env) with
+              match check_missing_instance_methods(decls) with
               | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
               | Nothing ->
               match check_instance_class_effects(decls) with
@@ -8395,65 +8395,33 @@ fn build_inst_key_set(decls: List ast.Decl, acc: Dict Bool) -> Dict Bool =
 # nothing to dispatch to. Unchecked, lowering found the dictionary but not the
 # method and emitted a poison thunk that panicked at run time.
 #
-# Classes come from this module's decls, keyed as declared, and from the env's
-# `@class:<method>` markers, keyed short — the REPL / LSP path, as for
-# check_instance_head_kinds. Each entry keeps its class's full name beside its
-# methods: two env classes sharing a short name leave that name with no methods, so
-# neither is checked rather than both checked against the union (class_own_part's
-# rule). A class found nowhere is skipped. Method names are compared short.
-fn check_missing_instance_methods(decls: List ast.Decl,
-                                  env: Dict types.Scheme) -> Maybe(source.SourcePos, String) =
-  first_missing_method(decls,
-    own_class_methods(decls, env_class_methods(vec_to_list(dict_entries(env)), dict_empty())))
+# Classes come from decls only, matched by the exact name the instance writes. The
+# bundler puts every class in decls under one qualified spelling, so that finds it. The
+# env's `@class:<method>` markers are not read: they carry bare class names, which
+# cannot tell two same-named classes apart, and only the retired env path
+# (module_loader.build_import_pairs) supplies classes that way. A class not found is
+# skipped. Method names are compared short.
+fn check_missing_instance_methods(decls: List ast.Decl) -> Maybe(source.SourcePos, String) =
+  first_missing_method(decls, own_class_methods(decls, dict_empty()))
 
-fn own_class_methods(decls: List ast.Decl,
-                     acc: Dict (String, List String)) -> Dict (String, List String) =
+fn own_class_methods(decls: List ast.Decl, acc: Dict (List String)) -> Dict (List String) =
   match decls with
   | [] -> acc
   | [ast.ClassDecl name _ methods _ _ | rest] ->
-      own_class_methods(rest, dict_set(name, (name, list_map(class_method_name, methods)), acc))
+      own_class_methods(rest, dict_set(name, list_map(class_method_name, methods), acc))
   | [_ | rest] -> own_class_methods(rest, acc)
 
 fn class_method_name(method: ast.ClassMethodSig) -> String =
   match method with
   | ast.ClassMethodSig name _ _ _ _ -> string.after_last_dot(name)
 
-fn env_class_methods(entries: List (String, types.Scheme),
-                     acc: Dict (String, List String)) -> Dict (String, List String) =
-  match entries with
-  | [] -> acc
-  | [(key, marker) | rest] -> env_class_methods(rest, env_class_method_add(key, marker, acc))
-
-fn env_class_method_add(key: String, marker: types.Scheme,
-                        acc: Dict (String, List String)) -> Dict (String, List String) =
-  let Just method = string.strip_prefix(key, class_marker_prefix) else acc
-      types.TConst id = types.scheme_type(marker) else acc
-  in add_class_method(types.type_id_name(id), string.after_last_dot(method), acc)
-
-# Never a class name: it has no letters.
-let ambiguous_class: String = "#"
-
-fn add_class_method(cls: String, method: String,
-                    acc: Dict (String, List String)) -> Dict (String, List String) =
-  let short = string.after_last_dot(cls)
-  in
-    match dict_get(short, acc) with
-    | Nothing -> dict_set(short, (cls, [method]), acc)
-    | Just (seen, methods) ->
-        if seen == cls then dict_set(short, (cls, Cons(method, methods)), acc)
-        else dict_set(short, (ambiguous_class, Nil), acc)
-
-# Verbatim first, then short: own classes are keyed as declared, env ones short.
-fn class_methods_of(cls: String, class_methods: Dict (String, List String)) -> List String =
+fn class_methods_of(cls: String, class_methods: Dict (List String)) -> List String =
   match dict_get(cls, class_methods) with
-  | Just (_, methods) -> methods
-  | Nothing ->
-      match dict_get(string.after_last_dot(cls), class_methods) with
-      | Just (_, methods) -> methods
-      | Nothing -> Nil
+  | Just methods -> methods
+  | Nothing -> Nil
 
 fn first_missing_method(decls: List ast.Decl,
-                        class_methods: Dict (String, List String)) -> Maybe(source.SourcePos, String) =
+                        class_methods: Dict (List String)) -> Maybe(source.SourcePos, String) =
   match decls with
   | [] -> Nothing
   | [ast.InstanceDecl constraint _ methods pos | rest] ->
@@ -8463,7 +8431,7 @@ fn first_missing_method(decls: List ast.Decl,
   | [_ | rest] -> first_missing_method(rest, class_methods)
 
 fn instance_missing_method(constraint: ast.TypeConstraint, methods: List ast.InstanceMethodImpl,
-                           class_methods: Dict (String, List String)) -> Maybe String =
+                           class_methods: Dict (List String)) -> Maybe String =
   match constraint with
   | ast.TypeConstraint cls type_args ->
       let defined = list_map(instance_method_name, methods)
