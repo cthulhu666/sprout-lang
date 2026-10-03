@@ -3356,6 +3356,72 @@ gc-adapt-check: bootstrap-from-seed
   (( failed == 0 )) || exit 1
   echo "==> gc-adapt-check ✓"
 
+# Validate the sweep-walk counter (`walked=` on every SPROUT_DEBUG_GC cycle line):
+# slots the sweep stepped over, live and FREE included. Divided by `swept` it is the
+# work spent per object reclaimed, which a sweep's cost tracks and no trigger reads.
+#   1. Every cycle line carries it, and walked >= live + swept on every cycle (each
+#      live and each swept object sits in a walked slot — fewer means it miscounts).
+#   2. It DISCRIMINATES: test_gc_walk_sparse pins regions full of FREE slots no later
+#      allocation can refill, so walked/swept is high; test_gc_age_retain_none churns
+#      on dense regions, so it is ~1. A counter that cannot separate them measures
+#      nothing.
+# The ratio depends on the trigger policy, so the probe clears the GC tuning env.
+[group('test')]
+gc-walk-check: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -uo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_walk_XXXXXX); trap 'rm -rf "$TMPD"' EXIT
+  mkdir -p "$TMPD/rtobj"
+  for rtsrc in {{runtime_src}}; do
+    clang -c "$rtsrc" -O2 {{clang_extra}} -o "$TMPD/rtobj/$(basename "$rtsrc" .c).o" 2>"$TMPD/rt.err" \
+      || { echo "gc-walk-check: runtime compile failed ($rtsrc)" >&2; cat "$TMPD/rt.err" >&2; exit 1; }
+  done
+  # Emits "<cycles> <walked_total> <swept_total>", or fails if the counter is
+  # missing on any cycle line or under-counts any cycle.
+  probe() {
+    local name="$1" f="tests/stdlib/$1.spr"
+    [ -f "$f" ] || { echo "gc-walk-check: missing $f" >&2; return 1; }
+    "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" --package-root "{{justfile_directory()}}" "$f" > "$TMPD/$name.ll" 2>"$TMPD/$name.err" \
+      || { echo "gc-walk-check: compile failed: $f" >&2; cat "$TMPD/$name.err" >&2; return 1; }
+    clang "$TMPD/$name.ll" "$TMPD/rtobj"/*.o {{clang_extra}} -o "$TMPD/$name.bin" 2>"$TMPD/$name.err" \
+      || { echo "gc-walk-check: link failed: $f" >&2; cat "$TMPD/$name.err" >&2; return 1; }
+    env -u SPROUT_GC_THRESHOLD -u SPROUT_GC_ADAPT_FACTOR -u SPROUT_GC_ADAPT_RATIO -u SPROUT_GC_ADAPT_CAP \
+      SPROUT_DEBUG_GC=1 "$TMPD/$name.bin" > "$TMPD/$name.out" 2>"$TMPD/$name.log" \
+      || { echo "gc-walk-check: $name failed" >&2; tail -5 "$TMPD/$name.log" >&2; return 1; }
+    grep -q "SUITE PASSED" "$TMPD/$name.out" \
+      || { echo "gc-walk-check: $name did not pass" >&2; tail -5 "$TMPD/$name.out" >&2; return 1; }
+    awk -v n="$name" '/^\[sprout gc\] cycle=/ {
+           delete v
+           for (i = 1; i <= NF; i++) { split($i, kv, "="); v[kv[1]] = kv[2] }
+           c++
+           if (!("walked" in v)) { print "gc-walk-check: " n ": cycle " v["cycle"] " has no walked= field" > "/dev/stderr"; bad = 1; exit 1 }
+           if (v["walked"] + 0 < v["live"] + v["swept"]) {
+             print "gc-walk-check: " n ": cycle " v["cycle"] " walked=" v["walked"] " < live=" v["live"] " + swept=" v["swept"] " — the walk under-counts" > "/dev/stderr"
+             bad = 1; exit 1
+           }
+           w += v["walked"]; s += v["swept"]
+         }
+         END {
+           if (bad) exit 1
+           if (c == 0) { print "gc-walk-check: " n ": no cycle lines — did it collect at all?" > "/dev/stderr"; exit 1 }
+           printf "%d %d %d\n", c, w, s
+         }' "$TMPD/$name.log"
+  }
+  failed=0
+  read -r sp_c sp_w sp_s < <(probe test_gc_walk_sparse) || exit 1
+  read -r rn_c rn_w rn_s < <(probe test_gc_age_retain_none) || exit 1
+  # Invariant only: the other two never allocate a large (own-region) object.
+  read -r lg_c lg_w lg_s < <(probe test_gc_large_object_arena) || exit 1
+  echo "  walk_sparse : cycles=${sp_c} walked=${sp_w} swept=${sp_s}  ($(( sp_w / (sp_s > 0 ? sp_s : 1) )) slots per object swept)"
+  echo "  retain_none : cycles=${rn_c} walked=${rn_w} swept=${rn_s}"
+  echo "  large_object: cycles=${lg_c} walked=${lg_w} swept=${lg_s}"
+  (( sp_w >= 10 * sp_s )) \
+    || { echo "gc-walk-check: walk_sparse walked ${sp_w} < 10x swept ${sp_s} — the pinned FREE slots are not being counted" >&2; failed=1; }
+  (( rn_w <= 2 * rn_s )) \
+    || { echo "gc-walk-check: retain_none walked ${rn_w} > 2x swept ${rn_s} — a dense churn heap reads as sparse" >&2; failed=1; }
+  (( failed == 0 )) || exit 1
+  echo "==> gc-walk-check ✓"
+
 # Prove the O(1) arena lookup path is actually TAKEN, and that its fallback works.
 # This gate exists because the optimisation is invisible to every other test: if the
 # reservation fails or is mis-sized, `region_find` silently reverts to the binary
@@ -3466,6 +3532,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "gc-ageprof|gc-ageprof-check"
     "gc-adapt|gc-adapt-check"
     "gc-arena|gc-arena-check"
+    "gc-walk|gc-walk-check"
     "argv-smoke|argv-smoke"
     "div-by-zero-smoke|div-by-zero-smoke"
     "runtime-diag-smoke|runtime-diag-smoke"
