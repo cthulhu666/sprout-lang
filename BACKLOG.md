@@ -2661,8 +2661,8 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   "please report" message; ten probe shapes here reached the arity panic or ran correctly and none
   emitted a poison, `Double` included. That matters because the poison-sink entry records that no
   source-level RED INVOKES a poison — a real one falsifies that and is the more severe bug. **Get
-  the triggering expression from the reporter first**; a poison-reaching shape needs a producer
-  guard.
+  the triggering expression from the reporter first** — the message now names its line and
+  column; a poison-reaching shape needs a producer guard.
 - [~] `P1` **Core verifier for dictionary passing — phase 2b (IR-level) pending.** Phases 1 and 2a
   are landed: `verify_dispatch.sprout` re-derives each constraint variable's type from the callee's
   SOURCE signature, genuinely independent of the resolver, and rejects a call whose injected `TDict`
