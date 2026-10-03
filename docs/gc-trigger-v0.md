@@ -145,7 +145,10 @@ walks **251,306 slots** per cycle to free 3,235 — ~78 per object reclaimed, 5�
 The pinned row walks 289,178 to free 230,240, ~1.3. So the ordering stands and the middle row's
 footprint was under-read 5×; caveat 4's region arithmetic was the right one. The mechanism is the
 sparse-region one: 8 regions stay alive under ~1,600 live objects, and every sweep walks 246,450
-free slots through them. Which size classes those slots are in is not measured (§12 Q1).
+free slots through them. They are not a dead size class: a later run with a per-class probe put
+246,747 of 246,829 in classes the game allocates from every cycle, mostly 16- and 32-byte —
+most likely what the catalog load (peak live 158,637) left behind (§12 Q1). The
+waste is a large, usable free pool that every collection walks, ~3,500 allocations apart.
 
 Use the table for its ordering; the bench note has the measured magnitudes.
 
@@ -256,7 +259,7 @@ quantity directly: it drives work-per-garbage toward ~1 by construction, whateve
   the bound it sets is one the process is paying for regardless. Needs no clock. On #407's middle
   row it yields roughly the pinned configuration automatically.
 - **The signal separates.** Free slots walked per object freed (FREE/swept) is 0.00–1.46 on every
-  ordinary workload measured and **76** on the game; pinning the game's threshold drops it to 0.25
+  ordinary workload measured and **52–76** on the game; pinning the game's threshold drops it to 0.25
   (§3.1, `bench/results-2026-10-03-gc-walk.md`). The counter is `g_debug_gc_walked`, one increment
   per slot already in the sweep loop.
 - **Against — and the schematic above is not buildable as written.** *Ratchet*: the
@@ -268,10 +271,10 @@ quantity directly: it drives work-per-garbage toward ~1 by construction, whateve
 - **The repair, which is what makes B a design rather than a schematic.** Floor on `live` plus the
   free slots in classes that saw allocation demand *last cycle*, rather than on the whole walked
   footprint. That needs 257 counters and one flag store per allocation, and it terminates because
-  a class with no demand stops contributing. Whether it still delivers the reporting workload's
-  win depends on how many of the game's 246,450 free slots are in classes with demand, which is
-  not measured. That, and showing that a phase-structured program cannot defeat it the same way,
-  is §12 Q1.
+  a class with no demand stops contributing. It still delivers the reporting workload's win: all
+  but ~80 of the game's free slots are in classes with demand, so the repaired floor sits near
+  248,500, close to the pinned 232,000. Showing that a phase-structured program cannot defeat it
+  the same way is §12 Q1.
 - **Units are not a problem**, contrary to an earlier draft: slots walked and `g_managed_heap_count`
   are the same count — one cell per object whatever its size, and a large object is one region
   walked as one.
@@ -322,9 +325,9 @@ HotSpot's `GCTimeRatio`, Go's limiter.
 a guess: 3.2× peak RSS and +5.3% wall on nqueens, 1.9× RSS at no wall cost on http_log_middleware,
 nothing on math, no resolvable effect on the socket server, and a ~20× rise in per-collection
 pause wherever a workload was floor-pinned. **§9 item 1 is measured too**, and it keeps B alive:
-the game reads 76 free slots walked per object freed, against at most 1.46 elsewhere (§6.2). What
-it cannot say is whether §6.2's *repair* still catches the game — that depends on which size
-classes those free slots are in (§12 Q1).
+the game reads 52–76 free slots walked per object freed, against at most 1.46 elsewhere (§6.2),
+and nearly all of those slots are in classes the game allocates from, so §6.2's *repair* still
+catches it (§12 Q1).
 
 Given that, the ordering the evidence supports:
 
@@ -332,9 +335,10 @@ Given that, the ordering the evidence supports:
    flat-to-worse, nothing improved, the cost above. §8.1 measures `gc-adapt-check` green there and
    well clear of the ~138,000 pocket, §8.2's collision is dissolved by pinning that gate's own
    probes, and §8.3 shows the compiler is not harmed. What it buys the reporting workload is not
-   measured at 100,000: even 232,000 now reads 489 → 79 µs/frame (6×, against #407's 34×;
-   `bench/results-2026-10-03-gc-walk.md`), so likely less. The price is a guessed constant, a raised
-   minimum heap, and one workload made measurably worse on both axes to help another.
+   measured at 100,000. At 232,000 the game spends 7–10 µs of GC per 1,000 allocations against
+   161–217 at the default, ~20× (`bench/results-2026-10-03-gc-walk.md`; per-frame figures are not
+   comparable, since the game's allocation volume varies 5× between runs). The price is a guessed
+   constant, a raised minimum heap, and one workload made measurably worse on both axes to help another.
 2. **Option C should be folded into whatever lands**, and item 2 strengthened its case from an
    unexpected direction. By cycles × p50 pause, nqueens' collector got *cheaper* at the raised
    floor (315 → 274 ms, a proxy that leaves out the tail) while the program got slower; the likely
@@ -519,12 +523,13 @@ clocks count descheduled time.
 
 1. **Does §6.2's repair hold?** The schematic diverges; flooring on `live` plus the free slots in
    classes with demand last cycle is the candidate fix. It needs showing that a phase-structured
-   program cannot defeat it the same way the exact-fit freelists defeat the naive form — and that
-   it still catches the game. If the game's 246,450 free slots are in classes with no demand,
-   the repaired floor is `live` plus a few thousand and changes nothing there; if they are a
-   surplus in a churn class, it lands near the pinned result. A constant FREE count fits both,
-   since the sweep rebuilds the freelists each cycle. Settling it needs FREE per size class,
-   which nothing reports yet.
+   program cannot defeat it the same way the exact-fit freelists defeat the naive form.
+   **It does catch the game**, measured with a throwaway per-class probe (not committed; method in
+   `bench/results-2026-10-03-gc-walk.md`): of 246,829 free slots per cycle, 246,747 are in classes
+   the game allocated from since the last collection — 109,351 at 16 bytes and 106,544 at 32 — and
+   82 in classes with none. The game's free pool is surplus in live classes, not a dead
+   class, so the naive form's ratchet has only those ~80 slots a cycle to feed on here. The
+   phase-structured case is still open.
 2. **What constant, if A ships?** ~100,000 is where §8.1 measures green with margin on both sides
    of the pocket. §9 item 2 has priced it (§6.5): the number is still a guess, now with a known
    cost.
