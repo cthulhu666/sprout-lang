@@ -3050,6 +3050,13 @@ disagree about depth and their spines misalign *silently*: `instance Boxed (Tri 
 c) where ToString b` bound `b` to the wrong argument and printed a raw pointer.
 Rationale and the recorder invariant it rests on: `docs/instance-head-kinds-v0.md`.
 
+**An instance defines every method its class declares.**  Classes have no default
+method bodies, so an instance that leaves one out is rejected at the instance:
+
+```
+instance Two Box does not define method `two`, declared by class Two. Classes have no default method bodies, so an instance defines every method (spec-v0.md §8.5).
+```
+
 **Two instances may not share a head constructor.**  Instance selection keys on
 the head constructor, so `instance C (List a)` and `instance C (List b)` both name
 `C`-at-`List` and the second would silently shadow the first.  Sprout has no
