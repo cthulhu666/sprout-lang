@@ -144,8 +144,8 @@ it makes each one *productive*, by letting enough garbage accumulate to be worth
 walks **251,306 slots** per cycle to free 3,235 — ~78 per object reclaimed, 5× the table's ~15.
 The pinned row walks 289,178 to free 230,240, ~1.3. So the ordering stands and the middle row's
 footprint was under-read 5×; caveat 4's region arithmetic was the right one. The mechanism is the
-sparse-region one: 8 regions stay alive under ~1,600 live objects, and their 246,450 free slots are
-identical every cycle — walked, never refilled.
+sparse-region one: 8 regions stay alive under ~1,600 live objects, and every sweep walks 246,450
+free slots through them. Which size classes those slots are in is not measured (§12 Q1).
 
 Use the table for its ordering; the bench note has the measured magnitudes.
 
@@ -181,6 +181,8 @@ direct evidence and needs no inference.)
 **These results are consistent, and §3.1 says why.** `gc_roots` sweeps 4,019 of 4,096 slots — it is
 already at ~1 slot walked per object reclaimed, the same regime as #407's first and third columns.
 There is no waste for a floor to remove, so raising it buys nothing and eventually costs cache.
+nqueens is not quite that regime — it walks 1.46 free slots per object freed — but that waste is
+small next to #407's, and the floor still lost to cache (`bench/results-2026-10-03-gc-walk.md`).
 
 **The condition under which a floor helps is therefore narrow and statable:** the heap must be
 walking substantially more footprint than it reclaims. That is a measurable property, and it is not
@@ -188,8 +190,8 @@ implied by a small live set. `SPROUT_DEBUG_GC`'s `walked=` now reports it (§9 i
 
 This is the single most important correction to make to anyone's intuition about #407, including
 the author's of this doc: the finding is not "the default floor is too low". It is "a program whose
-retained footprint greatly exceeds its per-cycle garbage is served badly, and nothing measures
-that".
+retained footprint greatly exceeds its per-cycle garbage is served badly, and the trigger cannot
+see it".
 
 ## 5. Prior-art survey (primary-sourced)
 
@@ -266,9 +268,10 @@ quantity directly: it drives work-per-garbage toward ~1 by construction, whateve
 - **The repair, which is what makes B a design rather than a schematic.** Floor on `live` plus the
   free slots in classes that saw allocation demand *last cycle*, rather than on the whole walked
   footprint. That needs 257 counters and one flag store per allocation, and it terminates because
-  a class with no demand stops contributing. It still delivers the reporting workload's win, whose
-  ~48,000-slot base is churn-class. Showing that a phase-structured program cannot defeat it the
-  same way is §12 Q1.
+  a class with no demand stops contributing. Whether it still delivers the reporting workload's
+  win depends on how many of the game's 246,450 free slots are in classes with demand, which is
+  not measured. That, and showing that a phase-structured program cannot defeat it the same way,
+  is §12 Q1.
 - **Units are not a problem**, contrary to an earlier draft: slots walked and `g_managed_heap_count`
   are the same count — one cell per object whatever its size, and a large object is one region
   walked as one.
@@ -328,8 +331,9 @@ Given that, the ordering the evidence supports:
 1. **Option A at ~100,000 is a defensible interim**, and §9 item 2 came back as §4 predicted:
    flat-to-worse, nothing improved, the cost above. §8.1 measures `gc-adapt-check` green there and
    well clear of the ~138,000 pocket, §8.2's collision is dissolved by pinning that gate's own
-   probes, and §8.3 shows the compiler is not harmed. It buys the reporting workload most of the
-   win — roughly 15–20× by §3.1's fitted model — at the price of a guessed constant, a raised
+   probes, and §8.3 shows the compiler is not harmed. What it buys the reporting workload is not
+   measured at 100,000: even 232,000 now reads 489 → 79 µs/frame (6×, against #407's 34×;
+   `bench/results-2026-10-03-gc-walk.md`), so likely less. The price is a guessed constant, a raised
    minimum heap, and one workload made measurably worse on both axes to help another.
 2. **Option C should be folded into whatever lands**, and item 2 strengthened its case from an
    unexpected direction. By cycles × p50 pause, nqueens' collector got *cheaper* at the raised
@@ -489,9 +493,9 @@ test-suite file's peak heap becomes `floor × slot bytes`, roughly 4 MB at 100,0
   does keeps all three green — it sets the threshold and its base and leaves the factor on, so it
   reproduces §8.1's 4,096 row. What a pin costs is that the gate stops exercising the shipped
   floor. Add a Property 3 asserting the floor's compiled-in default, so a revert is caught.
-- **Coverage gap closed** (Definition of Ready #4): no existing test asserts anything about
-  collection frequency or sweep productivity as a function of heap shape; every GC gate today keys
-  on cycles, marked and freed at one configuration.
+- **Coverage gap closed** (Definition of Ready #4): `just gc-walk-check` bounds slots walked per
+  object freed on a sparse and a dense heap, but no test asserts how *often* collections run as a
+  function of heap shape — the thing a trigger fix changes.
 
 ## 11. Docs, spec and backlog
 
@@ -516,9 +520,11 @@ clocks count descheduled time.
 1. **Does §6.2's repair hold?** The schematic diverges; flooring on `live` plus the free slots in
    classes with demand last cycle is the candidate fix. It needs showing that a phase-structured
    program cannot defeat it the same way the exact-fit freelists defeat the naive form — and that
-   it still catches the game. The game's 246,450 free slots are never refilled, which fits
-   classes with no demand; if they all are, the repaired floor is `live` plus a few thousand and
-   changes nothing there. Settling it needs FREE per size class, which nothing reports yet.
+   it still catches the game. If the game's 246,450 free slots are in classes with no demand,
+   the repaired floor is `live` plus a few thousand and changes nothing there; if they are a
+   surplus in a churn class, it lands near the pinned result. A constant FREE count fits both,
+   since the sweep rebuilds the freelists each cycle. Settling it needs FREE per size class,
+   which nothing reports yet.
 2. **What constant, if A ships?** ~100,000 is where §8.1 measures green with margin on both sides
    of the pocket. §9 item 2 has priced it (§6.5): the number is still a guess, now with a known
    cost.
