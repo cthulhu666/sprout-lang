@@ -2694,9 +2694,11 @@ class's does.  An arrow inside a parameter or the return type is judged by
 the class's parameter into the method's, so a method may not declare pure a
 callback the class passes as `!{IO}`; the method's result flows out to the
 class's, so it may not return an `!{IO}` function where the class promises a
-pure one.  An effect variable stays under rule 8's variable exemption.  An
-unannotated parameter or return type is not checked yet (BACKLOG).  The
-method's own effect (rule 8) and ownership modes have their own rules.
+pure one.  An arrow whose effect is a variable, on either side, passes this
+check however the variable is spelled and wherever else it appears: rule 8's
+variable exemption, judged one arrow at a time.  An unannotated parameter or
+return type is not checked yet (BACKLOG).  The method's own effect (rule 8) and
+ownership modes have their own rules.
 
 **Method-level constraints.**  A class method may end with its own `where`
 clause, constraining a type variable the *method* quantifies rather than the
