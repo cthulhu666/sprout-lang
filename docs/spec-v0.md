@@ -2688,9 +2688,9 @@ expect.  The head's variables keep the head's spelling, because an instance's
 `where` reaches its methods by those names: for `instance Same (Pair a b)`, a
 method taking `Pair b a` is rejected.  The method's own variables may be renamed,
 and a method may be more general than its class (a variable where the class
-has `Int`).  An unannotated parameter or return type is not checked yet
-(BACKLOG).  Effects, ownership modes and the method-level `where` below have
-their own rules.
+has `Int`), as long as each method-level `where` below still constrains what the
+class's does.  An unannotated parameter or return type is not checked yet
+(BACKLOG).  Effects and ownership modes have their own rules.
 
 **Method-level constraints.**  A class method may end with its own `where`
 clause, constraining a type variable the *method* quantifies rather than the
@@ -2718,10 +2718,13 @@ On an instance member the clause sits before the `=`, which is what separates it
 from the value-binding `where` that may follow the body.
 
 The restatement must name **the same classes in the same order** as the class
-declaration; only the variable names are free.  Each constraint is one
-positional dictionary slot, so naming a different class, omitting or adding
-one, or listing the same classes in another order would dispatch through the
-wrong slot — each is rejected, naming the class and the position.  Rationale
+declaration, and each must constrain what the class's constraint in that
+position does, under the method's renaming; only the variable names are free.
+Each constraint is one positional dictionary slot, so naming a different class,
+omitting or adding one, listing the same classes in another order, or putting a
+slot on another variable (a method that swaps `a` and `b` but keeps `where
+ToString a, ToString b`) would dispatch through the wrong slot — each is
+rejected, naming the class and the position.  Rationale
 and the hidden-argument layout: `docs/method-level-constraints-v0.md`.
 
 **Constraint syntax.**  A `where` clause names the **class first, then the

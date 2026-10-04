@@ -8690,7 +8690,8 @@ fn instance_head_label(type_args: List ast.TypeExpr) -> String =
 # compared Box pointers as Ints. The head's variables are rigid, because a context
 # reaches a method by the head's variable NAME: a method writing `Pair b a` ran
 # String's `eq` on an Int. The method's own variables may be renamed, and the method
-# may be more general than the class, as GHC's InstanceSigs allow.
+# may be more general than the class, as GHC's InstanceSigs allow, as long as each
+# method-level `where` slot still constrains what the class's does.
 #
 # Classes come from decls by exact name, as in check_missing_instance_methods. A
 # class with more than one parameter, and an unannotated parameter or return type,
@@ -8711,6 +8712,16 @@ fn own_class_sigs(decls: List ast.Decl,
 # the head the parameter takes, and the alias table both sides resolve through.
 type InstanceSite = (cls: String, param: String, head: ast.TypeExpr, aliases: Dict types.Type)
 
+# One side of the comparison: parameter and return types as written (Nothing where
+# unannotated), and the method-level `where`.
+type SigParts = (params: List (Maybe ast.TypeExpr), ret: Maybe ast.TypeExpr,
+                 wheres: List ast.TypeConstraint)
+
+# What a `where` slot is compared under: the two sides' rigid environments, and the
+# class side for the message.
+type SlotCheck = (site: InstanceSite, name: String, inst_env: Dict types.Type,
+                  class_env: Dict types.Type, cls: SigParts)
+
 fn first_instance_sig_error(decls: List ast.Decl, classes: Dict (String, List ast.ClassMethodSig),
                             alias_env: Dict types.Type) -> Maybe(source.SourcePos, String) =
   match decls with
@@ -8727,14 +8738,15 @@ fn first_instance_sig_error(decls: List ast.Decl, classes: Dict (String, List as
 fn method_sig_error(site: InstanceSite, sigs: List ast.ClassMethodSig,
                     method: ast.InstanceMethodImpl) -> Maybe String =
   match method with
-  | ast.InstanceMethodImpl name params ret_maybe _ _ _ ->
+  | ast.InstanceMethodImpl name params ret_maybe _ wheres _ ->
       let short = string.after_last_dot(name)
-          Just(ast.ClassMethodSig _ cparams cret _ _) = find(\s -> class_method_name(s) == short, sigs)
+          Just(ast.ClassMethodSig _ cparams cret _ cwheres) = find(\s -> class_method_name(s) == short, sigs)
             else Just("instance " ++ instance_site_label(site) ++ " defines method `" ++ short
                       ++ "`, which class " ++ string.after_last_dot(site.cls) ++ " does not declare")
       in
-        sig_against_class(site, short, list_map(param_type_expr, params), ret_maybe,
-                          list_map(param_type_expr, cparams), cret)
+        sig_against_class(site, short,
+          SigParts(params = list_map(param_type_expr, params), ret = ret_maybe, wheres = wheres),
+          SigParts(params = list_map(param_type_expr, cparams), ret = Just(cret), wheres = cwheres))
 
 fn param_type_expr(p: ast.Param) -> Maybe ast.TypeExpr =
   match p with
@@ -8746,30 +8758,41 @@ let head_rigid_prefix: String = "$head:"
 let class_rigid_prefix: String = "$cls:"
 let inst_var_prefix: String = "$inst:"
 
-fn sig_against_class(site: InstanceSite, name: String, iparams: List (Maybe ast.TypeExpr),
-                     iret: Maybe ast.TypeExpr, cparams: List (Maybe ast.TypeExpr),
-                     cret: ast.TypeExpr) -> Maybe String =
+fn sig_against_class(site: InstanceSite, name: String, inst: SigParts, cls: SigParts) -> Maybe String =
   let head_vars = collect_te_vars(site.head, Nil)
       head_rigid = type_var_dict_as(head_vars, head_rigid_prefix, true, site.aliases)
       class_env = dict_set(site.param, type_from_ast(site.head, head_rigid),
-                    type_var_dict_as(sig_te_vars(cparams, Just(cret)), class_rigid_prefix, true, site.aliases))
+                    type_var_dict_as(sig_te_vars(cls), class_rigid_prefix, true, site.aliases))
       inst_env = type_var_dict_as(head_vars, head_rigid_prefix, true,
-                   type_var_dict_as(sig_te_vars(iparams, iret), inst_var_prefix, false, site.aliases))
+                   type_var_dict_as(sig_te_vars(inst), inst_var_prefix, false, site.aliases))
   in
-    if list_length(iparams) != list_length(cparams)
-    then Just(sig_mismatch_msg(site, name, iparams, iret, cparams, cret))
+    if list_length(inst.params) != list_length(cls.params)
+    then Just(sig_mismatch_msg(site, name, inst, cls))
     else
-      match unify_sig_parts(dict_empty(), dict_empty(),
-              maybe_types(list_append(iparams, [iret]), inst_env),
-              maybe_types(list_append(cparams, [Just(cret)]), class_env)) with
-      | Nothing -> Just(sig_mismatch_msg(site, name, iparams, iret, cparams, cret))
+      match unify_sig_parts(dict_empty(), dict_empty(), maybe_types(sig_types(inst), inst_env),
+                            maybe_types(sig_types(cls), class_env)) with
+      | Nothing -> Just(sig_mismatch_msg(site, name, inst, cls))
       | Just subst ->
-          match renamed_head_var(subst, sig_te_vars(iparams, iret)) with
+          match renamed_head_var(subst, sig_te_vars(inst)) with
           | Just (v, h) -> Just(renamed_head_var_msg(site, name, v, h))
-          | Nothing -> Nothing
+          | Nothing ->
+              where_slot_error(SlotCheck(site = site, name = name, inst_env = inst_env,
+                                         class_env = class_env, cls = cls),
+                               subst, inst.wheres, cls.wheres, 1)
 
-fn sig_te_vars(params: List (Maybe ast.TypeExpr), ret: Maybe ast.TypeExpr) -> List String =
-  collect_ret_type_vars(ret, list_fold(\ (acc, te) -> collect_ret_type_vars(te, acc), Nil, params))
+fn sig_types(p: SigParts) -> List (Maybe ast.TypeExpr) = list_append(p.params, [p.ret])
+
+# The variables a side writes, its `where` included: a constrained variable need
+# not appear in the signature, and it must still read as a variable.
+fn sig_te_vars(p: SigParts) -> List String =
+  list_fold(\ (acc, c) -> collect_te_vars_list(constraint_args(c), acc), signature_vars(p), p.wheres)
+
+fn signature_vars(p: SigParts) -> List String =
+  collect_ret_type_vars(p.ret, list_fold(\ (acc, te) -> collect_ret_type_vars(te, acc), Nil, p.params))
+
+fn constraint_args(c: ast.TypeConstraint) -> List ast.TypeExpr =
+  match c with
+  | ast.TypeConstraint _ args -> args
 
 # Each variable as a rigid constant or a free variable under `prefix`, over `acc`.
 fn type_var_dict_as(vars: List String, prefix: String, rigid: Bool,
@@ -8809,19 +8832,111 @@ fn renamed_head_var(subst: Dict types.Type, vars: List String) -> Maybe (String,
             else renamed_head_var(subst, rest)
       in Just((v, h))
 
-fn sig_mismatch_msg(site: InstanceSite, name: String, iparams: List (Maybe ast.TypeExpr),
-                    iret: Maybe ast.TypeExpr, cparams: List (Maybe ast.TypeExpr),
-                    cret: ast.TypeExpr) -> String =
-  let inst_env = build_type_var_dict(sig_te_vars(iparams, iret), site.aliases)
-      class_env = dict_set(site.param, head_as_written(site),
-                    build_type_var_dict(sig_te_vars(cparams, Just(cret)), site.aliases))
+# Each method-level `where` is a positional dictionary slot, so slot k must constrain
+# what the class's slot k does, read through the signature's substitution. A method
+# that swapped or generalized a variable could otherwise hand one type's dictionary
+# to another. A slot naming another class is class_method_constraints_error's.
+fn where_slot_error(chk: SlotCheck, subst: Dict types.Type, iwheres: List ast.TypeConstraint,
+                    cwheres: List ast.TypeConstraint, idx: Int) -> Maybe String =
+  match (iwheres, cwheres) with
+  | ([ast.TypeConstraint icls iargs | irest], [ast.TypeConstraint ccls cargs | crest]) ->
+      if string.after_last_dot(icls) != string.after_last_dot(ccls) then Nothing
+      else
+        match unify_sig_parts(subst, dict_empty(), just_types(iargs, chk.inst_env),
+                              just_types(cargs, chk.class_env)) with
+        | Just s -> where_slot_error(chk, s, irest, crest, idx + 1)
+        | Nothing ->
+            Just(where_slot_msg(chk, subst, ast.TypeConstraint(icls, iargs),
+                                ast.TypeConstraint(ccls, cargs), idx))
+  | _ -> Nothing
+
+fn just_types(tes: List ast.TypeExpr, env: Dict types.Type) -> List (Maybe types.Type) =
+  list_map(\te -> Just(type_from_ast(te, env)), tes)
+
+fn where_slot_msg(chk: SlotCheck, subst: Dict types.Type, inst_c: ast.TypeConstraint,
+                  class_c: ast.TypeConstraint, idx: Int) -> String =
+  let inst_names = build_type_var_dict(collect_te_vars_list(constraint_args(inst_c), Nil), chk.site.aliases)
+      class_names = class_display_env(chk.site, chk.cls)
+      slot = "constraint " ++ int_to_string(idx)
   in
-    "instance method `" ++ name ++ "` of instance " ++ instance_site_label(site)
-      ++ " has type `" ++ sig_text(iparams, iret, inst_env) ++ "`, but class "
-      ++ string.after_last_dot(site.cls) ++ " declares `"
-      ++ sig_text(cparams, Just(cret), class_env) ++ "` for this head. A call dispatches"
-      ++ " through the class signature, so the method takes and returns what the class"
-      ++ " says (spec-v0.md §8.5)."
+    "instance method `" ++ chk.name ++ "` of instance " ++ instance_site_label(chk.site) ++ " has `where "
+      ++ constraint_text(inst_c, inst_names) ++ "` as " ++ slot
+      ++ slot_subject_text(chk, subst, inst_c, inst_names, class_names) ++ ", but the class's "
+      ++ slot ++ " is `where " ++ constraint_text(class_c, class_names) ++ "`. Each `where` is a"
+      ++ " positional dictionary slot, so it constrains what the class's does (spec-v0.md §8.5)."
+
+# What the slot's subject stands for in the class's signature.
+fn slot_subject_text(chk: SlotCheck, subst: Dict types.Type, inst_c: ast.TypeConstraint,
+                     inst_names: Dict types.Type, class_names: Dict types.Type) -> String =
+  match constraint_args(inst_c) with
+  | [] -> ""
+  | [te | _] ->
+      ", and its `" ++ type_display(type_from_ast(te, inst_names)) ++ "` is `"
+        ++ type_display(rigid_names(unifier.apply_subst(subst, type_from_ast(te, chk.inst_env)), class_names))
+        ++ "` in the class's signature"
+
+fn constraint_text(c: ast.TypeConstraint, env: Dict types.Type) -> String =
+  match c with
+  | ast.TypeConstraint cls args ->
+      string.join(" ", Cons(string.after_last_dot(cls), list_map(constraint_arg_text(_, env), args)))
+
+fn constraint_arg_text(te: ast.TypeExpr, env: Dict types.Type) -> String =
+  let text = type_display(type_from_ast(te, env))
+  in if string.contains(text, " ") then "(" ++ text ++ ")" else text
+
+# A type read back off the comparison, under the names the message prints: a rigid
+# class or head variable by its display name, a free method variable by its own.
+fn rigid_names(t: types.Type, class_names: Dict types.Type) -> types.Type =
+  match t with
+  | types.TConst id -> rigid_name(types.type_id_name(id), t, class_names)
+  | types.TVar id -> types.TVar(types.tyvar_id(unprefixed(types.tyvar_name(id), inst_var_prefix)))
+  | types.TApp b a -> types.TApp(rigid_names(b, class_names), rigid_names(a, class_names))
+  | types.TFunc p r e o -> types.TFunc(rigid_names(p, class_names), rigid_names(r, class_names), e, o)
+  | types.TThunk r e -> types.TThunk(rigid_names(r, class_names), e)
+  | types.TTuple ts -> types.TTuple(list_map(rigid_names(_, class_names), ts))
+
+fn rigid_name(name: String, t: types.Type, class_names: Dict types.Type) -> types.Type =
+  match string.strip_prefix(name, class_rigid_prefix) with
+  | Just w ->
+      match dict_get(w, class_names) with
+      | Just shown -> shown
+      | Nothing -> types.TVar(types.tyvar_id(w))
+  | Nothing ->
+      match string.strip_prefix(name, head_rigid_prefix) with
+      | Just h -> types.TVar(types.tyvar_id(h))
+      | Nothing -> t
+
+fn unprefixed(name: String, prefix: String) -> String =
+  match string.strip_prefix(name, prefix) with
+  | Just rest -> rest
+  | Nothing -> name
+
+fn sig_mismatch_msg(site: InstanceSite, name: String, inst: SigParts, cls: SigParts) -> String =
+  "instance method `" ++ name ++ "` of instance " ++ instance_site_label(site)
+    ++ " has type `" ++ sig_text(inst, build_type_var_dict(sig_te_vars(inst), site.aliases))
+    ++ "`, but class " ++ string.after_last_dot(site.cls) ++ " declares `"
+    ++ sig_text(cls, class_display_env(site, cls)) ++ "` for this head. A call dispatches"
+    ++ " through the class signature, so the method takes and returns what the class"
+    ++ " says (spec-v0.md §8.5)."
+
+# The class side under printable names: its parameter as the head, and a class
+# variable spelled like a head variable renamed (`a1`), or the two sides of a
+# message read the same while meaning different variables.
+fn class_display_env(site: InstanceSite, cls: SigParts) -> Dict types.Type =
+  let head_vars = collect_te_vars(site.head, Nil)
+      class_vars = sig_te_vars(cls)
+  in
+    dict_set(site.param, head_as_written(site),
+      list_fold(display_var(head_vars, list_append(head_vars, class_vars), _, _), site.aliases, class_vars))
+
+fn display_var(head_vars: List String, taken: List String, acc: Dict types.Type,
+               w: String) -> Dict types.Type =
+  let shown = if list_member(w, head_vars) then fresh_display_name(w, 1, taken) else w
+  in dict_set(w, types.TVar(types.tyvar_id(shown)), acc)
+
+fn fresh_display_name(w: String, i: Int, taken: List String) -> String =
+  let candidate = w ++ int_to_string(i)
+  in if list_member(candidate, taken) then fresh_display_name(w, i + 1, taken) else candidate
 
 fn renamed_head_var_msg(site: InstanceSite, name: String, v: String, h: String) -> String =
   "instance method `" ++ name ++ "` of instance " ++ instance_site_label(site) ++ " writes `"
@@ -8836,9 +8951,9 @@ fn instance_site_label(site: InstanceSite) -> String =
   let head = type_display(head_as_written(site))
   in string.after_last_dot(site.cls) ++ " " ++ (if string.contains(head, " ") then "(" ++ head ++ ")" else head)
 
-fn sig_text(params: List (Maybe ast.TypeExpr), ret: Maybe ast.TypeExpr, env: Dict types.Type) -> String =
-  "(" ++ string.join(", ", list_map(maybe_type_text(_, env), params)) ++ ") -> "
-    ++ maybe_type_text(ret, env)
+fn sig_text(p: SigParts, env: Dict types.Type) -> String =
+  "(" ++ string.join(", ", list_map(maybe_type_text(_, env), p.params)) ++ ") -> "
+    ++ maybe_type_text(p.ret, env)
 
 fn maybe_type_text(te: Maybe ast.TypeExpr, env: Dict types.Type) -> String =
   match te with

@@ -1,0 +1,15 @@
+module main
+
+# The method swaps the class's `a` and `b`, which the signature check allows, but keeps
+# `where ToString a, ToString b` in the class's order. Each `where` is a positional
+# slot: slot 1 carries the dictionary for the class's `a` (Int here), and the method
+# used it on its own `a`, a String. The program crashed in String's append.
+
+class Both t
+  fn both(k: t, x: a, y: b) -> String where ToString a, ToString b
+
+instance Both Int
+  fn both(k: Int, x: b, y: a) -> String where ToString a, ToString b =
+    to_string(x) ++ "/" ++ to_string(y)
+
+fn main() -> Unit !{IO} = print(both(0, 1, "s"))

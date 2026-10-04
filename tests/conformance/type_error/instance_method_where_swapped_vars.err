@@ -1,0 +1,1 @@
+instance method `both` of instance Both Int has `where ToString a` as constraint 1, and its `a` is `b` in the class's signature, but the class's constraint 1 is `where ToString a`

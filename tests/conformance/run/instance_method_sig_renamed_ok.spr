@@ -1,8 +1,9 @@
 module main
 
 # An instance method may rename the method's own variables (`x`, `y` for the class's
-# `a`, `b`) and may be more general than its class (`extra: n` where the class says
-# Int). Only the head's variables must keep the head's names.
+# `a`, `b`), constrained ones too when its `where` follows the rename, and may be
+# more general than its class (`extra: n` where the class says Int). Only the head's
+# variables must keep the head's names.
 
 class Mapper f
   fn map_it(g: a -> b, xs: f a) -> f b
@@ -20,6 +21,13 @@ class Sized t
 instance Sized (Box a)
   fn size_of(x: Box a, extra: n) -> Int = 1
 
+class Tagged t
+  fn tagged(x: t, label: a, count: b) -> String where ToString a, ToString b
+
+instance Tagged (Box a)
+  fn tagged(x: Box a, label: l, count: c) -> String where ToString l, ToString c =
+    to_string(label) ++ ":" ++ to_string(count)
+
 fn unbox(b: Box Int) -> Int =
   match b with
   | Box v -> v
@@ -28,3 +36,4 @@ fn main() -> Unit !{IO} =
   do
     print(int_to_string(unbox(map_it(\v -> v + 1, Box(41)))))
     print(int_to_string(size_of(Box("s"), 5)))
+    print(tagged(Box(0), "n", 3))

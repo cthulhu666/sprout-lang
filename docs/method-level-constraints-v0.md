@@ -80,7 +80,11 @@ classes as the class declaration, in the same order. The dictionaries are
 positional slots, so a different class, a longer or shorter list, and the same
 classes reordered each dispatch through the wrong slot rather than failing —
 all three are rejected with the class and position named. Variable names are
-free, which is what lets `Maybe`'s instance say `z`.
+free, which is what lets `Maybe`'s instance say `z`, but each slot must constrain
+what the class's slot does under the method's renaming: a method that swaps `a`
+and `b` while keeping `where ToString a, ToString b` would hand each variable the
+other's dictionary. `check_instance_method_signatures` reads that renaming off the
+signature comparison and rejects the mismatch.
 
 ## 5. Hidden-argument ABI
 

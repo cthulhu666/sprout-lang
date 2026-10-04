@@ -1,0 +1,1 @@
+instance method `lift` of instance Lift (Box a) has type `(a) -> Box a`, but class Lift declares `(a1) -> Box a` for this head

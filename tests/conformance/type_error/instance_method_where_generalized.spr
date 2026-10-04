@@ -1,0 +1,15 @@
+module main
+
+# The method generalizes the class's `z: Int` to `z: n`, which the signature check
+# allows, and puts the class's one `where` slot on `n`. The caller fills that slot
+# for the class's `a` (String's dictionary), and the method applied it to an Int.
+
+class Pretty t
+  fn pretty(x: t, y: a, z: Int) -> String where ToString a
+
+type Box = Box
+
+instance Pretty Box
+  fn pretty(x: Box, y: b, z: n) -> String where ToString n = to_string(z)
+
+fn main() -> Unit !{IO} = print(pretty(Box, "hello", 7))
