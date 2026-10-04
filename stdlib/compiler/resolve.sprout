@@ -762,7 +762,10 @@ fn mr_first_concrete_head_str(t: types.Type) -> Maybe String =
   match t with
   | types.TConst name -> Just(types.type_id_display(name))
   | types.TApp base _ -> mr_first_concrete_head_str(base)
-  | _ -> Nothing
+  | types.TTuple items -> Just(types.tuple_head(list_length(items)))
+  | types.TVar _ -> Nothing
+  | types.TFunc _ _ _ _ -> Nothing
+  | types.TThunk _ _ -> Nothing
 
 fn mr_class_param_for(class_name: String, class_params: Dict String) -> Maybe String =
   match dict_get(class_name, class_params) with
@@ -819,17 +822,22 @@ fn match_type_var_lists(patterns: List types.Type, actuals: List types.Type, acc
 # produce_one_class for that single class. Non-derivable / non-concrete head →
 # EvUnresolved (lowering falls back to its own eta reconstruction).
 fn method_ref_evidence(method: String, class_name: String, t: types.Type, fwd_keys: Forwarded, tables: Tables) -> typed_ast.Evidence =
-  match mr_eta_class_type(class_name, method, t, t, tables_class_params(tables), tables_env(tables)) with
-  | class_type ->
-      match mr_first_concrete_head_str(class_type) with
-      | Nothing -> typed_ast.EvUnresolved
-      | Just _ ->
-          produce_one_class(class_name, named_type_expr(class_type, tables_env(tables)),
-            Cons(named_type_expr(class_type, tables_env(tables)), Nil), fwd_keys, tables)
+  let Just(ast.TypeConstraint _ args) = method_ref_constraint(method, class_name, t, tables)
+        else typed_ast.EvUnresolved
+      [head_arg] = args else typed_ast.EvUnresolved
+  in produce_one_class(class_name, head_arg, args, fwd_keys, tables)
 
-# The type with each variable a constraint declared named as it was declared, through
-# the `@eta_fwdvar` markers, so a slot key built from it (ast.dict_slot_key) is the one
-# the enclosing function's slot is under. Any other variable keeps its identity.
+# The constraint a value-position method needs, its type named as the enclosing
+# declaration wrote it; Nothing when the head is not a constructor.
+fn method_ref_constraint(method: String, class_name: String, t: types.Type,
+                         tables: Tables) -> Maybe ast.TypeConstraint =
+  let class_type = mr_eta_class_type(class_name, method, t, t, tables_class_params(tables), tables_env(tables))
+      Just _ = mr_first_concrete_head_str(class_type) else Nothing
+  in Just(ast.TypeConstraint(class_name, [named_type_expr(class_type, tables_env(tables))]))
+
+# The type with each signature variable named as it was declared, through the
+# `@eta_fwdvar` markers, so a slot key built from it (ast.dict_slot_key) is the one the
+# enclosing function's slot is under. Any other variable keeps its identity.
 fn named_type_expr(t: types.Type, env: Dict types.Scheme) -> ast.TypeExpr =
   match t with
   | types.TVar v ->
@@ -989,6 +997,9 @@ fn check_expr(e: typed_ast.TypedExpr, cover: VarCover, tables: Tables) -> Maybe(
   | typed_ast.TRecord _ fields _ _ -> check_expr_list(record_field_exprs(fields), cover, tables)
   | typed_ast.TGetField obj _ _ _ -> check_expr(obj, cover, tables)
   | typed_ast.TRecordUpdate base fields _ _ -> check_expr_list(Cons(base, record_field_exprs(fields)), cover, tables)
+  | typed_ast.TMethodRef method class_name t pos _ ->
+      let Just c = method_ref_constraint(method, class_name, t, tables) else Nothing
+      in check_constraint(c, pos, cover, tables)
   | _ -> Nothing
 
 fn check_expr_list(

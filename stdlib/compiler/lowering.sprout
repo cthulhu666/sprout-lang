@@ -843,7 +843,10 @@ fn first_concrete_head_str(t: types.Type) -> Maybe String =
   match t with
   | types.TConst name -> Just(types.type_id_name(name))
   | types.TApp base _ -> first_concrete_head_str(base)
-  | _ -> Nothing
+  | types.TTuple items -> Just(types.tuple_head(list_length(items)))
+  | types.TVar _ -> Nothing
+  | types.TFunc _ _ _ _ -> Nothing
+  | types.TThunk _ _ -> Nothing
 
 fn class_param_for(class_name: String, ctx: LowerCtx) -> Maybe String =
   match dict_get(class_name, ctx_class_params(ctx)) with
@@ -1393,8 +1396,9 @@ fn lower_expr(te: typed_ast.TypedExpr, ctx: LowerCtx) -> typed_ast.TypedExpr =
   match te with
   | typed_ast.TVar name t pos -> lower_value_var(name, t, pos, ctx)
   | typed_ast.TMethodRef name _ t pos ev ->
-      # A shadowed local is emitted as TMethodRef too — bound-var check first,
-      # then the clean Evidence path, else today's eta reconstruction.
+      # infer's post-pass turns a local shadowing a method back into a TVar; the
+      # bound-var check covers any body it does not reach. Then the clean Evidence
+      # path, else today's eta reconstruction.
       if list_member(name, ctx_bound_vars(ctx)) then
         lower_value_var(name, t, pos, ctx)
       else
@@ -1657,7 +1661,7 @@ fn pos_loc(pos: source.SourcePos) -> String =
 fn eta_from_evidence(method: String, t: types.Type, pos: source.SourcePos, ev: typed_ast.Evidence, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
   match ev with
   | typed_ast.EvInstance _ key children ->
-      if evidence_list_fully_resolved(children) then
+      if evidence_list_fully_resolved(children) && misses_named_forward(children, ctx) == false then
         eta_from_instance(method, key, t, pos, consume_inner_dicts(children, pos, ctx), ctx)
       else Nothing
   # M3b-5 (PR-A): value-position reroute to a forwarded hidden-dict slot — the eta
@@ -1676,14 +1680,38 @@ fn eta_from_evidence(method: String, t: types.Type, pos: source.SourcePos, ev: t
   | _ -> Nothing
 
 fn eta_from_instance(method: String, key: String, t: types.Type, pos: source.SourcePos, inner_dicts: List typed_ast.TypedExpr, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
-  if has_unresolved_dict(inner_dicts) then Nothing
-  else
-    match dict_get(key, ctx_inst(ctx)) with
-    | Nothing -> Nothing
-    | Just method_map ->
-        match dict_get_method(method, method_map) with
-        | Nothing -> Nothing
-        | Just impl_name -> Just(make_eta_lambda_with_dicts(impl_name, t, inner_dicts, pos))
+  match dict_get(key, ctx_inst(ctx)) with
+  | Nothing -> Nothing
+  | Just method_map ->
+      match dict_get_method(method, method_map) with
+      | Nothing -> Nothing
+      | Just impl_name -> Just(make_eta_lambda_with_dicts(impl_name, t, inner_dicts, pos))
+
+# An inner forward the body has no slot for. One for a variable no declaration names
+# (`_`, an inference variable) is not counted: it has no slot by construction and its
+# dictionary is never read, so it takes the stand-in, as on the call path
+# (consume_block). A named one is left to the fallback, which can reroute it.
+fn misses_named_forward(evs: List typed_ast.Evidence, ctx: LowerCtx) -> Bool =
+  any(named_forward_miss(_, ctx), evs)
+
+fn named_forward_miss(ev: typed_ast.Evidence, ctx: LowerCtx) -> Bool =
+  match ev with
+  | typed_ast.EvForward class_name key ->
+      match dict_get(key, ctx_fwd(ctx)) with
+      | Just _ -> false
+      | Nothing -> unnamed_forward(class_name, key) == false
+  | typed_ast.EvInstance _ _ children -> misses_named_forward(children, ctx)
+  | typed_ast.EvClasses blocks -> misses_named_forward(blocks, ctx)
+  | typed_ast.EvUnresolved -> false
+  | typed_ast.EvMissing _ -> false
+
+# The variable a forward key (ast.dict_slot_key) names is `_` or an inference variable,
+# as resolve.is_unnamed reads it; an existential (`$ex_`, a skolem) is a type of its own.
+fn unnamed_forward(class_name: String, key: String) -> Bool =
+  let arg = string.drop(key, string.length(string.after_last_dot(class_name)) + 1)
+  in arg == "_"
+     || (str_starts_with(arg, "$") && types.is_existential_head(arg) == false
+           && types.is_skolem_name(arg) == false)
 
 # ---------------------------------------------------------------------------
 # Inner-dict helpers: type unification, substitution, lambda wrapping

@@ -1,0 +1,18 @@
+# A method used as a value at a type whose inner variable no declaration names
+# (`Maybe _` for `Nothing`) needs that variable's dictionary only in its context, and
+# nothing reads it. The value path gave up and crashed the compiler, with or without
+# a `where`; the call path passes a stand-in, and so does this one now.
+module main
+
+fn plain() -> String =
+  let e = eq
+  in to_string(e(Nothing, Nothing))
+
+fn two_slots(x: a, y: b) -> String where Ord (Maybe a), Eq (Maybe b) =
+  let e = eq
+  in to_string(e(Nothing, Nothing))
+
+fn main() -> Unit !{IO} =
+  do
+    print(plain())
+    print(two_slots(1, "s"))

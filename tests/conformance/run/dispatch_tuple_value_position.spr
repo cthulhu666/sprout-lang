@@ -1,0 +1,14 @@
+# A tuple constraint used as a value reaches its own slot, beside another `ToString`
+# slot. The value path read only a constructor head, so a tuple fell to the
+# any-slot fallback, which cannot choose between two slots.
+module main
+
+fn pairs(xs: List (a, b)) -> List String where ToString (a, b), ToString a = list_map(to_string, xs)
+
+fn mixed(xs: List (a, Int), ys: List a) -> List String where ToString (a, Int), ToString (List a) =
+  list_map(to_string, xs) ++ [to_string(ys)]
+
+fn main() -> Unit !{IO} =
+  do
+    print(to_string(pairs([("x", 1)])))
+    print(to_string(mixed([(true, 2)], [false])))
