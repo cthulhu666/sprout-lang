@@ -251,13 +251,14 @@ escape hatch, while being numerically identical to raising the one floor that al
 target = max(live × factor, base, live + (live + free) / k);   /* k = 3 */
 ```
 
-`free` is the freelist length after the sweep. Collect once the program has allocated a fixed
+`free` is the freelist length after the sweep. Setting `SPROUT_GC_THRESHOLD` turns the third term
+off (§12 Q5). Collect once the program has allocated a fixed
 fraction of what the last sweep had to walk. This targets §3.1's quantity directly: it bounds
 work-per-garbage near `k` whatever the live set is.
 
 - **For:** no guessed heap size. `k` bounds a ratio, the same for every program, where A's floor
   is a heap size that suits one. Needs no clock. Measured on a prototype
-  (`bench/results-2026-10-04-gc-trigger-b.md`): the game's GC per allocation falls 12–15× with no
+  (`bench/results-2026-10-04-gc-trigger-b.md`): the game's GC per allocation falls 12–16× with no
   added regions, `gc_roots` and nqueens run identical cycles, and the compiler goes 98 → 103 MB.
 - **The signal separates.** Free slots walked per object freed (FREE/swept) is 0.00–1.46 on every
   ordinary workload measured and **52–76** on the game; pinning the game's threshold drops it to 0.25
@@ -266,9 +267,9 @@ work-per-garbage near `k` whatever the live set is.
   **"The class freelists are exact-fit"**), so take `U` free slots no allocation can reuse. A
   cycle allocates `(live + U + A) / k` into the reusable pool `A`; allocations `A` cannot hold bump
   fresh slots, and if anything live pins their regions they outlive Pass 2 and join `A`. `A`
-  settles at `(live + U) / (k − 1)`, which the prototype hit to within 13 slots on a constructed
-  adversary. At `k = 1`, flooring on the whole footprint, there is no fixed point: `A` grows by
-  `U` every cycle.
+  settles at `(live + U) / (k − 1)`, so the whole free pool at `U + (live + U) / (k − 1)`, which
+  the prototype hit to within 13 slots on a constructed adversary. At `k = 1` there is no fixed
+  point: `A` grows by `live + U` every cycle.
 - **Why `k = 3`.** k=2 already moves nqueens (8,279 → 5,637 cycles) and the compiler (98 →
   109 MB); k=3 leaves nqueens identical and the compiler at 103 MB. It matches the adapt factor,
   which is a coincidence rather than a reason.
@@ -329,7 +330,7 @@ nothing on math, no resolvable effect on the socket server, and a ~20× rise in 
 pause wherever a workload was floor-pinned. **§9 item 1 is measured too**: the game reads 52–76
 free slots walked per object freed, against at most 1.46 elsewhere (§6.2). **And B has run**, on
 a prototype (`bench/results-2026-10-04-gc-trigger-b.md`): the damped floor cuts the game's GC per
-allocation 12–15× with no added regions; the ordinary workloads move by at most the compiler's
+allocation 12–16× with no added regions; the ordinary workloads move by at most the compiler's
 +4% RSS.
 
 Given that, the ordering the evidence supports:
@@ -393,9 +394,10 @@ justified the factor 2.0 → 3.0 on the workloads *above* the floor, and recorde
 floor-pinned four — nqueens, http ×2, math — were *"unchanged by construction."* **A floor change
 has the inverse blast radius**: it moves precisely those four. None of §5.3's evidence transfers.
 
-Everything below was measured by exporting `SPROUT_GC_THRESHOLD`, which writes both
+§8.1–8.3 measure **Option A**, by exporting `SPROUT_GC_THRESHOLD`, which writes both
 `g_gc_threshold` and `g_gc_threshold_base` and so stands in exactly for a raised compiled-in
-default. Neither gate's probes set that variable, so simulating one needs no source edit.
+default. Neither gate's probes set that variable, so simulating one needs no source edit. §8.4
+measures **Option B** on the prototype.
 
 **Read this before deriving any floor boundary from `gc-generational-v0.md` §13.3.** That table's
 `live` column is a **mean over cycles** — `bench/gc_pause/pause_stats.py` computes
@@ -442,9 +444,10 @@ to count.
 `SPROUT_GC_THRESHOLD=4096` inside its probes is what it should already be doing. Any floor change
 carries that pin.
 
-### 8.3 The compiler is not in the blast radius
+### 8.3 The compiler is not in A's blast radius
 
-Contrary to an earlier draft of this section. A floor pins only the cycles where
+Contrary to an earlier draft of this section. It is in B's, mildly: 252 → 224 cycles and 98 → 103
+MB on the emit run (`bench/results-2026-10-04-gc-trigger-b.md`). A floor pins only the cycles where
 `live × factor < floor`, which for a compile is the early phase while the live set is still
 growing — and fewer early cycles is a time win. The emit run's late-phase target stays above any
 candidate floor, so peak RSS is unchanged. The cost falls on *small* compiles instead: a
@@ -460,6 +463,25 @@ test-suite file's peak heap becomes `floor × slot bytes`, roughly 4 MB at 100,0
 | `just rooting-cost-gate` | prices the compiler via `arena_bytes` and `gc_swept`; `gc_swept` is floored only |
 | golden IR | **not affected** — no emitted IR changes |
 
+### 8.4 Under B — one gate goes red, by design
+
+Each GC-sensitive gate run twice against the prototype runtime (via `just runtime_src=…`;
+`rooting_cost_gate.sh` against the seed linked to it), floor off and damped:
+
+| gate | off | damped |
+|---|---|---|
+| `gc-adapt-check` | green | green, every probe identical (6 / 9 / 6 cycles, `retain_none` 118) |
+| `gc-ageprof-check` | green | green, identical (73%, 24% / 99%) — needs no pin under B |
+| `gc-walk-check` | green | **red**: `walk_sparse` 88 → 10 cycles, 25 → 2.8 slots walked per object swept |
+| `render-cost-gate` | green | green: 3 objects in 3.1M differ |
+| `rooting-cost-gate` | green | green: 4 objects in 75,026, `gc_swept` 185,213 → 185,209 |
+
+The dense fixtures never let B's floor rise above `max(live × factor, base)`, which is the §6.2
+claim seen from the gate side. `gc-walk-check` fails because B removes the very waste its known
+answer depends on: it asserts the sparse fixture walks at least 10 slots per object swept, so the
+counter is shown to see FREE slots. That is a counter test, so it pins `SPROUT_GC_THRESHOLD=4096`
+under B — today's default, so its readings do not move, and B is off for it (§12 Q5).
+
 ## 9. Measurement plan
 
 **This precedes choosing an option, not implementing one.**
@@ -471,7 +493,7 @@ test-suite file's peak heap becomes `floor × slot bytes`, roughly 4 MB at 100,0
 2. ~~**Falsify the floor prediction on the floor-pinned four.**~~ **DONE** —
    `bench/results-2026-09-30-gc-floor.md`. §4 held on all four: nothing improved beyond noise, and
    the cost is §6.5's. Two things the run is worth reading for beyond its table — the cache
-   crossing that makes the byte case (§6.5 item 2), and a −5.0% reading at 5 reps that became
+   crossing that makes the byte case (§6.5 item 3), and a −5.0% reading at 5 reps that became
    +0.5% at 11, which is why the rep count is in the record.
 3. **The compiler** (`ast_to_ir.sprout` emit, 3 reps interleaved), in `gc-generational-v0.md`
    §5.3's table format so the two changes stay comparable. The RSS side is the risk: −19% wall for
@@ -488,18 +510,20 @@ test-suite file's peak heap becomes `floor × slot bytes`, roughly 4 MB at 100,0
 - **A termination test**: the bench note's adversary — a dead class with a trickle of demand,
   and live objects pinning the churn's fresh regions — must reach a fixed free pool. The
   per-class repair fails it by growing ~100,000 slots a cycle, so it tells the two forms apart.
-- **`gc-ageprof-check` must pin `SPROUT_GC_THRESHOLD=4096` in its probes**, as part of any floor
-  change. §8.2 measures it red at any floor above roughly 10,000, and its own comment says it
-  validates the age counter rather than the threshold policy — so the pin restores what it is for
-  rather than weakening it.
-- **`gc-adapt-check`** is green at the candidate, but §8.1's boundaries are integer cycle
-  comparisons, so it is fragile rather than safe. Property 1 should be re-expressed to exercise the
-  factor over many cycles instead of two or three. Note it has **three** assertions, not two:
-  `def_cyc == f3_cyc && def_marked == f3_marked`, then `def_cyc < f2_cyc`, then
-  `f3_marked × 100 < f2_marked × 70`. Pinning `SPROUT_GC_THRESHOLD=4096` as `gc-ageprof-check`
-  does keeps all three green — it sets the threshold and its base and leaves the factor on, so it
-  reproduces §8.1's 4,096 row. What a pin costs is that the gate stops exercising the shipped
-  floor. Add a Property 3 asserting the floor's compiled-in default, so a revert is caught.
+- **`gc-walk-check` must pin `SPROUT_GC_THRESHOLD=4096` in its probes** when B lands (§8.4). It
+  tests the counter, and B removes the walk its known answer needs. The pin is today's default and
+  turns B off (§12 Q5), so the gate's readings stay where they are.
+- **`gc-ageprof-check` and `gc-adapt-check` need nothing under B**: every probe reads identically
+  with the damped floor on (§8.4). The rest of this bullet is A's, kept for the record. Under A,
+  `gc-ageprof-check` would need the same 4096 pin (§8.2 measures it red above roughly 10,000, and
+  its comment says it validates the age counter, not the policy). `gc-adapt-check` is green at
+  A's candidate but fragile: §8.1's boundaries are integer cycle comparisons over its **three**
+  assertions — `def_cyc == f3_cyc && def_marked == f3_marked`, `def_cyc < f2_cyc`,
+  `f3_marked × 100 < f2_marked × 70`. Property 1 would need re-expressing to exercise the factor
+  over many cycles instead of two or three.
+- **B on by default needs its own assertion**, since the pins above turn it off wherever they
+  apply. The first bullet's regression test can be it: the sparse fixture run unpinned walks 2.8
+  slots per object swept under B and 25 without it, so a bound of 4 fails on a revert.
 - **Coverage gap closed** (Definition of Ready #4): `just gc-walk-check` bounds slots walked per
   object freed on a sparse and a dense heap, but no test asserts how *often* collections run as a
   function of heap shape — the thing a trigger fix changes.
@@ -537,10 +561,11 @@ clocks count descheduled time.
    six-figure minimum heap under A. Go's answer is that 4 MiB is small enough not to matter;
    Sprout's floor is in objects, so the equivalent claim is not automatically true (§6.3). Moot
    under B, which raises no minimum: its floor rises only with free slots the program already holds.
-5. **What does `SPROUT_GC_THRESHOLD` mean under B?** Today it sets the threshold and its base, so
-   a low value forces frequent collection. The prototype takes the larger of the base and B's
-   floor, so a low value stops forcing it wherever B's floor is higher. That is §6.1's
-   escape-hatch objection, now against B; one answer is that setting the variable turns B off.
+5. ~~**What does `SPROUT_GC_THRESHOLD` mean under B?**~~ **Decided: setting it turns B off.** It
+   sets the threshold and its base, so a low value forces frequent collection. Taking the larger
+   of that base and B's floor, as the first prototype did, would stop it forcing anything
+   wherever B's floor is higher — §6.1's escape-hatch objection, aimed at B. Turning B off keeps
+   the variable meaning what it means today, and it is what lets a gate pin a threshold (§10).
 
 ## 13. Sources
 
