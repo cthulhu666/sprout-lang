@@ -1,0 +1,1 @@
+instance method `g` of instance G Box has type `(Box, Maybe q) -> _`, but class G declares `(Box, List a) -> List a` for this head

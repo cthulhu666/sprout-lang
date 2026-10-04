@@ -1,0 +1,14 @@
+module main
+
+# `f: p -> q` is more general than the class's `a -> a`, which the class allows,
+# but it gives the class's `a` two names. A bare `y` would have to pick one.
+
+type Box = Box
+
+class G t
+  fn g(k: t, f: a -> a, y: a) -> Int
+
+instance G Box
+  fn g(k: Box, f: p -> q, y) -> Int = 0
+
+fn main() -> Unit !{IO} = print(int_to_string(g(Box, \n -> n, 1)))

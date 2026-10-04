@@ -2698,10 +2698,23 @@ pure one.  An arrow whose effect is a variable, on either side, passes this
 check however the variable is spelled and wherever else it appears: rule 8's
 variable exemption, judged one arrow at a time.  An unannotated parameter or
 return type takes the class's type at the head, and the body is checked against
-it.  A class variable that the head or a written type also spells is renamed
-apart; any other keeps the class's name, so a restated `where` reaches it.  A
+it.  A class variable takes what the written slots put in its place, aliases
+expanded: with the class's `g: a -> b, x: a`, a method writing `g: q -> r` and
+leaving `x` bare gets `x: q`.  The renaming is simultaneous, so a method
+writing `g: b -> a` gets `x: b`.  A method variable written over the class's
+structure (`r` for `List a`) fixes nothing under it, and the rest of that slot
+still fixes what it matches.  When written types put two different types in one
+class variable's place, that variable is unsettled, and a bare slot that needs
+it is an error: annotate it.  One no written slot fixes is renamed apart when
+the head or a written type spells it, and otherwise keeps the class's name, so
+a restated `where` reaches it.  A method-level `where` that names a class
+variable the method writes under one or more other names is an error: with
+`g: q -> String` and `z` bare, `z` is `q` too, so write `where ToString q`, not
+`where ToString a`.  A method whose written types
+do not match the class is reported as written, with `_` for each bare slot.  A
 seeded arrow takes the method's effect variable when it writes one, since rule 9
-allows one per signature.  The method's own effect (rule 8) and ownership modes have their own rules.
+allows one per signature.  The method's own effect (rule 8) and ownership modes
+have their own rules.
 
 **Method-level constraints.**  A class method may end with its own `where`
 clause, constraining a type variable the *method* quantifies rather than the

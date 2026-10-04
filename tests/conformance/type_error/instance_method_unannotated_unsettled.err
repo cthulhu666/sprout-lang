@@ -1,0 +1,1 @@
+instance method `g` of instance G Box does not annotate `y`, and its written types do not fix the class's `a` to one type

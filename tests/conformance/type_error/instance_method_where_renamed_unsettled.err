@@ -1,0 +1,1 @@
+instance method `h` of instance H Box has `where ToString a`, but it writes the class's `a` under more than one name, so `a` names nothing in its signature
