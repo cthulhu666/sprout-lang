@@ -1,0 +1,47 @@
+module main
+
+# An unannotated parameter or return takes the class's type at the head. `Pick`
+# leaves every slot bare. `Show2` leaves `y` bare and restates the class's
+# `where ToString b`, which reaches `y` because `y` is the class's `b`. `Keep`'s
+# class variable `a` is renamed apart from `Cell a`'s, or `y` would be the head's
+# `a` and the method narrower than its class. `Ap`'s `g` takes the method's `!{r}`,
+# not the class's `!{e}`, which would be a second effect variable (rule 9).
+
+type Box = Box(Int)
+
+type Cell a = Cell(a)
+
+class Pick t
+  fn pick(x: t, y: t) -> t
+
+instance Pick Box
+  fn pick(x, y) =
+    let Box(m) = x
+        Box(n) = y
+    in if m > n then x else y
+
+class Show2 t
+  fn show2(x: t, y: b) -> String where ToString b
+
+instance Show2 Box
+  fn show2(x: Box, y) -> String where ToString b = to_string(y)
+
+class Keep t
+  fn keep(x: t, y: a) -> a
+
+instance Keep (Cell a)
+  fn keep(x, y) = y
+
+class Ap t
+  fn ap(k: t, f: Int -> Int !{e}, g: Int -> Int !{e}) -> Int
+
+instance Ap Box
+  fn ap(k: Box, f: Int -> Int !{r}, g) -> Int = f(g(4))
+
+fn main() -> Unit !{IO} =
+  do
+    let Box(k) = pick(Box(3), Box(7))
+    print(int_to_string(k))
+    print(show2(Box(0), 42))
+    print(keep(Cell(1), "kept"))
+    print(int_to_string(ap(Box(0), \n -> n + 1, \n -> n * 2)))

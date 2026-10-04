@@ -573,7 +573,7 @@ fn apply_type_exprs(base: TypeExpr, args: List TypeExpr) -> TypeExpr =
 # Every variant spelled out: a future TypeExpr carrying a nested type must not
 # default to "no substitution", which would leave an alias parameter unbound
 # inside it.
-fn subst_type_expr(sub: Dict TypeExpr, te: TypeExpr) -> TypeExpr =
+export fn subst_type_expr(sub: Dict TypeExpr, te: TypeExpr) -> TypeExpr =
   match te with
   | TypeName n ->
       match dict_get(n, sub) with

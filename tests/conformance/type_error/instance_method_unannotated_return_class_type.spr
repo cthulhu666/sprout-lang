@@ -1,0 +1,14 @@
+module main
+
+# An unannotated return takes the class's type at the head: a body returning `Int`
+# where the class promises `Bool` is rejected, where a caller once read 5 as a Bool.
+
+type Box a = Box(a)
+
+class Same t
+  fn same(x: t, y: t) -> Bool
+
+instance Same (Box a)
+  fn same(x: Box a, y: Box a) = 5
+
+fn main() -> Unit !{IO} = print(to_string(same(Box(1), Box(2))))

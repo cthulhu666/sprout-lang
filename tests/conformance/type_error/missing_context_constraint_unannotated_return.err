@@ -1,1 +1,1 @@
-needs `Eq` on the return type, which has no annotation
+the `Eq` instance for `Maybe r` needs `Eq r`, which nothing in scope supplies
