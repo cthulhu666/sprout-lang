@@ -2724,6 +2724,12 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   (`check_instance_method_signatures`) skips an unannotated position because the declaration has
   no type there. Fix: seed an unannotated parameter or return with the class's type at the head
   before checking the body.
+- [ ] `P3` **An instance signature rejected for effect direction gets the generic message.**
+  `sig_against_class` reports every rejection with `sig_mismatch_msg`, which never names the
+  effect. Class `ap(k: t, g: Int -> Int !{IO}) -> Int -> Int`, instance
+  `ap(k: Box, g: q) -> q = g` is rightly rejected (the IO callback returns as pure), but the
+  message prints `(Box, q) -> q`, which §8.5 allows as more general. Fix: when `arrows_flow`
+  fails, say which arrow lets IO into a pure slot. Review run 1791122795-32761.
 - [ ] `P3` **A deferred constraint at an applied variable (`$f Int`) gets no slot.**
   `resolve_precise_head` gives a bare variable a hole (`hole_tdict`) but nothing to an applied
   one, so the next same-class dict shifts into its slot: `let g = \z -> both(ident(z), 5) in
