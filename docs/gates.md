@@ -441,7 +441,8 @@ fixture, not of the compiler. This is why there is now a **third fixture**
 computed twice, over 60→120 and over 120→240, and their ratio is bounded. Flat is 1.0 and quadratic
 2.0. The first bound was 15/10 on both counters, red-verified at **18/10** on the pre-conversion
 compiler for both objects and bytes, green at 11/10 and 13/10 after. It is now in hundredths, with
-objects at 112 and bytes at 150 — see the front-end paragraph below for why.
+objects at 112 and bytes at 125, and closures have their own arm at 125 — see the front-end and
+rooting paragraphs below for why.
 
 A shape arm can go vacuous the same way a ceiling can, and the first version of this one did: it only
 tested `-gt`, so a truncated `huge` fixture collapsed its delta to zero, read as *perfectly* flat, and
@@ -474,14 +475,24 @@ nested `Cons` of a list literal copied every outcome below it. Threading one `Li
 the walk took `check` to a flat 976 objects per element, and the ratio to 107/100.
 
 That is also why the arm moved to **hundredths**: tenths floored 119 and 107 to 11 and 10, too close
-to set a bound between. Objects are bounded at 112 and bytes at 150. The last 7 in the objects figure
+to set a bound between. Objects were bounded at 112 and bytes at 150. The last 7 in the objects figure
 comes from the fixtures, not a pass: they number elements `1..n`, so each doubling adds elements one
-digit longer to lex. Bytes still grow at 130, in the back half (`BACKLOG`).
+digit longer to lex.
 
-**Counting allocations cannot see a scan that allocates nothing.** The rooting pass itself takes cubic
-time on one long block — 4.9 s at 480 elements, 37 s at 960 — while every arm here stays flat:
-`roots_across` runs `list_member` over the root stack for every in-scope value at every trigger, and
-`list_member` allocates nothing. `BACKLOG` has the entry.
+**The rooting pass was cubic, and the gate read it as flat.** `--emit-ir` took 4.9 s at 480 elements
+and 37 s at 960. At every trigger `roots_across` walked every value in scope and ran `list_member`
+against the root stack for each one. This entry first said that scan allocates nothing. It does: each
+`list_member` call builds its `Eq String` dictionary as a fresh closure. The report printed
+`closure=` all along, and no arm read it. Per-element closures went 1212 → 2382 per doubling, and the
+same closures were most of the byte growth, 130/100.
+
+Only values defined since the last trigger can need a root. A value passed over at a trigger was dead
+after it, and liveness only shrinks within a block; a value pushed is still rooted or was popped dead.
+Scanning just those gives byte-identical IR, 36 closures per element at every size, and 0.34 s at
+960 elements. The new **closure growth arm** bounds it at 125/100, and bytes tightened to 125. That
+arm sees the comparisons, not the walk: a rewrite that drops `list_member` but still visits the
+whole scope per trigger allocates no closure and would pass. Bytes still grow 120/100 in the back
+half (`BACKLOG`).
 
 The fix is `ListBuilder IROp` rather than a hand-kept reversed list, because the file was *already*
 carrying both conventions under one type: `translate_expr` held `cur_ops` in source order while

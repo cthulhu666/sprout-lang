@@ -786,19 +786,11 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   Also `set_remove`: it reinserts every element into a fresh set where an AVL delete is already
   available — `NativeSet` IS the `Map` BST with value 0, and `map_remove` calls `bst_remove_node`.
   O(n) allocations instead of O(log n), and it needs a `native_set_remove` extern, so ASK FIRST.
-- [ ] `P1` **The rooting pass takes cubic time on one long block.** `--emit-ir` over one list
-  literal: 0.9 s / 4.9 s / 37 s at 240 / 480 / 960 elements, ~7.5x per doubling. At every trigger
-  `ir_rooting.roots_across_loop` walks all of `in_scope_ord` and runs `list_member` against the
-  root stack for each value: O(n) x O(n) per op. It allocates nothing, so every arm of
-  `just rooting-cost-gate` stays flat. Only values defined since the last trigger can need a push,
-  so tracking those alone should make it linear with byte-identical IR. The gate needs a counter
-  that sees it too, e.g. `str_eq` calls in the `SPROUT_DEBUG_ALLOC` report. Also `add_def`, which
-  dedups with `list_member` per def. See `docs/gates.md` §Compiling one long block.
-- [ ] `P3` **The back half's BYTES per element grow with block length.** `just rooting-cost-gate`
-  reads arena bytes at 130/100 per doubling while objects are flat at 107/100. The front end adds
-  ~8 KB/element and barely grows; the rest (~29 KB) is after `--phase recheck`. Bytes growing with
-  flat objects means something copies a string or buffer per element. It is what bounds the byte
-  growth arm at 150; find it before tightening that.
+- [ ] `P3` **The back half's BYTES per element grow with block length.** After `--phase recheck`,
+  arena bytes per element go 51 KB → 61 KB per doubling (120/100) while objects are flat; the
+  front end's 107/100 is the fixtures' longer digits. It was 130/100 overall until the rooting scan
+  stopped building a closure per comparison. Persistent-map path copying (O(log n) nodes per
+  insert) would fit, but is unverified. It bounds the byte growth arm at 125.
 
 - [ ] `P2` **A `Dict` key is interned permanently, so computed keys leak for the process's life.**
   `map_set` routes every key through `intern_string`, which mallocs outside the arena and never

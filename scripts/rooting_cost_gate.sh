@@ -61,6 +61,8 @@ fi
 # removed most of the objects, so most of the sweeping went with them. Read the
 # floor against 3259, not 7650 — it is 2.2x below the observation now, not 5.1x.
 # 3076 on 2026-09-30, after verify_dispatch's walk stopped copying its outcomes.
+# 1913 on 2026-10-04, after the rooting scan stopped building a closure per
+# comparison; the floor moved 1500 -> 1000 so the ~13% build spread fits under it.
 #
 # MAP is the sharp one: it was 4076 per element and rising with every element
 # added, so a return of that quadratic overshoots this ceiling by ~6x at this
@@ -89,7 +91,7 @@ MAX_MAP_PER_ELEM=650
 # the same size, or the literal stops being one block, the delta collapses and
 # the ceilings above guard nothing while staying green.
 MIN_MAP_PER_ELEM=60
-MIN_SWEPT_PER_ELEM=1500
+MIN_SWEPT_PER_ELEM=1000
 
 # ARENA BYTES, the only arm here that sees ir_lowering. Named for the
 # allocator it covers: off-arena payloads are counted separately
@@ -185,6 +187,7 @@ for f in "$err_small" "$err_large" "$err_huge"; do
   require_unique "$f" gc_swept
   require_unique "$f" arena_bytes
   require_unique "$f" sprout_obj
+  require_unique "$f" closure
 done
 
 map_s=$(counter "$err_small" map);        map_l=$(counter "$err_large" map)
@@ -192,14 +195,18 @@ swept_s=$(counter "$err_small" gc_swept); swept_l=$(counter "$err_large" gc_swep
 sb_s=$(counter "$err_small" arena_bytes);  sb_l=$(counter "$err_large" arena_bytes)
 obj_s=$(counter "$err_small" sprout_obj); obj_l=$(counter "$err_large" sprout_obj)
 obj_h=$(counter "$err_huge" sprout_obj);  sb_h=$(counter "$err_huge" arena_bytes)
+clo_s=$(counter "$err_small" closure); clo_l=$(counter "$err_large" closure)
+clo_h=$(counter "$err_huge" closure)
 
 # A missing counter means the report did not appear — the runtime lost
 # SPROUT_DEBUG_ALLOC, or its format changed. A blind gate must fail, not pass.
 if [ -z "$map_s" ] || [ -z "$map_l" ] || [ -z "$swept_s" ] || [ -z "$swept_l" ] \
    || [ -z "$sb_s" ] || [ -z "$sb_l" ] || [ -z "$obj_s" ] || [ -z "$obj_l" ] \
-   || [ -z "$obj_h" ] || [ -z "$sb_h" ]; then
+   || [ -z "$obj_h" ] || [ -z "$sb_h" ] || [ -z "$clo_s" ] || [ -z "$clo_l" ] \
+   || [ -z "$clo_h" ]; then
   echo "FAIL: could not read the counters (map='$map_s'/'$map_l' swept='$swept_s'/'$swept_l'" >&2
-  echo "      arena_bytes='$sb_s'/'$sb_l' sprout_obj='$obj_s'/'$obj_l')" >&2
+  echo "      arena_bytes='$sb_s'/'$sb_l' sprout_obj='$obj_s'/'$obj_l'" >&2
+  echo "      closure='$clo_s'/'$clo_l'/'$clo_h')" >&2
   echo "--- small ---" >&2; cat "$err_small" >&2
   echo "--- large ---" >&2; cat "$err_large" >&2
   exit 1
@@ -251,19 +258,20 @@ fi
 # make this distinction, which is the whole reason a 550000-byte ceiling sat green
 # over a per-element cost of 397637 that grew with every element added.
 #
-# Measured 2026-09-30 (stage-2): objects 107/100, bytes 130/100. Objects are flat
+# Measured 2026-10-04 (stage-2): objects 107/100, bytes 114/100. Objects are flat
 # in every phase but lexing, and the lexer is linear -- the fixtures are not: they
 # number their elements 1..n, so each doubling adds elements one digit longer.
-# That is the whole 7. Bytes are NOT flat, and the growth is in the back half
-# (BACKLOG). Before verify_dispatch's walk stopped copying its outcome list the
-# objects read 119/100; before ast_to_ir's op accumulator moved to ListBuilder,
-# 180/100 on both.
+# That is the whole 7. Bytes still grow in the back half, 120/100 there (BACKLOG).
+# They read 130/100 until the rooting scan stopped building a closure per
+# comparison (the closure arm below). Before verify_dispatch's walk stopped
+# copying its outcome list the objects read 119/100; before ast_to_ir's op
+# accumulator moved to ListBuilder, 180/100 on both.
 #
 # Hundredths, to stay in integer arithmetic: tenths floored 107 and 119 to 10 and
-# 11, too close to set a bound between. 112 splits them; 150 sits between the
-# bytes' 130 and the 180 of a copied accumulator. Re-measure before relaxing either.
+# 11, too close to set a bound between. 112 splits them; 125 sits between the
+# bytes' 114 and the 130 of the rooting scan. Re-measure before relaxing either.
 MAX_OBJ_GROWTH_PCT=112
-MAX_BYTES_GROWTH_PCT=150
+MAX_BYTES_GROWTH_PCT=125
 
 obj_per2=$(( (obj_h - obj_l) / DELTA2_N ))
 sb_per2=$(( (sb_h - sb_l) / DELTA2_N ))
@@ -298,6 +306,40 @@ if [ "$obj_growth" -gt "$MAX_OBJ_GROWTH_PCT" ] || [ "$sb_growth" -gt "$MAX_BYTES
   echo "      \`--phase recheck\` each stop earlier, and the phase whose own" >&2
   echo "      per-element cost rises is the one to read. The front end has done" >&2
   echo "      this too (verify_dispatch's outcome list), not only lowering." >&2
+  over=1
+fi
+
+# CLOSURES, the rooting pass's own growth arm. Every `list_member` call builds its
+# `Eq String` dictionary as a fresh closure, so a scan that compares strings and
+# allocates nothing else still counts here. The pass once ran `list_member` against
+# the root stack for every value in scope at every trigger: per-element closures
+# measured 1212 -> 2382 (196/100) on 2026-10-04 (stage-2), while objects and map
+# read flat and `--emit-ir` took 37 s on 960 elements. Scanning only the values
+# defined since the last trigger: 36 -> 36 (100/100), and 0.34 s.
+#
+# BLIND SPOT: this sees the comparisons, not the walk. A rewrite that drops
+# `list_member` but still visits every in-scope value per trigger is quadratic and
+# allocates no closure; only time or a compiler-side counter would catch it. It also
+# goes blind if dictionaries stop being built per call.
+MAX_CLOSURE_GROWTH_PCT=125
+# Floor at half the 36 observed, for the same reason as the floors above.
+MIN_CLOSURE_PER_ELEM=18
+
+clo_per=$(( (clo_l - clo_s) / DELTA_N ))
+clo_per2=$(( (clo_h - clo_l) / DELTA2_N ))
+if [ "$clo_per" -lt "$MIN_CLOSURE_PER_ELEM" ] || [ "$clo_per2" -lt "$MIN_CLOSURE_PER_ELEM" ]; then
+  echo "FAIL: $clo_per / $clo_per2 closures per element is below the floor of $MIN_CLOSURE_PER_ELEM." >&2
+  echo "      The ratio below would divide by nothing and read as flat. Check what the" >&2
+  echo "      fixtures still allocate per element before lowering the floor." >&2
+  exit 1
+fi
+clo_growth=$(( (100 * clo_per2) / clo_per ))
+echo "==> closures at 2x block length: ${clo_per} -> ${clo_per2} (${clo_growth}/100)"
+if [ "$clo_growth" -gt "$MAX_CLOSURE_GROWTH_PCT" ]; then
+  echo "FAIL: closures per element grew ${clo_growth}/100 (budget ${MAX_CLOSURE_GROWTH_PCT}/100)." >&2
+  echo "      Suspect a membership test against a list that grows with the block --" >&2
+  echo "      in ir_rooting, the scan at each trigger. Only values defined since the" >&2
+  echo "      last trigger can need a root; walk those, not the whole scope." >&2
   over=1
 fi
 
