@@ -2586,6 +2586,13 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   misses the ~10 `tests/stdlib/test_ir_*` suites that also bundle the whole compiler (one is 222k IR
   lines / ~17 s emit) but live in flat `tests/stdlib/`. Move them under `tests/stdlib/compiler/`, or
   gate by an explicit file list.
+- [ ] `P3` **`test-gates` is the slowest CI job; six gates make most of it.** Since the core
+  suite split, run time is `test-gates` (270–454 s) or the compiler jobs (~285 s). On a fast
+  runner: `task-io-smoke` 116 s, `type-errors` 82, `conformance-run` 72, `rooting-cost` 54,
+  `ir-golden-diff` 52, `overflow-smoke` 48 (each gate prints its seconds). Profile the top ones
+  before splitting the job again: more shards means more runner draws, and one slow draw sets
+  the run. Runner speed varies 1.7–2× per gate between runs minutes apart, so compare per-gate
+  times across several runs, never one run's total.
 - [ ] `P3` **`task-io-smoke` mostly waits, and holds a fan-out slot while it does.** Its 44
   fixtures run one after another: alone it takes ~123 s wall for ~40 s CPU (locally), since the
   fixtures wait on timers and deadlines. It starts first in `ci-fast-gates`, so today it overlaps
