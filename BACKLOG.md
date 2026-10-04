@@ -2718,13 +2718,12 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   remedy but a concrete type, which is what the #423 context check now tells the user. Fix:
   support `where C (f a)` end to end (hidden slot, call-site injection, dispatch), or reject it
   at the declaration with a located message instead of an internal error.
-- [ ] `P1` **An instance method's signature is never checked against the class's at the head.**
-  `instance Same (Box a)` with `fn same(x: Int, y: Int)` compiles and compares `Box` pointers as
-  `Int`s. Swapped names segfault: `instance Same (Pair a b) where Eq a, Eq b` with method
-  params `Pair b a` runs String's `eq` on an Int, because a context reaches a method by variable
-  NAME. Master too. Fix: in `check_instance_method`, unify the method's declared type with the
-  class method's scheme at the head, head variables rigid; that also makes a renamed head
-  variable (`type_error/instance_method_renamed_head_var`) a declaration-site error.
+- [ ] `P2` **An unannotated instance-method parameter is typed by its body, not by the class.**
+  `instance Same (Box a)` with `fn same(x, y) -> Bool = x + y == 0` infers `Int` for both, and a
+  call through the class adds two `Box` pointers (prints `false`). The signature check
+  (`check_instance_method_signatures`) skips an unannotated position because the declaration has
+  no type there. Fix: seed an unannotated parameter or return with the class's type at the head
+  before checking the body.
 - [ ] `P3` **A deferred constraint at an applied variable (`$f Int`) gets no slot.**
   `resolve_precise_head` gives a bare variable a hole (`hole_tdict`) but nothing to an applied
   one, so the next same-class dict shifts into its slot: `let g = \z -> both(ident(z), 5) in
@@ -2765,14 +2764,6 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   `TDict`'s constraint head against its resolved argument type, which overlaps phase 2b above —
   wire it behind a debug/CI flag so this class fails at compile time rather than at the runtime
   poison backstop.
-- [ ] `P2` **An instance may define a method its class does not declare, silently.** `instance
-  Quiet Q` with a stray `fn extra(x: Q) -> Int !{IO}` type-checks clean; the method is dead (a call
-  to `extra` reports `Unknown variable`), so it launders nothing, but every whole-instance check
-  keyed on the class's method list skips it without a word — rule 8's effect comparison among them.
-  Found while fixing that check, whose comment had claimed such a method was "already diagnosed".
-  Fix: reject an instance method absent from its class's `ClassMethodSig` list, at the method,
-  naming the class. Needs a `type_error` fixture; check first whether a typo'd method name in a
-  legitimate instance currently produces a *worse* message than the missing-method one it becomes.
 - [ ] `P2` **Pattern-variable names share the fresh-tyvar namespace.** Pattern-bound variable names
   and the inferencer's fresh `t0`/`t1`/… names are drawn from the same namespace with no collision
   guard, so a pattern binding whose name collides with a fresh tyvar could shadow, or be shadowed

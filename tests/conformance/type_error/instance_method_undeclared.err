@@ -1,0 +1,1 @@
+instance Quiet Q defines method `extra`, which class Quiet does not declare

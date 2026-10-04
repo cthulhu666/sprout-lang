@@ -1,0 +1,12 @@
+module main
+
+# One parameter where the class declares two: a call through the class passes two
+# arguments to a one-argument body.
+
+class Same t
+  fn same(x: t, y: t) -> Bool
+
+instance Same Int
+  fn same(x: Int) -> Bool = x == 0
+
+fn main() -> Unit !{IO} = print(to_string(same(1, 2)))

@@ -1,1 +1,1 @@
-if it is the instance head's variable, spell it as the head does
+instance method `same` of instance Same (Box a) writes `t` for the head's `a`

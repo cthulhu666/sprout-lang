@@ -1,0 +1,1 @@
+instance method `from_int` of instance Codec Int has type `(Int) -> String`, but class Codec declares `(Int) -> Int` for this head

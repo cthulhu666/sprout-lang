@@ -1,0 +1,14 @@
+module main
+
+# The class says `from_int` returns the instance type; this one returns a String,
+# which a caller expecting an Int then treats as one.
+
+class Codec a
+  fn from_int(n: Int) -> a
+
+instance Codec Int
+  fn from_int(n: Int) -> String = int_to_string(n)
+
+fn decode(n: Int) -> Int = from_int(n)
+
+fn main() -> Unit !{IO} = print(int_to_string(decode(7) + 1))
