@@ -88,9 +88,10 @@ allocations and summed to the cycle line's `walked − live − swept` exactly.
 **For Option B, the gap is the finding.** Ordinary programs span 0.00–1.46 and the game reads
 52–76, so any bound between ~2 and ~50 separates them. Raising the game's threshold drops it to
 0.25: the signal switches off once the floor is high enough, which is what a feedback loop needs
-to settle. B's *repaired* form counts only free slots in classes with recent demand; on the
-split above that is all but 82 of them, so it would set the floor near 248,500, close to the
-pinned 232,000 (`docs/gc-trigger-v0.md` §12 Q1).
+to settle. B's per-class repair counts only free slots in classes with recent demand; on the
+split above that is all but 82 of them, which read as a floor near 248,500. **Run as a loop it
+does not stay there**: it averaged 321k–367k on the game and grows without bound on a constructed
+adversary (`bench/results-2026-10-04-gc-trigger-b.md`), which is why a damped floor replaced it.
 
 ## Reproducing
 
