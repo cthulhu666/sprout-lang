@@ -1,0 +1,16 @@
+# A compound constraint with a variable and a concrete argument, forwarded by a caller
+# that declares the same.
+module main
+
+type Two a b = Two a b
+
+instance ToString (Two a b) where ToString a, ToString b
+  fn to_string(p: Two a b) -> String =
+    match p with
+    | Two x y -> "<" ++ to_string(x) ++ "," ++ to_string(y) ++ ">"
+
+fn show(x: a, y: b) -> String where ToString (Two a b) = to_string(Two(x, y))
+
+fn outer(x: c) -> String where ToString (Two c Int) = show(x, 5)
+
+fn main() -> Unit !{IO} = print(outer("s"))

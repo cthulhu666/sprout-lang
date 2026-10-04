@@ -1,0 +1,1 @@
+the `ToString` instance for `Tagged k Int` needs `ToString k`, which nothing in scope supplies — add `where ToString k`

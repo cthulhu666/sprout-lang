@@ -1,0 +1,12 @@
+module main
+
+# `outer` passes on `ToString (List a)` without declaring it or `ToString a`, so neither
+# a forward nor the List instance can supply it. Building the instance anyway gave it
+# an element dictionary nothing fills, and the program aborted at run time.
+fn label(x: t) -> String where ToString t = to_string(x)
+
+fn f(x: a) -> String where ToString (List a) = label([x])
+
+fn outer(x: a) -> String = f(x)
+
+fn main() -> Unit !{IO} = print(outer(3))

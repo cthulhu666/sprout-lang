@@ -1,0 +1,19 @@
+# A TUPLE subject. It was tokenised as headless, so the call site took the first
+# concrete argument's instance — `ToString Int` for `x` — and read the tuple through
+# it, printing a pointer. A tuple is a compound head like any other: `Tuple2` over
+# its element types.
+module main
+
+fn label(x: t) -> String where ToString t = to_string(x)
+
+fn pairlabel(x: a, y: b) -> String where ToString ((a, b)) = label((x, y))
+
+# The same obligation FORWARDED from a caller that is itself polymorphic: its
+# dictionary slot is keyed by the head, which read "" for a tuple here and `Tuple2`
+# in lowering.
+fn forwarded(x: a, y: b) -> String where ToString ((a, b)) = pairlabel(x, y)
+
+fn main() -> Unit !{IO} = do
+  print(pairlabel(1, "s"))
+  print(pairlabel("q", 2.5))
+  print(forwarded(3, "t"))

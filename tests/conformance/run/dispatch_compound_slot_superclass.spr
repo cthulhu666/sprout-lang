@@ -1,0 +1,8 @@
+# `Ord (List a)` supplies `Eq (List a)`, its superclass, over the same variable.
+module main
+
+fn needs_eq(x: a) -> Bool where Eq (List a) = [x] == [x]
+
+fn outer(x: a) -> Bool where Ord (List a) = needs_eq(x)
+
+fn main() -> Unit !{IO} = print(to_string(outer(1)))
