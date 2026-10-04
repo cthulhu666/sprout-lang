@@ -101,5 +101,11 @@ fn main() -> Unit !{IO} =
     # line becomes an empty line so `fn a` keeps its original line number.
     assert_true(state, "strip_headers replaces a module header with a blank line",
       source.strip_headers("module m\nfn a() -> Int = 1\n") == "\nfn a() -> Int = 1\n")
+    # Several header lines, one with a multi-byte character, so the body's
+    # codepoint offset differs from its byte offset: every line is blanked and
+    # the body survives whole.
+    assert_true(state, "strip_headers blanks every header line before a body",
+      source.strip_headers("module m\n# café\nimport a.b\n\nfn a() -> Int = 1\n")
+        == "\n\n\n\nfn a() -> Int = 1\n")
 
     summary(state)

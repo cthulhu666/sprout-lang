@@ -76,9 +76,8 @@ fn emit_one_fn_rooted(rooted: sprout_ir.IRFunction, next_idx: Int,
     Result String StreamState !{IO} =
   match rooted with
   | sprout_ir.IRFunction fname _ _ rblocks ->
-      # Walk blocks for string constants (pass "" as globals_acc to get
-      # only this fn's chunk — O(1) prepend to str_acc later).
-      match ir_lowering.walk_blocks_for_strs(rblocks, next_idx, "", dict_empty()) with
+      # This fn's string-constant chunk — O(1) prepend to str_acc below.
+      match ir_lowering.walk_blocks_for_strs(rblocks, next_idx, dict_empty()) with
       | (fn_str_chunk, next_idx2, fn_table) ->
           do
             str_old <- ref_read(str_acc)

@@ -1,16 +1,14 @@
 # Cost fixture for `just rooting-cost-gate` -- see scripts/rooting_cost_gate.sh.
 #
-# The THIRD size.  Its siblings (60 and 120) give one per-element figure; this one
-# gives a second, at double the block length, and the gate compares them.  A cost
-# that is quadratic in block length doubles between the two while a linear one
-# holds flat, so the comparison sees the SHAPE rather than the level.
+# One function, one basic block, one list literal.  Every element is a freshly
+# allocated String that stays live until the list is built, so the block's
+# live set grows with the literal and the rooting pass sees a long live range
+# at every op.  This is the shape of the generated vector suites
+# (tests/stdlib/test_bigint_vectors.spr), reduced to what the gate needs.
 #
-# That distinction is not academic here: a per-element arena-byte ceiling of
-# 550000 stayed green while the real cost per element was 397637 and rising with
-# every element added, because one measurement cannot tell a big constant from a
-# growing one.
-#
-# Same shape as the other two, element for element.  Change one, change all three.
+# Three sizes that MUST differ only in element count, this header included: the
+# gate reads the differences between them, so anything else that differs is
+# measured as per-element cost.  Change one, change all three.
 
 fn rows() -> List String =
   [

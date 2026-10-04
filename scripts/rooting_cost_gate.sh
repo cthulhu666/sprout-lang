@@ -51,6 +51,18 @@ if [ "$LARGE_N" -ne $((2 * SMALL_N)) ] || [ "$HUGE_N" -ne $((2 * LARGE_N)) ]; th
   exit 1
 fi
 
+# Everything above the literal must match too. `huge` once carried a three-line
+# longer header, and header stripping is quadratic in header length, so the extra
+# comment read as 901 arena bytes per element of "growth" (2026-10-04).
+fixture_head() { sed '/^fn rows()/,$d' "$1"; }
+if [ "$(fixture_head "$SMALL")" != "$(fixture_head "$LARGE")" ] \
+   || [ "$(fixture_head "$SMALL")" != "$(fixture_head "$HUGE")" ]; then
+  echo "FAIL: the cost fixtures' headers differ (everything above \`fn rows()\`)." >&2
+  echo "      The gate reads differences between the fixtures as per-element cost, so" >&2
+  echo "      a longer comment in one of them is measured as growth. Make them identical." >&2
+  exit 1
+fi
+
 # Per element added to the literal. Observed 300 map / 7650 swept on 2026-09-28
 # against a stage-2 build, with per-op live sets replaced by one per-block
 # last-use index. Stage-1 scored 6752 swept on the same source — ~13%
@@ -258,20 +270,21 @@ fi
 # make this distinction, which is the whole reason a 550000-byte ceiling sat green
 # over a per-element cost of 397637 that grew with every element added.
 #
-# Measured 2026-10-04 (stage-2): objects 107/100, bytes 114/100. Objects are flat
-# in every phase but lexing, and the lexer is linear -- the fixtures are not: they
-# number their elements 1..n, so each doubling adds elements one digit longer.
-# That is the whole 7. Bytes still grow in the back half, 120/100 there (BACKLOG).
-# They read 130/100 until the rooting scan stopped building a closure per
-# comparison (the closure arm below). Before verify_dispatch's walk stopped
-# copying its outcome list the objects read 119/100; before ast_to_ir's op
+# Measured 2026-10-04 (stage-2): objects 100/100, bytes 102/100. Objects read
+# 107/100 until the fixtures' headers were made identical: `huge` carried three
+# more comment lines, and header stripping re-scanned from byte 0 per header line.
+# That 7 was blamed on the fixtures' longer digits for a week; it was the header.
+# Bytes read 112/100 until ir_lowering stopped appending each string global to the
+# function's growing globals text, 130/100 until the rooting scan stopped building
+# a closure per comparison (the closure arm below). Before verify_dispatch's walk
+# stopped copying its outcome list the objects read 119/100; before ast_to_ir's op
 # accumulator moved to ListBuilder, 180/100 on both.
 #
-# Hundredths, to stay in integer arithmetic: tenths floored 107 and 119 to 10 and
-# 11, too close to set a bound between. 112 splits them; 125 sits between the
-# bytes' 114 and the 130 of the rooting scan. Re-measure before relaxing either.
-MAX_OBJ_GROWTH_PCT=112
-MAX_BYTES_GROWTH_PCT=125
+# Hundredths, to stay in integer arithmetic: tenths floor 107 and 112 alike. The
+# bounds sit a few points over what is measured, under every regression above.
+# Re-measure before relaxing either.
+MAX_OBJ_GROWTH_PCT=105
+MAX_BYTES_GROWTH_PCT=106
 
 obj_per2=$(( (obj_h - obj_l) / DELTA2_N ))
 sb_per2=$(( (sb_h - sb_l) / DELTA2_N ))

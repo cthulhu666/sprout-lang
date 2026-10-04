@@ -856,47 +856,57 @@ export fn any_runtime_global(globals: List sprout_ir.IRGlobalDecl) -> Bool =
 #   - fn_tables:    Dict fn_name (Dict raw_ptr (gname, byte_len)).  raw_ptr
 #                   names are per-function ("%t0", ...) and would collide
 #                   across functions if keyed flat, hence the outer Dict.
+# Text is collected as reversed parts and joined once, at each level, for
+# lower_ops_parts' reason: appending to a growing string copies all of it per
+# literal, quadratic in literals per function here and per program above.
 fn collect_str_consts(fns: List sprout_ir.IRFunction) -> (String, Dict (Dict (String, Int)), Int) =
-  collect_str_consts_loop(fns, 0, "", dict_empty())
+  match collect_str_consts_loop(fns, 0, Nil, dict_empty()) with
+  | (parts, tables, next_idx) -> (string_concat_many(list_reverse(parts)), tables, next_idx)
 
 fn collect_str_consts_loop(fns: List sprout_ir.IRFunction, next_idx: Int,
-                           globals_acc: String, tables_acc: Dict (Dict (String, Int))) ->
-    (String, Dict (Dict (String, Int)), Int) =
+                           parts: List String, tables_acc: Dict (Dict (String, Int))) ->
+    (List String, Dict (Dict (String, Int)), Int) =
   match fns with
-  | Nil -> (globals_acc, tables_acc, next_idx)
+  | Nil -> (parts, tables_acc, next_idx)
   | Cons f rest ->
       match f with
       | sprout_ir.IRFunction name _ _ blocks ->
-          match walk_blocks_for_strs(blocks, next_idx, globals_acc, dict_empty()) with
-          | (gs2, idx2, fn_table) ->
-              collect_str_consts_loop(rest, idx2, gs2,
+          match walk_blocks_for_strs(blocks, next_idx, dict_empty()) with
+          | (text, idx2, fn_table) ->
+              collect_str_consts_loop(rest, idx2, Cons(text, parts),
                                       dict_set(name, fn_table, tables_acc))
 
+# One function's string globals, as text, plus the next free index and its table.
 export fn walk_blocks_for_strs(blocks: List sprout_ir.IRBlock, next_idx: Int,
-                               globals_acc: String, fn_table: Dict (String, Int)) ->
+                               fn_table: Dict (String, Int)) ->
     (String, Int, Dict (String, Int)) =
+  match walk_blocks_parts(blocks, next_idx, Nil, fn_table) with
+  | (parts, idx2, ft2) -> (string_concat_many(list_reverse(parts)), idx2, ft2)
+
+fn walk_blocks_parts(blocks: List sprout_ir.IRBlock, next_idx: Int,
+                     parts: List String, fn_table: Dict (String, Int)) ->
+    (List String, Int, Dict (String, Int)) =
   match blocks with
-  | Nil -> (globals_acc, next_idx, fn_table)
+  | Nil -> (parts, next_idx, fn_table)
   | Cons b rest ->
       match b with
       | sprout_ir.IRBlock _ ops ->
-          match walk_ops_for_strs(ops, next_idx, globals_acc, fn_table) with
-          | (gs2, idx2, ft2) -> walk_blocks_for_strs(rest, idx2, gs2, ft2)
+          match walk_ops_for_strs(ops, next_idx, parts, fn_table) with
+          | (parts2, idx2, ft2) -> walk_blocks_parts(rest, idx2, parts2, ft2)
 
 fn walk_ops_for_strs(ops: List sprout_ir.IROp, next_idx: Int,
-                     globals_acc: String, fn_table: Dict (String, Int)) ->
-    (String, Int, Dict (String, Int)) =
+                     parts: List String, fn_table: Dict (String, Int)) ->
+    (List String, Int, Dict (String, Int)) =
   match ops with
-  | Nil -> (globals_acc, next_idx, fn_table)
+  | Nil -> (parts, next_idx, fn_table)
   | Cons op rest ->
       match op with
       | sprout_ir.IRStrConst _ raw s ->
           match emit_str_global(next_idx, s) with
           | (decl, len, gname) ->
-              walk_ops_for_strs(rest, next_idx + 1,
-                                globals_acc ++ decl,
+              walk_ops_for_strs(rest, next_idx + 1, Cons(decl, parts),
                                 dict_set(raw, (gname, len), fn_table))
-      | _ -> walk_ops_for_strs(rest, next_idx, globals_acc, fn_table)
+      | _ -> walk_ops_for_strs(rest, next_idx, parts, fn_table)
 
 # Emit a string-literal global as a header-prefixed CSTR block:
 #   { i64 header, [len x i8] bytes }

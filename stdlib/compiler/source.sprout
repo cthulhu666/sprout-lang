@@ -396,9 +396,14 @@ fn strip_headers_go(s: String, bytes: Bytes, pos: Int, stripped: Int, depth: Int
   if pos >= str_byte_len(s) then string.repeat("\n", stripped)
   else if depth > 0 || is_header_line_byte(s, pos) then
     strip_headers_go(s, bytes, eol, stripped + 1, floor_zero(depth + paren_delta_bytes(bytes, pos, eol, 0)))
-  else str_concat(string.repeat("\n", stripped), str_slice(s, cp, str_len(s) - cp))
-  where cp = byte_to_cp(bytes, 0, 0, pos)
-        eol = next_line_byte(bytes, pos)
+  else body_after_headers(s, stripped, byte_to_cp(bytes, 0, 0, pos))
+  where eol = next_line_byte(bytes, pos)
+
+# The body from codepoint `cp` on, behind one newline per stripped header line.
+# Its own function so `byte_to_cp` runs once, where the headers end: as a `where`
+# binding it ran at every header line, from byte 0 each time.
+fn body_after_headers(s: String, stripped: Int, cp: Int) -> String =
+  str_concat(string.repeat("\n", stripped), str_slice(s, cp, str_len(s) - cp))
 
 fn floor_zero(n: Int) -> Int = if n < 0 then 0 else n
 
