@@ -1,0 +1,12 @@
+# An uncovered dictionary whose subject is a TUPLE over generalized variables.
+#
+# The instance `ToString (a, b)` is built from `ToString a` and `ToString b`, so the advice
+# names a variable, as it does for a bare one. Naming the tuple — `where ToString ((a, b))` —
+# would ask for the compound dictionary instead of its parts.
+module main
+
+fn label(x: t) -> String where ToString t = to_string(x)
+
+fn pair_label(x: a, y: b) -> String = label((x, y))
+
+fn main() -> Unit !{IO} = print(pair_label(1, "s"))

@@ -1,0 +1,1 @@
+needs a ToString instance for type variable `a`, but declares no `where` constraint for it, so one instance was chosen at definition instead of per call — add `where ToString a` to its signature

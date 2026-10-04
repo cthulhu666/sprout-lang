@@ -1,0 +1,16 @@
+# The constructor in the advice is one this module declares. It is printed as the reader
+# writes it, `Tagged t`: the canonical `main.Tagged t` is rejected inside a `where` clause.
+module main
+
+type Tagged t a = | Tagged t a
+
+instance Functor (Tagged t)
+  fn fmap(f: a -> b, x: Tagged t a) -> Tagged t b =
+    match x with
+    | Tagged k v -> Tagged(k, f(v))
+
+fn bump(x: f Int) -> f Int where Functor f = fmap(\n -> n + 1, x)
+
+fn bump_tagged(x: Tagged t Int) -> Tagged t Int = bump(x)
+
+fn main() -> Unit !{IO} = print("x")
