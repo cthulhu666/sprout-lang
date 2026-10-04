@@ -2679,6 +2679,19 @@ dedent: a `do` block's enclosing context is an expression, so a dedented token
 there is a genuine continuation of an outer block, whereas nothing at all may
 appear between a body's members.
 
+**Instance method signatures.**  An instance defines only methods its class
+declares, and each one's signature is the class's with the class variable
+replaced by the instance head: the same number of parameters, and each
+parameter and the return type matching.  A call dispatches through the class
+signature, so a method that took other types would run on values it does not
+expect.  The head's variables keep the head's spelling, because an instance's
+`where` reaches its methods by those names: for `instance Same (Pair a b)`, a
+method taking `Pair b a` is rejected.  The method's own variables may be renamed,
+and a method may be more general than its class (a variable where the class
+has `Int`).  An unannotated parameter or return type is not checked yet
+(BACKLOG).  Effects, ownership modes and the method-level `where` below have
+their own rules.
+
 **Method-level constraints.**  A class method may end with its own `where`
 clause, constraining a type variable the *method* quantifies rather than the
 class variable:

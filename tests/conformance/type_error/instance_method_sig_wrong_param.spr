@@ -1,0 +1,15 @@
+module main
+
+# An instance method's signature must be the class's at the instance head. `same`
+# takes Ints where the class gives `Box a`, so a call through the class passed two
+# Box pointers to a body that compared them as Ints.
+
+class Same t
+  fn same(x: t, y: t) -> Bool
+
+type Box a = Box a
+
+instance Same (Box a)
+  fn same(x: Int, y: Int) -> Bool = x == y
+
+fn main() -> Unit !{IO} = print(to_string(same(Box(1), Box(2))))

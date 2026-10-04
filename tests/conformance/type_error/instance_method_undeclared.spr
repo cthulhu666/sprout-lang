@@ -1,0 +1,15 @@
+module main
+
+# `extra` is not a method of Quiet. It was accepted silently, as dead code; a
+# typo'd method name looks the same, so it is rejected, naming the class.
+
+class Quiet a
+  fn calc(x: a) -> Int
+
+type Q = Q
+
+instance Quiet Q
+  fn calc(x: Q) -> Int = 1
+  fn extra(x: Q) -> Int !{IO} = 2
+
+fn main() -> Unit !{IO} = print(int_to_string(calc(Q)))

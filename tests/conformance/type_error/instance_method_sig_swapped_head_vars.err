@@ -1,0 +1,1 @@
+instance method `same` of instance Same (Pair a b) has type `(Pair b a, Pair b a) -> Bool`, but class Same declares `(Pair a b, Pair a b) -> Bool` for this head

@@ -7146,6 +7146,11 @@ fn typecheck_decls_resolved(
               match check_missing_superclass_instances(decls) with
               | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
               | Nothing ->
+              # Before the missing-method check, so a typo'd method name is reported
+              # as the stray name it is, not as the method it should have been.
+              match check_instance_method_signatures(decls, qual_env) with
+              | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
+              | Nothing ->
               match check_missing_instance_methods(decls) with
               | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
               | Nothing ->
@@ -8675,6 +8680,182 @@ fn instance_head_label(type_args: List ast.TypeExpr) -> String =
   match type_args with
   | [] -> ""
   | [head_te | _] -> " " ++ string.after_last_dot(type_head_str(type_from_ast(head_te, dict_empty())))
+
+# ---------------------------------------------------------------------------
+# An instance method's signature is its class's at the instance head
+# ---------------------------------------------------------------------------
+#
+# A call dispatches through the class signature, so a method taking other types runs
+# on values it does not expect: `same(x: Int, y: Int)` in `instance Same (Box a)`
+# compared Box pointers as Ints. The head's variables are rigid, because a context
+# reaches a method by the head's variable NAME: a method writing `Pair b a` ran
+# String's `eq` on an Int. The method's own variables may be renamed, and the method
+# may be more general than the class, as GHC's InstanceSigs allow.
+#
+# Classes come from decls by exact name, as in check_missing_instance_methods. A
+# class with more than one parameter, and an unannotated parameter or return type,
+# are skipped. Effects, ownership modes and method `where` lists have their own checks.
+fn check_instance_method_signatures(decls: List ast.Decl,
+                                    alias_env: Dict types.Type) -> Maybe(source.SourcePos, String) =
+  first_instance_sig_error(decls, own_class_sigs(decls, dict_empty()), alias_env)
+
+fn own_class_sigs(decls: List ast.Decl,
+                  acc: Dict (String, List ast.ClassMethodSig)) -> Dict (String, List ast.ClassMethodSig) =
+  match decls with
+  | [] -> acc
+  | [ast.ClassDecl name [param] methods _ _ | rest] ->
+      own_class_sigs(rest, dict_set(name, (param, methods), acc))
+  | [_ | rest] -> own_class_sigs(rest, acc)
+
+# What every method of one instance is checked against: the class, its parameter,
+# the head the parameter takes, and the alias table both sides resolve through.
+type InstanceSite = (cls: String, param: String, head: ast.TypeExpr, aliases: Dict types.Type)
+
+fn first_instance_sig_error(decls: List ast.Decl, classes: Dict (String, List ast.ClassMethodSig),
+                            alias_env: Dict types.Type) -> Maybe(source.SourcePos, String) =
+  match decls with
+  | [] -> Nothing
+  | [ast.InstanceDecl(ast.TypeConstraint cls [head_te]) _ methods pos | rest] ->
+      let Just(param, sigs) = dict_get(cls, classes) else first_instance_sig_error(rest, classes, alias_env)
+          site = InstanceSite(cls = cls, param = param, head = head_te, aliases = alias_env)
+      in
+        match find_map(method_sig_error(site, sigs, _), methods) with
+        | Just msg -> Just((pos, msg))
+        | Nothing -> first_instance_sig_error(rest, classes, alias_env)
+  | [_ | rest] -> first_instance_sig_error(rest, classes, alias_env)
+
+fn method_sig_error(site: InstanceSite, sigs: List ast.ClassMethodSig,
+                    method: ast.InstanceMethodImpl) -> Maybe String =
+  match method with
+  | ast.InstanceMethodImpl name params ret_maybe _ _ _ ->
+      let short = string.after_last_dot(name)
+          Just(ast.ClassMethodSig _ cparams cret _ _) = find(\s -> class_method_name(s) == short, sigs)
+            else Just("instance " ++ instance_site_label(site) ++ " defines method `" ++ short
+                      ++ "`, which class " ++ string.after_last_dot(site.cls) ++ " does not declare")
+      in
+        sig_against_class(site, short, list_map(param_type_expr, params), ret_maybe,
+                          list_map(param_type_expr, cparams), cret)
+
+fn param_type_expr(p: ast.Param) -> Maybe ast.TypeExpr =
+  match p with
+  | ast.Param _ te _ -> te
+
+# Rigid names carry a prefix no source variable can spell, so a renamed head
+# variable is read back off the substitution by its prefix.
+let head_rigid_prefix: String = "$head:"
+let class_rigid_prefix: String = "$cls:"
+let inst_var_prefix: String = "$inst:"
+
+fn sig_against_class(site: InstanceSite, name: String, iparams: List (Maybe ast.TypeExpr),
+                     iret: Maybe ast.TypeExpr, cparams: List (Maybe ast.TypeExpr),
+                     cret: ast.TypeExpr) -> Maybe String =
+  let head_vars = collect_te_vars(site.head, Nil)
+      head_rigid = type_var_dict_as(head_vars, head_rigid_prefix, true, site.aliases)
+      class_env = dict_set(site.param, type_from_ast(site.head, head_rigid),
+                    type_var_dict_as(sig_te_vars(cparams, Just(cret)), class_rigid_prefix, true, site.aliases))
+      inst_env = type_var_dict_as(head_vars, head_rigid_prefix, true,
+                   type_var_dict_as(sig_te_vars(iparams, iret), inst_var_prefix, false, site.aliases))
+  in
+    if list_length(iparams) != list_length(cparams)
+    then Just(sig_mismatch_msg(site, name, iparams, iret, cparams, cret))
+    else
+      match unify_sig_parts(dict_empty(), dict_empty(),
+              maybe_types(list_append(iparams, [iret]), inst_env),
+              maybe_types(list_append(cparams, [Just(cret)]), class_env)) with
+      | Nothing -> Just(sig_mismatch_msg(site, name, iparams, iret, cparams, cret))
+      | Just subst ->
+          match renamed_head_var(subst, sig_te_vars(iparams, iret)) with
+          | Just (v, h) -> Just(renamed_head_var_msg(site, name, v, h))
+          | Nothing -> Nothing
+
+fn sig_te_vars(params: List (Maybe ast.TypeExpr), ret: Maybe ast.TypeExpr) -> List String =
+  collect_ret_type_vars(ret, list_fold(\ (acc, te) -> collect_ret_type_vars(te, acc), Nil, params))
+
+# Each variable as a rigid constant or a free variable under `prefix`, over `acc`.
+fn type_var_dict_as(vars: List String, prefix: String, rigid: Bool,
+                    acc: Dict types.Type) -> Dict types.Type =
+  match vars with
+  | [] -> acc
+  | [v | rest] ->
+      type_var_dict_as(rest, prefix, rigid, dict_set(v, var_type_as(prefix ++ v, rigid), acc))
+
+fn var_type_as(name: String, rigid: Bool) -> types.Type =
+  if rigid then types.TConst(types.type_id(name)) else types.TVar(types.tyvar_id(name))
+
+fn maybe_types(tes: List (Maybe ast.TypeExpr), env: Dict types.Type) -> List (Maybe types.Type) =
+  list_map(\te -> map(type_from_ast(_, env), te), tes)
+
+# Positions pair up by index; an unannotated side has nothing to compare.
+fn unify_sig_parts(subst: Dict types.Type, eff_subst: Dict types.Effect,
+                   inst: List (Maybe types.Type), cls: List (Maybe types.Type)) -> Maybe (Dict types.Type) =
+  match (inst, cls) with
+  | ([Just it | irest], [Just ct | crest]) ->
+      match unifier.unify_join(subst, eff_subst, it, ct) with
+      | unifier.UnifyOk s es -> unify_sig_parts(s, es, irest, crest)
+      | unifier.UnifyErr _ -> Nothing
+  | ([_ | irest], [_ | crest]) -> unify_sig_parts(subst, eff_subst, irest, crest)
+  | _ -> Just(subst)
+
+# A method variable that took a head variable's place: the context names the
+# head's spelling, so it does not reach this one. The head's own spelling is rigid
+# on both sides, so its `$inst:` twin stays unbound and never matches.
+fn renamed_head_var(subst: Dict types.Type, vars: List String) -> Maybe (String, String) =
+  match vars with
+  | [] -> Nothing
+  | [v | rest] ->
+      let types.TConst id = unifier.apply_subst(subst, types.TVar(types.tyvar_id(inst_var_prefix ++ v)))
+            else renamed_head_var(subst, rest)
+          Just h = string.strip_prefix(types.type_id_name(id), head_rigid_prefix)
+            else renamed_head_var(subst, rest)
+      in Just((v, h))
+
+fn sig_mismatch_msg(site: InstanceSite, name: String, iparams: List (Maybe ast.TypeExpr),
+                    iret: Maybe ast.TypeExpr, cparams: List (Maybe ast.TypeExpr),
+                    cret: ast.TypeExpr) -> String =
+  let inst_env = build_type_var_dict(sig_te_vars(iparams, iret), site.aliases)
+      class_env = dict_set(site.param, head_as_written(site),
+                    build_type_var_dict(sig_te_vars(cparams, Just(cret)), site.aliases))
+  in
+    "instance method `" ++ name ++ "` of instance " ++ instance_site_label(site)
+      ++ " has type `" ++ sig_text(iparams, iret, inst_env) ++ "`, but class "
+      ++ string.after_last_dot(site.cls) ++ " declares `"
+      ++ sig_text(cparams, Just(cret), class_env) ++ "` for this head. A call dispatches"
+      ++ " through the class signature, so the method takes and returns what the class"
+      ++ " says (spec-v0.md §8.5)."
+
+fn renamed_head_var_msg(site: InstanceSite, name: String, v: String, h: String) -> String =
+  "instance method `" ++ name ++ "` of instance " ++ instance_site_label(site) ++ " writes `"
+    ++ v ++ "` for the head's `" ++ h ++ "`. An instance's `where` reaches its methods by the"
+    ++ " head's variable names, so spell it `" ++ h ++ "` (spec-v0.md §8.5)."
+
+# The head with its variables under their own names, for messages.
+fn head_as_written(site: InstanceSite) -> types.Type =
+  type_from_ast(site.head, build_type_var_dict(collect_te_vars(site.head, Nil), site.aliases))
+
+fn instance_site_label(site: InstanceSite) -> String =
+  let head = type_display(head_as_written(site))
+  in string.after_last_dot(site.cls) ++ " " ++ (if string.contains(head, " ") then "(" ++ head ++ ")" else head)
+
+fn sig_text(params: List (Maybe ast.TypeExpr), ret: Maybe ast.TypeExpr, env: Dict types.Type) -> String =
+  "(" ++ string.join(", ", list_map(maybe_type_text(_, env), params)) ++ ") -> "
+    ++ maybe_type_text(ret, env)
+
+fn maybe_type_text(te: Maybe ast.TypeExpr, env: Dict types.Type) -> String =
+  match te with
+  | Just t -> type_display(type_from_ast(t, env))
+  | Nothing -> "_"
+
+# Bundler-qualified names (`main.Box`) printed as the source spells them.
+fn type_display(t: types.Type) -> String = types.type_to_string(short_type_names(t))
+
+fn short_type_names(t: types.Type) -> types.Type =
+  match t with
+  | types.TVar _ -> t
+  | types.TConst id -> types.TConst(types.type_id(types.type_id_display(id)))
+  | types.TApp b a -> types.TApp(short_type_names(b), short_type_names(a))
+  | types.TFunc p r e o -> types.TFunc(short_type_names(p), short_type_names(r), e, o)
+  | types.TThunk r e -> types.TThunk(short_type_names(r), e)
+  | types.TTuple ts -> types.TTuple(list_map(short_type_names, ts))
 
 # An extern is always marked global, but its signature is bound only when the name
 # is free: a module re-declaring an extern already in scope must not shadow the
@@ -11833,8 +12014,8 @@ fn instance_method_effect_error(class_name: String, method: ast.InstanceMethodIm
   | ast.InstanceMethodImpl name _ _ eff_maybe _ _ ->
       # No entry means the class declares no such method: either the class is not in
       # scope, already diagnosed as an unknown instance head, or the instance defines
-      # a method the class does not — accepted silently today (BACKLOG §Dispatch
-      # Soundness). Neither is this check's to report.
+      # a method the class does not, which check_instance_method_signatures rejects.
+      # Neither is this check's to report.
       let Just class_eff = class_method_declared_effect(class_name, name, declared) else Nothing
           inst_eff = types.effect_from_labels(eff_maybe)
       in

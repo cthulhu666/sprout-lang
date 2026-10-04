@@ -1,0 +1,17 @@
+module main
+
+# The method writes `Pair b a` for the head's `Pair a b`. The context reaches the
+# method by variable name, so `p == r` ran `b`'s dictionary (String's `eq`) on the
+# Ints in the first field, and the program crashed.
+
+class Same t
+  fn same(x: t, y: t) -> Bool
+
+type Pair a b = Pair a b
+
+instance Same (Pair a b) where Eq a, Eq b
+  fn same(x: Pair b a, y: Pair b a) -> Bool =
+    match (x, y) with
+    | (Pair p q, Pair r s) -> p == r && q == s
+
+fn main() -> Unit !{IO} = print(to_string(same(Pair(1, "x"), Pair(1, "x"))))

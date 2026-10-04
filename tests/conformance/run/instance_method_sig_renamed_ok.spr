@@ -1,0 +1,30 @@
+module main
+
+# An instance method may rename the method's own variables (`x`, `y` for the class's
+# `a`, `b`) and may be more general than its class (`extra: n` where the class says
+# Int). Only the head's variables must keep the head's names.
+
+class Mapper f
+  fn map_it(g: a -> b, xs: f a) -> f b
+
+type Box a = Box a
+
+instance Mapper Box
+  fn map_it(h: x -> y, xs: Box x) -> Box y =
+    match xs with
+    | Box v -> Box(h(v))
+
+class Sized t
+  fn size_of(x: t, extra: Int) -> Int
+
+instance Sized (Box a)
+  fn size_of(x: Box a, extra: n) -> Int = 1
+
+fn unbox(b: Box Int) -> Int =
+  match b with
+  | Box v -> v
+
+fn main() -> Unit !{IO} =
+  do
+    print(int_to_string(unbox(map_it(\v -> v + 1, Box(41)))))
+    print(int_to_string(size_of(Box("s"), 5)))

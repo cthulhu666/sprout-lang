@@ -1,7 +1,6 @@
 # An instance's context names the head's variables. A method that writes `Box t` for
-# the head's `Box a` has a variable of its own, which the context does not reach.
-# Matching contexts to methods by position instead needs the method's signature
-# checked against the class's at the head, which nothing does yet (BACKLOG).
+# the head's `Box a` has a variable of its own, which the context does not reach, so
+# the method's signature is rejected against the class's at the head.
 type Box a = Box a
 
 class Same t

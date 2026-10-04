@@ -35,11 +35,12 @@ instance Enum Color
     | Red -> 0
     | Green -> 1
     | Blue -> 2
-  fn from_ordinal(i: Int) -> Color =
+  fn from_ordinal(i: Int) -> Maybe Color =
     match i with
-    | 0 -> Red
-    | 1 -> Green
-    | _ -> Blue
+    | 0 -> Just(Red)
+    | 1 -> Just(Green)
+    | 2 -> Just(Blue)
+    | _ -> Nothing
 
 # --- the constrained functions under test ---
 
