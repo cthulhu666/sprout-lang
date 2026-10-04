@@ -1,0 +1,23 @@
+module main
+
+# The class passes `run_it` an `!{IO}` callback; the instance declared it pure, so a
+# pure caller ran IO through the class ("IO ran inside a pure function"). A caller's
+# argument flows from the class's parameter into the method's, so the method's
+# parameter must accept every effect the class's admits.
+
+class Runner t
+  fn run_it(k: t, f: Int -> Int !{IO}) -> Int
+
+type Box = Box
+
+instance Runner Box
+  fn run_it(k: Box, f: Int -> Int) -> Int = f(1)
+
+fn noisy(n: Int) -> Int !{IO} =
+  do
+    print("IO ran inside a pure function")
+    n
+
+fn sneaky() -> Int = run_it(Box, noisy)
+
+fn main() -> Unit !{IO} = print(int_to_string(sneaky()))

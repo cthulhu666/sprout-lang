@@ -8695,7 +8695,8 @@ fn instance_head_label(type_args: List ast.TypeExpr) -> String =
 #
 # Classes come from decls by exact name, as in check_missing_instance_methods. A
 # class with more than one parameter, and an unannotated parameter or return type,
-# are skipped. Effects, ownership modes and method `where` lists have their own checks.
+# are skipped. The method's own effect, its ownership modes and the classes its `where`
+# names have their own checks.
 fn check_instance_method_signatures(decls: List ast.Decl,
                                     alias_env: Dict types.Type) -> Maybe(source.SourcePos, String) =
   first_instance_sig_error(decls, own_class_sigs(decls, dict_empty()), alias_env)
@@ -8769,8 +8770,8 @@ fn sig_against_class(site: InstanceSite, name: String, inst: SigParts, cls: SigP
     if list_length(inst.params) != list_length(cls.params)
     then Just(sig_mismatch_msg(site, name, inst, cls))
     else
-      match unify_sig_parts(dict_empty(), dict_empty(), maybe_types(sig_types(inst), inst_env),
-                            maybe_types(sig_types(cls), class_env)) with
+      match sig_subst(maybe_types(inst.params, inst_env), maybe_types(cls.params, class_env),
+                      maybe_types([inst.ret], inst_env), maybe_types([cls.ret], class_env)) with
       | Nothing -> Just(sig_mismatch_msg(site, name, inst, cls))
       | Just subst ->
           match renamed_head_var(subst, sig_te_vars(inst)) with
@@ -8780,7 +8781,15 @@ fn sig_against_class(site: InstanceSite, name: String, inst: SigParts, cls: SigP
                                          class_env = class_env, cls = cls),
                                subst, inst.wheres, cls.wheres, 1)
 
-fn sig_types(p: SigParts) -> List (Maybe ast.TypeExpr) = list_append(p.params, [p.ret])
+# A caller's argument flows from the class's parameter into the method's, and the
+# method's result flows out to the class's, so an arrow inside either is judged in
+# that direction: a method may not declare pure a callback the class passes as
+# `!{IO}`, nor return an `!{IO}` function where the class promises a pure one.
+fn sig_subst(iparams: List (Maybe types.Type), cparams: List (Maybe types.Type),
+             iret: List (Maybe types.Type), cret: List (Maybe types.Type)) -> Maybe (Dict types.Type) =
+  let Just(s1, es1) = unify_sig_parts(IntoMethod, dict_empty(), dict_empty(), iparams, cparams) else Nothing
+      Just(s2, _) = unify_sig_parts(OutOfMethod, s1, es1, iret, cret) else Nothing
+  in Just(s2)
 
 # The variables a side writes, its `where` included: a constrained variable need
 # not appear in the signature, and it must still read as a variable.
@@ -8808,16 +8817,31 @@ fn var_type_as(name: String, rigid: Bool) -> types.Type =
 fn maybe_types(tes: List (Maybe ast.TypeExpr), env: Dict types.Type) -> List (Maybe types.Type) =
   list_map(\te -> map(type_from_ast(_, env), te), tes)
 
+# Which way a value crosses between the class's signature and the method's. A
+# `where` argument carries no value, so its two sides only have to agree.
+type Flow =
+  | IntoMethod
+  | OutOfMethod
+  | NoFlow
+
 # Positions pair up by index; an unannotated side has nothing to compare.
-fn unify_sig_parts(subst: Dict types.Type, eff_subst: Dict types.Effect,
-                   inst: List (Maybe types.Type), cls: List (Maybe types.Type)) -> Maybe (Dict types.Type) =
+fn unify_sig_parts(flow: Flow, subst: Dict types.Type, eff_subst: Dict types.Effect,
+                   inst: List (Maybe types.Type),
+                   cls: List (Maybe types.Type)) -> Maybe (Dict types.Type, Dict types.Effect) =
   match (inst, cls) with
   | ([Just it | irest], [Just ct | crest]) ->
-      match unifier.unify_join(subst, eff_subst, it, ct) with
-      | unifier.UnifyOk s es -> unify_sig_parts(s, es, irest, crest)
+      match unify_flow(flow, subst, eff_subst, it, ct) with
+      | unifier.UnifyOk s es -> unify_sig_parts(flow, s, es, irest, crest)
       | unifier.UnifyErr _ -> Nothing
-  | ([_ | irest], [_ | crest]) -> unify_sig_parts(subst, eff_subst, irest, crest)
-  | _ -> Just(subst)
+  | ([_ | irest], [_ | crest]) -> unify_sig_parts(flow, subst, eff_subst, irest, crest)
+  | _ -> Just((subst, eff_subst))
+
+fn unify_flow(flow: Flow, subst: Dict types.Type, eff_subst: Dict types.Effect,
+              inst_t: types.Type, cls_t: types.Type) -> unifier.Unified =
+  match flow with
+  | IntoMethod -> unifier.unify_actual_expected(subst, eff_subst, cls_t, inst_t)
+  | OutOfMethod -> unifier.unify_actual_expected(subst, eff_subst, inst_t, cls_t)
+  | NoFlow -> unifier.unify_join(subst, eff_subst, inst_t, cls_t)
 
 # A method variable that took a head variable's place: the context names the
 # head's spelling, so it does not reach this one. The head's own spelling is rigid
@@ -8842,9 +8866,9 @@ fn where_slot_error(chk: SlotCheck, subst: Dict types.Type, iwheres: List ast.Ty
   | ([ast.TypeConstraint icls iargs | irest], [ast.TypeConstraint ccls cargs | crest]) ->
       if string.after_last_dot(icls) != string.after_last_dot(ccls) then Nothing
       else
-        match unify_sig_parts(subst, dict_empty(), just_types(iargs, chk.inst_env),
+        match unify_sig_parts(NoFlow, subst, dict_empty(), just_types(iargs, chk.inst_env),
                               just_types(cargs, chk.class_env)) with
-        | Just s -> where_slot_error(chk, s, irest, crest, idx + 1)
+        | Just (s, _) -> where_slot_error(chk, s, irest, crest, idx + 1)
         | Nothing ->
             Just(where_slot_msg(chk, subst, ast.TypeConstraint(icls, iargs),
                                 ast.TypeConstraint(ccls, cargs), idx))
