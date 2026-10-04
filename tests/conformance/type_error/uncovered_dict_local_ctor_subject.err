@@ -1,0 +1,1 @@
+needs a Functor instance for `Tagged t`, but declares no `where` constraint for it, so one instance was chosen at definition instead of per call — add `where Functor (Tagged t)` to its signature

@@ -1,0 +1,12 @@
+# An uncovered dictionary whose subject is a FULLY applied constructor, `List a`.
+#
+# `List` takes one argument and has it, so `ToString (List a)` is built from `ToString a`
+# and the advice names the variable. Only a constructor left short of its arguments, like
+# `Result e` (uncovered_dict_constructor_subject.spr), is named in the advice.
+module main
+
+fn label(x: t) -> String where ToString t = to_string(x)
+
+fn list_label(x: a) -> String = label([x])
+
+fn main() -> Unit !{IO} = print(list_label(1))

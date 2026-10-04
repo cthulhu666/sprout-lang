@@ -10924,7 +10924,7 @@ fn fn_dict_coverage_msg(name: String, params: List ast.Param,
   in
     match named_uncovered_dict(param_vars, prog_to_fresh, s2, uncovered, typed_body, env) with
     | Just (v, cls, subject) ->
-        match constraint_advice(v, cls, subject, param_vars, prog_to_fresh, s2) with
+        match constraint_advice(v, cls, subject, param_vars, prog_to_fresh, s2, env) with
         | (subj, where_text) ->
             Just("`" ++ name ++ "` needs " ++ a_or_an(cls) ++ " " ++ cls ++ " instance for "
                    ++ subj ++ ", but declares no `where` constraint for it, so one instance was"
@@ -10959,7 +10959,7 @@ fn instance_method_dict_coverage_msg(name: String, params: List ast.Param,
   in
     match named_uncovered_dict(param_vars, prog_to_fresh, s2, uncovered, typed_body, env) with
     | Just (v, cls, subject) ->
-        match constraint_advice(v, cls, subject, param_vars, prog_to_fresh, s2) with
+        match constraint_advice(v, cls, subject, param_vars, prog_to_fresh, s2, env) with
         | (subj, where_text) ->
             Just("`" ++ name ++ "` needs " ++ a_or_an(cls) ++ " " ++ cls ++ " instance for "
                    ++ subj ++ ", which this method generalizes and nothing supplies; add `where "
@@ -11029,27 +11029,32 @@ fn rename_each(ivs: List String, name: String, acc: Dict String) -> Dict String 
 fn a_or_an(word: String) -> String =
   if list_member(string.take(word, 1), ["A", "E", "I", "O", "U"]) then "an" else "a"
 
-# How to name the subject in prose, and how to spell it inside a `where` clause. An
-# applied constructor needs both: `Result e` rather than the bare variable `e` — which
-# is the error type, not the applicative — and parentheses the variable does not take.
-#
-# The TVar arm's wording is load-bearing: four `type_error` fixtures and spec §8.5's
-# worked examples match it as a substring, so it must stay byte-identical. Rendering
-# every subject through the second arm instead would print "for `a`" and break all of
-# them to say the same thing.
+# How to name the subject in prose, and how to spell it inside a `where` clause. A
+# constructor short of its arguments is the subject itself: `Result e`, not `e`, which
+# is the error type. `List a` and `(a, b)` are built from `C a`, so they keep the
+# variable. Unmapped variables stay bare, since naming `$t2150` would leak.
 fn constraint_advice(v: String, cls: String, subject: types.Type, param_vars: List String,
-                     prog_to_fresh: Dict types.Type, s2: Dict types.Type) -> (String, String) =
+                     prog_to_fresh: Dict types.Type, s2: Dict types.Type,
+                     env: Dict types.Scheme) -> (String, String) =
   let bare = ("type variable `" ++ v ++ "`", cls ++ " " ++ v)
       applied = unifier.apply_subst(s2, subject)
       rename = source_name_rename(param_vars, prog_to_fresh, s2, dict_empty())
   in
-    match applied with
-    | types.TVar _ -> bare
-    # Only name the constructor while every variable in it has a source name to print.
-    # apply_rename_type leaves an unmapped variable as its internal `$t2150`, and a
-    # diagnostic naming that reads as a compiler leak; the bare form is always sayable.
-    | _ -> if all_source_named(types.ftv(applied), rename) then named_advice(cls, rename, applied)
-           else bare
+    if leaves_arguments(applied, 0, env) && all_source_named(types.ftv(applied), rename)
+    then named_advice(cls, rename, applied)
+    else bare
+
+# Whether `t` is a named constructor applied to fewer arguments than it declares.
+fn leaves_arguments(t: types.Type, applied: Int, env: Dict types.Scheme) -> Bool =
+  match t with
+  | types.TApp f _ -> leaves_arguments(f, applied + 1, env)
+  | types.TConst id ->
+      let Just declared = type_arity_of(types.type_id_name(id), dict_empty(), env) else false
+      in declared > applied
+  | types.TVar _ -> false
+  | types.TFunc _ _ _ _ -> false
+  | types.TThunk _ _ -> false
+  | types.TTuple _ -> false
 
 fn named_advice(cls: String, rename: Dict String, applied: types.Type) -> (String, String) =
   let shown = types.type_to_string_named(rename, applied)

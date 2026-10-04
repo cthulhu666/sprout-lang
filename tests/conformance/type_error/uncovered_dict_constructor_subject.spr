@@ -8,9 +8,9 @@
 # CALL site as "No instance of Applicative for String", a worse place to work the
 # answer out from.
 #
-# The constraint the reader must write is on the partially applied constructor, and
-# the checker has always accepted it; only the advice was wrong. See
-# tests/stdlib/test_uncovered_dict_constraint.spr for the accepted sibling.
+# The constraint the reader must write is on the partially applied constructor; only
+# the advice was wrong. run/dispatch_compound_head_partial_ctor.spr compiles and runs
+# the advised form.
 module main
 
 fn try_map(f: a -> Result e b, xs: List a) -> Result e (List b) =

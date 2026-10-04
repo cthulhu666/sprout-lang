@@ -2850,7 +2850,9 @@ so the instance would be chosen once at definition and every caller would receiv
 that choice.  Adding the clause is what makes it legal.  The diagnostic names the
 type the instance is missing for, which need not be a bare variable: a constraint
 on a partially applied constructor is reported and suggested as one, since `where
-Applicative e` over an error type `e` would not compile.  When the variable appears
+Applicative e` over an error type `e` would not compile.  A tuple or a fully applied
+type, such as `(a, b)` or `List a`, is built from its variables' instances, so the
+advice names a variable: `where ToString a`.  When the variable appears
 in no parameter, a `where` clause has nothing to *attach* to until the signature
 names the variable somewhere, so the diagnostic asks for a declared return type
 carrying the constraint, or a concrete annotation:

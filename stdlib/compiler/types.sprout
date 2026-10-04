@@ -1069,11 +1069,20 @@ fn nth_string(xs: List String, k: Int) -> Maybe String =
 export fn type_to_string_renamed(vars: List String, t: Type) -> String =
   type_to_string(apply_rename_type(build_var_rename(vars, 0, dict_empty()), t))
 
-# A type rendered with CHOSEN variable names: `rename` maps each internal variable
-# identity to the source name it stands for. type_to_string_renamed picks fresh
-# letters, which is wrong when the reader has to retype the name in a `where` clause.
+# A type as the reader writes it, for retyping in a `where` clause: `rename` maps each
+# internal variable to its source name, and constructors drop their module, since a
+# canonical `main.Tagged` is rejected there.
 export fn type_to_string_named(rename: Dict String, t: Type) -> String =
-  type_to_string(apply_rename_type(rename, t))
+  type_to_string(display_consts(apply_rename_type(rename, t)))
+
+fn display_consts(t: Type) -> Type =
+  match t with
+  | TVar _ -> t
+  | TConst id -> TConst(type_id(type_id_display(id)))
+  | TApp base arg -> TApp(display_consts(base), display_consts(arg))
+  | TFunc param ret eff own -> TFunc(display_consts(param), display_consts(ret), eff, own)
+  | TThunk ret eff -> TThunk(display_consts(ret), eff)
+  | TTuple items -> TTuple(list_map(display_consts, items))
 
 export fn scheme_to_string(s: Scheme) -> String =
   match scheme_vars(s) with
