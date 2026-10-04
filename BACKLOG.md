@@ -2578,22 +2578,25 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
 
 ### CI / Build Performance
 
-- [ ] `P2` **The apt LLVM install has no retry and no cache, and it hung CI for 24 min.** The `test`
-  and `lsp` jobs run a bare `sudo apt-get update && sudo apt-get install -y llvm clang …` with no
-  retry, no timeout and no package cache; on one run that step sat 24 minutes against 24 seconds on
-  the run 43 minutes earlier. It cannot fail fast — GitHub's default job timeout is 6 hours, so a
-  stalled mirror burns the whole budget rather than erroring, and from the checks list it looks like
-  a long test run. And the workflow caches the deterministic thing and not the fragile one: the
-  reproducible bootstrap (23 s) is cached, the networked third-party fetch is not. Recommended first
-  increment is a retry loop plus `timeout-minutes`; measure before assuming an apt cache helps.
+- [ ] `P2` **The apt LLVM install has no retry and no cache, and it hung CI for 24 min.** The
+  `test-*` shards and `lsp` run a bare `sudo apt-get update && sudo apt-get install -y llvm clang …`
+  with no retry and no package cache; on one run that step sat 24 minutes against 24 seconds on the
+  run 43 minutes earlier. A 5-min `timeout-minutes` now makes a stall fail rather than burn the
+  6-hour job default, but a failed fetch is still a red run, now on three shards instead of one.
+  The workflow caches the deterministic thing and not the fragile one: the reproducible bootstrap
+  (23 s) is cached, the networked third-party fetch is not. Next increment is a retry loop; measure
+  before assuming an apt cache helps.
 - [ ] `P2` **Straggler heavy bundlers still run on every PR.** The compiler-suite directory gate
   misses the ~10 `tests/stdlib/test_ir_*` suites that also bundle the whole compiler (one is 222k IR
   lines / ~17 s emit) but live in flat `tests/stdlib/`. Move them under `tests/stdlib/compiler/`, or
-  gate by an explicit file list. Also open: LPT (largest-first) dispatch in
-  `_test-stdlib`/`_compile-examples`/`ci-fast-gates` so a 50 s pole stops stranding idle lanes, and
-  folding the serial `verify-bootstrap-fixed-point` (~23 s) into the `ci-fast-gates` fan-out.
-  Re-measure first: the 846 s compiler-suite figure predates the quadratic-`strlen` fix, and all the
-  older wall-times came from a self-hosted GCE worker, not today's GitHub-hosted `ubuntu-latest`.
+  gate by an explicit file list.
+- [ ] `P2` **`ci-fast-gates` ends on one gate running alone.** Measured 4-wide locally: 623 s of
+  work, 239 s wall against ~156 s ideal. `task-io-smoke` (171 s) is 33rd of 52, so it finishes
+  last by itself; it builds 45 fixtures serially and recompiles `sprout_runtime.c` at `-O2` for
+  each (~1.2 s). Fix: largest-first order in `GATES`, and compile the runtime to `.o` once, as
+  `_test-stdlib` does (22 recipes link `{{runtime_src}} -O2`). Print each gate's seconds on its ✓
+  line: CI logs have no per-gate time today. Largest-first in `_test-stdlib` gains less: its files
+  average ~3 s (core) and ~15 s (compiler) on CI.
 - [ ] `P3` **CI has no arm64 Linux job, and `linux-smoke`'s value is latency, not OS coverage.**
   `linux-smoke` adds no OS coverage — `ci.yml` is `ubuntu-latest` with the same env and
   `ci-fast-gates` already contains `task-io-smoke`. What it covers is the *architecture*: its

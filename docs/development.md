@@ -109,10 +109,10 @@ suppression and the file's other eight uses lose the rule with it.
 ### Platforms
 
 Supported hosts today are **macOS** and **Linux**. The two workflows cover different
-slices of that, and it is worth keeping them apart: `ci.yml` runs the full `test` job on
-`ubuntu-latest` plus a `macos` job on `macos-latest`, while `release.yml` publishes
-binaries for Linux **x86_64 and aarch64** only — there is no released macOS artifact,
-and no CI job builds Linux aarch64.
+slices of that, and it is worth keeping them apart: `ci.yml` runs the full suite on
+`ubuntu-latest` (three `test-*` shards, gathered by the `test` check) plus a `macos` job
+on `macos-latest`, while `release.yml` publishes binaries for Linux **x86_64 and aarch64**
+only — there is no released macOS artifact, and no CI job builds Linux aarch64.
 
 **Windows is a port in progress, not a supported host.** It is parked after milestone W2
 with a resume point recorded in [windows-port-v0.md](./windows-port-v0.md). What the

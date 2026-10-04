@@ -324,8 +324,8 @@ must not cost more than this" — has no second arm to normalise against, so it 
 does not vary with the machine. Ratios catch a wrong exponent; budgets catch a bad constant. This
 gate is the second kind, and today's bug was the second kind: correct complexity, 8× the constant.
 
-**A ratio arm must not time a header-reading builtin.** CI sets `SPROUT_GC_HDRCHECK=1` for the
-whole test job, and under it `str_byte_len` validates the header with a `strlen` — so the O(1)
+**A ratio arm must not time a header-reading builtin.** CI sets `SPROUT_GC_HDRCHECK=1` for
+every `test-*` shard, and under it `str_byte_len` validates the header with a `strlen` — so the O(1)
 byte-length read that `string.byte_length` documents is O(n) exactly where the gate runs. A
 `string.take` guard built on it measured 1.0x locally and 164x on CI (255x locally once the flag
 was set); an earlier `sprout_cstr_byte_len` revision failed the same way at 389x. The comment on
@@ -617,11 +617,21 @@ literally because they carry no extension. Nothing else: `examples/` is compiled
 it edits, so none of those three counts as docs. Fail open, as before: any non-`pull_request` event,
 an unresolvable base, or a failed diff runs everything.
 
-**`test` skips its steps, never itself.** GitHub reports a workflow skipped by a path filter as
-*pending*, not as success, so a `paths-ignore` on this workflow would leave the required check
-pending forever and block every docs PR — the obvious fix is the broken one. `macos`, `lsp`,
-`intellij-plugin` and `windows` skip as whole jobs, which is safe only because none of them is
-required.
+**`test` is never skipped; the shards are.** GitHub treats the two kinds of skip differently, and
+both are traps for a required check. A workflow skipped by a path filter leaves its checks
+*pending* forever, so a `paths-ignore` here would block every docs PR. A job skipped by `if:`
+reports *success*, so a required job that could be skipped would pass with a red shard under it.
+So the Linux suite runs as three shards — `test-gates`, `test-suites` and `test-compiler` — that
+skip as whole jobs, and `test` is a separate job that gives the verdict. It runs under
+`if: !cancelled()`, so a failed shard does not skip it. It accepts a skipped shard only where
+`changes` says that shard should skip. `macos`, `lsp`, `intellij-plugin` and `windows` skip as whole
+jobs too, which is safe because none of them is required.
+
+**Why three shards.** One job ran the suite step by step on one 4-vCPU runner. Each step already
+filled all four cores, so wall time was the sum: 18–23 min. Sharded, it is the slowest shard plus
+the ~1 min of setup each shard repeats. Standard runners are free on a public repo, so the repeat
+costs runner time, not money. The limit that matters is the free plan's 20 concurrent jobs: a run
+has at most 7 running at once.
 
 So a `test` green in 30 seconds is not evidence the suite passed — only that nothing the suite can
 observe changed. Check the `changes` job's log before citing a green.

@@ -87,16 +87,25 @@ jobs:
             echo "docs_only=true" >> "$GITHUB_OUTPUT"
           fi
 
-  test:
+  # The Linux suite, split three ways so it runs on three runners at once. One job ran every
+  # step in sequence on one 4-vCPU runner, and each step already filled all four cores, so the
+  # suite's wall time was its sum (~21 min). Sharded, it is the slowest shard plus ~1 min of
+  # setup each shard repeats. Runner minutes on standard runners are free for a public repo, so
+  # the repeated setup costs time on parallel runners, not money.
+  #
+  # Shared steps are YAML anchors on test-gates and aliases on the other two shards, so each
+  # is written once. Every `just` task stays in this file: gate-audit scrapes only ci.yml.
+  test-gates:
     needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
-    # Turn the runtime's invariant enforcers ON for every binary this job runs.
-    # These are runtime-read env vars (see sprout_runtime.c), so a single job-level
-    # declaration covers bootstrap, fixed-point verify, ci-fast-gates (incl. the
-    # example canary), the stdlib/compiler test suites, compile-examples, and
-    # test-stress — no duplicated pass. Cost is ~19% on a GC-heavy emit-ir run,
-    # measured, not nil: docs/gates.md §ratio arms has the split and the reason a
-    # timing gate must be re-run under the flag before it is trusted.
+    # Turn the runtime's invariant enforcers ON for every binary the shards run.
+    # These are runtime-read env vars (see sprout_runtime.c), so one declaration per
+    # shard covers bootstrap, fixed-point verify, ci-fast-gates (incl. the example
+    # canary), the stdlib/compiler test suites, compile-examples, and test-stress.
+    # Cost is ~19% on a GC-heavy emit-ir run, measured, not nil: docs/gates.md
+    # §ratio arms has the split and the reason a timing gate must be re-run under
+    # the flag before it is trusted.
     #   SPROUT_GC_HDRCHECK=1 — two oracles. (a) The sweep's slot walk must agree
     #     with the slotmap in both directions (a start bit where it stops, none
     #     strictly inside a step), and a VECTOR's aux must be non-zero exactly
@@ -108,20 +117,21 @@ jobs:
     #     docs/runtime-invariant-confidence-v0.md). Off by default; a bare-string
     #     producer slipping in is a ~1/256 SILENT wrong length in prod but a
     #     guaranteed loud abort here. Reproduce locally: SPROUT_GC_HDRCHECK=1 just test
-    env:
+    env: &invariant-env
       SPROUT_GC_HDRCHECK: "1"
     steps:
-      - uses: actions/checkout@v4
+      - &checkout
+        uses: actions/checkout@v4
 
-      - name: Install mise toolchain (just 1.39.0, from mise.toml)
-        if: needs.changes.outputs.docs_only != 'true'
+      - &install-mise
+        name: Install mise toolchain (just 1.39.0, from mise.toml)
         # Installs and activates the tools pinned in mise.toml and puts their shims
         # on PATH for subsequent steps, so `just` resolves to the pinned version —
         # matching the `mise exec -- just` path used locally and in AGENTS.md.
         uses: jdx/mise-action@v2
 
-      - name: Install LLVM/Clang + sanitizer runtime + ripgrep, expose bare clang/opt on PATH
-        if: needs.changes.outputs.docs_only != 'true'
+      - &install-llvm
+        name: Install LLVM/Clang + sanitizer runtime + ripgrep, expose bare clang/opt on PATH
         # Sprout IR uses opaque pointer type → requires LLVM >= 16. The build recipes
         # call BARE `clang` and `opt` (the IR verifier, via `opt --passes=verify`)
         # from PATH; only the versioned LLVM bindir (/usr/lib/llvm-N/bin) carries the
@@ -147,33 +157,26 @@ jobs:
           "$LLVM_BINDIR/clang" --version
           "$LLVM_BINDIR/opt" --version
 
-      - name: Cache stage-1 binary
-        if: needs.changes.outputs.docs_only != 'true'
+      - &cache-stage1
+        name: Cache stage-1 binary
         # Key on seed IR + runtime source. When unchanged, restore the linked
         # stage-1 binary across CI runs — skips bootstrap-from-seed's
         # `opt --passes=verify` + `clang -O2 ~298k LLVM IR lines`. The
         # bootstrap-from-seed recipe has a guard that no-ops when
         # build/compile_driver_bin_stage1 is newer than the seed, so restore order
         # matters: cache runs AFTER checkout so the restored binary's mtime > the
-        # freshly-checked-out seed's mtime.
+        # freshly-checked-out seed's mtime. All three shards share the key: on a miss
+        # each builds the binary and one save wins, so storage does not grow.
         uses: actions/cache@v4
         with:
           path: build/compile_driver_bin_stage1
           key: stage1-${{ runner.os }}-${{ hashFiles('bootstrap/compile_driver.ll', 'runtime/sprout_runtime.c') }}
 
-      - name: Bootstrap stage-1 from committed IR seed
-        if: needs.changes.outputs.docs_only != 'true'
+      - &bootstrap
+        name: Bootstrap stage-1 from committed IR seed
         run: just bootstrap-from-seed
 
-      - name: Verify bootstrap seed is a fixed point
-        if: needs.changes.outputs.docs_only != 'true'
-        # stage-1 (built from bootstrap/compile_driver.ll) must re-emit
-        # byte-identical IR for the current driver source. If this fails, someone
-        # changed compiler source without refreshing the seed via `just refresh-seed`.
-        run: just verify-bootstrap-fixed-point
-
       - name: CI fast gates (parallel)
-        if: needs.changes.outputs.docs_only != 'true'
         # Single-threaded gates fanned out JOBS-wide by `just ci-fast-gates`; the
         # GATES array in the justfile is the list, and the gate-audit recipe fails if
         # a verifying recipe has no caller. No count here — it said 16 while the array
@@ -187,36 +190,91 @@ jobs:
         # trace-dispatch / verify-dispatch).
         run: just ci-fast-gates
 
+  test-suites:
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    env: *invariant-env
+    steps:
+      - *checkout
+      - *install-mise
+      - *install-llvm
+      - *cache-stage1
+      - *bootstrap
+
+      - name: Verify bootstrap seed is a fixed point
+        # stage-1 (built from bootstrap/compile_driver.ll) must re-emit
+        # byte-identical IR for the current driver source. If this fails, someone
+        # changed compiler source without refreshing the seed via `just refresh-seed`.
+        run: just verify-bootstrap-fixed-point
+
       - name: Run stdlib core tests (stage-1)
-        if: needs.changes.outputs.docs_only != 'true'
         # tests/stdlib/* excluding the compiler/ subdir — always runs.
         run: just test-stdlib-core-stage1
 
       - name: Run IDE tests (stage-1)
-        if: needs.changes.outputs.docs_only != 'true'
         # tests/ide/* — a directory of its own, since `ide/` lifts out whole.
         run: just test-ide
 
-      - name: Run compiler tests (stage-1)
-        # tests/stdlib/compiler/* — gated by the `changes` job.
-        if: needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.run_compiler == 'true'
-        run: just test-stdlib-compiler-stage1
-
       - name: Verify examples compile (stage-1)
-        if: needs.changes.outputs.docs_only != 'true'
         run: just compile-examples-stage1
 
       - name: Verify benches compile (stage-1)
-        if: needs.changes.outputs.docs_only != 'true'
         # bench/ was gated by nothing until 2026-08-11 and rotted silently: it held
         # the P0 linear leak, and needed migrating for the fallible-bind rule.
         run: just compile-bench
 
       - name: GC-stress pass (typed-codegen rooting guard, parallel)
-        if: needs.changes.outputs.docs_only != 'true'
         # Curated rooting tests under SPROUT_GC_STRESS=1 (collect on every alloc).
         # Default-threshold greens hide use-after-free rooting bugs; fails loudly.
         run: just test-stress
+
+  test-compiler:
+    # tests/stdlib/compiler/* — gated by the `changes` job's run_compiler.
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.run_compiler == 'true'
+    runs-on: ubuntu-latest
+    env: *invariant-env
+    steps:
+      - *checkout
+      - *install-mise
+      - *install-llvm
+      - *cache-stage1
+      - *bootstrap
+
+      - name: Run compiler tests (stage-1)
+        run: just test-stdlib-compiler-stage1
+
+  test:
+    # The one required check on master, and the only job here that is never skipped while a
+    # shard has failed. GitHub reports a job skipped by `if:` as SUCCESS, so a required check
+    # that could be skipped would pass a red shard — hence `!cancelled()`, which runs it after
+    # a failed `needs` too, and an explicit verdict below rather than trusting the needs.
+    # A skipped shard counts only where `changes` says it should skip.
+    needs: [changes, test-gates, test-suites, test-compiler]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every shard passed, or skipped where `changes` says it should
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          RUN_COMPILER: ${{ needs.changes.outputs.run_compiler }}
+          GATES: ${{ needs.test-gates.result }}
+          SUITES: ${{ needs.test-suites.result }}
+          COMPILER: ${{ needs.test-compiler.result }}
+        run: |
+          set -u
+          echo "changes=$CHANGES docs_only=$DOCS_ONLY run_compiler=$RUN_COMPILER"
+          echo "test-gates=$GATES test-suites=$SUITES test-compiler=$COMPILER"
+          [ "$CHANGES" = success ] || { echo "the changes job did not succeed"; exit 1; }
+          if [ "$DOCS_ONLY" = true ]; then echo "docs-only change: no shard runs"; exit 0; fi
+          [ "$GATES" = success ] || { echo "test-gates: $GATES"; exit 1; }
+          [ "$SUITES" = success ] || { echo "test-suites: $SUITES"; exit 1; }
+          if [ "$RUN_COMPILER" = true ] || [ "$COMPILER" != skipped ]; then
+            [ "$COMPILER" = success ] || { echo "test-compiler: $COMPILER"; exit 1; }
+          fi
+          echo "all shards green"
 
   # Everything above runs on Linux, so until this job existed CI exercised the epoll+timerfd
   # poller ONLY and never compiled a line of the macOS-specific TLS client. Two consequences,

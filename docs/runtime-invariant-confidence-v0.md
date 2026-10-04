@@ -42,10 +42,11 @@ corruption into a loud, local signal.*
 
 ## What would raise confidence further (ranked by leverage)
 
-1. **✅ DONE — HDRCHECK on in CI.** The `test` job in `.github/workflows/ci.yml` declares
-   `SPROUT_GC_HDRCHECK=1` at job level, so every binary it runs (bootstrap, fixed-point verify,
-   `ci-fast-gates` incl. the example canary, the stdlib + compiler suites, `compile-examples`,
-   `test-stress`) executes under the enforcer — one declaration, near-zero added CI time. A
+1. **✅ DONE — HDRCHECK on in CI.** Each `test-*` shard in `.github/workflows/ci.yml` declares
+   `SPROUT_GC_HDRCHECK=1` at job level (one YAML anchor), so every binary they run (bootstrap,
+   fixed-point verify, `ci-fast-gates` incl. the example canary, the stdlib + compiler suites,
+   `compile-examples`, `test-stress`) executes under the enforcer. It costs ~19% on a GC-heavy
+   emit-ir run (measured; the `ci.yml` comment points to the split in `docs/gates.md`). A
    bare-string producer slipping in is now a guaranteed abort on every PR, not a ~1/256 silent
    wrong length in production. Reproduce locally with `SPROUT_GC_HDRCHECK=1 just test`.
    *Remaining generalization (backlog):* a full "debug-assertions" runtime build that checks every
