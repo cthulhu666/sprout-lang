@@ -1997,11 +1997,17 @@ task-io-smoke: bootstrap-from-seed
   set -euo pipefail
   TMPD=$(mktemp -d /tmp/sprout_taskio_XXXXXX)
   trap 'rm -rf "$TMPD"' EXIT
+  # Compile the runtime once; each of the ~44 fixtures links the objects.
+  mkdir -p "$TMPD/rt"
+  for src in {{runtime_src}}; do
+    clang -c "$src" -O2 -o "$TMPD/rt/$(basename "$src" .c).o" 2>"$TMPD/rt.err" \
+      || { echo "task-io-smoke: runtime compile failed ($src)" >&2; cat "$TMPD/rt.err" >&2; exit 1; }
+  done
   build() {  # $1 = fixture -> $TMPD/bin
     if ! "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$1" > "$TMPD/out.ll" 2>"$TMPD/emit.err"; then
       echo "task-io-smoke: emit-IR failed for $1" >&2; cat "$TMPD/emit.err" >&2; exit 1
     fi
-    if ! clang "$TMPD/out.ll" {{runtime_src}} -O2 {{clang_extra}} -o "$TMPD/bin" 2>"$TMPD/link.err"; then
+    if ! clang "$TMPD/out.ll" "$TMPD/rt"/*.o -O2 {{clang_extra}} -o "$TMPD/bin" 2>"$TMPD/link.err"; then
       echo "task-io-smoke: link failed for $1" >&2; cat "$TMPD/link.err" >&2; exit 1
     fi
   }
@@ -3510,7 +3516,21 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
   TMPD=$(mktemp -d /tmp/sprout_gates_XXXXXX); trap 'rm -rf "$TMPD"' EXIT
   JOBS=$(bash scripts/test_jobs.sh)
   # "<label>|<gate-command>"; labels are filesystem-safe (result/output filenames).
+  # Longest first: dispatch is greedy, so a long gate started late runs alone at the
+  # end. The order comes from the seconds printed beside each ✓ below; re-check it
+  # when a gate grows.
   GATES=(
+    "task-io-smoke|task-io-smoke"
+    "conformance-run|test-conformance-run"
+    "ir-golden-diff|ir-golden-diff"
+    "rooting-cost|rooting-cost-gate"
+    # Added when Assertion D landed: both had names that CLAIM verification while nothing
+    # ran them. c-runtime-test's ten C-level assertions were unrunnable for however long it
+    # took someone to try (the runtime split into sprout_scheduler.c/sprout_poll.c broke its
+    # link line and nothing noticed); b1-gate sat RED on master behind a fixture that
+    # predated the explicit-`_` partial-application syntax.
+    "c-runtime-test|c-runtime-test"
+    "b1-gate|b1-gate"
     "approved-builtins|check-approved-builtins"
     "smoke-shapes|smoke-shapes"
     "o2-codegen-smoke|o2-codegen-smoke"
@@ -3522,12 +3542,10 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "tui-files-smoke|tui-files-smoke"
     "ide-smoke|ide-smoke"
     "render-cost|render-cost-gate"
-    "rooting-cost|rooting-cost-gate"
     "type-errors|test-type-errors"
     "parse-errors|test-parse-errors"
     "executable-errors|test-executable-errors"
     "emit-errors|test-emit-errors"
-    "conformance-run|test-conformance-run"
     "example-canary|run-example-canary"
     "gc-safety|gc-safety-check --strict"
     "freelist-verify|test-freelist-verify"
@@ -3543,14 +3561,12 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "closure-arity-smoke|closure-arity-smoke"
     "stack-overflow-smoke|stack-overflow-smoke"
     "flush-on-crash-smoke|flush-on-crash-smoke"
-    "task-io-smoke|task-io-smoke"
     "http-client-binary|http-client-binary-gate"
     "tco-runtime-smoke|tco-runtime-smoke"
     "trace-dispatch-smoke|trace-dispatch-smoke"
     "verify-dispatch-smoke|verify-dispatch-smoke"
     "loud-fail-smoke|loud-fail-smoke"
     "diagnostic-stream-smoke|diagnostic-stream-smoke"
-    "ir-golden-diff|ir-golden-diff"
     "gate-audit|gate-audit"
     "seed-dep-check|seed-dep-check"
     "review-gate|test-review-gate"
@@ -3558,13 +3574,6 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "review-ledger|test-review-ledger"
     "review-script|test-review-script"
     "setup-dev|test-setup-dev"
-    # Added when Assertion D landed: both had names that CLAIM verification while nothing
-    # ran them. c-runtime-test's ten C-level assertions were unrunnable for however long it
-    # took someone to try (the runtime split into sprout_scheduler.c/sprout_poll.c broke its
-    # link line and nothing noticed); b1-gate sat RED on master behind a fixture that
-    # predated the explicit-`_` partial-application syntax.
-    "c-runtime-test|c-runtime-test"
-    "b1-gate|b1-gate"
     # Added with the prelude-extern relocation: one C symbol, one `extern fn`
     # declaration, repo-wide. The prelude and stdlib.regex both declared
     # regex_replace_all_literal with DIFFERENT parameter orders, both typechecked
@@ -3581,7 +3590,8 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     label="${entry%%|*}"; cmd="${entry#*|}"
     labels+=("$label")
     # word-split $cmd deliberately: it is a controlled "recipe [args]" string.
-    ( $JUST $cmd > "$TMPD/$label.out" 2>&1; echo $? > "$TMPD/$label.status" ) &
+    ( s=$SECONDS; $JUST $cmd > "$TMPD/$label.out" 2>&1; echo $? > "$TMPD/$label.status"
+      echo $((SECONDS - s)) > "$TMPD/$label.secs" ) &
     pids+=($!); idx=$((idx + 1)); active=$((active + 1))
     if (( active >= JOBS )); then
       wait -n 2>/dev/null || wait "${pids[idx - active]}" || true
@@ -3593,7 +3603,8 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
   echo ""
   for label in "${labels[@]}"; do
     st=$(cat "$TMPD/$label.status" 2>/dev/null || echo 1)
-    if [ "$st" = 0 ]; then echo "  ✓ $label"; else echo "  ✗ $label (exit $st)"; failed=$((failed + 1)); fi
+    secs=$(cat "$TMPD/$label.secs" 2>/dev/null || echo "?")
+    if [ "$st" = 0 ]; then echo "  ✓ $label (${secs}s)"; else echo "  ✗ $label (exit $st, ${secs}s)"; failed=$((failed + 1)); fi
   done
   if (( failed > 0 )); then
     echo "" >&2

@@ -2582,13 +2582,16 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   misses the ~10 `tests/stdlib/test_ir_*` suites that also bundle the whole compiler (one is 222k IR
   lines / ~17 s emit) but live in flat `tests/stdlib/`. Move them under `tests/stdlib/compiler/`, or
   gate by an explicit file list.
-- [ ] `P2` **`ci-fast-gates` ends on one gate running alone.** Measured 4-wide locally: 623 s of
-  work, 239 s wall against ~156 s ideal. `task-io-smoke` (171 s) is 33rd of 52, so it finishes
-  last by itself; it builds 45 fixtures serially and recompiles `sprout_runtime.c` at `-O2` for
-  each (~1.2 s). Fix: largest-first order in `GATES`, and compile the runtime to `.o` once, as
-  `_test-stdlib` does (22 recipes link `{{runtime_src}} -O2`). Print each gate's seconds on its ✓
-  line: CI logs have no per-gate time today. Largest-first in `_test-stdlib` gains less: its files
-  average ~3 s (core) and ~15 s (compiler) on CI.
+- [ ] `P3` **`task-io-smoke` mostly waits, and holds a fan-out slot while it does.** Its 44
+  fixtures run one after another: alone it takes ~123 s wall for ~40 s CPU (locally), since the
+  fixtures wait on timers and deadlines. It starts first in `ci-fast-gates`, so today it overlaps
+  the other gates; once they shrink below it, it sets the step's floor. Running fixtures in
+  parallel needs a per-fixture `out.ll`/`bin` path (all share one today).
+- [ ] `P3` **`task-io-smoke` fixtures bind fixed ports, so two worktrees running it collide.**
+  Each fixture listens on a hard-coded port (e.g. `read_exact_deadline.spr` on 28982). Two
+  sessions running the gate at once fail with `tcp_listen: bind failed`, which reads as a parking
+  hang (seen 2026-10-04). Fix wants port 0 plus a way to read the bound port, which `listen_local`
+  lacks (#335/#336). Parallel fixtures inside the gate would need this too.
 - [ ] `P3` **CI has no arm64 Linux job, and `linux-smoke`'s value is latency, not OS coverage.**
   `linux-smoke` adds no OS coverage — `ci.yml` is `ubuntu-latest` with the same env and
   `ci-fast-gates` already contains `task-io-smoke`. What it covers is the *architecture*: its
