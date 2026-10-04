@@ -1,0 +1,1 @@
+instance method `run_it` of instance Runner Box has type `(Box, Int -> Int) -> Int`, but class Runner declares `(Box, Int -> Int !{IO}) -> Int` for this head

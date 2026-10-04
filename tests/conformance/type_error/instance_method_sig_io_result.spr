@@ -1,0 +1,22 @@
+module main
+
+# The class promises `make` returns a pure function; the instance returns an `!{IO}`
+# one, so a pure caller applying the result would run IO. The method's result flows
+# out to the class's, so it may perform at most what the class's admits.
+
+class Maker t
+  fn make(k: t) -> Int -> Int
+
+type Box = Box
+
+fn noisy(n: Int) -> Int !{IO} =
+  do
+    print("IO ran inside a pure function")
+    n
+
+instance Maker Box
+  fn make(k: Box) -> Int -> Int !{IO} = noisy
+
+fn apply_it() -> Int = make(Box)(1)
+
+fn main() -> Unit !{IO} = print(int_to_string(apply_it()))

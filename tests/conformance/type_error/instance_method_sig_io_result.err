@@ -1,0 +1,1 @@
+instance method `make` of instance Maker Box has type `(Box) -> Int -> Int !{IO}`, but class Maker declares `(Box) -> Int -> Int` for this head
