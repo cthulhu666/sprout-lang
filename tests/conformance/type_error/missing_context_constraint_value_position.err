@@ -1,0 +1,1 @@
+the `Eq` instance for `Maybe a` needs `Eq a`, which nothing in scope supplies — add `where Eq a`

@@ -1,0 +1,7 @@
+# A method used as a value needs its instance's context like a call does. Unchecked,
+# `eq` at `Maybe a` with no `Eq a` crashed the compiler in lowering.
+fn h(x: a) -> String =
+  let e = eq
+  in to_string(e(Just(x), Just(x)))
+
+fn main() -> Unit !{IO} = print(h(1))

@@ -2927,11 +2927,12 @@ fn same(y: Maybe a, x: a) -> Bool where Eq a = y == Just(x)   # accepted
 ```
 
 This holds however the variable reaches the call — through a lambda parameter
-applied later, or through a function whose own constraint is compound (`where
-Eq (Maybe t)`) — and even when the inner comparison can never run, as in
-`m == Nothing`: the instance is chosen when the program is checked, not when the
-comparison runs.  A callee constraint nested past one constructor or over a tuple
-(`where ToString (Box (List b))`, `where ToString (b, Int)`) is built the same way.
+applied later, through a function whose own constraint is compound (`where
+Eq (Maybe t)`), or through a method used as a value (`let e = eq`) — and even
+when the inner comparison can never run, as in `m == Nothing`: the instance is
+chosen when the program is checked, not when the comparison runs.  A callee
+constraint nested past one constructor or over a tuple (`where ToString (Box (List
+b))`, `where ToString (b, Int)`) is built the same way.
 
 A forwarded compound constraint arrives whole: `where Eq (Maybe a)` supplies
 `Eq (Maybe a)`, context included — and only that.  It does not supply

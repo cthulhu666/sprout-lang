@@ -520,14 +520,19 @@ unknown — an existential (`$ex_…`, a `$sk…` skolem), an unannotated slot's
 a headerless file's own type (`$entry.Never`) is a type of its own. A use that conflicts
 with every slot (`Maybe Int` beside `where Eq (Maybe a)`) takes the instance and its own
 context, which the context check then requires to be supplied; one that fits two slots
-forwards neither.
+forwards neither. A use fits two only through a variable nothing names, whose dictionary
+is never read, so its instance gets the poison stand-in for that variable: on the call
+path (`consume_block`) and for a method used as a value (`misses_named_forward`) alike.
 
 A request finds a slot by name, so every producer names its variables:
 `named_typeexpr` and `type_to_typeexpr_with_prog_vars` in `infer` (through `@fwdvar`, then
 the signature variable the substitution now identifies it with, `sig_var_now_named`), and
-`@eta_fwdvar` markers for the value-position paths in `resolve.method_ref_evidence` and
-`lowering.eta_slot_key`, written after the body is inferred under both the seeded and the
-final variable.
+`@eta_fwdvar` markers, one per signature variable, for the value-position paths in
+`resolve.method_ref_evidence` and `lowering.eta_slot_key`, written after the body is
+inferred under both the seeded and the final variable. `resolve` checks a method used as
+a value against them as it checks a call, so a missing `where` is reported for both. A
+local that shadows a method (`empty` in a `where`) is turned back into a variable first,
+in `infer`'s post-pass (`resolve_dispatch_typed_expr`), or it would be checked as one.
 
 `where Boxed (Tagged k), Boxed (Tagged j)` would get two slots, but
 `infer.check_indistinct_constraints` still rejects the written pair (spec-v0 "Two

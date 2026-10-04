@@ -4036,13 +4036,6 @@ fn seed_forward_markers(constraints: List ast.TypeConstraint, prog_to_fresh: Dic
   | Cons c rest ->
       seed_forward_markers(rest, prog_to_fresh, seed_one_constraint_marker(c, prog_to_fresh, env))
 
-fn constraint_args(cs: List ast.TypeConstraint) -> List ast.TypeExpr =
-  list_flat_map(\c -> constraint_type_args(c), cs)
-
-fn constraint_type_args(c: ast.TypeConstraint) -> List ast.TypeExpr =
-  let ast.TypeConstraint _ args = c
-  in args
-
 # Each named variable as `TApp(<source name>, <its seeded variable>)`.
 fn declared_var_pairs(names: List String, prog_to_fresh: Dict types.Type) -> List types.Type =
   list_filter_map(\n -> declared_var_pair(n, prog_to_fresh), names)
@@ -4208,14 +4201,15 @@ fn seed_super_from_entries(class_name: String, fresh_name: String, prog_var: Str
 # the entire typecheck env per FnDecl regardless of constraint count — the
 # dominant cost in self-compile (~32% of total time per `sample` profile).
 # Constraint-free decls (~98% of stdlib) now pay zero cost here.
-# Class-independent `@eta_fwdvar:<var>` markers naming every variable the constraints
-# mention, keyed by the seeded variable and by what `s2` made of it: the body can
-# rebind the seeded one, and lowering reads the final types. Lowering renders a
-# value-position slot key (ast.dict_slot_key) through them.
-fn eta_fwdvar_markers(constraints: List ast.TypeConstraint, prog_to_fresh: Dict types.Type,
-                      s2: Dict types.Type, markers: Dict types.Scheme) -> Dict types.Scheme =
+# Class-independent `@eta_fwdvar:<var>` markers naming every signature variable, keyed
+# by the seeded variable and by what `s2` made of it: the body can rebind the seeded
+# one, and lowering reads the final types. A value-position slot key
+# (ast.dict_slot_key) is rendered through them, and resolve checks a method used as a
+# value at the named type.
+fn eta_fwdvar_markers(prog_to_fresh: Dict types.Type, s2: Dict types.Type,
+                      markers: Dict types.Scheme) -> Dict types.Scheme =
   list_fold(\ (acc, pr) -> add_eta_fwdvar(pr, s2, acc), markers,
-            declared_var_pairs(collect_te_vars_list(constraint_args(constraints), Nil), prog_to_fresh))
+            declared_var_pairs(vec_to_list(dict_keys(prog_to_fresh)), prog_to_fresh))
 
 fn add_eta_fwdvar(pr: types.Type, s2: Dict types.Type, markers: Dict types.Scheme) -> Dict types.Scheme =
   let types.TApp name fresh = pr else markers
@@ -10386,7 +10380,9 @@ fn resolve_dispatch_typed_expr(env: Dict types.Scheme, subst: Dict types.Type, b
         resolve_dispatch_typed_list(env, subst, bound, args),
         t, pos)
   | typed_ast.TDict _ _ _ _ -> e
-  | typed_ast.TMethodRef _ _ _ _ _ -> e
+  # A local that shadows a class method (`empty` in a `where`) is a variable, not the
+  # method: resolve would otherwise check the method's instance at its type.
+  | typed_ast.TMethodRef name _ t pos _ -> if set_member(name, bound) then typed_ast.TVar(name, t, pos) else e
   | typed_ast.TLambda params body t pos ->
       typed_ast.TLambda(params, resolve_dispatch_typed_expr(env, subst, bind_params(params, bound), body), t, pos)
   | typed_ast.TBinary op left right t pos ->
@@ -11305,7 +11301,7 @@ fn check_fn_body(
             | linear_check.LinFail lp lm -> (typed_ast.BodyErr(lp, lm), dict_empty(), Nil, subst)
             | linear_check.LinPass ->
                 (typed_ast.BodyOk(resolve_dispatch_typed_expr(seed_unann_inner_names(own_unann_vars(name, params, ret_type_maybe), s2, fwd_env), s2, bind_params(params, set_empty()), typed_body), unifier.apply_subst(s2, inst_type)),
-                 eta_fwdvar_markers(constraints, prog_to_fresh, s2, fwd_markers),
+                 eta_fwdvar_markers(prog_to_fresh, s2, fwd_markers),
                  canonicalize_constrained_constraints(constraints, prog_to_fresh, s2, inst_type, env_ftv),
                  s2)
   | _ -> (typed_ast.BodyOk(dummy_unit(), types.TConst(types.type_id("Unit"))), dict_empty(), Nil, subst)
