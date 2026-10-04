@@ -7071,7 +7071,7 @@ export fn typecheck_decls(
   match register_all_aliases(decls, import_aliases_from_env(env)) with
   | AliasesErr pos msg -> pure_typed_err(pos, msg)
   | AliasesOk alias_env ->
-      typecheck_decls_resolved(state, seed_instance_method_types(decls), env, subst, eff_subst, alias_env)
+      typecheck_decls_resolved(state, seed_instance_method_types(decls, alias_env), env, subst, eff_subst, alias_env)
 
 fn pure_typed_err(pos: source.SourcePos, msg: String) -> typed_ast.TypedResult !{IO} =
   do
@@ -8676,45 +8676,297 @@ fn instance_head_label(type_args: List ast.TypeExpr) -> String =
   | [] -> ""
   | [head_te | _] -> " " ++ string.after_last_dot(type_head_str(type_from_ast(head_te, dict_empty())))
 
+# A call dispatches through the class signature, so a method taking other types runs
+# on values it does not expect: `same(x: Int, y: Int)` in `instance Same (Box a)`
+# compared Box pointers as Ints. The head's variables are rigid, because a context
+# reaches a method by the head's variable NAME: a method writing `Pair b a` ran
+# String's `eq` on an Int. The method's own variables may be renamed, and the method
+# may be more general than the class, as GHC's InstanceSigs allow, as long as each
+# method-level `where` slot still constrains what the class's does.
+#
+# Classes come from decls by exact name, as in check_missing_instance_methods. A
+# class with more than one parameter is skipped. seed_instance_method_types has
+# filled every bare slot of a method this check accepts, unless the written types
+# leave a class variable the slot needs unsettled, which is reported here. The
+# method's own effect, its ownership modes and the classes its `where` names have
+# their own checks.
+fn check_instance_method_signatures(decls: List ast.Decl,
+                                    alias_env: Dict types.Type) -> Maybe(source.SourcePos, String) =
+  first_instance_sig_error(decls, own_class_sigs(decls, dict_empty()), alias_env)
+
+fn own_class_sigs(decls: List ast.Decl,
+                  acc: Dict (String, List ast.ClassMethodSig)) -> Dict (String, List ast.ClassMethodSig) =
+  match decls with
+  | [] -> acc
+  | [ast.ClassDecl name [param] methods _ _ | rest] ->
+      own_class_sigs(rest, dict_set(name, (param, methods), acc))
+  | [_ | rest] -> own_class_sigs(rest, acc)
+
+# What every method of one instance is checked against: the class, its parameter,
+# the head the parameter takes, and the alias table both sides resolve through.
+type InstanceSite = (cls: String, param: String, head: ast.TypeExpr, aliases: Dict types.Type)
+
+# One side of the comparison: parameter and return types as written (Nothing where
+# unannotated), and the method-level `where`.
+type SigParts = (params: List (Maybe ast.TypeExpr), ret: Maybe ast.TypeExpr,
+                 wheres: List ast.TypeConstraint)
+
+# What a `where` slot is compared under: the two sides' rigid environments, and the
+# class side for the message.
+type SlotCheck = (site: InstanceSite, name: String, inst_env: Dict types.Type,
+                  class_env: Dict types.Type, cls: SigParts)
+
+# What a method's written types make one class variable (class_var_bindings). A
+# variable they leave alone has no entry.
+type ClassVar =
+  | Fixed types.Type
+  | Unsettled
+
+fn first_instance_sig_error(decls: List ast.Decl, classes: Dict (String, List ast.ClassMethodSig),
+                            alias_env: Dict types.Type) -> Maybe(source.SourcePos, String) =
+  match decls with
+  | [] -> Nothing
+  | [ast.InstanceDecl(ast.TypeConstraint cls [head_te]) _ methods pos | rest] ->
+      let Just(param, sigs) = dict_get(cls, classes) else first_instance_sig_error(rest, classes, alias_env)
+          site = InstanceSite(cls = cls, param = param, head = head_te, aliases = alias_env)
+      in
+        match find_map(method_sig_error(site, sigs, _), methods) with
+        | Just msg -> Just((pos, msg))
+        | Nothing -> first_instance_sig_error(rest, classes, alias_env)
+  | [_ | rest] -> first_instance_sig_error(rest, classes, alias_env)
+
+fn method_sig_error(site: InstanceSite, sigs: List ast.ClassMethodSig,
+                    method: ast.InstanceMethodImpl) -> Maybe String =
+  match method with
+  | ast.InstanceMethodImpl name params ret_maybe _ wheres _ ->
+      let short = string.after_last_dot(name)
+          Just(ast.ClassMethodSig _ cparams cret _ cwheres) = find(\s -> class_method_name(s) == short, sigs)
+            else Just("instance " ++ instance_site_label(site) ++ " defines method `" ++ short
+                      ++ "`, which class " ++ string.after_last_dot(site.cls) ++ " does not declare")
+          inst = SigParts(params = list_map(param_type_expr, params), ret = ret_maybe, wheres = wheres)
+          cls = SigParts(params = list_map(param_type_expr, cparams), ret = Just(cret), wheres = cwheres)
+          Nothing = sig_against_class(site, short, inst, cls) else err -> err
+          vars = class_var_bindings(site, inst, cls)
+          Nothing = unsettled_bare_slot(vars, slot_labels(params), inst, cls)
+            else Just(slot, v) -> Just(unsettled_slot_msg(site, short, slot, v))
+      in renamed_where_var_error(site, short, vars, inst)
+
+fn unsettled_slot_msg(site: InstanceSite, name: String, slot: String, v: String) -> String =
+  "instance method `" ++ name ++ "` of instance " ++ instance_site_label(site) ++ " does not annotate "
+    ++ slot ++ ", and its written types do not fix the class's `" ++ v ++ "` to one type, so "
+    ++ slot ++ " has none to take. Annotate it (spec-v0.md §8.5)."
+
+# A `where` naming a class variable the method wrote under another name names
+# nothing in the method's signature, so it constrains nothing the body uses.
+fn renamed_where_var_error(site: InstanceSite, name: String, vars: Dict ClassVar,
+                           inst: SigParts) -> Maybe String =
+  let own = collect_te_vars(site.head, signature_vars(inst))
+      Just(c, v, cv) = find_map(renamed_where_var(own, vars, _), inst.wheres) else Nothing
+      names = build_type_var_dict(collect_te_vars_list(constraint_args(c), Nil), site.aliases)
+  in
+    Just("instance method `" ++ name ++ "` of instance " ++ instance_site_label(site) ++ " has `where "
+         ++ constraint_text(c, names) ++ "`, but it writes the class's `" ++ v ++ "` "
+         ++ written_as_text(cv) ++ ", so `" ++ v ++ "` names nothing in its signature. Use the"
+         ++ " method's name for it (spec-v0.md §8.5).")
+
+fn renamed_where_var(own: List String, vars: Dict ClassVar,
+                     c: ast.TypeConstraint) -> Maybe(ast.TypeConstraint, String, ClassVar) =
+  find_map(\v -> if list_member(v, own) then Nothing else map(\cv -> (c, v, cv), dict_get(v, vars)),
+           collect_te_vars_list(constraint_args(c), Nil))
+
+fn written_as_text(cv: ClassVar) -> String =
+  match cv with
+  | Fixed t -> "as `" ++ type_display(t) ++ "`"
+  | Unsettled -> "under more than one name"
+
+fn fixed_type(v: String, vars: Dict ClassVar) -> Maybe types.Type =
+  match dict_get(v, vars) with
+  | Just (Fixed t) -> Just(t)
+  | Just Unsettled -> Nothing
+  | Nothing -> Nothing
+
+fn param_type_expr(p: ast.Param) -> Maybe ast.TypeExpr =
+  match p with
+  | ast.Param _ te _ -> te
+
 # ---------------------------------------------------------------------------
-# An instance method's signature is its class's at the instance head
+# An instance method's bare slots take its class's types at the head
 # ---------------------------------------------------------------------------
 #
 # An unannotated parameter or return takes the class's type at the head, as in
 # Haskell and, for a return, Scala 3. Typed by its body instead, `fn same(x, y)` in
 # `instance Same (Box a)` took two Ints and a call through the class added two
-# pointers. A class variable a head or written variable also spells is renamed
-# apart; any other keeps the class's name, so a restated `where` reaches it.
-# Classes come from decls, as in check_instance_method_signatures.
-fn seed_instance_method_types(decls: List ast.Decl) -> List ast.Decl =
-  list_map(seed_instance_decl(own_class_sigs(decls, dict_empty()), _), decls)
+# pointers. A class variable takes what the method wrote in its place; one nothing
+# written fixes is renamed apart from the head's and the method's variables if it
+# clashes, and otherwise keeps the class's name, so a restated `where` reaches it.
+# A method the signature check rejects is left as written, so its message shows
+# only what was written. Classes come from decls, as in that check.
+fn seed_instance_method_types(decls: List ast.Decl, aliases: Dict types.Type) -> List ast.Decl =
+  list_map(seed_instance_decl(own_class_sigs(decls, dict_empty()), aliases, _), decls)
 
-fn seed_instance_decl(classes: Dict (String, List ast.ClassMethodSig), decl: ast.Decl) -> ast.Decl =
+fn seed_instance_decl(classes: Dict (String, List ast.ClassMethodSig), aliases: Dict types.Type,
+                      decl: ast.Decl) -> ast.Decl =
   let ast.InstanceDecl(ast.TypeConstraint cls [head_te]) ctx methods pos = decl else decl
       Just(param, sigs) = dict_get(cls, classes) else decl
+      site = InstanceSite(cls = cls, param = param, head = head_te, aliases = aliases)
   in ast.InstanceDecl(ast.TypeConstraint(cls, [head_te]), ctx,
-                      list_map(seed_method_types(param, head_te, sigs, _), methods), pos)
+                      list_map(seed_method_types(site, sigs, _), methods), pos)
 
-# A method whose arity differs from the class's is left as written; the signature
-# check reports it.
-fn seed_method_types(param: String, head_te: ast.TypeExpr, sigs: List ast.ClassMethodSig,
+fn seed_method_types(site: InstanceSite, sigs: List ast.ClassMethodSig,
                      m: ast.InstanceMethodImpl) -> ast.InstanceMethodImpl =
   let ast.InstanceMethodImpl name params ret effs wheres body = m
-      Just(ast.ClassMethodSig _ cparams cret _ _) =
-        find(\s -> class_method_name(s) == string.after_last_dot(name), sigs) else m
-      cls_vars = written_type_vars(cparams, Just(cret))
-      taken = collect_te_vars(head_te, written_type_vars(params, ret))
+      short = string.after_last_dot(name)
+      Just(ast.ClassMethodSig _ cparams cret _ cwheres) = find(\s -> class_method_name(s) == short, sigs) else m
+      inst = SigParts(params = list_map(param_type_expr, params), ret = ret, wheres = wheres)
+      cls = SigParts(params = list_map(param_type_expr, cparams), ret = Just(cret), wheres = cwheres)
+      Nothing = sig_against_class(site, short, inst, cls) else m
+      fixed = class_var_bindings(site, inst, cls)
+      Nothing = unsettled_bare_slot(fixed, slot_labels(params), inst, cls) else m
+      cls_vars = signature_vars(cls)
+      vars = list_filter(\v -> v != site.param, cls_vars)
+      taken = collect_te_vars(site.head, signature_vars(inst))
       where_vars = list_fold(\ (acc, c) -> collect_te_vars_list(constraint_args(c), acc), Nil, wheres)
-      sub = apart_names(list_filter(\v -> v != param, cls_vars), taken, list_append(cls_vars, where_vars),
-                        dict_set(param, head_te, dict_empty()))
+      written = list_fold(\ (acc, v) -> fixed_type_expr(v, fixed, acc), dict_empty(), vars)
+      sub = apart_names(vars, taken, list_append(cls_vars, where_vars), dict_set(site.param, site.head, written))
       seed = seeded_type(sub, written_effect_vars(params, ret, effs), _)
-  in
-    if list_length(params) != list_length(cparams) then m
-    else ast.InstanceMethodImpl(name, seed_params(params, cparams, seed),
-                                maybe_or_else(ret, Just(seed(cret))), effs, wheres, body)
+  in ast.InstanceMethodImpl(name, seed_params(params, cparams, seed),
+                            maybe_or_else(ret, Just(seed(cret))), effs, wheres, body)
 
-fn written_type_vars(params: List ast.Param, ret: Maybe ast.TypeExpr) -> List String =
-  collect_ret_type_vars(ret, list_fold(\ (acc, p) -> collect_ret_type_vars(param_type_expr(p), acc), Nil, params))
+fn fixed_type_expr(v: String, vars: Dict ClassVar, acc: Dict ast.TypeExpr) -> Dict ast.TypeExpr =
+  match fixed_type(v, vars) with
+  | Just t -> dict_set(v, written_type_expr(t), acc)
+  | Nothing -> acc
+
+# A written type read back as source, its arrows' effects kept, which
+# typed_ast.type_to_type_expr drops. Its variables are rigid constants under their
+# own names, so they read back as written.
+fn written_type_expr(t: types.Type) -> ast.TypeExpr =
+  match t with
+  | types.TApp f x -> ast.TypeApply(written_type_expr(f), written_type_expr(x))
+  | types.TFunc p r e own ->
+      ast.TypeArrow(written_type_expr(p), written_type_expr(r), effect_label_list(e),
+                    ast.mode_of_flags(types.ownership_is_borrow(own), types.ownership_is_once(own)))
+  | types.TThunk r e -> ast.TypeThunk(written_type_expr(r), effect_label_list(e))
+  | types.TTuple items -> ast.TupleType(list_map(written_type_expr, items))
+  | types.TConst _ -> typed_ast.type_to_type_expr(t)
+  | types.TVar _ -> typed_ast.type_to_type_expr(t)
+
+fn effect_label_list(e: types.Effect) -> Maybe (List String) =
+  match e with
+  | types.EffectPure -> Nothing
+  | types.EffectIO -> Just(["IO"])
+  | types.EffectRow labels -> Just(labels)
+  | types.EffectVar v -> Just([v])
+
+let seed_var_prefix: String = "$seed:"
+
+# What the method's written slots make each class variable. Each slot is unified
+# alone, aliases expanded, with the class's variables free and the method's rigid,
+# so a class variable reads off as what the method wrote in its place. One that two
+# places make different types is unsettled: the method is more general there than
+# the class.
+fn class_var_bindings(site: InstanceSite, inst: SigParts, cls: SigParts) -> Dict ClassVar =
+  let inst_env = type_var_dict_as(collect_te_vars(site.head, signature_vars(inst)), "", true, site.aliases)
+      class_env = dict_set(site.param, type_from_ast(site.head, inst_env),
+                    type_var_dict_as(signature_vars(cls), seed_var_prefix, false, site.aliases))
+  in bind_slots(inst_env, class_env, Cons(inst.ret, inst.params), Cons(cls.ret, cls.params),
+                dict_empty())
+
+fn bind_slots(inst_env: Dict types.Type, class_env: Dict types.Type,
+              islots: List (Maybe ast.TypeExpr), cslots: List (Maybe ast.TypeExpr),
+              acc: Dict ClassVar) -> Dict ClassVar =
+  match (islots, cslots) with
+  | ([Just ite | irest], [Just cte | crest]) ->
+      bind_slots(inst_env, class_env, irest, crest,
+                 bind_slot(type_from_ast(ite, inst_env), type_from_ast(cte, class_env), acc))
+  | ([_ | irest], [_ | crest]) -> bind_slots(inst_env, class_env, irest, crest, acc)
+  | _ -> acc
+
+fn bind_slot(it: types.Type, ct: types.Type, acc: Dict ClassVar) -> Dict ClassVar =
+  match unifier.unify_join(dict_empty(), dict_empty(), it, ct) with
+  | unifier.UnifyOk s _ ->
+      list_fold(\ (a, v) -> settle_class_var(v, unifier.apply_subst(s, seed_var(v)), a), acc,
+                seed_vars(ct, Nil))
+  | unifier.UnifyErr _ -> bind_parts(it, ct, acc)
+
+# A slot that does not unify as a whole still fixes what its matching parts do:
+# `(q, r)` against `(a, List b)` fixes `a`. A method variable over the class's
+# structure (`r` for `List b`) fixes nothing under it.
+fn bind_parts(it: types.Type, ct: types.Type, acc: Dict ClassVar) -> Dict ClassVar =
+  match (it, ct) with
+  | (types.TApp f x, types.TApp g y) -> bind_slot(x, y, bind_slot(f, g, acc))
+  | (types.TFunc p r _ _, types.TFunc q s _ _) -> bind_slot(r, s, bind_slot(p, q, acc))
+  | (types.TThunk r _, types.TThunk s _) -> bind_slot(r, s, acc)
+  | (types.TTuple xs, types.TTuple ys) -> bind_items(xs, ys, acc)
+  | _ -> acc
+
+fn bind_items(xs: List types.Type, ys: List types.Type, acc: Dict ClassVar) -> Dict ClassVar =
+  match (xs, ys) with
+  | ([x | xrest], [y | yrest]) -> bind_items(xrest, yrest, bind_slot(x, y, acc))
+  | _ -> acc
+
+fn seed_var(v: String) -> types.Type = types.TVar(types.tyvar_id(seed_var_prefix ++ v))
+
+# The class variables a class-side type names, by their source names.
+fn seed_vars(t: types.Type, acc: List String) -> List String =
+  match t with
+  | types.TVar id ->
+      match string.strip_prefix(types.tyvar_name(id), seed_var_prefix) with
+      | Just v -> list_add_unique(v, acc)
+      | Nothing -> acc
+  | types.TConst _ -> acc
+  | types.TApp f x -> seed_vars(x, seed_vars(f, acc))
+  | types.TFunc p r _ _ -> seed_vars(r, seed_vars(p, acc))
+  | types.TThunk r _ -> seed_vars(r, acc)
+  | types.TTuple items -> list_fold(\ (a, i) -> seed_vars(i, a), acc, items)
+
+# A variable the slot left free (still a TVar) learns nothing from it.
+fn settle_class_var(v: String, t: types.Type, acc: Dict ClassVar) -> Dict ClassVar =
+  if is_type_var(t) then acc
+  else
+    match dict_get(v, acc) with
+    | Nothing -> dict_set(v, Fixed(t), acc)
+    | Just Unsettled -> acc
+    | Just (Fixed t0) -> if same_written_type(t0, t) then acc else dict_set(v, Unsettled, acc)
+
+fn is_type_var(t: types.Type) -> Bool =
+  match t with
+  | types.TVar _ -> true
+  | _ -> false
+
+fn same_written_type(a: types.Type, b: types.Type) -> Bool =
+  match unifier.unify_join(dict_empty(), dict_empty(), a, b) with
+  | unifier.UnifyOk _ _ -> true
+  | unifier.UnifyErr _ -> false
+
+# Each slot's name for messages, the return first, as the slot lists run.
+fn slot_labels(params: List ast.Param) -> List String =
+  Cons("the return type", list_map(param_label, params))
+
+fn param_label(p: ast.Param) -> String =
+  match p with
+  | ast.Param name _ _ -> "`" ++ name ++ "`"
+
+# The first bare slot whose class type names an unsettled variable, and that variable.
+fn unsettled_bare_slot(vars: Dict ClassVar, labels: List String, inst: SigParts,
+                       cls: SigParts) -> Maybe (String, String) =
+  first_unsettled(vars, labels, Cons(inst.ret, inst.params), Cons(cls.ret, cls.params))
+
+fn first_unsettled(vars: Dict ClassVar, labels: List String, islots: List (Maybe ast.TypeExpr),
+                   cslots: List (Maybe ast.TypeExpr)) -> Maybe (String, String) =
+  match (labels, islots, cslots) with
+  | ([l | lrest], [Nothing | irest], [Just cte | crest]) ->
+      match find(is_unsettled(vars, _), collect_te_vars(cte, Nil)) with
+      | Just v -> Just((l, v))
+      | Nothing -> first_unsettled(vars, lrest, irest, crest)
+  | ([_ | lrest], [_ | irest], [_ | crest]) -> first_unsettled(vars, lrest, irest, crest)
+  | _ -> Nothing
+
+fn is_unsettled(vars: Dict ClassVar, v: String) -> Bool =
+  match dict_get(v, vars) with
+  | Just Unsettled -> true
+  | Just (Fixed _) -> false
+  | Nothing -> false
 
 # Rule 9 lets a signature name one effect variable. When the method writes one, a
 # seeded arrow takes it in place of the class's, which would be a second.
@@ -8765,91 +9017,26 @@ fn seed_params(params: List ast.Param, cparams: List ast.Param,
   | ([p | rest], [_ | crest]) -> Cons(p, seed_params(rest, crest, seed))
   | _ -> params
 
-# A class variable `taken` already spells is renamed to the first of `a1`, `a2`, …
-# that neither `taken` nor `used` spells. `used` holds the class's variables and
-# the method's `where` ones, so a fresh name meets no constraint by accident.
+# A class variable no written slot binds, and that `taken` already spells, is
+# renamed to the first of `a1`, `a2`, … that neither `taken` nor `used` spells.
+# `used` holds the class's variables and the method's `where` ones, so a fresh
+# name meets no constraint by accident.
 fn apart_names(vars: List String, taken: List String, used: List String,
                acc: Dict ast.TypeExpr) -> Dict ast.TypeExpr =
   match vars with
   | [] -> acc
   | [v | rest] ->
-      if ! list_member (v, taken) then apart_names(rest, taken, used, acc)
-      else
-        let fresh = fresh_var_name(v, 1, list_append(taken, used))
-        in apart_names(rest, Cons(fresh, taken), used, dict_set(v, ast.TypeName(fresh), acc))
+      match dict_get(v, acc) with
+      | Just _ -> apart_names(rest, taken, used, acc)
+      | Nothing ->
+          if ! list_member (v, taken) then apart_names(rest, taken, used, acc)
+          else
+            let fresh = fresh_var_name(v, 1, list_append(taken, used))
+            in apart_names(rest, Cons(fresh, taken), used, dict_set(v, ast.TypeName(fresh), acc))
 
 fn fresh_var_name(base: String, n: Int, used: List String) -> String =
   let name = base ++ int_to_string(n)
   in if list_member(name, used) then fresh_var_name(base, n + 1, used) else name
-
-# A call dispatches through the class signature, so a method taking other types runs
-# on values it does not expect: `same(x: Int, y: Int)` in `instance Same (Box a)`
-# compared Box pointers as Ints. The head's variables are rigid, because a context
-# reaches a method by the head's variable NAME: a method writing `Pair b a` ran
-# String's `eq` on an Int. The method's own variables may be renamed, and the method
-# may be more general than the class, as GHC's InstanceSigs allow, as long as each
-# method-level `where` slot still constrains what the class's does.
-#
-# Classes come from decls by exact name, as in check_missing_instance_methods. A
-# class with more than one parameter is skipped, and so is an unannotated parameter
-# or return type, which seed_instance_method_types has filled for every class this
-# check sees. The method's own effect, its ownership modes and the classes its
-# `where` names have their own checks.
-fn check_instance_method_signatures(decls: List ast.Decl,
-                                    alias_env: Dict types.Type) -> Maybe(source.SourcePos, String) =
-  first_instance_sig_error(decls, own_class_sigs(decls, dict_empty()), alias_env)
-
-fn own_class_sigs(decls: List ast.Decl,
-                  acc: Dict (String, List ast.ClassMethodSig)) -> Dict (String, List ast.ClassMethodSig) =
-  match decls with
-  | [] -> acc
-  | [ast.ClassDecl name [param] methods _ _ | rest] ->
-      own_class_sigs(rest, dict_set(name, (param, methods), acc))
-  | [_ | rest] -> own_class_sigs(rest, acc)
-
-# What every method of one instance is checked against: the class, its parameter,
-# the head the parameter takes, and the alias table both sides resolve through.
-type InstanceSite = (cls: String, param: String, head: ast.TypeExpr, aliases: Dict types.Type)
-
-# One side of the comparison: parameter and return types as written (Nothing where
-# unannotated), and the method-level `where`.
-type SigParts = (params: List (Maybe ast.TypeExpr), ret: Maybe ast.TypeExpr,
-                 wheres: List ast.TypeConstraint)
-
-# What a `where` slot is compared under: the two sides' rigid environments, and the
-# class side for the message.
-type SlotCheck = (site: InstanceSite, name: String, inst_env: Dict types.Type,
-                  class_env: Dict types.Type, cls: SigParts)
-
-fn first_instance_sig_error(decls: List ast.Decl, classes: Dict (String, List ast.ClassMethodSig),
-                            alias_env: Dict types.Type) -> Maybe(source.SourcePos, String) =
-  match decls with
-  | [] -> Nothing
-  | [ast.InstanceDecl(ast.TypeConstraint cls [head_te]) _ methods pos | rest] ->
-      let Just(param, sigs) = dict_get(cls, classes) else first_instance_sig_error(rest, classes, alias_env)
-          site = InstanceSite(cls = cls, param = param, head = head_te, aliases = alias_env)
-      in
-        match find_map(method_sig_error(site, sigs, _), methods) with
-        | Just msg -> Just((pos, msg))
-        | Nothing -> first_instance_sig_error(rest, classes, alias_env)
-  | [_ | rest] -> first_instance_sig_error(rest, classes, alias_env)
-
-fn method_sig_error(site: InstanceSite, sigs: List ast.ClassMethodSig,
-                    method: ast.InstanceMethodImpl) -> Maybe String =
-  match method with
-  | ast.InstanceMethodImpl name params ret_maybe _ wheres _ ->
-      let short = string.after_last_dot(name)
-          Just(ast.ClassMethodSig _ cparams cret _ cwheres) = find(\s -> class_method_name(s) == short, sigs)
-            else Just("instance " ++ instance_site_label(site) ++ " defines method `" ++ short
-                      ++ "`, which class " ++ string.after_last_dot(site.cls) ++ " does not declare")
-      in
-        sig_against_class(site, short,
-          SigParts(params = list_map(param_type_expr, params), ret = ret_maybe, wheres = wheres),
-          SigParts(params = list_map(param_type_expr, cparams), ret = Just(cret), wheres = cwheres))
-
-fn param_type_expr(p: ast.Param) -> Maybe ast.TypeExpr =
-  match p with
-  | ast.Param _ te _ -> te
 
 # Rigid names carry a prefix no source variable can spell, so a renamed head
 # variable is read back off the substitution by its prefix.

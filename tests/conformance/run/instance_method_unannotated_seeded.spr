@@ -6,6 +6,14 @@ module main
 # class variable `a` is renamed apart from `Cell a`'s, or `y` would be the head's
 # `a` and the method narrower than its class. `Ap`'s `g` takes the method's `!{r}`,
 # not the class's `!{e}`, which would be a second effect variable (rule 9).
+# `Conv` and `Mapper` are partly written: a class variable a written slot names
+# takes the method's name for it, so `conv`'s return is the written `b`, and
+# `Cell a`'s `mapit` seeds `g: b -> b1`, the class's `b` renamed apart from the
+# method's. `Swap` writes the class's `a` and `b` swapped, so `y` is the method's
+# `b` and the return its `a`. `Mapper Bool` writes `g` through an alias, which is
+# read expanded. `Part` and `Curry` write a slot the class's does not unify with as a
+# whole; its matching parts still fix `a` and `b`. `Wide`'s `r` over the class's
+# `List a` fixes nothing, so `y` keeps the class's `a`.
 
 type Box = Box(Int)
 
@@ -38,6 +46,50 @@ class Ap t
 instance Ap Box
   fn ap(k: Box, f: Int -> Int !{r}, g) -> Int = f(g(4))
 
+class Conv t
+  fn conv(x: t, y: b) -> b
+
+instance Conv Box
+  fn conv(x: Box, y: b) = y
+
+class Mapper t
+  fn mapit(k: t, g: a -> b, x: a) -> b
+
+instance Mapper Box
+  fn mapit(k: Box, g: q -> r, x) = g(x)
+
+instance Mapper (Cell a)
+  fn mapit(k, g, x: b) = g(x)
+
+class Swap t
+  fn swap(k: t, g: a -> b, y: a) -> b
+
+instance Swap Box
+  fn swap(k: Box, g: b -> a, y) = g(y)
+
+type alias Fn a b = a -> b
+
+instance Mapper Bool
+  fn mapit(k: Bool, g: Fn q r, x) = g(x)
+
+class Part t
+  fn part(k: t, p: (a, List b), x: a) -> a
+
+instance Part Box
+  fn part(k: Box, p: (q, r), x) = x
+
+class Curry t
+  fn curry(k: t, g: a -> a -> b, y: b) -> b
+
+instance Curry Box
+  fn curry(k: Box, g: p -> q -> r, y) = y
+
+class Wide t
+  fn wide(k: t, p: List a, y: a) -> a
+
+instance Wide Box
+  fn wide(k: Box, p: r, y) = y
+
 fn main() -> Unit !{IO} =
   do
     let Box(k) = pick(Box(3), Box(7))
@@ -45,3 +97,11 @@ fn main() -> Unit !{IO} =
     print(show2(Box(0), 42))
     print(keep(Cell(1), "kept"))
     print(int_to_string(ap(Box(0), \n -> n + 1, \n -> n * 2)))
+    print(conv(Box(0), "same"))
+    print(int_to_string(mapit(Box(0), \n -> n + 1, 41)))
+    print(mapit(Cell(0), \s -> s ++ "!", "hi"))
+    print(swap(Box(0), \n -> int_to_string(n + 1), 5))
+    print(mapit(true, \s -> s ++ "?", "named"))
+    print(int_to_string(part(Box(0), (1, [2]), 8)))
+    print(curry(Box(0), \x -> \y -> x, "curried"))
+    print(int_to_string(wide(Box(0), [1], 2)))

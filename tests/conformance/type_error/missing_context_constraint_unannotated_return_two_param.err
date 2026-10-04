@@ -1,0 +1,1 @@
+needs `Eq` on the return type, which has no annotation

@@ -1,0 +1,14 @@
+module main
+
+# A method whose written types do not match the class is reported as written: the
+# bare return prints as `_`, not as a type read off `Maybe q`.
+
+type Box = Box
+
+class G t
+  fn g(k: t, y: List a) -> List a
+
+instance G Box
+  fn g(k: Box, y: Maybe q) = y
+
+fn main() -> Unit !{IO} = print("unreached")

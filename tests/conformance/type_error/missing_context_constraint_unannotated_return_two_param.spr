@@ -1,0 +1,12 @@
+# A two-parameter class is not seeded, so its instance method's return stays
+# unannotated: its placeholder's owner is `#inst/mk`, and the message must name the
+# return type, not a parameter called `mk`.
+class Mk t u
+  fn mk(x: t, y: u) -> r
+
+instance Mk Int Int
+  fn mk(x: Int, y: Int) =
+    let v = panic("never")
+    in if Just(v) == Just(v) then v else v
+
+fn main() -> Unit !{IO} = print(to_string(mk(1, 2) == 1))

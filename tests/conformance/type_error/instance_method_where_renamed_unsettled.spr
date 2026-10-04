@@ -1,0 +1,14 @@
+module main
+
+# The method writes the class's `a` as both `q` and `r`, so a restated
+# `where ToString a` names nothing in its signature.
+
+type Box = Box
+
+class H t
+  fn h(k: t, g: a -> String, z: a) -> String where ToString a
+
+instance H Box
+  fn h(k: Box, g: q -> String, z: r) -> String where ToString a = to_string(z)
+
+fn main() -> Unit !{IO} = print(h(Box, \n -> "x", 2))
