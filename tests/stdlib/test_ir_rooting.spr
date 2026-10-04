@@ -399,6 +399,29 @@ fn test15_program() -> sprout_ir.IRProgram =
     Nil), Nil, Nil, Nil)
 
 # ---------------------------------------------------------------------------
+# Test 15b: like Test 15, but %p, seeded into `next` at entry, is live across TWO
+# triggers there (%z and %w).  The pass scans only values pending since the last
+# trigger, and the seed is pending only until the first one: %p is pushed at %z
+# and still rooted at %w, so it must not be pushed again → 2 pushes in all.
+fn test15b_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("cross_block_twice", Cons(("p", sprout_ir.IRTHeap), Nil), "i64", Cons(
+      sprout_ir.IRBlock("entry", Cons(
+        sprout_ir.IRStrConst("%x1", "%x1_raw", "x"),
+        Cons(sprout_ir.IRStrConst("%x2", "%x2_raw", "y"),
+        Cons(sprout_ir.IRStrConcat("%x", "%x1", "%x2"),
+        Cons(sprout_ir.IRBr("next"), Nil))))),
+      Cons(sprout_ir.IRBlock("next", Cons(
+        sprout_ir.IRStrConst("%z1", "%z1_raw", "z"),
+        Cons(sprout_ir.IRStrConst("%z2", "%z2_raw", "w"),
+        Cons(sprout_ir.IRStrConcat("%z", "%z1", "%z2"),
+        Cons(sprout_ir.IRStrConcat("%w", "%z", "%z"),
+        Cons(sprout_ir.IRStrConcat("%r", sprout_ir.param_ssa("p"), "%w"),
+        Cons(sprout_ir.IRRet("%r"), Nil))))))),
+      Nil))),
+    Nil), Nil, Nil, Nil)
+
+# ---------------------------------------------------------------------------
 # Test 16: interleaved (non-nested) lifetimes — %a dies while %b (defined later,
 # above it on the root stack) is still live.  %a cannot be popped from the middle,
 # so it is over-retained until %b dies, then both pop together.  This is the safe
@@ -761,6 +784,10 @@ fn main() -> Unit !{IO} =
               count(lower(test15_program()), "call i64 @sprout_gc_push_i64_root"), 2),
     check_eq("T15: two pop_roots(i64 1) (entry block-end + next end-of-liveness)",
               count(lower(test15_program()), "@sprout_gc_pop_roots(i64 1)"), 2),
+
+    # --- Test 15b: a seeded value live across two triggers is pushed once there.
+    check_eq("T15b: two push_i64_root (seeded %p not re-pushed at the second trigger)",
+              count(lower(test15b_program()), "call i64 @sprout_gc_push_i64_root"), 2),
 
     # --- Test 16: interleaved lifetimes — %a over-retained under live %b, popped
     # together.  Pushed once each (no re-rooting); safe over-retention.

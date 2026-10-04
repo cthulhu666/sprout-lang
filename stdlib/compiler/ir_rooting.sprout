@@ -18,10 +18,11 @@ import stdlib.compiler.sprout_ir as sprout_ir
 #        - Index the block once (BlockLive: live_out + last-use per name), then
 #          ASK whether a name is live after op i.  Never a set per op.
 #        - For trigger ops, compute live_across (heap-typed values defined
-#          earlier that remain live), emit IRRoot before / IRUnroot after.
+#          since the last trigger that remain live), emit IRRoot before /
+#          IRUnroot after.
 #
 # Representation: liveness/heap sets are `Set`, per-op liveness a `Dict Int` of
-# last-use indices; `in_scope_ord` stays a `List String` because the order of
+# last-use indices; `pending` stays a `List String` because the order of
 # definitions is observable — IRRoot emission order is deterministic in
 # definition order.
 
@@ -535,7 +536,7 @@ fn op_def(op: sprout_ir.IROp) -> Maybe String =
   | sprout_ir.IRCall r _ _ _ -> Just(r)
   # Two defs; report <val> (the heap-relevant one) so liveness kills it at its
   # definition.  <tag> is scalar and un-killed here — harmless over-approximation,
-  # and emission is gated by update_scope's in_scope_ord (op_produces_simple_heap),
+  # and emission is gated by update_scope's pending (op_produces_simple_heap),
   # so <val> is never rooted before it is defined.
   | sprout_ir.IRCallUnboxed2 _ val _ _ _ -> Just(val)
   # Three scalar defs; report <s0> for liveness kill (s1/s2 un-killed here — a
@@ -686,7 +687,7 @@ fn compute_liveness(blocks: List sprout_ir.IRBlock) -> Dict Set =
 #
 # ONLY VALID for a name defined at or before op i — the one case where this
 # differs from the live_after recurrence is a name whose def is still ahead.
-# Every caller asks about in_scope_ord or rooted, which hold nothing else.
+# Every caller asks about pending or rooted, which hold nothing else.
 # Under that precondition "in live_out, or used later" is exact.
 type BlockLive = (last_use: Dict Int, out: Set)
 
@@ -753,29 +754,23 @@ fn compute_heap_origin(blocks: List sprout_ir.IRBlock) -> Set =
 # ---------------------------------------------------------------------------
 # Forward rewrite — insert IRRoot/IRUnroot around trigger ops.
 #
-# in_scope_ord is a List String (NOT a Set) because IRRoot emission order is
+# pending is a List String (NOT a Set) because IRRoot emission order is
 # observable: roots are emitted in definition order so identical input IR
 # produces byte-identical LLVM output.
 
-# Filter in_scope_ord (in reverse-def order) to those still live AND not already
-# rooted, returning in DEFINITION order so emitted IRRoots are deterministic.
-# Skipping the rooted ones here rather than subtracting them afterwards is what
-# keeps this O(delta) in allocation: the delta is nearly always tiny while the
-# live set is O(block), so materialising the latter per trigger was quadratic.
-fn live_across_loop(in_scope_ord_rev: List String,
-                    i: Int, bl: BlockLive, rooted: List String,
+# Filter pending (in reverse-def order) to those still live, returning in
+# DEFINITION order so emitted IRRoots are deterministic.
+fn live_across_loop(pending_rev: List String, i: Int, bl: BlockLive,
                     acc: List String) -> List String =
-  match in_scope_ord_rev with
+  match pending_rev with
   | Nil -> acc
   | Cons v rest ->
-      if list_member(v, rooted) then live_across_loop(rest, i, bl, rooted, acc)
-      else if live_after_at(v, i, bl)
-      then live_across_loop(rest, i, bl, rooted, Cons(v, acc))
-      else live_across_loop(rest, i, bl, rooted, acc)
+      if live_after_at(v, i, bl)
+      then live_across_loop(rest, i, bl, Cons(v, acc))
+      else live_across_loop(rest, i, bl, acc)
 
-fn live_across(in_scope_ord_rev: List String, i: Int, bl: BlockLive,
-               rooted: List String) -> List String =
-  live_across_loop(in_scope_ord_rev, i, bl, rooted, Nil)
+fn live_across(pending_rev: List String, i: Int, bl: BlockLive) -> List String =
+  live_across_loop(pending_rev, i, bl, Nil)
 
 # Some allocating triggers store their operand registers only AFTER the
 # allocation that can fire GC, and (unlike @str_concat, which SPROUT_HANDLEs
@@ -898,28 +893,32 @@ fn op_exposes_operands(op: sprout_ir.IROp) -> Bool =
 fn op_operand_set(op: sprout_ir.IROp) -> Set =
   list_fold(\ (acc, u) -> set_insert(u, acc), set_empty(), op_uses(op))
 
-# Like live_across, but also keeps any in-scope value that is an operand of
+# Like live_across, but also keeps any pending value that is an operand of
 # this op (def order preserved, deduped by the single traversal).
-fn roots_across_loop(in_scope_ord_rev: List String,
-                     i: Int, bl: BlockLive, rooted: List String,
-                     operands: Set,
-                     acc: List String) -> List String =
-  match in_scope_ord_rev with
+fn roots_across_loop(pending_rev: List String, i: Int, bl: BlockLive,
+                     operands: Set, acc: List String) -> List String =
+  match pending_rev with
   | Nil -> acc
   | Cons v rest ->
-      if list_member(v, rooted) then roots_across_loop(rest, i, bl, rooted, operands, acc)
-      else if live_after_at(v, i, bl) || set_member(v, operands)
-      then roots_across_loop(rest, i, bl, rooted, operands, Cons(v, acc))
-      else roots_across_loop(rest, i, bl, rooted, operands, acc)
+      if live_after_at(v, i, bl) || set_member(v, operands)
+      then roots_across_loop(rest, i, bl, operands, Cons(v, acc))
+      else roots_across_loop(rest, i, bl, operands, acc)
 
-# Values to root across `op` that are NOT already rooted: those live after it,
-# plus — for operand-exposing allocating ops — its own heap operands.
-# O(in_scope * uses).
-fn roots_across(in_scope_ord_rev: List String, i: Int, bl: BlockLive,
-                rooted: List String, op: sprout_ir.IROp) -> List String =
+# Values to root across `op`: those pending that are live after it, plus — for
+# operand-exposing allocating ops — its own heap operands.
+#
+# Only PENDING values — defined since the last trigger, or seeded at block entry
+# if there was none — can need a push. One that was in scope at an earlier trigger
+# t and not pushed was dead after t and not t's operand; liveness only shrinks
+# within a block, so it stays dead, and an operand of a later trigger would have
+# been live after t. One that was pushed is either still rooted or was popped dead.
+# Scanning the whole scope instead, with a list_member against the root stack per
+# value, is cubic in block length (docs/gates.md §Compiling one long block).
+fn roots_across(pending_rev: List String, i: Int, bl: BlockLive,
+                op: sprout_ir.IROp) -> List String =
   if op_exposes_operands(op)
-  then roots_across_loop(in_scope_ord_rev, i, bl, rooted, op_operand_set(op), Nil)
-  else live_across(in_scope_ord_rev, i, bl, rooted)
+  then roots_across_loop(pending_rev, i, bl, op_operand_set(op), Nil)
+  else live_across(pending_rev, i, bl)
 
 # Emit one IRRoot per value (def order).  Each IRRoot consumes two fresh idx
 # slots (slot-name and discard-reg).  Result is prepended to acc (reverse).
@@ -991,14 +990,17 @@ fn push_pop_trigger(op: sprout_ir.IROp, to_push: List String, i: Int, bl: BlockL
       finish_trigger(i, bl, rooted1, idx1, prefix, Cons(op, acc1))
 
 # Per-op: a trigger pushes its need-delta, emits the op, then pops dead top values;
-# a non-trigger is emitted unchanged with the stack untouched.
-fn process_op(op: sprout_ir.IROp, i: Int, bl: BlockLive, in_scope_ord: List String,
+# a non-trigger is emitted unchanged with the stack untouched.  Also returns the
+# pending list to carry on: empty after a trigger, since it has seen them all.
+fn process_op(op: sprout_ir.IROp, i: Int, bl: BlockLive, pending: List String,
               rooted: List String, idx: Int, prefix: String, summary: Dict Bool,
-              acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, List String, Int) =
+              acc: List sprout_ir.IROp)
+    -> (List sprout_ir.IROp, List String, Int, List String) =
   if op_triggers_gc_summary(op, summary)
-  then push_pop_trigger(op, roots_across(in_scope_ord, i, bl, rooted, op),
-                        i, bl, rooted, idx, prefix, acc)
-  else (Cons(op, acc), rooted, idx)
+  then match push_pop_trigger(op, roots_across(pending, i, bl, op),
+                              i, bl, rooted, idx, prefix, acc) with
+       | (acc1, rooted1, idx1) -> (acc1, rooted1, idx1, Nil)
+  else (Cons(op, acc), rooted, idx, pending)
 
 # Pop all remaining roots BEFORE the terminator — emitting them after a terminator
 # would be invalid IR (nothing executes past a terminator).
@@ -1015,30 +1017,32 @@ fn finish_block(term_op: sprout_ir.IROp, rooted: List String, idx: Int, prefix: 
   match emit_block_end_pop(rooted, idx, prefix, acc) with
   | (acc1, idx1) -> (list_reverse(Cons(term_op, acc1)), idx1)
 
-# Carry both a reverse-definition-order list and dedup via list_member.
-fn add_def(name: String, ord: List String) -> List String =
-  if list_member(name, ord) then ord else Cons(name, ord)
-
+# Add op's heap def to pending (reverse-def order). No dedup: every name added
+# here is an LLVM local defined once per function, and `opt --passes=verify`
+# rejects a second def; nor can a seeded (live-in) name be defined in its own
+# block, which would be a use before its def.
 fn update_scope(op: sprout_ir.IROp, heap_origin: Set,
                 ord: List String) -> List String =
   match op_produces_simple_heap(op) with
-  | Just r -> add_def(r, ord)
+  | Just r -> Cons(r, ord)
   | Nothing ->
       match op with
       | sprout_ir.IRPhi r _ _ ->
           if set_member(r, heap_origin)
-          then add_def(r, ord)
+          then Cons(r, ord)
           else ord
       | _ -> ord
 
 # `i` is the op's position in the block, the index `bl.last_use` is keyed on.
 # `rooted` is the persistent root stack (head = top), empty at block entry.  The
 # last op in a block is its terminator: pop all remaining roots before it.
+# `pending` empties at each trigger BEFORE the trigger's own def is added: that
+# def is live across no earlier trigger, and must be seen at the next one.
 fn rewrite_ops(ops: List sprout_ir.IROp,
                i: Int,
                bl: BlockLive,
                heap_origin: Set,
-               in_scope_ord: List String,
+               pending: List String,
                rooted: List String,
                idx: Int,
                prefix: String,
@@ -1050,22 +1054,19 @@ fn rewrite_ops(ops: List sprout_ir.IROp,
       match rest with
       | Nil -> finish_block(op, rooted, idx, prefix, acc)
       | _ ->
-          match process_op(op, i, bl, in_scope_ord, rooted, idx, prefix, summary, acc) with
-          | (acc1, rooted1, idx1) ->
+          match process_op(op, i, bl, pending, rooted, idx, prefix, summary, acc) with
+          | (acc1, rooted1, idx1, pending1) ->
               rewrite_ops(rest, i + 1, bl, heap_origin,
-                          update_scope(op, heap_origin, in_scope_ord),
+                          update_scope(op, heap_origin, pending1),
                           rooted1, idx1, prefix, summary, acc1)
 
-fn seed_in_scope_loop(names: List String, ord: List String) -> List String =
-  match names with
-  | Nil -> ord
-  | Cons n rest -> seed_in_scope_loop(rest, add_def(n, ord))
-
-fn seed_in_scope(names: List String) -> List String =
-  seed_in_scope_loop(names, Nil)
+# Names arrive unique (from a Set), so the seed needs no dedup; reversed into
+# pending's reverse-def order.
+fn seed_pending(names: List String) -> List String =
+  list_reverse(names)
 
 # Filter a Set down to those names also present in `keep`, returning a List.
-# Used to seed in_scope_ord from (live_in ∩ heap_origin) at block entry.
+# Used to seed pending from (live_in ∩ heap_origin) at block entry.
 fn intersect_to_list(s: Set, keep: Set) -> List String =
   list_fold(\ (acc, x) -> if set_member(x, keep) then Cons(x, acc) else acc,
             Nil, set_to_list(s))
@@ -1083,7 +1084,7 @@ fn rewrite_block_full(b: sprout_ir.IRBlock,
                         0,
                         block_live_of(ops, compute_live_out(b, all_blocks, live_in_map)),
                         heap_origin,
-                        seed_in_scope(intersect_to_list(lookup_live(lbl, live_in_map), heap_origin)),
+                        seed_pending(intersect_to_list(lookup_live(lbl, live_in_map), heap_origin)),
                         Nil,
                         idx, prefix, summary, Nil) with
       | (new_ops, idx_out) -> (sprout_ir.IRBlock(lbl, new_ops), idx_out)
