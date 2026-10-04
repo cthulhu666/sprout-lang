@@ -441,8 +441,8 @@ fixture, not of the compiler. This is why there is now a **third fixture**
 computed twice, over 60→120 and over 120→240, and their ratio is bounded. Flat is 1.0 and quadratic
 2.0. The first bound was 15/10 on both counters, red-verified at **18/10** on the pre-conversion
 compiler for both objects and bytes, green at 11/10 and 13/10 after. It is now in hundredths, with
-objects at 112 and bytes at 125, and closures have their own arm at 125 — see the front-end and
-rooting paragraphs below for why.
+objects at 105 and bytes at 106, and closures have their own arm at 125 — see the front-end,
+rooting and fixture paragraphs below for why.
 
 A shape arm can go vacuous the same way a ceiling can, and the first version of this one did: it only
 tested `-gt`, so a truncated `huge` fixture collapsed its delta to zero, read as *perfectly* flat, and
@@ -476,8 +476,7 @@ the walk took `check` to a flat 976 objects per element, and the ratio to 107/10
 
 That is also why the arm moved to **hundredths**: tenths floored 119 and 107 to 11 and 10, too close
 to set a bound between. Objects were bounded at 112 and bytes at 150. The last 7 in the objects figure
-comes from the fixtures, not a pass: they number elements `1..n`, so each doubling adds elements one
-digit longer to lex.
+was blamed on the fixtures' digits; it was the fixtures' headers (below).
 
 **The rooting pass was cubic, and the gate read it as flat.** `--emit-ir` took 4.9 s at 480 elements
 and 37 s at 960. At every trigger `roots_across` walked every value in scope and ran `list_member`
@@ -491,8 +490,17 @@ after it, and liveness only shrinks within a block; a value pushed is still root
 Scanning just those gives byte-identical IR, 36 closures per element at every size, and 0.34 s at
 960 elements. The new **closure growth arm** bounds it at 125/100, and bytes tightened to 125. That
 arm sees the comparisons, not the walk: a rewrite that drops `list_member` but still visits the
-whole scope per trigger allocates no closure and would pass. Bytes still grow 120/100 in the back
-half (`BACKLOG`).
+whole scope per trigger allocates no closure and would pass.
+
+**The fixtures differed in more than element count.** Profiled by allocation site, the remaining
+byte growth had two sources. `ir_lowering.walk_ops_for_strs` appended each string global to the
+function's growing globals text, 8,550 → 17,088 bytes per element: one literal per element, so
+quadratic. And `rooting_block_huge.sprout` had a three-line longer header comment than its siblings,
+while `strip_headers` re-scanned from byte 0 at every header line, so those lines read as 901 bytes
+per element of growth — and as the objects arm's 7, which this entry had put down to the digits.
+Collecting the globals as parts and joining once, scanning the header once, and making the headers
+identical took bytes to 102/100 and objects to 100/100. The gate now fails if the headers differ,
+and the bounds are 105 (objects) and 106 (bytes).
 
 The fix is `ListBuilder IROp` rather than a hand-kept reversed list, because the file was *already*
 carrying both conventions under one type: `translate_expr` held `cur_ops` in source order while

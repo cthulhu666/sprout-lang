@@ -786,11 +786,6 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   Also `set_remove`: it reinserts every element into a fresh set where an AVL delete is already
   available — `NativeSet` IS the `Map` BST with value 0, and `map_remove` calls `bst_remove_node`.
   O(n) allocations instead of O(log n), and it needs a `native_set_remove` extern, so ASK FIRST.
-- [ ] `P3` **The back half's BYTES per element grow with block length.** After `--phase recheck`,
-  arena bytes per element go 51 KB → 61 KB per doubling (120/100) while objects are flat; the
-  front end's 107/100 is the fixtures' longer digits. It was 130/100 overall until the rooting scan
-  stopped building a closure per comparison. Persistent-map path copying (O(log n) nodes per
-  insert) would fit, but is unverified. It bounds the byte growth arm at 125.
 
 - [ ] `P2` **A `Dict` key is interned permanently, so computed keys leak for the process's life.**
   `map_set` routes every key through `intern_string`, which mallocs outside the arena and never

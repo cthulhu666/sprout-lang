@@ -6,8 +6,9 @@
 # at every op.  This is the shape of the generated vector suites
 # (tests/stdlib/test_bigint_vectors.spr), reduced to what the gate needs.
 #
-# The gate subtracts this file's counts from its larger twin, so the two MUST
-# differ only in the number of elements.  Change one, change both.
+# Three sizes that MUST differ only in element count, this header included: the
+# gate reads the differences between them, so anything else that differs is
+# measured as per-element cost.  Change one, change all three.
 
 fn rows() -> List String =
   [

@@ -33,6 +33,28 @@ fn make_tco_fn() -> sprout_ir.IRFunction =
            Cons(sprout_ir.IRTcoBack(Cons(("%p.slot", "i64", sprout_ir.param_ssa("p")), Nil), "%sp", "tco_loop"), Nil))),
     Nil)))
 
+# Three string constants over two blocks, collected from index 5.  The walk
+# gathers its text as reversed parts and joins once, so a missed reverse would
+# emit the globals backwards; this pins order, numbering and the table.
+let str_blocks =
+  Cons(sprout_ir.IRBlock("entry",
+         Cons(sprout_ir.IRStrConst("%a", "%a_raw", "x"),
+         Cons(sprout_ir.IRStrConst("%b", "%b_raw", "yy"),
+         Cons(sprout_ir.IRBr("next"), Nil)))),
+  Cons(sprout_ir.IRBlock("next",
+         Cons(sprout_ir.IRStrConst("%c", "%c_raw", "zzz"),
+         Cons(sprout_ir.IRRet("%c"), Nil))),
+  Nil))
+
+fn global_text(idx: Int, s: String) -> String =
+  match ir_lowering.emit_str_global(idx, s) with
+  | (decl, _, _) -> decl
+
+fn table_names(raw: String, table: Dict (String, Int), gname: String, len: Int) -> Bool =
+  match dict_get(raw, table) with
+  | Just (g, l) -> g == gname && l == len
+  | Nothing -> false
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -63,5 +85,15 @@ fn main() -> Unit !{IO} =
       string.contains(tco_ir, "call void @llvm.stackrestore(ptr %sp)"))
     assert_true(state, "tco back-edge branches to the loop header",
       string.contains(tco_ir, "br label %tco_loop"))
+
+    match ir_lowering.walk_blocks_for_strs(str_blocks, 5, dict_empty()) with
+    | (text, next_idx, table) ->
+        do
+          assert_true(state, "string globals come out in document order, numbered from 5",
+            text == global_text(5, "x") ++ global_text(6, "yy") ++ global_text(7, "zzz"))
+          assert_true(state, "the walk returns the next free string index",
+            next_idx == 8)
+          assert_true(state, "the table maps each raw name to its global and byte length",
+            table_names("%a_raw", table, "@.str.5", 2) && table_names("%c_raw", table, "@.str.7", 4))
 
     summary(state)
