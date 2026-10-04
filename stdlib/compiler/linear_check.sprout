@@ -125,7 +125,7 @@ fn head_type_name(t: types.Type) -> String =
   | types.TConst name -> types.type_id_name(name)
   | types.TApp base _ -> head_type_name(base)
   | types.TVar name -> types.tyvar_identity(name)
-  | types.TTuple items -> "Tuple" ++ int_to_string(list_length(items))
+  | types.TTuple items -> types.tuple_head(list_length(items))
   | _ -> types.type_to_string(t)
 
 fn type_is_linear(t: types.Type, env: Dict types.Scheme) -> Bool =

@@ -499,34 +499,41 @@ check (`check_context_constraint`, #423), never rejected. The three faults above
 stay closed — `_` is skipped as unnamed, a depth mismatch is reported first, and
 `Baz k` is the exempt case.
 
-### One hidden-dictionary slot per class and head constructor
+### A hidden-dictionary slot is keyed by its whole constraint
 
-A constrained function's hidden dictionary parameters are keyed by class name plus the
-OUTERMOST constructor of each constraint argument — `lowering.constraint_key_str`,
-mirrored by `resolve`'s `EvForward` key and by the existential witness seeding. So
-`where Boxed (Tagged k), Boxed (Tagged j)` gives both constraints the key
-`Boxed_Tagged`, one slot for two obligations: the caller passes two dictionaries and
-the body reads one of them twice.
+A constrained function's hidden dictionary parameters are found under
+`ast.dict_slot_key`: the class, then each argument in full, variables by source name —
+`ToString_a`, `ToString_List(a)`, `ToString_(a,b)`. `lowering.build_hidden_for_constraints`
+keys `ctx_fwd` with it, `resolve`'s `EvForward` uses it, and so do the existential witness
+seeding and the value-position (eta) lookups. Instance keys are a different function,
+`constraint_key_str`, and name the head constructor only: one instance per head is correct.
 
-`infer.check_indistinct_constraints` rejects that shape rather than letting it
-miscompile. Making it WORK means putting the arguments' identity into that key in all
-four places that build it — a change to the dictionary-passing key format, which is
-why it is a backlog entry and not part of this rule.
+It was head-only once (`ToString_List`), and then a body declaring `ToString (List a)`
+answered every `ToString (List …)` request from that slot — a concrete `List String`
+included — and `where Ord (Maybe a), Eq (Maybe b)` had two obligations on one slot.
 
-The same coarseness let ONE forwarded constraint serve a different use: with
-`where Eq (Maybe a)`, a `p == q` on `Maybe b` (or `Maybe Int`) found the key
-`Eq_Maybe` and took `a`'s dictionary. `resolve` therefore keeps each forwarded
-constraint's WRITTEN arguments beside its key (`Forwarded`) and forwards only when
-the use does not conflict with them (`resolve.forwards`); otherwise the use takes the
-instance and its own context, which the context check then requires to be supplied.
-The key format is unchanged, so lowering's `ctx_fwd` needs no change. Two details
-keep the comparison honest: the written arguments are stored with type aliases
-expanded (`resolve.expand_aliases`, reading the `@aliasty:` markers), since use
-sites arrive expanded; and only `_` and `$t…` inference variables count as unknown —
-an existential (`$ex_…`, a `$sk…` skolem), an unannotated slot's placeholder or a
-headerless file's own type (`$entry.Never`) is a type of its own. A superclass can also put two arguments on one key (`where
-Ord (Maybe a), Eq (Maybe b)`); `resolve.fwd_slot_clash` rejects that, the expanded
-twin of `check_indistinct_constraints`.
+`resolve` groups a body's slots by class and head (`Forwarded`), each with its WRITTEN
+arguments, aliases expanded (`resolve.expand_aliases`, reading the `@aliasty:` markers),
+and `forwarded_slot` picks the one a use means: the exact key, else the one slot whose
+arguments the use does not conflict with. Only `_` and `$t…` inference variables count as
+unknown — an existential (`$ex_…`, a `$sk…` skolem), an unannotated slot's placeholder or
+a headerless file's own type (`$entry.Never`) is a type of its own. A use that conflicts
+with every slot (`Maybe Int` beside `where Eq (Maybe a)`) takes the instance and its own
+context, which the context check then requires to be supplied; one that fits two slots
+forwards neither.
+
+A request finds a slot by name, so every producer names its variables:
+`named_typeexpr` and `type_to_typeexpr_with_prog_vars` in `infer` (through `@fwdvar`, then
+the signature variable the substitution now identifies it with, `sig_var_now_named`), and
+`@eta_fwdvar` markers for the value-position paths in `resolve.method_ref_evidence` and
+`lowering.eta_slot_key`, written after the body is inferred under both the seeded and the
+final variable.
+
+`where Boxed (Tagged k), Boxed (Tagged j)` would get two slots, but
+`infer.check_indistinct_constraints` still rejects the written pair (spec-v0 "Two
+constraints of one class must not differ only in their arguments"): the value-position
+fallback that takes the only slot carrying a method (`lowering.find_forwarded_method_any`)
+cannot pick between two.
 
 **A dictionary rebuilt after inference may only fill holes.** The post-pass
 (`settled_constrained_dict`, `settled_dispatch_call`) rebuilds a dict whose recorded
@@ -541,18 +548,13 @@ argument the head-directed scan finds.
 **Only an exact path names a variable.** A dict built from the callee's own variable
 renders its type with `named_typeexpr`, so a variable reads as the program name
 `resolve` checks (`Eq a`). A head-directed scan (`first_concrete_typed_arg_typeexpr`
-and kin) guesses — a nested `where ToString (Box (List b))` or a tuple constraint has
-no variable to read — and renders with the unnamed `type_to_typeexpr`, so its
-variables stay `_`. A named guess passed `resolve` as forwarded and ran the other
-argument's dictionary; a hole lowers to the poison thunk, which fails loudly
-(`tests/stdlib/compiler/test_guessed_dict_stays_hole.spr`). The post-pass never
-rebuilds from a scan: a token with no head or no arguments keeps its hole
-(`rebuilt_constrained_dict`). One gap remains: `resolve.forwards` reads a `_` as
-no conflict, so when the caller's own `where` has the guess's head (`where ToString
-(c, Int)` against a guessed `ToString (_, Int)`) the guess is forwarded to it. That
-is right when the caller has one such variable and silently wrong when the guess
-came from another; refusing it would break the first to fix the second. The fix is
-an exact dict (BACKLOG, nested or tuple callee constraint).
+and kin), left for a token with no head and a variable token the call cannot decode,
+guesses and renders with the unnamed `type_to_typeexpr`, so its variables stay `_`: a
+named guess passed `resolve` as forwarded and ran the other argument's dictionary,
+while a hole lowers to the poison thunk, which fails loudly. Nested and tuple
+constraints carry their arguments in the token and are never guessed
+(`run/dispatch_compound_exact_not_guessed`). The post-pass never rebuilds from a scan:
+a token with no head or no arguments keeps its hole (`rebuilt_constrained_dict`).
 
 **An unpacked existential is found by position.** `infer_pattern` keeps a pattern
 variable's type under its name and under its position (`bind_pattern_var`). The
@@ -577,54 +579,63 @@ there emits no dictionary. That one is placed by position, at the head of the
 arguments, so `maybe_forward_input_dispatch` reads it from there — not from "the
 call carries some dictionary", which a method-level `where` makes true without it.
 
-### The compound-head constraint token, and why it carries `#any`
+### The compound-head constraint token
 
 A constrained `fn`'s hidden dictionaries come from its Scheme's `(head_token, class)`
 list. A compound head is stored as:
 
 ```
-#app:<Head>:<t1>,<t2>,...     one constraint-var token per WRITTEN argument
-#app:<Head>                   the head alone — a pre-v9 interface only
+#app:<Head>:<t1>,<t2>,...     one token per WRITTEN argument
 ```
 
-Each `<ti>` is one of three things: `#pos:<k>` against the callee's generalized binder
-list, a **type constructor's own name** where the constraint fixed that argument
-(`where Sh (Box String)` writes `String`), or **`#any`** where the argument is neither
-— a variable the body pinned to a type the scheme cannot name. `#any` is the part
-worth understanding: it carries no identity, so why write it? For the COUNT. Two
-independent things read this token, and they fail differently:
+Each `<ti>` is `#pos:<k>` against the callee's generalized binder list (a source name
+in a monomorphic or `.iface` scheme), a **type constructor's own name** where the
+constraint fixed that argument (`where Sh (Box String)` writes `String`), a **nested**
+`[<head>;<arg>;…]` for a structured argument (`where ToString (List (Maybe b))` writes
+`[Maybe;#pos:1]`, and a variable head is a token too, so `List (f a)` writes
+`[#pos:0;#pos:1]`; `types.nested_arg_token` — no comma, so the top-level split on `,`
+holds, and no space or parenthesis, so the token stays one `.iface` atom), or `#any` for
+an arrow, thunk or effect, which names no head.
 
-- `resolve_compound_head_tdict` reads the *positions*, to rebuild the constraint's
-  own head at this call — `where Boxed (Tagged j)` becomes `Tagged String`. This is
-  what stops `second_only(x: Tagged k Int, y: Tagged j Int)` taking `x`'s dictionary
-  for `y`'s value. It needs every argument named, so one `#any` sends it to the scan.
-- `resolve_arg_scanned_tdict` reads the *count*, as `want_arity`. The scan matches a
-  whole argument — the class variable APPLIED — and the count is how much of it is
-  surplus. Dropping the arguments entirely when one was `#any` lost the count too,
-  and `where Sh (Box String)` then bound the instance's `c` to `Int`.
+`compound_head_tdict` decodes every argument at the call (`token_typeexpr`) — a variable
+to what the substitution made of it, named as the enclosing declaration wrote it
+(`named_typeexpr`; an existential's skolem by its witness) — and rebuilds the
+constraint's own head over them: `where Boxed (Tagged j)` becomes `Tagged String`,
+whichever parameter is headed by `Tagged`. Nothing is taken from "the first argument
+headed by the constructor", the scan this replaced: beside `p: (a, b)`, `ToString ((c,
+d))` is not `p`'s, and in `xs: List (List (Box a))` the `List (Box a)` is not `xs`'s type.
+A variable still open at the call is a hole (`_`), and the post-pass rebuilds the
+constraint from the same tokens once the body is inferred (`compound_from_callee`): a later
+unification (a lambda parameter, say) can still make it a declared variable, and one never
+bound stays `_`, whose dictionary nothing reads.
+The result is taken when it has a hole, when the caller declares exactly it — `seed_compound_marker` records
+each compound constraint a body declares, and each transitive superclass of it, as `@fwdhead:` plus its
+slot key (`ast.dict_slot_key`) — or when the class has an instance for the head, looked up
+under the constraint's own spelling of it (qualified when bundled, `main.Pair`; short on
+the env path, below). `resolve` then forwards the exact slot, or builds the instance from
+its context: a context constraint on a variable the call named must be one the body
+forwards (`check_context_constraint` rejects it otherwise), and one on `_` is never read. A
+self-call's tokens are the caller's own source names already. With neither, the result is
+Nothing and the call fails at codegen (BACKLOG: "A compound constraint with no instance for
+its head"). Type aliases are expanded in every `where` clause before any of this
+(`ast.expand_alias_constraints`), so a slot key and a rebuilt type spell one type alike.
 
-A fixed argument records its own name rather than `#any` for the first reader's sake,
-not the second's. `Box String` names which parameter to dispatch on just as precisely
-as a variable does, and recording `#any` there left the choice to the scan — which
-takes the first parameter the head constructor matches, so `via(a: Box Bool Int, b:
-Box String Int) where Sh (Box String)` read `b`'s String through `a`'s `ToString Bool`
-witness.
+Four producers write the token and they must agree: `constraint_pos_tokens` (and
+`constraint_source_tokens`, with `Nil` binders, for the provisional scheme);
+`canonicalize_constrained_constraints_acc`, whose arguments must go through
+`prog_to_fresh`/`s2` as the head variable beside them does; and
+`iface_codec.method_constraint_tokens` for class-method schemes, by name, since that
+scheme quantifies the class parameters only.
 
-So the token degrades in two stages rather than one: positions, then count, then
-nothing. Both stages are covered by `tests/conformance/run/dispatch_compound_head_*`.
+The `.iface` wire form moved with this token: v9 added the arguments; v11 made a tuple
+a compound head (`#app:Tuple2:…`, rebuilt as the tuple itself — it was `#none`, so the
+first concrete argument's dictionary read the whole tuple) and nested a structured
+argument where `#any` stood.
 
-Three producers write head tokens and they must agree. `constraint_pos_tokens` is
-the one; `constraint_source_tokens` delegates to it with `Nil` binders, because
-`constraint_var_token` already falls back to the source name when the variable has
-no index — which is exactly what an ungeneralized provisional scheme wants.
-`canonicalize_constrained_constraints_acc` keeps its own writer only because its
-arguments must be canonicalized through `prog_to_fresh`/`s2`, as the head variable
-beside them is; a source name would not survive the generalize/instantiate renaming.
-`iface_codec.method_constraint_tokens` mirrors the format for class-method schemes,
-by name, since that scheme quantifies the class parameters only.
-
-Widening this token changed the `.iface` wire form, so it is v9. Earlier bumps did
-the same, one of them (v3→v4) to this very field.
+Pinned by `tests/conformance/run/dispatch_compound_*`, with `dispatch_compound_shapes`
+covering every shape at once; the callers that must be rejected by
+`type_error/compound_head_forward_*`, `compound_head_headed_*` and
+`compound_head_nested_forward_other_var`.
 
 ## Env-path type names are SHORT, and the marker families depend on it
 

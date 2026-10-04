@@ -26,14 +26,14 @@ import stdlib.string as string
 # (ast/source/string only) so lint_rules.sprout can reuse the same Vec-context
 # computation without depending on the typechecker.
 
-# Alias-headed instance heads are expanded FIRST, before anything downstream reads
-# a head: both checker entry points reach every later phase through here, so this is
-# the one place that keeps infer's, resolve's and lowering's instance keys agreeing
-# (ast.expand_alias_instance_heads).
+# Aliases in instance heads and `where` clauses are expanded FIRST, before anything reads
+# a constraint: both checker entry points reach every later phase through here, so this is
+# the one place that keeps infer's, resolve's and lowering's keys agreeing
+# (ast.expand_alias_constraints).
 export fn desugar_program(prog: ast.Program) -> ast.Program =
   match prog with
   | ast.Program decls pos ->
-      desugared_program(ast.expand_alias_instance_heads(decls), pos)
+      desugared_program(ast.expand_alias_constraints(decls), pos)
 
 fn desugared_program(decls: List ast.Decl, pos: source.SourcePos) -> ast.Program =
   ast.Program(desugar_decls_i(decls, build_fn_sig_index(decls)), pos)
