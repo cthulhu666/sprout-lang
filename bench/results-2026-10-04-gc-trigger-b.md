@@ -103,8 +103,9 @@ Q5); the runs above never set it.
 - The game's allocation volume varies up to 7× between runs (2.9M–20.3M in the window), which is
   why it is compared per allocation.
 - `http_log_middleware` exits on `Int overflow in +` in `wall_loop` in every arm, which sums
-  `time.wall_micros()` (~1.76e15) across iterations. That is a bench bug, not a GC one. Its rows
-  cover the run up to there, and the arms' allocation counts differ by 1.3% for a reason not
+  `time.wall_micros()` (~1.76e15) across iterations. That is a bench bug, not a GC one, filed as
+  `BACKLOG.md` **"`http_log_middleware` overflows in `wall_loop`"**. Its rows cover five of six
+  phases, and the arms' allocation counts differ by 1.3% for a reason not
   established.
 - The prototype is not the implementation: the real build is measured again before it lands.
 

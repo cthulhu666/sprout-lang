@@ -262,7 +262,8 @@ work-per-garbage near `k` whatever the live set is.
   added regions, `gc_roots` and nqueens run identical cycles, and the compiler goes 98 → 103 MB.
 - **The signal separates.** Free slots walked per object freed (FREE/swept) is 0.00–1.46 on every
   ordinary workload measured and **52–76** on the game; pinning the game's threshold drops it to 0.25
-  (§3.1, `bench/results-2026-10-03-gc-walk.md`). Under the damped floor it settles at `k − 1`.
+  (§3.1, `bench/results-2026-10-03-gc-walk.md`). Under the damped floor it settles at
+  `k·free / (live + free) − 1`: `k − 1` when the free pool dwarfs the live set, as on the game.
 - **It terminates, and the undamped form does not.** `g_freelist` is exact-fit (`BACKLOG.md`
   **"The class freelists are exact-fit"**), so take `U` free slots no allocation can reuse. A
   cycle allocates `(live + U + A) / k` into the reusable pool `A`; allocations `A` cannot hold bump
@@ -325,8 +326,9 @@ HotSpot's `GCTimeRatio`, Go's limiter.
 ### 6.5 Recommendation
 
 **§9 item 2 is now measured** (`bench/results-2026-09-30-gc-floor.md`) and A's price is no longer
-a guess: 3.2× peak RSS and +5.3% wall on nqueens, 1.9× RSS at no wall cost on http_log_middleware,
-nothing on math, no resolvable effect on the socket server, and a ~20× rise in per-collection
+a guess: 3.2× peak RSS and +5.3% wall on nqueens, 1.9× RSS at no wall cost on http_log_middleware
+(over five of its six phases in both arms: the sixth has trapped on Int overflow since 2026-09-23,
+`BACKLOG.md` **"`http_log_middleware` overflows in `wall_loop`"**), nothing on math, no resolvable effect on the socket server, and a ~20× rise in per-collection
 pause wherever a workload was floor-pinned. **§9 item 1 is measured too**: the game reads 52–76
 free slots walked per object freed, against at most 1.46 elsewhere (§6.2). **And B has run**, on
 a prototype (`bench/results-2026-10-04-gc-trigger-b.md`): the damped floor cuts the game's GC per
@@ -376,11 +378,12 @@ the error the first two shared; the third came from running B instead of reading
 live set is under `floor / factor`. The bound is `floor × average slot bytes` — the trigger fires
 *at* the threshold (`g_managed_heap_count >= g_gc_threshold`), so peak managed objects equal the
 floor, not the floor times the factor. Programs setting `SPROUT_GC_THRESHOLD` keep full control
-under Option A, since it writes both the threshold and its base; under B the interaction has to be
-specified rather than inherited.
+under Option A, since it writes both the threshold and its base, and under B, because setting it
+turns B off (§12 Q5).
 
 **The pause side, measured.** A floor-pinned workload's per-collection pause scales with the floor:
-at 100,000, nqueens goes 38 → 818 µs p50 and http_log_middleware 25 → 509 µs, both ~20×,
+at 100,000, nqueens goes 38 → 818 µs p50 and http_log_middleware 25 → 509 µs (five of six
+phases, §6.5), both ~20×,
 while collecting ~25× less often. GC time falls in both cases on a cycles × p50 proxy; jitter
 rises. For #407's own
 constituency — a program holding a frame budget — 818 µs is 5% of a 16.7 ms frame, so this is
@@ -484,7 +487,10 @@ under B — today's default, so its readings do not move, and B is off for it (�
 
 ## 9. Measurement plan
 
-**This precedes choosing an option, not implementing one.**
+Items 1 and 2 preceded the choice; items 3 and 4 **precede landing B**, measured on the build
+rather than the prototype, which ran the compiler once and only #407's scene. Make them one script
+over arms × workloads, reporting per allocation, so the next trigger change re-runs it rather than
+re-deriving it by hand.
 
 1. ~~**Measure work-per-garbage directly.**~~ **DONE** — `walked=` on `SPROUT_DEBUG_GC`'s cycle
    line, gated by `just gc-walk-check`; readings in `bench/results-2026-10-03-gc-walk.md`. B
@@ -498,7 +504,8 @@ under B — today's default, so its readings do not move, and B is off for it (�
 3. **The compiler** (`ast_to_ir.sprout` emit, 3 reps interleaved), in `gc-generational-v0.md`
    §5.3's table format so the two changes stay comparable. The RSS side is the risk: −19% wall for
    +18% RSS was accepted once; nothing here should spend that budget again.
-4. **The reporter's workload** — `uncharted-suns` `game/app.sprout`, both scenes.
+4. **The reporter's workload** — `uncharted-suns` `game/app.sprout`, both scenes. The in-system
+   scene is the one unread workload that could still reverse §6.5.
 
 **Report both axes on every row.** #407 exists because a change was evaluated on pause alone.
 
@@ -510,6 +517,7 @@ under B — today's default, so its readings do not move, and B is off for it (�
 - **A termination test**: the bench note's adversary — a dead class with a trickle of demand,
   and live objects pinning the churn's fresh regions — must reach a fixed free pool. The
   per-class repair fails it by growing ~100,000 slots a cycle, so it tells the two forms apart.
+  Counts are deterministic, so this and the revert check below are gates, not benchmarks.
 - **`gc-walk-check` must pin `SPROUT_GC_THRESHOLD=4096` in its probes** when B lands (§8.4). It
   tests the counter, and B removes the walk its known answer needs. The pin is today's default and
   turns B off (§12 Q5), so the gate's readings stay where they are.

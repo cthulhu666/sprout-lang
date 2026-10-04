@@ -2175,6 +2175,12 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   `live + (live + free) / 3`. A prototype cut the game's GC per allocation 12–16× with no added
   regions, left `gc_roots` and nqueens unchanged and cost the compiler +4% RSS
   (`bench/results-2026-10-04-gc-trigger-b.md`). Design and open questions: `docs/gc-trigger-v0.md`.
+- [ ] `P3` **`http_log_middleware` overflows in `wall_loop`.** The bench sums `time.wall_micros()`
+  (~1.76e15) over 1,000,000 iterations in `bench/http_log_middleware/`, so the fifth of its six
+  phases traps on Int overflow (since 61fd1617, 2026-09-23) and `fmt_loop` never runs. Every GC
+  figure taken from it since then covers five phases: `bench/results-2026-09-30-gc-floor.md`,
+  `bench/results-2026-10-04-gc-trigger-b.md`. Fix: accumulate something bounded, then re-read
+  those notes' rows.
 - [ ] `P3` **The GC cycle timer measures elapsed time with a non-monotonic clock.**
   `sprout_gc_collect_with_reason` brackets the collection with `sprout_now_micros`
   (`gettimeofday`/`CLOCK_REALTIME`), while that function's neighbour documents the rule it breaks:
