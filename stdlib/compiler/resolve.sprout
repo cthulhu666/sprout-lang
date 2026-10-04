@@ -55,11 +55,12 @@ fn tables_super(t: Tables) -> Dict (List String) =
 fn tables_class_params(t: Tables) -> Dict String =
   match t with | Tables _ _ _ _ p -> p
 
-# The constraints a declaration forwards as hidden dictionaries: constraint key →
-# the type arguments it was WRITTEN with. Keys hold only class and head constructor
-# (one hidden slot per pair — docs/compiler-internals.md), so the arguments are
-# what tell `Eq (Maybe a)` from `Eq (Maybe b)`; see forwards.
-type alias Forwarded = Dict(List ast.TypeExpr)
+# The constraints a declaration forwards as hidden dictionaries, grouped by class and
+# head constructor (constraint_key_str): each slot's key (ast.dict_slot_key, one slot
+# per whole constraint) with the arguments it was written with, aliases expanded.
+# Two slots can share a group (`Ord (Maybe a)` brings `Eq (Maybe a)` beside a written
+# `Eq (Maybe b)`); see forwarded_slot.
+type alias Forwarded = Dict(List (String, List ast.TypeExpr))
 
 # What an instance context's type-variable constraint is checked against. In a
 # declaration body it must be one the declaration forwards (CoverFrom its table),
@@ -77,14 +78,32 @@ type DeclKind =
   | InFn
   | InInstanceMethod (List String)
 
-# The declaration forwards THIS constraint, not just one sharing its key. A written
-# variable or a concrete type that differs from what the `where` wrote is a
-# different constraint; `where Eq (Maybe a)` used to serve `Maybe b` and `Maybe Int`
-# with `a`'s dictionary. An unnamed use-site position (`_`, an inference variable)
-# is not evidence of a difference.
-fn forwards(key: String, type_args: List ast.TypeExpr, fwd: Forwarded) -> Bool =
-  let Just written = dict_get(key, fwd) else false
-  in args_conflict(type_args, written) == false
+# The slot the declaration forwards for THIS constraint, not just one sharing its class
+# and head. A written variable or a concrete type that differs from what the `where`
+# wrote is a different constraint; `where Eq (Maybe a)` used to serve `Maybe b` and
+# `Maybe Int` with `a`'s dictionary. An unnamed use-site position (`_`, an inference
+# variable) is not evidence of a difference, so it takes the one slot it fits, and none
+# when it fits two.
+fn forwarded_slot(class_bare: String, type_args: List ast.TypeExpr, fwd: Forwarded) -> Maybe String =
+  let Just slots = dict_get(constraint_key_str(class_bare, type_args), fwd) else Nothing
+      exact = ast.dict_slot_key(class_bare, type_args)
+  in
+    if any(\s -> slot_key(s) == exact, slots) then Just(exact)
+    else
+      match list_filter(\s -> args_conflict(type_args, slot_args(s)) == false, slots) with
+      | [(key, _)] -> Just(key)
+      | _ -> Nothing
+
+fn slot_key(s: (String, List ast.TypeExpr)) -> String =
+  let (key, _) = s
+  in key
+
+fn slot_args(s: (String, List ast.TypeExpr)) -> List ast.TypeExpr =
+  let (_, written) = s
+  in written
+
+fn forwards(class_bare: String, type_args: List ast.TypeExpr, fwd: Forwarded) -> Bool =
+  forwarded_slot(class_bare, type_args, fwd) != Nothing
 
 fn args_conflict(uses: List ast.TypeExpr, written: List ast.TypeExpr) -> Bool =
   match (uses, written) with
@@ -208,51 +227,6 @@ fn te_drop(xs: List ast.TypeExpr, n: Int) -> List ast.TypeExpr =
     | [] -> []
     | [_ | rest] -> te_drop(rest, n - 1)
 
-# Two constraints of one declaration that claim the same hidden-dictionary slot with
-# different arguments. infer.check_indistinct_constraints rejects the written pair;
-# a superclass brings its own (`Ord (Maybe a)` brings `Eq (Maybe a)`) and only shows
-# up once expanded, here. Lowering keeps one dictionary per slot, so one of the two
-# would be used for both.
-fn fwd_slot_clash(constraints: List ast.TypeConstraint, tables: Tables) -> Maybe String =
-  clash_walk(constraints, tables, dict_empty())
-
-fn clash_walk(constraints: List ast.TypeConstraint, tables: Tables,
-              seen: Dict (List ast.TypeExpr, String)) -> Maybe String =
-  match constraints with
-  | [] -> Nothing
-  | [ast.TypeConstraint class_name type_args | rest] ->
-      match clash_in(types.class_with_transitive_supers(class_name, tables_super(tables)),
-                     constraint_display(class_name, type_args),
-                     list_map(\a -> expand_aliases(a, tables_env(tables)), type_args), type_args, seen) with
-      | ClashFound msg -> Just(msg)
-      | ClashNone seen2 -> clash_walk(rest, tables, seen2)
-
-type ClashStep =
-  | ClashFound String
-  | ClashNone (Dict (List ast.TypeExpr, String))
-
-fn clash_in(effs: List String, origin: String, expanded: List ast.TypeExpr, type_args: List ast.TypeExpr,
-            seen: Dict (List ast.TypeExpr, String)) -> ClashStep =
-  match effs with
-  | [] -> ClashNone(seen)
-  | [eff | rest] ->
-      match dict_get(constraint_key_str(string.substring_after_last(eff, "."), type_args), seen) with
-      | Just (earlier_args, earlier_origin) ->
-          if args_conflict(expanded, earlier_args) || args_conflict(earlier_args, expanded)
-          then ClashFound("`" ++ earlier_origin ++ "` and `" ++ origin ++ "` both need `"
-                            ++ string.substring_after_last(eff, ".") ++ "` for `"
-                            ++ string.join("`, `", list_map(te_display, earlier_args)) ++ "` and for `"
-                            ++ string.join("`, `", list_map(te_display, expanded))
-                            ++ "`, which share one hidden-dictionary slot; the body would use a single "
-                            ++ "dictionary for both. Constrain one variable, or use distinct classes")
-          else clash_in(rest, origin, expanded, type_args, seen)
-      | Nothing ->
-          clash_in(rest, origin, expanded, type_args,
-            dict_set(constraint_key_str(string.substring_after_last(eff, "."), type_args), (expanded, origin), seen))
-
-fn constraint_display(class_name: String, type_args: List ast.TypeExpr) -> String =
-  string.join(" ", Cons(string.substring_after_last(class_name, "."), list_map(te_display_atom, type_args)))
-
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -330,23 +304,22 @@ fn check_constraint(
           # Only diagnose constraints whose head is a concrete type constructor
           # (uppercase head). A lowercase/`_`/non-letter head is a type variable —
           # forwarded/polymorphic, resolved as a hidden parameter by lowering.
-          if head_is_concrete(head_arg) == false then Nothing
+          if declares(string.substring_after_last(class_name, "."), type_args, cover) then Nothing
+          else if head_is_concrete(head_arg) == false then Nothing
           else
             if instance_exists(string.substring_after_last(class_name, "."), type_args, head_arg, tables)
             then check_context(constraint_key_str(string.substring_after_last(class_name, "."), type_args),
-                               class_name, head_arg, type_args, pos,
-                               cover_below(constraint_key_str(string.substring_after_last(class_name, "."), type_args),
-                                           type_args, cover),
-                               tables)
+                               class_name, head_arg, type_args, pos, cover, tables)
             else Just((pos,
               "No instance of " ++ string.substring_after_last(class_name, ".") ++ " for " ++ type_expr_head_name(head_arg)))
 
-# A dictionary the declaration forwards arrives whole, so its context is not this
-# body's to supply. Decided as produce_one_class decides EvForward.
-fn cover_below(key: String, type_args: List ast.TypeExpr, cover: VarCover) -> VarCover =
+# A dictionary the declaration forwards arrives whole, context included, so no instance
+# has to exist for it and its context is not this body's to supply. Decided as
+# produce_one_class decides EvForward.
+fn declares(class_bare: String, type_args: List ast.TypeExpr, cover: VarCover) -> Bool =
   match cover with
-  | CoverByCaller -> CoverByCaller
-  | CoverFrom _ fwd_keys -> if forwards(key, type_args, fwd_keys) then CoverByCaller else cover
+  | CoverByCaller -> false
+  | CoverFrom _ fwd_keys -> forwards(class_bare, type_args, fwd_keys)
 
 # An instance exists if a bundled decl provides it OR the checker env carries an
 # @inst: marker for it (instances from imported modules whose decls are not
@@ -475,7 +448,7 @@ fn unsupplied_context_var(
       [head_arg | _] = type_args else Nothing
   in
     if is_checked_var(type_expr_head_name(head_arg)) == false then Nothing
-    else if forwards(constraint_key_str(string.substring_after_last(class_name, "."), type_args), type_args, fwd_keys) then Nothing
+    else if forwards(string.substring_after_last(class_name, "."), type_args, fwd_keys) then Nothing
     else Just((pos, "the `" ++ string.substring_after_last(outer_class, ".") ++ "` instance for `"
                       ++ te_display(outer_head) ++ "` "
                       ++ unsupplied_remedy(kind, string.substring_after_last(class_name, "."), head_arg)))
@@ -607,9 +580,9 @@ fn produce_evidence(c: ast.TypeConstraint, fwd_keys: Forwarded, tables: Tables) 
               \eff_class -> produce_one_class(eff_class, head_arg, type_args, fwd_keys, tables),
               types.class_with_transitive_supers(class_name, tables_super(tables))))
 
-# One effective-class block. The key is computed exactly as lowering's
-# resolve_tdict_for_classes does: constraint_key_str(after_last_dot(eff_class), args).
-# class_name kept UNSTRIPPED (eff_class); only the key is stripped.
+# One effective-class block. A forward is keyed by ast.dict_slot_key, as lowering keys
+# its slots; an instance by constraint_key_str, the head alone. class_name is kept
+# UNSTRIPPED (eff_class); only the keys are stripped.
 fn produce_one_class(
   eff_class: String,
   head_arg: ast.TypeExpr,
@@ -617,12 +590,13 @@ fn produce_one_class(
   fwd_keys: Forwarded,
   tables: Tables
 ) -> typed_ast.Evidence =
-  if forwards(constraint_key_str(string.substring_after_last(eff_class, "."), type_args), type_args, fwd_keys) then
-    typed_ast.EvForward(eff_class, constraint_key_str(string.substring_after_last(eff_class, "."), type_args))
-  else if head_is_concrete(head_arg) == false then
-    typed_ast.EvForward(eff_class, constraint_key_str(string.substring_after_last(eff_class, "."), type_args))
-  else
-    produce_concrete_evidence(eff_class, string.substring_after_last(eff_class, "."), type_args, head_arg, fwd_keys, tables)
+  match forwarded_slot(string.substring_after_last(eff_class, "."), type_args, fwd_keys) with
+  | Just slot -> typed_ast.EvForward(eff_class, slot)
+  | Nothing ->
+      if head_is_concrete(head_arg) == false then
+        typed_ast.EvForward(eff_class, ast.dict_slot_key(string.substring_after_last(eff_class, "."), type_args))
+      else
+        produce_concrete_evidence(eff_class, string.substring_after_last(eff_class, "."), type_args, head_arg, fwd_keys, tables)
 
 fn produce_concrete_evidence(
   eff_class: String,
@@ -660,10 +634,9 @@ fn produce_instance_evidence(
           \ic -> produce_evidence(substitute_constraint(ic, unify_type_args_list(inst_type_args, type_args, dict_empty())), fwd_keys, tables),
           inst_constraints))
 
-# The forwarded-key set for a function/method body: one key per (constraint, super)
-# in its where-clause, computed exactly as lowering's build_hidden_for_constraints
-# keys ctx_fwd (constraint_key_str(after_last_dot(eff_class), type_args)).
-# Keyed by the WRITTEN arguments, as lowering keys its ctx_fwd, and holding them with
+# The forwarded slots of a function/method body: one per (constraint, super) in its
+# where-clause, keyed by the WRITTEN arguments exactly as lowering's
+# build_hidden_for_constraints keys ctx_fwd (ast.dict_slot_key), and holding them with
 # aliases expanded, as use sites are compared (expand_aliases).
 fn build_fwd_keys(constraints: List ast.TypeConstraint, tables: Tables) -> Forwarded =
   add_fwd_keys(constraints, tables, dict_empty())
@@ -684,7 +657,18 @@ fn add_eff_keys(effs: List String, type_args: List ast.TypeExpr, expanded: List 
   | Nil -> acc
   | Cons eff rest ->
       add_eff_keys(rest, type_args, expanded,
-        dict_set(constraint_key_str(string.substring_after_last(eff, "."), type_args), expanded, acc))
+        add_slot(string.substring_after_last(eff, "."), type_args, expanded, acc))
+
+# A slot already recorded (one constraint reached twice, as a superclass and directly)
+# is not recorded again.
+fn add_slot(class_bare: String, type_args: List ast.TypeExpr, expanded: List ast.TypeExpr,
+            acc: Forwarded) -> Forwarded =
+  let group = constraint_key_str(class_bare, type_args)
+      slot = ast.dict_slot_key(class_bare, type_args)
+      Just slots = dict_get(group, acc) else dict_set(group, [(slot, expanded)], acc)
+  in
+    if any(\s -> slot_key(s) == slot, slots) then acc
+    else dict_set(group, list_append(slots, [(slot, expanded)]), acc)
 
 # The type variables an instance head binds (`a` in `instance Eq (Maybe a)`).
 fn head_vars(constraint: ast.TypeConstraint) -> List String =
@@ -840,8 +824,23 @@ fn method_ref_evidence(method: String, class_name: String, t: types.Type, fwd_ke
       match mr_first_concrete_head_str(class_type) with
       | Nothing -> typed_ast.EvUnresolved
       | Just _ ->
-          produce_one_class(class_name, typed_ast.type_to_type_expr(class_type),
-            Cons(typed_ast.type_to_type_expr(class_type), Nil), fwd_keys, tables)
+          produce_one_class(class_name, named_type_expr(class_type, tables_env(tables)),
+            Cons(named_type_expr(class_type, tables_env(tables)), Nil), fwd_keys, tables)
+
+# The type with each variable a constraint declared named as it was declared, through
+# the `@eta_fwdvar` markers, so a slot key built from it (ast.dict_slot_key) is the one
+# the enclosing function's slot is under. Any other variable keeps its identity.
+fn named_type_expr(t: types.Type, env: Dict types.Scheme) -> ast.TypeExpr =
+  match t with
+  | types.TVar v ->
+      match dict_get("@eta_fwdvar:" ++ types.tyvar_identity(v), env) with
+      | Just scheme -> typed_ast.type_to_type_expr(types.scheme_type(scheme))
+      | Nothing -> typed_ast.type_to_type_expr(t)
+  | types.TApp f x -> ast.TypeApply(named_type_expr(f, env), named_type_expr(x, env))
+  | types.TTuple items -> ast.TupleType(list_map(\i -> named_type_expr(i, env), items))
+  | types.TConst _ -> typed_ast.type_to_type_expr(t)
+  | types.TFunc _ _ _ _ -> typed_ast.type_to_type_expr(t)
+  | types.TThunk _ _ -> typed_ast.type_to_type_expr(t)
 
 # ---------------------------------------------------------------------------
 # Evidence rewrite: fill every TDict's Evidence, structure otherwise unchanged
@@ -956,13 +955,9 @@ fn check_decl(d: typed_ast.TypedDecl, tables: Tables) -> Maybe(source.SourcePos,
   | typed_ast.TExternFnDecl _ _ _ _ -> Nothing
   | typed_ast.TPassThrough _ -> Nothing
 
-# A slot clash is reported before the body: a clashing pair makes every use of the slot
-# suspect, so the dictionaries the body asks for are not worth checking one by one.
 fn check_body(body: typed_ast.TypedExpr, kind: DeclKind, constraints: List ast.TypeConstraint,
               tables: Tables) -> Maybe(source.SourcePos, String) =
-  match fwd_slot_clash(constraints, tables) with
-  | Just msg -> Just((typed_ast.typed_expr_pos(body), msg))
-  | Nothing -> check_expr(body, CoverFrom(kind, build_fwd_keys(constraints, tables)), tables)
+  check_expr(body, CoverFrom(kind, build_fwd_keys(constraints, tables)), tables)
 
 fn check_methods(
   bound: List String,
@@ -1085,7 +1080,7 @@ fn type_expr_head_name(te: ast.TypeExpr) -> String =
   | ast.TypeArrow _ _ _ _ -> "Fn"
   | ast.TypeThunk _ _ -> "Fn"
   | ast.TypeEffect _ _ -> "Eff"
-  | ast.TupleType items -> "Tuple" ++ int_to_string(list_length(items))
+  | ast.TupleType items -> types.tuple_head(list_length(items))
 
 # The instance head and the dispatch type arrive at the SAME application depth:
 # every recorder records the class variable's binding, and the head-arity check

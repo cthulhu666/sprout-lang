@@ -2930,21 +2930,18 @@ This holds however the variable reaches the call — through a lambda parameter
 applied later, or through a function whose own constraint is compound (`where
 Eq (Maybe t)`) — and even when the inner comparison can never run, as in
 `m == Nothing`: the instance is chosen when the program is checked, not when the
-comparison runs.  Not yet for a callee constraint nested past one constructor or over
-a tuple (`where ToString (Box (List b))`, `where ToString (b, Int)`): when the
-argument's type holds a variable, the call compiles to a dictionary that panics if
-used — or, when the caller's own `where` has the same head, to that `where`'s
-dictionary, which is wrong if it belongs to another variable (BACKLOG).
+comparison runs.  A callee constraint nested past one constructor or over a tuple
+(`where ToString (Box (List b))`, `where ToString (b, Int)`) is built the same way.
 
 A forwarded compound constraint arrives whole: `where Eq (Maybe a)` supplies
 `Eq (Maybe a)`, context included — and only that.  It does not supply
 `Eq (Maybe b)`, `Eq (Maybe Int)`, or `Eq (Maybe t)` for an existential `t`
 unpacked in the body; those take the instance and need their own context.  A
 type alias in the `where` is compared expanded, so `where Eq (List (Opt a))` with
-`type alias Opt a = Maybe a` supplies `Eq (List (Maybe a))`.  Two constraints may
-not need one class at two types that share a head constructor, even when one comes
-from a superclass (`where Ord (Maybe a), Eq (Maybe b)`); this is rejected, as the
-written pair is.
+`type alias Opt a = Maybe a` supplies `Eq (List (Maybe a))`.  A superclass may
+bring a second constraint of one class at the same head (`where Ord (Maybe a), Eq
+(Maybe b)`): each has its own dictionary. Two such constraints written directly are
+rejected ("Two constraints of one class", below).
 
 In an instance method the context comes from the instance head, under the head's
 own variable names, and reaches only the variables the head binds; a variable of
@@ -3155,16 +3152,18 @@ for a type the constraint does not mention, and the method then interprets one t
 value through another's dictionary.  An argument the constraint fixes names its
 parameter just as a variable does: `where Sh (Box String)` dispatches on the `Box
 String` parameter even where a `Box Bool` one precedes it.  When a constraint's
-arguments are not all fixed at a call site the obligation is forwarded rather than
-guessed, exactly as for a variable-headed constraint.
+arguments are not all fixed at a call site, the caller's own identical constraint is
+forwarded; failing that, the dictionary is built from the instance for the head, using the
+caller's dictionaries for its context.  A context constraint on one of the caller's type
+variables that the caller does not declare is a compile-time error, even when the instance
+never reads that dictionary: the check goes by the declared context.
 
 **Two constraints of one class must not differ only in their arguments.**  A `where`
-clause may not carry both `Boxed (Tagged k)` and `Boxed (Tagged j)`: one hidden
-dictionary parameter serves each class-and-head-constructor pair, so the two
-obligations would share a slot and the body would read one dictionary for both.  This
-is rejected at the declaration.  Two constraints with the same subject are not
-affected, and neither are two over different head constructors or different classes.
-Lifting the restriction requires widening the dictionary key (see `BACKLOG.md`).
+clause may not carry both `Boxed (Tagged k)` and `Boxed (Tagged j)`: each gets its own
+hidden dictionary, but a method used as a value in the body cannot yet tell the two
+apart, so it could take either one.  This is rejected at the declaration.  Two constraints with
+the same subject are not affected, and neither are two over different head
+constructors or different classes.  Lifting the restriction is tracked in `BACKLOG.md`.
 
 ### `Applicative` class and `mapN` helpers
 

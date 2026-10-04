@@ -1187,16 +1187,13 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   `Eq Bytes` (clean) but written down nowhere. Make it a step: every new instance on a builtin type
   records the downstream check and its result, and the diagnostic should name the competing module.
 
-- [ ] `P2` **The hidden-dictionary key cannot tell two same-class constraints apart.** It is class
-  name plus the outermost constructor of each argument (`lowering.constraint_key_str`), so
-  `where Boxed (Tagged k), Boxed (Tagged j)` is one slot for two obligations — the caller passes two
-  dictionaries and the body reads one twice. `infer.check_indistinct_constraints` now rejects the
-  shape rather than miscompiling it (spec §"Two constraints of one class must not differ only in
-  their arguments"; `docs/instance-head-kinds-v0.md` §12). Making it work means putting the
-  arguments' identity into that key in all FOUR places that build it — lowering's `build_hidden`,
-  lowering's existential witness seeding, resolve's `fwd_keys` and `EvForward` — and the eta paths
-  build it from a `types.Type` where the others use an `ast.TypeExpr`, so the two spellings must
-  agree. Instance-table keys must NOT change with it: one instance per head constructor is correct.
+- [ ] `P2` **Two same-class constraints differing only in their arguments are still rejected.**
+  `where Boxed (Tagged k), Boxed (Tagged j)` gets two hidden slots now — `ast.dict_slot_key` names
+  the arguments — but `infer.check_indistinct_constraints` still rejects it (spec "Two constraints
+  of one class must not differ only in their arguments"). What is left: the eta fallback that
+  takes the only slot carrying a method (`lowering.find_forwarded_method_any`) must pick by key.
+  Then drop the rule and its spec paragraph, and turn `type_error/same_class_heads_share_dict_slot`
+  and `tuple_heads_share_dict_slot` into run fixtures.
 - [ ] `P2` **A class method's `.iface` scheme quantifies fewer binders than the live
   registration.** `iface_codec.method_scheme` quantifies the CLASS parameters only, so a
   method-level constraint head is keyed by source NAME, while `infer.register_class_method_over`
@@ -2671,6 +2668,11 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
 > (core verifier, dispatch trace, loud heuristic, canonical identity) are landed; what follows is
 > the residue, ordered by leverage.
 
+- [ ] `P3` **A compound constraint with no instance for its head fails at codegen.** A caller
+  that neither declares `where C (T a)` nor can build it (the class has no `T` instance) gets
+  `under-application ... reached codegen` instead of a diagnostic: `infer.compound_head_tdict`
+  returns Nothing. A method call on such a constraint is already rejected, so this is rare.
+
 - [~] `P1` **A `where`-constrained function used as a first-class VALUE.** Fixed everywhere the
   dictionary is readable at the mention, by rewriting a bare mention into the eta-lambda the
   programmer could have written (`eta_expand_constrained_arg`) in `infer_arg_slots`; the five
@@ -2725,19 +2727,6 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   NAME. Master too. Fix: in `check_instance_method`, unify the method's declared type with the
   class method's scheme at the head, head variables rigid; that also makes a renamed head
   variable (`type_error/instance_method_renamed_head_var`) a declaration-site error.
-- [ ] `P2` **A nested or tuple callee constraint gets a guessed dictionary, not the exact one.**
-  `where ToString (Box (List b))` or `where ToString (b, Int)` leaves `#any` in the token, so
-  `infer`'s scan takes the first argument with that head and writes its variables as `_`. Under a
-  caller `where` with another head the guess stays a hole and panics if used, right pick or not
-  (`tests/stdlib/compiler/test_guessed_dict_stays_hole.spr`). Under one with the same head,
-  `resolve.forwards` forwards it: right with one such variable, silently wrong with two
-  (`pt((p, 1), (q, 2))` under `where ToString (c, Int), ToString d` prints a pointer). Refusing
-  the forward breaks the first case. Fix: encode the written arguments in the token
-  (`iface_codec` too) and build the dict from them, as one-level heads already are.
-- [ ] `P2` **A tuple-headed `where` passes the wrong dictionary.** `fn direct(p: c) -> String
-  where ToString (c, Int) = to_string((p, 1))` prints a pointer for `direct(1)`; master too.
-  `where ToString (Box (List c))` works, so it is tuple-specific. Not yet located. No test or
-  corpus code has a tuple-headed `where`.
 - [ ] `P3` **A deferred constraint at an applied variable (`$f Int`) gets no slot.**
   `resolve_precise_head` gives a bare variable a hole (`hole_tdict`) but nothing to an applied
   one, so the next same-class dict shifts into its slot: `let g = \z -> both(ident(z), 5) in
