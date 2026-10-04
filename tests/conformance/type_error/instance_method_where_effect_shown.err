@@ -1,0 +1,1 @@
+instance method `shown` of instance Shown Box has `where ToString x` as constraint 1, and its `x` is `Int -> Int !{IO}` in the class's signature, but the class's constraint 1 is `where ToString b`

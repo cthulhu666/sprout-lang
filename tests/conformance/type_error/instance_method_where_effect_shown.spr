@@ -1,0 +1,14 @@
+module main
+
+# The slot's subject `x` stands for the class's `!{IO}` callback type. The message
+# prints that type as the class wrote it, not under an internal effect name.
+
+class Shown t
+  fn shown(k: t, f: Int -> Int !{IO}, y: b) -> Int where ToString b
+
+type Box = Box
+
+instance Shown Box
+  fn shown(k: Box, f: x, y: z) -> Int where ToString x = 1
+
+fn main() -> Unit !{IO} = print(int_to_string(shown(Box, \n -> n, 2)))

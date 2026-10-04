@@ -1,0 +1,32 @@
+module main
+
+# An effect variable on either side of an arrow is never what rejects an instance
+# method (rule 8's variable exemption), whatever it is named and wherever it falls.
+# `Named` spells the instance's variable like the class's; `Ordered` and `Mirrored`
+# are one program with the parameters in opposite orders.
+
+type Box = Box
+
+class Named t
+  fn named(k: t, g: Int -> Int !{e}, f: Int -> Int !{IO}) -> Int
+
+instance Named Box
+  fn named(k: Box, g: Int -> Int, f: Int -> Int !{e}) -> Int = 1
+
+class Ordered t
+  fn ordered(k: t, f: Int -> Int !{e}, g: Int -> Int !{e}) -> Int
+
+instance Ordered Box
+  fn ordered(k: Box, f: Int -> Int, g: Int -> Int !{IO}) -> Int = f(2)
+
+class Mirrored t
+  fn mirrored(k: t, g: Int -> Int !{e}, f: Int -> Int !{e}) -> Int
+
+instance Mirrored Box
+  fn mirrored(k: Box, g: Int -> Int !{IO}, f: Int -> Int) -> Int = f(3)
+
+fn main() -> Unit !{IO} =
+  do
+    print(int_to_string(named(Box, \n -> n, \n -> n)))
+    print(int_to_string(ordered(Box, \n -> n, \n -> n)))
+    print(int_to_string(mirrored(Box, \n -> n, \n -> n)))

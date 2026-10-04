@@ -8770,26 +8770,75 @@ fn sig_against_class(site: InstanceSite, name: String, inst: SigParts, cls: SigP
     if list_length(inst.params) != list_length(cls.params)
     then Just(sig_mismatch_msg(site, name, inst, cls))
     else
-      match sig_subst(maybe_types(inst.params, inst_env), maybe_types(cls.params, class_env),
-                      maybe_types([inst.ret], inst_env), maybe_types([cls.ret], class_env)) with
-      | Nothing -> Just(sig_mismatch_msg(site, name, inst, cls))
-      | Just subst ->
-          match renamed_head_var(subst, sig_te_vars(inst)) with
-          | Just (v, h) -> Just(renamed_head_var_msg(site, name, v, h))
-          | Nothing ->
-              where_slot_error(SlotCheck(site = site, name = name, inst_env = inst_env,
-                                         class_env = class_env, cls = cls),
-                               subst, inst.wheres, cls.wheres, 1)
+      let iparams = maybe_types(inst.params, inst_env)
+          cparams = maybe_types(cls.params, class_env)
+          iret = maybe_types([inst.ret], inst_env)
+          cret = maybe_types([cls.ret], class_env)
+      in
+        match unify_sig_parts(NoFlow, dict_empty(), dict_empty(), list_append(iparams, iret),
+                              list_append(cparams, cret)) with
+        | Nothing -> Just(sig_mismatch_msg(site, name, inst, cls))
+        | Just (subst, _) ->
+            if ! arrows_flow (iparams, cparams, iret, cret)
+            then Just(sig_mismatch_msg(site, name, inst, cls))
+            else
+              match renamed_head_var(subst, sig_te_vars(inst)) with
+              | Just (v, h) -> Just(renamed_head_var_msg(site, name, v, h))
+              | Nothing ->
+                  where_slot_error(SlotCheck(site = site, name = name, inst_env = inst_env,
+                                             class_env = class_env, cls = cls),
+                                   subst, inst.wheres, cls.wheres, 1)
 
 # A caller's argument flows from the class's parameter into the method's, and the
 # method's result flows out to the class's, so an arrow inside either is judged in
 # that direction: a method may not declare pure a callback the class passes as
 # `!{IO}`, nor return an `!{IO}` function where the class promises a pure one.
-fn sig_subst(iparams: List (Maybe types.Type), cparams: List (Maybe types.Type),
-             iret: List (Maybe types.Type), cret: List (Maybe types.Type)) -> Maybe (Dict types.Type) =
-  let Just(s1, es1) = unify_sig_parts(IntoMethod, dict_empty(), dict_empty(), iparams, cparams) else Nothing
-      Just(s2, _) = unify_sig_parts(OutOfMethod, s1, es1, iret, cret) else Nothing
-  in Just(s2)
+# Only the verdict is kept: a directed bind renames an arrow's effect, so the
+# substitution the messages print is the join's above.
+fn arrows_flow(iparams: List (Maybe types.Type), cparams: List (Maybe types.Type),
+               iret: List (Maybe types.Type), cret: List (Maybe types.Type)) -> Bool =
+  let Just(s1, es1) = unify_sig_parts(IntoMethod, dict_empty(), dict_empty(),
+                                      effects_apart(iparams, "i", 0), effects_apart(cparams, "c", 0))
+        else false
+      Just _ = unify_sig_parts(OutOfMethod, s1, es1, effects_apart(iret, "i:r", 0),
+                               effects_apart(cret, "c:r", 0))
+        else false
+  in true
+
+# Rule 8 exempts an arrow whose effect is a variable, so each occurrence gets its
+# own name: a variable shared across parameters, or spelled alike on both sides,
+# would carry one arrow's verdict into the next. The name is the occurrence's path.
+fn effects_apart(ts: List (Maybe types.Type), tag: String, idx: Int) -> List (Maybe types.Type) =
+  match ts with
+  | [] -> []
+  | [t | rest] ->
+      Cons(map(effect_vars_apart(_, tag ++ "/" ++ int_to_string(idx)), t),
+           effects_apart(rest, tag, idx + 1))
+
+fn effect_vars_apart(t: types.Type, path: String) -> types.Type =
+  match t with
+  | types.TFunc p r e o ->
+      types.TFunc(effect_vars_apart(p, path ++ "p"), effect_vars_apart(r, path ++ "r"),
+                  effect_apart(e, path), o)
+  | types.TThunk r e -> types.TThunk(effect_vars_apart(r, path ++ "r"), effect_apart(e, path))
+  | types.TApp b a -> types.TApp(effect_vars_apart(b, path ++ "b"), effect_vars_apart(a, path ++ "a"))
+  | types.TTuple items -> types.TTuple(tuple_items_apart(items, path, 0))
+  | types.TVar _ -> t
+  | types.TConst _ -> t
+
+fn tuple_items_apart(items: List types.Type, path: String, idx: Int) -> List types.Type =
+  match items with
+  | [] -> []
+  | [t | rest] ->
+      Cons(effect_vars_apart(t, path ++ "t" ++ int_to_string(idx) ++ "."),
+           tuple_items_apart(rest, path, idx + 1))
+
+fn effect_apart(e: types.Effect, path: String) -> types.Effect =
+  match e with
+  | types.EffectVar _ -> types.EffectVar("$eff:" ++ path)
+  | types.EffectPure -> e
+  | types.EffectIO -> e
+  | types.EffectRow _ -> e
 
 # The variables a side writes, its `where` included: a constrained variable need
 # not appear in the signature, and it must still read as a variable.
@@ -8817,8 +8866,9 @@ fn var_type_as(name: String, rigid: Bool) -> types.Type =
 fn maybe_types(tes: List (Maybe ast.TypeExpr), env: Dict types.Type) -> List (Maybe types.Type) =
   list_map(\te -> map(type_from_ast(_, env), te), tes)
 
-# Which way a value crosses between the class's signature and the method's. A
-# `where` argument carries no value, so its two sides only have to agree.
+# Which way a value crosses between the class's signature and the method's.
+# NoFlow only asks the two sides to agree: a `where` argument carries no value, and
+# the substitution that names variables in messages needs no verdict on effects.
 type Flow =
   | IntoMethod
   | OutOfMethod
