@@ -579,6 +579,23 @@ _test-stdlib stage dirs="tests/stdlib tests/stdlib/compiler":
       files+=("$f")
     done
   done
+  # SPROUT_TEST_SHARD=k/n keeps every n-th file starting at the k-th, so n CI runners can
+  # split one directory. Unset runs everything. An empty shard fails rather than passing.
+  if [[ -n "${SPROUT_TEST_SHARD:-}" ]]; then
+    if [[ ! "$SPROUT_TEST_SHARD" =~ ^([1-9][0-9]*)/([1-9][0-9]*)$ ]] || (( BASH_REMATCH[1] > BASH_REMATCH[2] )); then
+      echo "ERROR: SPROUT_TEST_SHARD must be k/n with 1 <= k <= n (got '$SPROUT_TEST_SHARD')" >&2; exit 1
+    fi
+    k=${BASH_REMATCH[1]}; n=${BASH_REMATCH[2]}
+    declare -a picked=()
+    for i in "${!files[@]}"; do
+      if (( i % n == k - 1 )); then picked+=("${files[$i]}"); fi
+    done
+    if (( ${#picked[@]} == 0 )); then
+      echo "ERROR: shard $k/$n selects none of ${#files[@]} files" >&2; exit 1
+    fi
+    echo "==> shard $k/$n: ${#picked[@]} of ${#files[@]} files"
+    files=("${picked[@]}")
+  fi
   declare -a pids=()
   idx=0
   active=0

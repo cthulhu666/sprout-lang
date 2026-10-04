@@ -87,13 +87,14 @@ jobs:
             echo "docs_only=true" >> "$GITHUB_OUTPUT"
           fi
 
-  # The Linux suite, split three ways so it runs on three runners at once. One job ran every
-  # step in sequence on one 4-vCPU runner, and each step already filled all four cores, so the
-  # suite's wall time was its sum (~21 min). Sharded, it is the slowest shard plus ~1 min of
-  # setup each shard repeats. Runner minutes on standard runners are free for a public repo, so
-  # the repeated setup costs time on parallel runners, not money.
+  # The Linux suite, split across four runners that run at once (test-compiler is two). One job
+  # ran every step in sequence on one 4-vCPU runner, and each step already filled all four
+  # cores, so the suite's wall time was its sum (~21 min). Sharded, it is the slowest shard plus
+  # ~1 min of setup each shard repeats. Runner minutes on standard runners are free for a public
+  # repo, so the repeated setup costs time on parallel runners, not money. Steps sit where they
+  # keep the shards even; the per-step times in a run's log are what to rebalance from.
   #
-  # Shared steps are YAML anchors on test-gates and aliases on the other two shards, so each
+  # Shared steps are YAML anchors on test-gates and aliases on the other shards, so each
   # is written once. Every `just` task stays in this file: gate-audit scrapes only ci.yml.
   test-gates:
     needs: changes
@@ -190,6 +191,16 @@ jobs:
         # trace-dispatch / verify-dispatch).
         run: just ci-fast-gates
 
+      - name: Verify benches compile (stage-1)
+        # bench/ was gated by nothing until 2026-08-11 and rotted silently: it held
+        # the P0 linear leak, and needed migrating for the fallible-bind rule.
+        run: just compile-bench
+
+      - name: GC-stress pass (typed-codegen rooting guard, parallel)
+        # Curated rooting tests under SPROUT_GC_STRESS=1 (collect on every alloc).
+        # Default-threshold greens hide use-after-free rooting bugs; fails loudly.
+        run: just test-stress
+
   test-suites:
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
@@ -219,20 +230,13 @@ jobs:
       - name: Verify examples compile (stage-1)
         run: just compile-examples-stage1
 
-      - name: Verify benches compile (stage-1)
-        # bench/ was gated by nothing until 2026-08-11 and rotted silently: it held
-        # the P0 linear leak, and needed migrating for the fallible-bind rule.
-        run: just compile-bench
-
-      - name: GC-stress pass (typed-codegen rooting guard, parallel)
-        # Curated rooting tests under SPROUT_GC_STRESS=1 (collect on every alloc).
-        # Default-threshold greens hide use-after-free rooting bugs; fails loudly.
-        run: just test-stress
-
-  test-compiler:
-    # tests/stdlib/compiler/* — gated by the `changes` job's run_compiler.
+  # tests/stdlib/compiler/* — gated by the `changes` job's run_compiler. Two jobs, each taking
+  # every other file: every file re-bundles the whole compiler, so this is the suite's largest
+  # single step. Two named jobs, not a matrix: GitHub's docs do not say how a matrix's legs
+  # combine into `needs.<job>.result`, and the `test` verdict below must not rest on that.
+  test-compiler-1:
     needs: changes
-    if: needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.run_compiler == 'true'
+    if: &compiler-if needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.run_compiler == 'true'
     runs-on: ubuntu-latest
     env: *invariant-env
     steps:
@@ -242,8 +246,23 @@ jobs:
       - *cache-stage1
       - *bootstrap
 
-      - name: Run compiler tests (stage-1)
-        run: just test-stdlib-compiler-stage1
+      - name: Run compiler tests (stage-1, shard 1/2)
+        run: SPROUT_TEST_SHARD=1/2 just test-stdlib-compiler-stage1
+
+  test-compiler-2:
+    needs: changes
+    if: *compiler-if
+    runs-on: ubuntu-latest
+    env: *invariant-env
+    steps:
+      - *checkout
+      - *install-mise
+      - *install-llvm
+      - *cache-stage1
+      - *bootstrap
+
+      - name: Run compiler tests (stage-1, shard 2/2)
+        run: SPROUT_TEST_SHARD=2/2 just test-stdlib-compiler-stage1
 
   test:
     # The one required check on master, and the only job here that is never skipped while a
@@ -251,7 +270,7 @@ jobs:
     # that could be skipped would pass a red shard — hence `!cancelled()`, which runs it after
     # a failed `needs` too, and an explicit verdict below rather than trusting the needs.
     # A skipped shard counts only where `changes` says it should skip.
-    needs: [changes, test-gates, test-suites, test-compiler]
+    needs: [changes, test-gates, test-suites, test-compiler-1, test-compiler-2]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
@@ -262,18 +281,22 @@ jobs:
           RUN_COMPILER: ${{ needs.changes.outputs.run_compiler }}
           GATES: ${{ needs.test-gates.result }}
           SUITES: ${{ needs.test-suites.result }}
-          COMPILER: ${{ needs.test-compiler.result }}
+          COMPILER1: ${{ needs.test-compiler-1.result }}
+          COMPILER2: ${{ needs.test-compiler-2.result }}
         run: |
           set -u
           echo "changes=$CHANGES docs_only=$DOCS_ONLY run_compiler=$RUN_COMPILER"
-          echo "test-gates=$GATES test-suites=$SUITES test-compiler=$COMPILER"
+          echo "test-gates=$GATES test-suites=$SUITES"
+          echo "test-compiler-1=$COMPILER1 test-compiler-2=$COMPILER2"
           [ "$CHANGES" = success ] || { echo "the changes job did not succeed"; exit 1; }
           if [ "$DOCS_ONLY" = true ]; then echo "docs-only change: no shard runs"; exit 0; fi
           [ "$GATES" = success ] || { echo "test-gates: $GATES"; exit 1; }
           [ "$SUITES" = success ] || { echo "test-suites: $SUITES"; exit 1; }
-          if [ "$RUN_COMPILER" = true ] || [ "$COMPILER" != skipped ]; then
-            [ "$COMPILER" = success ] || { echo "test-compiler: $COMPILER"; exit 1; }
-          fi
+          for c in "$COMPILER1" "$COMPILER2"; do
+            if [ "$RUN_COMPILER" = true ] || [ "$c" != skipped ]; then
+              [ "$c" = success ] || { echo "a test-compiler shard: $c"; exit 1; }
+            fi
+          done
           echo "all shards green"
 
   # Everything above runs on Linux, so until this job existed CI exercised the epoll+timerfd
