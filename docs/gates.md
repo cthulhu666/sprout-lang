@@ -642,7 +642,8 @@ jobs too, which is safe because none of them is required.
 filled all four cores, so wall time was the sum: 18–23 min. Sharded, it is the slowest shard plus
 the ~1 min of setup each shard repeats. Standard runners are free on a public repo, so the repeat
 costs runner time, not money. The limit that matters is the free plan's 20 concurrent jobs: a run
-has at most 7 running at once.
+has at most 7 running at once. Inside `test-gates`, `ci-fast-gates` starts its longest gates first
+and prints each gate's seconds beside its ✓, so the order can be re-checked from any CI log.
 
 So a `test` green in 30 seconds is not evidence the suite passed — only that nothing the suite can
 observe changed. Check the `changes` job's log before citing a green.
