@@ -1,0 +1,1 @@
+instance method `pretty` of instance Pretty Box has `where ToString n` as constraint 1, and its `n` is `Int` in the class's signature, but the class's constraint 1 is `where ToString a`

@@ -1,0 +1,15 @@
+module main
+
+# The class's `a` is its own variable; the instance head also names an `a`. Copying
+# the class signature makes the method's `x` the head's `a`, which is not what the
+# class says. The message renames the class's variable so the two sides differ.
+
+class Lift t
+  fn lift(x: a) -> t
+
+type Box a = Box a
+
+instance Lift (Box a)
+  fn lift(x: a) -> Box a = Box(x)
+
+fn main() -> Unit !{IO} = print("x")
