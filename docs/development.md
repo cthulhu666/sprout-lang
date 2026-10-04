@@ -110,7 +110,7 @@ suppression and the file's other eight uses lose the rule with it.
 
 Supported hosts today are **macOS** and **Linux**. The two workflows cover different
 slices of that, and it is worth keeping them apart: `ci.yml` runs the full suite on
-`ubuntu-latest` (three `test-*` shards, gathered by the `test` check) plus a `macos` job
+`ubuntu-latest` (five `test-*` shards, gathered by the `test` check) plus a `macos` job
 on `macos-latest`, while `release.yml` publishes binaries for Linux **x86_64 and aarch64**
 only — there is no released macOS artifact, and no CI job builds Linux aarch64.
 

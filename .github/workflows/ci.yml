@@ -87,7 +87,7 @@ jobs:
             echo "docs_only=true" >> "$GITHUB_OUTPUT"
           fi
 
-  # The Linux suite, split across four runners that run at once (test-compiler is two). One job
+  # The Linux suite, split across five runners that run at once. One job
   # ran every step in sequence on one 4-vCPU runner, and each step already filled all four
   # cores, so the suite's wall time was its sum (~21 min). Sharded, it is the slowest shard plus
   # ~1 min of setup each shard repeats. Runner minutes on standard runners are free for a public
@@ -166,7 +166,7 @@ jobs:
         # bootstrap-from-seed recipe has a guard that no-ops when
         # build/compile_driver_bin_stage1 is newer than the seed, so restore order
         # matters: cache runs AFTER checkout so the restored binary's mtime > the
-        # freshly-checked-out seed's mtime. All three shards share the key: on a miss
+        # freshly-checked-out seed's mtime. All shards share the key: on a miss
         # each builds the binary and one save wins, so storage does not grow.
         uses: actions/cache@v4
         with:
@@ -201,7 +201,9 @@ jobs:
         # Default-threshold greens hide use-after-free rooting bugs; fails loudly.
         run: just test-stress
 
-  test-suites:
+  # tests/stdlib/* outside compiler/, split across two jobs by file like the compiler suite
+  # below. test-core-1 also runs the smaller suites, which keeps it level with test-gates.
+  test-core-1:
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
@@ -219,9 +221,8 @@ jobs:
         # changed compiler source without refreshing the seed via `just refresh-seed`.
         run: just verify-bootstrap-fixed-point
 
-      - name: Run stdlib core tests (stage-1)
-        # tests/stdlib/* excluding the compiler/ subdir — always runs.
-        run: just test-stdlib-core-stage1
+      - name: Run stdlib core tests (stage-1, shard 1/2)
+        run: SPROUT_TEST_SHARD=1/2 just test-stdlib-core-stage1
 
       - name: Run IDE tests (stage-1)
         # tests/ide/* — a directory of its own, since `ide/` lifts out whole.
@@ -229,6 +230,21 @@ jobs:
 
       - name: Verify examples compile (stage-1)
         run: just compile-examples-stage1
+
+  test-core-2:
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    env: *invariant-env
+    steps:
+      - *checkout
+      - *install-mise
+      - *install-llvm
+      - *cache-stage1
+      - *bootstrap
+
+      - name: Run stdlib core tests (stage-1, shard 2/2)
+        run: SPROUT_TEST_SHARD=2/2 just test-stdlib-core-stage1
 
   # tests/stdlib/compiler/* — gated by the `changes` job's run_compiler. Two jobs, each taking
   # every other file: every file re-bundles the whole compiler, so this is the suite's largest
@@ -270,7 +286,7 @@ jobs:
     # that could be skipped would pass a red shard — hence `!cancelled()`, which runs it after
     # a failed `needs` too, and an explicit verdict below rather than trusting the needs.
     # A skipped shard counts only where `changes` says it should skip.
-    needs: [changes, test-gates, test-suites, test-compiler-1, test-compiler-2]
+    needs: [changes, test-gates, test-core-1, test-core-2, test-compiler-1, test-compiler-2]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
@@ -280,18 +296,20 @@ jobs:
           DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
           RUN_COMPILER: ${{ needs.changes.outputs.run_compiler }}
           GATES: ${{ needs.test-gates.result }}
-          SUITES: ${{ needs.test-suites.result }}
+          CORE1: ${{ needs.test-core-1.result }}
+          CORE2: ${{ needs.test-core-2.result }}
           COMPILER1: ${{ needs.test-compiler-1.result }}
           COMPILER2: ${{ needs.test-compiler-2.result }}
         run: |
           set -u
           echo "changes=$CHANGES docs_only=$DOCS_ONLY run_compiler=$RUN_COMPILER"
-          echo "test-gates=$GATES test-suites=$SUITES"
+          echo "test-gates=$GATES test-core-1=$CORE1 test-core-2=$CORE2"
           echo "test-compiler-1=$COMPILER1 test-compiler-2=$COMPILER2"
           [ "$CHANGES" = success ] || { echo "the changes job did not succeed"; exit 1; }
           if [ "$DOCS_ONLY" = true ]; then echo "docs-only change: no shard runs"; exit 0; fi
           [ "$GATES" = success ] || { echo "test-gates: $GATES"; exit 1; }
-          [ "$SUITES" = success ] || { echo "test-suites: $SUITES"; exit 1; }
+          [ "$CORE1" = success ] || { echo "test-core-1: $CORE1"; exit 1; }
+          [ "$CORE2" = success ] || { echo "test-core-2: $CORE2"; exit 1; }
           for c in "$COMPILER1" "$COMPILER2"; do
             if [ "$RUN_COMPILER" = true ] || [ "$c" != skipped ]; then
               [ "$c" = success ] || { echo "a test-compiler shard: $c"; exit 1; }
