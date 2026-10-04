@@ -49,8 +49,9 @@ the program ends. On pin-only it does not (78 cycles, 13.5 MB): the ratchet need
 
 Damped settles where the arithmetic says. With `U` slots no allocation can reuse and `L` live, a
 cycle allocates `(L + U + A) / k` into a reusable pool `A`, so `A` grows to the fixed point
-`(L + U) / (k − 1)`. At `U` = 100,000 and `L` ≈ 2,060 that predicts 151,031 at k=3 and 202,066
-at k=2; measured 151,018 and 202,018.
+`(L + U) / (k − 1)` and the whole free pool to `U + (L + U) / (k − 1)`. At `U` = 100,000 and
+`L` ≈ 2,060 that predicts a pool of 151,031 at k=3 and 202,066 at k=2; measured 151,018 and
+202,018.
 
 **Ordinary workloads**, one run each:
 
@@ -73,7 +74,8 @@ runs per arm, interleaved:
 | per-class | 20 / 10 | 7.2 / 8.7 | 2,570 / 2,521 µs | 366,793 / 321,269 | 13 / 11 |
 | damped k=3 | 170 / 58 | 13.8 / 14.6 | 1,052 / 1,110 µs | 79,427 / 79,413 | 8 / 8 |
 
-Damped cuts the game's GC cost per allocation 12–15× with no added regions. FREE/swept settles at
+Damped cuts the game's GC cost per allocation 12–16× with no added regions: 11.6× and 15.9×
+pairing runs in the order they ran, 12.2× and 15.1× crossed. FREE/swept settles at
 1.97–1.99, which is `k − 1`. Pinning the threshold at 232,000 read 7.2–9.6 µs
 (`bench/results-2026-10-03-gc-walk.md`): damped's GC costs 1.5–2× the pinned figure, at a third
 of its threshold.
@@ -82,11 +84,19 @@ Per-class's mean threshold of 321k–367k is not the ~248,500 the probe predicte
 Its free pool is not split across classes in the proportions the game allocates in, and every
 class short of slots bumps new ones that join its pool.
 
+**Gates.** The five GC-sensitive gates against this runtime, floor off then damped:
+`gc-adapt-check`, `gc-ageprof-check`, `render-cost-gate` and `rooting-cost-gate` stay green, the
+first two with every probe identical and the cost gates within 4 objects. `gc-walk-check` goes
+red: its sparse fixture runs 10 cycles instead of 88 and walks 2.8 slots per object swept instead
+of 25, under the 10 it asserts. That is B working on the fixture built to show the waste
+(`docs/gc-trigger-v0.md` §8.4). The prototype turns B off when `SPROUT_GC_THRESHOLD` is set (§12
+Q5); the runs above never set it.
+
 ## Caveats
 
 - `elapsed_us` varies ~20% between runs with identical cycle counts (`gc_roots`: 377, 351 and
-  309 ms over three arms that all ran 7,041 cycles), so the ordinary rows compare cycles and heap, not time. The game's 12–15× is far
-  outside that.
+  309 ms over three arms that all ran 7,041 cycles), so the ordinary rows compare cycles and
+  heap, not time. The game's 12–16× is far outside that.
 - One run per ordinary workload. RSS is from `/usr/bin/time -l` with `SPROUT_DEBUG_GC` on. The
   game's regions come from the GC log: `time` on `just` reports the largest descendant, here the
   compiler (142 regions against the game's 8).

@@ -2172,7 +2172,7 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   collector work, while a cycle's cost tracks the footprint `sprout_gc_sweep` walks — which the
   trigger never reads. uncharted-suns cut a live set 45× and total GC rose 4× (#407): its sweeps
   walk 52–76 free slots per object freed, others ≤1.46. **Next: build Option B's damped floor**,
-  `live + (live + free) / 3`. A prototype cut the game's GC per allocation 12–15× with no added
+  `live + (live + free) / 3`. A prototype cut the game's GC per allocation 12–16× with no added
   regions, left `gc_roots` and nqueens unchanged and cost the compiler +4% RSS
   (`bench/results-2026-10-04-gc-trigger-b.md`). Design and open questions: `docs/gc-trigger-v0.md`.
 - [ ] `P3` **The GC cycle timer measures elapsed time with a non-monotonic clock.**
