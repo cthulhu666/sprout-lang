@@ -632,11 +632,12 @@ an unresolvable base, or a failed diff runs everything.
 both are traps for a required check. A workflow skipped by a path filter leaves its checks
 *pending* forever, so a `paths-ignore` here would block every docs PR. A job skipped by `if:`
 reports *success*, so a required job that could be skipped would pass with a red shard under it.
-So the Linux suite runs as four shards — `test-gates`, `test-suites`, `test-compiler-1` and
-`test-compiler-2` — that skip as whole jobs, and `test` is a separate job that gives the verdict.
-It runs under `if: !cancelled()`, so a failed shard does not skip it. It accepts a skipped shard
-only where `changes` says that shard should skip. The compiler suite is two named jobs, not a
-matrix, because GitHub's docs do not say how a matrix's legs combine into `needs.<job>.result`.
+So the Linux suite runs as five shards — `test-gates`, `test-core-1`, `test-core-2`,
+`test-compiler-1` and `test-compiler-2` — that skip as whole jobs, and `test` is a separate job
+that gives the verdict. It runs under `if: !cancelled()`, so a failed shard does not skip it. It
+accepts a skipped shard only where `changes` says that shard should skip. A split suite is named
+jobs, not a matrix, because GitHub's docs do not say how a matrix's legs combine into
+`needs.<job>.result`.
 `macos`, `lsp`, `intellij-plugin` and `windows` skip as whole jobs too, which is safe because none
 of them is required.
 
@@ -644,9 +645,9 @@ of them is required.
 filled all four cores, so wall time was the sum: 18–23 min. Sharded, it is the slowest shard plus
 the ~1 min of setup each shard repeats. Standard runners are free on a public repo, so the repeat
 costs runner time, not money. The limit that matters is the free plan's 20 concurrent jobs: a run
-has at most 8 running at once. Rebalance from the per-step times in a run's log: inside
+has at most 9 running at once. Rebalance from the per-step times in a run's log: inside
 `test-gates`, `ci-fast-gates` starts its longest gates first and prints each gate's seconds
-beside its ✓. The two compiler jobs split `tests/stdlib/compiler/` with `SPROUT_TEST_SHARD=k/n`,
+beside its ✓. The core and compiler pairs split their suites with `SPROUT_TEST_SHARD=k/n`,
 which `_test-stdlib` reads: every n-th file from the k-th. Unset runs all files; an empty shard
 fails rather than passing.
 
