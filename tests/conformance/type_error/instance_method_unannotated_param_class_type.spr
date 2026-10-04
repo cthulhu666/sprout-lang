@@ -1,0 +1,15 @@
+module main
+
+# An unannotated parameter takes the class's type at the head, not one its body
+# implies: `x + y` on two `Box a` is rejected, where it once typed them `Int` and
+# a call through the class added two pointers.
+
+type Box a = Box(a)
+
+class Same t
+  fn same(x: t, y: t) -> Bool
+
+instance Same (Box a)
+  fn same(x, y) -> Bool = x + y == 0
+
+fn main() -> Unit !{IO} = print(to_string(same(Box(1), Box(2))))

@@ -1,5 +1,5 @@
-# An instance method's unannotated return type: its placeholder's owner is `#inst/mk`,
-# and the message must name the return type, not a parameter called `mk`.
+# An instance method's unannotated return takes the class's `r`, so the message
+# names `r`: nothing supplies the `Eq r` that `Maybe r`'s `Eq` instance needs.
 class Mk t
   fn mk(x: t) -> r
 

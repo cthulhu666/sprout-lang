@@ -7076,7 +7076,8 @@ export fn typecheck_decls(
   # position without threading a new parameter through inference.
   match register_all_aliases(decls, import_aliases_from_env(env)) with
   | AliasesErr pos msg -> pure_typed_err(pos, msg)
-  | AliasesOk alias_env -> typecheck_decls_resolved(state, decls, env, subst, eff_subst, alias_env)
+  | AliasesOk alias_env ->
+      typecheck_decls_resolved(state, seed_instance_method_types(decls), env, subst, eff_subst, alias_env)
 
 fn pure_typed_err(pos: source.SourcePos, msg: String) -> typed_ast.TypedResult !{IO} =
   do
@@ -8685,6 +8686,108 @@ fn instance_head_label(type_args: List ast.TypeExpr) -> String =
 # An instance method's signature is its class's at the instance head
 # ---------------------------------------------------------------------------
 #
+# An unannotated parameter or return takes the class's type at the head, as in
+# Haskell and, for a return, Scala 3. Typed by its body instead, `fn same(x, y)` in
+# `instance Same (Box a)` took two Ints and a call through the class added two
+# pointers. A class variable a head or written variable also spells is renamed
+# apart; any other keeps the class's name, so a restated `where` reaches it.
+# Classes come from decls, as in check_instance_method_signatures.
+fn seed_instance_method_types(decls: List ast.Decl) -> List ast.Decl =
+  list_map(seed_instance_decl(own_class_sigs(decls, dict_empty()), _), decls)
+
+fn seed_instance_decl(classes: Dict (String, List ast.ClassMethodSig), decl: ast.Decl) -> ast.Decl =
+  let ast.InstanceDecl(ast.TypeConstraint cls [head_te]) ctx methods pos = decl else decl
+      Just(param, sigs) = dict_get(cls, classes) else decl
+  in ast.InstanceDecl(ast.TypeConstraint(cls, [head_te]), ctx,
+                      list_map(seed_method_types(param, head_te, sigs, _), methods), pos)
+
+# A method whose arity differs from the class's is left as written; the signature
+# check reports it.
+fn seed_method_types(param: String, head_te: ast.TypeExpr, sigs: List ast.ClassMethodSig,
+                     m: ast.InstanceMethodImpl) -> ast.InstanceMethodImpl =
+  let ast.InstanceMethodImpl name params ret effs wheres body = m
+      Just(ast.ClassMethodSig _ cparams cret _ _) =
+        find(\s -> class_method_name(s) == string.after_last_dot(name), sigs) else m
+      cls_vars = written_type_vars(cparams, Just(cret))
+      taken = collect_te_vars(head_te, written_type_vars(params, ret))
+      where_vars = list_fold(\ (acc, c) -> collect_te_vars_list(constraint_args(c), acc), Nil, wheres)
+      sub = apart_names(list_filter(\v -> v != param, cls_vars), taken, list_append(cls_vars, where_vars),
+                        dict_set(param, head_te, dict_empty()))
+      seed = seeded_type(sub, written_effect_vars(params, ret, effs), _)
+  in
+    if list_length(params) != list_length(cparams) then m
+    else ast.InstanceMethodImpl(name, seed_params(params, cparams, seed),
+                                maybe_or_else(ret, Just(seed(cret))), effs, wheres, body)
+
+fn written_type_vars(params: List ast.Param, ret: Maybe ast.TypeExpr) -> List String =
+  collect_ret_type_vars(ret, list_fold(\ (acc, p) -> collect_ret_type_vars(param_type_expr(p), acc), Nil, params))
+
+# Rule 9 lets a signature name one effect variable. When the method writes one, a
+# seeded arrow takes it in place of the class's, which would be a second.
+fn seeded_type(sub: Dict ast.TypeExpr, own_effs: List String, cte: ast.TypeExpr) -> ast.TypeExpr =
+  match own_effs with
+  | [v] -> effect_vars_as(v, ast.subst_type_expr(sub, cte))
+  | _ -> ast.subst_type_expr(sub, cte)
+
+fn written_effect_vars(params: List ast.Param, ret: Maybe ast.TypeExpr,
+                       effs: Maybe (List String)) -> List String =
+  list_fold(\ (acc, te) -> te_effect_vars(te, acc), effect_label_vars(effs, Nil),
+            list_filter_map(\t -> t, Cons(ret, list_map(param_type_expr, params))))
+
+fn te_effect_vars(te: ast.TypeExpr, acc: List String) -> List String =
+  match te with
+  | ast.TypeName _ -> acc
+  | ast.TypeApply f x -> te_effect_vars(x, te_effect_vars(f, acc))
+  | ast.TypeArrow p r effs _ -> te_effect_vars(r, te_effect_vars(p, effect_label_vars(effs, acc)))
+  | ast.TypeThunk r effs -> te_effect_vars(r, effect_label_vars(effs, acc))
+  | ast.TypeEffect inner labels -> te_effect_vars(inner, effect_label_vars(Just(labels), acc))
+  | ast.TupleType items -> list_fold(\ (a, t) -> te_effect_vars(t, a), acc, items)
+
+fn effect_label_vars(labels: Maybe (List String), acc: List String) -> List String =
+  list_fold(\ (a, l) -> list_add_unique(l, a), acc,
+            list_filter(types.effect_label_is_var, maybe_with_default(Nil, labels)))
+
+fn effect_vars_as(v: String, te: ast.TypeExpr) -> ast.TypeExpr =
+  match te with
+  | ast.TypeName _ -> te
+  | ast.TypeApply f x -> ast.TypeApply(effect_vars_as(v, f), effect_vars_as(v, x))
+  | ast.TypeArrow p r effs mode ->
+      ast.TypeArrow(effect_vars_as(v, p), effect_vars_as(v, r), map(labels_as(v, _), effs), mode)
+  | ast.TypeThunk r effs -> ast.TypeThunk(effect_vars_as(v, r), map(labels_as(v, _), effs))
+  | ast.TypeEffect inner labels -> ast.TypeEffect(effect_vars_as(v, inner), labels_as(v, labels))
+  | ast.TupleType items -> ast.TupleType(list_map(effect_vars_as(v, _), items))
+
+fn labels_as(v: String, labels: List String) -> List String =
+  list_map(label_as(v, _), labels)
+
+fn label_as(v: String, label: String) -> String =
+  if types.effect_label_is_var(label) then v else label
+
+fn seed_params(params: List ast.Param, cparams: List ast.Param,
+               seed: ast.TypeExpr -> ast.TypeExpr) -> List ast.Param =
+  match (params, cparams) with
+  | ([ast.Param pname Nothing mode | rest], [ast.Param _ (Just cte) _ | crest]) ->
+      Cons(ast.Param(pname, Just(seed(cte)), mode), seed_params(rest, crest, seed))
+  | ([p | rest], [_ | crest]) -> Cons(p, seed_params(rest, crest, seed))
+  | _ -> params
+
+# A class variable `taken` already spells is renamed to the first of `a1`, `a2`, …
+# that neither `taken` nor `used` spells. `used` holds the class's variables and
+# the method's `where` ones, so a fresh name meets no constraint by accident.
+fn apart_names(vars: List String, taken: List String, used: List String,
+               acc: Dict ast.TypeExpr) -> Dict ast.TypeExpr =
+  match vars with
+  | [] -> acc
+  | [v | rest] ->
+      if ! list_member (v, taken) then apart_names(rest, taken, used, acc)
+      else
+        let fresh = fresh_var_name(v, 1, list_append(taken, used))
+        in apart_names(rest, Cons(fresh, taken), used, dict_set(v, ast.TypeName(fresh), acc))
+
+fn fresh_var_name(base: String, n: Int, used: List String) -> String =
+  let name = base ++ int_to_string(n)
+  in if list_member(name, used) then fresh_var_name(base, n + 1, used) else name
+
 # A call dispatches through the class signature, so a method taking other types runs
 # on values it does not expect: `same(x: Int, y: Int)` in `instance Same (Box a)`
 # compared Box pointers as Ints. The head's variables are rigid, because a context
@@ -8694,9 +8797,10 @@ fn instance_head_label(type_args: List ast.TypeExpr) -> String =
 # method-level `where` slot still constrains what the class's does.
 #
 # Classes come from decls by exact name, as in check_missing_instance_methods. A
-# class with more than one parameter, and an unannotated parameter or return type,
-# are skipped. The method's own effect, its ownership modes and the classes its `where`
-# names have their own checks.
+# class with more than one parameter is skipped, and so is an unannotated parameter
+# or return type, which seed_instance_method_types has filled for every class this
+# check sees. The method's own effect, its ownership modes and the classes its
+# `where` names have their own checks.
 fn check_instance_method_signatures(decls: List ast.Decl,
                                     alias_env: Dict types.Type) -> Maybe(source.SourcePos, String) =
   first_instance_sig_error(decls, own_class_sigs(decls, dict_empty()), alias_env)

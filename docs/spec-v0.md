@@ -2697,8 +2697,11 @@ class's, so it may not return an `!{IO}` function where the class promises a
 pure one.  An arrow whose effect is a variable, on either side, passes this
 check however the variable is spelled and wherever else it appears: rule 8's
 variable exemption, judged one arrow at a time.  An unannotated parameter or
-return type is not checked yet (BACKLOG).  The method's own effect (rule 8) and
-ownership modes have their own rules.
+return type takes the class's type at the head, and the body is checked against
+it.  A class variable that the head or a written type also spells is renamed
+apart; any other keeps the class's name, so a restated `where` reaches it.  A
+seeded arrow takes the method's effect variable when it writes one, since rule 9
+allows one per signature.  The method's own effect (rule 8) and ownership modes have their own rules.
 
 **Method-level constraints.**  A class method may end with its own `where`
 clause, constraining a type variable the *method* quantifies rather than the

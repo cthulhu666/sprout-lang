@@ -2724,12 +2724,13 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   remedy but a concrete type, which is what the #423 context check now tells the user. Fix:
   support `where C (f a)` end to end (hidden slot, call-site injection, dispatch), or reject it
   at the declaration with a located message instead of an internal error.
-- [ ] `P2` **An unannotated instance-method parameter is typed by its body, not by the class.**
-  `instance Same (Box a)` with `fn same(x, y) -> Bool = x + y == 0` infers `Int` for both, and a
-  call through the class adds two `Box` pointers (prints `false`). The signature check
-  (`check_instance_method_signatures`) skips an unannotated position because the declaration has
-  no type there. Fix: seed an unannotated parameter or return with the class's type at the head
-  before checking the body.
+- [ ] `P2` **On the REPL/LSP path an instance of an env-supplied class is neither seeded nor
+  checked.** `seed_instance_method_types` and `check_instance_method_signatures` read classes from
+  decls only (`own_class_sigs`), against `docs/compiler-internals.md` §Whole-program passes. The
+  REPL / analysis-service path supplies imported classes as env schemes (`@class:<method>` and the
+  method's scheme), so there an unannotated slot is still typed by its body and a mistyped one is
+  not caught. Read from the code, not reproduced. Fix: one class-signature source over decls and
+  env that both consume, tested through `compile_source_with_cache`.
 - [ ] `P3` **An instance signature rejected for effect direction gets the generic message.**
   `sig_against_class` reports every rejection with `sig_mismatch_msg`, which never names the
   effect. Class `ap(k: t, g: Int -> Int !{IO}) -> Int -> Int`, instance
