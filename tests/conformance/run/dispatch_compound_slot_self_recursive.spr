@@ -1,0 +1,9 @@
+# A self-recursive call forwards its own compound constraint.
+module main
+
+fn label(x: t) -> String where ToString t = to_string(x)
+
+fn f(x: a, n: Int) -> String where ToString (List a) =
+  if n <= 0 then label([x]) else f(x, n - 1)
+
+fn main() -> Unit !{IO} = print(f(3, 2))

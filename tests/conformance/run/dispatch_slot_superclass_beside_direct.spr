@@ -1,0 +1,7 @@
+# `Ord (Maybe a)` brings `Eq (Maybe a)` as its superclass beside a written
+# `Eq (Maybe b)`. With one slot per class and head, one comparison used the other's
+# dictionary, so the pair was rejected; each now has a slot of its own.
+fn f(x: Maybe a, y: Maybe a, p: Maybe b, q: Maybe b) -> (Bool, Bool) where Ord (Maybe a), Eq (Maybe b) =
+  (x == y, p == q)
+
+fn main() -> Unit !{IO} = print(to_string(f(Just(1), Just(1), Just(2), Just(3))))

@@ -1,0 +1,13 @@
+module main
+
+# `f` needs `ToString (List (Maybe b))` for `ys`; `outer` declares it for `xs`'s
+# element type instead. The first argument headed by `List` was `xs`, so its dictionary
+# was handed over for `ys`.
+fn label(x: t) -> String where ToString t = to_string(x)
+
+fn f(xs: List (Maybe a), ys: List (Maybe b)) -> String where ToString (List (Maybe b)) = label(ys)
+
+fn outer(xs: List (Maybe a), ys: List (Maybe b)) -> String where ToString (List (Maybe a)) =
+  f(xs, ys) ++ label(xs)
+
+fn main() -> Unit !{IO} = print(outer([Just(1)], [Just("s")]))

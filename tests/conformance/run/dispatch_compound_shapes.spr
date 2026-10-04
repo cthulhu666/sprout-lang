@@ -1,0 +1,69 @@
+# Every compound-constraint shape master dispatched, in one place, so a resolver that
+# narrows what it handles fails here. The caller's exact slot is forwarded; failing
+# that, the instance is used, over an open, arrow or alias argument as well.
+module main
+
+type Box a = Box a
+
+type alias Pr m = (m, Int)
+
+class Named t
+  fn name(x: t) -> String
+
+instance Named (Box a)
+  fn name(b: Box a) -> String = "box"
+
+fn twice(xs: List a) -> List a where Semigroup (List a) = xs ++ xs
+
+fn count2(xs: List b) -> Int = list_length(twice(xs))
+
+fn named(b: Box a) -> String where Named (Box a) = name(b)
+
+fn named_any(b: Box c) -> String = named(b)
+
+fn named_fn(b: Box (a -> c)) -> String where Named (Box(a -> c)) = name(b)
+
+fn fm(r: Result e Int) -> Result e Int where Functor (Result e) = map(\x -> x + 1, r)
+
+fn fm_any(r: Result e Int) -> Result e Int = fm(r)
+
+fn show_m(m: Maybe a) -> String where ToString (Maybe a) = to_string(m)
+
+fn show_all(xs: List a) -> String where ToString (List a) = to_string(xs)
+
+fn show_pr(xs: List (Pr a)) -> String where ToString (List (Pr a)) = "S" ++ to_string(xs)
+
+fn show_pairs(xs: List (a, Int)) -> String where ToString (List(a, Int)) = "P" ++ to_string(xs)
+
+fn fwd_pr(xs: List (Pr c)) -> String where ToString (List (Pr c)) = show_pairs(xs)
+
+fn show_fa(xs: List (f a)) -> String where ToString (List(f a)) = to_string(xs)
+
+fn show_elems(x: a) -> String where ToString a = show_all([x])
+
+instance ToString (Box a) where ToString a
+  fn to_string(b: Box a) -> String =
+    match b with
+    | Box x -> "B" ++ to_string(x)
+
+fn boxes(xs: List (Box a)) -> String where ToString (List (Box a)) = to_string(xs)
+
+fn fwd_boxes(xs: List (Box b)) -> String where ToString (List (Box b)) = boxes(xs)
+
+fn maybes(xs: List (Maybe a)) -> String where ToString (List (Maybe a)) = to_string(xs)
+
+fn fwd_maybes(xs: List (Maybe b)) -> String where ToString (List (Maybe b)) = maybes(xs)
+
+fn main() -> Unit !{IO} = do
+  print(int_to_string(count2([1, 2, 3])))
+  print(named_any(Box(1)))
+  print(named_fn(Box(\x -> x + 1)))
+  print(to_string(fm_any(Ok(1))))
+  print(show_m(Nothing))
+  print(show_all([]))
+  print(show_pr([(1, 2)]))
+  print(fwd_pr([("q", 1)]))
+  print(show_fa([Just(1), Nothing]))
+  print(show_elems(3))
+  print(fwd_boxes([Box(1)]))
+  print(fwd_maybes([Just(2)]))

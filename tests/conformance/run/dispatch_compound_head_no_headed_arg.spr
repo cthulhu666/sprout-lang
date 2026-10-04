@@ -1,0 +1,26 @@
+# A compound subject that no parameter carries: `f` takes an `a`, but needs
+# `ToString (List a)` and `ToString (Pair a)`. The constraint's arguments rebuild from
+# the token (`a` is Int here); the head's name comes from the constraint itself,
+# because no argument's type is headed by `List` or `Pair`. `Pair` is declared in
+# this module, so both it and its instance key are spelled `main.Pair`.
+module main
+
+type Pair a = Pair a a
+
+instance ToString (Pair a) where ToString a
+  fn to_string(p: Pair a) -> String =
+    match p with
+    | Pair x y -> "<" ++ to_string(x) ++ "," ++ to_string(y) ++ ">"
+
+fn label(x: t) -> String where ToString t = to_string(x)
+
+fn f(x: a) -> String where ToString (List a), ToString (Pair a) =
+  label([x]) ++ " " ++ label(Pair(x, x))
+
+# Forwarded by a caller polymorphic in `a`, for both heads at once.
+fn outer(x: a) -> String where ToString (List a), ToString (Pair a) = f(x)
+
+fn main() -> Unit !{IO} = do
+  print(f(7))
+  print(f("s"))
+  print(outer(true))

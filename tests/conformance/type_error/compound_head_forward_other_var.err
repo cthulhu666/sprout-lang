@@ -1,0 +1,1 @@
+the `ToString` instance for `List a` needs `ToString a`, which nothing in scope supplies — add `where ToString a`

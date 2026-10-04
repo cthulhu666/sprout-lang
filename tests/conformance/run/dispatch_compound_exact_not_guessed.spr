@@ -1,0 +1,26 @@
+# A nested or tuple callee constraint is built from its own written arguments, not
+# guessed from the first argument with its head. Guessed, `pick` and `pt` read `p`'s
+# Int dictionary for `q`'s String and printed a pointer; so did `direct`, whose own
+# `where` is the tuple.
+module main
+
+type Box a deriving (ToString) = Box a
+
+fn pick(x: Box (List a), y: Box (List b)) -> String where ToString (Box (List b)) = to_string(y)
+
+fn nested(p: c, q: d) -> String where ToString c, ToString d = pick(Box([p]), Box([q]))
+
+fn pt(x: (a, Int), y: (b, Int)) -> String where ToString (b, Int) = to_string(y)
+
+fn elements(p: c, q: d) -> String where ToString c, ToString d = pt((p, 1), (q, 2))
+
+fn tuples(p: c, q: d) -> String where ToString (c, Int), ToString d = pt((p, 1), (q, 2))
+
+fn direct(p: c) -> String where ToString (c, Int) = to_string((p, 1))
+
+fn main() -> Unit !{IO} =
+  do
+    print(nested(1, "s"))
+    print(elements(1, "s"))
+    print(tuples(1, "s"))
+    print(direct(1))

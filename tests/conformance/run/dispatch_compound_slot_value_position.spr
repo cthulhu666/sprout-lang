@@ -1,0 +1,15 @@
+# A compound slot read in value position (`to_string` passed to `list_map`), and one
+# supplied through a superclass (`==` under `Ord (List a)`).
+module main
+
+fn shown(xss: List (List a)) -> List String where ToString (List a) = list_map(to_string, xss)
+
+fn same(xs: List a, ys: List a) -> Bool where Ord (List a) = xs == ys
+
+fn both(x: a) -> Bool where Eq (List a), Eq a = [x] == [x]
+
+fn main() -> Unit !{IO} = do
+  print(to_string(shown([[1], [2, 3]])))
+  print(to_string(same([1], [1])))
+  print(to_string(same(["a"], ["b"])))
+  print(to_string(both(1)))

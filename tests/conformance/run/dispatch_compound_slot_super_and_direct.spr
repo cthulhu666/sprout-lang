@@ -1,0 +1,10 @@
+# `Ord (List a)` supplies `Eq (List a)` and `Eq (List b)` is declared directly: two
+# slots of one class and head. Recording one forward per class and head let the later
+# overwrite the earlier, and that call failed at codegen.
+module main
+
+fn needs_eq(x: a) -> Bool where Eq (List a) = [x] == [x]
+
+fn outer(x: a, y: b) -> Bool where Ord (List a), Eq (List b) = needs_eq(x) && needs_eq(y)
+
+fn main() -> Unit !{IO} = print(to_string(outer(1, "s")))

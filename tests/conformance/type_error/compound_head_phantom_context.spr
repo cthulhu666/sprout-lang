@@ -1,0 +1,17 @@
+module main
+
+# The instance's context asks for `ToString k`, so a caller passing `Tagged k Int` on
+# must have it, even though this instance never reads `k`'s dictionary: the checker
+# goes by the declared context, not by the method bodies.
+type Tagged k v = | Tagged v
+
+instance ToString (Tagged k v) where ToString k, ToString v
+  fn to_string(t: Tagged k v) -> String =
+    match t with
+    | Tagged x -> "T" ++ to_string(x)
+
+fn render(x: Tagged k v) -> String where ToString (Tagged k v) = to_string(x)
+
+fn show_t(x: Tagged k Int) -> String = render(x)
+
+fn main() -> Unit !{IO} = print(show_t(Tagged(4)))

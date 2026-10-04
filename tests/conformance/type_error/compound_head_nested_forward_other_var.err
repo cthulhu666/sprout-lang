@@ -1,0 +1,1 @@
+the `ToString` instance for `Maybe b` needs `ToString b`, which nothing in scope supplies — add `where ToString b`

@@ -1,0 +1,9 @@
+module main
+
+# A cyclic alias that branches, named in a `where` clause. Expanding it there doubled
+# at every level and hung the compiler before the cycle could be reported.
+type alias T = (T, T)
+
+fn f(x: Int) -> Int where ToString T = x
+
+fn main() -> Unit !{IO} = print(int_to_string(f(1)))

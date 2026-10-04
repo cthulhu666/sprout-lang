@@ -1,0 +1,1 @@
+the `ToString` instance for `(c, d)` needs `ToString c`, which nothing in scope supplies — add `where ToString c`
