@@ -248,33 +248,35 @@ escape hatch, while being numerically identical to raising the one floor that al
 ### 6.2 Option B — tie the floor to the measured footprint
 
 ```c
-/* schematic, units unresolved — see below */
-target = max(live × factor, base, footprint_walked_last_cycle);
+target = max(live × factor, base, live + (live + free) / k);   /* k = 3 */
 ```
 
-Collect once the heap has grown to what the last sweep actually had to walk. This targets §3.1's
-quantity directly: it drives work-per-garbage toward ~1 by construction, whatever the live set is.
+`free` is the freelist length after the sweep. Collect once the program has allocated a fixed
+fraction of what the last sweep had to walk. This targets §3.1's quantity directly: it bounds
+work-per-garbage near `k` whatever the live set is.
 
-- **For:** no guessed constant. RSS-neutral in principle — those slots are already committed, so
-  the bound it sets is one the process is paying for regardless. Needs no clock. On #407's middle
-  row it yields roughly the pinned configuration automatically.
+- **For:** no guessed heap size. `k` bounds a ratio, the same for every program, where A's floor
+  is a heap size that suits one. Needs no clock. Measured on a prototype
+  (`bench/results-2026-10-04-gc-trigger-b.md`): the game's GC per allocation falls 12–15× with no
+  added regions, `gc_roots` and nqueens run identical cycles, and the compiler goes 98 → 103 MB.
 - **The signal separates.** Free slots walked per object freed (FREE/swept) is 0.00–1.46 on every
   ordinary workload measured and **52–76** on the game; pinning the game's threshold drops it to 0.25
-  (§3.1, `bench/results-2026-10-03-gc-walk.md`). The counter is `g_debug_gc_walked`, one increment
-  per slot already in the sweep loop.
-- **Against — and the schematic above is not buildable as written.** *Ratchet*: the
-  loop **demonstrably diverges**, which is stronger than the "needs a termination proof" an earlier
-  draft claimed. `g_freelist` is exact-fit (`BACKLOG.md` **"The class freelists are exact-fit"**),
-  so with `U` free slots in size classes the program has stopped allocating, the budget admits `U`
-  excess allocations that cannot reuse them; those bump into fresh slots, die, and join the
-  unreusable pool. The footprint then grows by `U` every cycle, without bound.
-- **The repair, which is what makes B a design rather than a schematic.** Floor on `live` plus the
-  free slots in classes that saw allocation demand *last cycle*, rather than on the whole walked
-  footprint. That needs 257 counters and one flag store per allocation, and it terminates because
-  a class with no demand stops contributing. It still delivers the reporting workload's win: all
-  but ~80 of the game's free slots are in classes with demand, so the repaired floor sits near
-  248,500, close to the pinned 232,000. Showing that a phase-structured program cannot defeat it
-  the same way is §12 Q1.
+  (§3.1, `bench/results-2026-10-03-gc-walk.md`). Under the damped floor it settles at `k − 1`.
+- **It terminates, and the undamped form does not.** `g_freelist` is exact-fit (`BACKLOG.md`
+  **"The class freelists are exact-fit"**), so take `U` free slots no allocation can reuse. A
+  cycle allocates `(live + U + A) / k` into the reusable pool `A`; allocations `A` cannot hold bump
+  fresh slots, and if anything live pins their regions they outlive Pass 2 and join `A`. `A`
+  settles at `(live + U) / (k − 1)`, which the prototype hit to within 13 slots on a constructed
+  adversary. At `k = 1`, flooring on the whole footprint, there is no fixed point: `A` grows by
+  `U` every cycle.
+- **Why `k = 3`.** k=2 already moves nqueens (8,279 → 5,637 cycles) and the compiler (98 →
+  109 MB); k=3 leaves nqueens identical and the compiler at 103 MB. It matches the adapt factor,
+  which is a coincidence rather than a reason.
+- **The per-class repair an earlier draft proposed diverges.** It floored on `live` plus the free
+  slots in classes with allocation demand last cycle. One allocation a cycle in the class holding
+  `U` keeps all of `U` counted, so it ratchets exactly as the undamped form does: +100,000 slots a
+  cycle on the adversary, to 1.3M when the program ended. It also took the compiler to 221 MB and
+  tripled the game's pauses.
 - **Units are not a problem**, contrary to an earlier draft: slots walked and `g_managed_heap_count`
   are the same count — one cell per object whatever its size, and a large object is one region
   walked as one.
@@ -324,40 +326,38 @@ HotSpot's `GCTimeRatio`, Go's limiter.
 **§9 item 2 is now measured** (`bench/results-2026-09-30-gc-floor.md`) and A's price is no longer
 a guess: 3.2× peak RSS and +5.3% wall on nqueens, 1.9× RSS at no wall cost on http_log_middleware,
 nothing on math, no resolvable effect on the socket server, and a ~20× rise in per-collection
-pause wherever a workload was floor-pinned. **§9 item 1 is measured too**, and it keeps B alive:
-the game reads 52–76 free slots walked per object freed, against at most 1.46 elsewhere (§6.2),
-and nearly all of those slots are in classes the game allocates from, so §6.2's *repair* still
-catches it (§12 Q1).
+pause wherever a workload was floor-pinned. **§9 item 1 is measured too**: the game reads 52–76
+free slots walked per object freed, against at most 1.46 elsewhere (§6.2). **And B has run**, on
+a prototype (`bench/results-2026-10-04-gc-trigger-b.md`): the damped floor cuts the game's GC per
+allocation 12–15× with no added regions; the ordinary workloads move by at most the compiler's
++4% RSS.
 
 Given that, the ordering the evidence supports:
 
-1. **Option A at ~100,000 is a defensible interim**, and §9 item 2 came back as §4 predicted:
-   flat-to-worse, nothing improved, the cost above. §8.1 measures `gc-adapt-check` green there and
-   well clear of the ~138,000 pocket, §8.2's collision is dissolved by pinning that gate's own
-   probes, and §8.3 shows the compiler is not harmed. What it buys the reporting workload is not
-   measured at 100,000. At 232,000 the game spends 7–10 µs of GC per 1,000 allocations against
-   161–217 at the default, ~20× (`bench/results-2026-10-03-gc-walk.md`; per-frame figures are not
-   comparable, since the game's allocation volume varies 5× between runs). The price is a guessed
-   constant, a raised minimum heap, and one workload made measurably worse on both axes to help another.
-2. **Option C should be folded into whatever lands**, and item 2 strengthened its case from an
+1. **Build Option B in its damped form (§6.2).** It does for the reporting workload most of what
+   pinning did — 14 µs of GC per 1,000 allocations against 7–10 pinned at 232,000 and 169–220 at
+   the default — without a raised minimum heap, so it costs nqueens nothing where A cost it 3.2×
+   RSS. Its pauses rise ~30% on the game (807 → ~1,080 µs), where A's rose ~20× wherever a
+   workload was floor-pinned.
+2. **Option A is no longer needed as an interim.** It was one while B had no terminating form. Its
+   price above stays the record of why it was not shipped.
+3. **Option C should be folded into whatever lands**, and §9 item 2 strengthened its case from an
    unexpected direction. By cycles × p50 pause, nqueens' collector got *cheaper* at the raised
    floor (315 → 274 ms, a proxy that leaves out the tail) while the program got slower; the likely
    cost is cache, at 17.4 MB. http_log_middleware saw the same proxy saving at 8.5 MB and came out
    flat. The variable separating them is whether the raised heap outgrows cache — a threshold in
    **bytes**, invisible to a trigger that counts objects. That argument does not route through
    work-per-garbage, so C no longer depends on B.
-3. **Option B remains the design**, but §6.2's schematic does not terminate and needs the per-class
-   repair first. It is A's successor, not a reason to skip A.
 4. **Option D stays the end state**, gated on the ceiling and the CPU clock, neither of which is
    large.
 
-**What is a judgement call rather than an evidence call:** whether to ship an interim constant at
-all. A is a guessed number that helps one workload class and costs pause and RSS on another; B is
-principled and further away. The measurements bound that trade — and now price it — but they do
-not settle it.
+**What is still a judgement call:** `k`. 3 is where the ordinary workloads stop moving (§6.2), not
+a derived value, and the prototype numbers are one run each outside the game; the real build is
+measured again before it lands (§9).
 
-This section has now reversed twice — away from A on a gate collision that measurement shows does
-not exist, then back toward it. §8's preamble names the error both reversals shared.
+This section has reversed three times — away from A on a gate collision that measurement shows
+does not exist, back toward it, then to B once B had a form that terminates. §8's preamble names
+the error the first two shared; the third came from running B instead of reading one cycle of it.
 
 ## 7. Impact
 
@@ -485,6 +485,9 @@ test-suite file's peak heap becomes `floor × slot bytes`, roughly 4 MB at 100,0
 - **Regression test, written first and confirmed RED** (Definition of Ready #3): a fixture that
   holds allocation volume fixed and asserts a bound on work-per-garbage or cycle count. Today's
   runtime fails it; a correct fix passes.
+- **A termination test**: the bench note's adversary — a dead class with a trickle of demand,
+  and live objects pinning the churn's fresh regions — must reach a fixed free pool. The
+  per-class repair fails it by growing ~100,000 slots a cycle, so it tells the two forms apart.
 - **`gc-ageprof-check` must pin `SPROUT_GC_THRESHOLD=4096` in its probes**, as part of any floor
   change. §8.2 measures it red at any floor above roughly 10,000, and its own comment says it
   validates the age counter rather than the threshold policy — so the pin restores what it is for
@@ -521,22 +524,23 @@ clocks count descheduled time.
 
 ## 12. Open questions
 
-1. **Does §6.2's repair hold?** The schematic diverges; flooring on `live` plus the free slots in
-   classes with demand last cycle is the candidate fix. It needs showing that a phase-structured
-   program cannot defeat it the same way the exact-fit freelists defeat the naive form.
-   **It does catch the game**, measured with a throwaway per-class probe (not committed; method in
-   `bench/results-2026-10-03-gc-walk.md`): of 246,829 free slots per cycle, 246,747 are in classes
-   the game allocated from since the last collection — 109,351 at 16 bytes and 106,544 at 32 — and
-   82 in classes with none. The game's free pool is surplus in live classes, not a dead
-   class, so the naive form's ratchet has only those ~80 slots a cycle to feed on here. The
-   phase-structured case is still open.
-2. **What constant, if A ships?** ~100,000 is where §8.1 measures green with margin on both sides
-   of the pocket. §9 item 2 has priced it (§6.5): the number is still a guess, now with a known
-   cost.
+1. ~~**Does §6.2's repair hold?**~~ No — the per-class repair diverges; the damped form holds
+   (§6.2, `bench/results-2026-10-04-gc-trigger-b.md`). A one-cycle probe had read the per-class
+   floor at ~248,500 on the game, because 246,747 of its 246,829 free slots are in classes it
+   allocates from. Run as a loop, it averaged 321k–367k: the pool is not split across classes in
+   the game's allocation mix, so short classes keep bumping new slots. A trickle of demand into a
+   dead class, with live objects pinning the fresh regions, makes it grow without bound.
+2. ~~**What constant, if A ships?**~~ Moot while A is not recommended (§6.5). ~100,000 was where
+   §8.1 measures green with margin on both sides of the pocket, at the cost §9 item 2 priced.
 3. ~~**Is §3.1's sparse-region mechanism real?**~~ Yes — measured (§3.1).
 4. **Does anything below the floor deserve the old behaviour?** A genuinely tiny program pays a
    six-figure minimum heap under A. Go's answer is that 4 MiB is small enough not to matter;
-   Sprout's floor is in objects, so the equivalent claim is not automatically true (§6.3).
+   Sprout's floor is in objects, so the equivalent claim is not automatically true (§6.3). Moot
+   under B, which raises no minimum: its floor rises only with free slots the program already holds.
+5. **What does `SPROUT_GC_THRESHOLD` mean under B?** Today it sets the threshold and its base, so
+   a low value forces frequent collection. The prototype takes the larger of the base and B's
+   floor, so a low value stops forcing it wherever B's floor is higher. That is §6.1's
+   escape-hatch objection, now against B; one answer is that setting the variable turns B off.
 
 ## 13. Sources
 

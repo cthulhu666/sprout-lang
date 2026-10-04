@@ -2170,13 +2170,11 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
 - [ ] `P1` **The GC trigger is a pure space policy, so shrinking a live set can raise total GC
   time.** `threshold = max(live × factor, base)` bounds RSS and is also the only thing scheduling
   collector work, while a cycle's cost tracks the footprint `sprout_gc_sweep` walks — which the
-  trigger never reads. uncharted-suns cut a live set 45× and total GC rose 4× (#407). The condition
-  is narrower than "small live set": it bites only when retained footprint greatly exceeds
-  per-cycle garbage. `walked=` measures it: the game walks 52–76 free slots per object freed, other
-  programs ≤1.46 (`bench/results-2026-10-03-gc-walk.md`). A 100,000 floor is measured green on
-  `gc-adapt-check`, red on `gc-ageprof-check` above ~10k (which that gate's threshold pin
-  dissolves), and flat-to-worse on the floor-pinned four at up to 3.2× RSS and a 20× pause rise
-  (`bench/results-2026-09-30-gc-floor.md`). Options and open questions: `docs/gc-trigger-v0.md`.
+  trigger never reads. uncharted-suns cut a live set 45× and total GC rose 4× (#407): its sweeps
+  walk 52–76 free slots per object freed, others ≤1.46. **Next: build Option B's damped floor**,
+  `live + (live + free) / 3`. A prototype cut the game's GC per allocation 12–15× with no added
+  regions, left `gc_roots` and nqueens unchanged and cost the compiler +4% RSS
+  (`bench/results-2026-10-04-gc-trigger-b.md`). Design and open questions: `docs/gc-trigger-v0.md`.
 - [ ] `P3` **The GC cycle timer measures elapsed time with a non-monotonic clock.**
   `sprout_gc_collect_with_reason` brackets the collection with `sprout_now_micros`
   (`gettimeofday`/`CLOCK_REALTIME`), while that function's neighbour documents the rule it breaks:
