@@ -2428,6 +2428,19 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   growth once blamed on it: `--phase bundle` is flat to 1,920 elements. Shipping the table as a
   STRING literal decoded at startup remains the smaller-IR option: emitted IR is constant-size
   whatever the table.
+- [ ] `P2` **A long `do` block hits the same root-pool ceiling.** One `do` block of 4,400 plain
+  `print(...)` steps fails with `GC root pool exhausted`; 4,200 compiles. Cost is linear below it
+  (27 / 42 / 69 MB at 600 / 1,200 / 2,400 steps).
+  `--phase check` passes, so the crash is after type checking. `translate_do` in
+  `stdlib/compiler/ast_to_ir.sprout` recurses once per step (not a tail call), and 131,072 /
+  ~4,300 ≈ 30 roots per frame. That fits recursion depth, but nobody has traced it yet. The step
+  kind does not matter: interleaved `let`/`print` dies at the same count.
+- [ ] `P2` **Chained `let` in a `do` block compiles in quadratic time.** `let xN = x(N-1) + 1` × N
+  in one block: 0.7 s / 56 MB at 600, 2.4 s / 153 MB at 1,200, 9.6 s / 552 MB at 2,400. The same
+  count of independent lets (`let xN = N + 1`) takes 0.2 / 0.24 / 0.39 s, so the chaining drives
+  it; their RSS still grows 2.5× per doubling. `--phase check` is flat, so it is past type checking.
+  Cause not found; `sra_core_eligible(name, e, rest, …)` reads all of `rest` at each `let`, so check
+  it first. Neither cost gate covers it: both fixtures are flat blocks with no bindings.
 - [ ] `P2` **Allow a layout `do` block inside call parentheses** — an inline multi-statement
   effectful lambda as a call argument. `range_fold(\ (s, k) -> do <newline> stmt1 …, seed, r)`
   fails with "Expected )"; today the lambda must be `let`-bound and passed by name. A probe shows it
