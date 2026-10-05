@@ -5,6 +5,7 @@ import stdlib.compiler.unifier as unifier
 import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.source as source
 import stdlib.compiler.linear_check as linear_check
+import stdlib.compiler.scc as scc
 import stdlib.string as string
 import stdlib.env as env
 
@@ -9358,108 +9359,6 @@ fn bind_params(params: List ast.Param, bound: Set) -> Set =
       | ast.Param name _ _ -> bind_params(rest, set_insert(name, bound))
 
 # ---------------------------------------------------------------------------
-# Strongly connected components — Kosaraju, iteratively
-# ---------------------------------------------------------------------------
-#
-# Two reasons this is not the SCC walk that already exists in ast_to_ir.
-#
-# `pb_scc_of` computes a component by calling `mutual_reaches(f,g) && reaches(g,f)`
-# PAIRWISE over every candidate — 2n graph searches per node. That is fine for the
-# mutual-TCO pre-pass, whose node set is a handful of tail-callers. Here the largest
-# reorderable run in this repo is 551 functions (measured 2026-08-25: infer.sprout
-# itself), where pairwise reachability is O(n²(V+E)) — around a billion operations
-# on the compiler's own hottest file, every build. This is O(V+E).
-#
-# And it is ITERATIVE. Textbook Kosaraju is two recursive depth-first searches; at
-# 551 frames that is a stack the `stack-overflow-smoke` gate exists to police, and
-# the depth is set by user code, not by us. Both passes carry an explicit worklist.
-#
-# Pass 1 walks G recording nodes by DECREASING finish time; pass 2 walks Gᵀ in that
-# order and each tree it reaches is one component.
-fn neighbors_of(n: String, graph: Dict Set) -> List String =
-  match dict_get(n, graph) with
-  | Just s -> set_to_list(s)
-  | Nothing -> Nil
-
-fn set_or_empty(k: String, d: Dict Set) -> Set =
-  match dict_get(k, d) with
-  | Just s -> s
-  | Nothing -> set_empty()
-
-fn reverse_graph(nodes: List String, graph: Dict Set, acc: Dict Set) -> Dict Set =
-  match nodes with
-  | Nil -> acc
-  | Cons n rest -> reverse_graph(rest, graph, add_reverse_edges(n, neighbors_of(n, graph), acc))
-
-fn add_reverse_edges(from: String, tos: List String, acc: Dict Set) -> Dict Set =
-  match tos with
-  | Nil -> acc
-  | Cons t rest -> add_reverse_edges(from, rest, dict_set(t, set_insert(from, set_or_empty(t, acc)), acc))
-
-# Pass 1. The worklist holds (node, is_exit): an `is_exit` item means every
-# descendant of that node has been finished, so this is where post-order is
-# recorded. `order` is built by consing on finish, which leaves the LAST-finished
-# node at the head — decreasing finish time, exactly what pass 2 consumes.
-fn scc_finish_order(nodes: List String, graph: Dict Set) -> List String =
-  scc_finish_order_go(nodes, graph, set_empty(), Nil)
-
-fn scc_finish_order_go(nodes: List String, graph: Dict Set, visited: Set, order: List String) -> List String =
-  match nodes with
-  | Nil -> order
-  | Cons n rest ->
-      if set_member(n, visited) then scc_finish_order_go(rest, graph, visited, order)
-      else
-        let (v2, o2) = scc_dfs1(Cons((n, false), Nil), graph, visited, order)
-        in scc_finish_order_go(rest, graph, v2, o2)
-
-fn scc_dfs1(work: List (String, Bool), graph: Dict Set, visited: Set, order: List String) -> (Set, List String) =
-  match work with
-  | Nil -> (visited, order)
-  | Cons item rest ->
-      match item with
-      | (n, true) -> scc_dfs1(rest, graph, visited, Cons(n, order))
-      | (n, false) ->
-          # A node can be pushed as an ENTER more than once (two parents reach it
-          # before either finishes); the visited test here is what makes that
-          # harmless. Its EXIT marker is pushed exactly once, on first entry.
-          if set_member(n, visited) then scc_dfs1(rest, graph, visited, order)
-          else
-            scc_dfs1(push_enters(neighbors_of(n, graph), Cons((n, true), rest)),
-                     graph, set_insert(n, visited), order)
-
-fn push_enters(ns: List String, work: List (String, Bool)) -> List (String, Bool) =
-  match ns with
-  | Nil -> work
-  | Cons n rest -> Cons((n, false), push_enters(rest, work))
-
-# Pass 2. Each tree reached in Gᵀ is one component.
-#
-# Kosaraju discovers components in topological order of G's condensation, and G's
-# edges point caller -> callee, so it finds CALLERS first. `acc` is built by
-# consing, which reverses that — leaving callees first, which is the order a
-# dependency-ordered check needs. The reversal is load-bearing, not incidental.
-fn scc_components(order: List String, rgraph: Dict Set, visited: Set, acc: List (List String)) -> List (List String) =
-  match order with
-  | Nil -> acc
-  | Cons n rest ->
-      if set_member(n, visited) then scc_components(rest, rgraph, visited, acc)
-      else
-        let (v2, members) = scc_dfs2(Cons(n, Nil), rgraph, visited, Nil)
-        in scc_components(rest, rgraph, v2, Cons(members, acc))
-
-fn scc_dfs2(work: List String, rgraph: Dict Set, visited: Set, members: List String) -> (Set, List String) =
-  match work with
-  | Nil -> (visited, members)
-  | Cons n rest ->
-      if set_member(n, visited) then scc_dfs2(rest, rgraph, visited, members)
-      else scc_dfs2(append(neighbors_of(n, rgraph), rest), rgraph, set_insert(n, visited), Cons(n, members))
-
-# Components of `nodes` under `graph`, dependencies first.
-fn sccs_in_dependency_order(nodes: List String, graph: Dict Set) -> List (List String) =
-  scc_components(scc_finish_order(nodes, graph), reverse_graph(nodes, graph, dict_empty()),
-                 set_empty(), Nil)
-
-# ---------------------------------------------------------------------------
 # group_plan — the §4.5.1 seam
 # ---------------------------------------------------------------------------
 #
@@ -9566,7 +9465,7 @@ fn partition_segment(seg: List (Int, ast.Decl)) -> List (List Int) =
       let names = segment_names(seg)
           index = set_of_list(names, set_empty())
       in groups_to_indices(
-           sccs_in_dependency_order(names, segment_graph(seg, index, dict_empty())),
+           scc.sccs_in_dependency_order(names, segment_graph(seg, index, dict_empty())),
            segment_index_map(seg, dict_empty()))
 
 fn segment_names(seg: List (Int, ast.Decl)) -> List String =

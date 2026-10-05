@@ -5,6 +5,7 @@ import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.types as types
 import stdlib.compiler.ast as ast
 import stdlib.compiler.source as source
+import stdlib.string as string
 
 # Phase B (signature unification) unit tests. See docs/mutual-tco-phase-b-v0.md.
 
@@ -45,9 +46,20 @@ fn fndecl_named(name: String, pnames: List String, body: typed_ast.TypedExpr) ->
 fn arm_pat(name: String, body: typed_ast.TypedExpr) -> typed_ast.TypedMatchBranch =
   typed_ast.TypedMatchBranch(ast.VarPattern(name, no_pos()), body)
 
-fn first_scc(sccs: List (List (String, Int))) -> List (String, Int) =
-  match sccs with | Nil -> Nil | [h | _] -> h
-fn scc_size_at(sccs: List (List (String, Int)), _i: Int) -> Int = list_length(first_scc(sccs))
+fn scc_at(sccs: List (List (String, Int)), i: Int) -> List (String, Int) =
+  match sccs with
+  | [] -> Nil
+  | [h | rest] -> if i <= 0 then h else scc_at(rest, i - 1)
+fn first_scc(sccs: List (List (String, Int))) -> List (String, Int) = scc_at(sccs, 0)
+fn scc_size_at(sccs: List (List (String, Int)), i: Int) -> Int = list_length(scc_at(sccs, i))
+# Every SCC in order, members in order: "[a/1 b/2] [c/2 d/3]".
+fn render_sccs(sccs: List (List (String, Int))) -> String = string.join(" ", list_map(render_scc, sccs))
+fn render_scc(members: List (String, Int)) -> String = "[" ++ string.join(" ", list_map(render_member, members)) ++ "]"
+fn render_member(member: (String, Int)) -> String =
+  match member with
+  | (name, arity) -> name ++ "/" ++ int_to_string(arity)
+fn zeros(n: Int) -> List typed_ast.TypedExpr = if n <= 0 then Nil else Cons(tint(0), zeros(n - 1))
+fn calls(name: String, arity: Int) -> typed_ast.TypedExpr = tcall(tvar(name), zeros(arity))
 fn pair_in(xs: List (String, Int), name: String, ar: Int) -> Bool =
   match xs with
   | Nil -> false
@@ -191,5 +203,25 @@ fn main() -> Unit !{IO} =
                 list_length(ast_to_ir.pb_hetero_sccs(Cons(sh_helper, Cons(sh_a, Nil)))) == 0)
     assert_true(state, "param shadows member: phase_b_unify leaves decls unchanged (2)",
                 list_length(ast_to_ir.phase_b_unify(Cons(sh_helper, Cons(sh_a, Nil)))) == 2)
+
+    # 15. Output order: SCCs by their first member's declaration, members in
+    #     declaration order. Phase B emits its `$u` variants in this order, so a
+    #     reordering changes the IR. a1 tail-calls into {b1,b2}, so the SCC search
+    #     meets {b1,b2} first; declaration order must still put {a1,a2} first.
+    let o_a1 = fndecl("a1", 1, tif(tint(0), calls("a2", 2), calls("b1", 2)))
+    let o_b1 = fndecl("b1", 2, calls("b2", 3))
+    let o_a2 = fndecl("a2", 2, calls("a1", 1))
+    let o_b2 = fndecl("b2", 3, calls("b1", 2))
+    assert_true(state, "two SCCs: declaration order of SCCs and of members",
+                render_sccs(ast_to_ir.pb_hetero_sccs([o_a1, o_b1, o_a2, o_b2])) == "[a1/1 a2/2] [b1/2 b2/3]")
+    assert_true(state, "scc_at reads past the first SCC", scc_size_at(ast_to_ir.pb_hetero_sccs([o_a1, o_b1, o_a2, o_b2]), 1) == 2)
+
+    # 16. A 3-member cycle reached only indirectly (c1 -> c2 -> c3 -> c1), declared
+    #     out of cycle order: members still come out in declaration order.
+    let c1 = fndecl("c1", 1, calls("c2", 2))
+    let c2 = fndecl("c2", 2, calls("c3", 1))
+    let c3 = fndecl("c3", 1, calls("c1", 1))
+    assert_true(state, "3-member indirect cycle, declaration order",
+                render_sccs(ast_to_ir.pb_hetero_sccs([c3, c1, c2])) == "[c3/1 c1/1 c2/2]")
 
     summary(state)

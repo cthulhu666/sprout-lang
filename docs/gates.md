@@ -509,6 +509,28 @@ between them reversed the list back and forth. A `wrap` makes the compiler enfor
 asked for — and the whole conversion is verified by emitting byte-identical IR for all 73 compilable
 fixtures under `examples/`, `tests/smoke_shapes/` and `tests/cost/`.
 
+## Compiling many functions — `just scc-cost-gate`
+
+The rooting gate's fixtures are one function, so it cannot see a cost that grows with the number of
+functions. This one compiles a tail-call chain of 40, 80 and 160 top-level functions
+(`tests/cost/scc_chain_{small,large,huge}.sprout`) and bounds objects and arena bytes per added link,
+plus their growth when the chain doubles. Same method as the rooting gate: allocation counts, fixture
+differences, link counts read from the files, identical headers asserted, stage-2.
+
+It exists because mutual TCO's Phase B found its SCCs by asking "does f reach g, and g reach f?" for
+every pair, one graph search per question. That is cubic in chain length: 400 links took 48 s and
+33.6 GB of arena (2026-10-04). It was also 55% of the compiler's self-compile allocation, unseen,
+because the IR was right. One Kosaraju pass (`scc.sccs_in_dependency_order`): 0.49 s and 362 MB.
+On the gate's fixtures, pairwise read 231/100 objects and 264/100 bytes at 2x chain length; the
+single pass reads 100/100 and 101/100.
+
+**The arities alternate 1, 2, 1, 2.** Phase A still runs one search per same-arity tail edge, which
+is quadratic on a same-arity chain (BACKLOG). Alternating keeps Phase A out of the measurement, so a
+red here means Phase B or something new, not the known debt.
+
+`ci-fast-gates` runs it in one `just` call with `rooting-cost-gate`: both depend on `build-stage2`,
+which always relinks, and two parallel entries would write the same binary at once.
+
 ## Object-age instrument — `just gc-ageprof-check`
 
 Calibrates `SPROUT_GC_AGEPROF=1` against two workloads with known answers. Details and the

@@ -1,0 +1,55 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.scc as scc
+import stdlib.string as string
+
+# Strongly connected components (stdlib/compiler/scc.sprout).
+
+fn graph_of(edges: List (String, List String)) -> Dict Set = list_fold(add_node, dict_empty(), edges)
+
+fn add_node(graph: Dict Set, edge: (String, List String)) -> Dict Set =
+  match edge with
+  | (from, tos) -> dict_set(from, list_fold(add_member, set_empty(), tos), graph)
+
+fn add_member(s: Set, name: String) -> Set = set_insert(name, s)
+
+# A component's members come back in no promised order, so each is sorted here;
+# the ORDER OF COMPONENTS is the contract under test.
+fn render(comps: List (List String)) -> String = string.join(" ", list_map(render_comp, comps))
+
+fn render_comp(members: List String) -> String =
+  "[" ++ string.join(",", vec_to_list(vec_sort(vec_from_list(members)))) ++ "]"
+
+fn sccs(nodes: List String, edges: List (String, List String)) -> String =
+  render(scc.sccs_in_dependency_order(nodes, graph_of(edges)))
+
+fn main() -> Unit !{IO} =
+  do
+    let state = new_state()
+
+    # Callees come first: group_plan checks a group's dependencies before it.
+    assert_true(state, "chain a->b->c: callees first",
+                sccs(["a", "b", "c"], [("a", ["b"]), ("b", ["c"])]) == "[c] [b] [a]")
+
+    assert_true(state, "3-cycle a->b->c->a: one component",
+                sccs(["a", "b", "c"], [("a", ["b"]), ("b", ["c"]), ("c", ["a"])]) == "[a,b,c]")
+
+    # The cycle {a,b} calls the cycle {c,d}, so {c,d} comes first whatever the node order.
+    assert_true(state, "two cycles, a->c: callee cycle first",
+                sccs(["a", "b", "c", "d"], [("a", ["b", "c"]), ("b", ["a"]), ("c", ["d"]), ("d", ["c"])])
+                  == "[c,d] [a,b]")
+    assert_true(state, "two cycles, nodes listed callee-first: same answer",
+                sccs(["c", "d", "a", "b"], [("a", ["b", "c"]), ("b", ["a"]), ("c", ["d"]), ("d", ["c"])])
+                  == "[c,d] [a,b]")
+
+    # A self-loop is a component of one, not a cycle with anything else.
+    assert_true(state, "self-loop a->a, a->b: two singletons, b first",
+                sccs(["a", "b"], [("a", ["a", "b"])]) == "[b] [a]")
+
+    # A node with no entry in the graph has no out-edges; it is still a component.
+    assert_true(state, "node absent from the graph is its own component",
+                sccs(["a", "b"], [("a", ["b"])]) == "[b] [a]")
+
+    assert_true(state, "no nodes: no components", sccs([], []) == "")
+
+    summary(state)

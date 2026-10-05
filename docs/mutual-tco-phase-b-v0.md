@@ -399,8 +399,9 @@ param-type gate dropped vs `docs/mutual-tco-v0.md` §4a (loud-fail, not silent, 
 ABI ever lands); #4-tuple the missed-opt above; #5 SCC name-matching assumes bare == qualified
 callee names (cross-module hetero cycle silently unoptimized if they diverge; untested); #6
 `pb_retarget_*` duplicates the `pb_tail_callees_*` tail-grammar walk (drift → detection/rewrite
-disagree); #7 SCC via repeated whole-graph reachability is O(n²·(V+E)) on every compile incl.
-bootstrap; #8 `pb_scc_of_rest` is a provably-equivalent copy of `pb_scc_of`; #9 `test_ir_codegen_closures.spr`
+disagree); ~~#7 SCC via repeated whole-graph reachability is O(n²·(V+E)) on every compile incl.
+bootstrap; #8 `pb_scc_of_rest` is a provably-equivalent copy of `pb_scc_of`~~ (both fixed: one
+Kosaraju pass, `scc.sccs_in_dependency_order`, guarded by `just scc-cost-gate`); #9 `test_ir_codegen_closures.spr`
 T19 assertion diluted to a substring; #10 `build_ret_i64` is vacuous (`llvm_ret_type` ≡ i64), so the
 i64 eligibility gate collapses to one string test.
 
