@@ -306,6 +306,8 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
   - `dict_keys(dict) -> Vec String`
   - `dict_values(dict) -> Vec v`
   - `dict_entries(dict) -> Vec (String, v)`
+  - `dict_entries_with_prefix(prefix, dict) -> Vec (String, v)` — the entries whose key starts
+    with `prefix`, in key order; O((log n + k) log n) for k matches
   - dict literals: `{foo: 1, "bar": 2}`, `{}`
 - `Show t`, `Ord t`, `Semigroup t`, `Functor f`, and `Foldable f`
 - `to_string(x)` is the default `Show` operation

@@ -4182,19 +4182,18 @@ fn seeded_sig_vars(env: Dict types.Scheme) -> List types.Type =
 # Scans env for "@super:{class_name}:{super_name}" entries and adds
 # "@fwd:{fresh_name}:{super_name}" for each.
 fn seed_superclass_fwd_markers(class_name: String, fresh_name: String, prog_var: String, env: Dict types.Scheme) -> Dict types.Scheme =
-  seed_super_from_entries(class_name, fresh_name, prog_var, vec_to_list(dict_entries(env)), env)
+  list_fold(set_super_marker(key_prefix, prog_var, _, _), env, direct_superclasses_in_env(class_name, env))
+where
+  key_prefix = "@fwd:" ++ fresh_name ++ ":"
 
-fn seed_super_from_entries(class_name: String, fresh_name: String, prog_var: String, entries: List (String, types.Scheme), env: Dict types.Scheme) -> Dict types.Scheme =
-  match entries with
-  | Nil -> env
-  | Cons entry rest ->
-      match entry with
-      | (key, _) ->
-          if str_starts_with(key, "@super:" ++ class_name ++ ":")
-          then seed_super_from_entries(class_name, fresh_name, prog_var, rest,
-                 dict_set("@fwd:" ++ fresh_name ++ ":" ++ string.drop(key, string.length("@super:" ++ class_name ++ ":")),
-                          types.mono(types.TConst(types.type_id(prog_var))), env))
-          else seed_super_from_entries(class_name, fresh_name, prog_var, rest, env)
+# The direct superclasses `class_name`'s `@super:` markers record, in key order. A
+# prefix scan rather than a walk of every entry: this runs once per class constraint.
+fn direct_superclasses_in_env(class_name: String, env: Dict types.Scheme) -> List String =
+  direct_superclasses(class_name, vec_to_list(dict_entries_with_prefix("@super:" ++ class_name ++ ":", env)))
+
+# `<key_prefix><super_name>` -> `prog_var`: the shape of both @fwd: and @eta_fwd: markers.
+fn set_super_marker(key_prefix: String, prog_var: String, acc: Dict types.Scheme, super_name: String) -> Dict types.Scheme =
+  dict_set(key_prefix ++ super_name, types.mono(types.TConst(types.type_id(prog_var))), acc)
 
 # Computes the @eta_fwd:* markers that correspond to the @fwd:* entries
 # seed_forward_markers seeds. Used by check_fn_body to thread markers to
@@ -4249,19 +4248,10 @@ fn add_eta_for_constraint(c: ast.TypeConstraint, prog_to_fresh: Dict types.Type,
 # arrive wrapped, unwrap once for string concat used in the @eta_fwd:* key
 # prefix and the scheme-value content.  See the wrap declarations above.
 fn add_eta_with_supers(class_name: String, fresh_name: FreshTVarName, prog_var: ProgVarName, env: Dict types.Scheme, markers: Dict types.Scheme) -> Dict types.Scheme =
-  add_eta_supers_from_entries(class_name, fresh_tvar_str(fresh_name), prog_var_str(prog_var), vec_to_list(dict_entries(env)), markers)
-
-fn add_eta_supers_from_entries(class_name: String, fresh_name: String, prog_var: String, entries: List (String, types.Scheme), markers: Dict types.Scheme) -> Dict types.Scheme =
-  match entries with
-  | Nil -> markers
-  | Cons entry rest ->
-      match entry with
-      | (key, _) ->
-          if str_starts_with(key, "@super:" ++ class_name ++ ":")
-          then add_eta_supers_from_entries(class_name, fresh_name, prog_var, rest,
-                 dict_set("@eta_fwd:" ++ fresh_name ++ ":" ++ string.drop(key, string.length("@super:" ++ class_name ++ ":")),
-                          types.mono(types.TConst(types.type_id(prog_var))), markers))
-          else add_eta_supers_from_entries(class_name, fresh_name, prog_var, rest, markers)
+  list_fold(set_super_marker(key_prefix, prog_var_str(prog_var), _, _), markers,
+            direct_superclasses_in_env(class_name, env))
+where
+  key_prefix = "@eta_fwd:" ++ fresh_tvar_str(fresh_name) ++ ":"
 
 # --- Args accumulator ---
 
@@ -6137,8 +6127,11 @@ fn annotation_tyvar(te: ast.TypeExpr) -> Maybe String =
 # Without the `@aliasty:` half, `\ (n: Name) -> …` against `type alias Name =
 # String` resolves `Name` to an opaque TConst of that name and fails later as
 # `No instance of ToString for Name`.
+#
+# Both are prefix scans rather than walks of every entry: this runs once per lambda.
 fn aliases_for_annotations(env: Dict types.Scheme) -> Dict types.Type =
-  alias_decls_from_env(vec_to_list(dict_entries(env)), import_aliases_from_env(env))
+  alias_decls_from_env(vec_to_list(dict_entries_with_prefix(types.alias_marker_prefix, env)),
+                       import_aliases_from_env(env))
 
 # A `type alias` is mirrored into the value environment under
 # types.alias_marker_prefix — one spelling for the write and every reader, resolve's
@@ -7528,7 +7521,7 @@ fn class_names_from_entries(entries: List (String, types.Scheme), acc: List Stri
 # local_vars dict is built on (build_type_var_dict), so the sentinels reach
 # every annotation position without threading a parameter through inference.
 fn import_aliases_from_env(env: Dict types.Scheme) -> Dict types.Type =
-  import_aliases_go(vec_to_list(dict_entries(env)), dict_empty())
+  import_aliases_go(vec_to_list(dict_entries_with_prefix("@qualalias:", env)), dict_empty())
 
 fn import_aliases_go(entries: List (String, types.Scheme), acc: Dict types.Type) -> Dict types.Type =
   match entries with

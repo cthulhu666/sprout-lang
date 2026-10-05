@@ -1,0 +1,39 @@
+import stdlib.test (TestCase, check_eq, run_suite)
+
+# dict_entries_with_prefix must equal dict_entries filtered by str_starts_with,
+# order included: infer swaps one for the other at four call sites.
+fn has_prefix(prefix: String, entry: (String, Int)) -> Bool =
+  match entry with
+  | (key, _) -> str_starts_with(key, prefix)
+
+fn filtered(prefix: String, d: Dict Int) -> Vec (String, Int) =
+  vec_filter(has_prefix(prefix, _), dict_entries(d))
+
+fn agrees(prefix: String, d: Dict Int) -> TestCase =
+  check_eq("agrees with filter: \"" ++ prefix ++ "\"", dict_entries_with_prefix(prefix, d), filtered(prefix, d))
+
+fn main() -> Unit !{IO} =
+  let env = dict_from_list([
+    ("@aliasty:Name", 1), ("@qualalias:types.Type", 2), ("@qualalias:ast.Expr", 3),
+    ("@super:A:Eq", 4), ("@super:A:Ord", 5), ("@super:AB:Show", 6), ("@super:", 7),
+    ("@superx", 8), ("map", 9), ("żółw", 10), ("żółwik", 11), ("@", 12)])
+  in run_suite("dict_entries_with_prefix", [
+    check_eq("two matches, key order", dict_entries_with_prefix("@qualalias:", env),
+      foldable_to_vec([("@qualalias:ast.Expr", 3), ("@qualalias:types.Type", 2)])),
+    # `@super:AB:Show` sorts right after the `@super:A:` run; the walk must stop there.
+    check_eq("neighbouring prefix excluded", dict_entries_with_prefix("@super:A:", env),
+      foldable_to_vec([("@super:A:Eq", 4), ("@super:A:Ord", 5)])),
+    check_eq("no match", dict_entries_with_prefix("@class:", env), foldable_to_vec([])),
+    check_eq("empty dict", dict_entries_with_prefix("@", dict_empty()), foldable_to_vec([])),
+    agrees("", env),
+    agrees("@", env),
+    agrees("@super:", env),
+    agrees("@super", env),
+    agrees("@aliasty:", env),
+    agrees("!", env),
+    agrees("zzz", env),
+    agrees("map", env),
+    agrees("map2", env),
+    agrees("żółw", env),
+    agrees("ż", env)
+  ])

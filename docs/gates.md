@@ -524,6 +524,14 @@ because the IR was right. One Kosaraju pass (`scc.sccs_in_dependency_order`): 0.
 On the gate's fixtures, pairwise read 231/100 objects and 264/100 bytes at 2x chain length; the
 single pass reads 100/100 and 101/100.
 
+**Each link passes an annotated lambda.** Inference turned the whole type environment into a list
+for every lambda, twice, to pick out its `@qualalias:` and `@aliasty:` markers
+(`infer.aliases_for_annotations`): 18% of self-compile allocation. `dict_entries_with_prefix` reads
+only the run of keys with the prefix. Per link: 21464 objects and 797 KB before, 5404 and 258 KB
+after (2026-10-05). Growth read only 109/100 and 108/100 — the environment is mostly the prelude, a
+constant — so the ceilings caught it, not the growth arm. Annotated, so the fixture keeps pricing
+alias resolution if unannotated lambdas ever skip it.
+
 **The arities alternate 1, 2, 1, 2.** Phase A still runs one search per same-arity tail edge, which
 is quadratic on a same-arity chain (BACKLOG). Alternating keeps Phase A out of the measurement, so a
 red here means Phase B or something new, not the known debt.
