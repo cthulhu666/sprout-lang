@@ -1,0 +1,50 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.compiler as compiler
+import stdlib.compiler.bundler as bundler
+import stdlib.compiler.source as source
+import stdlib.string as string
+import stdlib.env as env
+
+# An instance of an IMPORTED class on the REPL / analysis-service path
+# (compile_source_with_cache): its written signature is checked against the class,
+# and a bare slot takes the class's type (spec-v0.md §8.5). Both passes read classes
+# from decls; this path bundles, so the prelude's classes are decls here too.
+
+fn fails_with(r: compiler.CompileResult, needle: String) -> Bool =
+  let compiler.CompileFail [compiler.DiagError _ msg | _] = r else false
+  in string.contains(msg, needle)
+
+fn is_compile_ok(r: compiler.CompileResult) -> Bool =
+  match r with
+  | compiler.CompileOk _ -> true
+  | compiler.CompileFail _ -> false
+
+fn session(body: String) -> String = `module app.session\n\n${body}\n`
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    match env.get("SPROUT_STDLIB_ROOT") with
+    # Loud, not silent: a skipped run reports "0 passed", which reads as green.
+    | Nothing -> print("SKIP: SPROUT_STDLIB_ROOT unset — no assertion ran")
+    | Just stdlib_root ->
+        do
+          cache <- bundler.new_load_env()
+          r_written <- compiler.compile_source_with_cache(
+            session(`type Q = Q\n\ninstance ToString Q\n  fn to_string(x: Int) -> String = "q"`),
+            source.StdlibRoot(stdlib_root), cache)
+          assert_true(state, "REPL: written slot checked against an imported class",
+                      fails_with(r_written, "class ToString declares"))
+          # Seeded `x: Q`, so the body's Int use is a mismatch, not the slot's type.
+          r_bare <- compiler.compile_source_with_cache(
+            session(`type Q = Q\n\ninstance ToString Q\n  fn to_string(x) = int_to_string(x)`),
+            source.StdlibRoot(stdlib_root), cache)
+          assert_true(state, "REPL: bare slot takes an imported class's type",
+                      fails_with(r_bare, "Int vs"))
+          # `.n` on a bare parameter needs its record type, which only the seed gives.
+          r_field <- compiler.compile_source_with_cache(
+            session(`type P = (n: Int)\n\ninstance Semigroup P\n  fn append(left, right) = P(n = left.n + right.n)`),
+            source.StdlibRoot(stdlib_root), cache)
+          assert_true(state, "REPL: seeded bare slot reads a record field", is_compile_ok(r_field))
+    summary(state)
