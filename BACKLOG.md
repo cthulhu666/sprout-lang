@@ -304,12 +304,25 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   (blocked: a tuple return has no `adt_index` entry); #5 confirm bare-vs-qualified callee names at
   the pre-lowering seam; #6 collapse the duplicated tail-position grammar walk; #9 restore T19's
   exact-name assertion; #10 the vacuous `build_ret_i64` eligibility map.
-- [ ] `P3` **Mutual TCO Phase A searches the call graph once per same-arity tail edge.**
-  `ast_to_ir.mutual_filter_targets` calls `mutual_reaches(g, f)` per callee, so a same-arity
-  tail-call chain is quadratic: per-link arena bytes 387k / 486k / 700k at 100 -> 800 links
-  (2026-10-04). 0.1% of self-compile. `scripts/scc_cost_gate.sh` alternates arity to dodge it.
-  Fix: one `scc.sccs_in_dependency_order` pass, then compare `g`'s component with `f`'s; then
-  drop the alternation from the gate's fixtures.
+- [ ] `P3` **Mutual TCO Phase A and the may-trigger-GC fixpoint are quadratic in call depth.**
+  `ast_to_ir.mutual_filter_targets` calls `mutual_reaches(g, f)` per same-arity tail callee:
+  per-link arena bytes 387k / 486k / 700k at 100 -> 800 links. `ir_rooting.fixpoint_iterate` is
+  Jacobi (a round reads only the last round's map), so a fact moves one call per round: a chain
+  whose last link allocates costs 745k / 955k / 1.39M per link. 1.1% and 0.2% of self-compile
+  allocation (2026-10-05). `scripts/scc_cost_gate.sh` alternates arity to dodge Phase A. Fix for
+  both: one `scc.sccs_in_dependency_order` pass — Phase A compares components, the fixpoint walks
+  them callees first — then drop the alternation from the gate's fixtures.
+- [ ] `P3` **The lexer is a third of the compiler's self-compile allocation.** 35% sits under a
+  `lexer.` frame in a stage-2 self-compile (2.72 GB, 2026-10-05): mostly `source.next` (11.4%)
+  and `source.decode_char_at` / `decode_codepoint_at` (6.1% each), then
+  `try_multi_char_symbol_worker` and `advance_position`. It is paid per character, so every compile
+  pays it. Profile per token first. The unverified superlinear-lexing report in the list-literal
+  root-pool entry is the same code: confirm or drop it in that pass.
+- [ ] `P3` **Two `@fwd:` marker lookups still walk the whole type environment.**
+  `infer.forwarded_tdict_for_tyvar` (after a direct-key miss) and `resolve_via_fwd_for_prog_var`
+  turn `dict_entries(env)` into a list to find `@fwd:*:<class>` markers: 2.9% and 1.0% of
+  self-compile allocation (2026-10-05). `dict_entries_with_prefix("@fwd:", env)` narrows each to
+  the `@fwd:` run; the class is a key suffix, so going further needs a re-keyed marker.
 - [ ] `P3` **Single traversal for the alloc-summary pre-pass vs the streaming emit.**
   `ir_pipeline.summarize_*` hand-duplicates the structure of `stream_*`; only the per-fn leaf action
   differs. Degrades safely (a missing summary entry over-roots), so this is drift, not soundness.
@@ -809,12 +822,13 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   fast path skipped the searches. The fast path hid it for ASCII; non-Latin text still pays. Options
   are a non-higher-order entry point per table, or making a static function argument not allocate.
   `sample` never showed this — it flattened into `str_slice`; only the per-kind counters named it.
-- [ ] `P3` **Cost gates cover three workloads; a parse and the stdlib hot paths are unguarded.**
+- [ ] `P3` **Cost gates cover four workloads; a parse and the stdlib hot paths are unguarded.**
   `render-cost-gate` budgets a TUI frame, `test_byte_offset_cost.spr` pins one complexity claim,
-  `rooting-cost-gate` prices a compile. Bytes are now REPORTED but barely budgeted: `arena_bytes=`
-  and `offarena_bytes=` split the two allocators, and only `arena_bytes` has a ceiling, only in
-  `rooting-cost-gate` — where it separates the two concatenation forms 5.9× against no signal from
-  any count. Nothing budgets `offarena_bytes` (no `Bytes`/`Builder` fixture exists to set one from)
+  `rooting-cost-gate` prices a compile of one long block and `scc-cost-gate` one of many functions.
+  Bytes are now REPORTED but barely budgeted: `arena_bytes=` and `offarena_bytes=` split the two
+  allocators, and only `arena_bytes` has a ceiling, only in the two compile gates — in
+  `rooting-cost-gate` it separates the two concatenation forms 5.9× against no signal from any
+  count. Nothing budgets `offarena_bytes` (no `Bytes`/`Builder` fixture exists to set one from)
   and `render-cost-gate` budgets neither. A `cost-golden` over 4–5 fixed workloads on shared
   counters is the shape that covers all of them at once. Shapes: `docs/gates.md` §Render cost.
 - [ ] `P3` **Mid-string `str_slice` is O(start)**, so a scanner whose offset advances is still
