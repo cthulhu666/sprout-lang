@@ -1,0 +1,14 @@
+module main
+
+# A bare parameter of an instance method takes the head's type (spec-v0.md §8.5),
+# so `b` is `Box a` and the head's `where ToString a` reaches `v`. Typed by the
+# body alone, `v` had a variable no `where` could name.
+
+type Box a = Box(a)
+
+instance ToString (Box a) where ToString a
+  fn to_string(b) =
+    let Box(v) = b
+    in to_string(Just(v))
+
+fn main() -> Unit !{IO} = print(to_string(Box(3)))

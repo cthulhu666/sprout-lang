@@ -1,0 +1,42 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.compiler as compiler
+import stdlib.compiler.bundler as bundler
+import stdlib.compiler.source as source
+import stdlib.string as string
+import stdlib.env as env
+
+# Instance overlap on the REPL / analysis-service path (compile_source_with_cache).
+# A session instance overlapping a PRELUDE one is rejected as on `--phase check`:
+# this path bundles, so the prelude's instances are decls the overlap scan sees.
+
+fn fails_with(r: compiler.CompileResult, needle: String) -> Bool =
+  let compiler.CompileFail [compiler.DiagError _ msg | _] = r else false
+  in string.contains(msg, needle)
+
+fn is_compile_ok(r: compiler.CompileResult) -> Bool =
+  match r with
+  | compiler.CompileOk _ -> true
+  | compiler.CompileFail _ -> false
+
+fn session(body: String) -> String = `module app.session\n\n${body}\n`
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    match env.get("SPROUT_STDLIB_ROOT") with
+    # Loud, not silent: a skipped run reports "0 passed", which reads as green.
+    | Nothing -> print("SKIP: SPROUT_STDLIB_ROOT unset — no assertion ran")
+    | Just stdlib_root ->
+        do
+          cache <- bundler.new_load_env()
+          r_prelude <- compiler.compile_source_with_cache(
+            session(`instance ToString Int\n  fn to_string(x: Int) -> String = "mine"`),
+            source.StdlibRoot(stdlib_root), cache)
+          assert_true(state, "REPL: instance overlapping a prelude one rejected",
+                      fails_with(r_prelude, "Overlapping instances for ToString"))
+          r_own <- compiler.compile_source_with_cache(
+            session(`type Q = Q\n\ninstance ToString Q\n  fn to_string(x: Q) -> String = "q"`),
+            source.StdlibRoot(stdlib_root), cache)
+          assert_true(state, "REPL: instance for a session type accepted", is_compile_ok(r_own))
+    summary(state)
