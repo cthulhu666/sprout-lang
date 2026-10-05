@@ -796,6 +796,38 @@ export fn dict_entries(dict: Dict v) -> Vec (String, v) =
   match dict with
   | Dict raw -> vec_from_list(list_reverse_go(dict_entries_from(raw, 0, map_size(raw), Nil), Nil))
 
+# The index of the first key in [lo, hi) that sorts at or after `prefix`, else hi.
+fn map_lower_bound(raw: Map v, prefix: String, lo: Int, hi: Int) -> Int =
+  if lo >= hi then lo
+  else map_lower_bound_at(raw, prefix, lo, hi, lo + (hi - lo) / 2)
+
+fn map_lower_bound_at(raw: Map v, prefix: String, lo: Int, hi: Int, mid: Int) -> Int =
+  match map_nth_key(raw, mid) with
+  | Just key ->
+      if str_compare(key, prefix) < 0 then map_lower_bound(raw, prefix, mid + 1, hi)
+      else map_lower_bound(raw, prefix, lo, mid)
+  # Unreachable: lo <= mid < hi <= map_size.
+  | Nothing -> hi
+
+fn dict_prefix_from(raw: Map v, prefix: String, index: Int, total: Int, acc: List (String, v)) -> List (String, v) =
+  if index >= total then acc
+  else
+    let Just key = map_nth_key(raw, index) else acc
+        Just value = map_nth_value(raw, index) else acc
+    in if str_starts_with(key, prefix) then dict_prefix_from(raw, prefix, index + 1, total, Cons((key, value), acc))
+       else acc
+
+# The entries whose key starts with `prefix`, in key order: `dict_entries` filtered,
+# in O((log n + k) log n) rather than O(n log n). The map orders keys by strcmp, as
+# str_compare does, so the keys sharing a prefix are one contiguous run starting at
+# the first key that sorts at or after it.
+export fn dict_entries_with_prefix(prefix: String, dict: Dict v) -> Vec (String, v) =
+  match dict with
+  | Dict raw ->
+      vec_from_list(list_reverse_go(
+        dict_prefix_from(raw, prefix, map_lower_bound(raw, prefix, 0, map_size(raw)), map_size(raw), Nil),
+        Nil))
+
 # O(1).
 export fn set_empty() -> Set =
   Set(native_set_empty())

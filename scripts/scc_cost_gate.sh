@@ -8,6 +8,11 @@
 # same pass was 55% of the compiler's own self-compile allocation. Nothing that
 # checks output saw it, because the IR was right.
 #
+# Each link also passes a lambda. Inference once turned the whole type environment
+# into a list for every lambda, twice, to pick out its alias markers
+# (infer.aliases_for_annotations): 18% of the self-compile's allocation, and a
+# cost that grows with the environment.
+#
 # The fixtures are a tail-call chain at three doubling lengths. The gate counts
 # ALLOCATIONS (`SPROUT_DEBUG_ALLOC=1`), which repeat exactly from run to run and
 # across platforms, and reads DIFFERENCES between fixtures, so compiling the
@@ -43,16 +48,19 @@ if [ "$(fixture_head "$SMALL")" != "$(fixture_head "$LARGE")" ] \
   exit 1
 fi
 
-# Per link, 2026-10-04 (stage-2), first delta. One Kosaraju pass: 7431 objects and
-# 319599 arena bytes. Pairwise reachability, same fixtures: 107282 and 12364607, so
-# its return overshoots these ceilings 7x and 19x at THIS size and more at any larger.
-MAX_SPROUT_OBJ_PER_LINK=15000
-MAX_ARENA_BYTES_PER_LINK=650000
+# Per link, 2026-10-05 (stage-2), first delta: 5404 objects and 257959 arena bytes.
+# The whole-environment walk per lambda read 21464 and 797229 (1.9x and 1.5x these
+# ceilings); pairwise SCC reachability overshot them 7x and 19x before that, on
+# fixtures without the lambda.
+MAX_SPROUT_OBJ_PER_LINK=11000
+MAX_ARENA_BYTES_PER_LINK=520000
 # Floors at half the observation: "cheap" and "compiled nothing" are the same number
 # to a ceiling.
-MIN_SPROUT_OBJ_PER_LINK=3500
-MIN_ARENA_BYTES_PER_LINK=150000
-# Hundredths. One pass: objects 100/100, bytes 101/100. Pairwise: 231/100 and 264/100.
+MIN_SPROUT_OBJ_PER_LINK=2700
+MIN_ARENA_BYTES_PER_LINK=129000
+# Hundredths. Now: objects 100/100, bytes 101/100. The environment walk: 109/100 and
+# 108/100, which is why the ceilings and not this arm caught it. Pairwise SCC
+# reachability: 231/100 and 264/100.
 MAX_GROWTH_PCT=110
 
 if [ ! -x "$BIN" ]; then
@@ -124,7 +132,8 @@ done
 over=0
 if [ "$obj_per" -gt "$MAX_SPROUT_OBJ_PER_LINK" ] || [ "$sb_per" -gt "$MAX_ARENA_BYTES_PER_LINK" ]; then
   echo "FAIL: $obj_per objects / $sb_per arena bytes per link exceeds the budget of" >&2
-  echo "      $MAX_SPROUT_OBJ_PER_LINK / $MAX_ARENA_BYTES_PER_LINK." >&2
+  echo "      $MAX_SPROUT_OBJ_PER_LINK / $MAX_ARENA_BYTES_PER_LINK. Suspect work per function or per" >&2
+  echo "      lambda that reads the whole type environment (dict_entries(env))." >&2
   over=1
 fi
 

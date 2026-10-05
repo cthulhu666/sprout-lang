@@ -1,250 +1,255 @@
 # Cost fixture for `just scc-cost-gate` -- see scripts/scc_cost_gate.sh.
 #
-# A chain of top-level functions, each tail-calling the next. Arities alternate
-# 1, 2, 1, 2, so no tail edge joins two functions of equal arity: mutual TCO's
-# Phase A rejects every edge on arity before it searches the graph, and what is
-# priced is Phase B's SCC pass over the whole chain.
+# A chain of top-level functions, each passing a lambda to `apply1` and
+# tail-calling the next. Arities alternate 1, 2, 1, 2, so no tail edge joins two
+# functions of equal arity: mutual TCO's Phase A rejects every edge on arity
+# before it searches the graph. What is priced is Phase B's SCC pass over the
+# whole chain, and inference's per-lambda work, which once walked the whole type
+# environment (infer.aliases_for_annotations). The lambda is annotated, so it
+# takes the full annotation path.
 #
 # Three sizes that MUST differ only in link count, this header included: the
 # gate reads the differences between them, so anything else that differs is
 # measured as per-link cost.  Change one, change all three.
 
+fn apply1(f: Int -> Int, x: Int) -> Int = f(x)
+
 fn link_0(a: Int) -> Int =
-  if a > 1000 then a else link_1(a + 1, a)
+  if a > 1000 then a else link_1(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_1(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_2(a + b)
+  if a > 1000 then a + b else link_2(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_2(a: Int) -> Int =
-  if a > 1000 then a else link_3(a + 1, a)
+  if a > 1000 then a else link_3(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_3(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_4(a + b)
+  if a > 1000 then a + b else link_4(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_4(a: Int) -> Int =
-  if a > 1000 then a else link_5(a + 1, a)
+  if a > 1000 then a else link_5(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_5(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_6(a + b)
+  if a > 1000 then a + b else link_6(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_6(a: Int) -> Int =
-  if a > 1000 then a else link_7(a + 1, a)
+  if a > 1000 then a else link_7(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_7(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_8(a + b)
+  if a > 1000 then a + b else link_8(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_8(a: Int) -> Int =
-  if a > 1000 then a else link_9(a + 1, a)
+  if a > 1000 then a else link_9(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_9(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_10(a + b)
+  if a > 1000 then a + b else link_10(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_10(a: Int) -> Int =
-  if a > 1000 then a else link_11(a + 1, a)
+  if a > 1000 then a else link_11(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_11(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_12(a + b)
+  if a > 1000 then a + b else link_12(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_12(a: Int) -> Int =
-  if a > 1000 then a else link_13(a + 1, a)
+  if a > 1000 then a else link_13(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_13(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_14(a + b)
+  if a > 1000 then a + b else link_14(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_14(a: Int) -> Int =
-  if a > 1000 then a else link_15(a + 1, a)
+  if a > 1000 then a else link_15(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_15(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_16(a + b)
+  if a > 1000 then a + b else link_16(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_16(a: Int) -> Int =
-  if a > 1000 then a else link_17(a + 1, a)
+  if a > 1000 then a else link_17(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_17(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_18(a + b)
+  if a > 1000 then a + b else link_18(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_18(a: Int) -> Int =
-  if a > 1000 then a else link_19(a + 1, a)
+  if a > 1000 then a else link_19(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_19(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_20(a + b)
+  if a > 1000 then a + b else link_20(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_20(a: Int) -> Int =
-  if a > 1000 then a else link_21(a + 1, a)
+  if a > 1000 then a else link_21(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_21(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_22(a + b)
+  if a > 1000 then a + b else link_22(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_22(a: Int) -> Int =
-  if a > 1000 then a else link_23(a + 1, a)
+  if a > 1000 then a else link_23(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_23(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_24(a + b)
+  if a > 1000 then a + b else link_24(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_24(a: Int) -> Int =
-  if a > 1000 then a else link_25(a + 1, a)
+  if a > 1000 then a else link_25(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_25(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_26(a + b)
+  if a > 1000 then a + b else link_26(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_26(a: Int) -> Int =
-  if a > 1000 then a else link_27(a + 1, a)
+  if a > 1000 then a else link_27(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_27(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_28(a + b)
+  if a > 1000 then a + b else link_28(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_28(a: Int) -> Int =
-  if a > 1000 then a else link_29(a + 1, a)
+  if a > 1000 then a else link_29(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_29(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_30(a + b)
+  if a > 1000 then a + b else link_30(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_30(a: Int) -> Int =
-  if a > 1000 then a else link_31(a + 1, a)
+  if a > 1000 then a else link_31(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_31(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_32(a + b)
+  if a > 1000 then a + b else link_32(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_32(a: Int) -> Int =
-  if a > 1000 then a else link_33(a + 1, a)
+  if a > 1000 then a else link_33(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_33(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_34(a + b)
+  if a > 1000 then a + b else link_34(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_34(a: Int) -> Int =
-  if a > 1000 then a else link_35(a + 1, a)
+  if a > 1000 then a else link_35(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_35(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_36(a + b)
+  if a > 1000 then a + b else link_36(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_36(a: Int) -> Int =
-  if a > 1000 then a else link_37(a + 1, a)
+  if a > 1000 then a else link_37(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_37(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_38(a + b)
+  if a > 1000 then a + b else link_38(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_38(a: Int) -> Int =
-  if a > 1000 then a else link_39(a + 1, a)
+  if a > 1000 then a else link_39(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_39(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_40(a + b)
+  if a > 1000 then a + b else link_40(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_40(a: Int) -> Int =
-  if a > 1000 then a else link_41(a + 1, a)
+  if a > 1000 then a else link_41(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_41(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_42(a + b)
+  if a > 1000 then a + b else link_42(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_42(a: Int) -> Int =
-  if a > 1000 then a else link_43(a + 1, a)
+  if a > 1000 then a else link_43(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_43(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_44(a + b)
+  if a > 1000 then a + b else link_44(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_44(a: Int) -> Int =
-  if a > 1000 then a else link_45(a + 1, a)
+  if a > 1000 then a else link_45(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_45(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_46(a + b)
+  if a > 1000 then a + b else link_46(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_46(a: Int) -> Int =
-  if a > 1000 then a else link_47(a + 1, a)
+  if a > 1000 then a else link_47(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_47(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_48(a + b)
+  if a > 1000 then a + b else link_48(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_48(a: Int) -> Int =
-  if a > 1000 then a else link_49(a + 1, a)
+  if a > 1000 then a else link_49(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_49(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_50(a + b)
+  if a > 1000 then a + b else link_50(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_50(a: Int) -> Int =
-  if a > 1000 then a else link_51(a + 1, a)
+  if a > 1000 then a else link_51(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_51(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_52(a + b)
+  if a > 1000 then a + b else link_52(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_52(a: Int) -> Int =
-  if a > 1000 then a else link_53(a + 1, a)
+  if a > 1000 then a else link_53(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_53(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_54(a + b)
+  if a > 1000 then a + b else link_54(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_54(a: Int) -> Int =
-  if a > 1000 then a else link_55(a + 1, a)
+  if a > 1000 then a else link_55(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_55(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_56(a + b)
+  if a > 1000 then a + b else link_56(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_56(a: Int) -> Int =
-  if a > 1000 then a else link_57(a + 1, a)
+  if a > 1000 then a else link_57(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_57(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_58(a + b)
+  if a > 1000 then a + b else link_58(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_58(a: Int) -> Int =
-  if a > 1000 then a else link_59(a + 1, a)
+  if a > 1000 then a else link_59(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_59(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_60(a + b)
+  if a > 1000 then a + b else link_60(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_60(a: Int) -> Int =
-  if a > 1000 then a else link_61(a + 1, a)
+  if a > 1000 then a else link_61(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_61(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_62(a + b)
+  if a > 1000 then a + b else link_62(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_62(a: Int) -> Int =
-  if a > 1000 then a else link_63(a + 1, a)
+  if a > 1000 then a else link_63(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_63(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_64(a + b)
+  if a > 1000 then a + b else link_64(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_64(a: Int) -> Int =
-  if a > 1000 then a else link_65(a + 1, a)
+  if a > 1000 then a else link_65(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_65(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_66(a + b)
+  if a > 1000 then a + b else link_66(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_66(a: Int) -> Int =
-  if a > 1000 then a else link_67(a + 1, a)
+  if a > 1000 then a else link_67(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_67(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_68(a + b)
+  if a > 1000 then a + b else link_68(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_68(a: Int) -> Int =
-  if a > 1000 then a else link_69(a + 1, a)
+  if a > 1000 then a else link_69(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_69(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_70(a + b)
+  if a > 1000 then a + b else link_70(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_70(a: Int) -> Int =
-  if a > 1000 then a else link_71(a + 1, a)
+  if a > 1000 then a else link_71(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_71(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_72(a + b)
+  if a > 1000 then a + b else link_72(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_72(a: Int) -> Int =
-  if a > 1000 then a else link_73(a + 1, a)
+  if a > 1000 then a else link_73(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_73(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_74(a + b)
+  if a > 1000 then a + b else link_74(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_74(a: Int) -> Int =
-  if a > 1000 then a else link_75(a + 1, a)
+  if a > 1000 then a else link_75(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_75(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_76(a + b)
+  if a > 1000 then a + b else link_76(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_76(a: Int) -> Int =
-  if a > 1000 then a else link_77(a + 1, a)
+  if a > 1000 then a else link_77(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_77(a: Int, b: Int) -> Int =
-  if a > 1000 then a + b else link_78(a + b)
+  if a > 1000 then a + b else link_78(apply1(\ (x: Int) -> x + 1, a + b))
 
 fn link_78(a: Int) -> Int =
-  if a > 1000 then a else link_79(a + 1, a)
+  if a > 1000 then a else link_79(apply1(\ (x: Int) -> x + 1, a), a)
 
 fn link_79(a: Int, b: Int) -> Int =
   if a > 1000 then a + b else a + b
