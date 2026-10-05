@@ -2061,7 +2061,9 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   remaining callers of the retired scheme-environment path, each carrying its own copy.
   `build_import_pairs_with_roots` is marked RETIRED in-file. `load_prelude_pairs` stays either way
   — `check_bundled` uses it for the ambient-prelude case. (Same two modules as the
-  orphaned-executables item under Compiler Internals.)
+  orphaned-executables item under Compiler Internals.) Fix with them the comments that still call
+  the env path the REPL's: `infer.class_names_from_env`, `type_names_from_env`, the type-name note
+  in `typecheck_decls_resolved`, and `scripts/front_end_agreement.sh`'s header.
 - [ ] `P2` **Analysis-service env isolation:** `SPROUT_GC_THRESHOLD` and `SPROUT_GC_ADAPT_RATIO`
   must not propagate to the `analysis_service_bin` subprocess. The GC stress test sets
   `GC_THRESHOLD=1` on the program binary, the program spawns the service with the same env, and the
@@ -2756,13 +2758,6 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   remedy but a concrete type, which is what the #423 context check now tells the user. Fix:
   support `where C (f a)` end to end (hidden slot, call-site injection, dispatch), or reject it
   at the declaration with a located message instead of an internal error.
-- [ ] `P2` **On the REPL/LSP path an instance of an env-supplied class is neither seeded nor
-  checked.** `seed_instance_method_types` and `check_instance_method_signatures` read classes from
-  decls only (`own_class_sigs`), against `docs/compiler-internals.md` §Whole-program passes. The
-  REPL / analysis-service path supplies imported classes as env schemes (`@class:<method>` and the
-  method's scheme), so there an unannotated slot is still typed by its body and a mistyped one is
-  not caught. Read from the code, not reproduced. Fix: one class-signature source over decls and
-  env that both consume, tested through `compile_source_with_cache`.
 - [ ] `P3` **An instance signature rejected for effect direction gets the generic message.**
   `sig_against_class` reports every rejection with `sig_mismatch_msg`, which never names the
   effect. Class `ap(k: t, g: Int -> Int !{IO}) -> Int -> Int`, instance
@@ -2851,9 +2846,3 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   substitution silently works for ADTs and breaks for records. Three sites hit this; the invariant
   is "resolve constraint/dispatch argument types via `apply_subst(s3, …)`, not `typed_expr_type`
   alone", and a written rule stops the next one at review time.
-- [ ] `P3` **`docs/compiler-internals.md` still says the REPL / LSP skip the bundler.**
-  §"Whole-program passes" says `compile_source_with_cache` checks against an env of schemes. It
-  bundles now
-  (`compile_source_at_with_cache_roots`), so a reader puts a scope check in `infer`, where names are
-  short, instead of the bundler. Only `type_driver` and `module_loader.load_module` still take the
-  env path. Found while fixing #422.

@@ -384,39 +384,41 @@ as evidence about pruning. `examples/sentry_api.sprout` declares no `main`, so i
 snapshot keeps all 538 definitions — 228 of them referenced nowhere. That is this
 rule firing, not a pruning bug, and it has been mis-filed as one before.
 
-## Whole-program passes: scan `decls` AND read `env`
+## Whole-program passes: `decls` holds every class and type
 
-**Any pass that derives a fact by scanning `decls` must also recover that fact
-from `env`.** The two compile entry points assemble a program differently, and a
-pass that only walks `decls` silently sees an empty vocabulary on one of them:
+**Every front end bundles.** The file compile (`--phase check`, `compile_full_ir`)
+and the REPL / LSP / analysis service (`compiler.compile_source_with_cache`) both
+inline the prelude and every import as AST nodes, so a pass that scans
+`prog.decls` sees every `TypeDecl` and `ClassDecl`. The REPL has bundled since
+`142471d4`.
 
-- **File / `--phase check` / `compile_full_ir`** — `bundler.bundle_file` inlines
-  the prelude and every import as real AST nodes, so `prog.decls` holds every
-  `TypeDecl`/`ClassDecl`. A decl-scan sees everything.
-- **REPL / LSP / analysis service** — `compiler.compile_source_with_cache` →
-  `checker.check_program_with_env` parses only the session source. Imports arrive
-  as an env of `(name, Scheme)` pairs plus `@`-prefixed markers, never as decls.
-  A decl-scan sees nothing.
+Before that it checked the session source alone, against an env of imported
+`(name, Scheme)` pairs and `@`-prefixed markers, and a decl-scan there saw nothing.
+That bit twice: a `where ToString a` using a prelude class was rejected in the REPL,
+and type-name validation rejected `Vec`, `Dict` and `Result`, making 11 of 27
+top-level stdlib modules unloadable there. `infer.class_names_from_env` and
+`infer.type_names_from_env`, which fold the `@class:` and `@type:` markers into the
+decl-derived set, date from then
+([docs/repl-env-type-vocabulary-v0.md](repl-env-type-vocabulary-v0.md)).
 
-`infer.class_names_from_env` and `infer.type_names_from_env` are the reference
-implementations: each scans `dict_entries(env)` for its marker family
-(`@class:`, `@type:`) and folds the recovered names into the decl-derived set.
+The env path survives as `checker.check_program_with_env`, reached through
+`module_loader.load_module`: the analysis service's prelude warm-up, whose classes
+are its own decls, and the unbuilt `type_driver` / `lower_driver`, filed for deletion
+in `BACKLOG.md`. A new pass needs no env fallback for them.
 
-This has bitten twice. A `where ToString a` constraint using a prelude class was
-rejected in the REPL because the class set was empty; then the type-name
-validation pass rejected `Vec`, `Dict` and `Result`, making 11 of 27 top-level
-stdlib modules unloadable there. Both were invisible to `just test`, which
-exercises the bundling path. Write the regression test against
-`compile_source_with_cache` — see `tests/stdlib/compiler/test_repl_type_vocabulary.spr`
-and `docs/repl-env-type-vocabulary-v0.md`.
+Still test a pass that reads classes or types through `compile_source_with_cache`:
+the failures above were invisible to `just test`'s file compiles. See
+`tests/stdlib/compiler/test_repl_type_vocabulary.spr` and
+`tests/stdlib/compiler/test_repl_instance_seed.spr`.
 
-The failure mode is silent by construction: `module_loader.load_module` turns a
-module's `CheckErr` into an empty pair list, so the error surfaces far from its
-cause as `Unknown variable: <module>.<name>`.
+`module_loader.load_module` fails silently: it turns a module's `CheckErr` into an
+empty pair list, so the error surfaces far from its cause as
+`Unknown variable: <module>.<name>`.
 
 ### The stronger form: don't re-decide, consume an authority
 
-The rule above is necessary but not sufficient, and the third instance proved it.
+While two front ends existed, reading `env` as well as `decls` was not enough, and
+the third instance proved it.
 `module_loader` was **not** missing information when it prefixed an extern with the
 import alias — it pattern-matched `ExternFnDecl` and simply decided differently
 from `bundler.add_decl_to_symbols`, which drops externs. Reading a fact from `env`
