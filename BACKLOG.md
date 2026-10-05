@@ -349,6 +349,12 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   live range holds more GC roots across more triggers. CSE (the sibling pass) was measured and
   declined: its sites were real but ran a handful of times each. Gate this on an A/B of a
   hand-applied hoist, not on a count of invariant parameters. `docs/opt-passes-v0.md` §M2.
+- [ ] `P3` **The width-3 `sret` extern ABI is documented but no longer exists.** The sret call
+  path lived in `codegen.sprout`, deleted with the direct backend (`5f29b9da`, 2026-07-12);
+  `ir_lowering` declares only width-2 `_unboxed` externs. Nothing calls
+  `native_set_to_list_unboxed` in `runtime/sprout_runtime.c`, yet `docs/compiler-internals.md`
+  §CPR extern ABI and the status note of `docs/unboxed-adt-returns-v1-draft.md` describe the path
+  as live. Delete the function and correct both docs.
 
 **GC and runtime**
 
@@ -396,6 +402,12 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
 
 - [ ] `P3` **Static string literals: emit a length-prefix header word in the data segment** so all
   strings get O(1) length via a uniform header read. Codegen change → seed refresh.
+- [ ] `P2` **`print` writes a string literal inside an ADT as a number.** `print(Err("boom"))`
+  prints `Err(4373942584)`, while `print(Just(int_to_string(42) ++ "x"))` prints `Just(42x)`.
+  `print_inline_value` in `runtime/sprout_runtime.c` renders a word as text only when
+  `sprout_heap_lookup` finds a `CSTR` block; a literal lives in the data segment, so it falls
+  through to `%lld`. A bare `print("s")` is fine: the compiler picks `print_str` from the type.
+  The literal-header entry above would make literals recognisable at runtime.
 - [ ] `P3` **Embedded-NUL string semantics.** `String` silently truncates at the first interior NUL
   (e.g. binary-ish `proc_run` output). Decide at spec level: keep "no interior NULs" and enforce
   loudly at ingestion boundaries, or move to length-delimited semantics.
@@ -2507,6 +2519,11 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
 
 **Tooling, diagnostics and cleanup**
 
+- [ ] `P3` **The fallible-bind error-type hint names `map_error`, which does not exist.** The
+  diagnostic in `infer.sprout` ("Convert the error at the bind with `map_error`") and spec-v0.md
+  §5.9 both name it; the prelude has `result_map_error`. Pinned by
+  `tests/conformance/type_error/fallible_bind_error_type_mismatch.err`. Rename in all three;
+  the diagnostic is compiler source, so it needs a reseed.
 - [ ] `P3` **`fmt` skips normalization on any line containing a backtick template.** Two adjacent
   lines of the same construct format differently: `\(s: String) -> s` is rewritten to
   `\ (s: String)` while `\(s: String) -> ` + a template is left alone — and `fmt` reports both
