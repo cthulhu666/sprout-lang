@@ -1,7 +1,9 @@
 # Refutable Binding — `let-else` fused with Monadic Propagation — Design Plan
 
 **Status:** PLAN. Drafted 2026-07-07. **Tier 1 LANDED 2026-07-07** (§6);
-**Tier 1b LANDED 2026-07-27** (§6b). One
+**Tier 1b LANDED 2026-07-27** (§6b). **Tier 2 is superseded** by `try`
+(`docs/try-propagate-v0.md` §7): a no-`else` `let Ok x = e` looks like an ordinary
+binding. Tier 3 (monad-generic propagation) is not pursued. One
 binding construct delivered in capability tiers; the smallest tier is
 self-contained and touches neither the monad machinery nor the effect system.
 

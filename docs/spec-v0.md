@@ -556,8 +556,8 @@ Rules:
   variable binds the whole scrutinee (no failure constructor is ever injected).
   The residual is checked for exhaustiveness like any match arm — a residual that
   leaves cases uncovered is a non-exhaustive-match error. Constant vs binding-else
-  is disambiguated on the `->` after the else. (Monadic propagation — a no-`else`
-  form — remains planned; see `docs/let-else-and-monadic-binding-plan.md`.)
+  is disambiguated on the `->` after the else. (Propagation without an `else` is
+  proposed as `try`; see `docs/try-propagate-v0.md`.)
 - Every `else` and the body must unify to the block's result type. At least one
   binding is required.
 - `let … in` is an ordinary expression (usable anywhere), and **complements**
@@ -654,8 +654,8 @@ the branch; the pure form matches the value directly. Exhaustiveness is enforced
 the same non-exhaustive-match rule (a residual leaving cases uncovered is an error).
 A refutable step with **no following step** is an error (it would have no success
 continuation). RHS effect handling is inherited from `<-` and is unchanged — this is
-purely a parse-time rewrite (`docs/effectful-let-else-v0.md`). Monadic propagation (a
-no-`else` form) remains planned.
+purely a parse-time rewrite (`docs/effectful-let-else-v0.md`). Propagation without an
+`else` is proposed as `try` (`docs/try-propagate-v0.md`).
 
 An **irrefutable** pattern needs no `else`, and per §5.2.1 that is decided against
 the pattern's *type*, not its syntax. A `wrap` or single-constructor ADT pattern is
@@ -3292,9 +3292,9 @@ The three Monad laws (left identity `and_then(f, pure(x)) == f(x)`, right identi
 checked in `tests/stdlib/test_typeclass_laws.spr`.
 
 `do`/`<-` already performs the same bind for `Maybe`/`Result` structurally in the
-desugarer; the `Monad` class does not currently wire into `do` (a monad-generic
-`do` and a built-in `?` propagation form are future work, see
-`docs/let-else-and-monadic-binding-plan.md`).
+desugarer; the `Monad` class does not currently wire into `do`. A propagation form
+through a user-extensible class is proposed as `try` (`docs/try-propagate-v0.md`); a
+monad-generic `do` is not part of that proposal.
 
 An `Alternative` class (a generic `<|>`/`or_else`) is **not** provided: the only
 lawful `List` instance duplicates `Semigroup (List a)`'s `++`, so with `List`

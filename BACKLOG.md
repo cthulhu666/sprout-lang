@@ -105,11 +105,15 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
 
 **Bindings, patterns and surface syntax**
 
-- [~] `P2` **Refutable `let-else` + pure monadic binding.** Tier 1, 1b and the effectful-RHS
-  (`do`-local) tier all landed; surface (A) chosen over widening `let..in`. **Remaining tiers:** 2
-  — no-else propagate for `Result`/`Maybe` (a built-in `?`); 3 — general monad-generic
-  propagate, entangled with effect-system design D2. `docs/let-else-and-monadic-binding-plan.md`;
-  `docs/effectful-let-else-v0.md`.
+- [ ] `P1` **A `<-` whose type head is resolved late miscompiles.** The checker picks unwrap-or-not
+  at the bind (`do_unwrap_type`); codegen re-picks from the final type. `x <- pure("a")` then `x`
+  in a `-> Maybe String` fn prints a pointer; the `Result` twin segfaults. Fix: decide once, store
+  it on the bind, reject a head that becomes `Maybe`/`Result` later. Phase 0 of
+  `docs/try-propagate-v0.md`.
+- [ ] `P2` **`try` + `Propagate`: early return through a class.** Replaces the type-name-chosen
+  fallible `<-` (spec §5.9) with `try e` / `try e else fb` / `try e with f` over a user-extensible
+  `Propagate` class; `<-` becomes effect-only and a `do`-`let` pure. Supersedes let-else Tier 2
+  (no-`else` propagate). Open questions, measurements, migration: `docs/try-propagate-v0.md`.
 - [~] `P2` **Binding-level type annotations `let x : T = e`.** Phase 1 (top-level `let`) landed
   2026-07-30. `docs/binding-annotations-v0.md`; spec §5.2 (experimental).
   - [ ] `P2` **Phase 2 — `let…in` and `where` annotations.** Those bindings are desugared and
@@ -1316,10 +1320,10 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   over sliceable input appears. Probed working; declined because the index unit diverges (5
   codepoints vs 5 bytes, silently valid both ways), dispatch costs 3 GC root pushes and an indirect
   call against 1 and a direct one, and data-last `vec_slice` bars `Vec` as a third instance.
-- [ ] `P3` **Monad-generic `do` + built-in `?` propagation** — wire `Monad` into `do`/`<-`
-  (currently desugarer-special-cased for `Maybe`/`Result`) and add the Tier-2/3 propagate form. This
-  is the rung that flattens the `staircase-of-doom` cascades.
-  `docs/let-else-and-monadic-binding-plan.md`.
+- [ ] `P3` **Monad-generic `do`** — a bind through `Monad.flat_map` for pure monads (parsers,
+  State). Propagation is `try`'s job (`docs/try-propagate-v0.md`), and there `<-` becomes
+  effect-only, so this needs its own bind syntax. `flat_map`'s function is pure, so no IO after a
+  bind. No user yet.
 - [ ] `P3` **`ZipList` newtype** — the pairwise `Applicative` for lists, distinct from the prelude
   instance's cartesian product. `wrap ZipList a = List a` with its own `map2`/`pure` (`pure`'s
   infinite/repeat semantics need a bounded variant).
