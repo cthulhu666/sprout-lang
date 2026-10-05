@@ -1853,7 +1853,7 @@ fn lower_expr_list(exprs: List typed_ast.TypedExpr, ctx: LowerCtx) -> List typed
 
 fn do_step_bound_names(step: typed_ast.TypedDoStep) -> List String =
   match step with
-  | typed_ast.TDoBindStep pat _ -> ast.pattern_names(pat)
+  | typed_ast.TDoBindStep pat _ _ -> ast.pattern_names(pat)
   | typed_ast.TDoLetStep name _ -> Cons(name, Nil)
   | typed_ast.TDoExprStep _ -> Nil
 
@@ -2002,7 +2002,7 @@ fn lower_do_steps(steps: List typed_ast.TypedDoStep, ctx: LowerCtx) -> List type
 
 fn lower_do_step(step: typed_ast.TypedDoStep, ctx: LowerCtx) -> typed_ast.TypedDoStep =
   match step with
-  | typed_ast.TDoBindStep pat e -> typed_ast.TDoBindStep(pat, lower_expr(e, ctx))
+  | typed_ast.TDoBindStep pat e mode -> typed_ast.TDoBindStep(pat, lower_expr(e, ctx), mode)
   | typed_ast.TDoLetStep name e -> typed_ast.TDoLetStep(name, lower_expr(e, ctx))
   | typed_ast.TDoExprStep e -> typed_ast.TDoExprStep(lower_expr(e, ctx))
 

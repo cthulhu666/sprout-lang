@@ -1,0 +1,14 @@
+module main
+
+# `Result` twin of do_bind_late_maybe_head: the bind's head is unknown when the
+# checker decides it is a plain bind, and becomes `Result String` only at the tail.
+
+fn count() -> Result String Int =
+  do
+    n <- pure(41)
+    n
+
+fn main() -> Unit !{IO} =
+  match count() with
+  | Ok n -> print(int_to_string(n + 1))
+  | Err e -> print(e)

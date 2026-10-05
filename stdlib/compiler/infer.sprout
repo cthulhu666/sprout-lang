@@ -1182,10 +1182,11 @@ export fn typecheck_expr(
     | InferErr _ _ ->
         do
           _ <- unifier.take_field_obligations(state)
+          _ <- unifier.take_parked_binds(state)
           r
     | InferOk _ _ _ _ -> r
 
-# Settle this declaration's parked field accesses against its FINAL
+# Settle this declaration's parked field accesses and plain binds against its FINAL
 # substitution, then re-apply so the repaired types reach lowering. Every
 # declaration-level caller of typecheck_expr must call this after its own
 # unification step — obligations left parked would otherwise be settled against
@@ -1198,10 +1199,14 @@ fn finish_field_obligations(
 ) -> FinishResult !{IO} =
   do
     pending <- unifier.take_field_obligations(state)
+    binds <- unifier.take_parked_binds(state)
     d <- discharge_field_obligations(state, env, subst, pending)
     match d with
     | DischargeErr dpos dmsg -> FinishErr(dpos, dmsg)
-    | DischargeOk s2 -> FinishOk(apply_subst_typed_expr(s2, typed_expr), s2)
+    | DischargeOk s2 ->
+        match check_parked_binds(binds, s2) with
+        | DischargeErr bpos bmsg -> FinishErr(bpos, bmsg)
+        | DischargeOk s3 -> FinishOk(apply_subst_typed_expr(s3, typed_expr), s3)
 
 type FinishResult =
   | FinishOk typed_ast.TypedExpr (Dict types.Type)
@@ -5600,9 +5605,8 @@ fn skolem_name_if_skolem(s: String) -> Maybe String =
 # ---------------------------------------------------------------------------
 
 # Short-circuit family ("Maybe" / "Result") of a do-step's inferred type, or
-# Nothing for any other type (IO actions, pure values).  Mirrors the shape
-# recognized by do_unwrap_type: `Maybe a` = TApp (TConst Maybe) a;
-# `Result e a` = TApp (TApp (TConst Result) e) a.
+# Nothing for any other type (IO actions, pure values): `Maybe a` =
+# TApp (TConst Maybe) a; `Result e a` = TApp (TApp (TConst Result) e) a.
 fn short_circuit_family(t: types.Type) -> Maybe String =
   match t with
   | types.TApp outer _ ->
@@ -5776,8 +5780,8 @@ fn first_fallible_step(steps: List typed_ast.TypedDoStep, subst: Dict types.Type
   | Nil -> Nothing
   | Cons step rest ->
       match step with
-      | typed_ast.TDoBindStep _ e ->
-          match short_circuit_family(unifier.apply_subst(subst, typed_ast.typed_expr_type(e))) with
+      | typed_ast.TDoBindStep _ e mode ->
+          match bind_mode_family(mode) with
           | Just fam ->
               Just(DoFamily(fam, unifier.apply_subst(subst, typed_ast.typed_expr_type(e)),
                             typed_ast.typed_expr_pos(e)))
@@ -5842,12 +5846,12 @@ fn infer_do_steps(
                                    typed_ast.typed_expr_pos(typed_step_expr), s1, family) with
             | Err msg -> InferErr(pos, msg)
             | Ok new_family ->
-                infer_do_steps(
-                  state,
-                  extend_env_from_do_step(step, typed_ast.typed_expr_type(typed_step_expr), s1, env),
-                  s1, es1, rest, typed_step_expr,
-                  Cons(do_step_to_typed(step, typed_step_expr), acc_steps),
-                  merge_effects(acc_eff, step_eff), new_family, pos)
+                do
+                  typed_step <- typed_do_step(state, step, typed_step_expr, s1)
+                  infer_do_steps(
+                    state, extend_env_from_do_step(typed_step, s1, env),
+                    s1, es1, rest, typed_step_expr, Cons(typed_step, acc_steps),
+                    merge_effects(acc_eff, step_eff), new_family, pos)
 
 fn is_nil_steps(steps: List ast.DoStep) -> Bool =
   match steps with
@@ -5866,33 +5870,82 @@ fn infer_do_step(
   | ast.DoBindStep _ e -> infer_expr(state, env, subst, eff_subst, e)
   | ast.DoLetStep _ e -> infer_expr(state, env, subst, eff_subst, e)
 
-fn do_step_to_typed(step: ast.DoStep, typed_expr: typed_ast.TypedExpr) -> typed_ast.TypedDoStep =
+fn typed_do_step(
+  state: unifier.InferState,
+  step: ast.DoStep,
+  typed_expr: typed_ast.TypedExpr,
+  subst: Dict types.Type
+) -> typed_ast.TypedDoStep !{IO} =
   match step with
   | ast.DoExprStep _ -> typed_ast.TDoExprStep(typed_expr)
-  | ast.DoBindStep pat _ -> typed_ast.TDoBindStep(pat, typed_expr)
+  | ast.DoBindStep pat _ ->
+      do
+        mode <- decide_bind_mode(state, unifier.apply_subst(subst, typed_ast.typed_expr_type(typed_expr)),
+                                 typed_ast.typed_expr_pos(typed_expr))
+        typed_ast.TDoBindStep(pat, typed_expr, mode)
   | ast.DoLetStep name _ -> typed_ast.TDoLetStep(name, typed_expr)
 
-fn do_unwrap_type(t: types.Type) -> types.Type =
-  match t with
-  | types.TApp outer inner ->
-      match outer with
-      | types.TConst name ->
-          if types.type_id_name(name) == "Maybe" then inner else t
-      | types.TApp outer2 _ ->
-          match outer2 with
-          | types.TConst name ->
-              if types.type_id_name(name) == "Result" then inner else t
-          | _ -> t
-      | _ -> t
-  | _ -> t
+# The one place a `<-` is decided (spec-v0.md §5.9), from its type AT THE BIND. A plain
+# bind whose type head is still a variable is parked: if that head later becomes
+# `Maybe`/`Result`, the bind would have had to unwrap, and check_parked_binds rejects it.
+fn decide_bind_mode(state: unifier.InferState, t: types.Type, pos: source.SourcePos) ->
+    typed_ast.BindMode !{IO} =
+  match short_circuit_family(t) with
+  | Just fam -> if fam == "Maybe" then typed_ast.MaybeBind else typed_ast.ResultBind
+  | Nothing ->
+      do
+        if type_head_open(t) then unifier.park_bind(state, unifier.ParkedBind(t, pos)) else ()
+        typed_ast.PlainBind
 
-fn extend_env_from_do_step(step: ast.DoStep, step_type: types.Type, subst: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
+fn bind_mode_family(m: typed_ast.BindMode) -> Maybe String =
+  match m with
+  | typed_ast.PlainBind -> Nothing
+  | typed_ast.MaybeBind -> Just("Maybe")
+  | typed_ast.ResultBind -> Just("Result")
+
+fn type_head_open(t: types.Type) -> Bool =
+  match t with
+  | types.TVar _ -> true
+  | types.TApp f _ -> type_head_open(f)
+  | _ -> false
+
+# The first parked plain bind whose type the final substitution made `Maybe`/`Result`.
+fn check_parked_binds(binds: List unifier.ParkedBind, subst: Dict types.Type) -> DischargeResult =
+  match binds with
+  | Nil -> DischargeOk(subst)
+  | Cons b rest ->
+      match b with
+      | unifier.ParkedBind t pos ->
+          match short_circuit_family(unifier.apply_subst(subst, t)) with
+          | Nothing -> check_parked_binds(rest, subst)
+          | Just fam -> DischargeErr(pos, late_bind_head_msg(fam, unifier.apply_subst(subst, t)))
+
+fn late_bind_head_msg(fam: String, t: types.Type) -> String =
+  string_concat_many([
+    "this `<-` bind's type was not known at the bind, which made it a plain bind; it became ",
+    types.type_to_string(t), " later, and a ", fam, " bind must unwrap. Give the right-hand side a ",
+    "known type here (a constructor or a function returning ", fam, ", not `pure`)."])
+
+# A propagating bind binds the payload; a plain bind binds the whole value.
+fn extend_env_from_do_step(step: typed_ast.TypedDoStep, subst: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
   match step with
-  | ast.DoBindStep pat _ ->
-      extend_env_from_pattern_typed(pat, do_unwrap_type(unifier.apply_subst(subst, step_type)), subst, env)
-  | ast.DoLetStep name _ ->
-      bind_local_scheme(name, types.mono(unifier.apply_subst(subst, step_type)), env)
-  | ast.DoExprStep _ -> env
+  | typed_ast.TDoBindStep pat e mode ->
+      extend_env_from_pattern_typed(pat, bound_type(mode, unifier.apply_subst(subst, typed_ast.typed_expr_type(e))),
+                                    subst, env)
+  | typed_ast.TDoLetStep name e ->
+      bind_local_scheme(name, types.mono(unifier.apply_subst(subst, typed_ast.typed_expr_type(e))), env)
+  | typed_ast.TDoExprStep _ -> env
+
+fn bound_type(mode: typed_ast.BindMode, t: types.Type) -> types.Type =
+  match mode with
+  | typed_ast.PlainBind -> t
+  | typed_ast.MaybeBind -> last_type_arg(t)
+  | typed_ast.ResultBind -> last_type_arg(t)
+
+fn last_type_arg(t: types.Type) -> types.Type =
+  match t with
+  | types.TApp _ arg -> arg
+  | _ -> t
 
 fn extend_env_from_pattern_typed(pat: ast.Pattern, t: types.Type, subst: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
   match pat with
@@ -10195,8 +10248,8 @@ fn apply_subst_typed_do_steps(subst: Dict types.Type, steps: List typed_ast.Type
   | Nil -> Nil
   | Cons h t ->
       match h with
-      | typed_ast.TDoBindStep pat expr ->
-          Cons(typed_ast.TDoBindStep(pat, apply_subst_typed_expr(subst, expr)), apply_subst_typed_do_steps(subst, t))
+      | typed_ast.TDoBindStep pat expr mode ->
+          Cons(typed_ast.TDoBindStep(pat, apply_subst_typed_expr(subst, expr), mode), apply_subst_typed_do_steps(subst, t))
       | typed_ast.TDoLetStep name expr ->
           Cons(typed_ast.TDoLetStep(name, apply_subst_typed_expr(subst, expr)), apply_subst_typed_do_steps(subst, t))
       | typed_ast.TDoExprStep expr ->
@@ -10983,8 +11036,8 @@ fn resolve_dispatch_typed_do_steps_local(env: Dict types.Scheme, subst: Dict typ
   | Nil -> Nil
   | Cons h t ->
       match h with
-      | typed_ast.TDoBindStep pat expr ->
-          Cons(typed_ast.TDoBindStep(pat, resolve_dispatch_typed_expr(env, subst, bound, expr)),
+      | typed_ast.TDoBindStep pat expr mode ->
+          Cons(typed_ast.TDoBindStep(pat, resolve_dispatch_typed_expr(env, subst, bound, expr), mode),
                resolve_dispatch_typed_do_steps_local(env, subst, bind_pattern(pat, bound), t))
       | typed_ast.TDoLetStep name expr ->
           Cons(typed_ast.TDoLetStep(name, resolve_dispatch_typed_expr(env, subst, bound, expr)),
@@ -11089,7 +11142,7 @@ fn assert_resolved_typed_do_steps(fn_name: String, steps: List typed_ast.TypedDo
   | Cons h t ->
       do
         match h with
-        | typed_ast.TDoBindStep _ expr -> assert_resolved_typed_expr(fn_name, expr)
+        | typed_ast.TDoBindStep _ expr _ -> assert_resolved_typed_expr(fn_name, expr)
         | typed_ast.TDoLetStep _ expr -> assert_resolved_typed_expr(fn_name, expr)
         | typed_ast.TDoExprStep expr -> assert_resolved_typed_expr(fn_name, expr)
         assert_resolved_typed_do_steps(fn_name, t)
@@ -11403,7 +11456,7 @@ fn ambiguous_dict_in_steps(steps: List typed_ast.TypedDoStep, subst: Dict types.
 fn ambiguous_dict_in_step(step: typed_ast.TypedDoStep, subst: Dict types.Type,
                           quantified: List String) -> Maybe String =
   match step with
-  | typed_ast.TDoBindStep _ e -> first_ambiguous_dict_class(e, subst, quantified)
+  | typed_ast.TDoBindStep _ e _ -> first_ambiguous_dict_class(e, subst, quantified)
   | typed_ast.TDoLetStep _ e -> first_ambiguous_dict_class(e, subst, quantified)
   | typed_ast.TDoExprStep e -> first_ambiguous_dict_class(e, subst, quantified)
 
@@ -11812,7 +11865,7 @@ fn uncovered_dict_in_step(step: typed_ast.TypedDoStep, subst: Dict types.Type,
                           uncovered: List String,
                           env: Dict types.Scheme) -> Maybe (String, types.Type) =
   match step with
-  | typed_ast.TDoBindStep _ e -> uncovered_dict_subject(e, subst, uncovered, env)
+  | typed_ast.TDoBindStep _ e _ -> uncovered_dict_subject(e, subst, uncovered, env)
   | typed_ast.TDoLetStep _ e -> uncovered_dict_subject(e, subst, uncovered, env)
   | typed_ast.TDoExprStep e -> uncovered_dict_subject(e, subst, uncovered, env)
 

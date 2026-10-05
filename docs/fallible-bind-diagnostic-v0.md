@@ -36,7 +36,7 @@ that precedent does not transfer and a warning here would leave memory-unsafe co
 
 ### 0.1 `Maybe` binds are the same bug, and hold nearly all of the blast radius
 
-`infer.do_unwrap_type` peels `Maybe a -> a` for the binder exactly as it peels `Result e a -> a`, so
+`infer.bound_type` peels `Maybe a -> a` for the binder exactly as it peels `Result e a -> a`, so
 everything above applies unchanged to `Maybe`. Two additions matter:
 
 - **It defeats the exhaustiveness checker.** A `Maybe` short-circuit returned from `-> List Int`

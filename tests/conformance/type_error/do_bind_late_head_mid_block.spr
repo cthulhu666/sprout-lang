@@ -1,0 +1,14 @@
+module main
+
+# Like do_bind_late_maybe_head, but a MIDDLE step fixes the bind's head, not the
+# tail or the signature. Lowering unwrapped `x`, then passed the payload to
+# `maybe_with_default` as a `Maybe`, which segfaulted. See spec-v0.md §5.9.
+
+fn pick() -> Int =
+  do
+    x <- pure(5)
+    let y = maybe_with_default(0, x)
+    y + 1
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(pick()))

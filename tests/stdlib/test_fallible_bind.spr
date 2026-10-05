@@ -51,6 +51,23 @@ fn plain_bind() -> Int !{IO} =
     v <- ref_read(r)
     v * 2
 
+# A bind whose type head is unknown at the bind and resolves later to a type that is
+# NOT `Maybe`/`Result` stays a plain bind: `xs` is the whole `List Int`. The late-head
+# rejection must not catch this (tests/conformance/type_error/do_bind_late_*_head).
+fn late_plain_head() -> List Int !{IO} =
+  do
+    xs <- pure(1)
+    xs
+
+# A RIGID head (the signature's `f`) never becomes `Maybe` inside the body, so the bind is
+# plain and binds the whole `f Int`, even when the caller picks `f = Maybe`.
+fn generic_head() -> f Int where Applicative f =
+  do
+    x <- pure(1)
+    x
+
+fn generic_head_at_maybe() -> Maybe Int = generic_head()
+
 fn show_result(r: Result String Int) -> String =
   match r with
   | Ok n -> "Ok " ++ int_to_string(n)
@@ -83,5 +100,9 @@ fn main() -> Unit !{IO} =
 
     p <- plain_bind()
     assert_eq(state, "non-fallible bind unaffected", p, 10)
+
+    late <- late_plain_head()
+    assert_eq(state, "late-resolving non-fallible head stays a plain bind", late, [1])
+    assert_eq(state, "rigid head stays a plain bind", show_maybe(generic_head_at_maybe()), "Just 1")
 
     summary(state)

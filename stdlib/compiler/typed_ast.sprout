@@ -30,9 +30,20 @@ import stdlib.compiler.source as source
 export type TypedMatchBranch (..) = TypedMatchBranch ast.Pattern TypedExpr
 
 export type TypedDoStep (..) =
-  | TDoBindStep ast.Pattern TypedExpr
+  | TDoBindStep ast.Pattern TypedExpr BindMode
   | TDoLetStep String TypedExpr
   | TDoExprStep TypedExpr
+
+# Whether a `<-` unwraps its right-hand side and returns early on failure (spec-v0.md
+# §5.9). The checker decides it once, at the bind; every later pass reads it here and
+# never re-derives it from the final type, which can differ from the type at the bind.
+export type BindMode (..) = PlainBind | MaybeBind | ResultBind
+
+export fn bind_mode_propagates(m: BindMode) -> Bool =
+  match m with
+  | PlainBind -> false
+  | MaybeBind -> true
+  | ResultBind -> true
 
 export type TypedRecordField (..) = TypedRecordField String TypedExpr
 
@@ -261,7 +272,7 @@ fn count_steps(steps: List TypedDoStep) -> Int =
 
 fn count_step(s: TypedDoStep) -> Int =
   match s with
-  | TDoBindStep _ value -> 1 + count_expr(value)
+  | TDoBindStep _ value _ -> 1 + count_expr(value)
   | TDoLetStep _ value -> 1 + count_expr(value)
   | TDoExprStep value -> 1 + count_expr(value)
 
