@@ -179,7 +179,7 @@ generalizes at its own boundary in **source** order.
 
 | Part | Status |
 |---|---|
-| 1. Dependency analysis | **Landed.** `referenced_names` builds the edge set, `sccs_in_dependency_order` partitions it (iterative Kosaraju), `group_plan` returns the components dependencies-first; see §7.3 |
+| 1. Dependency analysis | **Landed.** `referenced_names` builds the edge set, `scc.sccs_in_dependency_order` partitions it (iterative Kosaraju, `stdlib/compiler/scc.sprout`), `group_plan` returns the components dependencies-first; see §7.3 |
 | 2. Monomorphic per-declaration assumptions | **Landed.** `unann_ret_var` / `unann_param_var` mint `_unann@<owner>` and `_unann@<owner>/<param>`; the collectors no longer put them in the binder list, so `instantiate` leaves them alone and every use shares one variable |
 | 3. Shared substitution | **Landed.** `check_fn_body` returns its final substitution, `TypedDeclOk` gained a fourth field, and `typecheck_decls_inner` threads it |
 | 4. Generalization boundary | **Landed.** `own_unann_vars` subtracts the declaration's own placeholders from `env_ftv` at its generalization point — see §7.1, the part that is easy to get wrong |
@@ -306,15 +306,15 @@ under-approximating puts a declaration before its dependency, which is the hole
 this all exists to close. A catch-all would fail in the dangerous direction,
 silently, the next time an expression form is added.
 
-**The algorithm.** Iterative Kosaraju, `sccs_in_dependency_order`. Two things ruled
-out the SCC walk that already existed. `pb_scc_of` (`ast_to_ir.sprout`) computes a
-component by calling `mutual_reaches` **pairwise** — 2n graph searches per node —
-which is fine for the mutual-TCO pre-pass and not for this: the largest reorderable
-run in this repo is **551** functions (`infer.sprout` itself, measured
-2026-08-25), where pairwise reachability is around a billion operations on the
-compiler's own hottest file, every build. And it must be iterative: 551 recursive
-DFS frames is the stack the `stack-overflow-smoke` gate exists to police, at a
-depth set by user code rather than by us.
+**The algorithm.** Iterative Kosaraju, `scc.sccs_in_dependency_order`
+(`stdlib/compiler/scc.sprout`). It is linear rather than pairwise: the largest
+reorderable run in this repo is **551** functions (`infer.sprout` itself, measured
+2026-08-25), where asking "does f reach g, and g reach f?" for every pair is around a
+billion operations. Mutual TCO's Phase B asked exactly that, until it was 55% of the
+compiler's self-compile allocation; it now shares this pass (`scripts/scc_cost_gate.sh`).
+And it must be iterative: 551 recursive DFS frames is the stack the
+`stack-overflow-smoke` gate exists to police, at a depth set by user code rather than
+by us.
 
 **The invariant.** Groups must partition `0..n-1` exactly once — a missing index
 silently drops a declaration from the emitted program, a duplicate emits it twice.

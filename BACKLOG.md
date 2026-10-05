@@ -302,9 +302,14 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   disposition in `docs/mutual-tco-phase-b-v0.md` §12. #2 arity re-check on `pb_retarget_tail`; #3
   restore the per-edge all-i64 `params_match` gate; #4 broaden `pb_ret_unifiable` to `TTuple`
   (blocked: a tuple return has no `adt_index` entry); #5 confirm bare-vs-qualified callee names at
-  the pre-lowering seam; #6 collapse the duplicated tail-position grammar walk; #7 replace the
-  O(n²) SCC with one Tarjan pass; #8 delete the dead `pb_scc_of_rest`; #9 restore T19's exact-name
-  assertion; #10 the vacuous `build_ret_i64` eligibility map.
+  the pre-lowering seam; #6 collapse the duplicated tail-position grammar walk; #9 restore T19's
+  exact-name assertion; #10 the vacuous `build_ret_i64` eligibility map.
+- [ ] `P3` **Mutual TCO Phase A searches the call graph once per same-arity tail edge.**
+  `ast_to_ir.mutual_filter_targets` calls `mutual_reaches(g, f)` per callee, so a same-arity
+  tail-call chain is quadratic: per-link arena bytes 387k / 486k / 700k at 100 -> 800 links
+  (2026-10-04). 0.1% of self-compile. `scripts/scc_cost_gate.sh` alternates arity to dodge it.
+  Fix: one `scc.sccs_in_dependency_order` pass, then compare `g`'s component with `f`'s; then
+  drop the alternation from the gate's fixtures.
 - [ ] `P3` **Single traversal for the alloc-summary pre-pass vs the streaming emit.**
   `ir_pipeline.summarize_*` hand-duplicates the structure of `stream_*`; only the per-fn leaf action
   differs. Degrades safely (a missing summary entry over-roots), so this is drift, not soundness.

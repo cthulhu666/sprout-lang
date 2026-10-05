@@ -6,6 +6,7 @@ import stdlib.compiler.source as source
 import stdlib.compiler.sprout_ir as sprout_ir
 import stdlib.compiler.field_kinds as fk
 import stdlib.compiler.type_kind as type_kind
+import stdlib.compiler.scc as scc
 import stdlib.string as string
 
 # ---------------------------------------------------------------------------
@@ -6776,25 +6777,6 @@ fn pb_tail_graph(decls: List typed_ast.TypedDecl, fnset: Set) -> Dict Set =
                    pb_tail_graph(rest, fnset))
       | _ -> pb_tail_graph(rest, fnset)
 
-# The SCC (in `order`) of `f`: itself plus every g mutually tail-reachable with it.
-fn pb_scc_of(f: String, order: List String, graph: Dict Set) -> List String =
-  match order with
-  | Nil -> Nil
-  | Cons g rest ->
-      if g == f then Cons(f, pb_scc_of_rest(f, rest, graph))
-      else if mutual_reaches(f, g, graph) && mutual_reaches(g, f, graph)
-           then Cons(g, pb_scc_of_rest(f, rest, graph))
-           else pb_scc_of(f, rest, graph)
-
-fn pb_scc_of_rest(f: String, order: List String, graph: Dict Set) -> List String =
-  match order with
-  | Nil -> Nil
-  | Cons g rest ->
-      if g == f then Cons(f, pb_scc_of_rest(f, rest, graph))
-      else if mutual_reaches(f, g, graph) && mutual_reaches(g, f, graph)
-           then Cons(g, pb_scc_of_rest(f, rest, graph))
-           else pb_scc_of_rest(f, rest, graph)
-
 # All members pass the return gate (v0: scalar return — see pb_scalar_ret_map).
 fn pb_all_ret_ok(members: List String, ok: Dict Bool) -> Bool =
   match members with
@@ -6860,31 +6842,45 @@ fn pb_unifiable_ret_map(decls: List typed_ast.TypedDecl) -> Dict Bool =
           dict_set(name, pb_ret_unifiable(typed_ast.typed_expr_type(body)), pb_unifiable_ret_map(rest))
       | _ -> pb_unifiable_ret_map(rest)
 
+# One SCC pass, then declaration order: Phase B emits its `$u` variants in the
+# order this returns, so the order is part of the IR.
 export fn pb_hetero_sccs(decls: List typed_ast.TypedDecl) -> List (List (String, Int)) =
-  pb_scc_collect(pb_fn_order(decls),
-                 pb_fn_order(decls),
-                 pb_tail_graph(decls, set_from_list(pb_fn_order(decls))),
-                 pb_fn_arity(decls),
-                 pb_unifiable_ret_map(decls),
-                 set_empty())
-
-fn pb_scc_collect(work: List String, order: List String, graph: Dict Set,
-                  arity: Dict Int, ret: Dict Bool, seen: Set) -> List (List (String, Int)) =
-  match work with
-  | Nil -> Nil
-  | Cons f rest ->
-      if set_member(f, seen) then pb_scc_collect(rest, order, graph, arity, ret, seen)
-      else pb_scc_emit(f, rest, order, graph, arity, ret, seen)
-
-fn pb_scc_emit(f: String, rest: List String, order: List String, graph: Dict Set,
-               arity: Dict Int, ret: Dict Bool, seen: Set) -> List (List (String, Int)) =
-  if list_length(members) >= 2 && pb_all_ret_ok(members, ret) && pb_heterogeneous(members, arity)
-  then Cons(pb_members_with_arity(members, arity),
-            pb_scc_collect(rest, order, graph, arity, ret, seen2))
-  else pb_scc_collect(rest, order, graph, arity, ret, seen2)
+  scc.sccs_in_dependency_order(order, pb_tail_graph(decls, set_from_list(order)))
+  |> list_filter(pb_is_hetero_scc(_, arity, ret))
+  |> pb_in_decl_order(pb_decl_index(order, 0, dict_empty()))
+  |> list_map(pb_members_with_arity(_, arity))
 where
-  members = pb_scc_of(f, order, graph)
-  seen2 = set_union(seen, set_from_list(members))
+  order = pb_fn_order(decls)
+  arity = pb_fn_arity(decls)
+  ret = pb_unifiable_ret_map(decls)
+
+fn pb_is_hetero_scc(members: List String, arity: Dict Int, ret: Dict Bool) -> Bool =
+  list_length(members) >= 2 && pb_all_ret_ok(members, ret) && pb_heterogeneous(members, arity)
+
+# name -> position in declaration order.
+fn pb_decl_index(order: List String, i: Int, acc: Dict Int) -> Dict Int =
+  match order with
+  | [] -> acc
+  | [name | rest] -> pb_decl_index(rest, i + 1, dict_set(name, i, acc))
+
+fn pb_index_of(name: String, index: Dict Int) -> Int =
+  match dict_get(name, index) with | Just i -> i | Nothing -> -1
+
+# Members by declaration position, then SCCs by their first member's.
+fn pb_in_decl_order(index: Dict Int, sccs: List (List String)) -> List (List String) =
+  sccs
+  |> list_map(pb_by_index(index, _))
+  |> vec_from_list
+  |> vec_sort_by(pb_first_index(index, _))
+  |> vec_to_list
+
+fn pb_by_index(index: Dict Int, members: List String) -> List String =
+  vec_to_list(vec_sort_by(pb_index_of(_, index), vec_from_list(members)))
+
+fn pb_first_index(index: Dict Int, members: List String) -> Int =
+  match members with
+  | [] -> -1
+  | [m | _] -> pb_index_of(m, index)
 
 # --- Generator: unify each heterogeneous SCC to a uniform max arity + emit a
 # trampoline for each original.  `phase_b_unify(decls)` runs BEFORE detection in the
@@ -6910,7 +6906,7 @@ fn pb_member_names(members: List (String, Int)) -> Set =
 fn pb_build_index(sccs: List (List (String, Int))) -> Dict (Int, Set) =
   match sccs with
   | Nil -> dict_empty()
-  | Cons scc rest -> pb_index_scc(scc, pb_max_arity(scc), pb_member_names(scc), pb_build_index(rest))
+  | Cons members rest -> pb_index_scc(members, pb_max_arity(members), pb_member_names(members), pb_build_index(rest))
 
 fn pb_index_scc(members: List (String, Int), m: Int, mset: Set, acc: Dict (Int, Set)) -> Dict (Int, Set) =
   match members with

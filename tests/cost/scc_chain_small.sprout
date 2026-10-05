@@ -1,0 +1,132 @@
+# Cost fixture for `just scc-cost-gate` -- see scripts/scc_cost_gate.sh.
+#
+# A chain of top-level functions, each tail-calling the next. Arities alternate
+# 1, 2, 1, 2, so no tail edge joins two functions of equal arity: mutual TCO's
+# Phase A rejects every edge on arity before it searches the graph, and what is
+# priced is Phase B's SCC pass over the whole chain.
+#
+# Three sizes that MUST differ only in link count, this header included: the
+# gate reads the differences between them, so anything else that differs is
+# measured as per-link cost.  Change one, change all three.
+
+fn link_0(a: Int) -> Int =
+  if a > 1000 then a else link_1(a + 1, a)
+
+fn link_1(a: Int, b: Int) -> Int =
+  if a > 1000 then a + b else link_2(a + b)
+
+fn link_2(a: Int) -> Int =
+  if a > 1000 then a else link_3(a + 1, a)
+
+fn link_3(a: Int, b: Int) -> Int =
+  if a > 1000 then a + b else link_4(a + b)
+
+fn link_4(a: Int) -> Int =
+  if a > 1000 then a else link_5(a + 1, a)
+
+fn link_5(a: Int, b: Int) -> Int =
+  if a > 1000 then a + b else link_6(a + b)
+
+fn link_6(a: Int) -> Int =
+  if a > 1000 then a else link_7(a + 1, a)
+
+fn link_7(a: Int, b: Int) -> Int =
+  if a > 1000 then a + b else link_8(a + b)
+
+fn link_8(a: Int) -> Int =
+  if a > 1000 then a else link_9(a + 1, a)
+
+fn link_9(a: Int, b: Int) -> Int =
+  if a > 1000 then a + b else link_10(a + b)
+
+fn link_10(a: Int) -> Int =
+  if a > 1000 then a else link_11(a + 1, a)
+
+fn link_11(a: Int, b: Int) -> Int =
+  if a > 1000 then a + b else link_12(a + b)
+
+fn link_12(a: Int) -> Int =
+  if a > 1000 then a else link_13(a + 1, a)
+
+fn link_13(a: Int, b: Int) -> Int =
+  if a > 1000 then a + b else link_14(a + b)
+
+fn link_14(a: Int) -> Int =
+  if a > 1000 then a else link_15(a + 1, a)
+
+fn link_15(a: Int, b: Int) -> Int =
+  if a > 1000 then a + b else link_16(a + b)
+
+fn link_16(a: Int) -> Int =
+  if a > 1000 then a else link_17(a + 1, a)
+
+fn link_17(a: Int, b: Int) -> Int =
+  if a > 1000 then a + b else link_18(a + b)
+
+fn link_18(a: Int) -> Int =
+  if a > 1000 then a else link_19(a + 1, a)
+
+fn link_19(a: Int, b: Int) -> Int =
+  if a > 1000 then a + b else link_20(a + b)
+
+fn link_20(a: Int) -> Int =
+  if a > 1000 then a else link_21(a + 1, a)
+
+fn link_21(a: Int, b: Int) -> Int =
+  if a > 1000 then a + b else link_22(a + b)
+
+fn link_22(a: Int) -> Int =
+  if a > 1000 then a else link_23(a + 1, a)
+
+fn link_23(a: Int, b: Int) -> Int =
+  if a > 1000 then a + b else link_24(a + b)
+
+fn link_24(a: Int) -> Int =
+  if a > 1000 then a else link_25(a + 1, a)
+
+fn link_25(a: Int, b: Int) -> Int =
+  if a > 1000 then a + b else link_26(a + b)
+
+fn link_26(a: Int) -> Int =
+  if a > 1000 then a else link_27(a + 1, a)
+
+fn link_27(a: Int, b: Int) -> Int =
+  if a > 1000 then a + b else link_28(a + b)
+
+fn link_28(a: Int) -> Int =
+  if a > 1000 then a else link_29(a + 1, a)
+
+fn link_29(a: Int, b: Int) -> Int =
+  if a > 1000 then a + b else link_30(a + b)
+
+fn link_30(a: Int) -> Int =
+  if a > 1000 then a else link_31(a + 1, a)
+
+fn link_31(a: Int, b: Int) -> Int =
+  if a > 1000 then a + b else link_32(a + b)
+
+fn link_32(a: Int) -> Int =
+  if a > 1000 then a else link_33(a + 1, a)
+
+fn link_33(a: Int, b: Int) -> Int =
+  if a > 1000 then a + b else link_34(a + b)
+
+fn link_34(a: Int) -> Int =
+  if a > 1000 then a else link_35(a + 1, a)
+
+fn link_35(a: Int, b: Int) -> Int =
+  if a > 1000 then a + b else link_36(a + b)
+
+fn link_36(a: Int) -> Int =
+  if a > 1000 then a else link_37(a + 1, a)
+
+fn link_37(a: Int, b: Int) -> Int =
+  if a > 1000 then a + b else link_38(a + b)
+
+fn link_38(a: Int) -> Int =
+  if a > 1000 then a else link_39(a + 1, a)
+
+fn link_39(a: Int, b: Int) -> Int =
+  if a > 1000 then a + b else a + b
+
+fn entry() -> Int = link_0(0)

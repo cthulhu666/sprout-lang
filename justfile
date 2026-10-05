@@ -3540,7 +3540,9 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "task-io-smoke|task-io-smoke"
     "conformance-run|test-conformance-run"
     "ir-golden-diff|ir-golden-diff"
-    "rooting-cost|rooting-cost-gate"
+    # One invocation for both: each rebuilds stage-2, and two parallel entries would
+    # write the same binary at once. `just` runs a shared dependency once per call.
+    "compile-cost|rooting-cost-gate scc-cost-gate"
     # Added when Assertion D landed: both had names that CLAIM verification while nothing
     # ran them. c-runtime-test's ten C-level assertions were unrunnable for however long it
     # took someone to try (the runtime split into sprout_scheduler.c/sprout_poll.c broke its
@@ -3793,6 +3795,14 @@ rooting-cost-gate: bootstrap-from-seed build-stage2
   SPROUT_ROOTING_COST_BIN="{{build_dir}}/compile_driver_bin_stage2" \
   SPROUT_ROOTING_COST_STDLIB="{{stdlib_root}}" bash scripts/rooting_cost_gate.sh
 
+# Prices the COMPILER per top-level function: a tail-call chain at three doubling
+# lengths. Stage-2 for the reason rooting-cost-gate gives.
+scc-cost-gate: bootstrap-from-seed build-stage2
+  #!/usr/bin/env bash
+  set -euo pipefail
+  SPROUT_SCC_COST_BIN="{{build_dir}}/compile_driver_bin_stage2" \
+  SPROUT_SCC_COST_STDLIB="{{stdlib_root}}" bash scripts/scc_cost_gate.sh
+
 # ── Aggregate Gates ───────────────────────────────────────────────────────────
 #
 # One-shot verification batteries so the pre-commit ritual is a single command
@@ -3820,7 +3830,7 @@ gate-quick: fmt-check test compile-examples-stage1 smoke-shapes bundle-smoke
 # advisory), so it runs in the body rather than as an arg-less dependency.
 # Full CI-parity battery (slow, ~15-25m); a green run means CI will not surprise you.
 [group('gate')]
-gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate rooting-cost-gate loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate check-approved-builtins check-extern-signatures backlog-shape verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test lsp-smoke task-io-smoke http-client-binary-gate http-tls-gate test-stress
+gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate rooting-cost-gate scc-cost-gate loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate check-approved-builtins check-extern-signatures backlog-shape verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test lsp-smoke task-io-smoke http-client-binary-gate http-tls-gate test-stress
   #!/usr/bin/env bash
   set -euo pipefail
   echo "==> gate: gc-safety-check --strict..."
