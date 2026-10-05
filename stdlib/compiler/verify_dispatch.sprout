@@ -609,13 +609,13 @@ fn collect_do_steps(steps: List typed_ast.TypedDoStep, sigs: Dict CalleeSig, loc
 
 fn step_binds(s: typed_ast.TypedDoStep, locals: Dict Bool) -> Dict Bool =
   match s with
-  | typed_ast.TDoBindStep pat _ -> bind_names(ast.pattern_names(pat), locals)
+  | typed_ast.TDoBindStep pat _ _ -> bind_names(ast.pattern_names(pat), locals)
   | typed_ast.TDoLetStep name _ -> dict_set(name, true, locals)
   | typed_ast.TDoExprStep _ -> locals
 
 fn collect_step(s: typed_ast.TypedDoStep, sigs: Dict CalleeSig, locals: Dict Bool, out: ListBuilder VerifyOutcome) -> ListBuilder VerifyOutcome =
   match s with
-  | typed_ast.TDoBindStep _ expr -> collect_expr(expr, sigs, locals, out)
+  | typed_ast.TDoBindStep _ expr _ -> collect_expr(expr, sigs, locals, out)
   | typed_ast.TDoLetStep _ expr -> collect_expr(expr, sigs, locals, out)
   | typed_ast.TDoExprStep expr -> collect_expr(expr, sigs, locals, out)
 

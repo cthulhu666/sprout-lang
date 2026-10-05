@@ -234,7 +234,7 @@ fn branch_body(b: typed_ast.TypedMatchBranch) -> typed_ast.TypedExpr =
 
 fn step_value(s: typed_ast.TypedDoStep) -> typed_ast.TypedExpr =
   match s with
-  | typed_ast.TDoBindStep _ value -> value
+  | typed_ast.TDoBindStep _ value _ -> value
   | typed_ast.TDoLetStep _ value -> value
   | typed_ast.TDoExprStep value -> value
 

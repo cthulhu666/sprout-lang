@@ -501,6 +501,15 @@ check (`check_context_constraint`, #423), never rejected. The three faults above
 stay closed — `_` is skipped as unnamed, a depth mismatch is reported first, and
 `Baz k` is the exempt case.
 
+The fallible `<-` bind (spec §5.9) is the same shape. Whether a bind unwraps is
+decided once, in `infer.decide_bind_mode`, from its type at the bind, and recorded
+as `typed_ast.BindMode` on `TDoBindStep`. Codegen, the SRA guard, worker collection
+and `linear_check` read the mode; none of them looks at the type's name. Each used
+to re-decide from the FINAL type, which can differ from the type at the bind when an
+unresolved head is fixed later, and `x <- pure(…)` in a `Maybe` function then
+compiled to a raw pointer. A plain bind with an open head is parked and rejected at
+the declaration boundary if that head becomes `Maybe`/`Result`.
+
 ### A hidden-dictionary slot is keyed by its whole constraint
 
 A constrained function's hidden dictionary parameters are found under

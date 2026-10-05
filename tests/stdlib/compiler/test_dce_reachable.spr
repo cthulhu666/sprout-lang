@@ -199,7 +199,7 @@ fn main() -> Unit !{IO} =
     bind_shadow = kept([main_returning(
                           typed_ast.TDo([typed_ast.TDoBindStep(
                                            ast.VarPattern("helper", pos()),
-                                           lit()),
+                                           lit(), typed_ast.PlainBind),
                                          typed_ast.TDoExprStep(var("helper"))],
                                         int_ty(), pos())),
                         leaf("helper")])
@@ -209,7 +209,7 @@ fn main() -> Unit !{IO} =
     bind_rhs_seen = kept([main_returning(
                             typed_ast.TDo([typed_ast.TDoBindStep(
                                              ast.VarPattern("helper", pos()),
-                                             var("helper")),
+                                             var("helper"), typed_ast.PlainBind),
                                            typed_ast.TDoExprStep(lit())],
                                           int_ty(), pos())),
                           leaf("helper")])

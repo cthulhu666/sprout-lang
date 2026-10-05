@@ -929,7 +929,7 @@ fn rewrite_branch(b: typed_ast.TypedMatchBranch, fwd_keys: Forwarded, tables: Ta
 
 fn rewrite_step(s: typed_ast.TypedDoStep, fwd_keys: Forwarded, tables: Tables) -> typed_ast.TypedDoStep =
   match s with
-  | typed_ast.TDoBindStep pat ex -> typed_ast.TDoBindStep(pat, rewrite_expr(ex, fwd_keys, tables))
+  | typed_ast.TDoBindStep pat ex mode -> typed_ast.TDoBindStep(pat, rewrite_expr(ex, fwd_keys, tables), mode)
   | typed_ast.TDoLetStep name ex -> typed_ast.TDoLetStep(name, rewrite_expr(ex, fwd_keys, tables))
   | typed_ast.TDoExprStep ex -> typed_ast.TDoExprStep(rewrite_expr(ex, fwd_keys, tables))
 
@@ -1026,7 +1026,7 @@ fn do_step_exprs(steps: List typed_ast.TypedDoStep) -> List typed_ast.TypedExpr 
   | Nil -> Nil
   | Cons s rest ->
       match s with
-      | typed_ast.TDoBindStep _ ex -> Cons(ex, do_step_exprs(rest))
+      | typed_ast.TDoBindStep _ ex _ -> Cons(ex, do_step_exprs(rest))
       | typed_ast.TDoLetStep _ ex -> Cons(ex, do_step_exprs(rest))
       | typed_ast.TDoExprStep ex -> Cons(ex, do_step_exprs(rest))
 

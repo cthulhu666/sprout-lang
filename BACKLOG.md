@@ -105,11 +105,6 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
 
 **Bindings, patterns and surface syntax**
 
-- [ ] `P1` **A `<-` whose type head is resolved late miscompiles.** The checker picks unwrap-or-not
-  at the bind (`do_unwrap_type`); codegen re-picks from the final type. `x <- pure("a")` then `x`
-  in a `-> Maybe String` fn prints a pointer; the `Result` twin segfaults. Fix: decide once, store
-  it on the bind, reject a head that becomes `Maybe`/`Result` later. Phase 0 of
-  `docs/try-propagate-v0.md`.
 - [ ] `P2` **`try` + `Propagate`: early return through a class.** Replaces the type-name-chosen
   fallible `<-` (spec §5.9) with `try e` / `try e else fb` / `try e with f` over a user-extensible
   `Propagate` class; `<-` becomes effect-only and a `do`-`let` pure. Supersedes let-else Tier 2

@@ -195,7 +195,7 @@ fn is_free_in_steps(name: String, steps: List typed_ast.TypedDoStep) -> Bool =
   | Nil -> false
   | Cons step rest ->
       match step with
-      | typed_ast.TDoBindStep pat e ->
+      | typed_ast.TDoBindStep pat e _ ->
           is_free(name, e) ||
           (if pat_binds(name, pat) then false else is_free_in_steps(name, rest))
       | typed_ast.TDoLetStep n e ->
@@ -278,8 +278,8 @@ fn elim_one_step(step: typed_ast.TypedDoStep, tail: List typed_ast.TypedDoStep) 
       if is_pure_expr(e) && (is_free_in_steps(name, tail) == false)
       then tail
       else Cons(typed_ast.TDoLetStep(name, elim_expr(e)), tail)
-  | typed_ast.TDoBindStep pat e ->
-      Cons(typed_ast.TDoBindStep(pat, elim_expr(e)), tail)
+  | typed_ast.TDoBindStep pat e mode ->
+      Cons(typed_ast.TDoBindStep(pat, elim_expr(e), mode), tail)
   | typed_ast.TDoExprStep e ->
       Cons(typed_ast.TDoExprStep(elim_expr(e)), tail)
 
@@ -409,7 +409,7 @@ fn refs_steps(steps: List typed_ast.TypedDoStep, bound: Set, acc: Set) -> Set =
   | Nil -> acc
   | Cons step rest ->
       match step with
-      | typed_ast.TDoBindStep pat e ->
+      | typed_ast.TDoBindStep pat e _ ->
           refs_steps(rest, bind_pat(pat, bound), refs_expr(e, bound, acc))
       | typed_ast.TDoLetStep n e ->
           refs_steps(rest, set_insert(n, bound), refs_expr(e, bound, acc))

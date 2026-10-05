@@ -12,10 +12,9 @@ costs follow.
 1. **The reader cannot see which lines may return early.** A user wrote
    `r <- fs.write_text(...)` and then `match r with | Ok _ -> …`, expecting `r : Result`. The bind
    had unwrapped it to `Unit`, and the error named the `match`, not the bind.
-2. **It is unsound.** The checker decides the mode at the bind, from the type known *then*
-   (`do_unwrap_type`, `stdlib/compiler/infer.sprout`). Codegen decides it again from the *final*
-   type (`ast_to_ir.sprout`, the `TDoBindStep` arm). When the head is filled in later they
-   disagree:
+2. **It was unsound.** The checker decided the mode at the bind, from the type known *then*.
+   Codegen decided it again from the *final* type. When the head was filled in later they
+   disagreed:
 
    ```sprout
    fn greet() -> Maybe String =
@@ -24,11 +23,11 @@ costs follow.
        x
    ```
 
-   This compiles and prints a pointer. The `Result` twin segfaults. A separate fix (phase 0, §8)
-   closes the hole; this design removes the cause.
+   This compiled and printed a pointer; the `Result` twin segfaulted. Phase 0 (§8) now rejects
+   it; this design removes the cause.
 3. **Only two types can do it.** A user type with two kinds of failure (`Got a | NotFound |
-   Failed String`) cannot short-circuit. The compiler tests the names `Maybe`/`Result` in five
-   places: infer, codegen, two optimisation gates, and `linear_check` (`bind_short_circuits`).
+   Failed String`) cannot short-circuit. The checker tests the names `Maybe`/`Result`
+   (`infer.decide_bind_mode`), and every later pass reads its `typed_ast.BindMode`.
 4. **Errors land on the wrong line.** `x <- pure("a")` followed by `x ++ "b"` reports
    `` `++` needs matching Semigroup operands: $t3031 String vs String `` at the `++`.
 5. **Pure code has no propagation.** A pure function uses `do` only to get the short-circuit, and
@@ -288,9 +287,9 @@ IR is unchanged after normalising names.
 
 **Phases.**
 
-0. Soundness fix, a separate PR. Store one "propagates" decision per bind, read it in codegen and
-   `linear_check`, and reject a bind whose head becomes `Maybe`/`Result` only after the bind. The
-   decision it stores is also the list the codemod needs.
+0. ~~Soundness fix.~~ Landed: `typed_ast.BindMode` on each bind, decided in
+   `infer.decide_bind_mode` and read by every later pass; a head that becomes `Maybe`/`Result`
+   after the bind is rejected (spec §5.9). The modes are also the list the codemod needs.
 1. Add `Step`, `Propagate`, `MapFailure` and their instances, plus `try`/`else`/`with` and fusion.
    Old fallible `<-` keeps working.
 2. Run the codemod on sprout_lang, then on uncharted-suns and repbit.
@@ -311,7 +310,7 @@ IR is unchanged after normalising names.
   with `let..else` and would cover `with`'s job, at more length.
 - **Q6. Generic-code cost.** Specialisation would remove it. Out of scope.
 - **Q7. Linear types.** Spec §5.8 forbids a consume after a fallible bind. `linear_check` keys that
-  on the bind's type (`bind_short_circuits`); it must key on `try` instead.
+  on the bind's `BindMode`; it must key on `try` instead.
 
 ## 10. Tests
 

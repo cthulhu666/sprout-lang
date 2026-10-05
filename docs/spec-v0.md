@@ -1860,6 +1860,13 @@ anything other than `Maybe`/`Result`, and a **fallible bind** when it is one of 
 two. `Maybe` and `Result` are the only short-circuiting families; the behaviour is
 not user-extensible.
 
+**The kind is decided at the bind**, from `e`'s type as inferred from `e` and the steps
+before it. If the head of that type is still unknown there, as in `x <- pure(1)`, whose
+type constructor only the tail or the signature fixes, the bind is effectful and binds
+the whole value. If the head later turns out to be `Maybe` or `Result`, that is a
+**type error**, since the bind would have had to unwrap. Give `e` a known type at the
+bind. As with comprehension sources (§5.10), the type must be known where it is used.
+
 A fallible bind `x <- e` where `e : Result E A` binds `x : A` on success. On failure
 it **returns from the enclosing function**, carrying the failure — it does not merely
 end the block. `Maybe` behaves the same way with `Nothing` in place of `Err`.

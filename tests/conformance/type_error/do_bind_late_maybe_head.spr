@@ -1,0 +1,14 @@
+module main
+
+# A `<-` whose right-hand side has an unknown type head at the bind: the checker
+# binds it whole (`x : f String`), the tail then fixes `f = Maybe`, and lowering --
+# reading the final type -- unwraps it. The two disagreed, and this compiled and
+# printed a raw pointer instead of `Just("a")`. See spec-v0.md §5.9.
+
+fn greet() -> Maybe String =
+  do
+    x <- pure("a")
+    x
+
+fn main() -> Unit !{IO} =
+  print(greet())
