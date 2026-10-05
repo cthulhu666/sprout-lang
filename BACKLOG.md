@@ -1249,16 +1249,6 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   so Design Change Process. Blast radius: 13 `@inst:` sites in `infer.sprout`, 2 in
   `resolve.sprout`, both key writers, lowering's parallel `instance_table`, plus seed and golden IR.
   GHC pairs the relaxation with full-head matching; they arrive together.
-- [ ] `P2` **Instance overlap is not enforced against env-supplied instances on the REPL /
-  analysis-service path.** Confirmed by probe: a session redeclaring a *prelude* instance
-  (`instance ToString Int`) is ACCEPTED on the REPL path and rejected on the compile path, while a
-  duplicate within the session's own decls is rejected on both. `check_program_with_env` passes
-  imports and the prelude as env schemes so their instances arrive as `@inst:` markers, while
-  `check_overlapping_instances` scans `decls`, which holds only the session's own source. **Open
-  question that sets the severity:** which instance wins at dispatch — if the session's, shadowing
-  is the de facto semantics and needs specifying; if the prelude's, the session instance is silently
-  dead and wants rejecting. **Decide before implementing:** reject for consistency with
-  `--phase check`, or define session-level instance shadowing in the spec. Today is neither.
 - [ ] `P2` **`Validation` type + error-accumulating `Applicative`** — the killer app (form-style
   validation collecting *all* errors). Needs its own type (`Valid a | Invalid e`) because a type
   admits one `Applicative` and `Result`'s is fail-fast; the instance requires `Semigroup e`.
@@ -2787,10 +2777,12 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   `Int`, yet `resolve` asks for an annotation and a `where`. Each member's post-pass and
   placeholder naming read its own substitution (`infer.sprout`, per-member `s2`), not the
   group's. Declaring `b_fn` first compiles. Master compiled it to the poison thunk.
-- [ ] `P3` **An instance method's unannotated parameter gets the `fn` remedy.** In `instance
-  ToString (Box a) where ToString a`, `fn to_string(b) = … to_string(Just(v))` is told to name
-  the variable and add a `where`; the fix that works is `b: Box a`. `resolve.unsupplied_remedy`
-  checks the placeholder before the `DeclKind`. Fix: in an instance method, name the head.
+- [ ] `P3` **§8.5's instance rules skip a class with more than one parameter, unstated.**
+  `own_class_sigs` keeps only one-parameter classes, so an instance of `class Show2 t u` is neither
+  seeded nor signature-checked. Its bare `b` in `instance Show2 (Box a) Int where ToString a` gets
+  the `fn` remedy ("write that type out … add a `where`"), and with `b: Box a` the call fails as
+  "No instance of Show2". The spec states neither limit. Fix: reject a multi-parameter class at its
+  declaration, or say in §8.5 what holds for one.
 - [ ] `P3` **A `where` headed by a type alias is keyed by the alias.** `type alias M a = Maybe
   a` with `fn f(y: M a, z: M a) -> Bool where Eq (M a) = y == z` is rejected ("add `where Eq
   a`"): `resolve.add_eff_keys` keys it `Eq_M` from the written head while the use site looks up
