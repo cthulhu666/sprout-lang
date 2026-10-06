@@ -208,6 +208,11 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   `translate_call` consults `captures` *before* the intrinsic names but `param_known` *after*, so a
   captured variable named `bit_and` wins while a parameter of the same name is intercepted. Fix both
   together. `docs/bitwise-int-ops-v0.md` §8.1.
+- [ ] `P2` **A user's constructor captures a name the compiler synthesizes.**
+  `type Mine = Cons Int | Nil` breaks `[x for x in xs if x > 1]` with "'Cons' expects 1
+  arguments, got 2", at a position the user never wrote. A user's top-level function does not
+  capture. Synthesized references to prelude names need an identity no module can shadow.
+  `try`'s rewrite has the same need (`docs/try-propagate-v0.md` §9 Q9), so build it once.
 - [ ] `P3` **Reassess the `print` design** — should compiled `print` dispatch through `ToString`
   everywhere, instead of the type-erased runtime renderer? The full redesign regresses the
   importless loud-fail, risks bootstrap (every `print` in `stdlib/compiler/` needs an instance in

@@ -370,6 +370,15 @@ four repos compiling with unchanged behaviour.
 0. ~~Soundness fix.~~ Landed: `typed_ast.BindMode` on each bind, decided in
    `infer.decide_bind_mode` and read by every later pass; a head that becomes `Maybe`/`Result`
    after the bind is rejected (spec §5.9). The modes are also the list the codemod needs.
+   0b. Move `let..else` and `do` pattern binds (`build_do_refutable`, `build_do_total`) from the
+   parser into inference, as Q9 does for `try`; decided 2026-10-06. A refactor: the rewrite emits
+   the same `match`, so the acceptance test is an unchanged seed fixed point and golden IR. It
+   builds the machinery `try` uses under that test. Once in inference, the synthetic `__t <- e`
+   can be marked plain, which the parser cannot do; that changes behaviour, so it belongs to
+   step 1, not 0b (today `Just x <- g() else Nothing` with `g : Maybe (Maybe Int)` binds
+   `x = 2`). Better messages follow in a separate commit: a wrong
+   fallback reports "Match branch type mismatch", and a trailing `let..else` gets a parse error
+   while a trailing `let` gets the inference one.
 1. Add `Step`, `Propagate` and their instances, `try`, its two reserved shapes (§4.4), fusion and
    `ignore`. Old fallible `<-` keeps working, except that a `<-` whose right-hand side is a `try`
    (after stripping parentheses) is always plain. Otherwise `x <- try e` with
