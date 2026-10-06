@@ -1,0 +1,12 @@
+module main
+
+# A written `match` keeps its own wording; only a binding's `else` is reported as one
+# (let_else_fallback_type_mismatch).
+
+fn describe(n: Int) -> String =
+  match n with
+  | 0 -> "zero"
+  | _ -> n
+
+fn main() -> Unit !{IO} =
+  print(describe(1))

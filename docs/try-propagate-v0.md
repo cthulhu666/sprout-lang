@@ -386,10 +386,10 @@ four repos compiling with unchanged behaviour.
    fixed point and golden IR. It builds the machinery `try` uses under that test. Once in
    inference, the synthetic `__t <- e` can be marked plain, which the parser cannot do; that
    changes behaviour, so it belongs to step 1, not 0b (today `Just x <- g() else Nothing` with
-   `g : Maybe (Maybe Int)` binds `x = 2`). Better messages follow in a separate commit: a wrong
-   fallback reports "Match branch type mismatch", and a trailing `let..else` gets a parse error
-   while a trailing `let` gets the inference one. A third commit lets an `else` binding sit in a
-   multi-binding `do`-`let` statement (§9 Q13).
+   `g : Maybe (Maybe Int)` binds `x = 2`). Second commit landed: a wrong fallback is reported at
+   the `else` value instead of as "Match branch type mismatch", and a trailing pattern or `else`
+   binding gets the same inference error as a trailing `let`. A third commit lets an `else`
+   binding sit in a multi-binding `do`-`let` statement (§9 Q13).
 1. Add `ControlFlow`, `Propagate` and their instances, `try`, its two reserved shapes (§4.4),
    fusion and `ignore`. Old fallible `<-` keeps working, except that a `<-` whose right-hand side
    is a `try` (after stripping parentheses) is always plain. Otherwise `x <- try e` with

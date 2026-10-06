@@ -727,17 +727,14 @@ fn step_has_bind_arrow(tokens: Vec token.Token, i: Int, depth: Int) -> Bool =
 # ---------------------------------------------------------------------------
 # Do expressions
 
-# A do step as parsed. DoStepBinding is a binding whose continuation is the steps
-# after it (ast.DoPatStep), so the collector must find at least one; its position
-# is the binding's, so the match it becomes reads as `<-`/`let`, not `match`,
-# keeping the staircase lint from re-flagging it. Without an `else` the match has
-# one arm, which hands refutability to W5, where spec §5.2.1 puts it.
-# DoStepLets carries a multi-name `let` statement, which yields one DoLetStep per
-# name.
+# A do step as parsed. A DoPatStep takes the binding's position, so the match it
+# becomes reads as `<-`/`let`, not `match`, keeping the staircase lint from
+# re-flagging it. Without an `else` the match has one arm, which hands
+# refutability to W5, where spec §5.2.1 puts it. DoStepLets carries a multi-name
+# `let` statement, which yields one DoLetStep per name.
 type DoStepParse (..) =
   | DoStepPlain ast.DoStep
   | DoStepLets (List ast.DoStep)
-  | DoStepBinding ast.DoBindKind ast.Pattern ast.Expr (Maybe ast.LetElse) source.SourcePos
 
 # Whether a do-bind pattern can be lowered DIRECTLY, without a match staircase:
 # a variable, wildcard, unit, or a tuple of those. This mirrors exactly what
@@ -786,11 +783,11 @@ fn do_let_statement(bindings: List LetBinding, let_pos: source.SourcePos) -> Res
   match bindings with
   | [b] ->
       match b.els with
-      | Just _ -> Ok(DoStepBinding(ast.LetBind, b.pat, b.rhs, b.els, let_pos))
+      | Just _ -> Ok(DoStepPlain(ast.DoPatStep(ast.LetBind, b.pat, b.rhs, b.els, let_pos)))
       | Nothing ->
           match binding_name(b.pat) with
           | Just name -> Ok(DoStepPlain(ast.DoLetStep(name, b.rhs)))
-          | Nothing -> Ok(DoStepBinding(ast.LetBind, b.pat, b.rhs, Nothing, let_pos))
+          | Nothing -> Ok(DoStepPlain(ast.DoPatStep(ast.LetBind, b.pat, b.rhs, Nothing, let_pos)))
   | _ -> group_steps(bindings, Nil)
 
 fn group_steps(bindings: List LetBinding, acc: List ast.DoStep) -> Result ParseError DoStepParse =
@@ -813,11 +810,11 @@ fn parse_do_step(tokens: Vec token.Token, i: Int) -> Result ParseError (DoStepPa
         do
           (_, i5) <- expected_keyword("else", tokens, i4)
           (residual, handler, i6) <- parse_let_else_clause(tokens, i5)
-          Ok((DoStepBinding(ast.ArrowBind, pattern, value, Just(ast.LetElse(residual, handler)), cur_pos(tokens, i)), i6))
+          Ok((DoStepPlain(ast.DoPatStep(ast.ArrowBind, pattern, value, Just(ast.LetElse(residual, handler)), cur_pos(tokens, i))), i6))
       else if is_irrefutable_do_bind_pattern(pattern) then
         Ok((DoStepPlain(ast.DoBindStep(pattern, value)), i4))
       else
-        Ok((DoStepBinding(ast.ArrowBind, pattern, value, Nothing, cur_pos(tokens, i)), i4))
+        Ok((DoStepPlain(ast.DoPatStep(ast.ArrowBind, pattern, value, Nothing, cur_pos(tokens, i))), i4))
   else
     do
       (value, i2) <- parse_expression(tokens, i)
@@ -835,17 +832,6 @@ fn collect_do_steps(tokens: Vec token.Token, i: Int, acc: List ast.DoStep) -> Re
       # One statement, several steps — prepended in order, so `acc` (which is
       # reversed) receives them last-first exactly as repeated DoStepPlain would.
       | DoStepLets steps -> collect_do_steps(tokens, k, list_append(list_reverse(steps), acc))
-      | DoStepBinding kind pat value els pos ->
-          do
-            (rest, i3) <- collect_do_steps(tokens, k, Nil)
-            match rest with
-            | Nil -> Err(ParseError(no_continuation_msg(els), pos))
-            | [_ | _] -> Ok((list_append(list_reverse(acc), Cons(ast.DoPatStep(kind, pat, value, els, pos), rest)), i3))
-
-fn no_continuation_msg(els: Maybe ast.LetElse) -> String =
-  match els with
-  | Just _ -> "a binding-else do step needs at least one following step as its success continuation"
-  | Nothing -> "a destructuring do step needs at least one following step as its continuation"
 
 fn parse_do_expr(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
   do

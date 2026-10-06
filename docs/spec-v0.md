@@ -630,8 +630,8 @@ Rules:
   leaves cases uncovered is a non-exhaustive-match error. Constant vs binding-else
   is disambiguated on the `->` after the else. (Propagation without an `else` is
   proposed as `try`; see `docs/try-propagate-v0.md`.)
-- Every `else` and the body must unify to the block's result type. At least one
-  binding is required.
+- Every `else` and the body must unify to the block's result type; a mismatch is
+  reported at the `else` value. At least one binding is required.
 - `let … in` is an ordinary expression (usable anywhere), and **complements**
   `where`: a function may use both, with `where` as the outer scope (its bindings
   are visible in a `let … in` RHS/body; `let … in` bindings are not visible in
@@ -700,8 +700,8 @@ a token that cannot end one (`->`, `=`, an operator). A step also ends at a toke
 that closes an enclosing bracket, so a `do` block may be a call argument.
 
 **The last step is the block's value**, so it must be an expression. A `<-` or `let`
-there binds a name nothing can read and leaves the block with no value; it is an
-error, as a refutable step with no following step is (§5.2.2).
+there, with any pattern and with or without an `else` (§5.2.2), binds names nothing
+can read and leaves the block with no value; it is an error.
 
 ### 5.2.2 Refutable binds in `do` blocks *(experimental)*
 
@@ -730,9 +730,10 @@ let <pat> = <e> else <fb | rpat -> h>  →  match <e> with | <pat> -> do <rest> 
 The effectful form runs `<e>`'s effect exactly once (via the ordinary `<-`) before
 the branch; the pure form matches the value directly. Exhaustiveness is enforced by
 the same non-exhaustive-match rule (a residual leaving cases uncovered is an error).
-A refutable step with **no following step** is an error (it would have no success
-continuation). RHS effect handling is inherited from `<-` and is unchanged — this is
-purely a parse-time rewrite (`docs/effectful-let-else-v0.md`). Propagation without an
+A refutable step with **no following step** has no success continuation; it is the
+last-step error of §5.2.1a. RHS effect handling is inherited from `<-` and is
+unchanged: inference applies the rewrite before typing the step
+(`docs/effectful-let-else-v0.md`). Propagation without an
 `else` is proposed as `try` (`docs/try-propagate-v0.md`).
 
 An **irrefutable** pattern needs no `else`, and per §5.2.1 that is decided against

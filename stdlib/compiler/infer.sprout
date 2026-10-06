@@ -1135,7 +1135,7 @@ fn infer_expr(
   | ast.VarExpr name pos -> infer_var_or_field(state, env, subst, eff_subst, name, pos)
   | ast.IfExpr cond then_ else_ pos -> infer_if(state, env, subst, eff_subst, cond, then_, else_, pos)
   | ast.CallExpr callee args pos -> infer_call(state, env, subst, eff_subst, callee, args, pos)
-  | ast.MatchExpr scrut branches pos -> infer_match(state, env, subst, eff_subst, scrut, branches, pos)
+  | ast.MatchExpr scrut branches pos -> infer_match(state, env, subst, eff_subst, scrut, branches, UserMatch, pos)
   | ast.TupleExpr elems pos -> infer_tuple(state, env, subst, eff_subst, elems, pos)
   | ast.BinaryExpr op left right pos -> infer_binary(state, env, subst, eff_subst, op, left, right, pos)
   | ast.UnaryExpr op operand pos -> infer_unary(state, env, subst, eff_subst, op, operand, pos)
@@ -1153,7 +1153,8 @@ fn infer_expr(
   | ast.ComprehensionExpr elem gens pos ->
       infer_comprehension(state, env, subst, eff_subst, elem, gens, pos)
   | ast.LetBindExpr pat value els body pos ->
-      infer_expr(state, env, subst, eff_subst, ast.let_bind_match(pat, value, els, body, pos))
+      infer_match(state, env, subst, eff_subst, value, ast.let_bind_branches(pat, els, body, pos),
+                  LetBinding, pos)
 
 # Declaration-boundary wrapper: applies s1 to the result so fresh TVars
 # never escape into lowering.  Declaration-level callers should use this;
@@ -5158,6 +5159,20 @@ fn unreachable_check(subst: Dict types.Type, ctor_map: Dict (List String), scrut
 
 # --- Match ---
 
+# What a match was written as, which decides how a branch mismatch is worded.
+type MatchSource =
+  | UserMatch
+  | LetBinding  # a binding's body, then its `else` (ast.let_bind_branches)
+
+# Only a binding's `else` can mismatch: the body's branch comes first, against a
+# fresh result type.
+fn branch_mismatch_message(src: MatchSource, e: String) -> String =
+  match src with
+  | UserMatch -> "Match branch type mismatch: " ++ e
+  | LetBinding ->
+      "the `else` value must have the type of the code after the binding, which it replaces "
+        ++ "when the pattern fails. " ++ e
+
 fn infer_match(
   state: unifier.InferState,
   env: Dict types.Scheme,
@@ -5165,6 +5180,7 @@ fn infer_match(
   eff_subst: Dict types.Effect,
   scrutinee: ast.Expr,
   branches: List ast.MatchBranch,
+  src: MatchSource,
   pos: source.SourcePos
 ) -> InferResult !{IO} =
   do
@@ -5174,7 +5190,8 @@ fn infer_match(
     | InferOk typed_scrut s1 es1 scrut_eff ->
         do
           v <- unifier.fresh(state)
-          infer_branches(state, env, s1, es1, typed_scrut, types.TVar(types.tyvar_id(v)), branches, Nil, scrut_eff, pos)
+          infer_branches(state, env, s1, es1, typed_scrut, types.TVar(types.tyvar_id(v)), branches, Nil, scrut_eff,
+                         src, pos)
 
 fn infer_branches(
   state: unifier.InferState,
@@ -5186,6 +5203,7 @@ fn infer_branches(
   branches: List ast.MatchBranch,
   acc_branches: List typed_ast.TypedMatchBranch,
   acc_eff: types.Effect,
+  src: MatchSource,
   pos: source.SourcePos
 ) -> InferResult !{IO} =
   match branches with
@@ -5210,7 +5228,7 @@ fn infer_branches(
       | ast.MatchBranch pat _ ->
           do
             br <- infer_branch(state, env, subst, eff_subst,
-                               typed_ast.typed_expr_type(typed_scrut), ret_type, branch)
+                               typed_ast.typed_expr_type(typed_scrut), ret_type, branch, src)
             match br with
             | InferErr pos e -> InferErr(pos, e)
             | InferOk typed_body s1 es1 branch_eff ->
@@ -5218,7 +5236,7 @@ fn infer_branches(
                                unifier.apply_subst(s1, ret_type),
                                rest,
                                Cons(typed_ast.TypedMatchBranch(pat, typed_body), acc_branches),
-                               merge_effects(acc_eff, branch_eff), pos)
+                               merge_effects(acc_eff, branch_eff), src, pos)
 
 fn infer_branch(
   state: unifier.InferState,
@@ -5227,7 +5245,8 @@ fn infer_branch(
   eff_subst: Dict types.Effect,
   scrut_type: types.Type,
   ret_type: types.Type,
-  branch: ast.MatchBranch
+  branch: ast.MatchBranch,
+  src: MatchSource
 ) -> InferResult !{IO} =
   match branch with
   | ast.MatchBranch pat body ->
@@ -5242,7 +5261,7 @@ fn infer_branch(
             # than searching global instances (which have none for a skolem).
             infer_branch_body(state,
               extend_env_with_existential_givens(pat, s1, extend_env_from_pattern(pat, s1, env)),
-              s1, es1, ret_type, body)
+              s1, es1, ret_type, body, src)
 
 fn infer_branch_body(
   state: unifier.InferState,
@@ -5250,24 +5269,26 @@ fn infer_branch_body(
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
   ret_type: types.Type,
-  body: ast.Expr
+  body: ast.Expr,
+  src: MatchSource
 ) -> InferResult !{IO} =
   do
     br <- infer_expr(state, env, subst, eff_subst, body)
     match br with
     | InferErr pos e -> InferErr(pos, e)
     | InferOk typed_body s2 es2 body_eff ->
-        infer_branch_unify(s2, es2, typed_body, ret_type, body_eff)
+        infer_branch_unify(s2, es2, typed_body, ret_type, body_eff, src)
 
 fn infer_branch_unify(
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
   typed_body: typed_ast.TypedExpr,
   ret_type: types.Type,
-  body_eff: types.Effect
+  body_eff: types.Effect,
+  src: MatchSource
 ) -> InferResult !{IO} =
   match unifier.unify_actual_expected(subst, eff_subst, typed_ast.typed_expr_type(typed_body), ret_type) with
-  | unifier.UnifyErr e -> InferErr(typed_ast.typed_expr_pos(typed_body), "Match branch type mismatch: " ++ e)
+  | unifier.UnifyErr e -> InferErr(typed_ast.typed_expr_pos(typed_body), branch_mismatch_message(src, e))
   | unifier.UnifyOk s3 es3 ->
       InferOk(typed_body, s3, es3, unifier.apply_effect_subst(es3, body_eff))
 
@@ -5844,6 +5865,8 @@ fn infer_do_steps(
                   typed_ast.TDo(typed_do_step_list_reverse(acc_steps),
                                 unifier.apply_subst(s, typed_ast.typed_expr_type(last_typed)), pos),
                   s, eff_subst, acc_eff)
+  # A trailing binding has no steps to scope over (spec-v0.md §5.2.1a).
+  | [ast.DoPatStep kind _ _ _ bind_pos] -> trailing_binding_err(do_bind_kind_word(kind), bind_pos)
   # The binding and the steps after it become its match (ast.do_pat_steps), so the
   # per-step helpers below never see a DoPatStep.
   | [ast.DoPatStep kind pat value els bind_pos | rest] ->
@@ -5875,11 +5898,16 @@ fn trailing_binding(steps: List typed_ast.TypedDoStep) -> Maybe InferResult =
   | [last | _] ->
       match last with
       | typed_ast.TDoExprStep _ -> Nothing
-      | typed_ast.TDoBindStep _ e _ -> Just(trailing_binding_err("`<-`", e))
-      | typed_ast.TDoLetStep _ e -> Just(trailing_binding_err("`let`", e))
+      | typed_ast.TDoBindStep _ e _ -> Just(trailing_binding_err("`<-`", typed_ast.typed_expr_pos(e)))
+      | typed_ast.TDoLetStep _ e -> Just(trailing_binding_err("`let`", typed_ast.typed_expr_pos(e)))
 
-fn trailing_binding_err(step: String, value: typed_ast.TypedExpr) -> InferResult =
-  InferErr(typed_ast.typed_expr_pos(value),
+fn do_bind_kind_word(kind: ast.DoBindKind) -> String =
+  match kind with
+  | ast.ArrowBind -> "`<-`"
+  | ast.LetBind -> "`let`"
+
+fn trailing_binding_err(step: String, pos: source.SourcePos) -> InferResult =
+  InferErr(pos,
            "this " ++ step ++ " is the last step of its `do` block, so the block has no value. "
              ++ "End the block with an expression; to return this value, write it without the binding.")
 
