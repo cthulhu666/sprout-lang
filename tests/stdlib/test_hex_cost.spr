@@ -1,0 +1,73 @@
+import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
+import stdlib.bytes as bytes
+import stdlib.hex as hex
+import stdlib.terminal as terminal
+import stdlib.time as time
+
+# Pins that hex.encode and hex.decode scale near-linearly. Building Bytes one byte at a time
+# with `builder_append` copies both chunk tables per append, which is quadratic, and a correct
+# answer cannot show it — so this guard is a cost measurement.
+#
+# The input grows 64x. Linear cost grows 64x, the halving build ~100x (log n), a quadratic
+# build ~4000x. The budget allows 400x: well clear of both. Each arm takes the minimum of
+# several rounds so a stalled CI runner cannot inflate one, and the timings are printed so
+# a failure says which way it went.
+
+let rounds = 3
+let short_len = 1024
+let long_len = 65536
+let baseline_floor_us = 200
+let allowed_ratio = 400
+
+# 2^k copies of `seed`, built by doubling: O(total).
+fn grow(seed: Bytes, k: Int) -> Bytes =
+  if k <= 0 then seed else grow(bytes.append(seed, seed), k - 1)
+
+fn seed() -> Bytes =
+  bytes.append(bytes.append(bytes.singleton(0), bytes.singleton(127)),
+               bytes.append(bytes.singleton(171), bytes.singleton(255)))
+
+fn input(len: Int) -> Bytes =
+  bytes.take(grow(seed(), 14), len)
+
+fn round_trips(value: Bytes) -> Bool =
+  match hex.decode(hex.encode(value)) with
+  | Ok back -> back == value
+  | Err _ -> false
+
+# -1 when a round trip returns the wrong bytes, so a probe that stopped doing work fails its
+# own assertion rather than timing as fast in both arms.
+fn min_round_trip_us(value: Bytes, remaining: Int, best: Int) -> Int !{IO} =
+  if remaining <= 0 then best
+  else
+    do
+      t0 <- time.now_micros()
+      let ok = round_trips(value)
+      t1 <- time.now_micros()
+      if ok then min_round_trip_us(value, remaining - 1, if t1 - t0 < best then t1 - t0 else best)
+      else -1
+
+fn budget_us(baseline: Int) -> Int =
+  (if baseline < baseline_floor_us then baseline_floor_us else baseline) * allowed_ratio
+
+fn report(short_us: Int, long_us: Int) -> Unit !{IO} =
+  terminal.write("  [cost] hex round trip: 1KiB=" ++ int_to_string(short_us) ++ "us 64KiB="
+                 ++ int_to_string(long_us) ++ "us budget=" ++ int_to_string(budget_us(short_us))
+                 ++ "us\n")
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    let short_bytes = input(short_len)
+    let long_bytes = input(long_len)
+    assert_eq(state, "short input length", bytes.length(short_bytes), short_len)
+    assert_eq(state, "long input length", bytes.length(long_bytes), long_len)
+
+    short_us <- min_round_trip_us(short_bytes, rounds, 1000000000)
+    long_us <- min_round_trip_us(long_bytes, rounds, 1000000000)
+    report(short_us, long_us)
+    assert_true(state, "short round trip is correct", short_us >= 0)
+    assert_true(state, "long round trip is correct", long_us >= 0)
+    assert_true(state, "hex round trip scales near-linearly", long_us <= budget_us(short_us))
+
+    summary(state)

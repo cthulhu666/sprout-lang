@@ -736,6 +736,25 @@ Bytes helpers (in `stdlib/bytes.sprout`):
   - `builder_append(left: Builder, right: Builder) -> Builder`
   - `builder_build(value: Builder) -> Bytes`
 
+Hex helpers (in `stdlib/hex.sprout`) — base16, RFC 4648 §8:
+
+- `HexError` variants (`HexOddLength`, `HexBadDigit Int` — the byte offset of the first
+  non-hex byte); derives `Eq`, `ToString`
+- `encode(value: Bytes) -> String` — lowercase, two digits per byte. O(n)
+- `decode(raw: String) -> Result HexError Bytes` — either case, no whitespace or prefix. An
+  odd length is reported before any digit is read. O(n log n)
+
+UUID helpers (in `stdlib/uuid.sprout`) — RFC 9562:
+
+- `Uuid` opaque type, always held lowercase 8-4-4-4-12; derives `Eq`, `Ord`.
+  `instance ToString Uuid` gives that text, not `Uuid(…)`
+- `parse(raw: String) -> Maybe Uuid` — either case; checks the shape only, so the Nil and Max
+  ids parse and no version is required. Braces, a `urn:uuid:` prefix and missing dashes are
+  rejected
+- `v4_from_bytes(random: Bytes) -> Maybe Uuid` — exactly 16 bytes; sets the version and
+  variant bits. Pure, so a test can pass fixed bytes
+- `v4() -> Result CryptoError Uuid` (effectful; `random_bytes(16)` into `v4_from_bytes`)
+
 Crypto helpers (in `stdlib/crypto.sprout`):
 
 - `sha256(value: Bytes) -> Bytes`
