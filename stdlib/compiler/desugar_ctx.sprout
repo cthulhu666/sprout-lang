@@ -136,6 +136,9 @@ fn desugar_expr_i(expr: ast.Expr, expected: Maybe String, fn_idx: Dict (List (Ma
             )
         | ast.MatchExpr scrut branches pos ->
             ast.MatchExpr(desugar_expr_no_ctx_i(scrut, fn_idx), desugar_branches_i(branches, expected, fn_idx), pos)
+        | ast.LetBindExpr pat value els body pos ->
+            ast.LetBindExpr(pat, desugar_expr_no_ctx_i(value, fn_idx), desugar_let_else_i(els, expected, fn_idx),
+                            desugar_expr_i(body, expected, fn_idx), pos)
         | _ -> desugar_ctx_leaf_i(expr, exp_name, fn_idx)
       else
         desugar_expr_no_ctx_i(expr, fn_idx)
@@ -173,6 +176,12 @@ fn desugar_ctx_leaf_i(expr: ast.Expr, exp_name: String, fn_idx: Dict (List (Mayb
 # Wrap an already-desugared list literal in vec_from_list so it denotes a Vec.
 fn wrap_vec_from_list(inner: ast.Expr, pos: source.SourcePos) -> ast.Expr =
   ast.CallExpr(ast.VarExpr("vec_from_list", pos), Cons(inner, Nil), pos)
+
+# The handler's value is the binding's, so it takes the same expected type.
+fn desugar_let_else_i(els: Maybe ast.LetElse, expected: Maybe String, fn_idx: Dict (List (Maybe String))) -> Maybe ast.LetElse =
+  match els with
+  | Nothing -> Nothing
+  | Just (ast.LetElse residual handler) -> Just(ast.LetElse(residual, desugar_expr_i(handler, expected, fn_idx)))
 
 fn desugar_branches_i(branches: List ast.MatchBranch, expected: Maybe String, fn_idx: Dict (List (Maybe String))) -> List ast.MatchBranch =
   match branches with
@@ -214,6 +223,9 @@ fn desugar_expr_no_ctx_i(expr: ast.Expr, fn_idx: Dict (List (Maybe String))) -> 
       ast.IntRangeExpr(desugar_expr_no_ctx_i(lo, fn_idx), desugar_expr_no_ctx_i(hi, fn_idx), pos)
   | ast.ComprehensionExpr elem gens pos ->
       ast.ComprehensionExpr(desugar_expr_no_ctx_i(elem, fn_idx), desugar_comprehension_gens_i(gens, fn_idx), pos)
+  | ast.LetBindExpr pat value els body pos ->
+      ast.LetBindExpr(pat, desugar_expr_no_ctx_i(value, fn_idx), desugar_let_else_i(els, Nothing, fn_idx),
+                      desugar_expr_no_ctx_i(body, fn_idx), pos)
   | _ -> expr
 
 fn desugar_comprehension_gens_i(gens: List ast.ComprehensionGen, fn_idx: Dict (List (Maybe String))) -> List ast.ComprehensionGen =
@@ -263,6 +275,8 @@ fn desugar_do_step_i(s: ast.DoStep, fn_idx: Dict (List (Maybe String))) -> ast.D
   | ast.DoBindStep pat value -> ast.DoBindStep(pat, desugar_expr_no_ctx_i(value, fn_idx))
   | ast.DoLetStep name value -> ast.DoLetStep(name, desugar_expr_no_ctx_i(value, fn_idx))
   | ast.DoExprStep value -> ast.DoExprStep(desugar_expr_no_ctx_i(value, fn_idx))
+  | ast.DoPatStep kind pat value els pos ->
+      ast.DoPatStep(kind, pat, desugar_expr_no_ctx_i(value, fn_idx), desugar_let_else_i(els, Nothing, fn_idx), pos)
 
 fn desugar_record_fields_i(fields: List ast.RecordField, fn_idx: Dict (List (Maybe String))) -> List ast.RecordField =
   match fields with
@@ -478,6 +492,8 @@ fn find_redundant_expr(expr: ast.Expr, expected: Maybe String, fn_idx: Dict (Lis
             )
         | ast.MatchExpr scrut branches _ ->
             list_append(find_redundant_no_ctx(scrut, fn_idx), find_redundant_branches(branches, expected, fn_idx))
+        | ast.LetBindExpr pat value els body pos ->
+            find_redundant_expr(ast.let_bind_match(pat, value, els, body, pos), expected, fn_idx)
         | _ -> find_redundant_ctx_leaf(expr, exp_name, fn_idx)
       else
         find_redundant_no_ctx(expr, fn_idx)
@@ -553,6 +569,8 @@ fn find_redundant_no_ctx(expr: ast.Expr, fn_idx: Dict (List (Maybe String))) -> 
       list_append(find_redundant_no_ctx(lo, fn_idx), find_redundant_no_ctx(hi, fn_idx))
   | ast.ComprehensionExpr elem gens _ ->
       list_append(find_redundant_no_ctx(elem, fn_idx), find_redundant_comprehension_gens(gens, fn_idx))
+  | ast.LetBindExpr pat value els body pos ->
+      find_redundant_no_ctx(ast.let_bind_match(pat, value, els, body, pos), fn_idx)
   | _ -> Nil
 
 fn find_redundant_comprehension_gens(gens: List ast.ComprehensionGen, fn_idx: Dict (List (Maybe String))) -> List source.SourcePos =
@@ -600,13 +618,14 @@ fn find_redundant_branches_no_ctx(branches: List ast.MatchBranch, fn_idx: Dict (
 fn find_redundant_do_steps(steps: List ast.DoStep, fn_idx: Dict (List (Maybe String))) -> List source.SourcePos =
   match steps with
   | Nil -> Nil
-  | Cons s rest -> list_append(find_redundant_do_step(s, fn_idx), find_redundant_do_steps(rest, fn_idx))
+  | [ast.DoPatStep kind pat value els pos | rest] ->
+      find_redundant_do_steps(ast.do_pat_steps(kind, pat, value, els, rest, pos), fn_idx)
+  | [ast.DoBindStep _ value | rest] -> find_redundant_do_step(value, rest, fn_idx)
+  | [ast.DoLetStep _ value | rest] -> find_redundant_do_step(value, rest, fn_idx)
+  | [ast.DoExprStep value | rest] -> find_redundant_do_step(value, rest, fn_idx)
 
-fn find_redundant_do_step(s: ast.DoStep, fn_idx: Dict (List (Maybe String))) -> List source.SourcePos =
-  match s with
-  | ast.DoBindStep _ value -> find_redundant_no_ctx(value, fn_idx)
-  | ast.DoLetStep _ value -> find_redundant_no_ctx(value, fn_idx)
-  | ast.DoExprStep value -> find_redundant_no_ctx(value, fn_idx)
+fn find_redundant_do_step(value: ast.Expr, rest: List ast.DoStep, fn_idx: Dict (List (Maybe String))) -> List source.SourcePos =
+  list_append(find_redundant_no_ctx(value, fn_idx), find_redundant_do_steps(rest, fn_idx))
 
 fn find_redundant_record_fields(fields: List ast.RecordField, fn_idx: Dict (List (Maybe String))) -> List source.SourcePos =
   match fields with

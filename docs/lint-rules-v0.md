@@ -111,8 +111,8 @@ nothing but rewrap:
 The `result_from_maybe` four are `prelude.sprout:1517` (its own definition),
 `analysis_service_driver.sprout:98` and `:106` (the sites issue #378 owns), and
 `examples/sentry_issue_browser_tui.sprout:11`. These counts come from a text scan that only sees the
-literal `match` spelling, so **every row is a floor**: `let..else` desugars to the same AST
-(`parser.sprout:1032`, `build_let_binding_match`) and a text scan cannot see it. There are 121
+literal `match` spelling, so **every row is a floor**: `let..else` means the same match
+(`ast.let_bind_match`) and a text scan cannot see it. There are 121
 `let Just/Ok … else` sites the table therefore misses.
 
 ## 2. Goals and non-goals
@@ -231,9 +231,10 @@ Two properties follow, and they are why this beats a hand-written table:
 - **A derived pattern cannot drift from the definition.** Change `result_from_maybe`'s body and the
   pattern changes in the same commit. A table would keep matching the old shape and keep suggesting
   a function that no longer has it.
-- **Both spellings come free.** `let Just v = e else Err(x) in Ok(v)` desugars to a two-branch
-  `MatchExpr` whose second pattern is `residual_or_wild` — a wildcard when the else is a constant
-  (`parser.sprout:1032-1037`). One rule, both spellings, subject to §5.2's wildcard rule.
+- **Both spellings come free.** Lint reads bindings through `ast.elaborate_bindings`, so
+  `let Just v = e else Err(x) in Ok(v)` arrives as a two-branch `MatchExpr` whose second pattern is
+  the residual, or a wildcard when the else is a constant (`ast.let_bind_match`). One rule, both
+  spellings, subject to §5.2's wildcard rule.
 
 The candidate list for v0, all verified present in `prelude.sprout`: `result_from_maybe` (:1516),
 `maybe_with_default` (:1531), `result_with_default` (:1498). `guard` (:1524) has body
@@ -288,7 +289,7 @@ Nothing about the *name* `result_map` tells you that; only the check does.
 
 **(b) Branch permutation, bounded.** Constructor-headed branches whose patterns are pairwise
 disjoint may be matched in any order — required, per §5's prelude inconsistency and because
-`build_let_binding_match` always emits the bound pattern first. But permutation plus a lenient
+`ast.let_bind_match` always emits the bound pattern first. But permutation plus a lenient
 wildcard is unsound together: `| _ -> Err(e) | Just v -> Ok(v)` would match `result_from_maybe`'s
 pattern while always taking the `Err` branch. So: **a subject wildcard may stand in for a pattern
 constructor only in last position.** The compiler rejects that inverted subject anyway

@@ -132,6 +132,8 @@ fn free_vars(e: ast.Expr, bound: Set) -> Set =
   | ast.RecordUpdateExpr base fields _ ->
       set_union(free_vars(base, bound), free_vars_fields(fields, bound))
   | ast.ComprehensionExpr elem gens _ -> free_vars_gens(gens, elem, bound)
+  | ast.LetBindExpr pat value els body pos ->
+      free_vars(ast.let_bind_match(pat, value, els, body, pos), bound)
 
 fn param_names(params: List ast.Param) -> List String =
   match params with
@@ -253,6 +255,8 @@ fn free_vars_steps(steps: List ast.DoStep, bound: Set) -> Set =
           set_union(free_vars(e, bound),
                     free_vars_steps(rest, set_insert(name, bound)))
       | ast.DoExprStep e -> set_union(free_vars(e, bound), free_vars_steps(rest, bound))
+      | ast.DoPatStep kind pat e els pos ->
+          free_vars_steps(ast.do_pat_steps(kind, pat, e, els, rest, pos), bound)
 
 # Generators scope left to right, and a guard belongs to the generator it
 # follows, so it sees that generator's binders.
@@ -274,8 +278,14 @@ fn free_vars_gens(gens: List ast.ComprehensionGen, elem: ast.Expr, bound: Set) -
 export fn expr_alpha_equal(a: ast.Expr, b: ast.Expr) -> Bool =
   alpha_eq(a, b, ren_empty())
 
+# A binding is compared as the match it means, on either side.
 fn alpha_eq(a: ast.Expr, b: ast.Expr, r: Ren) -> Bool =
+  alpha_eq_heads(ast.elaborate_head(a), ast.elaborate_head(b), r)
+
+fn alpha_eq_heads(a: ast.Expr, b: ast.Expr, r: Ren) -> Bool =
   match a with
+  | ast.LetBindExpr pat value els body pos ->
+      alpha_eq_heads(ast.let_bind_match(pat, value, els, body, pos), b, r)
   | ast.VarExpr an _ ->
       (match b with
        | ast.VarExpr bn _ -> ren_same(an, bn, r)
@@ -399,6 +409,9 @@ fn alpha_eq_fields(as_: List ast.RecordField, bs: List ast.RecordField, r: Ren) 
           an == bn && alpha_eq(av, bv, r) && alpha_eq_fields(arest, brest, r)
 
 fn alpha_eq_steps(as_: List ast.DoStep, bs: List ast.DoStep, r: Ren) -> Bool =
+  alpha_eq_step_heads(ast.elaborate_steps_head(as_), ast.elaborate_steps_head(bs), r)
+
+fn alpha_eq_step_heads(as_: List ast.DoStep, bs: List ast.DoStep, r: Ren) -> Bool =
   match as_ with
   | [] -> (match bs with | [] -> true | _ -> false)
   | [a | arest] ->
@@ -406,6 +419,8 @@ fn alpha_eq_steps(as_: List ast.DoStep, bs: List ast.DoStep, r: Ren) -> Bool =
       | [] -> false
       | [b | brest] ->
           match a with
+          | ast.DoPatStep kind pat e els pos ->
+              alpha_eq_step_heads(ast.do_pat_steps(kind, pat, e, els, arest, pos), bs, r)
           | ast.DoBindStep apat ae ->
               (match b with
                | ast.DoBindStep bpat be ->
@@ -534,8 +549,14 @@ fn capture(name: String, subject: ast.Expr, st: MState) -> Maybe MState =
     # A repeated hole must stand for one subterm, not two that merely look alike.
     | Just prev -> if expr_alpha_equal(prev, subject) then Just(st) else Nothing
 
+# A binding is matched as the match it means, on either side.
 fn go(p: ast.Expr, s: ast.Expr, holes: List String, st: MState) -> Maybe MState =
+  go_heads(ast.elaborate_head(p), ast.elaborate_head(s), holes, st)
+
+fn go_heads(p: ast.Expr, s: ast.Expr, holes: List String, st: MState) -> Maybe MState =
   match p with
+  | ast.LetBindExpr pat value els body pos ->
+      go_heads(ast.let_bind_match(pat, value, els, body, pos), s, holes, st)
   | ast.VarExpr pn _ ->
       if is_hole(pn, holes, st.ren) then capture(pn, s, st)
       else
@@ -752,7 +773,7 @@ fn go_branch(pb: ast.MatchBranch, sb: ast.MatchBranch, s_is_last: Bool,
 # The literal arms admit no subject wildcard at all, which is conservative rather
 # than inconsistent: refusing a pairing is always sound.
 # This is the `let Just v = e else fb` spelling, whose desugaring puts a
-# wildcard in the second branch (parser.sprout: build_let_binding_match).
+# wildcard in the second branch (ast.let_bind_match).
 fn pair_pattern(ppat: ast.Pattern, spat: ast.Pattern, s_is_last: Bool, r: Ren) -> Maybe Ren =
   match ppat with
   | ast.WildcardPattern _ -> pattern_wildcard_over(spat, s_is_last, r)

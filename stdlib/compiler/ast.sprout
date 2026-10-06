@@ -137,6 +137,19 @@ export type DoStep (..) =
   | DoBindStep Pattern Expr
   | DoLetStep String Expr
   | DoExprStep Expr
+  # A binding the steps above cannot hold: one with an `else`, a `let` of a
+  # pattern, or a `<-` of a pattern other than a tuple of names. The steps after
+  # it are its continuation; inference rewrites them together (do_pat_steps).
+  | DoPatStep DoBindKind Pattern Expr (Maybe LetElse) source.SourcePos
+
+export type DoBindKind (..) =
+  | ArrowBind  # `<pat> <- e`, which runs `e`
+  | LetBind  # `let <pat> = e`
+
+# A refutable binding's `else`: the residual pattern naming the failing value
+# (`else Err e -> h`), or Nothing for a constant `else h`; then the handler.
+export type LetElse (..) =
+  | LetElse (Maybe Pattern) Expr
 
 # A name=value field in a record literal: RecordField "x" expr
 export type RecordField (..) =
@@ -179,6 +192,122 @@ export type Expr (..) =
   # generators, leftmost outermost. Typed natively in `infer` and rewritten to
   # folds by a post-inference pass, so this node never reaches lowering.
   | ComprehensionExpr Expr (List ComprehensionGen) source.SourcePos
+  # `let <pat> = <value> [else …] in <body>`, and `where`, the same construct
+  # (spec §5.1). Inference rewrites it to a match (let_bind_match).
+  | LetBindExpr Pattern Expr (Maybe LetElse) Expr source.SourcePos
+
+# --- Binding elaboration ---
+# The match each binding form means. Inference rewrites through these, and lint
+# reads a program through elaborate_bindings, since its rules match these shapes.
+
+export fn let_bind_match(pat: Pattern, value: Expr, els: Maybe LetElse, body: Expr,
+                         pos: source.SourcePos) -> Expr =
+  MatchExpr(value, Cons (MatchBranch(pat, body), else_branch(els, pos)), pos)
+
+# A `let` whose body is the steps after the binding. `<-` first runs the value
+# into a fresh temp and binds that.
+export fn do_pat_steps(kind: DoBindKind, pat: Pattern, value: Expr, els: Maybe LetElse,
+                       rest: List DoStep, pos: source.SourcePos) -> List DoStep =
+  match kind with
+  | ArrowBind ->
+      let tmp = do_tmp_name(pos)
+      in [DoBindStep (VarPattern(tmp, pos), value),
+          DoExprStep(LetBindExpr(pat, VarExpr(tmp, pos), els, DoExpr(rest, pos), pos))]
+  | LetBind -> [DoExprStep (LetBindExpr(pat, value, els, DoExpr(rest, pos), pos))]
+
+# Position-derived, so no two bindings share one.
+fn do_tmp_name(pos: source.SourcePos) -> String =
+  "__do" ++ int_to_string(pos.line) ++ "_" ++ int_to_string(pos.column)
+
+# A constant `else` takes whatever reached it.
+fn else_branch(els: Maybe LetElse, pos: source.SourcePos) -> List MatchBranch =
+  match els with
+  | Nothing -> Nil
+  | Just (LetElse Nothing handler) -> [MatchBranch (WildcardPattern(pos), handler)]
+  | Just (LetElse (Just residual) handler) -> [MatchBranch(residual, handler)]
+
+# One level only: what a node means at its head, for a walker comparing two trees.
+export fn elaborate_head(e: Expr) -> Expr =
+  match e with
+  | LetBindExpr pat value els body pos -> let_bind_match(pat, value, els, body, pos)
+  | _ -> e
+
+export fn elaborate_steps_head(steps: List DoStep) -> List DoStep =
+  match steps with
+  | [DoPatStep kind pat value els pos | rest] -> do_pat_steps(kind, pat, value, els, rest, pos)
+  | _ -> steps
+
+export fn elaborate_bindings(prog: Program) -> Program =
+  let Program decls pos = prog
+  in Program(list_map(elab_decl, decls), pos)
+
+fn elab_decl(d: Decl) -> Decl =
+  match d with
+  | FnDecl name params ret effs cs body pos -> FnDecl(name, params, ret, effs, cs, elab_expr(body), pos)
+  | LetDecl name body anno pos -> LetDecl(name, elab_expr(body), anno, pos)
+  | InstanceDecl head ctx methods pos -> InstanceDecl(head, ctx, list_map(elab_impl, methods), pos)
+  | ExternFnDecl _ _ _ _ _ -> d
+  | TypeDecl _ _ _ _ _ _ -> d
+  | RecordDecl _ _ _ _ _ _ _ -> d
+  | ClassDecl _ _ _ _ _ -> d
+  | AliasDecl _ _ _ _ -> d
+  | WrapDecl _ _ _ _ _ -> d
+
+fn elab_impl(m: InstanceMethodImpl) -> InstanceMethodImpl =
+  let InstanceMethodImpl name params ret effs cs body = m
+  in InstanceMethodImpl(name, params, ret, effs, cs, elab_expr(body))
+
+fn elab_expr(e: Expr) -> Expr =
+  match e with
+  | LetBindExpr pat value els body pos -> elab_expr(let_bind_match(pat, value, els, body, pos))
+  | VarExpr _ _ -> e
+  | IntExpr _ _ -> e
+  | FloatExpr _ _ -> e
+  | BoolExpr _ _ -> e
+  | StringExpr _ _ -> e
+  | CharExpr _ _ -> e
+  | UnitExpr _ -> e
+  | StringTemplateExpr parts pos -> StringTemplateExpr(list_map(elab_template_part, parts), pos)
+  | TupleExpr items pos -> TupleExpr(list_map(elab_expr, items), pos)
+  | IfExpr c t f pos -> IfExpr(elab_expr(c), elab_expr(t), elab_expr(f), pos)
+  | MatchExpr scrut branches pos -> MatchExpr(elab_expr(scrut), list_map(elab_branch, branches), pos)
+  | CallExpr callee args pos -> CallExpr(elab_expr(callee), list_map(elab_expr, args), pos)
+  | LambdaExpr params body pos -> LambdaExpr(params, elab_expr(body), pos)
+  | BinaryExpr op l r pos -> BinaryExpr(op, elab_expr(l), elab_expr(r), pos)
+  | UnaryExpr op x pos -> UnaryExpr(op, elab_expr(x), pos)
+  | IntRangeExpr lo hi pos -> IntRangeExpr(elab_expr(lo), elab_expr(hi), pos)
+  | DoExpr steps pos -> DoExpr(elab_steps(steps), pos)
+  | RecordExpr name fields pos -> RecordExpr(name, list_map(elab_field, fields), pos)
+  | GetFieldExpr r field pos -> GetFieldExpr(elab_expr(r), field, pos)
+  | RecordUpdateExpr base fields pos ->
+      RecordUpdateExpr(elab_expr(base), list_map(elab_field, fields), pos)
+  | ComprehensionExpr elem gens pos ->
+      ComprehensionExpr(elab_expr(elem), list_map(elab_gen, gens), pos)
+
+fn elab_steps(steps: List DoStep) -> List DoStep =
+  match steps with
+  | [] -> []
+  | [DoPatStep kind pat value els pos | rest] -> elab_steps(do_pat_steps(kind, pat, value, els, rest, pos))
+  | [DoBindStep pat value | rest] -> Cons(DoBindStep(pat, elab_expr(value)), elab_steps(rest))
+  | [DoLetStep name value | rest] -> Cons(DoLetStep(name, elab_expr(value)), elab_steps(rest))
+  | [DoExprStep value | rest] -> Cons(DoExprStep(elab_expr(value)), elab_steps(rest))
+
+fn elab_branch(b: MatchBranch) -> MatchBranch =
+  let MatchBranch pat body = b
+  in MatchBranch(pat, elab_expr(body))
+
+fn elab_field(f: RecordField) -> RecordField =
+  let RecordField name value = f
+  in RecordField(name, elab_expr(value))
+
+fn elab_gen(g: ComprehensionGen) -> ComprehensionGen =
+  let ComprehensionGen pat src guards = g
+  in ComprehensionGen(pat, elab_expr(src), list_map(elab_expr, guards))
+
+fn elab_template_part(p: TemplateExprPart) -> TemplateExprPart =
+  match p with
+  | LitPart _ -> p
+  | InterpPart e -> InterpPart(elab_expr(e))
 
 # --- Template literal parts (Experimental — Phase 1 AST stub) ---
 # Parser wiring happens in Phase 3; this variant is unreachable until then.

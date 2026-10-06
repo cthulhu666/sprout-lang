@@ -1,0 +1,84 @@
+# sprout-ignore-all lint/hand-rolled-combinator: the binding forms ARE the subject
+import stdlib.test (check_eq, run_suite)
+
+# Every binding form scopes its pattern over what follows it, and its `else`
+# handler over the outer names only. Names resolve before inference, so a local
+# binder that shadows a top-level name is pinned here for each form.
+
+fn scale(x: Int) -> Int = x * 1000
+
+type Box = Box Int
+
+type Outcome = Good Int | Bad Int
+
+fn io_outcome(o: Outcome) -> Outcome !{IO} =
+  do
+    print("")
+    o
+
+fn vec_len(v: Vec Int) -> Int = vec_length(v)
+
+fn let_in_shadows_top(n: Int) -> Int =
+  let scale = n + 1
+  in scale * 2
+
+fn where_shadows_top(n: Int) -> Int = scale * 2
+  where scale = n + 1
+
+# The handler runs where the pattern did not match, so `x` is the parameter.
+fn let_else_sees_outer(x: Int, m: Maybe Int) -> Int =
+  let Just x = m else x
+  in x * 10
+
+fn residual_shadows_top(r: Result Int Int) -> Int =
+  let Ok v = r else Err scale -> scale + 1
+  in v
+
+fn do_let_else_shadows_top(m: Maybe Int) -> Int =
+  do
+    let Just scale = m else 0
+    scale + 1
+
+fn do_destructure_shadows_top(b: Box) -> Int =
+  do
+    let Box scale = b
+    scale + 1
+
+fn do_bind_else_sees_outer(x: Int, o: Outcome) -> Int !{IO} =
+  do
+    Good x <- io_outcome(o) else x
+    x * 10
+
+fn do_bind_residual_shadows_top(o: Outcome) -> Int !{IO} =
+  do
+    Good v <- io_outcome(o) else Bad scale -> scale + 1
+    v
+
+# A list literal in a `Vec` position becomes a `Vec`, through a binding's body
+# and its `else` alike.
+fn let_body_in_vec_context(n: Int) -> Int =
+  vec_len(
+    let x = n
+    in [x, x])
+
+fn let_else_in_vec_context(m: Maybe Int) -> Int =
+  vec_len(
+    let Just x = m else []
+    in [x, x, x])
+
+fn main() -> Unit !{IO} =
+  run_suite("binding_scope", [
+    check_eq("let..in binder shadows a top-level fn", let_in_shadows_top(2), 6),
+    check_eq("where binder shadows a top-level fn", where_shadows_top(2), 6),
+    check_eq("let..else handler sees the outer name", let_else_sees_outer(5, Nothing), 5),
+    check_eq("let..else success sees the pattern's name", let_else_sees_outer(5, Just(2)), 20),
+    check_eq("residual shadows a top-level fn", residual_shadows_top(Err(4)), 5),
+    check_eq("do let..else binder shadows a top-level fn", do_let_else_shadows_top(Just(4)), 5),
+    check_eq("do destructure binder shadows a top-level fn", do_destructure_shadows_top(Box(4)), 5),
+    check_eq("do <- else handler sees the outer name", do_bind_else_sees_outer(5, Bad(0)), 5),
+    check_eq("do <- else success sees the pattern's name", do_bind_else_sees_outer(5, Good(2)), 20),
+    check_eq("do <- residual shadows a top-level fn", do_bind_residual_shadows_top(Bad(4)), 5),
+    check_eq("let body in a Vec position", let_body_in_vec_context(7), 2),
+    check_eq("let..else handler in a Vec position", let_else_in_vec_context(Nothing), 0),
+    check_eq("let..else body in a Vec position", let_else_in_vec_context(Just(1)), 3)
+  ])

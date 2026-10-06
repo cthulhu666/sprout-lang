@@ -727,64 +727,23 @@ fn step_has_bind_arrow(tokens: Vec token.Token, i: Int, depth: Int) -> Bool =
 # ---------------------------------------------------------------------------
 # Do expressions
 
-# A do step as parsed, before the binding-else desugar. A plain step passes
-# through unchanged; a refutable step (`<pat> <- <e> else …` or `let <pat> = <e>
-# else …`) carries the pieces the collector needs to splice the *remaining* steps
-# into the success arm. Fields: is_bind (`<-` vs pure `let`), success pattern, the
-# bound value/scrutinee, the optional residual pattern, the else handler, and the
-# source position of the binding (so the desugared match reads as `<-`/`let`, not
-# `match`, keeping the staircase lint from re-flagging generated code).
-# DoStepTotal is the same shape with no else handler: a pattern the parser
-# cannot lower directly, bound without an `else`. It desugars to the identical
-# staircase carrying ONE branch, which hands the refutability question to W5 —
-# where spec §5.2.1 puts it, since refutability is a property of the pattern
-# versus its type and the parser only sees syntax.
+# A do step as parsed. DoStepBinding is a binding whose continuation is the steps
+# after it (ast.DoPatStep), so the collector must find at least one; its position
+# is the binding's, so the match it becomes reads as `<-`/`let`, not `match`,
+# keeping the staircase lint from re-flagging it. Without an `else` the match has
+# one arm, which hands refutability to W5, where spec §5.2.1 puts it.
 # DoStepLets carries a multi-name `let` statement, which yields one DoLetStep per
 # name.
 type DoStepParse (..) =
   | DoStepPlain ast.DoStep
   | DoStepLets (List ast.DoStep)
-  | DoStepRefutable Bool ast.Pattern ast.Expr (Maybe ast.Pattern) ast.Expr source.SourcePos
-  | DoStepTotal Bool ast.Pattern ast.Expr source.SourcePos
-
-fn do_tmp_name(pos: source.SourcePos) -> String =
-  "__do" ++ int_to_string(pos.line) ++ "_" ++ int_to_string(pos.column)
-
-# Desugars a refutable do step, given the already-collected `rest` steps, into
-# ordinary steps: an effectful bind runs the value into a fresh temp then matches
-# it; a pure `let` matches the value directly. The success arm carries `rest` as a
-# nested `do`; the else arm is the residual pattern (or a wildcard for a constant
-# else). This is exactly the hand-written `<-`/`match` staircase, so inference,
-# effect threading and codegen are unchanged.
-fn build_do_refutable(is_bind: Bool, success_pat: ast.Pattern, value: ast.Expr, residual: Maybe ast.Pattern, handler: ast.Expr, rest: List ast.DoStep, pos: source.SourcePos) -> List ast.DoStep =
-  let branches = Cons(ast.MatchBranch(success_pat, ast.DoExpr(rest, pos)),
-                   Cons(ast.MatchBranch(residual_or_wild(residual, pos), handler), Nil))
-  in if is_bind then
-       let tmp = do_tmp_name(pos)
-       in Cons(ast.DoBindStep(ast.VarPattern(tmp, pos), value),
-            Cons(ast.DoExprStep(ast.MatchExpr(ast.VarExpr(tmp, pos), branches, pos)), Nil))
-     else
-       Cons(ast.DoExprStep(ast.MatchExpr(value, branches, pos)), Nil)
-
-# The no-`else` counterpart: one branch, so an irrefutable pattern (a `wrap`, a
-# single-constructor ADT) passes W5 and a genuinely refutable one gets W5's
-# non-exhaustive-match error — which names the missing constructors, unlike the
-# blanket parse error this replaced.
-fn build_do_total(is_bind: Bool, success_pat: ast.Pattern, value: ast.Expr, rest: List ast.DoStep, pos: source.SourcePos) -> List ast.DoStep =
-  let branches = Cons(ast.MatchBranch(success_pat, ast.DoExpr(rest, pos)), Nil)
-  in if is_bind then
-       let tmp = do_tmp_name(pos)
-       in Cons(ast.DoBindStep(ast.VarPattern(tmp, pos), value),
-            Cons(ast.DoExprStep(ast.MatchExpr(ast.VarExpr(tmp, pos), branches, pos)), Nil))
-     else
-       Cons(ast.DoExprStep(ast.MatchExpr(value, branches, pos)), Nil)
+  | DoStepBinding ast.DoBindKind ast.Pattern ast.Expr (Maybe ast.LetElse) source.SourcePos
 
 # Whether a do-bind pattern can be lowered DIRECTLY, without a match staircase:
 # a variable, wildcard, unit, or a tuple of those. This mirrors exactly what
-# `ast_to_ir.do_bind_captures` can lower. Anything else routes through
-# build_do_refutable (with `else`) or build_do_total (without) — it selects the
-# lowering path and no longer decides legality, which is W5's job. O(n) in
-# pattern nodes.
+# `ast_to_ir.do_bind_captures` can lower. Anything else becomes an ast.DoPatStep
+# — this selects the lowering path and does not decide legality, which is W5's
+# job. O(n) in pattern nodes.
 fn is_irrefutable_do_bind_pattern(pat: ast.Pattern) -> Bool =
   match pat with
   | ast.VarPattern _ _ -> true
@@ -826,19 +785,19 @@ fn parse_do_let(tokens: Vec token.Token, i: Int) -> Result ParseError (DoStepPar
 fn do_let_statement(bindings: List LetBinding, let_pos: source.SourcePos) -> Result ParseError DoStepParse =
   match bindings with
   | [b] ->
-      match b.fallback with
-      | Just fb -> Ok(DoStepRefutable(false, b.pat, b.rhs, b.residual, fb, let_pos))
+      match b.els with
+      | Just _ -> Ok(DoStepBinding(ast.LetBind, b.pat, b.rhs, b.els, let_pos))
       | Nothing ->
           match binding_name(b.pat) with
           | Just name -> Ok(DoStepPlain(ast.DoLetStep(name, b.rhs)))
-          | Nothing -> Ok(DoStepTotal(false, b.pat, b.rhs, let_pos))
+          | Nothing -> Ok(DoStepBinding(ast.LetBind, b.pat, b.rhs, Nothing, let_pos))
   | _ -> group_steps(bindings, Nil)
 
 fn group_steps(bindings: List LetBinding, acc: List ast.DoStep) -> Result ParseError DoStepParse =
   match bindings with
   | Nil -> Ok(DoStepLets(list_reverse(acc)))
   | [b | rest] ->
-      match (b.fallback, binding_name(b.pat)) with
+      match (b.els, binding_name(b.pat)) with
       | (Just _, _) -> Err(ParseError("a let binding with else must stand alone in its let statement", b.pos))
       | (Nothing, Nothing) -> Err(ParseError("a multi-name let binds plain names only", b.pos))
       | (Nothing, Just name) -> group_steps(rest, Cons(ast.DoLetStep(name, b.rhs), acc))
@@ -854,11 +813,11 @@ fn parse_do_step(tokens: Vec token.Token, i: Int) -> Result ParseError (DoStepPa
         do
           (_, i5) <- expected_keyword("else", tokens, i4)
           (residual, handler, i6) <- parse_let_else_clause(tokens, i5)
-          Ok((DoStepRefutable(true, pattern, value, residual, handler, cur_pos(tokens, i)), i6))
+          Ok((DoStepBinding(ast.ArrowBind, pattern, value, Just(ast.LetElse(residual, handler)), cur_pos(tokens, i)), i6))
       else if is_irrefutable_do_bind_pattern(pattern) then
         Ok((DoStepPlain(ast.DoBindStep(pattern, value)), i4))
       else
-        Ok((DoStepTotal(true, pattern, value, cur_pos(tokens, i)), i4))
+        Ok((DoStepBinding(ast.ArrowBind, pattern, value, Nothing, cur_pos(tokens, i)), i4))
   else
     do
       (value, i2) <- parse_expression(tokens, i)
@@ -876,18 +835,17 @@ fn collect_do_steps(tokens: Vec token.Token, i: Int, acc: List ast.DoStep) -> Re
       # One statement, several steps — prepended in order, so `acc` (which is
       # reversed) receives them last-first exactly as repeated DoStepPlain would.
       | DoStepLets steps -> collect_do_steps(tokens, k, list_append(list_reverse(steps), acc))
-      | DoStepRefutable is_bind pat value residual handler pos ->
+      | DoStepBinding kind pat value els pos ->
           do
             (rest, i3) <- collect_do_steps(tokens, k, Nil)
             match rest with
-            | Nil -> Err(ParseError("a binding-else do step needs at least one following step as its success continuation", pos))
-            | [_ | _] -> Ok((list_append(list_reverse(acc), build_do_refutable(is_bind, pat, value, residual, handler, rest, pos)), i3))
-      | DoStepTotal is_bind pat value pos ->
-          do
-            (rest, i3) <- collect_do_steps(tokens, k, Nil)
-            match rest with
-            | Nil -> Err(ParseError("a destructuring do step needs at least one following step as its continuation", pos))
-            | [_ | _] -> Ok((list_append(list_reverse(acc), build_do_total(is_bind, pat, value, rest, pos)), i3))
+            | Nil -> Err(ParseError(no_continuation_msg(els), pos))
+            | [_ | _] -> Ok((list_append(list_reverse(acc), Cons(ast.DoPatStep(kind, pat, value, els, pos), rest)), i3))
+
+fn no_continuation_msg(els: Maybe ast.LetElse) -> String =
+  match els with
+  | Just _ -> "a binding-else do step needs at least one following step as its success continuation"
+  | Nothing -> "a destructuring do step needs at least one following step as its continuation"
 
 fn parse_do_expr(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
   do
@@ -906,39 +864,21 @@ fn parse_do_expr(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr
 #       <pat> = <rhs> [else <rpat> -> <h>]     -- binding-else: <rpat> names the
 #   in  <body>                                 --   failing value
 #
-# Bindings are sequential (each in scope for later bindings + body). Each
-# desugars right-over the body to a match; `in` closes the block. No new AST
-# node — the refutability rules enforce themselves through W5:
+# Bindings are sequential (each in scope for later bindings + body), each an
+# ast.LetBindExpr over the rest; `in` closes the block. Inference rewrites each
+# to a match (ast.let_bind_match), so the refutability rules enforce themselves
+# through W5:
 #   pat = e else fb          →  match e | pat -> <rest> | _    -> fb   (exhaustive)
 #   pat = e else rpat -> h    →  match e | pat -> <rest> | rpat -> h    (W5-checked)
 #   pat = e                  →  match e | pat -> <rest>                (single arm)
 # so a refutable pattern without `else` is a non-exhaustive match (error), and an
 # `else` on an irrefutable pattern makes the trailing arm unreachable (error).
-# The binding-else residual is a *full* pattern spliced verbatim into arm 2 — a
-# bare variable binds the whole scrutinee, so it stays parser-only and uniform
-# with bare-ADT bindings (no failure ctor is ever injected). Constant vs
-# binding-else is disambiguated on a `->` after the else pattern.
+# The binding-else residual is a *full* pattern used verbatim as arm 2 — a bare
+# variable binds the whole scrutinee, uniform with bare-ADT bindings (no failure
+# ctor is ever injected). Constant vs binding-else is disambiguated on a `->`
+# after the else pattern.
 
-type LetBinding = (pat: ast.Pattern, rhs: ast.Expr, residual: Maybe ast.Pattern,
-                   fallback: Maybe ast.Expr, pos: source.SourcePos)
-
-# The else-arm pattern: an explicit residual (binding-else) or a wildcard (the
-# classic constant else). A residual is spliced verbatim, so W5 decides whether
-# the two arms are exhaustive.
-fn residual_or_wild(residual: Maybe ast.Pattern, pos: source.SourcePos) -> ast.Pattern =
-  match residual with
-  | Just rp -> rp
-  | Nothing -> ast.WildcardPattern(pos)
-
-fn build_let_binding_match(pat: ast.Pattern, rhs: ast.Expr, residual: Maybe ast.Pattern, fb: Maybe ast.Expr, rest: ast.Expr, pos: source.SourcePos) -> ast.Expr =
-  match fb with
-  | Just fbe ->
-      ast.MatchExpr(rhs,
-        Cons(ast.MatchBranch(pat, rest),
-          Cons(ast.MatchBranch(residual_or_wild(residual, pos), fbe), Nil)),
-        pos)
-  | Nothing ->
-      ast.MatchExpr(rhs, Cons(ast.MatchBranch(pat, rest), Nil), pos)
+type LetBinding = (pat: ast.Pattern, rhs: ast.Expr, els: Maybe ast.LetElse, pos: source.SourcePos)
 
 # A constant else: the whole clause is one expression, re-parsed from `e`.
 # The third component is the index just past the clause.
@@ -977,9 +917,9 @@ fn parse_let_binding(tokens: Vec token.Token, i: Int) -> Result ParseError (LetB
       do
         (_, e) <- expected_keyword("else", tokens, d)
         (residual, fb, g) <- parse_let_else_clause(tokens, e)
-        Ok((LetBinding(pat = pat, rhs = rhs, residual = residual, fallback = Just(fb), pos = cur_pos(tokens, i)), g))
+        Ok((LetBinding(pat = pat, rhs = rhs, els = Just(ast.LetElse(residual, fb)), pos = cur_pos(tokens, i)), g))
     else
-      Ok((LetBinding(pat = pat, rhs = rhs, residual = Nothing, fallback = Nothing, pos = cur_pos(tokens, i)), d))
+      Ok((LetBinding(pat = pat, rhs = rhs, els = Nothing, pos = cur_pos(tokens, i)), d))
 
 # The bindings up to the group's close, in source order, and the index past it.
 fn collect_let_bindings(tokens: Vec token.Token, i: Int, acc: List LetBinding) -> Result ParseError (List LetBinding, Int) =
@@ -993,7 +933,7 @@ fn collect_let_bindings(tokens: Vec token.Token, i: Int, acc: List LetBinding) -
 fn let_chain(bindings: List LetBinding, body: ast.Expr) -> ast.Expr =
   match bindings with
   | Nil -> body
-  | [b | rest] -> build_let_binding_match(b.pat, b.rhs, b.residual, b.fallback, let_chain(rest, body), b.pos)
+  | [b | rest] -> ast.LetBindExpr(b.pat, b.rhs, b.els, let_chain(rest, body), b.pos)
 
 # `in` and the body, after a group closed at `i`.
 fn finish_let_in(tokens: Vec token.Token, bindings: List LetBinding, i: Int) -> Result ParseError (ast.Expr, Int) =
@@ -1736,30 +1676,13 @@ fn pattern_pos(p: ast.Pattern) -> source.SourcePos =
   | ast.TuplePattern _ pos -> pos
   | ast.ConstructorPattern _ _ pos -> pos
 
-# `where <pat> = <value>` desugars to the SAME node `let <pat> = <value> in <body>`
-# builds (build_let_binding_match): a single-arm match on the value.  The two forms
-# are the same binding construct with different syntax, so they must not have
-# different desugarings — that divergence was a real bug, not a stylistic wart.
-#
-# It used to build an immediately-applied lambda with an UNANNOTATED parameter:
-#   where a = v   ==>   (\a -> <body>)(v)
-# `infer_call_general` infers the callee before the arguments, so the body was
-# typed while `a` was still an unconstrained variable; `check_arith` defaulted it
-# to `Int`, and only then did the call unify `Int` against `v`'s real type.  Every
-# `where`-bound `Double` whose type the body did not independently pin failed with
-# `Call type mismatch: Type mismatch: Int vs Double` — even `where a = 2.5`.
-# Information flowed body -> binding, i.e. backwards.
-#
-# A match infers its SCRUTINEE first, so the type now flows value -> binding, and
-# a tuple pattern distributes the value's element types positionally.  This also
-# retires the whole fresh-tmp-name apparatus: the lambda form needed a synthetic
-# parameter (`__sprout_where_N`) for a non-variable pattern, and therefore a
-# capture-avoidance scan over the body; a match arm binds the pattern directly, so
-# there is no synthetic name and nothing to capture.
+# `where <pat> = <value>` builds the node `let <pat> = <value> in <body>` builds:
+# they are one construct (spec §5.1), so they must not type differently. The
+# match inference makes of it infers the value first, so the type flows value ->
+# binding; an applied lambda, the old form, typed the body first.
 fn wrap_where_binding(inner: ast.Expr, binding: (ast.Pattern, ast.Expr)) -> ast.Expr =
   match binding with
-  | (pattern, value) ->
-      ast.MatchExpr(value, Cons(ast.MatchBranch(pattern, inner), Nil), pattern_pos(pattern))
+  | (pattern, value) -> ast.LetBindExpr(pattern, value, Nothing, inner, pattern_pos(pattern))
 
 # ---------------------------------------------------------------------------
 # Type constructor parsing

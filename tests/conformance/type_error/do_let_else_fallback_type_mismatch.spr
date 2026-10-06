@@ -1,0 +1,9 @@
+module main
+
+# A `do`-block `let..else` fallback ends the block, so it must have the type of
+# the steps after it.
+
+fn main() -> Unit !{IO} =
+  do
+    let Just x = Just(1) else 0
+    print(x)

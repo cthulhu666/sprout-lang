@@ -112,6 +112,7 @@ fn expr_uses_any(names: List String, e: ast.Expr) -> Bool =
   | ast.IntRangeExpr lo hi _ -> expr_uses_any(names, lo) || expr_uses_any(names, hi)
   | ast.StringTemplateExpr parts _ -> template_parts_use_any(names, parts)
   | ast.ComprehensionExpr elem gens _ -> expr_uses_any(names, elem) || comprehension_gens_use_any(names, gens)
+  | ast.LetBindExpr pat value els body pos -> expr_uses_any(names, ast.let_bind_match(pat, value, els, body, pos))
   | _ -> false  # leaves: Int/Float/Bool/String/Char/Unit — no sub-expressions
 
 fn comprehension_gens_use_any(names: List String, gens: List ast.ComprehensionGen) -> Bool =
@@ -137,12 +138,11 @@ fn branches_use_any(names: List String, branches: List ast.MatchBranch) -> Bool 
 fn do_steps_use_any(names: List String, steps: List ast.DoStep) -> Bool =
   match steps with
   | Nil -> false
-  | Cons s rest ->
-      (match s with
-       | ast.DoBindStep _ value -> expr_uses_any(names, value)
-       | ast.DoLetStep _ value -> expr_uses_any(names, value)
-       | ast.DoExprStep value -> expr_uses_any(names, value))
-      || do_steps_use_any(names, rest)
+  | [ast.DoPatStep kind pat value els pos | rest] ->
+      do_steps_use_any(names, ast.do_pat_steps(kind, pat, value, els, rest, pos))
+  | [ast.DoBindStep _ value | rest] -> expr_uses_any(names, value) || do_steps_use_any(names, rest)
+  | [ast.DoLetStep _ value | rest] -> expr_uses_any(names, value) || do_steps_use_any(names, rest)
+  | [ast.DoExprStep value | rest] -> expr_uses_any(names, value) || do_steps_use_any(names, rest)
 
 fn record_fields_use_any(names: List String, fields: List ast.RecordField) -> Bool =
   match fields with
@@ -162,7 +162,7 @@ fn template_parts_use_any(names: List String, parts: List ast.TemplateExprPart) 
 
 # Does a terminal branch's body depend on its own (failing) match? `let <pat> = e
 # else fb` cannot express that: `fb` is matched against a bare wildcard
-# (parser.sprout: build_let_binding_match), so it has no access to whatever the
+# (ast.let_bind_match), so it has no access to whatever the
 # failing pattern would have bound (e.g. the `msg` in `Err msg -> ...`).
 fn terminal_needs_own_payload(pat: ast.Pattern, body: ast.Expr) -> Bool =
   expr_uses_any(ast.pattern_names(pat), body)
@@ -197,6 +197,7 @@ fn walk_expr(bound: List String, e: ast.Expr) -> List LintFinding =
       list_append(walk_expr(bound, lo), walk_expr(bound, hi))
   | ast.StringTemplateExpr parts _ -> walk_template_parts(bound, parts)
   | ast.ComprehensionExpr elem gens _ -> walk_comprehension(bound, elem, gens)
+  | ast.LetBindExpr pat value els body pos -> walk_expr(bound, ast.let_bind_match(pat, value, els, body, pos))
   | _ -> Nil  # leaves: Var/Int/Float/Bool/String/Char/Unit — no sub-expressions
 
 # A generator's pattern scopes over its own guards, the generators after it and
@@ -230,6 +231,8 @@ fn walk_do_steps(bound: List String, steps: List ast.DoStep) -> List LintFinding
           list_append(walk_expr(bound, value), walk_do_steps(Cons(n, bound), rest))
       | ast.DoExprStep value ->
           list_append(walk_expr(bound, value), walk_do_steps(bound, rest))
+      | ast.DoPatStep kind pat value els pos ->
+          walk_do_steps(bound, ast.do_pat_steps(kind, pat, value, els, rest, pos))
 
 fn walk_record_fields(bound: List String, fields: List ast.RecordField) -> List LintFinding =
   match fields with
@@ -469,6 +472,7 @@ fn find_list_shape_in_expr(e: ast.Expr) -> List source.SourcePos =
       find_list_shape_in_expr(lo) ++ find_list_shape_in_expr(hi)
   | ast.StringTemplateExpr parts _ -> find_list_shape_in_template_parts(parts)
   | ast.ComprehensionExpr elem gens _ -> find_list_shape_in_expr(elem) ++ find_list_shape_in_comprehension_gens(gens)
+  | ast.LetBindExpr pat value els body pos -> find_list_shape_in_expr(ast.let_bind_match(pat, value, els, body, pos))
   | _ -> Nil
 
 fn find_list_shape_in_comprehension_gens(gens: List ast.ComprehensionGen) -> List source.SourcePos =
@@ -490,13 +494,14 @@ fn find_list_shape_in_branch(b: ast.MatchBranch) -> List source.SourcePos =
   | ast.MatchBranch pat body -> find_list_shape_in_pattern(pat) ++ find_list_shape_in_expr(body)
 
 fn find_list_shape_in_do_steps(steps: List ast.DoStep) -> List source.SourcePos =
-  concat_map(find_list_shape_in_do_step, steps)
-
-fn find_list_shape_in_do_step(s: ast.DoStep) -> List source.SourcePos =
-  match s with
-  | ast.DoBindStep pat value -> find_list_shape_in_pattern(pat) ++ find_list_shape_in_expr(value)
-  | ast.DoLetStep _ value -> find_list_shape_in_expr(value)
-  | ast.DoExprStep value -> find_list_shape_in_expr(value)
+  match steps with
+  | [] -> Nil
+  | [ast.DoPatStep kind pat value els pos | rest] ->
+      find_list_shape_in_do_steps(ast.do_pat_steps(kind, pat, value, els, rest, pos))
+  | [ast.DoBindStep pat value | rest] ->
+      find_list_shape_in_pattern(pat) ++ find_list_shape_in_expr(value) ++ find_list_shape_in_do_steps(rest)
+  | [ast.DoLetStep _ value | rest] -> find_list_shape_in_expr(value) ++ find_list_shape_in_do_steps(rest)
+  | [ast.DoExprStep value | rest] -> find_list_shape_in_expr(value) ++ find_list_shape_in_do_steps(rest)
 
 fn find_list_shape_in_record_fields(fields: List ast.RecordField) -> List source.SourcePos =
   concat_map(\f -> match f with | ast.RecordField _ value -> find_list_shape_in_expr(value), fields)
@@ -604,6 +609,7 @@ fn find_prefix_pattern_in_expr(e: ast.Expr) -> List source.SourcePos =
       find_prefix_pattern_in_expr(lo) ++ find_prefix_pattern_in_expr(hi)
   | ast.StringTemplateExpr parts _ -> find_prefix_pattern_in_template_parts(parts)
   | ast.ComprehensionExpr elem gens _ -> find_prefix_pattern_in_expr(elem) ++ find_prefix_pattern_in_comprehension_gens(gens)
+  | ast.LetBindExpr pat value els body pos -> find_prefix_pattern_in_expr(ast.let_bind_match(pat, value, els, body, pos))
   | _ -> Nil
 
 fn find_prefix_pattern_in_comprehension_gens(gens: List ast.ComprehensionGen) -> List source.SourcePos =
@@ -625,13 +631,14 @@ fn find_prefix_pattern_in_branch(b: ast.MatchBranch) -> List source.SourcePos =
   | ast.MatchBranch pat body -> find_prefix_pattern_in_pattern(pat) ++ find_prefix_pattern_in_expr(body)
 
 fn find_prefix_pattern_in_do_steps(steps: List ast.DoStep) -> List source.SourcePos =
-  concat_map(find_prefix_pattern_in_do_step, steps)
-
-fn find_prefix_pattern_in_do_step(s: ast.DoStep) -> List source.SourcePos =
-  match s with
-  | ast.DoBindStep pat value -> find_prefix_pattern_in_pattern(pat) ++ find_prefix_pattern_in_expr(value)
-  | ast.DoLetStep _ value -> find_prefix_pattern_in_expr(value)
-  | ast.DoExprStep value -> find_prefix_pattern_in_expr(value)
+  match steps with
+  | [] -> Nil
+  | [ast.DoPatStep kind pat value els pos | rest] ->
+      find_prefix_pattern_in_do_steps(ast.do_pat_steps(kind, pat, value, els, rest, pos))
+  | [ast.DoBindStep pat value | rest] ->
+      find_prefix_pattern_in_pattern(pat) ++ find_prefix_pattern_in_expr(value) ++ find_prefix_pattern_in_do_steps(rest)
+  | [ast.DoLetStep _ value | rest] -> find_prefix_pattern_in_expr(value) ++ find_prefix_pattern_in_do_steps(rest)
+  | [ast.DoExprStep value | rest] -> find_prefix_pattern_in_expr(value) ++ find_prefix_pattern_in_do_steps(rest)
 
 fn find_prefix_pattern_in_record_fields(fields: List ast.RecordField) -> List source.SourcePos =
   concat_map(\f -> match f with | ast.RecordField _ value -> find_prefix_pattern_in_expr(value), fields)
@@ -704,6 +711,7 @@ fn max_line(e: ast.Expr) -> Int =
   | ast.StringTemplateExpr parts pos -> larger(pos.line, max_line_template_parts(parts))
   | ast.ComprehensionExpr elem gens pos ->
       larger(pos.line, larger(max_line(elem), max_line_comprehension_gens(gens)))
+  | ast.LetBindExpr pat value els body pos -> max_line(ast.let_bind_match(pat, value, els, body, pos))
   | ast.VarExpr _ pos -> pos.line
   | ast.IntExpr _ pos -> pos.line
   | ast.FloatExpr _ pos -> pos.line
@@ -727,13 +735,11 @@ fn max_line_branches(branches: List ast.MatchBranch) -> Int =
 fn max_line_do_steps(steps: List ast.DoStep) -> Int =
   match steps with
   | Nil -> 0
-  | Cons s rest -> larger(max_line_do_step(s), max_line_do_steps(rest))
-
-fn max_line_do_step(s: ast.DoStep) -> Int =
-  match s with
-  | ast.DoBindStep _ value -> max_line(value)
-  | ast.DoLetStep _ value -> max_line(value)
-  | ast.DoExprStep value -> max_line(value)
+  | [ast.DoPatStep kind pat value els pos | rest] ->
+      max_line_do_steps(ast.do_pat_steps(kind, pat, value, els, rest, pos))
+  | [ast.DoBindStep _ value | rest] -> larger(max_line(value), max_line_do_steps(rest))
+  | [ast.DoLetStep _ value | rest] -> larger(max_line(value), max_line_do_steps(rest))
+  | [ast.DoExprStep value | rest] -> larger(max_line(value), max_line_do_steps(rest))
 
 fn max_line_record_fields(fields: List ast.RecordField) -> Int =
   match fields with
@@ -961,9 +967,9 @@ fn lint_program(prog: ast.Program) -> List LintFinding =
       list_append(walk_decls(decls),
         list_append(nullary_const_findings(decls), redundant_vec_wrap_findings(prog)))
 
-# `let <pat> = e else fb` is pure sugar (parser.sprout: build_let_binding_match)
-# — it desugars to the SAME MatchExpr shape a hand-written nested match would,
-# with no distinguishing AST node. So a MatchExpr's own position is the only
+# `let <pat> = e else fb` is pure sugar (ast.let_bind_match), and lint reads it
+# elaborated: the SAME MatchExpr shape a hand-written nested match has, with no
+# distinguishing AST node. So a MatchExpr's own position is the only
 # way to tell them apart: a hand-written match's pos is the `match` keyword
 # itself; a let-else's pos is wherever that binding's pattern starts (there is
 # no `match` token in the source at all). Without this check, every already-
@@ -1121,7 +1127,7 @@ fn decl_is_fn_named(name: String, d: ast.Decl) -> Bool =
   | _ -> false
 
 # §5.3: "one expression" is vacuous, since every body is one. `where` and
-# `let..in` desugar to a MatchExpr too (parser.sprout: build_let_binding_match),
+# `let..in` desugar to a MatchExpr too (ast.let_bind_match),
 # so the branch patterns are what tells them apart — a let body binds with a
 # variable pattern where a real combinator dispatches on a constructor.
 fn constructor_headed(branches: List ast.MatchBranch) -> Bool =
@@ -1202,8 +1208,9 @@ export fn derive_combinators(names: List String, src: String)
     -> Result String (List Combinator) =
   let Ok toks = lexer.tokenize(src)
         else Err(token.TokenizeError msg _) -> Err("combinator source does not lex: " ++ msg)
-      Ok(ast.Program decls _) = parser.parse_program(toks)
+      Ok parsed = parser.parse_program(toks)
         else Err(parser.ParseError msg _) -> Err("combinator source does not parse: " ++ msg)
+      ast.Program decls _ = ast.elaborate_bindings(parsed)
   in derive_each(names, decls)
 
 # `List Combinator`, derived once per process at module init — the reason
@@ -1224,7 +1231,7 @@ export let combinator_patterns =
 # Rule: hand-rolled-combinator
 #
 # A `match` that reimplements one of the combinators above. `let..else` desugars
-# to the same MatchExpr (parser.sprout: build_let_binding_match), so one rule
+# to the same MatchExpr (ast.let_bind_match), so one rule
 # covers both spellings — and for THIS rule the desugared form is a true
 # positive, which is why `drop_desugared_matches` must stay keyed on
 # `staircase-of-doom` and not be generalised over rule ids.
@@ -1291,6 +1298,7 @@ fn free_to_hoist(bound: List String, e: ast.Expr) -> Bool =
   | ast.GetFieldExpr _ _ _ -> false
   | ast.RecordUpdateExpr _ _ _ -> false
   | ast.ComprehensionExpr _ _ _ -> false
+  | ast.LetBindExpr _ _ _ _ _ -> false
 
 # A `guard`-shaped pattern consumes a Bool, which is an immediate — passing it to
 # the call boxes nothing, so a computed condition is free (checked in IR). Only a
@@ -1585,10 +1593,12 @@ fn ast_findings(src: String) -> List LintFinding =
   | Ok toks ->
       match parser.parse_program(toks) with
       | Err (parser.ParseError msg pos) -> [unparsed_finding(pos, msg)]
-      | Ok prog ->
-          list_append(drop_desugared_matches(src, guarded_program_findings(src, prog)),
-            list_append(list_shape_findings(src, prog),
-              list_append(list_prefix_findings(src, prog), brace_body_findings(toks))))
+      | Ok parsed ->
+          # The rules match the matches bindings mean, as inference sees them.
+          let prog = ast.elaborate_bindings(parsed)
+          in list_append(drop_desugared_matches(src, guarded_program_findings(src, prog)),
+               list_append(list_shape_findings(src, prog),
+                 list_append(list_prefix_findings(src, prog), brace_body_findings(toks))))
 
 # The combinator rule is collected during the walk and dropped here, because its
 # §7 guards are facts about the FILE that the walk cannot see. Filtering by rule

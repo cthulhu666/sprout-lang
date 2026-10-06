@@ -11,9 +11,9 @@ import stdlib.test (check_true, run_suite)
 #   `Call type mismatch: Type mismatch: Int vs Double`
 # whenever the body did not independently pin the type.
 #
-# `let pat = rhs in body` never had the bug: it desugars to
+# `let pat = rhs in body` never had the bug: inference makes it
 # `MatchExpr(rhs, [pat -> body])`, and a match infers its scrutinee first, so the
-# type flows RHS -> binding. `where` now desugars to that same node.
+# type flows RHS -> binding. `where` now parses to the same node.
 #
 # The failures are compile-time, so the RED state of this file is "the whole file
 # does not compile" — not a failing assertion.
