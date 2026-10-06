@@ -167,8 +167,10 @@ let x = try e          →   match branch(e) with
 ```
 
 In `do`, `x <- try e` runs `e`'s effect once and then branches, the same way an effectful
-`let..else` step does (spec §5.2.2). What a bare `try e` statement means, and `try` as a block's
-last step, are open (§9 Q11).
+`let..else` step does (spec §5.2.2). A bare `try e` statement, not last, passes a failure on and
+drops the success value: it means `_ <- try e`, or `let _ = try e` when `e` is pure. A success
+value that is itself fallible is caught by the discard rule (§4.5). `try` as a block's last step is
+an error, since the block ends there anyway: write `e` without `try` (§9 Q11).
 
 **Typing.** `r : t b` becomes the value of the enclosing block, so the block's type must unify with
 `t b`. This one unification replaces §5.9's table: a `Maybe` in a `Result` block fails, and so
@@ -338,6 +340,7 @@ Maybe in Result    ... plus: to turn `Nothing` into an error, write `let Just x 
 reserved else      `try` takes no `else` yet. For `let..else` on the value: `(try e) else …`.
 reserved with      `with` after `try` is reserved. For a record update, write `(try e) with (…)`.
 unknown t          the existing ambiguity error.
+last-step try      the block ends here anyway, so `try` does nothing. Write `e` without `try`.
 effectful do-let   this `let` runs an effect. Bind it with `<-`.          (step 5)
 pure <-            this has no effect. Write `let x = …`.                  (step 3)
 discarded failure  this drops a `Result` failure in silence. Write `try e` to pass it on,
@@ -484,11 +487,14 @@ Raised by the 2026-10-06 review; all must be decided before step 1:
   loses its failure: `let Just v = mx else Nothing` / `in Just(v)` as a step, then `Just(99)`,
   returns `Just 99` for `mx = Nothing`. That follows from Q2. **Decided by Q8:** the step is a
   discarded fallible statement, so it is an error.
-- **Q11. A bare `try e` statement, and `try` as the last step.** §4.2 first said a bare statement
-  means `let _ = try e`, but a `do`-`let` is to be pure; `_ <- try e` fits. After Q8 a bare
-  fallible statement is an error, so a bare `try e` is the only short way to run a fallible step
-  for its failure alone. As the last step it is rejected by the trailing-binding rule with a
-  message about a `let` or `<-` the user never wrote.
+- **Q11. A bare `try e` statement, and `try` as the last step.** **Decided (2026-10-06):** a
+  bare non-final `try e` is allowed (§4.2); after Q8 it replaces today's `_ <- e`. `try` as the
+  last step is rejected with its own message, not the trailing-binding one; the rare flatten
+  (`e : Maybe (Maybe A)`) is `let x = try e`, then `x`. Rust allows `f()?;`, and clippy's
+  `needless_question_mark` flags `Some(x?)` in return position: "There's no reason to use `?` to
+  short-circuit when execution of the body will end there anyway." Zig requires `_ = try f();`
+  unless the success type is `void` ("Expressions of type void are the only ones whose value can
+  be ignored"); Sprout discards a non-fallible value freely today, and keeps that.
 - **Q12. The operand.** "An application" rejects `try r` and `try p.field`. Alternative: any postfix
   expression (variable, field, call, parenthesised); only an infix expression or a pipe needs
   parentheses. Also decides what codemod A parenthesises.
@@ -510,6 +516,8 @@ Raised by the 2026-10-06 review; all must be decided before step 1:
   `<-` whose right-hand side is pure, with and without `try` (an `!{e}` one is accepted); and, at
   step 5, an effectful `do`-`let`.
 - Runtime: both paths of every form, plus the nested-block semantics of Q2.
+- Q11: a bare `try e` passes a failure on and continues on success, effectful and pure; `try` as
+  the last step is rejected with its own message.
 - Step 1: `x <- try e` with `e : Result E (Maybe A)` binds a `Maybe A` in a `Result` block.
 - Codemod A: a pattern-`else` bind on a fallible right-hand side is refused, not rewritten.
 - Discard rule (Q8): a fallible `_ <- e` and a fallible non-final statement are rejected, in pure
