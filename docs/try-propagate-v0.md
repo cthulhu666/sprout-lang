@@ -83,7 +83,7 @@ opt in on stable Rust; in Sprout any type can.
 ### 4.1 The class
 
 ```sprout
-type Step r a = Continue a | Break r          # names open, §9 Q3
+type Step r a = Continue a | Break r          # names: §9 Q3
 
 class Propagate t
   fn branch(value: t a) -> Step (t b) a
@@ -302,9 +302,13 @@ IR is unchanged after normalising names.
   expression, which needs a real early return in codegen.
 - **Q2. Where does the failure go?** Proposed: the enclosing block, which is what `<-` does today.
   Fix §5.9's "returns from the enclosing function" to match.
-- **Q3. Names.** Collisions in code (comments and strings excluded): `Step` 52 in sprout_lang and
-  175 in uncharted-suns; `Continue` 52 (a constructor in `stdlib/repl.sprout`); `branch` 5;
-  `Break`, `Propagate`, `MapFailure`, `map_failure` 0. `Step` needs another name.
+- **Q3. Names.** Lines using the word, comment lines excluded: `Step` 52 in sprout_lang and 41 in
+  uncharted-suns; `Continue` 52 (constructors in `stdlib/repl.sprout` and `stdlib/tui/app.sprout`);
+  `branch` only as a local binding; `Break`, `Propagate`, `MapFailure`, `map_failure` 0. A clash
+  does not block a name: a module's own type or constructor shadows the prelude's, and the
+  prelude's uses keep working (checked with a local `IntRange`, and a local `Just` beside a `Maybe`
+  `<-`). Proposed: keep `Step`/`Continue`/`Break`, the shape of Rust's `ControlFlow`. Open: how a
+  module with its own `Step` names the prelude's, to write an instance by hand.
 - **Q4. `<-` with a pure right-hand side.** Allowed, error, or lint? Proposed: allowed, linted.
 - **Q5. A binding `else` for `try`** (`try e else Err x -> …`), as `let..else` has. It is consistent
   with `let..else` and would cover `with`'s job, at more length.
