@@ -133,19 +133,19 @@ so making it the discard would change old code silently. It takes OCaml's `ignor
 ### 4.1 The class
 
 ```sprout
-type Step r a = Continue a | Break r          # names: §9 Q3
+type ControlFlow r a = Continue a | Break r   # names: §9 Q3
 
 class Propagate t
-  fn branch(value: t a) -> Step (t b) a
+  fn branch(value: t a) -> ControlFlow (t b) a
 
 instance Propagate Maybe
-  fn branch(value: Maybe a) -> Step (Maybe b) a =
+  fn branch(value: Maybe a) -> ControlFlow (Maybe b) a =
     match value with
     | Just v -> Continue(v)
     | Nothing -> Break(Nothing)
 
 instance Propagate (Result e)
-  fn branch(value: Result e a) -> Step (Result e b) a =
+  fn branch(value: Result e a) -> ControlFlow (Result e b) a =
     match value with
     | Ok v -> Continue(v)
     | Err err -> Break(Err(err))
@@ -252,7 +252,7 @@ rule from linear values to fallible ones. A named `x <- e` stays legal and binds
 
 ### 4.6 Generic code
 
-`try` works under `where Propagate t`. It costs a dictionary call and a `Step` box (§5).
+`try` works under `where Propagate t`. It costs a dictionary call and a `ControlFlow` box (§5).
 
 Generic code can propagate but cannot build a success: `Propagate` has no `pure`-like method, so a
 `where Propagate t` function returning `t a` also asks for `Applicative t` (§9 Q14). A type with
@@ -300,7 +300,7 @@ match branch(check(i)) with | Continue a -> K | Break r -> r
 
 That is variant C, which measured the same as today. The rule depends on the instance's shape, not
 its name, so it covers user types too. Acceptance: a fused `try` chain emits the same IR as the
-hand-written `match` (modulo SSA names), and no `sprout_alloc_obj` for `Step`.
+hand-written `match` (modulo SSA names), and no `sprout_alloc_obj` for `ControlFlow`.
 
 Fusion needs the instance's `branch` body during lowering. `LowerCtx` (`lowering.sprout`) carries
 only instance impl names, so step 1 adds a table of instance bodies from the typed program.
@@ -389,14 +389,13 @@ four repos compiling with unchanged behaviour.
    fallback reports "Match branch type mismatch", and a trailing `let..else` gets a parse error
    while a trailing `let` gets the inference one. A third commit lets an `else` binding sit in a
    multi-binding `do`-`let` statement (§9 Q13).
-1. Add `Step`, `Propagate` and their instances, `try`, its two reserved shapes (§4.4), fusion and
-   `ignore`. Old fallible `<-` keeps working, except that a `<-` whose right-hand side is a `try`
-   (after stripping parentheses) is always plain. Otherwise `x <- try e` with
+1. Add `ControlFlow`, `Propagate` and their instances, `try`, its two reserved shapes (§4.4),
+   fusion and `ignore`. Old fallible `<-` keeps working, except that a `<-` whose right-hand side
+   is a `try` (after stripping parentheses) is always plain. Otherwise `x <- try e` with
    `e : Result E (Maybe A)` unwraps twice. The rule must reach every place that reads a bind's
-   type, not only
-   `decide_bind_mode`: `do_family_update` (`infer.sprout`) sets the block's family from the step's
-   type for every `DoBindStep`, and the parser's synthetic `__t <- e` binds (`build_do_total`,
-   `parser.sprout`) carry the user's right-hand side.
+   type, not only `decide_bind_mode`: `do_family_update` (`infer.sprout`) sets the block's family
+   from the step's type for every `DoBindStep`, and the parser's synthetic `__t <- e` binds
+   (`build_do_total`, `parser.sprout`) carry the user's right-hand side.
    1a. Tooling: a compiler phase that lists every bind whose `BindMode` propagates (and whether
    its right-hand side is pure), every non-final `do` statement with a fallible value, and every
    effectful `do`-`let`, with file, line and column. Only the type checker knows any of them, and
@@ -445,13 +444,16 @@ type-checks either way (`show(x)`) is caught only by tests.
 - **Q2. Where does the failure go?** **Decided (2026-10-06): the enclosing block**, which is what
   `<-` does today. Prior art in §3. Spec §5.9 said "returns from the enclosing function"; it now
   says the block.
-- **Q3. Names.** Lines using the word, comment lines excluded: `Step` 52 in sprout_lang and 41 in
-  uncharted-suns; `Continue` 52 (constructors in `stdlib/repl.sprout` and `stdlib/tui/app.sprout`);
-  `branch` only as a local binding; `Break`, `Propagate`, `MapFailure`, `map_failure` 0. A clash
-  does not block a name: a module's own type or constructor shadows the prelude's, and the
-  prelude's uses keep working (checked with a local `IntRange`, and a local `Just` beside a `Maybe`
-  `<-`). Proposed: keep `Step`/`Continue`/`Break`, the shape of Rust's `ControlFlow`. Open: how a
-  module with its own `Step` names the prelude's, to write an instance by hand.
+- **Q3. Names.** **Decided (2026-10-06): `ControlFlow` with `Continue` and `Break`**, Rust's
+  names, in Rust's parameter order (failure first). Declared in the four repos, tests included:
+  `Step` as a type in 6 files (`ide/editor` and uncharted-suns `chess/attack` export one) and as
+  a constructor in 1; `Continue` as a constructor in `stdlib/repl.sprout` and
+  `stdlib/tui/app.sprout`; `ControlFlow`, `Break`, `Propagate` nowhere. A clash breaks nothing: a
+  module's own name shadows the prelude's, and so does a selectively imported one (checked: an
+  imported `IntRange` beside `1..4`). With Q9's requirement, `try` is unaffected too. What a
+  shadowing module cannot do is name the prelude's type to write an instance by hand: the prelude
+  has no qualified spelling. The unshadowable reference Q9 requires should be writable, so one
+  mechanism serves both.
 - **Q4. `<-` with a pure right-hand side.** **Decided (2026-10-06): an error** (§4.5), from
   step 3. A lint cannot do it: Sprout's lint never consults types or effects
   (`docs/lint-rules-v0.md`). A warning would be the compiler's first (`DiagWarning` exists, nothing
@@ -550,7 +552,7 @@ Raised by the 2026-10-06 review; all must be decided before step 1:
 - Discard rule (Q8): a fallible `_ <- e` and a fallible non-final statement are rejected, in pure
   and effectful blocks; a named `x <- e` and `ignore(e)` are accepted; the final statement is
   exempt. `ignore` on a linear value does not drop it in silence.
-- Codegen: a fused `try` chain matches the hand-written IR and allocates no `Step`.
+- Codegen: a fused `try` chain matches the hand-written IR and allocates no `ControlFlow`.
 - Capture (Q9): `try` works in a module that defines its own `Continue`, `Break` and `branch`.
 - Positions (Q13): `try` in a `where` binding returns the failure from the function; in a
   top-level `let` it is rejected; in a multi-binding group, a failure skips the later bindings.
@@ -570,7 +572,7 @@ Raised by the 2026-10-06 review; all must be decided before step 1:
 - Spec §5.1 (`where`), §5.2.1 and §5.2.2: `try` in binding right-hand sides; `do`-`let` purity
   enforced. §5.2.1a: an `else` binding no longer stands alone (step 0b's third commit). Their
   "monadic propagation remains planned" notes point here.
-- Spec, prelude classes section: `Propagate`, `Step`. The note that "a built-in `?`
+- Spec, prelude classes section: `Propagate`, `ControlFlow`. The note that "a built-in `?`
   propagation form" is future work becomes `try`.
 - `docs/idiomatic-sprout.md`: `try` idioms, and pure `do` blocks become `let..in`.
 - `docs/let-else-and-monadic-binding-plan.md`: Tier 2 is this document. Tier 3 (monad-generic
