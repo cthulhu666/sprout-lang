@@ -1,4 +1,4 @@
-# `try` and `Propagate` — early return through a class (v0)
+# `try` and `Propagate` — propagation through a class (v0)
 
 Status: **proposal**, not implemented. Nothing here is normative until `docs/spec-v0.md` carries
 it. Drafted 2026-10-05.
@@ -242,7 +242,8 @@ binder, and share one purity check, looking through `try`. Spec §5.2.2 already 
 "the pure local bind", but the checker accepts an effectful right-hand side today
 (`let r = fs.write_text(...)` compiles and runs). The same holds for `let..in`: spec §5.2.1 makes
 an effectful right-hand side an error, yet `let r = fs.read_text(...) in …` compiles in an `!{IO}`
-function. Unlike a `do`-`let`, it has no mechanical rewrite to `<-` (§9 Q15).
+function. So does a `where` binding, the same construct (§5.1), and a top-level `let`, which spec
+§5.2 says must be pure ("Not yet enforced"). Step 5 enforces all four (§9 Q15).
 
 **Discarding a failure** (§9 Q8). A non-final `do` statement, or a `_ <-` bind, whose value's type
 has a `Propagate` instance is an error. Write `try e` to pass the failure on, or `ignore(e)` to drop
@@ -342,7 +343,7 @@ reserved else      `try` takes no `else` yet. For `let..else` on the value: `(tr
 reserved with      `with` after `try` is reserved. For a record update, write `(try e) with (…)`.
 unknown t          the existing ambiguity error.
 last-step try      the block ends here anyway, so `try` does nothing. Write `e` without `try`.
-effectful do-let   this `let` runs an effect. Bind it with `<-`.          (step 5)
+effectful let      this `let` runs an effect. Bind it with `<-` in a `do` block.  (step 5)
 pure <-            this has no effect. Write `let x = …`.                  (step 3)
 discarded failure  this drops a `Result` failure in silence. Write `try e` to pass it on,
                    or `ignore(e)` to drop it.                          (step 3)
@@ -412,13 +413,16 @@ four repos compiling with unchanged behaviour.
 3. Flip: `<-` never unwraps. The discard rule and the pure-`<-` error (§4.5) land with it, so a
    stale `_ <- e` is an error, not a silent discard. `Ok x <- e else …` on a `Result`, a type
    error today because the synthetic bind unwraps, becomes legal; that change is intended.
-4. Codemod B: rewrite every effectful `do`-`let` to `<-`, except that `let _ = e` with a fallible
-   `e` becomes `ignore(e)`, since `_ <- e` is now an error. Behaviour is preserved because `<-` is
-   now plain; before step 3 it is not (`let _ = fs.write_text(bad, …)` continues, `_ <-` stops the
-   block). IR is not preserved: a tuple bound by a `do`-`let` gets scalar replacement
-   (`sra_core_eligible`, `ast_to_ir.sprout`) and a plain `<-` does not. Extend it to plain `<-`
-   first, or accept the diff.
-5. Enforce `do`-`let` purity (and `let..in`, per §9 Q15).
+4. Codemod B: rewrite every effectful `do`-`let` to `<-`, and every effectful `let..in` and
+   `where` binding to a `do` block with `<-` (`do` is an expression), except that `let _ = e`
+   with a fallible `e` becomes `ignore(e)`, since `_ <- e` is now an error. Behaviour is preserved
+   because `<-` is now plain; before step 3 it is not (`let _ = fs.write_text(bad, …)` continues,
+   `_ <-` stops the block). IR is not preserved: a tuple bound by a `do`-`let` gets scalar
+   replacement (`sra_core_eligible`, `ast_to_ir.sprout`) and a plain `<-` does not. Extend it to
+   plain `<-` first, so the rewrite costs nothing.
+5. Enforce purity for every `let` form: `do`-`let`, `let..in`, `where` and top-level `let`
+   (§9 Q15). An effectful top-level `let` has no rewrite to `<-` and is fixed by hand, usually by
+   making it a function.
 
 All Sprout code is in these four repos, so each step migrates all of them together; there is no
 compatibility window for outside code. The steps stay separate for other reasons: the compiler's
@@ -519,8 +523,12 @@ Raised by the 2026-10-06 review; all must be decided before step 1:
   `try_trait_v2`) has `from_output`, with the law `Try::from_output(x).branch() -->
   ControlFlow::Continue(x)`, because Rust has no `Applicative`. A superclass would make every type
   that uses `try` define `map`, `pure` and `map2`; a `from_output` method would duplicate `pure`.
-- **Q15. Step 5's scope.** Whether purity is also enforced for `let..in` (§4.5), which has no
-  mechanical rewrite.
+- **Q15. Step 5's scope.** **Decided (2026-10-06): every `let` form**, as the spec already says:
+  `do`-`let` (§5.2.2), `let..in` (§5.2.1), `where` (§5.1, the same construct) and top-level `let`
+  (§5.2; §6 relies on imports running no effects). Q4's split, known pure to `let` and anything
+  else to `<-`, only holds if no `let` can hide an effect. The review said `let..in` has no
+  mechanical rewrite; it has one, since `do` is an expression (`ast.DoExpr`). Only a top-level
+  `let` has none.
 
 ## 10. Tests
 
@@ -533,7 +541,7 @@ Raised by the 2026-10-06 review; all must be decided before step 1:
 - Law: `branch(pure(x)) == Continue(x)` for `Maybe` and `Result e`.
 - Typechecker, rejected: no instance; wrong family; wrong error type; unknown `t`; at step 3, a
   `<-` whose right-hand side is pure, with and without `try` (an `!{e}` one is accepted); and, at
-  step 5, an effectful `do`-`let`.
+  step 5, an effectful `do`-`let`, `let..in`, `where` binding or top-level `let`.
 - Runtime: both paths of every form, plus the nested-block semantics of Q2.
 - Q11: a bare `try e` passes a failure on and continues on success, effectful and pure; `try` as
   the last step is rejected with its own message.
