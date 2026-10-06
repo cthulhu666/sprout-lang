@@ -385,7 +385,8 @@ four repos compiling with unchanged behaviour.
    step 1, not 0b (today `Just x <- g() else Nothing` with `g : Maybe (Maybe Int)` binds
    `x = 2`). Better messages follow in a separate commit: a wrong
    fallback reports "Match branch type mismatch", and a trailing `let..else` gets a parse error
-   while a trailing `let` gets the inference one.
+   while a trailing `let` gets the inference one. A third commit lets an `else` binding sit in a
+   multi-binding `do`-`let` statement (§9 Q13).
 1. Add `Step`, `Propagate` and their instances, `try`, its two reserved shapes (§4.4), fusion and
    `ignore`. Old fallible `<-` keeps working, except that a `<-` whose right-hand side is a `try`
    (after stripping parentheses) is always plain. Otherwise `x <- try e` with
@@ -503,9 +504,15 @@ Raised by the 2026-10-06 review; all must be decided before step 1:
   `?` is postfix. Swift's `try` changes no value; Sprout's unwraps, so the two readings differ in
   type, and parentheses remove the question. Corpus, `<-` right-hand sides in the four repos,
   non-test: 4 variables (`mx`, `rx`), 1 pipe, 11 `if`/`match`/`do`/`let`/lambda, of 2617.
-- **Q13. Positions.** A `try` binding inside a multi-binding `let` (spec §5.2.1a forces an
-  `else`-carrying binding to stand alone, and `try` has the same shape); a top-level `let` or a
-  `where` binding, which have no block and must be rejected; which patterns may sit left of a `try`.
+- **Q13. Positions.** **Decided (2026-10-06).** A top-level `let` rejects `try`: no block or
+  function is there to end. A `where` binding accepts it, and a failure becomes the function's
+  value: spec §5.1 makes `where` and `let … in` "the same binding construct", and `where` bindings
+  run before the body. Left of a `try`, any pattern a plain `let` accepts; a refutable one without
+  `else` gets the usual non-exhaustive error, and with `else` it is the reserved shape (§4.4). A
+  `try` binding may sit in a multi-binding group. Spec §5.2.1a makes an `else` binding stand alone
+  in a `do`-`let` statement only because the parser's rewrite nests the remaining steps in a
+  `match` arm; `let..in` groups already allow it. After step 0b that limit is gone, and lifting it
+  for `else` is a separate commit, since it changes the language.
 - **Q14. Building a success in generic code.** Require `Applicative t` beside `Propagate t`
   (§4.6), or give `Propagate` a method for it, as Rust's `Try` has `from_output`.
 - **Q15. Step 5's scope.** Whether purity is also enforced for `let..in` (§4.5), which has no
@@ -532,6 +539,8 @@ Raised by the 2026-10-06 review; all must be decided before step 1:
   exempt. `ignore` on a linear value does not drop it in silence.
 - Codegen: a fused `try` chain matches the hand-written IR and allocates no `Step`.
 - Capture (Q9): `try` works in a module that defines its own `Continue`, `Break` and `branch`.
+- Positions (Q13): `try` in a `where` binding returns the failure from the function; in a
+  top-level `let` it is rejected; in a multi-binding group, a failure skips the later bindings.
 - Linear: a consume after a `try` is rejected (Q7).
 - The phase-0 regression fixtures keep passing.
 
@@ -545,7 +554,8 @@ Raised by the 2026-10-06 review; all must be decided before step 1:
   `parser.looks_like_do_step_start` and spec §5.2.1a's step-start list; the formatter's
   `is_call_like_pp_kw`, else `try (x)` is reformatted to `try(x)`; the IntelliJ plugin's lexer
   keyword list and its test.
-- Spec §5.2.1 and §5.2.2: `try` in binding right-hand sides; `do`-`let` purity enforced. Their
+- Spec §5.1 (`where`), §5.2.1 and §5.2.2: `try` in binding right-hand sides; `do`-`let` purity
+  enforced. §5.2.1a: an `else` binding no longer stands alone (step 0b's third commit). Their
   "monadic propagation remains planned" notes point here.
 - Spec, prelude classes section: `Propagate`, `Step`. The note that "a built-in `?`
   propagation form" is future work becomes `try`.
