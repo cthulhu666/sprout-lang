@@ -6,10 +6,10 @@ it. Drafted 2026-10-05.
 ## 1. Problem
 
 Inside `do`, `x <- e` has two meanings, chosen by the *name* of `e`'s type (spec §5.9). On `Maybe`
-or `Result` it unwraps and may return early. On anything else it binds the whole value. Five
+or `Result` it unwraps and may end its block early. On anything else it binds the whole value. Five
 costs follow.
 
-1. **The reader cannot see which lines may return early.** A user wrote
+1. **The reader cannot see which lines may end the block early.** A user wrote
    `r <- fs.write_text(...)` and then `match r with | Ok _ -> …`, expecting `r : Result`. The bind
    had unwrapped it to `Unit`, and the error named the `match`, not the bind.
 2. **It was unsound.** The checker decided the mode at the bind, from the type known *then*.
@@ -37,7 +37,8 @@ costs follow.
 
 **Goals.**
 
-- One meaning per syntax. `<-` means "an effect runs here". `try` means "this may return early".
+- One meaning per syntax. `<-` means "an effect runs here". `try` means "this may end the block
+  early".
 - User types opt in through a class. The compiler tests no type names.
 - Zero cost at a known instance: the same code as a hand-written `match` (§5 measures the bar).
 - Works in `do` and in pure `let..in`.
@@ -77,6 +78,39 @@ operand's type name. Today's `<-` is the outlier.
 
 `Propagate` is Rust's `Try` made an ordinary class. Rust keeps `Try` unstable, so a user type cannot
 opt in on stable Rust; in Sprout any type can.
+
+### Where the failure goes (§9 Q2)
+
+Checked 2026-10-06 against each primary source.
+
+**To the function** — languages with statements and a real `return`:
+
+| Language | Rule | Source |
+|---|---|---|
+| Rust `?` | "the `Err` will be returned from the whole function as if we had used the `return` keyword"; "Async blocks act like a function boundary, much like closures" | *The Rust Programming Language* §9.2; Reference, *Block expressions* |
+| Rust `try { }` | "A `try` block creates a new scope one can use the `?` operator in" — a block target, unstable | Unstable Book, `try_blocks` |
+| Zig `try` | "Equivalent to: `a catch \|err\| return err`" | Zig Language Reference |
+| Swift `try` | Propagates "to the scope from which it's called"; a `do`-`catch` intercepts it, and "If none of the `catch` clauses handle the error, the error propagates to the surrounding scope" | *The Swift Programming Language*, Error Handling |
+
+**To the enclosing block** — expression languages, where the rest of the block becomes a function:
+
+| Language | Translation | Source |
+|---|---|---|
+| Haskell `do` | `do {p <- e; stmts} = let ok p = do {stmts} … in e >>= ok` | Haskell 2010 Report §3.14 |
+| Scala `for` | `for (p <- e; p' <- e'; …) yield e''` → `e.flatMap { case p => for (…) yield e'' }` | Scala 2.13 spec §6.19 |
+| F# `let!` | `builder.Bind(expr, (fun pattern -> {{ cexpr }}))`, scoped to the expression's braces | F# Language Reference, *Computation Expressions* |
+| OCaml `let*` | `( let* ) e1 (fun x -> e2)` | OCaml Manual, *Binding operators* |
+| Gleam `use` | "turns all following expressions into an anonymous function" | Gleam v0.25 release notes |
+
+Sprout has no `return`, and `<-` already lowers to a `match` over the remaining steps, so it is in
+the second group. Both first-group languages with a block form added it deliberately (Rust `try`
+blocks, Swift `do`-`catch`).
+
+Gleam is the nearest precedent and cuts the other way on syntax. It had a block-scoped `try`
+keyword from v0.9 and removed it in v0.27: "Now that we have `use` expressions, the less general
+`try` expressions are redundant"; it prefers "fewer ways to do the same thing". Its replacement is
+`use x <- result.try(e)`, a library function. This design keeps the keyword but backs it with a
+class, as Rust backs `?` with `Try`.
 
 ## 4. Design
 
@@ -124,9 +158,9 @@ In `do`, `x <- try e` runs `e`'s effect once and then branches, the same way an 
 does `Result String _` in a `Result Int _` block. No special rule is needed.
 
 **Where the failure goes.** It becomes the value of the enclosing `let..in` or `do` block. When that
-block is the function body, the function returns it. This is what `<-` does today. A probe with a
-fallible bind in a nested `do` showed the failure ending only the inner block, though §5.9 says it
-"returns from the enclosing function" (§9 Q2).
+block is the function body, the function returns it. A failure in a nested block ends only that
+block, and a `do` inside a lambda is the lambda's own block. This is what `<-` does today; spec §5.9
+says so since Q2 was decided.
 
 **An unknown `t`** is an ordinary class constraint. It resolves as late as any other, and an
 unresolved one is the usual ambiguity error at the `try`. The mode is fixed by the syntax, so the
@@ -167,7 +201,7 @@ A user type with one error slot can add an instance.
 
 ### 4.5 `<-` and `let` inside `do`
 
-| Line | Effect? | May return early? |
+| Line | Effect? | May end the block early? |
 |---|---|---|
 | `let n = parse_count(s)` | no | no |
 | `line <- read_line()` | yes | no |
@@ -300,8 +334,9 @@ IR is unchanged after normalising names.
 - **Q1. Where can `try` appear?** Proposed: binding positions only (a `let` or `<-` right-hand
   side, or a bare statement in `do`), which lower to `match`. Rust, Swift and Zig allow it in any
   expression, which needs a real early return in codegen.
-- **Q2. Where does the failure go?** Proposed: the enclosing block, which is what `<-` does today.
-  Fix §5.9's "returns from the enclosing function" to match.
+- **Q2. Where does the failure go?** **Decided (2026-10-06): the enclosing block**, which is what
+  `<-` does today. Prior art in §3. Spec §5.9 said "returns from the enclosing function"; it now
+  says the block.
 - **Q3. Names.** Lines using the word, comment lines excluded: `Step` 52 in sprout_lang and 41 in
   uncharted-suns; `Continue` 52 (constructors in `stdlib/repl.sprout` and `stdlib/tui/app.sprout`);
   `branch` only as a local binding; `Break`, `Propagate`, `MapFailure`, `map_failure` 0. A clash

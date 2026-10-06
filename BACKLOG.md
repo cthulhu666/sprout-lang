@@ -105,7 +105,7 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
 
 **Bindings, patterns and surface syntax**
 
-- [ ] `P2` **`try` + `Propagate`: early return through a class.** Replaces the type-name-chosen
+- [ ] `P2` **`try` + `Propagate`: propagation through a class.** Replaces the type-name-chosen
   fallible `<-` (spec §5.9) with `try e` / `try e else fb` / `try e with f` over a user-extensible
   `Propagate` class; `<-` becomes effect-only and a `do`-`let` pure. Supersedes let-else Tier 2
   (no-`else` propagate). Open questions, measurements, migration: `docs/try-propagate-v0.md`.

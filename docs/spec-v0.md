@@ -1681,7 +1681,7 @@ a field access or as a `match` scrutinee. Every other reference consumes. So
   the block's, and `!{IO}` does not exempt it: an effect row and a short-circuit are
   orthogonal, so an `!{IO}` block containing a fallible bind does *not* run every
   step. A block whose own type is `Maybe`/`Result` but whose binds are all
-  non-fallible is likewise unaffected — nothing in it can return early.
+  non-fallible is likewise unaffected — nothing in it can end the block early.
 - A `borrowing` parameter may not be consumed or returned.
 - An argument at a `borrowing` position must be a **variable reference**; a
   freshly-built linear value there would never be consumed.
@@ -1872,17 +1872,18 @@ the whole value. If the head later turns out to be `Maybe` or `Result`, that is 
 bind. As with comprehension sources (§5.10), the type must be known where it is used.
 
 A fallible bind `x <- e` where `e : Result E A` binds `x : A` on success. On failure
-it **returns from the enclosing function**, carrying the failure — it does not merely
-end the block. `Maybe` behaves the same way with `Nothing` in place of `Err`.
+it **ends the enclosing `do` block**, whose value is the failure; when that block is
+the function body, the function returns it. A failure in a nested block ends only that
+block, and a `do` inside a lambda is the lambda's own block. `Maybe` behaves the same
+way with `Nothing` in place of `Err`.
 
-Because the failure leaves through the function's return, it must be a value that
-function can return. A fallible bind is therefore well-typed only where the block's
-type can carry the failure:
+Because the failure becomes the block's value, a fallible bind is well-typed only
+where the block's type can carry it:
 
 | Right-hand side | Block's type must be | On failure |
 | --- | --- | --- |
-| `Result E A` | `Result E B` — same error type `E` | returns `Err e` unchanged |
-| `Maybe A` | `Maybe B` | returns `Nothing` |
+| `Result E A` | `Result E B` — same error type `E` | the block is `Err e`, unchanged |
+| `Maybe A` | `Maybe B` | the block is `Nothing` |
 
 Anything else is a **type error**, including a non-fallible block type (`Int`,
 `String`, `Unit`, …), the other family, and the same family with a different error

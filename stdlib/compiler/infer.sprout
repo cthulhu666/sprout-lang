@@ -5662,13 +5662,12 @@ fn do_family_update(
 
 # THE FALLIBLE-BIND RULE (spec-v0.md §5.9).
 #
-# `x <- e` with `e : Result E A` does not merely end the block on `Err` — it RETURNS
-# from the enclosing function carrying the failure. So the failure has to be a value
-# that function can return, and until this check existed nothing said so: a do block
-# is typed as its LAST step (see infer_do_steps' Nil arm) and `check_fn_body` unifies
-# exactly that against the declared return type, so the TAIL was checked and the
-# short-circuit path was not. A `-> Int` function binding a failing `Result` returned
-# a heap `Err` box read as an `Int`.
+# `x <- e` with `e : Result E A` ends the enclosing block on `Err`, and the failure
+# becomes the block's value. So it has to be a value of the block's type, and until
+# this check existed nothing said so: a do block is typed as its LAST step (see
+# infer_do_steps' Nil arm) and `check_fn_body` unifies exactly that against the
+# declared return type, so the TAIL was checked and the short-circuit path was not. A
+# `-> Int` function binding a failing `Result` returned a heap `Err` box read as an `Int`.
 #
 # The check is one unification against a CONSTRUCTED `Result E ?a` / `Maybe ?a`, not a
 # head-name comparison, and that matters in both directions:
