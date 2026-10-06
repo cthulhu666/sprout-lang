@@ -233,11 +233,14 @@ common.
 | `row <- try pg_query(conn, sql)` | yes | yes |
 | `let cfg = try parse_config(text)` | no | yes |
 
-`x <- e` never unwraps. A `do`-`let` must be pure. Spec §5.2.2 already calls it "the pure local
-bind", but the checker accepts an effectful right-hand side today (`let r = fs.write_text(...)`
-compiles and runs). The same holds for `let..in`: spec §5.2.1 makes an effectful right-hand side an
-error, yet `let r = fs.read_text(...) in …` compiles in an `!{IO}` function. Unlike a `do`-`let`, it
-has no mechanical rewrite to `<-` (§9 Q15).
+`x <- e` never unwraps. A `do`-`let` must be pure, and a `<-` must not be (§9 Q4): a right-hand
+side known to be pure is an error ("this has no effect; write `let x = …`"). An unknown effect
+(`!{e}`) may be an effect, so it takes `<-`. The two rules give every right-hand side exactly one
+binder, and share one purity check, looking through `try`. Spec §5.2.2 already calls a `do`-`let`
+"the pure local bind", but the checker accepts an effectful right-hand side today
+(`let r = fs.write_text(...)` compiles and runs). The same holds for `let..in`: spec §5.2.1 makes
+an effectful right-hand side an error, yet `let r = fs.read_text(...) in …` compiles in an `!{IO}`
+function. Unlike a `do`-`let`, it has no mechanical rewrite to `<-` (§9 Q15).
 
 **Discarding a failure** (§9 Q8). A non-final `do` statement, or a `_ <-` bind, whose value's type
 has a `Propagate` instance is an error. Write `try e` to pass the failure on, or `ignore(e)` to drop
@@ -336,6 +339,7 @@ reserved else      `try` takes no `else` yet. For `let..else` on the value: `(tr
 reserved with      `with` after `try` is reserved. For a record update, write `(try e) with (…)`.
 unknown t          the existing ambiguity error.
 effectful do-let   this `let` runs an effect. Bind it with `<-`.          (step 5)
+pure <-            this has no effect. Write `let x = …`.                  (step 3)
 discarded failure  this drops a `Result` failure in silence. Write `try e` to pass it on,
                    or `ignore(e)` to drop it.                          (step 3)
 ```
@@ -387,20 +391,22 @@ four repos compiling with unchanged behaviour.
    `decide_bind_mode`: `do_family_update` (`infer.sprout`) sets the block's family from the step's
    type for every `DoBindStep`, and the parser's synthetic `__t <- e` binds (`build_do_total`,
    `parser.sprout`) carry the user's right-hand side.
-   1a. Tooling: a compiler phase that lists every bind whose `BindMode` propagates, every
-   non-final `do` statement with a fallible value, and every effectful `do`-`let`, with file,
-   line and column. Only the type checker knows any of them, and no `--phase` reports them today.
+   1a. Tooling: a compiler phase that lists every bind whose `BindMode` propagates (and whether
+   its right-hand side is pure), every non-final `do` statement with a fallible value, and every
+   effectful `do`-`let`, with file, line and column. Only the type checker knows any of them, and
+   no `--phase` reports them today.
 2. Codemod A, on all four repos and every live worktree branch: add `try` to every listed `<-`,
-   and wrap every listed fallible statement in `ignore(…)`. `x <- try e` means what the old
+   writing `let x = try e` where the right-hand side is pure (§9 Q4), and wrap every listed
+   fallible statement in `ignore(…)`. `x <- try e` means what the old
    `x <- e` did. The codemod must parenthesise an operand that is not an application (§9 Q12;
    uncharted-suns has about 105 lines `<- if`/`match`/`do`/`let`), map a synthetic `__t <-` back
    to the user's line, and refuse a pattern-`else` bind on a fallible right-hand side
    (`Just x <- e else …`): its faithful rewrite is the reserved shape, and today it unwraps twice
    (`e = Just(Just(2))` binds `x = 2`). A grep of the four repos finds no such site. Running
    it on `stdlib/compiler/` needs step 1 landed and reseeded first.
-3. Flip: `<-` never unwraps, and the discard rule (§4.5) lands with it, so a stale `_ <- e` is
-   an error, not a silent discard. `Ok x <- e else …` on a `Result`, a type error today because
-   the synthetic bind unwraps, becomes legal; that change is intended.
+3. Flip: `<-` never unwraps. The discard rule and the pure-`<-` error (§4.5) land with it, so a
+   stale `_ <- e` is an error, not a silent discard. `Ok x <- e else …` on a `Result`, a type
+   error today because the synthetic bind unwraps, becomes legal; that change is intended.
 4. Codemod B: rewrite every effectful `do`-`let` to `<-`, except that `let _ = e` with a fallible
    `e` becomes `ignore(e)`, since `_ <- e` is now an error. Behaviour is preserved because `<-` is
    now plain; before step 3 it is not (`let _ = fs.write_text(bad, …)` continues, `_ <-` stops the
@@ -437,9 +443,13 @@ type-checks either way (`show(x)`) is caught only by tests.
   prelude's uses keep working (checked with a local `IntRange`, and a local `Just` beside a `Maybe`
   `<-`). Proposed: keep `Step`/`Continue`/`Break`, the shape of Rust's `ControlFlow`. Open: how a
   module with its own `Step` names the prelude's, to write an instance by hand.
-- **Q4. `<-` with a pure right-hand side.** Allowed, error, or lint? Proposed: allowed, linted.
-  Decide before step 2: codemod A writes `x <- try pure_fn()` into every pure `Maybe` `do` block,
-  and lint is a CI gate. A lint must look through `try`.
+- **Q4. `<-` with a pure right-hand side.** **Decided (2026-10-06): an error** (§4.5), from
+  step 3. A lint cannot do it: Sprout's lint never consults types or effects
+  (`docs/lint-rules-v0.md`). A warning would be the compiler's first (`DiagWarning` exists, nothing
+  constructs one) and fails nothing. Swift makes a redundant `try`/`await` a warning
+  (`no_throw_in_try`, `no_async_in_await` in `DiagnosticsSema.def`); hlint suggests "Use let" for
+  `x <- return y`. A callee that drops its effect breaks each `x <- callee()`, but effects are
+  declared in the signature, so that is a signature change like any other.
 - **Q5. A binding `else` for `try`** (`try e else Err x -> …`). Moot after Q1: `try` takes no
   `else`, and `let..else` already has the binding form.
 - **Q6. Generic-code cost.** Specialisation would remove it. Out of scope.
@@ -496,8 +506,9 @@ Raised by the 2026-10-06 review; all must be decided before step 1:
   operand rejected; both reserved shapes rejected, and their parenthesised forms accepted.
 - Typechecker, accepted: `Maybe`, `Result`, a user instance, generic `where Propagate t`, nested
   blocks.
-- Typechecker, rejected: no instance; wrong family; wrong error type; unknown `t`; and, at step 5,
-  an effectful `do`-`let`.
+- Typechecker, rejected: no instance; wrong family; wrong error type; unknown `t`; at step 3, a
+  `<-` whose right-hand side is pure, with and without `try` (an `!{e}` one is accepted); and, at
+  step 5, an effectful `do`-`let`.
 - Runtime: both paths of every form, plus the nested-block semantics of Q2.
 - Step 1: `x <- try e` with `e : Result E (Maybe A)` binds a `Maybe A` in a `Result` block.
 - Codemod A: a pattern-`else` bind on a fallible right-hand side is refused, not rewritten.
