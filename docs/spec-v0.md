@@ -625,6 +625,10 @@ prefix `-` or `!`, a backtick template, or one of `let`/`if`/`match`/`do`/
 with a token that cannot head an expression, such as an operator or a `|` match
 arm — continues the step above it.
 
+**The last step is the block's value**, so it must be an expression. A `<-` or `let`
+there binds a name nothing can read and leaves the block with no value; it is an
+error, as a refutable step with no following step is (§5.2.2).
+
 ### 5.2.2 Refutable binds in `do` blocks *(experimental)*
 
 Inside a `do` block, both the effectful bind (`<pattern> <- <e>`) and the pure

@@ -1,0 +1,14 @@
+module main
+
+# A plain `<-` as the last step: the block was typed `Ref Int` but evaluated to
+# unit, so `ref_read` failed at runtime. See spec-v0.md §5.2.1a.
+
+fn make() -> Ref Int !{IO} =
+  do
+    r <- ref_new(5)
+
+fn main() -> Unit !{IO} =
+  do
+    r <- make()
+    v <- ref_read(r)
+    print(v)

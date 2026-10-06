@@ -5827,15 +5827,18 @@ fn infer_do_steps(
   | Nil ->
       # The block is complete, so its type is known and the fallible-bind rule can be
       # discharged against it (see do_block_carries).
-      do
-        carried <- do_block_carries(state, family, typed_ast.typed_expr_type(last_typed), subst)
-        match carried with
-        | CarryErr msg bind_pos -> InferErr(bind_pos, msg)
-        | CarryOk s ->
-            InferOk(
-              typed_ast.TDo(typed_do_step_list_reverse(acc_steps),
-                            unifier.apply_subst(s, typed_ast.typed_expr_type(last_typed)), pos),
-              s, eff_subst, acc_eff)
+      match trailing_binding(acc_steps) with
+      | Just err -> err
+      | Nothing ->
+          do
+            carried <- do_block_carries(state, family, typed_ast.typed_expr_type(last_typed), subst)
+            match carried with
+            | CarryErr msg bind_pos -> InferErr(bind_pos, msg)
+            | CarryOk s ->
+                InferOk(
+                  typed_ast.TDo(typed_do_step_list_reverse(acc_steps),
+                                unifier.apply_subst(s, typed_ast.typed_expr_type(last_typed)), pos),
+                  s, eff_subst, acc_eff)
   | Cons step rest ->
       do
         sr <- infer_do_step(state, env, subst, eff_subst, step)
@@ -5852,6 +5855,22 @@ fn infer_do_steps(
                     state, extend_env_from_do_step(typed_step, s1, env),
                     s1, es1, rest, typed_step_expr, Cons(typed_step, acc_steps),
                     merge_effects(acc_eff, step_eff), new_family, pos)
+
+# A block's value is its last step, so that step must be an expression: a trailing `<-` or
+# `let` leaves the block with no value (spec-v0.md §5.2.1a). `steps` is reversed, last first.
+fn trailing_binding(steps: List typed_ast.TypedDoStep) -> Maybe InferResult =
+  match steps with
+  | [] -> Nothing
+  | [last | _] ->
+      match last with
+      | typed_ast.TDoExprStep _ -> Nothing
+      | typed_ast.TDoBindStep _ e _ -> Just(trailing_binding_err("`<-`", e))
+      | typed_ast.TDoLetStep _ e -> Just(trailing_binding_err("`let`", e))
+
+fn trailing_binding_err(step: String, value: typed_ast.TypedExpr) -> InferResult =
+  InferErr(typed_ast.typed_expr_pos(value),
+           "this " ++ step ++ " is the last step of its `do` block, so the block has no value. "
+             ++ "End the block with an expression; to return this value, write it without the binding.")
 
 fn is_nil_steps(steps: List ast.DoStep) -> Bool =
   match steps with
