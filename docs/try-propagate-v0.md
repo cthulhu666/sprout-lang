@@ -42,7 +42,8 @@ costs follow.
 - User types opt in through a class. The compiler tests no type names.
 - Zero cost at a known instance: the same code as a hand-written `match` (§5 measures the bar).
 - Works in `do` and in pure `let..in`.
-- Error conversion without implicit conversions: `else` replaces the failure, `with` wraps it.
+- Error conversion without implicit conversions: replacing or wrapping a failure is an explicit
+  `let..else` (§4.3), with room to add `try` suffixes for it later (§4.4).
 
 **Non-goals.**
 
@@ -159,45 +160,53 @@ does `Result String _` in a `Result Int _` block. No special rule is needed.
 
 **Where the failure goes.** It becomes the value of the enclosing `let..in` or `do` block. When that
 block is the function body, the function returns it. A failure in a nested block ends only that
-block, and a `do` inside a lambda is the lambda's own block. This is what `<-` does today; spec §5.9
-says so since Q2 was decided.
+block, and a `do` inside a lambda is the lambda's own block. This is what `<-` does today; spec
+§5.9 says so since Q2 was decided.
 
 **An unknown `t`** is an ordinary class constraint. It resolves as late as any other, and an
 unresolved one is the usual ambiguity error at the `try`. The mode is fixed by the syntax, so the
 checker and codegen cannot disagree about it.
 
-### 4.3 `try e else fb` — replace the failure
+### 4.3 Replacing or wrapping a failure: `let..else`
 
-```
-let x = try e else fb   →   match branch(e) with | Continue x -> <rest> | Break _ -> fb
-```
-
-`fb` has the block's type and is evaluated only on failure. It covers the two shapes `with`
-cannot: discarding the cause, and crossing from `Maybe` into `Result`:
+`try` takes no suffix (§9 Q1). To replace or wrap a failure, match it with `let..else` (spec
+§5.2.1), which already compiles to a `match` on the call:
 
 ```sprout
-let text = try bytes.to_string(raw) else Err(BadClientData("json"))
-let decoded = try b64.decode(text) else Err(BadRequest(name))
+let Just decoded = b64.decode(text) else Err(BadRequest(name))                # replace
+let Ok key = webauthn.public_key_from_spki(pk) else Err e -> Err(Rejected(e))   # wrap
 ```
 
-### 4.4 `try e with f` — wrap the failure
+Corpus, non-test code of the three repos, one-line forms: about 53 sites replace a failure and
+about 7 wrap it, against about 600 that propagate it unchanged. For replacing, a `try e else fb`
+suffix is the same length as `let..else` and means the same thing. Wrapping is where a suffix
+would be shorter.
 
-`try e with f` is `try map_failure(f, e)`:
+### 4.4 Later: `try e else fb` and `try e with f`
 
-```sprout
-class MapFailure p
-  fn map_failure(f: e1 -> e2, value: p e1 a) -> p e2 a
+The suffixes can be added later without breaking anything, because two shapes are reserved now:
 
-instance MapFailure Result
-  fn map_failure(f: e1 -> e2, value: Result e1 a) -> Result e2 a =
-    match value with
-    | Ok v -> Ok(v)
-    | Err err -> Err(f(err))
+- **A `try` right-hand side takes no pattern `else`.** `let Just y = try e else fb` is an error,
+  so a later `try … else` gives meaning only to code that was rejected. For `let..else` on the
+  unwrapped value, parenthesise: `let Just y = (try e) else fb`.
+- **No `with` directly after a `try` expression.** `try load_point() with (x = 1)` would otherwise
+  parse as a record update of the unwrapped value. Parenthesise: `(try load_point()) with (x = 1)`.
+
+If added, they would mean:
+
+```
+let x = try e else fb   →   match branch(e) with | Continue x -> <rest>
+                                                 | Break _ -> fb
+let x = try e with f    →   match branch(e) with | Continue x -> <rest>
+                                                 | Break r -> map_failure(f, r)
 ```
 
-A class over a two-argument constructor compiles and runs today. `Maybe` has no error to convert
-and cannot be an instance, so `with` on a `Maybe` is a type error whose message points to `else`.
-A user type with one error slot can add an instance.
+`with` must map only the failure arm. The first draft defined it as `try map_failure(f, e)`, which
+passes `e`'s result as an argument (boxed, §5) and rebuilds `Ok(v)` on every success. `MapFailure`
+is a class over a two-argument constructor, which compiles today; `Maybe` has no error and cannot
+be an instance. `try e else fb` would also let generic code (`where Propagate t`) replace a
+failure, which `let..else` cannot, having no constructor to name. Add them when wrap sites become
+common.
 
 ### 4.5 `<-` and `let` inside `do`
 
@@ -284,9 +293,10 @@ Proposed wording. Each is reported at the `try`, the `let` or the `<-`, never at
 ```
 no instance        `try` needs a type that can fail, and `Int` has no `Propagate` instance.
 wrong block type   this `try` returns a `Result String _` failure, but the block returns `Int`.
-                   Handle it here with `else` or `with`, or make the block return `Result String _`.
-Maybe in Result    ... plus: to turn `Nothing` into an error, write `try e else Err(...)`.
-with on Maybe      `with` converts an error, and `Maybe` has none. Use `else`.
+                   Handle it here with `let..else`, or make the block return `Result String _`.
+Maybe in Result    ... plus: to turn `Nothing` into an error, write `let Just x = e else Err(...)`.
+reserved else      `try` takes no `else` yet. For `let..else` on the value: `(try e) else …`.
+reserved with      `with` after `try` is reserved. For a record update, write `(try e) with (…)`.
 unknown t          the existing ambiguity error.
 effectful do-let   this `let` runs an effect. Bind it with `<-`.          (phase 3)
 old fallible <-    `<-` no longer unwraps `Result`. Write `x <- try e`.   (phase 3)
@@ -294,8 +304,9 @@ old fallible <-    `<-` no longer unwraps `Result`. Write `x <- try e`.   (phase
 
 ## 7. Interaction with `let..else`
 
-The two overlap. `let Just x = find(k) else Nothing` and `let x = try find(k) else Nothing` mean
-the same thing.
+They split the work. `try` propagates a failure unchanged; `let..else` replaces it, wraps it or
+supplies a default. They overlap only on unchanged propagation: `let Just x = find(k) else Nothing`
+and `let x = try find(k)` mean the same thing, and both stay legal.
 
 - `let..else` matches **any refutable pattern** on any type (`let Cons h _ = xs else d`).
 - `try` asks the **type** what success is, through `Propagate`, and needs no pattern.
@@ -324,16 +335,20 @@ IR is unchanged after normalising names.
 0. ~~Soundness fix.~~ Landed: `typed_ast.BindMode` on each bind, decided in
    `infer.decide_bind_mode` and read by every later pass; a head that becomes `Maybe`/`Result`
    after the bind is rejected (spec §5.9). The modes are also the list the codemod needs.
-1. Add `Step`, `Propagate`, `MapFailure` and their instances, plus `try`/`else`/`with` and fusion.
-   Old fallible `<-` keeps working.
+1. Add `Step`, `Propagate` and their instances, plus `try`, its two reserved shapes (§4.4) and
+   fusion. Old fallible `<-` keeps working.
 2. Run the codemod on sprout_lang, then on uncharted-suns and repbit.
 3. Flip: a fallible `<-` is an error with the migration hint, and `do`-`let` must be pure.
 
 ## 9. Open questions
 
-- **Q1. Where can `try` appear?** Proposed: binding positions only (a `let` or `<-` right-hand
-  side, or a bare statement in `do`), which lower to `match`. Rust, Swift and Zig allow it in any
-  expression, which needs a real early return in codegen.
+- **Q1. Where can `try` appear?** **Decided (2026-10-06):** at the head of a binding's right-hand
+  side (`let x = try e`, `x <- try e`) or as a bare statement in `do`, lowering to `match`. Its
+  operand is an application; anything else is parenthesised (`try (a |> f)`). No `else` or `with`
+  suffix: failures are replaced or wrapped with `let..else` (§4.3), and two shapes are reserved so
+  the suffixes can be added later (§4.4). The suffixes were weighed against a corpus count and
+  against their grammar cost: `else` and `with` already mean two things each. Rust, Swift and Zig
+  allow `try` in any expression, which needs a real early return in codegen.
 - **Q2. Where does the failure go?** **Decided (2026-10-06): the enclosing block**, which is what
   `<-` does today. Prior art in §3. Spec §5.9 said "returns from the enclosing function"; it now
   says the block.
@@ -345,19 +360,20 @@ IR is unchanged after normalising names.
   `<-`). Proposed: keep `Step`/`Continue`/`Break`, the shape of Rust's `ControlFlow`. Open: how a
   module with its own `Step` names the prelude's, to write an instance by hand.
 - **Q4. `<-` with a pure right-hand side.** Allowed, error, or lint? Proposed: allowed, linted.
-- **Q5. A binding `else` for `try`** (`try e else Err x -> …`), as `let..else` has. It is consistent
-  with `let..else` and would cover `with`'s job, at more length.
+- **Q5. A binding `else` for `try`** (`try e else Err x -> …`). Moot after Q1: `try` takes no
+  `else`, and `let..else` already has the binding form.
 - **Q6. Generic-code cost.** Specialisation would remove it. Out of scope.
 - **Q7. Linear types.** Spec §5.8 forbids a consume after a fallible bind. `linear_check` keys that
   on the bind's `BindMode`; it must key on `try` instead.
 
 ## 10. Tests
 
-- Parser: `try e`, `try e else fb`, `try e with f`; precedence against calls and `|>`.
-- Typechecker, accepted: `Maybe`, `Result`, a user instance, generic `where Propagate t`, `Maybe` to
-  `Result` through `else`, conversion through `with`, nested blocks.
-- Typechecker, rejected: no instance; wrong family; wrong error type; `with` on `Maybe`; unknown
-  `t`; and, at phase 3, an effectful `do`-`let` and a fallible `<-`.
+- Parser: `try e` in each binding position; `try` elsewhere rejected; an unparenthesised `|>`
+  operand rejected; both reserved shapes rejected, and their parenthesised forms accepted.
+- Typechecker, accepted: `Maybe`, `Result`, a user instance, generic `where Propagate t`, nested
+  blocks.
+- Typechecker, rejected: no instance; wrong family; wrong error type; unknown `t`; and, at phase 3,
+  an effectful `do`-`let` and a fallible `<-`.
 - Runtime: both paths of every form, plus the nested-block semantics of Q2.
 - Codegen: a fused `try` chain matches the hand-written IR and allocates no `Step`.
 - Linear: a consume after a `try` is rejected (Q7).
@@ -368,7 +384,7 @@ IR is unchanged after normalising names.
 - Spec §5.9: replaced by `try`, experimental at phase 1 and normative at phase 3.
 - Spec §5.2.1 and §5.2.2: `try` in binding right-hand sides; `do`-`let` purity enforced. Their
   "monadic propagation remains planned" notes point here.
-- Spec, prelude classes section: `Propagate`, `MapFailure`, `Step`. The note that "a built-in `?`
+- Spec, prelude classes section: `Propagate`, `Step`. The note that "a built-in `?`
   propagation form" is future work becomes `try`.
 - `docs/idiomatic-sprout.md`: `try` idioms, and pure `do` blocks become `let..in`.
 - `docs/let-else-and-monadic-binding-plan.md`: Tier 2 is this document. Tier 3 (monad-generic

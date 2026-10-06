@@ -106,9 +106,10 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
 **Bindings, patterns and surface syntax**
 
 - [ ] `P2` **`try` + `Propagate`: propagation through a class.** Replaces the type-name-chosen
-  fallible `<-` (spec §5.9) with `try e` / `try e else fb` / `try e with f` over a user-extensible
-  `Propagate` class; `<-` becomes effect-only and a `do`-`let` pure. Supersedes let-else Tier 2
-  (no-`else` propagate). Open questions, measurements, migration: `docs/try-propagate-v0.md`.
+  fallible `<-` (spec §5.9) with a bare `try e` over a user-extensible `Propagate` class; replacing
+  or wrapping a failure stays `let..else`. `<-` becomes effect-only and a `do`-`let` pure.
+  Supersedes let-else Tier 2 (no-`else` propagate). Open questions, measurements, migration:
+  `docs/try-propagate-v0.md`.
 - [~] `P2` **Binding-level type annotations `let x : T = e`.** Phase 1 (top-level `let`) landed
   2026-07-30. `docs/binding-annotations-v0.md`; spec §5.2 (experimental).
   - [ ] `P2` **Phase 2 — `let…in` and `where` annotations.** Those bindings are desugared and
