@@ -401,8 +401,8 @@ four repos compiling with unchanged behaviour.
 2. Codemod A, on all four repos and every live worktree branch: add `try` to every listed `<-`,
    writing `let x = try e` where the right-hand side is pure (§9 Q4), and wrap every listed
    fallible statement in `ignore(…)`. `x <- try e` means what the old
-   `x <- e` did. The codemod must parenthesise an operand that is not an application (§9 Q12;
-   uncharted-suns has about 105 lines `<- if`/`match`/`do`/`let`), map a synthetic `__t <-` back
+   `x <- e` did. The codemod must parenthesise an operand that is not a postfix expression
+   (§9 Q12; 12 sites in the four repos, non-test), map a synthetic `__t <-` back
    to the user's line, and refuse a pattern-`else` bind on a fallible right-hand side
    (`Just x <- e else …`): its faithful rewrite is the reserved shape, and today it unwraps twice
    (`e = Just(Just(2))` binds `x = 2`). A grep of the four repos finds no such site. Running
@@ -431,11 +431,11 @@ type-checks either way (`show(x)`) is caught only by tests.
 
 - **Q1. Where can `try` appear?** **Decided (2026-10-06):** at the head of a binding's right-hand
   side (`let x = try e`, `x <- try e`) or as a bare statement in `do`, lowering to `match`. Its
-  operand is an application; anything else is parenthesised (`try (a |> f)`). No `else` or `with`
-  suffix: failures are replaced or wrapped with `let..else` (§4.3), and two shapes are reserved so
-  the suffixes can be added later (§4.4). The suffixes were weighed against a corpus count and
-  against their grammar cost: `else` and `with` already mean two things each. Rust, Swift and Zig
-  allow `try` in any expression, which needs a real early return in codegen.
+  operand is a postfix expression (Q12); anything else is parenthesised (`try (a |> f)`). No
+  `else` or `with` suffix: failures are replaced or wrapped with `let..else` (§4.3), and two shapes
+  are reserved so the suffixes can be added later (§4.4). The suffixes were weighed against a
+  corpus count and against their grammar cost: `else` and `with` already mean two things each.
+  Rust, Swift and Zig allow `try` in any expression, which needs a real early return in codegen.
 - **Q2. Where does the failure go?** **Decided (2026-10-06): the enclosing block**, which is what
   `<-` does today. Prior art in §3. Spec §5.9 said "returns from the enclosing function"; it now
   says the block.
@@ -495,9 +495,14 @@ Raised by the 2026-10-06 review; all must be decided before step 1:
   short-circuit when execution of the body will end there anyway." Zig requires `_ = try f();`
   unless the success type is `void` ("Expressions of type void are the only ones whose value can
   be ignored"); Sprout discards a non-fallible value freely today, and keeps that.
-- **Q12. The operand.** "An application" rejects `try r` and `try p.field`. Alternative: any postfix
-  expression (variable, field, call, parenthesised); only an infix expression or a pipe needs
-  parentheses. Also decides what codemod A parenthesises.
+- **Q12. The operand.** **Decided (2026-10-06): a postfix expression** — a variable, a field
+  access, a call (qualified or a constructor's) or a parenthesised expression. An infix
+  expression, a pipe, `if`/`match`/`do`/`let` or a lambda needs parentheses, and the error says so.
+  Q1 said "an application", which rejected `try mx`. Prior art splits on `try a + b`: Swift's `try`
+  "applies to the whole infix expression", Zig's binds like `!x`/`-x`, tighter than `+`, and Rust's
+  `?` is postfix. Swift's `try` changes no value; Sprout's unwraps, so the two readings differ in
+  type, and parentheses remove the question. Corpus, `<-` right-hand sides in the four repos,
+  non-test: 4 variables (`mx`, `rx`), 1 pipe, 11 `if`/`match`/`do`/`let`/lambda, of 2617.
 - **Q13. Positions.** A `try` binding inside a multi-binding `let` (spec §5.2.1a forces an
   `else`-carrying binding to stand alone, and `try` has the same shape); a top-level `let` or a
   `where` binding, which have no block and must be rejected; which patterns may sit left of a `try`.
@@ -508,8 +513,10 @@ Raised by the 2026-10-06 review; all must be decided before step 1:
 
 ## 10. Tests
 
-- Parser: `try e` in each binding position; `try` elsewhere rejected; an unparenthesised `|>`
-  operand rejected; both reserved shapes rejected, and their parenthesised forms accepted.
+- Parser: `try e` in each binding position; `try` elsewhere rejected; each postfix operand
+  accepted (variable, field, call, constructor, parenthesised); an unparenthesised infix, `|>`,
+  `if`, `match`, `do`, `let` or lambda operand rejected; both reserved shapes rejected, and their
+  parenthesised forms accepted.
 - Typechecker, accepted: `Maybe`, `Result`, a user instance, generic `where Propagate t`, nested
   blocks.
 - Typechecker, rejected: no instance; wrong family; wrong error type; unknown `t`; at step 3, a
