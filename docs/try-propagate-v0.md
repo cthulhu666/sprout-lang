@@ -103,8 +103,8 @@ Checked 2026-10-06 against each primary source.
 | OCaml `let*` | `( let* ) e1 (fun x -> e2)` | OCaml Manual, *Binding operators* |
 | Gleam `use` | "turns all following expressions into an anonymous function" | Gleam v0.25 release notes |
 
-Sprout has no `return`, and `<-` already lowers to a `match` over the remaining steps, so it is in
-the second group. Both first-group languages with a block form added it deliberately (Rust `try`
+Sprout has no `return`, a failing `<-` already ends only its block, and `let..else` desugars to a
+`match` over the remaining steps, so it is in the second group. Both first-group languages with a block form added it deliberately (Rust `try`
 blocks, Swift `do`-`catch`).
 
 Gleam is the nearest precedent and cuts the other way on syntax. It had a block-scoped `try`
@@ -152,7 +152,8 @@ let x = try e          →   match branch(e) with
 ```
 
 In `do`, `x <- try e` runs `e`'s effect once and then branches, the same way an effectful
-`let..else` step does (spec §5.2.2). A bare `try e` statement in `do` means `let _ = try e`.
+`let..else` step does (spec §5.2.2). What a bare `try e` statement means, and `try` as a block's
+last step, are open (§9 Q11).
 
 **Typing.** `r : t b` becomes the value of the enclosing block, so the block's type must unify with
 `t b`. This one unification replaces §5.9's table: a `Maybe` in a `Result` block fails, and so
@@ -219,11 +220,16 @@ common.
 
 `x <- e` never unwraps. A `do`-`let` must be pure. Spec §5.2.2 already calls it "the pure local
 bind", but the checker accepts an effectful right-hand side today (`let r = fs.write_text(...)`
-compiles and runs).
+compiles and runs). The same holds for `let..in`: spec §5.2.1 makes an effectful right-hand side an
+error, yet `let r = fs.read_text(...) in …` compiles in an `!{IO}` function. Unlike a `do`-`let`, it
+has no mechanical rewrite to `<-` (§9 Q15).
 
 ### 4.6 Generic code
 
 `try` works under `where Propagate t`. It costs a dictionary call and a `Step` box (§5).
+
+Generic code can propagate but cannot build a success: `Propagate` has no `pure`-like method, so a
+`where Propagate t` function returning `t a` also needs `Applicative t` (§9 Q14).
 
 ### 4.7 Exceptions, later
 
@@ -269,6 +275,17 @@ That is variant C, which measured the same as today. The rule depends on the ins
 its name, so it covers user types too. Acceptance: a fused `try` chain emits the same IR as the
 hand-written `match` (modulo SSA names), and no `sprout_alloc_obj` for `Step`.
 
+Fusion needs the instance's `branch` body during lowering. `LowerCtx` (`lowering.sprout`) carries
+only instance impl names, so step 1 adds a table of instance bodies from the typed program.
+
+**What "zero cost" means here.** The same code as a hand-written `match`, on the success path:
+
+- The unboxed worker return needs the scrutinee to be a direct call to a top-level function
+  (`unboxed_maybe_match_target`, `ast_to_ir.sprout`). `try` on a variable, a field, a lambda or a
+  closure call stays boxed, exactly as a hand-written `match` on it would.
+- On failure the fused `Err e -> Err(e)` rebuilds the `Err`, as today's unboxed `<-` path already
+  does. Only today's boxed path passes the original box on.
+
 **Generic code** still pays the dictionary call and the box. `docs/fold-while-v0.md` §6 rejected a
 `Continue`/`Done` type because "Sprout boxes every constructor", which on `any`/`all` would mean
 one allocation per element of every fold. Here the box is confined to generic code that cannot
@@ -279,9 +296,9 @@ short-circuit at all today, and fusion removes it everywhere else.
 | Fast path | Decided by | Effect of this design |
 |---|---|---|
 | Unboxed worker return (`_worker`, tag + payload) | shape: at most one field per constructor | unchanged; already serves user ADTs (variant D) |
-| `<-` short-circuit lowering | name (`is_maybe_type` / `is_result_type`) | removed; fusion replaces it |
+| `<-` short-circuit lowering | the bind's `BindMode` (phase 0) | removed; fusion replaces it |
 | Unboxed C runtime reads | a fixed list of 8 externs | unchanged (runtime ABI) |
-| Tuple scalar replacement | shape, tuples only | its name test (`sra_rest_plain`) becomes a `try` test |
+| Tuple scalar replacement | shape, tuples only | its `BindMode` test (`sra_rest_plain`) becomes a `try` test |
 
 A constructor with two or more fields is boxed even in hand-written code. Widening unboxed returns
 helps every ADT, but it is separate work.
@@ -298,8 +315,8 @@ Maybe in Result    ... plus: to turn `Nothing` into an error, write `let Just x 
 reserved else      `try` takes no `else` yet. For `let..else` on the value: `(try e) else …`.
 reserved with      `with` after `try` is reserved. For a record update, write `(try e) with (…)`.
 unknown t          the existing ambiguity error.
-effectful do-let   this `let` runs an effect. Bind it with `<-`.          (phase 3)
-old fallible <-    `<-` no longer unwraps `Result`. Write `x <- try e`.   (phase 3)
+effectful do-let   this `let` runs an effect. Bind it with `<-`.          (step 5)
+old fallible <-    `<-` no longer unwraps `Result`. Write `x <- try e`.   (step 3)
 ```
 
 ## 7. Interaction with `let..else`
@@ -319,26 +336,49 @@ turning that error into propagation would silently change the meaning of a mista
 
 ## 8. Compatibility and migration
 
-Breaking at phase 3: a fallible `<-` needs `try`, and an effectful `do`-`let` becomes `<-`.
+Breaking: a fallible `<-` needs `try`, and an effectful `do`-`let` becomes `<-`.
 
 **Size.** A rough count of fallible binds (callee name looked up against `fn` signatures, ±50%):
 576 certain across sprout_lang, uncharted-suns and repbit, an estimated 600–900 in total.
 uncharted-suns is mostly `Maybe`, repbit mostly `Result`. Effectful `do`-`let`s are not counted.
 Exact counts need the compiler, not grep.
 
-**Codemod.** Add `try` after every propagating `<-`. That is always valid, because `<-` with a pure
-right-hand side stays legal (§9 Q4). Rewrite every effectful `do`-`let` to `<-`. Check that golden
-IR is unchanged after normalising names.
-
-**Phases.**
+**Order (proposed; reviewed 2026-10-06 by three independent passes, pending §9 Q8).** Every step
+must leave all three repos compiling with unchanged behaviour.
 
 0. ~~Soundness fix.~~ Landed: `typed_ast.BindMode` on each bind, decided in
    `infer.decide_bind_mode` and read by every later pass; a head that becomes `Maybe`/`Result`
    after the bind is rejected (spec §5.9). The modes are also the list the codemod needs.
-1. Add `Step`, `Propagate` and their instances, plus `try`, its two reserved shapes (§4.4) and
-   fusion. Old fallible `<-` keeps working.
-2. Run the codemod on sprout_lang, then on uncharted-suns and repbit.
-3. Flip: a fallible `<-` is an error with the migration hint, and `do`-`let` must be pure.
+1. Add `Step`, `Propagate` and their instances, `try`, its two reserved shapes (§4.4) and fusion.
+   Old fallible `<-` keeps working, except that a `<-` whose right-hand side is a `try` (after
+   stripping parentheses) is always plain. Otherwise `x <- try e` with `e : Result E (Maybe A)`
+   unwraps twice. The rule must reach every place that reads a bind's type, not only
+   `decide_bind_mode`: `do_family_update` (`infer.sprout`) sets the block's family from the step's
+   type for every `DoBindStep`, and the parser's synthetic `__t <- e` binds (`build_do_total`,
+   `parser.sprout`) carry the user's right-hand side.
+   1a. Tooling: a compiler phase that lists every bind whose `BindMode` propagates and every
+   effectful `do`-`let`, with file, line and column. Only the type checker knows either, and no
+   `--phase` reports them today.
+2. Codemod A, on sprout_lang, then uncharted-suns and repbit: add `try` to every listed `<-`.
+   `x <- try e` means what the old `x <- e` did. The codemod must parenthesise an operand that is
+   not an application (§9 Q12; uncharted-suns has about 105 lines `<- if`/`match`/`do`/`let`),
+   map a synthetic `__t <-` back to the user's line, and refuse a pattern-`else` bind on a fallible
+   right-hand side (`Just x <- e else …`): its faithful rewrite is the reserved shape, and today
+   it unwraps twice (`e = Just(Just(2))` binds `x = 2`). A grep of the three repos finds no such
+   site. Running it on `stdlib/compiler/` needs step 1 landed and reseeded first.
+3. Flip: `<-` never unwraps. A `<-` that would have unwrapped without `try` gets a migration
+   diagnostic (§9 Q8). `Ok x <- e else …` on a `Result`, a type error today because the synthetic
+   bind unwraps, becomes legal; that change is intended.
+4. Codemod B: rewrite every effectful `do`-`let` to `<-`. Behaviour is preserved because `<-` is
+   now plain; before step 3 it is not (`let _ = fs.write_text(bad, …)` continues, `_ <-` stops the
+   block). IR is not preserved: a tuple bound by a `do`-`let` gets scalar replacement
+   (`sra_core_eligible`, `ast_to_ir.sprout`) and a plain `<-` does not. Extend it to plain `<-`
+   first, or accept the diff.
+5. Enforce `do`-`let` purity (and `let..in`, per §9 Q15).
+
+Downstream CI builds against sprout-lang master. Codemod A must be merged in uncharted-suns and
+repbit before step 3 lands, and codemod B before step 5. uncharted-suns has about 8 live
+worktrees; each branch needs codemod A before it rebases past step 3.
 
 ## 9. Open questions
 
@@ -360,11 +400,42 @@ IR is unchanged after normalising names.
   `<-`). Proposed: keep `Step`/`Continue`/`Break`, the shape of Rust's `ControlFlow`. Open: how a
   module with its own `Step` names the prelude's, to write an instance by hand.
 - **Q4. `<-` with a pure right-hand side.** Allowed, error, or lint? Proposed: allowed, linted.
+  Decide before step 2: codemod A writes `x <- try pure_fn()` into every pure `Maybe` `do` block,
+  and lint is a CI gate. A lint must look through `try`.
 - **Q5. A binding `else` for `try`** (`try e else Err x -> …`). Moot after Q1: `try` takes no
   `else`, and `let..else` already has the binding form.
 - **Q6. Generic-code cost.** Specialisation would remove it. Out of scope.
 - **Q7. Linear types.** Spec §5.8 forbids a consume after a fallible bind. `linear_check` keys that
-  on the bind's `BindMode`; it must key on `try` instead.
+  on the bind's `BindMode`; it must key on `try` instead, in all three forms: `lin_do_let`
+  (`linear_check.sprout`) has no fallible flag today, and a pure `let..in` reaches the checker as a
+  parse-time `match`, with a different message from `after_fallible_msg`. Depends on Q9.
+
+Raised by the 2026-10-06 review; all must be decided before step 1:
+
+- **Q8. The step-3 diagnostic.** As first proposed it is a permanent error, which forbids binding a
+  whole `Result` (`r <- fs.write_text(…)`, the case §1 opens with) and contradicts §4.5. Make it
+  temporary or a lint, with a later step that removes it.
+- **Q9. Representation.** A typed `try` node, or a parse-time rewrite to `match branch(e)`. It
+  decides diagnostic positions, Q7, the tuple scalar-replacement test and fusion. A rewrite to the
+  bare names `branch`/`Continue`/`Break` can be captured by a user's own definitions
+  (`stdlib/repl.sprout` defines a `Continue`), so the lowering needs names a module cannot shadow.
+- **Q10. A failure swallowed by a discarded step.** A non-last `do` step whose value is discarded
+  loses its failure: `let Just v = mx else Nothing` / `in Just(v)` as a step, then `Just(99)`,
+  returns `Just 99` for `mx = Nothing`. That follows from Q2. It is rare with `let..else`; with
+  `try` in pure code it will not be. Needs a diagnostic.
+- **Q11. A bare `try e` statement, and `try` as the last step.** §4.2 first said a bare statement
+  means `let _ = try e`, but a `do`-`let` is to be pure; `_ <- try e` fits. As the last step it is
+  rejected by the trailing-binding rule with a message about a `let` or `<-` the user never wrote.
+- **Q12. The operand.** "An application" rejects `try r` and `try p.field`. Alternative: any postfix
+  expression (variable, field, call, parenthesised); only an infix expression or a pipe needs
+  parentheses. Also decides what codemod A parenthesises.
+- **Q13. Positions.** A `try` binding inside a multi-binding `let` (spec §5.2.1a forces an
+  `else`-carrying binding to stand alone, and `try` has the same shape); a top-level `let` or a
+  `where` binding, which have no block and must be rejected; which patterns may sit left of a `try`.
+- **Q14. Building a success in generic code.** Require `Applicative t` beside `Propagate t`
+  (§4.6), or give `Propagate` a method for it, as Rust's `Try` has `from_output`.
+- **Q15. Step 5's scope.** Whether purity is also enforced for `let..in` (§4.5), which has no
+  mechanical rewrite.
 
 ## 10. Tests
 
@@ -372,16 +443,23 @@ IR is unchanged after normalising names.
   operand rejected; both reserved shapes rejected, and their parenthesised forms accepted.
 - Typechecker, accepted: `Maybe`, `Result`, a user instance, generic `where Propagate t`, nested
   blocks.
-- Typechecker, rejected: no instance; wrong family; wrong error type; unknown `t`; and, at phase 3,
-  an effectful `do`-`let` and a fallible `<-`.
+- Typechecker, rejected: no instance; wrong family; wrong error type; unknown `t`; and, at steps 3
+  and 5, a fallible `<-` and an effectful `do`-`let`.
 - Runtime: both paths of every form, plus the nested-block semantics of Q2.
+- Step 1: `x <- try e` with `e : Result E (Maybe A)` binds a `Maybe A` in a `Result` block.
+- Codemod A: a pattern-`else` bind on a fallible right-hand side is refused, not rewritten.
 - Codegen: a fused `try` chain matches the hand-written IR and allocates no `Step`.
 - Linear: a consume after a `try` is rejected (Q7).
 - The phase-0 regression fixtures keep passing.
 
 ## 11. Spec and docs impact
 
-- Spec §5.9: replaced by `try`, experimental at phase 1 and normative at phase 3.
+- Spec §5.9: replaced by `try`, experimental at step 1 and normative at step 3.
+- `try` becomes a hard keyword. No identifier `try` exists in the three repos (strings and comments
+  excluded). Places that list keywords or step starts: `lexer.is_keyword` and spec §2;
+  `parser.looks_like_do_step_start` and spec §5.2.1a's step-start list; the formatter's
+  `is_call_like_pp_kw`, else `try (x)` is reformatted to `try(x)`; the IntelliJ plugin's lexer
+  keyword list and its test.
 - Spec §5.2.1 and §5.2.2: `try` in binding right-hand sides; `do`-`let` purity enforced. Their
   "monadic propagation remains planned" notes point here.
 - Spec, prelude classes section: `Propagate`, `Step`. The note that "a built-in `?`
@@ -389,4 +467,4 @@ IR is unchanged after normalising names.
 - `docs/idiomatic-sprout.md`: `try` idioms, and pure `do` blocks become `let..in`.
 - `docs/let-else-and-monadic-binding-plan.md`: Tier 2 is this document. Tier 3 (monad-generic
   propagation) is not pursued.
-- `README.md`: none until phase 1 lands.
+- `README.md`: none until step 1 lands.
