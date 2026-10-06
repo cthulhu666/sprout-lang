@@ -1,0 +1,54 @@
+import stdlib.test (check_eq, check_true, run_suite)
+import stdlib.bytes as bytes
+import stdlib.hex as hex
+
+fn of_list(values: List Int) -> Bytes =
+  bytes.builder_build(list_fold(\ (acc, v) -> bytes.builder_append(acc, bytes.builder_byte(v)),
+                                bytes.builder_empty(), values))
+
+fn all_bytes() -> Bytes =
+  of_list(range_to_list(0..255))
+
+# The decoded bytes re-encoded, or the error, so one string compares both arms.
+fn show(result: Result hex.HexError Bytes) -> String =
+  match result with
+  | Ok value -> `ok:${hex.encode(value)}`
+  | Err e -> `err:${to_string(e)}`
+
+fn main() -> Unit !{IO} =
+  run_suite("hex", [
+    check_eq("encode empty", hex.encode(bytes.empty()), ""),
+    check_eq("encode is lowercase, two digits per byte", hex.encode(of_list([0, 15, 16, 171, 255])),
+             "000f10abff"),
+    check_eq("encode every byte value", bytes.length(all_bytes()), 256),
+    check_eq("every byte value encodes to 512 digits", str_len(hex.encode(all_bytes())), 512),
+    check_true("every byte value round-trips",
+               match hex.decode(hex.encode(all_bytes())) with
+               | Ok back -> back == all_bytes()
+               | Err _ -> false),
+
+    check_eq("decode empty", show(hex.decode("")), "ok:"),
+    check_eq("decode lowercase", show(hex.decode("000f10abff")), "ok:000f10abff"),
+    check_eq("decode uppercase", show(hex.decode("DEADBEEF")), "ok:deadbeef"),
+    check_eq("decode mixed case", show(hex.decode("DeAdBeEf")), "ok:deadbeef"),
+
+    # Length is checked before any digit, so an odd input never reports a digit.
+    check_eq("odd length", show(hex.decode("abc")), "err:HexOddLength"),
+    check_eq("odd length with a bad digit", show(hex.decode("zz1")), "err:HexOddLength"),
+
+    # The offset is the first bad BYTE, so it points into the input as written.
+    check_eq("bad digit in the low nibble", show(hex.decode("0g")), "err:HexBadDigit(1)"),
+    check_eq("bad digit after good pairs", show(hex.decode("00ffzz")), "err:HexBadDigit(4)"),
+    check_eq("whitespace is not skipped", show(hex.decode("0a 0")), "err:HexBadDigit(2)"),
+    # "é" is two bytes, so "éé" is an even four bytes, none of them hex.
+    check_eq("multibyte input", show(hex.decode("éé")), "err:HexBadDigit(0)"),
+
+    # One byte either side of each accepted range.
+    check_eq("'/' sits below '0'", show(hex.decode("/0")), "err:HexBadDigit(0)"),
+    check_eq("':' sits above '9'", show(hex.decode(":0")), "err:HexBadDigit(0)"),
+    check_eq("'@' sits below 'A'", show(hex.decode("@0")), "err:HexBadDigit(0)"),
+    check_eq("'G' sits above 'F'", show(hex.decode("G0")), "err:HexBadDigit(0)"),
+    check_eq("'`' sits below 'a'", show(hex.decode("`0")), "err:HexBadDigit(0)"),
+    check_eq("'g' sits above 'f'", show(hex.decode("g0")), "err:HexBadDigit(0)"),
+    check_eq("the edges themselves", show(hex.decode("09afAF")), "ok:09afaf")
+  ])

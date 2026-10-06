@@ -1,0 +1,71 @@
+module stdlib.uuid
+
+import stdlib.bits
+import stdlib.bytes as bytes
+import stdlib.crypto as crypto
+import stdlib.hex as hex
+import stdlib.string as string
+
+# An RFC 9562 UUID, held in canonical form: lowercase 8-4-4-4-12. The constructor is
+# hidden, so a Uuid comes only from `parse` or a mint, and two are equal exactly when
+# they name the same id.
+export wrap Uuid = String deriving (Eq, Ord)
+
+# The canonical text itself, for SQL and JSON — not the derived `Uuid(…)`.
+instance ToString Uuid
+  fn to_string(id: Uuid) -> String =
+    match id with
+    | Uuid text -> text
+
+# Any case in, lowercase out. Only the shape is checked, so RFC 9562's Nil and Max ids parse
+# and no version is required. O(1): anything but 36 bytes is rejected first.
+export fn parse(raw: String) -> Maybe Uuid =
+  if string.byte_length(raw) == 36 && has_dashes(raw) then
+    match hex.decode(without_dashes(raw)) with
+    | Ok value -> Just(format(value))
+    | Err _ -> Nothing
+  else Nothing
+
+# Exactly 16 bytes, so a wrong slice of a larger random draw is caught, not truncated.
+# Byte 6 gets version 4 and byte 8 the RFC 9562 variant; the rest is used as given.
+export fn v4_from_bytes(random: Bytes) -> Maybe Uuid =
+  if bytes.length(random) != 16 then Nothing
+  else Just(format(with_version_bits(random)))
+
+export fn v4() -> Result crypto.CryptoError Uuid !{IO} =
+  match crypto.random_bytes(16) with
+  | Err e -> Err(e)
+  | Ok random ->
+      match v4_from_bytes(random) with
+      | Just id -> Ok(id)
+      | Nothing -> Err(crypto.CryptoUnavailable("random_bytes(16) did not return 16 bytes"))
+
+fn has_dashes(raw: String) -> Bool =
+  str_starts_with_at_byte(raw, 8, "-") && str_starts_with_at_byte(raw, 13, "-")
+    && str_starts_with_at_byte(raw, 18, "-") && str_starts_with_at_byte(raw, 23, "-")
+
+# Every cut sits next to a checked '-' or at an end, so each is a codepoint boundary
+# even when a group holds a multibyte character; `hex.decode` then rejects it.
+fn without_dashes(raw: String) -> String =
+  str_slice_bytes(raw, 0, 8) ++ str_slice_bytes(raw, 9, 4) ++ str_slice_bytes(raw, 14, 4)
+    ++ str_slice_bytes(raw, 19, 4) ++ str_slice_bytes(raw, 24, 12)
+
+fn format(value: Bytes) -> Uuid =
+  let digits = hex.encode(value)
+  in Uuid(str_slice_bytes(digits, 0, 8) ++ "-" ++ str_slice_bytes(digits, 8, 4) ++ "-"
+            ++ str_slice_bytes(digits, 12, 4) ++ "-" ++ str_slice_bytes(digits, 16, 4) ++ "-"
+            ++ str_slice_bytes(digits, 20, 12))
+
+# Version 4 in byte 6's high nibble, variant `10` in byte 8's top bits.
+fn with_version_bits(random: Bytes) -> Bytes =
+  let version = bit_or(bit_and(byte_or_zero(random, 6), 15), 64)
+      variant = bit_or(bit_and(byte_or_zero(random, 8), 63), 128)
+      pieces = [bytes.builder_bytes(bytes.take(random, 6)), bytes.builder_byte(version),
+                bytes.builder_bytes(bytes.slice(random, 7, 1)), bytes.builder_byte(variant),
+                bytes.builder_bytes(bytes.drop(random, 9))]
+  in bytes.builder_build(list_fold(bytes.builder_append, bytes.builder_empty(), pieces))
+
+fn byte_or_zero(value: Bytes, index: Int) -> Int =
+  match bytes.get(value, index) with
+  | Just b -> b
+  | Nothing -> 0

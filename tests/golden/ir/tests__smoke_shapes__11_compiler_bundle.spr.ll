@@ -842,9 +842,9 @@ declare i64 @fs_rename(i64, i64)
 @.str.707 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.str.708 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c" \00" }
 @.str.709 = private unnamed_addr constant { i64, [44 x i8] } { i64 704522, [44 x i8] c":help :quit :q :exit :type :t :instances :i\00" }
-@.str.710 = private unnamed_addr constant { i64, [74 x i8] } { i64 1196042, [74 x i8] c"args bits bytes chan collections compiler crypto env fs http http_client \00" }
+@.str.710 = private unnamed_addr constant { i64, [78 x i8] } { i64 1261578, [78 x i8] c"args bits bytes chan collections compiler crypto env fs hex http http_client \00" }
 @.str.711 = private unnamed_addr constant { i64, [76 x i8] } { i64 1228810, [76 x i8] c"http_middleware http_server json linalg log math mutable net process regex \00" }
-@.str.712 = private unnamed_addr constant { i64, [75 x i8] } { i64 1212426, [75 x i8] c"repl rng scram stamped string task template terminal test time url version\00" }
+@.str.712 = private unnamed_addr constant { i64, [80 x i8] } { i64 1294346, [80 x i8] c"repl rng scram stamped string task template terminal test time url uuid version\00" }
 @.str.713 = private unnamed_addr constant { i64, [15 x i8] } { i64 229386, [15 x i8] c"stdlib.prelude\00" }
 @.str.714 = private unnamed_addr constant { i64, [21 x i8] } { i64 327690, [21 x i8] c"read_file: prelude: \00" }
 @.str.715 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 216, column 84)\00" }
@@ -49641,7 +49641,7 @@ entry:
 define i64 @stdlib.repl.stdlib_module_completion_names() {
 entry:
   %t$0 = call i64 @vec_empty()
-  %t$1 = getelementptr inbounds { i64, [74 x i8] }, ptr @.str.710, i64 0, i32 1, i64 0
+  %t$1 = getelementptr inbounds { i64, [78 x i8] }, ptr @.str.710, i64 0, i32 1, i64 0
   %t$2 = ptrtoint ptr %t$1 to i64
   %t$3 = getelementptr inbounds { i64, [76 x i8] }, ptr @.str.711, i64 0, i32 1, i64 0
   %t$4 = ptrtoint ptr %t$3 to i64
@@ -49656,7 +49656,7 @@ entry:
   %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
   %t$5 = call i64 @__tc_Semigroup_String_append(i64 %t$2, i64 %t$4)
   %t$16 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$6 = getelementptr inbounds { i64, [75 x i8] }, ptr @.str.712, i64 0, i32 1, i64 0
+  %t$6 = getelementptr inbounds { i64, [80 x i8] }, ptr @.str.712, i64 0, i32 1, i64 0
   %t$7 = ptrtoint ptr %t$6 to i64
   %t$17 = alloca i64
   store i64 %t$5, ptr %t$17

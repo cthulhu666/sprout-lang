@@ -198,9 +198,9 @@ fn repl_command_names() -> Vec String =
 # modules, including every one added since it was written).
 export fn stdlib_module_completion_names() -> Vec String =
   append_space_names(vec_empty(),
-    "args bits bytes chan collections compiler crypto env fs http http_client "
+    "args bits bytes chan collections compiler crypto env fs hex http http_client "
       ++ "http_middleware http_server json linalg log math mutable net process regex "
-      ++ "repl rng scram stamped string task template terminal test time url version")
+      ++ "repl rng scram stamped string task template terminal test time url uuid version")
 
 # The prelude is in scope unqualified, so BOTH its exports and its externs are
 # offered bare. The externs are the ones that were missing entirely: `print`,

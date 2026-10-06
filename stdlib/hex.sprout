@@ -1,0 +1,69 @@
+module stdlib.hex
+
+# Base16 (RFC 4648 §8): `encode` writes lowercase, `decode` reads either case.
+
+import stdlib.bits
+import stdlib.bytes as bytes
+import stdlib.math.int (is_odd)
+import stdlib.string as string
+
+export type HexError (..) deriving (Eq, ToString) =
+  | HexOddLength
+  # The byte offset of the first byte that is not a hex digit.
+  | HexBadDigit Int
+
+# Every byte value as its two digits, so encoding takes one slice per byte.
+let digit_pairs = string_concat_many(list_map(pair_of, range_to_list(0..255)))
+
+fn pair_of(value: Int) -> String =
+  str_slice_bytes("0123456789abcdef", value / 16, 1)
+    ++ str_slice_bytes("0123456789abcdef", bit_and(value, 15), 1)
+
+# O(n): one slice per byte, joined once.
+export fn encode(value: Bytes) -> String =
+  string_concat_many(encode_from(value, bytes.length(value) - 1, Nil))
+
+# From the last byte down, so the pieces arrive in order with no reverse.
+fn encode_from(value: Bytes, index: Int, acc: List String) -> List String =
+  if index < 0 then acc
+  else
+    match bytes.get(value, index) with
+    | Just b -> encode_from(value, index - 1, Cons(str_slice_bytes(digit_pairs, b * 2, 2), acc))
+    | Nothing -> acc
+
+# O(n log n). An odd length is reported before any digit is read. The bytes are built by
+# halving, because `builder_append` copies both sides' chunk tables and a fold is quadratic.
+export fn decode(raw: String) -> Result HexError Bytes =
+  let digits = bytes.from_string(raw)
+      total = bytes.length(digits)
+  in if is_odd(total) then Err(HexOddLength)
+     else
+       match first_bad_digit(digits, 0, total) with
+       | Just index -> Err(HexBadDigit(index))
+       | Nothing -> Ok(bytes.builder_build(build_pairs(digits, 0, total / 2)))
+
+# The digit's value, or -1 for any other byte.
+fn digit_value(code: Int) -> Int =
+  if code >= 48 && code <= 57 then code - 48
+  else if code >= 97 && code <= 102 then code - 87
+  else if code >= 65 && code <= 70 then code - 55
+  else -1
+
+fn digit_at(digits: Bytes, index: Int) -> Int =
+  match bytes.get(digits, index) with
+  | Just code -> digit_value(code)
+  | Nothing -> -1
+
+fn first_bad_digit(digits: Bytes, index: Int, total: Int) -> Maybe Int =
+  if index >= total then Nothing
+  else if digit_at(digits, index) < 0 then Just(index)
+  else first_bad_digit(digits, index + 1, total)
+
+# Output bytes [low, high); every digit has already been checked.
+fn build_pairs(digits: Bytes, low: Int, high: Int) -> Builder =
+  if high <= low then bytes.builder_empty()
+  else if high - low == 1 then
+    bytes.builder_byte(digit_at(digits, 2 * low) * 16 + digit_at(digits, 2 * low + 1))
+  else
+    let middle = low + (high - low) / 2
+    in bytes.builder_append(build_pairs(digits, low, middle), build_pairs(digits, middle, high))

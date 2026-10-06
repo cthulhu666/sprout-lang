@@ -1,0 +1,87 @@
+import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
+import stdlib.bytes as bytes
+import stdlib.uuid as uuid
+
+fn repeated(value: Int, count: Int) -> Bytes =
+  bytes.builder_build(list_fold(\ (acc, _) -> bytes.builder_append(acc, bytes.builder_byte(value)),
+                                bytes.builder_empty(), range_to_list(1..count)))
+
+fn counting(count: Int) -> Bytes =
+  bytes.builder_build(list_fold(\ (acc, v) -> bytes.builder_append(acc, bytes.builder_byte(v)),
+                                bytes.builder_empty(), range_to_list(0..(count - 1))))
+
+fn show(id: Maybe uuid.Uuid) -> String =
+  match id with
+  | Just value -> to_string(value)
+  | Nothing -> "none"
+
+fn parses(raw: String) -> Bool =
+  match uuid.parse(raw) with
+  | Just _ -> true
+  | Nothing -> false
+
+fn minted_text() -> String !{IO} =
+  match uuid.v4() with
+  | Ok id -> to_string(id)
+  | Err _ -> "error"
+
+fn check_minted(state: TestState) -> Unit !{IO} =
+  match uuid.v4() with
+  | Err _ -> assert_true(state, "v4 mints an id", false)
+  | Ok id ->
+      do
+        assert_eq(state, "v4 output parses back to itself", show(uuid.parse(to_string(id))),
+                  to_string(id))
+        assert_eq(state, "v4 sets the version digit", str_slice(to_string(id), 14, 1), "4")
+        assert_true(state, "v4 sets the variant digit",
+                    str_find("89ab", str_slice(to_string(id), 19, 1)) >= 0)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # Byte 6 carries the version nibble (4), byte 8 the variant bits (10).
+    assert_eq(state, "zero bytes get version and variant",
+              show(uuid.v4_from_bytes(repeated(0, 16))), "00000000-0000-4000-8000-000000000000")
+    assert_eq(state, "0xff bytes get version and variant",
+              show(uuid.v4_from_bytes(repeated(255, 16))), "ffffffff-ffff-4fff-bfff-ffffffffffff")
+    assert_eq(state, "bytes land in 8-4-4-4-12 order",
+              show(uuid.v4_from_bytes(counting(16))), "00010203-0405-4607-8809-0a0b0c0d0e0f")
+    assert_eq(state, "15 bytes is not a uuid", show(uuid.v4_from_bytes(counting(15))), "none")
+    assert_eq(state, "17 bytes is not a uuid", show(uuid.v4_from_bytes(counting(17))), "none")
+    assert_eq(state, "no bytes is not a uuid", show(uuid.v4_from_bytes(bytes.empty())), "none")
+
+    assert_eq(state, "parse keeps a canonical id",
+              show(uuid.parse("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")),
+              "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+    assert_eq(state, "parse lowercases",
+              show(uuid.parse("A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11")),
+              "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+    assert_true(state, "ids differing only in case are equal",
+                parses("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+                  && uuid.parse("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+                       == uuid.parse("A0eebc99-9C0B-4ef8-BB6D-6bb9bd380A11"))
+    # The shape is checked, not the version: RFC 9562's Nil and Max ids both parse.
+    assert_true(state, "nil uuid parses", parses("00000000-0000-0000-0000-000000000000"))
+    assert_true(state, "max uuid parses", parses("ffffffff-ffff-ffff-ffff-ffffffffffff"))
+
+    assert_true(state, "no dashes", parses("a0eebc999c0b4ef8bb6d6bb9bd380a11") == false)
+    assert_true(state, "dash one place late",
+                parses("a0eebc999-c0b-4ef8-bb6d-6bb9bd380a11") == false)
+    assert_true(state, "37 characters", parses("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a110") == false)
+    assert_true(state, "35 characters", parses("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a1") == false)
+    assert_true(state, "non-hex digit", parses("g0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11") == false)
+    assert_true(state, "braces", parses("{a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11}") == false)
+    assert_true(state, "urn prefix",
+                parses("urn:uuid:a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11") == false)
+    assert_true(state, "empty", parses("") == false)
+    # "é" is two bytes, so this is 36 bytes with one hex pair replaced.
+    assert_true(state, "36 bytes with a multibyte character",
+                parses("éeebc99-9c0b-4ef8-bb6d-6bb9bd380a11") == false)
+
+    check_minted(state)
+    first <- minted_text()
+    second <- minted_text()
+    assert_true(state, "two v4 ids differ", first != second)
+
+    summary(state)
