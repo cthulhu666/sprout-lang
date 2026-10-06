@@ -1,0 +1,16 @@
+module main
+
+# A `<-` as the last step leaves the block with no value. The checker typed the
+# block as the bind's right-hand side (`Maybe Int`), lowering returned unit, and
+# the caller aborted on a null tag. See spec-v0.md §5.2.1a.
+
+fn find(n: Int) -> Maybe Int =
+  if n > 0 then Just(n) else Nothing
+
+fn pick() -> Maybe Int =
+  do
+    x <- find(1)
+    y <- find(x + 1)
+
+fn main() -> Unit !{IO} =
+  print(maybe_with_default(0, pick()))

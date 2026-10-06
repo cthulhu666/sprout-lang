@@ -1,0 +1,11 @@
+module main
+
+# A `let` as the last step: the block was typed `Int` but evaluated to unit, so
+# `five() + 1` printed 1. See spec-v0.md §5.2.1a.
+
+fn five() -> Int =
+  do
+    let x = 5
+
+fn main() -> Unit !{IO} =
+  print(five() + 1)
