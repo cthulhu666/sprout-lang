@@ -68,6 +68,15 @@ fn generic_head() -> f Int where Applicative f =
 
 fn generic_head_at_maybe() -> Maybe Int = generic_head()
 
+# A failure ends only the innermost block (spec-v0.md §5.9), not the function: the inner
+# `do` is a discarded statement, so the outer block carries on to its own last step.
+fn inner_failure_stays_inner(m: Maybe Int) -> Maybe Int =
+  do
+    do
+      y <- m
+      Just(y)
+    Just(42)
+
 fn show_result(r: Result String Int) -> String =
   match r with
   | Ok n -> "Ok " ++ int_to_string(n)
@@ -104,5 +113,7 @@ fn main() -> Unit !{IO} =
     late <- late_plain_head()
     assert_eq(state, "late-resolving non-fallible head stays a plain bind", late, [1])
     assert_eq(state, "rigid head stays a plain bind", show_maybe(generic_head_at_maybe()), "Just 1")
+    assert_eq(state, "inner failure ends only the inner block",
+              show_maybe(inner_failure_stays_inner(Nothing)), "Just 42")
 
     summary(state)
