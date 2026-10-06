@@ -254,7 +254,8 @@ rule from linear values to fallible ones. A named `x <- e` stays legal and binds
 `try` works under `where Propagate t`. It costs a dictionary call and a `Step` box (§5).
 
 Generic code can propagate but cannot build a success: `Propagate` has no `pure`-like method, so a
-`where Propagate t` function returning `t a` also needs `Applicative t` (§9 Q14).
+`where Propagate t` function returning `t a` also asks for `Applicative t` (§9 Q14). A type with
+both instances must satisfy `branch(pure(x)) == Continue(x)`.
 
 ### 4.7 Exceptions, later
 
@@ -513,8 +514,11 @@ Raised by the 2026-10-06 review; all must be decided before step 1:
   in a `do`-`let` statement only because the parser's rewrite nests the remaining steps in a
   `match` arm; `let..in` groups already allow it. After step 0b that limit is gone, and lifting it
   for `else` is a separate commit, since it changes the language.
-- **Q14. Building a success in generic code.** Require `Applicative t` beside `Propagate t`
-  (§4.6), or give `Propagate` a method for it, as Rust's `Try` has `from_output`.
+- **Q14. Building a success in generic code.** **Decided (2026-10-06): ask for `Applicative t`
+  beside `Propagate t`** (§4.6); `Propagate` keeps one method. Rust's `Try` (unstable,
+  `try_trait_v2`) has `from_output`, with the law `Try::from_output(x).branch() -->
+  ControlFlow::Continue(x)`, because Rust has no `Applicative`. A superclass would make every type
+  that uses `try` define `map`, `pure` and `map2`; a `from_output` method would duplicate `pure`.
 - **Q15. Step 5's scope.** Whether purity is also enforced for `let..in` (§4.5), which has no
   mechanical rewrite.
 
@@ -525,7 +529,8 @@ Raised by the 2026-10-06 review; all must be decided before step 1:
   `if`, `match`, `do`, `let` or lambda operand rejected; both reserved shapes rejected, and their
   parenthesised forms accepted.
 - Typechecker, accepted: `Maybe`, `Result`, a user instance, generic `where Propagate t`, nested
-  blocks.
+  blocks; generic `where Propagate t, Applicative t` building a success with `pure`.
+- Law: `branch(pure(x)) == Continue(x)` for `Maybe` and `Result e`.
 - Typechecker, rejected: no instance; wrong family; wrong error type; unknown `t`; at step 3, a
   `<-` whose right-hand side is pure, with and without `try` (an `!{e}` one is accepted); and, at
   step 5, an effectful `do`-`let`.
