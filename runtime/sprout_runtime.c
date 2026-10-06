@@ -7831,12 +7831,6 @@ typedef struct {
   int family, socktype, protocol;
 } HttpCandidate;
 
-/* Returns the candidate count (possibly 0), or -1 with *out_gai set to the getaddrinfo error.
- *
- * NOTE: getaddrinfo itself is still a BLOCKING call that freezes the scheduler for the duration of
- * the lookup. That is a separate defect with its own fix (a resolver thread or an in-Sprout DNS
- * client) and is tracked in BACKLOG.md; it is out of scope here, which is why this function
- * resolves up front rather than pretending to be async. */
 /* The blocking core of name resolution: getaddrinfo, copying the candidate list into `out`. Returns
  * the count (>= 0), or -1 with *out_gai set to the getaddrinfo error. Shared by the synchronous and
  * the threaded (async_resolve) paths, so both behave identically down to the copy bound.
