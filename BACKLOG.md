@@ -212,7 +212,8 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   `type Mine = Cons Int | Nil` breaks `[x for x in xs if x > 1]` with "'Cons' expects 1
   arguments, got 2", at a position the user never wrote. A user's top-level function does not
   capture. Synthesized references to prelude names need an identity no module can shadow.
-  `try`'s rewrite has the same need (`docs/try-propagate-v0.md` §9 Q9), so build it once.
+  `try`'s rewrite has the same need (`docs/try-propagate-v0.md` §9 Q9), so build it once, and
+  make it writable: a module that shadows a prelude name cannot reach the prelude's today (Q3).
 - [ ] `P3` **Reassess the `print` design** — should compiled `print` dispatch through `ToString`
   everywhere, instead of the type-erased runtime renderer? The full redesign regresses the
   importless loud-fail, risks bootstrap (every `print` in `stdlib/compiler/` needs an instance in
