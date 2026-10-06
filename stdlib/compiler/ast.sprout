@@ -202,7 +202,12 @@ export type Expr (..) =
 
 export fn let_bind_match(pat: Pattern, value: Expr, els: Maybe LetElse, body: Expr,
                          pos: source.SourcePos) -> Expr =
-  MatchExpr(value, Cons (MatchBranch(pat, body), else_branch(els, pos)), pos)
+  MatchExpr(value, let_bind_branches(pat, els, body, pos), pos)
+
+# The body's branch, then the `else` branch if any.
+export fn let_bind_branches(pat: Pattern, els: Maybe LetElse, body: Expr,
+                            pos: source.SourcePos) -> List MatchBranch =
+  Cons(MatchBranch(pat, body), else_branch(els, pos))
 
 # A `let` whose body is the steps after the binding. `<-` first runs the value
 # into a fresh temp and binds that.

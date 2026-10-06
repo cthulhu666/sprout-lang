@@ -1,1 +1,1 @@
-Match branch type mismatch: Type mismatch: Int vs Unit
+the `else` value must have the type of the code after the binding, which it replaces when the pattern fails. Type mismatch: Int vs Unit

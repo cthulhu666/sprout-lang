@@ -1,1 +1,1 @@
-Match branch type mismatch: Type mismatch: String vs Int
+the `else` value must have the type of the code after the binding, which it replaces when the pattern fails. Type mismatch: String vs Int

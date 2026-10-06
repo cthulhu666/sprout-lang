@@ -1,0 +1,11 @@
+module main
+
+# A destructuring `let` as the last step leaves the block with no value, as a
+# plain `let` does (do_trailing_let). See spec-v0.md §5.2.1a.
+
+type Box = Box Int
+
+fn main() -> Unit !{IO} =
+  do
+    print("a")
+    let Box n = Box(3)

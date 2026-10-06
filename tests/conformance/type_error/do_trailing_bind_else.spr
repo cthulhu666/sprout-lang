@@ -1,0 +1,14 @@
+module main
+
+# A `<-` with `else` as the last step leaves the block with no value, as a plain
+# `<-` does (do_trailing_bind_plain). See spec-v0.md §5.2.1a.
+
+fn get() -> Maybe Int !{IO} =
+  do
+    print("start")
+    Just(1)
+
+fn main() -> Unit !{IO} =
+  do
+    print("a")
+    Just x <- get() else print("none")
