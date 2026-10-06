@@ -318,7 +318,7 @@ short-circuit at all today, and fusion removes it everywhere else.
 | Unboxed worker return (`_worker`, tag + payload) | shape: at most one field per constructor | unchanged; already serves user ADTs (variant D) |
 | `<-` short-circuit lowering | the bind's `BindMode` (phase 0) | removed; fusion replaces it |
 | Unboxed C runtime reads | a fixed list of 8 externs | unchanged (runtime ABI) |
-| Tuple scalar replacement | shape, tuples only | its `BindMode` test (`sra_rest_plain`) becomes a `try` test |
+| Tuple scalar replacement | shape, tuples only | unchanged: a `try` in the rest of the block disables it, as a fallible `<-` does today (`sra_rest_plain`) |
 
 A constructor with two or more fields is boxed even in hand-written code. Widening unboxed returns
 helps every ADT, but it is separate work.
@@ -387,7 +387,8 @@ four repos compiling with unchanged behaviour.
    uncharted-suns has about 105 lines `<- if`/`match`/`do`/`let`), map a synthetic `__t <-` back
    to the user's line, and refuse a pattern-`else` bind on a fallible right-hand side
    (`Just x <- e else …`): its faithful rewrite is the reserved shape, and today it unwraps twice
-   (`e = Just(Just(2))` binds `x = 2`). A grep of the four repos finds no such site. Running it on `stdlib/compiler/` needs step 1 landed and reseeded first.
+   (`e = Just(Just(2))` binds `x = 2`). A grep of the four repos finds no such site. Running
+   it on `stdlib/compiler/` needs step 1 landed and reseeded first.
 3. Flip: `<-` never unwraps, and the discard rule (§4.5) lands with it, so a stale `_ <- e` is
    an error, not a silent discard. `Ok x <- e else …` on a `Result`, a type error today because
    the synthetic bind unwraps, becomes legal; that change is intended.
@@ -436,7 +437,9 @@ type-checks either way (`show(x)`) is caught only by tests.
 - **Q7. Linear types.** Spec §5.8 forbids a consume after a fallible bind. `linear_check` keys that
   on the bind's `BindMode`; it must key on `try` instead, in all three forms: `lin_do_let`
   (`linear_check.sprout`) has no fallible flag today, and a pure `let..in` reaches the checker as a
-  parse-time `match`, with a different message from `after_fallible_msg`. Depends on Q9.
+  parse-time `match`, with a different message from `after_fallible_msg`. After Q9 the rule comes
+  from branch convergence (spec §5.8): a consume after a `try` sits in the `Continue` arm only.
+  What remains is the message, which must name the `try`, not a `match`.
 
 Raised by the 2026-10-06 review; all must be decided before step 1:
 
@@ -446,10 +449,18 @@ Raised by the 2026-10-06 review; all must be decided before step 1:
   temporary error would guard only its window, and a branch rebased after it would change in
   silence; the rule catches a stale `_ <- e` at any time. Prior art in §3. The first proposal, an
   error on every `<-` that would have unwrapped, forbade binding a whole `Result`.
-- **Q9. Representation.** A typed `try` node, or a parse-time rewrite to `match branch(e)`. It
-  decides diagnostic positions, Q7, the tuple scalar-replacement test and fusion. A rewrite to the
-  bare names `branch`/`Continue`/`Break` can be captured by a user's own definitions
-  (`stdlib/repl.sprout` defines a `Continue`), so the lowering needs names a module cannot shadow.
+- **Q9. Representation.** **Decided (2026-10-06): an untyped `try` node, checked and rewritten
+  inside inference**, as list comprehensions are (`docs/list-comprehensions-v0.md` §D2). The check
+  raises §6's diagnostics with the user's `try` in hand; the rewrite is
+  `match branch(e) with | Continue x -> rest | Break r -> r`, positioned at the `try`, and inference
+  types it as ordinary code. A rewrite after inference is unsound, since `linear_check` runs during
+  inference. A typed node through to lowering doubles the passes touched (about 8 typed-side files)
+  and needs its own linear rule. A parse-time rewrite reports errors about a `match` the user never
+  wrote. Requirement: the rewrite's references to `branch`, `Continue` and `Break` must reach the
+  prelude's, never a user's. Today a user's constructor captures a rewrite's bare name:
+  `type Mine = Cons Int | Nil` breaks `[x for x in xs if x > 1]` with "'Cons' expects 1
+  arguments, got 2" (a user's top-level function does not capture). `stdlib/repl.sprout` defines a
+  `Continue`.
 - **Q10. A failure swallowed by a discarded step.** A non-last `do` step whose value is discarded
   loses its failure: `let Just v = mx else Nothing` / `in Just(v)` as a step, then `Just(99)`,
   returns `Just 99` for `mx = Nothing`. That follows from Q2. **Decided by Q8:** the step is a
@@ -485,6 +496,7 @@ Raised by the 2026-10-06 review; all must be decided before step 1:
   and effectful blocks; a named `x <- e` and `ignore(e)` are accepted; the final statement is
   exempt. `ignore` on a linear value does not drop it in silence.
 - Codegen: a fused `try` chain matches the hand-written IR and allocates no `Step`.
+- Capture (Q9): `try` works in a module that defines its own `Continue`, `Break` and `branch`.
 - Linear: a consume after a `try` is rejected (Q7).
 - The phase-0 regression fixtures keep passing.
 
