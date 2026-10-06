@@ -104,14 +104,29 @@ Checked 2026-10-06 against each primary source.
 | Gleam `use` | "turns all following expressions into an anonymous function" | Gleam v0.25 release notes |
 
 Sprout has no `return`, a failing `<-` already ends only its block, and `let..else` desugars to a
-`match` over the remaining steps, so it is in the second group. Both first-group languages with a block form added it deliberately (Rust `try`
-blocks, Swift `do`-`catch`).
+`match` over the remaining steps, so it is in the second group. Both first-group languages with a
+block form added it deliberately (Rust `try` blocks, Swift `do`-`catch`).
 
 Gleam is the nearest precedent and cuts the other way on syntax. It had a block-scoped `try`
 keyword from v0.9 and removed it in v0.27: "Now that we have `use` expressions, the less general
 `try` expressions are redundant"; it prefers "fewer ways to do the same thing". Its replacement is
 `use x <- result.try(e)`, a library function. This design keeps the keyword but backs it with a
 class, as Rust backs `?` with `Try`.
+
+### Discarding a failure (§9 Q8)
+
+Checked 2026-10-06 against each primary source. Each flags a result dropped in silence and has a
+written-out discard.
+
+| Language | Flags | Written-out discard | Source |
+|---|---|---|---|
+| Rust | an expression statement of a `#[must_use]` type, such as `Result` (lint `unused_must_use`) | `let _ = f();` | Reference, *Diagnostic attributes* |
+| Swift | a call whose result is unused, unless the function is `@discardableResult` | — | *The Swift Programming Language*, Attributes |
+| Haskell | a `do` statement whose result is not bound (`-Wunused-do-bind`, in `-Wall`) | `_ <- e` | GHC User's Guide, Warnings |
+| OCaml | a non-`unit` expression left of `;` (warning 10, on by default) | `ignore (f x)` | OCaml Manual, Warnings; `Stdlib.ignore` |
+
+Sprout cannot use the wildcard bind, as Rust and Haskell do: `_ <- e` passes the failure on today,
+so making it the discard would change old code silently. It takes OCaml's `ignore`.
 
 ## 4. Design
 
@@ -178,10 +193,10 @@ let Just decoded = b64.decode(text) else Err(BadRequest(name))                # 
 let Ok key = webauthn.public_key_from_spki(pk) else Err e -> Err(Rejected(e))   # wrap
 ```
 
-Corpus, non-test code of the three repos, one-line forms: about 53 sites replace a failure and
-about 7 wrap it, against about 600 that propagate it unchanged. For replacing, a `try e else fb`
-suffix is the same length as `let..else` and means the same thing. Wrapping is where a suffix
-would be shorter.
+Corpus, non-test code of the four repos, one-line forms: about 83 sites replace a failure (30 of
+them in sprout-pg) and about 7 wrap it, against about 600 that propagate it unchanged (sprout-pg
+not counted). For replacing, a `try e else fb` suffix is the same length as `let..else` and means
+the same thing. Wrapping is where a suffix would be shorter.
 
 ### 4.4 Later: `try e else fb` and `try e with f`
 
@@ -223,6 +238,11 @@ bind", but the checker accepts an effectful right-hand side today (`let r = fs.w
 compiles and runs). The same holds for `let..in`: spec §5.2.1 makes an effectful right-hand side an
 error, yet `let r = fs.read_text(...) in …` compiles in an `!{IO}` function. Unlike a `do`-`let`, it
 has no mechanical rewrite to `<-` (§9 Q15).
+
+**Discarding a failure** (§9 Q8). A non-final `do` statement, or a `_ <-` bind, whose value's type
+has a `Propagate` instance is an error. Write `try e` to pass the failure on, or `ignore(e)` to drop
+it; `ignore(x: a) -> Unit` is a pure prelude function. This extends spec §5.8's *Discarded result*
+rule from linear values to fallible ones. A named `x <- e` stays legal and binds the whole value.
 
 ### 4.6 Generic code
 
@@ -316,7 +336,8 @@ reserved else      `try` takes no `else` yet. For `let..else` on the value: `(tr
 reserved with      `with` after `try` is reserved. For a record update, write `(try e) with (…)`.
 unknown t          the existing ambiguity error.
 effectful do-let   this `let` runs an effect. Bind it with `<-`.          (step 5)
-old fallible <-    `<-` no longer unwraps `Result`. Write `x <- try e`.   (step 3)
+discarded failure  this drops a `Result` failure in silence. Write `try e` to pass it on,
+                   or `ignore(e)` to drop it.                          (step 3)
 ```
 
 ## 7. Interaction with `let..else`
@@ -340,45 +361,52 @@ Breaking: a fallible `<-` needs `try`, and an effectful `do`-`let` becomes `<-`.
 
 **Size.** A rough count of fallible binds (callee name looked up against `fn` signatures, ±50%):
 576 certain across sprout_lang, uncharted-suns and repbit, an estimated 600–900 in total.
-uncharted-suns is mostly `Maybe`, repbit mostly `Result`. Effectful `do`-`let`s are not counted.
-Exact counts need the compiler, not grep.
+uncharted-suns is mostly `Maybe`, repbit mostly `Result`. sprout-pg adds up to 100 `<-` lines, not
+yet split by type. Effectful `do`-`let`s are not counted. Exact counts need the compiler, not grep.
 
-**Order (proposed; reviewed 2026-10-06 by three independent passes, pending §9 Q8).** Every step
-must leave all three repos compiling with unchanged behaviour.
+**Order (proposed; reviewed 2026-10-06 by three independent passes).** Every step must leave all
+four repos compiling with unchanged behaviour.
 
 0. ~~Soundness fix.~~ Landed: `typed_ast.BindMode` on each bind, decided in
    `infer.decide_bind_mode` and read by every later pass; a head that becomes `Maybe`/`Result`
    after the bind is rejected (spec §5.9). The modes are also the list the codemod needs.
-1. Add `Step`, `Propagate` and their instances, `try`, its two reserved shapes (§4.4) and fusion.
-   Old fallible `<-` keeps working, except that a `<-` whose right-hand side is a `try` (after
-   stripping parentheses) is always plain. Otherwise `x <- try e` with `e : Result E (Maybe A)`
-   unwraps twice. The rule must reach every place that reads a bind's type, not only
+1. Add `Step`, `Propagate` and their instances, `try`, its two reserved shapes (§4.4), fusion and
+   `ignore`. Old fallible `<-` keeps working, except that a `<-` whose right-hand side is a `try`
+   (after stripping parentheses) is always plain. Otherwise `x <- try e` with
+   `e : Result E (Maybe A)` unwraps twice. The rule must reach every place that reads a bind's
+   type, not only
    `decide_bind_mode`: `do_family_update` (`infer.sprout`) sets the block's family from the step's
    type for every `DoBindStep`, and the parser's synthetic `__t <- e` binds (`build_do_total`,
    `parser.sprout`) carry the user's right-hand side.
-   1a. Tooling: a compiler phase that lists every bind whose `BindMode` propagates and every
-   effectful `do`-`let`, with file, line and column. Only the type checker knows either, and no
-   `--phase` reports them today.
-2. Codemod A, on sprout_lang, then uncharted-suns and repbit: add `try` to every listed `<-`.
-   `x <- try e` means what the old `x <- e` did. The codemod must parenthesise an operand that is
-   not an application (§9 Q12; uncharted-suns has about 105 lines `<- if`/`match`/`do`/`let`),
-   map a synthetic `__t <-` back to the user's line, and refuse a pattern-`else` bind on a fallible
-   right-hand side (`Just x <- e else …`): its faithful rewrite is the reserved shape, and today
-   it unwraps twice (`e = Just(Just(2))` binds `x = 2`). A grep of the three repos finds no such
-   site. Running it on `stdlib/compiler/` needs step 1 landed and reseeded first.
-3. Flip: `<-` never unwraps. A `<-` that would have unwrapped without `try` gets a migration
-   diagnostic (§9 Q8). `Ok x <- e else …` on a `Result`, a type error today because the synthetic
-   bind unwraps, becomes legal; that change is intended.
-4. Codemod B: rewrite every effectful `do`-`let` to `<-`. Behaviour is preserved because `<-` is
+   1a. Tooling: a compiler phase that lists every bind whose `BindMode` propagates, every
+   non-final `do` statement with a fallible value, and every effectful `do`-`let`, with file,
+   line and column. Only the type checker knows any of them, and no `--phase` reports them today.
+2. Codemod A, on all four repos and every live worktree branch: add `try` to every listed `<-`,
+   and wrap every listed fallible statement in `ignore(…)`. `x <- try e` means what the old
+   `x <- e` did. The codemod must parenthesise an operand that is not an application (§9 Q12;
+   uncharted-suns has about 105 lines `<- if`/`match`/`do`/`let`), map a synthetic `__t <-` back
+   to the user's line, and refuse a pattern-`else` bind on a fallible right-hand side
+   (`Just x <- e else …`): its faithful rewrite is the reserved shape, and today it unwraps twice
+   (`e = Just(Just(2))` binds `x = 2`). A grep of the four repos finds no such site. Running it on `stdlib/compiler/` needs step 1 landed and reseeded first.
+3. Flip: `<-` never unwraps, and the discard rule (§4.5) lands with it, so a stale `_ <- e` is
+   an error, not a silent discard. `Ok x <- e else …` on a `Result`, a type error today because
+   the synthetic bind unwraps, becomes legal; that change is intended.
+4. Codemod B: rewrite every effectful `do`-`let` to `<-`, except that `let _ = e` with a fallible
+   `e` becomes `ignore(e)`, since `_ <- e` is now an error. Behaviour is preserved because `<-` is
    now plain; before step 3 it is not (`let _ = fs.write_text(bad, …)` continues, `_ <-` stops the
    block). IR is not preserved: a tuple bound by a `do`-`let` gets scalar replacement
    (`sra_core_eligible`, `ast_to_ir.sprout`) and a plain `<-` does not. Extend it to plain `<-`
    first, or accept the diff.
 5. Enforce `do`-`let` purity (and `let..in`, per §9 Q15).
 
-Downstream CI builds against sprout-lang master. Codemod A must be merged in uncharted-suns and
-repbit before step 3 lands, and codemod B before step 5. uncharted-suns has about 8 live
-worktrees; each branch needs codemod A before it rebases past step 3.
+All Sprout code is in these four repos, so each step migrates all of them together; there is no
+compatibility window for outside code. The steps stay separate for other reasons: the compiler's
+own source has hundreds of `<-` lines, so the seed must know `try` before that source uses it; and
+codemod A is checked alone, since under the old rules it must change no test result, and its
+`try` half no golden IR. Downstream CI builds against sprout-lang master, so codemod A must be
+merged downstream before step 3 lands, and codemod B before step 5. A branch that rebases past
+step 3 without codemod A fails on every fallible `_ <- e` or statement; a named `x <- e` whose `x`
+type-checks either way (`show(x)`) is caught only by tests.
 
 ## 9. Open questions
 
@@ -412,20 +440,25 @@ worktrees; each branch needs codemod A before it rebases past step 3.
 
 Raised by the 2026-10-06 review; all must be decided before step 1:
 
-- **Q8. The step-3 diagnostic.** As first proposed it is a permanent error, which forbids binding a
-  whole `Result` (`r <- fs.write_text(…)`, the case §1 opens with) and contradicts §4.5. Make it
-  temporary or a lint, with a later step that removes it.
+- **Q8. The step-3 diagnostic.** **Decided (2026-10-06): no migration diagnostic; a permanent
+  discard rule instead** (§4.5). A fallible `_ <- e` or non-final statement is an error; `ignore(e)`
+  drops a failure on purpose, `try e` passes it on, and a named `x <- e` binds the whole value. A
+  temporary error would guard only its window, and a branch rebased after it would change in
+  silence; the rule catches a stale `_ <- e` at any time. Prior art in §3. The first proposal, an
+  error on every `<-` that would have unwrapped, forbade binding a whole `Result`.
 - **Q9. Representation.** A typed `try` node, or a parse-time rewrite to `match branch(e)`. It
   decides diagnostic positions, Q7, the tuple scalar-replacement test and fusion. A rewrite to the
   bare names `branch`/`Continue`/`Break` can be captured by a user's own definitions
   (`stdlib/repl.sprout` defines a `Continue`), so the lowering needs names a module cannot shadow.
 - **Q10. A failure swallowed by a discarded step.** A non-last `do` step whose value is discarded
   loses its failure: `let Just v = mx else Nothing` / `in Just(v)` as a step, then `Just(99)`,
-  returns `Just 99` for `mx = Nothing`. That follows from Q2. It is rare with `let..else`; with
-  `try` in pure code it will not be. Needs a diagnostic.
+  returns `Just 99` for `mx = Nothing`. That follows from Q2. **Decided by Q8:** the step is a
+  discarded fallible statement, so it is an error.
 - **Q11. A bare `try e` statement, and `try` as the last step.** §4.2 first said a bare statement
-  means `let _ = try e`, but a `do`-`let` is to be pure; `_ <- try e` fits. As the last step it is
-  rejected by the trailing-binding rule with a message about a `let` or `<-` the user never wrote.
+  means `let _ = try e`, but a `do`-`let` is to be pure; `_ <- try e` fits. After Q8 a bare
+  fallible statement is an error, so a bare `try e` is the only short way to run a fallible step
+  for its failure alone. As the last step it is rejected by the trailing-binding rule with a
+  message about a `let` or `<-` the user never wrote.
 - **Q12. The operand.** "An application" rejects `try r` and `try p.field`. Alternative: any postfix
   expression (variable, field, call, parenthesised); only an infix expression or a pipe needs
   parentheses. Also decides what codemod A parenthesises.
@@ -443,19 +476,24 @@ Raised by the 2026-10-06 review; all must be decided before step 1:
   operand rejected; both reserved shapes rejected, and their parenthesised forms accepted.
 - Typechecker, accepted: `Maybe`, `Result`, a user instance, generic `where Propagate t`, nested
   blocks.
-- Typechecker, rejected: no instance; wrong family; wrong error type; unknown `t`; and, at steps 3
-  and 5, a fallible `<-` and an effectful `do`-`let`.
+- Typechecker, rejected: no instance; wrong family; wrong error type; unknown `t`; and, at step 5,
+  an effectful `do`-`let`.
 - Runtime: both paths of every form, plus the nested-block semantics of Q2.
 - Step 1: `x <- try e` with `e : Result E (Maybe A)` binds a `Maybe A` in a `Result` block.
 - Codemod A: a pattern-`else` bind on a fallible right-hand side is refused, not rewritten.
+- Discard rule (Q8): a fallible `_ <- e` and a fallible non-final statement are rejected, in pure
+  and effectful blocks; a named `x <- e` and `ignore(e)` are accepted; the final statement is
+  exempt. `ignore` on a linear value does not drop it in silence.
 - Codegen: a fused `try` chain matches the hand-written IR and allocates no `Step`.
 - Linear: a consume after a `try` is rejected (Q7).
 - The phase-0 regression fixtures keep passing.
 
 ## 11. Spec and docs impact
 
-- Spec §5.9: replaced by `try`, experimental at step 1 and normative at step 3.
-- `try` becomes a hard keyword. No identifier `try` exists in the three repos (strings and comments
+- Spec §5.9: replaced by `try`, experimental at step 1 and normative at step 3. Its "discard form"
+  (a bare fallible statement continues) becomes `ignore(e)`.
+- Spec §5.8, *Discarded result*: extended to values with a `Propagate` instance (step 3).
+- `try` becomes a hard keyword. No identifier `try` exists in the four repos (strings and comments
   excluded). Places that list keywords or step starts: `lexer.is_keyword` and spec §2;
   `parser.looks_like_do_step_start` and spec §5.2.1a's step-start list; the formatter's
   `is_call_like_pp_kw`, else `try (x)` is reformatted to `try(x)`; the IntelliJ plugin's lexer
