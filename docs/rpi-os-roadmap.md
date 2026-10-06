@@ -214,7 +214,7 @@ fn main() -> Unit !{IO} =
     _ <- Uart.init()
     _ <- Uart.puts("Hello, World\n")
     _ <- Gpio.set_function(47, 1)
-    _ <- blink_loop(0)
+    blink_loop(0)
 ```
 
 `justfile` `rpi3-hello` target:

@@ -419,6 +419,7 @@ import stdlib.fs as fs
 do
   fs.write_text(path, contents)   # run it, discard the Result, continue
   _ <- fs.write_text(path, more)  # propagates on Err — needs a Result-returning fn
+  Ok(())                          # the last step is the block's value: an expression
 ```
 
 ## Match lists by shape with `[…]` patterns
