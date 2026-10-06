@@ -1152,6 +1152,8 @@ fn infer_expr(
       InferErr(pos, "Internal error: StringTemplateExpr reached inference; desugar pass should have eliminated it")
   | ast.ComprehensionExpr elem gens pos ->
       infer_comprehension(state, env, subst, eff_subst, elem, gens, pos)
+  | ast.LetBindExpr pat value els body pos ->
+      infer_expr(state, env, subst, eff_subst, ast.let_bind_match(pat, value, els, body, pos))
 
 # Declaration-boundary wrapper: applies s1 to the result so fresh TVars
 # never escape into lowering.  Declaration-level callers should use this;
@@ -5628,6 +5630,9 @@ fn do_family_name(f: DoFamily) -> String = match f with | DoFamily n _ _ -> n
 fn do_family_type(f: DoFamily) -> types.Type = match f with | DoFamily _ t _ -> t
 fn do_family_pos(f: DoFamily) -> source.SourcePos = match f with | DoFamily _ _ p -> p
 
+let do_pat_step_unrewritten: String =
+  "Internal error: a do-block pattern binding reached a step helper; infer_do_steps rewrites it first"
+
 # A do block may sequence exactly one short-circuit family.  A `<-` bind fixes
 # the family; a later bind or the final expression in a different family is an
 # error.  Returns Ok(updated-family) or Err(diagnostic).  IO/pure steps and
@@ -5659,6 +5664,7 @@ fn do_family_update(
                 else Err(string_concat_many(["do block started with ", do_family_name(est), " bindings, but its final expression returns ", cur]))
           else Ok(family)
       | ast.DoLetStep _ _ -> Ok(family)
+      | ast.DoPatStep _ _ _ _ _ -> Err(do_pat_step_unrewritten)
 
 # THE FALLIBLE-BIND RULE (spec-v0.md §5.9).
 #
@@ -5838,6 +5844,12 @@ fn infer_do_steps(
                   typed_ast.TDo(typed_do_step_list_reverse(acc_steps),
                                 unifier.apply_subst(s, typed_ast.typed_expr_type(last_typed)), pos),
                   s, eff_subst, acc_eff)
+  # The binding and the steps after it become its match (ast.do_pat_steps), so the
+  # per-step helpers below never see a DoPatStep.
+  | [ast.DoPatStep kind pat value els bind_pos | rest] ->
+      infer_do_steps(state, env, subst, eff_subst,
+                     ast.do_pat_steps(kind, pat, value, els, rest, bind_pos),
+                     last_typed, acc_steps, acc_eff, family, pos)
   | Cons step rest ->
       do
         sr <- infer_do_step(state, env, subst, eff_subst, step)
@@ -5887,6 +5899,7 @@ fn infer_do_step(
   | ast.DoExprStep e -> infer_expr(state, env, subst, eff_subst, e)
   | ast.DoBindStep _ e -> infer_expr(state, env, subst, eff_subst, e)
   | ast.DoLetStep _ e -> infer_expr(state, env, subst, eff_subst, e)
+  | ast.DoPatStep _ _ _ _ pos -> InferErr(pos, do_pat_step_unrewritten)
 
 fn typed_do_step(
   state: unifier.InferState,
@@ -5902,6 +5915,8 @@ fn typed_do_step(
                                  typed_ast.typed_expr_pos(typed_expr))
         typed_ast.TDoBindStep(pat, typed_expr, mode)
   | ast.DoLetStep name _ -> typed_ast.TDoLetStep(name, typed_expr)
+  | ast.DoPatStep _ _ _ _ pos ->
+      panic(`${do_pat_step_unrewritten} at ${int_to_string(pos.line)}:${int_to_string(pos.column)}`)
 
 # The one place a `<-` is decided (spec-v0.md §5.9), from its type AT THE BIND. A plain
 # bind whose type head is still a variable is parked: if that head later becomes
@@ -6899,7 +6914,7 @@ fn check_comprehension_gen_body(
         ctor_map <- unifier.get_ctor_map(state)
         # D3: a refutable generator pattern is rejected, not filtered. Reuses
         # W5's exhaustiveness judgement rather than a bespoke refutability
-        # predicate — the same routing parser.build_do_total uses for a
+        # predicate — the same routing ast.do_pat_steps uses for a
         # no-`else` do-bind. Match this Maybe-!{IO} check DIRECTLY: a `<-` bind
         # would strip the Maybe layer (see infer_branches's identical caveat
         # above, around :3960).
@@ -7009,7 +7024,7 @@ fn build_comp_guards(guards: List ast.Expr, inner: ast.Expr, acc_name: String, p
 
 # A lambda parameter must be an identifier (parser.parse_lambda_params), so any pattern
 # that is not a plain variable is destructured by a one-arm `match` — the same
-# shape parser.build_do_total uses. The pattern is already known irrefutable
+# shape ast.do_pat_steps uses. The pattern is already known irrefutable
 # (checked above), so this match cannot fail at runtime and W5 accepts it.
 fn build_comp_destructure(pat: ast.Pattern, val_name: String, inner: ast.Expr, pos: source.SourcePos) -> ast.Expr =
   match pat with
@@ -7034,7 +7049,7 @@ fn comp_kinds_tail(kinds: List CompKind) -> List CompKind =
   | Nil -> Nil
   | Cons _ t -> t
 
-# Position-derived, like parser.do_tmp_name, and additionally indexed by nesting
+# Position-derived, like ast.do_tmp_name, and additionally indexed by nesting
 # depth so two generators of the same comprehension cannot collide. The prefix
 # keeps these out of the user's namespace, and linear_check matches on it to
 # recognize a synthesized fold.
@@ -9468,9 +9483,9 @@ fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Di
 #
 # `bound` carries the value names shadowed at this point: lambda parameters, match
 # and do-bind pattern binders, and `do let` names. A shadowed name is not an edge —
-# `\ map -> map(x)` does not depend on the top-level `map`. Note `where` and
-# `let … in` need no case of their own: the parser desugars both to a single-arm
-# MatchExpr (parser.desugar_where), so their binders arrive as ordinary patterns.
+# `\ map -> map(x)` does not depend on the top-level `map`. A `let`/`where` binding
+# and a do-block pattern binding are walked as the match they mean
+# (ast.let_bind_match, ast.do_pat_steps), so their binders scope as its patterns do.
 #
 # **The two ways to be wrong here are not symmetric.** Over-approximating — an edge
 # that is not real — merges two groups, so their members are inferred monomorphically
@@ -9522,6 +9537,8 @@ fn referenced_names(e: ast.Expr, bound: Set, index: Set, acc: Set) -> Set =
       referenced_names_fields(fields, bound, index, referenced_names(base, bound, index, acc))
   | ast.ComprehensionExpr elem gens _ ->
       referenced_names_comprehension(elem, gens, bound, index, acc)
+  | ast.LetBindExpr pat value els body pos ->
+      referenced_names(ast.let_bind_match(pat, value, els, body, pos), bound, index, acc)
 
 # A generator's pattern binders scope over its own guards, every later
 # generator's source and guards, and (once the walk reaches Nil) the element.
@@ -9575,6 +9592,8 @@ fn referenced_names_do(steps: List ast.DoStep, bound: Set, index: Set, acc: Set)
             referenced_names(e, bound, index, acc))
       | ast.DoExprStep e ->
           referenced_names_do(rest, bound, index, referenced_names(e, bound, index, acc))
+      | ast.DoPatStep kind pat value els pos ->
+          referenced_names_do(ast.do_pat_steps(kind, pat, value, els, rest, pos), bound, index, acc)
 
 fn referenced_names_fields(fields: List ast.RecordField, bound: Set, index: Set, acc: Set) -> Set =
   match fields with

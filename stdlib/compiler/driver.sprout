@@ -192,6 +192,14 @@ fn dump_expr(e: ast.Expr) -> String =
       sexp("record-update", Cons(dump_expr(base), dump_record_fields(fields)))
   | ast.ComprehensionExpr elem gens _ ->
       sexp("comprehension", Cons(dump_expr(elem), dump_comprehension_gens(gens)))
+  | ast.LetBindExpr pat value els body _ ->
+      sexp("let", Cons(dump_pat(pat), Cons(dump_expr(value), list_append(dump_let_else(els), [dump_expr(body)]))))
+
+fn dump_let_else(els: Maybe ast.LetElse) -> List String =
+  match els with
+  | Nothing -> []
+  | Just (ast.LetElse Nothing handler) -> [sexp("else", [dump_expr(handler)])]
+  | Just (ast.LetElse(Just residual) handler) -> [sexp("else", [dump_pat(residual), dump_expr(handler)])]
 
 fn dump_comprehension_gens(items: List ast.ComprehensionGen) -> List String =
   match items with
@@ -227,6 +235,10 @@ fn dump_step(s: ast.DoStep) -> String =
       sexp("do-let", [q(name), dump_expr(value)])
   | ast.DoExprStep value ->
       sexp("do-expr", Cons(dump_expr(value), Nil))
+  | ast.DoPatStep ast.ArrowBind pat value els _ ->
+      sexp("bind", Cons(dump_pat(pat), Cons(dump_expr(value), dump_let_else(els))))
+  | ast.DoPatStep ast.LetBind pat value els _ ->
+      sexp("do-let", Cons(dump_pat(pat), Cons(dump_expr(value), dump_let_else(els))))
 
 fn dump_record_fields(items: List ast.RecordField) -> List String =
   match items with

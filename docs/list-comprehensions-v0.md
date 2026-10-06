@@ -362,14 +362,14 @@ is addressed, and recorded here so the decision is not re-litigated from memory:
 - **Capture** — fixed binder names collided with user names, so
   `[acc + 1 for acc in xs]` produced `list_fold(\ (acc, acc) -> …)`.
   **Fixed:** binders are position-derived and prefixed, `comp_tmp_name`
-  producing `__cmp_acc{line}_{col}_{depth}` — the scheme `parser.do_tmp_name`
-  (`parser.sprout:525-526`) already uses, plus a depth index so two generators
+  producing `__cmp_acc{line}_{col}_{depth}` — the scheme `ast.do_tmp_name`
+  already uses, plus a depth index so two generators
   of one comprehension cannot collide.
 - **Patterns in parameter position** — a lambda parameter must be an identifier
   (`parse_param`, `parser.sprout:1414-1417`), so a generator pattern could not
   be one. **Fixed:** any pattern that is not a plain variable is destructured by
-  a one-arm `match`, exactly as `parser.build_do_total` (`:548-555`) does for a
-  no-`else` do-bind. A plain variable pattern still becomes the fold parameter
+  a one-arm `match`, exactly as `ast.do_pat_steps` does for a no-`else`
+  do-bind. A plain variable pattern still becomes the fold parameter
   directly, so the common case emits no match at all.
 - **Under-determined sources** — parameter annotations are optional in v0
   (spec §291), so in `fn f(xs) = [x for x in xs]` the source may still be a

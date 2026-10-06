@@ -200,6 +200,11 @@ No file needs migration; the ~4 do-block staircases in `infer.sprout` (and the
 
 ## 11. Implementation (as built — parse-time desugar, `stdlib/compiler/parser.sprout`)
 
+> **Moved to inference** ([try-propagate-v0.md](try-propagate-v0.md) §8 step 0b). The parser now
+> emits an `ast.DoPatStep`, and `infer_do_steps` rewrites it with the steps after it through
+> `ast.do_pat_steps` into the shape below, unchanged. Lint reads it through
+> `ast.elaborate_bindings`.
+
 `do` is threaded as a `DoExpr (List DoStep)` node through inference/lowering/codegen
 (not desugared early), and — decisively — the compiler *already* emits and handles
 the target shape (nested `do { __t <- e; match __t | pat -> do{rest} | err -> h }`,

@@ -352,9 +352,9 @@ a missing typeclass instance at runtime.** Concretely, this is a constraint on:
 parameters, match binders, do-bindings — as the free-variable check in the same
 file does, both reading one classifier (`bind_pat`). A `TVar` naming a bound name
 is a local, not an edge. `where` and `let … in` need no case of their own:
-`parser.wrap_where_binding` and `build_let_binding_match` emit a `MatchExpr` — one
-arm, or two when a `let … else` supplies a fallback, whose residual pattern binds
-as well — so the match-arm case already covers every form.
+inference rewrites both to a match (`ast.let_bind_match`) — one arm, or two when a
+`let … else` supplies a fallback, whose residual pattern binds as well — so the
+match-arm case already covers every form.
 
 It collected names **without** tracking binders until 2026-09-09, which made the
 emitted program depend on what callers named their parameters — a prelude

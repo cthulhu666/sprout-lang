@@ -1325,6 +1325,24 @@ export fn encode_ast_expr(e: ast.Expr) -> String =
       string_concat_many(["(RecordUpdateExpr ", encode_ast_expr(base), " ", encode_record_field_list(fields), " ", encode_ast_pos(p), ")"])
   | ast.ComprehensionExpr elem gens p ->
       string_concat_many(["(ComprehensionExpr ", encode_ast_expr(elem), " ", encode_comprehension_gen_list(gens), " ", encode_ast_pos(p), ")"])
+  | ast.LetBindExpr pat value els body p ->
+      string_concat_many(["(LetBindExpr ", encode_ast_pattern(pat), " ", encode_ast_expr(value), " ", encode_let_else(els), " ", encode_ast_expr(body), " ", encode_ast_pos(p), ")"])
+
+fn encode_let_else(els: Maybe ast.LetElse) -> String =
+  match els with
+  | Nothing -> "(Nothing)"
+  | Just (ast.LetElse residual handler) ->
+      string_concat_many(["(Just (LetElse ", encode_maybe_pattern(residual), " ", encode_ast_expr(handler), "))"])
+
+fn encode_maybe_pattern(m: Maybe ast.Pattern) -> String =
+  match m with
+  | Nothing -> "(Nothing)"
+  | Just pat -> string_concat_many(["(Just ", encode_ast_pattern(pat), ")"])
+
+fn encode_do_bind_kind(k: ast.DoBindKind) -> String =
+  match k with
+  | ast.ArrowBind -> "ArrowBind"
+  | ast.LetBind -> "LetBind"
 
 fn encode_comprehension_gen(g: ast.ComprehensionGen) -> String =
   match g with
@@ -1371,6 +1389,8 @@ fn encode_do_step(step: ast.DoStep) -> String =
       string_concat_many(["(DoLetStep ", encode_quoted_str(name), " ", encode_ast_expr(e), ")"])
   | ast.DoExprStep e ->
       string_concat_many(["(DoExprStep ", encode_ast_expr(e), ")"])
+  | ast.DoPatStep kind pat e els p ->
+      string_concat_many(["(DoPatStep ", encode_do_bind_kind(kind), " ", encode_ast_pattern(pat), " ", encode_ast_expr(e), " ", encode_let_else(els), " ", encode_ast_pos(p), ")"])
 
 fn encode_do_step_list(xs: List ast.DoStep) -> String =
   string_concat_many(["(", join_do_steps(xs), ")"])
@@ -1916,6 +1936,57 @@ fn decode_ast_expr_by_tag(s: String, bytes: Bytes, i: Int, total: Int, tag: Stri
   else if tag == "GetFieldExpr" then decode_get_field_expr_at(s, bytes, i, total)
   else if tag == "RecordUpdateExpr" then decode_record_update_expr_at(s, bytes, i, total)
   else if tag == "ComprehensionExpr" then decode_comprehension_expr_at(s, bytes, i, total)
+  else if tag == "LetBindExpr" then decode_let_bind_expr_at(s, bytes, i, total)
+  else Nothing
+
+fn decode_let_bind_expr_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
+  let Just(pat, j) = decode_ast_pattern_at(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing
+      Just(value, k) = decode_ast_expr_at(s, bytes, skip_ws(s, bytes, j, total), total) else Nothing
+      Just(els, m) = decode_let_else_at(s, bytes, skip_ws(s, bytes, k, total), total) else Nothing
+      Just(body, n) = decode_ast_expr_at(s, bytes, skip_ws(s, bytes, m, total), total) else Nothing
+      Just(p, q) = decode_pos_at(s, bytes, skip_ws(s, bytes, n, total), total) else Nothing
+      Just end = expect_char(s, bytes, skip_ws(s, bytes, q, total), total, ')') else Nothing
+  in Just((ast.LetBindExpr(pat, value, els, body, p), end))
+
+# Decodes (Nothing) or (Just (LetElse <maybe-pattern> <expr>)).
+fn decode_let_else_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (Maybe ast.LetElse, Int) =
+  let Just j = expect_char(s, bytes, i, total, '(') else Nothing
+      Just(tag, k) = read_atom(s, bytes, skip_ws(s, bytes, j, total), total) else Nothing
+  in
+    if tag == "Nothing" then
+      let Just end = expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') else Nothing
+      in Just((Nothing, end))
+    else if tag == "Just" then decode_just_let_else(s, bytes, skip_ws(s, bytes, k, total), total)
+    else Nothing
+
+fn decode_just_let_else(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (Maybe ast.LetElse, Int) =
+  let Just j = expect_char(s, bytes, i, total, '(') else Nothing
+      Just(tag, k) = read_atom(s, bytes, skip_ws(s, bytes, j, total), total) else Nothing
+  in
+    if tag != "LetElse" then Nothing
+    else
+      let Just(residual, m) = decode_maybe_pattern_at(s, bytes, skip_ws(s, bytes, k, total), total) else Nothing
+          Just(handler, n) = decode_ast_expr_at(s, bytes, skip_ws(s, bytes, m, total), total) else Nothing
+          Just inner_end = expect_char(s, bytes, skip_ws(s, bytes, n, total), total, ')') else Nothing
+          Just end = expect_char(s, bytes, skip_ws(s, bytes, inner_end, total), total, ')') else Nothing
+      in Just((Just(ast.LetElse(residual, handler)), end))
+
+fn decode_maybe_pattern_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (Maybe ast.Pattern, Int) =
+  let Just j = expect_char(s, bytes, i, total, '(') else Nothing
+      Just(tag, k) = read_atom(s, bytes, skip_ws(s, bytes, j, total), total) else Nothing
+  in
+    if tag == "Nothing" then
+      let Just end = expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') else Nothing
+      in Just((Nothing, end))
+    else if tag == "Just" then
+      let Just(pat, m) = decode_ast_pattern_at(s, bytes, skip_ws(s, bytes, k, total), total) else Nothing
+          Just end = expect_char(s, bytes, skip_ws(s, bytes, m, total), total, ')') else Nothing
+      in Just((Just(pat), end))
+    else Nothing
+
+fn decode_do_bind_kind(atom: String) -> Maybe ast.DoBindKind =
+  if atom == "ArrowBind" then Just(ast.ArrowBind)
+  else if atom == "LetBind" then Just(ast.LetBind)
   else Nothing
 
 fn decode_var_expr_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
@@ -2131,7 +2202,18 @@ fn decode_do_step_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.D
     if tag == "DoBindStep" then decode_do_bind_step_body(s, bytes, k, total)
     else if tag == "DoLetStep" then decode_do_let_step_body(s, bytes, k, total)
     else if tag == "DoExprStep" then decode_do_expr_step_body(s, bytes, k, total)
+    else if tag == "DoPatStep" then decode_do_pat_step_body(s, bytes, k, total)
     else Nothing
+
+fn decode_do_pat_step_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.DoStep, Int) =
+  let Just(kind_atom, j) = read_atom(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing
+      Just kind = decode_do_bind_kind(kind_atom) else Nothing
+      Just(pat, k) = decode_ast_pattern_at(s, bytes, skip_ws(s, bytes, j, total), total) else Nothing
+      Just(e, m) = decode_ast_expr_at(s, bytes, skip_ws(s, bytes, k, total), total) else Nothing
+      Just(els, n) = decode_let_else_at(s, bytes, skip_ws(s, bytes, m, total), total) else Nothing
+      Just(p, q) = decode_pos_at(s, bytes, skip_ws(s, bytes, n, total), total) else Nothing
+      Just end = expect_char(s, bytes, skip_ws(s, bytes, q, total), total, ')') else Nothing
+  in Just((ast.DoPatStep(kind, pat, e, els, p), end))
 
 fn decode_do_bind_step_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.DoStep, Int) =
   let Just(pat, j) = decode_ast_pattern_at(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing

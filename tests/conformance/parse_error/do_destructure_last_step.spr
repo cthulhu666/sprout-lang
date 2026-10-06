@@ -1,0 +1,12 @@
+# sprout-ignore-all lint/unparsed: parse-error fixture — this file must not parse
+module main
+
+# A destructuring `let` continues into the steps after it; as the last step it
+# has none.
+
+type Box = Box Int
+
+fn main() -> Unit !{IO} =
+  do
+    print("a")
+    let Box n = Box(3)

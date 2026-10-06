@@ -12,28 +12,63 @@ type BodyLineError deriving (Eq, ToString) =
   | ParseError
   | NoDecls
   | FirstNotFn
-  | BodyNotMatch
+  | BodyNotLet
 
-# W9/X5: line of the first fn's desugared body. A where-binding lowers to a
-# single-arm `MatchExpr` on the bound value — the SAME node `let … in` builds
-# (parser.wrap_where_binding / build_let_binding_match). It used to lower to a
-# CallExpr wrapping an unannotated lambda, which typed the body before the bound
-# value and so defaulted `where`-bound Doubles to Int; that is why the node shape
-# here is a MatchExpr and not a CallExpr.
+# W9/X5: line of the first fn's body. A where-binding parses to the `let` node
+# `let … in` builds (ast.LetBindExpr), which inference makes a match on the bound
+# value. It used to lower to a CallExpr wrapping an unannotated lambda, which
+# typed the body before the bound value and so defaulted `where`-bound Doubles to
+# Int.
 #
 # Each step bails to its own reason, so a failure says which stage stopped it —
-# lex, parse, empty, non-fn, or non-match body.
+# lex, parse, empty, non-fn, or non-let body.
 fn first_fn_body_line(src: String) -> Result BodyLineError Int =
   let Ok toks = lexer.tokenize(src) else Err(LexError)
       Ok prog = parser.parse_program(toks) else Err(ParseError)
       ast.Program([d | _]) _ = prog else Err(NoDecls)
       ast.FnDecl _ _ _ _ _ body _ = d else Err(FirstNotFn)
-      ast.MatchExpr _ _ pos = body else Err(BodyNotMatch)
+      ast.LetBindExpr _ _ _ _ pos = body else Err(BodyNotLet)
   in Ok(pos.line)
 
-# The desugared body's node shape, so a test can assert that `where` and the
-# equivalent `let … in` lower to the SAME constructor. Two desugarings for one
-# binding construct is what allowed them to type differently.
+fn first_fn_body(src: String) -> Maybe ast.Expr =
+  let Ok toks = lexer.tokenize(src) else Nothing
+      Ok prog = parser.parse_program(toks) else Nothing
+      ast.Program([ast.FnDecl _ _ _ _ _ body _ | _]) _ = prog else Nothing
+  in Just(body)
+
+# The steps of a fn whose body is a `do`, one word each: what each step parsed to.
+fn first_fn_steps(src: String) -> List String =
+  let Just(ast.DoExpr steps _) = first_fn_body(src) else ["not-do"]
+  in list_map(step_shape, steps)
+
+fn step_shape(s: ast.DoStep) -> String =
+  match s with
+  | ast.DoBindStep _ _ -> "bind"
+  | ast.DoLetStep _ _ -> "let"
+  | ast.DoExprStep _ -> "expr"
+  | ast.DoPatStep ast.ArrowBind _ _ els _ -> "pat-bind" ++ else_suffix(els)
+  | ast.DoPatStep ast.LetBind _ _ els _ -> "pat-let" ++ else_suffix(els)
+
+fn else_suffix(els: Maybe ast.LetElse) -> String =
+  match els with
+  | Nothing -> ""
+  | Just (ast.LetElse Nothing _) -> "+else"
+  | Just (ast.LetElse(Just _) _) -> "+residual"
+
+# A chain of `let` nodes, outermost first: each binding's pattern name and its else.
+fn let_chain(e: ast.Expr) -> List String =
+  match e with
+  | ast.LetBindExpr (ast.VarPattern n _) _ els body _ -> Cons(n ++ else_suffix(els), let_chain(body))
+  | ast.LetBindExpr _ _ els body _ -> Cons("pat" ++ else_suffix(els), let_chain(body))
+  | _ -> []
+
+fn first_fn_let_chain(src: String) -> List String =
+  let Just body = first_fn_body(src) else ["no-fn"]
+  in let_chain(body)
+
+# The body's node shape, so a test can assert that `where` and the equivalent
+# `let … in` parse to the SAME constructor. Two desugarings for one binding
+# construct is what allowed them to type differently.
 fn first_fn_body_shape(src: String) -> String =
   match lexer.tokenize(src) with
   | Err _ -> "lex-error"
@@ -53,6 +88,7 @@ fn first_fn_body_shape(src: String) -> String =
 fn expr_shape(e: ast.Expr) -> String =
   match e with
   | ast.MatchExpr _ _ _ -> "match"
+  | ast.LetBindExpr _ _ _ _ _ -> "let"
   | ast.CallExpr _ _ _ -> "call"
   | ast.LambdaExpr _ _ _ -> "lambda"
   | ast.IntExpr _ _ -> "int"
@@ -432,23 +468,53 @@ fn main() -> Unit !{IO} =
       first_fn_body_line(""), Err (NoDecls))
     assert_eq(state, "bail: first decl not a fn",
       first_fn_body_line("type Color = Red | Green"), Err (FirstNotFn))
-    assert_eq(state, "bail: body not a match",
-      first_fn_body_line("fn f() -> Int = 42"), Err (BodyNotMatch))
+    assert_eq(state, "bail: body not a let",
+      first_fn_body_line("fn f() -> Int = 42"), Err (BodyNotLet))
 
-    # `where` and the equivalent `let … in` must desugar to the SAME node. They are
+    # `where` and the equivalent `let … in` must parse to the SAME node. They are
     # one binding construct with two syntaxes; when they had two desugarings they
     # also typed differently — `where` inferred the binding from the BODY (an
     # applied lambda with an unannotated param, so `where a = 2.5` defaulted to Int
     # and failed), while `let` inferred it from the value. This pins the shared shape
     # so the two cannot silently diverge again.
-    assert_eq(state, "where desugars to a match",
-      first_fn_body_shape("fn f() -> Int = x where x = 5"), "match")
-    assert_eq(state, "let..in desugars to a match",
-      first_fn_body_shape("fn f() -> Int =\n  let x = 5\n  in x"), "match")
+    assert_eq(state, "where parses to a let",
+      first_fn_body_shape("fn f() -> Int = x where x = 5"), "let")
+    assert_eq(state, "let..in parses to a let",
+      first_fn_body_shape("fn f() -> Int =\n  let x = 5\n  in x"), "let")
     assert_eq(state, "where and let..in agree on node shape",
       first_fn_body_shape("fn f() -> Int = x where x = 5"),
       first_fn_body_shape("fn f() -> Int =\n  let x = 5\n  in x"))
-    assert_eq(state, "tuple where desugars to a match too",
-      first_fn_body_shape("fn f() -> Int = a where (a, b) = (1, 2)"), "match")
+    assert_eq(state, "tuple where parses to a let too",
+      first_fn_body_shape("fn f() -> Int = a where (a, b) = (1, 2)"), "let")
+
+    # Bindings nest outermost-first, each carrying its own `else`.
+    assert_eq(state, "let..in group nests in order, each with its else",
+      first_fn_let_chain("fn f(m: Maybe Int) -> Int =\n  let a = 1\n      Just b = m else 0\n      Ok c = r else Err e -> e\n  in a"),
+      ["a", "pat+else", "pat+residual"])
+    assert_eq(state, "where group nests first binding outermost",
+      first_fn_let_chain("fn f() -> Int = b\n  where a = 1\n        b = a"), ["a", "b"])
+
+    # A do step that needs the steps after it is one flat DoPatStep; a name or a
+    # tuple of names bound with `<-` stays a DoBindStep.
+    assert_eq(state, "do: <- of a name stays a bind",
+      first_fn_steps("fn f() -> Int =\n  do\n    x <- g()\n    x"), ["bind", "expr"])
+    assert_eq(state, "do: <- of a tuple stays a bind",
+      first_fn_steps("fn f() -> Int =\n  do\n    (a, b) <- g()\n    a"), ["bind", "expr"])
+    assert_eq(state, "do: <- of a constructor is a pattern step",
+      first_fn_steps("fn f() -> Int =\n  do\n    Box n <- g()\n    n"), ["pat-bind", "expr"])
+    assert_eq(state, "do: <- with else",
+      first_fn_steps("fn f() -> Int =\n  do\n    Just n <- g() else 0\n    n"), ["pat-bind+else", "expr"])
+    assert_eq(state, "do: <- with a residual",
+      first_fn_steps("fn f() -> Int =\n  do\n    Ok n <- g() else Err e -> e\n    n"),
+      ["pat-bind+residual", "expr"])
+    assert_eq(state, "do: let of a name stays a let",
+      first_fn_steps("fn f() -> Int =\n  do\n    let x = 1\n    x"), ["let", "expr"])
+    assert_eq(state, "do: let of a pattern is a pattern step",
+      first_fn_steps("fn f() -> Int =\n  do\n    let (a, b) = p\n    a"), ["pat-let", "expr"])
+    assert_eq(state, "do: let with else, steps before and after stay flat",
+      first_fn_steps("fn f() -> Int =\n  do\n    print(1)\n    let Just n = m else 0\n    print(n)\n    n"),
+      ["expr", "pat-let+else", "expr", "expr"])
+    assert_true(state, "do: a pattern step as the last step is a parse error",
+      parse_fails("fn f() -> Int =\n  do\n    print(1)\n    let Just n = m else 0"))
 
     summary(state)

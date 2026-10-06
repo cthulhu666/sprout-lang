@@ -37,7 +37,7 @@ seed re-refreshed to a fixed point.
 
 > **Superseded 2026-08-06 — `where`/`let..in` no longer desugar to a lambda at all.**
 > Both now lower to a **single-arm `MatchExpr` on the bound value**
-> (`parser.wrap_where_binding` / `build_let_binding_match`), so the tail position in
+> (`ast.let_bind_match`, applied by inference), so the tail position in
 > `hi_step` is structural — a match arm — rather than something arc (b)'s
 > beta-reduction has to recover. `musttail` count on
 > `test_scram_pbkdf2_green.spr` is unchanged (2), and the test still passes.

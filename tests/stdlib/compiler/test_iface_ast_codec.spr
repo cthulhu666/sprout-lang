@@ -2,6 +2,7 @@ import stdlib.test (TestState, new_state, assert_true, assert_false, summary)
 import stdlib.compiler.ast as ast
 import stdlib.compiler.source as source
 import stdlib.compiler.iface_codec as iface_codec
+import stdlib.string as string
 
 # Phase 2 iface codec round-trip: encode/decode for ast.Program and all
 # constituent ADTs.
@@ -23,6 +24,11 @@ fn rt_expr(e: ast.Expr) -> Bool =
   match iface_codec.decode_ast_expr(iface_codec.encode_ast_expr(e)) with
   | Nothing -> false
   | Just e2 -> iface_codec.encode_ast_expr(e2) == iface_codec.encode_ast_expr(e)
+
+fn decode_fails(text: String) -> Bool =
+  match iface_codec.decode_ast_expr(text) with
+  | Nothing -> true
+  | Just _ -> false
 
 fn rt_pattern(p: ast.Pattern) -> Bool =
   match iface_codec.decode_ast_pattern(iface_codec.encode_ast_pattern(p)) with
@@ -235,6 +241,31 @@ fn main() -> Unit !{IO} =
             ast.MatchBranch(ast.WildcardPattern(pos0()), ast.StringExpr("other", pos0())),
             Nil)),
         pos0())))
+
+    assert_true(state, "LetBindExpr without else roundtrip",
+      rt_expr(ast.LetBindExpr(ast.VarPattern("x", pos0()), ast.IntExpr(1, pos0()), Nothing,
+        ast.VarExpr("x", pos1()), pos0())))
+    assert_true(state, "LetBindExpr constant else roundtrip",
+      rt_expr(ast.LetBindExpr(ast.ConstructorPattern("Just", [ast.VarPattern("x", pos0())], pos0()),
+        ast.VarExpr("m", pos0()), Just(ast.LetElse(Nothing, ast.IntExpr(0, pos1()))),
+        ast.VarExpr("x", pos1()), pos0())))
+    assert_true(state, "LetBindExpr residual else roundtrip",
+      rt_expr(ast.LetBindExpr(ast.ConstructorPattern("Ok", [ast.VarPattern("x", pos0())], pos0()),
+        ast.VarExpr("r", pos0()),
+        Just(ast.LetElse(Just(ast.ConstructorPattern("Err", [ast.VarPattern("e", pos1())], pos1())),
+                         ast.VarExpr("e", pos1()))),
+        ast.VarExpr("x", pos1()), pos0())))
+    assert_true(state, "DoPatStep roundtrip, both kinds",
+      rt_expr(ast.DoExpr([
+        ast.DoPatStep(ast.ArrowBind, ast.ConstructorPattern("Box", [ast.VarPattern("n", pos0())], pos0()),
+          ast.VarExpr("g", pos0()), Nothing, pos0()),
+        ast.DoPatStep(ast.LetBind, ast.ConstructorPattern("Just", [ast.VarPattern("k", pos1())], pos1()),
+          ast.VarExpr("m", pos1()), Just(ast.LetElse(Nothing, ast.IntExpr(0, pos1()))), pos1()),
+        ast.DoExprStep(ast.VarExpr("k", pos1()))], pos0())))
+    assert_true(state, "a misspelt LetElse tag is rejected, not misread",
+      decode_fails(string.replace_all("(LetElse ", "(Wrong ", iface_codec.encode_ast_expr(
+        ast.LetBindExpr(ast.VarPattern("x", pos0()), ast.VarExpr("m", pos0()),
+          Just(ast.LetElse(Nothing, ast.IntExpr(0, pos0()))), ast.VarExpr("x", pos0()), pos0())))))
 
     assert_true(state, "IntRangeExpr roundtrip",
       rt_expr(ast.IntRangeExpr(

@@ -379,13 +379,14 @@ four repos compiling with unchanged behaviour.
 0. ~~Soundness fix.~~ Landed: `typed_ast.BindMode` on each bind, decided in
    `infer.decide_bind_mode` and read by every later pass; a head that becomes `Maybe`/`Result`
    after the bind is rejected (spec §5.9). The modes are also the list the codemod needs.
-   0b. Move `let..else` and `do` pattern binds (`build_do_refutable`, `build_do_total`) from the
-   parser into inference, as Q9 does for `try`; decided 2026-10-06. A refactor: the rewrite emits
-   the same `match`, so the acceptance test is an unchanged seed fixed point and golden IR. It
-   builds the machinery `try` uses under that test. Once in inference, the synthetic `__t <- e`
-   can be marked plain, which the parser cannot do; that changes behaviour, so it belongs to
-   step 1, not 0b (today `Just x <- g() else Nothing` with `g : Maybe (Maybe Int)` binds
-   `x = 2`). Better messages follow in a separate commit: a wrong
+   0b. Move `let..else` and `do` pattern binds from the parser into inference, as Q9 does for
+   `try`; decided 2026-10-06. First commit landed: the parser emits `ast.LetBindExpr` and
+   `ast.DoPatStep`, and inference rewrites them via `ast.let_bind_match` and `ast.do_pat_steps`.
+   A refactor: the rewrite emits the same `match`, so the acceptance test is an unchanged seed
+   fixed point and golden IR. It builds the machinery `try` uses under that test. Once in
+   inference, the synthetic `__t <- e` can be marked plain, which the parser cannot do; that
+   changes behaviour, so it belongs to step 1, not 0b (today `Just x <- g() else Nothing` with
+   `g : Maybe (Maybe Int)` binds `x = 2`). Better messages follow in a separate commit: a wrong
    fallback reports "Match branch type mismatch", and a trailing `let..else` gets a parse error
    while a trailing `let` gets the inference one. A third commit lets an `else` binding sit in a
    multi-binding `do`-`let` statement (§9 Q13).
@@ -394,8 +395,8 @@ four repos compiling with unchanged behaviour.
    is a `try` (after stripping parentheses) is always plain. Otherwise `x <- try e` with
    `e : Result E (Maybe A)` unwraps twice. The rule must reach every place that reads a bind's
    type, not only `decide_bind_mode`: `do_family_update` (`infer.sprout`) sets the block's family
-   from the step's type for every `DoBindStep`, and the parser's synthetic `__t <- e` binds
-   (`build_do_total`, `parser.sprout`) carry the user's right-hand side.
+   from the step's type for every `DoBindStep`, and the synthetic `__t <- e` binds
+   (`ast.do_pat_steps`) carry the user's right-hand side.
    1a. Tooling: a compiler phase that lists every bind whose `BindMode` propagates (and whether
    its right-hand side is pure), every non-final `do` statement with a fallible value, and every
    effectful `do`-`let`, with file, line and column. Only the type checker knows any of them, and

@@ -1563,6 +1563,19 @@ fn qualify_do_steps(ctx: ResolveCtx, scope: List String, steps: List ast.DoStep)
       | ast.DoExprStep expr ->
           Cons(ast.DoExprStep(qualify_expr(ctx, scope, expr)),
                qualify_do_steps(ctx, scope, rest))
+      | ast.DoPatStep kind pat value els pos ->
+          Cons(ast.DoPatStep(kind, qualify_pattern(ctx, pat), qualify_expr(ctx, scope, value),
+                             qualify_let_else(ctx, scope, els), pos),
+               qualify_do_steps(ctx, list_append(scope, ast.pattern_names(pat)), rest))
+
+# The handler runs where the pattern failed, so only the residual's names are in scope.
+fn qualify_let_else(ctx: ResolveCtx, scope: List String, els: Maybe ast.LetElse) -> Maybe ast.LetElse =
+  match els with
+  | Nothing -> Nothing
+  | Just (ast.LetElse Nothing handler) -> Just(ast.LetElse(Nothing, qualify_expr(ctx, scope, handler)))
+  | Just (ast.LetElse(Just residual) handler) ->
+      Just(ast.LetElse(Just(qualify_pattern(ctx, residual)),
+                       qualify_expr(ctx, list_append(scope, ast.pattern_names(residual)), handler)))
 
 fn qualify_expr_list(ctx: ResolveCtx, scope: List String, exprs: List ast.Expr) -> List ast.Expr =
   match exprs with
@@ -1615,6 +1628,10 @@ fn qualify_expr(ctx: ResolveCtx, scope: List String, expr: ast.Expr) -> ast.Expr
   | ast.ComprehensionExpr elem gens pos ->
       let (qgens, final_scope) = qualify_comprehension_gens(ctx, scope, gens)
       in ast.ComprehensionExpr(qualify_expr(ctx, final_scope, elem), qgens, pos)
+  | ast.LetBindExpr pat value els body pos ->
+      ast.LetBindExpr(qualify_pattern(ctx, pat), qualify_expr(ctx, scope, value),
+                      qualify_let_else(ctx, scope, els),
+                      qualify_expr(ctx, list_append(scope, ast.pattern_names(pat)), body), pos)
 
 # Each generator's pattern scopes over its own guards, every later generator's
 # source and guards, and (via the returned final scope) the element expr.
@@ -2031,6 +2048,8 @@ fn unresolved_in_expr(e: ast.Expr, declared: Dict String) -> Maybe String =
       match unresolved_in_expr(elem, declared) with
       | Just n -> Just(n)
       | Nothing -> unresolved_in_comprehension_gens(gens, declared)
+  | ast.LetBindExpr pat value els body pos ->
+      unresolved_in_expr(ast.let_bind_match(pat, value, els, body, pos), declared)
   | _ -> Nothing
 
 fn unresolved_in_comprehension_gens(gens: List ast.ComprehensionGen, declared: Dict String) -> Maybe String =
@@ -2067,18 +2086,16 @@ fn unresolved_in_branches(bs: List ast.MatchBranch, declared: Dict String) -> Ma
 fn unresolved_in_do_steps(steps: List ast.DoStep, declared: Dict String) -> Maybe String =
   match steps with
   | Nil -> Nothing
-  | Cons s rest ->
-      match step_expr(s) with
-      | e ->
-          match unresolved_in_expr(e, declared) with
-          | Just n -> Just(n)
-          | Nothing -> unresolved_in_do_steps(rest, declared)
+  | [ast.DoPatStep kind pat value els pos | rest] ->
+      unresolved_in_do_steps(ast.do_pat_steps(kind, pat, value, els, rest, pos), declared)
+  | [ast.DoBindStep _ e | rest] -> unresolved_in_step(e, rest, declared)
+  | [ast.DoLetStep _ e | rest] -> unresolved_in_step(e, rest, declared)
+  | [ast.DoExprStep e | rest] -> unresolved_in_step(e, rest, declared)
 
-fn step_expr(s: ast.DoStep) -> ast.Expr =
-  match s with
-  | ast.DoBindStep _ e -> e
-  | ast.DoLetStep _ e -> e
-  | ast.DoExprStep e -> e
+fn unresolved_in_step(e: ast.Expr, rest: List ast.DoStep, declared: Dict String) -> Maybe String =
+  match unresolved_in_expr(e, declared) with
+  | Just n -> Just(n)
+  | Nothing -> unresolved_in_do_steps(rest, declared)
 
 fn unresolved_in_record_exprs(fields: List ast.RecordField, declared: Dict String) -> Maybe String =
   match fields with

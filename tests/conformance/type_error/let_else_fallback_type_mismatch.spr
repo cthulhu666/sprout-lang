@@ -1,0 +1,11 @@
+# sprout-ignore-all lint/hand-rolled-combinator: the fixture exists to fail typechecking on the fallback
+module main
+
+# A `let..else` fallback must have the type of the block it ends.
+
+fn first_or(m: Maybe Int) -> Int =
+  let Just x = m else "none"
+  in x
+
+fn main() -> Unit !{IO} =
+  print(first_or(Just(1)))
