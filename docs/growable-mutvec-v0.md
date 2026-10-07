@@ -1,7 +1,7 @@
 # Growable `MutVec` — v0
 
 **Status:** growth shipped 2026-08-15, shrinking 2026-09-09. Behaviour is documented in
-[builtins-reference.md](./builtins-reference.md#growing-a-mutvec); this document records the problem,
+[stdlib-reference.md](./stdlib-reference.md#growing-a-mutvec); this document records the problem,
 the decisions, and what was deliberately left out.
 
 `MutVec` is a stdlib type, not part of the language core, so `spec-v0.md` does not describe it and
@@ -135,7 +135,7 @@ guarantee the *cost*, not the *strategy*, and keep failure out of the return typ
 
 **Decision — growth factor: doubling from 8, documented as behaviour, not as contract.** The
 contract is amortised O(1), matching both rows above. Doubling is nonetheless stated in
-`builtins-reference.md` because a caller sizing a 24k-entry log needs to know the peak can reach 2×
+`stdlib-reference.md` because a caller sizing a 24k-entry log needs to know the peak can reach 2×
 the final length; the escape hatch for those callers is `mutvec_new(n, fill)` plus indexed writes,
 which allocates exactly once.
 
@@ -214,7 +214,7 @@ rather than only at the ends. A zero is legal mid-loop: `sprout_gc_drain_marks` 
 
 **The price is that shrinking is O(len − n) rather than O(1)**, which matters most for `clear`: a
 caller emptying a large vector each iteration pays a full pass over the live region where a bare
-length store would be free. That is disclosed in `builtins-reference.md` rather than hidden, and it
+length store would be free. That is disclosed in `stdlib-reference.md` rather than hidden, and it
 is the argument for revisiting the zeroing if a real caller ever measures it — the benefit is
 hypothetical and the cost is not.
 

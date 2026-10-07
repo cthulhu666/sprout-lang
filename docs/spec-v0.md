@@ -2412,7 +2412,7 @@ use plain unprefixed names:
   semantics are specified below.
 - **`stdlib.math`** — the `Double` (real-valued) layer. `Double` itself is an
   experimental extension rather than part of the normative v0 core (see §8.6), so
-  that module's surface is documented in `docs/builtins-reference.md` and
+  that module's surface is documented in `docs/stdlib-reference.md` and
   `docs/math-transcendental-v0.md` rather than fixed here.
 
 Sprout has no overloading, so a single name cannot serve both types. The split is

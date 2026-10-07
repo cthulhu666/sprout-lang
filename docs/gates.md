@@ -301,6 +301,17 @@ The sweep removed the ones sitting beside a named ref; thirteen survive in
 was deleted, so there is no identifier left to name. `.sprout` line refs — several hundred — are out
 of scope.
 
+## Stdlib reference — `just stdlib-reference`
+
+Every top-level `stdlib/*.sprout` module but the prelude needs a `## stdlib.<name>` section in
+`docs/stdlib-reference.md`. Added 2026-10-07 when that file was split out of
+`builtins-reference.md`: 20 of 35 modules had a reference, and nothing had noticed the other 15.
+
+They are listed in `UNDOCUMENTED` in the script so the gate was green on arrival, and the list only
+shrinks — a listed module that gains a section fails until it is removed from the list, and so does
+a listed name with no module file. Nested modules (`fs/path`, `math/int`) are out of scope, as for
+the REPL's completion list. It checks that a section exists, not what it says.
+
 ## Render cost — `just render-cost-gate`
 
 Paints 20 frames of a 200×50 screen through the real stack (`tests/cost/render_frame.sprout`) under

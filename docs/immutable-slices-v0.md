@@ -30,7 +30,7 @@ writing this note; the exported `string.slice` / `bytes.slice` wrappers were alw
 only stdlib-internal readers were exposed.)
 
 The consequence is not hypothetical. `tcp_write_some(conn, payload, offset)` takes a byte **offset
-instead of a re-sliced tail**, and `docs/builtins-reference.md:105` says why in as many words: it is
+instead of a re-sliced tail**, and `tcp_write_some`'s entry in `docs/builtins-reference.md` says why in as many words: it is
 "what keeps a Sprout-side write loop linear instead of O(n²) in the payload length". That is a
 hand-rolled view, threaded through a builtin signature, because the language has no view type.
 `docs/browser-preliminary-analysis.md:167` independently asks for "better range or slice" support
