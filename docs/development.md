@@ -2,7 +2,8 @@
 
 Practical guide to building and running Sprout, plus the current implementation
 surface. For normative language semantics see [spec-v0.md](./spec-v0.md); for the
-builtin surface see [builtins-reference.md](./builtins-reference.md).
+builtin surface see [builtins-reference.md](./builtins-reference.md); for the standard library see
+[stdlib-reference.md](./stdlib-reference.md).
 
 ## Toolchain (mise + just)
 
@@ -285,3 +286,41 @@ Commands:
   - lint: `mise exec -- just lint-file your_file.sprout`
   - format/lint whole repo: `mise exec -- just fmt` / `mise exec -- just lint`
   - current scope: whitespace-aware formatting, comment preservation, trailing-whitespace/tab/final-newline checks
+
+## Examples
+
+Example classification:
+
+- Runnable examples define `main() -> Unit !{IO}` and can be compiled with `just compile-native` or run with `just run` (no program arguments) or `just compile-native` + direct execution (for programs that read `argv_get`).
+- Library-style examples expose helpers without `main`; use `just check` for them directly, or import them from another runnable module.
+- `examples/sentry_api.sprout` is a library-style module layering Sentry-specific API helpers plus typed issue-summary and issue-detail decoding on top of generic `stdlib.http` + `stdlib.http_client`.
+- `examples/sentry_issue_browser_tui.sprout` is a library-style interactive issue browser module with environment-based config loading, list navigation, refresh, and detail rendering.
+- `examples/sentry_issue_browser.sprout` is the runnable wrapper around that helper module for `just run` and `just compile-native`, including HTTPS-backed Sentry API calls in native mode.
+- `examples/http_get_cli.sprout` is a runnable CLI example that reads its URL from `argv_get(0)` and prints the response body.
+- `examples/text_demo.sprout` is a runnable Unicode-aware text summary CLI showing `Char`, `char_at_or`, `string_from_char`, and code-point `length`.
+- `examples/regex_demo.sprout` is a runnable experimental regex demo showing `compile`, `find_first`, `is_match`, `replace_all_literal`, and `escape`, including doubled-backslash regex patterns inside ordinary string literals.
+- `examples/string_templates.sprout` is a runnable experimental string-template demo showing templates in both `String` contexts (`string_concat_many` instead of `++` chains) and `StringTemplate` contexts (structured parts passed to a sink).
+
+The stdlib prelude is included automatically when a stdlib root is provided; `just check` and `just run` always include it.
+
+Load HTTP and JSON helpers via imports such as `import stdlib.http (...)`, `import stdlib.http_client (...)`, `import stdlib.json as json`, and `import stdlib.string as string`.
+
+For programs that take program arguments (`argv_get`), use `just compile-native` and then run the binary directly. `just run` does not forward arguments.
+
+- Typecheck a file: `mise exec -- just check examples/fizzbuzz.sprout`
+- Run a file (no program arguments): `mise exec -- just run examples/fizzbuzz.sprout`
+- Run with program arguments (compile first):
+  `mise exec -- just compile-native examples/http_get_cli.sprout /tmp/http_get && /tmp/http_get http://127.0.0.1:8080/`
+- Example text demo:
+  `mise exec -- just compile-native examples/text_demo.sprout /tmp/text_demo && /tmp/text_demo "zażółć gęślą jaźń"`
+- Example regex demo:
+  `mise exec -- just compile-native examples/regex_demo.sprout /tmp/regex_demo && /tmp/regex_demo "ticket=AB-42 owner=ada"`
+- Example string templates demo:
+  `mise exec -- just compile-native examples/string_templates.sprout /tmp/string_templates && /tmp/string_templates Ada 3`
+- Sentry issue browser build and run:
+  `mise exec -- just compile-native examples/sentry_issue_browser.sprout /tmp/sentry_issue_browser`
+  `SENTRY_ORG=your-org SENTRY_PROJECT=your-project SENTRY_TOKEN=token /tmp/sentry_issue_browser`
+  Interactive terminals use arrow keys or `j`/`k` to move, `Enter` to open details, `r` to refresh, and `q` to quit. Non-interactive runs fall back to the plain issue list.
+- Collections helper demo: `mise exec -- just run examples/collections_demo.sprout`
+- Typeclass collections demo (experimental surface area, not normative v0):
+  `mise exec -- just run examples/typeclass_functor_foldable_demo.sprout`

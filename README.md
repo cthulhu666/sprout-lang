@@ -93,7 +93,8 @@ parses but is deprecated and reported by the linter as `deprecated-brace-body`.
 - [Style guide](./docs/style-guide-v0.md) · [stdlib/compiler guidelines](./docs/guidelines.md)
 - [HM typechecker guide](./docs/hm-typechecker.md) · [effect enforcement](./docs/effect-enforcement-v0.md) · [records](./docs/records-v0.md)
 - [Compiler internals](./docs/compiler-internals.md) · [packaging](./docs/packaging-v0.md) · [language server](./docs/language-server-roadmap.md)
-- [Builtins reference](./docs/builtins-reference.md) — host builtins + collections.
+- [Stdlib reference](./docs/stdlib-reference.md) — the `stdlib.*` modules, one section each.
+- [Builtins reference](./docs/builtins-reference.md) — host builtins (`extern fn`).
 - [Toolchain, build & implementation status](./docs/development.md)
 - [Debugging](./docs/debugging.md) · [Gates](./docs/gates.md) · [Bootstrap chain](./docs/bootstrap-chain.md)
 - [Backlog & roadmap](./BACKLOG.md)

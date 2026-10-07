@@ -1071,6 +1071,11 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
 
 **Gates and diagnostics**
 
+- [ ] `P3` **15 stdlib modules have no section in `docs/stdlib-reference.md`.** `args`, `bits`,
+  `chan`, `http_middleware`, `linalg`, `log`, `mutable`, `process`, `repl`, `rng`, `stamped`,
+  `task`, `template`, `test`, `version` — listed as `UNDOCUMENTED` in
+  `scripts/stdlib_reference_gate.sh`, which fails once one gains a section until it leaves the
+  list. Several (`task`, `chan`) have design docs but no API reference a user would find.
 - [ ] `P2` **`just gate-audit` derives "CI runs task X" by grepping the workflow's COMMENTS.** The
   pattern matches anywhere in `ci.yml`, so prose invents requirements: a task named only in a
   comment counts as CI-run, and the English word "just" manufactures a task name. **Not a

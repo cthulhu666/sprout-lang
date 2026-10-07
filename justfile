@@ -1886,6 +1886,12 @@ backlog-shape:
 runtime-line-refs:
   ./scripts/runtime_line_refs.sh
 
+# Every top-level stdlib module has a `## stdlib.<name>` section in docs/stdlib-reference.md.
+# The not-yet-documented ones are listed in the script, and that list can only shrink.
+[group('smoke')]
+stdlib-reference:
+  ./scripts/stdlib_reference_gate.sh
+
 # DoD #10 — example canary RUN.  The canary set must compile AND run to
 # completion without crashing.  `just compile-examples-stage1` only covers
 # compile; this recipe adds the runtime check.
@@ -3602,6 +3608,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "extern-signatures|check-extern-signatures"
     "backlog-shape|backlog-shape"
     "runtime-line-refs|runtime-line-refs"
+    "stdlib-reference|stdlib-reference"
   )
   declare -a pids=() labels=()
   idx=0; active=0
