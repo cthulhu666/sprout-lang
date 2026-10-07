@@ -602,6 +602,12 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   but all three can still mint invalid UTF-8, which `SPROUT_GC_HDRCHECK` is blind to because it
   compares `aux` against `strlen` and a bad lead byte leaves those equal. `docs/debugging.md`
   records the asymmetry.
+- [ ] `P2` **`http_request`'s `timeout_ms` does not bound name resolution.** The deadline starts
+  before `http_resolve`, but `async_resolve` parks on its pipe with `scheduler_park_on_unowned_fd`,
+  which has no timeout, so a 30 s lookup under `timeout_ms = 1000` returns ~29 s late
+  (documented as a limit in `docs/builtins-reference.md`). **Fix:** park with the remaining
+  budget (`scheduler_park_on_unowned_fd_timeout`) and abandon the lookup on expiry the way
+  force-drop already does (`docs/async-dns-v0.md` §6), so no thread or fd leaks.
 
 ### 2.5) Binary Data and Protocol Primitives
 
