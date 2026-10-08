@@ -55,9 +55,58 @@ fn wildcard_discard(r: Result Int Int) -> Int !{IO} =
     let Ok v = r else Err code -> code
     v
 
+# A multi-binding `let` statement takes a pattern or an `else` on any binding.
+# Each binding scopes over the ones below it, its `else` included (spec §5.2.1a).
+fn grouped(m: Maybe Int, r: Result Int Int) -> Int !{IO} =
+  do
+    print("")
+    let base = 100
+        Just a = m else base + 1
+        (b, c) = (a, a + 1)
+        Ok d = r else Err code -> base + code
+    a + b + c + d
+
+fn else_first(m: Maybe Int) -> Int !{IO} =
+  do
+    print("")
+    let Just a = m else 0
+        b = a * 2
+    a + b
+
+# A nullary constructor handler on its own line ends at the line break, not at
+# the next binding's name.
+type Pick = Picked Int | NoPick
+
+fn pick_value(p: Pick) -> Int =
+  match p with
+  | Picked n -> n
+  | NoPick -> 0
+
+fn ctor_handler(m: Maybe Int) -> Pick !{IO} =
+  do
+    print("")
+    let Just v = m else
+        NoPick
+        w = v + 1
+    Picked(w)
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
+    c1 <- ctor_handler(Just(1))
+    assert_eq(state, "let group: constructor handler, success", pick_value(c1), 2)
+    c2 <- ctor_handler(Nothing)
+    assert_eq(state, "let group: constructor handler, fallback", pick_value(c2), 0)
+    g1 <- grouped(Just(1), Ok(2))
+    assert_eq(state, "let group: every binding matches", g1, 6)
+    g2 <- grouped(Nothing, Ok(2))
+    assert_eq(state, "let group: an else sees the bindings above it", g2, 101)
+    g3 <- grouped(Just(1), Err(5))
+    assert_eq(state, "let group: a residual on a later binding", g3, 105)
+    f1 <- else_first(Just(3))
+    assert_eq(state, "let group: else on the first binding, success", f1, 9)
+    f2 <- else_first(Nothing)
+    assert_eq(state, "let group: else on the first binding, fallback", f2, 0)
     r1 <- eff_recover(Good(5))
     assert_eq(state, "eff bind: Good binds value", r1, 5)
     r2 <- eff_recover(Bad(42))

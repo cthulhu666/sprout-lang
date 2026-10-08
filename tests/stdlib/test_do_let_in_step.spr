@@ -32,8 +32,8 @@ fn multi(n: Int) -> Int =
         y = n + 2
     in x + y
 
-# A binding carrying an `else`. §5.2.1a makes such a binding stand alone as a
-# statement, so this shape can ONLY be the expression form.
+# A binding carrying an `else`, closed by `in`: the expression form, so `v`
+# scopes over the body only.
 fn with_else(m: Maybe Int) -> Int =
   do
     let Just v = m else 0
