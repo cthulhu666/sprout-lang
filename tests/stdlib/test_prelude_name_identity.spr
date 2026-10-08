@@ -1,0 +1,79 @@
+import stdlib.test (check_eq, run_suite)
+
+# Names the compiler writes reach the prelude's declarations whatever a local is
+# called, and `prelude.X` names the prelude's `X` beside a module's own
+# (docs/prelude-name-identity-v0.md).
+
+# This module's own `Continue`.
+type Step =
+  | Continue Int
+  | Stop
+
+fn step_value(s: Step) -> Int =
+  match s with
+  | Continue n -> n
+  | Stop -> 0
+
+# Locals named like the prelude functions a rewrite calls.
+fn template_with(to_string: Int -> String, n: Int) -> String = `n=${n}`
+
+fn own_call(to_string: Int -> String, n: Int) -> String = to_string(n)
+
+fn vec_with(vec_from_list: Int) -> Vec Int = [1, vec_from_list]
+
+fn comprehension_with(list_reverse: Int, xs: List Int) -> List Int = [x + list_reverse for x in xs]
+
+# A local named like a class method, used as a value and through a field chain.
+type Holder = (to_string: Int)
+
+fn field_of(to_string: Holder) -> Int = to_string.to_string
+
+fn total(xs: List Int) -> Int = fold(\ (acc, x) -> acc + x, 0, xs)
+
+# `prelude.X` names the prelude's declaration in an expression, a pattern and a type.
+fn qualified_sum() -> Int = total(prelude.Cons(4, prelude.Cons(5, prelude.Nil)))
+
+fn qualified_head(xs: List Int) -> Int =
+  match xs with
+  | prelude.Cons h _ -> h
+  | prelude.Nil -> 0
+
+fn qualified_type(n: Int) -> prelude.Maybe Int = Just(n)
+
+# A Propagate instance beside this module's own `Continue`.
+type Box a =
+  | Full a
+  | Empty
+
+instance Propagate Box
+  fn branch(value: Box a) -> ControlFlow (Box b) a =
+    match value with
+    | Full v -> prelude.Continue(v)
+    | Empty -> Break(Empty)
+
+fn box_value(b: Box Int) -> Int =
+  match branch(b) with
+  | prelude.Continue v -> v
+  | Break _ -> 0
+
+# A local named `prelude` wins over the qualifier, as any local head does.
+type Point = (x: Int, y: Int)
+
+fn point_x(prelude: Point) -> Int = prelude.x
+
+fn main() -> Unit !{IO} =
+  run_suite("prelude name identity", [
+    check_eq("own constructor", step_value(Continue(5)) + step_value(Stop), 5),
+    check_eq("template beside a local to_string", template_with(\n -> "LOCAL", 5), "n=5"),
+    check_eq("the local is still callable", own_call(\n -> "LOCAL", 5), "LOCAL"),
+    check_eq("vec literal beside a local vec_from_list", vec_length(vec_with(9)), 2),
+    check_eq("comprehension beside a local list_reverse", comprehension_with(10, [1, 2]), [11, 12]),
+    check_eq("field chain on a renamed local", field_of(Holder(to_string = 7)), 7),
+    check_eq("prelude.Cons in an expression", qualified_sum(), 9),
+    check_eq("prelude.Cons in a pattern", qualified_head([3, 4]), 3),
+    check_eq("prelude.Nil in a pattern", qualified_head([]), 0),
+    check_eq("prelude.Maybe in a type", qualified_type(2), Just(2)),
+    check_eq("prelude.Continue beside an own Continue", box_value(Full(6)), 6),
+    check_eq("instance failure", box_value(Empty), 0),
+    check_eq("a local named prelude", point_x(Point(x = 1, y = 2)), 1)
+  ])

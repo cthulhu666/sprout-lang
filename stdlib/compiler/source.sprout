@@ -189,7 +189,12 @@ export let entry_module_name: String = "$entry"
 
 export let entry_module_prefix: String = "$entry."
 
-# Remove the synthetic prefix from text about to be shown to a user.
+# The bundler renames a local that shares a prelude value's name to this prefix
+# plus the name (docs/prelude-name-identity-v0.md §5.1). `$` makes it unforgeable,
+# as for `$entry`; no dot, since a dotted local reads as a field chain.
+export let local_rename_prefix: String = "$l_"
+
+# Remove the synthetic prefixes from text about to be shown to a user.
 #
 # Applied at the RENDER boundary — where compiler-internal message text becomes
 # user-facing output — rather than at each site that builds a message. Those
@@ -206,7 +211,7 @@ export let entry_module_prefix: String = "$entry."
 # Deliberately NOT applied to `--phase qualify`'s debug dump: a debug surface
 # should show the real qualified names, which is the whole reason to look at it.
 export fn strip_entry_names(msg: String) -> String =
-  string.replace_all(entry_module_prefix, "", msg)
+  string.replace_all(local_rename_prefix, "", string.replace_all(entry_module_prefix, "", msg))
 
 # The display name of a constructor: the name the user wrote, with the bundler's
 # module qualification dropped. `main.Apple` -> `Apple`, `$entry.Box` -> `Box`,

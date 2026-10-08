@@ -366,20 +366,20 @@ entry:
   ret i64 %t$14
 }
 
-define i64 @examples.ref_tutorial.track_list(i64 %p$xs$in, i64 %p$total$in, i64 %p$maximum$in) {
+define i64 @examples.ref_tutorial.track_list(i64 %p$xs$in, i64 %p$total$in, i64 %p$$l_maximum$in) {
 entry:
   %t$24 = alloca i64
   store i64 %p$xs$in, ptr %t$24
   %t$25 = alloca i64
   store i64 %p$total$in, ptr %t$25
   %t$26 = alloca i64
-  store i64 %p$maximum$in, ptr %t$26
+  store i64 %p$$l_maximum$in, ptr %t$26
   %t$27 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
   %p$xs = load i64, ptr %t$24
   %p$total = load i64, ptr %t$25
-  %p$maximum = load i64, ptr %t$26
+  %p$$l_maximum = load i64, ptr %t$26
   %t$0 = call i64 @sprout_tag(i64 %p$xs)
   br label %arm_0_1
 arm_0_1:
@@ -400,7 +400,7 @@ body_1_1:
   store i64 %p$total, ptr %t$28
   %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
   %t$30 = alloca i64
-  store i64 %p$maximum, ptr %t$30
+  store i64 %p$$l_maximum, ptr %t$30
   %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)
   %t$32 = alloca i64
   store i64 %t$8, ptr %t$32
@@ -430,10 +430,10 @@ ovfok_11:
   store i64 %p$total, ptr %t$41
   %t$42 = call i64 @sprout_gc_push_i64_root(ptr %t$41)
   %t$43 = alloca i64
-  store i64 %p$maximum, ptr %t$43
+  store i64 %p$$l_maximum, ptr %t$43
   %t$44 = call i64 @sprout_gc_push_i64_root(ptr %t$43)
   %t$14 = call i64 @ref_write(i64 %p$total, i64 %t$11)
-  %t$15 = call i64 @ref_read(i64 %p$maximum)
+  %t$15 = call i64 @ref_read(i64 %p$$l_maximum)
   %t$16 = icmp sgt i64 %t$8, %t$15
   %t$17 = zext i1 %t$16 to i64
   %t$22 = trunc i64 %t$17 to i1
@@ -450,9 +450,9 @@ then_18:
   store i64 %p$total, ptr %t$50
   %t$51 = call i64 @sprout_gc_push_i64_root(ptr %t$50)
   %t$52 = alloca i64
-  store i64 %p$maximum, ptr %t$52
+  store i64 %p$$l_maximum, ptr %t$52
   %t$53 = call i64 @sprout_gc_push_i64_root(ptr %t$52)
-  %t$20 = call i64 @ref_write(i64 %p$maximum, i64 %t$8)
+  %t$20 = call i64 @ref_write(i64 %p$$l_maximum, i64 %t$8)
   %t$54 = call i64 @sprout_gc_pop_roots(i64 4)
   br label %join_18
 else_18:
@@ -462,7 +462,7 @@ join_18:
   %t$19 = phi i64 [%t$20, %then_18], [%t$21, %else_18]
   store i64 %t$9, ptr %t$24
   store i64 %p$total, ptr %t$25
-  store i64 %p$maximum, ptr %t$26
+  store i64 %p$$l_maximum, ptr %t$26
   call void @llvm.stackrestore(ptr %t$27)
   br label %tco_loop
 arm_2_1:

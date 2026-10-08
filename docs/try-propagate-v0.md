@@ -394,10 +394,9 @@ four repos compiling with unchanged behaviour.
 1. Add `ControlFlow`, `Propagate` and their instances, `try`, its two reserved shapes (§4.4)
    and fusion, as separate PRs in that order. The first landed: `ControlFlow`, `Propagate` and
    the `Maybe` and `Result e` instances, in the prelude (spec §8.5). A local or top-level
-   `branch` shadows the method today, so `try`'s rewrite needs the name identity in the BACKLOG
-   entry "A user's constructor captures a name the compiler synthesizes". `ignore` moves to step 2,
-   its first user; `tests/stdlib/test_linear_borrowing.spr` defines its own `ignore`, to be
-   renamed then. Old fallible `<-` keeps working, except that a `<-` whose right-hand side
+   `branch` cannot capture `try`'s rewrite (Q9). `ignore` moves to step 2, its first user;
+   `tests/stdlib/test_linear_borrowing.spr` defines its own `ignore`, to be renamed then. Old
+   fallible `<-` keeps working, except that a `<-` whose right-hand side
    is a `try` (after stripping parentheses) is always plain. Otherwise `x <- try e` with
    `e : Result E (Maybe A)` unwraps twice. The rule must reach every place that reads a bind's
    type, not only `decide_bind_mode`: `do_family_update` (`infer.sprout`) sets the block's family
@@ -457,10 +456,8 @@ type-checks either way (`show(x)`) is caught only by tests.
   a constructor in 1; `Continue` as a constructor in `stdlib/repl.sprout` and
   `stdlib/tui/app.sprout`; `ControlFlow`, `Break`, `Propagate` nowhere. A clash breaks nothing: a
   module's own name shadows the prelude's, and so does a selectively imported one (checked: an
-  imported `IntRange` beside `1..4`). With Q9's requirement, `try` is unaffected too. What a
-  shadowing module cannot do is name the prelude's type to write an instance by hand: the prelude
-  has no qualified spelling. The unshadowable reference Q9 requires should be writable, so one
-  mechanism serves both.
+  imported `IntRange` beside `1..4`). With Q9's requirement, `try` is unaffected too. A
+  shadowing module writes the prelude's as `prelude.Continue` (spec §3.1).
 - **Q4. `<-` with a pure right-hand side.** **Decided (2026-10-06): an error** (§4.5), from
   step 3. A lint cannot do it: Sprout's lint never consults types or effects
   (`docs/lint-rules-v0.md`). A warning would be the compiler's first (`DiagWarning` exists, nothing
@@ -494,10 +491,9 @@ Raised by the 2026-10-06 review; all must be decided before step 1:
   inference. A typed node through to lowering doubles the passes touched (about 8 typed-side files)
   and needs its own linear rule. A parse-time rewrite reports errors about a `match` the user never
   wrote. Requirement: the rewrite's references to `branch`, `Continue` and `Break` must reach the
-  prelude's, never a user's. Today a user's constructor captures a rewrite's bare name:
-  `type Mine = Cons Int | Nil` breaks `[x for x in xs if x > 1]` with "'Cons' expects 1
-  arguments, got 2" (a user's top-level function does not capture). `stdlib/repl.sprout` defines a
-  `Continue`.
+  prelude's, never a user's. Met by `docs/prelude-name-identity-v0.md`: after bundling, a module's
+  own names are qualified and a local that shares a prelude name is renamed, so a bare name written
+  in inference is the prelude's.
 - **Q10. A failure swallowed by a discarded step.** A non-last `do` step whose value is discarded
   loses its failure: `let Just v = mx else Nothing` / `in Just(v)` as a step, then `Just(99)`,
   returns `Just 99` for `mx = Nothing`. That follows from Q2. **Decided by Q8:** the step is a

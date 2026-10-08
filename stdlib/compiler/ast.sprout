@@ -799,6 +799,10 @@ export fn all_syntactic_values(exprs: List Expr) -> Bool =
 export let list_ctor_nil = "Nil"
 export let list_ctor_cons = "Cons"
 
+# `prelude.X` names the prelude's own `X` (spec §3.1); the bundler resolves it to
+# the bare name (docs/prelude-name-identity-v0.md).
+export let prelude_qualifier = "prelude"
+
 # Prefix of every binder the comprehension elaboration invents (infer.comp_tmp_name).
 # Shared because linear_check reads it back: a lambda carrying such a binder is
 # code the user never wrote, so its diagnostics must name the generator rather

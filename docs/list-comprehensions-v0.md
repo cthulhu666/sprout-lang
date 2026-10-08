@@ -385,9 +385,10 @@ A **fourth** hazard, found by the second review and not present in the list
 above: a local can shadow a bare prelude name the elaboration emits, as in
 `let list_fold = 5 in [x * x for x in xs]`. Locals are not module-qualified, so
 the synthesized call resolves to the local. Under the rejected typed-node design
-this was a *silent miscompile*; here it is a type error, in the same
-already-known wart class as shadowing `append` misdirecting a `Semigroup` error.
-Pinned by `tests/conformance/type_error/comprehension_shadowed_prelude.spr`.
+this was a *silent miscompile*; here it was a type error. Since 2026-10-08 the
+bundler renames such a local (`docs/prelude-name-identity-v0.md`), so the call
+reaches the prelude's `list_fold` and the program runs. Pinned by
+`tests/conformance/run/comprehension_shadowed_prelude.spr`.
 
 Three alternatives for the *dispatch* (as opposed to its timing) were rejected:
 

@@ -176,9 +176,9 @@ entry:
   ret i64 %t$0
 }
 
-define i64 @stdlib.crypto.random_bytes(i64 %p$count) {
+define i64 @stdlib.crypto.random_bytes(i64 %p$$l_count) {
 entry:
-  %t$0 = call i64 @crypto_random_bytes(i64 %p$count)
+  %t$0 = call i64 @crypto_random_bytes(i64 %p$$l_count)
   ret i64 %t$0
 }
 
@@ -346,9 +346,9 @@ wrepack_next_21:
   unreachable
 }
 
-define { i64, i64 } @stdlib.crypto.random_bytes_worker(i64 %p$count) {
+define { i64, i64 } @stdlib.crypto.random_bytes_worker(i64 %p$$l_count) {
 entry:
-  %t$0 = call i64 @crypto_random_bytes(i64 %p$count)
+  %t$0 = call i64 @crypto_random_bytes(i64 %p$$l_count)
   %t$1 = call i64 @sprout_tag(i64 %t$0)
   %t$2 = add i64 0, 7
   %t$3 = icmp eq i64 %t$1, %t$2
