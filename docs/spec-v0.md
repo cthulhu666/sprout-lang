@@ -3524,8 +3524,11 @@ class Propagate t
 `branch` splits a `t a` into its value (`Continue`) or its failure (`Break`). The
 failure holds no `a`, so it comes back as `t b` for any `b`: it fits a block
 whose success type differs, and a failure of another type constructor does not
-unify. Instances: `Maybe` and `Result e`; a user type can have one. A type with
-both `Propagate` and `Applicative` must satisfy `branch(pure(x)) == Continue(x)`.
+unify. Instances: `Maybe` and `Result e`; a user type can have one, except in a
+module that declares its own `Continue` or `Break`: that name shadows the
+prelude's, which has no qualified spelling. A type with both `Propagate` and
+`Applicative` must satisfy `branch(pure(x)) == Continue(x)`. `ControlFlow r a`
+has `Eq` and `ToString` when `r` and `a` do.
 The planned `try` expression rewrites to `branch` (`docs/try-propagate-v0.md`).
 
 ### `Filterable` class and generic `filter` (Experimental)

@@ -134,14 +134,14 @@ declare i64 @fs_rename(i64, i64)
 @.str.15 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 802, column 51)\00" }
 @.str.16 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 807, column 77)\00" }
 @.str.17 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 817, column 81)\00" }
-@.str.18 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1845, column 30)\00" }
-@.str.19 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1877, column 10)\00" }
+@.str.18 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1857, column 30)\00" }
+@.str.19 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1889, column 10)\00" }
 @.str.20 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
-@.str.21 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in / (line 1882, column 39)\00" }
-@.str.22 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1904, column 33)\00" }
-@.str.23 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 1904, column 43)\00" }
-@.str.24 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1904, column 49)\00" }
-@.str.25 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1912, column 58)\00" }
+@.str.21 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in / (line 1894, column 39)\00" }
+@.str.22 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1916, column 33)\00" }
+@.str.23 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 1916, column 43)\00" }
+@.str.24 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1916, column 49)\00" }
+@.str.25 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1924, column 58)\00" }
 @.str.26 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 61, column 30)\00" }
 @.str.27 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.str.28 = private unnamed_addr constant { i64, [45 x i8] } { i64 720906, [45 x i8] c"Int overflow in unary - (line 63, column 18)\00" }
@@ -4345,7 +4345,7 @@ declare i64 @fs_rename(i64, i64)
 @.str.4226 = private unnamed_addr constant { i64, [56 x i8] } { i64 901130, [56 x i8] c"ERROR: usage: compile-driver --check-iface <iface-file>\00" }
 @.str.4227 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.str.4228 = private unnamed_addr constant { i64, [220 x i8] } { i64 3588106, [220 x i8] c"ERROR: usage: compile-driver [--phase bundle|check|effects|lower|recheck|scan-info|dump-qualify | --emit-ir [--debug] | --use-ir-codegen | --emit-iface <module-name> | --check-iface <iface-file>] <stdlib-root> <file>...\00" }
-@.str.4229 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 1285, column 26)\00" }
+@.str.4229 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 1291, column 26)\00" }
 @.str.4230 = private unnamed_addr constant { i64, [66 x i8] } { i64 1064970, [66 x i8] c"ast_to_ir: internal compiler bug: bind_ctor_field_args field_idx=\00" }
 @.str.4231 = private unnamed_addr constant { i64, [21 x i8] } { i64 327690, [21 x i8] c" exceeds fks length \00" }
 @.str.4232 = private unnamed_addr constant { i64, [34 x i8] } { i64 540682, [34 x i8] c" (expected one byte per ctor arg)\00" }

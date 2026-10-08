@@ -1338,6 +1338,11 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   constructor resolved. Confirm whether qualified constructor access is intended syntax at all
   before treating it as a bug.
 - [ ] `P2` **Deriving/specialization follow-ups** once the core class system is stable.
+- [ ] `P3` **`deriving (ToString)` in the prelude depends on declaration order.** On a prelude
+  type declared above `instance Semigroup String`, it fails with "No Semigroup instance for String
+  in instance method to_string"; below it, it works. `deriving (Eq)` works anywhere. Instance
+  resolution should not depend on order. Until fixed, prelude types hand-write `ToString`
+  (`ControlFlow` does).
 - [ ] `P3` **`Alternative` class + generic `or_else`** — deferred until a *second* lawful instance
   exists (e.g. a parser combinator type); with only `Maybe` it is single-instance ceremony, and
   List's lawful instance (`++`) is already `Semigroup`.
