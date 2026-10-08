@@ -135,8 +135,8 @@ All variables are read at program startup; invalid values abort with a message.
 
 | Variable | Default | Description |
 |---|---|---|
-| `SPROUT_GC_THRESHOLD` | `4096` | Managed heap node count that triggers a mid-execution collection. Positive integer to override; `off` or `0` to collect only at exit. |
-| `SPROUT_DEBUG_GC` | off | Set to `1` / `true` / `yes` to log each GC cycle to stderr: `[sprout gc] cycle=N reason=X threshold=N heap_before=N heap_after=N live=N roots=N marked=N alloc_since_gc=N swept=N elapsed_us=N arena_regions=N overflow_regions=N walked=N`. `arena_regions`/`overflow_regions` report how many live regions sit inside the reserved arena versus outside it (see below). `walked` counts the slots the sweep stepped over, so `walked - live - swept` is the FREE slots it walked and reclaimed nothing from — sweep cost the trigger cannot see. Under `SPROUT_GC_LINEAGE=1` it also includes every POISON corpse ([debugging.md](debugging.md)). |
+| `SPROUT_GC_THRESHOLD` | `4096` | Managed heap node count that triggers a mid-execution collection. Positive integer to override; `off` or `0` to collect only at exit. Setting it turns the footprint floor (below) off, so the value forces collections at the rate it names. |
+| `SPROUT_DEBUG_GC` | off | Set to `1` / `true` / `yes` to log each GC cycle to stderr: `[sprout gc] cycle=N reason=X threshold=N heap_before=N heap_after=N live=N roots=N marked=N alloc_since_gc=N swept=N elapsed_us=N arena_regions=N overflow_regions=N walked=N free=N`. `arena_regions`/`overflow_regions` report how many live regions sit inside the reserved arena versus outside it (see below). `walked` counts the slots the sweep stepped over, so `walked - live - swept` is the FREE slots it walked and reclaimed nothing from — sweep cost the trigger cannot see. Under `SPROUT_GC_LINEAGE=1` it also includes every POISON corpse ([debugging.md](debugging.md)). `free` is the freelist length after the sweep, which the footprint floor reads. |
 
 **Region arena** — 1-MiB regions are carved from a contiguous `mmap(PROT_NONE)` *reservation* of
 address space (not memory; pages are committed per chunk with `mprotect` on first use). This makes
@@ -154,6 +154,14 @@ Full rationale and measurements in [gc-arena-lookup-v0.md](gc-arena-lookup-v0.md
 `SPROUT_GC_ADAPT_CAP`. This keeps the heap (hence RSS) proportional to live data: it rises for
 genuinely live-heavy heaps, avoiding GC thrash, and falls again when the working set shrinks.
 Set `SPROUT_GC_ADAPT_RATIO=0` to disable and freeze the threshold.
+
+**Footprint floor** — a sweep walks free slots as well as live ones, and one survivor keeps a
+region's free slots in every later walk. So the threshold is also at least
+`live + (live + free) / 3`, where `free` is the freelist length after the sweep: collect once the
+program has allocated a third of what the last sweep walked. Ordinary programs never reach it; a
+program holding a large free pool behind a small live set does, and collects far less often
+([gc-trigger-v0.md](gc-trigger-v0.md) §6.2). It is part of the adaptive re-base, so
+`SPROUT_GC_ADAPT_RATIO=0` turns it off too, as does setting `SPROUT_GC_THRESHOLD`.
 
 Read the factor as a **garbage budget**: `(factor − 1) × live` objects of garbage are tolerated
 before the next collection. Raising it trades RSS for time, and only for programs whose live set

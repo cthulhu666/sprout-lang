@@ -208,6 +208,9 @@ static long long g_debug_gc_swept = 0;
    slot class nothing allocates, and invisible to a trigger that reads `live`.
    Under SPROUT_GC_LINEAGE it also counts every POISON corpse kept so far. */
 static long long g_debug_gc_walked = 0;
+/* Freelist length after the last sweep: pushes kept by fl_region_commit. The
+   trigger's footprint floor reads it (sprout_gc_collect_with_reason). */
+static long long g_gc_free_after_sweep = 0;
 /* The intern table is malloc'd outside the arena and never freed, so neither the
    alloc counters nor the live census can see it. Reported so a program whose keys
    are COMPUTED shows its growth instead of hiding it. Unguarded, unlike the
@@ -223,6 +226,14 @@ static long long g_gc_threshold = 4096;
    when set.  Keeps tiny programs from GC-thrashing once the threshold tracks the
    live set. */
 static long long g_gc_threshold_base = 4096;
+/* Set by SPROUT_GC_THRESHOLD. Turns the footprint floor off, so the variable keeps
+   forcing collections at the rate it names (docs/gc-trigger-v0.md §12 Q5). */
+static int g_gc_threshold_pinned = 0;
+/* Footprint floor divisor: collect once the program has allocated 1/k of what the
+   last sweep walked (live + free). Bounds free slots walked per object freed near
+   k - 1 on a sparse heap; ordinary workloads stay under `live * factor` and do not
+   move at 3 (docs/gc-trigger-v0.md §6.2). */
+static const long long g_gc_footprint_k = 3;
 static long long g_gc_marked_count = 0;
 /* Per-type live counts and CSTR bytes after each sweep (logged with SPROUT_DEBUG_GC). */
 static long long g_gc_live_obj = 0, g_gc_live_closure = 0, g_gc_live_vec = 0;
@@ -444,6 +455,7 @@ static void sprout_debug_gc_maybe_enable(void) {
 static void sprout_gc_threshold_maybe_enable(void) {
   const char* raw = getenv("SPROUT_GC_THRESHOLD");
   if (raw == NULL || raw[0] == '\0') return;
+  g_gc_threshold_pinned = 1;
   if (!sprout_debug_alloc_truthy(raw)) {
     g_gc_threshold = 0;
     return;
@@ -573,11 +585,11 @@ static void sprout_gc_log_cycle(
   long long walked_delta
 ) {
   if (!g_debug_gc_enabled) return;
-  /* walked= is last: bench/gc_pause/pause_stats.py reads swept= and elapsed_us= as
-     adjacent fields. */
+  /* walked= and free= go last: bench/gc_pause/pause_stats.py reads swept= and
+     elapsed_us= as adjacent fields. */
   fprintf(
     stderr,
-    "[sprout gc] cycle=%lld reason=%s threshold=%lld heap_before=%lld heap_after=%lld live=%lld roots=%lld marked=%lld alloc_since_gc=%lld swept=%lld elapsed_us=%lld arena_regions=%lld overflow_regions=%lld walked=%lld\n",
+    "[sprout gc] cycle=%lld reason=%s threshold=%lld heap_before=%lld heap_after=%lld live=%lld roots=%lld marked=%lld alloc_since_gc=%lld swept=%lld elapsed_us=%lld arena_regions=%lld overflow_regions=%lld walked=%lld free=%lld\n",
     g_gc_cycle_count,
     reason,
     g_gc_threshold,
@@ -591,7 +603,8 @@ static void sprout_gc_log_cycle(
     elapsed_us,
     g_arena_region_count,
     g_overflow_region_count,
-    walked_delta
+    walked_delta,
+    g_gc_free_after_sweep
   );
   fprintf(
     stderr,
@@ -2393,6 +2406,7 @@ static void*  g_fl_saved[SPROUT_FREELIST_CLASSES];
 static int    g_fl_touched[SPROUT_FREELIST_CLASSES];
 static size_t g_fl_touched_list[SPROUT_FREELIST_CLASSES];
 static size_t g_fl_touched_n;
+static long long g_fl_region_pushed = 0;
 
 /* Push a FREE slot onto its class list, saving the class head on first touch of
  * that class within the current region.  cls == slot_bytes/16.  Class 0 is
@@ -2409,14 +2423,17 @@ static inline void fl_push_staged(size_t cls, void* payload) {
   }
   memcpy(payload, &g_freelist[cls], sizeof(void*));  /* next-ptr in payload word 0 */
   g_freelist[cls] = payload;
+  g_fl_region_pushed++;
 }
 
-static inline void fl_region_begin(void) { g_fl_touched_n = 0; }
+static inline void fl_region_begin(void) { g_fl_touched_n = 0; g_fl_region_pushed = 0; }
 
 /* Keep this region's entries (the region survives Pass 2). */
 static inline void fl_region_commit(void) {
   for (size_t i = 0; i < g_fl_touched_n; i++) g_fl_touched[g_fl_touched_list[i]] = 0;
   g_fl_touched_n = 0;
+  g_gc_free_after_sweep += g_fl_region_pushed;
+  g_fl_region_pushed = 0;
 }
 
 /* Drop this region's entries (Pass 2 is about to release its memory). */
@@ -2427,6 +2444,7 @@ static inline void fl_region_rollback(void) {
     g_fl_touched[cls] = 0;
   }
   g_fl_touched_n = 0;
+  g_fl_region_pushed = 0;
 }
 
 /* SPROUT_FL_VERIFY=1 — oracle check for the staged freelist build.
@@ -2599,6 +2617,7 @@ static void sprout_gc_sweep(void) {
      Safe here because nothing between this point and the end of the sweep
      allocates a managed object: Pass 1/2 only free(), malloc() and realloc(). */
   memset(g_freelist, 0, sizeof(g_freelist));
+  g_gc_free_after_sweep = 0;
   g_gc_live_obj = g_gc_live_closure = g_gc_live_vec = 0;
   g_gc_live_map = g_gc_live_bytes = g_gc_live_builder = 0;
   g_gc_live_tuple = g_gc_live_ref = 0;
@@ -2919,10 +2938,19 @@ static void sprout_gc_collect_with_reason(const char* reason) {
      shrinks, bounding peak RSS to ~factor x the live set.  g_gc_threshold_base
      is the floor for small programs; the optional cap still applies.
      NOTE: adapt_ratio survives only as the on/off switch below — the swept fraction
-     it used to name is no longer part of the decision. */
+     it used to name is no longer part of the decision.
+     Footprint floor: a sweep walks live AND free slots, and one survivor keeps a
+     region's free slots in every later walk, so `live * factor` alone can collect
+     every few thousand allocations while walking a large free pool each time.
+     Damped by k, so the pool it lets the program build settles (gc-trigger-v0 §6.2). */
   if (g_gc_adapt_ratio > 0.0) {
     long long target = (long long)((double)g_managed_heap_count * g_gc_adapt_factor);
     if (target < g_gc_threshold_base) target = g_gc_threshold_base;
+    if (!g_gc_threshold_pinned) {
+      long long footprint_floor = g_managed_heap_count
+        + (g_managed_heap_count + g_gc_free_after_sweep) / g_gc_footprint_k;
+      if (target < footprint_floor) target = footprint_floor;
+    }
     if (g_gc_adapt_cap > 0 && target > g_gc_adapt_cap) target = g_gc_adapt_cap;
     g_gc_threshold = target;
   }
