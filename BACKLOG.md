@@ -208,12 +208,17 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   `translate_call` consults `captures` *before* the intrinsic names but `param_known` *after*, so a
   captured variable named `bit_and` wins while a parameter of the same name is intercepted. Fix both
   together. `docs/bitwise-int-ops-v0.md` §8.1.
-- [ ] `P3` **A module's own `Cons`/`Nil`/`dict_empty`/`dict_set` captures its list and dict
-  literals.** The parser builds them from bare names before the bundler runs (spec §3.1, pinned by
-  `tests/conformance/type_error/own_cons_captures_list_literal.spr`). Writing `prelude.Cons`
-  instead breaks `no_prelude` files and every path that type-checks without bundling
-  (`module_loader`, `type_driver`, `compiler.compile_source`), where nothing resolves it.
-  `docs/prelude-name-identity-v0.md` §5.
+- [ ] `P3` **Names the parser writes are captured by a module's own declaration or a local.**
+  List and dict literals, list patterns and `>>`/`<<` use bare `Cons`, `Nil`, `dict_empty`,
+  `dict_set`, `rcompose`, `lcompose` (spec §3.1; `own_cons_captures_list_literal.spr`). Writing
+  `prelude.Cons` instead breaks `no_prelude` files and every path that type-checks without
+  bundling (`module_loader`, `type_driver`, `compiler.compile_source`), which also do not resolve a
+  user's `prelude.X`; `module_loader` drops that failure silently.
+  `docs/prelude-name-identity-v0.md`.
+- [ ] `P2` **A user class method named like a prelude function captures built-in syntax.** Method
+  names stay bare after bundling, so a method `list_reverse` breaks comprehensions
+  (`class_method_captures_comprehension.spr`), and a method `branch` would capture `try`'s
+  rewrite (`docs/try-propagate-v0.md` §9 Q9). Same root as spec §3.1's wrapper-symbol limit.
 - [ ] `P3` **Reassess the `print` design** — should compiled `print` dispatch through `ToString`
   everywhere, instead of the type-erased runtime renderer? The full redesign regresses the
   importless loud-fail, risks bootstrap (every `print` in `stdlib/compiler/` needs an instance in

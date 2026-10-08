@@ -23,6 +23,20 @@ fn vec_with(vec_from_list: Int) -> Vec Int = [1, vec_from_list]
 
 fn comprehension_with(list_reverse: Int, xs: List Int) -> List Int = [x + list_reverse for x in xs]
 
+# A template with three parts calls the extern `string_concat_many`.
+fn long_template_with(string_concat_many: Int, a: Int) -> String = `a=${a} c=${string_concat_many}!`
+
+# The binders `do`-`let` and a `let..else` residual introduce.
+fn do_let_with(m: Maybe Int) -> Maybe String =
+  do
+    x <- m
+    let to_string = x + 1
+    Just(`v=${to_string}`)
+
+fn residual_with(r: Result String Int) -> String =
+  let Ok v = r else Err to_string -> `e=${to_string}`
+  in `v=${v}`
+
 # A local named like a class method, used as a value and through a field chain.
 type Holder = (to_string: Int)
 
@@ -39,6 +53,10 @@ fn qualified_head(xs: List Int) -> Int =
   | prelude.Nil -> 0
 
 fn qualified_type(n: Int) -> prelude.Maybe Int = Just(n)
+
+fn qualified_extern(s: String) -> Int = prelude.str_len(s)
+
+fn qualified_constraint(x: a) -> String where prelude.ToString a = to_string(x)
 
 # A Propagate instance beside this module's own `Continue`.
 type Box a =
@@ -69,6 +87,12 @@ fn main() -> Unit !{IO} =
     check_eq("vec literal beside a local vec_from_list", vec_length(vec_with(9)), 2),
     check_eq("comprehension beside a local list_reverse", comprehension_with(10, [1, 2]), [11, 12]),
     check_eq("field chain on a renamed local", field_of(Holder(to_string = 7)), 7),
+    check_eq("long template beside a local named like an extern", long_template_with(3, 2), "a=2 c=3!"),
+    check_eq("do-let binder", do_let_with(Just(5)), Just("v=6")),
+    check_eq("let..else residual binder", residual_with(Err("no")), "e=no"),
+    check_eq("let..else success", residual_with(Ok(4)), "v=4"),
+    check_eq("prelude.str_len, an extern", qualified_extern("abc"), 3),
+    check_eq("prelude.ToString in a constraint", qualified_constraint(12), "12"),
     check_eq("prelude.Cons in an expression", qualified_sum(), 9),
     check_eq("prelude.Cons in a pattern", qualified_head([3, 4]), 3),
     check_eq("prelude.Nil in a pattern", qualified_head([]), 0),

@@ -132,8 +132,9 @@ type ResolveCtx =
       PreludeNames
 
 # The prelude's own symbol tables, held as they are: copying them per module would
-# cost the prelude's size each time. `methods` is built, but from a short list.
-type PreludeNames = (values: Dict String, methods: Dict String, types: Dict String,
+# cost the prelude's size each time. `bare` is built, from two short lists: class
+# methods and externs, which keep their bare names and are in no value table.
+type PreludeNames = (values: Dict String, bare: Dict String, types: Dict String,
                      classes: Dict String)
 
 # ---------------------------------------------------------------------------
@@ -1008,16 +1009,17 @@ fn prelude_names(all_symbols: Dict ModuleSymbols, stdlib_root: String) -> Prelud
   | Nothing -> no_prelude_names()
   | Just syms ->
       PreludeNames(values = sym_value_locals(syms),
-                   methods = fold(\ (acc, m) -> dict_set(m, m, acc), dict_empty(), sym_method_names(syms)),
+                   bare = fold(\ (acc, m) -> dict_set(m, m, acc), dict_empty(),
+                               sym_method_names(syms) ++ sym_extern_names(syms)),
                    types = sym_type_locals(syms), classes = sym_class_locals(syms))
 
 fn no_prelude_names() -> PreludeNames =
-  PreludeNames(values = dict_empty(), methods = dict_empty(), types = dict_empty(), classes = dict_empty())
+  PreludeNames(values = dict_empty(), bare = dict_empty(), types = dict_empty(), classes = dict_empty())
 
 fn prelude_value(names: PreludeNames, name: String) -> Maybe String =
   match dict_get(name, names.values) with
   | Just canonical -> Just(canonical)
-  | Nothing -> dict_get(name, names.methods)
+  | Nothing -> dict_get(name, names.bare)
 
 fn prelude_type(names: PreludeNames, name: String) -> Maybe String =
   match dict_get(name, names.types) with
@@ -1427,7 +1429,8 @@ fn qualified_type_lookup(ctx: ResolveCtx, name: String) -> Maybe String =
       | Just exports -> dict_get(symbol, exports)
 
 # DOTTED-NAME CASCADE — do not reorder, and do not drop a step, without checking
-# all five readings a dotted name has. Only the last is an error:
+# all six readings a dotted name has. Only the last is an error. A and C rename
+# through `local_name`/`local_head` like any local:
 #   A. A binder named by the WHOLE dotted name — the `scope` test below. Rare;
 #      a name with a dot in it is not writable as a binder, but lambdas and
 #      `do` binds thread names in verbatim.
@@ -1439,7 +1442,9 @@ fn qualified_type_lookup(ctx: ResolveCtx, name: String) -> Maybe String =
 #      alias sharing a parameter's name answers `origin.x` with the module's
 #      export and the program reads a different value, compiling clean.
 #   D. An alias-qualified import (`sealed.unseal`) — `qualified_value_lookup`.
-#   E. Anything left: a method name, a typo, or a hand-written canonical name.
+#   E. `prelude.X` — `prelude_qualified`. After D, so an alias named `prelude`
+#      wins; before F, which would mark it as a typed canonical name.
+#   F. Anything left: a method name, a typo, or a hand-written canonical name.
 #      `guard_canonical` separates the last from the rest and must run here,
 #      after D has declined — running it earlier would reject `sealed.unseal`,
 #      whose canonical form is in the same table.

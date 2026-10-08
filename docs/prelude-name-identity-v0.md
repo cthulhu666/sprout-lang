@@ -85,10 +85,11 @@ names, and `prelude.X` is the qualified spelling.
 `X`, in value, constructor-pattern and type positions, skipping the module's own declarations and
 its imports. A local named `prelude` and an import alias `prelude` win over it, as they do for any
 dotted head. `prelude.X` where the prelude has no `X` stays unresolved, and inference reports it
-as an unknown name. Under `no_prelude` only the floor's names resolve.
+as an unknown name. Under `no_prelude` only the floor's names resolve. Only the bundler knows
+the spelling: a module checked without bundling reports `prelude.X` as unknown.
 
-**Locals.** The bundler renames a binder whose name is a prelude value or class-method name, and
-every use of it, to `$l_<name>` (§5.1). The rename is a pure function of the name, so
+**Locals.** The bundler renames a binder whose name is a prelude value, class method or extern,
+and every use of it, to `$l_<name>` (§5.1). The rename is a pure function of the name, so
 nested shadowing keeps its structure and no map is needed. Binders: function and lambda
 parameters, instance-method parameters, `VarPattern` in `match`, `let`, `do` and comprehension
 patterns, `do`-`let` names. A dotted name whose head is a renamed local renames the head.
@@ -100,11 +101,17 @@ module's `$entry` does, and LLVM accepts it. No dot, since a dotted local reads 
 in inference. Spelling: `$l_<name>`. `source.strip_entry_names`, the render-boundary strip,
 also removes `$l_`, so no diagnostic shows it.
 
-**Not done: list and dict literals.** The parser builds them from bare `Cons`, `Nil`,
-`dict_empty` and `dict_set` before the bundler runs, so a module that declares one of those
-names still captures its literals: a type error, never a wrong value. Spec §3.1 lists it beside
-the other two shadowing limits, and
-`tests/conformance/type_error/own_cons_captures_list_literal.spr` pins it. Lifting it needs a spelling the unbundled checking paths can resolve; see `BACKLOG.md`.
+**Not done**, each listed in spec §3.1 and `BACKLOG.md`:
+
+- **Names the parser writes.** List and dict literals, list patterns and `>>`/`<<` use bare
+  `Cons`, `Nil`, `dict_empty`, `dict_set`, `rcompose` and `lcompose`, written before the bundler
+  runs, so a module's own declaration or a local of that name captures them. Pinned by
+  `tests/conformance/type_error/own_cons_captures_list_literal.spr`. Lifting it needs a spelling
+  the unbundled checking paths can resolve.
+- **User class methods** keep bare names after bundling, so a method named like a prelude
+  function captures names written later: a method `list_reverse` breaks comprehensions, and one
+  named `branch` would capture `try`. Pinned by
+  `tests/conformance/type_error/class_method_captures_comprehension.spr`.
 
 ## 6. Impact
 
@@ -118,8 +125,9 @@ the other two shadowing limits, and
 
 ## 7. Tests
 
-`tests/stdlib/test_prelude_name_identity.spr`: the three local rows of §1, a field chain on a
-renamed local, `prelude.X` in an expression, a pattern and a type, an instance using
-`prelude.Continue` beside a user `Continue`, a local named `prelude`. Conformance:
-`prelude.nosuch` rejected; a diagnostic about a renamed local shows its source name; the list
-literal limit.
+`tests/stdlib/test_prelude_name_identity.spr`: the three local rows of §1, a local named like an
+extern, `do`-`let` and `let..else` residual binders, a field chain on a renamed local, `prelude.X`
+in an expression, a pattern, a type and a constraint, an extern through `prelude.X`, an instance
+using `prelude.Continue` beside a user `Continue`, a local named `prelude`. Conformance:
+`prelude.nosuch` rejected; a diagnostic about a renamed local shows its source name; an import
+alias named `prelude` wins; both limits in §5.

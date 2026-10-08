@@ -1,0 +1,7 @@
+module main
+import stdlib.string as prelude
+
+# An import alias named `prelude` wins over the qualifier, as any alias head does
+# (spec §3.1): `prelude.repeat` is stdlib.string's.
+
+fn main() -> Unit !{IO} = print(prelude.repeat("ab", 3))
