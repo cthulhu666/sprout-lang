@@ -1,7 +1,8 @@
 # The GC trigger is a pure space policy (v0, 2026-09-29)
 
-Design doc for issue #407. **No option here is approved or implemented.** §6 is a decision to be
-made, and §9 is the measurement that has to precede it.
+Design doc for issue #407. **Option B (§6.2), the damped footprint floor with `k = 3`, was approved
+2026-10-08 and is implemented** in `sprout_gc_collect_with_reason`, tested by `just
+gc-trigger-check`. §9 records the measurements on the build.
 
 Companion to [gc-generational-v0.md](gc-generational-v0.md), which owns the *sweep's* cost and the
 adapt-factor default. This doc owns the **trigger** only, and it is the cited exception to that
@@ -501,26 +502,52 @@ re-deriving it by hand.
    the cost is §6.5's. Two things the run is worth reading for beyond its table — the cache
    crossing that makes the byte case (§6.5 item 3), and a −5.0% reading at 5 reps that became
    +0.5% at 11, which is why the rep count is in the record.
-3. **The compiler** (`ast_to_ir.sprout` emit, 3 reps interleaved), in `gc-generational-v0.md`
-   §5.3's table format so the two changes stay comparable. The RSS side is the risk: −19% wall for
-   +18% RSS was accepted once; nothing here should spend that budget again.
-4. **The reporter's workload** — `uncharted-suns` `game/app.sprout`, both scenes. The in-system
-   scene is the one unread workload that could still reverse §6.5.
+3. ~~**The compiler**~~ **DONE** — `ast_to_ir.sprout` emit by the seed compiler, 3 reps
+   interleaved, `bench/gc_trigger/measure.sh`. The floor costs nothing here; the RSS risk the
+   prototype priced at +4% did not appear on the build:
+
+   | workload | time | peak RSS | cycles | GC ms |
+   |---|---|---|---|---|
+   | compiler emit, off → floor | 1.47s → 1.51s (noise) | 105.9 → **103.5 MB** | 175 → 153 | 661 → 633 |
+
+   Wall is within run-to-run spread (1.41–1.54s over both arms). The prototype ran an earlier
+   compiler (`e6553023`); the build's heap is shaped differently, so its +4% is not a prediction
+   for this one.
+4. ~~**The reporter's workload**~~ **DONE** — `uncharted-suns` `game/app.sprout`, 1,200 frames
+   muted, from cycle 16, 2 reps interleaved, `bench/gc_trigger/measure.sh`. `system` starts
+   in-system with `perf.py`'s `belt` flags (`--system=00232 --ship-view`).
+
+   | scene | arm | cycles | GC µs per 1k allocations | mean pause | regions | mean threshold |
+   |---|---|---|---|---|---|---|
+   | galaxy | off | 1,654 / 1,113 | 191.8 / 211.2 | 753 / 755 µs | 9 / 8 | 5,889 / 5,364 |
+   | galaxy | floor | 31 / 96 | **15.7 / 13.5** | 1,145 / 1,041 µs | 8 / 9 | 76,188 / 79,622 |
+   | system | off | 116 / 116 | 13.4 / 13.4 | 1,526 / 1,526 µs | 10 / 10 | 170,645 / 170,668 |
+   | system | floor | 117 / 151 | 15.2 / 12.7 | 1,729 / 1,123 µs | 12 / 10 | 170,666 / 90,584 |
+
+   The galaxy scene repeats the prototype: 12–16× less GC per allocation, no added regions, and
+   pauses up ~45% (the prototype read ~30%). **The in-system scene does not reverse §6.5**: its
+   live set already holds the threshold near 170,000, so the floor rarely binds, and GC per
+   allocation stays within run spread. One unexplained reading: the second floor run's mean
+   threshold is 90,584. The floor can only raise a target, so that run took a different path
+   through the scene rather than being lowered by B; it was not chased.
 
 **Report both axes on every row.** #407 exists because a change was evaluated on pause alone.
 
 ## 10. Tests
 
-- **Regression test, written first and confirmed RED** (Definition of Ready #3): a fixture that
-  holds allocation volume fixed and asserts a bound on work-per-garbage or cycle count. Today's
-  runtime fails it; a correct fix passes.
-- **A termination test**: the bench note's adversary — a dead class with a trickle of demand,
-  and live objects pinning the churn's fresh regions — must reach a fixed free pool. The
-  per-class repair fails it by growing ~100,000 slots a cycle, so it tells the two forms apart.
-  Counts are deterministic, so this and the revert check below are gates, not benchmarks.
-- **`gc-walk-check` must pin `SPROUT_GC_THRESHOLD=4096` in its probes** when B lands (§8.4). It
-  tests the counter, and B removes the walk its known answer needs. The pin is today's default and
-  turns B off (§12 Q5), so the gate's readings stay where they are.
+Landed as `just gc-trigger-check` (in `ci-fast-gates`), described in [gates.md](gates.md).
+
+- **Regression test, written first and confirmed RED** (Definition of Ready #3):
+  `test_gc_walk_sparse` under the default trigger must walk fewer than 4 slots per object swept.
+  It read 25 before B and 2.77 after; it is also the "B is on by default" assertion below.
+- **A termination test**: `test_gc_trigger_adversary` — a dead class with a trickle of demand,
+  and live objects pinning the churn's fresh regions — must reach a fixed free pool: at most 2%
+  growth over the second half of the run. It reads 150,802 → 150,842 under B. With the divisor
+  set to 1 it grew 210,570 → 718,250 and the gate went red, so it tells a settling floor from a
+  diverging one.
+- **`gc-walk-check` pins `SPROUT_GC_THRESHOLD=4096` in its probes** (§8.4). It tests the counter,
+  and B removes the walk its known answer needs. The pin is the default and turns B off (§12 Q5),
+  so the gate's readings stay where they were.
 - **`gc-ageprof-check` and `gc-adapt-check` need nothing under B**: every probe reads identically
   with the damped floor on (§8.4). The rest of this bullet is A's, kept for the record. Under A,
   `gc-ageprof-check` would need the same 4096 pin (§8.2 measures it red above roughly 10,000, and
@@ -529,12 +556,11 @@ re-deriving it by hand.
   assertions — `def_cyc == f3_cyc && def_marked == f3_marked`, `def_cyc < f2_cyc`,
   `f3_marked × 100 < f2_marked × 70`. Property 1 would need re-expressing to exercise the factor
   over many cycles instead of two or three.
-- **B on by default needs its own assertion**, since the pins above turn it off wherever they
-  apply. The first bullet's regression test can be it: the sparse fixture run unpinned walks 2.8
-  slots per object swept under B and 25 without it, so a bound of 4 fails on a revert.
-- **Coverage gap closed** (Definition of Ready #4): `just gc-walk-check` bounds slots walked per
-  object freed on a sparse and a dense heap, but no test asserts how *often* collections run as a
-  function of heap shape — the thing a trigger fix changes.
+- **B on by default** is the first bullet's assertion: the pins above turn B off wherever they
+  apply, and the sparse fixture runs unpinned there, so a revert fails the bound of 4.
+- **Coverage gap closed** (Definition of Ready #4): before this, no test asserted how *often*
+  collections run as a function of heap shape — the thing a trigger fix changes. Both probes above
+  do (sparse: 88 → 10 cycles).
 
 ## 11. Docs, spec and backlog
 
@@ -543,7 +569,8 @@ re-deriving it by hand.
   clears it stops being a guard; this doc is the cited exception, and §4 explains what made it one.
 - The `BACKLOG.md` `P1` galaxy-game entry is corrected in the same change that adds this doc: it
   recommended shrinking the live set, that route was taken, and #407 is the result.
-- On implementing any option, delete the `BACKLOG.md` entry this doc's work becomes.
+- ~~On implementing any option, delete the `BACKLOG.md` entry this doc's work becomes.~~ Done:
+  the `P1` "The GC trigger is a pure space policy" entry was deleted when B landed.
 
 **Found in passing, filed separately.** The GC cycle timer measures elapsed time with the wrong
 clock: `sprout_gc_collect_with_reason` brackets the collection with `sprout_now_micros()`, which is

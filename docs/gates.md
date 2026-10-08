@@ -592,6 +592,22 @@ allocates an object large enough for its own region, so deleting the `is_large` 
 left both green. `test_gc_large_object_arena` is probed for the invariant alone, and fails the
 same deletion on its first cycle (walked 4,076 < 10 + 4,086).
 
+**It pins `SPROUT_GC_THRESHOLD=4096`.** The trigger's footprint floor removes the very walk the
+sparse answer needs (25 → 2.8 slots per object swept), and the pin turns the floor off. 4096 is the
+default, so the readings are the ones above. `gc-trigger-check` tests the floor itself.
+
+## Trigger footprint floor — `just gc-trigger-check`
+
+Tests the floor [gc-trigger-v0.md](gc-trigger-v0.md) §6.2 adds to the threshold, under the default
+trigger. Two known answers: `test_gc_walk_sparse` walks fewer than 4 slots per object swept (2.77
+at landing, 25 with the floor off), and `test_gc_trigger_adversary`'s free pool (`free=` on the
+cycle line) grows by at most 2% over the second half of the run (150,802 → 150,842).
+
+**The second probe is there to fail the floor that looks right.** Counting free slots only in
+classes with allocation demand diverges on that fixture, and so does the floor without its `/ 3`.
+With the divisor at 1, the pool grew 210,570 → 718,250 and the gate went red; the first probe
+stayed green.
+
 ## Optimisation-pass harness — `just opt-harness-check`
 
 Compiles `tests/opt_harness/dead_let.spr` twice, once with every pass on and once with

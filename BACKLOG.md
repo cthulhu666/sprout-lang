@@ -2205,16 +2205,8 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   reports p50 7,713 → 797 µs but *total* GC 207 → 888 µs/frame — the trigger re-based onto the
   smaller live set while the swept footprint did not follow. This entry named only pause; the two
   are traded. Untried: move the map off the managed heap. Open: make the sweep proportional to
-  something other than total slots (generation-scoped freelists are the prerequisite).
-  `docs/gc-trigger-v0.md` owns the trigger half.
-- [ ] `P1` **The GC trigger is a pure space policy, so shrinking a live set can raise total GC
-  time.** `threshold = max(live × factor, base)` bounds RSS and is also the only thing scheduling
-  collector work, while a cycle's cost tracks the footprint `sprout_gc_sweep` walks — which the
-  trigger never reads. uncharted-suns cut a live set 45× and total GC rose 4× (#407): its sweeps
-  walk 52–76 free slots per object freed, others ≤1.46. **Next: build Option B's damped floor**,
-  `live + (live + free) / 3`. A prototype cut the game's GC per allocation 12–16× with no added
-  regions, left `gc_roots` and nqueens unchanged and cost the compiler +4% RSS
-  (`bench/results-2026-10-04-gc-trigger-b.md`). Design and open questions: `docs/gc-trigger-v0.md`.
+  something other than total slots (generation-scoped freelists are the prerequisite). The trigger
+  half landed as the footprint floor (`docs/gc-trigger-v0.md` §9): GC per allocation 12–16× lower.
 - [ ] `P3` **`http_log_middleware` overflows in `wall_loop`.** The bench sums `time.wall_micros()`
   (~1.76e15) over 1,000,000 iterations in `bench/http_log_middleware/`, so the fifth of its six
   phases traps on Int overflow (since 61fd1617, 2026-09-23) and `fmt_loop` never runs. Every GC
