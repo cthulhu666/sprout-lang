@@ -1,0 +1,10 @@
+# sprout-ignore-all lint/unparsed: parse-error fixture — this file must not parse
+# A nested `do` whose first step sits in the outer `do`'s column is empty: the
+# next lines are outer steps. Opening a block there made them the `else`
+# branch, so they silently never ran.
+fn main() -> Unit !{IO} =
+  do
+    print("start")
+    if true then print("x") else do
+    print("y")
+    print("z")

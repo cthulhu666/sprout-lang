@@ -633,8 +633,8 @@ let nullary_suppressed =
 # tree could no longer be read as "every file was linted".
 let unparseable =
   "fn gap(n: Int) -> Int =\n" ++
-  "  let d = n + 1 in\n" ++
-  "  d * 2\n"
+  "  let d = n + 1 999\n" ++
+  "  in d * 2\n"
 
 # The earlier of the two failure points: this one never reaches the parser.
 let unlexable =

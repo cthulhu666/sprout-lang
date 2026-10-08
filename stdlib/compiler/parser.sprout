@@ -2,6 +2,7 @@ module stdlib.compiler.parser
 import stdlib.string as string
 import stdlib.bits
 import stdlib.compiler.token as token
+import stdlib.compiler.layout as layout
 import stdlib.compiler.source as source
 import stdlib.compiler.ast as ast
 import stdlib.compiler.types as types
@@ -662,69 +663,69 @@ fn build_cons_pattern(items: List ast.Pattern, tail: ast.Pattern, pos: source.So
   | Cons h rest -> ast.ConstructorPattern(ast.list_ctor_cons, [h, build_cons_pattern(rest, tail, pos)], pos)
 
 # ---------------------------------------------------------------------------
-# Do expression helpers
-
-# Can this token head an expression, and so begin a new step?
+# Layout blocks
 #
-# The arms must mirror `parse_primary` and `parse_unary` — every literal kind,
-# opening bracket and prefix operator they accept, plus the four keywords that
-# head an expression form (`let`/`if`/`match`/`do`). A form left out is not a
-# harmless omission: `scan_do_step_end` reads a "no" as "this line continues the
-# previous step", so the earlier step's slice swallows the line and the step is
-# lost. `tests/stdlib/test_do_step_starts.spr` exercises one of each and fails
-# at parse time when the two lists drift apart.
-#
-# Prefix `!` cannot be confused with infix `!=`: the lexer matches the two-char
-# operators first, so `!=` never reaches here as a bare `!`.
-fn looks_like_do_step_start(tokens: Vec token.Token, i: Int) -> Bool =
-  tok_is_keyword(tok_at(tokens, i), "let") ||
-  tok_is_keyword(tok_at(tokens, i), "if") ||
-  tok_is_keyword(tok_at(tokens, i), "match") ||
-  tok_is_keyword(tok_at(tokens, i), "do") ||
-  tok_is_keyword(tok_at(tokens, i), "true") ||
-  tok_is_keyword(tok_at(tokens, i), "false") ||
-  tok_is_ident(tok_at(tokens, i)) ||
-  tok_is_int(tok_at(tokens, i)) ||
-  tok_is_float(tok_at(tokens, i)) ||
-  tok_is_string(tok_at(tokens, i)) ||
-  tok_is_char(tok_at(tokens, i)) ||
-  tok_is_symbol(tok_at(tokens, i), "\\") ||
-  tok_is_symbol(tok_at(tokens, i), "[") ||
-  tok_is_symbol(tok_at(tokens, i), "{") ||
-  tok_is_symbol(tok_at(tokens, i), "(") ||
-  tok_is_symbol(tok_at(tokens, i), "-") ||
-  tok_is_symbol(tok_at(tokens, i), "!") ||
-  tok_is_template_start(tok_at(tokens, i))
+# The layout pass (stdlib/compiler/layout.sprout) brackets every `do`, `let`,
+# match-arm, `where` and class-body block in open / separator / close tokens, so
+# a block parser reads items until the close and never looks at a column.
 
-fn update_bracket_depth(t: token.Token, depth: Int) -> Int =
-  if tok_is_symbol(t, "(") || tok_is_symbol(t, "[") || tok_is_symbol(t, "{") then depth + 1
-  else if tok_is_symbol(t, ")") || tok_is_symbol(t, "]") || tok_is_symbol(t, "}") then
-    if depth > 0 then depth - 1 else 0
-  else depth
+fn tok_is_layout_open(t: token.Token) -> Bool =
+  match token.token_kind(t) with
+  | token.TokenLayoutOpen -> true
+  | _ -> false
 
-# Scans forward to find the exclusive end index of the current do step.
-# start_i: the first index of this step (used to skip initial same-line check).
-# prev_line: line of the previous token (initially the 'do' keyword line).
-# depth: current bracket nesting depth (initially 0).
-# block_col: the expected column for step starts.
-fn scan_do_step_end(tokens: Vec token.Token, i: Int, start_i: Int, prev_line: Int, depth: Int, block_col: Int) -> Int =
-  if tok_is_eof(t) then i
-  else if i > start_i && this_line > prev_line && depth == 0 && this_col < block_col then i
-  else if i > start_i && this_line > prev_line && depth == 0 && this_col == block_col && looks_like_do_step_start(tokens, i) then i
-  else scan_do_step_end(tokens, i + 1, start_i, this_line, update_bracket_depth(t, depth), block_col)
-where
-  t = tok_at(tokens, i)
-  this_line = tok_pos(t).line
-  this_col = tok_pos(t).column
+fn tok_is_layout_sep(t: token.Token) -> Bool =
+  match token.token_kind(t) with
+  | token.TokenLayoutSep -> true
+  | _ -> false
 
-# Returns true if the token list has a '<-' at bracket depth 0 BEFORE any
-# match/if/do keyword at depth 0 (which cannot appear in a pattern, so they
-# signal an expression step rather than a bind step).
+fn tok_is_layout_close(t: token.Token) -> Bool =
+  match token.token_kind(t) with
+  | token.TokenLayoutClose -> true
+  | _ -> false
+
+# The pass opens a block after every block keyword, so a missing open is a
+# disagreement between the pass and the parser, not a user error.
+fn expected_block_open(tokens: Vec token.Token, i: Int) -> Result ParseError Int =
+  if tok_is_layout_open(tok_at(tokens, i)) then Ok(i + 1)
+  else Err(ParseError(`internal: expected a layout block at ${pos_str(cur_pos(tokens, i))}`, cur_pos(tokens, i)))
+
+# After one item of a block: the index of the next item, or of the close. An
+# item must end where its line does — anything left over is a second item on
+# the same line, and dropping it in silence once deleted live statements.
+fn next_item(tokens: Vec token.Token, i: Int, item: String, rule: String) -> Result ParseError Int =
+  if tok_is_layout_sep(tok_at(tokens, i)) then Ok(i + 1)
+  else if tok_is_layout_close(tok_at(tokens, i)) then Ok(i)
+  else
+    Err(ParseError(`Unexpected token after the end of ${item} at ${pos_str(cur_pos(tokens, i))} — ${rule}`,
+      cur_pos(tokens, i)))
+
+fn do_step_end(tokens: Vec token.Token, i: Int) -> Result ParseError Int =
+  next_item(tokens, i, "a do step", "a do block takes one step per line")
+
+fn let_binding_end(tokens: Vec token.Token, i: Int) -> Result ParseError Int =
+  next_item(tokens, i, "a let binding", "a let block takes one binding per line")
+
+fn opens_group(t: token.Token) -> Bool =
+  tok_is_symbol(t, "(") || tok_is_symbol(t, "[") || tok_is_symbol(t, "{") || tok_is_layout_open(t)
+
+fn closes_group(t: token.Token) -> Bool =
+  tok_is_symbol(t, ")") || tok_is_symbol(t, "]") || tok_is_symbol(t, "}") || tok_is_layout_close(t)
+
+# Does this step have a `<-` at depth 0 before its end, and before any
+# match/if/do keyword (which cannot appear in a pattern)?
 fn step_has_bind_arrow(tokens: Vec token.Token, i: Int, depth: Int) -> Bool =
-  if tok_is_eof(tok_at(tokens, i)) then false
-  else if depth == 0 && (tok_is_keyword(tok_at(tokens, i), "match") || tok_is_keyword(tok_at(tokens, i), "if") || tok_is_keyword(tok_at(tokens, i), "do")) then false
-  else if depth == 0 && tok_is_symbol(tok_at(tokens, i), "<-") then true
-  else step_has_bind_arrow(tokens, i + 1, update_bracket_depth(tok_at(tokens, i), depth))
+  let t = tok_at(tokens, i)
+  in if tok_is_eof(t) then false
+     else if depth == 0 && (tok_is_layout_sep(t) || closes_group(t)) then false
+     else if depth == 0 && (tok_is_keyword(t, "match") || tok_is_keyword(t, "if") || tok_is_keyword(t, "do")) then false
+     else if depth == 0 && tok_is_symbol(t, "<-") then true
+     else if opens_group(t) then step_has_bind_arrow(tokens, i + 1, depth + 1)
+     else if closes_group(t) then step_has_bind_arrow(tokens, i + 1, depth - 1)
+     else step_has_bind_arrow(tokens, i + 1, depth)
+
+# ---------------------------------------------------------------------------
+# Do expressions
 
 # A do step as parsed, before the binding-else desugar. A plain step passes
 # through unchanged; a refutable step (`<pat> <- <e> else …` or `let <pat> = <e>
@@ -739,8 +740,7 @@ fn step_has_bind_arrow(tokens: Vec token.Token, i: Int, depth: Int) -> Bool =
 # where spec §5.2.1 puts it, since refutability is a property of the pattern
 # versus its type and the parser only sees syntax.
 # DoStepLets carries a multi-name `let` statement, which yields one DoLetStep per
-# name. `let a = 1 / b = 2` in expression position has always bound both; as a
-# statement it produced one step and the rest were dropped.
+# name.
 type DoStepParse (..) =
   | DoStepPlain ast.DoStep
   | DoStepLets (List ast.DoStep)
@@ -799,214 +799,112 @@ fn all_irrefutable_do_bind(pats: List ast.Pattern) -> Bool =
   | Cons p rest ->
       if is_irrefutable_do_bind_pattern(p) then all_irrefutable_do_bind(rest) else false
 
-# Has a parse reached the end of the slice it was given?
-fn slice_consumed(step_tokens: Vec token.Token, i: Int) -> Bool =
-  tok_is_eof(tok_at(step_tokens, i)) || i >= vec_length(step_tokens)
-
-# Every arm below ends by checking that the step consumed its whole slice.
-#
-# It did not use to. Each arm discarded its final index (`(value, _) <- ...`),
-# so ANY tokens left over were dropped in silence — not just the tail bindings of
-# a multi-name `let`. Two statements written on one line meant the second simply
-# never ran: `print("first") print("second")` printed only "first" and exited 0.
-fn step_fully_consumed(step_tokens: Vec token.Token, i: Int, step: DoStepParse) -> Result ParseError (DoStepParse, Int) =
-  if slice_consumed(step_tokens, i) then Ok((step, 0))
-  else
-    Err(ParseError(
-      string.concat("Unexpected token after the end of a do step at ", pos_str(cur_pos(step_tokens, i)))
-        ++ " — a do block takes one step per line",
-      cur_pos(step_tokens, i)))
-
-# The bindings of a multi-name `let` statement, split by LAYOUT COLUMN — the same
-# rule `parse_let_block` applies to the expression form, so the two forms agree on
-# where one binding ends and the next begins (including a right-hand side that
-# spans lines).
-#
-# `else` is deliberately not accepted here: a refutable binding desugars to a
-# match carrying the remaining steps in its success arm, which is a shape one
-# binding of several cannot have. It stays a single-binding step.
-fn parse_do_let_bindings(step_tokens: Vec token.Token, i: Int, binding_col: Int, acc: List ast.DoStep) -> Result ParseError (List ast.DoStep, Int) =
-  if tok_is_eof(tok_at(step_tokens, i)) || i >= vec_length(step_tokens) then Ok((list_reverse(acc), i))
-  else
-    do
-      (pat, j) <- parse_pattern(step_tokens, i)
-      (_, k) <- expected_symbol("=", step_tokens, j)
-      (value, m) <- parse_expr(step_tokens, k)
-      match binding_name(pat) with
-      | Nothing -> Err(ParseError("a multi-name let binds plain names only", cur_pos(step_tokens, i)))
-      | Just name -> parse_do_let_bindings(step_tokens, m, binding_col, Cons(ast.DoLetStep(name, value), acc))
-
 fn binding_name(pat: ast.Pattern) -> Maybe String =
   match pat with
   | ast.VarPattern name _ -> Just(name)
   | ast.WildcardPattern _ -> Just("_")
   | _ -> Nothing
 
-# Does this `let` statement carry more than one binding? True when the slice holds
-# a token beyond the first binding's end, found by the layout scan.
-fn do_let_first_binding_end(step_tokens: Vec token.Token, i2: Int) -> Int =
-  scan_do_step_end(step_tokens, i2, i2, tok_pos(tok_at(step_tokens, i2)).line, 0,
-                   tok_pos(tok_at(step_tokens, i2)).column)
-
-# Is there an `in` at bracket depth 0 anywhere in this slice? A prefilter for the
-# expression-form attempt below, so an ordinary `let` statement is not parsed
-# twice. Deliberately imprecise: it also fires on the `in` of a nested `let … in`
-# sitting in a binding's right-hand side, and the attempt then fails and falls
-# through — the same outcome as never firing.
-fn slice_has_toplevel_in(step_tokens: Vec token.Token, i: Int, depth: Int) -> Bool =
-  if slice_consumed(step_tokens, i) then false
-  else if depth == 0 && tok_is_keyword(tok_at(step_tokens, i), "in") then true
-  else slice_has_toplevel_in(step_tokens, i + 1,
-                             update_bracket_depth(tok_at(step_tokens, i), depth))
-
-# A `let` step whose binding group is closed by `in` is the §5.2.1 EXPRESSION
-# form, not the §5.2.1a statement form. The two are textually identical up to the
-# `in`, so the reading cannot be picked from the head of the slice: parse it as
-# one expression and keep that reading only if it accounts for the whole step.
-#
-# Falling back on anything else is what makes this safe. A slice the expression
-# parse consumes whole is one that is rejected TODAY — `in` heads no expression,
-# so `looks_like_do_step_start` never lets it begin a step and it stays inside
-# this slice, where the statement path finds no pattern at it or trips
-# `step_fully_consumed`. A slice the expression parse cannot consume — a
-# statement whose right-hand side holds a nested `let … in`, say — reaches the
-# statement path unchanged, so no accepted program changes meaning.
-#
-# The result separates "not this form" from "this form, malformed": `Nothing` is
-# no top-level `in` at all, `Just (Err …)` is a slice that looked like the
-# expression form and failed. The caller still tries the statement reading in the
-# second case — the prefilter is imprecise on purpose — but when BOTH readings
-# fail it reports this error, because a top-level `in` says which one was meant.
-# Without that, a malformed `let … in` surfaced as the statement path's complaint
-# about the `in` line ("Expected = at …"), pointing away from the real mistake.
-fn parse_do_let_in_expr(step_tokens: Vec token.Token) -> Maybe (Result ParseError ast.Expr) =
-  if slice_has_toplevel_in(step_tokens, 0, 0) then
-    match parse_expr(step_tokens, 0) with
-    | Err e -> Just(Err(e))
-    | Ok (value, i) ->
-        if slice_consumed(step_tokens, i) then Just(Ok(value))
-        else Just(Err (ParseError(
-          string.concat("Unexpected token after the end of a let binding at ", pos_str(cur_pos(step_tokens, i)))
-            ++ " — a let block takes one binding per line",
-          cur_pos(step_tokens, i))))
-  else Nothing
-
-# The §5.2.1a `let` STATEMENT readings: a binding carrying an `else`, a multi-name
-# group, or one plain binding.
-fn parse_do_let_statement(step_tokens: Vec token.Token, slice_pos: source.SourcePos) -> Result ParseError (DoStepParse, Int) =
+# A `let` step. A group closed by `in` is the §5.2.1 expression form and the
+# step's value; otherwise it is the §5.2.1a statement form.
+fn parse_do_let(tokens: Vec token.Token, i: Int) -> Result ParseError (DoStepParse, Int) =
   do
-    (_, i2) <- expected_keyword("let", step_tokens, 0)
-    (pat, i3) <- parse_pattern(step_tokens, i2)
-    (_, i4) <- expected_symbol("=", step_tokens, i3)
-    (value, i5) <- parse_expr(step_tokens, i4)
-    if tok_is_keyword(tok_at(step_tokens, i5), "else") then
+    (_, i2) <- expected_keyword("let", tokens, i)
+    i3 <- expected_block_open(tokens, i2)
+    (bindings, i4) <- collect_let_bindings(tokens, i3, Nil)
+    if tok_is_keyword(tok_at(tokens, i4), "in") || list_length(bindings) == 0 then
       do
-        (_, i6) <- expected_keyword("else", step_tokens, i5)
-        (residual, handler, i7) <- parse_let_else_clause(step_tokens, i6)
-        step_fully_consumed(step_tokens, i7,
-          DoStepRefutable(false, pat, value, residual, handler, slice_pos))
-    else if do_let_first_binding_end(step_tokens, i2) < vec_length(step_tokens) then
-      do
-        (steps, end_i) <- parse_do_let_bindings(step_tokens, i2,
-                            tok_pos(tok_at(step_tokens, i2)).column, Nil)
-        step_fully_consumed(step_tokens, end_i, DoStepLets(steps))
+        (value, i5) <- finish_let_in(tokens, bindings, i4)
+        Ok((DoStepPlain(ast.DoExprStep(value)), i5))
     else
-      match pat with
-      | ast.VarPattern name _ -> step_fully_consumed(step_tokens, i5, DoStepPlain(ast.DoLetStep(name, value)))
-      | ast.WildcardPattern _ -> step_fully_consumed(step_tokens, i5, DoStepPlain(ast.DoLetStep("_", value)))
-      | _ -> step_fully_consumed(step_tokens, i5, DoStepTotal(false, pat, value, slice_pos))
+      do
+        step <- do_let_statement(bindings, cur_pos(tokens, i))
+        Ok((step, i4))
 
-# Parses one do step from a sub-slice of tokens (step_tokens is the exact tokens for this step).
-fn parse_do_step_sub(step_tokens: Vec token.Token) -> Result ParseError (DoStepParse, Int) =
-  let slice_pos = tok_pos(tok_at(step_tokens, 0))
-  in if tok_is_keyword(tok_at(step_tokens, 0), "let") then
-    match parse_do_let_in_expr(step_tokens) with
-    | Just (Ok value) -> Ok((DoStepPlain(ast.DoExprStep(value)), 0))
-    | Nothing -> parse_do_let_statement(step_tokens, slice_pos)
-    | Just (Err in_err) ->
-        # Still try the statement reading: the `in` prefilter also fires on a
-        # nested `let … in` inside a binding's right-hand side, which is a
-        # perfectly good statement. Only when that fails too is `in_err` the
-        # honest report — it names the mistake, where the statement path would
-        # complain about the `in` line it was never going to accept.
-        match parse_do_let_statement(step_tokens, slice_pos) with
-        | Ok stmt -> Ok(stmt)
-        | Err _ -> Err(in_err)
-  else if step_has_bind_arrow(step_tokens, 0, 0) then
+# A binding carrying an `else` stands alone: its desugaring places the remaining
+# steps inside a match arm, which one binding of several cannot have.
+fn do_let_statement(bindings: List LetBinding, let_pos: source.SourcePos) -> Result ParseError DoStepParse =
+  match bindings with
+  | [b] ->
+      match b.fallback with
+      | Just fb -> Ok(DoStepRefutable(false, b.pat, b.rhs, b.residual, fb, let_pos))
+      | Nothing ->
+          match binding_name(b.pat) with
+          | Just name -> Ok(DoStepPlain(ast.DoLetStep(name, b.rhs)))
+          | Nothing -> Ok(DoStepTotal(false, b.pat, b.rhs, let_pos))
+  | _ -> group_steps(bindings, Nil)
+
+fn group_steps(bindings: List LetBinding, acc: List ast.DoStep) -> Result ParseError DoStepParse =
+  match bindings with
+  | Nil -> Ok(DoStepLets(list_reverse(acc)))
+  | [b | rest] ->
+      match (b.fallback, binding_name(b.pat)) with
+      | (Just _, _) -> Err(ParseError("a let binding with else must stand alone in its let statement", b.pos))
+      | (Nothing, Nothing) -> Err(ParseError("a multi-name let binds plain names only", b.pos))
+      | (Nothing, Just name) -> group_steps(rest, Cons(ast.DoLetStep(name, b.rhs), acc))
+
+fn parse_do_step(tokens: Vec token.Token, i: Int) -> Result ParseError (DoStepParse, Int) =
+  if tok_is_keyword(tok_at(tokens, i), "let") then parse_do_let(tokens, i)
+  else if step_has_bind_arrow(tokens, i, 0) then
     do
-      (pattern, i2) <- parse_pattern(step_tokens, 0)
-      (_, i3) <- expected_symbol("<-", step_tokens, i2)
-      (value, i4) <- parse_expr(step_tokens, i3)
-      if tok_is_keyword(tok_at(step_tokens, i4), "else") then
+      (pattern, i2) <- parse_pattern(tokens, i)
+      (_, i3) <- expected_symbol("<-", tokens, i2)
+      (value, i4) <- parse_expression(tokens, i3)
+      if tok_is_keyword(tok_at(tokens, i4), "else") then
         do
-          (_, i5) <- expected_keyword("else", step_tokens, i4)
-          (residual, handler, i6) <- parse_let_else_clause(step_tokens, i5)
-          step_fully_consumed(step_tokens, i6,
-            DoStepRefutable(true, pattern, value, residual, handler, slice_pos))
+          (_, i5) <- expected_keyword("else", tokens, i4)
+          (residual, handler, i6) <- parse_let_else_clause(tokens, i5)
+          Ok((DoStepRefutable(true, pattern, value, residual, handler, cur_pos(tokens, i)), i6))
+      else if is_irrefutable_do_bind_pattern(pattern) then
+        Ok((DoStepPlain(ast.DoBindStep(pattern, value)), i4))
       else
-        if is_irrefutable_do_bind_pattern(pattern) then
-          step_fully_consumed(step_tokens, i4, DoStepPlain(ast.DoBindStep(pattern, value)))
-        else
-          step_fully_consumed(step_tokens, i4, DoStepTotal(true, pattern, value, slice_pos))
+        Ok((DoStepTotal(true, pattern, value, cur_pos(tokens, i)), i4))
   else
     do
-      (value, i2) <- parse_expr(step_tokens, 0)
-      step_fully_consumed(step_tokens, i2, DoStepPlain(ast.DoExprStep(value)))
+      (value, i2) <- parse_expression(tokens, i)
+      Ok((DoStepPlain(ast.DoExprStep(value)), i2))
 
-# Parses one do step from tokens[i..end_i) and returns (step, end_i).
-fn parse_do_step(tokens: Vec token.Token, i: Int, end_i: Int) -> Result ParseError (DoStepParse, Int) =
-  match parse_do_step_sub(vec_slice(i, end_i - i, tokens)) with
-  | Err e -> Err(e)
-  | Ok (step, _) -> Ok((step, end_i))
-
-# Collects all do steps at the established block column.
-fn collect_do_steps(tokens: Vec token.Token, i: Int, do_line: Int, block_col: Int, acc: List ast.DoStep) -> Result ParseError (List ast.DoStep, Int) =
-  if tok_is_eof(tok_at(tokens, i)) then Ok((list_reverse(acc), i))
-  else if tok_pos(tok_at(tokens, i)).line == do_line then Ok((list_reverse(acc), i))
-  else if block_col == -1 then
-    collect_do_steps_at(tokens, i, do_line, tok_pos(tok_at(tokens, i)).column, acc)
-  else if tok_pos(tok_at(tokens, i)).column < block_col then Ok((list_reverse(acc), i))
-  else if tok_pos(tok_at(tokens, i)).column > block_col then
-    Err(ParseError(string.concat("Unexpected indentation in do block at ", pos_str(cur_pos(tokens, i))), cur_pos(tokens, i)))
+# Collects the steps up to the block's close and returns the index past it.
+fn collect_do_steps(tokens: Vec token.Token, i: Int, acc: List ast.DoStep) -> Result ParseError (List ast.DoStep, Int) =
+  if tok_is_layout_close(tok_at(tokens, i)) then Ok((list_reverse(acc), i + 1))
   else
-    collect_do_steps_at(tokens, i, do_line, block_col, acc)
-
-fn collect_do_steps_at(tokens: Vec token.Token, i: Int, do_line: Int, block_col: Int, acc: List ast.DoStep) -> Result ParseError (List ast.DoStep, Int) =
-  do
-    (stepres, i2) <- parse_do_step(tokens, i, scan_do_step_end(tokens, i, i, do_line, 0, block_col))
-    match stepres with
-    | DoStepPlain step -> collect_do_steps(tokens, i2, do_line, block_col, Cons(step, acc))
-    # One statement, several steps — prepended in order, so `acc` (which is
-    # reversed) receives them last-first exactly as repeated DoStepPlain would.
-    | DoStepLets steps -> collect_do_steps(tokens, i2, do_line, block_col, list_append(list_reverse(steps), acc))
-    | DoStepRefutable is_bind pat value residual handler pos ->
-        do
-          (rest, i3) <- collect_do_steps(tokens, i2, do_line, block_col, Nil)
-          match rest with
-          | Nil -> Err(ParseError("a binding-else do step needs at least one following step as its success continuation", pos))
-          | [_ | _] -> Ok((list_append(list_reverse(acc), build_do_refutable(is_bind, pat, value, residual, handler, rest, pos)), i3))
-    | DoStepTotal is_bind pat value pos ->
-        do
-          (rest, i3) <- collect_do_steps(tokens, i2, do_line, block_col, Nil)
-          match rest with
-          | Nil -> Err(ParseError("a destructuring do step needs at least one following step as its continuation", pos))
-          | [_ | _] -> Ok((list_append(list_reverse(acc), build_do_total(is_bind, pat, value, rest, pos)), i3))
+    do
+      (stepres, j) <- parse_do_step(tokens, i)
+      k <- do_step_end(tokens, j)
+      match stepres with
+      | DoStepPlain step -> collect_do_steps(tokens, k, Cons(step, acc))
+      # One statement, several steps — prepended in order, so `acc` (which is
+      # reversed) receives them last-first exactly as repeated DoStepPlain would.
+      | DoStepLets steps -> collect_do_steps(tokens, k, list_append(list_reverse(steps), acc))
+      | DoStepRefutable is_bind pat value residual handler pos ->
+          do
+            (rest, i3) <- collect_do_steps(tokens, k, Nil)
+            match rest with
+            | Nil -> Err(ParseError("a binding-else do step needs at least one following step as its success continuation", pos))
+            | [_ | _] -> Ok((list_append(list_reverse(acc), build_do_refutable(is_bind, pat, value, residual, handler, rest, pos)), i3))
+      | DoStepTotal is_bind pat value pos ->
+          do
+            (rest, i3) <- collect_do_steps(tokens, k, Nil)
+            match rest with
+            | Nil -> Err(ParseError("a destructuring do step needs at least one following step as its continuation", pos))
+            | [_ | _] -> Ok((list_append(list_reverse(acc), build_do_total(is_bind, pat, value, rest, pos)), i3))
 
 fn parse_do_expr(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
   do
     (do_tok, i2) <- expected_keyword("do", tokens, i)
-    (steps, i3) <- collect_do_steps(tokens, i2, tok_pos(do_tok).line, -1, Nil)
+    i3 <- expected_block_open(tokens, i2)
+    (steps, i4) <- collect_do_steps(tokens, i3, Nil)
     if list_length(steps) == 0 then
       Err(ParseError(string.concat("Expected at least one do step at ", pos_str(tok_pos(do_tok))), tok_pos(do_tok)))
     else
-      Ok((ast.DoExpr(steps, tok_pos(do_tok)), i3))
+      Ok((ast.DoExpr(steps, tok_pos(do_tok)), i4))
 
 # ---------------------------------------------------------------------------
 # `let … in` binding block (pure expression position)
 #
 #   let <pat> = <rhs> [else <fb>]              -- one or more, layout-aligned
 #       <pat> = <rhs> [else <rpat> -> <h>]     -- binding-else: <rpat> names the
-#   in  <body>                                 --   failing value (`in` at `let` col)
+#   in  <body>                                 --   failing value
 #
 # Bindings are sequential (each in scope for later bindings + body). Each
 # desugars right-over the body to a match; `in` closes the block. No new AST
@@ -1020,6 +918,9 @@ fn parse_do_expr(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr
 # bare variable binds the whole scrutinee, so it stays parser-only and uniform
 # with bare-ADT bindings (no failure ctor is ever injected). Constant vs
 # binding-else is disambiguated on a `->` after the else pattern.
+
+type LetBinding = (pat: ast.Pattern, rhs: ast.Expr, residual: Maybe ast.Pattern,
+                   fallback: Maybe ast.Expr, pos: source.SourcePos)
 
 # The else-arm pattern: an explicit residual (binding-else) or a wildcard (the
 # classic constant else). A residual is spliced verbatim, so W5 decides whether
@@ -1040,101 +941,93 @@ fn build_let_binding_match(pat: ast.Pattern, rhs: ast.Expr, residual: Maybe ast.
       ast.MatchExpr(rhs, Cons(ast.MatchBranch(pat, rest), Nil), pos)
 
 # A constant else: the whole clause is one expression, re-parsed from `e`.
-# The third component is the index just past the clause, so a caller can tell
-# whether the step consumed its whole slice.
-fn parse_let_else_constant(step_tokens: Vec token.Token, e: Int) -> Result ParseError (Maybe ast.Pattern, ast.Expr, Int) =
+# The third component is the index just past the clause.
+fn parse_let_else_constant(tokens: Vec token.Token, e: Int) -> Result ParseError (Maybe ast.Pattern, ast.Expr, Int) =
   do
-    (fb, f) <- parse_expr(step_tokens, e)
+    (fb, f) <- parse_expression(tokens, e)
     Ok((Nothing, fb, f))
 
 # After a residual pattern parsed cleanly (ending at `f`): a `->` makes it a
 # binding-else (`<rpat> -> <handler>`); anything else means the pattern was really
 # the start of a constant expression, so fall back to parsing one from `e`.
-fn parse_let_else_after_pat(step_tokens: Vec token.Token, e: Int, rpat: ast.Pattern, f: Int) -> Result ParseError (Maybe ast.Pattern, ast.Expr, Int) =
-  match match_symbol(step_tokens, f, "->") with
+fn parse_let_else_after_pat(tokens: Vec token.Token, e: Int, rpat: ast.Pattern, f: Int) -> Result ParseError (Maybe ast.Pattern, ast.Expr, Int) =
+  match match_symbol(tokens, f, "->") with
   | Just (_, g) ->
       do
-        (handler, h) <- parse_expr(step_tokens, g)
+        (handler, h) <- parse_expression(tokens, g)
         Ok((Just(rpat), handler, h))
-  | Nothing -> parse_let_else_constant(step_tokens, e)
+  | Nothing -> parse_let_else_constant(tokens, e)
 
 # Parses the else clause after `else` has been consumed at index `e`: either a
 # binding-else `<rpat> -> <handler>` (residual pattern followed by `->`) or the
 # classic constant `<expr>`. Disambiguates on a `->` after a well-formed pattern;
 # a pattern that fails to parse, or one not followed by `->`, is a constant else.
-fn parse_let_else_clause(step_tokens: Vec token.Token, e: Int) -> Result ParseError (Maybe ast.Pattern, ast.Expr, Int) =
-  match parse_pattern(step_tokens, e) with
-  | Ok (rpat, f) -> parse_let_else_after_pat(step_tokens, e, rpat, f)
-  | Err _ -> parse_let_else_constant(step_tokens, e)
+fn parse_let_else_clause(tokens: Vec token.Token, e: Int) -> Result ParseError (Maybe ast.Pattern, ast.Expr, Int) =
+  match parse_pattern(tokens, e) with
+  | Ok (rpat, f) -> parse_let_else_after_pat(tokens, e, rpat, f)
+  | Err _ -> parse_let_else_constant(tokens, e)
 
-# Parses one binding `<pat> = <rhs> [else <fb> | else <rpat> -> <h>]` from its
-# exact token slice, returning where the binding actually ended.
-#
-# Both arms used to return a dummy `0`, and the else arm discarded the clause's
-# own end index as well — so nothing could compare where the binding stopped
-# against where its slice ended, and `parse_let_binding_step` resumed at the
-# layout-scanned boundary regardless. Tokens in between were dropped in silence.
-fn parse_let_binding_sub(step_tokens: Vec token.Token) -> Result ParseError ((ast.Pattern, ast.Expr, Maybe ast.Pattern, Maybe ast.Expr), Int) =
+# One binding `<pat> = <rhs> [else <fb> | else <rpat> -> <h>]`.
+fn parse_let_binding(tokens: Vec token.Token, i: Int) -> Result ParseError (LetBinding, Int) =
   do
-    (pat, b) <- parse_pattern(step_tokens, 0)
-    (_, c) <- expected_symbol("=", step_tokens, b)
-    (rhs, d) <- parse_expr(step_tokens, c)
-    if tok_is_keyword(tok_at(step_tokens, d), "else") then
+    (pat, b) <- parse_pattern(tokens, i)
+    (_, c) <- expected_symbol("=", tokens, b)
+    (rhs, d) <- parse_expression(tokens, c)
+    if tok_is_keyword(tok_at(tokens, d), "else") then
       do
-        (_, e) <- expected_keyword("else", step_tokens, d)
-        (residual, fb, g) <- parse_let_else_clause(step_tokens, e)
-        Ok(((pat, rhs, residual, Just(fb)), g))
+        (_, e) <- expected_keyword("else", tokens, d)
+        (residual, fb, g) <- parse_let_else_clause(tokens, e)
+        Ok((LetBinding(pat = pat, rhs = rhs, residual = residual, fallback = Just(fb), pos = cur_pos(tokens, i)), g))
     else
-      Ok(((pat, rhs, Nothing, Nothing), d))
+      Ok((LetBinding(pat = pat, rhs = rhs, residual = Nothing, fallback = Nothing, pos = cur_pos(tokens, i)), d))
 
-# A binding must consume its whole layout-scanned slice, for the same reason a do
-# step must (`step_fully_consumed`): anything left over is a statement the parser
-# is about to delete without saying so. `let a = 1 print("x")` compiled at exit 0
-# with the call absent from the emitted IR — and the identical line without an
-# `in` was already a loud error, so the two forms disagreed about the same text.
-#
-# `used` indexes the SLICE, which starts at `i` in `tokens`, so the offending
-# token is at `i + used` in the original vector.
-fn let_binding_fully_consumed(tokens: Vec token.Token, i: Int, used: Int, slice: Vec token.Token) -> Result ParseError Bool =
-  if slice_consumed(slice, used) then Ok(true)
+# The bindings up to the group's close, in source order, and the index past it.
+fn collect_let_bindings(tokens: Vec token.Token, i: Int, acc: List LetBinding) -> Result ParseError (List LetBinding, Int) =
+  if tok_is_layout_close(tok_at(tokens, i)) then Ok((list_reverse(acc), i + 1))
   else
-    Err(ParseError(
-      string.concat("Unexpected token after the end of a let binding at ", pos_str(cur_pos(tokens, i + used)))
-        ++ " — a let block takes one binding per line",
-      cur_pos(tokens, i + used)))
-
-# Parses one binding (given its layout-scanned slice end), recurses for the rest.
-fn parse_let_binding_step(tokens: Vec token.Token, i: Int, block_col: Int, binding_end: Int) -> Result ParseError (ast.Expr, Int) =
-  do
-    let slice = vec_slice(i, binding_end - i, tokens)
-    (binding, used) <- parse_let_binding_sub(slice)
-    _ <- let_binding_fully_consumed(tokens, i, used, slice)
-    (rest, k) <- parse_let_block(tokens, binding_end, block_col)
-    match binding with
-    | (pat, rhs, residual, fb) -> Ok((build_let_binding_match(pat, rhs, residual, fb, rest, cur_pos(tokens, i)), k))
-
-# Collects bindings at block_col until `in`, then parses the body.
-fn parse_let_block(tokens: Vec token.Token, i: Int, block_col: Int) -> Result ParseError (ast.Expr, Int) =
-  if tok_is_keyword(tok_at(tokens, i), "in") then
     do
-      (_, j) <- expected_keyword("in", tokens, i)
-      parse_expr(tokens, j)
-  else
-    parse_let_binding_step(tokens, i, block_col,
-      scan_do_step_end(tokens, i, i, tok_pos(tok_at(tokens, i)).line, 0, block_col))
+      (b, j) <- parse_let_binding(tokens, i)
+      k <- let_binding_end(tokens, j)
+      collect_let_bindings(tokens, k, Cons(b, acc))
+
+fn let_chain(bindings: List LetBinding, body: ast.Expr) -> ast.Expr =
+  match bindings with
+  | Nil -> body
+  | [b | rest] -> build_let_binding_match(b.pat, b.rhs, b.residual, b.fallback, let_chain(rest, body), b.pos)
+
+# `in` and the body, after a group closed at `i`.
+fn finish_let_in(tokens: Vec token.Token, bindings: List LetBinding, i: Int) -> Result ParseError (ast.Expr, Int) =
+  match bindings with
+  | Nil -> Err(ParseError("let requires at least one binding before in", cur_pos(tokens, i)))
+  | _ ->
+      do
+        (_, j) <- expected_keyword("in", tokens, i)
+        (body, k) <- parse_expression(tokens, j)
+        Ok((let_chain(bindings, body), k))
 
 fn parse_let_else_expr(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
   do
     (_, a) <- expected_keyword("let", tokens, i)
-    if tok_is_keyword(tok_at(tokens, a), "in") then
-      Err(ParseError("let requires at least one binding before in", cur_pos(tokens, a)))
-    else
-      parse_let_block(tokens, a, tok_pos(tok_at(tokens, a)).column)
+    b <- expected_block_open(tokens, a)
+    (bindings, c) <- collect_let_bindings(tokens, b, Nil)
+    finish_let_in(tokens, bindings, c)
 
 # ---------------------------------------------------------------------------
 # Expression parsing
 
-export fn parse_expr(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
+# An expression from lexer tokens, laid out first. The returned index counts
+# the laid-out tokens, not `raw`.
+export fn parse_expr(raw: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
+  do
+    tokens <- laid_out(vec_slice(i, vec_length(raw) - i, raw), layout.ExprLayout)
+    parse_expression(tokens, 0)
+
+fn laid_out(raw: Vec token.Token, mode: layout.LayoutMode) -> Result ParseError (Vec token.Token) =
+  match layout.layout(raw, mode) with
+  | Ok tokens -> Ok(tokens)
+  | Err (layout.LayoutError msg pos) -> Err(ParseError(`${msg} at ${pos_str(pos)}`, pos))
+
+fn parse_expression(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
   if tok_is_keyword(tok_at(tokens, i), "do") then parse_do_expr(tokens, i)
   else if tok_is_keyword(tok_at(tokens, i), "if") then parse_if_expr(tokens, i)
   else if tok_is_keyword(tok_at(tokens, i), "match") then parse_match_expr(tokens, i)
@@ -1144,37 +1037,53 @@ export fn parse_expr(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.
 fn parse_if_expr(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
   do
     (_, i2) <- expected_keyword("if", tokens, i)
-    (cond, i3) <- parse_expr(tokens, i2)
+    (cond, i3) <- parse_expression(tokens, i2)
     (_, i4) <- expected_keyword("then", tokens, i3)
-    (then_b, i5) <- parse_expr(tokens, i4)
+    (then_b, i5) <- parse_expression(tokens, i4)
     (_, i6) <- expected_keyword("else", tokens, i5)
-    (else_b, i7) <- parse_expr(tokens, i6)
+    (else_b, i7) <- parse_expression(tokens, i6)
     Ok((ast.IfExpr(cond, then_b, else_b, cur_pos(tokens, i)), i7))
 
 fn parse_match_expr(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
   do
     (_, i2) <- expected_keyword("match", tokens, i)
-    (scrutinee, i3) <- parse_expr(tokens, i2)
+    (scrutinee, i3) <- parse_expression(tokens, i2)
     (_, i4) <- expected_keyword("with", tokens, i3)
-    (branches, i5) <- collect_match_branches(tokens, i4, Nil, -1)
+    i5 <- expected_block_open(tokens, i4)
+    (branches, i6) <- collect_match_branches(tokens, i5, Nil)
     if list_length(branches) == 0 then
       Err(ParseError(string.concat("Expected match branch at ", pos_str(cur_pos(tokens, i))), cur_pos(tokens, i)))
+    else if tok_is_infix(tok_at(tokens, i6)) then
+      Err(ParseError(
+        `Unexpected \`${token.token_text(tok_at(tokens, i6))}\` after the last match arm at ${pos_str(cur_pos(tokens, i6))} — a match is no operand; put it in parentheses`,
+        cur_pos(tokens, i6)))
     else
-      Ok((ast.MatchExpr(scrutinee, list_reverse(branches), cur_pos(tokens, i)), i5))
+      Ok((ast.MatchExpr(scrutinee, list_reverse(branches), cur_pos(tokens, i)), i6))
 
-fn collect_match_branches(tokens: Vec token.Token, i: Int, acc: List ast.MatchBranch, branch_col: Int) -> Result ParseError (List ast.MatchBranch, Int) =
-  match match_symbol(tokens, i, "|") with
-  | Nothing -> Ok((acc, i))
-  | Just (bar_tok, i2) ->
-      if branch_col != -1 && tok_pos(bar_tok).column < branch_col
-      then Ok((acc, i))
-      else
+let infix_symbols = ["|>", "++", "+", "-", "*", "/", "%", "==", "!=", "<", ">", "<=", ">=", "&&", "||", ">>", "<<"]
+
+# A binary operator. After a match it means a line meant to continue the match.
+fn tok_is_infix(t: token.Token) -> Bool =
+  match token.token_kind(t) with
+  | token.TokenSymbolKind -> list_member(token.token_text(t), infix_symbols)
+  | _ -> false
+
+# Arms up to the block's close; `|` separates them, so the block has no
+# separators. No arm at all is left to the caller's error.
+fn collect_match_branches(tokens: Vec token.Token, i: Int, acc: List ast.MatchBranch) -> Result ParseError (List ast.MatchBranch, Int) =
+  if tok_is_layout_close(tok_at(tokens, i)) then Ok((acc, i + 1))
+  else
+    match match_symbol(tokens, i, "|") with
+    | Nothing ->
+        match acc with
+        | Nil -> Ok((acc, i))
+        | _ -> Err(ParseError(`Unexpected token after a match arm at ${pos_str(cur_pos(tokens, i))}`, cur_pos(tokens, i)))
+    | Just (_, i2) ->
         do
-          let col = if branch_col == -1 then tok_pos(bar_tok).column else branch_col
           (pattern, i3) <- parse_pattern(tokens, i2)
           (_, i4) <- expected_symbol("->", tokens, i3)
-          (value, i5) <- parse_expr(tokens, i4)
-          collect_match_branches(tokens, i5, Cons(ast.MatchBranch(pattern, value), acc), col)
+          (value, i5) <- parse_expression(tokens, i4)
+          collect_match_branches(tokens, i5, Cons(ast.MatchBranch(pattern, value), acc))
 
 fn parse_pipe(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
   do
@@ -1444,7 +1353,7 @@ fn collect_call_args(tokens: Vec token.Token, i: Int, acc: List ast.Expr) -> Res
   if tok_is_symbol(tok_at(tokens, i), ")") then Ok((acc, i))
   else
     do
-      (e, i2) <- parse_expr(tokens, i)
+      (e, i2) <- parse_expression(tokens, i)
       match match_symbol(tokens, i2, ",") with
       | Nothing -> Ok((Cons(e, acc), i2))
       | Just (_, i3) -> collect_call_args(tokens, i3, Cons(e, acc))
@@ -1497,7 +1406,7 @@ fn collect_template_parts(tokens: Vec token.Token, i: Int, acc: List ast.Templat
     collect_template_parts(tokens, i + 1, Cons(ast.LitPart(token.token_text(tok_at(tokens, i))), acc))
   else if tok_is_template_interp_start(tok_at(tokens, i)) then
     do
-      (expr, i2) <- parse_expr(tokens, i + 1)
+      (expr, i2) <- parse_expression(tokens, i + 1)
       if tok_is_template_interp_end(tok_at(tokens, i2)) then
         collect_template_parts(tokens, i2 + 1, Cons(ast.InterpPart(expr), acc))
       else
@@ -1510,7 +1419,7 @@ fn parse_lambda(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr,
     (_, i2) <- expected_symbol("\\", tokens, i)
     (params, i3) <- parse_lambda_params(tokens, i2)
     (_, i4) <- expected_symbol("->", tokens, i3)
-    (body, i5) <- parse_expr(tokens, i4)
+    (body, i5) <- parse_expression(tokens, i4)
     Ok((ast.LambdaExpr(params, body, cur_pos(tokens, i)), i5))
 
 fn parse_lambda_params(tokens: Vec token.Token, i: Int) -> Result ParseError (List ast.Param, Int) =
@@ -1532,7 +1441,7 @@ fn parse_list_literal(tokens: Vec token.Token, i: Int) -> Result ParseError (ast
     | Just (_, i3) -> Ok((ast.VarExpr(ast.list_ctor_nil, cur_pos(tokens, i)), i3))
     | Nothing ->
         do
-          (head_expr, i3) <- parse_expr(tokens, i2)
+          (head_expr, i3) <- parse_expression(tokens, i2)
           if tok_is_keyword(tok_at(tokens, i3), "for") then
             parse_comprehension_tail(tokens, i3 + 1, head_expr, cur_pos(tokens, i))
           else
@@ -1594,7 +1503,7 @@ fn parse_comprehension_gen(tokens: Vec token.Token, i: Int) -> Result ParseError
   do
     (pat, i2) <- parse_pattern(tokens, i)
     (_, i3) <- expected_keyword("in", tokens, i2)
-    (src, i4) <- parse_expr(tokens, i3)
+    (src, i4) <- parse_expression(tokens, i3)
     (guards, i5) <- collect_comprehension_guards(tokens, i4, Nil)
     Ok((ast.ComprehensionGen(pat, src, guards), i5))
 
@@ -1604,7 +1513,7 @@ fn parse_comprehension_gen(tokens: Vec token.Token, i: Int) -> Result ParseError
 fn collect_comprehension_guards(tokens: Vec token.Token, i: Int, acc: List ast.Expr) -> Result ParseError (List ast.Expr, Int) =
   if tok_is_keyword(tok_at(tokens, i), "if") then
     do
-      (g, i2) <- parse_expr(tokens, i + 1)
+      (g, i2) <- parse_expression(tokens, i + 1)
       collect_comprehension_guards(tokens, i2, Cons(g, acc))
   else Ok((list_reverse(acc), i))
 
@@ -1630,7 +1539,7 @@ fn collect_dict_entries(tokens: Vec token.Token, i: Int, acc: List (String, ast.
   do
     (key_tok, i2) <- expected_ident("dict key", tokens, i)
     (_, i3) <- expected_symbol(":", tokens, i2)
-    (value, i4) <- parse_expr(tokens, i3)
+    (value, i4) <- parse_expression(tokens, i3)
     match match_symbol(tokens, i4, ",") with
     | Nothing -> Ok((Cons((token.token_text(key_tok), value), acc), i4))
     | Just (_, i5) ->
@@ -1672,7 +1581,7 @@ fn collect_record_literal_fields(tokens: Vec token.Token, i: Int, acc: List ast.
   do
     (name_tok, i2) <- expected_ident("record field name", tokens, i)
     (_, i3) <- expected_symbol("=", tokens, i2)
-    (value, i4) <- parse_expr(tokens, i3)
+    (value, i4) <- parse_expression(tokens, i3)
     match match_symbol(tokens, i4, ",") with
     | Nothing -> Ok((Cons(ast.RecordField(token.token_text(name_tok), value), acc), i4))
     | Just (_, i5) ->
@@ -1683,7 +1592,7 @@ fn collect_record_literal_fields(tokens: Vec token.Token, i: Int, acc: List ast.
 
 fn collect_expr_list(tokens: Vec token.Token, i: Int, acc: List ast.Expr) -> Result ParseError (List ast.Expr, Int) =
   do
-    (e, i2) <- parse_expr(tokens, i)
+    (e, i2) <- parse_expression(tokens, i)
     match match_symbol(tokens, i2, ",") with
     | Nothing -> Ok((Cons(e, acc), i2))
     | Just (_, i3) -> collect_expr_list(tokens, i3, Cons(e, acc))
@@ -1695,7 +1604,7 @@ fn parse_paren_expr(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.E
     | Just (_, i3) -> Ok((ast.UnitExpr(cur_pos(tokens, i)), i3))
     | Nothing ->
         do
-          (first, i3) <- parse_expr(tokens, i2)
+          (first, i3) <- parse_expression(tokens, i2)
           parse_paren_expr_cont(tokens, i3, first, cur_pos(tokens, i))
 
 fn parse_paren_expr_cont(tokens: Vec token.Token, i: Int, first: ast.Expr, pos: source.SourcePos) -> Result ParseError (ast.Expr, Int) =
@@ -1791,19 +1700,17 @@ fn collect_constraints(tokens: Vec token.Token, i: Int, acc: List ast.TypeConstr
 # ---------------------------------------------------------------------------
 # Where clause desugaring
 
-fn starts_where_binding(tokens: Vec token.Token, i: Int) -> Bool =
-  (tok_is_ident(tok_at(tokens, i)) && tok_is_symbol(tok_at(tokens, i + 1), "=")) ||
-  tok_is_symbol(tok_at(tokens, i), "(")
-
+# The bindings up to the block's close, last first: desugar_where wraps the
+# body in the last one first, so the first binding ends up outermost.
 fn collect_where_bindings(tokens: Vec token.Token, i: Int, acc: List (ast.Pattern, ast.Expr)) -> Result ParseError (List(ast.Pattern, ast.Expr), Int) =
-  if starts_where_binding(tokens, i) then
+  if tok_is_layout_close(tok_at(tokens, i)) then Ok((acc, i + 1))
+  else
     do
       (pattern, i2) <- parse_pattern(tokens, i)
       (_, i3) <- expected_symbol("=", tokens, i2)
-      (value, i4) <- parse_expr(tokens, i3)
-      collect_where_bindings(tokens, i4, Cons((pattern, value), acc))
-  else
-    Ok((acc, i))
+      (value, i4) <- parse_expression(tokens, i3)
+      k <- next_item(tokens, i4, "a where binding", "a where block takes one binding per line")
+      collect_where_bindings(tokens, k, Cons((pattern, value), acc))
 
 fn desugar_where(body: ast.Expr, bindings: List (ast.Pattern, ast.Expr)) -> ast.Expr =
   desugar_where_step(body, bindings)
@@ -2099,7 +2006,7 @@ fn parse_fn_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl
     (return_type, effects, i7) <- parse_optional_return_type(tokens, i6)
     (constraints, i8) <- parse_optional_constraints(tokens, i7)
     (_, i9) <- expected_symbol("=", tokens, i8)
-    (body, i10) <- parse_expr(tokens, i9)
+    (body, i10) <- parse_expression(tokens, i9)
     (final_body, i11) <- parse_optional_where_body(tokens, i10, body)
     Ok((ast.FnDecl(token.token_text(name_tok), list_reverse(params), return_type, effects, constraints, final_body, cur_pos(tokens, i)), i11))
 
@@ -2143,8 +2050,9 @@ fn parse_optional_where_body(tokens: Vec token.Token, i: Int, body: ast.Expr) ->
   | Nothing -> Ok((body, i))
   | Just (_, i2) ->
       do
-        (bindings, i3) <- collect_where_bindings(tokens, i2, Nil)
-        Ok((desugar_where(body, bindings), i3))
+        i3 <- expected_block_open(tokens, i2)
+        (bindings, i4) <- collect_where_bindings(tokens, i3, Nil)
+        Ok((desugar_where(body, bindings), i4))
 
 # Optional `: TypeExpr` annotation (used by `let x : T = e`). Absent -> Nothing,
 # leaving the cursor unmoved; present -> Just the parsed type. Mirrors the
@@ -2163,7 +2071,7 @@ fn parse_let_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Dec
     (name_tok, i3) <- expected_ident("let binding name", tokens, i2)
     (anno, i3b) <- parse_optional_type_anno(tokens, i3)
     (_, i4) <- expected_symbol("=", tokens, i3b)
-    (body, i5) <- parse_expr(tokens, i4)
+    (body, i5) <- parse_expression(tokens, i4)
     Ok((ast.LetDecl(token.token_text(name_tok), body, anno, cur_pos(tokens, i)), i5))
 
 fn parse_record_field_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.RecordFieldDecl, Int) =
@@ -2243,61 +2151,27 @@ fn collect_class_method_sigs(tokens: Vec token.Token, i: Int, acc: List ast.Clas
   else
     Ok((list_reverse(acc), i))
 
-# The layout form's member run: the `fn`s indented past the `class` keyword and
-# aligned on a single block column.  `block_col == -1` until the first member
-# fixes it — the same state machine as collect_do_steps, and deliberately so:
-# `do`, `let` and `match` already end their blocks on a dedent, and a class body
-# that behaved differently would be a second layout rule to learn.
-#
-# `keyword_col` is the guard that makes the *first* member meaningful.  Without
-# it a `fn` in column 1 would establish block_col = 1 and every following
-# top-level declaration would be collected as a class method.
-fn collect_class_method_sigs_layout(tokens: Vec token.Token, i: Int, keyword_col: Int, block_col: Int, acc: List ast.ClassMethodSig) -> Result ParseError (List ast.ClassMethodSig, Int) =
-  if ! (tok_is_keyword(tok_at(tokens, i), "fn")) then Ok((list_reverse(acc), i))
-  else if tok_pos(tok_at(tokens, i)).column <= keyword_col then Ok((list_reverse(acc), i))
-  else if block_col == -1 then
-    collect_class_method_sigs_layout_at(tokens, i, keyword_col,
-      tok_pos(tok_at(tokens, i)).column, acc)
-  # Misalignment in EITHER direction is an error.  This branch is reachable only
-  # when the token is indented past the keyword (the guard above returned
-  # otherwise), so it is plainly meant as a member — handing it back to the
-  # top-level parser would silently reinterpret it.  Only a dedent to or past
-  # the keyword's own column ends a body.
-  else if tok_pos(tok_at(tokens, i)).column != block_col then
-    Err(ParseError(string.concat("Unexpected indentation in class body at ", pos_str(cur_pos(tokens, i))), cur_pos(tokens, i)))
+# The layout form's members, up to the block's close. The pass opens the block
+# at the first `fn` line right of the declaration and rejects a misaligned one.
+fn collect_class_method_sigs_layout(tokens: Vec token.Token, i: Int, acc: List ast.ClassMethodSig) -> Result ParseError (List ast.ClassMethodSig, Int) =
+  if tok_is_layout_close(tok_at(tokens, i)) then Ok((list_reverse(acc), i + 1))
   else
-    collect_class_method_sigs_layout_at(tokens, i, keyword_col, block_col, acc)
-
-fn collect_class_method_sigs_layout_at(tokens: Vec token.Token, i: Int, keyword_col: Int, block_col: Int, acc: List ast.ClassMethodSig) -> Result ParseError (List ast.ClassMethodSig, Int) =
-  do
-    (sig, i2) <- parse_class_method_sig(tokens, i)
-    collect_class_method_sigs_layout(tokens, i2, keyword_col, block_col, Cons(sig, acc))
-
-# The column the layout guard must key on is the DECLARATION's first token, not
-# the `class`/`instance` keyword's.  `parse_decl` consumes a leading `export`
-# via skip_export and passes only the keyword index on, so for
-# `export class Eq a` the keyword sits at column 8 while the members are at 3 —
-# keying on the keyword would put every member at or left of it, ending the body
-# immediately and leaving the members to be read as top-level declarations.
-# `export` is the only prefix skip_export consumes, so one token of lookbehind
-# recovers the declaration's true column.
-fn decl_start_col(tokens: Vec token.Token, i: Int) -> Int =
-  if tok_is_keyword(tok_at(tokens, i - 1), "export")
-  then tok_pos(tok_at(tokens, i - 1)).column
-  else tok_pos(tok_at(tokens, i)).column
+    do
+      (sig, j) <- parse_class_method_sig(tokens, i)
+      k <- next_item(tokens, j, "a class member", "a class body takes one member per line")
+      collect_class_method_sigs_layout(tokens, k, Cons(sig, acc))
 
 # Two body forms, chosen by one token of lookahead: an explicit `{ … }`, or the
-# layout form.  Both are accepted so the brace sources still in the tree keep
-# parsing while they are migrated.
-fn parse_class_body(tokens: Vec token.Token, i: Int, keyword_col: Int) -> Result ParseError (List ast.ClassMethodSig, Int) =
+# layout form. No block at all is an empty body.
+fn parse_class_body(tokens: Vec token.Token, i: Int) -> Result ParseError (List ast.ClassMethodSig, Int) =
   if tok_is_symbol(tok_at(tokens, i), "{") then
     do
       (_, i2) <- expected_symbol("{", tokens, i)
       (methods, i3) <- collect_class_method_sigs(tokens, i2, Nil)
       (_, i4) <- expected_symbol("}", tokens, i3)
       Ok((methods, i4))
-  else
-    collect_class_method_sigs_layout(tokens, i, keyword_col, -1, Nil)
+  else if tok_is_layout_open(tok_at(tokens, i)) then collect_class_method_sigs_layout(tokens, i + 1, Nil)
+  else Ok((Nil, i))
 
 fn parse_class_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
   do
@@ -2305,7 +2179,7 @@ fn parse_class_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.D
     (name_tok, i3) <- expected_ident("class name", tokens, i2)
     (params, i4) <- collect_ident_list(tokens, i3, Nil)
     (superclasses, i5) <- parse_optional_instance_constraints(tokens, i4)
-    (methods, i6) <- parse_class_body(tokens, i5, decl_start_col(tokens, i))
+    (methods, i6) <- parse_class_body(tokens, i5)
     Ok((ast.ClassDecl(token.token_text(name_tok), params, methods, superclasses, cur_pos(tokens, i)), i6))
 
 fn parse_instance_method(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.InstanceMethodImpl, Int) =
@@ -2320,7 +2194,7 @@ fn parse_instance_method(tokens: Vec token.Token, i: Int) -> Result ParseError (
     # bindings after the body.
     (constraints, i7b) <- parse_optional_constraints(tokens, i7)
     (_, i8) <- expected_symbol("=", tokens, i7b)
-    (body, i9) <- parse_expr(tokens, i8)
+    (body, i9) <- parse_expression(tokens, i8)
     (final_body, i10) <- parse_optional_where_body(tokens, i9, body)
     Ok((ast.InstanceMethodImpl(token.token_text(name_tok), list_reverse(params), return_type, effects, constraints, final_body), i10))
 
@@ -2332,47 +2206,32 @@ fn collect_instance_methods(tokens: Vec token.Token, i: Int, acc: List ast.Insta
   else
     Ok((list_reverse(acc), i))
 
-# As collect_class_method_sigs_layout, but the stakes are higher: an instance
-# member `fn f(x) = e` is token-for-token a top-level `fn`, so the column is the
-# *only* thing that says where the block ends.  A member's body may wrap onto
-# further-indented lines — those are consumed by parse_expr and never reach this
-# loop, which only ever inspects the token a completed member stopped at.
-fn collect_instance_methods_layout(tokens: Vec token.Token, i: Int, keyword_col: Int, block_col: Int, acc: List ast.InstanceMethodImpl) -> Result ParseError (List ast.InstanceMethodImpl, Int) =
-  if ! (tok_is_keyword(tok_at(tokens, i), "fn")) then Ok((list_reverse(acc), i))
-  else if tok_pos(tok_at(tokens, i)).column <= keyword_col then Ok((list_reverse(acc), i))
-  else if block_col == -1 then
-    collect_instance_methods_layout_at(tokens, i, keyword_col,
-      tok_pos(tok_at(tokens, i)).column, acc)
-  # Misalignment in either direction is an error — see the class collector.  It
-  # matters more here: an instance member IS a valid top-level `fn`, so an
-  # under-indented one would be silently reinterpreted as one, leaving the
-  # instance short a method and the program compiling with a different meaning.
-  else if tok_pos(tok_at(tokens, i)).column != block_col then
-    Err(ParseError(string.concat("Unexpected indentation in instance body at ", pos_str(cur_pos(tokens, i))), cur_pos(tokens, i)))
+# As collect_class_method_sigs_layout. An instance member is token-for-token a
+# top-level `fn`, so the pass, not this loop, decides where the body ends.
+fn collect_instance_methods_layout(tokens: Vec token.Token, i: Int, acc: List ast.InstanceMethodImpl) -> Result ParseError (List ast.InstanceMethodImpl, Int) =
+  if tok_is_layout_close(tok_at(tokens, i)) then Ok((list_reverse(acc), i + 1))
   else
-    collect_instance_methods_layout_at(tokens, i, keyword_col, block_col, acc)
+    do
+      (m, j) <- parse_instance_method(tokens, i)
+      k <- next_item(tokens, j, "an instance member", "an instance body takes one member per line")
+      collect_instance_methods_layout(tokens, k, Cons(m, acc))
 
-fn collect_instance_methods_layout_at(tokens: Vec token.Token, i: Int, keyword_col: Int, block_col: Int, acc: List ast.InstanceMethodImpl) -> Result ParseError (List ast.InstanceMethodImpl, Int) =
-  do
-    (m, i2) <- parse_instance_method(tokens, i)
-    collect_instance_methods_layout(tokens, i2, keyword_col, block_col, Cons(m, acc))
-
-fn parse_instance_body(tokens: Vec token.Token, i: Int, keyword_col: Int) -> Result ParseError (List ast.InstanceMethodImpl, Int) =
+fn parse_instance_body(tokens: Vec token.Token, i: Int) -> Result ParseError (List ast.InstanceMethodImpl, Int) =
   if tok_is_symbol(tok_at(tokens, i), "{") then
     do
       (_, i2) <- expected_symbol("{", tokens, i)
       (methods, i3) <- collect_instance_methods(tokens, i2, Nil)
       (_, i4) <- expected_symbol("}", tokens, i3)
       Ok((methods, i4))
-  else
-    collect_instance_methods_layout(tokens, i, keyword_col, -1, Nil)
+  else if tok_is_layout_open(tok_at(tokens, i)) then collect_instance_methods_layout(tokens, i + 1, Nil)
+  else Ok((Nil, i))
 
 fn parse_instance_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
   do
     (_, i2) <- expected_keyword("instance", tokens, i)
     (constraint, i3) <- parse_type_constraint(tokens, i2)
     (inst_constraints, i4) <- parse_optional_instance_constraints(tokens, i3)
-    (methods, i5) <- parse_instance_body(tokens, i4, decl_start_col(tokens, i))
+    (methods, i5) <- parse_instance_body(tokens, i4)
     Ok((ast.InstanceDecl(constraint, inst_constraints, methods, cur_pos(tokens, i)), i5))
 
 fn parse_optional_instance_constraints(tokens: Vec token.Token, i: Int) -> Result ParseError (List ast.TypeConstraint, Int) =
@@ -2383,20 +2242,14 @@ fn parse_optional_instance_constraints(tokens: Vec token.Token, i: Int) -> Resul
         (cs, i3) <- collect_constraints(tokens, i2, Nil)
         Ok((list_reverse(cs), i3))
 
-# Single source of truth for the keywords that begin a top-level declaration.
+# The keywords that begin a top-level declaration (the list is in `token`).
 # parse_decl_body guards its dispatch on this predicate, so the two cannot
 # drift: a keyword in the dispatch but missing here is rejected before it
 # reaches its arm; a keyword here but missing from the dispatch reaches the
 # internal-error arm. Any client that must classify submissions (the REPL,
 # and later a language server) reuses this instead of copying the list.
 export fn is_decl_keyword(text: String) -> Bool =
-  text == "extern"
-  || text == "fn"
-  || text == "let"
-  || text == "class"
-  || text == "instance"
-  || text == "type"
-  || text == "wrap"
+  token.is_decl_keyword(text)
 
 # Does `raw` begin a top-level declaration? Looks only at the leading keyword
 # (skipping an `export` modifier), the same signal parse_decl uses. Clients
@@ -2516,12 +2369,13 @@ fn collect_decls(tokens: Vec token.Token, i: Int, acc: List ast.Decl) -> Result 
 # ---------------------------------------------------------------------------
 # Top-level entry point
 
-export fn parse_program(tokens: Vec token.Token) -> Result ParseError ast.Program =
+export fn parse_program(raw: Vec token.Token) -> Result ParseError ast.Program =
   do
+    tokens <- laid_out(raw, layout.ProgramLayout)
     (decls, _) <- collect_decls(tokens, 0, Nil)
     Ok(ast.Program(decls, first_pos))
 where
-  first_pos = match vec_get(0, tokens) with
+  first_pos = match vec_get(0, raw) with
     | Just t -> tok_pos(t)
     | Nothing -> source.SourcePos(index = 0, line = 0, column = 0)
 

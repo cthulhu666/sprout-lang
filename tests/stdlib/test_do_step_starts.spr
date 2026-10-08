@@ -1,14 +1,14 @@
 import stdlib.test (TestState, new_state, assert_true, summary)
 
-# A do step ends where the NEXT step begins. `scan_do_step_end` finds that point
-# by asking `looks_like_do_step_start` whether the next line's first token can
-# head an expression; when the answer is wrongly "no", the scan runs on and the
-# PREVIOUS step's token slice swallows the whole line.
+# A do step ends where the NEXT step begins. The layout pass finds that point by
+# asking `layout.starts_step` whether the next line's first token can head an
+# expression; when the answer is wrongly "no", no separator goes in and the
+# PREVIOUS step runs on into the line.
 #
 # That used to be silent. A bare `3.5` after another step compiled clean and the
 # block evaluated to the earlier step's value instead — wrong code, exit 0, no
-# diagnostic. `step_fully_consumed` now rejects the leftover tokens, so the same
-# shape is a parse error rather than a wrong answer; either way the step is lost.
+# diagnostic. A step ends only at a separator, so the same shape is a parse
+# error rather than a wrong answer; either way the step is lost.
 #
 # The allow-list must therefore mirror `parse_primary` and `parse_unary` exactly.
 # One helper below per form those two accept, each with the form as a step that

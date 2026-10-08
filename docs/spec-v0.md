@@ -75,6 +75,77 @@ Out of scope for v0:
   Decided and rationale: `docs/bigint-v0.md` §5.3.
 - Comments: line comments start with `#` and continue to end of line
 
+### 2.1 Layout
+
+Indentation delimits blocks. This section is the one statement of the rule; the
+constructs below refer to it. Rationale and prior art: `docs/layout-v0.md`.
+
+**Blocks.** `do`, `let` (other than a top-level declaration), the `with` of a
+`match`, and a function body's `where` each open a block at the next token; its
+column is the block's **item column**. The top level is a block with item column
+1, and a line in it that begins with a declaration keyword starts a declaration
+at any column. A class or instance body opens at
+the first line that begins with `fn` right of the declaration's first token; a
+`fn` on the head line is rejected. A block whose first token is at or left of the
+enclosing block's limit is empty, and a `do` needs its first step on a later line
+than the `do`. The limit is the item column of the top level, a `do` or match
+block (match arms, which start with `|`, may open on it), or the floor of a
+`let` or `where` group or a class body. A group's floor is the limit it opened
+over, and 0 directly inside brackets; a class body's floor is its declaration's
+column.
+
+**Line starts.** Outside brackets, the first token of a line is compared with
+the innermost open block:
+
+| Block | Ends when the line starts | Next item when the line starts |
+|---|---|---|
+| `do` | left of the item column | at it, with a token that can head an expression |
+| match arms | left of it, or at it with anything but `\|`, `then`, `else` | — (`\|` separates arms) |
+| `let` | left of its floor, or at it with an item start | right of the floor, reading `<pattern> =` |
+| `where` | left of its floor, or with a declaration keyword at any column | at or right of the floor, reading `<pattern> =` |
+| class / instance body | at or left of the declaration's column, unless it is a member's `where`; or with a declaration keyword other than `fn` | a `fn` at its column |
+
+In its floor column, a `let` group ends only on a line that starts an
+item there (a step, a `|`, a declaration); a line starting with `else` or an
+operator continues it. A `where` group ends at a line starting with a
+declaration keyword, at any column, and at no other line in that column, so its
+bindings may sit in the declaration's own column. A `where` followed by a
+declaration keyword is empty. A declaration keyword (`fn`, `type`, `class`,
+`instance`, `extern`, `export`) ends every `do`, match, `let` and `where` block
+opened on its line or before it, and begins a declaration or member wherever it
+sits on its line. So does a `let` right after an operand on the same line.
+
+Any other line continues the current item, and so does every line after a token
+that cannot end one: `->`, `=`, `<-`, a binary or prefix operator, `if`, `then`,
+`else`, `in`, `match`. A line starting with the `then`, `else` or `with` that an
+open `if` or `match` still waits for continues it at any column. So a step continues on a line at the
+block column that starts with `else`, `then`, `|`, an operator or a closing
+bracket; a binding's right-hand side may start on the next line left of the
+binding; and match arms may sit in the column of the block around the `match`.
+A `fn` in a class or instance body that is neither at the member column nor at or
+left of the declaration is rejected (`Unexpected indentation in class body`,
+resp. `… instance body`). A line starting with `in` never ends a `let` group; the
+`in` does. A `match` is no operand, so a binary operator right after its last
+arm (`|> g` in the arm column) is rejected; put the `match` in parentheses.
+
+**Closers.** A token that closes something opened before a block closes the
+block on its own line. None reaches past an enclosing bracket.
+
+- `)`, `]`, `}`, `,` and the end of a template or interpolation close every block
+  opened inside the bracket.
+- A comprehension's `for`, and an `if` right after an operand in a bracket's own
+  expression, not in a `do` opened inside it (a guard), close
+  one-line `match` blocks above them.
+- `in` closes blocks down to and including the innermost `let` group.
+- `then` and `else` close the `match` blocks opened after their `if`, so in an
+  arm's column they end an `if` inside the arm or one around the `match`.
+- `with` after a `match` scrutinee opens the arms; `r with (f = …)` is a record update.
+- A function body's `where` closes every block opened in the body.
+
+Lines directly inside brackets are not compared: the lines of a bracketed
+expression may sit at any column. A block opened inside the brackets, such as a
+`do` lambda passed as an argument, compares its own lines as usual.
+
 ## 3. Program Structure
 
 A source file is a sequence of top-level declarations:
@@ -411,7 +482,8 @@ Local `where` bindings in v0 follow these rules:
 - They are allowed only on `fn` declarations.
 - They are value bindings only; local type annotations are not part of v0.
 - Binding patterns may be either a single name or a tuple pattern built from names, `_`, and nested tuples.
-- Multiple bindings are allowed and are evaluated in source order.
+- Multiple bindings are allowed and are evaluated in source order, one per line
+  (§2.1): `where a = 1 b = 2` is a parse error.
 - Each binding may use function parameters and earlier local bindings.
 - Self-reference, mutual recursion, and forward reference are not part of v0.
 - **A binding's type is determined by its right-hand side**, not by how the body
@@ -509,8 +581,8 @@ are not yet part of the language. See `docs/binding-annotations-v0.md`.
 ### 5.2.1 `let … in` binding block
 
 In pure expression position, a `let … in` block introduces one or more local
-bindings before a body expression. Bindings are layout-aligned under `let`; `in`,
-dedented to the `let` column, closes the block:
+bindings before a body expression. Bindings are layout-aligned under `let` (§2.1);
+`in` — on the same line, or starting any later line — closes the block:
 
 ```sprout
 fn first_or(xs: List Int, dflt: Int) -> Int =
@@ -584,7 +656,7 @@ do
 Bindings are **sequential**, matching §5.2.1: each is in scope for the ones below
 it and for the rest of the block. The statement is equivalent to writing one
 `let` statement per name, and the split between bindings uses the same layout
-rule the expression form uses, so a right-hand side may span lines.
+rule the expression form uses (§2.1), so a right-hand side may span lines.
 
 A binding carrying an `else` (§5.2.2) must stand alone as a single-binding
 statement: its desugaring places the remaining steps inside a `match` arm, which
@@ -617,13 +689,15 @@ continuation lines indented under it). Trailing tokens are an error — they use
 to be discarded in silence, so a second statement written on the same line as
 the first simply never ran.
 
-**Where a step ends.** A step runs up to the next line that both starts at the
-block's indentation column and begins with a token that can head an expression:
-an identifier, a literal of any kind, an opening `(`/`[`/`{`, a `\` lambda, a
-prefix `-` or `!`, a backtick template, or one of `let`/`if`/`match`/`do`/
-`true`/`false`. A line indented further — or one starting at the block column
-with a token that cannot head an expression, such as an operator or a `|` match
-arm — continues the step above it.
+**Where a step ends.** By the layout rule (§2.1). A step runs up to the next line
+that both starts at the block's indentation column and begins with a token that
+can head an expression: an identifier, a literal of any kind, an opening
+`(`/`[`/`{`, a `\` lambda, a prefix `-` or `!`, a backtick template, or one of
+`let`/`if`/`match`/`do`/`true`/`false`. A line indented further — or one starting
+at the block column with a token that cannot head an expression, such as an
+operator or a `|` match arm — continues the step above it, as does any line after
+a token that cannot end one (`->`, `=`, an operator). A step also ends at a token
+that closes an enclosing bracket, so a `do` block may be a call argument.
 
 **The last step is the block's value**, so it must be an expression. A `<-` or `let`
 there binds a name nothing can read and leaves the block with no value; it is an
@@ -2673,9 +2747,9 @@ broken by the deprecation — but the linter reports every occurrence as
 annotation within the declaration head (`instance Boxer (a !{IO})`) is not a
 body brace and is not reported.
 
-The layout rule is the one already used by `do`, `let … in` and `match`.  The
-first member fixes the **block column**, and exactly one thing ends the body: a
-`fn` at or left of the `class`/`instance` keyword's own column.  A member
+The layout rule is the one `do`, `let … in` and `match` use (§2.1).  The
+first member fixes the **block column**, and the body ends at a line at or left of
+the declaration's own column (its `export`, if it has one).  A member
 indented past the keyword but *not* on the block column — in either direction —
 is rejected with **`Unexpected indentation in class body`** (resp. **`… in
 instance body`**).  A member's body may wrap onto further-indented lines without

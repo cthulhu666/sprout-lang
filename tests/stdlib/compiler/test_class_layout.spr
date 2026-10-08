@@ -4,12 +4,12 @@ import stdlib.compiler.parser as parser
 import stdlib.compiler.ast as ast
 
 # Layout-delimited `class` and `instance` bodies: the members are the run of
-# `fn` declarations indented past the introducing keyword, exactly as `do`,
-# `let` and `match` blocks already work (parser.collect_do_steps_at).
+# `fn` declarations indented past the introducing keyword, laid out by the same
+# pass as `do`, `let` and `match` blocks (stdlib/compiler/layout.sprout).
 #
 # The termination case is what these tests are really about.  A class body is
 # signatures only, but an instance method (`fn f(x) = e`) is token-for-token a
-# top-level `fn`, so ONLY the column tells the parser where the block stops.
+# top-level `fn`, so ONLY the column tells the layout pass where the block stops.
 # Every "… then a top-level fn" case below fails on a parser that just keeps
 # collecting `fn`s: the following declaration is swallowed as a member.
 

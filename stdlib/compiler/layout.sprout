@@ -1,0 +1,725 @@
+module stdlib.compiler.layout
+import stdlib.compiler.token as token
+import stdlib.compiler.source as source
+
+# Turns indentation into virtual open / separator / close tokens, so the parser
+# never reads a column (spec §2.1, docs/layout-v0.md). Closer tokens stand in for
+# Haskell's parse-error rule, which a pass cannot see.
+
+export type LayoutError (..) =
+  | LayoutError String source.SourcePos
+
+export type LayoutMode (..) =
+  | ProgramLayout
+  | ExprLayout
+
+type BodyKind =
+  | ClassBody
+  | InstanceBody
+
+# Where a root or member item is in its declaration. Decides whether `let` is a
+# declaration, whether `where` opens bindings, and when a class body may open.
+type Decl =
+  | DeclStart Int
+  | DeclFnHead
+  | DeclFnBody
+  | DeclClassHead BodyKind Int
+  | DeclOther
+
+# Blocks carry their item column; `Let` and `Where` also a floor, the threshold
+# they opened over, and `Body` its declaration's column. A
+# brace-form class body is a bracket that also tracks its members' declaration
+# state. Markers carry nothing.
+type Frame =
+  | FRoot Int Decl
+  | FBody BodyKind Int Int Decl
+  | FDo Int
+  | FMatch Int
+  | FLet Int Int
+  | FWhere Int Int
+  | FBracket
+  | FBraceBody Decl
+  | FIf
+  | FThen
+  | FScrut
+
+# A block keyword seen, waiting for the token that opens its block.
+type Opener =
+  | OpenNone
+  | OpenDo Int
+  | OpenMatch
+  | OpenLet
+  | OpenWhere
+
+type LState = (mode: LayoutMode, stack: List Frame, out: List token.Token, prev_line: Int, dangling: Bool, pending: Opener)
+
+export fn layout(tokens: Vec token.Token, mode: LayoutMode) -> Result LayoutError (Vec token.Token) =
+  match run(tokens, 0, LState(mode = mode, stack = [root_frame(mode)], out = [], prev_line = 0, dangling = false, pending = OpenNone)) with
+  | Err e -> Err(e)
+  | Ok out -> Ok(vec_from_list(list_reverse(out)))
+
+fn root_frame(mode: LayoutMode) -> Frame =
+  match mode with
+  | ProgramLayout -> FRoot(1, DeclOther)
+  | ExprLayout -> FRoot(0, DeclOther)
+
+fn run(tokens: Vec token.Token, i: Int, st: LState) -> Result LayoutError (List token.Token) =
+  match vec_get(i, tokens) with
+  | Nothing -> Ok(finish(st, source.SourcePos(index = 0, line = 0, column = 0)).out)
+  | Just t ->
+      if token.is_eof_token(t) then Ok(emit(finish(st, pos_of(t)), t).out)
+      else
+        match step(tokens, i, t, st) with
+        | Err e -> Err(e)
+        | Ok st2 -> run(tokens, i + 1, st2 with (prev_line = pos_of(t).line, dangling = expects_more(t)))
+
+# One real token: reject a member on a class head line, open a pending block,
+# compare a line start with the innermost block, then apply the token's own rule.
+fn step(tokens: Vec token.Token, i: Int, t: token.Token, st: LState) -> Result LayoutError LState =
+  let line_start = pos_of(t).line > st.prev_line && ! st.dangling && ! (awaited(t, st.stack))
+      Nothing = head_line_member(t, line_start, st.stack) else Just kind -> Err(LayoutError(member_on_head(kind), pos_of(t)))
+  in match open_pending(st, t) with
+     | Opened st1 -> Ok(on_token(tokens, i, t, st1))
+     | NotOpened st1 ->
+         if line_start then
+           match on_line(tokens, i, t, st1) with
+           | Err e -> Err(e)
+           | Ok st2 -> Ok(on_token(tokens, i, t, st2))
+         else Ok(on_token(tokens, i, t, st1))
+
+# The `then`, `else` or `with` that the marker on top waits for continues the
+# item at any column: no other parse can take it.
+fn awaited(t: token.Token, stack: List Frame) -> Bool =
+  match stack with
+  | [FIf | _] -> is_keyword(t, "then")
+  | [FThen | _] -> is_keyword(t, "else")
+  | [FScrut | _] -> is_keyword(t, "with")
+  | _ -> false
+
+# A class or instance body opens at a line start, so a `fn` on the head line
+# would become a top-level function.
+fn head_line_member(t: token.Token, line_start: Bool, stack: List Frame) -> Maybe BodyKind =
+  match stack with
+  | [FRoot _ (DeclClassHead kind _) | _] -> if is_keyword(t, "fn") && ! line_start then Just(kind) else Nothing
+  | _ -> Nothing
+
+fn member_on_head(kind: BodyKind) -> String =
+  match kind with
+  | ClassBody -> "A class body starts on the line after its head"
+  | InstanceBody -> "An instance body starts on the line after its head"
+
+fn finish(st: LState, pos: source.SourcePos) -> LState =
+  close_all(close_pending(st, pos), pos)
+
+fn close_pending(st: LState, pos: source.SourcePos) -> LState =
+  match st.pending with
+  | OpenNone -> st
+  | _ -> empty_block(st with (pending = OpenNone), pos)
+
+fn close_all(st: LState, pos: source.SourcePos) -> LState =
+  match st.stack with
+  | [FRoot _ _ | _] -> st
+  | Nil -> st
+  | [f | rest] ->
+      if is_block(f) then close_all(emit(st with (stack = rest), virtual(token.TokenLayoutClose, pos)), pos)
+      else close_all(st with (stack = rest), pos)
+
+# ---------------------------------------------------------------------------
+# Opening a block
+
+# Whether the pending block opened at this token, which then starts no line.
+type Opening =
+  | Opened LState
+  | NotOpened LState
+
+# The token after a block keyword opens the block at its column, unless it sits
+# at or left of the enclosing block's threshold; then the block is empty. A `do`
+# needs its first step on a later line.
+fn open_pending(st: LState, t: token.Token) -> Opening =
+  let pos = pos_of(t)
+      k = pos.column
+      fresh = st with (pending = OpenNone)
+  in match st.pending with
+     | OpenNone -> NotOpened(st)
+     | OpenDo do_line ->
+         if pos.line == do_line || k <= open_threshold(st.stack) then NotOpened(empty_block(fresh, pos))
+         else Opened(push_block(fresh, FDo(k), pos))
+     # Arms may sit on the enclosing floor: `|` cannot be read as its item.
+     | OpenMatch ->
+         if k < open_threshold(st.stack) || (k == open_threshold(st.stack) && ! (is_symbol(t, "|"))) then
+           NotOpened(empty_block(fresh, pos))
+         else Opened(push_block(fresh, FMatch(k), pos))
+     | OpenLet ->
+         let fl = open_threshold(st.stack)
+         in if k <= fl then NotOpened(empty_block(fresh, pos))
+            else Opened(push_block(fresh, FLet(k, fl), pos))
+     # Bindings may sit on the declaration's floor; one never starts with a
+     # declaration keyword, so a `where` before one is empty.
+     | OpenWhere ->
+         let fl = open_threshold(st.stack)
+         in if k < fl || starts_decl(t) then NotOpened(empty_block(fresh, pos))
+            else Opened(push_block(fresh, FWhere(k, fl), pos))
+
+fn empty_block(st: LState, pos: source.SourcePos) -> LState =
+  emit(emit(st, virtual(token.TokenLayoutOpen, pos)), virtual(token.TokenLayoutClose, pos))
+
+fn push_block(st: LState, f: Frame, pos: source.SourcePos) -> LState =
+  emit(st with (stack = Cons(f, st.stack)), virtual(token.TokenLayoutOpen, pos))
+
+# A new block must start right of this column; match arms may start on it.
+# Inside a bracket anything goes.
+fn open_threshold(stack: List Frame) -> Int =
+  match top_block(stack) with
+  | Nothing -> 0
+  | Just f ->
+      match f with
+      | FDo c -> c
+      | FMatch c -> c
+      | FLet _ fl -> fl
+      | FWhere _ fl -> fl
+      | FBody _ _ fl _ -> fl
+      | FRoot c _ -> c
+      | _ -> 0
+
+# ---------------------------------------------------------------------------
+# Line starts
+
+# `fn` only starts a declaration or member, so it closes expression blocks.
+fn on_line(tokens: Vec token.Token, i: Int, t: token.Token, st: LState) -> Result LayoutError LState =
+  match top_block(st.stack) with
+  | Nothing -> Ok(st)
+  | Just f ->
+      if is_keyword(t, "fn") && in_expression(f) then on_line(tokens, i, t, close_block(st, pos_of(t)))
+      else block_line(tokens, i, t, st, f)
+
+fn continues_arms(t: token.Token) -> Bool =
+  is_symbol(t, "|") || is_keyword(t, "then") || is_keyword(t, "else")
+
+fn close_expressions(st: LState, pos: source.SourcePos) -> LState =
+  match top_block(st.stack) with
+  | Just f -> if in_expression(f) then close_expressions(close_block(st, pos), pos) else st
+  | Nothing -> st
+
+fn in_expression(f: Frame) -> Bool =
+  match f with
+  | FDo _ -> true
+  | FMatch _ -> true
+  | FLet _ _ -> true
+  | FWhere _ _ -> true
+  | _ -> false
+
+fn block_line(tokens: Vec token.Token, i: Int, t: token.Token, st: LState, f: Frame) -> Result LayoutError LState =
+  let pos = pos_of(t)
+      k = pos.column
+  in match f with
+     | FDo c ->
+         if k < c then on_line(tokens, i, t, close_block(st, pos))
+         else if k == c && starts_step(t) then Ok(separate(st, pos))
+         else Ok(st)
+     # `then` and `else` close only the matches their `if` encloses (`else_rule`).
+     | FMatch c ->
+         if k < c || (k == c && ! (continues_arms(t))) then on_line(tokens, i, t, close_block(st, pos))
+         else Ok(st)
+     # An `in` line belongs to the innermost `let`, which the `in` rule closes.
+     | FLet _ fl -> if is_keyword(t, "in") then Ok(st) else let_line(tokens, i, t, st, fl)
+     | FWhere _ fl -> where_line(tokens, i, t, st, fl)
+     | FBody kind c fl _ ->
+         if body_ends(t, k, fl, st.stack) then on_line(tokens, i, t, close_block(st, pos))
+         else if is_keyword(t, "fn") && k == c then Ok(set_decl(separate(st, pos), DeclStart(k)))
+         else if is_keyword(t, "fn") then Err(LayoutError(misaligned_member(kind), pos))
+         else Ok(st)
+     | FRoot _ d -> Ok(root_line(t, st, d))
+     | _ -> Ok(st)
+
+# A body ends at or left of its declaration's column, except at a member's
+# `where`, and at a declaration keyword other than `fn` in any column.
+fn body_ends(t: token.Token, k: Int, fl: Int, stack: List Frame) -> Bool =
+  if is_keyword(t, "fn") then k <= fl
+  else if starts_decl(t) then true
+  else k <= fl && ! (is_keyword(t, "where") && body_where(stack))
+
+fn misaligned_member(kind: BodyKind) -> String =
+  match kind with
+  | ClassBody -> "Unexpected indentation in class body"
+  | InstanceBody -> "Unexpected indentation in instance body"
+
+# A `let` group closes left of its floor, or on it at a token that starts an
+# item of the block below. Any other binding-shaped line starts a binding, at
+# whatever column, as the greedy parse always allowed.
+fn let_line(tokens: Vec token.Token, i: Int, t: token.Token, st: LState, fl: Int) -> Result LayoutError LState =
+  let pos = pos_of(t)
+      k = pos.column
+  in if k < fl || (k == fl && starts_item(t)) then on_line(tokens, i, t, close_block(st, pos))
+     else binding_line(tokens, i, st, pos)
+
+# A `where` group closes left of its floor, or at a declaration keyword in any
+# column: no binding starts with one, so bindings may sit on the floor and
+# indented declarations still end the group.
+fn where_line(tokens: Vec token.Token, i: Int, t: token.Token, st: LState, fl: Int) -> Result LayoutError LState =
+  let pos = pos_of(t)
+  in if pos.column < fl || starts_decl(t) then on_line(tokens, i, t, close_block(st, pos))
+     else binding_line(tokens, i, st, pos)
+
+fn binding_line(tokens: Vec token.Token, i: Int, st: LState, pos: source.SourcePos) -> Result LayoutError LState =
+  if binding_shaped(tokens, i) then Ok(separate(st, pos)) else Ok(st)
+
+# A token that can start an item of the block a `let` group sits in. A line in
+# the floor column starting with anything else (`else`, an operator) continues
+# the group's last binding, as it continues a `do` step.
+fn starts_item(t: token.Token) -> Bool =
+  starts_step(t) || starts_decl(t) || is_symbol(t, "|")
+
+# A class or instance body opens at its first `fn` line right of the head.
+# Otherwise a line starting with a declaration keyword starts an item, at any
+# column; any other line (a body's `where`, a constructor's `|`) continues one.
+fn root_line(t: token.Token, st: LState, d: Decl) -> LState =
+  let pos = pos_of(t)
+      k = pos.column
+  in match d with
+     | DeclClassHead kind dcol ->
+         if is_keyword(t, "fn") && k > dcol then
+           push_block(set_decl(st, DeclOther), FBody(kind, k, dcol, DeclStart(k)), pos)
+         else new_item(t, st, k)
+     | _ -> new_item(t, st, k)
+
+# An expression has no declarations: a line starting with `let` there is a `let`.
+fn new_item(t: token.Token, st: LState, k: Int) -> LState =
+  match st.mode with
+  | ProgramLayout -> if starts_decl(t) then set_decl(st, DeclStart(k)) else st
+  | ExprLayout -> st
+
+fn starts_decl(t: token.Token) -> Bool =
+  match token.token_kind(t) with
+  | token.TokenKeywordKind -> token.token_text(t) == "export" || token.is_decl_keyword(token.token_text(t))
+  | _ -> false
+
+# A token that can head an expression, and so begin a `do` step. Must mirror
+# `parse_primary` and `parse_unary`: a form left out joins the previous step
+# and fails it (tests/stdlib/test_do_step_starts.spr has one of each).
+fn starts_step(t: token.Token) -> Bool =
+  match token.token_kind(t) with
+  | token.TokenIdentKind -> true
+  | token.TokenIntKind -> true
+  | token.TokenFloatKind -> true
+  | token.TokenStringKind -> true
+  | token.TokenCharKind -> true
+  | token.TokenTemplateStart -> true
+  | token.TokenKeywordKind ->
+      let w = token.token_text(t)
+      in w == "let" || w == "if" || w == "match" || w == "do" || w == "true" || w == "false"
+  | token.TokenSymbolKind ->
+      let s = token.token_text(t)
+      in s == "\\" || s == "[" || s == "{" || s == "(" || s == "-" || s == "!"
+  | _ -> false
+
+# A token that cannot end an item. The line after it continues the item
+# whatever its column: `| Nothing ->` may put the arm's body on the next line in
+# the arm column. Block keywords are absent: their next token opens the block.
+fn expects_more(t: token.Token) -> Bool =
+  match token.token_kind(t) with
+  | token.TokenKeywordKind ->
+      let w = token.token_text(t)
+      in w == "if" || w == "then" || w == "else" || w == "in" || w == "match"
+  | token.TokenSymbolKind ->
+      let s = token.token_text(t)
+      in s == "->" || s == "=" || s == "<-" || s == "\\" || s == "+" || s == "-" || s == "*"
+         || s == "/" || s == "%" || s == "==" || s == "!=" || s == "<" || s == ">" || s == "<="
+         || s == ">=" || s == "&&" || s == "||" || s == "|>" || s == "++" || s == ">>"
+         || s == "<<" || s == ".." || s == "!" || s == ":"
+  | _ -> false
+
+# Does the line at `i` read `<pattern> =`? Bracketed pattern parts and the `=`
+# may sit on later lines; any other token on a later line means no.
+fn binding_shaped(tokens: Vec token.Token, i: Int) -> Bool =
+  match vec_get(i, tokens) with
+  | Nothing -> false
+  | Just t -> scan_binding(tokens, i, i, pos_of(t).line, 0)
+
+fn scan_binding(tokens: Vec token.Token, start: Int, i: Int, prev_line: Int, depth: Int) -> Bool =
+  match vec_get(i, tokens) with
+  | Nothing -> false
+  | Just t ->
+      let line = pos_of(t).line
+      in if token.is_eof_token(t) then false
+         else if depth == 0 && line > prev_line && ! (is_symbol(t, "=")) then false
+         else if depth == 0 && is_symbol(t, "=") then i > start
+         else if is_symbol(t, "(") || is_symbol(t, "[") then scan_binding(tokens, start, i + 1, line, depth + 1)
+         else if is_symbol(t, ")") || is_symbol(t, "]") then
+           depth > 0 && scan_binding(tokens, start, i + 1, line, depth - 1)
+         else if pattern_atom(t) || (depth > 0 && (is_symbol(t, ",") || is_symbol(t, "|") || is_symbol(t, "-"))) then
+           scan_binding(tokens, start, i + 1, line, depth)
+         else false
+
+fn pattern_atom(t: token.Token) -> Bool =
+  match token.token_kind(t) with
+  | token.TokenIdentKind -> true
+  | token.TokenIntKind -> true
+  | token.TokenFloatKind -> true
+  | token.TokenStringKind -> true
+  | token.TokenCharKind -> true
+  | token.TokenKeywordKind -> token.token_text(t) == "true" || token.token_text(t) == "false"
+  | _ -> false
+
+# ---------------------------------------------------------------------------
+# Token rules
+
+fn on_token(tokens: Vec token.Token, i: Int, t: token.Token, st_in: LState) -> LState =
+  let pos = pos_of(t)
+      st0 = if item_keyword(tokens, i, t) then begin_item(st_in, pos) else st_in
+      st = decl_step(t, st0)
+  in if opens_bracket(t) then open_bracket(t, st)
+     else if closes_bracket(t) then emit(close_bracket(st, pos), t)
+     else if is_symbol(t, ",") then emit(close_to_bracket(st, pos), t)
+     else if is_symbol(t, "=") then emit(body_starts(st), t)
+     else
+       match token.token_kind(t) with
+       | token.TokenKeywordKind -> keyword_rule(tokens, i, t, token.token_text(t), st0, st)
+       | _ -> emit(st, t)
+
+# A declaration keyword starts an item wherever it sits, so it ends the
+# expression blocks before it, as in a one-line brace-form body. A `let` does
+# so only right after an operand on its own line.
+fn item_keyword(tokens: Vec token.Token, i: Int, t: token.Token) -> Bool =
+  if is_keyword(t, "let") then follows_operand(tokens, i) && same_line_as_previous(tokens, i, t)
+  else starts_decl(t)
+
+# An item begun by `export` keeps the `export`'s column.
+fn begin_item(st: LState, pos: source.SourcePos) -> LState =
+  if item_starting(st.stack) then st
+  else
+    let s = close_expressions(st, pos)
+    in match s.mode with
+       | ProgramLayout -> set_decl(s, DeclStart(pos.column))
+       | ExprLayout -> s
+
+fn same_line_as_previous(tokens: Vec token.Token, i: Int, t: token.Token) -> Bool =
+  match vec_get(i - 1, tokens) with
+  | Just p -> pos_of(p).line == pos_of(t).line
+  | Nothing -> false
+
+# `before` is the state ahead of this token's declaration step: a `let` is a
+# declaration only as the first keyword of an item.
+fn keyword_rule(tokens: Vec token.Token, i: Int, t: token.Token, w: String, before: LState, st: LState) -> LState =
+  let pos = pos_of(t)
+  in if w == "do" then emit(st, t) with (pending = OpenDo(pos.line))
+     else if w == "let" then
+       if item_starting(before.stack) then emit(st, t)
+       else emit(st, t) with (pending = OpenLet)
+     else if w == "if" then
+       if follows_operand(tokens, i) && guard_position(st.stack) then emit(close_matches(st, pos), t)
+       else emit(st with (stack = Cons(FIf, st.stack)), t)
+     else if w == "match" then emit(st with (stack = Cons(FScrut, st.stack)), t)
+     else if w == "then" then emit(then_rule(st, pos), t)
+     else if w == "else" then emit(else_rule(st, pos), t)
+     else if w == "for" then emit(close_matches(st, pos), t)
+     else if w == "with" then with_rule(tokens, i, t, st)
+     else if w == "in" then emit(close_through_let(st, pos), t)
+     else if w == "where" then where_rule(t, st)
+     else emit(st, t)
+
+# ---------------------------------------------------------------------------
+# Declaration state
+
+# A `fn` heads a declaration or member wherever it sits on its line.
+fn decl_step(t: token.Token, st: LState) -> LState =
+  match st.stack with
+  | [FRoot c (DeclStart col) | rest] -> st with (stack = Cons(FRoot(c, start_decl(t, col)), rest))
+  | [FBody kind c fl (DeclStart col) | rest] ->
+      st with (stack = Cons(FBody(kind, c, fl, start_decl(t, col)), rest))
+  | _ -> if is_keyword(t, "fn") then set_decl(st, DeclFnHead) else st
+
+# A brace-form body ends its head, so the root forgets the class head.
+fn open_bracket(t: token.Token, st: LState) -> LState =
+  match bracket_frame(t, st.stack) with
+  | FBraceBody d -> push_bracket(set_decl(st, DeclOther), FBraceBody(d), t)
+  | f -> push_bracket(st, f, t)
+
+fn push_bracket(st: LState, f: Frame, t: token.Token) -> LState =
+  emit(st with (stack = Cons(f, st.stack)), t)
+
+# A `{` straight after a class or instance head opens a brace-form body.
+fn bracket_frame(t: token.Token, stack: List Frame) -> Frame =
+  match stack with
+  | [FRoot _ (DeclClassHead _ _) | _] -> if is_symbol(t, "{") then FBraceBody(DeclOther) else FBracket
+  | _ -> FBracket
+
+fn start_decl(t: token.Token, col: Int) -> Decl =
+  if is_keyword(t, "export") then DeclStart(col)
+  else if is_keyword(t, "fn") then DeclFnHead
+  else if is_keyword(t, "class") then DeclClassHead(ClassBody, col)
+  else if is_keyword(t, "instance") then DeclClassHead(InstanceBody, col)
+  else DeclOther
+
+fn item_starting(stack: List Frame) -> Bool =
+  match stack with
+  | [FRoot _ (DeclStart _) | _] -> true
+  | [FBody _ _ _ (DeclStart _) | _] -> true
+  | _ -> false
+
+# The `=` of a function head starts its body, after which `where` opens bindings.
+fn body_starts(st: LState) -> LState =
+  match st.stack with
+  | [FRoot c DeclFnHead | rest] -> st with (stack = Cons(FRoot(c, DeclFnBody), rest))
+  | [FBody kind c fl DeclFnHead | rest] -> st with (stack = Cons(FBody(kind, c, fl, DeclFnBody), rest))
+  | [FBraceBody DeclFnHead | rest] -> st with (stack = Cons(FBraceBody (DeclFnBody), rest))
+  | _ -> st
+
+fn set_decl(st: LState, d: Decl) -> LState =
+  match drop_markers(st.stack) with
+  | [FRoot c _ | rest] -> st with (stack = Cons(FRoot(c, d), rest))
+  | [FBody kind c fl _ | rest] -> st with (stack = Cons(FBody(kind, c, fl, d), rest))
+  | [FBraceBody _ | rest] -> st with (stack = Cons(FBraceBody(d), rest))
+  | _ -> st
+
+# A function body's `where` closes every block above the declaration and opens
+# the bindings. A `where` anywhere else is a constraint list.
+fn where_rule(t: token.Token, st: LState) -> LState =
+  if body_where(st.stack) then
+    emit(set_decl(close_to_decl(st, pos_of(t)), DeclOther), t) with (pending = OpenWhere)
+  else emit(st, t)
+
+fn body_where(stack: List Frame) -> Bool =
+  match stack with
+  | Nil -> false
+  | [f | rest] ->
+      match f with
+      | FRoot _ DeclFnBody -> true
+      | FBody _ _ _ DeclFnBody -> true
+      | FRoot _ _ -> false
+      | FBody _ _ _ _ -> false
+      | FBracket -> false
+      | FBraceBody DeclFnBody -> true
+      | FBraceBody _ -> false
+      | _ -> body_where(rest)
+
+fn close_to_decl(st: LState, pos: source.SourcePos) -> LState =
+  match st.stack with
+  | [FRoot _ _ | _] -> st
+  | [FBody _ _ _ _ | _] -> st
+  | [FBraceBody _ | _] -> st
+  | Nil -> st
+  | _ -> close_to_decl(pop_frame(st, pos), pos)
+
+# ---------------------------------------------------------------------------
+# Closers
+
+# A template and its interpolations bracket too, so a multi-line template's
+# text never reads as a line start.
+fn opens_bracket(t: token.Token) -> Bool =
+  match token.token_kind(t) with
+  | token.TokenTemplateStart -> true
+  | token.TokenTemplateInterpStart -> true
+  | _ -> is_symbol(t, "(") || is_symbol(t, "[") || is_symbol(t, "{")
+
+fn closes_bracket(t: token.Token) -> Bool =
+  match token.token_kind(t) with
+  | token.TokenTemplateEnd -> true
+  | token.TokenTemplateInterpEnd -> true
+  | _ -> is_symbol(t, ")") || is_symbol(t, "]") || is_symbol(t, "}")
+
+fn in_bracket(stack: List Frame) -> Bool =
+  match stack with
+  | Nil -> false
+  | [FBracket | _] -> true
+  | [FBraceBody _ | _] -> true
+  | [FRoot _ _ | _] -> false
+  | [_ | rest] -> in_bracket(rest)
+
+# Closes every block above the innermost bracket. Outside brackets, nothing.
+fn close_to_bracket(st: LState, pos: source.SourcePos) -> LState =
+  if in_bracket(st.stack) then pop_to_bracket(st, pos) else st
+
+fn pop_to_bracket(st: LState, pos: source.SourcePos) -> LState =
+  match st.stack with
+  | [FBracket | _] -> st
+  | [FBraceBody _ | _] -> st
+  | Nil -> st
+  | _ -> pop_to_bracket(pop_frame(st, pos), pos)
+
+fn close_bracket(st: LState, pos: source.SourcePos) -> LState =
+  if in_bracket(st.stack) then drop_top(pop_to_bracket(st, pos)) else st
+
+# `in` closes blocks down to and including the innermost `let`, if one is open
+# in this bracket.
+fn close_through_let(st: LState, pos: source.SourcePos) -> LState =
+  if let_open(st.stack) then pop_through_let(st, pos) else st
+
+fn let_open(stack: List Frame) -> Bool =
+  match stack with
+  | Nil -> false
+  | [f | rest] ->
+      match f with
+      | FLet _ _ -> true
+      | FDo _ -> let_open(rest)
+      | FMatch _ -> let_open(rest)
+      | FIf -> let_open(rest)
+      | FThen -> let_open(rest)
+      | FScrut -> let_open(rest)
+      | _ -> false
+
+fn pop_through_let(st: LState, pos: source.SourcePos) -> LState =
+  match st.stack with
+  | [FLet _ _ | _] -> pop_frame(st, pos)
+  | Nil -> st
+  | _ -> pop_through_let(pop_frame(st, pos), pos)
+
+# `then` / `else` cannot continue a match arm, so they close the one-line
+# matches above them, then take their `if` / `then` marker if it is next.
+fn then_rule(st: LState, pos: source.SourcePos) -> LState =
+  let s = close_matches(st, pos)
+  in match s.stack with
+     | [FIf | rest] -> s with (stack = Cons(FThen, rest))
+     | _ -> s
+
+fn else_rule(st: LState, pos: source.SourcePos) -> LState =
+  let s = close_matches(st, pos)
+  in match s.stack with
+     | [FThen | rest] -> s with (stack = rest)
+     | _ -> s
+
+# `if` is a prefix form, so after a complete operand in a bracket's own
+# expression it can only be a comprehension guard. In a `do` or a declaration
+# it starts the next step.
+fn guard_position(stack: List Frame) -> Bool =
+  match stack with
+  | Nil -> false
+  | [f | rest] ->
+      match f with
+      | FBracket -> true
+      | FDo _ -> false
+      | FRoot _ _ -> false
+      | FBody _ _ _ _ -> false
+      | FBraceBody _ -> false
+      | FMatch _ -> guard_position(rest)
+      | FLet _ _ -> guard_position(rest)
+      | FWhere _ _ -> guard_position(rest)
+      | FIf -> guard_position(rest)
+      | FThen -> guard_position(rest)
+      | FScrut -> guard_position(rest)
+
+fn follows_operand(tokens: Vec token.Token, i: Int) -> Bool =
+  match vec_get(i - 1, tokens) with
+  | Nothing -> false
+  | Just p ->
+      match token.token_kind(p) with
+      | token.TokenIdentKind -> true
+      | token.TokenIntKind -> true
+      | token.TokenFloatKind -> true
+      | token.TokenStringKind -> true
+      | token.TokenCharKind -> true
+      | token.TokenTemplateEnd -> true
+      | token.TokenKeywordKind -> token.token_text(p) == "true" || token.token_text(p) == "false"
+      | _ -> is_symbol(p, ")") || is_symbol(p, "]") || is_symbol(p, "}")
+
+# Closes the one-line matches on top: `then`, `else` and a comprehension's `for`
+# and `if` cannot continue an arm.
+fn close_matches(st: LState, pos: source.SourcePos) -> LState =
+  match st.stack with
+  | [FMatch _ | _] -> close_matches(pop_frame(st, pos), pos)
+  | _ -> st
+
+# `with` after a `match` scrutinee opens the arms; `r with (f = …)` is a record
+# update and has no block.
+fn with_rule(tokens: Vec token.Token, i: Int, t: token.Token, st: LState) -> LState =
+  if record_update_at(tokens, i) || ! (scrutinee_open(st.stack)) then emit(st, t)
+  else emit(drop_top(pop_to_scrutinee(st, pos_of(t))), t) with (pending = OpenMatch)
+
+fn record_update_at(tokens: Vec token.Token, i: Int) -> Bool =
+  match (vec_get(i + 1, tokens), vec_get(i + 2, tokens), vec_get(i + 3, tokens)) with
+  | (Just a, Just b, Just c) -> is_symbol(a, "(") && is_ident(b) && is_symbol(c, "=")
+  | _ -> false
+
+fn scrutinee_open(stack: List Frame) -> Bool =
+  match stack with
+  | [FScrut | _] -> true
+  | [FMatch _ | rest] -> scrutinee_open(rest)
+  | _ -> false
+
+fn pop_to_scrutinee(st: LState, pos: source.SourcePos) -> LState =
+  match st.stack with
+  | [FScrut | _] -> st
+  | Nil -> st
+  | _ -> pop_to_scrutinee(pop_frame(st, pos), pos)
+
+# ---------------------------------------------------------------------------
+# Stack helpers
+
+fn is_block(f: Frame) -> Bool =
+  match f with
+  | FRoot _ _ -> true
+  | FBody _ _ _ _ -> true
+  | FDo _ -> true
+  | FMatch _ -> true
+  | FLet _ _ -> true
+  | FWhere _ _ -> true
+  | _ -> false
+
+fn is_marker(f: Frame) -> Bool =
+  match f with
+  | FIf -> true
+  | FThen -> true
+  | FScrut -> true
+  | _ -> false
+
+fn drop_markers(stack: List Frame) -> List Frame =
+  match stack with
+  | [f | rest] -> if is_marker(f) then drop_markers(rest) else stack
+  | Nil -> Nil
+
+# The innermost block, unless a bracket is nearer.
+fn top_block(stack: List Frame) -> Maybe Frame =
+  match drop_markers(stack) with
+  | [FBracket | _] -> Nothing
+  | [FBraceBody _ | _] -> Nothing
+  | [f | _] -> Just(f)
+  | Nil -> Nothing
+
+# Pops one frame; a block emits its close token. The root is never popped.
+fn pop_frame(st: LState, pos: source.SourcePos) -> LState =
+  match st.stack with
+  | [FRoot _ _ | _] -> st
+  | Nil -> st
+  | [f | rest] ->
+      if is_block(f) then emit(st with (stack = rest), virtual(token.TokenLayoutClose, pos))
+      else st with (stack = rest)
+
+fn drop_top(st: LState) -> LState =
+  match st.stack with
+  | [FRoot _ _ | _] -> st
+  | [_ | rest] -> st with (stack = rest)
+  | Nil -> st
+
+fn close_block(st: LState, pos: source.SourcePos) -> LState =
+  pop_frame(st with (stack = drop_markers(st.stack)), pos)
+
+# A separator ends the item before it, so its open markers go with it.
+fn separate(st: LState, pos: source.SourcePos) -> LState =
+  emit(st with (stack = drop_markers(st.stack)), virtual(token.TokenLayoutSep, pos))
+
+fn emit(st: LState, t: token.Token) -> LState =
+  st with (out = Cons(t, st.out))
+
+# The text is what a parse error names when it meets the token.
+fn virtual(kind: token.TokenKind, pos: source.SourcePos) -> token.Token =
+  match kind with
+  | token.TokenLayoutOpen -> token.Token(kind, "start of block", pos)
+  | token.TokenLayoutSep -> token.Token(kind, "new line", pos)
+  | _ -> token.Token(kind, "end of block", pos)
+
+fn pos_of(t: token.Token) -> source.SourcePos =
+  token.token_position(t)
+
+fn is_symbol(t: token.Token, s: String) -> Bool =
+  match token.token_kind(t) with
+  | token.TokenSymbolKind -> token.token_text(t) == s
+  | _ -> false
+
+fn is_ident(t: token.Token) -> Bool =
+  match token.token_kind(t) with
+  | token.TokenIdentKind -> true
+  | _ -> false
+
+fn is_keyword(t: token.Token, w: String) -> Bool =
+  match token.token_kind(t) with
+  | token.TokenKeywordKind -> token.token_text(t) == w
+  | _ -> false

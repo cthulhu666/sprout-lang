@@ -1,0 +1,10 @@
+# sprout-ignore-all lint/unparsed: parse-error fixture — this file must not parse
+# A line right of a match's arm column continues the last arm. A binding there,
+# after arms that sit left of the binding column, is part of that arm.
+fn main() -> Unit !{IO} =
+  do
+    let r = match 0 with
+      | 0 -> 1
+      | _ -> 2
+        s = 3
+    print(int_to_string(r + s))

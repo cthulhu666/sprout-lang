@@ -15,6 +15,10 @@ export type TokenKind (..) =
   | TokenTemplateInterpStart
   | TokenTemplateInterpEnd
   | TokenTemplateEnd
+  # Virtual block tokens from the layout pass; the lexer never emits them.
+  | TokenLayoutOpen
+  | TokenLayoutSep
+  | TokenLayoutClose
 
 export type Token (..) =
   | Token TokenKind String source.SourcePos
@@ -37,6 +41,17 @@ export fn token_position(token: Token) -> source.SourcePos =
 export fn error_message(value: TokenizeError) -> String =
   match value with
   | TokenizeError message _ -> message
+
+# The keywords that begin a top-level declaration. The parser and the layout
+# pass both read this list, so they cannot drift.
+export fn is_decl_keyword(text: String) -> Bool =
+  text == "extern"
+  || text == "fn"
+  || text == "let"
+  || text == "class"
+  || text == "instance"
+  || text == "type"
+  || text == "wrap"
 
 export fn eof_token(position: source.SourcePos) -> Token =
   Token(TokenEofKind, "", position)
