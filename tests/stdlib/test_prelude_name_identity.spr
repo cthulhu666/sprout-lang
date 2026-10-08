@@ -23,6 +23,9 @@ fn vec_with(vec_from_list: Int) -> Vec Int = [1, vec_from_list]
 
 fn comprehension_with(list_reverse: Int, xs: List Int) -> List Int = [x + list_reverse for x in xs]
 
+# A local named like `Monoid.empty`, a method dispatched on its return type alone.
+fn via_empty(empty: Int -> Int) -> Int = empty(7)
+
 # A template with three parts calls the extern `string_concat_many`.
 fn long_template_with(string_concat_many: Int, a: Int) -> String = `a=${a} c=${string_concat_many}!`
 
@@ -88,6 +91,7 @@ fn main() -> Unit !{IO} =
     check_eq("comprehension beside a local list_reverse", comprehension_with(10, [1, 2]), [11, 12]),
     check_eq("field chain on a renamed local", field_of(Holder(to_string = 7)), 7),
     check_eq("long template beside a local named like an extern", long_template_with(3, 2), "a=2 c=3!"),
+    check_eq("a local named empty", via_empty(\n -> n + 1), 8),
     check_eq("do-let binder", do_let_with(Just(5)), Just("v=6")),
     check_eq("let..else residual binder", residual_with(Err("no")), "e=no"),
     check_eq("let..else success", residual_with(Ok(4)), "v=4"),

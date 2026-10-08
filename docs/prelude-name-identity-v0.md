@@ -83,16 +83,20 @@ names, and `prelude.X` is the qualified spelling.
 
 **`prelude.X`.** In the bundler, a dotted name whose head is `prelude` resolves to the prelude's
 `X`, in value, constructor-pattern and type positions, skipping the module's own declarations and
-its imports. A local named `prelude` and an import alias `prelude` win over it, as they do for any
-dotted head. `prelude.X` where the prelude has no `X` stays unresolved, and inference reports it
-as an unknown name. Under `no_prelude` only the floor's names resolve. Only the bundler knows
-the spelling: a module checked without bundling reports `prelude.X` as unknown.
+its imports. A local, an import alias or a top-level value named `prelude` wins over it in every
+position, as for any dotted head. `prelude.X` where the prelude has no `X` stays unresolved, and
+inference reports it as an unknown name. Under `no_prelude` only the floor's names resolve.
+
+Both halves live in the bundler only: a module checked without bundling neither resolves
+`prelude.X` nor renames its locals.
 
 **Locals.** The bundler renames a binder whose name is a prelude value, class method or extern,
 and every use of it, to `$l_<name>` (§5.1). The rename is a pure function of the name, so
 nested shadowing keeps its structure and no map is needed. Binders: function and lambda
 parameters, instance-method parameters, `VarPattern` in `match`, `let`, `do` and comprehension
 patterns, `do`-`let` names. A dotted name whose head is a renamed local renames the head.
+Parameters of a declaration with no body, a class method signature or an extern, keep their
+names: nothing the compiler writes can reach them.
 
 ### 5.1 The renamed spelling
 
