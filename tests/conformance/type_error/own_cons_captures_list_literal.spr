@@ -1,0 +1,13 @@
+module main
+
+# A known limit (spec §3.1): list literals are built from the bare names `Cons`
+# and `Nil`, so a module's own `Cons` captures them. When the limit is lifted,
+# this fixture moves to run/.
+
+type Mine =
+  | Cons Int
+  | Nil
+
+fn three(first: Int) -> List Int = [first, 2, 3]
+
+fn main() -> Unit !{IO} = print(three(1))

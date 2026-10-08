@@ -4099,12 +4099,12 @@ entry:
   ret i64 %t$3
 }
 
-define i64 @vec_slice_from(i64 %p$start$in, i64 %p$count$in, i64 %p$vec$in, i64 %p$index$in, i64 %p$total$in, i64 %p$acc$in) {
+define i64 @vec_slice_from(i64 %p$start$in, i64 %p$$l_count$in, i64 %p$vec$in, i64 %p$index$in, i64 %p$total$in, i64 %p$acc$in) {
 entry:
   %t$46 = alloca i64
   store i64 %p$start$in, ptr %t$46
   %t$47 = alloca i64
-  store i64 %p$count$in, ptr %t$47
+  store i64 %p$$l_count$in, ptr %t$47
   %t$48 = alloca i64
   store i64 %p$vec$in, ptr %t$48
   %t$49 = alloca i64
@@ -4117,7 +4117,7 @@ entry:
   br label %tco_loop
 tco_loop:
   %p$start = load i64, ptr %t$46
-  %p$count = load i64, ptr %t$47
+  %p$$l_count = load i64, ptr %t$47
   %p$vec = load i64, ptr %t$48
   %p$index = load i64, ptr %t$49
   %p$total = load i64, ptr %t$50
@@ -4160,7 +4160,7 @@ ovfpanic_12:
   unreachable
 ovfok_12:
   store i64 %p$start, ptr %t$46
-  store i64 %p$count, ptr %t$47
+  store i64 %p$$l_count, ptr %t$47
   store i64 %p$vec, ptr %t$48
   store i64 %t$12, ptr %t$49
   store i64 %p$total, ptr %t$50
@@ -4168,7 +4168,7 @@ ovfok_12:
   call void @llvm.stackrestore(ptr %t$52)
   br label %tco_loop
 else_9:
-  %t$16$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %p$start, i64 %p$count)
+  %t$16$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %p$start, i64 %p$$l_count)
   %t$16 = extractvalue { i64, i1 } %t$16$agg, 0
   %t$16$ovf = extractvalue { i64, i1 } %t$16$agg, 1
   br i1 %t$16$ovf, label %ovfpanic_16, label %ovfok_16
@@ -4257,7 +4257,7 @@ ovfok_38:
   %t$83 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$84 = call i64 @sprout_gc_pop_roots(i64 2)
   store i64 %p$start, ptr %t$46
-  store i64 %p$count, ptr %t$47
+  store i64 %p$$l_count, ptr %t$47
   store i64 %p$vec, ptr %t$48
   store i64 %t$38, ptr %t$49
   store i64 %p$total, ptr %t$50
@@ -4281,10 +4281,10 @@ join_2:
   ret i64 %t$3
 }
 
-define i64 @vec_slice(i64 %p$start, i64 %p$count, i64 %p$vec) {
+define i64 @vec_slice(i64 %p$start, i64 %p$$l_count, i64 %p$vec) {
 entry:
   %t$0 = add i64 0, 0
-  %t$1 = icmp sle i64 %p$count, %t$0
+  %t$1 = icmp sle i64 %p$$l_count, %t$0
   %t$2 = zext i1 %t$1 to i64
   %t$17 = trunc i64 %t$2 to i1
   br i1 %t$17, label %then_3, label %else_3
@@ -4313,7 +4313,7 @@ join_9:
   %t$20 = alloca i64
   store i64 %t$15, ptr %t$20
   %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
-  %t$16 = call i64 @vec_slice_from(i64 %t$10, i64 %p$count, i64 %p$vec, i64 %t$13, i64 %t$14, i64 %t$15)
+  %t$16 = call i64 @vec_slice_from(i64 %t$10, i64 %p$$l_count, i64 %p$vec, i64 %t$13, i64 %t$14, i64 %t$15)
   %t$22 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %join_3
 join_3:
@@ -13447,20 +13447,20 @@ entry:
   ret i64 %t$0
 }
 
-define i64 @stdlib.bytes.slice(i64 %p$value, i64 %p$start, i64 %p$count) {
+define i64 @stdlib.bytes.slice(i64 %p$value, i64 %p$start, i64 %p$$l_count) {
 entry:
   %t$1 = alloca i64
   store i64 %p$value, ptr %t$1
   %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
-  %t$0 = call i64 @bytes_slice(i64 %p$value, i64 %p$start, i64 %p$count)
+  %t$0 = call i64 @bytes_slice(i64 %p$value, i64 %p$start, i64 %p$$l_count)
   %t$3 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$0
 }
 
-define i64 @stdlib.bytes.take(i64 %p$value, i64 %p$count) {
+define i64 @stdlib.bytes.take(i64 %p$value, i64 %p$$l_count) {
 entry:
   %t$0 = add i64 0, 0
-  %t$1 = icmp sle i64 %p$count, %t$0
+  %t$1 = icmp sle i64 %p$$l_count, %t$0
   %t$2 = zext i1 %t$1 to i64
   %t$14 = trunc i64 %t$2 to i1
   br i1 %t$14, label %then_3, label %else_3
@@ -13472,7 +13472,7 @@ else_3:
   store i64 %p$value, ptr %t$15
   %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
   %t$6 = call i64 @stdlib.bytes.length(i64 %p$value)
-  %t$7 = icmp sge i64 %p$count, %t$6
+  %t$7 = icmp sge i64 %p$$l_count, %t$6
   %t$8 = zext i1 %t$7 to i64
   %t$13 = trunc i64 %t$8 to i1
   %t$17 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -13484,7 +13484,7 @@ else_9:
   %t$18 = alloca i64
   store i64 %p$value, ptr %t$18
   %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
-  %t$12 = call i64 @stdlib.bytes.slice(i64 %p$value, i64 %t$11, i64 %p$count)
+  %t$12 = call i64 @stdlib.bytes.slice(i64 %p$value, i64 %t$11, i64 %p$$l_count)
   %t$20 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_9
 join_9:
@@ -13495,10 +13495,10 @@ join_3:
   ret i64 %t$4
 }
 
-define i64 @stdlib.bytes.drop(i64 %p$value, i64 %p$count) {
+define i64 @stdlib.bytes.drop(i64 %p$value, i64 %p$$l_count) {
 entry:
   %t$0 = add i64 0, 0
-  %t$1 = icmp sle i64 %p$count, %t$0
+  %t$1 = icmp sle i64 %p$$l_count, %t$0
   %t$2 = zext i1 %t$1 to i64
   %t$17 = trunc i64 %t$2 to i1
   br i1 %t$17, label %then_3, label %else_3
@@ -13509,7 +13509,7 @@ else_3:
   store i64 %p$value, ptr %t$18
   %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
   %t$5 = call i64 @stdlib.bytes.length(i64 %p$value)
-  %t$6 = icmp sge i64 %p$count, %t$5
+  %t$6 = icmp sge i64 %p$$l_count, %t$5
   %t$7 = zext i1 %t$6 to i64
   %t$16 = trunc i64 %t$7 to i1
   %t$20 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -13522,7 +13522,7 @@ else_8:
   store i64 %p$value, ptr %t$21
   %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
   %t$11 = call i64 @stdlib.bytes.length(i64 %p$value)
-  %t$12$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %t$11, i64 %p$count)
+  %t$12$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %t$11, i64 %p$$l_count)
   %t$12 = extractvalue { i64, i1 } %t$12$agg, 0
   %t$12$ovf = extractvalue { i64, i1 } %t$12$agg, 1
   %t$23 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -13536,7 +13536,7 @@ ovfok_12:
   %t$24 = alloca i64
   store i64 %p$value, ptr %t$24
   %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
-  %t$15 = call i64 @stdlib.bytes.slice(i64 %p$value, i64 %p$count, i64 %t$12)
+  %t$15 = call i64 @stdlib.bytes.slice(i64 %p$value, i64 %p$$l_count, i64 %t$12)
   %t$26 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_8
 join_8:
@@ -13587,10 +13587,10 @@ join_7:
   ret i64 %t$8
 }
 
-define i64 @stdlib.bytes.take_last(i64 %p$value, i64 %p$count) {
+define i64 @stdlib.bytes.take_last(i64 %p$value, i64 %p$$l_count) {
 entry:
   %t$0 = add i64 0, 0
-  %t$1 = icmp sle i64 %p$count, %t$0
+  %t$1 = icmp sle i64 %p$$l_count, %t$0
   %t$2 = zext i1 %t$1 to i64
   %t$17 = trunc i64 %t$2 to i1
   br i1 %t$17, label %then_3, label %else_3
@@ -13602,7 +13602,7 @@ else_3:
   store i64 %p$value, ptr %t$18
   %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
   %t$6 = call i64 @stdlib.bytes.length(i64 %p$value)
-  %t$7 = icmp sge i64 %p$count, %t$6
+  %t$7 = icmp sge i64 %p$$l_count, %t$6
   %t$8 = zext i1 %t$7 to i64
   %t$16 = trunc i64 %t$8 to i1
   %t$20 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -13614,7 +13614,7 @@ else_9:
   store i64 %p$value, ptr %t$21
   %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
   %t$11 = call i64 @stdlib.bytes.length(i64 %p$value)
-  %t$12$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %t$11, i64 %p$count)
+  %t$12$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %t$11, i64 %p$$l_count)
   %t$12 = extractvalue { i64, i1 } %t$12$agg, 0
   %t$12$ovf = extractvalue { i64, i1 } %t$12$agg, 1
   %t$23 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -13628,7 +13628,7 @@ ovfok_12:
   %t$24 = alloca i64
   store i64 %p$value, ptr %t$24
   %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
-  %t$15 = call i64 @stdlib.bytes.slice(i64 %p$value, i64 %t$12, i64 %p$count)
+  %t$15 = call i64 @stdlib.bytes.slice(i64 %p$value, i64 %t$12, i64 %p$$l_count)
   %t$26 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_9
 join_9:
@@ -13639,10 +13639,10 @@ join_3:
   ret i64 %t$4
 }
 
-define i64 @stdlib.bytes.drop_last(i64 %p$value, i64 %p$count) {
+define i64 @stdlib.bytes.drop_last(i64 %p$value, i64 %p$$l_count) {
 entry:
   %t$0 = add i64 0, 0
-  %t$1 = icmp sle i64 %p$count, %t$0
+  %t$1 = icmp sle i64 %p$$l_count, %t$0
   %t$2 = zext i1 %t$1 to i64
   %t$18 = trunc i64 %t$2 to i1
   br i1 %t$18, label %then_3, label %else_3
@@ -13653,7 +13653,7 @@ else_3:
   store i64 %p$value, ptr %t$19
   %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
   %t$5 = call i64 @stdlib.bytes.length(i64 %p$value)
-  %t$6 = icmp sge i64 %p$count, %t$5
+  %t$6 = icmp sge i64 %p$$l_count, %t$5
   %t$7 = zext i1 %t$6 to i64
   %t$17 = trunc i64 %t$7 to i1
   %t$21 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -13667,7 +13667,7 @@ else_8:
   store i64 %p$value, ptr %t$22
   %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
   %t$12 = call i64 @stdlib.bytes.length(i64 %p$value)
-  %t$13$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %t$12, i64 %p$count)
+  %t$13$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %t$12, i64 %p$$l_count)
   %t$13 = extractvalue { i64, i1 } %t$13$agg, 0
   %t$13$ovf = extractvalue { i64, i1 } %t$13$agg, 1
   %t$24 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -15842,9 +15842,9 @@ entry:
   ret i64 %t$0
 }
 
-define i64 @stdlib.string.slice(i64 %p$raw, i64 %p$start, i64 %p$count) {
+define i64 @stdlib.string.slice(i64 %p$raw, i64 %p$start, i64 %p$$l_count) {
 entry:
-  %t$0 = call i64 @str_slice(i64 %p$raw, i64 %p$start, i64 %p$count)
+  %t$0 = call i64 @str_slice(i64 %p$raw, i64 %p$start, i64 %p$$l_count)
   ret i64 %t$0
 }
 
@@ -16120,10 +16120,10 @@ entry:
   ret i64 %t$2
 }
 
-define i64 @stdlib.string.take(i64 %p$raw, i64 %p$count) {
+define i64 @stdlib.string.take(i64 %p$raw, i64 %p$$l_count) {
 entry:
   %t$0 = add i64 0, 0
-  %t$1 = icmp sle i64 %p$count, %t$0
+  %t$1 = icmp sle i64 %p$$l_count, %t$0
   %t$2 = zext i1 %t$1 to i64
   %t$9 = trunc i64 %t$2 to i1
   br i1 %t$9, label %then_3, label %else_3
@@ -16136,7 +16136,7 @@ else_3:
   %t$10 = alloca i64
   store i64 %p$raw, ptr %t$10
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
-  %t$8 = call i64 @stdlib.string.slice(i64 %p$raw, i64 %t$7, i64 %p$count)
+  %t$8 = call i64 @stdlib.string.slice(i64 %p$raw, i64 %t$7, i64 %p$$l_count)
   %t$12 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_3
 join_3:
@@ -16144,10 +16144,10 @@ join_3:
   ret i64 %t$4
 }
 
-define i64 @stdlib.string.drop(i64 %p$raw, i64 %p$count) {
+define i64 @stdlib.string.drop(i64 %p$raw, i64 %p$$l_count) {
 entry:
   %t$0 = add i64 0, 0
-  %t$1 = icmp sle i64 %p$count, %t$0
+  %t$1 = icmp sle i64 %p$$l_count, %t$0
   %t$2 = zext i1 %t$1 to i64
   %t$10 = trunc i64 %t$2 to i1
   br i1 %t$10, label %then_3, label %else_3
@@ -16158,7 +16158,7 @@ else_3:
   store i64 %p$raw, ptr %t$11
   %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
   %t$5 = call i64 @stdlib.string.length(i64 %p$raw)
-  %t$6$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %t$5, i64 %p$count)
+  %t$6$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %t$5, i64 %p$$l_count)
   %t$6 = extractvalue { i64, i1 } %t$6$agg, 0
   %t$6$ovf = extractvalue { i64, i1 } %t$6$agg, 1
   %t$13 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -16172,7 +16172,7 @@ ovfok_6:
   %t$14 = alloca i64
   store i64 %p$raw, ptr %t$14
   %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
-  %t$9 = call i64 @stdlib.string.slice(i64 %p$raw, i64 %p$count, i64 %t$6)
+  %t$9 = call i64 @stdlib.string.slice(i64 %p$raw, i64 %p$$l_count, i64 %t$6)
   %t$16 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_3
 join_3:
@@ -16220,10 +16220,10 @@ join_7:
   ret i64 %t$8
 }
 
-define i64 @stdlib.string.take_last(i64 %p$raw, i64 %p$count) {
+define i64 @stdlib.string.take_last(i64 %p$raw, i64 %p$$l_count) {
 entry:
   %t$0 = add i64 0, 0
-  %t$1 = icmp sle i64 %p$count, %t$0
+  %t$1 = icmp sle i64 %p$$l_count, %t$0
   %t$2 = zext i1 %t$1 to i64
   %t$12 = trunc i64 %t$2 to i1
   br i1 %t$12, label %then_3, label %else_3
@@ -16236,7 +16236,7 @@ else_3:
   store i64 %p$raw, ptr %t$13
   %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
   %t$7 = call i64 @stdlib.string.length(i64 %p$raw)
-  %t$8$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %t$7, i64 %p$count)
+  %t$8$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %t$7, i64 %p$$l_count)
   %t$8 = extractvalue { i64, i1 } %t$8$agg, 0
   %t$8$ovf = extractvalue { i64, i1 } %t$8$agg, 1
   %t$15 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -16250,7 +16250,7 @@ ovfok_8:
   %t$16 = alloca i64
   store i64 %p$raw, ptr %t$16
   %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
-  %t$11 = call i64 @stdlib.string.slice(i64 %p$raw, i64 %t$8, i64 %p$count)
+  %t$11 = call i64 @stdlib.string.slice(i64 %p$raw, i64 %t$8, i64 %p$$l_count)
   %t$18 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_3
 join_3:
@@ -16258,10 +16258,10 @@ join_3:
   ret i64 %t$4
 }
 
-define i64 @stdlib.string.drop_last(i64 %p$raw, i64 %p$count) {
+define i64 @stdlib.string.drop_last(i64 %p$raw, i64 %p$$l_count) {
 entry:
   %t$0 = add i64 0, 0
-  %t$1 = icmp sle i64 %p$count, %t$0
+  %t$1 = icmp sle i64 %p$$l_count, %t$0
   %t$2 = zext i1 %t$1 to i64
   %t$11 = trunc i64 %t$2 to i1
   br i1 %t$11, label %then_3, label %else_3
@@ -16273,7 +16273,7 @@ else_3:
   store i64 %p$raw, ptr %t$12
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
   %t$6 = call i64 @stdlib.string.length(i64 %p$raw)
-  %t$7$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %t$6, i64 %p$count)
+  %t$7$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %t$6, i64 %p$$l_count)
   %t$7 = extractvalue { i64, i1 } %t$7$agg, 0
   %t$7$ovf = extractvalue { i64, i1 } %t$7$agg, 1
   %t$14 = call i64 @sprout_gc_pop_roots(i64 1)

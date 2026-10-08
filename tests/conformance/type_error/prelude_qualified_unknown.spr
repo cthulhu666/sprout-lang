@@ -1,0 +1,6 @@
+module main
+
+# `prelude.X` names only what the prelude declares.
+
+fn main() -> Unit !{IO} =
+  print(prelude.no_such_function(1))

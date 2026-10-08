@@ -208,12 +208,12 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   `translate_call` consults `captures` *before* the intrinsic names but `param_known` *after*, so a
   captured variable named `bit_and` wins while a parameter of the same name is intercepted. Fix both
   together. `docs/bitwise-int-ops-v0.md` §8.1.
-- [ ] `P2` **A user's constructor captures a name the compiler synthesizes.**
-  `type Mine = Cons Int | Nil` breaks `[x for x in xs if x > 1]` with "'Cons' expects 1
-  arguments, got 2", at a position the user never wrote. A user's top-level function does not
-  capture. Synthesized references to prelude names need an identity no module can shadow.
-  `try`'s rewrite has the same need (`docs/try-propagate-v0.md` §9 Q9), so build it once, and
-  make it writable: a module that shadows a prelude name cannot reach the prelude's today (Q3).
+- [ ] `P3` **A module's own `Cons`/`Nil`/`dict_empty`/`dict_set` captures its list and dict
+  literals.** The parser builds them from bare names before the bundler runs (spec §3.1, pinned by
+  `tests/conformance/type_error/own_cons_captures_list_literal.spr`). Writing `prelude.Cons`
+  instead breaks `no_prelude` files and every path that type-checks without bundling
+  (`module_loader`, `type_driver`, `compiler.compile_source`), where nothing resolves it.
+  `docs/prelude-name-identity-v0.md` §5.
 - [ ] `P3` **Reassess the `print` design** — should compiled `print` dispatch through `ToString`
   everywhere, instead of the type-erased runtime renderer? The full redesign regresses the
   importless loud-fail, risks bootstrap (every `print` in `stdlib/compiler/` needs an instance in

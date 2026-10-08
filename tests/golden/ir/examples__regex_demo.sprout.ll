@@ -378,9 +378,9 @@ entry:
   ret i64 %t$0
 }
 
-define i64 @stdlib.string.slice(i64 %p$raw, i64 %p$start, i64 %p$count) {
+define i64 @stdlib.string.slice(i64 %p$raw, i64 %p$start, i64 %p$$l_count) {
 entry:
-  %t$0 = call i64 @str_slice(i64 %p$raw, i64 %p$start, i64 %p$count)
+  %t$0 = call i64 @str_slice(i64 %p$raw, i64 %p$start, i64 %p$$l_count)
   ret i64 %t$0
 }
 

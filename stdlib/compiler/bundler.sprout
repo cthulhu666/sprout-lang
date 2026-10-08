@@ -113,6 +113,10 @@ type ImportBinding =
 #              unqual_values unqual_types unqual_classes
 #              alias_val_exports alias_type_exports
 #              canonical_names
+#              prelude
+#
+# `prelude` is what the prelude declares, for `prelude.X` and for renaming a local
+# that shares a prelude value's name (`local_name`).
 #
 # `canonical_names` is the one entry that is not per-module: it is every
 # `<module>.<name>` in the bundle, and it is here so the two `qualify_*_name`
@@ -125,6 +129,12 @@ type ResolveCtx =
       (Dict String) (Dict String) (Dict String)
       (Dict (Dict String)) (Dict (Dict String))
       (Dict String)
+      PreludeNames
+
+# The prelude's own symbol tables, held as they are: copying them per module would
+# cost the prelude's size each time. `methods` is built, but from a short list.
+type PreludeNames = (values: Dict String, methods: Dict String, types: Dict String,
+                     classes: Dict String)
 
 # ---------------------------------------------------------------------------
 # ModuleSymbols accessors
@@ -162,69 +172,73 @@ fn sym_extern_names(s: ModuleSymbols) -> List String =
 # ---------------------------------------------------------------------------
 
 fn ctx_value_locals(c: ResolveCtx) -> Dict String =
-  match c with | ResolveCtx v _ _ _ _ _ _ _ _ _ -> v
+  match c with | ResolveCtx v _ _ _ _ _ _ _ _ _ _ -> v
 
 fn ctx_type_locals(c: ResolveCtx) -> Dict String =
-  match c with | ResolveCtx _ t _ _ _ _ _ _ _ _ -> t
+  match c with | ResolveCtx _ t _ _ _ _ _ _ _ _ _ -> t
 
 fn ctx_class_locals(c: ResolveCtx) -> Dict String =
-  match c with | ResolveCtx _ _ cl _ _ _ _ _ _ _ -> cl
+  match c with | ResolveCtx _ _ cl _ _ _ _ _ _ _ _ -> cl
 
 fn ctx_method_names(c: ResolveCtx) -> List String =
-  match c with | ResolveCtx _ _ _ mn _ _ _ _ _ _ -> mn
+  match c with | ResolveCtx _ _ _ mn _ _ _ _ _ _ _ -> mn
 
 fn ctx_unqual_values(c: ResolveCtx) -> Dict String =
-  match c with | ResolveCtx _ _ _ _ uv _ _ _ _ _ -> uv
+  match c with | ResolveCtx _ _ _ _ uv _ _ _ _ _ _ -> uv
 
 fn ctx_unqual_types(c: ResolveCtx) -> Dict String =
-  match c with | ResolveCtx _ _ _ _ _ ut _ _ _ _ -> ut
+  match c with | ResolveCtx _ _ _ _ _ ut _ _ _ _ _ -> ut
 
 fn ctx_unqual_classes(c: ResolveCtx) -> Dict String =
-  match c with | ResolveCtx _ _ _ _ _ _ uc _ _ _ -> uc
+  match c with | ResolveCtx _ _ _ _ _ _ uc _ _ _ _ -> uc
 
 fn ctx_alias_val_exports(c: ResolveCtx) -> Dict (Dict String) =
-  match c with | ResolveCtx _ _ _ _ _ _ _ ave _ _ -> ave
+  match c with | ResolveCtx _ _ _ _ _ _ _ ave _ _ _ -> ave
 
 fn ctx_alias_type_exports(c: ResolveCtx) -> Dict (Dict String) =
-  match c with | ResolveCtx _ _ _ _ _ _ _ _ ate _ -> ate
+  match c with | ResolveCtx _ _ _ _ _ _ _ _ ate _ _ -> ate
 
 fn ctx_canonical_names(c: ResolveCtx) -> Dict String =
-  match c with | ResolveCtx _ _ _ _ _ _ _ _ _ cn -> cn
+  match c with | ResolveCtx _ _ _ _ _ _ _ _ _ cn _ -> cn
+
+fn ctx_prelude(c: ResolveCtx) -> PreludeNames =
+  match c with | ResolveCtx _ _ _ _ _ _ _ _ _ _ pn -> pn
 
 fn ctx_with_methods(c: ResolveCtx, extra: List String) -> ResolveCtx =
   match c with
-  | ResolveCtx vl tl cl mn uv ut uc ave ate cn ->
-      ResolveCtx(vl, tl, cl, list_append(mn, extra), uv, ut, uc, ave, ate, cn)
+  | ResolveCtx vl tl cl mn uv ut uc ave ate cn pn ->
+      ResolveCtx(vl, tl, cl, list_append(mn, extra), uv, ut, uc, ave, ate, cn, pn)
 
 fn ctx_with_alias_val(c: ResolveCtx, alias: String, exports: Dict String) -> ResolveCtx =
   match c with
-  | ResolveCtx vl tl cl mn uv ut uc ave ate cn ->
-      ResolveCtx(vl, tl, cl, mn, uv, ut, uc, dict_set(alias, exports, ave), ate, cn)
+  | ResolveCtx vl tl cl mn uv ut uc ave ate cn pn ->
+      ResolveCtx(vl, tl, cl, mn, uv, ut, uc, dict_set(alias, exports, ave), ate, cn, pn)
 
 fn ctx_with_alias_type(c: ResolveCtx, alias: String, exports: Dict String) -> ResolveCtx =
   match c with
-  | ResolveCtx vl tl cl mn uv ut uc ave ate cn ->
-      ResolveCtx(vl, tl, cl, mn, uv, ut, uc, ave, dict_set(alias, exports, ate), cn)
+  | ResolveCtx vl tl cl mn uv ut uc ave ate cn pn ->
+      ResolveCtx(vl, tl, cl, mn, uv, ut, uc, ave, dict_set(alias, exports, ate), cn, pn)
 
 fn ctx_with_unqual_value(c: ResolveCtx, name: String, canonical: String) -> ResolveCtx =
   match c with
-  | ResolveCtx vl tl cl mn uv ut uc ave ate cn ->
-      ResolveCtx(vl, tl, cl, mn, dict_set(name, canonical, uv), ut, uc, ave, ate, cn)
+  | ResolveCtx vl tl cl mn uv ut uc ave ate cn pn ->
+      ResolveCtx(vl, tl, cl, mn, dict_set(name, canonical, uv), ut, uc, ave, ate, cn, pn)
 
 fn ctx_with_unqual_type(c: ResolveCtx, name: String, canonical: String) -> ResolveCtx =
   match c with
-  | ResolveCtx vl tl cl mn uv ut uc ave ate cn ->
-      ResolveCtx(vl, tl, cl, mn, uv, dict_set(name, canonical, ut), uc, ave, ate, cn)
+  | ResolveCtx vl tl cl mn uv ut uc ave ate cn pn ->
+      ResolveCtx(vl, tl, cl, mn, uv, dict_set(name, canonical, ut), uc, ave, ate, cn, pn)
 
 fn ctx_with_unqual_class(c: ResolveCtx, name: String, canonical: String) -> ResolveCtx =
   match c with
-  | ResolveCtx vl tl cl mn uv ut uc ave ate cn ->
-      ResolveCtx(vl, tl, cl, mn, uv, ut, dict_set(name, canonical, uc), ave, ate, cn)
+  | ResolveCtx vl tl cl mn uv ut uc ave ate cn pn ->
+      ResolveCtx(vl, tl, cl, mn, uv, ut, dict_set(name, canonical, uc), ave, ate, cn, pn)
 
 fn empty_resolve_ctx() -> ResolveCtx =
   ResolveCtx(dict_empty(), dict_empty(), dict_empty(), Nil,
              dict_empty(), dict_empty(), dict_empty(),
-             dict_empty(), dict_empty(), dict_empty())
+             dict_empty(), dict_empty(), dict_empty(),
+             no_prelude_names())
 
 # ---------------------------------------------------------------------------
 # Utilities
@@ -984,7 +998,31 @@ fn build_resolve_ctx(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_
                        sym_class_locals(own_syms),
                        sym_method_names(own_syms),
                        dict_empty(), dict_empty(), dict_empty(),
-                       dict_empty(), dict_empty(), canonical))
+                       dict_empty(), dict_empty(), canonical,
+                       prelude_names(all_symbols, stdlib_root)))
+
+# Found by path, as `prelude_type_names` does. Empty when the bundle has no
+# prelude; under `no_prelude` it is the floor.
+fn prelude_names(all_symbols: Dict ModuleSymbols, stdlib_root: String) -> PreludeNames =
+  match dict_get(prelude_path(stdlib_root), all_symbols) with
+  | Nothing -> no_prelude_names()
+  | Just syms ->
+      PreludeNames(values = sym_value_locals(syms),
+                   methods = fold(\ (acc, m) -> dict_set(m, m, acc), dict_empty(), sym_method_names(syms)),
+                   types = sym_type_locals(syms), classes = sym_class_locals(syms))
+
+fn no_prelude_names() -> PreludeNames =
+  PreludeNames(values = dict_empty(), methods = dict_empty(), types = dict_empty(), classes = dict_empty())
+
+fn prelude_value(names: PreludeNames, name: String) -> Maybe String =
+  match dict_get(name, names.values) with
+  | Just canonical -> Just(canonical)
+  | Nothing -> dict_get(name, names.methods)
+
+fn prelude_type(names: PreludeNames, name: String) -> Maybe String =
+  match dict_get(name, names.types) with
+  | Just canonical -> Just(canonical)
+  | Nothing -> dict_get(name, names.classes)
 
 # Every `<module>.<name>` the bundle declares, keyed for lookup. Built once per
 # bundle and handed to every module's ResolveCtx: a name that is in here and that
@@ -1324,11 +1362,12 @@ fn qualify_params(ctx: ResolveCtx, params: List ast.Param) -> List ast.Param =
   | Nil -> Nil
   | Cons p rest ->
       match p with
-      # Qualification rewrites the TYPE only — `mode` must be carried through, or
-      # `borrowing`/`consuming` would be silently dropped for every bundled module
-      # (the compiler self-compiles through this path).
-      | ast.Param name Nothing mode -> Cons(ast.Param(name, Nothing, mode), qualify_params(ctx, rest))
-      | ast.Param name (Just t) mode -> Cons(ast.Param(name, Just(qualify_type_expr(ctx, t)), mode), qualify_params(ctx, rest))
+      # Qualification rewrites the type, and the name only through `local_name`.
+      # `mode` must be carried through, or `borrowing`/`consuming` would be silently
+      # dropped for every bundled module (the compiler self-compiles through this path).
+      | ast.Param name Nothing mode -> Cons(ast.Param(local_name(ctx, name), Nothing, mode), qualify_params(ctx, rest))
+      | ast.Param name (Just t) mode ->
+          Cons(ast.Param(local_name(ctx, name), Just(qualify_type_expr(ctx, t)), mode), qualify_params(ctx, rest))
 
 fn qualify_constraints(ctx: ResolveCtx, cs: List ast.TypeConstraint) -> List ast.TypeConstraint =
   match cs with
@@ -1357,7 +1396,10 @@ fn qualify_type_name(ctx: ResolveCtx, name: String) -> String =
   if str_find(name, ".") != -1 then
     match qualified_type_lookup(ctx, name) with
     | Just canonical -> canonical
-    | Nothing -> guard_canonical(ctx, Nil, name)
+    | Nothing ->
+        match prelude_qualified(ctx, name, \symbol -> prelude_type(ctx_prelude(ctx), symbol)) with
+        | Just canonical -> canonical
+        | Nothing -> guard_canonical(ctx, Nil, name)
   else
     match dict_get(name, ctx_type_locals(ctx)) with
     | Just canonical -> canonical
@@ -1405,13 +1447,16 @@ fn qualified_type_lookup(ctx: ResolveCtx, name: String) -> Maybe String =
 # `guard_canonical` repeats C's head test because it is also called with an
 # empty scope (`:1356`), where no binder can have been seen.
 fn qualify_value_name(ctx: ResolveCtx, scope: List String, name: String) -> String =
-  if str_list_member(name, scope) then name
+  if str_list_member(name, scope) then local_name(ctx, name)
   else if str_find(name, ".") != -1 then
-    if str_list_member(head_segment(name), scope) then name
+    if str_list_member(head_segment(name), scope) then local_head(ctx, name)
     else
       match qualified_value_lookup(ctx, name) with
       | Just canonical -> canonical
-      | Nothing -> guard_canonical(ctx, scope, name)
+      | Nothing ->
+          match prelude_qualified(ctx, name, \symbol -> prelude_value(ctx_prelude(ctx), symbol)) with
+          | Just canonical -> canonical
+          | Nothing -> guard_canonical(ctx, scope, name)
   else
     match dict_get(name, ctx_value_locals(ctx)) with
     | Just canonical -> canonical
@@ -1421,6 +1466,34 @@ fn qualify_value_name(ctx: ResolveCtx, scope: List String, name: String) -> Stri
           match dict_get(name, ctx_unqual_values(ctx)) with
           | Just canonical -> canonical
           | Nothing -> name
+
+# `prelude.X` is the prelude's `X`, after a local or an import alias named `prelude`
+# has declined it (docs/prelude-name-identity-v0.md §5). `Nothing` for an `X` the
+# prelude lacks, so the name stays unresolved and inference reports it.
+fn prelude_qualified(ctx: ResolveCtx, name: String, declared: String -> Maybe String) -> Maybe String =
+  match split_at_dot(name) with
+  | (head, symbol) ->
+      if head != ast.prelude_qualifier || is_import_alias(ctx, head) then Nothing
+      else declared(symbol)
+
+fn is_import_alias(ctx: ResolveCtx, name: String) -> Bool =
+  match (dict_get(name, ctx_alias_val_exports(ctx)), dict_get(name, ctx_alias_type_exports(ctx))) with
+  | (Nothing, Nothing) -> false
+  | _ -> true
+
+# A local that shares a prelude value's name is renamed at its binder and at every
+# use, so no name the compiler writes after bundling can reach it. A pure function
+# of the name, so nested shadowing keeps its shape (§5.1 of the same doc).
+fn local_name(ctx: ResolveCtx, name: String) -> String =
+  match prelude_value(ctx_prelude(ctx), name) with
+  | Nothing -> name
+  | Just _ -> source.local_rename_prefix ++ name
+
+# A field chain on a local: rename the head, keep the fields.
+fn local_head(ctx: ResolveCtx, name: String) -> String =
+  match split_at_dot(name) with
+  | ("", whole) -> local_name(ctx, whole)
+  | (head, fields) -> local_name(ctx, head) ++ "." ++ fields
 
 fn qualified_value_lookup(ctx: ResolveCtx, name: String) -> Maybe String =
   match split_at_dot(name) with
@@ -1523,7 +1596,14 @@ fn qualify_pattern(ctx: ResolveCtx, p: ast.Pattern) -> ast.Pattern =
                              qualify_pattern_list(ctx, args), pos)
   | ast.TuplePattern items pos ->
       ast.TuplePattern(qualify_pattern_list(ctx, items), pos)
-  | _ -> p
+  # Every binder goes through `local_name`, so a new binding pattern must be listed.
+  | ast.VarPattern name pos -> ast.VarPattern(local_name(ctx, name), pos)
+  | ast.WildcardPattern _ -> p
+  | ast.IntPattern _ _ -> p
+  | ast.BoolPattern _ _ -> p
+  | ast.StringPattern _ _ -> p
+  | ast.CharPattern _ _ -> p
+  | ast.UnitPattern _ -> p
 
 fn qualify_pattern_list(ctx: ResolveCtx, ps: List ast.Pattern) -> List ast.Pattern =
   match ps with
@@ -1558,7 +1638,7 @@ fn qualify_do_steps(ctx: ResolveCtx, scope: List String, steps: List ast.DoStep)
           Cons(ast.DoBindStep(qualify_pattern(ctx, pat), qualify_expr(ctx, scope, expr)),
                qualify_do_steps(ctx, list_append(scope, ast.pattern_names(pat)), rest))
       | ast.DoLetStep name expr ->
-          Cons(ast.DoLetStep(name, qualify_expr(ctx, scope, expr)),
+          Cons(ast.DoLetStep(local_name(ctx, name), qualify_expr(ctx, scope, expr)),
                qualify_do_steps(ctx, Cons(name, scope), rest))
       | ast.DoExprStep expr ->
           Cons(ast.DoExprStep(qualify_expr(ctx, scope, expr)),

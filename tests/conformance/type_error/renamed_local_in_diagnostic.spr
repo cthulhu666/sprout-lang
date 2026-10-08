@@ -1,0 +1,13 @@
+module main
+
+# A local named like a prelude function is renamed internally
+# (docs/prelude-name-identity-v0.md §5.1); a diagnostic about it shows the name
+# the user wrote.
+
+type linear File = File Int
+
+fn use_file(f: File) -> Int = match f with | File n -> n
+
+fn dup(to_string: File) -> Int = use_file(to_string) + use_file(to_string)
+
+fn main() -> Unit !{IO} = print(to_string(dup(File(7))))

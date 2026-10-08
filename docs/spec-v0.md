@@ -274,11 +274,39 @@ removed specifically. It is also unwritable — it begins with `$`, which no Spr
 identifier may contain (§2) — so no source file can declare a module that
 collides with it.
 
-Shadowing has two known limits, both because the construct resolves by
+**Built-in syntax means the prelude's names.** String templates, `Vec` literals and
+comprehensions are defined in terms of prelude functions (`to_string`,
+`vec_from_list`, …), and no local of the same name changes them: a parameter named
+`to_string` is not what `` `${n}` `` calls. This is the Haskell Report's rule, the
+opposite of GHC's `RebindableSyntax`. List literals and patterns and dict literals
+are the exception, listed below.
+
+**`prelude.X` names the prelude's own `X`**, in an expression, a pattern or a type,
+whatever the file declares or imports:
+
+```sprout
+type Step = Continue | Stop          # this file's own Continue
+
+type Box a = Full a | Empty
+
+instance Propagate Box
+  fn branch(value: Box a) -> ControlFlow (Box b) a =
+    match value with
+    | Full v -> prelude.Continue(v)  # the prelude's
+    | Empty -> Break(Empty)
+```
+
+A local or an import alias named `prelude` takes precedence, as for any dotted head.
+`prelude.X` where the prelude has no `X` is an unknown name. Rationale:
+`docs/prelude-name-identity-v0.md`.
+
+Shadowing has three known limits, all because the construct resolves by
 *unqualified* name: a redefined type cannot be bound with `<-` (do notation picks
-the monad family by bare name), and a redefined class collides in the
-class-method wrapper symbol. Both predate this rule and apply equally to a named
-module; use `no_prelude` for a file that needs either.
+the monad family by bare name); a redefined class collides in the class-method
+wrapper symbol; and a file that declares its own `Cons`, `Nil`, `dict_empty` or
+`dict_set` captures its list and dict literals, a type error rather than a wrong
+value. All three predate this rule and apply equally to a named module; use
+`no_prelude` for a file that needs any of them.
 
 #### The `no_prelude` opt-out
 
@@ -3524,9 +3552,9 @@ class Propagate t
 `branch` splits a `t a` into its value (`Continue`) or its failure (`Break`). The
 failure holds no `a`, so it comes back as `t b` for any `b`: it fits a block
 whose success type differs, and a failure of another type constructor does not
-unify. Instances: `Maybe` and `Result e`; a user type can have one, except in a
-module that declares its own `Continue` or `Break`: that name shadows the
-prelude's, which has no qualified spelling. A type with both `Propagate` and
+unify. Instances: `Maybe` and `Result e`; a user type can have one. A module that
+declares its own `Continue` or `Break` writes the prelude's as `prelude.Continue`
+(§3.1). A type with both `Propagate` and
 `Applicative` must satisfy `branch(pure(x)) == Continue(x)`. `ControlFlow r a`
 has `Eq` and `ToString` when `r` and `a` do.
 The planned `try` expression rewrites to `branch` (`docs/try-propagate-v0.md`).
