@@ -1196,6 +1196,12 @@ instance Eq (Result e a) where Eq e, Eq a
     | Ok x -> match right with | Ok y -> eq(x, y) | Err _ -> false
     | Err e -> match right with | Ok _ -> false | Err f -> eq(e, f)
 
+instance Eq (ControlFlow r a) where Eq r, Eq a
+  fn eq(left: ControlFlow r a, right: ControlFlow r a) -> Bool =
+    match left with
+    | Continue x -> match right with | Continue y -> eq(x, y) | Break _ -> false
+    | Break x -> match right with | Continue _ -> false | Break y -> eq(x, y)
+
 instance Eq (a, b) where Eq a, Eq b
   fn eq(left: (a, b), right: (a, b)) -> Bool =
     match left with
@@ -1721,6 +1727,12 @@ instance ToString (Result e a) where ToString e, ToString a
     match x with
     | Ok v -> "Ok(" ++ to_string(v) ++ ")"
     | Err e -> "Err(" ++ to_string(e) ++ ")"
+
+instance ToString (ControlFlow r a) where ToString r, ToString a
+  fn to_string(x: ControlFlow r a) -> String =
+    match x with
+    | Continue v -> "Continue(" ++ to_string(v) ++ ")"
+    | Break r -> "Break(" ++ to_string(r) ++ ")"
 
 fn vec_to_string_go(vec: Vec a, i: Int, total: Int, first: Bool, acc: List String) -> String where ToString a =
   if i == total then string_concat_many(list_reverse_go(acc, Nil))

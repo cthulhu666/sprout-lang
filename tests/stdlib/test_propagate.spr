@@ -3,11 +3,6 @@ import stdlib.test (check_eq, run_suite)
 # Propagate: `branch` splits a `t a` into its value or its failure, and the
 # failure comes back re-typed as `t b` for any `b` (docs/try-propagate-v0.md §4.1).
 
-fn describe(flow: ControlFlow r Int) -> String =
-  match flow with
-  | Continue v -> `continue ${v}`
-  | Break _ -> "break"
-
 # The failure holds no `a`, so it fits a block of another success type.
 fn maybe_len(m: Maybe String) -> Maybe Int =
   match branch(m) with
@@ -49,12 +44,22 @@ fn bump(x: t Int) -> t Int where Propagate t, Applicative t =
   | Continue v -> pure(v + 1)
   | Break r -> r
 
+# Each names the instance it exercises, with the failure kept at its own type.
+fn maybe_flow(m: Maybe Int) -> ControlFlow (Maybe Int) Int = branch(m)
+
+fn result_flow(r: Result String Int) -> ControlFlow (Result String Int) Int = branch(r)
+
+# The law `branch(pure(x)) == Continue(x)`, for each prelude instance.
+fn maybe_law(x: Int) -> Bool = maybe_flow(pure(x)) == Continue(x)
+
+fn result_law(x: Int) -> Bool = result_flow(pure(x)) == Continue(x)
+
 fn main() -> Unit !{IO} =
   run_suite("propagate", [
-    check_eq("maybe continue", describe(branch(Just(3))), "continue 3"),
-    check_eq("maybe break", describe(branch(Nothing)), "break"),
-    check_eq("result continue", describe(branch(Ok(4))), "continue 4"),
-    check_eq("result break", describe(branch(Err("no"))), "break"),
+    check_eq("maybe continue", maybe_flow(Just(3)), Continue(3)),
+    check_eq("maybe break", maybe_flow(Nothing), Break (Nothing)),
+    check_eq("result continue", result_flow(Ok(4)), Continue(4)),
+    check_eq("result break", result_flow(Err("no")), Break (Err("no"))),
     check_eq("maybe retyped success", maybe_len(Just("abc")), Just(3)),
     check_eq("maybe retyped failure", maybe_len(Nothing), Nothing),
     check_eq("result retyped success", result_len(Ok("ab")), Ok(2)),
@@ -65,5 +70,10 @@ fn main() -> Unit !{IO} =
     check_eq("generic maybe", bump(Just(1)), Just(2)),
     check_eq("generic maybe failure", bump(Nothing), Nothing),
     check_eq("generic result", bump(Ok(1)), Ok(2)),
-    check_eq("generic result failure", bump(Err("e")), Err("e"))
+    check_eq("generic result failure", bump(Err("e")), Err("e")),
+    check_eq("flows differ", maybe_flow(Just(3)) == maybe_flow(Nothing), false),
+    check_eq("to_string continue", to_string(maybe_flow(Just(3))), "Continue(3)"),
+    check_eq("to_string break", to_string(result_flow(Err("no"))), "Break(Err(no))"),
+    check_eq("law: maybe", maybe_law(7), true),
+    check_eq("law: result", result_law(7), true)
   ])
