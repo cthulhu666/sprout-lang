@@ -1,0 +1,12 @@
+# sprout-ignore-all lint/hand-rolled-combinator: the fixture exists to fail typechecking on the body
+module main
+
+# The body is the wrong side here, so the message names both types and blames
+# neither.
+
+fn label(m: Maybe Int) -> String =
+  let Just x = m else "none"
+  in x
+
+fn main() -> Unit !{IO} =
+  print(label(Just(1)))
