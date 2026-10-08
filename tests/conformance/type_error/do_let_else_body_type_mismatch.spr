@@ -1,0 +1,14 @@
+module main
+
+# The steps after the binding are the wrong side here: `print` is Unit, the
+# function and its `else` are Int.
+
+fn first(m: Maybe Int) -> Int !{IO} =
+  do
+    let Just x = m else 0
+    print(x)
+
+fn main() -> Unit !{IO} =
+  do
+    n <- first(Just(1))
+    print(n)

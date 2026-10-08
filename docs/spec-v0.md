@@ -631,7 +631,8 @@ Rules:
   is disambiguated on the `->` after the else. (Propagation without an `else` is
   proposed as `try`; see `docs/try-propagate-v0.md`.)
 - Every `else` and the body must unify to the block's result type; a mismatch is
-  reported at the `else` value. At least one binding is required.
+  reported at the `else` value and names both types, since either side may be the
+  wrong one. At least one binding is required.
 - `let … in` is an ordinary expression (usable anywhere), and **complements**
   `where`: a function may use both, with `where` as the outer scope (its bindings
   are visible in a `let … in` RHS/body; `let … in` bindings are not visible in

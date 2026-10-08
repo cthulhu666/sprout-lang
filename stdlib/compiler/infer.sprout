@@ -5164,14 +5164,18 @@ type MatchSource =
   | UserMatch
   | LetBinding  # a binding's body, then its `else` (ast.let_bind_branches)
 
-# Only a binding's `else` can mismatch: the body's branch comes first, against a
-# fresh result type.
-fn branch_mismatch_message(src: MatchSource, e: String) -> String =
+# Only a binding's `else` can mismatch, since the body's branch comes first
+# against a fresh type. Either side may be the wrong one, so name both, with one
+# renaming so a shared variable prints as one letter.
+fn branch_mismatch_message(src: MatchSource, e: String, branch_ty: types.Type,
+                           expected_ty: types.Type) -> String =
   match src with
   | UserMatch -> "Match branch type mismatch: " ++ e
   | LetBinding ->
-      "the `else` value must have the type of the code after the binding, which it replaces "
-        ++ "when the pattern fails. " ++ e
+      let vars = types.ftv(types.TTuple([branch_ty, expected_ty]))
+      in "the `else` value is `" ++ types.type_to_string_renamed(vars, branch_ty)
+           ++ "`, but the code after the binding is `" ++ types.type_to_string_renamed(vars, expected_ty)
+           ++ "`; they must have the same type, since the `else` replaces that code when the pattern fails"
 
 fn infer_match(
   state: unifier.InferState,
@@ -5288,7 +5292,11 @@ fn infer_branch_unify(
   src: MatchSource
 ) -> InferResult !{IO} =
   match unifier.unify_actual_expected(subst, eff_subst, typed_ast.typed_expr_type(typed_body), ret_type) with
-  | unifier.UnifyErr e -> InferErr(typed_ast.typed_expr_pos(typed_body), branch_mismatch_message(src, e))
+  | unifier.UnifyErr e ->
+      InferErr(typed_ast.typed_expr_pos(typed_body),
+               branch_mismatch_message(src, e,
+                 unifier.apply_subst(subst, typed_ast.typed_expr_type(typed_body)),
+                 unifier.apply_subst(subst, ret_type)))
   | unifier.UnifyOk s3 es3 ->
       InferOk(typed_body, s3, es3, unifier.apply_effect_subst(es3, body_eff))
 
