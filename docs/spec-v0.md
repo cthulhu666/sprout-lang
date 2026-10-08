@@ -296,10 +296,11 @@ instance Propagate Box
     | Empty -> Break(Empty)
 ```
 
-A local or an import alias named `prelude` takes precedence, as for any dotted head.
-`prelude.X` where the prelude has no `X` is an unknown name. A compile resolves it;
-checking one module on its own, without the rest of the program, does not yet, and
-reports it as unknown. Rationale: `docs/prelude-name-identity-v0.md`.
+A local, an import alias or a top-level value named `prelude` takes precedence, in
+every position, as for any dotted head. `prelude.X` where the prelude has no `X` is
+an unknown name. A compile resolves `prelude.X` and keeps locals off prelude names;
+checking one module on its own, without the rest of the program, does neither yet.
+Rationale: `docs/prelude-name-identity-v0.md`.
 
 Shadowing has three known limits, all because the construct resolves by
 *unqualified* name:

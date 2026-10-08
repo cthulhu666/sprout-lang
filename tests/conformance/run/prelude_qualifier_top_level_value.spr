@@ -1,0 +1,10 @@
+module main
+
+# A top-level value named `prelude` wins over the qualifier, as a local or an
+# import alias does (spec §3.1): `prelude.x` is a field of this value.
+
+type Point = (x: Int, y: Int)
+
+let prelude = Point(x = 4, y = 5)
+
+fn main() -> Unit !{IO} = print(prelude.x)

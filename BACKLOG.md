@@ -212,9 +212,9 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   List and dict literals, list patterns and `>>`/`<<` use bare `Cons`, `Nil`, `dict_empty`,
   `dict_set`, `rcompose`, `lcompose` (spec §3.1; `own_cons_captures_list_literal.spr`). Writing
   `prelude.Cons` instead breaks `no_prelude` files and every path that type-checks without
-  bundling (`module_loader`, `type_driver`, `compiler.compile_source`), which also do not resolve a
-  user's `prelude.X`; `module_loader` drops that failure silently.
-  `docs/prelude-name-identity-v0.md`.
+  bundling (`module_loader`, `type_driver`, `compiler.compile_source`). Those paths also neither
+  resolve a user's `prelude.X` nor rename locals, so a local still captures templates there;
+  `module_loader` drops the failure silently. `docs/prelude-name-identity-v0.md` §5.
 - [ ] `P2` **A user class method named like a prelude function captures built-in syntax.** Method
   names stay bare after bundling, so a method `list_reverse` breaks comprehensions
   (`class_method_captures_comprehension.spr`), and a method `branch` would capture `try`'s
@@ -2388,14 +2388,6 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   `type_from_ast`, or `\(x: a) -> …` inside a `where`-constrained function turns `a` into a rigid
   `TConst` instead of binding the declaration's variable. Spec §5.3 carries a "not yet enforced"
   note. Seed-gated; needs success *and* failure typecheck tests.
-- [ ] `P2` **A local named `empty` — any zero-argument, return-dispatched class method — is
-  still rejected.** `fn via(empty: Int -> Int) -> Int = empty(7)` fails with
-  `No instance of Monoid for Int` while the same shape named `mk` compiles. Note the **absent
-  `dispatch-verify:` prefix**: this is rejected during dispatch *resolution*, a different pass from
-  the local-shadowing fix that closed the `append`/`to_string`/`compare`/`pure` cases, and it is not
-  a regression. `Monoid.empty` takes no arguments, so its dispatch is driven entirely by the
-  expected return type — the arm a local shadow must be excluded from. Wanted: the scope check the
-  verifier has, applied wherever resolution decides a bare name is a class method.
 - [ ] `P2` **Audit HM inference for latent typeclass-constraint / accumulator-type interference.**
   The original `fold_indexed` failure was two *syntactic* barriers, not an HM bug — no tuple
   destructuring in lambda params, and a nested `match` in call-arg position — and the natural
