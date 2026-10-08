@@ -491,9 +491,10 @@ Raised by the 2026-10-06 review; all must be decided before step 1:
   inference. A typed node through to lowering doubles the passes touched (about 8 typed-side files)
   and needs its own linear rule. A parse-time rewrite reports errors about a `match` the user never
   wrote. Requirement: the rewrite's references to `branch`, `Continue` and `Break` must reach the
-  prelude's, never a user's. Met by `docs/prelude-name-identity-v0.md`: after bundling, a module's
-  own names are qualified and a local that shares a prelude name is renamed, so a bare name written
-  in inference is the prelude's.
+  prelude's, never a user's. Met by `docs/prelude-name-identity-v0.md` except for class methods:
+  after bundling a module's own names are qualified and a local that shares a prelude name is
+  renamed, but a user class method named `branch` stays bare and would capture the rewrite (spec
+  §3.1's limits; BACKLOG).
 - **Q10. A failure swallowed by a discarded step.** A non-last `do` step whose value is discarded
   loses its failure: `let Just v = mx else Nothing` / `in Just(v)` as a step, then `Just(99)`,
   returns `Just 99` for `mx = Nothing`. That follows from Q2. **Decided by Q8:** the step is a

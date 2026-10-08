@@ -278,8 +278,8 @@ collides with it.
 comprehensions are defined in terms of prelude functions (`to_string`,
 `vec_from_list`, …), and no local of the same name changes them: a parameter named
 `to_string` is not what `` `${n}` `` calls. This is the Haskell Report's rule, the
-opposite of GHC's `RebindableSyntax`. List literals and patterns and dict literals
-are the exception, listed below.
+opposite of GHC's `RebindableSyntax`. List and dict literals, list patterns and
+`>>`/`<<` are the exception, listed below.
 
 **`prelude.X` names the prelude's own `X`**, in an expression, a pattern or a type,
 whatever the file declares or imports:
@@ -297,16 +297,24 @@ instance Propagate Box
 ```
 
 A local or an import alias named `prelude` takes precedence, as for any dotted head.
-`prelude.X` where the prelude has no `X` is an unknown name. Rationale:
-`docs/prelude-name-identity-v0.md`.
+`prelude.X` where the prelude has no `X` is an unknown name. A compile resolves it;
+checking one module on its own, without the rest of the program, does not yet, and
+reports it as unknown. Rationale: `docs/prelude-name-identity-v0.md`.
 
 Shadowing has three known limits, all because the construct resolves by
-*unqualified* name: a redefined type cannot be bound with `<-` (do notation picks
-the monad family by bare name); a redefined class collides in the class-method
-wrapper symbol; and a file that declares its own `Cons`, `Nil`, `dict_empty` or
-`dict_set` captures its list and dict literals, a type error rather than a wrong
-value. All three predate this rule and apply equally to a named module; use
-`no_prelude` for a file that needs any of them.
+*unqualified* name:
+
+- A redefined type cannot be bound with `<-`: do notation picks the monad family by
+  bare name.
+- Class methods keep bare names. A redefined class collides in the class-method
+  wrapper symbol, and a method named like a prelude function is what built-in
+  syntax calls: a method `list_reverse` breaks comprehensions.
+- List and dict literals, list patterns and `>>`/`<<` are built from the bare names
+  `Cons`, `Nil`, `dict_empty`, `dict_set`, `rcompose` and `lcompose`. A file's own
+  declaration of one of them, or a local named like one, is what they use.
+
+All three predate this rule and apply equally to a named module; use `no_prelude`
+for a file that needs any of them.
 
 #### The `no_prelude` opt-out
 
