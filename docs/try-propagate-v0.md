@@ -391,8 +391,13 @@ four repos compiling with unchanged behaviour.
    type mismatch", and a trailing pattern or `else` binding gets the same inference error as a
    trailing `let`. Third commit landed: a multi-binding `do`-`let` statement takes patterns and
    `else` (§9 Q13).
-1. Add `ControlFlow`, `Propagate` and their instances, `try`, its two reserved shapes (§4.4),
-   fusion and `ignore`. Old fallible `<-` keeps working, except that a `<-` whose right-hand side
+1. Add `ControlFlow`, `Propagate` and their instances, `try`, its two reserved shapes (§4.4)
+   and fusion, as separate PRs in that order. The first landed: `ControlFlow`, `Propagate` and
+   the `Maybe` and `Result e` instances, in the prelude (spec §8.5). A local or top-level
+   `branch` shadows the method today, so `try`'s rewrite needs the name identity in the BACKLOG
+   entry "A user's constructor captures a name the compiler synthesizes". `ignore` moves to step 2,
+   its first user; `tests/stdlib/test_linear_borrowing.spr` defines its own `ignore`, to be
+   renamed then. Old fallible `<-` keeps working, except that a `<-` whose right-hand side
    is a `try` (after stripping parentheses) is always plain. Otherwise `x <- try e` with
    `e : Result E (Maybe A)` unwraps twice. The rule must reach every place that reads a bind's
    type, not only `decide_bind_mode`: `do_family_update` (`infer.sprout`) sets the block's family
@@ -404,9 +409,9 @@ four repos compiling with unchanged behaviour.
    no `--phase` reports them today.
 2. Codemod A, on all four repos and every live worktree branch: add `try` to every listed `<-`,
    writing `let x = try e` where the right-hand side is pure (§9 Q4), and wrap every listed
-   fallible statement in `ignore(…)`. `x <- try e` means what the old
-   `x <- e` did. The codemod must parenthesise an operand that is not a postfix expression
-   (§9 Q12; 12 sites in the four repos, non-test), map a synthetic `__t <-` back
+   fallible statement in `ignore(…)`, which this step adds to the prelude. `x <- try e` means
+   what the old `x <- e` did. The codemod must parenthesise an operand that is not a postfix
+   expression (§9 Q12; 12 sites in the four repos, non-test), map a synthetic `__t <-` back
    to the user's line, and refuse a pattern-`else` bind on a fallible right-hand side
    (`Just x <- e else …`): its faithful rewrite is the reserved shape, and today it unwraps twice
    (`e = Just(Just(2))` binds `x = 2`). A grep of the four repos finds no such site. Running

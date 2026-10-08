@@ -1,0 +1,69 @@
+import stdlib.test (check_eq, run_suite)
+
+# Propagate: `branch` splits a `t a` into its value or its failure, and the
+# failure comes back re-typed as `t b` for any `b` (docs/try-propagate-v0.md §4.1).
+
+fn describe(flow: ControlFlow r Int) -> String =
+  match flow with
+  | Continue v -> `continue ${v}`
+  | Break _ -> "break"
+
+# The failure holds no `a`, so it fits a block of another success type.
+fn maybe_len(m: Maybe String) -> Maybe Int =
+  match branch(m) with
+  | Continue s -> Just(str_len(s))
+  | Break r -> r
+
+fn result_len(r: Result String String) -> Result String Int =
+  match branch(r) with
+  | Continue s -> Ok(str_len(s))
+  | Break failure -> failure
+
+# A user type with two kinds of failure.
+type Fetch a =
+  | Got a
+  | NotFound
+  | Failed String
+
+instance Propagate Fetch
+  fn branch(value: Fetch a) -> ControlFlow (Fetch b) a =
+    match value with
+    | Got v -> Continue(v)
+    | NotFound -> Break(NotFound)
+    | Failed why -> Break(Failed(why))
+
+fn fetch_text(f: Fetch Int) -> String =
+  match f with
+  | Got v -> `got ${v}`
+  | NotFound -> "not found"
+  | Failed why -> `failed: ${why}`
+
+fn fetch_double(f: Fetch Int) -> Fetch Int =
+  match branch(f) with
+  | Continue v -> Got(v * 2)
+  | Break r -> r
+
+# Generic code needs `Applicative t` too, to build the success (§9 Q14).
+fn bump(x: t Int) -> t Int where Propagate t, Applicative t =
+  match branch(x) with
+  | Continue v -> pure(v + 1)
+  | Break r -> r
+
+fn main() -> Unit !{IO} =
+  run_suite("propagate", [
+    check_eq("maybe continue", describe(branch(Just(3))), "continue 3"),
+    check_eq("maybe break", describe(branch(Nothing)), "break"),
+    check_eq("result continue", describe(branch(Ok(4))), "continue 4"),
+    check_eq("result break", describe(branch(Err("no"))), "break"),
+    check_eq("maybe retyped success", maybe_len(Just("abc")), Just(3)),
+    check_eq("maybe retyped failure", maybe_len(Nothing), Nothing),
+    check_eq("result retyped success", result_len(Ok("ab")), Ok(2)),
+    check_eq("result failure keeps its error", result_len(Err("bad")), Err("bad")),
+    check_eq("user instance success", fetch_text(fetch_double(Got(5))), "got 10"),
+    check_eq("user instance not found", fetch_text(fetch_double(NotFound)), "not found"),
+    check_eq("user instance failed", fetch_text(fetch_double(Failed("x"))), "failed: x"),
+    check_eq("generic maybe", bump(Just(1)), Just(2)),
+    check_eq("generic maybe failure", bump(Nothing), Nothing),
+    check_eq("generic result", bump(Ok(1)), Ok(2)),
+    check_eq("generic result failure", bump(Err("e")), Err("e"))
+  ])

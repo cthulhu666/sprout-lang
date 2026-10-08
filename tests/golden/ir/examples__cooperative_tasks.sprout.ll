@@ -143,22 +143,26 @@ declare i64 @split_words(i64)
 @.cfkinds.12 = private unnamed_addr constant [2 x i8] c"p\00"
 @.cname.13 = private unnamed_addr constant [9 x i8] c"IntRange\00"
 @.cfkinds.13 = private unnamed_addr constant [4 x i8] c"iii\00"
-@.cname.14 = private unnamed_addr constant [18 x i8] c"stdlib.task.Scope\00"
-@.cfkinds.14 = private unnamed_addr constant [2 x i8] c"i\00"
-@.cname.15 = private unnamed_addr constant [17 x i8] c"stdlib.task.Task\00"
-@.cfkinds.15 = private unnamed_addr constant [2 x i8] c"i\00"
-@.cname.16 = private unnamed_addr constant [22 x i8] c"stdlib.task.Completed\00"
-@.cfkinds.16 = private unnamed_addr constant [2 x i8] c"_\00"
-@.cname.17 = private unnamed_addr constant [20 x i8] c"stdlib.task.Expired\00"
-@.cfkinds.17 = private unnamed_addr constant [1 x i8] c"\00"
-@.cname.18 = private unnamed_addr constant [20 x i8] c"stdlib.task.Running\00"
-@.cfkinds.18 = private unnamed_addr constant [1 x i8] c"\00"
-@.cname.19 = private unnamed_addr constant [22 x i8] c"stdlib.task.Cancelled\00"
+@.cname.14 = private unnamed_addr constant [9 x i8] c"Continue\00"
+@.cfkinds.14 = private unnamed_addr constant [2 x i8] c"_\00"
+@.cname.15 = private unnamed_addr constant [6 x i8] c"Break\00"
+@.cfkinds.15 = private unnamed_addr constant [2 x i8] c"_\00"
+@.cname.16 = private unnamed_addr constant [18 x i8] c"stdlib.task.Scope\00"
+@.cfkinds.16 = private unnamed_addr constant [2 x i8] c"i\00"
+@.cname.17 = private unnamed_addr constant [17 x i8] c"stdlib.task.Task\00"
+@.cfkinds.17 = private unnamed_addr constant [2 x i8] c"i\00"
+@.cname.18 = private unnamed_addr constant [22 x i8] c"stdlib.task.Completed\00"
+@.cfkinds.18 = private unnamed_addr constant [2 x i8] c"_\00"
+@.cname.19 = private unnamed_addr constant [20 x i8] c"stdlib.task.Expired\00"
 @.cfkinds.19 = private unnamed_addr constant [1 x i8] c"\00"
-@.cname.20 = private unnamed_addr constant [21 x i8] c"stdlib.task.TimedOut\00"
+@.cname.20 = private unnamed_addr constant [20 x i8] c"stdlib.task.Running\00"
 @.cfkinds.20 = private unnamed_addr constant [1 x i8] c"\00"
-@.cname.21 = private unnamed_addr constant [29 x i8] c"stdlib.bytes.Utf8DecodeError\00"
-@.cfkinds.21 = private unnamed_addr constant [2 x i8] c"s\00"
+@.cname.21 = private unnamed_addr constant [22 x i8] c"stdlib.task.Cancelled\00"
+@.cfkinds.21 = private unnamed_addr constant [1 x i8] c"\00"
+@.cname.22 = private unnamed_addr constant [21 x i8] c"stdlib.task.TimedOut\00"
+@.cfkinds.22 = private unnamed_addr constant [1 x i8] c"\00"
+@.cname.23 = private unnamed_addr constant [29 x i8] c"stdlib.bytes.Utf8DecodeError\00"
+@.cfkinds.23 = private unnamed_addr constant [2 x i8] c"s\00"
 @list_builder_empty = global i64 zeroinitializer
 @pow10_clamp = private constant i64 400
 @max_int = private constant i64 9223372036854775807
@@ -172,7 +176,7 @@ entry:
   store i64 %p$body, ptr %t$4
   %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
   %t$0 = call i64 @__scope_open()
-  %t$1 = call i64 @sprout_alloc_obj(i64 14, i64 1)
+  %t$1 = call i64 @sprout_alloc_obj(i64 16, i64 1)
   %t$1$ptr = inttoptr i64 %t$1 to ptr
   %t$1$f0 = getelementptr i64, ptr %t$1$ptr, i64 0
   store i64 %t$0, ptr %t$1$f0
@@ -194,7 +198,7 @@ entry:
   %t$0 = call i64 @sprout_tag(i64 %p$scope)
   br label %arm_0_1
 arm_0_1:
-  %t$3 = add i64 0, 14
+  %t$3 = add i64 0, 16
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
@@ -390,30 +394,36 @@ entry:
   %cname_ptr_13 = getelementptr inbounds [9 x i8], ptr @.cname.13, i64 0, i64 0
   %cfkinds_ptr_13 = getelementptr inbounds [4 x i8], ptr @.cfkinds.13, i64 0, i64 0
   %creg_13 = call i64 @sprout_register_ctor(i64 13, ptr %cname_ptr_13, i64 3, ptr %cfkinds_ptr_13)
-  %cname_ptr_14 = getelementptr inbounds [18 x i8], ptr @.cname.14, i64 0, i64 0
+  %cname_ptr_14 = getelementptr inbounds [9 x i8], ptr @.cname.14, i64 0, i64 0
   %cfkinds_ptr_14 = getelementptr inbounds [2 x i8], ptr @.cfkinds.14, i64 0, i64 0
   %creg_14 = call i64 @sprout_register_ctor(i64 14, ptr %cname_ptr_14, i64 1, ptr %cfkinds_ptr_14)
-  %cname_ptr_15 = getelementptr inbounds [17 x i8], ptr @.cname.15, i64 0, i64 0
+  %cname_ptr_15 = getelementptr inbounds [6 x i8], ptr @.cname.15, i64 0, i64 0
   %cfkinds_ptr_15 = getelementptr inbounds [2 x i8], ptr @.cfkinds.15, i64 0, i64 0
   %creg_15 = call i64 @sprout_register_ctor(i64 15, ptr %cname_ptr_15, i64 1, ptr %cfkinds_ptr_15)
-  %cname_ptr_16 = getelementptr inbounds [22 x i8], ptr @.cname.16, i64 0, i64 0
+  %cname_ptr_16 = getelementptr inbounds [18 x i8], ptr @.cname.16, i64 0, i64 0
   %cfkinds_ptr_16 = getelementptr inbounds [2 x i8], ptr @.cfkinds.16, i64 0, i64 0
   %creg_16 = call i64 @sprout_register_ctor(i64 16, ptr %cname_ptr_16, i64 1, ptr %cfkinds_ptr_16)
-  %cname_ptr_17 = getelementptr inbounds [20 x i8], ptr @.cname.17, i64 0, i64 0
-  %cfkinds_ptr_17 = getelementptr inbounds [1 x i8], ptr @.cfkinds.17, i64 0, i64 0
-  %creg_17 = call i64 @sprout_register_ctor(i64 17, ptr %cname_ptr_17, i64 0, ptr %cfkinds_ptr_17)
-  %cname_ptr_18 = getelementptr inbounds [20 x i8], ptr @.cname.18, i64 0, i64 0
-  %cfkinds_ptr_18 = getelementptr inbounds [1 x i8], ptr @.cfkinds.18, i64 0, i64 0
-  %creg_18 = call i64 @sprout_register_ctor(i64 18, ptr %cname_ptr_18, i64 0, ptr %cfkinds_ptr_18)
-  %cname_ptr_19 = getelementptr inbounds [22 x i8], ptr @.cname.19, i64 0, i64 0
+  %cname_ptr_17 = getelementptr inbounds [17 x i8], ptr @.cname.17, i64 0, i64 0
+  %cfkinds_ptr_17 = getelementptr inbounds [2 x i8], ptr @.cfkinds.17, i64 0, i64 0
+  %creg_17 = call i64 @sprout_register_ctor(i64 17, ptr %cname_ptr_17, i64 1, ptr %cfkinds_ptr_17)
+  %cname_ptr_18 = getelementptr inbounds [22 x i8], ptr @.cname.18, i64 0, i64 0
+  %cfkinds_ptr_18 = getelementptr inbounds [2 x i8], ptr @.cfkinds.18, i64 0, i64 0
+  %creg_18 = call i64 @sprout_register_ctor(i64 18, ptr %cname_ptr_18, i64 1, ptr %cfkinds_ptr_18)
+  %cname_ptr_19 = getelementptr inbounds [20 x i8], ptr @.cname.19, i64 0, i64 0
   %cfkinds_ptr_19 = getelementptr inbounds [1 x i8], ptr @.cfkinds.19, i64 0, i64 0
   %creg_19 = call i64 @sprout_register_ctor(i64 19, ptr %cname_ptr_19, i64 0, ptr %cfkinds_ptr_19)
-  %cname_ptr_20 = getelementptr inbounds [21 x i8], ptr @.cname.20, i64 0, i64 0
+  %cname_ptr_20 = getelementptr inbounds [20 x i8], ptr @.cname.20, i64 0, i64 0
   %cfkinds_ptr_20 = getelementptr inbounds [1 x i8], ptr @.cfkinds.20, i64 0, i64 0
   %creg_20 = call i64 @sprout_register_ctor(i64 20, ptr %cname_ptr_20, i64 0, ptr %cfkinds_ptr_20)
-  %cname_ptr_21 = getelementptr inbounds [29 x i8], ptr @.cname.21, i64 0, i64 0
-  %cfkinds_ptr_21 = getelementptr inbounds [2 x i8], ptr @.cfkinds.21, i64 0, i64 0
-  %creg_21 = call i64 @sprout_register_ctor(i64 21, ptr %cname_ptr_21, i64 1, ptr %cfkinds_ptr_21)
+  %cname_ptr_21 = getelementptr inbounds [22 x i8], ptr @.cname.21, i64 0, i64 0
+  %cfkinds_ptr_21 = getelementptr inbounds [1 x i8], ptr @.cfkinds.21, i64 0, i64 0
+  %creg_21 = call i64 @sprout_register_ctor(i64 21, ptr %cname_ptr_21, i64 0, ptr %cfkinds_ptr_21)
+  %cname_ptr_22 = getelementptr inbounds [21 x i8], ptr @.cname.22, i64 0, i64 0
+  %cfkinds_ptr_22 = getelementptr inbounds [1 x i8], ptr @.cfkinds.22, i64 0, i64 0
+  %creg_22 = call i64 @sprout_register_ctor(i64 22, ptr %cname_ptr_22, i64 0, ptr %cfkinds_ptr_22)
+  %cname_ptr_23 = getelementptr inbounds [29 x i8], ptr @.cname.23, i64 0, i64 0
+  %cfkinds_ptr_23 = getelementptr inbounds [2 x i8], ptr @.cfkinds.23, i64 0, i64 0
+  %creg_23 = call i64 @sprout_register_ctor(i64 23, ptr %cname_ptr_23, i64 1, ptr %cfkinds_ptr_23)
   call void @__sprout_init_globals()
   call i64 @__sprout_user_main()
   ret i32 0

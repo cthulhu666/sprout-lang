@@ -1,0 +1,12 @@
+module main
+
+# A `Maybe` failure cannot become the value of a `Result` block: `Break r` has
+# type `Maybe b`, which never unifies with `Result String Int`.
+
+fn first(m: Maybe Int) -> Result String Int =
+  match branch(m) with
+  | Continue v -> Ok(v)
+  | Break r -> r
+
+fn main() -> Unit !{IO} =
+  print(first(Just(1)))
