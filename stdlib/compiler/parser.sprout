@@ -730,8 +730,8 @@ fn step_has_bind_arrow(tokens: Vec token.Token, i: Int, depth: Int) -> Bool =
 # A do step as parsed. A DoPatStep takes the binding's position, so the match it
 # becomes reads as `<-`/`let`, not `match`, keeping the staircase lint from
 # re-flagging it. Without an `else` the match has one arm, which hands
-# refutability to W5, where spec §5.2.1 puts it. DoStepLets carries a multi-name
-# `let` statement, which yields one DoLetStep per name.
+# refutability to W5, where spec §5.2.1 puts it. DoStepLets carries a `let`
+# statement, one step per binding.
 type DoStepParse (..) =
   | DoStepPlain ast.DoStep
   | DoStepLets (List ast.DoStep)
@@ -773,31 +773,25 @@ fn parse_do_let(tokens: Vec token.Token, i: Int) -> Result ParseError (DoStepPar
         (value, i5) <- finish_let_in(tokens, bindings, i4)
         Ok((DoStepPlain(ast.DoExprStep(value)), i5))
     else
-      do
-        step <- do_let_statement(bindings, cur_pos(tokens, i))
-        Ok((step, i4))
+      Ok((do_let_statement(bindings, cur_pos(tokens, i)), i4))
 
-# A binding carrying an `else` stands alone: its desugaring places the remaining
-# steps inside a match arm, which one binding of several cannot have.
-fn do_let_statement(bindings: List LetBinding, let_pos: source.SourcePos) -> Result ParseError DoStepParse =
+# Each binding becomes a step, in order, scoping over the steps after it. The
+# first takes the `let`'s position.
+fn do_let_statement(bindings: List LetBinding, let_pos: source.SourcePos) -> DoStepParse =
   match bindings with
-  | [b] ->
-      match b.els with
-      | Just _ -> Ok(DoStepPlain(ast.DoPatStep(ast.LetBind, b.pat, b.rhs, b.els, let_pos)))
-      | Nothing ->
-          match binding_name(b.pat) with
-          | Just name -> Ok(DoStepPlain(ast.DoLetStep(name, b.rhs)))
-          | Nothing -> Ok(DoStepPlain(ast.DoPatStep(ast.LetBind, b.pat, b.rhs, Nothing, let_pos)))
-  | _ -> group_steps(bindings, Nil)
+  | Nil -> DoStepLets(Nil)
+  | [b | rest] -> DoStepLets(Cons(do_let_step(b, let_pos), group_steps(rest)))
 
-fn group_steps(bindings: List LetBinding, acc: List ast.DoStep) -> Result ParseError DoStepParse =
+fn group_steps(bindings: List LetBinding) -> List ast.DoStep =
   match bindings with
-  | Nil -> Ok(DoStepLets(list_reverse(acc)))
-  | [b | rest] ->
-      match (b.els, binding_name(b.pat)) with
-      | (Just _, _) -> Err(ParseError("a let binding with else must stand alone in its let statement", b.pos))
-      | (Nothing, Nothing) -> Err(ParseError("a multi-name let binds plain names only", b.pos))
-      | (Nothing, Just name) -> group_steps(rest, Cons(ast.DoLetStep(name, b.rhs), acc))
+  | Nil -> Nil
+  | [b | rest] -> Cons(do_let_step(b, b.pos), group_steps(rest))
+
+# A plain name without `else` binds directly; anything else is a pattern step.
+fn do_let_step(b: LetBinding, pos: source.SourcePos) -> ast.DoStep =
+  match (b.els, binding_name(b.pat)) with
+  | (Nothing, Just name) -> ast.DoLetStep(name, b.rhs)
+  | _ -> ast.DoPatStep(ast.LetBind, b.pat, b.rhs, b.els, pos)
 
 fn parse_do_step(tokens: Vec token.Token, i: Int) -> Result ParseError (DoStepParse, Int) =
   if tok_is_keyword(tok_at(tokens, i), "let") then parse_do_let(tokens, i)

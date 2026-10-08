@@ -388,8 +388,8 @@ four repos compiling with unchanged behaviour.
    changes behaviour, so it belongs to step 1, not 0b (today `Just x <- g() else Nothing` with
    `g : Maybe (Maybe Int)` binds `x = 2`). Second commit landed: a wrong fallback is reported at
    the `else` value instead of as "Match branch type mismatch", and a trailing pattern or `else`
-   binding gets the same inference error as a trailing `let`. A third commit lets an `else`
-   binding sit in a multi-binding `do`-`let` statement (§9 Q13).
+   binding gets the same inference error as a trailing `let`. Third commit landed: a
+   multi-binding `do`-`let` statement takes patterns and `else` (§9 Q13).
 1. Add `ControlFlow`, `Propagate` and their instances, `try`, its two reserved shapes (§4.4),
    fusion and `ignore`. Old fallible `<-` keeps working, except that a `<-` whose right-hand side
    is a `try` (after stripping parentheses) is always plain. Otherwise `x <- try e` with
@@ -517,10 +517,9 @@ Raised by the 2026-10-06 review; all must be decided before step 1:
   value: spec §5.1 makes `where` and `let … in` "the same binding construct", and `where` bindings
   run before the body. Left of a `try`, any pattern a plain `let` accepts; a refutable one without
   `else` gets the usual non-exhaustive error, and with `else` it is the reserved shape (§4.4). A
-  `try` binding may sit in a multi-binding group. Spec §5.2.1a makes an `else` binding stand alone
-  in a `do`-`let` statement only because the parser's rewrite nests the remaining steps in a
-  `match` arm; `let..in` groups already allow it. After step 0b that limit is gone, and lifting it
-  for `else` is a separate commit, since it changes the language.
+  `try` binding may sit in a multi-binding group. Spec §5.2.1a made an `else` binding stand alone
+  in a `do`-`let` statement only because the parser's rewrite nested the remaining steps in a
+  `match` arm; `let..in` groups already allowed it. Step 0b's third commit lifted that limit.
 - **Q14. Building a success in generic code.** **Decided (2026-10-06): ask for `Applicative t`
   beside `Propagate t`** (§4.6); `Propagate` keeps one method. Rust's `Try` (unstable,
   `try_trait_v2`) has `from_output`, with the law `Try::from_output(x).branch() -->
@@ -571,8 +570,7 @@ Raised by the 2026-10-06 review; all must be decided before step 1:
   `is_call_like_pp_kw`, else `try (x)` is reformatted to `try(x)`; the IntelliJ plugin's lexer
   keyword list and its test.
 - Spec §5.1 (`where`), §5.2.1 and §5.2.2: `try` in binding right-hand sides; `do`-`let` purity
-  enforced. §5.2.1a: an `else` binding no longer stands alone (step 0b's third commit). Their
-  "monadic propagation remains planned" notes point here.
+  enforced. Their "monadic propagation remains planned" notes point here.
 - Spec, prelude classes section: `Propagate`, `ControlFlow`. The note that "a built-in `?`
   propagation form" is future work becomes `try`.
 - `docs/idiomatic-sprout.md`: `try` idioms, and pure `do` blocks become `let..in`.

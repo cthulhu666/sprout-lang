@@ -655,12 +655,20 @@ do
 
 Bindings are **sequential**, matching §5.2.1: each is in scope for the ones below
 it and for the rest of the block. The statement is equivalent to writing one
-`let` statement per name, and the split between bindings uses the same layout
+`let` statement per binding, and the split between bindings uses the same layout
 rule the expression form uses (§2.1), so a right-hand side may span lines.
 
-A binding carrying an `else` (§5.2.2) must stand alone as a single-binding
-statement: its desugaring places the remaining steps inside a `match` arm, which
-is a shape one binding among several cannot have.
+Each binding may be any binding `let … in` accepts: a pattern, with or without an
+`else` (§5.2.2). A binding that fails ends the block with its `else` value, so the
+bindings below it and the rest of the block do not run:
+
+```sprout
+do
+  let base = 100
+      Just a = lookup(k) else base     # the block's value; sees `base`
+      (b, c) = split(a)
+  a + b + c
+```
 
 **Statement or expression: the `in` decides.** A step beginning with `let` is
 this statement form *unless* an `in`, dedented to the `let` column, closes the
@@ -679,10 +687,6 @@ do
       d = c + 1      # and the step's value is that body
   in print(to_string(c + d))
 ```
-
-The `else` restriction above is what makes the difference observable rather than
-academic: a multi-binding group carrying an `else` can only ever be the
-expression form.
 
 **One step per line.** A `do` step must consume the whole of its line (and any
 continuation lines indented under it). Trailing tokens are an error — they used
