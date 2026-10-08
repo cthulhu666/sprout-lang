@@ -3512,6 +3512,22 @@ whose order is deliberately unpinned (`docs/effect-polymorphism-policy-v0.md`
 §5).  O(n) in elements, plus the applicative's own per-step cost, at O(1)
 recursion depth for every instance.
 
+### `Propagate` class and `ControlFlow` (Experimental)
+
+```
+type ControlFlow r a = Continue a | Break r
+
+class Propagate t
+  fn branch(value: t a) -> ControlFlow (t b) a
+```
+
+`branch` splits a `t a` into its value (`Continue`) or its failure (`Break`). The
+failure holds no `a`, so it comes back as `t b` for any `b`: it fits a block
+whose success type differs, and a failure of another type constructor does not
+unify. Instances: `Maybe` and `Result e`; a user type can have one. A type with
+both `Propagate` and `Applicative` must satisfy `branch(pure(x)) == Continue(x)`.
+The planned `try` expression rewrites to `branch` (`docs/try-propagate-v0.md`).
+
 ### `Filterable` class and generic `filter` (Experimental)
 
 ```

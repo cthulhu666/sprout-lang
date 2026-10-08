@@ -936,6 +936,16 @@ export class Monad m where Applicative m
 export class Traversable t
   fn traverse_values(g: a -> f b, xs: t a) -> f(t b) where Applicative f
 
+export type ControlFlow r a =
+  | Continue a
+  | Break r
+
+# `branch` splits a `t a` into its value or its failure. The failure holds no
+# `a`, so it comes back as `t b` for any `b` and fits whatever the enclosing
+# block returns (docs/try-propagate-v0.md §4.1).
+export class Propagate t
+  fn branch(value: t a) -> ControlFlow(t b) a
+
 export fn and_then(f: a -> m b, xs: m a) -> m b where Monad m =
   flat_map(f, xs)
 
@@ -1527,6 +1537,18 @@ instance Monad (Result e)
     match rx with
     | Err e -> Err(e)
     | Ok x -> f(x)
+
+instance Propagate Maybe
+  fn branch(value: Maybe a) -> ControlFlow (Maybe b) a =
+    match value with
+    | Just v -> Continue(v)
+    | Nothing -> Break(Nothing)
+
+instance Propagate (Result e)
+  fn branch(value: Result e a) -> ControlFlow (Result e b) a =
+    match value with
+    | Ok v -> Continue(v)
+    | Err err -> Break(Err(err))
 
 instance Functor Vec
   fn fmap(f: a -> b, xs: Vec a) -> Vec b =
