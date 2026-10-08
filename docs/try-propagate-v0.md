@@ -566,7 +566,7 @@ Raised by the 2026-10-06 review; all must be decided before step 1:
 - Spec §5.8, *Discarded result*: extended to values with a `Propagate` instance (step 3).
 - `try` becomes a hard keyword. No identifier `try` exists in the four repos (strings and comments
   excluded). Places that list keywords or step starts: `lexer.is_keyword` and spec §2;
-  `parser.looks_like_do_step_start` and spec §5.2.1a's step-start list; the formatter's
+  `layout.starts_step` and spec §5.2.1a's step-start list; the formatter's
   `is_call_like_pp_kw`, else `try (x)` is reformatted to `try(x)`; the IntelliJ plugin's lexer
   keyword list and its test.
 - Spec §5.1 (`where`), §5.2.1 and §5.2.2: `try` in binding right-hand sides; `do`-`let` purity

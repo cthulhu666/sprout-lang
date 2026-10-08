@@ -2462,16 +2462,6 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   it; their RSS still grows 2.5× per doubling. `--phase check` is flat, so it is past type checking.
   Cause not found; `sra_core_eligible(name, e, rest, …)` reads all of `rest` at each `let`, so check
   it first. Neither cost gate covers it: both fixtures are flat blocks with no bindings.
-- [ ] `P2` **Allow a layout `do` block inside call parentheses** — an inline multi-statement
-  effectful lambda as a call argument. `range_fold(\ (s, k) -> do <newline> stmt1 …, seed, r)`
-  fails with "Expected )"; today the lambda must be `let`-bound and passed by name. A probe shows it
-  affects all argument positions, single- as well as multi-statement, so it is not a
-  non-final-argument issue. Root cause: the do-step layout scanner ends a block only on EOF or a
-  dedent, never on a bracket, and `update_bracket_depth` clamps close-brackets at zero, so a `)`
-  closing an enclosing `(` is invisible and the block over-consumes to EOF. Fix is the standard
-  layout rule (cf. Haskell's parse-error rule): let depth go negative, ending the step and the block
-  when a closer takes it below 0, and on a depth-0 `,`. Guard existing do-blocks against
-  regressions.
 - [ ] `P2` **Add a `module prelude` header to `prelude.sprout`** so all its symbols get an
   `@prelude.` prefix in emitted IR, eliminating future POSIX/libc symbol collisions — the `pipe`
   → `pipe_apply` rename is the tactical fix, this is the principled one. Requires a
@@ -2482,22 +2472,6 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   framing; a proper descriptor read subsumes it and enables pipes, sockets and files without extra
   builtins. Candidate design: `stdin_fd()`/`stdout_fd()`/`stderr_fd()` constants plus
   `io_read_bytes(fd, n)`.
-- [ ] `P3` **One-line `let … in` is rejected everywhere, and the diagnostic blames the next
-  declaration.** `fn f(n) = let x = n + 1 in x + 10` fails with `Expected pattern` pointing at the
-  *following* top-level declaration. Spec §5.2.1 requires `in` dedented to the `let` column, so the
-  rejection is conformant — but the one-line form is the canonical ML spelling and the error names
-  a line the author did not write. Root cause: `parse_let_block`'s binding-end scan is line-based,
-  so a same-line `in` cannot terminate a binding slice. **(a)** Fix the diagnostic to point at the
-  `in` — cheap, worth doing alone. **(b)** Accept the form: needs a spec change and a scan
-  stopping at a `let`-balanced `in`, and that balancing miscounts when a binding's RHS holds a `do`
-  block with a `let` *statement*, which swallows the real terminator.
-- [ ] `P3` **`parse_do_let_bindings` never reads its `binding_col`, so a misaligned binding is
-  silently absorbed.** The split between bindings falls out of wherever `parse_expr` happens to
-  stop, so a third binding at a column that is neither the binding nor the block column is accepted.
-  Both the function's own comment and spec §5.2.1a assert an alignment rule that nothing enforces.
-  Which way out is right is a language call: enforce the column and reject (a tightening, needs a
-  corpus sweep), or drop the claim and soften the spec to say bindings split at the end of each
-  right-hand side.
 - [ ] `P3` **No exported `Int` bound constants, so every caller open-codes them.** There is no
   `int_max`/`int_min` in the stdlib: `math.sprout` keeps a **private**
   `min_int() = 0 - 9223372036854775807 - 1` and nothing exposes the maximum. The awkward spelling is
@@ -2595,13 +2569,26 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   to drop the intermediate list `set_from_list(ast.pattern_names(p))` allocates per match arm in
   free-var computation; the type-directed one asks a different question and stays. All three
   are exhaustive, so a new `Pattern` variant is a compile error at each — hence P3.
-- [ ] `P3` **`looks_like_do_step_start` duplicates `parse_expr`'s notion of "starts an expression",
-  by hand** — eighteen `tok_is_*` disjuncts maintained in parallel with what `parse_expr` accepts,
+- [ ] `P3` **`layout.starts_step` duplicates the parser's notion of "starts an expression",
+  by hand** — a token-kind list maintained in parallel with what `parse_primary` accepts,
   with nothing to detect divergence. Each divergence has cost a PR (a float literal and a prefix `!`
   could not begin a do step; neither could a `let … in`). Wanted: a test that derives one from the
   other — for every token kind the lexer can emit, assert the two agree on a minimal expression
   starting with it. **Feasibility unverified**: some tokens are expression-legal only in context, so
   the test needs a way to avoid false failures, and that design question is the actual work.
+- [ ] `P2` **A mid-line `let` after a `do` step silently becomes a top-level `let`.**
+  `layout.item_keyword` starts a declaration at a `let` right after an operand on its line, so
+  `do` / `print("a") let y = 2` closes the `do` and makes `y` a module global. Before the layout
+  pass this was "a do block takes one step per line"; with a step after it, the error now lands
+  on that next line as "Expected declaration". Contradicts spec §5.2.1a. Fix: count such a `let`
+  as a declaration only when no `do`/`let`/`where` block is open (`fn one() = 1 let two = 2`
+  must keep working — `test_layout_blocks.spr` pins it).
+- [ ] `P3` **`layout.awaited` sees only the top frame**, so an `else` left of the `do` holding
+  its `if` fails ("Expected keyword else") when the then-branch opened a block: `if c then do` /
+  … / `else`, or a multi-line `match` then-branch. The dedent closes that block and drops the
+  `FThen` marker. Spec §2.1 states the any-column rule without this exception. Fix: a line-start
+  `else` left of every block above the innermost `FThen` closes them and keeps the marker. The
+  old parser rejected this shape too.
 - [ ] `P3` **Type-driven-design gaps from the "parse, don't validate" audit.** Adherence is strong
   overall; these remain. *Compiler, seed-gated:* `Token TokenKind String pos` lets kind and payload
   disagree, unlike the `Expr`/`Pattern` ADTs where each variant carries its own typed payload;

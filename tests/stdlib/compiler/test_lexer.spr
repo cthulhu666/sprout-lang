@@ -17,6 +17,9 @@ fn kind_str(t: token.Token) -> String =
   | token.TokenTemplateInterpStart -> "template_interp_start"
   | token.TokenTemplateInterpEnd -> "template_interp_end"
   | token.TokenTemplateEnd -> "template_end"
+  | token.TokenLayoutOpen -> "layout_open"
+  | token.TokenLayoutSep -> "layout_sep"
+  | token.TokenLayoutClose -> "layout_close"
 
 fn tok_kind_at(src: String, n: Int) -> String =
   match lexer.tokenize(src) with

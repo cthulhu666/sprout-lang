@@ -1,0 +1,6 @@
+# sprout-ignore-all lint/unparsed: parse-error fixture — this file must not parse
+# A block opens right of the block around it. A top-level `do` whose steps sit
+# in column 1 is empty, so its steps read as declarations.
+fn main() -> Unit !{IO} = do
+print("a")
+print("b")

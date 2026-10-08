@@ -1,0 +1,151 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.layout as layout
+import stdlib.compiler.token as token
+import stdlib.string as string
+
+# The layout pass's output, one string: virtual tokens as `{` `;` `}`, real
+# tokens as their text, EOF dropped.
+fn render(mode: layout.LayoutMode, src: String) -> String =
+  let Ok toks = lexer.tokenize(src) else Err e -> "lex error: " ++ token.error_message(e)
+      Ok laid = layout.layout(toks, mode) else Err(layout.LayoutError msg _) -> "layout error: " ++ msg
+  in string.join(" ", list_filter(\s -> s != "", list_map(show, vec_to_list(laid))))
+
+fn show(t: token.Token) -> String =
+  match token.token_kind(t) with
+  | token.TokenLayoutOpen -> "{"
+  | token.TokenLayoutSep -> ";"
+  | token.TokenLayoutClose -> "}"
+  | token.TokenStringKind -> "\"" ++ token.token_text(t) ++ "\""
+  | _ -> token.token_text(t)
+
+fn prog(src: String) -> String = render(layout.ProgramLayout, src)
+
+fn expr(src: String) -> String = render(layout.ExprLayout, src)
+
+fn main() -> Unit !{IO} =
+  run_suite("layout", [
+    check_eq("do steps", prog("fn f() =\n  do\n    a\n    b"), "fn f ( ) = do { a ; b }"),
+    check_eq("continuation line", prog("fn f() =\n  do\n    a\n      + 1\n    b"), "fn f ( ) = do { a + 1 ; b }"),
+    check_eq("else at the block column continues", prog("fn f() =\n  do\n    if c then\n      a\n    else\n      b"),
+      "fn f ( ) = do { if c then a else b }"),
+    check_eq("a do on its own line is empty", prog("fn f() = do a"), "fn f ( ) = do { } a"),
+    check_eq("nested do closes on dedent", prog("fn f() =\n  do\n    x <- do\n      a\n    b"),
+      "fn f ( ) = do { x <- do { a } ; b }"),
+    check_eq("next declaration closes everything", prog("fn f() =\n  do\n    a\nfn g() = b"),
+      "fn f ( ) = do { a } fn g ( ) = b"),
+    check_eq("`)` closes a do block", prog("fn f() =\n  g(do\n      a\n      b)"), "fn f ( ) = g ( do { a ; b } )"),
+    check_eq("`,` closes a do block", prog("fn f() =\n  g(\\x -> do\n      a, 1)"), "fn f ( ) = g ( \\ x -> do { a } , 1 )"),
+    check_eq("match arms at the do column", prog("fn f() =\n  do\n    match m with\n    | A -> 1\n    | B -> 2\n    c"),
+      "fn f ( ) = do { match m with { | A -> 1 | B -> 2 } ; c }"),
+    check_eq("one-line match closed by else", expr("if c then match m with | A -> 1 else 2"),
+      "if c then match m with { | A -> 1 } else 2"),
+    check_eq("nested match closes on its column", prog("fn f() =\n  match a with\n  | A ->\n    match b with\n    | C -> 1\n  | B -> 2"),
+      "fn f ( ) = match a with { | A -> match b with { | C -> 1 } | B -> 2 }"),
+    check_eq("arm body on the next line, in the arm column",
+      prog("fn f() =\n  match a with\n  | A -> 1\n  | B ->\n  match b with\n  | C -> 2"),
+      "fn f ( ) = match a with { | A -> 1 | B -> match b with { | C -> 2 } }"),
+    check_eq("a line after an operator continues the step", prog("fn f() =\n  do\n    a +\n    b"),
+      "fn f ( ) = do { a + b }"),
+    check_eq("record update is no match", expr("r with (x = 1)"), "r with ( x = 1 )"),
+    check_eq("let..in", expr("let a = 1\n    b = 2\nin a"), "let { a = 1 ; b = 2 } in a"),
+    check_eq("one-line let..in", expr("let a = 1 in a"), "let { a = 1 } in a"),
+    check_eq("an in line closes the inner let only",
+      prog("fn f() =\n  do\n    let total =\n      let\n        a = 1\n      in a + 1\n    total"),
+      "fn f ( ) = do { let { total = let { a = 1 } in a + 1 } ; total }"),
+    check_eq("let with nothing before in", expr("let in a"), "let { } in a"),
+    check_eq("let rhs left of the binding", prog("fn f() =\n  do\n    let base =\n      g(1)\n    base"),
+      "fn f ( ) = do { let { base = g ( 1 ) } ; base }"),
+    check_eq("let group binding left of the first", prog("fn f() =\n  do\n    let a = 1\n      b = 2\n    b"),
+      "fn f ( ) = do { let { a = 1 ; b = 2 } ; b }"),
+    check_eq("let rhs in the binding column", prog("fn f() =\n  do\n    let total =\n        1 + 2\n    total"),
+      "fn f ( ) = do { let { total = 1 + 2 } ; total }"),
+    check_eq("a ( line is no binding", prog("fn f() =\n  do\n    let r = g\n      (21)\n    r"),
+      "fn f ( ) = do { let { r = g ( 21 ) } ; r }"),
+    check_eq("multi-line tuple binding", prog("fn f() =\n  do\n    let a = n\n        (x,\n         y) = p\n    x"),
+      "fn f ( ) = do { let { a = n ; ( x , y ) = p } ; x }"),
+    check_eq("#456: nested group left of the outer binding",
+      prog("fn f() =\n  do\n    let r = do\n      let x = 1\n        y = 2\n      x + y\n    r"),
+      "fn f ( ) = do { let { r = do { let { x = 1 ; y = 2 } ; x + y } } ; r }"),
+    check_eq("top-level let is a declaration", prog("let x = 1\nfn f() = x"), "let x = 1 fn f ( ) = x"),
+    check_eq("where bindings", prog("fn f() = a + b\n  where a = 1\n        b = 2\nfn g() = 1"),
+      "fn f ( ) = a + b where { a = 1 ; b = 2 } fn g ( ) = 1"),
+    check_eq("where at column 1", prog("fn f() = a\nwhere\n  a = 1"), "fn f ( ) = a where { a = 1 }"),
+    check_eq("where closes a one-line match", prog("fn f(x) = match x with | A -> b where b = 1"),
+      "fn f ( x ) = match x with { | A -> b } where { b = 1 }"),
+    check_eq("constraint where opens nothing", prog("fn f(x: a) -> a where Eq a = x"),
+      "fn f ( x : a ) -> a where Eq a = x"),
+    check_eq("class body", prog("class C a\n  fn m(x: a) -> a\n  fn n(x: a) -> a\nfn g() = 1"),
+      "class C a { fn m ( x : a ) -> a ; fn n ( x : a ) -> a } fn g ( ) = 1"),
+    check_eq("export instance body with a where", prog("export instance C Int\n  fn m(x: Int) -> Int = y\n    where y = x"),
+      "export instance C Int { fn m ( x : Int ) -> Int = y where { y = x } }"),
+    check_eq("instance head constraint", prog("instance C (B a) where C a\n  fn m(x: B a) -> B a = x"),
+      "instance C ( B a ) where C a { fn m ( x : B a ) -> B a = x }"),
+    check_eq("empty class", prog("class C a\nfn g() = 1"), "class C a fn g ( ) = 1"),
+    check_eq("brace class body", prog("class C a {\n  fn m(x: a) -> a\n}"), "class C a { fn m ( x : a ) -> a }"),
+    check_eq("where in a brace instance body", prog("instance C Int {\n  fn m(x: Int) -> Int = y where y = x\n}"),
+      "instance C Int { fn m ( x : Int ) -> Int = y where { y = x } }"),
+    check_eq("a member after a where group", prog("instance C Int\n  fn m(x: Int) -> Int = y\n    where y = x\n  fn n(x: Int) -> Int = x"),
+      "instance C Int { fn m ( x : Int ) -> Int = y where { y = x } ; fn n ( x : Int ) -> Int = x }"),
+    check_eq("over-indented member after a where group", prog("instance C Int\n  fn m(x: Int) -> Int = y\n    where y = x\n      fn n(x: Int) -> Int = x"),
+      "layout error: Unexpected indentation in instance body"),
+    check_eq("brace body member after a where group", prog("instance C Int {\n  fn m(x: Int) -> Int = y\n    where y = x\n  fn n(x: Int) -> Int = x\n}"),
+      "instance C Int { fn m ( x : Int ) -> Int = y where { y = x } fn n ( x : Int ) -> Int = x }"),
+    check_eq("misaligned member", prog("instance C Int\n  fn m(x: Int) -> Int = x\n   fn n(x: Int) -> Int = x"),
+      "layout error: Unexpected indentation in instance body"),
+    check_eq("multi-line template text", prog("fn f() =\n  do\n    `a\nb`\n    c"),
+      "fn f ( ) = do { ` a\nb ` ; c }"),
+    check_eq("for closes a one-line match", expr("[match m with | A -> 1 for m in ms]"),
+      "[ match m with { | A -> 1 } for m in ms ]"),
+    check_eq("comprehension in stays put", prog("fn f() =\n  let ys = [x for x in xs]\n  in ys"),
+      "fn f ( ) = let { ys = [ x for x in xs ] } in ys"),
+    check_eq("a guard if closes a one-line match", expr("[x for x in match m with | A -> xs if p]"),
+      "[ x for x in match m with { | A -> xs } if p ]"),
+    check_eq("an if inside an arm stays in it", expr("[x for x in match m with | A -> if c then xs else ys]"),
+      "[ x for x in match m with { | A -> if c then xs else ys } ]"),
+    check_eq("let binding right of the first", prog("fn f() =\n  do\n    let a = 1\n        b = 2\n          c = 3\n    c"),
+      "fn f ( ) = do { let { a = 1 ; b = 2 ; c = 3 } ; c }"),
+    check_eq("where bindings in the root column", prog("fn f() = y\nwhere\ny = 1\nz = 2\nfn g() = 1"),
+      "fn f ( ) = y where { y = 1 ; z = 2 } fn g ( ) = 1"),
+    check_eq("where bindings in the member column",
+      prog("instance C Int\n  fn m(x: Int) -> Int = y\n  where\n  y = 1\n  z = 2\n  fn n(x: Int) -> Int = x"),
+      "instance C Int { fn m ( x : Int ) -> Int = y where { y = 1 ; z = 2 } ; fn n ( x : Int ) -> Int = x }"),
+    check_eq("a nested do in the outer do column is empty",
+      prog("fn f() =\n  do\n    a\n    if c then x else do\n    y\n    z"),
+      "fn f ( ) = do { a ; if c then x else do { } ; y ; z }"),
+    check_eq("an indented file", prog("  instance C Int\n    fn m(x: Int) -> Int = x\n  fn g() = 1"),
+      "instance C Int { fn m ( x : Int ) -> Int = x } fn g ( ) = 1"),
+    check_eq("member where in the instance column", prog("instance C Int\n  fn m(x: Int) -> Int = y\nwhere\n  y = x\nfn g() = 1"),
+      "instance C Int { fn m ( x : Int ) -> Int = y where { y = x } } fn g ( ) = 1"),
+    check_eq("else in the arm column ends the arm's if", prog("fn f() =\n  match m with\n  | A -> if c then 1\n  else 2\n  | B -> 3"),
+      "fn f ( ) = match m with { | A -> if c then 1 else 2 | B -> 3 }"),
+    check_eq("else in the arm column ends an outer if", prog("fn f() =\n  if c then match m with\n  | A -> 1\n  else 2"),
+      "fn f ( ) = if c then match m with { | A -> 1 } else 2"),
+    check_eq("binding with = on the next line", prog("fn g() = a + b\n  where\n    a = n\n    b\n      = 2"),
+      "fn g ( ) = a + b where { a = n ; b = 2 }"),
+    check_eq("member on the head line", prog("instance C Int fn m(x: Int) -> Int = x"),
+      "layout error: An instance body starts on the line after its head"),
+    check_eq("an indented instance after a type", prog("type T =\n  | A\n  | B\n  instance C T\n    fn m(x: T) -> T = x"),
+      "type T = | A | B instance C T { fn m ( x : T ) -> T = x }"),
+    check_eq("an indented fn with a where", prog("type T = A\n  fn g() = y\n  where\n    y = 3"),
+      "type T = A fn g ( ) = y where { y = 3 }"),
+    check_eq("an indented first declaration", prog("  fn one() = 1\nclass C a\n  fn m(x: a) -> a"),
+      "fn one ( ) = 1 class C a { fn m ( x : a ) -> a }"),
+    check_eq("a let line in an expression is no declaration", expr("let a = 1\n    b = 2\nin a"), "let { a = 1 ; b = 2 } in a"),
+    check_eq("fn closes a match mid-line", prog("instance C T { fn a(c) = match c with | A -> 1 fn b(c) = 2 }"),
+      "instance C T { fn a ( c ) = match c with { | A -> 1 } fn b ( c ) = 2 }"),
+    check_eq("fn closes a where mid-line", prog("instance C T { fn a(c) = x where x = 1 fn b(c) = 2 }"),
+      "instance C T { fn a ( c ) = x where { x = 1 } fn b ( c ) = 2 }"),
+    check_eq("an indented type ends a where", prog("  fn f() = a\n  where\n    a = 1\n  type T = A"),
+      "fn f ( ) = a where { a = 1 } type T = A"),
+    check_eq("an indented export ends a where", prog("  fn f() = a\n  where\n    a = 1\n  export fn g() = 2"),
+      "fn f ( ) = a where { a = 1 } export fn g ( ) = 2"),
+    check_eq("an empty where before an indented fn", prog("type T = A\n  fn f(n) = n\n  where\n  fn g(n) = a\n  where\n    a = 1"),
+      "type T = A fn f ( n ) = n where { } fn g ( n ) = a where { a = 1 }"),
+    check_eq("an empty member where", prog("instance C T\n  fn a(b) = 1 where\n  fn c(b) = 2"),
+      "instance C T { fn a ( b ) = 1 where { } ; fn c ( b ) = 2 }"),
+    check_eq("an indented fn after a brace body", prog("instance C Int { fn m(x) = x }\n  fn h(n) = n"),
+      "instance C Int { fn m ( x ) = x } fn h ( n ) = n"),
+    check_eq("a fn after a brace body on its line", prog("instance C Int { fn m(x) = x } fn g() = 1"),
+      "instance C Int { fn m ( x ) = x } fn g ( ) = 1")
+  ])

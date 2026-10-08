@@ -1,0 +1,12 @@
+# sprout-ignore-all lint/unparsed: parse-error fixture — this file must not parse
+# A class or instance body starts on the line after its head. A member on the
+# head line used to become a top-level function, and the instance then had no
+# methods.
+class Named a
+  fn name(x: a) -> String
+
+type Box = Box Int
+
+instance Named Box fn name(b) = "boxed"
+
+fn main() -> Unit !{IO} = print(name(Box(1)))

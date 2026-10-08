@@ -1,0 +1,7 @@
+# sprout-ignore-all lint/unparsed: parse-error fixture — this file must not parse
+# A `where` block takes one binding per line. The old greedy parse split
+# `a = 1 b = 2` where the first right-hand side ended; the layout pass does not.
+fn two_where() -> Int = a + b
+  where a = 1 b = 2
+
+fn main() -> Unit !{IO} = print(int_to_string(two_where()))

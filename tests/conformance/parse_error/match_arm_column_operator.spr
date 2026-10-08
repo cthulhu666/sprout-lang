@@ -1,0 +1,12 @@
+# sprout-ignore-all lint/unparsed: parse-error fixture — this file must not parse
+# A line in the arm column that is not an arm ends the match, and a match is no
+# operand. The old parser piped only the last arm's value into `g`.
+fn g(n: Int) -> Int = n + 1
+
+fn piped(m: Maybe Int) -> Int =
+  match m with
+  | Just v -> v
+  | Nothing -> 0
+  |> g
+
+fn main() -> Unit !{IO} = print(int_to_string(piped(Just(2))))

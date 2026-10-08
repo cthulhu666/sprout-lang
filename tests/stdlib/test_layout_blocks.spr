@@ -1,0 +1,285 @@
+# sprout-ignore-all lint/deprecated-brace-body: fixture — layout inside a brace-form body is one of the shapes it pins
+# sprout-ignore-all lint/multi-line-lambda-arg: fixture — a `let` group inside a lambda argument is one of the shapes it pins
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# Layouts the parser accepted before the layout pass. Each must keep its meaning.
+# The `do`-`let` ones are the shapes PR #453's reviews found, written with names.
+
+fn g(n: Int) -> Int = n * 10
+
+# Issue #456: a nested do's own let group sits LEFT of the outer binding.
+fn nested_group_left_of_outer() -> Int =
+  do
+    let r = do
+      let xxxxxxx = 1
+        y = 2
+      xxxxxxx + y
+    r
+
+fn rhs_left_of_binding() -> Int =
+  do
+    let base =
+      g(1)
+    base
+
+fn rhs_in_binding_column() -> Int =
+  do
+    let total =
+        1 + 2
+    total
+
+fn later_binding_left_of_first() -> Int =
+  do
+    let a = 1
+      b = 2
+    a + b
+
+fn later_binding_right_of_first() -> Int =
+  do
+    let a = 1
+        b = 2
+          c = 3
+    a + b + c
+
+fn if_in_binding_column(c: Bool) -> Int =
+  do
+    let n = if c then
+        1
+        else 2
+    n
+
+fn nested_do_in_binding_column() -> Int =
+  do
+    let r = do
+        let x = 5
+        x
+    r
+
+# The inner group sits in the outer binding's column and still holds both bindings.
+fn nested_let_in_rhs() -> Int =
+  do
+    let total =
+      let
+        a = 1
+        b = 2
+      in a + b
+    total
+
+fn apply_one(f: Int -> Int) -> Int = f(1)
+
+# Inside brackets a `let` group ends only at its `in`.
+fn let_group_in_call() -> Int =
+  do
+    let r = apply_one(\x ->
+        let y = x + 7
+        z = 1
+        in y + z)
+    r
+
+fn inner_group_then_outer_binding() -> Int =
+  do
+    let r = do
+          let a = 1
+              b = 2
+          a + b
+        c = r
+    c
+
+fn lambda_do_with_group() -> Int =
+  do
+    let f = \x -> do
+              let a = x
+                  b = 2
+              a + b
+    f(1)
+
+fn arm_do_with_group(m: Maybe Int) -> Int =
+  do
+    let r = match m with
+      | Just v -> do
+          let a = v
+              b = 1
+          a + b
+      | Nothing -> 0
+    r
+
+fn paren_line_continues_call() -> Int =
+  do
+    let r = g
+      (21)
+    r
+
+# A match at the do column, arms at the same column, then another step.
+fn match_at_block_column(m: Maybe Int) -> Int =
+  do
+    let base = 1
+    match m with
+    | Just v -> v + base
+    | Nothing -> base
+
+# `else` at the do column continues the `if` step.
+fn else_at_block_column(c: Bool) -> Int =
+  do
+    let k = 3
+    if c then
+      k
+    else
+      0
+
+fn where_group() -> Int = a + b
+  where a = 1
+        b = a + 1
+
+fn where_in_root_column() -> Int = y + z
+where
+y = 1
+z = 2
+
+class Codec a
+  fn enc(x: a) -> a
+  fn dec(x: a) -> a
+
+class Label a
+  fn label(x: a) -> String
+
+# The `where` group sits in the member column.
+instance Label Bool
+  fn label(b: Bool) -> String = y ++ z
+  where
+  y = "a"
+  z = if b then "b" else "c"
+
+# The member's `where` sits in the instance's column.
+instance Label Int
+  fn label(n: Int) -> String = y
+where
+  y = int_to_string(n)
+
+type Shade =
+  | Light
+  | Dark
+
+  # A declaration indented past the top level still starts an item.
+  instance Label Shade
+    fn label(s: Shade) -> String = name
+    where
+      name = match s with
+        | Light -> "light"
+        | Dark -> "dark"
+
+  # An indented declaration ends the `where` group above it.
+  fn shade_code(s: Shade) -> Int = base
+  where
+    base = 4
+  let shade_offset = 1
+
+# One-line brace members: a `fn` ends the member before it.
+instance Codec Bool {fn enc(b: Bool) -> Bool = match b with | true -> false | false -> true fn dec(b: Bool) -> Bool = ! b}
+
+fn else_in_arm_column(c: Bool, m: Maybe Int) -> Int =
+  match m with
+  | Just v -> if c then v
+  else 0
+  | Nothing -> 5
+
+fn equals_on_next_line(n: Int) -> Int = a + b
+  where
+    a = n
+    b
+      = n * 2
+
+class Sized a
+  fn size(x: a) -> Int
+  type Box = | Box Int
+
+# A declaration keyword at the member column ends the body.
+instance Sized Bool
+  fn size(b: Bool) -> Int = 1
+  export fn sized_helper(n: Int) -> Int = n + 1
+  let sized_offset = 4
+
+fn box_value(b: Box) -> Int =
+  match b with
+  | Box k -> k
+
+# A `fn` mid-line starts a declaration, so its `where` opens bindings.
+type Tone = | Warm | Cool fn tone_code(t: Tone) -> Int = n where n = 2
+
+fn one_line_a() -> Int = a where a = 1 fn one_line_b() -> Int = b where b = 2
+
+# Any declaration keyword mid-line starts a declaration; `let` does after an operand.
+fn add_seven(n: Int) -> Int = n + 7 let mid_eight = 8
+
+type Grain = | Fine | Coarse let grain_count = 2 export let grain_floor = 1
+
+# A token that an open `if` or `match` waits for continues it at any column.
+fn else_left_of_arms(c: Bool, m: Maybe Int) -> Int =
+  match m with
+    | Just v -> if c then v
+  else 0
+    | Nothing -> 5
+
+fn then_left_of_arms(c: Bool, m: Maybe Int) -> Int =
+  match m with
+    | Just v -> if c
+  then v else 0
+    | Nothing -> 5
+
+fn with_left_of_arms(m: Maybe Int) -> Int =
+  match m with
+    | Just v -> match v
+  with
+      | 0 -> 10
+      | _ -> 20
+    | Nothing -> 30
+
+# A brace-form body: the `where` group ends at the next member.
+instance Codec Int {
+  fn enc(x: Int) -> Int = y
+    where y = x + 1
+  fn dec(x: Int) -> Int = x - 1
+}
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_eq(state, "#456: nested group left of the outer binding", nested_group_left_of_outer(), 3)
+    assert_eq(state, "rhs starting left of the binding", rhs_left_of_binding(), 10)
+    assert_eq(state, "rhs continued in the binding column", rhs_in_binding_column(), 3)
+    assert_eq(state, "a later binding left of the first", later_binding_left_of_first(), 3)
+    assert_eq(state, "a later binding right of the first", later_binding_right_of_first(), 6)
+    assert_eq(state, "where bindings in the root column", where_in_root_column(), 3)
+    assert_eq(state, "where bindings in the member column", label(true), "ab")
+    assert_eq(state, "member where in the instance column", label(7), "7")
+    assert_eq(state, "an indented instance after a type", label(Dark), "dark")
+    assert_eq(state, "an indented let ends a where group", shade_code(Light) + shade_offset, 5)
+    assert_eq(state, "a one-line brace member ending in a match", enc(true), false)
+    assert_eq(state, "the one-line brace member after it", dec(true), false)
+    assert_eq(state, "else in the arm column", else_in_arm_column(false, Just(4)), 0)
+    assert_eq(state, "the arm after an else in the arm column", else_in_arm_column(true, Nothing), 5)
+    assert_eq(state, "where binding with = on the next line", equals_on_next_line(1), 3)
+    assert_eq(state, "if continued in the binding column", if_in_binding_column(false), 2)
+    assert_eq(state, "nested do steps in the binding column", nested_do_in_binding_column(), 5)
+    assert_eq(state, "nested let..in right-hand side", nested_let_in_rhs(), 3)
+    assert_eq(state, "let group inside a call", let_group_in_call(), 9)
+    assert_eq(state, "a member before a declaration keyword", size(true), 1)
+    assert_eq(state, "export fn at the member column", sized_helper(1) + sized_offset, 6)
+    assert_eq(state, "type at the member column", box_value(Box(2)), 2)
+    assert_eq(state, "fn after a type on one line", tone_code(Cool), 2)
+    assert_eq(state, "two fn..where on one line", one_line_a() + one_line_b(), 3)
+    assert_eq(state, "let after a fn on one line", add_seven(mid_eight), 15)
+    assert_eq(state, "let and export let after a type on one line", grain_count + grain_floor, 3)
+    assert_eq(state, "else left of the arms", else_left_of_arms(false, Just(4)), 0)
+    assert_eq(state, "the arm after an else left of the arms", else_left_of_arms(true, Nothing), 5)
+    assert_eq(state, "then left of the arms", then_left_of_arms(true, Just(4)), 4)
+    assert_eq(state, "with left of the arms", with_left_of_arms(Just(0)), 10)
+    assert_eq(state, "the arm after a with left of the arms", with_left_of_arms(Nothing), 30)
+    assert_eq(state, "inner group, then an outer binding", inner_group_then_outer_binding(), 3)
+    assert_eq(state, "lambda do body with its own group", lambda_do_with_group(), 3)
+    assert_eq(state, "match arm do body with its own group", arm_do_with_group(Just(4)), 5)
+    assert_eq(state, "a `(` line that is no binding continues a call", paren_line_continues_call(), 210)
+    assert_eq(state, "match at the do column", match_at_block_column(Nothing), 1)
+    assert_eq(state, "else at the do column", else_at_block_column(true), 3)
+    assert_eq(state, "where group", where_group(), 3)
+    assert_eq(state, "brace-form members around a where group", dec(enc(5)), 5)
+    summary(state)
