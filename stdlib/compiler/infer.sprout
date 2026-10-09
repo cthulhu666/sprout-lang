@@ -5118,9 +5118,11 @@ fn unreachable_check(subst: Dict types.Type, ctor_map: Dict (List String), scrut
 type MatchSource =
   | UserMatch
   | LetBinding  # a binding's body, then its `else` (ast.let_bind_branches)
-  # A `try` at this position, whose operand has this type: the success arms
-  # and the failure arms, in the instance's order when fused.
-  | TryBinding source.SourcePos types.Type
+  # A `try` at this position, and the index of its one success arm; the rest
+  # are failure arms, in the instance's order when fused.
+  | TryBinding source.SourcePos Int
+  # One arm of such a match, and whether it is the success arm.
+  | TryArm source.SourcePos Bool
 
 # Only a binding's `else` can mismatch, since the body's branch comes first
 # against a fresh type. Either side may be the wrong one, so name both, with one
@@ -5134,16 +5136,19 @@ fn branch_mismatch_message(src: MatchSource, e: String, branch_ty: types.Type,
       in "the `else` value is `" ++ types.type_to_string_renamed(vars, branch_ty)
            ++ "`, but the code after the binding is `" ++ types.type_to_string_renamed(vars, expected_ty)
            ++ "`; they must have the same type, since the `else` replaces that code when the pattern fails"
-  | TryBinding _ operand_ty -> try_block_message(operand_ty, branch_ty, expected_ty)
+  | TryBinding _ _ -> try_block_message(branch_ty, expected_ty)
+  # A success arm's type is the block's; the arms before it set the failure's.
+  | TryArm _ true -> try_block_message(expected_ty, branch_ty)
+  | TryArm _ false -> try_block_message(branch_ty, expected_ty)
 
-# The failure is the side with the operand's head; when both have it, the arm
-# being checked is the failure, as it is for every arm after the first.
-fn try_block_message(operand_ty: types.Type, branch_ty: types.Type, expected_ty: types.Type) -> String =
-  let head = type_head_str(operand_ty)
-      (failure, block) = if type_head_str(branch_ty) != head && type_head_str(expected_ty) == head
-                         then (expected_ty, branch_ty)
-                         else (branch_ty, expected_ty)
-      failure_str = type_with_holes(failure)
+# A `try` match's source for the arm after `done`.
+fn arm_source(src: MatchSource, done: List typed_ast.TypedMatchBranch) -> MatchSource =
+  match src with
+  | TryBinding pos success -> TryArm(pos, list_length(done) == success)
+  | _ -> src
+
+fn try_block_message(failure: types.Type, block: types.Type) -> String =
+  let failure_str = type_with_holes(failure)
   in "this `try` passes on a `" ++ failure_str ++ "` failure, but the block returns `"
        ++ type_with_holes(block) ++ "`. Handle the failure here with `let..else`, or make the block return `"
        ++ failure_str ++ "`." ++ try_maybe_hint(type_head_str(failure), type_head_str(block))
@@ -5164,6 +5169,7 @@ fn holes_for(vars: List String) -> Dict types.Type =
 fn mismatch_pos(src: MatchSource, body_pos: source.SourcePos) -> source.SourcePos =
   match src with
   | TryBinding try_pos _ -> try_pos
+  | TryArm try_pos _ -> try_pos
   | _ -> body_pos
 
 fn infer_match(
@@ -5208,7 +5214,7 @@ fn infer_try(
   tb: ast.TryBind
 ) -> InferResult !{IO} =
   do
-    let ast.TryBind operand pos success_arms = tb
+    let ast.TryBind operand pos success = tb
     unifier.note_try(state, pos)
     sr <- infer_expr(state, env, subst, eff_subst, operand)
     match sr with
@@ -5219,11 +5225,11 @@ fn infer_try(
           v <- unifier.fresh(state)
           let operand_ty = unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_operand))
               ret_ty = types.TVar(types.tyvar_id(v))
-              src = TryBinding(pos, operand_ty)
           match and_then(\head -> dict_get(head, fusions), concrete_type_str(operand_ty)) with
           | Just inst_arms ->
               infer_branches(state, env, s1, es1, typed_operand, ret_ty,
-                             fuse_try_arms(inst_arms, success_arms), Nil, operand_eff, src, pos)
+                             fuse_try_arms(inst_arms, success, pos), Nil, operand_eff,
+                             TryBinding(pos, continue_index(inst_arms, 0)), pos)
           | Nothing ->
               do
                 cr <- infer_expr(state, bind_local_scheme(try_operand_name, types.mono(operand_ty), env), s1, es1,
@@ -5232,7 +5238,7 @@ fn infer_try(
                 | InferErr epos e -> InferErr(epos, try_branch_error(epos, pos, e, operand_ty))
                 | InferOk typed_call s2 es2 _ ->
                     infer_branches(state, env, s2, es2, splice_try_operand(typed_call, typed_operand), ret_ty,
-                                   ast.try_match_arms(success_arms, pos), Nil, operand_eff, src, pos)
+                                   ast.try_match_arms(success, pos), Nil, operand_eff, TryBinding(pos, 0), pos)
 
 # The declaration's `try` matches, marked for linear_check.
 fn with_try_markers(positions: List source.SourcePos, env: Dict types.Scheme) -> Dict types.Scheme =
@@ -5260,10 +5266,23 @@ fn try_branch_error(epos: source.SourcePos, try_pos: source.SourcePos, e: String
 #
 # An instance can be fused when its `branch` is one `match` on its parameter,
 # with exactly one arm `Continue(v)` for a `v` its pattern binds, and every other
-# arm `Break(f)` with `f` not naming the parameter. An instance with a context is
-# left alone: its dictionaries are its own. Keyed by the instance's head type.
+# arm `Break(f)` with `f` not naming the parameter. Every arm must name a
+# constructor and only the success arm the success's, so a success value reaches
+# no failure arm and a refutable success pattern stays non-exhaustive. An
+# instance with a context is left alone: its dictionaries are its own. Keyed by
+# the instance's head type.
 fn try_fusions(decls: List ast.Decl) -> Dict (List ast.MatchBranch) =
   list_fold(\ (acc, d) -> add_try_fusion(d, acc), dict_empty(), decls)
+
+# Every name a fused failure arm refers to: a dependency of each function with
+# a `try`, which the generic form referenced_names walks does not show.
+fn try_failure_deps(decls: List ast.Decl, index: Set) -> Set =
+  list_fold(\ (acc, arms) -> list_fold(\ (a, arm) -> failure_arm_refs(arm, index, a), acc, arms),
+            set_empty(), vec_to_list(dict_values(try_fusions(decls))))
+
+fn failure_arm_refs(arm: ast.MatchBranch, index: Set, acc: Set) -> Set =
+  let ast.MatchBranch pat body = arm
+  in referenced_names(body, bind_pattern(pat, set_empty()), index, acc)
 
 fn add_try_fusion(d: ast.Decl, acc: Dict (List ast.MatchBranch)) -> Dict (List ast.MatchBranch) =
   match d with
@@ -5279,8 +5298,31 @@ fn fusable_branch_arms(param: String, body: ast.Expr) -> Maybe (List ast.MatchBr
       if scrut == param
          && list_length(list_filter(is_continue_arm, arms)) == 1
          && all(\a -> fusable_arm(param, a), arms)
+         && heads_disjoint(arms)
       then Just(arms) else Nothing
   | _ -> Nothing
+
+fn heads_disjoint(arms: List ast.MatchBranch) -> Bool =
+  match list_filter(is_continue_arm, arms) with
+  | [ast.MatchBranch(ast.ConstructorPattern success _ _) _] ->
+      all(has_ctor_head, arms) && list_length(list_filter(\a -> ctor_head_is(a, success), arms)) == 1
+  | _ -> false
+
+fn has_ctor_head(arm: ast.MatchBranch) -> Bool =
+  match arm with
+  | ast.MatchBranch (ast.ConstructorPattern _ _ _) _ -> true
+  | _ -> false
+
+fn ctor_head_is(arm: ast.MatchBranch, name: String) -> Bool =
+  match arm with
+  | ast.MatchBranch (ast.ConstructorPattern head _ _) _ -> head == name
+  | _ -> false
+
+# Where the success arm sits in a fusable instance's arms.
+fn continue_index(arms: List ast.MatchBranch, i: Int) -> Int =
+  match arms with
+  | [] -> i
+  | [arm | rest] -> if is_continue_arm(arm) then i else continue_index(rest, i + 1)
 
 fn is_continue_arm(arm: ast.MatchBranch) -> Bool =
   let ast.MatchBranch _ body = arm
@@ -5303,30 +5345,39 @@ fn fusable_arm(param: String, arm: ast.MatchBranch) -> Bool =
                                              set_insert(param, set_empty()), set_empty()))
      | _ -> false
 
-# The instance's arms, its `Continue` arm replaced by one arm per success arm:
-# the instance pattern with `v` replaced by the success pattern and its other
-# binders by `_`, so none can capture a name the success arm uses.
-fn fuse_try_arms(inst_arms: List ast.MatchBranch, success_arms: List ast.MatchBranch) -> List ast.MatchBranch =
-  list_flat_map(\a -> fuse_try_arm(a, success_arms), inst_arms)
+# The instance's arms with `Continue(v) -> …` replaced by the success arm: the
+# instance pattern with `v` replaced by the success pattern and its other binders
+# by `_`, so none can capture a name the success arm uses. The instance's
+# patterns take the `try`'s position, so no diagnostic points into its file.
+fn fuse_try_arms(inst_arms: List ast.MatchBranch, success: ast.MatchBranch, pos: source.SourcePos) ->
+    List ast.MatchBranch =
+  list_map(\a -> fuse_try_arm(a, success, pos), inst_arms)
 
-fn fuse_try_arm(arm: ast.MatchBranch, success_arms: List ast.MatchBranch) -> List ast.MatchBranch =
+fn fuse_try_arm(arm: ast.MatchBranch, success: ast.MatchBranch, pos: source.SourcePos) -> ast.MatchBranch =
   let ast.MatchBranch pat body = arm
+      ast.MatchBranch success_pat success_body = success
   in match (continue_binder(body), body) with
-     | (Just v, _) -> list_map(\s -> place_success(pat, v, s), success_arms)
-     | (Nothing, ast.CallExpr _ [failure] _) -> [ast.MatchBranch(pat, failure)]
-     | _ -> [arm]
+     | (Just v, _) ->
+         ast.MatchBranch(pattern_at(pat, pos, \ (name, p) -> if name == v then success_pat else ast.WildcardPattern(p)),
+                         success_body)
+     | (Nothing, ast.CallExpr _ [failure] _) ->
+         ast.MatchBranch(pattern_at(pat, pos, \ (name, p) -> ast.VarPattern(name, p)), failure)
+     | _ -> arm
 
-fn place_success(pat: ast.Pattern, v: String, success: ast.MatchBranch) -> ast.MatchBranch =
-  let ast.MatchBranch success_pat success_body = success
-  in ast.MatchBranch(replace_binder(pat, v, success_pat), success_body)
-
-fn replace_binder(pat: ast.Pattern, v: String, with_pat: ast.Pattern) -> ast.Pattern =
+# `pat` with every node at `pos` and each binder replaced by `binder(name, pos)`.
+fn pattern_at(pat: ast.Pattern, pos: source.SourcePos, binder: String -> source.SourcePos -> ast.Pattern) ->
+    ast.Pattern =
   match pat with
-  | ast.VarPattern name pos -> if name == v then with_pat else ast.WildcardPattern(pos)
-  | ast.TuplePattern items pos -> ast.TuplePattern(list_map(\p -> replace_binder(p, v, with_pat), items), pos)
-  | ast.ConstructorPattern name items pos ->
-      ast.ConstructorPattern(name, list_map(\p -> replace_binder(p, v, with_pat), items), pos)
-  | _ -> pat
+  | ast.VarPattern name _ -> binder(name, pos)
+  | ast.WildcardPattern _ -> ast.WildcardPattern(pos)
+  | ast.IntPattern n _ -> ast.IntPattern(n, pos)
+  | ast.BoolPattern b _ -> ast.BoolPattern(b, pos)
+  | ast.StringPattern s _ -> ast.StringPattern(s, pos)
+  | ast.CharPattern c _ -> ast.CharPattern(c, pos)
+  | ast.UnitPattern _ -> ast.UnitPattern(pos)
+  | ast.TuplePattern items _ -> ast.TuplePattern(list_map(\p -> pattern_at(p, pos, binder), items), pos)
+  | ast.ConstructorPattern name items _ ->
+      ast.ConstructorPattern(name, list_map(\p -> pattern_at(p, pos, binder), items), pos)
 
 fn infer_branches(
   state: unifier.InferState,
@@ -5363,7 +5414,8 @@ fn infer_branches(
       | ast.MatchBranch pat _ ->
           do
             br <- infer_branch(state, env, subst, eff_subst,
-                               typed_ast.typed_expr_type(typed_scrut), ret_type, branch, src)
+                               typed_ast.typed_expr_type(typed_scrut), ret_type, branch,
+                               arm_source(src, acc_branches))
             match br with
             | InferErr pos e -> InferErr(pos, e)
             | InferOk typed_body s1 es1 branch_eff ->
@@ -9628,6 +9680,10 @@ fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Di
 # Which is why the walk lists **every** ast.Expr constructor and has no `| _ ->`
 # catch-all. A catch-all would make a newly added expression form contribute no
 # edges — silently, and in the dangerous direction.
+# In referenced_names' result, a `try`: it may be fused with an instance's
+# failure arm, whose references segment_graph adds (try_failure_deps).
+let try_dep_mark = "$try_deps"
+
 fn referenced_names(e: ast.Expr, bound: Set, index: Set, acc: Set) -> Set =
   match e with
   | ast.VarExpr name _ ->
@@ -9668,8 +9724,9 @@ fn referenced_names(e: ast.Expr, bound: Set, index: Set, acc: Set) -> Set =
   | ast.ComprehensionExpr elem gens _ ->
       referenced_names_comprehension(elem, gens, bound, index, acc)
   | ast.LetBindExpr pat value els body pos ->
-      referenced_names(ast.let_bind_match(pat, value, els, body, pos), bound, index, acc)
-  | ast.TryExpr operand _ -> referenced_names(operand, bound, index, acc)
+      referenced_names(ast.let_bind_match(pat, value, els, body, pos), bound, index,
+                       if ast.starts_with_try(value) then set_insert(try_dep_mark, acc) else acc)
+  | ast.TryExpr operand _ -> referenced_names(operand, bound, index, set_insert(try_dep_mark, acc))
 
 # A generator's pattern binders scope over its own guards, every later
 # generator's source and guards, and (once the walk reaches Nil) the element.
@@ -9794,7 +9851,9 @@ fn bind_params(params: List ast.Param, bound: Set) -> Set =
 # verification below is not a substitute for that argument; it is there because a
 # silently vanishing declaration is the one failure mode worth paying to rule out.
 fn group_plan(decls: List ast.Decl) -> List (List Int) =
-  checked_plan(plan_walk(index_decls(decls, 0), Nil, Nil), list_length(decls))
+  let items = index_decls(decls, 0)
+  in checked_plan(plan_walk(items, Nil, Nil, try_failure_deps(decls, set_of_list(segment_names(items), set_empty()))),
+                  list_length(decls))
 
 # A plan that does not partition 0..n-1 falls back to source order. Reordering is
 # an optimisation of COMPLETENESS — it makes more correct programs typable — so
@@ -9827,18 +9886,19 @@ fn index_decls(decls: List ast.Decl, i: Int) -> List (Int, ast.Decl) =
 # `seg` is the current run of FnDecls and `acc` the finished groups, both held in
 # REVERSE so the walk stays a cons. Hitting a barrier flushes the run, then emits
 # the barrier itself as a singleton in its original position.
-fn plan_walk(items: List (Int, ast.Decl), seg: List (Int, ast.Decl), acc: List (List Int)) -> List (List Int) =
+fn plan_walk(items: List (Int, ast.Decl), seg: List (Int, ast.Decl), acc: List (List Int), try_deps: Set) ->
+    List(List Int) =
   match items with
-  | Nil -> reverse_groups(flush_segment(seg, acc), Nil)
+  | Nil -> reverse_groups(flush_segment(seg, acc, try_deps), Nil)
   | Cons item rest ->
       match item with
       | (i, decl) ->
           match decl with
-          | ast.FnDecl _ _ _ _ _ _ _ -> plan_walk(rest, Cons(item, seg), acc)
-          | _ -> plan_walk(rest, Nil, Cons (Cons(i, Nil), flush_segment(seg, acc)))
+          | ast.FnDecl _ _ _ _ _ _ _ -> plan_walk(rest, Cons(item, seg), acc, try_deps)
+          | _ -> plan_walk(rest, Nil, Cons (Cons(i, Nil), flush_segment(seg, acc, try_deps)), try_deps)
 
-fn flush_segment(seg: List (Int, ast.Decl), acc: List (List Int)) -> List (List Int) =
-  prepend_groups(partition_segment(reverse_items(seg, Nil)), acc)
+fn flush_segment(seg: List (Int, ast.Decl), acc: List (List Int), try_deps: Set) -> List (List Int) =
+  prepend_groups(partition_segment(reverse_items(seg, Nil), try_deps), acc)
 
 fn prepend_groups(gs: List (List Int), acc: List (List Int)) -> List (List Int) =
   match gs with
@@ -9859,14 +9919,14 @@ fn reverse_items(xs: List (Int, ast.Decl), acc: List (Int, ast.Decl)) -> List (I
 # exact rather than an approximation: a reference to an earlier segment names a
 # declaration already checked, and a reference to a later one names something the
 # barrier makes unreachable anyway. Neither can inform this segment's order.
-fn partition_segment(seg: List (Int, ast.Decl)) -> List (List Int) =
+fn partition_segment(seg: List (Int, ast.Decl), try_deps: Set) -> List (List Int) =
   match seg with
   | Nil -> Nil
   | [_ | _] ->
       let names = segment_names(seg)
           index = set_of_list(names, set_empty())
       in groups_to_indices(
-           scc.sccs_in_dependency_order(names, segment_graph(seg, index, dict_empty())),
+           scc.sccs_in_dependency_order(names, segment_graph(seg, index, try_deps, dict_empty())),
            segment_index_map(seg, dict_empty()))
 
 fn segment_names(seg: List (Int, ast.Decl)) -> List String =
@@ -9877,15 +9937,23 @@ fn segment_names(seg: List (Int, ast.Decl)) -> List String =
       | (_, ast.FnDecl name _ _ _ _ _ _) -> Cons(name, segment_names(rest))
       | _ -> segment_names(rest)
 
-fn segment_graph(seg: List (Int, ast.Decl), index: Set, acc: Dict Set) -> Dict Set =
+fn segment_graph(seg: List (Int, ast.Decl), index: Set, try_deps: Set, acc: Dict Set) -> Dict Set =
   match seg with
   | Nil -> acc
   | Cons m rest ->
       match m with
       | (_, ast.FnDecl name params _ _ _ body _) ->
-          segment_graph(rest, index,
-            dict_set(name, referenced_names(body, bind_params(params, set_empty()), index, set_empty()), acc))
-      | _ -> segment_graph(rest, index, acc)
+          segment_graph(rest, index, try_deps,
+            dict_set(name, with_try_deps(referenced_names(body, bind_params(params, set_empty()), index, set_empty()),
+                                         index, try_deps), acc))
+      | _ -> segment_graph(rest, index, try_deps, acc)
+
+# A body with a `try` depends on whatever a fused failure arm calls in this segment.
+fn with_try_deps(refs: Set, index: Set, try_deps: Set) -> Set =
+  if set_member(try_dep_mark, refs) then
+    list_fold(\ (acc, n) -> if set_member(n, index) then set_insert(n, acc) else acc,
+              set_remove(try_dep_mark, refs), set_to_list(try_deps))
+  else refs
 
 fn segment_index_map(seg: List (Int, ast.Decl), acc: Dict Int) -> Dict Int =
   match seg with

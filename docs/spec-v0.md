@@ -2083,9 +2083,10 @@ on the success write `let Just y = (try e) else …`; for a record update write
 fallible bind (§5.8): the failure path skips it.
 
 **Cost.** When `e`'s type has an instance whose `branch` is one `match` on its
-parameter, with one `Continue(v)` arm and every other arm `Break(…)`, and the
-instance has no `where` context, the compiler puts that `match` in place of the
-`branch` call. The result is the `match` written by hand: no call and no
+parameter, with one `Continue(v)` arm and every other arm `Break(…)`, every arm's
+pattern a constructor and no other arm the `Continue` arm's, and the instance has
+no `where` context, the compiler puts that `match` in place of the `branch` call.
+Accepted programs and their results are the same either way. The result is the `match` written by hand: no call and no
 `ControlFlow` value. Otherwise, and in generic code (`where Propagate t`), `try`
 calls `branch` and allocates a `ControlFlow`. The type must be known at the `try`
 for the first case.

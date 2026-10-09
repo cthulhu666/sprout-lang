@@ -309,10 +309,21 @@ inferred first; when its type's head has an instance in `infer.try_fusions`, the
 instance's own untyped `match` arms in place of the `branch` call and infers the result as ordinary
 code. Nothing needs re-typing, and the output is the hand-written `match` by construction. A
 fusable instance: `branch` is one `match` on its parameter, exactly one arm is `Continue(v)` for a
-`v` its pattern binds, every other arm is `Break(f)` with `f` not naming the parameter, and the
-instance has no `where` context. The success pattern replaces `v` in that arm's pattern, and the
-arm's other binders become `_`, so none captures a name the code after the `try` uses. Otherwise,
-and when the operand's head is still unknown at the `try` (`try pure(3)`), `try` calls `branch`.
+`v` its pattern binds, every other arm is `Break(f)` with `f` not naming the parameter, every
+arm's pattern is a constructor and no other arm's is the `Continue` arm's, and the instance has no
+`where` context. The success pattern replaces `v` in that arm's pattern, and the arm's other
+binders become `_`, so none captures a name the code after the `try` uses. Otherwise, and when the
+operand's head is still unknown at the `try` (`try pure(3)`), `try` calls `branch`.
+
+Fusion must not change which programs are accepted, so three things hold it to the unfused
+meaning. The disjoint constructors keep a refutable success pattern non-exhaustive: a catch-all
+failure arm would otherwise catch the success values the pattern misses
+(`try_fused_refutable_pattern.spr`). The binding-group graph adds, for each function with a `try`,
+the names fused failure arms reference (`infer.try_failure_deps`), so an unannotated helper they
+call is inferred first (`test_try_decl_order.spr`). And the instance's patterns take the `try`'s
+position, so no diagnostic points into the instance's file. A `try` with a `let..else` binds the
+success first and runs the binding as its own `let`, so the `else` is checked, and its errors
+reported, as for any `let..else`.
 Fusion was planned for lowering, from a table of typed instance bodies; in inference the instance
 types come for free and the shape check reads the source the user wrote.
 

@@ -1068,7 +1068,9 @@ fn parse_pipe_rest(tokens: Vec token.Token, i: Int, left: ast.Expr) -> Result Pa
   | Just (_, i2) ->
       do
         (rhs, i3) <- parse_logical_or(tokens, i2)
-        parse_pipe_rest(tokens, i3, pipe_into_call(left, rhs, cur_pos(tokens, i)))
+        # `x |> (try f)` would put the `try` at the head of the call it makes.
+        if ast.starts_with_try(rhs) then Err(ParseError(ast.try_place_msg, cur_pos(tokens, i2)))
+        else parse_pipe_rest(tokens, i3, pipe_into_call(left, rhs, cur_pos(tokens, i)))
 
 fn pipe_into_call(left: ast.Expr, rhs: ast.Expr, pos: source.SourcePos) -> ast.Expr =
   match rhs with

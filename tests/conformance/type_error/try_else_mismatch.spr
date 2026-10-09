@@ -1,0 +1,8 @@
+# A wrong `else` value under `(try e) else …` is the `else`'s mismatch, reported
+# at the `else` as for any `let..else` (spec §5.2.1), not the `try`'s.
+
+fn first(m: Maybe (Maybe Int)) -> Maybe Int =
+  let Just v = (try m) else 0
+  in Just(v)
+
+fn main() -> Unit !{IO} = print(to_string(first(Just (Just(1)))))
