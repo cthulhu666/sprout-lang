@@ -5248,26 +5248,29 @@ fn infer_try(
           v <- unifier.fresh(state)
           let operand_ty = unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_operand))
               inner = tail_try(success)
+              b = types.TVar(types.tyvar_id(v))
           # The match's type is the failure's, `t b` as `branch` declares it, before
           # any arm is checked: a fused arm may be more general, and a mismatch is
           # then the success arm's.
-          match (ready_try_fusion(fusions, operand_ty), failure_type(operand_ty, types.TVar(types.tyvar_id(v)))) with
-          | (Just(inst_arms, scope), Just failure_ty) ->
+          match (ready_try_fusion(fusions, operand_ty), failure_type(operand_ty, b)) with
+          | (Just(fusion, scope), Just failure_ty) ->
               infer_branches(state, env, s1, es1, typed_operand, failure_ty,
-                             fuse_try_arms(inst_arms, success, pos), Nil, operand_eff,
-                             TryBinding(pos, continue_index(inst_arms, 0), inner, Just(scope)), pos)
+                             list_map(\a -> fuse_try_arm(a, success, pos), fusion.arms), Nil, operand_eff,
+                             TryBinding(pos, fusion.success, inner, Just(scope)), pos)
           | _ ->
-              do
-                cr <- infer_expr(state, bind_local_scheme(try_operand_name, types.mono(operand_ty), env), s1, es1,
-                                 ast.CallExpr(ast.VarExpr("branch", pos), [ast.VarExpr(try_operand_name, pos)], pos))
-                match cr with
-                | InferErr epos e -> InferErr(epos, try_branch_error(epos, pos, e, operand_ty))
-                | InferOk typed_call s2 es2 _ ->
-                    infer_branches(state, env, s2, es2, splice_try_operand(typed_call, typed_operand),
-                                   break_type(unifier.apply_subst(s2, typed_ast.typed_expr_type(typed_call)),
-                                              types.TVar(types.tyvar_id(v))),
-                                   ast.try_match_arms(success, pos), Nil, operand_eff, TryBinding(pos, 0, inner, Nothing),
-                                   pos)
+              match no_propagate_error(operand_ty, env) with
+              | Just msg -> InferErr(pos, msg)
+              | Nothing ->
+                  do
+                    cr <- infer_expr(state, bind_local_scheme(try_operand_name, types.mono(operand_ty), env), s1, es1,
+                                     ast.CallExpr(ast.VarExpr("branch", pos), [ast.VarExpr(try_operand_name, pos)], pos))
+                    match cr with
+                    | InferErr epos e -> InferErr(epos, e)
+                    | InferOk typed_call s2 es2 _ ->
+                        infer_branches(state, env, s2, es2, splice_try_operand(typed_call, typed_operand),
+                                       break_type(unifier.apply_subst(s2, typed_ast.typed_expr_type(typed_call)), b),
+                                       ast.try_match_arms(success, pos), Nil, operand_eff,
+                                       TryBinding(pos, 0, inner, Nothing), pos)
 
 # `t b` for an operand `t a`.
 fn failure_type(operand_ty: types.Type, b: types.Type) -> Maybe types.Type =
@@ -5289,9 +5292,9 @@ fn tail_try(success: ast.MatchBranch) -> Maybe source.SourcePos =
 
 fn tail_try_expr(e: ast.Expr) -> Maybe source.SourcePos =
   match e with
-  | ast.LetBindExpr pat value els body pos ->
-      match ast.try_bind(pat, value, els, body, pos) with
-      | Just (ast.TryBind _ tpos _) -> Just(tpos)
+  | ast.LetBindExpr _ value _ body _ ->
+      match ast.head_try(value) with
+      | Just (_, tpos) -> Just(tpos)
       | Nothing -> tail_try_expr(body)
   | ast.DoExpr steps _ -> tail_try_steps(steps)
   | _ -> Nothing
@@ -5323,12 +5326,22 @@ fn is_try_operand(e: typed_ast.TypedExpr) -> Bool =
   | typed_ast.TVar name _ _ -> name == try_operand_name
   | _ -> false
 
-# The `branch` call fails at the `try` only when the operand's type has no
-# instance: it is not a `t a`, or its `t` has none.
-fn try_branch_error(epos: source.SourcePos, try_pos: source.SourcePos, e: String, operand_ty: types.Type) -> String =
-  if epos.index == try_pos.index && (string.starts_with(e, "Call type mismatch") || string.starts_with(e, "No instance of Propagate"))
-  then "`try` needs a type that can fail, and `" ++ type_with_holes(operand_ty) ++ "` has no `Propagate` instance"
-  else e
+# An operand whose type has no `Propagate` instance in scope: it is not a `t a`,
+# or its `t` has none yet. A variable head is the `branch` call's to resolve.
+fn no_propagate_error(operand_ty: types.Type, env: Dict types.Scheme) -> Maybe String =
+  let msg = "`try` needs a type that can fail, and `" ++ type_with_holes(operand_ty) ++ "` has no `Propagate` instance"
+  in match operand_ty with
+     | types.TVar _ -> Nothing
+     | types.TApp _ _ ->
+         match concrete_type_str(operand_ty) with
+         | Just head -> if types.is_skolem_name(head) || env_has(propagate_instance_key(head), env) then Nothing else Just(msg)
+         | Nothing -> Nothing
+     | types.TConst _ -> Just(msg)
+     | types.TFunc _ _ _ _ -> Just(msg)
+     | types.TThunk _ _ -> Just(msg)
+     | types.TTuple _ -> Just(msg)
+
+fn propagate_instance_key(head: String) -> String = "@inst:Propagate:" ++ head
 
 # --- `try` fusion ---
 #
@@ -5337,20 +5350,26 @@ fn try_branch_error(epos: source.SourcePos, try_pos: source.SourcePos, e: String
 # arm `Break(f)` with `f` not naming the parameter. Every arm must name a
 # constructor and only the success arm the success's, so a success value reaches
 # no failure arm and a refutable success pattern stays non-exhaustive. An
-# instance with a context is left alone: its dictionaries are its own. Keyed by
-# the instance's head type, with the declarations its failure arms call.
+# instance with a context is left alone: its dictionaries are its own.
 #
-# A `try` is not a dependency of what those arms call, so a fused arm could name
-# a declaration not yet typed, or typed in the same group. Until all are typed,
-# the `try` calls `branch` instead (ready_try_fusion).
+# A `try` is not a dependency of what the failure arms call, nor of the instance,
+# so either may not be typed yet where the `try` is. Until both are, the `try`
+# calls `branch` (ready_try_fusion).
 fn try_fusions(decls: List ast.Decl) -> unifier.TryFusions =
-  let names = list_fold(\ (acc, d) -> add_value_name(d, acc), set_empty(), decls)
-  in unifier.TryFusions(list_fold(\ (acc, d) -> add_try_fusion(d, names, acc), dict_empty(), decls), names, Nothing)
+  let pending = list_fold(\ (acc, d) -> add_value_name(d, acc), set_empty(), decls)
+      callable = list_fold(\ (acc, d) -> add_class_methods(d, acc), pending, decls)
+  in unifier.TryFusions(by_head = list_fold(\ (acc, d) -> add_try_fusion(d, callable, acc), dict_empty(), decls),
+                        pending = pending, scope = Nothing)
 
 fn add_value_name(d: ast.Decl, acc: Set) -> Set =
   match checked_value_name(d) with
   | Just name -> set_insert(name, acc)
   | Nothing -> acc
+
+fn add_class_methods(d: ast.Decl, acc: Set) -> Set =
+  match d with
+  | ast.ClassDecl _ _ methods _ _ -> list_fold(\ (a, m) -> set_insert(class_method_name(m), a), acc, methods)
+  | _ -> acc
 
 # The value a declaration defines whose type is known only once it is checked.
 fn checked_value_name(d: ast.Decl) -> Maybe String =
@@ -5366,124 +5385,111 @@ fn checked_value_name(d: ast.Decl) -> Maybe String =
   | ast.AliasDecl _ _ _ _ -> Nothing
   | ast.WrapDecl _ _ _ _ _ -> Nothing
 
-fn failure_arm_refs(arm: ast.MatchBranch, index: Set, acc: Set) -> Set =
-  let ast.MatchBranch pat body = arm
-  in referenced_names(body, bind_pattern(pat, set_empty()), index, acc)
-
-fn add_try_fusion(d: ast.Decl, names: Set, acc: Dict (List ast.MatchBranch, Set)) ->
-    Dict(List ast.MatchBranch, Set) =
+fn add_try_fusion(d: ast.Decl, callable: Set, acc: Dict unifier.Fusion) -> Dict unifier.Fusion =
   match d with
   | ast.InstanceDecl (ast.TypeConstraint "Propagate" [head]) [] [ast.InstanceMethodImpl "branch" [ast.Param param _ _] _ _ _ body] _ ->
       match fusable_branch_arms(param, body) with
       | Just arms ->
           dict_set(type_head_str(type_from_ast(head, dict_empty())),
-                   (arms, list_fold(\ (a, arm) -> failure_arm_refs(arm, names, a), set_empty(), arms)), acc)
+                   unifier.Fusion(arms = arms, success = success_index(arms, 0),
+                                  calls = list_fold(\ (a, arm) -> failure_calls(arm, callable, a), set_empty(), arms)),
+                   acc)
       | Nothing -> acc
   | _ -> acc
 
-# The arms to fuse a `try` on `operand_ty` with, once all their calls are typed,
-# and the scope to infer its failure arms in.
+fn failure_calls(arm: unifier.FusionArm, callable: Set, acc: Set) -> Set =
+  match arm with
+  | unifier.SuccessArm _ _ -> acc
+  | unifier.FailureArm pat failure -> referenced_names(failure, bind_pattern(pat, set_empty()), callable, acc)
+
+# The fusion for a `try` on `operand_ty`, once its instance and what its failure
+# arms call are typed and in scope, and the scope to infer those arms in.
 fn ready_try_fusion(fusions: unifier.TryFusions, operand_ty: types.Type) ->
-    Maybe(List ast.MatchBranch, Dict types.Scheme) =
-  let unifier.TryFusions by_head pending scope = fusions
-      Just head = concrete_type_str(operand_ty) else Nothing
-      Just(arms, calls) = dict_get(head, by_head) else Nothing
-      Just failure_scope = scope else Nothing
-  in if any(\n -> set_member(n, pending), set_to_list(calls)) then Nothing else Just((arms, failure_scope))
+    Maybe(unifier.Fusion, Dict types.Scheme) =
+  let Just head = concrete_type_str(operand_ty) else Nothing
+      Just fusion = dict_get(head, fusions.by_head) else Nothing
+      Just scope = fusions.scope else Nothing
+  in if env_has(propagate_instance_key(head), scope)
+        && all(\n -> env_has(n, scope) && ! set_member (n, fusions.pending), set_to_list(fusion.calls))
+     then Just((fusion, scope)) else Nothing
 
 # A failure arm names what the instance sees, not the locals at the `try`: the
 # scope of the declaration being checked, before its parameters.
 fn enter_try_scope(state: unifier.InferState, env: Dict types.Scheme) -> Unit !{IO} =
   do
     fusions <- unifier.get_try_fusions(state)
-    let unifier.TryFusions by_head pending _ = fusions
-    unifier.set_try_fusions(state, unifier.TryFusions(by_head, pending, Just(env)))
+    unifier.set_try_fusions(state, fusions with (scope = Just(env)))
 
 # A group's declarations are typed once it is checked, and its scope is done.
 fn settle_try_fusions(state: unifier.InferState, decl_vec: Vec ast.Decl, g: List Int) -> Unit !{IO} =
   do
     fusions <- unifier.get_try_fusions(state)
-    let unifier.TryFusions by_head pending _ = fusions
     unifier.set_try_fusions(state,
-      unifier.TryFusions(by_head, list_fold(\ (acc, i) -> settle_decl(decl_at(decl_vec, i), acc), pending, g),
-                         Nothing))
+      fusions with (pending = list_fold(\ (acc, i) -> settle_decl(decl_at(decl_vec, i), acc), fusions.pending, g),
+                    scope = Nothing))
 
 fn settle_decl(d: Maybe ast.Decl, pending: Set) -> Set =
   match and_then(checked_value_name, d) with
   | Just name -> set_remove(name, pending)
   | Nothing -> pending
 
-fn fusable_branch_arms(param: String, body: ast.Expr) -> Maybe (List ast.MatchBranch) =
-  match body with
-  | ast.MatchExpr (ast.VarExpr scrut _) arms _ ->
-      if scrut == param
-         && list_length(list_filter(is_continue_arm, arms)) == 1
-         && all(\a -> fusable_arm(param, a), arms)
-         && heads_disjoint(arms)
-      then Just(arms) else Nothing
+fn fusable_branch_arms(param: String, body: ast.Expr) -> Maybe (List unifier.FusionArm) =
+  let ast.MatchExpr(ast.VarExpr scrut _) arms _ = body else Nothing
+      Just classified = traverse(\a -> fusion_arm(param, a), arms) else Nothing
+  in if scrut == param && heads_disjoint(classified) then Just(classified) else Nothing
+
+# `Continue(v)` for a `v` the pattern binds, or `Break(f)` for an `f` that does
+# not name the parameter.
+fn fusion_arm(param: String, arm: ast.MatchBranch) -> Maybe unifier.FusionArm =
+  let ast.MatchBranch pat body = arm
+  in match body with
+     | ast.CallExpr (ast.VarExpr "Continue" _) [ast.VarExpr v _] _ ->
+         if list_member(v, ast.pattern_names(pat)) then Just(unifier.SuccessArm(pat, v)) else Nothing
+     | ast.CallExpr (ast.VarExpr "Break" _) [failure] _ ->
+         if set_member(param, referenced_names(failure, bind_pattern(pat, set_empty()), set_insert(param, set_empty()),
+                                               set_empty()))
+         then Nothing else Just(unifier.FailureArm(pat, failure))
+     | _ -> Nothing
+
+# One success arm, every arm a constructor, and the success's constructor in no
+# other arm.
+fn heads_disjoint(arms: List unifier.FusionArm) -> Bool =
+  match list_filter(is_success_arm, arms) with
+  | [unifier.SuccessArm(ast.ConstructorPattern success _ _) _] ->
+      all(\a -> ctor_head(a) != Nothing, arms) && list_length(list_filter(\a -> ctor_head(a) == Just(success), arms)) == 1
+  | _ -> false
+
+fn is_success_arm(arm: unifier.FusionArm) -> Bool =
+  match arm with
+  | unifier.SuccessArm _ _ -> true
+  | unifier.FailureArm _ _ -> false
+
+fn ctor_head(arm: unifier.FusionArm) -> Maybe String =
+  match fusion_arm_pattern(arm) with
+  | ast.ConstructorPattern name _ _ -> Just(name)
   | _ -> Nothing
 
-fn heads_disjoint(arms: List ast.MatchBranch) -> Bool =
-  match list_filter(is_continue_arm, arms) with
-  | [ast.MatchBranch(ast.ConstructorPattern success _ _) _] ->
-      all(has_ctor_head, arms) && list_length(list_filter(\a -> ctor_head_is(a, success), arms)) == 1
-  | _ -> false
-
-fn has_ctor_head(arm: ast.MatchBranch) -> Bool =
+fn fusion_arm_pattern(arm: unifier.FusionArm) -> ast.Pattern =
   match arm with
-  | ast.MatchBranch (ast.ConstructorPattern _ _ _) _ -> true
-  | _ -> false
+  | unifier.SuccessArm pat _ -> pat
+  | unifier.FailureArm pat _ -> pat
 
-fn ctor_head_is(arm: ast.MatchBranch, name: String) -> Bool =
-  match arm with
-  | ast.MatchBranch (ast.ConstructorPattern head _ _) _ -> head == name
-  | _ -> false
-
-# Where the success arm sits in a fusable instance's arms.
-fn continue_index(arms: List ast.MatchBranch, i: Int) -> Int =
+fn success_index(arms: List unifier.FusionArm, i: Int) -> Int =
   match arms with
   | [] -> i
-  | [arm | rest] -> if is_continue_arm(arm) then i else continue_index(rest, i + 1)
+  | [arm | rest] -> if is_success_arm(arm) then i else success_index(rest, i + 1)
 
-fn is_continue_arm(arm: ast.MatchBranch) -> Bool =
-  let ast.MatchBranch _ body = arm
-  in match continue_binder(body) with
-     | Just _ -> true
-     | Nothing -> false
-
-# `v` for an arm body `Continue(v)`.
-fn continue_binder(body: ast.Expr) -> Maybe String =
-  match body with
-  | ast.CallExpr (ast.VarExpr "Continue" _) [ast.VarExpr v _] _ -> Just(v)
-  | _ -> Nothing
-
-fn fusable_arm(param: String, arm: ast.MatchBranch) -> Bool =
-  let ast.MatchBranch pat body = arm
-  in match (continue_binder(body), body) with
-     | (Just v, _) -> list_member(v, ast.pattern_names(pat))
-     | (Nothing, ast.CallExpr(ast.VarExpr "Break" _) [failure] _) ->
-         ! set_member (param, referenced_names(failure, bind_pattern(pat, set_empty()),
-                                             set_insert(param, set_empty()), set_empty()))
-     | _ -> false
-
-# The instance's arms with `Continue(v) -> …` replaced by the success arm: the
-# instance pattern with `v` replaced by the success pattern and its other binders
-# by `_`, so none can capture a name the success arm uses. The instance's
-# patterns take the `try`'s position, so no diagnostic points into its file.
-fn fuse_try_arms(inst_arms: List ast.MatchBranch, success: ast.MatchBranch, pos: source.SourcePos) ->
-    List ast.MatchBranch =
-  list_map(\a -> fuse_try_arm(a, success, pos), inst_arms)
-
-fn fuse_try_arm(arm: ast.MatchBranch, success: ast.MatchBranch, pos: source.SourcePos) -> ast.MatchBranch =
-  let ast.MatchBranch pat body = arm
-      ast.MatchBranch success_pat success_body = success
-  in match (continue_binder(body), body) with
-     | (Just v, _) ->
+# An instance arm in the `try`'s match. The success arm takes the success pattern
+# in place of `v` and `_` for its other binders, so none can capture a name the
+# success arm uses. Patterns take the `try`'s position, so no diagnostic points
+# into the instance's file.
+fn fuse_try_arm(arm: unifier.FusionArm, success: ast.MatchBranch, pos: source.SourcePos) -> ast.MatchBranch =
+  let ast.MatchBranch success_pat success_body = success
+  in match arm with
+     | unifier.SuccessArm pat v ->
          ast.MatchBranch(pattern_at(pat, pos, \ (name, p) -> if name == v then success_pat else ast.WildcardPattern(p)),
                          success_body)
-     | (Nothing, ast.CallExpr _ [failure] _) ->
-         ast.MatchBranch(pattern_at(pat, pos, \ (name, p) -> ast.VarPattern(name, p)), failure)
-     | _ -> arm
+     | unifier.FailureArm pat failure -> ast.MatchBranch(pattern_at(pat, pos, \ (name, p) -> ast.VarPattern(name, p)), failure)
 
 # `pat` with every node at `pos` and each binder replaced by `binder(name, pos)`.
 fn pattern_at(pat: ast.Pattern, pos: source.SourcePos, binder: String -> source.SourcePos -> ast.Pattern) ->

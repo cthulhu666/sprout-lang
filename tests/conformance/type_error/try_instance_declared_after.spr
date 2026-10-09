@@ -1,0 +1,21 @@
+# The instance is declared after the `try`, so `branch` has no instance there;
+# a `try` fused from it must not accept what the call to `branch` rejects.
+
+type Fetch a =
+  | Got a
+  | Failed String
+
+fn bump(f: Fetch Int) -> Fetch Int =
+  let v = try f
+  in Got(v + 1)
+
+instance Propagate Fetch
+  fn branch(value: Fetch a) -> ControlFlow (Fetch b) a =
+    match value with
+    | Got v -> Continue(v)
+    | Failed why -> Break(Failed(why))
+
+fn main() -> Unit !{IO} =
+  match bump(Got(1)) with
+  | Got v -> print(to_string(v))
+  | Failed why -> print(why)

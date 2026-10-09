@@ -229,9 +229,32 @@ fn bound_role(polarity: Polarity, bound_is_left: Bool) -> BoundRole =
 # would become one only if arrow effect unification were ever made strict.
 export fn no_effect_subst() -> Dict types.Effect = dict_empty()
 
-export type InferState (..) =
-  | InferState (Ref Int) (Ref Int) (Ref (Dict (List String))) (Ref (List FieldObligation)) (Ref (List EffectReport)) (Ref (List ParkedBind)) (Ref TryFusions) (Ref (List source.SourcePos))
-  # InferState next_type_id  next_effect_id  ctor_map  parked_field_obligations  effect_reports  parked_binds  try_fusions  try_positions
+# The `Propagate` instances a `try` can be fused with, by head type; the
+# declarations not yet typed; and the scope of the declaration being checked,
+# without its locals. A head fuses only once what its failure arms call is typed
+# and in scope, and they are inferred in that scope (infer.try_fusions).
+export type TryFusions (..) = (by_head: Dict Fusion, pending: Set, scope: Maybe (Dict types.Scheme))
+
+# A fusable `branch`: its arms, where the success arm is, and the names the
+# failure arms call.
+export type Fusion (..) = (arms: List FusionArm, success: Int, calls: Set)
+
+# The success arm's pattern and the binder it passes on, or a failure arm's
+# pattern and failure value.
+export type FusionArm (..) =
+  | SuccessArm ast.Pattern String
+  | FailureArm ast.Pattern ast.Expr
+
+export type InferState (..) = (
+  next_type_id: Ref Int,
+  next_effect_id: Ref Int,
+  ctor_map: Ref (Dict (List String)),
+  field_obligations: Ref (List FieldObligation),
+  effect_reports: Ref (List EffectReport),
+  parked_binds: Ref (List ParkedBind),
+  try_fusions: Ref TryFusions,
+  try_positions: Ref (List source.SourcePos)
+)
 
 export fn new_state() -> InferState !{IO} =
   do
@@ -241,25 +264,23 @@ export fn new_state() -> InferState !{IO} =
     field_ref <- ref_new(Nil)
     effect_ref <- ref_new(Nil)
     bind_ref <- ref_new(Nil)
-    fusion_ref <- ref_new(TryFusions(dict_empty(), set_empty(), Nothing))
+    fusion_ref <- ref_new(TryFusions(by_head = dict_empty(), pending = set_empty(), scope = Nothing))
     try_ref <- ref_new(Nil)
-    InferState(t_id, e_id, ctor_ref, field_ref, effect_ref, bind_ref, fusion_ref, try_ref)
+    InferState(next_type_id = t_id, next_effect_id = e_id, ctor_map = ctor_ref, field_obligations = field_ref,
+               effect_reports = effect_ref, parked_binds = bind_ref, try_fusions = fusion_ref,
+               try_positions = try_ref)
 
 # Unlike take_field_obligations this ACCUMULATES across the whole program: the
 # report is a whole-program census, not a per-declaration obligation.
 export fn record_effect_report(state: InferState, r: EffectReport) -> Unit !{IO} =
-  match state with
-  | InferState _ _ _ _ effect_ref _ _ _ ->
-      do
-        prior <- ref_read(effect_ref)
-        ref_write(effect_ref, Cons(r, prior))
+  do
+    prior <- ref_read(state.effect_reports)
+    ref_write(state.effect_reports, Cons(r, prior))
 
 export fn effect_reports(state: InferState) -> List EffectReport !{IO} =
-  match state with
-  | InferState _ _ _ _ effect_ref _ _ _ ->
-      do
-        prior <- ref_read(effect_ref)
-        list_reverse_reports(prior)
+  do
+    prior <- ref_read(state.effect_reports)
+    list_reverse_reports(prior)
 
 fn list_reverse_reports(xs: List EffectReport) -> List EffectReport =
   list_reverse_reports_acc(xs, Nil)
@@ -270,39 +291,31 @@ fn list_reverse_reports_acc(xs: List EffectReport, acc: List EffectReport) -> Li
   | Cons h t -> list_reverse_reports_acc(t, Cons(h, acc))
 
 export fn park_field_obligation(state: InferState, o: FieldObligation) -> Unit !{IO} =
-  match state with
-  | InferState _ _ _ field_ref _ _ _ _ ->
-      do
-        parked <- ref_read(field_ref)
-        ref_write(field_ref, Cons(o, parked))
+  do
+    parked <- ref_read(state.field_obligations)
+    ref_write(state.field_obligations, Cons(o, parked))
 
 # Read AND clear. Every declaration body passes through the boundary that calls
 # this, so clearing keeps one declaration's unresolved accesses from being
 # discharged against the next declaration's environment — including when a body
 # errors out before its own obligations are discharged.
 export fn take_field_obligations(state: InferState) -> List FieldObligation !{IO} =
-  match state with
-  | InferState _ _ _ field_ref _ _ _ _ ->
-      do
-        parked <- ref_read(field_ref)
-        ref_write(field_ref, Nil)
-        list_reverse(parked)
+  do
+    parked <- ref_read(state.field_obligations)
+    ref_write(state.field_obligations, Nil)
+    list_reverse(parked)
 
 export fn park_bind(state: InferState, b: ParkedBind) -> Unit !{IO} =
-  match state with
-  | InferState _ _ _ _ _ bind_ref _ _ ->
-      do
-        parked <- ref_read(bind_ref)
-        ref_write(bind_ref, Cons(b, parked))
+  do
+    parked <- ref_read(state.parked_binds)
+    ref_write(state.parked_binds, Cons(b, parked))
 
 # Read AND clear, at the same boundary and for the same reason as take_field_obligations.
 export fn take_parked_binds(state: InferState) -> List ParkedBind !{IO} =
-  match state with
-  | InferState _ _ _ _ _ bind_ref _ _ ->
-      do
-        parked <- ref_read(bind_ref)
-        ref_write(bind_ref, Nil)
-        list_reverse(parked)
+  do
+    parked <- ref_read(state.parked_binds)
+    ref_write(state.parked_binds, Nil)
+    list_reverse(parked)
 
 # "$" cannot open a Sprout identifier (string.is_ident_start admits only
 # ASCII alpha or '_'; see stdlib/string.sprout), so a "$"-prefixed name can
@@ -312,60 +325,40 @@ export fn take_parked_binds(state: InferState) -> List ParkedBind !{IO} =
 # "t1") could alias a live compiler-internal metavariable of the same name
 # and silently corrupt unification (see tests/stdlib/compiler/test_fresh_tvar_collision.spr).
 export fn fresh(state: InferState) -> String !{IO} =
-  match state with
-  | InferState t_ref _ _ _ _ _ _ _ ->
-      do
-        n <- ref_read(t_ref)
-        ref_write(t_ref, n + 1)
-        "$t" ++ int_to_string(n)
+  do
+    n <- ref_read(state.next_type_id)
+    ref_write(state.next_type_id, n + 1)
+    "$t" ++ int_to_string(n)
 
 export fn fresh_effect(state: InferState) -> String !{IO} =
-  match state with
-  | InferState _ e_ref _ _ _ _ _ _ ->
-      do
-        n <- ref_read(e_ref)
-        ref_write(e_ref, n + 1)
-        "$e" ++ int_to_string(n)
+  do
+    n <- ref_read(state.next_effect_id)
+    ref_write(state.next_effect_id, n + 1)
+    "$e" ++ int_to_string(n)
 
 export fn set_ctor_map(state: InferState, ctor_map: Dict (List String)) -> Unit !{IO} =
-  match state with
-  | InferState _ _ ctor_ref _ _ _ _ _ -> ref_write(ctor_ref, ctor_map)
+  ref_write(state.ctor_map, ctor_map)
 
 export fn get_ctor_map(state: InferState) -> Dict (List String) !{IO} =
-  match state with
-  | InferState _ _ ctor_ref _ _ _ _ _ -> ref_read(ctor_ref)
-
-# The `Propagate` instances a `try` can be fused with, by head type: each one's
-# `branch` arms and the declarations its failure arms call. Then the
-# declarations not yet typed, and the scope of the declaration being checked,
-# without its locals: a head fuses only once its calls are typed, and its
-# failure arms are inferred in that scope (infer.try_fusions).
-export type TryFusions (..) =
-  | TryFusions (Dict (List ast.MatchBranch, Set)) Set (Maybe (Dict types.Scheme))
+  ref_read(state.ctor_map)
 
 export fn set_try_fusions(state: InferState, fusions: TryFusions) -> Unit !{IO} =
-  match state with
-  | InferState _ _ _ _ _ _ fusion_ref _ -> ref_write(fusion_ref, fusions)
+  ref_write(state.try_fusions, fusions)
 
 export fn get_try_fusions(state: InferState) -> TryFusions !{IO} =
-  match state with
-  | InferState _ _ _ _ _ _ fusion_ref _ -> ref_read(fusion_ref)
+  ref_read(state.try_fusions)
 
 # Where this declaration's `try`s are, so linear_check can name them.
 export fn note_try(state: InferState, pos: source.SourcePos) -> Unit !{IO} =
-  match state with
-  | InferState _ _ _ _ _ _ _ try_ref ->
-      do
-        prior <- ref_read(try_ref)
-        ref_write(try_ref, Cons(pos, prior))
+  do
+    prior <- ref_read(state.try_positions)
+    ref_write(state.try_positions, Cons(pos, prior))
 
 export fn take_try_positions(state: InferState) -> List source.SourcePos !{IO} =
-  match state with
-  | InferState _ _ _ _ _ _ _ try_ref ->
-      do
-        positions <- ref_read(try_ref)
-        ref_write(try_ref, Nil)
-        positions
+  do
+    positions <- ref_read(state.try_positions)
+    ref_write(state.try_positions, Nil)
+    positions
 
 # ---------------------------------------------------------------------------
 # apply_subst — walk a Type, replacing bound TVars
@@ -1090,12 +1083,10 @@ fn fresh_pattern_skolem(state: InferState) -> types.Type !{IO} =
 # open a user identifier, so "$sk<n>" can never name a real type — same
 # no-collision guarantee as `fresh`. Shares the tyvar counter for uniqueness.
 fn fresh_skolem(state: InferState) -> String !{IO} =
-  match state with
-  | InferState t_ref _ _ _ _ _ _ _ ->
-      do
-        n <- ref_read(t_ref)
-        ref_write(t_ref, n + 1)
-        "$sk" ++ int_to_string(n)
+  do
+    n <- ref_read(state.next_type_id)
+    ref_write(state.next_type_id, n + 1)
+    "$sk" ++ int_to_string(n)
 
 # Instantiation is a SIMULTANEOUS renaming, but `apply_full_subst` chases: it
 # re-applies the map to its own result. So a target the map still binds is

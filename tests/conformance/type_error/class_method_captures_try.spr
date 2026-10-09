@@ -7,8 +7,24 @@ class Tree t
 instance Tree Int
   fn branch(x: Int) -> Int = x + 1
 
-fn f(xs: List Int) -> List Int =
-  let v = try xs
-  in [v]
+type Box a =
+  | Full a
+  | Empty
 
-fn main() -> Unit !{IO} = print(to_string(f([1])))
+# Not one `match`, so a `try` on a `Box` calls `branch`.
+instance Propagate Box
+  fn branch(value: Box a) -> ControlFlow (Box b) a = box_flow(value)
+
+fn box_flow(value: Box a) -> ControlFlow (Box b) a =
+  match value with
+  | Full v -> Continue(v)
+  | Empty -> Break(Empty)
+
+fn f(b: Box Int) -> Box Int =
+  let v = try b
+  in Full(v + 1)
+
+fn main() -> Unit !{IO} =
+  match f(Full(1)) with
+  | Full v -> print(to_string(v))
+  | Empty -> print("empty")

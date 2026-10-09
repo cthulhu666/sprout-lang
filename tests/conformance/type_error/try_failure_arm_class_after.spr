@@ -1,0 +1,28 @@
+# The instance and the class its failure arm calls are both declared after the
+# `try`: rejected at the `try` as the call to `branch` would be, not with the
+# instance's error placed in `bump`.
+
+type Fetch a =
+  | Got a
+  | Failed String
+
+fn bump(f: Fetch Int) -> Fetch Int =
+  let v = try f
+  in Got(v + 1)
+
+instance Propagate Fetch
+  fn branch(value: Fetch a) -> ControlFlow (Fetch b) a =
+    match value with
+    | Got v -> Continue(v)
+    | Failed why -> Break(Failed(describe(why)))
+
+class Describe a
+  fn describe(x: a) -> String
+
+instance Describe String
+  fn describe(x: String) -> String = "described: " ++ x
+
+fn main() -> Unit !{IO} =
+  match bump(Got(1)) with
+  | Got v -> print(to_string(v))
+  | Failed why -> print(why)

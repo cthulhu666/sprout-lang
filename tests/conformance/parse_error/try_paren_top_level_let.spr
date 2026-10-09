@@ -1,0 +1,9 @@
+# A top-level `let` has no block for a failure to end, in parentheses too.
+
+type Point = (x: Int, y: Int)
+
+fn pt() -> Maybe Point = Nothing
+
+let top = (try pt()).x
+
+fn main() -> Unit !{IO} = print(to_string(top))
