@@ -1,0 +1,24 @@
+# A fused failure arm is typed as `branch` declares it: `Res e b`, keeping the
+# operand's `e`. So `Break(Gone)` does not let a `Res String _` failure leave a
+# block that returns `Res Int _`, just as it does not when `branch` is called.
+
+type Res e a =
+  | Good a
+  | Bad e
+  | Gone
+
+instance Propagate (Res e)
+  fn branch(value: Res e a) -> ControlFlow (Res e b) a =
+    match value with
+    | Good v -> Continue(v)
+    | Bad _ -> Break(Gone)
+    | Gone -> Break(Gone)
+
+fn f(r: Res String Int) -> Res Int Int =
+  let x = try r
+  in Good(x + 1)
+
+fn main() -> Unit !{IO} =
+  match f(Good(1)) with
+  | Good v -> print(to_string(v))
+  | _ -> print("failed")
