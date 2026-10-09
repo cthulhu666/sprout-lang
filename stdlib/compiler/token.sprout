@@ -60,3 +60,9 @@ export fn is_eof_token(token: Token) -> Bool =
   match token_kind(token) with
   | TokenEofKind -> true
   | _ -> false
+
+# The keyword `kw`: an identifier spelled the same is not one.
+export fn is_keyword_token(token: Token, kw: String) -> Bool =
+  match token_kind(token) with
+  | TokenKeywordKind -> token_text(token) == kw
+  | _ -> false

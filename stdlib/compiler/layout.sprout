@@ -91,16 +91,16 @@ fn step(tokens: Vec token.Token, i: Int, t: token.Token, st: LState) -> Result L
 # item at any column: no other parse can take it.
 fn awaited(t: token.Token, stack: List Frame) -> Bool =
   match stack with
-  | [FIf | _] -> is_keyword(t, "then")
-  | [FThen | _] -> is_keyword(t, "else")
-  | [FScrut | _] -> is_keyword(t, "with")
+  | [FIf | _] -> token.is_keyword_token(t, "then")
+  | [FThen | _] -> token.is_keyword_token(t, "else")
+  | [FScrut | _] -> token.is_keyword_token(t, "with")
   | _ -> false
 
 # A class or instance body opens at a line start, so a `fn` on the head line
 # would become a top-level function.
 fn head_line_member(t: token.Token, line_start: Bool, stack: List Frame) -> Maybe BodyKind =
   match stack with
-  | [FRoot _ (DeclClassHead kind _) | _] -> if is_keyword(t, "fn") && ! line_start then Just(kind) else Nothing
+  | [FRoot _ (DeclClassHead kind _) | _] -> if token.is_keyword_token(t, "fn") && ! line_start then Just(kind) else Nothing
   | _ -> Nothing
 
 fn member_on_head(kind: BodyKind) -> String =
@@ -189,11 +189,11 @@ fn on_line(tokens: Vec token.Token, i: Int, t: token.Token, st: LState) -> Resul
   match top_block(st.stack) with
   | Nothing -> Ok(st)
   | Just f ->
-      if is_keyword(t, "fn") && in_expression(f) then on_line(tokens, i, t, close_block(st, pos_of(t)))
+      if token.is_keyword_token(t, "fn") && in_expression(f) then on_line(tokens, i, t, close_block(st, pos_of(t)))
       else block_line(tokens, i, t, st, f)
 
 fn continues_arms(t: token.Token) -> Bool =
-  is_symbol(t, "|") || is_keyword(t, "then") || is_keyword(t, "else")
+  is_symbol(t, "|") || token.is_keyword_token(t, "then") || token.is_keyword_token(t, "else")
 
 fn close_expressions(st: LState, pos: source.SourcePos) -> LState =
   match top_block(st.stack) with
@@ -221,12 +221,12 @@ fn block_line(tokens: Vec token.Token, i: Int, t: token.Token, st: LState, f: Fr
          if k < c || (k == c && ! (continues_arms(t))) then on_line(tokens, i, t, close_block(st, pos))
          else Ok(st)
      # An `in` line belongs to the innermost `let`, which the `in` rule closes.
-     | FLet _ fl -> if is_keyword(t, "in") then Ok(st) else let_line(tokens, i, t, st, fl)
+     | FLet _ fl -> if token.is_keyword_token(t, "in") then Ok(st) else let_line(tokens, i, t, st, fl)
      | FWhere _ fl -> where_line(tokens, i, t, st, fl)
      | FBody kind c fl _ ->
          if body_ends(t, k, fl, st.stack) then on_line(tokens, i, t, close_block(st, pos))
-         else if is_keyword(t, "fn") && k == c then Ok(set_decl(separate(st, pos), DeclStart(k)))
-         else if is_keyword(t, "fn") then Err(LayoutError(misaligned_member(kind), pos))
+         else if token.is_keyword_token(t, "fn") && k == c then Ok(set_decl(separate(st, pos), DeclStart(k)))
+         else if token.is_keyword_token(t, "fn") then Err(LayoutError(misaligned_member(kind), pos))
          else Ok(st)
      | FRoot _ d -> Ok(root_line(t, st, d))
      | _ -> Ok(st)
@@ -234,9 +234,9 @@ fn block_line(tokens: Vec token.Token, i: Int, t: token.Token, st: LState, f: Fr
 # A body ends at or left of its declaration's column, except at a member's
 # `where`, and at a declaration keyword other than `fn` in any column.
 fn body_ends(t: token.Token, k: Int, fl: Int, stack: List Frame) -> Bool =
-  if is_keyword(t, "fn") then k <= fl
+  if token.is_keyword_token(t, "fn") then k <= fl
   else if starts_decl(t) then true
-  else k <= fl && ! (is_keyword(t, "where") && body_where(stack))
+  else k <= fl && ! (token.is_keyword_token(t, "where") && body_where(stack))
 
 fn misaligned_member(kind: BodyKind) -> String =
   match kind with
@@ -277,7 +277,7 @@ fn root_line(t: token.Token, st: LState, d: Decl) -> LState =
       k = pos.column
   in match d with
      | DeclClassHead kind dcol ->
-         if is_keyword(t, "fn") && k > dcol then
+         if token.is_keyword_token(t, "fn") && k > dcol then
            push_block(set_decl(st, DeclOther), FBody(kind, k, dcol, DeclStart(k)), pos)
          else new_item(t, st, k)
      | _ -> new_item(t, st, k)
@@ -381,7 +381,7 @@ fn on_token(tokens: Vec token.Token, i: Int, t: token.Token, st_in: LState) -> L
 # expression blocks before it, as in a one-line brace-form body. A `let` does
 # so only right after an operand on its own line.
 fn item_keyword(tokens: Vec token.Token, i: Int, t: token.Token) -> Bool =
-  if is_keyword(t, "let") then follows_operand(tokens, i) && same_line_as_previous(tokens, i, t)
+  if token.is_keyword_token(t, "let") then follows_operand(tokens, i) && same_line_as_previous(tokens, i, t)
   else starts_decl(t)
 
 # An item begun by `export` keeps the `export`'s column.
@@ -427,7 +427,7 @@ fn decl_step(t: token.Token, st: LState) -> LState =
   | [FRoot c (DeclStart col) | rest] -> st with (stack = Cons(FRoot(c, start_decl(t, col)), rest))
   | [FBody kind c fl (DeclStart col) | rest] ->
       st with (stack = Cons(FBody(kind, c, fl, start_decl(t, col)), rest))
-  | _ -> if is_keyword(t, "fn") then set_decl(st, DeclFnHead) else st
+  | _ -> if token.is_keyword_token(t, "fn") then set_decl(st, DeclFnHead) else st
 
 # A brace-form body ends its head, so the root forgets the class head.
 fn open_bracket(t: token.Token, st: LState) -> LState =
@@ -445,10 +445,10 @@ fn bracket_frame(t: token.Token, stack: List Frame) -> Frame =
   | _ -> FBracket
 
 fn start_decl(t: token.Token, col: Int) -> Decl =
-  if is_keyword(t, "export") then DeclStart(col)
-  else if is_keyword(t, "fn") then DeclFnHead
-  else if is_keyword(t, "class") then DeclClassHead(ClassBody, col)
-  else if is_keyword(t, "instance") then DeclClassHead(InstanceBody, col)
+  if token.is_keyword_token(t, "export") then DeclStart(col)
+  else if token.is_keyword_token(t, "fn") then DeclFnHead
+  else if token.is_keyword_token(t, "class") then DeclClassHead(ClassBody, col)
+  else if token.is_keyword_token(t, "instance") then DeclClassHead(InstanceBody, col)
   else DeclOther
 
 fn item_starting(stack: List Frame) -> Bool =
@@ -720,7 +720,7 @@ fn is_ident(t: token.Token) -> Bool =
   | token.TokenIdentKind -> true
   | _ -> false
 
-fn is_keyword(t: token.Token, w: String) -> Bool =
+fn token.is_keyword_token(t: token.Token, w: String) -> Bool =
   match token.token_kind(t) with
   | token.TokenKeywordKind -> token.token_text(t) == w
   | _ -> false

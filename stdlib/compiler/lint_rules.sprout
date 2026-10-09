@@ -275,7 +275,7 @@ let min_staircase_depth = 3
 fn written_matches(toks: Vec token.Token) -> Set = vec_fold(add_if_match, set_empty(), toks)
 
 fn add_if_match(acc: Set, t: token.Token) -> Set =
-  if tok_is_keyword(t, "match") then set_insert(pos_key(token.token_position(t)), acc)
+  if token.is_keyword_token(t, "match") then set_insert(pos_key(token.token_position(t)), acc)
   else acc
 
 fn pos_key(pos: source.SourcePos) -> String = int_to_string(pos.index)
@@ -1015,11 +1015,6 @@ fn brace_tok_at(tokens: Vec token.Token, i: Int) -> token.Token =
   | Just t -> t
   | Nothing -> token.eof_token(source.SourcePos(index = 0, line = 0, column = 0))
 
-fn tok_is_keyword(t: token.Token, kw: String) -> Bool =
-  match token.token_kind(t) with
-  | token.TokenKeywordKind -> token.token_text(t) == kw
-  | _ -> false
-
 fn brace_is_symbol(t: token.Token, sym: String) -> Bool =
   match token.token_kind(t) with
   | token.TokenSymbolKind -> token.token_text(t) == sym
@@ -1051,8 +1046,8 @@ fn find_body_brace(tokens: Vec token.Token, i: Int, n: Int) -> Maybe source.Sour
 
 fn brace_body_scan(tokens: Vec token.Token, i: Int, n: Int, acc: List LintFinding) -> List LintFinding =
   if i >= n then list_reverse(acc)
-  else if tok_is_keyword(brace_tok_at(tokens, i), "class")
-       || tok_is_keyword(brace_tok_at(tokens, i), "instance") then
+  else if token.is_keyword_token(brace_tok_at(tokens, i), "class")
+       || token.is_keyword_token(brace_tok_at(tokens, i), "instance") then
     match find_body_brace(tokens, i + 1, n) with
     | Nothing -> brace_body_scan(tokens, i + 1, n, acc)
     | Just pos ->

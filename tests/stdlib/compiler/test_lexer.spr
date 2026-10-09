@@ -21,6 +21,11 @@ fn kind_str(t: token.Token) -> String =
   | token.TokenLayoutSep -> "layout_sep"
   | token.TokenLayoutClose -> "layout_close"
 
+fn keyword_at(src: String, n: Int, kw: String) -> Bool =
+  let Ok toks = lexer.tokenize(src) else false
+      Just t = vec_get(n, toks) else false
+  in token.is_keyword_token(t, kw)
+
 fn tok_kind_at(src: String, n: Int) -> String =
   match lexer.tokenize(src) with
   | Err _ -> "lex_error"
@@ -145,6 +150,11 @@ fn main() -> Unit !{IO} =
     check_eq("fn main first kind", tok_kind_at("fn main", 0), "keyword"),
     check_eq("fn main second kind", tok_kind_at("fn main", 1), "ident"),
     check_eq("fn main second text", tok_text_at("fn main", 1), "main"),
+
+    # is_keyword_token: the kind and the text both have to match
+    check_true("is_keyword_token: match is match", keyword_at("match x", 0, "match")),
+    check_false("is_keyword_token: match is not with", keyword_at("match x", 0, "with")),
+    check_false("is_keyword_token: an ident is never a keyword", keyword_at("match x", 1, "x")),
 
     # EOF on empty input
     check_eq("empty string eof", tok_kind_at("", 0), "eof"),

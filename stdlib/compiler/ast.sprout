@@ -306,9 +306,6 @@ export fn starts_with_try(e: Expr) -> Bool =
   | Just _ -> true
   | Nothing -> false
 
-# Inference's own binders: no user name starts with `$` (spec §2).
-export fn is_inference_name(name: String) -> Bool = str_starts_with(name, "$")
-
 # A whole `try e` right-hand side without `else` matches the success with the
 # binding's pattern. Otherwise the success is bound first and the binding runs
 # as its own `let`, so its `else` is checked and reported as any `let..else` is.
