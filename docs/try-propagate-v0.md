@@ -332,7 +332,8 @@ position, so no diagnostic points into the instance's file. Two `try`s in one bl
 differently are reported at the later one, naming the earlier, past any steps between them
 (`try_two_tries_disagree.spr`, `try_two_tries_between.spr`), since neither is wrong alone. A `try`
 with a `let..else` binds the success first and runs the binding as its own `let`, so the `else` is
-checked, and its errors reported, as for any `let..else`.
+checked, and its errors reported, as for any `let..else`. `x <- (try e).f` does the same with a
+`<-`, so `.f`'s own `Maybe` or `Result` is still unwrapped (`test_try.spr`).
 Fusion was planned for lowering, from a table of typed instance bodies; in inference the instance
 types come for free and the shape check reads the source the user wrote.
 
@@ -363,7 +364,9 @@ helps every ADT, but it is separate work.
 
 ## 6. Diagnostics
 
-Each is reported at the `try`, the `let` or the `<-`, never at a later use. Step 1's are as built
+Each is reported at the `try`, the `let` or the `<-`, never at a later use, except a block value
+whose type is not the failure's when the declaration returns the failure's: that value is the one
+to change, so it is reported there, naming the `try`. Step 1's are as built
 (`tests/conformance/{parse_error,type_error}/try_*`); steps 3 and 5 are proposed.
 
 ```
@@ -372,6 +375,8 @@ wrong block type   this `try` passes on a `Result String _` failure, but the blo
                    Handle the failure here with `let..else`, or make the block return
                    `Result String _`.
 Maybe in Result    ... plus: To turn `Nothing` into an error, write `let Just x = e else Err(…)`.
+wrong block value  this is `String`, but the `try` at 8:13 passes on a `Maybe _` failure, so the
+                   block must return `Maybe _`
 two tries differ   this `try` passes on a `Result Int _` failure, but the `try` at 9:11 passes on
                    a `Result String _` failure. A block's `try`s must pass on the same type;
                    handle one of them with `let..else`.

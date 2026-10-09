@@ -199,9 +199,39 @@ export type Expr (..) =
   # (head_try) or as a `do` statement; inference rewrites it with the binding.
   | TryExpr Expr source.SourcePos
 
+export fn expr_pos(e: Expr) -> source.SourcePos =
+  match e with
+  | VarExpr _ pos -> pos
+  | IntExpr _ pos -> pos
+  | FloatExpr _ pos -> pos
+  | BoolExpr _ pos -> pos
+  | StringExpr _ pos -> pos
+  | StringTemplateExpr _ pos -> pos
+  | CharExpr _ pos -> pos
+  | UnitExpr pos -> pos
+  | TupleExpr _ pos -> pos
+  | IfExpr _ _ _ pos -> pos
+  | MatchExpr _ _ pos -> pos
+  | CallExpr _ _ pos -> pos
+  | LambdaExpr _ _ pos -> pos
+  | BinaryExpr _ _ _ pos -> pos
+  | UnaryExpr _ _ pos -> pos
+  | IntRangeExpr _ _ pos -> pos
+  | DoExpr _ pos -> pos
+  | RecordExpr _ _ pos -> pos
+  | GetFieldExpr _ _ pos -> pos
+  | RecordUpdateExpr _ _ pos -> pos
+  | ComprehensionExpr _ _ pos -> pos
+  | LetBindExpr _ _ _ _ pos -> pos
+  | TryExpr _ pos -> pos
+
 # --- Binding elaboration ---
 # The match each binding form means. Inference rewrites through these, and lint
 # reads a program through elaborate_bindings, since its rules match these shapes.
+
+# Inference's binders. `$` keeps them apart from every user name (spec §2).
+let try_value_name = "$try"
+let try_failure_name = "$failure"
 
 export fn let_bind_match(pat: Pattern, value: Expr, els: Maybe LetElse, body: Expr,
                          pos: source.SourcePos) -> Expr =
@@ -215,16 +245,26 @@ export fn let_bind_branches(pat: Pattern, els: Maybe LetElse, body: Expr,
   Cons(MatchBranch(pat, body), else_branch(els, pos))
 
 # A `let` whose body is the steps after the binding. `<-` first runs the value
-# into a fresh temp and binds that, unless it is a `try`: the match runs it, and
-# a temp `<-` would unwrap a `Maybe` or `Result` success a second time.
+# into a fresh temp and binds that. A bare `try` skips the temp, since its match
+# already unwraps the success; a chain on one, `(try e).f`, binds the success and
+# then runs the chain with `<-`.
 export fn do_pat_steps(kind: DoBindKind, pat: Pattern, value: Expr, els: Maybe LetElse,
                        rest: List DoStep, pos: source.SourcePos) -> List DoStep =
-  match (kind, head_try(value)) with
-  | (ArrowBind, Nothing) ->
-      let tmp = do_tmp_name(pos)
-      in [DoBindStep (VarPattern(tmp, pos), value),
-          DoExprStep(LetBindExpr(pat, VarExpr(tmp, pos), els, DoExpr(rest, pos), pos))]
-  | _ -> [DoExprStep (LetBindExpr(pat, value, els, DoExpr(rest, pos), pos))]
+  match (kind, value) with
+  | (LetBind, _) -> [let_step(pat, value, els, rest, pos)]
+  | (ArrowBind, TryExpr _ _) -> [let_step(pat, value, els, rest, pos)]
+  | (ArrowBind, _) ->
+      let Just(operand, tpos, chain) = split_head_try(value) else temp_bind_steps(pat, value, els, rest, pos)
+      in [let_step(VarPattern(try_value_name, tpos), TryExpr(operand, tpos), Nothing,
+                   Cons(DoPatStep (ArrowBind, pat, chain, els, pos), rest), pos)]
+
+fn temp_bind_steps(pat: Pattern, value: Expr, els: Maybe LetElse, rest: List DoStep,
+                   pos: source.SourcePos) -> List DoStep =
+  let tmp = do_tmp_name(pos)
+  in [DoBindStep (VarPattern(tmp, pos), value), let_step(pat, VarExpr(tmp, pos), els, rest, pos)]
+
+fn let_step(pat: Pattern, value: Expr, els: Maybe LetElse, rest: List DoStep, pos: source.SourcePos) -> DoStep =
+  DoExprStep(LetBindExpr(pat, value, els, DoExpr(rest, pos), pos))
 
 # A non-final `try e` statement means `_ <- try e`.
 export fn try_statement_steps(operand: Expr, rest: List DoStep, pos: source.SourcePos) -> List DoStep =
@@ -236,36 +276,38 @@ export fn try_statement_steps(operand: Expr, rest: List DoStep, pos: source.Sour
 export type TryBind (..) =
   | TryBind Expr source.SourcePos MatchBranch
 
-# Inference's binders. `$` keeps them apart from every user name (spec §2).
-let try_value_name = "$try"
-let try_failure_name = "$failure"
-
 # A `try` anywhere else, from the parser or, inside parentheses, from inference.
 export let try_place_msg =
   "`try` can only start the right-hand side of a `let`, `where` or `<-` binding, or a `do` statement"
 
-# The `try` a right-hand side starts with, through a postfix chain:
-# `try e`, `(try e).f`, `(try e)(x)`, `(try e) with (…)`.
-export fn head_try(e: Expr) -> Maybe (Expr, source.SourcePos) =
+# The `try` a right-hand side starts with, through a postfix chain — `try e`,
+# `(try e).f`, `(try e)(x)`, `(try e) with (…)` — its position, and the chain
+# with the success, `$try`, in its place.
+fn split_head_try(e: Expr) -> Maybe (Expr, source.SourcePos, Expr) =
   match e with
-  | TryExpr operand pos -> Just((operand, pos))
-  | GetFieldExpr base _ _ -> head_try(base)
-  | CallExpr callee _ _ -> head_try(callee)
-  | RecordUpdateExpr base _ _ -> head_try(base)
+  | TryExpr operand pos -> Just((operand, pos, VarExpr(try_value_name, pos)))
+  | GetFieldExpr base field pos ->
+      let Just(operand, tpos, chain) = split_head_try(base) else Nothing
+      in Just((operand, tpos, GetFieldExpr(chain, field, pos)))
+  | CallExpr callee args pos ->
+      let Just(operand, tpos, chain) = split_head_try(callee) else Nothing
+      in Just((operand, tpos, CallExpr(chain, args, pos)))
+  | RecordUpdateExpr base fields pos ->
+      let Just(operand, tpos, chain) = split_head_try(base) else Nothing
+      in Just((operand, tpos, RecordUpdateExpr(chain, fields, pos)))
   | _ -> Nothing
+
+export fn head_try(e: Expr) -> Maybe (Expr, source.SourcePos) =
+  let Just(operand, pos, _) = split_head_try(e) else Nothing
+  in Just((operand, pos))
 
 export fn starts_with_try(e: Expr) -> Bool =
   match head_try(e) with
   | Just _ -> true
   | Nothing -> false
 
-fn replace_head_try(e: Expr, v: Expr) -> Expr =
-  match e with
-  | TryExpr _ _ -> v
-  | GetFieldExpr base field pos -> GetFieldExpr(replace_head_try(base, v), field, pos)
-  | CallExpr callee args pos -> CallExpr(replace_head_try(callee, v), args, pos)
-  | RecordUpdateExpr base fields pos -> RecordUpdateExpr(replace_head_try(base, v), fields, pos)
-  | _ -> e
+# Inference's own binders: no user name starts with `$` (spec §2).
+export fn is_inference_name(name: String) -> Bool = str_starts_with(name, "$")
 
 # A whole `try e` right-hand side without `else` matches the success with the
 # binding's pattern. Otherwise the success is bound first and the binding runs
@@ -275,8 +317,7 @@ export fn try_bind(pat: Pattern, value: Expr, els: Maybe LetElse, body: Expr,
   match (value, els) with
   | (TryExpr operand tpos, Nothing) -> Just(TryBind(operand, tpos, MatchBranch(pat, body)))
   | _ ->
-      let Just(operand, tpos) = head_try(value) else Nothing
-          rhs = replace_head_try(value, VarExpr(try_value_name, tpos))
+      let Just(operand, tpos, rhs) = split_head_try(value) else Nothing
       in Just(TryBind(operand, tpos,
                       MatchBranch(VarPattern(try_value_name, tpos), LetBindExpr(pat, rhs, els, body, pos))))
 

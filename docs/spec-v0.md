@@ -2064,15 +2064,17 @@ with the prelude's `branch`, `Continue` and `Break` (§8.5), never a module's ow
 local of that name. `e` runs once. `p` may be any pattern a `let` takes; a refutable
 one without `else` is a non-exhaustive match. `x <- try e` runs `e`'s effect and binds
 the success: it never unwraps a second time, so `e : Result E (Maybe A)` binds a
-`Maybe A`. A `do` statement `try e` means `_ <- try e`: it passes a failure on and
-drops the success. As a block's last step `try` is an error, since the block ends
-there anyway.
+`Maybe A`. `x <- (try e).f` binds the success, then runs `<-` on its `.f` as on any
+value: a `Maybe` or `Result` there is unwrapped. A `do` statement `try e` means
+`_ <- try e`: it passes a failure on and drops the success. As a block's last step
+`try` is an error, since the block ends there anyway.
 
 **Typing.** `e : t a` with an instance `Propagate t`; the binding gets `a`. The
 failure `f : t b` becomes the value of the enclosing `let … in` or `do` block, the
 function's when that block is its body, so the block's type must unify with `t b`:
 a `Maybe` failure in a `Result` block, or `Result String _` in a `Result Int _` block,
-is an error at the `try`. A failure in a nested block ends only that block; a `do`
+is an error at the `try`. When the declaration returns the failure's type, a block
+value of another type is the error instead, at that value. A failure in a nested block ends only that block; a `do`
 inside a lambda is the lambda's own block.
 
 **Reserved.** No `else` and no `with` directly after a `try` operand. For `let..else`

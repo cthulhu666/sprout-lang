@@ -204,6 +204,25 @@ fn keep_inner(r: Result String (Maybe Int)) -> Result String Int !{IO} =
     | Just v -> Ok(v)
     | Nothing -> Ok(-1)
 
+# `<-` on a chain that starts with `try` unwraps the chain's own value (§5.9).
+type Config = (port: Maybe Int, status: Result String Int)
+
+fn load_config(ok: Bool, port: Maybe Int) -> Maybe Config =
+  if ok then Just(Config(port = port, status = Ok(0))) else Nothing
+
+fn config_port(ok: Bool, port: Maybe Int) -> Maybe String =
+  do
+    p <- (try load_config(ok, port)).port
+    Just(to_string(p))
+
+fn load_job(ok: Bool, status: Result String Int) -> Result String Config =
+  if ok then Ok(Config(port = Nothing, status = status)) else Err("no job")
+
+fn job_status(ok: Bool, status: Result String Int) -> Result String String =
+  do
+    _ <- (try load_job(ok, status)).status
+    Ok("continued")
+
 # A multi-binding `do`-`let`: a failure skips the later bindings.
 fn group(a: String, b: String) -> Maybe Int =
   do
@@ -275,6 +294,12 @@ fn main() -> Unit !{IO} =
       check_eq("arrow binds the success whole", kept, Ok(4)),
       check_eq("arrow inner nothing", kept_nothing, Ok(-1)),
       check_eq("arrow outer failure", kept_err, Err("outer")),
+      check_eq("arrow after a try chain", config_port(true, Just(4)), Just("4")),
+      check_eq("arrow after a try chain fails", config_port(true, Nothing), Nothing),
+      check_eq("arrow after a try chain, try fails", config_port(false, Just(4)), Nothing),
+      check_eq("wildcard arrow after a try chain", job_status(true, Ok(1)), Ok("continued")),
+      check_eq("wildcard arrow after a try chain fails", job_status(true, Err("bad")), Err("bad")),
+      check_eq("wildcard arrow after a try chain, try fails", job_status(false, Ok(1)), Err("no job")),
       check_eq("do-let group", group("1", "2"), Just(12)),
       check_eq("do-let group fails", group("x", "2"), Nothing),
       check_eq("lambda blocks fail alone", list_map(digit_plus_five(), ["2", "x", "1"]),

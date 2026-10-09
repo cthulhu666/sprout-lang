@@ -230,10 +230,13 @@ fn bound_role(polarity: Polarity, bound_is_left: Bool) -> BoundRole =
 export fn no_effect_subst() -> Dict types.Effect = dict_empty()
 
 # The `Propagate` instances a `try` can be fused with, by head type; the
-# declarations not yet typed; and the scope of the declaration being checked,
-# without its locals. A head fuses only once what its failure arms call is typed
-# and in scope, and they are inferred in that scope (infer.try_fusions).
-export type TryFusions (..) = (by_head: Dict Fusion, pending: Set, scope: Maybe (Dict types.Scheme))
+# declarations not yet typed; and the declaration being checked. A head fuses
+# only once what its failure arms call is typed and in scope, and they are
+# inferred in that scope (infer.try_fusions).
+export type TryFusions (..) = (by_head: Dict Fusion, pending: Set, decl: Maybe TryDecl)
+
+# A declaration's scope without its locals, and its return type.
+export type TryDecl (..) = (scope: Dict types.Scheme, returns: types.Type)
 
 # A fusable `branch`: its arms, where the success arm is, and the names the
 # failure arms call.
@@ -264,7 +267,7 @@ export fn new_state() -> InferState !{IO} =
     field_ref <- ref_new(Nil)
     effect_ref <- ref_new(Nil)
     bind_ref <- ref_new(Nil)
-    fusion_ref <- ref_new(TryFusions(by_head = dict_empty(), pending = set_empty(), scope = Nothing))
+    fusion_ref <- ref_new(TryFusions(by_head = dict_empty(), pending = set_empty(), decl = Nothing))
     try_ref <- ref_new(Nil)
     InferState(next_type_id = t_id, next_effect_id = e_id, ctor_map = ctor_ref, field_obligations = field_ref,
                effect_reports = effect_ref, parked_binds = bind_ref, try_fusions = fusion_ref,

@@ -164,9 +164,10 @@ fn template_parts_use_any(names: List String, parts: List ast.TemplateExprPart) 
 # Does a terminal branch's body depend on its own (failing) match? `let <pat> = e
 # else fb` cannot express that: `fb` is matched against a bare wildcard
 # (ast.let_bind_match), so it has no access to whatever the
-# failing pattern would have bound (e.g. the `msg` in `Err msg -> ...`).
+# failing pattern would have bound (e.g. the `msg` in `Err msg -> ...`). A `try`'s
+# own `Break $failure -> $failure` does not count: that link is already flat.
 fn terminal_needs_own_payload(pat: ast.Pattern, body: ast.Expr) -> Bool =
-  expr_uses_any(ast.pattern_names(pat), body)
+  expr_uses_any(list_filter(\n -> ! ast.is_inference_name (n), ast.pattern_names(pat)), body)
 
 # ---------------------------------------------------------------------------
 # Generic ast.Expr traversal — every variant, modeled on checker.sprout's
