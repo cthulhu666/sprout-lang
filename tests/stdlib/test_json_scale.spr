@@ -76,7 +76,8 @@ fn decodes(case: (String, String)) -> Bool =
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
-    # 64x more input: linear ~64x, quadratic ~4000x.
+    # 64x more input: linear ~64x, quadratic ~4000x. CI runs this under SPROUT_GC_HDRCHECK=1, where
+    # `str_byte_len` is O(n), so the parser must not read it per byte (docs/gates.md §ratio arms).
     assert_scales(state, "string escapes", decodes, escaped_literal(9), escaped_literal(15), 400)
     # The string decoder's escape step called back into the run loop instead of looping, so 2^15
     # escapes (64 KiB) overflowed the stack.
