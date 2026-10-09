@@ -439,10 +439,6 @@ fn find_chain_roots(terminates: ast.Pattern -> Bool, pat: ast.Pattern) -> List s
 fn find_chain_roots_in(terminates: ast.Pattern -> Bool, pats: List ast.Pattern) -> List source.SourcePos =
   concat_map(\p -> find_chain_roots(terminates, p), pats)
 
-fn find_chain_roots_in_decls(terminates: ast.Pattern -> Bool, decls: List ast.Decl)
-    -> List source.SourcePos =
-  find_chain_roots_in(terminates, patterns_in_decls(decls))
-
 # Every pattern position under `decls`, in source order. Patterns exist only at
 # match branches, do-binds and comprehension generators; fn/lambda params are
 # bare names. Both list rules share this walk, so a new Expr form is added once.
@@ -523,11 +519,12 @@ fn nth_line(lines: List String, target: Int, cur: Int) -> String =
 fn drop_desugared_list_patterns(src: String, positions: List source.SourcePos) -> List source.SourcePos =
   filter(\pos -> is_written_as_ctor(src, pos.line, pos.column), positions)
 
-fn list_shape_findings(src: String, prog: ast.Program) -> List LintFinding =
-  match prog with
-  | ast.Program decls _ ->
-      map(\pos -> mk_finding(pos, "list-shape-pattern", list_shape_message),
-        drop_desugared_list_patterns(src, find_chain_roots_in_decls(chain_terminates_in_nil, decls)))
+# Hand-written Cons chains among `pats` whose tail satisfies `terminates`,
+# reported as `rule`. Both list rules run over one collected `pats`.
+fn chain_findings(src: String, pats: List ast.Pattern, terminates: ast.Pattern -> Bool,
+                  rule: String, message: String) -> List LintFinding =
+  map(\pos -> mk_finding(pos, rule, message),
+      drop_desugared_list_patterns(src, find_chain_roots_in(terminates, pats)))
 
 # ---------------------------------------------------------------------------
 # Rule: list-prefix-pattern
@@ -563,12 +560,6 @@ fn chain_terminates_in_wildcard(pat: ast.Pattern) -> Bool =
         | _ -> false  # malformed arity guard
       else false  # Nil terminal: list-shape-pattern's territory, not this rule
   | _ -> false  # bound variable: ordinary recursion, not flagged
-
-fn list_prefix_findings(src: String, prog: ast.Program) -> List LintFinding =
-  match prog with
-  | ast.Program decls _ ->
-      map(\pos -> mk_finding(pos, "list-prefix-pattern", list_prefix_message),
-        drop_desugared_list_patterns(src, find_chain_roots_in_decls(chain_terminates_in_wildcard, decls)))
 
 # ---------------------------------------------------------------------------
 # Rule: multi-line-lambda-arg
@@ -1464,9 +1455,17 @@ fn ast_findings(src: String) -> List LintFinding =
       | Ok parsed ->
           # The rules match the matches bindings mean, as inference sees them.
           let prog = ast.elaborate_bindings(parsed)
+              pats = program_patterns(prog)
           in list_append(guarded_program_findings(src, written_matches(toks), prog),
-               list_append(list_shape_findings(src, prog),
-                 list_append(list_prefix_findings(src, prog), brace_body_findings(toks))))
+               list_append(chain_findings(src, pats, chain_terminates_in_nil, "list-shape-pattern",
+                                          list_shape_message),
+                 list_append(chain_findings(src, pats, chain_terminates_in_wildcard,
+                                            "list-prefix-pattern", list_prefix_message),
+                             brace_body_findings(toks))))
+
+fn program_patterns(prog: ast.Program) -> List ast.Pattern =
+  match prog with
+  | ast.Program decls _ -> patterns_in_decls(decls)
 
 # The combinator rule is collected during the walk and dropped here, because its
 # §7 guards are facts about the FILE that the walk cannot see. Filtering by rule

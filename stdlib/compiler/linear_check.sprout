@@ -88,16 +88,10 @@ fn luse_pos(u: LinUse) -> source.SourcePos =
   | LinUse _ p -> p
 
 fn luse_member(name: String, us: List LinUse) -> Bool =
-  match us with
-  | Nil -> false
-  | Cons u rest -> if luse_name(u) == name then true else luse_member(name, rest)
+  any(\u -> luse_name(u) == name, us)
 
 fn luse_remove(name: String, us: List LinUse) -> List LinUse =
-  match us with
-  | Nil -> Nil
-  | Cons u rest ->
-      if luse_name(u) == name then luse_remove(name, rest)
-      else Cons(u, luse_remove(name, rest))
+  list_filter(\u -> luse_name(u) != name, us)
 
 # A name present in `a` but absent from `b`, if any (drives divergence errors).
 fn first_missing(a: List LinUse, b: List LinUse) -> Maybe String =
@@ -264,10 +258,7 @@ fn last_arg_is_phantom(t: types.Type, env: Dict types.Scheme) -> Bool =
 # Each name in `binders` must appear in `consumed` (else it leaked); returns the
 # first unconsumed one.
 fn unconsumed_binder(binders: List LinBinder, consumed: List LinUse) -> Maybe LinBinder =
-  match binders with
-  | Nil -> Nothing
-  | Cons b rest ->
-      if luse_member(lbind_name(b), consumed) then unconsumed_binder(rest, consumed) else Just(b)
+  find(\b -> ! luse_member (lbind_name(b), consumed), binders)
 
 # The lambda parameter that still defers the whole lambda: linear, and NOT taken
 # `borrowing` — a borrowing one is admissible (M4.4b), so only an owned one is a
@@ -550,9 +541,7 @@ fn comprehension_capture_msg(name: String) -> String =
 
 # The first use in `us` whose name also appears in `other`.
 fn first_shared(us: List LinUse, other: List LinUse) -> Maybe LinUse =
-  match us with
-  | Nil -> Nothing
-  | Cons u rest -> if luse_member(luse_name(u), other) then Just(u) else first_shared(rest, other)
+  find(\u -> luse_member(luse_name(u), other), us)
 
 # Sequential composition of two subexpressions, `a` strictly BEFORE `b`. The
 # order is real, not assumed: spec-v0.md §6 fixes evaluation left-to-right for
@@ -875,11 +864,7 @@ fn lin_once_no_borrows(bc: List LinUse, bb: List LinUse, p: source.SourcePos) ->
   | [u | _] -> LinErr(p, once_borrow_capture_msg(luse_name(u)))
 
 fn luse_remove_all(names: List String, uses: List LinUse) -> List LinUse =
-  match uses with
-  | Nil -> Nil
-  | Cons u rest ->
-      if list_member(luse_name(u), names) then luse_remove_all(names, rest)
-      else Cons(u, luse_remove_all(names, rest))
+  list_filter(\u -> ! list_member (luse_name(u), names), uses)
 
 fn lin_borrow_arg(a: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) -> LinRes =
   match a with
@@ -1881,9 +1866,7 @@ fn param_obligations(owned: List LinBinder, borrowed: List String,
   | Nothing -> unused_linear_param(owned, consumed, fn_pos, env)
 
 fn first_consumed_borrow(borrowed: List String, consumed: List LinUse) -> Maybe LinUse =
-  match consumed with
-  | Nil -> Nothing
-  | Cons u rest -> if list_member(luse_name(u), borrowed) then Just(u) else first_consumed_borrow(borrowed, rest)
+  find(\u -> list_member(luse_name(u), borrowed), consumed)
 
 fn unused_linear_param(owned: List LinBinder, consumed: List LinUse,
                        fn_pos: source.SourcePos, env: Dict types.Scheme) -> LinCheck =

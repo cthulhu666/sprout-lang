@@ -889,11 +889,10 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   `examples/digit_recognizer/recognizer.sprout` hand-writes two monomorphic length helpers purely
   because of it. Root-cause and fix so those can be deleted; add a regression over a `List` of a
   field-bearing ADT and of a tuple. Likely the same dispatch/monomorphization family as B2.
-- [ ] `P2` **Retire two private re-implementations of `split`.** `ast_to_ir.split_on_comma` and
-  `prelude.split_on_char` predate `stdlib.string.split`. Check two things: the shared one is
-  O(bytes × |sep|) where the `split_once`-recursion is quadratic; and it **keeps** empty segments,
-  so a caller relying on its private version dropping them needs a `filter` (`path.split` is the
-  worked example).
+- [ ] `P2` **Retire `prelude.split_on_char`, a private re-implementation of `split`.** It predates
+  `stdlib.string.split`. Check two things: the shared one is O(bytes × |sep|) where the
+  `split_once`-recursion is quadratic; and it **keeps** empty segments, so a caller relying on the
+  private version dropping them needs a `filter` (`path.split` is the worked example).
 - [ ] `P2` **Generalize `string_join_newlines` to `string_join_suffix(suffix, lines)`**, then
   reimplement in pure Sprout over `list_fold` + builder once the §2.5 builder work lands, and
   remove the C builtin. The builtin was a 2026-05-11 workaround for a 204K-deep right-fold that
@@ -2332,22 +2331,9 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
 
 ### Prelude-helper cleanup arc (#602, #603) — review residuals
 
-Cleanups the 2026-10-09 reviews of #606 and #607 reported and left. Unverified by design: confirm
-each before acting. The compiler ones each cost a reseed, so land them as one PR.
+Cleanups the 2026-10-09 review of #606 reported and left. Unverified by design: confirm each before
+acting.
 
-- [ ] `P3` **Compiler: hand copies of `ast` and prelude helpers survive #607.** `infer.sprout:7440`
-  `validate_ctor`, `validate_record_field`, `alias_uses_in_ctor`, `alias_uses_in_field` and
-  `ast_to_ir.sprout:539` `record_field_types` only unwrap field types: use
-  `ast.ctor_field_type_exprs` / `ast.record_field_type_exprs`, as `bundler.sprout` does.
-  `ast_to_ir.sprout:1923` `find_capture_type_list` and `_fields` are hand-written `find_map`.
-  `linear_check.sprout` `luse_member`, `luse_remove(_all)`, `unconsumed_binder`, `first_shared` and
-  `first_consumed_borrow` are hand-written `any` / `list_filter` / `find`, about 30 lines.
-- [ ] `P3` **Compiler: copy-paste and a quadratic fold left after #607.** `lint_rules`
-  `list_shape_findings` and `list_prefix_findings` differ in rule id, message and terminator, and
-  each walks the AST again. `analysis_service_driver`'s `source_type_of`, `source_instances` and
-  `source_eval` repeat one three-step order, and its JSON is 23 nested `JsonObjectCons` chains where
-  `lsp_driver` uses `json.object_from_pairs`. `infer.merge_effect_labels` folds `list_add_unique`
-  (quadratic). `compound_tdict` now builds every unresolved TDict: rename it `unresolved_tdict`.
 - [ ] `P3` **TUI: the reply tuple and one loop are still spelled out after #606.** `app.sprout`'s
   `Step` and `Update` aliases are private, so `ide/app.sprout` (7 sites), the `tui_files` and
   `tui_dashboard` examples write `(widget.Widget Msg, app.Flow, Asks)`: export them.
@@ -2364,19 +2350,14 @@ each before acting. The compiler ones each cost a reseed, so land them as one PR
 
 **Codegen and IR correctness**
 
-- [ ] `P3` **`ast_to_ir` headers contradict the code beneath them, and one helper is dead.** The
-  Bool/Unit codegen restrictions were lifted; the comments announcing them were not.
-  `translate_lambda`'s header still reads "Rejects: Bool-returning lambda … deferred to a follow-up
-  PR" (`ast_to_ir.sprout:2105`) sixteen lines above "Bool-return guard removed", and
-  `is_supported_arg_type`'s still promises the ctor guard "keeps its own deferred restrictions on
-  Bool and Unit" (`:812`) ten lines above "Bool is ACCEPTED" / "Unit is ACCEPTED".
-  `find_bool_capture` (`:2072`) has no caller left. ~15 lines to fix, but a compiler-source change,
-  so it costs a full reseed plus the golden-IR gate.
 - [ ] `P3` **46 compiler comments cite `codegen.sprout`, deleted 2026-07-12 in `5f29b9da`.** Spread
   over `ast_to_ir` (31), `ir_lowering` (7), `sprout_ir` (6), `type_kind` and `field_kinds` (1 each),
   mostly as "mirrors codegen.sprout:<fn>" provenance notes whose target cannot be opened. They read
   as live cross-references and send a reader looking for a file that is two months gone. Either
   re-anchor each to the surviving definition or drop the citation; decide once and sweep.
+- [ ] `P3` **`ast_to_ir.sra_escape_ok_go` builds a free-variable Set per do-step to test one
+  name.** Up to two full `compute_free_vars` Sets per step, only to ask whether `name` occurs. An
+  early-exit "does `e` mention `name`" walk does the same job. Same family as #599.
 
 - [~] `P1` **Arity mismatch through a function-typed VALUE is a clean runtime error, not a working
   call.** Both halves of the miscompile are closed — direct calls check arity in both directions,

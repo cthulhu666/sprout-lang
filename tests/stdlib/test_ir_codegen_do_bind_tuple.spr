@@ -52,6 +52,27 @@ fn do_bind_tuple_chain() -> Int !{IO} =
     (p, q) <- pair_io()
     x + y + p + q
 
+# T5–T8: the same patterns through a Result or Maybe bind, which take the
+# short-circuit path (test the tag, branch away on Err/Nothing) before the
+# tuple walk. The miss arm must skip the walk entirely.
+fn nested_result(ok: Bool) -> Result String ((Int, Int), Int) =
+  if ok then Ok(((2, 4), 6)) else Err("no")
+
+fn right_nested_maybe(ok: Bool) -> Maybe (Int, (Int, Int)) =
+  if ok then Just((1, (10, 100))) else Nothing
+
+# O(1).
+fn result_nested_bind(ok: Bool) -> Result String Int =
+  do
+    ((a, b), c) <- nested_result(ok)
+    Ok(a * 100 + b * 10 + c)
+
+# O(1).
+fn maybe_right_nested_bind(ok: Bool) -> Maybe Int =
+  do
+    (a, (b, c)) <- right_nested_maybe(ok)
+    Just(a + b + c)
+
 fn main() -> Unit !{IO} =
   do
     r1 <- do_bind_tuple_flat()
@@ -62,5 +83,9 @@ fn main() -> Unit !{IO} =
       check_eq("T1 flat (a, b) <- (3, 7)", r1, 10),
       check_eq("T2 nested ((a, b), c) <- ((2, 4), 6)", r2, 12),
       check_eq("T3 wildcard (_, b) <- (3, 7)", r3, 7),
-      check_eq("T4 two consecutive tuple binds", r4, 20)
+      check_eq("T4 two consecutive tuple binds", r4, 20),
+      check_eq("T5 Result ((a, b), c) <- Ok keeps slot order", result_nested_bind(true), Ok(246)),
+      check_eq("T6 Result tuple bind on Err short-circuits", result_nested_bind(false), Err("no")),
+      check_eq("T7 Maybe (a, (b, c)) <- Just", maybe_right_nested_bind(true), Just(111)),
+      check_eq("T8 Maybe tuple bind on Nothing short-circuits", maybe_right_nested_bind(false), Nothing)
     ])

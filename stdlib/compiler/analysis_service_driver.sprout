@@ -64,16 +64,12 @@ export fn rebuild_session_source(sess: SessionState) -> String =
 # JSON response construction
 
 fn ok_response(value: json.Json) -> json.Json =
-  json.JsonObject(
-    json.JsonObjectCons("ok", json.JsonBool(true),
-    json.JsonObjectCons("value", value,
-    json.JsonObjectNil)))
+  json.object_from_pairs([("ok", json.JsonBool(true)),
+                          ("value", value)])
 
 fn error_response(msg: String) -> json.Json =
-  json.JsonObject(
-    json.JsonObjectCons("ok", json.JsonBool(false),
-    json.JsonObjectCons("error", json.JsonString(msg),
-    json.JsonObjectNil)))
+  json.object_from_pairs([("ok", json.JsonBool(false)),
+                          ("error", json.JsonString(msg))])
 
 fn string_list_to_json(xs: List String) -> json.Json =
   json.array_from_list(list_map(json.string, xs))
@@ -85,11 +81,9 @@ fn not_implemented(op_name: String) -> json.Json =
   error_response(string.concat("not yet implemented in self-hosted analysis service: ", op_name))
 
 fn empty_diags_response() -> json.Json =
-  ok_response(json.JsonObject(
-    json.JsonObjectCons("messages", json.array_from_list(Nil),
-    json.JsonObjectCons("lines", json.array_from_list(Nil),
-    json.JsonObjectCons("columns", json.array_from_list(Nil),
-    json.JsonObjectNil)))))
+  ok_response(json.object_from_pairs([("messages", json.array_from_list(Nil)),
+                                      ("lines", json.array_from_list(Nil)),
+                                      ("columns", json.array_from_list(Nil))]))
 
 fn require_string_field(req: json.Json, field: String) -> Result String String =
   match json.json_get_field(req, field) with
@@ -181,12 +175,10 @@ fn collect_decl_locations(
             Cons(ast.decl_pos(d).column, cols))
 
 fn empty_locations_json() -> json.Json =
-  ok_response(json.JsonObject(
-    json.JsonObjectCons("categories", json.array_from_list(Nil),
-    json.JsonObjectCons("names", json.array_from_list(Nil),
-    json.JsonObjectCons("lines", json.array_from_list(Nil),
-    json.JsonObjectCons("columns", json.array_from_list(Nil),
-    json.JsonObjectNil))))))
+  ok_response(json.object_from_pairs([("categories", json.array_from_list(Nil)),
+                                      ("names", json.array_from_list(Nil)),
+                                      ("lines", json.array_from_list(Nil)),
+                                      ("columns", json.array_from_list(Nil))]))
 
 fn parse_symbol_locations(src: String) -> json.Json =
   match lexer.tokenize(source.strip_headers(src)) with
@@ -199,12 +191,10 @@ fn parse_symbol_locations(src: String) -> json.Json =
           | ast.Program decls _ ->
               match collect_decl_locations(decls, 0, Nil, Nil, Nil, Nil) with
               | (cats, loc_names, loc_lines, loc_cols) ->
-                  ok_response(json.JsonObject(
-                    json.JsonObjectCons("categories", string_list_to_json(cats),
-                    json.JsonObjectCons("names", string_list_to_json(loc_names),
-                    json.JsonObjectCons("lines", int_list_to_json(loc_lines),
-                    json.JsonObjectCons("columns", int_list_to_json(loc_cols),
-                    json.JsonObjectNil))))))
+                  ok_response(json.object_from_pairs([("categories", string_list_to_json(cats)),
+                                                      ("names", string_list_to_json(loc_names)),
+                                                      ("lines", int_list_to_json(loc_lines)),
+                                                      ("columns", int_list_to_json(loc_cols))]))
 
 # ---------------------------------------------------------------------------
 # Import name extraction (for symbol_inventory imported list)
@@ -245,11 +235,9 @@ fn collect_diag_fields(
 fn diags_to_json(diags: List compiler.Diagnostic) -> json.Json =
   match collect_diag_fields(diags, Nil, Nil, Nil) with
   | (msgs, diag_lines, diag_cols) ->
-      ok_response(json.JsonObject(
-        json.JsonObjectCons("messages", string_list_to_json(msgs),
-        json.JsonObjectCons("lines", int_list_to_json(diag_lines),
-        json.JsonObjectCons("columns", int_list_to_json(diag_cols),
-        json.JsonObjectNil)))))
+      ok_response(json.object_from_pairs([("messages", string_list_to_json(msgs)),
+                                          ("lines", int_list_to_json(diag_lines)),
+                                          ("columns", int_list_to_json(diag_cols))]))
 
 # ---------------------------------------------------------------------------
 # instances_in_source — list the typeclass instances whose head type matches a
@@ -464,11 +452,9 @@ fn op_exported_names_in_source(src: String) -> json.Json =
   ok_response(string_list_to_json(exported_names_from_src(src)))
 
 fn op_symbol_inventory_in_source(src: String) -> json.Json =
-  ok_response(json.JsonObject(
-    json.JsonObjectCons("declared", string_list_to_json(parse_decl_names(src)),
-    json.JsonObjectCons("imported", string_list_to_json(collect_import_names(module_loader.collect_imports(src), Nil)),
-    json.JsonObjectCons("exported", string_list_to_json(exported_names_from_src(src)),
-    json.JsonObjectNil)))))
+  ok_response(json.object_from_pairs([("declared", string_list_to_json(parse_decl_names(src))),
+                                      ("imported", string_list_to_json(collect_import_names(module_loader.collect_imports(src), Nil))),
+                                      ("exported", string_list_to_json(exported_names_from_src(src)))]))
 
 fn op_symbol_locations_in_source(src: String) -> json.Json =
   parse_symbol_locations(src)
@@ -547,10 +533,8 @@ fn op_instances_in_source(src: String, query: String, state: StartupState) -> js
     match result with
     | InstancesErr msg -> error_response(msg)
     | InstancesOk query_type matches ->
-        ok_response(json.JsonObject(
-          json.JsonObjectCons("query_type", json.JsonString(query_type),
-          json.JsonObjectCons("matches", string_list_to_json(matches),
-          json.JsonObjectNil))))
+        ok_response(json.object_from_pairs([("query_type", json.JsonString(query_type)),
+                                            ("matches", string_list_to_json(matches))]))
 
 # ---------------------------------------------------------------------------
 # type_of_in_source — infer the type of an expression in a source context
@@ -918,9 +902,9 @@ fn source_op(op: String, req: json.Json,
   else if op == "exported_names_in_source" then Just(op_exported_names_in_source)
   else if op == "symbol_inventory_in_source" then Just(op_symbol_inventory_in_source)
   else if op == "symbol_locations_in_source" then Just(op_symbol_locations_in_source)
-  else if op == "type_of_in_source" then Just(source_type_of(req, state, _))
-  else if op == "instances_in_source" then Just(source_instances(req, state, _))
-  else if op == "eval_expr_in_source" then Just(source_eval(req, state, _))
+  else if op == "type_of_in_source" then Just(semantic_with_field("expr", op_type_of_in_source, req, state, _))
+  else if op == "instances_in_source" then Just(semantic_with_field("query", op_instances_in_source, req, state, _))
+  else if op == "eval_expr_in_source" then Just(semantic_with_field("expr", op_eval_expr_in_source, req, state, _))
   else Nothing
 
 fn checked_source(state: StartupState, src: String) -> json.Json !{IO} =
@@ -932,23 +916,14 @@ fn source_diagnostics(state: StartupState, src: String) -> json.Json !{IO} =
   if state_stdlib_root(state) == "" then empty_diags_response()
   else op_diagnostics_in_source(src, state)
 
-fn source_type_of(req: json.Json, state: StartupState, src: String) -> json.Json !{IO} =
+# A semantic op over `src` that also reads string field `field`: a missing
+# field is reported before a missing stdlib root.
+fn semantic_with_field(field: String, run: String -> String -> StartupState -> json.Json !{IO},
+                       req: json.Json, state: StartupState, src: String) -> json.Json !{IO} =
   do
-    let Ok expr = require_string_field(req, "expr") else Err msg -> error_response(msg)
+    let Ok value = require_string_field(req, field) else Err msg -> error_response(msg)
     let Nothing = missing_stdlib_root(state) else Just resp -> resp
-    op_type_of_in_source(src, expr, state)
-
-fn source_instances(req: json.Json, state: StartupState, src: String) -> json.Json !{IO} =
-  do
-    let Ok query = require_string_field(req, "query") else Err msg -> error_response(msg)
-    let Nothing = missing_stdlib_root(state) else Just resp -> resp
-    op_instances_in_source(src, query, state)
-
-fn source_eval(req: json.Json, state: StartupState, src: String) -> json.Json !{IO} =
-  do
-    let Ok expr = require_string_field(req, "expr") else Err msg -> error_response(msg)
-    let Nothing = missing_stdlib_root(state) else Just resp -> resp
-    op_eval_expr_in_source(src, expr, state)
+    run(src, value, state)
 
 fn dispatch_op(op: String, req: json.Json, state: StartupState) -> json.Json !{IO} =
   match source_op(op, req, state) with
