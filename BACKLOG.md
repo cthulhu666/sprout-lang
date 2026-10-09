@@ -302,8 +302,9 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   population, removes the gap and the hand-taught rule in `docs/idiomatic-sprout.md`.
 - [ ] `P3` **Phase B mutual-TCO: a member that is both self-tail-recursive and in a heterogeneous
   mutual cycle keeps its mutual edge as a plain call.** `mutual_tco_rewrite_fn` skips any fn
-  carrying an `IRTcoEntry`. No miscompile — only the mutual edge builds a native frame per
-  iteration. `docs/mutual-tco-phase-b-v0.md` §5a.
+  carrying an `IRTcoEntry`. No miscompile, but the mutual edge builds a native frame per
+  iteration, so a long input overflows the stack: `json`'s string decoder died at 2^15 escapes
+  until it was rewritten as one self-recursive loop. `docs/mutual-tco-phase-b-v0.md` §5a.
 - [ ] `P3` **Phase B / Tier-2 CPR: `emit_repack_one` emits width-2 only.** A match-routed cycle
   member returning a ≥2-field-ctor ADT would drop fields. Unreachable today (worker routing is
   gated on max-ctor-arity ≤ 1), so latent. Widening needs `{tag, f0, f1}` and a `{i64,i64,i64}`
@@ -622,9 +623,8 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   append makes an internal node (O(1)) and `builder_build` traverses once. Also add `builder_str`
   and `builder_to_str` to skip the `Bytes` intermediary and the UTF-8 round-trip. These three
   unblock a pure-Sprout `string_join_suffix` over `list_fold` + builder (see §5).
-  Two live accumulation loops still fold left and are therefore quadratic in the chunk count, with
-  the count chosen by a network peer in both: `http_server.read_remaining_body` and
-  `url.decode_bytes`. `bigint.builder_of_mag` and `net.read_exact_by` work around it by halving.
+  Until then, `bytes.builder_concat` (pairwise merge, O(k log k)) is the workaround every chunked
+  reader uses; `bigint.builder_of_mag` and `hex` still hand-roll the same halving.
 
 - [ ] `P2` **`bytes.singleton` and `bytes.builder_byte` are partial**, trapping via `sprout_fail`
   on a value outside 0..255 (`bytes_singleton`, `bytes_builder_byte`). `docs/guidelines.md` §2 makes
@@ -637,6 +637,11 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
 
 ### 3) JSON Support
 
+- [ ] `P1` **`json.parse` has no nesting limit, so 32 KiB of `[` kills the process.** `p_value`
+  recurses once per level; 2^14 nested arrays overflow the main stack (measured, 2026-10-09), and a
+  green task's stack is smaller. Reachable from any HTTP or LSP body. Needs a depth cap that returns
+  `Err` — a Design Change Process call on the limit and whether callers can raise it (serde_json and
+  Go's `encoding/json` both cap by default).
 - [ ] `P2` **Reimplement `json_stringify` in Sprout** once string/escaping primitives make that
   practical, keeping host builtins for the impossible or efficiency-critical.
 - [ ] `P2` **An out-of-range literal reads as an infinity, so a conformant document can be READ but
@@ -869,12 +874,11 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   `examples/digit_recognizer/recognizer.sprout` hand-writes two monomorphic length helpers purely
   because of it. Root-cause and fix so those can be deleted; add a regression over a `List` of a
   field-bearing ADT and of a tuple. Likely the same dispatch/monomorphization family as B2.
-- [ ] `P2` **Retire five private re-implementations of `split`.** `stdlib.string.split` landed
-  2026-09-05; the five are `template.split_on`, `url.split_amp`, `ast_to_ir.split_on_comma`,
-  `http_server.split_header_lines` and `prelude.split_on_char`. A mechanical sweep with two things
-  to check: the new one is O(bytes × |sep|) where the `split_once`-recursion is quadratic, so at
-  least two sites get *faster*; and it **keeps** empty segments, so a caller relying on its private
-  version dropping them needs a `filter` (`path.split` is the worked example).
+- [ ] `P2` **Retire two private re-implementations of `split`.** `ast_to_ir.split_on_comma` and
+  `prelude.split_on_char` predate `stdlib.string.split`. Check two things: the shared one is
+  O(bytes × |sep|) where the `split_once`-recursion is quadratic; and it **keeps** empty segments,
+  so a caller relying on its private version dropping them needs a `filter` (`path.split` is the
+  worked example).
 - [ ] `P2` **Generalize `string_join_newlines` to `string_join_suffix(suffix, lines)`**, then
   reimplement in pure Sprout over `list_fold` + builder once the §2.5 builder work lands, and
   remove the C builtin. The builtin was a 2026-05-11 workaround for a 204K-deep right-fold that

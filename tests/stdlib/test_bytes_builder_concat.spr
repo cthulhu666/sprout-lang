@@ -1,0 +1,35 @@
+import stdlib.test (new_state, assert_true, summary)
+import stdlib.bytes as bytes
+import testsupport.cost (assert_scales)
+
+# `builder_concat` joins many builders in order. `builder_append` copies both chunk tables, so a
+# left fold over k builders is O(k^2); a chunked reader whose k the peer picks needs better.
+
+fn low_byte(i: Int) -> Int =
+  i - (i / 256) * 256
+
+fn byte_builders(n: Int) -> List Builder =
+  list_map(\i -> bytes.builder_byte(low_byte(i)), range_to_list(range_up(0, n - 1)))
+
+fn joins_in_order(n: Int) -> Bool =
+  bytes.length(built) == n && in_order(built, 0, n)
+where
+  built = bytes.builder_build(bytes.builder_concat(byte_builders(n)))
+
+fn in_order(b: Bytes, i: Int, n: Int) -> Bool =
+  if i >= n then true
+  else if bytes.get(b, i) == Just(low_byte(i)) then in_order(b, i + 1, n)
+  else false
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_true(state, "no builders give empty bytes",
+                bytes.length(bytes.builder_build(bytes.builder_concat([]))) == 0)
+    assert_true(state, "one builder passes through", joins_in_order(1))
+    assert_true(state, "an odd count keeps order", joins_in_order(7))
+    # A merge pass that recursed once per pair overflowed the stack here.
+    assert_true(state, "2^20 builders join without overflowing", joins_in_order(1048576))
+    # 64x more builders: k log k ~100x, quadratic ~4000x.
+    assert_scales(state, "builder_concat", joins_in_order, 1024, 65536, 400)
+    summary(state)

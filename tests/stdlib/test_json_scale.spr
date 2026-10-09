@@ -1,0 +1,90 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.json as json
+import stdlib.string as string
+import testsupport.cost (assert_scales)
+
+# Large JSON inputs: an HTTP or LSP body is untrusted, and 1 MiB of it must neither crash the
+# process nor cost more than linear time.
+
+# 2^19 elements is about 1 MiB of `[0,1,…]`. The array and object builders used to recurse once
+# per element, so this size overflowed the stack and killed the process.
+let many = 524288
+
+fn int_list(n: Int) -> List String =
+  list_map(int_to_string, ints(n))
+
+# `[0,1,…,n-1]`
+fn array_text(n: Int) -> String =
+  "[" ++ string.join(",", int_list(n)) ++ "]"
+
+# `{"k":0,"k":1,…}` — duplicate keys are legal JSON and keep the input small.
+fn object_text(n: Int) -> String =
+  "{" ++ string.join(",", list_map(\i -> "\"k\":" ++ i, int_list(n))) ++ "}"
+
+# Walks the array checking element i is i, so order is checked as well as length.
+fn array_in_order(arr: json.JsonArray, i: Int) -> Int =
+  match arr with
+  | json.JsonArrayNil -> i
+  | json.JsonArrayCons (json.JsonInt v) rest -> if v == i then array_in_order(rest, i + 1) else -1
+  | json.JsonArrayCons _ _ -> -1
+
+fn object_in_order(obj: json.JsonObject, i: Int) -> Int =
+  match obj with
+  | json.JsonObjectNil -> i
+  | json.JsonObjectCons "k" (json.JsonInt v) rest -> if v == i then object_in_order(rest, i + 1) else -1
+  | json.JsonObjectCons _ _ _ -> -1
+
+fn ints(n: Int) -> List Int =
+  range_to_list(range_up(0, n - 1))
+
+fn built_array(n: Int) -> json.JsonArray =
+  match json.array_from_list(list_map(json.int, ints(n))) with
+  | json.JsonArray arr -> arr
+  | _ -> json.JsonArrayNil
+
+fn built_object(n: Int) -> json.JsonObject =
+  match json.object_from_pairs(list_map(\i -> ("k", i), ints(n))) with
+  | json.JsonObject obj -> obj
+  | _ -> json.JsonObjectNil
+
+fn array_count(raw: String) -> Int =
+  match json.parse(raw) with
+  | Ok (json.JsonArray arr) -> array_in_order(arr, 0)
+  | _ -> -1
+
+fn object_count(raw: String) -> Int =
+  match json.parse(raw) with
+  | Ok (json.JsonObject obj) -> object_in_order(obj, 0)
+  | _ -> -1
+
+# 2^k copies of `s`, by doubling: O(total). `string.repeat` is quadratic.
+fn grow(s: String, k: Int) -> String =
+  if k <= 0 then s else grow(s ++ s, k - 1)
+
+# A string literal of 2^k repeats of `a\n`. Each escape appended to the decoded string used to copy
+# everything decoded so far.
+fn escaped_literal(k: Int) -> (String, String) =
+  ("\"" ++ grow("a\\n", k) ++ "\"", grow("a\n", k))
+
+fn decodes(case: (String, String)) -> Bool =
+  match case with
+  | (raw, expected) ->
+      match json.parse(raw) with
+      | Ok (json.JsonString s) -> s == expected
+      | _ -> false
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    # 64x more input: linear ~64x, quadratic ~4000x.
+    assert_scales(state, "string escapes", decodes, escaped_literal(9), escaped_literal(15), 400)
+    # The string decoder's escape step called back into the run loop instead of looping, so 2^15
+    # escapes (64 KiB) overflowed the stack.
+    assert_true(state, "a string of 2^17 escapes parses", decodes(escaped_literal(17)))
+    assert_true(state, "a 2^19-element array parses in order", array_count(array_text(many)) == many)
+    assert_true(state, "a 2^19-member object parses in order", object_count(object_text(many)) == many)
+    assert_true(state, "array_from_list keeps 2^19 elements in order",
+                array_in_order(built_array(many), 0) == many)
+    assert_true(state, "object_from_pairs keeps 2^19 members in order",
+                object_in_order(built_object(many), 0) == many)
+    summary(state)

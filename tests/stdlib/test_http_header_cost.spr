@@ -1,0 +1,27 @@
+import stdlib.test (new_state, summary)
+import stdlib.http_server (parse, request_header)
+import testsupport.cost (assert_scales)
+
+# The header block is attacker-controlled up to `max_header_bytes`, so splitting it into lines must
+# be linear. Cutting each line off with `string.drop` recounted the remainder's codepoints per line.
+
+# 2^k copies of `s`, by doubling: O(total).
+fn grow(s: String, k: Int) -> String =
+  if k <= 0 then s else grow(s ++ s, k - 1)
+
+# 2^k short header lines. One repeated name keeps the header Dict at one entry, so only the split
+# grows with k.
+fn request(k: Int) -> String =
+  "GET / HTTP/1.1\r\n" ++ grow("X-A: b\r\n", k) ++ "\r\n"
+
+fn parses(raw: String) -> Bool =
+  match parse(raw) with
+  | Ok req -> request_header("x-a", req) == Just("b")
+  | Err _ -> false
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    # 64x more lines: linear ~64x, quadratic ~4000x.
+    assert_scales(state, "header lines", parses, request(8), request(14), 400)
+    summary(state)

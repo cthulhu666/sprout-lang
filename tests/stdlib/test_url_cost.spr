@@ -1,0 +1,31 @@
+import stdlib.test (new_state, summary)
+import stdlib.url (query_decode, parse_query)
+import testsupport.cost (assert_scales)
+
+# `parse_query` reads form bodies up to `max_body_bytes`, which the peer controls, so decoding and
+# splitting must be linear in the input.
+
+# 2^k copies of `s`, by doubling: O(total).
+fn grow(s: String, k: Int) -> String =
+  if k <= 0 then s else grow(s ++ s, k - 1)
+
+# One long value mixing literal bytes, an escape and a '+'.
+fn decodes(k: Int) -> Bool =
+  match query_decode(grow("ab%41+", k)) with
+  | Ok s -> s == grow("abA ", k)
+  | Err _ -> false
+
+# 2^k `k=v` pairs.
+fn splits(k: Int) -> Bool =
+  vec_length(parse_query(grow("k=v&", k))) == pow2(k)
+
+fn pow2(k: Int) -> Int =
+  if k <= 0 then 1 else 2 * pow2(k - 1)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    # 64x more input: linear ~64x, quadratic ~4000x.
+    assert_scales(state, "query_decode", decodes, 8, 14, 400)
+    assert_scales(state, "parse_query", splits, 8, 14, 400)
+    summary(state)

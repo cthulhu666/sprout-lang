@@ -180,42 +180,50 @@ fn plain_end(s: String, i: Int) -> Int =
   else if str_starts_with_at_byte(s, i, "\"") || str_starts_with_at_byte(s, i, "\\") then i
   else plain_end(s, i + 1)
 
-fn p_unicode(s: String, i: Int, acc: String) -> Maybe (String, Int) =
+# The escape steps return their decoded piece and the next index rather than calling back into the
+# run loop: a call cycle between functions is not turned into a loop, so 2^15 escapes overflowed
+# the stack.
+fn p_unicode(s: String, i: Int) -> Maybe (String, Int) =
   let cp = hex4(s, i)
   in if cp < 0 then Nothing
      else if (cp >= 55296) && (cp <= 56319) then
        if str_starts_with_at_byte(s, i + 4, "\\u") then
          let lo = hex4(s, i + 6)
          in if (lo >= 56320) && (lo <= 57343)
-            then p_string_run(s, i + 10, str_concat(acc, char_to_str(65536 + ((cp - 55296) * 1024) + (lo - 56320))))
+            then Just((char_to_str(65536 + ((cp - 55296) * 1024) + (lo - 56320)), i + 10))
             else Nothing
        else Nothing
      else if (cp >= 56320) && (cp <= 57343) then Nothing
-     else p_string_run(s, i + 4, str_concat(acc, char_to_str(cp)))
+     else Just((char_to_str(cp), i + 4))
 
-fn p_escape(s: String, i: Int, acc: String) -> Maybe (String, Int) =
-  if str_starts_with_at_byte(s, i, "\"") then p_string_run(s, i + 1, str_concat(acc, "\""))
-  else if str_starts_with_at_byte(s, i, "\\") then p_string_run(s, i + 1, str_concat(acc, "\\"))
-  else if str_starts_with_at_byte(s, i, "/") then p_string_run(s, i + 1, str_concat(acc, "/"))
-  else if str_starts_with_at_byte(s, i, "n") then p_string_run(s, i + 1, str_concat(acc, "\n"))
-  else if str_starts_with_at_byte(s, i, "t") then p_string_run(s, i + 1, str_concat(acc, "\t"))
-  else if str_starts_with_at_byte(s, i, "r") then p_string_run(s, i + 1, str_concat(acc, "\r"))
-  else if str_starts_with_at_byte(s, i, "b") then p_string_run(s, i + 1, str_concat(acc, char_to_str(8)))
-  else if str_starts_with_at_byte(s, i, "f") then p_string_run(s, i + 1, str_concat(acc, char_to_str(12)))
-  else if str_starts_with_at_byte(s, i, "u") then p_unicode(s, i + 1, acc)
+fn p_escape(s: String, i: Int) -> Maybe (String, Int) =
+  if str_starts_with_at_byte(s, i, "\"") then Just(("\"", i + 1))
+  else if str_starts_with_at_byte(s, i, "\\") then Just(("\\", i + 1))
+  else if str_starts_with_at_byte(s, i, "/") then Just(("/", i + 1))
+  else if str_starts_with_at_byte(s, i, "n") then Just(("\n", i + 1))
+  else if str_starts_with_at_byte(s, i, "t") then Just(("\t", i + 1))
+  else if str_starts_with_at_byte(s, i, "r") then Just(("\r", i + 1))
+  else if str_starts_with_at_byte(s, i, "b") then Just((char_to_str(8), i + 1))
+  else if str_starts_with_at_byte(s, i, "f") then Just((char_to_str(12), i + 1))
+  else if str_starts_with_at_byte(s, i, "u") then p_unicode(s, i + 1)
   else Nothing
 
 # i points into the string body (after the opening quote). Returns (decoded, indexAfterCloseQuote).
-fn p_string_run(s: String, i: Int, acc: String) -> Maybe (String, Int) =
+# `parts` holds the decoded pieces newest-first and is joined once at the closing quote: appending
+# each piece to the decoded string copied everything decoded so far.
+fn p_string_run(s: String, i: Int, parts: List String) -> Maybe (String, Int) =
   if at_end(s, i) then Nothing
-  else if str_starts_with_at_byte(s, i, "\"") then Just((acc, i + 1))
-  else if str_starts_with_at_byte(s, i, "\\") then p_escape(s, i + 1, acc)
+  else if str_starts_with_at_byte(s, i, "\"") then Just((string_concat_many(list_reverse(parts)), i + 1))
+  else if str_starts_with_at_byte(s, i, "\\") then
+    match p_escape(s, i + 1) with
+    | Nothing -> Nothing
+    | Just (piece, j) -> p_string_run(s, j, Cons(piece, parts))
   else
     let j = plain_end(s, i)
-    in p_string_run(s, j, str_concat(acc, str_slice_bytes(s, i, j - i)))
+    in p_string_run(s, j, Cons(str_slice_bytes(s, i, j - i), parts))
 
 # i at the opening quote.
-fn p_string(s: String, i: Int) -> Maybe (String, Int) = p_string_run(s, i + 1, "")
+fn p_string(s: String, i: Int) -> Maybe (String, Int) = p_string_run(s, i + 1, Nil)
 
 # --- array ----------------------------------------------------------------------------------
 fn p_array_items(s: String, i: Int, acc: List Json) -> Maybe (Json, Int) =
@@ -224,7 +232,7 @@ fn p_array_items(s: String, i: Int, acc: List Json) -> Maybe (Json, Int) =
   | Just (v, j) ->
       let k = skip_ws(s, j)
       in if str_starts_with_at_byte(s, k, "]")
-         then Just((JsonArray(json_array_from_list(list_reverse(Cons(v, acc)))), k + 1))
+         then Just((JsonArray(json_array_from_reversed(Cons(v, acc), JsonArrayNil)), k + 1))
          else if str_starts_with_at_byte(s, k, ",") then p_array_items(s, skip_ws(s, k + 1), Cons(v, acc))
          else Nothing
 
@@ -235,14 +243,6 @@ fn p_array(s: String, i: Int) -> Maybe (Json, Int) =
      else p_array_items(s, j, Nil)
 
 # --- object ---------------------------------------------------------------------------------
-# Build a JsonObject from already-Json pairs (no JsonEncode constraint, unlike json_object_from_pairs).
-fn json_object_from_json_pairs(items: List (String, Json)) -> JsonObject =
-  match items with
-  | Nil -> JsonObjectNil
-  | Cons pair rest ->
-      match pair with
-      | (key, value) -> JsonObjectCons(key, value, json_object_from_json_pairs(rest))
-
 fn p_object_members(s: String, i: Int, acc: List (String, Json)) -> Maybe (Json, Int) =
   if str_starts_with_at_byte(s, i, "\"") then
     match p_string(s, i) with
@@ -255,7 +255,7 @@ fn p_object_members(s: String, i: Int, acc: List (String, Json)) -> Maybe (Json,
              | Just (v, m) ->
                  let n = skip_ws(s, m)
                  in if str_starts_with_at_byte(s, n, "}")
-                    then Just((JsonObject(json_object_from_json_pairs(list_reverse(Cons((key, v), acc)))), n + 1))
+                    then Just((JsonObject(json_object_from_reversed(Cons((key, v), acc), JsonObjectNil)), n + 1))
                     else if str_starts_with_at_byte(s, n, ",") then p_object_members(s, skip_ws(s, n + 1), Cons((key, v), acc))
                     else Nothing
            else Nothing
@@ -364,25 +364,30 @@ export fn json_error_message(err: JsonError) -> String =
   | JsonDecode msg -> msg
   | JsonNonFinite x -> "non-finite number: " ++ double_to_string(x)
 
-fn json_array_from_list(items: List Json) -> JsonArray =
+# `items` is newest-first, so consing each onto the result restores source order in one
+# tail-recursive pass. Recursing once per element overflowed the stack on a 1 MiB array.
+fn json_array_from_reversed(items: List Json, arr: JsonArray) -> JsonArray =
   match items with
-  | Nil -> JsonArrayNil
-  | Cons item rest -> JsonArrayCons(item, json_array_from_list(rest))
+  | Nil -> arr
+  | Cons item rest -> json_array_from_reversed(rest, JsonArrayCons(item, arr))
 
-# O(n): builds a linked JsonArray by traversing the source list once.
+fn json_object_from_reversed(pairs: List (String, Json), obj: JsonObject) -> JsonObject =
+  match pairs with
+  | Nil -> obj
+  | Cons (key, value) rest -> json_object_from_reversed(rest, JsonObjectCons(key, value, obj))
+
+# O(n): a linked JsonArray in the list's order.
 export fn array_from_list(items: List Json) -> Json =
-  JsonArray(json_array_from_list(items))
+  JsonArray(json_array_from_reversed(list_reverse(items), JsonArrayNil))
 
-fn json_object_from_pairs(items: List (String, a)) -> JsonObject where JsonEncode a =
-  match items with
-  | Nil -> JsonObjectNil
-  | Cons pair rest ->
-      match pair with
-      | (key, value) -> JsonObjectCons(key, encode(value), json_object_from_pairs(rest))
+fn json_object_encoded(pairs: List (String, a), obj: JsonObject) -> JsonObject where JsonEncode a =
+  match pairs with
+  | Nil -> obj
+  | Cons (key, value) rest -> json_object_encoded(rest, JsonObjectCons(key, encode(value), obj))
 
-# O(n): traverses the input list once and encodes each value once.
+# O(n): encodes each value once, keeping the list's order.
 export fn object_from_pairs(items: List (String, a)) -> Json where JsonEncode a =
-  JsonObject(json_object_from_pairs(items))
+  JsonObject(json_object_encoded(list_reverse(items), JsonObjectNil))
 
 fn json_object_from_dict_entries(entries: Vec (String, a), index: Int, total: Int, obj: JsonObject) -> JsonObject where JsonEncode a =
   if index >= total then obj
@@ -392,9 +397,11 @@ fn json_object_from_dict_entries(entries: Vec (String, a), index: Int, total: In
     | Just (key, value) ->
         json_object_from_dict_entries(entries, index + 1, total, JsonObjectCons(key, encode(value), obj))
 
-# O(n^2): `dict_entries` itself is quadratic on persistent vectors, then this pass walks the entries again.
+# O(n log n), the cost of `dict_entries`. Members come out in reverse key order.
 export fn object_from_dict(items: Dict a) -> Json where JsonEncode a =
-  JsonObject(json_object_from_dict_entries(dict_entries(items), 0, vec_length(dict_entries(items)), JsonObjectNil))
+  JsonObject(json_object_from_dict_entries(entries, 0, vec_length(entries), JsonObjectNil))
+where
+  entries = dict_entries(items)
 
 instance JsonEncode Json
   fn encode_json(value: Json) -> Json =

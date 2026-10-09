@@ -156,6 +156,8 @@ Bytes helpers (in `stdlib/bytes.sprout`):
   - `builder_u16_be(value: Int) -> Builder`
   - `builder_u32_be(value: Int) -> Builder`
   - `builder_append(left: Builder, right: Builder) -> Builder`
+  - `builder_concat(parts: List Builder) -> Builder` — joins many in order, O(k log k); use it
+    instead of folding `builder_append`, which is O(k²)
   - `builder_build(value: Builder) -> Bytes`
 
 ## stdlib.collections
@@ -748,7 +750,7 @@ Quick reference for the main collection types in the prelude and `stdlib`, with 
 | `List a` | `++` (lowers to `list_append`) | O(\|left\|) | Right side is shared structurally; the left spine is copied twice (reversed, then unreversed onto `right`), so 2\|left\| cells. Best for prepend-heavy work via `Cons`. Avoid right-folded concatenation (O(n²)); accumulate with `Cons` and reverse once instead. |
 | `Vec a` | `++` (Semigroup instance) | O(\|left\| + \|right\|) | Lowers to the `vector_concat` builtin: one fresh `n+m` backing array, both element blocks copied in a single pass (no intermediate cons cells). |
 | `Bytes` | `bytes.append` (`bytes_append`) | O(\|left\| + \|right\|) | Allocates a fresh contiguous buffer and copies both inputs. |
-| `bytes.Builder` | `bytes.builder_append` | O(chunks\_left + chunks\_right) | Concatenates chunk tables without flattening the bytes themselves; the final `bytes.builder_build` is O(total\_bytes). The right tool for protocol packet assembly and other "many small fragments, one final blob" patterns. |
+| `bytes.Builder` | `bytes.builder_append` | O(chunks\_left + chunks\_right) | Concatenates chunk tables without flattening the bytes themselves; the final `bytes.builder_build` is O(total\_bytes). The right tool for protocol packet assembly and other "many small fragments, one final blob" patterns. A loop that appends one builder per step is O(k²) in the chunk count; collect the parts in a list and join them with `bytes.builder_concat` (O(k log k)). |
 | `Dict v` | `++` (Semigroup instance) | O(m · log(n + m)) | Persistent: each of `right`'s m entries is folded into `left` via `dict_set`, which is O(log n) copy-on-write on the balanced AVL map (path copy, not a full-array copy). For very large merges, folding into a freshly built dict avoids re-walking the growing left. |
 | `MutVec a` (`stdlib.mutable`) | `mutvec_push` (one element) | amortised O(1) | **Mutable and in place**, unlike every other row here. Start from `mutvec_empty()` when the size is discovered at runtime; capacity doubles from 8 as it fills. See below. |
 
