@@ -2090,9 +2090,10 @@ Accepted programs and their results are the same either way. The result is the `
 `ControlFlow` value. Otherwise, and in generic code (`where Propagate t`), `try`
 calls `branch` and allocates a `ControlFlow`. The type must be known at the `try`
 for the first case, the `try` must be in a function or instance method, and the
-declarations the `Break` arms call must be typed before that function: in a
-binding group with it, or declared after it without a dependency, they are not,
-and `try` calls `branch`.
+instance and what its `Break` arms call must be checked before that function:
+declared after it without a dependency, or in a binding group with it, they are
+not, and `try` calls `branch`. An instance declared after the `try` is not in
+scope there either way, so that `try` is rejected.
 
 ### 5.10 List comprehensions (Experimental)
 

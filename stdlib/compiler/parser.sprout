@@ -794,6 +794,9 @@ fn do_let_step(b: LetBinding, pos: source.SourcePos) -> ast.DoStep =
   | (Nothing, Just name, false) -> ast.DoLetStep(name, b.rhs)
   | _ -> ast.DoPatStep(ast.LetBind, b.pat, b.rhs, b.els, pos)
 
+# A parenthesised `try` heads only a right-hand side (spec §5.9.1).
+let try_statement_msg = "`(try …)` cannot start a `do` statement; bind its value instead: `let y = (try e).x`"
+
 fn parse_do_step(tokens: Vec token.Token, i: Int) -> Result ParseError (DoStepParse, Int) =
   if tok_is_keyword(tok_at(tokens, i), "let") then parse_do_let(tokens, i)
   else if step_has_bind_arrow(tokens, i, 0) then
@@ -813,7 +816,8 @@ fn parse_do_step(tokens: Vec token.Token, i: Int) -> Result ParseError (DoStepPa
   else
     do
       (value, i2) <- parse_rhs(tokens, i)
-      Ok((DoStepPlain(ast.DoExprStep(value)), i2))
+      if paren_try(value) then Err(ParseError(try_statement_msg, cur_pos(tokens, i)))
+      else Ok((DoStepPlain(ast.DoExprStep(value)), i2))
 
 # Collects the steps up to the block's close and returns the index past it.
 fn collect_do_steps(tokens: Vec token.Token, i: Int, acc: List ast.DoStep) -> Result ParseError (List ast.DoStep, Int) =
@@ -936,9 +940,9 @@ fn parse_let_else_expr(tokens: Vec token.Token, i: Int) -> Result ParseError (as
 # ---------------------------------------------------------------------------
 # `try` (spec §5.9)
 #
-# `try` starts a binding's right-hand side or a `do` statement, or sits in
-# parentheses at the head of one: `(try e).x`, `(try e) else …`. Its operand is a
-# postfix expression. `else` and `with` after it are reserved, so adding
+# `try` starts a binding's right-hand side or a `do` statement, or, in
+# parentheses, heads a right-hand side: `(try e).x`, `(try e) else …`. Its operand
+# is a postfix expression. `else` and `with` after it are reserved, so adding
 # `try … else` or `try … with` later changes only code rejected today.
 
 let try_operand_msg =
@@ -946,6 +950,12 @@ let try_operand_msg =
 let try_else_msg = "`try` takes no `else` yet. For `let..else` on the value, write `(try e) else …`"
 let try_with_msg = "`with` after `try` is reserved. For a record update on the value, write `(try e) with (…)`"
 let try_top_level_msg = "a top-level `let` cannot use `try`: there is no block for a failure to end"
+
+# `(try e)` with a field, call or update after it: a right-hand side only.
+fn paren_try(e: ast.Expr) -> Bool =
+  match e with
+  | ast.TryExpr _ _ -> false
+  | _ -> ast.starts_with_try(e)
 
 # A binding's right-hand side, or a `do` statement.
 fn parse_rhs(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
@@ -2054,7 +2064,8 @@ fn parse_let_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Dec
     else
       do
         (body, i5) <- parse_expression(tokens, i4)
-        Ok((ast.LetDecl(token.token_text(name_tok), body, anno, cur_pos(tokens, i)), i5))
+        if ast.starts_with_try(body) then Err(ParseError(try_top_level_msg, cur_pos(tokens, i4)))
+        else Ok((ast.LetDecl(token.token_text(name_tok), body, anno, cur_pos(tokens, i)), i5))
 
 fn parse_record_field_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.RecordFieldDecl, Int) =
   do

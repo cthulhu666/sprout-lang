@@ -275,12 +275,10 @@ export fn try_bind(pat: Pattern, value: Expr, els: Maybe LetElse, body: Expr,
   match (value, els) with
   | (TryExpr operand tpos, Nothing) -> Just(TryBind(operand, tpos, MatchBranch(pat, body)))
   | _ ->
-      match head_try(value) with
-      | Nothing -> Nothing
-      | Just (operand, tpos) ->
-          let rhs = replace_head_try(value, VarExpr(try_value_name, tpos))
-          in Just(TryBind(operand, tpos,
-                          MatchBranch(VarPattern(try_value_name, tpos), LetBindExpr(pat, rhs, els, body, pos))))
+      let Just(operand, tpos) = head_try(value) else Nothing
+          rhs = replace_head_try(value, VarExpr(try_value_name, tpos))
+      in Just(TryBind(operand, tpos,
+                      MatchBranch(VarPattern(try_value_name, tpos), LetBindExpr(pat, rhs, els, body, pos))))
 
 # `match branch(e) with | Continue <arm> -> … | Break f -> f`: the meaning of
 # `try` at any instance. Inference fuses it at a known one.

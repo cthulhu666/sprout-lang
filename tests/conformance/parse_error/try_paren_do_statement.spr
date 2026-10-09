@@ -1,0 +1,10 @@
+# Only a bare `try` starts a `do` statement; a parenthesised one heads a binding.
+
+type Point = (x: Int, y: Int)
+
+fn run(m: Maybe Point) -> Maybe Int =
+  do
+    (try m).x
+    Just(1)
+
+fn main() -> Unit !{IO} = print(to_string(run(Nothing)))
