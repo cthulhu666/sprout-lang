@@ -158,10 +158,13 @@ Set `SPROUT_GC_ADAPT_RATIO=0` to disable and freeze the threshold.
 **Footprint floor** — a sweep walks free slots as well as live ones, and one survivor keeps a
 region's free slots in every later walk. So the threshold is also at least
 `live + (live + free) / 3`, where `free` is the freelist length after the sweep: collect once the
-program has allocated a third of what the last sweep walked. Ordinary programs never reach it; a
-program holding a large free pool behind a small live set does, and collects far less often
-([gc-trigger-v0.md](gc-trigger-v0.md) §6.2). It is part of the adaptive re-base, so
-`SPROUT_GC_ADAPT_RATIO=0` turns it off too, as does setting `SPROUT_GC_THRESHOLD`.
+program has allocated a third of what the last sweep walked. Most programs stay under
+`live × factor`, and the compiler reaches it on part of its run; a program holding a large free
+pool behind a small live set collects far less often ([gc-trigger-v0.md](gc-trigger-v0.md) §6.2).
+Its limit: a program whose phases take turns across three or more object sizes while its live
+data grows can hold several times the memory (§6.2.1); `SPROUT_GC_ADAPT_CAP` bounds it. It is
+part of the adaptive re-base, so `SPROUT_GC_ADAPT_RATIO=0` turns it off too, as does setting
+`SPROUT_GC_THRESHOLD`.
 
 Read the factor as a **garbage budget**: `(factor − 1) × live` objects of garbage are tolerated
 before the next collection. Raising it trades RSS for time, and only for programs whose live set

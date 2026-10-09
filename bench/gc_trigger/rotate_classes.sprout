@@ -1,0 +1,96 @@
+module main
+
+# The footprint floor's limit: allocation phases that take turns across slot classes.
+#
+# Each phase builds throwaway 64-node lists of one record arity, then moves to the next class,
+# keeping one Link per 100 lists. The freelists are exact-fit, so during a phase the other
+# classes' free slots are slots nothing can reuse. Numbers: docs/gc-trigger-v0.md §6.2.
+#
+# Build as in docs/debugging.md §Running one test file, then compare the two arms:
+#   SPROUT_DEBUG_GC=1 /usr/bin/time -l ./rotate                            # floor on
+#   SPROUT_GC_THRESHOLD=4096 SPROUT_DEBUG_GC=1 /usr/bin/time -l ./rotate   # floor off
+# The other rows edit `main`: classes, `mixed`, phases, lists per phase, and `cap` (keep at most
+# `cap` Links, so live data stays flat; 0 keeps every one, so it grows).
+
+type L1 (..) =
+  | E1
+  | N1 Int L1
+
+type L3 (..) =
+  | E3
+  | N3 Int Int Int L3
+
+type L5 (..) =
+  | E5
+  | N5 Int Int Int Int Int L5
+
+type L7 (..) =
+  | E7
+  | N7 Int Int Int Int Int Int Int L7
+
+type Chain (..) =
+  | End
+  | Link Int Chain
+
+fn b1(n: Int, acc: L1) -> L1 = if n <= 0 then acc else b1(n - 1, N1(n, acc))
+fn b3(n: Int, acc: L3) -> L3 = if n <= 0 then acc else b3(n - 1, N3(n, 0, 0, acc))
+fn b5(n: Int, acc: L5) -> L5 = if n <= 0 then acc else b5(n - 1, N5(n, 0, 0, 0, 0, acc))
+fn b7(n: Int, acc: L7) -> L7 = if n <= 0 then acc else b7(n - 1, N7(n, 0, 0, 0, 0, 0, 0, acc))
+
+fn l1(w: L1, a: Int) -> Int =
+  match w with
+  | N1 _ r -> l1(r, a + 1)
+  | E1 -> a
+
+fn l3(w: L3, a: Int) -> Int =
+  match w with
+  | N3 _ _ _ r -> l3(r, a + 1)
+  | E3 -> a
+
+fn l5(w: L5, a: Int) -> Int =
+  match w with
+  | N5 _ _ _ _ _ r -> l5(r, a + 1)
+  | E5 -> a
+
+fn l7(w: L7, a: Int) -> Int =
+  match w with
+  | N7 _ _ _ _ _ _ _ r -> l7(r, a + 1)
+  | E7 -> a
+
+fn chain_len(c: Chain, acc: Int) -> Int =
+  match c with
+  | Link _ rest -> chain_len(rest, acc + 1)
+  | End -> acc
+
+fn trim(c: Chain, k: Int) -> Chain =
+  match c with
+  | Link v rest -> if k <= 0 then End else Link(v, trim(rest, k - 1))
+  | End -> End
+
+fn keep_one(n: Int, keep: Chain, cap: Int) -> Chain =
+  if cap > 0 then Link(n, trim(keep, cap - 1)) else Link(n, keep)
+
+fn round(cls: Int) -> Int =
+  if cls == 0 then l1(b1(64, E1), 0)
+  else if cls == 1 then l3(b3(64, E3), 0)
+  else if cls == 2 then l5(b5(64, E5), 0)
+  else l7(b7(64, E7), 0)
+
+# `mixed` ignores the phase's class and cycles all four list by list.
+fn phase(cls: Int, mixed: Bool, n: Int, tick: Int, cap: Int, keep: Chain, acc: Int) -> (Int, Chain) =
+  if n <= 0 then (acc, keep)
+  else
+    let r = acc + round(if mixed then n - (n / 4) * 4 else cls)
+    in
+    if tick <= 1 then phase(cls, mixed, n - 1, 100, cap, keep_one(n, keep, cap), r)
+    else phase(cls, mixed, n - 1, tick - 1, cap, keep, r)
+
+fn phases(i: Int, c: Int, classes: Int, mixed: Bool, total: Int, len: Int, cap: Int, keep: Chain, acc: Int) -> (Int, Chain) =
+  if i >= total then (acc, keep)
+  else
+    let (a, k) = phase(c, mixed, len, 40, cap, keep, acc)
+    in phases(i + 1, if c + 1 >= classes then 0 else c + 1, classes, mixed, total, len, cap, k, a)
+
+fn main() -> Unit !{IO} =
+  let (nodes, kept) = phases(0, 0, 4, false, 96, 10000, 0, End, 0)
+  in print(`nodes=${nodes} kept=${chain_len(kept, 0)}\n`)

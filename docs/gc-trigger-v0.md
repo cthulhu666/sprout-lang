@@ -265,7 +265,8 @@ work-per-garbage near `k` whatever the live set is.
   ordinary workload measured and **52–76** on the game; pinning the game's threshold drops it to 0.25
   (§3.1, `bench/results-2026-10-03-gc-walk.md`). Under the damped floor it settles at
   `k·free / (live + free) − 1`: `k − 1` when the free pool dwarfs the live set, as on the game.
-- **It terminates, and the undamped form does not.** `g_freelist` is exact-fit (`BACKLOG.md`
+- **It terminates while `U` stays fixed, and the undamped form does not.** §6.2.1 has the case
+  where `U` grows. `g_freelist` is exact-fit (`BACKLOG.md`
   **"The class freelists are exact-fit"**), so take `U` free slots no allocation can reuse. A
   cycle allocates `(live + U + A) / k` into the reusable pool `A`; allocations `A` cannot hold bump
   fresh slots, and if anything live pins their regions they outlive Pass 2 and join `A`. `A`
@@ -283,6 +284,43 @@ work-per-garbage near `k` whatever the live set is.
 - **Units are not a problem**, contrary to an earlier draft: slots walked and `g_managed_heap_count`
   are the same count — one cell per object whatever its size, and a large object is one region
   walked as one.
+
+#### 6.2.1 Limit: slot classes taking turns
+
+Found in review, measured 2026-10-09 with `bench/gc_trigger/rotate_classes.sprout` (its header
+has the commands). Phases each allocate one slot class, in turn. During a phase the other classes'
+pools are `U`, and each grows again in its own turn, so `U` is not fixed and the pool does not
+settle. Floor on vs off (`SPROUT_GC_THRESHOLD=4096`), 96 phases of 10,000 lists unless noted:
+
+| shape | peak RSS, on / off | slots walked, on / off |
+|---|---|---|
+| 1 class | 4.5 / 4.6 MB | 90.2M / 90.2M |
+| 2 classes in turn | 5.5 / 5.4 MB | 153.1M / 153.1M |
+| 3 classes in turn | **21.0 / 6.6 MB** | 182.9M / 214.0M |
+| 4 classes in turn | **42.9 / 7.2 MB** | 193.7M / 272.6M |
+| 4 classes, 192 phases | **80.1 / 12.7 MB** | 392.6M / 547.1M |
+| 4 classes, 384 phases | **113.2 / 20.0 MB** | 786.7M / 1,097.6M |
+| 4 classes, live held at 100 Links | 8.0 / 4.8 MB, same at 384 phases | 188.4M / 251.0M |
+| 4 classes mixed in every phase | 5.1 / 4.9 MB | 92.6M / 92.6M |
+
+It takes both: three or more classes taking turns, and live data that grows into each new region,
+so none is released. With live data flat the extra memory is bounded; with classes mixed, or two,
+the floor does not bind. Where it binds the floor still walks 14–29% fewer slots, and GC time
+fell 36–52% on the growing rows (one run each; the flat row is within noise). The growth follows
+run length, about 6× the off arm at each length tried with four classes.
+
+Left as is, because each alternative loses more:
+
+- **A cap at a multiple of live** cannot tell this from the game. The floor sits ~20× live here
+  and ~42× on the game (~2k live under ~246k free, `bench/results-2026-10-03-gc-walk.md`), so a
+  cap that stops this removes the game's gain first.
+- **Counting only classes with demand** diverges (above).
+- **The root cause is exact-fit freelists** (`BACKLOG.md` **"The class freelists are
+  exact-fit"**). Re-carving a larger slot lets a small class use a big class's pool, not the
+  reverse, so a phase order from small to large stays exposed.
+
+A program with this shape can bound RSS with `SPROUT_GC_ADAPT_CAP`, or turn the floor off by
+setting `SPROUT_GC_THRESHOLD`.
 
 ### 6.3 Option C — express the floor in bytes
 
