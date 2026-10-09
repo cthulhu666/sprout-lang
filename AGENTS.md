@@ -76,7 +76,8 @@ grouped by the reader, so it cannot say what the passes said. Writing them down 
 retired the clustering it belonged to, so the script now groups nothing and gates nothing.
 It takes an effort level like `/code-review` does — `/sprout-review [low|medium|high|xhigh|max]
 [<pr#>|<branch>|<path>]`, defaulting to `high` so runs on one branch stay comparable — which buys
-1/2/3/5/8 reviewer passes and is recorded in the ledger beside the counts.
+1/2/3/5/8 reviewer passes and is recorded in the ledger beside the counts. Beside them run
+1/1/1/4/4 report-only cleanup passes — `/simplify`'s angles — kept out of verify and the bug counts.
 **It reports and stops**: fixing a finding in the same turn leaves the reader a changelog instead of
 a decision, and that has happened. `scripts/review_ledger.sh count` reads the ledger; test with
 `just test-review-ledger` and `just test-review-script`.

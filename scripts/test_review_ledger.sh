@@ -161,8 +161,29 @@ git switch -q -c effort-bogus
 idb=$(bash "$LEDGER" open)
 bash "$LEDGER" done "$idb" 1 1 "$(printf 'hi\tgh')"
 check "a bogus level is not recorded"  "review:1 1 found 1 real" "$(bash "$LEDGER" show)"
-check "a bogus level keeps 8 columns"  "1" \
-  "$(awk -F'\t' '$2=="done" && $3=="effort-bogus" { print NF }' "$runs" | grep -c '^8$')"
+check "a bogus level keeps 9 columns"  "1" \
+  "$(awk -F'\t' '$2=="done" && $3=="effort-bogus" { print NF }' "$runs" | grep -c '^9$')"
+
+# --- the cleanups column -------------------------------------------------
+# Cleanups are not bugs, so they get their own ninth column rather than a share
+# of `found`, which means "bug reports" in every row ever written.
+git switch -q -c cleanup-col
+idc=$(bash "$LEDGER" open)
+bash "$LEDGER" done "$idc" 4 2 high 6
+check "the cleanup count is column 9"  "6" \
+  "$(awk -F'\t' '$2=="done" && $3=="cleanup-col" { print $9 }' "$runs")"
+check "cleanups leave show unchanged"  "review:1 4 found 2 real @high" "$(bash "$LEDGER" show)"
+check "a start row is 9 columns wide"  "9" \
+  "$(awk -F'\t' '$2=="start" && $3=="cleanup-col" { print NF }' "$runs")"
+# Same rule as the level: only a count is stored, never a token that could
+# carry a tab into the row.
+idd=$(bash "$LEDGER" open)
+bash "$LEDGER" done "$idd" 1 1 high "$(printf '3\tx')"
+check "a non-numeric cleanup count is dropped" "-" \
+  "$(awk -F'\t' -v i="$idd" '$2=="done" && $5==i { print $9 }' "$runs")"
+# An 8-field row predates the column and must keep counting.
+printf '2020-01-01T00:00:00Z\tdone\tcleanup-col\tdeadbee\t999-2\t3\t1\tlow\n' >> "$runs"
+check "a legacy 8-field row counts"    "3"  "$(bash "$LEDGER" count)"
 git switch -q main
 
 # Outside a repository the ledger must stay quiet rather than erroring: the

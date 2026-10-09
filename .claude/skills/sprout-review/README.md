@@ -204,6 +204,34 @@ they are the whole argument for the removal — the constant was retired by meas
 `VERIFY_CAP = 10` is the last threshold here with that asymmetry: overrunning it is announced in the
 log, while a cap set too low just means fewer things were checked. `BACKLOG.md` owns it.
 
+## Why there is a cleanup track
+
+Measured 2026-10-09 over all 11 runs on record, 67 raw findings, classified by hand from their
+summaries:
+
+| kind | count |
+|---|---|
+| correctness bugs | ~50 |
+| stale comment, doc, spec prose or PR-body claim | ~10 |
+| diagnostic text that blames the wrong thing | 3 |
+| missing test | 1 |
+| efficiency-shaped (all reported as hangs or wrong behaviour) | 3 |
+| reuse or simplification | **0** |
+
+Zero is what the pipeline selects for, not evidence the code was clean: the reviewer prompt says
+"prefer real failure modes over style", and the skeptic refutes anything without a failure. So
+`/simplify`'s angles find a different set, not an overlapping one.
+
+The track is `/simplify` (Claude Code 2.1.286) with three changes. It reports instead of applying,
+because this skill stops at the report. It has Sprout's own forms in the angle text, which is the
+part a generic pass cannot know. And its pass count follows the level — one pass holding all four
+angles up to `high`, which is `/simplify`'s own fallback shape, and one per angle at `xhigh` and
+`max`, which is its normal shape. Nothing has measured whether four passes find more than one.
+
+The built-in `/code-review` already runs cleanup angles at `high` — three cleanup, one altitude and
+one conventions, inline in one context. The conventions angle (quote a CLAUDE.md rule, quote the line
+that breaks it) is not in this track.
+
 ## Reading it
 
 ```sh

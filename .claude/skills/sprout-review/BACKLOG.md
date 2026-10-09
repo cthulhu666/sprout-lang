@@ -57,3 +57,14 @@ Rationale and measurements live in `README.md`; the skill itself is `SKILL.md`.
   The `done` row already stores the head SHA; comparing it against the current tree would give a
   staleness marker (`rv:2*`). `review_gate.py` already computes a per-path tree digest that could
   be reused rather than reinvented.
+
+- [ ] `P2` **The cleanup track's value is unmeasured.** Nothing says how many of its findings get
+  acted on, or whether four one-angle passes at `xhigh` find more than one four-angle pass. Count
+  cleanups fixed vs declined over a few runs (needs the disposition entry above), then decide
+  whether `CLEANUP_LADDER` earns its upper rung — or the track its agent at all.
+
+- [ ] `P2` **Doc and comment drift is ~20% of findings, and no angle asks for it.** Of 67 raw
+  findings over 11 runs, about 14 were stale comments, spec prose, PR-body claims or diagnostic
+  text. They pass only because a stale comment can be phrased as a misbehaviour. Name it: a drift
+  angle, or `/code-review`'s conventions angle pointed at `AGENTS.md` §Docs & Spec. `README.md`
+  §Why there is a cleanup track has the classification.
