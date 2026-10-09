@@ -163,9 +163,8 @@ let already_let_else =
   "    else Nothing\n"
 
 # A do block written with effectful-RHS binding-else (do-local refutable binds).
-# The parser desugars each into a nested match, but positions them at the `<-`/`let`
-# source, so `is_written_as_match` drops them — no staircase finding, just like
-# `already_let_else`. Guards the desugar's position choice against regression.
+# Each elaborates to a nested match with no `match` keyword, so none counts
+# toward depth — no staircase finding, just like `already_let_else`.
 let already_do_binding_else =
   "fn eff(a: Result Int Int, b: Result Int Int, c: Result Int Int) -> Int !{IO} =\n" ++
   "  do\n" ++
@@ -186,7 +185,8 @@ let blocked_own_payload =
   "          | Err msg -> error_response(msg)\n" ++
   "          | Ok line -> combine(session_id, kind, line)\n"
 
-# A `try` passes its failure on itself, so its links never need a binding-else.
+# Depth counts written matches. A binding already reads flat, so one `match`
+# over two binding lines is one level, not three.
 let match_then_tries =
   "fn total(m: Maybe String, a: String, b: String) -> Maybe Int =\n" ++
   "  match m with\n" ++
@@ -195,6 +195,60 @@ let match_then_tries =
   "          y = try parse_digit(b)\n" ++
   "      in Just(x + y + str_len(s))\n" ++
   "  | Nothing -> Nothing\n"
+
+let match_then_let_elses =
+  "fn total(m: Maybe String, a: String, b: String) -> Maybe Int =\n" ++
+  "  match m with\n" ++
+  "  | Just s ->\n" ++
+  "      let Just x = parse_digit(a) else Nothing\n" ++
+  "          Just y = parse_digit(b) else Nothing\n" ++
+  "      in Just(x + y + str_len(s))\n" ++
+  "  | Nothing -> Nothing\n"
+
+# A binding between written links adds no depth but does not end the chain.
+let written_chain_through_try =
+  "fn f(a: Maybe Int, b: Maybe Int, c: String) -> Maybe Int =\n" ++
+  "  match a with\n" ++
+  "  | Nothing -> Nothing\n" ++
+  "  | Just x ->\n" ++
+  "      let d = try parse_digit(c)\n" ++
+  "      in\n" ++
+  "        match b with\n" ++
+  "        | Nothing -> Nothing\n" ++
+  "        | Just y ->\n" ++
+  "            match parse_digit(c) with\n" ++
+  "            | Nothing -> Nothing\n" ++
+  "            | Just z -> Just(x + y + z + d)\n"
+
+# Under a binding, the written chain is reported from its own first `match`.
+let written_chain_under_binding =
+  "fn f(m: Maybe Int, a: Maybe Int, b: Maybe Int, c: Maybe Int) -> Maybe Int =\n" ++
+  "  let n = try m\n" ++
+  "  in\n" ++
+  "    match a with\n" ++
+  "    | Nothing -> Nothing\n" ++
+  "    | Just x ->\n" ++
+  "        match b with\n" ++
+  "        | Nothing -> Nothing\n" ++
+  "        | Just y ->\n" ++
+  "            match c with\n" ++
+  "            | Nothing -> Nothing\n" ++
+  "            | Just z -> Just(n + x + y + z)\n"
+
+# The binding-else link is already flat; only the written links decide the message.
+let binding_else_link_not_blocking =
+  "fn f(a: Maybe Int, b: Maybe Int, r: Result Int Int, c: Maybe Int) -> Int =\n" ++
+  "  match a with\n" ++
+  "  | Nothing -> 0\n" ++
+  "  | Just x ->\n" ++
+  "      let Ok w = r else Err e -> e\n" ++
+  "      in\n" ++
+  "        match b with\n" ++
+  "        | Nothing -> 0\n" ++
+  "        | Just y ->\n" ++
+  "            match c with\n" ++
+  "            | Nothing -> 0\n" ++
+  "            | Just z -> x + y + z + w\n"
 
 let leaf_match_arm_uses_own_payload_is_clean =
   "fn f(a: Maybe Int, b: Maybe Int) -> Int =\n" ++
@@ -774,8 +828,20 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "blocked chain: rule id unchanged", first_rule(lint_rules.lint_ast(blocked_own_payload)), "staircase-of-doom")
     assert_eq(state, "payload chain: message points to let..else (binding-else, Tier 1b)", mentions_let_else(first_message(lint_rules.lint_ast(blocked_own_payload))), true)
 
-    assert_eq(state, "try links: constant-else message, not binding-else",
-      first_message(lint_rules.lint_ast(match_then_tries)),
+    assert_eq(state, "match over two try lines: one written level, no finding",
+      count_by_rule(lint_rules.lint_ast(match_then_tries), "staircase-of-doom"), 0)
+    assert_eq(state, "match over two let..else lines: one written level, no finding",
+      count_by_rule(lint_rules.lint_ast(match_then_let_elses), "staircase-of-doom"), 0)
+    assert_eq(state, "written chain through a try link: reported once",
+      count_by_rule(lint_rules.lint_ast(written_chain_through_try), "staircase-of-doom"), 1)
+    assert_eq(state, "written chain through a try link: anchored at the first match",
+      first_line(lint_rules.lint_ast(written_chain_through_try)), 2)
+    assert_eq(state, "written chain under a binding: reported",
+      count_by_rule(lint_rules.lint_ast(written_chain_under_binding), "staircase-of-doom"), 1)
+    assert_eq(state, "written chain under a binding: anchored at its own first match",
+      first_line(lint_rules.lint_ast(written_chain_under_binding)), 4)
+    assert_eq(state, "binding-else link: constant-else message, not binding-else",
+      first_message(lint_rules.lint_ast(binding_else_link_not_blocking)),
       "nested match can be flattened with let..else (docs/idiomatic-sprout.md)")
 
     assert_eq(state, "leaf match arm using its own payload stays clean (leaf never becomes an else-fallback)", count_list(lint_rules.lint_ast(leaf_match_arm_uses_own_payload_is_clean)), 1)

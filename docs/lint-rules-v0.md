@@ -487,12 +487,12 @@ only a syntactic check for the callee finds it.
    `source.strip_headers(src)`, so the imports are gone before the AST
    exists. Both guards must read `header_lines`, the same text-level view
    the suppression directives use.
-6. **Not `drop_desugared_matches`.** That filter (`lint_rules.drop_desugared_matches`) drops findings whose
-   source line does not literally begin with `match`, because `staircase-of-doom` was firing on
-   already-flat `let..else` code. For *this* rule the desugared form is a **true** positive. The
-   filter is keyed on the `"staircase-of-doom"` rule id, so the new rule is outside it by default — but
-   that needs a comment, or someone will later generalise the filter and blind the rule to half its
-   cases.
+6. **Not the staircase rule's written-match check.** `staircase-of-doom` counts only matches
+   at a `match` keyword (`lint_rules.written_matches`, read from the tokens), because it was firing
+   on already-flat `let..else` and `try` code. For *this* rule the desugared form is a **true**
+   positive. The check lives in `walk_chain` and `walk_match`, so the new rule is outside it — but
+   that needs a comment, or someone will later move it into the shared walk and blind the rule to
+   half its cases.
 
 ## 8. Config, and why it unblocks the `tests/` question
 
@@ -528,7 +528,7 @@ Revision 1 claimed three of the seven could become patterns. Reading them, none 
 | `redundant-vec-from-list` | delegates to `desugar_ctx.find_redundant_vec_wraps` (`desugar_ctx.sprout:436`), which threads a function-signature index to compute Vec *context*. A syntactic `vec_from_list([…])` pattern fires on every wrap, redundant or not — the opposite of what the rule means. |
 | `list-shape-pattern` | matches on `ast.Pattern`, not `Expr` (`lint_rules.find_list_shape_in_pattern`); walks Cons chains of unbounded length; needs a source-text post-filter because `[a, b]` sugar produces identical nodes. |
 | `list-prefix-pattern` | same family, same three reasons (`find_prefix_pattern_in_pattern`). |
-| `staircase-of-doom` | counts chain depth and checks whether a terminal branch uses its own payload. |
+| `staircase-of-doom` | counts written matches in a chain (a binding adds none) and checks whether a terminal branch uses its own payload. |
 | `multi-line-lambda-arg` | layout, not shape. |
 | `nullary-const-fn` | a predicate over the body, not a shape. |
 | `deprecated-brace-body` | token-level: the AST discards which delimiter produced the body. |

@@ -164,133 +164,146 @@ fn template_parts_use_any(names: List String, parts: List ast.TemplateExprPart) 
 # Does a terminal branch's body depend on its own (failing) match? `let <pat> = e
 # else fb` cannot express that: `fb` is matched against a bare wildcard
 # (ast.let_bind_match), so it has no access to whatever the
-# failing pattern would have bound (e.g. the `msg` in `Err msg -> ...`). A `try`'s
-# own `Break $failure -> $failure` does not count: that link is already flat.
+# failing pattern would have bound (e.g. the `msg` in `Err msg -> ...`).
 fn terminal_needs_own_payload(pat: ast.Pattern, body: ast.Expr) -> Bool =
-  expr_uses_any(list_filter(\n -> ! ast.is_inference_name (n), ast.pattern_names(pat)), body)
+  expr_uses_any(ast.pattern_names(pat), body)
 
 # ---------------------------------------------------------------------------
 # Generic ast.Expr traversal — every variant, modeled on checker.sprout's
 # desugar_expr_no_ctx_i so no shape is silently skipped (a missed variant here
 # is a silent false negative, the worst failure mode for a coverage tool).
 
-fn walk_expr(bound: List String, e: ast.Expr) -> List LintFinding =
+fn walk_expr(written: Set, bound: List String, e: ast.Expr) -> List LintFinding =
   match e with
   | ast.MatchExpr scrut branches pos ->
-      list_append(combinator_findings(bound, e, pos), walk_match(bound, scrut, branches, pos))
+      list_append(combinator_findings(bound, e, pos), walk_match(written, bound, scrut, branches, pos))
   | ast.IfExpr cond then_ else_ pos ->
       list_append(combinator_findings(bound, e, pos),
-        list_append(walk_expr(bound, cond),
-                    list_append(walk_expr(bound, then_), walk_expr(bound, else_))))
+        list_append(walk_expr(written, bound, cond),
+                    list_append(walk_expr(written, bound, then_), walk_expr(written, bound, else_))))
   | ast.CallExpr callee args _ ->
       list_append(multi_line_lambda_findings(args),
-                  list_append(walk_expr(bound, callee), walk_exprs(bound, args)))
-  | ast.TupleExpr elems _ -> walk_exprs(bound, elems)
+                  list_append(walk_expr(written, bound, callee), walk_exprs(written, bound, args)))
+  | ast.TupleExpr elems _ -> walk_exprs(written, bound, elems)
   | ast.BinaryExpr _ left right _ ->
-      list_append(walk_expr(bound, left), walk_expr(bound, right))
-  | ast.UnaryExpr _ operand _ -> walk_expr(bound, operand)
-  | ast.LambdaExpr params body _ -> walk_expr(list_append(param_names(params), bound), body)
-  | ast.DoExpr steps _ -> walk_do_steps(bound, steps)
-  | ast.RecordExpr _ fields _ -> walk_record_fields(bound, fields)
-  | ast.GetFieldExpr rec_expr _ _ -> walk_expr(bound, rec_expr)
+      list_append(walk_expr(written, bound, left), walk_expr(written, bound, right))
+  | ast.UnaryExpr _ operand _ -> walk_expr(written, bound, operand)
+  | ast.LambdaExpr params body _ -> walk_expr(written, list_append(param_names(params), bound), body)
+  | ast.DoExpr steps _ -> walk_do_steps(written, bound, steps)
+  | ast.RecordExpr _ fields _ -> walk_record_fields(written, bound, fields)
+  | ast.GetFieldExpr rec_expr _ _ -> walk_expr(written, bound, rec_expr)
   | ast.RecordUpdateExpr base fields _ ->
-      list_append(walk_expr(bound, base), walk_record_fields(bound, fields))
+      list_append(walk_expr(written, bound, base), walk_record_fields(written, bound, fields))
   | ast.IntRangeExpr lo hi _ ->
-      list_append(walk_expr(bound, lo), walk_expr(bound, hi))
-  | ast.StringTemplateExpr parts _ -> walk_template_parts(bound, parts)
-  | ast.ComprehensionExpr elem gens _ -> walk_comprehension(bound, elem, gens)
-  | ast.LetBindExpr pat value els body pos -> walk_expr(bound, ast.let_bind_match(pat, value, els, body, pos))
-  | ast.TryExpr operand _ -> walk_expr(bound, operand)
+      list_append(walk_expr(written, bound, lo), walk_expr(written, bound, hi))
+  | ast.StringTemplateExpr parts _ -> walk_template_parts(written, bound, parts)
+  | ast.ComprehensionExpr elem gens _ -> walk_comprehension(written, bound, elem, gens)
+  | ast.LetBindExpr pat value els body pos -> walk_expr(written, bound, ast.let_bind_match(pat, value, els, body, pos))
+  | ast.TryExpr operand _ -> walk_expr(written, bound, operand)
   | _ -> Nil  # leaves: Var/Int/Float/Bool/String/Char/Unit — no sub-expressions
 
 # A generator's pattern scopes over its own guards, the generators after it and
 # the element expression, so the environment grows left to right.
-fn walk_comprehension(bound: List String, elem: ast.Expr,
+fn walk_comprehension(written: Set, bound: List String, elem: ast.Expr,
                       gens: List ast.ComprehensionGen) -> List LintFinding =
   match gens with
-  | Nil -> walk_expr(bound, elem)
+  | Nil -> walk_expr(written, bound, elem)
   | Cons g rest ->
       match g with
       | ast.ComprehensionGen pat src guards ->
           let inner = list_append(ast.pattern_names(pat), bound)
-          in list_append(walk_expr(bound, src),
-               list_append(walk_exprs(inner, guards), walk_comprehension(inner, elem, rest)))
+          in list_append(walk_expr(written, bound, src),
+               list_append(walk_exprs(written, inner, guards), walk_comprehension(written, inner, elem, rest)))
 
-fn walk_exprs(bound: List String, exprs: List ast.Expr) -> List LintFinding =
+fn walk_exprs(written: Set, bound: List String, exprs: List ast.Expr) -> List LintFinding =
   match exprs with
   | Nil -> Nil
-  | Cons e rest -> list_append(walk_expr(bound, e), walk_exprs(bound, rest))
+  | Cons e rest -> list_append(walk_expr(written, bound, e), walk_exprs(written, bound, rest))
 
 # A step's binder scopes over the steps after it, never over its own value.
-fn walk_do_steps(bound: List String, steps: List ast.DoStep) -> List LintFinding =
+fn walk_do_steps(written: Set, bound: List String, steps: List ast.DoStep) -> List LintFinding =
   match steps with
   | Nil -> Nil
   | Cons s rest ->
       match s with
       | ast.DoBindStep pat value ->
-          list_append(walk_expr(bound, value),
-                      walk_do_steps(list_append(ast.pattern_names(pat), bound), rest))
+          list_append(walk_expr(written, bound, value),
+                      walk_do_steps(written, list_append(ast.pattern_names(pat), bound), rest))
       | ast.DoLetStep n value ->
-          list_append(walk_expr(bound, value), walk_do_steps(Cons(n, bound), rest))
+          list_append(walk_expr(written, bound, value), walk_do_steps(written, Cons(n, bound), rest))
       | ast.DoExprStep value ->
-          list_append(walk_expr(bound, value), walk_do_steps(bound, rest))
+          list_append(walk_expr(written, bound, value), walk_do_steps(written, bound, rest))
       | ast.DoPatStep kind pat value els pos ->
-          walk_do_steps(bound, ast.do_pat_steps(kind, pat, value, els, rest, pos))
+          walk_do_steps(written, bound, ast.do_pat_steps(kind, pat, value, els, rest, pos))
 
-fn walk_record_fields(bound: List String, fields: List ast.RecordField) -> List LintFinding =
+fn walk_record_fields(written: Set, bound: List String, fields: List ast.RecordField) -> List LintFinding =
   match fields with
   | Nil -> Nil
   | Cons f rest ->
       match f with
       | ast.RecordField _ value ->
-          list_append(walk_expr(bound, value), walk_record_fields(bound, rest))
+          list_append(walk_expr(written, bound, value), walk_record_fields(written, bound, rest))
 
-fn walk_template_parts(bound: List String,
+fn walk_template_parts(written: Set, bound: List String,
                        parts: List ast.TemplateExprPart) -> List LintFinding =
   match parts with
   | Nil -> Nil
   | Cons p rest ->
       match p with
-      | ast.LitPart _ -> walk_template_parts(bound, rest)
+      | ast.LitPart _ -> walk_template_parts(written, bound, rest)
       | ast.InterpPart e ->
-          list_append(walk_expr(bound, e), walk_template_parts(bound, rest))
+          list_append(walk_expr(written, bound, e), walk_template_parts(written, bound, rest))
 
-fn walk_branch(bound: List String, b: ast.MatchBranch) -> List LintFinding =
+fn walk_branch(written: Set, bound: List String, b: ast.MatchBranch) -> List LintFinding =
   match b with
-  | ast.MatchBranch pat body -> walk_expr(list_append(ast.pattern_names(pat), bound), body)
+  | ast.MatchBranch pat body -> walk_expr(written, list_append(ast.pattern_names(pat), bound), body)
 
-fn walk_branches(bound: List String, branches: List ast.MatchBranch) -> List LintFinding =
+fn walk_branches(written: Set, bound: List String, branches: List ast.MatchBranch) -> List LintFinding =
   match branches with
   | Nil -> Nil
-  | Cons b rest -> list_append(walk_branch(bound, b), walk_branches(bound, rest))
+  | Cons b rest -> list_append(walk_branch(written, bound, b), walk_branches(written, bound, rest))
 
-# Minimum chain length (number of nested matches, including the root) before
-# a chain is reported. The docs/idiomatic-sprout.md example is itself only
-# 2 deep; raising this filters out simple two-level unwraps and flags only
+# Minimum chain length (number of nested written matches, including the root)
+# before a chain is reported. The docs/idiomatic-sprout.md example is itself
+# only 2 deep; raising this filters out simple two-level unwraps and flags only
 # genuinely deep cascades.
 let min_staircase_depth = 3
 
+# The `match` keywords in the source, by index. The rules read bindings
+# elaborated (ast.elaborate_bindings), so a `let..else` or `try` line is a
+# MatchExpr too; only one at a `match` keyword was written as a match.
+fn written_matches(toks: Vec token.Token) -> Set = vec_fold(add_if_match, set_empty(), toks)
+
+fn add_if_match(acc: Set, t: token.Token) -> Set =
+  if tok_is_keyword(t, "match") then set_insert(pos_key(token.token_position(t)), acc)
+  else acc
+
+fn pos_key(pos: source.SourcePos) -> String = int_to_string(pos.index)
+
+fn is_written(written: Set, pos: source.SourcePos) -> Bool = set_member(pos_key(pos), written)
+
 # walk_chain: the chain starting at this 2-branch match. Returns (depth,
-# blocked, findings) — depth is 1 + however deep the continuing branch's own
-# chain goes; blocked is true when ANY link's terminal branch needs its own
-# (failing-pattern) payload, meaning the flat form needs a binding-else
+# blocked, findings) — depth counts the written matches in the chain; an
+# elaborated binding already reads flat, so it adds nothing but the chain runs
+# on through it. blocked is true when a written link's terminal branch needs its
+# own (failing-pattern) payload, meaning the flat form needs a binding-else
 # (`else <pat> -> <h>`, Tier 1b) rather than a constant else; findings covers every
 # non-chain subexpression along the way (the scrutinee at each link, each
 # link's terminal body) but never a finding for THIS node — the caller
 # decides that once it knows the total depth and blocked status.
-fn walk_chain(bound: List String, branches: List ast.MatchBranch,
-              scrut: ast.Expr) -> (Int, Bool, List LintFinding) =
+fn walk_chain(written: Set, bound: List String, branches: List ast.MatchBranch,
+              scrut: ast.Expr, pos: source.SourcePos) -> (Int, Bool, List LintFinding) =
   match branches with
   | [b1, b2] ->
       (match classify(b1, b2) with
        | Just (terminal_pat, terminal_body, continuing_pat, continuing_match) ->
-           (match walk_chain_expr(list_append(ast.pattern_names(continuing_pat), bound),
+           (match walk_chain_expr(written, list_append(ast.pattern_names(continuing_pat), bound),
                                   continuing_match) with
             | (inner_depth, inner_blocked, inner_findings) ->
-                (1 + inner_depth,
-                  inner_blocked || terminal_needs_own_payload(terminal_pat, terminal_body),
-                  list_append(walk_expr(bound, scrut),
-                    list_append(walk_expr(list_append(ast.pattern_names(terminal_pat), bound),
+                (own + inner_depth,
+                  inner_blocked || here && terminal_needs_own_payload(terminal_pat, terminal_body),
+                  list_append(walk_expr(written, bound, scrut),
+                    list_append(walk_expr(written, list_append(ast.pattern_names(terminal_pat), bound),
                                           terminal_body),
                                 inner_findings))))
        | Nothing ->
@@ -299,22 +312,25 @@ fn walk_chain(bound: List String, branches: List ast.MatchBranch,
            # fallback. Its arms stay ordinary match arms either way, free to
            # use their own bindings — hence `blocked = false` here even if
            # b1/b2 reference their own payload.
-           (1, false, list_append(walk_expr(bound, scrut),
-                        list_append(walk_branch(bound, b1), walk_branch(bound, b2)))))
-  | _ -> (1, false, list_append(walk_expr(bound, scrut), walk_branches(bound, branches)))
+           (own, false, list_append(walk_expr(written, bound, scrut),
+                          list_append(walk_branch(written, bound, b1), walk_branch(written, bound, b2)))))
+  | _ -> (own, false, list_append(walk_expr(written, bound, scrut), walk_branches(written, bound, branches)))
+where
+  here = is_written(written, pos)
+  own = if here then 1 else 0
 
 # walk_chain_expr: like walk_chain, but for an expression that may or may not
 # itself be a match. It is also where a chain link's OWN combinator finding is
 # collected: `walk_chain` recurses through here rather than `walk_expr`, so until
 # this arm offered the node to the rule, no combinator nested in a 2-branch chain
 # was ever checked.
-fn walk_chain_expr(bound: List String, e: ast.Expr) -> (Int, Bool, List LintFinding) =
+fn walk_chain_expr(written: Set, bound: List String, e: ast.Expr) -> (Int, Bool, List LintFinding) =
   match e with
   | ast.MatchExpr scrut branches pos ->
-      (match walk_chain(bound, branches, scrut) with
+      (match walk_chain(written, bound, branches, scrut, pos) with
        | (depth, blocked, findings) ->
            (depth, blocked, list_append(combinator_findings(bound, e, pos), findings)))
-  | _ -> (1, false, walk_expr(bound, e))
+  | _ -> (1, false, walk_expr(written, bound, e))
 
 # Both shapes have a concrete fix in let..else, so both name it. A chain whose
 # terminal recovers using the *failing* pattern's payload needs the binding-else
@@ -325,13 +341,18 @@ fn staircase_message(blocked: Bool) -> String =
   then "nested match can be flattened with let..else — the failing case carries a payload, so use a binding-else `else <pat> -> ...` (docs/idiomatic-sprout.md)"
   else "nested match can be flattened with let..else (docs/idiomatic-sprout.md)"
 
-fn walk_match(bound: List String, scrut: ast.Expr, branches: List ast.MatchBranch,
+# A chain is reported at its first written match: under an elaborated binding,
+# the arms are walked as ordinary code, so a written chain below starts its own.
+fn walk_match(written: Set, bound: List String, scrut: ast.Expr, branches: List ast.MatchBranch,
               pos: source.SourcePos) -> List LintFinding =
-  match walk_chain(bound, branches, scrut) with
-  | (depth, blocked, findings) ->
-      if depth >= min_staircase_depth
-      then Cons(mk_finding(pos, "staircase-of-doom", staircase_message(blocked)), findings)
-      else findings
+  if ! is_written (written, pos)
+  then list_append(walk_expr(written, bound, scrut), walk_branches(written, bound, branches))
+  else
+    match walk_chain(written, bound, branches, scrut, pos) with
+    | (depth, blocked, findings) ->
+        if depth >= min_staircase_depth
+        then Cons(mk_finding(pos, "staircase-of-doom", staircase_message(blocked)), findings)
+        else findings
 
 # ---------------------------------------------------------------------------
 # Rule: redundant-vec-from-list
@@ -374,8 +395,8 @@ fn positions_to_findings(positions: List source.SourcePos) -> List LintFinding =
 # distinguishing AST marker (parser.sprout: parse_list_pattern/
 # build_cons_pattern) — but the WHOLE desugared literal shares ONE SourcePos,
 # the position of the `[` token, while a hand-written Cons/Nil node carries
-# the position of its own token. So the same source-text-sniffing trick as
-# is_written_as_match (below) tells them apart, applied as a post-filter.
+# the position of its own token. So the source text at that position tells them
+# apart, applied as a post-filter.
 
 let list_shape_message: String =
   "list matched with a fixed length via raw Cons/Nil constructors — [...] list-pattern sugar reads the length at a glance (docs/idiomatic-sprout.md)"
@@ -426,6 +447,11 @@ fn is_written_as_ctor(src: String, line: Int, col: Int) -> Bool =
 fn rest_of_line(src: String, line: Int, col: Int) -> String =
   str_slice(text, col - 1, str_len(text) - (col - 1))
   where text = nth_line(str_split_lines(src), line, 1)
+
+fn nth_line(lines: List String, target: Int, cur: Int) -> String =
+  match lines with
+  | Nil -> ""
+  | Cons l rest -> if cur == target then l else nth_line(rest, target, cur + 1)
 
 fn drop_desugared_list_patterns(src: String, positions: List source.SourcePos) -> List source.SourcePos =
   filter(\pos -> is_written_as_ctor(src, pos.line, pos.column), positions)
@@ -947,59 +973,31 @@ fn list_is_empty(xs: List a) -> Bool =
 # ---------------------------------------------------------------------------
 # Program-level entry points
 
-fn walk_instance_methods(methods: List ast.InstanceMethodImpl) -> List LintFinding =
+fn walk_instance_methods(written: Set, methods: List ast.InstanceMethodImpl) -> List LintFinding =
   match methods with
   | Nil -> Nil
   | Cons m rest ->
       match m with
       | ast.InstanceMethodImpl _ params _ _ _ body ->
-          list_append(walk_expr(param_names(params), body), walk_instance_methods(rest))
+          list_append(walk_expr(written, param_names(params), body), walk_instance_methods(written, rest))
 
-fn walk_decl(d: ast.Decl) -> List LintFinding =
+fn walk_decl(written: Set, d: ast.Decl) -> List LintFinding =
   match d with
-  | ast.FnDecl _ params _ _ _ body _ -> walk_expr(param_names(params), body)
-  | ast.LetDecl _ body _ _ -> walk_expr(Nil, body)
-  | ast.InstanceDecl _ _ methods _ -> walk_instance_methods(methods)
+  | ast.FnDecl _ params _ _ _ body _ -> walk_expr(written, param_names(params), body)
+  | ast.LetDecl _ body _ _ -> walk_expr(written, Nil, body)
+  | ast.InstanceDecl _ _ methods _ -> walk_instance_methods(written, methods)
   | _ -> Nil  # ExternFnDecl/TypeDecl/RecordDecl/ClassDecl/AliasDecl/WrapDecl: no expr body
 
-fn walk_decls(decls: List ast.Decl) -> List LintFinding =
+fn walk_decls(written: Set, decls: List ast.Decl) -> List LintFinding =
   match decls with
   | Nil -> Nil
-  | Cons d rest -> list_append(walk_decl(d), walk_decls(rest))
+  | Cons d rest -> list_append(walk_decl(written, d), walk_decls(written, rest))
 
-fn lint_program(prog: ast.Program) -> List LintFinding =
+fn lint_program(written: Set, prog: ast.Program) -> List LintFinding =
   match prog with
   | ast.Program decls _ ->
-      list_append(walk_decls(decls),
+      list_append(walk_decls(written, decls),
         list_append(nullary_const_findings(decls), redundant_vec_wrap_findings(prog)))
-
-# `let <pat> = e else fb` is pure sugar (ast.let_bind_match), and lint reads it
-# elaborated: the SAME MatchExpr shape a hand-written nested match has, with no
-# distinguishing AST node. So a MatchExpr's own position is the only
-# way to tell them apart: a hand-written match's pos is the `match` keyword
-# itself; a let-else's pos is wherever that binding's pattern starts (there is
-# no `match` token in the source at all). Without this check, every already-
-# idiomatic let-else chain gets told to become the thing it already is. Scoped
-# to staircase-of-doom findings only — other rules' positions never point at
-# a `match` keyword in the first place, so this check doesn't apply to them.
-fn nth_line(lines: List String, target: Int, cur: Int) -> String =
-  match lines with
-  | Nil -> ""
-  | Cons l rest -> if cur == target then l else nth_line(rest, target, cur + 1)
-
-fn is_written_as_match(src: String, line: Int, col: Int) -> Bool =
-  string.starts_with(str_slice(text, col - 1, str_len(text) - (col - 1)), "match")
-  where text = nth_line(str_split_lines(src), line, 1)
-
-fn drop_desugared_matches(src: String, findings: List LintFinding) -> List LintFinding =
-  match findings with
-  | Nil -> Nil
-  | Cons f rest ->
-      match f with
-      | LintFinding ln col rule_id _ ->
-          if rule_id == "staircase-of-doom" && ! is_written_as_match (src, ln, col)
-          then drop_desugared_matches(src, rest)
-          else Cons(f, drop_desugared_matches(src, rest))
 
 # ---------------------------------------------------------------------------
 # Rule: deprecated-brace-body
@@ -1017,7 +1015,7 @@ fn brace_tok_at(tokens: Vec token.Token, i: Int) -> token.Token =
   | Just t -> t
   | Nothing -> token.eof_token(source.SourcePos(index = 0, line = 0, column = 0))
 
-fn brace_is_keyword(t: token.Token, kw: String) -> Bool =
+fn tok_is_keyword(t: token.Token, kw: String) -> Bool =
   match token.token_kind(t) with
   | token.TokenKeywordKind -> token.token_text(t) == kw
   | _ -> false
@@ -1053,8 +1051,8 @@ fn find_body_brace(tokens: Vec token.Token, i: Int, n: Int) -> Maybe source.Sour
 
 fn brace_body_scan(tokens: Vec token.Token, i: Int, n: Int, acc: List LintFinding) -> List LintFinding =
   if i >= n then list_reverse(acc)
-  else if brace_is_keyword(brace_tok_at(tokens, i), "class")
-       || brace_is_keyword(brace_tok_at(tokens, i), "instance") then
+  else if tok_is_keyword(brace_tok_at(tokens, i), "class")
+       || tok_is_keyword(brace_tok_at(tokens, i), "instance") then
     match find_body_brace(tokens, i + 1, n) with
     | Nothing -> brace_body_scan(tokens, i + 1, n, acc)
     | Just pos ->
@@ -1239,8 +1237,7 @@ export let combinator_patterns =
 # A `match` that reimplements one of the combinators above. `let..else` desugars
 # to the same MatchExpr (ast.let_bind_match), so one rule
 # covers both spellings — and for THIS rule the desugared form is a true
-# positive, which is why `drop_desugared_matches` must stay keyed on
-# `staircase-of-doom` and not be generalised over rule ids.
+# positive, which is why only the staircase walk asks `is_written`.
 
 let combinator_rule_id: String = "hand-rolled-combinator"
 
@@ -1603,17 +1600,17 @@ fn ast_findings(src: String) -> List LintFinding =
       | Ok parsed ->
           # The rules match the matches bindings mean, as inference sees them.
           let prog = ast.elaborate_bindings(parsed)
-          in list_append(drop_desugared_matches(src, guarded_program_findings(src, prog)),
+          in list_append(guarded_program_findings(src, written_matches(toks), prog),
                list_append(list_shape_findings(src, prog),
                  list_append(list_prefix_findings(src, prog), brace_body_findings(toks))))
 
 # The combinator rule is collected during the walk and dropped here, because its
 # §7 guards are facts about the FILE that the walk cannot see. Filtering by rule
 # id keeps that decision out of the shared walkers, which three other rules use.
-fn guarded_program_findings(src: String, prog: ast.Program) -> List LintFinding =
+fn guarded_program_findings(src: String, written: Set, prog: ast.Program) -> List LintFinding =
   match prog with
   | ast.Program decls _ ->
-      let found = lint_program(prog)
+      let found = lint_program(written, prog)
       in if combinator_rule_applies(src, decls) then found
          else list_filter(\ (f: LintFinding) -> finding_rule_id(f) != combinator_rule_id, found)
 
