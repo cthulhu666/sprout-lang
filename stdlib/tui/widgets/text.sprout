@@ -7,7 +7,6 @@ module stdlib.tui.widgets.text
 # quietly wrong beside it. Wrap at the call site, where the width is known.
 # Design: docs/tui-widget-set-v0.md §4.6.
 
-import stdlib.tui.event as event
 import stdlib.tui.geometry as geometry
 import stdlib.tui.screen as screen
 import stdlib.tui.style as style
@@ -17,10 +16,6 @@ import stdlib.tui.widgets.paint as paint
 
 # One line or many is the same widget; `label` is the one-line spelling.
 type Block = (st: style.Style, ls: List String)
-
-fn block_on_event(b: Block,
-                  ev: event.Event) -> (Block, List m, List(widget.Cmd m)) =
-  (b, Nil, Nil)
 
 # As wide as its widest line and as tall as it has lines. Static content never
 # yields, so both axes are `Fixed`.
@@ -32,7 +27,7 @@ fn block_render(b: Block, r: geometry.Region, s: screen.Screen) -> Unit !{IO} =
 
 fn block(st: style.Style, ls: List String) -> widget.Widget m =
   widget.Widget(widget.View(state = Block(st = st, ls = ls),
-                            on_event = block_on_event, route = widget.no_route,
+                            on_event = widget.no_event, route = widget.no_route,
                             render = block_render, measure = block_measure))
 
 # Style is a separate function rather than a defaulted parameter, since Sprout

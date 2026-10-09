@@ -155,18 +155,15 @@ fn csi_parsed(b: Bytes, n: Int, i: Int, fin: Int, params: String, f: Int) -> Ste
 
 # ── CSI: keys ───────────────────────────────────────────────────────────────
 
-fn param_at(params: String, k: Int) -> Int =
-  match list_nth(string.split(params, ";"), k) with
-  | Nothing -> 0
-  | Just raw ->
-      match parse_int(raw) with
-      | Nothing -> 0
-      | Just v -> v
+# The `;`-separated parameters, split once per sequence. A malformed one reads
+# as 0, as does any index past the end in `param_at`.
+fn params_of(params: String) -> List Int =
+  list_map(\raw -> maybe_with_default(0, parse_int(raw)), string.split(params, ";"))
 
-fn list_nth(xs: List String, k: Int) -> Maybe String =
-  match xs with
-  | Nil -> Nothing
-  | Cons h rest -> if k <= 0 then Just(h) else list_nth(rest, k - 1)
+fn param_at(ps: List Int, k: Int) -> Int =
+  match ps with
+  | Nil -> 0
+  | Cons h rest -> if k <= 0 then h else param_at(rest, k - 1)
 
 # The modifier parameter is `1 + bitfield`, bits 1=shift, 2=alt, 4=ctrl. A
 # missing parameter reads as 0, which is not a valid encoding, so it maps to
@@ -178,8 +175,10 @@ fn mods_bits(bits: Int) -> event.Mods =
   event.Mods(imod(bits / 4, 2) == 1, imod(bits / 2, 2) == 1, imod(bits, 2) == 1)
 
 fn csi_key(params: String, f: Int, next: Int) -> Step =
-  if f == 126 then tilde_key(param_at(params, 0), mods_of(param_at(params, 1)), next)
-  else letter_key(f, mods_of(param_at(params, 1)), next)
+  if f == 126 then tilde_key(param_at(ps, 0), mods_of(param_at(ps, 1)), next)
+  else letter_key(f, mods_of(param_at(ps, 1)), next)
+where
+  ps = params_of(params)
 
 fn letter_key(f: Int, m: event.Mods, next: Int) -> Step =
   match final_key(f) with
@@ -226,7 +225,7 @@ fn tilde_code(p: Int) -> Maybe event.Key =
 fn mouse_step(params: String, f: Int, next: Int) -> Step =
   mouse_event(param_at(fields, 0), param_at(fields, 1), param_at(fields, 2), f, next)
 where
-  fields = string.drop(params, 1)
+  fields = params_of(string.drop(params, 1))
 
 fn mouse_event(btn: Int, col: Int, row: Int, f: Int, next: Int) -> Step =
   if f == 77 then Emit(event.MousePress(mouse_button(btn), at(col, row)), next)

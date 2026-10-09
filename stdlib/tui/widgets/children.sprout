@@ -11,11 +11,6 @@ import stdlib.tui.geometry as geometry
 import stdlib.tui.screen as scr
 import stdlib.tui.widget as widget
 
-# Accumulate reversed and reverse once, so a long child list is linear rather
-# than quadratic in `++`.
-fn push_all(xs: List a, acc: List a) -> List a =
-  list_fold(\ (seen, x) -> Cons(x, seen), acc, xs)
-
 # ── broadcast ───────────────────────────────────────────────────────────────
 
 # Every child sees the event, in order, and their messages and commands are
@@ -23,22 +18,23 @@ fn push_all(xs: List a, acc: List a) -> List a =
 # what any of it means.
 export fn broadcast(evt: event.Event,
                     kids: List (widget.Widget m)) -> (List(widget.Widget m), List m, List(widget.Cmd m)) =
-  broadcast_go(evt, kids, Nil, Nil, Nil)
+  broadcast_go(evt, kids, list_builder_empty, list_builder_empty, list_builder_empty)
 
 fn broadcast_go(evt: event.Event, ws: List (widget.Widget m),
-                wacc: List (widget.Widget m), macc: List m,
-                cacc: List (widget.Cmd m)) -> (List(widget.Widget m), List m, List(widget.Cmd m)) =
+                wacc: ListBuilder (widget.Widget m), macc: ListBuilder m,
+                cacc: ListBuilder (widget.Cmd m)) -> (List(widget.Widget m), List m, List(widget.Cmd m)) =
   match ws with
-  | Nil -> (list_reverse(wacc), list_reverse(macc), list_reverse(cacc))
+  | Nil -> (list_builder_build(wacc), list_builder_build(macc), list_builder_build(cacc))
   | [w | rest] -> broadcast_step(widget.on_event(w, evt), evt, rest, wacc, macc, cacc)
 
 fn broadcast_step(r: (widget.Widget m, List m, List(widget.Cmd m)),
                   evt: event.Event, rest: List (widget.Widget m),
-                  wacc: List (widget.Widget m), macc: List m,
-                  cacc: List (widget.Cmd m)) -> (List(widget.Widget m), List m, List(widget.Cmd m)) =
+                  wacc: ListBuilder (widget.Widget m), macc: ListBuilder m,
+                  cacc: ListBuilder (widget.Cmd m)) -> (List(widget.Widget m), List m, List(widget.Cmd m)) =
   match r with
   | (w2, msgs, cmds) ->
-      broadcast_go(evt, rest, Cons(w2, wacc), push_all(msgs, macc), push_all(cmds, cacc))
+      broadcast_go(evt, rest, list_builder_add(w2, wacc), list_builder_extend(msgs, macc),
+                   list_builder_extend(cmds, cacc))
 
 # ── addressed delivery ──────────────────────────────────────────────────────
 

@@ -92,5 +92,14 @@ fn main() -> Unit !{IO} =
     # Degenerate widths must terminate rather than loop: a zero or negative
     # width has no line to fill, so the whole text is one line.
     check_eq("zero width yields the input", wrapped("abc", 0), "abc"),
-    check_eq("negative width yields the input", wrapped("abc", -3), "abc")
+    check_eq("negative width yields the input", wrapped("abc", -3), "abc"),
+
+    # ── take_n / drop_n: generic, and total for any count ───────────────────
+    check_eq("take_n takes from any list", text.take_n(["a", "b", "c"], 2, Nil), ["a", "b"]),
+    check_eq("take_n past the end takes everything", text.take_n(["a"], 5, Nil), ["a"]),
+    check_eq("take_n of a negative count is empty", text.take_n([1, 2], -1, Nil), Nil),
+    check_eq("drop_n drops from any list", text.drop_n(["a", "b", "c"], 2), ["c"]),
+    check_eq("drop_n of a negative count drops nothing", text.drop_n(["a", "b"], -1), ["a", "b"]),
+    check_eq("from_clusters inverts clusters",
+             text.from_clusters(text.clusters(a_e_acute_b())), a_e_acute_b())
   ])

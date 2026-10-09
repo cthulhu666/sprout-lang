@@ -36,11 +36,6 @@ type Area m = (id: widget.WidgetId, on_change: String -> m,
 
 type alias Reply m = Maybe(Area m, List m, List(widget.Cmd m))
 
-# Everything an area reacts to arrives addressed, so the broadcast is idle.
-fn area_on_event(a: Area m,
-                 ev: event.Event) -> (Area m, List m, List(widget.Cmd m)) =
-  (a, Nil, Nil)
-
 fn area_handler(a: Area m, d: widget.Delivery m) -> Reply m =
   match d with
   # An area asks for no work, and §4.10 leaves the control vocabulary to an
@@ -144,7 +139,8 @@ fn area_measure(a: Area m, avail: geometry.Size) -> widget.Measured =
   widget.greedy_size(avail)
 
 fn area_widget(a: Area m) -> widget.Widget m =
-  widget.Widget(widget.View(state = a, on_event = area_on_event,
+  # Everything an area reacts to arrives addressed, so the broadcast is idle.
+  widget.Widget(widget.View(state = a, on_event = widget.no_event,
                             route = widget.route_when(a.id, area_handler, _, _,
                                                       _),
                             render = area_render, measure = area_measure))

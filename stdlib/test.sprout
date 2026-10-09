@@ -37,19 +37,18 @@ export fn new_state() -> TestState !{IO} =
     f <- ref_new(0)
     TestState(p, f)
 
-export fn assert_true(state: TestState, label: String, condition: Bool) -> Unit !{IO} =
+# Count one assertion as passed or failed, and print its line.
+fn record(state: TestState, passed: Bool, line: String) -> Unit !{IO} =
   match state with
   | TestState pass_ref fail_ref ->
-      if condition then
-        do
-          p <- ref_read(pass_ref)
-          ref_write(pass_ref, p + 1)
-          print("PASS: " ++ label)
-      else
-        do
-          f <- ref_read(fail_ref)
-          ref_write(fail_ref, f + 1)
-          print("FAIL: " ++ label)
+      do
+        let counter = if passed then pass_ref else fail_ref
+        n <- ref_read(counter)
+        ref_write(counter, n + 1)
+        print(line)
+
+export fn assert_true(state: TestState, label: String, condition: Bool) -> Unit !{IO} =
+  record(state, condition, (if condition then "PASS: " else "FAIL: ") ++ label)
 
 export fn assert_false(state: TestState, label: String, condition: Bool) -> Unit !{IO} =
   assert_true(state, label, condition == false)
@@ -59,18 +58,8 @@ export fn assert_false(state: TestState, label: String, condition: Bool) -> Unit
 # Mirrors: HUnit assertEqual :: (Eq a, Show a) => String -> a -> a -> Assertion
 #          Rust assert_eq! requiring PartialEq + Debug
 export fn assert_eq(state: TestState, label: String, actual: a, expected: a) -> Unit !{IO} where Eq a, ToString a =
-  match state with
-  | TestState pass_ref fail_ref ->
-      if eq(actual, expected) then
-        do
-          p <- ref_read(pass_ref)
-          ref_write(pass_ref, p + 1)
-          print("PASS: " ++ label)
-      else
-        do
-          f <- ref_read(fail_ref)
-          ref_write(fail_ref, f + 1)
-          print("FAIL: " ++ label ++ " (expected " ++ to_string(expected) ++ ", got " ++ to_string(actual) ++ ")")
+  if eq(actual, expected) then record(state, true, "PASS: " ++ label)
+  else record(state, false, "FAIL: " ++ label ++ " (expected " ++ to_string(expected) ++ ", got " ++ to_string(actual) ++ ")")
 
 # Prints pass/fail counts, then "SUITE PASSED" or "SUITE FAILED".
 # The justfile runner greps for "SUITE FAILED" to set the exit code.

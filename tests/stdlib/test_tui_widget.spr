@@ -59,6 +59,12 @@ fn counter(n: Int) -> widget.Widget Msg =
                             route = widget.no_route,
                             render = counter_render, measure = counter_measure))
 
+# A counter that ignores broadcasts, the shape every addressed-only leaf has.
+fn quiet(n: Int) -> widget.Widget Msg =
+  widget.Widget(widget.View(state = n, on_event = widget.no_event,
+                            route = widget.no_route,
+                            render = counter_render, measure = counter_measure))
+
 # ── a label: hidden state is String ─────────────────────────────────────────
 
 fn label_on_event(s: String,
@@ -126,6 +132,10 @@ fn event_cases(state: TestState) -> Unit !{IO} = do
   assert_eq(state, "a tick advances the hidden state",
             width_of(stepped(counter(0), event.TickEvent)), 1)
   assert_eq(state, "a tick emits no message", said(counter(0), event.TickEvent), "[]")
+
+  assert_eq(state, "no_event keeps the state through a batch",
+            width_of(fed(quiet(4), [event.TickEvent, key])), 4)
+  assert_eq(state, "no_event says nothing", said_all(quiet(4), [event.TickEvent, key]), "[]")
 
   assert_eq(state, "a keypress leaves the state alone",
             width_of(stepped(counter(7), key)), 7)

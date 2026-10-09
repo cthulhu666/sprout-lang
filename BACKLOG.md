@@ -1666,6 +1666,12 @@ deferral happened, not for current behaviour. Still open:
   both give positioned `check` errors. **The rejection is correct in every case; only the phase and
   the diagnostic are wrong.** Four negative probes exist and belong in
   `tests/conformance/type_error/`.
+- [ ] `P2` **A record literal written above its `type` declaration is rejected.** In one file,
+  `fn mk() -> Lp = Lp(a = 1, b = 2)` followed by `type Lp = (a: Int, b: Int)` fails with
+  `check: Unknown record type or field: Lp.a`; declaring `Lp` first compiles. Field access above
+  the declaration is fine — only the named-field literal fails. Spec §5.6.2 says a type is visible
+  to declarations written above it. Hit in `stdlib/tui/app.sprout`, whose `Loop` had to move up.
+  Wants a `tests/conformance/run/` fixture.
 - [ ] `P2` **DECISION NEEDED — derived `ToString`: qualified or bare name?** `to_string` on a
   `deriving (ToString)` type prints the declaring module's qualified name when imported and the bare
   name when declared in the entry file, compounding per nesting level. Not a spec violation — §12

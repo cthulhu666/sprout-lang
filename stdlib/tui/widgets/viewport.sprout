@@ -33,8 +33,8 @@ fn window_of(b: buffer.Buffer, r: geometry.Region) -> Window =
 where
   top = first_row(buffer.buffer_row(b), geometry.region_rows(r))
   cs = text.clusters(buffer.buffer_line(b))
-  before = taken(cs, buffer.buffer_col(b), Nil)
-  caret = caret_cluster(dropped(cs, buffer.buffer_col(b)))
+  before = text.take_n(cs, buffer.buffer_col(b), Nil)
+  caret = caret_cluster(text.drop_n(cs, buffer.buffer_col(b)))
   # The caret's OWN width is what the window reserves, not one column: on a CJK
   # or emoji cluster a single reserved column truncates it away, painting
   # neither the character nor the focus.
@@ -75,7 +75,7 @@ fn framed(screen: scr.Screen, region: geometry.Region, b: buffer.Buffer,
 
 # The lines the region shows, unshifted.
 fn visible(b: buffer.Buffer, r: geometry.Region, w: Window) -> List String =
-  taken(dropped(buffer.buffer_lines(b), w.top), geometry.region_rows(r), Nil)
+  text.take_n(text.drop_n(buffer.buffer_lines(b), w.top), geometry.region_rows(r), Nil)
 
 # Every line shifts by the SAME number of columns, or the text would jump from
 # row to row as the caret moved.
@@ -94,17 +94,3 @@ fn cut_left(cs: List (List Int), off: Int) -> String =
     match cs with
     | Nil -> ""
     | [c | rest] -> cut_left(rest, off - text.cluster_width(c))
-
-fn dropped(xs: List a, n: Int) -> List a =
-  if n <= 0 then xs
-  else
-    match xs with
-    | Nil -> Nil
-    | [_ | rest] -> dropped(rest, n - 1)
-
-fn taken(xs: List a, n: Int, acc: List a) -> List a =
-  if n <= 0 then list_reverse(acc)
-  else
-    match xs with
-    | Nil -> list_reverse(acc)
-    | [x | rest] -> taken(rest, n - 1, Cons(x, acc))

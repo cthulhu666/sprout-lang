@@ -103,14 +103,10 @@ fn refilled(v: Sv m, child: Maybe (widget.Widget m)) -> Reply m =
 # spent before the window moves back — `KHome`/`KEnd` are the one-key recovery.
 fn advanced(p: Pos, d: Int) -> Pos =
   match p with
-  | FromTop n -> FromTop(imax(0, n + d))
-  | FromBottom k -> FromBottom(imax(0, k - d))
+  | FromTop n -> FromTop(geometry.imax(0, n + d))
+  | FromBottom k -> FromBottom(geometry.imax(0, k - d))
 
 # ── what shows ──────────────────────────────────────────────────────────────
-
-fn imax(a: Int, b: Int) -> Int = if a > b then a else b
-
-fn imin(a: Int, b: Int) -> Int = if a < b then a else b
 
 # A `Greedy` axis has no natural extent — it means "whatever I am given" — so
 # that axis does not scroll and the child gets the viewport. A `Fixed` child
@@ -118,15 +114,15 @@ fn imin(a: Int, b: Int) -> Int = if a < b then a else b
 # squeezed to its own size, which is what a container would have done.
 fn extent_of(natural: Int, grow: widget.Grow, avail: Int) -> Int =
   match grow with
-  | widget.Fixed -> imax(natural, avail)
+  | widget.Fixed -> geometry.imax(natural, avail)
   | widget.Greedy -> avail
 
 fn resolved(p: Pos, extent: Int, avail: Int) -> Int =
-  let far = imax(0, extent - avail)
+  let far = geometry.imax(0, extent - avail)
   in
   match p with
-  | FromTop n -> imin(n, far)
-  | FromBottom k -> imax(0, far - k)
+  | FromTop n -> geometry.imin(n, far)
+  | FromBottom k -> geometry.imax(0, far - k)
 
 fn sv_render(v: Sv m, r: geometry.Region, s: scr.Screen) -> Unit !{IO} =
   painted(v, r, s, widget.measure(v.child, geometry.region_size(r)))

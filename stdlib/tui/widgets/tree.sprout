@@ -15,6 +15,7 @@ import stdlib.tui.text as text
 import stdlib.tui.widget as widget
 import stdlib.tui.widgets.list_view as list_view
 import stdlib.tui.widgets.paint as paint
+import stdlib.tui.widgets.viewport as viewport
 
 # Three states, because "not yet read" is not "empty" (§4.2). Collapsing them
 # renders an unread directory as a leaf, with no way to open it; `Loaded(Nil)`
@@ -70,11 +71,6 @@ type Mark (..) =
   | MOpen
 
 type Row = (path: List String, label: String, depth: Int, mark: Mark)
-
-# Everything a tree reacts to arrives addressed, so the broadcast is idle.
-fn tr_on_event(t: Tr m,
-               ev: event.Event) -> (Tr m, List m, List(widget.Cmd m)) =
-  (t, Nil, Nil)
 
 fn tr_handler(t: Tr m, d: widget.Delivery m) -> Reply m =
   match d with
@@ -151,22 +147,16 @@ fn mark_of(t: Tr m, n: Node, path: List String) -> Mark =
   | NoChildren -> MLeaf
   | _ -> if is_open(t, path) then MOpen else MClosed
 
-fn same_path(a: List String, b: List String) -> Bool =
-  match (a, b) with
-  | (Nil, Nil) -> true
-  | (Cons x xs, Cons y ys) -> if x == y then same_path(xs, ys) else false
-  | _ -> false
-
 fn index_of(rows: List Row, path: List String, i: Int) -> Int =
   match rows with
   | Nil -> 0
   | [r | rest] ->
-      if same_path(r.path, path) then i else index_of(rest, path, i + 1)
+      if r.path == path then i else index_of(rest, path, i + 1)
 
 fn present(rows: List Row, path: List String) -> Bool =
   match rows with
   | Nil -> false
-  | [r | rest] -> if same_path(r.path, path) then true else present(rest, path)
+  | [r | rest] -> if r.path == path then true else present(rest, path)
 
 fn at_index(rows: List Row, i: Int) -> Maybe Row =
   match rows with
@@ -224,20 +214,14 @@ fn landed(t: Tr m, rows: List Row, d: Int) -> Reply m =
 # there. An empty forest has no path to name, so the key is still claimed —
 # the application must not see a stray Down — and nothing is announced.
 fn settled(t: Tr m, rows: List Row, want: Int) -> Reply m =
-  match at_index(rows, clamped_into(list_length(rows), want)) with
+  match at_index(rows, list_view.clamped_into(list_length(rows), want)) with
   | Nothing -> Just((t, Nil, Nil))
   | Just r -> spoken(t, r.path)
-
-fn clamped_into(count: Int, i: Int) -> Int =
-  if count == 0 then 0
-  else if i < 0 then 0
-  else if i >= count then count - 1
-  else i
 
 # A move that lands where it started says nothing: Down at the last row is the
 # tree's key, but there is no new selection to report.
 fn spoken(t: Tr m, path: List String) -> Reply m =
-  if same_path(path, t.sel) then Just((t, Nil, Nil))
+  if path == t.sel then Just((t, Nil, Nil))
   else Just(((t with (sel = path)), highlighted(t, path), Nil))
 
 fn highlighted(t: Tr m, path: List String) -> List m =
@@ -341,11 +325,6 @@ fn kept_or_moved(t: Tr m, rows: List Row) -> Reply m =
 
 # ── what it paints ──────────────────────────────────────────────────────────
 
-# The window is a function of the selection, so there is no scroll position to
-# drift out of step with it (`list_view` §4.4).
-fn first_shown(sel: Int, rows: Int) -> Int =
-  if sel < rows then 0 else sel - rows + 1
-
 fn mark_text(m: Mark) -> String =
   match m with
   | MLeaf -> " "
@@ -355,9 +334,11 @@ fn mark_text(m: Mark) -> String =
 fn line_of(row: Row) -> String =
   mark_text(row.mark) ++ " " ++ string.repeat(" ", row.depth * 2) ++ row.label
 
+# The window is a function of the selection, so there is no scroll position to
+# drift out of step with it (`list_view` §4.4).
 fn tr_render(t: Tr m, r: geometry.Region, s: scr.Screen) -> Unit !{IO} =
   drawn(t, r, s, rows_of(t), 0,
-        first_shown(index_of(rows_of(t), t.sel, 0), geometry.region_rows(r)))
+        viewport.first_row(index_of(rows_of(t), t.sel, 0), geometry.region_rows(r)))
 
 fn drawn(t: Tr m, r: geometry.Region, s: scr.Screen, rows: List Row, i: Int,
          start: Int) -> Unit !{IO} =
@@ -374,7 +355,7 @@ fn drawn_step(t: Tr m, r: geometry.Region, s: scr.Screen, row: Row,
   drawn(t, r, s, rest, i + 1, start)
 
 fn style_at(t: Tr m, row: Row) -> style.Style =
-  if ! same_path (row.path, t.sel) then t.opts.look.normal
+  if row.path != t.sel then t.opts.look.normal
   else if t.has_focus then t.opts.look.selected_focused
   else t.opts.look.selected
 
@@ -385,7 +366,8 @@ fn tr_measure(t: Tr m, avail: geometry.Size) -> widget.Measured =
                                    list_length(rows_of(t))))
 
 fn tr_widget(t: Tr m) -> widget.Widget m =
-  widget.Widget(widget.View(state = t, on_event = tr_on_event,
+  # Everything a tree reacts to arrives addressed, so the broadcast is idle.
+  widget.Widget(widget.View(state = t, on_event = widget.no_event,
                             route = widget.route_when(t.id, tr_handler, _, _,
                                                       _),
                             render = tr_render, measure = tr_measure))

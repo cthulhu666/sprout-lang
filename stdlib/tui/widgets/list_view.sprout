@@ -13,6 +13,7 @@ import stdlib.tui.style as style
 import stdlib.tui.text as text
 import stdlib.tui.widget as widget
 import stdlib.tui.widgets.paint as paint
+import stdlib.tui.widgets.viewport as viewport
 
 # Three styles, not `focus.FocusStyle`'s two: a list that has lost the
 # keyboard still HAS a selection, and must be able to show it more quietly
@@ -56,11 +57,6 @@ type Lst m = (id: widget.WidgetId, items: List String, on_select: Int -> m,
               has_focus: Bool)
 
 type alias Reply m = Maybe(Lst m, List m, List(widget.Cmd m))
-
-# Everything a list reacts to arrives addressed, so the broadcast is idle.
-fn lst_on_event(l: Lst m,
-                ev: event.Event) -> (Lst m, List m, List(widget.Cmd m)) =
-  (l, Nil, Nil)
 
 fn lst_handler(l: Lst m, d: widget.Delivery m) -> Reply m =
   match d with
@@ -120,7 +116,7 @@ fn moved_by(l: Lst m, d: Int) -> Reply m = moved_to(l, l.sel + d)
 # Every move clamps rather than refusing, so a page runs to the end and stops
 # there; the caller's `start` goes through the same rule, since an index
 # outside the list must not leave it unselectable.
-fn clamped_into(count: Int, i: Int) -> Int =
+export fn clamped_into(count: Int, i: Int) -> Int =
   if count == 0 then 0
   else if i < 0 then 0
   else if i >= count then count - 1
@@ -154,12 +150,9 @@ fn chosen(l: Lst m) -> Reply m =
 # drift out of step with it (docs/tui-input-v0.md §4.5 takes the same rule for
 # the caret): the top of the list until the selection passes the last row,
 # and the selection on that row from then on.
-fn first_shown(sel: Int, rows: Int) -> Int =
-  if sel < rows then 0 else sel - rows + 1
-
 fn lst_render(l: Lst m, r: geometry.Region, s: scr.Screen) -> Unit !{IO} =
   painted_rows(l, r, s, l.items, 0,
-               first_shown(l.sel, geometry.region_rows(r)))
+               viewport.first_row(l.sel, geometry.region_rows(r)))
 
 # Stops at the region's bottom edge rather than painting the rest and letting
 # `paint.line` drop it. The items ABOVE the window are still walked one cons at
@@ -190,7 +183,8 @@ fn lst_measure(l: Lst m, avail: geometry.Size) -> widget.Measured =
   widget.greedy_size(geometry.Size(l.width, l.count))
 
 fn lst_widget(l: Lst m) -> widget.Widget m =
-  widget.Widget(widget.View(state = l, on_event = lst_on_event,
+  # Everything a list reacts to arrives addressed, so the broadcast is idle.
+  widget.Widget(widget.View(state = l, on_event = widget.no_event,
                             route = widget.route_when(l.id, lst_handler, _, _, _),
                             render = lst_render, measure = lst_measure))
 

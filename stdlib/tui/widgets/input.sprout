@@ -36,11 +36,6 @@ type Field m = (id: widget.WidgetId, on_change: String -> m, opts: InputOpts m,
 
 type alias Reply m = Maybe(Field m, List m, List(widget.Cmd m))
 
-# Everything a field reacts to arrives addressed, so the broadcast is idle.
-fn field_on_event(f: Field m,
-                  ev: event.Event) -> (Field m, List m, List(widget.Cmd m)) =
-  (f, Nil, Nil)
-
 fn field_handler(f: Field m, d: widget.Delivery m) -> Reply m =
   match d with
   # A field asks for no work, so an answer addressed to it belongs to `update`
@@ -168,7 +163,8 @@ fn field_measure(f: Field m, avail: geometry.Size) -> widget.Measured =
                   cols = widget.Greedy, rows = widget.Fixed)
 
 fn field_widget(f: Field m) -> widget.Widget m =
-  widget.Widget(widget.View(state = f, on_event = field_on_event,
+  # Everything a field reacts to arrives addressed, so the broadcast is idle.
+  widget.Widget(widget.View(state = f, on_event = widget.no_event,
                             route = widget.route_when(f.id, field_handler, _, _, _),
                             render = field_render, measure = field_measure))
 

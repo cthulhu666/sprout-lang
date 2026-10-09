@@ -34,13 +34,8 @@ fn finish_loop(prompt: Maybe String) -> Unit !{IO} =
   | Just _ -> terminal.write("\r\n")
   | Nothing -> term_noop()
 
-fn render_lines(prompt: Maybe String, lines: Vec String, index: Int) -> Unit !{IO} =
-  match vec_get(index, lines) with
-  | Just line ->
-      do
-        write_line(prompt, line)
-        render_lines(prompt, lines, index + 1)
-  | Nothing -> term_noop()
+fn render_lines(prompt: Maybe String, lines: Vec String) -> Unit !{IO} =
+  list_each(write_line(prompt, _), vec_to_list(lines))
 
 fn single_line(text: String) -> Vec String =
   vec_singleton(text)
@@ -111,13 +106,8 @@ export fn history_next(current: String, history: Vec String, browse_index: Int, 
   else if browse_index + 1 >= vec_length(history) then (draft, -1, draft)
   else (history_value(browse_index + 1, current, history), browse_index + 1, draft)
 
-fn render_interactive_match_lines(matches: Vec String, index: Int) -> Unit !{IO} =
-  match vec_get(index, matches) with
-  | Just line ->
-      do
-        terminal.write(line ++ "\r\n")
-        render_interactive_match_lines(matches, index + 1)
-  | Nothing -> term_noop()
+fn render_interactive_match_lines(matches: Vec String) -> Unit !{IO} =
+  list_each(\line -> terminal.write(line ++ "\r\n"), vec_to_list(matches))
 
 fn contains_char(chars: String, target: Char, index: Int) -> Bool =
   if index >= string.length(chars) then false
@@ -521,7 +511,7 @@ fn complete_current_line(prompt: String, history: Vec String, session: compiler.
       else
         do
           terminal.write("\r\n")
-          render_interactive_match_lines(matches, 0)
+          render_interactive_match_lines(matches)
           redraw_input(prompt, current, cursor)
           interactive_read_line_loop(prompt, history, session, current, cursor, -1, current)
 
@@ -770,7 +760,7 @@ fn continue_loop(result: SubmissionResult, prompt: Maybe String, history: Vec St
   match result with
   | Continue lines next_session ->
       do
-        render_lines(prompt, lines, 0)
+        render_lines(prompt, lines)
         repl_loop_session(prompt, history, next_session)
   | Exit -> finish_loop(prompt)
 
@@ -794,39 +784,24 @@ fn repl_loop_session(prompt: Maybe String, history: Vec String, session: compile
       | Just _ -> continue_loop(handle_block_submission(line, session), prompt, push_history(history, line))
   | ReadNotice message ->
       do
-        render_lines(prompt, single_line(message), 0)
+        render_lines(prompt, single_line(message))
         repl_loop_session(prompt, history, session)
   | ReadError message ->
       do
-        render_lines(prompt, render_error(message), 0)
+        render_lines(prompt, render_error(message))
         repl_loop_session(prompt, history, session)
   | EndInput -> finish_loop(prompt)
 
-fn replay_imports(session: compiler.StatefulSession, imports: Vec String, i: Int) -> compiler.StatefulSession !{IO} =
-  if i >= vec_length(imports) then session
-  else
-    match vec_get(i, imports) with
-    | Nothing -> replay_imports(session, imports, i + 1)
-    | Just line ->
-        match compiler.session_import(session, line) with
-        | Err _ -> replay_imports(session, imports, i + 1)
-        | Ok next -> replay_imports(next, imports, i + 1)
-
-fn replay_declarations(session: compiler.StatefulSession, declarations: Vec String, i: Int) -> compiler.StatefulSession !{IO} =
-  if i >= vec_length(declarations) then session
-  else
-    match vec_get(i, declarations) with
-    | Nothing -> replay_declarations(session, declarations, i + 1)
-    | Just line ->
-        match compiler.session_declare(session, line) with
-        | Err _ -> replay_declarations(session, declarations, i + 1)
-        | Ok next -> replay_declarations(next, declarations, i + 1)
+# Each line through `step`, in order. A line `step` rejects leaves the session as it was.
+fn replay(step: compiler.StatefulSession -> String -> Result String compiler.StatefulSession !{IO},
+          session: compiler.StatefulSession, lines: Vec String) -> compiler.StatefulSession !{IO} =
+  list_fold(\ (s, line) -> result_with_default(s, step(s, line)), session, vec_to_list(lines))
 
 export fn repl_loop(prompt: Maybe String, history: Vec String, imports: Vec String, declarations: Vec String) -> Unit !{IO} =
   do
     empty_session <- compiler.create_session()
-    with_imports <- replay_imports(empty_session, imports, 0)
-    full_session <- replay_declarations(with_imports, declarations, 0)
+    with_imports <- replay(compiler.session_import, empty_session, imports)
+    full_session <- replay(compiler.session_declare, with_imports, declarations)
     repl_loop_session(prompt, history, full_session)
 
 export fn run() -> Unit !{IO} =
