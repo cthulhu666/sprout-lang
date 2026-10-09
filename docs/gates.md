@@ -110,15 +110,15 @@ Three checks are easy to run together and are not the same thing:
 | check | compares | run by |
 |---|---|---|
 | `scripts/seed_gate.sh` (commit hook) | staged tree hash vs `.git/seed-fp-ack` | local `git commit` |
-| `just seed-stale` | `shasum` of `stdlib/compiler/*.sprout` vs the `; seed-fingerprint:` line at the top of the seed | nothing automatic |
+| `just seed-stale` | `shasum` of `stdlib/compiler/*.sprout` vs the `; seed-fingerprint:` line at the top of the seed | `.githooks/pre-commit`, when `stdlib/compiler/` is staged |
 | `just verify-bootstrap-fixed-point` | the re-emitted IR is byte-identical | **CI** (`.github/workflows/ci.yml`) |
 
 Edit only a comment in a compiler source and the source bytes change while the emitted IR does not,
 so `seed-stale` reports STALE while the fixed point holds. **CI runs only the fixed-point check, so
-a red `seed-stale` is not evidence CI will fail** — and `seed-stale`'s own message says "Run: just
-refresh-seed", which will send you through a full reseed you did not need. For an IR-unchanged edit
-the bypass above (verify, then ack) is the correct path; reseed when you want the fingerprint line
-back in sync, not because the fixed point demands it. Note the commit hook compares *tree hashes*,
+a red `seed-stale` is not evidence CI will fail.** The git pre-commit hook does run it, so a commit
+that stages `stdlib/compiler/` needs a reseed even then; its diff is the fingerprint line alone,
+which confirms the IR did not change. The verify-then-ack bypass above is for the seed gate, on an
+IR-unchanged edit to `stdlib/*.sprout` outside the compiler. Note the seed gate compares *tree hashes*,
 not fingerprints: `just seed-fp-ack` must be its own step with nothing touching the index between it
 and the commit, or the ack goes stale and the hook blocks for a reason unrelated to the seed.
 
