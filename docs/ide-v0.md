@@ -241,7 +241,7 @@ navigates through. Pinned in `tests/ide/test_ide_filetree.spr`.
 
 | Deferred | Waiting on |
 |---|---|
-| `ide/pane.sprout` — splits and tabs | the `tabs` widget (`BACKLOG.md` §4, C3) |
+| `ide/pane.sprout` — splits and tabs | per-pane ids in `ed.Opening`/`ed.Saving` (`docs/tui-tabs-v0.md` §5) |
 | `ide/palette.sprout` — commands, save-as | the same, plus a text input in an overlay |
 | Reopening at the remembered caret | `text_area`/`viewport` announcing a `Caret` outward |
 | Highlighting, diagnostics | M6 spans, then M7's plugin interface |

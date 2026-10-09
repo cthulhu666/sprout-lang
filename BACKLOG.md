@@ -700,9 +700,12 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   feeds `appChooseCursor` from the ring. Trapping — a widget that consumes Tab itself — is the
   opt-in §4.5 declines to make implicit. Both are cosmetic until an application asks.
   Design: `docs/tui-focus-v0.md` §9.
-- [ ] `P2` **TUI M4 C3 — the larger widgets.** `tabs`, `tree`, `table`. `scroll_view` and the screen
-  clip it needed landed as C3a (`docs/tui-scroll-view-v0.md`), `text_area` as C3b
-  (`docs/tui-text-area-v0.md`); the rest are still open.
+- [ ] `P2` **TUI M4 C3 — `table`, the last of the larger widgets.** `scroll_view` landed as C3a,
+  `text_area` as C3b, `tree` as C3c and `tabs` as C3d (`docs/tui-tabs-v0.md`).
+- [ ] `P3` **TUI `tabs` — what v0 left out.** No way to retitle a tab, so the IDE cannot mark a
+  dirty file in the bar; a bar wider than its region is cut at the edge rather than scrolled to
+  keep the shown title in view; no mouse; no reordering. Each is additive: retitling is one more
+  `Change` arm. Design: `docs/tui-tabs-v0.md` §2.
 - [ ] `P3` **TUI — a tick repaints the whole tree even when nothing changed.** `App.tick_ms` is both
   the input read deadline and the tick period, and the deadline is load-bearing: it is what resolves
   a held ESC into a key. So an application wanting no animation still repaints twice a second, and
@@ -788,10 +791,11 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
 
 - [ ] `P2` **IDE — one pane, no splits, no tabs, no palette.** `ide/app.sprout` wires exactly one
   editor beside the tree, so a second file replaces the first and an unsaved edit goes with it.
-  `ide/pane.sprout` and `ide/palette.sprout` from the plan are unwritten, and both want the `tabs`
-  widget, which §4's C3 entry still lists as missing. A palette also needs somewhere to type a
-  path, which is what makes "save a scratch buffer" reachable — `ed.Unnamed` is the honest refusal
-  standing in for it today. Design: `docs/ide-v0.md` §9.
+  `ide/pane.sprout` and `ide/palette.sprout` from the plan are unwritten; the `tabs` widget they
+  want has landed. The pane first needs each editor's id in `ed.Opening`/`ed.Saving`, a rule for
+  Enter on a directory and for closing a dirty tab (`docs/tui-tabs-v0.md` §5). A palette also needs
+  somewhere to type a path, which makes "save a scratch buffer" reachable. Design: `docs/ide-v0.md`
+  §9.
 - [ ] `P2` **IDE — reopening a file forgets where the caret was.** `ed.EditorOpts.on_content`
   carries a stamped body and no caret, so every open starts at line 1. The payload is not the
   blocker — §4's "an application can send a caret in but never read one out" is: the pane would
