@@ -82,6 +82,36 @@ let fetch_hand =
   "  | NotFound -> NotFound\n" ++
   "  | Failed why -> Failed(why)\n"
 
+# A failure arm that calls a helper fuses once the helper is typed.
+let tagged_decls =
+  "type Tagged a =\n" ++
+  "  | Hit a\n" ++
+  "  | Miss String\n" ++
+  "instance Propagate Tagged\n" ++
+  "  fn branch(value: Tagged a) -> ControlFlow (Tagged b) a =\n" ++
+  "    match value with\n" ++
+  "    | Hit v -> Continue(v)\n" ++
+  "    | Miss s -> Break(tag(s))\n" ++
+  "fn tag(s) = Miss(\"tagged: \" ++ s)\n" ++
+  "fn look(i: Int) -> Tagged Int = if i > 0 then Hit(i) else Miss(\"neg\")\n" ++
+  "fn main() -> Unit !{IO} =\n" ++
+  "  match f(1) with\n" ++
+  "  | Hit v -> print(int_to_string(v))\n" ++
+  "  | Miss s -> print(s)\n"
+
+let tagged_try =
+  tagged_decls ++
+  "fn f(i: Int) -> Tagged Int =\n" ++
+  "  let a = try look(i)\n" ++
+  "  in Hit(a * 2)\n"
+
+let tagged_hand =
+  tagged_decls ++
+  "fn f(i: Int) -> Tagged Int =\n" ++
+  "  match look(i) with\n" ++
+  "  | Hit a -> Hit(a * 2)\n" ++
+  "  | Miss s -> tag(s)\n"
+
 fn ir_text(r: compiler.IrFullResult) -> String =
   match r with
   | compiler.IrFullOk ir -> ir
@@ -138,4 +168,5 @@ fn main() -> Unit !{IO} =
           check_pair(state, stdlib_root, "result", result_try, result_hand)
           check_pair(state, stdlib_root, "maybe", maybe_try, maybe_hand)
           check_pair(state, stdlib_root, "user instance", fetch_try, fetch_hand)
+          check_pair(state, stdlib_root, "failure arm calls a helper", tagged_try, tagged_hand)
     summary(state)

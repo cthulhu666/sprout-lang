@@ -1,0 +1,13 @@
+# Two `try`s in one block that fail differently: the error is at the second and
+# names the first, since neither alone decides which one is wrong.
+
+fn good(n: Int) -> Result String Int = Ok(n)
+
+fn bad(n: Int) -> Result Int Int = Ok(n)
+
+fn f(n: Int) -> Result String Int =
+  let a = try good(n)
+      b = try bad(n)
+  in Ok(a + b)
+
+fn main() -> Unit !{IO} = print(to_string(f(1)))

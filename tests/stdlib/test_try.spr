@@ -37,7 +37,7 @@ fn pair_sum(n: Int) -> Result String Int =
 
 fn nested(m: Result String (Maybe Int)) -> Result String Int =
   let Just v = (try m) else Err("inner nothing")
-  in Ok(v)
+  in Ok(v * 10)
 
 # A record update on the unwrapped value needs parentheses (§4.4).
 type Point = (x: Int, y: Int) deriving (Eq, ToString)
@@ -238,7 +238,7 @@ fn main() -> Unit !{IO} =
       check_eq("where failure", doubled("x"), Nothing),
       check_eq("tuple pattern", pair_sum(3), Ok(7)),
       check_eq("tuple pattern failure", pair_sum(0), Err("no pair")),
-      check_eq("let-else on the value", nested(Ok (Just(5))), Ok(5)),
+      check_eq("let-else on the value", nested(Ok (Just(5))), Ok(50)),
       check_eq("let-else fallback", nested(Ok (Nothing)), Err("inner nothing")),
       check_eq("let-else outer failure", nested(Err("outer")), Err("outer")),
       check_eq("update after try", moved(true), Just (Point(x = 10, y = 2))),

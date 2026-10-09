@@ -230,7 +230,7 @@ fn bound_role(polarity: Polarity, bound_is_left: Bool) -> BoundRole =
 export fn no_effect_subst() -> Dict types.Effect = dict_empty()
 
 export type InferState (..) =
-  | InferState (Ref Int) (Ref Int) (Ref (Dict (List String))) (Ref (List FieldObligation)) (Ref (List EffectReport)) (Ref (List ParkedBind)) (Ref (Dict (List ast.MatchBranch))) (Ref (List source.SourcePos))
+  | InferState (Ref Int) (Ref Int) (Ref (Dict (List String))) (Ref (List FieldObligation)) (Ref (List EffectReport)) (Ref (List ParkedBind)) (Ref TryFusions) (Ref (List source.SourcePos))
   # InferState next_type_id  next_effect_id  ctor_map  parked_field_obligations  effect_reports  parked_binds  try_fusions  try_positions
 
 export fn new_state() -> InferState !{IO} =
@@ -241,7 +241,7 @@ export fn new_state() -> InferState !{IO} =
     field_ref <- ref_new(Nil)
     effect_ref <- ref_new(Nil)
     bind_ref <- ref_new(Nil)
-    fusion_ref <- ref_new(dict_empty())
+    fusion_ref <- ref_new(TryFusions(dict_empty(), set_empty()))
     try_ref <- ref_new(Nil)
     InferState(t_id, e_id, ctor_ref, field_ref, effect_ref, bind_ref, fusion_ref, try_ref)
 
@@ -335,13 +335,18 @@ export fn get_ctor_map(state: InferState) -> Dict (List String) !{IO} =
   match state with
   | InferState _ _ ctor_ref _ _ _ _ _ -> ref_read(ctor_ref)
 
-# The `branch` arms of each `Propagate` instance a `try` can be fused with,
-# keyed by the instance's head type (infer.try_fusions).
-export fn set_try_fusions(state: InferState, fusions: Dict (List ast.MatchBranch)) -> Unit !{IO} =
+# The `Propagate` instances a `try` can be fused with, by head type: each one's
+# `branch` arms and the declarations its failure arms call. Then the
+# declarations not yet typed: a head fuses only once its calls are typed
+# (infer.try_fusions).
+export type TryFusions (..) =
+  | TryFusions (Dict (List ast.MatchBranch, Set)) Set
+
+export fn set_try_fusions(state: InferState, fusions: TryFusions) -> Unit !{IO} =
   match state with
   | InferState _ _ _ _ _ _ fusion_ref _ -> ref_write(fusion_ref, fusions)
 
-export fn get_try_fusions(state: InferState) -> Dict (List ast.MatchBranch) !{IO} =
+export fn get_try_fusions(state: InferState) -> TryFusions !{IO} =
   match state with
   | InferState _ _ _ _ _ _ fusion_ref _ -> ref_read(fusion_ref)
 

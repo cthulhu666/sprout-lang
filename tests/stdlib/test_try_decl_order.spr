@@ -1,8 +1,9 @@
 import stdlib.test (check_eq, run_suite)
 
-# A fused `try` uses the instance's failure arm, so the functions that arm calls
-# are dependencies of every function with a `try`. Here `tagged` is unannotated
-# and declared after its users; it must still be inferred first.
+# A fused `try` uses the instance's failure arm, which calls `tagged`. Here
+# `tagged` is unannotated and declared after its users, and `first`, a `try` on
+# a Maybe, is used by `tagged` at two types: neither may change how the program
+# is typed compared with the call to `branch` it stands for.
 
 type Outcome a =
   | Good a
@@ -22,7 +23,12 @@ fn shout(o: Outcome String) -> Outcome String =
   let s = try o
   in Good(s ++ "!")
 
-fn tagged(s) = Bad("tagged: " ++ s)
+fn first(m) =
+  let v = try m
+  in Just(v)
+
+fn tagged(s) =
+  if first(Just(1)) == Just(1) && first(Just("a")) == Just("a") then Bad("tagged: " ++ s) else Bad(s)
 
 fn text(o: Outcome a) -> String where ToString a =
   match o with
@@ -34,5 +40,6 @@ fn main() -> Unit !{IO} =
     check_eq("int success", text(bump(Good(1))), "good 2"),
     check_eq("int failure", text(bump(Bad("x"))), "bad tagged: x"),
     check_eq("string success", text(shout(Good("hi"))), "good hi!"),
-    check_eq("string failure", text(shout(Bad("y"))), "bad tagged: y")
+    check_eq("string failure", text(shout(Bad("y"))), "bad tagged: y"),
+    check_eq("maybe at two types", first(Just(true)), Just(true))
   ])
