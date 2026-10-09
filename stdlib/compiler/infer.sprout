@@ -5114,52 +5114,80 @@ fn unreachable_check(subst: Dict types.Type, ctor_map: Dict (List String), scrut
 
 # --- Match ---
 
+# A success arm's value: another `try`'s match, or a value at a position.
+type BlockTail =
+  | TailTry source.SourcePos
+  | TailValue source.SourcePos
+
+# A `try` at `at`, the index of its one success arm (the rest are failure arms,
+# in the instance's order when fused), what the success arm's value is, the scope
+# of its failure arms when fused, and the return type of its declaration.
+type TryMatch = (at: source.SourcePos, success: Int, tail: BlockTail, arm_scope: Maybe (Dict types.Scheme),
+                 returns: Maybe types.Type)
+
 # What a match was written as, which decides how a branch mismatch is worded.
 type MatchSource =
   | UserMatch
   | LetBinding  # a binding's body, then its `else` (ast.let_bind_branches)
-  # A `try` at this position, the index of its one success arm (the rest are
-  # failure arms, in the instance's order when fused), the `try` whose match is
-  # that arm's value (tail_try), and when fused the scope of its failure arms.
-  | TryBinding source.SourcePos Int (Maybe source.SourcePos) (Maybe (Dict types.Scheme))
-  # One arm of such a match, whether it is the success arm, and the same tail_try.
-  | TryArm source.SourcePos Bool (Maybe source.SourcePos)
+  | TryBinding TryMatch
+  # One arm of a `try`'s match, and whether it is the success arm.
+  | TryArm TryMatch Bool
 
-# Only a binding's `else` can mismatch, since the body's branch comes first
-# against a fresh type. Either side may be the wrong one, so name both, with one
-# renaming so a shared variable prints as one letter.
-fn branch_mismatch_message(src: MatchSource, e: String, branch_ty: types.Type,
-                           expected_ty: types.Type) -> String =
+# Where a branch mismatch is reported, and its message. A binding's `else` is
+# the only one of its branches that can mismatch, since the body's branch comes
+# first against a fresh type; either may be wrong, so the message names both,
+# with one renaming so a shared variable prints as one letter.
+fn branch_mismatch(src: MatchSource, e: String, branch_ty: types.Type, expected_ty: types.Type,
+                   body_pos: source.SourcePos, subst: Dict types.Type, eff_subst: Dict types.Effect) ->
+    (source.SourcePos, String) =
   match src with
-  | UserMatch -> "Match branch type mismatch: " ++ e
+  | UserMatch -> (body_pos, "Match branch type mismatch: " ++ e)
   | LetBinding ->
       let vars = types.ftv(types.TTuple([branch_ty, expected_ty]))
-      in "the `else` value is `" ++ types.type_to_string_renamed(vars, branch_ty)
-           ++ "`, but the code after the binding is `" ++ types.type_to_string_renamed(vars, expected_ty)
-           ++ "`; they must have the same type, since the `else` replaces that code when the pattern fails"
-  | TryBinding _ _ _ _ -> try_block_message(branch_ty, expected_ty)
-  # The match's type is the failure's, so the success arm is the one that differs.
-  | TryArm pos true (Just _) -> try_pair_message(branch_ty, pos, expected_ty)
-  | TryArm _ true Nothing -> try_block_message(expected_ty, branch_ty)
-  | TryArm _ false _ -> try_block_message(branch_ty, expected_ty)
+      in (body_pos,
+          "the `else` value is `" ++ types.type_to_string_renamed(vars, branch_ty)
+            ++ "`, but the code after the binding is `" ++ types.type_to_string_renamed(vars, expected_ty)
+            ++ "`; they must have the same type, since the `else` replaces that code when the pattern fails")
+  # A failure arm is partly the instance's, so it is reported at the `try`.
+  | TryBinding tm -> (tm.at, try_block_message(branch_ty, expected_ty))
+  | TryArm tm false -> (tm.at, try_block_message(branch_ty, expected_ty))
+  # The match's type is the failure's, so the success arm is the one that differs:
+  # at the `try` unless the declaration returns that failure type.
+  | TryArm tm true ->
+      match tm.tail with
+      | TailTry inner -> (inner, try_pair_message(branch_ty, tm.at, expected_ty))
+      | TailValue value_pos ->
+          if returns_failure(tm.returns, expected_ty, subst, eff_subst)
+          then (value_pos, try_value_message(branch_ty, tm.at, expected_ty))
+          else (tm.at, try_block_message(expected_ty, branch_ty))
 
-# A `try` match's source for the arm after `done`.
-fn arm_source(src: MatchSource, done: List typed_ast.TypedMatchBranch) -> MatchSource =
-  match src with
-  | TryBinding pos success inner _ -> TryArm(pos, list_length(done) == success, inner)
-  | _ -> src
+fn returns_failure(returns: Maybe types.Type, failure: types.Type, subst: Dict types.Type,
+                   eff_subst: Dict types.Effect) -> Bool =
+  let Just r = returns else false
+      unifier.UnifyOk _ _ = unifier.unify_actual_expected(subst, eff_subst, failure, r) else false
+  in true
 
-# A fused failure arm's scope, so the caller's locals cannot capture its names.
-fn arm_env(src: MatchSource, done: List typed_ast.TypedMatchBranch, env: Dict types.Scheme) -> Dict types.Scheme =
+# A `try` match's source for the arm after `done`, and its scope: a fused failure
+# arm's own, so the caller's locals cannot capture its names.
+fn arm_context(src: MatchSource, done: List typed_ast.TypedMatchBranch, env: Dict types.Scheme) ->
+    (MatchSource, Dict types.Scheme) =
   match src with
-  | TryBinding _ success _ (Just scope) -> if list_length(done) == success then env else scope
-  | _ -> env
+  | TryBinding tm ->
+      let success = list_length(done) == tm.success
+      in (TryArm(tm, success), if success then env else maybe_with_default(env, tm.arm_scope))
+  | _ -> (src, env)
 
 fn try_block_message(failure: types.Type, block: types.Type) -> String =
   let failure_str = type_with_holes(failure)
   in "this `try` passes on a `" ++ failure_str ++ "` failure, but the block returns `"
        ++ type_with_holes(block) ++ "`. Handle the failure here with `let..else`, or make the block return `"
        ++ failure_str ++ "`." ++ try_maybe_hint(type_head_str(failure), type_head_str(block))
+
+fn try_value_message(value: types.Type, try_pos: source.SourcePos, failure: types.Type) -> String =
+  let failure_str = type_with_holes(failure)
+  in "this is `" ++ type_with_holes(value) ++ "`, but the `try` at " ++ int_to_string(try_pos.line) ++ ":"
+       ++ int_to_string(try_pos.column) ++ " passes on a `" ++ failure_str ++ "` failure, so the block must return `"
+       ++ failure_str ++ "`"
 
 # Two `try`s in one block that fail differently. Neither alone is wrong, so the
 # message names both, at the later one.
@@ -5186,14 +5214,6 @@ fn type_with_holes(t: types.Type) -> String =
 
 fn holes_for(vars: List String) -> Dict types.Type =
   list_fold(\ (acc, v) -> dict_set(v, types.TConst(types.type_id("_")), acc), dict_empty(), vars)
-
-# A `try`'s arms are partly the instance's, so a mismatch is reported at the `try`.
-fn mismatch_pos(src: MatchSource, body_pos: source.SourcePos) -> source.SourcePos =
-  match src with
-  | TryBinding try_pos _ _ _ -> try_pos
-  | TryArm _ true (Just inner) -> inner
-  | TryArm try_pos _ _ -> try_pos
-  | _ -> body_pos
 
 fn infer_match(
   state: unifier.InferState,
@@ -5247,7 +5267,8 @@ fn infer_try(
           fusions <- unifier.get_try_fusions(state)
           v <- unifier.fresh(state)
           let operand_ty = unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_operand))
-              inner = tail_try(success)
+              tm = TryMatch(at = pos, success = 0, tail = block_tail(success), arm_scope = Nothing,
+                            returns = map(\d -> d.returns, fusions.decl))
               b = types.TVar(types.tyvar_id(v))
           # The match's type is the failure's, `t b` as `branch` declares it, before
           # any arm is checked: a fused arm may be more general, and a mismatch is
@@ -5256,7 +5277,7 @@ fn infer_try(
           | (Just(fusion, scope), Just failure_ty) ->
               infer_branches(state, env, s1, es1, typed_operand, failure_ty,
                              list_map(\a -> fuse_try_arm(a, success, pos), fusion.arms), Nil, operand_eff,
-                             TryBinding(pos, fusion.success, inner, Just(scope)), pos)
+                             TryBinding(tm with (success = fusion.success, arm_scope = Just(scope))), pos)
           | _ ->
               match no_propagate_error(operand_ty, env) with
               | Just msg -> InferErr(pos, msg)
@@ -5270,7 +5291,7 @@ fn infer_try(
                         infer_branches(state, env, s2, es2, splice_try_operand(typed_call, typed_operand),
                                        break_type(unifier.apply_subst(s2, typed_ast.typed_expr_type(typed_call)), b),
                                        ast.try_match_arms(success, pos), Nil, operand_eff,
-                                       TryBinding(pos, 0, inner, Nothing), pos)
+                                       TryBinding(tm), pos)
 
 # `t b` for an operand `t a`.
 fn failure_type(operand_ty: types.Type, b: types.Type) -> Maybe types.Type =
@@ -5284,32 +5305,32 @@ fn break_type(flow: types.Type, fallback: types.Type) -> types.Type =
   | types.TApp (types.TApp _ f) _ -> f
   | _ -> fallback
 
-# The `try` whose match is the value of a success arm's body, through plain `let`s:
-# the one that fixed the type the arm is checked against.
-fn tail_try(success: ast.MatchBranch) -> Maybe source.SourcePos =
+# A success arm's value through plain `let`s: the `try` whose match it is, which
+# fixed the type the arm is checked against, or the value itself.
+fn block_tail(success: ast.MatchBranch) -> BlockTail =
   let ast.MatchBranch _ body = success
-  in tail_try_expr(body)
+  in expr_tail(body)
 
-fn tail_try_expr(e: ast.Expr) -> Maybe source.SourcePos =
+fn expr_tail(e: ast.Expr) -> BlockTail =
   match e with
   | ast.LetBindExpr _ value _ body _ ->
       match ast.head_try(value) with
-      | Just (_, tpos) -> Just(tpos)
-      | Nothing -> tail_try_expr(body)
-  | ast.DoExpr steps _ -> tail_try_steps(steps)
-  | _ -> Nothing
+      | Just (_, tpos) -> TailTry(tpos)
+      | Nothing -> expr_tail(body)
+  | ast.DoExpr steps pos -> steps_tail(steps, pos)
+  | _ -> TailValue(ast.expr_pos(e))
 
 # A block's value is its last step's, and a `try` step holds every step after it.
-fn tail_try_steps(steps: List ast.DoStep) -> Maybe source.SourcePos =
+fn steps_tail(steps: List ast.DoStep, pos: source.SourcePos) -> BlockTail =
   match steps with
-  | [] -> Nothing
-  | [ast.DoExprStep last] -> tail_try_expr(last)
+  | [] -> TailValue(pos)
+  | [ast.DoExprStep last] -> expr_tail(last)
   | [ast.DoPatStep _ _ value _ _ | rest] ->
       match ast.head_try(value) with
-      | Just (_, tpos) -> Just(tpos)
-      | Nothing -> tail_try_steps(rest)
-  | [ast.DoExprStep(ast.TryExpr _ tpos), _ | _] -> Just(tpos)
-  | [_ | rest] -> tail_try_steps(rest)
+      | Just (_, tpos) -> TailTry(tpos)
+      | Nothing -> steps_tail(rest, pos)
+  | [ast.DoExprStep(ast.TryExpr _ tpos), _ | _] -> TailTry(tpos)
+  | [_ | rest] -> steps_tail(rest, pos)
 
 # The declaration's `try` matches, marked for linear_check.
 fn with_try_markers(positions: List source.SourcePos, env: Dict types.Scheme) -> Dict types.Scheme =
@@ -5329,17 +5350,21 @@ fn is_try_operand(e: typed_ast.TypedExpr) -> Bool =
 # An operand whose type has no `Propagate` instance in scope: it is not a `t a`,
 # or its `t` has none yet. A variable head is the `branch` call's to resolve.
 fn no_propagate_error(operand_ty: types.Type, env: Dict types.Scheme) -> Maybe String =
-  let msg = "`try` needs a type that can fail, and `" ++ type_with_holes(operand_ty) ++ "` has no `Propagate` instance"
-  in match operand_ty with
-     | types.TVar _ -> Nothing
-     | types.TApp _ _ ->
-         match concrete_type_str(operand_ty) with
-         | Just head -> if types.is_skolem_name(head) || env_has(propagate_instance_key(head), env) then Nothing else Just(msg)
-         | Nothing -> Nothing
-     | types.TConst _ -> Just(msg)
-     | types.TFunc _ _ _ _ -> Just(msg)
-     | types.TThunk _ _ -> Just(msg)
-     | types.TTuple _ -> Just(msg)
+  match operand_ty with
+  | types.TVar _ -> Nothing
+  | types.TApp _ _ ->
+      match concrete_type_str(operand_ty) with
+      | Just head ->
+          if types.is_skolem_name(head) || env_has(propagate_instance_key(head), env) then Nothing
+          else Just(no_propagate_msg(operand_ty))
+      | Nothing -> Nothing
+  | types.TConst _ -> Just(no_propagate_msg(operand_ty))
+  | types.TFunc _ _ _ _ -> Just(no_propagate_msg(operand_ty))
+  | types.TThunk _ _ -> Just(no_propagate_msg(operand_ty))
+  | types.TTuple _ -> Just(no_propagate_msg(operand_ty))
+
+fn no_propagate_msg(operand_ty: types.Type) -> String =
+  "`try` needs a type that can fail, and `" ++ type_with_holes(operand_ty) ++ "` has no `Propagate` instance"
 
 fn propagate_instance_key(head: String) -> String = "@inst:Propagate:" ++ head
 
@@ -5359,7 +5384,7 @@ fn try_fusions(decls: List ast.Decl) -> unifier.TryFusions =
   let pending = list_fold(\ (acc, d) -> add_value_name(d, acc), set_empty(), decls)
       callable = list_fold(\ (acc, d) -> add_class_methods(d, acc), pending, decls)
   in unifier.TryFusions(by_head = list_fold(\ (acc, d) -> add_try_fusion(d, callable, acc), dict_empty(), decls),
-                        pending = pending, scope = Nothing)
+                        pending = pending, decl = Nothing)
 
 fn add_value_name(d: ast.Decl, acc: Set) -> Set =
   match checked_value_name(d) with
@@ -5408,17 +5433,19 @@ fn ready_try_fusion(fusions: unifier.TryFusions, operand_ty: types.Type) ->
     Maybe(unifier.Fusion, Dict types.Scheme) =
   let Just head = concrete_type_str(operand_ty) else Nothing
       Just fusion = dict_get(head, fusions.by_head) else Nothing
-      Just scope = fusions.scope else Nothing
-  in if env_has(propagate_instance_key(head), scope)
-        && all(\n -> env_has(n, scope) && ! set_member (n, fusions.pending), set_to_list(fusion.calls))
-     then Just((fusion, scope)) else Nothing
+      Just decl = fusions.decl else Nothing
+  in if env_has(propagate_instance_key(head), decl.scope)
+        && all(\n -> env_has(n, decl.scope) && ! set_member (n, fusions.pending), set_to_list(fusion.calls))
+     then Just((fusion, decl.scope)) else Nothing
 
-# A failure arm names what the instance sees, not the locals at the `try`: the
-# scope of the declaration being checked, before its parameters.
-fn enter_try_scope(state: unifier.InferState, env: Dict types.Scheme) -> Unit !{IO} =
+# A declaration's `try`s start here. A failure arm names what the instance sees,
+# not the locals at the `try`: the scope before the parameters. A body that
+# failed before this one leaves its `try` positions behind.
+fn enter_try_decl(state: unifier.InferState, env: Dict types.Scheme, returns: types.Type) -> Unit !{IO} =
   do
+    _ <- unifier.take_try_positions(state)
     fusions <- unifier.get_try_fusions(state)
-    unifier.set_try_fusions(state, fusions with (scope = Just(env)))
+    unifier.set_try_fusions(state, fusions with (decl = Just(unifier.TryDecl(scope = env, returns = returns))))
 
 # A group's declarations are typed once it is checked, and its scope is done.
 fn settle_try_fusions(state: unifier.InferState, decl_vec: Vec ast.Decl, g: List Int) -> Unit !{IO} =
@@ -5426,7 +5453,7 @@ fn settle_try_fusions(state: unifier.InferState, decl_vec: Vec ast.Decl, g: List
     fusions <- unifier.get_try_fusions(state)
     unifier.set_try_fusions(state,
       fusions with (pending = list_fold(\ (acc, i) -> settle_decl(decl_at(decl_vec, i), acc), fusions.pending, g),
-                    scope = Nothing))
+                    decl = Nothing))
 
 fn settle_decl(d: Maybe ast.Decl, pending: Set) -> Set =
   match and_then(checked_value_name, d) with
@@ -5456,7 +5483,7 @@ fn fusion_arm(param: String, arm: ast.MatchBranch) -> Maybe unifier.FusionArm =
 fn heads_disjoint(arms: List unifier.FusionArm) -> Bool =
   match list_filter(is_success_arm, arms) with
   | [unifier.SuccessArm(ast.ConstructorPattern success _ _) _] ->
-      all(\a -> ctor_head(a) != Nothing, arms) && list_length(list_filter(\a -> ctor_head(a) == Just(success), arms)) == 1
+      all(\a -> ctor_head(a) != Nothing, arms) && count(\a -> ctor_head(a) == Just(success), arms) == 1
   | _ -> false
 
 fn is_success_arm(arm: unifier.FusionArm) -> Bool =
@@ -5540,9 +5567,9 @@ fn infer_branches(
       match branch with
       | ast.MatchBranch pat _ ->
           do
-            br <- infer_branch(state, arm_env(src, acc_branches, env), subst, eff_subst,
-                               typed_ast.typed_expr_type(typed_scrut), ret_type, branch,
-                               arm_source(src, acc_branches))
+            let (arm_src, arm_env) = arm_context(src, acc_branches, env)
+            br <- infer_branch(state, arm_env, subst, eff_subst, typed_ast.typed_expr_type(typed_scrut), ret_type,
+                               branch, arm_src)
             match br with
             | InferErr pos e -> InferErr(pos, e)
             | InferOk typed_body s1 es1 branch_eff ->
@@ -5603,10 +5630,10 @@ fn infer_branch_unify(
 ) -> InferResult !{IO} =
   match unifier.unify_actual_expected(subst, eff_subst, typed_ast.typed_expr_type(typed_body), ret_type) with
   | unifier.UnifyErr e ->
-      InferErr(mismatch_pos(src, typed_ast.typed_expr_pos(typed_body)),
-               branch_mismatch_message(src, e,
-                 unifier.apply_subst(subst, typed_ast.typed_expr_type(typed_body)),
-                 unifier.apply_subst(subst, ret_type)))
+      let (epos, msg) = branch_mismatch(src, e, unifier.apply_subst(subst, typed_ast.typed_expr_type(typed_body)),
+                                        unifier.apply_subst(subst, ret_type), typed_ast.typed_expr_pos(typed_body),
+                                        subst, eff_subst)
+      in InferErr(epos, msg)
   | unifier.UnifyOk s3 es3 ->
       InferOk(typed_body, s3, es3, unifier.apply_effect_subst(es3, body_eff))
 
@@ -12271,11 +12298,9 @@ fn check_fn_body(
   match decl with
   | ast.FnDecl name params ret_type_maybe effects_maybe constraints body fn_pos ->
       do
-        # A body that failed before this one leaves its `try`s behind.
-        _ <- unifier.take_try_positions(state)
-        enter_try_scope(state, env)
         let decl_scheme = scheme_from_fn_parts(name, params, ret_type_maybe, effects_maybe, alias_env)
         (inst_type, prog_to_fresh) <- unifier.instantiate_with_vars(state, decl_scheme)
+        enter_try_decl(state, env, fn_return_type(inst_type, list_length(params)))
         let fwd_env = seed_unann_names(own_unann_vars(name, params, ret_type_maybe),
                         seed_sig_var_names(prog_to_fresh, seed_forward_markers(constraints, prog_to_fresh, env)))
         # Compute @eta_fwd:* markers in parallel without walking fwd_env post-hoc.
@@ -12887,7 +12912,7 @@ fn check_instance_method(
                         seed_sig_var_names(prog_to_fresh,
                           seed_forward_markers(list_append(inst_constraints, method_constraints), prog_to_fresh, env)))
         let body_env = extend_env_with_params(params, ctor_param_types(inst_type), fwd_env)
-        enter_try_scope(state, env)
+        enter_try_decl(state, env, fn_return_type(inst_type, list_length(params)))
         br <- typecheck_expr(state, body_env, subst, eff_subst, body)
         match br with
         | InferErr pos msg -> instance_method_err(name, pos, msg)

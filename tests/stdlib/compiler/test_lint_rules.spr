@@ -186,6 +186,16 @@ let blocked_own_payload =
   "          | Err msg -> error_response(msg)\n" ++
   "          | Ok line -> combine(session_id, kind, line)\n"
 
+# A `try` passes its failure on itself, so its links never need a binding-else.
+let match_then_tries =
+  "fn total(m: Maybe String, a: String, b: String) -> Maybe Int =\n" ++
+  "  match m with\n" ++
+  "  | Just s ->\n" ++
+  "      let x = try parse_digit(a)\n" ++
+  "          y = try parse_digit(b)\n" ++
+  "      in Just(x + y + str_len(s))\n" ++
+  "  | Nothing -> Nothing\n"
+
 let leaf_match_arm_uses_own_payload_is_clean =
   "fn f(a: Maybe Int, b: Maybe Int) -> Int =\n" ++
   "  match a with\n" ++
@@ -763,6 +773,10 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "blocked chain (terminal uses own payload): still reported", count_list(lint_rules.lint_ast(blocked_own_payload)), 1)
     assert_eq(state, "blocked chain: rule id unchanged", first_rule(lint_rules.lint_ast(blocked_own_payload)), "staircase-of-doom")
     assert_eq(state, "payload chain: message points to let..else (binding-else, Tier 1b)", mentions_let_else(first_message(lint_rules.lint_ast(blocked_own_payload))), true)
+
+    assert_eq(state, "try links: constant-else message, not binding-else",
+      first_message(lint_rules.lint_ast(match_then_tries)),
+      "nested match can be flattened with let..else (docs/idiomatic-sprout.md)")
 
     assert_eq(state, "leaf match arm using its own payload stays clean (leaf never becomes an else-fallback)", count_list(lint_rules.lint_ast(leaf_match_arm_uses_own_payload_is_clean)), 1)
     assert_eq(state, "leaf match arm using its own payload: message still references let..else", mentions_let_else(first_message(lint_rules.lint_ast(leaf_match_arm_uses_own_payload_is_clean))), true)

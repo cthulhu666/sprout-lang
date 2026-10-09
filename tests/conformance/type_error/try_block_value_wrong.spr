@@ -1,0 +1,12 @@
+# The code after a `try` has the wrong type while the `try` agrees with the
+# function's return type: the error is at that code, and names the `try`.
+
+fn get(n: Int) -> Maybe Int = if n > 0 then Just(n) else Nothing
+
+fn f(n: Int) -> Maybe Int =
+  do
+    let a = try get(n)
+    let b = a + 1
+    to_string(b)
+
+fn main() -> Unit !{IO} = print(to_string(f(1)))
