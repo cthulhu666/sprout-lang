@@ -17,20 +17,20 @@ import stdlib.tui.widget as widget
 # concatenated. A container forwards what its children ask for without knowing
 # what any of it means.
 export fn broadcast(evt: event.Event,
-                    kids: List (widget.Widget m)) -> (List(widget.Widget m), List m, List(widget.Cmd m)) =
+                    kids: List (widget.Widget m)) -> widget.Handled(List(widget.Widget m)) m =
   broadcast_go(evt, kids, list_builder_empty, list_builder_empty, list_builder_empty)
 
 fn broadcast_go(evt: event.Event, ws: List (widget.Widget m),
                 wacc: ListBuilder (widget.Widget m), macc: ListBuilder m,
-                cacc: ListBuilder (widget.Cmd m)) -> (List(widget.Widget m), List m, List(widget.Cmd m)) =
+                cacc: ListBuilder (widget.Cmd m)) -> widget.Handled(List(widget.Widget m)) m =
   match ws with
   | Nil -> (list_builder_build(wacc), list_builder_build(macc), list_builder_build(cacc))
   | [w | rest] -> broadcast_step(widget.on_event(w, evt), evt, rest, wacc, macc, cacc)
 
-fn broadcast_step(r: (widget.Widget m, List m, List(widget.Cmd m)),
+fn broadcast_step(r: widget.Handled (widget.Widget m) m,
                   evt: event.Event, rest: List (widget.Widget m),
                   wacc: ListBuilder (widget.Widget m), macc: ListBuilder m,
-                  cacc: ListBuilder (widget.Cmd m)) -> (List(widget.Widget m), List m, List(widget.Cmd m)) =
+                  cacc: ListBuilder (widget.Cmd m)) -> widget.Handled(List(widget.Widget m)) m =
   match r with
   | (w2, msgs, cmds) ->
       broadcast_go(evt, rest, list_builder_add(w2, wacc), list_builder_extend(msgs, macc),
@@ -43,12 +43,12 @@ fn broadcast_step(r: (widget.Widget m, List m, List(widget.Cmd m)),
 # still reaches `update`. Stopping at the first claimant makes a duplicated id
 # resolve by tree order rather than delivering the same answer twice.
 export fn deliver_first(target: widget.WidgetId, d: widget.Delivery m,
-                        kids: List (widget.Widget m)) -> Maybe (List(widget.Widget m), List m, List(widget.Cmd m)) =
+                        kids: List (widget.Widget m)) -> Maybe(widget.Handled(List(widget.Widget m)) m) =
   deliver_go(target, d, kids, Nil)
 
 fn deliver_go(target: widget.WidgetId, d: widget.Delivery m,
               ws: List (widget.Widget m),
-              seen: List (widget.Widget m)) -> Maybe (List(widget.Widget m), List m, List(widget.Cmd m)) =
+              seen: List (widget.Widget m)) -> Maybe(widget.Handled(List(widget.Widget m)) m) =
   match ws with
   | Nil -> Nothing
   | [w | rest] ->
@@ -57,9 +57,9 @@ fn deliver_go(target: widget.WidgetId, d: widget.Delivery m,
       | Just claimed -> Just(deliver_hit(claimed, rest, seen))
 
 # A child that declined is unchanged, so only the claimant is spliced back in.
-fn deliver_hit(r: (widget.Widget m, List m, List(widget.Cmd m)),
+fn deliver_hit(r: widget.Handled (widget.Widget m) m,
                rest: List (widget.Widget m),
-               seen: List (widget.Widget m)) -> (List(widget.Widget m), List m, List(widget.Cmd m)) =
+               seen: List (widget.Widget m)) -> widget.Handled(List(widget.Widget m)) m =
   match r with
   | (w2, msgs, cmds) -> (list_append(list_reverse(Cons(w2, seen)), rest), msgs, cmds)
 

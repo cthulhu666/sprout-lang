@@ -99,11 +99,11 @@ fn regions_of(b: Box m, r: geometry.Region) -> List geometry.Region =
 fn box_kids(b: Box m) -> List(widget.Widget m) = list_map(slot_widget, b.slots)
 
 fn box_on_event(b: Box m,
-                ev: event.Event) -> (Box m, List m, List(widget.Cmd m)) =
+                ev: event.Event) -> widget.Handled(Box m) m =
   box_repack(b, children.broadcast(ev, box_kids(b)))
 
 fn box_repack(b: Box m,
-              r: (List(widget.Widget m), List m, List(widget.Cmd m))) -> (Box m, List m, List(widget.Cmd m)) =
+              r: widget.Handled (List(widget.Widget m)) m) -> widget.Handled(Box m) m =
   match r with
   | (ws, msgs, cmds) -> (b with (slots = respan(b.slots, ws)), msgs, cmds)
 
@@ -125,7 +125,7 @@ fn reseat(s: Slot m, w: widget.Widget m) -> Slot m =
   | SlotFit _ -> SlotFit(w)
 
 fn box_route(b: Box m, target: widget.WidgetId,
-             d: widget.Delivery m) -> Maybe (Box m, List m, List(widget.Cmd m)) =
+             d: widget.Delivery m) -> Maybe(widget.Handled(Box m) m) =
   map(box_repack(b, _), children.deliver_first(target, d, box_kids(b)))
 
 fn box_render(b: Box m, r: geometry.Region, s: screen.Screen) -> Unit !{IO} =
@@ -226,16 +226,16 @@ fn grid_regions(g: Grid m, r: geometry.Region) -> List geometry.Region =
   list_flat_map(\band -> band, layout.grid(r, g.cols, g.rows))
 
 fn grid_on_event(g: Grid m,
-                 ev: event.Event) -> (Grid m, List m, List(widget.Cmd m)) =
+                 ev: event.Event) -> widget.Handled(Grid m) m =
   grid_repack(g, children.broadcast(ev, g.kids))
 
 fn grid_repack(g: Grid m,
-               r: (List(widget.Widget m), List m, List(widget.Cmd m))) -> (Grid m, List m, List(widget.Cmd m)) =
+               r: widget.Handled (List(widget.Widget m)) m) -> widget.Handled(Grid m) m =
   match r with
   | (ws, msgs, cmds) -> (g with (kids = ws), msgs, cmds)
 
 fn grid_route(g: Grid m, target: widget.WidgetId,
-              d: widget.Delivery m) -> Maybe (Grid m, List m, List(widget.Cmd m)) =
+              d: widget.Delivery m) -> Maybe(widget.Handled(Grid m) m) =
   map(grid_repack(g, _), children.deliver_first(target, d, g.kids))
 
 # Children fill cells row-major. A child past the last cell gets no region and

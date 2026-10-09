@@ -143,19 +143,19 @@ type Pane m = (id: widget.WidgetId, opts: EditorOpts m, doc: document.Document,
                wanted: version.Version, shown: version.Version,
                writing: Bool, quiet: Int, refused: Bool)
 
-type alias Reply m = Maybe(Pane m, List m, List(widget.Cmd m))
+type alias Reply m = Maybe(widget.Handled(Pane m) m)
 
 # A tick is the one broadcast a pane acts on. It arrives HERE and not through
 # `pane_event` because the ring sends `TickEvent` to `broadcast` explicitly —
 # it is addressed to nobody — and because an unfocused pane holding unsaved
 # text is exactly the one that most wants saving.
 fn pane_on_event(p: Pane m,
-                 ev: event.Event) -> (Pane m, List m, List(widget.Cmd m)) =
+                 ev: event.Event) -> widget.Handled(Pane m) m =
   match ev with
   | event.TickEvent -> ticked(p with (quiet = p.quiet + 1))
   | _ -> (p, Nil, Nil)
 
-fn ticked(p: Pane m) -> (Pane m, List m, List(widget.Cmd m)) =
+fn ticked(p: Pane m) -> widget.Handled(Pane m) m =
   match p.opts.save_when with
   | WhenIdle n -> if p.quiet >= n then unprompted(p) else (p, Nil, Nil)
   | WhenUnfocused -> (p, Nil, Nil)
@@ -170,7 +170,7 @@ fn pane_handler(p: Pane m, d: widget.Delivery m) -> Reply m =
 # The EDGE out of focus, so a blur repeated cannot save twice. Gaining focus is
 # not a reason to write anything. The messages do reach the loop:
 # `focus.move_focus` blurs first and keeps what the blurred widget said.
-fn focused(p: Pane m, now: Bool) -> (Pane m, List m, List(widget.Cmd m)) =
+fn focused(p: Pane m, now: Bool) -> widget.Handled(Pane m) m =
   if p.has_focus && ! now && leaving(p) then unprompted(shifted)
   else (shifted, Nil, Nil)
 where
@@ -253,10 +253,10 @@ fn answering(p: Pane m, sv: Saving) -> Reply m =
 # answered `Unnamed` or `Busy` because it asked; a trigger repeating either into
 # the status line every tick is worse than silence. A `Busy` pane stays due, so
 # the save follows the outstanding write instead of being dropped.
-fn unprompted(p: Pane m) -> (Pane m, List m, List(widget.Cmd m)) =
+fn unprompted(p: Pane m) -> widget.Handled(Pane m) m =
   if is_due(p) then offered(p) else (p, Nil, Nil)
 
-fn offered(p: Pane m) -> (Pane m, List m, List(widget.Cmd m)) =
+fn offered(p: Pane m) -> widget.Handled(Pane m) m =
   let Just reply = p.opts.on_saving else (p, Nil, Nil)
   in handed_out(p, reply, saving(p))
 
@@ -278,7 +278,7 @@ fn handed(p: Pane m, reply: Saving -> m, sv: Saving) -> Reply m =
   Just(handed_out(p, reply, sv))
 
 fn handed_out(p: Pane m, reply: Saving -> m,
-              sv: Saving) -> (Pane m, List m, List(widget.Cmd m)) =
+              sv: Saving) -> widget.Handled(Pane m) m =
   ((p with (writing = leaves(sv))), [reply(sv)], Nil)
 
 fn leaves(sv: Saving) -> Bool =
@@ -344,7 +344,7 @@ fn confirmed(p: Pane m, at: Maybe document.FilePath) -> Reply m =
 # HERE rather than on the next trigger is what keeps `WhenUnfocused` whole: its
 # trigger fired while the write was out, was refused for `Busy`, and cannot fire
 # again — the pane is already unfocused, and ticks are not its trigger.
-fn resumed(p: Pane m) -> (Pane m, List m, List(widget.Cmd m)) =
+fn resumed(p: Pane m) -> widget.Handled(Pane m) m =
   if has_trigger(p) then unprompted(p) else (p, Nil, Nil)
 
 fn has_trigger(p: Pane m) -> Bool =
@@ -355,7 +355,7 @@ fn has_trigger(p: Pane m) -> Bool =
 
 # ── what it says back ───────────────────────────────────────────────────────
 
-fn settled(was: Pane m, now: Pane m) -> (Pane m, List m, List(widget.Cmd m)) =
+fn settled(was: Pane m, now: Pane m) -> widget.Handled(Pane m) m =
   (now, relabelled(was, now), Nil)
 
 # The EDGE, not every keystroke: a label that has not changed is nothing the

@@ -105,6 +105,10 @@ export fn fixed_size(sz: geometry.Size) -> Measured =
 export fn greedy_size(sz: geometry.Size) -> Measured =
   Measured(size = sz, cols = Greedy, rows = Greedy)
 
+# What handling an event produces: the new state, the messages for `update`,
+# and the commands to run.
+export type alias Handled s m = (s, List m, List (Cmd m))
+
 # The five things a widget can do, over its own state type. `on_event`
 # broadcasts, `route` is addressed; both are pure, asking for IO with a `Cmd`
 # rather than performing any, which is what keeps a widget testable and the
@@ -117,22 +121,22 @@ export fn greedy_size(sz: geometry.Size) -> Measured =
 # the caller would have to be trusted to discard.
 export type View s m (..) = (
   state: s,
-  on_event: s -> event.Event -> (s, List m, List (Cmd m)),
-  route: s -> WidgetId -> Delivery m -> Maybe(s, List m, List (Cmd m)),
+  on_event: s -> event.Event -> Handled s m,
+  route: s -> WidgetId -> Delivery m -> Maybe(Handled s m),
   render: s -> geometry.Region -> screen.Screen -> Unit !{IO},
   measure: s -> geometry.Size -> Measured
 )
 
 # A widget that ignores broadcast events — every leaf whose input arrives
 # addressed. `no_route`'s twin for the `on_event` field.
-export fn no_event(st: s, ev: event.Event) -> (s, List m, List (Cmd m)) =
+export fn no_event(st: s, ev: event.Event) -> Handled s m =
   (st, Nil, Nil)
 
 # A widget nothing is ever addressed to — every leaf until it wants a command
 # of its own. Declines everything, so an undeliverable answer reaches the
 # application instead of disappearing here.
 export fn no_route(st: s, target: WidgetId,
-                   d: Delivery m) -> Maybe(s, List m, List (Cmd m)) =
+                   d: Delivery m) -> Maybe (Handled s m) =
   Nothing
 
 # The leaf spelling: handle a delivery addressed to `mine`. Applied with `_`
@@ -141,9 +145,9 @@ export fn no_route(st: s, target: WidgetId,
 # The claim is by ADDRESS, not by what the handler did: an answer arriving at
 # the widget that asked for it has got home whether or not the state moved.
 export fn route_if(mine: WidgetId,
-                   handler: s -> Delivery m -> (s, List m, List (Cmd m)),
+                   handler: s -> Delivery m -> Handled s m,
                    st: s, target: WidgetId,
-                   d: Delivery m) -> Maybe(s, List m, List (Cmd m)) =
+                   d: Delivery m) -> Maybe (Handled s m) =
   if id_eq(mine, target) then Just(handler(st, d)) else Nothing
 
 # The other half: the claim is the HANDLER's to make, not the address's. A
@@ -151,9 +155,9 @@ export fn route_if(mine: WidgetId,
 # which `route_if` cannot express — it has got home either way, which is right
 # for a command's answer and wrong for a key.
 export fn route_when(mine: WidgetId,
-                     handler: s -> Delivery m -> Maybe(s, List m, List (Cmd m)),
+                     handler: s -> Delivery m -> Maybe(Handled s m),
                      st: s, target: WidgetId,
-                     d: Delivery m) -> Maybe(s, List m, List (Cmd m)) =
+                     d: Delivery m) -> Maybe (Handled s m) =
   if id_eq(mine, target) then handler(st, d) else Nothing
 
 # Run an optional decoder over an incoming message. A REUSABLE widget is
@@ -176,7 +180,7 @@ export type Widget m (..) =
 
 # Hand one event to a widget: the box comes back rebuilt around its new state,
 # still hiding the same type, plus what it wants to say and what it wants done.
-export fn on_event(w: Widget m, ev: event.Event) -> (Widget m, List m, List (Cmd m)) =
+export fn on_event(w: Widget m, ev: event.Event) -> Handled (Widget m) m =
   match w with
   | Widget v -> repack(v, v.on_event(v.state, ev))
 
@@ -184,7 +188,7 @@ export fn on_event(w: Widget m, ev: event.Event) -> (Widget m, List m, List (Cmd
 # under the `Widget v` pattern; naming it here keeps `on_event` one line and
 # the existential's scope obvious.
 fn repack(v: View s m,
-          r: (s, List m, List (Cmd m))) -> (Widget m, List m, List (Cmd m)) =
+          r: Handled s m) -> Handled (Widget m) m =
   match r with
   | (s2, msgs, cmds) -> (Widget(v with (state = s2)), msgs, cmds)
 
@@ -193,18 +197,18 @@ fn repack(v: View s m,
 # of the terminal yields several events, and they must be applied in arrival
 # order — a widget's reply depends on the state the previous event left.
 export fn feed(w: Widget m,
-               evs: List event.Event) -> (Widget m, List m, List (Cmd m)) =
+               evs: List event.Event) -> Handled (Widget m) m =
   feed_go(w, evs, list_builder_empty, list_builder_empty)
 
 fn feed_go(w: Widget m, evs: List event.Event, msgs: ListBuilder m,
-           cmds: ListBuilder (Cmd m)) -> (Widget m, List m, List (Cmd m)) =
+           cmds: ListBuilder (Cmd m)) -> Handled (Widget m) m =
   match evs with
   | Nil -> (w, list_builder_build(msgs), list_builder_build(cmds))
   | [e | rest] -> feed_step(on_event(w, e), rest, msgs, cmds)
 
-fn feed_step(r: (Widget m, List m, List (Cmd m)), rest: List event.Event,
+fn feed_step(r: Handled (Widget m) m, rest: List event.Event,
              msgs: ListBuilder m,
-             cmds: ListBuilder (Cmd m)) -> (Widget m, List m, List (Cmd m)) =
+             cmds: ListBuilder (Cmd m)) -> Handled (Widget m) m =
   match r with
   | (w2, ms, cs) ->
       feed_go(w2, rest, list_builder_extend(ms, msgs), list_builder_extend(cs, cmds))
@@ -214,14 +218,14 @@ fn feed_step(r: (Widget m, List m, List (Cmd m)), rest: List event.Event,
 # the only way an address can cross the existential — the framework cannot see
 # through `Widget m` to know whether it holds children at all.
 export fn deliver(w: Widget m, target: WidgetId,
-                  d: Delivery m) -> Maybe (Widget m, List m, List (Cmd m)) =
+                  d: Delivery m) -> Maybe (Handled (Widget m) m) =
   match w with
   | Widget v -> repack_route(v, v.route(v.state, target, d))
 
 # The reply now has `on_event`'s shape under the `Maybe`, so repacking is the
 # same function both paths already needed.
 fn repack_route(v: View s m,
-                r: Maybe (s, List m, List (Cmd m))) -> Maybe (Widget m, List m, List (Cmd m)) =
+                r: Maybe (Handled s m)) -> Maybe (Handled (Widget m) m) =
   match r with
   | Nothing -> Nothing
   | Just t -> Just(repack(v, t))
@@ -256,9 +260,9 @@ export fn map_msgs(f: m -> n, unf: n -> Maybe m, w: Widget m) -> Widget n =
                             measure = v.measure))
 
 fn mapped_route(f: m -> n, unf: n -> Maybe m,
-                inner: s -> WidgetId -> Delivery m -> Maybe(s, List m, List (Cmd m)),
+                inner: s -> WidgetId -> Delivery m -> Maybe(Handled s m),
                 st: s, target: WidgetId,
-                d: Delivery n) -> Maybe(s, List n, List (Cmd n)) =
+                d: Delivery n) -> Maybe (Handled s n) =
   match narrow(unf, d) with
   # A message in a vocabulary the embedded widget does not speak is not its
   # business. Declined rather than guessed at, so it still reaches the
@@ -280,19 +284,19 @@ fn as_delivery(r: Maybe m) -> Maybe (Delivery m) =
   | Just mm -> Just(ToMsg(mm))
 
 fn remap(f: m -> n,
-         r: Maybe (s, List m, List (Cmd m))) -> Maybe(s, List n, List (Cmd n)) =
+         r: Maybe (Handled s m)) -> Maybe (Handled s n) =
   match r with
   | Nothing -> Nothing
   | Just t -> Just(remap_one(f, t))
 
 # Applied above with `_` holes for the last two arguments, leaving
-# `s -> Event -> (s, List n, List (Cmd n))` — the field's type. Sprout is
+# `s -> Event -> Handled s n` — the field's type. Sprout is
 # n-ary, so the holes
 # are how a partial application is spelled; a lambda would say the same thing
 # but would be one in argument position, which the style guide rejects.
 fn mapped_on_event(f: m -> n,
-                   inner: s -> event.Event -> (s, List m, List (Cmd m)),
-                   st: s, ev: event.Event) -> (s, List n, List (Cmd n)) =
+                   inner: s -> event.Event -> Handled s m,
+                   st: s, ev: event.Event) -> Handled s n =
   remap_one(f, inner(st, ev))
 
 # Both replies have this shape, so both retargetings are this one function. The
@@ -300,7 +304,7 @@ fn mapped_on_event(f: m -> n,
 # report in the embedding vocabulary, or the outer app receives a message it
 # cannot read.
 fn remap_one(f: m -> n,
-             r: (s, List m, List (Cmd m))) -> (s, List n, List (Cmd n)) =
+             r: Handled s m) -> Handled s n =
   match r with
   | (s2, msgs, cmds) -> (s2, list_map(f, msgs), list_map(cmd_map(f, _), cmds))
 
@@ -334,28 +338,28 @@ fn unqualify(prefix: String, target: WidgetId) -> Maybe WidgetId =
   map(WidgetId, string.strip_prefix(id_text(target), prefix ++ namespace_sep))
 
 fn namespaced_on_event(prefix: String,
-                       inner: s -> event.Event -> (s, List m, List (Cmd m)),
-                       st: s, ev: event.Event) -> (s, List m, List (Cmd m)) =
+                       inner: s -> event.Event -> Handled s m,
+                       st: s, ev: event.Event) -> Handled s m =
   requalify(prefix, inner(st, ev))
 
 fn namespaced_route(prefix: String,
-                    inner: s -> WidgetId -> Delivery m -> Maybe(s, List m, List (Cmd m)),
+                    inner: s -> WidgetId -> Delivery m -> Maybe(Handled s m),
                     st: s, target: WidgetId,
-                    d: Delivery m) -> Maybe(s, List m, List (Cmd m)) =
+                    d: Delivery m) -> Maybe (Handled s m) =
   and_then(namespaced_deliver(prefix, inner, st, d, _), unqualify(prefix, target))
 
 # Separate because `and_then` wants the stripped target last, and everything
 # else the wrapper needs is already bound when an address arrives.
 fn namespaced_deliver(prefix: String,
-                      inner: s -> WidgetId -> Delivery m -> Maybe(s, List m, List (Cmd m)),
+                      inner: s -> WidgetId -> Delivery m -> Maybe(Handled s m),
                       st: s, d: Delivery m,
-                      target: WidgetId) -> Maybe(s, List m, List (Cmd m)) =
+                      target: WidgetId) -> Maybe (Handled s m) =
   map(requalify(prefix, _), inner(st, target, d))
 
 # Only the commands move: a message carries no address, and the state is the
 # inner widget's own.
 fn requalify(prefix: String,
-             r: (s, List m, List (Cmd m))) -> (s, List m, List (Cmd m)) =
+             r: Handled s m) -> Handled s m =
   match r with
   | (s2, msgs, cmds) -> (s2, msgs, list_map(cmd_readdress(q, _), cmds))
 where

@@ -23,6 +23,8 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
 - `count(predicate, xs) -> Int` (`where Foldable c`)
 - `member(x, xs) -> Bool` (`where Foldable c, Eq a`)
 - `list_filter(predicate, list) -> List`, `list_filter_map`, `list_partition`
+- `list_take(n, list)` / `list_drop(n, list)` — the first `n` elements / the rest; total, O(n).
+  There is no index lookup on `List`: match the head of `list_drop(i, xs)`, or use a `Vec`
 - `split_ints(s: String) -> List Int`
 - `Vec a` plus foundational helpers:
   - `vec_empty()`

@@ -21,7 +21,7 @@ type Btn m = (id: widget.WidgetId, label: String, on_press: m,
               look: focus.FocusStyle, has_focus: Bool)
 
 fn btn_handler(b: Btn m,
-               d: widget.Delivery m) -> Maybe (Btn m, List m, List(widget.Cmd m)) =
+               d: widget.Delivery m) -> Maybe(widget.Handled(Btn m) m) =
   match d with
   # A button asks for no work, so an answer addressed to it is not its
   # business and belongs to `update`.
@@ -30,7 +30,7 @@ fn btn_handler(b: Btn m,
   | widget.ToEvent e -> btn_key(b, e)
 
 fn btn_key(b: Btn m,
-           e: event.Event) -> Maybe (Btn m, List m, List(widget.Cmd m)) =
+           e: event.Event) -> Maybe(widget.Handled(Btn m) m) =
   match e with
   | event.KeyPress k mods -> btn_activate(b, k, mods)
   | _ -> Nothing
@@ -39,7 +39,7 @@ fn btn_key(b: Btn m,
 # either way, which is what leaves it to the ring; alt-space is the
 # application's chord to bind, not a press.
 fn btn_activate(b: Btn m, k: event.Key,
-                mods: event.Mods) -> Maybe (Btn m, List m, List(widget.Cmd m)) =
+                mods: event.Mods) -> Maybe(widget.Handled(Btn m) m) =
   if b.has_focus && ! event.mods_is_chord (mods) && activates(k)
   then Just((b, [b.on_press], Nil))
   else Nothing

@@ -68,7 +68,7 @@ fn member(ids: List widget.WidgetId,
 # A widget that declines is left as it is: the id list is the author's claim
 # about the tree, and nothing can check it (§4.6).
 fn notify(child: widget.Widget m, who: Maybe widget.WidgetId,
-          on: Bool) -> (widget.Widget m, List m, List(widget.Cmd m)) =
+          on: Bool) -> widget.Handled(widget.Widget m) m =
   let Just id = who else (child, Nil, Nil)
       Just t = widget.deliver(child, id, widget.ToFocus(on)) else (child, Nil, Nil)
   in t
@@ -77,7 +77,7 @@ fn notify(child: widget.Widget m, who: Maybe widget.WidgetId,
 # rather than a `Maybe`: "move focus to nobody" is not a move, and `shift`
 # above has already turned that case into a broadcast.
 fn move_focus(r: Ring m,
-              to: widget.WidgetId) -> (Ring m, List m, List(widget.Cmd m)) =
+              to: widget.WidgetId) -> widget.Handled(Ring m) m =
   let (dark, said, asked) = notify(r.child, r.at, false)
       (lit, said2, asked2) = notify(dark, Just(to), true)
   in (Ring(ids = r.ids, at = Just(to), child = lit),
@@ -91,7 +91,7 @@ fn move_focus(r: Ring m,
 # belongs to whatever is under the pointer, which needs hit-testing the
 # framework does not have.
 fn ring_on_event(r: Ring m,
-                 ev: event.Event) -> (Ring m, List m, List(widget.Cmd m)) =
+                 ev: event.Event) -> widget.Handled(Ring m) m =
   match ev with
   | event.KeyPress k _ -> on_key(r, ev, k)
   | event.Paste _ -> to_focused(r, ev)
@@ -103,7 +103,7 @@ fn ring_on_event(r: Ring m,
 # Tab is read before the focused widget sees it, so a greedy handler cannot
 # trap focus (§4.5).
 fn on_key(r: Ring m, ev: event.Event,
-          k: event.Key) -> (Ring m, List m, List(widget.Cmd m)) =
+          k: event.Key) -> widget.Handled(Ring m) m =
   match k with
   | event.KTab -> shift(r, ev, ring_next(r.ids, r.at))
   | event.KBackTab -> shift(r, ev, ring_next(list_reverse(r.ids), r.at))
@@ -114,7 +114,7 @@ fn on_key(r: Ring m, ev: event.Event,
 # it would cost an application its global binding whenever the ring it computes
 # from its model happens to be empty.
 fn shift(r: Ring m, ev: event.Event,
-         to: Maybe widget.WidgetId) -> (Ring m, List m, List(widget.Cmd m)) =
+         to: Maybe widget.WidgetId) -> widget.Handled(Ring m) m =
   match to with
   | Nothing -> broadcast(r, ev)
   | Just id -> stay_or_move(r, id)
@@ -123,7 +123,7 @@ fn shift(r: Ring m, ev: event.Event,
 # ring's, but blurring and refocusing would reset a widget that commits on
 # blur, so nothing is told.
 fn stay_or_move(r: Ring m,
-                id: widget.WidgetId) -> (Ring m, List m, List(widget.Cmd m)) =
+                id: widget.WidgetId) -> widget.Handled(Ring m) m =
   if holds(r.at, id) then (r, Nil, Nil) else move_focus(r, id)
 
 fn holds(at: Maybe widget.WidgetId, id: widget.WidgetId) -> Bool =
@@ -132,17 +132,17 @@ fn holds(at: Maybe widget.WidgetId, id: widget.WidgetId) -> Bool =
 # The fall-through `route_when` exists for: a key the focused widget declines
 # still reaches everything the broadcast reaches.
 fn to_focused(r: Ring m,
-              ev: event.Event) -> (Ring m, List m, List(widget.Cmd m)) =
+              ev: event.Event) -> widget.Handled(Ring m) m =
   let Just id = r.at else broadcast(r, ev)
       Just t = widget.deliver(r.child, id, widget.ToEvent(ev)) else broadcast(r, ev)
   in rewrap(r, t)
 
 fn broadcast(r: Ring m,
-             ev: event.Event) -> (Ring m, List m, List(widget.Cmd m)) =
+             ev: event.Event) -> widget.Handled(Ring m) m =
   rewrap(r, widget.on_event(r.child, ev))
 
 fn rewrap(r: Ring m,
-          t: (widget.Widget m, List m, List(widget.Cmd m))) -> (Ring m, List m, List(widget.Cmd m)) =
+          t: widget.Handled (widget.Widget m) m) -> widget.Handled(Ring m) m =
   match t with
   | (c2, said, asked) -> (r with (child = c2), said, asked)
 
@@ -152,14 +152,14 @@ fn rewrap(r: Ring m,
 # first, and the next Tab would blur the wrong one. Nested rings are a non-goal
 # (§2), so declining is the whole rule.
 fn ring_route(r: Ring m, target: widget.WidgetId,
-              d: widget.Delivery m) -> Maybe (Ring m, List m, List(widget.Cmd m)) =
+              d: widget.Delivery m) -> Maybe(widget.Handled(Ring m) m) =
   match d with
   | widget.ToFocus _ -> Nothing
   | widget.ToMsg _ -> forwarded(r, target, d)
   | widget.ToEvent _ -> forwarded(r, target, d)
 
 fn forwarded(r: Ring m, target: widget.WidgetId,
-             d: widget.Delivery m) -> Maybe (Ring m, List m, List(widget.Cmd m)) =
+             d: widget.Delivery m) -> Maybe(widget.Handled(Ring m) m) =
   map(rewrap(r, _), widget.deliver(r.child, target, d))
 
 fn ring_render(r: Ring m, reg: geometry.Region, s: scr.Screen) -> Unit !{IO} =

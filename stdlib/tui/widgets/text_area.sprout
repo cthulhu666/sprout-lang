@@ -34,7 +34,7 @@ export fn text_area_opts() -> TextAreaOpts m =
 type Area m = (id: widget.WidgetId, on_change: String -> m,
                opts: TextAreaOpts m, doc: buffer.Buffer, has_focus: Bool)
 
-type alias Reply m = Maybe(Area m, List m, List(widget.Cmd m))
+type alias Reply m = Maybe(widget.Handled(Area m) m)
 
 fn area_handler(a: Area m, d: widget.Delivery m) -> Reply m =
   match d with

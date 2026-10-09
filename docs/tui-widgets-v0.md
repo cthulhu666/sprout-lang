@@ -183,9 +183,9 @@ measurement is `stdlib.unicode.width` over grapheme clusters, exactly as `screen
 already places them.
 
 That shared need drives a small refactor: the cluster segmentation currently private inside
-`screen.sprout` (`cluster_list`, `split_clusters`, `take_n`, `drop_n`, `cluster_width`)
-moves into `text.sprout` and is exported, and `screen.sprout` imports it. Behaviour is
-unchanged; this is deduplication, not a redesign, and it keeps one definition of "how wide
+`screen.sprout` (`cluster_list`, `split_clusters`, `cluster_width`) moves into `text.sprout`
+and is exported (its list helpers are now the prelude's `list_take`/`list_drop`), and
+`screen.sprout` imports it. Behaviour is unchanged; this is deduplication, not a redesign, and it keeps one definition of "how wide
 is this text" for the placer and the wrapper to share.
 
 ### 3.6 The pump is one sum-typed channel
@@ -302,10 +302,10 @@ does not write an empty list in every arm.
 
 | Module | Contents | Lands in |
 |---|---|---|
-| `stdlib/tui/text.sprout` | cluster segmentation, `width`, `wrap_to`, `truncate`; `take_n`/`drop_n` over any list | pure half |
+| `stdlib/tui/text.sprout` | cluster segmentation, `width`, `wrap_to`, `truncate` | pure half |
 | `stdlib/tui/layout.sprout` | `Dimension`, `Edge`, `solve`, `row`, `column`, `grid`, `dock`, `ask_of` | pure half |
 | `stdlib/tui/geometry.sprout` | `split_right`, `split_bottom` added | pure half |
-| `stdlib/tui/widget.sprout` | `View`, `Widget`, `WidgetId`, `Cmd`, `on_event`, `feed`, `measure`, `render`, `map_msgs`, `cmd_run`, `cmd_map`; later `Grow`, `Measured`, `fixed_size`, `greedy_size` (M4, `docs/tui-widget-set-v0.md` §4.3) and `route_when`, `namespaced`, `cmd_readdress` (`docs/tui-routing-v0.md` §3.8–3.9) and `ToFocus` (C2, `docs/tui-focus-v0.md` §4.2), `no_event` (the idle `on_event`) and `decoded`, which runs an application-supplied content decoder and whose `Nothing` is how a widget declines a `ToMsg` (`docs/tui-content-update-v0.md` §9.5) | app-loop half |
+| `stdlib/tui/widget.sprout` | `View`, `Widget`, `WidgetId`, `Cmd`, `on_event`, `feed`, `measure`, `render`, `map_msgs`, `cmd_run`, `cmd_map`; later `Grow`, `Measured`, `fixed_size`, `greedy_size` (M4, `docs/tui-widget-set-v0.md` §4.3) and `route_when`, `namespaced`, `cmd_readdress` (`docs/tui-routing-v0.md` §3.8–3.9) and `ToFocus` (C2, `docs/tui-focus-v0.md` §4.2), `no_event` (the idle `on_event`), `Handled` (the `(state, msgs, cmds)` reply) and `decoded`, which runs an application-supplied content decoder and whose `Nothing` is how a widget declines a `ToMsg` (`docs/tui-content-update-v0.md` §9.5) | app-loop half |
 | `stdlib/tui/app.sprout` | `Flow`, `Signal`, `App`, `apply`, `step`, `run`, `done` | app-loop half |
 | `stdlib/tui/widgets/focus.sprout` | `focus_ring`, `focus_ring_at` | C2, `docs/tui-focus-v0.md` |
 | `stdlib/tui/widgets/button.sprout` | `button`, `button_styled` | C2, `docs/tui-focus-v0.md` |

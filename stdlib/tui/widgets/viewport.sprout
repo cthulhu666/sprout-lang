@@ -33,8 +33,8 @@ fn window_of(b: buffer.Buffer, r: geometry.Region) -> Window =
 where
   top = first_row(buffer.buffer_row(b), geometry.region_rows(r))
   cs = text.clusters(buffer.buffer_line(b))
-  before = text.take_n(cs, buffer.buffer_col(b), Nil)
-  caret = caret_cluster(text.drop_n(cs, buffer.buffer_col(b)))
+  before = list_take(buffer.buffer_col(b), cs)
+  caret = caret_cluster(list_drop(buffer.buffer_col(b), cs))
   # The caret's OWN width is what the window reserves, not one column: on a CJK
   # or emoji cluster a single reserved column truncates it away, painting
   # neither the character nor the focus.
@@ -75,7 +75,7 @@ fn framed(screen: scr.Screen, region: geometry.Region, b: buffer.Buffer,
 
 # The lines the region shows, unshifted.
 fn visible(b: buffer.Buffer, r: geometry.Region, w: Window) -> List String =
-  text.take_n(text.drop_n(buffer.buffer_lines(b), w.top), geometry.region_rows(r), Nil)
+  list_take(geometry.region_rows(r), list_drop(w.top, buffer.buffer_lines(b)))
 
 # Every line shifts by the SAME number of columns, or the text would jump from
 # row to row as the caret moved.

@@ -57,7 +57,7 @@ type Lst m = (id: widget.WidgetId, items: List String, on_select: Int -> m,
               opts: ListOpts m, count: Int, width: Int, sel: Int,
               has_focus: Bool)
 
-type alias Reply m = Maybe(Lst m, List m, List(widget.Cmd m))
+type alias Reply m = Maybe(widget.Handled(Lst m) m)
 
 fn lst_handler(l: Lst m, d: widget.Delivery m) -> Reply m =
   match d with
