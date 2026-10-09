@@ -334,7 +334,8 @@ Experimental HTTP server helpers (in `stdlib/http_server.sprout`):
 - `ok(body) -> HttpServerResponse`
 - `bad_request(body) -> HttpServerResponse`
 - `not_found(body) -> HttpServerResponse`
-- `with_header(name, value, resp) -> HttpServerResponse`
+- `with_header(name, value, resp) -> HttpServerResponse` — sets `name`, removing every earlier line of it
+- `add_header(name, value, resp) -> HttpServerResponse` — adds another `name` line; header lines go out in the order set
 - `request_method(req) -> String`
 - `request_path(req) -> String`
 - `request_version(req) -> String`
@@ -364,6 +365,20 @@ is what RFC 9113 §8.2.3 requires of anything handing the field to a generic ser
 
 - `cookie_pairs(req) -> Vec (String, String)` — every cookie, in order, duplicates kept
 - `request_cookie(name, req) -> Maybe String` — the first value for `name`
+
+Response cookies. A bad value cannot be built, so `with_cookie` and `render` never fail on a
+cookie; a `;`, CR or LF in a name, path or domain is rendered as a space
+([http-request-params-v0.md](http-request-params-v0.md) §9):
+
+- `CookieValue` — a value with RFC 6265 `cookie-octet` bytes only; constructor hidden
+- `cookie_value(raw) -> Maybe CookieValue` — `Nothing` for a space, comma, `"`, `;`, `\`, control or non-ASCII byte
+- `cookie_value_of_bytes(data) -> CookieValue` — standard base64; total
+- `cookie_value_text(value) -> String`
+- `SetCookie` — record: `name`, `value`, `max_age_seconds`, `path`, `domain`, `http_only`, `same_site`, `secure`
+- `SameSite` — `SameSiteStrict | SameSiteLax | SameSiteNone`; browsers drop `SameSiteNone` without `secure`
+- `cookie(name, value) -> SetCookie` — `Path=/`, `HttpOnly`, `SameSite=Lax`; adjust with record update
+- `expired_cookie(name) -> SetCookie` — empty value, `Max-Age=0`; set path and domain as the cookie was set
+- `with_cookie(cookie, resp) -> HttpServerResponse` — one `Set-Cookie` line, replacing an earlier one of the same name
 
 Current experimental scope:
 

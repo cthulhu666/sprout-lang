@@ -189,8 +189,59 @@ quadratic, which matters because a Cookie header is attacker-controlled up to
 392 MB of churn before the fix and 7.8 MB after. `request_cookie` re-derives the
 pairs per call, like every accessor in §5; that is linear per call and deliberate.
 
-**Not here: `Set-Cookie`.** Issue #373's response half needs `HttpServerResponse` to
-hold repeatable headers first — it carries one `Dict String`, so a second
-`with_cookie` would silently overwrite the first. Filed as its own `BACKLOG.md` §2
-entry, because a prerequisite recorded only in a design doc is invisible to anyone
-scanning for open work.
+**Not here: `Set-Cookie`.** The response half is §9.
+
+## 9. Response headers and cookies (issue #373, response half)
+
+**Repeatable headers.** `HttpServerResponse` held one `Dict String`, so a response
+could carry one `Set-Cookie`. It now holds its header lines in the order the handler
+set them. `with_header` replaces every earlier line of the name, and `add_header`
+appends one: Go's `Header.Set`/`Header.Add`, Rust `http`'s `HeaderMap::insert`/
+`append`. `render` still defaults content-type and connection only when absent, and
+drops every caller content-length for the real one. Lines go out in insertion order,
+no longer sorted by name.
+
+**Cookies are a typed field, not header lines.** `with_cookie` replaces an earlier
+cookie of the same name (RFC 6265 §4.1.1: a server SHOULD NOT send two; Plug keys
+`resp_cookies` by name), which needs the name, not a rendered line. `render` is the
+only place a cookie becomes text, after the other headers. A raw
+`with_header("set-cookie", …)` still works and is not compared against them.
+
+**A bad cookie cannot be built, so nothing fails later.** A first draft refused a
+bad cookie in `render`, which `render_response_or_fallback` turns into a bare 500:
+the handler's body, its other headers and a redirect after a POST that already
+changed data were all lost, and the reason was dropped. No library surveyed fails at
+render. They raise at construction or encode the value:
+
+| library | when it checks | value |
+|---|---|---|
+| Go `net/http` | `SetCookie` skips a cookie whose name is not a token, silently | sanitised |
+| Elixir Plug | raises `ArgumentError` on `;` in name or value | as given |
+| jshttp `cookie` (Express) | throws `TypeError` on a bad name, value, path or domain | `encodeURIComponent` when outside `cookie-octet` |
+| ASP.NET Core | never; `SameSite=None` without `Secure` is only logged | always escaped |
+
+Sources: `net/http/cookie.go`; `plug/lib/plug/conn/cookies.ex`; `jshttp/cookie/src/index.ts`;
+`aspnetcore/src/Http/Http/src/Internal/ResponseCookies.cs`.
+
+So the value, the one part a handler computes from data and the one a `;` injects
+attributes through, is `CookieValue`: a `wrap` with a hidden constructor, like
+`uuid.Uuid`. `cookie_value` admits RFC 6265 `cookie-octet` only, stricter than the
+request side (§8 admits space and comma, which browsers send) because a server
+controls what it sends and RFC 6265 §3 names the comma as a folding hazard. Every
+value it admits reads back unchanged through `request_cookie`. `cookie_value_of_bytes`
+is total: standard base64 uses only `cookie-octet` bytes. Encoding every value
+(ASP.NET) was rejected because §8 deliberately does not decode, so `a b` would come
+back as `a%20b`.
+
+Name, path and domain stay `String`: usually literals, never read back, and wrong on
+the first browser test. `render` makes them inert instead: `;` becomes a space, and
+`sanitize_field` already does that to CR and LF. `SameSite=None` without `Secure` is
+documented, not refused, since browsers reject it visibly. A `Max-Age` ≤ 0 is sent as
+given; RFC 6265 §5.2.2 expires it.
+
+`SetCookie` is an open record, so a caller adjusts `cookie(name, value)`'s defaults
+(`Path=/`, `HttpOnly`, `SameSite=Lax`) with record update. `expired_cookie(name)` is
+the same with an empty value and `Max-Age=0`; a browser clears only the cookie with
+the same path and domain, so those are set as when the cookie was set. Attributes go
+out in Go's order. Not here: `Expires` (`Max-Age` covers it), cookie prefixes,
+`Partitioned`.

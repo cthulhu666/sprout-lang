@@ -556,11 +556,12 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   §8.2.3. That is three special cases where a general all-values accessor would be one rule —
   which is the argument for this entry, not against it. Needs an accessor beside `request_header`
   (Go `map[string][]string`; Rust `HeaderMap` multi-map).
-- [ ] `P2` **Repeatable response headers.** `HttpServerResponse` carries one `Dict String`, so a
-  response can emit at most one `Set-Cookie` — a second `with_header("set-cookie", …)` silently
-  overwrites the first, and RFC 6265 §3 gives each cookie its own field line. Setting a session
-  cookie while clearing another is ordinary, so this blocks a `with_cookie` builder (issue #373's
-  response half) entirely. `docs/http-request-params-v0.md` §8.
+- [ ] `P3` **A `render` error reaches the client as a bare 500, its reason dropped.**
+  `render_response_or_fallback` in `stdlib/http_server.sprout` answers any `Err` from `render`
+  with a fixed "internal server error", and `http_server` has no log, so the handler's body and
+  headers and the `HttpServerError` saying why are all lost. Only a status outside `stdlib.http`'s
+  table reaches it today. Wants a way to report it, e.g. a log hook on `ServerConfig`.
+  `docs/http-request-params-v0.md` §9.
 - [ ] `P2` **Request-param convenience layer.** A merged `param`/`param_all` bag over query+form
   (query-first, matching Werkzeug's `CombinedMultiDict([args, form])`), plus first-wins
   `Dict String` projections `query_params`/`form_params`/`params`. All over the existing `_pairs`
