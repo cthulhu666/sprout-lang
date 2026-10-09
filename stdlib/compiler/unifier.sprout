@@ -241,7 +241,7 @@ export fn new_state() -> InferState !{IO} =
     field_ref <- ref_new(Nil)
     effect_ref <- ref_new(Nil)
     bind_ref <- ref_new(Nil)
-    fusion_ref <- ref_new(TryFusions(dict_empty(), set_empty()))
+    fusion_ref <- ref_new(TryFusions(dict_empty(), set_empty(), Nothing))
     try_ref <- ref_new(Nil)
     InferState(t_id, e_id, ctor_ref, field_ref, effect_ref, bind_ref, fusion_ref, try_ref)
 
@@ -337,10 +337,11 @@ export fn get_ctor_map(state: InferState) -> Dict (List String) !{IO} =
 
 # The `Propagate` instances a `try` can be fused with, by head type: each one's
 # `branch` arms and the declarations its failure arms call. Then the
-# declarations not yet typed: a head fuses only once its calls are typed
-# (infer.try_fusions).
+# declarations not yet typed, and the scope of the declaration being checked,
+# without its locals: a head fuses only once its calls are typed, and its
+# failure arms are inferred in that scope (infer.try_fusions).
 export type TryFusions (..) =
-  | TryFusions (Dict (List ast.MatchBranch, Set)) Set
+  | TryFusions (Dict (List ast.MatchBranch, Set)) Set (Maybe (Dict types.Scheme))
 
 export fn set_try_fusions(state: InferState, fusions: TryFusions) -> Unit !{IO} =
   match state with

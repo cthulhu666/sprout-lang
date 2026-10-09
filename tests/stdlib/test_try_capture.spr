@@ -48,6 +48,32 @@ fn box_text(b: Box Int) -> String =
   | Full v -> `full ${v}`
   | Empty -> "empty"
 
+# A fused failure arm sees the instance's names, never the caller's locals.
+class Describe a
+  fn describe(x: a) -> String
+
+instance Describe String
+  fn describe(x: String) -> String = "described: " ++ x
+
+type Fetch a =
+  | Got a
+  | Failed String
+
+instance Propagate Fetch
+  fn branch(value: Fetch a) -> ControlFlow (Fetch b) a =
+    match value with
+    | Got v -> prelude.Continue(v)
+    | Failed why -> prelude.Break(Failed(describe(why)))
+
+fn shadowing(describe: String -> String, f: Fetch Int) -> Fetch Int =
+  let v = try f
+  in Got(if describe("z") == "" then v else v + 1)
+
+fn fetch_text(f: Fetch Int) -> String =
+  match f with
+  | Got v -> `got ${v}`
+  | Failed why -> why
+
 fn main() -> Unit !{IO} =
   run_suite("try capture", [
     check_eq("own branch is not captured", own_names("2"), Just(200)),
@@ -55,5 +81,8 @@ fn main() -> Unit !{IO} =
     check_eq("local branch is not captured", local_branch(10, "1"), Just(11)),
     check_eq("own constructors still work", step_value(Continue(4)) + step_value(Break), 3),
     check_eq("own instance success", box_text(box_plus(Full(1))), "full 101"),
-    check_eq("own instance failure", box_text(box_plus(Empty)), "empty")
+    check_eq("own instance failure", box_text(box_plus(Empty)), "empty"),
+    check_eq("local does not capture a failure arm's name",
+             fetch_text(shadowing(\s -> "LOCAL " ++ s, Failed("x"))), "described: x"),
+    check_eq("shadowing success", fetch_text(shadowing(\s -> s, Got(1))), "got 2")
   ])

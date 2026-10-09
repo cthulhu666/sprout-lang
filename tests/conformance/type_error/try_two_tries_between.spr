@@ -1,0 +1,16 @@
+# Two `try`s that fail differently, with a plain `let` and a statement between
+# them: still reported at the second, naming the first.
+
+fn good(n: Int) -> Result String Int = Ok(n)
+
+fn bad(n: Int) -> Result Int Int = Ok(n)
+
+fn f(n: Int) -> Result String Int !{IO} =
+  do
+    a <- try good(n)
+    let k = 5
+    print("between")
+    b <- try bad(n)
+    Ok(a + b + k)
+
+fn main() -> Unit !{IO} = print(to_string(f(1)))
