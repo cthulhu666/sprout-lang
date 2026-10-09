@@ -973,9 +973,10 @@ fn merge_effects(a: types.Effect, b: types.Effect) -> types.Effect =
   | _ -> merge_effect_labels(a, b)
 
 fn merge_effect_labels(a: types.Effect, b: types.Effect) -> types.Effect =
-  match list_fold(\ (acc, y) -> list_add_unique(y, acc), effect_labels(a), effect_labels(b)) with
+  match list_append(a_labels, list_dedup(list_diff(effect_labels(b), a_labels))) with
   | [only] -> types.EffectVar(only)
   | labels -> types.EffectRow(labels)
+  where a_labels = effect_labels(a)
 
 fn effect_labels(e: types.Effect) -> List String =
   match e with
@@ -3123,7 +3124,7 @@ fn scan_ptf_prog_var_entries(
               else if has_inner_tvar_for_prog_var(unifier.apply_subst(s3, fresh_t), class_name, prog_var, env) then
                 match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
                 | Just _ ->
-                    Just(compound_tdict(class_name,
+                    Just(unresolved_tdict(class_name,
                       type_to_typeexpr_with_prog_vars(unifier.apply_subst(s3, fresh_t), class_name, s3, env), pos))
                 | Nothing ->
                     scan_ptf_prog_var_entries(class_name, prog_var, rest, s3, env, pos, excluded)
@@ -3313,13 +3314,14 @@ fn compound_head_tdict(
   in
     if dict_member(compound_fwd_key(class_name, te), env) || dict_member("@inst:" ++ class_name ++ ":" ++ want, env)
        || te_has_hole(te)
-    then Just(compound_tdict(class_name, te, pos))
+    then Just(unresolved_tdict(class_name, te, pos))
     else Nothing
   where
     toks = arg_scan_arg_tokens(head_token)
     var_te = call_var_typeexpr(_, callee, prog_to_fresh, subst, env)
 
-fn compound_tdict(class_name: String, te: ast.TypeExpr, pos: source.SourcePos) -> typed_ast.TypedExpr =
+# A dictionary for `class_name` at `te`, left for resolution to fill in.
+fn unresolved_tdict(class_name: String, te: ast.TypeExpr, pos: source.SourcePos) -> typed_ast.TypedExpr =
   typed_ast.TDict(ast.TypeConstraint(class_name, Cons(te, Nil)),
                   types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved)
 
@@ -3390,7 +3392,7 @@ fn resolve_one_constraint_tdict(
   | Just head_str ->
       match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
       | Just _ ->
-          Just(compound_tdict(class_name,
+          Just(unresolved_tdict(class_name,
             first_concrete_arg_typeexpr_or_name_excluding(head_str, user_args, subst, excluded), pos))
       | Nothing ->
           resolve_via_fwd_or_scan(class_name, user_args, subst, env, pos)
@@ -3403,7 +3405,7 @@ fn resolve_one_constraint_tdict(
       | Just head_str ->
           match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
           | Just _ ->
-              Just(compound_tdict(class_name,
+              Just(unresolved_tdict(class_name,
                 first_concrete_arg_typeexpr_or_name_excluding(head_str, user_args, subst, Nil), pos))
           | Nothing ->
               resolve_via_fwd_or_scan(class_name, user_args, subst, env, pos)
@@ -3437,7 +3439,7 @@ fn resolve_via_fwd_or_scan(
 fn fwd_scheme_to_tdict(fwd_scheme: types.Scheme, class_name: String, pos: source.SourcePos) -> Maybe typed_ast.TypedExpr =
   match fwd_scheme with
   | types.Scheme _ _ (types.TConst prog_var) _ _ ->
-      Just(compound_tdict(class_name, ast.TypeName(types.type_id_name(prog_var)), pos))
+      Just(unresolved_tdict(class_name, ast.TypeName(types.type_id_name(prog_var)), pos))
   | _ -> Nothing
 
 # Scan all env entries for the first "@fwd:*:class_name" marker.
@@ -3493,7 +3495,7 @@ fn scan_fwd_markers_for_prog_var(
             match val with
             | types.Scheme _ _ (types.TConst stored_prog_var) _ _ ->
                 if types.type_id_name(stored_prog_var) == prog_var
-                then Just(compound_tdict(class_name, ast.TypeName(prog_var), pos))
+                then Just(unresolved_tdict(class_name, ast.TypeName(prog_var), pos))
                 else scan_fwd_markers_for_prog_var(class_name, prog_var, rest, pos)
             | _ -> scan_fwd_markers_for_prog_var(class_name, prog_var, rest, pos)
           else scan_fwd_markers_for_prog_var(class_name, prog_var, rest, pos)
@@ -3625,7 +3627,7 @@ fn resolve_precise_head(
       # prog_vars can legitimately map to the same concrete type; same dict.
       match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
       | Just _ ->
-          (Just(compound_tdict(class_name,
+          (Just(unresolved_tdict(class_name,
             type_to_typeexpr_with_prog_vars(unifier.apply_subst(s3, fresh_t), class_name, s3, env), pos)), "precise-just")
       | Nothing ->
           (resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos), "precise_no_inst->fwd_or_scan")
@@ -3656,7 +3658,7 @@ fn resolve_precise_head(
 # A dictionary the post-pass must still decide: a slot of its own, every argument `_`.
 # Never filled, it lowers to the poison thunk, which fails loudly if reached.
 fn hole_tdict(class_name: String, pos: source.SourcePos) -> typed_ast.TypedExpr =
-  compound_tdict(class_name, ast.TypeName("_"), pos)
+  unresolved_tdict(class_name, ast.TypeName("_"), pos)
 
 # Decode a positional constraint-var token ("#pos:<k>", written by
 # canonicalize_constrained_constraints) back to the callee's live generalized-scheme
@@ -3799,7 +3801,7 @@ fn resolve_field_constraint(
 fn resolve_concrete_head_tdict(class_name: String, head_name: String, env: Dict types.Scheme, pos: source.SourcePos) -> Maybe typed_ast.TypedExpr =
   match dict_get("@inst:" ++ class_name ++ ":" ++ head_name, env) with
   | Just _ ->
-      Just(compound_tdict(class_name, ast.TypeName(head_name), pos))
+      Just(unresolved_tdict(class_name, ast.TypeName(head_name), pos))
   | Nothing -> Nothing
 
 # --- Forward marker helpers ---
@@ -4315,7 +4317,7 @@ fn append_via_semigroup_at(
       | Just _ ->
           InferOk(
             typed_ast.TCall(typed_ast.TVar("append", t, pos),
-              Cons(compound_tdict("Semigroup",
+              Cons(unresolved_tdict("Semigroup",
                      type_to_typeexpr_with_prog_vars(t, "Semigroup", s1, env), pos),
                    [typed_left, typed_right]),
               t, pos),
@@ -7489,28 +7491,12 @@ fn validate_te(te: ast.TypeExpr, decl_name: String, declared: List String) -> Ma
 fn validate_te_list(parts: List ast.TypeExpr, decl_name: String, declared: List String) -> Maybe String =
   find_map(\h -> validate_te(h, decl_name, declared), parts)
 
-fn validate_ctors(
-  ctors: List ast.TypeConstructor,
-  decl_name: String,
-  declared: List String
-) -> Maybe String =
-  find_map(validate_ctor(decl_name, declared, _), ctors)
+fn validate_ctors(ctors: List ast.TypeConstructor, decl_name: String, declared: List String) -> Maybe String =
+  validate_te_list(ast.ctor_field_type_exprs(ctors), decl_name, declared)
 
-fn validate_ctor(decl_name: String, declared: List String, ctor: ast.TypeConstructor) -> Maybe String =
-  match ctor with
-  | ast.TypeConstructor _ fields _ _ -> validate_te_list(fields, decl_name, declared)
-
-fn validate_record_fields(
-  fields: List ast.RecordFieldDecl,
-  decl_name: String,
-  declared: List String
-) -> Maybe String =
-  find_map(validate_record_field(decl_name, declared, _), fields)
-
-fn validate_record_field(decl_name: String, declared: List String,
-                         field: ast.RecordFieldDecl) -> Maybe String =
-  match field with
-  | ast.RecordFieldDecl _ ftype -> validate_te(ftype, decl_name, declared)
+fn validate_record_fields(fields: List ast.RecordFieldDecl, decl_name: String,
+                          declared: List String) -> Maybe String =
+  validate_te_list(ast.record_field_type_exprs(fields), decl_name, declared)
 
 fn validate_decl(decl: ast.Decl, declared: List String) -> Maybe String =
   match decl with
@@ -7620,18 +7606,10 @@ fn alias_uses_in_maybe_te(te: Maybe ast.TypeExpr, arities: Dict Int) -> Maybe St
   | Just t -> alias_uses_in_te(t, arities)
 
 fn alias_uses_in_ctors(ctors: List ast.TypeConstructor, arities: Dict Int) -> Maybe String =
-  find_map(alias_uses_in_ctor(arities, _), ctors)
-
-fn alias_uses_in_ctor(arities: Dict Int, c: ast.TypeConstructor) -> Maybe String =
-  match c with
-  | ast.TypeConstructor _ fields _ _ -> alias_uses_in_te_list(fields, arities)
+  alias_uses_in_te_list(ast.ctor_field_type_exprs(ctors), arities)
 
 fn alias_uses_in_fields(fields: List ast.RecordFieldDecl, arities: Dict Int) -> Maybe String =
-  find_map(alias_uses_in_field(arities, _), fields)
-
-fn alias_uses_in_field(arities: Dict Int, f: ast.RecordFieldDecl) -> Maybe String =
-  match f with
-  | ast.RecordFieldDecl _ ftype -> alias_uses_in_te(ftype, arities)
+  alias_uses_in_te_list(ast.record_field_type_exprs(fields), arities)
 
 fn alias_uses_in_te(te: ast.TypeExpr, arities: Dict Int) -> Maybe String =
   match te with
@@ -10618,7 +10596,7 @@ fn skolem_given_tdict(class_name: String, skolem: String, env: Dict types.Scheme
 fn instance_dict_for(class_name: String, head_str: String, t: types.Type, subst: Dict types.Type,
                      env: Dict types.Scheme, pos: source.SourcePos) -> Maybe typed_ast.TypedExpr =
   let Just _ = dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) else Nothing
-  in Just(compound_tdict(class_name, named_typeexpr(t, subst, env), pos))
+  in Just(unresolved_tdict(class_name, named_typeexpr(t, subst, env), pos))
 
 # Scan a concrete return type for an inner component that has an @inst marker
 # for the given class.  Tries the type itself first (handles `a` in return
@@ -10630,7 +10608,7 @@ fn find_inst_in_return_type(class_name: String, t: types.Type, env: Dict types.S
   | Just head_str ->
       match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
       | Just _ ->
-          Just(compound_tdict(class_name, type_to_typeexpr(t), pos))
+          Just(unresolved_tdict(class_name, type_to_typeexpr(t), pos))
       | Nothing ->
           find_inst_in_return_type_children(class_name, t, env, pos)
   | Nothing ->
@@ -10672,7 +10650,7 @@ fn concrete_dispatch_call(
   resolved_t: types.Type
 ) -> typed_ast.TypedExpr =
   typed_ast.TCall(fn_,
-    Cons(compound_tdict(class_name,
+    Cons(unresolved_tdict(class_name,
       type_to_typeexpr_with_prog_vars(resolved_t, class_name, subst, env), pos),
       args),
     t, pos)

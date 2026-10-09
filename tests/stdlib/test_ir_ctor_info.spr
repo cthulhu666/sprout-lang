@@ -1,50 +1,24 @@
 import stdlib.test (check_eq, check_true, run_suite)
 import stdlib.compiler.sprout_ir as sprout_ir
 
-# Unit tests for sprout_ir.CtorInfo — the name-keyed constructor-table value
-# that replaced the anonymous `(Int, Int, Int, String)` tuple threaded through
-# ast_to_ir.  A named record makes every field self-documenting; these tests pin
-# the field ORDER (tag, arity, max_arity, field_kinds, field_names) so a
-# construction-site transposition is caught here rather than downstream.
-#
-# The field values are deliberately all-distinct (5 / 2 / 3 / "ips" / "a,b") so a
-# swapped pair cannot accidentally satisfy an assertion.  field_names is "" for
-# ADT/wrap constructors (positional) and a comma-separated label list for records.
-
-fn info_tag(ci: sprout_ir.CtorInfo) -> Int =
-  match ci with
-  | sprout_ir.CtorInfo tag _ _ _ _ -> tag
-
-fn info_arity(ci: sprout_ir.CtorInfo) -> Int =
-  match ci with
-  | sprout_ir.CtorInfo _ arity _ _ _ -> arity
-
-fn info_max_arity(ci: sprout_ir.CtorInfo) -> Int =
-  match ci with
-  | sprout_ir.CtorInfo _ _ max_ar _ _ -> max_ar
-
-fn info_field_kinds(ci: sprout_ir.CtorInfo) -> String =
-  match ci with
-  | sprout_ir.CtorInfo _ _ _ fks _ -> fks
-
-fn info_field_names(ci: sprout_ir.CtorInfo) -> String =
-  match ci with
-  | sprout_ir.CtorInfo _ _ _ _ names -> names
+# Unit tests for sprout_ir.CtorInfo, the name-keyed constructor-table value
+# ast_to_ir reads. The field values are all distinct (5 / 2 / 3 / "ips" /
+# ["a", "b"]), so a field read through the wrong name cannot pass by accident.
+# field_names is empty for ADT and wrap constructors (positional) and the
+# declaration-order labels for a record.
 
 fn main() -> Unit !{IO} =
-  # Wrap-sentinel shape: tag -1, arity/max_arity 1, single-field kinds, no names.
-  let ci = sprout_ir.CtorInfo(5, 2, 3, "ips", "a,b")
-      wrap_ci = sprout_ir.CtorInfo(-1, 1, 1, "p", "")
+  let ci = sprout_ir.CtorInfo(tag = 5, arity = 2, max_arity = 3, field_kinds = "ips",
+                              field_names = ["a", "b"])
+      wrap_ci = sprout_ir.CtorInfo(tag = -1, arity = 1, max_arity = 1, field_kinds = "p",
+                                   field_names = Nil)
   in run_suite("ir_ctor_info", [
-    check_eq("CtorInfo: tag field is position 0", info_tag(ci), 5),
-    check_eq("CtorInfo: arity field is position 1", info_arity(ci), 2),
-    check_eq("CtorInfo: max_arity field is position 2", info_max_arity(ci), 3),
-    check_true("CtorInfo: field_kinds field is position 3",
-                info_field_kinds(ci) == "ips"),
-    check_true("CtorInfo: field_names field is position 4",
-                info_field_names(ci) == "a,b"),
-    check_eq("CtorInfo: wrap sentinel tag is -1", info_tag(wrap_ci), -1),
-    check_eq("CtorInfo: wrap sentinel arity is 1", info_arity(wrap_ci), 1),
-    check_true("CtorInfo: positional ctor has empty field_names",
-                info_field_names(wrap_ci) == "")
+    check_eq("CtorInfo: tag", ci.tag, 5),
+    check_eq("CtorInfo: arity", ci.arity, 2),
+    check_eq("CtorInfo: max_arity", ci.max_arity, 3),
+    check_true("CtorInfo: field_kinds", ci.field_kinds == "ips"),
+    check_eq("CtorInfo: a record's field_names keep declaration order", ci.field_names, ["a", "b"]),
+    check_eq("CtorInfo: wrap sentinel tag is -1", wrap_ci.tag, -1),
+    check_eq("CtorInfo: wrap sentinel arity is 1", wrap_ci.arity, 1),
+    check_true("CtorInfo: positional ctor has no field_names", wrap_ci.field_names == Nil)
   ])
