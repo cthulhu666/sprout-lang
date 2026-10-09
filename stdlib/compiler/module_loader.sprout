@@ -203,7 +203,7 @@ export fn module_name_to_path(name: source.ModuleName, stdlib_root: String) -> M
   if str_starts_with(n, "stdlib.") then
     Just(stdlib_root ++ "/" ++ string.replace_all(".", "/", str_slice(n, 7, str_len(n))) ++ ".sprout")
   else if str_find(n, ".") == -1 then
-    Just(str_concat(stdlib_root, str_concat("/", str_concat(n, ".sprout"))))
+    Just(stdlib_root ++ "/" ++ n ++ ".sprout")
   else Nothing
   where n = source.module_name_str(name)
 

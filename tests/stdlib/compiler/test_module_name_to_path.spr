@@ -1,0 +1,21 @@
+module main
+
+import stdlib.test (TestCase, check_eq, run_suite)
+import stdlib.compiler.module_loader as module_loader
+import stdlib.compiler.source as source
+
+# `module_name_to_path`'s three cases: a `stdlib.*` name, a bare name (both under
+# the stdlib root) and a dotted non-stdlib name, which it leaves to the package roots.
+
+fn path_of(name: String) -> Maybe String =
+  module_loader.module_name_to_path(source.ModuleName(name), "/proj/stdlib")
+
+fn main() -> Unit !{IO} =
+  run_suite("module_name_to_path", [
+    check_eq("a stdlib name maps its dots to directories",
+             path_of("stdlib.compiler.ast"), Just("/proj/stdlib/compiler/ast.sprout")),
+    check_eq("a bare name sits at the stdlib root",
+             path_of("string"), Just("/proj/stdlib/string.sprout")),
+    check_eq("a dotted non-stdlib name is not the stdlib's",
+             path_of("postgres.wire"), Nothing)
+  ])

@@ -1891,9 +1891,7 @@ fn mark_declared_types(names: List String, env: Dict types.Scheme) -> Dict types
 
 # True when the named type constructor was declared linear (see mark_type_multiplicity).
 fn type_name_is_linear(name: String, env: Dict types.Scheme) -> Bool =
-  match dict_get("@linear:" ++ name, env) with
-  | Just _ -> true
-  | Nothing -> false
+  dict_member("@linear:" ++ name, env)
 
 fn fn_declared_arity(name: String, env: Dict types.Scheme) -> Maybe Int =
   match arity_marker_for(name, env) with
@@ -2671,12 +2669,10 @@ fn class_var_dispatch_type(
 # Like first_concrete_typed_arg_str_excluding, but returns the arg itself (used
 # as the W4 fallback so head_str and TypeExpr derive from the same TypedExpr).
 fn first_concrete_typed_arg(typed_args: List typed_ast.TypedExpr, subst: Dict types.Type) -> Maybe typed_ast.TypedExpr =
-  find(has_concrete_head(subst, _), typed_args)
+  find(\a -> concrete_head_not_excluded(subst, Nil, a) != Nothing, typed_args)
 
-fn has_concrete_head(subst: Dict types.Type, a: typed_ast.TypedExpr) -> Bool =
-  match concrete_type_str(unifier.apply_subst(subst, typed_ast.typed_expr_type(a))) with
-  | Nothing -> false
-  | Just _ -> true
+fn arg_type_under(subst: Dict types.Type, a: typed_ast.TypedExpr) -> types.Type =
+  unifier.apply_subst(subst, typed_ast.typed_expr_type(a))
 
 # Head of the first arg with a concrete constructor head (TConst). Function-typed
 # and type-variable-headed args cannot host an instance, so they are skipped; so
@@ -2691,9 +2687,8 @@ fn first_concrete_typed_arg_str_excluding(
 
 fn concrete_head_not_excluded(subst: Dict types.Type, excluded: List String,
                               a: typed_ast.TypedExpr) -> Maybe String =
-  match concrete_type_str(unifier.apply_subst(subst, typed_ast.typed_expr_type(a))) with
-  | Nothing -> Nothing
-  | Just s -> if list_member(s, excluded) then Nothing else Just(s)
+  let Just s = concrete_type_str(arg_type_under(subst, a)) else Nothing
+  in if list_member(s, excluded) then Nothing else Just(s)
 
 # Convert a concrete types.Type to an ast.TypeExpr, every type variable written `_`.
 # This is what a SCAN records — head-directed, first-concrete-argument, return-type —
@@ -2749,9 +2744,8 @@ fn first_concrete_arg_typeexpr_or_name_excluding(
 
 fn concrete_typeexpr_not_excluded(subst: Dict types.Type, excluded: List String,
                                   a: typed_ast.TypedExpr) -> Maybe ast.TypeExpr =
-  match concrete_typeexpr(unifier.apply_subst(subst, typed_ast.typed_expr_type(a))) with
-  | Nothing -> Nothing
-  | Just te -> if list_member(te_outermost_name(te), excluded) then Nothing else Just(te)
+  let Just te = concrete_typeexpr(arg_type_under(subst, a)) else Nothing
+  in if list_member(te_outermost_name(te), excluded) then Nothing else Just(te)
 
 # Like first_concrete_arg_typeexpr_or_name_excluding, but substitutes programmer type-variable
 # names recovered from @fwd markers when the type contains TVars.  This is needed when
@@ -3313,18 +3307,13 @@ fn compound_head_tdict(
       [_ | _] = toks else Nothing
       te = rebuild_head(want, list_map(token_typeexpr(_, var_te), toks))
   in
-    if env_has(compound_fwd_key(class_name, te), env) || env_has("@inst:" ++ class_name ++ ":" ++ want, env)
+    if dict_member(compound_fwd_key(class_name, te), env) || dict_member("@inst:" ++ class_name ++ ":" ++ want, env)
        || te_has_hole(te)
     then Just(compound_tdict(class_name, te, pos))
     else Nothing
   where
     toks = arg_scan_arg_tokens(head_token)
     var_te = call_var_typeexpr(_, callee, prog_to_fresh, subst, env)
-
-fn env_has(key: String, env: Dict types.Scheme) -> Bool =
-  match dict_get(key, env) with
-  | Just _ -> true
-  | Nothing -> false
 
 fn compound_tdict(class_name: String, te: ast.TypeExpr, pos: source.SourcePos) -> typed_ast.TypedExpr =
   typed_ast.TDict(ast.TypeConstraint(class_name, Cons(te, Nil)),
@@ -5146,7 +5135,7 @@ fn no_propagate_error(operand_ty: types.Type, env: Dict types.Scheme) -> Maybe S
   | types.TApp _ _ ->
       match concrete_type_str(operand_ty) with
       | Just head ->
-          if types.is_skolem_name(head) || env_has(propagate_instance_key(head), env) then Nothing
+          if types.is_skolem_name(head) || dict_member(propagate_instance_key(head), env) then Nothing
           else Just(no_propagate_msg(operand_ty))
       | Nothing -> Nothing
   | types.TConst _ -> Just(no_propagate_msg(operand_ty))
@@ -5225,8 +5214,8 @@ fn ready_try_fusion(fusions: unifier.TryFusions, operand_ty: types.Type) ->
   let Just head = concrete_type_str(operand_ty) else Nothing
       Just fusion = dict_get(head, fusions.by_head) else Nothing
       Just decl = fusions.decl else Nothing
-  in if env_has(propagate_instance_key(head), decl.scope)
-        && all(\n -> env_has(n, decl.scope) && ! set_member (n, fusions.pending), set_to_list(fusion.calls))
+  in if dict_member(propagate_instance_key(head), decl.scope)
+        && all(\n -> dict_member(n, decl.scope) && ! set_member (n, fusions.pending), set_to_list(fusion.calls))
      then Just((fusion, decl.scope)) else Nothing
 
 # A declaration's `try`s start here. A failure arm names what the instance sees,
@@ -7484,7 +7473,7 @@ fn validate_decl(decl: ast.Decl, declared: List String) -> Maybe String =
   | _ -> Nothing
 
 fn validate_all_decls(decls: List ast.Decl, declared: List String) -> Maybe(source.SourcePos, String) =
-  find_map(\decl -> map(\e -> (ast.decl_pos(decl), e), validate_decl(decl, declared)), decls)
+  ast.first_decl_error(validate_decl(_, declared), decls)
 
 # ---------------------------------------------------------------------------
 # Alias arity validation
@@ -7530,7 +7519,7 @@ fn count_text(n: Int, noun: String) -> String =
   if n == 1 then "1 " ++ noun else int_to_string(n) ++ " " ++ noun ++ "s"
 
 fn validate_alias_uses(decls: List ast.Decl, arities: Dict Int) -> Maybe(source.SourcePos, String) =
-  find_map(\decl -> map(\e -> (ast.decl_pos(decl), e), alias_uses_in_decl(decl, arities)), decls)
+  ast.first_decl_error(alias_uses_in_decl(_, arities), decls)
 
 fn alias_uses_in_decl(decl: ast.Decl, arities: Dict Int) -> Maybe String =
   match decl with
@@ -7785,13 +7774,12 @@ let main_signature_hint: String =
   "; write `fn main() -> Unit !{IO}`, or `fn main() -> Int !{IO}` to set the process exit code"
 
 fn validate_constraints_all(decls: List ast.Decl, classes: List String) -> Maybe(source.SourcePos, String) =
-  find_map(decl_constraint_error(classes, _), decls)
+  ast.first_decl_error(decl_constraint_error(classes, _), decls)
 
-fn decl_constraint_error(classes: List String, decl: ast.Decl) -> Maybe(source.SourcePos, String) =
+fn decl_constraint_error(classes: List String, decl: ast.Decl) -> Maybe String =
   match decl with
   | ast.FnDecl name params ret _ constraints _ _ ->
-      map(\e -> (ast.decl_pos(decl), e),
-          validate_fn_constraints(constraints, name, classes, fn_sig_tyvars(params, ret)))
+      validate_fn_constraints(constraints, name, classes, fn_sig_tyvars(params, ret))
   | _ -> Nothing
 
 # ---------------------------------------------------------------------------
@@ -7862,17 +7850,14 @@ fn check_main_signature(params: List ast.Param, ret: Maybe ast.TypeExpr, effects
 
 # Returns the first entrypoint diagnostic among the decls, or Nothing.
 fn validate_entrypoint(decls: List ast.Decl) -> Maybe(source.SourcePos, String) =
-  match decls with
-  | Nil -> Nothing
-  | Cons decl rest ->
-      match decl with
-      | ast.FnDecl name params ret effects _ _ _ ->
-          if is_main_decl_name(name) then
-            match check_main_signature(params, ret, effects) with
-            | Just e -> Just((ast.decl_pos(decl), e))
-            | Nothing -> validate_entrypoint(rest)
-          else validate_entrypoint(rest)
-      | _ -> validate_entrypoint(rest)
+  ast.first_decl_error(entrypoint_error, decls)
+
+fn entrypoint_error(decl: ast.Decl) -> Maybe String =
+  match decl with
+  | ast.FnDecl name params ret effects _ _ _ ->
+      if is_main_decl_name(name) then check_main_signature(params, ret, effects)
+      else Nothing
+  | _ -> Nothing
 
 # ---------------------------------------------------------------------------
 # Overlapping-instance validation pass
@@ -8463,9 +8448,7 @@ fn check_instance_head_kinds(decls: List ast.Decl, env: Dict types.Scheme,
 fn check_arity_decls(decls: List ast.Decl, depths: Dict (String, List Int),
                      supers: Dict (List String), arities: Dict Int,
                      env: Dict types.Scheme) -> Maybe(source.SourcePos, String) =
-  find_map(\decl ->
-    map(\msg -> (ast.decl_pos(decl), msg), decl_arity_error(decl, depths, supers, arities, env)),
-    decls)
+  ast.first_decl_error(decl_arity_error(_, depths, supers, arities, env), decls)
 
 
 # ---------------------------------------------------------------------------
@@ -8576,7 +8559,7 @@ fn impl_method_indistinct(m: ast.InstanceMethodImpl) -> Maybe String =
   | ast.InstanceMethodImpl _ _ _ _ constraints _ -> indistinct_constraints_error(constraints)
 
 fn check_indistinct_constraints(decls: List ast.Decl) -> Maybe(source.SourcePos, String) =
-  find_map(\decl -> map(\msg -> (ast.decl_pos(decl), msg), decl_indistinct_error(decl)), decls)
+  ast.first_decl_error(decl_indistinct_error, decls)
 
 
 fn check_overlapping_instances(decls: List ast.Decl, seen: Dict Bool) -> Maybe(source.SourcePos, String) =
@@ -8613,18 +8596,16 @@ fn check_overlapping_instances(decls: List ast.Decl, seen: Dict Bool) -> Maybe(s
 # is `Sup A`, not `Sup A B`. Do NOT generalize this to "all type args": that would
 # encode the wrong assumption. When multi-parameter classes land, revisit here.
 fn check_missing_superclass_instances(decls: List ast.Decl) -> Maybe(source.SourcePos, String) =
-  check_inst_supers_go(decls, build_class_super_map(decls, dict_empty()), build_inst_key_set(decls, dict_empty()))
+  ast.first_decl_error(missing_superclass_error(super_map, inst_set, _), decls)
+where
+  super_map = build_class_super_map(decls, dict_empty())
+  inst_set = build_inst_key_set(decls, dict_empty())
 
-fn check_inst_supers_go(decls: List ast.Decl, super_map: Dict (List String), inst_set: Dict Bool) -> Maybe(source.SourcePos, String) =
-  match decls with
-  | Nil -> Nothing
-  | Cons decl rest ->
-      match decl with
-      | ast.InstanceDecl constraint _ _ _ ->
-          match superclass_check_one(constraint, super_map, inst_set) with
-          | Just err -> Just((ast.decl_pos(decl), err))
-          | Nothing -> check_inst_supers_go(rest, super_map, inst_set)
-      | _ -> check_inst_supers_go(rest, super_map, inst_set)
+fn missing_superclass_error(super_map: Dict (List String), inst_set: Dict Bool,
+                            decl: ast.Decl) -> Maybe String =
+  match decl with
+  | ast.InstanceDecl constraint _ _ _ -> superclass_check_one(constraint, super_map, inst_set)
+  | _ -> Nothing
 
 fn superclass_check_one(constraint: ast.TypeConstraint, super_map: Dict (List String), inst_set: Dict Bool) -> Maybe String =
   match constraint with
@@ -9712,8 +9693,9 @@ fn plan_walk(items: List (Int, ast.Decl), seg: List (Int, ast.Decl), acc: List (
           | ast.FnDecl _ _ _ _ _ _ _ -> plan_walk(rest, Cons(item, seg), acc)
           | _ -> plan_walk(rest, Nil, Cons (Cons(i, Nil), flush_segment(seg, acc)))
 
+# The segment's groups land on `acc` reversed, in one pass.
 fn flush_segment(seg: List (Int, ast.Decl), acc: List (List Int)) -> List (List Int) =
-  list_append(list_reverse(partition_segment(list_reverse(seg))), acc)
+  list_fold(\ (rest, g) -> Cons(g, rest), acc, partition_segment(list_reverse(seg)))
 
 # The edge set is restricted to the SEGMENT, not the whole program, and that is
 # exact rather than an approximation: a reference to an earlier segment names a
@@ -11657,12 +11639,7 @@ fn named_advice(cls: String, rename: Dict String, applied: types.Type) -> (Strin
   in ("`" ++ shown ++ "`", cls ++ " (" ++ shown ++ ")")
 
 fn all_source_named(ivs: List String, rename: Dict String) -> Bool =
-  all(has_rename(rename, _), ivs)
-
-fn has_rename(rename: Dict String, iv: String) -> Bool =
-  match dict_get(iv, rename) with
-  | Nothing -> false
-  | Just _ -> true
+  all(dict_member(_, rename), ivs)
 
 # The first parameter-mentioned source variable whose dictionary is uncovered, with the class that
 # needs it. Reported separately from the unnamed case because a source name is what makes

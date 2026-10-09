@@ -49,6 +49,7 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
 - `Dict v` plus foundational helpers:
   - `dict_empty()`
   - `dict_get(key, dict) -> Maybe v`
+  - `dict_member(key, dict) -> Bool`
   - `dict_set(key, value, dict)`
   - `dict_remove(key, dict)`
   - `dict_keys(dict) -> Vec String`

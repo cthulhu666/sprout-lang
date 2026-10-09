@@ -350,6 +350,15 @@ let fixed_length_hand_written =
   "  | Cons a (Cons b Nil) -> a + b\n" ++
   "  | _ -> 0\n"
 
+# A pattern inside a `try` operand is still a pattern position, and is linted.
+let fixed_length_inside_try =
+  "fn f(xs: List Int) -> Maybe Int =\n" ++
+  "  do\n" ++
+  "    try (match xs with\n" ++
+  "           | Cons a (Cons b Nil) -> Just(a + b)\n" ++
+  "           | _ -> Nothing)\n" ++
+  "    Just(0)\n"
+
 let nested_fixed_length_in_head =
   "fn f(xs: List (List Int)) -> Int =\n" ++
   "  match xs with\n" ++
@@ -876,6 +885,7 @@ fn main() -> Unit !{IO} =
 
     assert_eq(state, "hand-written Cons a (Cons b Nil) fixed-length pattern: reported", count_list(lint_rules.lint_ast(fixed_length_hand_written)), 1)
     assert_eq(state, "hand-written fixed-length pattern: rule id", first_rule(lint_rules.lint_ast(fixed_length_hand_written)), "list-shape-pattern")
+    assert_eq(state, "fixed-length pattern inside a try operand: reported", count_by_rule(lint_rules.lint_ast(fixed_length_inside_try), "list-shape-pattern"), 1)
 
     assert_eq(state, "fixed-length pattern nested in a head position (outer chain stays var-tailed): one finding (the inner [a, b])", count_list(lint_rules.lint_ast(nested_fixed_length_in_head)), 1)
 

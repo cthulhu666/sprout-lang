@@ -40,6 +40,12 @@ fn main() -> Unit !{IO} =
     check_eq("dict_get hit", dict_get("alpha", d), Just(1)),
     check_eq("dict_get miss", dict_get("zzz", d), Nothing),
 
+    # dict_member: a key's presence, whatever its value
+    check_true("dict_member hit", dict_member("alpha", d)),
+    check_false("dict_member miss", dict_member("zzz", d)),
+    check_false("dict_member after remove", dict_member("beta", d2)),
+    check_true("dict_member of a false value", dict_member("k", {k: false})),
+
     # dict_set: overwrite an existing key replaces the value, keeps the count
     check_eq("dict_set overwrite", dict_set("alpha", 100, d), {alpha: 100, beta: 2, gamma: 3}),
 

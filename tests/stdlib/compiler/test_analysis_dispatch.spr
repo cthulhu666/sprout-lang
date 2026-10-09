@@ -1,0 +1,43 @@
+module main
+
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.compiler.analysis_service_driver as svc
+import stdlib.json as json
+
+# The service's request dispatch, run without a stdlib root so no op needs a
+# bundle: a source op gets its `module_source` first and its own fields after,
+# a semantic op then reports the missing root, and anything else falls through
+# to the session ops.
+
+fn reply(state: svc.StartupState, line: String) -> String !{IO} =
+  do
+    resp <- svc.dispatch_line(line, state)
+    match json.stringify(resp) with
+    | Ok text -> text
+    | Err _ -> "<unprintable>"
+
+fn main() -> Unit !{IO} =
+  do
+    t <- new_state()
+    state <- svc.build_startup_state("")
+    a <- reply(state, "{\"op\":\"declared_names_in_source\",\"module_source\":\"fn f() -> Int = 1\"}")
+    assert_eq(t, "a source op runs on the request's module_source", a,
+              "{\"ok\":true,\"value\":[\"f\"]}")
+    b <- reply(state, "{\"op\":\"declared_names_in_source\"}")
+    assert_eq(t, "a source op without module_source is refused", b,
+              "{\"ok\":false,\"error\":\"missing field: module_source\"}")
+    c <- reply(state, "{\"op\":\"type_of_in_source\",\"module_source\":\"x\"}")
+    assert_eq(t, "an op's own field is checked before the stdlib root", c,
+              "{\"ok\":false,\"error\":\"missing field: expr\"}")
+    d <- reply(state, "{\"op\":\"type_of_in_source\",\"module_source\":\"x\",\"expr\":\"1\"}")
+    assert_eq(t, "a semantic op needs a stdlib root", d,
+              "{\"ok\":false,\"error\":\"stdlib-root not configured for semantic ops\"}")
+    e <- reply(state, "{\"op\":\"diagnostics_in_source\",\"module_source\":\"x\"}")
+    assert_eq(t, "diagnostics without a stdlib root are empty, not an error", e,
+              "{\"ok\":true,\"value\":{\"messages\":[],\"lines\":[],\"columns\":[]}}")
+    f <- reply(state, "{\"op\":\"session_destroy\"}")
+    assert_eq(t, "a session op is not a source op", f,
+              "{\"ok\":false,\"error\":\"missing field: session_id\"}")
+    g <- reply(state, "{\"op\":\"nope\"}")
+    assert_eq(t, "an unknown op is named", g, "{\"ok\":false,\"error\":\"unknown op: nope\"}")
+    summary(t)

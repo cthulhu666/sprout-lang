@@ -330,13 +330,8 @@ fn instance_exists(
   head_arg: ast.TypeExpr,
   tables: Tables
 ) -> Bool =
-  dict_has(constraint_key_str(class_bare, type_args), tables_exists(tables))
-  || env_has_inst("@inst:" ++ class_bare ++ ":" ++ type_expr_head_name(head_arg), tables_env(tables))
-
-fn env_has_inst(key: String, env: Dict types.Scheme) -> Bool =
-  match dict_get(key, env) with
-  | Just _ -> true
-  | Nothing -> false
+  dict_member(constraint_key_str(class_bare, type_args), tables_exists(tables))
+  || dict_member("@inst:" ++ class_bare ++ ":" ++ type_expr_head_name(head_arg), tables_env(tables))
 
 # Recurse into a matched instance's context constraints (substituted at the
 # concrete type args).  A context-free instance has no entry → Nothing.
@@ -429,7 +424,7 @@ fn check_context_constraint(
 fn context_head_bound(ic: ast.TypeConstraint, subs: Dict ast.TypeExpr) -> Bool =
   let ast.TypeConstraint _ type_args = ic
       [ast.TypeName v | _] = type_args else false
-  in dict_has(v, subs)
+  in dict_member(v, subs)
 
 # Only a variable the declaration's signature names is checked: one the program
 # wrote, or an unannotated parameter's placeholder (`_unann@<fn>/<param>`, named by
@@ -537,11 +532,6 @@ fn te_display_atom(te: ast.TypeExpr) -> String =
   | ast.TypeArrow _ _ _ _ -> "(" ++ te_display(te) ++ ")"
   | _ -> te_display(te)
 
-fn dict_has(key: String, d: Dict v) -> Bool =
-  match dict_get(key, d) with
-  | Just _ -> true
-  | Nothing -> false
-
 # ---------------------------------------------------------------------------
 # Evidence production
 # ---------------------------------------------------------------------------
@@ -606,9 +596,9 @@ fn produce_concrete_evidence(
   fwd_keys: Forwarded,
   tables: Tables
 ) -> typed_ast.Evidence =
-  if dict_has(constraint_key_str(class_bare, type_args), tables_exists(tables)) then
+  if dict_member(constraint_key_str(class_bare, type_args), tables_exists(tables)) then
     produce_instance_evidence(eff_class, constraint_key_str(class_bare, type_args), type_args, fwd_keys, tables)
-  else if env_has_inst("@inst:" ++ class_bare ++ ":" ++ type_expr_head_name(head_arg), tables_env(tables)) then
+  else if dict_member("@inst:" ++ class_bare ++ ":" ++ type_expr_head_name(head_arg), tables_env(tables)) then
     typed_ast.EvUnresolved
   else
     typed_ast.EvMissing(ast.TypeConstraint(eff_class, type_args))

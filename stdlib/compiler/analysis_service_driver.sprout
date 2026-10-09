@@ -620,7 +620,7 @@ let runtime_objs_dir: String = "/tmp/sprout_runtime_daemon_objs"
 # ---------------------------------------------------------------------------
 # StartupState — pre-compiled runtime objects dir, stdlib_root, and persistent module cache
 
-type StartupState = StartupState String (Ref String) bundler.LoadEnv(Ref (Dict SessionState)) (Ref Int)
+export type StartupState = StartupState String (Ref String) bundler.LoadEnv(Ref (Dict SessionState)) (Ref Int)
   # stdlib_root, runtime_objs_dir ("" = not yet compiled), cache, sessions, next_session_id
 
 fn state_stdlib_root(state: StartupState) -> String =
@@ -646,7 +646,7 @@ fn state_next_id(state: StartupState) -> Ref Int =
 # Create the persistent service state. Runtime object compilation is deferred to
 # first eval so the service starts (and answers diagnostics/type-of/hover) even
 # when clang is not on PATH.
-fn build_startup_state(stdlib_root: String) -> StartupState !{IO} =
+export fn build_startup_state(stdlib_root: String) -> StartupState !{IO} =
   do
     runtime_obj_ref <- ref_new("")
     load_env <- bundler.new_load_env()
@@ -908,48 +908,58 @@ fn missing_stdlib_root(state: StartupState) -> Maybe json.Json =
   then Just(error_response("stdlib-root not configured for semantic ops"))
   else Nothing
 
-let source_ops: List String =
-  ["check_source", "diagnostics_in_source", "declared_names_in_source",
-   "exported_names_in_source", "symbol_inventory_in_source", "symbol_locations_in_source",
-   "type_of_in_source", "instances_in_source", "eval_expr_in_source"]
+# The handler for an op that reads `module_source`, given that source; Nothing for
+# any other op. One chain, so an op cannot be listed here and handled nowhere.
+fn source_op(op: String, req: json.Json,
+             state: StartupState) -> Maybe (String -> json.Json !{IO}) =
+  if op == "check_source" then Just(checked_source(state, _))
+  else if op == "diagnostics_in_source" then Just(source_diagnostics(state, _))
+  else if op == "declared_names_in_source" then Just(op_declared_names_in_source)
+  else if op == "exported_names_in_source" then Just(op_exported_names_in_source)
+  else if op == "symbol_inventory_in_source" then Just(op_symbol_inventory_in_source)
+  else if op == "symbol_locations_in_source" then Just(op_symbol_locations_in_source)
+  else if op == "type_of_in_source" then Just(source_type_of(req, state, _))
+  else if op == "instances_in_source" then Just(source_instances(req, state, _))
+  else if op == "eval_expr_in_source" then Just(source_eval(req, state, _))
+  else Nothing
 
-# Ops that read `module_source` from the request.
-fn dispatch_source_op(op: String, src: String, req: json.Json, state: StartupState)
-    -> json.Json !{IO} =
-  if op == "check_source" then
-    do
-      let Nothing = missing_stdlib_root(state) else Just resp -> resp
-      op_check_source(src, state)
-  else if op == "diagnostics_in_source" then
-    if state_stdlib_root(state) == "" then empty_diags_response()
-    else op_diagnostics_in_source(src, state)
-  else if op == "declared_names_in_source" then op_declared_names_in_source(src)
-  else if op == "exported_names_in_source" then op_exported_names_in_source(src)
-  else if op == "symbol_inventory_in_source" then op_symbol_inventory_in_source(src)
-  else if op == "symbol_locations_in_source" then op_symbol_locations_in_source(src)
-  else if op == "type_of_in_source" then
-    do
-      let Ok expr = require_string_field(req, "expr") else Err msg -> error_response(msg)
-      let Nothing = missing_stdlib_root(state) else Just resp -> resp
-      op_type_of_in_source(src, expr, state)
-  else if op == "instances_in_source" then
-    do
-      let Ok query = require_string_field(req, "query") else Err msg -> error_response(msg)
-      let Nothing = missing_stdlib_root(state) else Just resp -> resp
-      op_instances_in_source(src, query, state)
-  else if op == "eval_expr_in_source" then
-    do
-      let Ok expr = require_string_field(req, "expr") else Err msg -> error_response(msg)
-      let Nothing = missing_stdlib_root(state) else Just resp -> resp
-      op_eval_expr_in_source(src, expr, state)
-  else error_response(string.concat("unknown op: ", op))
+fn checked_source(state: StartupState, src: String) -> json.Json !{IO} =
+  do
+    let Nothing = missing_stdlib_root(state) else Just resp -> resp
+    op_check_source(src, state)
+
+fn source_diagnostics(state: StartupState, src: String) -> json.Json !{IO} =
+  if state_stdlib_root(state) == "" then empty_diags_response()
+  else op_diagnostics_in_source(src, state)
+
+fn source_type_of(req: json.Json, state: StartupState, src: String) -> json.Json !{IO} =
+  do
+    let Ok expr = require_string_field(req, "expr") else Err msg -> error_response(msg)
+    let Nothing = missing_stdlib_root(state) else Just resp -> resp
+    op_type_of_in_source(src, expr, state)
+
+fn source_instances(req: json.Json, state: StartupState, src: String) -> json.Json !{IO} =
+  do
+    let Ok query = require_string_field(req, "query") else Err msg -> error_response(msg)
+    let Nothing = missing_stdlib_root(state) else Just resp -> resp
+    op_instances_in_source(src, query, state)
+
+fn source_eval(req: json.Json, state: StartupState, src: String) -> json.Json !{IO} =
+  do
+    let Ok expr = require_string_field(req, "expr") else Err msg -> error_response(msg)
+    let Nothing = missing_stdlib_root(state) else Just resp -> resp
+    op_eval_expr_in_source(src, expr, state)
 
 fn dispatch_op(op: String, req: json.Json, state: StartupState) -> json.Json !{IO} =
-  if list_member(op, source_ops) then
-    do
-      let Ok src = require_string_field(req, "module_source") else Err msg -> error_response(msg)
-      dispatch_source_op(op, src, req, state)
-  else if op == "complete_in_state" then not_implemented(op)
+  match source_op(op, req, state) with
+  | Just handle ->
+      do
+        let Ok src = require_string_field(req, "module_source") else Err msg -> error_response(msg)
+        handle(src)
+  | Nothing -> dispatch_session_op(op, req, state)
+
+fn dispatch_session_op(op: String, req: json.Json, state: StartupState) -> json.Json !{IO} =
+  if op == "complete_in_state" then not_implemented(op)
   else if op == "session_create" then op_session_create(state)
   else if op == "session_update" then op_session_update(req, state)
   else if op == "session_eval" then op_session_eval(req, state)
@@ -966,7 +976,7 @@ fn dispatch(req: json.Json, state: StartupState) -> json.Json !{IO} =
       | Nothing -> error_response("'op' must be a string")
       | Just op -> dispatch_op(op, req, state)
 
-fn dispatch_line(line: String, state: StartupState) -> json.Json !{IO} =
+export fn dispatch_line(line: String, state: StartupState) -> json.Json !{IO} =
   match json.parse(line) with
   | Err err -> error_response("invalid JSON: " ++ json.json_error_message(err))
   | Ok req -> dispatch(req, state)

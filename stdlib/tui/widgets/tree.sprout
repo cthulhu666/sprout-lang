@@ -116,9 +116,7 @@ fn tr_plain(t: Tr m, k: event.Key) -> Reply m =
 fn key_of(path: List String) -> String = string.join("\n", path)
 
 fn is_open(t: Tr m, path: List String) -> Bool =
-  match dict_get(key_of(path), t.open) with
-  | Just _ -> true
-  | Nothing -> false
+  dict_member(key_of(path), t.open)
 
 # Built reversed and turned once, so appending a row stays O(1).
 fn rows_of(t: Tr m) -> List Row =

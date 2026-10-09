@@ -662,12 +662,7 @@ fn expand_one_deriving_decl(d: ast.Decl) -> List ast.Decl =
 # Closes the F1 follow-up from the v1 design doc.
 
 export fn validate_deriving_decls(decls: List ast.Decl) -> Maybe(source.SourcePos, String) =
-  match decls with
-  | Nil -> Nothing
-  | Cons d rest ->
-      match validate_one_deriving_decl(d) with
-      | Just err -> Just((ast.decl_pos(d), err))
-      | Nothing -> validate_deriving_decls(rest)
+  ast.first_decl_error(validate_one_deriving_decl, decls)
 
 fn validate_one_deriving_decl(d: ast.Decl) -> Maybe String =
   match d with
