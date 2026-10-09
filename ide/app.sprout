@@ -143,8 +143,6 @@ fn bar_text(m: Msg) -> Maybe String =
   | Noted t -> Just(t)
   | _ -> Nothing
 
-fn bar_on_event(b: Bar, ev: event.Event) -> (Bar, Says, Asks) = (b, Nil, Nil)
-
 fn bar_handler(b: Bar, d: widget.Delivery Msg) -> Maybe (Bar, Says, Asks) =
   match d with
   | widget.ToMsg msg -> refilled(b, bar_text(msg))
@@ -162,7 +160,7 @@ fn bar_measure(b: Bar, avail: g.Size) -> widget.Measured =
 
 fn bar() -> widget.Widget Msg =
   widget.Widget(widget.View(state = Bar(text = "untitled"),
-                            on_event = bar_on_event,
+                            on_event = widget.no_event,
                             route = widget.route_when(bar_id, bar_handler, _,
                                                       _, _),
                             render = bar_render, measure = bar_measure))

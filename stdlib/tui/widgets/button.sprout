@@ -20,11 +20,6 @@ import stdlib.tui.widgets.paint as paint
 type Btn m = (id: widget.WidgetId, label: String, on_press: m,
               look: focus.FocusStyle, has_focus: Bool)
 
-# Everything a button reacts to arrives addressed, so the broadcast is idle.
-fn btn_on_event(b: Btn m,
-                ev: event.Event) -> (Btn m, List m, List(widget.Cmd m)) =
-  (b, Nil, Nil)
-
 fn btn_handler(b: Btn m,
                d: widget.Delivery m) -> Maybe (Btn m, List m, List(widget.Cmd m)) =
   match d with
@@ -65,7 +60,8 @@ fn btn_render(b: Btn m, r: geometry.Region, s: scr.Screen) -> Unit !{IO} =
              if b.has_focus then b.look.focused else b.look.normal)
 
 fn btn_widget(b: Btn m) -> widget.Widget m =
-  widget.Widget(widget.View(state = b, on_event = btn_on_event,
+  # Everything a button reacts to arrives addressed, so the broadcast is idle.
+  widget.Widget(widget.View(state = b, on_event = widget.no_event,
                             route = widget.route_when(b.id, btn_handler, _, _, _),
                             render = btn_render, measure = btn_measure))
 

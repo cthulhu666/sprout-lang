@@ -4,4 +4,4 @@ module stdlib.collections
 # lives in the implicit prelude.
 
 export fn vec_singleton(value: a) -> Vec a =
-  vec_append(value, vec_empty())
+  prelude.vec_singleton(value)

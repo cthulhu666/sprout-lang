@@ -123,6 +123,11 @@ export type View s m (..) = (
   measure: s -> geometry.Size -> Measured
 )
 
+# A widget that ignores broadcast events — every leaf whose input arrives
+# addressed. `no_route`'s twin for the `on_event` field.
+export fn no_event(st: s, ev: event.Event) -> (s, List m, List (Cmd m)) =
+  (st, Nil, Nil)
+
 # A widget nothing is ever addressed to — every leaf until it wants a command
 # of its own. Declines everything, so an undeliverable answer reaches the
 # application instead of disappearing here.
@@ -189,24 +194,20 @@ fn repack(v: View s m,
 # order — a widget's reply depends on the state the previous event left.
 export fn feed(w: Widget m,
                evs: List event.Event) -> (Widget m, List m, List (Cmd m)) =
-  feed_go(w, evs, Nil, Nil)
+  feed_go(w, evs, list_builder_empty, list_builder_empty)
 
-fn feed_go(w: Widget m, evs: List event.Event, msgs: List m,
-           cmds: List (Cmd m)) -> (Widget m, List m, List (Cmd m)) =
+fn feed_go(w: Widget m, evs: List event.Event, msgs: ListBuilder m,
+           cmds: ListBuilder (Cmd m)) -> (Widget m, List m, List (Cmd m)) =
   match evs with
-  | Nil -> (w, list_reverse(msgs), list_reverse(cmds))
+  | Nil -> (w, list_builder_build(msgs), list_builder_build(cmds))
   | [e | rest] -> feed_step(on_event(w, e), rest, msgs, cmds)
 
 fn feed_step(r: (Widget m, List m, List (Cmd m)), rest: List event.Event,
-             msgs: List m,
-             cmds: List (Cmd m)) -> (Widget m, List m, List (Cmd m)) =
+             msgs: ListBuilder m,
+             cmds: ListBuilder (Cmd m)) -> (Widget m, List m, List (Cmd m)) =
   match r with
-  | (w2, ms, cs) -> feed_go(w2, rest, push_all(ms, msgs), push_all(cs, cmds))
-
-# Accumulate reversed and reverse once at the end, so a long batch is linear
-# rather than quadratic in `++`.
-fn push_all(xs: List a, acc: List a) -> List a =
-  list_fold(\ (seen, x) -> Cons(x, seen), acc, xs)
+  | (w2, ms, cs) ->
+      feed_go(w2, rest, list_builder_extend(ms, msgs), list_builder_extend(cs, cmds))
 
 # Hand one delivery to ONE widget, named. `Nothing` means nobody was home; a
 # container forwards down and answers with whatever its children said, which is

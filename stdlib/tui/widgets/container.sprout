@@ -70,8 +70,6 @@ fn grow_across(a: Arrange, m: widget.Measured) -> widget.Grow =
   | Across -> m.rows
   | Down -> m.cols
 
-fn imax(a: Int, b: Int) -> Int = if a > b then a else b
-
 # ── row and column ──────────────────────────────────────────────────────────
 
 type Box m = (arrange: Arrange, slots: List (Slot m))
@@ -171,12 +169,12 @@ fn ask_alongs(a: Arrange, slots: List (Slot m),
 
 fn ask_along(a: Arrange, s: Slot m, m: widget.Measured) -> Int =
   match s with
-  | SlotCells n _ -> imax(0, n)
+  | SlotCells n _ -> geometry.imax(0, n)
   | SlotFraction _ _ -> along(a, m.size)
   | SlotFit _ -> along(a, m.size)
 
 fn max_across(a: Arrange, ms: List widget.Measured) -> Int =
-  list_fold(\ (acc, m) -> imax(acc, across(a, m.size)), 0, ms)
+  list_fold(\ (acc, m) -> geometry.imax(acc, across(a, m.size)), 0, ms)
 
 fn any_greedy(pick: widget.Measured -> widget.Grow,
               ms: List widget.Measured) -> widget.Grow =
@@ -252,13 +250,7 @@ fn grid_measure(g: Grid m, avail: geometry.Size) -> widget.Measured =
                   cols = template_grow(g.cols), rows = template_grow(g.rows))
 
 fn template_sum(ds: List layout.Dimension) -> Int =
-  list_fold(\ (acc, d) -> acc + template_ask(d), 0, ds)
-
-fn template_ask(d: layout.Dimension) -> Int =
-  match d with
-  | layout.Cells n -> imax(0, n)
-  | layout.Auto n -> imax(0, n)
-  | layout.Fraction _ -> 0
+  list_fold(\ (acc, d) -> acc + layout.ask_of(d), 0, ds)
 
 fn template_grow(ds: List layout.Dimension) -> widget.Grow =
   list_fold(\ (acc, d) -> join_grow(acc, dim_grow(d)), widget.Fixed, ds)

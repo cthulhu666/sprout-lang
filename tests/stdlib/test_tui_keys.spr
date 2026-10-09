@@ -102,6 +102,9 @@ fn main() -> Unit !{IO} =
              key_mod(ev.KLeft, ev.Mods(true, false, true))),
     check_eq("all three modifiers at once", events(e("[1;8C")),
              key_mod(ev.KRight, ev.Mods(true, true, true))),
+    # A parameter that is not a number reads as 0, and 0 is no modifier — not
+    # shift, which `1 + bitfield` would make of a 1.
+    check_eq("a malformed modifier reads as none", events(e("[1;=C")), key(ev.KRight)),
 
     # --- CSI-tilde: the numbered keys ---
     check_eq("insert", events(e("[2~")), key(ev.KInsert)),
