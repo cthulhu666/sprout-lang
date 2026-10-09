@@ -552,6 +552,11 @@ export fn decl_pos(d: Decl) -> source.SourcePos =
   | AliasDecl _ _ _ p -> p
   | WrapDecl _ _ _ _ p -> p
 
+# The first declaration `check` rejects, at that declaration's position.
+export fn first_decl_error(check: Decl -> Maybe String,
+                           decls: List Decl) -> Maybe(source.SourcePos, String) =
+  find_map(\d -> map(\e -> (decl_pos(d), e), check(d)), decls)
+
 # --- Name scope: how an importer spells a declared value ---
 #
 # THE SINGLE AUTHORITY for this question. Sprout typechecks through two front

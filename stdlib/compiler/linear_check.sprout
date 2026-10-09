@@ -119,16 +119,12 @@ fn head_type_name(t: types.Type) -> String =
   | _ -> types.type_to_string(t)
 
 fn type_is_linear(t: types.Type, env: Dict types.Scheme) -> Bool =
-  match dict_get("@linear:" ++ head_type_name(t), env) with
-  | Just _ -> true
-  | Nothing -> false
+  dict_member("@linear:" ++ head_type_name(t), env)
 
 # True when the program declares any linear type (a cheap gate that lets a
 # linear-free compilation skip the whole pass — set alongside @linear:<name>).
 export fn program_has_linear(env: Dict types.Scheme) -> Bool =
-  match dict_get("@any_linear", env) with
-  | Just _ -> true
-  | Nothing -> false
+  dict_member("@any_linear", env)
 
 # --- resolving the types of pattern-bound variables (for linear tracking) ---
 #
@@ -631,10 +627,7 @@ fn scope_is_linear(name: String, sc: LinScope) -> Bool =
 # The lists model an environment, so every introduction must shadow, not append.
 # Regression: tests/conformance/type_error/borrow_shadowed_linear_binder.
 fn scope_shadow(names: List String, sc: LinScope) -> LinScope =
-  LinScope(without_names(names, scope_owned(sc)), without_names(names, scope_borrowed(sc)))
-
-fn without_names(names: List String, xs: List String) -> List String =
-  list_filter(\ (y: String) -> ! list_member (y, names), xs)
+  LinScope(list_diff(scope_owned(sc), names), list_diff(scope_borrowed(sc), names))
 
 fn scope_add_owned(names: List String, sc: LinScope) -> LinScope =
   scope_add_owned_after(names, scope_shadow(names, sc))
@@ -1316,9 +1309,7 @@ fn first_linear_in_args(tname: String, idx: Int, args: List types.Type,
 # the marker and every phantom position is descended again. That is what the
 # phantom cases in tests/stdlib/test_linear_binders.spr catch.
 fn param_is_phantom(tname: String, idx: Int, env: Dict types.Scheme) -> Bool =
-  match dict_get("@phantom:" ++ tname ++ ":" ++ int_to_string(idx), env) with
-  | Just _ -> true
-  | Nothing -> false
+  dict_member("@phantom:" ++ tname ++ ":" ++ int_to_string(idx), env)
 
 fn first_linear_in_list(ts: List types.Type, env: Dict types.Scheme,
                         seen: Dict Bool) -> (Maybe types.Type, Dict Bool) =

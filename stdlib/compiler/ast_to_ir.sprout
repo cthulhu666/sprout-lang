@@ -214,15 +214,9 @@ fn filter_capturable(frees: List String, params: List String,
   match frees with
   | Nil -> Nil
   | Cons v rest ->
-      if param_known(v, params) || dict_has(v, captures)
+      if param_known(v, params) || dict_member(v, captures)
       then Cons(v, filter_capturable(rest, params, captures))
       else filter_capturable(rest, params, captures)
-
-# dict_has: true if key present in dict. O(log n).
-fn dict_has(k: String, d: Dict a) -> Bool =
-  match dict_get(k, d) with
-  | Just _ -> true
-  | Nothing -> false
 
 # Look up a free var's current SSA name:
 # - If in captures dict (was a capture in an outer lambda), use that SSA name.
@@ -3381,10 +3375,10 @@ fn arms_have_ctor_anchor(arms: List typed_ast.TypedMatchBranch) -> Bool =
 # a direct `@env_get_unboxed` call to the C runtime.
 fn callee_name_shadowed(name: String, params: List String, captures: Dict String,
                         let_names: Set, ctors: Dict sprout_ir.CtorInfo) -> Bool =
-  dict_has(name, captures)
+  dict_member(name, captures)
   || param_known(name, params)
   || set_member(name, let_names)
-  || dict_has(name, ctors)
+  || dict_member(name, ctors)
 
 # Returns Just (unboxed_fn_name, call_args) when the peephole applies.
 # Shared Tier-2 SHAPE core (shadow-free): `name` is a non-extern callee whose
@@ -3414,7 +3408,7 @@ fn unboxed_maybe_match_target(scrut: typed_ast.TypedExpr,
     | Just ufn ->
         # Tier-1: direct Maybe-returning C extern with a runtime `_unboxed`.
         if is_maybe_type(call_ty) && all_arms_simple_maybe(arms)
-           && dict_has("Just", ctors) && dict_has("Nothing", ctors)
+           && dict_member("Just", ctors) && dict_member("Nothing", ctors)
            && ! callee_name_shadowed (name, params, captures, let_names, ctors)
         then Just((ufn, args))
         else Nothing
@@ -7785,7 +7779,7 @@ fn collect_wc_fields(fields: List typed_ast.TypedRecordField, top_level: Set,
 # A ctor name usable as a value here iff it is in `ctors` and NOT shadowed by a
 # param or capture (which would make the TVar/TCall a local reference).
 fn name_is_local(name: String, params: List String, captures: Dict String) -> Bool =
-  param_known(name, params) || dict_has(name, captures)
+  param_known(name, params) || dict_member(name, captures)
 
 # The tag of ctor `name` when it has exactly `want_arity` fields and is not shadowed.
 fn ctor_tag_if(name: String, want_arity: Int, params: List String, captures: Dict String,

@@ -747,6 +747,12 @@ export fn dict_get(key: String, dict: Dict v) -> Maybe v =
   match dict with
   | Dict raw -> map_get(raw, key)
 
+# O(log n): whether `key` is bound, whatever its value.
+export fn dict_member(key: String, dict: Dict v) -> Bool =
+  match dict_get(key, dict) with
+  | Just _ -> true
+  | Nothing -> false
+
 # O(log n): AVL insert; path-copies only the nodes on the root-to-key path.
 export fn dict_set(key: String, value: v, dict: Dict v) -> Dict v =
   match dict with

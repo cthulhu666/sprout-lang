@@ -59,9 +59,7 @@ fn head_same(lname: String, rname: String, r: Ren) -> Bool =
       | Nothing -> lname == rname
 
 fn is_bound_left(name: String, r: Ren) -> Bool =
-  match dict_get(name, r.left) with
-  | Just _ -> true
-  | Nothing -> false
+  dict_member(name, r.left)
 
 # A qualified name arrives as ONE `VarExpr` holding the whole dotted string
 # (`lexer.scan_ident_dotted`), and `infer.infer_var_or_field` splits it on the

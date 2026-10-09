@@ -1250,14 +1250,9 @@ fn import_name_binds(name: String, symbols: ModuleSymbols) -> Bool =
   | [_ | _] -> true
 
 fn module_declares_name(name: String, symbols: ModuleSymbols) -> Bool =
-  has_key(name, sym_value_locals(symbols))
-    || has_key(name, sym_type_locals(symbols))
-    || has_key(name, sym_class_locals(symbols))
-
-fn has_key(name: String, d: Dict String) -> Bool =
-  match dict_get(name, d) with
-  | Nothing -> false
-  | Just _ -> true
+  dict_member(name, sym_value_locals(symbols))
+    || dict_member(name, sym_type_locals(symbols))
+    || dict_member(name, sym_class_locals(symbols))
 
 fn first_unbound_name(names: List String, symbols: ModuleSymbols) -> Maybe String =
   find(\name -> ! import_name_binds (name, symbols), names)
@@ -2052,9 +2047,7 @@ fn type_name_in_scope(name: String, declared: Dict String) -> Bool =
   if type_name_starts_lower(name) then true
   else if str_list_member(name, undeclared_type_names) then true
   else
-    match dict_get(name, declared) with
-    | Just _ -> true
-    | Nothing -> false
+    dict_member(name, declared)
 
 fn unresolved_in_type(t: ast.TypeExpr, declared: Dict String) -> Maybe String =
   match t with
@@ -2286,12 +2279,10 @@ fn unresolved_type_message(name: String, decl_name: String, declared: Dict Strin
                ++ "`: nothing in scope declares that name"
 
 fn find_unresolved_type(decls: List ast.Decl, declared: Dict String) -> Maybe(source.SourcePos, String) =
-  match decls with
-  | Nil -> Nothing
-  | Cons d rest ->
-      match unresolved_in_decl(d, declared) with
-      | Just name -> Just((ast.decl_pos(d), unresolved_type_message(name, decl_display_name(d), declared)))
-      | Nothing -> find_unresolved_type(rest, declared)
+  ast.first_decl_error(unresolved_type_error(declared, _), decls)
+
+fn unresolved_type_error(declared: Dict String, d: ast.Decl) -> Maybe String =
+  map(unresolved_type_message(_, decl_display_name(d), declared), unresolved_in_decl(d, declared))
 
 # The declared set is now the whole story. It used to be widened with an
 # "ambient" list — the prelude's exported names, re-read from source, because a
@@ -2343,17 +2334,17 @@ fn one_ctor_named_apart(decl: ast.Decl) -> Maybe (String, List String, String, s
 fn alias_names_type(ctx: ResolveCtx, vocab: TypeVocab, name: String) -> Bool =
   match qualified_type_lookup(ctx, name) with
   | Nothing -> false
-  | Just canonical -> has_key(canonical, vocab.type_canonicals)
+  | Just canonical -> dict_member(canonical, vocab.type_canonicals)
 
 # A bare name is tried in qualify_type_name's order, so a class the module declares
 # or imports hides a prelude or builtin type of its name.
 fn names_type_in_scope(ctx: ResolveCtx, vocab: TypeVocab, name: String) -> Bool =
   if str_find(name, ".") != -1 then alias_names_type(ctx, vocab, name)
-  else if has_key(name, ctx_type_locals(ctx)) then true
-  else if has_key(name, ctx_class_locals(ctx)) then false
-  else if has_key(name, ctx_unqual_types(ctx)) then true
-  else if has_key(name, ctx_unqual_classes(ctx)) then false
-  else str_list_member(name, undeclared_type_names) || has_key(name, vocab.prelude_types)
+  else if dict_member(name, ctx_type_locals(ctx)) then true
+  else if dict_member(name, ctx_class_locals(ctx)) then false
+  else if dict_member(name, ctx_unqual_types(ctx)) then true
+  else if dict_member(name, ctx_unqual_classes(ctx)) then false
+  else str_list_member(name, undeclared_type_names) || dict_member(name, vocab.prelude_types)
 
 # `shown` is the qualified name, so the message names the module; `head` is the
 # type as written, with its parameters, which the suggested fix needs.
@@ -2419,7 +2410,7 @@ fn validate_qualified_decl(decl: ast.Decl) -> Maybe String =
   | _ -> Nothing
 
 fn validate_qualified_decls(decls: List ast.Decl) -> Maybe(source.SourcePos, String) =
-  find_map(\d -> map(\msg -> (ast.decl_pos(d), msg), validate_qualified_decl(d)), decls)
+  ast.first_decl_error(validate_qualified_decl, decls)
 
 # Imports are validated FIRST. A bad import makes the names it should have bound
 # resolve to something else or to nothing, so every later check reports a symptom

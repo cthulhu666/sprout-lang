@@ -149,21 +149,19 @@ fn lsp_position(line: Int, col: Int) -> json.Json =
     ("line", json.JsonInt(line)),
     ("character", json.JsonInt(col))])
 
-fn diag_severity(d: compiler.Diagnostic) -> Int =
+# (LSP severity, position, message); severity 1 is an error, 2 a warning.
+fn diag_parts(d: compiler.Diagnostic) -> (Int, source.SourcePos, String) =
   match d with
-  | compiler.DiagError _ _ -> 1
-  | compiler.DiagWarning _ _ -> 2
+  | compiler.DiagError pos msg -> (1, pos, msg)
+  | compiler.DiagWarning pos msg -> (2, pos, msg)
 
 # LSP positions are 0-based; SourcePos line/column are 1-based.
-fn diag_to_lsp(d: compiler.Diagnostic) -> json.Json =
-  match d with
-  | compiler.DiagError pos msg -> diag_json(d, pos, msg)
-  | compiler.DiagWarning pos msg -> diag_json(d, pos, msg)
-
-fn diag_json(d: compiler.Diagnostic, pos: source.SourcePos, msg: String) -> json.Json =
+export fn diag_to_lsp(d: compiler.Diagnostic) -> json.Json =
+  let (severity, pos, msg) = diag_parts(d)
+  in
   json.object_from_pairs([
     ("range", diag_range(pos.line - 1, pos.column - 1)),
-    ("severity", json.JsonInt(diag_severity(d))),
+    ("severity", json.JsonInt(severity)),
     ("message", json.JsonString(msg))])
 
 fn push_diagnostics(uri: String, diags: List compiler.Diagnostic, state: LspState) -> Unit !{IO} =

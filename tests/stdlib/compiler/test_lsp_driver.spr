@@ -1,6 +1,8 @@
 module main
 import stdlib.test (check_eq, run_suite)
+import stdlib.compiler.compiler as compiler
 import stdlib.compiler.lsp_driver as lsp
+import stdlib.compiler.source as source
 import stdlib.json as json
 
 fn hover_params_json(uri: json.Json, position: json.Json) -> json.Json =
@@ -37,6 +39,9 @@ fn stringified(j: json.Json) -> String =
   match json.stringify(j) with
   | Ok text -> text
   | Err _ -> ""
+
+fn at(line: Int, column: Int) -> source.SourcePos =
+  source.SourcePos(index = 0, line = line, column = column)
 
 fn rendered(value: Maybe json.Json) -> String =
   match value with
@@ -183,5 +188,14 @@ fn main() -> Unit !{IO} =
     check_eq("unknown method: a notification is not answered",
       rendered(lsp.unknown_method_response("$/cancelRequest",
         notification_json("$/cancelRequest"))),
-      "")
+      ""),
+    # LSP positions are 0-based, a SourcePos 1-based; the severity is 1 or 2.
+    check_eq("an error diagnostic is severity 1, its position 0-based",
+      stringified(lsp.diag_to_lsp(compiler.DiagError(at(3, 7), "bad"))),
+      "{\"range\":{\"start\":{\"line\":2,\"character\":6},"
+        ++ "\"end\":{\"line\":2,\"character\":6}},\"severity\":1,\"message\":\"bad\"}"),
+    check_eq("a warning diagnostic is severity 2",
+      stringified(lsp.diag_to_lsp(compiler.DiagWarning(at(1, 1), "meh"))),
+      "{\"range\":{\"start\":{\"line\":0,\"character\":0},"
+        ++ "\"end\":{\"line\":0,\"character\":0}},\"severity\":2,\"message\":\"meh\"}")
   ])
