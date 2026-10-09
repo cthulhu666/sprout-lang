@@ -1,0 +1,321 @@
+module stdlib.compiler.bind_census
+import stdlib.compiler.types as types
+import stdlib.compiler.source as source
+import stdlib.compiler.ast as ast
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.string as string
+
+# `--phase bind-census` (docs/try-propagate-v0.md §8 step 1a): every `<-`, every
+# fallible statement a block discards, and every `let` the migration must change,
+# as the checker sees them. Inference records pieces; this module joins them.
+
+# A binding's pattern as the codemods need it. `ElseShape` is any pattern with
+# `else`, which refuses a fallible right-hand side (§8 step 2).
+export type Shape (..) = NameShape | WildcardShape | UnitShape | TupleShape | DestructureShape | ElseShape
+
+# Where a `let` came from: a plain `do`-`let` step, a binding's `match` (a
+# pattern `do`-`let`, `let..in` or `where`), or a top-level declaration.
+export type LetForm (..) = StepLet | BindingLet | TopLevelLet
+
+# What inference saw at one place. A user statement can leave several pieces at
+# one position, because ast.do_pat_steps rewrites it into a temp bind, a `let`
+# and a `try` before inference sees it. Those pieces join; the rest stand alone.
+#   Note          — a pattern step before the rewrite: its kind and shape.
+#   TryStatement  — a non-final `try e` statement, which needs no change.
+#   Bind          — a user's own `<-`. TempBind — the rewrite's temp `<-`.
+#   Discard       — a non-final statement and its type.
+#   Let           — a `let`: its form, type, effect and shape.
+#   Try           — a `try` at a binding: the operand's effect, the success shape.
+export type Piece (..) =
+  | Note source.SourcePos ast.DoBindKind Shape
+  | TryStatement source.SourcePos
+  | Bind source.SourcePos typed_ast.BindMode types.Effect Shape
+  | TempBind source.SourcePos typed_ast.BindMode types.Effect
+  | Discard source.SourcePos types.Type
+  | Let source.SourcePos LetForm types.Type types.Effect Shape
+  | Try source.SourcePos types.Effect Shape
+
+# Off unless the phase asks. On: the entry's declaration keys, whether the
+# declaration being checked is one of them, its pieces, and every finished one.
+export type Census (..) =
+  | CensusOff
+  | CensusOn Set Bool (List Piece) (List Piece)
+
+# A declaration as census_enter names it: its name, or, for an instance, which
+# has none, its class and offset. Two files of one bundle instancing one class
+# at the same offset would collide. Declarations without a body have no key.
+export fn decl_key(d: ast.Decl) -> Maybe String =
+  match d with
+  | ast.FnDecl name _ _ _ _ _ _ -> Just(name)
+  | ast.LetDecl name _ _ _ -> Just(name)
+  | ast.InstanceDecl c _ _ pos -> Just(instance_key(c, pos))
+  | ast.TypeDecl _ _ _ _ _ _ -> Nothing
+  | ast.RecordDecl _ _ _ _ _ _ _ -> Nothing
+  | ast.ClassDecl _ _ _ _ _ -> Nothing
+  | ast.AliasDecl _ _ _ _ -> Nothing
+  | ast.WrapDecl _ _ _ _ _ -> Nothing
+  | ast.ExternFnDecl _ _ _ _ _ -> Nothing
+
+export fn instance_key(c: ast.TypeConstraint, pos: source.SourcePos) -> String =
+  let ast.TypeConstraint cls _ = c
+  in `instance ${cls}@${int_to_string(pos.index)}`
+
+export type Purity (..) = Pure | Effectful | Unknown
+
+# An effect variable may be an effect, so it is not pure (§4.5). Steps 3 and 5
+# must decide purity with this function, or the census stops predicting them.
+export fn rhs_purity(e: types.Effect) -> Purity =
+  match e with
+  | types.EffectPure -> Pure
+  | types.EffectIO -> Effectful
+  | types.EffectVar _ -> Unknown
+  | types.EffectRow _ -> Unknown
+
+export fn pattern_shape(pat: ast.Pattern, els: Maybe ast.LetElse) -> Shape =
+  match (els, pat) with
+  | (Just _, _) -> ElseShape
+  | (Nothing, ast.VarPattern _ _) -> NameShape
+  | (Nothing, ast.WildcardPattern _) -> WildcardShape
+  | (Nothing, ast.UnitPattern _) -> UnitShape
+  | (Nothing, ast.TuplePattern _ _) -> TupleShape
+  | (Nothing, _) -> DestructureShape
+
+# The temp ast.do_pat_steps binds a `<-` to.
+export fn is_temp_pattern(pat: ast.Pattern) -> Bool =
+  match pat with
+  | ast.VarPattern name pos -> name == ast.do_tmp_name(pos)
+  | _ -> false
+
+export fn map_piece(ft: types.Type -> types.Type, fe: types.Effect -> types.Effect, p: Piece) -> Piece =
+  match p with
+  | Note _ _ _ -> p
+  | TryStatement _ -> p
+  | Bind pos mode e shape -> Bind(pos, mode, fe(e), shape)
+  | TempBind pos mode e -> TempBind(pos, mode, fe(e))
+  | Discard pos t -> Discard(pos, ft(t))
+  | Let pos form t e shape -> Let(pos, form, ft(t), fe(e), shape)
+  | Try pos e shape -> Try(pos, fe(e), shape)
+
+# --- Joining pieces into lines ---
+
+fn piece_pos(p: Piece) -> source.SourcePos =
+  match p with
+  | Note pos _ _ -> pos
+  | TryStatement pos -> pos
+  | Bind pos _ _ _ -> pos
+  | TempBind pos _ _ -> pos
+  | Discard pos _ -> pos
+  | Let pos _ _ _ _ -> pos
+  | Try pos _ _ -> pos
+
+# Pieces of one rewritten statement share its position and join there.
+fn joins(p: Piece) -> Bool =
+  match p with
+  | Note _ _ _ -> true
+  | TryStatement _ -> true
+  | Bind _ _ _ _ -> false
+  | TempBind _ _ _ -> true
+  | Discard _ _ -> false
+  | Let _ form _ _ _ -> is_binding_let(form)
+  | Try _ _ _ -> true
+
+fn is_binding_let(form: LetForm) -> Bool =
+  match form with
+  | StepLet -> false
+  | BindingLet -> true
+  | TopLevelLet -> false
+
+fn group(pieces: List Piece) -> Dict (List Piece) =
+  list_fold(add_to_group, dict_empty(), list_filter(joins, pieces))
+
+fn add_to_group(acc: Dict (List Piece), p: Piece) -> Dict (List Piece) =
+  let key = int_to_string(piece_pos(p).index)
+  in dict_set(key, Cons(p, maybe_with_default(Nil, dict_get(key, acc))), acc)
+
+# Declared above its readers: a field read in a sort key, above the type, leaves
+# the `Ord` dictionary unresolved (BACKLOG).
+type Line = (index: Int, text: String)
+
+# One line per site, sorted by position: `index` keys the sort and is dropped.
+export fn census_lines(path: String, pieces: List Piece) -> List String =
+  list_append(list_filter_map(lone_line(path, _), pieces),
+              list_filter_map(joined_line(path, _), vec_to_list(dict_values(group(pieces)))))
+    |> vec_from_list
+    |> vec_sort_by(\l -> l.index)
+    |> vec_to_list
+    |> list_map(\l -> l.text)
+
+fn line(path: String, kind: String, pos: source.SourcePos, cols: List String) -> Line =
+  Line(index = pos.index,
+       text = string.join("\t", Cons(kind, Cons(`${path}:${int_to_string(pos.line)}:${int_to_string(pos.column)}`, cols))))
+
+# A piece that stands alone, as its line. Joining pieces are joined_line's.
+fn lone_line(path: String, p: Piece) -> Maybe Line =
+  match p with
+  | Bind pos mode e shape -> Just(bind_line(path, pos, mode, rhs_purity(e), shape, NoTry))
+  | Discard pos t ->
+      let Just fam = typed_ast.short_circuit_family(t) else Nothing
+      in Just(line(path, "discard", pos, [fam]))
+  | Let pos form t e shape ->
+      if is_binding_let(form) then Nothing else let_line(path, pos, form_word(form, false), t, rhs_purity(e), shape, NoTry)
+  | Note _ _ _ -> Nothing
+  | TryStatement _ -> Nothing
+  | TempBind _ _ _ -> Nothing
+  | Try _ _ _ -> Nothing
+
+# Where a binding's `try` sits: none, heading the right-hand side, or under a
+# chain on it (`(try e).f`), which codemod A refuses.
+type TryUse = NoTry | HeadTry | ChainTry
+
+fn bind_line(path: String, pos: source.SourcePos, mode: typed_ast.BindMode, purity: Purity, shape: Shape,
+             try_use: TryUse) -> Line =
+  line(path, "bind", pos,
+       [mode_word(mode), "rhs=" ++ purity_word(purity), "pat=" ++ shape_word(shape), "try=" ++ bind_try_word(try_use)])
+
+# A `let` needs changing when it is not pure, or when it discards a failure
+# (`let _ = e`). Under a `try`, the value bound is the success, not `t`.
+fn let_line(path: String, pos: source.SourcePos, form: String, t: types.Type, purity: Purity,
+            shape: Shape, try_use: TryUse) -> Maybe Line =
+  let fam = if is_no_try(try_use) then maybe_with_default("plain", typed_ast.short_circuit_family(t)) else "plain"
+  in if is_pure(purity) && (! is_wildcard (shape) || fam == "plain") then Nothing
+     else Just(line(path, "let", pos,
+                    [form, fam, "rhs=" ++ purity_word(purity), "pat=" ++ shape_word(shape),
+                     "try=" ++ let_try_word(try_use)]))
+
+# A statement's pieces, by its Note's kind; with no Note, a `let..in` or `where`.
+fn joined_line(path: String, g: List Piece) -> Maybe Line =
+  match g with
+  | [] -> Nothing
+  | [first | _] ->
+      let pos = piece_pos(first)
+          purity = list_fold(\ (acc, p) -> join_purity(acc, piece_purity(p)), Pure, g)
+          try_use = if any(is_try, g) then HeadTry else NoTry
+      in if any(is_try_statement, g) then Nothing
+         else
+           match find_map(note_of, g) with
+           | Just (ast.ArrowBind, shape) -> Just(arrow_line(path, pos, purity, shape, try_use, find_map(temp_mode, g)))
+           | Just (ast.LetBind, shape) -> let_line(path, pos, form_word(BindingLet, true), let_type(g), purity, shape, try_use)
+           | Nothing -> let_line(path, pos, form_word(BindingLet, false), let_type(g), purity, binding_shape(g), try_use)
+
+# A `<-` the rewrite split. Only a temp bind has a mode; one beside a `try`
+# binds the chain on its success, and without a temp the `try` is the whole
+# right-hand side, which binds plainly.
+fn arrow_line(path: String, pos: source.SourcePos, purity: Purity, shape: Shape, try_use: TryUse,
+              temp: Maybe typed_ast.BindMode) -> Line =
+  match (temp, try_use) with
+  | (Just mode, NoTry) -> bind_line(path, pos, mode, purity, shape, NoTry)
+  | (Just mode, _) -> bind_line(path, pos, mode, purity, shape, ChainTry)
+  | (Nothing, _) -> bind_line(path, pos, typed_ast.PlainBind, purity, shape, try_use)
+
+fn is_no_try(t: TryUse) -> Bool =
+  match t with
+  | NoTry -> true
+  | HeadTry -> false
+  | ChainTry -> false
+
+fn bind_try_word(t: TryUse) -> String =
+  match t with
+  | NoTry -> "no"
+  | HeadTry -> "head"
+  | ChainTry -> "chain"
+
+fn let_try_word(t: TryUse) -> String = if is_no_try(t) then "no" else "yes"
+
+# A binding's `match` is a `do`-`let` when a `do` block wrote it.
+fn form_word(form: LetForm, in_do: Bool) -> String =
+  match form with
+  | StepLet -> "do-let"
+  | BindingLet -> if in_do then "do-let" else "let-in"
+  | TopLevelLet -> "top-level"
+
+fn mode_word(mode: typed_ast.BindMode) -> String =
+  match mode with
+  | typed_ast.PlainBind -> "plain"
+  | typed_ast.MaybeBind -> "Maybe"
+  | typed_ast.ResultBind -> "Result"
+
+fn shape_word(shape: Shape) -> String =
+  match shape with
+  | NameShape -> "name"
+  | WildcardShape -> "wildcard"
+  | UnitShape -> "unit"
+  | TupleShape -> "tuple"
+  | DestructureShape -> "destructure"
+  | ElseShape -> "destructure-else"
+
+fn is_wildcard(shape: Shape) -> Bool =
+  match shape with
+  | WildcardShape -> true
+  | _ -> false
+
+fn purity_word(p: Purity) -> String =
+  match p with
+  | Pure -> "pure"
+  | Effectful -> "effectful"
+  | Unknown -> "unknown"
+
+fn is_pure(p: Purity) -> Bool =
+  match p with
+  | Pure -> true
+  | _ -> false
+
+fn join_purity(a: Purity, b: Purity) -> Purity =
+  match (a, b) with
+  | (Effectful, _) -> Effectful
+  | (_, Effectful) -> Effectful
+  | (Unknown, _) -> Unknown
+  | (_, Unknown) -> Unknown
+  | _ -> Pure
+
+fn piece_purity(p: Piece) -> Purity =
+  match p with
+  | Bind _ _ e _ -> rhs_purity(e)
+  | TempBind _ _ e -> rhs_purity(e)
+  | Let _ _ _ e _ -> rhs_purity(e)
+  | Try _ e _ -> rhs_purity(e)
+  | Note _ _ _ -> Pure
+  | TryStatement _ -> Pure
+  | Discard _ _ -> Pure
+
+fn is_try(p: Piece) -> Bool =
+  match p with
+  | Try _ _ _ -> true
+  | _ -> false
+
+fn is_try_statement(p: Piece) -> Bool =
+  match p with
+  | TryStatement _ -> true
+  | _ -> false
+
+fn note_of(p: Piece) -> Maybe(ast.DoBindKind, Shape) =
+  match p with
+  | Note _ kind shape -> Just((kind, shape))
+  | _ -> Nothing
+
+fn temp_mode(p: Piece) -> Maybe typed_ast.BindMode =
+  match p with
+  | TempBind _ mode _ -> Just(mode)
+  | _ -> Nothing
+
+# With a `try` the type is unused (let_line), so any will do.
+fn let_type(g: List Piece) -> types.Type =
+  maybe_with_default(types.TConst(types.type_id("Unit")), find_map(type_of_let, g))
+
+fn type_of_let(p: Piece) -> Maybe types.Type =
+  match p with
+  | Let _ _ t _ _ -> Just(t)
+  | _ -> Nothing
+
+# A `let`'s pattern, or a bare `try`'s, which has no `let` (ast.try_bind).
+fn binding_shape(g: List Piece) -> Shape =
+  maybe_with_default(NameShape, maybe_or_else(find_map(let_shape, g), find_map(try_shape, g)))
+
+fn let_shape(p: Piece) -> Maybe Shape =
+  match p with
+  | Let _ _ _ _ shape -> Just(shape)
+  | _ -> Nothing
+
+fn try_shape(p: Piece) -> Maybe Shape =
+  match p with
+  | Try _ _ shape -> Just(shape)
+  | _ -> Nothing

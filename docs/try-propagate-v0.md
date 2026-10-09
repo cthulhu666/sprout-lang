@@ -1,8 +1,8 @@
 # `try` and `Propagate` — propagation through a class (v0)
 
 Status: **step 1 implemented** (2026-10-09): `ControlFlow`, `Propagate`, `try`, its reserved
-shapes and known-instance fusion, experimental in spec §5.9.1. Steps 1a–5 (§8) are open. Drafted
-2026-10-05.
+shapes and known-instance fusion, experimental in spec §5.9.1. Step 1a's `--phase bind-census`
+landed; steps 2–5 (§8) are open. Drafted 2026-10-05.
 
 ## 1. Problem
 
@@ -456,10 +456,11 @@ four repos compiling with unchanged behaviour.
    pattern step, and `ast.do_pat_steps` rewrites it to a `match` on the operand with no synthetic
    `__t <- e`, so no `DoBindStep` and no `BindMode` ever see it. The IntelliJ plugin's keyword
    list (§11, `editors/intellij/`) is not yet updated; BACKLOG §7.6 tracks it.
-   1a. Tooling: a compiler phase that lists every bind whose `BindMode` propagates (and whether
-   its right-hand side is pure), every non-final `do` statement with a fallible value, and every
-   effectful `do`-`let`, with file, line and column. Only the type checker knows any of them, and
-   no `--phase` reports them today.
+   1a. ~~Tooling.~~ Landed: `--phase bind-census` ([debugging.md](debugging.md#diagnostic-phases---phase-cli-option))
+   lists every `<-` with its mode, every discarded fallible statement, and every `let` that
+   steps 4–5 change, for the entry file. Purity is `bind_census.rhs_purity`, which steps 3 and 5
+   must also use, at the same point (the declaration boundary), or the list stops predicting
+   them. Re-run after each codemod: its kinds must print nothing.
 2. Codemod A, on all four repos and every live worktree branch: add `try` to every listed `<-`,
    writing `let x = try e` where the right-hand side is pure (§9 Q4), and wrap every listed
    fallible statement in `ignore(…)`, which this step adds to the prelude. `x <- try e` means
@@ -588,6 +589,10 @@ Raised by the 2026-10-06 review; all must be decided before step 1:
   else to `<-`, only holds if no `let` can hide an effect. The review said `let..in` has no
   mechanical rewrite; it has one, since `do` is an expression (`ast.DoExpr`). Only a top-level
   `let` has none.
+- **Q16. Who rewrites a pure plain `<-`?** **Open.** Step 3 makes `n <- str_len(s)` an error
+  (§4.5), but codemod A rewrites only fallible binds and codemod B only effectful `let`s. The
+  census lists these as `bind plain rhs=pure`. Either codemod A also writes `let n = …`, or the
+  error waits for step 5.
 
 ## 10. Tests
 

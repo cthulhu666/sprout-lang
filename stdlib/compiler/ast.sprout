@@ -335,7 +335,7 @@ fn continue_arm(arm: MatchBranch, pos: source.SourcePos) -> MatchBranch =
   in MatchBranch(ConstructorPattern("Continue", [pat], pos), body)
 
 # Position-derived, so no two bindings share one.
-fn do_tmp_name(pos: source.SourcePos) -> String =
+export fn do_tmp_name(pos: source.SourcePos) -> String =
   "__do" ++ int_to_string(pos.line) ++ "_" ++ int_to_string(pos.column)
 
 # A constant `else` takes whatever reached it.

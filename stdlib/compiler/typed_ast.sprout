@@ -39,6 +39,21 @@ export type TypedDoStep (..) =
 # never re-derives it from the final type, which can differ from the type at the bind.
 export type BindMode (..) = PlainBind | MaybeBind | ResultBind
 
+# Short-circuit family ("Maybe" / "Result") of a do-step's inferred type, or
+# Nothing for any other type (IO actions, pure values): `Maybe a` =
+# TApp (TConst Maybe) a; `Result e a` = TApp (TApp (TConst Result) e) a.
+export fn short_circuit_family(t: types.Type) -> Maybe String =
+  match t with
+  | types.TApp outer _ ->
+      match outer with
+      | types.TConst name -> if types.type_id_name(name) == "Maybe" then Just("Maybe") else Nothing
+      | types.TApp outer2 _ ->
+          match outer2 with
+          | types.TConst name -> if types.type_id_name(name) == "Result" then Just("Result") else Nothing
+          | _ -> Nothing
+      | _ -> Nothing
+  | _ -> Nothing
+
 export fn bind_mode_propagates(m: BindMode) -> Bool =
   match m with
   | PlainBind -> false
