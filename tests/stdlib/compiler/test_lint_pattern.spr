@@ -354,6 +354,15 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "a hole name shadowed above a template is not a hole",
       matches("\\ v -> `a${v}b`", "\\ w -> `a${w}b`", ["v"]), true)
 
+    # Only a declared name is a hole; the last listed hole still counts.
+    assert_eq(state, "an undeclared name is a literal, not a hole",
+      matches("f(v)", "f(a)", []), false)
+    assert_eq(state, "the last of several holes is still a hole",
+      matches("f(u, v)", "f(a, b)", ["u", "v"]), true)
+    assert_eq(state, "three permuted branches still match",
+      matches("match x with | Just a -> 1 | Nothing -> 2 | _ -> 3",
+              "match x with | Nothing -> 2 | Just a -> 1 | _ -> 3", []), true)
+
     # ---------------------------------------------------------------
     # Free variables — what closedness is computed from.
     # ---------------------------------------------------------------

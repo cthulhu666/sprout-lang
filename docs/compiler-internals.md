@@ -637,7 +637,7 @@ its head"). Type aliases are expanded in every `where` clause before any of this
 
 Four producers write the token and they must agree: `constraint_pos_tokens` (and
 `constraint_source_tokens`, with `Nil` binders, for the provisional scheme);
-`canonicalize_constrained_constraints_acc`, whose arguments must go through
+`canonicalize_constrained_constraints` (via `constraint_head_token`), whose arguments must go through
 `prog_to_fresh`/`s2` as the head variable beside them does; and
 `iface_codec.method_constraint_tokens` for class-method schemes, by name, since that
 scheme quantifies the class parameters only.

@@ -83,17 +83,12 @@ fn classify(b1: ast.MatchBranch,
 fn param_names(params: List ast.Param) -> List String =
   list_map(param_name, params)
 
-fn name_in_list(name: String, names: List String) -> Bool =
-  match names with
-  | Nil -> false
-  | Cons n rest -> n == name || name_in_list(name, rest)
-
 # True when `e` references any of `names` as a plain variable — a simple,
 # shadowing-unaware syntactic check (adequate here: this only ever picks
 # which lint message to show, never rewrites anything).
 fn expr_uses_any(names: List String, e: ast.Expr) -> Bool =
   match e with
-  | ast.VarExpr name _ -> name_in_list(name, names)
+  | ast.VarExpr name _ -> list_member(name, names)
   | ast.MatchExpr scrut branches _ ->
       expr_uses_any(names, scrut) || branches_use_any(names, branches)
   | ast.IfExpr cond then_ else_ _ ->
@@ -422,23 +417,95 @@ fn chain_terminates_in_nil(pat: ast.Pattern) -> Bool =
 # Nil (ordinary head/tail recursion, or a discarded wildcard tail) is left
 # alone itself, but its head and tail are still searched generically for
 # fixed-length patterns nested elsewhere inside them.
-fn find_list_shape_in_pattern(pat: ast.Pattern) -> List source.SourcePos =
+#
+# `terminates` names the chain end that makes a Cons chain a root:
+# `chain_terminates_in_nil` for list-shape-pattern, `_in_wildcard` for
+# list-prefix-pattern.
+fn find_chain_roots(terminates: ast.Pattern -> Bool, pat: ast.Pattern) -> List source.SourcePos =
   match pat with
   | ast.ConstructorPattern name subpats pos ->
       if name == ast.list_ctor_cons then
         match subpats with
         | [head, tail] ->
-            if chain_terminates_in_nil(tail)
-            then Cons(pos, find_list_shape_in_pattern(head))
-            else find_list_shape_in_pattern(head) ++ find_list_shape_in_pattern(tail)
-        | _ -> find_list_shape_in_patterns(subpats)  # malformed arity guard
+            if terminates(tail)
+            then Cons(pos, find_chain_roots(terminates, head))
+            else find_chain_roots(terminates, head) ++ find_chain_roots(terminates, tail)
+        | _ -> find_chain_roots_in(terminates, subpats)  # malformed arity guard
       else
-        find_list_shape_in_patterns(subpats)  # bare Nil: no subpatterns, no finding
-  | ast.TuplePattern subpats _ -> find_list_shape_in_patterns(subpats)
+        find_chain_roots_in(terminates, subpats)  # bare Nil: no subpatterns, no finding
+  | ast.TuplePattern subpats _ -> find_chain_roots_in(terminates, subpats)
   | _ -> Nil  # Wildcard/Var/Int/Bool/String/Char/Unit: leaves, no subpatterns
 
-fn find_list_shape_in_patterns(pats: List ast.Pattern) -> List source.SourcePos =
-  concat_map(find_list_shape_in_pattern, pats)
+fn find_chain_roots_in(terminates: ast.Pattern -> Bool, pats: List ast.Pattern) -> List source.SourcePos =
+  concat_map(\p -> find_chain_roots(terminates, p), pats)
+
+fn find_chain_roots_in_decls(terminates: ast.Pattern -> Bool, decls: List ast.Decl)
+    -> List source.SourcePos =
+  find_chain_roots_in(terminates, patterns_in_decls(decls))
+
+# Every pattern position under `decls`, in source order. Patterns exist only at
+# match branches, do-binds and comprehension generators; fn/lambda params are
+# bare names. Both list rules share this walk, so a new Expr form is added once.
+fn patterns_in_decls(decls: List ast.Decl) -> List ast.Pattern =
+  concat_map(patterns_in_decl, decls)
+
+fn patterns_in_decl(d: ast.Decl) -> List ast.Pattern =
+  match d with
+  | ast.FnDecl _ _ _ _ _ body _ -> patterns_in_expr(body)
+  | ast.LetDecl _ body _ _ -> patterns_in_expr(body)
+  | ast.InstanceDecl _ _ methods _ ->
+      concat_map(\m -> match m with | ast.InstanceMethodImpl _ _ _ _ _ body -> patterns_in_expr(body), methods)
+  | _ -> Nil
+
+fn patterns_in_expr(e: ast.Expr) -> List ast.Pattern =
+  match e with
+  | ast.MatchExpr scrut branches _ -> patterns_in_expr(scrut) ++ concat_map(patterns_in_branch, branches)
+  | ast.IfExpr cond then_ else_ _ ->
+      patterns_in_expr(cond) ++ patterns_in_expr(then_) ++ patterns_in_expr(else_)
+  | ast.CallExpr callee args _ -> patterns_in_expr(callee) ++ patterns_in_exprs(args)
+  | ast.TupleExpr elems _ -> patterns_in_exprs(elems)
+  | ast.BinaryExpr _ left right _ -> patterns_in_expr(left) ++ patterns_in_expr(right)
+  | ast.UnaryExpr _ operand _ -> patterns_in_expr(operand)
+  | ast.LambdaExpr _ body _ -> patterns_in_expr(body)
+  | ast.DoExpr steps _ -> patterns_in_do_steps(steps)
+  | ast.RecordExpr _ fields _ -> patterns_in_record_fields(fields)
+  | ast.GetFieldExpr rec_expr _ _ -> patterns_in_expr(rec_expr)
+  | ast.RecordUpdateExpr base fields _ -> patterns_in_expr(base) ++ patterns_in_record_fields(fields)
+  | ast.IntRangeExpr lo hi _ -> patterns_in_expr(lo) ++ patterns_in_expr(hi)
+  | ast.StringTemplateExpr parts _ -> concat_map(patterns_in_template_part, parts)
+  | ast.ComprehensionExpr elem gens _ -> patterns_in_expr(elem) ++ concat_map(patterns_in_comprehension_gen, gens)
+  | ast.LetBindExpr pat value els body pos -> patterns_in_expr(ast.let_bind_match(pat, value, els, body, pos))
+  | ast.TryExpr operand _ -> patterns_in_expr(operand)
+  | _ -> Nil
+
+fn patterns_in_exprs(exprs: List ast.Expr) -> List ast.Pattern =
+  concat_map(patterns_in_expr, exprs)
+
+fn patterns_in_comprehension_gen(g: ast.ComprehensionGen) -> List ast.Pattern =
+  match g with
+  | ast.ComprehensionGen pat src guards -> Cons(pat, patterns_in_expr(src) ++ patterns_in_exprs(guards))
+
+fn patterns_in_branch(b: ast.MatchBranch) -> List ast.Pattern =
+  match b with
+  | ast.MatchBranch pat body -> Cons(pat, patterns_in_expr(body))
+
+fn patterns_in_do_steps(steps: List ast.DoStep) -> List ast.Pattern =
+  match steps with
+  | [] -> Nil
+  | [ast.DoPatStep kind pat value els pos | rest] ->
+      patterns_in_do_steps(ast.do_pat_steps(kind, pat, value, els, rest, pos))
+  | [ast.DoBindStep pat value | rest] ->
+      Cons(pat, patterns_in_expr(value) ++ patterns_in_do_steps(rest))
+  | [ast.DoLetStep _ value | rest] -> patterns_in_expr(value) ++ patterns_in_do_steps(rest)
+  | [ast.DoExprStep value | rest] -> patterns_in_expr(value) ++ patterns_in_do_steps(rest)
+
+fn patterns_in_record_fields(fields: List ast.RecordField) -> List ast.Pattern =
+  concat_map(\f -> match f with | ast.RecordField _ value -> patterns_in_expr(value), fields)
+
+fn patterns_in_template_part(p: ast.TemplateExprPart) -> List ast.Pattern =
+  match p with
+  | ast.LitPart _ -> Nil
+  | ast.InterpPart e -> patterns_in_expr(e)
 
 fn is_written_as_ctor(src: String, line: Int, col: Int) -> Bool =
   string.starts_with(rest_of_line(src, line, col), ast.list_ctor_cons)
@@ -460,89 +527,7 @@ fn list_shape_findings(src: String, prog: ast.Program) -> List LintFinding =
   match prog with
   | ast.Program decls _ ->
       map(\pos -> mk_finding(pos, "list-shape-pattern", list_shape_message),
-        drop_desugared_list_patterns(src, find_list_shape_in_decls(decls)))
-
-fn find_list_shape_in_decls(decls: List ast.Decl) -> List source.SourcePos =
-  concat_map(find_list_shape_in_decl, decls)
-
-fn find_list_shape_in_decl(d: ast.Decl) -> List source.SourcePos =
-  match d with
-  | ast.FnDecl _ _ _ _ _ body _ -> find_list_shape_in_expr(body)
-  | ast.LetDecl _ body _ _ -> find_list_shape_in_expr(body)
-  | ast.InstanceDecl _ _ methods _ -> find_list_shape_in_instance_methods(methods)
-  | _ -> Nil
-
-fn find_list_shape_in_instance_methods(methods: List ast.InstanceMethodImpl) -> List source.SourcePos =
-  concat_map(\m -> match m with | ast.InstanceMethodImpl _ _ _ _ _ body -> find_list_shape_in_expr(body), methods)
-
-# Reuses the SAME generic expr traversal shape as walk_expr above (a
-# separate, parallel walk — see walk_expr's own header comment on why every
-# variant is covered explicitly). Pattern positions only exist at match
-# branches and do-binds (ast.MatchBranch/ast.DoBindStep) — function/lambda
-# params are bare names (ast.Param String (Maybe TypeExpr) ParamMode), no patterns.
-fn find_list_shape_in_expr(e: ast.Expr) -> List source.SourcePos =
-  match e with
-  | ast.MatchExpr scrut branches _ ->
-      find_list_shape_in_expr(scrut) ++ find_list_shape_in_branches(branches)
-  | ast.IfExpr cond then_ else_ _ ->
-      find_list_shape_in_expr(cond) ++ find_list_shape_in_expr(then_) ++ find_list_shape_in_expr(else_)
-  | ast.CallExpr callee args _ ->
-      find_list_shape_in_expr(callee) ++ find_list_shape_in_exprs(args)
-  | ast.TupleExpr elems _ -> find_list_shape_in_exprs(elems)
-  | ast.BinaryExpr _ left right _ ->
-      find_list_shape_in_expr(left) ++ find_list_shape_in_expr(right)
-  | ast.UnaryExpr _ operand _ -> find_list_shape_in_expr(operand)
-  | ast.LambdaExpr _ body _ -> find_list_shape_in_expr(body)
-  | ast.DoExpr steps _ -> find_list_shape_in_do_steps(steps)
-  | ast.RecordExpr _ fields _ -> find_list_shape_in_record_fields(fields)
-  | ast.GetFieldExpr rec_expr _ _ -> find_list_shape_in_expr(rec_expr)
-  | ast.RecordUpdateExpr base fields _ -> find_list_shape_in_expr(base) ++ find_list_shape_in_record_fields(fields)
-  | ast.IntRangeExpr lo hi _ ->
-      find_list_shape_in_expr(lo) ++ find_list_shape_in_expr(hi)
-  | ast.StringTemplateExpr parts _ -> find_list_shape_in_template_parts(parts)
-  | ast.ComprehensionExpr elem gens _ -> find_list_shape_in_expr(elem) ++ find_list_shape_in_comprehension_gens(gens)
-  | ast.LetBindExpr pat value els body pos -> find_list_shape_in_expr(ast.let_bind_match(pat, value, els, body, pos))
-  | ast.TryExpr operand _ -> find_list_shape_in_expr(operand)
-  | _ -> Nil
-
-fn find_list_shape_in_comprehension_gens(gens: List ast.ComprehensionGen) -> List source.SourcePos =
-  concat_map(find_list_shape_in_comprehension_gen, gens)
-
-fn find_list_shape_in_comprehension_gen(g: ast.ComprehensionGen) -> List source.SourcePos =
-  match g with
-  | ast.ComprehensionGen pat src guards ->
-      find_list_shape_in_pattern(pat) ++ find_list_shape_in_expr(src) ++ find_list_shape_in_exprs(guards)
-
-fn find_list_shape_in_exprs(exprs: List ast.Expr) -> List source.SourcePos =
-  concat_map(find_list_shape_in_expr, exprs)
-
-fn find_list_shape_in_branches(branches: List ast.MatchBranch) -> List source.SourcePos =
-  concat_map(find_list_shape_in_branch, branches)
-
-fn find_list_shape_in_branch(b: ast.MatchBranch) -> List source.SourcePos =
-  match b with
-  | ast.MatchBranch pat body -> find_list_shape_in_pattern(pat) ++ find_list_shape_in_expr(body)
-
-fn find_list_shape_in_do_steps(steps: List ast.DoStep) -> List source.SourcePos =
-  match steps with
-  | [] -> Nil
-  | [ast.DoPatStep kind pat value els pos | rest] ->
-      find_list_shape_in_do_steps(ast.do_pat_steps(kind, pat, value, els, rest, pos))
-  | [ast.DoBindStep pat value | rest] ->
-      find_list_shape_in_pattern(pat) ++ find_list_shape_in_expr(value) ++ find_list_shape_in_do_steps(rest)
-  | [ast.DoLetStep _ value | rest] -> find_list_shape_in_expr(value) ++ find_list_shape_in_do_steps(rest)
-  | [ast.DoExprStep value | rest] -> find_list_shape_in_expr(value) ++ find_list_shape_in_do_steps(rest)
-
-fn find_list_shape_in_record_fields(fields: List ast.RecordField) -> List source.SourcePos =
-  concat_map(\f -> match f with | ast.RecordField _ value -> find_list_shape_in_expr(value), fields)
-
-fn find_list_shape_in_template_parts(parts: List ast.TemplateExprPart) -> List source.SourcePos =
-  concat_map(find_list_shape_in_template_part, parts)
-
-fn find_list_shape_in_template_part(p: ast.TemplateExprPart) -> List source.SourcePos =
-  match p with
-  | ast.LitPart _ -> Nil
-  | ast.InterpPart e -> find_list_shape_in_expr(e)
+        drop_desugared_list_patterns(src, find_chain_roots_in_decls(chain_terminates_in_nil, decls)))
 
 # ---------------------------------------------------------------------------
 # Rule: list-prefix-pattern
@@ -579,108 +564,11 @@ fn chain_terminates_in_wildcard(pat: ast.Pattern) -> Bool =
       else false  # Nil terminal: list-shape-pattern's territory, not this rule
   | _ -> false  # bound variable: ordinary recursion, not flagged
 
-# Mirrors find_list_shape_in_pattern's structure exactly, swapping the
-# terminal check from chain_terminates_in_nil to chain_terminates_in_wildcard.
-fn find_prefix_pattern_in_pattern(pat: ast.Pattern) -> List source.SourcePos =
-  match pat with
-  | ast.ConstructorPattern name subpats pos ->
-      if name == ast.list_ctor_cons then
-        match subpats with
-        | [head, tail] ->
-            if chain_terminates_in_wildcard(tail)
-            then Cons(pos, find_prefix_pattern_in_pattern(head))
-            else find_prefix_pattern_in_pattern(head) ++ find_prefix_pattern_in_pattern(tail)
-        | _ -> find_prefix_pattern_in_patterns(subpats)  # malformed arity guard
-      else
-        find_prefix_pattern_in_patterns(subpats)  # bare Nil: no subpatterns, no finding
-  | ast.TuplePattern subpats _ -> find_prefix_pattern_in_patterns(subpats)
-  | _ -> Nil  # Wildcard/Var/Int/Bool/String/Char/Unit: leaves, no subpatterns
-
-fn find_prefix_pattern_in_patterns(pats: List ast.Pattern) -> List source.SourcePos =
-  concat_map(find_prefix_pattern_in_pattern, pats)
-
 fn list_prefix_findings(src: String, prog: ast.Program) -> List LintFinding =
   match prog with
   | ast.Program decls _ ->
       map(\pos -> mk_finding(pos, "list-prefix-pattern", list_prefix_message),
-        drop_desugared_list_patterns(src, find_prefix_pattern_in_decls(decls)))
-
-fn find_prefix_pattern_in_decls(decls: List ast.Decl) -> List source.SourcePos =
-  concat_map(find_prefix_pattern_in_decl, decls)
-
-fn find_prefix_pattern_in_decl(d: ast.Decl) -> List source.SourcePos =
-  match d with
-  | ast.FnDecl _ _ _ _ _ body _ -> find_prefix_pattern_in_expr(body)
-  | ast.LetDecl _ body _ _ -> find_prefix_pattern_in_expr(body)
-  | ast.InstanceDecl _ _ methods _ -> find_prefix_pattern_in_instance_methods(methods)
-  | _ -> Nil
-
-fn find_prefix_pattern_in_instance_methods(methods: List ast.InstanceMethodImpl) -> List source.SourcePos =
-  concat_map(\m -> match m with | ast.InstanceMethodImpl _ _ _ _ _ body -> find_prefix_pattern_in_expr(body), methods)
-
-fn find_prefix_pattern_in_expr(e: ast.Expr) -> List source.SourcePos =
-  match e with
-  | ast.MatchExpr scrut branches _ ->
-      find_prefix_pattern_in_expr(scrut) ++ find_prefix_pattern_in_branches(branches)
-  | ast.IfExpr cond then_ else_ _ ->
-      find_prefix_pattern_in_expr(cond) ++ find_prefix_pattern_in_expr(then_) ++ find_prefix_pattern_in_expr(else_)
-  | ast.CallExpr callee args _ ->
-      find_prefix_pattern_in_expr(callee) ++ find_prefix_pattern_in_exprs(args)
-  | ast.TupleExpr elems _ -> find_prefix_pattern_in_exprs(elems)
-  | ast.BinaryExpr _ left right _ ->
-      find_prefix_pattern_in_expr(left) ++ find_prefix_pattern_in_expr(right)
-  | ast.UnaryExpr _ operand _ -> find_prefix_pattern_in_expr(operand)
-  | ast.LambdaExpr _ body _ -> find_prefix_pattern_in_expr(body)
-  | ast.DoExpr steps _ -> find_prefix_pattern_in_do_steps(steps)
-  | ast.RecordExpr _ fields _ -> find_prefix_pattern_in_record_fields(fields)
-  | ast.GetFieldExpr rec_expr _ _ -> find_prefix_pattern_in_expr(rec_expr)
-  | ast.RecordUpdateExpr base fields _ -> find_prefix_pattern_in_expr(base) ++ find_prefix_pattern_in_record_fields(fields)
-  | ast.IntRangeExpr lo hi _ ->
-      find_prefix_pattern_in_expr(lo) ++ find_prefix_pattern_in_expr(hi)
-  | ast.StringTemplateExpr parts _ -> find_prefix_pattern_in_template_parts(parts)
-  | ast.ComprehensionExpr elem gens _ -> find_prefix_pattern_in_expr(elem) ++ find_prefix_pattern_in_comprehension_gens(gens)
-  | ast.LetBindExpr pat value els body pos -> find_prefix_pattern_in_expr(ast.let_bind_match(pat, value, els, body, pos))
-  | ast.TryExpr operand _ -> find_prefix_pattern_in_expr(operand)
-  | _ -> Nil
-
-fn find_prefix_pattern_in_comprehension_gens(gens: List ast.ComprehensionGen) -> List source.SourcePos =
-  concat_map(find_prefix_pattern_in_comprehension_gen, gens)
-
-fn find_prefix_pattern_in_comprehension_gen(g: ast.ComprehensionGen) -> List source.SourcePos =
-  match g with
-  | ast.ComprehensionGen pat src guards ->
-      find_prefix_pattern_in_pattern(pat) ++ find_prefix_pattern_in_expr(src) ++ find_prefix_pattern_in_exprs(guards)
-
-fn find_prefix_pattern_in_exprs(exprs: List ast.Expr) -> List source.SourcePos =
-  concat_map(find_prefix_pattern_in_expr, exprs)
-
-fn find_prefix_pattern_in_branches(branches: List ast.MatchBranch) -> List source.SourcePos =
-  concat_map(find_prefix_pattern_in_branch, branches)
-
-fn find_prefix_pattern_in_branch(b: ast.MatchBranch) -> List source.SourcePos =
-  match b with
-  | ast.MatchBranch pat body -> find_prefix_pattern_in_pattern(pat) ++ find_prefix_pattern_in_expr(body)
-
-fn find_prefix_pattern_in_do_steps(steps: List ast.DoStep) -> List source.SourcePos =
-  match steps with
-  | [] -> Nil
-  | [ast.DoPatStep kind pat value els pos | rest] ->
-      find_prefix_pattern_in_do_steps(ast.do_pat_steps(kind, pat, value, els, rest, pos))
-  | [ast.DoBindStep pat value | rest] ->
-      find_prefix_pattern_in_pattern(pat) ++ find_prefix_pattern_in_expr(value) ++ find_prefix_pattern_in_do_steps(rest)
-  | [ast.DoLetStep _ value | rest] -> find_prefix_pattern_in_expr(value) ++ find_prefix_pattern_in_do_steps(rest)
-  | [ast.DoExprStep value | rest] -> find_prefix_pattern_in_expr(value) ++ find_prefix_pattern_in_do_steps(rest)
-
-fn find_prefix_pattern_in_record_fields(fields: List ast.RecordField) -> List source.SourcePos =
-  concat_map(\f -> match f with | ast.RecordField _ value -> find_prefix_pattern_in_expr(value), fields)
-
-fn find_prefix_pattern_in_template_parts(parts: List ast.TemplateExprPart) -> List source.SourcePos =
-  concat_map(find_prefix_pattern_in_template_part, parts)
-
-fn find_prefix_pattern_in_template_part(p: ast.TemplateExprPart) -> List source.SourcePos =
-  match p with
-  | ast.LitPart _ -> Nil
-  | ast.InterpPart e -> find_prefix_pattern_in_expr(e)
+        drop_desugared_list_patterns(src, find_chain_roots_in_decls(chain_terminates_in_wildcard, decls)))
 
 # ---------------------------------------------------------------------------
 # Rule: multi-line-lambda-arg
@@ -925,7 +813,7 @@ fn ctor_name(c: ast.TypeConstructor) -> String =
 # only ever withholds the suggestion.
 fn mentions_linear_ctor(names: List String, e: ast.Expr) -> Bool =
   match e with
-  | ast.VarExpr name _ -> name_in_list(string.after_last_dot(name), names)
+  | ast.VarExpr name _ -> list_member(string.after_last_dot(name), names)
   | ast.TupleExpr items _ -> any_mentions_linear_ctor(names, items)
   | ast.CallExpr callee args _ ->
       mentions_linear_ctor(names, callee) || any_mentions_linear_ctor(names, args)
@@ -1137,36 +1025,17 @@ fn constructor_headed(branches: List ast.MatchBranch) -> Bool =
       | ast.ConstructorPattern _ _ _ -> if list_is_empty(rest) then true else constructor_headed(rest)
       | _ -> false
 
-# Binders the branch patterns introduce. Patterns are small and closed, so this
-# walk is complete over them — unlike the branch BODIES, which v0 does not
-# inspect (§5.3): a hole shadowed by a lambda inside a body is not reported here.
-# The matcher still treats such an occurrence as the binder's, not the hole's
+# Binders the branch patterns introduce. The branch BODIES are not inspected
+# (§5.3): a hole shadowed by a lambda inside a body is not reported here. The
+# matcher still treats such an occurrence as the binder's, not the hole's
 # (`lint_pattern.is_hole`), so the gap costs a missed authoring warning and not
 # a wrong match.
-# Every variant is named rather than defaulted: a pattern variant added later
-# would silently report no binders, and a missed binder is a missed authoring
-# warning, not a compile error (guidelines.md §2a).
-fn pattern_binders(pat: ast.Pattern) -> List String =
-  match pat with
-  | ast.VarPattern n _ -> [n]
-  | ast.TuplePattern subs _ -> pattern_binders_all(subs)
-  | ast.ConstructorPattern _ subs _ -> pattern_binders_all(subs)
-  | ast.WildcardPattern _ -> []
-  | ast.IntPattern _ _ -> []
-  | ast.BoolPattern _ _ -> []
-  | ast.StringPattern _ _ -> []
-  | ast.CharPattern _ _ -> []
-  | ast.UnitPattern _ -> []
-
-fn pattern_binders_all(pats: List ast.Pattern) -> List String =
-  list_flat_map(pattern_binders, pats)
-
 fn branch_binders(branches: List ast.MatchBranch) -> List String =
   list_flat_map(branch_binders_one, branches)
 
 fn branch_binders_one(b: ast.MatchBranch) -> List String =
   match b with
-  | ast.MatchBranch pat _ -> pattern_binders(pat)
+  | ast.MatchBranch pat _ -> ast.pattern_names(pat)
 
 fn admissible_body(name: String, body: ast.Expr) -> Result String (List String) =
   match body with
@@ -1179,7 +1048,7 @@ fn admissible_body(name: String, body: ast.Expr) -> Result String (List String) 
 
 # A hole shadowed by a branch binder would name two different subterms.
 fn shadowed_hole(holes: List String, binders: List String) -> Maybe String =
-  find(\ (h: String) -> name_in_list(h, binders), holes)
+  find(\ (h: String) -> list_member(h, binders), holes)
 
 fn derive_one(name: String, decls: List ast.Decl) -> Result String Combinator =
   match find(\ (d: ast.Decl) -> decl_is_fn_named(name, d), decls) with
@@ -1244,7 +1113,7 @@ fn captured_exprs(holes: List String, caps: List lint_pattern.Capture) -> List a
 # in a branch body can. Holding a scrutinee to the same test as a fallback once
 # mis-scored 139 of 165 corpus findings (docs/lint-rules-v0.md §12).
 fn conditional_holes(pattern: ast.Expr, holes: List String) -> List String =
-  list_filter(\ (h: String) -> ! name_in_list (h, unconditional_holes(pattern, holes)), holes)
+  list_filter(\ (h: String) -> ! list_member (h, unconditional_holes(pattern, holes)), holes)
 
 # Only the two shapes `admissible_body` lets through can arrive. A third would
 # otherwise default to "nothing is unconditional" and quietly put the note back
@@ -1275,7 +1144,7 @@ fn rewrite_is_free(bound: List String, c: Combinator, subject: ast.Expr,
 # variable. Every variant is named so a new one cannot silently join the list.
 fn free_to_hoist(bound: List String, e: ast.Expr) -> Bool =
   match e with
-  | ast.VarExpr n _ -> name_in_list(root_segment(n), bound)
+  | ast.VarExpr n _ -> list_member(root_segment(n), bound)
   | ast.IntExpr _ _ -> true
   | ast.FloatExpr _ _ -> true
   | ast.BoolExpr _ _ -> true
@@ -1323,7 +1192,7 @@ fn root_segment(name: String) -> String =
 # typecheck. The file-level guards cannot see this; only the walk's scope can.
 fn combinator_finding(bound: List String, c: Combinator, e: ast.Expr,
                       pos: source.SourcePos) -> Maybe LintFinding =
-  if name_in_list(combinator_name(c), bound) then Nothing
+  if list_member(combinator_name(c), bound) then Nothing
   else
     let Just caps = lint_pattern.match_expr(combinator_pattern(c), e, combinator_holes(c))
           else Nothing
@@ -1363,7 +1232,7 @@ fn combinator_rule_applies(src: String, decls: List ast.Decl) -> Bool =
 let wrapper_type_names: List String = ["Maybe", "Result"]
 
 fn defines_a_wrapper_type(decls: List ast.Decl) -> Bool =
-  any(\ (d: ast.Decl) -> name_in_list(decl_declared_type_name(d), wrapper_type_names), decls)
+  any(\ (d: ast.Decl) -> list_member(decl_declared_type_name(d), wrapper_type_names), decls)
 
 fn all_pattern_ctor_names(cs: List Combinator) -> List String =
   match cs with
@@ -1413,7 +1282,7 @@ fn scope_name(ns: (String, ast.NameScope)) -> String =
   | (n, _) -> n
 
 fn any_name_in(names: List String, allowed: List String) -> Bool =
-  any(\ (n: String) -> name_in_list(n, allowed), names)
+  any(\ (n: String) -> list_member(n, allowed), names)
 
 # Four of the nine declaration forms introduce a type name. Every variant is named
 # rather than defaulted: here the default runs the WRONG way — an unrecognised
@@ -1461,7 +1330,7 @@ fn header_names(line: String) -> List String =
   |> string.words
 
 fn any_name_is_combinator(names: List String) -> Bool =
-  any(\ (n: String) -> name_in_list(string.trim(n), combinator_names), names)
+  any(\ (n: String) -> list_member(string.trim(n), combinator_names), names)
 
 # ---------------------------------------------------------------------------
 # Suppression directives
@@ -1614,4 +1483,4 @@ export fn lint_ast(src: String) -> List LintFinding =
 where
   ds = file_directives(src)
   suppressed = list_filter_map(directive_rule, ds)
-  kept = \ (f: LintFinding) -> ! name_in_list (finding_rule_id(f), suppressed)
+  kept = \ (f: LintFinding) -> ! list_member (finding_rule_id(f), suppressed)

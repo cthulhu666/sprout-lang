@@ -175,12 +175,7 @@ export fn type_mentions_skolem(t: Type) -> Bool =
   | TApp base arg -> type_mentions_skolem(base) || type_mentions_skolem(arg)
   | TFunc p r _ _ -> type_mentions_skolem(p) || type_mentions_skolem(r)
   | TThunk r _ -> type_mentions_skolem(r)
-  | TTuple items -> any_mentions_skolem(items)
-
-fn any_mentions_skolem(items: List Type) -> Bool =
-  match items with
-  | Nil -> false
-  | Cons h t -> if type_mentions_skolem(h) then true else any_mentions_skolem(t)
+  | TTuple items -> any(type_mentions_skolem, items)
 
 # ── Class graph traversal + existential witness-slot enumeration ──────────────
 # Shared home (this leaf is imported by both lowering and ast_to_ir) for the
@@ -206,12 +201,7 @@ fn collect_supers_dfs(stack: List String, super_map: Dict (List String), visited
 fn prepend_supers(name: String, super_map: Dict (List String), rest: List String) -> List String =
   match dict_get(name, super_map) with
   | Nothing -> rest
-  | Just supers -> append_str_list(supers, rest)
-
-fn append_str_list(xs: List String, ys: List String) -> List String =
-  match xs with
-  | Nil -> ys
-  | Cons h t -> Cons(h, append_str_list(t, ys))
+  | Just supers -> list_append(supers, rest)
 
 export fn class_methods_for(class_name: String, class_order: Dict (List String)) -> List String =
   match dict_get(class_name, class_order) with
@@ -547,45 +537,6 @@ fn ftv_list_acc(items: List Type, acc: List String) -> List String =
   | Nil -> acc
   | Cons h t -> ftv_list_acc(t, ftv_acc(h, acc))
 
-# ---------------------------------------------------------------------------
-# List-as-set helpers for String (stage-0 compatible: no Eq constraint)
-# ---------------------------------------------------------------------------
-#
-# The generic prelude list_member/union/diff/dedup use `where Eq a`, but the
-# self-hosted stage-0 constraint dispatch cannot resolve Eq for element types
-# inside container arguments (e.g. List String → looks for @inst:Eq:List, not
-# @inst:Eq:String).  These String-specific helpers shadow the prelude generics
-# within this module and are exported for use by unifier/infer.
-
-export fn list_member(x: String, xs: List String) -> Bool =
-  match xs with
-  | Nil -> false
-  | Cons h t -> if h == x then true else list_member(x, t)
-
-export fn list_union(xs: List String, ys: List String) -> List String =
-  match xs with
-  | Nil -> ys
-  | Cons h t ->
-      if list_member(h, ys) then list_union(t, ys)
-      else Cons(h, list_union(t, ys))
-
-export fn list_diff(xs: List String, ys: List String) -> List String =
-  match xs with
-  | Nil -> Nil
-  | Cons h t ->
-      if list_member(h, ys) then list_diff(t, ys)
-      else Cons(h, list_diff(t, ys))
-
-fn list_dedup_acc(xs: List String, seen: List String) -> List String =
-  match xs with
-  | Nil -> Nil
-  | Cons h t ->
-      if list_member(h, seen) then list_dedup_acc(t, seen)
-      else Cons(h, list_dedup_acc(t, Cons(h, seen)))
-
-fn list_dedup(xs: List String) -> List String =
-  list_dedup_acc(xs, Nil)
-
 export fn ftv(t: Type) -> List String =
   list_dedup(ftv_acc(t, Nil))
 
@@ -881,7 +832,7 @@ fn rename_generated_at(k: Int, v: String, rest: List String, taken: List String,
 fn next_free_letter(n: Int, taken: List String) -> Int =
   if list_member(nth_var_name(n), taken) then next_free_letter(n + 1, taken) else n
 
-fn apply_rename_type(rename: Dict String, t: Type) -> Type =
+export fn apply_rename_type(rename: Dict String, t: Type) -> Type =
   match t with
   | TVar name ->
       match dict_get(tyvar_identity(name), rename) with
@@ -1075,7 +1026,7 @@ export fn type_to_string_renamed(vars: List String, t: Type) -> String =
 export fn type_to_string_named(rename: Dict String, t: Type) -> String =
   type_to_string(display_consts(apply_rename_type(rename, t)))
 
-fn display_consts(t: Type) -> Type =
+export fn display_consts(t: Type) -> Type =
   match t with
   | TVar _ -> t
   | TConst id -> TConst(type_id(type_id_display(id)))

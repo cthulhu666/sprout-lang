@@ -174,11 +174,11 @@ export fn type_from_ast(te: ast.TypeExpr, local_vars: Dict types.Type) -> types.
       # annotation onto the arrow it is building, so `a -> b -> C !{IO}` puts it
       # on the INNERMOST arrow), and inference threw it away one step later.
       types.TFunc(type_from_ast(param, local_vars), type_from_ast(ret, local_vars),
-        effect_from_maybe_labels(effs),
-        types.ownership_of_mode(ast.mode_is_borrowing(mode), ast.mode_is_once(mode)))
+        types.effect_from_labels(effs),
+        linear_check.ownership_of_param_mode(mode))
   # No parameter, so no ownership to read — the two fields TFunc carries for one.
   | ast.TypeThunk ret effs ->
-      types.TThunk(type_from_ast(ret, local_vars), effect_from_maybe_labels(effs))
+      types.TThunk(type_from_ast(ret, local_vars), types.effect_from_labels(effs))
   # A trailing effect suffix that reached inference as a wrapper. A declaration's
   # return type never does — parser.parse_return_type_cont splits it into the
   # FnDecl's own `effects` field — and neither does `a -> b !{IO}`, which
@@ -190,7 +190,7 @@ export fn type_from_ast(te: ast.TypeExpr, local_vars: Dict types.Type) -> types.
   | ast.TypeEffect inner effs ->
       types.attach_arrow_effect(type_from_ast(inner, local_vars),
         types.effect_from_labels(Just(effs)))
-  | ast.TupleType parts -> types.TTuple(type_list_from_ast(parts, local_vars))
+  | ast.TupleType parts -> types.TTuple(list_map(\t -> type_from_ast(t, local_vars), parts))
 
 fn lookup_type_var(name: String, local_vars: Dict types.Type) -> types.Type =
   match dict_get(name, local_vars) with
@@ -200,11 +200,6 @@ fn lookup_type_var(name: String, local_vars: Dict types.Type) -> types.Type =
   # identity. The prelude's canonical form is unqualified (empty module header), so
   # this is a no-op on dotless names and only preserves genuine module prefixes.
   | Nothing -> types.TConst(types.type_id(name))
-
-fn type_list_from_ast(parts: List ast.TypeExpr, local_vars: Dict types.Type) -> List types.Type =
-  match parts with
-  | Nil -> Nil
-  | Cons h t -> Cons(type_from_ast(h, local_vars), type_list_from_ast(t, local_vars))
 
 # ---------------------------------------------------------------------------
 # Type alias expansion
@@ -258,7 +253,7 @@ fn alias_apply_or_plain(name: String, args: List ast.TypeExpr, base: ast.TypeExp
   | Nothing -> plain_type_apply(base, arg, local_vars)
   | Just body ->
       unifier.apply_subst(
-        alias_arg_subst(name, 0, type_list_from_ast(args, local_vars), dict_empty()),
+        alias_arg_subst(name, 0, list_map(\t -> type_from_ast(t, local_vars), args), dict_empty()),
         body)
 
 fn alias_body(name: String, arity: Int, local_vars: Dict types.Type) -> Maybe types.Type =
@@ -349,7 +344,7 @@ fn duplicate_alias_err(e: AliasEntry) -> AliasBuild =
                       "` is declared more than once in this module")
 
 fn ordered_aliases(entries: List AliasEntry, base: Dict types.Type) -> AliasBuild =
-  order_to_aliases(alias_order(entry_names(entries, Nil), table, dict_empty(), Nil),
+  order_to_aliases(alias_order(list_map(entry_name, entries), table, dict_empty(), Nil),
                    table, base, entries)
   where table = alias_table(entries, dict_empty())
 
@@ -378,11 +373,6 @@ fn alias_table(entries: List AliasEntry, acc: Dict AliasEntry) -> Dict AliasEntr
   match entries with
   | Nil -> acc
   | Cons e rest -> alias_table(rest, dict_set(entry_name(e), e, acc))
-
-fn entry_names(entries: List AliasEntry, acc: List String) -> List String =
-  match entries with
-  | Nil -> list_reverse(acc)
-  | Cons e rest -> entry_names(rest, Cons(entry_name(e), acc))
 
 fn alias_pos(name: String, entries: List AliasEntry) -> source.SourcePos =
   match entries with
@@ -467,9 +457,6 @@ fn te_type_names_list(parts: List ast.TypeExpr, acc: List String) -> List String
   | Nil -> acc
   | Cons h rest -> te_type_names(h, te_type_names_list(rest, acc))
 
-export fn effect_from_maybe_labels(labels: Maybe (List String)) -> types.Effect =
-  types.effect_from_labels(labels)
-
 # ---------------------------------------------------------------------------
 # Build a Scheme from a FnDecl
 # ---------------------------------------------------------------------------
@@ -541,10 +528,7 @@ fn own_unann_ret(owner: String, ret_type_maybe: Maybe ast.TypeExpr, acc: List St
 fn env_ftv_for_decl(env_ftv: List String, own: List String) -> List String =
   match own with
   | Nil -> env_ftv
-  | [_ | _] -> types.list_diff(env_ftv, own)
-
-fn list_add_unique(x: String, xs: List String) -> List String =
-  if types.list_member(x, xs) then xs else append(xs, Cons(x, Nil))
+  | [_ | _] -> list_diff(env_ftv, own)
 
 fn collect_param_type_vars(params: List ast.Param, acc: List String) -> List String =
   match params with
@@ -685,10 +669,10 @@ fn scheme_from_fn_parts_inner(
 ) -> types.Scheme =
   types.scheme_quantified(
     type_params,
-    build_fn_type_modes(param_types_from_decl(owner, params, local_vars), param_modes(params),
+    build_fn_type_modes(param_types_from_decl(owner, params, local_vars), list_map(ast.param_mode_of, params),
       ret_from_maybe_with_vars(owner, ret_type_maybe, local_vars),
-      effect_from_maybe_labels(effects_maybe)),
-    effect_from_maybe_labels(effects_maybe),
+      types.effect_from_labels(effects_maybe)),
+    types.effect_from_labels(effects_maybe),
     Nil
   )
   where local_vars = build_type_var_dict(type_params, alias_env)
@@ -739,7 +723,7 @@ fn build_arrow_chain(params: List types.Type, modes: List ast.ParamMode, ret: ty
   | Nil -> ret
   | Cons p rest ->
       types.TFunc(p, build_arrow_chain(rest, mode_list_tail(modes), ret, eff),
-        arrow_effect_at(rest, eff), own_of_mode(mode_list_head(modes)))
+        arrow_effect_at(rest, eff), linear_check.ownership_of_param_mode(mode_list_head(modes)))
 
 # The effect belongs to the last arrow only; every earlier one is a pure step
 # toward it.
@@ -747,9 +731,6 @@ fn arrow_effect_at(rest: List types.Type, eff: types.Effect) -> types.Effect =
   match rest with
   | Nil -> eff
   | _ -> types.EffectPure
-
-fn own_of_mode(m: ast.ParamMode) -> types.Ownership =
-  linear_check.ownership_of_param_mode(m)
 
 fn mode_list_head(modes: List ast.ParamMode) -> ast.ParamMode =
   match modes with
@@ -760,11 +741,6 @@ fn mode_list_tail(modes: List ast.ParamMode) -> List ast.ParamMode =
   match modes with
   | Nil -> Nil
   | Cons _ rest -> rest
-
-export fn param_modes(params: List ast.Param) -> List ast.ParamMode =
-  match params with
-  | Nil -> Nil
-  | Cons p rest -> Cons(ast.param_mode_of(p), param_modes(rest))
 
 # CALL side (M4.6): the arrow synthesized from the argument types, to unify
 # against the callee. Its ownership must be COPIED from the callee's own spine —
@@ -996,7 +972,7 @@ fn merge_effects(a: types.Effect, b: types.Effect) -> types.Effect =
   | _ -> merge_effect_labels(a, b)
 
 fn merge_effect_labels(a: types.Effect, b: types.Effect) -> types.Effect =
-  match list_union_labels(effect_labels(a), effect_labels(b)) with
+  match list_fold(\ (acc, y) -> list_add_unique(y, acc), effect_labels(a), effect_labels(b)) with
   | [only] -> types.EffectVar(only)
   | labels -> types.EffectRow(labels)
 
@@ -1006,63 +982,6 @@ fn effect_labels(e: types.Effect) -> List String =
   | types.EffectRow labels -> labels
   # Pure and IO are both handled by merge_effects before reaching here.
   | _ -> Nil
-
-fn list_union_labels(xs: List String, ys: List String) -> List String =
-  match ys with
-  | Nil -> xs
-  | Cons y rest ->
-      if list_member(y, xs)
-      then list_union_labels(xs, rest)
-      else list_union_labels(list_append_label(xs, y), rest)
-
-fn list_append_label(xs: List String, y: String) -> List String =
-  match xs with
-  | Nil -> [y]
-  | Cons h t -> Cons(h, list_append_label(t, y))
-
-# ---------------------------------------------------------------------------
-# List helpers (type-specific reverse functions)
-# ---------------------------------------------------------------------------
-
-fn typed_expr_list_reverse(xs: List typed_ast.TypedExpr) -> List typed_ast.TypedExpr =
-  typed_expr_rev_acc(xs, Nil)
-
-fn typed_expr_rev_acc(xs: List typed_ast.TypedExpr, acc: List typed_ast.TypedExpr) -> List typed_ast.TypedExpr =
-  match xs with
-  | Nil -> acc
-  | Cons h t -> typed_expr_rev_acc(t, Cons(h, acc))
-
-fn typed_branch_list_reverse(xs: List typed_ast.TypedMatchBranch) -> List typed_ast.TypedMatchBranch =
-  typed_branch_rev_acc(xs, Nil)
-
-fn typed_branch_rev_acc(xs: List typed_ast.TypedMatchBranch, acc: List typed_ast.TypedMatchBranch) -> List typed_ast.TypedMatchBranch =
-  match xs with
-  | Nil -> acc
-  | Cons h t -> typed_branch_rev_acc(t, Cons(h, acc))
-
-fn typed_do_step_list_reverse(xs: List typed_ast.TypedDoStep) -> List typed_ast.TypedDoStep =
-  typed_do_step_rev_acc(xs, Nil)
-
-fn typed_do_step_rev_acc(xs: List typed_ast.TypedDoStep, acc: List typed_ast.TypedDoStep) -> List typed_ast.TypedDoStep =
-  match xs with
-  | Nil -> acc
-  | Cons h t -> typed_do_step_rev_acc(t, Cons(h, acc))
-
-fn typed_record_field_list_reverse(xs: List typed_ast.TypedRecordField) -> List typed_ast.TypedRecordField =
-  typed_record_field_rev_acc(xs, Nil)
-
-fn typed_record_field_rev_acc(xs: List typed_ast.TypedRecordField, acc: List typed_ast.TypedRecordField) -> List typed_ast.TypedRecordField =
-  match xs with
-  | Nil -> acc
-  | Cons h t -> typed_record_field_rev_acc(t, Cons(h, acc))
-
-fn typed_method_list_reverse(xs: List typed_ast.TypedInstanceMethod) -> List typed_ast.TypedInstanceMethod =
-  typed_method_rev_acc(xs, Nil)
-
-fn typed_method_rev_acc(xs: List typed_ast.TypedInstanceMethod, acc: List typed_ast.TypedInstanceMethod) -> List typed_ast.TypedInstanceMethod =
-  match xs with
-  | Nil -> acc
-  | Cons h t -> typed_method_rev_acc(t, Cons(h, acc))
 
 # The positionless sentinel. Use ONLY where no source position exists — a
 # compiler-synthesized node, or a whole-file/IO error with no single span. Never
@@ -1206,17 +1125,6 @@ type OneResult =
 # principal typing. That is an error, not a fresh variable — a fresh variable
 # is what let the access be read at ANY type while lowering emitted a real
 # offset load.
-# Restores source order, so a declaration with several undetermined receivers
-# reports the FIRST one. Not `list_reverse`: this module shadows the prelude's
-# polymorphic one with a `List types.Type` definition (`:517`).
-fn reverse_obligations(
-  xs: List unifier.FieldObligation,
-  acc: List unifier.FieldObligation
-) -> List unifier.FieldObligation =
-  match xs with
-  | Nil -> acc
-  | Cons h t -> reverse_obligations(t, Cons(h, acc))
-
 fn discharge_field_obligations(
   state: unifier.InferState,
   env: Dict types.Scheme,
@@ -1237,7 +1145,7 @@ fn discharge_round(
 ) -> DischargeResult !{IO} =
   match pending with
   | Nil ->
-      discharge_next_round(state, env, subst, reverse_obligations(blocked, Nil), progressed)
+      discharge_next_round(state, env, subst, list_reverse(blocked), progressed)
   | Cons o rest ->
       do
         r <- discharge_one(state, env, subst, o)
@@ -1760,7 +1668,7 @@ fn infer_if_join(
   then_eff: types.Effect,
   else_eff: types.Effect,
   pos: source.SourcePos
-) -> InferResult !{IO} =
+) -> InferResult =
   let unifier.UnifyOk s5 es5 = unifier.unify_actual_expected(subst, eff_subst, typed_ast.typed_expr_type(typed_then), ret_type) else unifier.UnifyErr e -> InferErr(pos, "If branches must have same type: " ++ e)
       unifier.UnifyOk s6 es6 = unifier.unify_actual_expected(s5, es5, typed_ast.typed_expr_type(typed_else), ret_type) else unifier.UnifyErr e -> InferErr(pos, "If branches must have same type: " ++ e)
   in InferOk(
@@ -2304,7 +2212,7 @@ fn infer_call_resolve(
   callee_display: String,
   zero_arity_ok: Bool,
   pos: source.SourcePos
-) -> CallResult !{IO} =
+) -> CallResult =
   match arg_types with
   | Nil ->
       resolve_zero_arg_call(subst, eff_subst, unifier.apply_subst(subst, callee_type),
@@ -2489,7 +2397,7 @@ fn check_instance_for_marker(
                         unifier.apply_subst(s3, typed_ast.typed_expr_type(cv_arg)), head_str)),
                     s3, es3, call_eff)
           else
-            # Return-position dispatch — first_concrete_typed_arg_str would pick
+            # Return-position dispatch — first_concrete_typed_arg_str_excluding would pick
             # an irrelevant arg type (e.g. the String input of `deserialize`).
             # Route directly to fwd markers; the post-pass walker
             # (resolve_dispatch_typed_expr) rewrites the TDict once the outer
@@ -2660,19 +2568,6 @@ fn find_fwd_tdict_in_args(class_name: String, args: List typed_ast.TypedExpr, en
           | Just fwd_scheme -> fwd_scheme_to_tdict(fwd_scheme, class_name, pos)
           | Nothing -> find_fwd_tdict_in_args(class_name, rest, env, pos)
 
-# Scan all args for the first whose head type is a concrete constructor (TConst).
-# Skips function-typed args (TFunc) and type-variable-headed containers, which
-# cannot host a typeclass instance.  This allows class methods whose concrete
-# container argument is not the first parameter (e.g. fmap(fn, container)) to
-# resolve correctly.
-fn first_concrete_typed_arg_str(typed_args: List typed_ast.TypedExpr, subst: Dict types.Type) -> Maybe String =
-  match typed_args with
-  | Nil -> Nothing
-  | Cons first_arg rest ->
-      match concrete_type_str(unifier.apply_subst(subst, typed_ast.typed_expr_type(first_arg))) with
-      | Nothing -> first_concrete_typed_arg_str(rest, subst)
-      | Just s -> Just(s)
-
 # W4 (F-DISPATCH): pick the argument that determines the instance dict by
 # CONSTRAINT POSITION. Walk the method's declared parameter chain alongside the
 # actual args and return the first arg whose declared parameter type mentions a
@@ -2773,39 +2668,32 @@ fn class_var_dispatch_type(
       Just h = concrete_type_str(projected) else arg_t
   in if h == head_str then projected else arg_t
 
-# Like first_concrete_typed_arg_str, but returns the arg itself (used as the W4
-# fallback so head_str and TypeExpr derive from the same TypedExpr).
+# Like first_concrete_typed_arg_str_excluding, but returns the arg itself (used
+# as the W4 fallback so head_str and TypeExpr derive from the same TypedExpr).
 fn first_concrete_typed_arg(typed_args: List typed_ast.TypedExpr, subst: Dict types.Type) -> Maybe typed_ast.TypedExpr =
-  match typed_args with
-  | Nil -> Nothing
-  | Cons first_arg rest ->
-      match concrete_type_str(unifier.apply_subst(subst, typed_ast.typed_expr_type(first_arg))) with
-      | Nothing -> first_concrete_typed_arg(rest, subst)
-      | Just _ -> Just(first_arg)
+  find(has_concrete_head(subst, _), typed_args)
 
-# Like first_concrete_typed_arg_str but skips heads in the excluded list.
-# Used when multiple constraints share a class: subsequent constraints skip
-# heads already committed to earlier TDict injections.
+fn has_concrete_head(subst: Dict types.Type, a: typed_ast.TypedExpr) -> Bool =
+  match concrete_type_str(unifier.apply_subst(subst, typed_ast.typed_expr_type(a))) with
+  | Nothing -> false
+  | Just _ -> true
+
+# Head of the first arg with a concrete constructor head (TConst). Function-typed
+# and type-variable-headed args cannot host an instance, so they are skipped; so
+# are heads in `excluded`, which later constraints of one class use to skip heads
+# already committed to earlier TDict injections.
 fn first_concrete_typed_arg_str_excluding(
   typed_args: List typed_ast.TypedExpr,
   subst: Dict types.Type,
   excluded: List String
 ) -> Maybe String =
-  match typed_args with
-  | Nil -> Nothing
-  | Cons first_arg rest ->
-      match concrete_type_str(unifier.apply_subst(subst, typed_ast.typed_expr_type(first_arg))) with
-      | Nothing -> first_concrete_typed_arg_str_excluding(rest, subst, excluded)
-      | Just s ->
-          if str_list_contains(excluded, s) then
-            first_concrete_typed_arg_str_excluding(rest, subst, excluded)
-          else
-            Just(s)
+  find_map(concrete_head_not_excluded(subst, excluded, _), typed_args)
 
-fn str_list_contains(xs: List String, target: String) -> Bool =
-  match xs with
-  | Nil -> false
-  | Cons h rest -> if h == target then true else str_list_contains(rest, target)
+fn concrete_head_not_excluded(subst: Dict types.Type, excluded: List String,
+                              a: typed_ast.TypedExpr) -> Maybe String =
+  match concrete_type_str(unifier.apply_subst(subst, typed_ast.typed_expr_type(a))) with
+  | Nothing -> Nothing
+  | Just s -> if list_member(s, excluded) then Nothing else Just(s)
 
 # Convert a concrete types.Type to an ast.TypeExpr, every type variable written `_`.
 # This is what a SCAN records — head-directed, first-concrete-argument, return-type —
@@ -2847,58 +2735,25 @@ fn named_typeexpr(t: types.Type, subst: Dict types.Type, env: Dict types.Scheme)
   | types.TVar name -> fwd_prog_var_any_class(types.tyvar_identity(name), subst, env)
   | _ -> ast.TypeName("_")
 
-# Returns the full concrete ast.TypeExpr for the first concrete arg, or Nothing.
-fn first_concrete_typed_arg_typeexpr(
-  typed_args: List typed_ast.TypedExpr,
-  subst: Dict types.Type
-) -> Maybe ast.TypeExpr =
-  match typed_args with
-  | Nil -> Nothing
-  | Cons first_arg rest ->
-      match concrete_typeexpr(unifier.apply_subst(subst, typed_ast.typed_expr_type(first_arg))) with
-      | Nothing -> first_concrete_typed_arg_typeexpr(rest, subst)
-      | Just te -> Just(te)
-
-# Return the full concrete typeexpr for the first typed arg, falling back to TypeName(head_str).
-fn first_concrete_arg_typeexpr_or_name(
-  head_str: String,
-  typed_args: List typed_ast.TypedExpr,
-  subst: Dict types.Type
-) -> ast.TypeExpr =
-  match first_concrete_typed_arg_typeexpr(typed_args, subst) with
-  | Just te -> te
-  | Nothing -> ast.TypeName(head_str)
-
-# Like first_concrete_arg_typeexpr_or_name but skips args whose head is in excluded.
-# Needed so that the TypeConstraint in a TDict records the correct instance type
-# when multiple constraints share the same class.
+# Full concrete typeexpr of the head, falling back to TypeName(head_str). Args
+# whose head is in `excluded` are skipped, so the TypeConstraint in a TDict
+# records the right instance type when several constraints share a class.
 fn first_concrete_arg_typeexpr_or_name_excluding(
   head_str: String,
   typed_args: List typed_ast.TypedExpr,
   subst: Dict types.Type,
   excluded: List String
 ) -> ast.TypeExpr =
-  match first_concrete_typed_arg_typeexpr_excluding(typed_args, subst, excluded) with
-  | Just te -> te
-  | Nothing -> ast.TypeName(head_str)
+  maybe_with_default(ast.TypeName(head_str),
+    find_map(concrete_typeexpr_not_excluded(subst, excluded, _), typed_args))
 
-fn first_concrete_typed_arg_typeexpr_excluding(
-  typed_args: List typed_ast.TypedExpr,
-  subst: Dict types.Type,
-  excluded: List String
-) -> Maybe ast.TypeExpr =
-  match typed_args with
-  | Nil -> Nothing
-  | Cons first_arg rest ->
-      match concrete_typeexpr(unifier.apply_subst(subst, typed_ast.typed_expr_type(first_arg))) with
-      | Nothing -> first_concrete_typed_arg_typeexpr_excluding(rest, subst, excluded)
-      | Just te ->
-          if str_list_contains(excluded, te_outermost_name(te)) then
-            first_concrete_typed_arg_typeexpr_excluding(rest, subst, excluded)
-          else
-            Just(te)
+fn concrete_typeexpr_not_excluded(subst: Dict types.Type, excluded: List String,
+                                  a: typed_ast.TypedExpr) -> Maybe ast.TypeExpr =
+  match concrete_typeexpr(unifier.apply_subst(subst, typed_ast.typed_expr_type(a))) with
+  | Nothing -> Nothing
+  | Just te -> if list_member(te_outermost_name(te), excluded) then Nothing else Just(te)
 
-# Like first_concrete_arg_typeexpr_or_name, but substitutes programmer type-variable
+# Like first_concrete_arg_typeexpr_or_name_excluding, but substitutes programmer type-variable
 # names recovered from @fwd markers when the type contains TVars.  This is needed when
 # calling a class method on a polymorphic container (e.g. eq(x, y) where x: Maybe a):
 # without it, TVar args become TypeName("_") and the lowering's fwd-dict lookup fails.
@@ -3022,13 +2877,8 @@ fn fwd_scheme_prog_var(scheme: types.Scheme) -> ast.TypeExpr =
 # in the subst.  Fully applying the subst would follow that chain and return
 # "t364", which has no @fwd marker — the marker was registered for "t360".
 # Using the raw type preserves the original TVar name so the @fwd lookup works.
-fn first_tvar_head_after_subst(typed_args: List typed_ast.TypedExpr, subst: Dict types.Type) -> Maybe String =
-  match typed_args with
-  | Nil -> Nothing
-  | Cons first_arg rest ->
-      match tvar_head_of_type(typed_ast.typed_expr_type(first_arg)) with
-      | Just name -> Just(name)
-      | Nothing -> first_tvar_head_after_subst(rest, subst)
+fn first_tvar_head(typed_args: List typed_ast.TypedExpr) -> Maybe String =
+  find_map(\a -> tvar_head_of_type(typed_ast.typed_expr_type(a)), typed_args)
 
 fn tvar_head_of_type(t: types.Type) -> Maybe String =
   match t with
@@ -3142,14 +2992,9 @@ fn dispatch_type_for_vars(
       | Just t -> Just(t)
       | Nothing -> dispatch_type_for_vars(scheme_type, typed_args, ret_t, subst, rest)
 
-fn contains_str(xs: List String, target: String) -> Bool =
-  match xs with
-  | Nil -> false
-  | Cons h t -> if h == target then true else contains_str(t, target)
-
 fn type_contains_var(t: types.Type, names: List String) -> Bool =
   match t with
-  | types.TVar n -> contains_str(names, types.tyvar_identity(n))
+  | types.TVar n -> list_member(types.tyvar_identity(n), names)
   | types.TConst _ -> false
   | types.TApp a b -> if type_contains_var(a, names) then true else type_contains_var(b, names)
   | types.TFunc p r _ _ -> if type_contains_var(p, names) then true else type_contains_var(r, names)
@@ -3178,7 +3023,7 @@ fn class_var_in_args(method_type: types.Type, class_vars: List String) -> Bool =
 # appropriate dict args at the call site.
 #
 # user_typed_args strips TDict nodes already prepended in earlier iterations so
-# that first_concrete_typed_arg_str and first_tvar_head_after_subst only see
+# that first_concrete_typed_arg_str_excluding and first_tvar_head only see
 # the real user arguments when resolving each constraint.
 # Also strips TVar nodes whose names start with "__tc_" — these are materialized
 # hidden dict params inserted by the lowering pass (check2 path). Without this
@@ -3275,14 +3120,13 @@ fn scan_ptf_prog_var_entries(
           match concrete_type_str(unifier.apply_subst(s3, fresh_t)) with
           | Nothing -> scan_ptf_prog_var_entries(class_name, prog_var, rest, s3, env, pos, excluded)
           | Just head_str ->
-              if str_list_contains(excluded, head_str) then
+              if list_member(head_str, excluded) then
                 scan_ptf_prog_var_entries(class_name, prog_var, rest, s3, env, pos, excluded)
               else if has_inner_tvar_for_prog_var(unifier.apply_subst(s3, fresh_t), class_name, prog_var, env) then
                 match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
                 | Just _ ->
-                    Just(typed_ast.TDict(
-                      ast.TypeConstraint(class_name, Cons(type_to_typeexpr_with_prog_vars(unifier.apply_subst(s3, fresh_t), class_name, s3, env), Nil)),
-                      types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
+                    Just(compound_tdict(class_name,
+                      type_to_typeexpr_with_prog_vars(unifier.apply_subst(s3, fresh_t), class_name, s3, env), pos))
                 | Nothing ->
                     scan_ptf_prog_var_entries(class_name, prog_var, rest, s3, env, pos, excluded)
               else
@@ -3553,9 +3397,8 @@ fn resolve_one_constraint_tdict(
   | Just head_str ->
       match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
       | Just _ ->
-          Just(typed_ast.TDict(
-            ast.TypeConstraint(class_name, Cons(first_concrete_arg_typeexpr_or_name_excluding(head_str, user_args, subst, excluded), Nil)),
-            types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
+          Just(compound_tdict(class_name,
+            first_concrete_arg_typeexpr_or_name_excluding(head_str, user_args, subst, excluded), pos))
       | Nothing ->
           resolve_via_fwd_or_scan(class_name, user_args, subst, env, pos)
   | Nothing ->
@@ -3563,13 +3406,12 @@ fn resolve_one_constraint_tdict(
       # same type as a prior constraint of the same class (e.g. `where Eq a, Eq b` called
       # with a = b = AlwaysEqual). Fall back without exclusion: the second constraint
       # legitimately needs the same dict as the first.
-      match first_concrete_typed_arg_str(user_args, subst) with
+      match first_concrete_typed_arg_str_excluding(user_args, subst, Nil) with
       | Just head_str ->
           match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
           | Just _ ->
-              Just(typed_ast.TDict(
-                ast.TypeConstraint(class_name, Cons(first_concrete_arg_typeexpr_or_name(head_str, user_args, subst), Nil)),
-                types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
+              Just(compound_tdict(class_name,
+                first_concrete_arg_typeexpr_or_name_excluding(head_str, user_args, subst, Nil), pos))
           | Nothing ->
               resolve_via_fwd_or_scan(class_name, user_args, subst, env, pos)
       | Nothing ->
@@ -3584,7 +3426,7 @@ fn resolve_via_fwd_or_scan(
   env: Dict types.Scheme,
   pos: source.SourcePos
 ) -> Maybe typed_ast.TypedExpr =
-  match first_tvar_head_after_subst(user_args, subst) with
+  match first_tvar_head(user_args) with
   | Just tvar_name ->
       match dict_get("@fwd:" ++ tvar_name ++ ":" ++ class_name, env) with
       | Just fwd_scheme ->
@@ -3602,9 +3444,7 @@ fn resolve_via_fwd_or_scan(
 fn fwd_scheme_to_tdict(fwd_scheme: types.Scheme, class_name: String, pos: source.SourcePos) -> Maybe typed_ast.TypedExpr =
   match fwd_scheme with
   | types.Scheme _ _ (types.TConst prog_var) _ _ ->
-      Just(typed_ast.TDict(
-        ast.TypeConstraint(class_name, Cons(ast.TypeName(types.type_id_name(prog_var)), Nil)),
-        types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
+      Just(compound_tdict(class_name, ast.TypeName(types.type_id_name(prog_var)), pos))
   | _ -> Nothing
 
 # Scan all env entries for the first "@fwd:*:class_name" marker.
@@ -3660,9 +3500,7 @@ fn scan_fwd_markers_for_prog_var(
             match val with
             | types.Scheme _ _ (types.TConst stored_prog_var) _ _ ->
                 if types.type_id_name(stored_prog_var) == prog_var
-                then Just(typed_ast.TDict(
-                       ast.TypeConstraint(class_name, Cons(ast.TypeName(prog_var), Nil)),
-                       types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
+                then Just(compound_tdict(class_name, ast.TypeName(prog_var), pos))
                 else scan_fwd_markers_for_prog_var(class_name, prog_var, rest, pos)
             | _ -> scan_fwd_markers_for_prog_var(class_name, prog_var, rest, pos)
           else scan_fwd_markers_for_prog_var(class_name, prog_var, rest, pos)
@@ -3679,19 +3517,11 @@ fn scan_fwd_markers_for_prog_var(
 # (observability guard-rail #3). The two `(guess)` tags mark the order-dependent
 # heuristics that grab a plausible-but-wrong dict — motivation for backlog item 3.
 
-# Head name of a TypeExpr, mirroring concrete_type_str's head extraction for Types.
-fn dispatch_head_str(te: ast.TypeExpr) -> String =
-  match te with
-  | ast.TypeName n -> n
-  | ast.TypeApply base _ -> dispatch_head_str(base)
-  | ast.TupleType items -> types.tuple_head(list_length(items))
-  | _ -> "?"
-
 # The resolved dict's head type, read out of the TDict's constraint TypeExpr
 # (evidence is still EvUnresolved at this stage, so the TypeConstraint is the source).
 fn tdict_head_str(td: typed_ast.TypedExpr) -> String =
   match td with
-  | typed_ast.TDict (ast.TypeConstraint _ [head_te | _]) _ _ _ -> dispatch_head_str(head_te)
+  | typed_ast.TDict (ast.TypeConstraint _ [head_te | _]) _ _ _ -> maybe_with_default("?", type_expr_head_name(head_te))
   | _ -> "?"
 
 fn resolved_head_str(class_name: String, resolved: Maybe typed_ast.TypedExpr) -> String =
@@ -3802,9 +3632,8 @@ fn resolve_precise_head(
       # prog_vars can legitimately map to the same concrete type; same dict.
       match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
       | Just _ ->
-          (Just(typed_ast.TDict(
-            ast.TypeConstraint(class_name, Cons(type_to_typeexpr_with_prog_vars(unifier.apply_subst(s3, fresh_t), class_name, s3, env), Nil)),
-            types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved)), "precise-just")
+          (Just(compound_tdict(class_name,
+            type_to_typeexpr_with_prog_vars(unifier.apply_subst(s3, fresh_t), class_name, s3, env), pos)), "precise-just")
       | Nothing ->
           (resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos), "precise_no_inst->fwd_or_scan")
   | Nothing ->
@@ -3834,8 +3663,7 @@ fn resolve_precise_head(
 # A dictionary the post-pass must still decide: a slot of its own, every argument `_`.
 # Never filled, it lowers to the poison thunk, which fails loudly if reached.
 fn hole_tdict(class_name: String, pos: source.SourcePos) -> typed_ast.TypedExpr =
-  typed_ast.TDict(ast.TypeConstraint(class_name, [ast.TypeName("_")]),
-    types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved)
+  compound_tdict(class_name, ast.TypeName("_"), pos)
 
 # Decode a positional constraint-var token ("#pos:<k>", written by
 # canonicalize_constrained_constraints) back to the callee's live generalized-scheme
@@ -3978,9 +3806,7 @@ fn resolve_field_constraint(
 fn resolve_concrete_head_tdict(class_name: String, head_name: String, env: Dict types.Scheme, pos: source.SourcePos) -> Maybe typed_ast.TypedExpr =
   match dict_get("@inst:" ++ class_name ++ ":" ++ head_name, env) with
   | Just _ ->
-      Just(typed_ast.TDict(
-        ast.TypeConstraint(class_name, Cons(ast.TypeName(head_name), Nil)),
-        types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
+      Just(compound_tdict(class_name, ast.TypeName(head_name), pos))
   | Nothing -> Nothing
 
 # --- Forward marker helpers ---
@@ -4228,7 +4054,7 @@ fn infer_args_acc(
   acc_eff: types.Effect
 ) -> InferArgsResult !{IO} =
   match args with
-  | Nil -> ArgsOk(typed_expr_list_reverse(acc), subst, eff_subst, acc_eff)
+  | Nil -> ArgsOk(list_reverse(acc), subst, eff_subst, acc_eff)
   | Cons arg rest ->
       do
         r <- infer_expr(state, env, subst, eff_subst, arg)
@@ -4290,12 +4116,12 @@ fn eta_expand_constrained_arg(e: ast.Expr, env: Dict types.Scheme) -> ast.Expr =
   in expanded
 
 fn has_lambda_slot(slots: List ArgSlot) -> Bool =
-  match slots with
-  | Nil -> false
-  | Cons slot rest ->
-      match slot with
-      | ArgLambda _ _ _ _ -> true
-      | ArgDone _ _ -> has_lambda_slot(rest)
+  any(is_lambda_slot, slots)
+
+fn is_lambda_slot(slot: ArgSlot) -> Bool =
+  match slot with
+  | ArgLambda _ _ _ _ -> true
+  | ArgDone _ _ -> false
 
 # Pass 1: infer every non-lambda argument in source order, holding each lambda
 # back behind a fresh slot variable.
@@ -4308,7 +4134,7 @@ fn infer_arg_slots(
   acc: List ArgSlot
 ) -> ArgSlotsResult !{IO} =
   match args with
-  | Nil -> SlotsOk(arg_slot_list_reverse(acc), subst, eff_subst)
+  | Nil -> SlotsOk(list_reverse(acc), subst, eff_subst)
   | Cons arg0 rest ->
       # Rewrite a bare mention of a constrained function or constructor into its eta-lambda HERE rather than in
       # infer_var, because this match is where an argument's fate is decided: a lambda is held back
@@ -4350,16 +4176,13 @@ fn push_down_arg_slots(
   # lets an already-bound variable resolve during this unification.
   unifier.unified_subst(
     unifier.unify_actual_expected(subst, eff_subst, callee_type,
-      build_fn_type_like(arg_slot_types(slots), unifier.apply_subst(subst, callee_type), ret)),
+      build_fn_type_like(list_map(arg_slot_type, slots), unifier.apply_subst(subst, callee_type), ret)),
     subst)
 
-fn arg_slot_types(slots: List ArgSlot) -> List types.Type =
-  match slots with
-  | Nil -> Nil
-  | Cons slot rest ->
-      match slot with
-      | ArgDone typed_arg _ -> Cons(typed_ast.typed_expr_type(typed_arg), arg_slot_types(rest))
-      | ArgLambda _ _ v _ -> Cons(v, arg_slot_types(rest))
+fn arg_slot_type(slot: ArgSlot) -> types.Type =
+  match slot with
+  | ArgDone typed_arg _ -> typed_ast.typed_expr_type(typed_arg)
+  | ArgLambda _ _ v _ -> v
 
 # Pass 2: walk the slots in SOURCE order, inferring each held-back lambda against
 # its now-resolved slot.  Source order matters for the effect merge -- merge_effects
@@ -4374,7 +4197,7 @@ fn infer_lambda_slots(
   acc_eff: types.Effect
 ) -> InferArgsResult !{IO} =
   match slots with
-  | Nil -> ArgsOk(typed_expr_list_reverse(acc), subst, eff_subst, acc_eff)
+  | Nil -> ArgsOk(list_reverse(acc), subst, eff_subst, acc_eff)
   | Cons slot rest ->
       match slot with
       | ArgDone typed_arg arg_eff ->
@@ -4389,13 +4212,6 @@ fn infer_lambda_slots(
             | InferOk typed_lam s1 es1 lam_eff ->
                 infer_lambda_slots(state, env, s1, es1, rest,
                   Cons(typed_lam, acc), merge_effects(acc_eff, lam_eff))
-
-fn arg_slot_list_reverse(xs: List ArgSlot) -> List ArgSlot = arg_slot_rev_acc(xs, Nil)
-
-fn arg_slot_rev_acc(xs: List ArgSlot, acc: List ArgSlot) -> List ArgSlot =
-  match xs with
-  | Nil -> acc
-  | Cons h t -> arg_slot_rev_acc(t, Cons(h, acc))
 
 # --- Tuple ---
 
@@ -4506,9 +4322,8 @@ fn append_via_semigroup_at(
       | Just _ ->
           InferOk(
             typed_ast.TCall(typed_ast.TVar("append", t, pos),
-              Cons(typed_ast.TDict(
-                     ast.TypeConstraint("Semigroup", Cons(type_to_typeexpr_with_prog_vars(t, "Semigroup", s1, env), Nil)),
-                     types.TConst(types.type_id("Semigroup")), pos, typed_ast.EvUnresolved),
+              Cons(compound_tdict("Semigroup",
+                     type_to_typeexpr_with_prog_vars(t, "Semigroup", s1, env), pos),
                    [typed_left, typed_right]),
               t, pos),
             s1, eff_subst, eff)
@@ -4526,6 +4341,24 @@ fn append_via_semigroup_at(
       check_instance_fwd("Semigroup", typed_ast.TVar("append", t, pos),
                          [typed_left, typed_right], env, t, s1, eff_subst, eff, pos, ByArg(t))
 
+# The first candidate `t` unifies with, as (candidate, subst, eff_subst). When
+# none does, the error is the last attempt's.
+fn first_unifying(
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  t: types.Type,
+  candidates: List types.Type
+) -> Result String (types.Type, Dict types.Type, Dict types.Effect) =
+  match candidates with
+  | Nil -> Err("no candidate types")
+  | Cons c rest ->
+      match unifier.unify_actual_expected(subst, eff_subst, t, c) with
+      | unifier.UnifyOk s2 es2 -> Ok((c, s2, es2))
+      | unifier.UnifyErr e ->
+          match rest with
+          | Nil -> Err(e)
+          | [_ | _] -> first_unifying(subst, eff_subst, t, rest)
+
 fn check_arith(
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
@@ -4534,7 +4367,7 @@ fn check_arith(
   typed_right: typed_ast.TypedExpr,
   eff: types.Effect,
   pos: source.SourcePos
-) -> InferResult !{IO} =
+) -> InferResult =
   # Concrete-only, same-type numeric rule (docs/nn-gap-analysis.md §7.1):
   # unify the operands with each other first, then require the shared type be
   # Int or Double.  Int op Int -> Int; Double op Double -> Double; a mixed
@@ -4543,16 +4376,11 @@ fn check_arith(
   match unifier.unify_join(subst, eff_subst, typed_ast.typed_expr_type(typed_left), typed_ast.typed_expr_type(typed_right)) with
   | unifier.UnifyErr e -> InferErr(pos, op ++ " needs matching numeric operands: " ++ e)
   | unifier.UnifyOk s1 es1 ->
-      match unifier.unify_actual_expected(s1, es1, typed_ast.typed_expr_type(typed_left), types.type_int()) with
-      | unifier.UnifyOk s2 es2 ->
-          InferOk(typed_ast.TBinary(op, typed_left, typed_right, types.type_int(), pos),
-                  s2, es2, eff)
-      | unifier.UnifyErr _ ->
-          match unifier.unify_actual_expected(s1, es1, typed_ast.typed_expr_type(typed_left), types.type_double()) with
-          | unifier.UnifyErr e -> InferErr(pos, op ++ " needs Int or Double operands: " ++ e)
-          | unifier.UnifyOk s2 es2 ->
-              InferOk(typed_ast.TBinary(op, typed_left, typed_right, types.type_double(), pos),
-                      s2, es2, eff)
+      match first_unifying(s1, es1, typed_ast.typed_expr_type(typed_left),
+              [types.type_int(), types.type_double()]) with
+      | Err e -> InferErr(pos, op ++ " needs Int or Double operands: " ++ e)
+      | Ok (t, s2, es2) ->
+          InferOk(typed_ast.TBinary(op, typed_left, typed_right, t, pos), s2, es2, eff)
 
 fn check_compare(
   subst: Dict types.Type,
@@ -4562,28 +4390,19 @@ fn check_compare(
   typed_right: typed_ast.TypedExpr,
   eff: types.Effect,
   pos: source.SourcePos
-) -> InferResult !{IO} =
+) -> InferResult =
   # Unify left and right with each other first, then check the result is
   # Int, Char, or Double.  Double comparison (e.g. `x < 0.0`) lowers to an
   # ordered fcmp in the IR (docs/nn-gap-analysis.md §7.1).
   match unifier.unify_join(subst, eff_subst, typed_ast.typed_expr_type(typed_left), typed_ast.typed_expr_type(typed_right)) with
   | unifier.UnifyErr e -> InferErr(pos, op ++ " needs matching types: " ++ e)
   | unifier.UnifyOk s1 es1 ->
-      match unifier.unify_actual_expected(s1, es1, typed_ast.typed_expr_type(typed_left), types.type_int()) with
-      | unifier.UnifyOk s2 es2 ->
+      match first_unifying(s1, es1, typed_ast.typed_expr_type(typed_left),
+              [types.type_int(), types.type_char(), types.type_double()]) with
+      | Err e -> InferErr(pos, op ++ " needs Int, Char, or Double: " ++ e)
+      | Ok (_, s2, es2) ->
           InferOk(typed_ast.TBinary(op, typed_left, typed_right, types.type_bool(), pos),
                   s2, es2, eff)
-      | unifier.UnifyErr _ ->
-          match unifier.unify_actual_expected(s1, es1, typed_ast.typed_expr_type(typed_left), types.type_char()) with
-          | unifier.UnifyOk s2 es2 ->
-              InferOk(typed_ast.TBinary(op, typed_left, typed_right, types.type_bool(), pos),
-                      s2, es2, eff)
-          | unifier.UnifyErr _ ->
-              match unifier.unify_actual_expected(s1, es1, typed_ast.typed_expr_type(typed_left), types.type_double()) with
-              | unifier.UnifyErr e -> InferErr(pos, op ++ " needs Int, Char, or Double: " ++ e)
-              | unifier.UnifyOk s2 es2 ->
-                  InferOk(typed_ast.TBinary(op, typed_left, typed_right, types.type_bool(), pos),
-                          s2, es2, eff)
 
 fn is_primitive_eq_type(t: types.Type) -> Bool =
   match t with
@@ -4676,7 +4495,7 @@ fn check_bool(
   typed_right: typed_ast.TypedExpr,
   eff: types.Effect,
   pos: source.SourcePos
-) -> InferResult !{IO} =
+) -> InferResult =
   match unifier.unify_actual_expected(subst, eff_subst, typed_ast.typed_expr_type(typed_left), types.type_bool()) with
   | unifier.UnifyErr e -> InferErr(pos, op ++ " needs Bool: " ++ e)
   | unifier.UnifyOk s1 es1 ->
@@ -4712,24 +4531,14 @@ fn infer_unary(
           | unifier.UnifyOk s2 es2 ->
               InferOk(typed_ast.TUnary(op, typed_operand, types.type_bool(), pos), s2, es2, eff)
         else if op == "-" then
-          match unifier.unify_actual_expected(s1, es1, typed_ast.typed_expr_type(typed_operand), types.type_int()) with
-          | unifier.UnifyOk s2 es2 ->
-              InferOk(typed_ast.TUnary(op, typed_operand, types.type_int(), pos), s2, es2, eff)
-          | unifier.UnifyErr _ ->
-              match unifier.unify_actual_expected(s1, es1, typed_ast.typed_expr_type(typed_operand), types.type_double()) with
-              | unifier.UnifyErr e -> InferErr(pos, "- (negation) needs an Int or Double operand: " ++ e)
-              | unifier.UnifyOk s2 es2 ->
-                  InferOk(typed_ast.TUnary(op, typed_operand, types.type_double(), pos), s2, es2, eff)
+          match first_unifying(s1, es1, typed_ast.typed_expr_type(typed_operand),
+                  [types.type_int(), types.type_double()]) with
+          | Err e -> InferErr(pos, "- (negation) needs an Int or Double operand: " ++ e)
+          | Ok (t, s2, es2) -> InferOk(typed_ast.TUnary(op, typed_operand, t, pos), s2, es2, eff)
         else
           InferErr(pos, "unknown unary operator: " ++ op)
 
 # --- Exhaustiveness checking ---
-
-fn extract_adt_name(t: types.Type) -> Maybe String =
-  match t with
-  | types.TConst name -> Just(types.type_id_name(name))
-  | types.TApp base _ -> extract_adt_name(base)
-  | _ -> Nothing
 
 fn is_catchall_pattern(pat: ast.Pattern) -> Bool =
   match pat with
@@ -4747,26 +4556,21 @@ fn is_catchall_pattern(pat: ast.Pattern) -> Bool =
 # — deep nested-pattern subsumption is explicitly outside the v0 contract
 # (spec §10.11); a full usefulness matrix is the deferred v1 end-state.
 
-fn pats_have_catchall(pats: List ast.Pattern) -> Bool =
-  match pats with
-  | Nil -> false
-  | Cons p rest -> if is_catchall_pattern(p) then true else pats_have_catchall(rest)
-
 fn pats_have_bool(pats: List ast.Pattern, want: Bool) -> Bool =
-  match pats with
-  | Nil -> false
-  | Cons p rest ->
-      match p with
-      | ast.BoolPattern b _ -> if b == want then true else pats_have_bool(rest, want)
-      | _ -> pats_have_bool(rest, want)
+  any(is_bool_pattern(want, _), pats)
+
+fn is_bool_pattern(want: Bool, p: ast.Pattern) -> Bool =
+  match p with
+  | ast.BoolPattern b _ -> b == want
+  | _ -> false
 
 fn pats_have_unit(pats: List ast.Pattern) -> Bool =
-  match pats with
-  | Nil -> false
-  | Cons p rest ->
-      match p with
-      | ast.UnitPattern _ -> true
-      | _ -> pats_have_unit(rest)
+  any(is_unit_pattern, pats)
+
+fn is_unit_pattern(p: ast.Pattern) -> Bool =
+  match p with
+  | ast.UnitPattern _ -> true
+  | _ -> false
 
 # Bool is a two-value domain; covered iff both true and false appear.
 fn bool_gap(pats: List ast.Pattern) -> Maybe String =
@@ -4862,7 +4666,7 @@ fn coverage_gap(
   ty: types.Type,
   pats: List ast.Pattern
 ) -> Maybe String !{IO} =
-  if pats_have_catchall(pats) then Nothing
+  if any(is_catchall_pattern, pats) then Nothing
   else coverage_gap_resolved(state, env, subst, ctor_map, unifier.apply_subst(subst, ty), pats)
 
 fn coverage_gap_resolved(
@@ -4906,11 +4710,11 @@ fn coverage_gap_adt(
   rty: types.Type,
   pats: List ast.Pattern
 ) -> Maybe String !{IO} =
-  match extract_adt_name(rty) with
+  match concrete_type_str(rty) with
   | Nothing -> Nothing
   | Just adt_name ->
       # ctor_map is keyed by bare type name (build_ctor_map), matching the bare
-      # names extract_adt_name yields, so a direct lookup resolves every ADT.
+      # names concrete_type_str yields, so a direct lookup resolves every ADT.
       match dict_get(adt_name, ctor_map) with
       | Nothing -> Nothing
       | Just all_ctors -> adt_gap(state, env, subst, ctor_map, all_ctors, rty, pats)
@@ -4956,12 +4760,9 @@ fn tuple_gap(
       | Just w -> Just("(" ++ w ++ ")")
       | Nothing -> Nothing
 
-fn branch_pats(branches: List typed_ast.TypedMatchBranch) -> List ast.Pattern =
-  match branches with
-  | Nil -> Nil
-  | Cons b rest ->
-      match b with
-      | typed_ast.TypedMatchBranch pat _ -> Cons(pat, branch_pats(rest))
+fn branch_pat(b: typed_ast.TypedMatchBranch) -> ast.Pattern =
+  match b with
+  | typed_ast.TypedMatchBranch pat _ -> pat
 
 fn exhaustiveness_check(
   state: unifier.InferState,
@@ -4971,7 +4772,7 @@ fn exhaustiveness_check(
   scrut_type: types.Type,
   branches: List typed_ast.TypedMatchBranch
 ) -> Maybe String !{IO} =
-  match coverage_gap(state, env, subst, ctor_map, rty, branch_pats(branches)) with
+  match coverage_gap(state, env, subst, ctor_map, rty, list_map(branch_pat, branches)) with
   | Nothing -> Nothing
   | Just w ->
       Just("Non-exhaustive match on " ++ types.type_to_string(rty) ++
@@ -4985,11 +4786,6 @@ fn exhaustiveness_check(
 # shadowed by an earlier catch-all, a repeated top-level literal, a repeat of a
 # constructor already fully covered, or any branch after all constructors are
 # covered.  Deeper nested subsumption is out of scope.
-
-fn all_catchall(subs: List ast.Pattern) -> Bool =
-  match subs with
-  | Nil -> true
-  | Cons s rest -> if is_catchall_pattern(s) then all_catchall(rest) else false
 
 fn is_literal_pattern(p: ast.Pattern) -> Bool =
   match p with
@@ -5009,11 +4805,6 @@ fn same_literal(a: ast.Pattern, b: ast.Pattern) -> Bool =
   | ast.UnitPattern _ -> (match b with | ast.UnitPattern _ -> true | _ -> false)
   | _ -> false
 
-fn literal_in(prefix: List ast.Pattern, pat: ast.Pattern) -> Bool =
-  match prefix with
-  | Nil -> false
-  | Cons p rest -> if same_literal(p, pat) then true else literal_in(rest, pat)
-
 fn prefix_has_full_ctor(prefix: List ast.Pattern, name: String) -> Bool =
   match prefix with
   | Nil -> false
@@ -5021,7 +4812,7 @@ fn prefix_has_full_ctor(prefix: List ast.Pattern, name: String) -> Bool =
       match p with
       | ast.ConstructorPattern n subs _ ->
           if string.after_last_dot(n) == string.after_last_dot(name) then
-            (if all_catchall(subs) then true else prefix_has_full_ctor(rest, name))
+            (if all(is_catchall_pattern, subs) then true else prefix_has_full_ctor(rest, name))
           else prefix_has_full_ctor(rest, name)
       | _ -> prefix_has_full_ctor(rest, name)
 
@@ -5057,7 +4848,7 @@ fn prefix_has_full_tuple(prefix: List ast.Pattern) -> Bool =
   | Nil -> false
   | Cons p rest ->
       match p with
-      | ast.TuplePattern subs _ -> if all_catchall(subs) then true else prefix_has_full_tuple(rest)
+      | ast.TuplePattern subs _ -> if all(is_catchall_pattern, subs) then true else prefix_has_full_tuple(rest)
       | _ -> prefix_has_full_tuple(rest)
 
 fn all_ctors_covered(ctors: List String, prefix: List ast.Pattern) -> Bool =
@@ -5078,7 +4869,7 @@ fn prefix_covers_toplevel(ctor_map: Dict (List String), scrut_type: types.Type, 
       else if types.type_id_name(name) == "Unit" then pats_have_unit(prefix)
       else adt_all_ctors_covered(ctor_map, types.type_id_name(name), prefix)
   | types.TApp _ _ ->
-      match extract_adt_name(scrut_type) with
+      match concrete_type_str(scrut_type) with
       | Nothing -> false
       | Just nm -> adt_all_ctors_covered(ctor_map, nm, prefix)
   | types.TTuple _ -> prefix_has_full_tuple(prefix)
@@ -5087,13 +4878,13 @@ fn prefix_covers_toplevel(ctor_map: Dict (List String), scrut_type: types.Type, 
 # A branch is dead if its own shape is already handled: a repeated top-level
 # literal, or a constructor an earlier branch already fully covers.
 fn structurally_shadowed(prefix: List ast.Pattern, pat: ast.Pattern) -> Bool =
-  if is_literal_pattern(pat) then literal_in(prefix, pat)
+  if is_literal_pattern(pat) then any(\p -> same_literal(p, pat), prefix)
   else ctor_fully_covered_in(prefix, pat)
 
 fn branch_is_unreachable(ctor_map: Dict (List String), scrut_type: types.Type, prefix: List ast.Pattern, pat: ast.Pattern) -> Bool =
   # (1) shadowed by an earlier catch-all; (2) repeated literal / fully-covered
   # constructor; (3) after the scrutinee is already fully covered (top-level).
-  if pats_have_catchall(prefix) then true
+  if any(is_catchall_pattern, prefix) then true
   else if structurally_shadowed(prefix, pat) then true
   else prefix_covers_toplevel(ctor_map, scrut_type, prefix)
 
@@ -5549,7 +5340,7 @@ fn infer_branches(
   match branches with
   | Nil ->
       do
-        let reversed = typed_branch_list_reverse(acc_branches)
+        let reversed = list_reverse(acc_branches)
         ctor_map <- unifier.get_ctor_map(state)
         let scrut_ty = typed_ast.typed_expr_type(typed_scrut)
         # Match these Maybe-!{IO} checks directly: a `<-` bind would strip the
@@ -5627,7 +5418,7 @@ fn infer_branch_unify(
   ret_type: types.Type,
   body_eff: types.Effect,
   src: MatchSource
-) -> InferResult !{IO} =
+) -> InferResult =
   match unifier.unify_actual_expected(subst, eff_subst, typed_ast.typed_expr_type(typed_body), ret_type) with
   | unifier.UnifyErr e ->
       let (epos, msg) = branch_mismatch(src, e, unifier.apply_subst(subst, typed_ast.typed_expr_type(typed_body)),
@@ -5694,7 +5485,7 @@ fn check_pattern_type(
   expected: types.Type,
   expected_type: types.Type,
   label: String
-) -> InferResult !{IO} =
+) -> InferResult =
   match unifier.unify_expect_actual(subst, eff_subst, expected, expected_type) with
   | unifier.UnifyErr e -> InferErr(pos, label ++ " pattern: " ++ e)
   | unifier.UnifyOk s1 es1 ->
@@ -5710,7 +5501,7 @@ fn infer_tuple_pattern(
   pats: List ast.Pattern
 ) -> InferResult !{IO} =
   do
-    elem_vars <- make_fresh_var_list(state, pats)
+    elem_vars <- fresh_vars_for(state, pats)
     infer_tuple_pattern_unified(pos, state, env, subst, eff_subst, expected, elem_vars, pats)
 
 fn infer_tuple_pattern_unified(
@@ -5728,13 +5519,13 @@ fn infer_tuple_pattern_unified(
   | unifier.UnifyOk s1 es1 ->
       check_pattern_list(pos, state, env, s1, es1, elem_vars, pats)
 
-fn make_fresh_var_list(state: unifier.InferState, pats: List ast.Pattern) -> List types.Type !{IO} =
-  match pats with
+fn fresh_vars_for(state: unifier.InferState, xs: List a) -> List types.Type !{IO} =
+  match xs with
   | Nil -> Nil
   | Cons _ rest ->
       do
         v <- unifier.fresh(state)
-        rest_vars <- make_fresh_var_list(state, rest)
+        rest_vars <- fresh_vars_for(state, rest)
         Cons(types.TVar(types.tyvar_id(v)), rest_vars)
 
 fn check_pattern_list(
@@ -6207,7 +5998,7 @@ fn infer_do_steps(
             | CarryErr msg bind_pos -> InferErr(bind_pos, msg)
             | CarryOk s ->
                 InferOk(
-                  typed_ast.TDo(typed_do_step_list_reverse(acc_steps),
+                  typed_ast.TDo(list_reverse(acc_steps),
                                 unifier.apply_subst(s, typed_ast.typed_expr_type(last_typed)), pos),
                   s, eff_subst, acc_eff)
   # A trailing binding has no steps to scope over (spec-v0.md §5.2.1a).
@@ -6409,7 +6200,7 @@ fn infer_lambda_expected(
   pos: source.SourcePos
 ) -> InferResult !{IO} =
   do
-    fresh_params <- make_fresh_param_types(state, params)
+    fresh_params <- fresh_vars_for(state, params)
     let param_types = seed_param_types(fresh_params, expected)
     infer_lambda_checked(state, env, params, param_types,
       seed_param_modes(params, expected), body, pos,
@@ -6510,7 +6301,7 @@ fn seed_from_arrow(fresh: List types.Type, expected: types.Type) -> List types.T
 # nothing; only ModeDefault — "the author said nothing" — takes the slot's word.
 fn seed_param_modes(params: List ast.Param, expected: Maybe types.Type) -> List ast.ParamMode =
   match expected with
-  | Nothing -> param_modes(params)
+  | Nothing -> list_map(ast.param_mode_of, params)
   | Just t -> modes_from_arrow(params, t)
 
 fn modes_from_arrow(params: List ast.Param, expected: types.Type) -> List ast.ParamMode =
@@ -6520,7 +6311,7 @@ fn modes_from_arrow(params: List ast.Param, expected: types.Type) -> List ast.Pa
       match expected with
       | types.TFunc _ r _ own ->
           Cons(mode_or_slot(ast.param_mode_of(prm), own), modes_from_arrow(rest, r))
-      | _ -> param_modes(Cons(prm, rest))
+      | _ -> list_map(ast.param_mode_of, Cons(prm, rest))
 
 # `types` and `ast` do not import each other, so the slot's Ownership crosses back
 # to a ParamMode through the same flag pair that carried it the other way.
@@ -6537,15 +6328,6 @@ fn mode_or_slot(written: ast.ParamMode, own: types.Ownership) -> ast.ParamMode =
   match written with
   | ast.ModeDefault -> ast.mode_of_flags(types.ownership_is_borrow(own), false)
   | _ -> written
-
-fn make_fresh_param_types(state: unifier.InferState, params: List ast.Param) -> List types.Type !{IO} =
-  match params with
-  | Nil -> Nil
-  | Cons _ rest ->
-      do
-        v <- unifier.fresh(state)
-        rest_types <- make_fresh_param_types(state, rest)
-        Cons(types.TVar(types.tyvar_id(v)), rest_types)
 
 fn extend_env_with_params(params: List ast.Param, param_types: List types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
   match (params, param_types) with
@@ -6785,7 +6567,7 @@ fn infer_record_fields(
   | Nil ->
       InferOk(
         typed_ast.TRecord(type_name,
-                          typed_record_field_list_reverse(acc_fields),
+                          list_reverse(acc_fields),
                           result_type, pos),
         subst, eff_subst, acc_eff)
   | Cons field rest_fields ->
@@ -7026,7 +6808,7 @@ fn first_dup_field_go(fields: List ast.RecordField, seen: List String) -> Maybe 
   | Cons f rest ->
       match f with
       | ast.RecordField fname _ ->
-          if str_list_contains(seen, fname) then Just(fname)
+          if list_member(fname, seen) then Just(fname)
           else first_dup_field_go(rest, Cons(fname, seen))
 
 fn infer_update_fields(
@@ -7046,7 +6828,7 @@ fn infer_update_fields(
   match fields with
   | Nil ->
       InferOk(
-        typed_ast.TRecordUpdate(typed_base, typed_record_field_list_reverse(acc), base_type, pos),
+        typed_ast.TRecordUpdate(typed_base, list_reverse(acc), base_type, pos),
         subst, eff_subst, acc_eff)
   | Cons field rest ->
       match field with
@@ -7260,7 +7042,7 @@ fn check_comprehension_gens(
   acc_kinds: List CompKind
 ) -> CompCheck !{IO} =
   match gens with
-  | Nil -> CompOk(comp_kind_list_reverse(acc_kinds), subst, eff_subst)
+  | Nil -> CompOk(list_reverse(acc_kinds), subst, eff_subst)
   | Cons g rest ->
       match g with
       | ast.ComprehensionGen pat src guards ->
@@ -7316,14 +7098,6 @@ fn check_comprehension_gen_body(
                     | CompErr gpos e -> CompErr(gpos, e)
                     | CompOk _ s3 es3 ->
                         check_comprehension_gens(state, env2, s3, es3, rest, Cons(kind, acc_kinds))
-
-fn comp_kind_list_reverse(xs: List CompKind) -> List CompKind =
-  comp_kind_list_reverse_go(xs, Nil)
-
-fn comp_kind_list_reverse_go(xs: List CompKind, acc: List CompKind) -> List CompKind =
-  match xs with
-  | Nil -> acc
-  | Cons h t -> comp_kind_list_reverse_go(t, Cons(h, acc))
 
 # --- Elaboration (docs/list-comprehensions-v0.md §5) -------------------------
 #
@@ -7542,6 +7316,12 @@ let c_runtime_type_names: List String =
 let primitive_type_names: List String =
   ["Int", "Double", "Bool", "String", "Char", "Unit", "Bytes"]
 
+# Built-in type names, valid without a declaration: the language primitives
+# plus the opaque C-runtime types stdlib declarations name (Vector, Map,
+# NativeSet, Ref).
+let builtin_type_names: List String =
+  primitive_type_names ++ c_runtime_type_names
+
 fn typecheck_decls_resolved(
   state: unifier.InferState,
   decls: List ast.Decl,
@@ -7567,67 +7347,44 @@ fn typecheck_decls_resolved(
     # the env half served the deleted scheme-env loader, which supplied imported
     # modules as schemes. Mirrors the class-name seed below.
     let own_type_names = collect_declared_type_names(decls, Nil)
-    let declared_types = own_type_names ++ type_names_from_env(env, builtin_type_names())
+    let declared_types = own_type_names ++ type_names_from_env(env, builtin_type_names)
     # Export this module's own type names so its importers get the same treatment.
     let named_env = mark_declared_types(own_type_names, scanned_env)
     # And their declared parameter counts, which the instance-head arity check reads
     # back on the env path where no decl carries them.
     let scanned_env_with_types = mark_declared_type_arities(decls, named_env)
-    match validate_all_decls(decls, declared_types) with
-    | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
-    | Nothing ->
-      match validate_alias_uses(decls, alias_arities(decls, dict_empty())) with
-      | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
-      | Nothing ->
-      match validate_constraints_all(decls, collect_declared_class_names(decls, class_names_from_env(env, Nil))) with
-      | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
-      | Nothing ->
-        match check_duplicate_fn_decls(decls, dict_empty()) with
-        | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
-        | Nothing ->
-          match check_tyvar_instance_heads(decls) with
-          | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
-          | Nothing ->
-            match check_instance_head_kinds(decls, env, qual_env) with
-            | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
-            | Nothing ->
-            match check_indistinct_constraints(decls) with
-            | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
-            | Nothing ->
-            match check_overlapping_instances(decls, dict_empty()) with
-            | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
-            | Nothing ->
-              match check_missing_superclass_instances(decls) with
-              | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
-              | Nothing ->
-              # Before the missing-method check, so a typo'd method name is reported
-              # as the stray name it is, not as the method it should have been.
-              match check_instance_method_signatures(decls, qual_env) with
-              | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
-              | Nothing ->
-              match check_missing_instance_methods(decls) with
-              | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
-              | Nothing ->
-              match check_instance_class_effects(decls) with
-              | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
-              | Nothing ->
-                # Wrap scanned_env_with_types as GlobalEnv at this seam — it is the
-                # output of pre_scan_fn_decls (Dict, raw pre-pass) plus this module's
-                # @type: markers. From here on the env flows between decls as the
-                # wrap-protected GlobalEnv, and out to importers as the checked env.
-                # ftv is unaffected: a marker's body is a TConst, never a free var.
-                # Mirrored once, up front: an annotation inside a body reads
-                # aliases from the env, and a body may be checked above the
-                # declaration whose alias it names.
-                match typecheck_decls_inner(state, decls, mirror_alias_env(qual_env, GlobalEnv(scanned_env_with_types)), subst, eff_subst, qual_env, unifier.ftv_env(scanned_env_with_types)) with
-                | typed_ast.TypedErr p m -> typed_ast.TypedErr(p, m)
-                | typed_ast.TypedOk prog schemes ->
-                    # Final gate: a DEFINED `main` must be a well-formed entrypoint.
-                    # Runs only on an otherwise-valid program, so a broken main body
-                    # reports its own error first (this never masks it).
-                    match validate_entrypoint(decls) with
-                    | Just (pos, msg) -> typed_ast.TypedErr(pos, msg)
-                    | Nothing -> typed_ast.TypedOk(prog, schemes)
+    # Checks run in this order; each is skipped once an earlier one has failed.
+    let Nothing = validate_all_decls(decls, declared_types) else Just(p, m) -> typed_ast.TypedErr(p, m)
+    let Nothing = validate_alias_uses(decls, alias_arities(decls, dict_empty())) else Just(p, m) -> typed_ast.TypedErr(p, m)
+    let Nothing = validate_constraints_all(decls, collect_declared_class_names(decls, class_names_from_env(env, Nil))) else Just(p, m) -> typed_ast.TypedErr(p, m)
+    let Nothing = check_duplicate_fn_decls(decls, dict_empty()) else Just(p, m) -> typed_ast.TypedErr(p, m)
+    let Nothing = check_tyvar_instance_heads(decls) else Just(p, m) -> typed_ast.TypedErr(p, m)
+    let Nothing = check_instance_head_kinds(decls, env, qual_env) else Just(p, m) -> typed_ast.TypedErr(p, m)
+    let Nothing = check_indistinct_constraints(decls) else Just(p, m) -> typed_ast.TypedErr(p, m)
+    let Nothing = check_overlapping_instances(decls, dict_empty()) else Just(p, m) -> typed_ast.TypedErr(p, m)
+    let Nothing = check_missing_superclass_instances(decls) else Just(p, m) -> typed_ast.TypedErr(p, m)
+    # Before the missing-method check, so a typo'd method name is reported
+    # as the stray name it is, not as the method it should have been.
+    let Nothing = check_instance_method_signatures(decls, qual_env) else Just(p, m) -> typed_ast.TypedErr(p, m)
+    let Nothing = check_missing_instance_methods(decls) else Just(p, m) -> typed_ast.TypedErr(p, m)
+    let Nothing = check_instance_class_effects(decls) else Just(p, m) -> typed_ast.TypedErr(p, m)
+    # Wrap scanned_env_with_types as GlobalEnv at this seam — it is the
+    # output of pre_scan_fn_decls (Dict, raw pre-pass) plus this module's
+    # @type: markers. From here on the env flows between decls as the
+    # wrap-protected GlobalEnv, and out to importers as the checked env.
+    # ftv is unaffected: a marker's body is a TConst, never a free var.
+    # Mirrored once, up front: an annotation inside a body reads
+    # aliases from the env, and a body may be checked above the
+    # declaration whose alias it names.
+    match typecheck_decls_inner(state, decls, mirror_alias_env(qual_env, GlobalEnv(scanned_env_with_types)), subst, eff_subst, qual_env, unifier.ftv_env(scanned_env_with_types)) with
+    | typed_ast.TypedErr p m -> typed_ast.TypedErr(p, m)
+    | typed_ast.TypedOk prog schemes ->
+        # Final gate: a DEFINED `main` must be a well-formed entrypoint.
+        # Runs only on an otherwise-valid program, so a broken main body
+        # reports its own error first (this never masks it).
+        match validate_entrypoint(decls) with
+        | Just (pos, msg) -> typed_ast.TypedErr(pos, msg)
+        | Nothing -> typed_ast.TypedOk(prog, schemes)
 
 # ---------------------------------------------------------------------------
 # Strict type-name validation pass
@@ -7649,19 +7406,6 @@ fn typecheck_decls_resolved(
 # Qualified names (e.g. `stdlib.compiler.ast.TypeExpr`) are stripped to their
 # short form before lookup, matching the after_last_dot convention used
 # throughout lookup_type_var.
-
-# O(1): built-in primitive type names always valid without a declaration.
-# primitive_type_names covers language-level primitives;
-# c_runtime_type_names covers opaque C-runtime types used in stdlib TypeDecl/AliasDecl:
-#   Vector   — backing store for Vec a and MutVec a (prelude.sprout)
-#   Map      — backing store for Dict v (prelude.sprout)
-#   NativeSet — backing store for Set (prelude.sprout)
-#   Ref      — mutable reference cell (test.sprout TestState, unifier.sprout InferState,
-#               lsp_driver.sprout LspState, analysis_service_driver.sprout StartupState,
-#               module_loader.sprout ModuleCache alias)
-fn builtin_type_names() -> List String =
-  append(primitive_type_names, c_runtime_type_names)
-
 
 
 # O(n decls): collect short names (prefix-stripped) of all declared types.
@@ -7686,7 +7430,7 @@ fn validate_te(te: ast.TypeExpr, decl_name: String, declared: List String) -> Ma
   | ast.TypeName name ->
       if ast.is_lowercase_name(name) then Nothing
       else
-        if types.list_member(string.after_last_dot(name), declared) then Nothing
+        if list_member(string.after_last_dot(name), declared) then Nothing
         else Just("type-validation: unknown type name `" ++ string.after_last_dot(name) ++
                   "` in declaration `" ++ string.after_last_dot(decl_name) ++ "`")
   | ast.TypeApply left right ->
@@ -7702,40 +7446,30 @@ fn validate_te(te: ast.TypeExpr, decl_name: String, declared: List String) -> Ma
   | ast.TupleType parts -> validate_te_list(parts, decl_name, declared)
 
 fn validate_te_list(parts: List ast.TypeExpr, decl_name: String, declared: List String) -> Maybe String =
-  match parts with
-  | Nil -> Nothing
-  | Cons h rest ->
-      match validate_te(h, decl_name, declared) with
-      | Just e -> Just(e)
-      | Nothing -> validate_te_list(rest, decl_name, declared)
+  find_map(\h -> validate_te(h, decl_name, declared), parts)
 
 fn validate_ctors(
   ctors: List ast.TypeConstructor,
   decl_name: String,
   declared: List String
 ) -> Maybe String =
-  match ctors with
-  | Nil -> Nothing
-  | Cons ctor rest ->
-      match ctor with
-      | ast.TypeConstructor _ fields _ _ ->
-          match validate_te_list(fields, decl_name, declared) with
-          | Just e -> Just(e)
-          | Nothing -> validate_ctors(rest, decl_name, declared)
+  find_map(validate_ctor(decl_name, declared, _), ctors)
+
+fn validate_ctor(decl_name: String, declared: List String, ctor: ast.TypeConstructor) -> Maybe String =
+  match ctor with
+  | ast.TypeConstructor _ fields _ _ -> validate_te_list(fields, decl_name, declared)
 
 fn validate_record_fields(
   fields: List ast.RecordFieldDecl,
   decl_name: String,
   declared: List String
 ) -> Maybe String =
-  match fields with
-  | Nil -> Nothing
-  | Cons field rest ->
-      match field with
-      | ast.RecordFieldDecl _ ftype ->
-          match validate_te(ftype, decl_name, declared) with
-          | Just e -> Just(e)
-          | Nothing -> validate_record_fields(rest, decl_name, declared)
+  find_map(validate_record_field(decl_name, declared, _), fields)
+
+fn validate_record_field(decl_name: String, declared: List String,
+                         field: ast.RecordFieldDecl) -> Maybe String =
+  match field with
+  | ast.RecordFieldDecl _ ftype -> validate_te(ftype, decl_name, declared)
 
 fn validate_decl(decl: ast.Decl, declared: List String) -> Maybe String =
   match decl with
@@ -7750,12 +7484,7 @@ fn validate_decl(decl: ast.Decl, declared: List String) -> Maybe String =
   | _ -> Nothing
 
 fn validate_all_decls(decls: List ast.Decl, declared: List String) -> Maybe(source.SourcePos, String) =
-  match decls with
-  | Nil -> Nothing
-  | Cons decl rest ->
-      match validate_decl(decl, declared) with
-      | Just e -> Just((ast.decl_pos(decl), e))
-      | Nothing -> validate_all_decls(rest, declared)
+  find_map(\decl -> map(\e -> (ast.decl_pos(decl), e), validate_decl(decl, declared)), decls)
 
 # ---------------------------------------------------------------------------
 # Alias arity validation
@@ -7795,18 +7524,13 @@ fn alias_arity_error(name: String, given: Int, arities: Dict Int) -> Maybe Strin
       if want == 0 then Nothing
       else if want == given then Nothing
       else Just("type alias `" ++ string.after_last_dot(name) ++ "` takes " ++
-                arg_count_text(want) ++ ", given " ++ int_to_string(given))
+                count_text(want, "type argument") ++ ", given " ++ int_to_string(given))
 
-fn arg_count_text(n: Int) -> String =
-  if n == 1 then "1 type argument" else int_to_string(n) ++ " type arguments"
+fn count_text(n: Int, noun: String) -> String =
+  if n == 1 then "1 " ++ noun else int_to_string(n) ++ " " ++ noun ++ "s"
 
 fn validate_alias_uses(decls: List ast.Decl, arities: Dict Int) -> Maybe(source.SourcePos, String) =
-  match decls with
-  | Nil -> Nothing
-  | Cons decl rest ->
-      match alias_uses_in_decl(decl, arities) with
-      | Just e -> Just((ast.decl_pos(decl), e))
-      | Nothing -> validate_alias_uses(rest, arities)
+  find_map(\decl -> map(\e -> (ast.decl_pos(decl), e), alias_uses_in_decl(decl, arities)), decls)
 
 fn alias_uses_in_decl(decl: ast.Decl, arities: Dict Int) -> Maybe String =
   match decl with
@@ -7822,25 +7546,19 @@ fn alias_uses_in_decl(decl: ast.Decl, arities: Dict Int) -> Maybe String =
 
 fn alias_uses_in_class_methods(methods: List ast.ClassMethodSig,
                                arities: Dict Int) -> Maybe String =
-  match methods with
-  | Nil -> Nothing
-  | Cons m rest ->
-      match m with
-      | ast.ClassMethodSig _ params ret _ _ ->
-          match alias_uses_in_sig(params, Just(ret), arities) with
-          | Just e -> Just(e)
-          | Nothing -> alias_uses_in_class_methods(rest, arities)
+  find_map(alias_uses_in_class_method(arities, _), methods)
+
+fn alias_uses_in_class_method(arities: Dict Int, m: ast.ClassMethodSig) -> Maybe String =
+  match m with
+  | ast.ClassMethodSig _ params ret _ _ -> alias_uses_in_sig(params, Just(ret), arities)
 
 fn alias_uses_in_instance_methods(methods: List ast.InstanceMethodImpl,
                                   arities: Dict Int) -> Maybe String =
-  match methods with
-  | Nil -> Nothing
-  | Cons m rest ->
-      match m with
-      | ast.InstanceMethodImpl _ params ret _ _ _ ->
-          match alias_uses_in_sig(params, ret, arities) with
-          | Just e -> Just(e)
-          | Nothing -> alias_uses_in_instance_methods(rest, arities)
+  find_map(alias_uses_in_instance_method(arities, _), methods)
+
+fn alias_uses_in_instance_method(arities: Dict Int, m: ast.InstanceMethodImpl) -> Maybe String =
+  match m with
+  | ast.InstanceMethodImpl _ params ret _ _ _ -> alias_uses_in_sig(params, ret, arities)
 
 fn alias_uses_in_sig(params: List ast.Param, ret: Maybe ast.TypeExpr,
                      arities: Dict Int) -> Maybe String =
@@ -7849,14 +7567,11 @@ fn alias_uses_in_sig(params: List ast.Param, ret: Maybe ast.TypeExpr,
   | Nothing -> alias_uses_in_maybe_te(ret, arities)
 
 fn alias_uses_in_params(params: List ast.Param, arities: Dict Int) -> Maybe String =
-  match params with
-  | Nil -> Nothing
-  | Cons p rest ->
-      match p with
-      | ast.Param _ te_maybe _ ->
-          match alias_uses_in_maybe_te(te_maybe, arities) with
-          | Just e -> Just(e)
-          | Nothing -> alias_uses_in_params(rest, arities)
+  find_map(alias_uses_in_param(arities, _), params)
+
+fn alias_uses_in_param(arities: Dict Int, p: ast.Param) -> Maybe String =
+  match p with
+  | ast.Param _ te_maybe _ -> alias_uses_in_maybe_te(te_maybe, arities)
 
 fn alias_uses_in_maybe_te(te: Maybe ast.TypeExpr, arities: Dict Int) -> Maybe String =
   match te with
@@ -7864,24 +7579,18 @@ fn alias_uses_in_maybe_te(te: Maybe ast.TypeExpr, arities: Dict Int) -> Maybe St
   | Just t -> alias_uses_in_te(t, arities)
 
 fn alias_uses_in_ctors(ctors: List ast.TypeConstructor, arities: Dict Int) -> Maybe String =
-  match ctors with
-  | Nil -> Nothing
-  | Cons c rest ->
-      match c with
-      | ast.TypeConstructor _ fields _ _ ->
-          match alias_uses_in_te_list(fields, arities) with
-          | Just e -> Just(e)
-          | Nothing -> alias_uses_in_ctors(rest, arities)
+  find_map(alias_uses_in_ctor(arities, _), ctors)
+
+fn alias_uses_in_ctor(arities: Dict Int, c: ast.TypeConstructor) -> Maybe String =
+  match c with
+  | ast.TypeConstructor _ fields _ _ -> alias_uses_in_te_list(fields, arities)
 
 fn alias_uses_in_fields(fields: List ast.RecordFieldDecl, arities: Dict Int) -> Maybe String =
-  match fields with
-  | Nil -> Nothing
-  | Cons f rest ->
-      match f with
-      | ast.RecordFieldDecl _ ftype ->
-          match alias_uses_in_te(ftype, arities) with
-          | Just e -> Just(e)
-          | Nothing -> alias_uses_in_fields(rest, arities)
+  find_map(alias_uses_in_field(arities, _), fields)
+
+fn alias_uses_in_field(arities: Dict Int, f: ast.RecordFieldDecl) -> Maybe String =
+  match f with
+  | ast.RecordFieldDecl _ ftype -> alias_uses_in_te(ftype, arities)
 
 fn alias_uses_in_te(te: ast.TypeExpr, arities: Dict Int) -> Maybe String =
   match te with
@@ -7916,12 +7625,7 @@ fn alias_uses_in_apply_parts(te: ast.TypeExpr, arities: Dict Int) -> Maybe Strin
   | _ -> Nothing
 
 fn alias_uses_in_te_list(parts: List ast.TypeExpr, arities: Dict Int) -> Maybe String =
-  match parts with
-  | Nil -> Nothing
-  | Cons h rest ->
-      match alias_uses_in_te(h, arities) with
-      | Just e -> Just(e)
-      | Nothing -> alias_uses_in_te_list(rest, arities)
+  find_map(\h -> alias_uses_in_te(h, arities), parts)
 
 # ---------------------------------------------------------------------------
 # Constraint class-name validation
@@ -7992,7 +7696,7 @@ fn first_known_class_arg(args: List ast.TypeExpr, classes: List String) -> Maybe
   | Cons te rest ->
       match te with
       | ast.TypeName name ->
-          if types.list_member(string.after_last_dot(name), classes)
+          if list_member(string.after_last_dot(name), classes)
           then Just(string.after_last_dot(name))
           else first_known_class_arg(rest, classes)
       | _ -> first_known_class_arg(rest, classes)
@@ -8022,7 +7726,7 @@ fn fn_sig_tyvars_ret(ret_maybe: Maybe ast.TypeExpr, acc: List String) -> List St
 # <head>` on a value parameter would be a vacuous constraint that still fails at
 # link time (the exact trap this whole pass exists to catch).
 fn order_hint_tail(cls: String, decl_name: String, head: String, sig_tyvars: List String) -> String =
-  if types.list_member(head, sig_tyvars) then
+  if list_member(head, sig_tyvars) then
     "did you mean `where " ++ cls ++ " " ++ head ++ "`? (the class name comes first, the type variable second)"
   else
     match sig_tyvars with
@@ -8037,11 +7741,7 @@ fn swapped_order_hint(head: String, decl_name: String, cls: String, sig_tyvars: 
 # The first type variable in `vs` that is not among the signature's type
 # variables, or Nothing when all are present.
 fn first_absent_tyvar(vs: List String, sig_tyvars: List String) -> Maybe String =
-  match vs with
-  | [] -> Nothing
-  | [v | rest] ->
-      if types.list_member(v, sig_tyvars) then first_absent_tyvar(rest, sig_tyvars)
-      else Just(v)
+  find(\v -> ! list_member (v, sig_tyvars), vs)
 
 # A well-ordered constraint (`where <Class> <var>`) still binds nothing when its
 # type variable is not one the signature introduces — e.g. `where ToString x`
@@ -8061,7 +7761,7 @@ fn check_constraint_tyvars_in_sig(cls: String, args: List ast.TypeExpr, decl_nam
 fn validate_fn_constraint(c: ast.TypeConstraint, decl_name: String, classes: List String, sig_tyvars: List String) -> Maybe String =
   match c with
   | ast.TypeConstraint head args ->
-      if types.list_member(string.after_last_dot(head), classes)
+      if list_member(string.after_last_dot(head), classes)
       then check_constraint_tyvars_in_sig(head, args, decl_name, sig_tyvars)
       else
         match first_known_class_arg(args, classes) with
@@ -8085,15 +7785,14 @@ let main_signature_hint: String =
   "; write `fn main() -> Unit !{IO}`, or `fn main() -> Int !{IO}` to set the process exit code"
 
 fn validate_constraints_all(decls: List ast.Decl, classes: List String) -> Maybe(source.SourcePos, String) =
-  match decls with
-  | Nil -> Nothing
-  | Cons decl rest ->
-      match decl with
-      | ast.FnDecl name params ret _ constraints _ _ ->
-          match validate_fn_constraints(constraints, name, classes, fn_sig_tyvars(params, ret)) with
-          | Just e -> Just((ast.decl_pos(decl), e))
-          | Nothing -> validate_constraints_all(rest, classes)
-      | _ -> validate_constraints_all(rest, classes)
+  find_map(decl_constraint_error(classes, _), decls)
+
+fn decl_constraint_error(classes: List String, decl: ast.Decl) -> Maybe(source.SourcePos, String) =
+  match decl with
+  | ast.FnDecl name params ret _ constraints _ _ ->
+      map(\e -> (ast.decl_pos(decl), e),
+          validate_fn_constraints(constraints, name, classes, fn_sig_tyvars(params, ret)))
+  | _ -> Nothing
 
 # ---------------------------------------------------------------------------
 # Executable entrypoint validation
@@ -8135,9 +7834,7 @@ fn main_return_ok(ret: Maybe ast.TypeExpr) -> Bool =
 # An effect name is a variable (polymorphic) iff it is lowercase; concrete
 # effects like `IO` are capitalized.
 fn any_effect_var(effs: List String) -> Bool =
-  match effs with
-  | Nil -> false
-  | Cons e rest -> if ast.is_lowercase_name(e) then true else any_effect_var(rest)
+  any(ast.is_lowercase_name, effs)
 
 
 fn main_error(what: String) -> Maybe String =
@@ -8148,7 +7845,7 @@ fn main_effect_error(effects: Maybe (List String)) -> Maybe String =
   | Nothing -> main_error("must declare the {IO} effect")
   | Just effs ->
       if any_effect_var(effs) then main_error("must not be effect-polymorphic")
-      else if str_list_contains(effs, "IO") == false then main_error("must declare the {IO} effect")
+      else if list_member("IO", effs) == false then main_error("must declare the {IO} effect")
       else Nothing
 
 fn check_main_signature(params: List ast.Param, ret: Maybe ast.TypeExpr, effects: Maybe (List String)) -> Maybe String =
@@ -8542,9 +8239,7 @@ fn single_depth(depths: List Int) -> Maybe Int =
   | [h | t] -> if all_eq_int(t, h) then Just(h) else Nothing
 
 fn all_eq_int(xs: List Int, n: Int) -> Bool =
-  match xs with
-  | [] -> true
-  | [h | t] -> if h == n then all_eq_int(t, n) else false
+  all(\x -> x == n, xs)
 
 fn depth_conflict(depths: List Int) -> Maybe (Int, Int) =
   match depths with
@@ -8645,12 +8340,9 @@ fn head_arity_error(kind: String, cls: String, head_te: ast.TypeExpr, want: Int,
                     arities: Dict Int, env: Dict types.Scheme) -> Maybe String =
   let Just residual = head_residual(head_te, arities, env) else Nothing
   in if residual == want then Nothing
-     else Just("class `" ++ cls ++ "` applies its variable to " ++ argument_count_text(want)
+     else Just("class `" ++ cls ++ "` applies its variable to " ++ count_text(want, "argument")
                ++ ", so " ++ kind ++ " must leave " ++ int_to_string(want)
                ++ " unapplied; this head leaves " ++ int_to_string(residual))
-
-fn argument_count_text(n: Int) -> String =
-  if n == 1 then "1 argument" else int_to_string(n) ++ " arguments"
 
 # One constraint list — a fn's `where`, a method's, or an instance context.
 fn constraints_arity_error(kind: String, cs: List ast.TypeConstraint,
@@ -8681,7 +8373,7 @@ fn class_decl_arity_error(name: String, superclasses: List ast.TypeConstraint,
   match depth_conflict(class_own_part(name, depths)) with
   | Just (a, b) ->
       Just("class `" ++ string.after_last_dot(name) ++ "` applies its variable to "
-           ++ argument_count_text(a) ++ " in one method and " ++ int_to_string(b)
+           ++ count_text(a, "argument") ++ " in one method and " ++ int_to_string(b)
            ++ " in another; one class variable cannot be both")
   | Nothing ->
       match class_super_arity_error(name, superclasses, depths, supers) with
@@ -8704,7 +8396,7 @@ fn super_arity_error(cls: String, own: Int, names: List String,
       | Just n ->
           if n == own then super_arity_error(cls, own, rest, depths, supers)
           else Just("class `" ++ string.after_last_dot(cls) ++ "` applies its variable to "
-                    ++ argument_count_text(own) ++ ", but its superclass `"
+                    ++ count_text(own, "argument") ++ ", but its superclass `"
                     ++ string.after_last_dot(s) ++ "` applies its own to " ++ int_to_string(n))
       | Nothing -> super_arity_error(cls, own, rest, depths, supers)
 
@@ -8771,12 +8463,9 @@ fn check_instance_head_kinds(decls: List ast.Decl, env: Dict types.Scheme,
 fn check_arity_decls(decls: List ast.Decl, depths: Dict (String, List Int),
                      supers: Dict (List String), arities: Dict Int,
                      env: Dict types.Scheme) -> Maybe(source.SourcePos, String) =
-  match decls with
-  | [] -> Nothing
-  | [decl | rest] ->
-      match decl_arity_error(decl, depths, supers, arities, env) with
-      | Just msg -> Just((ast.decl_pos(decl), msg))
-      | Nothing -> check_arity_decls(rest, depths, supers, arities, env)
+  find_map(\decl ->
+    map(\msg -> (ast.decl_pos(decl), msg), decl_arity_error(decl, depths, supers, arities, env)),
+    decls)
 
 
 # ---------------------------------------------------------------------------
@@ -8873,28 +8562,21 @@ fn decl_indistinct_error(decl: ast.Decl) -> Maybe String =
   | _ -> Nothing
 
 fn class_method_indistinct_error(methods: List ast.ClassMethodSig) -> Maybe String =
-  match methods with
-  | [] -> Nothing
-  | [ast.ClassMethodSig _ _ _ _ constraints | rest] ->
-      match indistinct_constraints_error(constraints) with
-      | Just msg -> Just(msg)
-      | Nothing -> class_method_indistinct_error(rest)
+  find_map(class_method_indistinct, methods)
+
+fn class_method_indistinct(m: ast.ClassMethodSig) -> Maybe String =
+  match m with
+  | ast.ClassMethodSig _ _ _ _ constraints -> indistinct_constraints_error(constraints)
 
 fn impl_indistinct_error(methods: List ast.InstanceMethodImpl) -> Maybe String =
-  match methods with
-  | [] -> Nothing
-  | [ast.InstanceMethodImpl _ _ _ _ constraints _ | rest] ->
-      match indistinct_constraints_error(constraints) with
-      | Just msg -> Just(msg)
-      | Nothing -> impl_indistinct_error(rest)
+  find_map(impl_method_indistinct, methods)
+
+fn impl_method_indistinct(m: ast.InstanceMethodImpl) -> Maybe String =
+  match m with
+  | ast.InstanceMethodImpl _ _ _ _ constraints _ -> indistinct_constraints_error(constraints)
 
 fn check_indistinct_constraints(decls: List ast.Decl) -> Maybe(source.SourcePos, String) =
-  match decls with
-  | [] -> Nothing
-  | [decl | rest] ->
-      match decl_indistinct_error(decl) with
-      | Just msg -> Just((ast.decl_pos(decl), msg))
-      | Nothing -> check_indistinct_constraints(rest)
+  find_map(\decl -> map(\msg -> (ast.decl_pos(decl), msg), decl_indistinct_error(decl)), decls)
 
 
 fn check_overlapping_instances(decls: List ast.Decl, seen: Dict Bool) -> Maybe(source.SourcePos, String) =
@@ -9714,12 +9396,8 @@ fn class_display_env(site: InstanceSite, cls: SigParts) -> Dict types.Type =
 
 fn display_var(head_vars: List String, taken: List String, acc: Dict types.Type,
                w: String) -> Dict types.Type =
-  let shown = if list_member(w, head_vars) then fresh_display_name(w, 1, taken) else w
+  let shown = if list_member(w, head_vars) then fresh_var_name(w, 1, taken) else w
   in dict_set(w, types.TVar(types.tyvar_id(shown)), acc)
-
-fn fresh_display_name(w: String, i: Int, taken: List String) -> String =
-  let candidate = w ++ int_to_string(i)
-  in if list_member(candidate, taken) then fresh_display_name(w, i + 1, taken) else candidate
 
 fn renamed_head_var_msg(site: InstanceSite, name: String, v: String, h: String) -> String =
   "instance method `" ++ name ++ "` of instance " ++ instance_site_label(site) ++ " writes `"
@@ -9744,16 +9422,7 @@ fn maybe_type_text(te: Maybe ast.TypeExpr, env: Dict types.Type) -> String =
   | Nothing -> "_"
 
 # Bundler-qualified names (`main.Box`) printed as the source spells them.
-fn type_display(t: types.Type) -> String = types.type_to_string(short_type_names(t))
-
-fn short_type_names(t: types.Type) -> types.Type =
-  match t with
-  | types.TVar _ -> t
-  | types.TConst id -> types.TConst(types.type_id(types.type_id_display(id)))
-  | types.TApp b a -> types.TApp(short_type_names(b), short_type_names(a))
-  | types.TFunc p r e o -> types.TFunc(short_type_names(p), short_type_names(r), e, o)
-  | types.TThunk r e -> types.TThunk(short_type_names(r), e)
-  | types.TTuple ts -> types.TTuple(list_map(short_type_names, ts))
+fn type_display(t: types.Type) -> String = types.type_to_string(types.display_consts(t))
 
 # An extern's signature is bound only when the name is free: a module re-declaring
 # an extern already in scope must not shadow the scheme that is there.
@@ -10035,7 +9704,7 @@ fn index_decls(decls: List ast.Decl, i: Int) -> List (Int, ast.Decl) =
 # the barrier itself as a singleton in its original position.
 fn plan_walk(items: List (Int, ast.Decl), seg: List (Int, ast.Decl), acc: List (List Int)) -> List (List Int) =
   match items with
-  | Nil -> reverse_groups(flush_segment(seg, acc), Nil)
+  | Nil -> list_reverse(flush_segment(seg, acc))
   | Cons item rest ->
       match item with
       | (i, decl) ->
@@ -10044,22 +9713,7 @@ fn plan_walk(items: List (Int, ast.Decl), seg: List (Int, ast.Decl), acc: List (
           | _ -> plan_walk(rest, Nil, Cons (Cons(i, Nil), flush_segment(seg, acc)))
 
 fn flush_segment(seg: List (Int, ast.Decl), acc: List (List Int)) -> List (List Int) =
-  prepend_groups(partition_segment(reverse_items(seg, Nil)), acc)
-
-fn prepend_groups(gs: List (List Int), acc: List (List Int)) -> List (List Int) =
-  match gs with
-  | Nil -> acc
-  | Cons g rest -> prepend_groups(rest, Cons(g, acc))
-
-fn reverse_groups(gs: List (List Int), acc: List (List Int)) -> List (List Int) =
-  match gs with
-  | Nil -> acc
-  | Cons g rest -> reverse_groups(rest, Cons(g, acc))
-
-fn reverse_items(xs: List (Int, ast.Decl), acc: List (Int, ast.Decl)) -> List (Int, ast.Decl) =
-  match xs with
-  | Nil -> acc
-  | Cons x rest -> reverse_items(rest, Cons(x, acc))
+  list_append(list_reverse(partition_segment(list_reverse(seg))), acc)
 
 # The edge set is restricted to the SEGMENT, not the whole program, and that is
 # exact rather than an approximation: a reference to an earlier segment names a
@@ -10335,7 +9989,7 @@ fn group_unann_vars(members: List (Int, ast.Decl), acc: List String) -> List Str
       | (_, decl) ->
           match decl with
           | ast.FnDecl name params ret_type_maybe _ _ _ _ ->
-              group_unann_vars(rest, types.list_union(own_unann_vars(name, params, ret_type_maybe), acc))
+              group_unann_vars(rest, list_union(own_unann_vars(name, params, ret_type_maybe), acc))
           | _ -> group_unann_vars(rest, acc)
 
 # Built on the RETURN path (recurse-then-cons) so the result stays in CHECK order.
@@ -10486,13 +10140,13 @@ fn commit_fn_decl(
                GlobalEnv(dict_set(name,
                  types.scheme_with_constraints(
                    unifier.generalize(group_env_ftv, dict_empty(), dict_empty(),
-                     inferred_fn_type, effect_from_maybe_labels(effects_maybe)),
+                     inferred_fn_type, types.effect_from_labels(effects_maybe)),
                    decl_constraints),
                  global_env_dict(env)))),
              # WHY: @eta_fwd markers have free type variables that must be included
              # in env_ftv so subsequent declarations don't incorrectly generalize
              # over them. Computed once per declaration → stays O(n).
-             types.list_union(unifier.ftv_env(fwd_markers), env_ftv))
+             list_union(unifier.ftv_env(fwd_markers), env_ftv))
       | _ -> (typed_ast.TPassThrough(decl), env, env_ftv)
 
 fn typecheck_decl(
@@ -10925,8 +10579,7 @@ fn skolem_given_tdict(class_name: String, skolem: String, env: Dict types.Scheme
 fn instance_dict_for(class_name: String, head_str: String, t: types.Type, subst: Dict types.Type,
                      env: Dict types.Scheme, pos: source.SourcePos) -> Maybe typed_ast.TypedExpr =
   let Just _ = dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) else Nothing
-  in Just(typed_ast.TDict(ast.TypeConstraint(class_name, Cons(named_typeexpr(t, subst, env), Nil)),
-                          types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
+  in Just(compound_tdict(class_name, named_typeexpr(t, subst, env), pos))
 
 # Scan a concrete return type for an inner component that has an @inst marker
 # for the given class.  Tries the type itself first (handles `a` in return
@@ -10938,9 +10591,7 @@ fn find_inst_in_return_type(class_name: String, t: types.Type, env: Dict types.S
   | Just head_str ->
       match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
       | Just _ ->
-          Just(typed_ast.TDict(
-            ast.TypeConstraint(class_name, Cons(type_to_typeexpr(t), Nil)),
-            types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
+          Just(compound_tdict(class_name, type_to_typeexpr(t), pos))
       | Nothing ->
           find_inst_in_return_type_children(class_name, t, env, pos)
   | Nothing ->
@@ -10961,12 +10612,7 @@ fn find_inst_in_return_type_children(class_name: String, t: types.Type, env: Dic
   | _ -> Nothing
 
 fn find_inst_in_return_type_list(class_name: String, items: List types.Type, env: Dict types.Scheme, pos: source.SourcePos) -> Maybe typed_ast.TypedExpr =
-  match items with
-  | Nil -> Nothing
-  | Cons h rest ->
-      match find_inst_in_return_type(class_name, h, env, pos) with
-      | Just d -> Just(d)
-      | Nothing -> find_inst_in_return_type_list(class_name, rest, env, pos)
+  find_map(\h -> find_inst_in_return_type(class_name, h, env, pos), items)
 
 # Prepend the instance dict for a dispatch head the final substitution has made
 # concrete. Shared by the return- and input-position paths: once the head is
@@ -10987,9 +10633,8 @@ fn concrete_dispatch_call(
   resolved_t: types.Type
 ) -> typed_ast.TypedExpr =
   typed_ast.TCall(fn_,
-    Cons(typed_ast.TDict(
-      ast.TypeConstraint(class_name, Cons(type_to_typeexpr_with_prog_vars(resolved_t, class_name, subst, env), Nil)),
-      types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved),
+    Cons(compound_tdict(class_name,
+      type_to_typeexpr_with_prog_vars(resolved_t, class_name, subst, env), pos),
       args),
     t, pos)
 
@@ -11604,7 +11249,7 @@ fn rigidity_violation_go(
             # signature promised to leave open. This holds for a const-free
             # one (`b -> c`) exactly as for `Int` or `List c`: a caller may
             # still instantiate the variable at anything else.
-            Just(n ++ " forced to " ++ types.type_to_string(render_written(written, other)))
+            Just(n ++ " forced to " ++ types.type_to_string(types.apply_rename_type(written, other)))
 
 # prog_to_fresh reversed: fresh-variable identity -> the name the programmer
 # wrote. Rendering a resolution through it keeps the internal "$t41" out of the
@@ -11621,26 +11266,6 @@ fn fresh_to_written_go(entries: List (String, types.Type), acc: Dict String) -> 
           match t with
           | types.TVar id -> fresh_to_written_go(rest, dict_set(types.tyvar_identity(id), written, acc))
           | _ -> fresh_to_written_go(rest, acc)
-
-# Structural sibling of `types.apply_rename_type`, kept local because this
-# renames INTO the programmer's names for one diagnostic rather than into the
-# canonical a/b/c display names a scheme is printed with.
-fn render_written(written: Dict String, t: types.Type) -> types.Type =
-  match t with
-  | types.TVar id ->
-      match dict_get(types.tyvar_identity(id), written) with
-      | Just name -> types.TVar(types.tyvar_id(name))
-      | Nothing -> t
-  | types.TConst _ -> t
-  | types.TApp base arg -> types.TApp(render_written(written, base), render_written(written, arg))
-  | types.TFunc p r eff own -> types.TFunc(render_written(written, p), render_written(written, r), eff, own)
-  | types.TThunk r eff -> types.TThunk(render_written(written, r), eff)
-  | types.TTuple items -> types.TTuple(render_written_list(written, items))
-
-fn render_written_list(written: Dict String, items: List types.Type) -> List types.Type =
-  match items with
-  | Nil -> Nil
-  | Cons h t -> Cons(render_written(written, h), render_written_list(written, t))
 
 # M4.2 linear check, gated on the program declaring any linear type. When it does
 # not, skip the check AND the full-body substitution copy (evaluated only inside
@@ -11776,12 +11401,7 @@ fn args_mention_quantified(args: List typed_ast.TypedExpr, subst: Dict types.Typ
         args_mention_quantified(rest, subst, quantified)
 
 fn type_mentions_quantified(t: types.Type, subst: Dict types.Type, quantified: List String) -> Bool =
-  any_var_quantified(types.ftv(unifier.apply_subst(subst, t)), quantified)
-
-fn any_var_quantified(vars: List String, quantified: List String) -> Bool =
-  match vars with
-  | [] -> false
-  | [v | rest] -> list_member(v, quantified) || any_var_quantified(rest, quantified)
+  any(\v -> list_member(v, quantified), types.ftv(unifier.apply_subst(subst, t)))
 
 fn ambiguous_dict_in_list(es: List typed_ast.TypedExpr, subst: Dict types.Type,
                           quantified: List String) -> Maybe String =
@@ -11885,8 +11505,8 @@ fn let_dict_ambiguity_msg(name: String, quantified: List String, t: types.Type,
 fn uncovered_generalized_vars(constraints: List ast.TypeConstraint,
                               prog_to_fresh: Dict types.Type, s2: Dict types.Type,
                               inst_type: types.Type, env_ftv: List String) -> List String =
-  types.list_diff(
-    types.list_diff(types.ftv(unifier.apply_subst(s2, inst_type)), env_ftv),
+  list_diff(
+    list_diff(types.ftv(unifier.apply_subst(s2, inst_type)), env_ftv),
     constraints_covered_ftv(constraints, prog_to_fresh, s2))
 
 fn fn_dict_coverage_msg(name: String, params: List ast.Param,
@@ -12037,12 +11657,12 @@ fn named_advice(cls: String, rename: Dict String, applied: types.Type) -> (Strin
   in ("`" ++ shown ++ "`", cls ++ " (" ++ shown ++ ")")
 
 fn all_source_named(ivs: List String, rename: Dict String) -> Bool =
-  match ivs with
-  | Nil -> true
-  | Cons iv rest ->
-      match dict_get(iv, rename) with
-      | Nothing -> false
-      | Just _ -> all_source_named(rest, rename)
+  all(has_rename(rename, _), ivs)
+
+fn has_rename(rename: Dict String, iv: String) -> Bool =
+  match dict_get(iv, rename) with
+  | Nothing -> false
+  | Just _ -> true
 
 # The first parameter-mentioned source variable whose dictionary is uncovered, with the class that
 # needs it. Reported separately from the unnamed case because a source name is what makes
@@ -12062,10 +11682,7 @@ fn named_uncovered_dict(param_vars: List String, prog_to_fresh: Dict types.Type,
         | Nothing -> named_uncovered_dict(rest, prog_to_fresh, s2, uncovered, body, env)
 
 fn list_common(xs: List String, ys: List String) -> List String =
-  match xs with
-  | Nil -> Nil
-  | Cons x rest ->
-      if list_member(x, ys) then Cons(x, list_common(rest, ys)) else list_common(rest, ys)
+  list_filter(\x -> list_member(x, ys), xs)
 
 # ---------------------------------------------------------------------------
 # Per-variable dictionary attribution
@@ -12263,7 +11880,7 @@ fn finish_let_decl(name: String, expr: ast.Expr, typed_expr: typed_ast.TypedExpr
       # top-level type variables.
       if ast.is_syntactic_value(expr) then
         let resolved = unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_expr))
-        in match let_dict_ambiguity_msg(name, types.list_diff(types.ftv(resolved), env_ftv),
+        in match let_dict_ambiguity_msg(name, list_diff(types.ftv(resolved), env_ftv),
                                         resolved, s1, typed_expr) with
            | Just msg -> TypedDeclErr(let_pos, msg)
            | Nothing ->
@@ -12275,7 +11892,7 @@ fn finish_let_decl(name: String, expr: ast.Expr, typed_expr: typed_ast.TypedExpr
                    global_env_dict(env))),
                  env_ftv, s1)
       else
-        match types.list_diff(types.ftv(unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_expr))), env_ftv) with
+        match list_diff(types.ftv(unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_expr))), env_ftv) with
         | [_ | _] ->
             TypedDeclErr(let_pos, "value restriction: non-value binding '" ++ name ++ "' has an ambiguous polymorphic type " ++ types.type_to_string(unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_expr))) ++ "; bind a value or add a concrete type annotation")
         | Nil ->
@@ -12410,68 +12027,49 @@ fn canonicalize_constrained_constraints(
   inst_type: types.Type,
   env_ftv: List String
 ) -> List (String, String) =
-  canonicalize_constrained_constraints_acc(constraints, prog_to_fresh, s2,
-    types.list_diff(types.ftv(unifier.apply_subst(s2, inst_type)), env_ftv))
+  let binders = list_diff(types.ftv(unifier.apply_subst(s2, inst_type)), env_ftv)
+  in list_map(constraint_entry(prog_to_fresh, s2, binders, _), constraints)
 
-# The list is built on the RETURN path (recurse-then-cons) so it stays in
-# where-clause order, and every constraint contributes exactly one entry.
-fn canonicalize_constrained_constraints_acc(
-  constraints: List ast.TypeConstraint,
+fn constraint_entry(
+  prog_to_fresh: Dict types.Type,
+  s2: Dict types.Type,
+  binders: List String,
+  c: ast.TypeConstraint
+) -> (String, String) =
+  match c with
+  | ast.TypeConstraint class_name type_args ->
+      (constraint_head_token(type_args, prog_to_fresh, s2, binders), class_name)
+
+fn constraint_head_token(
+  type_args: List ast.TypeExpr,
   prog_to_fresh: Dict types.Type,
   s2: Dict types.Type,
   binders: List String
-) -> List (String, String) =
-  match constraints with
-  | Nil -> Nil
-  | Cons c rest ->
-      match c with
-      | ast.TypeConstraint class_name type_args ->
-          match type_args with
-          | [ast.TypeName prog_var | _] ->
-              match dict_get(prog_var, prog_to_fresh) with
-              | Just fresh_t ->
-                  match unifier.apply_subst(s2, fresh_t) with
-                  | types.TVar canon ->
-                      Cons((constraint_var_token(types.tyvar_identity(canon), binders), class_name),
-                           canonicalize_constrained_constraints_acc(rest, prog_to_fresh, s2, binders))
-                  | _ ->
-                      # Pinned to a concrete type (rigidity-rejected for a top-level
-                      # constrained fn — defensive): record by source name.
-                      Cons((prog_var, class_name),
-                           canonicalize_constrained_constraints_acc(rest, prog_to_fresh, s2, binders))
-              | Nothing ->
-                  # Concrete-ctor head (e.g. "List"): stable source name.
-                  Cons((prog_var, class_name),
-                       canonicalize_constrained_constraints_acc(rest, prog_to_fresh, s2, binders))
-          | [ast.TypeApply cb ca | _] ->
-              # Compound head (`where Sh (Box a)`). The head CONSTRUCTOR says which
-              # argument carries the dictionary — collapsing it into "#none" left
-              # the injection site committing to the first concrete argument, so
-              # the same constraint picked a different instance depending on
-              # parameter order. The head alone is still not enough when two
-              # parameters share it, which is why the ARGUMENTS come too.
-              Cons((canonical_compound_head_token(ast.TypeApply(cb, ca), prog_to_fresh, s2, binders),
-                    class_name),
-                   canonicalize_constrained_constraints_acc(rest, prog_to_fresh, s2, binders))
-          | [ast.TupleType items | _] ->
-              # A tuple is a compound head too (`Tuple2` over its elements), for the
-              # reason above: treated as headless, it took the first concrete
-              # argument's dictionary.
-              Cons((canonical_compound_head_token(ast.TupleType(items), prog_to_fresh, s2, binders),
-                    class_name),
-                   canonicalize_constrained_constraints_acc(rest, prog_to_fresh, s2, binders))
-          | [] -> Cons(("#none", class_name),
-                       canonicalize_constrained_constraints_acc(rest, prog_to_fresh, s2, binders))
-          | [ast.TypeArrow _ _ _ _ | _] ->
-              # Headless: an arrow, thunk or effect subject names no constructor.
-              Cons(("#none", class_name),
-                   canonicalize_constrained_constraints_acc(rest, prog_to_fresh, s2, binders))
-          | [ast.TypeThunk _ _ | _] ->
-              Cons(("#none", class_name),
-                   canonicalize_constrained_constraints_acc(rest, prog_to_fresh, s2, binders))
-          | [ast.TypeEffect _ _ | _] ->
-              Cons(("#none", class_name),
-                   canonicalize_constrained_constraints_acc(rest, prog_to_fresh, s2, binders))
+) -> String =
+  match type_args with
+  | [ast.TypeName prog_var | _] ->
+      match dict_get(prog_var, prog_to_fresh) with
+      | Just fresh_t ->
+          match unifier.apply_subst(s2, fresh_t) with
+          | types.TVar canon -> constraint_var_token(types.tyvar_identity(canon), binders)
+          # Pinned to a concrete type (rigidity-rejected for a top-level
+          # constrained fn — defensive): record by source name.
+          | _ -> prog_var
+      # Concrete-ctor head (e.g. "List"): stable source name.
+      | Nothing -> prog_var
+  # A compound head (`where Sh (Box a)`) or a tuple: the head CONSTRUCTOR says
+  # which argument carries the dictionary, and the ARGUMENTS come too, since two
+  # parameters can share the head. Treated as headless, the injection site took
+  # the first concrete argument and the instance depended on parameter order.
+  | [ast.TypeApply cb ca | _] ->
+      canonical_compound_head_token(ast.TypeApply(cb, ca), prog_to_fresh, s2, binders)
+  | [ast.TupleType items | _] ->
+      canonical_compound_head_token(ast.TupleType(items), prog_to_fresh, s2, binders)
+  # Headless: no subject, or an arrow, thunk or effect, which names no constructor.
+  | [] -> "#none"
+  | [ast.TypeArrow _ _ _ _ | _] -> "#none"
+  | [ast.TypeThunk _ _ | _] -> "#none"
+  | [ast.TypeEffect _ _ | _] -> "#none"
 
 # §13.3(B) S4: the self-binding carries the fn's own constraints (source-name
 # tokens) so a recursive self-call injects its forwarded dicts from the Scheme
@@ -12676,13 +12274,12 @@ fn register_fn_decl_scheme(
   alias_env: Dict types.Type,
   env: Dict types.Scheme
 ) -> Dict types.Scheme =
-  match constraints with
-  | Nil ->
-      dict_remove("@class:" ++ name,
-        dict_set(name, scheme_from_fn_parts(name, params, ret_type_maybe, effects_maybe, alias_env), env))
-  | _ ->
-      dict_remove("@class:" ++ name,
-        dict_set(name, types.scheme_with_constraints(scheme_from_fn_parts(name, params, ret_type_maybe, effects_maybe, alias_env), constraint_source_tokens(constraints)), env))
+  dict_remove("@class:" ++ name,
+    dict_set(name,
+      types.scheme_with_constraints(
+        scheme_from_fn_parts(name, params, ret_type_maybe, effects_maybe, alias_env),
+        constraint_source_tokens(constraints)),
+      env))
 
 # ---------------------------------------------------------------------------
 # InstanceDecl: declared-effect check, then instance marker registration
@@ -12871,7 +12468,7 @@ fn check_instance_methods_acc(
   acc: List typed_ast.TypedInstanceMethod
 ) -> typed_ast.InstanceMethodsResult !{IO} =
   match methods with
-  | Nil -> typed_ast.InstanceMethodsOk(typed_method_list_reverse(acc))
+  | Nil -> typed_ast.InstanceMethodsOk(list_reverse(acc))
   | Cons method rest ->
       do
         r <- check_instance_method(state, inst_constraints, method, env, subst, eff_subst, env_ftv)
@@ -12970,7 +12567,7 @@ fn instance_method_checked(
       do
         _ <- unifier.record_effect_report(state,
                unifier.EffectReport(instance_report_name(name, inst_type),
-                 effect_from_maybe_labels(eff_maybe),
+                 types.effect_from_labels(eff_maybe),
                  unifier.apply_effect_subst(es2a, body_eff),
                  typed_ast.typed_expr_pos(typed_body0),
                  decl_scheme))

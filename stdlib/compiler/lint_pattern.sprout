@@ -515,15 +515,10 @@ export fn match_expr(pattern: ast.Expr, subject: ast.Expr, holes: List String)
 fn is_hole(name: String, holes: List String, r: Ren) -> Bool =
   let head = name_head(name)
   in if is_bound_left(head, r) then false
-     else if ! list_contains_name (head, holes) then false
+     else if ! list_member (head, holes) then false
      else if name_path(name) != "" then
        panic(`lint_pattern: hole \`${head}\` used through a field path \`${name}\` (§5.3)`)
      else true
-
-fn list_contains_name(name: String, names: List String) -> Bool =
-  match names with
-  | [] -> false
-  | [n | rest] -> if n == name then true else list_contains_name(name, rest)
 
 # Probes the smaller side against the larger. Better than `set_diff` twice, which
 # built two whole trees to answer a Bool under every hole occurrence and again on
@@ -715,12 +710,7 @@ fn index_branches(brs: List ast.MatchBranch, i: Int) -> List (Int, ast.MatchBran
   | [] -> []
   | [b | rest] -> Cons((i, b), index_branches(rest, i + 1))
 
-fn last_index(brs: List ast.MatchBranch) -> Int = branch_count(brs) - 1
-
-fn branch_count(brs: List ast.MatchBranch) -> Int =
-  match brs with
-  | [] -> 0
-  | [_ | rest] -> 1 + branch_count(rest)
+fn last_index(brs: List ast.MatchBranch) -> Int = list_length(brs) - 1
 
 # The prelude is not internally consistent about branch order — `result_from_maybe`
 # tests `Nothing` first, `maybe_with_default` tests `Just` first — so a derived

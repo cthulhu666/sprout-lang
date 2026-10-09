@@ -1,0 +1,1 @@
+unknown class in deriving clause for `Color`: `Show` (v1 supports Eq, Ord, ToString, Enum)

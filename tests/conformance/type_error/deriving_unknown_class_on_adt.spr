@@ -1,0 +1,10 @@
+# An unknown class in an ADT deriving clause is reported at the deriving site.
+import stdlib.terminal as terminal
+
+type Color (..) deriving (Eq, Show) =
+  | Red
+  | Green
+
+fn main() -> Unit !{IO} =
+  do
+    terminal.write("unreachable")

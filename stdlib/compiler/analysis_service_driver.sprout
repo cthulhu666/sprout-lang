@@ -146,6 +146,20 @@ fn parse_decl_names(src: String) -> List String =
 # ---------------------------------------------------------------------------
 # Symbol location extraction
 
+# (category, name) of a declaration the inventory lists; instances and externs
+# are not listed.
+fn decl_category(d: ast.Decl) -> Maybe (String, String) =
+  match d with
+  | ast.FnDecl name _ _ _ _ _ _ -> Just(("fn", name))
+  | ast.TypeDecl name _ _ _ _ _ -> Just(("type", name))
+  | ast.RecordDecl name _ _ _ _ _ _ -> Just(("type", name))
+  | ast.LetDecl name _ _ _ -> Just(("let", name))
+  | ast.ClassDecl name _ _ _ _ -> Just(("class", name))
+  | ast.InstanceDecl _ _ _ _ -> Nothing
+  | ast.AliasDecl name _ _ _ -> Just(("alias", name))
+  | ast.WrapDecl name _ _ _ _ -> Just(("type", name))
+  | ast.ExternFnDecl _ _ _ _ _ -> Nothing
+
 fn collect_decl_locations(
   decls: List ast.Decl,
   line_offset: Int,
@@ -158,46 +172,13 @@ fn collect_decl_locations(
   | Nil ->
       (list_reverse(categories), list_reverse(names), list_reverse(lines), list_reverse(cols))
   | Cons d rest ->
-      match d with
-      | ast.FnDecl name _ _ _ _ _ pos ->
+      match decl_category(d) with
+      | Nothing -> collect_decl_locations(rest, line_offset, categories, names, lines, cols)
+      | Just (category, name) ->
           collect_decl_locations(rest, line_offset,
-            Cons("fn", categories), Cons(name, names),
-            Cons(pos.line + line_offset, lines),
-            Cons(pos.column, cols))
-      | ast.TypeDecl name _ _ _ _ pos ->
-          collect_decl_locations(rest, line_offset,
-            Cons("type", categories), Cons(name, names),
-            Cons(pos.line + line_offset, lines),
-            Cons(pos.column, cols))
-      | ast.RecordDecl name _ _ _ _ _ pos ->
-          collect_decl_locations(rest, line_offset,
-            Cons("type", categories), Cons(name, names),
-            Cons(pos.line + line_offset, lines),
-            Cons(pos.column, cols))
-      | ast.LetDecl name _ _ pos ->
-          collect_decl_locations(rest, line_offset,
-            Cons("let", categories), Cons(name, names),
-            Cons(pos.line + line_offset, lines),
-            Cons(pos.column, cols))
-      | ast.ClassDecl name _ _ _ pos ->
-          collect_decl_locations(rest, line_offset,
-            Cons("class", categories), Cons(name, names),
-            Cons(pos.line + line_offset, lines),
-            Cons(pos.column, cols))
-      | ast.InstanceDecl _ _ _ _ ->
-          collect_decl_locations(rest, line_offset, categories, names, lines, cols)
-      | ast.AliasDecl name _ _ pos ->
-          collect_decl_locations(rest, line_offset,
-            Cons("alias", categories), Cons(name, names),
-            Cons(pos.line + line_offset, lines),
-            Cons(pos.column, cols))
-      | ast.WrapDecl name _ _ _ pos ->
-          collect_decl_locations(rest, line_offset,
-            Cons("type", categories), Cons(name, names),
-            Cons(pos.line + line_offset, lines),
-            Cons(pos.column, cols))
-      | ast.ExternFnDecl _ _ _ _ _ ->
-          collect_decl_locations(rest, line_offset, categories, names, lines, cols)
+            Cons(category, categories), Cons(name, names),
+            Cons(ast.decl_pos(d).line + line_offset, lines),
+            Cons(ast.decl_pos(d).column, cols))
 
 fn empty_locations_json() -> json.Json =
   ok_response(json.JsonObject(
@@ -425,17 +406,8 @@ fn collect_matches(decls: List ast.Decl, query_te: ast.TypeExpr, alias_env: Dict
               | _ -> collect_matches(rest, query_te, alias_env, acc)
       | _ -> collect_matches(rest, query_te, alias_env, acc)
 
-fn insert_sorted(x: String, sorted: List String) -> List String =
-  match sorted with
-  | Nil -> Cons(x, Nil)
-  | Cons h t ->
-      if str_compare(x, h) <= 0 then Cons(x, Cons(h, t))
-      else Cons(h, insert_sorted(x, t))
-
 fn sort_strings(xs: List String) -> List String =
-  match xs with
-  | Nil -> Nil
-  | Cons h t -> insert_sorted(h, sort_strings(t))
+  vec_to_list(vec_sort(vec_from_list(xs)))
 
 fn parse_query_type(query: String) -> Result String ast.TypeExpr =
   match lexer.tokenize(query) with
@@ -899,104 +871,84 @@ fn op_session_update(req: json.Json, state: StartupState) -> json.Json !{IO} =
                 ref_write(state_sessions(state), dict_set(int_to_string(session_id), new_sess, sessions))
                 ok_response(json.JsonBool(true))
 
+fn session_or_error(session_id: Int, sessions: Dict SessionState) -> Result json.Json SessionState =
+  match dict_get(int_to_string(session_id), sessions) with
+  | Nothing -> Err(error_response("unknown session: " ++ int_to_string(session_id)))
+  | Just sess -> Ok(sess)
+
 fn op_session_eval(req: json.Json, state: StartupState) -> json.Json !{IO} =
-  match require_int_field(req, "session_id") with
-  | Err msg -> error_response(msg)
-  | Ok session_id ->
-      match require_string_field(req, "expr") with
-      | Err msg -> error_response(msg)
-      | Ok expr ->
-          do
-            sessions <- ref_read(state_sessions(state))
-            match dict_get(int_to_string(session_id), sessions) with
-            | Nothing -> error_response("unknown session: " ++ int_to_string(session_id))
-            | Just sess ->
-                op_eval_expr_in_source(rebuild_session_source(sess), expr, state)
+  do
+    let Ok session_id = require_int_field(req, "session_id") else Err msg -> error_response(msg)
+    let Ok expr = require_string_field(req, "expr") else Err msg -> error_response(msg)
+    sessions <- ref_read(state_sessions(state))
+    let Ok sess = session_or_error(session_id, sessions) else Err resp -> resp
+    op_eval_expr_in_source(rebuild_session_source(sess), expr, state)
 
 fn op_session_type_of(req: json.Json, state: StartupState) -> json.Json !{IO} =
-  match require_int_field(req, "session_id") with
-  | Err msg -> error_response(msg)
-  | Ok session_id ->
-      match require_string_field(req, "expr") with
-      | Err msg -> error_response(msg)
-      | Ok expr ->
-          do
-            sessions <- ref_read(state_sessions(state))
-            match dict_get(int_to_string(session_id), sessions) with
-            | Nothing -> error_response("unknown session: " ++ int_to_string(session_id))
-            | Just sess ->
-                op_type_of_in_source(rebuild_session_source(sess), expr, state)
+  do
+    let Ok session_id = require_int_field(req, "session_id") else Err msg -> error_response(msg)
+    let Ok expr = require_string_field(req, "expr") else Err msg -> error_response(msg)
+    sessions <- ref_read(state_sessions(state))
+    let Ok sess = session_or_error(session_id, sessions) else Err resp -> resp
+    op_type_of_in_source(rebuild_session_source(sess), expr, state)
 
 fn op_session_diagnostics(req: json.Json, state: StartupState) -> json.Json !{IO} =
-  match require_int_field(req, "session_id") with
-  | Err msg -> error_response(msg)
-  | Ok session_id ->
-      do
-        sessions <- ref_read(state_sessions(state))
-        match dict_get(int_to_string(session_id), sessions) with
-        | Nothing -> error_response("unknown session: " ++ int_to_string(session_id))
-        | Just sess ->
-            op_diagnostics_in_source(rebuild_session_source(sess), state)
+  do
+    let Ok session_id = require_int_field(req, "session_id") else Err msg -> error_response(msg)
+    sessions <- ref_read(state_sessions(state))
+    let Ok sess = session_or_error(session_id, sessions) else Err resp -> resp
+    op_diagnostics_in_source(rebuild_session_source(sess), state)
 
 # ---------------------------------------------------------------------------
 # Request dispatch
 
-fn dispatch_op(op: String, req: json.Json, state: StartupState) -> json.Json !{IO} =
+# The error for a semantic op when the service runs without a stdlib root.
+fn missing_stdlib_root(state: StartupState) -> Maybe json.Json =
+  if state_stdlib_root(state) == ""
+  then Just(error_response("stdlib-root not configured for semantic ops"))
+  else Nothing
+
+let source_ops: List String =
+  ["check_source", "diagnostics_in_source", "declared_names_in_source",
+   "exported_names_in_source", "symbol_inventory_in_source", "symbol_locations_in_source",
+   "type_of_in_source", "instances_in_source", "eval_expr_in_source"]
+
+# Ops that read `module_source` from the request.
+fn dispatch_source_op(op: String, src: String, req: json.Json, state: StartupState)
+    -> json.Json !{IO} =
   if op == "check_source" then
-    match require_string_field(req, "module_source") with
-    | Err msg -> error_response(msg)
-    | Ok src ->
-        if state_stdlib_root(state) == "" then error_response("stdlib-root not configured for semantic ops")
-        else op_check_source(src, state)
+    do
+      let Nothing = missing_stdlib_root(state) else Just resp -> resp
+      op_check_source(src, state)
   else if op == "diagnostics_in_source" then
-    match require_string_field(req, "module_source") with
-    | Err msg -> error_response(msg)
-    | Ok src ->
-        if state_stdlib_root(state) == "" then empty_diags_response()
-        else op_diagnostics_in_source(src, state)
-  else if op == "declared_names_in_source" then
-    match require_string_field(req, "module_source") with
-    | Err msg -> error_response(msg)
-    | Ok src -> op_declared_names_in_source(src)
-  else if op == "exported_names_in_source" then
-    match require_string_field(req, "module_source") with
-    | Err msg -> error_response(msg)
-    | Ok src -> op_exported_names_in_source(src)
-  else if op == "symbol_inventory_in_source" then
-    match require_string_field(req, "module_source") with
-    | Err msg -> error_response(msg)
-    | Ok src -> op_symbol_inventory_in_source(src)
-  else if op == "symbol_locations_in_source" then
-    match require_string_field(req, "module_source") with
-    | Err msg -> error_response(msg)
-    | Ok src -> op_symbol_locations_in_source(src)
+    if state_stdlib_root(state) == "" then empty_diags_response()
+    else op_diagnostics_in_source(src, state)
+  else if op == "declared_names_in_source" then op_declared_names_in_source(src)
+  else if op == "exported_names_in_source" then op_exported_names_in_source(src)
+  else if op == "symbol_inventory_in_source" then op_symbol_inventory_in_source(src)
+  else if op == "symbol_locations_in_source" then op_symbol_locations_in_source(src)
   else if op == "type_of_in_source" then
-    match require_string_field(req, "module_source") with
-    | Err msg -> error_response(msg)
-    | Ok src ->
-        match require_string_field(req, "expr") with
-        | Err msg -> error_response(msg)
-        | Ok expr ->
-            if state_stdlib_root(state) == "" then error_response("stdlib-root not configured for semantic ops")
-            else op_type_of_in_source(src, expr, state)
+    do
+      let Ok expr = require_string_field(req, "expr") else Err msg -> error_response(msg)
+      let Nothing = missing_stdlib_root(state) else Just resp -> resp
+      op_type_of_in_source(src, expr, state)
   else if op == "instances_in_source" then
-    match require_string_field(req, "module_source") with
-    | Err msg -> error_response(msg)
-    | Ok src ->
-        match require_string_field(req, "query") with
-        | Err msg -> error_response(msg)
-        | Ok query ->
-            if state_stdlib_root(state) == "" then error_response("stdlib-root not configured for semantic ops")
-            else op_instances_in_source(src, query, state)
+    do
+      let Ok query = require_string_field(req, "query") else Err msg -> error_response(msg)
+      let Nothing = missing_stdlib_root(state) else Just resp -> resp
+      op_instances_in_source(src, query, state)
   else if op == "eval_expr_in_source" then
-    match require_string_field(req, "module_source") with
-    | Err msg -> error_response(msg)
-    | Ok src ->
-        match require_string_field(req, "expr") with
-        | Err msg -> error_response(msg)
-        | Ok expr ->
-            if state_stdlib_root(state) == "" then error_response("stdlib-root not configured for semantic ops")
-            else op_eval_expr_in_source(src, expr, state)
+    do
+      let Ok expr = require_string_field(req, "expr") else Err msg -> error_response(msg)
+      let Nothing = missing_stdlib_root(state) else Just resp -> resp
+      op_eval_expr_in_source(src, expr, state)
+  else error_response(string.concat("unknown op: ", op))
+
+fn dispatch_op(op: String, req: json.Json, state: StartupState) -> json.Json !{IO} =
+  if list_member(op, source_ops) then
+    do
+      let Ok src = require_string_field(req, "module_source") else Err msg -> error_response(msg)
+      dispatch_source_op(op, src, req, state)
   else if op == "complete_in_state" then not_implemented(op)
   else if op == "session_create" then op_session_create(state)
   else if op == "session_update" then op_session_update(req, state)

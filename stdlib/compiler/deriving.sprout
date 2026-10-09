@@ -164,21 +164,31 @@ fn stored_params(type_params: List String, fields: List ast.TypeExpr) -> List St
       if ast.type_exprs_store(p, fields) then Cons(p, stored_params(rest, fields))
       else stored_params(rest, fields)
 
+# Shared skeleton of every derived instance: `instance <Class> <T> where ctx { methods }`.
+fn derived_instance(class_name: String, name: String, type_params: List String,
+                    ctx: List ast.TypeConstraint, methods: List ast.InstanceMethodImpl,
+                    pos: source.SourcePos) -> ast.Decl =
+  ast.InstanceDecl(
+    ast.TypeConstraint(class_name, [instance_head_typeexpr(name, type_params)]),
+    ctx,
+    methods,
+    pos)
+
+# A pure, effect-free method with an explicit return type.
+fn derived_method(method: String, params: List ast.Param, ret: ast.TypeExpr, body: ast.Expr) -> ast.InstanceMethodImpl =
+  ast.InstanceMethodImpl(method, params, Just(ret), Nothing, Nil, body)
+
+# A parameter of the instance's own type.
+fn self_param(param_name: String, name: String, type_params: List String) -> ast.Param =
+  ast.Param(param_name, Just(instance_head_typeexpr(name, type_params)), ast.ModeDefault)
+
 # Emit `instance Eq <T> [where Eq a, ...] { fn eq(left, right) -> Bool = ... }`.
 # Returns the InstanceDecl as an ast.Decl (since InstanceDecl is a constructor
 # of ast.Decl, not a separate type).
 fn emit_eq_instance(name: String, type_params: List String, ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Decl =
-  ast.InstanceDecl(
-    ast.TypeConstraint("Eq", [instance_head_typeexpr(name, type_params)]),
-    adt_instance_constraints("Eq", type_params, ctors),
-    [ast.InstanceMethodImpl(
-       "eq",
-       [ast.Param("left", Just(instance_head_typeexpr(name, type_params)), ast.ModeDefault),
-        ast.Param("right", Just(instance_head_typeexpr(name, type_params)), ast.ModeDefault)],
-       Just(ast.TypeName("Bool")),
-       Nothing,
-       Nil,
-       build_eq_match_body(ctors, pos))],
+  derived_instance("Eq", name, type_params, adt_instance_constraints("Eq", type_params, ctors),
+    [derived_method("eq", [self_param("left", name, type_params), self_param("right", name, type_params)],
+       ast.TypeName("Bool"), build_eq_match_body(ctors, pos))],
     pos)
 
 # --- ToString emitter --------------------------------------------------------
@@ -252,16 +262,9 @@ fn build_to_string_match_body(ctors: List ast.TypeConstructor, pos: source.Sourc
     pos)
 
 fn emit_to_string_instance(name: String, type_params: List String, ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Decl =
-  ast.InstanceDecl(
-    ast.TypeConstraint("ToString", [instance_head_typeexpr(name, type_params)]),
-    adt_instance_constraints("ToString", type_params, ctors),
-    [ast.InstanceMethodImpl(
-       "to_string",
-       [ast.Param("value", Just(instance_head_typeexpr(name, type_params)), ast.ModeDefault)],
-       Just(ast.TypeName("String")),
-       Nothing,
-       Nil,
-       build_to_string_match_body(ctors, pos))],
+  derived_instance("ToString", name, type_params, adt_instance_constraints("ToString", type_params, ctors),
+    [derived_method("to_string", [self_param("value", name, type_params)],
+       ast.TypeName("String"), build_to_string_match_body(ctors, pos))],
     pos)
 
 # --- Ord emitter (all ADT shapes: nullary and field-bearing) -----------------
@@ -358,17 +361,9 @@ fn build_ord_match_body(ctors: List ast.TypeConstructor, pos: source.SourcePos) 
     pos)
 
 fn emit_ord_instance(name: String, type_params: List String, ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Decl =
-  ast.InstanceDecl(
-    ast.TypeConstraint("Ord", [instance_head_typeexpr(name, type_params)]),
-    adt_instance_constraints("Ord", type_params, ctors),
-    [ast.InstanceMethodImpl(
-       "compare",
-       [ast.Param("left", Just(instance_head_typeexpr(name, type_params)), ast.ModeDefault),
-        ast.Param("right", Just(instance_head_typeexpr(name, type_params)), ast.ModeDefault)],
-       Just(ast.TypeName("Int")),
-       Nothing,
-       Nil,
-       build_ord_match_body(ctors, pos))],
+  derived_instance("Ord", name, type_params, adt_instance_constraints("Ord", type_params, ctors),
+    [derived_method("compare", [self_param("left", name, type_params), self_param("right", name, type_params)],
+       ast.TypeName("Int"), build_ord_match_body(ctors, pos))],
     pos)
 
 # --- Enum emitter (nullary-only ADTs) ----------------------------------------
@@ -421,23 +416,11 @@ fn maybe_of(head: ast.TypeExpr) -> ast.TypeExpr =
 # No per-parameter constraints are emitted: an Enum-derivable type is nullary, so
 # any type parameter is necessarily phantom (no field can mention it).
 fn emit_enum_instance(name: String, type_params: List String, ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Decl =
-  ast.InstanceDecl(
-    ast.TypeConstraint("Enum", [instance_head_typeexpr(name, type_params)]),
-    Nil,
-    [ast.InstanceMethodImpl(
-       "ordinal",
-       [ast.Param("v", Just(instance_head_typeexpr(name, type_params)), ast.ModeDefault)],
-       Just(ast.TypeName("Int")),
-       Nothing,
-       Nil,
-       build_ordinal_body(ctors, pos)),
-     ast.InstanceMethodImpl(
-       "from_ordinal",
-       [ast.Param("n", Just(ast.TypeName("Int")), ast.ModeDefault)],
-       Just(maybe_of(instance_head_typeexpr(name, type_params))),
-       Nothing,
-       Nil,
-       build_from_ordinal_ladder(ctors, 0, pos))],
+  derived_instance("Enum", name, type_params, Nil,
+    [derived_method("ordinal", [self_param("v", name, type_params)],
+       ast.TypeName("Int"), build_ordinal_body(ctors, pos)),
+     derived_method("from_ordinal", [ast.Param("n", Just(ast.TypeName("Int")), ast.ModeDefault)],
+       maybe_of(instance_head_typeexpr(name, type_params)), build_from_ordinal_ladder(ctors, 0, pos))],
     pos)
 
 # --- DerivableClass ADT + dispatch ------------------------------------------
@@ -481,12 +464,7 @@ fn derive_instance(class_name: String, name: String, type_params: List String, c
   | Just dc -> derive_instance_for(dc, name, type_params, ctors, pos)
 
 fn derive_instances_for_classes(name: String, type_params: List String, ctors: List ast.TypeConstructor, pos: source.SourcePos, classes: List String) -> List ast.Decl =
-  match classes with
-  | Nil -> Nil
-  | Cons class_name rest ->
-      match derive_instance(class_name, name, type_params, ctors, pos) with
-      | Nothing -> derive_instances_for_classes(name, type_params, ctors, pos, rest)
-      | Just inst -> Cons(inst, derive_instances_for_classes(name, type_params, ctors, pos, rest))
+  list_filter_map(\c -> derive_instance(c, name, type_params, ctors, pos), classes)
 
 # --- Wrap support ------------------------------------------------------------
 #
@@ -512,12 +490,7 @@ fn wrap_synthetic_ctor(name: String, inner: ast.TypeExpr) -> ast.TypeConstructor
 # The ADT message ("constructor `Line` has fields") would blame a constructor
 # the user never wrote, so wraps get their own wording.
 fn validate_wrap_deriving_classes_list(name: String, classes: List String) -> Maybe String =
-  match classes with
-  | Nil -> Nothing
-  | Cons class_name rest ->
-      match validate_one_wrap_deriving_class(name, class_name) with
-      | Just err -> Just(err)
-      | Nothing -> validate_wrap_deriving_classes_list(name, rest)
+  find_map(\c -> validate_one_wrap_deriving_class(name, c), classes)
 
 fn validate_one_wrap_deriving_class(name: String, class_name: String) -> Maybe String =
   match parse_derivable_class(class_name) with
@@ -567,17 +540,9 @@ fn build_record_eq_acc(fields: List ast.RecordFieldDecl, acc: ast.Expr, pos: sou
         ast.BinaryExpr("&&", acc, record_field_eq_call(record_field_name(f), pos), pos), pos)
 
 fn emit_record_eq_instance(name: String, type_params: List String, fields: List ast.RecordFieldDecl, pos: source.SourcePos) -> ast.Decl =
-  ast.InstanceDecl(
-    ast.TypeConstraint("Eq", [instance_head_typeexpr(name, type_params)]),
-    record_instance_constraints("Eq", type_params, fields),
-    [ast.InstanceMethodImpl(
-       "eq",
-       [ast.Param("left", Just(instance_head_typeexpr(name, type_params)), ast.ModeDefault),
-        ast.Param("right", Just(instance_head_typeexpr(name, type_params)), ast.ModeDefault)],
-       Just(ast.TypeName("Bool")),
-       Nothing,
-       Nil,
-       build_record_eq_body(fields, pos))],
+  derived_instance("Eq", name, type_params, record_instance_constraints("Eq", type_params, fields),
+    [derived_method("eq", [self_param("left", name, type_params), self_param("right", name, type_params)],
+       ast.TypeName("Bool"), build_record_eq_body(fields, pos))],
     pos)
 
 # --- Record ToString: `"Name(" ++ "f0 = " ++ to_string(value.f0) ++ ", " ...` --
@@ -614,16 +579,9 @@ fn build_record_to_string_body(name: String, fields: List ast.RecordFieldDecl, p
     pos)
 
 fn emit_record_to_string_instance(name: String, type_params: List String, fields: List ast.RecordFieldDecl, pos: source.SourcePos) -> ast.Decl =
-  ast.InstanceDecl(
-    ast.TypeConstraint("ToString", [instance_head_typeexpr(name, type_params)]),
-    record_instance_constraints("ToString", type_params, fields),
-    [ast.InstanceMethodImpl(
-       "to_string",
-       [ast.Param("value", Just(instance_head_typeexpr(name, type_params)), ast.ModeDefault)],
-       Just(ast.TypeName("String")),
-       Nothing,
-       Nil,
-       build_record_to_string_body(name, fields, pos))],
+  derived_instance("ToString", name, type_params, record_instance_constraints("ToString", type_params, fields),
+    [derived_method("to_string", [self_param("value", name, type_params)],
+       ast.TypeName("String"), build_record_to_string_body(name, fields, pos))],
     pos)
 
 # --- Record Ord: lexicographic per-field `compare` (Int), `0` when field-less. -
@@ -649,17 +607,9 @@ fn build_record_ord_chain(fields: List ast.RecordFieldDecl, i: Int, pos: source.
             pos)
 
 fn emit_record_ord_instance(name: String, type_params: List String, fields: List ast.RecordFieldDecl, pos: source.SourcePos) -> ast.Decl =
-  ast.InstanceDecl(
-    ast.TypeConstraint("Ord", [instance_head_typeexpr(name, type_params)]),
-    record_instance_constraints("Ord", type_params, fields),
-    [ast.InstanceMethodImpl(
-       "compare",
-       [ast.Param("left", Just(instance_head_typeexpr(name, type_params)), ast.ModeDefault),
-        ast.Param("right", Just(instance_head_typeexpr(name, type_params)), ast.ModeDefault)],
-       Just(ast.TypeName("Int")),
-       Nothing,
-       Nil,
-       build_record_ord_chain(fields, 0, pos))],
+  derived_instance("Ord", name, type_params, record_instance_constraints("Ord", type_params, fields),
+    [derived_method("compare", [self_param("left", name, type_params), self_param("right", name, type_params)],
+       ast.TypeName("Int"), build_record_ord_chain(fields, 0, pos))],
     pos)
 
 # Dispatch a parsed class to its record emitter. DcEnum yields Nothing: a record
@@ -678,12 +628,7 @@ fn derive_record_instance(class_name: String, name: String, type_params: List St
   | Just dc -> derive_record_instance_for(dc, name, type_params, fields, pos)
 
 fn derive_record_instances_for_classes(name: String, type_params: List String, fields: List ast.RecordFieldDecl, pos: source.SourcePos, classes: List String) -> List ast.Decl =
-  match classes with
-  | Nil -> Nil
-  | Cons class_name rest ->
-      match derive_record_instance(class_name, name, type_params, fields, pos) with
-      | Nothing -> derive_record_instances_for_classes(name, type_params, fields, pos, rest)
-      | Just inst -> Cons(inst, derive_record_instances_for_classes(name, type_params, fields, pos, rest))
+  list_filter_map(\c -> derive_record_instance(c, name, type_params, fields, pos), classes)
 
 # --- Top-level expansion -----------------------------------------------------
 
@@ -692,31 +637,19 @@ fn derive_record_instances_for_classes(name: String, type_params: List String, f
 # order matters: instance lookup walks the env, and the synthesized instance
 # body references the type's fields/constructors that the decl just registered.
 export fn expand_deriving_decls(decls: List ast.Decl) -> List ast.Decl =
-  match decls with
-  | Nil -> Nil
-  | Cons d rest ->
-      match d with
-      | ast.TypeDecl name type_params ctors deriving_classes _ pos ->
-          match deriving_classes with
-          | Nil -> Cons(d, expand_deriving_decls(rest))
-          | _ -> Cons(d, list_append(
-                          derive_instances_for_classes(name, type_params, ctors, pos, deriving_classes),
-                          expand_deriving_decls(rest)))
-      | ast.RecordDecl name type_params fields deriving_classes _ _ pos ->
-          match deriving_classes with
-          | Nil -> Cons(d, expand_deriving_decls(rest))
-          | _ -> Cons(d, list_append(
-                          derive_record_instances_for_classes(name, type_params, fields, pos, deriving_classes),
-                          expand_deriving_decls(rest)))
-      # A wrap reuses the ADT emitters over its synthetic constructor, with its
-      # own type parameters.
-      | ast.WrapDecl name params inner deriving_classes pos ->
-          match deriving_classes with
-          | Nil -> Cons(d, expand_deriving_decls(rest))
-          | _ -> Cons(d, list_append(
-                          derive_instances_for_classes(name, params, [wrap_synthetic_ctor(name, inner)], pos, deriving_classes),
-                          expand_deriving_decls(rest)))
-      | _ -> Cons(d, expand_deriving_decls(rest))
+  list_flat_map(expand_one_deriving_decl, decls)
+
+fn expand_one_deriving_decl(d: ast.Decl) -> List ast.Decl =
+  match d with
+  | ast.TypeDecl name type_params ctors deriving_classes _ pos ->
+      Cons(d, derive_instances_for_classes(name, type_params, ctors, pos, deriving_classes))
+  | ast.RecordDecl name type_params fields deriving_classes _ _ pos ->
+      Cons(d, derive_record_instances_for_classes(name, type_params, fields, pos, deriving_classes))
+  # A wrap reuses the ADT emitters over its synthetic constructor, with its
+  # own type parameters.
+  | ast.WrapDecl name params inner deriving_classes pos ->
+      Cons(d, derive_instances_for_classes(name, params, [wrap_synthetic_ctor(name, inner)], pos, deriving_classes))
+  | _ -> [d]
 
 # --- Validation pass --------------------------------------------------------
 #
@@ -749,12 +682,7 @@ fn validate_one_deriving_decl(d: ast.Decl) -> Maybe String =
 # Records derive Eq/Ord/ToString only; Enum is ill-defined (a record is one
 # product, not an enumeration). Unknown classes are rejected as for ADTs.
 fn validate_record_deriving_classes_list(name: String, classes: List String) -> Maybe String =
-  match classes with
-  | Nil -> Nothing
-  | Cons class_name rest ->
-      match validate_one_record_deriving_class(name, class_name) with
-      | Just err -> Just(err)
-      | Nothing -> validate_record_deriving_classes_list(name, rest)
+  find_map(\c -> validate_one_record_deriving_class(name, c), classes)
 
 fn validate_one_record_deriving_class(name: String, class_name: String) -> Maybe String =
   match parse_derivable_class(class_name) with
@@ -765,12 +693,7 @@ fn validate_one_record_deriving_class(name: String, class_name: String) -> Maybe
   | Just _ -> Nothing
 
 fn validate_deriving_classes_list(name: String, ctors: List ast.TypeConstructor, classes: List String) -> Maybe String =
-  match classes with
-  | Nil -> Nothing
-  | Cons class_name rest ->
-      match validate_one_deriving_class(name, ctors, class_name) with
-      | Just err -> Just(err)
-      | Nothing -> validate_deriving_classes_list(name, ctors, rest)
+  find_map(\c -> validate_one_deriving_class(name, ctors, c), classes)
 
 # Name of the first constructor carrying fields, if any — the offending ctor for
 # an Enum derivation, which requires every constructor to be nullary.

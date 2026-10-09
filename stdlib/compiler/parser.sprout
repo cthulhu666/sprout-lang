@@ -1724,26 +1724,13 @@ fn desugar_where_step(body: ast.Expr, bindings: List (ast.Pattern, ast.Expr)) ->
       | (pattern, value) ->
           desugar_where_step(wrap_where_binding(body, (pattern, value)), rest)
 
-# Span of a pattern (every Pattern variant carries its SourcePos last).
-fn pattern_pos(p: ast.Pattern) -> source.SourcePos =
-  match p with
-  | ast.WildcardPattern pos -> pos
-  | ast.VarPattern _ pos -> pos
-  | ast.IntPattern _ pos -> pos
-  | ast.BoolPattern _ pos -> pos
-  | ast.StringPattern _ pos -> pos
-  | ast.CharPattern _ pos -> pos
-  | ast.UnitPattern pos -> pos
-  | ast.TuplePattern _ pos -> pos
-  | ast.ConstructorPattern _ _ pos -> pos
-
 # `where <pat> = <value>` builds the node `let <pat> = <value> in <body>` builds:
 # they are one construct (spec §5.1), so they must not type differently. The
 # match inference makes of it infers the value first, so the type flows value ->
 # binding; an applied lambda, the old form, typed the body first.
 fn wrap_where_binding(inner: ast.Expr, binding: (ast.Pattern, ast.Expr)) -> ast.Expr =
   match binding with
-  | (pattern, value) -> ast.LetBindExpr(pattern, value, Nothing, inner, pattern_pos(pattern))
+  | (pattern, value) -> ast.LetBindExpr(pattern, value, Nothing, inner, ast.pattern_pos(pattern))
 
 # ---------------------------------------------------------------------------
 # Type constructor parsing
@@ -1787,24 +1774,13 @@ fn parse_type_constructor_def(tokens: Vec token.Token, i: Int) -> Result ParseEr
     # existential form `| exists a. Shown a where ToString a` (docs/gadts-v0.md §6),
     # `where` (not `=>`) matching every other Sprout constraint site. It is validated
     # against the `exists`-prefix vars below.
-    (where_cons, i4) <- parse_ctor_where_clause(tokens, i3)
+    (where_cons, i4) <- parse_optional_constraints(tokens, i3)
     _ <- validate_ctor_where(exist_vars, where_cons, tokens, i3)
     # The `any C` sugar hoists a fresh existential var + constraint per occurrence;
     # they extend any explicit `exists`-prefix vars. Stage 0b (docs/gadts-v0.md §6).
     Ok((ast.TypeConstructor(token.token_text(t), fields,
                             list_append(exist_vars, any_vars),
                             list_append(any_cons, where_cons)), i4))
-
-# Parse an optional trailing `where <constraints>` clause on a constructor. Reuses
-# collect_constraints (comma-separated, terminating at `|` or a non-type token).
-# `where` is a reserved keyword, so collect_ctor_fields already halts before it.
-fn parse_ctor_where_clause(tokens: Vec token.Token, i: Int) -> Result ParseError (List ast.TypeConstraint, Int) =
-  match match_keyword(tokens, i, "where") with
-  | Nothing -> Ok((Nil, i))
-  | Just (_, i2) ->
-      do
-        (cons, i3) <- collect_constraints(tokens, i2, Nil)
-        Ok((list_reverse(cons), i3))
 
 # A constructor `where` clause is only meaningful for an existential: each
 # constraint must apply a class to a variable bound by the `exists` prefix.
@@ -2021,6 +1997,9 @@ fn parse_return_type_cont(tokens: Vec token.Token, i: Int, ty_raw: ast.TypeExpr)
         (effs_maybe, i2) <- parse_effect_annotation(tokens, i)
         Ok((Just(ty_raw), effs_maybe, i2))
 
+# Parse an optional trailing `where <constraints>` clause (function, constructor,
+# class or instance). collect_constraints is comma-separated and stops at `|` or a
+# non-type token; `where` is reserved, so constructor fields halt before it.
 fn parse_optional_constraints(tokens: Vec token.Token, i: Int) -> Result ParseError (List ast.TypeConstraint, Int) =
   match match_keyword(tokens, i, "where") with
   | Nothing -> Ok((Nil, i))
@@ -2166,7 +2145,7 @@ fn parse_class_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.D
     (_, i2) <- expected_keyword("class", tokens, i)
     (name_tok, i3) <- expected_ident("class name", tokens, i2)
     (params, i4) <- collect_ident_list(tokens, i3, Nil)
-    (superclasses, i5) <- parse_optional_instance_constraints(tokens, i4)
+    (superclasses, i5) <- parse_optional_constraints(tokens, i4)
     (methods, i6) <- parse_class_body(tokens, i5)
     Ok((ast.ClassDecl(token.token_text(name_tok), params, methods, superclasses, cur_pos(tokens, i)), i6))
 
@@ -2218,17 +2197,9 @@ fn parse_instance_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (as
   do
     (_, i2) <- expected_keyword("instance", tokens, i)
     (constraint, i3) <- parse_type_constraint(tokens, i2)
-    (inst_constraints, i4) <- parse_optional_instance_constraints(tokens, i3)
+    (inst_constraints, i4) <- parse_optional_constraints(tokens, i3)
     (methods, i5) <- parse_instance_body(tokens, i4)
     Ok((ast.InstanceDecl(constraint, inst_constraints, methods, cur_pos(tokens, i)), i5))
-
-fn parse_optional_instance_constraints(tokens: Vec token.Token, i: Int) -> Result ParseError (List ast.TypeConstraint, Int) =
-  match match_keyword(tokens, i, "where") with
-  | Nothing -> Ok((Nil, i))
-  | Just (_, i2) ->
-      do
-        (cs, i3) <- collect_constraints(tokens, i2, Nil)
-        Ok((list_reverse(cs), i3))
 
 # The keywords that begin a top-level declaration (the list is in `token`).
 # parse_decl_body guards its dispatch on this predicate, so the two cannot

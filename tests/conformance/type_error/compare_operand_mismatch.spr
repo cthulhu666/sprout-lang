@@ -1,0 +1,4 @@
+# `<` accepts Int, Char or Double. A Bool operand fails every attempt; the error
+# comes from the last one tried.
+
+fn bad(x: Bool) -> Bool = x < true
