@@ -9,7 +9,7 @@
 # review can never dirty a commit. Same place `review_gate.py` keeps its state.
 #
 #   review_ledger.sh open            record a run starting; prints the run id
-#   review_ledger.sh done <id> <found> <confirmed> [effort] [cleanups]
+#   review_ledger.sh done <id> <found> <confirmed> [effort] [cleanups] [cleanups-confirmed]
 #   review_ledger.sh findings <id>   print the path to write that run's findings to
 #   review_ledger.sh raw <id>        path for that run's findings as each pass worded them
 #   review_ledger.sh count           completed runs on this branch
@@ -26,17 +26,25 @@ branch_name() {
   git rev-parse --abbrev-ref HEAD 2>/dev/null || printf 'DETACHED'
 }
 
-# Columns: when, state, branch, head, run-id, found, confirmed, effort, cleanups.
-# A `start` row writes "-" for the four it cannot know yet.
+# Columns: when, state, branch, head, run-id, found, confirmed, effort, cleanups,
+# cleanups-confirmed. A `start` row writes "-" for the five it cannot know yet.
 #
-# `effort` and `cleanups` were appended rather than inserted, so rows have seven,
-# eight or nine fields. Every reader selects by number and tests NF past $7, so
-# all widths parse — which is the only reason these columns could be added.
+# The last three were appended rather than inserted, so rows have seven to ten
+# fields. Every reader selects by number and tests NF past $7, so all widths
+# parse — which is the only reason these columns could be added.
 append_row() {
   local file="$1"
   shift
   mkdir -p "$(dirname "$file")" || return 1
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$@" >> "$file"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$@" >> "$file"
+}
+
+# A count, or "-": digits only, so no argument can carry a tab into the row.
+count_or_dash() {
+  case "${1:-}" in
+    "" | *[!0-9]*) printf -- '-' ;;
+    *) printf '%s' "$1" ;;
+  esac
 }
 
 cmd_open() {
@@ -46,13 +54,13 @@ cmd_open() {
   head=$(git rev-parse --short HEAD 2>/dev/null || printf 'unknown')
   # Seconds since epoch plus the pid: unique without coordinating with readers.
   id="$(date +%s)-$$"
-  append_row "$file" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" start "$branch" "$head" "$id" - - - -
+  append_row "$file" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" start "$branch" "$head" "$id" - - - - -
   printf '%s\n' "$id"
 }
 
 cmd_done() {
-  local file branch head id found confirmed effort cleanups
-  id="${1:?usage: review_ledger.sh done <id> <found> <confirmed> [effort] [cleanups]}"
+  local file branch head id found confirmed effort cleanups cleanups_confirmed
+  id="${1:?usage: review_ledger.sh done <id> <found> <confirmed> [effort] [cleanups] [cleanups-confirmed]}"
   found="${2:--}"
   confirmed="${3:--}"
   # The level arrives from an argument the skill parsed, so only the known
@@ -62,16 +70,14 @@ cmd_done() {
     low | medium | high | xhigh | max) effort="$4" ;;
     *) effort=- ;;
   esac
-  # Cleanups are not bugs, so they never share `found`. Digits only, same reason.
-  case "${5:-}" in
-    "" | *[!0-9]*) cleanups=- ;;
-    *) cleanups="$5" ;;
-  esac
+  # Cleanups are not bugs, so they never share `found` or `confirmed`.
+  cleanups=$(count_or_dash "${5:-}")
+  cleanups_confirmed=$(count_or_dash "${6:-}")
   file=$(ledger_path) || { echo "not a git repository" >&2; return 1; }
   branch=$(branch_name)
   head=$(git rev-parse --short HEAD 2>/dev/null || printf 'unknown')
   append_row "$file" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" done "$branch" "$head" "$id" \
-             "$found" "$confirmed" "$effort" "$cleanups"
+             "$found" "$confirmed" "$effort" "$cleanups" "$cleanups_confirmed"
 }
 
 # Where a run's findings are written, as a sibling of the TSV rather than a column
@@ -154,6 +160,6 @@ case "${1:-show}" in
   raw) shift; cmd_raw "$@" ;;
   count) cmd_count ;;
   show)  cmd_show ;;
-  *) echo "usage: review_ledger.sh {open|done <id> <found> <confirmed> [effort] [cleanups]|findings <id>|raw <id>|count|show}" >&2
+  *) echo "usage: review_ledger.sh {open|done <id> <found> <confirmed> [effort] [cleanups] [cleanups-confirmed]|findings <id>|raw <id>|count|show}" >&2
      exit 2 ;;
 esac

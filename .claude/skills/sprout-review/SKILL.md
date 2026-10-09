@@ -6,13 +6,13 @@ argument-hint: "[low|medium|high|xhigh|max] [<pr#>|<branch>|<path>]"
 
 # sprout-review
 
-An ensemble diff review that **records that it ran**: N independent bug passes, one adversarial
-verify pass over their findings, C cleanup passes beside them, and a ledger row plus a findings file
-on disk either side of it.
+An ensemble diff review that **records that it ran**: N independent bug passes, C cleanup passes
+beside them, one adversarial verify pass per track over what that track found, and a ledger row
+plus a findings file on disk either side of it.
 
-It costs at most **N + C + 1 agents**, known before the run — five at the default level, or four
-when the bug passes found nothing at all. The effort level moves `N` and `C`; §Arguments has the
-table.
+It costs at most **N + C + 2 agents**, known before the run — six at the default level, one fewer
+for each track that found nothing, since there is then nothing to judge. The effort level moves `N`
+and `C`; §Arguments has the table.
 
 Three things follow from that and govern the procedure below. The run is **owned** — the row is
 opened before reviewing and closed after, so the count is exact by construction rather than inferred
@@ -24,7 +24,7 @@ reading task, and the machinery that tried it got that wrong on every run it was
 
 The **cleanup track** is `/simplify`'s four angles — reuse, simplification, efficiency, altitude —
 with Sprout idioms added, reporting instead of applying. It shares the diff and the fan-out with the
-bug passes and nothing else: no skeptic, no cap, no share of `found` or `confirmed`. Other
+bug passes. It has its own skeptic, cap and counts, and no share of `found` or `confirmed`. Other
 repo-specific dimensions (GC rooting, seed staleness) are NOT here yet.
 
 Why any of this exists, what was measured to get here, and what is still open: `README.md` and
@@ -54,11 +54,11 @@ one on the same branch, and a level that drifts with whatever `/effort` happens 
 
 | level | N passes | C cleanup | reviewer effort | agents (max) |
 |---|---|---|---|---|
-| `low` | 1 | 1 | `low` | 3 |
-| `medium` | 2 | 1 | `medium` | 4 |
-| **`high`** (default) | **3** | **1** | `high` | **5** |
-| `xhigh` | 5 | 4 | `xhigh` | 10 |
-| `max` | 8 | 4 | `max` | 13 |
+| `low` | 1 | 1 | `low` | 4 |
+| `medium` | 2 | 1 | `medium` | 5 |
+| **`high`** (default) | **3** | **1** | `high` | **6** |
+| `xhigh` | 5 | 4 | `xhigh` | 11 |
+| `max` | 8 | 4 | `max` | 14 |
 
 `C = 1` is one pass holding all four angles; `C = 4` is one angle per pass, as `/simplify` runs.
 
@@ -66,8 +66,9 @@ These five rows are a cost ladder, not a measurement — the same caveat `README
 for `N = 3`, now multiplied by five. `BACKLOG.md` owns closing that.
 
 **What the level does NOT move**, deliberately: `VERIFY_CAP`. It is what one skeptic can hold at
-once, which does not grow because more reviewers ran, and it has an open `BACKLOG.md` entry to
-measure it — a constant that varies with a flag cannot be calibrated. One consequence is worth
+once — each track's skeptic has its own — which does not grow because more reviewers ran, and it
+has an open `BACKLOG.md` entry to measure it — a constant that varies with a flag cannot be
+calibrated. One consequence is worth
 stating plainly: at `xhigh` and `max` the cap binds hard — 8 passes at up to 8 findings each is 64
 against a cap of 10 — so most findings come back **unverified rather than
 unchecked-and-presented-as-checked**. The fix is more skeptics (the judge-panel entry in
@@ -118,7 +119,8 @@ hand-substituting three values into two hundred lines could. Editing the script 
 The script returns the findings as its passes reported them, each with a verdict. It merges nothing
 and counts no agreement, so two reports of one bug arrive as two findings and `found` counts
 **reports**. Turning them into issues is step 4's job, and yours. The cleanups come back separately,
-as `cleanups`, each with a `category` and no verdict.
+each with a `category`, split the same way: `cleanups` (confirmed), `cleanupsUnverified` and
+`cleanupsRefuted`, with `cleanupsFound` and `cleanupsConfirmed` as their counts.
 
 **4. Write the findings to disk** before reporting them, at the path the ledger names:
 
@@ -134,8 +136,8 @@ exist only inside a chat message cannot be pointed at afterwards, which is the s
 ledger exists to fix, one level down: a count without a list says a review happened but not what it
 said.
 
-Write the `cleanups` there too, under their own heading after the bugs, with their category, and
-grouped the same way.
+Write the cleanups there too — confirmed, unverified and refuted — under their own heading after the
+bugs, with their category, and grouped the same way.
 
 **Also write the workflow's `raw` array**, verbatim JSON, to the path `review_ledger.sh raw <id>`
 names. That file is the only record of what each pass said in its own words, and it is what made the
@@ -146,7 +148,7 @@ measuring them is what ended them. `VERIFY_CAP` is the only constant left to che
 **5. Close the ledger row** with the counts the workflow returned, and the level it ran at:
 
 ```
-bash "$(git rev-parse --show-toplevel)/scripts/review_ledger.sh" done <run-id> <found> <confirmed> <level> <cleanups>
+bash "$(git rev-parse --show-toplevel)/scripts/review_ledger.sh" done <run-id> <found> <confirmed> <level> <cleanups> <cleanups-confirmed>
 ```
 
 `found` is the workflow's `found`: how many findings its passes **reported**, ungrouped, so the
@@ -156,8 +158,9 @@ For `<level>` use the workflow's returned `effort`, not the token the user typed
 resolved in step 1 — the three differ precisely when something went wrong, and the returned one is
 the level the passes actually ran at. The ledger stores only the known vocabulary, so a level it
 does not recognise is dropped silently rather than corrupting the row: nothing downstream will
-complain about a wrong one. `<cleanups>` is the length of the returned `cleanups`, ungrouped: its
-own column, because `found` means bug reports in every row written before cleanups existed.
+complain about a wrong one. `<cleanups>` and `<cleanups-confirmed>` are the returned
+`cleanupsFound` and `cleanupsConfirmed`, ungrouped: their own columns, because `found` means bug
+reports in every row written before cleanups existed.
 
 Close the row even when the count is zero — a review that found nothing still happened, and a
 missing row reads as "never reviewed".
@@ -183,9 +186,10 @@ Severity and verification status are two axes, so never fold them into one chip.
 them apart has lost the distinction the verify phase was spent on. The status stays a word beside
 the chip: `CONFIRMED`, `UNVERIFIED — <reason>`, `REFUTED`.
 
-**Cleanups go after every bug**, in their own section, with the same chips and the category in place
-of a status: `🟡 LOW reuse — net.sprout:40 …`. Say once, in the heading, that they are not verified
-by design: you are the filter that `/simplify`'s applying agent was.
+**Cleanups go after every bug**, in their own section, with the same chips, then the category, then
+the status: `🟡 LOW reuse CONFIRMED — net.sprout:40 …`. A confirmed cleanup is one whose claims
+hold — the code says what it says, a named helper exists and matches, the proposed form keeps
+behaviour. Whether it is worth doing is still the reader's call, not the skeptic's.
 
 Do not fix anything in this turn, and do not commit, amend or push. The temptation is strong when a
 finding is obviously right and the fix is three lines — and it defeats the skill. A review whose
@@ -204,7 +208,7 @@ export const meta = {
   description: 'Ensemble diff review: N careful reviewers, cleanup passes, adversarial verify',
   phases: [
     { title: 'Review', detail: 'N independent bug passes and the cleanup passes, over the diff' },
-    { title: 'Verify', detail: 'one skeptic refutes every finding the cap admits' },
+    { title: 'Verify', detail: 'one skeptic per track refutes every finding its cap admits' },
   ],
 }
 
@@ -225,13 +229,14 @@ if (!args || !LADDER[args.effort]) log(`no usable effort in args — defaulting 
 const VERIFY_EFFORT = (EFFORT === 'low') ? 'medium' : EFFORT
 
 // Deliberately NOT a function of EFFORT: this is what one skeptic can hold at
-// once, which does not grow because more reviewers ran. At xhigh and max it
-// binds hard and the excess is reported unverified. See BACKLOG.md.
+// once, which does not grow because more reviewers ran. Each track's skeptic
+// has its own. At xhigh and max it binds hard and the excess is reported
+// unverified. See BACKLOG.md.
 const VERIFY_CAP = 10
 
 // Cleanup passes: /simplify's four angles, report-only. One pass covers all four
 // up to high; xhigh and max split them one per pass, as /simplify does. A
-// separate track — never verified, capped or counted in `found`/`confirmed`.
+// separate track with its own skeptic, never counted in `found`/`confirmed`.
 const CLEANUP_LADDER = { low: 1, medium: 1, high: 1, xhigh: 4, max: 4 }
 const C = CLEANUP_LADDER[EFFORT]
 
@@ -422,8 +427,39 @@ const cleanups = rawCleanups.map(f => ({ ...f, file: canon.get(f.file) || f.file
 // took two comparators — one for eviction, one for reading order — while
 // agreement had a say in either; with agreement gone they collapse into this.
 const bySeverity = (a, b) => RANK[b.severity] - RANK[a.severity]
-const ranked = findings.slice().sort(bySeverity)
 
+// The two skeptics' questions. A bug skeptic asks whether a failure occurs; a
+// cleanup has no failure, so asked that it would refute nearly every one. The
+// cleanup skeptic checks the cleanup's claims instead, and never its worth —
+// that stays the reader's call.
+const BUG_TRACK = {
+  noun: 'findings',
+  one: 'finding',
+  label: 'verify',
+  head: f => `Claim: ${f.summary}\nScenario given: ${f.scenario}`,
+  ask: `Try to REFUTE each finding below. Read the code around each one and decide whether the
+failure genuinely occurs. Default to refuted=true when you are unsure a finding is real.`,
+}
+const CLEANUP_TRACK = {
+  noun: 'cleanups',
+  one: 'cleanup',
+  label: 'verify-cleanups',
+  head: f => `Category: ${f.category}\nClaim: ${f.summary}\nCost and proposed form: ${f.scenario}`,
+  ask: `Check each cleanup below. A reviewer proposed it to improve the code, not to fix a bug.
+You are judging whether what it says is TRUE, not whether it is worth doing.
+
+Read the code around each one, and refute it if any of these fails:
+1. The cited code says and does what the claim says.
+2. Any existing helper or other copy it names exists and does the same job.
+3. The form it proposes keeps the code's behaviour.
+Default to refuted=true when you are unsure.`,
+}
+
+// One track's list, judged by ONE skeptic — not one per finding. Findings
+// cluster in the same few files, so a shared context reads each file once where
+// separate agents each re-read it, and the agent count stays known before the
+// run: `N + C + 2`, not `N + D` discovered during it.
+//
 // EVERY finding is judged, up to the cap. There is no gate. A severity-and-
 // agreement gate withheld six of eight findings on run 1790751683-30359 and sent
 // the two that were already conceded dead: every finding was a lone low, so both
@@ -434,58 +470,65 @@ const ranked = findings.slice().sort(bySeverity)
 // it a finding is still REPORTED — visible and cheap, rather than invisible.
 // Eviction is severity-major: sorting it by agreement once put ten corroborated
 // lows ahead of a lone high and evicted the high.
-const toVerify = ranked.slice(0, VERIFY_CAP)
-const pastCap = ranked.slice(VERIFY_CAP)
-  .map(f => ({ ...f, unverifiedBecause: `past VERIFY_CAP (${VERIFY_CAP})` }))
-log(`${findings.length} findings from ${passes.filter(Boolean).length} passes; verifying ${toVerify.length}, ${pastCap.length} past the cap reported UNVERIFIED`)
+const judge = async (list, from, track) => {
+  const ranked = list.slice().sort(bySeverity)
+  const toVerify = ranked.slice(0, VERIFY_CAP)
+  const pastCap = ranked.slice(VERIFY_CAP)
+    .map(f => ({ ...f, unverifiedBecause: `past VERIFY_CAP (${VERIFY_CAP})` }))
+  log(`${list.length} ${track.noun} from ${from} passes; verifying ${toVerify.length}` +
+      (pastCap.length ? `, ${pastCap.length} past the cap reported UNVERIFIED` : ''))
 
-phase('Verify')
-// ONE skeptic for the whole list, not one per finding. Two reasons. The agent
-// count becomes `N + C + 1` and known before the run instead of `N + D` discovered
-// during it. And findings cluster in the same few files, so a shared context
-// reads each file once where D separate agents each re-read it.
-const listed = toVerify.map((f, i) =>
-  `[${i}] ${f.file}:${f.line} (${f.severity})\n` +
-  `Claim: ${f.summary}\nScenario given: ${f.scenario}`).join('\n\n')
-
-const panel = toVerify.length === 0 ? { verdicts: [] } : await agent(
-  `Try to REFUTE each finding below. Read the code around each one and decide whether the
-failure genuinely occurs. Default to refuted=true when you are unsure a finding is real.
+  const listed = toVerify.map((f, i) =>
+    `[${i}] ${f.file}:${f.line} (${f.severity})\n${track.head(f)}`).join('\n\n')
+  const panel = toVerify.length === 0 ? { verdicts: [] } : await agent(
+    `${track.ask}
 
 Judge each on its own evidence — they come from different reviewers and one being wrong
-says nothing about the next. Return exactly one verdict per finding, keyed by its [index].
+says nothing about the next. Return exactly one verdict per ${track.one}, keyed by its [index].
 
 ${listed}`,
-  { label: `verify:${toVerify.length}`, phase: 'Verify', schema: VERDICTS,
-    effort: VERIFY_EFFORT })
+    { label: `${track.label}:${toVerify.length}`, phase: 'Verify', schema: VERDICTS,
+      effort: VERIFY_EFFORT })
 
-// The join is on a number the model chose, so it is checked before it is
-// trusted. Omission is survivable — those findings go back unverified. A
-// duplicate or out-of-range index is not: it means the numbering itself is
-// unreliable, and a 1-based reply would otherwise hand every finding its
-// PREDECESSOR's verdict, silently confirming what was refuted. So the whole
-// mapping is discarded and the batch is reported unverified.
-const raw = panel?.verdicts || []
-const inRange = v => Number.isInteger(v.index) && v.index >= 0 && v.index < toVerify.length
-const seen = new Set()
-const dupe = raw.some(v => seen.size === seen.add(v.index).size)
-const trustworthy = raw.every(inRange) && !dupe
-if (!trustworthy) {
-  log(`VERDICTS DISCARDED: ${raw.length} for ${toVerify.length} findings, ` +
-      `${dupe ? 'duplicate index' : 'index out of range'} — numbering is unreliable`)
-} else if (raw.length !== toVerify.length) {
-  log(`${toVerify.length - raw.length} of ${toVerify.length} findings got no verdict`)
+  // The join is on a number the model chose, so it is checked before it is
+  // trusted. Omission is survivable — those findings go back unverified. A
+  // duplicate or out-of-range index is not: it means the numbering itself is
+  // unreliable, and a 1-based reply would otherwise hand every finding its
+  // PREDECESSOR's verdict, silently confirming what was refuted. So the whole
+  // mapping is discarded and the batch is reported unverified.
+  const raw = panel?.verdicts || []
+  const inRange = v => Number.isInteger(v.index) && v.index >= 0 && v.index < toVerify.length
+  const seen = new Set()
+  const dupe = raw.some(v => seen.size === seen.add(v.index).size)
+  const trustworthy = raw.every(inRange) && !dupe
+  if (!trustworthy) {
+    log(`VERDICTS DISCARDED: ${raw.length} for ${toVerify.length} ${track.noun}, ` +
+        `${dupe ? 'duplicate index' : 'index out of range'} — numbering is unreliable`)
+  } else if (raw.length !== toVerify.length) {
+    log(`${toVerify.length - raw.length} of ${toVerify.length} ${track.noun} got no verdict`)
+  }
+
+  // A finding the skeptic skipped has no evidence either way, so it is neither
+  // confirmed nor refuted — `refuted` means the skeptic killed it, and reporting
+  // an unjudged finding that way buries it in a one-line list.
+  const verdictBy = trustworthy ? new Map(raw.map(v => [v.index, v])) : new Map()
+  const judged = toVerify.map((f, i) => ({ ...f, verdict: verdictBy.get(i) || null }))
+  const unanswered = judged.filter(f => !f.verdict)
+    .map(f => ({ ...f, unverifiedBecause: trustworthy ? 'no verdict returned' : 'verdicts discarded' }))
+  return {
+    confirmed: judged.filter(f => f.verdict && !f.verdict.refuted).sort(bySeverity),
+    unverified: [...pastCap, ...unanswered].sort(bySeverity),
+    refuted: judged.filter(f => f.verdict && f.verdict.refuted),
+  }
 }
 
-// A finding the skeptic skipped has no evidence either way, so it is neither
-// confirmed nor refuted — `refuted` means the skeptic killed it, and reporting
-// an unjudged finding that way buries it in a one-line list.
-const verdictBy = trustworthy ? new Map(raw.map(v => [v.index, v])) : new Map()
-const judged = toVerify.map((f, i) => ({ ...f, verdict: verdictBy.get(i) || null }))
-const unanswered = judged.filter(f => !f.verdict)
-  .map(f => ({ ...f, unverifiedBecause: trustworthy ? 'no verdict returned' : 'verdicts discarded' }))
-
-const confirmed = judged.filter(f => f.verdict && !f.verdict.refuted)
+phase('Verify')
+// Side by side: the second skeptic costs no wall-clock, and each has its own
+// cap, so neither track can push the other's findings past it.
+const [bugs, tidy] = await parallel([
+  () => judge(findings, passes.filter(Boolean).length, BUG_TRACK),
+  () => judge(cleanups, C - cleanupFailed, CLEANUP_TRACK),
+])
 return {
   // Returned so step 5 records the level the run ACTUALLY used, not the one the
   // caller meant to send — they differ exactly when the args were malformed,
@@ -494,17 +537,21 @@ return {
   passes: N,
   target: TARGET || null,
   found: findings.length,
-  confirmed: confirmed.length,
+  confirmed: bugs.confirmed.length,
   // Every pass's findings in the reviewer's own words. Step 4 writes these to
   // the ledger beside the report, so the unjudged claims survive too.
   raw: all,
-  findings: confirmed.sort(bySeverity),
-  unverified: [...pastCap, ...unanswered].sort(bySeverity),
-  refuted: judged.filter(f => f.verdict && f.verdict.refuted),
-  // Unverified by design: the reader is the filter /simplify's applying agent
-  // was. Never part of `found`, `confirmed` or `raw`.
+  findings: bugs.confirmed,
+  unverified: bugs.unverified,
+  refuted: bugs.refuted,
+  // Never part of `found`, `confirmed` or `raw`: those mean bugs in every
+  // ledger row written before cleanups existed.
   cleanupPasses: C,
-  cleanups: cleanups.sort(bySeverity),
+  cleanupsFound: cleanups.length,
+  cleanupsConfirmed: tidy.confirmed.length,
+  cleanups: tidy.confirmed,
+  cleanupsUnverified: tidy.unverified,
+  cleanupsRefuted: tidy.refuted,
 }
 ```
 
@@ -536,12 +583,16 @@ return {
   gate admitted were the two the reviewers had already conceded were dead — while two it hid
   contradicted a claim in the PR body. A gate is only as good as the signal it ranks on, and that
   signal goes flat exactly when a diff has no severe bugs, which is most of the time.
-- **The agent count is at most `N + C + 1`,** known before the run — `N + C` only when the bug
-  passes found nothing at all, since there is then nothing to judge. It was `N + D` at `N = 8`,
-  where eight reviewers finding two apiece meant two dozen agents: nothing bounded the second phase.
-- **Why cleanups skip the skeptic.** It is told to refute when unsure and judges whether a failure
-  occurs; a cleanup has no failure, so it would refute nearly all of them. `/simplify` has no
-  verifier either — its applying agent skips weak findings. Here the reader does that.
+- **The agent count is at most `N + C + 2`,** known before the run — one fewer for each track that
+  found nothing, since there is then nothing to judge. It was `N + D` at `N = 8`, where eight
+  reviewers finding two apiece meant two dozen agents: nothing bounded the second phase.
+- **Why cleanups get their own skeptic.** The bug skeptic judges whether a failure occurs and
+  refutes when unsure; a cleanup has no failure, so it would refute nearly all of them. The cleanup
+  skeptic asks a different question — are the cleanup's claims true, and does its proposed form keep
+  behaviour — and not whether it is worth doing, which stays the reader's call. A separate agent
+  rather than a second list for the bug skeptic, so each has its own cap: sharing one, run
+  `1791578046-40156`'s 6 bugs and 8 cleanups would have left 4 cleanups unjudged. `/simplify` has
+  no verifier; its applying agent skips weak findings.
 - **Why cleanups are their own column.** Of 67 findings across the 11 runs on record before the
   track existed, none was reuse or simplification; the reviewer prompt asks for failures, and the
   skeptic refutes the rest. Folding cleanups into `found` would change what every older row means.
@@ -555,6 +606,6 @@ return {
   pass; it does not widen the verify cap, and nothing has measured what the extra passes find.
   Do not describe a `max` run as "thorough" — describe it as eight passes.
 - The ledger lives at `$GIT_DIR/claude-review/runs.tsv` — per-worktree, invisible to `git status`,
-  append-only so two concurrent sessions cannot clobber each other, and nine columns wide since
-  the cleanup count joined it (older seven- and eight-field rows still parse). See
+  append-only so two concurrent sessions cannot clobber each other, and ten columns wide since
+  the confirmed-cleanup count joined it (older seven- to nine-field rows still parse). See
   `scripts/review_ledger.sh`.

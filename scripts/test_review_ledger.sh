@@ -161,8 +161,8 @@ git switch -q -c effort-bogus
 idb=$(bash "$LEDGER" open)
 bash "$LEDGER" done "$idb" 1 1 "$(printf 'hi\tgh')"
 check "a bogus level is not recorded"  "review:1 1 found 1 real" "$(bash "$LEDGER" show)"
-check "a bogus level keeps 9 columns"  "1" \
-  "$(awk -F'\t' '$2=="done" && $3=="effort-bogus" { print NF }' "$runs" | grep -c '^9$')"
+check "a bogus level keeps 10 columns" "1" \
+  "$(awk -F'\t' '$2=="done" && $3=="effort-bogus" { print NF }' "$runs" | grep -c '^10$')"
 
 # --- the cleanups column -------------------------------------------------
 # Cleanups are not bugs, so they get their own ninth column rather than a share
@@ -173,7 +173,7 @@ bash "$LEDGER" done "$idc" 4 2 high 6
 check "the cleanup count is column 9"  "6" \
   "$(awk -F'\t' '$2=="done" && $3=="cleanup-col" { print $9 }' "$runs")"
 check "cleanups leave show unchanged"  "review:1 4 found 2 real @high" "$(bash "$LEDGER" show)"
-check "a start row is 9 columns wide"  "9" \
+check "a start row is 10 columns wide" "10" \
   "$(awk -F'\t' '$2=="start" && $3=="cleanup-col" { print NF }' "$runs")"
 # Same rule as the level: only a count is stored, never a token that could
 # carry a tab into the row.
@@ -184,6 +184,28 @@ check "a non-numeric cleanup count is dropped" "-" \
 # An 8-field row predates the column and must keep counting.
 printf '2020-01-01T00:00:00Z\tdone\tcleanup-col\tdeadbee\t999-2\t3\t1\tlow\n' >> "$runs"
 check "a legacy 8-field row counts"    "3"  "$(bash "$LEDGER" count)"
+
+# --- the confirmed-cleanups column ----------------------------------------
+# Cleanups have their own skeptic, so how many survived it is a tenth column.
+# Same rules as the ninth: digits only, and older rows keep counting.
+git switch -q -c cleanup-real
+ide=$(bash "$LEDGER" open)
+bash "$LEDGER" done "$ide" 4 2 high 8 5
+check "confirmed cleanups are column 10" "5" \
+  "$(awk -F'\t' -v i="$ide" '$2=="done" && $5==i { print $10 }' "$runs")"
+check "confirmed cleanups leave show unchanged" "review:1 4 found 2 real @high" \
+  "$(bash "$LEDGER" show)"
+idf=$(bash "$LEDGER" open)
+bash "$LEDGER" done "$idf" 1 1 high 3 "$(printf '2\tx')"
+check "a non-numeric confirmed count is dropped" "-" \
+  "$(awk -F'\t' -v i="$idf" '$2=="done" && $5==i { print $10 }' "$runs")"
+idg=$(bash "$LEDGER" open)
+bash "$LEDGER" done "$idg" 1 1 high 3
+check "an omitted confirmed count is '-'" "-" \
+  "$(awk -F'\t' -v i="$idg" '$2=="done" && $5==i { print $10 }' "$runs")"
+# A 9-field row predates the column and must keep counting.
+printf '2020-01-01T00:00:00Z\tdone\tcleanup-real\tdeadbee\t999-3\t3\t1\tlow\t2\n' >> "$runs"
+check "a legacy 9-field row counts"    "4"  "$(bash "$LEDGER" count)"
 git switch -q main
 
 # Outside a repository the ledger must stay quiet rather than erroring: the
