@@ -25,8 +25,9 @@ and decides what it means. Six behaviours are worth pinning beyond "it parses":
      reason a finding can come back unjudged.
   6. One file reported at two path spellings is reported at one canonical path,
      so the durable findings file does not mix the two spellings.
-  7. Cleanup passes are a separate track: they never reach the skeptic, the cap,
-     `found` or `confirmed`, and their count per level is pinned like N's.
+  7. Cleanup passes are a separate track: they never reach `found` or
+     `confirmed`, and their count per level is pinned like N's. They have their
+     own skeptic, cap and join, so neither track can evict or misnumber the other.
 """
 import json
 import os
@@ -87,15 +88,18 @@ const args = %s
 let reviewN = 0
 let cleanupN = 0
 let verifyCalls = 0
+let vetCalls = 0
 const EFFORTS = []
 const agent = async (prompt, opts) => {
   const label = (opts && opts.label) || ''
   EFFORTS.push({ label, effort: (opts && opts.effort) || null, prompt })
-  if (label.startsWith('verify:')) {
-    // One skeptic gets the whole list, so the stub answers by reading each
-    // entry's `[i] file:line` header back out of the prompt it was handed.
+  const vet = label.startsWith('verify-cleanups:')
+  if (vet || label.startsWith('verify:')) {
+    // One skeptic per track gets that track's whole list, so the stub answers
+    // by reading each entry's `[i] file:line` header back out of the prompt.
     // That also pins the prompt format the real verifier's indices rely on.
-    verifyCalls += 1
+    if (vet) vetCalls += 1
+    else verifyCalls += 1
     const heads = [...prompt.matchAll(/^\\[(\\d+)\\] (\\S+):(\\d+) \\(/gm)]
     const verdicts = []
     for (const m of heads) {
@@ -126,7 +130,8 @@ const log = m => LOGS.push(m)
 async function __main() {
 %s
 }
-__main().then(r => console.log(JSON.stringify({ ...r, LOGS, verifyCalls, reviewN, cleanupN, EFFORTS })))
+__main().then(r => console.log(JSON.stringify({ ...r, LOGS, verifyCalls, vetCalls, reviewN, cleanupN,
+                                                EFFORTS })))
 """
 
 
@@ -432,9 +437,9 @@ check("with a target the branch diff is not mentioned", 0,
 
 # --- the cleanup track ------------------------------------------------------
 # /simplify's four angles, report-only. They share the diff and the fan-out with
-# the bug passes and nothing else: no skeptic, no cap, no `found`/`confirmed`.
-# Those columns mean "bugs" in every ledger row ever written, and the skeptic is
-# told to refute anything with no failure, which every cleanup lacks.
+# the bug passes, never `found`/`confirmed` — those columns mean "bugs" in every
+# ledger row ever written. They get their own skeptic: the bug one refutes
+# anything with no failure, which every cleanup lacks.
 CLEANUP_LADDER = {"low": 1, "medium": 1, "high": 1, "xhigh": 4, "max": 4}
 ANGLES = ["### Reuse", "### Simplification", "### Efficiency", "### Altitude"]
 for level, c in CLEANUP_LADDER.items():
@@ -452,7 +457,10 @@ DUP_HELPER = {"file": "stdlib/net.sprout", "line": 40, "severity": "low",
               "scenario": "two copies to keep in step; call list_take"}
 out, err = run([[]] * 3, cleanups=[[DUP_HELPER]], args={"effort": "high", "target": ""})
 check("a cleanup is returned", 1, len(field(out, "cleanups")))
-check("a cleanup never reaches the skeptic", 0, out["verifyCalls"])
+check("a cleanup never reaches the bug skeptic", 0, out["verifyCalls"])
+check("a cleanup reaches its own skeptic", 1, out["vetCalls"])
+check("a judged cleanup counts as found", 1, out.get("cleanupsFound"))
+check("a judged cleanup counts as confirmed", 1, out.get("cleanupsConfirmed"))
 check("a cleanup is not counted as found", 0, out["found"])
 check("a cleanup is not in raw", 0, len(field(out, "raw")))
 cl = [e for e in field(out, "EFFORTS") if e["label"].startswith("cleanup:")]
@@ -463,12 +471,74 @@ check("the cleanup pass is not told to hunt bugs", False,
 check("the cleanup pass gets the branch diff", True,
       bool(cl) and "@{upstream}" in cl[0]["prompt"])
 
-# A bug and a cleanup together: the bug is judged, the cleanup is not, and the
-# cap and counts see only the bug.
+# The cleanup skeptic checks claims, not taste: whether the code says what the
+# cleanup says, whether a named helper exists and matches, whether the proposed
+# form keeps behaviour. Asked "does it fail?", it would refute every cleanup.
+vet = [e for e in field(out, "EFFORTS") if e["label"].startswith("verify-cleanups:")]
+check("the cleanup skeptic is not asked whether code fails", False,
+      bool(vet) and "failure genuinely occurs" in vet[0]["prompt"])
+check("the cleanup skeptic is not asked whether it is worth doing", True,
+      bool(vet) and "not whether it is worth doing" in vet[0]["prompt"])
+check("the cleanup skeptic is asked about behaviour", True,
+      bool(vet) and "keeps the code's behaviour" in vet[0]["prompt"])
+check("the cleanup skeptic sees the category", True,
+      bool(vet) and "Category: reuse" in vet[0]["prompt"])
+
+# No cleanups, no cleanup skeptic: the bound is N + C + 2 only when both tracks
+# have something to judge.
+out, err = run([[LONE_HIGH], [], []], cleanups=[[]])
+check("no cleanups spawn no cleanup skeptic", 0, out["vetCalls"])
+check("no cleanups report zero found", 0, out.get("cleanupsFound"))
+
+# A bug and a cleanup together: each goes to its own skeptic, alone.
 out, err = run([[LONE_HIGH], [], []], cleanups=[[DUP_HELPER]])
 check("with a cleanup beside it, the bug is still confirmed", 1, out["confirmed"])
 check("the skeptic is handed the bug alone", 1,
       sum(1 for e in field(out, "EFFORTS") if e["label"] == "verify:1"))
+check("the cleanup skeptic is handed the cleanup alone", 1,
+      sum(1 for e in field(out, "EFFORTS") if e["label"] == "verify-cleanups:1"))
+check("the bug skeptic never sees the cleanup", False,
+      any("re-implements list_take" in e["prompt"] for e in field(out, "EFFORTS")
+          if e["label"].startswith("verify:")))
+
+# Refuted and unanswered cleanups are separated as bugs are, never dropped.
+out, err = run([[]] * 3, cleanups=[[DUP_HELPER]],
+               verdicts=[{"at": "stdlib/net.sprout:40", "refuted": True}])
+check("a refuted cleanup is not confirmed", 0, len(field(out, "cleanups")))
+check("a refuted cleanup is still reported", 1, len(field(out, "cleanupsRefuted")))
+check("a refuted cleanup still counts as found", 1, out.get("cleanupsFound"))
+check("a refuted cleanup is not counted confirmed", 0, out.get("cleanupsConfirmed"))
+out, err = run([[]] * 3, cleanups=[[DUP_HELPER]],
+               verdicts=[{"at": "stdlib/net.sprout:40", "omit": True}])
+check("an unanswered cleanup is NOT called refuted", 0, len(field(out, "cleanupsRefuted")))
+check("an unanswered cleanup is reported unverified", "no verdict returned",
+      field(out, "cleanupsUnverified")[0].get("unverifiedBecause")
+      if field(out, "cleanupsUnverified") else None)
+
+# The join is validated the same way: a mis-numbered reply confirms nothing.
+OTHER_HELPER = dict(DUP_HELPER, line=90, summary="re-implements list_drop")
+out, err = run([[]] * 3, cleanups=[[DUP_HELPER, OTHER_HELPER]], index_mode="one_based")
+check("a 1-based cleanup reply confirms nothing", 0, out.get("cleanupsConfirmed"))
+check("a 1-based cleanup reply is reported unverified", 2,
+      len(field(out, "cleanupsUnverified")))
+check("a discarded cleanup batch is logged as such", 1,
+      sum(1 for m in field(out, "LOGS") if "VERDICTS DISCARDED" in m and "cleanup" in m))
+
+# Each track has its own cap, so neither evicts the other. Ten bugs fill the bug
+# skeptic's cap exactly; eleven cleanups overrun theirs by one.
+ELEVEN = [dict(DUP_HELPER, file="c%d.sprout" % i, summary="dup %d" % i) for i in range(11)]
+out, err = run([TEN_LOWS, [], []], cleanups=[ELEVEN])
+check("cleanups do not push a bug past the cap", 0, len(field(out, "unverified")))
+check("the cleanup cap evicts one", 1, len(field(out, "cleanupsUnverified")))
+check("the evicted cleanup says why", True,
+      "VERIFY_CAP" in field(out, "cleanupsUnverified")[0].get("unverifiedBecause", "")
+      if field(out, "cleanupsUnverified") else None)
+
+# Same floor as the bug skeptic: it also refutes when unsure.
+out, err = run([[]], cleanups=[[DUP_HELPER]], args={"effort": "low", "target": ""})
+check("low cleanups still get a medium skeptic", "medium",
+      next((e["effort"] for e in field(out, "EFFORTS")
+            if e["label"].startswith("verify-cleanups:")), None))
 
 # With one angle per pass, the angle IS the category: a pass that mislabels its
 # finding must not file an efficiency cleanup under reuse.

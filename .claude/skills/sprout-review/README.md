@@ -80,9 +80,10 @@ The first version cost `N + D` agents at `N = 8` — eight reviewers, then one v
 that cleared the severity/votes cap. D is only known at runtime, so the bill was not knowable
 before the run and reached the mid-teens.
 
-It is now **at most `N + 1`**, at a default `N = 3`: four agents, or three when the passes found
-nothing at all, since there is then nothing to judge. Three changes got there, and only the first is
-a pure reduction:
+For the bug track it is now **at most `N + 1`**, at a default `N = 3`: four agents, or three when
+the passes found nothing at all, since there is then nothing to judge. The cleanup track adds its
+`C` passes and its own skeptic, so the whole run is at most `N + C + 2` — six at `high`. Three
+changes got the bug track there, and only the first is a pure reduction:
 
 | change | why |
 |---|---|
@@ -227,6 +228,13 @@ because this skill stops at the report. It has Sprout's own forms in the angle t
 part a generic pass cannot know. And its pass count follows the level — one pass holding all four
 angles up to `high`, which is `/simplify`'s own fallback shape, and one per angle at `xhigh` and
 `max`, which is its normal shape. Nothing has measured whether four passes find more than one.
+
+**Cleanups are verified, by their own skeptic** (since 2026-10-09). It checks claims, not worth: the
+cited code says what the cleanup says, a named helper exists and does the same job, the proposed
+form keeps behaviour. Before it, run `1791578046-40156` handed over eight cleanups, none checked by
+anyone but the pass that wrote them. It is a second
+agent rather than a second list for the bug skeptic so that each track has its own `VERIFY_CAP`;
+sharing one, that run's 6 bugs would have pushed 4 of its 8 cleanups past the cap.
 
 The built-in `/code-review` already runs cleanup angles at `high` — three cleanup, one altitude and
 one conventions, inline in one context. The conventions angle (quote a CLAUDE.md rule, quote the line

@@ -58,10 +58,11 @@ Rationale and measurements live in `README.md`; the skill itself is `SKILL.md`.
   staleness marker (`rv:2*`). `review_gate.py` already computes a per-path tree digest that could
   be reused rather than reinvented.
 
-- [ ] `P2` **The cleanup track's value is unmeasured.** Nothing says how many of its findings get
-  acted on, or whether four one-angle passes at `xhigh` find more than one four-angle pass. Count
-  cleanups fixed vs declined over a few runs (needs the disposition entry above), then decide
-  whether `CLEANUP_LADDER` earns its upper rung — or the track its agent at all.
+- [ ] `P2` **The cleanup track's value is unmeasured.** The ledger's tenth column now says how many
+  cleanups survived their skeptic, but not how many get acted on, or whether four one-angle passes
+  at `xhigh` find more than one four-angle pass. Count cleanups fixed vs declined over a few runs
+  (needs the disposition entry above), then decide whether `CLEANUP_LADDER` earns its upper rung —
+  or the track its two agents at all.
 
 - [ ] `P2` **Doc and comment drift is ~20% of findings, and no angle asks for it.** Of 67 raw
   findings over 11 runs, about 14 were stale comments, spec prose, PR-body claims or diagnostic
