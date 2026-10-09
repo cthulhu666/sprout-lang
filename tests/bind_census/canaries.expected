@@ -1,0 +1,27 @@
+=== tests/bind_census/canaries.spr ===
+bind	tests/bind_census/canaries.spr:39:5	Maybe	rhs=pure	pat=name	try=no
+bind	tests/bind_census/canaries.spr:40:5	Maybe	rhs=pure	pat=wildcard	try=no
+bind	tests/bind_census/canaries.spr:41:5	Maybe	rhs=pure	pat=tuple	try=no
+bind	tests/bind_census/canaries.spr:42:5	Maybe	rhs=pure	pat=destructure-else	try=no
+bind	tests/bind_census/canaries.spr:43:5	plain	rhs=pure	pat=name	try=no
+bind	tests/bind_census/canaries.spr:48:5	Result	rhs=effectful	pat=name	try=no
+bind	tests/bind_census/canaries.spr:49:5	plain	rhs=effectful	pat=name	try=no
+bind	tests/bind_census/canaries.spr:50:5	plain	rhs=effectful	pat=unit	try=no
+bind	tests/bind_census/canaries.spr:51:5	plain	rhs=effectful	pat=name	try=no
+bind	tests/bind_census/canaries.spr:56:5	Maybe	rhs=unknown	pat=name	try=no
+bind	tests/bind_census/canaries.spr:61:5	plain	rhs=effectful	pat=name	try=head
+bind	tests/bind_census/canaries.spr:62:5	Maybe	rhs=pure	pat=name	try=chain
+discard	tests/bind_census/canaries.spr:64:8	Maybe
+discard	tests/bind_census/canaries.spr:65:9	Maybe
+let	tests/bind_census/canaries.spr:70:18	do-let	Result	rhs=effectful	pat=name	try=no
+let	tests/bind_census/canaries.spr:71:5	do-let	plain	rhs=effectful	pat=tuple	try=no
+let	tests/bind_census/canaries.spr:72:16	do-let	Maybe	rhs=pure	pat=wildcard	try=no
+let	tests/bind_census/canaries.spr:74:5	do-let	plain	rhs=effectful	pat=name	try=yes
+let	tests/bind_census/canaries.spr:78:7	let-in	Result	rhs=effectful	pat=name	try=no
+let	tests/bind_census/canaries.spr:81:9	let-in	Result	rhs=effectful	pat=name	try=no
+bind	tests/bind_census/canaries.spr:87:5	Maybe	rhs=pure	pat=name	try=no
+discard	tests/bind_census/canaries.spr:93:6	Maybe
+bind	tests/bind_census/canaries.spr:99:7	Maybe	rhs=pure	pat=name	try=no
+let	tests/bind_census/canaries.spr:102:1	top-level	Result	rhs=effectful	pat=name	try=no
+let	tests/bind_census/canaries.spr:106:22	do-let	Maybe	rhs=effectful	pat=name	try=no
+let	tests/bind_census/canaries.spr:111:7	let-in	plain	rhs=effectful	pat=wildcard	try=yes

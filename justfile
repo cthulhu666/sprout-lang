@@ -1432,6 +1432,26 @@ bundle-smoke: bootstrap-from-seed
 # So this asserts on both halves: the cases that MUST be flagged, and the ones
 # that must NOT — a report that flags everything is as useless as one that flags
 # nothing. tests/effects/canaries.spr documents the expected answer per function.
+# `--phase bind-census` against its canaries, line for line. The census is the
+# `try` migration's worklist and done-check (docs/try-propagate-v0.md §8 step 1a),
+# so a site it silently drops is a site the codemods never touch. An exact diff,
+# not greps: a missing line and an extra line are both failures.
+[group('smoke')]
+bind-census-smoke: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  FIX=tests/bind_census/canaries.spr
+  WANT=tests/bind_census/canaries.expected
+  TMPD=$(mktemp -d /tmp/sprout_census_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  if ! "{{build_dir}}/compile_driver_bin_stage1" --phase bind-census "{{stdlib_root}}" "$FIX" > "$TMPD/out" 2>&1; then
+    echo "bind-census-smoke: --phase bind-census failed" >&2; cat "$TMPD/out" >&2; exit 1
+  fi
+  if ! diff -u "$WANT" "$TMPD/out" >&2; then
+    echo "bind-census-smoke: output differs from $WANT (- expected, + actual)" >&2; exit 1
+  fi
+  echo "bind-census-smoke: OK ($(grep -c . "$WANT") lines)"
+
 [group('smoke')]
 effect-report-smoke: bootstrap-from-seed
   #!/usr/bin/env bash
@@ -3632,6 +3652,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "opt-harness-check|opt-harness-check"
     "bundle-smoke|bundle-smoke"
     "effect-report-smoke|effect-report-smoke"
+    "bind-census-smoke|bind-census-smoke"
     "fmt-check|fmt-check"
     "fmt-batch-smoke|fmt-batch-smoke"
     "tui-files-smoke|tui-files-smoke"

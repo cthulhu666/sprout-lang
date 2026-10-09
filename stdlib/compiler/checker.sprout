@@ -2,6 +2,7 @@ module stdlib.compiler.checker
 import stdlib.compiler.ast as ast
 import stdlib.compiler.types as types
 import stdlib.compiler.unifier as unifier
+import stdlib.compiler.bind_census as bind_census
 import stdlib.compiler.infer as infer
 import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.source as source
@@ -341,6 +342,18 @@ export fn typecheck_typed_with_effects(prog: ast.Program, extra: List (String, t
           result <- infer.typecheck_decls(state, decls, dict_from_list(builtin_entries() ++ extra), dict_empty(), dict_empty())
           reports <- unifier.effect_reports(state)
           (result, reports)
+
+# Like typecheck_typed_with_effects, but hands back the bind census of the
+# declarations named by `keys` (`--phase bind-census`). Rejects nothing either.
+export fn typecheck_typed_with_census(prog: ast.Program, extra: List (String, types.Scheme), keys: Set)
+    -> (typed_ast.TypedResult, List bind_census.Piece) !{IO} =
+  do
+    state <- unifier.new_state()
+    unifier.census_start(state, keys)
+    let ast.Program decls _ = desugar_program(prog)
+    result <- infer.typecheck_decls(state, decls, dict_from_list(builtin_entries() ++ extra), dict_empty(), dict_empty())
+    pieces <- unifier.census_pieces(state)
+    (result, pieces)
 
 # ---------------------------------------------------------------------------
 # String template / Vec-literal desugar pass

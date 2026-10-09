@@ -16,6 +16,7 @@ import stdlib.compiler.ir_rooting as ir_rooting
 import stdlib.compiler.ir_pipeline as ir_pipeline
 import stdlib.compiler.iface_codec as iface_codec
 import stdlib.compiler.cse_census as cse_census
+import stdlib.compiler.bind_census as bind_census
 import stdlib.compiler.source as source
 import stdlib.fs as fs
 
@@ -231,6 +232,18 @@ fn print_effect_summary(reports: List unifier.EffectReport) -> Unit !{IO} =
     ++ int_to_string(count(effect_report_is_var, reports)) ++ " unresolved effect vars")
 
 # ---------------------------------------------------------------------------
+# Phase: bind-census — the sites the `try` migration changes or rejects
+# (docs/try-propagate-v0.md §8 step 1a). Reports, never rejects, and lists the
+# entry file's declarations only, so every line's file is `path`.
+
+fn run_file_bind_census(path: String, stdlib_root: String, extra_roots: List String, failed: Ref Int) -> Unit !{IO} =
+  do
+    (result, pieces) <- compiler.compile_phase_census_with_roots(source.FilePath(path), source.StdlibRoot(stdlib_root), extra_roots)
+    match result with
+    | typed_ast.TypedErr pos msg -> report_error(failed, format_pos(pos) ++ "ERROR: " ++ msg)
+    | typed_ast.TypedOk _ _ -> print_lines(bind_census.census_lines(path, pieces))
+
+# ---------------------------------------------------------------------------
 # Phase: lower — typeclass dictionary-passing lowering
 
 # Phase: cse-census — how many shareable repeated pure calls a program contains
@@ -430,7 +443,7 @@ fn run_file_dump_qualify(path: String, stdlib_root: String) -> Unit !{IO} =
 # Prints "=== <path> ===" before each file's output (except the IR phase).
 #
 # phase: "" = default source check,
-#        "bundle"|"check"|"lower"|"recheck"|"ir-typed"|"scan-info"|"dump-qualify"
+#        "bundle"|"check"|"effects"|"bind-census"|"lower"|"recheck"|"ir-typed"|"scan-info"|"dump-qualify"
 
 fn run_batch(stdlib_root: String, idx: Int, phase: String, extra_roots: List String, failed: Ref Int) -> Unit !{IO} =
   match argv_get(idx) with
@@ -443,6 +456,7 @@ fn run_batch(stdlib_root: String, idx: Int, phase: String, extra_roots: List Str
         else if phase == "check" then run_file_check(path, stdlib_root, extra_roots, failed)
         else if phase == "lower" then run_file_lower(path, stdlib_root, extra_roots, failed)
         else if phase == "effects" then run_file_effects(path, stdlib_root, extra_roots, failed)
+        else if phase == "bind-census" then run_file_bind_census(path, stdlib_root, extra_roots, failed)
         else if phase == "cse-census" then run_file_cse_census(path, stdlib_root, extra_roots, false, failed)
         else if phase == "cse-keys" then run_file_cse_census(path, stdlib_root, extra_roots, true, failed)
         else if phase == "recheck" then run_file_recheck(path, stdlib_root, extra_roots, failed)
@@ -457,7 +471,7 @@ fn run_batch(stdlib_root: String, idx: Int, phase: String, extra_roots: List Str
         # like it had worked. A gate asserting on a phase's output is only as good
         # as the driver's willingness to admit the phase does not exist.
         else report_error(failed, "ERROR: unknown phase `" ++ phase
-               ++ "`: expected bundle|check|effects|cse-census|cse-keys|lower|recheck|scan-info|dump-qualify")
+               ++ "`: expected bundle|check|effects|bind-census|cse-census|cse-keys|lower|recheck|scan-info|dump-qualify")
         # Keep going after a failure: a batch reports every bad file, and `failed`
         # is write-1-only so the status survives the remaining files.
         run_batch(stdlib_root, idx + 1, phase, extra_roots, failed)
@@ -493,7 +507,7 @@ fn main() -> Int !{IO} =
     | ["--phase", _ | _] ->
         report_error(failed, "ERROR: usage: compile-driver --phase <phase> <stdlib-root> [--package-root <dir>] <file>...")
     | ["--phase" | _] ->
-        report_error(failed, "ERROR: --phase requires an argument: bundle|check|effects|lower|recheck|scan-info|dump-qualify")
+        report_error(failed, "ERROR: --phase requires an argument: bundle|check|effects|bind-census|lower|recheck|scan-info|dump-qualify")
     # --package-root before the bare form: the general arm would otherwise bind
     # path to the literal "--package-root". Mirrors the --emit-ir surface so the
     # typed-codegen path resolves dotted non-stdlib imports (e.g. testsupport.*).
@@ -514,6 +528,6 @@ fn main() -> Int !{IO} =
     | [stdlib_root | _] ->
         run_batch(stdlib_root, 1, "", Nil, failed)
     | _ ->
-        report_error(failed, "ERROR: usage: compile-driver [--phase bundle|check|effects|lower|recheck|scan-info|dump-qualify | --emit-ir [--debug] | --use-ir-codegen | --emit-iface <module-name> | --check-iface <iface-file>] <stdlib-root> <file>...")
+        report_error(failed, "ERROR: usage: compile-driver [--phase bundle|check|effects|bind-census|lower|recheck|scan-info|dump-qualify | --emit-ir [--debug] | --use-ir-codegen | --emit-iface <module-name> | --check-iface <iface-file>] <stdlib-root> <file>...")
     code <- ref_read(failed)
     code

@@ -78,6 +78,13 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   (measured): a self-call at `Nest (a, a)` needs `Eq (a, a)`, deduced against the instance
   environment, which Sprout has no step for. Pinned by
   `tests/conformance/type_error/polymorphic_recursion_constrained.spr`.
+- [ ] `P1` **A class dictionary keyed on a deferred field read is never resolved.** A key lambda
+  reading a field of a record declared later in the file compiles, then fails at runtime:
+  `vec_sort_by(\l -> l.index, rows)` above `type Row = (index: Int, …)` panics "dispatched
+  through an unresolved typeclass dictionary for Ord__" on the first comparison. The field
+  obligation is discharged at the declaration boundary, after `Ord k` was injected with `k` still
+  open. Declaring the type first, or naming the key function, avoids it. Found by
+  `bind_census.census_lines`; a five-line repro is the sort above plus a `main`.
 - [ ] `P2` **Numeric defaulting fires before a deferred field obligation is discharged**
   (`infer.check_arith`, `infer.sprout:2782`), so `Double` fields under arithmetic get a spurious
   `Int vs Double` error and valid code is rejected. Incomplete fix, not a regression — it replaced

@@ -1,0 +1,111 @@
+# Canaries for `--phase bind-census` (docs/try-propagate-v0.md §8 step 1a).
+#
+# Each site has a known line, pinned by `just bind-census-smoke`. A census that
+# silently drops a kind is the failure this file exists to catch. `stdlib.bytes`
+# is imported because it has `<-` binds and an instance of its own, and none of
+# them may be reported: the census lists the entry file only.
+import stdlib.bytes as bytes
+
+type Box = (v: Maybe Int)
+
+class Fetch a
+  fn fetch_one(x: a) -> Maybe Int
+
+fn get(n: Int) -> Maybe Int = if n > 0 then Just(n) else Nothing
+
+fn get2(n: Int) -> Maybe (Maybe Int) = Just(get(n))
+
+fn pair(n: Int) -> Maybe (Int, Int) = Just((n, n))
+
+fn box_of(n: Int) -> Maybe Box = Just(Box(v = get(n)))
+
+fn load(n: Int) -> Maybe Int !{IO} =
+  do
+    print("load")
+    get(n)
+
+fn fetch(s: String) -> Result String Int !{IO} =
+  do
+    print(s)
+    Ok(str_len(s))
+
+fn read_pair() -> (Int, Int) !{IO} =
+  do
+    print("pair")
+    (1, 2)
+
+fn pure_binds(n: Int) -> Maybe Int =
+  do
+    x <- get(n)
+    _ <- get(x)
+    (a, b) <- pair(x)
+    Just y <- get2(a) else Nothing
+    m <- str_len("k")
+    Just(y + b + m)
+
+fn io_binds(s: String) -> Result String Int !{IO} =
+  do
+    k <- fetch(s)
+    r <- ref_new(k)
+    () <- print("unit")
+    v <- ref_read(r)
+    Ok(v)
+
+fn unknown_bind(f: Int -> Maybe Int !{e}, n: Int) -> Maybe Int !{e} =
+  do
+    x <- f(n)
+    Just(x)
+
+fn try_binds(n: Int) -> Maybe Int !{IO} =
+  do
+    x <- try load(n)
+    y <- (try box_of(x)).v
+    try load(y)
+    get(y)
+    load(x)
+    Just(x + y)
+
+fn lets(s: String) -> Result String Int !{IO} =
+  do
+    let r = fetch(s)
+    let (a, b) = read_pair()
+    let _ = get(a)
+    let k = a + b
+    let v = try fetch(s)
+    Ok(v + k)
+
+fn let_in(s: String) -> Result String Int !{IO} =
+  let r = fetch(s) in r
+
+fn where_bound(s: String) -> Result String Int !{IO} = r
+  where r = fetch(s)
+
+fn in_lambda(xs: List Int) -> List (Maybe Int) =
+  list_map(step, xs)
+where
+  step = \ (n: Int) -> do
+    x <- get(n)
+    Just(x)
+
+fn deferred(b: Box) -> Maybe Int =
+  do
+    let h = \x -> x.v
+    h(b)
+    Just(1)
+
+instance Fetch Box
+  fn fetch_one(x: Box) -> Maybe Int =
+    do
+      y <- x.v
+      Just(y)
+
+let started = fetch("top")
+
+fn main() -> Unit !{IO} =
+  do
+    let r = try_binds(1)
+    print(int_to_string(maybe_with_default(0, r)))
+    print(int_to_string(bytes_length(bytes_from_utf8("x"))))
+
+fn try_let_in(n: Int) -> Maybe Int !{IO} =
+  let _ = try load(n) in Just(1)

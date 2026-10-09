@@ -8,6 +8,7 @@ import stdlib.compiler.types as types
 import stdlib.compiler.unifier as unifier
 import stdlib.compiler.module_loader as module_loader
 import stdlib.compiler.bundler as bundler
+import stdlib.compiler.bind_census as bind_census
 import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.resolve as resolve
 import stdlib.compiler.verify_dispatch as verify_dispatch
@@ -504,6 +505,19 @@ export fn compile_phase_effects_with_roots(path: source.FilePath, stdlib_root: s
     | bundler.BundleOk prog ->
         do
           checker.typecheck_typed_with_effects(prog, Nil)
+
+# The bind census of the entry file's declarations (`--phase bind-census`).
+export fn compile_phase_census_with_roots(path: source.FilePath, stdlib_root: source.StdlibRoot, extra_roots: List String)
+    -> (typed_ast.TypedResult, List bind_census.Piece) !{IO} =
+  do
+    (bundle_result, entry) <- bundler.bundle_with_entry_decls(path, stdlib_root, extra_roots)
+    match bundle_result with
+    | bundler.BundleErr pos msg -> (typed_ast.TypedErr(pos, "bundle: " ++ msg), Nil)
+    | bundler.BundleOk prog ->
+        checker.typecheck_typed_with_census(prog, Nil, set_from_keys(list_filter_map(bind_census.decl_key, entry)))
+
+fn set_from_keys(keys: List String) -> Set =
+  list_fold(\ (acc, k) -> set_insert(k, acc), set_empty(), keys)
 
 export fn compile_phase_check_with_roots(path: source.FilePath, stdlib_root: source.StdlibRoot, extra_roots: List String) -> typed_ast.TypedResult !{IO} =
   do
