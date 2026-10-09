@@ -226,6 +226,8 @@ fn main() -> Unit !{IO} =
     check_true("malformed: mismatched brackets", is_err(json.parse("[1, 2"))),
     check_true("malformed: bare word undefined", is_err(json.parse("undefined"))),
     check_true("malformed: unclosed string", is_err(json.parse("\"hello"))),
+    check_true("malformed: input ends after a backslash", is_err(json.parse("\"ab\\"))),
+    check_true("malformed: input ends after an escape", is_err(json.parse("\"a\\n"))),
     check_true("malformed: double comma", is_err(json.parse("[1,,2]"))),
     check_true("malformed: unquoted key", is_err(json.parse("{key: 1}"))),
 
