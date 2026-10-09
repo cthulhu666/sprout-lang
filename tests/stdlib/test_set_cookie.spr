@@ -1,10 +1,11 @@
 import stdlib.test (check_eq, check_true, run_suite)
-import stdlib.http_server (HttpServerResponse, SetCookie, SameSiteStrict, CookieValue, cookie, cookie_value, cookie_value_text, cookie_value_of_bytes, expired_cookie, with_cookie, with_header, ok, render, parse, request_cookie)
+import stdlib.http_server (HttpServerResponse, SetCookie, SameSiteStrict, CookieName, CookieValue, cookie, cookie_name, cookie_name_text, cookie_value, cookie_value_text, cookie_value_of_bytes, expired_cookie, with_cookie, with_header, ok, render, parse, request_cookie)
 import stdlib.bytes as bytes
 import stdlib.string as string
 
-# Response cookies (issue #373, response half). A `CookieValue` is checked when it is made, so
-# `with_cookie` and `render` cannot fail on a cookie: every check here is on the rendered wire.
+# Response cookies (issue #373, response half). A `CookieName` and a `CookieValue` are checked when
+# they are made, so `with_cookie` and `render` cannot fail on a cookie: every check here is either
+# on those constructors or on the rendered wire.
 
 fn rendered(resp: HttpServerResponse) -> String =
   match render(resp) with
@@ -17,18 +18,36 @@ fn set_cookie_lines(resp: HttpServerResponse) -> String =
     |> list_filter(\line -> string.starts_with(line, "set-cookie: "))
     |> string.join("|")
 
+# The tests' literal names are all valid; one that is not shows up as `refused-name` on the wire.
+fn name(raw: String) -> CookieName =
+  match cookie_name(raw) with
+  | Just n -> n
+  | Nothing -> name("refused-name")
+
+fn empty_value() -> CookieValue = cookie_value_of_bytes(bytes.empty())
+
 # The rendered line for `name=raw` after `edit`, or a marker when `raw` is refused.
-fn line_for(name: String, raw: String, edit: SetCookie -> SetCookie) -> String =
+fn line_for(raw_name: String, raw: String, edit: SetCookie -> SetCookie) -> String =
   match cookie_value(raw) with
   | Nothing -> "<REFUSED>"
-  | Just v -> set_cookie_lines(with_cookie(edit(cookie(name, v)), ok("")))
+  | Just v -> set_cookie_lines(with_cookie(edit(cookie(name(raw_name), v)), ok("")))
 
 fn plain(c: SetCookie) -> SetCookie = c
 
-fn accepted(raw: String) -> Bool =
+fn value_refused(raw: String) -> Bool =
   match cookie_value(raw) with
-  | Just _ -> true
-  | Nothing -> false
+  | Just _ -> false
+  | Nothing -> true
+
+fn name_refused(raw: String) -> Bool =
+  match cookie_name(raw) with
+  | Just _ -> false
+  | Nothing -> true
+
+fn lacks(hay: String, needle: String) -> Bool =
+  match string.find(hay, needle) with
+  | Just _ -> false
+  | Nothing -> true
 
 # What a browser sends back for this value, read through the request-side parser.
 fn read_back(v: CookieValue) -> String =
@@ -44,19 +63,32 @@ fn arbitrary_bytes() -> Bytes =
 
 fn main() -> Unit !{IO} =
   run_suite("set_cookie", [
+    # --- CookieName: RFC 6265 cookie-name, an RFC 2616 token -----------------------------------
+    check_eq("a token is a cookie name", cookie_name_text(name("__Host-sid")), "__Host-sid"),
+    check_eq("every token character is accepted", name_refused("az09!#$%&'*+-.^_`|~AZ"), false),
+    check_true("the empty name is refused", name_refused("")),
+    # `=` would move where the browser splits name from value, so `role=admin` would set `role`.
+    check_true("an equals sign is refused", name_refused("role=admin")),
+    check_true("a semicolon is refused in a name", name_refused("a;b")),
+    check_true("a space is refused in a name", name_refused("a b")),
+    check_true("a comma is refused in a name", name_refused("a,b")),
+    check_true("other separators are refused", name_refused("a/b")),
+    check_true("a CR LF is refused in a name", name_refused("a\r\nx-evil")),
+    check_true("a non-ASCII byte is refused in a name", name_refused("é")),
+
     # --- CookieValue: RFC 6265 §4.1.1 cookie-octet, strictly ---------------------------------
-    check_true("a base64url token is a cookie value", accepted("aB3-_x9.Z~")),
-    check_true("standard base64 is a cookie value", accepted("YWJj+/8=")),
-    check_true("the empty value is a cookie value", accepted("")),
+    check_eq("a base64url token is a cookie value", value_refused("aB3-_x9.Z~"), false),
+    check_eq("standard base64 is a cookie value", value_refused("YWJj+/8="), false),
+    check_eq("the empty value is a cookie value", value_refused(""), false),
     # `;` ends the pair and starts an attribute: `v; Domain=evil.com` would be an injection.
-    check_true("a semicolon is refused",! accepted ("a;b")),
-    check_true("a space is refused",! accepted ("a b")),
+    check_true("a semicolon is refused", value_refused("a;b")),
+    check_true("a space is refused", value_refused("a b")),
     # RFC 6265 §3: a comma conflicts with header folding.
-    check_true("a comma is refused",! accepted ("a,b")),
-    check_true("a double quote is refused",! accepted ("\"a\"")),
-    check_true("a backslash is refused",! accepted ("a\\b")),
-    check_true("a CR LF is refused",! accepted ("a\r\nb")),
-    check_true("a non-ASCII byte is refused",! accepted ("é")),
+    check_true("a comma is refused", value_refused("a,b")),
+    check_true("a double quote is refused", value_refused("\"a\"")),
+    check_true("a backslash is refused", value_refused("a\\b")),
+    check_true("a CR LF is refused", value_refused("a\r\nb")),
+    check_true("a non-ASCII byte is refused", value_refused("é")),
     check_eq("the text comes back as given", line_for("sid", "abc", plain), "set-cookie: sid=abc; Path=/; HttpOnly; SameSite=Lax"),
 
     # --- Bytes always fit -----------------------------------------------------------------------
@@ -77,31 +109,29 @@ fn main() -> Unit !{IO} =
       line_for("sid", "abc", \c -> c with (max_age_seconds = Just(-1))),
       "set-cookie: sid=abc; Path=/; Max-Age=-1; HttpOnly; SameSite=Lax"),
     check_eq("expired_cookie clears the value with Max-Age=0",
-      set_cookie_lines(with_cookie(expired_cookie("old"), ok(""))),
+      set_cookie_lines(with_cookie(expired_cookie(name("old")), ok(""))),
       "set-cookie: old=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"),
     check_eq("expired_cookie keeps a path the caller sets, so it matches the cookie it clears",
-      set_cookie_lines(with_cookie(expired_cookie("old") with (path = Just("/app")), ok(""))),
+      set_cookie_lines(with_cookie(expired_cookie(name("old")) with (path = Just("/app")), ok(""))),
       "set-cookie: old=; Path=/app; Max-Age=0; HttpOnly; SameSite=Lax"),
 
     # --- Several cookies -----------------------------------------------------------------------
     check_eq("two cookies are two lines, in the order set",
-      set_cookie_lines(with_cookie(cookie("b", cookie_value_of_bytes(bytes.empty())), with_cookie(expired_cookie("a"), ok("")))),
+      set_cookie_lines(with_cookie(cookie(name("b"), empty_value()), with_cookie(expired_cookie(name("a")), ok("")))),
       "set-cookie: a=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax|set-cookie: b=; Path=/; HttpOnly; SameSite=Lax"),
     # RFC 6265 §4.1.1: servers SHOULD NOT send two Set-Cookie lines with the same cookie-name.
     check_eq("a second cookie with the same name replaces the first",
-      set_cookie_lines(with_cookie(cookie("a", cookie_value_of_bytes(bytes.empty())), with_cookie(expired_cookie("a"), ok("")))),
+      set_cookie_lines(with_cookie(cookie(name("a"), empty_value()), with_cookie(expired_cookie(name("a")), ok("")))),
       "set-cookie: a=; Path=/; HttpOnly; SameSite=Lax"),
     check_eq("a raw set-cookie header and with_cookie both go out",
-      set_cookie_lines(with_cookie(expired_cookie("a"), with_header("set-cookie", "raw=1", ok("")))),
+      set_cookie_lines(with_cookie(expired_cookie(name("a")), with_header("set-cookie", "raw=1", ok("")))),
       "set-cookie: raw=1|set-cookie: a=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"),
 
-    # --- Name, path and domain are text: their structure is made inert at render ---------------
+    # --- Path and domain are text: their structure is made inert at render ---------------------
     check_true("a semicolon in a path cannot add an attribute",
-      ! string.contains (line_for("sid", "abc", \c -> c with (path = Just("/a; Domain=evil.com"))), "; Domain=evil.com")),
+      lacks(line_for("sid", "abc", \c -> c with (path = Just("/a; Domain=evil.com"))), "; Domain=evil.com")),
     check_true("a semicolon in a domain cannot add an attribute",
-      ! string.contains (line_for("sid", "abc", \c -> c with (domain = Just("x.com; Secure"))), "; Secure")),
-    check_true("a semicolon in a name cannot add an attribute",
-      ! string.contains (line_for("a; Domain=evil.com; b", "abc", plain), "; Domain=evil.com")),
-    check_true("a CR LF in a name cannot start a header line",
-      ! string.contains (rendered(with_cookie(cookie("a\r\nx-evil", cookie_value_of_bytes(bytes.empty())), ok(""))), "\r\nx-evil"))
+      lacks(line_for("sid", "abc", \c -> c with (domain = Just("x.com; Secure"))), "; Secure")),
+    check_true("a CR LF in a path cannot start a header line",
+      lacks(rendered(with_cookie(cookie(name("sid"), empty_value()) with (path = Just("/\r\nx-evil: 1")), ok(""))), "\r\nx-evil"))
   ])
