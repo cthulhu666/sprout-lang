@@ -2310,6 +2310,36 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   hermetic regression is available: a too-small backlog manifests as an unbounded park, since the
   kernel drops the SYN and no error reaches either side.
 
+### Prelude-helper cleanup arc (#602, #603) — review residuals
+
+Cleanups the 2026-10-09 reviews of #606 and #607 reported and left. Unverified by design: confirm
+each before acting. The compiler ones each cost a reseed, so land them as one PR.
+
+- [ ] `P3` **Compiler: hand copies of `ast` and prelude helpers survive #607.** `infer.sprout:7440`
+  `validate_ctor`, `validate_record_field`, `alias_uses_in_ctor`, `alias_uses_in_field` and
+  `ast_to_ir.sprout:539` `record_field_types` only unwrap field types: use
+  `ast.ctor_field_type_exprs` / `ast.record_field_type_exprs`, as `bundler.sprout` does.
+  `ast_to_ir.sprout:1923` `find_capture_type_list` and `_fields` are hand-written `find_map`.
+  `linear_check.sprout` `luse_member`, `luse_remove(_all)`, `unconsumed_binder`, `first_shared` and
+  `first_consumed_borrow` are hand-written `any` / `list_filter` / `find`, about 30 lines.
+- [ ] `P3` **Compiler: copy-paste and a quadratic fold left after #607.** `lint_rules`
+  `list_shape_findings` and `list_prefix_findings` differ in rule id, message and terminator, and
+  each walks the AST again. `analysis_service_driver`'s `source_type_of`, `source_instances` and
+  `source_eval` repeat one three-step order, and its JSON is 23 nested `JsonObjectCons` chains where
+  `lsp_driver` uses `json.object_from_pairs`. `infer.merge_effect_labels` folds `list_add_unique`
+  (quadratic). `compound_tdict` now builds every unresolved TDict: rename it `unresolved_tdict`.
+- [ ] `P3` **TUI: the reply tuple and one loop are still spelled out after #606.** `app.sprout`'s
+  `Step` and `Update` aliases are private, so `ide/app.sprout` (7 sites), the `tui_files` and
+  `tui_dashboard` examples write `(widget.Widget Msg, app.Flow, Asks)`: export them.
+  `ide/app.sprout`'s `bar_handler`, `refilled` and `keys_on_event` write `widget.Handled` by hand.
+  `grapheme.build` and `text.split_clusters` are one take/drop loop over `cluster_sizes`, walking
+  each prefix twice; a `list_split_at` (#608) does it in one pass.
+- [ ] `P3` **TUI: a private reverse-onto, a misplaced `first_row`, a duplicate assert.**
+  `text.reverse_onto` copies the prelude's private `list_reverse_go`, and `no_prelude_core.sprout`
+  and `children.sprout:64` do the same job: export a `list_reverse_onto`. `list_view` and `tree`
+  import text_area's `viewport` module only for `first_row`; move it lower. `test.record` is
+  `assert_true` with its arguments reordered.
+
 ### Compiler / Stdlib Misc
 
 **Codegen and IR correctness**

@@ -6,9 +6,10 @@ Status: **IMPLEMENTED — option C (§5.3), on all four stateful widgets.**
 and nothing here proposes a language change.
 
 What landing the first widget confirmed: the decoder needed no new machinery in the
-widget at all. Replacement re-uses the existing clamp and announce rule (both in
-`settled`), so "a content change that moves the selection announces it" and "a move
-that changes nothing is silent" came out as one rule rather than two, and the empty-list guard moved from the key path into the shared one.
+widget at all. Replacement re-uses the existing clamp (`clamped_into`) and the
+existing announce rule (`settled`), so "a content change that moves the selection
+announces it" and "a move that changes nothing is silent" came out as one rule rather
+than two, and the empty-list guard moved from the key path into the shared one.
 
 Revision 3 (2026-09-10), after an independent review. Three factual corrections, all
 verified against source: bubbles *preserves* the selection on `SetItems` rather than
@@ -165,7 +166,7 @@ place revision 2's option C was wrong. §5.3 carries the placement.
 Two divergences worth naming rather than leaving implied. brick sends an
 out-of-range index to **0** (`inBoundsOrZero`), where §5.3 clamps to the last row —
 `list_view` already has exactly one clamp rule and `opts.start` goes through it
-(in `settled`), so internal consistency wins over parity
+(`clamped_into`), so internal consistency wins over parity
 here. And bubbles clamps the *page* but not the cursor, so a shrink can leave its
 cursor past the end of the visible items; §5.3 clamps the index itself.
 
@@ -276,7 +277,7 @@ mechanism usable by the modules that motivate it. Preserving `sel` preserves a
 every keystroke, a command palette conventionally wants the selection back at the top
 per keystroke, and expanding a `tree` node shifts every index below it. `Nothing`
 means "keep the user's place" and is the common case; `Just i` is the caller taking
-the decision. Both go through `settled`'s clamp, so neither can leave the list
+the decision. Both go through `clamped_into`, so neither can leave the list
 unselectable.
 
 This is the projection the widget set already uses, run backwards. Every widget
@@ -292,7 +293,8 @@ the ring is not a widget an application usually names, so it has no echo to hand
 
 Two details it must pin, neither hard:
 
-- **A selection that falls off the end.** Both paths run through `settled`, the file's single clamp rule, so the last row is
+- **A selection that falls off the end.** Both paths run through `clamped_into`,
+  the file's single clamp rule, so the last row is
   the answer when the index is past the end and 0 when the list is empty.
 - **A clamp that moves the selection is announced.** `replaced` routes the new index
   through `settled` (`list_view.sprout:113`), which already emits `on_highlight` when
