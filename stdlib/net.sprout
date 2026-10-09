@@ -275,7 +275,7 @@ export fn read_avail_timeout(conn: borrowing TcpConnection, timeout_ms: Int) -> 
 # must close rather than reuse; a peer closing before `count` arrives is `Err TcpEndOfStream`.
 #
 # O(count) in bytes, plus O(k log k) pointer copies over the k chunks the peer sends — k is the
-# peer's choice, not the caller's, so see merge_chunk_pairs for why it is not a left fold.
+# peer's choice, not the caller's, so see bytes.builder_concat for why it is not a left fold.
 fn read_exact_by_go(handle: Int, count: Int, deadline_us: Int, acc: List Builder, have: Int) -> Result TcpError Bytes !{IO} =
   if have >= count then Ok(build_chunks(acc))
   else
