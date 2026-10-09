@@ -1,6 +1,6 @@
 module stdlib.net
 
-import stdlib.bytes (Utf8Error, Utf8DecodeError, builder_append, builder_build, builder_bytes, builder_empty, empty, from_string, to_string, length)
+import stdlib.bytes (Utf8Error, Utf8DecodeError, builder_build, builder_bytes, builder_concat, empty, from_string, to_string, length)
 import stdlib.time as time
 
 export extern fn tcp_listen(port: Int) -> Int !{IO}
@@ -312,26 +312,10 @@ fn read_exact_by_wait(handle: Int, count: Int, deadline_us: Int, acc: List Build
     if ready == 1 then read_exact_by_go(handle, count, deadline_us, acc, have)
     else Err(TcpTimeout)
 
-# builder_append copies BOTH operands' chunk arrays, so folding k of them left to right costs O(k^2)
-# pointer copies. Merging adjacent PAIRS halves the list each pass instead: O(k log k) at depth
-# log2(k). bigint's builder_of_mag halves for the same reason (docs/bigint-v0.md).
-fn merge_chunk_pairs(parts: List Builder) -> List Builder =
-  match parts with
-  | [left, right | more] -> Cons(builder_append(left, right), merge_chunk_pairs(more))
-  # Fewer than two left: nothing to pair, so the list passes through unchanged. An odd tail chunk
-  # rides to the next pass rather than being dropped.
-  | _ -> parts
-
-fn merge_chunks(parts: List Builder) -> Builder =
-  match parts with
-  | [] -> builder_empty()
-  | [only] -> only
-  | _ -> merge_chunks(merge_chunk_pairs(parts))
-
 # `parts` arrives in REVERSE order because the loop prepends — the O(1) step that keeps the loop off
 # the quadratic shape. The O(k) reverse is paid once, here.
 fn build_chunks(parts: List Builder) -> Bytes =
-  builder_build(merge_chunks(list_reverse(parts)))
+  builder_build(builder_concat(list_reverse(parts)))
 
 export fn read_exact_by(conn: borrowing TcpConnection, count: Int, deadline_us: Int) -> Result TcpError Bytes !{IO} =
   # A NEGATIVE count is refused, not silently satisfied: it means the caller's arithmetic went wrong —

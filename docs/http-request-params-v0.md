@@ -106,10 +106,10 @@ free for the deferred merged bag — and, since path params are deferred, a futu
 - `query_string`, `query_pairs`, `query_param`, `query_param_all`
 - `form_pairs`, `form_param`, `form_param_all`
 
-**Known cost.** The decoder appends one byte at a time to a `bytes` builder, which is
-O(n²) in the builder chunk table (see `BACKLOG.md` §2.5, the `bytes_builder_append`
-O(1)-amortized item). Fine for query strings (tens of bytes); revisit if a large-body
-decoder ever needs it.
+**Cost.** A form body is the peer's to size, so decoding is near-linear: each run of
+literal bytes becomes one slice, each escape one byte, and the chunks are joined once with
+`bytes.builder_concat` (O(k log k) in the chunk count). Splitting on `&` uses
+`string.split`, one byte scan. `tests/stdlib/test_url_cost.spr` guards both.
 
 ## 6. Tests
 

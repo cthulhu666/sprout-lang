@@ -113,6 +113,23 @@ export fn builder_append(left: Builder, right: Builder) -> Builder =
 export fn builder_build(value: Builder) -> Bytes =
   bytes_builder_build(value)
 
+# O(k log k) in the number of chunks: the builders joined in order. Use it instead of a left fold
+# of `builder_append`, which copies the growing table every step and is O(k^2) — a chunked reader
+# whose k the peer picks must not pay that. Merging adjacent pairs halves the list each pass.
+export fn builder_concat(parts: List Builder) -> Builder =
+  match parts with
+  | [] -> builder_empty()
+  | [only] -> only
+  | _ -> builder_concat(merge_pairs(parts, Nil))
+
+# Tail-recursive, since k can be large enough to overflow the stack. An odd last builder rides to
+# the next pass unchanged.
+fn merge_pairs(parts: List Builder, acc: List Builder) -> List Builder =
+  match parts with
+  | [left, right | more] -> merge_pairs(more, Cons(builder_append(left, right), acc))
+  | [last] -> list_reverse(Cons(last, acc))
+  | _ -> list_reverse(acc)
+
 fn mod_256(value: Int) -> Int =
   value - (value / 256) * 256
 

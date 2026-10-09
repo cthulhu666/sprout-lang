@@ -181,27 +181,18 @@ fn find_line_end(raw: String) -> Maybe Int =
 # invalid or replace each bare CR with SP", and the previous splitter did neither — it silently
 # DELETED the CR, so `X-Sig: a\rb` was handed to the handler as the different value `ab`.
 #
-# Cutting on the separator with str_find (a strstr) rather than walking codepoints also retires the
-# per-character `char_at_or`, which is O(index) and so was quadratic across the 64 KiB the header cap
-# admits. The other half of that quadratic — the per-character rebuild in the old local `lower_ascii`
-# and in `string.trim` — is gone too: both now run O(n) over Bytes (`string.to_lower_ascii` /
-# `string.trim`), so no single header line can freeze the pump (code review finding 5).
-fn split_header_lines(raw: String, acc: Vec String) -> ServerResult (Vec String) =
-  match string.find(raw, "\r\n") with
-  | Nothing ->
-      do
-        line <- checked_line(raw)
-        Ok(vec_append(line, acc))
-  | Just pos ->
-      do
-        line <- checked_line(string.take(raw, pos))
-        split_header_lines(string.drop(raw, pos + 2), vec_append(line, acc))
+# The block is the peer's to size, up to the header cap, so the split must be linear: `string.split`
+# is one byte scan. Cutting each line off the remainder recounted the remainder per line, and
+# appending to a Vec copied it per line — both quadratic in the line count.
+fn split_header_lines(raw: String) -> ServerResult (Vec String) =
+  if any(has_bare_terminator, lines) then Err(HttpInvalidRequest("malformed header line terminator"))
+  else Ok(vec_from_list(lines))
+where
+  lines = string.split(raw, "\r\n")
 
 # A segment already cut at its CRLF, so any CR or LF still in it is by definition bare.
-fn checked_line(line: String) -> ServerResult String =
-  if string.contains(line, "\r") || string.contains(line, "\n") then
-    Err(HttpInvalidRequest("malformed header line terminator"))
-  else Ok(line)
+fn has_bare_terminator(line: String) -> Bool =
+  string.contains(line, "\r") || string.contains(line, "\n")
 
 fn parse_header_pair(pair: (String, String)) -> Maybe (String, String) =
   match pair with
@@ -263,7 +254,7 @@ fn fold_repeat(name: String, value: String, prior: String, headers: Dict String)
 
 fn parse_headers(raw: String) -> ServerResult (Dict String) =
   do
-    lines <- split_header_lines(raw, vec_empty())
+    lines <- split_header_lines(raw)
     parse_header_lines(lines, 0, vec_length(lines), dict_empty())
 
 # How many bytes of body this message has, or why it cannot be framed at all. ONE place decides it,
@@ -408,11 +399,11 @@ where
 # The size check runs on the ACCUMULATED block before the next read, so the cap can be overshot by
 # at most one chunk (64 KiB).
 #
-# ONE accumulator now (a Builder), where there used to be two. The second existed only because the
-# terminator search needed a String, and it is gone: `bytes.find` searches the bytes directly. The
-# accumulator is a Builder rather than repeated `bytes.append` because append copies the whole buffer
-# per chunk (quadratic in bytes, ~8 MiB for a 1 MiB body in 64 KiB chunks), while a Builder
-# concatenates chunk TABLES and flattens once — quadratic only in chunk COUNT.
+# ONE accumulator now, where there used to be two. The second existed only because the terminator
+# search needed a String, and it is gone: `bytes.find` searches the bytes directly. The accumulator
+# is a reversed list of chunks, joined once by `bytes.builder_concat`. Repeated `bytes.append` copies
+# the whole buffer per chunk, and folding `builder_append` copies the chunk table per chunk — both
+# quadratic, and the peer picks the chunk count by how it splits its writes.
 #
 # `overlap` is what keeps the SEARCH linear, and it is the part worth reading twice. Re-scanning the
 # accumulated block every round would be quadratic in bytes — and reachable on purpose, because the
@@ -429,7 +420,7 @@ where
 fn crlf_crlf() -> Bytes =
   bytes.from_string("\r\n\r\n")
 
-fn read_until_headers(conn: borrowing TcpConnection, acc: Builder, total: Int, overlap: Bytes,
+fn read_until_headers(conn: borrowing TcpConnection, parts: List Builder, total: Int, overlap: Bytes,
                       deadline: Int, max_bytes: Int) -> ServerResult (Bytes, Int) !{IO} =
   if total > max_bytes then Err(HttpHeadersTooLarge)
   else
@@ -442,22 +433,26 @@ fn read_until_headers(conn: borrowing TcpConnection, acc: Builder, total: Int, o
         | Err TcpTimeout -> Err(HttpRequestTimeout)
         | Err TcpEndOfStream -> Err(HttpInvalidRequest("unexpected end of stream"))
         | Err _ -> Err(HttpInvalidRequest("connection error"))
-        | Ok chunk -> scan_for_terminator(conn, acc, total, overlap, chunk, deadline, max_bytes)
+        | Ok chunk -> scan_for_terminator(conn, parts, total, overlap, chunk, deadline, max_bytes)
 
 # Split out because the `where` bindings below are shared by both arms of the search, and because a
 # `match` inside the `do` above cannot carry them.
-fn scan_for_terminator(conn: borrowing TcpConnection, acc: Builder, total: Int, overlap: Bytes,
+fn scan_for_terminator(conn: borrowing TcpConnection, parts: List Builder, total: Int, overlap: Bytes,
                        chunk: Bytes, deadline: Int, max_bytes: Int) -> ServerResult (Bytes, Int) !{IO} =
   match bytes.find(probe, crlf_crlf()) with
   # `probe` index 0 sits at absolute byte `total - |overlap|`, so the terminator ends 4 bytes past the
   # match in that frame of reference.
-  | Just at -> Ok((bytes.builder_build(grown), total - bytes.length(overlap) + at + 4))
+  | Just at -> Ok((build_chunks(grown), total - bytes.length(overlap) + at + 4))
   | Nothing ->
       read_until_headers(conn, grown, total + bytes.length(chunk), next_overlap, deadline, max_bytes)
 where
   probe = bytes.append(overlap, chunk)
-  grown = bytes.builder_append(acc, bytes.builder_bytes(chunk))
+  grown = Cons(bytes.builder_bytes(chunk), parts)
   next_overlap = bytes.take_last(probe, 3)
+
+# `parts` is newest-first, as both read loops prepend.
+fn build_chunks(parts: List Builder) -> Bytes =
+  bytes.builder_build(bytes.builder_concat(list_reverse(parts)))
 
 # Every read path BORROWS the connection: a request is read over many syscalls,
 # and under strict consume-exactly-once the first read would take the socket and
@@ -465,7 +460,7 @@ where
 fn read_request(conn: borrowing TcpConnection, config: ServerConfig) -> ServerResult HttpRequest !{IO} =
   do
     header_deadline <- deadline_in(config.header_ms)
-    block <- read_until_headers(conn, bytes.builder_empty(), 0, bytes.empty(),
+    block <- read_until_headers(conn, Nil, 0, bytes.empty(),
                                 header_deadline, config.max_header_bytes)
     read_request_from_block(conn, block, config)
 
@@ -518,8 +513,8 @@ fn decode_header_block(block: Bytes) -> ServerResult String =
 # `string.length` nor `is_empty` could be used — both are strlen-based, so a chunk containing 0x00 was
 # under-counted and one starting with 0x00 looked like a closed connection. Reading bytes retires the
 # whole hazard rather than documenting it.
-fn read_remaining_body(conn: borrowing TcpConnection, acc: Builder, remaining: Int, deadline: Int) -> ServerResult Bytes !{IO} =
-  if remaining <= 0 then Ok(bytes.builder_build(acc))
+fn read_remaining_body(conn: borrowing TcpConnection, parts: List Builder, remaining: Int, deadline: Int) -> ServerResult Bytes !{IO} =
+  if remaining <= 0 then Ok(build_chunks(parts))
   else
     do
       budget <- remaining_ms(deadline)
@@ -531,7 +526,7 @@ fn read_remaining_body(conn: borrowing TcpConnection, acc: Builder, remaining: I
         | Err TcpEndOfStream -> Err(HttpInvalidRequest("unexpected end of stream"))
         | Err _ -> Err(HttpInvalidRequest("connection error"))
         | Ok chunk ->
-            read_remaining_body(conn, bytes.builder_append(acc, bytes.builder_bytes(chunk)),
+            read_remaining_body(conn, Cons(bytes.builder_bytes(chunk), parts),
                                 remaining - bytes.length(chunk), deadline)
 
 # The body gets its OWN budget, starting when the headers are complete — a slow upload must not be
@@ -547,7 +542,7 @@ fn continue_read_request(conn: borrowing TcpConnection, raw: Bytes, body_start: 
       # Total, scaled by the promised size: enough time to receive `content_length` bytes at
       # `min_rate_bps`, plus `body_ms` of grace. Never re-armed, so occupancy is bounded.
       body_deadline <- deadline_in(config.body_ms + rate_ms(content_length, config.min_rate_bps))
-      full <- read_remaining_body(conn, bytes.builder_bytes(body), content_length - bytes.length(body), body_deadline)
+      full <- read_remaining_body(conn, [bytes.builder_bytes(body)], content_length - bytes.length(body), body_deadline)
       # Trim to exactly the promised length: the final chunk can overshoot, and on a pipelined
       # connection those extra bytes are the next request rather than this body.
       Ok(build_request(req, headers, bytes.slice(full, 0, content_length)))

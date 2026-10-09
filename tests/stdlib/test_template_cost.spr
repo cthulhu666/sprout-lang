@@ -1,0 +1,37 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.template (Template, compile, render)
+import stdlib.json as json
+import stdlib.string as string
+import testsupport.cost (assert_scales)
+
+# A template is small but its data is not: a `for` over a large array must render in time linear
+# in the output. Each item's output appended to the result used to copy everything rendered so far.
+
+fn items(n: Int) -> List Int =
+  range_to_list(range_up(0, n - 1))
+
+fn context(n: Int) -> json.Json =
+  json.object_from_pairs([("xs", json.array_from_list(list_map(json.int, items(n))))])
+
+fn expected(n: Int) -> String =
+  string.join("", list_map(\i -> int_to_string(i) ++ ",", items(n)))
+
+fn renders(case: (Template, json.Json, String)) -> Bool =
+  match case with
+  | (tmpl, ctx, want) ->
+      match render(tmpl, ctx) with
+      | Ok out -> out == want
+      | Err _ -> false
+
+fn check_render(state: TestState, tmpl: Template) -> Unit !{IO} =
+  # 64x more items: linear ~64x, quadratic ~4000x.
+  assert_scales(state, "for loop render", renders,
+                (tmpl, context(256), expected(256)), (tmpl, context(16384), expected(16384)), 400)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    match compile("{% for x in xs %}{{ x }},{% endfor %}") with
+    | Ok tmpl -> check_render(state, tmpl)
+    | Err _ -> assert_true(state, "template compiles", false)
+    summary(state)

@@ -78,13 +78,8 @@ fn next_tag(src: String, pos: Int) -> Maybe (Int, Int) =
     Nothing)
 
 # Split `s` on every occurrence of `sep`, preserving order.
-fn split_on_go(s: String, sep: String, acc: Vec String) -> Vec String =
-  match string.split_once(s, sep) with
-  | Nothing -> vec_append(s, acc)
-  | Just (head, rest) -> split_on_go(rest, sep, vec_append(head, acc))
-
 fn split_on(s: String, sep: String) -> Vec String =
-  split_on_go(s, sep, vec_empty())
+  vec_from_list(string.split(s, sep))
 
 fn first_word(s: String) -> String =
   match string.split_once(string.trim(s), " ") with
@@ -218,17 +213,23 @@ export fn render_string(source: String, context: Json) -> Result TemplateError S
     render(tmpl, context)
 
 fn render_nodes(nodes: Vec Node, root: Json, scope: Dict Json) -> Result TemplateError String =
-  render_nodes_from(nodes, 0, vec_length(nodes), root, scope, "")
+  map(join_reversed, render_nodes_from(nodes, 0, vec_length(nodes), root, scope, Nil))
 
-fn render_nodes_from(nodes: Vec Node, index: Int, total: Int, root: Json, scope: Dict Json, acc: String) -> Result TemplateError String =
-  if index >= total then Ok(acc)
+# Output pieces are collected newest-first and joined once: appending each to the output so far
+# copied it per node, quadratic in the rendered size.
+fn join_reversed(parts: List String) -> String =
+  string_concat_many(list_reverse(parts))
+
+fn render_nodes_from(nodes: Vec Node, index: Int, total: Int, root: Json, scope: Dict Json,
+                     parts: List String) -> Result TemplateError (List String) =
+  if index >= total then Ok(parts)
   else
     match vec_get(index, nodes) with
-    | Nothing -> Ok(acc)
+    | Nothing -> Ok(parts)
     | Just node ->
         do
           out <- render_node(node, root, scope)
-          render_nodes_from(nodes, index + 1, total, root, scope, string.concat(acc, out))
+          render_nodes_from(nodes, index + 1, total, root, scope, Cons(out, parts))
 
 fn render_node(node: Node, root: Json, scope: Dict Json) -> Result TemplateError String =
   match node with
@@ -302,15 +303,16 @@ fn render_for(var: String, path: Vec String, body: Vec Node, root: Json, scope: 
   | Just v ->
       match v with
       | JsonNull -> Ok("")
-      | JsonArray arr -> render_for_arr(var, arr, body, root, scope, "")
+      | JsonArray arr -> map(join_reversed, render_for_arr(var, arr, body, root, scope, Nil))
       | _ -> Err(TemplateRenderError("cannot iterate a non-array value"))
 
-fn render_for_arr(var: String, arr: JsonArray, body: Vec Node, root: Json, scope: Dict Json, acc: String) -> Result TemplateError String =
+fn render_for_arr(var: String, arr: JsonArray, body: Vec Node, root: Json, scope: Dict Json,
+                  parts: List String) -> Result TemplateError (List String) =
   match json_array_next(arr) with
-  | Nothing -> Ok(acc)
+  | Nothing -> Ok(parts)
   | Just step ->
       match step with
       | JsonArrayStep head tail ->
           do
             out <- render_nodes(body, root, dict_set(var, head, scope))
-            render_for_arr(var, tail, body, root, scope, string.concat(acc, out))
+            render_for_arr(var, tail, body, root, scope, Cons(out, parts))

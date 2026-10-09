@@ -9,7 +9,7 @@ module stdlib.url
 # A malformed escape (`%zz`, a truncated or trailing `%`) yields Err rather than
 # silently corrupting the output.
 
-import stdlib.bytes (Utf8Error, Utf8DecodeError, builder_empty, builder_byte, builder_append, builder_build, from_string, to_string, get, length)
+import stdlib.bytes (Utf8Error, Utf8DecodeError, builder_byte, builder_bytes, builder_concat, builder_build, from_string, to_string, get, length, slice)
 import stdlib.string as string
 
 # ASCII hex digit (as a byte value) -> its 0..15 nibble, or Nothing if not hex.
@@ -31,30 +31,37 @@ fn hex_pair(input: Bytes, j: Int, total: Int) -> Maybe Int =
       lo <- hex_nibble(lb)
       Just(hi * 16 + lo)
 
-# Walk the input bytes, emitting decoded bytes into `acc`. `%XX` -> one byte;
-# when `plus_space` is set, '+' -> space (0x20); any other byte is copied through.
-# O(n^2) in the builder chunk table for now — fine for query strings (tens of
-# bytes); revisit if a large-body decoder ever needs it.
-fn decode_bytes(input: Bytes, index: Int, total: Int, plus_space: Bool, acc: Builder) -> Result Utf8Error Builder =
-  if index >= total then Ok(acc)
+# Walk the input bytes, collecting decoded chunks newest-first. A run of plain bytes becomes one
+# slice; `%XX` -> one byte; when `plus_space` is set, '+' -> space (0x20). `run` is where the current
+# plain run started. The input is a whole form body at worst, so the chunks are joined once with
+# `builder_concat` rather than appended one by one, which is quadratic in the chunk count.
+fn decode_bytes(input: Bytes, index: Int, total: Int, plus_space: Bool, run: Int,
+                parts: List Builder) -> Result Utf8Error (List Builder) =
+  if index >= total then Ok(with_run(input, run, index, parts))
   else
     match get(input, index) with
-    | Nothing -> Ok(acc)
+    | Nothing -> Ok(with_run(input, run, index, parts))
     | Just b ->
-        if b == 37 then decode_escape(input, index, total, plus_space, acc)  # '%'
+        if b == 37 then decode_escape(input, index, total, plus_space, with_run(input, run, index, parts))  # '%'
         else if plus_space && b == 43 then  # '+'
-          decode_bytes(input, index + 1, total, plus_space, builder_append(acc, builder_byte(32)))
-        else decode_bytes(input, index + 1, total, plus_space, builder_append(acc, builder_byte(b)))
+          decode_bytes(input, index + 1, total, plus_space, index + 1,
+                       Cons(builder_byte(32), with_run(input, run, index, parts)))
+        else decode_bytes(input, index + 1, total, plus_space, run, parts)
 
-fn decode_escape(input: Bytes, index: Int, total: Int, plus_space: Bool, acc: Builder) -> Result Utf8Error Builder =
+# The plain run `[run, stop)` as one chunk, if it is not empty.
+fn with_run(input: Bytes, run: Int, stop: Int, parts: List Builder) -> List Builder =
+  if stop > run then Cons(builder_bytes(slice(input, run, stop - run)), parts) else parts
+
+fn decode_escape(input: Bytes, index: Int, total: Int, plus_space: Bool,
+                 parts: List Builder) -> Result Utf8Error (List Builder) =
   match hex_pair(input, index + 1, total) with
   | Nothing -> Err(Utf8DecodeError("invalid percent-encoding"))
-  | Just byte -> decode_bytes(input, index + 3, total, plus_space, builder_append(acc, builder_byte(byte)))
+  | Just byte -> decode_bytes(input, index + 3, total, plus_space, index + 3, Cons(builder_byte(byte), parts))
 
 fn decode(s: String, plus_space: Bool) -> Result Utf8Error String =
   do
-    built <- decode_bytes(input, 0, length(input), plus_space, builder_empty())
-    to_string(builder_build(built))
+    parts <- decode_bytes(input, 0, length(input), plus_space, 0, Nil)
+    to_string(builder_build(builder_concat(list_reverse(parts))))
 where
   input = from_string(s)
 
@@ -65,14 +72,6 @@ export fn percent_decode(s: String) -> Result Utf8Error String =
 # Resolve %XX escapes AND map '+' to space (application/x-www-form-urlencoded).
 export fn query_decode(s: String) -> Result Utf8Error String =
   decode(s, true)
-
-# Split a query/body string on '&' into its raw segments, in order.
-fn split_amp(s: String, acc: Vec String) -> Vec String =
-  match string.split_once(s, "&") with
-  | Nothing -> vec_append(s, acc)
-  | Just parts ->
-      match parts with
-      | (head, rest) -> split_amp(rest, vec_append(head, acc))
 
 fn decode_kv(raw_key: String, raw_value: String) -> Maybe (String, String) =
   match query_decode(raw_key) with
@@ -91,23 +90,13 @@ fn decode_segment(seg: String) -> Maybe (String, String) =
       match parts with
       | (raw_key, raw_value) -> decode_kv(raw_key, raw_value)
 
-fn parse_segments(segs: Vec String, index: Int, total: Int, acc: Vec (String, String)) -> Vec (String, String) =
-  if index >= total then acc
-  else
-    match vec_get(index, segs) with
-    | Nothing -> acc
-    | Just seg ->
-        if string.is_empty(seg) then parse_segments(segs, index + 1, total, acc)
-        else
-          match decode_segment(seg) with
-          | Nothing -> parse_segments(segs, index + 1, total, acc)
-          | Just pair -> parse_segments(segs, index + 1, total, vec_append(pair, acc))
+# Empty segments (from `&&` or a leading/trailing `&`) and undecodable ones are dropped.
+fn parse_segment(seg: String) -> Maybe (String, String) =
+  if string.is_empty(seg) then Nothing else decode_segment(seg)
 
 # Parse an `application/x-www-form-urlencoded` string (query or form body) into
 # decoded (key, value) pairs. Duplicate keys and their order are preserved; empty
 # segments (from `&&` or a leading/trailing `&`) and segments whose key or value
 # fails to decode are dropped.
 export fn parse_query(s: String) -> Vec (String, String) =
-  parse_segments(segs, 0, vec_length(segs), vec_empty())
-where
-  segs = split_amp(s, vec_empty())
+  vec_from_list(list_filter_map(parse_segment, string.split(s, "&")))

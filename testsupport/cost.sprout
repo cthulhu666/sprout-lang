@@ -1,0 +1,44 @@
+module testsupport.cost
+
+# Cost guards. A wrong complexity is invisible to a correctness test, so a guard times one probe
+# on a short and a long input and bounds the ratio. Pick the sizes and the ratio so linear and
+# quadratic land an order of magnitude either side of it — then a slow runner cannot flip it.
+# Each arm takes the minimum of several rounds, so one stall cannot inflate a result, and the
+# timings are printed so a failure says which way it went.
+
+import stdlib.test (TestState, assert_true)
+import stdlib.terminal as terminal
+import stdlib.time as time
+
+let rounds = 3
+
+# The short arm's time is floored here so a very fast machine cannot shrink the budget to zero.
+let baseline_floor_us = 200
+
+# -1 when a run returns false, so a probe that stopped doing its work fails instead of timing fast.
+fn min_us(probe: a -> Bool, input: a, remaining: Int, best: Int) -> Int !{IO} =
+  if remaining <= 0 then best
+  else
+    do
+      t0 <- time.now_micros()
+      let ok = probe(input)
+      t1 <- time.now_micros()
+      if ok then min_us(probe, input, remaining - 1, if t1 - t0 < best then t1 - t0 else best)
+      else -1
+
+fn budget_us(short_us: Int, ratio: Int) -> Int =
+  (if short_us < baseline_floor_us then baseline_floor_us else short_us) * ratio
+
+# Asserts that `probe` is correct on both inputs and that the long input costs at most `ratio`
+# times the short one.
+export fn assert_scales(state: TestState, label: String, probe: a -> Bool, short: a, long: a,
+                        ratio: Int) -> Unit !{IO} =
+  do
+    short_us <- min_us(probe, short, rounds, 1000000000)
+    long_us <- min_us(probe, long, rounds, 1000000000)
+    terminal.write("  [cost] " ++ label ++ ": short=" ++ int_to_string(short_us) ++ "us long="
+                   ++ int_to_string(long_us) ++ "us budget="
+                   ++ int_to_string(budget_us(short_us, ratio)) ++ "us\n")
+    assert_true(state, label ++ ": correct on both inputs", short_us >= 0 && long_us >= 0)
+    assert_true(state, label ++ ": scales within " ++ int_to_string(ratio) ++ "x",
+                long_us <= budget_us(short_us, ratio))
