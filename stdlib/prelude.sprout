@@ -612,6 +612,25 @@ fn list_reverse_go(xs: List a, acc: List a) -> List a =
 export fn list_reverse(xs: List a) -> List a =
   list_reverse_go(xs, Nil)
 
+fn list_take_go(n: Int, xs: List a, acc: List a) -> List a =
+  match xs with
+  | Cons x rest ->
+      if n <= 0 then list_reverse_go(acc, Nil) else list_take_go(n - 1, rest, Cons(x, acc))
+  | Nil -> list_reverse_go(acc, Nil)
+
+# O(n): the first `n` elements, or all of them when there are fewer; none when
+# `n <= 0`. Stack-safe: it accumulates and reverses.
+export fn list_take(n: Int, xs: List a) -> List a =
+  list_take_go(n, xs, Nil)
+
+# O(n): what follows the first `n` elements, sharing `xs`'s tail; all of `xs`
+# when `n <= 0`, none when `n` covers it. Index access on a List is this plus a
+# match on the head; random access belongs in a Vec.
+export fn list_drop(n: Int, xs: List a) -> List a =
+  match xs with
+  | Cons _ rest -> if n <= 0 then xs else list_drop(n - 1, rest)
+  | Nil -> Nil
+
 export fn list_member(x: a, xs: List a) -> Bool where Eq a =
   match xs with
   | Nil -> false

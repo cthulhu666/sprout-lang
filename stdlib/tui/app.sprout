@@ -100,7 +100,7 @@ export fn step(update: Update m, w: widget.Widget m, ev: event.Event) -> Step m 
 
 # What the tree said, absorbed into the loop's verdict. Shared with `step_to`,
 # whose claimed reply has exactly this shape.
-fn stepped(update: Update m, r: (widget.Widget m, List m, List(widget.Cmd m))) -> Step m =
+fn stepped(update: Update m, r: widget.Handled (widget.Widget m) m) -> Step m =
   match r with
   | (w2, msgs, cmds) -> step_apply(cmds, apply(update, msgs, w2))
 
@@ -116,7 +116,7 @@ export fn step_to(update: Update m, w: widget.Widget m, target: widget.WidgetId,
 
 fn delivered(update: Update m,
              w: widget.Widget m, msg: m,
-             r: Maybe (widget.Widget m, List m, List(widget.Cmd m))) -> Step m =
+             r: Maybe (widget.Handled(widget.Widget m) m)) -> Step m =
   match r with
   # Nothing claimed it, so nothing happened: the original tree stands, and the
   # message goes where every unaddressed one goes.

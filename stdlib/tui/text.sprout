@@ -36,21 +36,7 @@ fn split_clusters(cps: List Int, sizes: List Int,
   match sizes with
   | Nil -> list_reverse(acc)
   | Cons n rest ->
-      split_clusters(drop_n(cps, n), rest, Cons(take_n(cps, n, Nil), acc))
-
-export fn take_n(xs: List a, n: Int, acc: List a) -> List a =
-  if n <= 0 then list_reverse(acc)
-  else
-    match xs with
-    | Nil -> list_reverse(acc)
-    | Cons h rest -> take_n(rest, n - 1, Cons(h, acc))
-
-export fn drop_n(xs: List a, n: Int) -> List a =
-  if n <= 0 then xs
-  else
-    match xs with
-    | Nil -> Nil
-    | Cons _ rest -> drop_n(rest, n - 1)
+      split_clusters(list_drop(n, cps), rest, Cons(list_take(n, cps), acc))
 
 # The width of the PRIMARY codepoint, not the sum over the cluster. Summing
 # would make an emoji ZWJ sequence four columns wide; tcell measures the same
@@ -237,8 +223,8 @@ fn chunk(w: List (List Int), rest: List (List (List Int)),
   # whole line. Emitting it alone overflows by one column, which is visible;
   # emitting nothing would never terminate, which is not.
   match head with
-  | Nil -> chunk_rest(drop_n(w, 1), rest, Cons(take_n(w, 1, Nil), acc), cols)
-  | [_ | _] -> chunk_rest(drop_n(w, list_length(head)), rest, Cons(head, acc), cols)
+  | Nil -> chunk_rest(list_drop(1, w), rest, Cons(list_take(1, w), acc), cols)
+  | [_ | _] -> chunk_rest(list_drop(list_length(head), w), rest, Cons(head, acc), cols)
 
 fn chunk_rest(tail: List (List Int), rest: List (List (List Int)),
               acc: List (List (List Int)), cols: Int) -> List (List (List Int)) =

@@ -62,7 +62,7 @@ type Tr m = (id: widget.WidgetId, roots: List Node,
              on_select: List String -> m, opts: TreeOpts m, sel: List String,
              open: Dict Bool, has_focus: Bool)
 
-type alias Reply m = Maybe(Tr m, List m, List(widget.Cmd m))
+type alias Reply m = Maybe(widget.Handled(Tr m) m)
 
 # A visible row. `depth` drives the indent and `mark` the expander glyph; both
 # are derived while flattening, since neither is a property of the node alone.
@@ -157,11 +157,6 @@ fn index_of(rows: List Row, path: List String, i: Int) -> Int =
 fn present(rows: List Row, path: List String) -> Bool =
   any(\r -> r.path == path, rows)
 
-fn at_index(rows: List Row, i: Int) -> Maybe Row =
-  match rows with
-  | Nil -> Nothing
-  | [r | rest] -> if i <= 0 then Just(r) else at_index(rest, i - 1)
-
 # ── walking to a node ───────────────────────────────────────────────────────
 
 # The FIRST sibling wins a repeated label. That is §4.1's documented
@@ -213,9 +208,9 @@ fn landed(t: Tr m, rows: List Row, d: Int) -> Reply m =
 # there. An empty forest has no path to name, so the key is still claimed —
 # the application must not see a stray Down — and nothing is announced.
 fn settled(t: Tr m, rows: List Row, want: Int) -> Reply m =
-  match at_index(rows, imath.clamp(want, 0, list_length(rows) - 1)) with
-  | Nothing -> Just((t, Nil, Nil))
-  | Just r -> spoken(t, r.path)
+  match list_drop(imath.clamp(want, 0, list_length(rows) - 1), rows) with
+  | [r | _] -> spoken(t, r.path)
+  | [] -> Just((t, Nil, Nil))
 
 # A move that lands where it started says nothing: Down at the last row is the
 # tree's key, but there is no new selection to report.

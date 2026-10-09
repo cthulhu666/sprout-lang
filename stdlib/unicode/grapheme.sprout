@@ -144,18 +144,5 @@ fn build(cps: List Int, sizes: List Int, acc: List String) -> List String =
   match sizes with
   | Nil -> list_reverse(acc)
   | Cons n rest ->
-      build(drop_n(cps, n), rest, Cons(utf8.from_codepoints(take_n(cps, n, Nil)), acc))
+      build(list_drop(n, cps), rest, Cons(utf8.from_codepoints(list_take(n, cps)), acc))
 
-fn take_n(xs: List Int, n: Int, acc: List Int) -> List Int =
-  if n <= 0 then list_reverse(acc)
-  else
-    match xs with
-    | Nil -> list_reverse(acc)
-    | Cons h rest -> take_n(rest, n - 1, Cons(h, acc))
-
-fn drop_n(xs: List Int, n: Int) -> List Int =
-  if n <= 0 then xs
-  else
-    match xs with
-    | Nil -> Nil
-    | Cons _ rest -> drop_n(rest, n - 1)

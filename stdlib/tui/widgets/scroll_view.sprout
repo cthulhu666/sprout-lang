@@ -28,15 +28,15 @@ type Pos (..) =
 type Sv m = (id: widget.WidgetId, child: widget.Widget m, opts: ScrollOpts m,
              across: Pos, down: Pos, has_focus: Bool)
 
-type alias Reply m = Maybe(Sv m, List m, List(widget.Cmd m))
+type alias Reply m = Maybe(widget.Handled(Sv m) m)
 
 # The child hears the broadcast; a scroll view is a container, not a lid.
 fn sv_on_event(v: Sv m,
-               ev: event.Event) -> (Sv m, List m, List(widget.Cmd m)) =
+               ev: event.Event) -> widget.Handled(Sv m) m =
   sv_repack(v, widget.on_event(v.child, ev))
 
 fn sv_repack(v: Sv m,
-             r: (widget.Widget m, List m, List(widget.Cmd m))) -> (Sv m, List m, List(widget.Cmd m)) =
+             r: widget.Handled (widget.Widget m) m) -> widget.Handled(Sv m) m =
   match r with
   | (w2, msgs, cmds) -> ((v with (child = w2)), msgs, cmds)
 

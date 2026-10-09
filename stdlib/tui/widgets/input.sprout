@@ -34,7 +34,7 @@ export fn input_opts() -> InputOpts m =
 type Field m = (id: widget.WidgetId, on_change: String -> m, opts: InputOpts m,
                 line: lz.Zipper, has_focus: Bool)
 
-type alias Reply m = Maybe(Field m, List m, List(widget.Cmd m))
+type alias Reply m = Maybe(widget.Handled(Field m) m)
 
 fn field_handler(f: Field m, d: widget.Delivery m) -> Reply m =
   match d with
@@ -106,7 +106,7 @@ fn moved(f: Field m, z: lz.Zipper) -> Reply m =
 fn submitted(f: Field m) -> Reply m = map(sent_by(f, _), f.opts.on_submit)
 
 fn sent_by(f: Field m,
-           say: String -> m) -> (Field m, List m, List(widget.Cmd m)) =
+           say: String -> m) -> widget.Handled(Field m) m =
   (f, [say(lz.zipper_text(f.line))], Nil)
 
 # ── what it paints ──────────────────────────────────────────────────────────

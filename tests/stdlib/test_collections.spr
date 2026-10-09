@@ -45,6 +45,14 @@ fn main() -> Unit !{IO} =
     check_false("dict_member miss", dict_member("zzz", d)),
     check_false("dict_member after remove", dict_member("beta", d2)),
     check_true("dict_member of a false value", dict_member("k", {k: false})),
+    # list_take / list_drop: total for any count, and the two split a list
+    check_eq("list_take takes from the front", list_take(2, ["a", "b", "c"]), ["a", "b"]),
+    check_eq("list_take past the end takes everything", list_take(5, ["a"]), ["a"]),
+    check_eq("list_take of a negative count is empty", list_take(-1, [1, 2]), Nil),
+    check_eq("list_drop drops from the front", list_drop(2, ["a", "b", "c"]), ["c"]),
+    check_eq("list_drop past the end is empty", list_drop(5, ["a"]), Nil),
+    check_eq("list_drop of a negative count drops nothing", list_drop(-1, ["a", "b"]), ["a", "b"]),
+    check_eq("take then drop is the list", list_take(2, [1, 2, 3]) ++ list_drop(2, [1, 2, 3]), [1, 2, 3]),
 
     # dict_set: overwrite an existing key replaces the value, keeps the count
     check_eq("dict_set overwrite", dict_set("alpha", 100, d), {alpha: 100, beta: 2, gamma: 3}),
