@@ -86,7 +86,8 @@ a decision, and that has happened. `scripts/review_ledger.sh count` reads the le
 `stdlib/compiler/*.sprout` or `stdlib/*.sprout` is staged without a refreshed
 `bootstrap/compile_driver.ll`. Bypass when the IR is genuinely unchanged: `just
 verify-bootstrap-fixed-point`, then `just seed-fp-ack` as its own step with nothing touching the
-index before the commit. A new prelude `extern fn` is **not** an IR-unchanged edit — reseed fully.
+index before the commit. It does not cover `stdlib/compiler/`: the git pre-commit hook runs `just
+seed-stale` there, so reseed even when only the fingerprint line changes. A new prelude `extern fn` is **not** an IR-unchanged edit — reseed fully.
 
 Both hooks scope to the worktree named by the session's `cwd`. Budgets, failure modes and the
 `seed-stale`-vs-CI distinction: [docs/gates.md](docs/gates.md).
