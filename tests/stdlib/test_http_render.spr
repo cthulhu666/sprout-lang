@@ -1,5 +1,5 @@
 import stdlib.test (check_true, check_eq, run_suite)
-import stdlib.http_server (HttpServerResponse, ok, response, with_header, render)
+import stdlib.http_server (HttpServerResponse, ok, response, with_header, add_header, render)
 import stdlib.string as string
 
 # Regression: `render` used to lean on http.http_response, whose base line hardcodes
@@ -71,5 +71,24 @@ fn main() -> Unit !{IO} =
     # Header NAMES go through the same wire path and the same injection: `lower_ascii` lowercases a
     # name but has never removed anything from it.
     check_true("a CRLF in a header name cannot start a new header line",
-      ! contains (rendered(with_header("x-a\r\nset-cookie", "evil=1", ok("hi"))), "\r\nset-cookie"))
+      ! contains (rendered(with_header("x-a\r\nset-cookie", "evil=1", ok("hi"))), "\r\nset-cookie")),
+
+    # --- Repeatable headers ---------------------------------------------------------------------
+    # `add_header` appends a line (Go `Header.Add`); `with_header` replaces every earlier line of
+    # that name (Go `Header.Set`). Lines go out in the order the handler set them.
+    check_true("add_header twice gives two lines",
+      contains(rendered(add_header("x-a", "2", add_header("x-a", "1", ok("hi")))), "x-a: 1\r\nx-a: 2\r\n")),
+    check_eq("with_header replaces every earlier line of that name",
+      count_from(rendered(with_header("X-A", "3", add_header("x-a", "2", add_header("x-a", "1", ok("hi"))))), "x-a: ", 0), 1),
+    check_true("with_header's value is the one that survives",
+      contains(rendered(with_header("X-A", "3", add_header("x-a", "2", add_header("x-a", "1", ok("hi"))))), "x-a: 3\r\n")),
+    check_true("headers go out in the order they were set",
+      contains(rendered(with_header("x-a", "1", with_header("x-b", "2", ok("hi")))), "x-b: 2\r\nx-a: 1\r\n")),
+    check_true("a content-type added by add_header suppresses the default",
+      ! contains (rendered(add_header("content-type", "text/html", ok("hi"))), "text/plain")),
+    # Framing is the server's: a caller's content-length, however added, never reaches the wire.
+    check_eq("a caller's content-length is replaced by the real one",
+      count_from(rendered(add_header("content-length", "999", add_header("content-length", "998", ok("hi")))), "content-length: ", 0), 1),
+    check_true("the surviving content-length is the body's",
+      contains(rendered(add_header("content-length", "999", ok("hi"))), "content-length: 2\r\n"))
   ])

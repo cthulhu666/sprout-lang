@@ -4,6 +4,7 @@ import stdlib.http (HttpStatusError, HttpUnsupportedStatus, RequestLine, Request
 import stdlib.net (TcpConnection, TcpListener, TcpTimeout, TcpEndOfStream, TcpError, accept, close, close_listener, listen_local, read_avail_timeout, tcp_error_message, write_all_utf8_by)
 import stdlib.string as string
 import stdlib.bytes as bytes
+import stdlib.crypto as crypto
 import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_send, chan_recv, chan_close)
 import stdlib.task (Scope, with_scope, task_spawn, task_yield)
 import stdlib.url (parse_query)
@@ -27,8 +28,10 @@ export type HttpRequest =
 type HttpRequestMeta =
   | HttpRequestMeta String (Dict String) Bytes
 
+# Headers in the order the handler set them, a name possibly repeated (`add_header`). Cookies are
+# kept apart and typed, so `with_cookie` replaces one by name and only `render` turns one into text.
 export type HttpServerResponse =
-  | HttpServerResponse Int (Dict String) String
+  | HttpServerResponse Int (Vec (String, String)) (Vec SetCookie) String
 
 export type HttpServerError (..) =
   | HttpInvalidRequest String
@@ -554,22 +557,9 @@ where
   # for a codepoint index to be mistaken for a byte one.
   body = bytes.drop(raw, body_start)
 
-fn headers_to_lines(keys: Vec String, headers: Dict String, index: Int, total: Int, acc: String) -> String =
-  if index >= total then acc
-  else
-    match vec_get(index, keys) with
-    | Nothing -> acc
-    | Just key ->
-        match dict_get(key, headers) with
-        | Nothing -> headers_to_lines(keys, headers, index + 1, total, acc)
-        | Just value ->
-            headers_to_lines(
-              keys,
-              headers,
-              index + 1,
-              total,
-              string.concat(acc, string.concat(sanitize_field(key), string.concat(": ", string.concat(sanitize_field(value), "\r\n"))))
-            )
+fn header_line(pair: (String, String)) -> String =
+  match pair with
+  | (name, value) -> sanitize_field(name) ++ ": " ++ sanitize_field(value) ++ "\r\n"
 
 # CR and LF are the response's STRUCTURE — one ends a header line, two end the header block — so a
 # name or value carrying either does not merely look odd on the wire, it changes what the message is.
@@ -595,40 +585,44 @@ fn headers_to_lines(keys: Vec String, headers: Dict String, index: Int, total: I
 fn sanitize_field(raw: String) -> String =
   string.replace_all("\n", " ", string.replace_all("\r", " ", raw))
 
-fn render_extra_headers(headers: Dict String) -> String =
-  headers_to_lines(keys, headers, 0, vec_length(keys), "")
-where
-  keys = dict_keys(headers)
+fn header_named(name: String, pair: (String, String)) -> Bool =
+  match pair with
+  | (key, _) -> key == name
+
+fn without_header(name: String, headers: Vec (String, String)) -> Vec (String, String) =
+  vec_filter(\pair -> ! header_named (name, pair), headers)
 
 # Set `name` to `value` only if the caller has not already provided it. Lets `render`
-# supply defaults (content-type, connection) that a handler's `with_header` overrides.
-fn with_default_header(name: String, value: String, headers: Dict String) -> Dict String =
-  match dict_get(name, headers) with
-  | Just _ -> headers
-  | Nothing -> dict_set(name, value, headers)
+# supply defaults (content-type, connection) that a handler's header overrides.
+fn with_default_header(name: String, value: String, headers: Vec (String, String)) -> Vec (String, String) =
+  if vec_any(\pair -> header_named(name, pair), headers) then headers
+  else vec_append((name, value), headers)
 
-# The final header set written to the wire: caller headers, plus defaulted
-# content-type/connection, plus an *always* byte-accurate content-length (framing is
-# the server's responsibility, so it overrides any caller-supplied value). Keys are
-# lowercase throughout, so each header appears exactly once — no duplicates.
-fn response_headers(headers: Dict String, body: String) -> Dict String =
-  dict_set(
-    "content-length",
-    int_to_string(string.byte_length(body)),
-    with_default_header("connection", "close", with_default_header("content-type", "text/plain", headers))
-  )
+# The final header lines written to the wire: caller headers in order, defaulted content-type and
+# connection, and an *always* byte-accurate content-length. Framing is the server's
+# responsibility, so every caller-supplied content-length is dropped, however it was added.
+fn response_headers(headers: Vec (String, String), body: String) -> Vec (String, String) =
+  without_header("content-length", headers)
+    |> with_default_header("content-type", "text/plain")
+    |> with_default_header("connection", "close")
+    |> vec_append(("content-length", int_to_string(string.byte_length(body))))
 
-fn assemble_response(line: String, headers: Dict String, body: String) -> String =
-  string.concat(line, string.concat("\r\n", string.concat(render_extra_headers(headers), string.concat("\r\n", body))))
+# Cookies go after the other headers. `header_line` sanitises them too, so a CR or LF in a
+# cookie's name, path or domain is as inert as one in any header.
+fn assemble_response(line: String, headers: Vec (String, String), cookies: Vec SetCookie, body: String) -> String =
+  string.join("", [line ++ "\r\n"] ++ header_lines ++ cookie_lines ++ ["\r\n", body])
+where
+  header_lines = list_map(header_line, vec_to_list(headers))
+  cookie_lines = list_map(\c -> header_line(("set-cookie", set_cookie_text(c))), vec_to_list(cookies))
 
 export fn response(status: Int, body: String) -> HttpServerResponse =
-  HttpServerResponse(status, dict_empty(), body)
+  HttpServerResponse(status, vec_empty(), vec_empty(), body)
 
 # The numeric status of a response — the accessor a logging/metrics middleware
 # needs, since the HttpServerResponse constructor is not exported for matching.
 export fn response_status(resp: HttpServerResponse) -> Int =
   match resp with
-  | HttpServerResponse status _ _ -> status
+  | HttpServerResponse status _ _ _ -> status
 
 export fn ok(body: String) -> HttpServerResponse =
   response(200, body)
@@ -665,11 +659,97 @@ export fn not_implemented(body: String) -> HttpServerResponse =
 export fn see_other(location: String) -> HttpServerResponse =
   with_header("location", location, response(303, ""))
 
+# Sets `name` to `value`, removing every earlier line of that name (Go `Header.Set`). Names are
+# case-insensitive and go out lowercase.
 export fn with_header(name: String, value: String, resp: HttpServerResponse) -> HttpServerResponse =
   match resp with
-  | HttpServerResponse status headers body -> HttpServerResponse(status, dict_set(header_name, value, headers), body)
+  | HttpServerResponse status headers cookies body ->
+      HttpServerResponse(status, vec_append((header_name, value), without_header(header_name, headers)), cookies, body)
 where
   header_name = string.to_lower_ascii(name)
+
+# Adds a `name: value` line after any earlier ones of that name (Go `Header.Add`).
+export fn add_header(name: String, value: String, resp: HttpServerResponse) -> HttpServerResponse =
+  match resp with
+  | HttpServerResponse status headers cookies body ->
+      HttpServerResponse(status, vec_append((string.to_lower_ascii(name), value), headers), cookies, body)
+
+# --- Response cookies -------------------------------------------------------
+# A cookie's value is the part a handler computes from data, and a `;` in it would add attributes
+# of the sender's choosing, so it is checked when made: `with_cookie` and `render` never fail on a
+# cookie. Name, path and domain are usually literals; `render` makes their structure inert instead.
+# Design: docs/http-request-params-v0.md §9.
+
+# A cookie value as sent: RFC 6265 §4.1.1 `cookie-octet` only, so no space, comma, `"`, `;`, `\`,
+# control or non-ASCII byte. Stricter than what `cookie_pairs` reads, and every value it admits
+# reads back unchanged.
+export wrap CookieValue = String
+
+export fn cookie_value(raw: String) -> Maybe CookieValue =
+  if sent_cookie_octets(raw) then Just(CookieValue(raw)) else Nothing
+
+export fn cookie_value_text(value: CookieValue) -> String =
+  match value with
+  | CookieValue text -> text
+
+# Total: standard base64 uses only `cookie-octet` bytes, so any bytes fit.
+export fn cookie_value_of_bytes(data: Bytes) -> CookieValue =
+  CookieValue(crypto.base64_encode(data))
+
+# Browsers drop `SameSiteNone` on a cookie without `secure`.
+export type SameSite (..) =
+  | SameSiteStrict
+  | SameSiteLax
+  | SameSiteNone
+
+export type SetCookie (..) = (name: String, value: CookieValue, max_age_seconds: Maybe Int, path: Maybe String, domain: Maybe String, http_only: Bool, same_site: Maybe SameSite, secure: Bool)
+
+# Defaults: `Path=/`, `HttpOnly`, `SameSite=Lax`, a session cookie (no `Max-Age`), no `Secure`.
+# Change one with record update: `cookie("sid", v) with (secure = true)`.
+export fn cookie(name: String, value: CookieValue) -> SetCookie =
+  SetCookie(name = name, value = value, max_age_seconds = Nothing, path = Just("/"), domain = Nothing, http_only = true, same_site = Just(SameSiteLax), secure = false)
+
+# Clears `name`: an empty value with `Max-Age=0`. A browser clears only the cookie with the same
+# path and domain, so set those as the cookie was set: `expired_cookie("sid") with (path = …)`.
+export fn expired_cookie(name: String) -> SetCookie =
+  cookie(name, CookieValue("")) with (max_age_seconds = Just(0))
+
+# Adds a `Set-Cookie` line, replacing an earlier `with_cookie` of the same name (RFC 6265 §4.1.1:
+# a server SHOULD NOT send two). A raw `with_header("set-cookie", …)` is not compared against it.
+export fn with_cookie(c: SetCookie, resp: HttpServerResponse) -> HttpServerResponse =
+  match resp with
+  | HttpServerResponse status headers cookies body ->
+      HttpServerResponse(status, headers, vec_append(c, vec_filter(\other -> other.name != c.name, cookies)), body)
+
+fn sent_cookie_octets(raw: String) -> Bool =
+  all_bytes(\byte -> byte != 32 && byte != 44 && cookie_octet(byte), encoded, 0, bytes.length(encoded))
+where
+  encoded = bytes.from_string(raw)
+
+# A `;` in a name, path or domain would start an attribute, so it becomes a space, as CR and LF do
+# in `sanitize_field`.
+fn attribute_text(raw: String) -> String =
+  string.replace_all(";", " ", raw)
+
+fn same_site_text(same_site: SameSite) -> String =
+  match same_site with
+  | SameSiteStrict -> "Strict"
+  | SameSiteLax -> "Lax"
+  | SameSiteNone -> "None"
+
+# Attributes in Go's order (`net/http.Cookie.String`).
+fn set_cookie_text(c: SetCookie) -> String =
+  [
+    Just(`${attribute_text(c.name)}=${cookie_value_text(c.value)}`),
+    map(\p -> `Path=${attribute_text(p)}`, c.path),
+    map(\d -> `Domain=${attribute_text(d)}`, c.domain),
+    map(\n -> `Max-Age=${int_to_string(n)}`, c.max_age_seconds),
+    if c.http_only then Just("HttpOnly") else Nothing,
+    if c.secure then Just("Secure") else Nothing,
+    map(\s -> `SameSite=${same_site_text(s)}`, c.same_site)
+  ]
+    |> list_filter_map(\attr -> attr)
+    |> string.join("; ")
 
 # --- Routing ---------------------------------------------------------------
 # A route pairs an HTTP method and an exact path with a handler. `dispatch` scans
@@ -868,9 +948,9 @@ fn unquoted(value: String) -> String =
 fn cookie_octet(byte: Int) -> Bool =
   byte >= 32 && byte <= 126 && byte != 34 && byte != 59 && byte != 92
 
-fn cookie_octets_from(raw: Bytes, index: Int, total: Int) -> Bool =
+fn all_bytes(ok: Int -> Bool, raw: Bytes, index: Int, total: Int) -> Bool =
   if index >= total then true
-  else cookie_octet(byte_or_minus_one(raw, index)) && cookie_octets_from(raw, index + 1, total)
+  else ok(byte_or_minus_one(raw, index)) && all_bytes(ok, raw, index + 1, total)
 
 fn byte_or_minus_one(raw: Bytes, index: Int) -> Int =
   match bytes.get(raw, index) with
@@ -878,7 +958,7 @@ fn byte_or_minus_one(raw: Bytes, index: Int) -> Int =
   | Nothing -> -1
 
 fn cookie_octets(value: String) -> Bool =
-  cookie_octets_from(encoded, 0, bytes.length(encoded))
+  all_bytes(cookie_octet, encoded, 0, bytes.length(encoded))
 where
   encoded = bytes.from_string(value)
 
@@ -920,20 +1000,20 @@ where
   pairs = cookie_pairs(req)
 
 # Render a response to the wire. The header block is assembled from the response's
-# header dict (not http_response's fixed base), so the content type is caller-
-# controlled and appears once, and every response carries a byte-accurate
-# Content-Length. `http_response` remains the shared status-line/body path for other
-# callers (http_client, echo helpers).
+# own header lines (not http_response's fixed base), so the content type is caller-
+# controlled, and every response carries a byte-accurate Content-Length.
+# `http_response` remains the shared status-line/body path for other callers
+# (http_client, echo helpers).
 fn as_server_error(err: HttpStatusError) -> HttpServerError =
   match err with
   | HttpUnsupportedStatus code -> HttpServerUnsupportedStatus(code)
 
 export fn render(resp: HttpServerResponse) -> ServerResult String =
   match resp with
-  | HttpServerResponse status headers body ->
+  | HttpServerResponse status headers cookies body ->
       do
         line <- status_line(status) |> result_map_error(as_server_error)
-        Ok(assemble_response(line, response_headers(headers, body), body))
+        Ok(assemble_response(line, response_headers(headers, body), cookies, body))
 
 # Recoverable, TOTALLY bounded write: a send to a peer that has vanished (reset/EPIPE) fails as an
 # Err rather than aborting the process, and a peer that stops reading — or reads too slowly to count
