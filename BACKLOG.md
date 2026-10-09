@@ -164,9 +164,6 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   multi-parameter classes are unsupported, but the validator's stated contract is not upheld. Fix:
   validate every `TypeName` argument. Stages 0a and 0b are complete; analysis, staging and prior art
   are in `docs/gadts-v0.md` (non-normative), spec §5.6 (experimental).
-- [ ] `P4` **Existentials — `check_existential_constraints` is a dead no-op hook**, body emptied
-  and still called from `infer.sprout`. Wire a real check, or drop the call and keep the comment as
-  the home marker.
 - [ ] `P4` **Existentials — extend constraint-head class validation to instance/class positions.**
   A variable-first `where a ToString` is rejected on a `FnDecl`; the same swap on an `InstanceDecl`
   context-constraint or a `ClassDecl` superclass silently drops the constraint.
@@ -211,10 +208,9 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
 - [ ] `P3` **Names the parser writes are captured by a module's own declaration or a local.**
   List and dict literals, list patterns and `>>`/`<<` use bare `Cons`, `Nil`, `dict_empty`,
   `dict_set`, `rcompose`, `lcompose` (spec §3.1; `own_cons_captures_list_literal.spr`). Writing
-  `prelude.Cons` instead breaks `no_prelude` files and every path that type-checks without
-  bundling (`module_loader`, `type_driver`, `compiler.compile_source`). Those paths also neither
-  resolve a user's `prelude.X` nor rename locals, so a local still captures templates there;
-  `module_loader` drops the failure silently. `docs/prelude-name-identity-v0.md` §5.
+  `prelude.Cons` instead breaks `no_prelude` files and `compiler.compile_source`, which type-checks
+  without bundling. That path also neither resolves a user's `prelude.X` nor renames locals, so a
+  local still captures templates there. `docs/prelude-name-identity-v0.md` §5.
 - [ ] `P2` **A user class method named like a prelude function captures built-in syntax.** Method
   names stay bare after bundling, so a method `list_reverse` breaks comprehensions
   (`class_method_captures_comprehension.spr`), and a method `branch` would capture `try`'s
@@ -1627,8 +1623,7 @@ deferral happened, not for current behaviour. Still open:
   `desugar_placeholder_call`.
 - [ ] `P3` **Span the remaining `no_pos()` error sites: codegen / IR-emit errors (`IrLinesErr`).**
   Everything else is spanned (diagnostics, infer/typed/check/body errors, bundle errors, pattern
-  inference, call resolve, the four `typecheck_decls` validators). `typecheck_decl`'s `BodyLenient`
-  internal-invariant arm intentionally stays `no_pos()` — unreachable by construction.
+  inference, call resolve, the four `typecheck_decls` validators).
 
 ### Runtime and performance roadmap
 
@@ -1825,15 +1820,9 @@ deferral happened, not for current behaviour. Still open:
   ships**. Extract one loop. Same-area efficiency: `worker_source_for` re-scans all decls per callee
   (O(N·D) — build a name→decl `Dict` once), and `build_adt_ctor_index_go` computes
   `adt_ctor_entries` twice per TypeDecl.
-- [ ] `P3` **`type_driver.sprout` and `lower_driver.sprout` are orphaned executables carrying a
-  fixed defect — wire them up or delete them.** Both still report errors via `print` (stdout), the
-  exact defect fixed in `compile_driver.sprout`; they were left alone deliberately, since nothing
-  builds them and fixing an unbuildable binary is an unverifiable change. Their original purpose was
-  parity diagnosis against a compiler that no longer exists, so the likely answer is **delete**,
-  plus the stale `checker.sprout:62` comment. If they are wanted as diagnostic entry points, note
-  `compile_driver --phase check`/`--phase lower` already do what they do. `gate-audit`'s assertion B
-  guards orphaned `scripts/*.sh`, not orphaned `.sprout` executables — arguably a third direction
-  worth adding.
+- [ ] `P3` **`gate-audit` does not catch orphaned `.sprout` executables.** Its assertion B guards
+  orphaned `scripts/*.sh` only. Seven unreferenced compiler drivers accumulated unnoticed until a
+  review deleted them (2026-10-09).
 - [ ] `P3` **No scientific-notation Double literal in the lexer.** `1.5e3` is a parse error, as is
   any integer part above 2^63. So 2^64 / 2^512 / 2^-512 are **not writable as literals at all**,
   which is why `stdlib/math.sprout`'s power-of-two ladder is built from module-level `let`s and
@@ -2090,14 +2079,6 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   Would have caught all eleven modules of the type-vocabulary bug the day they broke. Land it with
   the one remaining red module (`stdlib.repl`, failing inside the unswept `stdlib/compiler/`
   subtree) or with an explicit known-red list so it cannot silently rot.
-- [ ] `P2` **Delete `module_loader.build_import_pairs*` and the orphan
-  `type_driver`/`lower_driver`.** Those two driver modules are unreferenced and are the only
-  remaining callers of the retired scheme-environment path, each carrying its own copy.
-  `build_import_pairs_with_roots` is marked RETIRED in-file. `load_prelude_pairs` stays either way
-  — `check_bundled` uses it for the ambient-prelude case. (Same two modules as the
-  orphaned-executables item under Compiler Internals.) Fix with them the comments that still call
-  the env path the REPL's: `infer.class_names_from_env`, `type_names_from_env`, the type-name note
-  in `typecheck_decls_resolved`, and `scripts/front_end_agreement.sh`'s header.
 - [ ] `P2` **Analysis-service env isolation:** `SPROUT_GC_THRESHOLD` and `SPROUT_GC_ADAPT_RATIO`
   must not propagate to the `analysis_service_bin` subprocess. The GC stress test sets
   `GC_THRESHOLD=1` on the program binary, the program spawns the service with the same env, and the

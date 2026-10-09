@@ -380,8 +380,6 @@ export fn close_listener(listener: consuming TcpListener) -> Unit !{IO} =
   match listener with
   | TcpListener handle -> tcp_close_listener(handle)
 
-type alias TcpResult a = Result TcpError a
-
 fn utf8_error_message(err: Utf8Error) -> String =
   match err with
   | Utf8DecodeError msg -> msg

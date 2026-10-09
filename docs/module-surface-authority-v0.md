@@ -138,6 +138,8 @@ names because those are values.
 
 ### 5.2 Provenance: the `@extern:` marker
 
+**Deleted 2026-10-09** with the env path it served (§7.5). Kept as the record of the design.
+
 `prefix_pairs` operates on `(String, Scheme)` pairs, which carry no record of which declaration
 produced them — there was nothing to exempt even had it wanted to. Rather than thread a new
 structure through `load_module`'s twelve call sites (the plumbing cost measured in
@@ -309,9 +311,8 @@ as well as comparing verdicts, because a non-terminating check cannot be caught 
 
 ### 7.5 Not done
 
-`module_loader.build_import_pairs*` still exists, used only by the unreferenced `type_driver` /
-`lower_driver` diagnostic drivers. It is marked retired in-file; deleting it and them is filed in
-`BACKLOG.md`.
+Done 2026-10-09: `module_loader.build_import_pairs*`, the drivers that called it, and the
+`@extern:` / `@qualalias:` markers only it wrote or read are deleted. Every front end bundles.
 
 ## 8. Tests
 

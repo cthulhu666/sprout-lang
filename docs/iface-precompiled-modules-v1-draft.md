@@ -241,9 +241,12 @@ For the very first iteration:
 This is independently committable, validates the textual format, and unblocks
 the rest of PR 1.
 
-## Phase 2 — AST codec (shipped on `feat/iface-ast-codec`)
+## Phase 2 — AST codec (shipped, then deleted)
 
-Phase 2 adds encode/decode for `ast.Program` and all constituent ADTs to
+**Deleted 2026-10-09:** nothing read it, and every AST change had to update it. The code and
+its test are last present at `e5439037`; restore them from there when bundle-skip is scheduled.
+
+Phase 2 added encode/decode for `ast.Program` and all constituent ADTs to
 `stdlib/compiler/iface_codec.sprout`.  The implementation is additive — no
 existing Scheme/IfaceFile encode/decode functions were modified.
 

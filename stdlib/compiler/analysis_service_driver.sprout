@@ -671,14 +671,13 @@ fn state_next_id(state: StartupState) -> Ref Int =
   match state with
   | StartupState _ _ _ _ next_id -> next_id
 
-# Create the persistent service state and pre-warm the module cache with the
-# prelude.  Runtime object compilation is deferred to first eval so the service
-# starts (and answers diagnostics/type-of/hover) even when clang is not on PATH.
+# Create the persistent service state. Runtime object compilation is deferred to
+# first eval so the service starts (and answers diagnostics/type-of/hover) even
+# when clang is not on PATH.
 fn build_startup_state(stdlib_root: String) -> StartupState !{IO} =
   do
     runtime_obj_ref <- ref_new("")
     load_env <- bundler.new_load_env()
-    prelude_pairs <- module_loader.load_prelude_pairs(stdlib_root, bundler.load_env_schemes(load_env))
     sessions <- ref_new(dict_empty())
     next_id <- ref_new(1)
     StartupState(stdlib_root, runtime_obj_ref, load_env, sessions, next_id)
@@ -814,7 +813,7 @@ fn compile_and_run_eval(src: String, state: StartupState) -> json.Json !{IO} =
   | Err msg -> panic("write_file: eval_source: " ++ msg)
   | Ok _ ->
       do
-        ir_result <- compiler.compile_full_ir_with_cache(source.FilePath(eval_source_path), source.StdlibRoot(state_stdlib_root(state)), bundler.load_env_schemes(state_cache(state)))
+        ir_result <- compiler.compile_full_ir(source.FilePath(eval_source_path), source.StdlibRoot(state_stdlib_root(state)))
         link_and_run_eval(ir_result, state)
 
 export fn is_function_scheme(s: types.Scheme) -> Bool =

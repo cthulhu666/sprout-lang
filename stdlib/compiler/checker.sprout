@@ -62,7 +62,6 @@ export fn check_program_with_env(prog: ast.Program, extra: List (String, types.S
               | Just (pos, msg) -> CheckErr(pos, msg)
 
 # Like check_program_with_env but returns the full TypedResult (TypedProgram + env).
-# Used by lower_driver to feed the lowering pass.
 export fn typecheck_typed(prog: ast.Program, extra: List (String, types.Scheme)) -> typed_ast.TypedResult !{IO} =
   do
     (result, reports) <- typecheck_typed_with_effects(prog, extra)

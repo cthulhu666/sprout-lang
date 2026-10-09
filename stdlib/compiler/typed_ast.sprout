@@ -167,10 +167,8 @@ export type TypedResult (..) =
   | TypedErr source.SourcePos String
 
 # Result of inferring a single function/method body.
-# BodyLenient: an unknown-variable error was silently accepted (builtin gap).
 export type BodyResult (..) =
   | BodyOk TypedExpr types.Type
-  | BodyLenient
   | BodyErr source.SourcePos String
 
 export type InstanceMethodsResult (..) =

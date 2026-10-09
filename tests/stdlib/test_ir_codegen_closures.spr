@@ -142,13 +142,13 @@ fn main() -> Unit !{IO} =
     # T8: Finding #5 — TVar-typed higher-order function argument. A function
     # that takes a polymorphic fn-typed parameter and applies it twice should
     # translate to Ok, not fail with "must be Int or String". Verifies
-    # is_supported_arg_type accepts TFunc (or resolved TVar -> TFunc).
+    # translate_args accepts TFunc (or resolved TVar -> TFunc).
     t8 <- translated_ok_ir_contains(
       "fn twice_then(g: a -> a, x: a) -> a = g(g(x))",
       "load ptr, ptr")
     assert_true(state, "T8: polymorphic fn-typed arg (a -> a) accepted by translator (no TVar rejection)", t8)
 
-    # T9: Finding #6 — is_supported_arg_type widening must not leak to direct
+    # T9: Finding #6 — accepting any arg type must not leak to direct
     # calls. Passing a closure (fn-typed) to a direct-call site expecting Int
     # should be rejected. Latent — fix the source if Sprout typechecker changes.
     # Currently the typechecker enforces the type mismatch, so we assert Err.

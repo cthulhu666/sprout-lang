@@ -165,10 +165,7 @@ fn annotation_equal(a: Maybe ast.TypeExpr, b: Maybe ast.TypeExpr) -> Bool =
   | Nothing -> (match b with | Nothing -> true | _ -> false)
   | Just at -> (match b with | Just bt -> type_expr_equal(at, bt) | Nothing -> false)
 
-# Structural equality on a surface type expression. `iface_codec.encode_ast_typeexpr`
-# could answer this by comparing wire strings, but that is a versioned format (v10
-# reshaped TypeArrow) and it allocates a string pair to return a Bool.
-# O(n) in type-expression node count.
+# Structural equality on a surface type expression. O(n) in type-expression node count.
 fn type_expr_equal(a: ast.TypeExpr, b: ast.TypeExpr) -> Bool =
   match a with
   | ast.TypeName an -> (match b with | ast.TypeName bn -> an == bn | _ -> false)
