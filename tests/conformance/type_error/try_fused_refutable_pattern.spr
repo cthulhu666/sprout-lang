@@ -1,0 +1,22 @@
+# A refutable pattern without `else` on a `try` is a non-exhaustive match
+# whatever the instance's shape. An instance whose failure arm is a catch-all
+# must not make it exhaustive by fusion (spec §5.9.1).
+
+type Slot a =
+  | Filled a
+  | Blank
+
+instance Propagate Slot
+  fn branch(value: Slot a) -> ControlFlow (Slot b) a =
+    match value with
+    | Filled v -> Continue(v)
+    | _ -> Break(Blank)
+
+fn first(s: Slot (Maybe Int)) -> Slot Int =
+  let Just v = try s
+  in Filled(v)
+
+fn main() -> Unit !{IO} =
+  match first(Filled (Nothing)) with
+  | Filled v -> print(to_string(v))
+  | Blank -> print("blank")

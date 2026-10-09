@@ -1,0 +1,10 @@
+# An `else` on an irrefutable pattern after a `try` is an unreachable branch,
+# reported in this file at the binding, never at the instance's source.
+
+fn load(n: Int) -> Result String Int = if n > 0 then Ok(n) else Err("no")
+
+fn g(n: Int) -> Result String Int =
+  let y = (try load(n)) else Err("never")
+  in Ok(y)
+
+fn main() -> Unit !{IO} = print(to_string(g(1)))

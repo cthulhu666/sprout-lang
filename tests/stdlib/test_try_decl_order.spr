@@ -1,0 +1,38 @@
+import stdlib.test (check_eq, run_suite)
+
+# A fused `try` uses the instance's failure arm, so the functions that arm calls
+# are dependencies of every function with a `try`. Here `tagged` is unannotated
+# and declared after its users; it must still be inferred first.
+
+type Outcome a =
+  | Good a
+  | Bad String
+
+instance Propagate Outcome
+  fn branch(value: Outcome a) -> ControlFlow (Outcome b) a =
+    match value with
+    | Good v -> Continue(v)
+    | Bad s -> Break(tagged(s))
+
+fn bump(o: Outcome Int) -> Outcome Int =
+  let v = try o
+  in Good(v + 1)
+
+fn shout(o: Outcome String) -> Outcome String =
+  let s = try o
+  in Good(s ++ "!")
+
+fn tagged(s) = Bad("tagged: " ++ s)
+
+fn text(o: Outcome a) -> String where ToString a =
+  match o with
+  | Good v -> `good ${v}`
+  | Bad s -> `bad ${s}`
+
+fn main() -> Unit !{IO} =
+  run_suite("try declaration order", [
+    check_eq("int success", text(bump(Good(1))), "good 2"),
+    check_eq("int failure", text(bump(Bad("x"))), "bad tagged: x"),
+    check_eq("string success", text(shout(Good("hi"))), "good hi!"),
+    check_eq("string failure", text(shout(Bad("y"))), "bad tagged: y")
+  ])

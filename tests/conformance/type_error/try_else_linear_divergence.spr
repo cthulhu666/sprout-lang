@@ -1,0 +1,14 @@
+module main
+
+# A linear value consumed in a `let..else` handler after a `try` but not in the
+# body is the binding's own divergence, not a consume after the `try`.
+
+type linear File = File Int
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn talk(f: File, m: Maybe (Maybe Int)) -> Maybe Int =
+  let Just v = (try m) else Just(release(f))
+  in Just(v)
+
+fn main() -> Unit !{IO} = print(to_string(talk(File(1), Just (Just(2)))))

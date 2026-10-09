@@ -232,9 +232,9 @@ export fn try_statement_steps(operand: Expr, rest: List DoStep, pos: source.Sour
 
 # --- `try` ---
 # A binding whose right-hand side starts with `try`: the operand, the `try`'s
-# position, and the arms that take the success value.
+# position, and the one arm that takes the success value.
 export type TryBind (..) =
-  | TryBind Expr source.SourcePos (List MatchBranch)
+  | TryBind Expr source.SourcePos MatchBranch
 
 # Inference's binders. `$` keeps them apart from every user name (spec §2).
 let try_value_name = "$try"
@@ -267,31 +267,32 @@ fn replace_head_try(e: Expr, v: Expr) -> Expr =
   | RecordUpdateExpr base fields pos -> RecordUpdateExpr(replace_head_try(base, v), fields, pos)
   | _ -> e
 
-# A whole `try e` right-hand side matches the success with the binding's own
-# pattern and `else`; a longer one binds the success, then the binding runs.
+# A whole `try e` right-hand side without `else` matches the success with the
+# binding's pattern. Otherwise the success is bound first and the binding runs
+# as its own `let`, so its `else` is checked and reported as any `let..else` is.
 export fn try_bind(pat: Pattern, value: Expr, els: Maybe LetElse, body: Expr,
                    pos: source.SourcePos) -> Maybe TryBind =
-  match value with
-  | TryExpr operand tpos -> Just(TryBind(operand, tpos, let_bind_branches(pat, els, body, pos)))
+  match (value, els) with
+  | (TryExpr operand tpos, Nothing) -> Just(TryBind(operand, tpos, MatchBranch(pat, body)))
   | _ ->
       match head_try(value) with
       | Nothing -> Nothing
       | Just (operand, tpos) ->
           let rhs = replace_head_try(value, VarExpr(try_value_name, tpos))
           in Just(TryBind(operand, tpos,
-                          [MatchBranch (VarPattern(try_value_name, tpos), LetBindExpr(pat, rhs, els, body, pos))]))
+                          MatchBranch(VarPattern(try_value_name, tpos), LetBindExpr(pat, rhs, els, body, pos))))
 
 # `match branch(e) with | Continue <arm> -> … | Break f -> f`: the meaning of
 # `try` at any instance. Inference fuses it at a known one.
 export fn try_match(tb: TryBind) -> Expr =
-  let TryBind operand pos arms = tb
-  in MatchExpr(CallExpr (VarExpr("branch", pos), [operand], pos), try_match_arms(arms, pos), pos)
+  let TryBind operand pos arm = tb
+  in MatchExpr(CallExpr (VarExpr("branch", pos), [operand], pos), try_match_arms(arm, pos), pos)
 
-# The success arms under `Continue`, then `Break f -> f`.
-export fn try_match_arms(success_arms: List MatchBranch, pos: source.SourcePos) -> List MatchBranch =
-  list_map(\a -> continue_arm(a, pos), success_arms)
-    ++ [MatchBranch (ConstructorPattern("Break", [VarPattern(try_failure_name, pos)], pos),
-                    VarExpr(try_failure_name, pos))]
+# The success arm under `Continue`, then `Break f -> f`.
+export fn try_match_arms(success: MatchBranch, pos: source.SourcePos) -> List MatchBranch =
+  [continue_arm(success, pos),
+   MatchBranch(ConstructorPattern("Break", [VarPattern(try_failure_name, pos)], pos),
+                VarExpr(try_failure_name, pos))]
 
 fn continue_arm(arm: MatchBranch, pos: source.SourcePos) -> MatchBranch =
   let MatchBranch pat body = arm

@@ -1,0 +1,23 @@
+# The mismatch message names the failure and the block the right way round when
+# the instance lists its failure arm first.
+
+type Outcome e a =
+  | Bad e
+  | Good a
+
+instance Propagate (Outcome e)
+  fn branch(value: Outcome e a) -> ControlFlow (Outcome e b) a =
+    match value with
+    | Bad err -> Break(Bad(err))
+    | Good v -> Continue(v)
+
+fn good_int(v: Int) -> Outcome Int Int = Good(v)
+
+fn f(o: Outcome String Int) -> Outcome Int Int =
+  let v = try o
+  in good_int(v)
+
+fn main() -> Unit !{IO} =
+  match f(Good(1)) with
+  | Good v -> print(to_string(v))
+  | Bad e -> print(to_string(e))

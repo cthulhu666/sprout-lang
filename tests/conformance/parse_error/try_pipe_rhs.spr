@@ -1,0 +1,10 @@
+# A `try` on the right of `|>` is not at the head of the right-hand side: it
+# would run before the pipe's left operand (spec §5.9.1).
+
+fn pick(ok: Bool) -> Maybe (Int -> Int) = if ok then Just(\n -> n + 1) else Nothing
+
+fn f(ok: Bool) -> Maybe Int =
+  let r = 4 |> (try pick(ok))
+  in Just(r)
+
+fn main() -> Unit !{IO} = print(to_string(f(true)))
