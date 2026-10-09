@@ -134,4 +134,5 @@ extern, `do`-`let` and `let..else` residual binders, a field chain on a renamed 
 in an expression, a pattern, a type and a constraint, an extern through `prelude.X`, an instance
 using `prelude.Continue` beside a user `Continue`, a local named `prelude`. Conformance:
 `prelude.nosuch` rejected; a diagnostic about a renamed local shows its source name; an import
-alias named `prelude` wins; both limits in §5.
+alias, a top-level value and a local named `prelude` each win, the last two in a pattern too;
+both limits in §5.

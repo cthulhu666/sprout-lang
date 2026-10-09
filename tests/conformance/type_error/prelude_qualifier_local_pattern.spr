@@ -1,0 +1,13 @@
+module main
+
+# A local named `prelude` takes the qualifier in a pattern too, so `prelude.Nil`
+# there names nothing, as with a top-level value (spec §3.1).
+
+type Point = (x: Int, y: Int)
+
+fn size(prelude: Point, xs: List Int) -> Int =
+  match xs with
+  | prelude.Nil -> prelude.x
+  | _ -> 1
+
+fn main() -> Unit !{IO} = print(size(Point(x = 4, y = 5), []))
