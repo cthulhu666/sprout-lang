@@ -5,6 +5,7 @@ module stdlib.tui.widgets.scroll_view
 # The child is scroll-UNAWARE: it is handed a region the size it asked for,
 # shifted by the offset, and the screen's clip keeps it inside the viewport.
 
+import stdlib.math.int as imath
 import stdlib.tui.event as event
 import stdlib.tui.geometry as geometry
 import stdlib.tui.screen as scr
@@ -103,8 +104,8 @@ fn refilled(v: Sv m, child: Maybe (widget.Widget m)) -> Reply m =
 # spent before the window moves back — `KHome`/`KEnd` are the one-key recovery.
 fn advanced(p: Pos, d: Int) -> Pos =
   match p with
-  | FromTop n -> FromTop(geometry.imax(0, n + d))
-  | FromBottom k -> FromBottom(geometry.imax(0, k - d))
+  | FromTop n -> FromTop(imath.max(0, n + d))
+  | FromBottom k -> FromBottom(imath.max(0, k - d))
 
 # ── what shows ──────────────────────────────────────────────────────────────
 
@@ -114,15 +115,15 @@ fn advanced(p: Pos, d: Int) -> Pos =
 # squeezed to its own size, which is what a container would have done.
 fn extent_of(natural: Int, grow: widget.Grow, avail: Int) -> Int =
   match grow with
-  | widget.Fixed -> geometry.imax(natural, avail)
+  | widget.Fixed -> imath.max(natural, avail)
   | widget.Greedy -> avail
 
 fn resolved(p: Pos, extent: Int, avail: Int) -> Int =
-  let far = geometry.imax(0, extent - avail)
+  let far = imath.max(0, extent - avail)
   in
   match p with
-  | FromTop n -> geometry.imin(n, far)
-  | FromBottom k -> geometry.imax(0, far - k)
+  | FromTop n -> imath.min(n, far)
+  | FromBottom k -> imath.max(0, far - k)
 
 fn sv_render(v: Sv m, r: geometry.Region, s: scr.Screen) -> Unit !{IO} =
   painted(v, r, s, widget.measure(v.child, geometry.region_size(r)))

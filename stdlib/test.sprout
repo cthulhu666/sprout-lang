@@ -37,18 +37,18 @@ export fn new_state() -> TestState !{IO} =
     f <- ref_new(0)
     TestState(p, f)
 
-# Count one assertion as passed or failed, and print its line.
-fn record(state: TestState, passed: Bool, line: String) -> Unit !{IO} =
+# Count one assertion as passed or failed, and print it as PASS or FAIL.
+fn record(state: TestState, passed: Bool, label: String) -> Unit !{IO} =
   match state with
   | TestState pass_ref fail_ref ->
       do
         let counter = if passed then pass_ref else fail_ref
         n <- ref_read(counter)
         ref_write(counter, n + 1)
-        print(line)
+        print((if passed then "PASS: " else "FAIL: ") ++ label)
 
 export fn assert_true(state: TestState, label: String, condition: Bool) -> Unit !{IO} =
-  record(state, condition, (if condition then "PASS: " else "FAIL: ") ++ label)
+  record(state, condition, label)
 
 export fn assert_false(state: TestState, label: String, condition: Bool) -> Unit !{IO} =
   assert_true(state, label, condition == false)
@@ -58,8 +58,8 @@ export fn assert_false(state: TestState, label: String, condition: Bool) -> Unit
 # Mirrors: HUnit assertEqual :: (Eq a, Show a) => String -> a -> a -> Assertion
 #          Rust assert_eq! requiring PartialEq + Debug
 export fn assert_eq(state: TestState, label: String, actual: a, expected: a) -> Unit !{IO} where Eq a, ToString a =
-  if eq(actual, expected) then record(state, true, "PASS: " ++ label)
-  else record(state, false, "FAIL: " ++ label ++ " (expected " ++ to_string(expected) ++ ", got " ++ to_string(actual) ++ ")")
+  if eq(actual, expected) then record(state, true, label)
+  else record(state, false, label ++ " (expected " ++ to_string(expected) ++ ", got " ++ to_string(actual) ++ ")")
 
 # Prints pass/fail counts, then "SUITE PASSED" or "SUITE FAILED".
 # The justfile runner greps for "SUITE FAILED" to set the exit code.

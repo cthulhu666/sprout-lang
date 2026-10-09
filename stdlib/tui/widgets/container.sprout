@@ -4,6 +4,7 @@ module stdlib.tui.widgets.container
 # container serves every application while its children's states stay hidden
 # from it and from each other. Design: docs/tui-widget-set-v0.md §4.1-4.4.
 
+import stdlib.math.int as imath
 import stdlib.tui.event as event
 import stdlib.tui.geometry as geometry
 import stdlib.tui.layout as layout
@@ -169,12 +170,12 @@ fn ask_alongs(a: Arrange, slots: List (Slot m),
 
 fn ask_along(a: Arrange, s: Slot m, m: widget.Measured) -> Int =
   match s with
-  | SlotCells n _ -> geometry.imax(0, n)
+  | SlotCells n _ -> imath.max(0, n)
   | SlotFraction _ _ -> along(a, m.size)
   | SlotFit _ -> along(a, m.size)
 
 fn max_across(a: Arrange, ms: List widget.Measured) -> Int =
-  list_fold(\ (acc, m) -> geometry.imax(acc, across(a, m.size)), 0, ms)
+  list_fold(\ (acc, m) -> imath.max(acc, across(a, m.size)), 0, ms)
 
 fn any_greedy(pick: widget.Measured -> widget.Grow,
               ms: List widget.Measured) -> widget.Grow =

@@ -250,7 +250,7 @@ fn content_cases(state: TestState) -> Unit !{IO} = do
                   pressed(event.KEnter)]),
             "[Lit(1), Chose(1)]")
   # An index that survives into shorter content would name nothing, so it
-  # clamps — through `clamped_into`, the same rule `start` and every move use.
+  # clamps — the same rule `start` and every move use.
   assert_eq(state, "a selection past the end of new content clamps",
             says(items, contenting(),
                  [focus_on, pressed(event.KEnd), rows_msg(["p"]),
