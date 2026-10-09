@@ -63,11 +63,6 @@ fn lbind_type(b: LinBinder) -> types.Type =
 fn binder_names(bs: List LinBinder) -> List String =
   list_map(lbind_name, bs)
 
-fn app_binders(a: List LinBinder, b: List LinBinder) -> List LinBinder =
-  match a with
-  | Nil -> b
-  | Cons x rest -> Cons(x, app_binders(rest, b))
-
 # Result of a use-set computation: the linear bindings CONSUMED (each at most once
 # along any path) and those merely BORROWED, or a diagnostic. Two sets, not one:
 # a borrow neither discharges the once-only obligation nor collides with another
@@ -103,11 +98,6 @@ fn luse_remove(name: String, us: List LinUse) -> List LinUse =
   | Cons u rest ->
       if luse_name(u) == name then luse_remove(name, rest)
       else Cons(u, luse_remove(name, rest))
-
-fn str_member(x: String, xs: List String) -> Bool =
-  match xs with
-  | Nil -> false
-  | Cons y rest -> if y == x then true else str_member(x, rest)
 
 # A name present in `a` but absent from `b`, if any (drives divergence errors).
 fn first_missing(a: List LinUse, b: List LinUse) -> Maybe String =
@@ -239,7 +229,7 @@ fn pattern_linear_binders(pat: ast.Pattern, value_type: types.Type, env: Dict ty
 fn pattern_binders_list(pats: List ast.Pattern, tys: List types.Type, env: Dict types.Scheme) -> List LinBinder =
   match (pats, tys) with
   | (Cons p prest, Cons t trest) ->
-      app_binders(pattern_linear_binders(p, t, env), pattern_binders_list(prest, trest, env))
+      list_append(pattern_linear_binders(p, t, env), pattern_binders_list(prest, trest, env))
   | _ -> Nil
 
 # In a `x <- m` do-bind the bound variable's type is m's payload. The monad kind
@@ -275,11 +265,6 @@ fn last_arg_is_phantom(t: types.Type, env: Dict types.Scheme) -> Bool =
       param_is_phantom(head_type_name(t), list_length(app_spine_args(t)) - 1, env)
   | _ -> false
 
-fn app_names(a: List String, b: List String) -> List String =
-  match a with
-  | Nil -> b
-  | Cons x rest -> Cons(x, app_names(rest, b))
-
 # Each name in `binders` must appear in `consumed` (else it leaked); returns the
 # first unconsumed one.
 fn unconsumed_binder(binders: List LinBinder, consumed: List LinUse) -> Maybe LinBinder =
@@ -287,11 +272,6 @@ fn unconsumed_binder(binders: List LinBinder, consumed: List LinUse) -> Maybe Li
   | Nil -> Nothing
   | Cons b rest ->
       if luse_member(lbind_name(b), consumed) then unconsumed_binder(rest, consumed) else Just(b)
-
-fn remove_all(names: List String, us: List LinUse) -> List LinUse =
-  match names with
-  | Nil -> us
-  | Cons n rest -> remove_all(rest, luse_remove(n, us))
 
 # The lambda parameter that still defers the whole lambda: linear, and NOT taken
 # `borrowing` — a borrowing one is admissible (M4.4b), so only an owned one is a
@@ -572,11 +552,6 @@ fn comprehension_binder_subject(name: String) -> String =
 fn comprehension_capture_msg(name: String) -> String =
   "linear value '" ++ name ++ "' cannot be used inside a comprehension (a comprehension elaborates to a fold, and higher-order linearity is deferred: the step function runs once per element, so the compiler cannot yet prove '" ++ name ++ "' is consumed exactly once); consume it before the comprehension and use the result inside"
 
-fn app_uses(a: List LinUse, b: List LinUse) -> List LinUse =
-  match a with
-  | Nil -> b
-  | Cons x rest -> Cons(x, app_uses(rest, b))
-
 # The first use in `us` whose name also appears in `other`.
 fn first_shared(us: List LinUse, other: List LinUse) -> Maybe LinUse =
   match us with
@@ -605,7 +580,7 @@ fn seq2(ac: List LinUse, ab: List LinUse, bc: List LinUse, bb: List LinUse) -> L
 fn seq2_after_reuse(ac: List LinUse, ab: List LinUse, bc: List LinUse, bb: List LinUse) -> LinRes =
   match first_shared(bb, ac) with
   | Just u -> LinErr(luse_pos(u), after_consume_msg(luse_name(u)))
-  | Nothing -> LinOk(app_uses(ac, bc), app_uses(ab, bb))
+  | Nothing -> LinOk(list_append(ac, bc), list_append(ab, bb))
 
 # Two alternative branches. Consumed sets must be EQUAL (an obligation discharged
 # on one path must be discharged on all). Borrowed sets merely UNION: a borrow
@@ -620,7 +595,7 @@ fn alt_converge_rev(ac: List LinUse, ab: List LinUse, bc: List LinUse, bb: List 
                     at: source.SourcePos, try_pos: Maybe source.SourcePos) -> LinRes =
   match first_missing(bc, ac) with
   | Just n -> diverge_err(n, at, try_pos)
-  | Nothing -> LinOk(ac, app_uses(ab, bb))
+  | Nothing -> LinOk(ac, list_append(ab, bb))
 
 # --- the linear bindings in scope, split by mode ---
 #
@@ -638,9 +613,9 @@ fn scope_borrowed(sc: LinScope) -> List String =
   match sc with
   | LinScope _ b -> b
 
-fn scope_is_owned(name: String, sc: LinScope) -> Bool = str_member(name, scope_owned(sc))
+fn scope_is_owned(name: String, sc: LinScope) -> Bool = list_member(name, scope_owned(sc))
 
-fn scope_is_borrowed(name: String, sc: LinScope) -> Bool = str_member(name, scope_borrowed(sc))
+fn scope_is_borrowed(name: String, sc: LinScope) -> Bool = list_member(name, scope_borrowed(sc))
 
 fn scope_is_linear(name: String, sc: LinScope) -> Bool =
   scope_is_owned(name, sc) || scope_is_borrowed(name, sc)
@@ -656,23 +631,16 @@ fn scope_is_linear(name: String, sc: LinScope) -> Bool =
 # The lists model an environment, so every introduction must shadow, not append.
 # Regression: tests/conformance/type_error/borrow_shadowed_linear_binder.
 fn scope_shadow(names: List String, sc: LinScope) -> LinScope =
-  LinScope(str_remove_all(names, scope_owned(sc)), str_remove_all(names, scope_borrowed(sc)))
+  LinScope(without_names(names, scope_owned(sc)), without_names(names, scope_borrowed(sc)))
 
-fn str_remove_all(names: List String, xs: List String) -> List String =
-  match names with
-  | Nil -> xs
-  | Cons n rest -> str_remove_all(rest, str_remove(n, xs))
-
-fn str_remove(name: String, xs: List String) -> List String =
-  match xs with
-  | Nil -> Nil
-  | Cons y rest -> if y == name then str_remove(name, rest) else Cons(y, str_remove(name, rest))
+fn without_names(names: List String, xs: List String) -> List String =
+  list_filter(\ (y: String) -> ! list_member (y, names), xs)
 
 fn scope_add_owned(names: List String, sc: LinScope) -> LinScope =
   scope_add_owned_after(names, scope_shadow(names, sc))
 
 fn scope_add_owned_after(names: List String, sc: LinScope) -> LinScope =
-  LinScope(app_names(names, scope_owned(sc)), scope_borrowed(sc))
+  LinScope(list_append(names, scope_owned(sc)), scope_borrowed(sc))
 
 # --- the recursive walk ---
 
@@ -884,7 +852,7 @@ fn borrow_params_removed(bad: Maybe LinUse, bc: List LinUse, bb: List LinUse,
                          borrowed: List String) -> LinRes =
   match bad with
   | Just u -> LinErr(luse_pos(u), lambda_consumed_borrow_msg(luse_name(u)))
-  | Nothing -> LinOk(remove_all(borrowed, bc), remove_all(borrowed, bb))
+  | Nothing -> LinOk(luse_remove_all(borrowed, bc), luse_remove_all(borrowed, bb))
 
 # Consumed captures become the call's consumed set — the move. A capture that is
 # only BORROWED is refused: `with_scope` joins AFTER its body, so a spawned closure
@@ -906,23 +874,18 @@ fn borrow_params_removed(bad: Maybe LinUse, bc: List LinUse, bb: List LinUse,
 fn lin_once_captures(res: LinRes, p: source.SourcePos) -> LinRes =
   match res with
   | LinErr ep m -> LinErr(ep, m)
-  | LinOk bc bb -> lin_once_no_borrows(bc, luse_remove_all(names_of(bc), bb), p)
+  | LinOk bc bb -> lin_once_no_borrows(bc, luse_remove_all(list_map(luse_name, bc), bb), p)
 
 fn lin_once_no_borrows(bc: List LinUse, bb: List LinUse, p: source.SourcePos) -> LinRes =
   match bb with
   | Nil -> LinOk(bc, Nil)
   | [u | _] -> LinErr(p, once_borrow_capture_msg(luse_name(u)))
 
-fn names_of(uses: List LinUse) -> List String =
-  match uses with
-  | Nil -> Nil
-  | Cons u rest -> Cons(luse_name(u), names_of(rest))
-
 fn luse_remove_all(names: List String, uses: List LinUse) -> List LinUse =
   match uses with
   | Nil -> Nil
   | Cons u rest ->
-      if str_member(luse_name(u), names) then luse_remove_all(names, rest)
+      if list_member(luse_name(u), names) then luse_remove_all(names, rest)
       else Cons(u, luse_remove_all(names, rest))
 
 fn lin_borrow_arg(a: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) -> LinRes =
@@ -1048,7 +1011,7 @@ fn scope_add(names: List String, from_borrow: Bool, sc: LinScope) -> LinScope =
   else scope_add_owned(names, sc)
 
 fn scope_add_borrowed(names: List String, sc: LinScope) -> LinScope =
-  LinScope(scope_owned(sc), app_names(names, scope_borrowed(sc)))
+  LinScope(scope_owned(sc), list_append(names, scope_borrowed(sc)))
 
 fn scope_close(binders: List LinBinder, from_borrow: Bool, consumed: List LinUse,
                borrowed: List LinUse, leak_pos: source.SourcePos,
@@ -1060,15 +1023,15 @@ fn scope_close_borrowed(binders: List LinBinder, consumed: List LinUse,
                         borrowed: List LinUse) -> LinRes =
   match first_consumed_borrow(binder_names(binders), consumed) with
   | Just u -> LinErr(luse_pos(u), borrowed_binder_msg(luse_name(u)))
-  | Nothing -> LinOk(remove_all(binder_names(binders), consumed),
-                     remove_all(binder_names(binders), borrowed))
+  | Nothing -> LinOk(luse_remove_all(binder_names(binders), consumed),
+                     luse_remove_all(binder_names(binders), borrowed))
 
 fn scope_close_owned(binders: List LinBinder, consumed: List LinUse, borrowed: List LinUse,
                      leak_pos: source.SourcePos, env: Dict types.Scheme) -> LinRes =
   match unconsumed_binder(binders, consumed) with
   | Just leaked -> LinErr(leak_pos, leak_binder_msg(leaked, env))
-  | Nothing -> LinOk(remove_all(binder_names(binders), consumed),
-                     remove_all(binder_names(binders), borrowed))
+  | Nothing -> LinOk(luse_remove_all(binder_names(binders), consumed),
+                     luse_remove_all(binder_names(binders), borrowed))
 
 fn arm_pos(br: typed_ast.TypedMatchBranch) -> source.SourcePos =
   match br with
@@ -1176,10 +1139,10 @@ fn lin_do_bind_after(binders: List LinBinder, ec: List LinUse, eb: List LinUse,
                      restc: List LinUse, restb: List LinUse,
                      fallible: Bool) -> LinRes =
   match conditional_consume(fallible,
-                            remove_all(binder_names(binders), restc)) with
+                            luse_remove_all(binder_names(binders), restc)) with
   | Just u -> LinErr(luse_pos(u), after_fallible_msg(luse_name(u)))
-  | Nothing -> seq2(ec, eb, remove_all(binder_names(binders), restc),
-                    remove_all(binder_names(binders), restb))
+  | Nothing -> seq2(ec, eb, luse_remove_all(binder_names(binders), restc),
+                    luse_remove_all(binder_names(binders), restb))
 
 fn conditional_consume(sc_bind: Bool, outer: List LinUse) -> Maybe LinUse =
   if ! sc_bind then Nothing
@@ -1505,7 +1468,7 @@ fn lin_lambda_body(body: typed_ast.TypedExpr, p: source.SourcePos,
 fn lin_lambda_close(res: LinRes, p: source.SourcePos, from_comp: Bool) -> LinRes =
   match res with
   | LinErr ep m -> LinErr(ep, m)
-  | LinOk bc bb -> lin_lambda_captures(bc, luse_remove_all(names_of(bc), bb), p, from_comp)
+  | LinOk bc bb -> lin_lambda_captures(bc, luse_remove_all(list_map(luse_name, bc), bb), p, from_comp)
 
 fn lin_lambda_captures(consumed: List LinUse, borrowed: List LinUse,
                        p: source.SourcePos, from_comp: Bool) -> LinRes =
@@ -1550,8 +1513,6 @@ fn mode_is_once(m: ast.ParamMode) -> Bool =
 # can import it without a cycle.
 export fn ownership_of_param_mode(m: ast.ParamMode) -> types.Ownership =
   types.ownership_of_mode(mode_is_borrowing(m), mode_is_once(m))
-
-fn mode_ownership(m: ast.ParamMode) -> types.Ownership = ownership_of_param_mode(m)
 
 # True when any parameter carries a written modifier. Used to widen the M4.2
 # gate: a program with NO linear type at all must still reject a modifier on a
@@ -1617,11 +1578,11 @@ export fn method_mode_mismatch(params: List ast.Param, class_type: types.Type) -
   | Cons prm rest ->
       if ownership_agrees(param_mode(prm), class_type)
       then method_mode_mismatch(rest, spine_rest(class_type))
-      else Just(method_mismatch_for(param_name(prm), mode_ownership(param_mode(prm)),
+      else Just(method_mismatch_for(param_name(prm), ownership_of_param_mode(param_mode(prm)),
                                     spine_own(class_type)))
 
 fn ownership_agrees(m: ast.ParamMode, class_type: types.Type) -> Bool =
-  types.ownership_eq(mode_ownership(m), spine_own(class_type))
+  types.ownership_eq(ownership_of_param_mode(m), spine_own(class_type))
 
 fn method_mismatch_for(name: String, inst: types.Ownership, cls: types.Ownership) -> String =
   if types.ownership_is_once(inst) || types.ownership_is_once(cls)
@@ -1931,7 +1892,7 @@ fn param_obligations(owned: List LinBinder, borrowed: List String,
 fn first_consumed_borrow(borrowed: List String, consumed: List LinUse) -> Maybe LinUse =
   match consumed with
   | Nil -> Nothing
-  | Cons u rest -> if str_member(luse_name(u), borrowed) then Just(u) else first_consumed_borrow(borrowed, rest)
+  | Cons u rest -> if list_member(luse_name(u), borrowed) then Just(u) else first_consumed_borrow(borrowed, rest)
 
 fn unused_linear_param(owned: List LinBinder, consumed: List LinUse,
                        fn_pos: source.SourcePos, env: Dict types.Scheme) -> LinCheck =

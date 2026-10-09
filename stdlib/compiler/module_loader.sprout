@@ -199,18 +199,9 @@ export fn collect_imports(src: String) -> List ImportSpec =
 #   "stdlib.compiler.ast" + "/proj/stdlib" -> "/proj/stdlib/compiler/ast.sprout"
 #   "string"              + "/proj/stdlib" -> "/proj/stdlib/string.sprout"
 
-fn replace_dots_with_slash(s: String, i: Int, acc: String) -> String =
-  if i >= str_len(s) then acc
-  else
-    match str_char_at(s, i) with
-    | Nothing -> acc
-    | Just ch ->
-        if ch == '.' then replace_dots_with_slash(s, i + 1, str_concat(acc, "/"))
-        else replace_dots_with_slash(s, i + 1, str_concat(acc, char_to_string(ch)))
-
 export fn module_name_to_path(name: source.ModuleName, stdlib_root: String) -> Maybe String =
   if str_starts_with(n, "stdlib.") then
-    Just(str_concat(stdlib_root, str_concat("/", str_concat(replace_dots_with_slash(str_slice(n, 7, str_len(n)), 0, ""), ".sprout"))))
+    Just(stdlib_root ++ "/" ++ string.replace_all(".", "/", str_slice(n, 7, str_len(n))) ++ ".sprout")
   else if str_find(n, ".") == -1 then
     Just(str_concat(stdlib_root, str_concat("/", str_concat(n, ".sprout"))))
   else Nothing
@@ -233,4 +224,4 @@ fn try_extra_roots(name: source.ModuleName, extra_roots: List String) -> Maybe S
   match extra_roots with
   | Nil -> Nothing
   | [root | _] ->
-      Just(str_concat(root, str_concat("/", str_concat(replace_dots_with_slash(source.module_name_str(name), 0, ""), ".sprout"))))
+      Just(root ++ "/" ++ string.replace_all(".", "/", source.module_name_str(name)) ++ ".sprout")

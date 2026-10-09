@@ -96,15 +96,6 @@ fn mk_closure_cap_stores(caps: List String, raw_name: String, idx: Int) -> Strin
       "  store i64 " ++ cap ++ ", ptr " ++ raw_name ++ "$slot$" ++ int_to_string(idx) ++
       mk_closure_cap_stores(rest, raw_name, idx + 1)
 
-# Produce a comma-separated list of n "i64" tokens for a function-type signature.
-# E.g. replicate_i64_csv(1) = "i64", replicate_i64_csv(3) = "i64, i64, i64".
-# Used by IRApplyClosure to spell out the callee's type for opaque-pointer LLVM (15+).
-# O(n).
-fn replicate_i64_csv(n: Int) -> String =
-  if n == 0 then ""
-  else if n == 1 then "i64"
-  else "i64, " ++ replicate_i64_csv(n - 1)
-
 # Render a single IROp as one LLVM IR line (without trailing newline).
 # str_table maps raw-ptr names (e.g. "%t0") introduced by IRStrConst to
 # (global_name, byte_length) — populated by collect_str_consts before lowering.
@@ -188,7 +179,7 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int), c
       "  " ++ r ++ " = call i64 @sprout_alloc_tuple_blob(i64 " ++
         int_to_string(list_length(args) * 8) ++ ")\n" ++
       "  " ++ r ++ "$ptr = inttoptr i64 " ++ r ++ " to ptr\n" ++
-      lower_tuple_stores(r, args, 0)
+      lower_stores(r, "$s", args, 0)
   | sprout_ir.IRGetTupleField r t idx _ ->
       "  " ++ r ++ "$ptr = inttoptr i64 " ++ t ++ " to ptr\n" ++
       "  " ++ r ++ "$gep = getelementptr i64, ptr " ++ r ++ "$ptr, i64 " ++ int_to_string(idx) ++ "\n" ++
@@ -289,7 +280,7 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int), c
          "  " ++ r ++ " = call i64 @sprout_alloc_obj(i64 " ++ int_to_string(tag) ++
            ", i64 " ++ int_to_string(list_length(args)) ++ ")\n" ++
          "  " ++ r ++ "$ptr = inttoptr i64 " ++ r ++ " to ptr\n" ++
-         lower_ctor_stores(r, args, 0))
+         lower_stores(r, "$f", args, 0))
   | sprout_ir.IRMkClosure r code_fn arity caps ->
       # sz = (num_captures + 1) * 8 bytes; slot 0 holds the code pointer.
       # r is the i64 closure handle — directly the return of sprout_alloc_closure.
@@ -326,7 +317,7 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int), c
         int_to_string(list_length(args)) ++ ")\n" ++
       "  " ++ r ++ "$env_ptr = inttoptr i64 " ++ callee ++ " to ptr\n" ++
       "  " ++ r ++ "$code = load ptr, ptr " ++ r ++ "$env_ptr\n" ++
-      "  " ++ r ++ " = call i64 (" ++ replicate_i64_csv(1 + list_length(args)) ++ ") " ++
+      "  " ++ r ++ " = call i64 (" ++ i64_params(1 + list_length(args)) ++ ") " ++
         r ++ "$code(i64 " ++ callee ++ make_ctor_args_tail(args) ++ ")"
   | sprout_ir.IRLoadEnvSlot r env slot _ ->
       # kind field (FIX R4#7) is ignored at lowering — always emit load i64.
@@ -438,26 +429,17 @@ fn lower_tco_back_stores(stores: List (String, String, String)) -> String =
       "  store " ++ ty ++ " " ++ newv ++ ", ptr " ++ slot ++ "\n" ++
       lower_tco_back_stores(rest)
 
-# Emit per-field store instructions for an IRMakeCtor expansion.  Field `idx`
-# lands at word offset `idx`, matching the fixed offsets IRGetField reads back.
-fn lower_ctor_stores(obj_result: String, args: List String, idx: Int) -> String =
+# Emit per-field store instructions for an IRMakeCtor (`tag` "$f") or IRMakeTuple
+# (`tag` "$s") expansion.  Field `idx` lands at word offset `idx`, matching the
+# fixed offsets IRGetField / IRGetTupleField read back.
+fn lower_stores(result: String, tag: String, args: List String, idx: Int) -> String =
   match args with
   | Nil -> ""
   | Cons a rest ->
-      "  " ++ obj_result ++ "$f" ++ int_to_string(idx) ++ " = getelementptr i64, ptr " ++ obj_result ++ "$ptr, i64 " ++ int_to_string(idx) ++ "\n" ++
-      "  store i64 " ++ a ++ ", ptr " ++ obj_result ++ "$f" ++ int_to_string(idx) ++
+      "  " ++ result ++ tag ++ int_to_string(idx) ++ " = getelementptr i64, ptr " ++ result ++ "$ptr, i64 " ++ int_to_string(idx) ++ "\n" ++
+      "  store i64 " ++ a ++ ", ptr " ++ result ++ tag ++ int_to_string(idx) ++
       (if rest == Nil then "" else "\n") ++
-      lower_ctor_stores(obj_result, rest, idx + 1)
-
-# Emit per-element store instructions for an IRMakeTuple expansion.
-fn lower_tuple_stores(blob_result: String, args: List String, idx: Int) -> String =
-  match args with
-  | Nil -> ""
-  | Cons a rest ->
-      "  " ++ blob_result ++ "$s" ++ int_to_string(idx) ++ " = getelementptr i64, ptr " ++ blob_result ++ "$ptr, i64 " ++ int_to_string(idx) ++ "\n" ++
-      "  store i64 " ++ a ++ ", ptr " ++ blob_result ++ "$s" ++ int_to_string(idx) ++
-      (if rest == Nil then "" else "\n") ++
-      lower_tuple_stores(blob_result, rest, idx + 1)
+      lower_stores(result, tag, rest, idx + 1)
 
 # Build the comma-separated "i64 %p$a, i64 %p$b, ..." parameter list.
 # Param kinds (IRType) are intentionally ignored at lowering — they only
@@ -483,19 +465,16 @@ fn direct_call_attr(blocks: List sprout_ir.IRBlock) -> String =
   if blocks_have_tail_call(blocks) then " noinline" else ""
 
 fn blocks_have_tail_call(bs: List sprout_ir.IRBlock) -> Bool =
-  match bs with
-  | Nil -> false
-  | Cons b rest ->
-      match b with
-      | sprout_ir.IRBlock _ ops -> if ops_have_tail_call(ops) then true else blocks_have_tail_call(rest)
+  any(block_has_tail_call, bs)
 
-fn ops_have_tail_call(ops: List sprout_ir.IROp) -> Bool =
-  match ops with
-  | Nil -> false
-  | Cons op rest ->
-      match op with
-      | sprout_ir.IRTailCall _ _ _ _ -> true
-      | _ -> ops_have_tail_call(rest)
+fn block_has_tail_call(b: sprout_ir.IRBlock) -> Bool =
+  match b with
+  | sprout_ir.IRBlock _ ops -> any(is_tail_call_op, ops)
+
+fn is_tail_call_op(op: sprout_ir.IROp) -> Bool =
+  match op with
+  | sprout_ir.IRTailCall _ _ _ _ -> true
+  | _ -> false
 
 fn lower_fn(f: sprout_ir.IRFunction, fn_tables: Dict (Dict (String, Int))) -> String =
   match f with
@@ -841,14 +820,14 @@ export fn lower_globals(globals: List sprout_ir.IRGlobalDecl) -> String =
 # True if any IRGlobalDecl in the list uses GlobalZeroInit (a runtime-let).
 # Used by main_shim to decide whether to emit the init-fn call.
 export fn any_runtime_global(globals: List sprout_ir.IRGlobalDecl) -> Bool =
-  match globals with
-  | Nil -> false
-  | Cons g rest ->
-      match g with
-      | sprout_ir.IRGlobalDecl _ _ init_form ->
-          (match init_form with
-           | sprout_ir.GlobalZeroInit -> true
-           | _ -> any_runtime_global(rest))
+  any(is_runtime_global, globals)
+
+fn is_runtime_global(g: sprout_ir.IRGlobalDecl) -> Bool =
+  match g with
+  | sprout_ir.IRGlobalDecl _ _ init_form ->
+      match init_form with
+      | sprout_ir.GlobalZeroInit -> true
+      | _ -> false
 
 # String-constant collection pre-pass.  Walks every IRStrConst in document
 # order, allocates @.str.K names, and produces:

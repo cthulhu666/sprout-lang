@@ -1,0 +1,8 @@
+# An unknown class in a record deriving clause is reported at the deriving site.
+import stdlib.terminal as terminal
+
+type Point = (x: Int, y: Int) deriving (Eq, Show)
+
+fn main() -> Unit !{IO} =
+  do
+    terminal.write("unreachable")

@@ -363,7 +363,7 @@ Four new files under `stdlib/tui/widgets/` — `container`, `children`, `text`,
 decision gives that up deliberately, and §8 carries the migration it costs.
 
 These are the tree's first four-segment module names
-(`stdlib.tui.widgets.container`). `module_loader.replace_dots_with_slash` maps
+(`stdlib.tui.widgets.container`). `module_loader.module_name_to_path` maps
 every dot to a slash with no depth limit, so no loader change is needed —
 verified by reading `stdlib/compiler/module_loader.sprout:170-185`, and confirmed
 by the spike compiling. Nothing deeper than three segments exists today, so the

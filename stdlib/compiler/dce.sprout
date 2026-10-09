@@ -105,10 +105,9 @@ fn all_pure_fields(fields: List typed_ast.TypedRecordField) -> Bool =
 # Free-variable check — is `name` free anywhere in the given construct?
 # ---------------------------------------------------------------------------
 
-# The names a binder takes. One classifier serves both questions this file asks:
-# WHICH names a construct binds, for reachability below, and whether it binds a
-# GIVEN name, for the free-variable check here (guidelines §2a — reuse over a
-# sixth copy of "which names does this pattern bind?").
+# The names a binder takes. One set serves both questions this file asks: WHICH
+# names a construct binds, for reachability below, and whether it binds a GIVEN
+# name, for the free-variable check here.
 fn bind_param(p: ast.Param, bound: Set) -> Set =
   match p with
   | ast.Param n _ _ -> set_insert(n, bound)
@@ -119,27 +118,13 @@ fn bind_params(ps: List ast.Param, bound: Set) -> Set =
   | Cons p rest -> bind_params(rest, bind_param(p, bound))
 
 fn bind_pat(pat: ast.Pattern, bound: Set) -> Set =
-  match pat with
-  | ast.VarPattern n _ -> set_insert(n, bound)
-  | ast.WildcardPattern _ -> bound
-  | ast.IntPattern _ _ -> bound
-  | ast.BoolPattern _ _ -> bound
-  | ast.StringPattern _ _ -> bound
-  | ast.CharPattern _ _ -> bound
-  | ast.UnitPattern _ -> bound
-  | ast.TuplePattern pats _ -> bind_pats(pats, bound)
-  | ast.ConstructorPattern _ pats _ -> bind_pats(pats, bound)
-
-fn bind_pats(pats: List ast.Pattern, bound: Set) -> Set =
-  match pats with
-  | Nil -> bound
-  | Cons p rest -> bind_pats(rest, bind_pat(p, bound))
+  list_fold(\ (s, n) -> set_insert(n, s), bound, ast.pattern_names(pat))
 
 fn params_bind(name: String, ps: List ast.Param) -> Bool =
   set_member(name, bind_params(ps, set_empty()))
 
 fn pat_binds(name: String, pat: ast.Pattern) -> Bool =
-  set_member(name, bind_pat(pat, set_empty()))
+  list_member(name, ast.pattern_names(pat))
 
 fn is_free(name: String, e: typed_ast.TypedExpr) -> Bool =
   match e with

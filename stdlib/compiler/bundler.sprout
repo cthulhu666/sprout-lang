@@ -1260,11 +1260,7 @@ fn has_key(name: String, d: Dict String) -> Bool =
   | Just _ -> true
 
 fn first_unbound_name(names: List String, symbols: ModuleSymbols) -> Maybe String =
-  match names with
-  | Nil -> Nothing
-  | Cons name rest ->
-      if import_name_binds(name, symbols) then first_unbound_name(rest, symbols)
-      else Just(name)
+  find(\name -> ! import_name_binds (name, symbols), names)
 
 # A name carrying a parenthesised group reaches here because the import scanner
 # keeps the group rather than letting its `)` end the list
@@ -1305,12 +1301,7 @@ fn unknown_name_in_spec(spec: module_loader.ImportSpec, all_symbols: Dict Module
 
 fn first_unknown_import(specs: List module_loader.ImportSpec, all_symbols: Dict ModuleSymbols,
                         stdlib_root: String, extra_roots: List String, path: String) -> Maybe String =
-  match specs with
-  | Nil -> Nothing
-  | Cons spec rest ->
-      match unknown_name_in_spec(spec, all_symbols, stdlib_root, extra_roots, path) with
-      | Just msg -> Just(msg)
-      | Nothing -> first_unknown_import(rest, all_symbols, stdlib_root, extra_roots, path)
+  find_map(\spec -> unknown_name_in_spec(spec, all_symbols, stdlib_root, extra_roots, path), specs)
 
 fn module_import_error(mod: ParsedModule, all_symbols: Dict ModuleSymbols,
                        stdlib_root: String, extra_roots: List String) -> Maybe String =
@@ -1327,12 +1318,7 @@ fn module_import_error(mod: ParsedModule, all_symbols: Dict ModuleSymbols,
 
 fn validate_imports(modules: List ParsedModule, all_symbols: Dict ModuleSymbols,
                     stdlib_root: String, extra_roots: List String) -> Maybe String =
-  match modules with
-  | Nil -> Nothing
-  | Cons mod rest ->
-      match module_import_error(mod, all_symbols, stdlib_root, extra_roots) with
-      | Just msg -> Just(msg)
-      | Nothing -> validate_imports(rest, all_symbols, stdlib_root, extra_roots)
+  find_map(\mod -> module_import_error(mod, all_symbols, stdlib_root, extra_roots), modules)
 
 # ---------------------------------------------------------------------------
 # AST qualification
@@ -2095,14 +2081,11 @@ fn unresolved_in_maybe_type(mt: Maybe ast.TypeExpr, declared: Dict String) -> Ma
   | Just t -> unresolved_in_type(t, declared)
 
 fn unresolved_in_params(params: List ast.Param, declared: Dict String) -> Maybe String =
-  match params with
-  | Nil -> Nothing
-  | Cons p rest ->
-      match p with
-      | ast.Param _ anno _ ->
-          match unresolved_in_maybe_type(anno, declared) with
-          | Just n -> Just(n)
-          | Nothing -> unresolved_in_params(rest, declared)
+  find_map(unresolved_in_param(_, declared), params)
+
+fn unresolved_in_param(p: ast.Param, declared: Dict String) -> Maybe String =
+  match p with
+  | ast.Param _ anno _ -> unresolved_in_maybe_type(anno, declared)
 
 # A LAMBDA parameter may be annotated, and `LambdaExpr` is the only Expr node
 # that reaches a TypeExpr (every other one lives in a declaration head). So the
@@ -2143,35 +2126,24 @@ fn unresolved_in_expr(e: ast.Expr, declared: Dict String) -> Maybe String =
   | _ -> Nothing
 
 fn unresolved_in_comprehension_gens(gens: List ast.ComprehensionGen, declared: Dict String) -> Maybe String =
-  match gens with
-  | Nil -> Nothing
-  | Cons g rest ->
-      match g with
-      | ast.ComprehensionGen _ src guards ->
-          match unresolved_in_expr(src, declared) with
-          | Just n -> Just(n)
-          | Nothing ->
-              match unresolved_in_exprs(guards, declared) with
-              | Just n -> Just(n)
-              | Nothing -> unresolved_in_comprehension_gens(rest, declared)
+  find_map(unresolved_in_comprehension_gen(_, declared), gens)
+
+fn unresolved_in_comprehension_gen(g: ast.ComprehensionGen, declared: Dict String) -> Maybe String =
+  match g with
+  | ast.ComprehensionGen _ src guards ->
+      match unresolved_in_expr(src, declared) with
+      | Just n -> Just(n)
+      | Nothing -> unresolved_in_exprs(guards, declared)
 
 fn unresolved_in_exprs(es: List ast.Expr, declared: Dict String) -> Maybe String =
-  match es with
-  | Nil -> Nothing
-  | Cons e rest ->
-      match unresolved_in_expr(e, declared) with
-      | Just n -> Just(n)
-      | Nothing -> unresolved_in_exprs(rest, declared)
+  find_map(unresolved_in_expr(_, declared), es)
 
 fn unresolved_in_branches(bs: List ast.MatchBranch, declared: Dict String) -> Maybe String =
-  match bs with
-  | Nil -> Nothing
-  | Cons b rest ->
-      match b with
-      | ast.MatchBranch _ body ->
-          match unresolved_in_expr(body, declared) with
-          | Just n -> Just(n)
-          | Nothing -> unresolved_in_branches(rest, declared)
+  find_map(unresolved_in_branch(_, declared), bs)
+
+fn unresolved_in_branch(b: ast.MatchBranch, declared: Dict String) -> Maybe String =
+  match b with
+  | ast.MatchBranch _ body -> unresolved_in_expr(body, declared)
 
 fn unresolved_in_do_steps(steps: List ast.DoStep, declared: Dict String) -> Maybe String =
   match steps with
@@ -2188,35 +2160,27 @@ fn unresolved_in_step(e: ast.Expr, rest: List ast.DoStep, declared: Dict String)
   | Nothing -> unresolved_in_do_steps(rest, declared)
 
 fn unresolved_in_record_exprs(fields: List ast.RecordField, declared: Dict String) -> Maybe String =
-  match fields with
-  | Nil -> Nothing
-  | Cons f rest ->
-      match f with
-      | ast.RecordField _ e ->
-          match unresolved_in_expr(e, declared) with
-          | Just n -> Just(n)
-          | Nothing -> unresolved_in_record_exprs(rest, declared)
+  find_map(unresolved_in_record_expr(_, declared), fields)
+
+fn unresolved_in_record_expr(f: ast.RecordField, declared: Dict String) -> Maybe String =
+  match f with
+  | ast.RecordField _ e -> unresolved_in_expr(e, declared)
 
 fn unresolved_in_template_parts(parts: List ast.TemplateExprPart, declared: Dict String) -> Maybe String =
-  match parts with
-  | Nil -> Nothing
-  | Cons p rest ->
-      match p with
-      | ast.LitPart _ -> unresolved_in_template_parts(rest, declared)
-      | ast.InterpPart e ->
-          match unresolved_in_expr(e, declared) with
-          | Just n -> Just(n)
-          | Nothing -> unresolved_in_template_parts(rest, declared)
+  find_map(unresolved_in_template_part(_, declared), parts)
+
+fn unresolved_in_template_part(p: ast.TemplateExprPart, declared: Dict String) -> Maybe String =
+  match p with
+  | ast.LitPart _ -> Nothing
+  | ast.InterpPart e -> unresolved_in_expr(e, declared)
 
 fn unresolved_in_constraints(cs: List ast.TypeConstraint, declared: Dict String) -> Maybe String =
-  match cs with
-  | Nil -> Nothing
-  | Cons c rest ->
-      match c with
-      | ast.TypeConstraint class_name args ->
-          match unresolved_in_types(Cons(ast.TypeName(class_name), args), declared) with
-          | Just n -> Just(n)
-          | Nothing -> unresolved_in_constraints(rest, declared)
+  find_map(unresolved_in_constraint(_, declared), cs)
+
+fn unresolved_in_constraint(c: ast.TypeConstraint, declared: Dict String) -> Maybe String =
+  match c with
+  | ast.TypeConstraint class_name args ->
+      unresolved_in_types(Cons(ast.TypeName(class_name), args), declared)
 
 fn unresolved_in_signature(params: List ast.Param, ret: Maybe ast.TypeExpr, cs: List ast.TypeConstraint, declared: Dict String) -> Maybe String =
   match unresolved_in_params(params, declared) with
@@ -2227,50 +2191,35 @@ fn unresolved_in_signature(params: List ast.Param, ret: Maybe ast.TypeExpr, cs: 
       | Nothing -> unresolved_in_constraints(cs, declared)
 
 fn unresolved_in_class_methods(ms: List ast.ClassMethodSig, declared: Dict String) -> Maybe String =
-  match ms with
-  | Nil -> Nothing
-  | Cons m rest ->
-      match m with
-      | ast.ClassMethodSig _ params ret _ cs ->
-          match unresolved_in_signature(params, Just(ret), cs, declared) with
-          | Just n -> Just(n)
-          | Nothing -> unresolved_in_class_methods(rest, declared)
+  find_map(unresolved_in_class_method(_, declared), ms)
+
+fn unresolved_in_class_method(m: ast.ClassMethodSig, declared: Dict String) -> Maybe String =
+  match m with
+  | ast.ClassMethodSig _ params ret _ cs ->
+      unresolved_in_signature(params, Just(ret), cs, declared)
 
 fn unresolved_in_instance_methods(ms: List ast.InstanceMethodImpl, declared: Dict String) -> Maybe String =
-  match ms with
-  | Nil -> Nothing
-  | Cons m rest ->
-      match m with
-      | ast.InstanceMethodImpl _ params ret _ cs body ->
-          match unresolved_in_signature(params, ret, cs, declared) with
-          | Just n -> Just(n)
-          | Nothing ->
-              match unresolved_in_expr(body, declared) with
-              | Just n -> Just(n)
-              | Nothing -> unresolved_in_instance_methods(rest, declared)
+  find_map(unresolved_in_instance_method(_, declared), ms)
+
+fn unresolved_in_instance_method(m: ast.InstanceMethodImpl, declared: Dict String) -> Maybe String =
+  match m with
+  | ast.InstanceMethodImpl _ params ret _ cs body ->
+      match unresolved_in_signature(params, ret, cs, declared) with
+      | Just n -> Just(n)
+      | Nothing -> unresolved_in_expr(body, declared)
 
 fn unresolved_in_ctors(ctors: List ast.TypeConstructor, declared: Dict String) -> Maybe String =
-  match ctors with
-  | Nil -> Nothing
-  | Cons c rest ->
-      match c with
-      | ast.TypeConstructor _ args _ exist_constraints ->
-          match unresolved_in_types(args, declared) with
-          | Just n -> Just(n)
-          | Nothing ->
-              match unresolved_in_constraints(exist_constraints, declared) with
-              | Just n -> Just(n)
-              | Nothing -> unresolved_in_ctors(rest, declared)
+  find_map(unresolved_in_ctor(_, declared), ctors)
+
+fn unresolved_in_ctor(c: ast.TypeConstructor, declared: Dict String) -> Maybe String =
+  match c with
+  | ast.TypeConstructor _ args _ exist_constraints ->
+      match unresolved_in_types(args, declared) with
+      | Just n -> Just(n)
+      | Nothing -> unresolved_in_constraints(exist_constraints, declared)
 
 fn unresolved_in_record_fields(fields: List ast.RecordFieldDecl, declared: Dict String) -> Maybe String =
-  match fields with
-  | Nil -> Nothing
-  | Cons f rest ->
-      match f with
-      | ast.RecordFieldDecl _ t ->
-          match unresolved_in_type(t, declared) with
-          | Just n -> Just(n)
-          | Nothing -> unresolved_in_record_fields(rest, declared)
+  find_map(unresolved_in_type(_, declared), ast.record_field_type_exprs(fields))
 
 # The name of the declaration an unresolved type was written in, for the message.
 # Qualified, so it names the module too — the report's cost came from not knowing
@@ -2470,12 +2419,7 @@ fn validate_qualified_decl(decl: ast.Decl) -> Maybe String =
   | _ -> Nothing
 
 fn validate_qualified_decls(decls: List ast.Decl) -> Maybe(source.SourcePos, String) =
-  match decls with
-  | Nil -> Nothing
-  | Cons d rest ->
-      match validate_qualified_decl(d) with
-      | Just msg -> Just((ast.decl_pos(d), msg))
-      | Nothing -> validate_qualified_decls(rest)
+  find_map(\d -> map(\msg -> (ast.decl_pos(d), msg), validate_qualified_decl(d)), decls)
 
 # Imports are validated FIRST. A bad import makes the names it should have bound
 # resolve to something else or to nothing, so every later check reports a symptom

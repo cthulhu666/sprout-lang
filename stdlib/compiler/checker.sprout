@@ -124,9 +124,8 @@ fn enforce_effects(result: typed_ast.TypedResult, reports: List unifier.EffectRe
               typed_ast.TypedErr(unifier.effect_report_pos(first),
                 effect_multi_var_message(first))
 
-# The prelude has no list_filter; these are the local ones, as compile_driver
-# does for its own count. Order is source order, so each list reports its FIRST
-# offending declaration rather than an arbitrary one.
+# Order is source order, so each list reports its FIRST offending declaration
+# rather than an arbitrary one.
 #
 # Across the two lists, order is by RULE and not by position: every gap is
 # considered before any rule-9 violation, so a rule-9 error early in a file is
@@ -135,18 +134,10 @@ fn enforce_effects(result: typed_ast.TypedResult, reports: List unifier.EffectRe
 # — but it does mean "first offending declaration" holds within a rule, not
 # across the file.
 fn effect_gaps(reports: List unifier.EffectReport) -> List unifier.EffectReport =
-  match reports with
-  | Nil -> Nil
-  | Cons r rest ->
-      if unifier.effect_report_is_gap(r) then Cons(r, effect_gaps(rest))
-      else effect_gaps(rest)
+  list_filter(unifier.effect_report_is_gap, reports)
 
 fn effect_multi_vars(reports: List unifier.EffectReport) -> List unifier.EffectReport =
-  match reports with
-  | Nil -> Nil
-  | Cons r rest ->
-      if unifier.effect_report_is_multi_var(r) then Cons(r, effect_multi_vars(rest))
-      else effect_multi_vars(rest)
+  list_filter(unifier.effect_report_is_multi_var, reports)
 
 # Two causes, two messages. Both are rule-9 rejections, but the fix differs and a
 # single wording could only fit one of them.
@@ -175,23 +166,10 @@ fn effect_too_many_vars_message(r: unifier.EffectReport, vars: List String) -> S
 fn effect_row_message(r: unifier.EffectReport) -> String =
   types.effect_row_undefined_message(
     "`" ++ unifier.effect_report_name(r) ++ "`",
-    "!{" ++ join_effect_labels(unifier.effect_report_row_labels(r)) ++ "}")
+    "!{" ++ string.join(", ", unifier.effect_report_row_labels(r)) ++ "}")
 
 fn quoted_var_list(vars: List String) -> String =
-  match vars with
-  | Nil -> ""
-  | Cons v rest ->
-      match rest with
-      | Nil -> "`" ++ v ++ "`"
-      | _ -> "`" ++ v ++ "`, " ++ quoted_var_list(rest)
-
-fn join_effect_labels(labels: List String) -> String =
-  match labels with
-  | Nil -> ""
-  | Cons l rest ->
-      match rest with
-      | Nil -> l
-      | _ -> l ++ ", " ++ join_effect_labels(rest)
+  string.join(", ", list_map(\ (v: String) -> "`" ++ v ++ "`", vars))
 
 # Names every offending declaration, and shows the fix rather than describing it.
 # The first line carries the phrase the conformance fixtures pin.

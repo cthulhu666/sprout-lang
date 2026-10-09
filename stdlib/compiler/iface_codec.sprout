@@ -639,20 +639,13 @@ fn filter_dict_entries(entries: Vec (String, types.Scheme), i: Int, total: Int, 
 # - InstanceDecl → TInstanceDecl (infer replaces with typed version)
 #
 # These helpers do NOT import infer.sprout (avoids pulling in the large
-# inference engine).  Instead we duplicate two small local helpers:
+# inference engine).  Instead we duplicate one small local helper:
 #   typeexpr_to_type  — ast.TypeExpr → types.Type (same logic as infer.type_from_ast
 #                       but without the Dict local_vars for TVar lookup)
-#   strip_mod_prefix  — drop everything up to and including the last dot
 
 # ---------------------------------------------------------------------------
 # Local helpers (no dependency on infer.sprout)
 # ---------------------------------------------------------------------------
-
-# O(n) where n = chars in name; strips all module qualification.
-fn strip_mod_prefix(name: String) -> String =
-  if dot < 0 then name
-  else strip_mod_prefix(str_slice(name, dot + 1, str_len(name)))
-  where dot = str_find(name, ".")
 
 # Convert a surface ast.TypeExpr to types.Type. TypeName looks up local_vars
 # (type parameters listed in the enclosing decl) and falls back to TConst.
@@ -662,7 +655,7 @@ fn typeexpr_to_type_with_vars(te: ast.TypeExpr, local_vars: Dict types.Type) -> 
   | ast.TypeName name ->
       match dict_get(name, local_vars) with
       | Just t -> t
-      | Nothing -> types.TConst(types.type_id(strip_mod_prefix(name)))
+      | Nothing -> types.TConst(types.type_id(string.after_last_dot(name)))
   | ast.TypeApply base arg ->
       types.TApp(typeexpr_to_type_with_vars(base, local_vars),
                  typeexpr_to_type_with_vars(arg, local_vars))
@@ -714,7 +707,7 @@ fn constraint_head(type_args: List ast.TypeExpr) -> String =
 
 fn te_outermost_name(te: ast.TypeExpr) -> String =
   match te with
-  | ast.TypeName n -> strip_mod_prefix(n)
+  | ast.TypeName n -> string.after_last_dot(n)
   | ast.TypeApply base _ -> te_outermost_name(base)
   | _ -> "Unknown"
 
@@ -725,8 +718,8 @@ fn method_scheme(type_params: List String, params: List ast.Param, ret: ast.Type
                  constraints: List ast.TypeConstraint) -> types.Scheme =
   types.scheme_quantified(type_params,
     params_to_func_type(params, typeexpr_to_type_with_vars(ret, make_local_vars(type_params)),
-      make_local_vars(type_params), effect_from_maybe_labels(effects)),
-    effect_from_maybe_labels(effects), method_constraint_tokens(constraints))
+      make_local_vars(type_params), types.effect_from_labels(effects)),
+    types.effect_from_labels(effects), method_constraint_tokens(constraints))
 
 # Method-level constraint heads keyed by NAME, not position: this scheme
 # quantifies the CLASS params only, so a method's own variable has no index to
@@ -806,9 +799,6 @@ fn te_head_name(te: ast.TypeExpr) -> Maybe String =
   | ast.TypeArrow _ _ _ _ -> Nothing
   | ast.TypeThunk _ _ -> Nothing
   | ast.TypeEffect _ _ -> Nothing
-
-fn effect_from_maybe_labels(labels: Maybe (List String)) -> types.Effect =
-  types.effect_from_labels(labels)
 
 # Build a right-associating TFunc chain from a list of Params.
 #
@@ -991,7 +981,7 @@ fn collect_instance_infos_from_decls(decls: List typed_ast.TypedDecl, prefix: St
 fn build_instance_info(class_name: String, type_args: List ast.TypeExpr) -> InstanceInfo =
   InstanceInfo(class_name,
     head_type_from_args(type_args),
-    strip_mod_prefix(class_name) ++ "_" ++ constraint_head(type_args))
+    string.after_last_dot(class_name) ++ "_" ++ constraint_head(type_args))
 
 fn head_type_from_args(type_args: List ast.TypeExpr) -> types.Type =
   match type_args with

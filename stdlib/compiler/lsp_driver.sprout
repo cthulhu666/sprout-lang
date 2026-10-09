@@ -83,29 +83,24 @@ fn read_lsp_message() -> Maybe String !{IO} =
 # JSON-RPC 2.0 helpers
 
 fn make_result(id: json.Json, result: json.Json) -> json.Json =
-  json.JsonObject(
-    json.JsonObjectCons("jsonrpc", json.JsonString("2.0"),
-    json.JsonObjectCons("id", id,
-    json.JsonObjectCons("result", result,
-    json.JsonObjectNil))))
+  json.object_from_pairs([
+    ("jsonrpc", json.JsonString("2.0")),
+    ("id", id),
+    ("result", result)])
 
 fn make_error(id: json.Json, code: Int, msg: String) -> json.Json =
-  json.JsonObject(
-    json.JsonObjectCons("jsonrpc", json.JsonString("2.0"),
-    json.JsonObjectCons("id", id,
-    json.JsonObjectCons("error",
-      json.JsonObject(
-        json.JsonObjectCons("code", json.JsonInt(code),
-        json.JsonObjectCons("message", json.JsonString(msg),
-        json.JsonObjectNil))),
-    json.JsonObjectNil))))
+  json.object_from_pairs([
+    ("jsonrpc", json.JsonString("2.0")),
+    ("id", id),
+    ("error", json.object_from_pairs([
+      ("code", json.JsonInt(code)),
+      ("message", json.JsonString(msg))]))])
 
 fn make_notification(method: String, params: json.Json) -> json.Json =
-  json.JsonObject(
-    json.JsonObjectCons("jsonrpc", json.JsonString("2.0"),
-    json.JsonObjectCons("method", json.JsonString(method),
-    json.JsonObjectCons("params", params,
-    json.JsonObjectNil))))
+  json.object_from_pairs([
+    ("jsonrpc", json.JsonString("2.0")),
+    ("method", json.JsonString(method)),
+    ("params", params)])
 
 fn get_id(req: json.Json) -> json.Json =
   match json.json_get_field(req, "id") with
@@ -145,47 +140,37 @@ fn send_message(msg: json.Json) -> Unit !{IO} =
 # Diagnostics — public compiler.Diagnostic has (message, line, col)
 
 fn diag_range(line: Int, col: Int) -> json.Json =
-  json.JsonObject(
-    json.JsonObjectCons("start",
-      json.JsonObject(
-        json.JsonObjectCons("line", json.JsonInt(line),
-        json.JsonObjectCons("character", json.JsonInt(col),
-        json.JsonObjectNil))),
-    json.JsonObjectCons("end",
-      json.JsonObject(
-        json.JsonObjectCons("line", json.JsonInt(line),
-        json.JsonObjectCons("character", json.JsonInt(col),
-        json.JsonObjectNil))),
-    json.JsonObjectNil)))
+  json.object_from_pairs([
+    ("start", lsp_position(line, col)),
+    ("end", lsp_position(line, col))])
+
+fn lsp_position(line: Int, col: Int) -> json.Json =
+  json.object_from_pairs([
+    ("line", json.JsonInt(line)),
+    ("character", json.JsonInt(col))])
 
 fn diag_severity(d: compiler.Diagnostic) -> Int =
   match d with
   | compiler.DiagError _ _ -> 1
   | compiler.DiagWarning _ _ -> 2
 
+# LSP positions are 0-based; SourcePos line/column are 1-based.
 fn diag_to_lsp(d: compiler.Diagnostic) -> json.Json =
   match d with
-  # LSP positions are 0-based; SourcePos line/column are 1-based.
-  | compiler.DiagError pos msg ->
-      json.JsonObject(
-        json.JsonObjectCons("range", diag_range(pos.line - 1, pos.column - 1),
-        json.JsonObjectCons("severity", json.JsonInt(1),
-        json.JsonObjectCons("message", json.JsonString(msg),
-        json.JsonObjectNil))))
-  | compiler.DiagWarning pos msg ->
-      json.JsonObject(
-        json.JsonObjectCons("range", diag_range(pos.line - 1, pos.column - 1),
-        json.JsonObjectCons("severity", json.JsonInt(2),
-        json.JsonObjectCons("message", json.JsonString(msg),
-        json.JsonObjectNil))))
+  | compiler.DiagError pos msg -> diag_json(d, pos, msg)
+  | compiler.DiagWarning pos msg -> diag_json(d, pos, msg)
+
+fn diag_json(d: compiler.Diagnostic, pos: source.SourcePos, msg: String) -> json.Json =
+  json.object_from_pairs([
+    ("range", diag_range(pos.line - 1, pos.column - 1)),
+    ("severity", json.JsonInt(diag_severity(d))),
+    ("message", json.JsonString(msg))])
 
 fn push_diagnostics(uri: String, diags: List compiler.Diagnostic, state: LspState) -> Unit !{IO} =
   send_message(make_notification("textDocument/publishDiagnostics",
-    json.JsonObject(
-      json.JsonObjectCons("uri", json.JsonString(uri),
-      json.JsonObjectCons("diagnostics",
-        json.array_from_list(list_map(diag_to_lsp, diags)),
-      json.JsonObjectNil)))))
+    json.object_from_pairs([
+      ("uri", json.JsonString(uri)),
+      ("diagnostics", json.array_from_list(list_map(diag_to_lsp, diags)))])))
 
 fn check_and_push_diagnostics(uri: String, src: String, state: LspState) -> Unit !{IO} =
   do
@@ -248,13 +233,10 @@ export fn extract_word(line: String, col: Int) -> String =
 
 fn make_hover_result(id: json.Json, type_str: String) -> json.Json =
   make_result(id,
-    json.JsonObject(
-      json.JsonObjectCons("contents",
-        json.JsonObject(
-          json.JsonObjectCons("kind", json.JsonString("plaintext"),
-          json.JsonObjectCons("value", json.JsonString(type_str),
-          json.JsonObjectNil))),
-      json.JsonObjectNil)))
+    json.object_from_pairs([
+      ("contents", json.object_from_pairs([
+        ("kind", json.JsonString("plaintext")),
+        ("value", json.JsonString(type_str))]))]))
 
 # Hover types the word under the cursor by asking for its type IN THIS SOURCE, so a
 # name means what it means here — including names from package-root modules.
@@ -295,21 +277,17 @@ export fn extract_hover_params(params: json.Json) -> Maybe HoverParams =
 # fails the gate.
 
 let server_capabilities =
-  json.JsonObject(
-    json.JsonObjectCons("textDocumentSync", json.JsonInt(1),
-    json.JsonObjectCons("definitionProvider", json.JsonBool(true),
-    json.JsonObjectCons("hoverProvider", json.JsonBool(true),
-    json.JsonObjectNil))))
+  json.object_from_pairs([
+    ("textDocumentSync", json.JsonInt(1)),
+    ("definitionProvider", json.JsonBool(true)),
+    ("hoverProvider", json.JsonBool(true))])
 
 let initialize_result =
-  json.JsonObject(
-    json.JsonObjectCons("capabilities", server_capabilities,
-    json.JsonObjectCons("serverInfo",
-      json.JsonObject(
-        json.JsonObjectCons("name", json.JsonString("sproutd"),
-        json.JsonObjectCons("version", json.JsonString("0.1.0"),
-        json.JsonObjectNil))),
-    json.JsonObjectNil)))
+  json.object_from_pairs([
+    ("capabilities", server_capabilities),
+    ("serverInfo", json.object_from_pairs([
+      ("name", json.JsonString("sproutd")),
+      ("version", json.JsonString("0.1.0"))]))])
 
 # ---------------------------------------------------------------------------
 # Request / notification handlers
@@ -323,16 +301,10 @@ let initialize_result =
 # reports the roots it was actually given, which is the other thing that is easy to get
 # wrong and impossible to see from outside.
 fn log_message(text: String) -> Unit !{IO} =
-  send_message(
-    json.JsonObject(
-      json.JsonObjectCons("jsonrpc", json.JsonString("2.0"),
-      json.JsonObjectCons("method", json.JsonString("window/logMessage"),
-      json.JsonObjectCons("params",
-        json.JsonObject(
-          json.JsonObjectCons("type", json.JsonInt(3),
-          json.JsonObjectCons("message", json.JsonString(text),
-          json.JsonObjectNil))),
-      json.JsonObjectNil)))))
+  send_message(make_notification("window/logMessage",
+    json.object_from_pairs([
+      ("type", json.JsonInt(3)),
+      ("message", json.JsonString(text))])))
 
 fn roots_summary(roots: List String) -> String =
   match roots with
@@ -442,10 +414,9 @@ export fn path_for_uri(uri: String) -> String =
   | Nothing -> uri
 
 fn location_json(uri: String, line: Int, col: Int) -> json.Json =
-  json.JsonObject(
-    json.JsonObjectCons("uri", json.JsonString(uri),
-    json.JsonObjectCons("range", diag_range(line - 1, col - 1),
-    json.JsonObjectNil)))
+  json.object_from_pairs([
+    ("uri", json.JsonString(uri)),
+    ("range", diag_range(line - 1, col - 1))])
 
 # The module a qualified name's prefix refers to: an alias if one was bound, otherwise
 # the module's own name when it was imported without one.

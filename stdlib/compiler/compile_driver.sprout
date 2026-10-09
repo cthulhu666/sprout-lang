@@ -226,12 +226,9 @@ fn effect_report_is_var(r: unifier.EffectReport) -> Bool =
 # feed double-counted them.
 fn print_effect_summary(reports: List unifier.EffectReport) -> Unit !{IO} =
   print("effect-summary: " ++ int_to_string(list_length(reports)) ++ " declarations, "
-    ++ int_to_string(count_where(effect_report_is_gap, reports)) ++ " gaps (declared pure, inferred !{IO}), "
-    ++ int_to_string(count_where(unifier.effect_report_is_multi_var, reports)) ++ " singleton-rule violations, "
-    ++ int_to_string(count_where(effect_report_is_var, reports)) ++ " unresolved effect vars")
-
-fn count_where(p: unifier.EffectReport -> Bool, reports: List unifier.EffectReport) -> Int =
-  list_fold(\ (acc, r) -> if p(r) then acc + 1 else acc, 0, reports)
+    ++ int_to_string(count(effect_report_is_gap, reports)) ++ " gaps (declared pure, inferred !{IO}), "
+    ++ int_to_string(count(unifier.effect_report_is_multi_var, reports)) ++ " singleton-rule violations, "
+    ++ int_to_string(count(effect_report_is_var, reports)) ++ " unresolved effect vars")
 
 # ---------------------------------------------------------------------------
 # Phase: lower — typeclass dictionary-passing lowering

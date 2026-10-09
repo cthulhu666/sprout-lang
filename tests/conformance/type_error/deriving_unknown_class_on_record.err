@@ -1,0 +1,1 @@
+unknown class in deriving clause for `Point`: `Show` (v1 supports Eq, Ord, ToString, Enum)

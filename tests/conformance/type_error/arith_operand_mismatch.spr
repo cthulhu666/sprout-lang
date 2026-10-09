@@ -1,0 +1,4 @@
+# `+` accepts Int or Double. Two String operands agree with each other but fail
+# both attempts; the error comes from the last one tried.
+
+fn bad(x: String) -> String = x + x

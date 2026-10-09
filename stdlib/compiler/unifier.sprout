@@ -283,15 +283,7 @@ export fn record_effect_report(state: InferState, r: EffectReport) -> Unit !{IO}
 export fn effect_reports(state: InferState) -> List EffectReport !{IO} =
   do
     prior <- ref_read(state.effect_reports)
-    list_reverse_reports(prior)
-
-fn list_reverse_reports(xs: List EffectReport) -> List EffectReport =
-  list_reverse_reports_acc(xs, Nil)
-
-fn list_reverse_reports_acc(xs: List EffectReport, acc: List EffectReport) -> List EffectReport =
-  match xs with
-  | Nil -> acc
-  | Cons h t -> list_reverse_reports_acc(t, Cons(h, acc))
+    list_reverse(prior)
 
 export fn park_field_obligation(state: InferState, o: FieldObligation) -> Unit !{IO} =
   do
@@ -1051,10 +1043,10 @@ fn ctor_result_of(t: types.Type) -> types.Type =
 # a binder onto one captures it. Threaded whole rather than consumed with the
 # list — a target minted for the first binder must dodge the last one too.
 fn type_repl_domain(scheme: types.Scheme) -> List String =
-  types.list_union(types.scheme_vars(scheme), types.ftv(types.scheme_type(scheme)))
+  list_union(types.scheme_vars(scheme), types.ftv(types.scheme_type(scheme)))
 
 fn effect_repl_domain(scheme: types.Scheme) -> List String =
-  types.list_union(types.scheme_effect_vars(scheme),
+  list_union(types.scheme_effect_vars(scheme),
     types.scheme_effect_vars_of(types.scheme_type(scheme), types.scheme_effects(scheme)))
 
 fn build_ctor_pattern_repl(state: InferState, scheme: types.Scheme, result_ftv: List String, acc: Dict types.Type) -> Dict types.Type !{IO} =
@@ -1149,11 +1141,11 @@ export fn generalize(
 
 fn generalize_resolved(env_ftv: List String, resolved: types.Type, resolved_eff: types.Effect) -> types.Scheme =
   types.Scheme(
-    types.list_diff(types.ftv(resolved), env_ftv),
+    list_diff(types.ftv(resolved), env_ftv),
     # scheme_effect_vars_of, not ftv_effect: an inferred function value can carry
     # an effect variable in a parameter's arrow with nothing at the top level, and
     # a scheme that fails to name it leaves it globally shared after instantiation.
-    types.list_diff(types.scheme_effect_vars_of(resolved, resolved_eff), env_ftv),
+    list_diff(types.scheme_effect_vars_of(resolved, resolved_eff), env_ftv),
     resolved,
     resolved_eff,
     Nil
@@ -1164,4 +1156,4 @@ fn generalize_resolved(env_ftv: List String, resolved: types.Type, resolved_eff:
 # ---------------------------------------------------------------------------
 
 export fn ftv_env(env: Dict types.Scheme) -> List String =
-  vec_fold(\ (acc, s) -> types.list_union(types.ftv_scheme(s), acc), Nil, dict_values(env))
+  vec_fold(\ (acc, s) -> list_union(types.ftv_scheme(s), acc), Nil, dict_values(env))

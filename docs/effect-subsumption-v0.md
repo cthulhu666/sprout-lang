@@ -272,9 +272,9 @@ hole in one token**, and the resulting program is conformant against the amended
 (§10). A guarantee with a one-token opt-out is not a guarantee.
 
 **Mechanism.** Reject any label that is neither `IO` nor a lowercase effect variable, where
-the `Effect` is built. Two functions do that — `infer.effect_from_maybe_labels` for source
-annotations and `iface_codec`'s private copy for interface decode — and the rejection goes
-in both, or a hand-edited interface file smuggles what source cannot spell. Migration cost
+the `Effect` is built. One function does that — `types.effect_from_labels`, which both source
+annotations and interface decode call — so a hand-edited interface file cannot smuggle what
+source cannot spell. Migration cost
 is zero, already measured (header table). `docs/spec-v0.md` §7 rule 9 already admits only
 three annotation forms, so this rejects nothing rule 9 ever permitted — it closes the gap
 between the rule and its enforcement rather than adding a rule.
