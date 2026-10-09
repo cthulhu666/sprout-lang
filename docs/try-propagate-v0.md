@@ -455,7 +455,7 @@ four repos compiling with unchanged behaviour.
    fallible `<-` keeps working. A `<-` on a `try` is plain by construction: the parser makes it a
    pattern step, and `ast.do_pat_steps` rewrites it to a `match` on the operand with no synthetic
    `__t <- e`, so no `DoBindStep` and no `BindMode` ever see it. The IntelliJ plugin's keyword
-   list (§11) is a separate change in its own repository.
+   list (§11, `editors/intellij/`) is not yet updated; BACKLOG §7.6 tracks it.
    1a. Tooling: a compiler phase that lists every bind whose `BindMode` propagates (and whether
    its right-hand side is pure), every non-final `do` statement with a fallible value, and every
    effectful `do`-`let`, with file, line and column. Only the type checker knows any of them, and

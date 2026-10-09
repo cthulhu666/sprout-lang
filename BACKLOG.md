@@ -109,6 +109,12 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   experimental). Open: a phase that lists propagating binds (step 1a), codemod A adding `try` in
   all four repos, the flip that makes `<-` effect-only with the discard rule, codemod B, and `let`
   purity (steps 2–5 of `docs/try-propagate-v0.md` §8).
+- [ ] `P2` **`staircase-of-doom` counts each `try` as a nesting level.** The lint sees the match
+  a `try` elaborates to, so one user `match` whose arm holds two `let x = try …` lines reaches depth
+  3 and fails `just lint`; without the user match it lints clean. A `try` reads flat, like a
+  `let..else` chain. Decide whether a `try` link counts toward depth (`lint_rules.sprout`
+  `staircase-of-doom`; `match_then_tries` in `test_lint_rules.spr` pins it firing today). Must be
+  settled before codemod A, which would spread the finding across all four repos.
 - [~] `P2` **Binding-level type annotations `let x : T = e`.** Phase 1 (top-level `let`) landed
   2026-07-30. `docs/binding-annotations-v0.md`; spec §5.2 (experimental).
   - [ ] `P2` **Phase 2 — `let…in` and `where` annotations.** Those bindings are desugared and
@@ -1371,6 +1377,10 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
 
 ### 7.6) Editor integration — LSP server and the JetBrains plugin
 
+- [ ] `P3` **The IntelliJ lexer's keyword set lags `lexer.is_keyword`.** `SproutLexer.KEYWORDS`
+  says "Exactly `is_keyword` … Keep in lockstep" but lacks `for` and `try`, so neither highlights
+  as a keyword. Nothing checks the claim: add both, and a gate that diffs the two lists so the next
+  keyword cannot drift the same way.
 - [ ] `P1` **Wire the remaining three LSP features whose compiler API already exists:** formatting
   (`formatter.format_source`), document symbols (`symbol_inventory_in_source`), completion
   (`complete_in_state` — REPL-line-shaped, so it wants the document line up to the cursor). Each
@@ -2490,6 +2500,21 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
 
 **Tooling, diagnostics and cleanup**
 
+- [ ] `P3` **The rule for which `do` steps start a `try` is written four times.**
+  `ast.elaborate_steps_head`, `ast.elab_steps`, `infer.infer_do_steps` and `infer.steps_tail` each
+  match the same step shapes. `steps_tail` could walk `elaborate_steps_head`'s output instead; the
+  other three need their `DoPatStep` arms for exhaustiveness, so one `ast.elaborate_step` helper
+  did not remove them. A fifth copy would drift silently.
+- [ ] `P3` **`try` positions reach `linear_check` as fake `@try:` env entries.** `infer` writes a
+  Unit-typed name per `try` into the scheme env; every `match` in `linear_check.sprout` builds the
+  string key and looks it up, and the answer is threaded through five functions. Pass a set of
+  positions instead, or look up only on the error path.
+- [ ] `P4` **`infer.branch_mismatch`'s `TryBinding` arm is unreachable.** `arm_context` turns
+  every `TryBinding` into a `TryArm` before `branch_mismatch` sees it. Drop the arm, or make the
+  types say so.
+- [ ] `P4` **`line:col` formatting has four private copies.** `parser.pos_str`,
+  `lowering.pos_loc`, and two inline in `infer.sprout`'s `try` messages. Export one helper from
+  `source.sprout` and call it from all four.
 - [ ] `P3` **The fallible-bind error-type hint names `map_error`, which does not exist.** The
   diagnostic in `infer.sprout` ("Convert the error at the bind with `map_error`") and spec-v0.md
   §5.9 both name it; the prelude has `result_map_error`. Pinned by
