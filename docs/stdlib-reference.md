@@ -366,10 +366,13 @@ is what RFC 9113 §8.2.3 requires of anything handing the field to a generic ser
 - `cookie_pairs(req) -> Vec (String, String)` — every cookie, in order, duplicates kept
 - `request_cookie(name, req) -> Maybe String` — the first value for `name`
 
-Response cookies. A bad value cannot be built, so `with_cookie` and `render` never fail on a
-cookie; a `;`, CR or LF in a name, path or domain is rendered as a space
+Response cookies. A bad name or value cannot be built, so `with_cookie` and `render` never fail
+on a cookie; a `;`, CR or LF in a path or domain is rendered as a space
 ([http-request-params-v0.md](http-request-params-v0.md) §9):
 
+- `CookieName` — an RFC 2616 token, as RFC 6265 `cookie-name` requires; constructor hidden
+- `cookie_name(raw) -> Maybe CookieName` — `Nothing` for an empty name, a separator (`=`, `;`, `,`, space, …), control or non-ASCII byte
+- `cookie_name_text(name) -> String`
 - `CookieValue` — a value with RFC 6265 `cookie-octet` bytes only; constructor hidden
 - `cookie_value(raw) -> Maybe CookieValue` — `Nothing` for a space, comma, `"`, `;`, `\`, control or non-ASCII byte
 - `cookie_value_of_bytes(data) -> CookieValue` — standard base64; total

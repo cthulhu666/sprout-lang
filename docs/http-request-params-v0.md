@@ -233,8 +233,20 @@ is total: standard base64 uses only `cookie-octet` bytes. Encoding every value
 (ASP.NET) was rejected because §8 deliberately does not decode, so `a b` would come
 back as `a%20b`.
 
-Name, path and domain stay `String`: usually literals, never read back, and wrong on
-the first browser test. `render` makes them inert instead: `;` becomes a space, and
+The name is `CookieName`, the same shape: `cookie_name` admits an RFC 2616 token,
+which is what RFC 6265 `cookie-name` is and what Go checks. Go checks it in
+`SetCookie` and skips a failing cookie without a word; here a failing name cannot be
+built. No substitution can make a name safe, because any change names a different
+cookie, and `=` moves where the browser splits name from value: `role=admin` would set
+`role`. A first version made only `;` inert in a name, and review found that `=` got
+through and that `with_cookie`'s replace-by-name compared names the browser never
+saw. The cost is one `Maybe` per name, met once where the name is chosen; a literal
+cannot be checked at compile time, and a panicking constructor would violate
+`docs/guidelines.md` #2.
+
+Path and domain stay `String`, because for them a substitution does keep the meaning:
+a path with a space is an odd path, and a domain a browser rejects leaves the cookie
+host-only, which is narrower. `render` turns `;` into a space in them, and
 `sanitize_field` already does that to CR and LF. `SameSite=None` without `Secure` is
 documented, not refused, since browsers reject it visibly. A `Max-Age` ≤ 0 is sent as
 given; RFC 6265 §5.2.2 expires it.

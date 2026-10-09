@@ -675,10 +675,26 @@ export fn add_header(name: String, value: String, resp: HttpServerResponse) -> H
       HttpServerResponse(status, vec_append((string.to_lower_ascii(name), value), headers), cookies, body)
 
 # --- Response cookies -------------------------------------------------------
-# A cookie's value is the part a handler computes from data, and a `;` in it would add attributes
-# of the sender's choosing, so it is checked when made: `with_cookie` and `render` never fail on a
-# cookie. Name, path and domain are usually literals; `render` makes their structure inert instead.
+# A cookie's name and value are checked when made, so `with_cookie` and `render` never fail on a
+# cookie. No substitution can make either safe: a `;` in a value adds attributes, and any change
+# to a name names a different cookie. Path and domain are text; `render` turns `;` into a space.
 # Design: docs/http-request-params-v0.md §9.
+
+# A cookie name as sent: RFC 6265 `cookie-name`, an RFC 2616 token, so non-empty and no
+# separator (`=`, `;`, `,`, space, …), control or non-ASCII byte. Go's `SetCookie` skips any
+# other name without a word; here one cannot be built.
+export wrap CookieName = String deriving (Eq)
+
+export fn cookie_name(raw: String) -> Maybe CookieName =
+  if bytes.length(encoded) > 0 && all_bytes(token_byte, encoded, 0, bytes.length(encoded)) then
+    Just(CookieName(raw))
+  else Nothing
+where
+  encoded = bytes.from_string(raw)
+
+export fn cookie_name_text(name: CookieName) -> String =
+  match name with
+  | CookieName text -> text
 
 # A cookie value as sent: RFC 6265 §4.1.1 `cookie-octet` only, so no space, comma, `"`, `;`, `\`,
 # control or non-ASCII byte. Stricter than what `cookie_pairs` reads, and every value it admits
@@ -702,16 +718,16 @@ export type SameSite (..) =
   | SameSiteLax
   | SameSiteNone
 
-export type SetCookie (..) = (name: String, value: CookieValue, max_age_seconds: Maybe Int, path: Maybe String, domain: Maybe String, http_only: Bool, same_site: Maybe SameSite, secure: Bool)
+export type SetCookie (..) = (name: CookieName, value: CookieValue, max_age_seconds: Maybe Int, path: Maybe String, domain: Maybe String, http_only: Bool, same_site: Maybe SameSite, secure: Bool)
 
 # Defaults: `Path=/`, `HttpOnly`, `SameSite=Lax`, a session cookie (no `Max-Age`), no `Secure`.
-# Change one with record update: `cookie("sid", v) with (secure = true)`.
-export fn cookie(name: String, value: CookieValue) -> SetCookie =
+# Change one with record update: `cookie(sid, v) with (secure = true)`.
+export fn cookie(name: CookieName, value: CookieValue) -> SetCookie =
   SetCookie(name = name, value = value, max_age_seconds = Nothing, path = Just("/"), domain = Nothing, http_only = true, same_site = Just(SameSiteLax), secure = false)
 
 # Clears `name`: an empty value with `Max-Age=0`. A browser clears only the cookie with the same
-# path and domain, so set those as the cookie was set: `expired_cookie("sid") with (path = …)`.
-export fn expired_cookie(name: String) -> SetCookie =
+# path and domain, so set those as the cookie was set: `expired_cookie(sid) with (path = …)`.
+export fn expired_cookie(name: CookieName) -> SetCookie =
   cookie(name, CookieValue("")) with (max_age_seconds = Just(0))
 
 # Adds a `Set-Cookie` line, replacing an earlier `with_cookie` of the same name (RFC 6265 §4.1.1:
@@ -726,8 +742,18 @@ fn sent_cookie_octets(raw: String) -> Bool =
 where
   encoded = bytes.from_string(raw)
 
-# A `;` in a name, path or domain would start an attribute, so it becomes a space, as CR and LF do
-# in `sanitize_field`.
+let token_separators = bytes.from_string("()<>@,;:\\\"/[]?={}")
+
+# Visible ASCII less the RFC 2616 separators (space and tab are below 33).
+fn token_byte(byte: Int) -> Bool =
+  if byte < 33 || byte > 126 then false
+  else
+    match bytes.find(token_separators, bytes.singleton(byte)) with
+    | Just _ -> false
+    | Nothing -> true
+
+# A `;` in a path or domain would start an attribute, so it becomes a space, as CR and LF do in
+# `sanitize_field`.
 fn attribute_text(raw: String) -> String =
   string.replace_all(";", " ", raw)
 
@@ -740,7 +766,7 @@ fn same_site_text(same_site: SameSite) -> String =
 # Attributes in Go's order (`net/http.Cookie.String`).
 fn set_cookie_text(c: SetCookie) -> String =
   [
-    Just(`${attribute_text(c.name)}=${cookie_value_text(c.value)}`),
+    Just(`${cookie_name_text(c.name)}=${cookie_value_text(c.value)}`),
     map(\p -> `Path=${attribute_text(p)}`, c.path),
     map(\d -> `Domain=${attribute_text(d)}`, c.domain),
     map(\n -> `Max-Age=${int_to_string(n)}`, c.max_age_seconds),
