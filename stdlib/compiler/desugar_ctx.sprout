@@ -226,6 +226,7 @@ fn desugar_expr_no_ctx_i(expr: ast.Expr, fn_idx: Dict (List (Maybe String))) -> 
   | ast.LetBindExpr pat value els body pos ->
       ast.LetBindExpr(pat, desugar_expr_no_ctx_i(value, fn_idx), desugar_let_else_i(els, Nothing, fn_idx),
                       desugar_expr_no_ctx_i(body, fn_idx), pos)
+  | ast.TryExpr operand pos -> ast.TryExpr(desugar_expr_no_ctx_i(operand, fn_idx), pos)
   | _ -> expr
 
 fn desugar_comprehension_gens_i(gens: List ast.ComprehensionGen, fn_idx: Dict (List (Maybe String))) -> List ast.ComprehensionGen =
@@ -571,6 +572,7 @@ fn find_redundant_no_ctx(expr: ast.Expr, fn_idx: Dict (List (Maybe String))) -> 
       list_append(find_redundant_no_ctx(elem, fn_idx), find_redundant_comprehension_gens(gens, fn_idx))
   | ast.LetBindExpr pat value els body pos ->
       find_redundant_no_ctx(ast.let_bind_match(pat, value, els, body, pos), fn_idx)
+  | ast.TryExpr operand _ -> find_redundant_no_ctx(operand, fn_idx)
   | _ -> Nil
 
 fn find_redundant_comprehension_gens(gens: List ast.ComprehensionGen, fn_idx: Dict (List (Maybe String))) -> List source.SourcePos =

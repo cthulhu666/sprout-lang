@@ -1,0 +1,141 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
+import stdlib.compiler.compiler as compiler
+import stdlib.compiler.source as source
+import stdlib.string as string
+import stdlib.fs as fs
+import stdlib.env as env
+
+# Known-instance fusion (docs/try-propagate-v0.md §5): a `try` at a known instance
+# emits the IR of the hand-written `match`, with no `branch` call and no
+# `ControlFlow` box. Each pair differs only in how `f` is written.
+
+let result_try =
+  "fn check(i: Int) -> Result String Int = if i > 0 then Ok(i) else Err(\"neg\")\n" ++
+  "fn f(i: Int) -> Result String Int =\n" ++
+  "  let a = try check(i)\n" ++
+  "      b = try check(a + 1)\n" ++
+  "  in Ok(a + b)\n" ++
+  "fn main() -> Unit !{IO} = print(to_string(f(1)))\n"
+
+let result_hand =
+  "fn check(i: Int) -> Result String Int = if i > 0 then Ok(i) else Err(\"neg\")\n" ++
+  "fn f(i: Int) -> Result String Int =\n" ++
+  "  match check(i) with\n" ++
+  "  | Ok a ->\n" ++
+  "      match check(a + 1) with\n" ++
+  "      | Ok b -> Ok(a + b)\n" ++
+  "      | Err err -> Err(err)\n" ++
+  "  | Err err -> Err(err)\n" ++
+  "fn main() -> Unit !{IO} = print(to_string(f(1)))\n"
+
+let maybe_try =
+  "fn find(i: Int) -> Maybe Int = if i > 0 then Just(i) else Nothing\n" ++
+  "fn f(i: Int) -> Maybe Int =\n" ++
+  "  do\n" ++
+  "    let a = try find(i)\n" ++
+  "    let b = try find(a + 1)\n" ++
+  "    Just(a + b)\n" ++
+  "fn main() -> Unit !{IO} = print(to_string(f(1)))\n"
+
+let maybe_hand =
+  "fn find(i: Int) -> Maybe Int = if i > 0 then Just(i) else Nothing\n" ++
+  "fn f(i: Int) -> Maybe Int =\n" ++
+  "  match find(i) with\n" ++
+  "  | Just a ->\n" ++
+  "      match find(a + 1) with\n" ++
+  "      | Just b -> Just(a + b)\n" ++
+  "      | Nothing -> Nothing\n" ++
+  "  | Nothing -> Nothing\n" ++
+  "fn main() -> Unit !{IO} = print(to_string(f(1)))\n"
+
+let fetch_decls =
+  "type Fetch a =\n" ++
+  "  | Got a\n" ++
+  "  | NotFound\n" ++
+  "  | Failed String\n" ++
+  "instance Propagate Fetch\n" ++
+  "  fn branch(value: Fetch a) -> ControlFlow (Fetch b) a =\n" ++
+  "    match value with\n" ++
+  "    | Got v -> Continue(v)\n" ++
+  "    | NotFound -> Break(NotFound)\n" ++
+  "    | Failed why -> Break(Failed(why))\n" ++
+  "fn fetch(i: Int) -> Fetch Int = if i > 0 then Got(i) else NotFound\n" ++
+  "fn show(r: Fetch Int) -> String =\n" ++
+  "  match r with\n" ++
+  "  | Got v -> int_to_string(v)\n" ++
+  "  | NotFound -> \"none\"\n" ++
+  "  | Failed why -> why\n" ++
+  "fn main() -> Unit !{IO} = print(show(f(1)))\n"
+
+let fetch_try =
+  fetch_decls ++
+  "fn f(i: Int) -> Fetch Int =\n" ++
+  "  let a = try fetch(i)\n" ++
+  "  in Got(a * 2)\n"
+
+let fetch_hand =
+  fetch_decls ++
+  "fn f(i: Int) -> Fetch Int =\n" ++
+  "  match fetch(i) with\n" ++
+  "  | Got a -> Got(a * 2)\n" ++
+  "  | NotFound -> NotFound\n" ++
+  "  | Failed why -> Failed(why)\n"
+
+fn ir_text(r: compiler.IrFullResult) -> String =
+  match r with
+  | compiler.IrFullOk ir -> ir
+  | compiler.IrFullFail _ -> ""
+
+# `f`'s define block, from its header to the closing brace.
+fn define_of_f(ir: String) -> String =
+  let Just(_, body) = string.split_once(ir, "define i64 @$entry.f(") else ""
+      Just(text, _) = string.split_once(body, "\n}\n") else ""
+  in text
+
+# SSA values and labels renamed to `_`, so two blocks compare by shape only.
+fn normalize(block: String) -> String =
+  string.join("\n", list_map(normalize_line, string.split(block, "\n")))
+
+fn normalize_line(line: String) -> String =
+  if string.ends_with(line, ":") && ! string.contains (line, " ") then "_:"
+  else
+    match string.split(line, "%") with
+    | [] -> line
+    | [first | rest] -> first ++ string.join("", list_map(rename_value, rest))
+
+fn rename_value(piece: String) -> String =
+  "%_" ++ string.drop(piece, ident_run(piece, 0))
+
+fn ident_run(s: String, i: Int) -> Int =
+  match string.char_at(s, i) with
+  | Just c -> if string.is_ascii_alnum(c) || c == '_' || c == '$' || c == '.' then ident_run(s, i + 1) else i
+  | Nothing -> i
+
+fn compile(stdlib_root: String, name: String, src: String) -> String !{IO} =
+  do
+    let path = "/tmp/sprout_test_try_fusion_" ++ name ++ ".sprout"
+    fs.write_text(path, src)
+    r <- compiler.compile_full_ir(source.FilePath(path), source.StdlibRoot(stdlib_root))
+    define_of_f(ir_text(r))
+
+fn check_pair(state: TestState, stdlib_root: String, name: String, try_src: String, hand_src: String) -> Unit !{IO} =
+  do
+    fused <- compile(stdlib_root, name ++ "_try", try_src)
+    hand <- compile(stdlib_root, name ++ "_hand", hand_src)
+    assert_true(state, name ++ ": try compiles", fused != "")
+    assert_true(state, name ++ ": hand-written compiles", hand != "")
+    assert_true(state, name ++ ": no branch call",! string.contains (fused, "branch"))
+    assert_eq(state, name ++ ": same IR as the hand-written match", normalize(fused), normalize(hand))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    match env.get("SPROUT_STDLIB_ROOT") with
+    | Nothing -> ()
+    | Just stdlib_root ->
+        do
+          check_pair(state, stdlib_root, "result", result_try, result_hand)
+          check_pair(state, stdlib_root, "maybe", maybe_try, maybe_hand)
+          check_pair(state, stdlib_root, "user instance", fetch_try, fetch_hand)
+    summary(state)

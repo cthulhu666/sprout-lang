@@ -45,9 +45,26 @@ fn step_shape(s: ast.DoStep) -> String =
   match s with
   | ast.DoBindStep _ _ -> "bind"
   | ast.DoLetStep _ _ -> "let"
+  | ast.DoExprStep (ast.TryExpr _ _) -> "try"
   | ast.DoExprStep _ -> "expr"
-  | ast.DoPatStep ast.ArrowBind _ _ els _ -> "pat-bind" ++ else_suffix(els)
-  | ast.DoPatStep ast.LetBind _ _ els _ -> "pat-let" ++ else_suffix(els)
+  | ast.DoPatStep ast.ArrowBind _ v els _ -> "pat-bind" ++ try_suffix(v) ++ else_suffix(els)
+  | ast.DoPatStep ast.LetBind _ v els _ -> "pat-let" ++ try_suffix(v) ++ else_suffix(els)
+
+fn try_suffix(v: ast.Expr) -> String = if ast.starts_with_try(v) then "+try" else ""
+
+# The first `let` binding's right-hand side, down its postfix chain to a `try`.
+fn first_rhs_shape(src: String) -> String =
+  let Just(ast.LetBindExpr _ rhs _ _ _) = first_fn_body(src) else "not-let"
+  in rhs_shape(rhs)
+
+fn rhs_shape(e: ast.Expr) -> String =
+  match e with
+  | ast.TryExpr operand _ -> "try " ++ rhs_shape(operand)
+  | ast.GetFieldExpr base _ _ -> "field(" ++ rhs_shape(base) ++ ")"
+  | ast.RecordUpdateExpr base _ _ -> "update(" ++ rhs_shape(base) ++ ")"
+  | ast.CallExpr _ _ _ -> "call"
+  | ast.VarExpr _ _ -> "var"
+  | _ -> "other"
 
 fn else_suffix(els: Maybe ast.LetElse) -> String =
   match els with
@@ -536,5 +553,46 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "do: a pattern step as the last step parses",
       first_fn_steps("fn f() -> Int =\n  do\n    print(1)\n    let Just n = m else 0"),
       ["expr", "pat-let+else"])
+
+    # `try` (spec §5.9): at the head of a right-hand side, or a `do` statement.
+    assert_eq(state, "try: a call operand",
+      first_rhs_shape("fn f() -> Maybe Int =\n  let x = try g(1)\n  in Just(x)"), "try call")
+    assert_eq(state, "try: a name operand",
+      first_rhs_shape("fn f(m: Maybe Int) -> Maybe Int =\n  let x = try m\n  in Just(x)"), "try var")
+    assert_eq(state, "try: a field operand",
+      first_rhs_shape("fn f() -> Maybe Int =\n  let x = try g().inner\n  in Just(x)"), "try field(call)")
+    assert_eq(state, "try: a parenthesised operand",
+      first_rhs_shape("fn f(s: String) -> Maybe Int =\n  let x = try (s |> g)\n  in Just(x)"), "try call")
+    assert_eq(state, "try: parenthesised, then a field",
+      first_rhs_shape("fn f() -> Maybe Int =\n  let x = (try g()).y\n  in Just(x)"), "field(try call)")
+    assert_eq(state, "try: parenthesised, then a record update",
+      first_rhs_shape("fn f() -> Maybe P =\n  let p = (try g()) with (x = 1)\n  in Just(p)"), "update(try call)")
+    assert_true(state, "try: parenthesised, then let..else",
+      parse_ok("fn f() -> Maybe Int =\n  let Just y = (try g()) else Nothing\n  in Just(y)"))
+    assert_true(state, "try: in a where binding",
+      parse_ok("fn f() -> Maybe Int = Just(x)\n  where x = try g()"))
+    assert_eq(state, "do: try binds and a try statement",
+      first_fn_steps("fn f() -> Maybe Int =\n  do\n    x <- try g()\n    let y = try h(x)\n    try k(y)\n    Just(y)"),
+      ["pat-bind+try", "pat-let+try", "try", "expr"])
+    assert_true(state, "try: an infix operand needs parentheses",
+      parse_fails("fn f() -> Maybe Int =\n  let x = try g() + 1\n  in Just(x)"))
+    assert_true(state, "try: a pipe operand needs parentheses",
+      parse_fails("fn f(s: String) -> Maybe Int =\n  let x = try s |> g\n  in Just(x)"))
+    assert_true(state, "try: a negated operand needs parentheses",
+      parse_fails("fn f(n: Int) -> Maybe Int =\n  let x = try -n\n  in Just(x)"))
+    assert_true(state, "try: a lambda operand needs parentheses",
+      parse_fails("fn f() -> Maybe Int =\n  let x = try \\y -> y\n  in Just(x)"))
+    assert_true(state, "try: an if operand needs parentheses",
+      parse_fails("fn f(c: Bool) -> Maybe Int =\n  let x = try if c then g() else h()\n  in Just(x)"))
+    assert_true(state, "try: else after try is reserved",
+      parse_fails("fn f() -> Maybe Int =\n  let Just y = try g() else Nothing\n  in Just(y)"))
+    assert_true(state, "try: with after try is reserved",
+      parse_fails("fn f() -> Maybe P =\n  let p = try g() with (x = 1)\n  in Just(p)"))
+    assert_true(state, "try: not inside an argument",
+      parse_fails("fn f() -> Maybe Int = Just(try g())"))
+    assert_true(state, "try: not in a top-level let",
+      parse_fails("let x = try g()\n"))
+    assert_true(state, "try: is a keyword",
+      parse_fails("fn f() -> Int =\n  let try = 1\n  in try"))
 
     summary(state)

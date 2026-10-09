@@ -1,0 +1,8 @@
+fn check(n: Int) -> Result String Int = if n > 0 then Ok(n) else Err("negative")
+
+fn g(n: Int) -> Result String Int =
+  do
+    let m = n + 1
+    try check(m)
+
+fn main() -> Unit !{IO} = print(g(1))

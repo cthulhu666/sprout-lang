@@ -1720,6 +1720,7 @@ fn qualify_expr(ctx: ResolveCtx, scope: List String, expr: ast.Expr) -> ast.Expr
       ast.LetBindExpr(qualify_pattern(ctx, scope, pat), qualify_expr(ctx, scope, value),
                       qualify_let_else(ctx, scope, els),
                       qualify_expr(ctx, list_append(scope, ast.pattern_names(pat)), body), pos)
+  | ast.TryExpr operand pos -> ast.TryExpr(qualify_expr(ctx, scope, operand), pos)
 
 # Each generator's pattern scopes over its own guards, every later generator's
 # source and guards, and (via the returned final scope) the element expr.
@@ -2138,6 +2139,7 @@ fn unresolved_in_expr(e: ast.Expr, declared: Dict String) -> Maybe String =
       | Nothing -> unresolved_in_comprehension_gens(gens, declared)
   | ast.LetBindExpr pat value els body pos ->
       unresolved_in_expr(ast.let_bind_match(pat, value, els, body, pos), declared)
+  | ast.TryExpr operand _ -> unresolved_in_expr(operand, declared)
   | _ -> Nothing
 
 fn unresolved_in_comprehension_gens(gens: List ast.ComprehensionGen, declared: Dict String) -> Maybe String =

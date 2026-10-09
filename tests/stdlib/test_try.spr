@@ -1,0 +1,282 @@
+import stdlib.test (check_eq, run_suite)
+
+# `try e` passes a failure on to the enclosing block and binds the success
+# (docs/try-propagate-v0.md §4.2).
+
+fn parse_digit(s: String) -> Maybe Int =
+  match s with
+  | "0" -> Just(0)
+  | "1" -> Just(1)
+  | "2" -> Just(2)
+  | _ -> Nothing
+
+fn check_pos(n: Int) -> Result String Int = if n > 0 then Ok(n) else Err(`not positive: ${n}`)
+
+# Pure `let..in`, both families.
+fn add_digits(a: String, b: String) -> Maybe Int =
+  let x = try parse_digit(a)
+      y = try parse_digit(b)
+  in Just(x + y)
+
+fn sum_pos(a: Int, b: Int) -> Result String Int =
+  let x = try check_pos(a)
+      y = try check_pos(b)
+  in Ok(x + y)
+
+# A `where` binding: the failure becomes the function's value.
+fn doubled(s: String) -> Maybe Int = Just(d * 2)
+  where d = try parse_digit(s)
+
+# Patterns left of `try`: a tuple, and a refutable one with `else` on the
+# parenthesised form (§4.4).
+fn pair_of(n: Int) -> Result String (Int, Int) = if n > 0 then Ok((n, n + 1)) else Err("no pair")
+
+fn pair_sum(n: Int) -> Result String Int =
+  let (a, b) = try pair_of(n)
+  in Ok(a + b)
+
+fn nested(m: Result String (Maybe Int)) -> Result String Int =
+  let Just v = (try m) else Err("inner nothing")
+  in Ok(v)
+
+# A record update on the unwrapped value needs parentheses (§4.4).
+type Point = (x: Int, y: Int) deriving (Eq, ToString)
+
+fn load_point(ok: Bool) -> Maybe Point = if ok then Just(Point(x = 1, y = 2)) else Nothing
+
+fn moved(ok: Bool) -> Maybe Point =
+  let p = (try load_point(ok)) with (x = 10)
+  in Just(p)
+
+fn point_y(ok: Bool) -> Maybe Int =
+  let y = (try load_point(ok)).y
+  in Just(y)
+
+fn adder(ok: Bool) -> Maybe (Int -> Int) = if ok then Just(\n -> n + 1) else Nothing
+
+fn applied(ok: Bool) -> Maybe Int =
+  let n = (try adder(ok))(41)
+  in Just(n)
+
+# Operands: a variable, a field, a constructor call, a parenthesised pipe.
+type Holder = (inner: Maybe Int)
+
+fn from_var(m: Maybe Int) -> Maybe Int =
+  let v = try m
+  in Just(v + 1)
+
+fn from_field(h: Holder) -> Maybe Int =
+  let v = try h.inner
+  in Just(v + 1)
+
+fn from_ctor(n: Int) -> Maybe Int =
+  let v = try Just(n)
+  in Just(v + 1)
+
+fn from_pipe(s: String) -> Maybe Int =
+  let v = try (s |> parse_digit)
+  in Just(v + 1)
+
+# A failure in a nested block ends only that block (§9 Q2).
+fn inner_or_zero(s: String) -> Int =
+  let inner = (let v = try parse_digit(s) in Just(v))
+  in maybe_with_default(0, inner)
+
+# A user type with two kinds of failure, through its own instance.
+type Fetch a =
+  | Got a
+  | NotFound
+  | Failed String
+
+instance Propagate Fetch
+  fn branch(value: Fetch a) -> ControlFlow (Fetch b) a =
+    match value with
+    | Got v -> Continue(v)
+    | NotFound -> Break(NotFound)
+    | Failed why -> Break(Failed(why))
+
+fn fetch(n: Int) -> Fetch Int =
+  if n > 0 then Got(n) else if n == 0 then NotFound else Failed("negative")
+
+fn fetch_text(f: Fetch Int) -> String =
+  match f with
+  | Got v -> `got ${v}`
+  | NotFound -> "not found"
+  | Failed why -> `failed: ${why}`
+
+fn fetch_both(a: Int, b: Int) -> Fetch Int =
+  let x = try fetch(a)
+      y = try fetch(b)
+  in Got(x + y)
+
+# An instance whose failure arm is a wildcard after the success arm.
+type Slot a =
+  | Filled a
+  | Blank
+  | Broken
+
+instance Propagate Slot
+  fn branch(value: Slot a) -> ControlFlow (Slot b) a =
+    match value with
+    | Filled v -> Continue(v)
+    | _ -> Break(Blank)
+
+fn slot_text(s: Slot Int) -> String =
+  match s with
+  | Filled v -> `filled ${v}`
+  | Blank -> "blank"
+  | Broken -> "broken"
+
+fn slot_plus(s: Slot Int) -> Slot Int =
+  let v = try s
+  in Filled(v + 1)
+
+# An instance whose `branch` is not one `match` is called, not fused.
+type Gate a =
+  | Open a
+  | Shut
+
+fn gate_flow(g: Gate a) -> ControlFlow (Gate b) a =
+  match g with
+  | Open v -> Continue(v)
+  | Shut -> Break(Shut)
+
+instance Propagate Gate
+  fn branch(value: Gate a) -> ControlFlow (Gate b) a = gate_flow(value)
+
+fn gate_text(g: Gate Int) -> String =
+  match g with
+  | Open v -> `open ${v}`
+  | Shut -> "shut"
+
+fn gate_plus(g: Gate Int) -> Gate Int =
+  let v = try g
+  in Open(v + 1)
+
+# An operand whose type is known only from the block's.
+fn late_head() -> Maybe Int =
+  let v = try pure(3)
+  in Just(v + 1)
+
+# Generic code: a dictionary call, and `Applicative` to build the success (§4.6).
+fn bump(x: t Int) -> t Int where Propagate t, Applicative t =
+  let v = try x
+  in pure(v + 1)
+
+# `do`: `<-` runs the effect once, then branches; a bare `try e` passes a failure
+# on and drops the success.
+fn logged(log: Ref (List String), name: String, r: Result String Int) -> Result String Int !{IO} =
+  do
+    prior <- ref_read(log)
+    ref_write(log, prior ++ [name])
+    r
+
+fn run_steps(log: Ref (List String), first: Result String Int, second: Result String Int) ->
+    Result String Int !{IO} =
+  do
+    a <- try logged(log, "a", first)
+    try logged(log, "b", second)
+    let c = try check_pos(a)
+    try logged(log, "c", Ok(c))
+    Ok(a + c)
+
+fn steps_log(first: Result String Int, second: Result String Int) ->
+    (Result String Int, List String) !{IO} =
+  do
+    log <- ref_new([])
+    let r = run_steps(log, first, second)
+    entries <- ref_read(log)
+    (r, entries)
+
+# `x <- try e` binds the success whole, never unwrapping it again (§8 step 1).
+fn inner_maybe(log: Ref (List String), r: Result String (Maybe Int)) ->
+    Result String (Maybe Int) !{IO} =
+  do
+    prior <- ref_read(log)
+    ref_write(log, prior ++ ["inner"])
+    r
+
+fn keep_inner(r: Result String (Maybe Int)) -> Result String Int !{IO} =
+  do
+    log <- ref_new([])
+    m <- try inner_maybe(log, r)
+    match m with
+    | Just v -> Ok(v)
+    | Nothing -> Ok(-1)
+
+# A multi-binding `do`-`let`: a failure skips the later bindings.
+fn group(a: String, b: String) -> Maybe Int =
+  do
+    let x = try parse_digit(a)
+        y = try parse_digit(b)
+    Just(x * 10 + y)
+
+# A `do` inside a lambda is the lambda's own block.
+fn digit_plus_five() -> String -> Maybe Int =
+  \t ->
+    do
+      let v = try parse_digit(t)
+      Just(v + 5)
+
+fn main() -> Unit !{IO} =
+  do
+    ok_steps <- steps_log(Ok(2), Ok(7))
+    fail_first <- steps_log(Err("first"), Ok(7))
+    fail_second <- steps_log(Ok(2), Err("second"))
+    fail_check <- steps_log(Ok(-3), Ok(7))
+    let kept = keep_inner(Ok (Just(4)))
+    let kept_nothing = keep_inner(Ok (Nothing))
+    let kept_err = keep_inner(Err("outer"))
+    run_suite("try", [
+      check_eq("maybe both", add_digits("1", "2"), Just(3)),
+      check_eq("maybe first fails", add_digits("x", "2"), Nothing),
+      check_eq("maybe second fails", add_digits("1", "x"), Nothing),
+      check_eq("result both", sum_pos(2, 3), Ok(5)),
+      check_eq("result keeps the first error", sum_pos(-1, -2), Err("not positive: -1")),
+      check_eq("result second error", sum_pos(1, -2), Err("not positive: -2")),
+      check_eq("where success", doubled("2"), Just(4)),
+      check_eq("where failure", doubled("x"), Nothing),
+      check_eq("tuple pattern", pair_sum(3), Ok(7)),
+      check_eq("tuple pattern failure", pair_sum(0), Err("no pair")),
+      check_eq("let-else on the value", nested(Ok (Just(5))), Ok(5)),
+      check_eq("let-else fallback", nested(Ok (Nothing)), Err("inner nothing")),
+      check_eq("let-else outer failure", nested(Err("outer")), Err("outer")),
+      check_eq("update after try", moved(true), Just (Point(x = 10, y = 2))),
+      check_eq("update after try fails", moved(false), Nothing),
+      check_eq("field after try", point_y(true), Just(2)),
+      check_eq("field after try fails", point_y(false), Nothing),
+      check_eq("call after try", applied(true), Just(42)),
+      check_eq("call after try fails", applied(false), Nothing),
+      check_eq("variable operand", from_var(Just(1)), Just(2)),
+      check_eq("field operand", from_field(Holder(inner = Just(4))), Just(5)),
+      check_eq("field operand fails", from_field(Holder(inner = Nothing)), Nothing),
+      check_eq("constructor operand", from_ctor(6), Just(7)),
+      check_eq("pipe operand", from_pipe("2"), Just(3)),
+      check_eq("pipe operand fails", from_pipe("x"), Nothing),
+      check_eq("nested block success", inner_or_zero("2"), 2),
+      check_eq("nested block failure stays inside", inner_or_zero("x"), 0),
+      check_eq("user instance success", fetch_text(fetch_both(1, 2)), "got 3"),
+      check_eq("user instance not found", fetch_text(fetch_both(0, 2)), "not found"),
+      check_eq("user instance failed", fetch_text(fetch_both(1, -1)), "failed: negative"),
+      check_eq("wildcard instance success", slot_text(slot_plus(Filled(1))), "filled 2"),
+      check_eq("wildcard instance blank", slot_text(slot_plus(Blank)), "blank"),
+      check_eq("wildcard instance broken", slot_text(slot_plus(Broken)), "blank"),
+      check_eq("called instance success", gate_text(gate_plus(Open(1))), "open 2"),
+      check_eq("called instance failure", gate_text(gate_plus(Shut)), "shut"),
+      check_eq("type from the block", late_head(), Just(4)),
+      check_eq("generic maybe", bump(Just(1)), Just(2)),
+      check_eq("generic maybe failure", bump(Nothing), Nothing),
+      check_eq("generic result", bump(Ok(1)), Ok(2)),
+      check_eq("generic result failure", bump(Err("e")), Err("e")),
+      check_eq("do success", ok_steps, (Ok(4), ["a", "b", "c"])),
+      check_eq("do first fails", fail_first, (Err("first"), ["a"])),
+      check_eq("do statement fails", fail_second, (Err("second"), ["a", "b"])),
+      check_eq("do pure try fails", fail_check, (Err("not positive: -3"), ["a", "b"])),
+      check_eq("arrow binds the success whole", kept, Ok(4)),
+      check_eq("arrow inner nothing", kept_nothing, Ok(-1)),
+      check_eq("arrow outer failure", kept_err, Err("outer")),
+      check_eq("do-let group", group("1", "2"), Just(12)),
+      check_eq("do-let group fails", group("x", "2"), Nothing),
+      check_eq("lambda blocks fail alone", list_map(digit_plus_five(), ["2", "x", "1"]),
+               [Just(7), Nothing, Just(6)])
+    ])

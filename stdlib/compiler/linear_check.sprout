@@ -390,6 +390,26 @@ fn contained_leak_msg(name: String, t: types.Type, inner: Maybe types.Type) -> S
 fn diverge_msg(name: String) -> String =
   "linear value '" ++ name ++ "' is used in some branches but not others (every branch must use it exactly once)"
 
+# A `try`'s match diverges when the code after it consumes what its failure
+# path does not.
+fn after_try_msg(name: String) -> String =
+  "linear value '" ++ name ++ "' is consumed after a `try` in this block; the `try` can pass a failure on, so the consume would be skipped and the value leaked — consume it before the `try`, or handle the failure with `let..else`"
+
+# The env key inference sets for each `try` in a declaration, at the position of
+# the `match` it becomes.
+export fn try_marker(p: source.SourcePos) -> String =
+  "@try:" ++ int_to_string(p.index) ++ ":" ++ int_to_string(p.line) ++ ":" ++ int_to_string(p.column)
+
+fn try_at(p: source.SourcePos, env: Dict types.Scheme) -> Maybe source.SourcePos =
+  match dict_get(try_marker(p), env) with
+  | Just _ -> Just(p)
+  | Nothing -> Nothing
+
+fn diverge_err(name: String, at: source.SourcePos, try_pos: Maybe source.SourcePos) -> LinRes =
+  match try_pos with
+  | Just p -> LinErr(p, after_try_msg(name))
+  | Nothing -> LinErr(at, diverge_msg(name))
+
 fn after_fallible_msg(name: String) -> String =
   "linear value '" ++ name ++ "' is consumed after a fallible bind in this block; the bind can short-circuit, so the consume would be skipped and the value leaked — consume it before the first `<-`, or branch with `match`"
 
@@ -591,15 +611,15 @@ fn seq2_after_reuse(ac: List LinUse, ab: List LinUse, bc: List LinUse, bb: List 
 # on one path must be discharged on all). Borrowed sets merely UNION: a borrow
 # carries no obligation, so borrowing in one arm and not the other is harmless.
 fn alt_converge(ac: List LinUse, ab: List LinUse, bc: List LinUse, bb: List LinUse,
-                at: source.SourcePos) -> LinRes =
+                at: source.SourcePos, try_pos: Maybe source.SourcePos) -> LinRes =
   match first_missing(ac, bc) with
-  | Just n -> LinErr(at, diverge_msg(n))
-  | Nothing -> alt_converge_rev(ac, ab, bc, bb, at)
+  | Just n -> diverge_err(n, at, try_pos)
+  | Nothing -> alt_converge_rev(ac, ab, bc, bb, at, try_pos)
 
 fn alt_converge_rev(ac: List LinUse, ab: List LinUse, bc: List LinUse, bb: List LinUse,
-                    at: source.SourcePos) -> LinRes =
+                    at: source.SourcePos, try_pos: Maybe source.SourcePos) -> LinRes =
   match first_missing(bc, ac) with
-  | Just n -> LinErr(at, diverge_msg(n))
+  | Just n -> diverge_err(n, at, try_pos)
   | Nothing -> LinOk(ac, app_uses(ab, bb))
 
 # --- the linear bindings in scope, split by mode ---
@@ -953,20 +973,20 @@ fn lin_if(c: typed_ast.TypedExpr, a: typed_ast.TypedExpr, b: typed_ast.TypedExpr
   let LinOk cc cb = lin_consumed(c, sc, env) else LinErr ep m -> LinErr(ep, m)
       LinOk ac ab = lin_consumed(a, sc, env) else LinErr ep m -> LinErr(ep, m)
       LinOk bc bb = lin_consumed(b, sc, env) else LinErr ep m -> LinErr(ep, m)
-      LinOk mc mb = alt_converge(ac, ab, bc, bb, p) else LinErr ep m -> LinErr(ep, m)
+      LinOk mc mb = alt_converge(ac, ab, bc, bb, p, Nothing) else LinErr ep m -> LinErr(ep, m)
   in seq2(cc, cb, mc, mb)
 
 fn lin_match(scrut: typed_ast.TypedExpr, arms: List typed_ast.TypedMatchBranch,
              p: source.SourcePos, sc: LinScope, env: Dict types.Scheme) -> LinRes =
   match lin_read(scrut, sc, env) with
   | LinErr ep m -> LinErr(ep, m)
-  | LinOk sc_c sc_b -> lin_match_arms(scrut, arms, sc_c, sc_b, sc, env)
+  | LinOk sc_c sc_b -> lin_match_arms(scrut, arms, sc_c, sc_b, try_at(p, env), sc, env)
 
 fn lin_match_arms(scrut: typed_ast.TypedExpr, arms: List typed_ast.TypedMatchBranch,
-                  sc_c: List LinUse, sc_b: List LinUse,
+                  sc_c: List LinUse, sc_b: List LinUse, try_pos: Maybe source.SourcePos,
                   sc: LinScope, env: Dict types.Scheme) -> LinRes =
   match arm_sets(arms, sc, typed_ast.typed_expr_type(scrut),
-                 expr_is_borrowed_binding(scrut, sc), env) with
+                 expr_is_borrowed_binding(scrut, sc), try_pos, env) with
   | LinErr ep m -> LinErr(ep, m)
   | LinOk mc mb -> seq2(sc_c, sc_b, mc, mb)
 
@@ -986,21 +1006,21 @@ fn expr_is_borrowed_binding(e: typed_ast.TypedExpr, sc: LinScope) -> Bool =
 # consumed) when it came from a borrow. Either way they are removed before the
 # convergence comparison.
 fn arm_sets(arms: List typed_ast.TypedMatchBranch, sc: LinScope, scrut_type: types.Type,
-            from_borrow: Bool, env: Dict types.Scheme) -> LinRes =
+            from_borrow: Bool, try_pos: Maybe source.SourcePos, env: Dict types.Scheme) -> LinRes =
   match arms with
   | Nil -> LinOk(Nil, Nil)
   | [br] -> arm_consumed(br, sc, scrut_type, from_borrow, env)
   | Cons br rest ->
       match arm_consumed(br, sc, scrut_type, from_borrow, env) with
       | LinErr p m -> LinErr(p, m)
-      | LinOk ac ab -> arm_sets_rest(rest, ac, ab, arm_pos(br), sc, scrut_type, from_borrow, env)
+      | LinOk ac ab -> arm_sets_rest(rest, ac, ab, arm_pos(br), sc, scrut_type, from_borrow, try_pos, env)
 
 fn arm_sets_rest(rest: List typed_ast.TypedMatchBranch, ac: List LinUse, ab: List LinUse,
                  at: source.SourcePos, sc: LinScope, scrut_type: types.Type,
-                 from_borrow: Bool, env: Dict types.Scheme) -> LinRes =
-  match arm_sets(rest, sc, scrut_type, from_borrow, env) with
+                 from_borrow: Bool, try_pos: Maybe source.SourcePos, env: Dict types.Scheme) -> LinRes =
+  match arm_sets(rest, sc, scrut_type, from_borrow, try_pos, env) with
   | LinErr p m -> LinErr(p, m)
-  | LinOk bc bb -> alt_converge(ac, ab, bc, bb, at)
+  | LinOk bc bb -> alt_converge(ac, ab, bc, bb, at, try_pos)
 
 # `pattern_linear_binders` reports only the binders carrying obligations;
 # `scope_shadow` gets EVERY binder, because a non-linear pattern variable must still

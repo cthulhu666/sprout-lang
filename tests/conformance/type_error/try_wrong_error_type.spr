@@ -1,0 +1,11 @@
+# A failure whose error type differs from the block's, where only the signature
+# fixes the block's type: rejected at the `try`, in the return check's words
+# (docs/try-propagate-v0.md §6).
+
+fn g(n: Int) -> Result String Int = if n > 0 then Ok(n) else Err("no")
+
+fn f() -> Result Int Int =
+  let x = try g(0)
+  in Ok(x)
+
+fn main() -> Unit !{IO} = print(to_string(f()))

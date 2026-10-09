@@ -1,6 +1,7 @@
 module stdlib.compiler.unifier
 import stdlib.compiler.types as types
 import stdlib.compiler.source as source
+import stdlib.compiler.ast as ast
 import stdlib.string as string
 
 # ---------------------------------------------------------------------------
@@ -229,8 +230,8 @@ fn bound_role(polarity: Polarity, bound_is_left: Bool) -> BoundRole =
 export fn no_effect_subst() -> Dict types.Effect = dict_empty()
 
 export type InferState (..) =
-  | InferState (Ref Int) (Ref Int) (Ref (Dict (List String))) (Ref (List FieldObligation)) (Ref (List EffectReport)) (Ref (List ParkedBind))
-  # InferState next_type_id  next_effect_id  ctor_map  parked_field_obligations  effect_reports  parked_binds
+  | InferState (Ref Int) (Ref Int) (Ref (Dict (List String))) (Ref (List FieldObligation)) (Ref (List EffectReport)) (Ref (List ParkedBind)) (Ref (Dict (List ast.MatchBranch))) (Ref (List source.SourcePos))
+  # InferState next_type_id  next_effect_id  ctor_map  parked_field_obligations  effect_reports  parked_binds  try_fusions  try_positions
 
 export fn new_state() -> InferState !{IO} =
   do
@@ -240,20 +241,22 @@ export fn new_state() -> InferState !{IO} =
     field_ref <- ref_new(Nil)
     effect_ref <- ref_new(Nil)
     bind_ref <- ref_new(Nil)
-    InferState(t_id, e_id, ctor_ref, field_ref, effect_ref, bind_ref)
+    fusion_ref <- ref_new(dict_empty())
+    try_ref <- ref_new(Nil)
+    InferState(t_id, e_id, ctor_ref, field_ref, effect_ref, bind_ref, fusion_ref, try_ref)
 
 # Unlike take_field_obligations this ACCUMULATES across the whole program: the
 # report is a whole-program census, not a per-declaration obligation.
 export fn record_effect_report(state: InferState, r: EffectReport) -> Unit !{IO} =
   match state with
-  | InferState _ _ _ _ effect_ref _ ->
+  | InferState _ _ _ _ effect_ref _ _ _ ->
       do
         prior <- ref_read(effect_ref)
         ref_write(effect_ref, Cons(r, prior))
 
 export fn effect_reports(state: InferState) -> List EffectReport !{IO} =
   match state with
-  | InferState _ _ _ _ effect_ref _ ->
+  | InferState _ _ _ _ effect_ref _ _ _ ->
       do
         prior <- ref_read(effect_ref)
         list_reverse_reports(prior)
@@ -268,7 +271,7 @@ fn list_reverse_reports_acc(xs: List EffectReport, acc: List EffectReport) -> Li
 
 export fn park_field_obligation(state: InferState, o: FieldObligation) -> Unit !{IO} =
   match state with
-  | InferState _ _ _ field_ref _ _ ->
+  | InferState _ _ _ field_ref _ _ _ _ ->
       do
         parked <- ref_read(field_ref)
         ref_write(field_ref, Cons(o, parked))
@@ -279,7 +282,7 @@ export fn park_field_obligation(state: InferState, o: FieldObligation) -> Unit !
 # errors out before its own obligations are discharged.
 export fn take_field_obligations(state: InferState) -> List FieldObligation !{IO} =
   match state with
-  | InferState _ _ _ field_ref _ _ ->
+  | InferState _ _ _ field_ref _ _ _ _ ->
       do
         parked <- ref_read(field_ref)
         ref_write(field_ref, Nil)
@@ -287,7 +290,7 @@ export fn take_field_obligations(state: InferState) -> List FieldObligation !{IO
 
 export fn park_bind(state: InferState, b: ParkedBind) -> Unit !{IO} =
   match state with
-  | InferState _ _ _ _ _ bind_ref ->
+  | InferState _ _ _ _ _ bind_ref _ _ ->
       do
         parked <- ref_read(bind_ref)
         ref_write(bind_ref, Cons(b, parked))
@@ -295,7 +298,7 @@ export fn park_bind(state: InferState, b: ParkedBind) -> Unit !{IO} =
 # Read AND clear, at the same boundary and for the same reason as take_field_obligations.
 export fn take_parked_binds(state: InferState) -> List ParkedBind !{IO} =
   match state with
-  | InferState _ _ _ _ _ bind_ref ->
+  | InferState _ _ _ _ _ bind_ref _ _ ->
       do
         parked <- ref_read(bind_ref)
         ref_write(bind_ref, Nil)
@@ -310,7 +313,7 @@ export fn take_parked_binds(state: InferState) -> List ParkedBind !{IO} =
 # and silently corrupt unification (see tests/stdlib/compiler/test_fresh_tvar_collision.spr).
 export fn fresh(state: InferState) -> String !{IO} =
   match state with
-  | InferState t_ref _ _ _ _ _ ->
+  | InferState t_ref _ _ _ _ _ _ _ ->
       do
         n <- ref_read(t_ref)
         ref_write(t_ref, n + 1)
@@ -318,7 +321,7 @@ export fn fresh(state: InferState) -> String !{IO} =
 
 export fn fresh_effect(state: InferState) -> String !{IO} =
   match state with
-  | InferState _ e_ref _ _ _ _ ->
+  | InferState _ e_ref _ _ _ _ _ _ ->
       do
         n <- ref_read(e_ref)
         ref_write(e_ref, n + 1)
@@ -326,11 +329,37 @@ export fn fresh_effect(state: InferState) -> String !{IO} =
 
 export fn set_ctor_map(state: InferState, ctor_map: Dict (List String)) -> Unit !{IO} =
   match state with
-  | InferState _ _ ctor_ref _ _ _ -> ref_write(ctor_ref, ctor_map)
+  | InferState _ _ ctor_ref _ _ _ _ _ -> ref_write(ctor_ref, ctor_map)
 
 export fn get_ctor_map(state: InferState) -> Dict (List String) !{IO} =
   match state with
-  | InferState _ _ ctor_ref _ _ _ -> ref_read(ctor_ref)
+  | InferState _ _ ctor_ref _ _ _ _ _ -> ref_read(ctor_ref)
+
+# The `branch` arms of each `Propagate` instance a `try` can be fused with,
+# keyed by the instance's head type (infer.try_fusions).
+export fn set_try_fusions(state: InferState, fusions: Dict (List ast.MatchBranch)) -> Unit !{IO} =
+  match state with
+  | InferState _ _ _ _ _ _ fusion_ref _ -> ref_write(fusion_ref, fusions)
+
+export fn get_try_fusions(state: InferState) -> Dict (List ast.MatchBranch) !{IO} =
+  match state with
+  | InferState _ _ _ _ _ _ fusion_ref _ -> ref_read(fusion_ref)
+
+# Where this declaration's `try`s are, so linear_check can name them.
+export fn note_try(state: InferState, pos: source.SourcePos) -> Unit !{IO} =
+  match state with
+  | InferState _ _ _ _ _ _ _ try_ref ->
+      do
+        prior <- ref_read(try_ref)
+        ref_write(try_ref, Cons(pos, prior))
+
+export fn take_try_positions(state: InferState) -> List source.SourcePos !{IO} =
+  match state with
+  | InferState _ _ _ _ _ _ _ try_ref ->
+      do
+        positions <- ref_read(try_ref)
+        ref_write(try_ref, Nil)
+        positions
 
 # ---------------------------------------------------------------------------
 # apply_subst — walk a Type, replacing bound TVars
@@ -1056,7 +1085,7 @@ fn fresh_pattern_skolem(state: InferState) -> types.Type !{IO} =
 # no-collision guarantee as `fresh`. Shares the tyvar counter for uniqueness.
 fn fresh_skolem(state: InferState) -> String !{IO} =
   match state with
-  | InferState t_ref _ _ _ _ _ ->
+  | InferState t_ref _ _ _ _ _ _ _ ->
       do
         n <- ref_read(t_ref)
         ref_write(t_ref, n + 1)

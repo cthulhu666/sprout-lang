@@ -1,0 +1,1 @@
+a top-level `let` cannot use `try`: there is no block for a failure to end

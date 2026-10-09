@@ -1,0 +1,5 @@
+fn f(n: Int) -> Maybe Int = Just(n)
+
+fn g(n: Int) -> Maybe Int = Just(1 + (try f(n)))
+
+fn main() -> Unit !{IO} = print(g(1))

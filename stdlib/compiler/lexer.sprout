@@ -73,7 +73,8 @@ fn is_keyword(raw: String) -> Bool =
   raw == "extern" ||
   raw == "deriving" ||
   raw == "wrap" ||
-  raw == "for"
+  raw == "for" ||
+  raw == "try"
 
 # `.` is here as well as inside identifier runs, and the two do not conflict.
 # A dot INSIDE an identifier run is absorbed by `scan_ident_end`, so `p.x` and

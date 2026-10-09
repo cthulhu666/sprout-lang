@@ -1,0 +1,5 @@
+fn g(xs: List Int) -> List Int =
+  let x = try xs
+  in [x]
+
+fn main() -> Unit !{IO} = print(g([1]))

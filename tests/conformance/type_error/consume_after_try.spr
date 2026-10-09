@@ -1,0 +1,21 @@
+module main
+
+# A consume after a `try` is skipped when the `try` passes a failure on, so the
+# value would leak (spec-v0.md §5.8, docs/try-propagate-v0.md §9 Q7).
+
+type linear File = File Int
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+fn step(f: borrowing File) -> Result Int Int !{IO} = Ok(1)
+
+fn talk(f: File) -> Result Int Unit !{IO} =
+  do
+    a <- try step(f)
+    let _ = release(f)
+    print(to_string(a))
+    Ok(())
+
+fn main() -> Unit !{IO} =
+  match talk(File(1)) with
+  | Ok _ -> print("ok")
+  | Err _ -> print("err")
