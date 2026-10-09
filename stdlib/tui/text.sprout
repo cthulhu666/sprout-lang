@@ -13,7 +13,7 @@ module stdlib.tui.text
 # and the failure mode — a wrapper that breaks a line the placer then draws at
 # a different width — is a drifting cursor rather than an error.
 
-import stdlib.tui.geometry as geometry
+import stdlib.math.int as imath
 import stdlib.unicode.grapheme as grapheme
 import stdlib.unicode.utf8 as utf8
 import stdlib.unicode.width as uwidth
@@ -60,7 +60,7 @@ export fn drop_n(xs: List a, n: Int) -> List a =
 export fn cluster_width(cluster: List Int) -> Int =
   match cluster with
   | Nil -> 1
-  | [primary | _] -> geometry.imax(1, uwidth.codepoint_width(primary))
+  | [primary | _] -> imath.max(1, uwidth.codepoint_width(primary))
 
 fn cluster_is(cluster: List Int, cp: Int) -> Bool =
   match cluster with

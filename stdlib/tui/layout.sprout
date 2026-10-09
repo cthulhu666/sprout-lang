@@ -6,6 +6,7 @@ module stdlib.tui.layout
 # point, no failure case. `solve` is the whole engine and `row`/`column`/`grid`/
 # `dock` are the ways to spend its answer on a Region.
 
+import stdlib.math.int as imath
 import stdlib.tui.geometry as geometry
 
 # How much of an axis an item asks for.
@@ -28,7 +29,7 @@ export type Edge (..) deriving (Eq, ToString) =
   | Right
 
 # Split `total` among `items`, in declaration order, summing to EXACTLY
-# `imax(0, total)`.
+# `max(0, total)`.
 #
 # Fixed asks (`Cells`, then `Auto`) are paid first and fractions divide what is
 # left. When the fixed asks alone exceed the total, they are met in declaration
@@ -38,13 +39,13 @@ export type Edge (..) deriving (Eq, ToString) =
 # equivalent order; CSS Grid instead squeezes proportionally, which needs a
 # solver and a rounding rule at every step.
 export fn solve(total: Int, items: List Dimension) -> List Int =
-  let room = geometry.imax(0, total)
+  let room = imath.max(0, total)
       cells_ask = sum_of(items, is_cells)
       auto_ask = sum_of(items, is_auto)
   in
   # Budgets per tier, each the share left after the higher-priority tiers.
-  let cells_budget = geometry.imin(cells_ask, room)
-      auto_budget = geometry.imin(auto_ask, room - cells_budget)
+  let cells_budget = imath.min(cells_ask, room)
+      auto_budget = imath.min(auto_ask, room - cells_budget)
       frac_budget = room - cells_budget - auto_budget
   in
   place(items, take_state(cells_budget, auto_budget),
@@ -65,8 +66,8 @@ fn is_auto(d: Dimension) -> Bool =
 # The cells a fixed ask claims; a fraction claims none up front.
 export fn ask_of(d: Dimension) -> Int =
   match d with
-  | Cells n -> geometry.imax(0, n)
-  | Auto n -> geometry.imax(0, n)
+  | Cells n -> imath.max(0, n)
+  | Auto n -> imath.max(0, n)
   | Fraction _ -> 0
 
 fn sum_of(items: List Dimension, pick: Dimension -> Bool) -> Int =
@@ -85,11 +86,11 @@ fn place(items: List Dimension, budgets: Budgets, shares: List Int) -> List Int 
   | Cons d rest ->
       match d with
       | Cells n ->
-          let got = geometry.clamp_int(n, 0, budgets.cells)
+          let got = imath.clamp(n, 0, budgets.cells)
           in
           Cons(got, place(rest, budgets with (cells = budgets.cells - got), shares))
       | Auto n ->
-          let got = geometry.clamp_int(n, 0, budgets.auto)
+          let got = imath.clamp(n, 0, budgets.auto)
           in
           Cons(got, place(rest, budgets with (auto = budgets.auto - got), shares))
       | Fraction _ ->
@@ -121,7 +122,7 @@ fn fraction_weights(items: List Dimension) -> List Int =
 # yields the weights in order with the non-fractions dropped.
 fn weight_of(d: Dimension) -> List Int =
   match d with
-  | Fraction w -> [geometry.imax(0, w)]
+  | Fraction w -> [imath.max(0, w)]
   | Cells _ -> Nil
   | Auto _ -> Nil
 

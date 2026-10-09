@@ -6,6 +6,7 @@ module stdlib.tui.widgets.tree
 # flattening, so an index below an expanded node names a different node the
 # moment it opens (§4.1).
 
+import stdlib.math.int as imath
 import stdlib.string as string
 import stdlib.tui.event as event
 import stdlib.tui.geometry as geometry
@@ -154,9 +155,7 @@ fn index_of(rows: List Row, path: List String, i: Int) -> Int =
       if r.path == path then i else index_of(rest, path, i + 1)
 
 fn present(rows: List Row, path: List String) -> Bool =
-  match rows with
-  | Nil -> false
-  | [r | rest] -> if r.path == path then true else present(rest, path)
+  any(\r -> r.path == path, rows)
 
 fn at_index(rows: List Row, i: Int) -> Maybe Row =
   match rows with
@@ -214,7 +213,7 @@ fn landed(t: Tr m, rows: List Row, d: Int) -> Reply m =
 # there. An empty forest has no path to name, so the key is still claimed —
 # the application must not see a stray Down — and nothing is announced.
 fn settled(t: Tr m, rows: List Row, want: Int) -> Reply m =
-  match at_index(rows, list_view.clamped_into(list_length(rows), want)) with
+  match at_index(rows, imath.clamp(want, 0, list_length(rows) - 1)) with
   | Nothing -> Just((t, Nil, Nil))
   | Just r -> spoken(t, r.path)
 

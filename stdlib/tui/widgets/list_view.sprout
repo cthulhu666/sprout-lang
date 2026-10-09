@@ -6,6 +6,7 @@ module stdlib.tui.widgets.list_view
 # state, so the application keeps the items it supplied and an index is what
 # names one of them — two identical lines are not the same row.
 
+import stdlib.math.int as imath
 import stdlib.tui.event as event
 import stdlib.tui.geometry as geometry
 import stdlib.tui.screen as scr
@@ -114,14 +115,9 @@ fn moved_to(l: Lst m, i: Int) -> Reply m = settled(l, i)
 fn moved_by(l: Lst m, d: Int) -> Reply m = moved_to(l, l.sel + d)
 
 # Every move clamps rather than refusing, so a page runs to the end and stops
-# there; the caller's `start` goes through the same rule, since an index
+# there; the caller's `start` goes through the same clamp, since an index
 # outside the list must not leave it unselectable.
-export fn clamped_into(count: Int, i: Int) -> Int =
-  if count == 0 then 0
-  else if i < 0 then 0
-  else if i >= count then count - 1
-  else i
-
+#
 # A move that lands where it started says nothing: Down at the end is the
 # list's key, but there is no new selection to report. An empty list has no
 # index to name at all, so the key is still claimed — the application must not
@@ -129,7 +125,7 @@ export fn clamped_into(count: Int, i: Int) -> Int =
 # reset, or emptying would be a move nothing announces (INVARIANTS above).
 fn settled(l: Lst m, want: Int) -> Reply m =
   if l.count == 0 then Just((l, Nil, Nil))
-  else spoken(l, clamped_into(l.count, want))
+  else spoken(l, imath.clamp(want, 0, l.count - 1))
 
 fn spoken(l: Lst m, i: Int) -> Reply m =
   if i == l.sel then Just((l, Nil, Nil))
@@ -204,4 +200,4 @@ fn started(id: widget.WidgetId, items: List String, on_select: Int -> m,
            opts: ListOpts m, count: Int) -> widget.Widget m =
   lst_widget(Lst(id = id, items = items, on_select = on_select, opts = opts,
                  count = count, width = text.widest(items),
-                 sel = clamped_into(count, opts.start), has_focus = false))
+                 sel = imath.clamp(opts.start, 0, count - 1), has_focus = false))

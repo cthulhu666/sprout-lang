@@ -14,6 +14,8 @@ module stdlib.tui.geometry
 # `Vec` length. That is what makes `split_left` lossless — the halves share an
 # edge without sharing a cell.
 
+import stdlib.math.int as imath
+
 export type Size (..) deriving (Eq, ToString) =
   | Size Int Int
 
@@ -59,23 +61,16 @@ export fn contains(r: Region, o: Offset) -> Bool =
     offset_col(o) >= region_col(r) && offset_col(o) < region_right(r)
       && offset_row(o) >= region_row(r) && offset_row(o) < region_bottom(r)
 
-export fn imax(a: Int, b: Int) -> Int = if a > b then a else b
-
-export fn imin(a: Int, b: Int) -> Int = if a < b then a else b
-
-# `x` held to `lo..hi`; `hi` wins when the bounds cross.
-export fn clamp_int(x: Int, lo: Int, hi: Int) -> Int = imin(imax(x, lo), hi)
-
 # Disjoint inputs give an empty region at the greater origin, never a negative
 # extent: `is_empty` is then the whole test, and no caller has to reason about
 # a width below zero.
 export fn intersect(a: Region, b: Region) -> Region =
-  let col = imax(region_col(a), region_col(b))
-      row = imax(region_row(a), region_row(b))
-      right = imin(region_right(a), region_right(b))
-      bottom = imin(region_bottom(a), region_bottom(b))
+  let col = imath.max(region_col(a), region_col(b))
+      row = imath.max(region_row(a), region_row(b))
+      right = imath.min(region_right(a), region_right(b))
+      bottom = imath.min(region_bottom(a), region_bottom(b))
   in
-  Region(col, row, imax(0, right - col), imax(0, bottom - row))
+  Region(col, row, imath.max(0, right - col), imath.max(0, bottom - row))
 
 # The nearest cell inside `r`. An empty region has no cell to land on, so its
 # origin stands — the alternative, an offset one past the edge, would be a
@@ -83,20 +78,20 @@ export fn intersect(a: Region, b: Region) -> Region =
 export fn clamp_offset(r: Region, o: Offset) -> Offset =
   if is_empty(r) then Offset(region_col(r), region_row(r))
   else
-    Offset(clamp_int(offset_col(o), region_col(r), region_right(r) - 1),
-           clamp_int(offset_row(o), region_row(r), region_bottom(r) - 1))
+    Offset(imath.clamp(offset_col(o), region_col(r), region_right(r) - 1),
+           imath.clamp(offset_row(o), region_row(r), region_bottom(r) - 1))
 
 # Named for what they TAKE. "split_h" is ambiguous about whether it cuts along
 # a horizontal line or produces a horizontal arrangement, and every library
 # that uses the name means one of the two.
 export fn split_left(r: Region, cols: Int) -> (Region, Region) =
-  let n = clamp_int(cols, 0, region_cols(r))
+  let n = imath.clamp(cols, 0, region_cols(r))
   in
   (Region(region_col(r), region_row(r), n, region_rows(r)),
    Region(region_col(r) + n, region_row(r), region_cols(r) - n, region_rows(r)))
 
 export fn split_top(r: Region, rows: Int) -> (Region, Region) =
-  let n = clamp_int(rows, 0, region_rows(r))
+  let n = imath.clamp(rows, 0, region_rows(r))
   in
   (Region(region_col(r), region_row(r), region_cols(r), n),
    Region(region_col(r), region_row(r) + n, region_cols(r), region_rows(r) - n))
@@ -105,13 +100,13 @@ export fn split_top(r: Region, rows: Int) -> (Region, Region) =
 # near-edge counterparts — so the taken part is always first no matter which
 # edge it came off, and `dock` can fold over all four without a special case.
 export fn split_right(r: Region, cols: Int) -> (Region, Region) =
-  let n = clamp_int(cols, 0, region_cols(r))
+  let n = imath.clamp(cols, 0, region_cols(r))
   in
   (Region(region_right(r) - n, region_row(r), n, region_rows(r)),
    Region(region_col(r), region_row(r), region_cols(r) - n, region_rows(r)))
 
 export fn split_bottom(r: Region, rows: Int) -> (Region, Region) =
-  let n = clamp_int(rows, 0, region_rows(r))
+  let n = imath.clamp(rows, 0, region_rows(r))
   in
   (Region(region_col(r), region_bottom(r) - n, region_cols(r), n),
    Region(region_col(r), region_row(r), region_cols(r), region_rows(r) - n))

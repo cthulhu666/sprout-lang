@@ -102,12 +102,10 @@ fn main() -> Unit !{IO} =
              g.split_right(r(2, 1, 10, 5), 99), (r(2, 1, 10, 5), no_cols_at(2, 1, 5))),
     check_eq("split_bottom with a negative count takes nothing",
              g.split_bottom(r(2, 1, 10, 5), -4), (no_rows_at(2, 6, 10), r(2, 1, 10, 5))),
-
-    # --- clamp_int: the clamp every split and `layout.place` share ---
-    check_eq("clamp_int keeps a value in range", g.clamp_int(5, 0, 10), 5),
-    check_eq("clamp_int raises to lo", g.clamp_int(-3, 0, 10), 0),
-    check_eq("clamp_int lowers to hi", g.clamp_int(42, 0, 10), 10),
-    check_eq("clamp_int: hi wins when the bounds cross", g.clamp_int(5, 8, 2), 2),
+    # A negative extent is empty (`is_empty`), and the count is never below
+    # zero, so the taken part is empty and the remainder is the region itself.
+    check_eq("split_left of a negative-width region takes nothing",
+             g.split_left(r(2, 1, -3, 5), 2), (no_cols_at(2, 1, 5), r(2, 1, -3, 5))),
 
     # A split is lossless: the halves share an edge but no cell, so their
     # widths sum to the original and neither contains the other's cells.
