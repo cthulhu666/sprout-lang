@@ -25,6 +25,8 @@ and decides what it means. Six behaviours are worth pinning beyond "it parses":
      reason a finding can come back unjudged.
   6. One file reported at two path spellings is reported at one canonical path,
      so the durable findings file does not mix the two spellings.
+  7. Cleanup passes are a separate track: they never reach the skeptic, the cap,
+     `found` or `confirmed`, and their count per level is pinned like N's.
 """
 import json
 import os
@@ -76,11 +78,14 @@ HARNESS = """
 const REVIEWS = %s
 const VERDICTS = %s
 const INDEX_MODE = %s
+// One entry per cleanup pass, in call order; `null` models a pass that failed.
+const CLEANUPS = %s
 // `args` is a declared global in the Workflow runtime, holding the tool's `args`
 // input or `undefined`. Declared here for the same reason: left out, every
 // `args`-reading line is a ReferenceError rather than the fallback it models.
 const args = %s
 let reviewN = 0
+let cleanupN = 0
 let verifyCalls = 0
 const EFFORTS = []
 const agent = async (prompt, opts) => {
@@ -108,6 +113,10 @@ const agent = async (prompt, opts) => {
     }
     return { verdicts }
   }
+  if (label.startsWith('cleanup:')) {
+    const c = CLEANUPS[cleanupN++]
+    return c === null ? null : { findings: c || [] }
+  }
   return { findings: REVIEWS[reviewN++] || [] }
 }
 const parallel = async ts => Promise.all(ts.map(t => t()))
@@ -117,20 +126,22 @@ const log = m => LOGS.push(m)
 async function __main() {
 %s
 }
-__main().then(r => console.log(JSON.stringify({ ...r, LOGS, verifyCalls, reviewN, EFFORTS })))
+__main().then(r => console.log(JSON.stringify({ ...r, LOGS, verifyCalls, reviewN, cleanupN, EFFORTS })))
 """
 
 
-def run(reviews, verdicts=(), index_mode="prompt", args=None):
+def run(reviews, verdicts=(), index_mode="prompt", args=None, cleanups=()):
     """Run the extracted script with `reviews[i]` as pass i's findings.
 
     `index_mode` controls how the stub verifier numbers its reply: "prompt"
     echoes the indices it was given, "one_based"/"out_of_range"/"duplicate"
     number it wrongly, which is what exercises the join's validation.
 
-    `args` is the Workflow `args` input — the effort level and review target."""
+    `args` is the Workflow `args` input — the effort level and review target.
+    `cleanups[i]` is cleanup pass i's findings, or None for a pass that failed."""
     src = HARNESS % (json.dumps(reviews), json.dumps(list(verdicts)),
-                     json.dumps(index_mode), json.dumps(args), extract_script())
+                     json.dumps(index_mode), json.dumps(list(cleanups)),
+                     json.dumps(args), extract_script())
     d = tempfile.mkdtemp(prefix="sprout_review_script_")
     try:
         path = os.path.join(d, "script.mjs")
@@ -373,7 +384,7 @@ for level, passes in LADDER.items():
     check("%s reports the level it ran at" % level, level, out["effort"])
     check("%s reports its pass count" % level, passes, out["passes"])
     check("%s sets the reviewers' effort" % level, [level] * passes,
-          [e["effort"] for e in field(out, "EFFORTS")])
+          [e["effort"] for e in field(out, "EFFORTS") if e["label"].startswith("review:")])
 
 # A malformed `args` must not run zero passes and then close a ledger row saying
 # a review happened. The caller should have rejected the level; this is what
@@ -418,6 +429,71 @@ out, err = run([[]], args={"effort": "low", "target": "1234"})
 check("with a target the branch diff is not mentioned", 0,
       sum(1 for e in field(out, "EFFORTS")
           if e["label"].startswith("review:") and "@{upstream}" in e["prompt"]))
+
+# --- the cleanup track ------------------------------------------------------
+# /simplify's four angles, report-only. They share the diff and the fan-out with
+# the bug passes and nothing else: no skeptic, no cap, no `found`/`confirmed`.
+# Those columns mean "bugs" in every ledger row ever written, and the skeptic is
+# told to refute anything with no failure, which every cleanup lacks.
+CLEANUP_LADDER = {"low": 1, "medium": 1, "high": 1, "xhigh": 4, "max": 4}
+ANGLES = ["### Reuse", "### Simplification", "### Efficiency", "### Altitude"]
+for level, c in CLEANUP_LADDER.items():
+    out, err = run([[]] * LADDER[level], args={"effort": level, "target": ""})
+    check("%s runs %d cleanup pass(es)" % (level, c), c, out["cleanupN"])
+    check("%s reports its cleanup pass count" % level, c, out.get("cleanupPasses"))
+    cl = [e for e in field(out, "EFFORTS") if e["label"].startswith("cleanup:")]
+    check("%s sets the cleanup effort" % level, [level] * c, [e["effort"] for e in cl])
+    # Every angle is covered exactly once, however the passes split them.
+    check("%s covers each angle once" % level, [1] * 4,
+          [sum(1 for e in cl if a in e["prompt"]) for a in ANGLES])
+
+DUP_HELPER = {"file": "stdlib/net.sprout", "line": 40, "severity": "low",
+              "category": "reuse", "summary": "re-implements list_take",
+              "scenario": "two copies to keep in step; call list_take"}
+out, err = run([[]] * 3, cleanups=[[DUP_HELPER]], args={"effort": "high", "target": ""})
+check("a cleanup is returned", 1, len(field(out, "cleanups")))
+check("a cleanup never reaches the skeptic", 0, out["verifyCalls"])
+check("a cleanup is not counted as found", 0, out["found"])
+check("a cleanup is not in raw", 0, len(field(out, "raw")))
+cl = [e for e in field(out, "EFFORTS") if e["label"].startswith("cleanup:")]
+check("the cleanup pass is told not to edit", True,
+      bool(cl) and "do not edit" in cl[0]["prompt"].lower())
+check("the cleanup pass is not told to hunt bugs", False,
+      bool(cl) and "for real bugs" in cl[0]["prompt"])
+check("the cleanup pass gets the branch diff", True,
+      bool(cl) and "@{upstream}" in cl[0]["prompt"])
+
+# A bug and a cleanup together: the bug is judged, the cleanup is not, and the
+# cap and counts see only the bug.
+out, err = run([[LONE_HIGH], [], []], cleanups=[[DUP_HELPER]])
+check("with a cleanup beside it, the bug is still confirmed", 1, out["confirmed"])
+check("the skeptic is handed the bug alone", 1,
+      sum(1 for e in field(out, "EFFORTS") if e["label"] == "verify:1"))
+
+# With one angle per pass, the angle IS the category: a pass that mislabels its
+# finding must not file an efficiency cleanup under reuse.
+MISLABELLED = dict(DUP_HELPER, category="reuse", summary="list rebuilt per call")
+out, err = run([[]] * 5, cleanups=[[], [], [MISLABELLED], []],
+               args={"effort": "xhigh", "target": ""})
+check("one-angle passes stamp their own category", ["efficiency"],
+      [f.get("category") for f in field(out, "cleanups")])
+
+# A failed cleanup pass must not cost the bug review, and must not read as "the
+# code is clean" either.
+out, err = run([[LONE_HIGH], [], []], cleanups=[None])
+check("a failed cleanup pass keeps the bug result", 1, out["confirmed"])
+check("a failed cleanup pass is logged", 1,
+      sum(1 for m in field(out, "LOGS") if "cleanup pass" in m and "failed" in m))
+
+# Cleanups come back most costly first, and on the run's canonical paths.
+SMALL = dict(DUP_HELPER, severity="low", summary="small")
+BIG = dict(DUP_HELPER, severity="high", summary="big",
+           file="/Users/x/repo/stdlib/prelude.sprout")
+out, err = run([[REL_SPELLING], [], []], cleanups=[[SMALL, BIG]])
+check("cleanups are ordered by severity", ["big", "small"],
+      [f["summary"] for f in field(out, "cleanups")])
+check("cleanup paths are canonicalised with the bugs'", "stdlib/prelude.sprout",
+      field(out, "cleanups")[0]["file"] if field(out, "cleanups") else None)
 
 if failures:
     print("==> sprout-review script tests FAILED (%d)" % len(failures), file=sys.stderr)

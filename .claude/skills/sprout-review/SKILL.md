@@ -6,11 +6,13 @@ argument-hint: "[low|medium|high|xhigh|max] [<pr#>|<branch>|<path>]"
 
 # sprout-review
 
-An ensemble diff review that **records that it ran**: N independent passes, one adversarial verify
-pass over their findings, and a ledger row plus a findings file on disk either side of it.
+An ensemble diff review that **records that it ran**: N independent bug passes, one adversarial
+verify pass over their findings, C cleanup passes beside them, and a ledger row plus a findings file
+on disk either side of it.
 
-It costs at most **N + 1 agents**, known before the run — four at the default level, or three when
-the passes found nothing at all. The effort level moves `N`; §Arguments has the table.
+It costs at most **N + C + 1 agents**, known before the run — five at the default level, or four
+when the bug passes found nothing at all. The effort level moves `N` and `C`; §Arguments has the
+table.
 
 Three things follow from that and govern the procedure below. The run is **owned** — the row is
 opened before reviewing and closed after, so the count is exact by construction rather than inferred
@@ -20,7 +22,10 @@ withholds nothing from the skeptic, because deciding whether two reports describ
 reading task, and the machinery that tried it got that wrong on every run it was measured on
 (§Notes).
 
-Repo-specific review dimensions (GC rooting, seed staleness, idiomatic Sprout) are NOT here yet.
+The **cleanup track** is `/simplify`'s four angles — reuse, simplification, efficiency, altitude —
+with Sprout idioms added, reporting instead of applying. It shares the diff and the fan-out with the
+bug passes and nothing else: no skeptic, no cap, no share of `found` or `confirmed`. Other
+repo-specific dimensions (GC rooting, seed staleness) are NOT here yet.
 
 Why any of this exists, what was measured to get here, and what is still open: `README.md` and
 `BACKLOG.md` beside this file.
@@ -45,15 +50,17 @@ happened at a level nobody chose. `/code-review` makes the same distinction.
 one on the same branch, and a level that drifts with whatever `/effort` happens to be set to makes
 `review:3` mean three different things. `high` is also what this skill already did (`N = 3`).
 
-**What the level moves — two dials, and only two:**
+**What the level moves — three dials, and only three:**
 
-| level | N passes | reviewer effort | agents (max) |
-|---|---|---|---|
-| `low` | 1 | `low` | 2 |
-| `medium` | 2 | `medium` | 3 |
-| **`high`** (default) | **3** | `high` | **4** |
-| `xhigh` | 5 | `xhigh` | 6 |
-| `max` | 8 | `max` | 9 |
+| level | N passes | C cleanup | reviewer effort | agents (max) |
+|---|---|---|---|---|
+| `low` | 1 | 1 | `low` | 3 |
+| `medium` | 2 | 1 | `medium` | 4 |
+| **`high`** (default) | **3** | **1** | `high` | **5** |
+| `xhigh` | 5 | 4 | `xhigh` | 10 |
+| `max` | 8 | 4 | `max` | 13 |
+
+`C = 1` is one pass holding all four angles; `C = 4` is one angle per pass, as `/simplify` runs.
 
 These five rows are a cost ladder, not a measurement — the same caveat `README.md` already records
 for `N = 3`, now multiplied by five. `BACKLOG.md` owns closing that.
@@ -110,7 +117,8 @@ hand-substituting three values into two hundred lines could. Editing the script 
 
 The script returns the findings as its passes reported them, each with a verdict. It merges nothing
 and counts no agreement, so two reports of one bug arrive as two findings and `found` counts
-**reports**. Turning them into issues is step 4's job, and yours.
+**reports**. Turning them into issues is step 4's job, and yours. The cleanups come back separately,
+as `cleanups`, each with a `category` and no verdict.
 
 **4. Write the findings to disk** before reporting them, at the path the ledger names:
 
@@ -126,6 +134,9 @@ exist only inside a chat message cannot be pointed at afterwards, which is the s
 ledger exists to fix, one level down: a count without a list says a review happened but not what it
 said.
 
+Write the `cleanups` there too, under their own heading after the bugs, with their category, and
+grouped the same way.
+
 **Also write the workflow's `raw` array**, verbatim JSON, to the path `review_ledger.sh raw <id>`
 names. That file is the only record of what each pass said in its own words, and it is what made the
 clustering constants measurable at all. They were carried for three runs on recollection — "synonyms,
@@ -135,7 +146,7 @@ measuring them is what ended them. `VERIFY_CAP` is the only constant left to che
 **5. Close the ledger row** with the counts the workflow returned, and the level it ran at:
 
 ```
-bash "$(git rev-parse --show-toplevel)/scripts/review_ledger.sh" done <run-id> <found> <confirmed> <level>
+bash "$(git rev-parse --show-toplevel)/scripts/review_ledger.sh" done <run-id> <found> <confirmed> <level> <cleanups>
 ```
 
 `found` is the workflow's `found`: how many findings its passes **reported**, ungrouped, so the
@@ -145,7 +156,8 @@ For `<level>` use the workflow's returned `effort`, not the token the user typed
 resolved in step 1 — the three differ precisely when something went wrong, and the returned one is
 the level the passes actually ran at. The ledger stores only the known vocabulary, so a level it
 does not recognise is dropped silently rather than corrupting the row: nothing downstream will
-complain about a wrong one.
+complain about a wrong one. `<cleanups>` is the length of the returned `cleanups`, ungrouped: its
+own column, because `found` means bug reports in every row written before cleanups existed.
 
 Close the row even when the count is zero — a review that found nothing still happened, and a
 missing row reads as "never reviewed".
@@ -171,6 +183,10 @@ Severity and verification status are two axes, so never fold them into one chip.
 them apart has lost the distinction the verify phase was spent on. The status stays a word beside
 the chip: `CONFIRMED`, `UNVERIFIED — <reason>`, `REFUTED`.
 
+**Cleanups go after every bug**, in their own section, with the same chips and the category in place
+of a status: `🟡 LOW reuse — net.sprout:40 …`. Say once, in the heading, that they are not verified
+by design: you are the filter that `/simplify`'s applying agent was.
+
 Do not fix anything in this turn, and do not commit, amend or push. The temptation is strong when a
 finding is obviously right and the fix is three lines — and it defeats the skill. A review whose
 findings arrive alongside "…and I have already fixed all of them, and force-pushed" gave the reader
@@ -185,9 +201,9 @@ Pass this to `Workflow` as `script`, unmodified. Everything variable arrives thr
 ```js
 export const meta = {
   name: 'sprout-review',
-  description: 'Ensemble diff review: N careful reviewers, dedup, adversarial verify',
+  description: 'Ensemble diff review: N careful reviewers, cleanup passes, adversarial verify',
   phases: [
-    { title: 'Review', detail: 'N independent careful passes over the diff' },
+    { title: 'Review', detail: 'N independent bug passes and the cleanup passes, over the diff' },
     { title: 'Verify', detail: 'one skeptic refutes every finding the cap admits' },
   ],
 }
@@ -212,6 +228,12 @@ const VERIFY_EFFORT = (EFFORT === 'low') ? 'medium' : EFFORT
 // once, which does not grow because more reviewers ran. At xhigh and max it
 // binds hard and the excess is reported unverified. See BACKLOG.md.
 const VERIFY_CAP = 10
+
+// Cleanup passes: /simplify's four angles, report-only. One pass covers all four
+// up to high; xhigh and max split them one per pass, as /simplify does. A
+// separate track — never verified, capped or counted in `found`/`confirmed`.
+const CLEANUP_LADDER = { low: 1, medium: 1, high: 1, xhigh: 4, max: 4 }
+const C = CLEANUP_LADDER[EFFORT]
 
 const FINDINGS = {
   type: 'object',
@@ -257,10 +279,10 @@ const VERDICTS = {
 // review that instead" while nothing could ever pass one — a branch that read as
 // supported and was unreachable. The target now arrives in `args`, so the two
 // cases are separate prompts and neither mentions the other's.
-const SCOPE = TARGET ? `You are reviewing \`${TARGET}\` for real bugs. Resolve it as a PR number, a
+const scopeFor = what => TARGET ? `You are reviewing \`${TARGET}\` for ${what}. Resolve it as a PR number, a
 branch name, or a file path — in that order — and get the unified diff it names
 (\`gh pr diff <n>\`, \`git diff <branch>...HEAD\`, or the file's current contents).
-Treat that, and nothing else, as the review scope.` : `You are reviewing a pull request for real bugs. Run \`git diff @{upstream}...HEAD\` (or \`git diff main...HEAD\` / \`git diff HEAD~1\`
+Treat that, and nothing else, as the review scope.` : `You are reviewing a pull request for ${what}. Run \`git diff @{upstream}...HEAD\` (or \`git diff main...HEAD\` / \`git diff HEAD~1\`
 if there's no upstream) to get the unified diff under review. If there are
 uncommitted changes, or the range diff is empty, also run \`git diff HEAD\` and
 include the working-tree changes in scope — the review often runs before the
@@ -270,7 +292,7 @@ commit. Treat this diff as the review scope.`
 // the schema instead of ReportFindings, which was not available to the
 // original's agents in practice, and the last paragraph bounds the search —
 // exploration is where a pass spends its tokens.
-const REVIEWER = `${SCOPE}
+const REVIEWER = `${scopeFor('real bugs')}
 
 Review the diff as a careful senior engineer would: read every hunk, open the surrounding files for context as needed (Read, Grep, git log/blame/show), and hunt for correctness issues — wrong or inverted conditions, off-by-one, null/undefined dereference, missing \`await\`, dropped error handling, removed guards or validations, broken callers of changed functions, races. Prefer real failure modes over style; every finding needs a concrete scenario in which the code misbehaves.
 
@@ -278,14 +300,81 @@ Report at most 8 findings. Quality over quantity: include everything you genuine
 
 Stay inside the diff and what it touches. Read the changed hunks, the files they are in, and the callers of anything whose signature or behaviour changed. That is the budget — do not survey the repository, re-read a file you have already read, or go looking for pre-existing bugs the diff did not introduce.`
 
+// The angle text is /simplify's (Claude Code 2.1.286), with Sprout's own forms
+// added; its closing "apply the fixes" phase is dropped, since this skill reports.
+const ANGLES = {
+  reuse: `### Reuse
+Flag new code that re-implements something the codebase already has. Grep
+\`stdlib/prelude.sprout\`, the \`stdlib/\` modules and the files adjacent to the
+change, and name the existing helper to call instead.`,
+  simplification: `### Simplification
+Flag unnecessary complexity the diff adds: redundant or derivable state,
+copy-paste with slight variation, deep nesting, dead code left behind. In Sprout
+that includes a nested \`match\` that \`let..else\`, a combinator or \`|>\` would
+flatten (\`docs/idiomatic-sprout.md\`). Name the simpler form.`,
+  efficiency: `### Efficiency
+Flag wasted work the diff introduces: redundant computation or repeated I/O,
+blocking work added to startup or hot paths, and quadratic building — a
+\`list_append(acc, [x])\` in a loop copies \`acc\` every step. Also flag a
+long-lived closure that captures a large enclosing scope and keeps it alive.
+Name the cheaper alternative.`,
+  altitude: `### Altitude
+Check that each change fixes the root cause at the right depth rather than
+patching a symptom. Special cases layered on shared infrastructure are a sign the
+fix is not deep enough — prefer the simpler, more general change to the
+underlying mechanism over adding special cases, and name that change.`,
+}
+
+// Round-robin, so C = 1 gives one pass with every angle and C = 4 one each.
+const KEYS = Object.keys(ANGLES)
+const groups = Array.from({ length: C }, (_, i) => KEYS.filter((_, j) => j % C === i))
+
+const cleanupPrompt = keys => `${scopeFor('cleanups')}
+
+You are improving the quality of the changed code, not hunting for bugs — other
+reviewers do that. REPORT ONLY: do not edit any file. Skip a finding whose fix
+would change intended behaviour or need changes well outside the diff.
+
+${keys.map(k => ANGLES[k]).join('\n\n')}
+
+For each finding give \`file\`, \`line\`, a one-line \`summary\`, its angle as
+\`category\`, and in \`scenario\` the concrete cost: what is duplicated, wasted or
+harder to maintain, and the form to use instead. \`severity\` is the size of that
+cost. Report at most 8 findings.
+
+Stay inside the diff and what it touches. The one search outside it is the Reuse
+angle's grep for an existing helper.`
+
+const CLEANUP_FINDINGS = JSON.parse(JSON.stringify(FINDINGS))
+CLEANUP_FINDINGS.properties.findings.items.properties.category = { enum: KEYS }
+CLEANUP_FINDINGS.properties.findings.items.required.push('category')
+
 phase('Review')
-log(`${EFFORT}: ${N} pass(es) at ${EFFORT} effort, verify at ${VERIFY_EFFORT}` +
-    (TARGET ? `, target ${TARGET}` : ''))
-const passes = await parallel(
-  Array.from({ length: N }, (_, i) => () =>
+log(`${EFFORT}: ${N} pass(es) at ${EFFORT} effort, verify at ${VERIFY_EFFORT}, ` +
+    `${C} cleanup pass(es)` + (TARGET ? `, target ${TARGET}` : ''))
+// One barrier for both tracks: the cleanup passes cost no wall-clock beyond the
+// slowest bug pass.
+const results = await parallel([
+  ...Array.from({ length: N }, (_, i) => () =>
     agent(REVIEWER, {
       label: `review:${i + 1}`, phase: 'Review', schema: FINDINGS, effort: EFFORT,
-    })))
+    })),
+  ...groups.map(keys => () =>
+    agent(cleanupPrompt(keys), {
+      label: `cleanup:${keys.join('+')}`, phase: 'Review', schema: CLEANUP_FINDINGS,
+      effort: EFFORT,
+    })),
+])
+const passes = results.slice(0, N)
+
+// With one angle per pass the angle is known, so it overrides the pass's label.
+// A failed pass is logged: zero cleanups from a pass that never ran is not
+// "the code is clean".
+const cleanupResults = results.slice(N)
+const cleanupFailed = cleanupResults.filter(r => !r).length
+if (cleanupFailed) log(`${cleanupFailed} of ${C} cleanup pass(es) failed`)
+const rawCleanups = cleanupResults.flatMap((r, i) => (r?.findings || [])
+  .map(f => groups[i].length === 1 ? { ...f, category: groups[i][0] } : f))
 
 // A barrier is right here: the skeptic needs every pass's findings at once, and
 // one shared context reads each file once where separate agents each re-read it.
@@ -317,7 +406,7 @@ const RANK = { low: 0, medium: 1, high: 2 }
 // rewrite a genuinely different file, because the whole relative path has to
 // match — only a reviewer reporting a bare basename could collide, and that path
 // was ambiguous before it got here.
-const paths = [...new Set(all.map(f => f.file))]
+const paths = [...new Set([...all, ...rawCleanups].map(f => f.file))]
 const canon = new Map()
 for (const p of paths) {
   let best = p
@@ -327,6 +416,7 @@ for (const p of paths) {
   canon.set(p, best)
 }
 const findings = all.map(f => ({ ...f, file: canon.get(f.file) || f.file }))
+const cleanups = rawCleanups.map(f => ({ ...f, file: canon.get(f.file) || f.file }))
 
 // The only ordering in here, and it reads the reviewer's own severity field. It
 // took two comparators — one for eviction, one for reading order — while
@@ -351,7 +441,7 @@ log(`${findings.length} findings from ${passes.filter(Boolean).length} passes; v
 
 phase('Verify')
 // ONE skeptic for the whole list, not one per finding. Two reasons. The agent
-// count becomes `N + 1` and known before the run instead of `N + D` discovered
+// count becomes `N + C + 1` and known before the run instead of `N + D` discovered
 // during it. And findings cluster in the same few files, so a shared context
 // reads each file once where D separate agents each re-read it.
 const listed = toVerify.map((f, i) =>
@@ -411,6 +501,10 @@ return {
   findings: confirmed.sort(bySeverity),
   unverified: [...pastCap, ...unanswered].sort(bySeverity),
   refuted: judged.filter(f => f.verdict && f.verdict.refuted),
+  // Unverified by design: the reader is the filter /simplify's applying agent
+  // was. Never part of `found`, `confirmed` or `raw`.
+  cleanupPasses: C,
+  cleanups: cleanups.sort(bySeverity),
 }
 ```
 
@@ -442,9 +536,15 @@ return {
   gate admitted were the two the reviewers had already conceded were dead — while two it hid
   contradicted a claim in the PR body. A gate is only as good as the signal it ranks on, and that
   signal goes flat exactly when a diff has no severe bugs, which is most of the time.
-- **The agent count is at most `N + 1`,** known before the run — `N` only when the passes found
-  nothing at all, since there is then nothing to judge. It was `N + D` at `N = 8`, where eight
-  reviewers finding two apiece meant two dozen agents: nothing bounded the second phase.
+- **The agent count is at most `N + C + 1`,** known before the run — `N + C` only when the bug
+  passes found nothing at all, since there is then nothing to judge. It was `N + D` at `N = 8`,
+  where eight reviewers finding two apiece meant two dozen agents: nothing bounded the second phase.
+- **Why cleanups skip the skeptic.** It is told to refute when unsure and judges whether a failure
+  occurs; a cleanup has no failure, so it would refute nearly all of them. `/simplify` has no
+  verifier either — its applying agent skips weak findings. Here the reader does that.
+- **Why cleanups are their own column.** Of 67 findings across the 11 runs on record before the
+  track existed, none was reuse or simplification; the reviewer prompt asks for failures, and the
+  skeptic refutes the rest. Folding cleanups into `found` would change what every older row means.
 - **One comparator, severity.** Eviction order and reading order are the same now. They needed two
   while agreement had a say, and using the wrong one of the pair is how a lone `high` once got
   evicted in favour of ten corroborated `low`s.
@@ -455,5 +555,6 @@ return {
   pass; it does not widen the verify cap, and nothing has measured what the extra passes find.
   Do not describe a `max` run as "thorough" — describe it as eight passes.
 - The ledger lives at `$GIT_DIR/claude-review/runs.tsv` — per-worktree, invisible to `git status`,
-  append-only so two concurrent sessions cannot clobber each other, and eight columns wide since
-  the level joined it (older seven-field rows still parse). See `scripts/review_ledger.sh`.
+  append-only so two concurrent sessions cannot clobber each other, and nine columns wide since
+  the cleanup count joined it (older seven- and eight-field rows still parse). See
+  `scripts/review_ledger.sh`.
