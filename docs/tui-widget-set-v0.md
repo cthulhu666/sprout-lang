@@ -48,7 +48,8 @@ landed the same day; `input` and `list_view` are C2b. Scrolling, borders, tabs,
 tables, `tree` and `text_area` are C3 — scrolling landed as C3a
 (`docs/tui-scroll-view-v0.md`), `text_area` as C3b (`docs/tui-text-area-v0.md`),
 and `tree` is designed as C3c (`docs/tui-tree-v0.md`), held until content updates
-landed because a file browser's content changes every time a node expands.
+landed because a file browser's content changes every time a node expands. `tabs`
+landed as C3d (`docs/tui-tabs-v0.md`).
 Reflowing text is deferred with a reason (§4.6). No new builtin — and C3b
 answered the `vector_remove` question by not asking it: a widget handler is
 pure, so `text_area` holds a persistent zipper rather than a mutable vector.

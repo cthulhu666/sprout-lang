@@ -1,0 +1,283 @@
+module stdlib.tui.widgets.tabs
+
+# Several children, one shown, under a bar naming them all. Design:
+# docs/tui-tabs-v0.md.
+#
+# A container, not a bar: `app.App` has no model, so which tab is shown has
+# nowhere to live but here (§3). The tabs never bind a key — switching is the
+# application's, asked for with a `Change` through `on_change` (§4.4).
+
+import stdlib.tui.event as event
+import stdlib.tui.geometry as geometry
+import stdlib.tui.screen as scr
+import stdlib.tui.style as style
+import stdlib.tui.text as text
+import stdlib.tui.widget as widget
+import stdlib.tui.widgets.children as children
+import stdlib.tui.widgets.paint as paint
+
+# `key` is the id the child answers to. That is what lets the tabs pass a
+# delivery to whichever child is shown without seeing what it is (§4.2).
+export type Tab m (..) = (key: widget.WidgetId, title: String,
+                          child: widget.Widget m)
+
+# What the application can ask for. `Open` on a key already present selects
+# that tab and drops the new child, so opening is also "show it" (§4.3).
+export type Change m (..) =
+  | Open (Tab m)
+  | Select widget.WidgetId
+  | Close widget.WidgetId
+  | Next
+  | Prev
+
+# `on_change` decodes the application's messages into changes; a message it
+# does not decode goes to the shown tab. `on_switch` hears every change of
+# which tab is shown, whatever caused it.
+export type TabsOpts m (..) = (bar: style.Style, active: style.Style,
+                               on_change: Maybe (m -> Maybe(Change m)),
+                               on_switch: Maybe (widget.WidgetId -> m))
+
+export fn tabs_opts() -> TabsOpts m =
+  TabsOpts(bar = style.style_default,
+           active = style.with_reverse(style.style_default, true),
+           on_change = Nothing, on_switch = Nothing)
+
+# `active` names a tab in `tabs`, and is `Nothing` only when there are none.
+# Every change keeps that; a key that named nothing would read as empty.
+type Tb m = (id: widget.WidgetId, opts: TabsOpts m, tabs: List (Tab m),
+             active: Maybe widget.WidgetId, has_focus: Bool)
+
+type alias Reply m = (Tb m, List m, List(widget.Cmd m))
+
+# ── looking tabs up ─────────────────────────────────────────────────────────
+
+fn keys(t: Tb m) -> List widget.WidgetId = list_map(\tb -> tb.key, t.tabs)
+
+fn kids(t: Tb m) -> List(widget.Widget m) = list_map(\tb -> tb.child, t.tabs)
+
+fn tab_at(t: Tb m, k: widget.WidgetId) -> Maybe (Tab m) =
+  find(\tb -> widget.id_eq(tb.key, k), t.tabs)
+
+fn holds(t: Tb m, k: widget.WidgetId) -> Bool =
+  any(\tb -> widget.id_eq(tb.key, k), t.tabs)
+
+fn shown_tab(t: Tb m) -> Maybe (Tab m) = and_then(tab_at(t, _), t.active)
+
+fn is_shown(t: Tb m, k: widget.WidgetId) -> Bool =
+  maybe_with_default(false, map(widget.id_eq(k, _), t.active))
+
+# The key after `k` in `ks`, not wrapping. Before is this over the reversed
+# list, so there is one walk.
+fn key_after(ks: List widget.WidgetId, k: widget.WidgetId) -> Maybe widget.WidgetId =
+  match ks with
+  | Nil -> Nothing
+  | [x | rest] -> if widget.id_eq(x, k) then head_of(rest) else key_after(rest, k)
+
+fn head_of(xs: List a) -> Maybe a =
+  match xs with
+  | Nil -> Nothing
+  | [x | _] -> Just(x)
+
+# Next and Prev wrap; a close does not, so the tab that replaces a closed one
+# is beside it on screen.
+fn wrapped(ks: List widget.WidgetId, k: widget.WidgetId) -> Maybe widget.WidgetId =
+  maybe_or_else(key_after(ks, k), head_of(ks))
+
+fn neighbour(ks: List widget.WidgetId, k: widget.WidgetId) -> Maybe widget.WidgetId =
+  maybe_or_else(key_after(ks, k), key_after(list_reverse(ks), k))
+
+# ── rebuilding ──────────────────────────────────────────────────────────────
+
+fn with_child(t: Tb m, k: widget.WidgetId, w: widget.Widget m) -> Tb m =
+  t with (tabs = list_map(reseat(k, w, _), t.tabs))
+
+fn reseat(k: widget.WidgetId, w: widget.Widget m, tb: Tab m) -> Tab m =
+  if widget.id_eq(tb.key, k) then tb with (child = w) else tb
+
+# A traversal hands back the children in order, so each goes back under the
+# title it came from.
+fn rekid(t: Tb m,
+         r: (List(widget.Widget m), List m, List(widget.Cmd m))) -> Reply m =
+  let (ws, said, asked) = r
+  in (t with (tabs = respan(t.tabs, ws)), said, asked)
+
+# The two lists are the same length by construction — `kids` built the second
+# from the first — so a mismatch would be a bug here, not input.
+fn respan(ts: List (Tab m), ws: List (widget.Widget m)) -> List (Tab m) =
+  match ts with
+  | Nil -> Nil
+  | [tb | trest] ->
+      match ws with
+      | Nil -> Nil
+      | [w | wrest] -> Cons(tb with (child = w), respan(trest, wrest))
+
+fn then_do(r: Reply m, f: Tb m -> Reply m) -> Reply m =
+  let (t1, s1, c1) = r
+      (t2, s2, c2) = f(t1)
+  in (t2, list_append(s1, s2), list_append(c1, c2))
+
+fn quiet(t: Tb m) -> Reply m = (t, Nil, Nil)
+
+# ── focus ───────────────────────────────────────────────────────────────────
+
+# Only a focused tabs tells a child anything: the ring lit the tabs, not the
+# child, so an unfocused tabs has no focus to hand on or take back.
+fn tell(t: Tb m, k: Maybe widget.WidgetId, on: Bool) -> Reply m =
+  if t.has_focus then lit(t, k, on) else quiet(t)
+
+fn lit(t: Tb m, k: Maybe widget.WidgetId, on: Bool) -> Reply m =
+  let Just key = k else quiet(t)
+      Just tb = tab_at(t, key) else quiet(t)
+      Just r = widget.deliver(tb.child, key, widget.ToFocus(on)) else quiet(t)
+  in rejoin(t, key, r)
+
+fn focused(t: Tb m, on: Bool) -> Reply m =
+  if on then tell(t with (has_focus = true), t.active, true)
+  else tell(t, t.active, false) |> then_do(_, \t2 -> quiet(t2 with (has_focus = false)))
+
+# ── switching ───────────────────────────────────────────────────────────────
+
+# Blur the old tab before lighting the new one, so no two children are ever
+# focused at once — the ring's rule, kept inside the container.
+fn switch_to(t: Tb m, to: widget.WidgetId) -> Reply m =
+  if is_shown(t, to) then quiet(t)
+  else tell(t, t.active, false) |> then_do(_, arrive(_, Just(to)))
+
+fn arrive(t: Tb m, k: Maybe widget.WidgetId) -> Reply m =
+  tell(t with (active = k), k, true) |> then_do(_, announce(_, k))
+
+fn announce(t: Tb m, k: Maybe widget.WidgetId) -> Reply m =
+  let Just key = k else quiet(t)
+      Just say = t.opts.on_switch else quiet(t)
+  in (t, [say(key)], Nil)
+
+# ── changes ─────────────────────────────────────────────────────────────────
+
+fn changed(t: Tb m, c: Change m) -> Reply m =
+  match c with
+  | Open tb -> opened(t, tb)
+  | Select k -> if holds(t, k) then switch_to(t, k) else quiet(t)
+  | Close k -> closed(t, k)
+  | Next -> stepped(t, keys(t))
+  | Prev -> stepped(t, list_reverse(keys(t)))
+
+fn opened(t: Tb m, tb: Tab m) -> Reply m =
+  if holds(t, tb.key) then switch_to(t, tb.key)
+  else switch_to(t with (tabs = list_append(t.tabs, [tb])), tb.key)
+
+fn stepped(t: Tb m, ks: List widget.WidgetId) -> Reply m =
+  let Just k = t.active else quiet(t)
+      Just to = wrapped(ks, k) else quiet(t)
+  in switch_to(t, to)
+
+# A hidden tab just goes. The shown one is blurred on its way out — a pane that
+# saves on blur gets to — and its neighbour takes its place.
+fn closed(t: Tb m, k: widget.WidgetId) -> Reply m =
+  if ! holds (t, k) then quiet(t)
+  else if is_shown(t, k)
+  then tell(t, Just(k), false) |> then_do(_, replaced(_, k, neighbour(keys(t), k)))
+  else quiet(dropped(t, k))
+
+fn replaced(t: Tb m, k: widget.WidgetId, next: Maybe widget.WidgetId) -> Reply m =
+  arrive(dropped(t, k), next)
+
+fn dropped(t: Tb m, k: widget.WidgetId) -> Tb m =
+  t with (tabs = list_filter(\tb -> ! widget.id_eq (tb.key, k), t.tabs))
+
+# ── the widget ──────────────────────────────────────────────────────────────
+
+# A broadcast reaches every tab, shown or not: a hidden pane still counts ticks
+# toward its autosave.
+fn tb_on_event(t: Tb m, ev: event.Event) -> Reply m =
+  rekid(t, children.broadcast(ev, kids(t)))
+
+# Addressed to the tabs: a change if the decoder reads one, otherwise the shown
+# tab's. Addressed past them: whichever tab answers to it, shown or not, since
+# an answer can land after its tab was hidden (§4.2).
+fn tb_route(t: Tb m, target: widget.WidgetId,
+            d: widget.Delivery m) -> Maybe (Reply m) =
+  if widget.id_eq(target, t.id) then own(t, d) else past(t, target, d)
+
+fn own(t: Tb m, d: widget.Delivery m) -> Maybe (Reply m) =
+  match d with
+  | widget.ToMsg msg -> decided(t, d, widget.decoded(t.opts.on_change, msg))
+  | widget.ToFocus on -> Just(focused(t, on))
+  | widget.ToEvent _ -> to_shown(t, d)
+
+fn decided(t: Tb m, d: widget.Delivery m, c: Maybe (Change m)) -> Maybe (Reply m) =
+  match c with
+  | Just ch -> Just(changed(t, ch))
+  | Nothing -> to_shown(t, d)
+
+fn to_shown(t: Tb m, d: widget.Delivery m) -> Maybe (Reply m) =
+  let Just tb = shown_tab(t) else Nothing
+  in map(rejoin(t, tb.key, _), widget.deliver(tb.child, tb.key, d))
+
+fn rejoin(t: Tb m, k: widget.WidgetId,
+          r: (widget.Widget m, List m, List(widget.Cmd m))) -> Reply m =
+  let (w, said, asked) = r
+  in (with_child(t, k, w), said, asked)
+
+# Focus is the container's to hand out, as it is the ring's: lighting a child
+# from outside would leave two lit when the tabs next switch.
+fn past(t: Tb m, target: widget.WidgetId,
+        d: widget.Delivery m) -> Maybe (Reply m) =
+  match d with
+  | widget.ToFocus _ -> Nothing
+  | widget.ToMsg _ -> map(rekid(t, _), children.deliver_first(target, d, kids(t)))
+  | widget.ToEvent _ -> map(rekid(t, _), children.deliver_first(target, d, kids(t)))
+
+fn title_cell(tb: Tab m) -> String = ` ${tb.title} `
+
+fn bar_width(t: Tb m) -> Int =
+  list_fold(\ (acc, tb) -> acc + text.width(title_cell(tb)), 0, t.tabs)
+
+fn tb_render(t: Tb m, r: geometry.Region, s: scr.Screen) -> Unit !{IO} = do
+  let (bar, body) = geometry.split_top(r, 1)
+  paint_bar(t, bar, s, t.tabs, 0)
+  match shown_tab(t) with
+  | Nothing -> ()
+  | Just tb -> children.render_zip([body], s, [tb.child])
+
+# Each title at the column the previous one ended; `paint.at` drops what falls
+# past the right edge.
+fn paint_bar(t: Tb m, r: geometry.Region, s: scr.Screen, ts: List (Tab m),
+             col: Int) -> Unit !{IO} =
+  match ts with
+  | Nil -> ()
+  | [tb | rest] -> paint_title(t, r, s, tb, rest, col)
+
+fn paint_title(t: Tb m, r: geometry.Region, s: scr.Screen, tb: Tab m,
+               rest: List (Tab m), col: Int) -> Unit !{IO} = do
+  paint.at(s, r, 0, col, title_cell(tb), look_of(t, tb))
+  paint_bar(t, r, s, rest, col + text.width(title_cell(tb)))
+
+fn look_of(t: Tb m, tb: Tab m) -> style.Style =
+  if is_shown(t, tb.key) then t.opts.active else t.opts.bar
+
+# The bar over the shown child, growing as the child does. Only the shown child
+# is measured, so a switch can change the size — what a container's `fit` slot
+# reads; the IDE gives its tabs a fraction.
+fn tb_measure(t: Tb m, avail: geometry.Size) -> widget.Measured =
+  let Just tb = shown_tab(t) else widget.fixed_size(geometry.Size(bar_width(t), 1))
+      inner = widget.measure(tb.child, body_of(avail))
+  in inner with (size = geometry.Size(imax(bar_width(t), geometry.size_cols(inner.size)),
+                                      geometry.size_rows(inner.size) + 1))
+
+fn body_of(avail: geometry.Size) -> geometry.Size =
+  geometry.Size(geometry.size_cols(avail), imax(0, geometry.size_rows(avail) - 1))
+
+fn imax(a: Int, b: Int) -> Int = if a > b then a else b
+
+# The first tab is shown. Focus starts off: the ring lights the tabs, and the
+# tabs light their shown child then.
+export fn tabs_with(id: widget.WidgetId, ts: List (Tab m),
+                    opts: TabsOpts m) -> widget.Widget m =
+  widget.Widget(widget.View(state = Tb(id = id, opts = opts, tabs = ts,
+                                       active = map(\tb -> tb.key, head_of(ts)),
+                                       has_focus = false),
+                            on_event = tb_on_event, route = tb_route,
+                            render = tb_render, measure = tb_measure))
+
+export fn tabs(id: widget.WidgetId, ts: List (Tab m)) -> widget.Widget m =
+  tabs_with(id, ts, tabs_opts())

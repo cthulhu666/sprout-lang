@@ -1,0 +1,304 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.tui.event as event
+import stdlib.tui.geometry as g
+import stdlib.tui.screen as scr
+import stdlib.tui.style as sty
+import stdlib.tui.widget as widget
+import stdlib.tui.widgets.focus as focus
+import stdlib.tui.widgets.tabs as tabs
+
+# Several children, one shown. Design: docs/tui-tabs-v0.md.
+#
+# Every child is a probe that writes down what reached it, so "the active tab
+# got it", "a hidden tab got it" and "nobody got it" are three different
+# transcripts.
+
+type Msg (..) deriving (Eq, ToString) =
+  | OpenTab String
+  | SelectTab String
+  | CloseTab String
+  | NextTab
+  | PrevTab
+  # Not a tab change, so the decoder passes it on to the active tab.
+  | Ping
+  # What a probe says when something reaches it: its key, and what it was.
+  | Got String String
+  | Switched String
+
+type alias Says = List Msg
+type alias Asks = List(widget.Cmd Msg)
+
+let tabs_id = widget.WidgetId("tabs")
+
+# ── the probe ───────────────────────────────────────────────────────────────
+
+fn probe_on_event(k: String, ev: event.Event) -> (String, Says, Asks) =
+  match ev with
+  | event.TickEvent -> (k, [Got(k, "tick")], Nil)
+  | _ -> (k, Nil, Nil)
+
+fn probe_handler(k: String, d: widget.Delivery Msg) -> (String, Says, Asks) =
+  match d with
+  | widget.ToMsg m -> (k, [Got(k, to_string(m))], Nil)
+  | widget.ToFocus b -> (k, [Got(k, `focus ${to_string(b)}`)], Nil)
+  | widget.ToEvent _ -> (k, [Got(k, "key")], Nil)
+
+fn probe_render(k: String, r: g.Region, s: scr.Screen) -> Unit !{IO} = do
+  _ <- scr.screen_write(s, g.region_col(r), g.region_row(r), k,
+                        sty.style_default)
+  ()
+
+# Two rows tall so the tabs' own height is visible as the bar plus this.
+fn probe_measure(k: String, avail: g.Size) -> widget.Measured =
+  widget.fixed_size(g.Size(3, 2))
+
+fn probe(k: String) -> widget.Widget Msg =
+  widget.Widget(widget.View(state = k, on_event = probe_on_event,
+                            route = widget.route_if(widget.WidgetId(k),
+                                                    probe_handler, _, _, _),
+                            render = probe_render, measure = probe_measure))
+
+# The key is the id the child answers to, which is what lets the tabs forward
+# to whichever one is shown.
+fn tab(k: String) -> tabs.Tab Msg =
+  tabs.Tab(key = widget.WidgetId(k), title = k, child = probe(k))
+
+# ── the widget ──────────────────────────────────────────────────────────────
+
+fn change_of(m: Msg) -> Maybe(tabs.Change Msg) =
+  match m with
+  | OpenTab k -> Just(tabs.Open(tab(k)))
+  | SelectTab k -> Just(tabs.Select(widget.WidgetId(k)))
+  | CloseTab k -> Just(tabs.Close(widget.WidgetId(k)))
+  | NextTab -> Just(tabs.Next)
+  | PrevTab -> Just(tabs.Prev)
+  | _ -> Nothing
+
+fn switched(k: widget.WidgetId) -> Msg = Switched(widget.id_text(k))
+
+fn opts() -> tabs.TabsOpts Msg =
+  tabs.tabs_opts() with (on_change = Just(change_of), on_switch = Just(switched))
+
+fn three() -> widget.Widget Msg =
+  tabs.tabs_with(tabs_id, [tab("a"), tab("b"), tab("c")], opts())
+
+# ── observing ───────────────────────────────────────────────────────────────
+
+# A declined delivery is written into the transcript rather than dropped, so
+# "refused" and "said nothing" read differently.
+fn told_all(w: widget.Widget Msg, ds: List (widget.WidgetId, widget.Delivery Msg),
+            acc: Says) -> (widget.Widget Msg, Says) =
+  match ds with
+  | Nil -> (w, acc)
+  | [(to, d) | rest] -> told_step(w, rest, acc, widget.deliver(w, to, d))
+
+fn told_step(w: widget.Widget Msg,
+             rest: List (widget.WidgetId, widget.Delivery Msg), acc: Says,
+             r: Maybe (widget.Widget Msg, Says, Asks)) -> (widget.Widget Msg, Says) =
+  match r with
+  | Nothing -> told_all(w, rest, acc ++ [Got("-", "declined")])
+  | Just (w2, ms, _) -> told_all(w2, rest, acc ++ ms)
+
+fn says(w: widget.Widget Msg,
+        ds: List (widget.WidgetId, widget.Delivery Msg)) -> String =
+  match told_all(w, ds, Nil) with
+  | (_, ms) -> to_string(ms)
+
+fn after_told(w: widget.Widget Msg,
+         ds: List (widget.WidgetId, widget.Delivery Msg)) -> widget.Widget Msg =
+  match told_all(w, ds, Nil) with
+  | (w2, _) -> w2
+
+fn to_tabs(m: Msg) -> (widget.WidgetId, widget.Delivery Msg) =
+  (tabs_id, widget.ToMsg(m))
+
+fn to_key(k: String, m: Msg) -> (widget.WidgetId, widget.Delivery Msg) =
+  (widget.WidgetId(k), widget.ToMsg(m))
+
+fn focus_to(on: Bool) -> (widget.WidgetId, widget.Delivery Msg) =
+  (tabs_id, widget.ToFocus(on))
+
+fn said(r: (widget.Widget Msg, Says, Asks)) -> String =
+  match r with
+  | (_, ms, _) -> to_string(ms)
+
+fn key(k: event.Key) -> event.Event = event.KeyPress(k, event.mods_none)
+
+# ── painting ────────────────────────────────────────────────────────────────
+
+fn row_text(s: scr.Screen, row: Int, col: Int, cols: Int) -> String !{IO} =
+  if col >= cols then "" else row_step(s, row, col, cols)
+
+fn row_step(s: scr.Screen, row: Int, col: Int, cols: Int) -> String !{IO} = do
+  here <- scr.text_at(s, col, row)
+  rest <- row_text(s, row, col + 1, cols)
+  here ++ rest
+
+fn rows_from(s: scr.Screen, row: Int, rows: Int, cols: Int) -> String !{IO} =
+  if row >= rows then "" else rows_step(s, row, rows, cols)
+
+fn rows_step(s: scr.Screen, row: Int, rows: Int, cols: Int) -> String !{IO} = do
+  here <- row_text(s, row, 0, cols)
+  rest <- rows_from(s, row + 1, rows, cols)
+  if row + 1 >= rows then here else here ++ "|" ++ rest
+
+fn painted(w: widget.Widget Msg, cols: Int, rows: Int) -> scr.Screen !{IO} = do
+  s <- scr.screen_new(g.Size(cols, rows))
+  widget.render(w, g.Region(0, 0, cols, rows), s)
+  s
+
+fn shown(w: widget.Widget Msg, cols: Int, rows: Int) -> String !{IO} = do
+  s <- painted(w, cols, rows)
+  rows_from(s, 0, rows, cols)
+
+fn reversed_at(w: widget.Widget Msg, col: Int) -> Bool !{IO} = do
+  s <- painted(w, 12, 2)
+  c <- scr.cell_at(s, col, 0)
+  sty.style_reverse(scr.cell_style(c))
+
+fn paint_cases(state: TestState) -> Unit !{IO} = do
+  # The bar names every tab; the body shows only the active one.
+  first <- shown(three(), 12, 2)
+  assert_eq(state, "the bar names every tab and the body shows the first",
+            first, " a  b  c    |a           ")
+  picked <- shown(after_told(three(), [to_tabs(SelectTab("b"))]), 12, 2)
+  assert_eq(state, "selecting a tab shows its child instead", picked,
+            " a  b  c    |b           ")
+  # The active title is the one in reverse video, whether or not it is focused.
+  lit <- reversed_at(after_told(three(), [to_tabs(SelectTab("b"))]), 4)
+  assert_eq(state, "the active title is highlighted", lit, true)
+  dim <- reversed_at(after_told(three(), [to_tabs(SelectTab("b"))]), 1)
+  assert_eq(state, "an inactive title is not", dim, false)
+  # A title wider than what is left is cut at the edge, not wrapped.
+  cut <- shown(three(), 5, 1)
+  assert_eq(state, "a bar wider than the region is cut", cut, " a  b")
+  # Nothing open: an empty bar and an empty body.
+  none <- shown(tabs.tabs_with(tabs_id, Nil, opts()), 4, 2)
+  assert_eq(state, "no tabs paints nothing", none, "    |    ")
+
+fn measure_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "measures as the bar over the active child",
+            to_string(widget.measure(three(), g.Size(80, 24)).size),
+            "Size(9, 3)")
+  assert_eq(state, "and as the bar alone when empty",
+            to_string(widget.measure(tabs.tabs_with(tabs_id, Nil, opts()),
+                                     g.Size(80, 24)).size),
+            "Size(0, 1)")
+
+# ── where a delivery goes ───────────────────────────────────────────────────
+
+fn routing_cases(state: TestState) -> Unit !{IO} = do
+  # A message the decoder does not know is for whichever tab is shown.
+  assert_eq(state, "an undecoded message goes to the active tab",
+            says(three(), [to_tabs(Ping)]), "[Got(a, Ping)]")
+  assert_eq(state, "and follows the selection",
+            says(three(), [to_tabs(SelectTab("c")), to_tabs(Ping)]),
+            "[Switched(c), Got(c, Ping)]")
+  # The case a write's answer is: it was asked for by a tab that has since been
+  # hidden, and must still reach it.
+  assert_eq(state, "a message addressed to a hidden tab still reaches it",
+            says(three(), [to_key("b", Ping)]), "[Got(b, Ping)]")
+  assert_eq(state, "an address no tab answers to is declined",
+            says(three(), [to_key("zz", Ping)]), "[Got(-, declined)]")
+  assert_eq(state, "with no tabs an undecoded message is declined",
+            says(tabs.tabs_with(tabs_id, Nil, opts()), [to_tabs(Ping)]),
+            "[Got(-, declined)]")
+  # Without a decoder nothing is a change, so everything is passed on.
+  assert_eq(state, "with no decoder every message goes to the active tab",
+            says(tabs.tabs(tabs_id, [tab("a"), tab("b")]),
+                 [to_tabs(SelectTab("b"))]),
+            "[Got(a, SelectTab(b))]")
+  # Focus is the container's to hand out, as it is the ring's.
+  assert_eq(state, "focus addressed past the tabs is declined",
+            says(three(), [(widget.WidgetId("b"), widget.ToFocus(true))]),
+            "[Got(-, declined)]")
+
+# ── changing which tabs there are ───────────────────────────────────────────
+
+fn change_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "selecting the shown tab says nothing",
+            says(three(), [to_tabs(SelectTab("a"))]), "[]")
+  assert_eq(state, "selecting a missing tab is claimed and silent",
+            says(three(), [to_tabs(SelectTab("zz")), to_tabs(Ping)]),
+            "[Got(a, Ping)]")
+  assert_eq(state, "Next and Prev wrap around",
+            says(three(), [to_tabs(PrevTab), to_tabs(NextTab), to_tabs(NextTab)]),
+            "[Switched(c), Switched(a), Switched(b)]")
+  # Opening a key already open switches to it rather than opening it twice:
+  # the IDE choosing a file it already shows.
+  again <- shown(after_told(three(), [to_tabs(SelectTab("c")), to_tabs(OpenTab("a"))]),
+                 12, 2)
+  assert_eq(state, "opening an open key selects it, once", again,
+            " a  b  c    |a           ")
+  added <- shown(after_told(three(), [to_tabs(OpenTab("d"))]), 13, 2)
+  assert_eq(state, "opening a new key adds it at the end and shows it", added,
+            " a  b  c  d  |d            ")
+  assert_eq(state, "and announces the switch",
+            says(three(), [to_tabs(OpenTab("d"))]), "[Switched(d)]")
+  # Closing the shown tab shows its right-hand neighbour, or the left-hand one
+  # when it was last.
+  assert_eq(state, "closing the active tab shows the next one",
+            says(three(), [to_tabs(CloseTab("a")), to_tabs(Ping)]),
+            "[Switched(b), Got(b, Ping)]")
+  assert_eq(state, "closing the last tab shows the one before it",
+            says(three(), [to_tabs(SelectTab("c")), to_tabs(CloseTab("c")),
+                           to_tabs(Ping)]),
+            "[Switched(c), Switched(b), Got(b, Ping)]")
+  assert_eq(state, "closing a hidden tab leaves the selection alone",
+            says(three(), [to_tabs(CloseTab("b")), to_tabs(Ping),
+                           to_key("b", Ping)]),
+            "[Got(a, Ping), Got(-, declined)]")
+  assert_eq(state, "closing the only tab leaves nothing to send to",
+            says(tabs.tabs_with(tabs_id, [tab("a")], opts()),
+                 [to_tabs(CloseTab("a")), to_tabs(Ping)]),
+            "[Got(-, declined)]")
+
+# ── focus ───────────────────────────────────────────────────────────────────
+
+fn focus_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "focus is passed to the active tab",
+            says(three(), [focus_to(true)]), "[Got(a, focus true)]")
+  # Blur first, so no two children are ever focused at once.
+  assert_eq(state, "switching while focused moves focus with it",
+            says(three(), [focus_to(true), to_tabs(SelectTab("b"))]),
+            "[Got(a, focus true), Got(a, focus false), Got(b, focus true), Switched(b)]")
+  assert_eq(state, "switching while unfocused tells neither",
+            says(three(), [focus_to(true), focus_to(false),
+                           to_tabs(SelectTab("b"))]),
+            "[Got(a, focus true), Got(a, focus false), Switched(b)]")
+  # A closed tab is blurred on the way out: a pane that saves on blur must get
+  # the chance to.
+  assert_eq(state, "closing the focused tab blurs it and focuses the next",
+            says(three(), [focus_to(true), to_tabs(CloseTab("a"))]),
+            "[Got(a, focus true), Got(a, focus false), Got(b, focus true), Switched(b)]")
+  assert_eq(state, "an empty tabs claims focus and tells nobody",
+            says(tabs.tabs_with(tabs_id, Nil, opts()), [focus_to(true)]), "[]")
+  # The focus it claimed while empty is the next tab's: the IDE opening its
+  # first file with the pane focused.
+  assert_eq(state, "a tab opened into a focused empty tabs is focused",
+            says(tabs.tabs_with(tabs_id, Nil, opts()),
+                 [focus_to(true), to_tabs(OpenTab("a"))]),
+            "[Got(a, focus true), Switched(a)]")
+
+# ── events ──────────────────────────────────────────────────────────────────
+
+fn event_cases(state: TestState) -> Unit !{IO} = do
+  # The ring addresses the tabs, and the key goes to the tab that is shown.
+  assert_eq(state, "a focused key goes to the active tab",
+            said(widget.feed(focus.focus_ring([tabs_id], three()),
+                             [key(event.KChar('x'))])),
+            "[Got(a, key)]")
+  # A tick must reach every tab, or a hidden pane never autosaves.
+  assert_eq(state, "a broadcast reaches hidden tabs too",
+            said(widget.on_event(three(), event.TickEvent)),
+            "[Got(a, tick), Got(b, tick), Got(c, tick)]")
+
+fn main() -> Unit !{IO} = do
+  state <- new_state()
+  paint_cases(state)
+  measure_cases(state)
+  routing_cases(state)
+  change_cases(state)
+  focus_cases(state)
+  event_cases(state)
+  summary(state)
