@@ -117,6 +117,12 @@ fn s_do() -> Int =
       pre
       9
 
+fn s_try() -> Maybe Int =
+  do
+    pre
+    try Just(pre)
+    Just(10)
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -139,5 +145,6 @@ fn main() -> Unit !{IO} =
     assert_true(state, "`if` heads a later do step", s_if() == 6)
     assert_true(state, "`match` heads a later do step", s_match() == 7)
     assert_true(state, "a nested `do` heads a later do step", s_do() == 9)
+    assert_true(state, "`try` heads a later do step", s_try() == Just(10))
 
     summary(state)

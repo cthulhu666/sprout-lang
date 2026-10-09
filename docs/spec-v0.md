@@ -41,7 +41,7 @@ Out of scope for v0:
   `first(xs)..last(xs)` — and `a..b` is the canonical spelling the formatter emits.
 - Keywords: `export`, `fn`, `let`, `type`, `class`, `instance`, `where`, `match`,
   `with`, `do`, `if`, `then`, `else`, `in`, `true`, `false`, `extern`,
-  `deriving`, `wrap`, `for`. All are **hard** keywords — reserved everywhere,
+  `deriving`, `wrap`, `for`, `try`. All are **hard** keywords — reserved everywhere,
   never usable as an identifier. The implementation list is `is_keyword`
   (`lexer.sprout:56`) and this list must match it exactly.
 - Literals: integer, boolean, string, unit (`()`)
@@ -309,7 +309,8 @@ Shadowing has three known limits, all because the construct resolves by
   bare name.
 - Class methods keep bare names. A redefined class collides in the class-method
   wrapper symbol, and a method named like a prelude function is what built-in
-  syntax calls: a method `list_reverse` breaks comprehensions.
+  syntax calls: a method `list_reverse` breaks comprehensions, and one named
+  `branch` is what an unfused `try` calls (§5.9.1).
 - List and dict literals, list patterns and `>>`/`<<` are built from the bare names
   `Cons`, `Nil`, `dict_empty`, `dict_set`, `rcompose` and `lcompose`. A file's own
   declaration of one of them, or a local named like one, is what they use.
@@ -666,7 +667,7 @@ Rules:
   The residual is checked for exhaustiveness like any match arm — a residual that
   leaves cases uncovered is a non-exhaustive-match error. Constant vs binding-else
   is disambiguated on the `->` after the else. (Propagation without an `else` is
-  proposed as `try`; see `docs/try-propagate-v0.md`.)
+  `try`, §5.9.1.)
 - Every `else` and the body must unify to the block's result type; a mismatch is
   reported at the `else` value and names both types, since either side may be the
   wrong one. At least one binding is required.
@@ -776,7 +777,7 @@ A refutable step with **no following step** has no success continuation; it is t
 last-step error of §5.2.1a. RHS effect handling is inherited from `<-` and is
 unchanged: inference applies the rewrite before typing the step
 (`docs/effectful-let-else-v0.md`). Propagation without an
-`else` is proposed as `try` (`docs/try-propagate-v0.md`).
+`else` is `try` (§5.9.1).
 
 An **irrefutable** pattern needs no `else`, and per §5.2.1 that is decided against
 the pattern's *type*, not its syntax. A `wrap` or single-constructor ADT pattern is
@@ -1799,6 +1800,7 @@ a field access or as a `match` scrutinee. Every other reference consumes. So
   orthogonal, so an `!{IO}` block containing a fallible bind does *not* run every
   step. A block whose own type is `Maybe`/`Result` but whose binds are all
   non-fallible is likewise unaffected — nothing in it can end the block early.
+  The same holds after a `try` (§5.9.1), and the error names the `try`.
 - A `borrowing` parameter may not be consumed or returned.
 - An argument at a `borrowing` position must be a **variable reference**; a
   freshly-built linear value there would never be consumed.
@@ -2027,6 +2029,66 @@ is a type error, not an implicit `Ok`.
 Effects are orthogonal. `!{IO}` describes *what a step may do*, not whether the block
 can exit early, so an `!{IO}` block containing a fallible bind still short-circuits
 and its later steps are still conditional (see §5.8's consume rule).
+
+### 5.9.1 `try` *(experimental)*
+
+`try e` passes a failure on and gives the success. It replaces the fallible `<-`
+once the migration in `docs/try-propagate-v0.md` §8 completes; until then both work.
+
+```sprout
+fn sum_pos(a: Int, b: Int) -> Result String Int =
+  let x = try check_pos(a)
+      y = try check_pos(b)
+  in Ok(x + y)
+```
+
+**Where.** `try` starts the right-hand side of a `let` (in `let … in` and in `do`,
+alone or in a group), a `where` binding or a `<-` bind, or a `do` statement. Inside
+parentheses it may also head a right-hand side followed by a field, a call or a
+record update: `(try load()).x`, `(try load()) with (x = 1)`. Anywhere else, and in a
+top-level `let`, which has no block to end, it is an error.
+
+**The operand** is a name, a field, a call (a constructor's included) or a
+parenthesised expression. An operator, a pipe, a lambda, `-`, `!`, `if`, `match`,
+`do` or `let` needs parentheses: `try (s |> parse)`.
+
+**Meaning.** `let p = try e` followed by the rest of its block means
+
+```
+match branch(e) with
+| Continue p -> <rest of the block>
+| Break f -> f
+```
+
+with the prelude's `branch`, `Continue` and `Break` (§8.5), never a module's own or a
+local of that name. `e` runs once. `p` may be any pattern a `let` takes; a refutable
+one without `else` is a non-exhaustive match. `x <- try e` runs `e`'s effect and binds
+the success: it never unwraps a second time, so `e : Result E (Maybe A)` binds a
+`Maybe A`. A `do` statement `try e` means `_ <- try e`: it passes a failure on and
+drops the success. As a block's last step `try` is an error, since the block ends
+there anyway.
+
+**Typing.** `e : t a` with an instance `Propagate t`; the binding gets `a`. The
+failure `f : t b` becomes the value of the enclosing `let … in` or `do` block, the
+function's when that block is its body, so the block's type must unify with `t b`:
+a `Maybe` failure in a `Result` block, or `Result String _` in a `Result Int _` block,
+is an error at the `try`. A failure in a nested block ends only that block; a `do`
+inside a lambda is the lambda's own block.
+
+**Reserved.** No `else` and no `with` directly after a `try` operand. For `let..else`
+on the success write `let Just y = (try e) else …`; for a record update write
+`(try e) with (…)`.
+
+**Linear values.** A consume after a `try` in its block is rejected, as after a
+fallible bind (§5.8): the failure path skips it.
+
+**Cost.** When `e`'s type has an instance whose `branch` is one `match` on its
+parameter, with one `Continue(v)` arm and every other arm `Break(…)`, and the
+instance has no `where` context, the compiler puts that `match` in place of the
+`branch` call. The result is the `match` written by hand: no call and no
+`ControlFlow` value. Otherwise, and in generic code (`where Propagate t`), `try`
+calls `branch` and allocates a `ControlFlow`. The type must be known at the `try`
+for the first case.
 
 ### 5.10 List comprehensions (Experimental)
 
@@ -3421,9 +3483,8 @@ The three Monad laws (left identity `and_then(f, pure(x)) == f(x)`, right identi
 checked in `tests/stdlib/test_typeclass_laws.spr`.
 
 `do`/`<-` already performs the same bind for `Maybe`/`Result` structurally in the
-desugarer; the `Monad` class does not currently wire into `do`. A propagation form
-through a user-extensible class is proposed as `try` (`docs/try-propagate-v0.md`); a
-monad-generic `do` is not part of that proposal.
+desugarer; the `Monad` class does not currently wire into `do`. Propagation through
+a user-extensible class is `try` (§5.9.1); a monad-generic `do` is not part of it.
 
 An `Alternative` class (a generic `<|>`/`or_else`) is **not** provided: the only
 lawful `List` instance duplicates `Semigroup (List a)`'s `++`, so with `List`
@@ -3566,7 +3627,8 @@ declares its own `Continue` or `Break` writes the prelude's as `prelude.Continue
 (§3.1). A type with both `Propagate` and
 `Applicative` must satisfy `branch(pure(x)) == Continue(x)`. `ControlFlow r a`
 has `Eq` and `ToString` when `r` and `a` do.
-The planned `try` expression rewrites to `branch` (`docs/try-propagate-v0.md`).
+`try` (§5.9.1) is written through `branch`, and at a known instance whose `branch` is
+one `match` it uses that `match` directly.
 
 ### `Filterable` class and generic `filter` (Experimental)
 

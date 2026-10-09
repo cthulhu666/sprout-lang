@@ -787,10 +787,11 @@ fn group_steps(bindings: List LetBinding) -> List ast.DoStep =
   | Nil -> Nil
   | [b | rest] -> Cons(do_let_step(b, b.pos), group_steps(rest))
 
-# A plain name without `else` binds directly; anything else is a pattern step.
+# A plain name without `else` or `try` binds directly; anything else is a
+# pattern step.
 fn do_let_step(b: LetBinding, pos: source.SourcePos) -> ast.DoStep =
-  match (b.els, binding_name(b.pat)) with
-  | (Nothing, Just name) -> ast.DoLetStep(name, b.rhs)
+  match (b.els, binding_name(b.pat), ast.starts_with_try(b.rhs)) with
+  | (Nothing, Just name, false) -> ast.DoLetStep(name, b.rhs)
   | _ -> ast.DoPatStep(ast.LetBind, b.pat, b.rhs, b.els, pos)
 
 fn parse_do_step(tokens: Vec token.Token, i: Int) -> Result ParseError (DoStepParse, Int) =
@@ -799,19 +800,19 @@ fn parse_do_step(tokens: Vec token.Token, i: Int) -> Result ParseError (DoStepPa
     do
       (pattern, i2) <- parse_pattern(tokens, i)
       (_, i3) <- expected_symbol("<-", tokens, i2)
-      (value, i4) <- parse_expression(tokens, i3)
+      (value, i4) <- parse_rhs(tokens, i3)
       if tok_is_keyword(tok_at(tokens, i4), "else") then
         do
           (_, i5) <- expected_keyword("else", tokens, i4)
           (residual, handler, i6) <- parse_let_else_clause(tokens, i5)
           Ok((DoStepPlain(ast.DoPatStep(ast.ArrowBind, pattern, value, Just(ast.LetElse(residual, handler)), cur_pos(tokens, i))), i6))
-      else if is_irrefutable_do_bind_pattern(pattern) then
+      else if is_irrefutable_do_bind_pattern(pattern) && ! ast.starts_with_try (value) then
         Ok((DoStepPlain(ast.DoBindStep(pattern, value)), i4))
       else
         Ok((DoStepPlain(ast.DoPatStep(ast.ArrowBind, pattern, value, Nothing, cur_pos(tokens, i))), i4))
   else
     do
-      (value, i2) <- parse_expression(tokens, i)
+      (value, i2) <- parse_rhs(tokens, i)
       Ok((DoStepPlain(ast.DoExprStep(value)), i2))
 
 # Collects the steps up to the block's close and returns the index past it.
@@ -892,7 +893,7 @@ fn parse_let_binding(tokens: Vec token.Token, i: Int) -> Result ParseError (LetB
   do
     (pat, b) <- parse_pattern(tokens, i)
     (_, c) <- expected_symbol("=", tokens, b)
-    (rhs, d) <- parse_expression(tokens, c)
+    (rhs, d) <- parse_rhs(tokens, c)
     if tok_is_keyword(tok_at(tokens, d), "else") then
       do
         (_, e) <- expected_keyword("else", tokens, d)
@@ -931,6 +932,57 @@ fn parse_let_else_expr(tokens: Vec token.Token, i: Int) -> Result ParseError (as
     b <- expected_block_open(tokens, a)
     (bindings, c) <- collect_let_bindings(tokens, b, Nil)
     finish_let_in(tokens, bindings, c)
+
+# ---------------------------------------------------------------------------
+# `try` (spec §5.9)
+#
+# `try` starts a binding's right-hand side or a `do` statement, or sits in
+# parentheses at the head of one: `(try e).x`, `(try e) else …`. Its operand is a
+# postfix expression. `else` and `with` after it are reserved, so adding
+# `try … else` or `try … with` later changes only code rejected today.
+
+let try_operand_msg =
+  "the operand of `try` must be a name, a field, a call or a parenthesised expression; put this one in parentheses: `try (…)`"
+let try_else_msg = "`try` takes no `else` yet. For `let..else` on the value, write `(try e) else …`"
+let try_with_msg = "`with` after `try` is reserved. For a record update on the value, write `(try e) with (…)`"
+let try_top_level_msg = "a top-level `let` cannot use `try`: there is no block for a failure to end"
+
+# A binding's right-hand side, or a `do` statement.
+fn parse_rhs(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
+  if tok_is_keyword(tok_at(tokens, i), "try") then parse_try(tokens, i)
+  else parse_expression(tokens, i)
+
+fn parse_try(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
+  do
+    (try_tok, j) <- expected_keyword("try", tokens, i)
+    if starts_try_operand(tok_at(tokens, j)) then
+      do
+        (atom, k) <- parse_primary(tokens, j)
+        (operand, m) <- parse_postfix(tokens, k, atom, UpdatesReserved)
+        after_try_operand(tokens, m, operand, tok_pos(try_tok))
+    else Err(ParseError(try_operand_msg, tok_pos(try_tok)))
+
+fn starts_try_operand(t: token.Token) -> Bool =
+  match token.token_kind(t) with
+  | token.TokenIdentKind -> true
+  | token.TokenIntKind -> true
+  | token.TokenFloatKind -> true
+  | token.TokenStringKind -> true
+  | token.TokenCharKind -> true
+  | token.TokenTemplateStart -> true
+  | token.TokenKeywordKind -> token.token_text(t) == "true" || token.token_text(t) == "false"
+  | token.TokenSymbolKind ->
+      let s = token.token_text(t)
+      in s == "(" || s == "[" || s == "{"
+  | _ -> false
+
+fn after_try_operand(tokens: Vec token.Token, j: Int, operand: ast.Expr, try_pos: source.SourcePos) ->
+    Result ParseError (ast.Expr, Int) =
+  let t = tok_at(tokens, j)
+  in if tok_is_keyword(t, "else") then Err(ParseError(try_else_msg, cur_pos(tokens, j)))
+     else if tok_is_keyword(t, "with") then Err(ParseError(try_with_msg, cur_pos(tokens, j)))
+     else if tok_is_infix(t) || tok_is_symbol(t, "..") then Err(ParseError(try_operand_msg, try_pos))
+     else Ok((ast.TryExpr(operand, try_pos), j))
 
 # ---------------------------------------------------------------------------
 # Expression parsing
@@ -1168,20 +1220,35 @@ fn parse_call(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, I
 # accepted this accepts identically — it only stops rejecting orders that were
 # previously a parse error.
 fn parse_postfix_rest(tokens: Vec token.Token, i: Int, base: ast.Expr) -> Result ParseError (ast.Expr, Int) =
+  parse_postfix(tokens, i, base, UpdatesAllowed)
+
+# A `try` operand stops before `with`, which is reserved there (spec §5.9).
+type PostfixUpdates =
+  | UpdatesAllowed
+  | UpdatesReserved
+
+fn parse_postfix(tokens: Vec token.Token, i: Int, base: ast.Expr, updates: PostfixUpdates) ->
+    Result ParseError (ast.Expr, Int) =
   if tok_is_symbol(tok_at(tokens, i), "(") then
-    parse_call_postfix(tokens, i, base)
+    parse_call_postfix(tokens, i, base, updates)
   else if is_field_postfix_at(tokens, i) then
-    parse_field_postfix(tokens, i, base)
-  else if is_update_postfix_at(tokens, i) then
+    parse_field_postfix(tokens, i, base, updates)
+  else if allows_updates(updates) && is_update_postfix_at(tokens, i) then
     parse_update_postfix(tokens, i, base)
   else Ok((base, i))
 
-fn parse_call_postfix(tokens: Vec token.Token, i: Int, callee: ast.Expr) -> Result ParseError (ast.Expr, Int) =
+fn allows_updates(updates: PostfixUpdates) -> Bool =
+  match updates with
+  | UpdatesAllowed -> true
+  | UpdatesReserved -> false
+
+fn parse_call_postfix(tokens: Vec token.Token, i: Int, callee: ast.Expr, updates: PostfixUpdates) ->
+    Result ParseError (ast.Expr, Int) =
   do
     (_, i2) <- expected_symbol("(", tokens, i)
     (args, i3) <- collect_call_args(tokens, i2, Nil)
     (_, i4) <- expected_symbol(")", tokens, i3)
-    parse_postfix_rest(tokens, i4, desugar_placeholder_call(callee, list_reverse(args), cur_pos(tokens, i)))
+    parse_postfix(tokens, i4, desugar_placeholder_call(callee, list_reverse(args), cur_pos(tokens, i)), updates)
 
 # Postfix field access: a standalone `.` followed by an identifier
 # (docs/records-v0.md §4.3, "Scope B").  Requires the identifier so a bare
@@ -1193,12 +1260,12 @@ fn is_field_postfix_at(tokens: Vec token.Token, i: Int) -> Bool =
 # itself be dotted: `mk_line().from.x` lexes as `.` then the single ident token
 # `from.x`.  The remainder is therefore split and folded here, left-to-right,
 # into the same nested `GetFieldExpr` the Scope A resolution rule builds.
-fn parse_field_postfix(tokens: Vec token.Token, i: Int, base: ast.Expr) -> Result ParseError (ast.Expr, Int) =
+fn parse_field_postfix(tokens: Vec token.Token, i: Int, base: ast.Expr, updates: PostfixUpdates) ->
+    Result ParseError (ast.Expr, Int) =
   do
     (_, i2) <- expected_symbol(".", tokens, i)
     (name_tok, i3) <- expected_ident("a field name after '.'", tokens, i2)
-    parse_postfix_rest(tokens, i3,
-      fold_field_chain(base, token.token_text(name_tok), cur_pos(tokens, i)))
+    parse_postfix(tokens, i3, fold_field_chain(base, token.token_text(name_tok), cur_pos(tokens, i)), updates)
 
 fn fold_field_chain(base: ast.Expr, rest: String, pos: source.SourcePos) -> ast.Expr =
   match string.split_once(rest, ".") with
@@ -1279,7 +1346,8 @@ fn collect_call_args(tokens: Vec token.Token, i: Int, acc: List ast.Expr) -> Res
       | Just (_, i3) -> collect_call_args(tokens, i3, Cons(e, acc))
 
 fn parse_primary(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
-  if tok_is_keyword(tok_at(tokens, i), "true") then Ok((ast.BoolExpr(true, cur_pos(tokens, i)), i + 1))
+  if tok_is_keyword(tok_at(tokens, i), "try") then Err(ParseError(ast.try_place_msg, cur_pos(tokens, i)))
+  else if tok_is_keyword(tok_at(tokens, i), "true") then Ok((ast.BoolExpr(true, cur_pos(tokens, i)), i + 1))
   else if tok_is_keyword(tok_at(tokens, i), "false") then Ok((ast.BoolExpr(false, cur_pos(tokens, i)), i + 1))
   else if tok_is_int(tok_at(tokens, i)) then
     match int_literal_value(token.token_text(tok_at(tokens, i)), cur_pos(tokens, i)) with
@@ -1523,9 +1591,15 @@ fn parse_paren_expr(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.E
     match match_symbol(tokens, i2, ")") with
     | Just (_, i3) -> Ok((ast.UnitExpr(cur_pos(tokens, i)), i3))
     | Nothing ->
-        do
-          (first, i3) <- parse_expression(tokens, i2)
-          parse_paren_expr_cont(tokens, i3, first, cur_pos(tokens, i))
+        if tok_is_keyword(tok_at(tokens, i2), "try") then
+          do
+            (e, i3) <- parse_try(tokens, i2)
+            (_, i4) <- expected_symbol(")", tokens, i3)
+            Ok((e, i4))
+        else
+          do
+            (first, i3) <- parse_expression(tokens, i2)
+            parse_paren_expr_cont(tokens, i3, first, cur_pos(tokens, i))
 
 fn parse_paren_expr_cont(tokens: Vec token.Token, i: Int, first: ast.Expr, pos: source.SourcePos) -> Result ParseError (ast.Expr, Int) =
   match match_symbol(tokens, i, ",") with
@@ -1628,7 +1702,7 @@ fn collect_where_bindings(tokens: Vec token.Token, i: Int, acc: List (ast.Patter
     do
       (pattern, i2) <- parse_pattern(tokens, i)
       (_, i3) <- expected_symbol("=", tokens, i2)
-      (value, i4) <- parse_expression(tokens, i3)
+      (value, i4) <- parse_rhs(tokens, i3)
       k <- next_item(tokens, i4, "a where binding", "a where block takes one binding per line")
       collect_where_bindings(tokens, k, Cons((pattern, value), acc))
 
@@ -1974,8 +2048,11 @@ fn parse_let_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Dec
     (name_tok, i3) <- expected_ident("let binding name", tokens, i2)
     (anno, i3b) <- parse_optional_type_anno(tokens, i3)
     (_, i4) <- expected_symbol("=", tokens, i3b)
-    (body, i5) <- parse_expression(tokens, i4)
-    Ok((ast.LetDecl(token.token_text(name_tok), body, anno, cur_pos(tokens, i)), i5))
+    if tok_is_keyword(tok_at(tokens, i4), "try") then Err(ParseError(try_top_level_msg, cur_pos(tokens, i4)))
+    else
+      do
+        (body, i5) <- parse_expression(tokens, i4)
+        Ok((ast.LetDecl(token.token_text(name_tok), body, anno, cur_pos(tokens, i)), i5))
 
 fn parse_record_field_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.RecordFieldDecl, Int) =
   do

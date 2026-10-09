@@ -1112,8 +1112,13 @@ fn infer_expr(
   | ast.ComprehensionExpr elem gens pos ->
       infer_comprehension(state, env, subst, eff_subst, elem, gens, pos)
   | ast.LetBindExpr pat value els body pos ->
-      infer_match(state, env, subst, eff_subst, value, ast.let_bind_branches(pat, els, body, pos),
-                  LetBinding, pos)
+      match ast.try_bind(pat, value, els, body, pos) with
+      | Just tb -> infer_try(state, env, subst, eff_subst, tb)
+      | Nothing ->
+          infer_match(state, env, subst, eff_subst, value, ast.let_bind_branches(pat, els, body, pos),
+                      LetBinding, pos)
+  # Every legal `try` is taken with its binding or statement before it gets here.
+  | ast.TryExpr _ pos -> InferErr(pos, ast.try_place_msg)
 
 # Declaration-boundary wrapper: applies s1 to the result so fresh TVars
 # never escape into lowering.  Declaration-level callers should use this;
@@ -5113,6 +5118,9 @@ fn unreachable_check(subst: Dict types.Type, ctor_map: Dict (List String), scrut
 type MatchSource =
   | UserMatch
   | LetBinding  # a binding's body, then its `else` (ast.let_bind_branches)
+  # A `try` at this position, whose operand has this type: the success arms
+  # and the failure arms, in the instance's order when fused.
+  | TryBinding source.SourcePos types.Type
 
 # Only a binding's `else` can mismatch, since the body's branch comes first
 # against a fresh type. Either side may be the wrong one, so name both, with one
@@ -5126,6 +5134,37 @@ fn branch_mismatch_message(src: MatchSource, e: String, branch_ty: types.Type,
       in "the `else` value is `" ++ types.type_to_string_renamed(vars, branch_ty)
            ++ "`, but the code after the binding is `" ++ types.type_to_string_renamed(vars, expected_ty)
            ++ "`; they must have the same type, since the `else` replaces that code when the pattern fails"
+  | TryBinding _ operand_ty -> try_block_message(operand_ty, branch_ty, expected_ty)
+
+# The failure is the side with the operand's head; when both have it, the arm
+# being checked is the failure, as it is for every arm after the first.
+fn try_block_message(operand_ty: types.Type, branch_ty: types.Type, expected_ty: types.Type) -> String =
+  let head = type_head_str(operand_ty)
+      (failure, block) = if type_head_str(branch_ty) != head && type_head_str(expected_ty) == head
+                         then (expected_ty, branch_ty)
+                         else (branch_ty, expected_ty)
+      failure_str = type_with_holes(failure)
+  in "this `try` passes on a `" ++ failure_str ++ "` failure, but the block returns `"
+       ++ type_with_holes(block) ++ "`. Handle the failure here with `let..else`, or make the block return `"
+       ++ failure_str ++ "`." ++ try_maybe_hint(type_head_str(failure), type_head_str(block))
+
+fn try_maybe_hint(failure_head: String, block_head: String) -> String =
+  if failure_head == "Maybe" && block_head == "Result" then
+    " To turn `Nothing` into an error, write `let Just x = e else Err(…)`."
+  else ""
+
+# A type with each variable printed `_`: the part this `try` does not fix.
+fn type_with_holes(t: types.Type) -> String =
+  types.type_to_string(unifier.apply_subst(holes_for(types.ftv(t)), t))
+
+fn holes_for(vars: List String) -> Dict types.Type =
+  list_fold(\ (acc, v) -> dict_set(v, types.TConst(types.type_id("_")), acc), dict_empty(), vars)
+
+# A `try`'s arms are partly the instance's, so a mismatch is reported at the `try`.
+fn mismatch_pos(src: MatchSource, body_pos: source.SourcePos) -> source.SourcePos =
+  match src with
+  | TryBinding try_pos _ -> try_pos
+  | _ -> body_pos
 
 fn infer_match(
   state: unifier.InferState,
@@ -5146,6 +5185,148 @@ fn infer_match(
           v <- unifier.fresh(state)
           infer_branches(state, env, s1, es1, typed_scrut, types.TVar(types.tyvar_id(v)), branches, Nil, scrut_eff,
                          src, pos)
+
+# --- `try` (spec §5.9) ---
+#
+# `<pat> = try e` means `match branch(e) with | Continue <pat> -> … | Break f -> f`
+# (ast.try_match). When `e`'s type has a fusable instance (try_fusions), the
+# instance's own `match` takes the place of `branch`, which is the `match` a user
+# would write by hand: no call and no `ControlFlow` box (docs/try-propagate-v0.md §5).
+
+# Stands for the operand, already inferred, in the generic path's `branch` call.
+let try_operand_name = "$operand"
+
+let try_last_step_msg =
+  "this `try` is the last step of its block: the block ends here anyway, so `try` does nothing. "
+    ++ "Write the expression without `try`."
+
+fn infer_try(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  tb: ast.TryBind
+) -> InferResult !{IO} =
+  do
+    let ast.TryBind operand pos success_arms = tb
+    unifier.note_try(state, pos)
+    sr <- infer_expr(state, env, subst, eff_subst, operand)
+    match sr with
+    | InferErr epos e -> InferErr(epos, e)
+    | InferOk typed_operand s1 es1 operand_eff ->
+        do
+          fusions <- unifier.get_try_fusions(state)
+          v <- unifier.fresh(state)
+          let operand_ty = unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_operand))
+              ret_ty = types.TVar(types.tyvar_id(v))
+              src = TryBinding(pos, operand_ty)
+          match and_then(\head -> dict_get(head, fusions), concrete_type_str(operand_ty)) with
+          | Just inst_arms ->
+              infer_branches(state, env, s1, es1, typed_operand, ret_ty,
+                             fuse_try_arms(inst_arms, success_arms), Nil, operand_eff, src, pos)
+          | Nothing ->
+              do
+                cr <- infer_expr(state, bind_local_scheme(try_operand_name, types.mono(operand_ty), env), s1, es1,
+                                 ast.CallExpr(ast.VarExpr("branch", pos), [ast.VarExpr(try_operand_name, pos)], pos))
+                match cr with
+                | InferErr epos e -> InferErr(epos, try_branch_error(epos, pos, e, operand_ty))
+                | InferOk typed_call s2 es2 _ ->
+                    infer_branches(state, env, s2, es2, splice_try_operand(typed_call, typed_operand), ret_ty,
+                                   ast.try_match_arms(success_arms, pos), Nil, operand_eff, src, pos)
+
+# The declaration's `try` matches, marked for linear_check.
+fn with_try_markers(positions: List source.SourcePos, env: Dict types.Scheme) -> Dict types.Scheme =
+  list_fold(\ (e, p) -> dict_set(linear_check.try_marker(p), types.mono(types.TConst(types.type_id("Unit"))), e),
+            env, positions)
+
+fn splice_try_operand(call: typed_ast.TypedExpr, operand: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
+  match call with
+  | typed_ast.TCall callee args t p -> typed_ast.TCall(callee, list_map(\a -> if is_try_operand(a) then operand else a, args), t, p)
+  | _ -> call
+
+fn is_try_operand(e: typed_ast.TypedExpr) -> Bool =
+  match e with
+  | typed_ast.TVar name _ _ -> name == try_operand_name
+  | _ -> false
+
+# The `branch` call fails at the `try` only when the operand's type has no
+# instance: it is not a `t a`, or its `t` has none.
+fn try_branch_error(epos: source.SourcePos, try_pos: source.SourcePos, e: String, operand_ty: types.Type) -> String =
+  if epos.index == try_pos.index && (string.starts_with(e, "Call type mismatch") || string.starts_with(e, "No instance of Propagate"))
+  then "`try` needs a type that can fail, and `" ++ type_with_holes(operand_ty) ++ "` has no `Propagate` instance"
+  else e
+
+# --- `try` fusion ---
+#
+# An instance can be fused when its `branch` is one `match` on its parameter,
+# with exactly one arm `Continue(v)` for a `v` its pattern binds, and every other
+# arm `Break(f)` with `f` not naming the parameter. An instance with a context is
+# left alone: its dictionaries are its own. Keyed by the instance's head type.
+fn try_fusions(decls: List ast.Decl) -> Dict (List ast.MatchBranch) =
+  list_fold(\ (acc, d) -> add_try_fusion(d, acc), dict_empty(), decls)
+
+fn add_try_fusion(d: ast.Decl, acc: Dict (List ast.MatchBranch)) -> Dict (List ast.MatchBranch) =
+  match d with
+  | ast.InstanceDecl (ast.TypeConstraint "Propagate" [head]) [] [ast.InstanceMethodImpl "branch" [ast.Param param _ _] _ _ _ body] _ ->
+      match fusable_branch_arms(param, body) with
+      | Just arms -> dict_set(type_head_str(type_from_ast(head, dict_empty())), arms, acc)
+      | Nothing -> acc
+  | _ -> acc
+
+fn fusable_branch_arms(param: String, body: ast.Expr) -> Maybe (List ast.MatchBranch) =
+  match body with
+  | ast.MatchExpr (ast.VarExpr scrut _) arms _ ->
+      if scrut == param
+         && list_length(list_filter(is_continue_arm, arms)) == 1
+         && all(\a -> fusable_arm(param, a), arms)
+      then Just(arms) else Nothing
+  | _ -> Nothing
+
+fn is_continue_arm(arm: ast.MatchBranch) -> Bool =
+  let ast.MatchBranch _ body = arm
+  in match continue_binder(body) with
+     | Just _ -> true
+     | Nothing -> false
+
+# `v` for an arm body `Continue(v)`.
+fn continue_binder(body: ast.Expr) -> Maybe String =
+  match body with
+  | ast.CallExpr (ast.VarExpr "Continue" _) [ast.VarExpr v _] _ -> Just(v)
+  | _ -> Nothing
+
+fn fusable_arm(param: String, arm: ast.MatchBranch) -> Bool =
+  let ast.MatchBranch pat body = arm
+  in match (continue_binder(body), body) with
+     | (Just v, _) -> list_member(v, ast.pattern_names(pat))
+     | (Nothing, ast.CallExpr(ast.VarExpr "Break" _) [failure] _) ->
+         ! set_member (param, referenced_names(failure, bind_pattern(pat, set_empty()),
+                                             set_insert(param, set_empty()), set_empty()))
+     | _ -> false
+
+# The instance's arms, its `Continue` arm replaced by one arm per success arm:
+# the instance pattern with `v` replaced by the success pattern and its other
+# binders by `_`, so none can capture a name the success arm uses.
+fn fuse_try_arms(inst_arms: List ast.MatchBranch, success_arms: List ast.MatchBranch) -> List ast.MatchBranch =
+  list_flat_map(\a -> fuse_try_arm(a, success_arms), inst_arms)
+
+fn fuse_try_arm(arm: ast.MatchBranch, success_arms: List ast.MatchBranch) -> List ast.MatchBranch =
+  let ast.MatchBranch pat body = arm
+  in match (continue_binder(body), body) with
+     | (Just v, _) -> list_map(\s -> place_success(pat, v, s), success_arms)
+     | (Nothing, ast.CallExpr _ [failure] _) -> [ast.MatchBranch(pat, failure)]
+     | _ -> [arm]
+
+fn place_success(pat: ast.Pattern, v: String, success: ast.MatchBranch) -> ast.MatchBranch =
+  let ast.MatchBranch success_pat success_body = success
+  in ast.MatchBranch(replace_binder(pat, v, success_pat), success_body)
+
+fn replace_binder(pat: ast.Pattern, v: String, with_pat: ast.Pattern) -> ast.Pattern =
+  match pat with
+  | ast.VarPattern name pos -> if name == v then with_pat else ast.WildcardPattern(pos)
+  | ast.TuplePattern items pos -> ast.TuplePattern(list_map(\p -> replace_binder(p, v, with_pat), items), pos)
+  | ast.ConstructorPattern name items pos ->
+      ast.ConstructorPattern(name, list_map(\p -> replace_binder(p, v, with_pat), items), pos)
+  | _ -> pat
 
 fn infer_branches(
   state: unifier.InferState,
@@ -5243,7 +5424,7 @@ fn infer_branch_unify(
 ) -> InferResult !{IO} =
   match unifier.unify_actual_expected(subst, eff_subst, typed_ast.typed_expr_type(typed_body), ret_type) with
   | unifier.UnifyErr e ->
-      InferErr(typed_ast.typed_expr_pos(typed_body),
+      InferErr(mismatch_pos(src, typed_ast.typed_expr_pos(typed_body)),
                branch_mismatch_message(src, e,
                  unifier.apply_subst(subst, typed_ast.typed_expr_type(typed_body)),
                  unifier.apply_subst(subst, ret_type)))
@@ -5830,6 +6011,11 @@ fn infer_do_steps(
   | [ast.DoPatStep kind pat value els bind_pos | rest] ->
       infer_do_steps(state, env, subst, eff_subst,
                      ast.do_pat_steps(kind, pat, value, els, rest, bind_pos),
+                     last_typed, acc_steps, acc_eff, family, pos)
+  | [ast.DoExprStep(ast.TryExpr _ try_pos)] -> InferErr(try_pos, try_last_step_msg)
+  | [ast.DoExprStep(ast.TryExpr operand try_pos), next | more] ->
+      infer_do_steps(state, env, subst, eff_subst,
+                     ast.try_statement_steps(operand, Cons(next, more), try_pos),
                      last_typed, acc_steps, acc_eff, family, pos)
   | Cons step rest ->
       do
@@ -7165,6 +7351,7 @@ fn typecheck_decls_resolved(
     # is defined later in the same file).
     let scanned_env = pre_scan_fn_decls(decls, env, qual_env)
     unifier.set_ctor_map(state, build_ctor_map(decls, dict_empty()))
+    unifier.set_try_fusions(state, try_fusions(decls))
     # Strict type-name validation: walk every TypeExpr in every type/alias/record
     # declaration and error immediately if a referenced type name is not declared.
     # Runs after pre_scan so mutually recursive ADTs are always in the declared set.
@@ -9482,6 +9669,7 @@ fn referenced_names(e: ast.Expr, bound: Set, index: Set, acc: Set) -> Set =
       referenced_names_comprehension(elem, gens, bound, index, acc)
   | ast.LetBindExpr pat value els body pos ->
       referenced_names(ast.let_bind_match(pat, value, els, body, pos), bound, index, acc)
+  | ast.TryExpr operand _ -> referenced_names(operand, bound, index, acc)
 
 # A generator's pattern binders scope over its own guards, every later
 # generator's source and guards, and (once the walk reaches Nil) the element.
@@ -11903,6 +12091,8 @@ fn check_fn_body(
   match decl with
   | ast.FnDecl name params ret_type_maybe effects_maybe constraints body fn_pos ->
       do
+        # A body that failed before this one leaves its `try`s behind.
+        _ <- unifier.take_try_positions(state)
         let decl_scheme = scheme_from_fn_parts(name, params, ret_type_maybe, effects_maybe, alias_env)
         (inst_type, prog_to_fresh) <- unifier.instantiate_with_vars(state, decl_scheme)
         let fwd_env = seed_unann_names(own_unann_vars(name, params, ret_type_maybe),
@@ -11917,6 +12107,7 @@ fn check_fn_body(
           self_binding_scheme(name, params, ret_type_maybe, decl_scheme, inst_type, constraint_source_tokens(constraints)),
           fwd_env)
         InferOk typed_body0 s1 es1 body_eff <- typecheck_fn_body(state, body_env, subst, eff_subst, body, ret_type_maybe, fn_return_type(inst_type, list_length(params))) else InferErr pos msg -> (fn_body_err(name, pos, msg), dict_empty(), Nil, subst)
+        tries <- unifier.take_try_positions(state)
         let unifier.UnifyOk s2a es2a = unifier.unify_actual_expected(s1, es1, typed_ast.typed_expr_type(typed_body0), fn_return_type(inst_type, list_length(params))) else unifier.UnifyErr e -> (return_mismatch_body_err(name, typed_body0, fn_return_type(inst_type, list_length(params)), s1, "Return type mismatch in " ++ name ++ ": " ++ e), dict_empty(), Nil, subst)
         # The declaration boundary: the one place that holds both the declared
         # effect and the effect the body was inferred to perform. Recorded for
@@ -11955,7 +12146,7 @@ fn check_fn_body(
             # fully-substituted body/type. A violation becomes a BodyErr, surfacing
             # through the same path as any type error. Gated so a linear-free
             # program skips the check and its substitution copy. See linear_check.
-            match fn_linear_gate(params, ret_type_maybe, s2, inst_type, typed_body, fn_pos, env) with
+            match fn_linear_gate(params, ret_type_maybe, s2, inst_type, typed_body, fn_pos, with_try_markers(tries, env)) with
             | linear_check.LinFail lp lm -> (typed_ast.BodyErr(lp, lm), dict_empty(), Nil, subst)
             | linear_check.LinPass ->
                 (typed_ast.BodyOk(resolve_dispatch_typed_expr(seed_unann_inner_names(own_unann_vars(name, params, ret_type_maybe), s2, fwd_env), s2, bind_params(params, set_empty()), typed_body), unifier.apply_subst(s2, inst_type)),
@@ -12576,12 +12767,13 @@ fn instance_method_checked(
                  unifier.apply_effect_subst(es2a, body_eff),
                  typed_ast.typed_expr_pos(typed_body0),
                  decl_scheme))
+        tries <- unifier.take_try_positions(state)
         f <- finish_field_obligations(state, body_env, s2a, typed_body0)
         match f with
         | FinishErr fpos fmsg -> InstanceMethodErr(fpos, fmsg ++ " in instance method " ++ name)
         | FinishOk typed_body s2 ->
             finish_instance_method(name, params, ret_maybe, eff_maybe, body_env, s2, inst_type,
-              typed_body, env, inst_constraints, method_constraints, prog_to_fresh,
+              typed_body, with_try_markers(tries, env), inst_constraints, method_constraints, prog_to_fresh,
               types.scheme_vars(decl_scheme), env_ftv)
 
 fn instance_method_err(name: String, pos: source.SourcePos, msg: String) -> InstanceMethodResult =

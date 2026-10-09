@@ -113,6 +113,7 @@ fn expr_uses_any(names: List String, e: ast.Expr) -> Bool =
   | ast.StringTemplateExpr parts _ -> template_parts_use_any(names, parts)
   | ast.ComprehensionExpr elem gens _ -> expr_uses_any(names, elem) || comprehension_gens_use_any(names, gens)
   | ast.LetBindExpr pat value els body pos -> expr_uses_any(names, ast.let_bind_match(pat, value, els, body, pos))
+  | ast.TryExpr operand _ -> expr_uses_any(names, operand)
   | _ -> false  # leaves: Int/Float/Bool/String/Char/Unit — no sub-expressions
 
 fn comprehension_gens_use_any(names: List String, gens: List ast.ComprehensionGen) -> Bool =
@@ -198,6 +199,7 @@ fn walk_expr(bound: List String, e: ast.Expr) -> List LintFinding =
   | ast.StringTemplateExpr parts _ -> walk_template_parts(bound, parts)
   | ast.ComprehensionExpr elem gens _ -> walk_comprehension(bound, elem, gens)
   | ast.LetBindExpr pat value els body pos -> walk_expr(bound, ast.let_bind_match(pat, value, els, body, pos))
+  | ast.TryExpr operand _ -> walk_expr(bound, operand)
   | _ -> Nil  # leaves: Var/Int/Float/Bool/String/Char/Unit — no sub-expressions
 
 # A generator's pattern scopes over its own guards, the generators after it and
@@ -473,6 +475,7 @@ fn find_list_shape_in_expr(e: ast.Expr) -> List source.SourcePos =
   | ast.StringTemplateExpr parts _ -> find_list_shape_in_template_parts(parts)
   | ast.ComprehensionExpr elem gens _ -> find_list_shape_in_expr(elem) ++ find_list_shape_in_comprehension_gens(gens)
   | ast.LetBindExpr pat value els body pos -> find_list_shape_in_expr(ast.let_bind_match(pat, value, els, body, pos))
+  | ast.TryExpr operand _ -> find_list_shape_in_expr(operand)
   | _ -> Nil
 
 fn find_list_shape_in_comprehension_gens(gens: List ast.ComprehensionGen) -> List source.SourcePos =
@@ -610,6 +613,7 @@ fn find_prefix_pattern_in_expr(e: ast.Expr) -> List source.SourcePos =
   | ast.StringTemplateExpr parts _ -> find_prefix_pattern_in_template_parts(parts)
   | ast.ComprehensionExpr elem gens _ -> find_prefix_pattern_in_expr(elem) ++ find_prefix_pattern_in_comprehension_gens(gens)
   | ast.LetBindExpr pat value els body pos -> find_prefix_pattern_in_expr(ast.let_bind_match(pat, value, els, body, pos))
+  | ast.TryExpr operand _ -> find_prefix_pattern_in_expr(operand)
   | _ -> Nil
 
 fn find_prefix_pattern_in_comprehension_gens(gens: List ast.ComprehensionGen) -> List source.SourcePos =
@@ -712,6 +716,7 @@ fn max_line(e: ast.Expr) -> Int =
   | ast.ComprehensionExpr elem gens pos ->
       larger(pos.line, larger(max_line(elem), max_line_comprehension_gens(gens)))
   | ast.LetBindExpr pat value els body pos -> max_line(ast.let_bind_match(pat, value, els, body, pos))
+  | ast.TryExpr operand pos -> larger(pos.line, max_line(operand))
   | ast.VarExpr _ pos -> pos.line
   | ast.IntExpr _ pos -> pos.line
   | ast.FloatExpr _ pos -> pos.line
@@ -1299,6 +1304,7 @@ fn free_to_hoist(bound: List String, e: ast.Expr) -> Bool =
   | ast.RecordUpdateExpr _ _ _ -> false
   | ast.ComprehensionExpr _ _ _ -> false
   | ast.LetBindExpr _ _ _ _ _ -> false
+  | ast.TryExpr _ _ -> false
 
 # A `guard`-shaped pattern consumes a Bool, which is an immediate — passing it to
 # the call boxes nothing, so a computed condition is free (checked in IR). Only a

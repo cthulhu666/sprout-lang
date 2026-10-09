@@ -384,9 +384,10 @@ the wrapper first. See "Reach for a combinator on a single `Maybe`/`Result`".
 
 ## Pick the accessor that matches what you know
 
-A `<-` bind on a `Maybe`/`Result` **propagates the failure out of the enclosing
-function**, so it is only legal where that function returns the same shape
-(spec §5.9). In a function that returns a plain value, say what you actually mean:
+`try` on a `Maybe`/`Result` **passes the failure out of the enclosing block**, so it
+is only legal where that block returns the same shape (spec §5.9.1). A `<-` bind on a
+`Maybe`/`Result` still does the same without `try` (§5.9), until the migration to
+`try` completes. In a function that returns a plain value, say what you actually mean:
 
 ```sprout
 # You know the index is in range (fixed layout, freshly sized buffer, loop bound).
@@ -401,8 +402,17 @@ match mutvec_get(v, i) with
 | Just x  -> use(x)
 | Nothing -> recover()
 
-# You want the failure to propagate — only in a Maybe/Result-returning function.
-x <- mutvec_get(v, i)
+# You want the failure to propagate — only in a Maybe-returning block.
+x <- try mutvec_get(v, i)
+```
+
+`try` marks each line that can end the block. In pure code it needs no `do`:
+
+```sprout
+fn sum_pos(a: Int, b: Int) -> Result String Int =
+  let x = try check_pos(a)
+      y = try check_pos(b)
+  in Ok(x + y)
 ```
 
 Reaching for `mutvec_get` and binding it was the common shape, and in a
@@ -411,14 +421,14 @@ returned the `Nothing` box read as a `Double`. `mutvec_at` is also faster — it
 allocates no `Maybe` per read, which dominates in a hot loop.
 
 To run a fallible call for its effect and **continue** regardless, use it as a bare
-statement; `_ <- e` does *not* mean that, it still propagates:
+statement; `try e` and `_ <- e` do *not* mean that, they pass the failure on:
 
 ```sprout
 import stdlib.fs as fs
 ...
 do
   fs.write_text(path, contents)   # run it, discard the Result, continue
-  _ <- fs.write_text(path, more)  # propagates on Err — needs a Result-returning fn
+  try fs.write_text(path, more)   # passes Err on — needs a Result-returning block
   Ok(())                          # the last step is the block's value: an expression
 ```
 

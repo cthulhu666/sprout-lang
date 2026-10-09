@@ -1,0 +1,14 @@
+# Class methods keep bare names (spec §3.1), so a method named `branch` is what an
+# unfused `try` calls. Pins the limit; BACKLOG has the fix.
+
+class Tree t
+  fn branch(x: t) -> Int
+
+instance Tree Int
+  fn branch(x: Int) -> Int = x + 1
+
+fn f(xs: List Int) -> List Int =
+  let v = try xs
+  in [v]
+
+fn main() -> Unit !{IO} = print(to_string(f([1])))

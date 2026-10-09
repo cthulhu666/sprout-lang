@@ -195,6 +195,9 @@ export type Expr (..) =
   # `let <pat> = <value> [else …] in <body>`, and `where`, the same construct
   # (spec §5.1). Inference rewrites it to a match (let_bind_match).
   | LetBindExpr Pattern Expr (Maybe LetElse) Expr source.SourcePos
+  # `try e` (spec §5.9). Legal only at the head of a binding's right-hand side
+  # (head_try) or as a `do` statement; inference rewrites it with the binding.
+  | TryExpr Expr source.SourcePos
 
 # --- Binding elaboration ---
 # The match each binding form means. Inference rewrites through these, and lint
@@ -202,7 +205,9 @@ export type Expr (..) =
 
 export fn let_bind_match(pat: Pattern, value: Expr, els: Maybe LetElse, body: Expr,
                          pos: source.SourcePos) -> Expr =
-  MatchExpr(value, let_bind_branches(pat, els, body, pos), pos)
+  match try_bind(pat, value, els, body, pos) with
+  | Just tb -> try_match(tb)
+  | Nothing -> MatchExpr(value, let_bind_branches(pat, els, body, pos), pos)
 
 # The body's branch, then the `else` branch if any.
 export fn let_bind_branches(pat: Pattern, els: Maybe LetElse, body: Expr,
@@ -210,15 +215,87 @@ export fn let_bind_branches(pat: Pattern, els: Maybe LetElse, body: Expr,
   Cons(MatchBranch(pat, body), else_branch(els, pos))
 
 # A `let` whose body is the steps after the binding. `<-` first runs the value
-# into a fresh temp and binds that.
+# into a fresh temp and binds that, unless it is a `try`: the match runs it, and
+# a temp `<-` would unwrap a `Maybe` or `Result` success a second time.
 export fn do_pat_steps(kind: DoBindKind, pat: Pattern, value: Expr, els: Maybe LetElse,
                        rest: List DoStep, pos: source.SourcePos) -> List DoStep =
-  match kind with
-  | ArrowBind ->
+  match (kind, head_try(value)) with
+  | (ArrowBind, Nothing) ->
       let tmp = do_tmp_name(pos)
       in [DoBindStep (VarPattern(tmp, pos), value),
           DoExprStep(LetBindExpr(pat, VarExpr(tmp, pos), els, DoExpr(rest, pos), pos))]
-  | LetBind -> [DoExprStep (LetBindExpr(pat, value, els, DoExpr(rest, pos), pos))]
+  | _ -> [DoExprStep (LetBindExpr(pat, value, els, DoExpr(rest, pos), pos))]
+
+# A non-final `try e` statement means `_ <- try e`.
+export fn try_statement_steps(operand: Expr, rest: List DoStep, pos: source.SourcePos) -> List DoStep =
+  do_pat_steps(ArrowBind, WildcardPattern(pos), TryExpr(operand, pos), Nothing, rest, pos)
+
+# --- `try` ---
+# A binding whose right-hand side starts with `try`: the operand, the `try`'s
+# position, and the arms that take the success value.
+export type TryBind (..) =
+  | TryBind Expr source.SourcePos (List MatchBranch)
+
+# Inference's binders. `$` keeps them apart from every user name (spec §2).
+let try_value_name = "$try"
+let try_failure_name = "$failure"
+
+# A `try` anywhere else, from the parser or, inside parentheses, from inference.
+export let try_place_msg =
+  "`try` can only start the right-hand side of a `let`, `where` or `<-` binding, or a `do` statement"
+
+# The `try` a right-hand side starts with, through a postfix chain:
+# `try e`, `(try e).f`, `(try e)(x)`, `(try e) with (…)`.
+export fn head_try(e: Expr) -> Maybe (Expr, source.SourcePos) =
+  match e with
+  | TryExpr operand pos -> Just((operand, pos))
+  | GetFieldExpr base _ _ -> head_try(base)
+  | CallExpr callee _ _ -> head_try(callee)
+  | RecordUpdateExpr base _ _ -> head_try(base)
+  | _ -> Nothing
+
+export fn starts_with_try(e: Expr) -> Bool =
+  match head_try(e) with
+  | Just _ -> true
+  | Nothing -> false
+
+fn replace_head_try(e: Expr, v: Expr) -> Expr =
+  match e with
+  | TryExpr _ _ -> v
+  | GetFieldExpr base field pos -> GetFieldExpr(replace_head_try(base, v), field, pos)
+  | CallExpr callee args pos -> CallExpr(replace_head_try(callee, v), args, pos)
+  | RecordUpdateExpr base fields pos -> RecordUpdateExpr(replace_head_try(base, v), fields, pos)
+  | _ -> e
+
+# A whole `try e` right-hand side matches the success with the binding's own
+# pattern and `else`; a longer one binds the success, then the binding runs.
+export fn try_bind(pat: Pattern, value: Expr, els: Maybe LetElse, body: Expr,
+                   pos: source.SourcePos) -> Maybe TryBind =
+  match value with
+  | TryExpr operand tpos -> Just(TryBind(operand, tpos, let_bind_branches(pat, els, body, pos)))
+  | _ ->
+      match head_try(value) with
+      | Nothing -> Nothing
+      | Just (operand, tpos) ->
+          let rhs = replace_head_try(value, VarExpr(try_value_name, tpos))
+          in Just(TryBind(operand, tpos,
+                          [MatchBranch (VarPattern(try_value_name, tpos), LetBindExpr(pat, rhs, els, body, pos))]))
+
+# `match branch(e) with | Continue <arm> -> … | Break f -> f`: the meaning of
+# `try` at any instance. Inference fuses it at a known one.
+export fn try_match(tb: TryBind) -> Expr =
+  let TryBind operand pos arms = tb
+  in MatchExpr(CallExpr (VarExpr("branch", pos), [operand], pos), try_match_arms(arms, pos), pos)
+
+# The success arms under `Continue`, then `Break f -> f`.
+export fn try_match_arms(success_arms: List MatchBranch, pos: source.SourcePos) -> List MatchBranch =
+  list_map(\a -> continue_arm(a, pos), success_arms)
+    ++ [MatchBranch (ConstructorPattern("Break", [VarPattern(try_failure_name, pos)], pos),
+                    VarExpr(try_failure_name, pos))]
+
+fn continue_arm(arm: MatchBranch, pos: source.SourcePos) -> MatchBranch =
+  let MatchBranch pat body = arm
+  in MatchBranch(ConstructorPattern("Continue", [pat], pos), body)
 
 # Position-derived, so no two bindings share one.
 fn do_tmp_name(pos: source.SourcePos) -> String =
@@ -240,6 +317,7 @@ export fn elaborate_head(e: Expr) -> Expr =
 export fn elaborate_steps_head(steps: List DoStep) -> List DoStep =
   match steps with
   | [DoPatStep kind pat value els pos | rest] -> do_pat_steps(kind, pat, value, els, rest, pos)
+  | [DoExprStep (TryExpr operand pos), next | more] -> try_statement_steps(operand, Cons(next, more), pos)
   | _ -> steps
 
 export fn elaborate_bindings(prog: Program) -> Program =
@@ -288,11 +366,14 @@ fn elab_expr(e: Expr) -> Expr =
       RecordUpdateExpr(elab_expr(base), list_map(elab_field, fields), pos)
   | ComprehensionExpr elem gens pos ->
       ComprehensionExpr(elab_expr(elem), list_map(elab_gen, gens), pos)
+  | TryExpr operand pos -> TryExpr(elab_expr(operand), pos)
 
 fn elab_steps(steps: List DoStep) -> List DoStep =
   match steps with
   | [] -> []
   | [DoPatStep kind pat value els pos | rest] -> elab_steps(do_pat_steps(kind, pat, value, els, rest, pos))
+  | [DoExprStep (TryExpr operand pos), next | more] ->
+      elab_steps(try_statement_steps(operand, Cons(next, more), pos))
   | [DoBindStep pat value | rest] -> Cons(DoBindStep(pat, elab_expr(value)), elab_steps(rest))
   | [DoLetStep name value | rest] -> Cons(DoLetStep(name, elab_expr(value)), elab_steps(rest))
   | [DoExprStep value | rest] -> Cons(DoExprStep(elab_expr(value)), elab_steps(rest))

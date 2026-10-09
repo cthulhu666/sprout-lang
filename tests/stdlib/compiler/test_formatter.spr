@@ -106,5 +106,11 @@ fn main() -> Unit !{IO} =
     check_eq("a tight marker on a wrap is spaced out",
       formatter.format_source("wrap Age(..) = Int\n"), "wrap Age (..) = Int\n"),
     check_eq("a wrap without the marker is untouched",
-      formatter.format_source("wrap Age = Int\n"), "wrap Age = Int\n")
+      formatter.format_source("wrap Age = Int\n"), "wrap Age = Int\n"),
+
+    # `try` is a keyword, so a parenthesised operand is not a call on it.
+    check_eq("try keeps the space before a parenthesised operand",
+      formatter.format_source("  let x = try (s |> parse)\n"), "  let x = try (s |> parse)\n"),
+    check_eq("try leaves its operand's call tight",
+      formatter.format_source("  let x = try parse(s)\n"), "  let x = try parse(s)\n")
   ])

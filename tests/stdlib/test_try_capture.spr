@@ -1,0 +1,59 @@
+import stdlib.test (check_eq, run_suite)
+
+# `try` reaches the prelude's `branch`, `Continue` and `Break`, never a
+# module's own (docs/try-propagate-v0.md §9 Q9).
+
+type Step =
+  | Continue Int
+  | Break
+
+fn branch(n: Int) -> Int = n * 100
+
+fn parse_digit(s: String) -> Maybe Int =
+  match s with
+  | "1" -> Just(1)
+  | "2" -> Just(2)
+  | _ -> Nothing
+
+fn own_names(s: String) -> Maybe Int =
+  let v = try parse_digit(s)
+  in Just(branch(v))
+
+fn local_branch(branch: Int, s: String) -> Maybe Int =
+  let v = try parse_digit(s)
+  in Just(v + branch)
+
+fn step_value(s: Step) -> Int =
+  match s with
+  | Continue n -> n
+  | Break -> -1
+
+# An instance in this module names the prelude's constructors.
+type Box a =
+  | Full a
+  | Empty
+
+instance Propagate Box
+  fn branch(value: Box a) -> ControlFlow (Box b) a =
+    match value with
+    | Full v -> prelude.Continue(v)
+    | Empty -> prelude.Break(Empty)
+
+fn box_plus(b: Box Int) -> Box Int =
+  let v = try b
+  in Full(v + branch(1))
+
+fn box_text(b: Box Int) -> String =
+  match b with
+  | Full v -> `full ${v}`
+  | Empty -> "empty"
+
+fn main() -> Unit !{IO} =
+  run_suite("try capture", [
+    check_eq("own branch is not captured", own_names("2"), Just(200)),
+    check_eq("own branch failure", own_names("x"), Nothing),
+    check_eq("local branch is not captured", local_branch(10, "1"), Just(11)),
+    check_eq("own constructors still work", step_value(Continue(4)) + step_value(Break), 3),
+    check_eq("own instance success", box_text(box_plus(Full(1))), "full 101"),
+    check_eq("own instance failure", box_text(box_plus(Empty)), "empty")
+  ])

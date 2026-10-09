@@ -307,6 +307,7 @@ fn starts_step(t: token.Token) -> Bool =
   | token.TokenKeywordKind ->
       let w = token.token_text(t)
       in w == "let" || w == "if" || w == "match" || w == "do" || w == "true" || w == "false"
+         || w == "try"
   | token.TokenSymbolKind ->
       let s = token.token_text(t)
       in s == "\\" || s == "[" || s == "{" || s == "(" || s == "-" || s == "!"
@@ -319,7 +320,7 @@ fn expects_more(t: token.Token) -> Bool =
   match token.token_kind(t) with
   | token.TokenKeywordKind ->
       let w = token.token_text(t)
-      in w == "if" || w == "then" || w == "else" || w == "in" || w == "match"
+      in w == "if" || w == "then" || w == "else" || w == "in" || w == "match" || w == "try"
   | token.TokenSymbolKind ->
       let s = token.token_text(t)
       in s == "->" || s == "=" || s == "<-" || s == "\\" || s == "+" || s == "-" || s == "*"

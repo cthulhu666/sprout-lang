@@ -1,0 +1,1 @@
+this `try` passes on a `Result String _` failure, but the block returns `Int`

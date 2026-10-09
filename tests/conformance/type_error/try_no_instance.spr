@@ -1,0 +1,5 @@
+fn g(n: Int) -> Maybe Int =
+  let x = try n
+  in Just(x)
+
+fn main() -> Unit !{IO} = print(g(1))

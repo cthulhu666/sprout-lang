@@ -1,0 +1,7 @@
+fn find(n: Int) -> Maybe Int = if n > 0 then Just(n) else Nothing
+
+fn g(n: Int) -> Result String Int =
+  let x = try find(n)
+  in Ok(x)
+
+fn main() -> Unit !{IO} = print(g(1))

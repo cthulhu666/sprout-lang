@@ -1,7 +1,8 @@
 # `try` and `Propagate` — propagation through a class (v0)
 
-Status: **proposal**, not implemented. Nothing here is normative until `docs/spec-v0.md` carries
-it. Drafted 2026-10-05.
+Status: **step 1 implemented** (2026-10-09): `ControlFlow`, `Propagate`, `try`, its reserved
+shapes and known-instance fusion, experimental in spec §5.9.1. Steps 1a–5 (§8) are open. Drafted
+2026-10-05.
 
 ## 1. Problem
 
@@ -289,9 +290,8 @@ Devirtualisation already works: `try_devirt_concrete` (`lowering.sprout`) calls 
 instance directly. LLVM `-O2` recovers nothing more. The compiler has no inliner or case-of-case
 pass of its own.
 
-**Known-instance fusion.** At a `try` whose instance is known after devirtualisation, and whose
-`branch` body is one `match` with `Continue`/`Break` in its arms, inline `branch` and merge the two
-`match`es:
+**Known-instance fusion.** At a `try` whose instance is known, and whose `branch` body is one
+`match` with `Continue`/`Break` in its arms, inline `branch` and merge the two `match`es:
 
 ```
 match branch(check(i)) with | Continue a -> K | Break r -> r
@@ -300,10 +300,21 @@ match branch(check(i)) with | Continue a -> K | Break r -> r
 
 That is variant C, which measured the same as today. The rule depends on the instance's shape, not
 its name, so it covers user types too. Acceptance: a fused `try` chain emits the same IR as the
-hand-written `match` (modulo SSA names), and no `sprout_alloc_obj` for `ControlFlow`.
+hand-written `match` (modulo SSA names), and no `sprout_alloc_obj` for `ControlFlow`
+(`tests/stdlib/compiler/test_try_fusion.spr`, for `Result`, `Maybe` in a `do` block and a user
+type).
 
-Fusion needs the instance's `branch` body during lowering. `LowerCtx` (`lowering.sprout`) carries
-only instance impl names, so step 1 adds a table of instance bodies from the typed program.
+**As built**, fusion happens in inference, not lowering (`infer.infer_try`). The `try` operand is
+inferred first; when its type's head has an instance in `infer.try_fusions`, the rewrite puts the
+instance's own untyped `match` arms in place of the `branch` call and infers the result as ordinary
+code. Nothing needs re-typing, and the output is the hand-written `match` by construction. A
+fusable instance: `branch` is one `match` on its parameter, exactly one arm is `Continue(v)` for a
+`v` its pattern binds, every other arm is `Break(f)` with `f` not naming the parameter, and the
+instance has no `where` context. The success pattern replaces `v` in that arm's pattern, and the
+arm's other binders become `_`, so none captures a name the code after the `try` uses. Otherwise,
+and when the operand's head is still unknown at the `try` (`try pure(3)`), `try` calls `branch`.
+Fusion was planned for lowering, from a table of typed instance bodies; in inference the instance
+types come for free and the shape check reads the source the user wrote.
 
 **What "zero cost" means here.** The same code as a hand-written `match`, on the success path:
 
@@ -332,22 +343,37 @@ helps every ADT, but it is separate work.
 
 ## 6. Diagnostics
 
-Proposed wording. Each is reported at the `try`, the `let` or the `<-`, never at a later use.
+Each is reported at the `try`, the `let` or the `<-`, never at a later use. Step 1's are as built
+(`tests/conformance/{parse_error,type_error}/try_*`); steps 3 and 5 are proposed.
 
 ```
-no instance        `try` needs a type that can fail, and `Int` has no `Propagate` instance.
-wrong block type   this `try` returns a `Result String _` failure, but the block returns `Int`.
-                   Handle it here with `let..else`, or make the block return `Result String _`.
-Maybe in Result    ... plus: to turn `Nothing` into an error, write `let Just x = e else Err(...)`.
-reserved else      `try` takes no `else` yet. For `let..else` on the value: `(try e) else …`.
-reserved with      `with` after `try` is reserved. For a record update, write `(try e) with (…)`.
+no instance        `try` needs a type that can fail, and `Int` has no `Propagate` instance
+wrong block type   this `try` passes on a `Result String _` failure, but the block returns `Int`.
+                   Handle the failure here with `let..else`, or make the block return
+                   `Result String _`.
+Maybe in Result    ... plus: To turn `Nothing` into an error, write `let Just x = e else Err(…)`.
+operand            the operand of `try` must be a name, a field, a call or a parenthesised
+                   expression; put this one in parentheses: `try (…)`
+place              `try` can only start the right-hand side of a `let`, `where` or `<-`
+                   binding, or a `do` statement
+top-level let      a top-level `let` cannot use `try`: there is no block for a failure to end
+reserved else      `try` takes no `else` yet. For `let..else` on the value, write `(try e) else …`
+reserved with      `with` after `try` is reserved. For a record update on the value, write
+                   `(try e) with (…)`
 unknown t          the existing ambiguity error.
-last-step try      the block ends here anyway, so `try` does nothing. Write `e` without `try`.
+last-step try      this `try` is the last step of its block: the block ends here anyway, so
+                   `try` does nothing. Write the expression without `try`.
+consume after try  linear value 'f' is consumed after a `try` in this block; …  (§9 Q7)
 effectful let      this `let` runs an effect. Bind it with `<-` in a `do` block.  (step 5)
 pure <-            this has no effect. Write `let x = …`.                  (step 3)
 discarded failure  this drops a `Result` failure in silence. Write `try e` to pass it on,
                    or `ignore(e)` to drop it.                          (step 3)
 ```
+
+A wrong error type that only the function's signature reveals (`Result String _` from `try` in
+a block whose type the signature alone fixes as `Result Int Int`) is the return-type mismatch,
+reported at the `try` but in its own words (`try_wrong_error_type.spr`): at the `try`, the block's
+error type is still open.
 
 ## 7. Interaction with `let..else`
 
@@ -391,17 +417,15 @@ four repos compiling with unchanged behaviour.
    type mismatch", and a trailing pattern or `else` binding gets the same inference error as a
    trailing `let`. Third commit landed: a multi-binding `do`-`let` statement takes patterns and
    `else` (§9 Q13).
-1. Add `ControlFlow`, `Propagate` and their instances, `try`, its two reserved shapes (§4.4)
-   and fusion, as separate PRs in that order. The first landed: `ControlFlow`, `Propagate` and
-   the `Maybe` and `Result e` instances, in the prelude (spec §8.5). A local or top-level
-   `branch` cannot capture `try`'s rewrite (Q9). `ignore` moves to step 2, its first user;
+1. ~~Add `ControlFlow`, `Propagate` and their instances, `try`, its two reserved shapes (§4.4)
+   and fusion.~~ Landed in two PRs: the prelude half (spec §8.5), then `try` with its reserved
+   shapes and fusion together (spec §5.9.1). A local or top-level `branch` cannot capture
+   `try`'s rewrite (Q9). `ignore` moves to step 2, its first user;
    `tests/stdlib/test_linear_borrowing.spr` defines its own `ignore`, to be renamed then. Old
-   fallible `<-` keeps working, except that a `<-` whose right-hand side
-   is a `try` (after stripping parentheses) is always plain. Otherwise `x <- try e` with
-   `e : Result E (Maybe A)` unwraps twice. The rule must reach every place that reads a bind's
-   type, not only `decide_bind_mode`: `do_family_update` (`infer.sprout`) sets the block's family
-   from the step's type for every `DoBindStep`, and the synthetic `__t <- e` binds
-   (`ast.do_pat_steps`) carry the user's right-hand side.
+   fallible `<-` keeps working. A `<-` on a `try` is plain by construction: the parser makes it a
+   pattern step, and `ast.do_pat_steps` rewrites it to a `match` on the operand with no synthetic
+   `__t <- e`, so no `DoBindStep` and no `BindMode` ever see it. The IntelliJ plugin's keyword
+   list (§11) is a separate change in its own repository.
    1a. Tooling: a compiler phase that lists every bind whose `BindMode` propagates (and whether
    its right-hand side is pure), every non-final `do` statement with a fallible value, and every
    effectful `do`-`let`, with file, line and column. Only the type checker knows any of them, and
@@ -579,4 +603,4 @@ Raised by the 2026-10-06 review; all must be decided before step 1:
 - `docs/idiomatic-sprout.md`: `try` idioms, and pure `do` blocks become `let..in`.
 - `docs/let-else-and-monadic-binding-plan.md`: Tier 2 is this document. Tier 3 (monad-generic
   propagation) is not pursued.
-- `README.md`: none until step 1 lands.
+- `README.md`: none; it lists no binding forms.

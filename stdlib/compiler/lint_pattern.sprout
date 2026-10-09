@@ -134,6 +134,7 @@ fn free_vars(e: ast.Expr, bound: Set) -> Set =
   | ast.ComprehensionExpr elem gens _ -> free_vars_gens(gens, elem, bound)
   | ast.LetBindExpr pat value els body pos ->
       free_vars(ast.let_bind_match(pat, value, els, body, pos), bound)
+  | ast.TryExpr operand _ -> free_vars(operand, bound)
 
 fn param_names(params: List ast.Param) -> List String =
   match params with
@@ -349,6 +350,10 @@ fn alpha_eq_heads(a: ast.Expr, b: ast.Expr, r: Ren) -> Bool =
   | ast.ComprehensionExpr ae2 ags _ ->
       (match b with
        | ast.ComprehensionExpr be2 bgs _ -> alpha_eq_gens(ags, bgs, ae2, be2, r)
+       | _ -> false)
+  | ast.TryExpr ao _ ->
+      (match b with
+       | ast.TryExpr bo _ -> alpha_eq(ao, bo, r)
        | _ -> false)
 
 # Pair two binder lists positionally. Differing lengths are not alpha-equivalent.
@@ -636,6 +641,10 @@ fn go_heads(p: ast.Expr, s: ast.Expr, holes: List String, st: MState) -> Maybe M
   | ast.StringTemplateExpr _ _ -> keep(holeless_alpha_eq(p, s, holes, st.ren), st)
   | ast.DoExpr _ _ -> keep(holeless_alpha_eq(p, s, holes, st.ren), st)
   | ast.ComprehensionExpr _ _ _ -> keep(holeless_alpha_eq(p, s, holes, st.ren), st)
+  | ast.TryExpr po _ ->
+      (match s with
+       | ast.TryExpr so _ -> go(po, so, holes, st)
+       | _ -> Nothing)
 
 fn keep(ok: Bool, st: MState) -> Maybe MState = if ok then Just(st) else Nothing
 

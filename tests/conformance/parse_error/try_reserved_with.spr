@@ -1,0 +1,9 @@
+type Point = (x: Int, y: Int)
+
+fn load() -> Maybe Point = Just(Point(x = 1, y = 2))
+
+fn g() -> Maybe Point =
+  let p = try load() with (x = 3)
+  in Just(p)
+
+fn main() -> Unit !{IO} = print(g())
