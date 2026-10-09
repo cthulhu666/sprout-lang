@@ -7,8 +7,10 @@ import stdlib.test (check_eq, run_suite)
 # those FREE slots and reclaims nothing from them — #407's shape in miniature: a
 # live set shrank and the sweep did not.
 #
-# KNOWN ANSWER: slots walked per object swept is HIGH here and ~1 for
-# `test_gc_age_retain_none.spr`. `just gc-walk-check` asserts the separation.
+# KNOWN ANSWER: with SPROUT_GC_THRESHOLD pinned (footprint floor off), slots walked
+# per object swept is HIGH here and ~1 for `test_gc_age_retain_none.spr`;
+# `just gc-walk-check` asserts the separation. With the floor on it is LOW, and
+# `just gc-trigger-check` asserts that.
 # The assertions below only confirm the workload ran; the measurement is in the
 # runtime counters.
 

@@ -231,8 +231,8 @@ static long long g_gc_threshold_base = 4096;
 static int g_gc_threshold_pinned = 0;
 /* Footprint floor divisor: collect once the program has allocated 1/k of what the
    last sweep walked (live + free). Bounds free slots walked per object freed near
-   k - 1 on a sparse heap; ordinary workloads stay under `live * factor` and do not
-   move at 3 (docs/gc-trigger-v0.md §6.2). */
+   k - 1 on a sparse heap. At 3 it leaves nqueens alone and binds on part of the
+   compiler's run (docs/gc-trigger-v0.md §6.2, §9). */
 static const long long g_gc_footprint_k = 3;
 static long long g_gc_marked_count = 0;
 /* Per-type live counts and CSTR bytes after each sweep (logged with SPROUT_DEBUG_GC). */

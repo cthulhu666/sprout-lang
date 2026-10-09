@@ -2184,13 +2184,13 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
 - [ ] `P2` **The class freelists are exact-fit, so a reclaimed remainder usually goes unused.**
   `g_freelist` is indexed by `slot_bytes/16` and `sprout_gc_alloc_block` pops only that class, so a
   free 4064-byte slot is invisible to the 4080-byte request beside it and to every 32-byte one.
-  This is why `sprout_vec_release_inline_tail` mostly makes bytes *reclaimable* rather than reused,
-  and pages return to the OS only when a whole 1 MiB region empties. Three options, with the prior
-  art and why the rule is standard: `docs/gc-size-classes-v0.md` — re-carve a larger free slot for
-  a class-k request (the split writes exactly that header today); coalesce adjacent FREE slots in
-  the sweep walk that already visits both, which needs a `slotmap_clear` or HDRCHECK's "no start
-  bit inside a step" assert fires on the merged slot; or make regions single-class, which is what
-  five of six comparable heaps do. Unmeasured; needs the instrument the entry above wants.
+  So `sprout_vec_release_inline_tail` mostly makes bytes *reclaimable*, not reused; pages return
+  to the OS only when a whole 1 MiB region empties; and the trigger's footprint floor grows ~6× in
+  RSS when phases take turns across classes (`docs/gc-trigger-v0.md` §6.2.1). Options and prior
+  art: `docs/gc-size-classes-v0.md` — re-carve a larger free slot for a class-k request (the split
+  writes that header today); coalesce adjacent FREE slots in the sweep walk, which needs a
+  `slotmap_clear` or HDRCHECK's "no start bit inside a step" assert fires; or make regions
+  single-class, as five of six comparable heaps do. Unmeasured; needs the entry above's instrument.
 - [ ] `P2` **The freelists are still wiped and rebuilt from *all* regions every sweep** — a
   prerequisite for the nursery, since a minor collection that marks only young objects but rebuilds
   the whole heap's freelist is not proportional to the young set. Making them generation-scoped

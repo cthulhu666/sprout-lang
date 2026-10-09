@@ -28,11 +28,16 @@ case "$(uname -s)" in
   *)      TIME_FLAG=-v; LINK_EXTRA=(-lm -lpthread) ;;
 esac
 
+# Keyed on the seed and runtime sources, so an edit, a reseed or another worktree never reuses an
+# old link: both arms would then measure the old trigger and agree.
 compiler_bin() {
-  [ -x "$OUT/compiler" ] && return 0
+  local key
+  key=$(cat "$REPO/bootstrap/compile_driver.ll" "$REPO"/runtime/*.c "$REPO"/runtime/*.h | cksum | cut -d' ' -f1)
+  COMPILER="$OUT/compiler-$key"
+  [ -x "$COMPILER" ] && return 0
   echo "==> Linking the seed compiler against $REPO/runtime ..." >&2
   clang "$REPO/bootstrap/compile_driver.ll" "$REPO"/runtime/*.c -O2 "${LINK_EXTRA[@]}" \
-    -o "$OUT/compiler" 2>"$OUT/link.err" \
+    -o "$COMPILER" 2>"$OUT/link.err" \
     || { echo "ERROR: link failed" >&2; cat "$OUT/link.err" >&2; exit 1; }
 }
 
@@ -72,7 +77,7 @@ run_compiler() { # <arm> <rep>
   local log="$OUT/compiler.$1.$2"
   set_arm "$1"
   env -u SPROUT_GC_THRESHOLD ${ARM_ENV[@]+"${ARM_ENV[@]}"} SPROUT_DEBUG_GC=1 /usr/bin/time "$TIME_FLAG" \
-    "$OUT/compiler" --emit-ir "$REPO/stdlib" "$REPO/stdlib/compiler/ast_to_ir.sprout" \
+    "$COMPILER" --emit-ir "$REPO/stdlib" "$REPO/stdlib/compiler/ast_to_ir.sprout" \
     > /dev/null 2> "$log.gc" || { echo "ERROR: compiler run failed ($1 $2)" >&2; tail -3 "$log.gc" >&2; return 1; }
   grep -v '^\[sprout gc\]' "$log.gc" > "$log.time"
   echo "compiler $1 $2 $(summarise "$log.gc" 0) $(time_fields "$log.time")"
