@@ -109,12 +109,6 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   experimental). Open: a phase that lists propagating binds (step 1a), codemod A adding `try` in
   all four repos, the flip that makes `<-` effect-only with the discard rule, codemod B, and `let`
   purity (steps 2–5 of `docs/try-propagate-v0.md` §8).
-- [ ] `P2` **`staircase-of-doom` counts each `try` as a nesting level.** The lint sees the match
-  a `try` elaborates to, so one user `match` whose arm holds two `let x = try …` lines reaches depth
-  3 and fails `just lint`; without the user match it lints clean. A `try` reads flat, like a
-  `let..else` chain. Decide whether a `try` link counts toward depth (`lint_rules.sprout`
-  `staircase-of-doom`; `match_then_tries` in `test_lint_rules.spr` pins it firing today). Must be
-  settled before codemod A, which would spread the finding across all four repos.
 - [~] `P2` **Binding-level type annotations `let x : T = e`.** Phase 1 (top-level `let`) landed
   2026-07-30. `docs/binding-annotations-v0.md`; spec §5.2 (experimental).
   - [ ] `P2` **Phase 2 — `let…in` and `where` annotations.** Those bindings are desugared and
