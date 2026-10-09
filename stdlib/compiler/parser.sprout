@@ -153,11 +153,6 @@ fn cur_pos(tokens: Vec token.Token, i: Int) -> source.SourcePos =
 fn tok_is_eof(t: token.Token) -> Bool =
   token.is_eof_token(t)
 
-fn tok_is_keyword(t: token.Token, kw: String) -> Bool =
-  match token.token_kind(t) with
-  | token.TokenKeywordKind -> token.token_text(t) == kw
-  | _ -> false
-
 fn tok_is_symbol(t: token.Token, sym: String) -> Bool =
   match token.token_kind(t) with
   | token.TokenSymbolKind -> token.token_text(t) == sym
@@ -223,7 +218,7 @@ fn tok_is_template_end(t: token.Token) -> Bool =
   | _ -> false
 
 fn match_keyword(tokens: Vec token.Token, i: Int, kw: String) -> Maybe(token.Token, Int) =
-  if tok_is_keyword(tok_at(tokens, i), kw) then Just((tok_at(tokens, i), i + 1))
+  if token.is_keyword_token(tok_at(tokens, i), kw) then Just((tok_at(tokens, i), i + 1))
   else Nothing
 
 fn match_symbol(tokens: Vec token.Token, i: Int, sym: String) -> Maybe(token.Token, Int) =
@@ -559,8 +554,8 @@ fn parse_pattern_after_first(tokens: Vec token.Token, i: Int, first: ast.Pattern
         Ok((ast.TuplePattern(list_reverse(items), pos), i4))
 
 fn parse_pattern_non_paren(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Pattern, Int) =
-  if tok_is_keyword(tok_at(tokens, i), "true") then Ok((ast.BoolPattern(true, cur_pos(tokens, i)), i + 1))
-  else if tok_is_keyword(tok_at(tokens, i), "false") then Ok((ast.BoolPattern(false, cur_pos(tokens, i)), i + 1))
+  if token.is_keyword_token(tok_at(tokens, i), "true") then Ok((ast.BoolPattern(true, cur_pos(tokens, i)), i + 1))
+  else if token.is_keyword_token(tok_at(tokens, i), "false") then Ok((ast.BoolPattern(false, cur_pos(tokens, i)), i + 1))
   else if tok_is_int(tok_at(tokens, i)) then
     match int_literal_value(token.token_text(tok_at(tokens, i)), cur_pos(tokens, i)) with
     | Err e -> Err(e)
@@ -596,7 +591,7 @@ fn starts_pattern_atom(tokens: Vec token.Token, i: Int) -> Bool =
   tok_is_int(tok_at(tokens, i)) || tok_is_string(tok_at(tokens, i)) || tok_is_char(tok_at(tokens, i)) ||
   tok_is_ident(tok_at(tokens, i)) || tok_is_symbol(tok_at(tokens, i), "(") ||
   tok_is_symbol(tok_at(tokens, i), "[") ||
-  tok_is_keyword(tok_at(tokens, i), "true") || tok_is_keyword(tok_at(tokens, i), "false")
+  token.is_keyword_token(tok_at(tokens, i), "true") || token.is_keyword_token(tok_at(tokens, i), "false")
 
 fn collect_pattern_atoms(tokens: Vec token.Token, i: Int, acc: List ast.Pattern) -> Result ParseError (List ast.Pattern, Int) =
   if starts_pattern_atom(tokens, i) then
@@ -607,8 +602,8 @@ fn collect_pattern_atoms(tokens: Vec token.Token, i: Int, acc: List ast.Pattern)
     Ok((acc, i))
 
 fn parse_pattern_atom(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Pattern, Int) =
-  if tok_is_keyword(tok_at(tokens, i), "true") then Ok((ast.BoolPattern(true, cur_pos(tokens, i)), i + 1))
-  else if tok_is_keyword(tok_at(tokens, i), "false") then Ok((ast.BoolPattern(false, cur_pos(tokens, i)), i + 1))
+  if token.is_keyword_token(tok_at(tokens, i), "true") then Ok((ast.BoolPattern(true, cur_pos(tokens, i)), i + 1))
+  else if token.is_keyword_token(tok_at(tokens, i), "false") then Ok((ast.BoolPattern(false, cur_pos(tokens, i)), i + 1))
   else if tok_is_int(tok_at(tokens, i)) then
     match int_literal_value(token.token_text(tok_at(tokens, i)), cur_pos(tokens, i)) with
     | Err e -> Err(e)
@@ -718,7 +713,7 @@ fn step_has_bind_arrow(tokens: Vec token.Token, i: Int, depth: Int) -> Bool =
   let t = tok_at(tokens, i)
   in if tok_is_eof(t) then false
      else if depth == 0 && (tok_is_layout_sep(t) || closes_group(t)) then false
-     else if depth == 0 && (tok_is_keyword(t, "match") || tok_is_keyword(t, "if") || tok_is_keyword(t, "do")) then false
+     else if depth == 0 && (token.is_keyword_token(t, "match") || token.is_keyword_token(t, "if") || token.is_keyword_token(t, "do")) then false
      else if depth == 0 && tok_is_symbol(t, "<-") then true
      else if opens_group(t) then step_has_bind_arrow(tokens, i + 1, depth + 1)
      else if closes_group(t) then step_has_bind_arrow(tokens, i + 1, depth - 1)
@@ -768,7 +763,7 @@ fn parse_do_let(tokens: Vec token.Token, i: Int) -> Result ParseError (DoStepPar
     (_, i2) <- expected_keyword("let", tokens, i)
     i3 <- expected_block_open(tokens, i2)
     (bindings, i4) <- collect_let_bindings(tokens, i3, Nil)
-    if tok_is_keyword(tok_at(tokens, i4), "in") || list_length(bindings) == 0 then
+    if token.is_keyword_token(tok_at(tokens, i4), "in") || list_length(bindings) == 0 then
       do
         (value, i5) <- finish_let_in(tokens, bindings, i4)
         Ok((DoStepPlain(ast.DoExprStep(value)), i5))
@@ -798,13 +793,13 @@ fn do_let_step(b: LetBinding, pos: source.SourcePos) -> ast.DoStep =
 let try_statement_msg = "`(try …)` cannot start a `do` statement; bind its value instead: `let y = (try e).x`"
 
 fn parse_do_step(tokens: Vec token.Token, i: Int) -> Result ParseError (DoStepParse, Int) =
-  if tok_is_keyword(tok_at(tokens, i), "let") then parse_do_let(tokens, i)
+  if token.is_keyword_token(tok_at(tokens, i), "let") then parse_do_let(tokens, i)
   else if step_has_bind_arrow(tokens, i, 0) then
     do
       (pattern, i2) <- parse_pattern(tokens, i)
       (_, i3) <- expected_symbol("<-", tokens, i2)
       (value, i4) <- parse_rhs(tokens, i3)
-      if tok_is_keyword(tok_at(tokens, i4), "else") then
+      if token.is_keyword_token(tok_at(tokens, i4), "else") then
         do
           (_, i5) <- expected_keyword("else", tokens, i4)
           (residual, handler, i6) <- parse_let_else_clause(tokens, i5)
@@ -898,7 +893,7 @@ fn parse_let_binding(tokens: Vec token.Token, i: Int) -> Result ParseError (LetB
     (pat, b) <- parse_pattern(tokens, i)
     (_, c) <- expected_symbol("=", tokens, b)
     (rhs, d) <- parse_rhs(tokens, c)
-    if tok_is_keyword(tok_at(tokens, d), "else") then
+    if token.is_keyword_token(tok_at(tokens, d), "else") then
       do
         (_, e) <- expected_keyword("else", tokens, d)
         (residual, fb, g) <- parse_let_else_clause(tokens, e)
@@ -959,7 +954,7 @@ fn paren_try(e: ast.Expr) -> Bool =
 
 # A binding's right-hand side, or a `do` statement.
 fn parse_rhs(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
-  if tok_is_keyword(tok_at(tokens, i), "try") then parse_try(tokens, i)
+  if token.is_keyword_token(tok_at(tokens, i), "try") then parse_try(tokens, i)
   else parse_expression(tokens, i)
 
 fn parse_try(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
@@ -989,8 +984,8 @@ fn starts_try_operand(t: token.Token) -> Bool =
 fn after_try_operand(tokens: Vec token.Token, j: Int, operand: ast.Expr, try_pos: source.SourcePos) ->
     Result ParseError (ast.Expr, Int) =
   let t = tok_at(tokens, j)
-  in if tok_is_keyword(t, "else") then Err(ParseError(try_else_msg, cur_pos(tokens, j)))
-     else if tok_is_keyword(t, "with") then Err(ParseError(try_with_msg, cur_pos(tokens, j)))
+  in if token.is_keyword_token(t, "else") then Err(ParseError(try_else_msg, cur_pos(tokens, j)))
+     else if token.is_keyword_token(t, "with") then Err(ParseError(try_with_msg, cur_pos(tokens, j)))
      else if tok_is_infix(t) || tok_is_symbol(t, "..") then Err(ParseError(try_operand_msg, try_pos))
      else Ok((ast.TryExpr(operand, try_pos), j))
 
@@ -1010,10 +1005,10 @@ fn laid_out(raw: Vec token.Token, mode: layout.LayoutMode) -> Result ParseError 
   | Err (layout.LayoutError msg pos) -> Err(ParseError(`${msg} at ${pos_str(pos)}`, pos))
 
 fn parse_expression(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
-  if tok_is_keyword(tok_at(tokens, i), "do") then parse_do_expr(tokens, i)
-  else if tok_is_keyword(tok_at(tokens, i), "if") then parse_if_expr(tokens, i)
-  else if tok_is_keyword(tok_at(tokens, i), "match") then parse_match_expr(tokens, i)
-  else if tok_is_keyword(tok_at(tokens, i), "let") then parse_let_else_expr(tokens, i)
+  if token.is_keyword_token(tok_at(tokens, i), "do") then parse_do_expr(tokens, i)
+  else if token.is_keyword_token(tok_at(tokens, i), "if") then parse_if_expr(tokens, i)
+  else if token.is_keyword_token(tok_at(tokens, i), "match") then parse_match_expr(tokens, i)
+  else if token.is_keyword_token(tok_at(tokens, i), "let") then parse_let_else_expr(tokens, i)
   else parse_pipe(tokens, i)
 
 fn parse_if_expr(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
@@ -1289,7 +1284,7 @@ fn fold_field_chain(base: ast.Expr, rest: String, pos: source.SourcePos) -> ast.
 # pattern never contains `ident =`, so this never captures the `with` of an
 # enclosing `match ... with` (which is followed by `|` or a pattern).
 fn is_update_postfix_at(tokens: Vec token.Token, i: Int) -> Bool =
-  tok_is_keyword(tok_at(tokens, i), "with")
+  token.is_keyword_token(tok_at(tokens, i), "with")
   && tok_is_symbol(tok_at(tokens, i + 1), "(")
   && tok_is_ident(tok_at(tokens, i + 2))
   && tok_is_symbol(tok_at(tokens, i + 3), "=")
@@ -1358,9 +1353,9 @@ fn collect_call_args(tokens: Vec token.Token, i: Int, acc: List ast.Expr) -> Res
       | Just (_, i3) -> collect_call_args(tokens, i3, Cons(e, acc))
 
 fn parse_primary(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
-  if tok_is_keyword(tok_at(tokens, i), "try") then Err(ParseError(ast.try_place_msg, cur_pos(tokens, i)))
-  else if tok_is_keyword(tok_at(tokens, i), "true") then Ok((ast.BoolExpr(true, cur_pos(tokens, i)), i + 1))
-  else if tok_is_keyword(tok_at(tokens, i), "false") then Ok((ast.BoolExpr(false, cur_pos(tokens, i)), i + 1))
+  if token.is_keyword_token(tok_at(tokens, i), "try") then Err(ParseError(ast.try_place_msg, cur_pos(tokens, i)))
+  else if token.is_keyword_token(tok_at(tokens, i), "true") then Ok((ast.BoolExpr(true, cur_pos(tokens, i)), i + 1))
+  else if token.is_keyword_token(tok_at(tokens, i), "false") then Ok((ast.BoolExpr(false, cur_pos(tokens, i)), i + 1))
   else if tok_is_int(tok_at(tokens, i)) then
     match int_literal_value(token.token_text(tok_at(tokens, i)), cur_pos(tokens, i)) with
     | Err e -> Err(e)
@@ -1442,7 +1437,7 @@ fn parse_list_literal(tokens: Vec token.Token, i: Int) -> Result ParseError (ast
     | Nothing ->
         do
           (head_expr, i3) <- parse_expression(tokens, i2)
-          if tok_is_keyword(tok_at(tokens, i3), "for") then
+          if token.is_keyword_token(tok_at(tokens, i3), "for") then
             parse_comprehension_tail(tokens, i3 + 1, head_expr, cur_pos(tokens, i))
           else
             do
@@ -1480,7 +1475,7 @@ fn comprehension_no_generator_err(tokens: Vec token.Token, i: Int) -> ParseError
 # `for`.  Caught here so both get the diagnostic that names the missing form,
 # rather than a bare "Expected keyword in" from the pattern parser.
 fn comprehension_missing_generator(tokens: Vec token.Token, i: Int) -> Bool =
-  tok_is_keyword(tok_at(tokens, i), "if") || tok_is_symbol(tok_at(tokens, i), "]")
+  token.is_keyword_token(tok_at(tokens, i), "if") || tok_is_symbol(tok_at(tokens, i), "]")
 
 # The missing-generator check runs at EVERY generator position, not just the
 # first: `[x for y in ys, if p]` is the same mistake as `[x for if p]` and gets
@@ -1511,7 +1506,7 @@ fn parse_comprehension_gen(tokens: Vec token.Token, i: Int) -> Result ParseError
 # is only ever a prefix form in Sprout — it can never continue the expression to
 # its left — so a source expression always ends before one.
 fn collect_comprehension_guards(tokens: Vec token.Token, i: Int, acc: List ast.Expr) -> Result ParseError (List ast.Expr, Int) =
-  if tok_is_keyword(tok_at(tokens, i), "if") then
+  if token.is_keyword_token(tok_at(tokens, i), "if") then
     do
       (g, i2) <- parse_expression(tokens, i + 1)
       collect_comprehension_guards(tokens, i2, Cons(g, acc))
@@ -1603,7 +1598,7 @@ fn parse_paren_expr(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.E
     match match_symbol(tokens, i2, ")") with
     | Just (_, i3) -> Ok((ast.UnitExpr(cur_pos(tokens, i)), i3))
     | Nothing ->
-        if tok_is_keyword(tok_at(tokens, i2), "try") then
+        if token.is_keyword_token(tok_at(tokens, i2), "try") then
           do
             (e, i3) <- parse_try(tokens, i2)
             (_, i4) <- expected_symbol(")", tokens, i3)
@@ -2060,7 +2055,7 @@ fn parse_let_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Dec
     (name_tok, i3) <- expected_ident("let binding name", tokens, i2)
     (anno, i3b) <- parse_optional_type_anno(tokens, i3)
     (_, i4) <- expected_symbol("=", tokens, i3b)
-    if tok_is_keyword(tok_at(tokens, i4), "try") then Err(ParseError(try_top_level_msg, cur_pos(tokens, i4)))
+    if token.is_keyword_token(tok_at(tokens, i4), "try") then Err(ParseError(try_top_level_msg, cur_pos(tokens, i4)))
     else
       do
         (body, i5) <- parse_expression(tokens, i4)
@@ -2137,7 +2132,7 @@ fn make_class_method_sig(name: String, params: List ast.Param, ret_raw: ast.Type
         Ok((ast.ClassMethodSig(name, params, ret_raw, effs_maybe, cons), i3))
 
 fn collect_class_method_sigs(tokens: Vec token.Token, i: Int, acc: List ast.ClassMethodSig) -> Result ParseError (List ast.ClassMethodSig, Int) =
-  if tok_is_keyword(tok_at(tokens, i), "fn") then
+  if token.is_keyword_token(tok_at(tokens, i), "fn") then
     do
       (sig, i2) <- parse_class_method_sig(tokens, i)
       collect_class_method_sigs(tokens, i2, Cons(sig, acc))
@@ -2192,7 +2187,7 @@ fn parse_instance_method(tokens: Vec token.Token, i: Int) -> Result ParseError (
     Ok((ast.InstanceMethodImpl(token.token_text(name_tok), list_reverse(params), return_type, effects, constraints, final_body), i10))
 
 fn collect_instance_methods(tokens: Vec token.Token, i: Int, acc: List ast.InstanceMethodImpl) -> Result ParseError (List ast.InstanceMethodImpl, Int) =
-  if tok_is_keyword(tok_at(tokens, i), "fn") then
+  if token.is_keyword_token(tok_at(tokens, i), "fn") then
     do
       (m, i2) <- parse_instance_method(tokens, i)
       collect_instance_methods(tokens, i2, Cons(m, acc))
@@ -2283,13 +2278,13 @@ fn parse_decl_body(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.De
     ))
 
 fn parse_decl_dispatch(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
-  if tok_is_keyword(tok_at(tokens, i), "extern") then parse_extern_fn_decl(tokens, i)
-  else if tok_is_keyword(tok_at(tokens, i), "fn") then parse_fn_decl(tokens, i)
-  else if tok_is_keyword(tok_at(tokens, i), "let") then parse_let_decl(tokens, i)
-  else if tok_is_keyword(tok_at(tokens, i), "class") then parse_class_decl(tokens, i)
-  else if tok_is_keyword(tok_at(tokens, i), "instance") then parse_instance_decl(tokens, i)
-  else if tok_is_keyword(tok_at(tokens, i), "type") then parse_type_decl_or_record(tokens, i)
-  else if tok_is_keyword(tok_at(tokens, i), "wrap") then parse_wrap_decl(tokens, i)
+  if token.is_keyword_token(tok_at(tokens, i), "extern") then parse_extern_fn_decl(tokens, i)
+  else if token.is_keyword_token(tok_at(tokens, i), "fn") then parse_fn_decl(tokens, i)
+  else if token.is_keyword_token(tok_at(tokens, i), "let") then parse_let_decl(tokens, i)
+  else if token.is_keyword_token(tok_at(tokens, i), "class") then parse_class_decl(tokens, i)
+  else if token.is_keyword_token(tok_at(tokens, i), "instance") then parse_instance_decl(tokens, i)
+  else if token.is_keyword_token(tok_at(tokens, i), "type") then parse_type_decl_or_record(tokens, i)
+  else if token.is_keyword_token(tok_at(tokens, i), "wrap") then parse_wrap_decl(tokens, i)
   else
     Err(ParseError(
       string.concat("internal: is_decl_keyword accepted a keyword with no parser arm at ", pos_str(cur_pos(tokens, i))),
@@ -2425,9 +2420,9 @@ fn scan_surface_from(
 ) -> ModuleSurface =
   if i >= vec_length(tokens) || tok_is_eof(tok_at(tokens, i)) then
     ModuleSurface(list_reverse(exported), list_reverse(ctor_types), list_reverse(globals))
-  else if tok_is_keyword(tok_at(tokens, i), "export") then
+  else if token.is_keyword_token(tok_at(tokens, i), "export") then
     scan_exported_decl(tokens, i + 1, exported, ctor_types, globals)
-  else if tok_is_keyword(tok_at(tokens, i), "extern") then
+  else if token.is_keyword_token(tok_at(tokens, i), "extern") then
     scan_surface_from(tokens, i + 1, exported, ctor_types, extern_name_at(tokens, i, globals))
   else
     scan_surface_from(tokens, i + 1, exported, ctor_types, globals)
@@ -2442,21 +2437,21 @@ fn scan_exported_decl(
 ) -> ModuleSurface =
   # `export extern fn` — the modifier has no effect, so record nothing here and let
   # the extern arm classify it as a global.
-  if tok_is_keyword(tok_at(tokens, j), "extern") then
+  if token.is_keyword_token(tok_at(tokens, j), "extern") then
     scan_surface_from(tokens, j, exported, ctor_types, globals)
-  else if tok_is_keyword(tok_at(tokens, j), "fn")
-    || tok_is_keyword(tok_at(tokens, j), "let")
-    || tok_is_keyword(tok_at(tokens, j), "class") then
+  else if token.is_keyword_token(tok_at(tokens, j), "fn")
+    || token.is_keyword_token(tok_at(tokens, j), "let")
+    || token.is_keyword_token(tok_at(tokens, j), "class") then
     scan_surface_from(tokens, j + 1, name_at(tokens, j + 1, exported), ctor_types, globals)
   # A wrap's synthetic constructor shares the type's name, so `(..)` is the only
   # way to say which of the two is published — without it the type is exported
   # and the constructor stays module-private (spec-v0 §5.6.1). Type parameters
   # are skipped before looking for the marker, as on an ADT.
-  else if tok_is_keyword(tok_at(tokens, j), "wrap") then
+  else if token.is_keyword_token(tok_at(tokens, j), "wrap") then
     scan_surface_from(tokens, j + 1, name_at(tokens, j + 1, exported),
       if exports_ctors(tokens, skip_type_param_idents(tokens, j + 2)) then name_at(tokens, j + 1, ctor_types) else ctor_types,
       globals)
-  else if tok_is_keyword(tok_at(tokens, j), "type") then
+  else if token.is_keyword_token(tok_at(tokens, j), "type") then
     scan_exported_type(tokens, j, exported, ctor_types, globals)
   else
     scan_surface_from(tokens, j, exported, ctor_types, globals)
@@ -2500,4 +2495,4 @@ fn name_at(tokens: Vec token.Token, i: Int, acc: List String) -> List String =
 
 # `i` indexes the `extern` keyword; the name follows `fn`.
 fn extern_name_at(tokens: Vec token.Token, i: Int, globals: List String) -> List String =
-  if tok_is_keyword(tok_at(tokens, i + 1), "fn") then name_at(tokens, i + 2, globals) else globals
+  if token.is_keyword_token(tok_at(tokens, i + 1), "fn") then name_at(tokens, i + 2, globals) else globals

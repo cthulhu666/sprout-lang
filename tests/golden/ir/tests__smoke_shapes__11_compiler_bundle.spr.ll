@@ -367,9 +367,9 @@ declare i64 @fs_rename(i64, i64)
 @.str.232 = private unnamed_addr constant { i64, [82 x i8] } { i64 1327114, [82 x i8] c"' does not fit in Int; for an arbitrary-precision integer, use BigInt.from_string\00" }
 @.str.233 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"-\00" }
 @.str.234 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 148, column 42)\00" }
-@.str.235 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 226, column 76)\00" }
-@.str.236 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 230, column 76)\00" }
-@.str.237 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 234, column 70)\00" }
+@.str.235 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 221, column 84)\00" }
+@.str.236 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 225, column 76)\00" }
+@.str.237 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 229, column 70)\00" }
 @.str.238 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c":\00" }
 @.str.239 = private unnamed_addr constant { i64, [18 x i8] } { i64 278538, [18 x i8] c"Expected keyword \00" }
 @.str.240 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c" at \00" }
@@ -380,22 +380,22 @@ declare i64 @fs_rename(i64, i64)
 @.str.245 = private unnamed_addr constant { i64, [28 x i8] } { i64 442378, [28 x i8] c"' is a reserved keyword at \00" }
 @.str.246 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"Expected \00" }
 @.str.247 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c" at \00" }
-@.str.248 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 288, column 56)\00" }
-@.str.249 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 288, column 63)\00" }
-@.str.250 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 289, column 43)\00" }
+@.str.248 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 283, column 56)\00" }
+@.str.249 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 283, column 63)\00" }
+@.str.250 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 284, column 43)\00" }
 @.str.251 = private unnamed_addr constant { i64, [27 x i8] } { i64 425994, [27 x i8] c"ABCDEFGHIJKLMNOPQRSTUVWXYZ\00" }
 @.str.252 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"(\00" }
-@.str.253 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 334, column 71)\00" }
-@.str.254 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 339, column 39)\00" }
+@.str.253 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 329, column 71)\00" }
+@.str.254 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 334, column 39)\00" }
 @.str.255 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"->\00" }
 @.str.256 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"(\00" }
-@.str.257 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 345, column 84)\00" }
-@.str.258 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 345, column 95)\00" }
+@.str.257 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 340, column 84)\00" }
+@.str.258 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 340, column 95)\00" }
 @.str.259 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
-@.str.260 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 346, column 87)\00" }
-@.str.261 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 347, column 34)\00" }
-@.str.262 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 348, column 38)\00" }
-@.str.263 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 348, column 49)\00" }
+@.str.260 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 341, column 87)\00" }
+@.str.261 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 342, column 34)\00" }
+@.str.262 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 343, column 38)\00" }
+@.str.263 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 343, column 49)\00" }
 @.str.264 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
 @.str.265 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"->\00" }
 @.str.266 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"(\00" }
@@ -426,48 +426,48 @@ declare i64 @fs_rename(i64, i64)
 @.str.291 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
 @.str.292 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
 @.str.293 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"true\00" }
-@.str.294 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 562, column 102)\00" }
+@.str.294 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 557, column 110)\00" }
 @.str.295 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"false\00" }
-@.str.296 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 563, column 109)\00" }
-@.str.297 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 567, column 60)\00" }
-@.str.298 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 569, column 107)\00" }
-@.str.299 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 571, column 87)\00" }
+@.str.296 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 558, column 117)\00" }
+@.str.297 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 562, column 60)\00" }
+@.str.298 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 564, column 107)\00" }
+@.str.299 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 566, column 87)\00" }
 @.str.300 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"[\00" }
-@.str.301 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 575, column 34)\00" }
+@.str.301 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 570, column 34)\00" }
 @.str.302 = private unnamed_addr constant { i64, [21 x i8] } { i64 327690, [21 x i8] c"Expected pattern at \00" }
 @.str.303 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"_\00" }
-@.str.304 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 580, column 55)\00" }
-@.str.305 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 583, column 53)\00" }
-@.str.306 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 586, column 38)\00" }
+@.str.304 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 575, column 55)\00" }
+@.str.305 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 578, column 53)\00" }
+@.str.306 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 581, column 38)\00" }
 @.str.307 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c",\00" }
 @.str.308 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"(\00" }
 @.str.309 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"[\00" }
 @.str.310 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"true\00" }
 @.str.311 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"false\00" }
 @.str.312 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"true\00" }
-@.str.313 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 610, column 102)\00" }
+@.str.313 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 605, column 110)\00" }
 @.str.314 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"false\00" }
-@.str.315 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 611, column 109)\00" }
-@.str.316 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 615, column 60)\00" }
-@.str.317 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 617, column 107)\00" }
-@.str.318 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 619, column 87)\00" }
+@.str.315 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 606, column 117)\00" }
+@.str.316 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 610, column 60)\00" }
+@.str.317 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 612, column 107)\00" }
+@.str.318 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 614, column 87)\00" }
 @.str.319 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"(\00" }
-@.str.320 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 623, column 42)\00" }
+@.str.320 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 618, column 42)\00" }
 @.str.321 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"[\00" }
-@.str.322 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 625, column 34)\00" }
+@.str.322 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 620, column 34)\00" }
 @.str.323 = private unnamed_addr constant { i64, [26 x i8] } { i64 409610, [26 x i8] c"Expected pattern atom at \00" }
 @.str.324 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"_\00" }
-@.str.325 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 630, column 55)\00" }
-@.str.326 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 631, column 88)\00" }
-@.str.327 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 632, column 41)\00" }
+@.str.325 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 625, column 55)\00" }
+@.str.326 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 626, column 88)\00" }
+@.str.327 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 627, column 41)\00" }
 @.str.328 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"]\00" }
 @.str.329 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"|\00" }
 @.str.330 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"]\00" }
 @.str.331 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"]\00" }
 @.str.332 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c",\00" }
-@.str.333 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 690, column 54)\00" }
+@.str.333 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 685, column 54)\00" }
 @.str.334 = private unnamed_addr constant { i64, [38 x i8] } { i64 606218, [38 x i8] c"internal: expected a layout block at \00" }
-@.str.335 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 697, column 53)\00" }
+@.str.335 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 692, column 53)\00" }
 @.str.336 = private unnamed_addr constant { i64, [35 x i8] } { i64 557066, [35 x i8] c"Unexpected token after the end of \00" }
 @.str.337 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c" at \00" }
 @.str.338 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c" — \00" }
@@ -485,11 +485,11 @@ declare i64 @fs_rename(i64, i64)
 @.str.350 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"if\00" }
 @.str.351 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"do\00" }
 @.str.352 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"<-\00" }
-@.str.353 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 723, column 64)\00" }
-@.str.354 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 723, column 75)\00" }
-@.str.355 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 724, column 65)\00" }
-@.str.356 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 724, column 76)\00" }
-@.str.357 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 725, column 41)\00" }
+@.str.353 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 718, column 64)\00" }
+@.str.354 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 718, column 75)\00" }
+@.str.355 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 719, column 65)\00" }
+@.str.356 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 719, column 76)\00" }
+@.str.357 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 720, column 41)\00" }
 @.str.358 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"_\00" }
 @.str.359 = private unnamed_addr constant { i64, [4 x i8] } { i64 49162, [4 x i8] c"let\00" }
 @.str.360 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"in\00" }
@@ -497,14 +497,14 @@ declare i64 @fs_rename(i64, i64)
 @.str.362 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"<-\00" }
 @.str.363 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"else\00" }
 @.str.364 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"else\00" }
-@.str.365 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 824, column 75)\00" }
+@.str.365 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 819, column 75)\00" }
 @.str.366 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"do\00" }
 @.str.367 = private unnamed_addr constant { i64, [34 x i8] } { i64 540682, [34 x i8] c"Expected at least one do step at \00" }
 @.str.368 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"->\00" }
 @.str.369 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"=\00" }
 @.str.370 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"else\00" }
 @.str.371 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"else\00" }
-@.str.372 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 911, column 75)\00" }
+@.str.372 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 906, column 75)\00" }
 @.str.373 = private unnamed_addr constant { i64, [44 x i8] } { i64 704522, [44 x i8] c"let requires at least one binding before in\00" }
 @.str.374 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"in\00" }
 @.str.375 = private unnamed_addr constant { i64, [4 x i8] } { i64 49162, [4 x i8] c"let\00" }
@@ -532,7 +532,7 @@ declare i64 @fs_rename(i64, i64)
 @.str.397 = private unnamed_addr constant { i64, [13 x i8] } { i64 196618, [13 x i8] c"Unexpected `\00" }
 @.str.398 = private unnamed_addr constant { i64, [31 x i8] } { i64 491530, [31 x i8] c"` after the last match arm at \00" }
 @.str.399 = private unnamed_addr constant { i64, [50 x i8] } { i64 802826, [50 x i8] c" — a match is no operand; put it in parentheses\00" }
-@.str.400 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1056, column 61)\00" }
+@.str.400 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1051, column 61)\00" }
 @.str.401 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"|\00" }
 @.str.402 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Unexpected token after a match arm at \00" }
 @.str.403 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"->\00" }
@@ -543,85 +543,85 @@ declare i64 @fs_rename(i64, i64)
 @.str.408 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"&&\00" }
 @.str.409 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"==\00" }
 @.str.410 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"!=\00" }
-@.str.411 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1124, column 44)\00" }
+@.str.411 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1119, column 44)\00" }
 @.str.412 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"..\00" }
 @.str.413 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"<\00" }
 @.str.414 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c">\00" }
 @.str.415 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"<=\00" }
 @.str.416 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c">=\00" }
-@.str.417 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1148, column 43)\00" }
+@.str.417 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1143, column 43)\00" }
 @.str.418 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"+\00" }
 @.str.419 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"-\00" }
-@.str.420 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1161, column 45)\00" }
+@.str.420 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1156, column 45)\00" }
 @.str.421 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"++\00" }
-@.str.422 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1168, column 45)\00" }
+@.str.422 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1163, column 45)\00" }
 @.str.423 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"++\00" }
 @.str.424 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"*\00" }
 @.str.425 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"/\00" }
-@.str.426 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1181, column 50)\00" }
+@.str.426 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1176, column 50)\00" }
 @.str.427 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"<<\00" }
 @.str.428 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c">>\00" }
-@.str.429 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1194, column 50)\00" }
+@.str.429 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1189, column 50)\00" }
 @.str.430 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c">>\00" }
 @.str.431 = private unnamed_addr constant { i64, [9 x i8] } { i64 131082, [9 x i8] c"rcompose\00" }
 @.str.432 = private unnamed_addr constant { i64, [9 x i8] } { i64 131082, [9 x i8] c"lcompose\00" }
 @.str.433 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"-\00" }
-@.str.434 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1207, column 45)\00" }
-@.str.435 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1211, column 49)\00" }
+@.str.434 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1202, column 45)\00" }
+@.str.435 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1206, column 49)\00" }
 @.str.436 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"-\00" }
 @.str.437 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"!\00" }
-@.str.438 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1215, column 45)\00" }
+@.str.438 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1210, column 45)\00" }
 @.str.439 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"!\00" }
 @.str.440 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"(\00" }
 @.str.441 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"(\00" }
 @.str.442 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
 @.str.443 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c".\00" }
-@.str.444 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1269, column 74)\00" }
+@.str.444 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1264, column 74)\00" }
 @.str.445 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c".\00" }
 @.str.446 = private unnamed_addr constant { i64, [23 x i8] } { i64 360458, [23 x i8] c"a field name after '.'\00" }
 @.str.447 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c".\00" }
 @.str.448 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"with\00" }
-@.str.449 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1293, column 37)\00" }
+@.str.449 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1288, column 37)\00" }
 @.str.450 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"(\00" }
-@.str.451 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1294, column 36)\00" }
-@.str.452 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1295, column 37)\00" }
+@.str.451 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1289, column 36)\00" }
+@.str.452 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1290, column 37)\00" }
 @.str.453 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"=\00" }
 @.str.454 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"with\00" }
 @.str.455 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"(\00" }
 @.str.456 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
 @.str.457 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"_\00" }
-@.str.458 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1331, column 75)\00" }
-@.str.459 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1341, column 95)\00" }
+@.str.458 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1326, column 75)\00" }
+@.str.459 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1336, column 95)\00" }
 @.str.460 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
 @.str.461 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c",\00" }
 @.str.462 = private unnamed_addr constant { i64, [4 x i8] } { i64 49162, [4 x i8] c"try\00" }
 @.str.463 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"true\00" }
-@.str.464 = private unnamed_addr constant { i64, [42 x i8] } { i64 671754, [42 x i8] c"Int overflow in + (line 1362, column 104)\00" }
+@.str.464 = private unnamed_addr constant { i64, [42 x i8] } { i64 671754, [42 x i8] c"Int overflow in + (line 1357, column 112)\00" }
 @.str.465 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"false\00" }
-@.str.466 = private unnamed_addr constant { i64, [42 x i8] } { i64 671754, [42 x i8] c"Int overflow in + (line 1363, column 106)\00" }
-@.str.467 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1367, column 57)\00" }
-@.str.468 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1369, column 83)\00" }
-@.str.469 = private unnamed_addr constant { i64, [42 x i8] } { i64 671754, [42 x i8] c"Int overflow in + (line 1371, column 104)\00" }
-@.str.470 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1373, column 84)\00" }
+@.str.466 = private unnamed_addr constant { i64, [42 x i8] } { i64 671754, [42 x i8] c"Int overflow in + (line 1358, column 114)\00" }
+@.str.467 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1362, column 57)\00" }
+@.str.468 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1364, column 83)\00" }
+@.str.469 = private unnamed_addr constant { i64, [42 x i8] } { i64 671754, [42 x i8] c"Int overflow in + (line 1366, column 104)\00" }
+@.str.470 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1368, column 84)\00" }
 @.str.471 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\5C\00" }
 @.str.472 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"[\00" }
 @.str.473 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"{\00" }
 @.str.474 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"(\00" }
-@.str.475 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1383, column 39)\00" }
+@.str.475 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1378, column 39)\00" }
 @.str.476 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"(\00" }
-@.str.477 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1384, column 41)\00" }
-@.str.478 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1385, column 42)\00" }
+@.str.477 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1379, column 41)\00" }
+@.str.478 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1380, column 42)\00" }
 @.str.479 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"=\00" }
-@.str.480 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1386, column 38)\00" }
-@.str.481 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1388, column 83)\00" }
+@.str.480 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1381, column 38)\00" }
+@.str.481 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1383, column 83)\00" }
 @.str.482 = private unnamed_addr constant { i64, [24 x i8] } { i64 376842, [24 x i8] c"Expected expression at \00" }
 @.str.483 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c", got \00" }
-@.str.484 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1397, column 90)\00" }
+@.str.484 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1392, column 90)\00" }
 @.str.485 = private unnamed_addr constant { i64, [28 x i8] } { i64 442378, [28 x i8] c"Expected template start at \00" }
-@.str.486 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1404, column 16)\00" }
-@.str.487 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1406, column 38)\00" }
-@.str.488 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1409, column 48)\00" }
-@.str.489 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1411, column 43)\00" }
+@.str.486 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1399, column 16)\00" }
+@.str.487 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1401, column 38)\00" }
+@.str.488 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1404, column 48)\00" }
+@.str.489 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1406, column 43)\00" }
 @.str.490 = private unnamed_addr constant { i64, [33 x i8] } { i64 524298, [33 x i8] c"Expected template interp end at \00" }
 @.str.491 = private unnamed_addr constant { i64, [27 x i8] } { i64 425994, [27 x i8] c"Expected template part at \00" }
 @.str.492 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\5C\00" }
@@ -632,7 +632,7 @@ declare i64 @fs_rename(i64, i64)
 @.str.497 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"[\00" }
 @.str.498 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"]\00" }
 @.str.499 = private unnamed_addr constant { i64, [4 x i8] } { i64 49162, [4 x i8] c"for\00" }
-@.str.500 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1446, column 49)\00" }
+@.str.500 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1441, column 49)\00" }
 @.str.501 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"]\00" }
 @.str.502 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c",\00" }
 @.str.503 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"]\00" }
@@ -642,7 +642,7 @@ declare i64 @fs_rename(i64, i64)
 @.str.507 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c",\00" }
 @.str.508 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"in\00" }
 @.str.509 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"if\00" }
-@.str.510 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1516, column 45)\00" }
+@.str.510 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1511, column 45)\00" }
 @.str.511 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"{\00" }
 @.str.512 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"}\00" }
 @.str.513 = private unnamed_addr constant { i64, [11 x i8] } { i64 163850, [11 x i8] c"dict_empty\00" }
@@ -669,37 +669,37 @@ declare i64 @fs_rename(i64, i64)
 @.str.534 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
 @.str.535 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
 @.str.536 = private unnamed_addr constant { i64, [15 x i8] } { i64 229386, [15 x i8] c"parameter name\00" }
-@.str.537 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1646, column 71)\00" }
+@.str.537 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1641, column 71)\00" }
 @.str.538 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"borrowing\00" }
 @.str.539 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"consuming\00" }
 @.str.540 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"once\00" }
-@.str.541 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1658, column 12)\00" }
+@.str.541 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1653, column 12)\00" }
 @.str.542 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c":\00" }
 @.str.543 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
 @.str.544 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c",\00" }
 @.str.545 = private unnamed_addr constant { i64, [11 x i8] } { i64 163850, [11 x i8] c"class name\00" }
 @.str.546 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c",\00" }
-@.str.547 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1712, column 61)\00" }
+@.str.547 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1707, column 61)\00" }
 @.str.548 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"=\00" }
 @.str.549 = private unnamed_addr constant { i64, [16 x i8] } { i64 245770, [16 x i8] c"a where binding\00" }
 @.str.550 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"a where block takes one binding per line\00" }
 @.str.551 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"exists\00" }
 @.str.552 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c".\00" }
-@.str.553 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1779, column 77)\00" }
+@.str.553 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1774, column 77)\00" }
 @.str.554 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c".\00" }
 @.str.555 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"constructor name\00" }
 @.str.556 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"where\00" }
 @.str.557 = private unnamed_addr constant { i64, [88 x i8] } { i64 1425418, [88 x i8] c"a constructor `where` constraint must apply a class to a single `exists`-bound variable\00" }
 @.str.558 = private unnamed_addr constant { i64, [44 x i8] } { i64 704522, [44 x i8] c"constructor `where` constraint references `\00" }
 @.str.559 = private unnamed_addr constant { i64, [44 x i8] } { i64 704522, [44 x i8] c"`, which is not bound by an `exists` prefix\00" }
-@.str.560 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1850, column 95)\00" }
+@.str.560 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1845, column 95)\00" }
 @.str.561 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"(\00" }
 @.str.562 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
 @.str.563 = private unnamed_addr constant { i64, [4 x i8] } { i64 49162, [4 x i8] c"any\00" }
 @.str.564 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"existv\00" }
 @.str.565 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"|\00" }
 @.str.566 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"linear\00" }
-@.str.567 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1919, column 41)\00" }
+@.str.567 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1914, column 41)\00" }
 @.str.568 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"type\00" }
 @.str.569 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"type name\00" }
 @.str.570 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"=\00" }
@@ -747,13 +747,13 @@ declare i64 @fs_rename(i64, i64)
 @.str.612 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
 @.str.613 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"->\00" }
 @.str.614 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"fn\00" }
-@.str.615 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2150, column 75)\00" }
+@.str.615 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2145, column 75)\00" }
 @.str.616 = private unnamed_addr constant { i64, [15 x i8] } { i64 229386, [15 x i8] c"a class member\00" }
 @.str.617 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"a class body takes one member per line\00" }
 @.str.618 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"{\00" }
 @.str.619 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"{\00" }
 @.str.620 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"}\00" }
-@.str.621 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2166, column 97)\00" }
+@.str.621 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2161, column 97)\00" }
 @.str.622 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"class\00" }
 @.str.623 = private unnamed_addr constant { i64, [11 x i8] } { i64 163850, [11 x i8] c"class name\00" }
 @.str.624 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"fn\00" }
@@ -762,13 +762,13 @@ declare i64 @fs_rename(i64, i64)
 @.str.627 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
 @.str.628 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"=\00" }
 @.str.629 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"fn\00" }
-@.str.630 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2205, column 75)\00" }
+@.str.630 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2200, column 75)\00" }
 @.str.631 = private unnamed_addr constant { i64, [19 x i8] } { i64 294922, [19 x i8] c"an instance member\00" }
 @.str.632 = private unnamed_addr constant { i64, [43 x i8] } { i64 688138, [43 x i8] c"an instance body takes one member per line\00" }
 @.str.633 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"{\00" }
 @.str.634 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"{\00" }
 @.str.635 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"}\00" }
-@.str.636 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2219, column 96)\00" }
+@.str.636 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2214, column 96)\00" }
 @.str.637 = private unnamed_addr constant { i64, [9 x i8] } { i64 131082, [9 x i8] c"instance\00" }
 @.str.638 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"where\00" }
 @.str.639 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"export\00" }
@@ -785,48 +785,48 @@ declare i64 @fs_rename(i64, i64)
 @.str.650 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"wrap\00" }
 @.str.651 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"wrap name\00" }
 @.str.652 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"=\00" }
-@.str.653 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2326, column 33)\00" }
-@.str.654 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2326, column 76)\00" }
+@.str.653 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2321, column 33)\00" }
+@.str.654 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2321, column 76)\00" }
 @.str.655 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"alias\00" }
 @.str.656 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"type\00" }
 @.str.657 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"alias\00" }
 @.str.658 = private unnamed_addr constant { i64, [11 x i8] } { i64 163850, [11 x i8] c"alias name\00" }
 @.str.659 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"=\00" }
-@.str.660 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2345, column 28)\00" }
+@.str.660 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2340, column 28)\00" }
 @.str.661 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"=\00" }
-@.str.662 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2350, column 36)\00" }
+@.str.662 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2345, column 36)\00" }
 @.str.663 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"(\00" }
-@.str.664 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2351, column 40)\00" }
-@.str.665 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2352, column 41)\00" }
+@.str.664 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2346, column 40)\00" }
+@.str.665 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2347, column 41)\00" }
 @.str.666 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c":\00" }
-@.str.667 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2353, column 33)\00" }
+@.str.667 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2348, column 33)\00" }
 @.str.668 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"export\00" }
-@.str.669 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2429, column 34)\00" }
+@.str.669 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2424, column 34)\00" }
 @.str.670 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"extern\00" }
-@.str.671 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2431, column 33)\00" }
-@.str.672 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2433, column 33)\00" }
+@.str.671 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2426, column 33)\00" }
+@.str.672 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2428, column 33)\00" }
 @.str.673 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"extern\00" }
 @.str.674 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"fn\00" }
 @.str.675 = private unnamed_addr constant { i64, [4 x i8] } { i64 49162, [4 x i8] c"let\00" }
 @.str.676 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"class\00" }
-@.str.677 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2450, column 33)\00" }
-@.str.678 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2450, column 56)\00" }
+@.str.677 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2445, column 33)\00" }
+@.str.678 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2445, column 56)\00" }
 @.str.679 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"wrap\00" }
-@.str.680 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2456, column 33)\00" }
-@.str.681 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2456, column 56)\00" }
-@.str.682 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2457, column 65)\00" }
-@.str.683 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2457, column 94)\00" }
+@.str.680 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2451, column 33)\00" }
+@.str.681 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2451, column 56)\00" }
+@.str.682 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2452, column 65)\00" }
+@.str.683 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2452, column 94)\00" }
 @.str.684 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"type\00" }
-@.str.685 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2473, column 33)\00" }
-@.str.686 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2473, column 56)\00" }
-@.str.687 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2475, column 58)\00" }
-@.str.688 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2487, column 61)\00" }
-@.str.689 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2488, column 33)\00" }
-@.str.690 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2490, column 33)\00" }
-@.str.691 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2496, column 76)\00" }
-@.str.692 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2503, column 38)\00" }
+@.str.685 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2468, column 33)\00" }
+@.str.686 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2468, column 56)\00" }
+@.str.687 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2470, column 58)\00" }
+@.str.688 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2482, column 61)\00" }
+@.str.689 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2483, column 33)\00" }
+@.str.690 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2485, column 33)\00" }
+@.str.691 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2491, column 76)\00" }
+@.str.692 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2498, column 46)\00" }
 @.str.693 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"fn\00" }
-@.str.694 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2503, column 73)\00" }
+@.str.694 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2498, column 81)\00" }
 @.str.695 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 10, column 89)\00" }
 @.str.696 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"export\00" }
 @.str.697 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"fn\00" }
@@ -1142,9 +1142,9 @@ declare i64 @fs_rename(i64, i64)
 @.str.1007 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"fn\00" }
 @.str.1008 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c",\00" }
 @.str.1009 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"if\00" }
-@.str.1010 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1516, column 45)\00" }
+@.str.1010 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1511, column 45)\00" }
 @.str.1011 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c",\00" }
-@.str.1012 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1850, column 95)\00" }
+@.str.1012 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1845, column 95)\00" }
 @.str.1013 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
 @.str.1014 = private unnamed_addr constant { i64, [30 x i8] } { i64 475146, [30 x i8] c"class name in deriving clause\00" }
 @.str.1015 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c",\00" }
@@ -1152,12 +1152,12 @@ declare i64 @fs_rename(i64, i64)
 @.str.1017 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c":\00" }
 @.str.1018 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c",\00" }
 @.str.1019 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"}\00" }
-@.str.1020 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 824, column 75)\00" }
+@.str.1020 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 819, column 75)\00" }
 @.str.1021 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c",\00" }
 @.str.1022 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"fn\00" }
-@.str.1023 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 911, column 75)\00" }
+@.str.1023 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 906, column 75)\00" }
 @.str.1024 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c",\00" }
-@.str.1025 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1056, column 61)\00" }
+@.str.1025 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1051, column 61)\00" }
 @.str.1026 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"|\00" }
 @.str.1027 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Unexpected token after a match arm at \00" }
 @.str.1028 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"->\00" }
@@ -1170,21 +1170,21 @@ declare i64 @fs_rename(i64, i64)
 @.str.1035 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"=\00" }
 @.str.1036 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c",\00" }
 @.str.1037 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
-@.str.1038 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1404, column 16)\00" }
-@.str.1039 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1406, column 38)\00" }
-@.str.1040 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1409, column 48)\00" }
-@.str.1041 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1411, column 43)\00" }
+@.str.1038 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1399, column 16)\00" }
+@.str.1039 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1401, column 38)\00" }
+@.str.1040 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1404, column 48)\00" }
+@.str.1041 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1406, column 43)\00" }
 @.str.1042 = private unnamed_addr constant { i64, [33 x i8] } { i64 524298, [33 x i8] c"Expected template interp end at \00" }
 @.str.1043 = private unnamed_addr constant { i64, [27 x i8] } { i64 425994, [27 x i8] c"Expected template part at \00" }
 @.str.1044 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"|\00" }
 @.str.1045 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c",\00" }
-@.str.1046 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1712, column 61)\00" }
+@.str.1046 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1707, column 61)\00" }
 @.str.1047 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"=\00" }
 @.str.1048 = private unnamed_addr constant { i64, [16 x i8] } { i64 245770, [16 x i8] c"a where binding\00" }
 @.str.1049 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"a where block takes one binding per line\00" }
 @.str.1050 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"a do step\00" }
 @.str.1051 = private unnamed_addr constant { i64, [35 x i8] } { i64 557066, [35 x i8] c"a do block takes one step per line\00" }
-@.str.1052 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 690, column 54)\00" }
+@.str.1052 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 685, column 54)\00" }
 @.str.1053 = private unnamed_addr constant { i64, [38 x i8] } { i64 606218, [38 x i8] c"internal: expected a layout block at \00" }
 @.str.1054 = private unnamed_addr constant { i64, [18 x i8] } { i64 278538, [18 x i8] c"Expected keyword \00" }
 @.str.1055 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c" at \00" }
@@ -1199,18 +1199,18 @@ declare i64 @fs_rename(i64, i64)
 @.str.1064 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"a let block takes one binding per line\00" }
 @.str.1065 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"(\00" }
 @.str.1066 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
-@.str.1067 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 234, column 70)\00" }
-@.str.1068 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 226, column 76)\00" }
-@.str.1069 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 230, column 76)\00" }
-@.str.1070 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 697, column 53)\00" }
+@.str.1067 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 229, column 70)\00" }
+@.str.1068 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 221, column 84)\00" }
+@.str.1069 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 225, column 76)\00" }
+@.str.1070 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 692, column 53)\00" }
 @.str.1071 = private unnamed_addr constant { i64, [35 x i8] } { i64 557066, [35 x i8] c"Unexpected token after the end of \00" }
 @.str.1072 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c" at \00" }
 @.str.1073 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c" — \00" }
-@.str.1074 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1646, column 71)\00" }
+@.str.1074 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1641, column 71)\00" }
 @.str.1075 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"{\00" }
 @.str.1076 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"{\00" }
 @.str.1077 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"}\00" }
-@.str.1078 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2166, column 97)\00" }
+@.str.1078 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2161, column 97)\00" }
 @.str.1079 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"fn\00" }
 @.str.1080 = private unnamed_addr constant { i64, [12 x i8] } { i64 180234, [12 x i8] c"method name\00" }
 @.str.1081 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"(\00" }
@@ -1238,7 +1238,7 @@ declare i64 @fs_rename(i64, i64)
 @.str.1103 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"{\00" }
 @.str.1104 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"{\00" }
 @.str.1105 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"}\00" }
-@.str.1106 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2219, column 96)\00" }
+@.str.1106 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2214, column 96)\00" }
 @.str.1107 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"fn\00" }
 @.str.1108 = private unnamed_addr constant { i64, [12 x i8] } { i64 180234, [12 x i8] c"method name\00" }
 @.str.1109 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"(\00" }
@@ -1258,37 +1258,37 @@ declare i64 @fs_rename(i64, i64)
 @.str.1123 = private unnamed_addr constant { i64, [15 x i8] } { i64 229386, [15 x i8] c"parameter name\00" }
 @.str.1124 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"(\00" }
 @.str.1125 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"true\00" }
-@.str.1126 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 610, column 102)\00" }
+@.str.1126 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 605, column 110)\00" }
 @.str.1127 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"false\00" }
-@.str.1128 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 611, column 109)\00" }
-@.str.1129 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 615, column 60)\00" }
-@.str.1130 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 617, column 107)\00" }
-@.str.1131 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 619, column 87)\00" }
+@.str.1128 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 606, column 117)\00" }
+@.str.1129 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 610, column 60)\00" }
+@.str.1130 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 612, column 107)\00" }
+@.str.1131 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 614, column 87)\00" }
 @.str.1132 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"(\00" }
-@.str.1133 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 623, column 42)\00" }
+@.str.1133 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 618, column 42)\00" }
 @.str.1134 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"[\00" }
-@.str.1135 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 625, column 34)\00" }
+@.str.1135 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 620, column 34)\00" }
 @.str.1136 = private unnamed_addr constant { i64, [26 x i8] } { i64 409610, [26 x i8] c"Expected pattern atom at \00" }
 @.str.1137 = private unnamed_addr constant { i64, [4 x i8] } { i64 49162, [4 x i8] c"try\00" }
 @.str.1138 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"true\00" }
-@.str.1139 = private unnamed_addr constant { i64, [42 x i8] } { i64 671754, [42 x i8] c"Int overflow in + (line 1362, column 104)\00" }
+@.str.1139 = private unnamed_addr constant { i64, [42 x i8] } { i64 671754, [42 x i8] c"Int overflow in + (line 1357, column 112)\00" }
 @.str.1140 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"false\00" }
-@.str.1141 = private unnamed_addr constant { i64, [42 x i8] } { i64 671754, [42 x i8] c"Int overflow in + (line 1363, column 106)\00" }
-@.str.1142 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1367, column 57)\00" }
-@.str.1143 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1369, column 83)\00" }
-@.str.1144 = private unnamed_addr constant { i64, [42 x i8] } { i64 671754, [42 x i8] c"Int overflow in + (line 1371, column 104)\00" }
-@.str.1145 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1373, column 84)\00" }
+@.str.1141 = private unnamed_addr constant { i64, [42 x i8] } { i64 671754, [42 x i8] c"Int overflow in + (line 1358, column 114)\00" }
+@.str.1142 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1362, column 57)\00" }
+@.str.1143 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1364, column 83)\00" }
+@.str.1144 = private unnamed_addr constant { i64, [42 x i8] } { i64 671754, [42 x i8] c"Int overflow in + (line 1366, column 104)\00" }
+@.str.1145 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1368, column 84)\00" }
 @.str.1146 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\5C\00" }
 @.str.1147 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"[\00" }
 @.str.1148 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"{\00" }
 @.str.1149 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"(\00" }
-@.str.1150 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1383, column 39)\00" }
+@.str.1150 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1378, column 39)\00" }
 @.str.1151 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"(\00" }
-@.str.1152 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1384, column 41)\00" }
-@.str.1153 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1385, column 42)\00" }
+@.str.1152 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1379, column 41)\00" }
+@.str.1153 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1380, column 42)\00" }
 @.str.1154 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"=\00" }
-@.str.1155 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1386, column 38)\00" }
-@.str.1156 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1388, column 83)\00" }
+@.str.1155 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1381, column 38)\00" }
+@.str.1156 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1383, column 83)\00" }
 @.str.1157 = private unnamed_addr constant { i64, [24 x i8] } { i64 376842, [24 x i8] c"Expected expression at \00" }
 @.str.1158 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c", got \00" }
 @.str.1159 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"..\00" }
@@ -1301,20 +1301,20 @@ declare i64 @fs_rename(i64, i64)
 @.str.1166 = private unnamed_addr constant { i64, [11 x i8] } { i64 163850, [11 x i8] c"class name\00" }
 @.str.1167 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"constructor name\00" }
 @.str.1168 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"-\00" }
-@.str.1169 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1207, column 45)\00" }
-@.str.1170 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1211, column 49)\00" }
+@.str.1169 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1202, column 45)\00" }
+@.str.1170 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1206, column 49)\00" }
 @.str.1171 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"-\00" }
 @.str.1172 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"!\00" }
-@.str.1173 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1215, column 45)\00" }
+@.str.1173 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1210, column 45)\00" }
 @.str.1174 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"!\00" }
 @.str.1175 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"(\00" }
-@.str.1176 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 345, column 84)\00" }
-@.str.1177 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 345, column 95)\00" }
+@.str.1176 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 340, column 84)\00" }
+@.str.1177 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 340, column 95)\00" }
 @.str.1178 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
-@.str.1179 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 346, column 87)\00" }
-@.str.1180 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 347, column 34)\00" }
-@.str.1181 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 348, column 38)\00" }
-@.str.1182 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 348, column 49)\00" }
+@.str.1179 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 341, column 87)\00" }
+@.str.1180 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 342, column 34)\00" }
+@.str.1181 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 343, column 38)\00" }
+@.str.1182 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 343, column 49)\00" }
 @.str.1183 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"0x\00" }
 @.str.1184 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"0X\00" }
 @.str.1185 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"0b\00" }
@@ -7379,6 +7379,34 @@ join_2:
   ret i64 %t$3
 }
 
+define i64 @stdlib.compiler.token.is_keyword_token(i64 %p$token, i64 %p$kw) {
+entry:
+  %t$0$st = call { i64, i64 } @stdlib.compiler.token.token_kind_worker(i64 %p$token)
+  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
+  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  br label %arm_0_2
+arm_0_2:
+  %t$4 = add i64 0, 27
+  %t$5 = icmp eq i64 %t$0, %t$4
+  br i1 %t$5, label %body_0_2, label %arm_1_2
+body_0_2:
+  %t$6 = call i64 @stdlib.compiler.token.token_text(i64 %p$token)
+  %t$7$lptr = inttoptr i64 %t$6 to ptr
+  %t$7$rptr = inttoptr i64 %p$kw to ptr
+  %t$7$i1 = call i1 @str_eq(ptr %t$7$lptr, ptr %t$7$rptr)
+  %t$7 = zext i1 %t$7$i1 to i64
+  br label %join_2
+arm_1_2:
+  %t$8 = add i64 0, 0
+  br label %join_2
+arm_2_2:
+  call void @sprout_abort_match()
+  unreachable
+join_2:
+  %t$3 = phi i64 [%t$7, %body_0_2], [%t$8, %arm_1_2]
+  ret i64 %t$3
+}
+
 define i64 @stdlib.compiler.layout.layout(i64 %p$tokens, i64 %p$mode) {
 entry:
   %t$0 = add i64 0, 0
@@ -7980,7 +8008,7 @@ body_0_1:
 ntest_5:
   %t$9 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.102, i64 0, i32 1, i64 0
   %t$10 = ptrtoint ptr %t$9 to i64
-  %t$11 = call i64 @stdlib.compiler.layout.is_keyword(i64 %p$t, i64 %t$10)
+  %t$11 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %p$t, i64 %t$10)
   br label %join_1
 arm_1_1:
   %t$12 = add i64 0, 6
@@ -7995,7 +8023,7 @@ body_1_1:
 ntest_14:
   %t$18 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.103, i64 0, i32 1, i64 0
   %t$19 = ptrtoint ptr %t$18 to i64
-  %t$20 = call i64 @stdlib.compiler.layout.is_keyword(i64 %p$t, i64 %t$19)
+  %t$20 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %p$t, i64 %t$19)
   br label %join_1
 arm_2_1:
   %t$21 = add i64 0, 6
@@ -8010,7 +8038,7 @@ body_2_1:
 ntest_23:
   %t$27 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.104, i64 0, i32 1, i64 0
   %t$28 = ptrtoint ptr %t$27 to i64
-  %t$29 = call i64 @stdlib.compiler.layout.is_keyword(i64 %p$t, i64 %t$28)
+  %t$29 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %p$t, i64 %t$28)
   br label %join_1
 arm_3_1:
   %t$30 = add i64 0, 0
@@ -8047,7 +8075,7 @@ ntest_9:
   %t$13 = call i64 @sprout_field(i64 %t$9, i64 0)
   %t$14 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.105, i64 0, i32 1, i64 0
   %t$15 = ptrtoint ptr %t$14 to i64
-  %t$16 = call i64 @stdlib.compiler.layout.is_keyword(i64 %p$t, i64 %t$15)
+  %t$16 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %p$t, i64 %t$15)
   %t$21 = trunc i64 %t$16 to i1
   br i1 %t$21, label %then_17, label %else_17
 then_17:
@@ -9067,7 +9095,7 @@ arm_1_3:
 body_1_3:
   %t$10 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.109, i64 0, i32 1, i64 0
   %t$11 = ptrtoint ptr %t$10 to i64
-  %t$12 = call i64 @stdlib.compiler.layout.is_keyword(i64 %p$t, i64 %t$11)
+  %t$12 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %p$t, i64 %t$11)
   %t$17 = trunc i64 %t$12 to i1
   br i1 %t$17, label %then_13, label %else_13
 then_13:
@@ -9145,7 +9173,7 @@ then_3:
 else_3:
   %t$6 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.111, i64 0, i32 1, i64 0
   %t$7 = ptrtoint ptr %t$6 to i64
-  %t$8 = call i64 @stdlib.compiler.layout.is_keyword(i64 %p$t, i64 %t$7)
+  %t$8 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %p$t, i64 %t$7)
   br label %join_3
 join_3:
   %t$4 = phi i64 [%t$5, %then_3], [%t$8, %else_3]
@@ -9157,7 +9185,7 @@ then_10:
 else_10:
   %t$13 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.112, i64 0, i32 1, i64 0
   %t$14 = ptrtoint ptr %t$13 to i64
-  %t$15 = call i64 @stdlib.compiler.layout.is_keyword(i64 %p$t, i64 %t$14)
+  %t$15 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %p$t, i64 %t$14)
   br label %join_10
 join_10:
   %t$11 = phi i64 [%t$12, %then_10], [%t$15, %else_10]
@@ -9453,7 +9481,7 @@ body_2_7:
   %t$59 = call i64 @sprout_field(i64 %p$f, i64 1)
   %t$60 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.113, i64 0, i32 1, i64 0
   %t$61 = ptrtoint ptr %t$60 to i64
-  %t$62 = call i64 @stdlib.compiler.layout.is_keyword(i64 %p$t, i64 %t$61) noinline
+  %t$62 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %p$t, i64 %t$61) noinline
   %t$67 = trunc i64 %t$62 to i1
   br i1 %t$67, label %then_63, label %else_63
 then_63:
@@ -9514,7 +9542,7 @@ then_79:
 else_79:
   %t$84 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.114, i64 0, i32 1, i64 0
   %t$85 = ptrtoint ptr %t$84 to i64
-  %t$86 = call i64 @stdlib.compiler.layout.is_keyword(i64 %p$t, i64 %t$85) noinline
+  %t$86 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %p$t, i64 %t$85) noinline
   %t$92 = trunc i64 %t$86 to i1
   br i1 %t$92, label %then_87, label %else_87
 then_87:
@@ -9561,7 +9589,7 @@ then_93:
 else_93:
   %t$99 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.115, i64 0, i32 1, i64 0
   %t$100 = ptrtoint ptr %t$99 to i64
-  %t$101 = call i64 @stdlib.compiler.layout.is_keyword(i64 %p$t, i64 %t$100) noinline
+  %t$101 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %p$t, i64 %t$100) noinline
   %t$108 = trunc i64 %t$101 to i1
   br i1 %t$108, label %then_102, label %else_102
 then_102:
@@ -9667,7 +9695,7 @@ define i64 @stdlib.compiler.layout.body_ends(i64 %p$t, i64 %p$k, i64 %p$fl, i64 
 entry:
   %t$0 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.116, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
-  %t$2 = call i64 @stdlib.compiler.layout.is_keyword(i64 %p$t, i64 %t$1)
+  %t$2 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %p$t, i64 %t$1)
   %t$27 = trunc i64 %t$2 to i1
   br i1 %t$27, label %then_3, label %else_3
 then_3:
@@ -9689,7 +9717,7 @@ else_8:
 then_13:
   %t$15 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.117, i64 0, i32 1, i64 0
   %t$16 = ptrtoint ptr %t$15 to i64
-  %t$17 = call i64 @stdlib.compiler.layout.is_keyword(i64 %p$t, i64 %t$16)
+  %t$17 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %p$t, i64 %t$16)
   %t$22 = trunc i64 %t$17 to i1
   br i1 %t$22, label %then_18, label %else_18
 then_18:
@@ -10006,7 +10034,7 @@ body_0_7:
   %t$12 = call i64 @sprout_field(i64 %p$d, i64 1)
   %t$13 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.121, i64 0, i32 1, i64 0
   %t$14 = ptrtoint ptr %t$13 to i64
-  %t$15 = call i64 @stdlib.compiler.layout.is_keyword(i64 %p$t, i64 %t$14)
+  %t$15 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %p$t, i64 %t$14)
   %t$21 = trunc i64 %t$15 to i1
   br i1 %t$21, label %then_16, label %else_16
 then_16:
@@ -11570,7 +11598,7 @@ define i64 @stdlib.compiler.layout.item_keyword(i64 %p$tokens, i64 %p$i, i64 %p$
 entry:
   %t$0 = getelementptr inbounds { i64, [4 x i8] }, ptr @.str.184, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
-  %t$2 = call i64 @stdlib.compiler.layout.is_keyword(i64 %p$t, i64 %t$1)
+  %t$2 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %p$t, i64 %t$1)
   %t$12 = trunc i64 %t$2 to i1
   br i1 %t$12, label %then_3, label %else_3
 then_3:
@@ -12389,7 +12417,7 @@ ntest_35:
 arm_2_2:
   %t$50 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.196, i64 0, i32 1, i64 0
   %t$51 = ptrtoint ptr %t$50 to i64
-  %t$52 = call i64 @stdlib.compiler.layout.is_keyword(i64 %p$t, i64 %t$51)
+  %t$52 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %p$t, i64 %t$51)
   %t$57 = trunc i64 %t$52 to i1
   br i1 %t$57, label %then_53, label %else_53
 then_53:
@@ -12608,7 +12636,7 @@ define i64 @stdlib.compiler.layout.start_decl(i64 %p$t, i64 %p$col) {
 entry:
   %t$0 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.198, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
-  %t$2 = call i64 @stdlib.compiler.layout.is_keyword(i64 %p$t, i64 %t$1)
+  %t$2 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %p$t, i64 %t$1)
   %t$30 = trunc i64 %t$2 to i1
   br i1 %t$30, label %then_3, label %else_3
 then_3:
@@ -12620,7 +12648,7 @@ then_3:
 else_3:
   %t$6 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.199, i64 0, i32 1, i64 0
   %t$7 = ptrtoint ptr %t$6 to i64
-  %t$8 = call i64 @stdlib.compiler.layout.is_keyword(i64 %p$t, i64 %t$7)
+  %t$8 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %p$t, i64 %t$7)
   %t$29 = trunc i64 %t$8 to i1
   br i1 %t$29, label %then_9, label %else_9
 then_9:
@@ -12629,7 +12657,7 @@ then_9:
 else_9:
   %t$12 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.200, i64 0, i32 1, i64 0
   %t$13 = ptrtoint ptr %t$12 to i64
-  %t$14 = call i64 @stdlib.compiler.layout.is_keyword(i64 %p$t, i64 %t$13)
+  %t$14 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %p$t, i64 %t$13)
   %t$28 = trunc i64 %t$14 to i1
   br i1 %t$28, label %then_15, label %else_15
 then_15:
@@ -12648,7 +12676,7 @@ then_15:
 else_15:
   %t$19 = getelementptr inbounds { i64, [9 x i8] }, ptr @.str.201, i64 0, i32 1, i64 0
   %t$20 = ptrtoint ptr %t$19 to i64
-  %t$21 = call i64 @stdlib.compiler.layout.is_keyword(i64 %p$t, i64 %t$20)
+  %t$21 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %p$t, i64 %t$20)
   %t$27 = trunc i64 %t$21 to i1
   br i1 %t$27, label %then_22, label %else_22
 then_22:
@@ -15525,34 +15553,6 @@ join_2:
   ret i64 %t$3
 }
 
-define i64 @stdlib.compiler.layout.is_keyword(i64 %p$t, i64 %p$w) {
-entry:
-  %t$0$st = call { i64, i64 } @stdlib.compiler.token.token_kind_worker(i64 %p$t)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
-  br label %arm_0_2
-arm_0_2:
-  %t$4 = add i64 0, 27
-  %t$5 = icmp eq i64 %t$0, %t$4
-  br i1 %t$5, label %body_0_2, label %arm_1_2
-body_0_2:
-  %t$6 = call i64 @stdlib.compiler.token.token_text(i64 %p$t)
-  %t$7$lptr = inttoptr i64 %t$6 to ptr
-  %t$7$rptr = inttoptr i64 %p$w to ptr
-  %t$7$i1 = call i1 @str_eq(ptr %t$7$lptr, ptr %t$7$rptr)
-  %t$7 = zext i1 %t$7$i1 to i64
-  br label %join_2
-arm_1_2:
-  %t$8 = add i64 0, 0
-  br label %join_2
-arm_2_2:
-  call void @sprout_abort_match()
-  unreachable
-join_2:
-  %t$3 = phi i64 [%t$7, %body_0_2], [%t$8, %arm_1_2]
-  ret i64 %t$3
-}
-
 define i64 @stdlib.compiler.ast.split_head_try(i64 %p$e) {
 entry:
   %t$0 = call i64 @sprout_tag(i64 %p$e)
@@ -17084,34 +17084,6 @@ entry:
   ret i64 %t$0
 }
 
-define i64 @stdlib.compiler.parser.tok_is_keyword(i64 %p$t, i64 %p$kw) {
-entry:
-  %t$0$st = call { i64, i64 } @stdlib.compiler.token.token_kind_worker(i64 %p$t)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
-  br label %arm_0_2
-arm_0_2:
-  %t$4 = add i64 0, 27
-  %t$5 = icmp eq i64 %t$0, %t$4
-  br i1 %t$5, label %body_0_2, label %arm_1_2
-body_0_2:
-  %t$6 = call i64 @stdlib.compiler.token.token_text(i64 %p$t)
-  %t$7$lptr = inttoptr i64 %t$6 to ptr
-  %t$7$rptr = inttoptr i64 %p$kw to ptr
-  %t$7$i1 = call i1 @str_eq(ptr %t$7$lptr, ptr %t$7$rptr)
-  %t$7 = zext i1 %t$7$i1 to i64
-  br label %join_2
-arm_1_2:
-  %t$8 = add i64 0, 0
-  br label %join_2
-arm_2_2:
-  call void @sprout_abort_match()
-  unreachable
-join_2:
-  %t$3 = phi i64 [%t$7, %body_0_2], [%t$8, %arm_1_2]
-  ret i64 %t$3
-}
-
 define i64 @stdlib.compiler.parser.tok_is_symbol(i64 %p$t, i64 %p$sym) {
 entry:
   %t$0$st = call { i64, i64 } @stdlib.compiler.token.token_kind_worker(i64 %p$t)
@@ -17420,7 +17392,7 @@ entry:
   store i64 %p$kw, ptr %t$15
   %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
   %t$0 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
-  %t$1 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$0, i64 %p$kw)
+  %t$1 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$0, i64 %p$kw)
   %t$12 = trunc i64 %t$1 to i1
   %t$17 = call i64 @sprout_gc_pop_roots(i64 2)
   br i1 %t$12, label %then_2, label %else_2
@@ -21560,7 +21532,7 @@ entry:
   %t$0 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$1 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.293, i64 0, i32 1, i64 0
   %t$2 = ptrtoint ptr %t$1 to i64
-  %t$3 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$0, i64 %t$2)
+  %t$3 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$0, i64 %t$2)
   %t$117 = trunc i64 %t$3 to i1
   %t$120 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$117, label %then_4, label %else_4
@@ -21618,7 +21590,7 @@ else_4:
   %t$15 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$16 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.295, i64 0, i32 1, i64 0
   %t$17 = ptrtoint ptr %t$16 to i64
-  %t$18 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$15, i64 %t$17)
+  %t$18 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$15, i64 %t$17)
   %t$116 = trunc i64 %t$18 to i1
   %t$135 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$116, label %then_19, label %else_19
@@ -22476,7 +22448,7 @@ else_36:
   %t$39 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$40 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.310, i64 0, i32 1, i64 0
   %t$41 = ptrtoint ptr %t$40 to i64
-  %t$42 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$39, i64 %t$41)
+  %t$42 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$39, i64 %t$41)
   %t$72 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_36
 join_36:
@@ -22494,7 +22466,7 @@ else_44:
   %t$75 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$48 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.311, i64 0, i32 1, i64 0
   %t$49 = ptrtoint ptr %t$48 to i64
-  %t$50 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$47, i64 %t$49)
+  %t$50 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$47, i64 %t$49)
   br label %join_44
 join_44:
   %t$45 = phi i64 [%t$46, %then_44], [%t$50, %else_44]
@@ -22616,7 +22588,7 @@ entry:
   %t$0 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$1 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.312, i64 0, i32 1, i64 0
   %t$2 = ptrtoint ptr %t$1 to i64
-  %t$3 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$0, i64 %t$2)
+  %t$3 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$0, i64 %t$2)
   %t$130 = trunc i64 %t$3 to i1
   %t$133 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$130, label %then_4, label %else_4
@@ -22674,7 +22646,7 @@ else_4:
   %t$15 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$16 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.314, i64 0, i32 1, i64 0
   %t$17 = ptrtoint ptr %t$16 to i64
-  %t$18 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$15, i64 %t$17)
+  %t$18 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$15, i64 %t$17)
   %t$129 = trunc i64 %t$18 to i1
   %t$148 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$129, label %then_19, label %else_19
@@ -24409,7 +24381,7 @@ else_20:
 then_26:
   %t$28 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.349, i64 0, i32 1, i64 0
   %t$29 = ptrtoint ptr %t$28 to i64
-  %t$30 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$0, i64 %t$29)
+  %t$30 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$0, i64 %t$29)
   %t$37 = trunc i64 %t$30 to i1
   br i1 %t$37, label %then_31, label %else_31
 then_31:
@@ -24418,7 +24390,7 @@ then_31:
 else_31:
   %t$34 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.350, i64 0, i32 1, i64 0
   %t$35 = ptrtoint ptr %t$34 to i64
-  %t$36 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$0, i64 %t$35)
+  %t$36 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$0, i64 %t$35)
   br label %join_31
 join_31:
   %t$32 = phi i64 [%t$33, %then_31], [%t$36, %else_31]
@@ -24430,7 +24402,7 @@ then_38:
 else_38:
   %t$41 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.351, i64 0, i32 1, i64 0
   %t$42 = ptrtoint ptr %t$41 to i64
-  %t$43 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$0, i64 %t$42)
+  %t$43 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$0, i64 %t$42)
   br label %join_38
 join_38:
   %t$39 = phi i64 [%t$40, %then_38], [%t$43, %else_38]
@@ -24806,7 +24778,7 @@ do_cont_18:
   %t$24 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %t$23)
   %t$25 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.360, i64 0, i32 1, i64 0
   %t$26 = ptrtoint ptr %t$25 to i64
-  %t$27 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$24, i64 %t$26)
+  %t$27 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$24, i64 %t$26)
   %t$35 = trunc i64 %t$27 to i1
   %t$94 = call i64 @sprout_gc_pop_roots(i64 3)
   br i1 %t$35, label %then_28, label %else_28
@@ -25198,7 +25170,7 @@ entry:
   %t$0 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$1 = getelementptr inbounds { i64, [4 x i8] }, ptr @.str.361, i64 0, i32 1, i64 0
   %t$2 = ptrtoint ptr %t$1 to i64
-  %t$3 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$0, i64 %t$2)
+  %t$3 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$0, i64 %t$2)
   %t$117 = trunc i64 %t$3 to i1
   %t$120 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$117, label %then_4, label %else_4
@@ -25331,7 +25303,7 @@ do_cont_30:
   %t$36 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %t$35)
   %t$37 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.363, i64 0, i32 1, i64 0
   %t$38 = ptrtoint ptr %t$37 to i64
-  %t$39 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$36, i64 %t$38)
+  %t$39 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$36, i64 %t$38)
   %t$91 = trunc i64 %t$39 to i1
   %t$165 = call i64 @sprout_gc_pop_roots(i64 4)
   br i1 %t$91, label %then_40, label %else_40
@@ -26523,7 +26495,7 @@ do_cont_19:
   %t$25 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %t$24)
   %t$26 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.370, i64 0, i32 1, i64 0
   %t$27 = ptrtoint ptr %t$26 to i64
-  %t$28 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$25, i64 %t$27)
+  %t$28 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$25, i64 %t$27)
   %t$62 = trunc i64 %t$28 to i1
   %t$104 = call i64 @sprout_gc_pop_roots(i64 4)
   br i1 %t$62, label %then_29, label %else_29
@@ -27271,7 +27243,7 @@ entry:
   %t$0 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$1 = getelementptr inbounds { i64, [4 x i8] }, ptr @.str.376, i64 0, i32 1, i64 0
   %t$2 = ptrtoint ptr %t$1 to i64
-  %t$3 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$0, i64 %t$2)
+  %t$3 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$0, i64 %t$2)
   %t$8 = trunc i64 %t$3 to i1
   %t$11 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$8, label %then_4, label %else_4
@@ -27626,7 +27598,7 @@ entry:
 arm_0_1:
   %t$3 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.383, i64 0, i32 1, i64 0
   %t$4 = ptrtoint ptr %t$3 to i64
-  %t$5 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$0, i64 %t$4)
+  %t$5 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$0, i64 %t$4)
   %t$39 = trunc i64 %t$5 to i1
   br i1 %t$39, label %then_6, label %else_6
 then_6:
@@ -27658,7 +27630,7 @@ then_6:
 else_6:
   %t$12 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.384, i64 0, i32 1, i64 0
   %t$13 = ptrtoint ptr %t$12 to i64
-  %t$14 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$0, i64 %t$13)
+  %t$14 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$0, i64 %t$13)
   %t$38 = trunc i64 %t$14 to i1
   br i1 %t$38, label %then_15, label %else_15
 then_15:
@@ -27912,7 +27884,7 @@ entry:
   %t$0 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$1 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.387, i64 0, i32 1, i64 0
   %t$2 = ptrtoint ptr %t$1 to i64
-  %t$3 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$0, i64 %t$2)
+  %t$3 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$0, i64 %t$2)
   %t$32 = trunc i64 %t$3 to i1
   %t$35 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$32, label %then_4, label %else_4
@@ -27930,7 +27902,7 @@ else_4:
   %t$7 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$8 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.388, i64 0, i32 1, i64 0
   %t$9 = ptrtoint ptr %t$8 to i64
-  %t$10 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$7, i64 %t$9)
+  %t$10 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$7, i64 %t$9)
   %t$31 = trunc i64 %t$10 to i1
   %t$41 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$31, label %then_11, label %else_11
@@ -27948,7 +27920,7 @@ else_11:
   %t$14 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$15 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.389, i64 0, i32 1, i64 0
   %t$16 = ptrtoint ptr %t$15 to i64
-  %t$17 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$14, i64 %t$16)
+  %t$17 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$14, i64 %t$16)
   %t$30 = trunc i64 %t$17 to i1
   %t$47 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$30, label %then_18, label %else_18
@@ -27966,7 +27938,7 @@ else_18:
   %t$21 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$22 = getelementptr inbounds { i64, [4 x i8] }, ptr @.str.390, i64 0, i32 1, i64 0
   %t$23 = ptrtoint ptr %t$22 to i64
-  %t$24 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$21, i64 %t$23)
+  %t$24 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$21, i64 %t$23)
   %t$29 = trunc i64 %t$24 to i1
   %t$53 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$29, label %then_25, label %else_25
@@ -32160,7 +32132,7 @@ entry:
   %t$0 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$1 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.448, i64 0, i32 1, i64 0
   %t$2 = ptrtoint ptr %t$1 to i64
-  %t$3 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$0, i64 %t$2)
+  %t$3 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$0, i64 %t$2)
   %t$15 = trunc i64 %t$3 to i1
   %t$40 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$15, label %then_4, label %else_4
@@ -33016,7 +32988,7 @@ entry:
   %t$0 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$1 = getelementptr inbounds { i64, [4 x i8] }, ptr @.str.462, i64 0, i32 1, i64 0
   %t$2 = ptrtoint ptr %t$1 to i64
-  %t$3 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$0, i64 %t$2)
+  %t$3 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$0, i64 %t$2)
   %t$221 = trunc i64 %t$3 to i1
   %t$224 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$221, label %then_4, label %else_4
@@ -33053,7 +33025,7 @@ else_4:
   %t$10 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$11 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.463, i64 0, i32 1, i64 0
   %t$12 = ptrtoint ptr %t$11 to i64
-  %t$13 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$10, i64 %t$12)
+  %t$13 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$10, i64 %t$12)
   %t$220 = trunc i64 %t$13 to i1
   %t$236 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$220, label %then_14, label %else_14
@@ -33111,7 +33083,7 @@ else_14:
   %t$25 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$26 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.465, i64 0, i32 1, i64 0
   %t$27 = ptrtoint ptr %t$26 to i64
-  %t$28 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$25, i64 %t$27)
+  %t$28 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$25, i64 %t$27)
   %t$219 = trunc i64 %t$28 to i1
   %t$251 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$219, label %then_29, label %else_29
@@ -34886,7 +34858,7 @@ do_cont_28:
   %t$34 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %t$33)
   %t$35 = getelementptr inbounds { i64, [4 x i8] }, ptr @.str.499, i64 0, i32 1, i64 0
   %t$36 = ptrtoint ptr %t$35 to i64
-  %t$37 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$34, i64 %t$36)
+  %t$37 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$34, i64 %t$36)
   %t$69 = trunc i64 %t$37 to i1
   %t$116 = call i64 @sprout_gc_pop_roots(i64 3)
   br i1 %t$69, label %then_38, label %else_38
@@ -35370,7 +35342,7 @@ entry:
   %t$0 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$1 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.505, i64 0, i32 1, i64 0
   %t$2 = ptrtoint ptr %t$1 to i64
-  %t$3 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$0, i64 %t$2)
+  %t$3 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$0, i64 %t$2)
   %t$11 = trunc i64 %t$3 to i1
   %t$14 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$11, label %then_4, label %else_4
@@ -35792,7 +35764,7 @@ tco_loop:
   %t$0 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$1 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.509, i64 0, i32 1, i64 0
   %t$2 = ptrtoint ptr %t$1 to i64
-  %t$3 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$0, i64 %t$2)
+  %t$3 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$0, i64 %t$2)
   %t$24 = trunc i64 %t$3 to i1
   %t$33 = call i64 @sprout_gc_pop_roots(i64 2)
   br i1 %t$24, label %then_4, label %else_4
@@ -37618,7 +37590,7 @@ body_1_13:
   %t$25 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %t$8)
   %t$26 = getelementptr inbounds { i64, [4 x i8] }, ptr @.str.531, i64 0, i32 1, i64 0
   %t$27 = ptrtoint ptr %t$26 to i64
-  %t$28 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$25, i64 %t$27)
+  %t$28 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$25, i64 %t$27)
   %t$63 = trunc i64 %t$28 to i1
   %t$99 = call i64 @sprout_gc_pop_roots(i64 2)
   br i1 %t$63, label %then_29, label %else_29
@@ -44132,7 +44104,7 @@ do_cont_31:
   %t$36 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %t$35)
   %t$37 = getelementptr inbounds { i64, [4 x i8] }, ptr @.str.599, i64 0, i32 1, i64 0
   %t$38 = ptrtoint ptr %t$37 to i64
-  %t$39 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$36, i64 %t$38)
+  %t$39 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$36, i64 %t$38)
   %t$68 = trunc i64 %t$39 to i1
   %t$127 = call i64 @sprout_gc_pop_roots(i64 4)
   br i1 %t$68, label %then_40, label %else_40
@@ -45724,7 +45696,7 @@ tco_loop:
   %t$0 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$1 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.614, i64 0, i32 1, i64 0
   %t$2 = ptrtoint ptr %t$1 to i64
-  %t$3 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$0, i64 %t$2)
+  %t$3 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$0, i64 %t$2)
   %t$20 = trunc i64 %t$3 to i1
   %t$29 = call i64 @sprout_gc_pop_roots(i64 2)
   br i1 %t$20, label %then_4, label %else_4
@@ -46967,7 +46939,7 @@ tco_loop:
   %t$0 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$1 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.629, i64 0, i32 1, i64 0
   %t$2 = ptrtoint ptr %t$1 to i64
-  %t$3 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$0, i64 %t$2)
+  %t$3 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$0, i64 %t$2)
   %t$20 = trunc i64 %t$3 to i1
   %t$29 = call i64 @sprout_gc_pop_roots(i64 2)
   br i1 %t$20, label %then_4, label %else_4
@@ -47972,7 +47944,7 @@ entry:
   %t$0 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$1 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.642, i64 0, i32 1, i64 0
   %t$2 = ptrtoint ptr %t$1 to i64
-  %t$3 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$0, i64 %t$2)
+  %t$3 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$0, i64 %t$2)
   %t$63 = trunc i64 %t$3 to i1
   %t$66 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$63, label %then_4, label %else_4
@@ -47990,7 +47962,7 @@ else_4:
   %t$7 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$8 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.643, i64 0, i32 1, i64 0
   %t$9 = ptrtoint ptr %t$8 to i64
-  %t$10 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$7, i64 %t$9)
+  %t$10 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$7, i64 %t$9)
   %t$62 = trunc i64 %t$10 to i1
   %t$72 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$62, label %then_11, label %else_11
@@ -48008,7 +47980,7 @@ else_11:
   %t$14 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$15 = getelementptr inbounds { i64, [4 x i8] }, ptr @.str.644, i64 0, i32 1, i64 0
   %t$16 = ptrtoint ptr %t$15 to i64
-  %t$17 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$14, i64 %t$16)
+  %t$17 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$14, i64 %t$16)
   %t$61 = trunc i64 %t$17 to i1
   %t$78 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$61, label %then_18, label %else_18
@@ -48026,7 +47998,7 @@ else_18:
   %t$21 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$22 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.645, i64 0, i32 1, i64 0
   %t$23 = ptrtoint ptr %t$22 to i64
-  %t$24 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$21, i64 %t$23)
+  %t$24 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$21, i64 %t$23)
   %t$60 = trunc i64 %t$24 to i1
   %t$84 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$60, label %then_25, label %else_25
@@ -48044,7 +48016,7 @@ else_25:
   %t$28 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$29 = getelementptr inbounds { i64, [9 x i8] }, ptr @.str.646, i64 0, i32 1, i64 0
   %t$30 = ptrtoint ptr %t$29 to i64
-  %t$31 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$28, i64 %t$30)
+  %t$31 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$28, i64 %t$30)
   %t$59 = trunc i64 %t$31 to i1
   %t$90 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$59, label %then_32, label %else_32
@@ -48062,7 +48034,7 @@ else_32:
   %t$35 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$36 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.647, i64 0, i32 1, i64 0
   %t$37 = ptrtoint ptr %t$36 to i64
-  %t$38 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$35, i64 %t$37)
+  %t$38 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$35, i64 %t$37)
   %t$58 = trunc i64 %t$38 to i1
   %t$96 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$58, label %then_39, label %else_39
@@ -48080,7 +48052,7 @@ else_39:
   %t$42 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$43 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.648, i64 0, i32 1, i64 0
   %t$44 = ptrtoint ptr %t$43 to i64
-  %t$45 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$42, i64 %t$44)
+  %t$45 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$42, i64 %t$44)
   %t$57 = trunc i64 %t$45 to i1
   %t$102 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$57, label %then_46, label %else_46
@@ -49404,7 +49376,7 @@ else_9:
   %t$15 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$16 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.668, i64 0, i32 1, i64 0
   %t$17 = ptrtoint ptr %t$16 to i64
-  %t$18 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$15, i64 %t$17)
+  %t$18 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$15, i64 %t$17)
   %t$44 = trunc i64 %t$18 to i1
   %t$82 = call i64 @sprout_gc_pop_roots(i64 4)
   br i1 %t$44, label %then_19, label %else_19
@@ -49451,7 +49423,7 @@ else_19:
   %t$26 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$27 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.670, i64 0, i32 1, i64 0
   %t$28 = ptrtoint ptr %t$27 to i64
-  %t$29 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$26, i64 %t$28)
+  %t$29 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$26, i64 %t$28)
   %t$43 = trunc i64 %t$29 to i1
   %t$100 = call i64 @sprout_gc_pop_roots(i64 4)
   br i1 %t$43, label %then_30, label %else_30
@@ -49532,7 +49504,7 @@ entry:
   %t$0 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$j) noinline
   %t$1 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.673, i64 0, i32 1, i64 0
   %t$2 = ptrtoint ptr %t$1 to i64
-  %t$3 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$0, i64 %t$2) noinline
+  %t$3 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$0, i64 %t$2) noinline
   %t$80 = trunc i64 %t$3 to i1
   %t$89 = call i64 @sprout_gc_pop_roots(i64 4)
   br i1 %t$80, label %then_4, label %else_4
@@ -49555,7 +49527,7 @@ else_4:
   %t$7 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$j) noinline
   %t$8 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.674, i64 0, i32 1, i64 0
   %t$9 = ptrtoint ptr %t$8 to i64
-  %t$10 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$7, i64 %t$9) noinline
+  %t$10 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$7, i64 %t$9) noinline
   %t$18 = trunc i64 %t$10 to i1
   %t$98 = call i64 @sprout_gc_pop_roots(i64 4)
   br i1 %t$18, label %then_11, label %else_11
@@ -49578,7 +49550,7 @@ else_11:
   %t$14 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$j) noinline
   %t$15 = getelementptr inbounds { i64, [4 x i8] }, ptr @.str.675, i64 0, i32 1, i64 0
   %t$16 = ptrtoint ptr %t$15 to i64
-  %t$17 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$14, i64 %t$16) noinline
+  %t$17 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$14, i64 %t$16) noinline
   %t$107 = call i64 @sprout_gc_pop_roots(i64 4)
   br label %join_11
 join_11:
@@ -49604,7 +49576,7 @@ else_19:
   %t$22 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$j) noinline
   %t$23 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.676, i64 0, i32 1, i64 0
   %t$24 = ptrtoint ptr %t$23 to i64
-  %t$25 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$22, i64 %t$24) noinline
+  %t$25 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$22, i64 %t$24) noinline
   %t$116 = call i64 @sprout_gc_pop_roots(i64 4)
   br label %join_19
 join_19:
@@ -49666,7 +49638,7 @@ else_27:
   %t$39 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$j) noinline
   %t$40 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.679, i64 0, i32 1, i64 0
   %t$41 = ptrtoint ptr %t$40 to i64
-  %t$42 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$39, i64 %t$41) noinline
+  %t$42 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$39, i64 %t$41) noinline
   %t$78 = trunc i64 %t$42 to i1
   %t$134 = call i64 @sprout_gc_pop_roots(i64 4)
   br i1 %t$78, label %then_43, label %else_43
@@ -49785,7 +49757,7 @@ else_43:
   %t$69 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$j) noinline
   %t$70 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.684, i64 0, i32 1, i64 0
   %t$71 = ptrtoint ptr %t$70 to i64
-  %t$72 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$69, i64 %t$71) noinline
+  %t$72 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$69, i64 %t$71) noinline
   %t$77 = trunc i64 %t$72 to i1
   %t$171 = call i64 @sprout_gc_pop_roots(i64 4)
   br i1 %t$77, label %then_73, label %else_73
@@ -50092,7 +50064,7 @@ ovfok_1:
   %t$4 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %t$1)
   %t$5 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.693, i64 0, i32 1, i64 0
   %t$6 = ptrtoint ptr %t$5 to i64
-  %t$7 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$4, i64 %t$6)
+  %t$7 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$4, i64 %t$6)
   %t$15 = trunc i64 %t$7 to i1
   %t$20 = call i64 @sprout_gc_pop_roots(i64 2)
   br i1 %t$15, label %then_8, label %else_8
@@ -64700,7 +64672,7 @@ ntest_9:
   %t$13 = call i64 @sprout_field(i64 %t$9, i64 0)
   %t$14 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.989, i64 0, i32 1, i64 0
   %t$15 = ptrtoint ptr %t$14 to i64
-  %t$16 = call i64 @stdlib.compiler.layout.is_keyword(i64 %p$t, i64 %t$15)
+  %t$16 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %p$t, i64 %t$15)
   %t$21 = trunc i64 %t$16 to i1
   br i1 %t$21, label %then_17, label %else_17
 then_17:
@@ -66756,7 +66728,7 @@ entry:
   %t$0 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$1 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.1007, i64 0, i32 1, i64 0
   %t$2 = ptrtoint ptr %t$1 to i64
-  %t$3 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$0, i64 %t$2)
+  %t$3 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$0, i64 %t$2)
   %t$4 = trunc i64 %t$3 to i1
   %t$32 = call i64 @sprout_gc_pop_roots(i64 2)
   br i1 %t$4, label %then_4, label %else_4
@@ -67053,7 +67025,7 @@ entry:
   %t$0 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$1 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.1009, i64 0, i32 1, i64 0
   %t$2 = ptrtoint ptr %t$1 to i64
-  %t$3 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$0, i64 %t$2)
+  %t$3 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$0, i64 %t$2)
   %t$4 = trunc i64 %t$3 to i1
   %t$36 = call i64 @sprout_gc_pop_roots(i64 2)
   br i1 %t$4, label %then_4, label %else_4
@@ -68803,7 +68775,7 @@ entry:
   %t$0 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$1 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.1022, i64 0, i32 1, i64 0
   %t$2 = ptrtoint ptr %t$1 to i64
-  %t$3 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$0, i64 %t$2)
+  %t$3 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$0, i64 %t$2)
   %t$4 = trunc i64 %t$3 to i1
   %t$32 = call i64 @sprout_gc_pop_roots(i64 2)
   br i1 %t$4, label %then_4, label %else_4
@@ -73470,7 +73442,7 @@ entry:
   store i64 %p$kw, ptr %t$13
   %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
   %t$0 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
-  %t$1 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$0, i64 %p$kw)
+  %t$1 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$0, i64 %p$kw)
   %t$2 = trunc i64 %t$1 to i1
   %t$15 = call i64 @sprout_gc_pop_roots(i64 2)
   br i1 %t$2, label %then_2, label %else_2
@@ -75288,7 +75260,7 @@ entry:
   %t$0 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$1 = getelementptr inbounds { i64, [4 x i8] }, ptr @.str.1090, i64 0, i32 1, i64 0
   %t$2 = ptrtoint ptr %t$1 to i64
-  %t$3 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$0, i64 %t$2)
+  %t$3 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$0, i64 %t$2)
   %t$4 = trunc i64 %t$3 to i1
   %t$143 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$4, label %then_4, label %else_4
@@ -75441,7 +75413,7 @@ do_cont_37:
   %t$43 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %t$42)
   %t$44 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.1092, i64 0, i32 1, i64 0
   %t$45 = ptrtoint ptr %t$44 to i64
-  %t$46 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$43, i64 %t$45)
+  %t$46 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$43, i64 %t$45)
   %t$98 = trunc i64 %t$46 to i1
   %t$188 = call i64 @sprout_gc_pop_roots(i64 4)
   br i1 %t$98, label %then_47, label %else_47
@@ -76383,7 +76355,7 @@ entry:
   %t$0 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$1 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.1099, i64 0, i32 1, i64 0
   %t$2 = ptrtoint ptr %t$1 to i64
-  %t$3 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$0, i64 %t$2)
+  %t$3 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$0, i64 %t$2)
   %t$4 = trunc i64 %t$3 to i1
   %t$72 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$4, label %then_4, label %else_4
@@ -76421,7 +76393,7 @@ else_4:
   %t$15 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$16 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.1100, i64 0, i32 1, i64 0
   %t$17 = ptrtoint ptr %t$16 to i64
-  %t$18 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$15, i64 %t$17)
+  %t$18 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$15, i64 %t$17)
   %t$19 = trunc i64 %t$18 to i1
   %t$78 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$19, label %then_19, label %else_19
@@ -76459,7 +76431,7 @@ else_19:
   %t$30 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$31 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.1101, i64 0, i32 1, i64 0
   %t$32 = ptrtoint ptr %t$31 to i64
-  %t$33 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$30, i64 %t$32)
+  %t$33 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$30, i64 %t$32)
   %t$34 = trunc i64 %t$33 to i1
   %t$84 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$34, label %then_34, label %else_34
@@ -76497,7 +76469,7 @@ else_34:
   %t$45 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$46 = getelementptr inbounds { i64, [4 x i8] }, ptr @.str.1102, i64 0, i32 1, i64 0
   %t$47 = ptrtoint ptr %t$46 to i64
-  %t$48 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$45, i64 %t$47)
+  %t$48 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$45, i64 %t$47)
   %t$49 = trunc i64 %t$48 to i1
   %t$90 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$49, label %then_49, label %else_49
@@ -77741,7 +77713,7 @@ do_cont_19:
   %t$25 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %t$24)
   %t$26 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.1116, i64 0, i32 1, i64 0
   %t$27 = ptrtoint ptr %t$26 to i64
-  %t$28 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$25, i64 %t$27)
+  %t$28 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$25, i64 %t$27)
   %t$62 = trunc i64 %t$28 to i1
   %t$113 = call i64 @sprout_gc_pop_roots(i64 4)
   br i1 %t$62, label %then_29, label %else_29
@@ -79074,7 +79046,7 @@ entry:
   %t$0 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$1 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.1125, i64 0, i32 1, i64 0
   %t$2 = ptrtoint ptr %t$1 to i64
-  %t$3 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$0, i64 %t$2)
+  %t$3 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$0, i64 %t$2)
   %t$4 = trunc i64 %t$3 to i1
   %t$153 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$4, label %then_4, label %else_4
@@ -79126,7 +79098,7 @@ else_4:
   %t$14 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$15 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.1127, i64 0, i32 1, i64 0
   %t$16 = ptrtoint ptr %t$15 to i64
-  %t$17 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$14, i64 %t$16)
+  %t$17 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$14, i64 %t$16)
   %t$18 = trunc i64 %t$17 to i1
   %t$165 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$18, label %then_18, label %else_18
@@ -79635,7 +79607,7 @@ entry:
   %t$0 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$1 = getelementptr inbounds { i64, [4 x i8] }, ptr @.str.1137, i64 0, i32 1, i64 0
   %t$2 = ptrtoint ptr %t$1 to i64
-  %t$3 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$0, i64 %t$2)
+  %t$3 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$0, i64 %t$2)
   %t$4 = trunc i64 %t$3 to i1
   %t$259 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$4, label %then_4, label %else_4
@@ -79666,7 +79638,7 @@ else_4:
   %t$9 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$10 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.1138, i64 0, i32 1, i64 0
   %t$11 = ptrtoint ptr %t$10 to i64
-  %t$12 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$9, i64 %t$11)
+  %t$12 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$9, i64 %t$11)
   %t$13 = trunc i64 %t$12 to i1
   %t$268 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$13, label %then_13, label %else_13
@@ -79718,7 +79690,7 @@ else_13:
   %t$23 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$24 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.1140, i64 0, i32 1, i64 0
   %t$25 = ptrtoint ptr %t$24 to i64
-  %t$26 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$23, i64 %t$25)
+  %t$26 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$23, i64 %t$25)
   %t$27 = trunc i64 %t$26 to i1
   %t$280 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$27, label %then_27, label %else_27
@@ -81011,7 +80983,7 @@ entry:
   %t$0 = call i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i)
   %t$1 = getelementptr inbounds { i64, [4 x i8] }, ptr @.str.1162, i64 0, i32 1, i64 0
   %t$2 = ptrtoint ptr %t$1 to i64
-  %t$3 = call i64 @stdlib.compiler.parser.tok_is_keyword(i64 %t$0, i64 %t$2)
+  %t$3 = call i64 @stdlib.compiler.token.is_keyword_token(i64 %t$0, i64 %t$2)
   %t$4 = trunc i64 %t$3 to i1
   %t$13 = call i64 @sprout_gc_pop_roots(i64 1)
   br i1 %t$4, label %then_4, label %else_4

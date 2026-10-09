@@ -221,10 +221,10 @@ rewrite**, touching no downstream pass:
    *remaining* steps are collected and spliced into arm 1 as a nested `do`; an
    effectful bind runs the value into a fresh temp (`__do<line>_<col>`) then matches
    it, a pure `let` matches the value directly. Each generated `MatchExpr` takes the
-   **bind/`else` source position**, so the staircase lint's `is_written_as_match`
-   sniff never re-flags generated code. A refutable bind with **no following step**
-   is rejected, since an empty continuation would silently infer `DoExpr Nil = Unit`;
-   inference now reports it as it does a trailing `<-` (spec §5.2.1a).
+   **bind/`else` source position**, never a `match` keyword's, so the staircase lint
+   (`lint_rules.written_matches`) never counts generated code. A refutable bind with
+   **no following step** is rejected, since an empty continuation would silently infer
+   `DoExpr Nil = Unit`; inference now reports it as it does a trailing `<-` (spec §5.2.1a).
 3. **Lint**: no rule change needed — Tier 1b's `staircase-of-doom` message already
    points payload chains at binding-else, which now covers do-block sites too; a
    regression fixture (`already_do_binding_else`) asserts new-syntax code yields zero
