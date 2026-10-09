@@ -2089,9 +2089,10 @@ no `where` context, the compiler puts that `match` in place of the `branch` call
 Accepted programs and their results are the same either way. The result is the `match` written by hand: no call and no
 `ControlFlow` value. Otherwise, and in generic code (`where Propagate t`), `try`
 calls `branch` and allocates a `ControlFlow`. The type must be known at the `try`
-for the first case, and the declarations the `Break` arms call must be typed
-before the function with the `try`: in a binding group with it, or declared after
-it without a dependency, they are not, and `try` calls `branch`.
+for the first case, the `try` must be in a function or instance method, and the
+declarations the `Break` arms call must be typed before that function: in a
+binding group with it, or declared after it without a dependency, they are not,
+and `try` calls `branch`.
 
 ### 5.10 List comprehensions (Experimental)
 

@@ -315,20 +315,22 @@ arm's pattern is a constructor and no other arm's is the `Continue` arm's, and t
 binders become `_`, so none captures a name the code after the `try` uses. Otherwise, and when the
 operand's head is still unknown at the `try` (`try pure(3)`), `try` calls `branch`.
 
-Fusion must not change which programs are accepted, so four things hold it to the unfused
-meaning. The disjoint constructors keep a refutable success pattern non-exhaustive: a catch-all
-failure arm would otherwise catch the success values the pattern misses
+Fusion must not change which programs are accepted or what they do, so five things hold it to the
+unfused meaning. The disjoint constructors keep a refutable success pattern non-exhaustive: a
+catch-all failure arm would otherwise catch the success values the pattern misses
 (`try_fused_refutable_pattern.spr`). The `match` is typed as `branch` declares its failure, `t b`
 for an operand `t a`, before any arm, so a failure arm more general than that (`Break(Gone)` for a
 `Res e a`) cannot widen it (`try_fused_failure_type.spr`). A head fuses only once every declaration
 its failure arms call is typed (`infer.ready_try_fusion`); before that the `try` calls `branch`.
-Adding those calls to the binding-group graph instead made a `try` on any type depend on them,
-which merged unrelated groups and made their members monomorphic (`test_try_decl_order.spr`). And
-the instance's patterns take the `try`'s position, so no diagnostic points into the instance's
-file. Two `try`s in one block that fail differently are reported at the later one, naming the
-earlier (`try_two_tries_disagree.spr`), since neither is wrong alone. A `try` with a `let..else` binds the
-success first and runs the binding as its own `let`, so the `else` is checked, and its errors
-reported, as for any `let..else`.
+Adding those calls to the binding-group graph instead made a `try` on any type depend on them, which
+merged unrelated groups and made their members monomorphic (`test_try_decl_order.spr`). The failure
+arms are inferred in the declaration's scope without its locals, so a parameter at the `try` cannot
+capture a name they call (`test_try_capture.spr`). And the instance's patterns take the `try`'s
+position, so no diagnostic points into the instance's file. Two `try`s in one block that fail
+differently are reported at the later one, naming the earlier, past any steps between them
+(`try_two_tries_disagree.spr`, `try_two_tries_between.spr`), since neither is wrong alone. A `try`
+with a `let..else` binds the success first and runs the binding as its own `let`, so the `else` is
+checked, and its errors reported, as for any `let..else`.
 Fusion was planned for lowering, from a table of typed instance bodies; in inference the instance
 types come for free and the shape check reads the source the user wrote.
 
