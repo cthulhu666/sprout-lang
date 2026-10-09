@@ -5,13 +5,15 @@
 #
 # Sprout answers "does this file typecheck?" twice:
 #
-#   --phase check   the BUNDLER  — bundle_file → check. Every other gate in this repo
-#                                  runs this one.
-#   (no flag)       the ENV path — build_import_pairs → load_module →
-#                                  check_program_with_env. This is what the REPL, the
-#                                  analysis service and the LSP typecheck with.
+#   --phase check   the FILE path   — bundle_file → check. Every other gate in this repo
+#                                     runs this one.
+#   (no flag)       the SOURCE path — compile_source_with_root, which bundles a buffer.
+#                                     This is what the REPL, the analysis service and
+#                                     the LSP typecheck with.
 #
-# Until this script existed, NOTHING ran the env path: every compile_driver invocation in
+# Both now bundle. The source path used to build an environment of imported schemes
+# instead (the deleted `module_loader.build_import_pairs`), and until this script existed
+# NOTHING ran it: every compile_driver invocation in
 # the justfile passes --phase check, --emit-ir or another explicit phase. So a divergence
 # between the two was invisible to CI by construction and could only be found by a user in
 # an editor. Two were, on 2026-08-18, both against a live RubyMine session:

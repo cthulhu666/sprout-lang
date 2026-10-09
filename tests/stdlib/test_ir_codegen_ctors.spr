@@ -344,14 +344,13 @@ fn main() -> Unit !{IO} =
 
     # Fix C: ctor with an ADT-typed field.  HolderBoxed is a 3-arity boxed
     # ctor (max_arity=3) whose first field is an ADT value (InnerT, also
-    # boxed with max_arity=3).  translate_args_ctor must accept the
-    # ADT-typed arg without the Int/String filter that translate_args_scalar
-    # applies for IRCall sites.
+    # boxed with max_arity=3).  translate_args must accept the
+    # ADT-typed arg.
     fix_c <- translated_ok_ir_contains(
       "type InnerT = InnerT Int Int Int\ntype HolderBoxed = HolderBoxed InnerT Int Int\nfn mk() -> HolderBoxed = HolderBoxed(InnerT(1, 2, 3), 0, 0)",
       "call i64 @sprout_alloc_obj(i64 0, i64 3)")
     assert_true(state,
-                "Fix C: ctor with ADT-typed field lowers successfully via translate_args_ctor",
+                "Fix C: ctor with ADT-typed field lowers successfully via translate_args",
                 fix_c)
 
     # ---------------------------------------------------------------------------

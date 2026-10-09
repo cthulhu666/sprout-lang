@@ -1045,68 +1045,15 @@ fn collect_slots_from_method_map(methods: List String, method_map: Dict String, 
           Cons(typed_ast.TVar(slot, types.TVar(types.tyvar_id("?lambda")), pos),
                collect_slots_from_method_map(rest, method_map, pos))
 
-fn type_to_eta_typeexpr(t: types.Type) -> ast.TypeExpr =
-  match t with
-  | types.TConst name -> ast.TypeName(types.type_id_name(name))
-  | types.TVar name -> ast.TypeName(types.tyvar_identity(name))
-  | types.TApp base arg -> ast.TypeApply(type_to_eta_typeexpr(base), type_to_eta_typeexpr(arg))
-  | types.TFunc param ret _ own ->
-      ast.TypeArrow(type_to_eta_typeexpr(param), type_to_eta_typeexpr(ret), Nothing,
-        ast.mode_of_flags(types.ownership_is_borrow(own), types.ownership_is_once(own)))
-  | types.TThunk ret _ -> ast.TypeThunk(type_to_eta_typeexpr(ret), Nothing)
-  | types.TTuple items -> ast.TupleType(list_map(\item -> type_to_eta_typeexpr(item), items))
-
-fn lookup_eta_inner_dicts_general(class_name: String, head: String, actual_param: types.Type, ctx: LowerCtx) -> Maybe (List typed_ast.TypedExpr) =
-  match dict_get(class_name ++ "_" ++ head, ctx_inst_meta(ctx)) with
-  | Nothing -> Nothing
-  | Just (inst_type_args, inst_constraints, _) ->
-      match inst_constraints with
-      | Nil -> Nothing
-      | _ ->
-          match resolve_eta_substituted_inner_dicts(
-            inst_constraints,
-            unify_type_args_list(inst_type_args, Cons(type_to_eta_typeexpr(actual_param), Nil), dict_empty()),
-            no_pos(),
-            ctx) with
-          | Nil -> Nothing
-          | inner_dicts -> Just(inner_dicts)
-
-fn resolve_eta_substituted_inner_dicts(inst_constraints: List ast.TypeConstraint, subs: Dict ast.TypeExpr, pos: source.SourcePos, ctx: LowerCtx) -> List typed_ast.TypedExpr =
-  match inst_constraints with
-  | Nil -> Nil
-  | Cons c rest ->
-      list_append(
-        resolve_eta_substituted_inner_dict(substitute_constraint(c, subs), pos, ctx),
-        resolve_eta_substituted_inner_dicts(rest, subs, pos, ctx))
-
-fn resolve_eta_substituted_inner_dict(c: ast.TypeConstraint, pos: source.SourcePos, ctx: LowerCtx) -> List typed_ast.TypedExpr =
-  match c with
-  | ast.TypeConstraint class_name type_args ->
-      match type_args with
-      | [ast.TypeName name] ->
-          match resolve_eta_fwd_type_name_dict(class_name, name, pos, ctx) with
-          | Just dicts -> dicts
-          | Nothing -> eta_inner_dict_unreachable(class_name, pos)
-      | _ -> eta_inner_dict_unreachable(class_name, pos)
-
-# M3b-5: the deleted resolve_tdict once resolved eta inner-context dicts at these
-# sites.  The Evidence-consuming eta path (eta_from_evidence) covers every inner
+# M3b-5: the deleted resolve_tdict once resolved eta inner-context dicts here.
+# The Evidence-consuming eta path (eta_from_evidence) covers every inner
 # dict exercised by valid programs — census-verified: these sites never fire across
 # the whole corpus + compiler self-compile.  Reaching one signals a resolve/lowering
 # disagreement, so fail loudly rather than emit a wrong witness (the located-panic
 # discipline the dict-resolution north star mandates for a consumption miss).
-fn eta_inner_dict_unreachable(class_name: String, pos: source.SourcePos) -> List typed_ast.TypedExpr =
+fn eta_inner_dict_unreachable(class_name: String, pos: source.SourcePos) -> Maybe typed_ast.TypedExpr =
   panic("lowering: eta inner-dict resolution for '" ++ class_name ++ "' at " ++ pos_loc(pos) ++
         " reached the deleted resolve_tdict path — Evidence should cover this (M3b-5)")
-
-fn resolve_eta_fwd_type_name_dict(class_name: String, tvar_name: String, pos: source.SourcePos, ctx: LowerCtx) -> Maybe (List typed_ast.TypedExpr) =
-  match dict_get("@eta_fwd:" ++ tvar_name ++ ":" ++ string.after_last_dot(class_name), ctx_scheme_env(ctx)) with
-  | Nothing -> Nothing
-  | Just prog_scheme ->
-      match types.scheme_type(prog_scheme) with
-      | types.TConst _ ->
-          Just(eta_inner_dict_unreachable(class_name, pos))
-      | _ -> Nothing
 
 # The tvar-headed position of a method's own type: the first parameter of a
 # parameterised method, the result of a nullary one, whose TThunk has no parameter.
@@ -1204,19 +1151,13 @@ fn eta_in_class_by_head(class_name: String, name: String, t: types.Type, class_t
 # Concrete head: use the instance impl if one exists, else fall back to a forwarded slot.
 fn eta_in_class_concrete(class_name: String, name: String, t: types.Type, head: String, class_type: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
   match find_concrete_method_impl(class_name, name, head, ctx) with
-  | Just impl_name -> eta_in_class_with_impl(class_name, name, t, head, class_type, impl_name, ctx)
+  | Just impl_name -> eta_in_class_with_impl(class_name, t, head, impl_name, ctx)
   | Nothing -> eta_fwd_slot_lambda(class_name, name, class_type, t, ctx)
 
-fn eta_in_class_with_impl(class_name: String, name: String, t: types.Type, head: String, class_type: types.Type, impl_name: String, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
-  match lookup_eta_inner_dicts_general(string.after_last_dot(class_name), head, class_type, ctx) with
-  | Nothing -> Just(make_eta_lambda(impl_name, t, no_pos()))
-  | Just inner_dicts ->
-      # If any inner dict is the __unresolved_* sentinel it means the inner constraint
-      # (e.g. MyEq a) is not in scope — the caller only forwarded the outer one
-      # (MyEq (Box a)).  Prefer the forwarded slot so we emit a well-formed 2-arg lambda
-      # instead of a dangling ref.
-      if has_unresolved_dict(inner_dicts) then eta_fwd_slot_lambda(class_name, name, class_type, t, ctx)
-      else Just(make_eta_lambda_with_dicts(impl_name, t, inner_dicts, no_pos()))
+fn eta_in_class_with_impl(class_name: String, t: types.Type, head: String, impl_name: String, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
+  match dict_get(string.after_last_dot(class_name) ++ "_" ++ head, ctx_inst_meta(ctx)) with
+  | Just (_, [ast.TypeConstraint inner _ | _], _) -> eta_inner_dict_unreachable(inner, no_pos())
+  | _ -> Just(make_eta_lambda(impl_name, t, no_pos()))
 
 # Emit an eta-lambda over the forwarded hidden-dict slot for (class, method, class_type), or Nothing.
 fn eta_fwd_slot_lambda(class_name: String, name: String, class_type: types.Type, t: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
@@ -1714,87 +1655,8 @@ fn unnamed_forward(class_name: String, key: String) -> Bool =
            && types.is_skolem_name(arg) == false)
 
 # ---------------------------------------------------------------------------
-# Inner-dict helpers: type unification, substitution, lambda wrapping
+# Inner-dict helpers: lambda wrapping
 # ---------------------------------------------------------------------------
-
-# is_type_var_name: true if a TypeName refers to a type variable (lowercase first char).
-# In Sprout, type variable names start with a lowercase letter; concrete types with uppercase.
-fn is_type_var_name(name: String) -> Bool =
-  # A module-qualified name (dotted) is never a type variable — guard as
-  # ast.is_lowercase_name does (code-review finding 2, 2026-07-10).
-  if str_find(name, ".") != -1 then false
-  else match str_char_at(name, 0) with
-  | Nothing -> false
-  | Just c ->
-      c == 'a' || c == 'b' || c == 'c' || c == 'd' || c == 'e' || c == 'f' ||
-      c == 'g' || c == 'h' || c == 'i' || c == 'j' || c == 'k' || c == 'l' ||
-      c == 'm' || c == 'n' || c == 'o' || c == 'p' || c == 'q' || c == 'r' ||
-      c == 's' || c == 't' || c == 'u' || c == 'v' || c == 'w' || c == 'x' ||
-      c == 'y' || c == 'z'
-
-# Match a type pattern (from an instance decl) against a concrete type (from a
-# call site), accumulating type-variable bindings in acc.
-#
-# The two arrive at the SAME application depth: every recorder records the class
-# variable's binding, and the head-arity check (infer.check_instance_head_kinds)
-# rejects a head that would not match it. So the spines pair up as they stand —
-# this used to peel a surplus off the concrete side, computed per call, which was
-# only ever right when the concrete side was the deeper of the two.
-# docs/instance-head-kinds-v0.md §5.
-fn unify_type_expr(
-  pattern: ast.TypeExpr,
-  concrete: ast.TypeExpr,
-  acc: Dict ast.TypeExpr
-) -> Dict ast.TypeExpr =
-  match pattern with
-  | ast.TypeName name ->
-      if is_type_var_name(name) then dict_set(name, concrete, acc)
-      else acc
-  | ast.TypeApply pat_base pat_arg ->
-      match concrete with
-      | ast.TypeApply con_base con_arg ->
-          unify_type_expr(pat_arg, con_arg, unify_type_expr(pat_base, con_base, acc))
-      | _ -> acc
-  | ast.TupleType pat_items ->
-      match concrete with
-      | ast.TupleType con_items -> unify_type_args_list(pat_items, con_items, acc)
-      | _ -> acc
-  | _ -> acc
-
-# unify_type_args_list: unify each pair of (pattern, concrete) type args.
-fn unify_type_args_list(
-  patterns: List ast.TypeExpr,
-  concretes: List ast.TypeExpr,
-  acc: Dict ast.TypeExpr
-) -> Dict ast.TypeExpr =
-  match (patterns, concretes) with
-  | (Nil, _) -> acc
-  | (_, Nil) -> acc
-  | (Cons p rest_p, Cons c rest_c) ->
-      unify_type_args_list(rest_p, rest_c, unify_type_expr(p, c, acc))
-
-# substitute_type_expr: apply type-variable substitution to a TypeExpr.
-fn substitute_type_expr(te: ast.TypeExpr, subs: Dict ast.TypeExpr) -> ast.TypeExpr =
-  match te with
-  | ast.TypeName name ->
-      match dict_get(name, subs) with
-      | Just concrete -> concrete
-      | Nothing -> te
-  | ast.TypeApply base arg ->
-      ast.TypeApply(substitute_type_expr(base, subs), substitute_type_expr(arg, subs))
-  | ast.TypeArrow from_ to_ effs mode ->
-      ast.TypeArrow(substitute_type_expr(from_, subs), substitute_type_expr(to_, subs), effs, mode)
-  | ast.TypeThunk to_ effs ->
-      ast.TypeThunk(substitute_type_expr(to_, subs), effs)
-  | ast.TupleType items ->
-      ast.TupleType(list_map(\item -> substitute_type_expr(item, subs), items))
-  | _ -> te
-
-# substitute_constraint: apply substitution to all type args of a TypeConstraint.
-fn substitute_constraint(tc: ast.TypeConstraint, subs: Dict ast.TypeExpr) -> ast.TypeConstraint =
-  match tc with
-  | ast.TypeConstraint class_name type_args ->
-      ast.TypeConstraint(class_name, list_map(\te -> substitute_type_expr(te, subs), type_args))
 
 # build_lambda_with_inner_dicts: build a lambda that pre-applies inner dict args.
 # For an instance method fn_name with n_params explicit params, n_method_dicts

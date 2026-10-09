@@ -107,13 +107,9 @@ check "the diagnostic range is currently zero-width (end == start)" $?
 # a while only one of them was fixed. `compiler.check_bundled` stopped seeding the
 # checker with the prelude's schemes (`469924cf`, docs/no-prelude-core-v0.md) — that is
 # what turned a call to a prelude function from a clang `use of undefined value` into a
-# positioned diagnostic. The analysis service keeps a `load_prelude_pairs` call of its
-# own, so "fixed in the batch compiler" carried no information about what an editor
-# shows; it had to be driven to find out.
-#
-# It agrees, because that call is a cache pre-warm rather than an environment injection
-# (`analysis_service_driver.build_startup_state` discards the pairs). Asserted here
-# because nothing makes the two agree ON PURPOSE: a change to either side could split
+# positioned diagnostic. The analysis service is a separate front end, so "fixed in the
+# batch compiler" carries no information about what an editor shows; it had to be
+# driven to find out. Asserted here because nothing makes the two agree ON PURPOSE: a change to either side could split
 # them, and the symptom would be an editor that accepts what the build rejects.
 NP_URI="file:///tmp/lsp_smoke_no_prelude.sprout"
 

@@ -401,10 +401,9 @@ top-level stdlib modules unloadable there. `infer.class_names_from_env` and
 decl-derived set, date from then
 ([docs/repl-env-type-vocabulary-v0.md](repl-env-type-vocabulary-v0.md)).
 
-The env path survives as `checker.check_program_with_env`, reached through
-`module_loader.load_module`: the analysis service's prelude warm-up, whose classes
-are its own decls, and the unbuilt `type_driver` / `lower_driver`, filed for deletion
-in `BACKLOG.md`. A new pass needs no env fallback for them.
+The env path's loader, `module_loader.load_module`, is deleted (2026-10-09): every
+caller passes `checker.check_program_with_env` an empty `extra`. A new pass needs no
+env fallback.
 
 Still test a pass that reads classes or types through `compile_source_with_cache`:
 the failures above were invisible to `just test`'s file compiles. See
@@ -654,6 +653,11 @@ covering every shape at once; the callers that must be rejected by
 `compound_head_nested_forward_other_var`.
 
 ## Env-path type names are SHORT, and the marker families depend on it
+
+**The env path's loader is deleted (2026-10-09).** Every front end now bundles, so no
+caller supplies imported modules as schemes, and the alias-dropping described at the end
+of this section went with it. The marker table still holds for the markers the checker
+writes from a module's own declarations.
 
 On the env path a type is named by its short name — a module is checked with its
 header stripped, so its own declarations are bare, and `prefix_pairs` qualifies

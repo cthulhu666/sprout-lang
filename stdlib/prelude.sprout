@@ -1574,9 +1574,6 @@ instance Filterable Vec
   fn partition_values(pred: a -> Bool, xs: Vec a) -> (Vec a, Vec a) =
     vec_partition(pred, xs)
 
-fn vec_append_flip(acc: Vec a, item: a) -> Vec a =
-  vec_append(item, acc)
-
 # O(n+m): one fresh backing array, both element blocks copied in a single pass
 # via the vector_concat builtin (no intermediate cons cells).
 instance Semigroup (Vec a)

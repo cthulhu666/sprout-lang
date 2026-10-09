@@ -230,7 +230,7 @@ no alloc/loads; boxed `@main.swap_pair` wrapper retained.
    `types.TTuple [t0,t1]`. Milestone-1 guard: `t0,t1` both `type_is_non_heap_scalar`. Returns
    `(f ++ "_worker", args, [p0,p1], body)`. Call it in the `TMatch` translator where the Maybe
    recognizer is consulted.
-2. **Call-site emission** — `translate_unboxed_tuple_match`: `translate_args_scalar` args →
+2. **Call-site emission** — `translate_unboxed_tuple_match`: `translate_args` args →
    `IRCallUnboxed2(slot0, slot1, IRTUnknown, worker, arg_names)`; bind `p0←slot0`, `p1←slot1` into
    captures (mirror `bind_just_arg` :3213); translate `body` in that scope. Single block — **no tag
    test, no phi, no abort arm** (simpler than `translate_unboxed_maybe_match` :3340).

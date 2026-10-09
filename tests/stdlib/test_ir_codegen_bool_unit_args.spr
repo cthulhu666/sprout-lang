@@ -8,9 +8,9 @@
 # passes a Bool as its third argument.
 #
 # After PR 10:
-# - Bool: is_supported_arg_type accepts Bool; TBool already emits IRConst (i64 0/1)
+# - Bool: translate_args accepts Bool; TBool already emits IRConst (i64 0/1)
 #   via the /code-review fix #2 path, so Bool call args flow as i64 with no new IR ops.
-# - Unit: is_supported_arg_type accepts Unit; TUnit now emits IRConst(name, 0)
+# - Unit: translate_args accepts Unit; TUnit now emits IRConst(name, 0)
 #   (i64 0 sentinel), mirroring direct codegen's val_make(ll_i64(), "0") convention
 #   (codegen.sprout line 1776-1777).
 

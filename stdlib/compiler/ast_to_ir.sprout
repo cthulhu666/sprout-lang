@@ -31,13 +31,12 @@ import stdlib.string as string
 # exported there, so duplicated here; follow-up cleanup: move to a shared
 # typed_ast_utils module).
 #
-# compute_free_vars(expr, bound, top_level) -> Set String
+# compute_free_vars(expr, bound) -> Set String
 #   A name is FREE if it appears as TVar and is not in `bound` (lambda params /
 #   enclosing function params at this nesting level).
 #   For TLambda sub-expressions the lambda's own params are added to `bound`
 #   before recursing into the body.
-#   `top_level` is retained for signature symmetry but NOT used to exclude names.
-#   Excluding top_level here was WRONG: an enclosing parameter that collides with
+#   Top-level names are NOT excluded. Excluding them was WRONG: an enclosing parameter that collides with
 #   a top-level fn name (e.g. `body` in `with_timeout(ms, body)` when the program
 #   also defines `fn body`) would be dropped from the free set, hence never
 #   captured, then re-resolved inside the lifted lambda to the top-level fn and
@@ -51,7 +50,7 @@ fn set_from_list(xs: List String) -> Set =
   list_fold(\ (s, x) -> set_insert(x, s), set_empty(), xs)
 
 # O(n * log(n)).
-fn compute_free_vars(expr: typed_ast.TypedExpr, bound: Set, top_level: Set) -> Set =
+fn compute_free_vars(expr: typed_ast.TypedExpr, bound: Set) -> Set =
   match expr with
   | typed_ast.TVar name _ _ ->
       if set_member(name, bound)
@@ -64,48 +63,47 @@ fn compute_free_vars(expr: typed_ast.TypedExpr, bound: Set, top_level: Set) -> S
   | typed_ast.TChar _ _ _ -> set_empty()
   | typed_ast.TUnit _ _ -> set_empty()
   | typed_ast.TTuple items _ _ ->
-      compute_free_vars_list(items, bound, top_level)
+      compute_free_vars_list(items, bound)
   | typed_ast.TIf cond thn els _ _ ->
-      set_union(compute_free_vars(cond, bound, top_level),
-        set_union(compute_free_vars(thn, bound, top_level),
-                  compute_free_vars(els, bound, top_level)))
+      set_union(compute_free_vars(cond, bound),
+        set_union(compute_free_vars(thn, bound),
+                  compute_free_vars(els, bound)))
   | typed_ast.TBinary _ l r _ _ ->
-      set_union(compute_free_vars(l, bound, top_level),
-                compute_free_vars(r, bound, top_level))
+      set_union(compute_free_vars(l, bound),
+                compute_free_vars(r, bound))
   | typed_ast.TUnary _ operand _ _ ->
-      compute_free_vars(operand, bound, top_level)
+      compute_free_vars(operand, bound)
   | typed_ast.TCall callee args _ _ ->
-      set_union(compute_free_vars(callee, bound, top_level),
-                compute_free_vars_list(args, bound, top_level))
+      set_union(compute_free_vars(callee, bound),
+                compute_free_vars_list(args, bound))
   | typed_ast.TLambda lparams body _ _ ->
       compute_free_vars(body,
-        set_union(bound, set_from_list(fv_param_names(lparams))),
-        top_level)
+        set_union(bound, set_from_list(fv_param_names(lparams))))
   | typed_ast.TRange start end_ _ _ ->
-      set_union(compute_free_vars(start, bound, top_level),
-                compute_free_vars(end_, bound, top_level))
+      set_union(compute_free_vars(start, bound),
+                compute_free_vars(end_, bound))
   | typed_ast.TDo steps _ _ ->
-      compute_free_vars_do_steps(steps, bound, top_level)
+      compute_free_vars_do_steps(steps, bound)
   | typed_ast.TDict _ _ _ _ -> set_empty()
   | typed_ast.TMethodRef _ _ _ _ _ -> panic("ast_to_ir.compute_free_vars: TMethodRef survived lowering (internal error)")
   | typed_ast.TRecord _ fields _ _ ->
-      compute_free_vars_record_fields(fields, bound, top_level)
+      compute_free_vars_record_fields(fields, bound)
   | typed_ast.TMatch scrut arms _ _ ->
-      set_union(compute_free_vars(scrut, bound, top_level),
-                compute_free_vars_match_arms(arms, bound, top_level))
+      set_union(compute_free_vars(scrut, bound),
+                compute_free_vars_match_arms(arms, bound))
   | typed_ast.TGetField obj _ _ _ ->
-      compute_free_vars(obj, bound, top_level)
+      compute_free_vars(obj, bound)
   | typed_ast.TRecordUpdate base fields _ _ ->
-      set_union(compute_free_vars(base, bound, top_level),
-                compute_free_vars_record_fields(fields, bound, top_level))
+      set_union(compute_free_vars(base, bound),
+                compute_free_vars_record_fields(fields, bound))
 
 # O(n * k * log(k)) where n = list length, k = expr size.
-fn compute_free_vars_list(exprs: List typed_ast.TypedExpr, bound: Set, top_level: Set) -> Set =
+fn compute_free_vars_list(exprs: List typed_ast.TypedExpr, bound: Set) -> Set =
   match exprs with
   | Nil -> set_empty()
   | Cons e rest ->
-      set_union(compute_free_vars(e, bound, top_level),
-                compute_free_vars_list(rest, bound, top_level))
+      set_union(compute_free_vars(e, bound),
+                compute_free_vars_list(rest, bound))
 
 # Extract param names for free-var computation (private to this section).
 # O(n).
@@ -136,28 +134,28 @@ fn bind_params(names: List String, ssas: List String, captures: Dict String) -> 
 # changes to this helper.
 # O(n * k * log(k)) where n = steps, k = expr size.
 fn compute_free_vars_do_steps(steps: List typed_ast.TypedDoStep,
-                              bound: Set, top_level: Set) -> Set =
+                              bound: Set) -> Set =
   match steps with
   | Nil -> set_empty()
   | Cons step rest ->
       match step with
       | typed_ast.TDoBindStep pat e _ ->
-          set_union(compute_free_vars(e, bound, top_level),
+          set_union(compute_free_vars(e, bound),
                     compute_free_vars_do_steps(rest,
-                      set_union(bound, set_from_list(ast.pattern_names(pat))), top_level))
+                      set_union(bound, set_from_list(ast.pattern_names(pat)))))
       | typed_ast.TDoLetStep name e ->
-          set_union(compute_free_vars(e, bound, top_level),
+          set_union(compute_free_vars(e, bound),
                     compute_free_vars_do_steps(rest,
-                      set_insert(name, bound), top_level))
+                      set_insert(name, bound)))
       | typed_ast.TDoExprStep e ->
-          set_union(compute_free_vars(e, bound, top_level),
-                    compute_free_vars_do_steps(rest, bound, top_level))
+          set_union(compute_free_vars(e, bound),
+                    compute_free_vars_do_steps(rest, bound))
 
 # Free vars across all TMatch arms, extending bound with pattern-bound names
 # before recursing into each arm body.
 # O(n * k * log(k)) where n = arms, k = arm body size.
 fn compute_free_vars_match_arms(arms: List typed_ast.TypedMatchBranch,
-                                bound: Set, top_level: Set) -> Set =
+                                bound: Set) -> Set =
   match arms with
   | Nil -> set_empty()
   | Cons arm rest ->
@@ -165,21 +163,21 @@ fn compute_free_vars_match_arms(arms: List typed_ast.TypedMatchBranch,
       | typed_ast.TypedMatchBranch pat body ->
           set_union(
             compute_free_vars(body,
-              set_union(bound, set_from_list(ast.pattern_names(pat))), top_level),
-            compute_free_vars_match_arms(rest, bound, top_level))
+              set_union(bound, set_from_list(ast.pattern_names(pat)))),
+            compute_free_vars_match_arms(rest, bound))
 
 # Free vars in a TRecord field list — a record literal captured inside a lambda
 # collects the free vars of each field value expression.
 # O(n * k * log(k)) where n = fields, k = field expr size.
 fn compute_free_vars_record_fields(fields: List typed_ast.TypedRecordField,
-                                   bound: Set, top_level: Set) -> Set =
+                                   bound: Set) -> Set =
   match fields with
   | Nil -> set_empty()
   | Cons field rest ->
       match field with
       | typed_ast.TypedRecordField _ e ->
-          set_union(compute_free_vars(e, bound, top_level),
-                    compute_free_vars_record_fields(rest, bound, top_level))
+          set_union(compute_free_vars(e, bound),
+                    compute_free_vars_record_fields(rest, bound))
 
 # Build the top-level name Set from decl list + ctor dict.
 # Includes user fn names, extern fn names, and ctor names.
@@ -749,12 +747,6 @@ fn is_char_type(t: types.Type) -> Bool =
 fn is_int_or_char_type(t: types.Type) -> Bool =
   is_int_type(t) || is_char_type(t)
 
-# True iff t is the monomorphic Unit type.
-fn is_unit_type(t: types.Type) -> Bool =
-  match t with
-  | types.TConst name -> types.type_id_name(name) == "Unit"
-  | _ -> false
-
 # True iff t is a Maybe type (TApp (TConst "Maybe") _).
 # Mirrors codegen.sprout:is_maybe_type; duplicated here because codegen
 # does not export it.
@@ -771,43 +763,6 @@ fn is_list_type(t: types.Type) -> Bool =
   | types.TApp (types.TConst name) _ -> types.type_id_name(name) == "List"
   | _ -> false
 
-
-# Scalar argument types accepted by IRCall / IRApplyClosure (direct and
-# closure call sites).  All IR values are i64; the typechecker is the source
-# of truth for type compatibility.
-#
-# Bool: accepted.  TBool emits IRConst (i64 0/1) — the i64-uniform encoding
-# validated by /code-review fix #2.  Comparison results are widened to i64
-# by IRZextI1ToI64 before reaching a call site, so all Bool-valued args
-# arrive as i64.  (M3 PR 10)
-#
-# Unit: accepted.  TUnit emits IRConst(name, 0) — the i64 0 sentinel used by
-# direct codegen (codegen.sprout val_make(ll_i64(), "0")).  Every parameter
-# slot is filled; the callee convention is unchanged.  (M3 PR 10)
-#
-# Ctor field args use the separate is_supported_ctor_arg_type guard below,
-# which keeps its own deferred restrictions on Bool and Unit.
-fn is_supported_arg_type(_t: types.Type) -> Bool = true
-
-# Ctor field argument types accepted by translate_args_ctor.
-#
-# IRMakeCtor lowering (ir_lowering.sprout `lower_op` / `lower_call_args`)
-# hardcodes `i64 %argN` for every argument slot.  Int, String, Bool, Unit,
-# and heap-typed ADT values all produce i64 in LLVM IR.
-#
-# Bool is ACCEPTED: all Bool-valued translate_expr results are i64-uniform.
-# TBool literals emit IRConst (i64 0/1); comparison results go through
-# IRICmp (i1) + IRZextI1ToI64 (i64) in finish_binary, so the value
-# reaching the ctor field slot is always i64.  (M3 PR 15a)
-#
-# Unit is ACCEPTED: translate_expr's TUnit arm emits IRConst(name, 0) —
-# the i64 0 sentinel (mirrors codegen.sprout val_make(ll_i64(), "0")).
-# The field slot is filled with i64 0; the callee convention is unchanged.
-# (M3 PR 15e)
-#
-# All other types (including TVar, TApp, TypeArrow, ADT names) are accepted;
-# they all produce i64 in the IR path.
-fn is_supported_ctor_arg_type(_t: types.Type) -> Bool = true
 
 # Map an inferred return type to the LLVM type used for `define`/`ret`.
 # PR 1.3 only emits i64 (Int) and i1 (Bool); anything else falls back to i64
@@ -1120,7 +1075,7 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
               match record_exprs_in_decl_order(split_on_comma(names_csv), fields) with
               | Nothing -> Err("ast_to_ir: record '" ++ type_name ++ "' literal is missing a declared field")
               | Just ordered_exprs ->
-                  match translate_args_ctor(ordered_exprs, params, ctors, idx, cur_label, cur_ops, Nil, Nil,
+                  match translate_args(ordered_exprs, params, ctors, idx, cur_label, cur_ops, Nil, Nil,
                                             captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
                                             name_prefix) with
                   | Err msg -> Err(msg)
@@ -1608,7 +1563,7 @@ fn translate_do_bind_maybe_unboxed(pat: ast.Pattern, target: String,
                                    lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
                                    name_prefix: String) ->
     Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) !{IO} =
-  match translate_args_scalar(eargs, params, ctors, idx, cur_label, cur_ops, Nil, Nil, captures,
+  match translate_args(eargs, params, ctors, idx, cur_label, cur_ops, Nil, Nil, captures,
                               lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref,
                               lifted_idx_ref, name_prefix) with
   | Err msg -> Err(msg)
@@ -1799,7 +1754,7 @@ fn translate_do_bind_result(pat: ast.Pattern, e: typed_ast.TypedExpr,
   in
   match e with
   | typed_ast.TCall _ eargs _ _ ->
-      match translate_args_scalar(eargs, params, ctors, idx, cur_label, cur_ops, Nil, Nil, captures,
+      match translate_args(eargs, params, ctors, idx, cur_label, cur_ops, Nil, Nil, captures,
                                   lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref,
                                   lifted_idx_ref, name_prefix) with
       | Err msg -> Err(msg)
@@ -2041,19 +1996,6 @@ fn find_capture_type_do_steps(steps: List typed_ast.TypedDoStep, name: String) -
           | Just t -> Just(t)
           | Nothing -> find_capture_type_do_steps(rest, name)
 
-# Check whether any name in capturable is Bool-typed in the lambda body.
-# Returns Just(name) for the first Bool-typed capture, Nothing if none.
-# O(n * m) where n = capturable length, m = body size.
-fn find_bool_capture(capturable: List String, body: typed_ast.TypedExpr) -> Maybe String =
-  match capturable with
-  | Nil -> Nothing
-  | Cons v rest ->
-      match find_capture_type(body, v) with
-      | Just ty ->
-          if is_bool_type(ty) then Just(v)
-          else find_bool_capture(rest, body)
-      | Nothing -> find_bool_capture(rest, body)
-
 # Translate a TLambda node: lift the body into a synthetic function, emit
 # IRMkClosure at the use site, and register the lifted function via lifted_ref.
 #
@@ -2131,7 +2073,7 @@ fn translate_lambda_after_ret_check(lparams: List ast.Param, body: typed_ast.Typ
     # BST keyed by string-compare. Capture slot indices are therefore stable
     # across unrelated renames — only renaming a captured variable itself
     # changes its slot index.
-    let all_frees_list = set_to_list(compute_free_vars(body, lam_bound, top_level))
+    let all_frees_list = set_to_list(compute_free_vars(body, lam_bound))
     let capturable = filter_capturable(all_frees_list, params, captures)
     # /code-review-v2 fix #7: Bool-capture guard removed. Post-fix-#2 + #3,
     # Bool flows as i64; IRLoadEnvSlot returns i64; the captured Bool is i64
@@ -3654,7 +3596,7 @@ fn translate_unboxed_maybe_match(ufn: String, call_args: List typed_ast.TypedExp
                                  lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
                                  name_prefix: String) ->
     Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) !{IO} =
-  match translate_args_scalar(call_args, params, ctors, idx, cur_label, cur_ops, Nil, Nil,
+  match translate_args(call_args, params, ctors, idx, cur_label, cur_ops, Nil, Nil,
                               captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref,
                               lifted_idx_ref, name_prefix) with
   | Err msg -> Err(msg)
@@ -3811,34 +3753,33 @@ fn sra_consuming_match(name: String, rest: List typed_ast.TypedDoStep, width: In
 # match's scrutinee. Any rebinding of name, any use of name in another step (or in the consuming
 # arm's body), or a SECOND consuming match → ineligible. compute_free_vars is exhaustive (recurses
 # into nested do-blocks, lambda captures, and all match arms), so a hidden use cannot slip through.
-fn sra_escape_ok(name: String, rest: List typed_ast.TypedDoStep, width: Int, top_level: Set) -> Bool =
-  sra_escape_ok_go(name, rest, width, top_level, false)
+fn sra_escape_ok(name: String, rest: List typed_ast.TypedDoStep, width: Int) -> Bool =
+  sra_escape_ok_go(name, rest, width, false)
 
-fn sra_escape_ok_go(name: String, rest: List typed_ast.TypedDoStep, width: Int, top_level: Set,
-                    consumed: Bool) -> Bool =
+fn sra_escape_ok_go(name: String, rest: List typed_ast.TypedDoStep, width: Int, consumed: Bool) -> Bool =
   match rest with
   | Nil -> consumed
   | Cons step more ->
       (match step with
        | typed_ast.TDoLetStep n e ->
            if n == name then false
-           else if set_member(name, compute_free_vars(e, set_empty(), top_level)) then false
-           else sra_escape_ok_go(name, more, width, top_level, consumed)
+           else if set_member(name, compute_free_vars(e, set_empty())) then false
+           else sra_escape_ok_go(name, more, width, consumed)
        | typed_ast.TDoBindStep pat e _ ->
            if set_member(name, set_from_list(ast.pattern_names(pat))) then false
-           else if set_member(name, compute_free_vars(e, set_empty(), top_level)) then false
-           else sra_escape_ok_go(name, more, width, top_level, consumed)
+           else if set_member(name, compute_free_vars(e, set_empty())) then false
+           else sra_escape_ok_go(name, more, width, consumed)
        | typed_ast.TDoExprStep e ->
            (match sra_match_shape(e, name, width) with
             | Just cm ->
                 if consumed then false
                 else (match cm with
                       | (_binders, body) ->
-                          if set_member(name, compute_free_vars(body, set_empty(), top_level)) then false
-                          else sra_escape_ok_go(name, more, width, top_level, true))
+                          if set_member(name, compute_free_vars(body, set_empty())) then false
+                          else sra_escape_ok_go(name, more, width, true))
             | Nothing ->
-                if set_member(name, compute_free_vars(e, set_empty(), top_level)) then false
-                else sra_escape_ok_go(name, more, width, top_level, consumed)))
+                if set_member(name, compute_free_vars(e, set_empty())) then false
+                else sra_escape_ok_go(name, more, width, consumed)))
 
 # The continuation must contain NO Maybe/Result do-bind: those route to translate_do_bind_* helpers,
 # which reset the SRA side-table to empty (they never thread it). The guard guarantees no SRA-bound
@@ -3862,7 +3803,7 @@ fn sra_core_eligible(name: String, e: typed_ast.TypedExpr, rest: List typed_ast.
       Just producers = sra_producer_callees(e, w, top_level) else Nothing
       Just((binders, body)) = sra_consuming_match(name, rest, w) else Nothing
   in
-    if sra_escape_ok(name, rest, w, top_level) && sra_rest_plain(rest)
+    if sra_escape_ok(name, rest, w) && sra_rest_plain(rest)
     then Just((w, producers, binders, body))
     else Nothing
 
@@ -3923,13 +3864,13 @@ fn translate_tuple_scalars(e: typed_ast.TypedExpr, width: Int, params: List Stri
     Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, List String, Int) !{IO} =
   match e with
   | typed_ast.TTuple items _ _ ->
-      translate_args_scalar(items, params, ctors, idx, cur_label, cur_ops, Nil, Nil, captures,
+      translate_args(items, params, ctors, idx, cur_label, cur_ops, Nil, Nil, captures,
                             lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref,
                             lifted_idx_ref, name_prefix)
   | typed_ast.TCall callee args _ _ ->
       (match callee with
        | typed_ast.TVar fname _ _ ->
-           (match translate_args_scalar(args, params, ctors, idx, cur_label, cur_ops, Nil, Nil, captures,
+           (match translate_args(args, params, ctors, idx, cur_label, cur_ops, Nil, Nil, captures,
                                         lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref,
                                         lifted_idx_ref, name_prefix) with
             | Err msg -> Err(msg)
@@ -4070,7 +4011,7 @@ fn translate_unboxed_tuple_match(worker: String, call_args: List typed_ast.Typed
                                  lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
                                  name_prefix: String) ->
     Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) !{IO} =
-  match translate_args_scalar(call_args, params, ctors, idx, cur_label, cur_ops, Nil, Nil,
+  match translate_args(call_args, params, ctors, idx, cur_label, cur_ops, Nil, Nil,
                               captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref,
                               lifted_idx_ref, name_prefix) with
   | Err msg -> Err(msg)
@@ -4840,8 +4781,7 @@ fn translate_call_site_intrinsic(fname: String, args: List typed_ast.TypedExpr,
 #   - TDict _ _ _ → typeclass-dictionary dispatch, out of scope.
 #   - anything else → "indirect call not yet supported".
 #
-# Each argument is translated left-to-right via translate_args_scalar (for
-# direct fn calls) or translate_args_ctor (for ctor calls); the resulting
+# Each argument is translated left-to-right via translate_args; the resulting
 # (lbl, ops, idx) is the call site's current block.  PR 1.5 only handles
 # scalar (Int) arguments for IRCall; the IRCall lowering hard-codes `i64`
 # for every arg position.  The call's LLVM ret-type comes from `call_ty`
@@ -5177,9 +5117,7 @@ fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
           else if param_known(fname, params)
           then
             # Trust the typechecker: any param reached here was accepted as
-            # callable at the call site. No defensive type check — that would
-            # contradict the is_supported_arg_type trust contract and create an
-            # asymmetry with the captures branch above.
+            # callable at the call site, as in the captures branch above.
             translate_closure_call(sprout_ir.param_ssa(fname), args, params, ctors, idx,
                                    cur_label, cur_ops, captures, lifted_ref, top_level, let_names, fn_arities,
                                    lambda_ctr_ref, lifted_idx_ref, name_prefix)
@@ -5234,7 +5172,7 @@ fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
       # never a first-class closure) and keeps any recursive tail call in the body a
       # direct call, so mutual-TCO (musttail) can fire through a `where`/`let..in`.
       # See docs/mutual-tco-v0.md "arc (b)".
-      match translate_args_scalar(args, params, ctors, idx, cur_label, cur_ops, Nil, Nil,
+      match translate_args(args, params, ctors, idx, cur_label, cur_ops, Nil, Nil,
                                   captures, lifted_ref, top_level, let_names, fn_arities,
                                   lambda_ctr_ref, lifted_idx_ref, name_prefix) with
       | Err msg -> Err(msg)
@@ -5315,7 +5253,7 @@ fn translate_closure_call(callee_ssa: String, args: List typed_ast.TypedExpr,
                           lifted_idx_ref: Ref (Dict Int),
                           name_prefix: String) ->
     Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) !{IO} =
-  match translate_args_scalar(args, params, ctors, idx, cur_label, cur_ops, Nil, Nil,
+  match translate_args(args, params, ctors, idx, cur_label, cur_ops, Nil, Nil,
                               captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
                               name_prefix) with
   | Err msg -> Err(msg)
@@ -5354,7 +5292,7 @@ fn translate_boxed_ctor_call(name: String, tag: Int, actual_ar: Int,
   # tag == -1 is the wrap sentinel (mirrors codegen.sprout wrap_tag() = -1).
   if tag == -1
   then
-    match translate_args_ctor(args, params, ctors, idx, cur_label, cur_ops, Nil, Nil,
+    match translate_args(args, params, ctors, idx, cur_label, cur_ops, Nil, Nil,
                               captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
                               name_prefix) with
     | Err msg -> Err(msg)
@@ -5370,7 +5308,7 @@ fn translate_boxed_ctor_call(name: String, tag: Int, actual_ar: Int,
   if list_length(args) != actual_ar
   then Err("ast_to_ir: ctor application has wrong arity (got " ++ int_to_string(list_length(args)) ++ ", expected " ++ int_to_string(actual_ar) ++ ")")
   else
-    match translate_args_ctor(args, params, ctors, idx, cur_label, cur_ops, Nil, Nil,
+    match translate_args(args, params, ctors, idx, cur_label, cur_ops, Nil, Nil,
                               captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
                               name_prefix) with
     | Err msg -> Err(msg)
@@ -5492,7 +5430,7 @@ fn translate_append_operands(left: typed_ast.TypedExpr, right: typed_ast.TypedEx
                          fresh_name(name_prefix, idx2), idx2 + 1))
   else if is_list_type(typed_ast.typed_expr_type(left)) || is_list_type(call_ty) then
     # List ++ List → call @list_append.  Fallback only, same as the String arm.
-    match translate_args_scalar([left, right], params, ctors, idx, cur_label, cur_ops, Nil, Nil,
+    match translate_args([left, right], params, ctors, idx, cur_label, cur_ops, Nil, Nil,
                                 captures, lifted_ref, top_level, let_names, fn_arities,
                                 lambda_ctr_ref, lifted_idx_ref, name_prefix) with
     | Err msg -> Err(msg)
@@ -5552,7 +5490,7 @@ fn translate_direct_call(fname: String, args: List typed_ast.TypedExpr,
       # FIX R4#3: removed the is_string_type(call_ty) rejection that was here.
       # All IR values are i64 — String-returning user fns are i64 just like Int.
       # The check was a placeholder from PR 1.5 that blocked capturing-IIFE-returning-String.
-      match translate_args_scalar(args, params, ctors, idx, cur_label, cur_ops, Nil, Nil,
+      match translate_args(args, params, ctors, idx, cur_label, cur_ops, Nil, Nil,
                                   captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
                                   name_prefix) with
       | Err msg -> Err(msg)
@@ -5585,7 +5523,7 @@ fn translate_string_builtin(kind: StringBuiltin, fname: String,
                             lifted_idx_ref: Ref (Dict Int),
                             name_prefix: String) ->
     Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) !{IO} =
-  match translate_args_scalar(args, params, ctors, idx, cur_label, cur_ops, Nil, Nil,
+  match translate_args(args, params, ctors, idx, cur_label, cur_ops, Nil, Nil,
                               captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
                               name_prefix) with
   | Err msg -> Err(msg)
@@ -5827,21 +5765,6 @@ fn finish_vec_set_d(arg_blocks: List sprout_ir.IRBlock, cur_lbl: String,
                       "vector_mutset: null vector or index out of bounds", idx, name_prefix)
   | _ -> Err("ast_to_ir: vector_mutset expects 3 arguments")
 
-# Thread a list of argument expressions through translate_expr, accumulating
-# completed blocks, current-block ops, and the result-name of each arg.
-# `acc_blocks` is in already-correct order (we append, not prepend); the
-# arg-name list `acc_names` is built in reverse and reversed at the end so
-# the caller sees them in source order.
-#
-# translate_args_scalar — for IRCall / direct-call paths.  Rejects any arg
-# whose type is not Int or String (scalar-only milestone constraint).
-#
-# translate_args_ctor — for IRMakeCtor paths.  Accepts all types including
-# Unit (i64 0 sentinel), Bool, Int, String, and heap-typed ADT values — see
-# is_supported_ctor_arg_type for the full rationale.
-#
-# Both delegate to translate_args_core with a type-filter flag.
-
 # M3 PR 7: translate tuple elements left-to-right, accumulate SSAs, emit
 # IRMakeTuple at the end.  Each element gets its own translate_expr call;
 # blocks from intra-element control flow merge into acc_blocks.  Tuple
@@ -5922,45 +5845,15 @@ fn build_update_args(decl_names: List String, field_pos: Int,
                             captures, lifted_ref, top_level, let_names, fn_arities,
                             lambda_ctr_ref, lifted_idx_ref, name_prefix)
 
-fn translate_args_scalar(args: List typed_ast.TypedExpr, params: List String,
-                         ctors: Dict sprout_ir.CtorInfo,
-                         idx: Int, cur_label: String, cur_ops: ListBuilder sprout_ir.IROp,
-                         acc_blocks: List sprout_ir.IRBlock, acc_names: List String,
-                         captures: Dict String,
-                         lifted_ref: Ref (List sprout_ir.IRFunction),
-                         top_level: Set,
-                let_names: Set,
-                fn_arities: Dict FnInfo,
-                         lambda_ctr_ref: Ref Int,
-                         lifted_idx_ref: Ref (Dict Int),
-                         name_prefix: String) ->
-    Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, List String, Int) !{IO} =
-  translate_args_core(args, params, ctors, idx, cur_label, cur_ops, acc_blocks, acc_names,
-                      true, captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
-                      name_prefix)
-
-fn translate_args_ctor(args: List typed_ast.TypedExpr, params: List String,
+# Thread a list of argument expressions through translate_expr, accumulating
+# completed blocks, current-block ops, and the result-name of each arg.
+# `acc_blocks` is in already-correct order (we append, not prepend); the
+# arg-name list `acc_names` is built in reverse and reversed at the end so
+# the caller sees them in source order. Every IR value is i64, so any type passes.
+fn translate_args(args: List typed_ast.TypedExpr, params: List String,
                        ctors: Dict sprout_ir.CtorInfo,
                        idx: Int, cur_label: String, cur_ops: ListBuilder sprout_ir.IROp,
                        acc_blocks: List sprout_ir.IRBlock, acc_names: List String,
-                       captures: Dict String,
-                       lifted_ref: Ref (List sprout_ir.IRFunction),
-                       top_level: Set,
-                let_names: Set,
-                fn_arities: Dict FnInfo,
-                       lambda_ctr_ref: Ref Int,
-                       lifted_idx_ref: Ref (Dict Int),
-                       name_prefix: String) ->
-    Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, List String, Int) !{IO} =
-  translate_args_core(args, params, ctors, idx, cur_label, cur_ops, acc_blocks, acc_names,
-                      false, captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
-                      name_prefix)
-
-fn translate_args_core(args: List typed_ast.TypedExpr, params: List String,
-                       ctors: Dict sprout_ir.CtorInfo,
-                       idx: Int, cur_label: String, cur_ops: ListBuilder sprout_ir.IROp,
-                       acc_blocks: List sprout_ir.IRBlock, acc_names: List String,
-                       scalar_only: Bool,
                        captures: Dict String,
                        lifted_ref: Ref (List sprout_ir.IRFunction),
                        top_level: Set,
@@ -5973,21 +5866,18 @@ fn translate_args_core(args: List typed_ast.TypedExpr, params: List String,
   match args with
   | Nil -> Ok((acc_blocks, cur_label, cur_ops, list_reverse(acc_names), idx))
   | Cons a rest ->
-      if scalar_only && ! is_supported_arg_type (typed_ast.typed_expr_type(a))
-      then Err("ast_to_ir: call argument type not supported (Bool and Unit cannot be passed as i64)")
-      else
-        match translate_expr(a, params, ctors, idx, cur_label, cur_ops,
-                             captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
-                             name_prefix) with
-        | Err msg -> Err(msg)
-        | Ok ar ->
-            match ar with
-            | (ablocks, acur_lbl, acur_ops, a_name, idx1) ->
-                translate_args_core(rest, params, ctors, idx1, acur_lbl, acur_ops,
-                                    list_append(acc_blocks, ablocks),
-                                    Cons(a_name, acc_names), scalar_only,
-                                    captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref,
-                                    lifted_idx_ref, name_prefix)
+      match translate_expr(a, params, ctors, idx, cur_label, cur_ops,
+                           captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
+                           name_prefix) with
+      | Err msg -> Err(msg)
+      | Ok ar ->
+          match ar with
+          | (ablocks, acur_lbl, acur_ops, a_name, idx1) ->
+              translate_args(rest, params, ctors, idx1, acur_lbl, acur_ops,
+                             list_append(acc_blocks, ablocks),
+                             Cons(a_name, acc_names),
+                             captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref,
+                             lifted_idx_ref, name_prefix)
 
 # Translate a function body into a complete List IRBlock.  The body always
 # starts in the "entry" block; the final block (whatever cur_label is after
@@ -8139,7 +8029,7 @@ fn translate_tail_tuple(items: List typed_ast.TypedExpr, params: List String,
                         lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
                         name_prefix: String) ->
     Result String (List sprout_ir.IRBlock, Int) !{IO} =
-  match translate_args_scalar(items, params, ctors, idx, cur_label, cur_ops, Nil, Nil, captures,
+  match translate_args(items, params, ctors, idx, cur_label, cur_ops, Nil, Nil, captures,
                               lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref,
                               lifted_idx_ref, name_prefix) with
   | Err msg -> Err(msg)
@@ -8211,7 +8101,7 @@ fn translate_tail_chain(target_fn: String, args: List typed_ast.TypedExpr, param
                         lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
                         name_prefix: String, width: Int) ->
     Result String (List sprout_ir.IRBlock, Int) !{IO} =
-  match translate_args_scalar(args, params, ctors, idx, cur_label, cur_ops, Nil, Nil, captures,
+  match translate_args(args, params, ctors, idx, cur_label, cur_ops, Nil, Nil, captures,
                               lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref,
                               lifted_idx_ref, name_prefix) with
   | Err msg -> Err(msg)

@@ -74,9 +74,6 @@ fn redraw_input(prompt: String, current: String, cursor: Int) -> Unit !{IO} =
     terminal.write("\r" ++ prompt ++ current ++ esc ++ "[K")
     terminal.write("\r" ++ prompt ++ slice_left(current, cursor))
 
-fn ignore_key(value: String !{IO}) -> Unit !{IO} =
-  term_noop()
-
 fn escape_token(second: String, third: String) -> String =
   if second != "[" then "escape"
   else if third == "A" then "up"
@@ -215,11 +212,6 @@ fn append_names_from_vec(acc: Vec String, names: Vec String, index: Int) -> Vec 
   match vec_get(index, names) with
   | Just name -> append_names_from_vec(append_unique_name(acc, name), names, index + 1)
   | Nothing -> acc
-
-fn skip_spaces_from(raw: String, index: Int) -> Int =
-  if index >= string.length(raw) then index
-  else if char_at(raw, index) == ' ' || char_at(raw, index) == '\t' then skip_spaces_from(raw, index + 1)
-  else index
 
 fn skip_to_space_or_delim(raw: String, index: Int) -> Int =
   if index >= string.length(raw) then index
@@ -714,19 +706,6 @@ fn render_compiler_instances_result(result: Result String compiler.InstanceMatch
         single_line("No instances for " ++ compiler.instance_query_type(payload))
       else
         single_line("Instances for " ++ compiler.instance_query_type(payload) ++ ":") ++ compiler.instance_match_names(payload)
-
-fn first_diagnostic_message(lines: Vec compiler.ReportEntry) -> Maybe String =
-  match vec_get(0, lines) with
-  | Just value -> Just(compiler.diagnostic_message(value))
-  | Nothing -> Nothing
-
-fn report_error_lines(report: compiler.CompilerReport) -> Vec String =
-  match compiler.report_error_message(report) with
-  | Just message -> render_error(message)
-  | Nothing ->
-      match first_diagnostic_message(compiler.report_diagnostics(report)) with
-      | Just message -> render_error(message)
-      | Nothing -> render_error("analysis failed")
 
 fn handle_instances_command(line: String, prefix: String, session: compiler.StatefulSession) -> SubmissionResult !{IO} =
   if trim(drop_prefix(line, prefix)) == "" then Continue(render_error(":instances expects a type"), session)

@@ -189,7 +189,7 @@ export fn compile_source_at_with_cache_roots(src: String, entry_path: String, st
     | bundler.BundleErr pos msg -> CompileFail(Cons(diag_error(pos, "bundle: " ++ msg), Nil))
     | bundler.BundleOk prog ->
         do
-          result <- check_bundled(prog, stdlib_root, cache)
+          result <- check_bundled(prog)
           match result with
           | typed_ast.TypedErr pos msg -> CompileFail(Cons(diag_error(pos, msg), Nil))
           | typed_ast.TypedOk _ env -> CompileOk(unqualify_entry_names(bundler.scan_module_name(src), env))
@@ -511,9 +511,7 @@ export fn compile_phase_check_with_roots(path: source.FilePath, stdlib_root: sou
     match bundle_result with
     | bundler.BundleErr pos msg -> typed_ast.TypedErr(pos, "bundle: " ++ msg)
     | bundler.BundleOk prog ->
-        do
-          load_env <- bundler.new_load_env()
-          check_bundled(prog, stdlib_root, load_env)
+        check_bundled(prog)
 
 # Everything after the bundle: typecheck, resolve, verify dispatch. Shared so that
 # checking a FILE and checking a BUFFER cannot diverge — the whole point of retiring the
@@ -537,11 +535,7 @@ export fn compile_phase_check_with_roots(path: source.FilePath, stdlib_root: sou
 # files, which at the time received no prelude at all. Since
 # docs/prelude-scope-v0.md the prelude is unconditional, so bare files get it from
 # the bundle and the compensation had outlived its cause.
-#
-# The three remaining load_prelude_pairs callers are NOT redundant and stay:
-# lower_driver and type_driver parse a single file without bundling, so schemes
-# are their only source; analysis_service_driver calls it to warm the cache.
-fn check_bundled(prog: ast.Program, stdlib_root: source.StdlibRoot, load_env: bundler.LoadEnv) -> typed_ast.TypedResult !{IO} =
+fn check_bundled(prog: ast.Program) -> typed_ast.TypedResult !{IO} =
   do
     result <- checker.typecheck_typed(prog, Nil)
     match result with
@@ -596,62 +590,3 @@ export fn compile_full_ir(path: source.FilePath, stdlib_root: source.StdlibRoot)
         match ir_pipeline.compile_program_streaming(typed_lowered) with
         | Err msg -> IrFullFail(Cons(diag_error(no_pos(), "codegen: " ++ msg), Nil))
         | Ok ir_text -> IrFullOk(ir_text)
-
-
-# compile_full_ir_with_cache: like compile_full_ir but uses a caller-provided module cache.
-# Avoids recreating the cache on every eval when called from the analysis service daemon.
-# Emits via the typed IR pipeline (ir_pipeline), the sole codegen backend.
-export fn compile_full_ir_with_cache(path: source.FilePath, stdlib_root: source.StdlibRoot, cache) -> IrFullResult !{IO} =
-  do
-    recheck_result <- compile_phase_recheck_with_cache(path, stdlib_root, cache)
-    match recheck_result with
-    | typed_ast.TypedErr pos msg -> IrFullFail(Cons(diag_error(pos, msg), Nil))
-    | typed_ast.TypedOk typed_lowered _ ->
-        match ir_pipeline.compile_program_streaming(typed_lowered) with
-        | Err msg -> IrFullFail(Cons(diag_error(no_pos(), "codegen: " ++ msg), Nil))
-        | Ok ir_text -> IrFullOk(ir_text)
-
-fn compile_phase_check_with_cache(path: source.FilePath, stdlib_root: source.StdlibRoot, cache) -> typed_ast.TypedResult !{IO} =
-  do
-    bundle_result <- bundler.bundle_file(path, stdlib_root)
-    match bundle_result with
-    | bundler.BundleErr pos msg -> typed_ast.TypedErr(pos, "bundle: " ++ msg)
-    | bundler.BundleOk prog ->
-        do
-          result <- checker.typecheck_typed(prog, Nil)
-          match result with
-          | typed_ast.TypedErr pos msg -> typed_ast.TypedErr(pos, "check: " ++ msg)
-          | typed_ast.TypedOk typed_prog env ->
-              match resolve.resolve_program(typed_prog, env) with
-              | resolve.ResolveErr pos msg -> typed_ast.TypedErr(pos, "check: " ++ msg)
-              | resolve.ResolveOk resolved ->
-                  # Dictionary-passing verifier (retro item 1, phase 1). A finding is a
-                  # soundness bug (a dict resolved to the wrong instance) — fatal by
-                  # default, verified clean across the corpus + compiler source before
-                  # this flip. SPROUT_VERIFY_DISPATCH_OFF downgrades it to a warning
-                  # (escape hatch for an uncovered false positive in the wild);
-                  # SPROUT_VERIFY_DISPATCH_STATS logs coverage (verified/skipped/mismatched).
-                  do
-                    _ <- report_verify_stats(resolved)
-                    match verify_dispatch.verify_program(resolved) with
-                    | Nothing -> typed_ast.TypedOk(resolved, env)
-                    | Just (vpos, vmsg) ->
-                        match sys_env.get("SPROUT_VERIFY_DISPATCH_OFF") with
-                        | Just _ ->
-                            do
-                              _ <- eprint("[verify-dispatch] (suppressed) " ++ vmsg)
-                              typed_ast.TypedOk(resolved, env)
-                        | Nothing -> typed_ast.TypedErr(vpos, "check: dispatch-verify: " ++ vmsg)
-
-fn compile_phase_lower_with_cache(path: source.FilePath, stdlib_root: source.StdlibRoot, cache) -> typed_ast.TypedResult !{IO} =
-  do
-    check_result <- compile_phase_check_with_cache(path, stdlib_root, cache)
-    match check_result with
-    | typed_ast.TypedErr pos msg -> typed_ast.TypedErr(pos, msg)
-    | typed_ast.TypedOk typed_prog env ->
-        do
-          optimised <- run_opt_passes(lowering.lower_program(typed_prog, env))
-          typed_ast.TypedOk(optimised, env)
-
-fn compile_phase_recheck_with_cache(path: source.FilePath, stdlib_root: source.StdlibRoot, cache) -> typed_ast.TypedResult !{IO} =
-  compile_phase_lower_with_cache(path, stdlib_root, cache)

@@ -28,15 +28,6 @@ fn main() -> Unit !{IO} =
   do
     state <- new_state()
 
-    # new_load_env() creates an independent, empty memo each time
-    cache1 <- bundler.new_load_env()
-    d1 <- ref_read(bundler.load_env_schemes(cache1))
-    assert_eq(state, "new_load_env starts empty", vec_length(dict_keys(d1)), 0)
-
-    cache2 <- bundler.new_load_env()
-    d2 <- ref_read(bundler.load_env_schemes(cache2))
-    assert_eq(state, "each new_load_env is independent", vec_length(dict_keys(d2)), 0)
-
     # compile_source_with_cache: the subject here is CACHE SHARING across calls,
     # not prelude scope.
     #
@@ -53,14 +44,7 @@ fn main() -> Unit !{IO} =
     # depend on whether the prelude happened to be findable, which is exactly the
     # kind of invisible, environment-dependent scoping that prelude-scope-v0 set
     # out to remove.
-    #
-    # Pre-seeding "stdlib.prelude" into the SCHEMES cache is kept, but note it is
-    # no longer what makes this work: `check_bundled` stopped calling
-    # `load_prelude_pairs` in the same change, so on this path that cache is only
-    # exercised by callers that do not bundle.
     cache3 <- bundler.new_load_env()
-    d3 <- ref_read(bundler.load_env_schemes(cache3))
-    ref_write(bundler.load_env_schemes(cache3), dict_set("stdlib.prelude", Nil, d3))
 
     r1 <- compiler.compile_source_with_cache("no_prelude\n\nfn x() -> Int = 42", source.StdlibRoot("stdlib"), cache3)
     assert_true(state, "compile_source_with_cache: valid source compiles ok", is_ok(r1))

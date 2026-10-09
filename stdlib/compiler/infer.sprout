@@ -199,34 +199,7 @@ fn lookup_type_var(name: String, local_vars: Dict types.Type) -> types.Type =
   # name verbatim. Stripping here collapsed `main.Foo` and a prelude `Foo` to one
   # identity. The prelude's canonical form is unqualified (empty module header), so
   # this is a no-op on dotless names and only preserves genuine module prefixes.
-  #
-  # On the bundling path the name IS already canonical, because the bundler
-  # rewrote it. On the env path nothing has, and the two sides of an annotation
-  # disagree: an imported module is checked with its header stripped, so its
-  # schemes carry SHORT type names (`bytes.to_string :: … Result Utf8Error …`),
-  # while the annotation still spells the importer's alias (`bytes.Utf8Error`).
-  # Dropping a KNOWN alias prefix makes the two meet on the short name the env
-  # path uses everywhere — including in the `@linear:` and `@inst:` marker keys,
-  # which are keyed by short type name and would MISS if types were qualified
-  # here instead. A prefix that is not an import alias (`main.Foo`) is returned
-  # verbatim, so T7's distinction survives untouched.
-  | Nothing -> resolve_qualified_type_name(name, local_vars)
-
-# The alias part of `alias.Type` — the FIRST segment, which is what an import
-# binds. An already-canonical `stdlib.bytes.Utf8Error` yields `stdlib`, which is
-# never an alias, so it falls through and is returned verbatim.
-fn before_first_dot(name: String) -> String =
-  if i == -1 then name else str_slice(name, 0, i)
-  where i = str_find(name, ".")
-
-# `@qualalias:` keys carry ':' and '@', neither legal in a type name, so the
-# sentinels cannot collide with a real type parameter sharing the dict.
-fn resolve_qualified_type_name(name: String, local_vars: Dict types.Type) -> types.Type =
-  if str_find(name, ".") == -1 then types.TConst(types.type_id(name))
-  else
-    match dict_get(str_concat("@qualalias:", before_first_dot(name)), local_vars) with
-    | Just _ -> types.TConst(types.type_id(string.after_last_dot(name)))
-    | Nothing -> types.TConst(types.type_id(name))
+  | Nothing -> types.TConst(types.type_id(name))
 
 fn type_list_from_ast(parts: List ast.TypeExpr, local_vars: Dict types.Type) -> List types.Type =
   match parts with
@@ -247,7 +220,7 @@ fn type_list_from_ast(parts: List ast.TypeExpr, local_vars: Dict types.Type) -> 
 # The arity rides in the key because `alias_env` is a `Dict types.Type` shared
 # with the type-variable dict: one name holds one type, and `F a` and `F a b`
 # are different aliases. `@` and `:` cannot appear in a type name, so no user
-# name collides with a key (the same guarantee `@qualalias:` relies on). The
+# name collides with a key. The
 # prefixes live in types (alias_fn_prefix, alias_param_prefix) because resolve reads
 # the same keys back.
 fn alias_fn_key(name: String, arity: Int) -> String =
@@ -289,21 +262,7 @@ fn alias_apply_or_plain(name: String, args: List ast.TypeExpr, base: ast.TypeExp
         body)
 
 fn alias_body(name: String, arity: Int, local_vars: Dict types.Type) -> Maybe types.Type =
-  match dict_get(alias_fn_key(name, arity), local_vars) with
-  | Just t -> Just(t)
-  | Nothing -> alias_body_unqualified(name, arity, local_vars)
-
-# The env path spells an imported alias with the importer's prefix while the
-# schemes carry short names. Stripping is gated on the prefix being a known
-# import alias, exactly as resolve_qualified_type_name gates it — otherwise
-# `mod.Pair` would collide with a local `Pair`, which is a different type.
-fn alias_body_unqualified(name: String, arity: Int,
-                          local_vars: Dict types.Type) -> Maybe types.Type =
-  if str_find(name, ".") == -1 then Nothing
-  else
-    match dict_get(str_concat("@qualalias:", before_first_dot(name)), local_vars) with
-    | Just _ -> dict_get(alias_fn_key(string.after_last_dot(name), arity), local_vars)
-    | Nothing -> Nothing
+  dict_get(alias_fn_key(name, arity), local_vars)
 
 fn alias_arg_subst(name: String, index: Int, args: List types.Type,
                    acc: Dict types.Type) -> Dict types.Type =
@@ -1900,15 +1859,6 @@ fn infer_call_general(
 # `_`-placeholder partials (spec §5.3) are the n-ary way to partially apply.
 fn arity_marker(n: Int) -> types.Scheme =
   types.mono(types.TConst(types.type_id(int_to_string(n))))
-
-# "@extern:<name>" present ⇒ that value is an extern, i.e. ast.ScopeGlobal: bare
-# everywhere, never module-qualified, never filtered by an import list. Recorded
-# here because this is where an extern's signature enters the env, and read by
-# module_loader so the env path spells externs the way the bundler does. Like
-# every marker family it rides prefix_pairs/select_pairs unprefixed, which is
-# exactly the propagation a global name needs.
-fn extern_marker() -> types.Scheme =
-  types.mono(types.TConst(types.type_id("extern")))
 
 # Per-declaration linearity is recorded as a sentinel env entry, mirroring the
 # @arity: marker idiom above: "@linear:<TypeName>" present ⇒ the type constructor
@@ -6239,21 +6189,20 @@ fn annotation_tyvar(te: ast.TypeExpr) -> Maybe String =
   | [] -> Nothing
   | [v | _] -> Just(v)
 
-# The type vocabulary an annotation resolves against: module aliases lifted from
-# the `@qualalias:` markers, plus `type alias` declarations mirrored under
-# `@aliasty:` by mirror_alias_env.
+# The type vocabulary an annotation resolves against: `type alias` declarations
+# mirrored under `@aliasty:` by mirror_alias_env.
 #
-# Both come from `env` because that is all inference holds this deep. The
+# It comes from `env` because that is all inference holds this deep. The
 # declaration walk's own `alias_env` never reaches infer_expr, and a lambda
 # parameter annotation is the first annotation position resolved inside a body.
-# Without the `@aliasty:` half, `\ (n: Name) -> …` against `type alias Name =
+# Without it, `\ (n: Name) -> …` against `type alias Name =
 # String` resolves `Name` to an opaque TConst of that name and fails later as
 # `No instance of ToString for Name`.
 #
-# Both are prefix scans rather than walks of every entry: this runs once per lambda.
+# A prefix scan rather than a walk of every entry: this runs once per lambda.
 fn aliases_for_annotations(env: Dict types.Scheme) -> Dict types.Type =
   alias_decls_from_env(vec_to_list(dict_entries_with_prefix(types.alias_marker_prefix, env)),
-                       import_aliases_from_env(env))
+                       dict_empty())
 
 # A `type alias` is mirrored into the value environment under
 # types.alias_marker_prefix — one spelling for the write and every reader, resolve's
@@ -7186,11 +7135,7 @@ export fn typecheck_decls(
   subst: Dict types.Type,
   eff_subst: Dict types.Effect
 ) -> typed_ast.TypedResult !{IO} =
-  # The importer's type-name spellings, lifted out of the env's @qual* markers
-  # into the alias_env — which is the base every local_vars dict is built on
-  # (build_type_var_dict), so lookup_type_var sees them at every annotation
-  # position without threading a new parameter through inference.
-  match register_all_aliases(decls, import_aliases_from_env(env)) with
+  match register_all_aliases(decls, dict_empty()) with
   | AliasesErr pos msg -> pure_typed_err(pos, msg)
   | AliasesOk alias_env ->
       typecheck_decls_resolved(state, seed_instance_method_types(decls, alias_env), env, subst, eff_subst, alias_env)
@@ -7224,11 +7169,10 @@ fn typecheck_decls_resolved(
     # declaration and error immediately if a referenced type name is not declared.
     # Runs after pre_scan so mutually recursive ADTs are always in the declared set.
     #
-    # The vocabulary is this module's own declarations PLUS the imported names the
-    # env carries as @type: markers. Both halves are needed: the file-bundling path
-    # inlines the prelude so its types are ordinary decls, while the REPL / LSP /
-    # analysis-service path supplies them as env schemes and nothing else would put
-    # `Vec` or an imported `Utf8Error` in scope. Mirrors the class-name seed below.
+    # The vocabulary is this module's own declarations PLUS the names the env carries
+    # as @type: markers. Bundling inlines the prelude, so its types are ordinary decls;
+    # the env half served the deleted scheme-env loader, which supplied imported
+    # modules as schemes. Mirrors the class-name seed below.
     let own_type_names = collect_declared_type_names(decls, Nil)
     let declared_types = own_type_names ++ type_names_from_env(env, builtin_type_names())
     # Export this module's own type names so its importers get the same treatment.
@@ -7274,9 +7218,6 @@ fn typecheck_decls_resolved(
               match check_instance_class_effects(decls) with
               | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
               | Nothing ->
-                match check_existential_constraints(decls) with
-                | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
-                | Nothing ->
                 # Wrap scanned_env_with_types as GlobalEnv at this seam — it is the
                 # output of pre_scan_fn_decls (Dict, raw pre-pass) plus this module's
                 # @type: markers. From here on the env flows between decls as the
@@ -7285,7 +7226,7 @@ fn typecheck_decls_resolved(
                 # Mirrored once, up front: an annotation inside a body reads
                 # aliases from the env, and a body may be checked above the
                 # declaration whose alias it names.
-                match typecheck_decls_inner(state, decls, mirror_alias_env(qual_env, GlobalEnv(scanned_env_with_types)), subst, eff_subst, qual_env, Nil, unifier.ftv_env(scanned_env_with_types)) with
+                match typecheck_decls_inner(state, decls, mirror_alias_env(qual_env, GlobalEnv(scanned_env_with_types)), subst, eff_subst, qual_env, unifier.ftv_env(scanned_env_with_types)) with
                 | typed_ast.TypedErr p m -> typed_ast.TypedErr(p, m)
                 | typed_ast.TypedOk prog schemes ->
                     # Final gate: a DEFINED `main` must be a well-formed entrypoint.
@@ -7615,9 +7556,8 @@ fn collect_declared_class_names(decls: List ast.Decl, acc: List String) -> List 
 
 # Class names recoverable from the type environment's `@class:{method}` markers.
 # Each marker's scheme body is `TConst(class_name)` (register_class_method_markers).
-# The analysis-service / REPL path (check_program_with_env) supplies imported and
-# prelude classes as env schemes rather than ClassDecl nodes, so scanning decls
-# alone leaves the class set empty and every `where ToString a` reads as unknown.
+# The deleted scheme-env loader supplied imported and prelude classes as env schemes
+# rather than ClassDecl nodes; this scan is what found them.
 fn class_names_from_env(env: Dict types.Scheme, acc: List String) -> List String =
   class_names_from_entries(vec_to_list(dict_entries(env)), acc)
 
@@ -7634,28 +7574,8 @@ fn class_names_from_entries(entries: List (String, types.Scheme), acc: List Stri
 
 # Type names recoverable from the type environment's `@type:{TypeName}` markers,
 # the exact counterpart of class_names_from_env above (mark_declared_types writes
-# them; each marker's scheme body is `TConst(type_name)`). Same motivation: the
-# analysis-service / REPL path supplies the prelude and every imported module as
-# env schemes rather than decl nodes, so seeding the type vocabulary from decls
-# alone leaves `Vec`, `Dict`, `Result` and every cross-module type name unknown.
-# Lift module_loader's @qualalias: markers into an alias_env seed, keyed
-# identically so lookup_type_var reads them back. alias_env is the base every
-# local_vars dict is built on (build_type_var_dict), so the sentinels reach
-# every annotation position without threading a parameter through inference.
-fn import_aliases_from_env(env: Dict types.Scheme) -> Dict types.Type =
-  import_aliases_go(vec_to_list(dict_entries_with_prefix("@qualalias:", env)), dict_empty())
-
-fn import_aliases_go(entries: List (String, types.Scheme), acc: Dict types.Type) -> Dict types.Type =
-  match entries with
-  | [] -> acc
-  | [(key, scheme) | rest] ->
-      if str_starts_with(key, "@qualalias:") then
-        match scheme with
-        | types.Scheme _ _ (types.TConst id) _ _ ->
-            import_aliases_go(rest, dict_set(key, types.TConst(id), acc))
-        | _ -> import_aliases_go(rest, acc)
-      else import_aliases_go(rest, acc)
-
+# them; each marker's scheme body is `TConst(type_name)`). Same origin as
+# class_names_from_env.
 fn type_names_from_env(env: Dict types.Scheme, acc: List String) -> List String =
   type_names_from_entries(vec_to_list(dict_entries(env)), acc)
 
@@ -8617,17 +8537,6 @@ fn check_overlapping_instances(decls: List ast.Decl, seen: Dict Bool) -> Maybe(s
 # superclass may constrain a SUBSET of the class variables, so the required instance
 # is `Sup A`, not `Sup A B`. Do NOT generalize this to "all type args": that would
 # encode the wrong assumption. When multi-parameter classes land, revisit here.
-# Stage 0b generalization (docs/gadts-v0.md §5b): multi-method and superclass
-# constrained existentials are now supported. The witness-slot enumerator
-# (types.witness_slots_for_class) sizes the packed dictionary to one field per
-# method across each constraint's class AND its transitive superclasses, and
-# lowering forwards a ctx_fwd block per effective class — so the former
-# single-method / superclass-free restriction is lifted. No existential-specific
-# declaration rejection remains; this hook is retained (always Nothing) as the
-# home for any future existential validation.
-fn check_existential_constraints(_decls: List ast.Decl) -> Maybe(source.SourcePos, String) =
-  Nothing
-
 fn check_missing_superclass_instances(decls: List ast.Decl) -> Maybe(source.SourcePos, String) =
   check_inst_supers_go(decls, build_class_super_map(decls, dict_empty()), build_inst_key_set(decls, dict_empty()))
 
@@ -8740,8 +8649,8 @@ fn build_inst_key_set(decls: List ast.Decl, acc: Dict Bool) -> Dict Bool =
 # Classes come from decls only, matched by the exact name the instance writes. The
 # bundler puts every class in decls under one qualified spelling, so that finds it. The
 # env's `@class:<method>` markers are not read: they carry bare class names, which
-# cannot tell two same-named classes apart, and only the retired env path
-# (module_loader.build_import_pairs) supplies classes that way. A class not found is
+# cannot tell two same-named classes apart, and only the deleted scheme-env loader
+# supplied classes that way. A class not found is
 # skipped. Method names are compared short.
 fn check_missing_instance_methods(decls: List ast.Decl) -> Maybe(source.SourcePos, String) =
   first_missing_method(decls, own_class_methods(decls, dict_empty()))
@@ -9453,9 +9362,8 @@ fn short_type_names(t: types.Type) -> types.Type =
   | types.TThunk r e -> types.TThunk(short_type_names(r), e)
   | types.TTuple ts -> types.TTuple(list_map(short_type_names, ts))
 
-# An extern is always marked global, but its signature is bound only when the name
-# is free: a module re-declaring an extern already in scope must not shadow the
-# scheme that is there, and the marker must not be lost to that skip either.
+# An extern's signature is bound only when the name is free: a module re-declaring
+# an extern already in scope must not shadow the scheme that is there.
 fn pre_scan_extern(
   name: String,
   params: List ast.Param,
@@ -9465,11 +9373,10 @@ fn pre_scan_extern(
   env: Dict types.Scheme
 ) -> Dict types.Scheme =
   match dict_get(name, env) with
-  | Just _ -> dict_set("@extern:" ++ name, extern_marker(), env)
+  | Just _ -> env
   | Nothing ->
-      dict_set("@extern:" ++ name, extern_marker(),
-        dict_set("@arity:" ++ name, arity_marker(list_length(params)),
-          dict_set(name, scheme_from_fn_parts(name, params, ret_type_maybe, effects_maybe, alias_env), env)))
+      dict_set("@arity:" ++ name, arity_marker(list_length(params)),
+        dict_set(name, scheme_from_fn_parts(name, params, ret_type_maybe, effects_maybe, alias_env), env))
 
 # Register every FnDecl signature and TypeDecl constructor without checking a
 # body, so a declaration may reference one written below it.
@@ -9850,7 +9757,6 @@ fn typecheck_decls_inner(
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
   alias_env: Dict types.Type,
-  acc: List typed_ast.TypedDecl,
   env_ftv: List String
 ) -> typed_ast.TypedResult !{IO} =
   typecheck_groups(state, vec_from_list(decls), group_plan(decls), env, subst, eff_subst,
@@ -10135,10 +10041,6 @@ fn infer_fn_decl(
         (r, fwd_markers, decl_constraints, body_subst) <- check_fn_body(state, decl, env, subst, eff_subst, alias_env, group_env_ftv)
         match r with
         | typed_ast.BodyErr pos e -> (FnInferErr(pos, e), body_subst)
-        | typed_ast.BodyLenient ->
-            # BodyLenient is no longer produced (fn_body_err always returns BodyErr).
-            # Retained as a constructor only to avoid breaking the typed_ast public API.
-            (FnInferErr(no_pos(), "internal: unexpected BodyLenient in " ++ name), body_subst)
         | typed_ast.BodyOk typed_body inferred_fn_type ->
             # A skolem reaching the decl's own type escaped a match branch, and
             # generalize cannot notice: a skolem is a rigid TConst, so it has no
@@ -12250,11 +12152,9 @@ fn self_binding_scheme(
       | [_ | _] -> types.mono(inst_type)
 
 fn fn_body_err(name: String, pos: source.SourcePos, msg: String) -> typed_ast.BodyResult =
-  # Previously: if `is_unknown_ref(msg)` returned BodyLenient, which caused
-  # `typecheck_decl` to silently substitute a `dummy_unit()` body and continue.
-  # That masked real bugs (e.g. unresolved class-method references like
-  # `__unresolved_Semigroup_a`) and produced misleading downstream errors.
-  # All Unknown-variable / Unknown-constructor errors are now hard errors.
+  # Every Unknown-variable / Unknown-constructor error is a hard error: accepting one
+  # and substituting a dummy body masked real bugs, such as unresolved class-method
+  # references like `__unresolved_Semigroup_a`.
   if str_starts_with(name, "stdlib.compiler.")
   then typed_ast.BodyErr(pos, attribute_to_function("[DIAG] " ++ msg, name))
   else typed_ast.BodyErr(pos, attribute_to_function(msg, name))
@@ -12266,10 +12166,6 @@ fn attribute_to_function(msg: String, name: String) -> String =
   match string.split_once(msg, "\n") with
   | Nothing -> msg ++ " in function " ++ name
   | Just (head, rest) -> head ++ " in function " ++ name ++ "\n" ++ rest
-
-fn is_unknown_ref(msg: String) -> Bool =
-  str_starts_with(msg, "Unknown variable: ") ||
-  str_starts_with(msg, "Unknown constructor: ")
 
 # ---------------------------------------------------------------------------
 # ClassDecl: method registration + constraint markers

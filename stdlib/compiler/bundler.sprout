@@ -30,39 +30,29 @@ export type BundleResult (..) =
 #             the active one, which the env path could never do.
 #   parsed  : memo of path → ParsedModule, so a session that checks the same file after
 #             each keystroke re-reads and re-parses its imports once instead of always.
-#   schemes : the module_loader cache behind `load_prelude_pairs`, which TYPECHECKS the
-#             prelude to produce its schemes. Held here so one caller-owned value covers
-#             every repeated cost of a check, rather than two.
 #
 # Overlay paths are deliberately never memoised: they are dirty by definition.
 # The memo is keyed by path with no mtime check, matching the cache it replaces — an
 # external edit to an already-parsed file is not noticed. That is why the overlay, and
 # not the memo, is what an editor's live buffers go through.
-# The scheme cache is spelled out rather than written as `module_loader.ModuleCache`:
-# a type alias is not transparent across a module boundary here, so the alias and its
-# expansion do not unify and `new_cache()`'s result would not fit the field.
 export type LoadEnv (..) =
-  | LoadEnv (Dict String) (Ref (Dict ParsedModule)) (Ref (Dict (List (String, types.Scheme))))
+  | LoadEnv (Dict String) (Ref (Dict ParsedModule))
 
 export fn new_load_env() -> LoadEnv !{IO} =
   do
     parsed <- ref_new(dict_empty())
-    schemes <- module_loader.new_cache()
-    LoadEnv(dict_empty(), parsed, schemes)
+    LoadEnv(dict_empty(), parsed)
 
 # A LoadEnv sharing this one's memos but reading the given in-memory sources first.
 export fn load_env_with_overlay(overlay: Dict String, base: LoadEnv) -> LoadEnv =
   match base with
-  | LoadEnv _ parsed schemes -> LoadEnv(overlay, parsed, schemes)
+  | LoadEnv _ parsed -> LoadEnv(overlay, parsed)
 
 fn load_env_overlay(e: LoadEnv) -> Dict String =
-  match e with | LoadEnv o _ _ -> o
+  match e with | LoadEnv o _ -> o
 
 fn load_env_parsed(e: LoadEnv) -> Ref (Dict ParsedModule) =
-  match e with | LoadEnv _ p _ -> p
-
-export fn load_env_schemes(e: LoadEnv) -> Ref (Dict (List (String, types.Scheme))) =
-  match e with | LoadEnv _ _ s -> s
+  match e with | LoadEnv _ p -> p
 
 # ---------------------------------------------------------------------------
 # Internal types
