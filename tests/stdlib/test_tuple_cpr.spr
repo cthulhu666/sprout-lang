@@ -67,6 +67,21 @@ fn use_rgb_unwrap(a: Int, b: Int, c: Int) -> Int =
   match rgb_unwrap(Rgb((a, b, c))) with
   | (r, g, b2) -> (r * 100) + (g * 10) + b2
 
+# Width-2 repack: the `wrap (Int,Int)` analogue of rgb_unwrap.
+wrap Span = (Int, Int)
+
+fn span_unwrap(x: Span) -> (Int, Int) =
+  match x with | Span p -> p
+
+fn use_span_unwrap(a: Int, b: Int) -> Int =
+  match span_unwrap(Span((a, b))) with
+  | (lo, hi) -> hi - lo
+
+# A `_` slot in the matched worker tuple binds nothing.
+fn use_rgb3_ends(k: Int) -> Int =
+  match rgb3(k) with
+  | (r, _, b) -> (r * 10) + b
+
 fn main() -> Unit !{IO} =
   run_suite("tuple_cpr", [
     # direct tuple-literal tail
@@ -88,5 +103,9 @@ fn main() -> Unit !{IO} =
     check_eq("fwd3 2 -> (2,3,4) -> 9", use_fwd3(2), 9),
     # width-3: wrap-unwrap bare-var tail -> repack path (box-and-extract, IRRetUnboxed3)
     check_eq("rgb_unwrap 4,5,6 -> 456", use_rgb_unwrap(4, 5, 6), 456),
-    check_eq("rgb_unwrap 0,0,0 -> 0", use_rgb_unwrap(0, 0, 0), 0)
+    check_eq("rgb_unwrap 0,0,0 -> 0", use_rgb_unwrap(0, 0, 0), 0),
+    # width-2: wrap-unwrap bare-var tail -> repack path (IRRetUnboxed2)
+    check_eq("span_unwrap 3,8 -> 5", use_span_unwrap(3, 8), 5),
+    # wildcard slot in a width-3 worker match
+    check_eq("rgb3 ends 4 -> (4,_,6) -> 46", use_rgb3_ends(4), 46)
   ])

@@ -235,7 +235,7 @@ fn build_alloc_summary(decls: List typed_ast.TypedDecl, emit_penv: ast_to_ir.Pro
     match summarize_decls(decls, penv, Nil) with
     | Err msg -> Err(msg)
     | Ok after_decls ->
-        match ast_to_ir.collect_worker_callees(decls, penv.top_level, penv.ctors, penv.fn_arities) with
+        match ast_to_ir.collect_worker_callees(decls, penv) with
         | wset ->
             match summarize_workers(set_to_list(wset), wset, decls, penv,
                                     ast_to_ir.build_adt_ctor_index(decls, penv.ctors),
@@ -325,8 +325,7 @@ export fn compile_program_streaming(prog: typed_ast.TypedProgram) ->
                       match stream_decls(decls, penv, init_state) with
                       | Err msg -> Err(msg)
                       | Ok after_decls ->
-                        match ast_to_ir.collect_worker_callees(decls, penv.top_level, ctors,
-                                                               penv.fn_arities) with
+                        match ast_to_ir.collect_worker_callees(decls, penv) with
                         | wset ->
                         match stream_workers(set_to_list(wset), wset, decls, penv,
                                              ast_to_ir.build_adt_ctor_index(decls, ctors),
