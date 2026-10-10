@@ -20,7 +20,7 @@ import stdlib.string as string
 # numbers.
 #
 # The type is the point. Two conventions used to share one name and one type here:
-# translate_expr held cur_ops in source order, bind_ctor_field_args held it
+# translate_expr held cur_ops in source order, the pattern-field binders held it
 # reversed with the difference recorded only in a comment, and the boundary between
 # them reversed the list back and forth. `ListBuilder` is a wrap, so a builder no
 # longer type-checks where a list is wanted.
@@ -240,9 +240,9 @@ fn build_captures_list_ir(frees: List String, params: List String,
       match lookup_free_var_ssa(v, params, captures) with
       | Nothing -> Err("ast_to_ir: build_captures_list_ir: free var '" ++ v ++ "' not in params or captures — unreachable if filter_capturable is correct")
       | Just ssa ->
-          match build_captures_list_ir(rest, params, captures) with
-          | Err msg -> Err(msg)
-          | Ok tail -> Ok(Cons(ssa, tail))
+          do
+            tail <- build_captures_list_ir(rest, params, captures)
+            Ok(Cons(ssa, tail))
 
 # Build the captures dict for a lifted lambda body.
 # For each free var at index i (0-based), the lifted body reads it from
@@ -644,12 +644,40 @@ fn witness_slot_count(exist_constraints: List ast.TypeConstraint,
               list_length(types.witness_slots_for_class(class_name, class_order, super_map))
                 + witness_slot_count(rest, cenv)
 
+# The program-wide translation inputs: the constructor table, top-level and
+# let-bound names, arities, the lambda-name counter and the lifted-lambda
+# next-idx map. Built once per program.
+export type ProgEnv (..) = (ctors: Dict sprout_ir.CtorInfo, top_level: Set, let_names: Set,
+                            fn_arities: Dict FnInfo, lambda_ctr_ref: Ref Int,
+                            lifted_idx_ref: Ref (Dict Int))
+
+export fn new_prog_env(decls: List typed_ast.TypedDecl, ctors: Dict sprout_ir.CtorInfo) -> ProgEnv !{IO} =
+  do
+    lambda_ctr_ref <- ref_new(0)
+    lifted_idx_ref <- ref_new(dict_empty())
+    ProgEnv(ctors = ctors, top_level = build_top_level_set(decls, ctors),
+            let_names = build_top_level_let_names(decls),
+            fn_arities = build_fn_arities(decls, build_adt_ctor_index(decls, ctors)),
+            lambda_ctr_ref = lambda_ctr_ref, lifted_idx_ref = lifted_idx_ref)
+
+# The same tables with fresh refs, for a pass that re-runs translation without
+# disturbing another pass's lambda names and indices.
+export fn with_fresh_refs(penv: ProgEnv) -> ProgEnv !{IO} =
+  do
+    lambda_ctr_ref <- ref_new(0)
+    lifted_idx_ref <- ref_new(dict_empty())
+    penv with (lambda_ctr_ref = lambda_ctr_ref, lifted_idx_ref = lifted_idx_ref)
+
 # What every translator reads and none changes while one function is lowered:
-# the program's constructor table, top-level and let-bound names, arities, and
-# the refs that collect lifted lambdas. Built once per function.
+# the program env plus that function's lifted-lambda accumulator.
 type TxEnv = (ctors: Dict sprout_ir.CtorInfo, top_level: Set, let_names: Set,
               fn_arities: Dict FnInfo, lifted_ref: Ref (List sprout_ir.IRFunction),
               lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int))
+
+fn tx_env(penv: ProgEnv, lifted_ref: Ref (List sprout_ir.IRFunction)) -> TxEnv =
+  TxEnv(ctors = penv.ctors, top_level = penv.top_level, let_names = penv.let_names,
+        fn_arities = penv.fn_arities, lifted_ref = lifted_ref,
+        lambda_ctr_ref = penv.lambda_ctr_ref, lifted_idx_ref = penv.lifted_idx_ref)
 
 # Fresh-name counter threaded through the translator.
 # ALL synthetic SSA temporaries use the "%t$" prefix → %t$0, %t$1, …
@@ -789,11 +817,8 @@ let closure_arity_any: Int = 262143
 #   captures   — Dict String — maps a free var's source name to the SSA name
 #                produced by IRLoadEnvSlot in the enclosing lifted body.
 #                Empty dict_empty() for top-level user fns.
-#   lifted_ref — Ref (List IRFunction) — accumulator; each TLambda translation
-#                prepends its lifted IRFunction here (shared across the whole
-#                user fn; nested lambdas thus stay flat).
-#   top_level  — Set String — top-level fn names + ctor names; used by
-#                compute_free_vars to exclude globally addressable names.
+#   env        — TxEnv — per-program tables plus the per-user-fn lifted-lambda
+#                accumulator; nested lambdas share it and stay flat.
 fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
                   env: TxEnv, idx: Int,
                   cur_label: String, cur_ops: ListBuilder sprout_ir.IROp,
@@ -979,7 +1004,7 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
           then Ok((oblocks, ocur_lbl,
                     list_builder_add(sprout_ir.IRFNeg(fresh_name(idx1), o_name), ocur_ops),
                     fresh_name(idx1), idx1 + 1))
-          else finish_checked_arith("ssub", "unary -", pos, oblocks, Nil, ocur_lbl, ocur_ops,
+          else finish_checked_arith("ssub", "unary -", pos, oblocks, ocur_lbl, ocur_ops,
                                     "0", o_name, idx1)
         else Err("ast_to_ir: unary op '" ++ op ++ "' not yet supported")
   | typed_ast.TRange start end_ _ _ ->
@@ -1122,7 +1147,7 @@ fn record_exprs_in_decl_order(decl_names: List String, fields: List typed_ast.Ty
 #                        provides the do-block value.
 #   TDoBindStep pat e m — PlainBind: emit e; bind VarPattern/Wildcard directly
 #                        to the i64 SSA result; recurse.  MaybeBind/ResultBind
-#                        route to translate_do_bind_maybe/_result.
+#                        route to translate_do_bind_short.
 #   Nil                — emit IRConst 0 (unit sentinel; mirrors codegen
 #                        zero_val / val_make(ll_i64(), "0")).
 #
@@ -1145,8 +1170,6 @@ fn translate_do_expr_step(step_expr: typed_ast.TypedExpr, step_caps: Dict String
           translate_do(rest, params, env, eidx, elabel, eops, step_caps, sra)
         Ok((list_append(eblocks, rblocks), rlabel, rops, rname, ridx))
 
-# The ordinary (boxed) do-let-step: evaluate e, bind name→SSA in captures, continue. Used when a let
-# is not SRA-eligible (or its producers are shadowed).
 # An SRA `let name = e`: `e`'s field scalars go into the SRA map under `name`,
 # which is never boxed.
 fn translate_do_let_sra(name: String, e: typed_ast.TypedExpr, width: Int,
@@ -1162,6 +1185,8 @@ fn translate_do_let_sra(name: String, e: typed_ast.TypedExpr, width: Int,
       translate_do(rest, params, env, eidx, elabel, eops, captures, dict_set(name, scalars, sra))
     Ok((list_append(eblocks, rblocks), rlabel, rops, rname, ridx))
 
+# The ordinary (boxed) do-let-step: evaluate e, bind name→SSA in captures, continue. Used when a let
+# is not SRA-eligible (or its producers are shadowed).
 fn translate_do_let_boxed(name: String, e: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
                           params: List String, env: TxEnv, idx: Int,
                           cur_label: String, cur_ops: ListBuilder sprout_ir.IROp, captures: Dict String,
@@ -1219,11 +1244,11 @@ fn translate_do(steps: List typed_ast.TypedDoStep,
           # The checker's mode decides, never the final type (spec-v0.md §5.9).
           match mode with
           | typed_ast.MaybeBind ->
-              translate_do_bind_maybe(pat, e, rest, params, env, idx,
+              translate_do_bind_short(OnNothing, pat, e, rest, params, env, idx,
                                       cur_label, cur_ops, captures)
           | typed_ast.ResultBind ->
-              translate_do_bind_result(pat, e, rest, params, env, idx,
-                                       cur_label, cur_ops, captures)
+              translate_do_bind_short(OnErr, pat, e, rest, params, env, idx,
+                                      cur_label, cur_ops, captures)
           | typed_ast.PlainBind ->
             do
               (eblocks, elabel, eops, ename, eidx) <-
@@ -1304,21 +1329,21 @@ fn do_bind_tuple_items(items: List ast.Pattern, scrut_name: String,
       | ast.CharPattern _ _ ->
           Err("ast_to_ir: nested char pattern in do-bind tuple not yet supported")
 
-# M3 PR 13: ctor-tag lookup helper for the Maybe do-bind short-circuit.
-# Mirrors codegen.sprout's find_nothing_tag — checks both the bare name (when
-# prelude is imported unqualified) and the prelude-qualified form.  Defensive
-# fallback (0) matches direct codegen; a do-block bind on Maybe whose ctor
-# table is missing the names shouldn't typecheck in the first place.
-fn find_nothing_tag_ir(ctors: Dict sprout_ir.CtorInfo) -> Int =
-  prelude_ctor_tag("Nothing", ctors)
+# The prelude constructor a wrapper-strip bind short-circuits on.
+type ShortCircuit =
+  | OnNothing
+  | OnErr
 
-# Ctor-tag lookup for the Result do-bind short-circuit.  Like
-# find_nothing_tag_ir, checks both the bare name and the prelude-qualified
-# form.  The Result branch tests for Err (short-circuit on failure); Ok is the
-# continue case.  Defensive fallback matches direct codegen; a Result do-bind
-# whose ctor table lacks the names would not have typechecked.
-fn find_err_tag_ir(ctors: Dict sprout_ir.CtorInfo) -> Int =
-  prelude_ctor_tag("Err", ctors)
+fn short_ctor(kind: ShortCircuit) -> String =
+  match kind with
+  | OnNothing -> "Nothing"
+  | OnErr -> "Err"
+
+# The short-circuit constructor's fields, rebuilt from an unboxed `val`.
+fn rebuilt_payload(kind: ShortCircuit, val: String) -> List String =
+  match kind with
+  | OnNothing -> Nil
+  | OnErr -> [val]
 
 # The tag of prelude constructor `name`, under its bare or qualified key. 0 when
 # neither is present, which a program that typechecked cannot reach.
@@ -1328,31 +1353,6 @@ fn prelude_ctor_tag(name: String, ctors: Dict sprout_ir.CtorInfo) -> Int =
       entry.tag
   | Nothing -> 0
 
-# M3 PR 13: lower `x <- f()` where f returns `Maybe a !{IO}`.
-#
-# Per memory project_do_block_result_io_quirk: both layers (IO and Maybe)
-# strip; `x` is bound to the inner `a`.  Nothing short-circuits as the do
-# block's overall result, mirroring Haskell-style monadic propagation.
-#
-# Block layout (mirrors codegen.sprout's emit_do_maybe_bind, lines 2913-2956):
-#
-#   <cur_lbl>:
-#     ... cur_ops ...
-#     %e = <translate e>           ← may emit blocks of its own (eblocks)
-#     %tag = call i64 @sprout_tag(i64 %e)
-#     %nt = const <nothing_tag>
-#     %is_n = icmp eq i64 %tag, i64 %nt
-#     br i1 %is_n, label %do_short_K, label %do_cont_K
-#   do_short_K:
-#     %nv = call i64 @sprout_alloc_obj(i64 <nothing_tag>, i64 0)
-#     br label %do_done_K
-#   do_cont_K:
-#     %p = call i64 @sprout_field(i64 %e, i64 0)
-#     ... bind pat to %p via do_bind_captures ...
-#     ... translate rest of do-block ...
-#     <rest_final_lbl>: br label %do_done_K
-#   do_done_K:
-#     %result = phi i64 [%nv, %do_short_K], [%rest_name, %rest_final_lbl]
 # The unbox target (`@f_worker` for a top-level fn, `@f_unboxed` for a
 # Maybe/Result C extern) a `pat <- f(..)` do-bind routes to, or Nothing (boxed).
 # Local, like translate_match's router — the worker is guaranteed to exist because
@@ -1378,169 +1378,83 @@ fn do_bind_unbox_target(e: typed_ast.TypedExpr, params: List String, captures: D
       | _ -> Nothing
   | _ -> Nothing
 
-fn translate_do_bind_maybe(pat: ast.Pattern, e: typed_ast.TypedExpr,
-                            rest: List typed_ast.TypedDoStep,
-                            params: List String, env: TxEnv,
-                            idx: Int, cur_label: String, cur_ops: ListBuilder sprout_ir.IROp,
-                            captures: Dict String) ->
+# Lower a wrapper-strip `pat <- e`: `e` yields Maybe (MaybeBind) or Result
+# (ResultBind), `pat` binds the payload, and Nothing / Err short-circuits as
+# the do block's value. Boxed block layout, K = eidx:
+#
+#   <elbl>:       ... eops ...; %tag = sprout_tag(%e); %is = icmp eq %tag, <short tag>
+#                 br %is, do_short_K, do_cont_K
+#   do_short_K:   Maybe: %nv = Nothing; Result: nothing (the Err box is the value)
+#                 br do_done_K
+#   do_cont_K:    %p = sprout_field(%e, 0); bind pat to %p; rest of the do block
+#                 <rest_final>: br do_done_K
+#   do_done_K:    %result = phi [%nv or %e, do_short_K], [rest's value, <rest_final>]
+fn translate_do_bind_short(kind: ShortCircuit, pat: ast.Pattern, e: typed_ast.TypedExpr,
+                           rest: List typed_ast.TypedDoStep,
+                           params: List String, env: TxEnv,
+                           idx: Int, cur_label: String, cur_ops: ListBuilder sprout_ir.IROp,
+                           captures: Dict String) ->
     Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) !{IO} =
   match do_bind_unbox_target(e, params, captures, env.let_names, env.top_level, env.ctors, env.fn_arities) with
   | Just target ->
       match e with
       | typed_ast.TCall _ eargs _ _ ->
-          translate_do_bind_maybe_unboxed(pat, target, eargs, rest, params, env, idx,
-                                          cur_label, cur_ops, captures)
+          translate_do_bind_unboxed(kind, pat, target, eargs, rest, params, env, idx,
+                                    cur_label, cur_ops, captures)
       | _ -> Err("ast_to_ir: do-bind unbox target on non-call (internal error)")
   | Nothing ->
       do
         (eblocks, elbl, eops, ename, eidx) <-
           translate_expr(e, params, env, idx, cur_label, cur_ops, captures)
-        translate_do_bind_maybe_finish(pat, rest, eblocks, elbl, eops, ename, eidx,
-                                        params, env, captures)
+        finish_do_bind_boxed(kind, pat, rest, eblocks, elbl, eops, ename, eidx, params, env, captures)
 
-# Unboxed `pat <- f(..)`: call @target -> { tag, val }, short-circuit on Nothing
-# using tag directly (no IRGetTag), bind `pat` to val directly (no IRGetField).
-fn translate_do_bind_maybe_unboxed(pat: ast.Pattern, target: String,
-                                   eargs: List typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
-                                   params: List String, env: TxEnv,
-                                   idx: Int, cur_label: String, cur_ops: ListBuilder sprout_ir.IROp,
-                                   captures: Dict String) ->
+# The boxed short and cont branches. Maybe rebuilds Nothing at the do block's
+# own type; Result propagates the Err box unchanged, so needs fewer names.
+fn finish_do_bind_boxed(kind: ShortCircuit, pat: ast.Pattern, rest: List typed_ast.TypedDoStep,
+                        eblocks: List sprout_ir.IRBlock, elbl: String,
+                        eops: ListBuilder sprout_ir.IROp, ename: String, eidx: Int,
+                        params: List String, env: TxEnv, captures: Dict String) ->
+    Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) !{IO} =
+  match kind with
+  | OnNothing ->
+      finish_do_short_circuit(pat, rest, eblocks, test,
+                              [sprout_ir.IRMakeCtor(fresh_name(eidx + 4), "Nothing", tag, Nil)],
+                              fresh_name(eidx + 4),
+                              [sprout_ir.IRGetField(fresh_name(eidx + 5), ename, 0, sprout_ir.IRTUnknown)],
+                              fresh_name(eidx + 5), eidx + 6, eidx, params, env, captures)
+  | OnErr ->
+      finish_do_short_circuit(pat, rest, eblocks, test, Nil, ename,
+                              [sprout_ir.IRGetField(fresh_name(eidx + 3), ename, 0, sprout_ir.IRTUnknown)],
+                              fresh_name(eidx + 3), eidx + 4, eidx, params, env, captures)
+  where tag = prelude_ctor_tag(short_ctor(kind), env.ctors)
+        test = short_circuit_test(elbl, eops, [sprout_ir.IRGetTag(fresh_name(eidx), ename)],
+                                  fresh_name(eidx), tag, eidx + 1, eidx)
+
+# Unboxed `pat <- f(..)`: call @target -> { tag, val }, test tag directly (no
+# IRGetTag) and bind `pat` to val (no IRGetField). There is no box to
+# propagate, so the short branch rebuilds Nothing, or Err(val). val is 0 on
+# the Nothing path, never dereferenced.
+fn translate_do_bind_unboxed(kind: ShortCircuit, pat: ast.Pattern, target: String,
+                             eargs: List typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
+                             params: List String, env: TxEnv,
+                             idx: Int, cur_label: String, cur_ops: ListBuilder sprout_ir.IROp,
+                             captures: Dict String) ->
     Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) !{IO} =
   do
     (ablocks, albl, aops, anames, aidx) <-
       translate_args(eargs, params, env, idx, cur_label, cur_ops, Nil, Nil, captures)
     let tag_ssa = fresh_name(aidx)
     let val_ssa = fresh_name(aidx + 1)
-    translate_do_bind_maybe_finish_unboxed(pat, rest, ablocks, albl,
-      list_builder_add(sprout_ir.IRCallUnboxed2(tag_ssa, val_ssa, sprout_ir.IRTUnknown, target, anames), aops),
-      tag_ssa, val_ssa, aidx + 2, params, env, captures)
-
-fn translate_do_bind_maybe_finish(pat: ast.Pattern, rest: List typed_ast.TypedDoStep,
-                                   eblocks: List sprout_ir.IRBlock,
-                                   elbl: String, eops: ListBuilder sprout_ir.IROp,
-                                   ename: String, eidx: Int,
-                                   params: List String,
-                                   env: TxEnv,
-                                   captures: Dict String) ->
-    Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) !{IO} =
-  finish_do_short_circuit(pat, rest, eblocks,
-                          short_circuit_test(elbl, eops, [sprout_ir.IRGetTag(fresh_name(eidx), ename)],
-                                             fresh_name(eidx), nothing_tag, eidx + 1, eidx),
-                          [sprout_ir.IRMakeCtor(fresh_name(eidx + 4), "Nothing", nothing_tag, Nil)],
-                          fresh_name(eidx + 4),
-                          [sprout_ir.IRGetField(fresh_name(eidx + 5), ename, 0, sprout_ir.IRTUnknown)],
-                          fresh_name(eidx + 5), eidx + 6, eidx, params, env, captures)
-  where nothing_tag = find_nothing_tag_ir(env.ctors)
-
-# Unboxed variant: (tag_ssa, val_ssa) come from an IRCallUnboxed2 already emitted
-# into `eops`.  Mirrors translate_do_bind_maybe_finish's CFG (test/short/cont/done
-# + phi) but tests tag_ssa directly and binds `pat` to val_ssa — no box, no
-# IRGetTag/IRGetField.  val_ssa is 0 on the Nothing path, never dereferenced.
-fn translate_do_bind_maybe_finish_unboxed(pat: ast.Pattern, rest: List typed_ast.TypedDoStep,
-                                          eblocks: List sprout_ir.IRBlock, elbl: String,
-                                          eops: ListBuilder sprout_ir.IROp, tag_ssa: String, val_ssa: String,
-                                          eidx: Int, params: List String,
-                                          env: TxEnv, captures: Dict String) ->
-    Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) !{IO} =
-  finish_do_short_circuit(pat, rest, eblocks,
-                          short_circuit_test(elbl, eops, Nil, tag_ssa, nothing_tag, eidx, eidx),
-                          [sprout_ir.IRMakeCtor(fresh_name(eidx + 3), "Nothing", nothing_tag, Nil)],
-                          fresh_name(eidx + 3), Nil, val_ssa, eidx + 4, eidx,
-                          params, env, captures)
-  where nothing_tag = find_nothing_tag_ir(env.ctors)
-
-# Lower `pat <- f()` where f returns `Result E a` (optionally `!{IO}`).
-# Mirrors translate_do_bind_maybe but short-circuits on Err instead of Nothing.
-# The Err box already carries the E payload and is valid as the do-block's
-# overall `Result E b`, so the short branch propagates `ename` unchanged rather
-# than rebuilding -- this is why Result needs fewer fresh names than Maybe (no
-# Nothing-rebuild).  Block layout:
-#
-#   <elbl>:
-#     ... eops ...
-#     %tag = call i64 @sprout_tag(i64 %e)
-#     %ec  = const <err_tag>
-#     %is_e = icmp eq i64 %tag, %ec
-#     br i1 %is_e, label %do_short_K, label %do_cont_K
-#   do_short_K:
-#     br label %do_done_K                     ← err propagates %e via phi
-#   do_cont_K:
-#     %p = call i64 @sprout_field(i64 %e, i64 0)   ← strip Ok
-#     ... bind pat to %p; translate rest ...
-#     <rest_final>: br label %do_done_K
-#   do_done_K:
-#     %result = phi i64 [%e, %do_short_K], [%rest_name, <rest_final>]
-#
-# The boxed (non-unboxed) path: taken when do_bind_unbox_target finds no
-# eligible unbox target. Split out so translate_do_bind_result's own
-# do_bind_unbox_target dispatch reads as a flat `let..else` (a call, not an
-# inline multi-line fallback — that layout tripped the let-binding's
-# step-boundary scanner, since the nested match's shallow-indented arms sat
-# at columns below the binding's own layout column).
-fn translate_do_bind_result_boxed(pat: ast.Pattern, e: typed_ast.TypedExpr,
-                                  rest: List typed_ast.TypedDoStep,
-                                  params: List String, env: TxEnv,
-                                  idx: Int, cur_label: String, cur_ops: ListBuilder sprout_ir.IROp,
-                                  captures: Dict String) ->
-    Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) !{IO} =
-  do
-    (eblocks, elbl, eops, ename, eidx) <-
-      translate_expr(e, params, env, idx, cur_label, cur_ops, captures)
-    translate_do_bind_result_finish(pat, rest, eblocks, elbl, eops, ename, eidx,
-                                    params, env, captures)
-
-fn translate_do_bind_result(pat: ast.Pattern, e: typed_ast.TypedExpr,
-                            rest: List typed_ast.TypedDoStep,
-                            params: List String, env: TxEnv,
-                            idx: Int, cur_label: String, cur_ops: ListBuilder sprout_ir.IROp,
-                            captures: Dict String) ->
-    Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) !{IO} =
-  let Just target = do_bind_unbox_target(e, params, captures, env.let_names, env.top_level, env.ctors, env.fn_arities)
-      else translate_do_bind_result_boxed(pat, e, rest, params, env, idx, cur_label, cur_ops,
-             captures)
-  in
-  match e with
-  | typed_ast.TCall _ eargs _ _ ->
-      do
-        (ablocks, albl, aops, anames, aidx) <-
-          translate_args(eargs, params, env, idx, cur_label, cur_ops, Nil, Nil, captures)
-        let tag_ssa = fresh_name(aidx)
-        let val_ssa = fresh_name(aidx + 1)
-        translate_do_bind_result_finish_unboxed(pat, rest, ablocks, albl,
-          list_builder_add(sprout_ir.IRCallUnboxed2(tag_ssa, val_ssa, sprout_ir.IRTUnknown, target, anames), aops),
-          tag_ssa, val_ssa, aidx + 2, params, env, captures)
-  | _ -> Err("ast_to_ir: do-bind unbox target on non-call (internal error)")
-
-# Unboxed `pat <- f()` for Result: call @target -> { tag, val }, short-circuit on
-# Err by REBUILDING Err(val) (the boxed path propagated the box; unboxed has none),
-# bind `pat` to val on the Ok path.  Mirrors translate_do_bind_result_finish.
-fn translate_do_bind_result_finish_unboxed(pat: ast.Pattern, rest: List typed_ast.TypedDoStep,
-                                           eblocks: List sprout_ir.IRBlock, elbl: String,
-                                           eops: ListBuilder sprout_ir.IROp, tag_ssa: String, val_ssa: String,
-                                           eidx: Int, params: List String,
-                                           env: TxEnv, captures: Dict String) ->
-    Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) !{IO} =
-  finish_do_short_circuit(pat, rest, eblocks,
-                          short_circuit_test(elbl, eops, Nil, tag_ssa, err_tag, eidx, eidx),
-                          [sprout_ir.IRMakeCtor(fresh_name(eidx + 3), "Err", err_tag, [val_ssa])],
-                          fresh_name(eidx + 3), Nil, val_ssa, eidx + 4, eidx,
-                          params, env, captures)
-  where err_tag = find_err_tag_ir(env.ctors)
-
-fn translate_do_bind_result_finish(pat: ast.Pattern, rest: List typed_ast.TypedDoStep,
-                                   eblocks: List sprout_ir.IRBlock,
-                                   elbl: String, eops: ListBuilder sprout_ir.IROp,
-                                   ename: String, eidx: Int,
-                                   params: List String,
-                                   env: TxEnv,
-                                   captures: Dict String) ->
-    Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) !{IO} =
-  finish_do_short_circuit(pat, rest, eblocks,
-                          short_circuit_test(elbl, eops, [sprout_ir.IRGetTag(fresh_name(eidx), ename)],
-                                             fresh_name(eidx), find_err_tag_ir(env.ctors), eidx + 1, eidx),
-                          Nil, ename,
-                          [sprout_ir.IRGetField(fresh_name(eidx + 3), ename, 0, sprout_ir.IRTUnknown)],
-                          fresh_name(eidx + 3), eidx + 4, eidx, params, env, captures)
+    let eidx = aidx + 2
+    let tag = prelude_ctor_tag(short_ctor(kind), env.ctors)
+    finish_do_short_circuit(pat, rest, ablocks,
+                            short_circuit_test(albl,
+                              list_builder_add(sprout_ir.IRCallUnboxed2(tag_ssa, val_ssa, sprout_ir.IRTUnknown,
+                                                                        target, anames), aops),
+                              Nil, tag_ssa, tag, eidx, eidx),
+                            [sprout_ir.IRMakeCtor(fresh_name(eidx + 3), short_ctor(kind), tag,
+                                                  rebuilt_payload(kind, val_ssa))],
+                            fresh_name(eidx + 3), Nil, val_ssa, eidx + 4, eidx, params, env, captures)
 
 # The block holding the bound expression, closed by its short-circuit test:
 # `pre_ops`, then `subject == tag_value` (names k, k+1), then a branch to
@@ -1794,13 +1708,13 @@ fn translate_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.Type
        && is_string_type(typed_ast.typed_expr_type(right))
   then
     do
-      (lblocks, rblocks, rcur_lbl, rcur_ops, l_name, r_name, idx2) <-
+      (blocks, rcur_lbl, rcur_ops, l_name, r_name, idx2) <-
         translate_operands(left, right, params, env, idx, cur_label, cur_ops, captures)
       if op == "=="
-      then Ok((list_append(lblocks, rblocks), rcur_lbl,
+      then Ok((blocks, rcur_lbl,
                 list_builder_add(sprout_ir.IRStrEq(fresh_name(idx2), l_name, r_name), rcur_ops),
                 fresh_name(idx2), idx2 + 1))
-      else Ok((list_append(lblocks, rblocks), rcur_lbl,
+      else Ok((blocks, rcur_lbl,
                 list_builder_extend([sprout_ir.IRStrEq(fresh_name(idx2), l_name, r_name),
                                      sprout_ir.IRBoolNot(fresh_name(idx2 + 1), fresh_name(idx2))],
                                     rcur_ops),
@@ -1822,9 +1736,9 @@ fn translate_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.Type
     | Nothing -> Err("ast_to_ir: unexpected ordering op: " ++ op)
     | Just pred ->
         do
-          (lblocks, rblocks, rcur_lbl, rcur_ops, l_name, r_name, idx2) <-
+          (blocks, rcur_lbl, rcur_ops, l_name, r_name, idx2) <-
             translate_operands(left, right, params, env, idx, cur_label, cur_ops, captures)
-          Ok((list_append(lblocks, rblocks), rcur_lbl,
+          Ok((blocks, rcur_lbl,
               list_builder_add(sprout_ir.IRStrCompare(fresh_name(idx2), pred, l_name, r_name), rcur_ops),
               fresh_name(idx2), idx2 + 1))
   # Bool equality: Bool is i64 in the IR (0 or 1), so `==` / `!=` lower
@@ -1836,53 +1750,52 @@ fn translate_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.Type
        && is_bool_type(typed_ast.typed_expr_type(right))
   then
     do
-      (lblocks, rblocks, rcur_lbl, rcur_ops, l_name, r_name, idx2) <-
+      (blocks, rcur_lbl, rcur_ops, l_name, r_name, idx2) <-
         translate_operands(left, right, params, env, idx, cur_label, cur_ops, captures)
-      finish_binary(op, lblocks, rblocks, rcur_lbl, rcur_ops, l_name, r_name, idx2, false, pos)
+      finish_binary(op, blocks, rcur_lbl, rcur_ops, l_name, r_name, idx2, false, pos)
   else if ! ((is_int_or_char_type(typed_ast.typed_expr_type(left)) && is_int_or_char_type(typed_ast.typed_expr_type(right)))
              || (is_double_type(typed_ast.typed_expr_type(left)) && is_double_type(typed_ast.typed_expr_type(right))))
   then Err("ast_to_ir: binary op '" ++ op ++ "' requires Int or Double operands")
   else
     do
-      (lblocks, rblocks, rcur_lbl, rcur_ops, l_name, r_name, idx2) <-
+      (blocks, rcur_lbl, rcur_ops, l_name, r_name, idx2) <-
         translate_operands(left, right, params, env, idx, cur_label, cur_ops, captures)
-      finish_binary(op, lblocks, rblocks, rcur_lbl, rcur_ops, l_name, r_name, idx2,
+      finish_binary(op, blocks, rcur_lbl, rcur_ops, l_name, r_name, idx2,
                     is_double_type(typed_ast.typed_expr_type(left)), pos)
 
 # Translate `left` then `right`, threading the open block from one into the
-# other. Returns both operands' blocks (still separate), the open block, and
-# both result names.
+# other. Returns both operands' blocks in order, the open block, and both
+# result names.
 fn translate_operands(left: typed_ast.TypedExpr, right: typed_ast.TypedExpr,
                       params: List String, env: TxEnv, idx: Int,
                       cur_label: String, cur_ops: ListBuilder sprout_ir.IROp,
                       captures: Dict String) ->
-    Result String (List sprout_ir.IRBlock, List sprout_ir.IRBlock, String,
-                   ListBuilder sprout_ir.IROp, String, String, Int) !{IO} =
+    Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, String, Int) !{IO} =
   do
     (lblocks, lcur_lbl, lcur_ops, l_name, idx1) <-
       translate_expr(left, params, env, idx, cur_label, cur_ops, captures)
     (rblocks, rcur_lbl, rcur_ops, r_name, idx2) <-
       translate_expr(right, params, env, idx1, lcur_lbl, lcur_ops, captures)
-    Ok((lblocks, rblocks, rcur_lbl, rcur_ops, l_name, r_name, idx2))
+    Ok((list_append(lblocks, rblocks), rcur_lbl, rcur_ops, l_name, r_name, idx2))
 
 fn finish_binary(op: String,
-                 lblocks: List sprout_ir.IRBlock, rblocks: List sprout_ir.IRBlock,
+                 blocks: List sprout_ir.IRBlock,
                  cur_lbl: String, cur_ops: ListBuilder sprout_ir.IROp,
                  l_name: String, r_name: String,
                  idx: Int, is_float: Bool, pos: source.SourcePos) ->
     Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) =
   if is_float then
-    finish_binary_float(op, lblocks, rblocks, cur_lbl, cur_ops, l_name, r_name, idx)
+    finish_binary_float(op, blocks, cur_lbl, cur_ops, l_name, r_name, idx)
   else if op == "/" then
-    finish_checked_div(lblocks, rblocks, cur_lbl, cur_ops, l_name, r_name, idx, pos)
+    finish_checked_div(blocks, cur_lbl, cur_ops, l_name, r_name, idx, pos)
   # bigint-v0 Stage 1 (docs/bigint-v0.md §5.1): `+`/`-`/`*` on Int are
   # overflow-checked (finish_checked_arith), not plain IRIAdd/IRISub/IRIMul.
   else if op == "+" then
-    finish_checked_arith("sadd", "+", pos, lblocks, rblocks, cur_lbl, cur_ops, l_name, r_name, idx)
+    finish_checked_arith("sadd", "+", pos, blocks, cur_lbl, cur_ops, l_name, r_name, idx)
   else if op == "-" then
-    finish_checked_arith("ssub", "-", pos, lblocks, rblocks, cur_lbl, cur_ops, l_name, r_name, idx)
+    finish_checked_arith("ssub", "-", pos, blocks, cur_lbl, cur_ops, l_name, r_name, idx)
   else if op == "*" then
-    finish_checked_arith("smul", "*", pos, lblocks, rblocks, cur_lbl, cur_ops, l_name, r_name, idx)
+    finish_checked_arith("smul", "*", pos, blocks, cur_lbl, cur_ops, l_name, r_name, idx)
   else
     match cmp_predicate(op) with
     | Just pred ->
@@ -1891,7 +1804,7 @@ fn finish_binary(op: String,
         # the i64-uniform Bool representation. Downstream consumers (phi,
         # ret, ctor arg, IRMakeCtor arg, IRCondBr after narrow) all see
         # i64. The "value" of the binary expression is the zext result.
-        Ok((list_append(lblocks, rblocks), cur_lbl,
+        Ok((blocks, cur_lbl,
              list_builder_extend(Cons(sprout_ir.IRICmp(result, pred, l_name, r_name),
                Cons(sprout_ir.IRZextI1ToI64(zext_result, result), Nil)), cur_ops),
              zext_result, idx + 2))
@@ -1903,20 +1816,20 @@ fn finish_binary(op: String,
 # IRIDiv).  Comparisons use ordered fcmp predicates and, like the Int path, zext
 # the i1 result to the i64-uniform Bool.
 fn finish_binary_float(op: String,
-                       lblocks: List sprout_ir.IRBlock, rblocks: List sprout_ir.IRBlock,
+                       blocks: List sprout_ir.IRBlock,
                        cur_lbl: String, cur_ops: ListBuilder sprout_ir.IROp,
                        l_name: String, r_name: String,
                        idx: Int) ->
     Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) =
   match float_arith_op(op, result, l_name, r_name) with
   | Just fop ->
-      Ok((list_append(lblocks, rblocks), cur_lbl,
+      Ok((blocks, cur_lbl,
            list_builder_add(fop, cur_ops),
            result, idx + 1))
   | Nothing ->
       match float_cmp_predicate(op) with
       | Just pred ->
-          Ok((list_append(lblocks, rblocks), cur_lbl,
+          Ok((blocks, cur_lbl,
                list_builder_extend(Cons(sprout_ir.IRFCmp(result, pred, l_name, r_name),
                  Cons(sprout_ir.IRZextI1ToI64(zext_result, result), Nil)), cur_ops),
                zext_result, idx + 2))
@@ -1974,7 +1887,7 @@ fn panic_loc(pos: source.SourcePos) -> String =
 #
 # Consumes 8 fresh-name slots (zero-icmp, div0-msg-raw, div0-msg, negone-icmp,
 # ismin-icmp, ovf-msg-raw, ovf-msg, quotient).
-fn finish_checked_div(lblocks: List sprout_ir.IRBlock, rblocks: List sprout_ir.IRBlock,
+fn finish_checked_div(blocks: List sprout_ir.IRBlock,
                       cur_lbl: String, cur_ops: ListBuilder sprout_ir.IROp,
                       l_name: String, r_name: String,
                       idx: Int, pos: source.SourcePos) ->
@@ -2018,7 +1931,7 @@ fn finish_checked_div(lblocks: List sprout_ir.IRBlock, rblocks: List sprout_ir.I
                             sprout_ir.IRPanic(ovf_msg_result)])
         # Continuation block: the sdiv runs here; it is the new current block.
         div_op = sprout_ir.IRIDiv(div_result, l_name, r_name)
-        all_blocks = list_append(list_append(lblocks, rblocks),
+        all_blocks = list_append(blocks,
                        [cond_block, panic_block, chk2_block, ovfchk_block, ovfpanic_block])
 
 # bigint-v0 Stage 1 (docs/bigint-v0.md §5.1): `+`/`-`/`*` on Int lower through
@@ -2036,7 +1949,7 @@ fn finish_checked_div(lblocks: List sprout_ir.IRBlock, rblocks: List sprout_ir.I
 # `$agg`/`$ovf` derived names are NOT separate slots (see IRCheckedArith's doc
 # comment in sprout_ir.sprout).
 fn finish_checked_arith(intrinsic: String, sym: String, pos: source.SourcePos,
-                        lblocks: List sprout_ir.IRBlock, rblocks: List sprout_ir.IRBlock,
+                        blocks: List sprout_ir.IRBlock,
                         cur_lbl: String, cur_ops: ListBuilder sprout_ir.IROp,
                         l_name: String, r_name: String,
                         idx: Int) ->
@@ -2058,7 +1971,7 @@ fn finish_checked_arith(intrinsic: String, sym: String, pos: source.SourcePos,
                         [sprout_ir.IRStrConst(msg_result, msg_raw,
                            "Int overflow in " ++ sym ++ panic_loc(pos)),
                          sprout_ir.IRPanic(msg_result)])
-        all_blocks = list_append(list_append(lblocks, rblocks),
+        all_blocks = list_append(blocks,
                        [cond_block, panic_block])
 
 # Translate an if-then-else.
@@ -2346,44 +2259,41 @@ fn bind_pattern_field(pat: ast.Pattern, rest: List ast.Pattern, scrut_name: Stri
               bind_pattern_fields(rest, scrut_name, src, idx2, field_idx + 1, cont_ops, captures2,
                                   cont_lbl, miss_lbl, ctors, list_reverse(extra2))
   | ast.IntPattern n _ ->
-      bind_after_test(eq_const_ops(field_ssa, n, idx + 1), fresh_name(idx + 2), idx + 3, true,
-                      rest, scrut_name, src, idx, field_idx, cur_ops, acc_captures,
-                      cur_lbl, miss_lbl, ctors, acc_extra)
+      bind_after_test(scalar_fetched, eq_const_ops(field_ssa, n, idx + 1), fresh_name(idx + 2), idx + 3,
+                      rest, scrut_name, src, field_idx, cur_ops, acc_captures,
+                      cur_lbl, hit_lbl, miss_lbl, ctors, acc_extra)
   | ast.BoolPattern b _ ->
-      bind_after_test(eq_const_ops(field_ssa, if b then 1 else 0, idx + 1), fresh_name(idx + 2), idx + 3,
-                      true, rest, scrut_name, src, idx, field_idx, cur_ops, acc_captures,
-                      cur_lbl, miss_lbl, ctors, acc_extra)
+      bind_after_test(scalar_fetched, eq_const_ops(field_ssa, if b then 1 else 0, idx + 1),
+                      fresh_name(idx + 2), idx + 3, rest, scrut_name, src, field_idx, cur_ops,
+                      acc_captures, cur_lbl, hit_lbl, miss_lbl, ctors, acc_extra)
   | ast.StringPattern lit _ ->
-      bind_after_test(str_eq_ops(field_ssa, lit, idx + 1), fresh_name(idx + 5), idx + 6, false,
-                      rest, scrut_name, src, idx, field_idx, cur_ops, acc_captures,
-                      cur_lbl, miss_lbl, ctors, acc_extra)
+      bind_after_test(fetched, str_eq_ops(field_ssa, lit, idx + 1), fresh_name(idx + 5), idx + 6,
+                      rest, scrut_name, src, field_idx, cur_ops, acc_captures,
+                      cur_lbl, hit_lbl, miss_lbl, ctors, acc_extra)
   | ast.CharPattern _ _ ->
       Err("ast_to_ir: nested CharPattern in " ++ source_noun(src) ++ " match not yet supported")
   | ast.UnitPattern _ ->
       Err("ast_to_ir: nested UnitPattern in " ++ source_noun(src) ++ " match not yet supported")
   where field_ssa = fresh_name(idx)
         fetched = fetch_field(src, field_ssa, scrut_name, field_idx, false)
+        scalar_fetched = fetch_field(src, field_ssa, scrut_name, field_idx, true)
         hit_lbl = fresh_nested_test_label(idx)
 
-# A literal sub-pattern: seal the open block with `test_ops` on the fetched
-# sub-value (leaving the i1 `cmp`), then walk `rest` from a fresh block, with
-# names from `next_idx` on.
-fn bind_after_test(test_ops: List sprout_ir.IROp, cmp: String, next_idx: Int, scalar: Bool,
-                   rest: List ast.Pattern, scrut_name: String, src: FieldSource,
-                   idx: Int, field_idx: Int,
+# A literal sub-pattern: seal the open block with `fetch`, then `test_ops`
+# (leaving the i1 `cmp`), then walk `rest` from `hit_lbl`, with names from
+# `next_idx` on.
+fn bind_after_test(fetch: sprout_ir.IROp, test_ops: List sprout_ir.IROp, cmp: String, next_idx: Int,
+                   rest: List ast.Pattern, scrut_name: String, src: FieldSource, field_idx: Int,
                    cur_ops: ListBuilder sprout_ir.IROp,
                    acc_captures: Dict String,
-                   cur_lbl: String, miss_lbl: String,
+                   cur_lbl: String, hit_lbl: String, miss_lbl: String,
                    ctors: Dict sprout_ir.CtorInfo,
                    acc_extra: List sprout_ir.IRBlock) ->
     Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, Dict String, Int) =
   bind_pattern_fields(rest, scrut_name, src, next_idx, field_idx + 1, list_builder_empty,
                       acc_captures, hit_lbl, miss_lbl, ctors,
-                      Cons(tested_block(cur_lbl, cur_ops,
-                                        fetch_field(src, fresh_name(idx), scrut_name, field_idx, scalar),
-                                        test_ops, cmp, hit_lbl, miss_lbl),
+                      Cons(tested_block(cur_lbl, cur_ops, fetch, test_ops, cmp, hit_lbl, miss_lbl),
                            acc_extra))
-  where hit_lbl = fresh_nested_test_label(idx)
 
 # Bind the single inner pattern arg of a wrap-ctor match arm to the scrutinee SSA.
 # Wrap types are zero-cost: the scrutinee IS the inner value, so no IRGetField is needed.
@@ -2407,8 +2317,6 @@ fn bind_wrap_inner_arg(args: List ast.Pattern, s_name: String, captures: Dict St
       Err("ast_to_ir: a wrap pattern's inner arg must be a variable or `_`; a literal or nested pattern there is not supported (bind it as `Foo x`, then match on `x`)")
   | _ ->
       Err("ast_to_ir: a wrap pattern takes exactly one inner arg, got " ++ int_to_string(list_length(args)))
-
-
 
 # Translate a TuplePattern match arm.
 # Tuples always match (no tag check). Emits IRGetTupleField binds for each
@@ -2518,7 +2426,7 @@ fn is_simple_width2_arm(pat: ast.Pattern, ctors: Dict sprout_ir.CtorInfo) -> Boo
       | Nothing -> false
       | Just entry ->
           # entry.tag == -1 is the `wrap` sentinel: wrap values are UNBOXED (the raw
-          # inner value, no heap ctor/entry.tag), so the { entry.tag, val } worker machinery
+          # inner value, no heap ctor/tag), so the { tag, val } worker machinery
           # (IRGetTag/IRMakeCtor) does not apply — exclude them like Bool is.
           (entry.tag != -1) && (entry.max_arity <= 1) &&
           (match args with
@@ -2643,15 +2551,14 @@ fn emit_unboxed_arm_body(body: typed_ast.TypedExpr,
   do
     (body_blocks, body_cur_lbl, body_cur_ops, body_val, idx1) <-
       translate_expr(body, params, env, idx, body_lbl, list_builder_empty, body_captures)
-    do
-      let base_blocks = prepend_test_block(test_block, acc_blocks)
-      translate_unboxed_maybe_arms(rest, branch_idx + 1, base_idx, join_lbl, match_ty,
-        val_ssa, tag_ssa, params, env, idx1,
-        Cons(sprout_ir.IRBlock(body_cur_lbl,
-               list_builder_build(list_builder_add(sprout_ir.IRBr(join_lbl), body_cur_ops))),
-             list_append(list_reverse(body_blocks), base_blocks)),
-        Cons((body_val, body_cur_lbl), acc_phi),
-        outer_captures)
+    let base_blocks = prepend_test_block(test_block, acc_blocks)
+    translate_unboxed_maybe_arms(rest, branch_idx + 1, base_idx, join_lbl, match_ty,
+      val_ssa, tag_ssa, params, env, idx1,
+      Cons(sprout_ir.IRBlock(body_cur_lbl,
+             list_builder_build(list_builder_add(sprout_ir.IRBr(join_lbl), body_cur_ops))),
+           list_append(list_reverse(body_blocks), base_blocks)),
+      Cons((body_val, body_cur_lbl), acc_phi),
+      outer_captures)
 
 # Dispatch one simple Maybe arm: wildcard (unconditional) or a Just/Nothing tag test.
 fn translate_unboxed_maybe_one_arm(pat: ast.Pattern, body: typed_ast.TypedExpr,
@@ -2726,20 +2633,19 @@ fn translate_unboxed_maybe_match(ufn: String, call_args: List typed_ast.TypedExp
   do
     (arg_blocks, arg_cur_lbl, arg_cur_ops, arg_names, idx1) <-
       translate_args(call_args, params, env, idx, cur_label, cur_ops, Nil, Nil, captures)
-    do
-     let tag_ssa = fresh_name(idx1)
-     let val_ssa = fresh_name(idx1 + 1)
-     let call_ops = list_builder_add(sprout_ir.IRCallUnboxed2(tag_ssa, val_ssa, sprout_ir.IRTUnknown, ufn, arg_names), arg_cur_ops)
-     let base = idx1 + 2
-     (arm_blocks, phi_incoming, idx_after) <-
-       translate_unboxed_maybe_arms(arms, 0, base, fresh_join_label(base), match_ty,
-                                    val_ssa, tag_ssa, params, env, base + 2, Nil, Nil,
-                                    captures)
-     finish_match(match_ty, arg_blocks,
-       sprout_ir.IRBlock(arg_cur_lbl,
-         list_builder_build(list_builder_add(sprout_ir.IRBr(fresh_arm_label(0, base)), call_ops))),
-       arm_blocks, phi_incoming, fresh_join_label(base),
-       fresh_name(base + 1), idx_after)
+    let tag_ssa = fresh_name(idx1)
+    let val_ssa = fresh_name(idx1 + 1)
+    let call_ops = list_builder_add(sprout_ir.IRCallUnboxed2(tag_ssa, val_ssa, sprout_ir.IRTUnknown, ufn, arg_names), arg_cur_ops)
+    let base = idx1 + 2
+    (arm_blocks, phi_incoming, idx_after) <-
+      translate_unboxed_maybe_arms(arms, 0, base, fresh_join_label(base), match_ty,
+                                   val_ssa, tag_ssa, params, env, base + 2, Nil, Nil,
+                                   captures)
+    finish_match(match_ty, arg_blocks,
+      sprout_ir.IRBlock(arg_cur_lbl,
+        list_builder_build(list_builder_add(sprout_ir.IRBr(fresh_arm_label(0, base)), call_ops))),
+      arm_blocks, phi_incoming, fresh_join_label(base),
+      fresh_name(base + 1), idx_after)
 
 # --- Tuple-CPR (docs/scalar-replacement-v0.md, Stage 1) ---------------------
 # `match f(args) with | (a, b) -> body` over a top-level fn returning a 2-tuple of non-heap scalars
@@ -3104,24 +3010,23 @@ fn translate_unboxed_tuple_match(worker: String, call_args: List typed_ast.Typed
   do
     (arg_blocks, arg_lbl, arg_ops, arg_names, idx1) <-
       translate_args(call_args, params, env, idx, cur_label, cur_ops, Nil, Nil, captures)
-    do
-      let width = list_length(binders)
-      let slot0 = fresh_name(idx1)
-      let slot1 = fresh_name(idx1 + 1)
-      let slot2 = fresh_name(idx1 + 2)
-      # width comes from the binder count (= tuple width, tied by tuple_worker_shape); the
-      # worker's declared ret type is derived from the SAME width in emit_worker_fn, so the
-      # { i64,… } arity here always matches the worker's `ret`.
-      let call_op = if width == 3
-        then sprout_ir.IRCallUnboxed3(slot0, slot1, slot2, sprout_ir.IRTScalar, worker, arg_names)
-        else sprout_ir.IRCallUnboxed2(slot0, slot1, sprout_ir.IRTScalar, worker, arg_names)
-      let slots = if width == 3 then [slot0, slot1, slot2] else [slot0, slot1]
-      let next_idx = if width == 3 then idx1 + 3 else idx1 + 2
-      let call_ops = list_builder_add(call_op, arg_ops)
-      let body_caps = bind_tuple_slots(binders, slots, captures)
-      (b_blocks, b_lbl, b_ops, b_name, idx2) <-
-        translate_expr(body, params, env, next_idx, arg_lbl, call_ops, body_caps)
-      Ok((list_append(arg_blocks, b_blocks), b_lbl, b_ops, b_name, idx2))
+    let width = list_length(binders)
+    let slot0 = fresh_name(idx1)
+    let slot1 = fresh_name(idx1 + 1)
+    let slot2 = fresh_name(idx1 + 2)
+    # width comes from the binder count (= tuple width, tied by tuple_worker_shape); the
+    # worker's declared ret type is derived from the SAME width in emit_worker_fn, so the
+    # { i64,… } arity here always matches the worker's `ret`.
+    let call_op = if width == 3
+      then sprout_ir.IRCallUnboxed3(slot0, slot1, slot2, sprout_ir.IRTScalar, worker, arg_names)
+      else sprout_ir.IRCallUnboxed2(slot0, slot1, sprout_ir.IRTScalar, worker, arg_names)
+    let slots = if width == 3 then [slot0, slot1, slot2] else [slot0, slot1]
+    let next_idx = if width == 3 then idx1 + 3 else idx1 + 2
+    let call_ops = list_builder_add(call_op, arg_ops)
+    let body_caps = bind_tuple_slots(binders, slots, captures)
+    (b_blocks, b_lbl, b_ops, b_name, idx2) <-
+      translate_expr(body, params, env, next_idx, arg_lbl, call_ops, body_caps)
+    Ok((list_append(arg_blocks, b_blocks), b_lbl, b_ops, b_name, idx2))
 
 # Entry point: translate a TMatch expression.
 fn translate_match(scrut: typed_ast.TypedExpr, arms: List typed_ast.TypedMatchBranch,
@@ -3303,7 +3208,6 @@ fn translate_match_one_arm(pat: ast.Pattern, body: typed_ast.TypedExpr,
                                  params, env, idx, acc_blocks, acc_phi, captures)
   | ast.UnitPattern _ -> Err("ast_to_ir: UnitPattern in match not yet supported")
 
-
 # An arm guarded by `test_ops`, which leave the i1 `cmp`: a hit branches to the
 # body, a miss to the next arm's dispatch. `next_idx` is the first free name.
 fn translate_match_arm_tested(test_ops: List sprout_ir.IROp, cmp: String, next_idx: Int,
@@ -3400,42 +3304,33 @@ fn translate_match_arm_ctor(ctor_name: String, ctor_args: List ast.Pattern,
         # Wrap match: the scrutinee IS the inner value — no tag test, no IRGetField.
         # Mirror codegen.sprout ctor_is_wrap path (emit_pattern_bind:1253, emit_ctor_pattern_test:1122).
         # dispatch_lbl gets an unconditional branch to body_lbl; inner arg binds to s_name directly.
-        match fresh_arm_label(branch_idx + 1, base_idx) with
-        | miss_lbl ->
-            match fresh_body_label(branch_idx, base_idx) with
-            | body_lbl ->
-                do
-                  arm_captures <- bind_wrap_inner_arg(ctor_args, s_name, captures)
-                  translate_match_arm_sealed(body, rest_arms, branch_idx, base_idx,
-                                             Just(sprout_ir.IRBlock(dispatch_lbl, [sprout_ir.IRBr(body_lbl)])),
-                                             body_lbl, list_builder_empty, Nil, join_lbl, match_ty,
-                                             s_name, tag_name, params, env, idx,
-                                             acc_blocks, acc_phi, arm_captures, captures)
+        do
+          arm_captures <- bind_wrap_inner_arg(ctor_args, s_name, captures)
+          translate_match_arm_sealed(body, rest_arms, branch_idx, base_idx,
+                                     Just(sprout_ir.IRBlock(dispatch_lbl, [sprout_ir.IRBr(body_lbl)])),
+                                     body_lbl, list_builder_empty, Nil, join_lbl, match_ty,
+                                     s_name, tag_name, params, env, idx,
+                                     acc_blocks, acc_phi, arm_captures, captures)
       else
         # Regular ADT ctor: emit tag test in dispatch_lbl, bind fields at body_lbl.
         # Field ops start at idx+2 to leave room for the tag_const and cmp SSA names
         # allocated by the dispatch_lbl block.  body_lbl is the entry of the open block;
         # nested ConstructorPatterns may seal body_lbl and introduce extra intermediate
         # blocks before the real body.
-        match fresh_arm_label(branch_idx + 1, base_idx) with
-        | miss_lbl ->
-            match fresh_body_label(branch_idx, base_idx) with
-            | body_lbl ->
-                do
-                  (extra_blocks, real_body_lbl, field_ops, arm_captures, idx3) <-
-                    bind_pattern_fields(ctor_args, s_name, CtorFields(entry.field_kinds), idx + 2,
-                                        0, list_builder_empty, captures, body_lbl,
-                                        miss_lbl, env.ctors, Nil)
-                  translate_match_arm_sealed(body, rest_arms, branch_idx, base_idx,
-                                             Just(arm_test_block(dispatch_lbl,
-                                                                 eq_const_ops(tag_name, entry.tag, idx),
-                                                                 fresh_name(idx + 1),
-                                                                 branch_idx, base_idx)),
-                                             real_body_lbl, field_ops, extra_blocks, join_lbl,
-                                             match_ty, s_name, tag_name, params, env, idx3,
-                                             acc_blocks, acc_phi, arm_captures, captures)
-
-
+        do
+          (extra_blocks, real_body_lbl, field_ops, arm_captures, idx3) <-
+            bind_pattern_fields(ctor_args, s_name, CtorFields(entry.field_kinds), idx + 2,
+                                0, list_builder_empty, captures, body_lbl,
+                                fresh_arm_label(branch_idx + 1, base_idx), env.ctors, Nil)
+          translate_match_arm_sealed(body, rest_arms, branch_idx, base_idx,
+                                     Just(arm_test_block(dispatch_lbl,
+                                                         eq_const_ops(tag_name, entry.tag, idx),
+                                                         fresh_name(idx + 1),
+                                                         branch_idx, base_idx)),
+                                     real_body_lbl, field_ops, extra_blocks, join_lbl,
+                                     match_ty, s_name, tag_name, params, env, idx3,
+                                     acc_blocks, acc_phi, arm_captures, captures)
+  where body_lbl = fresh_body_label(branch_idx, base_idx)
 
 # Translate one arm's body at body_lbl, seal it with `br join`, then recurse
 # into rest_arms. `test_block` is the arm's test (Nothing for an always-match
@@ -4042,9 +3937,9 @@ fn translate_append_operands(left: typed_ast.TypedExpr, right: typed_ast.TypedEx
     # String ++ String → IRStrConcat.  Fallback only; see the note on
     # translate_append_call for why devirtualization gets here first.
     do
-      (lblocks, rblocks, rcur_lbl, rcur_ops, l_name, r_name, idx2) <-
+      (blocks, rcur_lbl, rcur_ops, l_name, r_name, idx2) <-
         translate_operands(left, right, params, env, idx, cur_label, cur_ops, captures)
-      Ok((list_append(lblocks, rblocks), rcur_lbl,
+      Ok((blocks, rcur_lbl,
           list_builder_add(sprout_ir.IRStrConcat(fresh_name(idx2), l_name, r_name), rcur_ops),
           fresh_name(idx2), idx2 + 1))
   else if is_list_type(typed_ast.typed_expr_type(left)) || is_list_type(call_ty) then
@@ -5465,29 +5360,21 @@ fn pb_unify_with(decls: List typed_ast.TypedDecl, index: Dict (Int, Set),
 # during body translation; the rooting pass (M2 PR 2.2) consumes it to allocate
 # fresh %tN names that do not collide with the translator's output.
 # The third field is the flat list of lambda IRFunctions lifted during this fn.
-# lambda_ctr_ref is shared across all user fns (lives at translate_program scope)
-# so that lifted lambda names are unique program-wide (__sprout_ir_lambda_0, __sprout_ir_lambda_1, …).
+# penv.lambda_ctr_ref is shared across all user fns, so lifted lambda names are
+# unique program-wide (__sprout_ir_lambda_0, __sprout_ir_lambda_1, …).
 fn translate_user_fn(name: String, params: List ast.Param, body: typed_ast.TypedExpr,
-                     ctors: Dict sprout_ir.CtorInfo, top_level: Set,
-                     let_names: Set,
-                fn_arities: Dict FnInfo,
-                     lambda_ctr_ref: Ref Int,
-                     lifted_idx_ref: Ref (Dict Int)) ->
+                     penv: ProgEnv) ->
     Result String (Maybe(sprout_ir.IRFunction, Int, List sprout_ir.IRFunction)) !{IO} =
   do
     lifted_ref <- ref_new(Nil)
-    # Prefix arg is ignored — fresh_name hardcodes "%t$" for ALL functions so
-    # synthetic temps never collide with a source param named `t<N>` (→ %t<N>).
-    (blocks, next_idx) <-
-      translate_body(body, pnames, TxEnv(ctors = ctors, top_level = top_level, let_names = let_names, fn_arities = fn_arities, lifted_ref = lifted_ref, lambda_ctr_ref = lambda_ctr_ref, lifted_idx_ref = lifted_idx_ref), 0, dict_empty())
-    do
-      lifted <- ref_read(lifted_ref)
-      # TCO: rewrite self-tail-recursion into an alloca-slot loop before
-      # rooting. Skipped for the program entry point (never recursive) and
-      # internally a no-op unless the body has a tail self-call.
-      match maybe_tco(name, sprout_ir.IRFunction(name, params_with_kinds, ret_ty, blocks), next_idx) with
-      | (tco_fn, next_idx2) ->
-          Ok(Just((tco_fn, next_idx2, list_reverse(lifted))))
+    (blocks, next_idx) <- translate_body(body, pnames, tx_env(penv, lifted_ref), 0, dict_empty())
+    lifted <- ref_read(lifted_ref)
+    # TCO: rewrite self-tail-recursion into an alloca-slot loop before
+    # rooting. Skipped for the program entry point (never recursive) and
+    # internally a no-op unless the body has a tail self-call.
+    match maybe_tco(name, sprout_ir.IRFunction(name, params_with_kinds, ret_ty, blocks), next_idx) with
+    | (tco_fn, next_idx2) ->
+        Ok(Just((tco_fn, next_idx2, list_reverse(lifted))))
   where ret_ty = llvm_ret_type(typed_ast.typed_expr_type(body))
         pnames = param_names(params)
         params_with_kinds = ast_params_to_irtype_pairs(params, pnames)
@@ -5535,16 +5422,12 @@ export fn validate_reserved_namespace(decls: List typed_ast.TypedDecl) -> Result
       # FIX R4#5: TInstanceDecl methods were not checked. A user instance with a
       # method named __sprout_ir_lambda_<N> would silently collide with lifted lambdas.
       | typed_ast.TInstanceDecl _ _ methods ->
-          match validate_instance_methods(methods) with
-          | Err msg -> Err(msg)
-          | Ok _ -> validate_reserved_namespace(rest)
+          do
+            _ <- validate_instance_methods(methods)
+            validate_reserved_namespace(rest)
       | _ -> validate_reserved_namespace(rest)
 
-export fn translate_decl_with_idx(d: typed_ast.TypedDecl, ctors: Dict sprout_ir.CtorInfo,
-                                  top_level: Set,
-                         let_names: Set,
-                         fn_arities: Dict FnInfo, lambda_ctr_ref: Ref Int,
-                                  lifted_idx_ref: Ref (Dict Int)) ->
+export fn translate_decl_with_idx(d: typed_ast.TypedDecl, penv: ProgEnv) ->
     Result String (Maybe(sprout_ir.IRFunction, Int, List sprout_ir.IRFunction)) !{IO} =
   match d with
   | typed_ast.TFnDecl name params ret_ty _ _ body ->
@@ -5563,41 +5446,34 @@ export fn translate_decl_with_idx(d: typed_ast.TypedDecl, ctors: Dict sprout_ir.
         # and called by the shim.  See ir_lowering.main_shim.
         match body with
         | typed_ast.TUnit _ _ -> Ok(Nothing)
-        | _ -> translate_user_fn(user_main_fn_name(ret_ty), params, body, ctors, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref)
-      else translate_user_fn(name, params, body, ctors, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref)
+        | _ -> translate_user_fn(user_main_fn_name(ret_ty), params, body, penv)
+      else translate_user_fn(name, params, body, penv)
   | typed_ast.TExternFnDecl _ _ _ _ -> Ok(Nothing)
   | typed_ast.TLetDecl _ _ -> Ok(Nothing)
   | typed_ast.TInstanceDecl _ _ _ -> Ok(Nothing)
   | typed_ast.TPassThrough _ -> Ok(Nothing)
 
-fn translate_decls(decls: List typed_ast.TypedDecl, ctors: Dict sprout_ir.CtorInfo,
-                   acc_fns: List sprout_ir.IRFunction,
-                   acc_idx: Dict Int, top_level: Set, let_names: Set, fn_arities: Dict FnInfo, lambda_ctr_ref: Ref Int,
-                   lifted_idx_ref: Ref (Dict Int)) ->
+fn translate_decls(decls: List typed_ast.TypedDecl, penv: ProgEnv,
+                   acc_fns: List sprout_ir.IRFunction, acc_idx: Dict Int) ->
     Result String (List sprout_ir.IRFunction, Dict Int) !{IO} =
   match decls with
   | Nil -> Ok((list_reverse(acc_fns), acc_idx))
   | Cons d rest ->
       do
-        maybe_f <-
-          translate_decl_with_idx(d, ctors, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref)
+        maybe_f <- translate_decl_with_idx(d, penv)
         match maybe_f with
-        | Nothing -> translate_decls(rest, ctors, acc_fns, acc_idx, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref)
-        | Just triple ->
-            match triple with
-            | (f, idx, lifted) ->
-                match f with
-                | sprout_ir.IRFunction fname _ _ _ ->
-                    # acc_fns is built in reverse; list_reverse at Nil base.
-                    # Prepend f, then lifted lambdas in front of it.
-                    # cons_list(lifted, acc_fns) pushes lifted in reverse onto
-                    # acc_fns; Cons(f, ...) puts f in front of them.
-                    # After list_reverse at the end: lifted_0, lifted_1, ..., f
-                    # — lifted lambdas appear BEFORE the user fn that references them.
-                    translate_decls(rest, ctors,
-                                    Cons(f, cons_list(lifted, acc_fns)),
-                                    dict_set(fname, idx, acc_idx),
-                                    top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref)
+        | Nothing -> translate_decls(rest, penv, acc_fns, acc_idx)
+        | Just (f, idx, lifted) ->
+            match f with
+            | sprout_ir.IRFunction fname _ _ _ ->
+                # acc_fns is built in reverse; list_reverse at Nil base.
+                # Prepend f, then lifted lambdas in front of it.
+                # cons_list(lifted, acc_fns) pushes lifted in reverse onto
+                # acc_fns; Cons(f, ...) puts f in front of them.
+                # After list_reverse at the end: lifted_0, lifted_1, ..., f
+                # — lifted lambdas appear BEFORE the user fn that references them.
+                translate_decls(rest, penv, Cons(f, cons_list(lifted, acc_fns)),
+                                dict_set(fname, idx, acc_idx))
 
 # Prepend a list (in order) onto an accumulator list.
 # cons_list([a,b,c], rest) = Cons(c, Cons(b, Cons(a, rest)))
@@ -5756,23 +5632,22 @@ fn synthesize_intrinsic_eta_closure(name: String, arity: Int, var_ty: types.Type
           translate_call_site_intrinsic(name,
             build_synth_arg_exprs(synth_names, arg_tys, var_pos),
             synth_names, env, 0, "entry", list_builder_empty, dict_empty())
-        do
-          let ret_block = sprout_ir.IRBlock(body_lbl,
-                            list_builder_build(list_builder_add(sprout_ir.IRRet(body_result), body_ops)))
-          let wrapper_fn = sprout_ir.IRFunction(wrapper_name,
-                             Cons(("env$", sprout_ir.IRTHeap),
-                                  build_intrinsic_eta_params(synth_names, arg_tys)),
-                             "i64",
-                             list_append(body_blocks, Cons(ret_block, Nil)))
-          existing_lifted <- ref_read(env.lifted_ref)
-          ref_write(env.lifted_ref, Cons(wrapper_fn, existing_lifted))
-          # The rooting pass mints fresh names from here, so it must not
-          # reuse the %t$N the body already spent.
-          cur_lifted_idx <- ref_read(env.lifted_idx_ref)
-          ref_write(env.lifted_idx_ref, dict_set(wrapper_name, body_next_idx, cur_lifted_idx))
-          Ok((Nil, cur_label,
-               list_builder_add(sprout_ir.IRMkClosure(fresh_name(idx), wrapper_name, arity, Nil), cur_ops),
-               fresh_name(idx), idx + 1))
+        let ret_block = sprout_ir.IRBlock(body_lbl,
+                          list_builder_build(list_builder_add(sprout_ir.IRRet(body_result), body_ops)))
+        let wrapper_fn = sprout_ir.IRFunction(wrapper_name,
+                           Cons(("env$", sprout_ir.IRTHeap),
+                                build_intrinsic_eta_params(synth_names, arg_tys)),
+                           "i64",
+                           list_append(body_blocks, Cons(ret_block, Nil)))
+        existing_lifted <- ref_read(env.lifted_ref)
+        ref_write(env.lifted_ref, Cons(wrapper_fn, existing_lifted))
+        # The rooting pass mints fresh names from here, so it must not
+        # reuse the %t$N the body already spent.
+        cur_lifted_idx <- ref_read(env.lifted_idx_ref)
+        ref_write(env.lifted_idx_ref, dict_set(wrapper_name, body_next_idx, cur_lifted_idx))
+        Ok((Nil, cur_label,
+             list_builder_add(sprout_ir.IRMkClosure(fresh_name(idx), wrapper_name, arity, Nil), cur_ops),
+             fresh_name(idx), idx + 1))
 
 # Peel `remaining` argument types off a function type.  Answers Nothing if the
 # type is not that many arrows deep, or if any argument type is still a type
@@ -5915,16 +5790,12 @@ fn classify_let_decls_ir_acc(decls: List typed_ast.TypedDecl,
 # `_`-placeholder partial (e.g. `let f = repeat("x", _)`) lifts a lambda here;
 # dropping it leaves an undefined reference.
 export fn synthesize_init_globals_fn(runtime_lets: List (source.GlobalName, typed_ast.TypedExpr),
-                                     ctors: Dict sprout_ir.CtorInfo,
-                                     top_level: Set, let_names: Set,
-                                     fn_arities: Dict FnInfo,
-                                     lambda_ctr_ref: Ref Int,
-                                     lifted_idx_ref: Ref (Dict Int)) ->
+                                     penv: ProgEnv) ->
     Result String (sprout_ir.IRFunction, List sprout_ir.IRFunction, Int) !{IO} =
   do
     lifted_ref <- ref_new(Nil)
     pair <-
-      synthesize_init_body_loop(runtime_lets, TxEnv(ctors = ctors, top_level = top_level, let_names = let_names, fn_arities = fn_arities, lifted_ref = lifted_ref, lambda_ctr_ref = lambda_ctr_ref, lifted_idx_ref = lifted_idx_ref), "entry", list_builder_empty, Nil, 0)
+      synthesize_init_body_loop(runtime_lets, tx_env(penv, lifted_ref), "entry", list_builder_empty, Nil, 0)
     match pair with
     # next_idx is the next-free %tN index after the init body; it MUST be
     # registered in idx_map for "__sprout_init_globals" so the rooting pass
@@ -5998,78 +5869,47 @@ export fn translate_program(prog: typed_ast.TypedProgram) ->
     Result String (sprout_ir.IRProgram, Dict Int) !{IO} =
   match prog with
   | typed_ast.TypedProgram decls ->
-      match validate_reserved_namespace(decls) with
-      | Err msg -> Err(msg)
-      | Ok _ ->
       match build_ctor_table(decls) with
-      | (ctor_dict, ctor_regs) ->
+      | (ctors, ctor_regs) ->
           do
-            # Shared counter for unique __sprout_ir_lambda_N naming across all user fns.
-            lambda_ctr_ref <- ref_new(0)
-            # Accumulates lifted-lambda name → next-free-idx for the rooting pass.
-            lifted_idx_ref <- ref_new(dict_empty())
-            # M3 PR 5: top-level let bindings.
-            # M3 PR 6: top-level fn arities (for eta-expansion at TVar refs).
-            let let_names = build_top_level_let_names(decls)
-            let top_level_set = build_top_level_set(decls, ctor_dict)
-            let fn_arities = build_fn_arities(decls, build_adt_ctor_index(decls, ctor_dict))
-            let classified = classify_let_decls_ir(decls)
-            translate_program_after_classify(decls, ctor_dict, ctor_regs,
-                                              classified, top_level_set, let_names,
-                                              fn_arities,
-                                              lambda_ctr_ref, lifted_idx_ref)
+            _ <- validate_reserved_namespace(decls)
+            penv <- new_prog_env(decls, ctors)
+            translate_program_after_classify(decls, ctor_regs, classify_let_decls_ir(decls), penv)
 
 # Helper for translate_program's post-classify pipeline.  Extracted so the
 # match nesting stays linear and avoids deep do-block indentation.
 fn translate_program_after_classify(decls: List typed_ast.TypedDecl,
-                                    ctors: Dict sprout_ir.CtorInfo,
                                     ctor_regs: List sprout_ir.CtorReg,
                                     classified: (List sprout_ir.IRGlobalDecl, List(source.GlobalName, typed_ast.TypedExpr)),
-                                    top_level_set: Set, let_names: Set,
-                                    fn_arities: Dict FnInfo,
-                                    lambda_ctr_ref: Ref Int,
-                                    lifted_idx_ref: Ref (Dict Int)) ->
+                                    penv: ProgEnv) ->
     Result String (sprout_ir.IRProgram, Dict Int) !{IO} =
   match classified with
   | (let_globals, runtime_lets) ->
       do
-        (fns0, idx_map0) <-
-          translate_decls(decls, ctors, Nil, dict_empty(),
-                           top_level_set, let_names, fn_arities,
-                           lambda_ctr_ref, lifted_idx_ref)
+        (fns0, idx_map0) <- translate_decls(decls, penv, Nil, dict_empty())
         # Tier-2 CPR: emit an unboxed { i64, i64 } worker for every matched
         # callee, appended after the boxed fns; their next-free idx is merged
         # into idx_map so the rooting pass can allocate fresh temps.  (The
         # active streaming path does the same in ir_pipeline.stream_workers.)
-        match tier2_augment_fns(decls, ctors, top_level_set, let_names, fn_arities,
-                                lambda_ctr_ref, lifted_idx_ref, fns0, idx_map0) with
-        | Err wmsg -> Err(wmsg)
-        | Ok aug ->
-          match aug with
-          | (fns, idx_map) ->
-          match runtime_lets with
-          | Nil ->
-              do
-                lifted_idx <- ref_read(lifted_idx_ref)
-                match merge_idx_dicts(idx_map, lifted_idx) with
-                | Err msg -> Err(msg)
-                | Ok merged -> Ok((sprout_ir.IRProgram(fns, let_globals, ctor_regs, externs), merged))
-          | _ ->
-              do
-                (init_fn, init_lifted, init_idx) <-
-                  synthesize_init_globals_fn(runtime_lets, ctors,
-                                              top_level_set, let_names, fn_arities,
-                                              lambda_ctr_ref, lifted_idx_ref)
-                do
-                  # Read lifted-idx AFTER init synthesis so lambdas lifted
-                  # while translating let-initializer bodies are registered,
-                  # and record __sprout_init_globals' own next-free idx.
-                  lifted_idx <- ref_read(lifted_idx_ref)
-                  merged <- merge_idx_dicts(idx_map, lifted_idx)
-                  Ok((sprout_ir.IRProgram(
-                        list_append(fns, list_append(init_lifted, Cons(init_fn, Nil))),
-                        let_globals, ctor_regs, externs),
-                      dict_set("__sprout_init_globals", init_idx, merged)))
+        (fns, idx_map) <- tier2_augment_fns(decls, penv, fns0, idx_map0)
+        match runtime_lets with
+        | Nil ->
+            do
+              lifted_idx <- ref_read(penv.lifted_idx_ref)
+              merged <- merge_idx_dicts(idx_map, lifted_idx)
+              Ok((sprout_ir.IRProgram(fns, let_globals, ctor_regs, externs), merged))
+        | _ ->
+            do
+              (init_fn, init_lifted, init_idx) <- synthesize_init_globals_fn(runtime_lets, penv)
+              # Read lifted-idx AFTER init synthesis so lambdas lifted
+              # while translating let-initializer bodies are registered,
+              # and record __sprout_init_globals' own next-free idx.
+              lifted_idx <- ref_read(penv.lifted_idx_ref)
+              merged <- merge_idx_dicts(idx_map, lifted_idx)
+              Ok((sprout_ir.IRProgram(
+                    list_append(fns, list_append(init_lifted, Cons(init_fn, Nil))),
+                    let_globals, ctor_regs, externs),
+                  dict_set("__sprout_init_globals", init_idx, merged)))
   where externs = collect_extern_decls(decls)
 
 # ===========================================================================
@@ -6668,21 +6508,18 @@ fn emit_repack_one(box_ssa: String, tag_ssa: String, ctor_tag: Int, arity: Int,
 # extern, a synthesized self-call that the catch-all repacks).
 fn emit_worker_fn(worker_name: String, self_name: String, params: List ast.Param,
                   body: typed_ast.TypedExpr, result_adt_ctors: List (Int, Int),
-                  ctors: Dict sprout_ir.CtorInfo, top_level: Set, let_names: Set,
-                  fn_arities: Dict FnInfo, worker_set: Set,
-                  lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int)) ->
+                  penv: ProgEnv, worker_set: Set) ->
     Result String (sprout_ir.IRFunction, Int, List sprout_ir.IRFunction) !{IO} =
   do
     lifted_ref <- ref_new(Nil)
     (blocks, next_idx) <-
-      translate_tail_unboxed(body, param_names(params), TxEnv(ctors = ctors, top_level = top_level, let_names = let_names, fn_arities = fn_arities, lifted_ref = lifted_ref, lambda_ctr_ref = lambda_ctr_ref, lifted_idx_ref = lifted_idx_ref), 0, "entry", list_builder_empty, dict_empty(), result_adt_ctors,
-                             worker_set, self_name)
-    do
-      lifted <- ref_read(lifted_ref)
-      Ok((sprout_ir.IRFunction(worker_name,
-            ast_params_to_irtype_pairs(params, param_names(params)),
-            worker_ret_ty(body), blocks),
-          next_idx, list_reverse(lifted)))
+      translate_tail_unboxed(body, param_names(params), tx_env(penv, lifted_ref), 0, "entry",
+                             list_builder_empty, dict_empty(), result_adt_ctors, worker_set, self_name)
+    lifted <- ref_read(lifted_ref)
+    Ok((sprout_ir.IRFunction(worker_name,
+          ast_params_to_irtype_pairs(params, param_names(params)),
+          worker_ret_ty(body), blocks),
+        next_idx, list_reverse(lifted)))
 
 # Look up the (params, body, result-ADT-ctors) for a matched worker callee.
 # Skips entry `main`, lets, and ctors (they are never routed to a worker).
@@ -6726,66 +6563,44 @@ fn synth_param_vars(params: List ast.Param) -> List typed_ast.TypedExpr =
 # Nothing when `name` is not a top-level fn/extern (a let/ctor over-collected by
 # the shadow-free scan).  Exported: the active streaming pipeline (ir_pipeline)
 # calls this per-name so each worker is rooted+lowered like any other fn.
-export fn emit_worker_for(name: String, decls: List typed_ast.TypedDecl,
-                          ctors: Dict sprout_ir.CtorInfo, top_level: Set, let_names: Set,
-                          fn_arities: Dict FnInfo, adt_index: Dict (List (Int, Int)), worker_set: Set,
-                          lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int)) ->
+export fn emit_worker_for(name: String, decls: List typed_ast.TypedDecl, penv: ProgEnv,
+                          adt_index: Dict (List (Int, Int)), worker_set: Set) ->
     Result String (Maybe(sprout_ir.IRFunction, Int, List sprout_ir.IRFunction)) !{IO} =
   # Guard: `@<name>_worker` shares the LLVM symbol namespace with user fns.  If a
   # top-level fn is literally named `<name>_worker`, both emit `define @<name>_worker`
   # -> duplicate-symbol link error.  Fail loudly here instead (no `_worker` suffix
   # reservation, since the compiler's own internals use `_unboxed`/`_worker`).
-  if set_member(name ++ "_worker", top_level)
+  if set_member(name ++ "_worker", penv.top_level)
   then Err("ast_to_ir: CPR worker name '" ++ name ++ "_worker' collides with an existing top-level definition")
   else
   match worker_source_for(name, decls, adt_index) with
   | Nothing -> Ok(Nothing)
-  | Just src ->
-      match src with
-      | (params, body, radt) ->
-          match emit_worker_fn(name ++ "_worker", name, params, body, radt, ctors, top_level,
-                               let_names, fn_arities, worker_set, lambda_ctr_ref, lifted_idx_ref) with
-          | Err msg -> Err(msg)
-          | Ok wres -> Ok(Just(wres))
+  | Just (params, body, radt) ->
+      do
+        wres <- emit_worker_fn(name ++ "_worker", name, params, body, radt, penv, worker_set)
+        Ok(Just(wres))
 
 # Batch worker emission for translate_program (the non-streaming path used by the
 # IR-shape tests): append every worker to `fns0`, merge next-idx into `idx_map0`.
-fn tier2_augment_fns(decls: List typed_ast.TypedDecl, ctors: Dict sprout_ir.CtorInfo,
-                     top_level: Set, let_names: Set, fn_arities: Dict FnInfo,
-                     lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
+fn tier2_augment_fns(decls: List typed_ast.TypedDecl, penv: ProgEnv,
                      fns0: List sprout_ir.IRFunction, idx_map0: Dict Int) ->
     Result String (List sprout_ir.IRFunction, Dict Int) !{IO} =
-  match collect_worker_callees(decls, top_level, ctors, fn_arities) with
-  | wset ->
-      emit_all_workers(set_to_list(wset), wset,
-                       decls, ctors, top_level, let_names, fn_arities,
-                       build_adt_ctor_index(decls, ctors),
-                       lambda_ctr_ref, lifted_idx_ref, fns0, idx_map0)
+  emit_all_workers(set_to_list(wset), wset, decls, penv,
+                   build_adt_ctor_index(decls, penv.ctors), fns0, idx_map0)
+  where wset = collect_worker_callees(decls, penv.top_level, penv.ctors, penv.fn_arities)
 
 fn emit_all_workers(names: List String, worker_set: Set, decls: List typed_ast.TypedDecl,
-                    ctors: Dict sprout_ir.CtorInfo, top_level: Set, let_names: Set,
-                    fn_arities: Dict FnInfo, adt_index: Dict (List (Int, Int)),
-                    lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
+                    penv: ProgEnv, adt_index: Dict (List (Int, Int)),
                     acc_fns: List sprout_ir.IRFunction, acc_idx: Dict Int) ->
     Result String (List sprout_ir.IRFunction, Dict Int) !{IO} =
   match names with
   | Nil -> Ok((acc_fns, acc_idx))
   | Cons name rest ->
-      match emit_worker_for(name, decls, ctors, top_level, let_names, fn_arities, adt_index, worker_set,
-                            lambda_ctr_ref, lifted_idx_ref) with
-      | Err msg -> Err(msg)
-      | Ok Nothing ->
-          emit_all_workers(rest, worker_set, decls, ctors, top_level, let_names, fn_arities, adt_index,
-                           lambda_ctr_ref, lifted_idx_ref, acc_fns, acc_idx)
-      | Ok justw ->
-          match justw with
-          | Just wres ->
-              match wres with
-              | (wfn, wnext, wlifted) ->
-                  emit_all_workers(rest, worker_set, decls, ctors, top_level, let_names, fn_arities, adt_index,
-                                   lambda_ctr_ref, lifted_idx_ref,
-                                   Cons(wfn, list_append(wlifted, acc_fns)),
-                                   dict_set(name ++ "_worker", wnext, acc_idx))
-          | Nothing ->
-              emit_all_workers(rest, worker_set, decls, ctors, top_level, let_names, fn_arities, adt_index,
-                               lambda_ctr_ref, lifted_idx_ref, acc_fns, acc_idx)
+      do
+        maybe_w <- emit_worker_for(name, decls, penv, adt_index, worker_set)
+        match maybe_w with
+        | Nothing -> emit_all_workers(rest, worker_set, decls, penv, adt_index, acc_fns, acc_idx)
+        | Just (wfn, wnext, wlifted) ->
+            emit_all_workers(rest, worker_set, decls, penv, adt_index,
+                             Cons(wfn, list_append(wlifted, acc_fns)),
+                             dict_set(name ++ "_worker", wnext, acc_idx))

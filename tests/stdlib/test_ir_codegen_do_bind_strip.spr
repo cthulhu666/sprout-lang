@@ -15,7 +15,7 @@ no_prelude
 #   stripped: IO and Maybe wrapper).  Nothing propagates as the do-block's
 #   overall result, mirroring Haskell-style monadic short-circuit.
 #
-# Implementation in ast_to_ir.sprout's translate_do_bind_maybe helper:
+# Implementation in ast_to_ir.sprout's translate_do_bind_short helper:
 #   - emit IRCall to sprout_tag(scrut) → tag
 #   - icmp eq tag, <nothing-tag> → is_nothing
 #   - br i1 → short branch (build Nothing of result-ty via IRMakeCtor)

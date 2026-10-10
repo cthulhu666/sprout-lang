@@ -107,23 +107,17 @@ fn emit_lifted_then_fn(lifted: List sprout_ir.IRFunction,
       | Ok s2 -> emit_lifted_then_fn(rest, f, idx_map, s2)
 
 # Main streaming loop over all decls.
-fn stream_decls(decls: List typed_ast.TypedDecl,
-                ctors: Dict sprout_ir.CtorInfo,
-                top_level: Set, let_names: Set, fn_arities: Dict ast_to_ir.FnInfo,
-                lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
+fn stream_decls(decls: List typed_ast.TypedDecl, penv: ast_to_ir.ProgEnv,
                 state: StreamState) ->
     Result String StreamState !{IO} =
   match decls with
   | Nil -> Ok(state)
   | Cons d rest ->
-      match ast_to_ir.translate_decl_with_idx(d, ctors, top_level, let_names, fn_arities,
-                                              lambda_ctr_ref, lifted_idx_ref) with
+      match ast_to_ir.translate_decl_with_idx(d, penv) with
       | Err msg -> Err(msg)
       | Ok maybe_f ->
           match maybe_f with
-          | Nothing ->
-              stream_decls(rest, ctors, top_level, let_names, fn_arities,
-                           lambda_ctr_ref, lifted_idx_ref, state)
+          | Nothing -> stream_decls(rest, penv, state)
           | Just triple ->
               match triple with
               | (f, idx, lifted) ->
@@ -132,46 +126,37 @@ fn stream_decls(decls: List typed_ast.TypedDecl,
                       # Build per-decl idx_map: f's idx plus all lifted-lambda indices
                       # accumulated in lifted_idx_ref during this translate call.
                       do
-                        lifted_idx <- ref_read(lifted_idx_ref)
+                        lifted_idx <- ref_read(penv.lifted_idx_ref)
                         let idx_map_for_decl = dict_set(fname, idx, lifted_idx)
                         match emit_lifted_then_fn(lifted, f, idx_map_for_decl, state) with
                         | Err msg -> Err(msg)
-                        | Ok s2 ->
-                            stream_decls(rest, ctors, top_level, let_names, fn_arities,
-                                         lambda_ctr_ref, lifted_idx_ref, s2)
+                        | Ok s2 -> stream_decls(rest, penv, s2)
 
 # Tier-2 CPR: stream an unboxed { i64, i64 } worker for each matched callee,
 # AFTER all boxed decls (so an escaping use resolves to the boxed original).
 # Each worker is rooted + lowered through emit_one_fn like any other fn.
 fn stream_workers(names: List String, worker_set: Set, decls: List typed_ast.TypedDecl,
-                  ctors: Dict sprout_ir.CtorInfo, top_level: Set, let_names: Set,
-                  fn_arities: Dict ast_to_ir.FnInfo, adt_index: Dict (List (Int, Int)),
-                  lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
+                  penv: ast_to_ir.ProgEnv, adt_index: Dict (List (Int, Int)),
                   state: StreamState) -> Result String StreamState !{IO} =
   match names with
   | Nil -> Ok(state)
   | Cons name rest ->
-      match ast_to_ir.emit_worker_for(name, decls, ctors, top_level, let_names, fn_arities,
-                                      adt_index, worker_set, lambda_ctr_ref, lifted_idx_ref) with
+      match ast_to_ir.emit_worker_for(name, decls, penv, adt_index, worker_set) with
       | Err msg -> Err(msg)
       | Ok maybe_w ->
           match maybe_w with
-          | Nothing ->
-              stream_workers(rest, worker_set, decls, ctors, top_level, let_names, fn_arities, adt_index,
-                             lambda_ctr_ref, lifted_idx_ref, state)
+          | Nothing -> stream_workers(rest, worker_set, decls, penv, adt_index, state)
           | Just wtriple ->
               match wtriple with
               | (wfn, wnext, wlifted) ->
                   match wfn with
                   | sprout_ir.IRFunction wname _ _ _ ->
                       do
-                        lifted_idx <- ref_read(lifted_idx_ref)
+                        lifted_idx <- ref_read(penv.lifted_idx_ref)
                         let idx_map = dict_set(wname, wnext, lifted_idx)
                         match emit_lifted_then_fn(wlifted, wfn, idx_map, state) with
                         | Err msg -> Err(msg)
-                        | Ok s2 ->
-                            stream_workers(rest, worker_set, decls, ctors, top_level, let_names, fn_arities,
-                                           adt_index, lambda_ctr_ref, lifted_idx_ref, s2)
+                        | Ok s2 -> stream_workers(rest, worker_set, decls, penv, adt_index, s2)
 
 # ---------------------------------------------------------------------------
 # Alloc-summary pre-pass (Option A).
@@ -198,52 +183,38 @@ fn summarize_lifted_then_fn(lifted: List sprout_ir.IRFunction, f: sprout_ir.IRFu
   | Nil -> summarize_one_fn(f, acc)
   | Cons lf rest -> summarize_lifted_then_fn(rest, f, summarize_one_fn(lf, acc))
 
-fn summarize_decls(decls: List typed_ast.TypedDecl,
-                   ctors: Dict sprout_ir.CtorInfo,
-                   top_level: Set, let_names: Set, fn_arities: Dict ast_to_ir.FnInfo,
-                   lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
+fn summarize_decls(decls: List typed_ast.TypedDecl, penv: ast_to_ir.ProgEnv,
                    acc: List (String, (Bool, Set))) ->
     Result String (List (String, (Bool, Set))) !{IO} =
   match decls with
   | Nil -> Ok(acc)
   | Cons d rest ->
-      match ast_to_ir.translate_decl_with_idx(d, ctors, top_level, let_names, fn_arities,
-                                              lambda_ctr_ref, lifted_idx_ref) with
+      match ast_to_ir.translate_decl_with_idx(d, penv) with
       | Err msg -> Err(msg)
       | Ok maybe_f ->
           match maybe_f with
-          | Nothing ->
-              summarize_decls(rest, ctors, top_level, let_names, fn_arities,
-                              lambda_ctr_ref, lifted_idx_ref, acc)
+          | Nothing -> summarize_decls(rest, penv, acc)
           | Just triple ->
               match triple with
               | (f, _idx, lifted) ->
-                  summarize_decls(rest, ctors, top_level, let_names, fn_arities,
-                                  lambda_ctr_ref, lifted_idx_ref,
-                                  summarize_lifted_then_fn(lifted, f, acc))
+                  summarize_decls(rest, penv, summarize_lifted_then_fn(lifted, f, acc))
 
 fn summarize_workers(names: List String, worker_set: Set, decls: List typed_ast.TypedDecl,
-                     ctors: Dict sprout_ir.CtorInfo, top_level: Set, let_names: Set,
-                     fn_arities: Dict ast_to_ir.FnInfo, adt_index: Dict (List (Int, Int)),
-                     lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
+                     penv: ast_to_ir.ProgEnv, adt_index: Dict (List (Int, Int)),
                      acc: List (String, (Bool, Set))) ->
     Result String (List (String, (Bool, Set))) !{IO} =
   match names with
   | Nil -> Ok(acc)
   | Cons name rest ->
-      match ast_to_ir.emit_worker_for(name, decls, ctors, top_level, let_names, fn_arities,
-                                      adt_index, worker_set, lambda_ctr_ref, lifted_idx_ref) with
+      match ast_to_ir.emit_worker_for(name, decls, penv, adt_index, worker_set) with
       | Err msg -> Err(msg)
       | Ok maybe_w ->
           match maybe_w with
-          | Nothing ->
-              summarize_workers(rest, worker_set, decls, ctors, top_level, let_names, fn_arities,
-                                adt_index, lambda_ctr_ref, lifted_idx_ref, acc)
+          | Nothing -> summarize_workers(rest, worker_set, decls, penv, adt_index, acc)
           | Just wtriple ->
               match wtriple with
               | (wfn, _wnext, wlifted) ->
-                  summarize_workers(rest, worker_set, decls, ctors, top_level, let_names, fn_arities,
-                                    adt_index, lambda_ctr_ref, lifted_idx_ref,
+                  summarize_workers(rest, worker_set, decls, penv, adt_index,
                                     summarize_lifted_then_fn(wlifted, wfn, acc))
 
 # Build the may-trigger-GC summary via the pre-pass.  Uses its own fresh Refs so it
@@ -255,42 +226,36 @@ fn finalize_summaries(raw: List (String, (Bool, Set)), arities: Dict ast_to_ir.F
     (Dict Bool, Dict (List (String, Int))) =
   (ir_rooting.summary_from_raw(raw), ast_to_ir.mutual_build_eligible(raw, arities, ret_i64))
 
-fn build_alloc_summary(decls: List typed_ast.TypedDecl,
-                       ctors: Dict sprout_ir.CtorInfo,
-                       top_level: Set, let_names: Set, fn_arities: Dict ast_to_ir.FnInfo,
+fn build_alloc_summary(decls: List typed_ast.TypedDecl, emit_penv: ast_to_ir.ProgEnv,
                        ret_i64: Dict Bool,
                        runtime_lets: List (source.GlobalName, typed_ast.TypedExpr)) ->
     Result String (Dict Bool, Dict (List (String, Int))) !{IO} =
   do
-    pp_lambda_ref <- ref_new(0)
-    pp_lifted_ref <- ref_new(dict_empty())
-    match summarize_decls(decls, ctors, top_level, let_names, fn_arities,
-                          pp_lambda_ref, pp_lifted_ref, Nil) with
+    penv <- ast_to_ir.with_fresh_refs(emit_penv)
+    match summarize_decls(decls, penv, Nil) with
     | Err msg -> Err(msg)
     | Ok after_decls ->
-        match ast_to_ir.collect_worker_callees(decls, top_level, ctors, fn_arities) with
+        match ast_to_ir.collect_worker_callees(decls, penv.top_level, penv.ctors, penv.fn_arities) with
         | wset ->
-            match summarize_workers(set_to_list(wset), wset, decls, ctors, top_level, let_names,
-                                    fn_arities, ast_to_ir.build_adt_ctor_index(decls, ctors),
-                                    pp_lambda_ref, pp_lifted_ref, after_decls) with
+            match summarize_workers(set_to_list(wset), wset, decls, penv,
+                                    ast_to_ir.build_adt_ctor_index(decls, penv.ctors),
+                                    after_decls) with
             | Err msg -> Err(msg)
             | Ok after_workers ->
                 # Init fn (if any) is emitted by the real pass but is a cold path; a
                 # missing entry is conservative (its callers keep rooting).  Include it
                 # for completeness when there are runtime lets.
                 match runtime_lets with
-                | Nil -> Ok(finalize_summaries(after_workers, fn_arities, ret_i64))
+                | Nil -> Ok(finalize_summaries(after_workers, penv.fn_arities, ret_i64))
                 | _ ->
-                    match ast_to_ir.synthesize_init_globals_fn(
-                            runtime_lets, ctors, top_level, let_names, fn_arities,
-                            pp_lambda_ref, pp_lifted_ref) with
+                    match ast_to_ir.synthesize_init_globals_fn(runtime_lets, penv) with
                     | Err msg -> Err(msg)
                     | Ok init_pair ->
                         match init_pair with
                         | (init_fn, init_lifted, _init_idx) ->
                             Ok(finalize_summaries(
                                  summarize_lifted_then_fn(init_lifted, init_fn, after_workers),
-                                 fn_arities, ret_i64))
+                                 penv.fn_arities, ret_i64))
 
 # Never-failing wrapper: the summary is an OPTIONAL optimization, so a pre-pass
 # failure must NOT take down an otherwise-valid compile.  On error, fall back to
@@ -298,14 +263,12 @@ fn build_alloc_summary(decls: List typed_ast.TypedDecl,
 # the pre-fixpoint behaviour) and warn on stderr.  Any genuine program error is
 # still reported by the real stream_decls pass that runs afterward, so this
 # swallows no real diagnostics.
-fn alloc_summary_or_empty(decls: List typed_ast.TypedDecl,
-                          ctors: Dict sprout_ir.CtorInfo,
-                          top_level: Set, let_names: Set, fn_arities: Dict ast_to_ir.FnInfo,
+fn alloc_summary_or_empty(decls: List typed_ast.TypedDecl, penv: ast_to_ir.ProgEnv,
                           ret_i64: Dict Bool,
                           runtime_lets: List (source.GlobalName, typed_ast.TypedExpr)) ->
     (Dict Bool, Dict (List (String, Int))) !{IO} =
   do
-    match build_alloc_summary(decls, ctors, top_level, let_names, fn_arities, ret_i64, runtime_lets) with
+    match build_alloc_summary(decls, penv, ret_i64, runtime_lets) with
     | Ok pair -> pair
     | Err msg ->
         do
@@ -342,12 +305,7 @@ export fn compile_program_streaming(prog: typed_ast.TypedProgram) ->
           match ast_to_ir.build_ctor_table(decls) with
           | (ctors, ctor_regs) ->
               do
-                lambda_ctr_ref <- ref_new(0)
-                lifted_idx_ref <- ref_new(dict_empty())
-                let let_names = ast_to_ir.build_top_level_let_names(decls)
-                let top_level_set = ast_to_ir.build_top_level_set(decls, ctors)
-                let fn_arities = ast_to_ir.build_fn_arities(decls,
-                                   ast_to_ir.build_adt_ctor_index(decls, ctors))
+                penv <- ast_to_ir.new_prog_env(decls, ctors)
                 let ret_i64 = ast_to_ir.build_ret_i64(decls)
                 let classified = ast_to_ir.classify_let_decls_ir(decls)
                 let externs = ast_to_ir.collect_extern_decls(decls)
@@ -358,25 +316,21 @@ export fn compile_program_streaming(prog: typed_ast.TypedProgram) ->
                       # the mutual-TCO eligible-edge map (fresh Refs, IR discarded).  Never
                       # fails the compile — a pre-pass error falls back to conservative
                       # rooting + no mutual-TCO.
-                      summaries <- alloc_summary_or_empty(decls, ctors, top_level_set,
-                                                          let_names, fn_arities, ret_i64, runtime_lets)
+                      summaries <- alloc_summary_or_empty(decls, penv, ret_i64, runtime_lets)
                       str_acc_ref <- ref_new(Nil)
                       bodies_acc_ref <- ref_new(Nil)
                       let alloc_summary = pair_first(summaries)
                       let mutual_eligible = pair_second(summaries)
                       let init_state = StreamState(0, str_acc_ref, bodies_acc_ref, set_empty(), false, false, alloc_summary, mutual_eligible)
-                      match stream_decls(decls, ctors, top_level_set, let_names, fn_arities,
-                                         lambda_ctr_ref, lifted_idx_ref, init_state) with
+                      match stream_decls(decls, penv, init_state) with
                       | Err msg -> Err(msg)
                       | Ok after_decls ->
-                        match ast_to_ir.collect_worker_callees(decls, top_level_set, ctors,
-                                                               fn_arities) with
+                        match ast_to_ir.collect_worker_callees(decls, penv.top_level, ctors,
+                                                               penv.fn_arities) with
                         | wset ->
-                        match stream_workers(
-                                set_to_list(wset), wset,
-                                decls, ctors, top_level_set, let_names, fn_arities,
-                                ast_to_ir.build_adt_ctor_index(decls, ctors),
-                                lambda_ctr_ref, lifted_idx_ref, after_decls) with
+                        match stream_workers(set_to_list(wset), wset, decls, penv,
+                                             ast_to_ir.build_adt_ctor_index(decls, ctors),
+                                             after_decls) with
                         | Err msg -> Err(msg)
                         | Ok after_workers ->
                           match after_workers with
@@ -387,9 +341,7 @@ export fn compile_program_streaming(prog: typed_ast.TypedProgram) ->
                                   assemble_result(str_acc, bodies_acc, defined, has_user_main, main_returns_int,
                                                   let_globals, ctor_regs, externs)
                               | _ ->
-                                  match ast_to_ir.synthesize_init_globals_fn(
-                                    runtime_lets, ctors, top_level_set, let_names, fn_arities,
-                                    lambda_ctr_ref, lifted_idx_ref) with
+                                  match ast_to_ir.synthesize_init_globals_fn(runtime_lets, penv) with
                                   | Err msg -> Err(msg)
                                   | Ok init_pair ->
                                     match init_pair with
@@ -400,7 +352,7 @@ export fn compile_program_streaming(prog: typed_ast.TypedProgram) ->
                                         # synthesized for let-initializer bodies, e.g. partial
                                         # applications) so root-slot names don't collide with the
                                         # function's body temps (%t0..).
-                                        lifted_idx <- ref_read(lifted_idx_ref)
+                                        lifted_idx <- ref_read(penv.lifted_idx_ref)
                                         let init_idx_map = dict_set("__sprout_init_globals", init_idx, lifted_idx)
                                         match emit_lifted_then_fn(init_lifted, init_fn, init_idx_map,
                                                           StreamState(next_idx2, str_acc, bodies_acc,

@@ -72,7 +72,7 @@ export fn field_kind_char_to_irtype(ch: Char) -> sprout_ir.IRType =
 # Look up the field kind IRType at index i in the field-kinds-string.
 # In correct compiler operation `i` is always in range (fks length is one
 # byte per ctor arg). The Nothing branch is a defensive fallback for
-# internal-compiler-bug paths only; callers (bind_ctor_field_args) guard
+# internal-compiler-bug paths only; callers (ast_to_ir.bind_pattern_fields) guard
 # the bounds explicitly so this branch is unreachable when the upstream
 # invariant holds. Conservative IRTUnknown is correctness-safe — at worst
 # over-roots.

@@ -13,9 +13,19 @@ fn value(c: Cents) -> Int = match c with | Cents (n) -> n
 
 fn double(c: Cents) -> Cents = match c with | Cents (n) -> Cents(n * 2)
 
+# A `_` payload binds nothing; the arm still matches unconditionally.
+fn always_one(c: Cents) -> Int = match c with | Cents (_) -> 1
+
+# A heap payload: the wrap value is the String pointer itself, no header.
+wrap Label = String
+
+fn shout(l: Label) -> String = match l with | Label (s) -> s ++ "!"
+
 fn main() -> Unit !{IO} =
   run_suite("ir_wrap_match", [
     check_eq("wrap extract 42", value(Cents(42)), 42),
     check_eq("wrap extract 0", value(Cents(0)), 0),
-    check_eq("wrap double 10 -> 20", value(double(Cents(10))), 20)
+    check_eq("wrap double 10 -> 20", value(double(Cents(10))), 20),
+    check_eq("wrap wildcard arm", always_one(Cents(9)), 1),
+    check_eq("wrap String payload", shout(Label("hi")), "hi!")
   ])
