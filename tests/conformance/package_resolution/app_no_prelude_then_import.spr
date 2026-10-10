@@ -1,0 +1,6 @@
+no_prelude
+import demo.tokbar (bar_value)
+
+# `no_prelude` is a header line, so the import after it is still in the header
+# block and `bar_value` resolves.
+fn main() -> Unit !{IO} = print(int_to_string(bar_value))

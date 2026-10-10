@@ -1,0 +1,52 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.types as types
+import stdlib.compiler.source as source
+import stdlib.compiler.ast as ast
+
+# typed_ast.children: the one child list that cse_census and infer's dictionary
+# walkers descend through. Order is part of the contract, since the walkers report
+# the FIRST match.
+
+fn pos() -> source.SourcePos =
+  source.SourcePos(index = 0, line = 1, column = 1)
+
+fn int_t() -> types.Type =
+  types.TConst(types.type_id("Int"))
+
+fn var_(name: String) -> typed_ast.TypedExpr =
+  typed_ast.TVar(name, int_t(), pos())
+
+fn name_of(e: typed_ast.TypedExpr) -> String =
+  match e with
+  | typed_ast.TVar name _ _ -> name
+  | _ -> "?"
+
+fn kids(e: typed_ast.TypedExpr) -> List String = list_map(name_of, typed_ast.children(e))
+
+fn field(name: String, value: String) -> typed_ast.TypedRecordField = typed_ast.TypedRecordField(name, var_(value))
+
+fn main() -> Unit !{IO} =
+  run_suite("typed_ast_children", [
+    check_eq("a leaf has none", kids(var_("x")), Nil),
+    check_eq("a dictionary has none",
+             kids(typed_ast.TDict(ast.TypeConstraint("Eq", []), int_t(), pos(), typed_ast.EvUnresolved)), Nil),
+    check_eq("if: condition, then, else",
+             kids(typed_ast.TIf(var_("c"), var_("t"), var_("e"), int_t(), pos())), ["c", "t", "e"]),
+    check_eq("call: callee, then arguments",
+             kids(typed_ast.TCall(var_("f"), [var_("a"), var_("b")], int_t(), pos())), ["f", "a", "b"]),
+    check_eq("match: scrutinee, then arm bodies, not patterns",
+             kids(typed_ast.TMatch(var_("s"),
+               [typed_ast.TypedMatchBranch(ast.VarPattern("p", pos()), var_("b1")),
+                typed_ast.TypedMatchBranch(ast.WildcardPattern(pos()), var_("b2"))], int_t(), pos())),
+             ["s", "b1", "b2"]),
+    check_eq("lambda: its body",
+             kids(typed_ast.TLambda([], var_("body"), int_t(), pos())), ["body"]),
+    check_eq("do: each step's value",
+             kids(typed_ast.TDo([typed_ast.TDoLetStep("x", var_("v1")), typed_ast.TDoExprStep(var_("v2"))],
+                                int_t(), pos())), ["v1", "v2"]),
+    check_eq("record update: base, then field values",
+             kids(typed_ast.TRecordUpdate(var_("r"), [field("a", "x"), field("b", "y")], int_t(), pos())),
+             ["r", "x", "y"]),
+    check_eq("field access: the base", kids(typed_ast.TGetField(var_("r"), "a", int_t(), pos())), ["r"])
+  ])

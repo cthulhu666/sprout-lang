@@ -1762,8 +1762,28 @@ diagnostic-stream-smoke: bootstrap-from-seed
     fi
   done
 
+  # An unknown --phase is rejected before the file loop: once, on stderr, nonzero,
+  # and with no files too — a batch naming none must not exit 0 for a typo.
+  for nfiles in 0 1; do
+    ufiles=()
+    if [[ "$nfiles" -eq 1 ]]; then ufiles=("$FIX/valid.spr"); fi
+    ustatus=0
+    "$DRIVER" --phase efects "{{stdlib_root}}" ${ufiles[@]+"${ufiles[@]}"} > "$TMPD/u.out" 2>"$TMPD/u.err" || ustatus=$?
+    if [[ "$ustatus" -eq 0 ]]; then
+      echo "diagnostic-stream-smoke: unknown phase with $nfiles file(s) exited 0." >&2; failed=1
+    fi
+    if [[ "$(grep -c '^ERROR: unknown phase `efects`' "$TMPD/u.err" || true)" -ne 1 ]]; then
+      echo "diagnostic-stream-smoke: unknown phase with $nfiles file(s) was not reported once on stderr:" >&2
+      head -3 "$TMPD/u.err" >&2; failed=1
+    fi
+    if [[ -s "$TMPD/u.out" ]]; then
+      echo "diagnostic-stream-smoke: unknown phase with $nfiles file(s) wrote to stdout:" >&2
+      head -3 "$TMPD/u.out" >&2; failed=1
+    fi
+  done
+
   if (( failed > 0 )); then exit 1; fi
-  echo "==> diagnostic-stream-smoke ✓ (errors on stderr, nonzero exit, stdout artifact-only, check-iface never silently OK)"
+  echo "==> diagnostic-stream-smoke ✓ (errors on stderr, nonzero exit, stdout artifact-only, check-iface never silently OK, unknown phase rejected)"
 
 # Dispatch-trace guard.  SPROUT_TRACE_DISPATCH=1 must emit a `[dispatch] ...` line
 # per constrained call site, and a projection sort (`vec_sort_by` with key type !=

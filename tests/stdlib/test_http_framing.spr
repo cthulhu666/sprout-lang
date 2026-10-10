@@ -28,7 +28,7 @@ fn describe_err(e: HttpServerError) -> String =
 fn main() -> Unit !{IO} =
   run_suite("http_framing", [
     # --- Bare LF / bare CR in the header block (finding 2) -------------------------------------
-    # The asymmetry that makes this a smuggling primitive: `find_headers_end` terminates the block
+    # The asymmetry that makes this a smuggling primitive: the terminator search ends the block
     # only on "\r\n\r\n", while the line splitter treated a BARE LF as a line terminator. A
     # conforming front end reads one header `X-Note` whose value happens to contain an invalid bare
     # LF and forwards no body; this server read a second header line `Content-Length: 9` out of that

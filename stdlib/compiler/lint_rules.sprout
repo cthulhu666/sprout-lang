@@ -80,9 +80,6 @@ fn classify(b1: ast.MatchBranch,
              else if c2 && ! c1 then Just((p1, body1, p2, body2))
              else Nothing
 
-fn param_names(params: List ast.Param) -> List String =
-  list_map(param_name, params)
-
 # True when `e` references any of `names` as a plain variable — a simple,
 # shadowing-unaware syntactic check (adequate here: this only ever picks
 # which lint message to show, never rewrites anything).
@@ -183,7 +180,7 @@ fn walk_expr(written: Set, bound: List String, e: ast.Expr) -> List LintFinding 
   | ast.BinaryExpr _ left right _ ->
       list_append(walk_expr(written, bound, left), walk_expr(written, bound, right))
   | ast.UnaryExpr _ operand _ -> walk_expr(written, bound, operand)
-  | ast.LambdaExpr params body _ -> walk_expr(written, list_append(param_names(params), bound), body)
+  | ast.LambdaExpr params body _ -> walk_expr(written, list_append(ast.param_names(params), bound), body)
   | ast.DoExpr steps _ -> walk_do_steps(written, bound, steps)
   | ast.RecordExpr _ fields _ -> walk_record_fields(written, bound, fields)
   | ast.GetFieldExpr rec_expr _ _ -> walk_expr(written, bound, rec_expr)
@@ -860,11 +857,11 @@ fn walk_instance_methods(written: Set, methods: List ast.InstanceMethodImpl) -> 
   | Cons m rest ->
       match m with
       | ast.InstanceMethodImpl _ params _ _ _ body ->
-          list_append(walk_expr(written, param_names(params), body), walk_instance_methods(written, rest))
+          list_append(walk_expr(written, ast.param_names(params), body), walk_instance_methods(written, rest))
 
 fn walk_decl(written: Set, d: ast.Decl) -> List LintFinding =
   match d with
-  | ast.FnDecl _ params _ _ _ body _ -> walk_expr(written, param_names(params), body)
+  | ast.FnDecl _ params _ _ _ body _ -> walk_expr(written, ast.param_names(params), body)
   | ast.LetDecl _ body _ _ -> walk_expr(written, Nil, body)
   | ast.InstanceDecl _ _ methods _ -> walk_instance_methods(written, methods)
   | _ -> Nil  # ExternFnDecl/TypeDecl/RecordDecl/ClassDecl/AliasDecl/WrapDecl: no expr body
@@ -997,10 +994,6 @@ export fn maybe_with_default(fallback: a, m: Maybe a) -> a =
   | Nothing -> fallback
 `
 
-fn param_name(p: ast.Param) -> String =
-  match p with
-  | ast.Param n _ _ -> n
-
 fn decl_is_fn_named(name: String, d: ast.Decl) -> Bool =
   match d with
   | ast.FnDecl n _ _ _ _ _ _ -> n == name
@@ -1047,7 +1040,7 @@ fn derive_one(name: String, decls: List ast.Decl) -> Result String Combinator =
   match find(\ (d: ast.Decl) -> decl_is_fn_named(name, d), decls) with
   | Nothing -> Err(name ++ ": not defined in the combinator source")
   | Just (ast.FnDecl _ params _ _ _ body _) ->
-      let holes = list_map(param_name, params)
+      let holes = list_map(ast.param_name, params)
           Ok binders = admissible_body(name, body) else Err msg -> Err(msg)
       in match shadowed_hole(holes, binders) with
          | Just h -> Err(name ++ ": parameter `" ++ h ++ "` is rebound by a branch pattern, "

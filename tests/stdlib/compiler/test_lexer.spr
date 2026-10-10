@@ -47,6 +47,19 @@ fn lex_ok(src: String) -> Bool =
   | Ok _ -> true
   | Err _ -> false
 
+# The lex error as `message@line:col`, or "ok".
+fn lex_err(src: String) -> String =
+  match lexer.tokenize(src) with
+  | Ok _ -> "ok"
+  | Err (token.TokenizeError msg pos) ->
+      msg ++ "@" ++ int_to_string(pos.line) ++ ":" ++ int_to_string(pos.column)
+
+# Every token's kind and text, space-separated.
+fn tok_dump(src: String) -> String =
+  match lexer.tokenize(src) with
+  | Err _ -> "lex_error"
+  | Ok toks -> string_concat_many(list_map(\t -> kind_str(t) ++ ":" ++ token.token_text(t) ++ " ", vec_to_list(toks)))
+
 fn token_count(src: String) -> Int =
   match lexer.tokenize(src) with
   | Err _ -> -1
@@ -188,6 +201,24 @@ fn main() -> Unit !{IO} =
 
     # String escape sequence — ensures escape decoding preserves order
     check_eq("string escape text", tok_text_at("\"a\\nb\"", 0), "a\nb"),
+
+    # Both loops share one token scanner; each keeps its own brace, backtick,
+    # whitespace and comment handling. These pin the two sides agreeing.
+    check_eq("interp body: string, char, symbol, braces and a comment",
+      tok_dump("`${f(\"s\", 'c') { x } # c\n}`"),
+      "template_start:` template_interp_start:${ ident:f symbol:( string:s symbol:, char:c symbol:) "
+        ++ "symbol:{ ident:x symbol:} template_interp_end:} template_end:` eof: "),
+    check_eq("top level: a backtick right after an ident and an operator",
+      tok_dump("a`x`->b"),
+      "ident:a template_start:` template_lit:x template_end:` symbol:-> ident:b eof: "),
+    check_eq("top level: unexpected char error and position",
+      lex_err("a\n  @"), "Unexpected character @@2:3"),
+    check_eq("interp body: unexpected char error and position",
+      lex_err("`${a @}`"), "Unexpected character @@1:6"),
+    check_eq("interp body: unterminated string reports the string",
+      lex_err("`${\"ab}`"), "Unterminated string literal@1:4"),
+    check_eq("interp body: unterminated interpolation reports the `${`",
+      lex_err("x `${a"), "Unterminated template interpolation@1:4"),
 
     # Mutual-recursion stress: tokenize_from ↔ scan_template_from cycle.
     # N simple templates produce 3N + 1 tokens (start, lit, end per template, plus eof).

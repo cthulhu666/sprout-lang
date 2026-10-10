@@ -114,9 +114,9 @@ boxed to reach them, whereas a `match` on the call *in place* takes the callee's
 unboxed `{ tag, field }` worker and allocates nothing. One `Just` costs
 **+17.5 ns/read, rising to 110–135 ns with 100k live — 70–90x** — because
 per-read allocation is flat but collection cost scales with the live set
-(`bench/results-2026-09-28-vec-box-tax.md`). `stdlib.bytes.byte_at` went 15x
-faster moving off `maybe_with_default`, and it is why `mutvec_at` exists beside
-`mutvec_get`.
+(`bench/results-2026-09-28-vec-box-tax.md`). It is why `stdlib.bytes.get_or`
+matches instead of calling `maybe_with_default` — 15x faster on a whole-buffer
+scan — and why `mutvec_at` exists beside `mutvec_get`.
 
 What decides it is **argument position**, not how hot the code is and not how far
 the call is from the accessor. Returning a wrapper keeps it unboxed however many

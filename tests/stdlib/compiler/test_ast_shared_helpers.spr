@@ -1,0 +1,49 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.compiler.ast as ast
+import stdlib.compiler.source as source
+import stdlib.compiler.types as types
+
+# The ast and source helpers that parser, bundler, infer, lowering and the linters share.
+
+fn p() -> source.SourcePos = source.SourcePos(index = 0, line = 0, column = 0)
+
+# Prints a chain innermost first, so nesting order is visible: `((a.b).c)`.
+fn show(e: ast.Expr) -> String =
+  match e with
+  | ast.VarExpr name _ -> name
+  | ast.GetFieldExpr base field _ -> "(" ++ show(base) ++ "." ++ field ++ ")"
+  | _ -> "?"
+
+fn param(name: String, mode: ast.ParamMode) -> ast.Param = ast.Param(name, Nothing, mode)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    assert_eq(state, "one field", show(ast.build_field_chain(ast.VarExpr("r", p()), "x", p())), "(r.x)")
+    assert_eq(state, "a chain nests left to right",
+      show(ast.build_field_chain(ast.VarExpr("r", p()), "a.b.c", p())), "(((r.a).b).c)")
+
+    assert_eq(state, "param_name", ast.param_name(param("x", ast.ModeDefault)), "x")
+    assert_eq(state, "param_names keeps order",
+      ast.param_names([param("a", ast.ModeDefault), param("b", ast.ModeBorrowing),
+                       param("c", ast.ModeOnce)]), ["a", "b", "c"])
+    assert_eq(state, "no params", ast.param_names([]), Nil)
+
+    assert_true(state, "a lowercase name", source.is_lowercase_name("x"))
+    assert_true(state, "z is lowercase", source.is_lowercase_name("zeta"))
+    assert_false(state, "an uppercase name", source.is_lowercase_name("Maybe"))
+    assert_false(state, "the empty name", source.is_lowercase_name(""))
+    assert_false(state, "a dotted name", source.is_lowercase_name("main.foo"))
+    assert_false(state, "a leading underscore", source.is_lowercase_name("_x"))
+    assert_false(state, "a leading digit", source.is_lowercase_name("1x"))
+    assert_false(state, "a non-ASCII initial", source.is_lowercase_name("éa"))
+    assert_false(state, "the char after z", source.is_lowercase_name("{"))
+    assert_false(state, "the char before a", source.is_lowercase_name("`"))
+
+    # An effect variable is a lowercase name by the same rule.
+    assert_true(state, "an effect variable", types.effect_label_is_var("e"))
+    assert_false(state, "a qualified effect label", types.effect_label_is_var("m.e"))
+    assert_false(state, "an effect label", types.effect_label_is_var("IO"))
+
+    summary(state)

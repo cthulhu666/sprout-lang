@@ -59,14 +59,9 @@ fn rejected(value: Maybe Bytes) -> Bool =
   | Just _ -> false
   | Nothing -> true
 
-fn byte_at_or(raw: Bytes, index: Int) -> Int =
-  match bytes.get(raw, index) with
-  | Just value -> value
-  | Nothing -> -1
-
 fn byte_of(value: Maybe Bytes, index: Int) -> Int =
   match value with
-  | Just raw -> byte_at_or(raw, index)
+  | Just raw -> bytes.get_or(raw, index, -1)
   | Nothing -> -1
 
 fn width_of(value: Maybe Bytes) -> Int =

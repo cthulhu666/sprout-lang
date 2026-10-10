@@ -27,8 +27,9 @@ export fn lower_program(prog: typed_ast.TypedProgram, env: Dict types.Scheme) ->
   | typed_ast.TypedProgram decls -> lower_program_decls(decls, env)
 
 fn lower_program_decls(decls: List typed_ast.TypedDecl, scheme_env: Dict types.Scheme) -> typed_ast.TypedProgram =
-  let class_order = collect_class_order(decls, dict_empty())
-      super_map = collect_super_map(decls, dict_empty())
+  let tables = typed_ast.class_tables(decls)
+      class_order = tables.order
+      super_map = tables.supers
   in
   match lower_decls(decls,
                     LowerEnv(class_order,
@@ -36,7 +37,7 @@ fn lower_program_decls(decls: List typed_ast.TypedDecl, scheme_env: Dict types.S
                              super_map,
                              collect_inst_meta(decls, class_order, super_map, dict_empty()),
                              scheme_env,
-                             collect_class_param_map(decls, dict_empty())),
+                             tables.params_with_short),
                     Nil, Nil, Nil) with
   | (user_rev, wrapper_rev, inst_rev) ->
       typed_ast.TypedProgram(
@@ -121,11 +122,6 @@ fn ctx_with_bound(vars: List String, ctx: LowerCtx) -> LowerCtx =
 
 fn no_pos() -> source.SourcePos = source.SourcePos(index = 0, line = 0, column = 0)
 
-fn param_names_from_list(ps: List ast.Param) -> List String =
-  match ps with
-  | Nil -> Nil
-  | Cons (ast.Param name _ _) rest -> Cons(name, param_names_from_list(rest))
-
 # ---------------------------------------------------------------------------
 # Type helpers for generated nodes
 # ---------------------------------------------------------------------------
@@ -158,85 +154,6 @@ fn generate_typed_param_vars(params: List ast.Param, method_type: types.Type, po
       | _ ->
           Cons(typed_ast.TVar(pname, method_type, pos),
                generate_typed_param_vars(rest, method_type, pos))
-
-# ---------------------------------------------------------------------------
-# Pass 1 – collect class_order
-# ---------------------------------------------------------------------------
-
-fn collect_class_order(decls: List typed_ast.TypedDecl, acc: Dict (List String)) -> Dict (List String) =
-  match decls with
-  | Nil -> acc
-  | Cons d rest ->
-      match d with
-      | typed_ast.TPassThrough inner_decl ->
-          match inner_decl with
-          | ast.ClassDecl class_name _ methods _ _ ->
-              collect_class_order(rest, dict_set(class_name, extract_method_names(methods), acc))
-          | _ -> collect_class_order(rest, acc)
-      | _ -> collect_class_order(rest, acc)
-
-fn extract_method_names(methods: List ast.ClassMethodSig) -> List String =
-  extract_method_names_acc(methods, Nil)
-
-fn extract_method_names_acc(methods: List ast.ClassMethodSig, acc: List String) -> List String =
-  match methods with
-  | Nil -> list_reverse(acc)
-  | Cons sig rest ->
-      match sig with
-      | ast.ClassMethodSig name _ _ _ _ ->
-          extract_method_names_acc(rest, Cons(name, acc))
-
-# class_param_map records the primary class type parameter for each class.
-# Eta-expansion uses this to locate the class type inside a method's expected
-# function type, instead of assuming it is always the first explicit parameter.
-fn collect_class_param_map(decls: List typed_ast.TypedDecl, acc: Dict String) -> Dict String =
-  match decls with
-  | Nil -> acc
-  | Cons d rest ->
-      match d with
-      | typed_ast.TPassThrough inner_decl ->
-          match inner_decl with
-          | ast.ClassDecl class_name type_params _ _ _ ->
-              collect_class_param_map(rest, add_class_param_entry(class_name, type_params, acc))
-          | _ -> collect_class_param_map(rest, acc)
-      | _ -> collect_class_param_map(rest, acc)
-
-fn add_class_param_entry(class_name: String, type_params: List String, acc: Dict String) -> Dict String =
-  match type_params with
-  | Nil -> acc
-  | [param | _] ->
-      dict_set(string.after_last_dot(class_name), param, dict_set(class_name, param, acc))
-
-# ---------------------------------------------------------------------------
-# Pass 1 – collect superclass map
-# ---------------------------------------------------------------------------
-#
-# class_name → list of direct superclass class names (in declaration order).
-# Used to expand transitive superclass dictionaries when lowering constraints.
-
-fn collect_super_map(decls: List typed_ast.TypedDecl, acc: Dict (List String)) -> Dict (List String) =
-  match decls with
-  | Nil -> acc
-  | Cons d rest ->
-      match d with
-      | typed_ast.TPassThrough inner_decl ->
-          match inner_decl with
-          | ast.ClassDecl class_name _ _ supers _ ->
-              collect_super_map(rest, dict_set(class_name, extract_super_names(supers, Nil), acc))
-          | _ -> collect_super_map(rest, acc)
-      | _ -> collect_super_map(rest, acc)
-
-fn extract_super_names(supers: List ast.TypeConstraint, acc: List String) -> List String =
-  match supers with
-  | Nil -> list_reverse(acc)
-  | Cons c rest ->
-      match c with
-      | ast.TypeConstraint super_name _ ->
-          extract_super_names(rest, Cons(super_name, acc))
-
-# class_with_transitive_supers / class_methods_for moved to types.sprout (the
-# shared leaf) so the existential witness-slot count/unpack and this dict path
-# derive layout from ONE traversal and cannot drift.
 
 # ---------------------------------------------------------------------------
 # Pass 1 – collect instance_table
@@ -590,7 +507,7 @@ fn generate_one_instance_fn(
             ret_maybe,
             effects_maybe,
             [],
-            lower_expr(body, LowerCtx(env_class_order(env), fwd_map, env_inst_table(env), env_super_map(env), env_inst_meta(env), env_scheme_env(env), env_class_params(env), param_names_from_list(list_append(params, hidden_params)))))
+            lower_expr(body, LowerCtx(env_class_order(env), fwd_map, env_inst_table(env), env_super_map(env), env_inst_meta(env), env_scheme_env(env), env_class_params(env), ast.param_names(list_append(params, hidden_params)))))
 
 # ---------------------------------------------------------------------------
 # FnDecl lowering
@@ -613,7 +530,7 @@ fn lower_fn_decl(
         ret_ty,
         effects,
         [],
-        lower_expr(body, LowerCtx(env_class_order(env), fwd_map, env_inst_table(env), env_super_map(env), env_inst_meta(env), env_scheme_env(env), env_class_params(env), param_names_from_list(list_append(params, hidden_params)))))
+        lower_expr(body, LowerCtx(env_class_order(env), fwd_map, env_inst_table(env), env_super_map(env), env_inst_meta(env), env_scheme_env(env), env_class_params(env), ast.param_names(list_append(params, hidden_params)))))
 
 # ---------------------------------------------------------------------------
 # Build hidden params for a list of constraints
@@ -839,65 +756,6 @@ fn list_str_member_stripped(needle: String, xs: List String) -> Bool =
       if string.after_last_dot(x) == needle then true
       else list_str_member_stripped(needle, rest)
 
-fn first_concrete_head_str(t: types.Type) -> Maybe String =
-  match t with
-  | types.TConst name -> Just(types.type_id_name(name))
-  | types.TApp base _ -> first_concrete_head_str(base)
-  | types.TTuple items -> Just(types.tuple_head(list_length(items)))
-  | types.TVar _ -> Nothing
-  | types.TFunc _ _ _ _ -> Nothing
-  | types.TThunk _ _ -> Nothing
-
-fn class_param_for(class_name: String, ctx: LowerCtx) -> Maybe String =
-  match dict_get(class_name, ctx_class_params(ctx)) with
-  | Just param -> Just(param)
-  | Nothing -> dict_get(string.after_last_dot(class_name), ctx_class_params(ctx))
-
-fn eta_class_type(class_name: String, method_name: String, actual_type: types.Type, fallback: types.Type, ctx: LowerCtx) -> types.Type =
-  match class_param_for(class_name, ctx) with
-  | Nothing -> fallback
-  | Just class_param ->
-      match lookup_method_scheme(method_name, ctx_scheme_env(ctx)) with
-      | Nothing -> fallback
-      | Just scheme -> eta_class_type_from_scheme(class_param, types.scheme_type(scheme), actual_type, fallback)
-
-fn lookup_method_scheme(method_name: String, scheme_env: Dict types.Scheme) -> Maybe types.Scheme =
-  match dict_get(method_name, scheme_env) with
-  | Just scheme -> Just(scheme)
-  | Nothing -> dict_get(string.after_last_dot(method_name), scheme_env)
-
-fn eta_class_type_from_scheme(class_param: String, scheme_type: types.Type, actual_type: types.Type, fallback: types.Type) -> types.Type =
-  match dict_get(class_param, match_type_vars(scheme_type, actual_type, dict_empty())) with
-  | Nothing -> fallback
-  | Just class_type -> class_type
-
-fn match_type_vars(pattern: types.Type, actual: types.Type, acc: Dict types.Type) -> Dict types.Type =
-  match pattern with
-  | types.TVar name -> dict_set(types.tyvar_identity(name), actual, acc)
-  | types.TConst _ -> acc
-  | types.TApp pbase parg ->
-      match actual with
-      | types.TApp abase aarg -> match_type_vars(parg, aarg, match_type_vars(pbase, abase, acc))
-      | _ -> acc
-  | types.TFunc pparam pret _ _ ->
-      match actual with
-      | types.TFunc aparam aret _ _ -> match_type_vars(pret, aret, match_type_vars(pparam, aparam, acc))
-      | _ -> acc
-  | types.TThunk pret _ ->
-      match actual with
-      | types.TThunk aret _ -> match_type_vars(pret, aret, acc)
-      | _ -> acc
-  | types.TTuple pitems ->
-      match actual with
-      | types.TTuple aitems -> match_type_var_lists(pitems, aitems, acc)
-      | _ -> acc
-
-fn match_type_var_lists(patterns: List types.Type, actuals: List types.Type, acc: Dict types.Type) -> Dict types.Type =
-  match (patterns, actuals) with
-  | (Nil, _) -> acc
-  | (_, Nil) -> acc
-  | (Cons p prest, Cons a arest) -> match_type_var_lists(prest, arest, match_type_vars(p, a, acc))
-
 fn find_concrete_method_impl(class_name: String, method_name: String, head: String, ctx: LowerCtx) -> Maybe String =
   # after_last_dot: class_order stores bundler-qualified names (e.g. "prelude.ToString")
   # but inst_table keys are always stripped (built via constraint_key_from_tc which calls
@@ -932,7 +790,7 @@ fn eta_named_typeexpr(t: types.Type, ctx: LowerCtx) -> ast.TypeExpr =
   | types.TApp base arg -> ast.TypeApply(eta_named_typeexpr(base, ctx), eta_named_typeexpr(arg, ctx))
   | types.TTuple items -> ast.TupleType(list_map(\i -> eta_named_typeexpr(i, ctx), items))
   | types.TVar v ->
-      match dict_get("@eta_fwdvar:" ++ types.tyvar_identity(v), ctx_scheme_env(ctx)) with
+      match dict_get(types.eta_fwdvar_marker_key(types.tyvar_identity(v)), ctx_scheme_env(ctx)) with
       | Just scheme ->
           match types.scheme_type(scheme) with
           | types.TConst prog_var -> ast.TypeName(types.type_id_name(prog_var))
@@ -1133,18 +991,18 @@ fn lookup_class_marker(method_name: String, ctx: LowerCtx) -> Maybe String =
       | _ -> Nothing
 
 fn lookup_class_marker_scheme(method_name: String, scheme_env: Dict types.Scheme) -> Maybe types.Scheme =
-  match dict_get("@class:" ++ method_name, scheme_env) with
+  match dict_get(types.class_marker_key(method_name), scheme_env) with
   | Just scheme -> Just(scheme)
-  | Nothing -> dict_get("@class:" ++ string.after_last_dot(method_name), scheme_env)
+  | Nothing -> dict_get(types.class_marker_key(string.after_last_dot(method_name)), scheme_env)
 
 fn try_eta_in_class(class_name: String, name: String, t: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
   let types.TFunc param _ _ _ = t else Nothing
-  in eta_in_class_by_head(class_name, name, t, eta_class_type(class_name, name, t, param, ctx), ctx)
+  in eta_in_class_by_head(class_name, name, t, types.eta_class_type(ctx_class_params(ctx), ctx_scheme_env(ctx), class_name, name, t, param), ctx)
 
 # Split on whether the class type has a concrete head: a concrete head resolves to an instance
 # (or its forwarded slot); an abstract (tvar) head forwards via the @eta_fwd marker.
 fn eta_in_class_by_head(class_name: String, name: String, t: types.Type, class_type: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
-  match first_concrete_head_str(class_type) with
+  match types.first_concrete_head_str(class_type) with
   | Just head -> eta_in_class_concrete(class_name, name, t, head, class_type, ctx)
   | Nothing -> eta_in_class_forwarded(class_name, name, t, class_type, ctx)
 
@@ -1193,9 +1051,9 @@ fn eta_forwarded_method_for_prog_var(method_name: String, class_name: String, pr
   | Nothing -> Nothing
 
 fn lookup_eta_fwd_scheme(tvar_name: String, class_name: String, ctx: LowerCtx) -> Maybe types.Scheme =
-  match dict_get("@eta_fwd:" ++ tvar_name ++ ":" ++ class_name, ctx_scheme_env(ctx)) with
+  match dict_get(types.eta_fwd_marker_key(tvar_name, class_name), ctx_scheme_env(ctx)) with
   | Just scheme -> Just(scheme)
-  | Nothing -> dict_get("@eta_fwd:" ++ tvar_name ++ ":" ++ string.after_last_dot(class_name), ctx_scheme_env(ctx))
+  | Nothing -> dict_get(types.eta_fwd_marker_key(tvar_name, string.after_last_dot(class_name)), ctx_scheme_env(ctx))
 
 # lower_expr_callee: lower the callee of a TCall without eta-expanding TVar class methods.
 # Direct class method calls already have TDict nodes injected by infer; rewriting the
@@ -1370,7 +1228,7 @@ fn lower_expr(te: typed_ast.TypedExpr, ctx: LowerCtx) -> typed_ast.TypedExpr =
       # the type mismatch on the TUnit node is harmless.
       typed_ast.TUnit(t, pos)
   | typed_ast.TLambda params body t pos ->
-      typed_ast.TLambda(params, lower_expr(body, ctx_with_bound(param_names_from_list(params), ctx)), t, pos)
+      typed_ast.TLambda(params, lower_expr(body, ctx_with_bound(ast.param_names(params), ctx)), t, pos)
   | typed_ast.TBinary op l r t pos ->
       typed_ast.TBinary(op, lower_expr(l, ctx), lower_expr(r, ctx), t, pos)
   | typed_ast.TUnary op e t pos ->

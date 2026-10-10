@@ -90,6 +90,10 @@ fn is_nonallocating_unboxed_read(fname: String) -> Bool =
   || fname == "argv_get_unboxed"
   || fname == "env_get_unboxed"
 
+# Whether `op` can trigger a collection by ITSELF, not counting a direct call:
+# a call is decided by its callee (op_raw_callee, op_triggers_gc_summary), so
+# here it is `false`. Only those two and scan_op_raw ask this, each after taking
+# the callee into account; never ask it about a call on its own.
 fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   match op with
   | sprout_ir.IRStrSlice _ _ _ _ -> true
@@ -102,21 +106,12 @@ fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   # IRPrintStr calls @print_str / @eprint_str — write-only I/O; does NOT allocate. NOT a GC trigger.
   | sprout_ir.IRPrintStr _ _ _ -> false
   | sprout_ir.IRStrConst _ _ _ -> false
-  # Every user call may transitively allocate — EXCEPT a verified allow-list of
-  # non-allocating read/store externs (B2).  Peek the callee name; over-roots any
-  # callee not on the list (correctness > optimization).
-  | sprout_ir.IRCall _ _ fname _ -> if is_nonallocating_read(fname) then false else true
-  # IRCallUnboxed2 calls a C `_unboxed` extern.  Every variant the codegen can
-  # currently emit (vector_get, map_get, str_char_at, …) returns { tag, value }
-  # by value and does NOT allocate.  Peek the callee name (B2 reach extension):
-  # non-trigger for the verified non-allocating variants, trigger otherwise — the
-  # fallback is deliberate, so an unrecognised name is over-rooted, not trusted.
-  | sprout_ir.IRCallUnboxed2 _ _ _ fname _ ->
-      if is_nonallocating_unboxed_read(fname) then false else true
+  # Direct calls: decided by callee, see the header.
+  | sprout_ir.IRCall _ _ _ _ -> false
+  | sprout_ir.IRCallUnboxed2 _ _ _ _ _ -> false
   # IRRetUnboxed2 is a terminator: two insertvalues + ret, pure — no allocation.
   | sprout_ir.IRRetUnboxed2 _ _ _ -> false
-  # IRCallUnboxed3 calls a Sprout `@f_worker` (a user fn) — may transitively allocate; trigger.
-  | sprout_ir.IRCallUnboxed3 _ _ _ _ _ _ -> true
+  | sprout_ir.IRCallUnboxed3 _ _ _ _ _ _ -> false
   # IRRetUnboxed3 is a terminator: three insertvalues + ret, pure — no allocation.
   | sprout_ir.IRRetUnboxed3 _ _ _ _ -> false
   # IRMakeCtor lowers to @sprout_makeN which always allocates; trigger.
@@ -784,7 +779,7 @@ fn live_across(pending_rev: List String, i: Int, bl: BlockLive) -> List String =
 # swept and a dangling pointer is stored (PR 11 item 4 GC-UAF).  The direct
 # --emit-ir path roots call operands across the call; the typed path must match.
 # We can't cheaply know which callees alloc-before-store, so root the operands of
-# ALL calls — matching op_triggers_gc's "every call may allocate" conservatism.
+# ALL calls — matching the summary's "a callee not proven pure may allocate" default.
 # Purely additive (only adds roots; can never cause a UAF, at worst over-retains).
 fn op_exposes_operands(op: sprout_ir.IROp) -> Bool =
   match op with
@@ -796,13 +791,13 @@ fn op_exposes_operands(op: sprout_ir.IROp) -> Bool =
   # A call may collect before consuming its operands (e.g. @ref_new); root the
   # heap operands across the call.  See the function-level comment above.  The B2
   # non-allocating allow-list is NOT re-checked here: op_exposes_operands is only
-  # consulted for ops op_triggers_gc already classified as triggers (process_op),
-  # so an allow-listed read short-circuits upstream and never reaches this arm.
+  # consulted for ops op_triggers_gc_summary already classified as triggers
+  # (process_op), so an allow-listed read short-circuits upstream.
   | sprout_ir.IRCall _ _ _ _ -> true
   # Like IRCall, an allocating unboxed extern may collect before consuming its
   # operands; root the heap operands across it (additive — only adds roots).  The
-  # non-allocating allow-list is enforced upstream in op_triggers_gc, so an
-  # allow-listed unboxed read short-circuits and never reaches this arm.
+  # non-allocating allow-list is enforced upstream (calls_nonallocating_extern), so
+  # an allow-listed unboxed read short-circuits and never reaches this arm.
   | sprout_ir.IRCallUnboxed2 _ _ _ _ _ -> true
   # IRRetUnboxed2 is a terminator: insertvalue+ret, no allocation, no exposure.
   | sprout_ir.IRRetUnboxed2 _ _ _ -> false
@@ -922,20 +917,17 @@ fn roots_across(pending_rev: List String, i: Int, bl: BlockLive,
 
 # Emit one IRRoot per value (def order).  Each IRRoot consumes two fresh idx
 # slots (slot-name and discard-reg).  Result is prepended to acc (reverse).
-# prefix is always "%t$" (see prefix_for_fn) — matches ast_to_ir.fresh_name so
-# rooting temps share a namespace with body temps and stay disjoint from
-# source-derived names (incl. the IRLoadEnvSlot names %t$0, %t$1, ...).
-fn emit_roots_loop(vs: List String, idx: Int, prefix: String, acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, Int) =
+fn emit_roots_loop(vs: List String, idx: Int, acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, Int) =
   match vs with
   | Nil -> (acc, idx)
   | Cons v rest ->
-      emit_roots_loop(rest, idx + 2, prefix,
-        Cons(sprout_ir.IRRoot(prefix ++ int_to_string(idx),
+      emit_roots_loop(rest, idx + 2,
+        Cons(sprout_ir.IRRoot(sprout_ir.temp_ssa(idx),
                               v,
-                              prefix ++ int_to_string(idx + 1)), acc))
+                              sprout_ir.temp_ssa(idx + 1)), acc))
 
-fn unroot_op(n: Int, idx: Int, prefix: String) -> (sprout_ir.IROp, Int) =
-  (sprout_ir.IRUnroot(n, prefix ++ int_to_string(idx)), idx + 1)
+fn unroot_op(n: Int, idx: Int) -> (sprout_ir.IROp, Int) =
+  (sprout_ir.IRUnroot(n, sprout_ir.temp_ssa(idx)), idx + 1)
 
 # Root-once stack coalescing.  Instead of bracketing each trigger with
 # push-all-live + pop-all (O(uses) re-rooting), a persistent root stack `rooted`
@@ -954,9 +946,9 @@ fn unroot_op(n: Int, idx: Int, prefix: String) -> (sprout_ir.IROp, Int) =
 
 # Emit IRRoots for to_push in def order; the new stack head is the last pushed
 # (= top), matching the runtime shadow-stack order.
-fn push_phase(to_push: List String, rooted: List String, idx: Int, prefix: String,
+fn push_phase(to_push: List String, rooted: List String, idx: Int,
               acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, List String, Int) =
-  match emit_roots_loop(to_push, idx, prefix, acc) with
+  match emit_roots_loop(to_push, idx, acc) with
   | (acc1, idx1) -> (acc1, list_append(list_reverse(to_push), rooted), idx1)
 
 # Pop consecutive dead values from the top (head); stop at the first still-live
@@ -969,52 +961,52 @@ fn pop_dead_top(rooted: List String, i: Int, bl: BlockLive, n: Int) -> (List Str
       then (rooted, n)
       else pop_dead_top(rest, i, bl, n + 1)
 
-fn emit_unroot_after(npop: Int, rooted2: List String, idx: Int, prefix: String,
+fn emit_unroot_after(npop: Int, rooted2: List String, idx: Int,
                      acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, List String, Int) =
-  match unroot_op(npop, idx, prefix) with
+  match unroot_op(npop, idx) with
   | (op_unroot, idx2) -> (Cons(op_unroot, acc), rooted2, idx2)
 
-fn finish_trigger(i: Int, bl: BlockLive, rooted1: List String, idx1: Int, prefix: String,
+fn finish_trigger(i: Int, bl: BlockLive, rooted1: List String, idx1: Int,
                   acc2: List sprout_ir.IROp) -> (List sprout_ir.IROp, List String, Int) =
   match pop_dead_top(rooted1, i, bl, 0) with
   | (rooted2, npop) ->
       if npop == 0
       then (acc2, rooted1, idx1)
-      else emit_unroot_after(npop, rooted2, idx1, prefix, acc2)
+      else emit_unroot_after(npop, rooted2, idx1, acc2)
 
 fn push_pop_trigger(op: sprout_ir.IROp, to_push: List String, i: Int, bl: BlockLive,
-                    rooted: List String, idx: Int, prefix: String,
+                    rooted: List String, idx: Int,
                     acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, List String, Int) =
-  match push_phase(to_push, rooted, idx, prefix, acc) with
+  match push_phase(to_push, rooted, idx, acc) with
   | (acc1, rooted1, idx1) ->
-      finish_trigger(i, bl, rooted1, idx1, prefix, Cons(op, acc1))
+      finish_trigger(i, bl, rooted1, idx1, Cons(op, acc1))
 
 # Per-op: a trigger pushes its need-delta, emits the op, then pops dead top values;
 # a non-trigger is emitted unchanged with the stack untouched.  Also returns the
 # pending list to carry on: empty after a trigger, since it has seen them all.
 fn process_op(op: sprout_ir.IROp, i: Int, bl: BlockLive, pending: List String,
-              rooted: List String, idx: Int, prefix: String, summary: Dict Bool,
+              rooted: List String, idx: Int, summary: Dict Bool,
               acc: List sprout_ir.IROp)
     -> (List sprout_ir.IROp, List String, Int, List String) =
   if op_triggers_gc_summary(op, summary)
   then match push_pop_trigger(op, roots_across(pending, i, bl, op),
-                              i, bl, rooted, idx, prefix, acc) with
+                              i, bl, rooted, idx, acc) with
        | (acc1, rooted1, idx1) -> (acc1, rooted1, idx1, Nil)
   else (Cons(op, acc), rooted, idx, pending)
 
 # Pop all remaining roots BEFORE the terminator — emitting them after a terminator
 # would be invalid IR (nothing executes past a terminator).
-fn emit_block_end_pop(rooted: List String, idx: Int, prefix: String,
+fn emit_block_end_pop(rooted: List String, idx: Int,
                       acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, Int) =
   match rooted with
   | Nil -> (acc, idx)
   | _ ->
-      match unroot_op(list_length(rooted), idx, prefix) with
+      match unroot_op(list_length(rooted), idx) with
       | (op_unroot, idx1) -> (Cons(op_unroot, acc), idx1)
 
-fn finish_block(term_op: sprout_ir.IROp, rooted: List String, idx: Int, prefix: String,
+fn finish_block(term_op: sprout_ir.IROp, rooted: List String, idx: Int,
                 acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, Int) =
-  match emit_block_end_pop(rooted, idx, prefix, acc) with
+  match emit_block_end_pop(rooted, idx, acc) with
   | (acc1, idx1) -> (list_reverse(Cons(term_op, acc1)), idx1)
 
 # Add op's heap def to pending (reverse-def order). No dedup: every name added
@@ -1045,20 +1037,19 @@ fn rewrite_ops(ops: List sprout_ir.IROp,
                pending: List String,
                rooted: List String,
                idx: Int,
-               prefix: String,
                summary: Dict Bool,
                acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, Int) =
   match ops with
   | Nil -> (list_reverse(acc), idx)
   | Cons op rest ->
       match rest with
-      | Nil -> finish_block(op, rooted, idx, prefix, acc)
+      | Nil -> finish_block(op, rooted, idx, acc)
       | _ ->
-          match process_op(op, i, bl, pending, rooted, idx, prefix, summary, acc) with
+          match process_op(op, i, bl, pending, rooted, idx, summary, acc) with
           | (acc1, rooted1, idx1, pending1) ->
               rewrite_ops(rest, i + 1, bl, heap_origin,
                           update_scope(op, heap_origin, pending1),
-                          rooted1, idx1, prefix, summary, acc1)
+                          rooted1, idx1, summary, acc1)
 
 # Names arrive unique (from a Set), so the seed needs no dedup; reversed into
 # pending's reverse-def order.
@@ -1076,7 +1067,6 @@ fn rewrite_block_full(b: sprout_ir.IRBlock,
                       heap_origin: Set,
                       all_blocks: List sprout_ir.IRBlock,
                       idx: Int,
-                      prefix: String,
                       summary: Dict Bool) -> (sprout_ir.IRBlock, Int) =
   match b with
   | sprout_ir.IRBlock lbl ops ->
@@ -1086,7 +1076,7 @@ fn rewrite_block_full(b: sprout_ir.IRBlock,
                         heap_origin,
                         seed_pending(intersect_to_list(lookup_live(lbl, live_in_map), heap_origin)),
                         Nil,
-                        idx, prefix, summary, Nil) with
+                        idx, summary, Nil) with
       | (new_ops, idx_out) -> (sprout_ir.IRBlock(lbl, new_ops), idx_out)
 
 fn rewrite_fn_blocks(blocks: List sprout_ir.IRBlock,
@@ -1094,23 +1084,22 @@ fn rewrite_fn_blocks(blocks: List sprout_ir.IRBlock,
                      heap_origin: Set,
                      all_blocks: List sprout_ir.IRBlock,
                      idx: Int,
-                     prefix: String,
                      summary: Dict Bool,
                      acc: List sprout_ir.IRBlock) -> List sprout_ir.IRBlock =
   match blocks with
   | Nil -> list_reverse(acc)
   | Cons b rest ->
-      match rewrite_block_full(b, live_in_map, heap_origin, all_blocks, idx, prefix, summary) with
+      match rewrite_block_full(b, live_in_map, heap_origin, all_blocks, idx, summary) with
       | (b1, idx1) ->
-          rewrite_fn_blocks(rest, live_in_map, heap_origin, all_blocks, idx1, prefix, summary, Cons(b1, acc))
+          rewrite_fn_blocks(rest, live_in_map, heap_origin, all_blocks, idx1, summary, Cons(b1, acc))
 
-fn rewrite_fn(f: sprout_ir.IRFunction, start_idx: Int, prefix: String, summary: Dict Bool) -> sprout_ir.IRFunction =
+fn rewrite_fn(f: sprout_ir.IRFunction, start_idx: Int, summary: Dict Bool) -> sprout_ir.IRFunction =
   match f with
   | sprout_ir.IRFunction name params ret_ty blocks ->
       sprout_ir.IRFunction(name, params, ret_ty,
         rewrite_fn_blocks(blocks, compute_liveness(blocks),
                           set_union(params_heap_origin(params), compute_heap_origin(blocks)),
-                          blocks, start_idx, prefix, summary, Nil))
+                          blocks, start_idx, summary, Nil))
 
 # ---------------------------------------------------------------------------
 # Seed heap_origin from function parameters.
@@ -1155,37 +1144,28 @@ fn params_heap_origin(params: List (String, sprout_ir.IRType)) -> Set =
 # --- Phase 1: raw per-function extraction (fn_names-INDEPENDENT, so the streaming
 # pre-pass can build it one function at a time and discard the IR). ---
 
-# The callee name of a call op, EXCLUDING allow-listed non-allocating externs.
-# Just(fname) for any other IRCall/IRCallUnboxed2 (Sprout fn OR unknown extern —
-# distinguished later, at resolution); Nothing for non-calls and allow-listed reads.
+# The callee of a direct call, EXCLUDING allow-listed non-allocating externs.
+# Just(fname) for any other call (Sprout fn OR unknown extern — distinguished
+# later, at resolution); Nothing for non-calls and allow-listed reads.
 fn op_raw_callee(op: sprout_ir.IROp) -> Maybe String =
-  match op with
-  | sprout_ir.IRCall _ _ fname _ ->
-      if is_nonallocating_read(fname) then Nothing else Just(fname)
-  | sprout_ir.IRCallUnboxed2 _ _ _ fname _ ->
-      if is_nonallocating_unboxed_read(fname) then Nothing else Just(fname)
-  # Width-3 unboxed call targets a Sprout `@f_worker` (never an allow-listed extern
-  # read), so the call-graph edge is always Just(fname) — the fixpoint refines it.
-  | sprout_ir.IRCallUnboxed3 _ _ _ _ fname _ -> Just(fname)
-  | _ -> Nothing
+  if calls_nonallocating_extern(op) then Nothing else sprout_ir.op_direct_callee(op)
 
-# Trigger contribution from NON-call ops only (calls are deferred to callee
-# resolution).  IRMakeCtor/IRMakeTuple/string ops → true; IRApplyClosure (indirect)
-# → true via op_triggers_gc; arithmetic/loads/control flow → false.
-fn op_noncall_trigger(op: sprout_ir.IROp) -> Bool =
+# Every user call may transitively allocate — EXCEPT a verified allow-list of
+# non-allocating read/store externs (B2), and the `_unboxed` reads, which return
+# { tag, value } by value. A name off the list is over-rooted, not trusted.
+# Width-3 calls target a Sprout `@f_worker`, never an allow-listed extern.
+fn calls_nonallocating_extern(op: sprout_ir.IROp) -> Bool =
   match op with
-  | sprout_ir.IRCall _ _ _ _ -> false
-  | sprout_ir.IRCallUnboxed2 _ _ _ _ _ -> false
-  # Width-3 unboxed call is a call — deferred to callee resolution (op_raw_callee).
-  | sprout_ir.IRCallUnboxed3 _ _ _ _ _ _ -> false
-  | _ -> op_triggers_gc(op)
+  | sprout_ir.IRCall _ _ fname _ -> is_nonallocating_read(fname)
+  | sprout_ir.IRCallUnboxed2 _ _ _ fname _ -> is_nonallocating_unboxed_read(fname)
+  | _ -> false
 
 fn scan_op_raw(op: sprout_ir.IROp, acc: (Bool, Set)) -> (Bool, Set) =
   match acc with
   | (nc, targets) ->
       match op_raw_callee(op) with
-      | Just g -> (nc || op_noncall_trigger(op), set_insert(g, targets))
-      | Nothing -> (nc || op_noncall_trigger(op), targets)
+      | Just g -> (nc || op_triggers_gc(op), set_insert(g, targets))
+      | Nothing -> (nc || op_triggers_gc(op), targets)
 
 fn scan_ops_raw(ops: List sprout_ir.IROp, acc: (Bool, Set)) -> (Bool, Set) =
   match ops with
@@ -1290,20 +1270,12 @@ export fn compute_alloc_summary(fns: List sprout_ir.IRFunction) -> Dict Bool =
 
 # Summary-aware trigger test: a call to a Sprout function proven non-triggering
 # (summary lookup false) is a non-trigger; an unknown callee (absent from the
-# summary) is conservatively a trigger.  Non-call ops delegate to op_triggers_gc.
+# summary) is conservatively a trigger.  An allow-listed extern read and every
+# non-call op go to op_triggers_gc.
 fn op_triggers_gc_summary(op: sprout_ir.IROp, summary: Dict Bool) -> Bool =
-  match op with
-  | sprout_ir.IRCall _ _ fname _ ->
-      if is_nonallocating_read(fname) then false
-      else match dict_get(fname, summary) with | Just b -> b | Nothing -> true
-  | sprout_ir.IRCallUnboxed2 _ _ _ fname _ ->
-      if is_nonallocating_unboxed_read(fname) then false
-      else match dict_get(fname, summary) with | Just b -> b | Nothing -> true
-  # Width-3 worker call: refine via the summary (absent → conservatively a trigger),
-  # so a proven-pure worker lets its call site elide roots.
-  | sprout_ir.IRCallUnboxed3 _ _ _ _ fname _ ->
-      match dict_get(fname, summary) with | Just b -> b | Nothing -> true
-  | _ -> op_triggers_gc(op)
+  match op_raw_callee(op) with
+  | Just g -> match dict_get(g, summary) with | Just b -> b | Nothing -> true
+  | Nothing -> op_triggers_gc(op)
 
 # ---------------------------------------------------------------------------
 # Per-program driver.
@@ -1315,25 +1287,12 @@ export fn rewrite_one_fn_with_summary(f: sprout_ir.IRFunction, idx_map: Dict Int
                                       summary: Dict Bool) -> sprout_ir.IRFunction =
   match f with
   | sprout_ir.IRFunction name _ _ _ ->
-      # All functions use "%t$" as the fresh-name prefix (see prefix_for_fn),
-      # matching ast_to_ir.fresh_name so rooting temps share the body namespace
-      # and stay disjoint from source-derived names (incl. the IRLoadEnvSlot
-      # names "%t$0", "%t$1", ... emitted by build_load_env_ops).  The start_idx
-      # from idx_map prevents the rooting pass from reusing indices already
-      # consumed by the translator; lifted lambdas in idx_map carry body_next_idx
-      # which starts after the n_caps IRLoadEnvSlot names.
+      # Rooting temps come from sprout_ir.temp_ssa, as the translator's do, so
+      # they start at idx_map's index: the first one the translator left unused
+      # (for a lifted lambda, after its IRLoadEnvSlot names).
       match dict_get(name, idx_map) with
-      | Just i -> rewrite_fn(f, i, prefix_for_fn(name), summary)
-      | Nothing -> rewrite_fn(f, 0, prefix_for_fn(name), summary)
-
-# SSA fresh-name prefix for root-slot temps the rooting pass generates: always
-# "%t$".  Must match ast_to_ir.fresh_name (which hardcodes "%t$" for every body
-# temp) so body temps and rooting temps share one namespace AND are disjoint
-# from source-derived names.  '$' cannot appear in a source identifier, so a
-# source param named `t<N>` (→ %t<N>) can never collide with %t$<N>.
-# O(n) in the function name length.
-fn prefix_for_fn(name: String) -> String =
-  "%t$"
+      | Just i -> rewrite_fn(f, i, summary)
+      | Nothing -> rewrite_fn(f, 0, summary)
 
 fn rewrite_fns(fns: List sprout_ir.IRFunction, idx_map: Dict Int, summary: Dict Bool,
                acc: List sprout_ir.IRFunction) -> List sprout_ir.IRFunction =

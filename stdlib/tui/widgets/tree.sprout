@@ -73,13 +73,12 @@ type Mark (..) =
 
 type Row = (path: List String, label: String, depth: Int, mark: Mark)
 
+# Declining is what keeps an application's other traffic flowing past a
+# widget it was merely addressed through.
 fn tr_handler(t: Tr m, d: widget.Delivery m) -> Reply m =
-  match d with
-  # Declining is what keeps an application's other traffic flowing past a
-  # widget it was merely addressed through.
-  | widget.ToMsg msg -> refilled(t, widget.decoded(t.opts.on_content, msg))
-  | widget.ToFocus x -> Just(((t with (has_focus = x)), Nil, Nil))
-  | widget.ToEvent e -> if t.has_focus then tr_event(t, e) else Nothing
+  widget.focus_gated(t.has_focus, \x -> ((t with (has_focus = x)), Nil, Nil),
+                     \msg -> refilled(t, widget.decoded(t.opts.on_content, msg)),
+                     tr_event(t, _), d)
 
 fn tr_event(t: Tr m, e: event.Event) -> Reply m =
   match e with

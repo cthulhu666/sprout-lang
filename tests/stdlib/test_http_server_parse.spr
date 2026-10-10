@@ -42,7 +42,7 @@ fn main() -> Unit !{IO} =
       describe(parse("POST /x HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\n\r\nabc")),
       "POST /x body=abc"),
     # Multiple headers before the body — exercises parse_header_line across several
-    # lines and the body-offset computation (request_body_start).
+    # lines and the body-offset computation.
     check_eq("request with multiple headers + body",
       describe(parse("POST /y HTTP/1.1\r\nHost: h\r\nX-Tag: v\r\nContent-Length: 5\r\n\r\nhello")),
       "POST /y body=hello"),
@@ -97,5 +97,23 @@ fn main() -> Unit !{IO} =
     # assuming `body_start` is already a byte count. `café` is 5 bytes.
     check_eq("multi-byte path with a body keeps both intact",
       describe(parse("POST /日本 HTTP/1.1\r\nContent-Length: 5\r\n\r\ncafé")),
-      "POST /日本 body=café")
+      "POST /日本 body=café"),
+
+    # Body framing shared with the socket path: too few bytes is an Err, too many are cut off.
+    check_eq("an ASCII body shorter than Content-Length is a clean Err",
+      describe(parse("POST /x HTTP/1.1\r\nContent-Length: 5\r\n\r\nabc")),
+      "Err request body shorter than Content-Length"),
+    check_eq("a multi-byte body one byte short is a clean Err",
+      describe(parse("POST /x HTTP/1.1\r\nContent-Length: 6\r\n\r\ncafé")),
+      "Err request body shorter than Content-Length"),
+    check_eq("an ASCII body longer than Content-Length is trimmed",
+      describe(parse("POST /x HTTP/1.1\r\nContent-Length: 3\r\n\r\nabcdef")),
+      "POST /x body=abc"),
+    check_eq("multi-byte bytes past Content-Length are trimmed",
+      describe(parse("POST /x HTTP/1.1\r\nContent-Length: 5\r\n\r\ncafé日本")),
+      "POST /x body=café"),
+    # The first terminator ends the headers; a second one in the body is body.
+    check_eq("a blank line inside the body does not move the header end",
+      describe(parse("POST /x HTTP/1.1\r\nContent-Length: 6\r\n\r\nab\r\n\r\ncd")),
+      "POST /x body=ab\r\n\r\n")
   ])

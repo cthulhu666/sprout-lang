@@ -1,4 +1,5 @@
 module stdlib.compiler.types
+import stdlib.compiler.source as source
 import stdlib.string as string
 
 # ---------------------------------------------------------------------------
@@ -168,6 +169,27 @@ export let alias_fn_prefix: String = "@aliasfn:"
 
 export let alias_param_prefix: String = "__aliasparam__"
 
+# Checker-env marker keys. Every writer and reader builds them here, so a key
+# cannot be spelled two ways; a prefix scan uses the family's `_tag`.
+#   @class:<method or class>        @inst:<class>:<head>      @arity:<ctor>
+#   @fwd:<tyvar>:<class>            @eta_fwd:<tyvar>:<class>   @eta_fwdvar:<tyvar>
+#   @super:<class>:<superclass>     @rec:<record>:<field>
+export let class_marker_tag: String = "@class:"
+export let fwd_marker_tag: String = "@fwd:"
+export let super_marker_tag: String = "@super:"
+export let rec_marker_tag: String = "@rec:"
+
+export fn class_marker_key(name: String) -> String = class_marker_tag ++ name
+export fn inst_marker_key(class_name: String, head: String) -> String = "@inst:" ++ class_name ++ ":" ++ head
+export fn arity_marker_key(ctor: String) -> String = "@arity:" ++ ctor
+export fn fwd_marker_key(tyvar: String, class_name: String) -> String = fwd_marker_tag ++ tyvar ++ ":" ++ class_name
+export fn eta_fwd_marker_key(tyvar: String, class_name: String) -> String = "@eta_fwd:" ++ tyvar ++ ":" ++ class_name
+export fn eta_fwdvar_marker_key(tyvar: String) -> String = "@eta_fwdvar:" ++ tyvar
+export fn super_marker_prefix(class_name: String) -> String = super_marker_tag ++ class_name ++ ":"
+export fn super_marker_key(class_name: String, super_name: String) -> String = super_marker_prefix(class_name) ++ super_name
+export fn rec_fields_prefix(rec_name: String) -> String = rec_marker_tag ++ rec_name ++ ":"
+export fn rec_field_key(rec_name: String, field: String) -> String = rec_fields_prefix(rec_name) ++ field
+
 export fn type_mentions_skolem(t: Type) -> Bool =
   match t with
   | TVar _ -> false
@@ -207,6 +229,64 @@ export fn class_methods_for(class_name: String, class_order: Dict (List String))
   match dict_get(class_name, class_order) with
   | Nothing -> Nil
   | Just ms -> ms
+
+# Aligns `pattern` with `actual` and binds each pattern variable to the subtree it
+# lines up with. A shape mismatch binds nothing below it; no unifier is needed
+# because `actual` is already the concrete side.
+export fn match_type_vars(pattern: Type, actual: Type, acc: Dict Type) -> Dict Type =
+  match pattern with
+  | TVar name -> dict_set(tyvar_identity(name), actual, acc)
+  | TConst _ -> acc
+  | TApp pbase parg ->
+      match actual with
+      | TApp abase aarg -> match_type_vars(parg, aarg, match_type_vars(pbase, abase, acc))
+      | _ -> acc
+  | TFunc pparam pret _ _ ->
+      match actual with
+      | TFunc aparam aret _ _ -> match_type_vars(pret, aret, match_type_vars(pparam, aparam, acc))
+      | _ -> acc
+  | TThunk pret _ ->
+      match actual with
+      | TThunk aret _ -> match_type_vars(pret, aret, acc)
+      | _ -> acc
+  | TTuple pitems ->
+      match actual with
+      | TTuple aitems -> match_type_var_lists(pitems, aitems, acc)
+      | _ -> acc
+
+fn match_type_var_lists(patterns: List Type, actuals: List Type, acc: Dict Type) -> Dict Type =
+  match (patterns, actuals) with
+  | (Nil, _) -> acc
+  | (_, Nil) -> acc
+  | (Cons p prest, Cons a arest) -> match_type_var_lists(prest, arest, match_type_vars(p, a, acc))
+
+# The class-parameter type a value-position method is used at: its scheme aligned
+# with `actual`, read at the class parameter. `fallback` when the class, the
+# method or the binding is missing. Lowering's eta expansion and resolve's
+# Evidence both read it; they pass different `class_params` tables (see
+# typed_ast.ClassTables), which differ for a short class name and for a declared
+# name that is also another class's short name.
+export fn eta_class_type(class_params: Dict String, scheme_env: Dict Scheme, class_name: String,
+                         method_name: String, actual: Type, fallback: Type) -> Type =
+  let Just class_param = dict_get_or_short(class_name, class_params) else fallback
+      Just scheme = dict_get_or_short(method_name, scheme_env) else fallback
+      Just class_type = dict_get(class_param, match_type_vars(scheme_type(scheme), actual, dict_empty())) else fallback
+  in class_type
+
+fn dict_get_or_short(name: String, d: Dict v) -> Maybe v =
+  match dict_get(name, d) with
+  | Just v -> Just(v)
+  | Nothing -> dict_get(string.after_last_dot(name), d)
+
+# The outermost concrete constructor's name, or Nothing for a variable or arrow.
+export fn first_concrete_head_str(t: Type) -> Maybe String =
+  match t with
+  | TConst name -> Just(type_id_name(name))
+  | TApp base _ -> first_concrete_head_str(base)
+  | TTuple items -> Just(tuple_head(list_length(items)))
+  | TVar _ -> Nothing
+  | TFunc _ _ _ _ -> Nothing
+  | TThunk _ _ -> Nothing
 
 # Ordered witness slots for ONE existential constraint's class: one (eff_class,
 # method) pair per method across the class and its transitive superclasses, in
@@ -390,15 +470,7 @@ export fn effect_label_is_known(name: String) -> Bool =
 # Here rather than in its callers for the reason `effect_from_labels` is: `infer`,
 # `checker` and `iface_codec` each read annotations, and a lexical rule they do
 # not share is one they will disagree on.
-export fn effect_label_is_var(name: String) -> Bool =
-  if str_find(name, ".") == -1 then starts_lowercase(name) else false
-
-# `char_at` is what makes the empty name answer false rather than depend on how
-# a zero-length slice compares.
-fn starts_lowercase(name: String) -> Bool =
-  match string.char_at(name, 0) with
-  | Nothing -> false
-  | Just ch -> string.is_ascii_lower(ch)
+export fn effect_label_is_var(name: String) -> Bool = source.is_lowercase_name(name)
 
 # Every name an `EffectVar` may legitimately carry: what source can write, plus
 # the `$eN` that `unifier.fresh_effect` generates and an interface records

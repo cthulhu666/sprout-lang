@@ -155,16 +155,10 @@ fn remaining_ms(deadline: Int) -> Int !{IO} =
     now <- time.now_micros()
     if now >= deadline then 0 else (deadline - now) / 1000
 
-fn find_headers_end(raw: String) -> Maybe Int =
-  string.find(raw, "\r\n\r\n")
-
-fn find_line_end(raw: String) -> Maybe Int =
-  string.find(raw, "\r\n")
-
 # Cut the header block into lines on CRLF, STRICTLY — a bare CR or bare LF left inside a line is a
 # rejection, not a separator and not something to delete.
 #
-# The strictness is forced by `find_headers_end`, which locates the end of the block with a literal
+# The strictness is forced by `crlf_crlf`, which locates the end of the block with a literal
 # "\r\n\r\n". A splitter that also treated a lone LF as a line terminator therefore disagreed with the
 # block terminator about what ends a line, and that disagreement is the whole of the smuggling
 # primitive: given `X-Note: hi\nContent-Length: 9\r\n`, a strictly-CRLF intermediary in front reads
@@ -292,29 +286,20 @@ fn content_length_result(m: Maybe Int) -> ServerResult Int =
   | Just n -> if n >= 0 then Ok(n) else Err(HttpInvalidRequest("invalid Content-Length"))
   | Nothing -> Err(HttpInvalidRequest("invalid Content-Length"))
 
-fn request_body_start(raw: String) -> Maybe Int =
-  map(\pos -> pos + 4, find_headers_end(raw))
-
-# The header block spans from just past the request line to the blank-line terminator.
-# A header-less request (HTTP/1.0-style) has the terminator right after the request
-# line, inverting the window; `slice_between` answers "" for that by construction.
-fn header_block(raw: String, line_end: Int, headers_end: Int) -> String =
-  string.slice_between(raw, header_start, headers_end)
-where
-  header_start = line_end + 2
-
-fn parse_request_prefix(raw: String) -> ServerResult (RequestLine, Dict String, Int) =
-  match find_headers_end(raw) with
-  | Nothing -> Err(HttpInvalidRequest("missing header terminator"))
-  | Just headers_end ->
-      match find_line_end(raw) with
-      | Nothing -> Err(HttpInvalidRequest("missing request line terminator"))
-      | Just line_end ->
-          do
-            req <- result_from_maybe(HttpInvalidRequest("invalid request line"), parse_request_line(string.take(raw, line_end)))
-            headers <- parse_headers(header_block(raw, line_end, headers_end))
-            content_length <- parse_body_framing(headers)
-            Ok((req, headers, content_length))
+# The request line and header block of `raw`, whose header terminator ends at byte `body_start`.
+# Both are cut at ASCII CRLFs, so decoding the two pieces accepts exactly the blocks that decoding
+# the whole would. A header-less request has an inverted header window, which slices to empty.
+fn request_head(raw: Bytes, body_start: Int) -> ServerResult (RequestLine, Dict String, Int) =
+  match bytes.find(raw, crlf()) with
+  | Nothing -> Err(HttpInvalidRequest("missing request line terminator"))
+  | Just line_end ->
+      do
+        line <- decode_header_block(bytes.take(raw, line_end))
+        block <- decode_header_block(bytes.slice_between(raw, line_end + 2, body_start - 4))
+        req <- result_from_maybe(HttpInvalidRequest("invalid request line"), parse_request_line(line))
+        headers <- parse_headers(block)
+        content_length <- parse_body_framing(headers)
+        Ok((req, headers, content_length))
 
 fn build_request(req: RequestLine, headers: Dict String, body: Bytes) -> HttpRequest =
   match req with
@@ -322,48 +307,29 @@ fn build_request(req: RequestLine, headers: Dict String, body: Bytes) -> HttpReq
       match pv with
       | RequestPathVersion path version -> HttpRequest(method, path, HttpRequestMeta(version, headers, body))
 
+# The request, once `raw` holds its whole body; Nothing while it does not. `Content-Length` counts
+# bytes, and bytes past it belong to the next request. The body stays Bytes, so a count that splits
+# a codepoint parses here and fails in `request_body`.
+fn complete_request(raw: Bytes, body_start: Int, head: (RequestLine, Dict String, Int)) -> Maybe HttpRequest =
+  if bytes.length(raw) - body_start >= content_length then
+    Just(build_request(req, headers, bytes.slice(raw, body_start, content_length)))
+  else Nothing
+where
+  (req, headers, content_length) = head
+
+# Frames an already-read request the way the socket path does, over the same bytes.
 export fn parse(raw: String) -> ServerResult HttpRequest =
-  do
-    prefix <- parse_request_prefix(raw)
-    parse_from_prefix(raw, prefix)
-
-fn parse_from_prefix(raw: String, prefix: (RequestLine, Dict String, Int)) -> ServerResult HttpRequest =
-  err_or_request(req, headers, content_length, raw)
-where
-  (req, headers, content_length) = prefix
-
-# `Content-Length` counts BYTES, so every measurement and every cut in the body region has to be
-# byte-denominated. `string.length`/`take`/`drop` are all CODEPOINT-denominated (str_slice seeks
-# UTF-8 boundaries), and framing the body with them mis-framed any body containing a multi-byte
-# character in both directions: `café` (5 bytes, 4 codepoints) under `Content-Length: 5` was
-# declared short, and taking 5 codepoints of `café!` swallowed a trailing byte that on a pipelined
-# connection belongs to the NEXT request. ASCII hid it — there the two index spaces coincide, and
-# every test predating this used an ASCII body (concurrency review C5).
-#
-# `body_start` is a codepoint offset (find_headers_end -> str_find), so it cannot index `raw_bytes`
-# directly; byte_length of the prefix converts it. Deriving the offset rather than assuming
-# header_bytes == body_start is what keeps a non-ASCII HEADER value from shifting the body.
-fn err_or_request(req: RequestLine, headers: Dict String, content_length: Int, raw: String) -> ServerResult HttpRequest =
-  match request_body_start(raw) with
+  match bytes.find(block, crlf_crlf()) with
   | Nothing -> Err(HttpInvalidRequest("missing header terminator"))
-  | Just body_start -> framed_body(req, headers, content_length, raw, body_start)
-
-# No UTF-8 validation here any more, and that is the substantive change: the body is Bytes, so a
-# payload that is not text is DELIVERED rather than refused. The validation moved to `request_body`,
-# which returns a Result — so a text handler still cannot mistake bytes for a decoded String, but a
-# binary handler is no longer blocked by a decision made on its behalf during the read.
-#
-# A Content-Length that cuts a multi-byte character in half therefore parses successfully now (the
-# bytes are exactly what the client announced) and surfaces as `Err Utf8Error` from `request_body`,
-# which is the honest place for it: the framing was valid, the decoding is not.
-fn framed_body(req: RequestLine, headers: Dict String, content_length: Int, raw: String, body_start: Int) -> ServerResult HttpRequest =
-  if bytes.length(raw_bytes) - header_bytes < content_length then
-    Err(HttpInvalidRequest("request body shorter than Content-Length"))
-  else
-    Ok(build_request(req, headers, bytes.slice(raw_bytes, header_bytes, content_length)))
+  | Just at -> parse_block(block, at + 4)
 where
-  raw_bytes = bytes.from_string(raw)
-  header_bytes = string.byte_length(string.take(raw, body_start))
+  block = bytes.from_string(raw)
+
+fn parse_block(raw: Bytes, body_start: Int) -> ServerResult HttpRequest =
+  do
+    head <- request_head(raw, body_start)
+    result_from_maybe(HttpInvalidRequest("request body shorter than Content-Length"),
+                      complete_request(raw, body_start, head))
 
 # Reads use net.read_avail_timeout (recoverable AND bounded): a socket failure becomes an Err in the
 # ServerResult, not an exit(1), so one client's connection reset drops just that connection.
@@ -420,6 +386,9 @@ where
 fn crlf_crlf() -> Bytes =
   bytes.from_string("\r\n\r\n")
 
+fn crlf() -> Bytes =
+  bytes.from_string("\r\n")
+
 fn read_until_headers(conn: borrowing TcpConnection, parts: List Builder, total: Int, overlap: Bytes,
                       deadline: Int, max_bytes: Int) -> ServerResult (Bytes, Int) !{IO} =
   if total > max_bytes then Err(HttpHeadersTooLarge)
@@ -466,8 +435,7 @@ fn read_request(conn: borrowing TcpConnection, config: ServerConfig) -> ServerRe
 
 fn read_request_from_block(conn: borrowing TcpConnection, block: (Bytes, Int), config: ServerConfig) -> ServerResult HttpRequest !{IO} =
   do
-    header_text <- decode_header_block(bytes.slice(raw, 0, body_start))
-    prefix <- parse_request_prefix(header_text)
+    prefix <- request_head(raw, body_start)
     continue_read_request(conn, raw, body_start, prefix, config)
 where
   (raw, body_start) = block
@@ -535,17 +503,18 @@ fn read_remaining_body(conn: borrowing TcpConnection, parts: List Builder, remai
 fn continue_read_request(conn: borrowing TcpConnection, raw: Bytes, body_start: Int,
                          prefix: (RequestLine, Dict String, Int), config: ServerConfig) -> ServerResult HttpRequest !{IO} =
   if content_length > config.max_body_bytes then Err(HttpBodyTooLarge)
-  else if bytes.length(body) >= content_length then
-    Ok(build_request(req, headers, bytes.slice(body, 0, content_length)))
   else
-    do
-      # Total, scaled by the promised size: enough time to receive `content_length` bytes at
-      # `min_rate_bps`, plus `body_ms` of grace. Never re-armed, so occupancy is bounded.
-      body_deadline <- deadline_in(config.body_ms + rate_ms(content_length, config.min_rate_bps))
-      full <- read_remaining_body(conn, [bytes.builder_bytes(body)], content_length - bytes.length(body), body_deadline)
-      # Trim to exactly the promised length: the final chunk can overshoot, and on a pipelined
-      # connection those extra bytes are the next request rather than this body.
-      Ok(build_request(req, headers, bytes.slice(full, 0, content_length)))
+    match complete_request(raw, body_start, prefix) with
+    | Just request -> Ok(request)
+    | Nothing ->
+        do
+          # Total, scaled by the promised size: enough time to receive `content_length` bytes at
+          # `min_rate_bps`, plus `body_ms` of grace. Never re-armed, so occupancy is bounded.
+          body_deadline <- deadline_in(config.body_ms + rate_ms(content_length, config.min_rate_bps))
+          full <- read_remaining_body(conn, [bytes.builder_bytes(body)], content_length - bytes.length(body), body_deadline)
+          # Trim to exactly the promised length: the final chunk can overshoot, and on a pipelined
+          # connection those extra bytes are the next request rather than this body.
+          Ok(build_request(req, headers, bytes.slice(full, 0, content_length)))
 where
   (req, headers, content_length) = prefix
   # `body_start` is already a byte offset — see read_until_headers. No conversion, and so no place
@@ -971,12 +940,7 @@ fn cookie_octet(byte: Int) -> Bool =
 
 fn all_bytes(ok: Int -> Bool, raw: Bytes, index: Int, total: Int) -> Bool =
   if index >= total then true
-  else ok(byte_or_minus_one(raw, index)) && all_bytes(ok, raw, index + 1, total)
-
-fn byte_or_minus_one(raw: Bytes, index: Int) -> Int =
-  match bytes.get(raw, index) with
-  | Just value -> value
-  | Nothing -> -1
+  else ok(bytes.get_or(raw, index, -1)) && all_bytes(ok, raw, index + 1, total)
 
 fn cookie_octets(value: String) -> Bool =
   all_bytes(cookie_octet, encoded, 0, bytes.length(encoded))

@@ -254,20 +254,9 @@ fn diags_to_json(diags: List compiler.Diagnostic) -> json.Json =
 # An applied query (`Maybe a`) additionally tries its outermost constructor
 # (`Maybe`), so higher-kinded instances (`Functor Maybe`) also show up.
 
-# A TypeName is a type *variable* iff it is unqualified (no module dot) and
-# starts lowercase.  Bundled user constructors carry a dotted module prefix and
-# prelude constructors start uppercase, so both stay rigid.
-fn name_starts_lower(name: String) -> Bool =
-  match str_char_at(name, 0) with
-  | Nothing -> false
-  | Just c -> c >= 'a' && c <= 'z'
-
-fn is_tyvar_name(name: String) -> Bool =
-  str_find(name, ".") == -1 && name_starts_lower(name)
-
 fn te_var_names(te: ast.TypeExpr, acc: List String) -> List String =
   match te with
-  | ast.TypeName name -> if is_tyvar_name(name) then Cons(name, acc) else acc
+  | ast.TypeName name -> if source.is_lowercase_name(name) then Cons(name, acc) else acc
   | ast.TypeApply base arg -> te_var_names(arg, te_var_names(base, acc))
   | ast.TypeArrow l r _ _ -> te_var_names(r, te_var_names(l, acc))
   | ast.TypeThunk r _ -> te_var_names(r, acc)

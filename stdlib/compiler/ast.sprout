@@ -128,6 +128,12 @@ export fn param_mode_of(p: Param) -> ParamMode =
   match p with
   | Param _ _ m -> m
 
+export fn param_name(p: Param) -> String =
+  match p with
+  | Param name _ _ -> name
+
+export fn param_names(ps: List Param) -> List String = list_map(param_name, ps)
+
 # --- Match branches and do steps (forward-reference Expr defined below) ---
 
 export type MatchBranch (..) =
@@ -224,6 +230,13 @@ export fn expr_pos(e: Expr) -> source.SourcePos =
   | ComprehensionExpr _ _ pos -> pos
   | LetBindExpr _ _ _ _ pos -> pos
   | TryExpr _ pos -> pos
+
+# Folds a dotted remainder `from.x` into nested GetFieldExpr on `base`. Parser,
+# bundler and infer all split a chain here, so they agree on where it divides.
+export fn build_field_chain(base: Expr, rest: String, pos: source.SourcePos) -> Expr =
+  match string.split_once(rest, ".") with
+  | Nothing -> GetFieldExpr(base, rest, pos)
+  | Just (field, more) -> build_field_chain(GetFieldExpr(base, field, pos), more, pos)
 
 # --- Binding elaboration ---
 # The match each binding form means. Inference rewrites through these, and lint
@@ -872,19 +885,10 @@ export type Program (..) =
 # that disagreed with the type checker about what a value is would recommend
 # rewrites the checker then refuses.
 
-export fn is_lowercase_name(name: String) -> Bool =
-  str_find(name, ".") == -1 &&
-  (c == "a" || c == "b" || c == "c" || c == "d" || c == "e" ||
-   c == "f" || c == "g" || c == "h" || c == "i" || c == "j" ||
-   c == "k" || c == "l" || c == "m" || c == "n" || c == "o" ||
-   c == "p" || c == "q" || c == "r" || c == "s" || c == "t" ||
-   c == "u" || c == "v" || c == "w" || c == "x" || c == "y" || c == "z")
-  where c = str_slice(name, 0, 1)
-
 # A call whose callee is a data constructor (uppercase head), not a function.
 # Constructor applications of values are syntactic values; function calls are not.
 export fn is_constructor_ref(name: String) -> Bool =
-  is_lowercase_name(string.after_last_dot(name)) == false
+  source.is_lowercase_name(string.after_last_dot(name)) == false
 
 # Syntactic value restriction (W3/F-VALRESTR): only generalize a top-level `let`
 # whose initializer is a syntactic value — a literal, variable, lambda, tuple of

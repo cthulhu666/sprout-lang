@@ -162,10 +162,7 @@ fn ticked(p: Pane m) -> widget.Handled(Pane m) m =
   | Manually -> (p, Nil, Nil)
 
 fn pane_handler(p: Pane m, d: widget.Delivery m) -> Reply m =
-  match d with
-  | widget.ToMsg msg -> answered(p, msg)
-  | widget.ToFocus x -> Just(focused(p, x))
-  | widget.ToEvent e -> if p.has_focus then pane_event(p, e) else Nothing
+  widget.focus_gated(p.has_focus, focused(p, _), answered(p, _), pane_event(p, _), d)
 
 # The EDGE out of focus, so a blur repeated cannot save twice. Gaining focus is
 # not a reason to write anything. The messages do reach the loop:

@@ -515,12 +515,90 @@ export type IRBlock (..) = IRBlock String (List IROp)
 # determined by the AST→IR translator from the function body's inferred type.
 export type IRFunction (..) = IRFunction String (List (String, IRType)) String (List IRBlock)
 
+export fn ir_fn_name(f: IRFunction) -> String =
+  match f with | IRFunction n _ _ _ -> n
+
 # The SSA name of a parameter.  LLVM keeps local values and block labels in ONE
 # namespace, so a bare `%entry` collides with the entry block; '$' cannot occur
 # in a Sprout identifier, so this prefix is disjoint from every label.  Every
 # module that names a param goes through here, or the rooting pass — which keys
 # its heap-origin set on these names — silently stops seeing parameters.
 export fn param_ssa(name: String) -> String = "%p$" ++ name
+
+# The SSA name of synthetic temporary `i`. The translator and the rooting pass
+# both name temps here, from one counter. '$' keeps them disjoint from every
+# source-derived name: a source `t0` lowers to `%t0`, never `%t$0`.
+export fn temp_ssa(i: Int) -> String = "%t$" ++ int_to_string(i)
+
+# The function a direct call names. Nothing for every other op, including the
+# indirect IRApplyClosure and IRTailCall. Exhaustive: a new call op must say
+# here whether it names a callee, or the rooting summary never sees the call.
+export fn op_direct_callee(op: IROp) -> Maybe String =
+  match op with
+  | IRConst _ _ -> Nothing
+  | IRRet _ -> Nothing
+  | IRRetVoid -> Nothing
+  | IRIAdd _ _ _ -> Nothing
+  | IRISub _ _ _ -> Nothing
+  | IRIMul _ _ _ -> Nothing
+  | IRIDiv _ _ _ -> Nothing
+  | IRCheckedArith _ _ _ _ -> Nothing
+  | IRIAnd _ _ _ -> Nothing
+  | IRIOr _ _ _ -> Nothing
+  | IRIXor _ _ _ -> Nothing
+  | IRIShl _ _ _ -> Nothing
+  | IRIAShr _ _ _ -> Nothing
+  | IRILShr _ _ _ -> Nothing
+  | IRFloatConst _ _ -> Nothing
+  | IRFAdd _ _ _ -> Nothing
+  | IRFSub _ _ _ -> Nothing
+  | IRFMul _ _ _ -> Nothing
+  | IRFDiv _ _ _ -> Nothing
+  | IRFCmp _ _ _ _ -> Nothing
+  | IRFNeg _ _ -> Nothing
+  | IRSIToF _ _ -> Nothing
+  | IRBoolNot _ _ -> Nothing
+  | IRINeg _ _ -> Nothing
+  | IRLoadGlobal _ _ -> Nothing
+  | IRStoreGlobal _ _ -> Nothing
+  | IRRegisterGlobalRoot _ -> Nothing
+  | IRMakeTuple _ _ -> Nothing
+  | IRGetTupleField _ _ _ _ -> Nothing
+  | IRICmp _ _ _ _ -> Nothing
+  | IRBr _ -> Nothing
+  | IRCondBr _ _ _ -> Nothing
+  | IRPhi _ _ _ -> Nothing
+  | IRCall _ _ fname _ -> Just(fname)
+  | IRCallUnboxed2 _ _ _ fname _ -> Just(fname)
+  | IRRetUnboxed2 _ _ _ -> Nothing
+  | IRCallUnboxed3 _ _ _ _ fname _ -> Just(fname)
+  | IRRetUnboxed3 _ _ _ _ -> Nothing
+  | IRStrConst _ _ _ -> Nothing
+  | IRStrSlice _ _ _ _ -> Nothing
+  | IRStrConcat _ _ _ -> Nothing
+  | IRStrEq _ _ _ -> Nothing
+  | IRStrCompare _ _ _ _ -> Nothing
+  | IRPrintStr _ _ _ -> Nothing
+  | IRStrFromInt _ _ -> Nothing
+  | IRMakeCtor _ _ _ _ -> Nothing
+  | IRMkClosure _ _ _ _ -> Nothing
+  | IRApplyClosure _ _ _ -> Nothing
+  | IRLoadEnvSlot _ _ _ _ -> Nothing
+  | IRRoot _ _ _ -> Nothing
+  | IRUnroot _ _ -> Nothing
+  | IRGetTag _ _ -> Nothing
+  | IRGetField _ _ _ _ -> Nothing
+  | IRVecLenD _ _ -> Nothing
+  | IRVecGetD _ _ _ -> Nothing
+  | IRVecSetD _ _ _ _ -> Nothing
+  | IRAbortMatch -> Nothing
+  | IRPanic _ -> Nothing
+  | IRZextI1ToI64 _ _ -> Nothing
+  | IRTruncI64ToI1 _ _ -> Nothing
+  | IRTcoEntry _ _ -> Nothing
+  | IRTcoLoad _ _ _ _ -> Nothing
+  | IRTcoBack _ _ _ -> Nothing
+  | IRTailCall _ _ _ _ -> Nothing
 
 # CtorReg carries the metadata emitted as @sprout_register_ctor calls in @main.
 # Fields: name (source-level, possibly qualified), tag, arity, field_kinds.

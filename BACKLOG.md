@@ -1192,11 +1192,6 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   qualified. Pre-existing, verified against builds either side of the `no_prelude` floor with
   byte-identical outcomes: the hazard is the bare namespace a `no_prelude` file already has, and it
   applies to any top-level name colliding with a runtime symbol.
-- [ ] `P2` **An `import` after `no_prelude` is silently dropped.** `no_prelude` then
-  `import demo.tokbar (bar_value)` fails as `Unknown variable: bar_value`; the reverse order works.
-  `module_loader.collect_imports_from_lines` stops at the first line that is not `module`, `import`,
-  blank or a comment, so `no_prelude` ends the import scan. Spec §3.1 calls `no_prelude` a header
-  line like `import`, with no order among them. Found while fixing #422.
 - [ ] `P3` **A module sees a `no_prelude` entry's types bare, unimported.** A module imported by a
   `no_prelude` entry that declares `type Token` can write `fn tok_value(t: Token)` with no import,
   and `Token` resolves to the entry's type. The entry keeps the empty module name, so its types are
@@ -2334,7 +2329,8 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
 
 ### Prelude-helper cleanup arc (#602, #603) — review residuals
 
-Cleanups the 2026-10-09 reviews of #606 and #613 reported and left. Confirm each before acting.
+Cleanups the 2026-10-09/10 reviews of #606, #613 and #617 reported and left. Confirm each before
+acting.
 
 - [ ] `P3` **TUI: the reply tuple and one loop are still spelled out after #606.** `app.sprout`'s
   `Step` and `Update` aliases are private, so `ide/app.sprout` (7 sites), the `tui_files` and
@@ -2353,6 +2349,12 @@ Cleanups the 2026-10-09 reviews of #606 and #613 reported and left. Confirm each
 - [ ] `P3` **`ast_to_ir`: bind-then-one-arm-match leftovers.** `translate_tail_*` and
   `translate_call` bind a result, then destructure it with a one-arm `match` (`er`, `br`, `r` — the
   last shadowed by `| Just r`); a tuple `<-` says it. Other one-arm matches only name `fresh_name`s.
+- [ ] `P3` **Class-parameter lookup: lowering and resolve read different tables.**
+  `typed_ast.class_tables` builds `params` (declared names) and `params_with_short` (also each
+  class's last segment). Lowering hands `types.eta_class_type` the second, resolve the first, so a
+  short class name finds a parameter in lowering only. Where a bare class shares a short name with
+  `x.B`, decl order picks lowering's answer. Pin resolve's answer for a short name with a test,
+  then keep one table.
 
 ### Compiler / Stdlib Misc
 

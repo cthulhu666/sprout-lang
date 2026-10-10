@@ -2,6 +2,7 @@ module main
 
 import stdlib.test (check_eq, run_suite)
 import stdlib.compiler.module_loader as module_loader
+import stdlib.string as string
 
 # THE SCANNER MUST REPORT THE TEXT IT CONSUMED.
 #
@@ -24,6 +25,15 @@ fn names_of(line: String) -> List String =
   match module_loader.parse_import_line(line) with
   | Just (module_loader.ImportSelective _ names) -> names
   | _ -> Nil
+
+# Each import `collect_imports` finds, as `module: names`.
+fn scanned(src: String) -> List String =
+  list_map(spec_line, module_loader.collect_imports(src))
+
+fn spec_line(spec: module_loader.ImportSpec) -> String =
+  match spec with
+  | module_loader.ImportSelective m names -> m ++ ": " ++ string.join(", ", names)
+  | module_loader.ImportAlias m alias -> m ++ " as " ++ alias
 
 fn main() -> Unit !{IO} =
   run_suite("import list scan", [
@@ -57,5 +67,13 @@ fn main() -> Unit !{IO} =
     # The separator is dropped, so the name is reported in one normalised
     # spelling however it was written — one shape for the diagnostic to quote.
     check_eq("a tab is whitespace too",
-             names_of("import demo.m (Alpha\t(..), beta)"), ["Alpha(..)", "beta"])
+             names_of("import demo.m (Alpha\t(..), beta)"), ["Alpha(..)", "beta"]),
+    # `no_prelude` is a header line, so the scan goes on past it, to the same
+    # boundary `strip_headers` uses.
+    check_eq("an import after no_prelude is collected",
+             scanned("no_prelude\nimport demo.m (a, b)\n"), ["demo.m: a, b"]),
+    check_eq("the same import without no_prelude agrees",
+             scanned("import demo.m (a, b)\n"), ["demo.m: a, b"]),
+    check_eq("an import after a no_prelude-like name is not",
+             scanned("no_prelude_x\nimport demo.m (a, b)\n"), [])
   ])

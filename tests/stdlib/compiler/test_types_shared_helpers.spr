@@ -1,0 +1,50 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.compiler.types as types
+
+# The type helpers that lowering, resolve and linear_check share.
+
+fn con(n: String) -> types.Type = types.TConst(types.type_id(n))
+fn var(n: String) -> types.Type = types.TVar(types.tyvar_id(n))
+fn app(f: types.Type, x: types.Type) -> types.Type = types.TApp(f, x)
+
+fn bound(pattern: types.Type, actual: types.Type, v: String) -> String =
+  match dict_get(v, types.match_type_vars(pattern, actual, dict_empty())) with
+  | Nothing -> "-"
+  | Just t -> types.type_to_string(t)
+
+# Class `Show a` whose method `show` has the scheme `a String`.
+fn eta(class_name: String, method: String, used: types.Type) -> String =
+  types.type_to_string(types.eta_class_type(dict_set("Show", "a", dict_empty()),
+                                            dict_set("show", types.mono(app(var("a"), con("String"))), dict_empty()),
+                                            class_name, method, used, con("Fallback")))
+
+fn head(t: types.Type) -> String = maybe_with_default("-", types.first_concrete_head_str(t))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    assert_eq(state, "a variable binds the whole type", bound(var("a"), con("Int"), "a"), "Int")
+    assert_eq(state, "an application binds its argument",
+      bound(app(con("List"), var("a")), app(con("List"), con("Int")), "a"), "Int")
+    assert_eq(state, "a higher-kinded variable binds the head",
+      bound(app(var("f"), var("a")), app(con("Maybe"), con("Int")), "f"), "Maybe")
+    assert_eq(state, "a shape mismatch binds nothing",
+      bound(app(con("List"), var("a")), con("Int"), "a"), "-")
+    assert_eq(state, "a tuple aligns pairwise",
+      bound(types.TTuple([var("a"), var("b")]), types.TTuple([con("Int"), con("Bool")]), "b"), "Bool")
+    assert_eq(state, "a shorter actual tuple stops early",
+      bound(types.TTuple([var("a"), var("b")]), types.TTuple([con("Int")]), "b"), "-")
+
+    assert_eq(state, "head of a constructor", head(con("Int")), "Int")
+    assert_eq(state, "head of an application", head(app(app(con("Either"), con("Int")), var("b"))), "Either")
+    assert_eq(state, "head of a tuple", head(types.TTuple([con("Int"), con("Int")])), "Tuple2")
+    assert_eq(state, "a variable has no head", head(var("a")), "-")
+
+    assert_eq(state, "eta type read at the class parameter, by short names",
+      eta("prelude.Show", "prelude.show", app(con("Int"), con("String"))), "Int")
+    assert_eq(state, "an unknown class falls back", eta("Eq", "show", app(con("Int"), con("String"))), "Fallback")
+    assert_eq(state, "an unknown method falls back", eta("Show", "eq", app(con("Int"), con("String"))), "Fallback")
+    assert_eq(state, "an unbound class parameter falls back", eta("Show", "show", con("Int")), "Fallback")
+
+    summary(state)

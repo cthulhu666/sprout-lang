@@ -1272,12 +1272,7 @@ fn parse_field_postfix(tokens: Vec token.Token, i: Int, base: ast.Expr, updates:
   do
     (_, i2) <- expected_symbol(".", tokens, i)
     (name_tok, i3) <- expected_ident("a field name after '.'", tokens, i2)
-    parse_postfix(tokens, i3, fold_field_chain(base, token.token_text(name_tok), cur_pos(tokens, i)), updates)
-
-fn fold_field_chain(base: ast.Expr, rest: String, pos: source.SourcePos) -> ast.Expr =
-  match string.split_once(rest, ".") with
-  | Nothing -> ast.GetFieldExpr(base, rest, pos)
-  | Just (field, more) -> fold_field_chain(ast.GetFieldExpr(base, field, pos), more, pos)
+    parse_postfix(tokens, i3, ast.build_field_chain(base, token.token_text(name_tok), cur_pos(tokens, i)), updates)
 
 # Record update postfix: `base with ( field = value, ... )` (docs/records-v0.md
 # §4.4).  Recognised only when `with` is followed by `( ident =` — a match branch

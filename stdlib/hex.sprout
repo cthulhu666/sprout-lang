@@ -50,9 +50,7 @@ fn digit_value(code: Int) -> Int =
   else -1
 
 fn digit_at(digits: Bytes, index: Int) -> Int =
-  match bytes.get(digits, index) with
-  | Just code -> digit_value(code)
-  | Nothing -> -1
+  digit_value(bytes.get_or(digits, index, -1))
 
 fn first_bad_digit(digits: Bytes, index: Int, total: Int) -> Maybe Int =
   if index >= total then Nothing

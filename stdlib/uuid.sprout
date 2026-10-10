@@ -58,14 +58,9 @@ fn format(value: Bytes) -> Uuid =
 
 # Version 4 in byte 6's high nibble, variant `10` in byte 8's top bits.
 fn with_version_bits(random: Bytes) -> Bytes =
-  let version = bit_or(bit_and(byte_or_zero(random, 6), 15), 64)
-      variant = bit_or(bit_and(byte_or_zero(random, 8), 63), 128)
+  let version = bit_or(bit_and(bytes.get_or(random, 6, 0), 15), 64)
+      variant = bit_or(bit_and(bytes.get_or(random, 8, 0), 63), 128)
       pieces = [bytes.builder_bytes(bytes.take(random, 6)), bytes.builder_byte(version),
                 bytes.builder_bytes(bytes.slice(random, 7, 1)), bytes.builder_byte(variant),
                 bytes.builder_bytes(bytes.drop(random, 9))]
   in bytes.builder_build(list_fold(bytes.builder_append, bytes.builder_empty(), pieces))
-
-fn byte_or_zero(value: Bytes, index: Int) -> Int =
-  match bytes.get(value, index) with
-  | Just b -> b
-  | Nothing -> 0

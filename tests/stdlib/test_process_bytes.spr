@@ -29,9 +29,6 @@ import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, 
 import stdlib.process (ProcResult, proc_run, proc_run_stdin, proc_exit, proc_ok, proc_stdout_bytes, proc_stderr_bytes, proc_stdout_text, proc_stdout_or, proc_stderr_or)
 import stdlib.bytes as bytes
 
-fn byte_at(value: Bytes, index: Int) -> Int =
-  maybe_with_default(-1, bytes.get(value, index))
-
 # Local rather than a `Result`-shaped assert helper, so the test never has to name Utf8Error.
 fn stdout_decodes(r: ProcResult) -> Bool =
   match proc_stdout_text(r) with
@@ -52,9 +49,9 @@ fn main() -> Unit !{IO} =
     # Length 3 is the whole point: a value truncated at the NUL has length 1. The trailing 'b' is
     # what proves nothing DOWNSTREAM of the NUL was dropped either.
     assert_eq(state, "nul stdout length", bytes.length(out_nul), 3)
-    assert_eq(state, "nul stdout byte 0", byte_at(out_nul, 0), 97)
-    assert_eq(state, "nul stdout byte 1", byte_at(out_nul, 1), 0)
-    assert_eq(state, "nul stdout byte 2", byte_at(out_nul, 2), 98)
+    assert_eq(state, "nul stdout byte 0", bytes.get_or(out_nul, 0, -1), 97)
+    assert_eq(state, "nul stdout byte 1", bytes.get_or(out_nul, 1, -1), 0)
+    assert_eq(state, "nul stdout byte 2", bytes.get_or(out_nul, 2, -1), 98)
     # The choke point. Delivering these bytes is correct; calling them text is not.
     assert_false(state, "nul stdout decode refused", stdout_decodes(r_nul))
     assert_eq(state, "nul stdout falls back", stdout_text_or_marker(r_nul), "<not-utf8>")
@@ -65,16 +62,16 @@ fn main() -> Unit !{IO} =
     r_bad <- proc_run(["printf", "a\\377b"])
     let out_bad = proc_stdout_bytes(r_bad)
     assert_eq(state, "bad-utf8 stdout length", bytes.length(out_bad), 3)
-    assert_eq(state, "bad-utf8 stdout byte 0", byte_at(out_bad, 0), 97)
-    assert_eq(state, "bad-utf8 stdout byte 1", byte_at(out_bad, 1), 255)
-    assert_eq(state, "bad-utf8 stdout byte 2", byte_at(out_bad, 2), 98)
+    assert_eq(state, "bad-utf8 stdout byte 0", bytes.get_or(out_bad, 0, -1), 97)
+    assert_eq(state, "bad-utf8 stdout byte 1", bytes.get_or(out_bad, 1, -1), 255)
+    assert_eq(state, "bad-utf8 stdout byte 2", bytes.get_or(out_bad, 2, -1), 98)
     assert_false(state, "bad-utf8 stdout decode refused", stdout_decodes(r_bad))
 
     # ── The same on stderr, which is a separate buffer and a separate conversion ──
     r_err <- proc_run(["sh", "-c", "printf 'x\\377y' >&2"])
     let err_bad = proc_stderr_bytes(r_err)
     assert_eq(state, "bad-utf8 stderr length", bytes.length(err_bad), 3)
-    assert_eq(state, "bad-utf8 stderr byte 1", byte_at(err_bad, 1), 255)
+    assert_eq(state, "bad-utf8 stderr byte 1", bytes.get_or(err_bad, 1, -1), 255)
     assert_eq(state, "bad-utf8 stderr falls back", proc_stderr_or(r_err, "<not-utf8>"), "<not-utf8>")
 
     # ── Ordinary text still decodes, so the fix is not "refuse everything" ───────

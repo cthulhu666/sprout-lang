@@ -350,27 +350,14 @@ fn to_mont(a: Felem) -> Felem = mont_mul(a, felem_r2)
 
 fn from_mont(a: Felem) -> Felem = mont_mul(a, felem_one)
 
-# Out-of-range reads answer -1, matching no tag or length, so a short input walks off
-# the end into a rejection rather than needing a bounds test per step.
-fn byte_at(raw: Bytes, index: Int) -> Int =
-  match bytes.get(raw, index) with
-  | Just value -> value
-  | Nothing -> -1
-
-# The zero-filling read `bits26` needs: its four-byte window runs past the top of the
-# field for the highest limbs, and there -1 would corrupt the limb rather than reject.
-fn byte_or_zero(raw: Bytes, index: Int) -> Int =
-  match bytes.get(raw, index) with
-  | Just value -> value
-  | Nothing -> 0
-
 # 26 bits starting at `offset`, read out of a 32-byte big-endian field. Four bytes
-# always cover the span, since the largest start offset within a byte is 6.
+# always cover the span, since the largest start offset within a byte is 6. The window
+# runs past the top of the field for the highest limbs, so those reads fill with zero.
 fn bits26(raw: Bytes, offset: Int) -> Int =
   let index = 31 - offset / 8
       shift = offset - (offset / 8) * 8
-      word = byte_or_zero(raw, index) + byte_or_zero(raw, index - 1) * 256 +
-             byte_or_zero(raw, index - 2) * 65536 + byte_or_zero(raw, index - 3) * 16777216
+      word = bytes.get_or(raw, index, 0) + bytes.get_or(raw, index - 1, 0) * 256 +
+             bytes.get_or(raw, index - 2, 0) * 65536 + bytes.get_or(raw, index - 3, 0) * 16777216
   in bit_and(bit_shr_zf(word, shift), 67108863)
 
 # PRECONDITION: value is in [0, p). Callers establish it --- `coordinate` rejects
@@ -572,10 +559,11 @@ let spki_header =
   [48, 89, 48, 19, 6, 7, 42, 134, 72, 206, 61, 2, 1,
    6, 8, 42, 134, 72, 206, 61, 3, 1, 7, 3, 66, 0]
 
+# A read past the end answers -1, which matches no header byte.
 fn header_matches(der: Bytes, index: Int, expected: List Int) -> Bool =
   match expected with
   | [] -> true
-  | [want | rest] -> byte_at(der, index) == want && header_matches(der, index + 1, rest)
+  | [want | rest] -> bytes.get_or(der, index, -1) == want && header_matches(der, index + 1, rest)
 
 # X.509 SubjectPublicKeyInfo, which is how a key arrives: WebAuthn's
 # `getPublicKey()`, `openssl ec -pubout`, the inside of a PEM block.
@@ -597,13 +585,16 @@ export fn public_key_spki(der: Bytes) -> Maybe PublicKey =
 # Long-form lengths are rejected outright. A P-256 body is at most 72 bytes, so DER's
 # minimal-length rule requires the short form; a long form is either non-minimal or
 # too wide for an in-range r and s.
+#
+# Out-of-range reads answer -1, matching no tag or length, so a short input walks off
+# the end into a rejection rather than needing a bounds test per step.
 
 # Answers the value and the offset just past it.
 fn der_integer(raw: Bytes, offset: Int) -> Maybe(bigint.BigInt, Int) =
-  let length = byte_at(raw, offset + 1)
-      first = byte_at(raw, offset + 2)
-      second = byte_at(raw, offset + 3)
-  in if byte_at(raw, offset) != 2 then Nothing
+  let length = bytes.get_or(raw, offset + 1, -1)
+      first = bytes.get_or(raw, offset + 2, -1)
+      second = bytes.get_or(raw, offset + 3, -1)
+  in if bytes.get_or(raw, offset, -1) != 2 then Nothing
      # Zero-length encodes nothing; 0 is one 0x00 byte.
      else if length < 1 || length > 127 then Nothing
      else if offset + 2 + length > bytes.length(raw) then Nothing
@@ -615,8 +606,8 @@ fn der_integer(raw: Bytes, offset: Int) -> Maybe(bigint.BigInt, Int) =
                 offset + 2 + length))
 
 fn signature(der: Bytes) -> Maybe(bigint.BigInt, bigint.BigInt) =
-  let length = byte_at(der, 1)
-  in if byte_at(der, 0) != 48 then Nothing
+  let length = bytes.get_or(der, 1, -1)
+  in if bytes.get_or(der, 0, -1) != 48 then Nothing
      else if length < 0 || length > 127 then Nothing
      # The SEQUENCE must be the whole input, or anything may be appended to a
      # signature that still verifies.
