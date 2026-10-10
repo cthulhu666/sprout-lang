@@ -282,9 +282,8 @@ declaration is its own group, in place, and no `FnDecl` crosses it. This is what
 the environments allow rather than caution:
 
 - `ClassDecl`, `InstanceDecl` are registered by `typecheck_decl` as it walks, not
-  by `pre_scan_fn_decls`. `RecordDecl` was too; it is now registered before the
-  walk (`register_record_decls`), so it no longer needs to be a barrier, but
-  still is (`BACKLOG.md`).
+  by `pre_scan_fn_decls`. `RecordDecl` was too; `pre_scan_fn_decls` now registers
+  it, so it no longer needs to be a barrier, but still is (`BACKLOG.md`).
 - A top-level `let` is not pre-scanned either — forward-referencing one is
   `Unknown variable` today (measured), and this must not change that.
 - `AliasDecl` is a barrier *despite* being pre-scanned. `pre_scan`'s `alias_env`

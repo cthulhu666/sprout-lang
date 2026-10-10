@@ -1181,16 +1181,12 @@ fn discharge_one(
   subst: Dict types.Type,
   o: unifier.FieldObligation
 ) -> OneResult !{IO} =
-  let resolved = unifier.apply_subst(subst, unifier.field_obligation_receiver(o))
-  in
-    match resolved with
-    | types.TConst rec_name ->
-        discharge_against_record(state, env, subst, o, types.type_id_name(rec_name), Nil)
-    | types.TApp _ _ ->
-        discharge_against_record(state, env, subst, o,
-          extract_tconst_name(resolved), extract_tapp_args(resolved))
-    | _ -> OneBlocked
+  match record_receiver(unifier.apply_subst(subst, unifier.field_obligation_receiver(o))) with
+  | Nothing -> OneBlocked
+  | Just (rec_name, type_args) -> discharge_against_record(state, env, subst, o, rec_name, type_args)
 
+# The same access as lookup_record_field_typed, reaching its receiver a
+# declaration later; both read the field through record_field_type.
 fn discharge_against_record(
   state: unifier.InferState,
   env: Dict types.Scheme,
@@ -1201,19 +1197,9 @@ fn discharge_against_record(
 ) -> OneResult !{IO} =
   let field_name = unifier.field_obligation_field(o)
   in
-    # The same access as lookup_record_field_typed, reaching its receiver a
-    # declaration later. Both paths gate, or `fn peek(p) = p.x` slips through the
-    # one that cannot yet see what `p` is.
-    if record_is_abstract_here(rec_name, env) then
-      OneFailed(unifier.field_obligation_pos(o),
-        abstract_record_message(rec_name, field_name))
-    else
-    let Just field_scheme = dict_get("@rec:" ++ rec_name ++ ":" ++ field_name, env)
-          else OneFailed(unifier.field_obligation_pos(o),
-                 record_name_error(rec_name, field_name, env))
-    in
-      do
-        field_t <- record_field_access_type(state, field_scheme, type_args)
+    match record_field_type(state, env, rec_name, field_name, type_args) with
+    | Err msg -> OneFailed(unifier.field_obligation_pos(o), msg)
+    | Ok field_t ->
         # no_effect_subst: OneResult carries only a type substitution, and the
         # deferred-obligation chain above it is six functions deep.
         match unifier.unify_actual_expected(subst, unifier.no_effect_subst(),
@@ -1222,6 +1208,32 @@ fn discharge_against_record(
             OneFailed(unifier.field_obligation_pos(o),
               "Record field type mismatch reading `." ++ field_name ++ "`: " ++ e)
         | unifier.UnifyOk s2 _ -> OneSettled(s2)
+
+# A receiver's record name and type arguments, once its head is a constructor.
+# Nothing while the head is a variable, bare or applied (`f Int` from `pure(3)`):
+# a later use may still name the record.
+fn record_receiver(t: types.Type) -> Maybe (String, List types.Type) =
+  if type_head_open(t) then Nothing
+  else
+    match t with
+    | types.TConst name -> Just((types.type_id_name(name), Nil))
+    | types.TApp _ _ -> Just((extract_tconst_name(t), extract_tapp_args(t)))
+    | _ -> Nothing
+
+# A field's type, read at the record's type arguments. A miss is an error: a
+# fresh variable would type the read as anything. Both access paths gate on
+# abstractness, or `fn peek(p) = p.x` slips through the one that cannot yet see
+# what `p` is.
+fn record_field_type(state: unifier.InferState, env: Dict types.Scheme, rec_name: String,
+                     field_name: String, type_args: List types.Type) -> Result String types.Type !{IO} =
+  if record_is_abstract_here(rec_name, env) then Err(abstract_record_message(rec_name, field_name))
+  else
+    let Just field_scheme = dict_get("@rec:" ++ rec_name ++ ":" ++ field_name, env)
+          else Err(record_name_error(rec_name, field_name, env))
+    in
+      do
+        field_t <- record_field_access_type(state, field_scheme, type_args)
+        Ok(field_t)
 
 fn discharge_next_round(
   state: unifier.InferState,
@@ -6504,12 +6516,8 @@ fn unify_param_annotation(
 # Record inference
 # ---------------------------------------------------------------------------
 
-# Every record, before any body is checked: a record's fields are in scope
-# throughout its module, as its type name is (spec §7).
-fn register_record_decls(decls: List ast.Decl, alias_env: Dict types.Type,
-                         env: Dict types.Scheme) -> Dict types.Scheme =
-  list_fold(\ (acc, d) -> register_record_decl(d, alias_env, acc), env, decls)
-
+# A record's fields and markers. pre_scan_fn_decls registers every record before
+# any body is checked.
 fn register_record_decl(decl: ast.Decl, alias_env: Dict types.Type,
                         env: Dict types.Scheme) -> Dict types.Scheme =
   match decl with
@@ -6689,14 +6697,11 @@ fn get_field_from_resolved(
   rec_eff: types.Effect,
   pos: source.SourcePos
 ) -> InferResult !{IO} =
-  match resolved with
-  | types.TConst rec_name ->
-      lookup_record_field_typed(state, env, subst, eff_subst, types.type_id_name(rec_name), Nil, typed_rec, field_name, rec_eff, pos)
-  | types.TApp _ _ ->
-      lookup_record_field_typed(state, env, subst, eff_subst,
-        extract_tconst_name(resolved), extract_tapp_args(resolved),
+  match record_receiver(resolved) with
+  | Just (rec_name, type_args) ->
+      lookup_record_field_typed(state, env, subst, eff_subst, rec_name, type_args,
         typed_rec, field_name, rec_eff, pos)
-  | _ ->
+  | Nothing ->
       # The receiver is not a record type YET. Inference runs left to right, so
       # a later call in the same body may still pin it down. Give the access a
       # fresh result variable to carry the value, and park the obligation to
@@ -6740,18 +6745,9 @@ fn lookup_record_field_typed(
   rec_eff: types.Effect,
   pos: source.SourcePos
 ) -> InferResult !{IO} =
-  if record_is_abstract_here(rec_name, env) then
-    InferErr(pos, abstract_record_message(rec_name, field_name))
-  else
-  match dict_get(str_concat("@rec:", str_concat(rec_name, str_concat(":", field_name))), env) with
-  # A miss is an error, as in discharge_against_record: a fresh variable would
-  # type the read as anything.
-  | Nothing -> InferErr(pos, record_name_error(rec_name, field_name, env))
-  | Just field_scheme ->
-      do
-        field_t <- record_field_access_type(state, field_scheme, type_args)
-        InferOk(typed_ast.TGetField(typed_rec, field_name, field_t, pos),
-          subst, eff_subst, rec_eff)
+  match record_field_type(state, env, rec_name, field_name, type_args) with
+  | Err msg -> InferErr(pos, msg)
+  | Ok field_t -> InferOk(typed_ast.TGetField(typed_rec, field_name, field_t, pos), subst, eff_subst, rec_eff)
 
 # Type of an accessed field with the record's type params bound to the accessed
 # value's ACTUAL type args. When the args line up with the record's params, bind
@@ -7445,8 +7441,7 @@ fn typecheck_decls_resolved(
     # Mirrored once, up front: an annotation inside a body reads
     # aliases from the env, and a body may be checked above the
     # declaration whose alias it names.
-    let record_env = register_record_decls(decls, qual_env, scanned_env_with_types)
-    match typecheck_decls_inner(state, decls, mirror_alias_env(qual_env, GlobalEnv(record_env)), subst, eff_subst, qual_env, unifier.ftv_env(scanned_env_with_types)) with
+    match typecheck_decls_inner(state, decls, mirror_alias_env(qual_env, GlobalEnv(scanned_env_with_types)), subst, eff_subst, qual_env, unifier.ftv_env(scanned_env_with_types)) with
     | typed_ast.TypedErr p m -> typed_ast.TypedErr(p, m)
     | typed_ast.TypedOk prog schemes ->
         # Final gate: a DEFINED `main` must be a well-formed entrypoint.
@@ -9478,8 +9473,8 @@ fn pre_scan_extern(
       dict_set("@arity:" ++ name, arity_marker(list_length(params)),
         dict_set(name, scheme_from_fn_parts(name, params, ret_type_maybe, effects_maybe, alias_env), env))
 
-# Register every FnDecl signature and TypeDecl constructor without checking a
-# body, so a declaration may reference one written below it.
+# Register every FnDecl signature, TypeDecl constructor and record without
+# checking a body, so a declaration may reference one written below it.
 fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Dict types.Type) -> Dict types.Scheme =
   match decls with
   | Nil -> env
@@ -9501,18 +9496,9 @@ fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Di
           pre_scan_fn_decls(rest, register_type_decl_raw(decl, alias_env, env), alias_env)
       | ast.WrapDecl _ _ _ _ _ ->
           pre_scan_fn_decls(rest, register_type_decl_raw(decl, alias_env, env), alias_env)
-      # Only the containment markers, and only because they must be in the env
-      # before any BODY is checked. An ADT gets them here already, through
-      # register_type_decl_raw; a record's other registration stays in
-      # typecheck_decl, so without this arm `fn f(h: Holder File)` written ABOVE
-      # `type Holder a = (n: Int)` was checked with no marker and rejected, while
-      # the same two declarations in the other order compiled.
-      | ast.RecordDecl rec_name type_params fields _ _ _ _ ->
-          pre_scan_fn_decls(rest,
-            mark_stored_fields(rec_name, type_params, ast.record_field_type_exprs(fields),
-              build_local_params(type_params, alias_env),
-              mark_phantom_params(rec_name, type_params, ast.record_field_type_exprs(fields), env)),
-            alias_env)
+      # A record's fields are in scope throughout its module (spec §7).
+      | ast.RecordDecl _ _ _ _ _ _ _ ->
+          pre_scan_fn_decls(rest, register_record_decl(decl, alias_env, env), alias_env)
       | _ -> pre_scan_fn_decls(rest, env, alias_env)
 
 # ---------------------------------------------------------------------------
@@ -10208,7 +10194,7 @@ fn typecheck_decl(
       TypedDeclOk(typed_ast.TPassThrough(decl),
         GlobalEnv(register_type_decl_raw(decl, alias_env, global_env_dict(env))),
         env_ftv, subst)
-  # Registered before the walk, by register_record_decls.
+  # Registered before the walk, by pre_scan_fn_decls.
   | ast.RecordDecl _ _ _ _ _ _ _ -> TypedDeclOk(typed_ast.TPassThrough(decl), env, env_ftv, subst)
   | ast.FnDecl name _ _ _ _ _ decl_pos ->
       # Unreachable. typecheck_group routes EVERY FnDecl through typecheck_fn_group,
