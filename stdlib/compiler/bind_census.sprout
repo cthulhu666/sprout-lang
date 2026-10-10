@@ -39,30 +39,14 @@ export type Piece (..) =
   | Let source.SourcePos LetForm types.Type types.Effect Shape
   | Try source.SourcePos types.Effect Shape
 
-# Off unless the phase asks. On: the entry's declaration keys, whether the
-# declaration being checked is one of them, its pieces, and every finished one.
+# The entry's declaration keys, whether the declaration being checked is one of
+# them, its pieces, and every finished declaration's.
+export type Recording (..) = (keys: Set, on: Bool, pending: List Piece, done: List Piece)
+
+# Off unless the phase asks.
 export type Census (..) =
   | CensusOff
-  | CensusOn Set Bool (List Piece) (List Piece)
-
-# A declaration as census_enter names it: its name, or, for an instance, which
-# has none, its class and offset. Two files of one bundle instancing one class
-# at the same offset would collide. Declarations without a body have no key.
-export fn decl_key(d: ast.Decl) -> Maybe String =
-  match d with
-  | ast.FnDecl name _ _ _ _ _ _ -> Just(name)
-  | ast.LetDecl name _ _ _ -> Just(name)
-  | ast.InstanceDecl c _ _ pos -> Just(instance_key(c, pos))
-  | ast.TypeDecl _ _ _ _ _ _ -> Nothing
-  | ast.RecordDecl _ _ _ _ _ _ _ -> Nothing
-  | ast.ClassDecl _ _ _ _ _ -> Nothing
-  | ast.AliasDecl _ _ _ _ -> Nothing
-  | ast.WrapDecl _ _ _ _ _ -> Nothing
-  | ast.ExternFnDecl _ _ _ _ _ -> Nothing
-
-export fn instance_key(c: ast.TypeConstraint, pos: source.SourcePos) -> String =
-  let ast.TypeConstraint cls _ = c
-  in `instance ${cls}@${int_to_string(pos.index)}`
+  | CensusOn Recording
 
 export type Purity (..) deriving (Eq) = Pure | Effectful | Unknown
 
@@ -124,7 +108,7 @@ fn joins(p: Piece) -> Bool =
   | Try _ _ _ -> true
 
 fn group(pieces: List Piece) -> Dict (List Piece) =
-  list_fold(add_to_group, dict_empty(), list_filter(joins, pieces))
+  list_fold(add_to_group, dict_empty(), pieces)
 
 fn add_to_group(acc: Dict (List Piece), p: Piece) -> Dict (List Piece) =
   let key = int_to_string(piece_pos(p).index)
@@ -136,26 +120,27 @@ type Line = (index: Int, text: String)
 
 # One line per site, sorted by position: `index` keys the sort and is dropped.
 export fn census_lines(path: String, pieces: List Piece) -> List String =
-  list_append(list_filter_map(lone_line(path, _), pieces),
-              list_filter_map(joined_line(path, _), vec_to_list(dict_values(group(pieces)))))
-    |> vec_from_list
-    |> vec_sort_by(\l -> l.index)
-    |> vec_to_list
-    |> list_map(\l -> l.text)
+  let (joining, lone) = list_partition(joins, pieces)
+  in list_append(list_filter_map(lone_line(path, _), lone),
+                 list_filter_map(joined_line(path, _), vec_to_list(dict_values(group(joining)))))
+       |> vec_from_list
+       |> vec_sort_by(\l -> l.index)
+       |> vec_to_list
+       |> list_map(\l -> l.text)
 
 fn line(path: String, kind: String, pos: source.SourcePos, cols: List String) -> Line =
   Line(index = pos.index,
        text = string.join("\t", [kind, `${path}:${int_to_string(pos.line)}:${int_to_string(pos.column)}`] ++ cols))
 
-# A piece that stands alone, as its line. Joining pieces are joined_line's.
+# A piece that does not join, as its line. census_lines gives joining pieces to
+# joined_line instead, so their arms here are never reached.
 fn lone_line(path: String, p: Piece) -> Maybe Line =
   match p with
   | Bind pos mode e shape -> Just(bind_line(path, pos, mode, rhs_purity(e), shape, NoTry))
   | Discard pos t ->
       let Just fam = typed_ast.short_circuit_family(t) else Nothing
       in Just(line(path, "discard", pos, [fam]))
-  | Let pos form t e shape ->
-      if form == BindingLet then Nothing else let_line(path, pos, form_word(form, false), t, rhs_purity(e), shape, NoTry)
+  | Let pos form t e shape -> let_line(path, pos, form_word(form, false), t, rhs_purity(e), shape, NoTry)
   | Note _ _ _ -> Nothing
   | TryStatement _ -> Nothing
   | TempBind _ _ _ -> Nothing

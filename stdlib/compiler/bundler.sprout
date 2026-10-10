@@ -1867,14 +1867,10 @@ fn bundle_names(modules: List ParsedModule, stdlib_root: String, extra_roots: Li
 
 fn qualify_one(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String,
                extra_roots: List String, canonical: Dict String, prelude: PreludeNames) -> QualifiedModule =
-  QualifiedModule(path = module_path(mod),
-                  decls = qualify_module_with(mod, all_symbols, stdlib_root, extra_roots, canonical, prelude))
-
-fn qualify_module_with(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String,
-                       extra_roots: List String, canonical: Dict String, prelude: PreludeNames) -> List ast.Decl =
-  let ParsedModule _ _ _ _ ctor_types decls = mod
-  in qualify_decls(build_resolve_ctx(mod, all_symbols, stdlib_root, extra_roots, canonical, prelude),
-                   publish_marked_records(ctor_types, decls))
+  let ParsedModule _ path _ _ ctor_types decls = mod
+  in QualifiedModule(path = path,
+                     decls = qualify_decls(build_resolve_ctx(mod, all_symbols, stdlib_root, extra_roots, canonical, prelude),
+                                           publish_marked_records(ctor_types, decls)))
 
 # Settle each record's Representation from the module's EXPORT SURFACE. Runs
 # before qualification, while the names are still the ones the author wrote and
@@ -2428,12 +2424,8 @@ fn validate_qualified_decls(decls: List ast.Decl) -> Maybe(source.SourcePos, Str
 # resolve to something else or to nothing, so every later check reports a symptom
 # of it — under its own name, somewhere the import is not mentioned.
 fn make_bundle_or_err(modules: List ParsedModule, entry_path: String, stdlib_root: String,
-                      extra_roots: List String) -> BundleResult =
-  check_bundle(modules, entry_path, stdlib_root, extra_roots, bundle_names(modules, stdlib_root, extra_roots))
-
-fn check_bundle(modules: List ParsedModule, entry_path: String, stdlib_root: String,
-                extra_roots: List String, names: BundleNames) -> BundleResult =
-  match validate_imports(modules, all_symbols, stdlib_root, extra_roots) with
+                      extra_roots: List String, names: BundleNames) -> BundleResult =
+  match validate_imports(modules, names.all_symbols, stdlib_root, extra_roots) with
   | Just err_msg -> BundleErr(no_pos(), err_msg)
   | Nothing ->
       match validate_qualified_decls(qualified) with
@@ -2442,17 +2434,14 @@ fn check_bundle(modules: List ParsedModule, entry_path: String, stdlib_root: Str
           match validate_type_names(qualified) with
           | Just (pos, err_msg) -> BundleErr(pos, err_msg)
           | Nothing ->
-            match find_one_ctor_clash(modules, all_symbols, stdlib_root, extra_roots, canonical, prelude,
-                                      type_vocab(all_symbols, stdlib_root)) with
+            match find_one_ctor_clash(modules, names.all_symbols, stdlib_root, extra_roots, names.canonical, names.prelude,
+                                      type_vocab(names.all_symbols, stdlib_root)) with
             | Just (path, pos, err_msg) -> BundleErr(pos_for_entry(path, pos, entry_path), err_msg)
             | Nothing ->
             match deriving.validate_deriving_decls(qualified) with
             | Just (pos, err_msg) -> BundleErr(pos, "deriving: " ++ err_msg)
             | Nothing -> BundleOk(ast.Program(deriving.expand_deriving_decls(qualified), no_pos()))
-  where all_symbols = names.all_symbols
-        canonical = names.canonical
-        prelude = names.prelude
-        qualified = list_flat_map(\m -> m.decls, names.qualified)
+  where qualified = list_flat_map(\m -> m.decls, names.qualified)
 
 export fn bundle_file(path: source.FilePath, stdlib_root: source.StdlibRoot) -> BundleResult !{IO} =
   bundle_file_with_roots(path, stdlib_root, Nil)
@@ -2463,7 +2452,8 @@ export fn bundle_file(path: source.FilePath, stdlib_root: source.StdlibRoot) -> 
 export fn bundle_file_with_roots(path: source.FilePath, stdlib_root: source.StdlibRoot, extra_roots: List String) -> BundleResult !{IO} =
   do
     load_env <- new_load_env()
-    bundle_entry(source.filepath_str(path), stdlib_root, extra_roots, load_env)
+    (bundle, _) <- bundle_entry(source.filepath_str(path), stdlib_root, extra_roots, load_env)
+    bundle
 
 # Bundle a module given its SOURCE rather than its path.
 #
@@ -2481,36 +2471,32 @@ export fn bundle_file_with_roots(path: source.FilePath, stdlib_root: source.Stdl
 # only that buffer.
 export fn bundle_source_with_roots(src: String, entry_path: String, stdlib_root: source.StdlibRoot,
                                    extra_roots: List String, load_env: LoadEnv) -> BundleResult !{IO} =
-  bundle_entry(entry_path, stdlib_root, extra_roots,
-    load_env_with_overlay(dict_set(entry_path, src, load_env_overlay(load_env)), load_env))
+  do
+    (bundle, _) <- bundle_entry(entry_path, stdlib_root, extra_roots,
+                                load_env_with_overlay(dict_set(entry_path, src, load_env_overlay(load_env)), load_env))
+    bundle
 
-# The bundle, and the entry module's declarations as the bundle names them, so a
-# report can tell the entry's declarations from its imports'.
+# Like bundle_file_with_roots, but also hands back the entry module's
+# declarations as the bundle names them, so a report can tell the entry's
+# declarations from its imports'.
 export fn bundle_with_entry_decls(path: source.FilePath, stdlib_root: source.StdlibRoot,
                                   extra_roots: List String) -> (BundleResult, List ast.Decl) !{IO} =
   do
     load_env <- new_load_env()
-    let entry_path = source.filepath_str(path)
-        root = source.stdlib_root_str(stdlib_root)
+    bundle_entry(source.filepath_str(path), stdlib_root, extra_roots, load_env)
+
+# Every bundle is loaded here: the bundle, and the entry module's declarations.
+fn bundle_entry(entry_path: String, stdlib_root: source.StdlibRoot, extra_roots: List String,
+                load_env: LoadEnv) -> (BundleResult, List ast.Decl) !{IO} =
+  do
+    let root = source.stdlib_root_str(stdlib_root)
     (err, modules) <- collect_modules(entry_path, root, extra_roots, load_env)
     match err with
     | Just issue -> (BundleErr(issue_pos_for_entry(issue, entry_path), issue_message(issue)), Nil)
     | Nothing ->
         let names = bundle_names(modules, root, extra_roots)
-        in (check_bundle(modules, entry_path, root, extra_roots, names),
+        in (make_bundle_or_err(modules, entry_path, root, extra_roots, names),
             list_flat_map(\m -> if m.path == entry_path then m.decls else Nil, names.qualified))
-
-fn module_path(mod: ParsedModule) -> String =
-  let ParsedModule _ path _ _ _ _ = mod
-  in path
-
-fn bundle_entry(entry_path: String, stdlib_root: source.StdlibRoot, extra_roots: List String,
-                load_env: LoadEnv) -> BundleResult !{IO} =
-  do
-    (err, modules) <- collect_modules(entry_path, source.stdlib_root_str(stdlib_root), extra_roots, load_env)
-    match err with
-    | Just issue -> BundleErr(issue_pos_for_entry(issue, entry_path), issue_message(issue))
-    | Nothing -> make_bundle_or_err(modules, entry_path, source.stdlib_root_str(stdlib_root), extra_roots)
 
 # ---------------------------------------------------------------------------
 # Phase: dump-qualify — show original→qualified name mapping per module

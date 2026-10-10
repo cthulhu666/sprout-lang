@@ -1431,11 +1431,12 @@ bundle-smoke: bootstrap-from-seed
 bind-census-smoke: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
-  FIX=tests/bind_census/canaries.spr
+  # collide.spr imports collide/dep.sprout, found under the package root.
+  FIXES=(tests/bind_census/canaries.spr tests/bind_census/collide.spr)
   WANT=tests/bind_census/canaries.expected
   TMPD=$(mktemp -d /tmp/sprout_census_XXXXXX)
   trap 'rm -rf "$TMPD"' EXIT
-  if ! "{{build_dir}}/compile_driver_bin_stage1" --phase bind-census "{{stdlib_root}}" "$FIX" > "$TMPD/out" 2>&1; then
+  if ! "{{build_dir}}/compile_driver_bin_stage1" --phase bind-census "{{stdlib_root}}" --package-root tests/bind_census "${FIXES[@]}" > "$TMPD/out" 2>&1; then
     echo "bind-census-smoke: --phase bind-census failed" >&2; cat "$TMPD/out" >&2; exit 1
   fi
   if ! diff -u "$WANT" "$TMPD/out" >&2; then

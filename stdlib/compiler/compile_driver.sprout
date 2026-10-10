@@ -18,6 +18,7 @@ import stdlib.compiler.iface_codec as iface_codec
 import stdlib.compiler.cse_census as cse_census
 import stdlib.compiler.bind_census as bind_census
 import stdlib.compiler.source as source
+import stdlib.string as string
 import stdlib.fs as fs
 
 # ---------------------------------------------------------------------------
@@ -442,12 +443,27 @@ fn run_file_dump_qualify(path: String, stdlib_root: String) -> Unit !{IO} =
 # Batch entry point: stdlib_root as argv[0], file paths as argv[1..N]
 # Prints "=== <path> ===" before each file's output (except the IR phase).
 #
-# phase: "" = default source check, "ir-typed" = --emit-ir --debug, or one of
-# known_phases.
+# phase: "" = default source check, "ir-typed" = --emit-ir --debug, or a key of
+# `phases`.
 
-# Every message that lists the phases reads this, so the lists cannot drift.
-let known_phases: String =
-  "bundle|check|effects|bind-census|cse-census|cse-keys|lower|recheck|scan-info|dump-qualify"
+# Every `--phase` name and what runs it. The dispatch and every message that
+# lists the phases read this, so they cannot drift. scan-info and dump-qualify
+# have no diagnostic path of their own — they panic on a read failure — so they
+# take no flag.
+let phases =
+  dict_from_list([
+    ("bundle", run_file_bundle),
+    ("check", run_file_check),
+    ("effects", run_file_effects),
+    ("bind-census", run_file_bind_census),
+    ("cse-census", run_file_cse_census(_, _, _, false, _)),
+    ("cse-keys", run_file_cse_census(_, _, _, true, _)),
+    ("lower", run_file_lower),
+    ("recheck", run_file_recheck),
+    ("scan-info", \ (path, root, _roots, _failed) -> run_file_scan_info(path, root)),
+    ("dump-qualify", \ (path, root, _roots, _failed) -> run_file_dump_qualify(path, root))])
+
+let known_phases: String = string.join("|", vec_to_list(dict_keys(phases)))
 
 fn run_batch(stdlib_root: String, idx: Int, phase: String, extra_roots: List String, failed: Ref Int) -> Unit !{IO} =
   match argv_get(idx) with
@@ -456,26 +472,16 @@ fn run_batch(stdlib_root: String, idx: Int, phase: String, extra_roots: List Str
       do
         if phase == "ir-typed" then ()
         else print("=== " ++ path ++ " ===")
-        if phase == "bundle" then run_file_bundle(path, stdlib_root, extra_roots, failed)
-        else if phase == "check" then run_file_check(path, stdlib_root, extra_roots, failed)
-        else if phase == "lower" then run_file_lower(path, stdlib_root, extra_roots, failed)
-        else if phase == "effects" then run_file_effects(path, stdlib_root, extra_roots, failed)
-        else if phase == "bind-census" then run_file_bind_census(path, stdlib_root, extra_roots, failed)
-        else if phase == "cse-census" then run_file_cse_census(path, stdlib_root, extra_roots, false, failed)
-        else if phase == "cse-keys" then run_file_cse_census(path, stdlib_root, extra_roots, true, failed)
-        else if phase == "recheck" then run_file_recheck(path, stdlib_root, extra_roots, failed)
-        else if phase == "ir-typed" then run_file_use_ir_codegen(path, stdlib_root, extra_roots, failed)
-        # scan-info and dump-qualify have no diagnostic path of their own — they
-        # panic on a read failure — so they take no flag.
-        else if phase == "scan-info" then run_file_scan_info(path, stdlib_root)
-        else if phase == "dump-qualify" then run_file_dump_qualify(path, stdlib_root)
+        if phase == "ir-typed" then run_file_use_ir_codegen(path, stdlib_root, extra_roots, failed)
         else if phase == "" then run_file(path, stdlib_root, failed)
-        # An unrecognised phase used to fall through to the default source check
-        # and exit 0, so `--phase efects` silently ran something else and looked
-        # like it had worked. A gate asserting on a phase's output is only as good
-        # as the driver's willingness to admit the phase does not exist.
-        else report_error(failed, "ERROR: unknown phase `" ++ phase
-               ++ "`: expected " ++ known_phases)
+        else
+          match dict_get(phase, phases) with
+          | Just run -> run(path, stdlib_root, extra_roots, failed)
+          # An unrecognised phase used to fall through to the default source check
+          # and exit 0, so `--phase efects` silently ran something else and looked
+          # like it had worked. A gate asserting on a phase's output is only as good
+          # as the driver's willingness to admit the phase does not exist.
+          | Nothing -> report_error(failed, "ERROR: unknown phase `" ++ phase ++ "`: expected " ++ known_phases)
         # Keep going after a failure: a batch reports every bad file, and `failed`
         # is write-1-only so the status survives the remaining files.
         run_batch(stdlib_root, idx + 1, phase, extra_roots, failed)

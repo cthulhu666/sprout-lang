@@ -85,6 +85,11 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   obligation is discharged at the declaration boundary, after `Ord k` was injected with `k` still
   open. Declaring the type first, or naming the key function, avoids it. Found by
   `bind_census.census_lines`; a five-line repro is the sort above plus a `main`.
+- [ ] `P1` **A lambda with two `_` parameters emits invalid IR.** `\ (a, _, _) -> a` lowers to
+  `define … (i64 %p$a, i64 %p$_, i64 %p$_)`, which `opt` rejects as "redefinition of argument".
+  `--emit-ir` exits 0, so the error surfaces only at `opt`/`clang`, with no Sprout position. Each
+  `_` needs its own SSA name. Workaround: name them (`_roots`, `_failed`), as
+  `compile_driver.phases` does. Repro: an `apply(f: Int -> Int -> Int -> Int)` passed that lambda.
 - [ ] `P2` **Numeric defaulting fires before a deferred field obligation is discharged**
   (`infer.check_arith`, `infer.sprout:2782`), so `Double` fields under arithmetic get a spurious
   `Int vs Double` error and valid code is rejected. Incomplete fix, not a regression — it replaced

@@ -1,0 +1,12 @@
+import collide.dep
+export type Bar (..) = Bar
+instance ToString Bar
+  fn to_string(x: Bar) -> String = "bar"
+
+# The census lists nothing here. collide/dep.sprout's instance of the same class
+# starts at the same offset — its first two lines are this file's, character for
+# character — and its `<-` must not be listed under this file's path.
+fn main() -> Unit !{IO} =
+  do
+    print(to_string(dep.Foo))
+    print(to_string(Bar))
