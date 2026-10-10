@@ -442,8 +442,12 @@ fn run_file_dump_qualify(path: String, stdlib_root: String) -> Unit !{IO} =
 # Batch entry point: stdlib_root as argv[0], file paths as argv[1..N]
 # Prints "=== <path> ===" before each file's output (except the IR phase).
 #
-# phase: "" = default source check,
-#        "bundle"|"check"|"effects"|"bind-census"|"lower"|"recheck"|"ir-typed"|"scan-info"|"dump-qualify"
+# phase: "" = default source check, "ir-typed" = --emit-ir --debug, or one of
+# known_phases.
+
+# Every message that lists the phases reads this, so the lists cannot drift.
+let known_phases: String =
+  "bundle|check|effects|bind-census|cse-census|cse-keys|lower|recheck|scan-info|dump-qualify"
 
 fn run_batch(stdlib_root: String, idx: Int, phase: String, extra_roots: List String, failed: Ref Int) -> Unit !{IO} =
   match argv_get(idx) with
@@ -471,7 +475,7 @@ fn run_batch(stdlib_root: String, idx: Int, phase: String, extra_roots: List Str
         # like it had worked. A gate asserting on a phase's output is only as good
         # as the driver's willingness to admit the phase does not exist.
         else report_error(failed, "ERROR: unknown phase `" ++ phase
-               ++ "`: expected bundle|check|effects|bind-census|cse-census|cse-keys|lower|recheck|scan-info|dump-qualify")
+               ++ "`: expected " ++ known_phases)
         # Keep going after a failure: a batch reports every bad file, and `failed`
         # is write-1-only so the status survives the remaining files.
         run_batch(stdlib_root, idx + 1, phase, extra_roots, failed)
@@ -507,7 +511,7 @@ fn main() -> Int !{IO} =
     | ["--phase", _ | _] ->
         report_error(failed, "ERROR: usage: compile-driver --phase <phase> <stdlib-root> [--package-root <dir>] <file>...")
     | ["--phase" | _] ->
-        report_error(failed, "ERROR: --phase requires an argument: bundle|check|effects|bind-census|lower|recheck|scan-info|dump-qualify")
+        report_error(failed, "ERROR: --phase requires an argument: " ++ known_phases)
     # --package-root before the bare form: the general arm would otherwise bind
     # path to the literal "--package-root". Mirrors the --emit-ir surface so the
     # typed-codegen path resolves dotted non-stdlib imports (e.g. testsupport.*).
@@ -528,6 +532,6 @@ fn main() -> Int !{IO} =
     | [stdlib_root | _] ->
         run_batch(stdlib_root, 1, "", Nil, failed)
     | _ ->
-        report_error(failed, "ERROR: usage: compile-driver [--phase bundle|check|effects|bind-census|lower|recheck|scan-info|dump-qualify | --emit-ir [--debug] | --use-ir-codegen | --emit-iface <module-name> | --check-iface <iface-file>] <stdlib-root> <file>...")
+        report_error(failed, "ERROR: usage: compile-driver [--phase " ++ known_phases ++ " | --emit-ir [--debug] | --use-ir-codegen | --emit-iface <module-name> | --check-iface <iface-file>] <stdlib-root> <file>...")
     code <- ref_read(failed)
     code

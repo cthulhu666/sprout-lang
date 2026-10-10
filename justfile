@@ -1423,15 +1423,6 @@ bundle-smoke: bootstrap-from-seed
   fi
   echo "==> bundle-smoke ✓"
 
-# Calibration gate for `--phase effects`, the declared-vs-inferred effect report.
-#
-# This gate exists because the instrument's failure mode is SILENCE, not noise.
-# A hand-rolled predecessor reported zero gaps across 316 declarations and read
-# as "the codebase is well-annotated"; it was actually reporting nothing at all,
-# and was caught only by running it against a case already known to be broken.
-# So this asserts on both halves: the cases that MUST be flagged, and the ones
-# that must NOT — a report that flags everything is as useless as one that flags
-# nothing. tests/effects/canaries.spr documents the expected answer per function.
 # `--phase bind-census` against its canaries, line for line. The census is the
 # `try` migration's worklist and done-check (docs/try-propagate-v0.md §8 step 1a),
 # so a site it silently drops is a site the codemods never touch. An exact diff,
@@ -1452,6 +1443,15 @@ bind-census-smoke: bootstrap-from-seed
   fi
   echo "bind-census-smoke: OK ($(grep -c . "$WANT") lines)"
 
+# Calibration gate for `--phase effects`, the declared-vs-inferred effect report.
+#
+# This gate exists because the instrument's failure mode is SILENCE, not noise.
+# A hand-rolled predecessor reported zero gaps across 316 declarations and read
+# as "the codebase is well-annotated"; it was actually reporting nothing at all,
+# and was caught only by running it against a case already known to be broken.
+# So this asserts on both halves: the cases that MUST be flagged, and the ones
+# that must NOT — a report that flags everything is as useless as one that flags
+# nothing. tests/effects/canaries.spr documents the expected answer per function.
 [group('smoke')]
 effect-report-smoke: bootstrap-from-seed
   #!/usr/bin/env bash

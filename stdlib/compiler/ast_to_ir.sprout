@@ -46,10 +46,6 @@ import stdlib.string as string
 # O(n * log(n)) where n = number of TVar nodes.
 
 # O(n * log(n)).
-fn set_from_list(xs: List String) -> Set =
-  list_fold(\ (s, x) -> set_insert(x, s), set_empty(), xs)
-
-# O(n * log(n)).
 fn compute_free_vars(expr: typed_ast.TypedExpr, bound: Set) -> Set =
   match expr with
   | typed_ast.TVar name _ _ ->

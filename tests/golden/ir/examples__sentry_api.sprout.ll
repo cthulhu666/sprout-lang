@@ -151,59 +151,59 @@ declare i64 @http_request(i64, i64, i64, i64, i64)
 @.str.48 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 827, column 51)\00" }
 @.str.49 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 832, column 77)\00" }
 @.str.50 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 842, column 81)\00" }
-@.str.51 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1057, column 42)\00" }
-@.str.52 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1067, column 56)\00" }
-@.str.53 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1259, column 54)\00" }
-@.str.54 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1273, column 39)\00" }
-@.str.55 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1398, column 55)\00" }
-@.str.56 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1415, column 49)\00" }
-@.str.57 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1422, column 46)\00" }
-@.str.58 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1548, column 38)\00" }
-@.str.59 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1621, column 83)\00" }
+@.str.51 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1061, column 42)\00" }
+@.str.52 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1071, column 56)\00" }
+@.str.53 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1263, column 54)\00" }
+@.str.54 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1277, column 39)\00" }
+@.str.55 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1402, column 55)\00" }
+@.str.56 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1419, column 49)\00" }
+@.str.57 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1426, column 46)\00" }
+@.str.58 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1552, column 38)\00" }
+@.str.59 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1625, column 83)\00" }
 @.str.60 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
-@.str.61 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1765, column 47)\00" }
-@.str.62 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1766, column 38)\00" }
+@.str.61 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1769, column 47)\00" }
+@.str.62 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1770, column 38)\00" }
 @.str.63 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
-@.str.64 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1779, column 52)\00" }
+@.str.64 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1783, column 52)\00" }
 @.str.65 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c": \00" }
-@.str.66 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1780, column 43)\00" }
+@.str.66 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1784, column 43)\00" }
 @.str.67 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c": \00" }
 @.str.68 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
-@.str.69 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1879, column 30)\00" }
-@.str.70 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1911, column 10)\00" }
+@.str.69 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1883, column 30)\00" }
+@.str.70 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1915, column 10)\00" }
 @.str.71 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
-@.str.72 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in / (line 1916, column 39)\00" }
-@.str.73 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1938, column 33)\00" }
-@.str.74 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 1938, column 43)\00" }
-@.str.75 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1938, column 49)\00" }
-@.str.76 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1946, column 58)\00" }
-@.str.77 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 1972, column 10)\00" }
-@.str.78 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 1972, column 28)\00" }
-@.str.79 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1981, column 33)\00" }
-@.str.80 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1981, column 57)\00" }
-@.str.81 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1982, column 25)\00" }
-@.str.82 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1983, column 10)\00" }
-@.str.83 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1990, column 81)\00" }
-@.str.84 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1994, column 50)\00" }
+@.str.72 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in / (line 1920, column 39)\00" }
+@.str.73 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1942, column 33)\00" }
+@.str.74 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 1942, column 43)\00" }
+@.str.75 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1942, column 49)\00" }
+@.str.76 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1950, column 58)\00" }
+@.str.77 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 1976, column 10)\00" }
+@.str.78 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 1976, column 28)\00" }
+@.str.79 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1985, column 33)\00" }
+@.str.80 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1985, column 57)\00" }
+@.str.81 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1986, column 25)\00" }
+@.str.82 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1987, column 10)\00" }
+@.str.83 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1994, column 81)\00" }
+@.str.84 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1998, column 50)\00" }
 @.str.85 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
-@.str.86 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in / (line 2001, column 17)\00" }
-@.str.87 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 2002, column 41)\00" }
-@.str.88 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 2002, column 32)\00" }
-@.str.89 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2013, column 52)\00" }
-@.str.90 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2048, column 60)\00" }
-@.str.91 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2049, column 54)\00" }
-@.str.92 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 2049, column 64)\00" }
-@.str.93 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 2049, column 70)\00" }
-@.str.94 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2050, column 29)\00" }
-@.str.95 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2050, column 47)\00" }
+@.str.86 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in / (line 2005, column 17)\00" }
+@.str.87 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 2006, column 41)\00" }
+@.str.88 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 2006, column 32)\00" }
+@.str.89 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2017, column 52)\00" }
+@.str.90 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2052, column 60)\00" }
+@.str.91 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2053, column 54)\00" }
+@.str.92 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 2053, column 64)\00" }
+@.str.93 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 2053, column 70)\00" }
+@.str.94 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2054, column 29)\00" }
+@.str.95 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2054, column 47)\00" }
 @.str.96 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c".\00" }
-@.str.97 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 2067, column 60)\00" }
-@.str.98 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 2087, column 58)\00" }
-@.str.99 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 2094, column 68)\00" }
-@.str.100 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2100, column 70)\00" }
+@.str.97 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 2071, column 60)\00" }
+@.str.98 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 2091, column 58)\00" }
+@.str.99 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 2098, column 68)\00" }
+@.str.100 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2104, column 70)\00" }
 @.str.101 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"-\00" }
 @.str.102 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"+\00" }
-@.str.103 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 2136, column 20)\00" }
+@.str.103 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 2140, column 20)\00" }
 @.str.104 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"e\00" }
 @.str.105 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"E\00" }
 @.str.106 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"-\00" }
@@ -529,12 +529,12 @@ declare i64 @http_request(i64, i64, i64, i64, i64)
 @.str.426 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
 @.str.427 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
 @.str.428 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
-@.str.429 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 1316, column 26)\00" }
-@.str.430 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 1324, column 10)\00" }
-@.str.431 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 1341, column 26)\00" }
-@.str.432 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 1345, column 10)\00" }
-@.str.433 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1392, column 64)\00" }
-@.str.434 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1410, column 69)\00" }
+@.str.429 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 1320, column 26)\00" }
+@.str.430 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 1328, column 10)\00" }
+@.str.431 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 1345, column 26)\00" }
+@.str.432 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 1349, column 10)\00" }
+@.str.433 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1396, column 64)\00" }
+@.str.434 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1414, column 69)\00" }
 @.str.435 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.str.436 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c"Nothing\00" }
 @.str.437 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"Just(\00" }
@@ -573,14 +573,14 @@ declare i64 @http_request(i64, i64, i64, i64, i64)
 @.str.470 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
 @.str.471 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
 @.str.472 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
-@.str.473 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1938, column 33)\00" }
-@.str.474 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 1938, column 43)\00" }
-@.str.475 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1938, column 49)\00" }
+@.str.473 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1942, column 33)\00" }
+@.str.474 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 1942, column 43)\00" }
+@.str.475 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1942, column 49)\00" }
 @.str.476 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"-\00" }
 @.str.477 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"-\00" }
 @.str.478 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"+\00" }
-@.str.479 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 2136, column 20)\00" }
-@.str.480 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2013, column 52)\00" }
+@.str.479 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 2140, column 20)\00" }
+@.str.480 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2017, column 52)\00" }
 @.str.481 = private unnamed_addr constant { i64, [50 x i8] } { i64 802826, [50 x i8] c"\0D\0AConnection: close\0D\0AContent-Type: text/plain\0D\0A\0D\0A\00" }
 @.str.482 = private unnamed_addr constant { i64, [4 x i8] } { i64 49162, [4 x i8] c"200\00" }
 @.str.483 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"OK\00" }
@@ -7494,6 +7494,39 @@ entry:
   ret i64 %t$3
 }
 
+define i64 @__sprout_ir_lambda_11(i64 %p$env$, i64 %p$s, i64 %p$x) {
+entry:
+  %t$1 = alloca i64
+  store i64 %p$x, ptr %t$1
+  %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
+  %t$3 = alloca i64
+  store i64 %p$s, ptr %t$3
+  %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
+  %t$0 = call i64 @set_insert(i64 %p$x, i64 %p$s)
+  %t$5 = call i64 @sprout_gc_pop_roots(i64 2)
+  ret i64 %t$0
+}
+
+define i64 @set_from_list(i64 %p$xs) {
+entry:
+  %t$3 = alloca i64
+  store i64 %p$xs, ptr %t$3
+  %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
+  %t$0 = call i64 @sprout_alloc_closure(i64 8, i64 2)
+  %t$0$raw = inttoptr i64 %t$0 to ptr
+  store ptr @__sprout_ir_lambda_11, ptr %t$0$raw
+  %t$5 = alloca i64
+  store i64 %t$0, ptr %t$5
+  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
+  %t$1 = call i64 @set_empty()
+  %t$7 = alloca i64
+  store i64 %t$1, ptr %t$7
+  %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
+  %t$2 = call i64 @list_fold(i64 %t$0, i64 %t$1, i64 %p$xs)
+  %t$9 = call i64 @sprout_gc_pop_roots(i64 3)
+  ret i64 %t$2
+}
+
 define i64 @and_then(i64 %p$f, i64 %p$xs, i64 %p$__tc_Monad_0_flat_map, i64 %p$__tc_Applicative_0_pure, i64 %p$__tc_Applicative_0_map2, i64 %p$__tc_Functor_0_fmap) {
 entry:
   %t$1 = alloca i64
@@ -7544,7 +7577,7 @@ entry:
   ret i64 %t$0
 }
 
-define i64 @__sprout_ir_lambda_11(i64 %p$env$, i64 %p$x) {
+define i64 @__sprout_ir_lambda_12(i64 %p$env$, i64 %p$x) {
 entry:
   ret i64 %p$x
 }
@@ -7568,7 +7601,7 @@ entry:
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
   %t$0 = call i64 @sprout_alloc_closure(i64 8, i64 1)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_11, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_12, ptr %t$0$raw
   %t$12 = alloca i64
   store i64 %t$0, ptr %t$12
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
@@ -7706,7 +7739,7 @@ entry:
   ret i64 %t$0
 }
 
-define i64 @__sprout_ir_lambda_12(i64 %p$env$, i64 %p$acc, i64 %p$x) {
+define i64 @__sprout_ir_lambda_13(i64 %p$env$, i64 %p$acc, i64 %p$x) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -7726,7 +7759,7 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_lambda_13(i64 %p$env$, i64 %p$acc) {
+define i64 @__sprout_ir_lambda_14(i64 %p$env$, i64 %p$acc) {
 entry:
   %t$0 = xor i64 %p$acc, 1
   ret i64 %t$0
@@ -7748,7 +7781,7 @@ entry:
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
   %t$0 = call i64 @sprout_alloc_closure(i64 16, i64 2)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_12, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_13, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$pred, ptr %t$0$raw$slot$1
   %t$12 = alloca i64
@@ -7756,7 +7789,7 @@ entry:
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
   %t$1 = call i64 @sprout_alloc_closure(i64 8, i64 1)
   %t$1$raw = inttoptr i64 %t$1 to ptr
-  store ptr @__sprout_ir_lambda_13, ptr %t$1$raw
+  store ptr @__sprout_ir_lambda_14, ptr %t$1$raw
   %t$2 = add i64 0, 0
   %t$14 = alloca i64
   store i64 %t$1, ptr %t$14
@@ -7766,7 +7799,7 @@ entry:
   ret i64 %t$3
 }
 
-define i64 @__sprout_ir_lambda_14(i64 %p$env$, i64 %p$acc, i64 %p$x) {
+define i64 @__sprout_ir_lambda_15(i64 %p$env$, i64 %p$acc, i64 %p$x) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -7786,7 +7819,7 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_lambda_15(i64 %p$env$, i64 %p$acc) {
+define i64 @__sprout_ir_lambda_16(i64 %p$env$, i64 %p$acc) {
 entry:
   ret i64 %p$acc
 }
@@ -7807,7 +7840,7 @@ entry:
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
   %t$0 = call i64 @sprout_alloc_closure(i64 16, i64 2)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_14, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_15, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$pred, ptr %t$0$raw$slot$1
   %t$12 = alloca i64
@@ -7815,7 +7848,7 @@ entry:
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
   %t$1 = call i64 @sprout_alloc_closure(i64 8, i64 1)
   %t$1$raw = inttoptr i64 %t$1 to ptr
-  store ptr @__sprout_ir_lambda_15, ptr %t$1$raw
+  store ptr @__sprout_ir_lambda_16, ptr %t$1$raw
   %t$2 = add i64 0, 1
   %t$14 = alloca i64
   store i64 %t$1, ptr %t$14
@@ -7825,7 +7858,7 @@ entry:
   ret i64 %t$3
 }
 
-define i64 @__sprout_ir_lambda_16(i64 %p$env$, i64 %p$acc, i64 %p$x) {
+define i64 @__sprout_ir_lambda_17(i64 %p$env$, i64 %p$acc, i64 %p$x) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -7860,7 +7893,7 @@ join_2:
   ret i64 %t$3
 }
 
-define i64 @__sprout_ir_lambda_17(i64 %p$env$, i64 %p$acc) {
+define i64 @__sprout_ir_lambda_18(i64 %p$env$, i64 %p$acc) {
 entry:
   %t$0 = call i64 @sprout_tag(i64 %p$acc)
   br label %arm_0_1
@@ -7902,7 +7935,7 @@ entry:
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
   %t$0 = call i64 @sprout_alloc_closure(i64 16, i64 2)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_16, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_17, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$pred, ptr %t$0$raw$slot$1
   %t$12 = alloca i64
@@ -7910,7 +7943,7 @@ entry:
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
   %t$1 = call i64 @sprout_alloc_closure(i64 8, i64 1)
   %t$1$raw = inttoptr i64 %t$1 to ptr
-  store ptr @__sprout_ir_lambda_17, ptr %t$1$raw
+  store ptr @__sprout_ir_lambda_18, ptr %t$1$raw
   %t$14 = alloca i64
   store i64 %t$1, ptr %t$14
   %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
@@ -7923,7 +7956,7 @@ entry:
   ret i64 %t$3
 }
 
-define i64 @__sprout_ir_lambda_18(i64 %p$env$, i64 %p$acc, i64 %p$x) {
+define i64 @__sprout_ir_lambda_19(i64 %p$env$, i64 %p$acc, i64 %p$x) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -7954,7 +7987,7 @@ join_2:
   ret i64 %t$3
 }
 
-define i64 @__sprout_ir_lambda_19(i64 %p$env$, i64 %p$acc) {
+define i64 @__sprout_ir_lambda_20(i64 %p$env$, i64 %p$acc) {
 entry:
   %t$0 = call i64 @sprout_tag(i64 %p$acc)
   br label %arm_0_1
@@ -7996,7 +8029,7 @@ entry:
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
   %t$0 = call i64 @sprout_alloc_closure(i64 16, i64 2)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_18, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_19, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$f, ptr %t$0$raw$slot$1
   %t$12 = alloca i64
@@ -8004,7 +8037,7 @@ entry:
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
   %t$1 = call i64 @sprout_alloc_closure(i64 8, i64 1)
   %t$1$raw = inttoptr i64 %t$1 to ptr
-  store ptr @__sprout_ir_lambda_19, ptr %t$1$raw
+  store ptr @__sprout_ir_lambda_20, ptr %t$1$raw
   %t$14 = alloca i64
   store i64 %t$1, ptr %t$14
   %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
@@ -8017,7 +8050,7 @@ entry:
   ret i64 %t$3
 }
 
-define i64 @__sprout_ir_lambda_20(i64 %p$env$, i64 %p$acc, i64 %p$x) {
+define i64 @__sprout_ir_lambda_21(i64 %p$env$, i64 %p$acc, i64 %p$x) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -8068,7 +8101,7 @@ entry:
   %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
   %t$0 = call i64 @sprout_alloc_closure(i64 16, i64 2)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_20, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_21, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$pred, ptr %t$0$raw$slot$1
   %t$1 = add i64 0, 0
@@ -8080,7 +8113,7 @@ entry:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_lambda_21(i64 %p$env$, i64 %p$y) {
+define i64 @__sprout_ir_lambda_22(i64 %p$env$, i64 %p$y) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -8121,7 +8154,7 @@ entry:
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
   %t$0 = call i64 @sprout_alloc_closure(i64 24, i64 1)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_21, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_22, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$__tc_Eq_1_eq, ptr %t$0$raw$slot$1
   %t$0$raw$slot$2 = getelementptr i64, ptr %t$0$raw, i64 2
@@ -8135,7 +8168,7 @@ entry:
   ret i64 %t$1
 }
 
-define i64 @__sprout_ir_lambda_22(i64 %p$env$, i64 %p$s, i64 %p$x) {
+define i64 @__sprout_ir_lambda_23(i64 %p$env$, i64 %p$s, i64 %p$x) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -8201,7 +8234,7 @@ entry:
   %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
   %t$0 = call i64 @sprout_alloc_closure(i64 16, i64 2)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_22, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_23, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$f, ptr %t$0$raw$slot$1
   %t$1 = add i64 0, 0
@@ -8542,7 +8575,7 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_lambda_23(i64 %p$env$, i64 %p$best, i64 %p$x) {
+define i64 @__sprout_ir_lambda_24(i64 %p$env$, i64 %p$best, i64 %p$x) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -8595,7 +8628,7 @@ entry:
   %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
   %t$0 = call i64 @sprout_alloc_closure(i64 32, i64 2)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_23, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_24, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$__tc_Eq_1_eq, ptr %t$0$raw$slot$1
   %t$0$raw$slot$2 = getelementptr i64, ptr %t$0$raw, i64 2
@@ -8620,7 +8653,7 @@ entry:
   ret i64 %t$3
 }
 
-define i64 @__sprout_ir_lambda_24(i64 %p$env$, i64 %p$best, i64 %p$x) {
+define i64 @__sprout_ir_lambda_25(i64 %p$env$, i64 %p$best, i64 %p$x) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -8673,7 +8706,7 @@ entry:
   %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
   %t$0 = call i64 @sprout_alloc_closure(i64 32, i64 2)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_24, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_25, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$__tc_Eq_1_eq, ptr %t$0$raw$slot$1
   %t$0$raw$slot$2 = getelementptr i64, ptr %t$0$raw, i64 2
@@ -8698,7 +8731,7 @@ entry:
   ret i64 %t$3
 }
 
-define i64 @__sprout_ir_lambda_25(i64 %p$env$, i64 %p$value) {
+define i64 @__sprout_ir_lambda_26(i64 %p$env$, i64 %p$value) {
 entry:
   ret i64 %p$value
 }
@@ -8722,7 +8755,7 @@ entry:
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
   %t$0 = call i64 @sprout_alloc_closure(i64 8, i64 1)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_25, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_26, ptr %t$0$raw
   %t$12 = alloca i64
   store i64 %t$0, ptr %t$12
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
@@ -8731,7 +8764,7 @@ entry:
   ret i64 %t$1
 }
 
-define i64 @__sprout_ir_lambda_26(i64 %p$env$, i64 %p$value) {
+define i64 @__sprout_ir_lambda_27(i64 %p$env$, i64 %p$value) {
 entry:
   ret i64 %p$value
 }
@@ -8755,7 +8788,7 @@ entry:
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
   %t$0 = call i64 @sprout_alloc_closure(i64 8, i64 1)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_26, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_27, ptr %t$0$raw
   %t$12 = alloca i64
   store i64 %t$0, ptr %t$12
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
@@ -8764,7 +8797,7 @@ entry:
   ret i64 %t$1
 }
 
-define i64 @__sprout_ir_lambda_27(i64 %p$env$, i64 %p$acc, i64 %p$x) {
+define i64 @__sprout_ir_lambda_28(i64 %p$env$, i64 %p$acc, i64 %p$x) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -8795,7 +8828,7 @@ entry:
   %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
   %t$0 = call i64 @sprout_alloc_closure(i64 16, i64 2)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_27, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_28, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$__tc_Semigroup_1_append, ptr %t$0$raw$slot$1
   %t$13 = alloca i64
@@ -8860,7 +8893,7 @@ entry:
   ret i64 %t$0
 }
 
-define i64 @__sprout_ir_lambda_28(i64 %p$env$, i64 %p$ab, i64 %p$c) {
+define i64 @__sprout_ir_lambda_29(i64 %p$env$, i64 %p$ab, i64 %p$c) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -8886,7 +8919,7 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_eta_ap_pair_29(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
+define i64 @__sprout_ir_eta_ap_pair_30(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
 entry:
   %t$0 = alloca i64
   store i64 %p$a1, ptr %t$0
@@ -8924,7 +8957,7 @@ entry:
   %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
   %t$0 = call i64 @sprout_alloc_closure(i64 16, i64 2)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_28, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_29, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$g, ptr %t$0$raw$slot$1
   %t$18 = alloca i64
@@ -8932,7 +8965,7 @@ entry:
   %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
   %t$1 = call i64 @sprout_alloc_closure(i64 8, i64 2)
   %t$1$raw = inttoptr i64 %t$1 to ptr
-  store ptr @__sprout_ir_eta_ap_pair_29, ptr %t$1$raw
+  store ptr @__sprout_ir_eta_ap_pair_30, ptr %t$1$raw
   %t$20 = alloca i64
   store i64 %t$1, ptr %t$20
   %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
@@ -8946,7 +8979,7 @@ entry:
   ret i64 %t$3
 }
 
-define i64 @__sprout_ir_lambda_30(i64 %p$env$, i64 %p$ab, i64 %p$cd) {
+define i64 @__sprout_ir_lambda_31(i64 %p$env$, i64 %p$ab, i64 %p$cd) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -8986,7 +9019,7 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_eta_ap_pair_31(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
+define i64 @__sprout_ir_eta_ap_pair_32(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
 entry:
   %t$0 = alloca i64
   store i64 %p$a1, ptr %t$0
@@ -8999,7 +9032,7 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta_ap_pair_32(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
+define i64 @__sprout_ir_eta_ap_pair_33(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
 entry:
   %t$0 = alloca i64
   store i64 %p$a1, ptr %t$0
@@ -9040,7 +9073,7 @@ entry:
   %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
   %t$0 = call i64 @sprout_alloc_closure(i64 16, i64 2)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_30, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_31, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$g, ptr %t$0$raw$slot$1
   %t$22 = alloca i64
@@ -9048,7 +9081,7 @@ entry:
   %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
   %t$1 = call i64 @sprout_alloc_closure(i64 8, i64 2)
   %t$1$raw = inttoptr i64 %t$1 to ptr
-  store ptr @__sprout_ir_eta_ap_pair_31, ptr %t$1$raw
+  store ptr @__sprout_ir_eta_ap_pair_32, ptr %t$1$raw
   %t$24 = alloca i64
   store i64 %t$1, ptr %t$24
   %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
@@ -9059,7 +9092,7 @@ entry:
   %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
   %t$3 = call i64 @sprout_alloc_closure(i64 8, i64 2)
   %t$3$raw = inttoptr i64 %t$3 to ptr
-  store ptr @__sprout_ir_eta_ap_pair_32, ptr %t$3$raw
+  store ptr @__sprout_ir_eta_ap_pair_33, ptr %t$3$raw
   %t$29 = alloca i64
   store i64 %t$3, ptr %t$29
   %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
@@ -9073,7 +9106,7 @@ entry:
   ret i64 %t$5
 }
 
-define i64 @__sprout_ir_lambda_33(i64 %p$env$, i64 %p$ab, i64 %p$cd, i64 %p$ev) {
+define i64 @__sprout_ir_lambda_34(i64 %p$env$, i64 %p$ab, i64 %p$cd, i64 %p$ev) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -9113,7 +9146,7 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_eta_ap_pair_34(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
+define i64 @__sprout_ir_eta_ap_pair_35(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
 entry:
   %t$0 = alloca i64
   store i64 %p$a1, ptr %t$0
@@ -9126,7 +9159,7 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta_ap_pair_35(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
+define i64 @__sprout_ir_eta_ap_pair_36(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
 entry:
   %t$0 = alloca i64
   store i64 %p$a1, ptr %t$0
@@ -9170,7 +9203,7 @@ entry:
   %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
   %t$0 = call i64 @sprout_alloc_closure(i64 16, i64 3)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_33, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_34, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$g, ptr %t$0$raw$slot$1
   %t$24 = alloca i64
@@ -9178,7 +9211,7 @@ entry:
   %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
   %t$1 = call i64 @sprout_alloc_closure(i64 8, i64 2)
   %t$1$raw = inttoptr i64 %t$1 to ptr
-  store ptr @__sprout_ir_eta_ap_pair_34, ptr %t$1$raw
+  store ptr @__sprout_ir_eta_ap_pair_35, ptr %t$1$raw
   %t$26 = alloca i64
   store i64 %t$1, ptr %t$26
   %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
@@ -9189,7 +9222,7 @@ entry:
   %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
   %t$3 = call i64 @sprout_alloc_closure(i64 8, i64 2)
   %t$3$raw = inttoptr i64 %t$3 to ptr
-  store ptr @__sprout_ir_eta_ap_pair_35, ptr %t$3$raw
+  store ptr @__sprout_ir_eta_ap_pair_36, ptr %t$3$raw
   %t$31 = alloca i64
   store i64 %t$3, ptr %t$31
   %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
@@ -9928,7 +9961,7 @@ join_2:
   ret i64 %t$3
 }
 
-define i64 @__sprout_ir_lambda_37(i64 %p$env$, i64 %p$y) {
+define i64 @__sprout_ir_lambda_38(i64 %p$env$, i64 %p$y) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -9943,7 +9976,7 @@ entry:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_lambda_36(i64 %p$env$, i64 %p$x) {
+define i64 @__sprout_ir_lambda_37(i64 %p$env$, i64 %p$x) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -9962,7 +9995,7 @@ entry:
   %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
   %t$2 = call i64 @sprout_alloc_closure(i64 24, i64 1)
   %t$2$raw = inttoptr i64 %t$2 to ptr
-  store ptr @__sprout_ir_lambda_37, ptr %t$2$raw
+  store ptr @__sprout_ir_lambda_38, ptr %t$2$raw
   %t$2$raw$slot$1 = getelementptr i64, ptr %t$2$raw, i64 1
   store i64 %t$0, ptr %t$2$raw$slot$1
   %t$2$raw$slot$2 = getelementptr i64, ptr %t$2$raw, i64 2
@@ -9988,7 +10021,7 @@ entry:
   %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
   %t$0 = call i64 @sprout_alloc_closure(i64 24, i64 1)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_36, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_37, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$g, ptr %t$0$raw$slot$1
   %t$0$raw$slot$2 = getelementptr i64, ptr %t$0$raw, i64 2
@@ -10002,7 +10035,7 @@ entry:
   ret i64 %t$1
 }
 
-define i64 @__sprout_ir_lambda_38(i64 %p$env$, i64 %p$ys) {
+define i64 @__sprout_ir_lambda_39(i64 %p$env$, i64 %p$ys) {
 entry:
   %t$2 = alloca i64
   store i64 %p$ys, ptr %t$2
@@ -10016,7 +10049,7 @@ entry:
   ret i64 %t$1
 }
 
-define i64 @__sprout_ir_lambda_39(i64 %p$env$, i64 %p$ys, i64 %p$y) {
+define i64 @__sprout_ir_lambda_40(i64 %p$env$, i64 %p$ys, i64 %p$y) {
 entry:
   %t$1 = alloca i64
   store i64 %p$ys, ptr %t$1
@@ -10072,7 +10105,7 @@ body_0_1:
   %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
   %t$5 = call i64 @sprout_alloc_closure(i64 8, i64 1)
   %t$5$raw = inttoptr i64 %t$5 to ptr
-  store ptr @__sprout_ir_lambda_38, ptr %t$5$raw
+  store ptr @__sprout_ir_lambda_39, ptr %t$5$raw
   %t$26 = alloca i64
   store i64 %t$5, ptr %t$26
   %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
@@ -10109,7 +10142,7 @@ body_1_1:
   %t$42 = call i64 @sprout_gc_push_i64_root(ptr %t$41)
   %t$11 = call i64 @sprout_alloc_closure(i64 8, i64 2)
   %t$11$raw = inttoptr i64 %t$11 to ptr
-  store ptr @__sprout_ir_lambda_39, ptr %t$11$raw
+  store ptr @__sprout_ir_lambda_40, ptr %t$11$raw
   %t$43 = alloca i64
   store i64 %t$11, ptr %t$43
   %t$44 = call i64 @sprout_gc_push_i64_root(ptr %t$43)
@@ -10139,7 +10172,7 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_lambda_40(i64 %p$env$, i64 %p$ys) {
+define i64 @__sprout_ir_lambda_41(i64 %p$env$, i64 %p$ys) {
 entry:
   %t$3 = alloca i64
   store i64 %p$ys, ptr %t$3
@@ -10168,7 +10201,7 @@ entry:
   %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
   %t$0 = call i64 @sprout_alloc_closure(i64 8, i64 1)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_40, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_41, ptr %t$0$raw
   %t$6 = alloca i64
   store i64 %t$0, ptr %t$6
   %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
@@ -10177,7 +10210,7 @@ entry:
   ret i64 %t$1
 }
 
-define i64 @__sprout_ir_lambda_41(i64 %p$env$, i64 %p$ys, i64 %p$y) {
+define i64 @__sprout_ir_lambda_42(i64 %p$env$, i64 %p$ys, i64 %p$y) {
 entry:
   %t$1 = alloca i64
   store i64 %p$ys, ptr %t$1
@@ -10308,7 +10341,7 @@ ovfok_15:
   %t$63 = call i64 @sprout_gc_push_i64_root(ptr %t$62)
   %t$18 = call i64 @sprout_alloc_closure(i64 8, i64 2)
   %t$18$raw = inttoptr i64 %t$18 to ptr
-  store ptr @__sprout_ir_lambda_41, ptr %t$18$raw
+  store ptr @__sprout_ir_lambda_42, ptr %t$18$raw
   %t$64 = alloca i64
   store i64 %t$18, ptr %t$64
   %t$65 = call i64 @sprout_gc_push_i64_root(ptr %t$64)
@@ -10446,7 +10479,7 @@ join_2:
   ret i64 %t$3
 }
 
-define i64 @__sprout_ir_lambda_42(i64 %p$env$, i64 %p$acc, i64 %p$x) {
+define i64 @__sprout_ir_lambda_43(i64 %p$env$, i64 %p$acc, i64 %p$x) {
 entry:
   %t$1 = alloca i64
   store i64 %p$x, ptr %t$1
@@ -10477,7 +10510,7 @@ entry:
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
   %t$0 = call i64 @sprout_alloc_closure(i64 8, i64 2)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_42, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_43, ptr %t$0$raw
   %t$12 = alloca i64
   store i64 %t$0, ptr %t$12
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
@@ -10591,7 +10624,7 @@ entry:
   ret i64 %t$0
 }
 
-define i64 @__sprout_ir_lambda_43(i64 %p$env$, i64 %p$x) {
+define i64 @__sprout_ir_lambda_44(i64 %p$env$, i64 %p$x) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -10624,7 +10657,7 @@ entry:
   %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
   %t$0 = call i64 @sprout_alloc_closure(i64 24, i64 1)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_43, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_44, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$f, ptr %t$0$raw$slot$1
   %t$0$raw$slot$2 = getelementptr i64, ptr %t$0$raw, i64 2
@@ -10633,7 +10666,7 @@ entry:
   ret i64 %t$0
 }
 
-define i64 @__sprout_ir_lambda_44(i64 %p$env$, i64 %p$x) {
+define i64 @__sprout_ir_lambda_45(i64 %p$env$, i64 %p$x) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -10666,7 +10699,7 @@ entry:
   %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
   %t$0 = call i64 @sprout_alloc_closure(i64 24, i64 1)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_44, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_45, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$f, ptr %t$0$raw$slot$1
   %t$0$raw$slot$2 = getelementptr i64, ptr %t$0$raw, i64 2
@@ -18220,7 +18253,7 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_lambda_45(i64 %p$env$, i64 %p$acc, i64 %p$s) {
+define i64 @__sprout_ir_lambda_46(i64 %p$env$, i64 %p$acc, i64 %p$s) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -18255,7 +18288,7 @@ entry:
   %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
   %t$0 = call i64 @sprout_alloc_closure(i64 16, i64 2)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_45, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_46, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$sep, ptr %t$0$raw$slot$1
   %t$13 = alloca i64
@@ -27957,7 +27990,7 @@ entry:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_lambda_46(i64 %p$env$, i64 %p$y) {
+define i64 @__sprout_ir_lambda_47(i64 %p$env$, i64 %p$y) {
 entry:
   %t$1 = alloca i64
   store i64 %p$y, ptr %t$1
@@ -28012,7 +28045,7 @@ body_1_1:
   %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
   %t$10 = call i64 @sprout_alloc_closure(i64 8, i64 1)
   %t$10$raw = inttoptr i64 %t$10 to ptr
-  store ptr @__sprout_ir_lambda_46, ptr %t$10$raw
+  store ptr @__sprout_ir_lambda_47, ptr %t$10$raw
   %t$28 = alloca i64
   store i64 %t$10, ptr %t$28
   %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
@@ -28468,7 +28501,7 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_lambda_47(i64 %p$env$, i64 %p$v) {
+define i64 @__sprout_ir_lambda_48(i64 %p$env$, i64 %p$v) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -28499,7 +28532,7 @@ entry:
   %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
   %t$2 = call i64 @sprout_alloc_closure(i64 16, i64 1)
   %t$2$raw = inttoptr i64 %t$2 to ptr
-  store ptr @__sprout_ir_lambda_47, ptr %t$2$raw
+  store ptr @__sprout_ir_lambda_48, ptr %t$2$raw
   %t$2$raw$slot$1 = getelementptr i64, ptr %t$2$raw, i64 1
   store i64 %p$__tc_ToString_0_to_string, ptr %t$2$raw$slot$1
   %t$15 = alloca i64

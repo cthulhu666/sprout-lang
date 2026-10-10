@@ -109,3 +109,33 @@ fn main() -> Unit !{IO} =
 
 fn try_let_in(n: Int) -> Maybe Int !{IO} =
   let _ = try load(n) in Just(1)
+
+# Typed before its callee, whose return type a later declaration fixes: the
+# census must resolve with the program's last substitution, not this body's.
+fn ping(n: Int) -> Maybe Int =
+  do
+    pong(n)
+    Just(n)
+
+fn pong(n: Int) = if n == 0 then Just(0) else ping(n - 1)
+
+fn early(n: Int) -> Maybe Int =
+  do
+    late(n)
+    Just(1)
+
+type Barrier = Barrier1 | Barrier2
+
+fn late(n: Int) = get(n)
+
+# Inferred twice — print's type peek, a comprehension's check phase — and
+# listed once.
+fn printed(n: Int) -> Unit !{IO} =
+  print(maybe_with_default(0, do
+    x <- load(n)
+    Just(x)))
+
+fn comprehended(n: Int) -> List Int !{IO} =
+  [x for x in (do
+    k <- ref_new(n)
+    [n])]
