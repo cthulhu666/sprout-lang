@@ -423,10 +423,10 @@ fn module_for_qualifier(specs: List module_loader.ImportSpec, qualifier: String)
   | Nil -> Nothing
   | Cons spec rest ->
       match spec with
-      | module_loader.ImportAlias module_name alias ->
+      | module_loader.ImportAlias module_name alias _ ->
           if alias == qualifier || module_name == qualifier then Just(module_name)
           else module_for_qualifier(rest, qualifier)
-      | module_loader.ImportSelective module_name _ ->
+      | module_loader.ImportSelective module_name _ _ ->
           if module_name == qualifier then Just(module_name)
           else module_for_qualifier(rest, qualifier)
 
@@ -436,10 +436,10 @@ fn module_for_selected_name(specs: List module_loader.ImportSpec, name: String) 
   | Nil -> Nothing
   | Cons spec rest ->
       match spec with
-      | module_loader.ImportSelective module_name names ->
+      | module_loader.ImportSelective module_name names _ ->
           if list_member(name, names) then Just(module_name)
           else module_for_selected_name(rest, name)
-      | module_loader.ImportAlias _ _ -> module_for_selected_name(rest, name)
+      | module_loader.ImportAlias _ _ _ -> module_for_selected_name(rest, name)
 
 fn definition_in_module(module_name: String, member: String, state: LspState) -> Maybe json.Json !{IO} =
   let Just path = module_loader.resolve_module_path(

@@ -201,8 +201,8 @@ fn parse_symbol_locations(src: String) -> json.Json =
 
 fn import_spec_names(spec: module_loader.ImportSpec) -> List String =
   match spec with
-  | module_loader.ImportAlias _ alias -> Cons(alias, Nil)
-  | module_loader.ImportSelective _ names -> names
+  | module_loader.ImportAlias _ alias _ -> Cons(alias, Nil)
+  | module_loader.ImportSelective _ names _ -> names
 
 fn collect_import_names(specs: List module_loader.ImportSpec, acc: List String) -> List String =
   match specs with

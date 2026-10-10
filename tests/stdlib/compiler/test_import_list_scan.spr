@@ -2,6 +2,7 @@ module main
 
 import stdlib.test (check_eq, run_suite)
 import stdlib.compiler.module_loader as module_loader
+import stdlib.compiler.source as source
 import stdlib.string as string
 
 # THE SCANNER MUST REPORT THE TEXT IT CONSUMED.
@@ -22,8 +23,8 @@ import stdlib.string as string
 # spurious `Unknown variable` reports instead of the one import error.
 
 fn names_of(line: String) -> List String =
-  match module_loader.parse_import_line(line) with
-  | Just (module_loader.ImportSelective _ names) -> names
+  match module_loader.parse_import_line(line, source.SourcePos(index = 0, line = 1, column = 1)) with
+  | Just (module_loader.ImportSelective _ names _) -> names
   | _ -> Nil
 
 # Each import `collect_imports` finds, as `module: names`.
@@ -32,8 +33,15 @@ fn scanned(src: String) -> List String =
 
 fn spec_line(spec: module_loader.ImportSpec) -> String =
   match spec with
-  | module_loader.ImportSelective m names -> m ++ ": " ++ string.join(", ", names)
-  | module_loader.ImportAlias m alias -> m ++ " as " ++ alias
+  | module_loader.ImportSelective m names _ -> m ++ ": " ++ string.join(", ", names)
+  | module_loader.ImportAlias m alias _ -> m ++ " as " ++ alias
+
+# Where each import starts, as `module@index:line:column`. An import diagnostic
+# points here, so a wrapped list must not shift the imports below it.
+fn positions(src: String) -> List String =
+  list_map(\spec -> `${module_loader.import_module(spec)}@${int_to_string(p(spec).index)}:${int_to_string(p(spec).line)}:${int_to_string(p(spec).column)}`,
+           module_loader.collect_imports(src))
+  where p = module_loader.import_pos
 
 fn main() -> Unit !{IO} =
   run_suite("import list scan", [
@@ -75,5 +83,15 @@ fn main() -> Unit !{IO} =
     check_eq("the same import without no_prelude agrees",
              scanned("import demo.m (a, b)\n"), ["demo.m: a, b"]),
     check_eq("an import after a no_prelude-like name is not",
-             scanned("no_prelude_x\nimport demo.m (a, b)\n"), [])
+             scanned("no_prelude_x\nimport demo.m (a, b)\n"), []),
+    check_eq("an import's position is its line start",
+             positions("module m\nimport demo.a as a\n"), ["demo.a@9:2:1"]),
+    check_eq("comments and blank lines count as lines",
+             positions("module m\n# c\n\nimport demo.a\n"), ["demo.a@14:4:1"]),
+    check_eq("a wrapped list does not shift the import after it",
+             positions("module m\nimport demo.a (\n  x,\n  y)\nimport demo.b\n"),
+             ["demo.a@9:2:1", "demo.b@35:5:1"]),
+    # Index counts codepoints, as the lexer's does, not bytes.
+    check_eq("a multi-byte comment counts once per codepoint",
+             positions("# żółw\nimport demo.a\n"), ["demo.a@7:2:1"])
   ])
