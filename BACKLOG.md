@@ -2331,8 +2331,7 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
 
 ### Prelude-helper cleanup arc (#602, #603) — review residuals
 
-Cleanups the 2026-10-09 review of #606 reported and left. Unverified by design: confirm each before
-acting.
+Cleanups the 2026-10-09 reviews of #606 and #613 reported and left. Confirm each before acting.
 
 - [ ] `P3` **TUI: the reply tuple and one loop are still spelled out after #606.** `app.sprout`'s
   `Step` and `Update` aliases are private, so `ide/app.sprout` (7 sites), the `tui_files` and
@@ -2345,6 +2344,12 @@ acting.
   and `children.sprout:64` do the same job: export a `list_reverse_onto`. `list_view` and `tree`
   import text_area's `viewport` module only for `first_row`; move it lower. `test.record` is
   `assert_true` with its arguments reordered.
+- [ ] `P3` **`ast_to_ir`: the ADT ctor index is rebuilt per pass.** `build_adt_ctor_index` runs in
+  `new_prog_env` and again in `tier2_augment_fns` and twice in `ir_pipeline`, on the same inputs.
+  Store it in `ProgEnv`; `emit_worker_for` and the worker streams then drop their `adt_index` param.
+- [ ] `P3` **`ast_to_ir`: bind-then-one-arm-match leftovers.** `translate_tail_*` and
+  `translate_call` bind a result, then destructure it with a one-arm `match` (`er`, `br`, `r` — the
+  last shadowed by `| Just r`); a tuple `<-` says it. Other one-arm matches only name `fresh_name`s.
 
 ### Compiler / Stdlib Misc
 
