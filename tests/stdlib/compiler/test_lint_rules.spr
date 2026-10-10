@@ -1041,10 +1041,10 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "lambda one constructor deep: no finding",
       count_by_rule(lint_rules.lint_ast(nullary_ctor_wrapping_lambda), "nullary-const-fn"), 0)
 
-    # The annotation resolves only prelude types, so the message must not send a
-    # reader at a `Version` or a `mod.T` without saying so.
-    assert_eq(state, "nullary const fn: message flags the prelude-only annotation",
-      mentions_prelude_only(first_message(lint_rules.lint_ast(nullary_ctor_app))), true)
+    # The annotation resolves any type a `fn` signature can name, so the message
+    # carries no prelude-only caveat.
+    assert_eq(state, "nullary const fn: message has no prelude-only caveat",
+      mentions_prelude_only(first_message(lint_rules.lint_ast(nullary_ctor_app))), false)
 
     assert_eq(state, "nullary fn with a where constraint: no finding",
       count_by_rule(lint_rules.lint_ast(nullary_constrained), "nullary-const-fn"), 0)

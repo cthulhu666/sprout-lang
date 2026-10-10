@@ -730,9 +730,7 @@ let entry_point_name: String = "main"
 fn nullary_const_message(name: String) -> String =
   "`" ++ name ++ "` takes no parameters and its body is a constant — bind it with a top-level "
   ++ "`let <name>: <type> = <body>`, which is evaluated once (docs/idiomatic-sprout.md). "
-  ++ "Carry the return type across: it selects the type, so dropping it turns `Vec` into `List`. "
-  ++ "The annotation resolves only prelude types today, so for any other one leave it off and "
-  ++ "check the inferred type."
+  ++ "Carry the return type across: it selects the type, so dropping it turns `Vec` into `List`."
 
 # Prefix `-` is an operator, so `-1` arrives as a UnaryExpr and the checker's
 # predicate rejects it — to that predicate `-1` and `negate(x)` are one shape.
@@ -1076,12 +1074,9 @@ export fn derive_combinators(names: List String, src: String)
 # `just lint` can batch paths instead of paying this per file (§10). It becomes
 # a permanent GC root, and unlike this file's other globals it is an object
 # graph rather than a flat string, so collection marks it whole.
-# Unannotated because a top-level `let` annotation resolves only prelude types;
-# docs/idiomatic-sprout.md says to leave it off and check the inferred type,
-# which the test does by consuming it as `List Combinator`.
 # The `panic` reports an authoring bug in the text above and nothing else — and
 # is itself the shape §6 refuses to rewrite: hoisted, it would fire always.
-export let combinator_patterns =
+export let combinator_patterns: List Combinator =
   match derive_combinators(combinator_names, combinator_source) with
   | Ok cs -> cs
   | Err msg -> panic("lint_rules: " ++ msg)

@@ -1,0 +1,6 @@
+# Qualifying a `let` annotation must not admit an undeclared name as a phantom
+# type: `qualify_type_expr` returns an unknown name unchanged, so the bundler's
+# unknown-type check still has to see it (unresolved_type_annotation, for `fn`).
+let x: Nosuch = 1
+
+fn main() -> Unit !{IO} = ()

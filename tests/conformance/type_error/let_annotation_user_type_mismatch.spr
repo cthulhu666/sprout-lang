@@ -1,0 +1,8 @@
+# A `let` annotation naming a type declared in this file must reach the
+# checker. The bundler left the annotation unqualified, so it failed earlier
+# as "unknown type `Colour`", advising an import of the file itself.
+type Colour = Red | Green
+
+let fav: Colour = 5
+
+fn main() -> Unit !{IO} = ()

@@ -501,8 +501,7 @@ body is a syntactic value, because a top-level `let` initializer must be pure
 
 **Carry the return type across** — `fn lengths() -> Vec Int = [1, 2, 3]` is a `Vec`
 *because* the return type says so (§5.5.1), and a bare `let lengths = [1, 2, 3]` is a
-`List`. The annotation only resolves prelude types today (`BACKLOG.md`, §1 Language Core and Safety), so where
-it cannot be written, leave the binding unannotated and check the inferred type.
+`List`. Write `let lengths: Vec Int = [1, 2, 3]`.
 
 Two shapes stay functions, and the rule leaves them alone:
 
