@@ -49,7 +49,7 @@ export type Tab m (..) = (key: widget.WidgetId, title: String, child: widget.Wid
 export type Change m (..) = Open (Tab m) | Select WidgetId | Close WidgetId | Next | Prev
 export type TabsOpts m (..) = (bar: Style, active: Style,
                                on_change: Maybe (m -> Maybe (Change m)),
-                               on_switch: Maybe (WidgetId -> m))
+                               on_switch: Maybe (Maybe WidgetId -> m))
 export fn tabs_opts() -> TabsOpts m
 export fn tabs(id, ts) / tabs_with(id, ts, opts) -> widget.Widget m
 ```
@@ -57,7 +57,8 @@ export fn tabs(id, ts) / tabs_with(id, ts, opts) -> widget.Widget m
 The first tab starts shown. `on_change` is a decoder like every other `on_content`
 (`docs/tui-content-update-v0.md` §5.3): the application's message stays data, and the decoder is
 where an `Open` builds the child widget. `on_switch` hears every change of the shown tab, whatever
-caused it — a close moves the selection without being asked to.
+caused it — a close moves the selection without being asked to. Closing the last tab is a change
+too, to no tab, so it hears `Nothing`: an application showing the open file's name must clear it.
 
 ### 4.2 A tab's key is the id its child answers to
 
@@ -84,8 +85,9 @@ A broadcast reaches every tab too. A hidden editor counts ticks toward its autos
   `Close` on a hidden tab changes nothing else.
 - `Next` and `Prev` wrap.
 - `Select` or `Close` of a key that is not there is claimed and silent.
-- A key repeated in the list given to `tabs_with` resolves to the first, as `deliver_first` does;
-  the later one is painted but never reached.
+- A key repeated in the list given to `tabs_with` keeps its first tab and drops the later ones, as
+  `Open` of a present key does. So no two tabs share a key: one that did would be rebuilt from the
+  other's child, highlighted with it, and would stop `Next` and `Prev` from moving past it.
 
 ### 4.4 No keys of its own
 
@@ -128,5 +130,6 @@ Found while designing this; recorded so the pane's design starts from them.
 `tests/stdlib/test_tui_tabs.spr`. Every child is a probe that writes down what reached it, so the
 shown tab, a hidden tab and nobody give three different transcripts. Covers the bar and body, the
 highlight, the cut, measuring; forwarding to the shown tab, to a hidden tab by key, and declining;
-each `Change` including the duplicate open and both close neighbours; focus moving with a switch
+each `Change` including the duplicate open, both close neighbours and the last close; a key given
+twice to `tabs_with`; focus moving with a switch
 and a close; a key through the ring; a tick reaching hidden tabs.

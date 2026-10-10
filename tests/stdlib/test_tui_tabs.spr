@@ -74,13 +74,23 @@ fn change_of(m: Msg) -> Maybe(tabs.Change Msg) =
   | PrevTab -> Just(tabs.Prev)
   | _ -> Nothing
 
-fn switched(k: widget.WidgetId) -> Msg = Switched(widget.id_text(k))
+fn switched(k: Maybe widget.WidgetId) -> Msg =
+  let Just key = k else Switched("none")
+  in Switched(widget.id_text(key))
 
 fn opts() -> tabs.TabsOpts Msg =
   tabs.tabs_opts() with (on_change = Just(change_of), on_switch = Just(switched))
 
 fn three() -> widget.Widget Msg =
   tabs.tabs_with(tabs_id, [tab("a"), tab("b"), tab("c")], opts())
+
+# Key "a" twice: the second is titled "y" and holds a probe that answers to
+# "q", so whether it is still there shows in every transcript.
+fn twice() -> widget.Widget Msg =
+  tabs.tabs_with(tabs_id,
+                 [tab("a"), tabs.Tab(key = widget.WidgetId("a"), title = "y",
+                                     child = probe("q")), tab("b")],
+                 opts())
 
 # ── observing ───────────────────────────────────────────────────────────────
 
@@ -248,10 +258,19 @@ fn change_cases(state: TestState) -> Unit !{IO} = do
             says(three(), [to_tabs(CloseTab("b")), to_tabs(Ping),
                            to_key("b", Ping)]),
             "[Got(a, Ping), Got(-, declined)]")
-  assert_eq(state, "closing the only tab leaves nothing to send to",
+  # Nothing shown is a change of what is shown too, so it is announced.
+  assert_eq(state, "closing the only tab announces nothing shown",
             says(tabs.tabs_with(tabs_id, [tab("a")], opts()),
                  [to_tabs(CloseTab("a")), to_tabs(Ping)]),
-            "[Got(-, declined)]")
+            "[Switched(none), Got(-, declined)]")
+  # A key given twice keeps its first tab; the later one is dropped.
+  dup <- shown(twice(), 7, 2)
+  assert_eq(state, "a repeated key keeps only its first tab", dup, " a  b  |a      ")
+  assert_eq(state, "a repeated key's later tab hears no broadcast",
+            said(widget.on_event(twice(), event.TickEvent)),
+            "[Got(a, tick), Got(b, tick)]")
+  assert_eq(state, "Next steps past a repeated key",
+            says(twice(), [to_tabs(NextTab)]), "[Switched(b)]")
 
 # ── focus ───────────────────────────────────────────────────────────────────
 

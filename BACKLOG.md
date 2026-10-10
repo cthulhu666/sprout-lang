@@ -706,6 +706,10 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   dirty file in the bar; a bar wider than its region is cut at the edge rather than scrolled to
   keep the shown title in view; no mouse; no reordering. Each is additive: retitling is one more
   `Change` arm. Design: `docs/tui-tabs-v0.md` §2.
+- [ ] `P3` **TUI tests — the screen-dump helpers are pasted into eight suites.** `row_text` is in
+  `tests/stdlib/test_tui_{input,list_view,focus,scroll_view,tree,text_area,tabs}.spr` and
+  `tests/ide/test_ide_editor.spr`; `rows_from` in four of them. A change to how a screen reads back
+  is made eight times. Move them to a `testsupport/` module; `just test` passes `--package-root`.
 - [ ] `P3` **TUI — a tick repaints the whole tree even when nothing changed.** `App.tick_ms` is both
   the input read deadline and the tick period, and the deadline is load-bearing: it is what resolves
   a held ESC into a key. So an application wanting no animation still repaints twice a second, and
