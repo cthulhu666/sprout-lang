@@ -229,12 +229,15 @@ part a generic pass cannot know. And its pass count follows the level — one pa
 angles up to `high`, which is `/simplify`'s own fallback shape, and one per angle at `xhigh` and
 `max`, which is its normal shape. Nothing has measured whether four passes find more than one.
 
-**Cleanups are verified, by their own skeptic** (since 2026-10-09). It checks claims, not worth: the
+**Cleanups are verified, by their own skeptic** (since 2026-10-09). It checks claims first: the
 cited code says what the cleanup says, a named helper exists and does the same job, the proposed
-form keeps behaviour. Before it, run `1791578046-40156` handed over eight cleanups, none checked by
-anyone but the pass that wrote them. It is a second
-agent rather than a second list for the bug skeptic so that each track has its own `VERIFY_CAP`;
-sharing one, that run's 6 bugs would have pushed 4 of its 8 cleanups past the cap.
+form keeps behaviour. Since 2026-10-10 it also scores each true cleanup's worth 1–5, as a separate
+answer, and the script marks it DO or SKIP against `--do-at` (default 3). Worth was left out at
+first to keep taste out of the truth verdict; a separate field does that, and a reader handed eight
+unranked cleanups had to do the ranking anyway. Before the skeptic, run `1791578046-40156` handed
+over eight cleanups, none checked by anyone but the pass that wrote them. It is a second agent
+rather than a second list for the bug skeptic so that each track has its own `VERIFY_CAP`; sharing
+one, that run's 6 bugs would have pushed 4 of its 8 cleanups past the cap.
 
 The built-in `/code-review` already runs cleanup angles at `high` — three cleanup, one altitude and
 one conventions, inline in one context. The conventions angle (quote a CLAUDE.md rule, quote the line
