@@ -42,9 +42,6 @@ fn mentions_one_binding(msg: String) -> Bool =
 fn mentions_annotation(msg: String) -> Bool =
   str_find(msg, "let <name>: <type>") != -1
 
-fn mentions_prelude_only(msg: String) -> Bool =
-  str_find(msg, "only prelude types") != -1
-
 # Rule-scoped count — keeps an assertion about ONE rule from breaking when a
 # fixture also happens to trip a different rule (e.g. a Cons/Nil-recursion
 # fixture used for staircase-of-doom now also legitimately trips
@@ -659,9 +656,7 @@ let nullary_unrestricted_ctor =
   "fn make_token() -> Token = Token(0)\n"
 
 # A context-typed body one CONSTRUCTOR deep. `Just(label)` is a syntactic value
-# and `takes_type_from_context` saw only the top node, so this was reported with
-# no rewrite that compiles: annotated hits the non-prelude type limitation,
-# unannotated hits `ambiguous typeclass binding`.
+# and `takes_type_from_context` saw only the top node, so this was reported.
 let nullary_ctor_wrapping_var =
   "fn pick() -> Maybe (Colour -> String) = Just(label)\n"
 
@@ -1040,11 +1035,6 @@ fn main() -> Unit !{IO} =
       count_by_rule(lint_rules.lint_ast(nullary_tuple_wrapping_var), "nullary-const-fn"), 0)
     assert_eq(state, "lambda one constructor deep: no finding",
       count_by_rule(lint_rules.lint_ast(nullary_ctor_wrapping_lambda), "nullary-const-fn"), 0)
-
-    # The annotation resolves any type a `fn` signature can name, so the message
-    # carries no prelude-only caveat.
-    assert_eq(state, "nullary const fn: message has no prelude-only caveat",
-      mentions_prelude_only(first_message(lint_rules.lint_ast(nullary_ctor_app))), false)
 
     assert_eq(state, "nullary fn with a where constraint: no finding",
       count_by_rule(lint_rules.lint_ast(nullary_constrained), "nullary-const-fn"), 0)

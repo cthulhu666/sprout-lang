@@ -1063,6 +1063,14 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   Rust's `#[expect]` is the strictly better fit for the two deliberate files — it turns the
   suppression into a second assertion that the construct is still present — held back only to
   avoid shipping two mechanisms at once.
+- [ ] `P3` **`nullary-const-fn` skips every lowercase-name body; narrow it once suppression lands.**
+  `lint_rules.takes_type_from_context` exists because a `let` annotation could not name a
+  non-prelude type; it now can, so `let pick: Colour -> String = label` compiles. The skip is
+  also coarse: plain value reads (`fn v0() -> v.Version = v.origin`) pass it too. Dropping it takes
+  `just lint` from 0 to 36 findings: 1 real (`analysis_service_driver.sprout`
+  `sentinel_name`), 35 fixtures testing the nullary-`fn` shape itself. Blocked on the pragma
+  above. Then narrow it, rewrite the real site, and mark the fixtures
+  `# lint: allow(nullary-const-fn)`.
 - [~] `P2` **Formatter/linter beyond the baseline.** Eight AST lint rules shipped
   (`staircase-of-doom`, `redundant-vec-from-list`, `list-shape-pattern`, `list-prefix-pattern`,
   `multi-line-lambda-arg`, `deprecated-brace-body`, `nullary-const-fn`, `hand-rolled-combinator`) on

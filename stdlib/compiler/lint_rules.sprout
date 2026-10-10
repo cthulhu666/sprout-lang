@@ -749,18 +749,22 @@ fn is_numeric_literal(e: ast.Expr) -> Bool =
   | _ -> false
 
 # A body that takes its type from CONTEXT rather than from itself. The declared
-# return type is evidence (§5.2), and only a carried annotation preserves it —
-# which is not always writable. `fn pick_color() -> Color -> String = label` is
-# the live case: that return type is what selects `ToString Color`.
+# return type is evidence (§5.2), and only a carried annotation preserves it.
+# `fn pick_color() -> Color -> String = label` is the live case: that return type
+# is what selects `ToString Color`, and bare `let pick_color = label` is an
+# ambiguous typeclass binding.
+#
+# The annotated rewrite compiles, so this skip is not about correctness. It is
+# coarse — any lowercase name, plain value reads included — and most bodies it
+# skips are fixtures testing the nullary-`fn` shape, which only a lint pragma
+# could keep (BACKLOG.md).
 #
 # A bare CONSTRUCTOR is not one of these. `Nothing` and `Nil` carry their own
 # type and need no dictionary; it is the lowercase head, a reference to a
 # function, that the return type was standing behind.
 #
 # RECURSES for the same reason `all_syntactic_values` does: `Just(label)` and
-# `(label, 1)` hide the context-typed part one level down, and checking only the
-# top node reported them with no rewrite that compiles — the annotated form hits
-# the prelude-only limitation, the bare one an ambiguous typeclass binding.
+# `(label, 1)` hide the context-typed part one level down.
 fn takes_type_from_context(e: ast.Expr) -> Bool =
   match e with
   | ast.VarExpr name _ -> ! ast.is_constructor_ref (name)
