@@ -98,8 +98,9 @@ fn serve(req: Request) -> Unit !{IO} =
 
 **One trap.** When the effectful step returns a `Maybe`/`Result`, `<-` unwraps it
 first (spec §5.9), so `Just row <- find(id) else …` is a type error: the pattern
-meets the success value, not the `Maybe`. Match the call instead — or, when the
-block itself returns that `Maybe`/`Result`, pass the failure on with `try`.
+meets the success value, not the `Maybe`. Match on the call itself —
+`match find(id) with` — not on a name bound by `<-`, which is already unwrapped. Or,
+when the block itself returns that `Maybe`/`Result`, pass the failure on with `try`.
 
 ## Pass a failure on with `try`
 
