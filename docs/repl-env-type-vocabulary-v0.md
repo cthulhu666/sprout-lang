@@ -217,15 +217,18 @@ env values are not "fixed" back apart later.
 
 ### 4.2 Fix B — stop swallowing `CheckErr` (secondary, smaller)
 
-`load_module`'s silent `Nil` is *deliberate* for non-stdlib and unresolvable modules — they are
-pre-seeded in `builtin_env`, and the doc comment at `module_loader.sprout:335` says so. Any change
-here must distinguish:
+*Superseded:* `load_module` no longer exists; the REPL bundles its session source like any other
+file. An import that resolves to no path, or to a file that cannot be read, is now an error at the
+import line (spec-v0 §Imports), so the "intentionally skipped" class below is gone.
+
+`load_module`'s silent `Nil` was *deliberate* for non-stdlib and unresolvable modules — they were
+pre-seeded in `builtin_env`. Any change here had to distinguish:
 
 - *intentionally skipped* — `module_name_to_path` returned `Nothing`; keep `Nil`, silently.
 - *found on disk but failed to check* — `read_file` succeeded and `tokenize`/`parse_program`/
   `check_program_with_env` then failed; this must surface.
 
-Only the second class changes. Fix A removes most of the current instances, but the swallow is what
+Only the second class changed. Fix A removes most of the current instances, but the swallow is what
 turned a one-line diagnostic into a multi-hour investigation, and the next divergence will land in
 the same trap. Recommended shape: return a result type distinguishing the two, and have
 `op_session_update` report the underlying error, so `import stdlib.net` fails loudly at the import

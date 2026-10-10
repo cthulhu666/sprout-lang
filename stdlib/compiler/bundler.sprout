@@ -381,15 +381,19 @@ fn scan_module_name_at(src: String, bytes: Bytes, i: Int) -> String =
 # tco_loop for it — O(1) native stack depth regardless of import graph size.
 #
 # Three work-item variants preserve the original semantics:
-#   WIVisit path      — check seen/visiting; enqueue deps then WIFinalize + WILeave
+#   WIVisit path edge — check seen/visiting; enqueue deps then WIFinalize + WILeave
 #   WILeave path      — pop path from the visiting (ancestor) set after its subtree
 #   WIFinalize path src specs — lex/parse/record the module; add to seen
 
 fn prelude_path(stdlib_root: String) -> String =
   stdlib_root ++ "/prelude.sprout"
 
+# The import that led to a module, so a failure to load it can point at that line.
+type ImportEdge = (importer: String, spec: module_loader.ImportSpec)
+
 type WorkItem =
-  | WIVisit String
+  # `Nothing` for the entry, which nothing imported.
+  | WIVisit String (Maybe ImportEdge)
   | WILeave String
   | WIFinalize String String (List module_loader.ImportSpec)
   # Already parsed on an earlier call: record the memoised module, skip lex and parse.
@@ -408,20 +412,52 @@ type LoadIssue =
 fn spec_to_path(spec: module_loader.ImportSpec, stdlib_root: String, extra_roots: List String) -> Maybe String =
   module_loader.resolve_module_path(source.ModuleName(module_loader.import_module(spec)), stdlib_root, extra_roots)
 
-fn specs_to_paths(specs: List module_loader.ImportSpec, stdlib_root: String, extra_roots: List String) -> List String =
+# Each import with its path, or the first import that resolves to no path.
+fn resolve_specs(specs: List module_loader.ImportSpec, stdlib_root: String, extra_roots: List String) -> Result module_loader.ImportSpec (List (String, module_loader.ImportSpec)) =
   match specs with
-  | Nil -> Nil
+  | Nil -> Ok(Nil)
   | Cons spec rest ->
-      match spec_to_path(spec, stdlib_root, extra_roots) with
-      | Nothing -> specs_to_paths(rest, stdlib_root, extra_roots)
-      | Just path -> Cons(path, specs_to_paths(rest, stdlib_root, extra_roots))
+      let Just path = spec_to_path(spec, stdlib_root, extra_roots) else Err(spec)
+          deps = try resolve_specs(rest, stdlib_root, extra_roots)
+      in Ok(Cons((path, spec), deps))
 
-# Push a WIVisit item for each path onto stack.
-# Called with list_reverse(dep_paths) so the first import ends up on top.
-fn push_visit_items(paths: List String, stack: List WorkItem) -> List WorkItem =
-  match paths with
+# Push a WIVisit item for each dependency onto stack.
+# Called with the deps reversed so the first import ends up on top.
+fn push_visit_items(importer: String, deps: List (String, module_loader.ImportSpec), stack: List WorkItem) -> List WorkItem =
+  match deps with
   | Nil -> stack
-  | Cons path rest -> push_visit_items(rest, Cons (WIVisit(path), stack))
+  | Cons (path, spec) rest ->
+      push_visit_items(importer, rest, Cons (WIVisit(path, Just (ImportEdge(importer = importer, spec = spec))), stack))
+
+# `import math.int` for `stdlib.math.int`: a hint, looked up only once loading has failed.
+fn stdlib_prefix_hint(mod_name: String, stdlib_root: String) -> String !{IO} =
+  if str_starts_with(mod_name, "stdlib.") || str_find(mod_name, ".") == -1 then ""
+  else
+    match module_loader.module_name_to_path(source.ModuleName("stdlib." ++ mod_name), stdlib_root) with
+    | Nothing -> ""
+    | Just path ->
+        do
+          found <- fs.is_file(path)
+          if found then `; did you mean \`stdlib.${mod_name}\`?` else ""
+
+# A dotted, non-stdlib name resolves to no path only when no package root is configured.
+fn unresolved_issue(importer: String, spec: module_loader.ImportSpec, stdlib_root: String) -> LoadIssue !{IO} =
+  do
+    let mod_name = module_loader.import_module(spec)
+    hint <- stdlib_prefix_hint(mod_name, stdlib_root)
+    LoadIssue(importer, module_loader.import_pos(spec),
+      `${importer}: import ${mod_name}: unknown module — it is not a stdlib module, and no package root is configured${hint}`)
+
+# A module that resolved to a path but could not be read. The entry has no import to blame.
+fn unreadable_issue(path: String, edge: Maybe ImportEdge, msg: String, stdlib_root: String) -> LoadIssue !{IO} =
+  match edge with
+  | Nothing -> LoadIssue(path, no_pos(), `cannot read ${path}: ${msg}`)
+  | Just e ->
+      do
+        let mod_name = module_loader.import_module(e.spec)
+        hint <- stdlib_prefix_hint(mod_name, stdlib_root)
+        LoadIssue(e.importer, module_loader.import_pos(e.spec),
+          `${e.importer}: import ${mod_name}: cannot read ${path}: ${msg}${hint}`)
 
 fn remove_str_from_list(s: String, lst: List String) -> List String =
   match lst with
@@ -461,7 +497,7 @@ fn process_item(
   load_env: LoadEnv
 ) -> List LoadIssue !{IO} =
   match item with
-  | WIVisit path -> process_wi_visit(path, work, visiting, seen, ordered, stdlib_root, extra_roots, load_env)
+  | WIVisit path edge -> process_wi_visit(path, edge, work, visiting, seen, ordered, stdlib_root, extra_roots, load_env)
   | WILeave path -> process_wi_leave(path, visiting)
   | WIFinalize path src specs -> process_wi_finalize(path, src, specs, seen, ordered, load_env)
   | WIRecord mod -> process_wi_record(mod, seen, ordered)
@@ -469,13 +505,10 @@ fn process_item(
 # The source of a module: an in-memory buffer if the caller supplied one, else the file.
 # An overlay entry for a path that does not exist on disk is the point, not an edge case —
 # it is how an editor typechecks an unsaved buffer.
-fn module_source(path: String, load_env: LoadEnv) -> String !{IO} =
+fn module_source(path: String, load_env: LoadEnv) -> Result String String !{IO} =
   match dict_get(path, load_env_overlay(load_env)) with
-  | Just src -> src
-  | Nothing ->
-      match fs.read_text(path) with
-      | Err msg -> panic("read_file: " ++ path ++ ": " ++ msg)
-      | Ok src -> src
+  | Just src -> Ok(src)
+  | Nothing -> fs.read_text(path)
 
 # A memoised parse, only when the caller has not overridden this path in memory.
 fn memoised_module(path: String, load_env: LoadEnv) -> Maybe ParsedModule !{IO} =
@@ -502,6 +535,7 @@ fn process_wi_record(
 
 fn process_wi_visit(
   path: String,
+  edge: Maybe ImportEdge,
   work: Ref (List WorkItem),
   visiting: Ref (List String),
   seen: Ref (List String),
@@ -529,14 +563,20 @@ fn process_wi_visit(
                 enqueue_module(path, parsed_specs(mod), WIRecord(mod),
                   work, visiting, visiting_list, stdlib_root, extra_roots)
             | Nothing ->
-                do
-                  src <- module_source(path, load_env)
-                  let specs = module_loader.collect_imports(src)
-                  enqueue_module(path, specs, WIFinalize(path, src, specs),
-                    work, visiting, visiting_list, stdlib_root, extra_roots)
+                match module_source(path, load_env) with
+                | Err msg ->
+                    do
+                      issue <- unreadable_issue(path, edge, msg, stdlib_root)
+                      [issue]
+                | Ok src ->
+                    do
+                      let specs = module_loader.collect_imports(src)
+                      enqueue_module(path, specs, WIFinalize(path, src, specs),
+                        work, visiting, visiting_list, stdlib_root, extra_roots)
 
 # Mark the module in progress and push its dependencies above the item that completes it,
-# so the subtree is finished before the module itself is recorded.
+# so the subtree is finished before the module itself is recorded. An import that resolves
+# to no path stops the walk here, before anything is pushed.
 fn enqueue_module(
   path: String,
   specs: List module_loader.ImportSpec,
@@ -547,12 +587,17 @@ fn enqueue_module(
   stdlib_root: String,
   extra_roots: List String
 ) -> List LoadIssue !{IO} =
-  do
-    let dep_paths = specs_to_paths(specs, stdlib_root, extra_roots)
-    ref_write(visiting, Cons(path, visiting_list))
-    stack_now <- ref_read(work)
-    ref_write(work, push_visit_items(list_reverse(dep_paths), Cons(finish, Cons (WILeave(path), stack_now))))
-    Nil
+  match resolve_specs(specs, stdlib_root, extra_roots) with
+  | Err spec ->
+      do
+        issue <- unresolved_issue(path, spec, stdlib_root)
+        [issue]
+  | Ok deps ->
+      do
+        ref_write(visiting, Cons(path, visiting_list))
+        stack_now <- ref_read(work)
+        ref_write(work, push_visit_items(path, list_reverse(deps), Cons(finish, Cons (WILeave(path), stack_now))))
+        Nil
 
 fn parsed_specs(mod: ParsedModule) -> List module_loader.ImportSpec =
   match mod with
@@ -633,7 +678,7 @@ fn visit_module_iter(
   load_env: LoadEnv
 ) -> List LoadIssue !{IO} =
   do
-    work <- ref_new(Cons (WIVisit(entry_path), Nil))
+    work <- ref_new(Cons (WIVisit(entry_path, Nothing), Nil))
     visiting <- ref_new(Nil)
     process_work(work, visiting, seen, ordered, stdlib_root, extra_roots, load_env)
 
@@ -740,9 +785,10 @@ fn headerless_import(mods: List ParsedModule, entry_path: String) -> Maybe LoadI
 fn skip_prelude(entry_path: String, stdlib_root: String, load_env: LoadEnv) -> Bool !{IO} =
   if entry_path == prelude_path(stdlib_root) then true
   else
-    do
-      src <- module_source(entry_path, load_env)
-      source.has_no_prelude(src)
+    # The walk has just read the entry; if it vanished since, the full prelude is the default.
+    match module_source(entry_path, load_env) with
+    | Err _ -> false
+    | Ok src -> source.has_no_prelude(src)
 
 # Give a headerless ENTRY file the synthetic module name, so its declarations
 # qualify like every other module's.
@@ -785,28 +831,31 @@ fn prelude_module(stdlib_root: String, load_env: LoadEnv) -> (Maybe LoadIssue, M
     match memoised_module(path, load_env) with
     | Just mod -> (Nothing, Just(mod))
     | Nothing ->
-        do
-          src <- module_source(path, load_env)
-          match scan_source_info(src) with
-          | (_, exported, ctor_types) ->
-              match lexer.tokenize(source.strip_headers(src)) with
-              | Err e ->
-                  match e with
-                  | token.TokenizeError msg pos ->
-                      (Just (LoadIssue(path, pos, str_concat("Lex error in prelude: ", msg))), Nothing)
-              | Ok tokens ->
-                  match parser.parse_program(tokens) with
-                  | Err e ->
-                      match e with
-                      | parser.ParseError msg pos ->
-                          (Just (LoadIssue(path, pos, str_concat("Parse error in prelude: ", msg))), Nothing)
-                  | Ok prog ->
-                      match prog with
-                      | ast.Program decls _ ->
-                          do
-                            let mod = ParsedModule("", path, Nil, exported, ctor_types, decls)
-                            memoise_module(path, mod, load_env)
-                            (Nothing, Just(mod))
+        match module_source(path, load_env) with
+        | Err msg -> (Just(LoadIssue(path, no_pos(), `cannot read the prelude ${path}: ${msg}`)), Nothing)
+        | Ok src -> parse_prelude(path, src, load_env)
+
+fn parse_prelude(path: String, src: String, load_env: LoadEnv) -> (Maybe LoadIssue, Maybe ParsedModule) !{IO} =
+  match scan_source_info(src) with
+  | (_, exported, ctor_types) ->
+      match lexer.tokenize(source.strip_headers(src)) with
+      | Err e ->
+          match e with
+          | token.TokenizeError msg pos ->
+              (Just (LoadIssue(path, pos, str_concat("Lex error in prelude: ", msg))), Nothing)
+      | Ok tokens ->
+          match parser.parse_program(tokens) with
+          | Err e ->
+              match e with
+              | parser.ParseError msg pos ->
+                  (Just (LoadIssue(path, pos, str_concat("Parse error in prelude: ", msg))), Nothing)
+          | Ok prog ->
+              match prog with
+              | ast.Program decls _ ->
+                  do
+                    let mod = ParsedModule("", path, Nil, exported, ctor_types, decls)
+                    memoise_module(path, mod, load_env)
+                    (Nothing, Just(mod))
 
 # ---------------------------------------------------------------------------
 # Symbol table building
@@ -1192,9 +1241,11 @@ fn selective_names_bindings(names: List String, symbols: ModuleSymbols) -> List 
 # Each binding with the position of the import that makes it.
 fn all_import_bindings(specs: List module_loader.ImportSpec, all_symbols: Dict ModuleSymbols,
                        stdlib_root: String, extra_roots: List String) -> List(source.SourcePos, ImportBinding) =
-  list_flat_map(\spec -> list_map(\b -> (module_loader.import_pos(spec), b),
-                                  spec_bindings(spec, all_symbols, stdlib_root, extra_roots)),
-                specs)
+  list_flat_map(\spec -> placed_bindings(spec, all_symbols, stdlib_root, extra_roots), specs)
+
+fn placed_bindings(spec: module_loader.ImportSpec, all_symbols: Dict ModuleSymbols,
+                   stdlib_root: String, extra_roots: List String) -> List(source.SourcePos, ImportBinding) =
+  [(module_loader.import_pos(spec), b) for b in spec_bindings(spec, all_symbols, stdlib_root, extra_roots)]
 
 # The first (namespace, name) bound to two DIFFERENT symbols, with the symbol it
 # was already bound to. The same symbol twice is legal — importing one name by
